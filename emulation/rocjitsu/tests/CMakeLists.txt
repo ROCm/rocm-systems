@@ -3468,6 +3468,25 @@ if(HSA_RUNTIME64)
             TIMEOUT 300
         )
 
+        register_hsa_dbi_nop_asm_case(
+            Cdna2
+            Hardware
+            RejectsAppendedCodePastFileBackedLoad
+            SIM
+            CONFIG ${RJ_CDNA2_KMD_CONFIG}
+            CONFIG_NAME ${RJ_CDNA2_KMD_CONFIG_NAME}
+            TIMEOUT 300
+        )
+        register_hsa_dbi_nop_asm_case(
+            Cdna2
+            Hardware
+            AcceptsAppendedCodeAtFileBackedLoadEnd
+            SIM
+            CONFIG ${RJ_CDNA2_KMD_CONFIG}
+            CONFIG_NAME ${RJ_CDNA2_KMD_CONFIG_NAME}
+            TIMEOUT 300
+        )
+
         if(HAS_CDNA2_GPU)
             # Hardware-gated tests. The two that dispatch get an explicit
             # timeout; the load+validate one runs quickly enough for the

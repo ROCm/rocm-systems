@@ -17,6 +17,7 @@ RJ_DIAGNOSTIC_IGNORE_PEDANTIC
 #include <hsa/hsa_ext_amd.h>
 RJ_DIAGNOSTIC_POP
 
+#include "../elf_test_support.h"
 #include "../test_paths.h"
 #include "dbi_test_fixtures.h"
 #include "rocjitsu/code/amdgpu_code_object.h"
@@ -30,9 +31,11 @@ RJ_DIAGNOSTIC_POP
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <cstring>
 #include <memory>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -331,7 +334,131 @@ protected:
   HsaDbiNopAsmCdna2Static() : HsaDbiNopAsmFixture(kCdna2Params) {}
 };
 
-class HsaDbiNopAsmCdna2Hardware : public HsaDbiNopAsmHardwareBase<kCdna2Params> {};
+class HsaDbiNopAsmCdna2Hardware : public HsaDbiNopAsmHardwareBase<kCdna2Params> {
+protected:
+  void run_tail_backing_case(bool file_backed);
+};
+
+void HsaDbiNopAsmCdna2Hardware::run_tail_backing_case(bool file_backed) {
+  std::vector<uint8_t> image = original_elf_bytes_;
+  AmdGpuCodeObject original(image.data(), image.size());
+  ASSERT_TRUE(original.is_valid());
+  ASSERT_EQ(original.text_sections().size(), 1u);
+  const Section &text = *original.text_sections().front();
+  std::unique_ptr<Decoder> decoder = Decoder::create(kCdna2Params.arch);
+  ASSERT_NE(decoder, nullptr);
+  util::FailureOr<std::vector<std::unique_ptr<BasicBlock>>> block_result =
+      BasicBlock::build(original, *decoder, kCdna2Params.arch);
+  ASSERT_TRUE(block_result.succeeded());
+  std::vector<std::unique_ptr<BasicBlock>> blocks = std::move(block_result).value();
+  uint64_t live_end = 0;
+  for (const std::unique_ptr<BasicBlock> &block : blocks) {
+    uint64_t offset = block->start_offset();
+    for (const Instruction &inst : block->instructions()) {
+      offset += static_cast<uint64_t>(inst.size());
+      if (inst.mnemonic() == "s_endpgm")
+        live_end = std::max(live_end, offset);
+    }
+  }
+  ASSERT_GT(live_end, anchor_offsets_.front());
+  ASSERT_LE(live_end + sizeof(uint32_t), text.size());
+  const uint32_t padding_word =
+      test_support::read_elf_struct_for_test<uint32_t>(image, text.sectionOffset() + live_end);
+  const DecodeResult padding = decoder->decode_window(std::span(&padding_word, 1));
+  ASSERT_TRUE(padding.succeeded());
+  ASSERT_EQ(padding.value()->mnemonic(), "s_nop");
+
+  const Elf64_Ehdr header = test_support::read_elf_struct_for_test<Elf64_Ehdr>(image, 0);
+  ASSERT_TRUE(text.sectionHeaderIndex());
+  const size_t text_index = *text.sectionHeaderIndex();
+  ASSERT_LT(text_index, header.e_shnum);
+  Elf64_Shdr text_header = test_support::read_elf_struct_for_test<Elf64_Shdr>(
+      image, header.e_shoff + text_index * header.e_shentsize);
+  const std::optional<Elf64_Sym> kernel =
+      test_support::find_elf_symbol_for_test(image, "vector_add");
+  ASSERT_TRUE(kernel);
+  ASSERT_EQ(kernel->st_shndx, text_index);
+  ASSERT_GE(kernel->st_value, text.vaddr());
+  ASSERT_LE(kernel->st_value - text.vaddr() + kernel->st_size, live_end);
+  std::optional<std::vector<Elf64_Phdr>> segments =
+      read_elf_table<Elf64_Phdr>(image, header.e_phoff, header.e_phnum, header.e_phentsize);
+  ASSERT_TRUE(segments);
+  size_t owner = segments->size();
+  for (size_t index = 0; index < segments->size(); ++index) {
+    const Elf64_Phdr &segment = (*segments)[index];
+    if (segment.p_type == PT_LOAD && segment.p_offset == text.sectionOffset() &&
+        segment.p_vaddr == text.vaddr() && (segment.p_flags & PF_X) != 0) {
+      ASSERT_EQ(owner, segments->size());
+      owner = index;
+    }
+  }
+  ASSERT_LT(owner, segments->size());
+  ASSERT_EQ((*segments)[owner].p_filesz, text.size());
+  ASSERT_EQ((*segments)[owner].p_memsz, text.size());
+
+  // Consume existing unreachable linker padding without moving another section.
+  // The only difference between the two cases is this tail word's file backing.
+  text_header.sh_size = live_end + sizeof(uint32_t);
+  (*segments)[owner].p_filesz = live_end + (file_backed ? sizeof(uint32_t) : 0);
+  (*segments)[owner].p_memsz = text_header.sh_size;
+  test_support::write_value_for_test<uint32_t>(image, text.sectionOffset() + live_end, 0);
+  test_support::write_elf_struct_for_test(image, header.e_shoff + text_index * header.e_shentsize,
+                                          text_header);
+  test_support::write_elf_struct_for_test(image, header.e_phoff + owner * header.e_phentsize,
+                                          (*segments)[owner]);
+  const std::vector<uint8_t> pristine = image;
+  AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  const GoldenVectorAddInputs inputs;
+  const hsa_agent_t cpu = find_cpu_agent();
+  ASSERT_NE(cpu.handle, 0u);
+  const std::vector<float> original_out =
+      dispatch_vector_add(image, s_gpu_, cpu, inputs.a(), inputs.b(), GoldenVectorAddInputs::kSize);
+  ASSERT_EQ(original_out.size(), GoldenVectorAddInputs::kSize);
+  const uint32_t original_matches = count_matching_golden(original_out, inputs.golden());
+  RecordProperty("original_golden_matches", static_cast<int>(original_matches));
+  ASSERT_EQ(original_matches, GoldenVectorAddInputs::kSize);
+
+  Instrumentor instrumentor(source, kCdna2Params.arch);
+  instrumentor.add_point_by_offset(anchor_offsets_.front());
+  const Instrumentor::ValidationResult eligible = instrumentor.validate_points();
+  ASSERT_TRUE(eligible.errors.empty());
+  ASSERT_EQ(eligible.sites.size(), 1u);
+  const InstrumentedCodeObjectDebug result = instrumentor.patch_with_debug_summaries();
+  EXPECT_EQ(image, pristine);
+  EXPECT_EQ(std::memcmp(source.image_data(), pristine.data(), pristine.size()), 0);
+  if (!file_backed) {
+    EXPECT_FALSE(result.errors.empty());
+    EXPECT_TRUE(result.elf_bytes.empty());
+    EXPECT_TRUE(result.sites.empty());
+    EXPECT_TRUE(result.patches.empty());
+    return;
+  }
+
+  ASSERT_TRUE(result.errors.empty())
+      << (result.errors.empty() ? std::string{} : result.errors.front());
+  ASSERT_FALSE(result.elf_bytes.empty());
+  ASSERT_EQ(result.patches.size(), 1u);
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  ASSERT_EQ(patched.text_sections().size(), 1u);
+  const Section &patched_text = *patched.text_sections().front();
+  ASSERT_GT(patched_text.size(), text_header.sh_size);
+  for (uint64_t offset = text_header.sh_size; offset < patched_text.size(); ++offset) {
+    const std::optional<uint64_t> loaded_offset =
+        test_support::loaded_vaddr_to_file_offset(result.elf_bytes, patched_text.vaddr() + offset);
+    ASSERT_TRUE(loaded_offset) << "Appended byte lacks file backing at text offset " << offset;
+    ASSERT_EQ(*loaded_offset, patched_text.sectionOffset() + offset);
+  }
+  RecordProperty("appended_bytes_checked",
+                 static_cast<int>(patched_text.size() - text_header.sh_size));
+  ASSERT_NO_FATAL_FAILURE(expect_elf_loads_and_validates(result.elf_bytes, s_gpu_));
+  const std::vector<float> patched_out = dispatch_vector_add(
+      result.elf_bytes, s_gpu_, cpu, inputs.a(), inputs.b(), GoldenVectorAddInputs::kSize);
+  ASSERT_EQ(patched_out.size(), GoldenVectorAddInputs::kSize);
+  EXPECT_EQ(patched_out, original_out);
+}
 
 TEST_F(HsaDbiNopAsmCdna2Static, PatchedElfActuallyContainsInstrumentation) {
   run_patched_elf_actually_contains_instrumentation();
@@ -347,6 +474,14 @@ TEST_F(HsaDbiNopAsmCdna2Hardware, PatchedKernelDispatchMatchesOriginal) {
 
 TEST_F(HsaDbiNopAsmCdna2Hardware, TrampolineIsActuallyExecutedByGpu) {
   run_trampoline_is_actually_executed_by_gpu();
+}
+
+TEST_F(HsaDbiNopAsmCdna2Hardware, RejectsAppendedCodePastFileBackedLoad) {
+  run_tail_backing_case(false);
+}
+
+TEST_F(HsaDbiNopAsmCdna2Hardware, AcceptsAppendedCodeAtFileBackedLoadEnd) {
+  run_tail_backing_case(true);
 }
 
 // gfx950 / CDNA4.

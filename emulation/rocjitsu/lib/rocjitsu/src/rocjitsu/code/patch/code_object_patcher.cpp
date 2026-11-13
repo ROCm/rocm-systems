@@ -209,9 +209,12 @@ bool load_mappings_preserve_text(std::span<const Elf64_Phdr> segments, size_t im
       text_size > std::numeric_limits<uint64_t>::max() - text_vaddr)
     return false;
   const uint64_t text_end = text_vaddr + text_size;
+  bool has_load = false;
+  bool has_full_backing = false;
   for (const Elf64_Phdr &segment : segments) {
     if (segment.p_type != PT_LOAD)
       continue;
+    has_load = true;
     if ((segment.p_filesz != 0 &&
          !image_contains_range(image_size, segment.p_offset, segment.p_filesz)) ||
         segment.p_filesz > segment.p_memsz ||
@@ -225,8 +228,11 @@ bool load_mappings_preserve_text(std::span<const Elf64_Phdr> segments, size_t im
     if (!elf_load_maps_file_range(segment, text_offset + (overlap_begin - text_vaddr),
                                   overlap_begin, overlap_end - overlap_begin))
       return false;
+    has_full_backing |= overlap_begin == text_vaddr && overlap_end == text_end;
   }
-  return true;
+  // Every LOAD owning the insertion grows by the complete padded delta, so a
+  // valid owner supplies the entire appended range. Preserve section-only use.
+  return !has_load || has_full_backing;
 }
 
 bool load_extent_is_valid(const Elf64_Phdr &segment, size_t image_size) {

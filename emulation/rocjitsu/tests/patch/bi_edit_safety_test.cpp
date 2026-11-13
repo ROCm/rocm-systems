@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "../dbi_test_util.h"
+#include "../elf_test_support.h"
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
@@ -19,6 +20,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <initializer_list>
 #include <memory>
 #include <optional>
 #include <span>
@@ -37,6 +39,45 @@ constexpr uint32_t kNop0Word = kNop0Encoding.value();
 constexpr uint32_t kNop1Word = kNop1Encoding.value();
 constexpr uint32_t kEndpgmWord = kEndpgmEncoding.value();
 
+Elf64_Ehdr read_hsa_v5_header(std::span<const uint8_t> image) {
+  Elf64_Ehdr header = test_support::read_elf_struct_for_test<Elf64_Ehdr>(image, 0);
+  header.e_ident[EI_DATA] = ELFDATA2LSB;
+  header.e_ident[EI_VERSION] = 1;
+  header.e_ident[EI_ABIVERSION] = ELFABIVERSION_AMDGPU_HSA_V5;
+  return header;
+}
+
+void write_fixture_headers(std::span<uint8_t> image, const Elf64_Ehdr &header,
+                           std::span<const Elf64_Phdr> segments,
+                           std::span<const Elf64_Shdr> sections = {}) {
+  test_support::write_elf_struct_for_test(image, 0, header);
+  for (size_t index = 0; index < segments.size(); ++index)
+    test_support::write_elf_struct_for_test(image, header.e_phoff + index * sizeof(Elf64_Phdr),
+                                            segments[index]);
+  for (size_t index = 0; index < sections.size(); ++index)
+    test_support::write_elf_struct_for_test(image, header.e_shoff + index * sizeof(Elf64_Shdr),
+                                            sections[index]);
+}
+
+void patch_eligible_points(const AmdGpuCodeObject &source, InstrumentedCodeObjectDebug &result,
+                           std::initializer_list<uint64_t> offsets = {0},
+                           rj_code_arch_t arch = kArch) {
+  Instrumentor instrumentor(source, arch);
+  for (uint64_t offset : offsets)
+    instrumentor.add_point_by_offset(offset);
+  const Instrumentor::ValidationResult eligible = instrumentor.validate_points();
+  ASSERT_TRUE(eligible.errors.empty()) << eligible.errors.front();
+  ASSERT_EQ(eligible.sites.size(), offsets.size());
+  result = instrumentor.patch_with_debug_summaries();
+}
+
+void expect_rejected_without_output(const InstrumentedCodeObjectDebug &result) {
+  EXPECT_FALSE(result.errors.empty());
+  EXPECT_TRUE(result.elf_bytes.empty());
+  EXPECT_TRUE(result.sites.empty());
+  EXPECT_TRUE(result.patches.empty());
+}
+
 void expect_loaded_prefix_relocation_policy(uint64_t bytes_before_text, bool overlaps_text) {
   constexpr rj_code_arch_t arch = ROCJITSU_CODE_ARCH_CDNA5;
   constexpr uint64_t loaded_prefix_size = sizeof(uint64_t);
@@ -54,11 +95,7 @@ void expect_loaded_prefix_relocation_policy(uint64_t bytes_before_text, bool ove
   const Section &original_text = *original.text_sections().front();
   const CodeObjectPatcher original_patcher(original);
   std::vector<Elf64_Shdr> sections = original_patcher.section_headers();
-  Elf64_Ehdr header = {};
-  std::memcpy(&header, image.data(), sizeof(header));
-  header.e_ident[EI_DATA] = ELFDATA2LSB;
-  header.e_ident[EI_VERSION] = 1;
-  header.e_ident[EI_ABIVERSION] = ELFABIVERSION_AMDGPU_HSA_V5;
+  Elf64_Ehdr header = read_hsa_v5_header(image);
   std::optional<std::vector<Elf64_Phdr>> segments =
       read_elf_table<Elf64_Phdr>(image, header.e_phoff, header.e_phnum, header.e_phentsize);
   ASSERT_TRUE(segments);
@@ -111,11 +148,8 @@ void expect_loaded_prefix_relocation_policy(uint64_t bytes_before_text, bool ove
                       .sh_entsize = sizeof(relocation)});
   header.e_shnum = static_cast<uint16_t>(sections.size());
   image.resize(header.e_shoff + sections.size() * sizeof(Elf64_Shdr));
-  std::memcpy(image.data() + relocation_offset, &relocation, sizeof(relocation));
-  std::memcpy(image.data(), &header, sizeof(header));
-  std::memcpy(image.data() + header.e_phoff, segments->data(),
-              segments->size() * sizeof(Elf64_Phdr));
-  std::memcpy(image.data() + header.e_shoff, sections.data(), sections.size() * sizeof(Elf64_Shdr));
+  test_support::write_elf_struct_for_test(image, relocation_offset, relocation);
+  write_fixture_headers(image, header, *segments, sections);
 
   const std::vector<uint8_t> pristine = image;
   const AmdGpuCodeObject source(image.data(), image.size());
@@ -159,18 +193,10 @@ void expect_loaded_prefix_relocation_policy(uint64_t bytes_before_text, bool ove
   EXPECT_FALSE(patcher.has_unsupported_relocation_to_text());
   EXPECT_EQ(patcher.has_relocations_within_text(), overlaps_text);
 
-  Instrumentor instrumentor(source, arch);
-  instrumentor.add_point_by_offset(4);
-  instrumentor.add_point_by_offset(0);
-  const Instrumentor::ValidationResult validation = instrumentor.validate_points();
-  const InstrumentedCodeObjectDebug result = instrumentor.patch_with_debug_summaries();
-  ASSERT_TRUE(validation.errors.empty()) << validation.errors.front();
-  ASSERT_EQ(validation.sites.size(), 2u);
+  InstrumentedCodeObjectDebug result = {};
+  ASSERT_NO_FATAL_FAILURE(patch_eligible_points(source, result, {4, 0}, arch));
   if (overlaps_text) {
-    EXPECT_FALSE(result.errors.empty());
-    EXPECT_TRUE(result.elf_bytes.empty());
-    EXPECT_TRUE(result.sites.empty());
-    EXPECT_TRUE(result.patches.empty());
+    expect_rejected_without_output(result);
     EXPECT_TRUE(result.edit_error);
     if (result.edit_error) {
       EXPECT_EQ(result.edit_error->code, TextEditErrorCode::UnsupportedReferences);
@@ -216,11 +242,7 @@ void expect_tail_relocation_growth_policy(bool moved_section) {
   const uint64_t text_file_end = text.sectionOffset() + text.size();
   const CodeObjectPatcher original_patcher(original);
   std::vector<Elf64_Shdr> sections = original_patcher.section_headers();
-  Elf64_Ehdr header = {};
-  std::memcpy(&header, image.data(), sizeof(header));
-  header.e_ident[EI_DATA] = ELFDATA2LSB;
-  header.e_ident[EI_VERSION] = 1;
-  header.e_ident[EI_ABIVERSION] = ELFABIVERSION_AMDGPU_HSA_V5;
+  Elf64_Ehdr header = read_hsa_v5_header(image);
   std::optional<std::vector<Elf64_Phdr>> segments =
       read_elf_table<Elf64_Phdr>(image, header.e_phoff, header.e_phnum, header.e_phentsize);
   ASSERT_TRUE(segments);
@@ -286,11 +308,8 @@ void expect_tail_relocation_growth_policy(bool moved_section) {
   header.e_shoff += sizeof(relocation);
   header.e_shnum = static_cast<uint16_t>(sections.size());
   image.resize(header.e_shoff + sections.size() * sizeof(Elf64_Shdr));
-  std::memcpy(image.data() + relocation_offset, &relocation, sizeof(relocation));
-  std::memcpy(image.data(), &header, sizeof(header));
-  std::memcpy(image.data() + header.e_phoff, segments->data(),
-              segments->size() * sizeof(Elf64_Phdr));
-  std::memcpy(image.data() + header.e_shoff, sections.data(), sections.size() * sizeof(Elf64_Shdr));
+  test_support::write_elf_struct_for_test(image, relocation_offset, relocation);
+  write_fixture_headers(image, header, *segments, sections);
   ASSERT_EQ(classify_rocr_relocation_section(header, sections, sections.back()),
             RocrRelocationSectionMode::Dynamic);
   ASSERT_EQ(std::ranges::any_of(sections,
@@ -307,12 +326,8 @@ void expect_tail_relocation_growth_policy(bool moved_section) {
   ASSERT_FALSE(patcher.has_relocations_within_text());
   ASSERT_FALSE(patcher.has_malformed_rocr_relocation_section());
   ASSERT_FALSE(patcher.has_unsupported_relocation_to_text());
-  Instrumentor instrumentor(source, kArch);
-  instrumentor.add_point_by_offset(0);
-  const Instrumentor::ValidationResult eligible = instrumentor.validate_points();
-  ASSERT_TRUE(eligible.errors.empty()) << eligible.errors.front();
-  ASSERT_EQ(eligible.sites.size(), 1u);
-  const InstrumentedCodeObjectDebug result = instrumentor.patch_with_debug_summaries();
+  InstrumentedCodeObjectDebug result = {};
+  ASSERT_NO_FATAL_FAILURE(patch_eligible_points(source, result));
   if (moved_section) {
     ASSERT_TRUE(result.errors.empty()) << result.errors.front();
     ASSERT_EQ(result.sites.size(), 1u);
@@ -340,10 +355,7 @@ void expect_tail_relocation_growth_policy(bool moved_section) {
                 sizeof(relocated_word));
     EXPECT_EQ(relocated_word, kNop0Word);
   } else {
-    EXPECT_FALSE(result.errors.empty());
-    EXPECT_TRUE(result.elf_bytes.empty());
-    EXPECT_TRUE(result.sites.empty());
-    EXPECT_TRUE(result.patches.empty());
+    expect_rejected_without_output(result);
   }
   EXPECT_EQ(image, pristine);
   EXPECT_EQ(std::memcmp(source.image_data(), pristine.data(), pristine.size()), 0);
@@ -383,11 +395,7 @@ std::optional<LoadAliasFixture> make_load_alias_fixture(std::optional<uint64_t> 
   EXPECT_LE(file_size, image.size() - file_offset);
   if (file_size > image.size() - file_offset)
     return std::nullopt;
-  Elf64_Ehdr header = {};
-  std::memcpy(&header, image.data(), sizeof(header));
-  header.e_ident[EI_DATA] = ELFDATA2LSB;
-  header.e_ident[EI_VERSION] = 1;
-  header.e_ident[EI_ABIVERSION] = ELFABIVERSION_AMDGPU_HSA_V5;
+  Elf64_Ehdr header = read_hsa_v5_header(image);
   std::optional<std::vector<Elf64_Phdr>> segments =
       read_elf_table<Elf64_Phdr>(image, header.e_phoff, header.e_phnum, header.e_phentsize);
   EXPECT_TRUE(segments);
@@ -437,9 +445,7 @@ std::optional<LoadAliasFixture> make_load_alias_fixture(std::optional<uint64_t> 
   segments->push_back(alias);
   std::ranges::sort(*segments, {}, &Elf64_Phdr::p_vaddr);
   header.e_phnum = static_cast<uint16_t>(segments->size());
-  std::memcpy(image.data(), &header, sizeof(header));
-  std::memcpy(image.data() + header.e_phoff, segments->data(),
-              segments->size() * sizeof(Elf64_Phdr));
+  write_fixture_headers(image, header, *segments);
   const AmdGpuCodeObject mapped(image.data(), image.size());
   EXPECT_TRUE(mapped.is_valid());
   if (!mapped.is_valid())
@@ -479,8 +485,7 @@ void expect_load_alias_mapping_preserved(const LoadAliasFixture &fixture,
   ASSERT_TRUE(candidate.is_valid());
   ASSERT_EQ(candidate.text_sections().size(), 1u);
   EXPECT_GT(candidate.text_sections().front()->size(), 4 * sizeof(uint32_t));
-  Elf64_Ehdr header = {};
-  std::memcpy(&header, result.elf_bytes.data(), sizeof(header));
+  Elf64_Ehdr header = test_support::read_elf_struct_for_test<Elf64_Ehdr>(result.elf_bytes, 0);
   const std::optional<std::vector<Elf64_Phdr>> segments = read_elf_table<Elf64_Phdr>(
       result.elf_bytes, header.e_phoff, header.e_phnum, header.e_phentsize);
   ASSERT_TRUE(segments);
@@ -522,17 +527,9 @@ TEST(BiEditSafety, RejectsDivergentLoadFileAliasesAtEditedInstructions) {
     ASSERT_TRUE(fixture);
     const std::vector<uint8_t> pristine = fixture->image;
     const AmdGpuCodeObject source(pristine.data(), pristine.size());
-    Instrumentor instrumentor(source, kArch);
-    instrumentor.add_point_by_offset(0);
-    instrumentor.add_point_by_offset(4);
-    const Instrumentor::ValidationResult eligible = instrumentor.validate_points();
-    ASSERT_TRUE(eligible.errors.empty()) << eligible.errors.front();
-    ASSERT_EQ(eligible.sites.size(), 2u);
-    const InstrumentedCodeObjectDebug result = instrumentor.patch_with_debug_summaries();
-    EXPECT_FALSE(result.errors.empty());
-    EXPECT_TRUE(result.elf_bytes.empty());
-    EXPECT_TRUE(result.sites.empty());
-    EXPECT_TRUE(result.patches.empty());
+    InstrumentedCodeObjectDebug result = {};
+    ASSERT_NO_FATAL_FAILURE(patch_eligible_points(source, result, {0, 4}));
+    expect_rejected_without_output(result);
     EXPECT_TRUE(result.edit_error);
     if (result.edit_error) {
       EXPECT_EQ(result.edit_error->code, TextEditErrorCode::InvalidImage);
@@ -560,16 +557,9 @@ TEST(BiEditSafety, RejectsTextGrowthIntoDivergentLoadZeroFill) {
   ASSERT_EQ(text.size(), 16u);
   ASSERT_EQ(fixture->alias.p_offset + fixture->alias.p_filesz, text.sectionOffset() + text.size());
   ASSERT_GT(fixture->alias.p_memsz, fixture->alias.p_filesz);
-  Instrumentor instrumentor(source, kArch);
-  instrumentor.add_point_by_offset(0);
-  const Instrumentor::ValidationResult eligible = instrumentor.validate_points();
-  ASSERT_TRUE(eligible.errors.empty()) << eligible.errors.front();
-  ASSERT_EQ(eligible.sites.size(), 1u);
-  const InstrumentedCodeObjectDebug result = instrumentor.patch_with_debug_summaries();
-  EXPECT_FALSE(result.errors.empty());
-  EXPECT_TRUE(result.elf_bytes.empty());
-  EXPECT_TRUE(result.sites.empty());
-  EXPECT_TRUE(result.patches.empty());
+  InstrumentedCodeObjectDebug result = {};
+  ASSERT_NO_FATAL_FAILURE(patch_eligible_points(source, result));
+  expect_rejected_without_output(result);
   EXPECT_EQ(fixture->image, pristine);
   EXPECT_EQ(std::memcmp(source.image_data(), pristine.data(), pristine.size()), 0);
 }
@@ -588,8 +578,7 @@ TEST(BiEditSafety, AllowsTextGrowthThroughEquivalentLoadMapping) {
   ASSERT_TRUE(candidate.is_valid());
   const Section &text = *candidate.text_sections().front();
   ASSERT_GT(text.size(), 16u);
-  Elf64_Ehdr header = {};
-  std::memcpy(&header, result.elf_bytes.data(), sizeof(header));
+  Elf64_Ehdr header = test_support::read_elf_struct_for_test<Elf64_Ehdr>(result.elf_bytes, 0);
   const std::optional<std::vector<Elf64_Phdr>> segments = read_elf_table<Elf64_Phdr>(
       result.elf_bytes, header.e_phoff, header.e_phnum, header.e_phentsize);
   ASSERT_TRUE(segments);
@@ -640,9 +629,8 @@ TEST(BiEditSafety, LoadFileAliasChecksKeepTouchingEmptyAndEquivalentMappingsElig
 }
 
 void replay_load_segments(std::span<const uint8_t> image, std::span<uint8_t> loaded) {
-  Elf64_Ehdr header = {};
-  ASSERT_GE(image.size(), sizeof(header));
-  std::memcpy(&header, image.data(), sizeof(header));
+  ASSERT_GE(image.size(), sizeof(Elf64_Ehdr));
+  const Elf64_Ehdr header = test_support::read_elf_struct_for_test<Elf64_Ehdr>(image, 0);
   const std::optional<std::vector<Elf64_Phdr>> segments =
       read_elf_table<Elf64_Phdr>(image, header.e_phoff, header.e_phnum, header.e_phentsize);
   ASSERT_TRUE(segments);
@@ -700,8 +688,7 @@ void expect_unmoved_load_growth_policy(const UnmovedLoadRange &range) {
   ASSERT_EQ(sections[1].sh_flags, SHF_ALLOC | SHF_EXECINSTR);
   ASSERT_EQ(sections[2].sh_flags, SHF_ALLOC);
   ASSERT_EQ(sections[3].sh_type, SHT_SYMTAB);
-  Elf64_Ehdr header = {};
-  std::memcpy(&header, image.data(), sizeof(header));
+  Elf64_Ehdr header = read_hsa_v5_header(image);
   std::optional<std::vector<Elf64_Phdr>> segments =
       read_elf_table<Elf64_Phdr>(image, header.e_phoff, header.e_phnum, header.e_phentsize);
   ASSERT_TRUE(segments);
@@ -711,9 +698,6 @@ void expect_unmoved_load_growth_policy(const UnmovedLoadRange &range) {
   image.insert(image.begin() + static_cast<std::ptrdiff_t>(original_text.sectionOffset()),
                static_cast<size_t>(delta), 0);
   header.e_shoff += delta;
-  header.e_ident[EI_DATA] = ELFDATA2LSB;
-  header.e_ident[EI_VERSION] = 1;
-  header.e_ident[EI_ABIVERSION] = ELFABIVERSION_AMDGPU_HSA_V5;
   for (Elf64_Shdr &section : sections) {
     if (section.sh_type != SHT_NULL && section.sh_offset >= original_text.sectionOffset())
       section.sh_offset += delta;
@@ -756,11 +740,8 @@ void expect_unmoved_load_growth_policy(const UnmovedLoadRange &range) {
   ASSERT_EQ(sections[1].sh_addr + sections[1].sh_size, 0x2000u);
   ASSERT_GE(range.vaddr, sections[1].sh_addr + sections[1].sh_size);
   ASSERT_LE(header.e_phoff + segments->size() * sizeof(Elf64_Phdr), marker_file_offset);
-  std::memcpy(image.data() + marker_file_offset, &kMarker, sizeof(kMarker));
-  std::memcpy(image.data(), &header, sizeof(header));
-  std::memcpy(image.data() + header.e_phoff, segments->data(),
-              segments->size() * sizeof(Elf64_Phdr));
-  std::memcpy(image.data() + header.e_shoff, sections.data(), sections.size() * sizeof(Elf64_Shdr));
+  test_support::write_value_for_test(image, marker_file_offset, kMarker);
+  write_fixture_headers(image, header, *segments, sections);
   const std::vector<uint8_t> pristine = image;
   const AmdGpuCodeObject source(image.data(), image.size());
   ASSERT_TRUE(source.is_valid());
@@ -776,12 +757,8 @@ void expect_unmoved_load_growth_policy(const UnmovedLoadRange &range) {
                 sizeof(original_zero_fill));
     ASSERT_EQ(original_zero_fill, 0u);
   }
-  Instrumentor instrumentor(source, kArch);
-  instrumentor.add_point_by_offset(0);
-  const Instrumentor::ValidationResult eligible = instrumentor.validate_points();
-  ASSERT_TRUE(eligible.errors.empty()) << eligible.errors.front();
-  ASSERT_EQ(eligible.sites.size(), 1u);
-  const InstrumentedCodeObjectDebug result = instrumentor.patch_with_debug_summaries();
+  InstrumentedCodeObjectDebug result = {};
+  ASSERT_NO_FATAL_FAILURE(patch_eligible_points(source, result));
   if (!result.elf_bytes.empty()) {
     const AmdGpuCodeObject candidate(result.elf_bytes.data(), result.elf_bytes.size());
     ASSERT_TRUE(candidate.is_valid());
@@ -816,10 +793,7 @@ void expect_unmoved_load_growth_policy(const UnmovedLoadRange &range) {
     }
   }
   if (range.overlaps_cave) {
-    EXPECT_FALSE(result.errors.empty());
-    EXPECT_TRUE(result.elf_bytes.empty());
-    EXPECT_TRUE(result.sites.empty());
-    EXPECT_TRUE(result.patches.empty());
+    expect_rejected_without_output(result);
   } else {
     ASSERT_TRUE(result.errors.empty()) << result.errors.front();
     ASSERT_EQ(result.sites.size(), 1u);
@@ -860,8 +834,7 @@ void expect_unedited_load_alias_growth_policy(uint64_t alias_text_offset, bool o
   const AmdGpuCodeObject original(fixture->image.data(), fixture->image.size());
   ASSERT_TRUE(original.is_valid());
   const Section &original_text = *original.text_sections().front();
-  Elf64_Ehdr header = {};
-  std::memcpy(&header, fixture->image.data(), sizeof(header));
+  Elf64_Ehdr header = test_support::read_elf_struct_for_test<Elf64_Ehdr>(fixture->image, 0);
   std::optional<std::vector<Elf64_Phdr>> segments = read_elf_table<Elf64_Phdr>(
       fixture->image, header.e_phoff, header.e_phnum, header.e_phentsize);
   ASSERT_TRUE(segments);
@@ -884,12 +857,8 @@ void expect_unedited_load_alias_growth_policy(uint64_t alias_text_offset, bool o
   ASSERT_EQ(std::memcmp(original_loaded.data() + source_text.vaddr(), source_text.data(),
                         source_text.size()),
             0);
-  Instrumentor instrumentor(source, kArch);
-  instrumentor.add_point_by_offset(0);
-  const Instrumentor::ValidationResult eligible = instrumentor.validate_points();
-  ASSERT_TRUE(eligible.errors.empty()) << eligible.errors.front();
-  ASSERT_EQ(eligible.sites.size(), 1u);
-  const InstrumentedCodeObjectDebug result = instrumentor.patch_with_debug_summaries();
+  InstrumentedCodeObjectDebug result = {};
+  ASSERT_NO_FATAL_FAILURE(patch_eligible_points(source, result));
   if (!result.elf_bytes.empty()) {
     const AmdGpuCodeObject candidate(result.elf_bytes.data(), result.elf_bytes.size());
     ASSERT_TRUE(candidate.is_valid());
@@ -922,10 +891,7 @@ void expect_unedited_load_alias_growth_policy(uint64_t alias_text_offset, bool o
     EXPECT_EQ(std::memcmp(loaded.data() + text.vaddr(), text.data(), text.size()), 0);
   }
   if (overlaps_cave) {
-    EXPECT_FALSE(result.errors.empty());
-    EXPECT_TRUE(result.elf_bytes.empty());
-    EXPECT_TRUE(result.sites.empty());
-    EXPECT_TRUE(result.patches.empty());
+    expect_rejected_without_output(result);
   } else {
     ASSERT_TRUE(result.errors.empty()) << result.errors.front();
     ASSERT_EQ(result.sites.size(), 1u);
@@ -958,11 +924,7 @@ void expect_anchor_load_backing_policy(AnchorLoadBacking backing) {
   image.resize(0x2108, 0);
   if (backing != AnchorLoadBacking::SameFile)
     std::memcpy(image.data() + file_offset, text.data() + word_offset, sizeof(uint32_t));
-  Elf64_Ehdr header = {};
-  std::memcpy(&header, image.data(), sizeof(header));
-  header.e_ident[EI_DATA] = ELFDATA2LSB;
-  header.e_ident[EI_VERSION] = 1;
-  header.e_ident[EI_ABIVERSION] = ELFABIVERSION_AMDGPU_HSA_V5;
+  Elf64_Ehdr header = read_hsa_v5_header(image);
   std::optional<std::vector<Elf64_Phdr>> segments =
       read_elf_table<Elf64_Phdr>(image, header.e_phoff, header.e_phnum, header.e_phentsize);
   ASSERT_TRUE(segments);
@@ -981,21 +943,15 @@ void expect_anchor_load_backing_policy(AnchorLoadBacking backing) {
   ASSERT_LE(header.e_phoff + segments->size() * sizeof(Elf64_Phdr), text.sectionOffset());
   for (const Elf64_Phdr &segment : *segments)
     ASSERT_EQ(segment.p_offset % segment.p_align, segment.p_vaddr % segment.p_align);
-  std::memcpy(image.data(), &header, sizeof(header));
-  std::memcpy(image.data() + header.e_phoff, segments->data(),
-              segments->size() * sizeof(Elf64_Phdr));
+  write_fixture_headers(image, header, *segments);
   const std::vector<uint8_t> pristine = image;
   const AmdGpuCodeObject source(image.data(), image.size());
   ASSERT_TRUE(source.is_valid());
   std::vector<uint8_t> loaded(0x10000, 0);
   ASSERT_NO_FATAL_FAILURE(replay_load_segments(image, loaded));
   ASSERT_EQ(std::memcmp(loaded.data() + text.vaddr(), text.data(), text.size()), 0);
-  Instrumentor instrumentor(source, kArch);
-  instrumentor.add_point_by_offset(0);
-  const Instrumentor::ValidationResult eligible = instrumentor.validate_points();
-  ASSERT_TRUE(eligible.errors.empty()) << eligible.errors.front();
-  ASSERT_EQ(eligible.sites.size(), 1u);
-  const InstrumentedCodeObjectDebug result = instrumentor.patch_with_debug_summaries();
+  InstrumentedCodeObjectDebug result = {};
+  ASSERT_NO_FATAL_FAILURE(patch_eligible_points(source, result));
   if (!result.elf_bytes.empty()) {
     const AmdGpuCodeObject candidate(result.elf_bytes.data(), result.elf_bytes.size());
     ASSERT_TRUE(candidate.is_valid());
@@ -1016,10 +972,7 @@ void expect_anchor_load_backing_policy(AnchorLoadBacking backing) {
     }
   }
   if (backing == AnchorLoadBacking::SeparateCopy) {
-    EXPECT_FALSE(result.errors.empty());
-    EXPECT_TRUE(result.elf_bytes.empty());
-    EXPECT_TRUE(result.sites.empty());
-    EXPECT_TRUE(result.patches.empty());
+    expect_rejected_without_output(result);
     ASSERT_TRUE(result.edit_error);
     EXPECT_EQ(result.edit_error->code, TextEditErrorCode::InvalidImage);
     EXPECT_EQ(result.edit_error->offset, 0u);
@@ -1070,11 +1023,7 @@ void expect_growth_load_contract(const GrowthLoadContract &layout) {
   const CodeObjectPatcher original_patcher(original);
   std::vector<Elf64_Shdr> sections = original_patcher.section_headers();
   ASSERT_EQ(sections.size(), 6u);
-  Elf64_Ehdr header = {};
-  std::memcpy(&header, original_image.data(), sizeof(header));
-  header.e_ident[EI_DATA] = ELFDATA2LSB;
-  header.e_ident[EI_VERSION] = 1;
-  header.e_ident[EI_ABIVERSION] = ELFABIVERSION_AMDGPU_HSA_V5;
+  Elf64_Ehdr header = read_hsa_v5_header(original_image);
   std::vector<uint8_t> image(0x8000, 0);
   uint64_t metadata_offset = 0x5000;
   for (size_t index = 1; index < sections.size(); ++index) {
@@ -1177,10 +1126,8 @@ void expect_growth_load_contract(const GrowthLoadContract &layout) {
   header.e_shnum = static_cast<uint16_t>(sections.size());
   header.e_shoff = metadata_offset;
   ASSERT_LE(header.e_phoff + segments.size() * sizeof(Elf64_Phdr), 0x200u);
-  std::memcpy(image.data() + layout.tail_file_offset, &kDataWord, sizeof(kDataWord));
-  std::memcpy(image.data(), &header, sizeof(header));
-  std::memcpy(image.data() + header.e_phoff, segments.data(), segments.size() * sizeof(Elf64_Phdr));
-  std::memcpy(image.data() + header.e_shoff, sections.data(), sections.size() * sizeof(Elf64_Shdr));
+  test_support::write_value_for_test(image, layout.tail_file_offset, kDataWord);
+  write_fixture_headers(image, header, segments, sections);
   image.resize(header.e_shoff + sections.size() * sizeof(Elf64_Shdr));
   const uint64_t original_allocation = segments.back().p_vaddr + segments.back().p_memsz;
   for (const Elf64_Phdr &segment : segments)
@@ -1192,12 +1139,8 @@ void expect_growth_load_contract(const GrowthLoadContract &layout) {
   ASSERT_NO_FATAL_FAILURE(replay_load_segments(image, loaded));
   ASSERT_EQ(std::memcmp(loaded.data() + layout.descriptor_vaddr, &descriptor, sizeof(descriptor)),
             0);
-  Instrumentor instrumentor(source, kArch);
-  instrumentor.add_point_by_offset(0);
-  const Instrumentor::ValidationResult eligible = instrumentor.validate_points();
-  ASSERT_TRUE(eligible.errors.empty()) << eligible.errors.front();
-  ASSERT_EQ(eligible.sites.size(), 1u);
-  const InstrumentedCodeObjectDebug result = instrumentor.patch_with_debug_summaries();
+  InstrumentedCodeObjectDebug result = {};
+  ASSERT_NO_FATAL_FAILURE(patch_eligible_points(source, result));
   if (!result.elf_bytes.empty()) {
     const AmdGpuCodeObject candidate(result.elf_bytes.data(), result.elf_bytes.size());
     ASSERT_TRUE(candidate.is_valid());
@@ -1208,7 +1151,7 @@ void expect_growth_load_contract(const GrowthLoadContract &layout) {
         expect_anchor_branch_to_cave(text, result.sites.front().instrumentation_offset));
     const CodeObjectPatcher emitted_patcher(candidate);
     const std::vector<Elf64_Shdr> emitted_sections = emitted_patcher.section_headers();
-    std::memcpy(&header, result.elf_bytes.data(), sizeof(header));
+    header = test_support::read_elf_struct_for_test<Elf64_Ehdr>(result.elf_bytes, 0);
     const std::optional<std::vector<Elf64_Phdr>> emitted_segments = read_elf_table<Elf64_Phdr>(
         result.elf_bytes, header.e_phoff, header.e_phnum, header.e_phentsize);
     ASSERT_TRUE(emitted_segments);
@@ -1254,10 +1197,7 @@ void expect_growth_load_contract(const GrowthLoadContract &layout) {
     ASSERT_TRUE(result.errors.empty()) << result.errors.front();
     EXPECT_EQ(result.sites.size(), 1u);
   } else {
-    EXPECT_FALSE(result.errors.empty());
-    EXPECT_TRUE(result.elf_bytes.empty());
-    EXPECT_TRUE(result.sites.empty());
-    EXPECT_TRUE(result.patches.empty());
+    expect_rejected_without_output(result);
     EXPECT_FALSE(result.edit_error);
   }
   EXPECT_EQ(image, pristine);

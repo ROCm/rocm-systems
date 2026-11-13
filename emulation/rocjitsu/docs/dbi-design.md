@@ -271,10 +271,10 @@ also validates the loader-visible effects of text growth:
   dynamic writes must clear the complete final `.text` range. A write left at
   the original text end can overwrite a trampoline; a destination that moves
   clear with its allocated section remains eligible.
-- After segment layout, every overlap between appended text and a `PT_LOAD`
-  memory range must be entirely file-backed. At each overlapping virtual address,
-  the segment must load the same file bytes as `.text`. Different file backing
-  or overlap with a segment's zero-fill storage rejects the patch.
+- After segment layout, images with `PT_LOAD` segments require matching file
+  backing for the complete appended range. Every overlap with a LOAD memory
+  range must also load the same file bytes as `.text`. Missing backing,
+  different file backing, or overlap with zero-fill storage rejects the patch.
 - Every originally loaded part of another allocated section must retain its
   backing after layout. A moved section or descriptor symbol must still name
   the corresponding file bytes or zero-fill range in its LOAD; moving section
@@ -293,6 +293,7 @@ The final overlap check permits touching memory ranges, empty memory mappings,
 and overlaps with matching file backing. Segments moved clear of the appended
 text remain eligible. A failed growth check returns through the existing patcher
 error path; Instrumentor publishes neither ELF bytes nor successful site records.
+Section-only images without LOAD segments retain their offline mutation path.
 
 ### Checked edits (`code/patch/checked_text_edits.h`)
 
