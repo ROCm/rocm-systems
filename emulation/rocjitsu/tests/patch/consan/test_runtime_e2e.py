@@ -96,6 +96,48 @@ class RuntimeIntegration(unittest.TestCase):
                         driver.directory / 'original.hsaco',
                     )
 
+    def test_grouped_output_requires_the_full_tracked_allocation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            driver = Driver(
+                argparse.Namespace(
+                    root=Path(directory),
+                    case='grouped_race',
+                    threads=65,
+                    wave_size=32,
+                    workgroups=16,
+                )
+            )
+            with self.assertRaisesRegex(AssertionError, '12 bytes.*192 bytes'):
+                driver.assert_workgroup_output_allocation(
+                    {'output_allocation_bytes': 12}
+                )
+            for allocated_bytes in (192, 4096):
+                driver.assert_workgroup_output_allocation(
+                    {'output_allocation_bytes': allocated_bytes}
+                )
+
+    def test_grouped_output_extent_uses_the_actual_wave_size(self):
+        for threads, required_bytes in ((65, 32), (129, 48)):
+            with self.subTest(
+                threads=threads
+            ), tempfile.TemporaryDirectory() as directory:
+                driver = Driver(
+                    argparse.Namespace(
+                        root=Path(directory),
+                        case='grouped_isolation',
+                        threads=threads,
+                        wave_size=64,
+                        workgroups=4,
+                    )
+                )
+                driver.assert_workgroup_output_allocation(
+                    {'output_allocation_bytes': required_bytes}
+                )
+                with self.assertRaisesRegex(AssertionError, 'ROCr output allocation'):
+                    driver.assert_workgroup_output_allocation(
+                        {'output_allocation_bytes': required_bytes - 1}
+                    )
+
     def test_missing_statistics_checks_the_requested_agent_first(self):
         with tempfile.TemporaryDirectory() as directory:
             build = Path(directory)

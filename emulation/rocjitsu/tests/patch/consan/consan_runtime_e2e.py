@@ -409,6 +409,8 @@ class Driver:
             return
         assert statistics['finish_status'] == 0
         assert statistics['completed'] == launches
+        if fixture_name.startswith('grouped_'):
+            self.assert_workgroup_output_allocation(statistics)
         counter_fields = ('submitted', 'forwarded', 'copied', 'written', 'reused')
         if args.test_statistics:
             for field in counter_fields[:-1]:
@@ -458,6 +460,16 @@ class Driver:
     def prepare_original(self, fixture, original):
         shutil.copyfile(fixture, original)
         return 'lds_producer_consumer'
+
+    def assert_workgroup_output_allocation(self, statistics):
+        waves = (self.args.threads + self.args.wave_size - 1) // self.args.wave_size
+        required_bytes = self.args.workgroups * waves * 4
+        allocated_bytes = statistics['output_allocation_bytes']
+        assert allocated_bytes >= required_bytes, (
+            f'ROCr output allocation has {allocated_bytes} bytes; '
+            f'{self.args.workgroups} workgroups of {self.args.threads} threads '
+            f'at wave{self.args.wave_size} require {required_bytes} bytes'
+        )
 
     def assert_observations(self, decoded, fixture):
         if fixture.startswith(('wide_', 'mixed_')):
