@@ -26,7 +26,7 @@ static int reportHook(int reportType, char* message, int* returnValue) {
 }
 #endif  // DEBUG
 
-extern "C" BOOL WINAPI DllMain(HINSTANCE hinst, DWORD reason, LPVOID reserved) {
+extern "C" BOOL WINAPI DllMain(HINSTANCE hinst, DWORD reason, LPVOID /*reserved*/) {
   switch (reason) {
     case DLL_PROCESS_ATTACH:
 #ifdef DEBUG

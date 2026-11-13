@@ -100,7 +100,7 @@ hipError_t IPCEventEmulated::synchronize() {
 }
 
 // ================================================================================================
-hipError_t IPCEventEmulated::streamWait(hip::Stream* stream, uint flags) {
+hipError_t IPCEventEmulated::streamWait(hip::Stream* stream, uint /*flags*/) {
   std::scoped_lock lock(lock_);
   const int offset = ihipSignalSlot(ipc_evt_.ipc_shmem_->read_index);
   return ihipStreamOperation(
@@ -112,7 +112,7 @@ hipError_t IPCEventEmulated::streamWait(hip::Stream* stream, uint flags) {
 
 // ================================================================================================
 hipError_t IPCEventEmulated::recordCommand(amd::Command*& command, amd::HostQueue* stream,
-                                           uint32_t flags, bool batch_flush) {
+                                           uint32_t /*flags*/, bool /*batch_flush*/) {
   // Graph event-record nodes call this directly; lock_ is recursive so the
   // normal addMarker path is unaffected.
   std::scoped_lock lock(lock_);
@@ -304,7 +304,7 @@ hipError_t IPCEvent::OpenHandle(ihipIpcEventHandle_t* handle) {
 
 // ================================================================================================
 hipError_t IPCEvent::recordCommand(amd::Command*& command, amd::HostQueue* stream,
-                                   uint32_t flags, bool batch_flush) {
+                                   uint32_t /*flags*/, bool /*batch_flush*/) {
   // Protect ipc_signal_ creation against concurrent access. Not all callers hold
   // Event::lock() (e.g. graph event-record nodes call this directly from
   // CreateCommand); lock_ is recursive, so the normal addMarker path is safe.
@@ -322,7 +322,7 @@ hipError_t IPCEvent::recordCommand(amd::Command*& command, amd::HostQueue* strea
 }
 
 // ================================================================================================
-hipError_t IPCEvent::enqueueRecordCommand(hip::Stream* stream, amd::Command* command) {
+hipError_t IPCEvent::enqueueRecordCommand(hip::Stream* /*stream*/, amd::Command* command) {
   // Protect event_/ipc_signal_ against concurrent query/synchronize/streamWait.
   // Not all callers hold Event::lock() (e.g. graph event-record nodes enqueue
   // directly), so take it here; lock_ is recursive, so the normal addMarker path
@@ -380,7 +380,7 @@ hipError_t IPCEvent::query() {
 }
 
 // ================================================================================================
-hipError_t IPCEvent::streamWait(hip::Stream* stream, uint flags) {
+hipError_t IPCEvent::streamWait(hip::Stream* stream, uint /*flags*/) {
   std::scoped_lock lock(lock_);
 
   if (ipc_signal_ == nullptr) {

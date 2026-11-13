@@ -2828,7 +2828,8 @@ hipError_t GraphExecSegmented::UpdatePacketBatchesForNodeEnableDisable(hip::Grap
   return hipSuccess;
 }
 
-void GraphExecBase::OnLaunchComplete(cl_event event, cl_int command_exec_status, void* user_data) {
+void GraphExecBase::OnLaunchComplete(cl_event event, cl_int /*command_exec_status*/,
+                                     void* user_data) {
   auto* cleanup = reinterpret_cast<GraphLaunchCleanup*>(user_data);
   GraphExecBase* execBase = cleanup->exec;
   // DEBUG_CLR_GRAPH_FAST_LAUNCH: the launch's end marker holds the command its side queues' fork
