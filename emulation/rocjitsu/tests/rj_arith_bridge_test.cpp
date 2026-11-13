@@ -6870,12 +6870,10 @@ TEST(ArithBridgeTest, DoubleFmaPairAliasesModifiersAndPolicies) {
 }
 
 TEST(ArithBridgeTest, TrigPreopArchitectureLiteralsPairsAndPolicies) {
-  // gfx1100/gfx1201 use the same table tail; OMOD flushing still differs.
+  // gfx1100/gfx1201 use the same table tail and flush it before OMOD (hw1100-noieee, MODE 0x00).
   const unsigned exponent[] = {1968, 1091, 1091, 1997};
   const unsigned selector[] = {5, 19, 19, 4};
-  const uint64_t golden[2][4] = {
-      {0, 0x19e839cfbc5294ULL, 0x29e839cfbc5294ULL, 0x11aba10ac06608cULL},
-      {0, 0, 0, 0x11aba10ac06608cULL}};
+  const uint64_t golden[4] = {0, 0, 0, 0x11aba10ac06608cULL};
   for (bool rdna3 : {true, false})
     for (unsigned lanes : {32u, 64u})
       for (unsigned omod = 0; omod < 4; ++omod)
@@ -6954,7 +6952,7 @@ TEST(ArithBridgeTest, TrigPreopArchitectureLiteralsPairsAndPolicies) {
                 const uint64_t before =
                     initial[destination][lane] | (uint64_t(initial[destination + 1][lane]) << 32);
                 const uint64_t expected =
-                    !rejected && ((exec_mask >> lane) & 1) ? golden[rdna3 ? 0 : 1][omod] : before;
+                    !rejected && ((exec_mask >> lane) & 1) ? golden[omod] : before;
                 const uint64_t actual =
                     fixture.cu->read_vgpr(fixture.base() + destination, lane) |
                     (uint64_t(fixture.cu->read_vgpr(fixture.base() + destination + 1, lane)) << 32);
