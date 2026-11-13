@@ -10,9 +10,13 @@
 #include "rocjitsu/kmd/linux/sysfs.h"
 #include "rocjitsu/vm/driver.h"
 
+#include <cstddef>
 #include <cstdint>
+#include <functional>
+#include <span>
 #include <string>
 #include <string_view>
+#include <utility>
 
 namespace rocjitsu {
 
@@ -142,6 +146,26 @@ public:
   /// the mapping is replaced. Drivers without simulated execution pass the mmap through unchanged.
   virtual void *mmap_replacing_client_doorbell_views(void *addr, size_t length, int prot, int flags,
                                                      int fd, off_t offset) = 0;
+
+  /// @brief Run one bare host VMA change and forget SVM policy on replaced bytes.
+  /// @details The callback holds host_mapping_lock only during the syscall.
+  /// The implementation must serialize the syscall with SVM policy changes and
+  /// clear affected policy after a successful change, before releasing that
+  /// serialization. Hardware-backed drivers still invoke the callback once.
+  virtual void run_host_vma_replacement(std::span<const std::pair<uint64_t, uint64_t>> ranges,
+                                        const std::function<bool()> &bare_mapping_change) = 0;
+
+  /// @brief Report a client VMA change before this operation releases its locks.
+  /// @details Invoke on_change after the host mapping changes, while the
+  /// operation's SVM policy serialization is still held. MAP_FIXED can replace
+  /// a VMA even if later GPU work fails.
+  virtual void *mmap_observing_host_vma_change(void *addr, size_t length, int prot, int flags,
+                                               off_t offset,
+                                               const std::function<void()> &on_change) = 0;
+  /// @brief Invoke on_change after a successful unmap, before releasing the
+  /// operation's SVM policy serialization.
+  virtual int munmap_observing_host_vma_change(void *addr, size_t length,
+                                               const std::function<void()> &on_change) = 0;
 
   /// @brief Return true if this driver should synthesize /dev/dri/renderD@p minor.
   /// @details A legacy single-GPU simulator accepts every minor for compatibility;

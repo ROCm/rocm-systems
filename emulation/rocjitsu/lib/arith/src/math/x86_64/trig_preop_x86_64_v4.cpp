@@ -35,35 +35,12 @@ void trig_preop_x86_64_v4(uint32_t exec_mask, uint32_t mode, bool flush_output, 
     auto value = _mm512_i32gather_epi64(index, table, 8);
     unsigned omod = (mode >> 6) & 3;
     if (omod) {
-      if constexpr (Rdna3) {
-        const auto hidden = _mm512_set1_epi64(1ULL << 52);
-        const auto tiny = _mm512_cmpgt_epi64_mask(hidden, value);
-        if (omod == 3) {
-          auto odd_half = _mm512_cmpeq_epi64_mask(_mm512_and_si512(value, _mm512_set1_epi64(3)),
-                                                  _mm512_set1_epi64(3));
-          auto rounded = _mm512_mask_add_epi64(_mm512_srli_epi64(value, 1), odd_half,
-                                               _mm512_srli_epi64(value, 1), _mm512_set1_epi64(1));
-          auto boundary = _mm512_cmpgt_epi64_mask(_mm512_set1_epi64(2ULL << 52), value);
-          value = _mm512_mask_blend_epi64(boundary, _mm512_sub_epi64(value, hidden), rounded);
-        } else {
-          auto shifted = omod == 1 ? _mm512_slli_epi64(value, 1) : _mm512_slli_epi64(value, 2);
-          if (omod == 2) {
-            auto carry = _mm512_cmpgt_epi64_mask(shifted, _mm512_set1_epi64((2ULL << 52) - 1));
-            shifted = _mm512_mask_blend_epi64(
-                carry, shifted, _mm512_add_epi64(_mm512_srli_epi64(shifted, 1), hidden));
-          }
-          value = _mm512_mask_blend_epi64(
-              tiny, _mm512_add_epi64(value, _mm512_set1_epi64(uint64_t(omod) << 52)), shifted);
-        }
-        value = _mm512_maskz_mov_epi64(
-            _mm512_cmpgt_epi64_mask(value, _mm512_set1_epi64(0xfffffffffffff)), value);
-      } else {
-        auto normal = _mm512_cmpgt_epi64_mask(value, _mm512_set1_epi64(0xfffffffffffff));
-        value = _mm512_add_epi64(
-            value, _mm512_set1_epi64(int64_t(omod == 3 ? -1 : int(omod)) * (INT64_C(1) << 52)));
-        normal &= _mm512_cmpgt_epi64_mask(value, _mm512_set1_epi64(0xfffffffffffff));
-        value = _mm512_maskz_mov_epi64(normal, value);
-      }
+      // gfx1100 and gfx1201 both flush a subnormal table value before scaling.
+      auto normal = _mm512_cmpgt_epi64_mask(value, _mm512_set1_epi64(0xfffffffffffff));
+      value = _mm512_add_epi64(
+          value, _mm512_set1_epi64(int64_t(omod == 3 ? -1 : int(omod)) * (INT64_C(1) << 52)));
+      normal &= _mm512_cmpgt_epi64_mask(value, _mm512_set1_epi64(0xfffffffffffff));
+      value = _mm512_maskz_mov_epi64(normal, value);
     }
     if (flush_output) {
       value = _mm512_maskz_mov_epi64(

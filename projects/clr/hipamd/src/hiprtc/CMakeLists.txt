@@ -82,6 +82,7 @@ if(WIN32)
 endif()
 
 target_link_libraries(hiprtc PUBLIC ${CMAKE_DL_LIBS})
+target_link_libraries(hiprtc PRIVATE $<BUILD_LOCAL_INTERFACE:clr::warnings>)
 # Add link to comgr, hsa-runtime and other required libraries in target files
 # This is required for static libraries
 if(NOT BUILD_SHARED_LIBS)

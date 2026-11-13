@@ -15,6 +15,7 @@
 
 #include "fakes/dev_runtime_micro_fakes.h"
 #include "fakes/hip_fakes.h"      // the shared g_hip* seams this suite drives
+#include "fakes/mgmt_task_enq_fakes.h"  // g_ncclMgmtTaskEnqueue
 #include "fakes/nccl_fakes.h"     // g_ncclProxyClientGetFdBlocking
 #include "fakes/devcomm_fakes.h"  // g_ncclTeamLsa
 #include "fakes/nccl_device_core_fakes.h"  // g_ncclTeamWorld and the rest of the ncclTeam* family
@@ -6091,7 +6092,7 @@ TEST_F(CommWindowRegisterImplTest, Rearch_HandsTheJobToTheManagementQueue) {
   ncclAsyncJob* job = nullptr;
   void (*jobFree)(void*) = nullptr;
   ncclComm* jobComm = nullptr;
-  g_devrMgmtTaskEnqueue = [&](ncclAsyncJob* j, ncclResult_t (*)(ncclAsyncJob*), void (*d)(void*), ncclComm* c) {
+  g_ncclMgmtTaskEnqueue = [&](ncclAsyncJob* j, ncclResult_t (*)(ncclAsyncJob*), void (*d)(void*), ncclComm* c) {
     job = j;
     jobFree = d;
     jobComm = c;
@@ -6115,7 +6116,7 @@ TEST_F(CommWindowRegisterImplTest, Rearch_HandsTheJobToTheManagementQueue) {
 TEST_F(CommWindowRegisterImplTest, RearchEnqueueRejects_JobIsDestroyedOnlyByTheEnqueue) {
   ScopedHook rearch(g_loadParam, ParamOverride({{"ENQUEUE_REARCH_ENABLE", 1}}));
   int destroyed = 0;
-  g_devrMgmtTaskEnqueue = [&](ncclAsyncJob* j, ncclResult_t (*)(ncclAsyncJob*), void (*d)(void*), ncclComm*) {
+  g_ncclMgmtTaskEnqueue = [&](ncclAsyncJob* j, ncclResult_t (*)(ncclAsyncJob*), void (*d)(void*), ncclComm*) {
     d(j);
     ++destroyed;
     return ncclInvalidArgument;
@@ -6589,6 +6590,26 @@ TEST_F(CommQueryPropertiesTest, UninitialisedProps_ReturnsInvalidUsage) {
   EXPECT_EQ(ncclCommQueryProperties(comm, &raw), ncclInvalidUsage);
 }
 
+// A caller that JIT-compiles its device code must allocate the devComm in the
+// runtime layout, so it is told the runtime's size, not its own headers'.
+TEST_F(CommQueryPropertiesTest, Caller231_ReportsRuntimeDevCommSize) {
+  props.version = NCCL_VERSION(2, 31, 0);
+  props.devCommRuntimeVersionSize = 0;
+
+  ASSERT_EQ(ncclCommQueryProperties(comm, &props), ncclSuccess);
+  EXPECT_EQ(props.devCommRuntimeVersionSize, sizeof(ncclDevComm_t));
+}
+
+// Branch: a pre-2.31 caller's struct ends before devCommRuntimeVersionSize, so
+// writing it would scribble past the caller's object.
+TEST_F(CommQueryPropertiesTest, Pre231Caller_LeavesDevCommRuntimeVersionSizeAlone) {
+  props.version = NCCL_VERSION(2, 30, 7);
+  props.devCommRuntimeVersionSize = 0xC0FFEE;  // stands in for the caller's neighbouring memory
+
+  ASSERT_EQ(ncclCommQueryProperties(comm, &props), ncclSuccess);
+  EXPECT_EQ(props.devCommRuntimeVersionSize, 0xC0FFEEu);
+}
+
 
 // ---------------------------------------------------------------------------
 // ncclDevrGetLsaTeamPtrMC resolves an offset to its multicast address for a
@@ -6872,6 +6893,7 @@ protected:
       free(t);
     }
     free(comm->devrState.lsaRankList);
+    FreeMallocdDevrTeams(comm);
     NcclVersionCompatTest::TearDown();
   }
 };
@@ -6939,6 +6961,142 @@ TEST_F(DevCommCreateTest, RequirementsFilterFails_ReturnsErrorWithoutQueueing) {
   };
 
   EXPECT_NE(ncclDevCommCreate(comm, &reqs, &outDevComm), ncclSuccess);
+  EXPECT_TRUE(ncclIntruQueueEmpty(&comm->devrState.commCreateTaskQueue));
+}
+
+
+// JIT: useRuntimeVersion or NCCL_DEV_API_JIT=1 queues the runtime version; reqs keep the caller's layout.
+
+// Oldest caller that has useRuntimeVersion, so the oldest one it is read from.
+constexpr uint32_t kJitFieldVersion = NCCL_VERSION(2, 31, 0);
+// A caller compiled before the field existed: the byte is past its struct.
+constexpr uint32_t kPreJitFieldVersion = NCCL_VERSION(2, 30, 7);
+static_assert(kJitFieldVersion < NCCL_VERSION_CODE,
+              "the JIT tests need a compile-time version that differs from the runtime version");
+
+class DevCommCreateJitTest : public DevCommCreateTest {
+protected:
+  uint32_t QueuedDeviceCodeVersion() {
+    ncclDevrCommCreateTask* task = ncclIntruQueueHead(&comm->devrState.commCreateTaskQueue);
+    return task != nullptr ? task->deviceCodeVersion : 0;
+  }
+
+  // Splits the compat table at kJitFieldVersion so that the caller's
+  // compile-time version and the runtime version resolve to different records.
+  static void SplitCompatAtJitFieldVersion() {
+    ncclDevCommCompat_v22902 = ncclDevCommCompat{};
+    ncclDevCommCompat_v22902.minVersion = 0;
+    ncclDevCommCompat_v22902.maxVersion = kJitFieldVersion;
+    ncclDevCommCompat_v22907 = ncclDevCommCompat{};
+    ncclDevCommCompat_v22907.minVersion = kJitFieldVersion + 1;
+    ncclDevCommCompat_v22907.maxVersion = NCCL_VERSION_CODE;
+  }
+};
+
+// Branch: an AOT caller older than the runtime keeps its own version, so its
+// devComm is later down-converted to the layout its kernels were built with.
+TEST_F(DevCommCreateJitTest, AotCaller_QueuesCompileTimeVersion) {
+  reqs.version = kJitFieldVersion;
+  reqs.useRuntimeVersion = false;
+
+  ASSERT_EQ(ncclDevCommCreate(comm, &reqs, &outDevComm), ncclSuccess);
+  EXPECT_EQ(QueuedDeviceCodeVersion(), kJitFieldVersion);
+}
+
+// Branch: useRuntimeVersion from a caller that has the field selects the
+// runtime version, whatever the caller was compiled against.
+TEST_F(DevCommCreateJitTest, UseRuntimeVersion_QueuesRuntimeVersion) {
+  reqs.version = kJitFieldVersion;
+  reqs.useRuntimeVersion = true;
+
+  ASSERT_EQ(ncclDevCommCreate(comm, &reqs, &outDevComm), ncclSuccess);
+  EXPECT_EQ(QueuedDeviceCodeVersion(), static_cast<uint32_t>(NCCL_VERSION_CODE));
+}
+
+// Branch: a pre-2.31 caller has no useRuntimeVersion, so whatever byte sits at
+// its offset is not trusted and the caller's own version is kept.
+TEST_F(DevCommCreateJitTest, UseRuntimeVersionFromPre231Caller_IsIgnored) {
+  reqs.version = kPreJitFieldVersion;
+  reqs.useRuntimeVersion = true;  // stands in for whatever lies past the old struct
+
+  ASSERT_EQ(ncclDevCommCreate(comm, &reqs, &outDevComm), ncclSuccess);
+  EXPECT_EQ(QueuedDeviceCodeVersion(), kPreJitFieldVersion);
+}
+
+// Branch: NCCL_DEV_API_JIT=1 selects the runtime version for a caller that
+// cannot set useRuntimeVersion, including one compiled before it existed.
+TEST_F(DevCommCreateJitTest, DevApiJitParam_QueuesRuntimeVersionForAnyCaller) {
+  ScopedHook loadParam(g_loadParam, [](const char* env, int64_t deftVal) -> int64_t {
+    return std::string(env) == "DEV_API_JIT" ? 1 : deftVal;
+  });
+  reqs.version = kPreJitFieldVersion;
+  reqs.useRuntimeVersion = false;
+
+  ASSERT_EQ(ncclDevCommCreate(comm, &reqs, &outDevComm), ncclSuccess);
+  EXPECT_EQ(QueuedDeviceCodeVersion(), static_cast<uint32_t>(NCCL_VERSION_CODE));
+}
+
+// NVIDIA/nccl@678911ee: the requirements filter must come from the record for
+// the caller's compile-time version, because reqs has that version's layout
+// even when the device code is the runtime version's.
+TEST_F(DevCommCreateJitTest, UseRuntimeVersion_FiltersRequirementsWithCompileTimeRecord) {
+  SplitCompatAtJitFieldVersion();
+  static int compileTimeFilterCalls;
+  compileTimeFilterCalls = 0;
+  ncclDevCommCompat_v22902.devCommRequirementsFilter = [](ncclComm_t, ncclDevCommRequirements_t*) {
+    compileTimeFilterCalls++;
+    return ncclSuccess;
+  };
+  ncclDevCommCompat_v22907.devCommRequirementsFilter = [](ncclComm_t, ncclDevCommRequirements_t*) {
+    ADD_FAILURE() << "the runtime version's requirements filter ran on a compile-time-version struct";
+    return ncclInternalError;
+  };
+  reqs.version = kJitFieldVersion;
+  reqs.useRuntimeVersion = true;
+
+  ASSERT_EQ(ncclDevCommCreate(comm, &reqs, &outDevComm), ncclSuccess);
+  EXPECT_EQ(compileTimeFilterCalls, 1);
+  EXPECT_EQ(QueuedDeviceCodeVersion(), static_cast<uint32_t>(NCCL_VERSION_CODE));
+}
+
+// Branch: useRuntimeVersion does not bypass the compatibility check on the
+// caller's own version; a compile-time version no record serves is refused.
+TEST_F(DevCommCreateJitTest, UseRuntimeVersion_UnservedCompileTimeVersion_ReturnsErrorWithoutQueueing) {
+  // Only the runtime version has a record; nothing serves the caller's compile-time version.
+  ncclDevCommCompat_v22902 = ncclDevCommCompat{};
+  ncclDevCommCompat_v22907 = ncclDevCommCompat{};
+  ncclDevCommCompat_v22907.minVersion = kJitFieldVersion + 1;
+  ncclDevCommCompat_v22907.maxVersion = NCCL_VERSION_CODE;
+  reqs.version = kJitFieldVersion;
+  reqs.useRuntimeVersion = true;
+
+  EXPECT_NE(ncclDevCommCreate(comm, &reqs, &outDevComm), ncclSuccess);
+  EXPECT_TRUE(ncclIntruQueueEmpty(&comm->devrState.commCreateTaskQueue));
+}
+
+// The enqueue-rearch path carries the version in its job, not the task queue,
+// and the job builds the devComm for that version. The hook runs the job and
+// then destroys it, as the management-task queue does: the job releases its
+// requirements copy on every exit, so the destructor only deletes the job.
+TEST_F(DevCommCreateJitTest, RearchJobPath_UseRuntimeVersion_BuildsForRuntimeVersion) {
+  ScopedHook rearch(g_loadParam, [](const char* env, int64_t deftVal) -> int64_t {
+    return std::string(env) == "ENQUEUE_REARCH_ENABLE" ? 1 : deftVal;
+  });
+  uint32_t jobVersion = 0;
+  ScopedHook enqueue(g_ncclMgmtTaskEnqueue, [&](ncclAsyncJob* job, ncclResult_t (*func)(ncclAsyncJob*),
+                                                void (*destructor)(void*), ncclComm_t) {
+    jobVersion = reinterpret_cast<ncclDevrCommCreateAsyncJob*>(job)->deviceCodeVersion;
+    ncclResult_t ret = func(job);
+    destructor(job);
+    return ret;
+  });
+  reqs.version = kJitFieldVersion;
+  reqs.useRuntimeVersion = true;
+
+  ASSERT_EQ(ncclDevCommCreate(comm, &reqs, &outDevComm), ncclSuccess);
+  EXPECT_EQ(enqueue.calls, 1);
+  EXPECT_EQ(jobVersion, static_cast<uint32_t>(NCCL_VERSION_CODE));
+  EXPECT_EQ(outDevComm.version, static_cast<uint32_t>(NCCL_VERSION_CODE));
   EXPECT_TRUE(ncclIntruQueueEmpty(&comm->devrState.commCreateTaskQueue));
 }
 
@@ -7398,6 +7556,102 @@ TEST_F(DevrCommCreateInternalTest, NoGinRequestedOnGinEnabledComm_SkipsGinDevCom
 
   EXPECT_EQ(Create(), ncclSuccess);
   EXPECT_EQ(setup.calls, 0);
+}
+
+
+// ---------------------------------------------------------------------------
+// JIT-compiled device code, devComm side: ncclDevrCommCreateInternal picks the
+// compat record from deviceCodeVersion, so a devComm for runtime-version
+// device code is written in the runtime layout and not down-converted, while
+// one for older AOT device code still is.
+
+class DevrCommCreateInternalJitTest : public DevrCommCreateInternalTest {
+protected:
+  struct NewToOldCall {
+    void* dst;
+    uint32_t srcVersion;
+  };
+  static std::vector<NewToOldCall>& NewToOldCalls() {
+    static std::vector<NewToOldCall> calls;
+    return calls;
+  }
+
+  void SetUp() override {
+    DevrCommCreateInternalTest::SetUp();
+    NewToOldCalls().clear();
+    // As under JIT: reqs carry the caller's compile-time version, so any use of
+    // reqs.version in place of deviceCodeVersion shows up below.
+    reqs.version = kJitFieldVersion;
+    // The compile-time version gets a record with a down-converter; the runtime
+    // version gets one without, as the current version's record has in production.
+    ncclDevCommCompat_v22902 = ncclDevCommCompat{};
+    ncclDevCommCompat_v22902.minVersion = 0;
+    ncclDevCommCompat_v22902.maxVersion = kJitFieldVersion;
+    ncclDevCommCompat_v22902.devCommCopyNewToOld = [](ncclComm_t, void* oldDevComm, ncclDevComm const* newDevComm) {
+      NewToOldCalls().push_back({oldDevComm, newDevComm->version});
+      return ncclSuccess;
+    };
+    ncclDevCommCompat_v22907 = ncclDevCommCompat{};
+    ncclDevCommCompat_v22907.minVersion = kJitFieldVersion + 1;
+    ncclDevCommCompat_v22907.maxVersion = NCCL_VERSION_CODE;
+  }
+
+  ncclResult_t CreateFor(uint32_t deviceCodeVersion) {
+    return ncclDevrCommCreateInternal(comm, &reqs, &outDevComm, /*isInternal=*/false, deviceCodeVersion);
+  }
+};
+
+// Runtime-version device code reads the runtime layout, so the devComm is
+// written straight into the caller's (runtime-sized) buffer and stamped with
+// the runtime version.
+TEST_F(DevrCommCreateInternalJitTest, RuntimeDeviceCodeVersion_WritesRuntimeLayoutWithoutDownConversion) {
+  ASSERT_EQ(CreateFor(NCCL_VERSION_CODE), ncclSuccess);
+
+  EXPECT_TRUE(NewToOldCalls().empty());
+  EXPECT_EQ(outDevComm.magic, static_cast<uint32_t>(NCCL_API_MAGIC));
+  EXPECT_EQ(outDevComm.version, static_cast<uint32_t>(NCCL_VERSION_CODE));
+}
+
+// Contrast: older AOT device code is down-converted through its own record,
+// and the caller's buffer is only ever written by that converter.
+TEST_F(DevrCommCreateInternalJitTest, CompileTimeDeviceCodeVersion_DownConvertsThroughItsRecord) {
+  ASSERT_EQ(CreateFor(kJitFieldVersion), ncclSuccess);
+
+  ASSERT_EQ(NewToOldCalls().size(), 1u);
+  EXPECT_EQ(NewToOldCalls()[0].dst, static_cast<void*>(&outDevComm));
+  EXPECT_EQ(NewToOldCalls()[0].srcVersion, kJitFieldVersion);
+  EXPECT_EQ(outDevComm.magic, 0u);  // the runtime layout never landed in the caller's buffer
+}
+
+// Branch: a deviceCodeVersion no record serves is refused before the caller's
+// devComm is touched.
+TEST_F(DevrCommCreateInternalJitTest, UnservedDeviceCodeVersion_ReturnsErrorBeforeWritingDevComm) {
+  ncclDevCommCompat_v22907 = ncclDevCommCompat{};  // nothing serves the runtime version
+  memset(&outDevComm, 0xAB, sizeof(outDevComm));
+  ncclDevComm untouched;
+  memcpy(&untouched, &outDevComm, sizeof(untouched));
+
+  EXPECT_NE(CreateFor(NCCL_VERSION_CODE), ncclSuccess);
+  EXPECT_EQ(memcmp(&outDevComm, &untouched, sizeof(untouched)), 0);
+}
+
+// GIN picks the device-side ABI of its backend from the device code's version,
+// so that version, not the caller's compile-time one, has to reach it.
+TEST_F(DevrCommCreateInternalJitTest, DeviceCodeVersion_ReachesGinDevCommSetup) {
+  reqs.ginConnectionType = NCCL_GIN_CONNECTION_FULL;
+  comm->globalGinSupport = NCCL_GIN_CONNECTION_FULL;
+  comm->devrState.ginEnabled = true;  // already connected: go straight to setup
+  std::vector<uint32_t> seen;
+  ScopedHook setup(g_devrGinDevCommSetup,
+                   [&](ncclComm*, ncclDevCommRequirements const*, ncclDevComm*, uint32_t deviceCodeVersion) {
+                     seen.push_back(deviceCodeVersion);
+                     return ncclInternalError;  // stop here; nothing below depends on the version
+                   });
+
+  EXPECT_EQ(CreateFor(NCCL_VERSION_CODE), ncclInternalError);
+  EXPECT_EQ(CreateFor(kJitFieldVersion), ncclInternalError);
+
+  EXPECT_EQ(seen, (std::vector<uint32_t>{static_cast<uint32_t>(NCCL_VERSION_CODE), kJitFieldVersion}));
 }
 
 
