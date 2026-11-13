@@ -80,6 +80,14 @@ else()
     )
 endif()
 
+# GCC bug 68080 can report a negative branch count ("branch N taken -4").
+# gcovr treats that as a fatal parse error and writes no report. Keep going.
+if(GCOVR_PATH)
+    set(PROFILER_HUB_GCOVR_IGNORE_PARSE_ERRORS
+        --gcov-ignore-parse-errors=negative_hits.warn_once_per_file
+    )
+endif()
+
 # ----------------------------------------------------------------------------------------#
 # Coverage compiler and linker flags
 # ----------------------------------------------------------------------------------------#
@@ -188,10 +196,11 @@ if(PROFILER_HUB_COVERAGE_USE_GCOVR)
         COMMAND ${CMAKE_CTEST_COMMAND} --output-on-failure
         # Generate HTML report
         COMMAND
-            ${GCOVR_PATH} --root ${CMAKE_SOURCE_DIR} --filter
-            ${CMAKE_SOURCE_DIR}/source --filter ${CMAKE_SOURCE_DIR}/include
-            --exclude ${CMAKE_SOURCE_DIR}/tests --html-details
-            ${PROFILER_HUB_COVERAGE_DIR}/html/index.html --print-summary
+            ${GCOVR_PATH} ${PROFILER_HUB_GCOVR_IGNORE_PARSE_ERRORS} --root
+            ${CMAKE_SOURCE_DIR} --filter ${CMAKE_SOURCE_DIR}/source --filter
+            ${CMAKE_SOURCE_DIR}/include --exclude ${CMAKE_SOURCE_DIR}/tests
+            --html-details ${PROFILER_HUB_COVERAGE_DIR}/html/index.html
+            --print-summary
         WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
         COMMENT "Generating code coverage report..."
     )
@@ -213,10 +222,10 @@ if(PROFILER_HUB_COVERAGE_USE_GCOVR)
         COMMAND ${CMAKE_CTEST_COMMAND} --output-on-failure
         # Generate XML report
         COMMAND
-            ${GCOVR_PATH} --root ${CMAKE_SOURCE_DIR} --filter
-            ${CMAKE_SOURCE_DIR}/source --filter ${CMAKE_SOURCE_DIR}/include
-            --exclude ${CMAKE_SOURCE_DIR}/tests --xml
-            ${PROFILER_HUB_COVERAGE_DIR}/coverage.xml --print-summary
+            ${GCOVR_PATH} ${PROFILER_HUB_GCOVR_IGNORE_PARSE_ERRORS} --root
+            ${CMAKE_SOURCE_DIR} --filter ${CMAKE_SOURCE_DIR}/source --filter
+            ${CMAKE_SOURCE_DIR}/include --exclude ${CMAKE_SOURCE_DIR}/tests
+            --xml ${PROFILER_HUB_COVERAGE_DIR}/coverage.xml --print-summary
         WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
         COMMENT "Generating Cobertura XML coverage report..."
     )
@@ -240,10 +249,10 @@ if(PROFILER_HUB_COVERAGE_USE_LCOV AND GCOVR_PATH)
         COMMAND ${CMAKE_CTEST_COMMAND} --output-on-failure
         # Generate XML using gcovr
         COMMAND
-            ${GCOVR_PATH} --root ${CMAKE_SOURCE_DIR} --filter
-            ${CMAKE_SOURCE_DIR}/source --filter ${CMAKE_SOURCE_DIR}/include
-            --exclude ${CMAKE_SOURCE_DIR}/tests --xml
-            ${PROFILER_HUB_COVERAGE_DIR}/coverage.xml --print-summary
+            ${GCOVR_PATH} ${PROFILER_HUB_GCOVR_IGNORE_PARSE_ERRORS} --root
+            ${CMAKE_SOURCE_DIR} --filter ${CMAKE_SOURCE_DIR}/source --filter
+            ${CMAKE_SOURCE_DIR}/include --exclude ${CMAKE_SOURCE_DIR}/tests
+            --xml ${PROFILER_HUB_COVERAGE_DIR}/coverage.xml --print-summary
         WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
         COMMENT "Generating Cobertura XML coverage report..."
     )

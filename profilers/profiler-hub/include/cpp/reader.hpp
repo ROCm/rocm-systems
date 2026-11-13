@@ -1,0 +1,450 @@
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
+#pragma once
+
+#include <profiler-hub/cpp/reader_types.hpp>
+#include <profiler-hub/cpp/storage.hpp>
+
+#include <memory>
+#include <optional>
+#include <string>
+#include <utility>
+#include <vector>
+
+extern "C"
+{
+    struct ph_table_event;
+}
+
+namespace profiler_hub
+{
+
+struct reader_catalog_t;
+struct resolved_event_query;
+
+/** @brief One display name and its duration aggregates. Durations are
+ *         end - start in trace ticks. */
+struct name_duration_summary_t
+{
+    std::string name;
+    uint64_t    count{};
+    uint64_t    min_duration{};
+    uint64_t    max_duration{};
+    uint64_t    total_duration{};
+};
+
+namespace common
+{
+class connection;
+class connection_pool;
+class thread_pool;
+}  // namespace common
+
+/**
+ * @brief Detects whether a reader can open @p path.
+ *        Opens a recognized file read-only and does not create or modify it.
+ *        Another format is added by registering a detector; another schema by
+ *        registering the versions its reader accepts.
+ */
+[[nodiscard]] reader_types::file_probe_result_t
+probe_file(const std::string& path);
+
+// ============================================================================
+// Reader Interface
+// ============================================================================
+
+struct reader_t
+{
+    /**
+     * @brief Construct a reader with the given storage backend
+     * @param storage Storage backend to read from (takes ownership)
+     */
+    explicit reader_t(std::unique_ptr<profiler_hub::storage_t> storage);
+
+    ~reader_t();
+
+    reader_t()                           = delete;
+    reader_t(const reader_t&)            = delete;
+    reader_t& operator=(const reader_t&) = delete;
+    reader_t(reader_t&&)                 = delete;
+    reader_t& operator=(reader_t&&)      = delete;
+
+    /**
+     *@section Info Table Accessors (Eagerly Loaded, Cached)
+     * These are loaded at construction and cached for the session lifetime.
+     * Returns shared_ptr to cached objects; fast access, no database query.
+     */
+
+    /**
+     * @brief Get all node info from cache
+     * @return List of all node info objects
+     */
+    [[nodiscard]] reader_types::node_info_list_t get_all_nodes() const;
+
+    /**
+     * @brief Get all process info from cache
+     * @return List of all process info objects
+     */
+    [[nodiscard]] reader_types::process_info_list_t get_all_processes() const;
+
+    /**
+     * @brief Get all thread info from cache
+     * @return List of all thread info objects
+     */
+    [[nodiscard]] reader_types::thread_info_list_t get_all_threads() const;
+
+    /**
+     * @brief Get all agent info from cache
+     * @return List of all agent info objects
+     */
+    [[nodiscard]] reader_types::agent_info_list_t get_all_agents() const;
+
+    /**
+     * @brief Get all queue info from cache
+     * @return List of all queue info objects
+     */
+    [[nodiscard]] reader_types::queue_info_list_t get_all_queues() const;
+
+    /**
+     * @brief Get all stream info from cache
+     * @return List of all stream info objects
+     */
+    [[nodiscard]] reader_types::stream_info_list_t get_all_streams() const;
+
+    /**
+     * @brief Get all PMC info from cache
+     * @return List of all PMC info objects
+     */
+    [[nodiscard]] reader_types::pmc_info_list_t get_all_pmc_info() const;
+
+    /**
+     * @brief Get all code object info from cache
+     * @return List of all code object info objects
+     */
+    [[nodiscard]] reader_types::code_object_info_list_t get_all_code_objects() const;
+
+    /**
+     * @brief Get all kernel symbol info from cache
+     * @return List of all kernel symbol info objects
+     */
+    [[nodiscard]] reader_types::kernel_symbol_info_list_t get_all_kernel_symbols() const;
+
+    /**
+     *@section Track Accessors (Eagerly Loaded, Cached)
+     * Tracks organize events on the timeline. Each track represents a unique
+     * context (e.g., node+process+thread, or node+agent+queue).
+     */
+
+    /**
+     * @brief Get all track info from cache
+     * @return List of all track info objects
+     */
+    [[nodiscard]] reader_types::track_info_list_t get_all_tracks() const;
+
+    /**
+     * @brief Distinct stream-to-hardware links discovered from kernel-dispatch,
+     *        memory-allocate, and memory-copy rows.
+     * @return One entry per (category, node, process, stream, agent, queue).
+     *         Either track pointer is null when that side was not recorded.
+     */
+    [[nodiscard]] reader_types::stream_hardware_link_list_t get_stream_hardware_links()
+        const;
+
+    /**
+     *@section Timeline Event Queries (On-Demand, Not Stored)
+     * These query the database and return lightweight timeline_event_t for display.
+     * The returned vector is owned by the caller; reader does not cache events.
+     * Use get_event_details() to fetch full data for a specific event.
+     */
+
+    /**
+     * @brief Get all events for a track within optional time window
+     * @param track Track to query events for
+     * @param filter Optional filter for time window and pagination
+     * @return List of lightweight timeline events for display
+     */
+    [[nodiscard]] reader_types::timeline_event_list_t get_events_for_track(
+        reader_types::track_info_ptr_t      track,
+        const reader_types::event_filter_t& filter = {}) const;
+
+    [[nodiscard]] std::optional<std::pair<size_t, size_t>> get_event_id_span(
+        reader_types::event_type_t type) const;
+
+    using event_visitor_t = void (*)(void*                                    context,
+                                     reader_types::unique_timeline_event_id_t id,
+                                     reader_types::timestamp_ns_t             start,
+                                     reader_types::timestamp_ns_t             end,
+                                     std::string_view                         name);
+
+    void visit_track_events_in_id_range(const reader_types::track_info_ptr_t& track,
+                                        reader_types::event_type_t            type,
+                                        size_t                                id_begin,
+                                        size_t                                id_end,
+                                        event_visitor_t                       visitor,
+                                        void* context) const;
+
+    /**
+     * @brief Get PMC/counter samples for a track within an optional time window
+     * @param track Track to query samples for (must be a PMC track)
+     * @param filter Optional filter for time window
+     * @return List of lightweight counter events for display
+     */
+    [[nodiscard]] reader_types::counter_timeline_event_list_t
+    get_counter_events_for_track(reader_types::track_info_ptr_t      track,
+                                 const reader_types::event_filter_t& filter = {}) const;
+
+    /**
+     * @brief Get events across all tracks matching filter
+     * @param filter Optional filter for time window and pagination
+     * @return List of lightweight timeline events for display
+     * @note For large databases, use pagination to limit result size
+     */
+    [[nodiscard]] reader_types::timeline_event_list_t get_events(
+        const reader_types::event_filter_t& filter = {}) const;
+
+    /**
+     * @brief Get total count of events matching filter without fetching data
+     * @param filter Optional filter; honors `time_window` and `types`. Pagination,
+     *               sort, and where fields are ignored - count reflects the total
+     *               number of matches.
+     * @return Number of matching events
+     * @note Useful for pagination UI - returns the unpaginated total.
+     */
+    [[nodiscard]] size_t get_event_count(
+        const reader_types::event_filter_t& filter = {}) const;
+
+    /**
+     *@section Event Details (On-Demand Query by db_id)
+     * Fetch full details for a timeline event. Queries database by db_id.
+     * Returns nullopt if type mismatch or db_id not found.
+     */
+
+    /**
+     * @brief Get full region details for a timeline event
+     * @param event Timeline event to fetch details for
+     * @return Region data, or nullopt if type mismatch or not found
+     */
+    [[nodiscard]] std::optional<reader_types::region_data_t> get_region_details(
+        const reader_types::timeline_event_t& event) const;
+
+    /**
+     * @brief Get full kernel dispatch details for a timeline event
+     * @param event Timeline event to fetch details for
+     * @return Kernel dispatch data, or nullopt if type mismatch or not found
+     */
+    [[nodiscard]] std::optional<reader_types::kernel_dispatch_data_t>
+    get_kernel_dispatch_details(const reader_types::timeline_event_t& event) const;
+
+    /**
+     * @brief Get full memory copy details for a timeline event
+     * @param event Timeline event to fetch details for
+     * @return Memory copy data, or nullopt if type mismatch or not found
+     */
+    [[nodiscard]] std::optional<reader_types::memory_copy_data_t> get_memory_copy_details(
+        const reader_types::timeline_event_t& event) const;
+
+    /**
+     * @brief Get full memory alloc details for a timeline event
+     * @param event Timeline event to fetch details for
+     * @return Memory alloc data, or nullopt if type mismatch or not found
+     */
+    [[nodiscard]] std::optional<reader_types::memory_alloc_data_t>
+    get_memory_alloc_details(const reader_types::timeline_event_t& event) const;
+
+    /**
+     * @brief Track this event is placed on
+     * @param event Timeline event identified by id and type
+     * @return The track resolve_track would choose, or null when the row is missing
+     */
+    [[nodiscard]] reader_types::track_info_ptr_t track_of(
+        const reader_types::timeline_event_t& event) const;
+
+    /**
+     * @brief Get full sample details for a timeline event
+     * @param event Timeline event to fetch details for
+     * @return Sample data, or nullopt if type mismatch or not found
+     */
+    [[nodiscard]] std::optional<reader_types::sample_data_t> get_sample_details(
+        const reader_types::timeline_event_t& event) const;
+
+    /**
+     * @brief Get full PMC event details for a timeline event
+     * @param event Timeline event to fetch details for
+     * @return PMC event data, or nullopt if type mismatch or not found
+     */
+    [[nodiscard]] std::optional<reader_types::pmc_event_data_t> get_pmc_event_details(
+        const reader_types::timeline_event_t& event) const;
+
+    /**
+     *@section Event Property Accessors (On-Demand, Related Data)
+     * Fetch additional properties for a specific event.
+     * These perform database queries on demand.
+     */
+
+    /**
+     * @brief Reconstruct the overlapping-region call stack for an event
+     * @param event Timeline event to fetch call stack for
+     * @return Region frames from the event outward to its active callers.
+     *         The event name is the frame function. Optional source context
+     *         from rocpd_event.line_info supplies file and line data. Empty
+     *         for non-region events or an event not in the database.
+     */
+    [[nodiscard]] reader_types::call_stack_t get_call_stack(
+        const reader_types::timeline_event_t& event) const;
+
+    /**
+     * @brief Get source code context for an event
+     * @param event Timeline event to fetch source context for
+     * @return List of source context entries (empty if not available)
+     */
+    [[nodiscard]] reader_types::source_context_list_t get_source_context(
+        const reader_types::timeline_event_t& event) const;
+
+    /**
+     * @brief Get function arguments for an event
+     * @param event Timeline event to fetch arguments for (typically region events)
+     * @return List of argument data (empty if not available)
+     */
+    [[nodiscard]] reader_types::arg_data_list_t get_arguments(
+        const reader_types::timeline_event_t& event) const;
+
+    /**
+     * @brief Get correlated events via stack_id matching
+     * @param event Timeline event to find correlations for
+     * @return List of related events (e.g., CPU region -> GPU kernel correlation)
+     * @note A stack id of 0 does not correlate, and the source event is
+     *       excluded. A region reaches regions, kernel dispatches, memory
+     *       copies, and memory allocations. A kernel dispatch reaches regions
+     *       and kernel dispatches. A memory copy reaches regions and memory
+     *       copies. A memory allocation reaches regions.
+     */
+    [[nodiscard]] reader_types::timeline_event_list_t get_correlated_events(
+        const reader_types::timeline_event_t& event) const;
+
+    /**
+     *@section Summary/Statistics (Aggregate Queries)
+     * Get aggregated statistics for events. These perform GROUP BY queries.
+     */
+    /**
+     * @brief Get aggregated kernel dispatch statistics
+     * @param window Optional time window to filter events
+     * @return List of kernel summary statistics
+     */
+    [[nodiscard]] reader_types::event_summary_list_t get_kernel_summary(
+        const reader_types::time_window_t& window = {}) const;
+
+    /**
+     * @brief Get aggregated region statistics
+     * @param window Optional time window to filter events
+     * @return List of region summary statistics
+     */
+    [[nodiscard]] reader_types::event_summary_list_t get_region_summary(
+        const reader_types::time_window_t& window = {}) const;
+
+    /**
+     *@section Database Metadata
+     * Get metadata about the database.
+     */
+    /**
+     * @brief Get time range of all data in the database
+     * @return Time window spanning all events
+     */
+    /**
+     * @brief Histogram for every track on one shared time grid.
+     * @param max_buckets Upper bound on the number of buckets. Must be non-zero.
+     *        The grid never has more buckets than this. A short trace has fewer.
+     *        Duration tracks count overlapping events and sum the overlap.
+     *        PMC tracks average sample values and hold the last value across
+     *        empty buckets between samples.
+     */
+    [[nodiscard]] reader_types::histogram_t get_histogram(size_t max_buckets = 500) const;
+
+    /** @brief Histogram for this file's tracks on a caller-supplied grid.
+     *         Several sources share one origin and bucket size. */
+    [[nodiscard]] reader_types::histogram_t get_histogram(
+        reader_types::timestamp_ns_t origin,
+        reader_types::timestamp_ns_t bucket_size,
+        size_t                       bucket_count) const;
+
+    [[nodiscard]] reader_types::time_window_t get_data_time_range() const;
+
+    /**
+     * @brief Get total counts of each event type
+     * @param window Optional time window to filter events
+     * @return Counts for each event type
+     */
+    [[nodiscard]] reader_types::event_counts_t get_event_counts(
+        const reader_types::time_window_t& window = {}) const;
+
+    /** @brief Fills @p rows with the next page of table events whose id is in
+     *         (@p after_id, @p last_id]. Returns the number written. A short
+     *         page means there are no further rows. */
+    [[nodiscard]] uint32_t read_table_events(const resolved_event_query& query,
+                                             uint32_t                    event_type,
+                                             uint64_t                    after_id,
+                                             uint64_t                    last_id,
+                                             ph_table_event*             rows,
+                                             uint32_t                    capacity);
+
+    /** @brief Groups matching rows by display name. Returns false when this
+     *         format has no summary query. */
+    [[nodiscard]] bool summarize_name_durations(
+        const resolved_event_query&           query,
+        uint32_t                              event_type,
+        std::vector<name_duration_summary_t>& rows);
+
+    /** @brief Reads the smallest and largest row id of the table that holds
+     *         @p event_type. Returns false if the table is empty. */
+    [[nodiscard]] bool table_event_id_span(uint32_t  event_type,
+                                           uint64_t& first_id,
+                                           uint64_t& last_id);
+
+    /** @brief Read backend for one trace format. Defined inside the library. */
+    struct impl;
+
+private:
+    friend class common::connection;
+    friend void populate_reader_catalog(common::thread_pool&     workers,
+                                        common::connection_pool& connections,
+                                        reader_catalog_t&        catalog);
+
+    // Pooled/shared-catalog construction: `catalog` is shared with sibling
+    // connections in the same pool and may be populated by any of them (see
+    // populate_reader_catalog). Caller guarantees non-null. `format` is the
+    // probed schema and version and selects the read backend.
+    reader_t(std::unique_ptr<profiler_hub::storage_t> storage,
+             std::shared_ptr<reader_catalog_t>        catalog,
+             const reader_types::trace_format_t&      format);
+
+    /**
+     * @brief Independently-buildable metadata categories (see
+     *        reader_catalog_t). Only used by populate_reader_catalog.
+     */
+    enum class catalog_category_t
+    {
+        string_list,
+        nodes,
+        processes,
+        threads,
+        agents,
+        tracks,
+        stream_hardware_links,
+        code_objects,
+        kernel_symbols,
+        streams,
+        queues,
+        pmc_infos,
+    };
+
+    // Builds one category of `catalog` using this reader's own connection.
+    // Caller (populate_reader_catalog) is responsible for respecting the dependency
+    // order documented on reader_catalog_t.
+    void build_catalog_category(catalog_category_t category, reader_catalog_t& catalog);
+
+    void ensure_track_topology_indexes();
+
+    std::unique_ptr<impl> m_impl;
+};
+
+}  // namespace profiler_hub

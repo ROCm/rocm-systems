@@ -3,15 +3,6 @@
 
 #pragma once
 
-#include <cstdint>
-
-namespace profiler_hub
-{
-
-struct version_t
-{
-    uint32_t major;
-    uint32_t minor;
-    uint32_t patch;
-};
-}  // namespace profiler_hub
+// The public C++ headers moved to profiler-hub/cpp. This path remains so
+// existing includes, including rocprofiler-systems, keep compiling.
+#include <profiler-hub/cpp/version.hpp>

@@ -4,9 +4,8 @@
 # Run by `cmake -P` from the add_custom_command in sqlite3.cmake. A COMMAND
 # list cannot branch on a result, so the clone's full-clone retry lives here.
 
-if(CMAKE_HOST_WIN32)
-    # Official pre-built amalgamation zip. No git, nmake, or Tcl.
-    # SQLITE3_GIT_TAG still names the extracted directory inside the zip.
+if(CMAKE_HOST_WIN32 OR NOT SQLITE3_FROM_GIT)
+    # Official pre-built amalgamation zip. No git, make, or Tcl.
     string(REGEX REPLACE "^version-" "" _sqlite3_version "${SQLITE3_GIT_TAG}")
     string(REPLACE "." ";" _sqlite3_version_parts "${_sqlite3_version}")
     list(LENGTH _sqlite3_version_parts _sqlite3_version_len)

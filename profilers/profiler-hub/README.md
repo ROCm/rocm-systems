@@ -17,6 +17,26 @@ This library is part of the [rocm-systems](https://github.com/ROCm/rocm-systems)
 At configure time, profiler-hub clones RocPD schema SQL from `rocm-systems` and
 embeds it as generated C++ headers. No installed `rocprofiler-sdk-rocpd` package
 is required.
+<<<<<<< HEAD
+=======
+
+## Build options
+
+These options apply on Linux and Windows.
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `PROFILER_HUB_BUILD_TESTS` | ON | Build unit tests |
+| `PROFILER_HUB_BUILD_BENCHMARKS` | ON | Build performance benchmarks |
+| `PROFILER_HUB_ENABLE_LOGGING` | OFF | Enable debug logging |
+| `PROFILER_HUB_ENABLE_COVERAGE` | OFF | Enable code coverage instrumentation (requires Debug build, gcov, and lcov or gcovr) |
+| `PROFILER_HUB_FETCH_DEPENDENCIES` | OFF | Download missing dependencies at configure time. Required on Windows when SQLite3 is not already on `CMAKE_PREFIX_PATH` |
+| `SQLITE3_AMALGAMATION_YEAR` | `2024` | sqlite.org release-year folder for the Windows amalgamation download when bumping `SQLITE3_GIT_TAG` |
+
+## Linux
+
+### Requirements
+>>>>>>> origin/develop-optiq
 
 ## Build options
 
@@ -90,7 +110,11 @@ target_link_libraries(your_target PRIVATE profiler-hub::profiler-hub)
 
 ## Windows
 
+<<<<<<< HEAD
 A native MSVC build is supported (CI runs on Linux and Windows). fmt, spdlog, nlohmann_json, GoogleTest, and Google Benchmark are fetched when they are not already installed. SQLite3 is fetched only when `-DPROFILER_HUB_FETCH_DEPENDENCIES=ON` is set.
+=======
+A native MSVC build is supported (CI runs on Linux only). fmt, spdlog, nlohmann_json, GoogleTest, and Google Benchmark are fetched when they are not already installed. SQLite3 is fetched only when `-DPROFILER_HUB_FETCH_DEPENDENCIES=ON` is set.
+>>>>>>> origin/develop-optiq
 
 ### Requirements
 
@@ -167,11 +191,18 @@ profiler-hub targets use distinct base names: `profiler-hub.lib` (import lib, pa
 ### Platform behavior
 
 - **SQLite3:** with `PROFILER_HUB_FETCH_DEPENDENCIES=ON`, Windows downloads the official
+<<<<<<< HEAD
   [amalgamation zip](https://www.sqlite.org/download.html) from `SQLITE3_AMALGAMATION_URL`
   (default matches `SQLITE3_GIT_TAG` `version-3.45.3`), verifies
   `SQLITE3_AMALGAMATION_SHA256` over TLS, and builds `profiler-hub-sqlite3.dll`, which
   exports the SQLite C API. Keep that DLL next to `profiler-hub.dll` (or on `PATH`) at
   run time.
+=======
+  [amalgamation zip](https://www.sqlite.org/download.html) matching `SQLITE3_GIT_TAG`
+  (default `version-3.45.3`, year folder `SQLITE3_AMALGAMATION_YEAR`). It is built as
+  `profiler-hub-sqlite3.dll`, which exports the SQLite C API. Keep that DLL next to
+  `profiler-hub.dll` (or on `PATH`) at run time.
+>>>>>>> origin/develop-optiq
 - **Dependencies:** fmt, spdlog, nlohmann_json, GoogleTest, and Google Benchmark are
   fetched via CMake `FetchContent` when not found on the system.
 - **Language standard:** library, tests, and benchmarks are built as **C++20**.
@@ -196,6 +227,17 @@ find_package(profiler-hub REQUIRED)
 target_link_libraries(your_target PRIVATE profiler-hub::profiler-hub)
 ```
 
+<<<<<<< HEAD
+=======
+`examples/installed-client` is a small program that uses that pattern to write one region and read it back. From that directory, after installing profiler-hub:
+
+```cmd
+cmake -S . -B build -DCMAKE_PREFIX_PATH=C:\opt\profiler-hub
+cmake --build build --config Release
+build\Release\writer-reader-example.exe
+```
+
+>>>>>>> origin/develop-optiq
 Point the consumer at the package with `-DCMAKE_PREFIX_PATH=C:\opt\profiler-hub` or
 `-Dprofiler-hub_DIR=<build-tree>` to use the build tree directly. Ensure
 `profiler-hub.dll` and, when SQLite was fetched, `profiler-hub-sqlite3.dll` are next
