@@ -14,6 +14,29 @@
 extern "C" {
 #endif
 
+// gfx1250 mixed BF16/FP32 FMA: one VGPR per operand, Wave32. MIX_BF16_A/B/C
+// select BF16 in the half selected by ALU_HIGH_A/B/C; other sources are FP32.
+// Supports source ABS/NEG and CLAMP. MIXLO/MIXHI preserve the other D half.
+// Loose, allow-Loose and Compatibility retain the inherited host-FMA model for
+// FP32 output, and compensated FP64 arithmetic with guest BF16 rounding for
+// BF16 output. Strict exact modes are unsupported; FP status is unchanged.
+// Denormal, IEEE and FP16_OVFL controls are accepted and ignored. FP32 output
+// ignores guest rounding. CLAMP maps NaNs to zero.
+int rj_arith_v_fma_mix_f32_bf16_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                    uint32_t *const *d, const uint32_t *const *a,
+                                    const uint32_t *const *b, const uint32_t *const *c,
+                                    uint32_t *excp_flag_user);
+
+int rj_arith_v_fma_mixlo_bf16_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  const uint32_t *const *b, const uint32_t *const *c,
+                                  uint32_t *excp_flag_user);
+
+int rj_arith_v_fma_mixhi_bf16_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  const uint32_t *const *b, const uint32_t *const *c,
+                                  uint32_t *excp_flag_user);
+
 // Fused division post-scaling: compute A*B+C and apply a power-of-two scale
 // before the single guest rounding (RJ_ARITH_FP_ROUND_MASK). A set lane bit in condition (the
 // implicit wave32 VCC input) selects +64/+128 when C's modified encoded exponent
@@ -1684,6 +1707,105 @@ int rj_arith_v_minimum_f64_w32(uint64_t flags, uint32_t exec_mask, uint64_t inst
 int rj_arith_v_maximum_f64_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                uint32_t *const *d, const uint32_t *const *a,
                                const uint32_t *const *b, uint32_t *excp_flag_user);
+
+// Mixed MAD on gfx942/gfx950. Each operand occupies one VGPR, selected per
+// source as FP32 or FP16. Retains an FP32 fused intermediate before optional
+// guest-rounded half narrowing; CLAMP precedes narrowing. Denormal controls and
+// FP32 guest rounding are unused. Low/high outputs preserve the other half.
+// Compatibility retains the fused result even where legacy SIMD split the product and sum.
+// Loose, allow-Loose and Compatibility share this approximation;
+// strict semantics are unsupported. FP status is unused and left unchanged.
+int rj_arith_v_mad_mix_f32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                               uint32_t *const *d, const uint32_t *const *a,
+                               const uint32_t *const *b, const uint32_t *const *c,
+                               uint32_t *trapsts);
+int rj_arith_v_mad_mix_f32_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                               uint32_t *const *d, const uint32_t *const *a,
+                               const uint32_t *const *b, const uint32_t *const *c,
+                               uint32_t *trapsts);
+int rj_arith_v_mad_mixlo_f16_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                 uint32_t *const *d, const uint32_t *const *a,
+                                 const uint32_t *const *b, const uint32_t *const *c,
+                                 uint32_t *trapsts);
+int rj_arith_v_mad_mixlo_f16_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                 uint32_t *const *d, const uint32_t *const *a,
+                                 const uint32_t *const *b, const uint32_t *const *c,
+                                 uint32_t *trapsts);
+int rj_arith_v_mad_mixhi_f16_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                 uint32_t *const *d, const uint32_t *const *a,
+                                 const uint32_t *const *b, const uint32_t *const *c,
+                                 uint32_t *trapsts);
+int rj_arith_v_mad_mixhi_f16_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                 uint32_t *const *d, const uint32_t *const *a,
+                                 const uint32_t *const *b, const uint32_t *const *c,
+                                 uint32_t *trapsts);
+
+// Packed FP32 FMA uses two VGPRs per operand and independent whole-word selectors.
+// RJ_ARITH_PK_* flags select/negate each FP32 result's inputs and optionally clamp.
+// Compatibility inherits rocjitsu's guest rounding, denormal and NaN policy; Loose
+// permits native arithmetic. Strict empirical modes are unsupported; FP status is unused.
+int rj_arith_v_pk_fma_f32_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                     uint32_t *const *d, const uint32_t *const *a,
+                                     const uint32_t *const *b, const uint32_t *const *c,
+                                     uint32_t *trapsts);
+int rj_arith_v_pk_fma_f32_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                     uint32_t *const *d, const uint32_t *const *a,
+                                     const uint32_t *const *b, const uint32_t *const *c,
+                                     uint32_t *trapsts);
+int rj_arith_v_pk_fma_f32_w32_gfx1250(uint64_t flags, uint32_t exec_mask,
+                                      uint64_t instruction_flags, uint32_t *const *d,
+                                      const uint32_t *const *a, const uint32_t *const *b,
+                                      const uint32_t *const *c, uint32_t *excp_flag_user);
+
+// Packed FP32 ADD/MUL have the same paired layout and selectors as packed FMA,
+// excluding C modifiers. Compatibility flushes outputs after FP32 rounding.
+int rj_arith_v_pk_add_f32_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                     uint32_t *const *d, const uint32_t *const *a,
+                                     const uint32_t *const *b, uint32_t *trapsts);
+int rj_arith_v_pk_add_f32_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                     uint32_t *const *d, const uint32_t *const *a,
+                                     const uint32_t *const *b, uint32_t *trapsts);
+int rj_arith_v_pk_add_f32_w32_gfx1250(uint64_t flags, uint32_t exec_mask,
+                                      uint64_t instruction_flags, uint32_t *const *d,
+                                      const uint32_t *const *a, const uint32_t *const *b,
+                                      uint32_t *excp_flag_user);
+int rj_arith_v_pk_mul_f32_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                     uint32_t *const *d, const uint32_t *const *a,
+                                     const uint32_t *const *b, uint32_t *trapsts);
+int rj_arith_v_pk_mul_f32_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                     uint32_t *const *d, const uint32_t *const *a,
+                                     const uint32_t *const *b, uint32_t *trapsts);
+int rj_arith_v_pk_mul_f32_w32_gfx1250(uint64_t flags, uint32_t exec_mask,
+                                      uint64_t instruction_flags, uint32_t *const *d,
+                                      const uint32_t *const *a, const uint32_t *const *b,
+                                      uint32_t *excp_flag_user);
+
+// gfx1250 packed BF16: two halfword results per VGPR, packed source selectors,
+// NEG and CLAMP. Nearest-even arithmetic preserves denormals; FP16_OVFL saturates
+// finite-input overflow. Guest rounding/denormal controls are ignored. Supports
+// Loose, allow-Loose and inherited Compatibility; strict modes are unsupported.
+// Whole-register aliases and EXEC masking are supported; FP status is unused.
+int rj_arith_v_pk_fma_bf16_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                               uint32_t *const *d, const uint32_t *const *a,
+                               const uint32_t *const *b, const uint32_t *const *c,
+                               uint32_t *excp_flag_user);
+
+int rj_arith_v_pk_add_bf16_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                               uint32_t *const *d, const uint32_t *const *a,
+                               const uint32_t *const *b, uint32_t *excp_flag_user);
+
+int rj_arith_v_pk_mul_bf16_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                               uint32_t *const *d, const uint32_t *const *a,
+                               const uint32_t *const *b, uint32_t *excp_flag_user);
+
+// Packed BF16 numeric selection shares the packed arithmetic controls, ignoring
+// FP16_OVFL. A numeric operand wins over a lone quiet or signaling NaN.
+int rj_arith_v_pk_min_num_bf16_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                   uint32_t *const *d, const uint32_t *const *a,
+                                   const uint32_t *const *b, uint32_t *excp_flag_user);
+int rj_arith_v_pk_max_num_bf16_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                   uint32_t *const *d, const uint32_t *const *a,
+                                   const uint32_t *const *b, uint32_t *excp_flag_user);
 
 #ifdef __cplusplus
 } // extern "C"

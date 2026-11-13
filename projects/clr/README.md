@@ -118,6 +118,12 @@ For detailed instructions, please refer to [How to build HIP](https://rocm.docs.
    cmake --build . --config Release -j 6 --target install
    ```
 
+### Build options
+
+| Option | Default | Description |
+| --- | --- | --- |
+| `CLR_ENABLE_WERROR` | `OFF` | Build the CLR targets (`rocclr`, `amdhip64`, and `hiprtc`) with `-Wall -Werror` |
+
 ## Tests
 
 ### HIP
