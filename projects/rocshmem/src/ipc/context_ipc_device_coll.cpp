@@ -701,6 +701,11 @@ __device__ void IPCContext::fcollectmem_linear_wave(rocshmem_team_t team, void *
 
 __device__ void IPCContext::internal_fcollectmem_wg(rocshmem_team_t team, void *dst,
                                                     const void *src, int nelems) {
+  // Unlike GDA's dispatcher, this does not also gate the thread-puts fast
+  // path on team size: it needs 2 * num_pes alltoall_pSync slots, so a
+  // team over 256 PEs would overflow the same way GDA's would. No IPC
+  // hardware today exercises that team size, so the check is not
+  // duplicated here, but keep this in mind if that changes.
 #if defined(USE_SDMA)
   if (nelems < 512 || constmem.ipc_sdma_threshold != SDMA_THRESHOLD_DISABLED)
 #else
