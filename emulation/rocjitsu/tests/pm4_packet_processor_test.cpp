@@ -391,6 +391,23 @@ TEST_F(Pm4PacketProcessorTest, RejectsTruncatedPacketBeforeCallingItsHandler) {
   EXPECT_FALSE(completed);
 }
 
+TEST_F(Pm4PacketProcessorTest, CursorPublicationRetryDoesNotReplayCompletedDma) {
+  constexpr uint32_t kSource = 0x1000;
+  const std::array words{0xc0055000u, 0u, kSource, 0u, kOutput, 0u, 8u};
+  memory->store<uint64_t>(kSource, 0x123456789abcdef0);
+  submit(words, true);
+  memory->make_store_unavailable_once(kReadPointer);
+  EXPECT_EQ(service(), Pm4TestStatus::Blocked);
+  EXPECT_FALSE(completed);
+  EXPECT_FALSE(queue.commands.submissions.front().data_transfer);
+  EXPECT_EQ(memory->load<uint64_t>(kOutput), 0x123456789abcdef0u);
+  memory->store<uint64_t>(kSource, 0);
+  EXPECT_EQ(service(), Pm4TestStatus::Ready);
+  EXPECT_TRUE(completed);
+  EXPECT_EQ(memory->load<uint64_t>(kOutput), 0x123456789abcdef0u);
+  EXPECT_EQ(memory->load<uint32_t>(kReadPointer), words.size());
+}
+
 TEST_F(Pm4PacketProcessorTest, RetiresSupportedNopEncodings) {
   const std::array words{0x80000000u, 0xc0001000u, 0u, 0xffff1000u};
   submit(words, true);

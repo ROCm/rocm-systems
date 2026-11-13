@@ -6,6 +6,7 @@
 /// @file
 /// @brief PM4 packets, shader registers and submission lifetime state.
 
+#include "rocjitsu/vm/amdgpu/pm4/pm4_data_transfer.h"
 #include "util/diagnostic.h"
 #include "util/result.h"
 
@@ -16,6 +17,7 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <vector>
 
 namespace rocjitsu::amdgpu {
@@ -147,6 +149,8 @@ struct Pm4Submission {
   bool graphics_engine = false;
   bool allow_dispatch = true; ///< AQL vendor IBs disable this to reject shader launches.
   std::deque<Pm4IndirectBuffer> buffers;
+  /// Admitted data packet; its owned effect must finish before another packet.
+  std::optional<Pm4DataTransfer> data_transfer;
   uint32_t indirect_expansions = 0;
   static constexpr uint32_t kMaxIndirectDepth = 64;
   static constexpr uint32_t kMaxIndirectExpansions = 4096;

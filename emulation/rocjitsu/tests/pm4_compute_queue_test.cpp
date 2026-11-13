@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "aql_queue.h"
+#include "async_vm_test_support.h"
 #include "config_test_util.h"
 #include "rocjitsu/config/config_loader.h"
 #include "rocjitsu/vm/amdgpu/command_processor.h"
@@ -738,6 +739,36 @@ TEST_F(Pm4ComputeQueueTest, ProducerCompletionWakesEarlierConsumerPromptly) {
   // Completing both submissions may request one final retry, but superseded
   // long deadlines must not enter the CP handler after all work is retired.
   EXPECT_LE(cp->doorbell_handle_count_for_test() - passes, 1u);
+}
+
+TEST_F(Pm4ComputeQueueTest, CancelsDeferredDataBeforeTheCompletionCallback) {
+  test::AsyncVmHarness owner;
+  auto deferred = std::make_shared<test::AsyncVmMemory>(*owner.owner, 0x4000, 0x1000, 0x2000);
+  const auto deferred_space = gpu_vm.register_translated(2, deferred, deferred);
+  ASSERT_TRUE(deferred_space);
+  ASSERT_TRUE(
+      cp->register_drm_queue({.address_space = deferred_space, .process_id = 2, .queue_id = 1}));
+  const std::array words{0xc0033700u, 5u << 8, 0x1000u, 0u, 0xdeadbeefu};
+  deferred->store(kRing, std::as_bytes(std::span(words)));
+  uint32_t completions = 0;
+  Pm4Submission submission;
+  submission.buffers.push_back({.address = kRing, .dwords = words.size()});
+  submission.complete = [&](bool success) {
+    EXPECT_FALSE(success);
+    EXPECT_EQ(deferred->backing->cancellations, 1u);
+    ++completions;
+  };
+  ASSERT_TRUE(cp->submit_pm4(1, 2, std::move(submission)));
+  while (!deferred->backing->posts && !completions)
+    ASSERT_TRUE(engine->step());
+  ASSERT_EQ(completions, 0u);
+  ASSERT_EQ(deferred->backing->posts, 1u);
+  EXPECT_EQ(deferred->backing->write_effects, 0u);
+  cp->unregister_drm_queue(1, 2);
+  EXPECT_EQ(completions, 1u);
+  (void)owner.engine.step();
+  EXPECT_EQ(deferred->backing->write_effects, 0u);
+  EXPECT_EQ(completions, 1u);
 }
 
 TEST_F(Pm4ComputeQueueTest, BoundsEachQueueServiceTurn) {

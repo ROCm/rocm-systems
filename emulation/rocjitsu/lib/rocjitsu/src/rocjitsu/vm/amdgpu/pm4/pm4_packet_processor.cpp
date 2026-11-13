@@ -74,6 +74,14 @@ void process_pm4_packets(ComputeQueueRecord &queue, GpuVm *gpu_vm,
     if (!queue.command_access)
       queue.command_access = gpu_vm->snapshot_pinned(queue.address_space);
     const auto &access = queue.command_access;
+    const auto retire_root_packet = [&](uint64_t cursor, uint32_t ring_bytes) {
+      if (!ring_bytes)
+        return VmAccessOutcome::Complete;
+      // Nested IBs never advance the root ring. The journal retains the
+      // stream's snapshot until this packet's writeback is durable.
+      queue.read_pointer_journal.retire(cursor, cursor % (ring_bytes / 4), *access);
+      return queue.read_pointer_journal.publish();
+    };
     // Bound one event's packet work, including IB chains.
     const uint32_t packet_budget = queue.submission_queue ? 4096 : 256;
     for (uint32_t budget = 0; budget < packet_budget && !state.submissions.empty(); ++budget) {
@@ -96,6 +104,30 @@ void process_pm4_packets(ComputeQueueRecord &queue, GpuVm *gpu_vm,
         return fail("PM4 read pointer publication failed");
       }
       auto &submission = state.submissions.front();
+      if (submission.data_transfer) {
+        auto &transfer = *submission.data_transfer;
+        const auto outcome = transfer.resume(*access);
+        if (outcome == VmAccessOutcome::Unavailable) {
+          context.retry();
+          return util::Result::success();
+        }
+        if (outcome != VmAccessOutcome::Complete)
+          return fail(transfer.failure_message());
+        const uint64_t cursor = transfer.root_cursor;
+        const uint32_t ring_bytes = transfer.root_ring_bytes;
+        // The data effect is complete even if cursor publication must retry.
+        submission.data_transfer.reset();
+        const auto retired = retire_root_packet(cursor, ring_bytes);
+        if (retired == VmAccessOutcome::Unavailable) {
+          context.retry();
+          return util::Result::success();
+        }
+        if (retired != VmAccessOutcome::Complete) {
+          queue.publication_faulted = true;
+          return fail("PM4 read pointer publication failed");
+        }
+        continue;
+      }
       if (submission.ready) {
         util::StringDiagnostic diagnostic;
         util::FailureOr<bool> ready = submission.ready(diagnostic.emitter());
@@ -314,9 +346,10 @@ void process_pm4_packets(ComputeQueueRecord &queue, GpuVm *gpu_vm,
           return fail("unsupported WRITE_DATA destination");
         if (flush_caches().failed())
           return util::Result::failure();
-        if (access->write(address(1), {reinterpret_cast<const std::byte *>(words.data() + 3),
-                                       (words.size() - 3) * 4}) != VmAccessOutcome::Complete)
-          return fail("PM4 WRITE_DATA failed");
+        const auto bytes = std::as_bytes(std::span(words).subspan(3));
+        submission.data_transfer.emplace(
+            std::nullopt, address(1), std::vector<std::byte>(bytes.begin(), bytes.end()),
+            root_cursor, root_ring_bytes, nullptr, "PM4 WRITE_DATA failed");
         break;
       }
       case Pm4Opcode::AtomicMem: {
@@ -406,16 +439,15 @@ void process_pm4_packets(ComputeQueueRecord &queue, GpuVm *gpu_vm,
           value = address(1);
         else if (source == 9)
           value = gpu_timestamp(context.arch);
-        else if (source == 1 || source == 2) {
-          if (access->read(address(1), {reinterpret_cast<std::byte *>(&value), bytes}) !=
-              VmAccessOutcome::Complete)
-            return fail("PM4 COPY_DATA read failed");
-        } else {
+        else if (source != 1 && source != 2) {
           return fail("unsupported COPY_DATA source");
         }
-        if (access->write(address(3), {reinterpret_cast<const std::byte *>(&value), bytes}) !=
-            VmAccessOutcome::Complete)
-          return fail("PM4 COPY_DATA write failed");
+        std::vector<std::byte> data(bytes);
+        std::memcpy(data.data(), &value, bytes);
+        submission.data_transfer.emplace(
+            source == 1 || source == 2 ? std::optional<uint64_t>(address(1)) : std::nullopt,
+            address(3), std::move(data), root_cursor, root_ring_bytes, "PM4 COPY_DATA read failed",
+            "PM4 COPY_DATA write failed");
         break;
       }
       case Pm4Opcode::WaitRegMem: {
@@ -749,21 +781,17 @@ void process_pm4_packets(ComputeQueueRecord &queue, GpuVm *gpu_vm,
           return fail("unsupported PM4 DMA destination");
         if (flush_caches().failed())
           return util::Result::failure();
-        if (src_select == 2) {
-          std::vector<uint8_t> data(bytes);
-          for (uint32_t i = 0; i < bytes; ++i)
-            data[i] = words[1] >> ((i % 4) * 8);
-          if (access->write(address(3), std::as_bytes(std::span(data))) !=
-              VmAccessOutcome::Complete)
-            return fail("PM4 DMA fill failed");
-        } else if (src_select == 0 || src_select == 3) {
-          std::vector<std::byte> data(bytes);
-          if (access->read(address(1), data) != VmAccessOutcome::Complete ||
-              access->write(address(3), data) != VmAccessOutcome::Complete)
-            return fail("PM4 DMA copy failed");
-        } else {
+        if (src_select != 0 && src_select != 2 && src_select != 3)
           return fail("unsupported PM4 DMA source");
+        std::vector<std::byte> data(bytes);
+        if (src_select == 2) {
+          for (uint32_t i = 0; i < bytes; ++i)
+            data[i] = static_cast<std::byte>(words[1] >> ((i % 4) * 8));
         }
+        const char *failure = src_select == 2 ? "PM4 DMA fill failed" : "PM4 DMA copy failed";
+        submission.data_transfer.emplace(
+            src_select == 2 ? std::nullopt : std::optional<uint64_t>(address(1)), address(3),
+            std::move(data), root_cursor, root_ring_bytes, failure, failure);
         break;
       }
       case Pm4Opcode::IndirectBuffer: {
@@ -829,12 +857,10 @@ void process_pm4_packets(ComputeQueueRecord &queue, GpuVm *gpu_vm,
       default:
         return fail(std::format("unsupported PM4 opcode {:#x}", opcode));
       }
+      if (submission.data_transfer)
+        continue;
       if (root_ring_bytes) {
-        // An IB enters a child frame; only the root packet advances the root ring.
-        // The journal retains this stream's snapshot until writeback is durable.
-        uint64_t retired = root_cursor;
-        queue.read_pointer_journal.retire(retired, retired % (root_ring_bytes / 4), *access);
-        const auto published = queue.read_pointer_journal.publish();
+        const auto published = retire_root_packet(root_cursor, root_ring_bytes);
         if (published == VmAccessOutcome::Unavailable) {
           context.retry();
           return util::Result::success();

@@ -6195,33 +6195,15 @@ int SimulatedKfd::dispatch_munmap(KfdProcess &proc, void *addr, size_t length,
     if (it == proc.allocations_.end()) {
       const auto retired =
           std::ranges::find_if(proc.retired_identity_views_, [&](const auto &view) {
-            return view.gpu_va == reinterpret_cast<uintptr_t>(addr) && view.mapped_bytes == length;
+            return view.gpu_va < end && start < view.gpu_va + view.mapped_bytes;
           });
       if (retired == proc.retired_identity_views_.end())
         return -ENOENT;
       if (safe_munmap(addr, length) != 0)
         return -errno;
+      clear_host_svm_policy_after_change_locked(proc, start, *unmapped_span);
       if (on_host_vma_change)
         on_host_vma_change();
-      // FREE denied the old BO while its caller-owned fixed CPU view remained
-      // mapped. Once that view is gone, a future host allocation may reuse the
-      // address as ordinary identity memory. A failed publication keeps denial.
-      try {
-        auto previous = proc.retired_gpu_ranges_;
-        auto previous_denials = proc.svm_denied_ranges_;
-        auto previous_access = proc.svm_access_ranges_;
-        try {
-          proc.claim_gpu_range_locked(retired->gpu_va, retired->mapped_bytes);
-          proc.publish_gpu_grants_locked();
-          proc.retired_identity_views_.erase(retired);
-        } catch (...) {
-          proc.retired_gpu_ranges_.swap(previous);
-          proc.svm_denied_ranges_.swap(previous_denials);
-          proc.svm_access_ranges_.swap(previous_access);
-        }
-      } catch (...) {
-        // Leave the tombstone published if its rollback snapshot cannot be made.
-      }
       return 0;
     }
     const auto &alloc = it->second;
@@ -7018,7 +7000,7 @@ int SimulatedKfd::free_memory_ioctl(
                  reinterpret_cast<uintptr_t>(view.ptr) == freed.gpu_va && view.size == freed.size;
         });
     const bool retired_fixed_identity_view =
-        !daemon_mode_ && freed.user_va && !freed.imported && !freed.backing_owner &&
+        !daemon_mode_ && freed.user_va && !freed.imported &&
         (kind == KFD_IOC_ALLOC_MEM_FLAGS_VRAM || kind == KFD_IOC_ALLOC_MEM_FLAGS_GTT) &&
         (primary_fixed_identity_view || client_fixed_identity_view);
     if (retired_fixed_identity_view) {
