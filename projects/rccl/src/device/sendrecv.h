@@ -100,6 +100,51 @@ struct RunWorkBatch<ncclFuncSendRecv, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_SIMPL
     } while (cursor < count);
   }
 
+  // A Direct AllGather slice copied to its owner. The peers receive it through runRecvNaN with every all-ones
+  // dword the arrival test reads (each dword, or each f64's high dword) lowered to 0xFFFFFFFE, so the owner's copy
+  // takes the same escape. Dwords count from the part start, which is 8-byte aligned in the slice.
+  __device__ void runCopyNaN(int tid, int tn, struct ncclDevWorkP2p* work) {
+    const size_t bytes = work->sendBytes;
+    const bool f64 = work->sendNanF64;
+    const uintptr_t align = (uintptr_t)work->sendAddr | (uintptr_t)work->recvAddr;
+    size_t dwordBeg = 0;
+    if (align % 16 == 0) {
+      const uint4* src = (const uint4*)work->sendAddr;
+      uint4* dst = (uint4*)work->recvAddr;
+      for (size_t i = tid; i < bytes / 16; i += tn) {
+        uint4 v = src[i];
+        if (!f64) v.x = min(v.x, 0xFFFFFFFEu);
+        v.y = min(v.y, 0xFFFFFFFEu);
+        if (!f64) v.z = min(v.z, 0xFFFFFFFEu);
+        v.w = min(v.w, 0xFFFFFFFEu);
+        dst[i] = v;
+      }
+      dwordBeg = bytes / 16 * 4;
+    }
+    if (align % 4 == 0) {
+      const uint32_t* src = (const uint32_t*)work->sendAddr;
+      uint32_t* dst = (uint32_t*)work->recvAddr;
+      for (size_t i = dwordBeg + tid; i < bytes / 4; i += tn) {
+        dst[i] = f64 && i % 2 == 0 ? src[i] : min(src[i], 0xFFFFFFFEu);
+      }
+    } else {
+      // f16 and bf16 slices can sit on 2-byte boundaries.
+      const uint16_t* src = (const uint16_t*)work->sendAddr;
+      uint16_t* dst = (uint16_t*)work->recvAddr;
+      for (size_t i = tid; i < bytes / 4; i += tn) {
+        uint16_t lo = src[2 * i];
+        const uint16_t hi = src[2 * i + 1];
+        if (lo == 0xFFFF && hi == 0xFFFF) lo = 0xFFFE;
+        dst[2 * i] = lo;
+        dst[2 * i + 1] = hi;
+      }
+    }
+    // An odd trailing half never fills a dword, and the wire pads it with zeros.
+    if (tid == 0 && bytes % 4 != 0) {
+      ((uint16_t*)work->recvAddr)[bytes / 2 - 1] = ((const uint16_t*)work->sendAddr)[bytes / 2 - 1];
+    }
+  }
+
 #if defined(USE_INDIRECT_FUNCTION_CALL) && !defined(__gfx942__) && !defined(__gfx950__) && (!defined(__gfx1250__) && !defined(__gfx1250_strict__))
   __device__ void run(){
 #else
@@ -213,7 +258,11 @@ struct RunWorkBatch<ncclFuncSendRecv, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_SIMPL
     }
   }
 
-  if (isCopy) {
+  bool nanCopy = false;
+  if constexpr (UserRegMode == 2) nanCopy = isCopy && work->sendNan;
+  if (nanCopy) {
+    runCopyNaN(subtid, subtn, work);
+  } else if (isCopy) {
 #if defined(__gfx942__) || defined(__gfx950__) || (defined(__gfx1250__) || defined(__gfx1250_strict__))
     reduceCopy<COLL_UNROLL * 2, 0, RedOp, T, 0, 1, 1, 0, 1, 1, /*PreOpSrcs=*/0>(
       subtid, subtn, 0, false, 1, &work->sendAddr, 1, &work->recvAddr, (ssize_t)work->sendBytes);

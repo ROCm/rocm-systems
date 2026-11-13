@@ -1390,6 +1390,7 @@ static void rcclFillSharedParentInfo(struct ncclPeerInfo* info, struct ncclComm*
   info->ibGdrFlushFlag = info->ibGdrFlushFlag && parent->ibGdrFlushFlag;
   info->sharedLl128BuffSize = parent->buffSizes[NCCL_PROTO_LL128];
   info->sharedP2pLl128BuffSize = parent->p2pLl128BuffSize;
+  info->sharedNanBuffSize = parent->buffSizes[NCCL_PROTO_NAN];
 }
 
 // Every rank sets up its net receives and picks algorithms on its own, so RCCL_IB_GDR_FLUSH_FLAG is on
@@ -1658,9 +1659,9 @@ static ncclResult_t computeBuffSizes(struct ncclComm* comm) {
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
   if (envs[NCCL_PROTO_LL128] == -2) rcclScaleCollLl128BuffSize(comm);
 #endif
-  // A rank sharing its parent's proxy must use the LL128 sizes that proxy sized and strides its net buffers with,
-  // and every other rank must match them: the sizes set connection strides and algorithm choices (an ncclCommGrow
-  // mixes such ranks with new ranks that have no parent). Take this rank's own, else the lowest rank's.
+  // A rank sharing its parent's proxy must use the LL128 and NaN sizes that proxy sized and strides its net buffers
+  // with, and every other rank must match them: the sizes set connection strides and algorithm choices (an
+  // ncclCommGrow mixes such ranks with new ranks that have no parent). Take this rank's own, else the lowest rank's.
   if (comm->peerInfo) {
     const ncclPeerInfo* self = comm->peerInfo + comm->rank;
     const ncclPeerInfo* shared = self->sharedLl128BuffSize > 0 ? self : nullptr;
@@ -1670,6 +1671,7 @@ static ncclResult_t computeBuffSizes(struct ncclComm* comm) {
     if (shared) {
       comm->buffSizes[NCCL_PROTO_LL128] = shared->sharedLl128BuffSize;
       comm->p2pLl128BuffSize = shared->sharedP2pLl128BuffSize;
+      comm->buffSizes[NCCL_PROTO_NAN] = shared->sharedNanBuffSize;
     }
   }
 

@@ -68,7 +68,9 @@ __device__ __attribute__((noinline)) void runRing(int tid, int nthreads, struct 
       rankDest = ringRanks[0];
       offset = dataOffset + rankDest * count;
 
-      if ((inputBuf + dataOffset == outputBuf + offset) || isNetOffload) { // In place or onePPN
+      // NaN escapes what it sends, so in place the owner's slice must still take the escaped copy.
+      const bool inPlace = inputBuf + dataOffset == outputBuf + offset && Proto::Id != NCCL_PROTO_NAN;
+      if (inPlace || isNetOffload) { // In place or onePPN
         prims.directSend(dataOffset, offset, nelem);
       } else {
         prims.directCopySend(dataOffset, offset, nelem);

@@ -661,10 +661,9 @@ void rcclUpdateThreadThreshold(struct ncclComm* comm, size_t const& nBytes, stru
     userChannelControlInput = !inputStr ? 0 : 1;
   }
 
-  // minMaxLLRange only has rows for the latency protocols (NCCL_NUM_PROTOCOLS - 1),
-  // so Simple and anything added after it index past the end.
-  if (!userChannelControlInput && comm->nNodes >= 2 && info->protocol >= 0 &&
-      info->protocol < NCCL_NUM_PROTOCOLS - 1 &&
+  // minMaxLLRange is tuned for LL and LL128 only.
+  if (!userChannelControlInput && comm->nNodes >= 2 &&
+      (info->protocol == NCCL_PROTO_LL || info->protocol == NCCL_PROTO_LL128) &&
       (info->func == ncclFuncReduceScatter || info->func == ncclFuncAllGather)) {
     auto tunableIndex = rcclGetTunableIndex(info->func);
     auto tunedThreshold = comm->minMaxLLRange[tunableIndex][info->protocol][RCCL_PROTOCOL_THREAD_THRESHOLD_IDX];
@@ -743,7 +742,7 @@ ncclResult_t rcclHierarchicalAlgoInfo(struct ncclComm* comm, ncclFunc_t coll, ui
   size_t intraCount = count * nNodes;
   size_t intraMsgSize = intraCount * ncclTypeSize(dataType) * intraComm->nRanks;
   if (isAllGather && rcclUseAllGatherDirect(intraComm, intraMsgSize)) {
-    intraProto = rcclNanProtoForcedFor(intraComm->nRanks, dataType) ? NCCL_PROTO_NAN : NCCL_PROTO_SIMPLE;
+    intraProto = rcclNanProtoForcedFor(intraComm, dataType) ? NCCL_PROTO_NAN : NCCL_PROTO_SIMPLE;
     intraChan = intraComm->p2pnChannels;
   } else {
     struct ncclTaskColl task = {};
@@ -776,7 +775,9 @@ ncclResult_t rcclGetAlgoInfo(struct ncclComm* comm, ncclFunc_t coll, uint64_t co
   }
   if (coll == ncclFuncAllGather && rcclUseAllGatherDirect(comm, msgSize)) {
     *algo = rcclAddonAlgos_t::RCCL_DIRECT_ALLGATHER;
-    *protocol = rcclNanProtoFor(comm, coll, dataType, msgSize) ? NCCL_PROTO_NAN : NCCL_PROTO_SIMPLE;
+    // Across nodes Direct AllGather stays off NaN (addP2pToPlan).
+    *protocol =
+      comm->nNodes == 1 && rcclNanProtoFor(comm, coll, dataType, msgSize) ? NCCL_PROTO_NAN : NCCL_PROTO_SIMPLE;
     *maxChannels = comm->p2pnChannels;
     return ncclSuccess;
   }
@@ -2409,8 +2410,7 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
         size_t intraCount = sendcount * nNodes;
         size_t intraMsgSize = intraCount * typeSize * intraComm->nRanks;
         if (rcclUseAllGatherDirect(intraComm, intraMsgSize)) {
-          intraProto =
-            rcclNanProtoForcedFor(intraComm->nRanks, datatype) ? NCCL_PROTO_NAN : NCCL_PROTO_SIMPLE;
+          intraProto = rcclNanProtoForcedFor(intraComm, datatype) ? NCCL_PROTO_NAN : NCCL_PROTO_SIMPLE;
           intraChan = intraComm->p2pnChannels;
         } else {
           // Zero-initialized: getAlgoInfo now reads task.algMask/forceAlgSelection.
@@ -2508,7 +2508,7 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
   // (5) Direct AllGather (per-peer Send/Recv).
   if (rcclUseAllGatherDirect(comm, msgSize)) {
     decision->algo = RCCL_DIRECT_ALLGATHER;
-    decision->protocol = nanForced ? NCCL_PROTO_NAN : NCCL_PROTO_SIMPLE;
+    decision->protocol = nanForced && comm->nNodes == 1 ? NCCL_PROTO_NAN : NCCL_PROTO_SIMPLE;
     decision->nMaxChannels = comm->p2pnChannels;
     return rcclSelectDone("AG", query, decision);
   }
@@ -3390,16 +3390,17 @@ void rcclSetDefaultBuffSizes(struct ncclComm* comm, int defaultBuffSizes[]) {
   // kernel's thread count after the fact and a step slot smaller than
   // nthreads*ELEMS_PER_THREAD words would let a warp's slice run off the end.
   //
-  // The protocol is opt-in -- updateCollCostTable() ignores it unless NCCL_PROTO
-  // names it or RCCL_NAN_PROTO_AUTO applies -- so a comm that never asks for it
-  // keeps the one-slice minimum instead of paying the deep FIFO's few MiB on every connection.
-  const char* nanProtoEnv = ncclGetEnv("NCCL_PROTO");
-  int nanElemsPerThread = (nanProtoEnv && strcasestr(nanProtoEnv, "nan")) || rcclNanProtoAutoTuned(comm)
-                            ? NCCL_NAN_STEP_ELEMS_PER_THREAD
-                            : NCCL_NAN_ELEMS_PER_THREAD;
+  // The protocol is opt-in, so a comm that NCCL_PROTO=NaN or RCCL_NAN_PROTO_AUTO does not cover gets no NaN
+  // FIFO and never picks NaN (rcclNanProtoFor).
+  if (!rcclNanProtoForced() && !rcclNanProtoAutoTuned(comm)) {
+    defaultBuffSizes[NCCL_PROTO_NAN] = 0;
+    return;
+  }
+  int nanElemsPerThread = NCCL_NAN_STEP_ELEMS_PER_THREAD;
 #if ENABLE_TDM_NAN
-  if (nanElemsPerThread == NCCL_NAN_STEP_ELEMS_PER_THREAD && comm->nanTdmMinBytes >= 0)
+  if (comm->nanTdmMinBytes >= 0) {
     nanElemsPerThread = NCCL_NAN_TDM_STEP_ELEMS_PER_THREAD;
+  }
 #endif
   defaultBuffSizes[NCCL_PROTO_NAN] = nanElemsPerThread * NCCL_MAX_NTHREADS * NCCL_STEPS * sizeof(uint64_t);
 }

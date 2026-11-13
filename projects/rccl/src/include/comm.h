@@ -660,6 +660,8 @@ struct ncclPeerInfo {
   // none. Every rank of the comm adopts them (computeBuffSizes). Append later fields after these.
   int sharedLl128BuffSize;
   int sharedP2pLl128BuffSize;
+  // [RCCL] That proxy's NaN buffer size, adopted with the LL128 sizes. It may be 0.
+  int sharedNanBuffSize;
 };
 
 typedef enum ncclGroupTaskType {
@@ -1361,10 +1363,30 @@ static inline bool rcclNanProtoAutoWins(const struct ncclComm* comm, ncclFunc_t 
 // Whether this collective runs the NaN-flag protocol where it has a NaN path: under NCCL_PROTO=NaN
 // always, under RCCL_NAN_PROTO_AUTO=1 only inside rcclNanProtoAutoWins. bytes is the collective's
 // total size: count * element size, times nRanks for AllGather, ReduceScatter and AlltoAll.
+// A comm whose NaN FIFO is empty (NCCL_NAN_BUFFSIZE=0, or a parent's proxy that sized none) never picks it.
 static inline bool rcclNanProtoFor(const struct ncclComm* comm, ncclFunc_t func, ncclDataType_t datatype,
                                    size_t bytes) {
-  if (comm->nRanks <= 1 || !rcclNanProtoDtype(datatype)) return false;
+  if (comm->nRanks <= 1 || comm->buffSizes[NCCL_PROTO_NAN] <= 0 || !rcclNanProtoDtype(datatype)) return false;
   return rcclNanProtoForced() || (rcclNanProtoAutoTuned(comm) && rcclNanProtoAutoWins(comm, func, bytes));
+}
+
+// rcclNanProtoFor without the RCCL_NAN_PROTO_AUTO windows: only NCCL_PROTO=NaN.
+static inline bool rcclNanProtoForcedFor(const struct ncclComm* comm, ncclDataType_t datatype) {
+  return comm->nRanks > 1 && comm->buffSizes[NCCL_PROTO_NAN] > 0 && rcclNanProtoForced() &&
+         rcclNanProtoDtype(datatype);
+}
+
+// Whether a planned task must run on a NaN kernel. An AllGather keeps its float dtype past task
+// append only when NaN was chosen for it there, and no other protocol has a float AllGather kernel,
+// so its dtype is the decision; aggregation can grow it past the window it was chosen in.
+static inline bool rcclNanProtoOnly(const struct ncclComm* comm, ncclFunc_t func, ncclDataType_t datatype,
+                                    size_t bytes) {
+  if (!rcclNanProtoFunc(func)) return false;
+  if (func == ncclFuncAllGather) {
+    return comm->nRanks > 1 && comm->buffSizes[NCCL_PROTO_NAN] > 0 && rcclNanProtoDtype(datatype) &&
+           (rcclNanProtoForced() || rcclNanProtoAutoTuned(comm));
+  }
+  return rcclNanProtoFor(comm, func, datatype, bytes);
 }
 
 // Whether the protocol is decided for this collective: the user named a protocol
@@ -1373,7 +1395,7 @@ static inline bool rcclNanProtoFor(const struct ncclComm* comm, ncclFunc_t func,
 static inline bool rcclProtoPinned(const struct ncclComm* comm, ncclFunc_t func, ncclDataType_t datatype,
                                    size_t bytes) {
   static const bool named = rcclTunerProtoEnv() != nullptr;
-  return named || (rcclNanProtoFor(comm, func, datatype, bytes) && rcclNanProtoFunc(func));
+  return named || rcclNanProtoOnly(comm, func, datatype, bytes);
 }
 
 ncclResult_t ncclCommEnsureReady(ncclComm_t comm);

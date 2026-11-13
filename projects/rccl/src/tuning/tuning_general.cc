@@ -126,8 +126,9 @@ ncclResult_t ncclTuningSetThreadThresholds(struct ncclComm* comm) {
     // NCCL_THREAD_THRESHOLDS only names LL/LL128/Simple; -2 keeps every unnamed
     // protocol (including NaN) on its default instead of being zeroed.
     ssize_t t[2][NCCL_NUM_PROTOCOLS];
-    for (int a = 0; a < 2; a++)
+    for (int a = 0; a < 2; a++) {
       for (int p = 0; p < NCCL_NUM_PROTOCOLS; p++) t[a][p] = -2;
+    }
     sscanf(str, "%ld %ld %ld %ld %ld %ld", t[0], t[0] + 1, t[0] + 2, t[1], t[1] + 1, t[1] + 2);
     for (int a = 0; a < 2; a++) {
       for (int p = 0; p < NCCL_NUM_PROTOCOLS; p++) {

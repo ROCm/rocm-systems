@@ -1360,9 +1360,11 @@ static ncclResult_t sendProxyConnect(struct ncclProxyConnection* connection, str
 
   if (resources->shared == 0) { // Only allocate dedicated buffers for ring/tree, not for p2p
     for (int p = 0; p < NCCL_NUM_PROTOCOLS; p++) {
-      NCCL_NET_MAP_ADD_POINTER(map, 0, p != NCCL_PROTO_LL && resources->useGdr ? 1 : 0,
-                               netBuffSize(proxyState, resources->isP2p, p), buffs[p]);
       resources->buffSizes[p] = netBuffSize(proxyState, resources->isP2p, p);
+      // An empty buffer (the NaN FIFO of a comm not using NaN) gets no pointer, so it is never registered.
+      if (resources->buffSizes[p] == 0) continue;
+      NCCL_NET_MAP_ADD_POINTER(map, 0, p != NCCL_PROTO_LL && resources->useGdr ? 1 : 0, resources->buffSizes[p],
+                               buffs[p]);
     }
   } else {
     // Get shared buffers
@@ -1624,9 +1626,9 @@ static ncclResult_t recvProxyConnect(struct ncclProxyConnection* connection, str
 
   if (resources->shared == 0) { // Only allocate dedicated buffers for ring/tree, not for p2p
     for (int p = 0; p < NCCL_NUM_PROTOCOLS; p++) {
-      NCCL_NET_MAP_ADD_POINTER(map, 0, resources->useGdr ? 1 : 0, netBuffSize(proxyState, resources->isP2p, p),
-                               buffs[p]);
       resources->buffSizes[p] = netBuffSize(proxyState, resources->isP2p, p);
+      if (resources->buffSizes[p] == 0) continue;
+      NCCL_NET_MAP_ADD_POINTER(map, 0, resources->useGdr ? 1 : 0, resources->buffSizes[p], buffs[p]);
     }
   } else {
     // Get shared buffers

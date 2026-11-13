@@ -29,6 +29,7 @@ THE SOFTWARE.
 #include "sym_kernels.h"
 #include <cstdlib>
 #include <cstring>
+#include <strings.h>
 
 // NaN-flag protocol (prims_nan.h). Readiness is "no element is NaN", so it is
 // only meaningful for these dtypes. Keep the list in sync with nan_tys in
@@ -45,16 +46,14 @@ static inline bool rcclNanProtoDtype(ncclDataType_t datatype) {
   }
 }
 
-// Exact match. NCCL_PROTO=LL,NaN must not skip the AllGather int8 collapse or
-// move AlltoAll's send/recv onto the NaN-flag protocol.
+// Exact match, ignoring case as the NCCL_PROTO parser does. NCCL_PROTO=LL,NaN must not
+// skip the AllGather int8 collapse or move AlltoAll's send/recv onto the NaN-flag protocol.
 static inline bool rcclNanProtoForced() {
-  const char* proto = ncclGetEnv("NCCL_PROTO");
-  return proto != nullptr && strcmp(proto, "NaN") == 0;
-}
-
-// More than one rank, float dtype, and the user named NaN.
-static inline bool rcclNanProtoForcedFor(int nRanks, ncclDataType_t datatype) {
-  return nRanks > 1 && rcclNanProtoForced() && rcclNanProtoDtype(datatype);
+  static const bool forced = [] {
+    const char* proto = ncclGetEnv("NCCL_PROTO");
+    return proto != nullptr && strcasecmp(proto, "NaN") == 0;
+  }();
+  return forced;
 }
 
 // Collectives with a NaN kernel: AllReduce (ring and tree), ring AllGather and
@@ -76,7 +75,8 @@ static inline bool rcclNanProtoFunc(ncclFunc_t func) {
 }
 
 // NCCL_PROTO=NaN forces NaN only where a NaN kernel can run; everything else
-// (other collectives, other dtypes) keeps the default protocol set. So the protocol tuners parse NCCL_PROTO only when it names something else.
+// (other collectives, other dtypes) keeps the default protocol set. So the
+// protocol tuners parse NCCL_PROTO only when it names something else.
 static inline const char* rcclTunerProtoEnv() {
   return rcclNanProtoForced() ? nullptr : ncclGetEnv("NCCL_PROTO");
 }

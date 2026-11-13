@@ -1761,15 +1761,16 @@ ncclResult_t mockRingLlTunerGetCollInfo(void* /*context*/, ncclFunc_t /*collType
                                         int /*numPipeOps*/, float** collCostTable, int numAlgo, int numProto,
                                         int /*regBuff*/, int* nChannels)
 {
-    float (*table)[NCCL_NUM_PROTOCOLS] = (float (*)[NCCL_NUM_PROTOCOLS])collCostTable;
+    // Rows are numProto wide: the plugin ABI's protocol count, not the core's.
+    float* table = (float*)collCostTable;
     for(int a = 0; a < numAlgo; ++a)
     {
         for(int p = 0; p < numProto; ++p)
         {
-            table[a][p] = NCCL_ALGO_PROTO_IGNORE;
+            table[a * numProto + p] = NCCL_ALGO_PROTO_IGNORE;
         }
     }
-    table[NCCL_ALGO_RING][NCCL_PROTO_LL] = 0.0;
+    table[NCCL_ALGO_RING * numProto + NCCL_PROTO_LL] = 0.0;
     if(nChannels)
     {
         *nChannels = 0;

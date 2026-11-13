@@ -2447,7 +2447,7 @@ TEST_F(NetConnectMicrotest, RecvFree_ReleasesMap) {
 template <typename Res>
 class NetProxyConnectMicrotest : public NetAllocMicrotestBase {
  protected:
-  static constexpr int kSizes[NCCL_NUM_PROTOCOLS] = {1 << 12, 1 << 13, 1 << 14};  // LL, LL128, SIMPLE
+  static constexpr int kSizes[NCCL_NUM_PROTOCOLS] = {1 << 12, 1 << 13, 1 << 14, 1 << 16};  // LL, LL128, SIMPLE, NaN
   static constexpr int kP2pLl128Size = 1 << 15;  // send/recv connections' own LL128 size
   std::deque<ncclProxyConnection> conns_;
   connectMap resp_{};
@@ -2664,6 +2664,18 @@ TEST_F(NetSendProxyConnectMicrotest, IbPlugins_ApplyP2pPolicy) {
   EXPECT_EQ(castHandle, args_.handle);
   EXPECT_EQ(castP2p, 1);
   EXPECT_EQ(ib.calls, 1);
+}
+
+TEST_F(NetSendProxyConnectMicrotest, EmptyNanBuffer_IsNeitherMappedNorRegistered) {
+  sendNetResources* r = AddConn();
+  proxyState_.buffSizes[NCCL_PROTO_NAN] = 0;
+
+  ASSERT_EQ(Connect(), ncclSuccess);
+
+  EXPECT_EQ(net_.regMrs.size(), (size_t)NCCL_NUM_PROTOCOLS - 1);
+  EXPECT_EQ(r->buffSizes[NCCL_PROTO_NAN], 0);
+  EXPECT_EQ(Buffer(r, NCCL_PROTO_NAN), nullptr);
+  EXPECT_EQ(r->mhandles[NCCL_PROTO_NAN], nullptr);
 }
 
 TEST_F(NetSendProxyConnectMicrotest, DedicatedHostBuffers_RegistersEveryProtocol) {
@@ -3123,6 +3135,18 @@ TEST_F(NetRecvProxyConnectMicrotest, RemoteProxy_Rejected) {
   EXPECT_EQ(hostAllocs_, 0);
 }
 
+TEST_F(NetRecvProxyConnectMicrotest, EmptyNanBuffer_IsNeitherMappedNorRegistered) {
+  recvNetResources* r = AddRecvConn();
+  proxyState_.buffSizes[NCCL_PROTO_NAN] = 0;
+
+  ASSERT_EQ(Connect(), ncclSuccess);
+
+  EXPECT_EQ(net_.regMrs.size(), (size_t)NCCL_NUM_PROTOCOLS - 1);
+  EXPECT_EQ(r->buffSizes[NCCL_PROTO_NAN], 0);
+  EXPECT_EQ(Buffer(r, NCCL_PROTO_NAN), nullptr);
+  EXPECT_EQ(r->mhandles[NCCL_PROTO_NAN], nullptr);
+}
+
 TEST_F(NetRecvProxyConnectMicrotest, DedicatedHostBuffers_RegistersEveryProtocol) {
   recvNetResources* r = AddRecvConn();
 
@@ -3289,7 +3313,7 @@ TEST_F(NetRecvProxyConnectMicrotest, DedicatedGdrCuMem_AllocatesShareableBank) {
 
   ASSERT_EQ(Connect(), ncclSuccess);
 
-  EXPECT_EQ(allocated, (size_t)kSizes[0] + kSizes[1] + kSizes[2]);
+  EXPECT_EQ(allocated, (size_t)kSizes[0] + kSizes[1] + kSizes[2] + kSizes[3]);
   EXPECT_EQ(devAllocs_, 0);
 #if CUDA_VERSION >= 11070 || NCCL_CUMEM_DMABUF_EXPORT_GATE
   ASSERT_EQ(exports_.size(), 1u);  // cuMem banks are always exported for DMA-BUF registration
@@ -3336,7 +3360,7 @@ TEST_F(NetRecvProxyConnectMicrotest, DedicatedWithLlBuffersFlag_AddsNoStaging) {
 
   ASSERT_EQ(Connect(), ncclSuccess);
 
-  EXPECT_EQ(r->map.mems[NCCL_NET_MAP_DEVMEM].size, (ssize_t)(kSizes[0] + kSizes[1] + kSizes[2]));
+  EXPECT_EQ(r->map.mems[NCCL_NET_MAP_DEVMEM].size, (ssize_t)(kSizes[0] + kSizes[1] + kSizes[2] + kSizes[3]));
 }
 
 TEST_F(NetRecvProxyConnectMicrotest, SharedComms_KeyedByProxyRankAndReused) {

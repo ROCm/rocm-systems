@@ -520,10 +520,10 @@ ncclResult_t ncclTuningCostModelSimModel(int id, struct ncclTuningInput_t* const
     goto not_valid;
   }
   {
-    int algo = NCCL_ALGO_UNDEF, proto = NCCL_PROTO_UNDEF;
-    if (ncclTuningExpandId(id, &algo, &proto, nullptr, nullptr) == ncclSuccess) {
-      const bool nanOnly = rcclNanProtoFor(input->comm, input->func, input->datatype, input->nBytes) &&
-                           rcclNanProtoFunc(input->func);
+    // Symmetric and CE ids expand to NCCL_PROTO_UNDEF, so they drop out under NaN like any other protocol.
+    int algo = NCCL_ALGO_UNDEF, proto = NCCL_PROTO_UNDEF, symKernelId, ceMethodId;
+    if (ncclTuningExpandId(id, &algo, &proto, &symKernelId, &ceMethodId) == ncclSuccess) {
+      const bool nanOnly = rcclNanProtoOnly(input->comm, input->func, input->datatype, input->nBytes);
       if (proto == NCCL_PROTO_NAN ? !(nanOnly && rcclNanProtoKernel(input->func, algo)) : nanOnly) {
         goto not_valid;
       }

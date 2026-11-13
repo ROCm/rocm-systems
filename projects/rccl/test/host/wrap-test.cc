@@ -784,9 +784,86 @@ TEST(WrapMicrotest, NanProtoFor_OffWithoutNcclProtoOrAuto) {
   ncclComm* comm = MakeCommWithArch("gfx950");
   comm->nNodes = 2;
   comm->nRanks = 16;
+  comm->buffSizes[NCCL_PROTO_NAN] = 4 << 20;
   EXPECT_FALSE(rcclNanProtoFor(comm, ncclFuncAllReduce, ncclFloat32, 64 * kNanMiB));
   EXPECT_FALSE(rcclProtoPinned(comm, ncclFuncAllReduce, ncclFloat32, 64 * kNanMiB));
   DeleteCommWithArch(comm);
+}
+
+// RCCL_NAN_PROTO_AUTO=1 picks NaN inside its windows on gfx950 with 8 GPUs per node and nowhere else. A planned
+// float AllGather is NaN-only at any size: its dtype survives task append only when NaN was chosen there.
+TEST(WrapMicrotestIsolated, NanProtoFor_AutoOnUsesWindowsOnGfx950EightPerNode) {
+  RUN_ISOLATED_TEST(
+      "Wrap_NanProtoFor_AutoOnUsesWindowsOnGfx950EightPerNode",
+      []() {
+        SetMicroEnv("RCCL_NAN_PROTO_AUTO", "1");
+        SetMicroEnvAbsent("NCCL_PROTO");
+        ncclComm* comm = MakeCommWithArch("gfx950");
+        comm->nNodes = 2;
+        comm->nRanks = 16;
+#if ENABLE_TDM_NAN
+        comm->nanTdmMinBytes = -1;
+#endif
+        int sizes[NCCL_NUM_PROTOCOLS] = {0};
+        rcclSetDefaultBuffSizes(comm, sizes);
+        EXPECT_EQ(4 << 20, sizes[NCCL_PROTO_NAN]);
+        comm->buffSizes[NCCL_PROTO_NAN] = sizes[NCCL_PROTO_NAN];
+        EXPECT_TRUE(rcclNanProtoFor(comm, ncclFuncAllReduce, ncclFloat32, 1 * kNanMiB));
+        EXPECT_TRUE(rcclProtoPinned(comm, ncclFuncAllReduce, ncclFloat32, 1 * kNanMiB));
+        EXPECT_FALSE(rcclNanProtoFor(comm, ncclFuncAllReduce, ncclFloat32, 4 * kNanMiB));
+        EXPECT_FALSE(rcclProtoPinned(comm, ncclFuncAllReduce, ncclFloat32, 4 * kNanMiB));
+        EXPECT_FALSE(rcclNanProtoFor(comm, ncclFuncAllReduce, ncclInt32, 1 * kNanMiB));
+        EXPECT_FALSE(rcclNanProtoForcedFor(comm, ncclFloat32));
+        EXPECT_FALSE(rcclNanProtoFor(comm, ncclFuncAllGather, ncclFloat32, 1 * kNanMiB));
+        EXPECT_TRUE(rcclNanProtoOnly(comm, ncclFuncAllGather, ncclFloat32, 1 * kNanMiB));
+        EXPECT_FALSE(rcclNanProtoOnly(comm, ncclFuncAllGather, ncclInt8, 1 * kNanMiB));
+
+        comm->nRanks = 12;
+        EXPECT_FALSE(rcclNanProtoFor(comm, ncclFuncAllReduce, ncclFloat32, 1 * kNanMiB));
+        rcclSetDefaultBuffSizes(comm, sizes);
+        EXPECT_EQ(0, sizes[NCCL_PROTO_NAN]);
+        ClearMicroEnv();
+        DeleteCommWithArch(comm);
+      });
+}
+
+// NCCL_PROTO, whatever it names, turns RCCL_NAN_PROTO_AUTO off and pins the protocol.
+TEST(WrapMicrotestIsolated, NanProtoFor_NcclProtoTurnsAutoOff) {
+  RUN_ISOLATED_TEST(
+      "Wrap_NanProtoFor_NcclProtoTurnsAutoOff",
+      []() {
+        SetMicroEnv("RCCL_NAN_PROTO_AUTO", "1");
+        SetMicroEnv("NCCL_PROTO", "Simple");
+        ncclComm* comm = MakeCommWithArch("gfx950");
+        comm->nNodes = 2;
+        comm->nRanks = 16;
+        comm->buffSizes[NCCL_PROTO_NAN] = 4 << 20;
+        EXPECT_FALSE(rcclNanProtoAutoTuned(comm));
+        EXPECT_FALSE(rcclNanProtoFor(comm, ncclFuncAllReduce, ncclFloat32, 1 * kNanMiB));
+        EXPECT_TRUE(rcclProtoPinned(comm, ncclFuncAllReduce, ncclFloat32, 1 * kNanMiB));
+        ClearMicroEnv();
+        DeleteCommWithArch(comm);
+      });
+}
+
+// A comm with no NaN FIFO (NCCL_NAN_BUFFSIZE=0, or a parent's proxy that sized none) never picks NaN.
+TEST(WrapMicrotestIsolated, NanProtoFor_NeedsNanFifo) {
+  RUN_ISOLATED_TEST(
+      "Wrap_NanProtoFor_NeedsNanFifo",
+      []() {
+        SetMicroEnv("NCCL_PROTO", "NaN");
+        ncclComm* comm = MakeCommWithArch("gfx950");
+        comm->nNodes = 1;
+        comm->nRanks = 8;
+        comm->buffSizes[NCCL_PROTO_NAN] = 0;
+        EXPECT_FALSE(rcclNanProtoFor(comm, ncclFuncAllReduce, ncclFloat32, 1 * kNanMiB));
+        EXPECT_FALSE(rcclNanProtoForcedFor(comm, ncclFloat32));
+        comm->buffSizes[NCCL_PROTO_NAN] = 4 << 20;
+        EXPECT_TRUE(rcclNanProtoFor(comm, ncclFuncAllReduce, ncclFloat32, 1 * kNanMiB));
+        EXPECT_TRUE(rcclNanProtoForcedFor(comm, ncclFloat32));
+        ClearMicroEnv();
+        DeleteCommWithArch(comm);
+      });
 }
 
 // nNodes=9: the allGather arm alone gives 32MB (>=8,<16); the reduceScatter arm
@@ -1080,20 +1157,46 @@ TEST(WrapMicrotestIsolated, SetDefaultBuffSizes_Gfx1250UsesWiderLL128Line) {
       });
 }
 
-// The NaN FIFO is one slice unless NCCL_PROTO names NaN, then 4 MiB, and 8 MiB
-// when the gfx1250 TDM path is on. Sizes are literals so a change to the
-// elems-per-thread macros is caught rather than mirrored.
+// A comm gets no NaN FIFO unless NCCL_PROTO is exactly NaN; then 4 MiB, and 8 MiB when the gfx1250 TDM path is
+// on. Sizes are literals so a change to the elems-per-thread macros is caught rather than mirrored. The NCCL_PROTO
+// read is cached, so each value runs in its own process.
+TEST(WrapMicrotestIsolated, SetDefaultBuffSizes_NoNanFifoWithoutNcclProto) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SetDefaultBuffSizes_NoNanFifoWithoutNcclProto",
+      []() {
+        ncclComm* comm = MakeCommWithArch("gfx1250");
+        int sizes[NCCL_NUM_PROTOCOLS] = {0};
+        SetMicroEnvAbsent("NCCL_PROTO");
+        rcclSetDefaultBuffSizes(comm, sizes);
+        EXPECT_EQ(0, sizes[NCCL_PROTO_NAN]);
+        ClearMicroEnv();
+        DeleteCommWithArch(comm);
+      });
+}
+
+// A list naming NaN among others never runs it, so it sizes no NaN FIFO either.
+TEST(WrapMicrotestIsolated, SetDefaultBuffSizes_NoNanFifoForProtoList) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SetDefaultBuffSizes_NoNanFifoForProtoList",
+      []() {
+        ncclComm* comm = MakeCommWithArch("gfx1250");
+        int sizes[NCCL_NUM_PROTOCOLS] = {0};
+        SetMicroEnv("NCCL_PROTO", "Simple,NaN");
+        rcclSetDefaultBuffSizes(comm, sizes);
+        EXPECT_EQ(0, sizes[NCCL_PROTO_NAN]);
+        ClearMicroEnv();
+        DeleteCommWithArch(comm);
+      });
+}
+
+// NCCL_PROTO is matched without case, as its parser does.
 TEST(WrapMicrotestIsolated, SetDefaultBuffSizes_NanFifoDepth) {
   RUN_ISOLATED_TEST(
       "Wrap_SetDefaultBuffSizes_NanFifoDepth",
       []() {
         ncclComm* comm = MakeCommWithArch("gfx1250");
         int sizes[NCCL_NUM_PROTOCOLS] = {0};
-        SetMicroEnvAbsent("NCCL_PROTO");
-        rcclSetDefaultBuffSizes(comm, sizes);
-        EXPECT_EQ(128 * 1024, sizes[NCCL_PROTO_NAN]);
-
-        SetMicroEnv("NCCL_PROTO", "Simple,NaN");
+        SetMicroEnv("NCCL_PROTO", "nan");
 #if ENABLE_TDM_NAN
         comm->nanTdmMinBytes = -1;
 #endif
@@ -8269,6 +8372,7 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_NanForcedSkipsNonNanFabricTiers) {
         ScopedHook ll128Eligible(g_allReduceDdaFabricLL128Eligible, eligible);
         ScopedHook vmmEligible(g_allReduceDdaFabricEligible, eligible);
         ncclComm* comm = MakeCommWithArch("gfx1250");
+        comm->buffSizes[NCCL_PROTO_NAN] = 4 << 20;
         comm->nRanks = 2;
         comm->nNodes = 1;
         rcclCollDecision decision{};
@@ -8579,6 +8683,7 @@ TEST(WrapMicrotestIsolated, SelectAllGather_NanForcedSkipsNonNanFabricTiers) {
         ScopedHook ll128Eligible(g_allGatherDdaFabricLL128Eligible, eligible);
         ScopedHook vmmEligible(g_allGatherDdaFabricEligible, eligible);
         ncclComm* comm = MakeCommWithArch("gfx1250");
+        comm->buffSizes[NCCL_PROTO_NAN] = 4 << 20;
         comm->nRanks = 2;
         comm->nNodes = 1;
         rcclCollDecision decision{};
@@ -8606,6 +8711,7 @@ TEST(WrapMicrotestIsolated, SelectAlltoAll_NanForcedSkipsNonNanFabricTiers) {
         ScopedHook ll128Eligible(g_allToAllDdaFabricLL128Eligible, eligible);
         ScopedHook vmmEligible(g_allToAllDdaFabricEligible, eligible);
         ncclComm* comm = MakeCommWithArch("gfx1250");
+        comm->buffSizes[NCCL_PROTO_NAN] = 4 << 20;
         comm->nRanks = 2;
         comm->nNodes = 1;
         comm->p2pnChannels = 17;
@@ -9930,6 +10036,7 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_NanForcedSkipsNonNanFabricTiers)
         ScopedHook ll128Eligible(g_reduceScatterDdaFabricLL128Eligible, eligible);
         ScopedHook vmmEligible(g_reduceScatterDdaFabricEligible, eligible);
         ncclComm* comm = MakeCommWithArch("gfx1250");
+        comm->buffSizes[NCCL_PROTO_NAN] = 4 << 20;
         comm->nRanks = 2;
         comm->nNodes = 1;
         rcclCollDecision decision{};

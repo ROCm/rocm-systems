@@ -1398,6 +1398,14 @@ static int rcclP2pPolicyChannels(struct ncclComm* comm, struct ncclTaskP2p* task
   return -1;
 }
 
+// Every rank must hold the same AllGather slice, and NaN escapes all-ones dwords, so a single-node Direct
+// AllGather on NaN escapes its self copy too (sendrecv.h), even in place. Across nodes it stays off NaN,
+// since network links do not escape.
+static bool rcclNanAllGatherSelfCopy(struct ncclComm* comm, const struct ncclTaskP2p* t) {
+  return t->collAPI == ncclFuncAllGather && comm->nNodes == 1 &&
+         rcclNanProtoFor(comm, ncclFuncAllGather, t->datatype, t->bytes * comm->nRanks);
+}
+
 // Put p2p op in plan assuming there is sizeof(ncclDevWorkBatch) in batch budget
 // and sizeof(ncclDevWorkP2p) in work budget. "sendRank" and "recvRank" must
 // match the corresponding values for this round of the p2p schedule (no -1's).
@@ -1514,10 +1522,16 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
   bool useNaN[2];
   for (int dir = 0; dir < 2; dir++) {
     const struct ncclTaskP2p* t = p2pTasks[dir];
-    useNaN[dir] = !useLL128OptIn && hasNaN[dir] && !network[dir] && t &&
-                  (t->collAPI == ncclFuncAlltoAll || t->collAPI == ncclFuncAllGather ||
-                   t->collAPI == ncclFuncReduceScatter) &&
-                  rcclNanProtoFor(comm, t->collAPI, t->datatype, t->bytes * comm->nRanks);
+    if (useLL128OptIn || t == nullptr) {
+      useNaN[dir] = false;
+    } else if (selfSend) {
+      useNaN[dir] = rcclNanAllGatherSelfCopy(comm, t);
+    } else {
+      const bool allGather = t->collAPI == ncclFuncAllGather;
+      useNaN[dir] = hasNaN[dir] && !network[dir] && !(allGather && comm->nNodes > 1) &&
+                    (t->collAPI == ncclFuncAlltoAll || allGather || t->collAPI == ncclFuncReduceScatter) &&
+                    rcclNanProtoFor(comm, t->collAPI, t->datatype, t->bytes * comm->nRanks);
+    }
   }
 
   ssize_t paramChunkSize = ncclParamChunkSize();
@@ -1913,7 +1927,8 @@ static ncclResult_t scheduleP2pTasksToPlan(struct ncclComm* comm, int* p2pEpoch,
       void* recvBuff = recv ? recv->buff : nullptr;
       // Add check to keep in-place send to self when P2P batching is enabled
       // Such case is not supported currently and is causing hangs
-      if (sendRank == comm->rank && send->buff == recv->buff && rcclEffectiveP2pBatchEnable(comm) == 0) {
+      if (sendRank == comm->rank && send->buff == recv->buff && rcclEffectiveP2pBatchEnable(comm) == 0 &&
+          !rcclNanAllGatherSelfCopy(comm, send)) {
         // Skip send to self in-place (we don't need to support this).
         ncclIntruQueueDequeue(&peers[sendRank].sendQueue);
         ncclIntruQueueDequeue(&peers[recvRank].recvQueue);
@@ -3111,16 +3126,14 @@ static void initCollCostTable(float** collCostTable) {
   }
 }
 
-// The NaN-flag protocol (src/device/prims_nan.h) is opt-in and narrow. It never
-// competes on cost: readiness is "no element is NaN", which is only meaningful for
-// floating-point data and hangs outright if the user's data contains a real NaN.
-// Unreachable unless the caller sets NCCL_PROTO=NaN, or RCCL_NAN_PROTO_AUTO=1 and
-// the size is in a winning window (rcclNanProtoFor), and then it is the only
-// protocol wherever it can run: intra-node float AllReduce (ring and tree) and
-// ring AllGather and ReduceScatter. AlltoAll takes it on the send/recv path
-// (addP2pToPlan). Everything else keeps the default protocol set.
+// The NaN-flag protocol (src/device/prims_nan.h) never competes on cost. It runs
+// only under NCCL_PROTO=NaN, or RCCL_NAN_PROTO_AUTO=1 inside a winning window
+// (rcclNanProtoFor), and then it is the only protocol wherever it has a kernel:
+// float AllReduce (ring and tree) and ring AllGather and ReduceScatter. AlltoAll
+// and the Direct collectives take it on the send/recv path (addP2pToPlan).
+// Everything else keeps the default protocol set.
 static bool nanProtoOnly(struct ncclComm* comm, struct ncclTaskColl* info, size_t nBytes) {
-  return rcclNanProtoFor(comm, info->func, info->datatype, nBytes) && rcclNanProtoFunc(info->func);
+  return rcclNanProtoOnly(comm, info->func, info->datatype, nBytes);
 }
 
 // numPipeOps: number of pipelined ops. Can be greater than 1 in aggregation mode. Used to adjust latency.
@@ -3491,21 +3504,23 @@ rccl_static ncclResult_t getAlgoInfo(struct ncclComm* comm, struct ncclTaskColl*
     // Tuner plugins are compiled against NCCL_NUM_PROTOCOLS_V5 and cast the table
     // to that stride, so pass a narrowed copy rather than our wider one.
     float pluginCostTable[NCCL_NUM_ALGORITHMS][NCCL_NUM_PROTOCOLS_V5];
-    for (int a = 0; a < NCCL_NUM_ALGORITHMS; a++)
+    for (int a = 0; a < NCCL_NUM_ALGORITHMS; a++) {
       for (int p = 0; p < NCCL_NUM_PROTOCOLS_V5; p++) pluginCostTable[a][p] = collCostTable[a][p];
+    }
     NCCLCHECK(comm->tuner->getCollInfo(comm->tunerContext, info->func, nBytes, numPipeOps, (float**)pluginCostTable,
                                        NCCL_NUM_ALGORITHMS, NCCL_NUM_PROTOCOLS_V5, regBuff, &nMaxChannels));
-    for (int a = 0; a < NCCL_NUM_ALGORITHMS; a++)
+    for (int a = 0; a < NCCL_NUM_ALGORITHMS; a++) {
       for (int p = 0; p < NCCL_NUM_PROTOCOLS_V5; p++) collCostTable[a][p] = pluginCostTable[a][p];
+    }
     NCCLCHECK(topoGetAlgoInfo(comm, info, nBytes, (float**)collCostTable, simInfo));
   } else {
     NCCLCHECK(topoGetAlgoInfo(comm, info, nBytes, (float**)collCostTable, simInfo));
     // override algo, tree doesn't work with fewer than 64 bytes
     size_t sizePerRank = rcclGetSizePerRank(info->func, nBytes, comm->nRanks);
-    // This hardcode names a protocol, so it has to stand down when the caller
-    // named one too -- otherwise NCCL_PROTO=<x> silently lands on Tree/LL here.
     const bool userProtoInput = rcclProtoPinned(comm, info->func, info->datatype, nBytes);
-    if (!userAlgoInput && !userProtoInput && IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950") &&
+    // This hardcode names Tree/LL, so it stands down where NCCL_PROTO or NaN left Tree/LL out.
+    const bool treeLLOffered = collCostTable[NCCL_ALGO_TREE][NCCL_PROTO_LL] >= 0.0f;
+    if (!userAlgoInput && treeLLOffered && IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950") &&
         comm->nNodes == 1 && (info->func == ncclFuncAllReduce) && sizePerRank >= 64 && sizePerRank <= 262144) {
       info->algorithm = NCCL_ALGO_TREE;
       info->protocol = NCCL_PROTO_LL;
@@ -3752,7 +3767,8 @@ static ncclResult_t calcCollChunking(struct ncclComm* comm, struct ncclTaskColl*
     *outDirectFlags = 0;
   }
 
-  if (comm->tuner != nullptr && comm->tuner->getChunkSize != nullptr) {
+  // The plugin ABI names only the first NCCL_NUM_PROTOCOLS_V5 protocols.
+  if (comm->tuner != nullptr && comm->tuner->getChunkSize != nullptr && info->protocol < NCCL_NUM_PROTOCOLS_V5) {
     size_t tunerChunkSize = chunkSize;
     NCCLCHECK(comm->tuner->getChunkSize(comm->tunerContext, info->func, nBytes, info->algorithm, info->protocol,
                                         nChannels, &tunerChunkSize));

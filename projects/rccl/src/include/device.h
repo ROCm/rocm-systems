@@ -282,12 +282,9 @@ static_assert(NCCL_LL_CLEAN_MASK % NCCL_STEPS == 0, "Invalid NCCL_LL_CLEAN_MASK 
  * tree chunk, so a ring round moves up to one full step. */
 #define NCCL_NAN_STEP_ELEMS_PER_THREAD 256
 /* The gfx1250 TDM path pays a fixed sync per op (poll, sentinel restore, tensorcnt
- * wait), so it wants a deep step instead: 8 MiB FIFO (1 MiB per step) took 1 GiB
- * AllReduce from 257 to 328 GB/s busbw and AlltoAll from 195 to 210; the register
- * path is flat across 2-8 MiB. Only used while the TDM path is enabled. */
+ * wait), so it wants a deeper step: 8 MiB FIFO, 1 MiB per step. Only used while
+ * the TDM path is enabled. */
 #define NCCL_NAN_TDM_STEP_ELEMS_PER_THREAD 512
-#define NCCL_NAN_MAX_NTHREADS NCCL_LL128_MAX_NTHREADS
-#define NCCL_NAN_SENTINEL64 0xFFFFFFFFFFFFFFFFull
 
 #define NCCL_P2P_WRITE 0x01
 #define NCCL_P2P_READ 0x02

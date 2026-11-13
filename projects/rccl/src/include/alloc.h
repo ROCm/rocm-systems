@@ -279,7 +279,9 @@ static inline ncclResult_t ncclCudaMemsetSync(void* ptr, int value, size_t size)
   CUDACHECK(cudaThreadExchangeStreamCaptureMode(&capMode));
   NCCLCHECKGOTO(getSideStream(&sidestream), result, restoreCapMode);
   stream = sidestream;
-  if (sidestream == nullptr) CUDACHECKGOTO(cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking), result, restoreCapMode);
+  if (sidestream == nullptr) {
+    CUDACHECKGOTO(cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking), result, restoreCapMode);
+  }
   CUDACHECKGOTO(cudaMemsetAsync(ptr, value, size, stream), result, destroyStream);
   CUDACHECKGOTO(cudaStreamSynchronize(stream), result, destroyStream);
 destroyStream:

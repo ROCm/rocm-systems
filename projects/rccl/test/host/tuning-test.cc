@@ -383,6 +383,10 @@ TEST_F(TuningMicrotest, InitPassesPluginInputsBeforeCostModelAndPrintsRankZeroTa
   comm_->nNodes = 4;
   comm_->tuningContext.generalLatencies[ncclFuncAllReduce][NCCL_ALGO_PAT][NCCL_PROTO_SIMPLE] = 12.5f;
   comm_->tuningContext.generalBandwidths[ncclFuncAllReduce][NCCL_ALGO_PAT][NCCL_PROTO_SIMPLE] = 34.5f;
+  // The plugin sees Ring/Simple and writes it back; the NaN column is past what it can see.
+  double* ringLatencies = &comm_->tuningContext.tuningConstants.baseLatencies[NCCL_ALGO_RING][0];
+  ringLatencies[NCCL_PROTO_SIMPLE] = 7.25;
+  ringLatencies[NCCL_PROTO_NAN] = 3.5;
   RcclUnitTesting::ScopedDebugLogging debugLogging(NCCL_LOG_INFO, NCCL_TUNING);
 
   ScopedHook load(g_tuningTunerPluginLoad, [&](ncclComm* comm) {
@@ -402,9 +406,10 @@ TEST_F(TuningMicrotest, InitPassesPluginInputsBeforeCostModelAndPrintsRankZeroTa
         EXPECT_EQ(&comm_->nvlDomainInfo, nvlDomainInfo);
         // The plugin gets a copy narrowed to its protocol columns, not the comm's own struct.
         EXPECT_NE(nullptr, constants);
-        if (constants != nullptr)
-          EXPECT_EQ(comm_->tuningContext.tuningConstants.baseLatencies[NCCL_ALGO_RING][NCCL_PROTO_SIMPLE],
-                    constants->baseLatencies[NCCL_ALGO_RING][NCCL_PROTO_SIMPLE]);
+        if (constants != nullptr) {
+          EXPECT_EQ(7.25, constants->baseLatencies[NCCL_ALGO_RING][NCCL_PROTO_SIMPLE]);
+          constants->baseLatencies[NCCL_ALGO_RING][NCCL_PROTO_SIMPLE] = 9.5;
+        }
         *context = &contextSentinel;
         return ncclSuccess;
       });
@@ -421,6 +426,8 @@ TEST_F(TuningMicrotest, InitPassesPluginInputsBeforeCostModelAndPrintsRankZeroTa
   const std::string log = RcclUnitTesting::CaptureLog([&] { result = TuningMicroInit(comm_.get()); });
   EXPECT_EQ(ncclSuccess, result);
   EXPECT_EQ(&contextSentinel, comm_->tunerContext);
+  EXPECT_EQ(9.5, ringLatencies[NCCL_PROTO_SIMPLE]) << "the plugin's write did not reach the comm";
+  EXPECT_EQ(3.5, ringLatencies[NCCL_PROTO_NAN]) << "a column the plugin cannot see changed";
   EXPECT_EQ((std::vector<std::string>{"load", "plugin-init", "cost", "thresholds"}), order);
   EXPECT_TRUE(RcclUnitTesting::LogHas(log, "Algorithm   |")) << log;
   EXPECT_TRUE(RcclUnitTesting::LogHas(log, "PAT")) << log;
@@ -728,9 +735,9 @@ TEST_F(TuningMicrotest, PluginReceivesGeneralTableAndOverridesTimeAndMaxChannels
                       EXPECT_EQ(123456u, nBytes);
                       EXPECT_EQ(7, numPipeOps);
                       EXPECT_EQ(NCCL_NUM_ALGORITHMS, numAlgo);
-                      EXPECT_EQ(NCCL_NUM_PROTOCOLS, numProto);
+                      EXPECT_EQ(NCCL_NUM_PROTOCOLS_V5, numProto);
                       EXPECT_EQ(1, regBuff);
-                      auto* table = reinterpret_cast<float (*)[NCCL_NUM_PROTOCOLS]>(rawTable);
+                      auto* table = reinterpret_cast<float (*)[NCCL_NUM_PROTOCOLS_V5]>(rawTable);
                       EXPECT_FLOAT_EQ(10.0f, table[NCCL_ALGO_TREE][NCCL_PROTO_LL]);
                       EXPECT_FLOAT_EQ(20.0f, table[NCCL_ALGO_RING][NCCL_PROTO_SIMPLE]);
                       EXPECT_FLOAT_EQ(NCCL_TUNING_IGNORE, table[NCCL_ALGO_PAT][NCCL_PROTO_LL128]);
@@ -751,6 +758,35 @@ TEST_F(TuningMicrotest, PluginReceivesGeneralTableAndOverridesTimeAndMaxChannels
   EXPECT_FLOAT_EQ(5.0f, result.timeUs);
   EXPECT_EQ(7, result.maxChannels);
   EXPECT_EQ(7, result.nChannels);
+}
+
+TEST_F(TuningMicrotest, PluginTableOmitsNanAndLeavesItsTime) {
+  const int ringSimple = GeneralId(NCCL_ALGO_RING, NCCL_PROTO_SIMPLE);
+  const int ringNan = GeneralId(NCCL_ALGO_RING, NCCL_PROTO_NAN);
+  comm_->tuner = &plugin_;
+  ncclTuningInput_t input = MakeInput();
+  input.tuningMask = TuningBit(ringSimple) | TuningBit(ringNan);
+  ncclTuningResult_t result = EmptyResult();
+
+  ScopedHook model(g_tuningCostModelSimModel, [&](int id, ncclTuningInput_t*, ncclTuningResult_t* tuning) {
+    tuning->valid = 1;
+    tuning->timeUs = id == ringNan ? 4.0f : 20.0f;
+    return ncclSuccess;
+  });
+  ScopedHook plugin(g_tuningPluginGetCollInfo,
+                    [](void*, ncclFunc_t, size_t, int, float** rawTable, int, int numProto, int, int*) {
+                      EXPECT_EQ(NCCL_NUM_PROTOCOLS_V5, numProto);
+                      auto* table = reinterpret_cast<float (*)[NCCL_NUM_PROTOCOLS_V5]>(rawTable);
+                      EXPECT_FLOAT_EQ(20.0f, table[NCCL_ALGO_RING][NCCL_PROTO_SIMPLE]);
+                      table[NCCL_ALGO_RING][NCCL_PROTO_SIMPLE] = 30.0f;
+                      return ncclSuccess;
+                    });
+  ScopedHook channels(g_tuningGetChannels, ChannelsReturning());
+
+  ASSERT_EQ(ncclSuccess, TuningMicroCompute(&input, &result));
+  EXPECT_EQ(1, plugin.calls);
+  EXPECT_EQ(ringNan, result.id);
+  EXPECT_FLOAT_EQ(4.0f, result.timeUs);
 }
 
 TEST_F(TuningMicrotest, PluginFailureStopsBeforeChannelSelection) {
@@ -814,9 +850,9 @@ TEST_F(TuningMicrotest, PartialGeneralCoordinatesAreNeverIndexedOrChanneled) {
     ScopedHook model(g_tuningCostModelSimModel, ModelSelecting(0));
     ScopedHook plugin(g_tuningPluginGetCollInfo,
                       [](void*, ncclFunc_t, size_t, int, float** rawTable, int, int, int, int*) {
-                        auto* table = reinterpret_cast<float (*)[NCCL_NUM_PROTOCOLS]>(rawTable);
+                        auto* table = reinterpret_cast<float (*)[NCCL_NUM_PROTOCOLS_V5]>(rawTable);
                         for (int algo = 0; algo < NCCL_NUM_ALGORITHMS; ++algo) {
-                          for (int proto = 0; proto < NCCL_NUM_PROTOCOLS; ++proto) {
+                          for (int proto = 0; proto < NCCL_NUM_PROTOCOLS_V5; ++proto) {
                             EXPECT_FLOAT_EQ(NCCL_TUNING_IGNORE, table[algo][proto]);
                           }
                         }
