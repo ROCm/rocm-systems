@@ -257,7 +257,7 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   because those seams replace `misc/socket.cc` wholesale, and other binaries link
   `bootstrap_stubs.cc` for this unit's symbols. See `test_categories_micro_bootstrap.yaml`.
 - **`rccl-UnitTestsMicroEnqueue`** — `enqueue.cc` (via `ENQUEUE_CC_PATH`); suite
-  `EnqueueMicrotest.*`. All tests live in `enqueue-test.cc`, grouped by unit under
+  `EnqueueMicrotest.*`. All tests live in `enqueue/enqueue-test.cc`, grouped by unit under
   test; several fixtures are reused by later groups, so the order within the file
   matters. `enqueue.cc:28` pulls in the device header `src/device/common.h`,
   which cannot compile host-only; the TU pre-sets that header's include guard and
@@ -277,10 +277,10 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   `onerank-test.cc`); suite `Onerank*`, driving `fakes/hip_fakes.cc`'s launch and copy hooks.
   Its own binary because `fakes/sched_stubs.cc` fakes `ncclLaunchOneRank`. See
   `test_categories_micro_onerank.yaml`.
-- **`rccl-UnitTestsMicroMgmtTaskEnq`** — `enqueue/mgmt_task_enq.cc` (via `MGMT_TASK_ENQ_CC_PATH`,
-  from `mgmt-task-enq-test.cc`); suite `MgmtTaskEnq*`. Its own binary because
+- **`rccl-UnitTestsMicroEnqueueMgmtTaskEnq`** — `enqueue/mgmt_task_enq.cc` (via `MGMT_TASK_ENQ_CC_PATH`,
+  from `enqueue/mgmt-task-enq-test.cc`); suite `MgmtTaskEnq*`. Its own binary because
   `fakes/mgmt_task_enq_fakes.cc`, which the other targets link, fakes `ncclMgmtTaskEnqueue`.
-  See `test_categories_micro_mgmt_task_enq.yaml`.
+  See `test_categories_micro_enqueue.yaml`.
 - **`rccl-UnitTestsMicroCe`**: `ce_coll.cc` (via `CE_COLL_CC_PATH`); suites
   `CeCollMicrotest.*`, `CeInitMicrotest.*` and `LaunchPaths/CeAlltoAllvSyncMicrotest.*`,
   all in `ce-coll-test.cc`. Its own binary because every other target links
@@ -401,26 +401,29 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   `Alloc*`. Its own binary: `alloc.h`'s inline side-stream map and shutdown and skip-free state
   would be shared with every other unit in `rccl-UnitTestsMicro`. See
   `test_categories_micro_alloc.yaml`.
-- **`rccl-UnitTestsMicroTaskPrep`** — `src/enqueue/task_prep/task_prep.cc` (via
-  `TASK_PREP_CC_PATH`, suite `TaskPrepMicrotest.*`),
-  `src/enqueue/task_prep/task_classify.cc` (via `TASK_CLASSIFY_CC_PATH`, suite
-  `TaskClassifyMicrotest.*`), `src/enqueue/task_prep/task_pretuning.cc` (via
+- **`rccl-UnitTestsMicroEnqueueTaskPrep`**, **`rccl-UnitTestsMicroEnqueueTaskPrepTaskClassify`**,
+  **`rccl-UnitTestsMicroEnqueueTaskPrepTaskPretuning`**, **`rccl-UnitTestsMicroEnqueueTaskPrepTaskPosttuning`**
+  — one binary per `src/enqueue/task_prep/` file:
+  `task_prep.cc` (via `TASK_PREP_CC_PATH`, suite `TaskPrepMicrotest.*`),
+  `task_classify.cc` (via `TASK_CLASSIFY_CC_PATH`, suite
+  `TaskClassifyMicrotest.*`), `task_pretuning.cc` (via
   `TASK_PRETUNING_CC_PATH`, suite `TaskPreTuningMicrotest.*`),
-  `src/enqueue/task_prep/task_posttuning.cc` (via `TASK_POSTTUNING_CC_PATH`, suite
-  `TaskPostTuningMicrotest.*`), and the seven `src/enqueue/task_sched/*.cc` files
+  `task_posttuning.cc` (via `TASK_POSTTUNING_CC_PATH`, suite
+  `TaskPostTuningMicrotest.*`), from `enqueue/task_prep/task-*-test.cc`; and
+  **`rccl-UnitTestsMicroEnqueueTaskSched`** for the seven `src/enqueue/task_sched/*.cc` files
   (`task_sched.cc`, `sym_sched.cc`, `legacy_sched.cc`, `allgatherv_sched.cc`,
   `p2p_sched.cc`, `rma_sched.cc`, `ce_sched.cc`, one `TASK_SCHED_*_CC_PATH` macro
-  each, all in one test TU, suite `TaskSchedMicrotest.*`). Its own binary, not
-  sharing `rccl-UnitTestsMicro`: that target links `collective_stubs.cc`, whose
+  each, all in `enqueue/task_sched/task-sched-test.cc`, suite `TaskSchedMicrotest.*`).
+  Not in `rccl-UnitTestsMicro`: that target links `collective_stubs.cc`, whose
   fail-loud `ncclTaskPrepare` would be a duplicate symbol against the real one,
-  and `group-test.cc` drives the path that stub stands in for. The four
-  `task_prep/` files are separate test TUs, one per file, so `task_prep.cc`'s
-  sibling externs resolve to real code and no file is listed twice; the seven
+  and `group-test.cc` drives the path that stub stands in for.
+  `rccl-UnitTestsMicroEnqueueTaskPrep` compiles the other three `task_prep/` files
+  as real units, so `task_prep.cc`'s sibling externs resolve to real code; the seven
   `task_sched/` files share one TU instead, since none of them reference each
   other and each defines exactly one distinct extern-linkage function. Shared
-  scene, vocabulary and fake-reset fixture live in `TaskPrepScene.h`.
+  scene, vocabulary and fake-reset fixture live in `enqueue/task_prep/TaskPrepScene.h`.
   `ENABLE_WARP_SPEED` is deliberately absent: all eleven files are free of it.
-  See `test_categories_micro_taskprep.yaml`.
+  See `test_categories_micro_enqueue.yaml`.
 - **`rccl-UnitTestsMicroNcclDevice`**: the requirement builders in
   `src/nccl_device/{cft_barrier,gin_barrier,gin_scratch,ll_a2a,lsa_barrier}.cc`
   (via `<STEM>_CC_PATH`, from `nccl-device-requirements-test.cc`); suite
@@ -1199,7 +1202,7 @@ declares:
 When a test grows a helper that is not specific to its unit under test, promote
 it here rather than leaving it in the TU — a per-TU copy is how four tests end
 up with four slightly different "wait for the thread" loops. Helpers that *are*
-specific to one unit stay with it (`TaskPrepScene.h` for the task-prep scene,
+specific to one unit stay with it (`enqueue/task_prep/TaskPrepScene.h` for the task-prep scene,
 `fakes/ras_*_test_support.h` for the RAS fixtures).
 
 ## Dealing with each kind of dependency
@@ -1464,7 +1467,8 @@ can be configured **directly** to build every host binary — `rccl-HostUnitTest
 `rccl-UnitTestsMicroGinHost`, `rccl-UnitTestsMicroGinHostFinalize`, `rccl-UnitTestsMicroDdaIpc`, `rccl-UnitTestsMicroCe`, `rccl-UnitTestsMicroDiagnostics`,
 `rccl-UnitTestsMicroGraph`, `rccl-UnitTestsMicroDda`, `rccl-UnitTestsMicroMisc`,
 `rccl-UnitTestsMicroTransport<Unit>` (one per `src/transport/` test file),
-`rccl-UnitTestsMicroSymKernels`, `rccl-UnitTestsMicroTaskPrep`, `rccl-UnitTestsMicroRmaProxy`,
+`rccl-UnitTestsMicroEnqueue<Unit>` (one per other `src/enqueue/` test file),
+`rccl-UnitTestsMicroSymKernels`, `rccl-UnitTestsMicroRmaProxy`,
 `rccl-UnitTestsMicroNetIbCastConnect`, `rccl-UnitTestsMicroNetIbCastQpSharing` and
 `rccl-UnitTestsMicroP2pResiliency` — **without configuring/building all of
 librccl**. It compiles just the tests + fakes + the hipified unit-under-test
@@ -1500,7 +1504,7 @@ cmake --build build -j"$(nproc)"
 ./build/rccl-UnitTestsMicro          # broad-coverage binary, ldd shows no HIP/ROCm/HSA/RCCL
 ./build/rccl-UnitTestsMicroCollectives        # src/collectives.cc tests
 ./build/rccl-UnitTestsMicroOnerank            # src/device/onerank.cu tests
-./build/rccl-UnitTestsMicroMgmtTaskEnq        # src/enqueue/mgmt_task_enq.cc tests
+./build/rccl-UnitTestsMicroEnqueueMgmtTaskEnq # src/enqueue/mgmt_task_enq.cc tests
 ./build/rccl-UnitTestsMicroWarpSpeed  # src/scheduler/*.cc tests
 ./build/rccl-UnitTestsMicroCrypt              # misc/crypt.cc tests
 ./build/rccl-UnitTestsMicroStrongstream       # misc/strongstream.cc tests
@@ -1520,7 +1524,11 @@ cmake --build build -j"$(nproc)"
 ./build/rccl-UnitTestsMicroDebug              # debug.cc tests
 ./build/rccl-UnitTestsMicroSymKernels         # sym_kernels.cc tests
 ./build/rccl-UnitTestsMicroGinHostProxy       # src/gin/gin_host_proxy.cc + proxy_gpucontext/
-./build/rccl-UnitTestsMicroTaskPrep           # src/enqueue/task_prep/ + task_sched/ tests
+./build/rccl-UnitTestsMicroEnqueueTaskPrep    # src/enqueue/task_prep/task_prep.cc tests
+./build/rccl-UnitTestsMicroEnqueueTaskPrepTaskClassify   # task_prep/task_classify.cc
+./build/rccl-UnitTestsMicroEnqueueTaskPrepTaskPretuning  # task_prep/task_pretuning.cc
+./build/rccl-UnitTestsMicroEnqueueTaskPrepTaskPosttuning # task_prep/task_posttuning.cc
+./build/rccl-UnitTestsMicroEnqueueTaskSched   # src/enqueue/task_sched/ tests
 ./build/rccl-UnitTestsMicroLinux              # src/os/linux*.cc, misc/{socket,shmutils,signals}.cc
 ./build/rccl-UnitTestsMicroConnect            # src/graph/connect.cc Preset/Postset tests
 ./build/rccl-UnitTestsMicroDiagnostics        # src/diagnostics.cc + src/diagnostics/ tests

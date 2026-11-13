@@ -17,7 +17,7 @@
 #include <cstdint>
 
 #include "ScopedHook.h"
-#include "TaskPrepScene.h"
+#include "enqueue/task_prep/TaskPrepScene.h"
 
 #include TASK_SCHED_DISPATCH_CC_PATH
 #include TASK_SCHED_SYM_CC_PATH
