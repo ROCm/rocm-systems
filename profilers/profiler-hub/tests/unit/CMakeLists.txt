@@ -11,9 +11,12 @@ set(UNIT_TEST_SOURCES
     json_serializer_test.cpp
     writer_test.cpp
     reader_test.cpp
+    rocpd_v2_reader_test.cpp
+    rocpd_v3_table_events_test.cpp
     reader_id_range_test.cpp
     sqlite_backend_impl_test.cpp
     ph_ctx_test.cpp
+    catalog_aggregate_store_test.cpp
     populate_reader_catalog_test.cpp
     c_api_test.cpp
     c_api_track_test.cpp
