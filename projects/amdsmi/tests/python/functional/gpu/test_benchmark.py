@@ -3183,6 +3183,7 @@ class TestGpuBenchmark(unittest.TestCase):
 
         self._log_performance_summary("amdsmi_reset_gpu_xgmi_error", "GPUs", "reset_gpu_xgmi_error")
 
+    @common.restores_gpu_perf_level
     def test_performance_set_clk_freq(self):
         self.common.print_func_name("")
 
@@ -3300,6 +3301,7 @@ class TestGpuBenchmark(unittest.TestCase):
             "set_gpu_accelerator_partition_profile",
         )
 
+    @common.restores_gpu_perf_level
     def test_performance_set_gpu_clk_limit(self):
         self.common.print_func_name("")
 
@@ -3589,6 +3591,7 @@ class TestGpuBenchmark(unittest.TestCase):
             "amdsmi_set_gpu_memory_partition_mode", "Processors", "set_gpu_memory_partition_mode"
         )
 
+    @common.restores_gpu_perf_level
     def test_performance_set_gpu_od_clk_info(self):
         self.common.print_func_name("")
 
@@ -3638,6 +3641,7 @@ class TestGpuBenchmark(unittest.TestCase):
             "amdsmi_set_gpu_od_clk_info", "Processors", "set_gpu_od_clk_info"
         )
 
+    @common.restores_gpu_perf_level
     def test_performance_set_gpu_od_volt_info(self):
         self.common.print_func_name("")
 
@@ -3683,6 +3687,7 @@ class TestGpuBenchmark(unittest.TestCase):
             "amdsmi_set_gpu_od_volt_info", "Processors", "set_gpu_od_volt_info"
         )
 
+    @common.restores_gpu_perf_level
     def test_performance_set_gpu_overdrive_level(self):
         self.common.print_func_name("")
 
@@ -3740,6 +3745,7 @@ class TestGpuBenchmark(unittest.TestCase):
             "gpu_overdrive_level_workflow", "Processors", "set_gpu_overdrive_level"
         )
 
+    @common.restores_gpu_perf_level
     def test_performance_set_gpu_pci_bandwidth(self):
         self.common.print_func_name("")
 
@@ -3804,6 +3810,7 @@ class TestGpuBenchmark(unittest.TestCase):
             "gpu_pci_bandwidth_workflow", "Processors", "set_gpu_pci_bandwidth"
         )
 
+    @common.restores_gpu_perf_level
     def test_performance_set_gpu_perf_determinism_mode(self):
         self.common.print_func_name("")
 
@@ -3842,6 +3849,7 @@ class TestGpuBenchmark(unittest.TestCase):
             "amdsmi_set_gpu_perf_determinism_mode", "Processors", "set_gpu_perf_determinism_mode"
         )
 
+    @common.restores_gpu_perf_level
     def test_performance_set_gpu_perf_level(self):
         self.common.print_func_name("")
 
@@ -3916,6 +3924,7 @@ class TestGpuBenchmark(unittest.TestCase):
 
         self._log_performance_summary("gpu_perf_level_workflow", "Processors", "set_gpu_perf_level")
 
+    @common.restores_gpu_perf_level
     def test_performance_set_gpu_power_profile(self):
         self.common.print_func_name("")
 

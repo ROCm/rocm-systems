@@ -1044,6 +1044,33 @@ class TestCliBase(unittest.TestCase):
                 per_gpu.append(freq["num_supported"] - int(freq["has_deep_sleep"]))
         return min(per_gpu) if per_gpu else 0
 
+    def RestorePerfLevels(self):
+        """Best-effort ``set --perf-level`` putting every GPU back on its baseline level.
+
+        For tests that run ``amd-smi set``/``reset``, which can leave the driver on a
+        level of their own (``reset --clocks`` forces AUTO, ``--clk-limit`` and
+        ``--perf-determinism`` leave MANUAL/DETERMINISM). Register with addCleanup so it
+        runs last, after the other clock writes. The baseline is the one setUpClass
+        recorded. A failed command is printed but never fails the test.
+        """
+        self.common.print("Restore Starting Values")
+        prefix = "AMDSMI_DEV_PERF_LEVEL_"
+        baseline = [
+            f"GPU {i}={self.metric_data['gpu_data'][i]['perf_level'].replace(prefix, '', 1)}"
+            for i in range(len(self.common.processors))
+        ]
+        self.common.print(f"{self.tab}perf level at setUpClass: {', '.join(baseline)}")
+        for index, _ in enumerate(self.common.processors):
+            perf_level = self.metric_data["gpu_data"][index]["perf_level"]
+            if perf_level in ("N/A", prefix + "UNKNOWN"):
+                continue
+            if perf_level.startswith(prefix):
+                perf_level = perf_level[len(prefix) :]
+            cmd = f"amd-smi set --perf-level {perf_level} --gpu {index}"
+            rc, _, _ = self.util.RunCmdSync(cmd)
+            name = EXIT_CODE_NAMES.get(rc, "") if rc else ""
+            self.common.print(f"{self.tab}{cmd}: rc={rc}" + (f" {name}" if name else ""))
+
     @staticmethod
     def _clk_limit_value(clocks, clk_type, bound):
         """The clock's currently reported *bound*, or None when it is not readable.
