@@ -1017,6 +1017,31 @@ in the following table.
       - | Unset or ``0``: off (default). Windows are registered through LSA.
         | ``1``: on.
 
+    * - | ``RCCL_GIN_ANVIL_FABRIC_LSA_A2A``
+        | ``NCCL_GIN_ANVIL_FABRIC_LSA_A2A``
+        | Opts into the direct LSA-flat AllToAll lane on the Anvil SDMA GIN
+          backend (``NCCL_GIN_TYPE=7``). Needs fabric registration
+          (``RCCL_GIN_ANVIL_FABRIC_MEM=1``), so it applies to the same
+          communicators, and only to device-API AllToAll (rccl-tests
+          ``-D 3``). Every rank must opt in with the same threshold; a split
+          vote leaves the lane off on all of them. At most 64 ranks.
+      - | Unset or ``0``: off (default). Device-API AllToAll uses ``gin.put``.
+        | ``1``: on. The kernel copies directly into peer receive windows
+          when the total size is at most
+          ``RCCL_GIN_ANVIL_FABRIC_LSA_THRESHOLD_ALLTOALL`` and the per-peer
+          size is a multiple of 16 bytes, and uses ``gin.put`` otherwise.
+
+    * - | ``RCCL_GIN_ANVIL_FABRIC_LSA_THRESHOLD_ALLTOALL``
+        | ``NCCL_GIN_ANVIL_FABRIC_LSA_THRESHOLD_ALLTOALL``
+        | Total AllToAll size, in bytes, at or below which the LSA-flat lane
+          copies directly into peer receive windows. Larger messages use
+          ``gin.put``. Ignored unless ``RCCL_GIN_ANVIL_FABRIC_LSA_A2A`` is ``1``.
+          Every rank must set the same value.
+      - | Unset: ``2097152`` (2 MiB) when the lane is enabled, otherwise 0.
+          On MI450 the lane is faster than ``gin.put`` up to about 2 MiB
+          total and slower from 4 to 8 MiB, at 4, 8 and 16 ranks.
+        | Non-negative integer byte count: the agreed threshold.
+
     * - | ``NCCL_RMA_PLUGIN``
         | Selects external one-sided RMA plugins, which are also the backend
           the built-in GIN proxy forwards to.

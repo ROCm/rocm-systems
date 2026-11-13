@@ -31,6 +31,7 @@ class GinAnvilReachMicrotest : public ::testing::Test {
   void TearDown() override {
     g_cuMemEnable = [] { return 0; };
     g_loadParam = [](const char*, int64_t deft) { return deft; };
+    ncclCuMemHandleType = hipMemHandleTypePosixFileDescriptor;
   }
 };
 
@@ -46,11 +47,22 @@ struct ReachComm {
   }
 };
 
+// hipMemHandleTypeFabric exists only with HIP_FABRIC_API (absent on the ROCm
+// 7.2 host-test image); without it, p2p.h supplies CU_MEM_HANDLE_TYPE_FABRIC.
+void useFabricHandles() {
+#ifdef HIP_FABRIC_API
+  ncclCuMemHandleType = hipMemHandleTypeFabric;
+#else
+  ncclCuMemHandleType = CU_MEM_HANDLE_TYPE_FABRIC;
+#endif
+}
+
 }  // namespace
 
 TEST_F(GinAnvilReachMicrotest, NullComm_NoFabricMem) {
   EXPECT_FALSE(ginAnvilFabricMemCapable(nullptr));
   EXPECT_FALSE(ginAnvilUseFabricMem(nullptr));
+  EXPECT_FALSE(ginFabricLsaA2ACapable(nullptr, 4));
 }
 
 // Fabric registration needs MNNVL on an MI450, one clique covering the
@@ -68,8 +80,37 @@ TEST_F(GinAnvilReachMicrotest, UseFabricMem_OnlyForMi450SingleCliqueWithCuMem) {
 // rank that did not opt in still joins the plugin's agreement vote.
 TEST_F(GinAnvilReachMicrotest, UseFabricMem_NeedsOptIn) {
   ReachComm rc("gfx1250", 1, 8, 8);
+  // Everything else the lane needs is in place, so only the opt-in keeps it off.
+  rc.comm->devrState.lsaSize = 8;
+  useFabricHandles();
   g_loadParam = [](const char*, int64_t deft) { return deft; };
   EXPECT_FALSE(ginAnvilUseFabricMem(rc.comm.get()));
   EXPECT_TRUE(ginAnvilFabricMemCapable(rc.comm.get()));
+  EXPECT_FALSE(ginFabricLsaA2ACapable(rc.comm.get(), 8));
   EXPECT_FALSE(ginAnvilFabricMemCapable(ReachComm("gfx942", 1, 8, 8).comm.get()));
+}
+
+// The LSA AllToAll lane also needs fabric handles and a GIN and LSA team that
+// both cover the communicator.
+TEST_F(GinAnvilReachMicrotest, FabricLsaA2ACapable_NeedsFabricHandlesAndFullTeams) {
+  ReachComm rc("gfx1250", 1, 8, 8);
+  rc.comm->devrState.lsaSize = 8;
+  EXPECT_FALSE(ginFabricLsaA2ACapable(rc.comm.get(), 8));
+  useFabricHandles();
+  EXPECT_TRUE(ginFabricLsaA2ACapable(rc.comm.get(), 8));
+  EXPECT_FALSE(ginFabricLsaA2ACapable(rc.comm.get(), 4));
+  rc.comm->devrState.lsaSize = 4;
+  EXPECT_FALSE(ginFabricLsaA2ACapable(rc.comm.get(), 8));
+}
+
+// An unset or negative threshold reads as -1.
+TEST_F(GinAnvilReachMicrotest, FabricLsaEnv_OptInAndThreshold) {
+  EXPECT_FALSE(ginAnvilFabricLsaA2AOptIn());
+  EXPECT_EQ(ginAnvilFabricLsaThresholdEnv(), -1);
+  g_loadParam = ParamOverride({{"RCCL_GIN_ANVIL_FABRIC_LSA_A2A", 1},
+                               {"RCCL_GIN_ANVIL_FABRIC_LSA_THRESHOLD_ALLTOALL", 65536}});
+  EXPECT_TRUE(ginAnvilFabricLsaA2AOptIn());
+  EXPECT_EQ(ginAnvilFabricLsaThresholdEnv(), 65536);
+  g_loadParam = ParamOverride({{"RCCL_GIN_ANVIL_FABRIC_LSA_THRESHOLD_ALLTOALL", -5}});
+  EXPECT_EQ(ginAnvilFabricLsaThresholdEnv(), -1);
 }

@@ -39,6 +39,9 @@ struct State {
   int probeResult = 1;
   bool bootstrapFail = false;
   int bootstrapNranks = 1;
+  bool bootstrapPeerThresholdSet = false;
+  size_t bootstrapPeerThreshold = 0;
+  bool bootstrapPeerLsaSetupFail = false;
   std::vector<std::vector<int>> bootstrapIntResults;
   IntraNodeBootstrapCall lastIntraNodeAllGather;
   IntraNodeBootstrapCall lastIntraNodeBarrier;
@@ -57,6 +60,9 @@ struct State {
   bool useFabricMem = false;
   // Topology allows fabric memory even where this rank did not opt in.
   bool fabricMemCapable = false;
+  bool fabricLsaCapable = true;
+  bool fabricLsaOptIn = false;
+  long long fabricLsaThresholdEnv = -1;
   bool fabricAddSelfFail = false;
   bool fabricExchangeFail = false;
   void* fabricPeerBase = reinterpret_cast<void*>(0x80000000ULL);
@@ -89,6 +95,11 @@ void Reset() { g = State{}; }
 void SetProbeResult(int result) { g.probeResult = result; }
 void SetBootstrapFail(bool fail) { g.bootstrapFail = fail; }
 void SetBootstrapNranks(int nranks) { g.bootstrapNranks = nranks; }
+void SetBootstrapPeerThreshold(size_t threshold) {
+  g.bootstrapPeerThresholdSet = true;
+  g.bootstrapPeerThreshold = threshold;
+}
+void SetBootstrapPeerLsaSetupFail(bool fail) { g.bootstrapPeerLsaSetupFail = fail; }
 void SetBootstrapIntResult(const int* values, int count) {
   g.bootstrapIntResults.emplace_back(values, values + count);
 }
@@ -97,6 +108,9 @@ void SetFactoryNullHandles(bool nullHandles) { g.factoryNullHandles = nullHandle
 void SetLsaAddrFail(bool fail) { g.lsaAddrFail = fail; }
 void SetUseFabricMem(bool use) { g.useFabricMem = use; }
 void SetFabricMemCapable(bool capable) { g.fabricMemCapable = capable; }
+void SetFabricLsaCapable(bool capable) { g.fabricLsaCapable = capable; }
+void SetFabricLsaOptIn(bool optIn) { g.fabricLsaOptIn = optIn; }
+void SetFabricLsaThresholdEnv(long long threshold) { g.fabricLsaThresholdEnv = threshold; }
 void SetFabricAddSelfFail(bool fail) { g.fabricAddSelfFail = fail; }
 void SetFabricExchangeFail(bool fail) { g.fabricExchangeFail = fail; }
 void SetFabricPeerBase(void* ptr) { g.fabricPeerBase = ptr; }
@@ -261,6 +275,17 @@ static ncclResult_t stubWideAllGather(void* allData, int nranks, int size) {
     if (p == src || memcmp(p, zero.data(), slot) != 0) continue;
     memcpy(p, src, slot);
   }
+  // The LSA agreement vote starts with size_t threshold and is wider than the
+  // int-only agreements. Override rank 1 after replication to model processes
+  // that parsed different per-rank environment values.
+  if (GinAnvilPluginStubs::g.bootstrapPeerThresholdSet && nranks > 1 && slot >= sizeof(size_t) + sizeof(int)) {
+    memcpy(bytes + slot, &GinAnvilPluginStubs::g.bootstrapPeerThreshold, sizeof(size_t));
+  }
+  // Its setupOk int follows threshold and enabled.
+  if (GinAnvilPluginStubs::g.bootstrapPeerLsaSetupFail && nranks > 1 && slot >= sizeof(size_t) + 2 * sizeof(int)) {
+    const int failed = 0;
+    memcpy(bytes + slot + sizeof(size_t) + sizeof(int), &failed, sizeof(int));
+  }
   return ncclSuccess;
 }
 
@@ -408,6 +433,19 @@ bool ginAnvilUseFabricMem(struct ncclComm* comm) {
   (void)comm;
   return GinAnvilPluginStubs::g.useFabricMem;
 }
+
+bool ginFabricLsaA2ACapable(struct ncclComm* comm, int ginNranks) {
+  if (!GinAnvilPluginStubs::g.useFabricMem || !GinAnvilPluginStubs::g.fabricLsaCapable) return false;
+  if (comm == nullptr) return false;
+  if (ginNranks != comm->nRanks) return false;
+  if (comm->MNNVL == 0) return false;
+  if (comm->devrState.lsaSize != comm->nRanks) return false;
+  return true;
+}
+
+bool ginAnvilFabricLsaA2AOptIn() { return GinAnvilPluginStubs::g.fabricLsaOptIn; }
+
+int64_t ginAnvilFabricLsaThresholdEnv() { return GinAnvilPluginStubs::g.fabricLsaThresholdEnv; }
 
 ncclFabricMemHandler::ncclFabricMemHandler(void* bootstrap, int rank, int nranks, struct ncclMemManager* manager)
   : bootstrap_(bootstrap), rank_(rank), nranks_(nranks), manager_(manager), selfPtr_(nullptr), selfHandle_{},

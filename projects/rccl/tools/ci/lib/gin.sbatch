@@ -15,8 +15,9 @@
 #   1. consume ROCm (provisioned on the head node) via .ci-out/rocm.env
 #   2. lib/build-ompi.sh      build OpenMPI (--with-rocm) -> ompi.env
 #   3. projects/rccl  install.sh  build RCCL (GIN), then build
-#      rccl-UnitTestsFixtures, the ConnCheck host/device tests, and
-#      rccl-UnitTestsGinSdmaBroadcastPolicy -> rccl.env
+#      rccl-UnitTestsFixtures, the ConnCheck host/device tests,
+#      rccl-UnitTestsGinSdmaBroadcastPolicy, and
+#      rccl-UnitTestsGinFabricLsaPolicy -> rccl.env
 #   4. projects/rccl-tests        build rccl-tests (DEVICE_API + GIN)
 #   5. rccl-UnitTestsGinAnvilSdmaFactory  SDMA factory gtest (single-node)
 #   6. run-gin-ci.sh              run the GIN tests (non-gating)
@@ -116,6 +117,7 @@ rccl_fixtures_bin="${rccl_build}/test/rccl-UnitTestsFixtures"
 rccl_conn_plugin_bin="${rccl_build}/test/rccl-UnitTestsGinAnvilPlugin"
 rccl_conn_device_bin="${rccl_build}/test/rccl-UnitTestsGinAnvilConnCheckDevice"
 rccl_bcast_policy_ut_bin="${rccl_build}/test/rccl-UnitTestsGinSdmaBroadcastPolicy"
+rccl_fabric_lsa_policy_ut_bin="${rccl_build}/test/rccl-UnitTestsGinFabricLsaPolicy"
 rccl_mpi_ut_bin="${rccl_build}/test/rccl-UnitTestsMPI"
 rm -rf "${rccl_prefix}"
 (
@@ -199,7 +201,7 @@ assert_conn_check_kernels_in_fatbin() {
 assert_conn_check_kernels_in_fatbin "${librccl}"
 echo "    conn-check kernels present in ${librccl} .hip_fatbin"
 
-echo "==> [3/6] build fixtures, ConnCheck, GinSdmaBroadcastPolicy, GinAnvilSdmaFactory, and UnitTestsMPI"
+echo "==> [3/6] build fixtures, ConnCheck, GinSdmaBroadcastPolicy, GinFabricLsaPolicy, GinAnvilSdmaFactory, and UnitTestsMPI"
 (
   cd "${rccl_build}"
   # ENABLE_MPI_TESTS is what creates the rccl-UnitTestsMPI target (test/
@@ -220,6 +222,7 @@ echo "==> [3/6] build fixtures, ConnCheck, GinSdmaBroadcastPolicy, GinAnvilSdmaF
     rccl-UnitTestsGinRocshmemGdaPlugin \
     rccl-UnitTestsGinAnvilConnCheckDevice \
     rccl-UnitTestsGinSdmaBroadcastPolicy \
+    rccl-UnitTestsGinFabricLsaPolicy \
     rccl-UnitTestsGinAnvilSdmaFactory \
     rccl-UnitTestsMPI
 )
@@ -231,6 +234,11 @@ fi
 if [[ ! -x "${rccl_bcast_policy_ut_bin}" ]]; then
   echo "ERROR: rccl-UnitTestsGinSdmaBroadcastPolicy not built at ${rccl_bcast_policy_ut_bin}" >&2
   ls -la "$(dirname "${rccl_bcast_policy_ut_bin}")" 2>/dev/null >&2 || true
+  exit 1
+fi
+if [[ ! -x "${rccl_fabric_lsa_policy_ut_bin}" ]]; then
+  echo "ERROR: rccl-UnitTestsGinFabricLsaPolicy not built at ${rccl_fabric_lsa_policy_ut_bin}" >&2
+  ls -la "$(dirname "${rccl_fabric_lsa_policy_ut_bin}")" 2>/dev/null >&2 || true
   exit 1
 fi
 if [[ ! -x "${rccl_conn_plugin_bin}" || ! -x "${rccl_conn_device_bin}" ]]; then
@@ -245,6 +253,7 @@ if [[ ! -x "${rccl_mpi_ut_bin}" ]]; then
 fi
 echo "    rccl-UnitTestsFixtures: ${rccl_fixtures_bin}"
 echo "    rccl-UnitTestsGinSdmaBroadcastPolicy: ${rccl_bcast_policy_ut_bin}"
+echo "    rccl-UnitTestsGinFabricLsaPolicy: ${rccl_fabric_lsa_policy_ut_bin}"
 echo "    rccl-UnitTestsGinAnvilPlugin: ${rccl_conn_plugin_bin}"
 echo "    rccl-UnitTestsGinAnvilConnCheckDevice: ${rccl_conn_device_bin}"
 echo "    rccl-UnitTestsMPI: ${rccl_mpi_ut_bin}"
