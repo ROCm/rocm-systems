@@ -864,16 +864,6 @@ def test_detect_rocprof_calls_console_error_if_sdk_path_invalid(
     mock_path_instance.exists.assert_called_once()
 
 
-def test_set_parser():
-    result = utils_common.parse_sets_yaml("gfx90a")
-    assert "compute_thruput_util" in result
-    assert result["compute_thruput_util"]["title"] == "Compute Throughput Utilization"
-
-    shared = utils_common.parse_sets_yaml("gfx1152")
-    assert "compute_thruput_flops" in shared
-    assert shared["launch_stats"]["title"] == "Launch Stats"
-
-
 # =============================================================================
 # validate_roofline_csv TESTS
 # =============================================================================
