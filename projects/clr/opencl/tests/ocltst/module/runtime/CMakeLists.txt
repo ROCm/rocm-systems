@@ -46,6 +46,7 @@ set(TESTS
     OCLSVM
     OCLThreadTrace
     OCLUnalignedCopy
+    OCLUserEventFailure
     OCLCreatePipe
 )
 

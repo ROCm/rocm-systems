@@ -52,6 +52,7 @@
 #include "OCLStablePState.h"
 #include "OCLThreadTrace.h"
 #include "OCLUnalignedCopy.h"
+#include "OCLUserEventFailure.h"
 #include "OCLCreatePipe.h"
 
 //
@@ -96,6 +97,7 @@ TestEntry TestList[] = {
     TEST(OCLDynamicBLines),
     TEST(OCLEmptyDeviceEnqueue),
     TEST(OCLUnalignedCopy),
+    TEST(OCLUserEventFailure),
     TEST(OCLBlitKernel),
     TEST(OCLRTQueue),
     TEST(OCLAsyncMap),
