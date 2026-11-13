@@ -8,23 +8,42 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
 #include <cstdlib>
+#include <functional>
 #include <initializer_list>
+#include <type_traits>
 #include <vector>
 
 #include "ScopedHook.h"
+#include "HostAllocLedger.h"
 #include "fakes/hip_fakes.h"
+#include "fakes/libc_fakes.h"
 #include "fakes/nccl_fakes.h"
 #include "fakes/os_fakes.h"
 #include "fakes/socket_fakes.h"
 #include "transport/RmaSocketTest.h"
 
+#undef ncclCalloc
+#define ncclCalloc(...) g_hostAllocs.Calloc(__VA_ARGS__)
+#include "fakes/libc_seam.h"
 #include RMA_SOCKET_SETUP_CC_PATH
+#include "fakes/libc_seam_undef.h"
+#undef ncclCalloc
 
 namespace {
 
 using rma_socket_test::Scene;
+
+template <typename Connect, typename... Arguments>
+ncclResult_t ConnectWithoutAbort(Connect connect, Arguments... arguments) {
+  if constexpr (std::is_invocable_v<Connect, Arguments..., volatile uint32_t*>) {
+    return connect(arguments..., nullptr);
+  } else {
+    return connect(arguments...);
+  }
+}
 
 class ScopedConnectHandshake {
  private:
@@ -44,6 +63,7 @@ class ScopedConnectHandshake {
              [this](ncclSocket* sock, const ncclSocketAddress* addr, uint64_t magic, ncclSocketType,
                     volatile uint32_t*, int, int) {
                if (addr != nullptr) outgoingConnects.push_back({sock, addr, magic});
+               else temporarySocket = sock;
                return ncclSuccess;
              }),
         connect(g_ncclSocketConnect, [](ncclSocket*) { return ncclSuccess; }),
@@ -79,7 +99,10 @@ class ScopedConnectHandshake {
           dst->magic = src->magic;
           src->magic = 0;
         }),
-        close(g_ncclSocketClose, [](ncclSocket*, bool) { return ncclSuccess; }) {}
+        close(g_ncclSocketClose, [this](ncclSocket* sock, bool) {
+          closedSockets.push_back(sock);
+          return ncclSuccess;
+        }) {}
 
   struct OutgoingConnect {
     ncclSocket* sock;
@@ -89,6 +112,8 @@ class ScopedConnectHandshake {
 
   std::vector<int> sentRanks;
   std::vector<OutgoingConnect> outgoingConnects;
+  ncclSocket* temporarySocket = nullptr;
+  std::vector<ncclSocket*> closedSockets;
   ScopedHook<ncclResult_t(ncclSocket*, const ncclSocketAddress*, uint64_t, ncclSocketType, volatile uint32_t*, int,
                           int)>
       init;
@@ -103,15 +128,98 @@ class ScopedConnectHandshake {
 
 class RmaSocketSetupMicrotest : public ::testing::Test {
  protected:
-  void SetUp() override { g_hipAsyncOpsResult = hipSuccess; }
+  void SetUp() override {
+    g_hipAsyncOpsResult = hipSuccess;
+    g_hostAllocs.Reset();
+    ResetLibcFakes();
+    g_free = [](void* pointer) {
+      if (g_hostAllocs.live.count(pointer)) g_hostAllocs.Free(pointer);
+      else std::free(pointer);
+    };
+  }
 
   void TearDown() override {
+    EXPECT_TRUE(g_hostAllocs.Clean()) << g_hostAllocs.Summary();
+    for (const auto& allocation : g_hostAllocs.live) std::free(allocation.first);
+    g_hostAllocs.Reset();
     ResetSocketFakes();
     ResetOsFakes();
     ResetHipFakes();
     ResetNcclFakes();
+    ResetLibcFakes();
+  }
+
+  template <typename Signature>
+  void CheckConnectFailure(std::function<Signature>& target, int failCall, int expectedCloses,
+                           bool expectTemporaryClose = false) {
+    ncclSocket listen{};
+    std::array<ncclRmaSocketProxyHandle, 2> handleStorage{};
+    std::array<void*, 2> handles{{&handleStorage[0], &handleStorage[1]}};
+    ScopedConnectHandshake handshake({1, 0});
+    const auto original = target;
+    int attempts = 0;
+    ScopedHook failure(target, [&, original](auto... arguments) {
+      if (++attempts == failCall) return ncclRemoteError;
+      return original(arguments...);
+    });
+    std::vector<void*> allocations;
+    ScopedHook allocate(g_hipHostMalloc, [&](void** output, size_t size, unsigned) {
+      *output = std::calloc(1, size);
+      allocations.push_back(*output);
+      return *output ? hipSuccess : hipErrorOutOfMemory;
+    });
+    ScopedHook release(g_hipHostFree, [&](void* pointer) {
+      auto found = std::find(allocations.begin(), allocations.end(), pointer);
+      EXPECT_NE(found, allocations.end());
+      if (found != allocations.end()) {
+        allocations.erase(found);
+        std::free(pointer);
+      }
+      return hipSuccess;
+    });
+    void* output = &listen;
+
+    EXPECT_EQ(ConnectWithoutAbort(ncclRmaSocketProxyConnect, nullptr, handles.data(), 2, 1, &listen, &output),
+              ncclRemoteError);
+    EXPECT_EQ(output, nullptr);
+    EXPECT_EQ(failure.calls, failCall);
+    EXPECT_EQ(handshake.close.calls, expectedCloses);
+    EXPECT_EQ(allocate.calls, 4);
+    EXPECT_EQ(release.calls, 4);
+    EXPECT_TRUE(allocations.empty());
+    EXPECT_EQ(std::count(handshake.closedSockets.begin(), handshake.closedSockets.end(), &listen), 0);
+    if (expectTemporaryClose) {
+      ASSERT_NE(handshake.temporarySocket, nullptr);
+      EXPECT_EQ(std::count(handshake.closedSockets.begin(), handshake.closedSockets.end(),
+                           handshake.temporarySocket), 1);
+    }
   }
 };
+
+TEST_F(RmaSocketSetupMicrotest, Connect_IncomingInitFailureReleasesPeerResources) {
+  ASSERT_NO_FATAL_FAILURE(CheckConnectFailure(g_ncclSocketInit, 3, 4));
+  ASSERT_NO_FATAL_FAILURE(CheckConnectFailure(g_ncclSocketInit, 4, 4));
+}
+
+TEST_F(RmaSocketSetupMicrotest, Connect_SecondConnectFailureReleasesPeerResources) {
+  ASSERT_NO_FATAL_FAILURE(CheckConnectFailure(g_ncclSocketConnect, 2, 4));
+}
+
+TEST_F(RmaSocketSetupMicrotest, Connect_SecondSendFailureReleasesPeerResources) {
+  ASSERT_NO_FATAL_FAILURE(CheckConnectFailure(g_ncclSocketSend, 2, 4));
+}
+
+TEST_F(RmaSocketSetupMicrotest, Connect_SecondAcceptFailureAlsoClosesTemporarySocket) {
+  ASSERT_NO_FATAL_FAILURE(CheckConnectFailure(g_ncclSocketAccept, 2, 5, true));
+}
+
+TEST_F(RmaSocketSetupMicrotest, Connect_SecondReadyFailureAlsoClosesTemporarySocket) {
+  ASSERT_NO_FATAL_FAILURE(CheckConnectFailure(g_ncclSocketReady, 2, 5, true));
+}
+
+TEST_F(RmaSocketSetupMicrotest, Connect_SecondRecvFailureAlsoClosesTemporarySocket) {
+  ASSERT_NO_FATAL_FAILURE(CheckConnectFailure(g_ncclSocketRecv, 2, 5, true));
+}
 
 ncclRmaSocketProxyCollComm* AllocateOwnedComm(int nranks) {
   auto* comm = static_cast<ncclRmaSocketProxyCollComm*>(std::calloc(1, sizeof(ncclRmaSocketProxyCollComm)));
@@ -132,10 +240,10 @@ ncclRmaSocketProxyCollComm* AllocateOwnedComm(int nranks) {
 
 // Frees AllocateOwnedComm's arrays and any send queue grown since, without the socket teardown CloseColl runs.
 void FreeOwnedComm(ncclRmaSocketProxyCollComm* comm) {
-  for (int peer = 0; peer < comm->nranks; ++peer) std::free(comm->peerSender[peer].tasks);
-  std::free(comm->peerSender);
-  std::free(comm->peerReceiver);
-  std::free(comm);
+  for (int peer = 0; peer < comm->nranks; ++peer) g_free(comm->peerSender[peer].tasks);
+  g_free(comm->peerSender);
+  g_free(comm->peerReceiver);
+  g_free(comm);
 }
 
 void FreeRejectedComm(ncclRmaSocketProxyCollComm* comm) {
@@ -201,14 +309,19 @@ TEST_F(RmaSocketSetupMicrotest, Connect_InvalidArgumentsAreRejectedWithoutPublis
   void* handles[] = {&handle};
   void* collComm = reinterpret_cast<void*>(0x1);
 
-  EXPECT_EQ(ncclRmaSocketProxyConnect(nullptr, nullptr, 1, 0, &listen, &collComm), ncclInvalidArgument);
+  EXPECT_EQ(ConnectWithoutAbort(ncclRmaSocketProxyConnect, nullptr, nullptr, 1, 0, &listen, &collComm),
+            ncclInvalidArgument);
   EXPECT_EQ(collComm, reinterpret_cast<void*>(0x1));
-  EXPECT_EQ(ncclRmaSocketProxyConnect(nullptr, handles, 1, 0, nullptr, &collComm), ncclInvalidArgument);
+  EXPECT_EQ(ConnectWithoutAbort(ncclRmaSocketProxyConnect, nullptr, handles, 1, 0, nullptr, &collComm),
+            ncclInvalidArgument);
   EXPECT_EQ(collComm, reinterpret_cast<void*>(0x1));
-  EXPECT_EQ(ncclRmaSocketProxyConnect(nullptr, handles, 1, 0, &listen, nullptr), ncclInvalidArgument);
-  EXPECT_EQ(ncclRmaSocketProxyConnect(nullptr, handles, 1, -1, &listen, &collComm), ncclInvalidArgument);
+  EXPECT_EQ(ConnectWithoutAbort(ncclRmaSocketProxyConnect, nullptr, handles, 1, 0, &listen, nullptr),
+            ncclInvalidArgument);
+  EXPECT_EQ(ConnectWithoutAbort(ncclRmaSocketProxyConnect, nullptr, handles, 1, -1, &listen, &collComm),
+            ncclInvalidArgument);
   EXPECT_EQ(collComm, reinterpret_cast<void*>(0x1));
-  EXPECT_EQ(ncclRmaSocketProxyConnect(nullptr, handles, 1, 1, &listen, &collComm), ncclInvalidArgument);
+  EXPECT_EQ(ConnectWithoutAbort(ncclRmaSocketProxyConnect, nullptr, handles, 1, 1, &listen, &collComm),
+            ncclInvalidArgument);
   EXPECT_EQ(collComm, reinterpret_cast<void*>(0x1));
 }
 
@@ -222,7 +335,8 @@ TEST_F(RmaSocketSetupMicrotest, Connect_AllPeersConnectedBuildsBidirectionalPeer
   ScopedConnectHandshake handshake({1, 0}, /*firstMagic=*/100, /*readyPollsPerPeer=*/2);
   void* opaque = nullptr;
 
-  ASSERT_EQ(ncclRmaSocketProxyConnect(nullptr, handles.data(), nranks, 0, &listen, &opaque), ncclSuccess);
+  ASSERT_EQ(ConnectWithoutAbort(ncclRmaSocketProxyConnect, nullptr, handles.data(), nranks, 0, &listen, &opaque),
+            ncclSuccess);
   auto* comm = static_cast<ncclRmaSocketProxyCollComm*>(opaque);
   ASSERT_NE(comm, nullptr);
   EXPECT_EQ(comm->rank, 0);
@@ -262,7 +376,8 @@ TEST_F(RmaSocketSetupMicrotest, Connect_MissingPeerHandleReturnsErrorAndLeavesOu
   void* opaque = reinterpret_cast<void*>(0x1);
   ScopedHook close(g_ncclSocketClose, [](ncclSocket*, bool) { return ncclSuccess; });
 
-  EXPECT_EQ(ncclRmaSocketProxyConnect(nullptr, handles, 1, 0, &listen, &opaque), ncclInvalidArgument);
+  EXPECT_EQ(ConnectWithoutAbort(ncclRmaSocketProxyConnect, nullptr, handles, 1, 0, &listen, &opaque),
+            ncclInvalidArgument);
   EXPECT_EQ(opaque, nullptr);
   EXPECT_EQ(close.calls, 2);
 }
@@ -274,7 +389,8 @@ TEST_F(RmaSocketSetupMicrotest, Connect_InvalidAcceptedRankReturnsErrorAndCleans
   void* opaque = reinterpret_cast<void*>(0x1);
   ScopedConnectHandshake handshake({1});
 
-  EXPECT_EQ(ncclRmaSocketProxyConnect(nullptr, handles, 1, 0, &listen, &opaque), ncclInternalError);
+  EXPECT_EQ(ConnectWithoutAbort(ncclRmaSocketProxyConnect, nullptr, handles, 1, 0, &listen, &opaque),
+            ncclInternalError);
   EXPECT_EQ(opaque, nullptr);
   EXPECT_EQ(handshake.move.calls, 0);
   EXPECT_EQ(handshake.close.calls, 3);
@@ -288,7 +404,8 @@ TEST_F(RmaSocketSetupMicrotest, Connect_DuplicateAcceptedRankReturnsErrorAndClea
   void* opaque = reinterpret_cast<void*>(0x1);
   ScopedConnectHandshake handshake({0, 0}, /*firstMagic=*/99);
 
-  EXPECT_EQ(ncclRmaSocketProxyConnect(nullptr, handles.data(), nranks, 0, &listen, &opaque), ncclInternalError);
+  EXPECT_EQ(ConnectWithoutAbort(ncclRmaSocketProxyConnect, nullptr, handles.data(), nranks, 0, &listen, &opaque),
+            ncclInternalError);
   EXPECT_EQ(opaque, nullptr);
   EXPECT_EQ(handshake.move.calls, 1);
   EXPECT_EQ(handshake.close.calls, nranks * 2 + 1);
@@ -340,6 +457,27 @@ TEST_F(RmaSocketSetupMicrotest, CreateAndDestroyContext_PublishesRequestsAndUpda
 
   EXPECT_EQ(ncclRmaSocketProxyDestroyContext(contexts), ncclSuccess);
   EXPECT_EQ(comm->nContexts, 0);
+  FreeOwnedComm(comm);
+}
+
+TEST_F(RmaSocketSetupMicrotest, CreateContext_QueueCapacityOverflowDoesNotPublishContexts) {
+  auto* comm = AllocateOwnedComm(2);
+  ASSERT_NE(comm, nullptr);
+  const int existingContexts = INT_MAX / (2 * NCCL_RMA_SOCKET_MAX_REQUESTS_PER_PEER);
+  comm->nContexts = existingContexts;
+  ncclRmaConfig_t config{};
+  config.nContexts = 2;
+  config.rankStride = 1;
+  void* output = nullptr;
+
+  EXPECT_EQ(ncclRmaSocketProxyCreateContext(comm, &config, &output), ncclInvalidArgument);
+
+  EXPECT_EQ(output, nullptr);
+  EXPECT_EQ(comm->nContexts, existingContexts);
+  EXPECT_EQ(comm->peerSender[0].capacity, 0);
+  EXPECT_EQ(comm->peerSender[1].capacity, 0);
+  EXPECT_EQ(g_hostAllocs.calls, 3);
+  EXPECT_TRUE(g_hostAllocs.Clean()) << g_hostAllocs.Summary();
   FreeOwnedComm(comm);
 }
 

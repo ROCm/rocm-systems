@@ -3436,6 +3436,7 @@ rccl_add_transport_micro_binary(rccl-UnitTestsMicroTransportRmaSocketSetup rma-s
     fakes/comm_fakes.cc
     fakes/env_fakes.cc
     fakes/hip_fakes.cc
+    fakes/libc_fakes.cc
     fakes/nccl_fakes.cc
     fakes/os_fakes.cc
     fakes/socket_fakes.cc
