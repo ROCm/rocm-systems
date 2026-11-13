@@ -1,15 +1,31 @@
 #ifndef RCCL_TEST_HOST_RAS_DIAGNOSTICS_TEST_SUPPORT_H_
 #define RCCL_TEST_HOST_RAS_DIAGNOSTICS_TEST_SUPPORT_H_
 
+#include <cstring>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "comm.h"
 #include "ras/diagnostics.h"
+#include "ras/diagnostics_checks_common.h"
 #include "fakes/ras_registry_test_support.h"
 
 namespace ras_test {
+
+template <typename Payload>
+std::vector<char> BuildRecords(const std::vector<std::pair<rasDiagnosticsRankHeader, Payload>>& records) {
+  const size_t stride = rasDiagnosticsLocalRecordStride(sizeof(Payload));
+  std::vector<char> data(records.size() * stride, 0);
+  size_t offset = 0;
+  for (const auto& record : records) {
+    std::memcpy(data.data() + offset, &record.first, sizeof(record.first));
+    std::memcpy(data.data() + offset + sizeof(record.first), &record.second, sizeof(record.second));
+    offset += stride;
+  }
+  return data;
+}
 
 struct OwnedComm {
   OwnedComm(uint64_t commHash, uint64_t hostHash, uint64_t pidHash, int rank, bool peerInfoValid = true)
