@@ -382,6 +382,84 @@ __device__ int rocshmem_ctx_alltoallmem_wave(rocshmem_ctx_t ctx,
 __device__ ATTR_NO_INLINE int rocshmem_float_alltoall_wave(
     rocshmem_team_t team, float *dest, const float *source, int nelems);
 
+__device__ ATTR_NO_INLINE int rocshmem_ctx_bfloat16_alltoall_wave(
+    rocshmem_ctx_t ctx, rocshmem_team_t team, __hip_bfloat16 *dest,
+    const __hip_bfloat16 *source, int nelems);
+
+__device__ ATTR_NO_INLINE int rocshmem_half_alltoall_wave(
+    rocshmem_team_t team, __half *dest, const __half *source, int nelems);
+
+__device__ ATTR_NO_INLINE int rocshmem_bfloat16_alltoall_wave(
+    rocshmem_team_t team, __hip_bfloat16 *dest, const __hip_bfloat16 *source, int nelems);
+
+__device__ ATTR_NO_INLINE int rocshmem_int8_alltoall_wave(
+    rocshmem_team_t team, int8_t *dest, const int8_t *source, int nelems);
+
+__device__ ATTR_NO_INLINE int rocshmem_int16_alltoall_wave(
+    rocshmem_team_t team, int16_t *dest, const int16_t *source, int nelems);
+
+__device__ ATTR_NO_INLINE int rocshmem_int32_alltoall_wave(
+    rocshmem_team_t team, int32_t *dest, const int32_t *source, int nelems);
+
+__device__ ATTR_NO_INLINE int rocshmem_int64_alltoall_wave(
+    rocshmem_team_t team, int64_t *dest, const int64_t *source, int nelems);
+
+__device__ ATTR_NO_INLINE int rocshmem_uint8_alltoall_wave(
+    rocshmem_team_t team, uint8_t *dest, const uint8_t *source, int nelems);
+
+__device__ ATTR_NO_INLINE int rocshmem_uint16_alltoall_wave(
+    rocshmem_team_t team, uint16_t *dest, const uint16_t *source, int nelems);
+
+__device__ ATTR_NO_INLINE int rocshmem_uint32_alltoall_wave(
+    rocshmem_team_t team, uint32_t *dest, const uint32_t *source, int nelems);
+
+__device__ ATTR_NO_INLINE int rocshmem_uint64_alltoall_wave(
+    rocshmem_team_t team, uint64_t *dest, const uint64_t *source, int nelems);
+
+__device__ ATTR_NO_INLINE int rocshmem_size_alltoall_wave(
+    rocshmem_team_t team, size_t *dest, const size_t *source, int nelems);
+
+__device__ ATTR_NO_INLINE int rocshmem_ptrdiff_alltoall_wave(
+    rocshmem_team_t team, ptrdiff_t *dest, const ptrdiff_t *source, int nelems);
+
+__device__ ATTR_NO_INLINE int rocshmem_ctx_uint32_alltoall_wave(
+    rocshmem_ctx_t ctx, rocshmem_team_t team, uint32_t *dest,
+    const uint32_t *source, int nelems);
+
+__device__ ATTR_NO_INLINE int rocshmem_ctx_uint64_alltoall_wave(
+    rocshmem_ctx_t ctx, rocshmem_team_t team, uint64_t *dest,
+    const uint64_t *source, int nelems);
+
+__device__ ATTR_NO_INLINE int rocshmem_ctx_size_alltoall_wave(
+    rocshmem_ctx_t ctx, rocshmem_team_t team, size_t *dest,
+    const size_t *source, int nelems);
+
+__device__ ATTR_NO_INLINE int rocshmem_ctx_ptrdiff_alltoall_wave(
+    rocshmem_ctx_t ctx, rocshmem_team_t team, ptrdiff_t *dest,
+    const ptrdiff_t *source, int nelems);
+
+/**
+ * @name ROCSHMEM_ALLTOALLMEM_WAVE
+ * @brief Exchanges a fixed amount of contiguous data blocks between all pairs
+ * of PEs participating in the collective routine.
+ *
+ * This function must be called as a wave collective.
+ *
+ * @param[in] ctx          The ROCSHMEM context associated with this operation.
+ * @param[in] team         The team participating in the collective.
+ * @param[in] dest         Destination address. Must be an address on the
+ *                         symmetric heap.
+ * @param[in] source       Source address. Must be an address on the symmetric
+ *                         heap.
+ * @param[in] nelems       Number of data blocks transferred per pair of PEs.
+ *
+ * @return int; zero on success, non-zero otherwise
+ */
+__device__ int rocshmem_ctx_alltoallmem_wave(rocshmem_ctx_t ctx,
+    rocshmem_team_t team, void *dest, const void *source, int nelems);
+__device__ ATTR_NO_INLINE int rocshmem_float_alltoall_wave(
+    rocshmem_team_t team, float *dest, const float *source, int nelems);
+
 __device__ ATTR_NO_INLINE int rocshmem_double_alltoall_wave(
     rocshmem_team_t team, double *dest, const double *source, int nelems);
 
@@ -453,22 +531,6 @@ __device__ ATTR_NO_INLINE int rocshmem_size_alltoall_wave(
 
 __device__ ATTR_NO_INLINE int rocshmem_ptrdiff_alltoall_wave(
     rocshmem_team_t team, ptrdiff_t *dest, const ptrdiff_t *source, int nelems);
-
-__device__ ATTR_NO_INLINE int rocshmem_ctx_uint32_alltoall_wave(
-    rocshmem_ctx_t ctx, rocshmem_team_t team, uint32_t *dest,
-    const uint32_t *source, int nelems);
-
-__device__ ATTR_NO_INLINE int rocshmem_ctx_uint64_alltoall_wave(
-    rocshmem_ctx_t ctx, rocshmem_team_t team, uint64_t *dest,
-    const uint64_t *source, int nelems);
-
-__device__ ATTR_NO_INLINE int rocshmem_ctx_size_alltoall_wave(
-    rocshmem_ctx_t ctx, rocshmem_team_t team, size_t *dest,
-    const size_t *source, int nelems);
-
-__device__ ATTR_NO_INLINE int rocshmem_ctx_ptrdiff_alltoall_wave(
-    rocshmem_ctx_t ctx, rocshmem_team_t team, ptrdiff_t *dest,
-    const ptrdiff_t *source, int nelems);
 
 /**
  * @name ROCSHMEM_ALLTOALLMEM_WAVE

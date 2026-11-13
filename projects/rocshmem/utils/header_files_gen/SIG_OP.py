@@ -89,6 +89,8 @@ def generate_signal_api():
 
     return "".join([signaling_api_dec(suffix) for suffix in suffixes])
 
+def fetch_api_dec(suffix):
+    return f"__device__ ATTR_NO_INLINE uint64_t rocshmem_signal_fetch{suffix}(const uint64_t *sig_addr);\n"
 
 def signal_op_dec(operation):
     return (
