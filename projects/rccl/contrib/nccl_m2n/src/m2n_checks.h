@@ -112,28 +112,34 @@ static inline bool m2nSameTensorTopology(const ncclDistTensor_t& a, const ncclDi
 
 #define NCCL_M2N_CUDACHECK(cmd) NCCL_M2N_CUDACHECK_IMPL(cmd, NCCL_M2N_UNIQUE(m2nCudaError_))
 
-/* HIP rejects a cudaMemcpy3DAsync whose source or destination pitch is >= INT32_MAX bytes with
- * cudaErrorInvalidValue. A >= 2 GiB contiguous pack/unpack span or a >= 2 GiB outer stride produces one; issue
- * such copies row by row instead. Rows are then >= 2 GiB apart, so there are few of them. */
+/* cudaMemcpy3DAsync rejects a source or destination pitch above cudaDevAttrMaxPitch (INT32_MAX on current GPUs;
+ * HIP also rejects a pitch equal to it). A >= 2 GiB contiguous pack/unpack span or a >= 2 GiB outer stride
+ * produces one. Such a copy is issued as one flat cudaMemcpyAsync when it is contiguous on both sides, else row by
+ * row: rows are then >= 2 GiB apart, so there are few of them. */
 inline cudaError_t m2nMemcpy3DAsync(const cudaMemcpy3DParms* p, cudaStream_t stream) {
-#if !defined(__HIP_PLATFORM_AMD__)
-  return cudaMemcpy3DAsync(p, stream);
-#else
-  const size_t maxPitch = 0x7fffffff;
-  if (p->srcPtr.pitch < maxPitch && p->dstPtr.pitch < maxPitch) return cudaMemcpy3DAsync(p, stream);
+  int dev = 0, attr = 0;
+  size_t maxPitch = 0x7fffffff;
+  if (cudaGetDevice(&dev) == cudaSuccess && cudaDeviceGetAttribute(&attr, cudaDevAttrMaxPitch, dev) == cudaSuccess &&
+      attr > 0)
+    maxPitch = (size_t)attr;
   const cudaPitchedPtr& s = p->srcPtr;
   const cudaPitchedPtr& d = p->dstPtr;
+  if (s.pitch < maxPitch && d.pitch < maxPitch) return cudaMemcpy3DAsync(p, stream);
+  const cudaExtent& e = p->extent;
   char* srcBase = (char*)s.ptr + (p->srcPos.z * s.ysize + p->srcPos.y) * s.pitch + p->srcPos.x;
   char* dstBase = (char*)d.ptr + (p->dstPos.z * d.ysize + p->dstPos.y) * d.pitch + p->dstPos.x;
-  for (size_t z = 0; z < p->extent.depth; z++) {
-    for (size_t y = 0; y < p->extent.height; y++) {
-      cudaError_t e = cudaMemcpyAsync(dstBase + (z * d.ysize + y) * d.pitch, srcBase + (z * s.ysize + y) * s.pitch,
-                                      p->extent.width, p->kind, stream);
-      if (e != cudaSuccess) return e;
+  const bool flat = e.height * e.depth == 1 ||
+                    (s.pitch == e.width && d.pitch == e.width &&
+                     (e.depth == 1 || (s.ysize == e.height && d.ysize == e.height)));
+  if (flat) return cudaMemcpyAsync(dstBase, srcBase, e.width * e.height * e.depth, p->kind, stream);
+  for (size_t z = 0; z < e.depth; z++) {
+    for (size_t y = 0; y < e.height; y++) {
+      cudaError_t err = cudaMemcpyAsync(dstBase + (z * d.ysize + y) * d.pitch, srcBase + (z * s.ysize + y) * s.pitch,
+                                        e.width, p->kind, stream);
+      if (err != cudaSuccess) return err;
     }
   }
   return cudaSuccess;
-#endif
 }
 
 #define NCCL_M2N_CHECK_ARG(cond, rank, ...) \

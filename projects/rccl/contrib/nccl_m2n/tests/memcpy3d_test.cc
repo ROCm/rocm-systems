@@ -35,16 +35,18 @@ protected:
     return cudaMemGetInfo(&freeBytes, &total) == cudaSuccess && freeBytes > bytes + kGiB;
   }
 
+  /* The setup writes go to the default stream, which a non-blocking stream does not wait for. */
   char* alloc(size_t bytes, int value) {
     void* p = nullptr;
     if (cudaMalloc(&p, bytes) != cudaSuccess) return nullptr;
     buffers.push_back(p);
-    if (cudaMemset(p, value, bytes) != cudaSuccess) return nullptr;
+    if (cudaMemset(p, value, bytes) != cudaSuccess || cudaDeviceSynchronize() != cudaSuccess) return nullptr;
     return (char*)p;
   }
 
   static void put(char* dev, size_t offset, uint64_t value) {
     ASSERT_EQ(cudaSuccess, cudaMemcpy(dev + offset, &value, sizeof(value), cudaMemcpyHostToDevice));
+    ASSERT_EQ(cudaSuccess, cudaDeviceSynchronize());
   }
 
   static uint64_t get(const char* dev, size_t offset) {
@@ -54,7 +56,7 @@ protected:
   }
 };
 
-/* A fully contiguous span past 2 GiB is one row whose pitch is its >= 2^31 width, which hipMemcpy3DAsync rejects. */
+/* A fully contiguous span past 2 GiB is one row whose pitch is its width, past cudaDevAttrMaxPitch. */
 TEST_F(Memcpy3DTest, ContiguousRowAbove2GiB) {
   const size_t width = 2 * kGiB + 4096;
   if (!haveFree(2 * width)) GTEST_SKIP() << "needs " << 2 * width << " B of free device memory";
@@ -75,6 +77,90 @@ TEST_F(Memcpy3DTest, ContiguousRowAbove2GiB) {
 
   for (size_t i = 0; i < sizeof(probes) / sizeof(probes[0]); i++) EXPECT_EQ(0x1000 + i, get(dst, probes[i]));
   EXPECT_EQ(0x5a5a5a5a5a5a5a5aull, get(dst, 3 * (kGiB / 2)));
+}
+
+/* A row of exactly INT32_MAX bytes: CUDA documents pitch > max as the error, HIP also rejects pitch == max. */
+TEST_F(Memcpy3DTest, ContiguousRowAtMaxPitch) {
+  const size_t width = 0x7fffffff;
+  if (!haveFree(2 * width)) GTEST_SKIP() << "needs " << 2 * width << " B of free device memory";
+  char* src = alloc(width, 0x77);
+  char* dst = alloc(width, 0);
+  ASSERT_NE(src, nullptr);
+  ASSERT_NE(dst, nullptr);
+  put(src, 0, 0x1234);
+  put(src, width - 8, 0x5678);
+
+  cudaMemcpy3DParms cp = {};
+  cp.kind = cudaMemcpyDeviceToDevice;
+  cp.srcPtr = make_cudaPitchedPtr(src, width, width, 1);
+  cp.dstPtr = make_cudaPitchedPtr(dst, width, width, 1);
+  cp.extent = make_cudaExtent(width, 1, 1);
+  ASSERT_EQ(cudaSuccess, m2nMemcpy3DAsync(&cp, stream));
+  ASSERT_EQ(cudaSuccess, cudaStreamSynchronize(stream));
+
+  EXPECT_EQ(0x1234ull, get(dst, 0));
+  EXPECT_EQ(0x5678ull, get(dst, width - 8));
+  EXPECT_EQ(0x7777777777777777ull, get(dst, kGiB));
+}
+
+/* Back-to-back rows past 2 GiB, contiguous on both sides: one flat copy of every row. */
+TEST_F(Memcpy3DTest, ContiguousRowsAbove2GiB) {
+  const size_t width = 2 * kGiB + 256;
+  const size_t rows = 2;
+  if (!haveFree(2 * rows * width)) GTEST_SKIP() << "needs " << 2 * rows * width << " B of free device memory";
+  char* src = alloc(rows * width, 0x44);
+  char* dst = alloc(rows * width, 0);
+  ASSERT_NE(src, nullptr);
+  ASSERT_NE(dst, nullptr);
+  for (size_t r = 0; r < rows; r++) {
+    put(src, r * width, 0xf0 + r);
+    put(src, r * width + width - 8, 0xf8 + r);
+  }
+
+  cudaMemcpy3DParms cp = {};
+  cp.kind = cudaMemcpyDeviceToDevice;
+  cp.srcPtr = make_cudaPitchedPtr(src, width, width, rows);
+  cp.dstPtr = make_cudaPitchedPtr(dst, width, width, rows);
+  cp.extent = make_cudaExtent(width, rows, 1);
+  ASSERT_EQ(cudaSuccess, m2nMemcpy3DAsync(&cp, stream));
+  ASSERT_EQ(cudaSuccess, cudaStreamSynchronize(stream));
+
+  for (size_t r = 0; r < rows; r++) {
+    EXPECT_EQ(0xf0 + r, get(dst, r * width));
+    EXPECT_EQ(0xf8 + r, get(dst, r * width + width - 8));
+    EXPECT_EQ(0x4444444444444444ull, get(dst, r * width + kGiB));
+  }
+}
+
+/* A captured copy past the pitch limit must land in the graph: the 3D copy would be rejected at capture. */
+TEST_F(Memcpy3DTest, CapturedContiguousRowAbove2GiB) {
+  const size_t width = 2 * kGiB + 4096;
+  if (!haveFree(2 * width)) GTEST_SKIP() << "needs " << 2 * width << " B of free device memory";
+  char* src = alloc(width, 0x66);
+  char* dst = alloc(width, 0);
+  ASSERT_NE(src, nullptr);
+  ASSERT_NE(dst, nullptr);
+  put(src, width - 8, 0xabcdef);
+
+  cudaMemcpy3DParms cp = {};
+  cp.kind = cudaMemcpyDeviceToDevice;
+  cp.srcPtr = make_cudaPitchedPtr(src, width, width, 1);
+  cp.dstPtr = make_cudaPitchedPtr(dst, width, width, 1);
+  cp.extent = make_cudaExtent(width, 1, 1);
+  cudaGraph_t graph = nullptr;
+  cudaGraphExec_t exec = nullptr;
+  ASSERT_EQ(cudaSuccess, cudaStreamBeginCapture(stream, cudaStreamCaptureModeThreadLocal));
+  const cudaError_t copied = m2nMemcpy3DAsync(&cp, stream);
+  ASSERT_EQ(cudaSuccess, cudaStreamEndCapture(stream, &graph));
+  ASSERT_EQ(cudaSuccess, copied);
+  ASSERT_EQ(cudaSuccess, cudaGraphInstantiateWithFlags(&exec, graph, 0));
+  ASSERT_EQ(cudaSuccess, cudaGraphLaunch(exec, stream));
+  ASSERT_EQ(cudaSuccess, cudaStreamSynchronize(stream));
+  cudaGraphExecDestroy(exec);
+  cudaGraphDestroy(graph);
+
+  EXPECT_EQ(0xabcdefull, get(dst, width - 8));
+  EXPECT_EQ(0x6666666666666666ull, get(dst, kGiB));
 }
 
 /* Rows wider than 2 GiB with a destination pitch and position: each row must land at its own pitch. */
