@@ -209,7 +209,11 @@ def pipeline_table(tmp_path, monkeypatch):
         encoding="utf-8",
     )
     _clear_pipeline_caches(monkeypatch)
-    monkeypatch.setattr(code_object_analysis.config, "analysis_configs_dir", tmp_path)
+    monkeypatch.setattr(
+        code_object_analysis.config,
+        "instruction_pipelines_path",
+        tmp_path / "instruction_pipelines.yaml",
+    )
 
 
 @pytest.mark.parametrize(
@@ -256,7 +260,11 @@ def test_lookup_answers_a_repeated_mnemonic_from_memory(pipeline_table):
 def test_lookup_without_a_table_leaves_every_type_unset(tmp_path, monkeypatch):
     """A missing table degrades to empty types instead of failing analyze."""
     _clear_pipeline_caches(monkeypatch)
-    monkeypatch.setattr(code_object_analysis.config, "analysis_configs_dir", tmp_path)
+    monkeypatch.setattr(
+        code_object_analysis.config,
+        "instruction_pipelines_path",
+        tmp_path / "instruction_pipelines.yaml",
+    )
 
     assert InstructionPipelines.lookup("v_mov_b32_e32 v1, 0") is None
     assert InstructionPipelines.lookup("s_waitcnt") is None
