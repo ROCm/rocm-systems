@@ -93,9 +93,9 @@ jobs:
 
       - name: Install JAX and test dependencies
         timeout-minutes: 15
-        # Intentionally installs latest nightly wheels against pinned test sources.
-        # The 10 smoke tests use stable pmap/shard_map APIs that are compatible
-        # across JAX versions. This lets us catch RCCL regressions with current JAX.
+        # Installs the latest nightly ROCm plugin for the pinned JAX series.
+        # test_jax_collective.py checks out the JAX tests at the commit the
+        # installed jax was built from, so test sources always match it.
         #
         # xla_rocm_plugin.so has RUNPATH entries that resolve math libraries
         # (hipBLASLt, hipFFT, MIOpen, rocBLAS, etc.) from the _rocm_sdk_libraries
@@ -110,11 +110,12 @@ jobs:
           # jax-rocm10-plugin outranks the nightly build and is silently
           # installed in its place.
           #
-          # jax/jaxlib are held to the plugin's 0.11 series: the plugin
-          # declares no jax dependency at all, so an unconstrained resolve
-          # pairs jax 0.12 with a 0.11 plugin.
+          # All four packages are pinned to one series. The plugin declares
+          # no jax dependency, so pinning only one side lets the resolver
+          # pair a jax and plugin from different series.
           uv pip install --prerelease=allow \
-            jax-rocm10-plugin jax-rocm10-pjrt "jax==0.11.*" "jaxlib==0.11.*" \
+            "jax-rocm10-plugin==0.11.*" "jax-rocm10-pjrt==0.11.*" \
+            "jax==0.11.*" "jaxlib==0.11.*" \
             --index-url https://pypi.org/simple/ \
             --extra-index-url https://nightly.repo.amd.com/rocm/jax/whl-next/
           uv pip install \
