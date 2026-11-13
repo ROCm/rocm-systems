@@ -1680,7 +1680,7 @@ bool Device::populateOCLDeviceConstants() {
   // extension.  They must be set unconditionally so that hipMallocPitch /
   // hipMalloc3D produce correct pitch alignment even when IMAGE_SUPPORT is
   // off.  The PAL backend already sets them unconditionally.
-  info_.imagePitchAlignment_ = 256;
+  info_.imagePitchAlignment_ = (isa().versionMajor() >= 12) ? 128 : 256;
   info_.imageBaseAddressAlignment_ = 256;
   info_.bufferFromImageSupport_ = false;
 
