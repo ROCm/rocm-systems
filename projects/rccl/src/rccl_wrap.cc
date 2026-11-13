@@ -45,6 +45,7 @@ THE SOFTWARE.
 #include "algorithms/dda/broadcast/dda_broadcast.h"
 #include "algorithms/gin/gin_alltoall.h"
 #include "group.h"
+#include "hier_host.h"
 #include "sym_kernels.h"
 #include "dev_runtime.h"
 #include "strongstream.h"
@@ -1031,6 +1032,9 @@ ncclResult_t rcclGetAlgoName(int algo, const char** algoName) {
     case rcclAddonAlgos_t::RCCL_A2A_GIN_SDMA:
       *algoName = "A2A-GIN";
       break;
+    case rcclAddonAlgos_t::RCCL_HOST_HIER_ALLREDUCE:
+      *algoName = "HierAR";
+      break;
     default:
       WARN("Invalid algorithm value: %d", algo);
       return ncclInvalidArgument;
@@ -1931,6 +1935,17 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
       return rcclSelectDone("AR", query, decision);
     }
   #endif
+
+    // Host-hierarchical AllReduce. The first live call splits the comm, which is
+    // collective and blocking, so the context gates must agree on every rank.
+    // A failed split falls through to the paths below and is not retried.
+    if (ncclGroupDepth == 0 && !ceCapturing && !rcclCollectiveMustUseEnqueuePath(comm) &&
+        rcclAllReducePreferredBackends(comm) == RCCL_BACKEND_ALL &&
+        rcclHostHierAllReduceEligible(comm, count, datatype, op) &&
+        (query || rcclHostHierEnsure(comm) == ncclSuccess)) {
+      decision->algo = RCCL_HOST_HIER_ALLREDUCE;
+      return rcclSelectDone("AR", query, decision);
+    }
 
     // Symmetric-window lookup hoisted ahead of the symk signals: winRegType is needed
     // for the symMaxR2 gate below, and the lookup is unconditional regardless, so

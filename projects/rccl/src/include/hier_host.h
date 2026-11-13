@@ -37,6 +37,10 @@ struct rcclHostHier {
   struct rcclHostLayout layout;
   ncclComm_t intra;  // Ranks of this host, ordered by local rank
   ncclComm_t inter;  // The same local rank on every host, ordered by host. Null with one host
+  // Shared by every host-hierarchical collective on the comm, so running them
+  // concurrently on two streams is unsafe.
+  void* scratch;
+  size_t scratchBytes;
 };
 
 // Returns true and fills layout when every host holds the same number of ranks,
@@ -53,5 +57,15 @@ ncclResult_t rcclHostHierEnsure(struct ncclComm* comm);
 
 // Destroys the child comms. Called from commFree.
 ncclResult_t rcclHostHierTeardown(struct ncclComm* comm);
+
+// Whether RCCL_HOST_HIER_ALLREDUCE and the operands allow host-hierarchical
+// AllReduce. The caller also checks the dispatch context: group depth 0, no
+// graph capture, no enqueue-only mode.
+bool rcclHostHierAllReduceEligible(struct ncclComm* comm, size_t count, ncclDataType_t datatype, ncclRedOp_t op);
+
+// ReduceScatter within the host, AllReduce across hosts, then AllGather within
+// the host. Needs rcclHostHierEnsure to have succeeded.
+ncclResult_t rcclHostHierAllReduce(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
+                                   ncclRedOp_t op, struct ncclComm* comm, cudaStream_t stream);
 
 #endif

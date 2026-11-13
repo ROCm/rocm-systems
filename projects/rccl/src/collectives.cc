@@ -15,6 +15,7 @@
 #include "api_trace.h"
 #include "nvtx_payload_schemas.h"
 #include "device/hierarchical_shuffle.h"
+#include "hier_host.h"
 #include "algorithms/dda/all_reduce/dda_all_reduce.h"
 #include "algorithms/dda/reduce_scatter/dda_reduce_scatter.h"
 #include "algorithms/dda/all_gather/dda_all_gather.h"
@@ -856,6 +857,10 @@ ncclResult_t ncclAllReduce_impl(const void* sendbuff, void* recvbuff, size_t cou
   case RCCL_DDA_IPC:
     return rcclAddonLaunch(info, [&] {
       return ncclAllReduceDdaIpc(sendbuff, recvbuff, count, datatype, op, comm, stream);
+    });
+  case RCCL_HOST_HIER_ALLREDUCE:
+    return rcclAddonLaunch(info, [&] {
+      return rcclHostHierAllReduce(sendbuff, recvbuff, count, datatype, op, comm, stream);
     });
   default:
     // RCCL_SYMMETRIC / RCCL_CE_REGISTERED / native kernel algorithms all go
