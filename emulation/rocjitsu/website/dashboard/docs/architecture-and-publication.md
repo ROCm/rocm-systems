@@ -149,6 +149,29 @@ This is a requirement on producers, not a guarantee stated by the upstream run
 schema. The consumer relies on this contract; publication does not perform
 cross-run membership validation.
 
+### Run time and target colors
+
+A run's time is `execution_summary.timestamp`, the start the harness recorded. The
+dashboard never reads `execution_summary.finished_at`. The corpus runner writes
+it on normal completion and on an ordinary exception or interrupt, but a
+harness killed outright (for example by the step timeout) leaves it `null`; the
+corpus schema calls that a checkpoint. Such a run must still sort and display by
+its start time. Recent runs order newest first by this value. The dashboard does
+not display the checkpoint state: a run whose cases did not execute shows its
+unexecuted rows as `failed` ("run interrupted before completion") and an `× Fail`
+status, which is the only interrupted-run signal consumers get.
+
+Chart colors for targets follow the order in which each target first appears in
+the published run history (oldest run first, alphabetical within one run;
+`targetColorOrder`). The first seven targets take a fixed palette in that order
+and later targets are generated, so publishing a new target never recolors an
+existing one. All published runs count, side-branch runs included, so a
+side-branch run that introduces a target early claims its position. A change to
+history before a target (a backfilled or deleted old run) can reorder later
+targets and is accepted. A run without a usable `timestamp` sorts first and its
+targets take the first colors. The filter lists keep `targets`, which stays
+alphabetical.
+
 Set picker dates describe the latest known develop commit using each set, not
 execution or creation time.
 Unknown URL identities stay explicit until the user chooses an available set or

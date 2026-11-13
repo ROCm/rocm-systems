@@ -10,7 +10,7 @@ export function createRecentRunsHistory(count = 65) {
     const run = structuredClone(canonical[index % canonical.length]);
     run.publication.id = `fictional-pagination-${String(index).padStart(3, '0')}`;
     // Rerun historical commits; completion order must win over commit order.
-    run.execution_summary.finished_at = new Date(Date.UTC(2026, 9, 5, 10, Math.floor(index / 2))).toISOString();
+    run.execution_summary.timestamp = new Date(Date.UTC(2026, 9, 5, 10, Math.floor(index / 2))).toISOString();
     run.publication.trigger = 'manual';
     return run;
   });

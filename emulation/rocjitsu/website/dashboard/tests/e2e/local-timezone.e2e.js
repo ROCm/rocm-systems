@@ -13,7 +13,7 @@ for (const timezoneId of ['UTC', 'America/Los_Angeles', 'Pacific/Kiritimati']) {
       const timestamp = '2026-01-01T00:30:00Z';
       run.provenance.rocjitsu.rocjitsu_commit_timestamp = timestamp;
       run.execution_summary.timestamp = timestamp;
-      run.execution_summary.finished_at = timestamp;
+      run.execution_summary.timestamp = timestamp;
       publication.index.generatedAt = timestamp;
       publication.index.runFiles = [`runs/default-branch/${run.publication.id}.json`];
       await installPublication(page, { publication });

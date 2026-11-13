@@ -191,7 +191,7 @@ function publicationWithSameDayRerun() {
   const source = publication.runs.find((entry) => entry.publication.id === COMPLETED);
   const rerun = structuredClone(source);
   rerun.publication.id = RERUN;
-  rerun.execution_summary.finished_at = '2026-10-04T09:00:00.000Z';
+  rerun.execution_summary.timestamp = '2026-10-04T09:00:00.000Z';
   for (const result of rerun.benchmark_results.filter(({ id }) => id === 'a')) {
     Object.assign(result, { status: 'failed', exit_code: 1, timing_results_s: [], error: 'Fictional rerun failure' });
   }

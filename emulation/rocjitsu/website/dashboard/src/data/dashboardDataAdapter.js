@@ -72,7 +72,7 @@ function normalizeRun(run) {
   const pr = source.pull_request;
   return {
     runId: publication.id, catalogId: summary.benchmark_suite,
-    timestamp: summary.finished_at, commitTimestamp: native.rocjitsu_commit_timestamp,
+    timestamp: summary.timestamp, commitTimestamp: native.rocjitsu_commit_timestamp,
     trigger: publication.trigger, machineId: publication.machine_label, branch: source.branch,
     ...(object(source.base) ? { sourceBase: { ...source.base } } : {}),
     ...(object(pr) ? { pullRequest: { ...pr, ...(pr.url && !safePublishedUrl(pr.url) ? { url: undefined } : {}) } } : {}),
@@ -86,6 +86,14 @@ function normalizeRun(run) {
     configurations: [...new Map(run.benchmark_results.map(({ target, thread_policy }) => [configurationKey(target, thread_policy), { target, thread_policy }])).values()],
     tests: run.benchmark_results.map(normalizeResult),
   };
+}
+
+// Targets in the order they first appear in run history (oldest run first; alphabetical within one run).
+// Chart colors follow this order, so a new target never recolors an existing one. Pass every published run, side
+// branches included. Changing the history before a target (backfill, deletion) can reorder it; that is accepted
+// (docs/architecture-and-publication.md, "Run time and target colors").
+export function firstSeenTargets(runs) {
+  return [...new Set([...runs].sort(compareRunExecution).flatMap(({ targets }) => [...targets].sort()))];
 }
 
 export function adaptPublishedDashboardData({ index, runs, runErrors = [], siteConfig = DASHBOARD_SITE_CONFIG }) {
@@ -130,10 +138,11 @@ export function adaptPublishedDashboardData({ index, runs, runErrors = [], siteC
     return normalizeRun(run);
   });
   const allRuns = normalized.sort(compareRunExecution);
+  const targetColorOrder = firstSeenTargets(allRuns);
   const canonical = allRuns.filter(({ branch }) => branch === siteConfig.canonicalBranch);
   return { sourceData: { index, runs }, data: {
     ...siteConfig, schemaVersion: CURRENT_RUN_SCHEMA_VERSION, generatedAt: index.generatedAt,
-    allRuns, runs: canonical, targets: [...new Set(allRuns.flatMap(({ targets }) => targets))].sort(), suites: [...new Set([...definitions.values()].map(({ suite }) => suite))].sort(), modes: THREAD_POLICIES.filter((policy) => allRuns.some((run) => run.modes.includes(policy))), testCatalog: [...definitions.values()], catalogs: Object.fromEntries(catalogs),
+    allRuns, runs: canonical, targetColorOrder, targets: [...targetColorOrder].sort(), suites: [...new Set([...definitions.values()].map(({ suite }) => suite))].sort(), modes: THREAD_POLICIES.filter((policy) => allRuns.some((run) => run.modes.includes(policy))), testCatalog: [...definitions.values()], catalogs: Object.fromEntries(catalogs),
     latestRun: canonical.at(-1) ?? null, latestCommitRun: sortRunsByCommit(canonical).at(-1) ?? null, backfillRunIds: backfillRunIds(canonical),
   } };
 }

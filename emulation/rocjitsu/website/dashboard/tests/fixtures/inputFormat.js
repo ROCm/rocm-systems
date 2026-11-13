@@ -20,6 +20,6 @@ export function fixtureProvenance(commit, committedAt, sdk = 'test-only') {
   };
 }
 
-export function fixtureSummary(benchmark_suite, timestamp, finished_at = timestamp) {
-  return { benchmark_suite, timestamp, finished_at, wall_time_s: 1, samples: 1, warmups: 0, timeout_seconds: 1200 };
+export function fixtureSummary(benchmark_suite, timestamp) {
+  return { benchmark_suite, timestamp, wall_time_s: 1, samples: 1, warmups: 0, timeout_seconds: 1200 };
 }

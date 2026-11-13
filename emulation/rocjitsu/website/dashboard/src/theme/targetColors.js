@@ -1,11 +1,12 @@
 import { colorTokens } from './tokens.js';
 import { hslToHex } from '../utils/colorMath.js';
 
-// Target chart colors follow list position: targets are sorted, and the first FIXED_TARGET_COUNT (seven) take a fixed palette, so
+// Target chart colors follow list position: targets arrive in first-seen order (oldest run first, see
+// firstSeenTargets), and the first FIXED_TARGET_COUNT (seven) take a fixed palette, so
 // those colors never change when targets are appended. The first two are the original blue and orange; the other five
 // are the colors the generator below produced for those positions. Later targets are generated, so a new target never
-// reuses another target's color and no assignment has to be added by hand. A target that sorts ahead of the others
-// shifts every position after it; that is accepted.
+// reuses another target's color and no assignment has to be added by hand. A new target is appended, so it never
+// shifts an existing one. Only a change to run history (backfill, deletion) can reorder.
 const GOLDEN_ANGLE = 137.508;
 const MIN_HUE_GAP = 30;
 const SEED_HUES = [219, 25];
@@ -59,7 +60,7 @@ export function targetHues(count) {
 // later positions are generated.
 export function generateTargetColors(mode, targets = []) {
   const fixed = FIXED_TARGET_COLORS[mode];
-  const unique = [...new Set(targets)].sort();
+  const unique = [...new Set(targets)];
   const hues = targetHues(unique.length);
   return new Map(unique.map((target, index) => [target, index < fixed.length ? fixed[index] : readableHue(hues[index], mode)]));
 }

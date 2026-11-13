@@ -101,7 +101,7 @@ test('a newer publication is available on reload without rebuilding the website 
   run.provenance.rocjitsu.rocjitsu_commit_sha = 'b'.repeat(40);
   run.provenance.rocjitsu.rocjitsu_commit_timestamp = '2026-10-06T10:00:00.000Z';
   run.execution_summary.timestamp = '2026-10-06T10:30:00.000Z';
-  run.execution_summary.finished_at = '2026-10-06T11:00:00.000Z';
+  run.execution_summary.timestamp = '2026-10-06T11:00:00.000Z';
   next.runs.push(run);
   next.index.runFiles.push(fixtureRunPath(run));
   adaptPublishedDashboardData(next);

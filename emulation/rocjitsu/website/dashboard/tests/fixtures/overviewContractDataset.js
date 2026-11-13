@@ -43,7 +43,7 @@ export function createOverviewContractPublication() {
       schema_version: 1, publication: { id, workflow_commit_sha: 'a'.repeat(40), tensile_commit_sha: 'b'.repeat(40),
       source: { branch: 'develop', message: `FICTIONAL contract commit ${day}` },
       trigger: 'manual', machine_label: 'fictional-contract-node' },
-      execution_summary: fixtureSummary(catalogs[testCatalog].benchmark_suite, stamp(5), stamp(hour)),
+      execution_summary: fixtureSummary(catalogs[testCatalog].benchmark_suite, stamp(hour)),
       provenance: fixtureProvenance(String(day).repeat(40), stamp(4)),
       benchmark_results: Object.entries(memberships[period]).flatMap(([key, members]) => {
         const [target, thread_policy] = key.split('/');
