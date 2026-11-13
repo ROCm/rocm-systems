@@ -514,12 +514,21 @@ __device__ __forceinline__ void copy_aligned_body(uint8_t* dst, uint8_t* src,
                                                   size_t size, int tid,
                                                   int stride) {
   uintptr_t dst_addr = reinterpret_cast<uintptr_t>(dst);
-  size_t prefix = (-dst_addr) & (ChunkSize - 1);
-  
+  uintptr_t src_addr = reinterpret_cast<uintptr_t>(src);
+
+  if (((dst_addr ^ src_addr) & (ChunkSize - 1)) != 0) {
+    for (size_t i = static_cast<size_t>(tid); i < size;
+        i += static_cast<size_t>(stride)) {
+      auto val = AsmAccess<1, LP, SP>::load(src + i);
+      AsmAccess<1, LP, SP>::store(dst + i, val);
+    }
+    return;
+  }
+
+  size_t prefix = (-dst_addr) & (ChunkSize - 1);  
   if (tid == 0 && prefix > 0) {
     copy_prefix<LP, SP>(dst, src, prefix);
   }
-
   dst += prefix;
   src += prefix;
   size -= prefix;
@@ -540,11 +549,9 @@ __device__ __forceinline__ void copy_aligned_body(uint8_t* dst, uint8_t* src,
 // ==============================================================================
 // LANE, WAVE, AND WG IMPLEMENTATIONS
 // ==============================================================================
-template <MemcpyKind Kind = MemcpyKind::Put>
+template <MemcpyKind Kind = MemcpyKind::Put, int Unroll = 8>
 [[maybe_unused]] __device__ __forceinline__ void memcpy_lane(void* dst, void* src, size_t size) {
   if (size == 0) return;
-
-  constexpr int Unroll = 8;
 
   constexpr CachePolicy LP = is_put(Kind) ? CachePolicy::Standard : CachePolicy::SystemScope;
   constexpr CachePolicy SP = is_put(Kind) ? CachePolicy::SystemScope : CachePolicy::Standard;
@@ -579,13 +586,10 @@ template <MemcpyKind Kind = MemcpyKind::Put>
 }
 
 // memcpy_wave is group-cooperative: every lane in the wave passes the same
-// dst/src and only differs by wave_tid/wave_size (folded into the per-access
-// offset inside copy_bulk)
-template <MemcpyKind Kind = MemcpyKind::Put>
+// dst/src and only differs by wave_tid/wave_size
+template <MemcpyKind Kind = MemcpyKind::Put, int Unroll = 8>
 [[maybe_unused]] __device__ __forceinline__ void memcpy_wave(void* dst, void* src, size_t size) {
   if (size == 0) return;
-
-  constexpr int Unroll = 8;
 
   constexpr CachePolicy LP = is_put(Kind) ? CachePolicy::Standard : CachePolicy::SystemScope;
   constexpr CachePolicy SP = is_put(Kind) ? CachePolicy::SystemScope : CachePolicy::Standard;
@@ -611,8 +615,6 @@ template <MemcpyKind Kind = MemcpyKind::Put, int Unroll = 8>
 [[maybe_unused]] __device__ __forceinline__ void memcpy_wg(void* dst, void* src,
                                                              size_t size) {
   if (size == 0) return;
-
-  constexpr int ChunkSize = 16;
 
   constexpr CachePolicy LP = is_put(Kind) ? CachePolicy::Standard : CachePolicy::SystemScope;
   constexpr CachePolicy SP = is_put(Kind) ? CachePolicy::SystemScope : CachePolicy::Standard;
