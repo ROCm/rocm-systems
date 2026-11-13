@@ -40,3 +40,6 @@ The following environment variables affect the hipFile runtime.
      - | Controls whether file I/O with registered host-memory buffers is enabled.
        | Host memory regions must be registered prior to starting any transfers involving them.
        | Default is ``true``. Setting to ``false`` disables this feature.
+   * - ``HIPFILE_DEVICE_STREAM_POOL_SIZE``
+     - | Controls the size of the device stream pool.
+       | Default size is 4 streams. Setting to 0 will use the default size.

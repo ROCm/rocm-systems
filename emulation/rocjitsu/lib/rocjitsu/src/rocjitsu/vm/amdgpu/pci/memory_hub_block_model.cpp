@@ -18,7 +18,7 @@ namespace {
 /// @brief The segment every offset below is measured from, its `_BASE_IDX`.
 constexpr uint32_t kHubSegment = 0;
 
-/// @brief Invalidation engines each memory hub has.
+/// @brief Invalidation-engine register slots answered by this model.
 ///
 /// @details The driver picks one by index and reaches it by stride, so the
 /// device answers all of them rather than guessing which. Engine 17 is the one
@@ -31,24 +31,12 @@ constexpr uint32_t kInvalidationEngineStride = 1;
 
 /// @brief Value a semaphore reads as when the acquire has been granted.
 ///
-/// @details The GC 12.0 flush path acquires an engine's semaphore before
-/// writing its request and releases it by writing zero, so this has to answer
-/// reads and ignore writes: one that stored the release would grant the first
-/// acquire and stall every flush after it. That path takes the semaphore for
-/// MMHUB only; both hubs are answered anyway, because eighteen more registers
-/// cost nothing and a hub that answered half a handshake would be the harder
-/// thing to explain.
-///
-/// The GC 12.1 path this device publishes today does not take the semaphore at
-/// all -- it writes the request and polls the acknowledge -- so these registers
-/// are answered for the profile rather than for the boot, and are untouched on
-/// gfx1250. They are still worth answering: this model is deliberately not
-/// specific to one part, and every other GC 12.x takes the path that does.
-///
-/// Granting unconditionally is right only while nothing else acquires. The
-/// device does not execute rings, so the driver's own lock is all that
-/// serializes flushes; a device that ran packets would have a second acquirer
-/// and this register would stop meaning what it means on hardware.
+/// @details The selected GC 12.1 driver writes the request and polls the
+/// acknowledge without acquiring the semaphore. The model returns an
+/// uncontended engine-ready value for register reads. If a driver or
+/// packet path starts acquiring an engine, this must become a stateful
+/// arbiter before that path is supported; merely echoing a release write would
+/// make a later acquire stall.
 constexpr uint32_t kInvalidationSemaphoreHeld = 0x1;
 
 /// @brief VMID bits carried in an invalidation request and acknowledgement.

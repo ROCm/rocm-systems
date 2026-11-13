@@ -47,8 +47,9 @@ class CoverageRule:
 
 
 COVERAGE_RULES = (
-    # Builds and runs test/host standalone. The in-tree BUILD_TESTS=ON build of
-    # test/host (and its CMake) is also compiled by TheRock Multi-Arch CI.
+    # Builds and runs test/host standalone. TheRock Multi-Arch CI compiles the
+    # in-tree BUILD_TESTS=ON build of test/host only when a PR also changes other
+    # paths: .github/skip-ci-config.toml skips TheRock CI for these patterns.
     CoverageRule(
         name="host-only unit tests",
         workflow=".github/workflows/rccl-host-unit-tests.yml",

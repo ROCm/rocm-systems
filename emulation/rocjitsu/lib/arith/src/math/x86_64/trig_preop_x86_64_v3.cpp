@@ -5,7 +5,7 @@
 // CPU-specific arithmetic stays here; public entry points select this backend.
 
 #include "math/trig_preop.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_math.h"
 
 #include <immintrin.h>
 #include <stdint.h>
@@ -34,37 +34,13 @@ void trig_preop_x86_64_v3(uint32_t exec_mask, uint32_t mode, bool flush_output, 
     auto value = _mm256_i32gather_epi64(reinterpret_cast<const long long *>(table), index, 8);
     unsigned omod = (mode >> 6) & 3;
     if (omod) {
-      if constexpr (Rdna3) {
-        const auto hidden = _mm256_set1_epi64x(1ULL << 52);
-        const auto tiny = _mm256_cmpgt_epi64(hidden, value);
-        if (omod == 3) {
-          auto rounded = _mm256_add_epi64(
-              _mm256_srli_epi64(value, 1),
-              _mm256_and_si256(_mm256_cmpeq_epi64(_mm256_and_si256(value, _mm256_set1_epi64x(3)),
-                                                  _mm256_set1_epi64x(3)),
-                               _mm256_set1_epi64x(1)));
-          auto boundary = _mm256_cmpgt_epi64(_mm256_set1_epi64x(2ULL << 52), value);
-          value = _mm256_blendv_epi8(_mm256_sub_epi64(value, hidden), rounded, boundary);
-        } else {
-          auto shifted = omod == 1 ? _mm256_slli_epi64(value, 1) : _mm256_slli_epi64(value, 2);
-          if (omod == 2) {
-            auto carry = _mm256_cmpgt_epi64(shifted, _mm256_set1_epi64x((2ULL << 52) - 1));
-            shifted = _mm256_blendv_epi8(
-                shifted, _mm256_add_epi64(_mm256_srli_epi64(shifted, 1), hidden), carry);
-          }
-          value = _mm256_blendv_epi8(
-              _mm256_add_epi64(value, _mm256_set1_epi64x(uint64_t(omod) << 52)), shifted, tiny);
-        }
-        value =
-            _mm256_and_si256(value, _mm256_cmpgt_epi64(value, _mm256_set1_epi64x(0xfffffffffffff)));
-      } else {
-        auto normal = _mm256_cmpgt_epi64(value, _mm256_set1_epi64x(0xfffffffffffff));
-        value = _mm256_add_epi64(
-            value, _mm256_set1_epi64x(int64_t(omod == 3 ? -1 : int(omod)) * (INT64_C(1) << 52)));
-        normal = _mm256_and_si256(normal,
-                                  _mm256_cmpgt_epi64(value, _mm256_set1_epi64x(0xfffffffffffff)));
-        value = _mm256_and_si256(value, normal);
-      }
+      // gfx1100 and gfx1201 both flush a subnormal table value before scaling.
+      auto normal = _mm256_cmpgt_epi64(value, _mm256_set1_epi64x(0xfffffffffffff));
+      value = _mm256_add_epi64(
+          value, _mm256_set1_epi64x(int64_t(omod == 3 ? -1 : int(omod)) * (INT64_C(1) << 52)));
+      normal =
+          _mm256_and_si256(normal, _mm256_cmpgt_epi64(value, _mm256_set1_epi64x(0xfffffffffffff)));
+      value = _mm256_and_si256(value, normal);
     }
     if (flush_output) {
       value =

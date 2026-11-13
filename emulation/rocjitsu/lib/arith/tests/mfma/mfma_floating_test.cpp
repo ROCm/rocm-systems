@@ -6,7 +6,8 @@
 #include "common/floating_point.h"
 #include "common/half_reference.h"
 #include "common/semantics.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_common.h"
+#include "rj_arith/detail/rj_arith_mfma.h"
 #include <array>
 #include <bit>
 #include <cmath>
@@ -19,7 +20,8 @@ using Entry = decltype(&rj_arith_v_mfma_f32_16x16x16_f16_w64);
 
 // Compare a full instruction against the established approximate reduction,
 // including batched layouts and sources that overlap the destination.
-template <int M, int K, int Batch, bool Bf16, bool FullF32 = false> void arithmetic(Entry entry) {
+template <int M, int K, int Batch, bool Bf16, bool FullF32 = false>
+void arithmetic(Entry entry, uint32_t factor_mask = UINT32_MAX) {
   constexpr int InputRegs = M * K * Batch / (FullF32 ? 64 : 128);
   constexpr int OutputRegs = M * M * Batch / 64;
   constexpr int Count = 2 * InputRegs + 2 * OutputRegs;
@@ -73,7 +75,8 @@ template <int M, int K, int Batch, bool Bf16, bool FullF32 = false> void arithme
               }
             }
             if constexpr (FullF32) {
-              return std::bit_cast<float>(input[operand * InputRegs + k % per_lane][source_lane]);
+              return std::bit_cast<float>(input[operand * InputRegs + k % per_lane][source_lane] &
+                                          factor_mask);
             } else {
               uint16_t value = uint16_t(
                   input[operand * InputRegs + k % per_lane / 2][source_lane] >> (16 * (k % 2)));
@@ -127,6 +130,100 @@ template <int M, int K, int Batch, bool Bf16, bool FullF32 = false> void arithme
             RJ_ARITH_ERROR_INVALID_FLAGS);
 }
 
+TEST(MfmaF32, F32ClampsFiniteOverflowAndPreservesInfinities) {
+  std::array<uint32_t, 64> a, b;
+  std::array<std::array<uint32_t, 64>, 4> result;
+  const uint32_t *sources_a[] = {a.data()};
+  const uint32_t *sources_b[] = {b.data()};
+  uint32_t *dest[] = {result[0].data(), result[1].data(), result[2].data(), result[3].data()};
+  const uint32_t *acc[] = {dest[0], dest[1], dest[2], dest[3]};
+
+  struct Case {
+    uint32_t a, b;
+    uint32_t initial, unclamped, clamped;
+  };
+  for (const Case test : {
+           Case{0x7f7fffff, 0x40000000, 0, 0x7f800000, 0x7f7fffff},
+           Case{0xff7fffff, 0x40000000, 0, 0xff800000, 0xff7fffff},
+           Case{0x7f800000, 0x40000000, 0, 0x7f800000, 0x7f800000},
+           Case{0x40000000, 0xff800000, 0, 0xff800000, 0xff800000},
+           Case{0x7f7fffff, 0x40000000, 0xff800000, 0xff800000, 0xff800000},
+       }) {
+    a.fill(test.a);
+    b.fill(test.b);
+    for (uint64_t cpu : supported_cpu_levels()) {
+      for (bool clamp : {false, true}) {
+        for (auto &reg : result) {
+          reg.fill(test.initial);
+        }
+        const uint64_t flags = cpu | RJ_ARITH_SEMANTICS_LOOSE | (clamp ? RJ_ARITH_FP16_OVFL : 0);
+        ASSERT_EQ(rj_arith_v_mfma_f32_4x4x1_16b_f32_w64(flags, 0, dest, sources_a, sources_b, acc),
+                  RJ_ARITH_SUCCESS);
+        for (const auto &reg : result) {
+          for (uint32_t value : reg) {
+            EXPECT_EQ(value, clamp ? test.clamped : test.unclamped);
+          }
+        }
+      }
+    }
+  }
+}
+
+TEST(MfmaHalf, Bf16ClampsFiniteOverflowAndPreservesInfinities) {
+  std::array<uint32_t, 64> a, b;
+  std::array<std::array<uint32_t, 64>, 4> result;
+  const uint32_t *sources_a[] = {a.data(), a.data()};
+  const uint32_t *sources_b[] = {b.data(), b.data()};
+  uint32_t *dest[] = {result[0].data(), result[1].data(), result[2].data(), result[3].data()};
+  const uint32_t *acc[] = {dest[0], dest[1], dest[2], dest[3]};
+
+  struct Case {
+    uint16_t a, b;
+    uint32_t initial, unclamped, clamped;
+  };
+  for (const Case test : {
+           Case{0x7f7f, 0x4000, 0, 0x7f800000, 0x7f7fffff},
+           Case{0xff7f, 0x4000, 0, 0xff800000, 0xff7fffff},
+           Case{0x7f80, 0x4000, 0, 0x7f800000, 0x7f800000},
+           Case{0x4000, 0xff80, 0, 0xff800000, 0xff800000},
+           Case{0x7f7f, 0x4000, 0xff800000, 0xff800000, 0xff800000},
+       }) {
+    a.fill(uint32_t(test.a) * 0x10001u);
+    b.fill(uint32_t(test.b) * 0x10001u);
+    for (uint64_t cpu : supported_cpu_levels()) {
+      for (bool clamp : {false, true}) {
+        for (auto &reg : result) {
+          reg.fill(test.initial);
+        }
+        const uint64_t flags = cpu | RJ_ARITH_SEMANTICS_LOOSE | (clamp ? RJ_ARITH_FP16_OVFL : 0);
+        ASSERT_EQ(rj_arith_v_mfma_f32_4x4x4_16b_bf16_w64(flags, 0, dest, sources_a, sources_b, acc),
+                  RJ_ARITH_SUCCESS);
+        for (const auto &reg : result) {
+          for (uint32_t value : reg) {
+            EXPECT_EQ(value, clamp ? test.clamped : test.unclamped);
+          }
+        }
+      }
+    }
+  }
+  // BLGP=2 broadcasts the upper 32 B lanes. Column 0 overflows from finite
+  // inputs in lane 32, while column 1 reads an actual infinity from lane 33.
+  a.fill(0x7f7f7f7fu);
+  b.fill(0x40004000u);
+  b[0] = b[33] = 0x7f807f80u;
+  for (uint64_t cpu : supported_cpu_levels()) {
+    for (auto &reg : result) {
+      reg.fill(0);
+    }
+    const uint64_t flags = cpu | RJ_ARITH_SEMANTICS_LOOSE | RJ_ARITH_FP16_OVFL;
+    ASSERT_EQ(
+        rj_arith_v_mfma_f32_4x4x4_16b_bf16_w64(flags, 2u << 7, dest, sources_a, sources_b, acc),
+        RJ_ARITH_SUCCESS);
+    EXPECT_EQ(result[0][0], 0x7f7fffffu);
+    EXPECT_EQ(result[0][1], 0x7f800000u);
+  }
+}
+
 TEST(MfmaHalf, mfma_f32_32x32x4_2b_f16) {
   arithmetic<32, 4, 2, false>(rj_arith_v_mfma_f32_32x32x4_2b_f16_w64);
 }
@@ -171,10 +268,10 @@ TEST(MfmaHalf, mfma_f32_32x32x16_bf16) {
 }
 
 TEST(MfmaFullF32, mfma_f32_16x16x8_xf32) {
-  arithmetic<16, 8, 1, false, true>(rj_arith_v_mfma_f32_16x16x8_xf32_w64);
+  arithmetic<16, 8, 1, false, true>(rj_arith_v_mfma_f32_16x16x8_xf32_w64, 0xffffe000u);
 }
 TEST(MfmaFullF32, mfma_f32_32x32x4_xf32) {
-  arithmetic<32, 4, 1, false, true>(rj_arith_v_mfma_f32_32x32x4_xf32_w64);
+  arithmetic<32, 4, 1, false, true>(rj_arith_v_mfma_f32_32x32x4_xf32_w64, 0xffffe000u);
 }
 TEST(MfmaF32, mfma_f32_32x32x1_2b_f32_w64) {
   arithmetic<32, 1, 2, false, true>(rj_arith_v_mfma_f32_32x32x1_2b_f32_w64);

@@ -184,6 +184,8 @@ def gen_vector_movrel(
     inactive_uses_bound_ctrl: bool = False,
     use_rj_arith: bool = False,
     is_vop3: bool = False,
+    stage_after_destination: bool = False,
+    apply_dpp_source_modifiers: bool = True,
 ) -> str:
     """Generate M0-relative VGPR move bodies."""
     if op not in ('src', 'dst', 'srcdst', 'srcdst2'):
@@ -211,7 +213,7 @@ def gen_vector_movrel(
             supports_dpp8,
             supports_sdwa,
             inactive_uses_bound_ctrl,
-            use_rj_arith and not is_vop3,
+            use_rj_arith and not is_vop3 and apply_dpp_source_modifiers,
         )
         L.append(_move_lanes(dst[0], 'rel_src', use_rj_arith, is_vop3))
         return '\n'.join(L)
@@ -257,7 +259,7 @@ def gen_vector_movrel(
             supports_dpp8,
             supports_sdwa,
             inactive_uses_bound_ctrl,
-            use_rj_arith and not is_vop3,
+            use_rj_arith and not is_vop3 and apply_dpp_source_modifiers,
         )
         L.append(_move_lanes('rel_dst', 'rel_src', use_rj_arith, is_vop3))
         return '\n'.join(L)
@@ -276,7 +278,19 @@ def gen_vector_movrel(
     L.append(
         f'  Operand rel_dst({dst[0]}.size_bits(), OperandType::OPR_VGPR, static_cast<int>(rel_dst_index));'
     )
-    L.append(_move_lanes('rel_dst', src[0], use_rj_arith, is_vop3))
+    source = src[0]
+    if stage_after_destination and (supports_dpp or supports_dpp8 or supports_sdwa):
+        L.append(f'  Operand &rel_src = {source};')
+        _stage_movrel_source(
+            L,
+            supports_dpp,
+            supports_dpp8,
+            supports_sdwa,
+            inactive_uses_bound_ctrl,
+            use_rj_arith and not is_vop3,
+        )
+        source = 'rel_src'
+    L.append(_move_lanes('rel_dst', source, use_rj_arith, is_vop3))
     return '\n'.join(L)
 
 
@@ -560,6 +574,7 @@ def gen_vector_qsad(
     op: str | None,
     uses_vgpr_msb_indexing: bool,
     integer_clamp: bool = False,
+    whole_valu_source: bool = False,
 ) -> str:
     """Generate QSAD/MQSAD four-window sum-of-absolute-difference ops."""
     is_packed = op in ('sad_pk_u16', 'msad_pk_u16')
@@ -589,6 +604,15 @@ def gen_vector_qsad(
                 '      accum[1] = static_cast<uint32_t>(*constant >> 32);',
                 '      accum[2] = 0;',
                 '      accum[3] = 0;',
+                *(
+                    [
+                        f'    }} else if (auto region = amdgpu::RegisterAccess(wf).read_operand_region({src[2]}, uint64_t{{1}} << lane, 4)) {{',
+                        '      for (uint32_t word = 0; word < 4; ++word)',
+                        '        accum[word] = region->lane(word, lane);',
+                    ]
+                    if whole_valu_source
+                    else []
+                ),
                 '    } else {',
                 f'      Operand accum_word = {src[2]};',
                 '      accum_word.size_bits_ = 32;',
@@ -2590,10 +2614,10 @@ def _gen_narrow_scalef32(ctx, mode: str, dst_fmt: str, src_fmt: str) -> str:
             '    double scale = std::ldexp(1.0, static_cast<int>(biased_exp) - 127);'
         )
         L.append(
-            f'    float s0 = static_cast<float>(static_cast<double>(std::bit_cast<float>(static_cast<uint32_t>(amdgpu::RegisterAccess(wf).read_lane({src[0]}, lane)))) / scale);'
+            f'    float s0 = static_cast<float>(amdgpu::widen_scalef32_source(amdgpu::RegisterAccess(wf).read_lane({src[0]}, lane), wf.fp_denorm_mode_f32()) / scale);'
         )
         L.append(
-            f'    float s1 = static_cast<float>(static_cast<double>(std::bit_cast<float>(static_cast<uint32_t>(amdgpu::RegisterAccess(wf).read_lane({src[1]}, lane)))) / scale);'
+            f'    float s1 = static_cast<float>(amdgpu::widen_scalef32_source(amdgpu::RegisterAccess(wf).read_lane({src[1]}, lane), wf.fp_denorm_mode_f32()) / scale);'
         )
         L.append(f"    uint8_t r0 = {_narrow_rne_encode_call(dst_fmt, cvt_fn, 's0')};")
         L.append(f"    uint8_t r1 = {_narrow_rne_encode_call(dst_fmt, cvt_fn, 's1')};")
@@ -2680,10 +2704,10 @@ def _gen_narrow_scalef32(ctx, mode: str, dst_fmt: str, src_fmt: str) -> str:
             '    double scale = std::ldexp(1.0, static_cast<int>(biased_exp) - 127);'
         )
         L.append(
-            f'    float s0 = static_cast<float>(static_cast<double>(std::bit_cast<float>(static_cast<uint32_t>(amdgpu::RegisterAccess(wf).read_lane({src[0]}, lane)))) / scale);'
+            f'    float s0 = static_cast<float>(amdgpu::widen_scalef32_source(amdgpu::RegisterAccess(wf).read_lane({src[0]}, lane), wf.fp_denorm_mode_f32()) / scale);'
         )
         L.append(
-            f'    float s1 = static_cast<float>(static_cast<double>(std::bit_cast<float>(static_cast<uint32_t>(amdgpu::RegisterAccess(wf).read_lane({src[1]}, lane)))) / scale);'
+            f'    float s1 = static_cast<float>(amdgpu::widen_scalef32_source(amdgpu::RegisterAccess(wf).read_lane({src[1]}, lane), wf.fp_denorm_mode_f32()) / scale);'
         )
         L.append(f"    uint8_t r0 = {_narrow_rne_encode_call(dst_fmt, cvt_fn, 's0')};")
         L.append(f"    uint8_t r1 = {_narrow_rne_encode_call(dst_fmt, cvt_fn, 's1')};")
@@ -2740,11 +2764,11 @@ def _gen_sr_scalef32(ctx, mode: str, dst_fmt: str, src_fmt: str) -> str:
                 f'    uint32_t seed_lo = static_cast<uint32_t>(amdgpu::RegisterAccess(wf).read_lane({random_src}, lane));'
             )
             L.append(
-                f'    float val0 = std::bit_cast<float>(static_cast<uint32_t>(amdgpu::RegisterAccess(wf).read_lane({data_src}, lane)));'
+                f'    double val0 = amdgpu::widen_scalef32_source(amdgpu::RegisterAccess(wf).read_lane({data_src}, lane), wf.fp_denorm_mode_f32());'
             )
             L.append(
-                '    float val1 = std::bit_cast<float>('
-                'amdgpu::RegisterAccess(cu).read_vgpr(data_src_base + 1, lane));'
+                '    double val1 = amdgpu::widen_scalef32_source('
+                'amdgpu::RegisterAccess(cu).read_vgpr(data_src_base + 1, lane), wf.fp_denorm_mode_f32());'
             )
         else:
             L.append(
@@ -2754,12 +2778,8 @@ def _gen_sr_scalef32(ctx, mode: str, dst_fmt: str, src_fmt: str) -> str:
                 f'    uint32_t seed_lo = amdgpu::RegisterAccess(wf).read_lane({random_src}, lane);'
             )
         if is_sr_pk_fp4_f32:
-            L.append(
-                '    float s0 = static_cast<float>(static_cast<double>(val0) / scale);'
-            )
-            L.append(
-                '    float s1 = static_cast<float>(static_cast<double>(val1) / scale);'
-            )
+            L.append('    float s0 = static_cast<float>(val0 / scale);')
+            L.append('    float s1 = static_cast<float>(val1 / scale);')
             L.append(
                 f"    uint8_t r0 = {_narrow_sr_encode_call(dst_fmt, cvt_fn, 's0', 'seed_lo')};"
             )
@@ -2818,7 +2838,7 @@ def _gen_sr_scalef32(ctx, mode: str, dst_fmt: str, src_fmt: str) -> str:
         )
         if src_fmt == 'f32':
             L.append(
-                f'    float val = std::bit_cast<float>(static_cast<uint32_t>(amdgpu::RegisterAccess(wf).read_lane({data_src}, lane)));'
+                f'    double val = amdgpu::widen_scalef32_source(amdgpu::RegisterAccess(wf).read_lane({data_src}, lane), wf.fp_denorm_mode_f32());'
             )
         elif src_fmt == 'f16':
             L.append(
@@ -3085,11 +3105,9 @@ def _gen_wide_scalef32(
                     idx = j * 2 + half
                     L.append(f'    {{')
                     L.append(
-                        f'      float v = std::bit_cast<float>(rd({s}_base, lane, {j}));'
+                        f'      double v = amdgpu::widen_scalef32_source(rd({s}_base, lane, {j}), wf.fp_denorm_mode_f32());'
                     )
-                    L.append(
-                        f'      float sv = static_cast<float>(static_cast<double>(v) / scale);'
-                    )
+                    L.append(f'      float sv = static_cast<float>(v / scale);')
                     if stochastic:
                         L.append(
                             f"      vals[{idx}] = {_narrow_sr_encode_call(dst_fmt, cvt_fn, 'sv', 'seed')};"
@@ -3105,11 +3123,9 @@ def _gen_wide_scalef32(
             for j in range(32):
                 L.append(f'    {{')
                 L.append(
-                    f'      float v = std::bit_cast<float>(rd({src[0]}_base, lane, {j}));'
+                    f'      double v = amdgpu::widen_scalef32_source(rd({src[0]}_base, lane, {j}), wf.fp_denorm_mode_f32());'
                 )
-                L.append(
-                    f'      float sv = static_cast<float>(static_cast<double>(v) / scale);'
-                )
+                L.append(f'      float sv = static_cast<float>(v / scale);')
                 if stochastic:
                     L.append(
                         f"      vals[{j}] = {_narrow_sr_encode_call(dst_fmt, cvt_fn, 'sv', 'seed')};"
