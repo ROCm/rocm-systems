@@ -21,14 +21,19 @@
 // SOFTWARE.
 
 #include <rocprofiler-sdk-collector/collector.h>
+#include <rocprofiler-sdk-collector/records.h>
+#include <rocprofiler-sdk/hip/runtime_api_id.h>
 
 #include "lib/rocprofiler-sdk-collector/ctf/reader.hpp"
 #include "lib/rocprofiler-sdk-collector/join.hpp"
 
+#include "format_args.hpp"
 #include "scratch_dir.hpp"
 
+#include <fmt/format.h>
 #include <gtest/gtest.h>
 
+#include <time.h>
 #include <unistd.h>
 
 #include <cstdlib>
@@ -540,4 +545,127 @@ TEST(collector, loses_no_calls_when_lossless)
     EXPECT_EQ(result.stats.lost_exits + result.stats.open_at_stop + result.stats.unmatched_exits +
                   result.stats.ambiguous_exits,
               0u);
+}
+
+namespace
+{
+uint64_t
+boottime_now()
+{
+    auto now = timespec{};
+    ::clock_gettime(CLOCK_BOOTTIME, &now);
+    return (static_cast<uint64_t>(now.tv_sec) * 1000000000) + static_cast<uint64_t>(now.tv_nsec);
+}
+
+struct read_hip_call
+{
+    rocprofiler_buffer_tracing_hip_api_ext_record_t record = {};
+    rocprofiler_collector_call_info_t               info   = {};
+    std::vector<collector::test::arg_row>           rows   = {};
+};
+}  // namespace
+
+TEST(collector, reads_hip_api_records)
+{
+    SKIP_WITHOUT_SESSION_DAEMON();
+    SKIP_WITHOUT_TEST_APP();
+
+    const char* const hip_providers[] = {"rocm_hip", nullptr};
+    auto              dir             = scratch_dir{};
+    auto              config          = make_config(dir.path.c_str(), hip_providers);
+    auto              handle          = rocprofiler_collector_t{};
+    ASSERT_EQ(rocprofiler_collector_create(&config, &handle), ROCPROFILER_COLLECTOR_STATUS_SUCCESS);
+
+    auto read_config       = rocprofiler_collector_read_config_t{};
+    read_config.size       = sizeof(read_config);
+    read_config.schema_dir = ROCPROFILER_COLLECTOR_TEST_SCHEMA_DIR;
+    EXPECT_EQ(rocprofiler_collector_read(handle, &read_config, nullptr),
+              ROCPROFILER_COLLECTOR_STATUS_ERROR_INVALID_STATE);  // not stopped
+
+    auto before = boottime_now();
+    ASSERT_EQ(rocprofiler_collector_start(handle), ROCPROFILER_COLLECTOR_STATUS_SUCCESS);
+    const char* const argv[] = {test_app, "4", "0", "hip", nullptr};
+    auto              pid    = 0;
+    ASSERT_EQ(rocprofiler_collector_launch(handle, argv, &pid),
+              ROCPROFILER_COLLECTOR_STATUS_SUCCESS);
+    auto exit_status = -1;
+    ASSERT_EQ(rocprofiler_collector_wait(handle, pid, &exit_status),
+              ROCPROFILER_COLLECTOR_STATUS_SUCCESS);
+    ASSERT_EQ(rocprofiler_collector_stop(handle), ROCPROFILER_COLLECTOR_STATUS_SUCCESS);
+    auto after = boottime_now();
+
+    // A schema directory without rocm_hip.json.
+    auto no_schema       = read_config;
+    no_schema.schema_dir = dir.path.c_str();
+    EXPECT_EQ(rocprofiler_collector_read(handle, &no_schema, nullptr),
+              ROCPROFILER_COLLECTOR_STATUS_ERROR_PROBE_SCHEMA);
+
+    auto calls                   = std::vector<read_hip_call>{};
+    read_config.user_data        = &calls;
+    read_config.hip_api_callback = [](const rocprofiler_buffer_tracing_hip_api_ext_record_t* record,
+                                      const rocprofiler_collector_call_info_t*               info,
+                                      void* user_data) {
+        static_cast<std::vector<read_hip_call>*>(user_data)->push_back(
+            {*record, *info, collector::test::format_args(*record)});
+    };
+    auto stats = rocprofiler_collector_read_statistics_t{};
+    ASSERT_EQ(rocprofiler_collector_read(handle, &read_config, &stats),
+              ROCPROFILER_COLLECTOR_STATUS_SUCCESS);
+
+    EXPECT_EQ(stats.size, sizeof(stats));
+    EXPECT_EQ(stats.events, 10u);
+    EXPECT_EQ(stats.calls, 5u);
+    EXPECT_EQ(stats.discarded_events + stats.calls_no_end + stats.calls_args_incomplete +
+                  stats.unmatched_exits + stats.ambiguous_exits + stats.unknown_calls,
+              0u);
+    EXPECT_EQ(stats.clock_stable, 1u);
+    ASSERT_EQ(calls.size(), 5u);
+
+    const char* const kinds[] = {
+        "HostToHost", "HostToDevice", "DeviceToHost", "DeviceToDevice", "Default"};
+    for(uint64_t i = 0; i < 4; ++i)
+    {
+        const auto& call = calls[i];
+        EXPECT_EQ(call.record.kind, ROCPROFILER_BUFFER_TRACING_HIP_RUNTIME_API_EXT);
+        EXPECT_EQ(call.record.correlation_id.internal, i + 1);
+        EXPECT_EQ(call.record.correlation_id.ancestor, 0u);
+        EXPECT_EQ(call.record.thread_id, static_cast<uint64_t>(pid));  // the main thread
+        EXPECT_EQ(call.info.pid, static_cast<uint32_t>(pid));
+        EXPECT_EQ(call.info.flags, 0u);
+        EXPECT_LE(before, call.record.start_timestamp);  // converted to CLOCK_BOOTTIME
+        EXPECT_LE(call.record.start_timestamp, call.record.end_timestamp);
+        EXPECT_LE(call.record.end_timestamp, after);
+        EXPECT_EQ(call.record.retval.hipError_t_retval, hipSuccess);
+
+        auto dst    = fmt::format("{:#x}", 0x7f0000000000ULL + (i * 0x1000));
+        auto stream = (i % 2 == 0) ? std::string{"0"} : std::string{"0x55a44b4332b0"};
+        EXPECT_EQ(call.rows,
+                  (std::vector<collector::test::arg_row>{
+                      {0, "void*", "dst", dst},
+                      {1, "void const*", "src", "0x7f1000000000"},
+                      {2, "unsigned long", "sizeBytes", std::to_string(4096 * (i + 1))},
+                      {3, "hipMemcpyKind", "kind", kinds[i]},
+                      {4, "ihipStream_t*", "stream", stream}}))
+            << "call " << i;
+    }
+
+    const auto& get_function = calls[4];
+    EXPECT_EQ(get_function.record.operation, ROCPROFILER_HIP_RUNTIME_API_ID_hipModuleGetFunction);
+    EXPECT_EQ(get_function.rows,
+              (std::vector<collector::test::arg_row>{
+                  {0, "ihipModuleSymbol_t**", "function", "0x7ffd00001000"},
+                  {1, "ihipModule_t*", "module", "0x560000002000"},
+                  {2, "char const*", "kname", "kernel_name"}}));
+
+    // The strings stay valid until destroy, and a second read gives the same records.
+    auto again            = std::vector<read_hip_call>{};
+    read_config.user_data = &again;
+    ASSERT_EQ(rocprofiler_collector_read(handle, &read_config, nullptr),
+              ROCPROFILER_COLLECTOR_STATUS_SUCCESS);
+    ASSERT_EQ(again.size(), calls.size());
+    EXPECT_EQ(again[4].rows, get_function.rows);
+    EXPECT_EQ(again[4].record.args.hipModuleGetFunction.kname,
+              get_function.record.args.hipModuleGetFunction.kname);
+
+    EXPECT_EQ(rocprofiler_collector_destroy(handle), ROCPROFILER_COLLECTOR_STATUS_SUCCESS);
 }

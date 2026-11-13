@@ -21,17 +21,22 @@ if(COLLECTOR_TEST_LTTNG_UST_FOUND)
 endif()
 
 set(collector_test_sources clock.cpp collector.cpp ctf_metadata.cpp ctf_reader.cpp
-                           join.cpp)
+                           hip_records.cpp join.cpp schema.cpp)
 
 add_executable(collector-tests)
 # c_api.c checks that the public headers compile as C.
 target_sources(collector-tests PRIVATE ${collector_test_sources} c_api.c)
 target_compile_definitions(
-    collector-tests PRIVATE ROCPROFILER_COLLECTOR_TEST_APP="${collector_test_app_path}")
+    collector-tests
+    PRIVATE
+        ROCPROFILER_COLLECTOR_TEST_APP="${collector_test_app_path}"
+        ROCPROFILER_COLLECTOR_TEST_SCHEMA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/test_schema")
 target_link_libraries(
     collector-tests
     PRIVATE rocprofiler-sdk::rocprofiler-sdk-collector-shared-library
-            rocprofiler-sdk::rocprofiler-sdk-collector-static-library GTest::gtest
+            rocprofiler-sdk::rocprofiler-sdk-collector-static-library
+            rocprofiler-sdk::rocprofiler-sdk-shared-library
+            GTest::gtest
             GTest::gtest_main)
 if(COLLECTOR_TEST_LTTNG_UST_FOUND)
     add_dependencies(collector-tests collector-test-app)

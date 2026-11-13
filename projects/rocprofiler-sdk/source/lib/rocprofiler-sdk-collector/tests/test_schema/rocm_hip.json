@@ -1,0 +1,45 @@
+{
+  "schema": 1,
+  "version": "test",
+  "provider": "rocm_hip",
+  "events": [
+    {
+      "name": "hipMemcpyAsync_enter",
+      "api": "hipMemcpyAsync",
+      "phase": "enter",
+      "fields": [
+        {"name": "dst", "role": "argument", "param": "dst", "type": "void *", "capture": "scalars"},
+        {"name": "src", "role": "argument", "param": "src", "type": "const void *", "capture": "scalars"},
+        {"name": "sizeBytes", "role": "argument", "param": "sizeBytes", "type": "size_t", "capture": "scalars"},
+        {"name": "kind", "role": "argument", "param": "kind", "type": "hipMemcpyKind", "capture": "scalars"},
+        {"name": "stream", "role": "argument", "param": "stream", "type": "hipStream_t", "capture": "scalars"}
+      ]
+    },
+    {
+      "name": "hipMemcpyAsync_exit",
+      "api": "hipMemcpyAsync",
+      "phase": "exit",
+      "fields": [
+        {"name": "result", "role": "result", "param": "", "type": "hipError_t", "capture": "none"}
+      ]
+    },
+    {
+      "name": "hipModuleGetFunction_enter",
+      "api": "hipModuleGetFunction",
+      "phase": "enter",
+      "fields": [
+        {"name": "function", "role": "argument", "param": "function", "type": "hipFunction_t *", "capture": "scalars"},
+        {"name": "module", "role": "argument", "param": "module", "type": "hipModule_t", "capture": "scalars"},
+        {"name": "kname", "role": "argument", "param": "kname", "type": "const char *", "capture": "full"}
+      ]
+    },
+    {
+      "name": "hipModuleGetFunction_exit",
+      "api": "hipModuleGetFunction",
+      "phase": "exit",
+      "fields": [
+        {"name": "result", "role": "result", "param": "", "type": "hipError_t", "capture": "none"}
+      ]
+    }
+  ]
+}
