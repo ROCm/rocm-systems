@@ -49,7 +49,7 @@ class GpuMemoryReference : public amd::ReferenceCountedObject {
   //! Get PAL memory object
   Pal::IGpuMemory* iMem() const { return gpuMem_; }
 
-  Pal::Result MakeResident() const;
+  Pal::Result MakeResident(bool cantTrim = true) const;
 
   Pal::IGpuMemory* gpuMem_;  //!< PAL GPU memory object
   void* cpuAddress_;         //!< CPU address of this memory
