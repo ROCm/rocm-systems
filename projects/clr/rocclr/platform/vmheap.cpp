@@ -96,6 +96,8 @@ VmHeap::VmHeap(Device* device, size_t va_size, size_t chunk_size, GetQueueFunc g
 VmHeap::~VmHeap() {
   if (created_) {
     std::scoped_lock k(lock_);
+    // Destruction releases all mappings, regardless of the cache retention policy.
+    unmap_threshold_ = 0;
 
     // Release all heap blocks
     HeapBlock *walk, *next;
@@ -175,8 +177,8 @@ void VmHeap::UnmapPhysMemory(size_t offset, size_t size) {
   int end_chunk = alignDown(offset + size, chunk_size_) / chunk_size_;
 
   for (int i = end_chunk - 1; i >= start_chunk; i--) {
-    // If free mapped memory lower than the threshold, then stop unmapping
-    if (free_mapped <= unmap_threshold_) {
+    // A whole chunk must fit in the release budget; do not round retention down.
+    if (free_mapped <= unmap_threshold_ || chunk_size_ > free_mapped - unmap_threshold_) {
       return;
     }
     if (i >= mapped_chunks_.size()) {
@@ -437,27 +439,28 @@ void VmHeapArray::Free(amd::Memory* memory) {
     freed += vm_heaps_[i]->FreeMappedSize();
   }
   if (freed > unmap_threshold_) {
-    uint64_t extra = freed - unmap_threshold_;
-    uint64_t trim = (extra < unmap_threshold_) ? (unmap_threshold_ - extra) : 0;
-    TrimPhysMemory(trim);
+    // TrimPhysMemory takes the amount to retain, not the excess to release.
+    TrimPhysMemory(unmap_threshold_);
   }
 }
 
 // ================================================================================================
 void VmHeapArray::TrimPhysMemory(size_t unmap_threshold) {
   for (uint i = 0; i < kMaxArraySize; ++i) {
-    // Check the threshold against the accumulated sizes in all heaps
-    if (vm_heaps_[i]->created_ && [this]() {
-          uint64_t size = 0;
-          for (uint i = 0; i < kMaxArraySize; ++i) {
-            size += vm_heaps_[i]->FreeMappedSize();
-          }
-          return size;
-        }() > unmap_threshold) {
-      vm_heaps_[i]->TrimPhysMemory(unmap_threshold);
-    } else {
+    // Allocations may skip smaller heaps; an uncreated heap is not the end.
+    if (!vm_heaps_[i]->created_) {
+      continue;
+    }
+    const uint64_t free_mapped = FreeMappedSize();
+    if (free_mapped <= unmap_threshold) {
       break;
     }
+    // Share one retention budget across the array. Recompute it after each
+    // heap because busy blocks and whole chunks can limit the actual release.
+    const uint64_t release_budget = free_mapped - unmap_threshold;
+    const uint64_t heap_free = vm_heaps_[i]->FreeMappedSize();
+    const uint64_t heap_retain = (heap_free > release_budget) ? heap_free - release_budget : 0;
+    vm_heaps_[i]->TrimPhysMemory(heap_retain);
   }
 }
 
@@ -466,9 +469,8 @@ void VmHeapArray::SetUnmapThreshold(uint64_t threshold) {
   for (uint i = 0; i < kMaxArraySize; ++i) {
     // Note: it's not precisely correct to use the same threshold in all heaps,
     // but the logic will trim heaps in Free()
-    if (vm_heaps_[i]->created_) {
-      vm_heaps_[i]->SetUnmapThreshold(threshold);
-    }
+    // Store the setting even before the first allocation creates this heap.
+    vm_heaps_[i]->SetUnmapThreshold(threshold);
   }
   unmap_threshold_ = threshold;
 }
