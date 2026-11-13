@@ -7,6 +7,7 @@ import contextlib
 import io
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -133,6 +134,31 @@ class Summary(unittest.TestCase):
         self.assertIn("| `release:10.1.0` | 2.30.7-HEAD:7da4302 | BF16 | 1743.0 | 1743.7 "
                       "| 1.0004 | PASSED |", table)
         self.assertIn("| `release:7.13.0` | | | | | | no results |", table)
+
+
+class ReleaseFingerprint(unittest.TestCase):
+    """The versions of released libraries, as `strings` shows them."""
+
+    def version(self, strings: str) -> str:
+        with tempfile.TemporaryDirectory() as tmp:
+            lib = Path(tmp) / "librccl.so.1"
+            lib.write_bytes(b"\x7fELF")
+            done = subprocess.CompletedProcess([], 0, stdout=strings, stderr="")
+            with mock.patch.object(tm.subprocess, "run", return_value=done):
+                return tm.get_rccl_fingerprint(lib)["version"]
+
+    def test_a_version_on_its_own_line(self):
+        # 7.14.1: RCCL 2.30.4
+        self.assertEqual(self.version("RCCL version : %s\n2.30.4\nHEAD:ca887ee\n"),
+                         "2.30.4-HEAD:ca887ee")
+
+    def test_a_version_only_in_the_banner(self):
+        # 7.13.0: RCCL 2.28.3 has no separate version literal.
+        self.assertEqual(
+            self.version("HEAD:3309c61\nHIP version  : 7.13.99004-3309c611\n"
+                         "RCCL version : 2.28.3\n"
+                         'RCCL version 2.28.3 compiled with ROCm "7.13.0.0-9999-3309c611"\n'),
+            "2.28.3-HEAD:3309c61")
 
 
 @unittest.skipIf(yaml is None, "PyYAML not installed")

@@ -723,7 +723,8 @@ def get_rccl_fingerprint(rccl_lib: Path) -> dict:
         git_ref = ""
         for line in result.stdout.splitlines():
             if not semver:
-                m = re.match(r"^(\d+\.\d+\.\d+)$", line)
+                # RCCL 2.28 (ROCm 7.13) has it only inside the banner's literal.
+                m = re.match(r"^(?:RCCL version : )?(\d+\.\d+\.\d+)$", line)
                 if m:
                     semver = m.group(1)
             if not git_ref:
