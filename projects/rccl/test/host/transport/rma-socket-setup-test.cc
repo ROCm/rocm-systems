@@ -63,6 +63,7 @@ class ScopedConnectHandshake {
              [this](ncclSocket* sock, const ncclSocketAddress* addr, uint64_t magic, ncclSocketType,
                     volatile uint32_t*, int, int) {
                if (addr != nullptr) outgoingConnects.push_back({sock, addr, magic});
+               else temporarySocket = sock;
                return ncclSuccess;
              }),
         connect(g_ncclSocketConnect, [](ncclSocket*) { return ncclSuccess; }),
@@ -98,7 +99,10 @@ class ScopedConnectHandshake {
           dst->magic = src->magic;
           src->magic = 0;
         }),
-        close(g_ncclSocketClose, [](ncclSocket*, bool) { return ncclSuccess; }) {}
+        close(g_ncclSocketClose, [this](ncclSocket* sock, bool) {
+          closedSockets.push_back(sock);
+          return ncclSuccess;
+        }) {}
 
   struct OutgoingConnect {
     ncclSocket* sock;
@@ -108,6 +112,8 @@ class ScopedConnectHandshake {
 
   std::vector<int> sentRanks;
   std::vector<OutgoingConnect> outgoingConnects;
+  ncclSocket* temporarySocket = nullptr;
+  std::vector<ncclSocket*> closedSockets;
   ScopedHook<ncclResult_t(ncclSocket*, const ncclSocketAddress*, uint64_t, ncclSocketType, volatile uint32_t*, int,
                           int)>
       init;
@@ -144,7 +150,8 @@ class RmaSocketSetupMicrotest : public ::testing::Test {
   }
 
   template <typename Signature>
-  void CheckConnectFailure(std::function<Signature>& target, int failCall, int expectedCloses) {
+  void CheckConnectFailure(std::function<Signature>& target, int failCall, int expectedCloses,
+                           bool expectTemporaryClose = false) {
     ncclSocket listen{};
     std::array<ncclRmaSocketProxyHandle, 2> handleStorage{};
     std::array<void*, 2> handles{{&handleStorage[0], &handleStorage[1]}};
@@ -180,6 +187,12 @@ class RmaSocketSetupMicrotest : public ::testing::Test {
     EXPECT_EQ(allocate.calls, 4);
     EXPECT_EQ(release.calls, 4);
     EXPECT_TRUE(allocations.empty());
+    EXPECT_EQ(std::count(handshake.closedSockets.begin(), handshake.closedSockets.end(), &listen), 0);
+    if (expectTemporaryClose) {
+      ASSERT_NE(handshake.temporarySocket, nullptr);
+      EXPECT_EQ(std::count(handshake.closedSockets.begin(), handshake.closedSockets.end(),
+                           handshake.temporarySocket), 1);
+    }
   }
 };
 
@@ -197,15 +210,15 @@ TEST_F(RmaSocketSetupMicrotest, Connect_SecondSendFailureReleasesPeerResources) 
 }
 
 TEST_F(RmaSocketSetupMicrotest, Connect_SecondAcceptFailureAlsoClosesTemporarySocket) {
-  ASSERT_NO_FATAL_FAILURE(CheckConnectFailure(g_ncclSocketAccept, 2, 5));
+  ASSERT_NO_FATAL_FAILURE(CheckConnectFailure(g_ncclSocketAccept, 2, 5, true));
 }
 
 TEST_F(RmaSocketSetupMicrotest, Connect_SecondReadyFailureAlsoClosesTemporarySocket) {
-  ASSERT_NO_FATAL_FAILURE(CheckConnectFailure(g_ncclSocketReady, 2, 5));
+  ASSERT_NO_FATAL_FAILURE(CheckConnectFailure(g_ncclSocketReady, 2, 5, true));
 }
 
 TEST_F(RmaSocketSetupMicrotest, Connect_SecondRecvFailureAlsoClosesTemporarySocket) {
-  ASSERT_NO_FATAL_FAILURE(CheckConnectFailure(g_ncclSocketRecv, 2, 5));
+  ASSERT_NO_FATAL_FAILURE(CheckConnectFailure(g_ncclSocketRecv, 2, 5, true));
 }
 
 ncclRmaSocketProxyCollComm* AllocateOwnedComm(int nranks) {
