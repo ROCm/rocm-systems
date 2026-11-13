@@ -54,8 +54,8 @@ class NullDevice : public amd::Device {
   );
 
   //! Instantiate a new virtual device
-  virtual device::VirtualDevice* createVirtualDevice(amd::CommandQueue* queue = nullptr,
-                                                     bool cooperative = false) {
+  virtual device::VirtualDevice* createVirtualDevice(amd::CommandQueue* /*queue*/ = nullptr,
+                                                     bool /*cooperative*/ = false) {
     return nullptr;
   }
 
@@ -65,12 +65,14 @@ class NullDevice : public amd::Device {
 
   //! Just returns NULL for the dummy device
   virtual device::Memory* createMemory(
-      amd::Memory& owner, amd::Memory::ErrorCode* errorCode) const { return nullptr; }
+      amd::Memory& /*owner*/, amd::Memory::ErrorCode* /*errorCode*/) const { return nullptr; }
   //! Just returns NULL for the dummy device
-  virtual device::Memory* createMemory(size_t size, size_t alignment = 0) const { return nullptr; }
+  virtual device::Memory* createMemory(size_t /*size*/, size_t /*alignment*/ = 0) const {
+    return nullptr;
+  }
   //! Sampler object allocation
-  virtual bool createSampler(const amd::Sampler& owner,  //!< abstraction layer sampler object
-                             device::Sampler** sampler   //!< device sampler object
+  virtual bool createSampler(const amd::Sampler& /*owner*/,  //!< abstraction layer sampler object
+                             device::Sampler** /*sampler*/   //!< device sampler object
   ) const {
     ShouldNotReachHere();
     return true;
@@ -78,8 +80,8 @@ class NullDevice : public amd::Device {
 
   //! Just returns NULL for the dummy device
   virtual device::Memory* createView(
-      amd::Memory& owner,           //!< Owner memory object
-      const device::Memory& parent  //!< Parent device memory object for the view
+      amd::Memory& /*owner*/,           //!< Owner memory object
+      const device::Memory& /*parent*/  //!< Parent device memory object for the view
   ) const {
     return nullptr;
   }
@@ -90,86 +92,92 @@ class NullDevice : public amd::Device {
   //! Acquire external graphics API object in the host thread
   //! Needed for OpenGL objects on CPU device
 
-  virtual bool bindExternalDevice(uint flags, void* const pDevice[], void* pContext,
-                                  bool validateOnly) {
+  virtual bool bindExternalDevice(uint /*flags*/, void* const /*pDevice*/[], void* /*pContext*/,
+                                  bool /*validateOnly*/) {
     return true;
   }
 
-  virtual bool unbindExternalDevice(uint flags, void* const pDevice[], void* pContext,
-                                    bool validateOnly) {
+  virtual bool unbindExternalDevice(uint /*flags*/, void* const /*pDevice*/[], void* /*pContext*/,
+                                    bool /*validateOnly*/) {
     return true;
   }
 
   //! Releases non-blocking map target memory
-  virtual void freeMapTarget(amd::Memory& mem, void* target) {}
+  virtual void freeMapTarget(amd::Memory& /*mem*/, void* /*target*/) {}
 
   Pal::AsicRevision asicRevision() const { return asicRevision_; }
 
   //! Empty implementation on Null device
-  virtual bool globalFreeMemory(size_t* freeMemory) const { return false; }
+  virtual bool globalFreeMemory(size_t* /*freeMemory*/) const { return false; }
 
   //! Empty implementation on Null device
-  virtual bool amdFileRead(amd::Os::FileDesc handle, void* devicePtr, uint64_t size, int64_t file_offset,
-                        uint64_t* size_copied, int32_t* status) {
+  virtual bool amdFileRead(amd::Os::FileDesc /*handle*/, void* /*devicePtr*/, uint64_t /*size*/, int64_t /*file_offset*/,
+                        uint64_t* /*size_copied*/, int32_t* /*status*/) {
     ShouldNotReachHere();
     return false;
   }
 
   //! Empty implementation on Null device
-  virtual bool amdFileWrite(amd::Os::FileDesc handle, void* devicePtr, uint64_t size, int64_t file_offset,
-                         uint64_t* size_copied, int32_t* status) {
+  virtual bool amdFileWrite(amd::Os::FileDesc /*handle*/, void* /*devicePtr*/, uint64_t /*size*/, int64_t /*file_offset*/,
+                         uint64_t* /*size_copied*/, int32_t* /*status*/) {
     ShouldNotReachHere();
     return false;
   }
 
   //! Get GPU device settings
   const pal::Settings& settings() const { return reinterpret_cast<pal::Settings&>(*settings_); }
-  virtual void* svmAlloc(amd::Context& context, size_t size, size_t alignment,
-                         cl_svm_mem_flags flags, void* svmPtr) const {
+  virtual void* svmAlloc(amd::Context& /*context*/, size_t /*size*/, size_t /*alignment*/,
+                         cl_svm_mem_flags /*flags*/, void* /*svmPtr*/) const {
     return NULL;
   }
-  virtual void svmFree(void* ptr) const { return; }
-  virtual void* virtualAlloc(void* addr, size_t size, size_t alignment) { return nullptr; };
-  virtual bool virtualFree(void* addr) { return true; }
+  virtual void svmFree(void* /*ptr*/) const { return; }
+  virtual void* virtualAlloc(void* /*addr*/, size_t /*size*/, size_t /*alignment*/) {
+    return nullptr;
+  };
+  virtual bool virtualFree(void* /*addr*/) { return true; }
 
-  virtual cl_int virtualMap(void* va, size_t size, amd::Memory* phys) override {
+  virtual cl_int virtualMap(void* /*va*/, size_t /*size*/, amd::Memory* /*phys*/) override {
     return CL_INVALID_OPERATION;
   }
-  virtual cl_int virtualUnmap(void* va, size_t size) override { return CL_INVALID_OPERATION; }
+  virtual cl_int virtualUnmap(void* /*va*/, size_t /*size*/) override {
+    return CL_INVALID_OPERATION;
+  }
 
-  virtual bool SetMemAccess(void* va_addr, size_t va_size, VmmAccess access_flags,
+  virtual bool SetMemAccess(void* /*va_addr*/, size_t /*va_size*/, VmmAccess /*access_flags*/,
                             VmmLocationType = VmmLocationType::kDevice,
-                            int numaNode = -1) {
+                            int /*numaNode*/ = -1) {
     return true;
   }
 
-  virtual bool GetMemAccess(void* va_addr, VmmAccess* access_flags_ptr) const { return true; }
+  virtual bool GetMemAccess(void* /*va_addr*/, VmmAccess* /*access_flags_ptr*/) const {
+    return true;
+  }
 
-  virtual bool ValidateMemAccess(amd::Memory& mem, bool read_write) const { return true; }
+  virtual bool ValidateMemAccess(amd::Memory& /*mem*/, bool /*read_write*/) const { return true; }
 
-  [[nodiscard]] bool writeDeviceGlobal(amd::Memory& dst, size_t offset, size_t size,
-                                       const void* src) const override {
+  [[nodiscard]] bool writeDeviceGlobal(amd::Memory& /*dst*/, size_t /*offset*/, size_t /*size*/,
+                                       const void* /*src*/) const override {
     ShouldNotReachHere();
     return false;
   }
 
-  virtual bool ExportShareableVMMHandle(amd::Memory& amd_mem_obj, int flags,
-                                        void* shareableHandle) {
+  virtual bool ExportShareableVMMHandle(amd::Memory& /*amd_mem_obj*/, int /*flags*/,
+                                        void* /*shareableHandle*/) {
     return false;
   }
 
-  virtual amd::Memory* ImportShareableVMMHandle(void* osHandle) { return nullptr; }
+  virtual amd::Memory* ImportShareableVMMHandle(void* /*osHandle*/) { return nullptr; }
 
-  virtual bool importExtSemaphore(void** extSemaphore, const amd::Os::FileDesc& handle,
-                                  amd::ExternalSemaphoreHandleType sem_handle_type) override {
+  virtual bool importExtSemaphore(void** /*extSemaphore*/, const amd::Os::FileDesc& /*handle*/,
+                                  amd::ExternalSemaphoreHandleType /*sem_handle_type*/) override {
     return false;
   }
-  virtual void DestroyExtSemaphore(void* extSemaphore) {}
+  virtual void DestroyExtSemaphore(void* /*extSemaphore*/) {}
 
   void* Alloc(const Util::AllocInfo& allocInfo) { return allocator_.Alloc(allocInfo); }
   void Free(const Util::FreeInfo& freeInfo) { allocator_.Free(freeInfo); }
-  virtual bool SetClockMode(const cl_set_device_clock_mode_input_amd setClockModeInput,
-                            cl_set_device_clock_mode_output_amd* pSetClockModeOutput) {
+  virtual bool SetClockMode(const cl_set_device_clock_mode_input_amd /*setClockModeInput*/,
+                            cl_set_device_clock_mode_output_amd* /*pSetClockModeOutput*/) {
     return true;
   }
 #if DEVICE_ADDRESS_SANITIZER
@@ -693,7 +701,8 @@ class Device : public NullDevice {
   std::map<Pal::IQueue*, QueueRecycleInfo*>& QueuePool() { return queue_pool_; }
   const std::map<Pal::IQueue*, QueueRecycleInfo*>& QueuePool() const { return queue_pool_; }
 
-  virtual bool findLinkInfo(const amd::Device& other_device, std::vector<LinkAttrType>* link_attr) {
+  virtual bool findLinkInfo(const amd::Device& /*other_device*/,
+                            std::vector<LinkAttrType>* /*link_attr*/) {
     // Unsupported in PAL
     LogError("The function is unsupported on Windows");
     return false;

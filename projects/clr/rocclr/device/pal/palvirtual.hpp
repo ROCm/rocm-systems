@@ -360,7 +360,7 @@ class VirtualGPU : public device::VirtualDevice {
 
   void flush(amd::Command* list = nullptr, bool wait = false);
 
-  void profilerAttach(bool enable = false) {}
+  void profilerAttach(bool /*enable*/ = false) {}
 
   bool isFenceDirty() const { return false; }
 
