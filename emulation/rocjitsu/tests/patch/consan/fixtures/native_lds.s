@@ -103,7 +103,7 @@ CONSAN_KERNEL:
   v_mov_b32 v2, s4
   v_mov_b32 v5, 0
 
-#if (CONSAN_CASE >= 25 && CONSAN_CASE <= 35) || CONSAN_CASE == 38
+#if (CONSAN_CASE >= 25 && CONSAN_CASE <= 35) || CONSAN_CASE == 38 || CONSAN_CASE == 40 || CONSAN_CASE == 41
 #if CONSAN_CASE == 25
   s_mov_b32 s10, 0
 #elif CONSAN_CASE == 26
@@ -118,6 +118,20 @@ CONSAN_KERNEL:
   s_mov_b32 s10, 10
 #else
   s_mov_b32 s10, 3
+#endif
+#if CONSAN_CASE == 40 || CONSAN_CASE == 41
+  // Whole waves choose different trip counts before entering the same loop.
+  v_cmp_eq_u32 MASK_VCC, 0, v0
+  s_cbranch_vccz .Lshort_trip
+  s_mov_b32 s10, 3
+  s_branch .Ltrip_ready
+.Lshort_trip:
+#if CONSAN_CASE == 40
+  s_mov_b32 s10, 2
+#else
+  s_mov_b32 s10, 0
+#endif
+.Ltrip_ready:
 #endif
 #if CONSAN_CASE == 32
   // 576 = 64 * (10 - 1): delay the only cross-wave pair until cycle 10.

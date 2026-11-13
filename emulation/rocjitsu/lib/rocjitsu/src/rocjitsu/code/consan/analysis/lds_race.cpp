@@ -543,8 +543,11 @@ LdsRaceExecutionResult analyze_lds_race_execution(const Manifest &facts,
         });
     const bool complete_exit =
         matching_phases && std::ranges::all_of(domain_completions, &WaveEvidence::journal_complete);
+    // Qualified loops may have different wave-local trip counts. This opens
+    // the final interval without contradicting otherwise valid row evidence.
     if (!matching_phases)
-      issue(result, UINT32_MAX, UINT32_MAX, "mismatched_workgroup_final_phases", workgroup);
+      issue(result, UINT32_MAX, UINT32_MAX, "mismatched_workgroup_final_phases", workgroup,
+            facts.scope != ScopeKind::NativeLdsWorkgroupBarrierLoop);
     uint32_t complete_witnesses = 0;
     for (uint32_t slot = 0; slot < kSyncCapacity; ++slot) {
       const std::optional<Completion> &first = domain_completions.front().journal[slot];
