@@ -33,6 +33,9 @@
 #include "transport/net_ib/common.h"
 #include "transport/net_ib/gin.h"
 
+// Read by the gin.cc verbs skip; net_ib_cast/common.cc, which defines it in librccl, is not linked here.
+int IbCastNDevs = -1;
+
 namespace {
 
 int g_ginSelfCopies = 0;
@@ -195,6 +198,7 @@ class NetIbGinMicrotest : public ::testing::Test {
 
   void TearDown() override {
     NetIbResetGlobals();
+    IbCastNDevs = -1;
     g_ginSelfCopies = 0;
     ResetGinHooks();
     ResetNetIbSupportSeams();
@@ -293,6 +297,9 @@ TEST_F(NetIbGinMicrotest, InitType_NoDevicesOrGdrReturnsErrorWithoutPublishingCo
 // NET runs IB-CAST, which has already enumerated the providers. Everywhere else
 // the IB RMA proxy starts, so host RMA keeps its plugin.
 TEST_F(NetIbGinMicrotest, InitType_UnsetOrAnvilSdmaSkipsVerbsOnlyUnderIbCastOnGfx1250) {
+  IbCastNDevs = 1;
+  SetMicroEnvAbsent("NCCL_GIN_TYPE");
+  SetMicroEnvAbsent("RCCL_GIN_TYPE_LIST");
   struct Case {
     const char* name;
     int type;
@@ -344,8 +351,11 @@ TEST_F(NetIbGinMicrotest, InitType_UnsetOrAnvilSdmaSkipsVerbsOnlyUnderIbCastOnGf
 
 // If the arch cannot be read, gfx1250 is not assumed and the IB RMA proxy starts.
 TEST_F(NetIbGinMicrotest, InitType_ArchLookupFailureKeepsVerbsInitUnderIbCast) {
+  IbCastNDevs = 1;
   SetMicroEnvAbsent("NCCL_NET");
   SetMicroEnvAbsent("NCCL_NET_PLUGIN");
+  SetMicroEnvAbsent("NCCL_GIN_TYPE");
+  SetMicroEnvAbsent("RCCL_GIN_TYPE_LIST");
   ScopedHook ainic(g_useAinic, [] { return true; });
   ScopedHook props(g_hipGetDeviceProperties, [](hipDeviceProp_t* prop, int) {
     *prop = hipDeviceProp_t{};
@@ -374,6 +384,56 @@ TEST_F(NetIbGinMicrotest, InitType_ArchLookupFailureKeepsVerbsInitUnderIbCast) {
     void* context = nullptr;
     EXPECT_EQ(ncclGinIbInitType(&context, 0, nullptr, -1), ncclInternalError);
     EXPECT_EQ(init.calls, 1);
+    EXPECT_EQ(context, nullptr);
+  }
+}
+
+// On gfx1250 under IB-CAST, verbs still start when RCCL_GIN_TYPE_LIST asks for proxy GIN, which runs on the
+// IB RMA proxy, or when IB-CAST stopped before listing the verbs devices (IbCastNDevs still -1).
+TEST_F(NetIbGinMicrotest, InitType_ProxyInGinTypeListOrUnlistedIbCastKeepsVerbsInit) {
+  struct Case {
+    const char* name;
+    int type;
+    const char* ginTypeEnv;
+    const char* ginTypeList;
+    int ibCastNDevs;
+    bool skip;
+  };
+  const Case cases[] = {
+      {"list names proxy", -1, nullptr, "2", 1, false},
+      {"list names GDA and proxy", -1, nullptr, "6,2", 1, false},
+      {"list names proxy and Anvil SDMA", -1, nullptr, "2,7", 1, false},
+      {"list names GDA only", -1, nullptr, "6", 1, true},
+      {"list names Anvil SDMA only", -1, nullptr, "7", 1, true},
+      {"list has no valid entry", -1, nullptr, "9", 1, true},
+      {"NCCL_GIN_TYPE=7 overrides a list naming proxy", NCCL_NET_DEVICE_GIN_ANVIL_SDMA, "7", "2", 1, true},
+      {"IB-CAST listed no usable device", -1, nullptr, nullptr, 0, true},
+      {"IB-CAST never listed devices", -1, nullptr, nullptr, -1, false},
+      {"Anvil SDMA, IB-CAST never listed devices", NCCL_NET_DEVICE_GIN_ANVIL_SDMA, "7", nullptr, -1, false},
+  };
+  SetMicroEnvAbsent("NCCL_NET");
+  SetMicroEnvAbsent("NCCL_NET_PLUGIN");
+  ScopedHook ainic(g_useAinic, [] { return true; });
+  ScopedHook props(g_hipGetDeviceProperties, [](hipDeviceProp_t* prop, int) {
+    *prop = hipDeviceProp_t{};
+    std::snprintf(prop->gcnArchName, sizeof(prop->gcnArchName), "%s", "gfx1250");
+    return hipSuccess;
+  });
+  for (const Case& c : cases) {
+    SCOPED_TRACE(c.name);
+    if (c.ginTypeEnv) SetMicroEnv("NCCL_GIN_TYPE", c.ginTypeEnv);
+    else SetMicroEnvAbsent("NCCL_GIN_TYPE");
+    if (c.ginTypeList) SetMicroEnv("RCCL_GIN_TYPE_LIST", c.ginTypeList);
+    else SetMicroEnvAbsent("RCCL_GIN_TYPE_LIST");
+    IbCastNDevs = c.ibCastNDevs;
+    ScopedHook init(g_ginInitDevices, [](ncclDebugLogger_t, ncclProfilerCallback_t) {
+      ncclNIbDevs = 0;
+      return ncclSuccess;
+    });
+    void* context = nullptr;
+
+    EXPECT_EQ(ncclGinIbInitType(&context, 0, nullptr, c.type), ncclInternalError);
+    EXPECT_EQ(init.calls, c.skip ? 0 : 1);
     EXPECT_EQ(context, nullptr);
   }
 }
