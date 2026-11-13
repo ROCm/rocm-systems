@@ -205,7 +205,7 @@ TEST(parser_env, trims_values_and_skips_an_empty_list)
     freq.env       = "ROCPROFSYS_FREQ";
     auto events    = make_param("events", param_type::enumeration_list);
     events.env     = "ROCPROFSYS_EVENTS";
-    events.choices = { choice{ .value = "ins" } };
+    events.choices = { "ins" };
     auto trace     = make_param("trace", param_type::boolean);
     trace.env      = "ROCPROFSYS_TRACE";
     auto label     = make_param("label", param_type::string);
@@ -302,14 +302,8 @@ make_event_schema()
     events.arg           = "--events";
     events.arg_min_count = 1;
     events.arg_max_count = 3;
-    events.choices       = { choice{ .value = "ins" },
-                             choice{ .value = "cyc", .aliases = { "cycles" } } };
-    auto format          = make_param("format", param_type::enumeration);
-    format.env           = "ROCPROFSYS_FORMAT";
-    format.arg           = "--format";
-    format.choices       = { choice{ .value = "pftrace", .aliases = { "proto" } } };
+    events.choices       = { "ins", "cycles" };
     add_param(value, std::move(events));
-    add_param(value, std::move(format));
     return value;
 }
 
@@ -320,7 +314,7 @@ TEST(parser_cli, joins_tokens_until_the_next_option)
             .parse(make_event_schema());
 
     EXPECT_TRUE(parsed.errors.empty());
-    expect_stored(parsed.values, "events", std::vector<std::string>{ "ins", "cyc" });
+    expect_stored(parsed.values, "events", std::vector<std::string>{ "ins", "cycles" });
     expect_stored(parsed.values, "trace", true);
 }
 
@@ -334,23 +328,9 @@ TEST(parser_cli, does_not_take_the_next_option_as_a_value)
     expect_stored(parsed.values, "trace", true);
 }
 
-TEST(parser_cli, stores_a_choice_alias_as_the_choice_value)
-{
-    const auto parsed =
-        cli_parser{ { "--format", "proto" }, unknown_option::report }.parse(
-            make_event_schema());
-
-    EXPECT_TRUE(parsed.errors.empty());
-    expect_stored(parsed.values, "format", std::string{ "pftrace" });
-}
-
-TEST(parser_env, stores_a_choice_alias_as_the_choice_value)
+TEST(parser_env, reads_a_comma_separated_list)
 {
     const auto lookup = [](std::string_view name) -> std::optional<std::string> {
-        if(name == "ROCPROFSYS_FORMAT")
-        {
-            return std::string{ "proto" };
-        }
         if(name == "ROCPROFSYS_EVENTS")
         {
             return std::string{ "cycles,ins" };
@@ -360,8 +340,7 @@ TEST(parser_env, stores_a_choice_alias_as_the_choice_value)
 
     const auto parsed = env_parser{ lookup }.parse(make_event_schema());
     EXPECT_TRUE(parsed.errors.empty());
-    expect_stored(parsed.values, "format", std::string{ "pftrace" });
-    expect_stored(parsed.values, "events", std::vector<std::string>{ "cyc", "ins" });
+    expect_stored(parsed.values, "events", std::vector<std::string>{ "cycles", "ins" });
 }
 
 TEST(parser_cli, accepts_a_negative_number_and_rejects_overflow)
@@ -440,13 +419,14 @@ TEST(parser_cli, list_stops_at_the_separator_and_rejects_a_bare_command)
                                        unknown_option::report }
                                .parse(make_event_schema());
     EXPECT_TRUE(separated.errors.empty());
-    expect_stored(separated.values, "events", std::vector<std::string>{ "ins", "cyc" });
+    expect_stored(separated.values, "events",
+                  std::vector<std::string>{ "ins", "cycles" });
     EXPECT_EQ(separated.command, (std::vector<std::string>{ "./app" }));
 
     const auto bare =
         cli_parser{ { "--events", "ins", "cycles", "./app" }, unknown_option::report }
             .parse(make_event_schema());
-    expect_stored(bare.values, "events", std::vector<std::string>{ "ins", "cyc" });
+    expect_stored(bare.values, "events", std::vector<std::string>{ "ins", "cycles" });
     EXPECT_TRUE(bare.command.empty());
     ASSERT_EQ(bare.errors.size(), 1U);
     EXPECT_NE(bare.errors.front().find("unexpected argument './app'"), std::string::npos);

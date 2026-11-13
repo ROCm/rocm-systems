@@ -27,7 +27,7 @@ struct parse_result
     /// invalid_value_message and store nothing.
     void store_if_valid(const schema_param& param, std::string_view value)
     {
-        const auto parsed = parse_value(param, canonical_choice(param, value));
+        const auto parsed = parse_value(param, value);
         if(!parsed)
         {
             errors.push_back(invalid_value_message(value, param.id));

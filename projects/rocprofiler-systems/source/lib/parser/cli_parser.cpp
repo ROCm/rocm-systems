@@ -84,7 +84,7 @@ accepts_list_token(const schema_param& param, std::string_view token)
     {
         return true;
     }
-    return is_valid_value(param, canonical_choice(param, token));
+    return is_valid_value(param, token);
 }
 
 std::string
