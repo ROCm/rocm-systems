@@ -71,6 +71,8 @@ RegisterEffects register_effects(const Instruction &inst, rj_code_arch_t arch, u
     if (!name.starts_with("global_") && !name.starts_with("scratch_"))
       return false;
     for (int i = 1; i < inst.num_src_operands(); ++i) {
+      if (!inst.tracks_explicit_source(i))
+        continue;
       const auto *op = inst.src_operand(i);
       if (op) {
         const auto ref = op->to_register_ref();
@@ -85,16 +87,18 @@ RegisterEffects register_effects(const Instruction &inst, rj_code_arch_t arch, u
       const auto *op = inst.dst_operand(i);
       if (!op)
         continue;
-      if (auto ref = op->to_register_ref())
-        effects.defs.expand(wave_sized_register(*op, *ref, wave_size));
+      if (auto ref = WaitcheckTarget::register_operand(*op, arch))
+        effects.defs.expand(inst.wave_sized_destination(*op, *ref, wave_size));
     }
   }
   inst.implicit_defs(effects.defs);
   for (int i = 0; i < inst.num_src_operands(); ++i) {
+    if (!inst.tracks_explicit_source(i))
+      continue;
     const auto *op = inst.src_operand(i);
     if (!op)
       continue;
-    auto ref = op->to_register_ref();
+    auto ref = WaitcheckTarget::register_operand(*op, arch);
     if (!ref)
       continue;
     if (i == 0 && name.starts_with("scratch_") && !scratch_vector_address_enabled(inst, arch))
@@ -116,6 +120,8 @@ std::optional<std::string_view> deferred_reason(const Instruction &inst,
   // dropping either a pending result or one of its consumers.
   for (int i = 0; i < inst.num_src_operands() + inst.num_dst_operands(); ++i) {
     const bool destination = i >= inst.num_src_operands();
+    if (!destination && !inst.tracks_explicit_source(i))
+      continue;
     const auto *op =
         destination ? inst.dst_operand(i - inst.num_src_operands()) : inst.src_operand(i);
     if (!op)
@@ -177,9 +183,11 @@ RegisterSet registers_for_event(const ClassifiedEvent &event, const RegisterEffe
     const auto name = inst.mnemonic();
     const int index = name.starts_with("buffer_") || name.starts_with("tbuffer_") ? 0 : 1;
     RegisterSet regs;
-    if (const auto *op = inst.src_operand(index)) {
-      if (auto ref = op->to_register_ref())
-        regs.expand(*ref);
+    if (inst.tracks_explicit_source(index)) {
+      if (const auto *op = inst.src_operand(index)) {
+        if (auto ref = op->to_register_ref())
+          regs.expand(*ref);
+      }
     }
     return regs;
   }
@@ -189,6 +197,20 @@ RegisterSet registers_for_event(const ClassifiedEvent &event, const RegisterEffe
 
 bool ordered_waw(const PendingEvent &event, std::span<const ClassifiedEvent> current,
                  rj_code_arch_t arch) {
+  if (amdgpu::has_ordered_lds_direct_writeback(arch) && event.counter == WaitCounterKind::Exp &&
+      event.kind == WaitEventKind::LdsDirect) {
+    return std::ranges::any_of(current, [](const auto &other) {
+      return other.counter == WaitCounterKind::Exp && other.kind == WaitEventKind::LdsDirect;
+    });
+  }
+  // LDS instructions stay in order with other LDS instructions from the same
+  // wave. GDS and SMEM are separate event kinds that are not ordered with LDS.
+  // Only DS-counter results qualify: expert scheduling also tracks DS sources
+  // on VmVsrc, and result ordering does not end those source lifetimes.
+  if (event.counter == WaitCounterKind::Ds && event.kind == WaitEventKind::Ds)
+    return std::ranges::any_of(current, [](const auto &other) {
+      return other.counter == WaitCounterKind::Ds && other.kind == WaitEventKind::Ds;
+    });
   if (!amdgpu::has_ordered_vmem_writeback(arch))
     return false;
   if (event.kind == WaitEventKind::FlatLoad) {
@@ -309,9 +331,19 @@ private:
         ++age;
     }
     ages[static_cast<size_t>(event.kind)] = 0;
+    const bool ordered_exp =
+        event.counter == WaitCounterKind::Exp && amdgpu::has_typed_export_waits(arch_) &&
+        (event.kind == WaitEventKind::ExportMrt || event.kind == WaitEventKind::ExportZ ||
+         event.kind == WaitEventKind::ExportPosition ||
+         event.kind == WaitEventKind::ExportPrimitive ||
+         event.kind == WaitEventKind::ExportDualSourceBlend ||
+         event.kind == WaitEventKind::LdsDirect);
     for (auto &pending : state_.pending[idx]) {
       if (pending.min_younger < max_wait.value())
         ++pending.min_younger;
+      if (ordered_exp && pending.kind == event.kind &&
+          pending.min_younger_in_fifo < max_wait.value())
+        ++pending.min_younger_in_fifo;
     }
     // Counter-only operations must age older requests without accumulating a
     // dependency record of their own (notably long sequences of stores).

@@ -1,3 +1,4 @@
+import ActionButton from '../shared/ActionButton';
 import {
   Box,
   Button,
@@ -37,7 +38,7 @@ export default function BenchmarkResultDialog({ record, repository, onClose }) {
         <>
           <DialogTitle component="div" sx={{ pr: 7 }}>
             <Typography variant="h2" sx={{ lineHeight: '24px' }}>{test.name}</Typography>
-            <Typography variant="body2" sx={{ color: 'text.secondary', mt: 0.4, lineHeight: '21px' }}>{test.target} · {test.mode} · {test.suite}</Typography>
+            <Typography variant="body2" sx={{ color: 'text.secondary', mt: '3px', lineHeight: '21px' }}>{test.target} · {test.mode} · {test.suite}</Typography>
             <IconButton onClick={onClose} aria-label="Close details" sx={{ position: 'absolute', top: 11, right: 11 }}><CloseRoundedIcon /></IconButton>
           </DialogTitle>
           <DialogContent dividers>
@@ -49,8 +50,8 @@ export default function BenchmarkResultDialog({ record, repository, onClose }) {
               {test.error && <Box sx={{ gridColumn: '1 / -1' }}><DetailItem label="Error">{test.error}</DetailItem></Box>}
             </DetailGrid>
 
-            <Divider sx={{ my: 2.5 }} />
-            <DetailSectionHeading>Problem Details</DetailSectionHeading>
+            <Divider sx={{ my: '20px' }} />
+            <DetailSectionHeading>Problem details</DetailSectionHeading>
             {testProblemDetails.length > 0 ? (
               <DetailGrid>
                 {testProblemDetails.map((detail) => (
@@ -61,7 +62,7 @@ export default function BenchmarkResultDialog({ record, repository, onClose }) {
               <Typography variant="body2" sx={{ color: 'text.secondary' }}>No problem details were provided for this result.</Typography>
             )}
 
-            <Divider sx={{ my: 2.5 }} />
+            <Divider sx={{ my: '20px' }} />
             <DetailSectionHeading>Environment</DetailSectionHeading>
             {environmentDetails.length > 0 ? (
               <DetailGrid>
@@ -73,22 +74,22 @@ export default function BenchmarkResultDialog({ record, repository, onClose }) {
               <Typography variant="body2" sx={{ color: 'text.secondary' }}>No environment details were provided for this run.</Typography>
             )}
 
-            <Divider sx={{ my: 2.5 }} />
-            <DetailSectionHeading>Run Provenance</DetailSectionHeading>
+            <Divider sx={{ my: '20px' }} />
+            <DetailSectionHeading>Run provenance</DetailSectionHeading>
             <DetailGrid>
               <DetailItem label="Run identity">{run.runId}</DetailItem>
               <DetailItem label="Run time">{formatFullDate(run.timestamp)}</DetailItem>
               <DetailItem label="Run type">{run.trigger == null ? '-' : run.trigger === 'manual' ? 'Manual' : run.trigger === 'auto' ? 'Auto' : run.trigger}</DetailItem>
               <DetailItem label="Machine">{formatMetadataValue(run.machineId)}</DetailItem>
-              <DetailItem label="Rocjitsu commit">{formatMetadataValue(commitSha)}</DetailItem>
+              <DetailItem label="rocjitsu commit">{formatMetadataValue(commitSha)}</DetailItem>
               <DetailItem label="Commit time">{formatFullDate(commitTimestampFor(run))}</DetailItem>
               {hasDisplayValue(provenance.commitMessage) && <DetailItem label="Commit message">{provenance.commitMessage}</DetailItem>}
             </DetailGrid>
 
           </DialogContent>
-          <DialogActions sx={{ px: 3, py: 1.5 }}>
+          <DialogActions sx={{ px: 3, py: '12px' }}>
             {sourceUrl && (
-              <Button
+              <ActionButton
                 component={Link}
                 href={sourceUrl}
                 target="_blank"
@@ -97,7 +98,7 @@ export default function BenchmarkResultDialog({ record, repository, onClose }) {
                 sx={{ mr: 'auto' }}
               >
                 Commit {shortSha(run)}
-              </Button>
+              </ActionButton>
             )}
             <Button onClick={onClose} color="inherit">Close</Button>
           </DialogActions>

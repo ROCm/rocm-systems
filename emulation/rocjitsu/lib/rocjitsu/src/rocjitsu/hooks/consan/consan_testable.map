@@ -1,0 +1,14 @@
+# Copyright (c) 2026 Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
+# Test-only variant: production lifecycle interfaces plus counter inspection.
+{
+  global:
+    OnLoad;
+    OnUnload;
+    rj_consan_drain;
+    rj_consan_finish;
+    rj_consan_get_statistics;
+  local:
+    *;
+};

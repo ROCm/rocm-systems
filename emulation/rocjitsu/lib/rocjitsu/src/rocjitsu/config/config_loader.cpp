@@ -2,7 +2,9 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/config/config_loader.h"
+#include "util/diagnostic.h"
 
+#include "rocjitsu/kmd/linux/amdgpu_properties.h"
 #include "rocjitsu/kmd/linux/cwsr.h"
 #include "rocjitsu/vm/amdgpu/pci/gpu_generation_registry.h"
 
@@ -38,7 +40,6 @@
 #include <limits>
 #include <regex>
 #include <sstream>
-#include <stdexcept>
 #include <string>
 #include <thread>
 #include <unordered_map>
@@ -48,27 +49,27 @@
 namespace rocjitsu {
 namespace config {
 
-ExecutionThreadAllocation resolve_execution_threads(const ExecutionThreadRequest &request,
-                                                    uint32_t host_threads, uint32_t xcds,
-                                                    std::span<const uint32_t> dispatch_capacities,
-                                                    bool async_supported,
-                                                    std::span<const ExecutionThreadChoice> choices,
-                                                    bool clocked) {
+util::FailureOr<ExecutionThreadAllocation>
+resolve_execution_threads(const ExecutionThreadRequest &request, uint32_t host_threads,
+                          uint32_t xcds, std::span<const uint32_t> dispatch_capacities,
+                          bool async_supported, std::span<const ExecutionThreadChoice> choices,
+                          util::DiagnosticEmitter emit_error, bool clocked) {
   if (request.helpers < -1 || request.helpers > 128)
-    throw std::invalid_argument("async_helper_threads must be -1 or between 0 and 128");
+    return emit_error.emit() << "async_helper_threads must be -1 or between 0 and 128";
   const uint32_t budget = request.budget ? request.budget : std::max(host_threads, 1u);
   xcds = std::max(xcds, 1u);
   if (clocked) {
     const uint32_t cpu_budget =
         request.budget ? request.budget : std::min(budget, kDefaultExecutionThreadCap);
-    return {std::min(request.engines ? request.engines : cpu_budget, xcds),
-            std::vector<uint32_t>(dispatch_capacities.size(), 1), 0};
+    return ExecutionThreadAllocation{std::min(request.engines ? request.engines : cpu_budget, xcds),
+                                     std::vector<uint32_t>(dispatch_capacities.size(), 1), 0};
   }
   auto effective = [&](ExecutionThreadChoice choice) {
     ExecutionThreadAllocation result;
     result.engines = std::min(request.engines ? request.engines : choice.engines, xcds);
-    result.helpers = request.helpers >= 0 ? static_cast<uint32_t>(request.helpers)
-                                          : (async_supported ? choice.helpers : 0);
+    result.helpers = !async_supported       ? 0
+                     : request.helpers >= 0 ? static_cast<uint32_t>(request.helpers)
+                                            : choice.helpers;
     for (uint32_t capacity : dispatch_capacities)
       result.dispatch.push_back(
           std::min(request.dispatch ? request.dispatch : choice.dispatch, std::max(capacity, 1u)));
@@ -79,8 +80,8 @@ ExecutionThreadAllocation resolve_execution_threads(const ExecutionThreadRequest
   uint64_t best_cost = 0;
   for (auto choice : choices) {
     if (!choice.engines || !choice.dispatch || choice.helpers > 128)
-      throw std::invalid_argument("thread_allocations require num_threads >= 1, "
-                                  "cpu_dispatch_threads >= 1 and async_helper_threads <= 128");
+      return emit_error.emit() << "thread_allocations require num_threads >= 1, "
+                                  "cpu_dispatch_threads >= 1 and async_helper_threads <= 128";
     auto candidate = effective(choice);
     uint64_t cpu_cost = candidate.engines;
     for (uint32_t width : candidate.dispatch)
@@ -588,15 +589,35 @@ util::FailureOr<std::vector<simdojo::LinkSpec>> expand_link(const fb::LinkDef *l
 
 using AsyncResources = std::shared_ptr<amdgpu::matrix_coexecution::ExecutionResources>;
 using CfgMap = std::unordered_map<std::string, std::string>;
+util::FailureOr<amdgpu::ArithmeticPolicy>
+arithmetic_from_config(const CfgMap &cfg, util::DiagnosticEmitter emit_error) {
+  auto value = [&](const char *key, const char *fallback) -> std::string_view {
+    auto it = cfg.find(key);
+    return it == cfg.end() ? std::string_view(fallback) : std::string_view(it->second);
+  };
+  for (const auto &[key, unused] : cfg) {
+    if (key.starts_with("arithmetic_") && key != "arithmetic_semantics")
+      return emit_error.emit() << "Unknown per-CU arithmetic key: " << key;
+  }
+  return parse_arithmetic_config(value("arithmetic_semantics", "compatibility"), emit_error,
+                                 "arithmetic_semantics");
+}
+
 enum class BuildMode { Full, Validate };
 
-amdgpu::ComputeUnitCore::Config parse_compute_unit_config(const CfgMap &cfg, rj_code_arch_t arch,
-                                                          rj_code_target_id_t target,
-                                                          const AsyncResources &resources) {
+util::FailureOr<amdgpu::ComputeUnitCore::Config>
+parse_compute_unit_config(const CfgMap &cfg, rj_code_arch_t arch, rj_code_target_id_t target,
+                          const AsyncResources &resources, uint32_t image_config,
+                          util::DiagnosticEmitter emit_error) {
   amdgpu::ComputeUnitCore::Config cc{};
   cc.arch = arch;
   cc.async_resources = resources;
   cc.target = target;
+  auto arithmetic = arithmetic_from_config(cfg, emit_error);
+  if (arithmetic.failed())
+    return util::Result::failure();
+  cc.arithmetic = arithmetic.value();
+  cc.image_gb_addr_config = image_config;
   cc.num_wf_slots = config_u32(cfg, "num_wf_slots", 10);
   cc.sgprs_per_wf = config_u32(cfg, "sgprs_per_wf", default_sgprs_per_wf(arch));
   cc.vgprs_per_wf = config_u32(cfg, "vgprs_per_wf", default_vgprs_per_wf(arch));
@@ -610,7 +631,7 @@ amdgpu::ComputeUnitCore::Config parse_compute_unit_config(const CfgMap &cfg, rj_
     else if (it->second == "warn")
       cc.memory_wait_diagnostics = amdgpu::MemoryWaitDiagnostics::Warn;
     else
-      throw std::invalid_argument("memory_wait_diagnostics must be warn or off");
+      return emit_error.emit() << "memory_wait_diagnostics must be warn or off";
   }
   if (auto it = cfg.find("xcnt_diagnostics"); it != cfg.end()) {
     if (it->second == "off")
@@ -618,14 +639,16 @@ amdgpu::ComputeUnitCore::Config parse_compute_unit_config(const CfgMap &cfg, rj_
     else if (it->second == "warn")
       cc.xcnt_diagnostics = amdgpu::MemoryWaitDiagnostics::Warn;
     else
-      throw std::invalid_argument("xcnt_diagnostics must be warn or off");
+      return emit_error.emit() << "xcnt_diagnostics must be warn or off";
   }
   return cc;
 }
 
-using FactoryFn = std::function<std::unique_ptr<simdojo::Component>(
+using ComponentResult = util::FailureOr<std::unique_ptr<simdojo::Component>>;
+using FactoryFn = std::function<ComponentResult(
     const std::string &name, const CfgMap &cfg, simdojo::ExecMode mode, rj_code_arch_t arch,
-    rj_code_target_id_t target, amdgpu::GpuMemory *mem, const AsyncResources &resources)>;
+    rj_code_target_id_t target, amdgpu::GpuMemory *mem, const AsyncResources &resources,
+    uint32_t image_config, util::DiagnosticEmitter emit_error)>;
 
 using FactoryMap = std::unordered_map<std::string, FactoryFn>;
 
@@ -644,75 +667,85 @@ const FactoryMap &factories(BuildMode build_mode) {
   static const FactoryMap full_factories = [] {
     std::unordered_map<std::string, FactoryFn> f;
     f["composite"] = [](const std::string &n, const CfgMap &, simdojo::ExecMode, rj_code_arch_t,
-                        rj_code_target_id_t, amdgpu::GpuMemory *, const AsyncResources &) {
+                        rj_code_target_id_t, amdgpu::GpuMemory *, const AsyncResources &, uint32_t,
+                        util::DiagnosticEmitter) -> ComponentResult {
       auto c = std::make_unique<simdojo::CompositeComponent>(n);
       c->set_weight(0);
-      return c;
+      return std::unique_ptr<simdojo::Component>(std::move(c));
     };
     f["soc"] = [](const std::string &n, const CfgMap &, simdojo::ExecMode mode, rj_code_arch_t arch,
-                  rj_code_target_id_t, amdgpu::GpuMemory *mem,
-                  const AsyncResources &) -> std::unique_ptr<simdojo::Component> {
-      auto soc = std::make_unique<SoC>(n, mem);
-      soc->set_arch(arch);
+                  rj_code_target_id_t, amdgpu::GpuMemory *mem, const AsyncResources &, uint32_t,
+                  util::DiagnosticEmitter) -> ComponentResult {
+      auto soc = std::make_unique<SoC>(n, mem, arch);
       soc->set_exec_mode(mode);
-      return soc;
+      return std::unique_ptr<simdojo::Component>(std::move(soc));
     };
     f["xcd"] = [](const std::string &n, const CfgMap &, simdojo::ExecMode, rj_code_arch_t,
-                  rj_code_target_id_t, amdgpu::GpuMemory *,
-                  const AsyncResources &) -> std::unique_ptr<simdojo::Component> {
-      return std::make_unique<amdgpu::Xcd>(n);
+                  rj_code_target_id_t, amdgpu::GpuMemory *, const AsyncResources &, uint32_t,
+                  util::DiagnosticEmitter) -> ComponentResult {
+      return std::unique_ptr<simdojo::Component>(std::make_unique<amdgpu::Xcd>(n));
     };
     f["shader_engine"] = [](const std::string &n, const CfgMap &, simdojo::ExecMode, rj_code_arch_t,
-                            rj_code_target_id_t, amdgpu::GpuMemory *,
-                            const AsyncResources &) -> std::unique_ptr<simdojo::Component> {
-      return std::make_unique<amdgpu::ShaderEngine>(n);
+                            rj_code_target_id_t, amdgpu::GpuMemory *, const AsyncResources &,
+                            uint32_t, util::DiagnosticEmitter) -> ComponentResult {
+      return std::unique_ptr<simdojo::Component>(std::make_unique<amdgpu::ShaderEngine>(n));
     };
 
     f["gpu_memory"] = [](const std::string &n, const CfgMap &, simdojo::ExecMode, rj_code_arch_t,
-                         rj_code_target_id_t, amdgpu::GpuMemory *,
-                         const AsyncResources &) -> std::unique_ptr<simdojo::Component> {
-      return std::make_unique<amdgpu::GpuMemory>(n);
+                         rj_code_target_id_t, amdgpu::GpuMemory *, const AsyncResources &, uint32_t,
+                         util::DiagnosticEmitter) -> ComponentResult {
+      return std::unique_ptr<simdojo::Component>(std::make_unique<amdgpu::GpuMemory>(n));
     };
 
     f["iod"] = [](const std::string &n, const CfgMap &cfg, simdojo::ExecMode, rj_code_arch_t,
-                  rj_code_target_id_t, amdgpu::GpuMemory *mem,
-                  const AsyncResources &) -> std::unique_ptr<simdojo::Component> {
+                  rj_code_target_id_t, amdgpu::GpuMemory *mem, const AsyncResources &, uint32_t,
+                  util::DiagnosticEmitter emit_error) -> ComponentResult {
       if (!mem)
-        throw std::runtime_error("IOD requires gpu_memory");
+        return emit_error.emit() << "IOD requires gpu_memory";
       amdgpu::Iod::Config ic{};
       ic.num_hbm_stacks = config_u32(cfg, "num_hbm_stacks", 4);
-      return std::make_unique<amdgpu::Iod>(n, ic, mem);
+      return std::unique_ptr<simdojo::Component>(std::make_unique<amdgpu::Iod>(n, ic, mem));
     };
 
     f["l2_cache"] = [](const std::string &n, const CfgMap &, simdojo::ExecMode, rj_code_arch_t,
-                       rj_code_target_id_t, amdgpu::GpuMemory *mem,
-                       const AsyncResources &) -> std::unique_ptr<simdojo::Component> {
+                       rj_code_target_id_t, amdgpu::GpuMemory *mem, const AsyncResources &,
+                       uint32_t, util::DiagnosticEmitter) -> ComponentResult {
       auto l2 = std::make_unique<amdgpu::L2Cache>(n);
       l2->set_backing_memory(mem);
       l2->set_legacy_maintenance_memory(mem);
-      return l2;
+      return std::unique_ptr<simdojo::Component>(std::move(l2));
     };
 
     f["memory_side_cache"] = [](const std::string &n, const CfgMap &, simdojo::ExecMode,
                                 rj_code_arch_t, rj_code_target_id_t, amdgpu::GpuMemory *mem,
-                                const AsyncResources &) -> std::unique_ptr<simdojo::Component> {
-      return std::make_unique<amdgpu::MemorySideCache>(
-          n, std::make_shared<amdgpu::DeviceCacheCoherence>(), mem);
+                                const AsyncResources &, uint32_t,
+                                util::DiagnosticEmitter) -> ComponentResult {
+      return std::unique_ptr<simdojo::Component>(std::make_unique<amdgpu::MemorySideCache>(
+          n, std::make_shared<amdgpu::DeviceCacheCoherence>(), mem));
     };
 
     f["command_processor"] = [](const std::string &n, const CfgMap &, simdojo::ExecMode mode,
                                 rj_code_arch_t arch, rj_code_target_id_t, amdgpu::GpuMemory *,
-                                const AsyncResources &) -> std::unique_ptr<simdojo::Component> {
+                                const AsyncResources &, uint32_t,
+                                util::DiagnosticEmitter) -> ComponentResult {
       auto cp = std::make_unique<amdgpu::CommandProcessor>(n, mode);
       cp->configure_for_arch(arch);
-      return cp;
+      return std::unique_ptr<simdojo::Component>(std::move(cp));
     };
 
     f["compute_unit"] = [](const std::string &n, const CfgMap &cfg, simdojo::ExecMode mode,
                            rj_code_arch_t arch, rj_code_target_id_t target, amdgpu::GpuMemory *mem,
-                           const AsyncResources &resources) -> std::unique_ptr<simdojo::Component> {
-      return amdgpu::ComputeUnitCore::create(
-          n, parse_compute_unit_config(cfg, arch, target, resources), mem, nullptr, mode);
+                           const AsyncResources &resources, uint32_t image_config,
+                           util::DiagnosticEmitter emit_error) -> ComponentResult {
+      util::FailureOr<amdgpu::ComputeUnitCore::Config> maybe_cu_config =
+          parse_compute_unit_config(cfg, arch, target, resources, image_config, emit_error);
+      if (maybe_cu_config.failed())
+        return util::Result::failure();
+      auto compute_unit = amdgpu::ComputeUnitCore::create(n, maybe_cu_config.value(), mem, nullptr,
+                                                          mode, emit_error);
+      if (!compute_unit)
+        return util::Result::failure();
+      return std::unique_ptr<simdojo::Component>(std::move(compute_unit));
     };
     return f;
   }();
@@ -722,45 +755,81 @@ const FactoryMap &factories(BuildMode build_mode) {
     FactoryMap result = full_factories;
     result["compute_unit"] =
         [](const std::string &name, const CfgMap &cfg, simdojo::ExecMode, rj_code_arch_t arch,
-           rj_code_target_id_t target, amdgpu::GpuMemory *,
-           const AsyncResources &resources) -> std::unique_ptr<simdojo::Component> {
-      const auto cu_config = parse_compute_unit_config(cfg, arch, target, resources);
-      amdgpu::ComputeUnitCore::validate(cu_config);
+           rj_code_target_id_t target, amdgpu::GpuMemory *, const AsyncResources &resources,
+           uint32_t image_config, util::DiagnosticEmitter emit_error) -> ComponentResult {
+      auto maybe_cu_config =
+          parse_compute_unit_config(cfg, arch, target, resources, image_config, emit_error);
+      if (maybe_cu_config.failed())
+        return util::Result::failure();
+      const auto &cu_config = maybe_cu_config.value();
+      if (amdgpu::ComputeUnitCore::validate(cu_config, emit_error).failed())
+        return util::Result::failure();
       // Preserve the parsed CU config and declarative children without execution state.
-      return std::make_unique<ValidatedComputeUnit>(name, cu_config);
+      return std::unique_ptr<simdojo::Component>(
+          std::make_unique<ValidatedComputeUnit>(name, cu_config));
     };
     return result;
   }();
   return validation_factories;
 }
 
+// Validate every explicit CU arithmetic entry before map insertion or launch
+// overrides can hide a missing value, an invalid value, or an unknown key.
+util::Result validate_cu_arithmetic_entries(const fb::ComponentDef &component,
+                                            util::DiagnosticEmitter emit_error) {
+  if (!component.type() || component.type()->str() != "compute_unit" || !component.config())
+    return util::Result::success();
+  for (const auto *entry : *component.config()) {
+    if (!entry->key())
+      continue;
+    const auto key = entry->key()->str();
+    if (!key.starts_with("arithmetic_"))
+      continue;
+    if (key != "arithmetic_semantics")
+      return emit_error.emit() << "Unknown per-CU arithmetic key: " << key;
+    if (!entry->value())
+      return emit_error.emit() << "Missing value for arithmetic_semantics";
+    if (parse_arithmetic_config(entry->value()->str(), emit_error, "arithmetic_semantics").failed())
+      return util::Result::failure();
+  }
+  return util::Result::success();
+}
+
 // Validate explicit policies even when the launch override will replace them.
-void apply_cu_overrides(CfgMap &cfg, const CfgMap &overrides) {
+util::Result apply_cu_overrides(CfgMap &cfg, const CfgMap &overrides,
+                                util::DiagnosticEmitter emit_error) {
+  if (arithmetic_from_config(cfg, emit_error).failed())
+    return util::Result::failure();
   for (const auto &[key, value] : overrides) {
-    if (auto it = cfg.find(key); it != cfg.end() && it->second != "off" && it->second != "warn")
-      throw std::invalid_argument(key + " must be warn or off");
+    if (auto it = cfg.find(key); key != "arithmetic_semantics" && it != cfg.end() &&
+                                 it->second != "off" && it->second != "warn")
+      return emit_error.emit() << key << " must be warn or off";
     cfg[key] = value;
   }
+  return util::Result::success();
 }
 
 util::Result
 build_children(simdojo::CompositeComponent *parent,
                const flatbuffers::Vector<flatbuffers::Offset<fb::ComponentDef>> *children,
                simdojo::ExecMode mode, rj_code_arch_t arch, rj_code_target_id_t target,
-               amdgpu::GpuMemory *&mem, const AsyncResources &resources, const CfgMap &cu_overrides,
-               BuildMode build_mode, util::DiagnosticEmitter emit_error) {
+               amdgpu::GpuMemory *&mem, const AsyncResources &resources, uint32_t image_config,
+               const CfgMap &cu_overrides, BuildMode build_mode,
+               util::DiagnosticEmitter emit_error) {
   if (!children)
     return util::Result::success();
   for (auto *cd : *children) {
     auto np = cd->name() ? cd->name()->str() : "";
     auto tp = cd->type() ? cd->type()->str() : "composite";
+    if (validate_cu_arithmetic_entries(*cd, emit_error).failed())
+      return util::Result::failure();
     CfgMap cfg;
     if (cd->config())
       for (auto *e : *cd->config())
         if (e->key() && e->value())
           cfg[e->key()->str()] = e->value()->str();
-    if (tp == "compute_unit")
-      apply_cu_overrides(cfg, cu_overrides);
+    if (tp == "compute_unit" && apply_cu_overrides(cfg, cu_overrides, emit_error).failed())
+      return util::Result::failure();
 
     auto names = expand_range(np, emit_error);
     if (names.failed())
@@ -769,15 +838,20 @@ build_children(simdojo::CompositeComponent *parent,
       auto &fmap = factories(build_mode);
       auto it = fmap.find(tp);
       if (it == fmap.end())
-        throw std::runtime_error("Unknown type: " + tp);
-      auto comp = it->second(n, cfg, mode, arch, target, mem, resources);
+        return emit_error.emit() << "Unknown type: " << tp;
+      auto maybe_comp =
+          it->second(n, cfg, mode, arch, target, mem, resources, image_config, emit_error);
+      if (maybe_comp.failed())
+        return util::Result::failure();
+      auto comp = std::move(maybe_comp).value();
       auto *raw = comp.get();
       if (auto *gm = dynamic_cast<amdgpu::GpuMemory *>(raw))
         mem = gm;
       parent->add_child(std::move(comp));
       if (cd->children() && cd->children()->size() > 0 && raw->is_composite())
         if (build_children(static_cast<simdojo::CompositeComponent *>(raw), cd->children(), mode,
-                           arch, target, mem, resources, cu_overrides, build_mode, emit_error)
+                           arch, target, mem, resources, image_config, cu_overrides, build_mode,
+                           emit_error)
                 .failed())
           return util::Result::failure();
     }
@@ -858,8 +932,7 @@ void do_wire_cps(simdojo::CompositeComponent *root, uint32_t cus_per_shader_arra
     for_each_cp_compute_unit(
         par, [&](simdojo::Component *component, uint32_t shader_engine_id, uint32_t cu_index) {
           auto *cu = dynamic_cast<amdgpu::ComputeUnitCore *>(component);
-          if (!cu)
-            throw std::logic_error("Full-mode CP wiring requires a constructed compute unit");
+          assert(cu && "Full-mode CP wiring requires a constructed compute unit");
           cu->set_shader_engine_location(shader_engine_id, cu_index, cus_per_shader_array,
                                          cus_per_shader_array ? expected_cus : 0);
           cp->add_compute_unit(cu);
@@ -912,40 +985,46 @@ void set_cu_l2(simdojo::CompositeComponent *root) {
 
 util::FailureOr<TopologyBuildResult>
 build_topology(const fb::TopologyDef *topology_def, simdojo::ExecMode mode, rj_code_arch_t arch,
-               rj_code_target_id_t target, const AsyncResources &resources,
+               rj_code_target_id_t target, const AsyncResources &resources, uint32_t image_config,
                uint32_t cus_per_shader_array, uint32_t shader_arrays_per_engine,
                const CfgMap &cu_overrides, BuildMode build_mode,
                util::DiagnosticEmitter emit_error) {
   if (!topology_def || !topology_def->root())
-    throw std::runtime_error("TopologyDef missing root ComponentDef");
+    return emit_error.emit() << "TopologyDef missing root ComponentDef";
 
   TopologyBuildResult result;
   auto *rd = topology_def->root();
   auto rn = rd->name() ? rd->name()->str() : "vm";
   auto rt = rd->type() ? rd->type()->str() : "composite";
 
+  if (validate_cu_arithmetic_entries(*rd, emit_error).failed())
+    return util::Result::failure();
   CfgMap root_cfg;
   if (rd->config())
     for (auto *e : *rd->config())
       if (e->key() && e->value())
         root_cfg[e->key()->str()] = e->value()->str();
-  if (rt == "compute_unit")
-    apply_cu_overrides(root_cfg, cu_overrides);
+  if (rt == "compute_unit" && apply_cu_overrides(root_cfg, cu_overrides, emit_error).failed())
+    return util::Result::failure();
 
   auto &f = factories(build_mode);
   auto it = f.find(rt);
   if (it == f.end())
-    throw std::runtime_error("Unknown component type for root: " + rt);
-  auto root_comp = it->second(rn, root_cfg, mode, arch, target, nullptr, resources);
+    return emit_error.emit() << "Unknown component type for root: " << rt;
+  auto maybe_root_comp =
+      it->second(rn, root_cfg, mode, arch, target, nullptr, resources, image_config, emit_error);
+  if (maybe_root_comp.failed())
+    return util::Result::failure();
+  auto root_comp = std::move(maybe_root_comp).value();
   auto *root = dynamic_cast<simdojo::CompositeComponent *>(root_comp.get());
   if (!root)
-    throw std::runtime_error("Root component must be a CompositeComponent");
+    return emit_error.emit() << "Root component must be a CompositeComponent";
   auto root_owner = std::unique_ptr<simdojo::CompositeComponent>(
       static_cast<simdojo::CompositeComponent *>(root_comp.release()));
 
   amdgpu::GpuMemory *mem = nullptr;
-  if (build_children(root, rd->children(), mode, arch, target, mem, resources, cu_overrides,
-                     build_mode, emit_error)
+  if (build_children(root, rd->children(), mode, arch, target, mem, resources, image_config,
+                     cu_overrides, build_mode, emit_error)
           .failed())
     return util::Result::failure();
 
@@ -959,7 +1038,7 @@ build_topology(const fb::TopologyDef *topology_def, simdojo::ExecMode mode, rj_c
       }
   }
   if (!mem)
-    throw std::runtime_error("Topology must contain a 'gpu_memory' component");
+    return emit_error.emit() << "Topology must contain a 'gpu_memory' component";
 
   {
     std::vector<simdojo::Component *> all;
@@ -1022,16 +1101,16 @@ build_topology(const fb::TopologyDef *topology_def, simdojo::ExecMode mode, rj_c
         // below supersedes it with the one device-wide store shared across every
         // XCD, so a dispatch under XCD fan-out still rendezvouses.
         xcd->wire_gws_to_cus();
-        if (soc)
-          soc->add_xcd(xcd);
+        if (soc && soc->add_xcd(xcd, emit_error).failed())
+          return util::Result::failure();
       } else if (auto *iod = dynamic_cast<amdgpu::Iod *>(c)) {
-        if (soc)
-          soc->add_iod(iod);
+        if (soc && soc->add_iod(iod, emit_error).failed())
+          return util::Result::failure();
       }
     }
     result.num_xcds = static_cast<uint32_t>(result.xcds.size());
     if (soc && !soc->set_memory(mem))
-      throw std::logic_error("cannot replace GPU memory while address spaces are active");
+      return emit_error.emit() << "cannot replace GPU memory while address spaces are active";
   }
 
   // Wire SPIs after CUs are added to SEs (above), so the lazily created
@@ -1053,24 +1132,28 @@ util::FailureOr<ExecutionTopology> execution_topology(const fb::ComponentDef *ro
   auto type = [](const fb::ComponentDef *c) -> std::string_view {
     return c->type() ? c->type()->string_view() : "composite";
   };
+  auto checked_capacity = [emit_error](uint64_t n, uint32_t &capacity) -> util::Result {
+    if (n > std::numeric_limits<uint32_t>::max())
+      return emit_error.emit() << "Topology execution capacity exceeds uint32 range";
+    capacity = static_cast<uint32_t>(n);
+    return util::Result::success();
+  };
   auto count = [emit_error](const fb::ComponentDef *c) -> util::FailureOr<uint64_t> {
     auto names = expand_range(c->name() ? c->name()->str() : "", emit_error);
     if (names.failed())
       return util::Result::failure();
     return names.value().size();
   };
-  auto checked = [](uint64_t n) {
-    if (n > std::numeric_limits<uint32_t>::max())
-      throw std::invalid_argument("Topology execution capacity exceeds uint32 range");
-    return static_cast<uint32_t>(n);
-  };
   ExecutionTopology result;
   auto visit = [&](auto &&self, const fb::ComponentDef *node, uint64_t copies) -> util::Result {
     if (!copies)
       return util::Result::success();
-    if (type(node) == "xcd")
-      result.xcds = checked(result.xcds + copies);
-    if (!node->children())
+    const auto node_type = type(node);
+    if (node_type == "xcd" && checked_capacity(result.xcds + copies, result.xcds).failed())
+      return util::Result::failure();
+    // Match build_children: leaf components do not instantiate declared children.
+    if (!node->children() || node_type == "gpu_memory" || node_type == "l2_cache" ||
+        node_type == "memory_side_cache" || node_type == "command_processor")
       return util::Result::success();
     bool has_cp = false, has_se = false;
     uint64_t direct_cus = 0, se_cus = 0;
@@ -1093,7 +1176,9 @@ util::FailureOr<ExecutionTopology> execution_topology(const fb::ComponentDef *ro
               se_cus += n * cu_count.value();
             }
       }
-      if (self(self, child, checked(copies * n)).failed())
+      uint32_t child_copies = 0;
+      if (checked_capacity(copies * n, child_copies).failed() ||
+          self(self, child, child_copies).failed())
         return util::Result::failure();
     }
     // Match do_wire_cps(): sibling CPs share the same CUs. Each XCD caller can
@@ -1101,8 +1186,10 @@ util::FailureOr<ExecutionTopology> execution_topology(const fb::ComponentDef *ro
     // This is maximum demand; fewer engine partitions can leave workers idle.
     if (has_cp) {
       const uint64_t cus = has_se ? se_cus : direct_cus;
-      if (cus)
-        result.dispatch_capacity = checked(result.dispatch_capacity + copies * (cus - 1));
+      if (cus &&
+          checked_capacity(result.dispatch_capacity + copies * (cus - 1), result.dispatch_capacity)
+              .failed())
+        return util::Result::failure();
     }
     return util::Result::success();
   };
@@ -1114,13 +1201,15 @@ util::FailureOr<ExecutionTopology> execution_topology(const fb::ComponentDef *ro
 /// Resolve a requested selector against the launch copy as well as the caller.
 /// Keeping the two in agreement prevents a daemon or interposer from silently
 /// building a different node than a direct C API caller requested.
-const SystemNode &selected_node(const fb::SimulationConfig *config, const SystemGraph &graph,
-                                std::string_view requested_node) {
+util::FailureOr<const SystemNode *> selected_node(const fb::SimulationConfig *config,
+                                                  const SystemGraph &graph,
+                                                  std::string_view requested_node,
+                                                  util::DiagnosticEmitter emit_error) {
   const std::string_view configured_node =
       config->local_node() ? config->local_node()->string_view() : std::string_view{};
   if (!requested_node.empty() && !configured_node.empty() && requested_node != configured_node)
-    throw std::invalid_argument("local node argument disagrees with config.local_node");
-  return graph.select_node(requested_node.empty() ? configured_node : requested_node);
+    return emit_error.emit() << "local node argument disagrees with config.local_node";
+  return graph.select_node(emit_error, requested_node.empty() ? configured_node : requested_node);
 }
 
 util::FailureOr<ExecutionThreadSettings>
@@ -1134,16 +1223,16 @@ execution_thread_settings(const fb::SimulationConfig *config, uint32_t gpus,
           : 0,
       config->async_helper_threads()};
   if (!config->vm() || !config->vm()->arch() || !config->topology())
-    throw std::invalid_argument("Thread allocation requires vm.arch and topology");
+    return emit_error.emit() << "Thread allocation requires vm.arch and topology";
   settings.arch = parse_arch(config->vm()->arch()->str());
   if (settings.arch == ROCJITSU_CODE_ARCH_INVALID)
-    throw std::invalid_argument("Invalid vm.arch for thread allocation");
+    return emit_error.emit() << "Invalid vm.arch for thread allocation";
   auto topology = execution_topology(config->topology()->root(), emit_error);
   if (topology.failed())
     return util::Result::failure();
   const auto &dimensions = topology.value();
   if (uint64_t{dimensions.xcds} * gpus > std::numeric_limits<uint32_t>::max())
-    throw std::invalid_argument("Total XCD count exceeds uint32 range");
+    return emit_error.emit() << "Total XCD count exceeds uint32 range";
   settings.xcds = dimensions.xcds * gpus;
   if (config->thread_allocations())
     for (const auto *choice : *config->thread_allocations())
@@ -1162,10 +1251,17 @@ build_from_fb(const rocjitsu::fb::SimulationConfig *fb_config, uint32_t host_thr
               std::optional<std::shared_ptr<amdgpu::matrix_coexecution::ExecutionResources>>
                   async_resources_override = std::nullopt) {
   CfgMap cu_overrides;
+  if (const auto *policy = fb_config->arithmetic()) {
+    // Validate even when the topology contains no CUs, using this API's failure channel.
+    if (arithmetic_from_fb(policy, emit_error).failed())
+      return util::Result::failure();
+    cu_overrides["arithmetic_semantics"] =
+        policy->semantics() ? policy->semantics()->str() : "compatibility";
+  }
   if (const auto *setting = fb_config->wait_checking()) {
     const auto mode = parse_wait_checking(setting->string_view());
     if (!mode)
-      throw std::invalid_argument("wait_checking must be on, off, or all");
+      return emit_error.emit() << "wait_checking must be on, off, or all";
     cu_overrides["memory_wait_diagnostics"] = *mode == WaitChecking::Off ? "off" : "warn";
     cu_overrides["xcnt_diagnostics"] = *mode == WaitChecking::All ? "warn" : "off";
   }
@@ -1174,7 +1270,10 @@ build_from_fb(const rocjitsu::fb::SimulationConfig *fb_config, uint32_t host_thr
   if (system_graph.failed())
     return util::Result::failure();
   result.system_graph = std::move(system_graph.value());
-  const SystemNode &node = selected_node(fb_config, result.system_graph, node_id);
+  auto selection = selected_node(fb_config, result.system_graph, node_id, emit_error);
+  if (selection.failed())
+    return util::Result::failure();
+  const SystemNode &node = *selection.value();
   result.local_node_id = node.id;
   for (uint32_t ordinal = 0; ordinal < node.gpus.size(); ++ordinal)
     result.global_to_local_ordinals.emplace(node.gpus[ordinal].id, ordinal);
@@ -1245,7 +1344,7 @@ build_from_fb(const rocjitsu::fb::SimulationConfig *fb_config, uint32_t host_thr
 
   auto *topo_def = fb_config->topology();
   if (!topo_def)
-    throw std::runtime_error("Config missing 'topology' section");
+    return emit_error.emit() << "Config missing 'topology' section";
 
   // Legacy configs without device identity project one GPU even if num_gpus
   // requests replication. Keep the built SoCs and the reported count aligned.
@@ -1258,7 +1357,11 @@ build_from_fb(const rocjitsu::fb::SimulationConfig *fb_config, uint32_t host_thr
     return util::Result::failure();
   const auto &thread_settings = maybe_thread_settings.value();
   result.thread_allocations = thread_settings.choices;
-  result.execution_threads = thread_settings.resolve(host_threads);
+  util::FailureOr<ExecutionThreadAllocation> allocation =
+      thread_settings.resolve(host_threads, emit_error);
+  if (allocation.failed())
+    return util::Result::failure();
+  result.execution_threads = std::move(allocation).value();
   if (!result.engine_config.num_threads)
     result.engine_config.num_threads = result.execution_threads.engines;
   if (async_resources_override) {
@@ -1269,15 +1372,19 @@ build_from_fb(const rocjitsu::fb::SimulationConfig *fb_config, uint32_t host_thr
   } else {
     result.async_resources = make_async_execution_resources(result.execution_threads.helpers);
   }
-  auto primary_build =
-      build_topology(topo_def, result.exec_mode, arch, result.target, result.async_resources,
-                     result.device.num_cu_per_sh, result.device.num_shader_arrays_per_engine,
-                     cu_overrides, build_mode, emit_error);
+  const auto image_config_for_device = [arch](const KfdDeviceConfig &device) {
+    return device.present ? kmd::gb_addr_config_for_gfx_target_version(device.gfx_target_version)
+                          : kmd::gb_addr_config_for_arch(arch);
+  };
+  auto primary_build = build_topology(
+      topo_def, result.exec_mode, arch, result.target, result.async_resources,
+      image_config_for_device(result.device), result.device.num_cu_per_sh,
+      result.device.num_shader_arrays_per_engine, cu_overrides, build_mode, emit_error);
   if (primary_build.failed())
     return util::Result::failure();
   result.build_result = std::move(primary_build.value());
   if (manifest && result.soc() == nullptr)
-    throw std::invalid_argument("system topology root must be an SoC");
+    return emit_error.emit() << "system topology root must be an SoC";
   // The CWSR capacity uses device fields for LDS and wave slots, while wave
   // admission uses each CU's configured limits. Reject a producer that could
   // exceed its advertised save area (or the LDS field in the save record).
@@ -1358,10 +1465,10 @@ build_from_fb(const rocjitsu::fb::SimulationConfig *fb_config, uint32_t host_thr
       }
     }
     for (uint32_t i = 1; i < result.num_gpus; ++i) {
-      auto extra_build =
-          build_topology(topo_def, result.exec_mode, arch, result.target, result.async_resources,
-                         result.device.num_cu_per_sh, result.device.num_shader_arrays_per_engine,
-                         cu_overrides, build_mode, emit_error);
+      auto extra_build = build_topology(
+          topo_def, result.exec_mode, arch, result.target, result.async_resources,
+          image_config_for_device(result.devices[i]), result.device.num_cu_per_sh,
+          result.device.num_shader_arrays_per_engine, cu_overrides, build_mode, emit_error);
       if (extra_build.failed())
         return util::Result::failure();
       result.extra_gpu_builds.push_back(std::move(extra_build.value()));
@@ -1382,6 +1489,9 @@ auto with_config_json(const std::string &json, const std::string &schema_text,
       json, schema_text, emit_error, [&](const fb::SimulationConfig *config) {
         if (config->system())
           return with_parsed_simulation_config_json(json, schema_text, emit_error, callback, false);
+        if (config->arithmetic() &&
+            validate_arithmetic_config_json(json, schema_text, emit_error).failed())
+          return decltype(callback(config))(util::Result::failure());
         return callback(config);
       });
 }
@@ -1462,7 +1572,7 @@ util::FailureOr<DeviceIdentityConfig> load_device_identity(const std::string &js
       json.value(), schema_text, emit_error,
       [emit_error](const fb::SimulationConfig *config) -> util::FailureOr<DeviceIdentityConfig> {
         if (config->system())
-          throw std::invalid_argument("system device identity requires a selected local node");
+          return emit_error.emit() << "system device identity requires a selected local node";
         DeviceIdentityConfig identity;
         if (config->vm() == nullptr || config->vm()->gpu() == nullptr)
           return identity;
@@ -1474,6 +1584,42 @@ util::FailureOr<DeviceIdentityConfig> load_device_identity(const std::string &js
         if (identity.device.present)
           (void)resolve_gpu_generation_topology(identity.device);
         identity.pci = pci_device_from_fb(config->vm()->gpu()->pci());
+        return identity;
+      });
+}
+
+util::FailureOr<NodeDeviceIdentityConfig>
+load_node_device_identity_from_string(const std::string &json, const std::string &schema_text,
+                                      std::string_view node_id,
+                                      util::DiagnosticEmitter emit_error) {
+  return with_config_json(
+      json, schema_text, emit_error,
+      [&](const fb::SimulationConfig *config) -> util::FailureOr<NodeDeviceIdentityConfig> {
+        auto graph = system_graph_from_fb(config, emit_error);
+        if (graph.failed())
+          return util::Result::failure();
+        auto selection = selected_node(config, graph.value(), node_id, emit_error);
+        if (selection.failed())
+          return util::Result::failure();
+        const SystemNode &node = *selection.value();
+        auto topology = execution_topology(
+            config->topology() ? config->topology()->root() : nullptr, emit_error);
+        if (topology.failed())
+          return util::Result::failure();
+
+        NodeDeviceIdentityConfig identity;
+        identity.local_node_id = node.id;
+        identity.num_xcc = topology.value().xcds;
+        identity.publish_peer_links = !graph.value().explicit_manifest;
+        if (config->vm() && config->vm()->gpu())
+          identity.pci = pci_device_from_fb(config->vm()->gpu()->pci());
+        identity.devices.reserve(node.gpus.size());
+        for (const auto &gpu : node.gpus) {
+          auto device = gpu.device;
+          if (device.present)
+            (void)resolve_gpu_generation_topology(device);
+          identity.devices.push_back(std::move(device));
+        }
         return identity;
       });
 }
@@ -1514,7 +1660,10 @@ util::FailureOr<ExecutionThreadSettings> load_execution_thread_settings_from_str
         auto graph = system_graph_from_fb(config, emit_error);
         if (graph.failed())
           return util::Result::failure();
-        const SystemNode &node = selected_node(config, graph.value(), node_id);
+        auto selection = selected_node(config, graph.value(), node_id, emit_error);
+        if (selection.failed())
+          return util::Result::failure();
+        const SystemNode &node = *selection.value();
         return execution_thread_settings(config, static_cast<uint32_t>(node.gpus.size()),
                                          emit_error);
       });

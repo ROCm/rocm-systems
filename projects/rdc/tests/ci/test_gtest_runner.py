@@ -115,6 +115,26 @@ class TestGoogleTestSuite:
             f"rdc_metric_fetcher_tests failed (rc={result.returncode}):\n{result.stdout[-2000:]}"
         )
 
+    def test_rdc_rocr_lifetime(self, rocm_dir, rdctst_path):
+        # rdctst_path skips this test unless the RDC test package is installed. Needs no GPU: the
+        # binary runs the ROCr diagnostic module against fake HSA calls. It is built with the
+        # module, so it is in every RDC test package that ships the module.
+        module = os.path.join(rocm_dir, "lib", "rdc", "librdc_rocr.so")
+        if not os.path.exists(module):
+            pytest.skip("RDC was built without the ROCr diagnostic module")
+        binary = os.path.join(rocm_dir, "share", "rdc", "rdctst_tests", "rdc_rocr_lifetime_tests")
+        assert os.path.isfile(binary), f"{binary} is missing from the RDC test package"
+
+        result = subprocess.run([binary], capture_output=True, text=True, timeout=120)
+
+        print(result.stdout)
+        if result.stderr:
+            print(result.stderr)
+
+        assert result.returncode == 0, (
+            f"rdc_rocr_lifetime_tests failed (rc={result.returncode}):\n{result.stdout[-2000:]}"
+        )
+
     def test_rdctst_help(self, rdctst_path):
         result = subprocess.run(
             [rdctst_path, "--rdctst_help"], capture_output=True, text=True, timeout=30

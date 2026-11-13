@@ -199,13 +199,6 @@ size_t PrintfDbg::outputArgument(const std::string& fmt, bool printFloat, size_t
       if (size > 0 && size < ConstStr) {
         size_t len = 0;
         while (len < size && argumentStr[len] != 0) len++;
-        // When strlen is a multiple of 4, the compiler stores only the string
-        // bytes without a null terminator (ArgSize = strlen + 4 but the last
-        // 4 bytes are never written). If no null was found, the real string
-        // length is size - 4.
-        if (len == size && size >= 4) {
-          len = size - 4;
-        }
         std::string safeStr(reinterpret_cast<const char*>(argumentStr), len);
         amd::Os::printf(fmt.data(), safeStr.c_str());
         copiedBytes = size;

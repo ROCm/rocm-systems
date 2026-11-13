@@ -18,9 +18,11 @@
 
 #include <atomic>
 #include <condition_variable>
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <mutex>
+#include <optional>
 #include <unordered_map>
 #include <vector>
 
@@ -47,7 +49,7 @@ struct MemoryFault {
 ///
 /// @details Owns all event-related state for the simulated driver: the event
 /// table, event page, and synchronization primitives. The SimulatedKfd
-/// delegates event ioctls to this class and accesses the event page and memfd
+/// delegates event ioctls to this class and accesses the event page and backing descriptor
 /// for mmap/munmap operations.
 class EventState {
 public:
@@ -96,6 +98,14 @@ public:
   /// reads page_/page_size_ under the same lock in signal_interrupt) can never race
   /// a concurrent munmap tearing the mapping down.
   [[nodiscard]] bool release_page(void *ptr);
+
+  /// @brief Return the adopted page size only when @p ptr is its base.
+  [[nodiscard]] std::optional<size_t> page_size_if_base(const void *ptr) const;
+
+  /// @brief True if a CPU mapping would replace any part of the adopted page.
+  /// @details Takes mutex_ so fixed mmap preflight sees the same page protected
+  /// by signal_interrupt() and release_page().
+  [[nodiscard]] bool overlaps_page(const void *ptr, size_t size) const;
 
   /// @brief Signal event(s) from the CP's interrupt callback.
   /// @details When event_id is non-zero, signals that specific event. When
@@ -163,11 +173,8 @@ public:
   /// the way a direct read of the `page_` field can.
   [[nodiscard]] bool has_page() const;
 
-  /// @brief Check whether a host range overlaps the adopted event page under mutex_.
-  [[nodiscard]] bool overlaps_page(const void *addr, size_t length) const;
-
 private:
-  int memfd_ = -1;       ///< memfd backing the KFD signal event page.
+  int backing_fd_ = -1;  ///< Backing descriptor for the KFD signal event page.
   void *page_ = nullptr; ///< Mapped signal page (libhsakmt polls slots here).
   size_t page_size_ = 0; ///< Size of the mapped event page in bytes.
 

@@ -1,18 +1,25 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-//! Public GPU native events over the shared KFD signal-page service.
+//! Public GPU native events over the qualified provider notification services.
 
 use crate::generated::amdf::*;
 use crate::instance::{self, Device};
 use crate::support::*;
-use rocddi::device::gpu::event::linux::{SignalEvent, SignalEventAddressing};
+use rocddi::device::gpu::event::{SignalEvent, SignalEventAddressing, SignalEventProtocol};
 use rocddi::memory::storage::Owned;
 
 struct Event {
     native: SignalEvent,
     device: *mut Device,
     info: amdf_gpu_event_info_t,
+}
+
+impl Event {
+    fn require_current_process(&self) -> Result<(), u64> {
+        // SAFETY: A live event borrows its registered device.
+        unsafe { &*self.device }.require_current_process()
+    }
 }
 
 pub(crate) unsafe extern "C" fn create(
@@ -27,8 +34,9 @@ pub(crate) unsafe extern "C" fn create(
             return Err(INVALID);
         }
         let device = object(pointer.cast::<Device>())?;
+        device.require_current_process()?;
         let instance = instance::device_instance(device);
-        if !instance.process_lifetime || instance.process_id != std::process::id() {
+        if !instance.process_lifetime() {
             return Err(UNSUPPORTED);
         }
         let reset_epoch = device.current_reset_epoch();
@@ -54,6 +62,7 @@ pub(crate) unsafe extern "C" fn create(
             unregister(&device.events);
             return Err(LOST);
         }
+        let SignalEventProtocol::KfdSignal { event_id } = event.protocol();
         let owner = slot.write(Event {
             info: amdf_gpu_event_info_t {
                 device_id: device.id,
@@ -62,8 +71,8 @@ pub(crate) unsafe extern "C" fn create(
                 format_version: 1,
                 publication_modes: AMDF_QUEUE_PUBLICATION_MODE_USER,
                 mailbox_address: mailbox.device,
-                trigger_data: event.info().kfd_event_id,
-                interrupt_context: event.info().kfd_event_id,
+                trigger_data: event_id,
+                interrupt_context: event_id,
                 ..Default::default()
             },
             native: event,
@@ -88,6 +97,7 @@ pub(crate) unsafe extern "C" fn info(
 pub(crate) unsafe extern "C" fn signal(pointer: *mut amdf_gpu_event_t) -> u64 {
     boundary(|| unsafe {
         let event = object(pointer.cast::<Event>())?;
+        event.require_current_process()?;
         if (*event.device).current_reset_epoch() != event.info.reset_epoch {
             return Err(LOST);
         }
@@ -101,6 +111,7 @@ pub(crate) unsafe extern "C" fn signal(pointer: *mut amdf_gpu_event_t) -> u64 {
 pub(crate) unsafe extern "C" fn wait(pointer: *mut amdf_gpu_event_t, timeout: u64) -> u64 {
     boundary(|| unsafe {
         let event = object(pointer.cast::<Event>())?;
+        event.require_current_process()?;
         let device = &*event.device;
         if device.current_reset_epoch() != event.info.reset_epoch {
             return Err(LOST);
@@ -129,6 +140,7 @@ pub(crate) unsafe extern "C" fn wait(pointer: *mut amdf_gpu_event_t, timeout: u6
 
 pub(crate) unsafe extern "C" fn destroy(pointer: *mut amdf_gpu_event_t) -> u64 {
     boundary(|| unsafe {
+        object(pointer.cast::<Event>())?.require_current_process()?;
         let event = exclusive(pointer.cast::<Event>())?;
         event
             .native

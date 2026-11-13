@@ -358,6 +358,10 @@ else()
     target_compile_definitions(${HSAKMT_TARGET} PRIVATE
       "HSAKMT_INSTALL_LIBDIR=\"${HSAKMT_INSTALL_LIBDIR}\"")
   else()
+    # WaitOnAddress/WakeByAddressAll live in API-MS-Win-Core-Synch-l1-2-0.dll,
+    # not kernel32. Used by dxg/wddm/event.cpp.
+    target_link_libraries(${HSAKMT_TARGET} PUBLIC Synchronization)
+
     ## Link Windows Kernel Mode Interface
     if (LIB_SRC_BUILD)
       set(WKMI_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../../wkmi" CACHE PATH "Path to wkmi source directory for direct build")
@@ -517,6 +521,7 @@ else()
         INTERFACE -Wl,-Bstatic ${AMDGPU_STATIC_LIB_PATHS} ${DRM_AMDGPU_LDFLAGS} ${DRM_LDFLAGS} -Wl,-Bdynamic
       )
     else()
+      target_link_libraries(${HSAKMT_STATIC_DRM_TARGET} PUBLIC Synchronization)
       if(WKMI_SRC_BUILD)
         target_link_libraries(${HSAKMT_STATIC_DRM_TARGET} PUBLIC wkmi)
         target_include_directories(${HSAKMT_STATIC_DRM_TARGET} PUBLIC ${WKMI_SRC_DIR}/lib/inc)

@@ -191,11 +191,13 @@ ncclResult_t ncclCeInit(struct ncclComm* comm) {
   ncclWindow_vidmem* ceWinDevHost = nullptr;
   ncclWindow_vidmem* sigWinDev = nullptr;
   ncclWindow_vidmem* sigWinDevHost = nullptr;
+  cudaStream_t sidestream = nullptr;
+  cudaStream_t zeroStream = nullptr;
   size_t ceDevBaseSize = alignUp(comm->nRanks * sizeof(uint32_t), 16) * 2;
   size_t sigBufferSize = NUM_SLOTS * comm->nRanks * sizeof(uint32_t);
   static int64_t paramStaging = rcclParamCeArStagingBytes();
   comm->ceColl.ceArMaxBytes     = rcclCeArNonRegCap(comm);
-  comm->ceColl.ceArStagingBytes = (paramStaging >= 0) ? (size_t)paramStaging : (size_t)NCCL_CE_AR_STAGING_BYTES;
+  comm->ceColl.ceArStagingBytes = ncclCeArStagingBytes(paramStaging);
 
   int i = 0;
   int targetStreams = 0;
@@ -221,6 +223,14 @@ ncclResult_t ncclCeInit(struct ncclComm* comm) {
 
   // ceSync window (ready/complete flag arrays).
   NCCLCHECKGOTO(ncclMemAlloc((void**)&ceDevBase, ceDevBaseSize), ret, fail);
+  // ncclMemAlloc does not zero memory, and a stale 1 would pass the first UC sync. hipMemset only queues the fill on
+  // the null stream, which registration does not wait for, so clear on a side stream and wait for that stream.
+  NCCLCHECKGOTO(getSideStream(&sidestream), ret, fail);
+  zeroStream = sidestream;
+  if (sidestream == nullptr) CUDACHECKGOTO(cudaStreamCreateWithFlags(&zeroStream, cudaStreamNonBlocking), ret, fail);
+  CUDACHECKGOTO(cudaMemsetAsync(ceDevBase, 0, ceDevBaseSize, zeroStream), ret, fail);
+  CUDACHECKGOTO(cudaStreamSynchronize(zeroStream), ret, fail);
+  if (sidestream == nullptr) CUDACHECKGOTO(cudaStreamDestroy(zeroStream), ret, fail);
   NCCLCHECKGOTO(ncclDevrWindowRegisterInGroup(comm, ceDevBase, ceDevBaseSize, NCCL_WIN_COLL_SYMMETRIC, &ceWinDev), ret,
                 fail);
   NCCLCHECKGOTO(ncclShadowPoolToHost(&comm->devrState.shadows, ceWinDev, &ceWinDevHost), ret, fail);
@@ -854,6 +864,8 @@ ncclResult_t ncclCeLaunchBatchOps(struct ncclComm* comm, struct ncclCeBatchOpsPa
   int64_t chunkSizeParam = ncclParamCeChunkSize();
   size_t ceChunkSize = chunkSizeParam > 0 ? (size_t)chunkSizeParam : 0;
   void* ceBatchHandle = NULL;
+  // Copy streams forked from stream; fail rejoins them so queued copies stay ordered before stream.
+  int forkedStreams = 0;
 
 #ifdef ENABLE_FAULT_INJECTION
   NCCLCHECK(ceFaultCheck(comm, CE_FAULT_LAUNCH_OP, "ncclCeLaunchBatchOps"));
@@ -964,6 +976,7 @@ ncclResult_t ncclCeLaunchBatchOps(struct ncclComm* comm, struct ncclCeBatchOpsPa
         for (int s = 0; s < activeStreams; s++) {
           CUDACHECKGOTO(cudaEventRecord(comm->ceColl.copyEvents[s], stream), ret, fail);
           CUDACHECKGOTO(cudaStreamWaitEvent(comm->ceColl.copyStreams[s], comm->ceColl.copyEvents[s], 0), ret, fail);
+          forkedStreams = s + 1;
         }
 
       // Distribute copies round-robin across streams
@@ -1001,6 +1014,10 @@ exit:
   ncclProfilerStopCeBatchEvent(comm, ceBatchHandle, stream);
   return ret;
 fail:
+  for (int s = 0; s < forkedStreams; s++) {
+    CUDACHECKIGNORE(cudaEventRecord(comm->ceColl.copyEvents[s], comm->ceColl.copyStreams[s]));
+    CUDACHECKIGNORE(cudaStreamWaitEvent(stream, comm->ceColl.copyEvents[s], 0));
+  }
   goto exit;
 }
 
@@ -3319,8 +3336,7 @@ ncclResult_t ncclCeAllReduce(struct ncclComm* comm, const void* sendbuff, void* 
     WARN("CE AllReduce: no valid chunk layout (count=%zu eltSize=%zu nRanks=%d)", count, eltSize, comm->nRanks);
     return ncclInvalidArgument;
   }
-  const size_t chunkBytes =
-    (shardBytes <= slotChunkBytes) ? shardBytes : ncclCeAllReduceChooseChunkBytes(shardBytes, slotChunkBytes);
+  const size_t chunkBytes = ncclCeAllReduceChunkBytes(shardBytes, slotChunkBytes);
   size_t baseChunkElems = chunkBytes / eltSize;
   size_t slotChunkElems = slotChunkBytes / eltSize;
   size_t chunksPerShard = shardElems / baseChunkElems;
@@ -3617,8 +3633,7 @@ ncclResult_t ncclCeReduceScatter(struct ncclComm* comm, const void* sendbuff, vo
     WARN("CE ReduceScatter: no valid chunk layout (count=%zu eltSize=%zu nRanks=%d)", count, eltSize, comm->nRanks);
     return ncclInvalidArgument;
   }
-  const size_t chunkBytes =
-    (shardBytes <= slotChunkBytes) ? shardBytes : ncclCeAllReduceChooseChunkBytes(shardBytes, slotChunkBytes);
+  const size_t chunkBytes = ncclCeAllReduceChunkBytes(shardBytes, slotChunkBytes);
   size_t baseChunkElems = chunkBytes / eltSize;
   size_t slotChunkElems = slotChunkBytes / eltSize;
   size_t chunksPerShard = shardElems / baseChunkElems;
@@ -3894,6 +3909,18 @@ ncclResult_t ncclLaunchCeColl(struct ncclComm* comm, struct ncclKernelPlan* plan
   }
 
 exit:
+  // As ncclLaunchKernel does: CE copies may write peer DDA scratch, so teardown's
+  // doneEvent wait and the next launch on another stream must cover them too. Also
+  // on failure, since copies queued before the error may still be running.
+  if (comm->doneEvent != nullptr) {
+    cudaError_t recordErr = cudaEventRecord(comm->doneEvent, stream);
+    if (recordErr == cudaSuccess) {
+      comm->lastStreamTag = ncclStreamTag(stream);
+    } else if (ret == ncclSuccess) {
+      WARN("ncclLaunchCeColl: doneEvent record failed (%s)", cudaGetErrorString(recordErr));
+      ret = ncclUnhandledCudaError;
+    }
+  }
   // Stop CE collective profiling - always attempt if started, even on error
   ncclProfilerStopCeCollEvent(comm, args, stream);
   return ret;

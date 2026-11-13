@@ -22,8 +22,11 @@ use std::sync::{Arc, LazyLock, Mutex, MutexGuard, RwLock};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use crate::platform::event::{SignalEvent, SignalEventAddressing, SignalEventService};
+use rocddi::device::gpu::event::{
+    SignalEvent, SignalEventAddressing, SignalEventProtocol, SignalEventService,
+};
 use rocddi::memory::device::{Allocation, DeviceAccess, MemoryKind};
+#[cfg(test)]
 use rocddi::session::DriverContextLifetime;
 
 use crate::callback_arg::CallbackArg;
@@ -42,7 +45,6 @@ use crate::api::signal::wait::*;
 #[cfg(test)]
 use crate::api::signal::{atomic::*, core::*};
 use ipc::{ImportedIpcSignal, OwnedIpcSignal};
-pub(crate) use wait::set_system_frequency;
 #[cfg(test)]
 use wait::*;
 
@@ -480,13 +482,13 @@ impl SignalState {
     }
 
     /// Initializes signal registries and stores the native context lifetime.
-    pub(crate) fn new(lifetime: DriverContextLifetime) -> Self {
-        Self {
+    pub(crate) fn new(session: &rocddi::session::Session) -> Result<Self, Status> {
+        Ok(Self {
             signal_slabs: Vec::new(),
             recycled_signals: Vec::new(),
             batches: HashMap::new(),
             batch_members: HashMap::new(),
-            event_service: SignalEventService::new(lifetime),
+            event_service: SignalEventService::new(session).map_err(map_error)?,
             interrupt_signals: HashMap::new(),
             signal_event_pool: Vec::new(),
             owned_ipc_signals: HashMap::new(),
@@ -494,7 +496,7 @@ impl SignalState {
             async_signal_refs: HashMap::new(),
             signal_groups: HashMap::new(),
             async_dispatcher: None,
-        }
+        })
     }
 
     /// Releases HSA signal records after workers and native queues have stopped.
@@ -715,14 +717,14 @@ impl HsaState {
     /// Creates signal event and records its ownership.
     pub(crate) fn create_signal_event(
         &mut self,
-    ) -> Option<(crate::platform::event::SignalEvent, usize, u32)> {
+    ) -> Option<(rocddi::device::gpu::event::SignalEvent, usize, u32)> {
         let gpu = self.gpus.first()?;
         let (event, mailbox) = self
             .signal_state
             .event_service
             .create(&gpu.device, SignalEventAddressing::Identity)
             .ok()?;
-        let id = event.info().kfd_event_id;
+        let SignalEventProtocol::KfdSignal { event_id: id } = event.protocol();
         Some((event, mailbox.host, id))
     }
 
@@ -737,7 +739,7 @@ impl HsaState {
                 .event_service
                 .mailbox(&gpu.device, event)
                 .ok()?;
-            let id = event.info().kfd_event_id;
+            let SignalEventProtocol::KfdSignal { event_id: id } = event.protocol();
             let event = self.signal_state.signal_event_pool.pop()?;
             return Some((event, mailbox.host, id));
         }
@@ -1136,7 +1138,8 @@ pub(crate) unsafe fn with_public_signal<R>(
     signal: HsaSignal,
     operation: impl for<'a> FnOnce(&'a AmdSignal) -> R,
 ) -> Option<R> {
-    let _admission = crate::runtime::enter_public_raw_handle()?;
+    let admission = crate::runtime::enter_public_raw_handle()?;
+    let _lease_scope = crate::runtime::ApiLeaseScope::enter(admission);
     // SAFETY: The caller supplies the same ownership guarantee as with_signal.
     unsafe { with_signal(signal, operation) }
 }

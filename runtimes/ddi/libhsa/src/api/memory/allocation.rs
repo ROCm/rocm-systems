@@ -360,7 +360,7 @@ pub unsafe extern "C" fn hsa_amd_memory_pool_free(pointer: *mut c_void) -> Statu
 
         // Transfer the native owner out of the public registry before calling
         // the driver. The token keeps its session alive if shutdown starts.
-        let (mut removed, token, tracker) = {
+        let (mut removed, token, health) = {
             let mut guard = match lock() {
                 Ok(guard) => guard,
                 Err(status) => return status,
@@ -420,7 +420,7 @@ pub unsafe extern "C" fn hsa_amd_memory_pool_free(pointer: *mut c_void) -> Statu
                 }
                 return OUT_OF_RESOURCES;
             };
-            (removed, token, tracker)
+            (removed, token, runtime.health.clone())
         };
         let result = match &mut removed {
             Removed::Allocation { memory, .. } => memory.free(),
@@ -465,7 +465,7 @@ pub unsafe extern "C" fn hsa_amd_memory_pool_free(pointer: *mut c_void) -> Statu
             if let Some(owner) = slot {
                 // Shutdown already detached the generation, or the registry
                 // is poisoned. Its native context cannot now be retired.
-                tracker.quarantine();
+                health.quarantine();
                 std::mem::forget(owner);
             }
             drop(token);

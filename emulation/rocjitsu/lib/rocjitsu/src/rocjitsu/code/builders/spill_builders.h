@@ -71,6 +71,14 @@ build_v_readlane_b32(uint16_t sgpr_dst, uint16_t vgpr_src, uint16_t lane, rj_cod
     return rdna4::build_vop3(rdna4::kVReadlaneB32Vop3, {.vdst = static_cast<uint8_t>(sgpr_dst),
                                                         .src0 = vop3_vgpr_src(vgpr_src),
                                                         .src1 = vop3_inline_uint(lane)});
+  case ROCJITSU_CODE_ARCH_RDNA3:
+    return rdna3::build_vop3(rdna3::kVReadlaneB32Vop3, {.vdst = static_cast<uint8_t>(sgpr_dst),
+                                                        .src0 = vop3_vgpr_src(vgpr_src),
+                                                        .src1 = vop3_inline_uint(lane)});
+  case ROCJITSU_CODE_ARCH_CDNA5:
+    return cdna5::build_vop3(cdna5::kVReadlaneB32Vop3, {.vdst = static_cast<uint8_t>(sgpr_dst),
+                                                        .src0 = vop3_vgpr_src(vgpr_src),
+                                                        .src1 = vop3_inline_uint(lane)});
   default:
     return error != nullptr
                ? error->emit()
@@ -247,6 +255,13 @@ build_wait_all_loads_complete(rj_code_arch_t arch, const util::DiagnosticEmitter
     return std::vector<uint32_t>{build_sopp_encoding(arch, cdna3::kSWaitcntSopp, 0).value()};
   case ROCJITSU_CODE_ARCH_CDNA4:
     return std::vector<uint32_t>{build_sopp_encoding(arch, cdna4::kSWaitcntSopp, 0).value()};
+  case ROCJITSU_CODE_ARCH_RDNA3:
+    return std::vector<uint32_t>{build_sopp_encoding(arch, rdna3::kSWaitcntSopp, 0).value()};
+  case ROCJITSU_CODE_ARCH_CDNA5:
+    return std::vector<uint32_t>{
+        build_sopp_encoding(arch, cdna5::kSWaitLoadcntDscntSopp, 0).value(),
+        build_sopp_encoding(arch, cdna5::kSWaitKmcntSopp, 0).value(),
+        build_sopp_encoding(arch, cdna5::kSWaitXcntSopp, 0).value()};
   case ROCJITSU_CODE_ARCH_RDNA4:
     return std::vector<uint32_t>{
         build_sopp_encoding(arch, rdna4::kSWaitLoadcntDscntSopp, 0).value(),

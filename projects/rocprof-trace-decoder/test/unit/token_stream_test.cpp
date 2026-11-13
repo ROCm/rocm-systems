@@ -401,7 +401,7 @@ TEST(Gfx12TokenStreamTest, DecodesSingleValuInst)
     builder.writeBits(token_data, 12);
     builder.finalize();
 
-    gfx12::TokenGenerator gen(builder.data(), builder.size(), 0, 0);
+    gfx12::TokenGenerator gen(builder.data(), builder.size(), 0, 0, false);
 
     auto token = gen.next();
     EXPECT_EQ(token.type, RdnaType::VALU_INST);
@@ -514,7 +514,7 @@ TEST(Gfx12TokenStreamTest, DecodesWaveStartGfx12)
 
     builder.writeBits(ws_data, 32);
 
-    gfx12::TokenGenerator gen(builder.data(), builder.size(), 0, 0);
+    gfx12::TokenGenerator gen(builder.data(), builder.size(), 0, 0, false);
 
     auto token = gen.next();
     EXPECT_EQ(token.type, RdnaType::WAVE_START);
@@ -540,7 +540,7 @@ TEST(Gfx12TokenStreamTest, DecodesInstGfx12)
     builder.writeBits(inst_data, 20);
     builder.finalize();
 
-    gfx12::TokenGenerator gen(builder.data(), builder.size(), 0, 0);
+    gfx12::TokenGenerator gen(builder.data(), builder.size(), 0, 0, false);
 
     auto token = gen.next();
     EXPECT_EQ(token.type, RdnaType::INST);
@@ -593,7 +593,7 @@ TEST(Gfx12TokenStreamTest, DecodesCompleteWaveLifecycle)
 
     builder.finalize();
 
-    gfx12::TokenGenerator gen(builder.data(), builder.size(), 0, 0);
+    gfx12::TokenGenerator gen(builder.data(), builder.size(), 0, 0, false);
 
     auto token = gen.next();
     EXPECT_EQ(token.type, RdnaType::WAVE_START);
@@ -788,7 +788,7 @@ TEST(Gfx12TokenStreamEdgeCaseTest, Gfx12SpecificInst)
     builder.writeBits(inst_data, 20);
     builder.finalize();
 
-    gfx12::TokenGenerator gen(builder.data(), builder.size(), 0, 0);
+    gfx12::TokenGenerator gen(builder.data(), builder.size(), 0, 0, false);
 
     auto token = gen.next();
     EXPECT_EQ(token.type, RdnaType::INST);

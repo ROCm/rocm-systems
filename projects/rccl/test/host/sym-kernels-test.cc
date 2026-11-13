@@ -36,6 +36,13 @@
 
 #include "SymTdmTestHelpers.h"
 
+// sym_kernels.cc asks for the railed GIN backend; gin_host.cc is not linked into this binary.
+std::function<ncclGinType_t(ncclComm*)> g_railedGinType = [](ncclComm*) { return NCCL_GIN_TYPE_NONE; };
+ncclResult_t ncclGetRailedGinType(struct ncclComm* comm, ncclGinType_t* ginType) {
+  *ginType = g_railedGinType(comm);
+  return ncclSuccess;
+}
+
 namespace {
 
 bool KernelBitSet(uint32_t mask, ncclSymkKernelId id) { return (mask >> static_cast<int>(id)) & 1u; }
@@ -369,6 +376,27 @@ TEST_F(SymKernelMaskTest, NeedGinTrue_HasGinFalse_EverythingCleared) {
   EXPECT_EQ(kmask, 0u);
 }
 
+// Init marks the GIN backend unsupported (Anvil SDMA): the same empty mask as SYM_GIN_KERNELS_ENABLE=0.
+TEST_F(SymKernelMaskTest, NeedGinTrue_GinBackendUnsupported_EverythingCleared) {
+  ScopedHook teamLsa(g_ncclTeamLsa, [](ncclComm_t) {
+    ncclTeam_t t{};
+    t.nRanks = 2;
+    return t;
+  });
+  ScopedHook loadParam(g_loadParam, SymGinKernelsEnable(1));
+  comm_->symkState.ginBackendUnsupported = true;
+  uint32_t kmask = ncclSymkMask(comm_.get(), ncclFuncReduceScatter, ncclDevSum, kTy, /*nElts=*/1024);
+  EXPECT_EQ(kmask, 0u);
+}
+
+TEST_F(SymKernelMicrotest, GinBackendUnsupported_OnlyForAnvilSdma) {
+  for (ncclGinType_t type : {NCCL_GIN_TYPE_ANVIL_SDMA, NCCL_GIN_TYPE_PROXY, NCCL_GIN_TYPE_NONE}) {
+    ScopedHook railed(g_railedGinType, [type](ncclComm*) { return type; });
+    EXPECT_EQ(ncclSymkGinBackendUnsupported(comm_.get()), type == NCCL_GIN_TYPE_ANVIL_SDMA) << "ginType " << type;
+    EXPECT_EQ(railed.calls, 1);
+  }
+}
+
 TEST_F(SymKernelMaskTest, HasLsaMultimemTrue_STMCKernelSurvives) {
   comm_->symkState.hasLsaMultimem = true;
   uint32_t kmask = ncclSymkMask(comm_.get(), ncclFuncAllReduce, ncclDevSum, kTy, /*nElts=*/1024);
@@ -464,6 +492,62 @@ INSTANTIATE_TEST_SUITE_P(SymHasLDMCPostDivCases, SymKernelHasLDMCPostDivTest,
 TEST_F(SymKernelMaskTest, AllGather_AGKernelSurvives) {
   uint32_t kmask = ncclSymkMask(comm_.get(), ncclFuncAllGather, ncclDevSum, kTy, /*nElts=*/1024);
   EXPECT_TRUE(KernelBitSet(kmask, ncclSymkKernelId_AllGather_ST));
+}
+
+// ---- Hierarchical AllGather: packages found in peerInfo, and the mask gate ----
+
+// A package is a run of consecutive ranks on one physical device, and every package must be the same size.
+TEST_F(SymKernelMicrotest, HierScaleInSize_EqualRunsOfConsecutiveRanksPerDevice) {
+  struct {
+    const char* layout;
+    std::vector<int> devices;  // physical device of each rank
+    int scaleIn;
+  } const cases[] = {
+      {"two devices, two ranks each", {0, 0, 1, 1}, 2},
+      {"interleaved", {0, 1, 0, 1}, 0},
+      {"uneven", {0, 0, 1, 1, 1, 1}, 0},
+      {"single device", {0, 0, 0, 0}, 0},
+  };
+  for (const auto& c : cases) {
+    std::vector<ncclPeerInfo> peers(c.devices.size());
+    for (size_t r = 0; r < peers.size(); ++r) {
+      peers[r].hostHash = 1;
+      // Partitions of one device differ only in the low 4 bits of the bus ID.
+      peers[r].busId = (int64_t(c.devices[r] + 1) << 8) | int64_t(r % 16);
+    }
+    comm_->nRanks = int(peers.size());
+    comm_->peerInfo = peers.data();
+    EXPECT_EQ(computeHierScaleInSize(comm_.get()), c.scaleIn) << c.layout;
+  }
+  comm_->peerInfo = nullptr;
+}
+
+TEST_F(SymKernelMaskTest, HierLsaST_OnlyOnGfx1250PartitionModeWithTwoOrMorePackages) {
+  struct {
+    const char* name;
+    bool gfx1250;
+    bool hasMloPart;
+    int scaleIn;  // ranks per package, of the fixture's 4-rank LSA team
+    bool offered;
+  } const cases[] = {
+      {"two packages", true, true, 2, true},  {"not partition mode", true, false, 2, false},
+      {"not gfx1250", false, true, 2, false}, {"no packages", true, true, 0, false},
+      {"one package", true, true, 4, false},  {"packages do not divide the team", true, true, 3, false},
+  };
+  for (const auto& c : cases) {
+    if (c.gfx1250) {
+      SetTdmCapableArch(comm_.get());
+    } else {
+      SetSymkArch(comm_.get(), "gfx950", 95, /*warpSize=*/64);
+    }
+    comm_->hasMloPart = c.hasMloPart;
+    comm_->symkState.kcomm.hierScaleInSize = c.scaleIn;
+    uint32_t kmask = ncclSymkMask(comm_.get(), ncclFuncAllGather, ncclDevSum, kTy, /*nElts=*/1024);
+    EXPECT_EQ(KernelBitSet(kmask, ncclSymkKernelId_AllGather_HierLsaST), c.offered) << c.name;
+    EXPECT_EQ(KernelBitSet(kmask, ncclSymkKernelId_AllGather_HierLsaTmaST), c.offered && TmaReachableOnThisBuild())
+        << c.name;
+    EXPECT_TRUE(KernelBitSet(kmask, ncclSymkKernelId_AllGather_ST)) << c.name;
+  }
 }
 
 TEST_F(SymKernelMaskTest, UnsupportedCollective_EntireMaskZeroed) {
