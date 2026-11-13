@@ -205,10 +205,6 @@ public:
       if (!(lane_mask & (1ULL << lane)))
         continue;
       uint64_t base = static_cast<uint64_t>(static_cast<uint32_t>(addrs[lane])) + base_offset;
-      if (elem_size == 4 && num_elems == 4 && base + 16 <= data_.size()) {
-        std::memcpy(dst + lane * 16, data_.data() + base, 16);
-        continue;
-      }
       for (uint32_t e = 0; e < num_elems; ++e) {
         uint64_t ea = base + static_cast<uint64_t>(e) * elem_size;
         if (ea + elem_size > capacity_bytes_) {
@@ -228,10 +224,6 @@ public:
       if (!(lane_mask & (1ULL << lane)))
         continue;
       uint64_t base = static_cast<uint64_t>(static_cast<uint32_t>(addrs[lane])) + base_offset;
-      if (elem_size == 4 && num_elems == 4 && base + 16 <= data_.size()) {
-        std::memcpy(data_.data() + base, src + lane * 16, 16);
-        continue;
-      }
       for (uint32_t e = 0; e < num_elems; ++e) {
         uint64_t ea = base + static_cast<uint64_t>(e) * elem_size;
         if (ea + elem_size > capacity_bytes_)
@@ -288,6 +280,10 @@ private:
 
   void write_backing(size_t offset, const uint8_t *src, size_t size) {
     assert(offset <= capacity_bytes_ && size <= capacity_bytes_ - offset);
+    if (size == 16 && offset <= data_.size() && size <= data_.size() - offset) {
+      std::memcpy(data_.data() + offset, src, 16);
+      return;
+    }
     ensure_materialized(offset + size);
     // Keep the checked loop explicit: GCC 15 can retain the vector's old object
     // size across resize and report a false stringop-overflow for memcpy here.

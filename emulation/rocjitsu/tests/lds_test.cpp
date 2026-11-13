@@ -6,6 +6,7 @@
 #include <gtest/gtest.h>
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 
 namespace {
@@ -87,6 +88,35 @@ TEST(LdsTest, WritesGrowBackingAndOutOfBoundsWritesDoNot) {
   EXPECT_EQ(untouched.materialized_size_bytes(), 0u);
 }
 
+TEST(LdsTest, BulkSixteenByteStoresPreserveBackingAndBounds) {
+  std::array<uint8_t, 16> source;
+  for (uint32_t i = 0; i < source.size(); ++i)
+    source[i] = 0x10 + i;
+
+  for (uint32_t address : {17u, 4080u, 4089u, 4096u, 8176u, 8185u}) {
+    SCOPED_TRACE(address);
+    Lds lds(8);
+    lds.zero_range(0, 256);
+    const size_t boundary = lds.materialized_size_bytes();
+    ASSERT_EQ(boundary, 4096u);
+    for (uint32_t i = 0; i < boundary; ++i)
+      lds.write8(i, 0xD7);
+
+    lds.write(address, source.data(), static_cast<uint32_t>(source.size()));
+    const bool in_bounds = address + source.size() <= lds.size_bytes();
+    if (!in_bounds || address + source.size() <= boundary)
+      EXPECT_EQ(lds.materialized_size_bytes(), boundary);
+    else
+      EXPECT_GE(lds.materialized_size_bytes(), address + source.size());
+    for (uint32_t i = 0; i < lds.size_bytes(); ++i) {
+      uint8_t expected = i < boundary ? 0xD7 : 0;
+      if (in_bounds && i >= address && i - address < source.size())
+        expected = source[i - address];
+      EXPECT_EQ(lds.read8(i), expected) << i;
+    }
+  }
+}
+
 TEST(LdsTest, FourDwordTransfersPreserveMaskAddressingAndLaneOrder) {
   Lds lds(4);
   lds.zero_range(0, 64);
@@ -150,7 +180,7 @@ TEST(LdsTest, FourDwordTransfersClipAtWholeElements) {
 TEST(LdsTest, FourDwordTransfersCrossUnmaterializedBacking) {
   Lds lds(64);
   lds.zero_range(0, 256);
-  const auto boundary = lds.materialized_size_bytes();
+  const size_t boundary = lds.materialized_size_bytes();
   ASSERT_LT(boundary + 16, lds.size_bytes());
   lds.write8(static_cast<uint32_t>(boundary - 1), 0xAB);
   std::array<uint64_t, 64> addrs{};
