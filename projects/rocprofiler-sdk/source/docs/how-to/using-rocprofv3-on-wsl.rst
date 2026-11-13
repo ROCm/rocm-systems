@@ -28,7 +28,7 @@ Set up the environment
 
       export HSA_ENABLE_DXG_DETECTION=1
 
-   Don't set ``HSA_ENABLE_DXG_DETECTION`` to ``0``. That disables GPU access on
+   Don't set ``HSA_ENABLE_DXG_DETECTION`` to ``0``. This disables GPU access on
    WSL2.
 
 3. Make sure ``HSA_TOOLS_DISABLE_REGISTER`` isn't set to ``1``. That setting
