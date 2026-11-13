@@ -21,7 +21,7 @@ THE SOFTWARE.
 */
 
 /**
- * @file fp8_bench.cpp
+ * @file reduceOpBench.cpp
  *
  * Probe FP8 hardware intrinsics on each GPU.
  *
@@ -257,7 +257,7 @@ int main(int argc, char** argv) {
     return 1;
   }
 
-  std::printf("fp8-bench GPU hardware probe (HIP %d, %d GPU(s))\n", HIP_VERSION, nGpus);
+  std::printf("reduceOpBench GPU hardware probe (HIP %d, %d GPU(s))\n", HIP_VERSION, nGpus);
   std::printf("Mode: auto-discover from BuiltinsAMDGPU");
   if (functional) std::printf(" + functional suite");
   std::printf("\n");

@@ -4,8 +4,8 @@ ROCM_PATH ?= /opt/rocm
 HIPCC     = $(ROCM_PATH)/bin/hipcc
 PYTHON    ?= python3
 
-EXE       = fp8_bench
-SRC       = fp8_bench.cpp
+EXE       = reduceOpBench
+SRC       = reduceOpBench.cpp
 AUTO_H    = fp8_auto_probe.h
 CXXFLAGS  = -std=c++17 -O3 --offload-arch=native
 

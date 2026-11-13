@@ -1,13 +1,13 @@
-# fp8-bench
+# reduceOpBench
 
 V1 GPU hardware probe for FP8 intrinsics. **Executes each intrinsic on the device** and reports whether it works — this is not an RCCL capability table.
 
 ## Build
 
 ```bash
-cd projects/rccl/tools/fp8-bench
+cd projects/rccl/tools/reduceOpBench
 make
-./fp8_bench
+./reduceOpBench
 ```
 
 Built with `--offload-arch=native`. Rebuild if probing a different GPU architecture.
