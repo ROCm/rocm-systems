@@ -7,6 +7,14 @@
 #include "mempool_common.hh"
 #include <resource_guards.hh>
 #include <utils.hh>
+
+#include <array>
+#include <chrono>
+#include <cstdint>
+#include <limits>
+#include <thread>
+#include <vector>
+
 /**
  * @addtogroup hipMemPoolSetAttribute hipMemPoolSetAttribute
  * @{
@@ -514,6 +522,165 @@ HIP_TEST_CASE(Unit_hipMemPoolSetAttribute_ResetMemHighAttr) {
   REQUIRE(valueReservedHighAfterReset == 0);
   REQUIRE(valueUsedHighAfterReset == 0);
   HIP_CHECK(hipMemPoolDestroy(mem_pool));
+}
+
+namespace {
+constexpr size_t MiB = 1024 * 1024;
+constexpr uint64_t kPinned = std::numeric_limits<uint64_t>::max();
+
+// A fresh pool isolates lazy initialization from tests using the default pool.
+// Track live allocations so a failed assertion does not leak into later tests.
+class ThresholdPool {
+ public:
+  ThresholdPool() : pool_(MemPools::created, 0), stream_(Streams::created) {}
+  ~ThresholdPool() {
+    for (void* ptr : live_) {
+      if (ptr != nullptr) static_cast<void>(hipFreeAsync(ptr, stream()));
+    }
+    static_cast<void>(hipStreamSynchronize(stream()));
+    uint64_t zero = 0;
+    static_cast<void>(hipMemPoolSetAttribute(pool(), hipMemPoolAttrReleaseThreshold, &zero));
+    static_cast<void>(hipMemPoolTrimTo(pool(), 0));
+  }
+
+  hipMemPool_t pool() const { return pool_.mempool(); }
+  hipStream_t stream() const { return stream_.stream(); }
+  uint64_t Get(hipMemPoolAttr attr) const {
+    uint64_t value = 0;
+    HIP_CHECK(hipMemPoolGetAttribute(pool(), attr, &value));
+    return value;
+  }
+  void Set(uint64_t threshold) {
+    HIP_CHECK(hipMemPoolSetAttribute(pool(), hipMemPoolAttrReleaseThreshold, &threshold));
+  }
+  void* Alloc(size_t bytes) {
+    void* ptr = nullptr;
+    HIP_CHECK(hipMallocFromPoolAsync(&ptr, bytes, pool(), stream()));
+    live_.push_back(ptr);
+    HIP_CHECK(hipMemsetAsync(ptr, 0xAB, bytes, stream()));
+    return ptr;
+  }
+  void Free(void* ptr) {
+    HIP_CHECK(hipFreeAsync(ptr, stream()));
+    for (auto& live : live_) {
+      if (live == ptr) {
+        live = nullptr;
+        break;
+      }
+    }
+  }
+  void Sync() { HIP_CHECK(hipStreamSynchronize(stream())); }
+
+ private:
+  MemPoolGuard pool_;
+  StreamGuard stream_;
+  std::vector<void*> live_;
+};
+
+// Query completion without invoking the synchronization-time pool release path.
+// A fixed sleep neither guarantees completion nor isolates free-time pressure.
+void WaitForCompletion(hipStream_t stream) {
+  EventsGuard event(1);
+  HIP_CHECK(hipEventRecord(event[0], stream));
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+  hipError_t status;
+  while ((status = hipEventQuery(event[0])) == hipErrorNotReady &&
+         std::chrono::steady_clock::now() < deadline) {
+    std::this_thread::yield();
+  }
+  HIP_CHECK(status);
+}
+}  // namespace
+
+// Retention must hold when freeing another allocation triggers pool maintenance.
+HIP_TEST_CASE(Unit_hipMemPoolAttrReleaseThreshold_Positive_PinnedUnderFreePressure) {
+  HIP_CHECK(hipSetDevice(0));
+  checkMempoolSupported(0);
+  ThresholdPool pool;
+  // Initialize first so this case does not depend on early threshold propagation.
+  pool.Free(pool.Alloc(MiB));
+  pool.Sync();
+  pool.Set(kPinned);
+  std::array<void*, 3> allocations;
+  for (auto& ptr : allocations) ptr = pool.Alloc(64 * MiB);
+  pool.Sync();
+  const auto before = pool.Get(hipMemPoolAttrReservedMemCurrent);
+  REQUIRE(before >= 3 * 64 * MiB);
+  pool.Free(allocations[0]);
+  pool.Free(allocations[1]);
+  WaitForCompletion(pool.stream());
+  pool.Free(allocations[2]);
+  pool.Sync();
+  CAPTURE(before, pool.Get(hipMemPoolAttrReservedMemCurrent));
+  REQUIRE(pool.Get(hipMemPoolAttrUsedMemCurrent) == 0);
+  REQUIRE(pool.Get(hipMemPoolAttrReservedMemCurrent) == before);
+}
+
+// Non-aligned allocations exercise partial chunks. Check the retention bound,
+// not one backend's exact chunk size or reservation (e.g. 640 MiB).
+HIP_TEST_CASE(Unit_hipMemPoolAttrReleaseThreshold_Positive_FiniteOnSynchronize) {
+  HIP_CHECK(hipSetDevice(0));
+  checkMempoolSupported(0);
+  ThresholdPool pool;
+  pool.Free(pool.Alloc(MiB));
+  pool.Sync();
+  const uint64_t threshold = GENERATE(uint64_t{256 * MiB}, uint64_t{300 * MiB});
+  CAPTURE(threshold);
+  pool.Set(threshold);
+  std::array<void*, 3> allocations;
+  for (auto& ptr : allocations) ptr = pool.Alloc(200 * MiB);
+  pool.Sync();
+  const auto before = pool.Get(hipMemPoolAttrReservedMemCurrent);
+  for (const int index : {1, 0, 2}) {
+    pool.Free(allocations[index]);
+    pool.Sync();
+    CAPTURE(index, pool.Get(hipMemPoolAttrReservedMemCurrent));
+    CHECK(pool.Get(hipMemPoolAttrReservedMemCurrent) >= threshold);
+  }
+  REQUIRE(pool.Get(hipMemPoolAttrUsedMemCurrent) == 0);
+  REQUIRE(pool.Get(hipMemPoolAttrReservedMemCurrent) < before);
+}
+
+// Retain freed memory until an explicit trim or a lower threshold allows release.
+// A large first allocation also exercises heaps created without earlier segments.
+HIP_TEST_CASE(Unit_hipMemPoolAttrReleaseThreshold_Positive_RetentionAndTrim) {
+  HIP_CHECK(hipSetDevice(0));
+  checkMempoolSupported(0);
+  const bool large = GENERATE(false, true);
+  const bool early = GENERATE(false, true);
+  const bool lower_threshold = GENERATE(false, true);
+  const uint64_t threshold = GENERATE(kPinned, kPinned / 2);
+  size_t bytes = 512 * MiB;
+  if (large) {
+    size_t available = 0, total = 0;
+    HIP_CHECK(hipMemGetInfo(&available, &total));
+    bytes = total / 8 + total / 16;
+    if (bytes > 4096 * MiB || available < bytes + 1024 * MiB) {
+      HIP_SKIP_TEST("Insufficient headroom or allocation exceeds the 4 GiB test budget");
+      return;
+    }
+  }
+  CAPTURE(bytes, early, lower_threshold, threshold);
+  ThresholdPool pool;
+  if (early) pool.Set(threshold);
+  auto ptr = pool.Alloc(bytes);
+  pool.Sync();
+  if (!early) pool.Set(threshold);
+  const auto before = pool.Get(hipMemPoolAttrReservedMemCurrent);
+  REQUIRE(before >= bytes);
+  REQUIRE(before <= threshold);
+  pool.Free(ptr);
+  pool.Sync();
+  REQUIRE(pool.Get(hipMemPoolAttrUsedMemCurrent) == 0);
+  REQUIRE(pool.Get(hipMemPoolAttrReservedMemCurrent) == before);
+  if (lower_threshold) {
+    pool.Set(0);
+    pool.Sync();
+  } else {
+    HIP_CHECK(hipMemPoolTrimTo(pool.pool(), 0));
+  }
+  REQUIRE(pool.Get(hipMemPoolAttrReservedMemCurrent) < before);
+  REQUIRE(pool.Get(hipMemPoolAttrReleaseThreshold) == (lower_threshold ? 0 : threshold));
 }
 
 /**
