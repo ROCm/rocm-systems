@@ -1322,7 +1322,7 @@ static ncclResult_t ipcRegisterBuffer(ncclComm* comm, const void* userbuff, size
                           ret, fail);
           } else {
             CUmemGenericAllocationHandle handle;
-            if (CUPFN(cuMemRetainAllocationHandle(&handle, baseAddr)) != CUDA_SUCCESS) {
+            if (CUPROBE(cuMemRetainAllocationHandle(&handle, baseAddr)) != CUDA_SUCCESS) {
               // RCCL: HIP keeps this expected failure for a cudaMalloc buffer as the thread's last error
               (void)cudaGetLastError();
               // if cuMem* export fails, retry legacy export

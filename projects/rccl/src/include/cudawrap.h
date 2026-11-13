@@ -28,6 +28,9 @@ extern CUmemAllocationHandleType ncclCuMemHandleType;
 #endif
 
 #define CUPFN(symbol) pfn_##symbol
+#if !defined(__HIP_PLATFORM_AMD__)
+#define CUPROBE(call) CUPFN(call)
+#endif
 
 // Emit an actionable hint for a subset of well-known CUDA driver errors.
 static inline void printCudaDriverErrorHint(CUresult err) {
