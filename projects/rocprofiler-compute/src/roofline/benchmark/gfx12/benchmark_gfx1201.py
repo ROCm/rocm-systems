@@ -233,7 +233,7 @@ class Bench_gfx1201(benchmark_gfx12_base.Bench_gfx12):
         The returned peak is the measured bandwidth. The printed line is the
         full Navi 48 pin-rate reference, not the peak of every board.
         """
-        peak = self.hbm_bw_benchmark(device, kernel_name, label)
+        peak = self.device_memory_bw_benchmark(device, kernel_name, label)
         ceiling = dram_pin_bandwidth_gbps(bus_bits, gbps_per_pin)
         print(
             "Full Navi 48 pin-rate reference (not every board): "
@@ -491,11 +491,10 @@ class Bench_gfx1201(benchmark_gfx12_base.Bench_gfx12):
 
         # DRAM bandwidth. Same streaming body as the gfx12 base (a dataset far
         # larger than the 64 MB Infinity Cache), with the entry point renamed.
-        # The source stays on hbm_bw_src because hbm_bw_benchmark compiles that
-        # attribute. The roofline test key is VRAM (CSV column VRAMBw). Keep
+        # The roofline test key is VRAM (CSV column VRAMBw). Keep
         # this kernel extern "C": the launcher looks the entry point up by the
         # unmangled name "DRAM_bw".
-        self.hbm_bw_src = """
+        self.device_memory_bw_src = """
         extern "C" __global__ void DRAM_bw(__uint128_t *src, long numSteps)
         {
             unsigned long offset = (unsigned long)blockIdx.x * blockDim.x

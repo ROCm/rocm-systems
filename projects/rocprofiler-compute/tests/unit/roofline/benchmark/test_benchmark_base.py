@@ -102,7 +102,7 @@ FLOPS_TEST_KEYS = {
 
 # Benchmarks whose launcher hard-codes the kernel name it resolves.
 LITERAL_KERNEL_NAMES = [
-    ("HBM", "hbm_bw_src", "HBM_bw"),
+    ("HBM", "device_memory_bw_src", "HBM_bw"),
     ("LDS", "lds_benchmark_src", "LDS_bw"),
 ]
 
@@ -260,7 +260,7 @@ def test_gfx1201_measures_vram_in_its_own_column():
     assert list(bench.tests)[0] == "VRAM"
     assert bench.csv_cols_map["VRAM"] == "VRAMBw"
     assert "HBM" not in bench.csv_cols_map
-    assert_source_defines(bench.hbm_bw_src, "DRAM_bw", "gfx1201 DRAM")
+    assert_source_defines(bench.device_memory_bw_src, "DRAM_bw", "gfx1201 DRAM")
 
 
 def test_gfx1201_cache_roofs_stay_inside_the_cache_that_serves_them():
@@ -367,7 +367,9 @@ def test_gfx1201_vram_test_runs_the_device_memory_benchmark_under_the_vram_name(
         calls.append((device, kernel_name, label))
         return 480.0
 
-    monkeypatch.setattr(bench, "hbm_bw_benchmark", fake_device_memory_benchmark)
+    monkeypatch.setattr(
+        bench, "device_memory_bw_benchmark", fake_device_memory_benchmark
+    )
 
     assert bench.tests["VRAM"](0) == 480.0
     assert calls == [(0, "DRAM_bw", "VRAM")]
@@ -377,9 +379,9 @@ def test_gfx1201_vram_test_runs_the_device_memory_benchmark_under_the_vram_name(
 def test_device_memory_benchmark_defaults_to_the_hbm_kernel_and_label(
     monkeypatch, capsys
 ):
-    """hbm_bw_benchmark gained a kernel name and label for gfx1201. A call without
-    them keeps every other architecture on the HBM_bw kernel and HBM label, and
-    a caller can ask for another kernel and label."""
+    """device_memory_bw_benchmark gained a kernel name and label for gfx1201. A
+    call without them keeps every other architecture on the HBM_bw kernel and HBM
+    label, and a caller can ask for another kernel and label."""
     kernels = []
     grids = []
 
@@ -405,13 +407,13 @@ def test_device_memory_benchmark_defaults_to_the_hbm_kernel_and_label(
     )
     monkeypatch.setattr(bench, "run_get_samples", lambda *args: [100.0, 250.0])
 
-    assert benchmark_base.Bench_base.hbm_bw_benchmark(bench, 0) == 250.0
+    assert benchmark_base.Bench_base.device_memory_bw_benchmark(bench, 0) == 250.0
     assert kernels == ["HBM_bw"]
     # 128 workgroups per multiprocessor, as HIP reports them: 28 x 128.
     assert grids[0] == [3584, 1, 1]
     assert "HBM BW, GPU ID: 0" in capsys.readouterr().out
 
-    benchmark_base.Bench_base.hbm_bw_benchmark(bench, 0, "DRAM_bw", "VRAM")
+    benchmark_base.Bench_base.device_memory_bw_benchmark(bench, 0, "DRAM_bw", "VRAM")
     assert kernels == ["HBM_bw", "DRAM_bw"]
     assert "VRAM BW, GPU ID: 0" in capsys.readouterr().out
 

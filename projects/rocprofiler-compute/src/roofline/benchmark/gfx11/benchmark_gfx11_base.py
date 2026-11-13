@@ -26,7 +26,7 @@ class Bench_gfx11(benchmark_base.Bench_base):
         self.matrix_ops = {}
 
         self.tests = {
-            "HBM": super().hbm_bw_benchmark,
+            "HBM": super().device_memory_bw_benchmark,
             "MALL": super().mall_bw_bench,
             "L2": super().l2_bw_bench,
             "L1": super().l1_bw_bench,
@@ -66,8 +66,8 @@ class Bench_gfx11(benchmark_base.Bench_base):
         # ----------------------------------------
         # All other cache and FLOPs definitions are completed in the Bench_base
         # class set_kernel_source()
-        # HBM Bandwidth benchmark
-        self.hbm_bw_src = """"""
+        # gfx115x has no device-memory roof.
+        self.device_memory_bw_src = """"""
 
         # BF16 uses a separate dot-product kernel for VALU flops measurement because:
         # -> __hip_bfloat16 is not a valid ext_vector_type element.
