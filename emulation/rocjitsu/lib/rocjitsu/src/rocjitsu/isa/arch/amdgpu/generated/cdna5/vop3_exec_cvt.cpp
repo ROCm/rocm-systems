@@ -2265,6 +2265,18 @@ void VCvtScalePk8Bf16Fp8Vop3::execute_impl(amdgpu::Wavefront &wf) {
 
 void VCvtScalePk8F32Fp8Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
+  if (const auto scale = src1.const_value(); scale &&
+                                             uint8_t(*scale >> ((inst_.opsel & 3u) * 8u)) == 127u &&
+                                             exec && !wf.cu().observes_register_access()) {
+    uint32_t dst_base =
+        wf.vgpr_alloc().base +
+        *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+    uint32_t src_base =
+        wf.vgpr_alloc().base +
+        *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+    if (amdgpu::try_unpack_unit_scale_pk8(wf, src_base, dst_base, util::detail::fp8_e4m3_ocp_lut()))
+      return;
+  }
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -2364,6 +2376,18 @@ void VCvtScalePk8Bf16Bf8Vop3::execute_impl(amdgpu::Wavefront &wf) {
 
 void VCvtScalePk8F32Bf8Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
+  if (const auto scale = src1.const_value(); scale &&
+                                             uint8_t(*scale >> ((inst_.opsel & 3u) * 8u)) == 127u &&
+                                             exec && !wf.cu().observes_register_access()) {
+    uint32_t dst_base =
+        wf.vgpr_alloc().base +
+        *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+    uint32_t src_base =
+        wf.vgpr_alloc().base +
+        *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+    if (amdgpu::try_unpack_unit_scale_pk8(wf, src_base, dst_base, util::detail::bf8_e5m2_ocp_lut()))
+      return;
+  }
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -2879,6 +2903,17 @@ void VCvtScalef32SrPk8Bf8Bf16Vop3::execute_impl(amdgpu::Wavefront &wf) {
 
 void VCvtScalef32Pk8Fp8F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
+  if (const auto scale = src1.const_value();
+      scale == 0x3f800000u && exec && !wf.cu().observes_register_access()) {
+    uint32_t dst_base =
+        wf.vgpr_alloc().base +
+        *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+    uint32_t src_base =
+        wf.vgpr_alloc().base +
+        *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+    if (amdgpu::try_pack_unit_scale_pk8(wf, src_base, dst_base, util::f32_to_fp8_e4m3_rne_mode))
+      return;
+  }
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -2964,6 +2999,17 @@ void VCvtScalef32Pk8Fp8F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
 
 void VCvtScalef32Pk8Bf8F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
+  if (const auto scale = src1.const_value();
+      scale == 0x3f800000u && exec && !wf.cu().observes_register_access()) {
+    uint32_t dst_base =
+        wf.vgpr_alloc().base +
+        *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+    uint32_t src_base =
+        wf.vgpr_alloc().base +
+        *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+    if (amdgpu::try_pack_unit_scale_pk8(wf, src_base, dst_base, util::f32_to_bf8_e5m2_rne_mode))
+      return;
+  }
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
