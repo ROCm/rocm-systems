@@ -182,15 +182,9 @@ void TuningFree(void* pointer) {
 #define ncclSymkLLKernelMask TuningSymkLLKernelMask
 #define ncclSymkKernelIdToString TuningSymkKernelIdToString
 #define ncclFuncStr TuningFuncStr
-#define ncclTuningInit TuningMicroInit
-#define ncclTuningFinalize TuningMicroFinalize
-#define ncclTuningCompute TuningMicroCompute
 
 #include TUNING_CC_PATH
 
-#undef ncclTuningCompute
-#undef ncclTuningFinalize
-#undef ncclTuningInit
 #undef ncclFuncStr
 #undef ncclSymkKernelIdToString
 #undef ncclSymkLLKernelMask
@@ -365,7 +359,7 @@ TEST_F(TuningMicrotest, InitWithoutPluginRunsCostModelThenThresholdSetup) {
   });
 
   ncclResult_t result = ncclInternalError;
-  const std::string log = RcclUnitTesting::CaptureLog([&] { result = TuningMicroInit(comm_.get()); });
+  const std::string log = RcclUnitTesting::CaptureLog([&] { result = ncclTuningInit(comm_.get()); });
   EXPECT_EQ(ncclSuccess, result);
   EXPECT_EQ((std::vector<std::string>{"load", "cost", "thresholds"}), order);
   EXPECT_EQ(1, load.calls);
@@ -414,7 +408,7 @@ TEST_F(TuningMicrotest, InitPassesPluginInputsBeforeCostModelAndPrintsRankZeroTa
   });
 
   ncclResult_t result = ncclInternalError;
-  const std::string log = RcclUnitTesting::CaptureLog([&] { result = TuningMicroInit(comm_.get()); });
+  const std::string log = RcclUnitTesting::CaptureLog([&] { result = ncclTuningInit(comm_.get()); });
   EXPECT_EQ(ncclSuccess, result);
   EXPECT_EQ(&contextSentinel, comm_->tunerContext);
   EXPECT_EQ((std::vector<std::string>{"load", "plugin-init", "cost", "thresholds"}), order);
@@ -428,7 +422,7 @@ TEST_F(TuningMicrotest, InitStopsAtTheFailingStage) {
   {
     ScopedHook load(g_tuningTunerPluginLoad, [](ncclComm*) { return ncclSystemError; });
     ScopedHook cost(g_tuningCostModelInit, [](ncclComm*) { return ncclSuccess; });
-    EXPECT_EQ(ncclSystemError, TuningMicroInit(comm_.get()));
+    EXPECT_EQ(ncclSystemError, ncclTuningInit(comm_.get()));
     EXPECT_EQ(1, load.calls);
     EXPECT_EQ(0, cost.calls);
   }
@@ -441,7 +435,7 @@ TEST_F(TuningMicrotest, InitStopsAtTheFailingStage) {
                           [](void**, uint64_t, size_t, size_t, ncclDebugLogger_t, ncclNvlDomainInfo_v6_t*,
                              ncclTunerConstants_v6_t*) { return ncclInvalidUsage; });
     ScopedHook cost(g_tuningCostModelInit, [](ncclComm*) { return ncclSuccess; });
-    EXPECT_EQ(ncclInvalidUsage, TuningMicroInit(comm_.get()));
+    EXPECT_EQ(ncclInvalidUsage, ncclTuningInit(comm_.get()));
     EXPECT_EQ(1, pluginInit.calls);
     EXPECT_EQ(0, cost.calls);
     comm_->tuner = nullptr;
@@ -449,7 +443,7 @@ TEST_F(TuningMicrotest, InitStopsAtTheFailingStage) {
   {
     ScopedHook cost(g_tuningCostModelInit, [](ncclComm*) { return ncclInternalError; });
     ScopedHook thresholds(g_tuningSetThreadThresholds, [](ncclComm*) { return ncclSuccess; });
-    EXPECT_EQ(ncclInternalError, TuningMicroInit(comm_.get()));
+    EXPECT_EQ(ncclInternalError, ncclTuningInit(comm_.get()));
     EXPECT_EQ(1, cost.calls);
     EXPECT_EQ(0, thresholds.calls);
   }
@@ -465,7 +459,7 @@ TEST_F(TuningMicrotest, FinalizeOrdersCostPluginAndUnloadAndStopsOnErrors) {
       order.push_back("cost");
       return ncclSuccess;
     });
-    EXPECT_EQ(ncclSuccess, TuningMicroFinalize(comm_.get()));
+    EXPECT_EQ(ncclSuccess, ncclTuningFinalize(comm_.get()));
     EXPECT_EQ((std::vector<std::string>{"cost"}), order);
   }
 
@@ -486,25 +480,25 @@ TEST_F(TuningMicrotest, FinalizeOrdersCostPluginAndUnloadAndStopsOnErrors) {
       order.push_back("unload");
       return ncclSuccess;
     });
-    EXPECT_EQ(ncclSuccess, TuningMicroFinalize(comm_.get()));
+    EXPECT_EQ(ncclSuccess, ncclTuningFinalize(comm_.get()));
     EXPECT_EQ((std::vector<std::string>{"cost", "plugin-finalize", "unload"}), order);
   }
 
   {
     ScopedHook cost(g_tuningCostModelFinalize, [](ncclComm*) { return ncclSystemError; });
     ScopedHook pluginFinalize(g_tuningPluginFinalize, [](void*) { return ncclSuccess; });
-    EXPECT_EQ(ncclSystemError, TuningMicroFinalize(comm_.get()));
+    EXPECT_EQ(ncclSystemError, ncclTuningFinalize(comm_.get()));
     EXPECT_EQ(0, pluginFinalize.calls);
   }
   {
     ScopedHook pluginFinalize(g_tuningPluginFinalize, [](void*) { return ncclInvalidUsage; });
     ScopedHook unload(g_tuningTunerPluginUnload, [](ncclComm*) { return ncclSuccess; });
-    EXPECT_EQ(ncclInvalidUsage, TuningMicroFinalize(comm_.get()));
+    EXPECT_EQ(ncclInvalidUsage, ncclTuningFinalize(comm_.get()));
     EXPECT_EQ(0, unload.calls);
   }
   {
     ScopedHook unload(g_tuningTunerPluginUnload, [](ncclComm*) { return ncclInternalError; });
-    EXPECT_EQ(ncclInternalError, TuningMicroFinalize(comm_.get()));
+    EXPECT_EQ(ncclInternalError, ncclTuningFinalize(comm_.get()));
     EXPECT_EQ(1, unload.calls);
   }
 }
@@ -627,7 +621,7 @@ TEST_F(TuningMicrotest, ComputeSingleRankUsesRingSimpleDefaultsBeforeChannelSele
     return ncclSuccess;
   });
 
-  ASSERT_EQ(ncclSuccess, TuningMicroCompute(&input, &result));
+  ASSERT_EQ(ncclSuccess, ncclTuningCompute(&input, &result));
   EXPECT_EQ(1, channels.calls);
   EXPECT_EQ(NCCL_ALGO_RING, result.algo);
   EXPECT_EQ(NCCL_PROTO_SIMPLE, result.proto);
@@ -644,7 +638,7 @@ TEST_F(TuningMicrotest, ChannelSelectionFailureLeavesCallerResultUntouched) {
   ScopedHook channels(g_tuningGetChannels,
                       [](ncclTuningInput_t*, ncclTuningResult_t*) { return ncclRemoteError; });
 
-  EXPECT_EQ(ncclRemoteError, TuningMicroCompute(&input, &result));
+  EXPECT_EQ(ncclRemoteError, ncclTuningCompute(&input, &result));
   EXPECT_EQ(1, channels.calls);
   EXPECT_EQ(123, result.id);
   EXPECT_EQ(NCCL_ALGO_PAT, result.algo);
@@ -660,7 +654,7 @@ TEST_F(TuningMicrotest, ComputeAllTuningsFailureLeavesCallerResultUntouched) {
                    [](int, ncclTuningInput_t*, ncclTuningResult_t*) { return ncclRemoteError; });
   ScopedHook channels(g_tuningGetChannels, ChannelsReturning());
 
-  EXPECT_EQ(ncclRemoteError, TuningMicroCompute(&input, &result));
+  EXPECT_EQ(ncclRemoteError, ncclTuningCompute(&input, &result));
   EXPECT_EQ(1, model.calls);
   EXPECT_EQ(0, channels.calls);
   EXPECT_EQ(123, result.id);
@@ -689,7 +683,7 @@ TEST_F(TuningMicrotest, ComputeSelectsLowestGeneralCandidateThenGetsChannels) {
     return ncclSuccess;
   });
 
-  ASSERT_EQ(ncclSuccess, TuningMicroCompute(&input, &result));
+  ASSERT_EQ(ncclSuccess, ncclTuningCompute(&input, &result));
   EXPECT_EQ(ringSimple, result.id);
   EXPECT_FLOAT_EQ(3.0f, result.timeUs);
   EXPECT_EQ(6, result.nChannels);
@@ -741,7 +735,7 @@ TEST_F(TuningMicrotest, PluginReceivesGeneralTableAndOverridesTimeAndMaxChannels
     return ncclSuccess;
   });
 
-  ASSERT_EQ(ncclSuccess, TuningMicroCompute(&input, &result));
+  ASSERT_EQ(ncclSuccess, ncclTuningCompute(&input, &result));
   EXPECT_EQ(1, plugin.calls);
   EXPECT_EQ(ringSimple, result.id);
   EXPECT_FLOAT_EQ(5.0f, result.timeUs);
@@ -762,7 +756,7 @@ TEST_F(TuningMicrotest, PluginFailureStopsBeforeChannelSelection) {
                     });
   ScopedHook channels(g_tuningGetChannels, ChannelsReturning());
 
-  EXPECT_EQ(ncclRemoteError, TuningMicroCompute(&input, &result));
+  EXPECT_EQ(ncclRemoteError, ncclTuningCompute(&input, &result));
   EXPECT_EQ(1, plugin.calls);
   EXPECT_EQ(0, channels.calls);
   EXPECT_EQ(1, g_tuningFreeCalls);
@@ -786,7 +780,7 @@ TEST_F(TuningMicrotest, PluginZeroChannelCapIsForwardedToChannelSelection) {
     return ncclSuccess;
   });
 
-  ASSERT_EQ(ncclSuccess, TuningMicroCompute(&input, &result));
+  ASSERT_EQ(ncclSuccess, ncclTuningCompute(&input, &result));
   EXPECT_EQ(treeLl, result.id);
   EXPECT_EQ(1, channels.calls);
   EXPECT_EQ(8, result.nChannels);
@@ -824,7 +818,7 @@ TEST_F(TuningMicrotest, PartialGeneralCoordinatesAreNeverIndexedOrChanneled) {
     SetMicroEnvAbsent("NCCL_SYM_KERNEL");
 
     ncclResult_t status = ncclSuccess;
-    const std::string log = RcclUnitTesting::CaptureLog([&] { status = TuningMicroCompute(&input, &result); });
+    const std::string log = RcclUnitTesting::CaptureLog([&] { status = ncclTuningCompute(&input, &result); });
     EXPECT_EQ(ncclInternalError, status);
     EXPECT_TRUE(RcclUnitTesting::LogHas(log, "No algorithm/protocol nor symKernelId available")) << log;
     EXPECT_EQ(1, plugin.calls);
@@ -843,7 +837,7 @@ TEST_F(TuningMicrotest, CopyEngineCandidateReturnsWithoutGeneralChannelSelection
   ScopedHook model(g_tuningCostModelSimModel, ModelSelecting(ce));
   ScopedHook channels(g_tuningGetChannels, ChannelsReturning());
 
-  ASSERT_EQ(ncclSuccess, TuningMicroCompute(&input, &result));
+  ASSERT_EQ(ncclSuccess, ncclTuningCompute(&input, &result));
   EXPECT_EQ(ce, result.id);
   EXPECT_EQ(NCCL_ALGO_UNDEF, result.algo);
   EXPECT_EQ(NCCL_PROTO_UNDEF, result.proto);
@@ -870,7 +864,7 @@ TEST_F(TuningMicrotest, EfficiencyPolicyOverridesWithEligibleNvlsResources) {
     return ncclSuccess;
   });
 
-  ASSERT_EQ(ncclSuccess, TuningMicroCompute(&input, &result));
+  ASSERT_EQ(ncclSuccess, ncclTuningCompute(&input, &result));
   EXPECT_EQ(1, query.calls);
   EXPECT_EQ(NCCL_ALGO_NVLS, result.algo);
   EXPECT_EQ(NCCL_PROTO_SIMPLE, result.proto);
@@ -881,7 +875,7 @@ TEST_F(TuningMicrotest, EfficiencyPolicyOverridesWithEligibleNvlsResources) {
   expectedFunc = ncclFuncReduceScatter;
   input.func = expectedFunc;
   result = EmptyResult();
-  ASSERT_EQ(ncclSuccess, TuningMicroCompute(&input, &result));
+  ASSERT_EQ(ncclSuccess, ncclTuningCompute(&input, &result));
   EXPECT_EQ(2, query.calls);
   EXPECT_EQ(NCCL_ALGO_NVLS, result.algo);
 
@@ -890,7 +884,7 @@ TEST_F(TuningMicrotest, EfficiencyPolicyOverridesWithEligibleNvlsResources) {
   comm_->nNodes = 2;
   input.collNetSupport = 1;
   result = EmptyResult();
-  ASSERT_EQ(ncclSuccess, TuningMicroCompute(&input, &result));
+  ASSERT_EQ(ncclSuccess, ncclTuningCompute(&input, &result));
   EXPECT_EQ(3, query.calls);
   EXPECT_EQ(NCCL_ALGO_NVLS, result.algo);
 
@@ -899,7 +893,7 @@ TEST_F(TuningMicrotest, EfficiencyPolicyOverridesWithEligibleNvlsResources) {
     return ncclSuccess;
   });
   result = EmptyResult();
-  ASSERT_EQ(ncclSuccess, TuningMicroCompute(&input, &result));
+  ASSERT_EQ(ncclSuccess, ncclTuningCompute(&input, &result));
   EXPECT_EQ(NCCL_ALGO_NVLS, result.algo);
   EXPECT_EQ(8, result.maxChannels);
   EXPECT_EQ(10, result.nWarps);
@@ -909,7 +903,7 @@ TEST_F(TuningMicrotest, EfficiencyPolicyOverridesWithEligibleNvlsResources) {
     return ncclSuccess;
   });
   result = EmptyResult();
-  ASSERT_EQ(ncclSuccess, TuningMicroCompute(&input, &result));
+  ASSERT_EQ(ncclSuccess, ncclTuningCompute(&input, &result));
   EXPECT_EQ(NCCL_ALGO_TREE, result.algo);
   EXPECT_EQ(8, result.nChannels);
 }
@@ -939,7 +933,7 @@ TEST_F(TuningMicrotest, EfficiencyPolicyGuardsPreventIneligibleNvlsOverride) {
   auto expectBlocked = [&] {
     const int callsBefore = query.calls;
     ncclTuningResult_t result = EmptyResult();
-    ASSERT_EQ(ncclSuccess, TuningMicroCompute(&input, &result));
+    ASSERT_EQ(ncclSuccess, ncclTuningCompute(&input, &result));
     EXPECT_EQ(callsBefore, query.calls);
     EXPECT_EQ(NCCL_ALGO_TREE, result.algo);
   };
@@ -995,7 +989,7 @@ TEST_F(TuningMicrotest, EfficiencyPolicyPropagatesNvlsQueryFailure) {
   ScopedHook query(g_tuningNvlsRegResourcesQuery,
                    [](ncclComm*, ncclFunc_t, int*) { return ncclRemoteError; });
 
-  EXPECT_EQ(ncclRemoteError, TuningMicroCompute(&input, &result));
+  EXPECT_EQ(ncclRemoteError, ncclTuningCompute(&input, &result));
   EXPECT_EQ(1, query.calls);
   EXPECT_EQ(NCCL_ALGO_UNDEF, result.algo);
 }
@@ -1026,7 +1020,7 @@ TEST_F(TuningMicrotest, SymmetricFallbackUsesGeneralTuningWhenExecutionRequiresI
       g_loadParam, TuningParams({{"SINGLE_PROC_MEM_REG_ENABLE", 0}, {"SYM_NOWIN_ENABLE", 1}}));
   ScopedHook channels(g_tuningGetChannels, ChannelsReturning(5));
 
-  ASSERT_EQ(ncclSuccess, TuningMicroCompute(&input, &result));
+  ASSERT_EQ(ncclSuccess, ncclTuningCompute(&input, &result));
   EXPECT_TRUE(sawGeneralMask);
   EXPECT_EQ(treeLl, result.id);
   EXPECT_EQ(NCCL_ALGO_TREE, result.algo);
@@ -1051,7 +1045,7 @@ TEST_F(TuningMicrotest, SymmetricRegisteredAndNonLlCasesDoNotFallback) {
   input.winRegType = ncclSymSendRegRecvReg;
   {
     ScopedHook llMask(g_tuningSymkLLKernelMask, [] { return 1 << 1; });
-    ASSERT_EQ(ncclSuccess, TuningMicroCompute(&input, &result));
+    ASSERT_EQ(ncclSuccess, ncclTuningCompute(&input, &result));
     EXPECT_EQ(1, result.symKernelId);
   }
 
@@ -1059,7 +1053,7 @@ TEST_F(TuningMicrotest, SymmetricRegisteredAndNonLlCasesDoNotFallback) {
   result = EmptyResult();
   {
     ScopedHook llMask(g_tuningSymkLLKernelMask, [] { return 0; });
-    ASSERT_EQ(ncclSuccess, TuningMicroCompute(&input, &result));
+    ASSERT_EQ(ncclSuccess, ncclTuningCompute(&input, &result));
     EXPECT_EQ(1, result.symKernelId);
   }
 
@@ -1093,7 +1087,7 @@ TEST_F(TuningMicrotest, SymmetricHalfRegisteredBuffersDoNotForceFallback) {
     ScopedHook params(
         g_loadParam, TuningParams({{"SINGLE_PROC_MEM_REG_ENABLE", 0}, {"SYM_NOWIN_ENABLE", 1}}));
     ncclTuningResult_t result = EmptyResult();
-    ASSERT_EQ(ncclSuccess, TuningMicroCompute(&input, &result));
+    ASSERT_EQ(ncclSuccess, ncclTuningCompute(&input, &result));
     EXPECT_EQ(1, result.symKernelId);
     EXPECT_EQ(NCCL_ALGO_UNDEF, result.algo);
     EXPECT_EQ(1, generalPasses);
@@ -1105,7 +1099,7 @@ TEST_F(TuningMicrotest, SymmetricHalfRegisteredBuffersDoNotForceFallback) {
   {
     ScopedHook params(g_loadParam, TuningParams({{"SYM_NOWIN_ENABLE", 0}}));
     ncclTuningResult_t result = EmptyResult();
-    ASSERT_EQ(ncclSuccess, TuningMicroCompute(&input, &result));
+    ASSERT_EQ(ncclSuccess, ncclTuningCompute(&input, &result));
     EXPECT_EQ(1, result.symKernelId);
     EXPECT_EQ(NCCL_ALGO_UNDEF, result.algo);
     EXPECT_EQ(1, generalPasses);
@@ -1139,7 +1133,7 @@ TEST_F(TuningMicrotest, SymmetricNoWindowPreferenceUsesGeneralProtocolAsTiebreak
   {
     ScopedHook params(g_loadParam, TuningParams({{"SYM_NOWIN_ENABLE", 1}}));
 
-    ASSERT_EQ(ncclSuccess, TuningMicroCompute(&input, &result));
+    ASSERT_EQ(ncclSuccess, ncclTuningCompute(&input, &result));
     EXPECT_EQ(1, result.symKernelId);
     EXPECT_EQ(NCCL_ALGO_UNDEF, result.algo);
     EXPECT_EQ(1, generalPasses);
@@ -1147,7 +1141,7 @@ TEST_F(TuningMicrotest, SymmetricNoWindowPreferenceUsesGeneralProtocolAsTiebreak
     generalProto = NCCL_PROTO_SIMPLE;
     generalPasses = 0;
     result = EmptyResult();
-    ASSERT_EQ(ncclSuccess, TuningMicroCompute(&input, &result));
+    ASSERT_EQ(ncclSuccess, ncclTuningCompute(&input, &result));
     EXPECT_EQ(treeSimple, result.id);
     EXPECT_EQ(NCCL_ALGO_TREE, result.algo);
     EXPECT_EQ(NCCL_PROTO_SIMPLE, result.proto);
@@ -1159,7 +1153,7 @@ TEST_F(TuningMicrotest, SymmetricNoWindowPreferenceUsesGeneralProtocolAsTiebreak
   result = EmptyResult();
   {
     ScopedHook params(g_loadParam, TuningParams({{"SYM_NOWIN_ENABLE", 0}}));
-    ASSERT_EQ(ncclSuccess, TuningMicroCompute(&input, &result));
+    ASSERT_EQ(ncclSuccess, ncclTuningCompute(&input, &result));
     EXPECT_EQ(treeLl, result.id);
     EXPECT_EQ(NCCL_ALGO_TREE, result.algo);
     EXPECT_EQ(NCCL_PROTO_LL, result.proto);
@@ -1190,7 +1184,7 @@ TEST_F(TuningMicrotest, SingleProcessRegistrationAvoidsImmediateSymmetricFallbac
   ScopedHook params(
       g_loadParam, TuningParams({{"SINGLE_PROC_MEM_REG_ENABLE", 1}, {"SYM_NOWIN_ENABLE", 1}}));
 
-  ASSERT_EQ(ncclSuccess, TuningMicroCompute(&input, &result));
+  ASSERT_EQ(ncclSuccess, ncclTuningCompute(&input, &result));
   EXPECT_EQ(1, result.symKernelId);
   EXPECT_EQ(NCCL_ALGO_UNDEF, result.algo);
 }
@@ -1213,7 +1207,7 @@ TEST_F(TuningMicrotest, MissingSymmetricCandidateFallsBackToGeneralMask) {
   });
   ScopedHook channels(g_tuningGetChannels, ChannelsReturning(6));
 
-  ASSERT_EQ(ncclSuccess, TuningMicroCompute(&input, &result));
+  ASSERT_EQ(ncclSuccess, ncclTuningCompute(&input, &result));
   EXPECT_EQ(ringSimple, result.id);
   EXPECT_EQ(NCCL_ALGO_RING, result.algo);
   EXPECT_EQ(NCCL_PROTO_SIMPLE, result.proto);
@@ -1230,7 +1224,7 @@ TEST_F(TuningMicrotest, NoValidTuningDistinguishesConfigurationErrors) {
 
   ncclResult_t status = ncclSuccess;
   const std::string noConfigLog =
-      RcclUnitTesting::CaptureLog([&] { status = TuningMicroCompute(&input, &result); });
+      RcclUnitTesting::CaptureLog([&] { status = ncclTuningCompute(&input, &result); });
   EXPECT_EQ(ncclInternalError, status);
   EXPECT_FALSE(RcclUnitTesting::LogHas(noConfigLog, "was set to")) << noConfigLog;
   EXPECT_EQ(NCCL_ALGO_UNDEF, result.algo);
@@ -1247,7 +1241,7 @@ TEST_F(TuningMicrotest, NoValidTuningDistinguishesConfigurationErrors) {
     SetMicroEnv(name, value);
     result = EmptyResult();
     status = ncclSuccess;
-    const std::string log = RcclUnitTesting::CaptureLog([&] { status = TuningMicroCompute(&input, &result); });
+    const std::string log = RcclUnitTesting::CaptureLog([&] { status = ncclTuningCompute(&input, &result); });
     EXPECT_EQ(ncclInvalidUsage, status) << name;
     EXPECT_TRUE(RcclUnitTesting::LogHas(log, name)) << log;
     EXPECT_TRUE(RcclUnitTesting::LogHas(log, value)) << log;

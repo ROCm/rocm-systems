@@ -9,13 +9,18 @@
 #ifndef RCCL_TEST_HOST_GIN_FAKES_H_
 #define RCCL_TEST_HOST_GIN_FAKES_H_
 
+#include <functional>
+
 #include "nccl.h"
+#include "nccl_device/core.h"  // ncclGinType_t
 
 struct ncclComm;
 struct ncclGinState;
 
 extern ncclResult_t g_ncclGinInitResult;
 extern bool g_ginHasError;
+// What ncclGetRailedGinType reports; NCCL_GIN_TYPE_NONE by default.
+extern std::function<ncclGinType_t(ncclComm*)> g_railedGinType;
 
 void ResetGinFakes();
 

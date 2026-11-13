@@ -117,26 +117,6 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     `#ifdef ENABLE_WARP_SPEED` cluster (~10 functions) is compiled out of
     this binary entirely, so no seam can reach it without changing the
     binary's own build configuration.
-  - `tuning/tuning_general.cc` (`TUNING_GENERAL_CC_PATH`, from
-    `tuning-general-test.cc`); suite `TuningGeneralMicrotest.*`. Covers the
-    shared step-count, hardware-index, time-estimation, thread-threshold,
-    channel/warp-selection, and tuning-ID helpers without a GPU. This TU
-    defines `ncclParamNthreads` and `ncclParamLl128Nthreads`; do not duplicate
-    them in `fakes/tuning_fakes.cc`.
-  - `tuning/tuning.cc` (`TUNING_CC_PATH`, from `tuning-test.cc`); suite
-    `TuningMicrotest.*`. Covers tuning lifecycle, candidate selection, tuner
-    overrides, NVLS efficiency policy, and symmetric-kernel fallback. Its
-    `ncclParamSingleProcMemRegEnable` resolves from `group.cc` via
-    `group-test.cc`; do not add `fakes/group_fakes.cc` to this binary.
-  - `tuning/cost_model.cc` (`COST_MODEL_CC_PATH`, from `cost-model-test.cc`);
-    suite `CostModelMicrotest.*`. Covers the `modelMap[]` registry, its
-    correspondence with `config/algorithm_registry.cc` (also `#include`d, via
-    `ALGORITHM_REGISTRY_CC_PATH`), the per-id dispatch, and the init-time
-    `enabled[][]` seeding and env narrowing. This TU defines `ncclFuncStr` (from
-    `src/init.cc`) and `ncclSymkKernelIdToString` (from `src/sym_kernels.cc`, not
-    from the generated `sym_kernels_host.cc`); do not duplicate either in
-    `fakes/`, and do not add `fakes/sym_kernels_index_fakes.cc` to this binary --
-    it collides with the generated file.
   - `include/param/utils.h` and `include/param/parser_common.h`, from
     `param-utils-test.cc`; suite `ParamUtilsMicrotest.*`. Header-only, no
     `_CC_PATH` macro needed. Covers `ncclParamTypeIdOf<T>`'s per-type mapping
@@ -328,15 +308,39 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   `gin/proxy_gpucontext/` writers (`GIN_HOST_PROXY_CC_PATH`, `GPUCONTEXT{,_V1,_V2}_CC_PATH`,
   from `gin/gin-host-proxy-test.cc`); suites `GinHostProxy*`, against the scripted RMA plugin in
   `fakes/rma_vtable_fake.h`. See `test_categories_micro_gin.yaml`.
-- **`rccl-UnitTestsMicroWarpSpeed`** — `allgatherv_sched.cc` +
+- **`rccl-UnitTestsMicroTuning<Unit>`** — `src/tuning/`, one binary per test file under
+  `test/host/tuning/`. See `test_categories_micro_tuning.yaml`.
+  - `tuning.cc` (`TUNING_CC_PATH`, from `tuning-test.cc`; `rccl-UnitTestsMicroTuning`);
+    suite `TuningMicrotest.*`. Covers tuning lifecycle, candidate selection, tuner
+    overrides, NVLS efficiency policy, and symmetric-kernel fallback. Its
+    `ncclParamSingleProcMemRegEnable` comes from `fakes/group_fakes.cc`.
+  - `tuning_general.cc` (`TUNING_GENERAL_CC_PATH`, from `tuning-general-test.cc`;
+    `rccl-UnitTestsMicroTuningGeneral`); suite `TuningGeneralMicrotest.*`. Covers the
+    shared step-count, hardware-index, time-estimation, thread-threshold,
+    channel/warp-selection, and tuning-ID helpers without a GPU. This TU
+    defines `ncclParamNthreads` and `ncclParamLl128Nthreads`; do not duplicate
+    them in `fakes/tuning_fakes.cc`. Block sizing goes through the real
+    `rcclOptThreadBlockSize`, so the binary links `rccl_wrap.cc` through
+    `tuning/rccl_wrap_wrapper.cc`, against the fakes `wrap-test.cc` uses.
+  - `cost_model.cc` (`COST_MODEL_CC_PATH`, from `cost-model-test.cc`;
+    `rccl-UnitTestsMicroTuningCostModel`); suite `CostModelMicrotest.*`. Covers the
+    `modelMap[]` registry, its correspondence with `config/algorithm_registry.cc` (also
+    `#include`d, via `ALGORITHM_REGISTRY_CC_PATH`), the per-id dispatch, and the init-time
+    `enabled[][]` seeding and env narrowing. This TU defines `ncclFuncStr` (from
+    `src/init.cc`) and `ncclSymkKernelIdToString` (from `src/sym_kernels.cc`, not from the
+    generated `sym_kernels_host.cc`); do not duplicate either in `fakes/`, and do not add
+    `fakes/sym_kernels_index_fakes.cc` to this binary -- it collides with the generated file.
+  - `sym_model.cc` and `sym_model/*.cc` (`SYM_MODEL*_CC_PATH`, from `sym-model-test.cc`;
+    `rccl-UnitTestsMicroTuningSymModel`, built only with generated sym kernels); suites
+    `SymModel*`. The real `src/sym_kernels.cc` it calls is compiled by
+    `tuning/sym_kernels_wrapper.cc`.
+- **`rccl-UnitTestsMicroScheduler`** — `src/scheduler/allgatherv_sched.cc` +
   `symmetric_sched.cc` (via `ALLGATHERV_SCHED_CC_PATH`/`SYMMETRIC_SCHED_CC_PATH`,
-  both from `scheduler-test.cc`); suite `SchedulerMicrotest.*`. Its own binary,
-  not sharing `rccl-UnitTestsMicro`: some of its test scenarios need
-  `ENABLE_WARP_SPEED`, which must be binary-wide (every TU compiled in has to
-  agree on `struct ncclComm`'s layout), and giving the macro its own small,
-  dedicated binary keeps it from silently reaching the ~8 unrelated TUs that
-  used to share a binary with it. `ncclDevrInitOnce`/`ncclDevrFindWindow` are
-  faked here (`fakes/dev_runtime_fakes.cc`) rather than compiling the real
+  both from `scheduler/scheduler-test.cc`); suite `SchedulerMicrotest.*`. Some of its
+  test scenarios need `ENABLE_WARP_SPEED`, which must be binary-wide (every TU compiled
+  in has to agree on `struct ncclComm`'s layout).
+  `ncclDevrInitOnce`/`ncclDevrFindWindow` are faked here
+  (`fakes/dev_runtime_fakes.cc`) rather than compiling the real
   `dev_runtime.cc` in, unlike `dev-runtime-test.cc`: `ncclDevrFindWindow` can
   only ever return success against a fresh comm, and `ncclDevrInitOnce`'s real
   error path is already covered directly by `dev-runtime-test.cc`'s own suite,
@@ -1453,7 +1457,7 @@ not reconstruct.
 `test/host/CMakeLists.txt` is dual-mode. Alongside the in-RCCL-build target
 above (`./install.sh -t`, wired via `add_subdirectory(host)`), the same file
 can be configured **directly** to build every host binary — `rccl-HostUnitTests`,
-`rccl-UnitTestsMicro`, `rccl-UnitTestsMicroWarpSpeed`,
+`rccl-UnitTestsMicro`, `rccl-UnitTestsMicroScheduler`,
 `rccl-UnitTestsMicroInit[-uncached|-faultinj]`, `rccl-UnitTestsMicroEnqueue[-devlinker|-warpspeed]`,
 `rccl-UnitTestsMicroGinHost`, `rccl-UnitTestsMicroGinHostFinalize`, `rccl-UnitTestsMicroCe`,
 `rccl-UnitTestsMicroDiagnostics`, `rccl-UnitTestsMicroDiagnostics<Unit>` (one per `src/diagnostics/` test file),
@@ -1463,6 +1467,7 @@ can be configured **directly** to build every host binary — `rccl-HostUnitTest
 `rccl-UnitTestsMicroOs<Unit>` (one per `src/os/` test file),
 `rccl-UnitTestsMicroTransport<Unit>` (one per `src/transport/` test file),
 `rccl-UnitTestsMicroEnqueue<Unit>` (one per other `src/enqueue/` test file),
+`rccl-UnitTestsMicroTuning<Unit>` (one per `src/tuning/` test file),
 `rccl-UnitTestsMicroSymKernels`, `rccl-UnitTestsMicroRmaProxy`,
 `rccl-UnitTestsMicroNetIbCastConnect`, `rccl-UnitTestsMicroNetIbCastQpSharing` and
 `rccl-UnitTestsMicroP2pResiliency` — **without configuring/building all of
@@ -1500,7 +1505,7 @@ cmake --build build -j"$(nproc)"
 ./build/rccl-UnitTestsMicroCollectives        # src/collectives.cc tests
 ./build/rccl-UnitTestsMicroDeviceOnerank      # src/device/onerank.cu tests
 ./build/rccl-UnitTestsMicroEnqueueMgmtTaskEnq # src/enqueue/mgmt_task_enq.cc tests
-./build/rccl-UnitTestsMicroWarpSpeed  # src/scheduler/*.cc tests
+./build/rccl-UnitTestsMicroScheduler  # src/scheduler/*.cc tests
 ./build/rccl-UnitTestsMicroMiscCrypt          # misc/crypt.cc tests
 ./build/rccl-UnitTestsMicroMiscStrongstream   # misc/strongstream.cc tests
 ./build/rccl-UnitTestsMicroMiscUtils          # misc/utils.cc tests
@@ -1517,6 +1522,7 @@ cmake --build build -j"$(nproc)"
 ./build/rccl-UnitTestsMicroMiscApiTrace       # misc/api_trace.cc tests
 ./build/rccl-UnitTestsMicroDebug              # debug.cc tests
 ./build/rccl-UnitTestsMicroSymKernels         # sym_kernels.cc tests
+./build/rccl-UnitTestsMicroTuning             # src/tuning/tuning.cc; one binary per src/tuning/ test file
 ./build/rccl-UnitTestsMicroGinHostProxy       # src/gin/gin_host_proxy.cc + proxy_gpucontext/
 ./build/rccl-UnitTestsMicroEnqueueTaskPrep    # src/enqueue/task_prep/task_prep.cc tests
 ./build/rccl-UnitTestsMicroEnqueueTaskPrepTaskClassify   # task_prep/task_classify.cc
