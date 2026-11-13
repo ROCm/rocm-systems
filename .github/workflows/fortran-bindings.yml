@@ -26,7 +26,7 @@ permissions:
 
 env:
   # Bump on purpose: a generator change must not fail unrelated header PRs.
-  GENERATOR_REF: 17e42c044d89fbcdebb4aab9e52f2100a3549369
+  GENERATOR_REF: c73ff72a47f5203a54862d51a388e63dcfd37541
 
 jobs:
   generate:
