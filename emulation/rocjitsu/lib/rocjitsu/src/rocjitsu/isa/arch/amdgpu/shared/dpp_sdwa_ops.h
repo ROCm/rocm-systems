@@ -661,14 +661,16 @@ inline uint32_t apply_source_modifiers(uint32_t value, SourceModifierFormat form
 /// execution.
 inline void stage_source(Operand &source, uint32_t selection, bool sign_extend, bool negate,
                          bool absolute, SourceModifierFormat modifier_format,
-                         std::optional<StagedOperand> &storage, Wavefront &wf) {
+                         std::optional<StagedOperand> &storage, Wavefront &wf,
+                         uint64_t source_lanes = ~uint64_t{0}) {
   storage.reset();
   const bool has_float_modifier =
       modifier_format != SourceModifierFormat::NONE && (absolute || negate);
   if (selection == DWORD && !has_float_modifier)
     return;
 
-  const uint64_t exec = wf.exec();
+  // Conditional selection only consumes its chosen source on each lane.
+  const uint64_t exec = wf.exec() & source_lanes;
   const auto source_view =
       RegisterAccess(wf).read_operand(source, exec, sdwa_src_byte_mask(selection));
   storage.emplace(source, static_cast<int>(wf.wf_size()));

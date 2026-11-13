@@ -10,6 +10,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/rj_arith_float_exec.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/rj_arith_vector_exec.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/transcendental.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
@@ -30,7 +31,11 @@ void VCndmaskB32Vop2::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
-  amdgpu::execute_v_cndmask_b32_vop2(*this, wf);
+  if (!wf.exec())
+    return;
+  amdgpu::arith::execute_conditional<false>(*this, wf, rj_arith_v_cndmask_b32_w32,
+                                            rj_arith_v_cndmask_b32_w64, wf.cu().arithmetic_flags(),
+                                            0, vdst, src0, vsrc1, wf.vcc_mask());
 }
 
 RJ_NOINLINE void VCndmaskB32Vop2::execute_modifier_impl(amdgpu::Wavefront &wf) {
@@ -49,7 +54,11 @@ RJ_NOINLINE void VCndmaskB32Vop2::execute_modifier_impl(amdgpu::Wavefront &wf) {
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
-  amdgpu::execute_v_cndmask_b32_vop2(*this, wf);
+  if (!wf.exec())
+    return;
+  amdgpu::arith::execute_conditional<false>(*this, wf, rj_arith_v_cndmask_b32_w32,
+                                            rj_arith_v_cndmask_b32_w64, wf.cu().arithmetic_flags(),
+                                            0, vdst, src0, vsrc1, wf.vcc_mask());
   dpp_write_mask_scope_.restore();
 }
 

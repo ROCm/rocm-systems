@@ -1185,6 +1185,32 @@ int rj_arith_s_cvt_hi_f32_f16_gfx1250(uint64_t flags, uint64_t instruction_flags
 int rj_arith_s_cvt_pk_rtz_f16_f32_gfx1250(uint64_t flags, uint64_t instruction_flags, uint32_t *d,
                                           uint32_t a, uint32_t b, uint32_t *excp_flag_user);
 
+// gfx1250 scalar-result math uses the same operands/modifiers and denormal contract.
+// Compatibility preserves rocjitsu's inherited model, including FP16 EXP/LOG.
+// Loose and allow-Loose use approximate arithmetic. Strict exact semantics are
+// unsupported: agreement with the inherited model is not gfx1250 hardware validation.
+// FP status is not produced; excp_flag_user is unused on successful calls.
+int rj_arith_v_s_exp_f16_gfx1250(uint64_t flags, uint64_t instruction_flags, uint32_t *d,
+                                 uint32_t a, uint32_t *excp_flag_user);
+int rj_arith_v_s_exp_f32_gfx1250(uint64_t flags, uint64_t instruction_flags, uint32_t *d,
+                                 uint32_t a, uint32_t *excp_flag_user);
+int rj_arith_v_s_log_f16_gfx1250(uint64_t flags, uint64_t instruction_flags, uint32_t *d,
+                                 uint32_t a, uint32_t *excp_flag_user);
+int rj_arith_v_s_log_f32_gfx1250(uint64_t flags, uint64_t instruction_flags, uint32_t *d,
+                                 uint32_t a, uint32_t *excp_flag_user);
+int rj_arith_v_s_rcp_f16_gfx1250(uint64_t flags, uint64_t instruction_flags, uint32_t *d,
+                                 uint32_t a, uint32_t *excp_flag_user);
+int rj_arith_v_s_rcp_f32_gfx1250(uint64_t flags, uint64_t instruction_flags, uint32_t *d,
+                                 uint32_t a, uint32_t *excp_flag_user);
+int rj_arith_v_s_rsq_f16_gfx1250(uint64_t flags, uint64_t instruction_flags, uint32_t *d,
+                                 uint32_t a, uint32_t *excp_flag_user);
+int rj_arith_v_s_rsq_f32_gfx1250(uint64_t flags, uint64_t instruction_flags, uint32_t *d,
+                                 uint32_t a, uint32_t *excp_flag_user);
+int rj_arith_v_s_sqrt_f16_gfx1250(uint64_t flags, uint64_t instruction_flags, uint32_t *d,
+                                  uint32_t a, uint32_t *excp_flag_user);
+int rj_arith_v_s_sqrt_f32_gfx1250(uint64_t flags, uint64_t instruction_flags, uint32_t *d,
+                                  uint32_t a, uint32_t *excp_flag_user);
+
 #ifdef __cplusplus
 } // extern "C"
 #endif
