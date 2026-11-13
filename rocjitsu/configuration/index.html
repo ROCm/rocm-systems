@@ -2780,11 +2780,11 @@ does not retain legacy host-environment isolation; nondefault host controls are
 outside the contract in every semantics mode. <code>RJ_FORCE_SCALAR</code>
 selects rj-arith's baseline CPU path; the test override also applies to existing CUs.
 It does not change semantics.</p>
-<p>Scalar FP arithmetic currently retains a guest-rounding limitation from the legacy
-handlers: Compatibility uses nearest-even for scalar F16/F32 add, subtract,
-multiply, and integer-to-F32 conversion. For example, <code>S_CVT_F32_I32 0x01000001</code>
-produces <code>0x4b800000</code> even with guest rounding toward +infinity; gfx1201 produces
-<code>0x4b800001</code>. The corresponding library entry points reject nonzero rounding flags.</p>
+<p>Scalar F16/F32 add, subtract, multiply, FMAC and the rounding conversions follow the
+MODE rounding field of their destination format (MODE[1:0] for FP32, MODE[3:2] for FP16).
+For example, under guest rounding toward +infinity <code>S_CVT_F32_I32 0x01000001</code> produces
+<code>0x4b800001</code>, as on gfx1201, both in decoded RDNA4 Compatibility, which also records FP
+causes, and through the rj-arith entry points in the configured semantics.</p>
 <h3 id="memory-wait-diagnostics">Memory wait diagnostics<a class="headerlink" href="#memory-wait-diagnostics" title="Permanent link">&para;</a></h3>
 <p>Ordinary memory wait diagnostics are enabled by default; gfx1250 XCNT replay-source
 checks are off. Compute units warn when an instruction reads or overwrites a pending
