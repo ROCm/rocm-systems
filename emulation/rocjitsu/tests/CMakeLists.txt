@@ -2405,7 +2405,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         add_dependencies(vm_embedding_api_test rocjitsu_shared rocjitsu_memory)
         gtest_discover_tests(
             vm_embedding_api_test
-            PROPERTIES ENVIRONMENT "LD_PRELOAD="
+            PROPERTIES ENVIRONMENT "LD_PRELOAD=" TIMEOUT 30
         )
     endif()
 
