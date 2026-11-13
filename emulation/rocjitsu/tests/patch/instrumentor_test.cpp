@@ -25,6 +25,8 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/vgpr_msb.h"
@@ -6106,6 +6108,140 @@ TEST(InstrumentorProbePatch, AfterInstRejectsPendingScaledWmmaDependenciesAtScal
           }
           EXPECT_TRUE(result.elf_bytes.empty());
           EXPECT_TRUE(result.sites.empty());
+        }
+      }
+    }
+  }
+}
+
+TEST(InstrumentorProbePatch, Gfx1100TransResultsAreDrainedBeforeCallableReads) {
+  // LLVM llvm-mc -mcpu=gfx1100 -show-encoding accepts this numeric wait as
+  // [0xff, 0x0f, 0x88, 0xbf]. The guest's wait deliberately remains beyond the
+  // callback, so it cannot establish readiness for the envelope's earlier read.
+  constexpr uint32_t kGfx1100VdstWait = 0xbf880fffu;
+  struct Target {
+    rj_code_arch_t arch;
+    uint32_t flags;
+    uint32_t sqrt;
+  };
+  const std::array<Target, 2> targets = {{
+      {.arch = ROCJITSU_CODE_ARCH_RDNA3,
+       .flags = EF_AMDGPU_MACH_AMDGCN_GFX1100,
+       .sqrt = rdna3::build_vop1(rdna3::kVSqrtF32Vop1, {.src0 = 265, .vdst = 8})[0]},
+      {.arch = ROCJITSU_CODE_ARCH_RDNA4,
+       .flags = EF_AMDGPU_MACH_AMDGCN_GFX1200,
+       .sqrt = rdna4::build_vop1(rdna4::kVSqrtF32Vop1, {.src0 = 265, .vdst = 8})[0]},
+  }};
+  struct Placement {
+    InstrumentationKind kind;
+    uint64_t offset;
+  };
+  const std::array<Placement, 4> placements = {{
+      {.kind = InstrumentationKind::AfterInst, .offset = 0},
+      {.kind = InstrumentationKind::AfterInst, .offset = 4},
+      {.kind = InstrumentationKind::BeforeInst, .offset = 4},
+      {.kind = InstrumentationKind::KernelExit, .offset = 8},
+  }};
+  for (const Target &target : targets) {
+    SCOPED_TRACE(target.flags);
+    const util::FailureOr<uint32_t> nop = build_s_nop(0, target.arch);
+    const util::FailureOr<uint32_t> end = build_s_endpgm(target.arch);
+    const util::FailureOr<uint32_t> ret = build_s_setpc_b64(30, target.arch);
+    const util::FailureOr<uint32_t> consume = build_v_mov_b32_src(10, 264, target.arch);
+    const util::FailureOr<uint32_t> read_argument = build_v_mov_b32_src(1, 256, target.arch);
+    const util::FailureOr<uint32_t> clobber = build_v_mov_b32_src(8, 128, target.arch);
+    ASSERT_TRUE(nop.succeeded() && end.succeeded() && ret.succeeded() && consume.succeeded() &&
+                read_argument.succeeded() && clobber.succeeded());
+    for (const Placement &placement : placements) {
+      SCOPED_TRACE(static_cast<int>(placement.kind));
+      SCOPED_TRACE(placement.offset);
+      std::vector<uint32_t> guest = {target.sqrt, nop.value()};
+      if (placement.kind != InstrumentationKind::KernelExit) {
+        // RDNA4's different dependency machinery is an unaffected control.
+        guest.push_back(target.arch == ROCJITSU_CODE_ARCH_RDNA3 ? kGfx1100VdstWait : nop.value());
+        guest.push_back(consume.value());
+      }
+      guest.push_back(end.value());
+      const std::vector<uint8_t> image =
+          test::with_resource_metadata(make_amdgpu_kernel_elf(guest, 64, 3, target.flags, 3, 0,
+                                                              false, false, false, false, true),
+                                       {{"test_kernel", 0, 32, 32, 0}});
+      const AmdGpuCodeObject object(image.data(), image.size());
+      ASSERT_TRUE(object.is_valid());
+      for (const bool constant_argument : {false, true}) {
+        // No guest register survives KernelExit unless the observation reads
+        // it. The result-argument case below covers that exit-boundary read.
+        if (constant_argument && placement.kind == InstrumentationKind::KernelExit)
+          continue;
+        SCOPED_TRACE(constant_argument);
+        std::vector<uint32_t> probe_words;
+        if (constant_argument)
+          probe_words.push_back(clobber.value());
+        probe_words.push_back(read_argument.value());
+        probe_words.push_back(ret.value());
+        const std::vector<uint8_t> body =
+            make_amdgpu_probe_elf("trans_result", probe_words, target.flags);
+        const AmdGpuCodeObject probe(body.data(), body.size());
+        InstrumentationOptions options;
+        if (constant_argument) {
+          // RDNA3 has no scratch spill emitter. Request the established
+          // register-growth path so preserving v8 itself reads the pending
+          // result before the constant argument is materialized.
+          options.register_growth = OriginalRegisterCounts{.sgprs = 32, .vgprs = 32};
+        }
+        Instrumentor instrumentor(object, target.arch, options);
+        instrumentor.add_point(
+            {.anchor_offset = placement.offset,
+             .kind = placement.kind,
+             .probe_obj = &probe,
+             .probe_symbol = "trans_result",
+             .probe_args = {constant_argument ? probe_arg_imm(1) : probe_arg_vgpr(8)}});
+        const InstrumentedCodeObject result = instrumentor.patch();
+        ASSERT_TRUE(result.errors.empty()) << result.errors.front();
+        ASSERT_EQ(result.sites.size(), 1u);
+        const AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+        ASSERT_TRUE(patched.is_valid());
+        const std::vector<uint32_t> words = section_words(patched, ".text");
+        const InstrumentedSite &site = result.sites.front();
+        const size_t begin = site.instrumentation_offset / sizeof(uint32_t);
+        const size_t size = site.instrumentation_size / sizeof(uint32_t);
+        ASSERT_LE(begin, words.size());
+        ASSERT_LE(size, words.size() - begin);
+        const std::span<const uint32_t> envelope =
+            std::span<const uint32_t>(words).subspan(begin, size);
+        const util::FailureOr<uint32_t> first_read =
+            build_v_mov_b32_src(constant_argument ? 32 : 0, 264, target.arch);
+        ASSERT_TRUE(first_read.succeeded());
+        const std::span<const uint32_t>::iterator read =
+            std::ranges::find(envelope, first_read.value());
+        ASSERT_NE(read, envelope.end())
+            << "missing " << (constant_argument ? "v8 preservation copy" : "v8 argument copy");
+        if (target.arch == ROCJITSU_CODE_ARCH_RDNA3) {
+          EXPECT_NE(std::find(envelope.begin(), read, kGfx1100VdstWait), read)
+              << "pending TRANS result is read before a va_vdst(0) wait";
+        } else {
+          EXPECT_EQ(std::ranges::count(envelope, kGfx1100VdstWait), 0);
+        }
+        if (constant_argument) {
+          // The backup occupies v32; Wave32 allocates in groups of eight, so
+          // the returned count, descriptor, and metadata must all report 40.
+          EXPECT_EQ(result.resources.vgprs, 40u);
+          EXPECT_EQ(patched_private_segment_size(patched), 64u);
+          ASSERT_EQ(patched.text_sections().size(), 1u);
+          const Section &text = *patched.text_sections().front();
+          const std::vector<KernelDescriptorInfo> kernels =
+              scan_kernel_descriptors(result.elf_bytes, text.sectionOffset(), text.size());
+          ASSERT_EQ(kernels.size(), 1u);
+          EXPECT_EQ(RJ_AMDHSA_BITS_GET(kernels.front().descriptor.compute_pgm_rsrc1,
+                                       amdhsa::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT),
+                    4u);
+          const FailureOr<amdhsa::MetadataDocument> metadata =
+              amdhsa::MetadataDocument::parse(result.elf_bytes);
+          ASSERT_TRUE(metadata.succeeded());
+          const amdhsa::MetadataValue *entries = metadata.value().root().field("amdhsa.kernels");
+          ASSERT_NE(entries, nullptr);
+          ASSERT_EQ(entries->array.size(), 1u);
+          EXPECT_EQ(entries->array.front().integer_field(".vgpr_count"), 40u);
         }
       }
     }

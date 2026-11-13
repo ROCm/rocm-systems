@@ -1887,6 +1887,52 @@ TEST(TrampolineBuilderEmit, Rdna4GuardsScalarSavesBeforeArgumentReads) {
   }
 }
 
+TEST(TrampolineBuilderEmit, Rdna3WaitsForValuDestinationsAtBothCallBoundaries) {
+  // Immediate 0x0fff waits for VA_VDST=0 and disables the other counters.
+  constexpr uint32_t kWaitVaVdst = 0xbf880fffu;
+  for (const bool saves_vgpr : {false, true}) {
+    SCOPED_TRACE(saves_vgpr);
+    TrampolinePlan plan = make_probe_plan(ROCJITSU_CODE_ARCH_RDNA3);
+    RegisterSet live;
+    if (saves_vgpr) {
+      live.expand({RegClass::VGPR, 8, 1});
+      plan.register_saves = {{.cls = RegClass::VGPR, .source = 8, .destination = 16}};
+    }
+    std::string error;
+    ASSERT_TRUE(TrampolineBuilder::plan_probe_call(plan, kProbeAbi, live, live, &error)) << error;
+    const std::optional<TrampolineBytes> bytes = TrampolineBuilder::emit_probe_call(plan, &error);
+    ASSERT_TRUE(bytes) << error;
+    const std::vector<uint32_t> &words = bytes->trampoline_words;
+    ASSERT_GE(words.size(), 2u);
+    EXPECT_EQ(words[1], kWaitVaVdst);
+    EXPECT_EQ(std::ranges::count(words, kWaitVaVdst), 2);
+
+    const util::FailureOr<uint32_t> call_word =
+        build_s_swappc_b64(30, plan.target_pair_base, plan.arch);
+    ASSERT_TRUE(call_word.succeeded());
+    const std::vector<uint32_t>::const_iterator call = std::ranges::find(words, call_word.value());
+    ASSERT_NE(call, words.end());
+    ASSERT_GT(words.end() - call, 2);
+    EXPECT_EQ(*(call + 2), kWaitVaVdst);
+
+    if (saves_vgpr) {
+      const util::FailureOr<uint32_t> save_word = build_v_mov_b32_src(16, 256 + 8, plan.arch);
+      const util::FailureOr<uint32_t> restore_word = build_v_mov_b32_src(8, 256 + 16, plan.arch);
+      ASSERT_TRUE(save_word.succeeded());
+      ASSERT_TRUE(restore_word.succeeded());
+      const std::vector<uint32_t>::const_iterator save =
+          std::ranges::find(words, save_word.value());
+      const std::vector<uint32_t>::const_iterator restore =
+          std::ranges::find(words, restore_word.value());
+      ASSERT_NE(save, words.end());
+      ASSERT_NE(restore, words.end());
+      EXPECT_LT(words.begin() + 1, save);
+      EXPECT_LT(save, call);
+      EXPECT_LT(call + 2, restore);
+    }
+  }
+}
+
 TEST(TrampolineBuilderEmit, Rdna4OrdersScalarStateAcrossTheCallAndGuestResume) {
   const TrampolinePlan plan = make_probe_plan(ROCJITSU_CODE_ARCH_RDNA4, true);
   std::string error;

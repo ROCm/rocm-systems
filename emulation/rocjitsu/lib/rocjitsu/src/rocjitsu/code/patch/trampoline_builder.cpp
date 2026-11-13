@@ -712,6 +712,12 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
   if (maybe_boundary_drain.failed())
     return std::nullopt;
   std::vector<uint32_t> boundary_drain = std::move(maybe_boundary_drain).value();
+  // gfx11.0 TRANS results need a VA_VDST wait before a VALU consumer. Neither
+  // s_waitcnt nor scalar envelope instructions discharge that dependency.
+  // Drain before guest saves/arguments and before restoring state on return.
+  if (plan.arch == ROCJITSU_CODE_ARCH_RDNA3)
+    boundary_drain.push_back(
+        build_sopp_encoding(plan.arch, rdna3::kSWaitcntDepctrSopp, 0x0fff).value());
   if (plan.arch == ROCJITSU_CODE_ARCH_RDNA4)
     boundary_drain.push_back(build_sopp_encoding(plan.arch, rdna4::kSWaitAluSopp, 0xf1fc).value());
 
@@ -1024,9 +1030,8 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
   if (!append_scalar(build_s_swappc_b64(link, target_lo, plan.arch, &error)))
     return std::nullopt;
 
-  // Drain the probe's in-flight loads before restoration or resuming the guest:
-  // a probe may return with an unwaited load targeting a register we restore or
-  // the guest reads next. Mirrors the boundary drain at envelope entry.
+  // Drain the probe's pending loads and target-specific ALU results before
+  // restoration or resuming the guest. Mirrors the drain at envelope entry.
   env.insert(env.end(), boundary_drain.begin(), boundary_drain.end());
 
   // Restore the observed SCC before resuming guest execution, whether the

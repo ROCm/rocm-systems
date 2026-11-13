@@ -174,6 +174,9 @@ The caller supplies the `preserve_exec`, `preserve_vcc`, and `preserve_m0` input
 
 The probe-call envelope, in emit order, is: an in-flight-load drain; the special-state saves (`s_mov` EXEC/VCC into dead SGPR pairs, M0 into a dead SGPR); the **spill prologue** (see below); the argument writes; the guest-mask restore; the SCC save; the `s_getpc_b64` + 64-bit add chain that materializes the copied probe body's address; `s_swappc_b64` to it; then after the call a `build_wait_all_loads_complete()` drain (so the probe's own in-flight loads finish before state restoration and before the guest resumes), the SCC restore, the **spill epilogue**, and the special-state restores. The default layout places this envelope before the relocated original; `probe_after_original` places it after the original. Saves and restores protect the state at the selected observation point.
 
+On gfx1100, both boundaries also wait for pending VALU destinations before
+the envelope reads or restores registers.
+
 For `AfterInst`, the Instrumentor includes the original instruction's definitions
 in the preservation set so the callback observes and preserves the instruction's
 results.
