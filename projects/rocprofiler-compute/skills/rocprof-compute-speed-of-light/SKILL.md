@@ -80,8 +80,8 @@ memory, which the Infinity Cache can also serve, so the plot marks it once, at
 `VRAM`. Compare it with both roofs yourself, because "Limited by" and the hover
 text never name `MALL`. A point above `VRAM` and below `MALL` means the
 Infinity Cache is absorbing the traffic; never call that kernel VRAM-limited.
-The `L2` and `L1` roofs have no kernel point, because there is no `AI L2` or
-`AI L1` row.
+There is no `L1` roof, because GL1 is a write-combining buffer, not a cache.
+The `L2` roof has no kernel point, because there is no `AI L2` row.
 Under `STABLE_STD` the measured roofs sit well below the interface peak. The
 VALU roofline rows subtract WMMA issues from all VALU issues and multiply by
 the wave size, validated only for one wave32 FP16 16x16x16 case. They are
