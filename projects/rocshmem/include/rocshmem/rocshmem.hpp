@@ -207,6 +207,18 @@ __host__ void rocshmem_query_thread(int *provided);
 __host__ size_t rocshmem_query_lds_stage_bytes();
 
 /**
+ * @brief Deprecated: Use rocshmem_query_lds_stage_bytes() instead.
+ * Queries bytes of dynamic LDS the LDS-staged copy fast path wants.
+ *
+ * @deprecated Use rocshmem_query_lds_stage_bytes() instead. This function
+ * will be removed in a future release.
+ *
+ * @return Number of bytes of dynamic LDS required.
+ */
+[[deprecated("Use rocshmem_query_lds_stage_bytes() instead")]]
+__host__ size_t rocshmem_query_tdm_lds_bytes();
+
+/**
  * @brief Function that dumps internal stats to stdout.
  */
 __host__ void rocshmem_dump_stats();
@@ -875,6 +887,18 @@ __device__ void rocshmem_query_thread(int *provided);
 __device__ size_t rocshmem_query_lds_stage_bytes();
 
 /**
+ * @brief Deprecated: Use rocshmem_query_lds_stage_bytes() instead.
+ * Queries bytes of dynamic LDS the LDS-staged copy fast path wants.
+ *
+ * @deprecated Use rocshmem_query_lds_stage_bytes() instead. This function
+ * will be removed in a future release.
+ *
+ * @return Number of bytes of dynamic LDS required.
+ */
+[[deprecated("Use rocshmem_query_lds_stage_bytes() instead")]]
+__device__ size_t rocshmem_query_tdm_lds_bytes();
+
+/**
  * @brief Registers the LDS buffer this work-group lets rocSHMEM use for
  * its LDS-staged copy fast path, for both work-group and wave
  * put/get. Publishes to the block via an internal barrier before
@@ -891,6 +915,19 @@ __device__ size_t rocshmem_query_lds_stage_bytes();
  *                       fast path.
  */
 __device__ void rocshmem_set_lds_stage(void *lds, size_t lds_bytes);
+
+/**
+ * @brief Deprecated: Use rocshmem_set_lds_stage() instead.
+ * Registers the LDS buffer for the LDS-staged copy fast path.
+ *
+ * @deprecated Use rocshmem_set_lds_stage() instead. This function
+ * will be removed in a future release.
+ *
+ * @param[in] lds        Workgroup-shared LDS buffer at least lds_bytes long.
+ * @param[in] lds_bytes  Size of \p lds in bytes.
+ */
+[[deprecated("Use rocshmem_set_lds_stage() instead")]]
+__device__ void rocshmem_set_tdm_lds(void *lds, size_t lds_bytes);
 
 /**
  * @brief Creates an OpenSHMEM context. By design, the context is private

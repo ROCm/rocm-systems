@@ -150,11 +150,21 @@ __device__ size_t rocshmem_query_lds_stage_bytes() {
 #endif
 }
 
+// Deprecated: Use rocshmem_query_lds_stage_bytes() instead
+__device__ size_t rocshmem_query_tdm_lds_bytes() {
+  return rocshmem_query_lds_stage_bytes();
+}
+
 __device__ void rocshmem_set_lds_stage([[maybe_unused]] void *lds,
                                        [[maybe_unused]] size_t lds_bytes) {
 #if ROCSHMEM_LDS_STAGE_ENABLED
   lds_stage::set_lds(lds, lds_bytes);
 #endif
+}
+
+// Deprecated: Use rocshmem_set_lds_stage() instead
+__device__ void rocshmem_set_tdm_lds(void *lds, size_t lds_bytes) {
+  rocshmem_set_lds_stage(lds, lds_bytes);
 }
 
 __device__ void rocshmem_wg_finalize() {}

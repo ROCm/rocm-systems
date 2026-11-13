@@ -714,6 +714,11 @@ __host__ size_t rocshmem_query_lds_stage_bytes() {
 #endif
 }
 
+// Deprecated: Use rocshmem_query_lds_stage_bytes() instead
+__host__ size_t rocshmem_query_tdm_lds_bytes() {
+  return rocshmem_query_lds_stage_bytes();
+}
+
 __host__ void rocshmem_global_exit(int status) {
   VERIFY_BACKEND();
   backend->global_exit(status);
