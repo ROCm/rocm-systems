@@ -1234,6 +1234,9 @@ graph:
   Unit_hipGraphExecKernelNodeSetParams_DisabledNeighborInBatch:
     <<: *level_default
     tags: [exec]
+  Unit_hipGraphExecKernelNodeSetParams_DisabledBatchHead:
+    <<: *level_default
+    tags: [exec]
   Unit_hipGraphLaunch_Positive:
     <<: *level_default
     tags: [exec, smoke, P0]

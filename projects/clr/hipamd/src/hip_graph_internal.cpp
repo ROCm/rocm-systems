@@ -2192,10 +2192,7 @@ void GraphExecSegmented::PacketBatch::rebuildFilteredLists(
       continue;
     }
 
-    const size_t idx = ownedPatchSlot(owned, patch.packet);
-    if (idx == kNoSlot) {
-      continue;
-    }
+    const size_t idx = findAndCachePacketSlot(owned, patch.packet);
     if (filteredIndex[idx] != kNotFiltered) {
       patch.flat_packet = filteredFlatPacketData.data() + filteredIndex[idx] * kAqlPktSize;
       continue;
@@ -2246,22 +2243,22 @@ void GraphExecSegmented::PacketBatch::restorePatchListPointers(
       patch.flat_packet = nullptr;
       continue;
     }
-    const size_t idx = ownedPatchSlot(owned, patch.packet);
-    if (idx != kNoSlot) {
-      patch.flat_packet = flatPacketData.data() + idx * kAqlPktSize;
-    }
+    const size_t idx = findAndCachePacketSlot(owned, patch.packet);
+    patch.flat_packet = flatPacketData.data() + idx * kAqlPktSize;
   }
 }
 
 // ================================================================================================
-size_t GraphExecSegmented::PacketBatch::ownedPatchSlot(OwnedPatch& owned, const uint8_t* packet) {
+size_t GraphExecSegmented::PacketBatch::findAndCachePacketSlot(OwnedPatch& owned,
+                                                               const uint8_t* packet) {
   if (owned.slot < dispatchPackets.size() && dispatchPackets[owned.slot] == packet) {
     return owned.slot;
   }
   auto it = std::find(dispatchPackets.begin(), dispatchPackets.end(), packet);
-  owned.slot = (it == dispatchPackets.end())
-                   ? kNoSlot
-                   : static_cast<size_t>(it - dispatchPackets.begin());
+  // fallbackDepBarrier is the only owned packet that is not in the batch, and callers skip it
+  // before this search. A miss means an update removed the packet and left the patch on it.
+  assert(it != dispatchPackets.end() && "patch packet is not in its batch");
+  owned.slot = static_cast<size_t>(it - dispatchPackets.begin());
   return owned.slot;
 }
 

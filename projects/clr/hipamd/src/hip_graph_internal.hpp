@@ -1393,9 +1393,11 @@ class GraphExecSegmented : public GraphExecBase {
     static constexpr size_t kNoSlot = ~size_t{0};
     std::vector<OwnedPatch> ownedPatches;
     PacketBatch() {}
-    // Index in dispatchPackets of |owned|'s packet, or kNoSlot when it is not in the batch.
-    // Uses the cached slot when it still holds the packet; otherwise searches and re-caches.
-    size_t ownedPatchSlot(OwnedPatch& owned, const uint8_t* packet);
+    // Index in dispatchPackets of |owned|'s packet. Uses the cached slot when it still holds
+    // the packet; otherwise searches the batch and re-caches. Callers handle fallbackDepBarrier,
+    // which has no slot. A packet that is not in the batch is a broken patch, and the search
+    // asserts.
+    size_t findAndCachePacketSlot(OwnedPatch& owned, const uint8_t* packet);
     // O(1) enable/disable operations - just update state
     void setEnabled(GraphNode* node, bool enabled);
     // Rebuild cached filtered lists if cache is stale.
