@@ -590,6 +590,41 @@ classify_text_symbol_relocation(RocrRelocationSectionMode mode, uint64_t relocat
   return TextSymbolRelocationAction::RequiresSymbolMapping;
 }
 
+/// @brief Whether a supported modern ROCr dynamic write enters an address range.
+/// @details Includes writes starting before the range and overflowing intervals.
+/// Explicit-target/static, inert and unsupported forms keep their separate policy.
+[[nodiscard]] inline bool elf_has_rocr_dynamic_write_in_range(std::span<const uint8_t> image,
+                                                              const Elf64_Ehdr &header,
+                                                              std::span<const Elf64_Shdr> sections,
+                                                              uint64_t range_vaddr,
+                                                              uint64_t range_size) {
+  if (range_size == 0)
+    return false;
+  for (const Elf64_Shdr &relocs : sections) {
+    if (classify_rocr_relocation_section(header, sections, relocs) !=
+            RocrRelocationSectionMode::Dynamic ||
+        relocs.sh_entsize != sizeof(Elf64_Rela) ||
+        (relocs.sh_offset > image.size() || relocs.sh_size > image.size() - relocs.sh_offset))
+      continue;
+    const size_t count = relocs.sh_size / sizeof(Elf64_Rela);
+    for (size_t index = 0; index < count; ++index) {
+      Elf64_Rela relocation = {};
+      std::memcpy(&relocation, image.data() + relocs.sh_offset + index * sizeof(relocation),
+                  sizeof(relocation));
+      const std::optional<uint64_t> write_size =
+          rocr_dynamic_relocation_write_size(elf_reloc_type(relocation.r_info));
+      if (!write_size)
+        continue;
+      const uint64_t place = relocation.r_offset;
+      if (*write_size > std::numeric_limits<uint64_t>::max() - place ||
+          (place >= range_vaddr && place - range_vaddr < range_size) ||
+          (place < range_vaddr && range_vaddr - place < *write_size))
+        return true;
+    }
+  }
+  return false;
+}
+
 /// @brief Return whether a relocation record applies to storage loaded at runtime.
 ///
 /// Relocation sections with an explicit sh_info target inherit that section's allocation

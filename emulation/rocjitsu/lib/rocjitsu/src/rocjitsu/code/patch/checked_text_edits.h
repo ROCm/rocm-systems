@@ -28,6 +28,7 @@ struct CheckedTextEdit {
 
 // Immutable reference storage, independent of any decoder or private writer.
 struct TextEditReferences {
+  std::vector<uint64_t> branch_addresses;
   std::vector<uint64_t> symbol_endpoints;
   std::vector<uint64_t> relative_text_references;
   std::vector<uint64_t> kernel_entries;

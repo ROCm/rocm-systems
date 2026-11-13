@@ -1397,7 +1397,7 @@ TEST(CheckedTextEdits, PreservesAdditionalExecutableSection) {
   std::vector<uint8_t> image = make_mixed_width_kernel_elf();
   const AmdGpuCodeObject original(image.data(), image.size());
   ASSERT_TRUE(original.is_valid());
-  const std::vector<Elf64_Shdr> sections = CodeObjectPatcher(original).section_headers();
+  std::vector<Elf64_Shdr> sections = CodeObjectPatcher(original).section_headers();
   const std::vector<Elf64_Shdr>::const_iterator data =
       std::ranges::find_if(sections, [](const Elf64_Shdr &candidate) {
         return candidate.sh_type == SHT_PROGBITS && (candidate.sh_flags & SHF_ALLOC) != 0 &&
@@ -1407,10 +1407,48 @@ TEST(CheckedTextEdits, PreservesAdditionalExecutableSection) {
   const size_t data_index = static_cast<size_t>(data - sections.begin());
   Elf64_Ehdr header = {};
   std::memcpy(&header, image.data(), sizeof(header));
-  Elf64_Shdr section = *data;
-  const size_t offset = header.e_shoff + data_index * header.e_shentsize;
-  section.sh_flags |= SHF_EXECINSTR;
-  std::memcpy(image.data() + offset, &section, sizeof(section));
+  const Elf64_Shdr section = *data;
+  // Keep the descriptor as allocated data. Append actual instructions to its
+  // LOAD as a separate executable sibling, shifting only subsequent metadata.
+  const std::array<uint32_t, 2> sibling_words = {kNop1Word, kEndpgmWord};
+  const uint64_t sibling_offset = section.sh_offset + section.sh_size;
+  const Elf64_Shdr sibling = {.sh_name = 0,
+                              .sh_type = SHT_PROGBITS,
+                              .sh_flags = SHF_ALLOC | SHF_EXECINSTR,
+                              .sh_addr = section.sh_addr + section.sh_size,
+                              .sh_offset = sibling_offset,
+                              .sh_size = sizeof(sibling_words),
+                              .sh_link = 0,
+                              .sh_info = 0,
+                              .sh_addralign = sizeof(uint32_t),
+                              .sh_entsize = 0};
+  const auto *sibling_bytes = reinterpret_cast<const uint8_t *>(sibling_words.data());
+  image.insert(image.begin() + sibling_offset, sibling_bytes,
+               sibling_bytes + sizeof(sibling_words));
+  for (Elf64_Shdr &shifted : sections) {
+    if (shifted.sh_offset >= sibling_offset)
+      shifted.sh_offset += sizeof(sibling_words);
+  }
+  const size_t sibling_index = sections.size();
+  sections.push_back(sibling);
+  header.e_shoff += sizeof(sibling_words);
+  header.e_shnum = static_cast<uint16_t>(sections.size());
+  image.resize(header.e_shoff + sections.size() * sizeof(Elf64_Shdr));
+  std::optional<std::vector<Elf64_Phdr>> segments =
+      read_elf_table<Elf64_Phdr>(image, header.e_phoff, header.e_phnum, header.e_phentsize);
+  ASSERT_TRUE(segments);
+  const std::vector<Elf64_Phdr>::iterator data_load =
+      std::ranges::find_if(*segments, [&](const Elf64_Phdr &segment) {
+        return segment.p_type == PT_LOAD && segment.p_offset == section.sh_offset;
+      });
+  ASSERT_NE(data_load, segments->end());
+  data_load->p_filesz += sizeof(sibling_words);
+  data_load->p_memsz += sizeof(sibling_words);
+  data_load->p_flags |= PF_X;
+  test_support::write_elf_struct_for_test(image, 0, header);
+  std::memcpy(image.data() + header.e_phoff, segments->data(),
+              segments->size() * sizeof(Elf64_Phdr));
+  std::memcpy(image.data() + header.e_shoff, sections.data(), sections.size() * sizeof(Elf64_Shdr));
   const std::vector<uint8_t> pristine = image;
   const AmdGpuCodeObject object(image.data(), image.size());
   ASSERT_EQ(object.text_sections().size(), 1u);
@@ -1429,17 +1467,26 @@ TEST(CheckedTextEdits, PreservesAdditionalExecutableSection) {
   ASSERT_TRUE(result.succeeded()) << error.message;
   std::vector<uint8_t> expected = result.value().elf_bytes;
   EXPECT_TRUE(matches_checked_output(object, requests, expected));
-  // Section growth can move the executable sibling in the ELF file. Corrupt
-  // its actual output bytes rather than the old file position now holding cave.
+  // Both later sections move in the output: executable bytes remain exact,
+  // while the descriptor's relative entry field tracks its new address.
   const AmdGpuCodeObject output(expected.data(), expected.size());
   const std::vector<Elf64_Shdr> output_sections = CodeObjectPatcher(output).section_headers();
+  ASSERT_LT(sibling_index, output_sections.size());
+  const Elf64_Shdr &output_executable = output_sections[sibling_index];
+  EXPECT_EQ(output_executable.sh_flags, sibling.sh_flags);
+  ASSERT_EQ(output_executable.sh_size, sibling.sh_size);
+  ASSERT_GT(output_executable.sh_offset, sibling.sh_offset);
+  ASSERT_LE(output_executable.sh_offset + output_executable.sh_size, expected.size());
+  EXPECT_EQ(std::memcmp(expected.data() + output_executable.sh_offset, sibling_words.data(),
+                        sizeof(sibling_words)),
+            0);
   ASSERT_LT(data_index, output_sections.size());
   const Elf64_Shdr &output_sibling = output_sections[data_index];
   ASSERT_EQ(output_sibling.sh_size, section.sh_size);
   ASSERT_LE(output_sibling.sh_offset + output_sibling.sh_size, expected.size());
   EXPECT_EQ(output_sibling.sh_flags, section.sh_flags);
-  // The sibling contains the kernel descriptor. Growing .text moves that
-  // descriptor, so only its entry displacement changes within the section.
+  // The allocated data sibling retains the kernel descriptor. Only its
+  // entry displacement changes within that section.
   std::vector<uint8_t> expected_sibling(image.begin() + section.sh_offset,
                                         image.begin() + section.sh_offset + section.sh_size);
   const Section &output_text = *output.text_sections().front();
@@ -1464,6 +1511,9 @@ TEST(CheckedTextEdits, PreservesAdditionalExecutableSection) {
             output_sibling.sh_offset + descriptor_within_section);
   EXPECT_EQ(image, pristine);
   EXPECT_EQ(std::memcmp(object.image_data(), pristine.data(), pristine.size()), 0);
+  expected[output_executable.sh_offset] ^= 1;
+  EXPECT_FALSE(matches_checked_output(object, requests, expected));
+  expected[output_executable.sh_offset] ^= 1;
   expected[output_sibling.sh_offset] ^= 1;
   EXPECT_FALSE(matches_checked_output(object, requests, expected));
 }
@@ -1879,6 +1929,662 @@ TEST(CheckedTextEdits, InstrumentorChecksDirectReferencesIncludingUnreachableBra
       expect_reference_result(image, 8,
                               destination == 12 ? std::optional<uint64_t>(12) : std::nullopt);
     }
+  }
+}
+
+// Extend the existing external-section fixture rather than introducing another
+// production writer. One LOAD maps the text, branch source and branch target.
+std::vector<uint8_t> make_external_branch_elf(uint64_t origin, uint64_t destination,
+                                              bool terminal_text = false,
+                                              bool truncated_external = false) {
+  constexpr rj_code_arch_t arch = ROCJITSU_CODE_ARCH_CDNA4;
+  constexpr uint64_t text_address = 0x300;
+  const util::FailureOr<uint32_t> end = build_s_endpgm(arch);
+  const std::optional<uint32_t> entry_branch =
+      test::expected_replacement_branch(text_address + 4, origin, arch);
+  const std::optional<uint32_t> external_branch =
+      test::expected_replacement_branch(origin, destination, arch);
+  if (end.failed() || !entry_branch || !external_branch)
+    return {};
+  std::vector<uint8_t> image =
+      make_branch_to_other_section_elf(terminal_text ? end.value() : *entry_branch);
+  const AmdGpuCodeObject original(image.data(), image.size());
+  if (!original.is_valid())
+    return {};
+  std::vector<Elf64_Shdr> sections = CodeObjectPatcher(original).section_headers();
+  Elf64_Ehdr header = test_support::read_elf_struct_for_test<Elf64_Ehdr>(image, 0);
+  const std::array<uint32_t, 3> text_words = {
+      test_support::read_elf_struct_for_test<uint32_t>(image, text_address),
+      terminal_text ? end.value() : *entry_branch, end.value()};
+  std::vector<uint8_t> names = {'\0'};
+  sections[1].sh_name = test::add_elf_name(names, ".other.branch");
+  sections[1].sh_addr = origin;
+  sections[1].sh_offset = origin;
+  sections[2].sh_name = test::add_elf_name(names, ".text");
+  sections[3].sh_name = test::add_elf_name(names, ".shstrtab");
+  Elf64_Shdr target = sections[1];
+  target.sh_name = test::add_elf_name(names, ".other.target");
+  target.sh_addr = destination;
+  target.sh_offset = destination;
+  sections.push_back(target);
+  const uint64_t loaded_begin = std::min({text_address, origin, destination});
+  const uint64_t loaded_end =
+      std::max({text_address + sizeof(text_words), origin + 4, destination + 4});
+  sections[3].sh_offset = loaded_end;
+  sections[3].sh_size = names.size();
+  header.e_flags = EF_AMDGPU_MACH_AMDGCN_GFX950;
+  header.e_phnum = 1;
+  header.e_shnum = sections.size();
+  header.e_shoff = test::align_up_for_test(loaded_end + names.size(), alignof(Elf64_Shdr));
+  const Elf64_Phdr load = {.p_type = PT_LOAD,
+                           .p_flags = PF_X,
+                           .p_offset = loaded_begin,
+                           .p_vaddr = loaded_begin,
+                           .p_paddr = loaded_begin,
+                           .p_filesz = loaded_end - loaded_begin,
+                           .p_memsz = loaded_end - loaded_begin,
+                           .p_align = sizeof(uint32_t)};
+  image.assign(header.e_shoff + sections.size() * sizeof(Elf64_Shdr), 0);
+  test_support::write_elf_struct_for_test(image, 0, header);
+  test_support::write_elf_struct_for_test(image, header.e_phoff, load);
+  std::memcpy(image.data() + text_address, text_words.data(), sizeof(text_words));
+  // This is an incomplete eight-byte s_mov literal when its section has only
+  // four bytes, so the external instruction stream cannot prove its references.
+  const uint32_t origin_word = truncated_external ? 0xbe8000ffu : *external_branch;
+  test_support::write_elf_struct_for_test(image, origin, origin_word);
+  test_support::write_elf_struct_for_test(image, destination, end.value());
+  std::memcpy(image.data() + loaded_end, names.data(), names.size());
+  std::memcpy(image.data() + header.e_shoff, sections.data(), sections.size() * sizeof(Elf64_Shdr));
+  return image;
+}
+
+TEST(CheckedTextEdits, ReplacementGrowthChecksBranchesOriginatingOutsideText) {
+  constexpr rj_code_arch_t arch = ROCJITSU_CODE_ARCH_CDNA4;
+  const util::FailureOr<uint32_t> nop = build_s_nop(0, arch);
+  ASSERT_TRUE(nop.succeeded());
+  struct ExternalBranchCase {
+    const char *name;
+    uint64_t origin;
+    uint64_t destination;
+    bool terminal_text;
+    bool rejects;
+  };
+  const std::array<ExternalBranchCase, 4> cases = {{
+      {.name = "fixed source to moved target",
+       .origin = 0x200,
+       .destination = 0x30c,
+       .terminal_text = false,
+       .rejects = true},
+      {.name = "moved source to fixed target",
+       .origin = 0x400,
+       .destination = 0x200,
+       .terminal_text = true,
+       .rejects = true},
+      {.name = "source and target move together",
+       .origin = 0x400,
+       .destination = 0x404,
+       .terminal_text = true,
+       .rejects = false},
+      {.name = "source and target remain fixed",
+       .origin = 0x200,
+       .destination = 0x204,
+       .terminal_text = false,
+       .rejects = false},
+  }};
+  for (const ExternalBranchCase &test_case : cases) {
+    SCOPED_TRACE(test_case.name);
+    const std::vector<uint8_t> image =
+        make_external_branch_elf(test_case.origin, test_case.destination, test_case.terminal_text);
+    const std::vector<uint8_t> original_image = image;
+    const AmdGpuCodeObject source(image.data(), image.size());
+    ASSERT_TRUE(source.is_valid());
+    ASSERT_EQ(source.text_sections().size(), 1u);
+    ASSERT_EQ(source.allocated_executable_sections().size(), 3u);
+    const Section *origin = test_support::find_section(source, ".other.branch");
+    const Section *target = test_support::find_section(source, ".other.target");
+    ASSERT_NE(origin, nullptr);
+    ASSERT_NE(target, nullptr);
+    const Elf64_Ehdr header = test_support::read_elf_struct_for_test<Elf64_Ehdr>(image, 0);
+    ASSERT_EQ(header.e_phnum, 1u);
+    const Elf64_Phdr load =
+        test_support::read_elf_struct_for_test<Elf64_Phdr>(image, header.e_phoff);
+    ASSERT_EQ(load.p_type, PT_LOAD);
+    ASSERT_LE(load.p_vaddr, std::min(origin->vaddr(), target->vaddr()));
+    ASSERT_GE(load.p_vaddr + load.p_filesz,
+              std::max(origin->vaddr() + origin->size(), target->vaddr() + target->size()));
+    for (int route = 0; route < 4; ++route) {
+      SCOPED_TRACE(route);
+      Instrumentor seed(source, arch);
+      Instrumentor *batch = &seed;
+      std::unique_ptr<Instrumentor> child;
+      TextEditError error;
+      if (route == 1) {
+        ASSERT_NE(seed.instruction_boundaries(error), nullptr) << error.message;
+      } else if (route >= 2) {
+        if (route == 3) {
+          seed.add_point_by_offset(0);
+          const Instrumentor::ValidationResult warmed = seed.validate_points();
+          ASSERT_TRUE(warmed.errors.empty()) << warmed.errors.front();
+          ASSERT_EQ(warmed.sites.size(), 1u);
+        }
+        FailureOr<std::unique_ptr<Instrumentor>> fork = seed.fork(error);
+        ASSERT_TRUE(fork.succeeded()) << error.message;
+        child = std::move(fork).value();
+        batch = child.get();
+      }
+      batch->add_point(
+          {.anchor_offset = 0,
+           .kind = InstrumentationKind::ReplaceWithInst,
+           .probe_symbol = {},
+           .probe_args = {},
+           .replacement = InstructionReplacement{
+               .expected_bytes = make_instruction_bytes({nop.value()}), .replacement_bytes = {}}});
+      const Instrumentor::ValidationResult validated = batch->validate_points();
+      const InstrumentedCodeObjectDebug result = batch->patch_with_debug_summaries();
+      if (test_case.rejects) {
+        EXPECT_FALSE(validated.errors.empty());
+        EXPECT_TRUE(validated.sites.empty());
+        EXPECT_FALSE(result.errors.empty());
+        EXPECT_TRUE(result.elf_bytes.empty());
+        EXPECT_TRUE(result.sites.empty());
+        EXPECT_TRUE(result.patches.empty());
+        ASSERT_TRUE(result.edit_error);
+        EXPECT_EQ(result.edit_error->code, TextEditErrorCode::UnsupportedReferences);
+        // Require the new branch-displacement guard, not an unrelated ELF gate.
+        EXPECT_NE(result.edit_error->message.find("branch"), std::string::npos);
+      } else {
+        ASSERT_TRUE(validated.errors.empty()) << validated.errors.front();
+        ASSERT_TRUE(result.errors.empty()) << result.errors.front();
+        ASSERT_EQ(result.sites.size(), 1u);
+        const AmdGpuCodeObject candidate(result.elf_bytes.data(), result.elf_bytes.size());
+        ASSERT_TRUE(candidate.is_valid());
+        const Section *moved_origin = test_support::find_section(candidate, ".other.branch");
+        const Section *moved_target = test_support::find_section(candidate, ".other.target");
+        ASSERT_NE(moved_origin, nullptr);
+        ASSERT_NE(moved_target, nullptr);
+        EXPECT_EQ(moved_origin->vaddr() - origin->vaddr(), moved_target->vaddr() - target->vaddr());
+        EXPECT_EQ(moved_origin->vaddr() > origin->vaddr(), test_case.terminal_text);
+        EXPECT_EQ(std::memcmp(moved_origin->data(), origin->data(), origin->size()), 0);
+        const std::unique_ptr<Decoder> decoder = Decoder::create(arch);
+        ASSERT_NE(decoder, nullptr);
+        const std::span<const uint32_t> words(
+            reinterpret_cast<const uint32_t *>(moved_origin->data()), 1);
+        const DecodeResult decoded = decoder->decode_window(words, moved_origin->vaddr());
+        ASSERT_TRUE(decoded.succeeded());
+        ASSERT_TRUE(decoded.value()->branch_offset_bytes());
+        const std::optional<uint64_t> actual_target =
+            add_signed_offset(moved_origin->vaddr() + decoded.value()->size(),
+                              *decoded.value()->branch_offset_bytes());
+        ASSERT_TRUE(actual_target);
+        EXPECT_EQ(*actual_target, moved_target->vaddr());
+      }
+      ASSERT_EQ(source.image_size(), image.size());
+      EXPECT_EQ(std::memcmp(source.image_data(), original_image.data(), original_image.size()), 0);
+    }
+  }
+}
+
+TEST(CheckedTextEdits, ReplacementRejectsUndecodableExternalExecutableSection) {
+  constexpr rj_code_arch_t arch = ROCJITSU_CODE_ARCH_CDNA4;
+  const util::FailureOr<uint32_t> nop = build_s_nop(0, arch);
+  ASSERT_TRUE(nop.succeeded());
+  const std::vector<uint8_t> image = make_external_branch_elf(0x200, 0x30c, false, true);
+  const std::vector<uint8_t> original_image = image;
+  const AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+  const Section *foreign = test_support::find_section(source, ".other.branch");
+  ASSERT_NE(foreign, nullptr);
+  const std::unique_ptr<Decoder> decoder = Decoder::create(arch);
+  ASSERT_NE(decoder, nullptr);
+  const uint32_t incomplete_move =
+      test_support::read_elf_struct_for_test<uint32_t>(image, foreign->sectionOffset());
+  const DecodeResult decoded = decoder->decode_window(std::span(&incomplete_move, 1), 0);
+  ASSERT_TRUE(decoded.failed());
+  for (int route = 0; route < 3; ++route) {
+    SCOPED_TRACE(route);
+    Instrumentor seed(source, arch);
+    Instrumentor *batch = &seed;
+    std::unique_ptr<Instrumentor> child;
+    TextEditError error;
+    if (route == 1) {
+      if (!seed.instruction_boundaries(error)) {
+        EXPECT_NE(error.code, TextEditErrorCode::None);
+        EXPECT_FALSE(error.message.empty());
+        continue;
+      }
+    } else if (route == 2) {
+      FailureOr<std::unique_ptr<Instrumentor>> fork = seed.fork(error);
+      if (fork.failed()) {
+        EXPECT_NE(error.code, TextEditErrorCode::None);
+        EXPECT_FALSE(error.message.empty());
+        continue;
+      }
+      child = std::move(fork).value();
+      batch = child.get();
+    }
+    batch->add_point(
+        {.anchor_offset = 0,
+         .kind = InstrumentationKind::ReplaceWithInst,
+         .probe_symbol = {},
+         .probe_args = {},
+         .replacement = InstructionReplacement{
+             .expected_bytes = make_instruction_bytes({nop.value()}), .replacement_bytes = {}}});
+    const Instrumentor::ValidationResult validated = batch->validate_points();
+    const InstrumentedCodeObjectDebug result = batch->patch_with_debug_summaries();
+    EXPECT_FALSE(validated.errors.empty());
+    EXPECT_TRUE(validated.sites.empty());
+    EXPECT_FALSE(result.errors.empty());
+    EXPECT_TRUE(result.elf_bytes.empty());
+    EXPECT_TRUE(result.sites.empty());
+    EXPECT_TRUE(result.patches.empty());
+    ASSERT_TRUE(result.edit_error);
+    EXPECT_NE(result.edit_error->code, TextEditErrorCode::None);
+    EXPECT_FALSE(result.edit_error->message.empty());
+  }
+  EXPECT_EQ(std::memcmp(source.image_data(), original_image.data(), original_image.size()), 0);
+}
+
+TEST(CheckedTextEdits, ReplacementChecksIncomingBranchesFromExternalSections) {
+  constexpr rj_code_arch_t arch = ROCJITSU_CODE_ARCH_CDNA4;
+  const util::FailureOr<uint32_t> nop = build_s_nop(0, arch);
+  const util::FailureOr<uint32_t> end = build_s_endpgm(arch);
+  ASSERT_TRUE(nop.succeeded());
+  ASSERT_TRUE(end.succeeded());
+  for (const uint64_t destination : {0x304u, 0x308u}) {
+    SCOPED_TRACE(destination);
+    std::vector<uint8_t> image = make_external_branch_elf(0x200, 0x400, true);
+    const std::optional<uint32_t> incoming =
+        test::expected_replacement_branch(0x200, destination, arch);
+    ASSERT_TRUE(incoming);
+    test_support::write_elf_struct_for_test(image, 0x200, *incoming);
+    // Keep an eight-byte instruction in .text and enter either its anchor or
+    // its interior literal from the separate executable section.
+    test_support::write_elf_struct_for_test(image, 0x304, uint32_t{0xbe8000ffu});
+    test_support::write_elf_struct_for_test(image, 0x308, uint32_t{0x12345678u});
+    const std::vector<uint8_t> original_image = image;
+    const AmdGpuCodeObject source(image.data(), image.size());
+    ASSERT_TRUE(source.is_valid());
+    for (int route = 0; route < 4; ++route) {
+      SCOPED_TRACE(route);
+      Instrumentor seed(source, arch);
+      Instrumentor *batch = &seed;
+      std::unique_ptr<Instrumentor> child;
+      TextEditError error;
+      if (route == 1) {
+        ASSERT_NE(seed.instruction_boundaries(error), nullptr) << error.message;
+      } else if (route >= 2) {
+        if (route == 3) {
+          seed.add_point_by_offset(0);
+          const Instrumentor::ValidationResult warmed = seed.validate_points();
+          ASSERT_TRUE(warmed.errors.empty()) << warmed.errors.front();
+          ASSERT_EQ(warmed.sites.size(), 1u);
+        }
+        FailureOr<std::unique_ptr<Instrumentor>> fork = seed.fork(error);
+        ASSERT_TRUE(fork.succeeded()) << error.message;
+        child = std::move(fork).value();
+        batch = child.get();
+      }
+      batch->add_point(
+          {.anchor_offset = 4,
+           .kind = InstrumentationKind::ReplaceWithInst,
+           .probe_symbol = {},
+           .probe_args = {},
+           .replacement = InstructionReplacement{
+               .expected_bytes = make_instruction_bytes({0xbe8000ffu, 0x12345678u}),
+               .replacement_bytes = make_instruction_bytes({nop.value(), end.value()})}});
+      const Instrumentor::ValidationResult validated = batch->validate_points();
+      const InstrumentedCodeObjectDebug result = batch->patch_with_debug_summaries();
+      if (destination == 0x308) {
+        EXPECT_FALSE(validated.errors.empty());
+        EXPECT_TRUE(validated.sites.empty());
+        EXPECT_FALSE(result.errors.empty());
+        EXPECT_TRUE(result.elf_bytes.empty());
+        EXPECT_TRUE(result.sites.empty());
+        EXPECT_TRUE(result.patches.empty());
+        ASSERT_TRUE(result.edit_error);
+        EXPECT_EQ(result.edit_error->code, TextEditErrorCode::UnsupportedReferences);
+        EXPECT_EQ(result.edit_error->offset, 8u);
+      } else {
+        ASSERT_TRUE(validated.errors.empty()) << validated.errors.front();
+        ASSERT_TRUE(result.errors.empty()) << result.errors.front();
+        EXPECT_EQ(result.sites.size(), 1u);
+      }
+      EXPECT_EQ(std::memcmp(source.image_data(), original_image.data(), original_image.size()), 0);
+    }
+  }
+}
+
+TEST(CheckedTextEdits, RelocatableForeignBranchesKeepSectionRelativeCoordinates) {
+  constexpr rj_code_arch_t arch = ROCJITSU_CODE_ARCH_CDNA4;
+  const util::FailureOr<uint32_t> nop = build_s_nop(0, arch);
+  const util::FailureOr<uint32_t> end = build_s_endpgm(arch);
+  const std::optional<uint32_t> branch = test::expected_replacement_branch(0, 8, arch);
+  ASSERT_TRUE(nop.succeeded());
+  ASSERT_TRUE(end.succeeded());
+  ASSERT_TRUE(branch);
+  std::vector<uint8_t> image = make_external_branch_elf(0x200, 0x400, true);
+  const AmdGpuCodeObject linked(image.data(), image.size());
+  ASSERT_TRUE(linked.is_valid());
+  std::vector<Elf64_Shdr> sections = CodeObjectPatcher(linked).section_headers();
+  const Section *foreign = test_support::find_section(linked, ".other.branch");
+  ASSERT_NE(foreign, nullptr);
+  ASSERT_TRUE(foreign->sectionHeaderIndex());
+  Elf64_Ehdr header = test_support::read_elf_struct_for_test<Elf64_Ehdr>(image, 0);
+  header.e_type = ET_REL;
+  header.e_phoff = 0;
+  header.e_phnum = 0;
+  for (Elf64_Shdr &section : sections) {
+    if ((section.sh_flags & SHF_ALLOC) != 0)
+      section.sh_addr = 0;
+  }
+  sections[*foreign->sectionHeaderIndex()].sh_size = 12;
+  test_support::write_elf_struct_for_test(image, 0x200, *branch);
+  test_support::write_elf_struct_for_test(image, 0x204, nop.value());
+  test_support::write_elf_struct_for_test(image, 0x208, end.value());
+  // The foreign branch targets its own section's instruction at offset 8.
+  // That coordinate is unrelated to the literal at .text+8 in an ET_REL image.
+  test_support::write_elf_struct_for_test(image, 0x304, uint32_t{0xbe8000ffu});
+  test_support::write_elf_struct_for_test(image, 0x308, uint32_t{0x12345678u});
+  test_support::write_elf_struct_for_test(image, 0, header);
+  std::memcpy(image.data() + header.e_shoff, sections.data(), sections.size() * sizeof(Elf64_Shdr));
+  const std::vector<uint8_t> original_image = image;
+  const AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+  ASSERT_EQ(source.allocated_executable_sections().size(), 3u);
+  for (const Section *section : source.allocated_executable_sections())
+    ASSERT_EQ(section->vaddr(), 0u);
+  for (int route = 0; route < 4; ++route) {
+    SCOPED_TRACE(route);
+    Instrumentor seed(source, arch);
+    Instrumentor *batch = &seed;
+    std::unique_ptr<Instrumentor> child;
+    TextEditError error;
+    if (route == 1) {
+      const InstructionBoundaries *boundaries = seed.instruction_boundaries(error);
+      ASSERT_NE(boundaries, nullptr) << error.message;
+      EXPECT_EQ(boundaries->entries().size(), 2u);
+      EXPECT_EQ(boundaries->find(8), nullptr);
+    } else if (route >= 2) {
+      if (route == 3) {
+        seed.add_point_by_offset(0);
+        const Instrumentor::ValidationResult warmed = seed.validate_points();
+        ASSERT_TRUE(warmed.errors.empty()) << warmed.errors.front();
+        ASSERT_EQ(warmed.sites.size(), 1u);
+      }
+      FailureOr<std::unique_ptr<Instrumentor>> fork = seed.fork(error);
+      ASSERT_TRUE(fork.succeeded()) << error.message;
+      child = std::move(fork).value();
+      batch = child.get();
+    }
+    batch->add_point(
+        {.anchor_offset = 4,
+         .kind = InstrumentationKind::ReplaceWithInst,
+         .probe_symbol = {},
+         .probe_args = {},
+         .replacement = InstructionReplacement{
+             .expected_bytes = make_instruction_bytes({0xbe8000ffu, 0x12345678u}),
+             .replacement_bytes = make_instruction_bytes({nop.value(), end.value()})}});
+    const Instrumentor::ValidationResult validated = batch->validate_points();
+    ASSERT_TRUE(validated.errors.empty()) << validated.errors.front();
+    ASSERT_EQ(validated.sites.size(), 1u);
+    const InstrumentedCodeObjectDebug result = batch->patch_with_debug_summaries();
+    ASSERT_TRUE(result.errors.empty()) << result.errors.front();
+    ASSERT_EQ(result.sites.size(), 1u);
+    const AmdGpuCodeObject candidate(result.elf_bytes.data(), result.elf_bytes.size());
+    ASSERT_TRUE(candidate.is_valid());
+    const Section *retained = test_support::find_section(candidate, ".other.branch");
+    ASSERT_NE(retained, nullptr);
+    EXPECT_EQ(retained->vaddr(), 0u);
+    EXPECT_EQ(retained->size(), 12u);
+    EXPECT_EQ(std::memcmp(retained->data(), original_image.data() + 0x200, 12), 0);
+    EXPECT_EQ(std::memcmp(source.image_data(), original_image.data(), original_image.size()), 0);
+  }
+}
+
+TEST(CheckedTextEdits, ReplacementRetainsPcReadsOriginatingOutsideText) {
+  constexpr rj_code_arch_t arch = ROCJITSU_CODE_ARCH_CDNA4;
+  const util::FailureOr<uint32_t> nop = build_s_nop(0, arch);
+  const util::FailureOr<uint32_t> getpc = build_s_getpc_b64(0, arch);
+  ASSERT_TRUE(nop.succeeded());
+  ASSERT_TRUE(getpc.succeeded());
+  // A foreign PC read at section offset zero is retained when .text+0 is
+  // replaced. Cover both a fixed origin and one moving with later storage.
+  for (const uint64_t origin : {0x200u, 0x400u}) {
+    SCOPED_TRACE(origin);
+    std::vector<uint8_t> image = make_external_branch_elf(origin, 0x404, true);
+    test_support::write_elf_struct_for_test(image, origin, getpc.value());
+    const std::vector<uint8_t> original_image = image;
+    const AmdGpuCodeObject source(image.data(), image.size());
+    ASSERT_TRUE(source.is_valid());
+    for (int route = 0; route < 4; ++route) {
+      SCOPED_TRACE(route);
+      Instrumentor seed(source, arch);
+      Instrumentor *batch = &seed;
+      std::unique_ptr<Instrumentor> child;
+      TextEditError error;
+      if (route == 1) {
+        ASSERT_NE(seed.instruction_boundaries(error), nullptr) << error.message;
+      } else if (route >= 2) {
+        if (route == 3) {
+          seed.add_point_by_offset(0);
+          const Instrumentor::ValidationResult warmed = seed.validate_points();
+          ASSERT_TRUE(warmed.errors.empty()) << warmed.errors.front();
+          ASSERT_EQ(warmed.sites.size(), 1u);
+        }
+        FailureOr<std::unique_ptr<Instrumentor>> fork = seed.fork(error);
+        ASSERT_TRUE(fork.succeeded()) << error.message;
+        child = std::move(fork).value();
+        batch = child.get();
+      }
+      batch->add_point(
+          {.anchor_offset = 0,
+           .kind = InstrumentationKind::ReplaceWithInst,
+           .probe_symbol = {},
+           .probe_args = {},
+           .replacement = InstructionReplacement{
+               .expected_bytes = make_instruction_bytes({nop.value()}), .replacement_bytes = {}}});
+      const Instrumentor::ValidationResult validated = batch->validate_points();
+      const InstrumentedCodeObjectDebug result = batch->patch_with_debug_summaries();
+      EXPECT_FALSE(validated.errors.empty());
+      EXPECT_TRUE(validated.sites.empty());
+      EXPECT_FALSE(result.errors.empty());
+      EXPECT_TRUE(result.elf_bytes.empty());
+      EXPECT_TRUE(result.sites.empty());
+      EXPECT_TRUE(result.patches.empty());
+      ASSERT_TRUE(result.edit_error);
+      EXPECT_EQ(result.edit_error->code, TextEditErrorCode::UnsupportedReferences);
+      EXPECT_NE(result.edit_error->message.find("PC-relative"), std::string::npos);
+      EXPECT_EQ(std::memcmp(source.image_data(), original_image.data(), original_image.size()), 0);
+    }
+  }
+}
+
+// Append a file-backed relocation and its null dynamic symbol using the same
+// old-section-table placement as with_relative64_reference.
+std::vector<uint8_t> with_foreign_instruction_relocation(std::vector<uint8_t> image, uint64_t place,
+                                                         uint32_t type, int64_t addend,
+                                                         bool dynamic) {
+  Elf64_Ehdr header = test_support::read_elf_struct_for_test<Elf64_Ehdr>(image, 0);
+  std::vector<Elf64_Shdr> sections =
+      test_support::read_elf_array_for_test<Elf64_Shdr>(image, header.e_shoff, header.e_shnum);
+  Elf64_Phdr load = test_support::read_elf_struct_for_test<Elf64_Phdr>(image, header.e_phoff);
+  const uint64_t symbol_offset = header.e_shoff;
+  const uint64_t relocation_offset = symbol_offset + sizeof(Elf64_Sym);
+  const uint32_t symbol_index = static_cast<uint32_t>(sections.size());
+  sections.push_back({.sh_name = 0,
+                      .sh_type = SHT_DYNSYM,
+                      .sh_flags = SHF_ALLOC,
+                      .sh_addr = symbol_offset,
+                      .sh_offset = symbol_offset,
+                      .sh_size = sizeof(Elf64_Sym),
+                      .sh_link = header.e_shstrndx,
+                      .sh_info = 1,
+                      .sh_addralign = alignof(Elf64_Sym),
+                      .sh_entsize = sizeof(Elf64_Sym)});
+  sections.push_back({.sh_name = 0,
+                      .sh_type = SHT_RELA,
+                      .sh_flags = SHF_ALLOC,
+                      .sh_addr = relocation_offset,
+                      .sh_offset = relocation_offset,
+                      .sh_size = sizeof(Elf64_Rela),
+                      .sh_link = symbol_index,
+                      .sh_info = dynamic ? SHN_UNDEF : 1u,
+                      .sh_addralign = alignof(Elf64_Rela),
+                      .sh_entsize = sizeof(Elf64_Rela)});
+  const Elf64_Rela relocation = {.r_offset = place, .r_info = type, .r_addend = addend};
+  header.e_ident[EI_VERSION] = 1;
+  header.e_ident[EI_ABIVERSION] = ELFABIVERSION_AMDGPU_HSA_V5;
+  header.e_shoff = relocation_offset + sizeof(relocation);
+  header.e_shnum = static_cast<uint16_t>(sections.size());
+  load.p_flags |= 0x2u; // PF_W
+  load.p_filesz = header.e_shoff - load.p_offset;
+  load.p_memsz = load.p_filesz;
+  image.resize(header.e_shoff + sections.size() * sizeof(Elf64_Shdr));
+  test_support::write_elf_struct_for_test(image, 0, header);
+  test_support::write_elf_struct_for_test(image, header.e_phoff, load);
+  test_support::write_elf_struct_for_test(image, symbol_offset, Elf64_Sym{});
+  test_support::write_elf_struct_for_test(image, relocation_offset, relocation);
+  std::memcpy(image.data() + header.e_shoff, sections.data(), sections.size() * sizeof(Elf64_Shdr));
+  return image;
+}
+
+TEST(CheckedTextEdits, ReplacementRejectsLoaderWritesIntoForeignInstructionFacts) {
+  constexpr rj_code_arch_t arch = ROCJITSU_CODE_ARCH_CDNA4;
+  constexpr uint64_t origin = 0x200;
+  constexpr uint64_t destination = 0x400;
+  const util::FailureOr<uint32_t> nop = build_s_nop(0, arch);
+  const std::optional<uint32_t> branch =
+      test::expected_replacement_branch(origin, destination, arch);
+  ASSERT_TRUE(nop.succeeded());
+  ASSERT_TRUE(branch);
+  struct ForeignRelocationCase {
+    const char *name;
+    uint64_t place;
+    uint32_t type;
+    bool dynamic;
+    bool rejects;
+  };
+  const std::array<ForeignRelocationCase, 5> cases = {{
+      {.name = "dynamic write changes foreign instruction",
+       .place = origin,
+       .type = R_AMDGPU_ABS32_LO,
+       .dynamic = true,
+       .rejects = true},
+      {.name = "dynamic write touches foreign section end",
+       .place = origin + 4,
+       .type = R_AMDGPU_ABS32_LO,
+       .dynamic = true,
+       .rejects = false},
+      {.name = "explicit-target write retains static dispatch",
+       .place = origin,
+       .type = R_AMDGPU_ABS32_LO,
+       .dynamic = false,
+       .rejects = false},
+      {.name = "explicit-target NONE remains inert",
+       .place = origin,
+       .type = R_AMDGPU_NONE,
+       .dynamic = false,
+       .rejects = false},
+      {.name = "dynamic NONE retains rejection",
+       .place = origin,
+       .type = R_AMDGPU_NONE,
+       .dynamic = true,
+       .rejects = true},
+  }};
+  for (const ForeignRelocationCase &test_case : cases) {
+    SCOPED_TRACE(test_case.name);
+    std::vector<uint8_t> image = make_external_branch_elf(origin, destination, true);
+    // On disk the instruction has no branch reference. The loader's ABS32_LO
+    // write can replace that instruction with the linked branch encoding.
+    test_support::write_elf_struct_for_test(image, origin, nop.value());
+    image = with_foreign_instruction_relocation(std::move(image), test_case.place, test_case.type,
+                                                *branch, test_case.dynamic);
+    const std::vector<uint8_t> original_image = image;
+    const AmdGpuCodeObject source(image.data(), image.size());
+    ASSERT_TRUE(source.is_valid());
+    const Elf64_Ehdr header = test_support::read_elf_struct_for_test<Elf64_Ehdr>(image, 0);
+    const std::vector<Elf64_Shdr> sections =
+        test_support::read_elf_array_for_test<Elf64_Shdr>(image, header.e_shoff, header.e_shnum);
+    ASSERT_EQ(classify_rocr_relocation_section(header, sections, sections.back()),
+              test_case.dynamic ? RocrRelocationSectionMode::Dynamic
+                                : RocrRelocationSectionMode::ExplicitTarget);
+    const CodeObjectPatcher patcher(source);
+    ASSERT_FALSE(patcher.has_relocations_within_text());
+    ASSERT_FALSE(patcher.has_malformed_rocr_relocation_section());
+    ASSERT_EQ(patcher.has_rocr_rejected_none_relocation(),
+              test_case.dynamic && test_case.type == R_AMDGPU_NONE);
+    const std::optional<uint32_t> loaded_word =
+        test_support::read_loaded_value<uint32_t>(image, origin);
+    ASSERT_TRUE(loaded_word);
+    ASSERT_EQ(*loaded_word, nop.value());
+    for (int route = 0; route < 4; ++route) {
+      SCOPED_TRACE(route);
+      Instrumentor seed(source, arch);
+      Instrumentor *batch = &seed;
+      std::unique_ptr<Instrumentor> child;
+      TextEditError error;
+      if (route == 1) {
+        const InstructionBoundaries *facts = seed.instruction_boundaries(error);
+        if (!facts) {
+          EXPECT_TRUE(test_case.rejects);
+          EXPECT_EQ(error.code, TextEditErrorCode::UnsupportedReferences);
+          EXPECT_FALSE(error.message.empty());
+          continue;
+        }
+        EXPECT_FALSE(test_case.rejects) << "query published untrustworthy instruction facts";
+      } else if (route >= 2) {
+        if (route == 3) {
+          seed.add_point_by_offset(0);
+          const Instrumentor::ValidationResult warmed = seed.validate_points();
+          if (!warmed.errors.empty()) {
+            EXPECT_TRUE(test_case.rejects);
+            EXPECT_TRUE(warmed.sites.empty());
+            ASSERT_TRUE(warmed.edit_error);
+            EXPECT_EQ(warmed.edit_error->code, TextEditErrorCode::UnsupportedReferences);
+            continue;
+          }
+          EXPECT_EQ(warmed.sites.size(), 1u);
+        }
+        FailureOr<std::unique_ptr<Instrumentor>> fork = seed.fork(error);
+        if (fork.failed()) {
+          EXPECT_TRUE(test_case.rejects);
+          EXPECT_EQ(error.code, TextEditErrorCode::UnsupportedReferences);
+          EXPECT_FALSE(error.message.empty());
+          continue;
+        }
+        EXPECT_FALSE(test_case.rejects) << "fork published untrustworthy instruction facts";
+        child = std::move(fork).value();
+        batch = child.get();
+      }
+      batch->add_point(
+          {.anchor_offset = 0,
+           .kind = InstrumentationKind::ReplaceWithInst,
+           .probe_symbol = {},
+           .probe_args = {},
+           .replacement = InstructionReplacement{
+               .expected_bytes = make_instruction_bytes({nop.value()}), .replacement_bytes = {}}});
+      const Instrumentor::ValidationResult validated = batch->validate_points();
+      const InstrumentedCodeObjectDebug result = batch->patch_with_debug_summaries();
+      if (test_case.rejects) {
+        EXPECT_FALSE(validated.errors.empty());
+        EXPECT_TRUE(validated.sites.empty());
+        EXPECT_FALSE(result.errors.empty());
+        EXPECT_TRUE(result.elf_bytes.empty());
+        EXPECT_TRUE(result.sites.empty());
+        EXPECT_TRUE(result.patches.empty());
+        EXPECT_TRUE(result.edit_error);
+        if (result.edit_error) {
+          EXPECT_EQ(result.edit_error->code, TextEditErrorCode::UnsupportedReferences);
+          EXPECT_NE(result.edit_error->message.find("relocation"), std::string::npos);
+        }
+      } else {
+        ASSERT_TRUE(validated.errors.empty()) << validated.errors.front();
+        ASSERT_TRUE(result.errors.empty()) << result.errors.front();
+        EXPECT_EQ(result.sites.size(), 1u);
+        EXPECT_FALSE(result.elf_bytes.empty());
+      }
+    }
+    EXPECT_EQ(std::memcmp(source.image_data(), original_image.data(), original_image.size()), 0);
   }
 }
 

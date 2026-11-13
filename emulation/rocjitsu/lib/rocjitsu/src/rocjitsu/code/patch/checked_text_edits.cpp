@@ -185,7 +185,17 @@ FailureOr<TextEditReferences> CheckedTextEdits::collect_references(
       patcher.has_rocr_rejected_none_relocation() || patcher.has_unsupported_relocation_to_text())
     return reject(error, TextEditErrorCode::UnsupportedReferences,
                   "unsupported relocation place or reference to .text");
+  for (const Elf64_Shdr &section : sections) {
+    if ((section.sh_flags & (SHF_ALLOC | SHF_EXECINSTR)) == (SHF_ALLOC | SHF_EXECINSTR) &&
+        section.sh_size != 0 &&
+        elf_has_rocr_dynamic_write_in_range(image_bytes(source), header, sections, section.sh_addr,
+                                            section.sh_size))
+      return reject(error, TextEditErrorCode::UnsupportedReferences,
+                    "dynamic relocation overwrites executable source instructions");
+  }
   TextEditReferences references;
+  references.branch_addresses.assign(boundaries.reference_addresses().begin(),
+                                     boundaries.reference_addresses().end());
   references.relative_text_references = patcher.relative_text_addend_offsets();
   references.kernel_entries.assign(kernel_entries.begin(), kernel_entries.end());
   const std::span<const uint32_t> words(reinterpret_cast<const uint32_t *>(text.data()),
@@ -284,7 +294,7 @@ Result CheckedTextEdits::validate_source_edits(std::span<const CheckedTextEdit> 
       return reject(error, TextEditErrorCode::Clause, "cannot edit a clause or its members",
                     edit.offset);
   }
-  for (const uint64_t address : boundaries_.reference_addresses()) {
+  for (const uint64_t address : references_.branch_addresses) {
     // A valid target before .text cannot enter an original-text anchor.
     if (address < text.vaddr())
       continue;

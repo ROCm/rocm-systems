@@ -383,34 +383,6 @@ bool section_load_backing_is_preserved(std::span<const Elf64_Shdr> original_sect
   return true;
 }
 
-bool has_dynamic_write_within_text(std::span<const uint8_t> image, const Elf64_Ehdr &header,
-                                   std::span<const Elf64_Shdr> sections, uint64_t text_vaddr,
-                                   uint64_t text_size) {
-  for (const Elf64_Shdr &relocs : sections) {
-    if (classify_rocr_relocation_section(header, sections, relocs) !=
-            RocrRelocationSectionMode::Dynamic ||
-        relocs.sh_entsize != sizeof(Elf64_Rela) ||
-        !image_contains_range(image.size(), relocs.sh_offset, relocs.sh_size))
-      continue;
-    const size_t count = relocs.sh_size / sizeof(Elf64_Rela);
-    for (size_t index = 0; index < count; ++index) {
-      Elf64_Rela relocation = {};
-      std::memcpy(&relocation, image.data() + relocs.sh_offset + index * sizeof(relocation),
-                  sizeof(relocation));
-      const std::optional<uint64_t> write_size =
-          rocr_dynamic_relocation_write_size(elf_reloc_type(relocation.r_info));
-      if (!write_size)
-        continue;
-      const uint64_t place = relocation.r_offset;
-      if (*write_size > std::numeric_limits<uint64_t>::max() - place ||
-          (place >= text_vaddr && place - text_vaddr < text_size) ||
-          (place < text_vaddr && text_vaddr - place < *write_size))
-        return true;
-    }
-  }
-  return false;
-}
-
 /// @brief Read a kernel descriptor struct out of the in-memory image.
 ///
 /// @returns nullopt if the descriptor does not fit within the image. Shared by
@@ -1345,7 +1317,7 @@ bool CodeObjectPatcher::has_relocations_within_text() const {
         return true;
     }
   }
-  return has_dynamic_write_within_text(image_, header, shdrs, text.sh_addr, text_size_);
+  return elf_has_rocr_dynamic_write_in_range(image_, header, shdrs, text.sh_addr, text_size_);
 }
 
 bool CodeObjectPatcher::has_rocr_rejected_none_relocation() const {
@@ -1694,7 +1666,8 @@ bool CodeObjectPatcher::replace_text(
 
   // Destinations in moved sections have their final addresses now. Unsectioned
   // places remain fixed and must not overlap the newly appended executable text.
-  if (has_dynamic_write_within_text(image_, header, shdrs, text_header.sh_addr, new_text.size()))
+  if (elf_has_rocr_dynamic_write_in_range(image_, header, shdrs, text_header.sh_addr,
+                                          new_text.size()))
     return false;
 
   std::memcpy(image_.data() + text_offset_, new_text.data(), new_text.size());

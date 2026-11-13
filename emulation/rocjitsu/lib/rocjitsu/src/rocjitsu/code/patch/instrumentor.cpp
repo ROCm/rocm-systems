@@ -52,13 +52,17 @@ namespace rocjitsu {
 // own source initializes these facts, and fork() retains that exact binding.
 // Storage owns the index/references, never the borrowed ELF, decoder or CFG.
 struct SourceTextFacts {
+  struct SourceLocation {
+    uint64_t address;
+    std::optional<uint64_t> text_offset;
+  };
   struct DirectBranch {
-    uint64_t source_offset;
+    SourceLocation source;
     uint64_t destination;
   };
   InstructionBoundaries boundaries;
   TextEditReferences references;
-  std::vector<uint64_t> pc_read_offsets;
+  std::vector<SourceLocation> pc_reads;
   std::vector<DirectBranch> direct_branches;
 };
 
@@ -959,30 +963,36 @@ bool Instrumentor::ensure_source_facts(TextEditError &error) {
   }
   auto facts = std::make_shared<SourceTextFacts>();
   const Section &text = *obj_.text_sections().front();
-  const auto record_instruction = [&](const Instruction &instruction) {
-    const size_t reference_count = facts->boundaries.reference_addresses().size();
-    facts->boundaries.record(instruction, text.vaddr());
+  Elf64_Ehdr header = {};
+  std::memcpy(&header, obj_.image_data(), sizeof(header));
+  const auto record_instruction = [&](const Instruction &instruction, const Section &section,
+                                      InstructionBoundaries &boundaries, bool in_text) {
+    const size_t reference_count = boundaries.reference_addresses().size();
+    boundaries.record(instruction, section.vaddr());
+    const SourceTextFacts::SourceLocation source = {
+        .address = section.vaddr() + instruction.src_loc(),
+        .text_offset = in_text ? std::optional<uint64_t>(instruction.src_loc()) : std::nullopt};
     // Reuse the boundary index's checked branch math; source admission below
     // rejects its overflow flag before these facts can be used.
-    const std::span<const uint64_t> references = facts->boundaries.reference_addresses();
+    const std::span<const uint64_t> references = boundaries.reference_addresses();
     if (references.size() != reference_count)
-      facts->direct_branches.push_back(
-          {.source_offset = instruction.src_loc(), .destination = references.back()});
+      facts->direct_branches.push_back({.source = source, .destination = references.back()});
     if (instruction.mnemonic() == "s_getpc_b64" || instruction.mnemonic() == "s_get_pc_i64")
-      facts->pc_read_offsets.push_back(instruction.src_loc());
+      facts->pc_reads.push_back(source);
   };
-  if (blocks_built_ && !analysis_object_) {
-    // Own the index rather than borrowing storage from the parent Instrumentor.
-    for (const std::unique_ptr<BasicBlock> &block : blocks_) {
-      for (const Instruction &instruction : block->instructions()) {
-        if (reject_unavailable_branch_reference(instruction, error))
-          return false;
-        record_instruction(instruction);
-      }
-    }
-  } else {
-    const std::span<const uint32_t> words(reinterpret_cast<const uint32_t *>(text.data()),
-                                          text.size() / sizeof(uint32_t));
+  const auto decode_section = [&](const Section &section, InstructionBoundaries &boundaries,
+                                  bool in_text) {
+    const auto fail = [&](TextEditErrorCode code, uint64_t offset, std::string message) {
+      if (!in_text)
+        message = "executable section " + section.name() + ": " + message;
+      error = {.code = code, .offset = in_text ? offset : 0, .message = std::move(message)};
+      return false;
+    };
+    if (section.data() == nullptr || section.size() % sizeof(uint32_t) != 0 ||
+        section.vaddr() > std::numeric_limits<uint64_t>::max() - section.size())
+      return fail(TextEditErrorCode::InvalidImage, 0, "invalid executable extent");
+    const std::span<const uint32_t> words(reinterpret_cast<const uint32_t *>(section.data()),
+                                          section.size() / sizeof(uint32_t));
     size_t cursor = 0;
     while (cursor < words.size()) {
       if (is_text_padding_word(arch_, words[cursor])) {
@@ -992,17 +1002,30 @@ bool Instrumentor::ensure_source_facts(TextEditError &error) {
       util::StringDiagnostic diagnostic;
       DecodeResult decoded =
           decoder_->decode_window(words.subspan(cursor), cursor * 4, diagnostic.emitter());
-      if (decoded.failed() || decoded.value()->size() == 0) {
-        error = {.code = TextEditErrorCode::InvalidInstruction,
-                 .offset = cursor * 4,
-                 .message = "invalid source instruction: " + diagnostic.message()};
-        return false;
-      }
+      if (decoded.failed() || decoded.value()->size() == 0 || decoded.value()->size() % 4 != 0 ||
+          static_cast<size_t>(decoded.value()->size()) / 4 > words.size() - cursor)
+        return fail(TextEditErrorCode::InvalidInstruction, cursor * 4,
+                    "invalid source instruction: " + diagnostic.message());
       if (reject_unavailable_branch_reference(*decoded.value(), error))
-        return false;
-      record_instruction(*decoded.value());
+        return fail(error.code, error.offset, std::move(error.message));
+      record_instruction(*decoded.value(), section, boundaries, in_text);
       cursor += static_cast<size_t>(decoded.value()->size()) / sizeof(uint32_t);
     }
+    if (boundaries.reference_overflow())
+      return fail(TextEditErrorCode::UnsupportedReferences, 0, "branch reference overflows");
+    return true;
+  };
+  if (blocks_built_ && !analysis_object_) {
+    // Own the index rather than borrowing storage from the parent Instrumentor.
+    for (const std::unique_ptr<BasicBlock> &block : blocks_) {
+      for (const Instruction &instruction : block->instructions()) {
+        if (reject_unavailable_branch_reference(instruction, error))
+          return false;
+        record_instruction(instruction, text, facts->boundaries, true);
+      }
+    }
+  } else if (!decode_section(text, facts->boundaries, true)) {
+    return false;
   }
   // Replacement bypasses observation resolution. Collect descriptor entries
   // explicitly, without imposing probe, owner, liveness or loader policy.
@@ -1020,6 +1043,20 @@ bool Instrumentor::ensure_source_facts(TextEditError &error) {
   if (references.failed())
     return false;
   facts->references = std::move(references).value();
+  // Foreign offsets must not enter the public .text index or be mistaken for
+  // replacement anchors. Their references still participate in the shared proof.
+  for (const Section *section : obj_.allocated_executable_sections()) {
+    // Relocatable sections have independent section-relative coordinates.
+    if (header.e_type == ET_REL || section == &text || section->size() == 0)
+      continue;
+    InstructionBoundaries boundaries;
+    if (!decode_section(*section, boundaries, false))
+      return false;
+  }
+  for (const SourceTextFacts::DirectBranch &branch : facts->direct_branches) {
+    if (!branch.source.text_offset)
+      facts->references.branch_addresses.push_back(branch.destination);
+  }
   source_facts_ = std::move(facts);
   return true;
 }
@@ -1355,15 +1392,17 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
     // Linked getpc/add constants carry no ELF relocation to adjust when data
     // moves. Keep those layouts unsupported until the complete builder can be
     // relocated; a getpc removed by this batch no longer produces a stale VA.
-    const std::vector<uint64_t>::const_iterator retained_pc =
-        std::ranges::find_if(source_facts_->pc_read_offsets, [&](uint64_t offset) {
-          return !replacement_indices.contains(offset);
-        });
+    const auto is_removed = [&](const SourceTextFacts::SourceLocation &source) {
+      return source.text_offset && replacement_indices.contains(*source.text_offset);
+    };
+    const std::vector<SourceTextFacts::SourceLocation>::const_iterator retained_pc =
+        std::ranges::find_if(
+            source_facts_->pc_reads,
+            [&](const SourceTextFacts::SourceLocation &source) { return !is_removed(source); });
     const bool has_retained_branch = std::ranges::any_of(
-        source_facts_->direct_branches, [&](const SourceTextFacts::DirectBranch &branch) {
-          return !replacement_indices.contains(branch.source_offset);
-        });
-    if (retained_pc != source_facts_->pc_read_offsets.end() || has_retained_branch) {
+        source_facts_->direct_branches,
+        [&](const SourceTextFacts::DirectBranch &branch) { return !is_removed(branch.source); });
+    if (retained_pc != source_facts_->pc_reads.end() || has_retained_branch) {
       const Section &text = *obj_.text_sections().front();
       const uint64_t text_end = text.vaddr() + text.size();
       const uint64_t file_end = text.sectionOffset() + text.size();
@@ -1406,22 +1445,26 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
         }
         return false;
       };
-      if (retained_pc != source_facts_->pc_read_offsets.end() && storage_moves(std::nullopt)) {
+      if (retained_pc != source_facts_->pc_reads.end() && storage_moves(std::nullopt)) {
         out.errors.emplace_back(
             "replacement growth cannot preserve retained PC-relative addresses to moved storage");
+        if (!retained_pc->text_offset)
+          out.errors.back() += " (source VA " + std::to_string(retained_pc->address) + ")";
         out.edit_error = TextEditError{.code = TextEditErrorCode::UnsupportedReferences,
-                                       .offset = *retained_pc,
+                                       .offset = retained_pc->text_offset.value_or(0),
                                        .message = out.errors.back()};
         return out;
       }
       for (const SourceTextFacts::DirectBranch &branch : source_facts_->direct_branches) {
-        if (replacement_indices.contains(branch.source_offset) ||
-            !storage_moves(branch.destination))
+        if (is_removed(branch.source) ||
+            storage_moves(branch.source.address) == storage_moves(branch.destination))
           continue;
         out.errors.emplace_back(
-            "replacement growth cannot preserve a retained direct branch to moved storage");
+            "replacement growth cannot preserve a retained direct branch displacement");
+        if (!branch.source.text_offset)
+          out.errors.back() += " (source VA " + std::to_string(branch.source.address) + ")";
         out.edit_error = TextEditError{.code = TextEditErrorCode::UnsupportedReferences,
-                                       .offset = branch.source_offset,
+                                       .offset = branch.source.text_offset.value_or(0),
                                        .message = out.errors.back()};
         return out;
       }
