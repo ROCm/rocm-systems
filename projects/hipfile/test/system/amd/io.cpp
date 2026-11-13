@@ -10,6 +10,7 @@
 #include "hipfile.h"
 
 #include "io-test.h"
+#include "mhip.h"
 #include "test-common.h"
 #include "test-options.h"
 
@@ -17,6 +18,7 @@
 #include <bit>
 #include <cstdlib>
 #include <fcntl.h>
+#include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include <hip/hip_runtime_api.h>
 #include <linux/stat.h>
@@ -28,6 +30,7 @@
 extern SystemTestOptions test_env;
 
 using namespace hipFile;
+using ::testing::NiceMock;
 
 HIPFILE_WARN_NO_GLOBAL_CTOR_OFF
 
@@ -349,6 +352,36 @@ TEST_F(HipFileIoHipErrors, FailedFastpathIoSetsHipError)
 
     hipFileHandleDeregister(ro_handle);
     close(ro_fd);
+}
+
+// A HIP Runtime failure that does not come from the kernel returns
+// -hipFileHipDriverError, and the HIP error is retrievable by the caller.
+TEST_F(HipFileIoHipErrors, FailedHipRuntimeCallReturnsHipDriverError)
+{
+    Context<Configuration>::get()->fallback(false);
+
+    hipFileHandle_t handle{registerFd(tmpfile.fd)};
+
+    enforceFastpathGate(handle, device_buffer);
+    if (!IsSkipped() && !HasFatalFailure()) {
+        NiceMock<MHip> mhip;
+        mhip.enable_passthrough();
+
+        // Pass the real hipAmdFileWrite() a host address. The thunk cannot map
+        // it to a GPU allocation, so the call fails before reaching the kernel.
+        int not_device_memory{};
+        EXPECT_CALL(mhip, hipAmdFileWrite)
+            .WillOnce([&mhip, &not_device_memory](hipAmdFileHandle_t fh, void *, uint64_t size,
+                                                   int64_t file_offset) {
+                return mhip.Hip::hipAmdFileWrite(fh, &not_device_memory, size, file_offset);
+            });
+
+        // Use expect so test-specific cleanup will run.
+        EXPECT_EQ(-hipFileHipDriverError, hipFileWrite(handle, device_buffer, io_size, 0, 0));
+        EXPECT_NE(hipSuccess, hipGetLastError());
+    }
+
+    hipFileHandleDeregister(handle);
 }
 #endif
 
