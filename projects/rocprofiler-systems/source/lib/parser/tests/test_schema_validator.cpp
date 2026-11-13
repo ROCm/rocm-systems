@@ -332,3 +332,24 @@ TEST(parser_schema_validator, catalog_check_reports_structural_errors)
     EXPECT_TRUE(has_violation(errors, "unknown parameter 'absent'"));
     EXPECT_FALSE(has_violation(errors, "unknown category"));
 }
+
+TEST(parser_schema_validator, a_choice_alias_is_a_valid_value_and_default)
+{
+    auto param = schema_param{
+        .id            = "format",
+        .type          = param_type::enumeration,
+        .default_value = "proto",
+        .choices       = { choice{ .value = "pftrace", .aliases = { "proto" } } },
+    };
+
+    // "proto" should be a valid value, since it's an alias for "pftrace".
+    EXPECT_TRUE(is_valid_value(param, "proto"));
+    EXPECT_TRUE(is_valid_value(param, "pftrace"));
+    // "pb" should be invalid, since it's not an alias for "pftrace".
+    EXPECT_FALSE(is_valid_value(param, "pb"));
+
+    // The schema should be valid.
+    schema value{};
+    add_checked(value, std::move(param));
+    EXPECT_TRUE(validate_schema(value).empty());
+}

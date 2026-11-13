@@ -265,3 +265,84 @@ TEST(parser_config_store, concurrent_updates_keep_each_value)
         EXPECT_EQ(store.get("slot_" + std::to_string(index)), last);
     }
 }
+
+namespace
+{
+schema
+make_alias_schema()
+{
+    auto format     = make_param("format", param_type::enumeration, "output");
+    format.choices  = { choice{ .value = "pftrace", .aliases = { "proto" } },
+                        choice{ .value = "text", .aliases = { "txt" } } };
+    auto formats    = make_param("formats", param_type::enumeration_list, "output");
+    formats.choices = format.choices;
+
+    schema value{};
+    add_param(value, std::move(format));
+    add_param(value, std::move(formats));
+    return value;
+}
+}  // namespace
+
+TEST(parser_config_store, stores_a_choice_alias_as_its_canonical_value)
+{
+    //  setting proto makes get() and get_as<std::string> return pftrace. Currently fails.
+    auto store = config_store{ make_alias_schema() };
+    store.set("format", "proto", config_source::command_line);
+
+    EXPECT_EQ(store.get("format"), "pftrace");
+    EXPECT_EQ(store.get_as<std::string>("format"), "pftrace");
+}
+
+TEST(parser_config_store, stores_aliases_in_a_list_as_canonical_values)
+{
+    // Setting " proto , text,txt" gives {"pftrace", "text", "text"}, or {"pftrace",
+    // "text"}, if de-duped. Currently fails.
+    auto store = config_store{ make_alias_schema() };
+    store.set("formats", " proto , text,txt", config_source::file);
+
+    EXPECT_EQ(store.get_as<std::vector<std::string>>("formats"),
+              (std::vector<std::string>{ "pftrace", "text", "text" }));
+    EXPECT_EQ(store.get("formats"), "pftrace,text,text");
+}
+
+TEST(parser_config_store, an_alias_of_the_stored_choice_is_not_a_change)
+{
+    // Setting "pftrace", then "proto", doesn't trigger a callback because the value is
+    // the "same". Currently fails.
+    auto store = config_store{ make_alias_schema() };
+    int  calls = 0;
+    store.on_change("format", [&](std::string_view, std::string_view) { ++calls; });
+
+    store.set("format", "pftrace", config_source::file);
+    store.set("format", "proto", config_source::command_line);
+
+    EXPECT_EQ(calls, 1);
+    EXPECT_EQ(store.source_of("format"), config_source::command_line);
+}
+
+TEST(parser_config_store, a_callback_receives_the_canonical_value_for_an_alias)
+{
+    // Setting "txt" makes the callback receive "text" (the canonical value). Currently
+    // fails.
+    auto        store = config_store{ make_alias_schema() };
+    std::string seen;
+    store.on_change("format",
+                    [&](std::string_view, std::string_view value) { seen = value; });
+
+    store.set("format", "txt", config_source::environment);
+
+    EXPECT_EQ(seen, "text");
+}
+
+TEST(parser_config_store, still_rejects_text_that_is_neither_a_choice_nor_an_alias)
+{
+    // Setting "pb" or "proto,pb" rejects the value. Currently passes.
+    auto store = config_store{ make_alias_schema() };
+
+    EXPECT_THROW(store.set("format", "pb", config_source::command_line),
+                 std::runtime_error);
+    EXPECT_THROW(store.set("formats", "proto,pb", config_source::command_line),
+                 std::runtime_error);
+    EXPECT_FALSE(store.contains("format"));
+}
