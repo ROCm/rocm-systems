@@ -5,7 +5,7 @@
  ************************************************************************/
 
 // Host-only microtests for src/plugin/profiler/profiler_v2.cc, the adapter that serves a v2 plugin through the
-// v7 interface. The plugin is a fake exported from a FakeLib (see profiler-test.cc's ncclOsDlsym).
+// v7 interface. The plugin is a fake exported from a FakeLib (see plugin/profiler/fake_lib_dlsym.cc).
 
 #include <gtest/gtest.h>
 
