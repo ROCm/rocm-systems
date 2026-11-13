@@ -2143,9 +2143,22 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
         // bypass the preferred/fallback warning when CE 2-shot is not yet ready.
         // The VMM-first window leaves messages the LL128 peer-split two-shot takes to the LL128 tier.
         const bool vmmFirst = rcclDdaArVmmFirstTab(archTable, comm->nRanks, msgBytes, winRegType);
+        // A split only uneven shards admit, where no DDA tier would run, replaces Ring: it runs within Ring's launch.
+        // Where the planner picks another algorithm (fp8 plans Tree) the LL128 tier stays out.
+        rcclDdaLaunchCap splitCap = ddaCap;
+        bool unevenOffRing = false;
+        if (splitCap.blocks == 0 &&
+            ncclAllReduceDdaFabricLL128SplitReplacesNonDda(comm, sendbuff, recvbuff, count, datatype, op)) {
+          NCCLCHECK(rcclRingFallback(comm, sendbuff, recvbuff, ncclFuncAllReduce, count, datatype, /*query=*/true,
+                                     &ringChoice, &ringThreads));
+          unevenOffRing = ringChoice.algo != NCCL_ALGO_RING;
+          splitCap.blocks = std::max<uint32_t>(ringChoice.nMaxChannels, 1);
+          splitCap.threads = std::max<uint32_t>(ringThreads, 1);
+        }
         rcclDdaLaunchCap splitBound;
-        const bool split = ncclAllReduceDdaFabricLL128SplitEligible(comm, sendbuff, recvbuff, count, datatype, op,
-                                                                    ddaCap, vmmFirst, &splitBound);
+        const bool split = !unevenOffRing && ncclAllReduceDdaFabricLL128SplitEligible(comm, sendbuff, recvbuff, count,
+                                                                                      datatype, op, splitCap, vmmFirst,
+                                                                                      &splitBound);
         if (vmmFirst && !split && ncclAllReduceDdaFabricEligible(comm, sendbuff, recvbuff, count, datatype, op)) {
           rcclCollDecision cand = *decision;
           cand.algo = RCCL_DDA_FABRIC_VMM;
@@ -2164,7 +2177,7 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
           if (!query) INFO(NCCL_TUNING, "AR cand DDA-LL: inWindow=%d preferred=%d fallback=%d", (int)(msgBytes <= arDdaLLMax), (int)cs.bestPreferredFound, (int)cs.bestFallbackFound);
         }
         // Mid-size fast lane: LL128 protocol (128B lines, no GPU barrier).
-        if (!cs.bestPreferredFound && arDdaLL128Max > 0 &&
+        if (!cs.bestPreferredFound && arDdaLL128Max > 0 && !unevenOffRing &&
             ncclAllReduceDdaFabricLL128Eligible(comm, sendbuff, recvbuff, count, datatype, op)) {
           rcclCollDecision cand = *decision;
           cand.algo = RCCL_DDA_FABRIC_LL128; cand.protocol = NCCL_PROTO_LL128;
