@@ -34,7 +34,7 @@ class StreamAddCallback : public StreamCallback {
 
  public:
   StreamAddCallback(hipStream_t stream, hipStreamCallback_t callback, void* userData)
-      : StreamCallback(userData), stream_(stream), callBack_(callback) {}
+      : StreamCallback(userData), callBack_(callback), stream_(stream) {}
 
   void CL_CALLBACK callback() override {
     hipError_t status = hipSuccess;
@@ -74,12 +74,13 @@ typedef struct ihipIpcEventShmem_s {
 
 class EventMarker : public amd::Marker {
  public:
-  EventMarker(amd::HostQueue& stream, bool disableFlush, bool markerTs = false,
+  EventMarker(amd::HostQueue& stream, bool disableFlush, bool signalRequired = false,
               int32_t scope = amd::Device::kCacheStateInvalid, bool batch_flush = true,
               bool enable_profiling = true)
       : amd::Marker(stream, disableFlush) {
     profilingInfo_.enabled_ = enable_profiling;
-    profilingInfo_.marker_ts_ = markerTs;
+    profilingInfo_.timed_ = enable_profiling;
+    profilingInfo_.signal_required_ = signalRequired;
     profilingInfo_.batch_flush_ = batch_flush;
     profilingInfo_.clear();
     // Command::enqueue() assigns the correlation id only to batch-flush markers. The
@@ -166,7 +167,7 @@ class Event {
     return hipErrorInvalidConfiguration;
   }
   virtual bool awaitEventCompletion();
-  virtual bool ready();
+  [[nodiscard]] virtual bool ready();
   virtual int64_t time(bool getStartTs) const;
 
  protected:
@@ -196,7 +197,7 @@ class EventDD : public Event {
   ~EventDD() override = default;
 
   bool awaitEventCompletion() override;
-  bool ready() override;
+  [[nodiscard]] bool ready() override;
   int64_t time(bool getStartTs) const override;
 };
 
@@ -220,8 +221,8 @@ class IPCEventEmulated : public Event {
     if (ipc_evt_.ipc_shmem_) {
       int owners = --ipc_evt_.ipc_shmem_->owners;
       // Make sure event is synchronized
-      hipError_t status = synchronize();
-      status = ihipHostUnregister(&ipc_evt_.ipc_shmem_->signal);
+      (void)synchronize();
+      (void)ihipHostUnregister(&ipc_evt_.ipc_shmem_->signal);
       if (!amd::Os::MemoryUnmapFile(ipc_evt_.ipc_shmem_, sizeof(hip::ihipIpcEventShmem_t))) {
         // print hipErrorInvalidHandle;
       }

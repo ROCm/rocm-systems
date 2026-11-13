@@ -23,6 +23,10 @@ struct rj_vm_t : rocjitsu::RefCounted {
   rocjitsu::SoC *soc = nullptr;
   rocjitsu::VirtualMachine *vm = nullptr;
   std::atomic<bool> plugin_group_active{false};
+  // Intrusive process-lifetime retry link used only if an interposer VM's
+  // checked destruction refuses final dirty writeback after its last owner
+  // reference has gone away. This is private to the implementation, not C ABI.
+  rj_vm_t *pending_destroy_next = nullptr;
 };
 
 #endif // ROCJITSU_VM_RJ_VM_IMPL_H_

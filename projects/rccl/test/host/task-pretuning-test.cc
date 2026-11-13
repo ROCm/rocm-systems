@@ -153,6 +153,21 @@ TEST_F(TaskPreTuningMicrotest, FillCollTuningInput_UnscaledColl_CopiesTheRawFiel
   EXPECT_EQ(TaskPrep_Poisoned<int>(), in.CTAPolicy);
 }
 
+// Across trays this path leaves the symmetric kernels out of AllGather only.
+TEST_F(TaskPreTuningMicrotest, FillCollTuningInput_CrossTrayLeavesOutAllGatherSymmetricKernels) {
+  const uint64_t all = NCCL_TUNING_MASK_SYM_KERNELS | NCCL_TUNING_MASK_GENERAL_KERNELS;
+  struct ncclRawTask* allGather = scene_.NewColl(ncclFuncAllGather);
+  struct ncclRawTask* reduceScatter = scene_.NewColl(ncclFuncReduceScatter);
+  ncclTuningInput_t in = TaskPrep_Poisoned<ncclTuningInput_t>();
+  ASSERT_EQ(ncclSuccess, fillCollTuningInput(scene_.comm(), &allGather->coll, &in));
+  EXPECT_EQ(all, in.tuningMask) << "one tray";
+  scene_.comm()->spansTrays = true;
+  ASSERT_EQ(ncclSuccess, fillCollTuningInput(scene_.comm(), &allGather->coll, &in));
+  EXPECT_EQ(NCCL_TUNING_MASK_GENERAL_KERNELS, in.tuningMask) << "AllGather across trays";
+  ASSERT_EQ(ncclSuccess, fillCollTuningInput(scene_.comm(), &reduceScatter->coll, &in));
+  EXPECT_EQ(all, in.tuningMask) << "ReduceScatter across trays";
+}
+
 TEST_F(TaskPreTuningMicrotest, FillCollTuningInput_AllGather_RescalesTheCountToBytesAndSwitchesToInt8) {
   struct ncclRawTask* raw = scene_.NewColl(ncclFuncAllGather);
   ncclTuningInput_t in = TaskPrep_Poisoned<ncclTuningInput_t>();

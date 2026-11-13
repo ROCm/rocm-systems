@@ -17,6 +17,10 @@ inline constexpr std::string_view kGzipSuffix = ".gz";
 inline constexpr int kCompressionLevel = 1;
 
 /// Thin gzip adapter over zlib gzFile. Caller supplies path including kGzipSuffix.
+///
+/// Writes to a temporary file and moves it into place on close, so the path
+/// only ever holds a complete stream. A stream that failed is discarded
+/// instead, leaving nothing behind.
 class GzipFileOutputStream
 {
 public:
@@ -33,6 +37,7 @@ public:
 
 private:
     std::string m_path;
+    std::string m_temp_path;
     gzFile_s*   m_file   = nullptr;
     bool        m_failed = false;
 };

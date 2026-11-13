@@ -4,6 +4,7 @@
 /// @file legacy_minmax_test.cpp
 /// @brief Decoded legacy selection, MODE and architecture-specific NaN/zero rules.
 
+#include "compute_unit_test_util.h"
 #include "decode_test_util.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
@@ -47,7 +48,8 @@ protected:
     config.sgprs_per_wf = 106;
     config.vgprs_per_wf = 256;
     config.lds_size_kb = 64;
-    cu_ = amdgpu::ComputeUnitCore::create("minmax_cu", config, &memory_, &cache_);
+    ASSERT_NO_FATAL_FAILURE(
+        rocjitsu::test::initialize_compute_unit(cu_, "minmax_cu", config, &memory_, &cache_));
     decoder_ = Decoder::create(config.arch);
     wave_ = cu_->dispatch_wf(0, 0, 106, 256);
     ASSERT_NE(wave_, nullptr);
@@ -215,8 +217,8 @@ protected:
 
   void check_vop3(uint32_t cdna_opcode, uint32_t rdna_opcode, uint32_t expected,
                   bool half = false) {
-    if (half && rdna() && !rdna12())
-      expected |= 0xdead0000u; // RDNA true16 writes preserve the other destination half.
+    if (half && rdna())
+      expected |= 0xdead0000u; // RDNA half writes preserve the other destination half.
     if (rdna12()) {
       // Binary min/max opcodes agree across RDNA; MED3 moved in RDNA3.
       static_assert(rdna2::kVMinF32Vop3 == rdna3::kVMinF32Vop3 &&
@@ -266,7 +268,7 @@ TEST_P(LegacySelectionPolicy, InputDenormalModeAcrossEncodings) {
       const uint32_t half_opcode = rdna() ? (maximum ? rdna3::kVMaxF16Vop2 : rdna3::kVMinF16Vop2)
                                           : (maximum ? cdna4::kVMaxF16Vop2 : cdna4::kVMinF16Vop2);
       check({(half_opcode << 25) | (4u << 17) | (1u << 9) | 256u, 0},
-            half_expected | (rdna() && !rdna12() ? 0xdead0000u : 0));
+            half_expected | (rdna() ? 0xdead0000u : 0));
       check_vop3(maximum ? cdna4::kVMaxF16Vop3 : cdna4::kVMinF16Vop3,
                  maximum ? rdna3::kVMaxF16Vop3 : rdna3::kVMinF16Vop3, half_expected, true);
     }
@@ -281,7 +283,7 @@ TEST_P(LegacySelectionPolicy, HalfVop2NanAndZeroSelection) {
                                      : (maximum ? cdna4::kVMaxF16Vop2 : cdna4::kVMinF16Vop2);
       const auto select = [&](uint32_t expected) {
         check({(opcode << 25) | (4u << 17) | (1u << 9) | 256u, 0},
-              (rdna() && !rdna12() ? 0xdead0000u : 0) | expected);
+              (rdna() ? 0xdead0000u : 0) | expected);
       };
       // a, b, CDNA/RDNA non-IEEE results, CDNA/RDNA IEEE results.
       for (auto input : std::array<std::array<uint16_t, 6>, 6>{

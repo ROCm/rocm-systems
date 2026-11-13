@@ -1,5 +1,5 @@
 <system version="2">
-  <cpu host_hash="0x1b2f53a636e182bb" numaid="0" affinity="00000000,00000000,00000000,ffffffff,ffffffff,ffffffff,00000000,00000000,00000000,ffffffff,ffffffff,ffffffff" arch="x86_64" vendor="AuthenticAMD" familyid="191" modelid="2">
+  <cpu host_hash="0x1b2f53a636e182bb" numaid="0" affinity="00000000,00000000,00000000,ffffffff,ffffffff,ffffffff,00000000,00000000,00000000,ffffffff,ffffffff,ffffffff" arch="x86_64" vendor="AuthenticAMD" familyid="26" modelid="2">
     <pci busid="0000:01:00.0" class="0x060400" vendor="0x1000" device="0xc030" subsystem_vendor="0x1d9b" subsystem_device="0xcc03" link_speed="32.0 GT/s PCIe" link_width="16">
       <pci busid="0000:03:00.0" class="0x020000" vendor="0x14e4" device="0x1760" subsystem_vendor="0x14e4" subsystem_device="0xf323" link_speed="32.0 GT/s PCIe" link_width="16">
         <nic>
@@ -81,7 +81,7 @@
       </pci>
     </pci>
   </cpu>
-  <cpu host_hash="0x1b2f53a636e182bb" numaid="1" affinity="ffffffff,ffffffff,ffffffff,00000000,00000000,00000000,ffffffff,ffffffff,ffffffff,00000000,00000000,00000000" arch="x86_64" vendor="AuthenticAMD" familyid="191" modelid="2">
+  <cpu host_hash="0x1b2f53a636e182bb" numaid="1" affinity="ffffffff,ffffffff,ffffffff,00000000,00000000,00000000,ffffffff,ffffffff,ffffffff,00000000,00000000,00000000" arch="x86_64" vendor="AuthenticAMD" familyid="26" modelid="2">
     <pci busid="0000:81:00.0" class="0x060400" vendor="0x1000" device="0xc030" subsystem_vendor="0x1d9b" subsystem_device="0xcc01" link_speed="32.0 GT/s PCIe" link_width="16">
       <pci busid="0000:83:00.0" class="0x020000" vendor="0x14e4" device="0x1760" subsystem_vendor="0x14e4" subsystem_device="0xf323" link_speed="32.0 GT/s PCIe" link_width="16">
         <nic>

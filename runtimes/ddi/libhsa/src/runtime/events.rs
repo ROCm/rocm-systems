@@ -5,18 +5,38 @@
 
 use super::*;
 
+/// Wakes callers waiting for a VM fault notification.
+pub(crate) static VM_FAULT_CONDVAR: Condvar = Condvar::new();
+
 thread_local! {
     /// Whether this thread currently invokes an application callback.
     static IN_CALLBACK: Cell<bool> = const { Cell::new(false) };
 }
 
 /// Marks application callbacks whose teardown would wait for the caller.
-pub(crate) struct CallbackScope(bool);
+pub(crate) struct CallbackScope {
+    /// Prior callback state restored when this invocation returns.
+    previous: bool,
+    /// Owns a worker callback's lease and thread-local inheritance marker.
+    _lease_scope: Option<ApiLeaseScope>,
+}
 
 impl CallbackScope {
     /// Marks entry into an application callback scope for reentrancy checks.
     pub(crate) fn enter() -> Self {
-        Self(IN_CALLBACK.with(|active| active.replace(true)))
+        let previous = IN_CALLBACK.with(|active| active.replace(true));
+        // A synchronous callback already runs under its caller's lease.
+        // Independent worker callbacks acquire one before invoking user code.
+        // After close, their owning worker is joined before state detachment;
+        // new HSA API calls from those callbacks are refused admission.
+        let lease_scope = (!ApiLeaseScope::current())
+            .then(|| process_admission().enter())
+            .flatten()
+            .map(ApiLeaseScope::enter);
+        Self {
+            previous,
+            _lease_scope: lease_scope,
+        }
     }
 
     /// Checks whether the current thread is executing an application callback.
@@ -28,7 +48,7 @@ impl CallbackScope {
 impl Drop for CallbackScope {
     /// Restores the previous callback reentrancy state for this thread.
     fn drop(&mut self) {
-        IN_CALLBACK.with(|active| active.set(self.0));
+        IN_CALLBACK.with(|active| active.set(self.previous));
     }
 }
 
@@ -39,6 +59,12 @@ impl HsaState {
         callback: SystemEventHandler,
         data: CallbackArg,
     ) -> Status {
+        if self.stop_workers.load(Ordering::Acquire) {
+            return INVALID_RUNTIME_STATE;
+        }
+        if self.system_event_failed.load(Ordering::Acquire) {
+            return ERROR;
+        }
         if self.system_event_handlers.try_reserve(1).is_err() {
             return OUT_OF_RESOURCES;
         }
@@ -52,6 +78,9 @@ impl HsaState {
 
     /// Ensures system event worker exists before use.
     fn ensure_system_event_worker(&mut self) -> Status {
+        if self.system_event_failed.load(Ordering::Acquire) {
+            return ERROR;
+        }
         if self.system_event_worker.is_some() {
             return SUCCESS;
         }
@@ -63,9 +92,10 @@ impl HsaState {
             Err(_) => return OUT_OF_RESOURCES,
         };
         let stop = self.stop_workers.clone();
+        let failed = self.system_event_failed.clone();
         let worker = match thread::Builder::new()
             .name("rocddi-system-events".into())
-            .spawn(move || system_event_worker(subscription, &stop))
+            .spawn(move || system_event_worker(subscription, &stop, &failed))
         {
             Ok(worker) => worker,
             Err(_) => return OUT_OF_RESOURCES,
@@ -151,10 +181,33 @@ pub(super) fn hardware_exception_event(
 }
 
 /// Receives native device events and dispatches HSA callbacks.
-pub(super) fn system_event_worker(mut subscription: DeviceEventSubscription, stop: &AtomicBool) {
+pub(super) fn system_event_worker(
+    mut subscription: DeviceEventSubscription,
+    stop: &AtomicBool,
+    failed: &AtomicBool,
+) {
+    system_event_worker_with(
+        |timeout| subscription.wait(timeout),
+        thread::sleep,
+        stop,
+        failed,
+    );
+}
+
+/// Runs the worker policy with an injectable event source and retry pause.
+fn system_event_worker_with(
+    mut wait: impl FnMut(Duration) -> Result<Option<DeviceEvent>, rocddi::Error>,
+    mut pause: impl FnMut(Duration),
+    stop: &AtomicBool,
+    failed: &AtomicBool,
+) {
+    let mut retry_delay = Duration::from_millis(1);
+    let mut driver_failures = 0u8;
     while !stop.load(Ordering::Acquire) {
-        match subscription.poll() {
+        match wait(Duration::from_millis(1)) {
             Ok(Some(DeviceEvent::GpuMemoryFault(fault))) => {
+                retry_delay = Duration::from_millis(1);
+                driver_failures = 0;
                 let notification = {
                     let Ok(mut guard) = lock() else {
                         return;
@@ -205,6 +258,10 @@ pub(super) fn system_event_worker(mut subscription: DeviceEventSubscription, sto
                         if queue.agent == agent && queue.vm_faulted {
                             queue.vm_fault_address = fault.virtual_address;
                             queue.vm_fault_reason = reason;
+                            // Only queue errors already observed are covered
+                            // by this callback. A later queue error has no
+                            // native ID to correlate with this process event.
+                            queue.vm_fault_callback_state.report_by_system();
                         }
                     }
                     (event, runtime.system_event_handlers.clone())
@@ -218,6 +275,8 @@ pub(super) fn system_event_worker(mut subscription: DeviceEventSubscription, sto
                 }
             }
             Ok(Some(DeviceEvent::GpuHardwareException(exception))) => {
+                retry_delay = Duration::from_millis(1);
+                driver_failures = 0;
                 let notification = {
                     let Ok(guard) = lock() else {
                         return;
@@ -248,16 +307,58 @@ pub(super) fn system_event_worker(mut subscription: DeviceEventSubscription, sto
                     std::process::abort();
                 }
             }
-            Ok(None) => thread::sleep(Duration::from_micros(20)),
-            Err(error)
-                if matches!(
-                    error.kind(),
-                    rocddi::ErrorKind::Driver | rocddi::ErrorKind::Busy
-                ) =>
-            {
-                thread::sleep(Duration::from_millis(1));
+            Ok(None) => {
+                retry_delay = Duration::from_millis(1);
+                driver_failures = 0;
             }
-            Err(_) => return,
+            Err(error) if error.kind() == rocddi::ErrorKind::Busy => {
+                driver_failures = 0;
+                pause(retry_delay);
+                retry_delay = (retry_delay * 2).min(Duration::from_millis(20));
+            }
+            Err(error) if error.kind() == rocddi::ErrorKind::Driver && driver_failures < 16 => {
+                driver_failures += 1;
+                pause(retry_delay);
+                retry_delay = (retry_delay * 2).min(Duration::from_millis(20));
+            }
+            Err(_) => {
+                // Queue error callbacks remain available even after this
+                // process event observer can no longer deliver notifications.
+                failed.store(true, Ordering::Release);
+                VM_FAULT_CONDVAR.notify_all();
+                return;
+            }
         }
+    }
+}
+
+#[cfg(test)]
+mod worker_tests {
+    use super::*;
+
+    #[test]
+    fn repeated_driver_errors_latch_only_system_event_failure() {
+        let stop = AtomicBool::new(false);
+        let failed = AtomicBool::new(false);
+        let mut calls = 0;
+        let mut pauses = Vec::new();
+        system_event_worker_with(
+            |_| {
+                calls += 1;
+                Err(rocddi::Error::Operation {
+                    kind: rocddi::ErrorKind::Driver,
+                    detail: "injected event poll failure",
+                })
+            },
+            |delay| pauses.push(delay),
+            &stop,
+            &failed,
+        );
+        assert_eq!(calls, 17);
+        assert_eq!(pauses.len(), 16);
+        assert_eq!(pauses[0], Duration::from_millis(1));
+        assert_eq!(pauses[15], Duration::from_millis(20));
+        assert!(failed.load(Ordering::Acquire));
+        assert!(!stop.load(Ordering::Acquire));
     }
 }

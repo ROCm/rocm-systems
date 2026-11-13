@@ -8,10 +8,8 @@ use std::ffi::c_void;
 use crate::ffi::*;
 use crate::memory::interop::*;
 use crate::memory::*;
-use crate::platform::memory as linux_interop;
-use crate::platform::memory::{
-    AisFileOperation as AisOperation, KfdIpcMemoryHandle as IpcMemoryHandle,
-};
+use crate::platform::memory as native_memory;
+use crate::platform::{AisOperation, ais_file_io};
 use crate::runtime::{boundary, initialized_mut, lock, map_error};
 
 #[cfg_attr(
@@ -43,8 +41,8 @@ pub unsafe extern "C" fn hsa_amd_ipc_memory_create(
         }) else {
             return INVALID_ARGUMENT;
         };
-        let exported = match linux_interop::export_kfd_ipc_memory(&memory.allocation) {
-            Ok(handle) => handle.words,
+        let exported = match native_memory::export_ipc_memory(&memory.allocation) {
+            Ok(handle) => handle,
             Err(error) => return map_error(error),
         };
         // SAFETY: The caller supplied writable output storage and publication
@@ -139,19 +137,21 @@ pub unsafe extern "C" fn hsa_amd_ipc_memory_attach(
                 .iter()
                 .map(|index| &runtime.gpus[*index].device)
                 .collect::<Vec<_>>();
-            match linux_interop::import_kfd_ipc_memory(
-                &runtime.session,
+            let Some(session) = runtime.session() else {
+                return ERROR;
+            };
+            match native_memory::import_ipc_memory(
+                session,
                 &devices,
                 &mapping_devices,
-                IpcMemoryHandle { words },
+                words,
                 size as u64,
             ) {
                 Ok(allocation) => allocation,
                 Err(error) => {
                     return match error.kind() {
-                        rocddi::ErrorKind::InvalidArgument | rocddi::ErrorKind::Unsupported => {
-                            INVALID_ARGUMENT
-                        }
+                        rocddi::ErrorKind::InvalidArgument => INVALID_ARGUMENT,
+                        rocddi::ErrorKind::Unsupported => NOT_SUPPORTED,
                         rocddi::ErrorKind::ResourceExhausted => OUT_OF_RESOURCES,
                         _ => ERROR,
                     };
@@ -382,10 +382,10 @@ pub unsafe extern "C" fn hsa_amd_portable_export_dmabuf_v2(
 pub extern "C" fn hsa_amd_portable_close_dmabuf(descriptor: i32) -> Status {
     boundary(|| {
         // SAFETY: The ABI transfers responsibility for closing this descriptor.
-        if unsafe { linux_interop::close_owned_descriptor(descriptor) }.is_ok() {
-            SUCCESS
-        } else {
-            RESOURCE_FREE
+        match unsafe { native_memory::close_owned_descriptor(descriptor) } {
+            Ok(()) => SUCCESS,
+            Err(error) if error.kind() == rocddi::ErrorKind::Unsupported => NOT_SUPPORTED,
+            Err(_) => RESOURCE_FREE,
         }
     })
 }

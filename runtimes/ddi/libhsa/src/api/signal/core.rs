@@ -263,10 +263,13 @@ pub unsafe extern "C" fn hsa_amd_ipc_signal_attach(
         // SAFETY: The caller supplied a readable IPC handle.
         let words = unsafe { handle.read() }.handle;
         // SAFETY: attach_ipc_signal validates the imported mapping and shared header.
+        let Some(session) = runtime.session.as_ref() else {
+            return ERROR;
+        };
         let attached = match unsafe {
             runtime
                 .signal_state
-                .attach_ipc_signal(&runtime.session, &runtime.gpus, words)
+                .attach_ipc_signal(session, &runtime.gpus, words)
         } {
             Ok(signal) => signal,
             Err(status) => return status,

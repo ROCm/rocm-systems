@@ -28,6 +28,7 @@
 #include "plugin/nccl_tuner.h"
 #include "rccl_common.h"
 #include "rocmwrap.h"
+#include "warp_speed_plan.h"
 
 #include <algorithm>
 #include <chrono>
@@ -2064,6 +2065,123 @@ TEST(Rcclwrap, WarpSpeedSupported_RejectsIneligibleTask)
     EXPECT_FALSE(rcclWarpSpeedSupported(&comm, &plan, &first, /*nCollTasks=*/2));
 }
 
+TEST(Rcclwrap, WarpSpeedPlanCap_LeadingPrefixPreservesWarpSpeed)
+{
+    auto comm = std::make_unique<ncclComm>();
+    auto topo = std::make_unique<ncclTopoSystem>();
+    auto plan = std::make_unique<ncclKernelPlan>();
+    comm->topo = topo.get();
+    comm->nNodes = 2;
+    topo->warpSpeedEnabled = true;
+    ncclIntruQueueConstruct(&plan->p2pTaskQueue);
+    ncclIntruQueueConstruct(&plan->bcastTaskQueue);
+
+    struct
+    {
+        int nTasks;
+        int ordinaryTask;
+        int treeTask;
+        bool expectPlanEligible;
+        bool expectCap;
+    } const cases[] = {
+        {4, -1, -1, true, true},
+        {4, 0, -1, false, false},
+        {4, 3, -1, false, true},
+        {4, -1, 1, false, false},
+        {5, -1, -1, true, true},
+        {5, 4, -1, false, true},
+        {4, 2, -1, false, false},
+        {3, 2, -1, false, false},
+    };
+
+    for(const auto& c : cases)
+    {
+        ncclTaskColl tasks[5]{};
+        for(int i = 0; i < c.nTasks; ++i)
+        {
+            tasks[i].algorithm = i == c.treeTask ? NCCL_ALGO_TREE : NCCL_ALGO_RING;
+            tasks[i].useWarpSpeed = i != c.ordinaryTask;
+            tasks[i].next = i + 1 < c.nTasks ? &tasks[i + 1] : nullptr;
+        }
+
+        EXPECT_EQ(c.expectPlanEligible, rcclWarpSpeedSupported(comm.get(), plan.get(), &tasks[0], c.nTasks));
+        EXPECT_EQ(c.expectCap, rcclShouldCapGroupedPlan(comm.get(), plan.get(), &tasks[0], c.nTasks));
+        EXPECT_FALSE(rcclShouldCapGroupedPlan(comm.get(), plan.get(), &tasks[0], /*nPlanColls=*/3));
+    }
+}
+
+TEST(Rcclwrap, WarpSpeedPlanCap_Ordinary58LayerGraphDoesNotSplitAtThree)
+{
+    auto comm = std::make_unique<ncclComm>();
+    auto topo = std::make_unique<ncclTopoSystem>();
+    auto plan = std::make_unique<ncclKernelPlan>();
+    comm->topo = topo.get();
+    comm->nNodes = 2;
+    topo->warpSpeedEnabled = true;
+    ncclIntruQueueConstruct(&plan->p2pTaskQueue);
+    ncclIntruQueueConstruct(&plan->bcastTaskQueue);
+
+    ncclTaskColl tasks[58]{};
+    for(int i = 0; i < 58; ++i)
+    {
+        tasks[i].algorithm = NCCL_ALGO_RING;
+        tasks[i].useWarpSpeed = false;
+        tasks[i].next = i + 1 < 58 ? &tasks[i + 1] : nullptr;
+    }
+
+    for(int nPlanColls = 0; nPlanColls <= 58; ++nPlanColls)
+    {
+        EXPECT_FALSE(rcclShouldCapGroupedPlan(comm.get(), plan.get(), &tasks[0], nPlanColls))
+            << "nPlanColls=" << nPlanColls;
+    }
+}
+
+TEST(Rcclwrap, GroupedPlanCap_SingleNodeGfx950CapsEveryPrefix)
+{
+    auto comm = std::make_unique<ncclComm>();
+    auto topo = std::make_unique<ncclTopoSystem>();
+    auto plan = std::make_unique<ncclKernelPlan>();
+    char arch[] = "gfx950";
+    char archWithSuffix[] = "gfx950:sramecc+:xnack-";
+    char otherArch[] = "gfx942";
+    comm->topo = topo.get();
+    comm->archName = arch;
+    comm->nNodes = 1;
+    topo->warpSpeedEnabled = false;
+    ncclIntruQueueConstruct(&plan->p2pTaskQueue);
+    ncclIntruQueueConstruct(&plan->bcastTaskQueue);
+
+    ncclTaskColl tasks[5]{};
+    for(int i = 0; i < 5; ++i)
+    {
+        tasks[i].func = i == 0 ? ncclFuncReduce : ncclFuncAllReduce;
+        tasks[i].datatype = i == 1 ? ncclFloat16 : ncclFloat;
+        tasks[i].count = 1048575 + i;
+        tasks[i].opHost = i == 2 ? ncclMax : ncclSum;
+        tasks[i].algorithm = i == 3 ? NCCL_ALGO_TREE : NCCL_ALGO_RING;
+        tasks[i].useWarpSpeed = false;
+        tasks[i].next = i + 1 < 5 ? &tasks[i + 1] : nullptr;
+    }
+
+    for(int ranks : {2, 8})
+    {
+        comm->nRanks = ranks;
+        for(char* gfx950Arch : {arch, archWithSuffix})
+        {
+            comm->archName = gfx950Arch;
+            EXPECT_FALSE(rcclShouldCapGroupedPlan(comm.get(), plan.get(), &tasks[0], /*nPlanColls=*/3));
+            EXPECT_TRUE(rcclShouldCapGroupedPlan(comm.get(), plan.get(), &tasks[0], /*nPlanColls=*/4));
+            EXPECT_TRUE(rcclShouldCapGroupedPlan(comm.get(), plan.get(), &tasks[0], /*nPlanColls=*/5));
+        }
+    }
+
+    comm->archName = otherArch;
+    EXPECT_FALSE(rcclShouldCapGroupedPlan(comm.get(), plan.get(), &tasks[0], /*nPlanColls=*/4));
+    comm->archName = archWithSuffix;
+    comm->nNodes = 2;
+    EXPECT_FALSE(rcclShouldCapGroupedPlan(comm.get(), plan.get(), &tasks[0], /*nPlanColls=*/4));
+}
+
 TEST(Rcclwrap, WarpSpeedSupported_OnlyChecksBudgetedPrefix)
 {
     ncclComm comm{};
@@ -2449,6 +2567,15 @@ static constexpr size_t kCeAllReduceCount = 4096;
 // still be refused; taking CE there silently drops the bias from the result.
 TEST(Rcclwrap, RcclUseCeAllReduce_BiasBuffer)
 {
+    // Without CE support rcclUseCeAr2Shot refuses every call, so the bias case
+    // would pass without the bias check. Skip here, not in the children: a child
+    // skip is not reported as a skip of this test.
+    if(!ncclCeImplemented(ncclFuncAllReduce, ncclDevSum, ncclFloat32))
+    {
+        GTEST_SKIP() << "CE not supported on this runtime driver "
+                        "(need ROCm >= 7.12 or 7.0.2.x backport [70051831, 70060000))";
+    }
+
     RUN_ISOLATED_TESTS(
         ProcessIsolatedTestRunner::TestConfig(
             "RcclUseCeAllReduce_BiasBufferRejected",
@@ -2497,21 +2624,11 @@ TEST(Rcclwrap, RcclUseCeAllReduce_BiasBuffer)
 }
 
 // ---------------------------------------------------------------------------
-// rcclAllReduceShouldTakeDdaPath: the AllReduce DDA-vs-CE dispatch decision.
+// rcclAllReduceShouldTakeDdaPath: the AllReduce DDA entry gate.
 //
-// The helper returns true when ncclAllReduce_impl should take the DDA path, and
-// false when it should yield (to CE AllReduce, the symmetric kernel, or the
-// generic ring/tree fallback). DDA is taken when the buffers are not
-// symmetric-kernel eligible, CE AllReduce will not service the call, and DDA is
-// enabled for this arch and size.
-//
-// `ceAllReduceAllowed` is passed in directly rather than derived inside the
-// test: the call site computes it once from rcclUseCeAr2Shot() plus whatever
-// additional gating CE AllReduce requires (graph latch, ncclGroupDepth,
-// force/symReg, op/dtype/size/divisibility support, etc). Driving it directly
-// keeps these cases independent of RCCL_CE_ALLREDUCE's default and of CE
-// AllReduce's own eligibility rules -- each case just asserts what the DDA
-// guard does for a given (symEligible, ceAllReduceAllowed) combination.
+// Returns true when DDA should handle the call: symk not eligible and DDA is
+// enabled for this arch and message size. CE vs DDA arbitration at dispatch is
+// handled by rcclCandSearch (preferred-backend mask), not by this function.
 //
 // These tests drive the real decision (no GPU): RCCL_DDA_ENABLE defaults to 1
 // and ncclGroupDepth to 0, so rcclDdaEnabled() runs its real arch/threshold logic.
@@ -2545,7 +2662,7 @@ TEST(Rcclwrap, Gfx950_SymOff_LargeMsg_TakesDda)
     InitDdaDecisionComm(*comm, "gfx950", 8, 1, /*symmetricSupport=*/false);
     size_t   count = CountForBytes(8ull * 1024 * 1024, ncclFloat32);
     EXPECT_TRUE(rcclAllReduceShouldTakeDdaPath(comm.get(), count, ncclFloat32,
-                                               /*symEligible=*/false, /*ceAllReduceAllowed=*/false, /*query=*/false));
+                                               /*symEligible=*/false, /*query=*/false));
 }
 
 // gfx950, small message with CE unavailable: squarely in DDA's range, takes DDA.
@@ -2555,51 +2672,7 @@ TEST(Rcclwrap, Gfx950_SymOff_SmallMsg_TakesDda)
     InitDdaDecisionComm(*comm, "gfx950", 8, 1, /*symmetricSupport=*/false);
     size_t   count = CountForBytes(2ull * 1024 * 1024, ncclFloat32);
     EXPECT_TRUE(rcclAllReduceShouldTakeDdaPath(comm.get(), count, ncclFloat32,
-                                               /*symEligible=*/false, /*ceAllReduceAllowed=*/false, /*query=*/false));
-}
-
-// gfx950 with symmetricSupport on and every CE prerequisite met: CE will service
-// the call, so the DDA guard must yield (returns false).
-TEST(Rcclwrap, Gfx950_SymOn_CeEligible_YieldsToCe)
-{
-    auto comm = std::make_unique<ncclComm>();
-    InitDdaDecisionComm(*comm, "gfx950", 8, 1, /*symmetricSupport=*/true);
-    size_t   count = CountForBytes(8ull * 1024 * 1024, ncclFloat32); // divisible by 8 ranks
-    EXPECT_FALSE(rcclAllReduceShouldTakeDdaPath(comm.get(), count, ncclFloat32,
-                                                /*symEligible=*/false, /*ceAllReduceAllowed=*/true, /*query=*/false));
-}
-
-// CE eligible by size/op/dtype but disabled by the graph latch (folded into the
-// caller's ceAllReduceAllowed=false): CE will not run, so DDA must reclaim the call.
-TEST(Rcclwrap, Gfx950_SymOn_GraphLatched_TakesDda)
-{
-    auto comm = std::make_unique<ncclComm>();
-    InitDdaDecisionComm(*comm, "gfx950", 8, 1, /*symmetricSupport=*/true);
-    size_t   count = CountForBytes(8ull * 1024 * 1024, ncclFloat32);
-    EXPECT_TRUE(rcclAllReduceShouldTakeDdaPath(comm.get(), count, ncclFloat32,
-                                               /*symEligible=*/false, /*ceAllReduceAllowed=*/false, /*query=*/false));
-}
-
-// CE declines on an unsupported op (folded into ceAllReduceAllowed=false) even
-// with symmetricSupport on, so DDA reclaims the call.
-TEST(Rcclwrap, Gfx950_SymOn_UnsupportedOp_TakesDda)
-{
-    auto comm = std::make_unique<ncclComm>();
-    InitDdaDecisionComm(*comm, "gfx950", 8, 1, /*symmetricSupport=*/true);
-    size_t   count = CountForBytes(8ull * 1024 * 1024, ncclFloat32);
-    EXPECT_TRUE(rcclAllReduceShouldTakeDdaPath(comm.get(), count, ncclFloat32,
-                                               /*symEligible=*/false, /*ceAllReduceAllowed=*/false, /*query=*/false));
-}
-
-// gfx942 with symmetricSupport off: a 6 MiB call is within the 8 MiB gfx942 DDA
-// cap and, with CE unavailable, takes DDA.
-TEST(Rcclwrap, Gfx942_SymOff_MidMsg_TakesDda)
-{
-    auto comm = std::make_unique<ncclComm>();
-    InitDdaDecisionComm(*comm, "gfx942", 8, 1, /*symmetricSupport=*/false);
-    size_t   count = CountForBytes(6ull * 1024 * 1024, ncclFloat32);
-    EXPECT_TRUE(rcclAllReduceShouldTakeDdaPath(comm.get(), count, ncclFloat32,
-                                               /*symEligible=*/false, /*ceAllReduceAllowed=*/false, /*query=*/false));
+                                               /*symEligible=*/false, /*query=*/false));
 }
 
 // gfx942 above its 8 MiB DDA cap: rcclDdaEnabled returns false, so no DDA.
@@ -2609,44 +2682,29 @@ TEST(Rcclwrap, Gfx942_SymOff_AboveCap_NoDda)
     InitDdaDecisionComm(*comm, "gfx942", 8, 1, /*symmetricSupport=*/false);
     size_t   count = CountForBytes(9ull * 1024 * 1024, ncclFloat32);
     EXPECT_FALSE(rcclAllReduceShouldTakeDdaPath(comm.get(), count, ncclFloat32,
-                                                /*symEligible=*/false, /*ceAllReduceAllowed=*/false, /*query=*/false));
+                                                /*symEligible=*/false, /*query=*/false));
 }
 
-// gfx942 with symmetricSupport on and every CE prerequisite met: CE claims the call
-// and the DDA guard yields, even though 6 MiB is within the 8 MiB gfx942 DDA cap.
-// Mirror of Gfx942_SymOff_MidMsg_TakesDda: ceAllReduceAllowed flips the decision.
-TEST(Rcclwrap, Gfx942_SymOn_CeEligible_YieldsToCe)
-{
-    auto comm = std::make_unique<ncclComm>();
-    InitDdaDecisionComm(*comm, "gfx942", 8, 1, /*symmetricSupport=*/true);
-    size_t   count = CountForBytes(6ull * 1024 * 1024, ncclFloat32); // divisible by 8 ranks
-    EXPECT_FALSE(rcclAllReduceShouldTakeDdaPath(comm.get(), count, ncclFloat32,
-                                                /*symEligible=*/false, /*ceAllReduceAllowed=*/true, /*query=*/false));
-}
 
-// gfx942 with symmetricSupport on but CE declines on an unsupported op (folded
-// into ceAllReduceAllowed=false): DDA reclaims the call since 6 MiB is within
-// the 8 MiB gfx942 cap.
-TEST(Rcclwrap, Gfx942_SymOn_UnsupportedOp_TakesDda)
+// gfx942 within its 8 MiB DDA cap: DDA takes the call.
+TEST(Rcclwrap, Gfx942_InRange_TakesDda)
 {
     auto comm = std::make_unique<ncclComm>();
-    InitDdaDecisionComm(*comm, "gfx942", 8, 1, /*symmetricSupport=*/true);
+    InitDdaDecisionComm(*comm, "gfx942", 8, 1, /*symmetricSupport=*/false);
     size_t   count = CountForBytes(6ull * 1024 * 1024, ncclFloat32);
     EXPECT_TRUE(rcclAllReduceShouldTakeDdaPath(comm.get(), count, ncclFloat32,
-                                               /*symEligible=*/false, /*ceAllReduceAllowed=*/false, /*query=*/false));
+                                               /*symEligible=*/false, /*query=*/false));
 }
 
-// gfx1250 forces the DDA fabric path regardless of CE eligibility: the
-// ddaFabricArch1250 short-circuit means CE never claims the call on this arch.
-// ceAllReduceAllowed=true (the call is otherwise fully CE-eligible: 64 MiB, sum,
-// divisible), so the short-circuit is the only reason DDA is chosen here.
+// gfx1250 has DDA enabled at 16 MiB (within the entry threshold); DDA is chosen
+// over CE. CE/DDA arbitration at dispatch is handled by rcclCandSearch, not here.
 TEST(Rcclwrap, Gfx1250_CeEligible_StillTakesDda)
 {
     auto comm = std::make_unique<ncclComm>();
     InitDdaDecisionComm(*comm, "gfx1250", 8, 1, /*symmetricSupport=*/true);
     size_t   count = CountForBytes(16ull * 1024 * 1024, ncclFloat32); // CE-eligible (4-256 MiB window) and within the DDA entry cap, divisible by 8
     EXPECT_TRUE(rcclAllReduceShouldTakeDdaPath(comm.get(), count, ncclFloat32,
-                                               /*symEligible=*/false, /*ceAllReduceAllowed=*/true, /*query=*/false));
+                                               /*symEligible=*/false, /*query=*/false));
 }
 
 // gfx1250 still requires !symEligible: mixed-registration hangs are handled
@@ -2659,7 +2717,7 @@ TEST(Rcclwrap, Gfx1250_SymEligible_RejectsDda)
     InitDdaDecisionComm(comm, "gfx1250", 2, 1, /*symmetricSupport=*/true);
     size_t   count = CountForBytes(256ull * 1024, ncclFloat32);
     EXPECT_FALSE(rcclAllReduceShouldTakeDdaPath(&comm, count, ncclFloat32,
-                                                /*symEligible=*/true, /*ceAllReduceAllowed=*/false, /*query=*/false));
+                                                /*symEligible=*/true, /*query=*/false));
 }
 
 // An arch DDA never runs on: rcclDdaEnabled returns false, so no DDA on any size.
@@ -2669,7 +2727,7 @@ TEST(Rcclwrap, UnsupportedArch_NoDda)
     InitDdaDecisionComm(*comm, "gfx90a", 8, 1, /*symmetricSupport=*/false);
     size_t   count = CountForBytes(2ull * 1024 * 1024, ncclFloat32);
     EXPECT_FALSE(rcclAllReduceShouldTakeDdaPath(comm.get(), count, ncclFloat32,
-                                                /*symEligible=*/false, /*ceAllReduceAllowed=*/false, /*query=*/false));
+                                                /*symEligible=*/false, /*query=*/false));
 }
 
 // ---------------------------------------------------------------------------
@@ -2728,7 +2786,7 @@ TEST(Rcclwrap, Gfx950_TooFewRanks_NoDda)
     InitDdaDecisionComm(*comm, "gfx950", 4, 1, /*symmetricSupport=*/false);
     size_t   count = CountForBytes(2ull * 1024 * 1024, ncclFloat32);
     EXPECT_FALSE(rcclAllReduceShouldTakeDdaPath(comm.get(), count, ncclFloat32,
-                                                /*symEligible=*/false, /*ceAllReduceAllowed=*/false, /*query=*/false));
+                                                /*symEligible=*/false, /*query=*/false));
 }
 
 // Symmetric-kernel eligible buffers win outright: the DDA guard yields (returns false)
@@ -2739,7 +2797,7 @@ TEST(Rcclwrap, SymEligible_YieldsToSymmetricKernel)
     InitDdaDecisionComm(*comm, "gfx950", 8, 1, /*symmetricSupport=*/false);
     size_t   count = CountForBytes(2ull * 1024 * 1024, ncclFloat32);
     EXPECT_FALSE(rcclAllReduceShouldTakeDdaPath(comm.get(), count, ncclFloat32,
-                                                /*symEligible=*/true, /*ceAllReduceAllowed=*/true, /*query=*/false));
+                                                /*symEligible=*/true, /*query=*/false));
 }
 
 // ---------------------------------------------------------------------------
@@ -3048,20 +3106,22 @@ TEST(RcclDdaTierThresholds, Gfx1250_RankScaledCaps)
             ASSERT_NE(comm->archThresholds, nullptr);
             // 4 ranks: totals.
             EXPECT_EQ(rcclDdaLLThreshold(comm.get(), ncclFuncAllReduce), 32 * MiB);
-            EXPECT_EQ(rcclDdaLLThreshold(comm.get(), ncclFuncAllGather), 128 * KiB);
-            EXPECT_EQ(rcclDdaLLThreshold(comm.get(), ncclFuncReduceScatter), 1 * MiB);
+            EXPECT_EQ(rcclDdaLLThreshold(comm.get(), ncclFuncAllGather), 64 * KiB);
+            EXPECT_EQ(rcclDdaLLThreshold(comm.get(), ncclFuncReduceScatter), 4 * MiB);
             EXPECT_EQ(rcclDdaLL128Threshold(comm.get(), ncclFuncAllGather), 128 * MiB);
-            EXPECT_EQ(rcclDdaLL128Threshold(comm.get(), ncclFuncReduceScatter), 64 * MiB);
+            EXPECT_EQ(rcclDdaLL128Threshold(comm.get(), ncclFuncReduceScatter), 224 * MiB);
             EXPECT_EQ(rcclDdaVmmThreshold(comm.get(), ncclFuncReduceScatter), 0ul);
             for (int nRanks : {8, 16, 32, 64}) {
                 comm->nRanks = nRanks;
                 const size_t n = static_cast<size_t>(nRanks);
                 EXPECT_EQ(rcclDdaLLThreshold(comm.get(), ncclFuncAllReduce), n * MiB) << nRanks;
                 EXPECT_EQ(rcclDdaLLThreshold(comm.get(), ncclFuncAllGather), n * 16 * KiB) << nRanks;
-                EXPECT_EQ(rcclDdaLLThreshold(comm.get(), ncclFuncReduceScatter), n * 256 * KiB) << nRanks;
+                EXPECT_EQ(rcclDdaLLThreshold(comm.get(), ncclFuncReduceScatter), n * MiB) << nRanks;
                 EXPECT_EQ(rcclDdaLL128Threshold(comm.get(), ncclFuncAllGather), std::min(n * 16 * MiB, 256 * MiB))
                     << nRanks;
-                EXPECT_EQ(rcclDdaLL128Threshold(comm.get(), ncclFuncReduceScatter), n * 2 * MiB) << nRanks;
+                EXPECT_EQ(rcclDdaLL128Threshold(comm.get(), ncclFuncReduceScatter),
+                          std::min(n * 15 * MiB / 2, 256 * MiB))
+                    << nRanks;
                 EXPECT_EQ(rcclDdaVmmThreshold(comm.get(), ncclFuncReduceScatter), n * 2 * MiB) << nRanks;
                 // Unscaled tiers keep their totals.
                 EXPECT_EQ(rcclDdaLL128Threshold(comm.get(), ncclFuncAllReduce), 256 * MiB) << nRanks;
@@ -3112,6 +3172,32 @@ TEST(RcclDdaTierThresholds, ForceCeScratchPerArch)
     EXPECT_TRUE(rcclGetArchThresholds("gfx942")->forceCeScratch);
 }
 
+// Only the gfx1250 SPX table opens the AllGather TDM window.
+TEST(RcclDdaTierThresholds, SymTdmWindowPerArch)
+{
+    constexpr size_t MiB = 1024 * 1024;
+    const rcclArchThresholds* spx = rcclGetArchThresholds("gfx1250");
+    ASSERT_NE(spx, nullptr);
+    EXPECT_EQ(spx->symTdmMinR2[ncclFuncAllGather], 64 * MiB);
+    EXPECT_EQ(spx->symTdmMaxR2[ncclFuncAllGather], 128 * MiB);
+    EXPECT_EQ(spx->symTdmMaxR2Graph[ncclFuncAllGather], 4096 * MiB);
+    EXPECT_EQ(spx->symTdmCrossTrayMaxR2[ncclFuncAllGather], 512 * MiB);
+    const rcclArchThresholds* tables[] = {spx, rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_DPX),
+                                          rcclGetArchThresholds("gfx950"), rcclGetArchThresholds("gfx942")};
+    for (const rcclArchThresholds* t : tables)
+    {
+        ASSERT_NE(t, nullptr);
+        for (int f = 0; f < RCCL_DDA_FUNC_COUNT; ++f)
+        {
+            if (t == spx && f == ncclFuncAllGather) continue;
+            EXPECT_EQ(t->symTdmMinR2[f], 0u) << f;
+            EXPECT_EQ(t->symTdmMaxR2[f], 0u) << f;
+            EXPECT_EQ(t->symTdmMaxR2Graph[f], 0u) << f;
+            EXPECT_EQ(t->symTdmCrossTrayMaxR2[f], 0u) << f;
+        }
+    }
+}
+
 // RCCL_TUNING_PARTITION_MODE: gfx1250 has its own DPX table, tuned on DPX nodes apart from
 // the SPX one; the other archs return one table for every mode.
 TEST(RcclDdaTierThresholds, TuningPartitionTablePerArch)
@@ -3126,8 +3212,13 @@ TEST(RcclDdaTierThresholds, TuningPartitionTablePerArch)
     // A few of the DPX-only entries, so a DPX value copied back over SPX shows up here.
     EXPECT_EQ(dpx->agRingLL128MaxPerRank, (size_t)16 * 1024 * 1024);
     EXPECT_EQ(dpx->arTreeLLMaxPerRank, (size_t)256 * 1024);
-    EXPECT_EQ(dpx->ddaLLMax[ncclFuncAlltoAll], (size_t)2 * 1024 * 1024);
+    EXPECT_EQ(dpx->ddaLLMax[ncclFuncAlltoAll], (size_t)128 * 1024);
     EXPECT_NE(spx->agRingLL128MaxPerRank, dpx->agRingLL128MaxPerRank);
+    // DPX sets total-byte broadcast ceilings. SPX leaves them 0.
+    EXPECT_EQ(dpx->bcRingLLMaxBytes, (size_t)16 * 1024);
+    EXPECT_EQ(dpx->bcRingLL128MaxBytes, (size_t)512 * 1024 * 1024);
+    EXPECT_EQ(spx->bcRingLLMaxBytes, (size_t)0);
+    EXPECT_EQ(spx->bcRingLL128MaxBytes, (size_t)0);
     for (const char* arch : {"gfx950", "gfx942"})
     {
         EXPECT_EQ(rcclGetArchThresholds(arch), rcclGetArchThresholds(arch, RCCL_TUNING_PARTITION_DPX)) << arch;
@@ -3244,14 +3335,14 @@ TEST(RcclDdaTierThresholds, Gfx1250_EnvZeroDisablesLlTier)
 // that the DDA eligibility predicates require.
 namespace
 {
-void InitA2ADecisionComm(ncclComm& comm, const char* arch, int nRanks)
+void InitA2ADecisionComm(ncclComm& comm, ncclTopoSystem& topo, const char* arch, int nRanks)
 {
     InitDdaDecisionComm(comm, arch, nRanks, /*nNodes=*/1, /*symmetricSupport=*/false);
     comm.archThresholds        = rcclGetArchThresholds(arch);
     // rcclSelectAlltoAll dereferences comm->topo->pivotA2AEnabled as its first
     // predicate (before any arch or DDA logic). Zero-initialised: pivotA2AEnabled=false,
     // so the pivot branch is skipped and falls through to the DDA logic under test.
-    comm.topo                  = new ncclTopoSystem();
+    comm.topo                  = &topo;
     // Sentinel pointers satisfy the non-null checks in the fabric eligibility
     // predicates (the values are never dereferenced by query=true calls).
     comm.bootstrap             = reinterpret_cast<void*>(0x1);
@@ -3264,14 +3355,22 @@ void InitA2ADecisionComm(ncclComm& comm, const char* arch, int nRanks)
         reinterpret_cast<nccl_dda_detail::DdaFabricBarrierState*>(0x5);
     comm.ddaLLEpochDev         = reinterpret_cast<uint32_t*>(0x6);
     comm.ddaLLEpochLen         = DDA_FABRIC_MAXBLOCKS;
+    // Non-fabric archs take the DDA IPC branch, whose eligibility check wants the IPC handles.
+    comm.ddaIpcMemHandler      = reinterpret_cast<ncclIpcMemHandler*>(0x7);
+    comm.ddaIpcBarrierState    = reinterpret_cast<nccl_dda_detail::DdaIpcBarrierState*>(0x8);
 }
 
-ncclResult_t SelectA2A(ncclComm& comm, size_t totalBytes, rcclCollDecision& out)
+// Distinct, 256-byte aligned send and receive buffers; selection reads only their addresses.
+alignas(256) char a2aSendStorage[256];
+alignas(256) char a2aRecvStorage[256];
+
+// count is per-peer bytes / type size; totalBytes = count * type size * nRanks
+ncclResult_t SelectA2A(ncclComm& comm, size_t totalBytes, rcclCollDecision& out, size_t sendOffset = 0,
+                       size_t recvOffset = 0, ncclDataType_t datatype = ncclFloat32)
 {
-    // count is per-peer bytes / sizeof(float); totalBytes = count * sizeof(float) * nRanks
-    size_t count = totalBytes / sizeof(float) / comm.nRanks;
-    return rcclSelectAlltoAll(&comm, /*sendbuff=*/nullptr, /*recvbuff=*/nullptr,
-                              count, ncclFloat32, /*stream=*/nullptr,
+    size_t count = totalBytes / ncclTypeSize(datatype) / comm.nRanks;
+    return rcclSelectAlltoAll(&comm, a2aSendStorage + sendOffset, a2aRecvStorage + recvOffset,
+                              count, datatype, /*stream=*/nullptr,
                               /*query=*/true, /*graphCapturingHint=*/false, &out);
 }
 } // namespace
@@ -3281,7 +3380,8 @@ ncclResult_t SelectA2A(ncclComm& comm, size_t totalBytes, rcclCollDecision& out)
 TEST(RcclAlltoAllDecision, Gfx1250_DdaLL_Band)
 {
     auto comm = std::make_unique<ncclComm>();
-    InitA2ADecisionComm(*comm, "gfx1250", 4);
+    auto topo = std::make_unique<ncclTopoSystem>();
+    InitA2ADecisionComm(*comm, *topo, "gfx1250", 4);
     const rcclArchThresholds* tbl = rcclGetArchThresholds("gfx1250");
     ASSERT_NE(tbl, nullptr);
     const size_t llMax = tbl->ddaLLMax[ncclFuncAlltoAll];
@@ -3294,14 +3394,15 @@ TEST(RcclAlltoAllDecision, Gfx1250_DdaLL_Band)
 }
 
 // gfx1250, message just above the LL ceiling and within the LL128 band
-// (ddaLL128Max[A2A] = 1 MiB total):
+// (ddaLL128Max[A2A] = 8 MiB total):
 // rcclSelectAlltoAll must choose RCCL_DDA_FABRIC_LL128.
 // gfx1250, LL128 tier disabled (ddaLL128Max[A2A] = 0 after commit 363b197e):
 // a message just above the LL ceiling must fall to Direct p2p, not LL128.
 TEST(RcclAlltoAllDecision, Gfx1250_DdaLL128_Band)
 {
     auto comm = std::make_unique<ncclComm>();
-    InitA2ADecisionComm(*comm, "gfx1250", 4);
+    auto topo = std::make_unique<ncclTopoSystem>();
+    InitA2ADecisionComm(*comm, *topo, "gfx1250", 4);
     const rcclArchThresholds* tbl = rcclGetArchThresholds("gfx1250");
     ASSERT_NE(tbl, nullptr);
     const size_t llMax    = tbl->ddaLLMax[ncclFuncAlltoAll];
@@ -3318,12 +3419,12 @@ TEST(RcclAlltoAllDecision, Gfx1250_DdaLL128_Band)
     EXPECT_EQ(dec.algo, RCCL_DDA_FABRIC_LL128);
 }
 
-// gfx1250, message above all DDA caps (ddaVmmMax[A2A] = 0, ddaLL128Max[A2A] = 1 MiB):
-// anything above the LL128 ceiling falls to Direct p2p.
+// gfx1250: above the 8 MiB LL128 cap (VMM off), AlltoAll falls to Direct p2p.
 TEST(RcclAlltoAllDecision, Gfx1250_AboveDdaCap_DirectFallback)
 {
     auto comm = std::make_unique<ncclComm>();
-    InitA2ADecisionComm(*comm, "gfx1250", 4);
+    auto topo = std::make_unique<ncclTopoSystem>();
+    InitA2ADecisionComm(*comm, *topo, "gfx1250", 4);
     const rcclArchThresholds* tbl = rcclGetArchThresholds("gfx1250");
     ASSERT_NE(tbl, nullptr);
     ASSERT_EQ(tbl->ddaVmmMax[ncclFuncAlltoAll], 0ul)
@@ -3340,12 +3441,65 @@ TEST(RcclAlltoAllDecision, Gfx1250_AboveDdaCap_DirectFallback)
     EXPECT_EQ(dec.algo, RCCL_DIRECT_ALLTOALL);
 }
 
+// gfx1250 DPX table, 8 ranks: DDA LL to 128 KiB total, DDA LL128 above it to 16 MiB, DDA VMM past that.
+TEST(RcclAlltoAllDecision, Gfx1250Dpx_A2aBands)
+{
+    auto comm = std::make_unique<ncclComm>();
+    auto topo = std::make_unique<ncclTopoSystem>();
+    InitA2ADecisionComm(*comm, *topo, "gfx1250", 8);
+    comm->archThresholds = rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_DPX);
+    ASSERT_NE(comm->archThresholds, nullptr);
+    const size_t align = 16u * (size_t)comm->nRanks;
+    const std::pair<size_t, int> cases[] = {{128ul << 10, RCCL_DDA_FABRIC_LL},
+                                            {(128ul << 10) + align, RCCL_DDA_FABRIC_LL128},
+                                            {16ul << 20, RCCL_DDA_FABRIC_LL128},
+                                            {(16ul << 20) + align, RCCL_DDA_FABRIC_VMM}};
+    for (const auto& c : cases)
+    {
+        rcclCollDecision dec{};
+        ASSERT_EQ(SelectA2A(*comm, c.first, dec), ncclSuccess) << c.first;
+        EXPECT_EQ(dec.algo, c.second) << c.first;
+    }
+}
+
+// gfx1250 DPX table, 8 ranks, bf16: buffer offsets of 1 and 2 bytes, in and out of place, take the band
+// a 256-byte aligned call takes, so ranks whose buffers differ in alignment pick the same kernel.
+TEST(RcclAlltoAllDecision, Gfx1250Dpx_A2aBandsIgnoreBufferAlignment)
+{
+    auto comm = std::make_unique<ncclComm>();
+    auto topo = std::make_unique<ncclTopoSystem>();
+    InitA2ADecisionComm(*comm, *topo, "gfx1250", 8);
+    comm->archThresholds = rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_DPX);
+    ASSERT_NE(comm->archThresholds, nullptr);
+    const size_t align = 16u * (size_t)comm->nRanks;
+    const std::pair<size_t, int> cases[] = {{128ul << 10, RCCL_DDA_FABRIC_LL},
+                                            {(128ul << 10) + align, RCCL_DDA_FABRIC_LL128},
+                                            {16ul << 20, RCCL_DDA_FABRIC_LL128}};
+    const std::pair<size_t, size_t> offsets[] = {{0, 0}, {2, 0}, {0, 2}, {1, 1}};
+    for (const auto& c : cases)
+    {
+        for (const auto& o : offsets)
+        {
+            rcclCollDecision dec{};
+            ASSERT_EQ(SelectA2A(*comm, c.first, dec, o.first, o.second, ncclBfloat16), ncclSuccess) << c.first;
+            EXPECT_EQ(dec.algo, c.second) << c.first << " send+" << o.first << " recv+" << o.second;
+        }
+        rcclCollDecision dec{};
+        const size_t count = c.first / ncclTypeSize(ncclBfloat16) / comm->nRanks;
+        ASSERT_EQ(rcclSelectAlltoAll(comm.get(), a2aRecvStorage + 2, a2aRecvStorage + 2, count, ncclBfloat16,
+                                     /*stream=*/nullptr, /*query=*/true, /*graphCapturingHint=*/false, &dec),
+                  ncclSuccess);
+        EXPECT_EQ(dec.algo, c.second) << c.first << " in place +2";
+    }
+}
+
 // gfx950, message at its DDA-IPC ceiling (ddaVmmMax[A2A] = 4 MiB):
 // rcclSelectAlltoAll must choose RCCL_DDA_IPC.
 TEST(RcclAlltoAllDecision, Gfx950_DdaIpc_Band)
 {
     auto comm = std::make_unique<ncclComm>();
-    InitA2ADecisionComm(*comm, "gfx950", 8);
+    auto topo = std::make_unique<ncclTopoSystem>();
+    InitA2ADecisionComm(*comm, *topo, "gfx950", 8);
     const rcclArchThresholds* tbl = rcclGetArchThresholds("gfx950");
     ASSERT_NE(tbl, nullptr);
     const size_t ddaMax = tbl->ddaVmmMax[ncclFuncAlltoAll];
@@ -3360,7 +3514,8 @@ TEST(RcclAlltoAllDecision, Gfx950_DdaIpc_Band)
 TEST(RcclAlltoAllDecision, Gfx950_AboveDdaCap_DirectFallback)
 {
     auto comm = std::make_unique<ncclComm>();
-    InitA2ADecisionComm(*comm, "gfx950", 8);
+    auto topo = std::make_unique<ncclTopoSystem>();
+    InitA2ADecisionComm(*comm, *topo, "gfx950", 8);
     const rcclArchThresholds* tbl = rcclGetArchThresholds("gfx950");
     ASSERT_NE(tbl, nullptr);
     const size_t ddaMax = tbl->ddaVmmMax[ncclFuncAlltoAll];
@@ -3378,11 +3533,12 @@ TEST(RcclAlltoAllDecision, Gfx950_AboveDdaCap_DirectFallback)
 TEST(RcclAlltoAllDecision, UnsupportedArch_DirectFallback)
 {
     auto comm = std::make_unique<ncclComm>();
+    auto topo = std::make_unique<ncclTopoSystem>();
     // rcclSelectAlltoAll dereferences comm->topo->pivotA2AEnabled as its first
     // predicate, so a topo is required. InitA2ADecisionComm attaches a zero-
     // initialised ncclTopoSystem (pivotA2AEnabled=false) and the DDA sentinels;
     // gfx90a exits rcclDdaEnabled early, so the sentinels are never dereferenced.
-    InitA2ADecisionComm(*comm, "gfx90a", 8);
+    InitA2ADecisionComm(*comm, *topo, "gfx90a", 8);
 
     rcclCollDecision dec{};
     ASSERT_EQ(rcclSelectAlltoAll(comm.get(), nullptr, nullptr, /*count=*/1024,

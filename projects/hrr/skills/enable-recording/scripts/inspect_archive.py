@@ -48,6 +48,15 @@ EXIT_NO_CROSS_CHECK = 3
 # Emitted by hrr_reader.cpp when the archive format and the reader disagree.
 VERSION_MISMATCH = "Version mismatch"
 
+# A runtime without the user's consent to capture writes nothing and says so on
+# the workload's stderr, while preflight still passes: only this line tells it
+# apart from a runtime that cannot capture. Only the user can give consent.
+CONSENT_HINT = (
+    "If the workload's stderr has a line starting '[HRR capture] HIP_HRR_CAPTURE_OUTPUT "
+    "ignored: capture needs your consent', capture was refused because the user has not "
+    "consented to it. Only the user can give consent, in one of the two ways that line names."
+)
+
 # `events.bin` is hrr_file_header(8) + events + optional hrr_eof_record(44).
 # The header is `{ uint32 magic, uint16 version, uint16 reserved }`, little
 # endian, and its version is the number the reader compares against its own
@@ -83,12 +92,12 @@ COMPRESSED_BUNDLE_MAGIC = b"CCOB"
 # `blobs/` holds buffer contents as well as fat binaries, so the fat binaries
 # are the blobs a `__hipRegisterFatBinary` record names: its hrr_api_id_t, and
 # where the record keeps the hash after the event header and `uint64 ret`.
-# The id is per archive format version (hrr_api_args.h): v8 put two compiler
-# APIs ahead of it, v9 one more, and v10 left it where it was. A v7 archive may
-# hold either numbering, so that and any other version leaves the fat binaries
-# unscanned. tools/tests/test_skill_api_ids.py fails when HRR_VERSION moves
-# past this table.
-REGISTER_FAT_BINARY = {8: 549, 9: 550, 10: 550}
+# The id is per archive format version (hrr_api_args.h): v8 put two runtime
+# APIs ahead of it, v9 one more, v10 left it where it was, v11 and v12 one more
+# each. A v7 archive may hold either numbering, so that and any other version
+# leaves the fat binaries unscanned. tools/tests/test_skill_api_ids.py fails
+# when HRR_VERSION moves past this table.
+REGISTER_FAT_BINARY = {8: 549, 9: 550, 10: 550, 11: 551, 12: 552}
 FAT_BINARY_HASH_OFFSET = EVENT_HEADER_BYTES + 8
 HARDWARE_ID_FIELDS = ("pci", "uuid", "luid")
 # Capture cannot zero what the GPU loads, so `verify` looks there for strings
@@ -827,7 +836,8 @@ def render(report: ArchiveReport) -> str:
         lines.append(
             "The usual cause is that the runtime the workload loaded has no capture "
             "support, or that HIP_HRR_CAPTURE_OUTPUT never reached the process that "
-            "used the GPU. Run 'hrr_capture.sh preflight' in the same environment."
+            "used the GPU. Run 'hrr_capture.sh preflight' in the same environment. "
+            + CONSENT_HINT
         )
         lines.append("")
         lines.append(
@@ -879,7 +889,7 @@ def render(report: ArchiveReport) -> str:
         lines.append(
             "At least one process has no clean-shutdown trailer. That is what a workload "
             "that crashed looks like, and such an archive is still readable and still "
-            "worth sending: the events before the crash are all there. The exception is "
+            "worth keeping: the events before the crash are all there. The exception is "
             "a capture that dropped an event it could not fit in the wire format, which "
             "leaves a hole instead; the workload's stderr then says 'Archive marked "
             "INCOMPLETE'."
@@ -909,9 +919,9 @@ def render(report: ArchiveReport) -> str:
         )
         if len(report.processes) > 1:
             lines.append(
-                "Send the whole archive directory, not one pid-* directory out of it; the "
-                "processes belong together. Replay them one at a time, starting with one "
-                "that did not shut down cleanly."
+                "Share the whole archive directory, as agreed and after reading its NOTICE.txt, "
+                "not one pid-* directory out of it; the processes belong together. Replay "
+                "them one at a time, starting with one that did not shut down cleanly."
             )
     else:
         lines.append("Verdict: empty. Process directories exist but no events were written.")
@@ -960,16 +970,18 @@ def missing_archive(archive: Path) -> tuple[str, dict]:
     """The report for a path capture never created, in both output forms.
 
     Distinct from an empty archive: nothing was created at all, so capture
-    never ran. Usual causes are a runtime with no capture compiled in, or a
-    workload that died before its first HIP call.
+    never ran. Usual causes are a runtime with no capture compiled in, a user
+    who has not consented to capture, or a workload that died before its first
+    HIP call.
     """
     text = (
         f"Archive: {archive}\n\n"
         "The runtime wrote nothing here. Either the runtime it loaded has no capture "
         "support, which is the common case, or the workload failed before its first HIP "
         "call. Run 'hrr_capture.sh preflight' with the workload command in the same "
-        "environment to tell those apart."
-        "\n\nVerdict: no archive. The directory was never created, so capture never started."
+        "environment to tell those apart. "
+        + CONSENT_HINT
+        + "\n\nVerdict: no archive. The directory was never created, so capture never started."
     )
     payload = {
         "archive": str(archive),

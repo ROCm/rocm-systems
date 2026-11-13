@@ -236,9 +236,6 @@ static void divisionErrorHandler(int sig, siginfo_t* info, void* ptr) {
   ::abort();
 }
 
-typedef int (*pthread_setaffinity_fn)(pthread_t, size_t, const cpu_set_t*);
-static pthread_setaffinity_fn pthread_setaffinity_fptr;
-
 static void init() __attribute__((constructor(101)));
 static void init() { Os::init(); }
 static cpu_set_t nativeMask_;
@@ -272,7 +269,6 @@ bool Os::init() {
   processorCount_ = ::sysconf(_SC_NPROCESSORS_CONF);
 
   pthread_getaffinity_np(pthread_self(), sizeof(cpu_set_t), &nativeMask_);
-  pthread_setaffinity_fptr = (pthread_setaffinity_fn)dlsym(RTLD_NEXT, "pthread_setaffinity_np");
 
   return Thread::init();
 }
@@ -973,28 +969,38 @@ bool Os::MemoryMapFile(const char* fname, const void** mmap_ptr, size_t* mmap_si
   return true;
 }
 
-bool Os::MemoryMapFileTruncated(const char* fname, const void** mmap_ptr, size_t mmap_size) {
+bool Os::MemoryMapFileTruncated(const char* fname, const void** mmap_ptr, size_t mmap_size,
+                                ShmMode mode) {
   if (mmap_ptr == nullptr) {
     return false;
   }
 
-  struct stat stat_buf;
-  int fd = shm_open(fname, O_RDWR | O_CREAT, S_IRWXU | S_IRWXG | S_IRWXO);
+  const bool create = (mode == ShmMode::kCreateNew);
+  int fd = create ? shm_open(fname, O_RDWR | O_CREAT | O_EXCL, S_IRUSR | S_IWUSR)
+                  : shm_open(fname, O_RDWR, 0);
   if (fd < 0) {
     return false;
   }
 
-  if (ftruncate(fd, mmap_size) != 0) {
-    return false;
+  bool ok = false;
+  if (create) {
+    ok = (ftruncate(fd, mmap_size) == 0);
+  } else {
+    struct stat stat_buf;
+    ok = (fstat(fd, &stat_buf) == 0) && (static_cast<size_t>(stat_buf.st_size) >= mmap_size);
   }
-  *mmap_ptr = mmap(NULL, mmap_size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+  void* ptr = ok ? mmap(NULL, mmap_size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0) : MAP_FAILED;
 
   close(fd);
 
-  if (*mmap_ptr == MAP_FAILED) {
+  if (ptr == MAP_FAILED) {
+    if (create) {
+      shm_unlink(fname);
+    }
     return false;
   }
 
+  *mmap_ptr = ptr;
   return true;
 }
 
@@ -1141,8 +1147,8 @@ bool NumaNode::GetAffinity() {
   auto iter = affinity->begin();
   // To parse from the end (little-endian layout)
   for (int i = line.size(); i > 0; i -= kHexsPerUInt64) {
-    uint32_t start = (i >= kHexsPerUInt64) ? i - kHexsPerUInt64 : 0;
-    uint32_t len = (i >= kHexsPerUInt64) ? kHexsPerUInt64 : i;
+    uint32_t start = (i >= static_cast<int>(kHexsPerUInt64)) ? i - kHexsPerUInt64 : 0;
+    uint32_t len = (i >= static_cast<int>(kHexsPerUInt64)) ? kHexsPerUInt64 : i;
 
     const std::string chunk = line.substr(start, len);
     const uint64_t value = std::stoul(chunk, nullptr, 16);

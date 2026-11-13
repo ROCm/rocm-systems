@@ -1,0 +1,1 @@
+../../projects/amdsmi/.github/agents/amdsmi-review-architecture.agent.md

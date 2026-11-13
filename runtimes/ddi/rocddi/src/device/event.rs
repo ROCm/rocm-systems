@@ -12,6 +12,42 @@
 use crate::Error;
 use crate::device::Device;
 use crate::driver;
+use std::thread;
+use std::time::{Duration, Instant};
+
+/// Identity of the driver event stream serving an activated device.
+/// Devices from one installed driver share an event source in this backend.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct DeviceEventSourceId(pub(crate) driver::DriverInstanceId);
+
+/// Driver-local identity of the native device named by an event.
+/// Compare values only for devices with the same [`DeviceEventSourceId`].
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct DeviceEventOriginId(u64);
+
+impl DeviceEventOriginId {
+    /// Wraps an identifier defined by the event source's driver.
+    #[must_use]
+    pub const fn from_driver_key(key: u64) -> Self {
+        Self(key)
+    }
+}
+
+impl Device {
+    /// Returns the event source shared by this driver's activated devices.
+    /// This is a cached identity and does not subscribe or query native state.
+    #[must_use]
+    pub fn event_source_id(&self) -> DeviceEventSourceId {
+        DeviceEventSourceId(self.endpoint.driver_instance)
+    }
+
+    /// Returns this device's identity within its driver event source, when
+    /// the backend can attribute events before public endpoint activation.
+    #[must_use]
+    pub fn event_origin_id(&self) -> Option<DeviceEventOriginId> {
+        self.driver_state.event_origin_id()
+    }
+}
 
 /// Driver-independent cause of a GPU virtual-memory fault.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -76,6 +112,8 @@ pub enum GpuResetCause {
 pub struct GpuHardwareException {
     /// Activated endpoint that reported the exception, when known.
     pub endpoint_id: Option<[u8; 16]>,
+    /// Native origin retained even when the endpoint has not been activated.
+    pub origin_id: Option<DeviceEventOriginId>,
     /// Scope of the reset reported by the driver.
     pub scope: GpuResetScope,
     /// Whether the driver reported loss of device memory.
@@ -114,6 +152,38 @@ impl DeviceEventSubscription {
     /// later poll can still retrieve an event recorded before a polling failure.
     pub fn poll(&mut self) -> Result<Option<DeviceEvent>, Error> {
         self.inner.poll()
+    }
+
+    /// Waits up to `timeout` for the next event on this subscription.
+    ///
+    /// A zero timeout observes once. `Busy` means another subscriber has
+    /// filled the retained event buffer and can clear it by reading; native
+    /// driver errors are returned to the caller without an implicit retry.
+    ///
+    /// # Errors
+    /// Reports native polling and driver-lifetime failures.
+    pub fn wait(&mut self, timeout: Duration) -> Result<Option<DeviceEvent>, Error> {
+        let started = Instant::now();
+        loop {
+            let buffer_full = match self.poll() {
+                Ok(Some(event)) => return Ok(Some(event)),
+                Ok(None) => false,
+                Err(error) if error.kind() == crate::ErrorKind::Busy => true,
+                Err(error) => return Err(error),
+            };
+            let remaining = timeout.saturating_sub(started.elapsed());
+            if remaining.is_zero() {
+                return Ok(None);
+            }
+            if buffer_full {
+                // Another subscriber must drain the retained buffer. Its
+                // signaled native event would cause a busy wait here.
+                thread::sleep(remaining.min(Duration::from_millis(1)));
+            } else {
+                self.inner
+                    .wait_native(remaining.min(Duration::from_millis(10)))?;
+            }
+        }
     }
 }
 

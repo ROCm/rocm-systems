@@ -34,6 +34,7 @@
 #include <hip/hiprtc.h>
 #include "hrr_reader.h"
 #include "hrr/hrr_api_args.h"
+#include "hrr/hrr_archive_notice.h"
 
 #include <algorithm>
 #include <cctype>
@@ -46,6 +47,11 @@
 #include <sstream>
 #include <string>
 #include <vector>
+
+#if !defined(_WIN32)
+#include <sys/stat.h>
+#include <unistd.h>
+#endif
 
 // fs, kPathSep, set_proc_search_path, ScopedDir, hrr_single_process_archive,
 // read_text_file, hrr_run_playback, hrr_run_roundtrip, hrr_capture_direct,
@@ -208,7 +214,9 @@ HRR_TEST_CASE(Unit_HRR_CaptureReplayRoundtrip) {
  *   - Spawns Unit_HRR_GpuWorkload_Direct with HIP_HRR_CAPTURE_OUTPUT set and
  *     AMD_LOG_LEVEL=0, capturing stdout and stderr. The capture layer must print
  *     its start notice exactly once, naming the per-process archive directory
- *     and the base directory that child processes record to.
+ *     and the base directory that child processes record to, and ending with
+ *     the short notice that points to NOTICE.txt. The base directory holds
+ *     NOTICE.txt with the full notice.
  *   - Repeats the capture with only stdout captured: the notice is on stderr,
  *     so stdout holds none.
  *   - Spawns the same workload without HIP_HRR_CAPTURE_OUTPUT: no notice.
@@ -245,8 +253,9 @@ HRR_TEST_CASE(Unit_HRR_CaptureStartNotice) {
     // The writer joins the pid-<pid> component with '/' on every platform.
     const std::string expected = kNotice + base + "/" + pid_dir +
                                  " (child processes record to their own pid-* directories in " +
-                                 base + ")";
+                                 base + "). " + kHrrArchiveNoticeShort;
     CHECK(line == expected);
+    CHECK(read_text_file(cap.path / "NOTICE.txt") == kHrrArchiveNotice);
   }
 
   {
@@ -277,6 +286,220 @@ HRR_TEST_CASE(Unit_HRR_CaptureStartNotice) {
     REQUIRE(ret == 0);
     CHECK(count_notices(out) == 0);
   }
+}
+
+/**
+ * Test Description
+ * ----------------
+ *   - Spawns Unit_HRR_DeviceInfo_Direct with HIP_HRR_CAPTURE_OUTPUT set, without
+ *     HIP_HRR_CAPTURE_CONSENT and with an empty configuration directory. The
+ *     workload must still pass and say on stderr that capture needs consent.
+ *     After it exits the capture directory must hold nothing, not even an empty
+ *     or partial pid-* directory: without consent hip_capture_enabled() is
+ *     false, so neither init nor exit writes there.
+ *   - Writes yes to that consent file and captures again: the archive is
+ *     written and its metadata records capture_consent "file".
+ *   - Captures with HIP_HRR_CAPTURE_CONSENT=yes and no consent file, bare and in
+ *     double quotes: the metadata records capture_consent "HIP_HRR_CAPTURE_CONSENT".
+ *   - Writes the yes as Windows PowerShell does, after a UTF-8 or a UTF-16LE
+ *     byte order mark: each still records capture_consent "file".
+ *   - Writes UTF-16LE that is not a yes but would read as one with its NULs
+ *     dropped or a line end looked for byte by byte: U+6579 then s, and yes,
+ *     U+010A, no. Nothing is written.
+ *   - With yes in the file and HIP_HRR_CAPTURE_CONSENT=no, nothing is written:
+ *     a set variable decides the run. The same with " yes ", as only trailing
+ *     blanks are trimmed. With an empty or blank exported variable the file
+ *     consents.
+ *   - With HIP_HRR_CAPTURE_CONSENT holding an escape sequence and 80 more
+ *     bytes, the refusal shows control bytes as '?' and cuts the value at 64.
+ *   - On POSIX, puts a FIFO with no writer at the consent path: the workload
+ *     must finish within a deadline, with nothing written and the file named as
+ *     not regular, instead of blocking HIP's init in the open of the consent file.
+ *     A yes reached through a symbolic link or a second hard link is refused
+ *     the same way, each named.
+ */
+HRR_TEST_CASE(Unit_HRR_CaptureNeedsConsent) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_capture_consent"};
+  ScopedDir cfg{fs::temp_directory_path() / "hrr_capture_consent_cfg"};
+  fs::create_directories(cfg.path);
+  const fs::path consent_file = cfg.path / "hrr" / "capture-consent";
+
+  // env_consent is the value of HIP_HRR_CAPTURE_CONSENT, or nullptr to unset it.
+  auto capture = [&](const char* env_consent, int timeout_seconds = 0) {
+    hrr::test::SpawnProc proc(hrr_self_exe(), /*capture_stdout=*/true, /*capture_stderr=*/true);
+    proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
+    proc.setEnv("AMD_LOG_LEVEL", "0");
+    // The consent file lives under XDG_CONFIG_HOME on POSIX and APPDATA on Windows.
+    proc.setEnv("XDG_CONFIG_HOME", cfg.path.string());
+    proc.setEnv("APPDATA", cfg.path.string());
+    if (env_consent == nullptr) {
+      proc.unsetEnv("HIP_HRR_CAPTURE_CONSENT");
+    } else {
+      proc.setEnv("HIP_HRR_CAPTURE_CONSENT", env_consent);
+    }
+    set_proc_search_path(proc);
+    int ret = proc.runWithTimeout("\"Unit_HRR_DeviceInfo_Direct\"", timeout_seconds);
+    const std::string out = proc.getOutput();
+    INFO("Capture subprocess output:\n" << out);
+    REQUIRE(ret == 0);
+    return out;
+  };
+  auto recorded_consent = [&]() {
+    const fs::path archive = hrr_single_process_archive(cap.path);
+    const std::string metadata =
+        json_object_value(read_text_file(archive / "manifest.json"), "metadata");
+    INFO("Metadata:\n" << metadata);
+    REQUIRE_FALSE(metadata.empty());
+    return json_string_value(metadata, "capture_consent");
+  };
+  // Stricter than hrr_process_archives(), which skips a pid-* directory with no
+  // events.bin: any entry at all would be a partial archive.
+  auto nothing_written = [&]() {
+    std::error_code ec;
+    return !fs::exists(cap.path, ec) || fs::is_empty(cap.path, ec);
+  };
+
+  {
+    const std::string out = capture(nullptr);
+    CHECK(out.find("[HRR capture] HIP_HRR_CAPTURE_OUTPUT ignored: capture needs your consent.") !=
+          std::string::npos);
+    CHECK(nothing_written());
+  }
+
+  {
+    fs::create_directories(consent_file.parent_path());
+    std::ofstream(consent_file) << "yes\n";
+    capture(nullptr);
+    CHECK(recorded_consent() == "file");
+  }
+
+  fs::remove(consent_file);
+  for (const char* yes : {"yes", "\"yes\""}) {
+    fs::remove_all(cap.path);
+    capture(yes);
+    CHECK(recorded_consent() == "HIP_HRR_CAPTURE_CONSENT");
+  }
+
+  // Windows PowerShell's byte order marks: UTF-8, and UTF-16LE from its `>`.
+  for (const std::string& yes :
+       {std::string("\xEF\xBB\xBFyes\r\n"), std::string("\xFF\xFEy\0e\0s\0\r\0\n\0", 12)}) {
+    fs::remove_all(cap.path);
+    std::ofstream(consent_file, std::ios::binary) << yes;
+    capture(nullptr);
+    CHECK(recorded_consent() == "file");
+  }
+
+  // UTF-16LE that is no yes: U+6579 then s, and yes, U+010A, no.
+  for (const std::string& not_yes :
+       {std::string("\xFF\xFE\x79\x65s\0", 6),
+        std::string("\xFF\xFEy\0e\0s\0\x0A\x01n\0o\0", 14)}) {
+    fs::remove_all(cap.path);
+    std::ofstream(consent_file, std::ios::binary) << not_yes;
+    capture(nullptr);
+    CHECK(nothing_written());
+  }
+
+  {
+    fs::remove_all(cap.path);
+    std::ofstream(consent_file) << "yes\n";
+    for (const char* not_yes : {"no", " yes "}) {
+      capture(not_yes);
+      CHECK(nothing_written());
+    }
+    // An exported empty or blank variable counts as unset, so the file decides.
+    for (const char* blank : {"", "   "}) {
+      fs::remove_all(cap.path);
+      capture(blank);
+      CHECK(recorded_consent() == "file");
+    }
+    // The refusal names the value with control bytes as '?' and cut at 64 bytes.
+    fs::remove_all(cap.path);
+    const std::string out = capture(("no\x1b[2J\x07" + std::string(80, 'n')).c_str());
+    CHECK(out.find("is set to 'no?[2J?" + std::string(57, 'n') + "...'") != std::string::npos);
+    CHECK(out.find('\x1b') == std::string::npos);
+  }
+
+#if !defined(_WIN32)
+  {
+    fs::remove_all(cap.path);
+    fs::remove(consent_file);
+    REQUIRE(::mkfifo(consent_file.c_str(), 0600) == 0);
+    const std::string out = capture(nullptr, 60);
+    CHECK(out.find(consent_file.string() + " is not a regular file.") != std::string::npos);
+    CHECK(nothing_written());
+  }
+  {
+    // A yes reached through a symbolic link or another hard link is refused.
+    const fs::path other = cfg.path / "other-yes";
+    std::ofstream(other) << "yes\n";
+    fs::remove(consent_file);
+    fs::create_symlink(other, consent_file);
+    std::string out = capture(nullptr);
+    CHECK(out.find(consent_file.string() + " is a symbolic link.") != std::string::npos);
+    CHECK(nothing_written());
+    fs::remove(consent_file);
+    fs::create_hard_link(other, consent_file);
+    out = capture(nullptr);
+    CHECK(out.find(consent_file.string() + " has more than one hard link.") != std::string::npos);
+    CHECK(nothing_written());
+  }
+#endif
+}
+
+/**
+ * Test Description
+ * ----------------
+ *   - Writes yes to the consent file, gives it to another user and spawns
+ *     Unit_HRR_DeviceInfo_Direct with HIP_HRR_CAPTURE_OUTPUT set and no
+ *     HIP_HRR_CAPTURE_CONSENT. A yes owned by someone else is not this user's,
+ *     so the workload passes and writes nothing.
+ *   - Gives the file back and captures again: the metadata records
+ *     capture_consent "file", so the refusal came from the owner alone.
+ *   - Skipped on Windows, where the file is not checked for an owner, and when
+ *     the test does not run as root, which it needs to give the file away.
+ */
+HRR_TEST_CASE(Unit_HRR_CaptureIgnoresConsentOfOtherUser) {
+#ifdef _WIN32
+  HRR_SKIP("POSIX file owners");
+#else
+  if (::geteuid() != 0) HRR_SKIP("Giving the consent file to another user needs root");
+  ScopedDir cap{fs::temp_directory_path() / "hrr_capture_consent_owner"};
+  ScopedDir cfg{fs::temp_directory_path() / "hrr_capture_consent_owner_cfg"};
+  const fs::path consent_file = cfg.path / "hrr" / "capture-consent";
+  fs::create_directories(consent_file.parent_path());
+  std::ofstream(consent_file) << "yes\n";
+
+  auto capture = [&]() {
+    hrr::test::SpawnProc proc(hrr_self_exe(), /*capture_stdout=*/true, /*capture_stderr=*/true);
+    proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
+    proc.setEnv("AMD_LOG_LEVEL", "0");
+    proc.setEnv("XDG_CONFIG_HOME", cfg.path.string());
+    proc.unsetEnv("HIP_HRR_CAPTURE_CONSENT");
+    set_proc_search_path(proc);
+    const int ret = proc.run("\"Unit_HRR_DeviceInfo_Direct\"");
+    const std::string out = proc.getOutput();
+    INFO("Capture subprocess output:\n" << out);
+    REQUIRE(ret == 0);
+  };
+
+  {
+    // 65534 is nobody on most systems; any uid other than root's will do.
+    REQUIRE(::chown(consent_file.c_str(), 65534, 65534) == 0);
+    capture();
+    std::error_code ec;
+    CHECK((!fs::exists(cap.path, ec) || fs::is_empty(cap.path, ec)));
+  }
+
+  {
+    REQUIRE(::chown(consent_file.c_str(), ::geteuid(), ::getegid()) == 0);
+    capture();
+    const fs::path archive = hrr_single_process_archive(cap.path);
+    const std::string metadata =
+        json_object_value(read_text_file(archive / "manifest.json"), "metadata");
+    INFO("Metadata:\n" << metadata);
+    CHECK(json_string_value(metadata, "capture_consent") == "file");
+  }
+#endif
 }
 
 /**
@@ -315,6 +538,9 @@ HRR_TEST_CASE(Unit_HRR_CaptureExitSummary) {
   REQUIRE(line.size() >= tail.size());
   CHECK(line.compare(line.size() - tail.size(), tail.size(), tail) == 0);
 }
+
+static void hrr_require_recorded_apis(const fs::path& cap_path,
+                                      const std::vector<hrr_api_id_t>& apis);
 
 /**
  * Test Description
@@ -367,6 +593,15 @@ HRR_TEST_CASE(Unit_HRR_AllApisRoundtrip) {
     INFO("Event count: " << arc.events.size());
     REQUIRE(arc.events.size() >= 40);  // ~55 distinct APIs exercised
   }
+
+  // The workload's array copies (block 19) need image support, which gfx950
+  // (MI350X) reports as absent. Where it has them, a capture without the copies
+  // would replay perfectly well, so ask for them.
+  int images = 0;
+  HRR_HIP_CHECK(hipDeviceGetAttribute(&images, hipDeviceAttributeImageSupport, 0));
+  if (images)
+    hrr_require_recorded_apis(cap.path, {HRR_API_HIPARRAY3DCREATE, HRR_API_HIPARRAYCREATE,
+                                         HRR_API_HIPMEMCPY3D, HRR_API_HIPMEMCPY3DASYNC});
 
   // -------------------------------------------------------------------------
   // Step 3: playback + D2H validation (d2[i] == 94)
@@ -1409,6 +1644,125 @@ HRR_TEST_CASE(Unit_HRR_ExtModuleLaunchKernelRoundtrip) {
   hrr_run_roundtrip("Unit_HRR_ExtModuleLaunchKernel_Direct", cap.path);
 }
 
+// Byte offset and event_type of each record in events.bin, in file order, up to
+// the EOF trailer.
+struct RawEvent {
+  size_t   offset;
+  uint16_t type;
+};
+
+static std::vector<RawEvent> hrr_raw_events(const fs::path& events) {
+  uint16_t version = 0;
+  FILE* f = hrr::open_record_stream(events.string(), HRR_MAGIC, HRR_VERSION, &version);
+  REQUIRE(f != nullptr);
+  std::vector<RawEvent> out;
+  std::vector<uint8_t> raw;
+  long off = ftell(f);
+  while (hrr::read_raw_record(f, raw) == hrr::RecordStatus::Ok) {
+    const auto* hdr = reinterpret_cast<const hrr_event_header*>(raw.data());
+    if (hdr->event_type == HRR_EOF_MARKER) break;
+    out.push_back({static_cast<size_t>(off), hdr->event_type});
+    off = ftell(f);
+  }
+  fclose(f);
+  return out;
+}
+
+static void hrr_poke_u16(const fs::path& file, size_t offset, uint16_t value) {
+  std::fstream f(file, std::ios::in | std::ios::out | std::ios::binary);
+  f.seekp(static_cast<std::streamoff>(offset));
+  f.write(reinterpret_cast<const char*>(&value), sizeof(value));
+}
+
+/**
+ * Test Description
+ * ----------------
+ *   - Capture Unit_HRR_ExtModuleLaunchKernel_Direct, which times a
+ *     hipExtModuleLaunchKernel with a start and a stop event and reads
+ *     hipEventElapsedTime. The runtime marks both events inside the launch, so
+ *     the archive must carry a hipEventRecord for the start event before the
+ *     launch record and one for the stop event after it, and the header must
+ *     say so (HRR_FILE_FLAG_EXT_LAUNCH_EVENT_MARKERS).
+ *   - Replay reaches the end without the old-archive fallback warning.
+ *   - Negative control: replace the stop marker with an event replay ignores.
+ *     With the flag set the missing marker is a fault and the replay fails; with
+ *     the flag cleared, as in an archive from before the markers were stored,
+ *     replay warns once and finishes.
+ */
+HRR_TEST_CASE(Unit_HRR_ExtLaunchEventMarkers) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_extlaunch_markers"};
+  hrr_capture_direct("Unit_HRR_ExtModuleLaunchKernel_Direct", cap.path);
+
+  const std::vector<fs::path> archives = hrr_process_archives(cap.path);
+  REQUIRE(archives.size() == 1);
+  const fs::path events = archives.front() / "events.bin";
+  const std::string fallback = "no marker on a live pair";
+
+  hrr::Archive arc;
+  REQUIRE(hrr::load_archive(cap.path.string(), arc));
+  REQUIRE((arc.flags & HRR_FILE_FLAG_EXT_LAUNCH_EVENT_MARKERS) != 0);
+
+  // Start marker, launch, stop marker: in that order and nothing between.
+  size_t launch = arc.events.size();
+  for (size_t i = 0; i < arc.events.size(); ++i)
+    if (arc.events[i].header().event_type == HRR_API_HIPMODULELAUNCHKERNEL)
+      launch = i;
+  REQUIRE(launch > 0);
+  REQUIRE(launch + 1 < arc.events.size());
+  auto record_event = [&](size_t i) -> uint64_t {
+    const hrr::Event& e = arc.events[i];
+    REQUIRE(e.header().event_type == HRR_API_HIPEVENTRECORD);
+    REQUIRE(e.raw_payload.size() >= sizeof(hrr_args_hipEventRecord));
+    return reinterpret_cast<const hrr_args_hipEventRecord*>(e.raw_payload.data())->event;
+  };
+  const uint64_t start_handle = record_event(launch - 1);
+  const uint64_t stop_handle  = record_event(launch + 1);
+  CHECK(start_handle != 0);
+  CHECK(stop_handle != 0);
+  CHECK(start_handle != stop_handle);
+
+  SECTION("replay applies the recorded markers") {
+    auto [ret, out] = hrr_playback_merged(cap.path, "", {{"HIP_HRR_D2H_EXACT", "1"}});
+    INFO("Playback output:\n" << out);
+    CHECK(out.find("D2H checks") != std::string::npos);
+    CHECK(out.find(fallback) == std::string::npos);
+#ifndef _WIN32
+    CHECK(ret == 0);
+#endif
+  }
+
+  const std::vector<RawEvent> raw = hrr_raw_events(events);
+  size_t at = raw.size();
+  for (size_t i = 0; i < raw.size(); ++i)
+    if (raw[i].type == HRR_API_HIPMODULELAUNCHKERNEL) at = i;
+  REQUIRE(at + 1 < raw.size());
+  REQUIRE(raw[at + 1].type == HRR_API_HIPEVENTRECORD);
+  // hipExtStreamCreateWithCUMask has a no-op replay handler that never reads its
+  // payload, so the swapped record is skipped and the stop event is never marked.
+  hrr_poke_u16(events, raw[at + 1].offset, HRR_API_HIPEXTSTREAMCREATEWITHCUMASK);
+
+  SECTION("a marker missing from a marked archive fails the replay") {
+    auto [ret, out] = hrr_playback_merged(cap.path, "", {{"HIP_HRR_D2H_EXACT", "1"}});
+    INFO("Playback output:\n" << out);
+    CHECK(ret != 0);
+    CHECK(out.find("D2H checks") == std::string::npos);
+    CHECK(out.find(fallback) == std::string::npos);
+  }
+
+  SECTION("an archive without the flag keeps the fallback") {
+    const uint16_t flags = static_cast<uint16_t>(
+        arc.flags & ~HRR_FILE_FLAG_EXT_LAUNCH_EVENT_MARKERS);
+    hrr_poke_u16(events, offsetof(hrr_file_header, reserved), flags);
+    auto [ret, out] = hrr_playback_merged(cap.path, "", {{"HIP_HRR_D2H_EXACT", "1"}});
+    INFO("Playback output:\n" << out);
+    CHECK(out.find("D2H checks") != std::string::npos);
+    CHECK(out.find(fallback) != std::string::npos);
+#ifndef _WIN32
+    CHECK(ret == 0);
+#endif
+  }
+}
+
 HRR_TEST_CASE(Unit_HRR_HostFreeRoundtrip) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_hostfree"};
   // Exercises hipHostFree + hipHostMalloc (pinned-host alloc-map lifecycle).
@@ -1649,6 +2003,62 @@ HRR_TEST_CASE(Unit_HRR_ChevronLaunchRoundtrip) {
   // Exercises __hipPushCallConfiguration → hipLaunchByPtr path.
   // min_events=5: malloc + stream + push + launch + D2H.
   hrr_run_roundtrip("Unit_HRR_ChevronLaunch_Direct", cap.path, 5);
+}
+
+// Capture records only successful calls, so the swap event exists only where swap runs.
+static bool hrr_device_supports_batch_swap() {
+  HRR_HIP_CHECK(hipSetDevice(0));
+  void *a = nullptr, *b = nullptr;
+  HRR_HIP_CHECK(hipMalloc(&a, 256));
+  HRR_HIP_CHECK(hipMalloc(&b, 256));
+  void* dsts[] = {a};
+  void* srcs[] = {b};
+  size_t sizes[] = {256};
+  hipExtMemcpyAttributes attr{};
+  attr.srcAccessOrder = hipMemcpySrcAccessOrderStream;
+  attr.flags = hipMemcpyFlagExtOpSwap;
+  size_t attr_idx[] = {0};
+  const hipError_t err = hipExtMemcpyBatchAsync(dsts, srcs, sizes, nullptr, nullptr, nullptr, 1,
+                                                &attr, attr_idx, 1, nullptr);
+  if (err == hipErrorNotSupported) {
+    (void)hipGetLastError();
+  } else {
+    HRR_HIP_CHECK(err);
+    HRR_HIP_CHECK(hipDeviceSynchronize());
+  }
+  HRR_HIP_CHECK(hipFree(a));
+  HRR_HIP_CHECK(hipFree(b));
+  return err != hipErrorNotSupported;
+}
+
+/**
+ * Test Description
+ * ----------------
+ *   - Capture Unit_HRR_ExtMemcpyBatch_Direct and REQUIRE the archive holds a
+ *     hipExtMemcpyBatchAsync event; where swap is supported, REQUIRE the
+ *     asymmetric-swap event with its sizesDst recorded.
+ *   - Replay and validate the D2H readbacks, which only the batches write.
+ */
+HRR_TEST_CASE(Unit_HRR_ExtMemcpyBatchRoundtrip) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_extmemcpybatch"};
+  hrr_run_roundtrip("Unit_HRR_ExtMemcpyBatch_Direct", cap.path);
+
+  hrr::Archive arc;
+  REQUIRE(hrr::load_archive(cap.path.string(), arc));
+  const auto is_batch = [](const hrr::Event& ev) {
+    return ev.header().event_type == HRR_API_HIPEXTMEMCPYBATCHASYNC;
+  };
+  REQUIRE(std::any_of(arc.events.begin(), arc.events.end(), is_batch));
+  if (!hrr_device_supports_batch_swap()) return;
+  REQUIRE(std::any_of(arc.events.begin(), arc.events.end(), [&](const hrr::Event& ev) {
+    if (!is_batch(ev)) return false;
+    hrr_args_hipExtMemcpyBatchAsync a{};
+    if (ev.raw_payload.size() < sizeof(a)) return false;
+    std::memcpy(&a, ev.raw_payload.data(), sizeof(a));
+    size_t sizes_dst = 0;
+    std::memcpy(&sizes_dst, a.sizesDst_bytes, sizeof(sizes_dst));
+    return a.sizesDst_present && a.sizesDst_n == 1 && sizes_dst == 1024;
+  }));
 }
 
 /**

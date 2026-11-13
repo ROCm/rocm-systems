@@ -8,9 +8,6 @@ It's anticipated that ROCProfiler, ROCTracer, `rocprof`, and `rocprofv2` will re
 > [!NOTE]
 > The published documentation is available at [ROCProfiler documentation](https://rocm.docs.amd.com/projects/rocprofiler/en/latest/index.html) in an organized, easy-to-read format, with search and a table of contents.
 
-[![Build Status](
-https://dev.azure.com/ROCm-CI/ROCm-CI/_apis/build/status%2Frocprofiler?repoName=ROCm%2Frocprofiler&branchName=amd-staging)](https://dev.azure.com/ROCm-CI/ROCm-CI/_build/latest?definitionId=143&repoName=ROCm%2Frocprofiler&branchName=amd-staging)
-
 ## Introduction
 
 ROCProfiler is AMD’s tooling infrastructure that provides a hardware specific low level performance analysis interface for the profiling and the tracing of GPU compute applications.

@@ -68,6 +68,10 @@
 #include "inc/amd_hsa_signal.h"
 #include "inc/hsa_ext_amd.h"
 
+#if defined(__x86_64__) || defined(_M_X64)
+#include <emmintrin.h>
+#endif
+
 #if defined(__i386__) || defined(__x86_64__)
 #include <mwaitxintrin.h>
 #ifndef MWAITX_ECX_TIMER_ENABLE
@@ -143,6 +147,9 @@ inline bool CheckSignalCondition(int64_t value, hsa_signal_condition_t condition
 }
 
 namespace core {
+// The same global as in runtime.h, which includes this header and so can't be included here
+extern bool g_use_mwaitx;
+
 class Agent;
 class Signal;
 
@@ -176,8 +183,23 @@ struct SharedSignal {
   }
 
   void GetRawTs(uint64_t& start, uint64_t& end) const {
+#if defined(__x86_64__) || defined(_M_X64)
+    // start_ts and end_ts fill one aligned 16-byte chunk, which a single load reads in one round
+    // trip when the signal is in device memory; two loads would cost two
+    static_assert(offsetof(amd_signal_t, start_ts) % 16 == 0 &&
+                      offsetof(amd_signal_t, end_ts) == offsetof(amd_signal_t, start_ts) + 8,
+                  "start_ts and end_ts must fill one aligned 16-byte chunk");
+    // The load faults on a misaligned address. The signal allocators align to SharedSignal.
+    static_assert(alignof(amd_signal_t) >= 16 && offsetof(SharedSignal, amd_signal) % 16 == 0,
+                  "amd_signal must be 16-byte aligned in every SharedSignal");
+    const __m128i timestamps =
+        _mm_load_si128(reinterpret_cast<const __m128i*>(&amd_signal.start_ts));
+    start = _mm_cvtsi128_si64(timestamps);
+    end = _mm_cvtsi128_si64(_mm_unpackhi_epi64(timestamps, timestamps));
+#else
     start = amd_signal.start_ts;
     end = amd_signal.end_ts;
+#endif
   }
 
   static __forceinline SharedSignal* Convert(hsa_signal_t signal) {
@@ -237,13 +259,14 @@ void FlushDeviceStores(volatile int64_t* stored, int64_t value);
 class SignalBatch {
  public:
   /// @p access_agents are granted access to the arena; empty when @p region is
-  /// already mapped for every agent.
+  /// already mapped for every agent. @p host_access_across_link states that the host reaches the
+  /// arena uncached across PCIe or XGMI; the batch then keeps a host-side copy of each member's
+  /// Signal*, since reading it from the slot would cost link round trips.
   static hsa_status_t Create(uint32_t count, const hsa_signal_value_t* initial_values,
                              bool use_interrupt, const MemoryRegion* region,
                              const std::vector<hsa_agent_t>& access_agents,
-                             bool host_access_via_hdp,
-                             SignalBatch** batch,
-                             hsa_signal_t* signals);
+                             bool host_access_via_hdp, bool host_access_across_link,
+                             SignalBatch** batch, hsa_signal_t* signals);
 
   static __forceinline hsa_amd_signal_batch_t Convert(SignalBatch* batch) {
     const hsa_amd_signal_batch_t handle = {
@@ -259,6 +282,9 @@ class SignalBatch {
 
   bool host_access_via_hdp() const { return host_access_via_hdp_; }
 
+  /// @brief The arena is in device memory the host reaches across PCIe or XGMI, uncached.
+  bool host_access_across_link() const { return host_access_across_link_; }
+
   /// @brief Releases the batch handle. Members stay valid until each is destroyed.
   void ReleaseHandle();
 
@@ -270,17 +296,18 @@ class SignalBatch {
     return num_shadowed_arenas_.load(std::memory_order_relaxed) != 0;
   }
 
-  /// @brief Resolves @p handle from host memory when it names a slot of an arena the host
-  /// reaches across the bus, where reading the slot's id and core_signal would cost a bus round
-  /// trip each. Returns false when @p handle is in no such arena; otherwise sets @p member,
-  /// to nullptr when the member has been destroyed.
+  /// @brief Resolves @p handle from host memory when it names a slot of an arena in device
+  /// memory, which the host reaches across PCIe or XGMI, so reading the slot's id and
+  /// core_signal would cost a round trip each. Returns false when @p handle is in no such arena;
+  /// otherwise sets @p member, to nullptr when the member has been destroyed.
   static bool FindShadowedMember(uint64_t handle, Signal** member);
 
  private:
-  SignalBatch(void* arena, uint32_t count, bool host_access_via_hdp)
+  SignalBatch(void* arena, uint32_t count, bool host_access_via_hdp, bool host_access_across_link)
       : arena_(arena),
         count_(count),
         host_access_via_hdp_(host_access_via_hdp),
+        host_access_across_link_(host_access_across_link),
         references_(1),
         destroyed_(false) {}
   ~SignalBatch();
@@ -300,9 +327,10 @@ class SignalBatch {
   void* const arena_;
   const uint32_t count_;
   const bool host_access_via_hdp_;
+  const bool host_access_across_link_;
 
   /// Host copy of each slot's core_signal, cleared when the member is destroyed. Only
-  /// allocated for arenas the host reaches across the bus.
+  /// allocated when host_access_across_link_.
   std::unique_ptr<std::atomic<Signal*>[]> shadow_members_;
 
   /// One for the batch handle plus one per live member object.
@@ -524,6 +552,8 @@ class Signal {
   /// @param wait_on_all Wait on all signals in the list to satisfy their
   /// conditions if true, else wait on any signal in the list to satisfy its
   /// condition.
+  /// @param wake_async_monitor Ask the async event monitor to rescan when this wait
+  /// may have taken its notification. False for the monitor's own waits.
   /// @return Return the index of the first signal in the list that satisfies
   /// its condition or -1 on a timeout. Note that if \p wait_on_all is true,
   /// then all signals in the list satisfy their conditions, thus the index will
@@ -533,7 +563,7 @@ class Signal {
                                const hsa_signal_value_t* values, uint64_t timeout,
                                hsa_wait_state_t wait_hint,
                                std::vector<hsa_signal_value_t>& satisfying_values,
-                               bool wait_on_all);
+                               bool wait_on_all, bool wake_async_monitor = true);
 
   /// @brief Dedicated funtion to wait on signals that are not of type HSA_EVENTTYPE_SIGNAL
   /// these events can only be received by calling the underlying driver (i.e via the hsaKmtWaitOnMultipleEvents_Ext
@@ -640,6 +670,24 @@ class Signal {
   /// atomics don't reach it and host stores need a flush. Cached so host operations
   /// never read the signal's properties across the bus.
   bool host_access_via_hdp_ = false;
+
+  /// @variable The host caches the value, so MONITORX sees an agent's store to it. A value in
+  /// device memory the host reaches across a link is uncached: the agent's store never reaches
+  /// the monitor, and MWAITX would sleep out its whole timeout.
+  bool host_can_monitor_ = true;
+
+  /// @brief One pause of a polling wait on the value. Where the host can monitor the value,
+  /// MWAITX returns once it changes from @p value_on_last_check or after @p timeout MWAITX
+  /// timer clocks. Otherwise each poll is a read across the link, and the pause only yields
+  /// the core to its SMT sibling.
+  __forceinline void WaitForValueChange(int64_t value_on_last_check, uint32_t timeout) {
+    if (!g_use_mwaitx) return;
+    if (host_can_monitor_) {
+      timer::DoMwaitx(const_cast<int64_t*>(&signal_.value), value_on_last_check, timeout, true);
+    } else {
+      cpu_relax();
+    }
+  }
 
  private:
   static std::mutex ipcLock_;

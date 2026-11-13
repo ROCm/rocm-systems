@@ -77,6 +77,7 @@ groups:
     - rocrtstFunc.Memory_Fragment_Overlap_Test
     - rocrtstFunc.Memory_Fragment_ZeroInit_Test
     - rocrtstFunc.Memory_Fragment_Coherence_Test
+    - rocrtstFunc.Loader_ReservedAddress_Test
     - rocrtstFunc.Concurrent_Init_Test
     - rocrtstFunc.Concurrent_Init_Shutdown_Test
     - rocrtstFunc.Concurrent_Shutdown
@@ -120,6 +121,7 @@ groups:
     - rocrtstFunc.Signal_Batch_Device_Pools
     - rocrtstFunc.Signal_Batch_Async_Copy_Completion
     - rocrtstFunc.Signal_Batch_Negative
+    - rocrtstFunc.Signal_Batch_Negative_InterruptDisabled
     - rocrtstFunc.Signal_Batch_Agent_Queries
     - rocrtstFunc.Signal_Handle_Hints
 

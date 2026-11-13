@@ -198,7 +198,7 @@ void KFDEventTest::SignalEventExt(int gpuNode) {
 
     /* 4. when event_age is 0, hsaKmtWaitOnEvent_Ext always sleeps */
     event_age = 0;
-    ASSERT_EQ_GPU(HSAKMT_STATUS_WAIT_TIMEOUT, HSAKMT_CALL(hsaKmtWaitOnEvent_Ext, m_hsakmt_current_ctx, m_pHsaEvent, g_TestTimeOut, &event_age), gpuNode);
+    ASSERT_EQ_GPU(HSAKMT_STATUS_WAIT_TIMEOUT, HSAKMT_CALL(hsaKmtWaitOnEvent_Ext, m_hsakmt_current_ctx, m_pHsaEvent, 100, &event_age), gpuNode);
 
     /* 5. when event_age is 0, it always stays 0 after the event signals */
     queue.PlaceAndSubmitPacket(PM4ReleaseMemoryPacket(m_FamilyId, false,

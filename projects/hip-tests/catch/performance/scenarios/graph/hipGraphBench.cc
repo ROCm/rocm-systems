@@ -5,6 +5,7 @@
  */
 
 #include <hip_test_common.hh>
+#include <utils.hh>
 
 #include <algorithm>
 #include <array>
@@ -50,20 +51,29 @@ namespace {
 __global__ void null_kernel() {}
 
 // Writes buf[node_id] = sum(buf[deps]) + 1. Dependencies are read at entry and
-// the result is written after delay_cycles, so a successor scheduled before this
-// node finishes reads a stale 0 and the deficit propagates to the exit nodes.
+// the result is written after delay_ticks of the device's fixed-rate clock
+// (SpinTicksPerUs(): wall_clock64() on AMD, where clock64() follows the shader
+// clock and may wrap; clock64() on NVIDIA, which has no wall_clock64()), so a
+// successor scheduled before this node finishes reads a stale 0 and the deficit
+// propagates to the exit nodes.
 __global__ void verify_kernel(int* buf, int node_id, int dep0, int dep1, int dep2, int dep3,
-                              int num_deps, long long delay_cycles) {
+                              int num_deps, long long delay_ticks) {
   int value = 1;
   if (num_deps > 0) value += buf[dep0];
   if (num_deps > 1) value += buf[dep1];
   if (num_deps > 2) value += buf[dep2];
   if (num_deps > 3) value += buf[dep3];
 
-  if (delay_cycles > 0) {
-    const long long start = clock64();
-    while (clock64() - start < delay_cycles) {
+  if (delay_ticks > 0) {
+#if HT_AMD
+    const long long start = wall_clock64();
+    while (wall_clock64() - start < delay_ticks) {
     }
+#else
+    const long long start = clock64();
+    while (clock64() - start < delay_ticks) {
+    }
+#endif
   }
 
   buf[node_id] = value;
@@ -77,7 +87,7 @@ constexpr int kMaxDeps = 4;
 struct VerifyContext {
   int* dev_buf = nullptr;
   int next_id = 0;
-  long long delay_cycles = 0;
+  long long delay_ticks = 0;
 
   std::vector<int> expected;
   std::vector<int> exits;
@@ -115,7 +125,7 @@ int AddNode(hipGraph_t graph, hipGraphNode_t* node, const hipGraphNode_t* deps, 
       std::array<int, 6>{node_id, dep_ids[0], dep_ids[1], dep_ids[2], dep_ids[3], num_deps});
 
   void* args[] = {&verify->dev_buf, &node_args[0], &node_args[1], &node_args[2],
-                  &node_args[3],    &node_args[4], &node_args[5], &verify->delay_cycles};
+                  &node_args[3],    &node_args[4], &node_args[5], &verify->delay_ticks};
   params.func = reinterpret_cast<void*>(verify_kernel);
   params.kernelParams = args;
   HIP_CHECK(hipGraphAddKernelNode(node, graph, deps, num_deps, &params));
@@ -320,11 +330,11 @@ struct VerifyResult {
 
 // Builds the graph with verify_kernel nodes, launches it verify_iters times and
 // compares every node's value with the CPU-computed expectation.
-VerifyResult VerifyTopology(const Topology& topology, int size, long long delay_cycles,
+VerifyResult VerifyTopology(const Topology& topology, int size, long long delay_ticks,
                             int verify_iters) {
   const int num_nodes = topology.node_count(size);
   VerifyContext verify;
-  verify.delay_cycles = delay_cycles;
+  verify.delay_ticks = delay_ticks;
   verify.node_args.reserve(num_nodes);
   verify.expected.reserve(num_nodes);
   HIP_CHECK(hipMalloc(&verify.dev_buf, num_nodes * sizeof(int)));
@@ -456,9 +466,7 @@ HIP_TEST_CASE(Performance_GraphBench_Verify) {
   int device_id;
   HIP_CHECK(hipGetDevice(&device_id));
   HIP_CHECK(hipGetDeviceProperties(&props, device_id));
-  // clockRate is in kHz; fall back to ~1.7 GHz if the runtime reports 0.
-  const long long cycles_per_us = props.clockRate > 0 ? props.clockRate / 1000 : 1700;
-  const long long delay_cycles = static_cast<long long>(verify_delay_us) * cycles_per_us;
+  const long long delay_ticks = static_cast<long long>(verify_delay_us * SpinTicksPerUs());
 
   CONSOLE_PRINT("\nDevice : %s", props.name);
   CONSOLE_PRINT("Mode   : verify (ordering check, size=%d, iters=%d, delay=%dus/node)\n", size,
@@ -469,7 +477,7 @@ HIP_TEST_CASE(Performance_GraphBench_Verify) {
 
   long long total_bad_values = 0;
   for (const auto* topology : topologies) {
-    const VerifyResult result = VerifyTopology(*topology, size, delay_cycles, verify_iters);
+    const VerifyResult result = VerifyTopology(*topology, size, delay_ticks, verify_iters);
     CONSOLE_PRINT("%-10s  %6d  %5d  %10d  %10d  %4d/%-4d  %10lld  %12.3f", topology->name,
                   result.num_nodes, result.num_exits, result.expected_exit_value,
                   result.min_exit_value, result.bad_iters, verify_iters, result.bad_values,

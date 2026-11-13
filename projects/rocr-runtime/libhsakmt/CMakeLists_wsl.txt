@@ -150,7 +150,6 @@ target_include_directories( ${ROCDXG_TARGET}
   $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
   PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/src/dxg
-  ${CMAKE_CURRENT_SOURCE_DIR}/../../../shared/amdgpu-windows-interop/wkmi
   ${CMAKE_CURRENT_SOURCE_DIR}/../runtime
   ${CMAKE_CURRENT_SOURCE_DIR}/../runtime/hsa-runtime/core
   ${CMAKE_CURRENT_SOURCE_DIR}/../runtime/hsa-runtime
@@ -163,9 +162,30 @@ add_compile_definitions(LINUX __AMD64__ LITTLEENDIAN_CPU HSA_LARGE_MODEL)
 # Ensure version macro is defined for this target
 target_compile_definitions(${ROCDXG_TARGET} PRIVATE ROCDXG_VERSION="${ROCDXG_VERSION}")
 
-target_link_directories(${ROCDXG_TARGET} PRIVATE
-  ${CMAKE_CURRENT_SOURCE_DIR}/../../../shared/amdgpu-windows-interop/wkmi/lnx/lib)
-target_link_libraries(${ROCDXG_TARGET} PRIVATE wkmi)
+## Link Windows Kernel Mode Interface
+if (LIB_SRC_BUILD)
+  set(WKMI_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../../wkmi" CACHE PATH "Path to wkmi source directory for direct build")
+endif()
+
+if(WKMI_SRC_DIR AND EXISTS "${WKMI_SRC_DIR}/CMakeLists.txt")
+  ## Build wkmi from source
+  message(STATUS "Building wkmi from source: ${WKMI_SRC_DIR}")
+  set(WKMI_DEBUG_WITH_OPTIMIZATIONS OFF CACHE BOOL "" FORCE)
+  add_subdirectory(${WKMI_SRC_DIR} ${CMAKE_CURRENT_BINARY_DIR}/wkmi)
+  target_include_directories(wkmi PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../runtime/hsa-runtime/core
+    ${CMAKE_CURRENT_SOURCE_DIR}/../runtime
+  )
+  target_link_libraries(${ROCDXG_TARGET} PRIVATE wkmi)
+  target_include_directories(${ROCDXG_TARGET} PRIVATE ${WKMI_SRC_DIR}/lib/inc)
+else()
+  ## Fall back to pre-built libwkmi.a
+  message(STATUS "Using pre-built libwkmi.a (set WKMI_SRC_DIR to build from source)")
+  set(WKMI_INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../../shared/amdgpu-windows-interop/wkmi)
+  target_include_directories(${ROCDXG_TARGET} PRIVATE ${WKMI_INCLUDE_DIR})
+  target_link_directories(${ROCDXG_TARGET} PRIVATE ${WKMI_INCLUDE_DIR}/lnx/lib)
+  target_link_libraries(${ROCDXG_TARGET} PRIVATE wkmi)
+endif()
 
 set_property(TARGET ${ROCDXG_TARGET} PROPERTY LINK_FLAGS ${ROCDXG_LINK_FLAGS})
 

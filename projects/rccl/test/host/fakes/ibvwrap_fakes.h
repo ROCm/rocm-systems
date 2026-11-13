@@ -29,6 +29,9 @@ extern std::function<struct ibv_mr*(struct ibv_pd* /*pd*/, void* /*addr*/, size_
 extern std::function<struct ibv_mr*(struct ibv_pd* /*pd*/, void* /*addr*/, size_t /*length*/, uint64_t /*iova*/,
                                     int /*access*/)>
     g_ibvDirectRegMrIova2;
+extern std::function<ncclResult_t(struct ibv_mr** /*ret*/, struct ibv_pd* /*pd*/, uint64_t /*offset*/,
+                                  size_t /*length*/, uint64_t /*iova*/, int /*fd*/, int /*access*/)>
+    g_ibvRegDmabufMr;
 extern std::function<ncclResult_t(struct ibv_mr* /*mr*/)> g_ibvDeregMr;
 extern std::function<ncclResult_t(struct ibv_mr** /*ret*/, struct ibv_pd* /*pd*/, void* /*addr*/, size_t /*length*/,
                                   int /*access*/)>
@@ -49,6 +52,9 @@ extern std::function<ncclResult_t(struct ibv_qp* /*qp*/)> g_ibvDestroyQp;
 extern std::function<ncclResult_t(struct ibv_context* /*context*/, uint8_t /*port_num*/, int /*index*/,
                                   union ibv_gid* /*gid*/)>
     g_ibvQueryGid;
+extern std::function<ncclResult_t(struct ibv_context* /*context*/, uint8_t /*port_num*/, int /*index*/,
+                                  uint16_t* /*pkey*/)>
+    g_ibvQueryPkey;
 extern std::function<ncclResult_t(struct ibv_qp* /*qp*/, struct ibv_ece* /*ece*/, int* /*supported*/)> g_ibvQueryEce;
 extern std::function<ncclResult_t(struct ibv_qp* /*qp*/, struct ibv_ece* /*ece*/, int* /*supported*/)> g_ibvSetEce;
 extern std::function<const char*(struct ibv_device* /*device*/)> g_ibvGetDeviceName;
