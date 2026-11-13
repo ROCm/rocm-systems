@@ -119,7 +119,15 @@ class TestSet(TestCliBase):
             # Writes each supported sensor's default_power_cap. Replaying the recorded
             # value did not restore it: min and max were written after it, so the cap
             # was left at max.
-            cmds.append((f"amd-smi reset --power-cap --gpu {index}", self.PASS))
+            # Skipped when no sensor reports a cap (e.g. an APU): the sweep had nothing
+            # to change, and the CLI returns NOT_SUPPORTED.
+            limits = self.static_data["gpu_data"][index].get("limit")
+            if isinstance(limits, dict) and any(
+                isinstance(limits.get(sensor), dict)
+                and limits[sensor].get("max_power_limit", "N/A") != "N/A"
+                for sensor in self.power_types
+            ):
+                cmds.append((f"amd-smi reset --power-cap --gpu {index}", self.PASS))
 
             # set --soc-pstate defaults
             soc_pstate = self.static_data["gpu_data"][index]["soc_pstate"]
