@@ -40,6 +40,9 @@ def emit_isa_properties(output_dir: str, specs) -> Path:
         descriptor_sgpr_count_encoded = (
             'true' if profile.descriptor_sgpr_count_encoded else 'false'
         )
+        coincident_ds_ignores_data1 = (
+            'true' if profile.coincident_ds_ignores_data1 else 'false'
+        )
         uses_ttmp_workgroup_ids = 'true' if profile.uses_ttmp_workgroup_ids else 'false'
         uses_cluster_ttmp_workgroup_ids = (
             'true' if profile.uses_cluster_ttmp_workgroup_ids else 'false'
@@ -66,6 +69,7 @@ def emit_isa_properties(output_dir: str, specs) -> Path:
             f'        .supports_wgp_mode = {supports_wgp_mode},',
             f'        .mode_has_gpr_idx_en = {mode_has_gpr_idx_en},',
             f'        .descriptor_sgpr_count_encoded = {descriptor_sgpr_count_encoded},',
+            f'        .coincident_ds_ignores_data1 = {coincident_ds_ignores_data1},',
             f'        .uses_ttmp_workgroup_ids = {uses_ttmp_workgroup_ids},',
             f'        .uses_cluster_ttmp_workgroup_ids = {uses_cluster_ttmp_workgroup_ids},',
             f'        .float_dot_accumulation = {float_dot_accumulation},',
@@ -115,6 +119,7 @@ def emit_isa_properties(output_dir: str, specs) -> Path:
         '  bool supports_wgp_mode = false;',
         '  bool mode_has_gpr_idx_en = false;',
         '  bool descriptor_sgpr_count_encoded = true;',
+        '  bool coincident_ds_ignores_data1 = false;',
         '  bool uses_ttmp_workgroup_ids = false;',
         '  bool uses_cluster_ttmp_workgroup_ids = false;',
         '  FloatDotAccumulation float_dot_accumulation = FloatDotAccumulation::HostF32;',

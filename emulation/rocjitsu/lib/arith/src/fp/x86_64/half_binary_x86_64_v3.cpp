@@ -10,7 +10,7 @@
 #include "fp/binary_impl.h"
 #include "fp/half_binary.h"
 #include "fp/x86_64/minmax_x86_64_v3.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_fp.h"
 
 #include <immintrin.h>
 #include <stdint.h>
@@ -84,19 +84,33 @@ void half_binary_x86_64_v3(uint64_t flags, uint32_t exec_mask, uint32_t instruct
         value = minmax<true, true>(x, y);
       }
 
+      // FP16 sums and products are exact in FP32 near the smallest normal. Tininess is
+      // judged after rounding to nearest even at FP16 precision, so a value within half a
+      // unit of 2^-14 is tiny even though subnormal rounding reaches the smallest normal.
+      auto tiny = _mm256_setzero_si256();
+      if (arithmetic &&
+          ((flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS) || (m & RJ_ARITH_ALU_OMOD_MASK))) {
+        tiny = _mm256_cmpgt_epi32(
+            _mm256_set1_epi32(0x387ff000),
+            _mm256_and_si256(_mm256_castps_si256(value), _mm256_set1_epi32(INT32_MAX)));
+      }
       if (arithmetic && compatibility) {
         // Preserve source priority and the explicit subtraction sign flip on NaNs.
         value = _mm256_blendv_ps(value, y, _mm256_cmp_ps(y, y, _CMP_UNORD_Q));
         value = _mm256_blendv_ps(value, x, _mm256_cmp_ps(x, x, _CMP_UNORD_Q));
       }
       if (m & RJ_ARITH_ALU_OMOD_MASK) {
+        if (arithmetic) {
+          // OMOD turns a tiny result into +0, before Compatibility rounds the others.
+          value = _mm256_andnot_ps(_mm256_castsi256_ps(tiny), value);
+        }
         if (arithmetic && compatibility && !Packed) {
           // Narrow and widen in registers; ordinary Loose needs neither conversion.
           auto narrowed = half_narrow(value, flags & RJ_ARITH_FP16_OVFL);
           value = _mm256_cvtph_ps(_mm_packus_epi32(_mm256_castsi256_si128(narrowed),
                                                    _mm256_extracti128_si256(narrowed, 1)));
         }
-        value = prepare_omod_f16(value, m);
+        value = prepare_omod_f16<arithmetic>(value, m);
         auto scaled = _mm256_mul_ps(value, _mm256_set1_ps(scales[(m >> 6) & 3]));
         if constexpr (arithmetic) {
           value = scaled;
@@ -115,16 +129,21 @@ void half_binary_x86_64_v3(uint64_t flags, uint32_t exec_mask, uint32_t instruct
         value = clamped;
       }
       auto encoded = half_narrow<legacy>(value, flags & RJ_ARITH_FP16_OVFL);
-      if constexpr (Packed && arithmetic) {
-        if (preserve_input_snan && !(m & RJ_ARITH_ALU_CLAMP)) {
-          // Restore selected raw sNaNs after F16C has quieted them.
-          auto raw_half = [](__m256i words, int shift, bool negate) {
+      if constexpr (arithmetic) {
+        // DX10_CLAMP off lets a NaN through CLAMP, so the selected sNaN is restored as well.
+        if (preserve_input_snan &&
+            (!(m & RJ_ARITH_ALU_CLAMP) || (flags & RJ_ARITH_FP_DX10_CLAMP_OFF))) {
+          // Restore selected raw sNaNs, with ABS, NEG and the SUB sign flip, after F16C has
+          // quieted them.
+          auto raw_half = [](__m256i words, int shift, bool abs, bool negate) {
             auto bits = _mm256_and_si256(_mm256_srl_epi32(words, _mm_cvtsi32_si128(shift)),
-                                         _mm256_set1_epi32(0xffff));
+                                         _mm256_set1_epi32(abs ? 0x7fff : 0xffff));
             return _mm256_xor_si256(bits, _mm256_set1_epi32(negate ? 0x8000 : 0));
           };
-          auto raw_x = raw_half(a_words, m & RJ_ARITH_ALU_HIGH_A ? 16 : 0, m & RJ_ARITH_ALU_NEG_A);
-          auto raw_y = raw_half(b_words, m & RJ_ARITH_ALU_HIGH_B ? 16 : 0, m & RJ_ARITH_ALU_NEG_B);
+          auto raw_x = raw_half(a_words, m & RJ_ARITH_ALU_HIGH_A ? 16 : 0, m & RJ_ARITH_ALU_ABS_A,
+                                bool(m & RJ_ARITH_ALU_NEG_A) != (Op == Binary::Subrev));
+          auto raw_y = raw_half(b_words, m & RJ_ARITH_ALU_HIGH_B ? 16 : 0, m & RJ_ARITH_ALU_ABS_B,
+                                bool(m & RJ_ARITH_ALU_NEG_B) != (Op == Binary::Sub));
           auto nan_x = _mm256_cmpgt_epi32(_mm256_and_si256(raw_x, _mm256_set1_epi32(0x7fff)),
                                           _mm256_set1_epi32(0x7c00));
           auto nan_y = _mm256_cmpgt_epi32(_mm256_and_si256(raw_y, _mm256_set1_epi32(0x7fff)),
@@ -133,9 +152,8 @@ void half_binary_x86_64_v3(uint64_t flags, uint32_t exec_mask, uint32_t instruct
           encoded = _mm256_blendv_epi8(encoded, raw_x, nan_x);
         }
       }
+      // Every subnormal result is tiny; OMOD has already zeroed tiny results.
       if (arithmetic && (flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS)) {
-        auto magnitude = _mm256_and_si256(encoded, _mm256_set1_epi32(0x7fff));
-        auto tiny = _mm256_cmpgt_epi32(_mm256_set1_epi32(0x0400), magnitude);
         auto sign = _mm256_and_si256(encoded, _mm256_set1_epi32(0x8000));
         encoded = _mm256_blendv_epi8(encoded, sign, tiny);
       }

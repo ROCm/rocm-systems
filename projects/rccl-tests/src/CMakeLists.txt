@@ -71,6 +71,7 @@ set(COMMON_FILES
   git_version.h
   collector.h
   collector.cu
+  alltoall_hier_policy.h
   common.h
   common.cu
   gin_sdma_allgather_policy.h

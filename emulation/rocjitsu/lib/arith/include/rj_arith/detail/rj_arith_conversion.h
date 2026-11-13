@@ -752,6 +752,334 @@ int rj_arith_v_cvt_nearest_i32_f32_w64(uint64_t flags, uint64_t exec_mask,
 int rj_arith_v_cvt_floor_i32_f32_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                      uint32_t *const *d, const uint32_t *const *a);
 
+// CDNA FP32-to-FP8/BF8 narrowing, inheriting the existing rocjitsu models.
+// gfx942 uses FNUZ; gfx950 uses sign-preserving OCP. gfx1250 FP8 also supports
+// unsigned E5M3 via CLAMP. ABS/NEG apply to floating sources, except in the raw
+// E5M3 path; OMOD is ignored. PK writes the selected half, SR the selected byte
+// using B as the stochastic seed. All other destination bits and inactive lanes
+// are preserved. FP16_OVFL saturates finite overflow. With CLAMP clear, gfx1250
+// converts +infinity to FP8 0x7f (NaN) or BF8 0x7c (infinity), even with FP16_OVFL.
+int rj_arith_v_cvt_pk_fp8_f32_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t mode,
+                                         uint32_t *const *d, const uint32_t *const *a,
+                                         const uint32_t *const *b);
+int rj_arith_v_cvt_pk_fp8_f32_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t mode,
+                                         uint32_t *const *d, const uint32_t *const *a,
+                                         const uint32_t *const *b);
+int rj_arith_v_cvt_sr_fp8_f32_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t mode,
+                                         uint32_t *const *d, const uint32_t *const *a,
+                                         const uint32_t *const *b);
+int rj_arith_v_cvt_sr_fp8_f32_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t mode,
+                                         uint32_t *const *d, const uint32_t *const *a,
+                                         const uint32_t *const *b);
+int rj_arith_v_cvt_pk_bf8_f32_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t mode,
+                                         uint32_t *const *d, const uint32_t *const *a,
+                                         const uint32_t *const *b);
+int rj_arith_v_cvt_pk_bf8_f32_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t mode,
+                                         uint32_t *const *d, const uint32_t *const *a,
+                                         const uint32_t *const *b);
+int rj_arith_v_cvt_sr_bf8_f32_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t mode,
+                                         uint32_t *const *d, const uint32_t *const *a,
+                                         const uint32_t *const *b);
+int rj_arith_v_cvt_sr_bf8_f32_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t mode,
+                                         uint32_t *const *d, const uint32_t *const *a,
+                                         const uint32_t *const *b);
+int rj_arith_v_cvt_pk_fp8_f32_w32_gfx950(uint64_t flags, uint32_t exec_mask, uint64_t mode,
+                                         uint32_t *const *d, const uint32_t *const *a,
+                                         const uint32_t *const *b);
+int rj_arith_v_cvt_pk_fp8_f32_w64_gfx950(uint64_t flags, uint64_t exec_mask, uint64_t mode,
+                                         uint32_t *const *d, const uint32_t *const *a,
+                                         const uint32_t *const *b);
+int rj_arith_v_cvt_sr_fp8_f32_w32_gfx950(uint64_t flags, uint32_t exec_mask, uint64_t mode,
+                                         uint32_t *const *d, const uint32_t *const *a,
+                                         const uint32_t *const *b);
+int rj_arith_v_cvt_sr_fp8_f32_w64_gfx950(uint64_t flags, uint64_t exec_mask, uint64_t mode,
+                                         uint32_t *const *d, const uint32_t *const *a,
+                                         const uint32_t *const *b);
+int rj_arith_v_cvt_pk_bf8_f32_w32_gfx950(uint64_t flags, uint32_t exec_mask, uint64_t mode,
+                                         uint32_t *const *d, const uint32_t *const *a,
+                                         const uint32_t *const *b);
+int rj_arith_v_cvt_pk_bf8_f32_w64_gfx950(uint64_t flags, uint64_t exec_mask, uint64_t mode,
+                                         uint32_t *const *d, const uint32_t *const *a,
+                                         const uint32_t *const *b);
+int rj_arith_v_cvt_sr_bf8_f32_w32_gfx950(uint64_t flags, uint32_t exec_mask, uint64_t mode,
+                                         uint32_t *const *d, const uint32_t *const *a,
+                                         const uint32_t *const *b);
+int rj_arith_v_cvt_sr_bf8_f32_w64_gfx950(uint64_t flags, uint64_t exec_mask, uint64_t mode,
+                                         uint32_t *const *d, const uint32_t *const *a,
+                                         const uint32_t *const *b);
+int rj_arith_v_cvt_pk_fp8_f32_w32_gfx1250(uint64_t flags, uint32_t exec_mask, uint64_t mode,
+                                          uint32_t *const *d, const uint32_t *const *a,
+                                          const uint32_t *const *b);
+int rj_arith_v_cvt_pk_fp8_f32_w64_gfx1250(uint64_t flags, uint64_t exec_mask, uint64_t mode,
+                                          uint32_t *const *d, const uint32_t *const *a,
+                                          const uint32_t *const *b);
+int rj_arith_v_cvt_sr_fp8_f32_w32_gfx1250(uint64_t flags, uint32_t exec_mask, uint64_t mode,
+                                          uint32_t *const *d, const uint32_t *const *a,
+                                          const uint32_t *const *b);
+int rj_arith_v_cvt_sr_fp8_f32_w64_gfx1250(uint64_t flags, uint64_t exec_mask, uint64_t mode,
+                                          uint32_t *const *d, const uint32_t *const *a,
+                                          const uint32_t *const *b);
+
+int rj_arith_v_cvt_pk_bf8_f32_w32_gfx1250(uint64_t flags, uint32_t exec_mask, uint64_t mode,
+                                          uint32_t *const *d, const uint32_t *const *a,
+                                          const uint32_t *const *b);
+int rj_arith_v_cvt_pk_bf8_f32_w64_gfx1250(uint64_t flags, uint64_t exec_mask, uint64_t mode,
+                                          uint32_t *const *d, const uint32_t *const *a,
+                                          const uint32_t *const *b);
+int rj_arith_v_cvt_sr_bf8_f32_w32_gfx1250(uint64_t flags, uint32_t exec_mask, uint64_t mode,
+                                          uint32_t *const *d, const uint32_t *const *a,
+                                          const uint32_t *const *b);
+int rj_arith_v_cvt_sr_bf8_f32_w64_gfx1250(uint64_t flags, uint64_t exec_mask, uint64_t mode,
+                                          uint32_t *const *d, const uint32_t *const *a,
+                                          const uint32_t *const *b);
+
+// gfx1250 FP16-to-FP8/BF8 conversions; each operand occupies one VGPR.
+// Packed RNE converts both A halves to two bytes in low/HIGH_D destination half.
+// SR converts low/HIGH_A using seed B to CVT_BYTE_0..3 of D. Other D bits survive.
+// ABS_A/NEG_A apply to both packed A halves; SR ignores source modifiers.
+// CLAMP selects raw unsigned E5M3 for FP8; OMOD and FP16_OVFL are ignored.
+// Inactive lanes remain unchanged.
+int rj_arith_v_cvt_pk_fp8_f16_w32(uint64_t flags, uint32_t exec_mask, uint64_t mode,
+                                  uint32_t *const *d, const uint32_t *const *a);
+int rj_arith_v_cvt_pk_fp8_f16_w64(uint64_t flags, uint64_t exec_mask, uint64_t mode,
+                                  uint32_t *const *d, const uint32_t *const *a);
+int rj_arith_v_cvt_sr_fp8_f16_w32(uint64_t flags, uint32_t exec_mask, uint64_t mode,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  const uint32_t *const *b);
+int rj_arith_v_cvt_sr_fp8_f16_w64(uint64_t flags, uint64_t exec_mask, uint64_t mode,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  const uint32_t *const *b);
+int rj_arith_v_cvt_pk_bf8_f16_w32(uint64_t flags, uint32_t exec_mask, uint64_t mode,
+                                  uint32_t *const *d, const uint32_t *const *a);
+int rj_arith_v_cvt_pk_bf8_f16_w64(uint64_t flags, uint64_t exec_mask, uint64_t mode,
+                                  uint32_t *const *d, const uint32_t *const *a);
+int rj_arith_v_cvt_sr_bf8_f16_w32(uint64_t flags, uint32_t exec_mask, uint64_t mode,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  const uint32_t *const *b);
+int rj_arith_v_cvt_sr_bf8_f16_w64(uint64_t flags, uint64_t exec_mask, uint64_t mode,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  const uint32_t *const *b);
+
+// gfx942 widens FNUZ; gfx950 (also used by gfx1250) widens OCP, preserving NaN signs.
+// These inherit Rocjitsu's format conversion model, without new hardware characterization.
+// Single conversions select CVT_BYTE; packed conversions select a half with HIGH_A and write two
+// VGPRs.
+int rj_arith_v_cvt_f32_fp8_w32_gfx942(uint64_t flags, uint32_t exec_mask,
+                                      uint64_t instruction_flags, uint32_t *const *d,
+                                      const uint32_t *const *a);
+int rj_arith_v_cvt_f32_fp8_w64_gfx942(uint64_t flags, uint64_t exec_mask,
+                                      uint64_t instruction_flags, uint32_t *const *d,
+                                      const uint32_t *const *a);
+int rj_arith_v_cvt_f32_bf8_w32_gfx942(uint64_t flags, uint32_t exec_mask,
+                                      uint64_t instruction_flags, uint32_t *const *d,
+                                      const uint32_t *const *a);
+int rj_arith_v_cvt_f32_bf8_w64_gfx942(uint64_t flags, uint64_t exec_mask,
+                                      uint64_t instruction_flags, uint32_t *const *d,
+                                      const uint32_t *const *a);
+int rj_arith_v_cvt_pk_f32_fp8_w32_gfx942(uint64_t flags, uint32_t exec_mask,
+                                         uint64_t instruction_flags, uint32_t *const *d,
+                                         const uint32_t *const *a);
+int rj_arith_v_cvt_pk_f32_fp8_w64_gfx942(uint64_t flags, uint64_t exec_mask,
+                                         uint64_t instruction_flags, uint32_t *const *d,
+                                         const uint32_t *const *a);
+int rj_arith_v_cvt_pk_f32_bf8_w32_gfx942(uint64_t flags, uint32_t exec_mask,
+                                         uint64_t instruction_flags, uint32_t *const *d,
+                                         const uint32_t *const *a);
+int rj_arith_v_cvt_pk_f32_bf8_w64_gfx942(uint64_t flags, uint64_t exec_mask,
+                                         uint64_t instruction_flags, uint32_t *const *d,
+                                         const uint32_t *const *a);
+int rj_arith_v_cvt_f32_fp8_w32_gfx950(uint64_t flags, uint32_t exec_mask,
+                                      uint64_t instruction_flags, uint32_t *const *d,
+                                      const uint32_t *const *a);
+int rj_arith_v_cvt_f32_fp8_w64_gfx950(uint64_t flags, uint64_t exec_mask,
+                                      uint64_t instruction_flags, uint32_t *const *d,
+                                      const uint32_t *const *a);
+int rj_arith_v_cvt_f32_bf8_w32_gfx950(uint64_t flags, uint32_t exec_mask,
+                                      uint64_t instruction_flags, uint32_t *const *d,
+                                      const uint32_t *const *a);
+int rj_arith_v_cvt_f32_bf8_w64_gfx950(uint64_t flags, uint64_t exec_mask,
+                                      uint64_t instruction_flags, uint32_t *const *d,
+                                      const uint32_t *const *a);
+int rj_arith_v_cvt_pk_f32_fp8_w32_gfx950(uint64_t flags, uint32_t exec_mask,
+                                         uint64_t instruction_flags, uint32_t *const *d,
+                                         const uint32_t *const *a);
+int rj_arith_v_cvt_pk_f32_fp8_w64_gfx950(uint64_t flags, uint64_t exec_mask,
+                                         uint64_t instruction_flags, uint32_t *const *d,
+                                         const uint32_t *const *a);
+int rj_arith_v_cvt_pk_f32_bf8_w32_gfx950(uint64_t flags, uint32_t exec_mask,
+                                         uint64_t instruction_flags, uint32_t *const *d,
+                                         const uint32_t *const *a);
+int rj_arith_v_cvt_pk_f32_bf8_w64_gfx950(uint64_t flags, uint64_t exec_mask,
+                                         uint64_t instruction_flags, uint32_t *const *d,
+                                         const uint32_t *const *a);
+
+// gfx1250 single FP8 widening uses CLAMP as an unsigned E5M3 format selector.
+int rj_arith_v_cvt_f32_fp8_w32_gfx1250(uint64_t flags, uint32_t exec_mask,
+                                       uint64_t instruction_flags, uint32_t *const *d,
+                                       const uint32_t *const *a);
+int rj_arith_v_cvt_f32_fp8_w64_gfx1250(uint64_t flags, uint64_t exec_mask,
+                                       uint64_t instruction_flags, uint32_t *const *d,
+                                       const uint32_t *const *a);
+
+// gfx1250 FP8/BF8 to FP16 conversions: each operand occupies one VGPR.
+// Single forms select a source byte with CVT_BYTE_0..3 and write low/HIGH_D half.
+// Packed forms select low/HIGH_A source half and replace both destination halves.
+// CLAMP selects unsigned E5M3 only for single FP8; FP16_OVFL saturates finite overflow.
+// Other arithmetic modifiers are ignored. Inactive destination lanes are preserved.
+int rj_arith_v_cvt_f16_fp8_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                               uint32_t *const *d, const uint32_t *const *a);
+int rj_arith_v_cvt_f16_fp8_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                               uint32_t *const *d, const uint32_t *const *a);
+int rj_arith_v_cvt_pk_f16_fp8_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a);
+int rj_arith_v_cvt_pk_f16_fp8_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a);
+int rj_arith_v_cvt_f16_bf8_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                               uint32_t *const *d, const uint32_t *const *a);
+int rj_arith_v_cvt_f16_bf8_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                               uint32_t *const *d, const uint32_t *const *a);
+int rj_arith_v_cvt_pk_f16_bf8_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a);
+int rj_arith_v_cvt_pk_f16_bf8_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a);
+// PKACCUM truncates/saturates A to U8, inserts it at byte (B & 3), and retains other bytes of C.
+// ABS_A, NEG_A, CLAMP, OMOD and guest rounding/input flushing are accepted but ignored.
+// Compatibility retains this legacy policy; strict bit-exact and FP status are unsupported.
+int rj_arith_v_cvt_pkaccum_u8_f32_w32(uint64_t flags, uint32_t exec_mask,
+                                      uint64_t instruction_flags, uint32_t *const *d,
+                                      const uint32_t *const *a, const uint32_t *const *b,
+                                      const uint32_t *const *c, uint32_t *trapsts);
+int rj_arith_v_cvt_pkaccum_u8_f32_w64(uint64_t flags, uint64_t exec_mask,
+                                      uint64_t instruction_flags, uint32_t *const *d,
+                                      const uint32_t *const *a, const uint32_t *const *b,
+                                      const uint32_t *const *c, uint32_t *trapsts);
+
+// BF16 conversions inherited from gfx950/gfx1250 rocjitsu models. Each operand
+// occupies one VGPR. Widening selects HIGH_A; single SR writes HIGH_D or low half.
+// Packed forms replace the whole word. SR uses B as seed, or C for packed SR;
+// packed SR uses C's low/high half as independent addends. FP16_OVFL saturates finite overflow.
+// Packed RNE supports ABS/NEG on A/B; single-result SR supports ABS/NEG on A.
+// Packed SR consumes the low/high 16-bit addends of C independently and ignores
+// source sign modifiers. Other arithmetic modifiers are ignored; inactive lanes remain unchanged.
+int rj_arith_v_cvt_f32_bf16_w32(uint64_t flags, uint32_t exec_mask, uint64_t mode,
+                                uint32_t *const *d, const uint32_t *const *a);
+int rj_arith_v_cvt_f32_bf16_w64(uint64_t flags, uint64_t exec_mask, uint64_t mode,
+                                uint32_t *const *d, const uint32_t *const *a);
+int rj_arith_v_cvt_pk_bf16_f32_w32(uint64_t flags, uint32_t exec_mask, uint64_t mode,
+                                   uint32_t *const *d, const uint32_t *const *a,
+                                   const uint32_t *const *b);
+int rj_arith_v_cvt_pk_bf16_f32_w64(uint64_t flags, uint64_t exec_mask, uint64_t mode,
+                                   uint32_t *const *d, const uint32_t *const *a,
+                                   const uint32_t *const *b);
+int rj_arith_v_cvt_sr_bf16_f32_w32(uint64_t flags, uint32_t exec_mask, uint64_t mode,
+                                   uint32_t *const *d, const uint32_t *const *a,
+                                   const uint32_t *const *b);
+int rj_arith_v_cvt_sr_bf16_f32_w64(uint64_t flags, uint64_t exec_mask, uint64_t mode,
+                                   uint32_t *const *d, const uint32_t *const *a,
+                                   const uint32_t *const *b);
+int rj_arith_v_cvt_sr_pk_bf16_f32_w32(uint64_t flags, uint32_t exec_mask, uint64_t mode,
+                                      uint32_t *const *d, const uint32_t *const *a,
+                                      const uint32_t *const *b, const uint32_t *const *c);
+int rj_arith_v_cvt_sr_pk_bf16_f32_w64(uint64_t flags, uint64_t exec_mask, uint64_t mode,
+                                      uint32_t *const *d, const uint32_t *const *a,
+                                      const uint32_t *const *b, const uint32_t *const *c);
+
+// FP16 narrowing uses the same operand, seed, selector, overflow and preservation
+// contracts as the BF16 forms above. Packed RNE preserves truncated NaN payloads;
+// stochastic rounding produces a signed all-ones NaN. Packed FP16 forms support
+// Loose, allow-Loose and Compatibility only: their inherited model is not
+// qualified for strict bit-exact semantics.
+int rj_arith_v_cvt_pk_f16_f32_w32(uint64_t flags, uint32_t exec_mask, uint64_t mode,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  const uint32_t *const *b);
+int rj_arith_v_cvt_pk_f16_f32_w64(uint64_t flags, uint64_t exec_mask, uint64_t mode,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  const uint32_t *const *b);
+int rj_arith_v_cvt_sr_f16_f32_w32(uint64_t flags, uint32_t exec_mask, uint64_t mode,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  const uint32_t *const *b);
+int rj_arith_v_cvt_sr_f16_f32_w64(uint64_t flags, uint64_t exec_mask, uint64_t mode,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  const uint32_t *const *b);
+int rj_arith_v_cvt_sr_pk_f16_f32_w32(uint64_t flags, uint32_t exec_mask, uint64_t mode,
+                                     uint32_t *const *d, const uint32_t *const *a,
+                                     const uint32_t *const *b, const uint32_t *const *c);
+int rj_arith_v_cvt_sr_pk_f16_f32_w64(uint64_t flags, uint64_t exec_mask, uint64_t mode,
+                                     uint32_t *const *d, const uint32_t *const *a,
+                                     const uint32_t *const *b, const uint32_t *const *c);
+
+// gfx942/gfx950 conversions: a low-half destination zero-extends into its VGPR;
+// HIGH_D preserves the low half. Conversions to FP16 additionally accept CVT_SDWA
+// for inherited scale-before-rounding arithmetic. FP status is currently unsupported.
+int rj_arith_v_cvt_f16_i16_w32_gfx942(uint64_t flags, uint32_t exec_mask,
+                                      uint64_t instruction_flags, uint32_t *const *d,
+                                      const uint32_t *const *a, uint32_t *trapsts);
+int rj_arith_v_cvt_f16_i16_w64_gfx942(uint64_t flags, uint64_t exec_mask,
+                                      uint64_t instruction_flags, uint32_t *const *d,
+                                      const uint32_t *const *a, uint32_t *trapsts);
+int rj_arith_v_cvt_f16_u16_w32_gfx942(uint64_t flags, uint32_t exec_mask,
+                                      uint64_t instruction_flags, uint32_t *const *d,
+                                      const uint32_t *const *a, uint32_t *trapsts);
+int rj_arith_v_cvt_f16_u16_w64_gfx942(uint64_t flags, uint64_t exec_mask,
+                                      uint64_t instruction_flags, uint32_t *const *d,
+                                      const uint32_t *const *a, uint32_t *trapsts);
+int rj_arith_v_cvt_i16_f16_w32_gfx942(uint64_t flags, uint32_t exec_mask,
+                                      uint64_t instruction_flags, uint32_t *const *d,
+                                      const uint32_t *const *a, uint32_t *trapsts);
+int rj_arith_v_cvt_i16_f16_w64_gfx942(uint64_t flags, uint64_t exec_mask,
+                                      uint64_t instruction_flags, uint32_t *const *d,
+                                      const uint32_t *const *a, uint32_t *trapsts);
+int rj_arith_v_cvt_u16_f16_w32_gfx942(uint64_t flags, uint32_t exec_mask,
+                                      uint64_t instruction_flags, uint32_t *const *d,
+                                      const uint32_t *const *a, uint32_t *trapsts);
+int rj_arith_v_cvt_u16_f16_w64_gfx942(uint64_t flags, uint64_t exec_mask,
+                                      uint64_t instruction_flags, uint32_t *const *d,
+                                      const uint32_t *const *a, uint32_t *trapsts);
+int rj_arith_v_cvt_f16_f32_w32_gfx942(uint64_t flags, uint32_t exec_mask,
+                                      uint64_t instruction_flags, uint32_t *const *d,
+                                      const uint32_t *const *a, uint32_t *trapsts);
+int rj_arith_v_cvt_f16_f32_w64_gfx942(uint64_t flags, uint64_t exec_mask,
+                                      uint64_t instruction_flags, uint32_t *const *d,
+                                      const uint32_t *const *a, uint32_t *trapsts);
+
+// gfx942/gfx950 normalized FP16 conversions zero-extend low-half destinations;
+// HIGH_D preserves the low half. Guest input flushing applies; rounding is nearest-even.
+int rj_arith_v_cvt_norm_i16_f16_w32_gfx942(uint64_t flags, uint32_t exec_mask,
+                                           uint64_t instruction_flags, uint32_t *const *d,
+                                           const uint32_t *const *a);
+int rj_arith_v_cvt_norm_i16_f16_w64_gfx942(uint64_t flags, uint64_t exec_mask,
+                                           uint64_t instruction_flags, uint32_t *const *d,
+                                           const uint32_t *const *a);
+int rj_arith_v_cvt_norm_u16_f16_w32_gfx942(uint64_t flags, uint32_t exec_mask,
+                                           uint64_t instruction_flags, uint32_t *const *d,
+                                           const uint32_t *const *a);
+int rj_arith_v_cvt_norm_u16_f16_w64_gfx942(uint64_t flags, uint64_t exec_mask,
+                                           uint64_t instruction_flags, uint32_t *const *d,
+                                           const uint32_t *const *a);
+
+// gfx942/gfx950: saturate two signed INT16 values to U8, then zero-extend the packed
+// result for low-half destinations. HIGH_D instead replaces the high half and preserves
+// the low half. CLAMP is accepted and ignored.
+int rj_arith_v_sat_pk_u8_i16_w32_gfx942(uint64_t flags, uint32_t exec_mask,
+                                        uint64_t instruction_flags, uint32_t *const *d,
+                                        const uint32_t *const *a);
+int rj_arith_v_sat_pk_u8_i16_w64_gfx942(uint64_t flags, uint64_t exec_mask,
+                                        uint64_t instruction_flags, uint32_t *const *d,
+                                        const uint32_t *const *a);
+
+// Saturate four signed/unsigned bytes to four packed nibbles. HIGH_D selects
+// the destination halfword; preserve its other half and inactive lanes. CLAMP
+// is ignored. DPP8/DPP16 source routing is supported. One VGPR per operand;
+// whole-register aliases are supported.
+int rj_arith_v_sat_pk4_i4_i8_w32(uint64_t flags, uint32_t exec_mask, uint64_t mode,
+                                 uint32_t *const *d, const uint32_t *const *a);
+int rj_arith_v_sat_pk4_u4_u8_w32(uint64_t flags, uint32_t exec_mask, uint64_t mode,
+                                 uint32_t *const *d, const uint32_t *const *a);
+int rj_arith_v_sat_pk4_i4_i8_w64(uint64_t flags, uint64_t exec_mask, uint64_t mode,
+                                 uint32_t *const *d, const uint32_t *const *a);
+int rj_arith_v_sat_pk4_u4_u8_w64(uint64_t flags, uint64_t exec_mask, uint64_t mode,
+                                 uint32_t *const *d, const uint32_t *const *a);
+
 #ifdef __cplusplus
 } // extern "C"
 #endif

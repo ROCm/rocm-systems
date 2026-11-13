@@ -15,6 +15,7 @@
 #include <array>
 #include <cstdint>
 #include <cstdlib>
+#include <unistd.h>
 
 int main(int argc, char **argv) {
   ::testing::InitGoogleTest(&argc, argv);
@@ -125,6 +126,56 @@ TEST(HipMemcpyTest, RoundTripInt) {
     EXPECT_EQ(dst[i], src[i]) << "mismatch at index " << i;
 
   (void)hipFree(d_buf);
+}
+
+TEST(HipMemcpyTest, VmmShareableAliasesRoundTrip) {
+  hipMemAllocationProp property{};
+  property.type = hipMemAllocationTypePinned;
+  property.location.type = hipMemLocationTypeDevice;
+  property.location.id = 0;
+  property.requestedHandleType = hipMemHandleTypePosixFileDescriptor;
+  size_t granularity = 0;
+  HIP_ASSERT(
+      hipMemGetAllocationGranularity(&granularity, &property, hipMemAllocationGranularityMinimum));
+  ASSERT_GT(granularity, 0u);
+
+  hipMemGenericAllocationHandle_t allocation{}, imported{};
+  HIP_ASSERT(hipMemCreate(&allocation, granularity, &property, 0));
+  int shared_fd = -1;
+  HIP_ASSERT(hipMemExportToShareableHandle(&shared_fd, allocation,
+                                           hipMemHandleTypePosixFileDescriptor, 0));
+  ASSERT_GE(shared_fd, 0);
+  HIP_ASSERT(hipMemImportFromShareableHandle(
+      &imported, reinterpret_cast<void *>(static_cast<intptr_t>(shared_fd)),
+      hipMemHandleTypePosixFileDescriptor));
+
+  void *original_address = nullptr;
+  void *imported_address = nullptr;
+  HIP_ASSERT(hipMemAddressReserve(&original_address, granularity, 0, nullptr, 0));
+  HIP_ASSERT(hipMemAddressReserve(&imported_address, granularity, 0, nullptr, 0));
+  HIP_ASSERT(hipMemMap(original_address, granularity, 0, allocation, 0));
+  HIP_ASSERT(hipMemMap(imported_address, granularity, 0, imported, 0));
+  hipMemAccessDesc access{};
+  access.location = property.location;
+  access.flags = hipMemAccessFlagsProtReadWrite;
+  HIP_ASSERT(hipMemSetAccess(original_address, granularity, &access, 1));
+  HIP_ASSERT(hipMemSetAccess(imported_address, granularity, &access, 1));
+
+  std::vector<uint8_t> source(granularity), result(granularity);
+  for (size_t index = 0; index < granularity; ++index)
+    source[index] = static_cast<uint8_t>(index * 17 + index / 4096);
+  HIP_ASSERT(hipMemcpy(original_address, source.data(), granularity, hipMemcpyHostToDevice));
+  HIP_ASSERT(hipMemcpy(result.data(), imported_address, granularity, hipMemcpyDeviceToHost));
+  EXPECT_EQ(result, source);
+
+  HIP_ASSERT(hipMemUnmap(imported_address, granularity));
+  HIP_ASSERT(hipMemUnmap(original_address, granularity));
+  HIP_ASSERT(hipMemAddressFree(imported_address, granularity));
+  HIP_ASSERT(hipMemAddressFree(original_address, granularity));
+  HIP_ASSERT(hipMemRelease(imported));
+  // The exporting allocation may close this descriptor during its teardown.
+  ASSERT_EQ(close(shared_fd), 0);
+  HIP_ASSERT(hipMemRelease(allocation));
 }
 
 /// @brief Round-trips a pageable buffer large enough to take HIP's pinned path.

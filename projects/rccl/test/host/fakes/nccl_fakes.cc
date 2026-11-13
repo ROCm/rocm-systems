@@ -28,9 +28,11 @@
 #include "comm.h"         // ncclCommGraphRegister / Deregister
 #include "strongstream.h" // ncclStrongStream*
 #include "mem_manager.h"  // ncclMemTrack / ncclMemUntrack / ncclDynMemMarkExportToPeer
-#include "ipcsocket.h"    // ncclIpcFd
+#include "ipcsocket.h"
 
+#include <algorithm>
 #include <functional>
+#include <string>
 
 #include "nccl_fakes.h"   // controllable seam hooks
 
@@ -78,19 +80,32 @@ uint32_t            ncclDebugLevelMask = 0; // NCCL_LOG_NONE
 uint64_t            ncclDebugMask    = 0;
 thread_local int    ncclDebugNoWarn  = 0;
 
-void ncclDebugLog(ncclDebugLogLevel /*level*/,
-                             unsigned long     /*flags*/,
+static void DefaultNcclDebugLog(ncclDebugLogLevel, unsigned long, const char* filefunc, int line, const char* msg)
+{
+    std::fprintf(stderr, "[fake] %s:%d %s\n", filefunc ? filefunc : "?", line, msg);
+}
+
+std::function<void(ncclDebugLogLevel, unsigned long, const char*, int, const char*)> g_ncclDebugLog =
+    DefaultNcclDebugLog;
+
+void ncclDebugLog(ncclDebugLogLevel level,
+                             unsigned long     flags,
                              const char*       filefunc,
                              int               line,
                              const char*       fmt,
                              ...)
 {
-    std::fprintf(stderr, "[fake] %s:%d ", filefunc ? filefunc : "?", line);
+    // debug.cc demotes a WARN raised under NOWARN to INFO.
+    if (ncclDebugNoWarn != 0 && level == NCCL_LOG_WARN) level = NCCL_LOG_INFO;
     std::va_list ap;
     va_start(ap, fmt);
-    std::vfprintf(stderr, fmt, ap);
+    std::va_list again;
+    va_copy(again, ap);
+    std::string msg(std::max(0, std::vsnprintf(nullptr, 0, fmt, ap)), '\0');
+    std::vsnprintf(&msg[0], msg.size() + 1, fmt, again);
+    va_end(again);
     va_end(ap);
-    std::fputc('\n', stderr);
+    g_ncclDebugLog(level, flags, filefunc, line, msg.c_str());
 }
 
 // src/debug.cc, same owner as the logging symbols above. A no-op rather than a
@@ -219,10 +234,9 @@ ncclResult_t ncclProxyClientQueryFdBlocking(struct ncclComm*           comm,
     return g_proxyClientQueryFdBlocking(comm, proxyConn, localFd, rmtFd);
 }
 
-// src/os/linux_ipcsocket.cc (NCCL 2.32): p2p.cc and dev_runtime.cc close
-// imported fds through this instead of close(2). A real close, as production
-// does, so suites that hand back a dup'd fd can still prove it was closed.
+#ifndef RCCL_NCCL_FAKES_OMIT_IPC_FD_CLOSE
 int ncclIpcFdClose(ncclIpcFd fd) { return ::close(fd); }
+#endif
 
 // --- Controllable seam: ncclRegLocalIsValid -----------------------------
 // Default preserves the old stub: report the record as not locally valid
@@ -450,27 +464,6 @@ ncclResult_t ncclStreamWaitStream(hipStream_t a, hipStream_t b, hipEvent_t ev)
     return g_ncclStreamWaitStream(a, b, ev);
 }
 
-ncclResult_t DefaultTopoGetLinkType(int, int, bool* isXGMI, int)
-{
-    if (isXGMI) *isXGMI = false;
-    return ncclSuccess;
-}
-std::function<ncclResult_t(int, int, bool*, int)> g_ncclTopoGetLinkType = DefaultTopoGetLinkType;
-int g_ncclTopoGetLinkTypeCalls = 0;
-
-#ifndef RCCL_NCCL_FAKES_OMIT_GRAPH
-ncclResult_t ncclTopoGetLinkType(struct ncclTopoSystem* /*system*/,
-                                 int                    dev1,
-                                 int                    dev2,
-                                 bool*                  isXGMI,
-                                 int                    maxInter,
-                                 int                    /*nInter*/,
-                                 int*                   /*inter*/)
-{
-    g_ncclTopoGetLinkTypeCalls++;
-    return g_ncclTopoGetLinkType(dev1, dev2, isXGMI, maxInter);
-}
-#endif
 
 // ---------------------------------------------------------------------------
 // Memory-manager tracking stubs.
@@ -626,6 +619,7 @@ int64_t ncclParamMultiSegmentRegister() { return g_loadParam("MULTI_SEGMENT_REGI
 
 void ResetNcclFakes()
 {
+    g_ncclDebugLog                 = DefaultNcclDebugLog;
     g_ncclProxyClientGetFdBlocking = DefaultNcclProxyClientGetFdBlocking;
     g_strongStreamAcquire          = DefaultStrongStreamAcquire;
     g_strongStreamRelease          = DefaultStrongStreamRelease;
@@ -641,8 +635,6 @@ void ResetNcclFakes()
     g_memUntrackDynamic            = DefaultMemUntrackDynamic;
     g_memUntrackPersist            = DefaultMemUntrackPersist;
     g_dynMemMarkExportToPeer       = DefaultDynMemMarkExportToPeer;
-    g_ncclTopoGetLinkType          = DefaultTopoGetLinkType;
-    g_ncclTopoGetLinkTypeCalls     = 0;
     g_ncclTopoCheckP2p             = DefaultTopoCheckP2p;
     g_ncclTopoCheckNet             = DefaultTopoCheckNet;
     g_regLocalIsValid              = DefaultRegLocalIsValid;
