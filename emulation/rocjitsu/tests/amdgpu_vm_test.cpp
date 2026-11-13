@@ -3802,6 +3802,45 @@ TEST(GpuMemoryTest, IdentityMappedEntryStillEnforcesItsExtent) {
 }
 
 #if defined(RJ_AMDGPU_VM_TEST_WITH_ASAN)
+TEST(GpuMemoryTest, SanitizedLocalGrantReadsLiveBytesBesideAPoisonedGap) {
+  using namespace amdgpu;
+  constexpr uint32_t kVmid = 7;
+  constexpr uint64_t kGpuVa = 0x40000000;
+  auto host = std::make_unique<uint8_t[]>(KfdProcess::kPageSize);
+  host[0] = 0x5a;
+  KfdProcess process(kVmid);
+  process.map_pages(kGpuVa, host.get(), KfdProcess::kPageSize);
+  GpuMemory memory("memory");
+  GpuVm vm;
+  LegacyGpuVmAdapter adapter(vm, &memory);
+  const auto handle = adapter.register_address_space(
+      kVmid, {.page_table = &process.page_table_,
+              .page_table_mutex = &process.page_table_mutex_,
+              .page_table_generation = process.page_table_generation(),
+              .request_mutex = process.page_table_request_mutex(),
+              .mutation_epoch = process.page_table_mutation_epoch(),
+              .page_table_cache_state = process.page_table_cache_state(),
+              .local_grant_epoch = std::make_shared<std::atomic<uint64_t>>(1),
+              .local_grant = [](uint64_t, size_t) {
+                return VmLocalGrant{kGpuVa, kGpuVa + KfdProcess::kPageSize, 1};
+              }});
+  ASSERT_TRUE(handle);
+  L2Cache l2("l2");
+  l2.set_backing_memory(&memory);
+  l2.set_gpu_vm(&vm);
+  L1VectorCache l1(&l2);
+  l1.set_gpu_vm(&vm);
+  ASSERT_TRUE(l2.can_fetch_range(kGpuVa, L2Cache::LINE_SIZE, kVmid));
+  __asan_poison_memory_region(host.get() + 16, 16);
+  EXPECT_FALSE(l2.can_fetch_range(kGpuVa, L2Cache::LINE_SIZE, kVmid));
+  uint8_t value = 0;
+  EXPECT_EQ(l1.load(&kGpuVa, 1, 1, 1, &value, Mtype::RW, false, false, 1, kVmid),
+            VmAccessOutcome::Complete);
+  EXPECT_EQ(value, 0x5a);
+  __asan_unpoison_memory_region(host.get() + 16, 16);
+  EXPECT_TRUE(l2.can_fetch_range(kGpuVa, L2Cache::LINE_SIZE, kVmid));
+}
+
 TEST(GpuMemoryTest, SanitizedCacheLineAccessClipsRoundedMapping) {
   rocjitsu::test::LegacyGpuMemoryFixture memory("memory");
   constexpr uint32_t kPid = 7;
