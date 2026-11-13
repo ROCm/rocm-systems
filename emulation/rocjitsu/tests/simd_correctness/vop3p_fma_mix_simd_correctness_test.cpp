@@ -3,8 +3,9 @@
 
 /// Compare decoded MIX instructions with SIMD enabled and forced scalar,
 /// including source selectors, modifiers, sparse EXEC and destination aliasing.
-/// RDNA uses fused arithmetic; CDNA1-4 retains the legacy MAD implementation.
+/// RDNA uses fused arithmetic. CDNA1 fuses to F32 before narrowing to F16.
 
+#include "compute_unit_test_util.h"
 #include "decode_test_util.h"
 #include "util/simd_test_hooks.h"
 
@@ -249,7 +250,9 @@ template <uint32_t WF_SIZE, int ArchTag> struct Fixture {
     cfg.sgprs_per_wf = SGPRS_PER_WF;
     cfg.vgprs_per_wf = VGPRS_PER_WF;
     cfg.lds_size_kb = 64;
-    cu = amdgpu::ComputeUnitCore::create("cu_vop3p_fma_mix", cfg, &gpu_mem, &l2);
+    rocjitsu::test::initialize_compute_unit(cu, "cu_vop3p_fma_mix", cfg, &gpu_mem, &l2);
+    if (!cu)
+      return;
     decoder = Decoder::create(cfg.arch);
     wf = cu->dispatch_wf(0, 0, SGPRS_PER_WF, VGPRS_PER_WF, WF_SIZE);
   }
@@ -317,6 +320,8 @@ void check_combo(uint32_t opcode, const ModCombo &mc, uint64_t exec, uint32_t ds
   auto run_mode = [&](bool force_scalar, uint32_t rot) -> std::array<uint32_t, WF_SIZE> {
     util::set_force_scalar_for_testing(force_scalar);
     Fixture<WF_SIZE, ArchTag> fx;
+    if (::testing::Test::HasFatalFailure())
+      return {};
     EXPECT_NE(fx.cu, nullptr);
     EXPECT_NE(fx.wf, nullptr);
     uint32_t words[4] = {0u, 0u, 0u, 0u};
@@ -525,6 +530,7 @@ void check_direct_mix_modes(uint32_t denorm = 3) {
       std::conditional_t<High, cdna4::VMadMixhiF16Vop3p, cdna4::VMadMixloF16Vop3p>>;
   using Inst = std::conditional_t<F32, rdna3::VFmaMixF32Vop3p, HalfInst>;
   Fixture<32, ArchTag> fixture;
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   ForceScalarGuard guard;
   util::set_force_scalar_for_testing(false);
   for (uint32_t round = 0; round < 4; ++round)
@@ -577,6 +583,7 @@ TEST(Vop3pFmaMixSimdCorrectness, DirectedSimdPreservesModifiersAndWave64Aliases)
   ForceScalarGuard guard;
   auto check = []<uint32_t Size>() {
     Fixture<Size, 0> fx;
+    ASSERT_FALSE(::testing::Test::HasFatalFailure());
     const uint64_t all = util::mask<uint64_t>(Size);
     for (uint32_t round = 1; round < 4; ++round) {
       for (bool high : {false, true}) {

@@ -21,6 +21,195 @@ def test_website_ci_watches_benchmark_preparation(event):
     )
 
 
+def test_benchmark_pr_trigger_extends_develop_push_paths():
+    workflow = yaml.safe_load((WORKFLOWS / 'rocjitsu-benchmarks.yml').read_text())
+    push = workflow[True]['push']
+    assert push['branches'] == ['develop']
+    assert push['paths'] == [
+        'emulation/rocjitsu/**',
+        '.github/workflows/rocjitsu-benchmarks.yml',
+    ]
+    trigger = workflow[True]['pull_request']
+    assert trigger['branches'] == ['develop']
+    assert trigger['types'] == ['labeled', 'synchronize']
+    assert trigger['paths'] == push['paths'] + [
+        '.github/scripts/rocjitsu_benchmark_report.js',
+        '.github/scripts/tests/test_rocjitsu_benchmark_report.js',
+    ]
+
+
+@pytest.mark.parametrize(
+    'event,action,label,labels,head_repo,repo,allowed',
+    [
+        (
+            'pull_request',
+            'labeled',
+            'rocjitsu-presubmit-benchmarks',
+            ['rocjitsu-presubmit-benchmarks'],
+            'ROCm/rocm-systems',
+            'ROCm/rocm-systems',
+            True,
+        ),
+        (
+            'pull_request',
+            'synchronize',
+            '',
+            ['rocjitsu-presubmit-benchmarks'],
+            'ROCm/rocm-systems',
+            'ROCm/rocm-systems',
+            True,
+        ),
+        (
+            'pull_request',
+            'labeled',
+            'other',
+            ['rocjitsu-presubmit-benchmarks', 'other'],
+            'ROCm/rocm-systems',
+            'ROCm/rocm-systems',
+            False,
+        ),
+        (
+            'pull_request',
+            'synchronize',
+            '',
+            [],
+            'ROCm/rocm-systems',
+            'ROCm/rocm-systems',
+            False,
+        ),
+        (
+            'pull_request',
+            'labeled',
+            'rocjitsu-presubmit-benchmarks',
+            ['rocjitsu-presubmit-benchmarks'],
+            'fork/repo',
+            'ROCm/rocm-systems',
+            False,
+        ),
+        ('workflow_dispatch', '', '', [], '', 'ROCm/rocm-systems', True),
+        ('push', '', '', [], '', 'ROCm/rocm-systems', True),
+        ('workflow_dispatch', '', '', [], '', 'fork/repo', False),
+    ],
+)
+def test_benchmark_opt_in_gate(event, action, label, labels, head_repo, repo, allowed):
+    workflow = yaml.safe_load((WORKFLOWS / 'rocjitsu-benchmarks.yml').read_text())
+    condition = workflow['jobs']['source-metadata']['if']
+    for key, value in {
+        "contains(github.event.pull_request.labels.*.name, 'rocjitsu-presubmit-benchmarks')": repr(
+            'rocjitsu-presubmit-benchmarks' in labels
+        ),
+        'github.event.pull_request.head.repo.full_name': repr(head_repo),
+        'github.event.label.name': repr(label),
+        'github.event.action': repr(action),
+        'github.event_name': repr(event),
+        'github.repository': repr(repo),
+        'github.ref': repr('refs/heads/develop'),
+    }.items():
+        condition = condition.replace(key, value)
+    assert (
+        eval(
+            condition.replace('&&', 'and').replace('||', 'or'), {'__builtins__': {}}, {}
+        )
+        is allowed
+    )
+
+
+@pytest.mark.parametrize(
+    'event,source,benchmark,expected',
+    [
+        ('pull_request', 'success', 'success', True),
+        ('pull_request', 'success', 'failure', True),
+        ('pull_request', 'success', 'skipped', False),
+        ('pull_request', 'success', 'cancelled', True),
+        ('pull_request', 'failure', 'skipped', False),
+        ('pull_request', 'failure', 'cancelled', False),
+        ('push', 'success', 'success', False),
+        ('workflow_dispatch', 'success', 'success', False),
+    ],
+)
+def test_report_includes_cancelled_pr_benchmarks(event, source, benchmark, expected):
+    workflow = yaml.safe_load((WORKFLOWS / 'rocjitsu-benchmarks.yml').read_text())
+    job = workflow['jobs']['report']
+    assert job['needs'] == ['source-metadata', 'benchmark', 'publish']
+    assert job['permissions'] == {
+        'contents': 'read',
+        'pull-requests': 'write',
+    }
+    assert job['concurrency'] == {
+        'group': 'rocjitsu-benchmark-report-${{ github.event.pull_request.number }}',
+        'cancel-in-progress': False,
+        'queue': 'max',
+    }
+    condition = job['if']
+    assert 'always()' in condition
+    for key, value in {
+        'always()': 'True',
+        # Catch an accidentally reintroduced !cancelled() guard.
+        '!cancelled()': 'False',
+        'github.event_name': repr(event),
+        'needs.source-metadata.result': repr(source),
+        'needs.benchmark.result': repr(benchmark),
+    }.items():
+        condition = condition.replace(key, value)
+    assert (
+        eval(
+            condition.replace('&&', 'and').replace('||', 'or'), {'__builtins__': {}}, {}
+        )
+        is expected
+    )
+    report = next(s for s in job['steps'] if s['name'] == 'Comment on the pull request')
+    assert report['env'] == {
+        'BENCHMARK_RESULT': '${{ needs.benchmark.result }}',
+        'PUBLICATION_RESULT': '${{ needs.publish.result }}',
+        'PUBLISHED_RUN_ID': '${{ needs.publish.outputs.run_id }}',
+        'BENCHMARK_RUN_ATTEMPT': '${{ needs.benchmark.outputs.run_attempt }}',
+        'SOURCE_SHA': '${{ needs.source-metadata.outputs.source_sha }}',
+    }
+    assert 'runNumber: process.env.GITHUB_RUN_NUMBER' in report['with']['script']
+    assert 'runAttempt: process.env.GITHUB_RUN_ATTEMPT' in report['with']['script']
+    assert 'publishedRunId: process.env.PUBLISHED_RUN_ID' in report['with']['script']
+    assert (
+        'benchmarkAttempt: process.env.BENCHMARK_RUN_ATTEMPT'
+        in report['with']['script']
+    )
+    assert 'headSha: process.env.SOURCE_SHA' in report['with']['script']
+    assert 'reportBenchmark' in report['with']['script']
+
+
+def test_report_helper_changes_trigger_their_node_ci_tests():
+    workflow = yaml.safe_load((WORKFLOWS / 'rocjitsu-website-test.yml').read_text())
+    helper_paths = [
+        '.github/scripts/rocjitsu_benchmark_report.js',
+        '.github/scripts/tests/test_rocjitsu_benchmark_report.js',
+    ]
+    for event in ('push', 'pull_request'):
+        for path in helper_paths:
+            assert path in workflow[True][event]['paths']
+    step = next(
+        s
+        for s in workflow['jobs']['verify']['steps']
+        if s['name'] == 'Test benchmark PR reporting'
+    )
+    assert step['working-directory'] == '.'
+    assert (
+        step['run']
+        == 'node --test .github/scripts/tests/test_rocjitsu_benchmark_report.js'
+    )
+
+
+def test_dispatch_form_explains_source_and_pr_constraints():
+    workflow = yaml.safe_load((WORKFLOWS / 'rocjitsu-benchmarks.yml').read_text())
+    inputs = workflow[True]['workflow_dispatch']['inputs']
+    source = inputs['source_commit']['description']
+    assert 'Use workflow from' in source
+    assert 'blank' in source and 'branch tip' in source
+    assert '7-40' in source and 'hex' in source and 'history' in source
+    assert 'side-branch SHA' in source and 'develop' in source
+    pr = inputs['pull_request_number']['description']
+    assert 'open' in pr and 'same-repository' in pr
+    assert 'selected side branch' in pr and 'develop' in pr
+
+
 def test_python_ci_names_its_current_workflow_responsibilities():
     workflow = yaml.safe_load((WORKFLOWS / 'rocjitsu-website-test.yml').read_text())
     job = workflow['jobs']['dashboard-data']
@@ -65,7 +254,43 @@ def test_publication_serializes_shared_branch_writes_without_dropping_pending_jo
         'queue': 'max',
     }
     assert 'concurrency' not in workflow
-    assert 'concurrency' not in workflow['jobs']['benchmark']
+
+
+@pytest.mark.parametrize(
+    'event,pr,run_id,cancel',
+    [
+        ('pull_request', 42, 100, True),
+        ('pull_request', 43, 101, True),
+        ('push', None, 102, False),
+        ('workflow_dispatch', None, 103, False),
+    ],
+)
+def test_only_pr_benchmarks_coalesce(event, pr, run_id, cancel):
+    workflow = yaml.safe_load((WORKFLOWS / 'rocjitsu-benchmarks.yml').read_text())
+    concurrency = workflow['jobs']['benchmark']['concurrency']
+    assert concurrency['group'] == (
+        '${{ github.workflow }}-benchmark-${{ github.event.pull_request.number || github.run_id }}'
+    )
+    group = (
+        concurrency['group']
+        .replace('${{ github.workflow }}', 'rocjitsu-benchmarks')
+        .replace(
+            '${{ github.event.pull_request.number || github.run_id }}',
+            str(pr or run_id),
+        )
+    )
+    assert group == f'rocjitsu-benchmarks-benchmark-{pr if pr is not None else run_id}'
+    expression = (
+        concurrency['cancel-in-progress'].removeprefix('${{').removesuffix('}}').strip()
+    )
+    assert (
+        eval(
+            expression.replace('github.event_name', repr(event)),
+            {'__builtins__': {}},
+            {},
+        )
+        is cancel
+    )
 
 
 def test_publication_steps_follow_responsibility_order():
@@ -81,6 +306,7 @@ def test_publication_steps_follow_responsibility_order():
         'Store immutable run',
         'Update run index',
         'Commit and push publication',
+        'Export published run ID',
         'Upload publication diagnostics',
     ]
 
@@ -231,6 +457,26 @@ def test_publication_metadata_uses_existing_checked_outputs():
         )
 
 
+def test_publisher_exports_its_run_id_after_publication(tmp_path):
+    workflow = yaml.safe_load((WORKFLOWS / 'rocjitsu-benchmarks.yml').read_text())
+    publish = workflow['jobs']['publish']
+    assert publish['outputs']['run_id'] == '${{ steps.publication.outputs.run_id }}'
+    steps = publish['steps']
+    export = next(step for step in steps if step.get('id') == 'publication')
+    commit = next(
+        step for step in steps if step['name'] == 'Commit and push publication'
+    )
+    assert steps.index(export) > steps.index(commit)
+    assert export.get('if', 'success()') == 'success()'
+    output = tmp_path / 'output'
+    subprocess.run(
+        ['bash', '-euo', 'pipefail', '-c', export['run']],
+        env={'RUN_ID': 'publisher-owned-id', 'GITHUB_OUTPUT': str(output)},
+        check=True,
+    )
+    assert output.read_text() == 'run_id=publisher-owned-id\n'
+
+
 def test_publication_identity_uses_the_recorded_benchmark_attempt():
     workflow = yaml.safe_load((WORKFLOWS / 'rocjitsu-benchmarks.yml').read_text())
     assert (
@@ -287,12 +533,118 @@ def test_publication_identity_uses_the_recorded_benchmark_attempt():
     )
 
 
+def test_dispatch_source_defaults_and_safe_input_binding():
+    workflow = yaml.safe_load((WORKFLOWS / 'rocjitsu-benchmarks.yml').read_text())
+    inputs = workflow[True]['workflow_dispatch']['inputs']
+    assert list(inputs) == ['source_commit', 'pull_request_number', 'publish_results']
+    assert inputs['source_commit'].get('default', '') == ''
+    assert inputs['source_commit']['required'] is False
+    assert inputs['publish_results']['default'] is True
+    assert (
+        inputs['publish_results']['description']
+        == 'Publish to shared dashboard dataset. Warning: side-branch workflows use side-branch tooling.'
+    )
+    metadata = workflow['jobs']['source-metadata']
+    assert metadata['permissions'] == {'contents': 'read', 'pull-requests': 'read'}
+    step = next(s for s in metadata['steps'] if s.get('id') == 'resolve')
+    assert step['env']['REQUESTED_SOURCE_COMMIT'] == '${{ inputs.source_commit }}'
+    assert '${{' not in step['run']
+    assert workflow['jobs']['benchmark']['needs'] == 'source-metadata'
+
+
+@pytest.mark.parametrize(
+    'workflow_ref', ['refs/heads/develop', 'refs/heads/feature/workflow']
+)
+@pytest.mark.parametrize(
+    'event,publish',
+    [
+        ('push', False),
+        ('workflow_dispatch', True),
+        ('workflow_dispatch', False),
+        ('pull_request', False),
+    ],
+)
+def test_publication_gate_allows_enabled_side_workflow(workflow_ref, event, publish):
+    job = yaml.safe_load((WORKFLOWS / 'rocjitsu-benchmarks.yml').read_text())['jobs'][
+        'publish'
+    ]
+    condition = job['if'].removeprefix('${{').removesuffix('}}').strip()
+    for key, value in {
+        '!cancelled()': 'True',
+        'needs.benchmark.outputs.ran': repr('true'),
+        'github.ref': repr(workflow_ref),
+        'github.event_name': repr(event),
+        'inputs.publish_results': repr(publish),
+    }.items():
+        condition = condition.replace(key, value)
+    condition = (
+        condition.replace('== true', '== True').replace('&&', 'and').replace('||', 'or')
+    )
+    allowed = eval(condition, {'__builtins__': {}}, {})
+    assert allowed == (
+        (event == 'push' and workflow_ref == 'refs/heads/develop')
+        or (event == 'workflow_dispatch' and publish)
+        or event == 'pull_request'
+    )
+    assert job['permissions'] == {'contents': 'write'}
+
+
+def test_benchmark_and_tooling_checkouts_have_separate_owners():
+    workflow = yaml.safe_load((WORKFLOWS / 'rocjitsu-benchmarks.yml').read_text())
+    benchmark = workflow['jobs']['benchmark']
+    steps = {s['name']: s for s in benchmark['steps']}
+    assert (
+        benchmark['env']['BENCHMARK_SHA']
+        == '${{ needs.source-metadata.outputs.source_sha }}'
+    )
+    assert (
+        benchmark['env']['BENCHMARK_BRANCH']
+        == '${{ needs.source-metadata.outputs.source_branch }}'
+    )
+    assert (
+        steps['Checkout rocm-systems']['with']['ref']
+        == '${{ needs.source-metadata.outputs.source_sha }}'
+    )
+    assert steps['Checkout benchmark workflow tooling']['with'] == {
+        'path': 'workflow-source',
+        'ref': '${{ github.sha }}',
+        'persist-credentials': False,
+        'sparse-checkout': 'emulation/rocjitsu/scripts',
+    }
+    assert (
+        workflow['env']['WORKFLOW_SOURCE_DIR']
+        == '${{ github.workspace }}/workflow-source/emulation/rocjitsu'
+    )
+    for name in (
+        'Install benchmark dependencies',
+        'Build rocjitsu',
+        'Prepare Tensile wheel and native adapter',
+        'Generate pinned Tensile artifacts',
+        'Collect preparation diagnostics',
+        'Clean owned benchmark scratch',
+    ):
+        assert (
+            '${WORKFLOW_SOURCE_DIR}/scripts/prepare-benchmarks.py' in steps[name]['run']
+        )
+    runner = steps['Run performance suite']['run']
+    assert '--rocjitsu-source-dir "${ROCJITSU_SOURCE_DIR}"' in runner
+    publish = workflow['jobs']['publish']
+    assert (
+        publish['env']['BENCHMARK_BRANCH']
+        == '${{ needs.source-metadata.outputs.source_branch }}'
+    )
+    assert (
+        publish['env']['BENCHMARK_SHA']
+        == '${{ needs.source-metadata.outputs.source_sha }}'
+    )
+
+
 def test_manual_publication_guard_and_diagnostics_remain_independent():
     workflow = yaml.safe_load((WORKFLOWS / 'rocjitsu-benchmarks.yml').read_text())
     condition = workflow['jobs']['publish']['if']
     assert "!cancelled() && needs.benchmark.outputs.ran == 'true'" in condition
     assert (
-        "github.event_name != 'workflow_dispatch' || inputs.publish_results == true"
+        "github.event_name == 'workflow_dispatch' && inputs.publish_results == true"
         in condition
     )
     for job, name in [

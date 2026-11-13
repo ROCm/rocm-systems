@@ -11,7 +11,7 @@ User-facing quick start: [README.md](README.md).
 ## Quick Start
 
 ```bash
-# Capture
+# Capture, once you have consented (README.md#capture)
 HIP_HRR_CAPTURE_OUTPUT=./my_capture.hrr ./my_hip_app
 
 # Replay + D2H validation
@@ -27,7 +27,7 @@ hrr-playback ./my_capture.hrr --info [--events]
 
 ### Capture overhead
 
-Capture is **not free**. When `HIP_HRR_CAPTURE_OUTPUT` is set, every HIP API call
+Capture is **not free**. When capture is enabled (see [Enable Flag](#enable-flag)), every HIP API call
 flows through a capture shim (fixed-size event header + serialized arguments), and
 selected APIs add extra work:
 
@@ -130,7 +130,7 @@ each blob write and closed after it. Every file inside the archive is created, o
 and removed relative to those descriptors with `openat`, `renameat` and `unlinkat`, the
 crash-path manifest included, so a directory renamed on the path after the check cannot
 redirect a write. Only finding `pid-<pid>/` when the archive opens, and the root
-`manifest.json` in the base directory, go by path, so every directory on the path to
+`manifest.json` and `NOTICE.txt` in the base directory, go by path, so every directory on the path to
 the base should still belong to the capturing user or to root, and any that other users
 can write to should have the sticky bit. When
 the archive cannot be set up, capture is disabled with a
@@ -246,7 +246,7 @@ kernel/code-object replay. Use the same install prefix or matching `LD_LIBRARY_P
 for both components.
 
 ```bash
-HIP_HRR_CAPTURE_OUTPUT=./out.hrr ./my_hip_app   # capture
+HIP_HRR_CAPTURE_OUTPUT=./out.hrr ./my_hip_app   # capture, once you have consented
 hrr-playback ./out.hrr                           # replay + D2H validation
 hrr-playback ./out.hrr --timing                  # with kernel + graph GPU timing
 hrr-playback ./out.hrr --info --events           # inspect archive (no GPU)
@@ -377,7 +377,7 @@ Normal builds generate temporary files and verify them against the checked-in co
 
 The generator classifies each API:
 - **`MANUAL_CAPTURE_APIS`**: kernel launches ×4, memcpy H2D+D2H ×8, module load ×3, `__hipRegisterFatBinary`, `hipHostRegister/Unregister`, `hipMemcpy3D` variants ×4, array creation ×2, VMM, stream/memory attribute APIs, `hipMemcpyWithStream`
-- **`MANUAL_PLAYBACK_APIS`**: above plus malloc ×4, free ×2, stream create/destroy ×4, event create/destroy ×3, `hipModuleGetFunction`, the full graph chain ×4, VMM APIs ×6, and other APIs requiring non-trivial handle translation or replay logic
+- **`MANUAL_PLAYBACK_APIS`**: above plus malloc ×4, free ×2, stream create/destroy ×4, event create/destroy ×3, `hipEventElapsedTime`, `hipModuleGetFunction`, the full graph chain ×4, VMM APIs ×6, and other APIs requiring non-trivial handle translation or replay logic
 - **`NOOP_PLAYBACK_APIS`**: APIs where replay is not meaningful (stale handles, context-destroying calls, missing in ROCm SDK 6.4) — emit `return hipSuccess;` without calling the real function. These are **not replay-tested**; tests that exercise only these APIs verify capture does not crash, not that replay works.
 
 Generated capture shims for manual APIs are pass-throughs (no `write_event()`).
@@ -551,12 +551,13 @@ or direct GPU access via the mapped flag. At capture time:
 
 At playback:
 
-- `playback_hipHostRegister` allocates a fresh 64-byte-aligned host buffer (`_aligned_malloc`
-  on Windows, `posix_memalign` on Linux), restores the blob snapshot into it, calls
-  `hipHostRegister` on the new buffer, and records `(recorded_ptr → live_ptr)` in `alloc_map`
+- `playback_hipHostRegister` takes the recorded address's block in `host_reg_blocks` (the
+  same block again when it is large enough), restores the blob snapshot into it, calls
+  `hipHostRegister` on it, and records `(recorded_ptr → live_ptr)` in `alloc_map`
   (for kernel-arg pointer translation) and `host_reg_bufs` (for cleanup at Unregister).
-- `playback_hipHostUnregister` translates the pointer, calls `hipHostUnregister`, frees the
-  backing buffer, and removes both map entries.
+- `playback_hipHostUnregister` translates the pointer, calls `hipHostUnregister`, and removes
+  both map entries. The block stays, charged to the host budget, until the context is
+  destroyed, since a graph node may still point into it.
 
 ### Pinned Host Snapshots
 
@@ -573,8 +574,12 @@ embedded device pointers, and replay translates them without the device-address 
 check. Replay checks each record names the base of a pinned host
 allocation it made, lies inside it and matches its blob's length, refusing and counting it
 otherwise; then it queues a host function that copies the blobs in on the launch stream,
-ahead of the kernel, without waiting for the stream. `hipHostFree` and `hipHostUnregister`
-wait for every stream, so the allocation outlives a queued copy. The summary prints
+ahead of the kernel, without waiting for the stream. Replay does not rely on the runtime's
+wait inside a free, which covers only the allocating device's streams. A kernel launch
+takes `host_free_mu` shared before it hands the global turn on and holds it until its
+launch call returns; `hipHostFree`, `hipFreeHost` and `hipHostUnregister` (and `hipFree`) take it
+exclusive across the map removal and the free. A free on the next sequence number therefore
+waits until the launch has resolved the destination and queued its copy. The summary prints
 restored, refused and skipped counts.
 
 Kept deliberately simple:
@@ -589,7 +594,9 @@ Kept deliberately simple:
   the application's graphs.
 - `HIP_HRR_HOST_SNAPSHOTS=0` turns snapshots off; an allocation larger than
   `HIP_HRR_HOST_SNAPSHOT_MAX_MB` (64) is not snapshotted and is listed under
-  `unreplayable_apis`.
+  `unreplayable_apis`. A snapshot over `HIP_HRR_CAPTURE_MAX_BLOB_MB` is recorded with a
+  zero hash on every launch that reads it, and replay refuses that launch outside a
+  stream capture.
 - Replay restores nothing for a launch replayed into a capturing stream, and capture does
   not snapshot at graph launch. A record for a launch into a capturing stream does not
   become the allocation's last, so the next launch outside the capture records again.
@@ -626,6 +633,26 @@ the kernarg buffer into the per-thread exec stack (`hip::tls.exec_stack_.top().a
 before the launch, and `capture_hipLaunchByPtr` snapshots it (a copy, since the real
 `hipLaunchByPtr` moves the exec out via `PopExec`) and feeds it through the same
 signature-driven serialization path.
+
+#### Start and stop events of `hipExtModuleLaunchKernel`
+
+The runtime marks `startEvent` and `stopEvent` inside the launch, so an app never
+calls `hipEventRecord` on them and `hipEventElapsedTime` still succeeds. Capture
+writes that side effect as a `hipEventRecord` for a non-null start event before
+the launch record and one for a non-null stop event after it, and sets
+`HRR_FILE_FLAG_EXT_LAUNCH_EVENT_MARKERS` in `hrr_file_header.reserved` (no version
+bump: an older reader replays the extra events like any others).
+`playback_hipEventElapsedTime` returns `hipErrorInvalidHandle` for such an
+archive, so a missing marker fails the replay. Only an archive without the flag,
+captured before the markers were stored, gets the fallback: a captured success
+with both handles live continues, warns once and clears the sticky error.
+`Unit_HRR_ExtLaunchEventMarkers` checks the order on a real capture and both
+replay outcomes.
+
+Follow-up: `hipExtLaunchKernel` and `hipHccModuleLaunchKernel` also take start and
+stop events, but their playback is a no-op (the launch itself is not replayed), so
+no marker is applied at replay either. Replaying those launches is the fix; the
+capture shim records no marker for them.
 
 ### Pointers Embedded in By-Value Struct Args (`value_kind == 3`)
 
@@ -733,6 +760,37 @@ differ at replay so the kernel computes an out-of-bounds index), not an argument
 capture problem. Confirm with `HIP_HRR_DEBUG_ARGS` (Debug runtime) that the nulls
 are genuine before suspecting the `<<<>>>` / kernarg capture path.
 
+### Arguments are checked against the kernel's signature
+
+The archive is input, and a launch record does not have to agree with the code
+object it names. HIP walks the loaded kernel's full signature and copies
+`size` bytes out of `kernelParams[i]` for every parameter, except that it reads 8
+bytes for a pointer parameter whatever size the code object declares. A record with
+fewer arguments than the kernel declares, or an argument narrower than its
+parameter, is an over-read of replay's own argument vectors. Extra arguments and
+wider ones are never read. The 8-byte pointer read is why every decoded argument
+carries 8 zeroed bytes past its recorded size, and why the Sp3 kernarg buffer is
+allocated 8 bytes longer than the size passed as `HIP_LAUNCH_PARAM_BUFFER_SIZE`
+(CLR checks `offset + size` against that size only); the signature check still
+compares recorded sizes. After resolving the kernel, replay reads its signature with
+`hipKernelGetParamInfo` and refuses the launch (`hipErrorInvalidValue`, one
+`[HRR] ... seq=<n> ... launch refused` line naming the mismatch) unless the decoded
+record has at least as many arguments and each is at least as wide as its
+parameter. A payload that ends before its declared arguments decodes fewer of them: an
+argument the payload cuts short is dropped whole, never stored narrower, so
+truncation is refused only when it leaves fewer arguments than the kernel
+declares. The read ends on a call one index past
+the last parameter, which answers `hipErrorInvalidValue`; replay clears it so it
+does not stay as HIP's last error. The graph kernel-node paths apply the same check: an add skips the node and
+marks its graph incomplete; a set-params call (graph or exec) returns
+`hipErrorInvalidValue`, like a refused launch, because the node would otherwise
+keep its old arguments. The exception is a record whose own recorded result is
+`hipErrorInvalidValue` (capture records a set-params call even when HIP refused
+it): that failure is reproduced faithfully and the call returns `hipSuccess`. A `--replace-kernel` code object is checked against the
+recorded arguments the same way, so a replacement may not declare more parameters,
+or wider ones, than the record carries. The runtime exposes each parameter's size and offset but
+not its type, so the type is not compared.
+
 ## Fat Binary Registration
 
 `__hipRegisterFatBinary` fires at C++ static-init time before shims are installed.
@@ -795,9 +853,9 @@ a child started with `exec` initialises HIP again and prints its own.
 
 ## Enable Flag
 
-Capture is enabled when `HIP_HRR_CAPTURE_OUTPUT` is set to a directory and the process
+Capture is enabled when `HIP_HRR_CAPTURE_OUTPUT` is set to a directory, the process
 was not started in secure-execution mode (see
-[README.md](README.md#capture-environment)). Defined as a `cstring` release flag in
+[README.md](README.md#capture-environment)), and the user has consented. Defined as a `cstring` release flag in
 `rocclr/utils/flags.hpp`. An empty or blank value leaves capture off: the flag parser
 stores an exported empty variable as a single space, and `hrr_capture_requested()` treats
 a value made only of whitespace as unset.
@@ -808,6 +866,21 @@ privileges that whoever set its environment does not, so it ignores the variable
 `secure_getenv()` would, and `hip_capture_init()` prints one line on stderr saying so.
 The check is `hrr_cap::metadata::secure_exec()` in `hip_capture_metadata.cpp`, and it is
 always false off Linux.
+
+Consent comes from `HIP_HRR_CAPTURE_CONSENT` or the per-user consent file; see
+[README.md](README.md#capture) for both and for which one decides. The file consents when
+its first line is `yes`, after any UTF-8 or UTF-16LE byte order mark and before trailing
+blanks. UTF-16LE is decoded before the line end is looked for, and a UTF-16LE unit
+outside ASCII makes the file no yes; so does a file over 4 KiB. On POSIX it counts only as a
+regular file, checked by path and again on the descriptor opened with `O_NONBLOCK` and
+`O_NOFOLLOW`, with one hard link and owned by the effective user. On Windows it is not
+checked for an owner and junctions are followed, so a redirected or shared `%APPDATA%`
+gives no per-user guarantee. The variable applies to every process that inherits the
+environment, the file to the user on every host that shares the home directory.
+Consent is read once, by `hrr_consent()`, and is part of `hip_capture_enabled()`.
+Without it `hip_capture_init()` prints one line on stderr naming what withheld it; it never
+prompts. `capture_consent` in the manifest metadata names the source, not the file's path,
+which names the user.
 
 ## Playback Tools
 
@@ -1089,7 +1162,7 @@ cmake --build hrr-build --target hrr-playback -j"$(nproc)"
 ```bash
 # Make the freshly built capture runtime win over any system ROCm copy at run time
 export LD_LIBRARY_PATH=$PWD/build/hipamd/lib:$LD_LIBRARY_PATH
-# or LD_PRELOAD the capture lib for a single app:
+# or LD_PRELOAD the capture lib for a single app (capture also needs consent, README.md#capture):
 LD_PRELOAD=$PWD/build/hipamd/lib/libamdhip64.so.7 HIP_HRR_CAPTURE_OUTPUT=./out.hrr ./my_hip_app
 ```
 
@@ -1251,7 +1324,8 @@ peer access from another process), the copy will operate on uninitialised memory
 ### `hipMallocManaged` — Unified Memory Not Validated
 
 Managed memory allocations are tracked in `alloc_map` and translated like any other
-device pointer. However the capture layer does not snapshot managed memory contents
+device pointer. Because the runtime may back them from host memory, replay charges
+their padded size to `--max-host-bytes` until `hipFree`. However the capture layer does not snapshot managed memory contents
 at any point. D2H validation blobs cover only explicitly synchronised
 `hipMemcpy`-family calls; data accessed by the CPU directly through a managed pointer
 is never captured.
@@ -1579,6 +1653,7 @@ The event wire format (finding H5):
 - `events.bin` marks such an archive with `HRR_FILE_FLAG_PACKED_HOST_RECTS` in `hrr_file_header.reserved`, and the layout came with the v7 bump, since a v6 reader ignores the flag. Replay then gives the host side of each pitched copy the dense layout of its blob (pitch equal to width, no offsets) and keeps the device side as recorded, so the copy moves the same bytes. A D2H check re-runs the copy into a scratch buffer of the blob's size and compares the two. Neither side of replay grows with the host pitch.
 - An archive without the flag lays a pitched host blob out from the base pointer with the recorded pitch and offsets, or holds the flat `width*height*depth` bytes (3D and driver D2H, `hipMemcpy3D` H2D). Replay keeps the recorded layout for it and compares only the copied rows. It skips a copy whose blob does not span the recorded rect, such as the flat blob of a rect that is not dense from the base, rather than read past the blob or issue it from the capture-time host address. A recorded rect whose footprint overflows `size_t` is skipped too. An archive whose every D2H check is skipped fails the replay rather than passing as one with no validation blobs.
 - The H2D source of the four `hipMemcpy3D` spellings is recorded only for a copy the runtime accepted.
+- Replay translates the `srcArray` and `dstArray` of the four `hipMemcpy3D` spellings through the array map before calling HIP, because CLR dereferences them. A handle replay never created (any array API other than `hipArrayCreate` / `hipArray3DCreate`) refuses the copy with `hipErrorInvalidValue`, naming the end and the recorded address; the recorded value never reaches the runtime. `hipMemcpy3DBatchAsync` refuses the same way, and also an array operand with a null handle or an operand type that is neither pointer nor array. The `hipDrvGraph*MemcpyNode*` copies translate an unknown array to null, which CLR refuses with `hipErrorInvalidValue`. A `hipMemcpy3D` whose kind is `hipMemcpyHostToDevice` with an array destination, or `hipMemcpyDeviceToHost` with an array source, is not replayed: its extent is in array elements, but the host rect and blob are sized in bytes, so issuing it would read or write past them. Replay notes it as unreplayable and returns `hipErrorNotSupported` (a D2H check on it counts as failed), so the replay ends instead of passing. The kind decides: a `hipMemcpyDefault` copy between `hipHostMalloc` memory and an array is still issued, as a device-to-device copy.
 - `hipMemset3D` / `hipMemset3DAsync` drop the destination pitched pointer/extent at
   capture (`pitchedDevPtr = 0`) and no-op at replay, so 3D-memset-initialized regions
   are invisible to replay.
@@ -1592,7 +1667,9 @@ handle-*creating* APIs — `hipHostRegister`, `hipHostGetDevicePointer`, `hipHos
 (finding H6), restoring symmetry with their already-ordered destroy/free counterparts.
 Under `--multi-thread`, a cross-thread consumer (e.g. `hipMemMap`) can no longer
 dispatch before the create populates the translation map and silently
-`return hipSuccess` while skipping the mapping.
+`return hipSuccess` while skipping the mapping. `hipMemMap` and `hipMemUnmap` are
+ordered too: a host-located handle's `--max-host-bytes` charge is held until its
+last mapping goes, so the map count must follow capture order.
 
 ### Validation-Fidelity Caveats
 

@@ -62,6 +62,8 @@ typedef struct BinarySearch {
   hsa_amd_memory_pool_t cpu_pool;
   hsa_amd_memory_pool_t gpu_pool;
   hsa_amd_memory_pool_t kern_arg_pool;
+  hsa_code_object_reader_t code_obj_rdr;
+  hsa_executable_t executable;
 
   // Other items we need to populate AQL packet
   uint64_t kernel_object;

@@ -57,3 +57,9 @@ Environment::async_buffer_size()
 {
     return Environment::get<size_t>(Environment::ASYNC_BUFFER_SIZE);
 }
+
+optional<bool>
+Environment::host()
+{
+    return Environment::get<bool>(Environment::HOST);
+}

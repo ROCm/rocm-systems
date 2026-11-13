@@ -19,6 +19,7 @@
 #include "nccl_common.h"
 
 struct ncclComm;
+struct ncclReg;
 struct ncclTaskColl;
 struct rcclCollDecision;
 
@@ -84,6 +85,10 @@ extern bool g_rcclCeAllReduceGraphLatchTickLastCapturing;  // UNDRIVEN
 // -------------------------------------------------------------------------
 extern bool g_rcclWarpSpeedSupported;
 extern int g_rcclWarpSpeedSupportedCalls;
+extern struct ncclTaskColl* g_rcclWarpSpeedSupportedLastCollHead;
+extern int g_rcclWarpSpeedSupportedLastNCollTasks;
+extern std::function<bool(struct ncclComm*, struct ncclKernelPlan*,
+                          struct ncclTaskColl*, int)> g_rcclWarpSpeedSupportedPrefix;
 extern ncclResult_t g_rcclSetWarpSpeedAutoResult;
 extern int g_rcclSetWarpSpeedAutoCalls;
 extern int g_rcclSetWarpSpeedCUsCalls;
@@ -107,9 +112,12 @@ extern std::function<size_t(int, bool, bool)> g_rcclHierarchicalTempBufferSize;
 extern int64_t g_rcclParamHierarchicalAllGather;
 extern int64_t g_rcclParamHierarchicalReduceScatter;
 
-// CE AllReduce staging (ncclCeEnsureAllReduceStaging, ncclCeInit in ce_coll.cc).
+// CE AllReduce / ReduceScatter staging (ncclCeEnsureAllReduceStaging, ncclCeInit in ce_coll.cc).
 extern int64_t g_rcclParamCeAllReduce;
+extern int64_t g_rcclParamCeReduceScatter;
 extern int64_t g_rcclParamCeArStagingBytes;
+// rcclCeArNonRegCap, which ncclCeInit and taskAppend call. Fails loud until a test installs it.
+extern std::function<size_t(const struct ncclComm*)> g_rcclCeArNonRegCap;
 
 // checkHsaEnvSetting's HSA_* scratch validation (rccl_wrap.cc). g_lastHsaScratchEnv records the
 // hsaScratchEnv argument, which is the only proof the check read the environment at all.
@@ -125,11 +133,13 @@ extern std::function<ncclResult_t(struct ncclComm*, const void*, void*, size_t, 
                                   bool, struct rcclCollDecision*)>
     g_rcclSelectAllGather;
 extern std::function<ncclResult_t(struct ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t, bool,
-                                  struct rcclCollDecision*)>
+                                  struct rcclCollDecision*, bool)>
     g_rcclSelectReduceScatter;
 extern std::function<ncclResult_t(struct ncclComm*, const void*, void*, size_t, ncclDataType_t, hipStream_t, bool,
                                   bool, struct rcclCollDecision*)>
     g_rcclSelectAlltoAll;
+extern std::function<ncclResult_t(struct ncclComm*, size_t, ncclDataType_t, int, bool, struct rcclCollDecision*)>
+    g_rcclSelectBroadcast;
 extern std::function<bool(const struct ncclComm*, size_t, size_t, bool, const char*)> g_rcclDdaEnabled;
 extern std::function<size_t(const struct ncclComm*, ncclFunc_t)> g_rcclDdaEntryThreshold;
 extern std::function<ncclResult_t(int, const char**)> g_rcclGetAlgoName;
@@ -137,6 +147,13 @@ extern std::function<bool(struct ncclComm*, size_t&)> g_rcclUseAllGatherDirect;
 extern std::function<bool(struct ncclComm*, size_t&)> g_rcclUseReduceScatterDirect;
 // RCCL_PARAM(DdaEnable, "DDA_ENABLE", 1).
 extern int64_t g_rcclParamDdaEnable;
+
+// NET user-buffer registration (net.cc's ncclNet{Local,Graph}RegisterBuffer). Both segment
+// counts default to keeping the caller's *numSegments; rcclNetRegCommit records its calls.
+extern std::function<ncclResult_t(struct ncclComm*, struct ncclReg*, int*)> g_rcclNetRegSegmentCount;
+extern std::function<ncclResult_t(struct ncclComm*, struct ncclReg*, int*)> g_rcclNetGraphRegSegmentCount;
+extern int g_rcclNetRegCommitCalls;
+extern int g_rcclNetRegCommitLastSegments;
 
 // -------------------------------------------------------------------------
 // DDA params and thresholds. Defaults match rccl_wrap.cc with no arch table.

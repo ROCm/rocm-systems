@@ -44,8 +44,11 @@ third frontend. Its small `src/lib.rs` makes Cargo link the AMDF and HSA `rlib`s
 into one `cdylib`. The ABIs retain separate rocddi sessions and public handles;
 the shared image contains one copy of rocddi's process-local KFD backend state.
 The root `build.rs` retains both entry point sets, applies HSA symbol versions
-and SONAME, and marks the image `NODELETE` while native KFD and DRM owners may
-remain live. `cmake/SharedImage.cmake` owns the corresponding CMake targets.
+and SONAME on Linux, and marks that image `NODELETE` while native KFD and DRM
+owners may remain live. Windows staging conventions use `rocddi_runtime.dll`
+and its MSVC import library; DLL export and link integration remain deferred.
+Resident module owners retain native code independently.
+`cmake/SharedImage.cmake` owns the corresponding CMake targets.
 
 The CMake build below stages one physical `libhsa-runtime64.so.1` with
 `libhsa-runtime64.so`, `libhsa_runtime64.so`, `libamdf.so.0`, and
@@ -93,11 +96,12 @@ The library helper takes keyword arguments for the Cargo package/target, native
 output name, type, and ABI version. Component `project(... VERSION ...)` calls and the shared-image module
 own native versions; the helper handles filenames, symlinks, SONAME settings,
 and per-static-library link requirements. Platform-specific conventions live
-in the helper, with explicit errors for Windows/Darwin until implemented.
-The configure helper recognizes native Linux x86-64, AArch64, PPC64/PPC64LE,
-and RISC-V64 toolchains. This is not runtime backend support: rocddi currently
-supports only Linux x86-64/AArch64 and rejects other architectures at compile
-time in `ddi/rocddi/src/driver.rs`. Only x86-64 has been validated locally.
+in the helper, with Linux and Windows MSVC implementations. Darwin remains
+unsupported. The configure helper recognizes native Linux x86-64, AArch64,
+PPC64/PPC64LE and RISC-V64, plus Windows x86-64 MSVC toolchains.
+Driver support is separate: Linux KFD/DRM is the only production GPU provider.
+Windows host services and shared contracts compile for x86-64 MSVC, but native
+Windows SDK/C++ linkage and execution remain outstanding.
 Python's standard-library TOML parser requires Python 3.11 or newer.
 `runtime-rust-config.cmake` in the build directory records the generated Cargo
 command and environment for inspection.
@@ -127,6 +131,28 @@ be prepared before configuration; missing inputs fail rather than fetch.
 Native C libraries should be discovered by CMake and explicitly supplied to
 Rust consumers when needed. No native package-discovery abstraction is added
 before there is a concrete dependency requiring it.
+
+## OS and driver support
+
+Host OS selection and GPU provider selection are independent. The shared DDI
+owns resource lifetimes, checked geometry, optional capability requests and
+native status domains; private native owners implement OS or driver contracts.
+Windows host services include CPU-group/NUMA/cache discovery, physical-memory
+capacity, allocation and remappable section backing, placeholder reservations,
+positioned file I/O, process identity, host clocks and resident module loading.
+Placeholder APIs require Windows 10 version 1803 or later.
+
+No Windows GPU provider is installed. GPU services report unavailable;
+Windows HSA initialization still requires a qualified AQL GPU and is therefore
+unavailable. Windows tool dispatch, loaded-module enumeration and borrowed CRT
+`FILE*` logging are outside the implemented support profile. The tested target
+is Linux x86-64 with the pinned Rust toolchain. Windows cross-compilation and
+portable fault-injection tests do not establish native Windows execution.
+
+Run the independent AMDF and HSA C/Rust ABI probes after a release build;
+their native compiler adapter supports Linux compilers and MSVC/clang-cl.
+On Windows, run from a provisioned MSVC environment with the matching native
+Rust toolchain, Windows SDK and AddrLib C++ build inputs.
 
 ## Direct Rust development
 

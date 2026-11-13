@@ -7,8 +7,8 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use rocddi::device::gpu::queue::{
-    self, QueueAccessWidth, QueueParameters, QueuePriority, QueueProducerMode, QueueRequest,
-    QueueRingMemory, QueueScratch,
+    self, QueueParameters, QueuePriority, QueueProducerMode, QueueRequest, QueueRingMemory,
+    QueueScratch,
 };
 use rocddi::memory::storage::{Allocator, Owned};
 
@@ -24,6 +24,10 @@ const LOST_BIT: u64 = 1 << 63;
 const DEFAULT_RING_BYTES: u64 = 64 * 1024;
 
 /// Native queue implementation or deterministic unit-test fixture.
+#[allow(
+    clippy::large_enum_variant,
+    reason = "the small variant exists only for the internal test fixture"
+)]
 enum NativeQueue {
     /// rocddi direct queue and its native transport.
     Provider(queue::RetainedQueue<Option<memory::QueueScratchBorrow>>),
@@ -104,11 +108,22 @@ struct Queue {
 struct Mapping {
     /// Queue borrowed by this public producer mapping.
     queue: *mut Queue,
+    /// A peer producer device borrowed until this mapping is unmapped.
+    producer_queues: Option<*const AtomicU64>,
     /// Cached transport addresses returned through the ABI.
     info: amdf_user_queue_mapping_info_t,
 }
 
 impl Queue {
+    fn require_current_process(&self) -> Result<(), u64> {
+        #[cfg(test)]
+        if matches!(self.native, NativeQueue::Fixture(_)) {
+            return Ok(());
+        }
+        // SAFETY: A live queue borrows its registered device.
+        unsafe { &*self.device }.require_current_process()
+    }
+
     fn observe_loss(&self) {
         #[cfg(test)]
         if matches!(self.native, NativeQueue::Fixture(_)) {
@@ -219,7 +234,10 @@ fn descriptor(
         if family.minimum_ring_byte_length == family.maximum_ring_byte_length {
             family.minimum_ring_byte_length
         } else {
-            DEFAULT_RING_BYTES
+            DEFAULT_RING_BYTES.clamp(
+                family.minimum_ring_byte_length,
+                family.maximum_ring_byte_length,
+            )
         }
     } else {
         info.ring_byte_length
@@ -300,7 +318,14 @@ unsafe fn scratch_descriptor(
             device_address: resolved.device_address,
             byte_length: scratch.byte_length,
             maximum_private_segment_byte_length: scratch.maximum_private_segment_byte_length,
-            lanes_per_wave: 32,
+            lanes_per_wave: unsafe {
+                (*device)
+                    .native
+                    .endpoint()
+                    .gpu()
+                    .ok_or(UNSUPPORTED)?
+                    .wavefront_size
+            },
             maximum_wave_count: scratch.maximum_wave_count,
         }),
         resolved.memory,
@@ -314,12 +339,15 @@ fn transport(
     format_features: amdf_queue_format_features_t,
     device: bool,
 ) -> Result<amdf_user_queue_mapping_info_t, u64> {
-    let units = match command_type {
-        AMDF_QUEUE_COMMAND_TYPE_GPU_PM4 => 4,
-        AMDF_QUEUE_COMMAND_TYPE_GPU_AQL => 64,
-        AMDF_QUEUE_COMMAND_TYPE_GPU_SDMA => 1,
+    if info.host_publication != queue::HostQueuePublication::Ordered64BitMmio {
+        return Err(UNSUPPORTED);
+    }
+    match command_type {
+        AMDF_QUEUE_COMMAND_TYPE_GPU_PM4
+        | AMDF_QUEUE_COMMAND_TYPE_GPU_AQL
+        | AMDF_QUEUE_COMMAND_TYPE_GPU_SDMA => (),
         _ => return Err(UNSUPPORTED),
-    };
+    }
     let (ring, read, write, doorbell) = if device {
         (
             info.ring_device_address,
@@ -335,21 +363,6 @@ fn transport(
             info.doorbell_host_address as u64,
         )
     };
-    if info.read_index_width != QueueAccessWidth::Bits64
-        || info.write_index_width != QueueAccessWidth::Bits64
-        || info.doorbell_width != QueueAccessWidth::Bits64
-        || info.read_index_wraps != (command_type == AMDF_QUEUE_COMMAND_TYPE_GPU_PM4)
-        || info.index_unit_bytes != units
-        || ring == 0
-        || read == 0
-        || write == 0
-        || doorbell == 0
-        || read & 7 != 0
-        || write & 7 != 0
-        || doorbell & 7 != 0
-    {
-        return Err(INTERNAL);
-    }
     Ok(amdf_user_queue_mapping_info_t {
         command_type,
         format_version,
@@ -471,6 +484,7 @@ pub(crate) unsafe extern "C" fn create(
         output_pointer(out)?;
         let create_info = input(create_info, AMDF_STRUCTURE_TYPE_GPU_USER_QUEUE_CREATE_INFO)?;
         let device = object(pointer.cast::<Device>())?;
+        device.require_current_process()?;
         let family = instance::family(device.native.endpoint(), create_info.queue_family_ordinal)?;
         let (scratch, scratch_memory) = scratch_descriptor(&create_info, &family, pointer.cast())?;
         let desc = descriptor(&create_info, &family, scratch)?;
@@ -589,6 +603,7 @@ pub(crate) unsafe extern "C" fn map(
     crate::support::boundary(|| unsafe {
         output_pointer(out)?;
         let queue = object(pointer.cast::<Queue>())?;
+        queue.require_current_process()?;
         queue.require_usable()?;
         let host = producer.is_null();
         let peer = if host || producer.cast::<Device>() == queue.device {
@@ -607,12 +622,17 @@ pub(crate) unsafe extern "C" fn map(
         let slot = queue
             .host_allocator
             .with_scope(|| Owned::<Mapping>::try_new_uninit().map_err(|_| EXHAUSTED))?;
-        let info = if host {
-            queue.host_mapping
-        } else if peer.is_none() {
-            queue.device_mapping.ok_or(UNSUPPORTED)?
-        } else {
-            let producer = peer.ok_or(INTERNAL)?;
+        let producer_queues = peer.map(|producer| &raw const producer.queues);
+        if let Some(counter) = producer_queues {
+            register(&*counter)?;
+        }
+        let info = (|| {
+            if host {
+                return Ok(queue.host_mapping);
+            }
+            let Some(producer) = peer else {
+                return queue.device_mapping.ok_or(UNSUPPORTED);
+            };
             let mut info = transport(
                 queue
                     .native
@@ -627,11 +647,26 @@ pub(crate) unsafe extern "C" fn map(
             info.queue_id = queue.info.queue_id;
             info.queue_reset_epoch = queue.info.reset_epoch;
             info.producer_reset_epoch = producer.current_reset_epoch();
-            info
+            Ok(info)
+        })();
+        let info = match info {
+            Ok(info) => info,
+            Err(status) => {
+                if let Some(counter) = producer_queues {
+                    unregister(&*counter);
+                }
+                return Err(status);
+            }
         };
-        register(&queue.mappings)?;
+        if let Err(status) = register(&queue.mappings) {
+            if let Some(counter) = producer_queues {
+                unregister(&*counter);
+            }
+            return Err(status);
+        }
         let owner = slot.write(Mapping {
             queue: pointer.cast(),
+            producer_queues,
             info,
         });
         out.write(owner.into_raw().cast());
@@ -655,6 +690,10 @@ pub(crate) unsafe extern "C" fn mapping_info(
 pub(crate) unsafe extern "C" fn unmap(pointer: *mut amdf_user_queue_mapping_t) -> u64 {
     crate::support::boundary(|| unsafe {
         let mapping = object(pointer.cast::<Mapping>())?;
+        (*mapping.queue).require_current_process()?;
+        if let Some(counter) = mapping.producer_queues {
+            unregister(&*counter);
+        }
         unregister(&(*mapping.queue).mappings);
         drop(Owned::from_raw(pointer.cast::<Mapping>()));
         Ok(())
@@ -668,6 +707,7 @@ pub(crate) unsafe extern "C" fn status(
     crate::support::boundary(|| unsafe {
         let out = output(out, AMDF_STRUCTURE_TYPE_USER_QUEUE_STATUS)?;
         let queue = object(pointer.cast::<Queue>())?;
+        queue.require_current_process()?;
         out.publish(queue.sample()?);
         Ok(())
     })
@@ -682,6 +722,7 @@ pub(crate) unsafe extern "C" fn wait(
     crate::support::boundary(|| unsafe {
         let start = Instant::now();
         let queue = object(pointer.cast::<Queue>())?;
+        queue.require_current_process()?;
         wait_consumed(queue, target, timeout, poll, start)
     })
 }
@@ -689,10 +730,14 @@ pub(crate) unsafe extern "C" fn wait(
 pub(crate) unsafe extern "C" fn destroy(pointer: *mut amdf_user_queue_t) -> u64 {
     crate::support::boundary(|| {
         unsafe {
-            let queue = exclusive(pointer.cast::<Queue>())?;
+            let queue = object(pointer.cast::<Queue>())?;
+            queue.require_current_process()?;
             if queue.mappings.load(Ordering::Acquire) != 0 {
                 return Err(BUSY);
             }
+            // Mapping children cannot borrow this queue after the preflight.
+            // The caller serializes direct queue calls with destruction.
+            let queue = exclusive(pointer.cast::<Queue>())?;
             let mut observation_error = None;
             if !queue.destroying.load(Ordering::Acquire) {
                 // A work-only BUSY rejection also leaves all public queue uses
@@ -716,11 +761,18 @@ pub(crate) unsafe extern "C" fn destroy(pointer: *mut amdf_user_queue_t) -> u64 
             } else {
                 // SAFETY: Mapping preflight established that no public producer
                 // borrow remains; the caller has exclusive queue access.
-                queue
-                    .native
-                    .destroy()
-                    .map_err(|error| queue.observe_error(&error))
+                queue.native.destroy().map_err(|error| {
+                    if error.kind() == rocddi::ErrorKind::Busy && error.native_status().is_none() {
+                        // Native preflight left the queue and its public
+                        // producer contract intact for a later retry.
+                        queue.destroying.store(false, Ordering::Release);
+                    }
+                    queue.observe_error(&error)
+                })
             };
+            if result == Err(BUSY) && !queue.destroying.load(Ordering::Acquire) {
+                return result;
+            }
             unregister(&*queue.device_queues);
             let owner = Owned::from_raw(pointer.cast::<Queue>());
             if result.is_err() {

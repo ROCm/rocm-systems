@@ -116,6 +116,8 @@ void flat_global_calculate_addresses(const Inst &inst, amdgpu::Wavefront &wf,
     d.exec_mask = amdgpu::wave32_exec_all_if_nonzero(d.exec_mask);
     d.lane_mask = d.exec_mask;
   }
+  if (d.transpose && !d.exec_mask)
+    return;
   uint64_t exec = d.exec_mask;
   int64_t offset = static_cast<int64_t>(signed_ioffset(inst.ioffset));
   bool saddr_present = has_saddr(inst.saddr);
@@ -152,8 +154,8 @@ void flat_global_calculate_addresses(const Inst &inst, amdgpu::Wavefront &wf,
     }
     uint64_t addr = saddr_val + vaddr + offset;
     if (decode_flat_private) {
-      const auto translated =
-          amdgpu::translate_flat_address(wf, addr, lane, amdgpu::FlatPrivateLayout::EncodedLane);
+      const auto translated = amdgpu::translate_flat_address(
+          wf, addr, lane, amdgpu::flat_private_layout(wf.cu().arch()));
       if (translated.private_address) {
         addr = translated.value;
         d.scratch_swizzle = true;
@@ -162,7 +164,8 @@ void flat_global_calculate_addresses(const Inst &inst, amdgpu::Wavefront &wf,
         d.scratch_lane_mask |= uint64_t{1} << lane;
       }
     } else {
-      assert(!amdgpu::translate_flat_address(wf, addr, lane, amdgpu::FlatPrivateLayout::EncodedLane)
+      assert(!amdgpu::translate_flat_address(wf, addr, lane,
+                                             amdgpu::flat_private_layout(wf.cu().arch()))
                   .private_address &&
              "gfx1250 global memory address must not use flat private scratch encoding");
     }
@@ -424,11 +427,14 @@ void ds_calculate_addresses_masked(const VdsMachineInst &inst, amdgpu::Wavefront
   amdgpu::RegisterAccess regs(cu);
   amdgpu::RegisterAccess::VgprReadRegion addr_region =
       regs.read_vgpr_region(addr_base, 1, lane_mask);
-  const std::span<const uint32_t> addresses = addr_region.lanes();
+  auto maybe_addresses = addr_region.lanes();
+  if (maybe_addresses.failed())
+    return;
+  const std::span<const uint32_t> addresses = maybe_addresses.value();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(lane_mask & (1ULL << lane)))
       continue;
-    d.per_lane_addr[lane] = addresses[lane] + offset + wf.lds_base();
+    d.per_lane_addr[lane] = amdgpu::ds_address(wf.lds_base(), addresses[lane], offset);
   }
 }
 

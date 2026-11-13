@@ -60,8 +60,8 @@ rocprofiler_add_integration_execute_test(
         --pmc SQ_WAVES SQ_INSTS_VALU GRBM_GUI_ACTIVE --pmc SQ_WAVES SQ_INSTS_VALU
         SQ_INSTS_SALU --pmc SQ_WAVES SQ_INSTS_VALU SQ_INSTS_SMEM --pmc SQ_WAVES
         SQ_INSTS_VALU SQ_INSTS_LDS --replay-mode kernel --kernel-replay-beta-enabled
-        --output-format csv json -d ${CMAKE_CURRENT_BINARY_DIR}/kernel-replay -o out --
-        $<TARGET_FILE:kernel-replay> 1048576 1
+        --output-format csv json rocpd -d ${CMAKE_CURRENT_BINARY_DIR}/kernel-replay -o out
+        -- $<TARGET_FILE:kernel-replay> 1048576 1
     DEPENDS kernel-replay
     TIMEOUT 120
     LABELS "kernel-replay"
@@ -69,17 +69,25 @@ rocprofiler_add_integration_execute_test(
     FIXTURES_SETUP rocprofv3-test-kernel-replay-data)
 
 # Validate replay structure: each dispatch replayed REPLAY_PASSES times, the shared sanity
-# counters (SQ_WAVES, SQ_INSTS_VALU) are constant across a dispatch's passes, and the
-# kernels are present. A sanity counter the agent does not report is skipped. A counter
-# that reads zero for every dispatch is skipped only on gfx1201 (SQ_INSTS_VALU); on other
-# targets, including gfx1250, that is a failure. No -x, so one skipped or failing counter
-# does not hide the remaining checks.
+# counters (SQ_WAVES, SQ_INSTS_VALU) are constant across a dispatch's passes, the kernels
+# are present, and rocpd's counters_collection averages the shared counters over the
+# passes rather than summing them. A sanity counter the agent does not report is skipped.
+# A counter that reads zero for every dispatch is skipped only on gfx1201 (SQ_INSTS_VALU);
+# on other targets, including gfx1250, that is a failure. No -x, so one skipped or failing
+# counter does not hide the remaining checks.
 rocprofiler_add_integration_validate_test(
     rocprofv3-test-kernel-replay-validate BUNDLE_TESTS
     TEST_PATHS validate.py
     COPY conftest.py
-    ARGS --json-input ${CMAKE_CURRENT_BINARY_DIR}/kernel-replay/out_results.json --passes
-         ${REPLAY_PASSES} --common-counters SQ_WAVES SQ_INSTS_VALU
+    ARGS --json-input
+         ${CMAKE_CURRENT_BINARY_DIR}/kernel-replay/out_results.json
+         --passes
+         ${REPLAY_PASSES}
+         --common-counters
+         SQ_WAVES
+         SQ_INSTS_VALU
+         --rocpd-input
+         ${CMAKE_CURRENT_BINARY_DIR}/kernel-replay/out_results.db
     TIMEOUT 120
     LABELS "kernel-replay"
     PYTHON_PATH
@@ -97,8 +105,9 @@ rocprofiler_add_integration_execute_test(
         --pmc SQ_WAVES SQ_INSTS_VALU GRBM_GUI_ACTIVE --pmc SQ_WAVES SQ_INSTS_VALU
         SQ_INSTS_SALU --pmc SQ_WAVES SQ_INSTS_VALU SQ_INSTS_SMEM --pmc SQ_WAVES
         SQ_INSTS_VALU SQ_INSTS_LDS --replay-mode kernel --kernel-replay-beta-enabled
-        --output-format csv json -d ${CMAKE_CURRENT_BINARY_DIR}/kernel-replay-interval -o
-        out -- $<TARGET_FILE:kernel-replay> 1048576 1
+        --output-format csv json rocpd -d
+        ${CMAKE_CURRENT_BINARY_DIR}/kernel-replay-interval -o out --
+        $<TARGET_FILE:kernel-replay> 1048576 1
     DEPENDS kernel-replay
     TIMEOUT 120
     LABELS "kernel-replay"
@@ -109,8 +118,15 @@ rocprofiler_add_integration_validate_test(
     rocprofv3-test-kernel-replay-interval-validate BUNDLE_TESTS
     TEST_PATHS validate.py
     COPY conftest.py
-    ARGS --json-input ${CMAKE_CURRENT_BINARY_DIR}/kernel-replay-interval/out_results.json
-         --passes ${REPLAY_PASSES} --common-counters SQ_WAVES SQ_INSTS_VALU
+    ARGS --json-input
+         ${CMAKE_CURRENT_BINARY_DIR}/kernel-replay-interval/out_results.json
+         --passes
+         ${REPLAY_PASSES}
+         --common-counters
+         SQ_WAVES
+         SQ_INSTS_VALU
+         --rocpd-input
+         ${CMAKE_CURRENT_BINARY_DIR}/kernel-replay-interval/out_results.db
     TIMEOUT 120
     LABELS "kernel-replay"
     PYTHON_PATH

@@ -4,6 +4,9 @@
 //! Native queue event delivery and scratch fault recovery.
 
 use super::*;
+use rocddi::device::gpu::queue::{
+    AqlQueueException, aql_scratch_lanes, decode_aql_queue_exception, replace_scratch_owner,
+};
 
 /// Queue error callback detached from the registry lock before invocation.
 struct PendingCallback {
@@ -27,28 +30,18 @@ struct QueueEventOutcome {
 
 /// Maps a native queue error code to an HSA status.
 pub(super) fn queue_error_status(error: u64) -> Status {
-    if error & 2 != 0 {
-        INCOMPATIBLE_ARGUMENTS
-    } else if error & 4 != 0 {
-        INVALID_ALLOCATION
-    } else if error & 8 != 0 {
-        INVALID_CODE_OBJECT
-    } else if error & 16 != 0 {
-        MEMORY_FAULT
-    } else if error & (32 | 256) != 0 {
-        INVALID_PACKET_FORMAT
-    } else if error & 64 != 0 {
-        INVALID_ARGUMENT
-    } else if error & 128 != 0 {
-        OUT_OF_REGISTERS
-    } else if error & 0x2000_0000 != 0 {
-        MEMORY_APERTURE_VIOLATION
-    } else if error & 0x4000_0000 != 0 {
-        ILLEGAL_INSTRUCTION
-    } else if error & 0x8000_0000 != 0 {
-        EXCEPTION
-    } else {
-        ERROR
+    match decode_aql_queue_exception(error) {
+        AqlQueueException::Scratch { .. } | AqlQueueException::Unknown => ERROR,
+        AqlQueueException::IncompatibleArguments => INCOMPATIBLE_ARGUMENTS,
+        AqlQueueException::InvalidAllocation => INVALID_ALLOCATION,
+        AqlQueueException::InvalidCodeObject => INVALID_CODE_OBJECT,
+        AqlQueueException::MemoryFault => MEMORY_FAULT,
+        AqlQueueException::InvalidPacketFormat => INVALID_PACKET_FORMAT,
+        AqlQueueException::InvalidArgument => INVALID_ARGUMENT,
+        AqlQueueException::OutOfRegisters => OUT_OF_REGISTERS,
+        AqlQueueException::MemoryApertureViolation => MEMORY_APERTURE_VIOLATION,
+        AqlQueueException::IllegalInstruction => ILLEGAL_INSTRUCTION,
+        AqlQueueException::Exception => EXCEPTION,
     }
 }
 
@@ -77,35 +70,26 @@ fn pending_error_callback(
         // Publish the affected queue so a running system event worker can
         // attach the process fault's address and reason.
         let details = runtime.vm_fault_details;
+        let defer_to_system = runtime.system_event_worker.is_some()
+            && !runtime.system_event_failed.load(Ordering::Acquire);
         let queue = runtime.queue_state.queues.get_mut(&key)?;
         queue.vm_faulted = true;
         if let Some((_, address, reason)) = details.filter(|(agent, _, _)| *agent == queue.agent) {
             queue.vm_fault_address = address;
             queue.vm_fault_reason = reason;
         }
-        if runtime.system_event_worker.is_some() {
-            VM_FAULT_CONDVAR.notify_all();
-            return None;
+        match queue.vm_fault_callback_state.observe(defer_to_system) {
+            VmFaultCallbackAction::Defer => {
+                VM_FAULT_CONDVAR.notify_all();
+                return None;
+            }
+            VmFaultCallbackAction::Ignore => return None,
+            VmFaultCallbackAction::Callback => {}
         }
         // Without a system event handler, the queue callback is the only
         // fault notification available to the application.
     }
     pending_callback(runtime, key, status)
-}
-
-/// Publishes a new owner only after the control update completes. The
-/// candidate is retained before the control update, so failure or
-/// unwind cannot release backing that the command processor may have observed.
-pub(super) fn update_scratch_owner<T>(
-    current: &mut Option<T>,
-    uncertain: &mut Vec<T>,
-    candidate: T,
-    update: impl FnOnce() -> Result<(), Status>,
-) -> Result<Option<T>, Status> {
-    uncertain.try_reserve(1).map_err(|_| OUT_OF_RESOURCES)?;
-    uncertain.push(candidate);
-    update()?;
-    Ok(std::mem::replace(current, uncertain.pop()))
 }
 
 /// Translates a native event observation into queue callback work.
@@ -116,12 +100,12 @@ fn handle_queue_event(key: usize, observed: SignalValue) -> Option<QueueEventOut
         return None;
     }
     let error = observed as u64;
-    if error & 0x401 == 0 {
+    let Some(lanes_per_wave) = aql_scratch_lanes(error) else {
         return Some(QueueEventOutcome {
             callback: pending_error_callback(runtime, key, queue_error_status(error)),
             rearm: false,
         });
-    }
+    };
     let (device, gpu, public, private_segment_size, dispatch_id) = {
         let queue = runtime.queue_state.queues.get(&key)?;
         let index = runtime.gpu_index(queue.agent)?;
@@ -140,7 +124,6 @@ fn handle_queue_event(key: usize, observed: SignalValue) -> Option<QueueEventOut
         )
     };
     drop(guard);
-    let lanes_per_wave = if error & 0x400 != 0 { 32 } else { 64 };
     crate::tool_events::alloc_start(public as *const HsaQueue, dispatch_id);
     let allocated = allocate_scratch(&device, gpu, private_segment_size, lanes_per_wave);
     let mut guard = if let Ok(guard) = lock() {
@@ -163,10 +146,11 @@ fn handle_queue_event(key: usize, observed: SignalValue) -> Option<QueueEventOut
         // SAFETY: The backing stays paired with this queue, and the candidate
         // is staged before its address can be written to native control state.
         let (native, backing) = unsafe { queue.native.parts_mut() };
-        let old = update_scratch_owner(
+        let old = replace_scratch_owner(
             &mut backing.scratch,
             &mut backing.uncertain_scratch,
             allocation,
+            OUT_OF_RESOURCES,
             || {
                 // SAFETY: The inactive signal reports a stopped queue. Both
                 // old and candidate allocations remain owned if the update
@@ -221,13 +205,32 @@ pub(super) fn queue_event_worker(
     stop: &AtomicBool,
     alive: &AtomicBool,
     signal: &QueueEventSignal,
+    observer_failed: &AtomicBool,
     key: usize,
 ) {
     let mut inactive_armed = true;
     let mut error_armed = true;
+    let mut observer_failure_checked = false;
     while !stop.load(Ordering::Acquire) && alive.load(Ordering::Acquire) {
         let error = signal.load_error();
-        let callback = if error != 0 && error_armed {
+        let callback = if !observer_failure_checked && observer_failed.load(Ordering::Acquire) {
+            observer_failure_checked = true;
+            let mut guard = match lock() {
+                Ok(guard) => guard,
+                Err(_) => return,
+            };
+            let Some(runtime) = guard.as_mut() else {
+                return;
+            };
+            let Some(queue) = runtime.queue_state.queues.get_mut(&key) else {
+                return;
+            };
+            if queue.vm_fault_callback_state.take_after_system_failure() {
+                pending_callback(runtime, key, MEMORY_FAULT)
+            } else {
+                None
+            }
+        } else if error != 0 && error_armed {
             error_armed = false;
             let mut guard = match lock() {
                 Ok(guard) => guard,

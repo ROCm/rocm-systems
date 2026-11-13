@@ -45,9 +45,10 @@ endif()
 
 option(PROFILE "Enable statistics and timing support" OFF)
 option(USE_RO "Enable RO conduit" OFF)
+option(USE_HOST_VERBS "Enable host-side verbs networking layer (src/net)" OFF)
 option(USE_IPC "Enable IPC support (using HIP)" ON)
 option(USE_GDA "Enable GDA conduit" OFF)
-option(USE_SDMA "Enable SDMA transport (MI300X+)" OFF)
+option(USE_SDMA "Enable SDMA transport (MI300X+). Implied by USE_IPC." ${USE_IPC})
 option(USE_TDM "Enable TDM (Tensor Data Mover) LDS-staged IPC transfers (MI4xx / gfx1250+)" OFF)
 option(USE_THREADS "Enable workgroup threads to share network queues" OFF)
 option(USE_WF_COAL "Enable wavefront message coalescing" OFF)
@@ -92,6 +93,13 @@ else()
 endif()
 option(GDA_MUX "Build provider multiplexer with runtime dispatch to hardware-specific provider"
        ${GDA_MUX_DEFAULT})
+
+# Gate the QueuePair device provider dispatch on __constant__ constmem. Always ON
+# for rocSHMEM's own build; consumers that embed only the GDA QueuePair headers
+# (e.g. RCCL's GIN path) set it OFF so device dispatch reads a per-instance
+# provider member instead, carrying no __constant__ global. Internal, not a
+# user-facing option — do not expose in ccmake.
+set(USE_CONSTMEM ON CACHE INTERNAL "QueuePair device dispatch reads __constant__ constmem (internal)")
 
 if(USE_GDA)
   if(GDA_PROVIDER_COUNT EQUAL 0)
@@ -554,6 +562,8 @@ if (NOT BUILD_TESTS_ONLY)
   endif()
 
   if(USE_ROCPROFILER_REGISTER AND TARGET rocprofiler-register::rocprofiler-register)
+    target_compile_definitions(${PROJECT_NAME}
+                               PRIVATE ROCSHMEM_ROCPROFILER_REGISTER=1)
     target_link_libraries(${PROJECT_NAME}
                           PRIVATE rocprofiler-register::rocprofiler-register)
   endif()

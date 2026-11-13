@@ -9,6 +9,7 @@ add_library(
     test_ucx_gotcha.cpp
     test_pthread_mutex_gotcha.cpp
     test_category_region.cpp
+    test_hardware_counter_track_name.cpp
 )
 
 target_link_libraries(
