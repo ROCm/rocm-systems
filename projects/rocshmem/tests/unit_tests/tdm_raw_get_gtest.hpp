@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: MIT
  *****************************************************************************/
 
-// Raw byte-array get tests exercising memcpy_wg_tdm via ipcCopy_wg. Mirrors
+// Raw byte-array get tests exercising memcpy_wg_lds_stage via ipcCopy_wg. Mirrors
 // tdm_raw_put_gtest.hpp with the direction and threshold reversed.
 //
 // Build: cmake -DUSE_TDM=ON -DUSE_IPC=ON -DAMDGPU_TARGETS=gfx1250 ...
@@ -47,7 +47,7 @@ __global__
 void tdm_raw_get_kernel(IpcImplT* ipc_impl, uint8_t* local_dst,
                         const uint8_t* remote_src, size_t bytes) {
   extern __shared__ uint8_t tdm_lds[];
-  rocshmem_set_tdm_lds(tdm_lds, rocshmem_query_tdm_lds_bytes());
+  rocshmem_set_lds_stage(tdm_lds, rocshmem_query_lds_stage_bytes());
 
   ipc_impl->template ipcCopy_wg<MemcpyKind::GetBlocking>(
       local_dst, const_cast<uint8_t*>(remote_src), bytes, /*local_pe=*/0);
@@ -72,7 +72,7 @@ class TdmRawGetFixture : public ::testing::TestWithParam<size_t> {
     // Force a known tile size so the parameterized sizes land where intended.
     uint32_t tile_bytes = TEST_TDM_GET_TILE_BYTES;
     CHECK_HIP(hipMemcpyToSymbol(HIP_SYMBOL(constmem), &tile_bytes, sizeof(tile_bytes),
-                                offsetof(constmem_t, tdm_tile_bytes)));
+                                offsetof(constmem_t, lds_stage_tile_bytes)));
     // Force SDMA off: this fixture never sets up an SDMA channel.
     size_t sdma_threshold = SDMA_THRESHOLD_DISABLED;
     CHECK_HIP(hipMemcpyToSymbol(HIP_SYMBOL(constmem), &sdma_threshold, sizeof(sdma_threshold),
@@ -80,7 +80,7 @@ class TdmRawGetFixture : public ::testing::TestWithParam<size_t> {
     // Force a known get threshold so the parameterized sizes land where intended.
     size_t get_threshold = TEST_TDM_GET_THRESHOLD;
     CHECK_HIP(hipMemcpyToSymbol(HIP_SYMBOL(constmem), &get_threshold, sizeof(get_threshold),
-                                offsetof(constmem_t, tdm_get_threshold)));
+                                offsetof(constmem_t, lds_stage_get_threshold)));
     hip_allocator_->allocate((void**)&ipc_impl_dptr_, sizeof(IpcImplT));
     CHECK_HIP(hipMemcpy(ipc_impl_dptr_, &ipc_impl_, sizeof(IpcImplT),
                         hipMemcpyHostToDevice));
@@ -119,7 +119,7 @@ class TdmRawGetFixture : public ::testing::TestWithParam<size_t> {
       // Block size: full wavefront for TDM to have at least 1 wave.
       const dim3 block(WF_SIZE);
       // Backend-free: compute LDS size from the forced tile size directly.
-      const size_t smem = tdm::lds_bytes_for_tile(TEST_TDM_GET_TILE_BYTES);
+      const size_t smem = lds_stage::lds_bytes_for_tile(TEST_TDM_GET_TILE_BYTES);
       tdm_raw_get_kernel<IpcImplT>
           <<<dim3(1), block, smem>>>(ipc_impl_dptr_, local_dst, remote_src, bytes);
       CHECK_HIP(hipStreamSynchronize(nullptr));

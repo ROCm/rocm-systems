@@ -9,6 +9,19 @@
 * Extended the tile API to support **3D and 4D tensors** (in addition to the existing 1D and 2D support) for both the IPC and GDA backends. The `TileView` internal structure now uses fixed-size arrays of `MAX_NDIM=4`, `tile_make_view` uses a generic loop over all dimensions, and `tile_memcpy_rma` includes an N-dimensional strided copy path. The `ndim > 2` guards in the IPC and GDA RMA and reduction operations have been relaxed to `ndim > TileView::MAX_NDIM`. The GDA lane-level `tile_put`/`tile_get` and the `tile_put_gda_workers`/`tile_get_gda_workers` helpers include N-dimensional element-by-element and contiguous paths for ranks 3 and 4.
 * Added standalone signal APIs:
     * `rocshmem_signal_add_on_stream` and `rocshmem_signal_set_on_stream`
+* Merged the TDM (Tensor Data Mover) LDS-staged IPC copy path with a new, non-TDM async
+  LDS-staged copy backend (sized `global_load_async_to_lds_b32`/
+  `global_store_async_from_lds_b32`-class instructions) into a single mechanism. Both
+  backends are gfx1250-only; every other architecture is unaffected.
+  * New primary build option `USE_LDS_STAGE` (selects the async backend on gfx1250).
+    `USE_TDM` selects the TDM backend specifically and is independent of
+    `USE_LDS_STAGE`: setting `USE_TDM=ON` alone is enough to build and use the
+    TDM path.
+  * Public API renamed: `rocshmem_set_tdm_lds()` -> `rocshmem_set_lds_stage()`,
+    `rocshmem_query_tdm_lds_bytes()` -> `rocshmem_query_lds_stage_bytes()`.
+  * Env vars renamed: `ROCSHMEM_TDM_TILE_BYTES`/`ROCSHMEM_TDM_PUT_THRESHOLD`/
+    `ROCSHMEM_TDM_GET_THRESHOLD` -> `ROCSHMEM_LDS_STAGE_TILE_BYTES`/
+    `ROCSHMEM_LDS_STAGE_PUT_THRESHOLD`/`ROCSHMEM_LDS_STAGE_GET_THRESHOLD`.
 
 ### Resolved issues
 * Fixed `rocshmem_fence` on the RO backend taking a host proxy round trip from every calling thread.
@@ -21,6 +34,10 @@
   which the host may already have handed to another thread.
   The `amo_add`, `amo_fadd`, `amo_inc`, `amo_finc` and
   `putmem_signal_on_stream` functional tests now run on RO.
+
+### Deprecated
+* Deprecated `rocshmem_set_tdm_lds()` and `rocshmem_query_tdm_lds_bytes()`.
+  Use `rocshmem_set_lds_stage()` and `rocshmem_query_lds_stage_bytes()` instead.
 
 ### Changed
 * SDMA transport is now built by default when IPC is enabled (`USE_SDMA` defaults to `ON`

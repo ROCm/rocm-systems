@@ -235,17 +235,18 @@ namespace envvar {
         false);
   }  // namespace sdma
 
-  namespace tdm {
+  namespace lds_stage {
     const var<uint32_t> tile_bytes("TILE_BYTES",
-        "TDM tile size in bytes for LDS-staged IPC transfers. 0 auto-sizes "
-        "the tile to use all LDS available per block", 131072);
+        "Tile size in bytes for LDS-staged IPC transfers on gfx1250 (the "
+        "async backend, or TDM specifically when built with USE_TDM). "
+        "0 auto-sizes the tile to use all LDS available per block", 131072);
     const var<size_t> put_threshold("PUT_THRESHOLD",
-        "TDM transfer size threshold in bytes for put; transfers smaller "
-        "than this use the normal (non-TDM) copy path instead", 16384);
+        "LDS-staged transfer size threshold in bytes for put; transfers "
+        "smaller than this use the normal (non-staged) copy path instead", 16384);
     const var<size_t> get_threshold("GET_THRESHOLD",
-        "TDM transfer size threshold in bytes for get; transfers smaller "
-        "than this use the normal (non-TDM) copy path instead", 1024);
-  }  // namespace tdm
+        "LDS-staged transfer size threshold in bytes for get; transfers "
+        "smaller than this use the normal (non-staged) copy path instead", 1024);
+  }  // namespace lds_stage
 
   namespace _detail {
     std::tuple<var_map_t&, std::mutex&> get_var_map() {
