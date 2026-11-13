@@ -187,6 +187,8 @@ jobs:
   gate:
     name: ${{ matrix.name }}
     needs: setup
+    # The implicit success() also fails on a skipped freeze-exempt upstream of setup.
+    if: ${{ !cancelled() && needs.setup.result == 'success' }}
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.setup.outputs.clusters) }}
