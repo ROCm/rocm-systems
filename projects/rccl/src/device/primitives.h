@@ -15,6 +15,7 @@
 #include "common_kernel.h"
 #include "common.h"
 
+// Spin iterations between abort-flag checks.
 #define NCCL_SPINS_BEFORE_CHECK_ABORT 10000
 #define barrier_generic(__THREAD_FENCE, NWORKERS, BARRIER_NEXT, BARRIERS_PTR) \
   do { \
