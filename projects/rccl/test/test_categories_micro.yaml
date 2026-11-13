@@ -18,6 +18,7 @@ test_categories:
       - "RasMicrotest.*"
       # ras/diagnostics_checks_common.cc
       - "RasDiagnosticsCommonMicrotest.*"
+      - "RasDiagnosticsPathsMicrotest.*"
       # ras/collectives.cc
       - "RasCollectivesMicrotest.*"
       # ras/diagnostics.cc

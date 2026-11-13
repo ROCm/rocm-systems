@@ -132,6 +132,10 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     integration-test territory. Since this binary uses section GC, validate
     completeness by checking that the linked coverage report still contains
     the same `ras.cc` function inventory as the compiled source.
+  - `ras/diagnostics_paths.cc` (`RAS_DIAGNOSTICS_PATHS_CC_PATH`, from
+    `ras-diagnostics-paths-test.cc`); suite `RasDiagnosticsPathsMicrotest.*`.
+    Covers topology readiness, rank-to-path classification, communicator filtering,
+    grouped reports and allocation/reporter failures using the shared RAS fixtures.
   - `ras/diagnostics_checks_common.cc` (`RAS_DIAGNOSTICS_COMMON_CC_PATH`, from
     `ras-diagnostics-common-test.cc`); suite
     `RasDiagnosticsCommonMicrotest.*`. Covers communicator snapshots and
