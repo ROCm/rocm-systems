@@ -479,7 +479,7 @@ bool DmaBlitManager::writeImage(const void* srcHost, device::Memory& dstMemory,
 
 bool DmaBlitManager::copyBuffer(device::Memory& srcMemory, device::Memory& dstMemory,
                                 const amd::Coord3D& srcOrigin, const amd::Coord3D& dstOrigin,
-                                const amd::Coord3D& size, bool entire,
+                                const amd::Coord3D& size, bool /*entire*/,
                                 amd::CopyMetadata copyMetadata) const {
   if (setup_.disableCopyBuffer_ ||
       (gpuMem(srcMemory).isHostMemDirectAccess() && gpuMem(srcMemory).isCacheable() &&
@@ -967,8 +967,8 @@ void CalcRowSlicePitches(uint64_t* pitch, const int32_t* copySize, size_t rowPit
 
 inline void KernelBlitManager::setArgument(amd::Kernel* kernel, size_t index, size_t size,
                                            const void* value, size_t offset,
-                                           const device::Memory* dev_mem,
-                                           bool writeVAImmediate) const {
+                                           const device::Memory* /*dev_mem*/,
+                                           bool /*writeVAImmediate*/) const {
   const amd::KernelParameterDescriptor& desc = kernel->signature().at(index);
 
   void* param = kernel->parameters().values() + desc.offset_;
@@ -2149,7 +2149,7 @@ static inline FillPatternPayload buildTilePattern(const void* pattern, size_t pa
 }
 
 bool KernelBlitManager::fillBuffer(device::Memory& memory, const void* pattern, size_t patternSize,
-                                   const amd::Coord3D& surface, const amd::Coord3D& origin,
+                                   const amd::Coord3D& /*surface*/, const amd::Coord3D& origin,
                                    const amd::Coord3D& size, bool entire, bool forceBlit) const {
   std::scoped_lock k(lockXferOps_);
   bool result = false;

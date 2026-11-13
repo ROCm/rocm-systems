@@ -1929,7 +1929,7 @@ bool Resource::hostRead(VirtualGPU* gpu, void* hostPtr, const amd::Coord3D& orig
 }
 
 // ================================================================================================
-void* Resource::gpuMemoryMap(size_t* pitch, uint flags, Pal::IGpuMemory* resource) const {
+void* Resource::gpuMemoryMap(size_t* pitch, uint /*flags*/, Pal::IGpuMemory* resource) const {
   if (desc_.cardMemory_ && !isPersistentDirectMap()) {
     // @todo remove const cast
     Unimplemented();
@@ -2062,7 +2062,7 @@ bool Resource::isPersistentDirectMap(bool writeMap) const {
 }
 
 // ================================================================================================
-void* Resource::map(VirtualGPU* gpu, uint flags, uint startLayer, uint numLayers) {
+void* Resource::map(VirtualGPU* gpu, uint flags, uint /*startLayer*/, uint /*numLayers*/) {
   if (isMemoryType(Pinned)) {
     // Check if we have to wait
     if (!(flags & NoWait)) {
@@ -2118,7 +2118,7 @@ void* Resource::map(VirtualGPU* gpu, uint flags, uint startLayer, uint numLayers
 }
 
 // ================================================================================================
-void Resource::unmap(VirtualGPU* gpu) {
+void Resource::unmap(VirtualGPU* /*gpu*/) {
   if (isMemoryType(Pinned)) {
     return;
   }
@@ -2169,7 +2169,7 @@ void MemorySubAllocator::forceResident(GpuMemoryReference* mem_ref) {
 }
 
 // ================================================================================================
-bool MemorySubAllocator::CreateChunk(const Pal::IGpuMemory* reserved_va) {
+bool MemorySubAllocator::CreateChunk(const Pal::IGpuMemory* /*reserved_va*/) {
   Pal::GpuMemoryCreateInfo createInfo = {};
   createInfo.size = device_->settings().subAllocationChunkSize_;
   createInfo.alignment = device_->properties().gpuMemoryProperties.fragmentSize;

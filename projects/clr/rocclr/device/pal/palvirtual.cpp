@@ -2654,7 +2654,7 @@ bool VirtualGPU::PreDeviceEnqueue(const amd::Kernel& kernel, const pal::Kernel& 
 
 // ================================================================================================
 void VirtualGPU::PostDeviceEnqueue(const amd::Kernel& kernel, const pal::Kernel& hsaKernel,
-                                   VirtualGPU* gpuDefQueue, uint64_t vmDefQueue,
+                                   VirtualGPU* gpuDefQueue, uint64_t /*vmDefQueue*/,
                                    uint64_t vmParentWrap, GpuEvent* gpuEvent) {
   uint32_t id = gpuEvent->id_;
   amd::DeviceQueue* defQueue = kernel.program().context().defDeviceQueue(dev());
@@ -2979,7 +2979,7 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
 }
 
 // ================================================================================================
-void VirtualGPU::submitNativeFn(amd::NativeFnCommand& vcmd) {
+void VirtualGPU::submitNativeFn(amd::NativeFnCommand& /*vcmd*/) {
   // Make sure VirtualGPU has an exclusive access to the resources
   std::scoped_lock lock(execution());
 
@@ -3025,7 +3025,7 @@ void VirtualGPU::submitMarker(amd::Marker& vcmd) {
 }
 
 // ================================================================================================
-void VirtualGPU::submitAccumulate(amd::AccumulateCommand& vcmd) {}
+void VirtualGPU::submitAccumulate(amd::AccumulateCommand& /*vcmd*/) {}
 
 // ================================================================================================
 void VirtualGPU::submitExternalSemaphoreCmd(amd::ExternalSemaphoreCmd& cmd) {
@@ -3712,7 +3712,7 @@ void VirtualGPU::addDoppRef(const Memory* memory, bool lastDoppCmd, bool pfpaDop
   queues_[MainEngine]->addCmdDoppRef(memory->iMem(), lastDoppCmd, pfpaDoppCmd);
 }
 
-void VirtualGPU::profileEvent(EngineType engine, bool type) const {
+void VirtualGPU::profileEvent(EngineType /*engine*/, bool type) const {
   if (nullptr == profileTs_) {
     return;
   }

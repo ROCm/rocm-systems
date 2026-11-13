@@ -121,8 +121,9 @@ Settings::Settings() {
 }
 
 bool Settings::create(const Pal::DeviceProperties& palProp,
-                      const Pal::GpuMemoryHeapProperties* heaps, const Pal::WorkStationCaps& wscaps,
-                      const amd::Isa& isa, bool reportAsOCL12Device) {
+                      const Pal::GpuMemoryHeapProperties* heaps,
+                      const Pal::WorkStationCaps& /*wscaps*/, const amd::Isa& isa,
+                      bool reportAsOCL12Device) {
   // Disable thread trace by default for all devices
   threadTraceEnable_ = false;
 

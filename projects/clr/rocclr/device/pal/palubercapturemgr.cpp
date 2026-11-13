@@ -43,7 +43,7 @@ UberTraceCaptureMgr* UberTraceCaptureMgr::Create(Pal::IPlatform* platform, const
   return mgr;
 }
 
-static void PAL_STDCALL UberTraceStateChangeCallback(const GpuUtil::TraceSession& pTraceSession,
+static void PAL_STDCALL UberTraceStateChangeCallback(const GpuUtil::TraceSession& /*pTraceSession*/,
                                                      GpuUtil::TraceSessionState newState,
                                                      void* pPrivateData)
 {
@@ -255,7 +255,7 @@ void UberTraceCaptureMgr::PreDispatch(VirtualGPU* gpu, const pal::Kernel& kernel
 }
 
 // ================================================================================================
-void UberTraceCaptureMgr::PostDispatch(VirtualGPU* gpu) {}
+void UberTraceCaptureMgr::PostDispatch(VirtualGPU* /*gpu*/) {}
 
 // ================================================================================================
 // Waits for the driver to be resumed if it's currently paused.
@@ -274,7 +274,7 @@ void UberTraceCaptureMgr::PreDeviceDestroy() {
 }
 
 // ================================================================================================
-void UberTraceCaptureMgr::FinishRGPTrace(VirtualGPU* gpu, bool aborted) {
+void UberTraceCaptureMgr::FinishRGPTrace(VirtualGPU* /*gpu*/, bool /*aborted*/) {
   // Nothing to be done
 }
 
@@ -286,7 +286,7 @@ bool UberTraceCaptureMgr::IsQueueTimingActive() const {
 
 // ================================================================================================
 bool UberTraceCaptureMgr::RegisterTimedQueue(uint32_t queue_id, Pal::IQueue* iQueue,
-                                             bool* debug_vmid) const {
+                                             bool* /*debug_vmid*/) const {
   // Get the OS context handle for this queue (this is a thing that RGP needs on DX clients;
   // it may be optional for Vulkan, but we provide it anyway if available).
   Pal::KernelContextInfo kernelContextInfo = {};
@@ -330,7 +330,7 @@ Pal::Result UberTraceCaptureMgr::TimedQueueSubmit(Pal::IQueue* queue, uint64_t c
 }
 
 // ================================================================================================
-bool UberTraceCaptureMgr::Update(Pal::IPlatform* platform) {
+bool UberTraceCaptureMgr::Update(Pal::IPlatform* /*platform*/) {
   Pal::Result result = queue_timings_trace_source_->Init(device_.iDev());
   return (result == Pal::Result::Success);
 }

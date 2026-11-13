@@ -83,7 +83,7 @@ uint64_t RgpCaptureMgr::AddElfBinary(const void* exe_binary, size_t exe_binary_s
 }
 
 // ================================================================================================
-bool RgpCaptureMgr::Init(Pal::IPlatform* platform) {
+bool RgpCaptureMgr::Init(Pal::IPlatform* /*platform*/) {
   if (dev_driver_server_ == nullptr) {
     return false;
   }

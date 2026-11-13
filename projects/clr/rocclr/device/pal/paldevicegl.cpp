@@ -809,7 +809,7 @@ bool Device::glAssociate(void* GLplatformContext, void* GLdeviceContext) const {
 #endif
 }
 
-bool Device::glDissociate(void* GLplatformContext, void* GLdeviceContext) const {
+bool Device::glDissociate(void* GLplatformContext, void* /*GLdeviceContext*/) const {
 #ifdef ATI_OS_LINUX
   GLXContext ctx = (GLXContext)GLplatformContext;
   if (glXEndCLInteropAMD == nullptr) {

@@ -260,7 +260,7 @@ bool NullDevice::create(const char* palName, const amd::Isa& isa, Pal::AsicRevis
   return true;
 }
 
-device::Program* NullDevice::createProgram(amd::Program& owner, amd::option::Options* options) {
+device::Program* NullDevice::createProgram(amd::Program& owner, amd::option::Options* /*options*/) {
   device::Program* program;
   program = new pal::Program(*this, owner);
 
@@ -1040,7 +1040,7 @@ bool Device::create(Pal::IDevice* device) {
 
 // ================================================================================================
 // Primary function that handles developer callbacks from PAL.
-void PAL_STDCALL Device::PalDeveloperCallback(void* pPrivateData, const Pal::uint32 deviceIndex,
+void PAL_STDCALL Device::PalDeveloperCallback(void* pPrivateData, const Pal::uint32 /*deviceIndex*/,
                                               Pal::Developer::CallbackType type, void* pCbData) {
 #ifdef PAL_GPUOPEN_OCL
   VirtualGPU* gpu = nullptr;
@@ -1237,7 +1237,7 @@ device::VirtualDevice* Device::createVirtualDevice(amd::CommandQueue* queue, boo
   }
 }
 
-device::Program* Device::createProgram(amd::Program& owner, amd::option::Options* options) {
+device::Program* Device::createProgram(amd::Program& owner, amd::option::Options* /*options*/) {
   device::Program* program = new pal::Program(*this, owner);
   if (program == nullptr) {
     LogError("We failed memory allocation for program!");
@@ -2087,8 +2087,8 @@ bool Device::globalFreeMemory(size_t* freeMemory) const {
 // PAL Device file I/O stubs: PAL doesn't implement AIS file I/O yet.
 // Provide definitions so the vtable and linker are satisfied.
 // Replace with a real implementation if/when PAL supports file I/O.
-bool Device::amdFileRead(amd::Os::FileDesc handle, void* devicePtr, uint64_t size, int64_t file_offset,
-                      uint64_t* size_copied, int32_t* status) {
+bool Device::amdFileRead(amd::Os::FileDesc /*handle*/, void* /*devicePtr*/, uint64_t /*size*/, int64_t /*file_offset*/,
+                      uint64_t* size_copied, int32_t* /*status*/) {
   if (size_copied) {
     *size_copied = 0;
   }
@@ -2096,8 +2096,8 @@ bool Device::amdFileRead(amd::Os::FileDesc handle, void* devicePtr, uint64_t siz
   return false;
 }
 
-bool Device::amdFileWrite(amd::Os::FileDesc handle, void* devicePtr, uint64_t size, int64_t file_offset,
-                       uint64_t* size_copied, int32_t* status) {
+bool Device::amdFileWrite(amd::Os::FileDesc /*handle*/, void* /*devicePtr*/, uint64_t /*size*/, int64_t /*file_offset*/,
+                       uint64_t* size_copied, int32_t* /*status*/) {
   if (size_copied) {
     *size_copied = 0;
   }
@@ -2340,9 +2340,9 @@ void Device::destroyScratchBuffers() {
   }
 }
 
-void Device::fillHwSampler(uint32_t state, void* hwState, uint32_t hwStateSize,
-                           const uint* addressMode, uint32_t mipFilter, float minLod,
-                           float maxLod, uint32_t maxAnisotropy) const {
+void Device::fillHwSampler(uint32_t state, void* hwState, uint32_t /*hwStateSize*/,
+                           const uint* addressMode, uint32_t mipFilter, float /*minLod*/,
+                           float /*maxLod*/, uint32_t maxAnisotropy) const {
   Pal::SamplerInfo samplerInfo = {};
   assert(addressMode != nullptr);
   samplerInfo.borderColorType = Pal::BorderColorType::TransparentBlack;
@@ -2397,8 +2397,8 @@ void Device::fillHwSampler(uint32_t state, void* hwState, uint32_t hwStateSize,
   iDev()->CreateSamplerSrds(1, &samplerInfo, hwState);
 }
 
-void* Device::hostAlloc(size_t size, size_t alignment, MemorySegment mem_seg,
-                        const void* agentInfo, bool allowAllAgentsAccess) const {
+void* Device::hostAlloc(size_t size, size_t alignment, MemorySegment /*mem_seg*/,
+                        const void* /*agentInfo*/, bool /*allowAllAgentsAccess*/) const {
   // for discrete gpu, we only reserve,no commit yet.
   return amd::Os::reserveMemory(nullptr, size, alignment, amd::Os::MEM_PROT_NONE);
 }
@@ -2426,7 +2426,7 @@ void Device::hostFree(void* ptr, size_t size) const {
   amd::Os::releaseMemory(ptr, size);
 }
 
-bool Device::deviceAllowAccess(void* ptr) const {
+bool Device::deviceAllowAccess(void* /*ptr*/) const {
   std::lock_guard<std::mutex> lock(lockAllowAccess_);
   // Empty function for now.
   return true;
@@ -2533,7 +2533,7 @@ void Device::svmFree(void* ptr) const {
 }
 
 // ================================================================================================
-void* Device::virtualAlloc(void* addr, size_t size, size_t alignment) {
+void* Device::virtualAlloc(void* addr, size_t size, size_t /*alignment*/) {
   constexpr bool kParent = true;
   constexpr bool kForceAlloc = true;
   amd::Memory* mem = CreateVirtualBuffer(context(), addr, size, -1, -1, kParent, kForceAlloc);
@@ -2693,7 +2693,7 @@ cl_int Device::virtualUnmap(void* va, size_t size) {
 
 // ================================================================================================
 bool Device::SetMemAccess(void* va_addr, size_t va_size, VmmAccess access_flags,
-                          VmmLocationType access_location, int numaNode) {
+                          VmmLocationType /*access_location*/, int /*numaNode*/) {
   amd::Memory* amd_mem_obj = amd::MemObjMap::FindMemObj(va_addr);
   if (amd_mem_obj == nullptr) {
     // If the amd_mem_obj is null, the check if this is a valid va_addr, but not-mapped,
@@ -3036,7 +3036,8 @@ void Device::DestroyExtSemaphore(void* extSemaphore) {
 }
 
 // ================================================================================================
-bool Device::ExportShareableVMMHandle(amd::Memory& amd_mem_obj, int flags, void* shareableHandle) {
+bool Device::ExportShareableVMMHandle(amd::Memory& amd_mem_obj, int /*flags*/,
+                                      void* shareableHandle) {
   device::Memory* dev_mem = static_cast<device::Memory*>(amd_mem_obj.getDeviceMemory(*this));
   return dev_mem->ExportHandle(shareableHandle);
 }
