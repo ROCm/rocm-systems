@@ -2673,8 +2673,12 @@ def amdsmi_get_ainic_info_detail(ainic_info_struct):
         },
         "BUS": {
             "bdf": _format_bdf(ainic_info_struct.bus.bdf),
-            "MAX_PCIE_WIDTH": int(ainic_info_struct.bus.max_pcie_width),
-            "MAX_PCIE_SPEED": ainic_info_struct.bus.max_pcie_speed,
+            "MAX_PCIE_WIDTH": _validate_if_max_uint(
+                ainic_info_struct.bus.max_pcie_width, MaxUIntegerTypes.UINT8_T
+            ),
+            "MAX_PCIE_SPEED": _validate_if_max_uint(
+                ainic_info_struct.bus.max_pcie_speed, MaxUIntegerTypes.UINT32_T
+            ),
             "PCIE_INTERFACE_VERSION": ainic_info_struct.bus.pcie_interface_version.decode(
                 "utf-8", errors="replace"
             ),
@@ -2685,7 +2689,7 @@ def amdsmi_get_ainic_info_detail(ainic_info_struct):
             "VERSION": ainic_info_struct.driver.version.decode("utf-8", errors="replace"),
         },
         "NUMA": {
-            "NODE": ainic_info_struct.numa.node,
+            "NODE": _validate_if_max_uint(ainic_info_struct.numa.node, MaxUIntegerTypes.UINT8_T),
             "AFFINITY": ainic_info_struct.numa.affinity.decode("utf-8", errors="replace"),
         },
         "PORTS": {},
