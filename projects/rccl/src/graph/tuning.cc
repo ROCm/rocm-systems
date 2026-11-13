@@ -1242,10 +1242,128 @@ static struct tuningModel tuning_model_11{
   .channelThresholds = {{{CHAN_THRESHOLDS_UNDEFINED}}},
 };
 
+// tuning_model_12: gfx1170, gfx1171.
+// Placeholder values copied from gfx110x (tuning_model_10) -- validate from sweep data.
+static struct tuningModel tuning_model_12{
+  .hwLat =
+    {
+      /* NVLINK */
+      {/* Tree (LL/LL128/Simple)*/ {0.8, 1.4, 2.5}, /* Ring (LL/LL128/Simple)*/ {0.8, 2.2, 3.6},
+       /* CollNetDirect (Simple)*/ {0.0, 0.0, 0.8}, /* CollNetChain (Simple)*/ {0.0, 0.0, 1.4}, /* NVLS */ {0, 0, 0},
+       /* NVLS Tree */ {0, 0, 0}, /* PAT */ {0, 0, 3.6}},
+      /* PCI */
+      {/* Tree (LL/LL128/Simple)*/ {2.2, 2.2, 5.7}, /* Ring (LL/LL128/Simple)*/ {2.2, 2.2, 5.7},
+       /* CollNetDirect (Simple)*/ {0.0, 0.0, 5.7}, /* CollNetChain (Simple)*/ {0.0, 0.0, 5.7}, /* NVLS */ {0, 0, 0},
+       /* NVLS Tree */ {0, 0, 0}, /* PAT */ {0, 0, 5.7}},
+      /* NET */
+      {/* Tree (LL/LL128/Simple)*/ {11.8, 18.2, 20.8}, /* Ring (LL/LL128/Simple)*/ {9.5, 19.8, 15.1},
+       /* CollNetDirect (Simple)*/ {0.0, 0.0, 11.8}, /* CollNetChain (Simple)*/ {0.0, 0.0, 18.2}, /* NVLS */ {0, 0, 0},
+       /* NVLS Tree */ {0, 0, 0}, /* PAT */ {0, 0, 15.1}},
+    },
+
+  .bwRatio =
+    {
+      /* 2 nodes */
+      {/* Tree (LL/LL128/Simple)*/ {0.04, 0.22, 0.91}, /* Ring (LL/LL128/Simple)*/ {0.04, 0.34, 1.00},
+       /* CollNetDirect (Simple)*/ {0.00, 0.00, 1.00}, /* CollNetChain (Simple)*/ {0.00, 0.00, 1.00},
+       /* NVLS */ {0, 0, 0}, /* NVLS Tree */ {0, 0, 0}, /* PAT */ {0, 0, 0}},
+      /* more than 2 nodes */
+      {/* Tree (LL/LL128/Simple)*/ {0.04, 0.22, 0.95}, /* Ring (LL/LL128/Simple)*/ {0.04, 0.34, 1.00},
+       /* CollNetDirect (Simple)*/ {0.00, 0.00, 1.00}, /* CollNetChain (Simple)*/ {0.00, 0.00, 1.00},
+       /* NVLS */ {0, 0, 0}, /* NVLS Tree */ {0, 0, 0}, /* PAT */ {0, 0, 1.00}},
+    },
+
+  .treeCorrectionFactor =
+    {
+      {
+        0.1, 0.2, 0.1, 0.1, 0.9, 0.3, 0.4, 0.1, 0.2, 0.4, 0.2, 0.1, 0.3, 0.3,
+        0.2, 0.2, 0.2, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1,
+      },
+      {
+        0.1, 0.3, 1.0, 0.1, 0.5, 1.0, 0.9, 1.0, 1.0, 1.0, 0.3, 0.1, 0.4, 0.5,
+        0.5, 0.4, 0.4, 0.3, 0.3, 0.2, 0.2, 0.2, 0.2, 0.2, 0.2, 0.2, 0.2,
+      },
+      {
+        0.2, 1.0, 0.1, 0.1, 0.7, 0.2, 0.4, 0.1, 0.1, 0.3, 0.4, 0.3, 0.6, 0.8,
+        1.0, 1.0, 1.0, 1.0, 0.9, 0.8, 0.8, 0.8, 0.8, 0.8, 0.9, 0.9, 0.9,
+      },
+    },
+
+  .ringCorrectionFactor =
+    {
+      {
+        0.1, 0.1, 0.1, 0.1, 0.1, 0.2, 0.4, 0.2, 0.3, 0.5, 0.3, 0.1, 0.5, 0.5,
+        0.3, 0.2, 0.2, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1,
+      },
+      {
+        0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.3, 1.0, 1.0, 1.0, 1.0,
+        1.0, 1.0, 0.8, 0.7, 0.5, 0.4, 0.4, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3,
+      },
+      {
+        1.0, 0.8, 0.2, 1.0, 1.0, 0.3, 1.0, 0.1, 0.1, 0.2, 0.2, 0.1, 0.5, 1.0,
+        0.8, 0.8, 1.0, 0.9, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0,
+      },
+    },
+
+  .llProtoRanges = {{{RCCL_LL_LIMITS_UNDEFINED}}},
+  .channelThresholds = {
+    // For each collective, define minMax per-rank size threshold for 32,40,48,56,64 channels
+    /*ReduceScatter*/ {{1, 512, 1},
+                       {512, 1024, 2},
+                       {1024, 4096, 4},
+                       {4096, 1048576, 8},
+                       {1048576, 4194304, 16},
+                       {4194304, 536870912, 28},
+                       {536870912, 34359738368, 32},
+                       {0, 0, 0},
+                       {0, 0, 0}},
+    /*AllGather*/
+    {{1, 512, 1},
+     {512, 1024, 2},
+     {1024, 4096, 4},
+     {4096, 1048576, 8},
+     {1048576, 4194304, 16},
+     {4194304, 536870912, 28},
+     {536870912, 34359738368, 32},
+     {0, 0, 0},
+     {0, 0, 0}},
+    /*AllReduce*/
+    {{1, 128, 1},
+     {128, 256, 2},
+     {256, 262144, 4},
+     {262144, 1048576, 8},
+     {1048576, 16777216, 14},
+     {16777216, 268435456, 28},
+     {268435456, 34359738368, 42},
+     {0, 0, 0},
+     {0, 0, 0}},
+    /*Reduce*/
+    {{1, 4096, 1},
+     {4096, 8192, 2},
+     {8192, 65536, 4},
+     {65536, 1048576, 8},
+     {1048576, 134217728, 16},
+     {134217728, 34359738368, 32},
+     {0, 0, 0},
+     {0, 0, 0},
+     {0, 0, 0}},
+    /*Broadcast*/
+    {{1, 1024, 1},
+     {1024, 8192, 2},
+     {8192, 65536, 4},
+     {65536, 1048576, 8},
+     {1048576, 8388608, 16},
+     {8388608, 34359738368, 32},
+     {0, 0, 0},
+     {0, 0, 0},
+     {0, 0, 0}},
+  },
+};
+
 static struct tuningModel rcclTuningModel[] = {
   tuning_model_0, tuning_model_1, tuning_model_2, tuning_model_3, tuning_model_4,
   tuning_model_5, tuning_model_6, tuning_model_7, tuning_model_8, tuning_model_9,
-  tuning_model_10, tuning_model_11,
+  tuning_model_10, tuning_model_11, tuning_model_12,
 };
 
 #if !defined(__HIP_PLATFORM_AMD__) && !defined(__HIPCC__)
@@ -1894,12 +2012,12 @@ int rcclGetTuningIndexForArch(const char* gfxarch) {
   static const std::vector<std::pair<std::string, int>> tuningIndexMap = {
     {"gfx906", 0},  {"gfx908", 0},  {"gfx90a", 0},  {"gfx942", 5},  {"gfx950", 6},  {"gfx1250", 11}, {"gfx1030", 0},
     {"gfx1100", 10}, {"gfx1101", 10}, {"gfx1102", 10}, {"gfx1151", 9},
-    {"gfx1170", 10}, {"gfx1171", 10}, {"gfx1200", 7}, {"gfx1201", 7}
+    {"gfx1170", 12}, {"gfx1171", 12}, {"gfx1200", 7}, {"gfx1201", 7}
   };
 
   static const std::vector<std::pair<std::string, int>> tuningIndexMapAINIC = {
     {"gfx906", 0},  {"gfx908", 0},  {"gfx90a", 0},  {"gfx942", 8},  {"gfx950", 6},  {"gfx1250", 11},
-    {"gfx1030", 0}, {"gfx1100", 10}, {"gfx1102", 10}, {"gfx1170", 10}, {"gfx1171", 10},
+    {"gfx1030", 0}, {"gfx1100", 10}, {"gfx1102", 10}, {"gfx1170", 12}, {"gfx1171", 12},
     {"gfx1200", 7}, {"gfx1201", 7}
   };
 

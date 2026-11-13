@@ -1,0 +1,1 @@
+* `tuning_model_12`: a separate tuning table for gfx1170 and gfx1171, which previously shared the gfx110x table (`tuning_model_10`). It is currently a copy of the gfx110x table, so tuning is unchanged.
