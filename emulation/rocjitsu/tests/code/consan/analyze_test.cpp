@@ -253,6 +253,7 @@ TEST_F(ConSanAnalysis, DecoderControlUnequalLoopFinalPhasesCannotConfirmAnUnorde
   ASSERT_TRUE(result.succeeded()) << error_.message;
   EXPECT_EQ(result.value().cross_wave_pairs, 0u);
   EXPECT_EQ(result.value().ordering_unresolved_pairs, 1u);
+  EXPECT_EQ(result.value().executions[0].integrity_events, 0u);
   EXPECT_FALSE(result.value().coverage_complete);
 }
 
@@ -334,8 +335,10 @@ TEST_F(ConSanAnalysis, SaturatedAccessPhasesAreCoverageLossWithoutInventingOrder
   const FailureOr<LdsRaceResult> contradictory = analyze();
   ASSERT_TRUE(contradictory.succeeded()) << error_.message;
   const LdsRaceExecutionResult &invalid = contradictory.value().executions[0];
-  // The changed row also contradicts the other wave's final phase.
-  EXPECT_EQ(invalid.integrity_events, 2u);
+  // Only the access contradicts its own row; unequal wave-local final phases
+  // independently leave ordering coverage incomplete.
+  EXPECT_EQ(invalid.integrity_events, 1u);
+  EXPECT_FALSE(invalid.coverage_complete);
   for (const char *reason :
        {"access_phase_contradicts_qualified_program", "mismatched_workgroup_final_phases"})
     EXPECT_TRUE(std::ranges::any_of(invalid.issues, [reason](const LdsRaceIntegrityIssue &issue) {

@@ -8,7 +8,9 @@
 
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
+#ifdef CONSAN_ANALYZER_ENABLED
 #include "rocjitsu/code/consan/analysis/lds_race.h"
+#endif
 #include "rocjitsu/code/consan/encoding.h"
 #include "rocjitsu/code/patch/code_object_patcher.h"
 #include "rocjitsu/code/patch/consan/input.h"
@@ -807,6 +809,7 @@ TEST_F(ConSanBootstrapSim, RepeatedBarrierLoopsPreserveStateAndRetainIndependent
     expect_guest_state(before, after);
     EXPECT_EQ(after.output[0], 7u);
     const bool late = std::string_view(fixture) == "native-32";
+#ifdef CONSAN_ANALYZER_ENABLED
     CapturedExecution execution;
     execution.serial = 41;
     execution.dimensions = {{64, 1, 1}, {64, 1, 1}};
@@ -822,6 +825,7 @@ TEST_F(ConSanBootstrapSim, RepeatedBarrierLoopsPreserveStateAndRetainIndependent
     EXPECT_EQ(analysis.synchronization_loss,
               2 * (2 * iterations - std::min(2 * iterations, kSyncCapacity)));
     EXPECT_EQ(analysis.coverage_complete, iterations <= 4);
+#endif
     const uint32_t stride = *wire::read_u32(after.report, wire::kReportRowStride);
     for (uint32_t wave = 0; wave < 2; ++wave) {
       const size_t row = kReportHeaderBytes + wave * stride;
@@ -848,6 +852,7 @@ TEST_F(ConSanBootstrapSim, ThreeBarrierGroupsRetainEachOccurrenceWithoutChanging
   expect_guest_state(before, after);
   EXPECT_EQ(after.output[0], 7u);
   ASSERT_EQ(after.manifest.barriers.size(), 3u);
+#ifdef CONSAN_ANALYZER_ENABLED
   const CapturedExecution execution = {.serial = 41,
                                        .dimensions = {{64, 1, 1}, {64, 1, 1}},
                                        .group_bytes = after.manifest.entry.prepared_group_bytes,
@@ -861,6 +866,7 @@ TEST_F(ConSanBootstrapSim, ThreeBarrierGroupsRetainEachOccurrenceWithoutChanging
   EXPECT_EQ(analysis.lost_occurrences, 0u);
   EXPECT_EQ(analysis.synchronization_loss, 0u);
   EXPECT_TRUE(analysis.coverage_complete);
+#endif
   const uint32_t stride = *wire::read_u32(after.report, wire::kReportRowStride);
   for (uint32_t wave = 0; wave < 2; ++wave) {
     const size_t row = kReportHeaderBytes + wave * stride;
@@ -873,6 +879,38 @@ TEST_F(ConSanBootstrapSim, ThreeBarrierGroupsRetainEachOccurrenceWithoutChanging
       EXPECT_EQ(wire::read_u32(after.report, record + wire::kSyncOccurrence), index / 3 + 1);
       EXPECT_EQ(wire::read_u32(after.report, record + wire::kSyncPhase), index + 1);
     }
+  }
+}
+
+#ifdef CONSAN_ANALYZER_ENABLED
+TEST_F(ConSanBootstrapSim, UnequalWaveTripCountsKeepValidOrderingWitnesses) {
+  for (const auto &[fixture, consumer_iterations] :
+       std::array<std::pair<const char *, uint32_t>, 2>{{{"native-40", 2}, {"native-41", 0}}}) {
+    SCOPED_TRACE(fixture);
+    RunResult before, after;
+    run(fixture, Bootstrap::None, before, {"gfx1250", 32}, 64, true);
+    ASSERT_FALSE(HasFatalFailure());
+    run(fixture, Bootstrap::Instrumented, after, {"gfx1250", 32}, 64, true);
+    ASSERT_FALSE(HasFatalFailure());
+    expect_guest_state(before, after);
+    const CapturedExecution execution = {.serial = 41,
+                                         .dimensions = {{64, 1, 1}, {64, 1, 1}},
+                                         .group_bytes = after.manifest.entry.prepared_group_bytes,
+                                         .arguments = {},
+                                         .report = after.report};
+    const LdsRaceExecutionResult analysis =
+        analyze_lds_race_execution(after.manifest, execution, 8);
+    EXPECT_EQ(analysis.valid_observations, 4 + consumer_iterations);
+    EXPECT_EQ(analysis.rejected_records, 0u);
+    EXPECT_EQ(analysis.integrity_events, 0u);
+    EXPECT_EQ(analysis.ordered_pairs, 3 * consumer_iterations);
+    EXPECT_EQ(analysis.cross_wave_pairs, 0u);
+    EXPECT_EQ(analysis.ordering_unresolved_pairs, 0u);
+    EXPECT_FALSE(analysis.coverage_complete);
+    const uint32_t stride = *wire::read_u32(after.report, wire::kReportRowStride);
+    EXPECT_EQ(wire::read_u32(after.report, kReportHeaderBytes + wire::kRowFinalPhase), 6u);
+    EXPECT_EQ(wire::read_u32(after.report, kReportHeaderBytes + stride + wire::kRowFinalPhase),
+              2 * consumer_iterations);
   }
 }
 
@@ -896,6 +934,8 @@ TEST_F(ConSanBootstrapSim, RemovingLoopPublicationOrReuseBarrierRetainsConfirmed
     EXPECT_EQ(analysis.lost_occurrences, 0u);
   }
 }
+
+#endif
 
 TEST_F(ConSanBootstrapSim, SeededNearLimitLoopCountersSaturateWithoutStoppingGuest) {
   RunResult before, after;
@@ -930,6 +970,7 @@ TEST_F(ConSanBootstrapSim, RepeatedAddressGroupExhaustionIsSeparateFromOccupiedB
   ASSERT_FALSE(HasFatalFailure());
   expect_guest_state(before, after);
   EXPECT_EQ(after.output[0], 7u);
+#ifdef CONSAN_ANALYZER_ENABLED
   CapturedExecution execution;
   execution.serial = 41;
   execution.dimensions = {{64, 1, 1}, {64, 1, 1}};
@@ -950,6 +991,7 @@ TEST_F(ConSanBootstrapSim, RepeatedAddressGroupExhaustionIsSeparateFromOccupiedB
   EXPECT_EQ(result.synchronization_loss, 0u);
   EXPECT_EQ(result.integrity_events, 0u);
   EXPECT_FALSE(result.coverage_complete);
+#endif
 }
 
 TEST_P(ConSanTargetSim, NativeWidthsPreserveEveryWordAndAllGuestState) {

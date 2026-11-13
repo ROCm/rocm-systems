@@ -60,6 +60,8 @@ foreach(
                 37
                 38
                 39
+                40
+                41
                 barrier-max31
                 barrier-max32
                 barrier-max33

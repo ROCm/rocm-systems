@@ -140,11 +140,20 @@ target_link_libraries(
     consan_bootstrap_sim_test
     PRIVATE
         rocjitsu_consan_compiler
-        rocjitsu_consan_analysis
         ${RJ_OBJECT_LIBS}
         flatbuffers
         GTest::gtest_main
 )
+if(RJ_BUILD_CONSAN_ANALYZER)
+    target_link_libraries(
+        consan_bootstrap_sim_test
+        PRIVATE rocjitsu_consan_analysis
+    )
+    target_compile_definitions(
+        consan_bootstrap_sim_test
+        PRIVATE CONSAN_ANALYZER_ENABLED=1
+    )
+endif()
 rj_configure_target(consan_bootstrap_sim_test PRIVATE_INCLUDES GENERATED WARNINGS SCHEMAS)
 if(TARGET consan_original_fixtures)
     add_dependencies(consan_bootstrap_sim_test consan_original_fixtures)
