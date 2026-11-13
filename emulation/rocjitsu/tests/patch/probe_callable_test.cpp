@@ -18,6 +18,10 @@
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/vgpr_msb.h"
@@ -189,6 +193,58 @@ TEST(ProbeCallableTest, BuildsNopProbe) {
   EXPECT_EQ(callable->abi, *derive_probe_abi(ProbeCallingConvention::AmdGpuFuncReturnS30S31));
   EXPECT_EQ(callable->body_words, body);
   EXPECT_EQ(callable->output_text_offset, 0u); // assigned by a later layout step.
+}
+
+TEST(ProbeCallableTest, TranscendentalCompletionAdmissionIsTargetSpecific) {
+  struct Case {
+    rj_code_arch_t arch;
+    uint32_t flags;
+    uint32_t instruction;
+    bool accepted;
+  };
+  const uint32_t cdna_exp = cdna4::build_vop1(cdna4::kVExpF32Vop1, {.src0 = 256, .vdst = 1})[0];
+  const uint32_t cdna5_exp = cdna5::build_vop1(cdna5::kVExpF32Vop1, {.src0 = 256, .vdst = 1})[0];
+  const std::array<Case, 6> cases = {{
+      {.arch = ROCJITSU_CODE_ARCH_CDNA3,
+       .flags = EF_AMDGPU_MACH_AMDGCN_GFX942,
+       .instruction = cdna_exp,
+       .accepted = true},
+      {.arch = ROCJITSU_CODE_ARCH_CDNA4,
+       .flags = EF_AMDGPU_MACH_AMDGCN_GFX950,
+       .instruction = cdna_exp,
+       .accepted = true},
+      {.arch = ROCJITSU_CODE_ARCH_CDNA5,
+       .flags = EF_AMDGPU_MACH_AMDGCN_GFX1250,
+       .instruction = cdna5_exp,
+       .accepted = false},
+      {.arch = ROCJITSU_CODE_ARCH_CDNA5,
+       .flags = EF_AMDGPU_MACH_AMDGCN_GFX1251,
+       .instruction = cdna5_exp,
+       .accepted = false},
+      {.arch = ROCJITSU_CODE_ARCH_RDNA3,
+       .flags = EF_AMDGPU_MACH_AMDGCN_GFX1100,
+       .instruction = rdna3::build_vop1(rdna3::kVSqrtF32Vop1, {.src0 = 256, .vdst = 1})[0],
+       .accepted = true},
+      {.arch = ROCJITSU_CODE_ARCH_RDNA4,
+       .flags = EF_AMDGPU_MACH_AMDGCN_GFX1200,
+       .instruction = rdna4::build_vop1(rdna4::kVExpF32Vop1, {.src0 = 256, .vdst = 1})[0],
+       .accepted = true},
+  }};
+  for (const Case &test_case : cases) {
+    SCOPED_TRACE(test_case.flags);
+    const util::FailureOr<uint32_t> ret = build_s_setpc_b64(30, test_case.arch);
+    ASSERT_TRUE(ret.succeeded());
+    const std::vector<uint32_t> body = {test_case.instruction, ret.value()};
+    const std::vector<uint8_t> image = make_elf(body, {}, test_case.flags);
+    const AmdGpuCodeObject object(image.data(), image.size());
+    std::string error;
+    const std::optional<ProbeCallable> callable =
+        build_probe_callable(object, whole_body_symbol(body), test_case.arch, 1, &error);
+    EXPECT_EQ(callable.has_value(), test_case.accepted) << error;
+    if (!test_case.accepted) {
+      EXPECT_NE(error.find("completion"), std::string::npos) << error;
+    }
+  }
 }
 
 TEST(ProbeCallableTest, CarriesTheDeclaredArgumentCountIntoTheAbi) {
