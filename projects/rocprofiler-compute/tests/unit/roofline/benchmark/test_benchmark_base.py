@@ -14,6 +14,8 @@ No GPU is required; the sources are plain strings built in the constructor.
 """
 
 import fcntl
+import re
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
@@ -356,6 +358,75 @@ def test_gfx1201_cache_roof_rejects_a_working_set_it_cannot_stream(
 
     with pytest.raises(ValueError, match="cache working set"):
         bench.cache_resident_bw(0, "test", roof)
+
+
+@pytest.mark.parametrize("level", ["L0", "L2"])
+@pytest.mark.parametrize("multiprocessors", [8, 24, 60])
+def test_gfx1201_cache_roof_follows_the_reported_multiprocessor_count(
+    level, multiprocessors, monkeypatch, capsys
+):
+    """Navi 48 boards differ in CU count, so the launch and the printed ceiling
+    come from the multiprocessor count HIP reports and from the roof, not from one
+    board's figures. The workgroup count is workgroups_per_cu per multiprocessor.
+    A per-multiprocessor pipe, such as GL0, scales its ceiling with the count. A
+    shared pipe, such as GL2, does not."""
+    wall_hz = 100e6
+    cycles, wall_ticks = 2_000_000_000, 100_000_000
+    clock_hz = cycles * wall_hz / wall_ticks
+    bench = BENCH_CLASSES["gfx1201"](0, dict(CACHE_SIZES), "gfx1201")
+    roof = bench.tests[level].keywords["roof"]
+    # GL0 is one per WGP, so it follows the multiprocessor count. GL2 is shared.
+    assert roof.instances_per_multiprocessor == (level == "L0")
+    launches = []
+
+    class FakeMemory:
+        def __init__(self, size):
+            self.size = size
+
+    def copy_clock_spans(spans, clocks, size):
+        spans[0], spans[1] = cycles, wall_ticks
+
+    fake_hip = SimpleNamespace(
+        hipSetDevice=lambda device: None,
+        hipGetDeviceProperties=lambda device: SimpleNamespace(
+            multiProcessorCount=multiprocessors
+        ),
+        hipMalloc=FakeMemory,
+        hipDeviceSynchronize=lambda: None,
+        hipEventCreate=lambda: None,
+        hipEventRecord=lambda event: None,
+        hipEventElapsedTime=lambda start, stop: 2.0,
+        hipMemcpyHtoD=lambda clocks, zeros, size: None,
+        hipMemcpyDtoH=copy_clock_spans,
+        HIPDeviceMemory=FakeMemory,
+    )
+    # The cache-resident launcher lives in the module that defines it.
+    launcher_module = sys.modules[type(bench).cache_resident_bw.__module__]
+    monkeypatch.setattr(benchmark_base, "hip", fake_hip)
+    monkeypatch.setattr(launcher_module, "hip", fake_hip)
+    monkeypatch.setattr(
+        bench, "Program", lambda source: SimpleNamespace(get_kernel=lambda name: name)
+    )
+    monkeypatch.setattr(
+        bench,
+        "launch_kernel",
+        lambda func, grid, block, shared, stream, args: launches.append(grid),
+    )
+
+    bench.tests[level](0)
+
+    instances = roof.instances
+    if roof.instances_per_multiprocessor:
+        instances *= multiprocessors
+    expected = instances * roof.bytes_per_clock * clock_hz / 1e9
+    printed = re.search(
+        rf"{roof.pipe_name} ceiling:([0-9.]+) GB/sec", capsys.readouterr().out
+    )
+    assert printed, "the benchmark did not print its ceiling"
+    assert float(printed.group(1)) == pytest.approx(expected, abs=0.1)
+    expected_grid = [roof.workgroups_per_cu * multiprocessors, 1, 1]
+    assert launches
+    assert all(grid == expected_grid for grid in launches)
 
 
 # =============================================================================
