@@ -214,8 +214,9 @@ class Primitives<T, RedOp, Fan, Direct, ProtoNaN, P2p, isNetOffload, Metadata, P
       }
       if (sendConnFifo) {
         // == sendStep[wid]; indexing by wid would keep Primitives in scratch.
-        __scoped_atomic_store_n((__attribute__((address_space(1))) int64_t*)&sendConnFifo[sendConnHead % NCCL_STEPS].size,
-                                (int64_t)nbytes, __ATOMIC_RELAXED, __MEMORY_SCOPE_SYSTEM);
+        __scoped_atomic_store_n(
+          (__attribute__((address_space(1))) int64_t*)&sendConnFifo[sendConnHead % NCCL_STEPS].size, (int64_t)nbytes,
+          __ATOMIC_RELAXED, __MEMORY_SCOPE_SYSTEM);
       }
       sendConnHead += 1;
     }
