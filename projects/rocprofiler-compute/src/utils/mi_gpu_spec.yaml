@@ -28,7 +28,8 @@
 #               | -- bandwidth # Memory levels with a bandwidth ceiling
 #               | -- valu # Data types with a VALU ceiling
 #               | -- mfma or wmma # Data types with a matrix ceiling, by matrix type
-#               | -- mfma_mixed or wmma_mixed # Mixed-precision matrix types, not plotted
+#               | -- mfma_mixed or wmma_mixed # Mixed-precision matrix types, each with the data
+#                    types plotted against its ceiling because one counter counts them all
 #
 # --------------------------------------------------------------------------------
 
@@ -271,7 +272,7 @@ mi_gpu_spec:
           bandwidth: [HBM, MALL, L2, L1, LDS]
           valu: [FP16, FP32, FP64, I8, I32, I64]
           mfma: [FP4, FP6, FP8, MXFP8, FP16, BF16, FP32, FP64, I8]
-          mfma_mixed: [F6F4]  # benchmarked, not plotted
+          mfma_mixed: {F6F4: [FP6, FP4]}
         models:
           - gpu_model: mi350
             partition_mode:
@@ -502,7 +503,7 @@ mi_gpu_spec:
           bandwidth: [HBM, L2, L0, LDS]
           valu: [FP16, FP32, FP64, I8, I32, I64]
           wmma: [FP4, FP6, FP8, MXFP8, FP16, BF16, FP32, I8]
-          wmma_mixed: [F6F4]  # benchmarked, not plotted
+          wmma_mixed: {F6F4: []}
         models:
           - gpu_model: gfx1250
             partition_mode:

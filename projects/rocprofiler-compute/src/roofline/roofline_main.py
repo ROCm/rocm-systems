@@ -5,7 +5,7 @@ import argparse
 import math
 from copy import deepcopy
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import numpy as np
 import plotly.colors as pcolors
@@ -78,6 +78,11 @@ _PREFERRED_DEFAULT_PRECISIONS = ["FP32", "FP16", "FP8"]
 def _figure_class(dtype: str) -> str:
     """Return OP or FLOP; integer datatypes use the ops figure."""
     return "OP" if str(dtype).startswith("I") else "FLOP"
+
+
+def _shown(compute_trace: Dict[str, Any], selected: Set[str]) -> bool:
+    """Whether a compute ceiling is shown: one of its datatypes is selected."""
+    return any(dtype in selected for dtype in compute_trace["dtypes"])
 
 
 def _default_precisions(precisions: list[str]) -> list[str]:
@@ -282,13 +287,14 @@ class Roofline:
         *,
         key: str,
         label: str,
+        data_types: str,
+        ceiling_name: str,
         dtype: str,
     ) -> None:
         """Draw a flat compute-peak line plus a hidden highlight overlay."""
         peak_perf = ceiling[1][0]
         left_x = peak_perf / max_bw if max_bw > 0 else ceiling[0][0]
         xs, ys = self._sample_ceiling(left_x, peak_perf, roof_dense_hi)
-        ceiling_name = f"Peak {label}-{dtype}"
         fig.add_trace(
             go.Scatter(
                 x=xs,
@@ -297,7 +303,7 @@ class Roofline:
                 mode="lines",
                 line=dict(color=get_color(key)),
                 hovertemplate=build_compute_peak_hover(
-                    label, ceiling[2], ops_flops, dtype
+                    label, ceiling[2], ops_flops, data_types
                 ),
             )
         )
@@ -306,7 +312,7 @@ class Roofline:
             "traceIndex": len(fig.data) - 1,
             "label": ceiling_name,
             "peakPerf": peak_perf,
-            "dtype": dtype,
+            "dtypes": [dtype],
         })
         fig.add_trace(
             go.Scatter(
@@ -342,10 +348,11 @@ class Roofline:
             if _figure_class(dt) != ops_flops or not self._datatype_supported(dt):
                 continue
             ceiling = self._ceiling_for_dtype(dt)
-            for key, label in self._compute_paths(dt):
+            for key, label, data_types in self._compute_paths(dt):
                 peak = self._peak_value(ceiling, key)
-                if peak and peak > 0:
-                    peaks.append((f"{dt} {label}", peak))
+                entry = (f"{data_types} {label}", peak)
+                if peak and peak > 0 and entry not in peaks:
+                    peaks.append(entry)
         return peaks
 
     def _determine_kernel_limiter(
@@ -716,7 +723,11 @@ class Roofline:
                     })
 
         view_model.precisions = list(
-            dict.fromkeys(trace["dtype"] for trace in view_model.compute_traces)
+            dict.fromkeys(
+                dtype
+                for trace in view_model.compute_traces
+                for dtype in trace["dtypes"]
+            )
         )
         view_model.default_precisions = _default_precisions(view_model.precisions)
         self._preselect_default_precisions(figure, view_model)
@@ -736,13 +747,13 @@ class Roofline:
             return
 
         for trace in view_model.compute_traces:
-            figure.data[trace["traceIndex"]].visible = trace["dtype"] in selected
+            figure.data[trace["traceIndex"]].visible = _shown(trace, selected)
 
         top_peak = max(
             (
                 trace["peakPerf"]
                 for trace in view_model.compute_traces
-                if trace["dtype"] in selected
+                if _shown(trace, selected)
             ),
             default=0.0,
         )
@@ -919,11 +930,18 @@ class Roofline:
         """Whether this datatype supports the given op class on this arch."""
         return flag in SUPPORTED_DATATYPES[self.__mspec.gpu_arch][dtype]
 
-    def _matrix_label(self) -> str:
-        """Matrix-op label (MFMA/WMMA) for this GPU arch."""
-        return mi_gpu_specs.get_roofline_matrix_type(self.__mspec.gpu_arch)
+    def _matrix_label(self, dtype: str) -> Tuple[str, str]:
+        """Matrix-op label (MFMA/WMMA) of this datatype's ceiling on this GPU arch
+        and the datatypes plotted against it, e.g. ("MFMA-F6F4", "FP6/FP4") for
+        FP4 on gfx950, where one counter counts FP6 and FP4 work."""
+        gpu_arch = self.__mspec.gpu_arch
+        label = mi_gpu_specs.get_roofline_matrix_type(gpu_arch)
+        ceiling, covered = mi_gpu_specs.get_roofline_matrix_ceiling(gpu_arch, dtype)
+        if ceiling == dtype:
+            return label, dtype
+        return f"{label}-{ceiling}", "/".join(covered)
 
-    def _compute_paths(self, dtype: str) -> list[tuple[str, str]]:
+    def _compute_paths(self, dtype: str) -> List[Tuple[str, str, str]]:
         """The compute roofs this datatype reaches on this arch, as (ceiling
         key, label): its scalar path, its matrix path, or both. The key names
         the ceiling in the benchmark data and its color alike, so a roof is
@@ -931,9 +949,9 @@ class Roofline:
         """
         paths = []
         if self._supports(dtype, OpsSupport.VALU):
-            paths.append(("valu", "VALU"))
+            paths.append(("valu", "VALU", dtype))
         if self._supports(dtype, OpsSupport.MATRIX):
-            paths.append(("matrix_ops", self._matrix_label()))
+            paths.append(("matrix_ops", *self._matrix_label(dtype)))
         return paths
 
     def _build_bandwidth_roofs(
@@ -1023,20 +1041,48 @@ class Roofline:
         max_bw: float,
         roof_dense_hi: float,
     ) -> None:
-        """Draw the flat VALU/matrix compute peaks that cap every roofline."""
-        for key, label in self._compute_paths(dtype):
+        """Draw the flat VALU/matrix compute peaks that cap every roofline. A
+        ceiling several datatypes share is drawn once and lists each of them."""
+        for key, label, data_types in self._compute_paths(dtype):
             ceiling = self.__ceiling_data.get(key)
-            if ceiling:
-                self._add_compute_ceiling(
-                    fig,
-                    ceiling,
-                    ops_flops,
-                    max_bw,
-                    roof_dense_hi,
-                    key=key,
-                    label=label,
-                    dtype=dtype,
-                )
+            if not ceiling:
+                continue
+            ceiling_name = (
+                f"Peak {label}-{dtype}"
+                if data_types == dtype
+                else f"Peak {label} ({data_types})"
+            )
+            drawn = self._drawn_compute_trace(fig, ops_flops, ceiling_name)
+            if drawn:
+                drawn["dtypes"].append(dtype)
+                continue
+            self._add_compute_ceiling(
+                fig,
+                ceiling,
+                ops_flops,
+                max_bw,
+                roof_dense_hi,
+                key=key,
+                label=label,
+                data_types=data_types,
+                ceiling_name=ceiling_name,
+                dtype=dtype,
+            )
+
+    def _drawn_compute_trace(
+        self, fig: go.Figure, ops_flops: str, ceiling_name: str
+    ) -> Optional[Dict[str, Any]]:
+        """The view-model entry of the compute ceiling already drawn on fig under
+        this name, if any."""
+        for trace in self.__view_models[ops_flops].compute_traces:
+            index = trace["traceIndex"]
+            if (
+                trace["label"] == ceiling_name
+                and index < len(fig.data)
+                and fig.data[index].name == ceiling_name
+            ):
+                return trace
+        return None
 
     def _apply_plotly_layout(
         self,

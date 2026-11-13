@@ -246,7 +246,7 @@ def calc_ceilings(
 
         peak_matrix = 0.0
         if OpsSupport.MATRIX in SUPPORTED_DATATYPES[mspec.gpu_arch][dtype]:
-            matrix_key = roofline_column(dtype, roofline_parameters["matrix_ops_type"])
+            matrix_key = mi_gpu_specs.get_roofline_matrix_column(mspec.gpu_arch, dtype)
             try:
                 peak_matrix = sanitize_ai_value(
                     benchmark_data[matrix_key][device_row_index]
@@ -577,7 +577,7 @@ def construct_roof(
         return GraphPoints.empty().__dict__
 
     benchmark_data = csv_data.columns
-    expected_columns = _expected_benchmark_columns(roofline_parameters, dtype, mspec)
+    expected_columns = _expected_benchmark_columns(dtype, mspec)
     missing_columns = [col for col in expected_columns if col not in benchmark_data]
     if missing_columns:
         console_warning(
@@ -698,9 +698,7 @@ def _parse_integral_id(value: Union[int, float, str], *, label: str) -> int:
     raise ValueError(f"{label} must be an integral value, got {type(value).__name__}")
 
 
-def _expected_benchmark_columns(
-    roofline_parameters: dict[str, Any], dtype: str, mspec: MachineSpecs
-) -> list[str]:
+def _expected_benchmark_columns(dtype: str, mspec: MachineSpecs) -> list[str]:
     """Benchmark columns the roofline needs for this datatype and mem levels."""
     columns: list[str] = []
 
@@ -711,7 +709,7 @@ def _expected_benchmark_columns(
     columns.extend(roofline_column(level, "bandwidth") for level in cache_hierarchy)
 
     if OpsSupport.MATRIX in SUPPORTED_DATATYPES[mspec.gpu_arch][dtype]:
-        columns.append(roofline_column(dtype, roofline_parameters["matrix_ops_type"]))
+        columns.append(mi_gpu_specs.get_roofline_matrix_column(mspec.gpu_arch, dtype))
     return columns
 
 

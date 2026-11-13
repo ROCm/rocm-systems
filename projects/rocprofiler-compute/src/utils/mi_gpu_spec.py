@@ -2,7 +2,7 @@
 # SPDX-License-Identifier:  MIT
 
 from pathlib import Path
-from typing import Any, Dict, FrozenSet, List, Optional, Set, Tuple
+from typing import Any, Dict, FrozenSet, List, Optional, Set, Tuple, Union
 
 from utils.logger import console_debug, console_error, console_warning
 from vendored import yaml
@@ -472,13 +472,41 @@ class MIGPUSpecs:
     ) -> Tuple[Tuple[str, bool, bool], ...]:
         """Return (data type, has VALU ceiling, has matrix ceiling) for each data type
         measured on gpu_arch, in plot order. Mixed-precision matrix types such as F6F4
-        are left out: the roofline does not plot them."""
+        are not data types of their own; get_roofline_matrix_ceiling() says which data
+        types use their ceiling."""
         valu = cls._roofline_list(gpu_arch, "valu")
         matrix = cls._roofline_list(gpu_arch, "matrix")
         return tuple(
             (data_type, data_type in valu, data_type in matrix)
             for data_type in ROOFLINE_DATA_TYPES
             if data_type in valu or data_type in matrix
+        )
+
+    @classmethod
+    def get_roofline_matrix_ceiling(
+        cls, gpu_arch: str, data_type: str
+    ) -> Tuple[str, Tuple[str, ...]]:
+        """Return the matrix type whose ceiling data_type is plotted against on
+        gpu_arch, and every data type plotted against it: the mixed-precision type
+        whose counter also counts data_type, for example (F6F4, (FP6, FP4)) for FP4
+        on gfx950, else (data_type, (data_type,))."""
+        mixed = cls._roofline_entry(gpu_arch, "mixed") or {}
+        return next(
+            (
+                (ceiling, tuple(covered))
+                for ceiling, covered in mixed.items()
+                if data_type in covered
+            ),
+            (data_type, (data_type,)),
+        )
+
+    @classmethod
+    def get_roofline_matrix_column(cls, gpu_arch: str, data_type: str) -> str:
+        """Return the roofline.csv column of data_type's matrix ceiling on gpu_arch,
+        e.g. "MFMAF6F4Flops" for FP4 on gfx950."""
+        return roofline_column(
+            cls.get_roofline_matrix_ceiling(gpu_arch, data_type)[0],
+            cls.get_roofline_matrix_type(gpu_arch),
         )
 
     @classmethod
@@ -521,15 +549,22 @@ class MIGPUSpecs:
 
     @classmethod
     def _roofline_list(cls, gpu_arch: str, key: str) -> Tuple[str, ...]:
-        """Return a list of gpu_arch's roofline block; "matrix" and "mixed" read the
-        key of the arch's matrix type, e.g. "mfma" and "mfma_mixed"."""
+        """Return a list of gpu_arch's roofline block; for "mixed", its types."""
+        return tuple(cls._roofline_entry(gpu_arch, key) or ())
+
+    @classmethod
+    def _roofline_entry(
+        cls, gpu_arch: str, key: str
+    ) -> Optional[Union[List[str], Dict[str, List[str]]]]:
+        """Return an entry of gpu_arch's roofline block, or None; "matrix" and "mixed"
+        read the key of the arch's matrix type, e.g. "mfma" and "mfma_mixed"."""
         roofline = cls._roofline.get(gpu_arch, {})
         if key in ("matrix", "mixed"):
             if not roofline:
-                return ()
+                return None
             prefix = cls.get_roofline_matrix_type(gpu_arch).lower()
             key = prefix if key == "matrix" else f"{prefix}_mixed"
-        return tuple(roofline.get(key, []))
+        return roofline.get(key)
 
     @classmethod
     def _all_memory_levels(cls) -> Set[str]:
