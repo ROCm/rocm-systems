@@ -16,30 +16,11 @@ from utils.file_io import (
     create_df_pmc,
     create_df_pmc_with_slot_ids,
     load_kernel_short_names,
-    load_panel_configs,
     rank_kernels_by_total_duration,
     validate_kernel_filter_ids,
 )
 
 KERNEL_SYMBOLS_COLUMNS = ["Kernel_Name", "Kernel_Short_Name"]
-
-COLLECTABLE_PANEL_YAML = """\
-Panel Config:
-  id: 200
-  title: SOL
-  data source:
-  - metric_table:
-      id: 201
-      header: {metric: Metric, value: Value}
-      metric:
-        FLOPs:
-          value: COLLECT_SUM(_collect.f16, _collect.f32)
-"""
-COLLECTABLES_YAML = """\
-collectables:
-  f32: {id: collect.f32, formula: SUM(F32)}
-  f16: {id: collect.f16, formula: SUM(F16)}
-"""
 
 ROCPD_COUNTER_HEADER = (
     "GPU_ID,Dispatch_ID,Grid_Size,Workgroup_Size,LDS_Per_Workgroup,"
@@ -678,19 +659,3 @@ def test_load_kernel_short_names_falls_back_past_an_empty_csv(tmp_path):
 def test_load_kernel_short_names_tolerates_a_record_without_symbols(tmp_path):
     """The fallback runs when things went wrong, so a bare record is not fatal."""
     assert load_kernel_short_names(str(tmp_path), [{"metadata": {"pid": 1}}]) == {}
-
-
-@pytest.mark.misc
-def test_load_panel_configs_attaches_collectables_and_skips_their_file(
-    tmp_path,
-) -> None:
-    (tmp_path / "0200_sol.yaml").write_text(COLLECTABLE_PANEL_YAML, encoding="utf-8")
-    (tmp_path / "collectables.yaml").write_text(COLLECTABLES_YAML, encoding="utf-8")
-    panels = load_panel_configs([str(tmp_path)])
-    assert list(panels) == [200]
-    metrics = panels[200]["data source"][0]["metric_table"]["metric"]
-    assert list(metrics) == ["FLOPs", "_collect.f16", "_collect.f32"]
-    assert metrics["_collect.f32"] == {
-        "value": "SUM(F32)",
-        "_collectable_id": "collect.f32",
-    }

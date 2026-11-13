@@ -25,18 +25,15 @@ from rocprof_compute_soc.soc_base import (
     _rebuild_tcc_channel_file_map,
     _trial_counter_file_with_extra,
 )
+from utils.counters.allocator import reads_one_pass
 from utils.counters.counter_file import CounterFile, flat_counters_in_perfmon_file
-from utils.metrics.expression import composite_part_refs
 from utils.mi_gpu_spec import mi_gpu_specs
 from utils.utils_common import (
     MEMBW_ANALYSIS_PANEL_ID,
     canonical_config_arch,
     convert_metric_id_to_panel_info,
-    load_collectable_formulas,
-    load_panel_file,
-    panel_config_paths,
 )
-from utils.utils_counter_defs import extract_counters_and_variables
+from utils.utils_counter_defs import Collectables, extract_counters_and_variables
 
 # =============================================================================
 # Fixtures
@@ -678,7 +675,7 @@ def test_detect_counters_reads_only_metric_expressions(
     counters, _ = membw_analysis_soc.detect_counters()
 
     formula_counters, _ = extract_counters_and_variables(
-        "", membw_analysis_soc._mspec.gpu_series
+        "", Collectables.of_arch(membw_analysis_soc._mspec.gpu_arch)
     )
     formula_counters |= {"SQ_LEVEL_WAVES_ACCUM", "SQ_BUSY_CYCLES"}
     assert counters == formula_counters
@@ -690,7 +687,7 @@ def test_panel_counters_add_up_to_full_profile(gpu_arch: str) -> None:
     the default profile, and with panel 30 to --membw-analysis."""
     config_dir = config.analysis_configs_dir
     counters_by_file: dict[str, set[str]] = {}
-    for path in panel_config_paths(config_dir / canonical_config_arch(gpu_arch)):
+    for path in (config_dir / canonical_config_arch(gpu_arch)).glob("*.yaml"):
         file_id = path.name.split("_")[0]
         panel = str(int(file_id) // 100)
         soc = offline_soc(gpu_arch, [panel], membw_analysis=True)
@@ -725,6 +722,28 @@ def test_live_attach_set_fits_one_pass_on_each_architecture(gpu_arch: str) -> No
     assert set(flat_counters_in_perfmon_file(counter_files[0])) == requested_counters
     assert not any(counter.endswith("_ACCUM") for counter in requested_counters), (
         f"{gpu_arch}: live attachment set uses accumulators"
+    )
+
+
+@pytest.mark.parametrize("gpu_arch", CONFIG_ARCHS)
+def test_every_metric_reads_one_pass(gpu_arch: str) -> None:
+    """Every metric of the default profile reads its counters from one pass."""
+    soc = offline_soc(gpu_arch, [], membw_analysis=False)
+    soc.set_perfmon_config(mi_gpu_specs.get_perfmon_config(gpu_arch))
+    counters, _ = soc.detect_counters()
+    passes = [
+        set(flat_counters_in_perfmon_file(counter_file))
+        for counter_file in soc._allocate_perfmon_counter_files(counters)
+    ]
+    collectables = Collectables.of_arch(gpu_arch)
+    spanning = [
+        f"{metric.table_id}.{metric.metric_idx} {metric.metric_name}"
+        for metric in soc._iter_arch_analysis_yaml_metrics()
+        if not reads_one_pass(metric.expressions, collectables, passes)
+    ]
+    assert spanning == [], (
+        f"{gpu_arch}: split these metrics into collectables "
+        "(see the metric library README and tools/counter_grouping_inspector.py)"
     )
 
 
@@ -769,42 +788,3 @@ def test_post_profiling_roofline_gating(
     soc.post_profiling()
 
     assert mock_benchmark.called is expect_benchmark
-
-
-def _composite_metric_ids(arch_dir: Path) -> list[tuple[str, list[str]]]:
-    """(metric id, part metric ids) of every composite parent under arch_dir."""
-    found: list[tuple[str, list[str]]] = []
-    collectable_formulas = load_collectable_formulas(arch_dir)
-    for path in panel_config_paths(arch_dir):
-        panel = str(int(path.name.split("_")[0]) // 100)
-        panel_file = load_panel_file(path, collectable_formulas)
-        sections = panel_file["Panel Config"]["data source"]
-        for section in sections:
-            table = section.get("metric_table")
-            if not table:
-                continue
-            names = list((table.get("metric") or {}).keys())
-            prefix = f"{panel}.{table['id'] % 100}"
-            for index, name in enumerate(names):
-                body = table["metric"][name] or {}
-                refs = {
-                    ref
-                    for value in body.values()
-                    if isinstance(value, str)
-                    for ref in composite_part_refs(value)
-                }
-                if refs:
-                    parts = [f"{prefix}.{names.index(ref)}" for ref in refs]
-                    found.append((f"{prefix}.{index}", parts))
-    return found
-
-
-@pytest.mark.parametrize("gpu_arch", CONFIG_ARCHS)
-def test_block_on_a_composite_metric_selects_its_parts(gpu_arch: str) -> None:
-    """-b <composite metric id> profiles the counters of the rows it combines."""
-    arch_dir = config.analysis_configs_dir / canonical_config_arch(gpu_arch)
-    for metric_id, part_ids in _composite_metric_ids(arch_dir):
-        selected, _ = offline_soc(gpu_arch, [metric_id], False).detect_counters()
-        for part_id in part_ids:
-            part, _ = offline_soc(gpu_arch, [part_id], False).detect_counters()
-            assert part <= selected, (metric_id, part_id, sorted(part - selected))

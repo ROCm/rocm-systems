@@ -16,7 +16,6 @@ import pytest
 
 import utils.utils_common as utils_common
 from utils.utils_common import canonical_config_arch
-from vendored import yaml
 
 LISTED_METRIC_IDS = ["0", "2", "2.1", "2.1.0", "2.1.1", "18", "18.1", "18.1.0", "18.2"]
 LISTED_METRIC_DETAILS = {
@@ -34,32 +33,6 @@ LISTED_METRIC_DETAILS = {
     "18.1.0": ("L2 Cache Hit Rate", "Percent", ""),
     "18.2": ("L2 Cache Hit Rate (Percent)", "", ""),
 }
-
-# A panel whose two tables name the same piece under different header keys.
-COLLECTABLE_PANEL_YAML = """\
-Panel Config:
-  id: 1600
-  title: vL1D
-  data source:
-  - metric_table:
-      id: 1601
-      header: {metric: Metric, value: Value}
-      metric:
-        Hit:
-          value: COLLECT_SUM(_collect.b, _collect.a)
-          peak: MAX(_collect.b + _collect.a)
-  - metric_table:
-      id: 1603
-      header: {metric: Metric, avg: Avg}
-      metric:
-        Hit:
-          avg: COLLECT_SUM(_collect.a, _collect.missing)
-"""
-COLLECTABLES_YAML = """\
-collectables:
-  a: {id: collect.a, formula: SUM(A)}
-  b: {id: collect.b, formula: SUM(B)}
-"""
 
 
 def build_listing_panel_configs():
@@ -1154,34 +1127,6 @@ class TestBuildMetricDetails:
         leaf_entries = self._extract_leaf_metric_entries(metric_list)
         assert "Partial Metric" in leaf_entries.values()
 
-    def test_collectable_names_are_omitted_and_later_ids_stay(self):
-        from collections import OrderedDict
-
-        table = {
-            "id": 201,
-            "title": "Speed-of-Light",
-            "header": {"metric": "Metric", "value": "Value"},
-            "metric": {
-                "VALU FLOPs": {"value": "SUM(SQ_A)"},
-                "_collect.valu_flops_f16": {"value": "SUM(SQ_B)"},
-                "MFMA FLOPs": {"value": "SUM(SQ_C)"},
-            },
-        }
-        panel_configs = OrderedDict()
-        panel_configs[200] = {
-            "id": 200,
-            "title": "System Speed-of-Light",
-            "data source": [{"metric_table": table}],
-        }
-
-        metric_list = self.build_metric_details(panel_configs, None)
-        leaf_entries = self._extract_leaf_metric_entries(metric_list)
-
-        assert leaf_entries["2.1.0"] == "VALU FLOPs"
-        assert leaf_entries["2.1.2"] == "MFMA FLOPs"
-        assert "2.1.1" not in leaf_entries
-        assert "_collect.valu_flops_f16" not in leaf_entries.values()
-
     def test_given_metric_with_all_none_avg_min_max__it_doesnt_present_in_metric_list(
         self,
     ):
@@ -1368,45 +1313,6 @@ def test_is_gfx1250_matches_only_the_supported_architecture():
     assert not utils_common.is_gfx1250("gfx12500")
     assert not utils_common.is_gfx1250("gfx1251")
     assert not utils_common.is_gfx1250(None)
-
-
-@pytest.mark.misc
-def test_attach_collectables_follows_first_reference_and_header_key():
-    panel = yaml.safe_load(COLLECTABLE_PANEL_YAML)["Panel Config"]
-    formulas = {"collect.a": "SUM(A)", "collect.b": "SUM(B)"}
-    utils_common.attach_collectables(panel, formulas)
-    value_table = panel["data source"][0]["metric_table"]["metric"]
-    avg_table = panel["data source"][1]["metric_table"]["metric"]
-    assert list(value_table) == ["Hit", "_collect.b", "_collect.a"]
-    assert value_table["_collect.b"] == {
-        "value": "SUM(B)",
-        "_collectable_id": "collect.b",
-    }
-    assert list(avg_table) == ["Hit", "_collect.a"]
-    assert avg_table["_collect.a"] == {"avg": "SUM(A)", "_collectable_id": "collect.a"}
-
-
-@pytest.mark.misc
-def test_attach_collectables_keeps_a_row_already_in_the_table():
-    panel = yaml.safe_load(COLLECTABLE_PANEL_YAML)["Panel Config"]
-    metrics = panel["data source"][0]["metric_table"]["metric"]
-    metrics["_collect.b"] = {"value": "SUM(LOCAL)", "_collectable_id": "collect.b"}
-    utils_common.attach_collectables(panel, {"collect.b": "SUM(B)"})
-    assert metrics["_collect.b"]["value"] == "SUM(LOCAL)"
-    assert "_collect.a" not in metrics
-
-
-@pytest.mark.misc
-def test_load_panel_configs_reads_the_collectables_file_as_rows(tmp_path):
-    (tmp_path / "1600_vl1d.yaml").write_text(COLLECTABLE_PANEL_YAML, encoding="utf-8")
-    (tmp_path / utils_common.COLLECTABLES_FILENAME).write_text(
-        COLLECTABLES_YAML, encoding="utf-8"
-    )
-    panels = utils_common.load_panel_configs([str(tmp_path)])
-    assert list(panels) == [1600]
-    metrics = panels[1600]["data source"][1]["metric_table"]["metric"]
-    assert metrics["_collect.a"] == {"avg": "SUM(A)", "_collectable_id": "collect.a"}
-    assert utils_common.panel_config_paths(tmp_path) == [tmp_path / "1600_vl1d.yaml"]
 
 
 @pytest.mark.parametrize(

@@ -30,7 +30,7 @@ Panel Config:
           peak: $FP64Flops_empirical_peak
         GL2 Cache BW:
           # Note: GL1C-GL2 reads can be 32B, 64B, or 128B. Writes can be 32B or 64B.
-          value: COLLECT_SUM(_collect.gl2_rd_bw, _collect.gl2_wr_bw)
+          value: 1e9 * ($gl2_read_bandwidth + $gl2_write_bandwidth)
           unit: Bytes/s
           peak: $L2Bw_empirical_peak * 1e9
         GL1 Cache BW:
@@ -45,6 +45,7 @@ Panel Config:
           value: SUM((SQC_LDS_IDX_ACTIVE_sum - SQC_LDS_BANK_CONFLICT_sum) * 4 * $lds_banks_per_cu) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
           unit: Bytes/s
           peak: $LDSBw_empirical_peak * 1e9
+
   - metric_table:
       id: 402
       title: Roofline Plot Points
@@ -56,7 +57,7 @@ Panel Config:
       metric:
         AI L2:
           # Note: GL1-GL2 reads can be 32B, 64B, or 128B. Writes can be 32B or 64B.
-          value: COLLECT_RATIO(_collect.ai_valu_flops, _collect.gl2_rd_bytes + _collect.gl2_wr_bytes)
+          value: SUM($valu_flops) / SUM($gl2_read_bytes + $gl2_write_bytes)
           unit: FLOPs/Byte
         AI L1:
           value: SUM($wave_size * SQ_INSTS_VALU_sum) / (64 * SUM(TCP_GL1_REQ_READ_sum + TCP_GL1_REQ_WRITE_sum))
@@ -70,6 +71,7 @@ Panel Config:
         Performance (GFLOPs):
           value: SUM($wave_size * SQ_INSTS_VALU_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1e9) / 1e9
           unit: GFLOP/s
+
   metrics_description:
     VALU FLOPs: >-
       Floating-point operations per second on the VALU. Peak is based on

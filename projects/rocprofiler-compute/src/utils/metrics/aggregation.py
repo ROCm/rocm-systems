@@ -10,8 +10,6 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from utils.logger import console_warning
-
 
 def calc_pct_of_peak(
     value: float | str | None,
@@ -168,78 +166,3 @@ def to_mod(
 
 def to_concat(a: Any, b: Any) -> str:  # noqa: ANN401
     return str(a) + str(b)
-
-
-def _sorted_dispatch_ids(series_list: list[pd.Series]) -> list[object]:
-    dispatch_ids: set[object] = set()
-    for series in series_list:
-        dispatch_ids.update(series.index)
-    return sorted(dispatch_ids, key=lambda item: (str(type(item)), str(item)))
-
-
-def _fragment_value(series: pd.Series, dispatch_id: object) -> float | None:
-    if dispatch_id not in series.index:
-        return None
-    value = series.loc[dispatch_id]
-    if pd.isna(value):
-        return None
-    return float(value)
-
-
-def _warn_skipped_dispatches(kind: str, used: int, total: int) -> None:
-    if total and used != total:
-        console_warning(
-            "metrics",
-            f"{kind}: used {used} of {total} dispatches; "
-            "skipped dispatches whose fragment was missing or NaN",
-        )
-
-
-def merge_dispatch_collect_ratio(
-    numerator_series_list: list[pd.Series],
-    denominator_series_list: list[pd.Series],
-) -> float:
-    """Sum numerators and denominators across dispatches, then divide once.
-
-    A dispatch whose denominator is zero still adds its numerator. A missing
-    or NaN fragment skips that dispatch. The result is unset when every
-    dispatch is skipped or the pooled denominator is zero.
-    """
-    if not numerator_series_list or not denominator_series_list:
-        return np.nan
-
-    all_series = numerator_series_list + denominator_series_list
-    dispatch_ids = _sorted_dispatch_ids(all_series)
-    if not dispatch_ids:
-        return np.nan
-
-    numerator_total = 0.0
-    denominator_total = 0.0
-    used = 0
-    for dispatch_id in dispatch_ids:
-        numerator = 0.0
-        denominator = 0.0
-        skip_dispatch = False
-        for series in numerator_series_list:
-            value = _fragment_value(series, dispatch_id)
-            if value is None:
-                skip_dispatch = True
-                break
-            numerator += value
-        if not skip_dispatch:
-            for series in denominator_series_list:
-                value = _fragment_value(series, dispatch_id)
-                if value is None:
-                    skip_dispatch = True
-                    break
-                denominator += value
-        if skip_dispatch:
-            continue
-        numerator_total += numerator
-        denominator_total += denominator
-        used += 1
-
-    _warn_skipped_dispatches("COLLECT_RATIO", used, len(dispatch_ids))
-    if used == 0 or denominator_total == 0.0:
-        return np.nan
-    return numerator_total / denominator_total

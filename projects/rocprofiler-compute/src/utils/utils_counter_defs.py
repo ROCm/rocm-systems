@@ -10,7 +10,10 @@ Imported by both the main runtime code and lightweight tooling such as
 import re
 from typing import Any, Dict, List, Set, Tuple
 
+import config
 from utils.logger import console_error
+from utils.utils_common import canonical_config_arch
+from vendored import yaml
 
 # ---------------------------------------------------------------------------
 # Regex patterns for HW counter and variable extraction
@@ -36,6 +39,9 @@ AMMOLITE_VAR_RE = re.compile(r"ammolite__([0-9A-Za-z_]+)")
 # Built-in variable and denominator definitions
 # ---------------------------------------------------------------------------
 
+# Per-arch files of named formulas, written $name in metric formulas
+COLLECTABLES_DIR = config.analysis_configs_dir / "collectables"
+
 # per_kernel denom column, injected at pmc load with 1 per dispatch so
 # SUM($denom) == N and Avg is the mean per dispatch.
 UNIT_COUNTER = "Dispatch_Unit"
@@ -47,65 +53,6 @@ SUPPORTED_DENOM: Dict[str, str] = {
     # A vector, not a scalar, so SUM($denom) == N.
     "per_kernel": UNIT_COUNTER,
 }
-
-
-def get_build_in_vars(gpu_series: str) -> Dict[str, str]:
-    """Return the architecture-specific built-in variables for *gpu_series*.
-
-    Args:
-        gpu_series: GPU series string from mi_gpu_specs.get_gpu_series()
-
-    Returns:
-        Dictionary mapping built-in variable names to their formulas.
-
-    Exits via console_error if *gpu_series* is falsy or not recognized.
-    """
-    if not gpu_series:
-        console_error(
-            "Cannot resolve built-in variables: no GPU series provided "
-            "(unknown GPU arch?)."
-        )
-
-    build_in_vars: dict[str, dict[str, str]] = {
-        "cdna": {
-            "GRBM_GUI_ACTIVE_PER_XCD": "(GRBM_GUI_ACTIVE / $num_xcd)",
-            "GRBM_COUNT_PER_XCD": "(GRBM_COUNT / $num_xcd)",
-            "GRBM_SPI_BUSY_PER_XCD": "(GRBM_SPI_BUSY / $num_xcd)",
-            "numActiveCUs": (
-                "TO_INT(MIN(ROUND(SUM(4 * SQ_BUSY_CU_CYCLES) / "
-                "SUM($GRBM_GUI_ACTIVE_PER_XCD), 0) / $max_waves_per_cu * 8 + "
-                "MIN(MOD(ROUND(SUM(4 * SQ_BUSY_CU_CYCLES) / "
-                "SUM($GRBM_GUI_ACTIVE_PER_XCD), 0), "
-                "$max_waves_per_cu), 8), $cu_per_gpu))"
-            ),
-            "kernelBusyCycles": (
-                "ROUND(AVG((((End_Timestamp - Start_Timestamp) / 1000) * "
-                "$max_sclk)), 0)"
-            ),
-            "hbmBandwidth": "($max_mclk / 1000 * 32 * $num_memory_channels)",
-        },
-        "rdna35": {
-            "GRBM_GUI_ACTIVE_PER_XCD": "(GRBM_GUI_ACTIVE / $num_xcd)",
-            "GRBM_COUNT_PER_XCD": "(GRBM_COUNT / $num_xcd)",
-            "GRBM_SPI_BUSY_PER_XCD": "(GRBM_SPI_BUSY / $num_xcd)",
-        },
-    }
-    if gpu_series == "GFX1250_SERIES":
-        # gfx1250 exposes GUI-active cycles summed across XCD dimensions. Divide
-        # the explicit sum by the visible num_xcd to preserve per-XCD semantics.
-        build_in_vars["cdna"]["GRBM_GUI_ACTIVE_PER_XCD"] = (
-            "GRBM_GUI_ACTIVE_sum / $num_xcd"
-        )
-
-    if gpu_series == "GFX1250_SERIES" or gpu_series.startswith("MI"):
-        return build_in_vars["cdna"]
-    elif gpu_series.startswith("RDNA"):
-        return build_in_vars["rdna35"]
-    else:
-        console_error(
-            f"Unknown GPU series '{gpu_series}': cannot determine built-in variables."
-        )
-        return {}
 
 
 # ---------------------------------------------------------------------------
@@ -158,10 +105,11 @@ def parse_counters_text(text: str) -> Tuple[Set[str], Set[str]]:
 
 
 def extract_counters_and_variables(
-    text: str, gpu_series: str, include_supported_denom: bool = True
+    text: str, collectables: Dict[str, str], include_supported_denom: bool = True
 ) -> Tuple[Set[str], Set[str]]:
-    """Return (hw_counters, builtin_vars) referenced by text, with transitive
-    resolution. Recognizes both $var and ammolite__var forms.
+    """Return (hw_counters, collectable names) referenced by text, with the
+    counters of the collectables it names. Recognizes both $var and
+    ammolite__var forms.
 
     Profiling must collect the SUPPORTED_DENOM counters too, because every
     metric is implicitly divided by its unit denominator. Pass
@@ -177,16 +125,15 @@ def extract_counters_and_variables(
             hw.update(hw_d)
             variables.update(var_d)
 
-    build_in_vars = get_build_in_vars(gpu_series)
     builtin_vars: set[str] = set()
     seen: set[str] = set()
     while variables - seen:
         new_vars: set[str] = set()
         for var in variables - seen:
             seen.add(var)
-            if var in build_in_vars:
+            if var in collectables:
                 builtin_vars.add(var)
-                hw_v, var_v = parse_counters_text(build_in_vars[var])
+                hw_v, var_v = parse_counters_text(collectables[var])
                 hw.update(hw_v)
                 new_vars.update(var_v)
         variables.update(new_vars)
@@ -204,3 +151,41 @@ def counter_to_block(counter: str) -> str:
     if block == "TX":
         return "TCP"
     return BLOCK_REMAP.get(block, block)
+
+
+def _dependency_order(formulas: Dict[str, str]) -> Dict[str, str]:
+    """Return formulas ordered so each collectable comes after those it uses."""
+    ordered: Dict[str, str] = {}
+    pending = dict(formulas)
+    while pending:
+        ready = {
+            name: formula
+            for name, formula in pending.items()
+            if not parse_counters_text(formula)[1] & pending.keys()
+        }
+        if not ready:
+            console_error(f"Collectables use each other in a loop: {sorted(pending)}")
+        ordered.update(ready)
+        pending = {name: pending[name] for name in pending.keys() - ready.keys()}
+    return ordered
+
+
+class Collectables:
+    """The collectables of each arch: named formulas that metric formulas use
+    as $name. Each arch's file is read once, and its collectables are kept so
+    that each one comes after the collectables it uses."""
+
+    _formulas_by_arch: Dict[str, Dict[str, str]] = {}
+
+    @classmethod
+    def of_arch(cls, gpu_arch: str) -> Dict[str, str]:
+        """Return the formula of each collectable of gpu_arch, by name."""
+        config_arch = canonical_config_arch(gpu_arch)
+        if config_arch not in cls._formulas_by_arch:
+            path = COLLECTABLES_DIR / f"{config_arch}_collectables.yaml"
+            if not path.is_file():
+                console_error(f"No collectables file for {gpu_arch}: {path}")
+            cls._formulas_by_arch[config_arch] = _dependency_order(
+                yaml.safe_load(path.read_text(encoding="utf-8"))
+            )
+        return cls._formulas_by_arch[config_arch]

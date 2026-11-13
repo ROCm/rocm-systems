@@ -6,7 +6,6 @@
 from __future__ import annotations
 
 import warnings
-from collections.abc import Callable
 from typing import Any
 
 import numpy as np
@@ -43,11 +42,17 @@ def counter_table_index(
     the merged table wins.
     """
     if isinstance(eval_string, str):
-        columns = columns_read(eval_string, build_in_vars)
         for index, table in enumerate(tables[:-1]):
-            if columns <= set(table.columns):
+            if table_holds(eval_string, table, build_in_vars):
                 return index
     return len(tables) - 1
+
+
+def table_holds(
+    eval_string: str, table: pd.DataFrame, build_in_vars: dict[str, str]
+) -> bool:
+    """Return whether table has every column the eval string reads."""
+    return columns_read(eval_string, build_in_vars) <= set(table.columns)
 
 
 class MetricEvaluator:
@@ -58,13 +63,10 @@ class MetricEvaluator:
         raw_pmc_df: pd.DataFrame,
         sys_vars: dict[str, Any],
         empirical_peaks: dict[str, Any],
-        collect_piece: Callable[[str], pd.Series] | None = None,
     ) -> None:
         self.raw_pmc_df = raw_pmc_df
         self.sys_vars = sys_vars
         self.empirical_peaks = empirical_peaks
-        # Returns the per-dispatch values of collect_piece("_collect.<piece>")
-        self.collect_piece = collect_piece
 
     def eval_expression(self, expr: str) -> str | float | int:
         """Evaluate a single expression with proper local context."""
@@ -90,8 +92,6 @@ class MetricEvaluator:
                 "to_concat": to_concat,
                 "to_noise_clamp": to_noise_clamp,
             })
-            if self.collect_piece is not None:
-                local_expr_context["collect_piece"] = self.collect_piece
 
             with warnings.catch_warnings(record=True) as caught:
                 warnings.simplefilter("always", RuntimeWarning)

@@ -3,28 +3,20 @@
 
 """Unit tests for utils/metrics/evaluation_pipeline.py."""
 
-from typing import List, Optional
 from unittest.mock import patch
 
 import numpy as np
 import pandas as pd
 import pytest
 
-from utils.metrics.collectable import (
-    COLLECT_SUM_SPECS_ATTR,
-    per_dispatch_series,
-)
 from utils.metrics.evaluation_pipeline import (
     calc_builtin_vars,
     compute_pct_of_peak,
     create_empirical_peaks_dict,
     create_sys_vars,
     eval_metric,
-    evaluate_metric_composites,
     validate_dual_issue_metrics,
 )
-from utils.metrics.expression import build_eval_string
-from utils.metrics.metric_evaluator import MetricEvaluator
 from utils.metrics.noise_clamper import (
     clear_noise_clamp_warnings,
     get_noise_clamp_warnings,
@@ -33,54 +25,6 @@ from utils.metrics.noise_clamper import (
 # =============================================================================
 # Tests for utils.metrics.evaluation_pipeline
 # =============================================================================
-
-
-def _ipc_collect_table() -> pd.DataFrame:
-    """IPC (Issued) parent plus the two collect pieces."""
-    piece_a = "to_sum(raw_pmc_df['INST_A']) / to_sum(raw_pmc_df['CYCLES'])"
-    piece_b = "to_sum(raw_pmc_df['INST_B']) / to_sum(raw_pmc_df['CYCLES'])"
-    min_expr = build_eval_string("MIN(_collect.ipc_issued_a + _collect.ipc_issued_b)")
-    max_expr = build_eval_string("MAX(_collect.ipc_issued_a + _collect.ipc_issued_b)")
-    table = pd.DataFrame(
-        [
-            ["1", "_collect.ipc_issued_a", piece_a, "", ""],
-            ["2", "_collect.ipc_issued_b", piece_b, "", ""],
-            ["3", "IPC (Issued)", "", min_expr, max_expr],
-        ],
-        columns=["Metric_ID", "Metric", "Avg", "Min", "Max"],
-    ).set_index("Metric_ID")
-    table.attrs[COLLECT_SUM_SPECS_ATTR] = {
-        "3": ["_collect.ipc_issued_a", "_collect.ipc_issued_b"],
-    }
-    return table
-
-
-def _eval_ipc_collect_table(
-    raw: pd.DataFrame, pass_tables: Optional[List[pd.DataFrame]] = None
-) -> pd.DataFrame:
-    table = _ipc_collect_table()
-    sys_info = pd.Series(TestEvaluationPipeline.sys_info_fields)
-    expressions = [
-        value
-        for column in ("Avg", "Min", "Max")
-        for value in table[column].tolist()
-        if isinstance(value, str) and value
-    ]
-    with patch(
-        "utils.metrics.evaluation_pipeline.get_build_in_vars",
-        return_value={},
-    ):
-        eval_metric(
-            {1: table},
-            {1: "metric_table"},
-            {1: expressions},
-            sys_info,
-            pd.DataFrame(),
-            raw,
-            debug=False,
-            pass_tables=pass_tables,
-        )
-    return table
 
 
 class TestEvaluationPipeline:
@@ -163,7 +107,7 @@ class TestEvaluationPipeline:
         )
         metric_df, dfs, dfs_type, dfs_expressions, sys_info, raw_pmc_df = fixture
         with patch(
-            "utils.metrics.evaluation_pipeline.get_build_in_vars",
+            "utils.utils_counter_defs.Collectables.of_arch",
             return_value={},
         ), patch(
             "utils.metrics.evaluation_pipeline.debug_row_tracker"
@@ -210,7 +154,7 @@ class TestEvaluationPipeline:
             for counters in pass_counters
         ]
         with patch(
-            "utils.metrics.evaluation_pipeline.get_build_in_vars",
+            "utils.utils_counter_defs.Collectables.of_arch",
             return_value={},
         ):
             eval_metric(
@@ -234,9 +178,7 @@ class TestEvaluationPipeline:
             }
         )
         metric_df, dfs, dfs_type, dfs_expressions, sys_info, raw_pmc_df = fixture
-        with patch(
-            "utils.metrics.evaluation_pipeline.get_build_in_vars", return_value={}
-        ):
+        with patch("utils.utils_counter_defs.Collectables.of_arch", return_value={}):
             eval_metric(
                 dfs,
                 dfs_type,
@@ -264,9 +206,7 @@ class TestEvaluationPipeline:
             "SQ_INSTS_VMEM": [10.0, 20.0, 30.0],
             "GRBM_GUI_ACTIVE": [1000, 2000, 1500],
         })
-        with patch(
-            "utils.metrics.evaluation_pipeline.get_build_in_vars", return_value={}
-        ):
+        with patch("utils.utils_counter_defs.Collectables.of_arch", return_value={}):
             eval_metric(
                 dfs,
                 dfs_type,
@@ -284,9 +224,7 @@ class TestEvaluationPipeline:
         metric_df, dfs, dfs_type, dfs_expressions, sys_info, raw_pmc_df = fixture
         assert metric_df.loc["1.1.0", "Average"] is None
 
-        with patch(
-            "utils.metrics.evaluation_pipeline.get_build_in_vars", return_value={}
-        ):
+        with patch("utils.utils_counter_defs.Collectables.of_arch", return_value={}):
             eval_metric(
                 dfs,
                 dfs_type,
@@ -320,7 +258,7 @@ class TestEvaluationPipeline:
 
         clear_noise_clamp_warnings()
         with patch(
-            "utils.metrics.evaluation_pipeline.get_build_in_vars", return_value={}
+            "utils.utils_counter_defs.Collectables.of_arch", return_value={}
         ), patch(
             "utils.metrics.evaluation_pipeline.console_warning"
         ) as mock_console_warning, patch(
@@ -625,159 +563,3 @@ class TestEvaluationPipeline:
         sys_info = pd.Series({**self.sys_info_fields, "num_gl1c": 8})
         result = create_sys_vars(sys_info)
         assert result["ammolite__num_gl1c"] == 8
-
-
-@pytest.mark.misc
-def test_evaluate_metric_composites_fills_parent_without_mutating_source():
-    raw = pd.DataFrame({
-        "Dispatch_ID": [1, 2],
-        "SQ_A": [10.0, 30.0],
-        "SQ_B": [2.0, 6.0],
-    })
-    df = pd.DataFrame(
-        [
-            ["1", "_collect.num", "to_sum(raw_pmc_df['SQ_A'])"],
-            ["2", "_collect.den", "to_sum(raw_pmc_df['SQ_B'])"],
-            ["3", "AI HBM", ""],
-        ],
-        columns=["Metric_ID", "Metric", "Value"],
-    ).set_index("Metric_ID")
-    df.attrs["collect_ratio_specs"] = {
-        "3": {"numerator": ["_collect.num"], "denominator": ["_collect.den"]},
-    }
-    df.attrs["collectable_expr_cache"] = {}
-    source_parent = df.at["3", "Value"]
-    sys_info = pd.Series({
-        "gpu_arch": "gfx90a",
-        "se_per_gpu": 1,
-        "pipes_per_gpu": 1,
-        "cu_per_gpu": 1,
-        "simd_per_cu": 1,
-        "sqc_per_gpu": 1,
-        "lds_banks_per_cu": 1,
-        "cur_sclk": 1.0,
-        "cur_mclk": 1.0,
-        "max_mclk": 1.0,
-        "max_sclk": 1.0,
-        "max_waves_per_cu": 1,
-        "wave_size": 64,
-        "total_l2_chan": 1,
-        "num_xcd": 1,
-    })
-    filled = evaluate_metric_composites(
-        {402: df},
-        {402: "metric_table"},
-        raw,
-        sys_info,
-        pd.DataFrame(),
-    )
-    assert filled[("3", "Value")] == pytest.approx((10.0 + 30.0) / (2.0 + 6.0))
-    assert df.at["3", "Value"] == source_parent
-
-
-@pytest.mark.misc
-def test_collect_piece_min_is_the_per_dispatch_extremum() -> None:
-    """MIN(a + b) is min over dispatches, not the sum of piece averages.
-
-    Dispatch 1 is 2/4 + 1/4 = 0.75. Dispatch 2 is 6/4 + 1/4 = 1.75.
-    The COLLECT_SUM average is (2+6)/(4+4) + (1+1)/(4+4) = 1.25.
-    """
-    raw = pd.DataFrame({
-        "Dispatch_ID": [1, 2],
-        "INST_A": [2.0, 6.0],
-        "INST_B": [1.0, 1.0],
-        "CYCLES": [4.0, 4.0],
-    })
-    table = _eval_ipc_collect_table(raw)
-    assert table.at["3", "Avg"] == pytest.approx(1.25)
-    assert table.at["3", "Min"] == pytest.approx(0.75)
-    assert table.at["3", "Max"] == pytest.approx(1.75)
-
-
-@pytest.mark.misc
-def test_collect_piece_min_stays_unset_without_dispatch_series() -> None:
-    """Scalar piece averages are not reported as Min or Max.
-
-    The same pooled ratios still add for the COLLECT_SUM average.
-    """
-    raw = pd.DataFrame({
-        "INST_A": [2.0, 6.0],
-        "INST_B": [1.0, 1.0],
-        "CYCLES": [4.0, 4.0],
-    })
-    table = _eval_ipc_collect_table(raw)
-    assert table.at["3", "Avg"] == pytest.approx(1.25)
-    assert table.at["3", "Min"] == "N/A"
-    assert table.at["3", "Max"] == "N/A"
-
-
-@pytest.mark.misc
-def test_collect_parts_read_the_pass_that_holds_their_counters() -> None:
-    """Each part reads its own pass table, not the merged table.
-
-    The merged table holds zero instructions, so reading it would give 0.
-    """
-    merged = pd.DataFrame({
-        "Dispatch_ID": [1, 2],
-        "INST_A": [0.0, 0.0],
-        "INST_B": [0.0, 0.0],
-        "CYCLES": [4.0, 4.0],
-    })
-    pass_tables = [
-        pd.DataFrame({
-            "Dispatch_ID": [1, 2],
-            "INST_A": [2.0, 6.0],
-            "CYCLES": [4.0, 4.0],
-        }),
-        pd.DataFrame({
-            "Dispatch_ID": [1, 2],
-            "INST_B": [1.0, 1.0],
-            "CYCLES": [4.0, 4.0],
-        }),
-    ]
-    table = _eval_ipc_collect_table(merged, pass_tables)
-    assert table.at["3", "Avg"] == pytest.approx(1.25)
-    assert table.at["3", "Min"] == pytest.approx(0.75)
-    assert table.at["3", "Max"] == pytest.approx(1.75)
-
-
-@pytest.mark.misc
-def test_per_dispatch_series_scopes_builtin_series_to_each_dispatch() -> None:
-    """A whole-frame cycle Series must not be the denominator of every dispatch.
-
-    Instructions and cycles are both [10, 30]. Each dispatch is 1, not 0.25/0.75.
-    """
-    raw = pd.DataFrame({
-        "Dispatch_ID": [1, 2],
-        "INST": [10.0, 30.0],
-    })
-    cycles = pd.Series([10.0, 30.0], index=raw.index, name="cycles")
-    built = "to_sum(raw_pmc_df['INST']) / to_sum(ammolite__CYCLES)"
-    series = per_dispatch_series(
-        built, MetricEvaluator(raw, {"ammolite__CYCLES": cycles}, {})
-    )
-    assert series.loc[1] == pytest.approx(1.0)
-    assert series.loc[2] == pytest.approx(1.0)
-
-
-@pytest.mark.misc
-def test_evaluate_metric_composites_includes_min_and_max() -> None:
-    """Database overlay receives the same per-dispatch Min and Max as analyze."""
-    raw = pd.DataFrame({
-        "Dispatch_ID": [1, 2],
-        "INST_A": [2.0, 6.0],
-        "INST_B": [1.0, 1.0],
-        "CYCLES": [4.0, 4.0],
-    })
-    table = _ipc_collect_table()
-    sys_info = pd.Series(TestEvaluationPipeline.sys_info_fields)
-    filled = evaluate_metric_composites(
-        {1: table},
-        {1: "metric_table"},
-        raw,
-        sys_info,
-        pd.DataFrame(),
-    )
-    assert filled[("3", "Min")] == pytest.approx(0.75)
-    assert filled[("3", "Max")] == pytest.approx(1.75)
-    assert isinstance(table.at["3", "Min"], str)

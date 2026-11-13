@@ -1,0 +1,6 @@
+hbm_read_bytes:
+  formula: TCC_EA0_RDREQ_128B_sum * 128 + TCC_EA0_RDREQ_32B_sum * 32 + TCC_EA0_RDREQ_64B_sum * 64
+mfma_f6f4_flop_rate:
+  formula: SUM($mfma_f6f4_flops) / SUM(End_Timestamp - Start_Timestamp)
+mfma_f6f4_flops:
+  formula: 512 * SQ_INSTS_VALU_MFMA_MOPS_F6F4

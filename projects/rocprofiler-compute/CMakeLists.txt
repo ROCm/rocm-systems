@@ -1064,33 +1064,6 @@ add_test(
 )
 
 # -----------------------------------
-# Collectable unit tests
-# -----------------------------------
-
-add_test(
-    NAME test_collectable
-    COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_collectable.xml
-        ${COV_OPTION} tests/unit/utils/metrics/test_collectable.py ${WORKING_DIR_OPTION}
-)
-
-add_test(
-    NAME test_collect_ratio
-    COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_collect_ratio.xml
-        ${COV_OPTION} tests/unit/utils/metrics/test_collect_ratio.py ${WORKING_DIR_OPTION}
-)
-
-add_test(
-    NAME test_analysis_config_collectables
-    COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest
-        --junitxml=tests/test_analysis_config_collectables.xml ${COV_OPTION}
-        tests/unit/rocprof_compute_soc/test_analysis_config_collectables.py
-        ${WORKING_DIR_OPTION}
-)
-
-# -----------------------------------
 # TTY table rendering unit tests
 # -----------------------------------
 
@@ -1253,9 +1226,6 @@ if(${ENABLE_COVERAGE})
         test_rocprof_compute_base
         test_rocprofv3_avail_interface
         test_soc_base
-        test_collect_ratio
-        test_collectable
-        test_analysis_config_collectables
         test_tty
         test_file_io
         test_utils_profile_csv

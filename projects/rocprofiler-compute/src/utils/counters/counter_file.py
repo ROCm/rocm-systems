@@ -3,18 +3,11 @@
 
 """Perfmon pass files and the counter slots each hardware block has."""
 
-from typing import Dict, List, Optional, Set
+from typing import Dict, List
 
 from utils.utils_counter_defs import counter_to_block
 
 _ACCUM_SUFFIX = "_ACCUM"
-# Counter families that must not share a pass, mapped to the family they clash
-# with. On gfx1250 the SP FLOP counters read zero when SP_VALU_* and SQ_VMEM_*
-# share a pass, even with free SQ slots.
-_INCOMPATIBLE_FAMILIES: Dict[str, str] = {
-    "SP_VALU_": "SQ_VMEM_",
-    "SQ_VMEM_": "SP_VALU_",
-}
 
 
 def slot_cost(counter: str) -> int:
@@ -30,14 +23,6 @@ def flat_counters_in_perfmon_file(counter_file: "CounterFile") -> List[str]:
         for block_name in counter_file.blocks
         for ctr in counter_file.blocks[block_name].elements
     ]
-
-
-def _incompatible_family(counter: str) -> Optional[str]:
-    """Return the _INCOMPATIBLE_FAMILIES prefix that counter starts with."""
-    return next(
-        (prefix for prefix in _INCOMPATIBLE_FAMILIES if counter.startswith(prefix)),
-        None,
-    )
 
 
 # Set with limited size
@@ -74,18 +59,9 @@ class CounterFile:
         self.blocks: Dict[str, LimitedSet] = {
             block: LimitedSet(capacity) for block, capacity in perfmon_config.items()
         }
-        # Families from _INCOMPATIBLE_FAMILIES that this pass already holds
-        self._families: Set[str] = set()
 
     def add(self, counter: str) -> bool:
-        family = _incompatible_family(counter)
-        if family is not None and _INCOMPATIBLE_FAMILIES[family] in self._families:
-            return False
-        if not self.blocks[counter_to_block(counter)].add(counter, slot_cost(counter)):
-            return False
-        if family is not None:
-            self._families.add(family)
-        return True
+        return self.blocks[counter_to_block(counter)].add(counter, slot_cost(counter))
 
     def reserve(self, counter: str, n: int) -> bool:
         return self.blocks[counter_to_block(counter)].reserve(n)

@@ -48,7 +48,7 @@ from rocprof_compute_soc.soc_base import (
     is_tcc_channel_counter,
     iter_analysis_config_metrics,
 )
-from utils.counters.allocator import metric_counter_sets
+from utils.counters.allocator import metric_counter_sets, reads_one_pass
 from utils.counters.counter_file import (
     CounterFile,
     flat_counters_in_perfmon_file,
@@ -56,7 +56,7 @@ from utils.counters.counter_file import (
 from utils.logger import console_error
 from utils.mi_gpu_spec import mi_gpu_specs
 from utils.utils_common import canonical_config_arch
-from utils.utils_counter_defs import BLOCK_REMAP
+from utils.utils_counter_defs import BLOCK_REMAP, Collectables
 
 
 def _counter_display_ip_prefix(counter: str) -> str:
@@ -279,12 +279,12 @@ def generate_bucket_metrics(
     single_rows: list[tuple[str, str, int, str, str]] = []
     total_metrics = 0
 
-    gpu_series = mi_gpu_specs.get_gpu_series(arch)
+    collectables = Collectables.of_arch(arch)
     config_arch = canonical_config_arch(arch)
     for metric in iter_analysis_config_metrics(config_dir / config_arch, set()):
         total_metrics += 1
         metric_sets = metric_counter_sets(
-            [metric.expressions], gpu_series, plan_counters
+            [metric.expressions], collectables, plan_counters
         )
         if not metric_sets:
             continue
@@ -298,13 +298,16 @@ def generate_bucket_metrics(
             for label, counters in bucket_counters.items()
             if metric_set <= counters
         ]
-        if holders:
+        # A split metric reads each of its collectables from its own pass
+        if holders or reads_one_pass(
+            metric.expressions, collectables, list(bucket_counters.values())
+        ):
             single_rows.append((
                 metric.stem_id,
                 panel_label,
                 metric.metric_idx,
                 metric.metric_name,
-                holders[0],
+                holders[0] if holders else "collectables",
             ))
             continue
         buckets = [

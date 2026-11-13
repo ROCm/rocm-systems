@@ -9,7 +9,7 @@ Until the cutover, the library copies the analysis configs:
 - every row has the unit of its metric;
 - every row peak is a peak of its metric, and every library peak has a row;
 - the library reads the same counters as detect_counters();
-- the library variables equal get_build_in_vars();
+- the library collectables equal the analysis config collectables;
 - each library set lists the metrics of its old set in profile_configs/sets.
 
 The check skips the roofline panel of an arch without a roofline benchmark (gfx908).
@@ -36,10 +36,9 @@ from utils.utils_common import (
     MEMBW_ANALYSIS_PANEL_ID,
     ROOFLINE_PANEL_ID,
     canonical_config_arch,
-    panel_config_paths,
     parse_sets_yaml,
 )
-from utils.utils_counter_defs import get_build_in_vars, metric_value_keys
+from utils.utils_counter_defs import Collectables, metric_value_keys
 
 
 class Row(NamedTuple):
@@ -58,6 +57,8 @@ MAIN_FORMS = ("avg", "value", "expr")
 ROW_FIELDS = ("unit", "peak")
 # Kernel time divisors in seconds (Bytes/s rows) and in nanoseconds (GB/s rows).
 SECONDS_SCALE = "/(SUM(End_Timestamp-Start_Timestamp)/1e9)"
+# A Bytes/s row can also scale a GB/s equation: 1e9*(<GB/s equation>)
+BYTES_SCALE_PREFIX = "1e9*("
 NANOSECONDS = "/SUM(End_Timestamp-Start_Timestamp)"
 # Metric unit -> row unit when the row divides by seconds.
 SECONDS_SCALE_UNITS = {"GB/s": "Bytes/s"}
@@ -101,12 +102,6 @@ DISPLAY_VARIANTS = {
         "4.1.10": ROOFLINE_L2_BW_128B,
         "4.1.12": ROOFLINE_LDS_BW,
         "11.2.7": PIPELINE_MFMA_UTIL,
-        "16.3.5": (
-            "Cache Hit Rate",
-            "vl1d.hit_rate",
-            "NOISE_CLAMP(COLLECT_SUM(_collect.vl1d_chr_non_rw, "
-            "_collect.vl1d_hit_atom), 100)",
-        ),
     },
     "gfx950": {
         "2.1.23": (
@@ -208,24 +203,6 @@ def row_forms(table: Dict[str, Any], row: Dict[str, Any]) -> List[str]:
     ]
 
 
-# Panel labels that show one library metric through a COLLECT_SUM or COLLECT_RATIO.
-# The library keeps the combined formula; the panel splits it across collectables.
-COLLECTED_ROW_IDS = {
-    "vl1 hit": "vl1d.hit_rate",
-    "hit rate": "vl1d.hit_rate",
-    "cache hit rate": "vl1d.hit_rate",
-    "read instructions": "td.rd_insts",
-    "cache hits": "vl1d.cache_hits",
-    "ai hbm": "fabric.ai_hbm",
-    "ai l2": "l2.ai",
-    "ai l1": "vl1d.ai",
-    "ai lds": "lds.ai",
-    "gl2 cache bw": "gl1.gl2_bw",
-    "ai gl2": "l2.ai",
-    "ai gl0": "gl0.ai",
-}
-
-
 def read_rows(arch: str) -> List[Row]:
     """Return every row equation in the analysis configs of arch.
 
@@ -235,8 +212,6 @@ def read_rows(arch: str) -> List[Row]:
     for item in iter_analysis_config_metrics(
         config.analysis_configs_dir / arch, unshown_file_ids(arch)
     ):
-        if item.metric_name.startswith("_collect."):
-            continue
         legacy_id = f"{item.table_id // 100}.{item.table_id % 100}.{item.metric_idx}"
         rows.extend(
             Row(
@@ -252,27 +227,20 @@ def read_rows(arch: str) -> List[Row]:
 
 
 def in_seconds(row: Row) -> bool:
-    """Return True if row divides by the kernel time in seconds (a Bytes/s row)."""
-    return row.equation is not None and row.equation.endswith(SECONDS_SCALE)
-
-
-def scales_as_seconds(row: Row) -> bool:
-    """Return True if row shows a GB/s library formula in Bytes/s.
-
-    A collected bandwidth keeps the pieces' Bytes/s equation, which does not end
-    with the kernel-time divisor the other Bytes/s rows use.
-    """
-    return in_seconds(row) or (
-        row.unit == "Bytes/s"
-        and row.equation is not None
-        and "COLLECT_" in row.equation
+    """Return True if row is a Bytes/s row: it divides by the kernel time in
+    seconds, or multiplies a GB/s equation by 1e9."""
+    return row.equation is not None and (
+        row.equation.endswith(SECONDS_SCALE)
+        or row.equation.startswith(BYTES_SCALE_PREFIX)
     )
 
 
 def gb_per_second(row: Row) -> Optional[str]:
     """Return the equation of row in GB/s, with the kernel time in nanoseconds."""
-    if in_seconds(row):
+    if row.equation is not None and row.equation.endswith(SECONDS_SCALE):
         return row.equation[: -len(SECONDS_SCALE)] + NANOSECONDS
+    if row.equation is not None and row.equation.startswith(BYTES_SCALE_PREFIX):
+        return row.equation[len(BYTES_SCALE_PREFIX) : -1]
     return row.equation
 
 
@@ -282,7 +250,7 @@ def row_peak(row: Row, peak: str) -> str:
     A Bytes/s row writes "<MHz term> / 1000" as "<MHz term> * 1e6", and a measured peak
     "$<ceiling>_empirical_peak" as "$<ceiling>_empirical_peak * 1e9".
     """
-    if not scales_as_seconds(row):
+    if not in_seconds(row):
         return peak
     if peak.endswith("/1000"):
         return peak[: -len("/1000")] + "*1e6"
@@ -292,9 +260,7 @@ def row_peak(row: Row, peak: str) -> str:
 def row_metric_id(row: Row, library: loader.MetricLibrary, arch: str) -> Optional[str]:
     """Return the metric id of row, or None if no metric matches.
 
-    A row with the name of a SHARED_FORMULA_IDS id as its label gets that id. A
-    COLLECT_SUM or COLLECT_RATIO row gets the metric its label names, since the
-    library keeps the combined formula.
+    A row with the name of a SHARED_FORMULA_IDS id as its label gets that id.
     """
     variants = DISPLAY_VARIANTS.get(arch, {})
     if row.legacy_id in variants:
@@ -313,8 +279,6 @@ def row_metric_id(row: Row, library: loader.MetricLibrary, arch: str) -> Optiona
     named_id = names.get(row.label.casefold())
     if metric_id is not None and SHARED_FORMULA_IDS.get(named_id) == metric_id:
         return named_id
-    if metric_id is None and row.equation is not None and "COLLECT_" in row.equation:
-        return named_id or COLLECTED_ROW_IDS.get(row.label.casefold())
     return metric_id
 
 
@@ -344,7 +308,7 @@ def shown_blocks(arch: str) -> List[str]:
         return []
     file_ids = {
         path.name.split("_")[0]
-        for path in panel_config_paths(config.analysis_configs_dir / arch)
+        for path in (config.analysis_configs_dir / arch).glob("*.yaml")
     }
     return [str(int(file_id) // 100) for file_id in sorted(file_ids - unshown)]
 
@@ -421,7 +385,7 @@ def test_row_units_are_metric_units(arch_view):
         elif row.label != label:
             errors.append(f"{row.legacy_id} is now {row.label!r}; update UNIT_VARIANTS")
         else:
-            if scales_as_seconds(row):
+            if in_seconds(row):
                 unit = SECONDS_SCALE_UNITS.get(unit, unit)
             if UNIT_ALIASES.get(row.unit, row.unit) != unit:
                 errors.append(f"{row.legacy_id}: {row.unit!r} is not {unit!r}")
@@ -476,22 +440,21 @@ def test_counters_match_detect_counters(arch_view):
     soc = make_soc(member_arch(arch), has_membw_panel, shown_blocks(arch))
     expected, _ = soc.detect_counters()
     library_counters = arch_view.library.get_counters_for_metrics(
-        list(arch_view.library.metrics), mi_gpu_specs.get_gpu_series(member_arch(arch))
+        list(arch_view.library.metrics)
     )
     assert soc._expand_tcc_template_counters(library_counters) == expected
 
 
-def test_variables_match_get_build_in_vars(arch_view):
-    library_variables = {
-        name: canonical_formula(variable["formula"])
-        for name, variable in arch_view.library.variables.items()
+def test_collectables_match_analysis_configs(arch_view):
+    library_collectables = {
+        name: canonical_formula(collectable["formula"])
+        for name, collectable in arch_view.library.collectables.items()
     }
-    gpu_series = mi_gpu_specs.get_gpu_series(member_arch(arch_view.arch))
     expected = {
         name: canonical_formula(formula)
-        for name, formula in get_build_in_vars(gpu_series).items()
+        for name, formula in Collectables.of_arch(arch_view.arch).items()
     }
-    assert library_variables == expected
+    assert library_collectables == expected
 
 
 def test_sets_match_profile_configs(arch_view):

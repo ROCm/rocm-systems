@@ -125,17 +125,18 @@ Panel Config:
         # Arithmetic Intensity relative to each memory level
         # Note: Using both VALU and WMMA FLOPs for total compute
         AI HBM:
-          value: COLLECT_RATIO(_collect.ai_sp_flops + _collect.ai_wmma_flops, _collect.hbm_bytes)
+          value: SUM($sp_flops + $wmma_flops) / SUM($hbm_bytes)
           unit: FLOPs/Byte
         AI GL2:
-          value: COLLECT_RATIO(_collect.ai_sp_flops + _collect.ai_wmma_flops, _collect.gl2_bytes)
+          value: SUM($sp_flops + $wmma_flops) / SUM($gl2_bytes)
           unit: FLOPs/Byte
         AI GL0:
-          value: COLLECT_RATIO(_collect.ai_sp_flops + _collect.ai_wmma_flops, _collect.gl0_bytes)
+          value: SUM($sp_flops + $wmma_flops) / SUM($gl0_bytes)
           unit: FLOPs/Byte
         Performance (GFLOPs):
-          value: COLLECT_SUM(_collect.perf_sp, _collect.perf_wmma)
+          value: $sp_flop_rate + $wmma_flop_rate
           unit: GFLOP/s
+
   metrics_description:
     VALU FLOPs (FP16): >-
       Achieved FP16 VALU throughput.

@@ -139,9 +139,9 @@ Panel Config:
           max: MAX(TD_COALESCABLE_WAVEFRONT_sum / $denom)
           unit: (Instructions + $normUnit)
         Read Instructions:
-          avg: COLLECT_SUM(_collect.td_read_load, _collect.td_read_store_atomic_corr)
-          min: MIN(_collect.td_read_load + _collect.td_read_store_atomic_corr)  # min over dispatches of the summed pieces
-          max: MAX(_collect.td_read_load + _collect.td_read_store_atomic_corr)  # max over dispatches of the summed pieces
+          avg: SUM($td_load_wavefronts - $td_store_and_atomic_wavefronts) / SUM($denom)
+          min: MIN(($td_load_wavefronts - $td_store_and_atomic_wavefronts) / $denom)
+          max: MAX(($td_load_wavefronts - $td_store_and_atomic_wavefronts) / $denom)
           unit: (Instructions + $normUnit)
         Write Instructions:
           avg: SUM(TD_STORE_WAVEFRONT_sum) / SUM($denom)

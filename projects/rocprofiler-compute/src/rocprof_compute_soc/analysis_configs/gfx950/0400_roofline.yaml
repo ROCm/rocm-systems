@@ -58,7 +58,7 @@ Panel Config:
           unit: GIOP/s
           peak: $MFMAI8Ops_empirical_peak
         HBM Bandwidth:
-          value: COLLECT_SUM(_collect.hbm_rd_bw, _collect.hbm_wr_bw)
+          value: $hbm_read_bandwidth + $hbm_write_bandwidth
           unit: GB/s
           peak: $HBMBw_empirical_peak
         L2 Cache Bandwidth:
@@ -83,19 +83,19 @@ Panel Config:
         unit: Unit
       metric:
         AI HBM:
-          value: COLLECT_RATIO(_collect.ai_flops_f16 + _collect.ai_flops_f32 + _collect.ai_flops_f64 + _collect.ai_flops_mfma_f16 + _collect.ai_flops_mfma_bf16 + _collect.ai_flops_mfma_f32 + _collect.ai_flops_mfma_f64 + _collect.ai_flops_mfma_f8 + _collect.ai_flops_mfma_f6f4, _collect.hbm_rd_bytes + _collect.hbm_wr_bytes)
+          value: SUM($valu_f16_flops + $valu_f32_flops + $valu_f64_flops + $mfma_f16_flops + $mfma_bf16_flops + $mfma_f32_flops + $mfma_f64_flops + $mfma_f8_flops + $mfma_f6f4_flops) / SUM($hbm_read_bytes + $hbm_write_bytes)
           unit: FLOPs/Byte
         AI L2:
-          value: COLLECT_RATIO(_collect.ai_flops_f16 + _collect.ai_flops_f32 + _collect.ai_flops_f64 + _collect.ai_flops_mfma_f16 + _collect.ai_flops_mfma_bf16 + _collect.ai_flops_mfma_f32 + _collect.ai_flops_mfma_f64 + _collect.ai_flops_mfma_f8 + _collect.ai_flops_mfma_f6f4, _collect.l2_bytes)
+          value: SUM($valu_f16_flops + $valu_f32_flops + $valu_f64_flops + $mfma_f16_flops + $mfma_bf16_flops + $mfma_f32_flops + $mfma_f64_flops + $mfma_f8_flops + $mfma_f6f4_flops) / SUM($l2_bytes)
           unit: FLOPs/Byte
         AI L1:
-          value: COLLECT_RATIO(_collect.ai_flops_f16 + _collect.ai_flops_f32 + _collect.ai_flops_f64 + _collect.ai_flops_mfma_f16 + _collect.ai_flops_mfma_bf16 + _collect.ai_flops_mfma_f32 + _collect.ai_flops_mfma_f64 + _collect.ai_flops_mfma_f8 + _collect.ai_flops_mfma_f6f4, _collect.l1_bytes)
+          value: SUM($valu_f16_flops + $valu_f32_flops + $valu_f64_flops + $mfma_f16_flops + $mfma_bf16_flops + $mfma_f32_flops + $mfma_f64_flops + $mfma_f8_flops + $mfma_f6f4_flops) / SUM($l1_bytes)
           unit: FLOPs/Byte
         AI LDS:
-          value: COLLECT_RATIO(_collect.ai_flops_f16 + _collect.ai_flops_f32 + _collect.ai_flops_f64 + _collect.ai_flops_mfma_f16 + _collect.ai_flops_mfma_bf16 + _collect.ai_flops_mfma_f32 + _collect.ai_flops_mfma_f64 + _collect.ai_flops_mfma_f8 + _collect.ai_flops_mfma_f6f4, _collect.lds_bytes)
+          value: SUM($valu_f16_flops + $valu_f32_flops + $valu_f64_flops + $mfma_f16_flops + $mfma_bf16_flops + $mfma_f32_flops + $mfma_f64_flops + $mfma_f8_flops + $mfma_f6f4_flops) / SUM($lds_bytes)
           unit: FLOPs/Byte
         Performance (GFLOPs):
-          value: COLLECT_SUM(_collect.perf_valu_f16, _collect.perf_valu_f32, _collect.perf_valu_f64, _collect.perf_mfma_f16, _collect.perf_mfma_bf16, _collect.perf_mfma_f32, _collect.perf_mfma_f64, _collect.perf_mfma_f8, _collect.perf_mfma_f6f4)
+          value: $valu_f16_flop_rate + $valu_f32_flop_rate + $valu_f64_flop_rate + $mfma_f16_flop_rate + $mfma_bf16_flop_rate + $mfma_f32_flop_rate + $mfma_f64_flop_rate + $mfma_f8_flop_rate + $mfma_f6f4_flop_rate
           unit: GFLOP/s
   metrics_description:
     VALU FLOPs (F16): >-

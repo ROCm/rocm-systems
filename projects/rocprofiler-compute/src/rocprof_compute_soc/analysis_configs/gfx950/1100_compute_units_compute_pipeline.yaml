@@ -14,7 +14,7 @@ Panel Config:
         pct_of_peak: Percent of Peak
       metric:
         VALU FLOPs:
-          value: COLLECT_SUM(_collect.valu_flops_f16, _collect.valu_flops_f32, _collect.valu_flops_f64)
+          value: $valu_f16_flop_rate + $valu_f32_flop_rate + $valu_f64_flop_rate
           unit: GFLOPs
           peak: $max_sclk * $cu_per_gpu * 64 * 2 / 1000
           pct_of_peak: true
@@ -74,9 +74,9 @@ Panel Config:
           max: MAX(SQ_INSTS / SQ_BUSY_CU_CYCLES)
           unit: Instructions per Cycle
         IPC (Issued):
-          avg: COLLECT_SUM(_collect.ipc_issued_a, _collect.ipc_issued_b)
-          min: MIN(_collect.ipc_issued_a + _collect.ipc_issued_b)  # min over dispatches of the summed pieces
-          max: MAX(_collect.ipc_issued_a + _collect.ipc_issued_b)  # max over dispatches of the summed pieces
+          avg: $ipc_valu_vmem_salu_smem + $ipc_branch_sendmsg_vskipped_lds
+          min: MIN($ipc_valu_vmem_salu_smem_per_dispatch + $ipc_branch_sendmsg_vskipped_lds_per_dispatch)
+          max: MAX($ipc_valu_vmem_salu_smem_per_dispatch + $ipc_branch_sendmsg_vskipped_lds_per_dispatch)
           unit: Instructions per Cycle
         SALU Utilization:
           avg: 100 * SUM(SQ_ACTIVE_INST_SCA) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
@@ -144,9 +144,9 @@ Panel Config:
         unit: Unit
       metric:
         FLOPs (Total):
-          avg: COLLECT_SUM(_collect.flops_total_a, _collect.flops_total_b, _collect.flops_total_c)
-          min: MIN(_collect.flops_total_a + _collect.flops_total_b + _collect.flops_total_c)  # min over dispatches of the summed pieces
-          max: MAX(_collect.flops_total_a + _collect.flops_total_b + _collect.flops_total_c)  # max over dispatches of the summed pieces
+          avg: SUM($valu_f16_flops + $valu_f32_flops + $valu_f64_flops + $mfma_f16_flops + $mfma_bf16_flops + $mfma_f32_flops + $mfma_f64_flops + $mfma_f8_flops + $mfma_f6f4_flops) / SUM($denom)
+          min: MIN(($valu_f16_flops + $valu_f32_flops + $valu_f64_flops + $mfma_f16_flops + $mfma_bf16_flops + $mfma_f32_flops + $mfma_f64_flops + $mfma_f8_flops + $mfma_f6f4_flops) / $denom)
+          max: MAX(($valu_f16_flops + $valu_f32_flops + $valu_f64_flops + $mfma_f16_flops + $mfma_bf16_flops + $mfma_f32_flops + $mfma_f64_flops + $mfma_f8_flops + $mfma_f6f4_flops) / $denom)
           unit: (FLOPs + $normUnit)
         IOPs (Total):
           avg: SUM(64 * (SQ_INSTS_VALU_INT32 + SQ_INSTS_VALU_INT64) + SQ_INSTS_VALU_MFMA_MOPS_I8 * 512) / SUM($denom)

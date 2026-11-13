@@ -8,7 +8,7 @@ gl1.busy:
     indicates active memory traffic from the GL0 caches.
 gl1.gl2_bw:
   name: GL1-GL2 Bandwidth
-  formula: SUM(GL1C_GL2_REQ_READ_32B_sum * 32 + GL1C_GL2_REQ_READ_64B_sum * 64 + GL1C_GL2_REQ_READ_128B_sum * 128 + GL1C_GL2_REQ_WRITE_32B_sum * 32 + GL1C_GL2_REQ_WRITE_64B_sum * 64) / SUM(End_Timestamp - Start_Timestamp)
+  formula: $gl2_read_bandwidth + $gl2_write_bandwidth
   unit: GB/s
   description: >-
     Achieved bandwidth between the GL1 and GL2 caches. This represents GL1 miss traffic

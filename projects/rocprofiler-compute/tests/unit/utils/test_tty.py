@@ -23,9 +23,7 @@ from utils.tty import (
     format_node_stats,
     format_table_output,
     has_time_data,
-    is_roofline_shown,
     print_operator_node,
-    process_table_data,
     show_all,
     show_call_tree,
     show_operator_summary,
@@ -1180,52 +1178,3 @@ def test_show_call_tree_prints_file_line_sort_and_kernel_id(capsys):
     assert "nn.Module.Linear.forward simple_torch_code.py:19" in output
     assert "aten::relu simple_torch_code.py" not in output
     assert "(id 4)" in output
-
-
-def test_per_kernel_roofline_omits_collectable_rows(capsys):
-    """Per-kernel roofline tables hide ``_collect.*`` and keep the parent."""
-    rates = pd.DataFrame({
-        "Metric": ["HBM Bandwidth", "_collect.hbm_rd_bw"],
-        "Value": [2268.0, 1034.81],
-    })
-    points = pd.DataFrame({
-        "Metric": ["AI HBM", "_collect.ai_flops_f16"],
-        "Value": [1.5, 0.0],
-    })
-    workload = SimpleNamespace(
-        roofline_peaks=pd.DataFrame([{"peak": 1.0}]),
-        roofline_html_path=None,
-        roofline_metrics={
-            0: {"name": "vcopy", "ai_table": rates, "calc_table": points},
-        },
-        dfs={1: pd.DataFrame()},
-    )
-    panel = {"data source": [{"metric_table": {"cli_style": "Roofline"}}]}
-    args = SimpleNamespace(filter_metrics=None, decimal=2)
-
-    shown = is_roofline_shown(args, {"run": workload}, None, panel)
-
-    output = capsys.readouterr().out
-    assert shown
-    assert "HBM Bandwidth" in output
-    assert "AI HBM" in output
-    assert "_collect.hbm_rd_bw" not in output
-    assert "_collect.ai_flops_f16" not in output
-
-
-def test_process_table_data_omits_collectable_rows():
-    """CLI table rows hide ``_collect.*`` and keep a normal metric."""
-    frame = pd.DataFrame({
-        "Metric": ["VALU FLOPs", "_collect.flops"],
-        "Value": ["1.0", "2.0"],
-    })
-    runs = {"run": SimpleNamespace(dfs={201: frame})}
-    args = SimpleNamespace(time_unit=None, cols=None, decimal=2, verbose=0)
-    result = process_table_data(
-        args,
-        runs,
-        {"id": 201},
-        "metric_table",
-        ["Value"],
-    )
-    assert list(result["Metric"]) == ["VALU FLOPs"]

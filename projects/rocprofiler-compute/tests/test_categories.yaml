@@ -9,9 +9,6 @@ test_categories:
       - test_metric_evaluator
       - test_allocator
       - test_counter_file
-      - test_collectable
-      - test_collect_ratio
-      - test_analysis_config_collectables
       - test_utils_counter_defs
       - test_metric_library_loader
       - test_metric_library_sync
@@ -97,9 +94,6 @@ test_categories:
       - test_metric_evaluator
       - test_allocator
       - test_counter_file
-      - test_collectable
-      - test_collect_ratio
-      - test_analysis_config_collectables
       - test_utils_counter_defs
       - test_metric_library_loader
       - test_metric_library_sync
@@ -209,9 +203,6 @@ test_categories:
       - test_metric_evaluator
       - test_allocator
       - test_counter_file
-      - test_collectable
-      - test_collect_ratio
-      - test_analysis_config_collectables
       - test_utils_counter_defs
       - test_metric_library_loader
       - test_metric_library_sync
@@ -321,9 +312,6 @@ test_categories:
       - test_metric_evaluator
       - test_allocator
       - test_counter_file
-      - test_collectable
-      - test_collect_ratio
-      - test_analysis_config_collectables
       - test_utils_counter_defs
       - test_metric_library_loader
       - test_metric_library_sync
