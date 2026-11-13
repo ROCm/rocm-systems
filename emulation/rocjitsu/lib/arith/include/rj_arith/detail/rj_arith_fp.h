@@ -533,9 +533,9 @@ int rj_arith_v_pk_fmac_f16_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_
 // guest-mode path, IEEE controls NaN quieting. Directed guest rounding uses
 // scalar FP64 arithmetic and integer narrowing. RDNA3 RJ_ARITH_FP_DX10_CLAMP_OFF uses
 // that scalar path to preserve NaNs under CLAMP. Loose and Compatibility are
-// supported; mode 1 may fall back to Loose. RDNA3 variants also support exact semantics
-// (no FP status) through the scalar guest-mode path, which matches gfx1100 with IEEE set
-// and clear; Compatibility keeps the SIMD path. RDNA4 variants reject exact modes.
+// supported; mode 1 may fall back to Loose. Both RDNA3 and RDNA4 variants also support
+// exact semantics (no FP status) through the scalar guest-mode path, which matches gfx1100
+// with IEEE set and clear and gfx1201. Compatibility keeps the SIMD path, which matches too.
 // Compatibility preserves selected gfx11 input NaN bits with IEEE clear in both
 // scalar and SIMD paths; IEEE set quiets them. Loose permits approximate NaN results.
 // ADD/MUL without _gfx12 take RDNA3 trapsts; RDNA4 variants
