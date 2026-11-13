@@ -2716,6 +2716,23 @@ struct AddonComm {
   }
   ncclComm* c() { return comm.get(); }
 };
+
+ncclInfo MakeCollInfo(ncclComm* comm, hipStream_t stream) {
+  struct ncclInfo info{};
+  info.coll       = ncclFuncAllReduce;
+  info.opName     = "AllReduce";
+  info.sendbuff   = nullptr;
+  info.recvbuff   = nullptr;
+  info.count      = static_cast<size_t>(comm->nRanks);
+  info.datatype   = ncclFloat32;
+  info.root       = 0;
+  info.comm       = comm;
+  info.stream     = stream;
+  info.chunkSteps = 1;
+  info.sliceSteps = 1;
+  info.acc        = nullptr;
+  return info;
+}
 }  // namespace
 
 TEST_F(EnqueueMicrotest, AddonLaunch_NothingTookTheEvent_EpilogueRecordsIt) {
@@ -2733,7 +2750,8 @@ TEST_F(EnqueueMicrotest, AddonLaunch_NothingTookTheEvent_EpilogueRecordsIt) {
     return hipSuccess;
   });
 
-  EXPECT_EQ(ncclSuccess, rcclAddonLaunch(ac.c(), kAddonStream, [] { return ncclSuccess; }));
+  struct ncclInfo info = MakeCollInfo(ac.c(), kAddonStream);
+  EXPECT_EQ(ncclSuccess, rcclAddonLaunch(info, [] { return ncclSuccess; }));
 
   ASSERT_EQ(1, record.calls);
   EXPECT_EQ(kAddonDoneEvent, recordedEvent);
@@ -2751,7 +2769,8 @@ TEST_F(EnqueueMicrotest, AddonLaunch_KernelTookTheEvent_EpilogueSkipsTheRecord) 
   ScopedHook record(g_hipEventRecord, [](hipEvent_t, hipStream_t) { return hipErrorInvalidValue; });
 
   hipEvent_t stopEvent = nullptr;
-  EXPECT_EQ(ncclSuccess, rcclAddonLaunch(ac.c(), kAddonStream, [&] {
+  struct ncclInfo info = MakeCollInfo(ac.c(), kAddonStream);
+  EXPECT_EQ(ncclSuccess, rcclAddonLaunch(info, [&] {
     stopEvent = rcclTakeAddonStopEvent(ac.c());
     return ncclSuccess;
   }));
@@ -2772,8 +2791,9 @@ TEST_F(EnqueueMicrotest, AddonLaunch_LaunchFailed_RecordsNothingAndLeavesTheTag)
                           });
   ScopedHook record(g_hipEventRecord, [](hipEvent_t, hipStream_t) { return hipErrorInvalidValue; });
 
+  struct ncclInfo info = MakeCollInfo(ac.c(), kAddonStream);
   EXPECT_EQ(ncclInternalError,
-            rcclAddonLaunch(ac.c(), kAddonStream, [] { return ncclInternalError; }));
+            rcclAddonLaunch(info, [] { return ncclInternalError; }));
 
   EXPECT_EQ(0, record.calls);
   EXPECT_EQ(0u, ac.c()->lastStreamTag);
@@ -2802,7 +2822,8 @@ TEST_F(EnqueueMicrotest, AddonLaunch_SetDeviceFailed_SkipsLaunchAndRestoresTheDe
   int launches = 0;
   ncclResult_t res = ncclSuccess;
   RcclUnitTesting::CaptureLog([&] {
-    res = rcclAddonLaunch(ac.c(), kAddonStream, [&] {
+    struct ncclInfo info = MakeCollInfo(ac.c(), kAddonStream);
+    res = rcclAddonLaunch(info, [&] {
       ++launches;
       return ncclSuccess;
     });
@@ -2838,7 +2859,8 @@ TEST_F(EnqueueMicrotest, AddonLaunch_CaptureQueryFailed_SkipsLaunchAndRestoresTh
   ScopedHook record(g_hipEventRecord, [](hipEvent_t, hipStream_t) { return hipSuccess; });
 
   int launches = 0;
-  EXPECT_EQ(ncclInternalError, rcclAddonLaunch(ac.c(), kAddonStream, [&] {
+  struct ncclInfo info = MakeCollInfo(ac.c(), kAddonStream);
+  EXPECT_EQ(ncclInternalError, rcclAddonLaunch(info, [&] {
               ++launches;
               return ncclSuccess;
             }));
@@ -2971,7 +2993,8 @@ TEST_F(EnqueueMicrotest, AddonLaunch_CapturedWithStreamOrdering_JoinsTheDeviceSt
     return ncclSuccess;
   });
 
-  EXPECT_EQ(ncclSuccess, rcclAddonLaunch(ac.c(), kAddonStream, [&] {
+  struct ncclInfo info = MakeCollInfo(ac.c(), kAddonStream);
+  EXPECT_EQ(ncclSuccess, rcclAddonLaunch(info, [&] {
     EXPECT_EQ(nullptr, rcclTakeAddonStopEvent(ac.c()));
     calls.push_back("launch");
     return ncclSuccess;
@@ -3010,7 +3033,8 @@ TEST_F(EnqueueMicrotest, AddonLaunch_CapturedWithoutStreamOrdering_WaitsOnAndRec
   });
 
   for (int i = 0; i < 2; ++i) {
-    EXPECT_EQ(ncclSuccess, rcclAddonLaunch(ac.c(), kAddonStream, [] { return ncclSuccess; }));
+    struct ncclInfo info = MakeCollInfo(ac.c(), kAddonStream);
+    EXPECT_EQ(ncclSuccess, rcclAddonLaunch(info, [] { return ncclSuccess; }));
   }
 
   EXPECT_EQ(0, acquire.calls);
@@ -3038,7 +3062,8 @@ TEST_F(EnqueueMicrotest, AddonLaunch_NotCapturing_LeavesTheDeviceStreamAlone) {
                          [](struct ncclCudaGraph, hipEvent_t, hipStream_t) { return ncclInternalError; });
   ScopedHook record(g_hipEventRecord, [](hipEvent_t, hipStream_t) { return hipSuccess; });
 
-  EXPECT_EQ(ncclSuccess, rcclAddonLaunch(ac.c(), kAddonStream, [] { return ncclSuccess; }));
+  struct ncclInfo info = MakeCollInfo(ac.c(), kAddonStream);
+  EXPECT_EQ(ncclSuccess, rcclAddonLaunch(info, [] { return ncclSuccess; }));
 
   EXPECT_EQ(0, acquire.calls);
   EXPECT_EQ(0, release.calls);
@@ -3059,7 +3084,8 @@ TEST_F(EnqueueMicrotest, AddonLaunch_CapturedLaunchFailed_StillReleasesTheDevice
   ScopedHook release(g_strongStreamRelease,
                      [](struct ncclCudaGraph, struct ncclStrongStream*, bool) { return ncclSuccess; });
 
-  EXPECT_EQ(ncclInternalError, rcclAddonLaunch(ac.c(), kAddonStream, [] { return ncclInternalError; }));
+  struct ncclInfo info = MakeCollInfo(ac.c(), kAddonStream);
+  EXPECT_EQ(ncclInternalError, rcclAddonLaunch(info, [] { return ncclInternalError; }));
 
   EXPECT_EQ(1, acquire.calls);
   EXPECT_EQ(1, release.calls);
@@ -5172,6 +5198,9 @@ TEST_F(EnqueueMicrotest, RedOpCreate_RecorderFailure_Propagates) {
 // only the tag written onto the task is checked.
 // ===========================================================================
 
+namespace {
+const hipStream_t kCollStream = reinterpret_cast<hipStream_t>(0x5118);
+
 // Minimal comm that satisfies collTaskAppend without entering the Broadcast /
 // AllGatherV branch and without GPU allocation.
 struct CollTaskComm {
@@ -5188,27 +5217,16 @@ struct CollTaskComm {
   }
   ncclComm* get() { return storage.get(); }
 };
-
-static ncclInfo MakeCollInfo(ncclComm* comm, bool decisionValid, int algo) {
-  ncclInfo info{};
-  info.comm          = comm;
-  info.coll          = ncclFuncAllReduce;
-  info.op            = ncclSum;
-  info.datatype      = ncclFloat32;
-  info.count         = static_cast<size_t>(comm->nRanks);
-  info.chunkSteps    = 1;
-  info.sliceSteps    = 1;
-  info.decisionValid = decisionValid;
-  info.decision.algo = algo;
-  return info;
-}
+}  // namespace
 
 TEST_F(EnqueueMicrotest, CollTaskAppend_NonSymmetricDecision_WritesDeny) {
   // decisionValid=true, algo != RCCL_SYMMETRIC → symkExtract must be DENY so
   // ncclMakeSymmetricTaskList does not extract the task even when buffers are
   // registered.
   CollTaskComm cc;
-  ncclInfo info = MakeCollInfo(cc.get(), /*decisionValid=*/true, NCCL_ALGO_RING);
+  struct ncclInfo info = MakeCollInfo(cc.get(), kCollStream);
+  info.decision.algo = NCCL_ALGO_RING;
+  info.decisionValid = true;
   ncclDevRedOpFull opDev{};
   ASSERT_EQ(ncclSuccess, collTaskAppend(cc.get(), &info, opDev));
   ASSERT_EQ(1, cc.get()->planner.nTasksColl);
@@ -5221,7 +5239,9 @@ TEST_F(EnqueueMicrotest, CollTaskAppend_SymmetricDecision_WritesAllow) {
   // decisionValid=true, algo == RCCL_SYMMETRIC → symkExtract must be ALLOW so
   // ncclMakeSymmetricTaskList can extract the task.
   CollTaskComm cc;
-  ncclInfo info = MakeCollInfo(cc.get(), /*decisionValid=*/true, RCCL_SYMMETRIC);
+  struct ncclInfo info = MakeCollInfo(cc.get(), kCollStream);
+  info.decision.algo = RCCL_SYMMETRIC;
+  info.decisionValid = true;
   ncclDevRedOpFull opDev{};
   ASSERT_EQ(ncclSuccess, collTaskAppend(cc.get(), &info, opDev));
   ASSERT_EQ(1, cc.get()->planner.nTasksColl);
@@ -5233,7 +5253,9 @@ TEST_F(EnqueueMicrotest, CollTaskAppend_SymmetricDecision_WritesAllow) {
 TEST_F(EnqueueMicrotest, CollTaskAppend_TdmWindowDecision_WritesAllowTdmOnly) {
   // A symmetric decision the AllGather TDM window admitted extracts only with a TDM kernel.
   CollTaskComm cc;
-  ncclInfo info = MakeCollInfo(cc.get(), /*decisionValid=*/true, RCCL_SYMMETRIC);
+  struct ncclInfo info = MakeCollInfo(cc.get(), kCollStream);
+  info.decision.algo = RCCL_SYMMETRIC;
+  info.decisionValid = true;
   info.decision.symkTdmOnly = true;
   ncclDevRedOpFull opDev{};
   ASSERT_EQ(ncclSuccess, collTaskAppend(cc.get(), &info, opDev));
@@ -5245,7 +5267,9 @@ TEST_F(EnqueueMicrotest, CollTaskAppend_TdmWindowDecision_WritesAllowTdmOnly) {
 TEST_F(EnqueueMicrotest, CollTaskAppend_NonSymmetricDecisionWithTdmOnly_WritesDeny) {
   // symkTdmOnly means nothing once another path won the decision.
   CollTaskComm cc;
-  ncclInfo info = MakeCollInfo(cc.get(), /*decisionValid=*/true, NCCL_ALGO_RING);
+  struct ncclInfo info = MakeCollInfo(cc.get(), kCollStream);
+  info.decision.algo = NCCL_ALGO_RING;
+  info.decisionValid = true;
   info.decision.symkTdmOnly = true;
   ncclDevRedOpFull opDev{};
   ASSERT_EQ(ncclSuccess, collTaskAppend(cc.get(), &info, opDev));
@@ -5258,7 +5282,9 @@ TEST_F(EnqueueMicrotest, CollTaskAppend_NoDecision_WritesNone) {
   // decisionValid=false → symkExtract must stay NONE so the extractor uses
   // window inspection rather than a stale/absent selector result.
   CollTaskComm cc;
-  ncclInfo info = MakeCollInfo(cc.get(), /*decisionValid=*/false, NCCL_ALGO_RING);
+  struct ncclInfo info = MakeCollInfo(cc.get(), kCollStream);
+  info.decision.algo = NCCL_ALGO_RING;
+  info.decisionValid = false;
   ncclDevRedOpFull opDev{};
   ASSERT_EQ(ncclSuccess, collTaskAppend(cc.get(), &info, opDev));
   ASSERT_EQ(1, cc.get()->planner.nTasksColl);
@@ -5270,6 +5296,9 @@ TEST_F(EnqueueMicrotest, CollTaskAppend_NoDecision_WritesNone) {
 // ===========================================================================
 // ceCollTaskAppend -- deferred CE staging setup (ROCM-32044)
 // ===========================================================================
+
+namespace {
+const hipStream_t kCeCollStream = reinterpret_cast<hipStream_t>(0x5217);
 
 // Comm ready for ceCollTaskAppend: CE initialized, out of every group; leaves the thread's group heads clean.
 struct CeAppendScene {
@@ -5288,12 +5317,15 @@ struct CeAppendScene {
     }
   }
   ncclResult_t Append(ncclFunc_t func) {
-    ncclInfo info = MakeCollInfo(cc.get(), /*decisionValid=*/true, RCCL_CE_REGISTERED);
+    struct ncclInfo info = MakeCollInfo(cc.get(), kCeCollStream);
     info.coll = func;
+    info.decision.algo = RCCL_CE_REGISTERED;
+    info.decisionValid = true;
     return ceCollTaskAppend(cc.get(), &info, nullptr, nullptr, nullptr, nullptr, ncclDevRedOpFull{});
   }
   bool JoinedSymRegister() { return ncclGroupCommHead[ncclGroupTaskTypeSymRegister] == cc.get(); }
 };
+}  // namespace
 
 TEST_F(EnqueueMicrotest, CeCollTaskAppend_AllReduceWithoutStaging_MarksPendingAndJoinsSymRegister) {
   CeAppendScene scene;
@@ -5960,9 +5992,10 @@ struct RawTaskScene : CeAppendScene {
     cc.get()->config.numRmaSig = 3;
   }
   ncclInfo Info(ncclFunc_t func) {
-    ncclInfo info = MakeCollInfo(cc.get(), /*decisionValid=*/false, NCCL_ALGO_RING);
+    struct ncclInfo info = MakeCollInfo(cc.get(), kRawStream);
     info.coll = func;
-    info.stream = kRawStream;
+    info.decision.algo = NCCL_ALGO_RING;
+    info.decisionValid = false;
     return info;
   }
   ncclResult_t Append(ncclInfo& info, std::string* log = nullptr) {
