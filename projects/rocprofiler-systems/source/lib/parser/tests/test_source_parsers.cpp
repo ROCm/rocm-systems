@@ -158,6 +158,33 @@ TEST(parser_default, rejects_a_default_the_catalog_refuses)
               std::string::npos);
 }
 
+TEST(parser_parse_result, text_writes_a_stored_value_as_canonical_text)
+{
+    parse_result parsed{};
+    parsed.values.emplace("freq", std::int64_t{ 2 });
+    parsed.values.emplace("events", std::vector<std::string>{ "ins", "cycles" });
+    EXPECT_EQ(parsed.text("freq"), "2");
+    EXPECT_EQ(parsed.text("events"), "ins,cycles");
+}
+
+TEST(parser_parse_result, store_typed_gives_the_same_verdict_as_text)
+{
+    auto freq = make_param("freq", param_type::integer);
+    freq.max  = k_frequency_limit;
+
+    parse_result typed{};
+    typed.store_typed(freq, std::int64_t{ 2 });
+    typed.store_typed(freq, std::int64_t{ 4 });
+    typed.store_typed(freq, std::string{ "2" });
+    expect_stored(typed.values, "freq", std::int64_t{ 2 });
+    ASSERT_EQ(typed.errors.size(), 2U);
+
+    parse_result text{};
+    text.store_if_valid(freq, "4");
+    ASSERT_EQ(text.errors.size(), 1U);
+    EXPECT_EQ(typed.errors.front(), text.errors.front());
+}
+
 TEST(parser_env, reads_set_variables_and_skips_unset_ones)
 {
     const std::map<std::string, std::string> environment{ { "ROCPROFSYS_FREQ", "2" } };
