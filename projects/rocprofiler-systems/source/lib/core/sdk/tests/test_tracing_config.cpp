@@ -70,6 +70,7 @@ enum backend_tag : int
     domain_choices_supported_only               = 118,
     domain_requests_without_handler             = 120,
     domain_requests_below_version_gate          = 121,
+    domain_requests_all_operations_excluded     = 122,
 };
 
 // tracing_config no longer caches get_version()/get_callback_tracing_names()/
@@ -930,6 +931,21 @@ TEST_F(tracing_config_domains_test,
     ASSERT_EQ(requests.size(), 1U);
     EXPECT_THAT(requests.front().operations,
                 gtest::Optional(gtest::ElementsAre("hipMalloc")));
+}
+
+TEST_F(tracing_config_domains_test, get_domains_skips_domain_with_no_operation_left)
+{
+    using sut = tracing_config<tagged_backend<domain_requests_all_operations_excluded>,
+                               mock_sdk_externals>;
+
+    expect_name_tables(make_hip_runtime_name_info());
+    expect_domains_environment("hip_runtime_api");
+    EXPECT_CALL(*g_mock_externals,
+                get_setting_value(
+                    gtest::Eq("ROCPROFSYS_ROCM_HIP_RUNTIME_API_OPERATIONS_EXCLUDE")))
+        .WillOnce(gtest::Return(std::string{ "hip.*" }));
+
+    EXPECT_THAT(sut::get_domains(), gtest::IsEmpty());
 }
 
 TEST_F(tracing_config_domains_test, get_domains_requests_all_operations_without_filters)
