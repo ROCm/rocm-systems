@@ -139,7 +139,6 @@ class CuidGpu : public CuidDevice {
 
  private:
   amdcuid_status_t partition_temporary_input(CuidUtilities::AuxiliaryInput& aux) const;
-  uint16_t partition_unit_id(const CuidPartitionParent& parent) const;
   amdcuid_gpu_info m_info;
 };
 

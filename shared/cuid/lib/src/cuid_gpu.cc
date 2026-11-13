@@ -314,21 +314,28 @@ bool partitioned_gpu(const std::string& device) {
   return CuidUtilities::read_sysfs_file(device + "/current_compute_partition") != "SPX";
 }
 
-// The UnitID amdgpu publishes in `dir`'s cuid_unit_id. False when there is no
-// such file; true with 0 when the value is not a partition's.
-bool published_unit_id(const std::string& dir, uint16_t& unit_id) {
+// A partition's UnitID: the one amdgpu publishes in `dir`'s cuid_unit_id, or
+// `kfd_unit_id` when there is no such file. A published value must be decimal
+// digits only, from 2 to 8128, or it is INVALID_FORMAT, as for a whole
+// device's; UNSUPPORTED when neither source names a partition.
+amdcuid_status_t partition_unit_id_in(const std::string& dir, uint16_t kfd_unit_id,
+                                      uint16_t& unit_id) {
+  unit_id = 0;
   const std::string path = dir + "/" + CuidUtilities::kDriverUnitIdAttribute;
-  if (access(path.c_str(), F_OK) != 0) return false;
+  if (access(path.c_str(), F_OK) != 0) {
+    unit_id = kfd_unit_id;
+    return unit_id == 0 ? AMDCUID_STATUS_UNSUPPORTED : AMDCUID_STATUS_SUCCESS;
+  }
   const std::string text = CuidUtilities::read_sysfs_file(path);
-  char* end = nullptr;
-  errno = 0;
-  const unsigned long value = std::strtoul(text.c_str(), &end, 10);
+  if (text.empty() || text.size() > 4 || text.find_first_not_of("0123456789") != std::string::npos)
+    return AMDCUID_STATUS_INVALID_FORMAT;
+  unsigned value = 0;
+  for (const char digit : text) value = value * 10 + static_cast<unsigned>(digit - '0');
   // UnitID 0 is the whole GPU and 1 the whole GPU in SLC mode; a partition
   // claiming either would take the device's identity.
-  unit_id = (text.empty() || errno == ERANGE || *end != '\0' || value < 2 || value > 8128)
-                ? 0
-                : static_cast<uint16_t>(value);
-  return true;
+  if (value < 2 || value > 8128) return AMDCUID_STATUS_INVALID_FORMAT;
+  unit_id = static_cast<uint16_t>(value);
+  return AMDCUID_STATUS_SUCCESS;
 }
 
 // A partition's UnitID, from cuid_unit_id or KFD, and its parent's IDs: what
@@ -340,8 +347,9 @@ amdcuid_status_t read_public_partition_metadata(amdcuid_gpu_info& info) {
       info.kfd_nodes.empty() ? kKfdNodes : info.kfd_nodes, parent);
   if (status != AMDCUID_STATUS_SUCCESS) return status;
   uint16_t unit_id = 0;
-  if (!published_unit_id(info.partition_attr_dir, unit_id)) unit_id = parent.kfd_unit_id;
-  if (unit_id == 0) return AMDCUID_STATUS_UNSUPPORTED;
+  const auto unit_status =
+      partition_unit_id_in(info.partition_attr_dir, parent.kfd_unit_id, unit_id);
+  if (unit_status != AMDCUID_STATUS_SUCCESS) return unit_status;
   info.header.fields.gpu.unit_id = unit_id;
   info.header.fields.gpu.revision_id = parent.revision_id;
   info.header.fields.gpu.device_id = parent.device_id;
@@ -855,13 +863,6 @@ amdcuid_status_t CuidGpu::partition_parent(const std::string& attr_dir, const st
   return AMDCUID_STATUS_SUCCESS;
 }
 
-// The UnitID of a partition: cuid_unit_id where the driver publishes it,
-// otherwise the one KFD implies on a stock kernel. 0 when neither names one.
-uint16_t CuidGpu::partition_unit_id(const CuidPartitionParent& parent) const {
-  uint16_t unit_id = 0;
-  return published_unit_id(m_info.partition_attr_dir, unit_id) ? unit_id : parent.kfd_unit_id;
-}
-
 // A partition's temporary input: its parent's routing and IDs plus its own
 // UnitID, which is what keeps it apart from the whole GPU and its siblings.
 amdcuid_status_t CuidGpu::partition_temporary_input(CuidUtilities::AuxiliaryInput& aux) const {
@@ -871,8 +872,10 @@ amdcuid_status_t CuidGpu::partition_temporary_input(CuidUtilities::AuxiliaryInpu
       m_info.partition_attr_dir, m_info.pci_root.empty() ? kPciDevices : m_info.pci_root,
       m_info.kfd_nodes.empty() ? kKfdNodes : m_info.kfd_nodes, parent);
   if (status != AMDCUID_STATUS_SUCCESS) return status;
-  const uint16_t unit_id = partition_unit_id(parent);
-  if (unit_id == 0) return AMDCUID_STATUS_UNSUPPORTED;
+  uint16_t unit_id = 0;
+  const auto unit_status =
+      partition_unit_id_in(m_info.partition_attr_dir, parent.kfd_unit_id, unit_id);
+  if (unit_status != AMDCUID_STATUS_SUCCESS) return unit_status;
 
   aux = {};
   aux.format = CuidUtilities::kAuxFormatPcie;
