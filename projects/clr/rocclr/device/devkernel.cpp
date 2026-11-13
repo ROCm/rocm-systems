@@ -809,7 +809,7 @@ bool Kernel::GetAttrCodePropMetadata() {
       }
 
       // extract the code properties metadata
-      amd_comgr_metadata_node_t codePropsMeta;
+      amd_comgr_metadata_node_t codePropsMeta{};
       if (status == AMD_COMGR_STATUS_SUCCESS) {
         status = amd::Comgr::metadata_lookup(kernelMetaNode, "CodeProps", &codePropsMeta);
       }

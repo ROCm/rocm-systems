@@ -49,7 +49,9 @@ class D3D11Object : public InteropObject {
 
   bool releaseResources_;
 
-  static std::vector<std::pair<void*, std::pair<UINT, UINT>>> resources_;
+  //! Tracked as {resource, {subresource, plane}}. The plane is INT, not UINT:
+  //! -1 is the "no plane" sentinel used throughout this class.
+  static std::vector<std::pair<void*, std::pair<UINT, INT>>> resources_;
 
  protected:
   //! Global lock.

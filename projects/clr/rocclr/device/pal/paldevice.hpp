@@ -255,6 +255,10 @@ class Device : public NullDevice {
     void operator delete(void*) = delete;
     // Placement new overload required by MSVC when operator new(size_t) is deleted
     void* operator new(size_t, void* p) noexcept { return p; }
+    // Matching placement delete. The compiler calls this if the constructor
+    // throws; it is a no-op because the storage belongs to
+    // amd::AllocWithTrailing, whose catch block frees it.
+    void operator delete(void*, void*) noexcept {}
 
     //! Returns the MQD's read_dispatch_id's address.
     uintptr_t DebuggerData() const {

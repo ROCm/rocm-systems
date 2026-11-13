@@ -1244,7 +1244,8 @@ hsa_signal_t VirtualGPU::HwQueueTracker::ActiveSignal(hsa_signal_value_t init_va
   // Check if the signal doesn't match the requested one.
   // Note: runtime needs the interrupts for the callbacks and the marker events, but it can reuse
   // the non-interrupt signals for the regular dispatches
-  if ((signal_list_[current_id_]->flags_.interrupt_ != use_irq) && gpu_.dev().ActiveWait()) {
+  if ((static_cast<bool>(signal_list_[current_id_]->flags_.interrupt_) != use_irq) &&
+      gpu_.dev().ActiveWait()) {
     // Use different stacks if an interrupt is required or not.
     // @note: if runtime needs an interrupt, then the tracking list replaces the original signal
     // with the interrupt signal and saves the signal without interrupt, or vise versa

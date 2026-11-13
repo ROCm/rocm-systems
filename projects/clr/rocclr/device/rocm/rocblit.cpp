@@ -3950,7 +3950,7 @@ bool KernelBlitManager::runScheduler(uint64_t vqVM, hsa_queue_t* schedulerQueue,
     // Use a device side global atomics to workaround the reliance of PCIe 3 atomics
     sp->write_index = Hsa::queue_load_write_index_relaxed(schedulerQueue);
   } else {
-    sp->write_index = static_cast<uint64_t>(-1ULL);
+    sp->write_index = ~uint64_t{0};
   }
 
   constexpr bool kDirectVa = true;

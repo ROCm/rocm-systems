@@ -123,7 +123,10 @@ hipError_t ihipOccupancyMaxActiveBlocksPerMultiprocessor(
 
   // The count above is per scheduling unit of the kernel: a WGP for a WGP mode
   // kernel, a single CU for a kernel compiled with -mcumode.
-  if (wrkGrpInfo->isWGPMode_ != device.settings().enableWgpMode_) {
+  // isWGPMode_ is a bool but enableWgpMode_ is a 1-bit unsigned bitfield, so
+  // compare them as bools rather than letting the bool promote to int.
+  const bool deviceWgpMode = static_cast<bool>(device.settings().enableWgpMode_);
+  if (wrkGrpInfo->isWGPMode_ != deviceWgpMode) {
     *maxBlocksPerCU = wrkGrpInfo->isWGPMode_
         ? (*maxBlocksPerCU / 2) : (*maxBlocksPerCU * 2);
   }
@@ -132,7 +135,7 @@ hipError_t ihipOccupancyMaxActiveBlocksPerMultiprocessor(
   *bestBlockSize = std::min(alu_limited_threads, aligned_input_size);
   // Calculate blocks per CU for full occupancy
   const int bestBlocksPerCU = alu_limited_threads / (*bestBlockSize);
-  const uint32_t maxCUs = (wrkGrpInfo->isWGPMode_ != device.settings().enableWgpMode_)
+  const uint32_t maxCUs = (wrkGrpInfo->isWGPMode_ != deviceWgpMode)
       ? (wrkGrpInfo->isWGPMode_
           ? device.info().maxComputeUnits_ / 2
           : device.info().maxComputeUnits_ * 2)

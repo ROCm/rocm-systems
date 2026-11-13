@@ -2402,7 +2402,10 @@ void VirtualGPU::submitStreamOperation(amd::StreamOperationCommand& cmd) {
       LogError("submitStreamOperation: Wait failed!");
     }
   } else if (type == ROCCLR_COMMAND_STREAM_WRITE_VALUE) {
-    bool result;
+    // The default case below only calls ShouldNotReachHere(), which is a no-op
+    // in release builds, so an unrecognised flag must still land on a defined
+    // value here. false is correct: it makes the failure get logged.
+    bool result = false;
     switch (flags) {
       case ROCCLR_STREAM_WRITE_VALUE_DEFAULT: {
         result = blitMgr().streamOpsWrite(*memory, value, offset, sizeBytes);
