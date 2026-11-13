@@ -58,7 +58,8 @@
 // Step Ids of the Api tables exported by Hsa Core Runtime
 #define HSA_API_TABLE_STEP_VERSION                  0x01
 #define HSA_CORE_API_TABLE_STEP_VERSION             0x00
-#define HSA_AMD_EXT_API_TABLE_STEP_VERSION          0x17
+// 0x18: appended hsa_amd_external_semaphore_handle_create_fn.
+#define HSA_AMD_EXT_API_TABLE_STEP_VERSION          0x18
 #define HSA_FINALIZER_API_TABLE_STEP_VERSION        0x00
 // 0x02 - added hsa_ext_sampler_create_v3 (anisotropic filtering) to ImageExtTable
 #define HSA_IMAGE_API_TABLE_STEP_VERSION            0x02

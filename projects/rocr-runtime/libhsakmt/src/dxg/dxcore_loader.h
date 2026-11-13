@@ -79,6 +79,9 @@ public:
     typedef NTSTATUS (DXCORE_DEF(D3DKMTQueryResourceInfoFromNtHandle))(void* args);
     typedef NTSTATUS (DXCORE_DEF(D3DKMTOpenResourceFromNtHandle))(void* args);
     typedef NTSTATUS (DXCORE_DEF(D3DKMTOpenSyncObjectFromNtHandle2))(void* args);
+    // Legacy global (KMT) sync-object open. The NtHandle2 form above cannot
+    // take a D3DKMT_HANDLE, so KMT semaphore import needs this one.
+    typedef NTSTATUS (DXCORE_DEF(D3DKMTOpenSynchronizationObject))(void* args);
     typedef NTSTATUS (DXCORE_DEF(D3DKMTCreateHwQueue))(void* args);
     typedef NTSTATUS (DXCORE_DEF(D3DKMTDestroyHwQueue))(void* args);
     typedef NTSTATUS (DXCORE_DEF(D3DKMTSubmitCommandToHwQueue))(void* args);
@@ -128,6 +131,7 @@ public:
     DXCORE_DEF(D3DKMTQueryResourceInfoFromNtHandle)* DXCORE_PFN(D3DKMTQueryResourceInfoFromNtHandle);
     DXCORE_DEF(D3DKMTOpenResourceFromNtHandle)* DXCORE_PFN(D3DKMTOpenResourceFromNtHandle);
     DXCORE_DEF(D3DKMTOpenSyncObjectFromNtHandle2)* DXCORE_PFN(D3DKMTOpenSyncObjectFromNtHandle2);
+    DXCORE_DEF(D3DKMTOpenSynchronizationObject)* DXCORE_PFN(D3DKMTOpenSynchronizationObject);
     DXCORE_DEF(D3DKMTCreateHwQueue)* DXCORE_PFN(D3DKMTCreateHwQueue);
     DXCORE_DEF(D3DKMTDestroyHwQueue)* DXCORE_PFN(D3DKMTDestroyHwQueue);
     DXCORE_DEF(D3DKMTSubmitCommandToHwQueue)* DXCORE_PFN(D3DKMTSubmitCommandToHwQueue);

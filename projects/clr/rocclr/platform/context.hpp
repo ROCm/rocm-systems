@@ -250,7 +250,6 @@ class Context : public RuntimeObject {
     d3d10ExtCache_.erase(it);
     return true;
   }
-  // Keyed by IDirect3DDevice9Ex* (as void*).
   void setD3D9Ext(void* d3d9Device, void* pExt, void* pCLExt) {
     std::lock_guard<std::mutex> lock(d3d9ExtCacheLock_);
     d3d9ExtCache_[d3d9Device] = {pExt, pCLExt};
