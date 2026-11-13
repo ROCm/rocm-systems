@@ -22,12 +22,11 @@ from pathlib import Path
 import common
 import pandas as pd
 import pytest
-import yaml
 from common import SUPPORTED_ARCHS
 from sqlalchemy.dialects import sqlite
 
+from rocprof_compute_soc.metric_library import loader
 from utils.analysis_orm import Database
-from utils.utils_common import canonical_config_arch
 
 # Runtime config options
 config = {}
@@ -350,22 +349,13 @@ def require_triton(*, gpu: bool = False) -> None:
 
 
 def get_available_sets_for_arch(gpu_arch):
-    """Return available set options for the given GPU arch,
-    or [] if gpu_arch is falsy."""
-    if not gpu_arch:
+    """Return the --set options of the given GPU arch's metric library,
+    or [] if gpu_arch is falsy or has no metric library."""
+    if not gpu_arch or not loader.has_metric_library(gpu_arch):
         return []
-    config_arch = canonical_config_arch(gpu_arch) or gpu_arch
-    sets_file = (
-        Path(common.SRC)
-        / "rocprof_compute_soc"
-        / "profile_configs"
-        / "sets"
-        / f"{config_arch}_sets.yaml"
+    return list(
+        loader.MetricLibrary.load(loader.default_metric_library_dir(), gpu_arch).sets
     )
-    if not sets_file.exists():
-        return []
-    data = yaml.safe_load(sets_file.read_text())
-    return [s["set_option"] for s in data.get("sets", []) if s.get("set_option")]
 
 
 def are_stochastic_counters_similar(test_dfs, baseline_df):

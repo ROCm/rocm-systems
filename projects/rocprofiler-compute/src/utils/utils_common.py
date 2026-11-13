@@ -609,29 +609,6 @@ def strip_ansi(text: str) -> str:
     return re.sub(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])", "", text)
 
 
-def parse_sets_yaml(arch: str) -> Dict[str, Any]:
-    config_arch = canonical_config_arch(arch) or arch
-    filename = (
-        config.rocprof_compute_home
-        / "rocprof_compute_soc"
-        / "profile_configs"
-        / "sets"
-        / f"{config_arch}_sets.yaml"
-    )
-    with open(filename, encoding="utf-8") as file:
-        content = file.read()
-    data = yaml.safe_load(content)
-
-    sets_data = data.get("sets", [])
-
-    sets_info: dict[str, Any] = {}
-    for set_item in sets_data:
-        set_option = set_item.get("set_option", "")
-        if set_option:
-            sets_info[set_option] = set_item
-    return sets_info
-
-
 def metric_tables_by_id(
     panel_configs: Dict[int, Dict[str, Any]],
 ) -> Dict[int, Dict[str, Any]]:
