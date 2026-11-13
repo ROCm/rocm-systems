@@ -522,12 +522,13 @@ VOID Lib::ComputeBlockDimensionForSurf(
     ADDR_EXTENT3D*    pExtent,
     UINT_32           bpp,
     UINT_32           numSamples,
-    Addr3SwizzleMode  swizzleMode
+    Addr3SwizzleMode  swizzleMode,
+    BOOL_32           forPitch
     ) const
 {
     const UINT_32 eleBytes     = bpp >> 3;
     const UINT_32 log2EleBytes = Log2(eleBytes);
-    const UINT_32 log2BlkSize  = GetBlockSizeLog2(swizzleMode);
+    const UINT_32 log2BlkSize  = GetBlockSizeLog2(swizzleMode, forPitch);
 
     if (IsLinear(swizzleMode))
     {

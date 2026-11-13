@@ -347,7 +347,8 @@ protected:
         ADDR_EXTENT3D*    pExtent,
         UINT_32           bpp,
         UINT_32           numSamples,
-        Addr3SwizzleMode  swizzleMode) const;
+        Addr3SwizzleMode  swizzleMode,
+        BOOL_32           forPitch = FALSE) const;
 
     ADDR_EXTENT3D GetMipTailDim(
         Addr3SwizzleMode      swizzleMode,

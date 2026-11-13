@@ -282,6 +282,27 @@ typedef void* cl_api_clSetProgramReleaseCallback;
 
 #endif
 
+/* OpenCL 3.0
+ *
+ * These slots are not optional even though this header set targets 2.2: a 3.0
+ * era ICD loader table-dispatches clCreateBufferWithProperties and
+ * clCreateImageWithProperties at these positions, so the dispatch struct must
+ * be long enough or the loader indexes past the end of icdVendorDispatch_[].
+ */
+
+typedef CL_API_ENTRY cl_int(CL_API_CALL* cl_api_clSetContextDestructorCallback)(
+    cl_context context, void(CL_CALLBACK* pfn_notify)(cl_context context, void* user_data),
+    void* user_data);
+
+typedef CL_API_ENTRY cl_mem(CL_API_CALL* cl_api_clCreateBufferWithProperties)(
+    cl_context context, const cl_mem_properties* properties, cl_mem_flags flags, size_t size,
+    void* host_ptr, cl_int* errcode_ret);
+
+typedef CL_API_ENTRY cl_mem(CL_API_CALL* cl_api_clCreateImageWithProperties)(
+    cl_context context, const cl_mem_properties* properties, cl_mem_flags flags,
+    const cl_image_format* image_format, const cl_image_desc* image_desc, void* host_ptr,
+    cl_int* errcode_ret);
+
 #ifdef CL_VERSION_1_2
 
 typedef CL_API_ENTRY cl_int(CL_API_CALL* cl_api_clUnloadPlatformCompiler)(cl_platform_id platform)
@@ -1156,6 +1177,11 @@ typedef struct _cl_icd_dispatch {
   /* OpenCL 2.2 */
   cl_api_clSetProgramReleaseCallback clSetProgramReleaseCallback;
   cl_api_clSetProgramSpecializationConstant clSetProgramSpecializationConstant;
+
+  /* OpenCL 3.0 - order must match the Khronos loader's table exactly */
+  cl_api_clCreateBufferWithProperties clCreateBufferWithProperties;
+  cl_api_clCreateImageWithProperties clCreateImageWithProperties;
+  cl_api_clSetContextDestructorCallback clSetContextDestructorCallback;
 } cl_icd_dispatch;
 
 #ifdef __cplusplus

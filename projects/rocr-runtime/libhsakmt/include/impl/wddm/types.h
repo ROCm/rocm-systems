@@ -74,6 +74,13 @@ using WinAdapterHandle = D3DKMT_HANDLE;
 //reference dk/winnt.h
 #define STANDARD_RIGHTS_REQUIRED         (0x000F0000L)
 
+#ifndef GENERIC_READ
+#define GENERIC_READ                     (0x80000000L)
+#endif
+#ifndef GENERIC_WRITE
+#define GENERIC_WRITE                    (0x40000000L)
+#endif
+
 //reference dk/ntdef.h
 #define OBJ_INHERIT                      (0x00000002L)
 typedef WCHAR *PWCHAR, *LPWCH, *PWCH;

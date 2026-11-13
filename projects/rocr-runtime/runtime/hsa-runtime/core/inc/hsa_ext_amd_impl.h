@@ -471,6 +471,13 @@ hsa_status_t hsa_amd_external_semaphore_handle_open(
     hsa_amd_external_semaphore_t *out_sem);
 
 // Mirrors Amd Extension Apis
+hsa_status_t hsa_amd_external_semaphore_handle_create(
+    hsa_agent_t agent,
+    const hsa_amd_external_semaphore_create_descriptor_t *desc,
+    hsa_amd_external_semaphore_t *out_sem,
+    void **out_os_handle);
+
+// Mirrors Amd Extension Apis
 hsa_status_t hsa_amd_external_semaphore_handle_close(
     hsa_amd_external_semaphore_t sem);
 

@@ -227,7 +227,19 @@ bool Settings::create(bool fullProfile, const amd::Isa& isa, bool enableXNACK, b
     enableExtension(ClKhrD3d9Sharing);
     enableExtension(ClAmdPlanarYuv);
   }
+
+  // External memory/semaphore interop. ROCr routes signal/wait through libhsakmt to
+  // D3DKMT, so only the Win32 handle flavours exist here; the KFD path is a stub.
+  enableExtension(ClKhrSemaphore);
+  enableExtension(ClKhrExternalMemory);
+  enableExtension(ClKhrExternalSemaphore);
+  enableExtension(ClKhrExternalMemoryWin32);
+  enableExtension(ClKhrExternalSemaphoreWin32);
 #endif
+
+  // cl_khr_device_uuid is served from info_.uuid_/luid*, which ROCr fills in from
+  // HSA_AMD_AGENT_INFO_UUID and _LUID.
+  enableExtension(ClKhrDeviceUuid);
 
   // Override current device settings
   override();

@@ -53,6 +53,7 @@ target_sources(amdocl PRIVATE
   cl_device.cpp
   cl_event.cpp
   cl_execute.cpp
+  cl_external_memory_khr.cpp
   cl_gl.cpp
   cl_icd.cpp
   cl_kernel_info_amd.cpp
@@ -64,6 +65,7 @@ target_sources(amdocl PRIVATE
   cl_program.cpp
   cl_sampler.cpp
   cl_sdi_amd.cpp
+  cl_semaphore_khr.cpp
   cl_svm.cpp
   cl_thread_trace_amd.cpp)
 

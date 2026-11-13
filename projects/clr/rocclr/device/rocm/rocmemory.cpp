@@ -359,6 +359,7 @@ bool Memory::createInteropBuffer(GLenum targetType, int miplevel) {
 
   deviceMemory_ = static_cast<char*>(interop_deviceMemory_) + offset;
 
+
   if (interopObj->asGLObject()) {
     if(!GlInterop::Detach(owner(), resHandle)) {
       LogError("GlInterop::Detach failed");
@@ -1053,8 +1054,15 @@ bool Buffer::create(bool alloc_local, amd::Memory::ErrorCode* errorCode) {
     return (success = (deviceMemory_ != nullptr));
   }
 
-  // Interop buffer
-  if (owner()->isInterop()) {
+  // Interop buffer.
+  //
+  // Views must be excluded explicitly. In OpenCL mode amd::Memory's child constructor
+  // inherits interopObj_ from the parent (memory.cpp, guarded by amd::IS_HIP), so a
+  // sub-buffer of an ExternalBuffer also reports isInterop(). Without this guard it
+  // would reach interopMapBuffer and map the external handle a second time instead of
+  // falling through to the sub-buffer branch below. Image::create already orders its
+  // parent check first; this keeps Buffer::create consistent with it.
+  if (owner()->isInterop() && (owner()->parent() == nullptr)) {
     amd::InteropObject* interop = owner()->getInteropObj();
     auto ext_memory = interop->asExternalMemory();
     if (ext_memory != nullptr) {
@@ -1568,20 +1576,25 @@ bool Image::createInteropImage() {
     return (err == HSA_STATUS_SUCCESS);
   }
 
-  // For D3D and other GL textures, use metadata descriptor
-  image_metadata desc;
-  if (!desc.create(amdImageDesc_)) {
-    return false;
-  }
+  // For D3D and other GL textures, use metadata descriptor. image_metadata only accepts a full
+  // driver SRD (version 1); D3D9 instead carries an opaque WDDM surface-metadata blob, exactly
+  // like the ExternalMemory path above, and the image manager reconstructs the SRD from it. The
+  // patching below is GL-only anyway, so skip the whole block when there is no SRD to patch.
+  if (amdImageDesc_->version == 1) {
+    image_metadata desc;
+    if (!desc.create(amdImageDesc_)) {
+      return false;
+    }
 
-  // Set mip level if GL object
-  if (glObj && !desc.setMipLevel(glObj->getGLMipLevel())) {
-    return false;
-  }
+    // Set mip level if GL object
+    if (glObj && !desc.setMipLevel(glObj->getGLMipLevel())) {
+      return false;
+    }
 
-  // Set cubemap face if GL cubemap
-  if (glObj && glObj->getGLTarget() == GL_TEXTURE_CUBE_MAP) {
-    desc.setFace(glObj->getCubemapFace(), dev().isa().versionMajor());
+    // Set cubemap face if GL cubemap
+    if (glObj && glObj->getGLTarget() == GL_TEXTURE_CUBE_MAP) {
+      desc.setFace(glObj->getCubemapFace(), dev().isa().versionMajor());
+    }
   }
 
   hsa_status_t err =

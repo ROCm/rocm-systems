@@ -1,6 +1,7 @@
 EXPORTS
 clBuildProgram
 clCreateBuffer
+clCreateBufferWithProperties
 clCreateCommandQueue
 clCreateContext
 clCreateContextFromType
@@ -8,6 +9,7 @@ clCreateFromGLBuffer
 clCreateFromGLRenderbuffer
 clCreateFromGLTexture2D
 clCreateFromGLTexture3D
+clCreateImageWithProperties
 clCreateImage2D
 clCreateImage3D
 clCreateKernel
