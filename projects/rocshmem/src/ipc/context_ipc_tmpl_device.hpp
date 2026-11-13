@@ -884,7 +884,7 @@ __device__ void IPCContext::alltoall_linear_wg(rocshmem_team_t team, T *dst,
   int pe_start = team_obj->tinfo_wrt_world->pe_start;
   int pe_size = team_obj->num_pes;
   int stride = team_obj->tinfo_wrt_world->stride;
-  long *pSync = team_obj->alltoall_pSync;
+  long *pSync = team_obj->barrier_pSync;
   int my_pe_in_team = team_obj->my_pe;
 
   // Have each PE put their designated data to the other PEs
