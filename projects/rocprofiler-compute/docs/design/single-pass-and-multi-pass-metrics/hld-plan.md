@@ -241,7 +241,7 @@ On gfx942, every single-pass metric gets a pass that holds all of its counters.
 | End to end | Three workloads — `vcopy`, `nbody` (`mini-nbody`), `mega_kernel` — on gfx908, gfx90a, gfx942, gfx950, and gfx115x, including gfx1151. Not gfx1250. CPX is a host precondition for the gfx942 run. The baseline is a separate run of `rocprofiler-compute-develop` on the same workloads | FR-2, NFR-4, the tickets in System Context |
 | Phase 2 only | The 16 multi-pass metrics: each part fits one pass, and the parent adds those parts or divides the pooled numerator by the pooled denominator | FR-6, FR-7, FR-8 |
 
-A script runs this build and a separate `rocprofiler-compute-develop` checkout on the same workloads. The health test report compares the two runs' artifact directories. It checks that there are no unexpected negative values and that percents stay in 0–100% except documented exceptions. Re-check the tickets listed under System Context and generate a summary report. The report is not part of the packing algorithm.
+Profile the same workloads with this build and with a separate `rocprofiler-compute-develop` build, and analyze each profile to CSV with the build that made it. `tools/generate_metric_health_report.py` compares the two runs. It checks that there are no unexpected negative values and that percents stay in 0–100% except documented exceptions. Re-check the tickets listed under System Context. The report is not part of the packing algorithm.
 
 ### Debugging a bad ratio
 

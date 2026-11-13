@@ -3,44 +3,33 @@
 # SPDX-License-Identifier:  MIT
 # ruff: noqa: E501
 
-"""Generate a metric health HTML report from one or two health runs.
+"""Generate a metric health HTML report from one or two runs.
 
-The report reads one or two completed artifact directories written by
-scripts/run_metric_health_test_report_local_driver.sh --fetch:
+A run directory holds one subdirectory per workload, named after it (vcopy,
+nbody, mega_kernel). Each workload subdirectory holds:
 
-* `-p` / `--path`: the baseline run.
-* A second `-p` / `--path`: the candidate run to compare with the baseline.
+* `profile/`: the `rocprof-compute profile --output-directory` output.
+* `analyze/`: the `rocprof-compute analyze --output-format csv` output of that
+  profile, written by the same build that profiled it.
 
-Each directory holds `logs/<arch>/<workload>_<run>.log` (analyze output) and
-`<arch>/<workload>_<tag>_<run>/.../sysinfo.csv` (the profiled workload). `<run>`
-is `--candidate-run` / `--baseline-run`. One path produces the baseline health
-report without comparison sections. The runs are never produced or re-profiled
-by this tool, and nothing here switches allocator modes.
+Pass the baseline run with `-p`. Pass the candidate run with a second `-p` to
+compare the two; one run gives the report without comparison sections.
 
-Analyze logs must be produced with `--view table` so chart-only panels (roofline,
-memory charts, etc.) are emitted as plain metric tables. Default TTY output omits
-metrics and yields incomplete coverage.
+Values belong to the kernel with the longest total duration, the one
+`analyze -k 0` selects. The primary statistic is Median:
 
-Primary statistic is **Median** (not Avg). Std Dev, when shown, is the
-per-dispatch sample standard deviation (analyze `STD` / `to_std`).
-CV is Std Dev / |Median|, shown as a percent:
+* Use analyze's Median when the table has one.
+* Else recompute it from per-dispatch data with this tree's evaluator.
+  `SUM / SUM`, `AVG` and Min formulas are reduced per dispatch.
+* Else, if Min equals Max, use that value.
+* Tables with only a Value column use Value.
 
-* Prefer the Median column when present in `--view table` output.
-* Else recompute Median from the run's per-dispatch data. `SUM / SUM`, `AVG`,
-  and other value-only formulas are reduced per dispatch, then aggregated.
-  Both runs are recomputed with the evaluator in this tree.
-* Else, if Min==Max, treat that value as the Median.
-* Value-only panels (no Avg/Min/Max/Median) use the single Value column.
-* A Median or Std Dev already printed by the analyze log is kept.
-
-Arch → analysis_configs mapping (`--arch`):
-
-* gfx942 / gfx950 / gfx90a / gfx908 → same-named config dir
-* gfx1150 / gfx1151 / gfx1152 / gfx1153 → `gfx115x`
-* gfx1250 → `gfx1250`
+Std Dev is the per-dispatch sample standard deviation, from analyze or
+recomputed the same way. CV is Std Dev / |Median|.
 """
 
 import argparse
+import csv
 import html
 import math
 import re
@@ -50,24 +39,19 @@ from datetime import date
 from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple
 
+import pandas as pd
 import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src"
+if str(SRC) not in sys.path:
+    sys.path.insert(0, str(SRC))
 
-# CLI arch → analysis_configs/<dir>
-ARCH_CONFIG_DIR: Dict[str, str] = {
-    "gfx908": "gfx908",
-    "gfx90a": "gfx90a",
-    "gfx942": "gfx942",
-    "gfx950": "gfx950",
-    "gfx1150": "gfx115x",
-    "gfx1151": "gfx115x",
-    "gfx1152": "gfx115x",
-    "gfx1153": "gfx115x",
-    "gfx115x": "gfx115x",
-    "gfx1250": "gfx1250",
-}
+import config  # noqa: E402
+from utils import file_io, parser, schema  # noqa: E402
+from utils.metrics.evaluation_pipeline import eval_metric  # noqa: E402
+from utils.metrics.expression import build_metric_value_string  # noqa: E402
+from utils.utils_common import canonical_config_arch  # noqa: E402
 
 ARCH_TITLE: Dict[str, str] = {
     "gfx908": "MI100 / gfx908",
@@ -89,24 +73,16 @@ DELTA_HIGHLIGHT_THRESHOLD = 1.0
 # Baselines below this make |rel| undefined; those pairs are skipped.
 DELTA_NEAR_ZERO = 1e-12
 
-DEFAULT_WORKLOADS: Tuple[str, ...] = ("vcopy", "nbody", "mega_kernel")
 DEFAULT_CANDIDATE_LABEL = "this branch"
 DEFAULT_BASELINE_LABEL = "rocprofiler-compute-develop"
-DEFAULT_CANDIDATE_RUN = "single-pass"
-DEFAULT_BASELINE_RUN = "develop"
 
-ANSI = re.compile(r"\x1b\[[0-9;]*m")
-ROW_RE = re.compile(
-    r"^\s*[│|]\s*"
-    r"([0-9]+(?:\.[0-9]+)*)\s*[│|]\s*"
-    r"([^│|]+?)\s*[│|]\s*"
-    r"(.+)$"
-)
-SUPPRESS_RE = re.compile(
-    r"Not showing table with empty column\(s\):\s*(.+)$", re.IGNORECASE
-)
+# Analyze value columns the report reads, in the order a raw cell is shown.
+# A metric with none of them is skipped.
+STAT_COLUMNS: Tuple[str, ...] = ("Median", "Value", "Min", "Max", "Avg")
+# Expression columns a metric's formula is read from; the first one set wins.
+FORMULA_COLUMNS: Tuple[str, ...] = ("Value", "Avg", "Median", "Min", "Max")
+
 LEVEL_COUNTER_RE = re.compile(r"_LEVEL(?:_sum)?|INFLIGHT_LEVEL", re.IGNORECASE)
-COUNT_RE = re.compile(r"^\s*[│|]\s*0\s*[│|].*?[│|]\s*([0-9]+(?:\.[0-9]+)?)\s*[│|]")
 
 COUNTER_SEMANTIC_OVERFLOW_NAMES = frozenset({
     "CP Utilization",
@@ -211,20 +187,23 @@ class MetricValue:
 
 
 @dataclass
-class ParsedLog:
-    metrics: Dict[str, MetricValue] = field(default_factory=dict)
-    suppressed: List[str] = field(default_factory=list)
+class WorkloadMetrics:
+    """One workload's metrics for its longest-running kernel, keyed by metric."""
+
+    kernel_name: str = ""
     dispatch_count: Optional[int] = None
+    metrics: Dict[str, MetricValue] = field(default_factory=dict)
+    units: Dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
 class RunArtifacts:
-    """Analyze logs and workload dirs of one health run, keyed by workload."""
+    """Profile and analyze CSV directories of one run, keyed by workload."""
 
     label: str
     artifact_dir: Path
-    logs: Dict[str, Path] = field(default_factory=dict)
-    workload_dirs: Dict[str, Path] = field(default_factory=dict)
+    profile_dirs: Dict[str, Path] = field(default_factory=dict)
+    csv_dirs: Dict[str, Path] = field(default_factory=dict)
 
 
 @dataclass
@@ -247,17 +226,12 @@ class ReportData:
 
     wl_names: List[str]
     metrics: Dict[str, Dict[str, MetricValue]]
-    suppressed: Dict[str, List[str]]
     dispatch_counts: Dict[str, Optional[int]]
     all_keys: List[str]
     summary: Dict[str, Dict[str, int]] = field(default_factory=dict)
     improvements: List[MetricChange] = field(default_factory=list)
     deltas: List[MetricChange] = field(default_factory=list)
     missing: List[MetricChange] = field(default_factory=list)
-
-
-def strip_ansi(text: str) -> str:
-    return ANSI.sub("", text)
 
 
 def to_float(value: str) -> Optional[float]:
@@ -303,153 +277,76 @@ def classify_all_workload_zero(name: str, formula: str) -> str:
     return "zero_other"
 
 
-def _header_col_index(cols: List[str], name: str) -> Optional[int]:
-    for i, col in enumerate(cols):
-        if col == name:
-            return i
-    return None
+def metric_value_from_columns(columns: Dict[str, str]) -> MetricValue:
+    """Pick a metric's primary value from its analyze value columns.
 
-
-def _cell_at(cols: List[str], header_idx: Optional[int]) -> Tuple[str, Optional[float]]:
-    if header_idx is None:
-        return "", None
-    data_idx = max(0, header_idx - 2)
-    if data_idx >= len(cols):
-        return "", None
-    raw = cols[data_idx]
-    return raw, to_float(raw)
-
-
-def parse_log(path: Path) -> ParsedLog:
-    """Parse analyze --view table log; prefer Median over Value-only panels.
-
-    Avg is never used as the primary value. Avg-only / Avg-Min-Max rows are
-    kept with `value=None` until Median recompute or Min==Max fill.
+    Median wins, then Value when the table has no Median or Min column, then
+    Min when it equals Max. Avg is never the primary value; an Avg-only metric
+    waits for the Median recompute.
     """
-    text = strip_ansi(path.read_text(encoding="utf-8", errors="replace"))
-    result = ParsedLog()
-    median_col: Optional[int] = None
-    min_col: Optional[int] = None
-    max_col: Optional[int] = None
-    value_col: Optional[int] = None
-    avg_col: Optional[int] = None
-    std_col: Optional[int] = None
-    in_metric_table = False
-    in_top_kernels = False
+    median = to_float(columns.get("Median", ""))
+    value_only = to_float(columns.get("Value", ""))
+    min_v = to_float(columns.get("Min", ""))
+    max_v = to_float(columns.get("Max", ""))
+    value: Optional[float] = None
+    source = ""
+    if median is not None:
+        value, source = median, "median"
+    elif value_only is not None and "Median" not in columns and "Min" not in columns:
+        value, source = value_only, "value"
+    elif (
+        min_v is not None
+        and max_v is not None
+        and abs(min_v - max_v) <= max(1e-9, 1e-9 * abs(min_v))
+    ):
+        value, source = min_v, "minmax_eq"
+    raw = next((columns[name] for name in STAT_COLUMNS if columns.get(name)), "N/A")
+    return MetricValue(
+        value=value,
+        raw=raw,
+        source=source,
+        min_v=min_v,
+        max_v=max_v,
+        std_v=to_float(columns.get("Std Dev", "")),
+    )
 
-    for line in text.splitlines():
-        if "0.1 Top Kernels" in line:
-            in_top_kernels = True
+
+def read_top_kernel_metrics(csv_dir: Path) -> WorkloadMetrics:
+    """Read the longest-running kernel's metrics from an analyze CSV export.
+
+    Analyze ranks kernels by total duration, so this is the kernel that
+    analyze -k 0 selects.
+    """
+    kernels = _read_csv_rows(csv_dir / "kernel.csv")
+    if not kernels:
+        raise SystemExit(f"No kernels in {csv_dir / 'kernel.csv'}")
+    top = max(kernels, key=lambda row: to_float(row["duration_ns_sum"]) or 0.0)
+    columns_by_key: Dict[str, Dict[str, str]] = {}
+    units: Dict[str, str] = {}
+    for row in _read_csv_rows(csv_dir / "kernel_metric.csv"):
+        if row["kernel_uuid"] != top["kernel_uuid"]:
             continue
-        if in_top_kernels and line.startswith("0.2"):
-            in_top_kernels = False
-        if in_top_kernels:
-            match_count = COUNT_RE.match(line)
-            if match_count and result.dispatch_count is None:
-                result.dispatch_count = int(float(match_count.group(1)))
+        key = f"{row['metric_id']}|{row['metric_name']}"
+        columns_by_key.setdefault(key, {})[row["value_name"]] = row["value"]
+        units[key] = row["unit"]
+    metrics = {
+        key: metric_value_from_columns(columns)
+        for key, columns in columns_by_key.items()
+        if any(name in columns for name in STAT_COLUMNS)
+    }
+    return WorkloadMetrics(
+        kernel_name=top["kernel_name"],
+        dispatch_count=int(top["dispatch_count"]),
+        metrics=metrics,
+        units={key: units[key] for key in metrics},
+    )
 
-        sup = SUPPRESS_RE.search(line)
-        if sup:
-            result.suppressed.append(sup.group(1).strip())
-            continue
 
-        if "Metric_ID" in line:
-            cols = [c.strip() for c in re.split(r"[│|]", line) if c.strip()]
-            # Reset so multi-bar panels without Median/Value cannot inherit.
-            median_col = min_col = max_col = value_col = avg_col = std_col = None
-            in_metric_table = False
-            if not (
-                "Median" in line or "Avg" in line or "Min" in line or "Value" in line
-            ):
-                continue
-            median_col = _header_col_index(cols, "Median")
-            min_col = _header_col_index(cols, "Min")
-            max_col = _header_col_index(cols, "Max")
-            value_col = _header_col_index(cols, "Value")
-            avg_col = _header_col_index(cols, "Avg")
-            std_col = _header_col_index(cols, "Std Dev")
-            in_metric_table = True
-            continue
-
-        match = ROW_RE.match(line)
-        if not match or not in_metric_table:
-            continue
-        if (
-            median_col is None
-            and value_col is None
-            and min_col is None
-            and avg_col is None
-        ):
-            continue
-
-        metric_id = match.group(1).strip()
-        name = match.group(2).strip()
-        cols = [c.strip() for c in re.split(r"[│|]", match.group(3)) if c.strip()]
-
-        raw_med, med_v = _cell_at(cols, median_col)
-        raw_min, min_v = _cell_at(cols, min_col)
-        raw_max, max_v = _cell_at(cols, max_col)
-        raw_val, val_v = _cell_at(cols, value_col)
-        raw_avg, avg_v = _cell_at(cols, avg_col)
-        _raw_std, std_v = _cell_at(cols, std_col)
-
-        value: Optional[float] = None
-        raw = ""
-        source = ""
-        if med_v is not None:
-            value, raw, source = med_v, raw_med, "median"
-        elif val_v is not None and median_col is None and min_col is None:
-            # Value-only panels (scalar / peak tables) — not Avg.
-            value, raw, source = val_v, raw_val, "value"
-        elif (
-            min_v is not None
-            and max_v is not None
-            and abs(min_v - max_v) <= max(1e-9, 1e-9 * abs(min_v))
-        ):
-            value, raw, source = min_v, raw_min, "minmax_eq"
-
-        # Keep Avg/Min/Max rows even when Median is not yet known so recompute
-        # / formula merge can see them. Never assign Avg to ``value``.
-        # Also keep all-N/A rows (raw "N/A") so per-workload Totals and N/A
-        # buckets stay aligned across workloads that omit different paths.
-        has_present_cell = any(
-            r != ""
-            for r, idx in (
-                (raw_med, median_col),
-                (raw_min, min_col),
-                (raw_max, max_col),
-                (raw_val, value_col),
-                (raw_avg, avg_col),
-            )
-            if idx is not None
-        )
-        if (
-            value is None
-            and med_v is None
-            and min_v is None
-            and val_v is None
-            and avg_v is None
-            and not has_present_cell
-        ):
-            continue
-
-        if value is None and not raw:
-            raw = next(
-                (r for r in (raw_med, raw_val, raw_min, raw_max, raw_avg) if r),
-                "N/A",
-            )
-
-        key = f"{metric_id}|{name}"
-        result.metrics[key] = MetricValue(
-            value=value,
-            raw=raw,
-            source=source,
-            min_v=min_v,
-            max_v=max_v,
-            std_v=std_v,
-        )
-
-    return result
+def _read_csv_rows(path: Path) -> List[Dict[str, str]]:
+    if not path.is_file():
+        raise SystemExit(f"Analyze CSV file not found: {path}")
+    with path.open(encoding="utf-8", newline="") as csv_file:
+        return list(csv.DictReader(csv_file))
 
 
 def min_formula_to_median_expr(min_formula: str) -> Optional[str]:
@@ -631,44 +528,75 @@ def _read_stat_column(arch_config: object, column: str) -> Dict[str, Optional[fl
     return out
 
 
-def compute_dispatch_stats_for_workload(
-    wl_dir: Path,
-    metric_keys: List[str],
-) -> Tuple[Dict[str, Optional[float]], Dict[str, Optional[float]]]:
-    """Recompute per-dispatch Median and sample Std Dev for one workload."""
-    del metric_keys  # compute every reducible row; keys unused
-    if str(SRC) not in sys.path:
-        sys.path.insert(0, str(SRC))
+def load_workload_metric_tables(wl_dir: Path) -> Tuple[object, pd.DataFrame]:
+    """Build the analyze metric tables for a profiled workload's own arch.
 
-    import pandas as pd
-
-    import config
-    from utils import file_io, parser, schema
-    from utils.metrics.evaluation_pipeline import eval_metric
-    from utils.metrics.expression import build_metric_value_string
-    from utils.utils_common import canonical_config_arch
-
+    Returns the arch config, with one table per panel, and the sysinfo frame.
+    """
     sys_info = pd.read_csv(wl_dir / "sysinfo.csv")
     arch = str(sys_info.iloc[0]["gpu_arch"])
-    config_arch = canonical_config_arch(arch) or arch
     config_dir = (
         config.rocprof_compute_home
         / "rocprof_compute_soc"
         / "analysis_configs"
-        / config_arch
+        / (canonical_config_arch(arch) or arch)
     )
-
     arch_config = schema.ArchConfig()
     arch_config.panel_configs = file_io.load_panel_configs([str(config_dir)])
-    profiling_config = file_io.load_profiling_config(str(wl_dir))
-
     parser.build_dfs(
         arch_configs=arch_config,
         filter_metrics=None,
         sys_info=sys_info.iloc[0],
-        profiling_config=profiling_config,
+        profiling_config=file_io.load_profiling_config(str(wl_dir)),
         arch=arch,
     )
+    return arch_config, sys_info
+
+
+def metric_formulas(arch_config: object) -> Dict[str, str]:
+    """Map each metric key to its formula, before evaluation.
+
+    Keys use the expanded names analyze writes (Block 18 Channel 0, ...).
+    """
+    formulas: Dict[str, str] = {}
+    for df_id, frame in arch_config.dfs.items():
+        if arch_config.dfs_type.get(df_id) != "metric_table":
+            continue
+        if "Metric" not in frame.columns:
+            continue
+        columns = [name for name in FORMULA_COLUMNS if name in frame.columns]
+        for row_id, row in frame.iterrows():
+            formulas[f"{row_id}|{row['Metric']}"] = next(
+                (
+                    row[name]
+                    for name in columns
+                    if isinstance(row[name], str) and row[name] not in ("", "None")
+                ),
+                "",
+            )
+    return formulas
+
+
+def collect_formulas(
+    run: RunArtifacts, results: Dict[str, WorkloadMetrics]
+) -> Dict[str, Tuple[str, str, bool]]:
+    """Map each reported metric key to (formula, unit, reads a LEVEL counter)."""
+    formulas: Dict[str, Tuple[str, str, bool]] = {}
+    for wl_name, wl_dir in run.profile_dirs.items():
+        arch_config, _sys_info = load_workload_metric_tables(wl_dir)
+        formula_by_key = metric_formulas(arch_config)
+        for key, unit in results[wl_name].units.items():
+            formula = formula_by_key.get(key, "")
+            formulas[key] = (formula, unit, uses_level_counter(formula))
+    return formulas
+
+
+def compute_dispatch_stats_for_workload(
+    wl_dir: Path,
+    kernel_name: str,
+) -> Tuple[Dict[str, Optional[float]], Dict[str, Optional[float]]]:
+    """Recompute per-dispatch Median and sample Std Dev for one kernel."""
+    arch_config, sys_info = load_workload_metric_tables(wl_dir)
 
     for df_id, frame in arch_config.dfs.items():
         if arch_config.dfs_type.get(df_id) != "metric_table":
@@ -715,6 +643,10 @@ def compute_dispatch_stats_for_workload(
         str(wl_dir), verbose=0
     )
     filtered = parser.apply_filters(workload, debug=False)
+    # Same dispatches as the analyze CSV values: one kernel's only.
+    filtered = filtered[filtered["Kernel_Name"] == kernel_name]
+    if filtered.empty:
+        raise SystemExit(f"Kernel {kernel_name} has no dispatches in {wl_dir}")
     eval_metric(
         arch_config.dfs,
         arch_config.dfs_type,
@@ -733,36 +665,16 @@ def compute_dispatch_stats_for_workload(
     )
 
 
-def compute_medians_for_workload(
-    wl_dir: Path,
-    metric_keys: List[str],
-) -> Dict[str, Optional[float]]:
-    """Recompute Median for metrics that have a Min formula, via analyze path."""
-    medians, _stddevs = compute_dispatch_stats_for_workload(wl_dir, metric_keys)
-    return medians
-
-
-def compute_stddevs_for_workload(
-    wl_dir: Path,
-    metric_keys: List[str],
-) -> Dict[str, Optional[float]]:
-    """Per-dispatch sample standard deviation, same STD/to_std analyze uses."""
-    _medians, stddevs = compute_dispatch_stats_for_workload(wl_dir, metric_keys)
-    return stddevs
-
-
 def apply_recomputed_medians(
-    parsed: Dict[str, ParsedLog],
-    workload_dirs: Dict[str, Path],
+    results: Dict[str, WorkloadMetrics],
+    profile_dirs: Dict[str, Path],
 ) -> None:
     """Fill missing Medians and Std Devs from per-dispatch re-eval."""
-    for wl_name, wl_dir in workload_dirs.items():
-        log = parsed.get(wl_name)
-        if log is None:
-            continue
+    for wl_name, wl_dir in profile_dirs.items():
+        workload_metrics = results[wl_name]
         try:
             medians, stddevs = compute_dispatch_stats_for_workload(
-                wl_dir, list(log.metrics)
+                wl_dir, workload_metrics.kernel_name
             )
         except Exception as exc:  # noqa: BLE001 - report soft-fail in HTML
             print(f"WARN: median recompute failed for {wl_dir}: {exc}")
@@ -770,9 +682,9 @@ def apply_recomputed_medians(
         for key, med in medians.items():
             if med is None:
                 continue
-            existing = log.metrics.get(key)
+            existing = workload_metrics.metrics.get(key)
             if existing is None:
-                log.metrics[key] = MetricValue(
+                workload_metrics.metrics[key] = MetricValue(
                     value=med, raw=f"{med:g}", source="recomputed"
                 )
             elif existing.source != "median":
@@ -782,77 +694,45 @@ def apply_recomputed_medians(
         for key, std in stddevs.items():
             if std is None:
                 continue
-            existing = log.metrics.get(key)
+            existing = workload_metrics.metrics.get(key)
             if existing is None or existing.std_v is not None:
                 continue
             existing.std_v = std
 
 
-def select_workload_log(workload: str, run: str, log_names: List[str]) -> Optional[str]:
-    """Return the analyze log name for one workload of one run, if present."""
-    wanted = f"{workload}_{run}.log"
-    return wanted if wanted in log_names else None
+def discover_run(run_dir: Path, label: str) -> RunArtifacts:
+    """Find each workload's profile and analyze CSV directories in one run.
 
-
-def select_workload_dir(
-    workload: str, run: str, sysinfo_parents: List[Path]
-) -> Optional[Path]:
-    """Return the profiled workload dir `<workload>_<tag>_<run>/...` if present.
-
-    `sysinfo_parents` are relative to `<artifact_dir>/<arch>`.
+    Every subdirectory is a workload and must hold profile/ and analyze/.
     """
-    for parent in sorted(sysinfo_parents):
-        top = parent.parts[0] if parent.parts else ""
-        if top.startswith(f"{workload}_") and top.endswith(f"_{run}"):
-            return parent
-    return None
+    if not run_dir.is_dir():
+        raise SystemExit(f"{label} run directory not found: {run_dir}")
+    run = RunArtifacts(label=label, artifact_dir=run_dir)
+    for workload_dir in sorted(path for path in run_dir.iterdir() if path.is_dir()):
+        sysinfo_paths = sorted((workload_dir / "profile").glob("**/sysinfo.csv"))
+        csv_dir = workload_dir / "analyze"
+        if not sysinfo_paths or not (csv_dir / "kernel_metric.csv").is_file():
+            raise SystemExit(
+                f"{label}: {workload_dir} needs profile/ with a profiled workload "
+                "and analyze/ with analyze --output-format csv output"
+            )
+        run.profile_dirs[workload_dir.name] = sysinfo_paths[0].parent
+        run.csv_dirs[workload_dir.name] = csv_dir
+    if not run.csv_dirs:
+        raise SystemExit(f"{label} run directory has no workloads: {run_dir}")
+    return run
 
 
-def discover_run_artifacts(
-    artifact_dir: Path,
-    arch: str,
-    run: str,
-    label: str,
-    workloads: List[str],
-) -> RunArtifacts:
-    """Find each workload's analyze log and profiled dir in one artifact dir.
-
-    Exits with a clear error when the directory or all of its logs are missing.
-    """
-    if not artifact_dir.is_dir():
-        raise SystemExit(f"{label} artifact directory not found: {artifact_dir}")
-    log_dir = artifact_dir / "logs" / arch
-    log_names = (
-        sorted(path.name for path in log_dir.glob("*.log")) if log_dir.is_dir() else []
-    )
-    workload_root = artifact_dir / arch
-    sysinfo_parents = [
-        path.parent.relative_to(workload_root)
-        for path in workload_root.glob("**/sysinfo.csv")
-    ]
-    artifacts = RunArtifacts(label=label, artifact_dir=artifact_dir)
-    for workload in workloads:
-        log_name = select_workload_log(workload, run, log_names)
-        if log_name is None:
-            print(f"WARN: {label}: no {workload}_{run}.log under {log_dir}")
-            continue
-        artifacts.logs[workload] = log_dir / log_name
-        wl_dir = select_workload_dir(workload, run, sysinfo_parents)
-        if wl_dir is not None:
-            artifacts.workload_dirs[workload] = workload_root / wl_dir
-    if not artifacts.logs:
-        raise SystemExit(
-            f"{label} artifact directory has no *_{run}.log analyze logs under "
-            f"{log_dir}"
-        )
-    return artifacts
+def load_run_metrics(run: RunArtifacts) -> Dict[str, WorkloadMetrics]:
+    """Read every workload's analyze CSV export and fill Medians from its data."""
+    results = {wl: read_top_kernel_metrics(path) for wl, path in run.csv_dirs.items()}
+    apply_recomputed_medians(results, run.profile_dirs)
+    return results
 
 
-def load_run_logs(run: RunArtifacts) -> Dict[str, ParsedLog]:
-    """Parse every analyze log of one run and fill Medians from its own data."""
-    parsed = {wl: parse_log(path) for wl, path in run.logs.items()}
-    apply_recomputed_medians(parsed, run.workload_dirs)
-    return parsed
+def workload_arch(profile_dir: Path) -> str:
+    """Return the GPU arch a workload was profiled on."""
+    return str(pd.read_csv(profile_dir / "sysinfo.csv").iloc[0]["gpu_arch"])
 
 
 def classify_metrics(
@@ -1016,10 +896,9 @@ def build_total_note(
         f"Each card Total equals the union of analyze-table rows across workloads "
         f"(<b>{all_keys_count}</b> here; per-workload "
         f"{totals}). All-N/A cells are kept and bucketed as N/A / Expected N/A — "
-        f"they are not dropped from Total. Entire panels omitted by TTY "
-        f"('<code>Not showing table with empty column(s)</code>') are not in any Total. "
+        f"they are not dropped from Total. "
         f"Cell values are <b>{html.escape(stat_label)}</b> "
-        f"(from log Median column, or recomputed from per-dispatch data). "
+        f"(from analyze's Median, or recomputed from per-dispatch data). "
         f"Std Dev is the per-dispatch sample standard deviation. "
         f"CV is Std Dev / |Median|."
     )
@@ -1027,7 +906,7 @@ def build_total_note(
     if arch in _CDNA3_L2_CHAN_ARCHES:
         return (
             "<p style='font-size:11px;color:#555;margin:4px 0 10px;max-width:960px'>"
-            "<b>Total</b> counts analyze-table rows (from <code>--view table</code> logs), "
+            "<b>Total</b> counts analyze-table rows (from the analyze CSV export), "
             f"not {yaml_bit}. "
             "Block 18 (L2 Cache per Channel) counts one analyze-table row per "
             "channel in <code>$total_l2_chan</code> "
@@ -1040,7 +919,7 @@ def build_total_note(
     if config_arch == "gfx115x" or arch.startswith("gfx115"):
         return (
             "<p style='font-size:11px;color:#555;margin:4px 0 10px;max-width:960px'>"
-            "<b>Total</b> counts analyze-table rows (from <code>--view table</code> logs), "
+            "<b>Total</b> counts analyze-table rows (from the analyze CSV export), "
             f"not {yaml_bit}. "
             "RDNA3.5 / gfx115x has no CDNA Block-18 "
             "<code>$total_l2_chan</code> L2-per-channel expansion, so Totals stay near "
@@ -1051,7 +930,7 @@ def build_total_note(
 
     return (
         "<p style='font-size:11px;color:#555;margin:4px 0 10px;max-width:960px'>"
-        "<b>Total</b> counts analyze-table rows (from <code>--view table</code> logs), "
+        "<b>Total</b> counts analyze-table rows (from the analyze CSV export), "
         f"not {yaml_bit}. "
         f"{common_tail}"
         "</p>"
@@ -1109,9 +988,9 @@ def _iteration_banner(
 
 def build_report(
     primary_run: RunArtifacts,
-    parsed_logs: Dict[str, ParsedLog],
+    results: Dict[str, WorkloadMetrics],
     baseline: Optional[RunArtifacts],
-    baseline_logs: Optional[Dict[str, ParsedLog]],
+    baseline_results: Optional[Dict[str, WorkloadMetrics]],
     formulas: Dict[str, Tuple[str, str, bool]],
     out_path: Path,
     report_date: str,
@@ -1122,7 +1001,7 @@ def build_report(
     stat_label: str,
 ) -> None:
     """Compute the report data, render it, and write the HTML page."""
-    data = compute_report(parsed_logs, baseline_logs, formulas)
+    data = compute_report(results, baseline_results, formulas)
     page = render_report(
         data,
         primary_run,
@@ -1139,28 +1018,27 @@ def build_report(
 
 
 def compute_report(
-    parsed_logs: Dict[str, ParsedLog],
-    baseline_logs: Optional[Dict[str, ParsedLog]],
+    results: Dict[str, WorkloadMetrics],
+    baseline_results: Optional[Dict[str, WorkloadMetrics]],
     formulas: Dict[str, Tuple[str, str, bool]],
 ) -> ReportData:
     """Classify metrics, count buckets, and compare against the baseline."""
     metric_units = {k: formulas.get(k, ("", "", False))[1] for k in formulas}
     metric_formulas = {k: formulas.get(k, ("", "", False))[0] for k in formulas}
     metrics: Dict[str, Dict[str, MetricValue]] = {
-        wl: log.metrics for wl, log in parsed_logs.items()
+        wl: result.metrics for wl, result in results.items()
     }
     classify_metrics(metrics, metric_units, metric_formulas)
     data = ReportData(
-        wl_names=list(parsed_logs),
+        wl_names=list(results),
         metrics=metrics,
-        suppressed={wl: log.suppressed for wl, log in parsed_logs.items()},
-        dispatch_counts={wl: log.dispatch_count for wl, log in parsed_logs.items()},
+        dispatch_counts={wl: result.dispatch_count for wl, result in results.items()},
         all_keys=ordered_metric_keys(metrics),
     )
     data.summary = summarize_buckets(data.metrics, data.all_keys)
-    if baseline_logs is not None:
+    if baseline_results is not None:
         base_metrics: Dict[str, Dict[str, MetricValue]] = {
-            wl: log.metrics for wl, log in baseline_logs.items()
+            wl: result.metrics for wl, result in baseline_results.items()
         }
         classify_metrics(base_metrics, metric_units, metric_formulas)
         compare_runs(data, base_metrics)
@@ -1185,10 +1063,10 @@ def summarize_buckets(
 ) -> Dict[str, Dict[str, int]]:
     """Count each workload's metrics per bucket over the shared key universe.
 
-    Total counts analyze-table rows parsed from --view table logs (including
+    Total counts analyze-table rows read from the analyze CSV export (including
     all-N/A cells), not YAML metric definitions. On CDNA3, Block 18 expands
     across $total_l2_chan — see build_total_note(). Missing keys (present in
-    another workload's log only) count as N/A so each card Total matches the
+    another workload only) count as N/A so each card Total matches the
     main-table row universe (len(all_keys)).
     """
     summary: Dict[str, Dict[str, int]] = {
@@ -1281,13 +1159,6 @@ def render_report(
         arch, config_arch, data.summary, len(data.all_keys), stat_label
     )
 
-    sup_rows = []
-    for wl in wl_names:
-        for table in data.suppressed.get(wl, []):
-            sup_rows.append(
-                f"<tr><td>{html.escape(wl)}</td><td>{html.escape(table)}</td></tr>"
-            )
-
     body_rows = [_render_metric_row(data, key, formulas) for key in data.all_keys]
 
     wl_headers = "".join(
@@ -1349,7 +1220,6 @@ tr:hover td{{filter:brightness(0.91)}}
 .mid{{font-family:monospace;color:#546e7a;font-size:11px}}.mname{{max-width:180px}}
 .unit{{color:#90a4ae;font-style:italic;font-size:10px}}
 tr.row-overflow{{box-shadow:inset 0 0 0 2px #c62828}}
-.sup-table{{font-size:12px}}.sup-table td{{padding:3px 8px}}.sup-table tr:nth-child(even){{background:#f9f9f9}}
 </style></head><body>
 <h1>{html.escape(arch_title)} — Metric Health Report</h1>
 <p style="margin:2px 0;color:#607d8b;font-size:12px"><b>Date:</b> {html.escape(report_date)}
@@ -1369,7 +1239,7 @@ Expected zero / Expected N/A compare non-mega workloads against mega_kernel when
 <table class="bucket-semantics">
 <thead><tr><th>Bucket</th><th>Meaning</th><th>Healthy?</th></tr></thead>
 <tbody>
-<tr><td>Good</td><td>Parsed value exists; not N/A; not &gt;100% (percent); not classified as zero</td><td>Usually yes</td></tr>
+<tr><td>Good</td><td>Value exists; not N/A; not &gt;100% (percent); not classified as zero</td><td>Usually yes</td></tr>
 <tr><td>Zero — healthy (<code>zero_healthy</code>)</td><td>Zero in every workload; metric is a stall/failure/alloc-failure rate where 0% is good</td><td>Yes</td></tr>
 <tr><td>Zero — optional path (<code>zero_optional</code>)</td><td>Zero in every workload; precision or IP path mega_kernel does not exercise (FP64, etc.)</td><td>Usually yes</td></tr>
 <tr><td>Zero — SDK bug suspect (<code>zero_sdk_bug</code>)</td><td>Zero in every workload but mega_kernel exercises the path or counters should fire (VALU FLOPs, DRAM read)</td><td>Investigate — file SDK JIRA</td></tr>
@@ -1381,13 +1251,8 @@ Expected zero / Expected N/A compare non-mega workloads against mega_kernel when
 <tr><td>&gt;100% hardware (<code>overflow</code>)</td><td>Percent &gt;100% not explained by known semantics — likely bad formula or counter bug</td><td>Investigate</td></tr>
 </tbody></table>
 {improve_section}
-<h2>Suppressed Tables</h2>
-<table class="sup-table"><tr style="background:#455a64;color:#fff"><th>Workload</th><th>Table</th></tr>
-{"".join(sup_rows) if sup_rows else "<tr><td colspan=2>None</td></tr>"}
-</table>
 <h2>All Metrics — Blocks 2–18</h2>
-<p style="font-size:11px;color:#555;margin:4px 0">Blocks 3 (Memory Chart) and 4 (Roofline) are chart/roofline panels — <b>no tabular metric rows in log output</b>.
-Column values are <b>{html.escape(stat_label)}</b>.</p>
+<p style="font-size:11px;color:#555;margin:4px 0">Column values are <b>{html.escape(stat_label)}</b>.</p>
 <div class="legend">
 <div class="leg" data-cls="good" style="background:#c8e6c9;color:#1b5e20;font-weight:bold;padding:5px 12px;border-radius:5px;cursor:pointer;font-size:12px">▲ Good (real data)</div>
 <div class="leg" data-cls="overflow" style="background:#c62828;color:#fff;font-weight:bold;padding:5px 12px;border-radius:5px;cursor:pointer;font-size:12px">🚨 &gt;100% hardware</div>
@@ -1567,7 +1432,7 @@ def _render_comparison_sections(
             f"{html.escape(baseline_label)} ({len(missing_rows)} rows, "
             f"{n_missing_metrics} metrics)</h2>"
             "<p class='filter-note'>The baseline reports these metrics for the "
-            "workload, but the candidate analyze log has no row for them.</p>"
+            "workload, but the candidate analyze output has no row for them.</p>"
             "<table class='improve-table'><thead><tr><th>Workload</th><th>ID</th>"
             f"<th>Metric</th><th>Old ({html.escape(stat_label)})</th>"
             "<th>New</th><th>Unit</th></tr></thead><tbody>"
@@ -1603,7 +1468,7 @@ def _render_delta_section(
         "<p class='filter-note'>Click a column header to sort "
         "(Kernel name, ID, Metric, |rel|, …). "
         f"Compared values are <b>{html.escape(stat_label)}</b> from analyze "
-        "<code>--view table</code> logs (or recomputed from per-dispatch "
+        "the CSV export (or recomputed from per-dispatch "
         "data when the Median column is absent). "
         "|rel| = |new−old|/|old|. "
         "Std Dev is the per-dispatch sample standard deviation. "
@@ -1694,56 +1559,11 @@ def _render_missing_row(
     )
 
 
-def merge_formulas_from_logs(
-    workloads: Dict[str, Path],
-    config_arch: str,
-) -> Dict[str, Tuple[str, str, bool]]:
-    formulas: Dict[str, Tuple[str, str, bool]] = {}
-    config_dir = SRC / "rocprof_compute_soc" / "analysis_configs" / config_arch
-    if not config_dir.is_dir():
-        raise SystemExit(f"analysis config dir missing: {config_dir}")
-    yaml_formulas: Dict[str, str] = {}
-    yaml_units: Dict[str, str] = {}
-
-    for yaml_path in sorted(config_dir.glob("*.yaml")):
-        data = yaml.safe_load(yaml_path.read_text(encoding="utf-8"))
-        panel = data.get("Panel Config", data)
-        for entry in panel.get("data source", []):
-            if not isinstance(entry, dict):
-                continue
-            table = entry.get("metric_table", entry)
-            if not isinstance(table, dict) or "metric" not in table:
-                continue
-            for name, spec in (table.get("metric") or {}).items():
-                if not isinstance(spec, dict):
-                    continue
-                formula = str(spec.get("value", spec.get("avg", "")))
-                unit = str(spec.get("unit", ""))
-                yaml_formulas[name] = formula
-                yaml_units[name] = unit
-
-    for log_path in workloads.values():
-        parsed = parse_log(log_path)
-        for key in parsed.metrics:
-            _mid, name = key.split("|", 1)
-            formula = yaml_formulas.get(name, "")
-            unit = yaml_units.get(name, "")
-            formulas[key] = (formula, unit, uses_level_counter(formula))
-
-    return formulas
-
-
 def _build_arg_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
+    arg_parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    parser.add_argument(
-        "--arch",
-        required=True,
-        choices=sorted(ARCH_CONFIG_DIR),
-        help="GPU arch (selects analysis_configs dir and logs/<arch>)",
-    )
-    parser.add_argument(
+    arg_parser.add_argument(
         "-p",
         "--path",
         dest="paths",
@@ -1753,89 +1573,67 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         nargs="+",
         action="append",
         help=(
-            "Artifact directories: baseline first; optional candidate second. "
+            "Run directories: baseline first; optional candidate second. "
             "Accepts at most two paths."
         ),
     )
-    parser.add_argument("--candidate-label", default=DEFAULT_CANDIDATE_LABEL)
-    parser.add_argument("--baseline-label", default=DEFAULT_BASELINE_LABEL)
-    parser.add_argument(
-        "--candidate-run",
-        default=DEFAULT_CANDIDATE_RUN,
-        help="Run name in the candidate file names, <workload>_<run>.log",
-    )
-    parser.add_argument(
-        "--baseline-run",
-        default=DEFAULT_BASELINE_RUN,
-        help="Run name in the baseline file names, <workload>_<run>.log",
-    )
-    parser.add_argument(
-        "--workloads",
-        nargs="+",
-        default=list(DEFAULT_WORKLOADS),
-        help="Workload names to compare (default: vcopy nbody mega_kernel)",
-    )
-    parser.add_argument("--out", type=Path, required=True)
-    parser.add_argument("--date", default=date.today().isoformat())
-    parser.add_argument("--host", default="unknown")
-    parser.add_argument(
+    arg_parser.add_argument("--candidate-label", default=DEFAULT_CANDIDATE_LABEL)
+    arg_parser.add_argument("--baseline-label", default=DEFAULT_BASELINE_LABEL)
+    arg_parser.add_argument("--out", type=Path, required=True)
+    arg_parser.add_argument("--date", default=date.today().isoformat())
+    arg_parser.add_argument("--host", default="unknown")
+    arg_parser.add_argument(
         "--iterations",
         type=int,
         default=None,
         help="Requested workload iterations (shown in report header)",
     )
-    parser.add_argument(
+    arg_parser.add_argument(
         "--stat",
         default="Median",
         help="Primary statistic label for the report (default: Median)",
     )
-    return parser
+    return arg_parser
 
 
 def main() -> None:
-    parser = _build_arg_parser()
-    args = parser.parse_args()
+    arg_parser = _build_arg_parser()
+    args = arg_parser.parse_args()
     paths = [path for path_group in args.paths for path in path_group]
     if len(paths) > 2:
-        parser.error(
+        arg_parser.error(
             "-p/--path accepts at most two paths: baseline first, candidate second"
         )
 
-    config_arch = ARCH_CONFIG_DIR[args.arch]
-    baseline = discover_run_artifacts(
-        paths[0],
-        args.arch,
-        args.baseline_run,
-        args.baseline_label,
-        args.workloads,
+    baseline = discover_run(paths[0], args.baseline_label)
+    candidate = (
+        discover_run(paths[1], args.candidate_label) if len(paths) == 2 else None
     )
-    candidate: Optional[RunArtifacts] = None
-    if len(paths) == 2:
-        candidate = discover_run_artifacts(
-            paths[1],
-            args.arch,
-            args.candidate_run,
-            args.candidate_label,
-            args.workloads,
-        )
-
     primary_run = candidate or baseline
-    baseline_logs = load_run_logs(baseline) if candidate is not None else None
-    formulas = merge_formulas_from_logs(primary_run.logs, config_arch)
+    arch = workload_arch(next(iter(primary_run.profile_dirs.values())))
     if candidate is not None:
+        baseline_arch = workload_arch(next(iter(baseline.profile_dirs.values())))
+        if baseline_arch != arch:
+            raise SystemExit(f"Runs profiled different archs: {baseline_arch}, {arch}")
+
+    results = load_run_metrics(primary_run)
+    formulas = collect_formulas(primary_run, results)
+    baseline_results: Optional[Dict[str, WorkloadMetrics]] = None
+    if candidate is not None:
+        baseline_results = load_run_metrics(baseline)
         # Baseline-only metrics still need their unit in the missing section.
-        formulas = {**merge_formulas_from_logs(baseline.logs, config_arch), **formulas}
+        formulas = {**collect_formulas(baseline, baseline_results), **formulas}
     build_report(
         primary_run,
-        load_run_logs(primary_run),
+        results,
         baseline if candidate is not None else None,
-        baseline_logs,
+        baseline_results,
         formulas,
         args.out,
         args.date,
         args.host,
-        args.arch,
-        config_arch,
+        arch,
+        canonical_config_arch(arch) or arch,
         args.iterations,
         args.stat,
     )
