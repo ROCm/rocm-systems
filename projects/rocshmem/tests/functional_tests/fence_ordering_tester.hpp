@@ -20,6 +20,8 @@ class FenceOrderingTester : public Tester {
   void verifyResults(size_t size) override;
 
  private:
+  int num_recv_slots() const;
+
   char *s_buf{nullptr};
   char *r_buf{nullptr};
   uint64_t *signal{nullptr};

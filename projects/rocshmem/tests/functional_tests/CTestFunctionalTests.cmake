@@ -210,6 +210,7 @@ set(TEST_tile_get_wave_3d 192)
 set(TEST_tile_put_wave_4d 193)
 set(TEST_tile_get_wave_4d 194)
 set(TEST_signal_ops_on_stream 195)
+set(TEST_fence_putmixedctx 196)
 
 # MPI should already be found by the parent CMakeLists.txt
 # Use standard CMake MPI variables set by find_package(MPI)
@@ -1317,6 +1318,18 @@ function(add_other_tests)
         add_rocshmem_functional_test(NAME fence_putwavenbichunks RANKS 2 WORKGROUPS 1 NUM_WF 1 MAX_MSG_SIZE 1048576)
         add_rocshmem_functional_test(NAME fence_putwavenbichunks RANKS 2 WORKGROUPS 8 THREADS 256 MAX_MSG_SIZE 65536)
     end_test_group()
+
+    # Mixed-context fence test: force the RO network conduit so lanes of one wave post to different queues
+    if(USE_RO)
+        begin_test_group(CATEGORY "FENCE" TIER full BACKENDS "ro" GPUS "all")
+            add_rocshmem_functional_test(NAME fence_putmixedctx RANKS 2 WORKGROUPS 1 THREADS 64 MAX_MSG_SIZE 65536
+                ENV_VARS "ROCSHMEM_BACKEND=ro" "ROCSHMEM_DISABLE_MIXED_IPC=1")
+            add_rocshmem_functional_test(NAME fence_putmixedctx RANKS 2 WORKGROUPS 2 THREADS 64 MAX_MSG_SIZE 65536
+                ENV_VARS "ROCSHMEM_BACKEND=ro" "ROCSHMEM_DISABLE_MIXED_IPC=1")
+            add_rocshmem_functional_test(NAME fence_putmixedctx RANKS 2 WORKGROUPS 4 THREADS 64 MAX_MSG_SIZE 65536
+                ENV_VARS "ROCSHMEM_BACKEND=ro" "ROCSHMEM_DISABLE_MIXED_IPC=1")
+        end_test_group()
+    endif()
 endfunction()
 
 # Heatmap Tests
