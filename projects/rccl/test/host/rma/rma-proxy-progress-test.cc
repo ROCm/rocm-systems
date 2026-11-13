@@ -10,7 +10,7 @@
 // #2119 ("one-sided host API requests dropped at a high message rate"). The
 // functions under test are all file-static, so this TU reaches them by
 // #include-ing the production .cc directly (via RMA_PROXY_PROGRESS_CC_PATH),
-// the standard rccl-UnitTestsMicro pattern (see MICROTEST_README.md).
+// the standard microtest pattern (see MICROTEST_README.md).
 //
 // The one hardware dependency -- the network -- is already a function-pointer
 // vtable (ncclRma_t). The test double, FakeNet, models exactly what #2119 is
