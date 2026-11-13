@@ -24,8 +24,9 @@ using namespace rocprofsys::parser;
 
 namespace
 {
-constexpr double k_frequency_limit = 3.0;
-constexpr int    k_argc            = 2;
+constexpr double       k_frequency_limit = 3.0;
+constexpr int          k_argc            = 2;
+constexpr std::int64_t k_negative_number = -5;
 
 schema_param
 make_param(std::string param_id, param_type type)
@@ -53,12 +54,13 @@ expect_unset(const typed_values_t& values, std::initializer_list<std::string_vie
 
 template <typename ValueT>
 void
-expect_stored(const typed_values_t& values, std::string_view id, const ValueT& expected)
+expect_stored(const typed_values_t& values, std::string_view param_id,
+              const ValueT& expected)
 {
-    const auto found = values.find(id);
-    ASSERT_NE(found, values.end()) << id;
+    const auto found = values.find(param_id);
+    ASSERT_NE(found, values.end()) << param_id;
     const auto* held = std::get_if<ValueT>(&found->second);
-    ASSERT_NE(held, nullptr) << id;
+    ASSERT_NE(held, nullptr) << param_id;
     EXPECT_EQ(*held, expected);
 }
 
@@ -475,7 +477,7 @@ TEST(parser_cli, accepts_a_negative_number_and_rejects_overflow)
     const auto negative =
         cli_parser{ { "--num", "-5" }, unknown_option::report }.parse(value);
     EXPECT_TRUE(negative.errors.empty());
-    expect_stored(negative.values, "num", std::int64_t{ -5 });
+    expect_stored(negative.values, "num", k_negative_number);
 
     const auto overflow =
         cli_parser{ { "--num", "9223372036854775808" }, unknown_option::report }.parse(
