@@ -31,6 +31,8 @@
 #include <utility>
 #include <vector>
 
+#include <sched.h>
+
 #include "LogCapture.hpp"
 #include "ScopedDir.h"
 
@@ -1316,6 +1318,37 @@ TEST(HostDispatchParallelismMicrotest, ADefaultOfNoneStillRunsOneBinary)
 TEST(HostDispatchParallelismMicrotest, ThisMachineIsReportedAsAtLeastOneProcessor)
 {
     EXPECT_GE(detectedParallelism(), 1u);
+}
+
+TEST(HostDispatchParallelismMicrotest, OnlyTheProcessorsThisProcessMayUseAreCounted)
+{
+    // A run confined to a subset of the node -- taskset, a cpuset, a container CPU limit --
+    // must size itself to that subset. Counting the whole node instead oversubscribes the few
+    // processors it does have by the ratio between the two.
+    cpu_set_t original;
+    ASSERT_EQ(sched_getaffinity(0, sizeof(original), &original), 0);
+    if (CPU_COUNT(&original) < 2) {
+        GTEST_SKIP() << "needs at least two usable processors to narrow the mask";
+    }
+
+    int first = -1;
+    for (int cpu = 0; cpu < CPU_SETSIZE && first < 0; ++cpu) {
+        if (CPU_ISSET(cpu, &original)) {
+            first = cpu;
+        }
+    }
+
+    cpu_set_t narrowed;
+    CPU_ZERO(&narrowed);
+    CPU_SET(first, &narrowed);
+    ASSERT_EQ(sched_setaffinity(0, sizeof(narrowed), &narrowed), 0);
+
+    const size_t detected = detectedParallelism();
+
+    // Restored before the expectation, so a failure does not leave the rest of the binary
+    // pinned to one processor.
+    ASSERT_EQ(sched_setaffinity(0, sizeof(original), &original), 0);
+    EXPECT_EQ(detected, 1u);
 }
 
 // ── resolveChildTimeout ─────────────────────────────────────────────

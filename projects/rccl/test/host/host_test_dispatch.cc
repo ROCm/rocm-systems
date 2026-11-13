@@ -44,6 +44,7 @@
 
 #include <fcntl.h>
 #include <poll.h>
+#include <sched.h>
 #include <sys/prctl.h>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -1176,8 +1177,20 @@ std::chrono::seconds resolveChildTimeout(const char *request)
 }
 
 // The number of processors available to this process, or 1 when that cannot be determined.
+//
+// The affinity mask, not the machine's processor count: a run under taskset, cpuset or a
+// container CPU limit may use only a few of the node's processors, and sizing the run to the
+// node would oversubscribe those few by the ratio between them. It is also what nproc -- the
+// count run_host_tests.sh reports -- uses, so the two agree.
 size_t detectedParallelism()
 {
+    cpu_set_t affinity;
+    if (sched_getaffinity(0, sizeof(affinity), &affinity) == 0) {
+        const int usable = CPU_COUNT(&affinity);
+        if (usable > 0) {
+            return static_cast<size_t>(usable);
+        }
+    }
     const long online = sysconf(_SC_NPROCESSORS_ONLN);
     return online > 0 ? static_cast<size_t>(online) : 1;
 }
