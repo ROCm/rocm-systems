@@ -82,9 +82,7 @@ def test_L1_cache_counters(
 
     # 5. check results are expected
 
-    # Cache Hit Rate combines two collectables that each read one pass, because
-    # its five TCP counters do not fit gfx942's four TCP slots.
-    assert pd.notna(result["vseq"]["Cache Hit Rate"])
-    assert pd.notna(result["vrand"]["Cache Hit Rate"])
+    # FIXME: use a range for comparison to account for different results
+    assert result["vseq"]["Cache Hit Rate"] >= result["vrand"]["Cache Hit Rate"]
     assert result["vseq"]["Read Req"] <= result["vrand"]["Read Req"]
     assert result["vseq"]["Write Req"] <= result["vrand"]["Write Req"]
