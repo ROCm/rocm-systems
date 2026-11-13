@@ -182,7 +182,16 @@ endforeach()
 foreach(
     family
     IN
-    ITEMS move_cndmask swap ds permlane relative lane
+    ITEMS
+        move_cndmask
+        pair_move
+        swap
+        ds
+        permlane
+        relative
+        lane
+        packed_permute
+        screen_partition
 )
     set(target "rj_arith_register_${family}_test")
     rj_arith_add_test(${target} register/${family}_test.cpp)
