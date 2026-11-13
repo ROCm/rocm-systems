@@ -334,6 +334,7 @@ struct ncclConnector {
   int connected;
   int hasSeen;
   int p2pOnly;
+  bool useCe;
   struct ncclProxyConnector proxyConn;
   struct ncclTransportComm* transportComm;
   void* transportResources;
@@ -379,6 +380,7 @@ struct ncclDirect {
 };
 
 #define NCCL_CONN_IDX_P2P_NET 2
+#define NCCL_CONN_IDX_P2P_CE 3
 #define NCCL_MAX_NVLS_ARITY 32
 #define NCCL_MAX_NVLS_TREE_ARITY 3
 struct ncclNvls {
@@ -397,7 +399,7 @@ struct ncclNvls {
 #define NCCL_MAX_ARITY NCCL_MAX_DIRECT_ARITY
 #endif
 
-#define NCCL_MAX_CONNS 3
+#define NCCL_MAX_CONNS 4
 struct ncclChannelPeer {
   struct ncclConnector send[NCCL_MAX_CONNS];
   struct ncclConnector recv[NCCL_MAX_CONNS];

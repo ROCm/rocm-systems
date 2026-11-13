@@ -77,6 +77,15 @@
 #include "util/data_types.h"
 #include "util/simd.h"
 
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna3/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna3/execution_backend.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna3/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/execution_backend.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/execution_backend.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
 #include <algorithm>
 #include <array>
 #include <bit>
@@ -85,6 +94,7 @@
 #include <gtest/gtest.h>
 #include <memory>
 #include <optional>
+
 #include <vector>
 
 namespace rocjitsu::amdgpu {
@@ -3291,7 +3301,8 @@ TEST(ArithBridgeTest, PackedBinaryInlineRoundingAndStrictPolicy) {
                                             {.vdst = 1, .src0 = 242, .src1 = 257, .opsel_hi = 3});
           auto instruction = fixture.decoder->decode_window(words);
           ASSERT_TRUE(instruction.succeeded());
-          const bool rejected = policy_index == 1 || policy_index == 2;
+          // RDNA3 supports exact semantics without FP status; RDNA4 rejects both.
+          const bool rejected = policy_index == 2 || (policy_index == 1 && !is_rdna3);
           EXPECT_EQ(
               fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave).failed(),
               rejected);
@@ -6869,12 +6880,10 @@ TEST(ArithBridgeTest, DoubleFmaPairAliasesModifiersAndPolicies) {
 }
 
 TEST(ArithBridgeTest, TrigPreopArchitectureLiteralsPairsAndPolicies) {
-  // gfx1100/gfx1201 use the same table tail; OMOD flushing still differs.
+  // gfx1100/gfx1201 use the same table tail and flush it before OMOD (hw1100-noieee, MODE 0x00).
   const unsigned exponent[] = {1968, 1091, 1091, 1997};
   const unsigned selector[] = {5, 19, 19, 4};
-  const uint64_t golden[2][4] = {
-      {0, 0x19e839cfbc5294ULL, 0x29e839cfbc5294ULL, 0x11aba10ac06608cULL},
-      {0, 0, 0, 0x11aba10ac06608cULL}};
+  const uint64_t golden[4] = {0, 0, 0, 0x11aba10ac06608cULL};
   for (bool rdna3 : {true, false})
     for (unsigned lanes : {32u, 64u})
       for (unsigned omod = 0; omod < 4; ++omod)
@@ -6953,7 +6962,7 @@ TEST(ArithBridgeTest, TrigPreopArchitectureLiteralsPairsAndPolicies) {
                 const uint64_t before =
                     initial[destination][lane] | (uint64_t(initial[destination + 1][lane]) << 32);
                 const uint64_t expected =
-                    !rejected && ((exec_mask >> lane) & 1) ? golden[rdna3 ? 0 : 1][omod] : before;
+                    !rejected && ((exec_mask >> lane) & 1) ? golden[omod] : before;
                 const uint64_t actual =
                     fixture.cu->read_vgpr(fixture.base() + destination, lane) |
                     (uint64_t(fixture.cu->read_vgpr(fixture.base() + destination + 1, lane)) << 32);
@@ -7909,7 +7918,8 @@ TEST(ArithBridgeTest, HalfFixupGuestRoundingNanClampAndPartialWrites) {
 }
 
 TEST(ArithBridgeTest, GuestModeInstructionsUpdateOnlyTheirNibbleRegardlessOfExecOrReporting) {
-  for (bool rdna3 : {false, true})
+  for (rj_code_arch_t arch :
+       {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5})
     for (uint32_t lanes : {32U, 64U})
       for (bool denorm : {false, true})
         for (bool loose : {false, true})
@@ -7921,14 +7931,20 @@ TEST(ArithBridgeTest, GuestModeInstructionsUpdateOnlyTheirNibbleRegardlessOfExec
 
               if (report && !loose)
                 policy.semantics = ArithmeticSemantics::BitExactEmpirical;
-              BridgeFixture fixture(rdna3, lanes, policy);
+              const bool rdna3 = arch == ROCJITSU_CODE_ARCH_RDNA3;
+              if (arch == ROCJITSU_CODE_ARCH_CDNA5 && lanes != 32)
+                continue;
+              BridgeFixture fixture(arch, lanes, policy);
               ASSERT_FALSE(::testing::Test::HasFatalFailure());
               constexpr uint32_t initial = 0x1234abcfU;
               fixture.wave->set_mode_raw(initial);
               fixture.wave->set_exec(0);
               fixture.wave->write_scc(1);
               const auto words =
-                  rdna3
+                  arch == ROCJITSU_CODE_ARCH_CDNA5
+                      ? cdna5::build_sopp(denorm ? cdna5::kSDenormModeSopp : cdna5::kSRoundModeSopp,
+                                          {.simm16 = immediate})
+                  : rdna3
                       ? rdna3::build_sopp(denorm ? rdna3::kSDenormModeSopp : rdna3::kSRoundModeSopp,
                                           {.simm16 = immediate})
                       : rdna4::build_sopp(denorm ? rdna4::kSDenormModeSopp : rdna4::kSRoundModeSopp,
@@ -7974,10 +7990,15 @@ TEST(ArithBridgeTest, GuestDenormInstructionControlsFollowingArithmetic) {
 }
 
 TEST(ArithBridgeTest, RelativeScalarMovesKeepResolvedSelectorsAndIgnoreExec) {
-  for (bool rdna3 : {false, true})
+  for (rj_code_arch_t arch :
+       {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA3,
+        ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA5})
     for (unsigned operation = 0; operation < 5; ++operation)
       for (uint32_t m0 : {0U, 3U, 0x0403U, 0x00040003U})
         for (bool alias : {false, true}) {
+          if (operation == 4 &&
+              (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4))
+            continue;
           const bool wide = operation == 1 || operation == 3;
           const unsigned width = wide ? 2 : 1;
           const unsigned source_base = 4, destination_base = alias ? 4 : 24;
@@ -7995,7 +8016,10 @@ TEST(ArithBridgeTest, RelativeScalarMovesKeepResolvedSelectorsAndIgnoreExec) {
           policy.semantics =
               alias ? ArithmeticSemantics::Loose : ArithmeticSemantics::BitExactEmpiricalNoFpStatus;
 
-          BridgeFixture fixture(rdna3, 32, policy);
+          const bool rdna3 = arch == ROCJITSU_CODE_ARCH_RDNA3;
+          BridgeFixture fixture(
+              arch, arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4 ? 64 : 32,
+              policy);
           ASSERT_FALSE(::testing::Test::HasFatalFailure());
           fixture.wave->set_exec(0);
           fixture.wave->set_m0(m0);
@@ -8003,12 +8027,24 @@ TEST(ArithBridgeTest, RelativeScalarMovesKeepResolvedSelectorsAndIgnoreExec) {
           const uint32_t base = fixture.wave->sgpr_alloc().base;
           for (unsigned reg = 0; reg < 64; ++reg)
             fixture.cu->write_sgpr(base + reg, 0xabc00000U + reg);
-          const auto words = rdna3 ? rdna3::build_sop1(rdna3::kSMovrelsB32Sop1 + operation,
-                                                       {.ssrc0 = uint8_t(source_base),
-                                                        .sdst = uint8_t(destination_base)})
-                                   : rdna4::build_sop1(rdna4::kSMovrelsB32Sop1 + operation,
-                                                       {.ssrc0 = uint8_t(source_base),
-                                                        .sdst = uint8_t(destination_base)});
+          const auto words = arch == ROCJITSU_CODE_ARCH_CDNA3
+                                 ? cdna3::build_sop1(cdna3::kSMovrelsB32Sop1 + operation,
+                                                     {.ssrc0 = uint8_t(source_base),
+                                                      .sdst = uint8_t(destination_base)})
+                             : arch == ROCJITSU_CODE_ARCH_CDNA4
+                                 ? cdna4::build_sop1(cdna4::kSMovrelsB32Sop1 + operation,
+                                                     {.ssrc0 = uint8_t(source_base),
+                                                      .sdst = uint8_t(destination_base)})
+                             : arch == ROCJITSU_CODE_ARCH_CDNA5
+                                 ? cdna5::build_sop1(cdna5::kSMovrelsB32Sop1 + operation,
+                                                     {.ssrc0 = uint8_t(source_base),
+                                                      .sdst = uint8_t(destination_base)})
+                             : rdna3 ? rdna3::build_sop1(rdna3::kSMovrelsB32Sop1 + operation,
+                                                         {.ssrc0 = uint8_t(source_base),
+                                                          .sdst = uint8_t(destination_base)})
+                                     : rdna4::build_sop1(rdna4::kSMovrelsB32Sop1 + operation,
+                                                         {.ssrc0 = uint8_t(source_base),
+                                                          .sdst = uint8_t(destination_base)});
           auto instruction = fixture.decoder->decode_window(words);
           ASSERT_TRUE(instruction.succeeded());
           ASSERT_TRUE(fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave)
@@ -8715,7 +8751,7 @@ TEST(ArithBridgeTest, DppConditionalAppliesIndependentSignsAfterRouting) {
 }
 
 TEST(ArithBridgeTest, ExecBooleanUpdatesPreserveWidthsOrderingAndAliasedDestinations) {
-  const uint16_t opcodes[2][2][12] = {
+  const uint16_t opcodes[5][2][12] = {
       {{rdna4::kSAndSaveExecB32Sop1, rdna4::kSOrSaveExecB32Sop1, rdna4::kSXorSaveExecB32Sop1,
         rdna4::kSNandSaveExecB32Sop1, rdna4::kSNorSaveExecB32Sop1, rdna4::kSXnorSaveExecB32Sop1,
         rdna4::kSAndNot0SaveExecB32Sop1, rdna4::kSOrNot0SaveExecB32Sop1,
@@ -8735,13 +8771,42 @@ TEST(ArithBridgeTest, ExecBooleanUpdatesPreserveWidthsOrderingAndAliasedDestinat
         rdna3::kSNandSaveExecB64Sop1, rdna3::kSNorSaveExecB64Sop1, rdna3::kSXnorSaveExecB64Sop1,
         rdna3::kSAndNot0SaveExecB64Sop1, rdna3::kSOrNot0SaveExecB64Sop1,
         rdna3::kSAndNot1SaveExecB64Sop1, rdna3::kSOrNot1SaveExecB64Sop1,
-        rdna3::kSAndNot0WrExecB64Sop1, rdna3::kSAndNot1WrExecB64Sop1}}};
-  for (bool rdna3 : {false, true})
+        rdna3::kSAndNot0WrExecB64Sop1, rdna3::kSAndNot1WrExecB64Sop1}},
+      {{},
+       {cdna3::kSAndSaveExecB64Sop1, cdna3::kSOrSaveExecB64Sop1, cdna3::kSXorSaveExecB64Sop1,
+        cdna3::kSNandSaveExecB64Sop1, cdna3::kSNorSaveExecB64Sop1, cdna3::kSXnorSaveExecB64Sop1,
+        cdna3::kSAndn1SaveExecB64Sop1, cdna3::kSOrn1SaveExecB64Sop1, cdna3::kSAndn2SaveExecB64Sop1,
+        cdna3::kSOrn2SaveExecB64Sop1, cdna3::kSAndn1WrExecB64Sop1, cdna3::kSAndn2WrExecB64Sop1}},
+      {{},
+       {cdna4::kSAndSaveExecB64Sop1, cdna4::kSOrSaveExecB64Sop1, cdna4::kSXorSaveExecB64Sop1,
+        cdna4::kSNandSaveExecB64Sop1, cdna4::kSNorSaveExecB64Sop1, cdna4::kSXnorSaveExecB64Sop1,
+        cdna4::kSAndn1SaveExecB64Sop1, cdna4::kSOrn1SaveExecB64Sop1, cdna4::kSAndn2SaveExecB64Sop1,
+        cdna4::kSOrn2SaveExecB64Sop1, cdna4::kSAndn1WrExecB64Sop1, cdna4::kSAndn2WrExecB64Sop1}},
+      {{cdna5::kSAndSaveExecB32Sop1, cdna5::kSOrSaveExecB32Sop1, cdna5::kSXorSaveExecB32Sop1,
+        cdna5::kSNandSaveExecB32Sop1, cdna5::kSNorSaveExecB32Sop1, cdna5::kSXnorSaveExecB32Sop1,
+        cdna5::kSAndNot0SaveExecB32Sop1, cdna5::kSOrNot0SaveExecB32Sop1,
+        cdna5::kSAndNot1SaveExecB32Sop1, cdna5::kSOrNot1SaveExecB32Sop1,
+        cdna5::kSAndNot0WrExecB32Sop1, cdna5::kSAndNot1WrExecB32Sop1},
+       {cdna5::kSAndSaveExecB64Sop1, cdna5::kSOrSaveExecB64Sop1, cdna5::kSXorSaveExecB64Sop1,
+        cdna5::kSNandSaveExecB64Sop1, cdna5::kSNorSaveExecB64Sop1, cdna5::kSXnorSaveExecB64Sop1,
+        cdna5::kSAndNot0SaveExecB64Sop1, cdna5::kSOrNot0SaveExecB64Sop1,
+        cdna5::kSAndNot1SaveExecB64Sop1, cdna5::kSOrNot1SaveExecB64Sop1,
+        cdna5::kSAndNot0WrExecB64Sop1, cdna5::kSAndNot1WrExecB64Sop1}}};
+  const rj_code_arch_t architectures[] = {ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_RDNA3,
+                                          ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4,
+                                          ROCJITSU_CODE_ARCH_CDNA5};
+  for (int architecture = 0; architecture < 5; ++architecture)
     for (uint32_t lanes : {32U, 64U})
       for (bool wide : {false, true})
         for (bool loose : {false, true})
           for (unsigned op = 0; op < 12; ++op)
             for (uint8_t destination : {uint8_t(0), uint8_t(2), uint8_t(126), uint8_t(127)}) {
+              const auto arch = architectures[architecture];
+              const bool rdna3 = arch == ROCJITSU_CODE_ARCH_RDNA3;
+              if ((architecture == 2 || architecture == 3) && (!wide || lanes != 64))
+                continue;
+              if (architecture == 4 && lanes != 32)
+                continue;
               if (wide && destination == 127)
                 continue;
               SCOPED_TRACE(::testing::Message() << "rdna3=" << rdna3 << " lanes=" << lanes
@@ -8750,7 +8815,7 @@ TEST(ArithBridgeTest, ExecBooleanUpdatesPreserveWidthsOrderingAndAliasedDestinat
               ArithmeticPolicy policy{};
               policy.semantics = loose ? ArithmeticSemantics::Loose
                                        : ArithmeticSemantics::BitExactEmpiricalNoFpStatus;
-              BridgeFixture fixture(rdna3, lanes, policy);
+              BridgeFixture fixture(arch, lanes, policy);
               ASSERT_FALSE(::testing::Test::HasFatalFailure());
               const uint32_t base = fixture.wave->sgpr_alloc().base;
               // Alternate zero, high-only and mixed EXEC to exercise the width of SCC.
@@ -8762,10 +8827,16 @@ TEST(ArithBridgeTest, ExecBooleanUpdatesPreserveWidthsOrderingAndAliasedDestinat
               fixture.wave->write_scc(1);
               fixture.cu->write_sgpr(base, uint32_t(input));
               fixture.cu->write_sgpr(base + 1, uint32_t(input >> 32));
-              const auto words =
-                  rdna3
-                      ? rdna3::build_sop1(opcodes[1][wide][op], {.ssrc0 = 0, .sdst = destination})
-                      : rdna4::build_sop1(opcodes[0][wide][op], {.ssrc0 = 0, .sdst = destination});
+              const auto opcode = opcodes[architecture][wide][op];
+              const auto words = arch == ROCJITSU_CODE_ARCH_CDNA3
+                                     ? cdna3::build_sop1(opcode, {.ssrc0 = 0, .sdst = destination})
+                                 : arch == ROCJITSU_CODE_ARCH_CDNA4
+                                     ? cdna4::build_sop1(opcode, {.ssrc0 = 0, .sdst = destination})
+                                 : arch == ROCJITSU_CODE_ARCH_CDNA5
+                                     ? cdna5::build_sop1(opcode, {.ssrc0 = 0, .sdst = destination})
+                                 : rdna3
+                                     ? rdna3::build_sop1(opcode, {.ssrc0 = 0, .sdst = destination})
+                                     : rdna4::build_sop1(opcode, {.ssrc0 = 0, .sdst = destination});
               auto instruction = fixture.decoder->decode_window(words);
               // The SREG destination class excludes EXEC; preserve that decoder
               // rejection instead of manufacturing an unsupported register
@@ -8837,10 +8908,15 @@ TEST(ArithBridgeTest, ExecBooleanUpdatesPreserveWidthsOrderingAndAliasedDestinat
 }
 
 TEST(ArithBridgeTest, ScalarMovesIgnoreExecAndUntakenMovesHaveNoRegisterAccesses) {
-  for (bool rdna3 : {false, true})
+  for (rj_code_arch_t arch :
+       {ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_CDNA3,
+        ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA5})
     for (unsigned kind = 0; kind < 6; ++kind)
       for (bool scc : {false, true}) {
-        BridgeFixture fixture(rdna3);
+        const bool rdna3 = arch == ROCJITSU_CODE_ARCH_RDNA3;
+        BridgeFixture fixture(
+            arch, arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4 ? 64 : 32,
+            {});
         ASSERT_FALSE(::testing::Test::HasFatalFailure());
         const bool conditional = kind & 1;
         const bool wide = kind == 2 || kind == 3;
@@ -8852,17 +8928,35 @@ TEST(ArithBridgeTest, ScalarMovesIgnoreExecAndUntakenMovesHaveNoRegisterAccesses
         fixture.cu->write_sgpr(base + 1, 0x87654321);
         fixture.cu->write_sgpr(base + 2, 0xabcdef01);
         fixture.cu->write_sgpr(base + 3, 0x98765432);
-        const uint16_t opcodes[2][6] = {
+        const uint16_t opcodes[5][6] = {
             {rdna4::kSMovB32Sop1, rdna4::kSCmovB32Sop1, rdna4::kSMovB64Sop1, rdna4::kSCmovB64Sop1,
              rdna4::kSMovkI32Sopk, rdna4::kSCmovkI32Sopk},
             {rdna3::kSMovB32Sop1, rdna3::kSCmovB32Sop1, rdna3::kSMovB64Sop1, rdna3::kSCmovB64Sop1,
-             rdna3::kSMovkI32Sopk, rdna3::kSCmovkI32Sopk}};
-        const uint16_t opcode = opcodes[rdna3][kind];
-        const auto words = immediate
-                               ? (rdna3 ? rdna3::build_sopk(opcode, {.simm16 = 0x8123, .sdst = 0})
-                                        : rdna4::build_sopk(opcode, {.simm16 = 0x8123, .sdst = 0}))
-                               : (rdna3 ? rdna3::build_sop1(opcode, {.ssrc0 = 2, .sdst = 0})
-                                        : rdna4::build_sop1(opcode, {.ssrc0 = 2, .sdst = 0}));
+             rdna3::kSMovkI32Sopk, rdna3::kSCmovkI32Sopk},
+            {cdna3::kSMovB32Sop1, cdna3::kSCmovB32Sop1, cdna3::kSMovB64Sop1, cdna3::kSCmovB64Sop1,
+             cdna3::kSMovkI32Sopk, cdna3::kSCmovkI32Sopk},
+            {cdna4::kSMovB32Sop1, cdna4::kSCmovB32Sop1, cdna4::kSMovB64Sop1, cdna4::kSCmovB64Sop1,
+             cdna4::kSMovkI32Sopk, cdna4::kSCmovkI32Sopk},
+            {cdna5::kSMovB32Sop1, cdna5::kSCmovB32Sop1, cdna5::kSMovB64Sop1, cdna5::kSCmovB64Sop1,
+             cdna5::kSMovkI32Sopk, cdna5::kSCmovkI32Sopk}};
+        const uint16_t opcode = opcodes[arch == ROCJITSU_CODE_ARCH_CDNA3   ? 2
+                                        : arch == ROCJITSU_CODE_ARCH_CDNA4 ? 3
+                                        : arch == ROCJITSU_CODE_ARCH_CDNA5 ? 4
+                                                                           : int(rdna3)][kind];
+        const auto words =
+            arch == ROCJITSU_CODE_ARCH_CDNA3
+                ? (immediate ? cdna3::build_sopk(opcode, {.simm16 = 0x8123, .sdst = 0})
+                             : cdna3::build_sop1(opcode, {.ssrc0 = 2, .sdst = 0}))
+            : arch == ROCJITSU_CODE_ARCH_CDNA4
+                ? (immediate ? cdna4::build_sopk(opcode, {.simm16 = 0x8123, .sdst = 0})
+                             : cdna4::build_sop1(opcode, {.ssrc0 = 2, .sdst = 0}))
+            : arch == ROCJITSU_CODE_ARCH_CDNA5
+                ? (immediate ? cdna5::build_sopk(opcode, {.simm16 = 0x8123, .sdst = 0})
+                             : cdna5::build_sop1(opcode, {.ssrc0 = 2, .sdst = 0}))
+            : immediate ? (rdna3 ? rdna3::build_sopk(opcode, {.simm16 = 0x8123, .sdst = 0})
+                                 : rdna4::build_sopk(opcode, {.simm16 = 0x8123, .sdst = 0}))
+                        : (rdna3 ? rdna3::build_sop1(opcode, {.ssrc0 = 2, .sdst = 0})
+                                 : rdna4::build_sop1(opcode, {.ssrc0 = 2, .sdst = 0}));
         auto instruction = fixture.decoder->decode_window(words);
         ASSERT_TRUE(instruction.succeeded());
         fixture.recorder->scalar_reads.clear();
@@ -10195,6 +10289,8 @@ TEST(ArithBridgeTest, Gfx1250HalfWmmaUsesLibraryPolicyAndInlineAccumulator) {
   }
 }
 
+// Inline -1 and a register with identical bits must name the same accumulator
+// value.
 TEST(ArithBridgeTest, CdnaMfmaInlineMinusOneIsNotDestination) {
   for (bool cdna4 : {false, true}) {
     auto arch = cdna4 ? ROCJITSU_CODE_ARCH_CDNA4 : ROCJITSU_CODE_ARCH_CDNA3;
@@ -10349,6 +10445,8 @@ TEST(ArithBridgeTest, CdnaHalfMfmaUsesLibraryPolicyAndAccumulatorBank) {
   }
 }
 
+// Dense gfx1250 decoding preserves inline C, whole-wave writes and the selected
+// semantics.
 TEST(ArithBridgeTest, Gfx1250MatrixUsesLibraryPolicyAndInlineAccumulator) {
   struct Case {
     uint16_t opcode;
@@ -10494,6 +10592,8 @@ TEST(ArithBridgeTest, Gfx1250MatrixUsesLibraryPolicyAndInlineAccumulator) {
   }
 }
 
+// The decoded CDNA bridge forwards all ABID bits and accumulator-bank
+// selection.
 TEST(ArithBridgeTest, CdnaMatrixUsesLibraryPolicyAndAccumulatorBank) {
   for (bool cdna4 : {false, true}) {
     for (auto semantics : {ArithmeticSemantics::Loose, ArithmeticSemantics::Compatibility,
@@ -12490,6 +12590,250 @@ TEST(ArithBridgeTest, Gfx1250NibblePackDestinationHalf) {
       const uint32_t packed = is_signed ? 0x78f1U : 0xfff1U;
       EXPECT_EQ(fixture.cu->read_vgpr(fixture.base(), 0),
                 high ? (packed << 16) | 0x5555U : 0xaaaa0000U | packed);
+    }
+  }
+}
+
+TEST(ArithBridgeTest, Gfx1250ScalarConversionCompatibility) {
+  for (bool packed : {false, true}) {
+    BridgeFixture fixture(ROCJITSU_CODE_ARCH_CDNA5, 32, {});
+    fixture.wave->set_exec(0);
+    fixture.wave->set_mode_raw(0);
+    fixture.wave->set_trapsts(0x80000000U);
+    fixture.wave->write_scc(true);
+    auto base = fixture.wave->sgpr_alloc().base;
+    fixture.cu->write_sgpr(base, packed ? 0x7f800001U : 0x00010000U);
+    fixture.cu->write_sgpr(base + 1, 0xb3800000U);
+    const auto words =
+        packed ? cdna5::build_sop2(cdna5::kSCvtPkRtzF16F32Sop2, {.ssrc0 = 0, .ssrc1 = 1, .sdst = 0})
+               : cdna5::build_sop1(cdna5::kSCvtHiF32F16Sop1, {.ssrc0 = 0, .sdst = 0});
+    auto instruction = fixture.decoder->decode_window(words);
+    ASSERT_TRUE(instruction.succeeded());
+    ASSERT_TRUE(
+        fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave).succeeded());
+    EXPECT_EQ(fixture.cu->read_sgpr(base), packed ? 0x80017c01U : 0x33800000U);
+    EXPECT_TRUE(fixture.wave->read_scc());
+    EXPECT_EQ(fixture.wave->exec(), 0U);
+    EXPECT_EQ(fixture.wave->trapsts(), 0x80000000U);
+  }
+}
+
+// Loose honors overflow control; Compatibility retains gfx1250's legacy fixed narrowing.
+TEST(ArithBridgeTest, Gfx1250ScalarHalfFmacOverflow) {
+  for (auto semantics : {ArithmeticSemantics::Compatibility, ArithmeticSemantics::Loose}) {
+    BridgeFixture fixture(ROCJITSU_CODE_ARCH_CDNA5, 32, ArithmeticPolicy{semantics});
+    ASSERT_FALSE(::testing::Test::HasFatalFailure());
+    fixture.wave->set_exec(0);
+    const auto base = fixture.wave->sgpr_alloc().base;
+    fixture.cu->write_sgpr(base, 0x7bffu);
+    fixture.cu->write_sgpr(base + 1, 0x4000u);
+    const auto words = cdna5::build_sop2(cdna5::kSFmacF16Sop2, {.ssrc0 = 0, .ssrc1 = 1, .sdst = 2});
+    auto instruction = fixture.decoder->decode_window(words);
+    ASSERT_TRUE(instruction.succeeded());
+    for (bool saturate : {false, true}) {
+      // Reset old D: an infinity left by the first call would conceal a missing flag.
+      fixture.cu->write_sgpr(base + 2, 0);
+      fixture.wave->set_mode_raw(saturate ? Wavefront::FP16_OVFL_BIT : 0);
+      ASSERT_TRUE(
+          fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave).succeeded());
+      const bool clamp = saturate && semantics == ArithmeticSemantics::Loose;
+      EXPECT_EQ(fixture.cu->read_sgpr(base + 2) & 0xffffu, clamp ? 0x7bffu : 0x7c00u);
+    }
+  }
+}
+
+TEST(ArithBridgeTest, Gfx1250ScalarFmaCompatibility) {
+  for (uint32_t rounding = 0; rounding < 4; ++rounding) {
+    BridgeFixture fixture(ROCJITSU_CODE_ARCH_CDNA5, 32, {});
+    fixture.wave->set_exec(0);
+    fixture.wave->set_mode_raw(rounding | (3U << 4));
+    fixture.wave->set_trapsts(0x80000000U);
+    fixture.wave->write_scc(true);
+    auto base = fixture.wave->sgpr_alloc().base;
+    fixture.cu->write_sgpr(base, 0x33800000U);
+    fixture.cu->write_sgpr(base + 1, 0x3f800000U);
+    const auto words = cdna5::build_sop2(cdna5::kSFmacF32Sop2, {.ssrc0 = 1, .ssrc1 = 1, .sdst = 0});
+    auto instruction = fixture.decoder->decode_window(words);
+    ASSERT_TRUE(instruction.succeeded());
+    ASSERT_TRUE(
+        fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave).succeeded());
+    EXPECT_EQ(fixture.cu->read_sgpr(base), rounding == 1 ? 0x3f800001U : 0x3f800000U);
+    EXPECT_TRUE(fixture.wave->read_scc());
+    EXPECT_EQ(fixture.wave->exec(), 0U);
+    EXPECT_EQ(fixture.wave->trapsts(), 0x80000000U);
+  }
+}
+
+TEST(ArithBridgeTest, Gfx1250ScalarBinaryCompatibility) {
+  for (bool half : {false, true}) {
+    for (bool select : {false, true}) {
+      BridgeFixture fixture(ROCJITSU_CODE_ARCH_CDNA5, 32, {});
+      fixture.wave->set_exec(0);
+      fixture.wave->set_mode_raw(0);
+      fixture.wave->set_trapsts(0x80000000U);
+      fixture.wave->write_scc(true);
+      const auto base = fixture.wave->sgpr_alloc().base;
+      fixture.cu->write_sgpr(base, 1);
+      fixture.cu->write_sgpr(base + 1, 1);
+      const auto opcode = half ? (select ? cdna5::kSMaxNumF16Sop2 : cdna5::kSAddF16Sop2)
+                               : (select ? cdna5::kSMaxNumF32Sop2 : cdna5::kSAddF32Sop2);
+      const auto words = cdna5::build_sop2(opcode, {.ssrc0 = 0, .ssrc1 = 1, .sdst = 0});
+      auto instruction = fixture.decoder->decode_window(words);
+      ASSERT_TRUE(instruction.succeeded());
+      ASSERT_TRUE(
+          fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave).succeeded());
+      EXPECT_EQ(fixture.cu->read_sgpr(base), select ? 0U : 2U);
+      EXPECT_TRUE(fixture.wave->read_scc());
+      EXPECT_EQ(fixture.wave->trapsts(), 0x80000000U);
+      EXPECT_EQ(fixture.wave->exec(), 0U);
+    }
+  }
+}
+
+TEST(ArithBridgeTest, Gfx1250ScalarRoundingCompatibility) {
+  for (bool half : {false, true}) {
+    for (uint32_t input : {1U, half ? 0x7c01U : 0x7f800001U}) {
+      BridgeFixture fixture(ROCJITSU_CODE_ARCH_CDNA5, 32, {});
+      fixture.wave->set_exec(0);
+      fixture.wave->set_mode_raw(0);
+      fixture.wave->set_trapsts(0x80000000U);
+      fixture.wave->write_scc(true);
+      const auto base = fixture.wave->sgpr_alloc().base;
+      fixture.cu->write_sgpr(base, input);
+      const auto words = cdna5::build_sop1(half ? cdna5::kSCeilF16Sop1 : cdna5::kSCeilF32Sop1,
+                                           {.ssrc0 = 0, .sdst = 0});
+      auto instruction = fixture.decoder->decode_window(words);
+      ASSERT_TRUE(instruction.succeeded());
+      ASSERT_TRUE(
+          fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave).succeeded());
+      EXPECT_EQ(fixture.cu->read_sgpr(base),
+                input == 1 ? (half ? 0x3c00U : 0x3f800000U) : input | (half ? 0x200U : 0x400000U));
+      EXPECT_TRUE(fixture.wave->read_scc());
+      EXPECT_EQ(fixture.wave->trapsts(), 0x80000000U);
+      EXPECT_EQ(fixture.wave->exec(), 0U);
+    }
+  }
+}
+
+TEST(ArithBridgeTest, CdnaScalarIntegerCarryFieldsAndCounts) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
+    for (bool carry : {false, true}) {
+      for (int operation = 0; operation < 4; ++operation) {
+        BridgeFixture fixture(arch, 32, {});
+        fixture.wave->set_exec(0);
+        fixture.wave->write_scc(carry);
+        const auto base = fixture.wave->sgpr_alloc().base;
+        fixture.cu->write_sgpr(base, operation == 0   ? 0xffffffffU
+                                     : operation == 3 ? 0x80000000U
+                                                      : 0xfU);
+        fixture.cu->write_sgpr(base + 1, 0xffffffffU);
+        fixture.cu->write_sgpr(base + 2, operation == 0 ? 0 : operation == 3 ? 1 : 0x00200010U);
+        std::array<uint32_t, 1> words;
+        if (arch == ROCJITSU_CODE_ARCH_CDNA3) {
+          if (operation == 2) {
+            words = cdna3::build_sop1(cdna3::kSBcnt1I32B64Sop1, {.ssrc0 = 0, .sdst = 0});
+          } else {
+            words = cdna3::build_sop2(operation == 0   ? cdna3::kSAddcU32Sop2
+                                      : operation == 1 ? cdna3::kSBfeU64Sop2
+                                                       : cdna3::kSAbsdiffI32Sop2,
+                                      {.ssrc0 = 0, .ssrc1 = 2, .sdst = 0});
+          }
+        } else if (arch == ROCJITSU_CODE_ARCH_CDNA4) {
+          if (operation == 2) {
+            words = cdna4::build_sop1(cdna4::kSBcnt1I32B64Sop1, {.ssrc0 = 0, .sdst = 0});
+          } else {
+            words = cdna4::build_sop2(operation == 0   ? cdna4::kSAddcU32Sop2
+                                      : operation == 1 ? cdna4::kSBfeU64Sop2
+                                                       : cdna4::kSAbsdiffI32Sop2,
+                                      {.ssrc0 = 0, .ssrc1 = 2, .sdst = 0});
+          }
+        } else if (arch == ROCJITSU_CODE_ARCH_CDNA5) {
+          if (operation == 2) {
+            words = cdna5::build_sop1(cdna5::kSBcnt1I32B64Sop1, {.ssrc0 = 0, .sdst = 0});
+          } else {
+            words = cdna5::build_sop2(operation == 0   ? cdna5::kSAddCoCiU32Sop2
+                                      : operation == 1 ? cdna5::kSBfeU64Sop2
+                                                       : cdna5::kSAbsdiffI32Sop2,
+                                      {.ssrc0 = 0, .ssrc1 = 2, .sdst = 0});
+          }
+        }
+        auto instruction = fixture.decoder->decode_window(words);
+        ASSERT_TRUE(instruction.succeeded());
+        ASSERT_TRUE(
+            fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave).succeeded());
+        const uint32_t expected = operation == 0   ? (carry ? 0 : 0xffffffffU)
+                                  : operation == 1 ? 0xffff0000U
+                                  : operation == 2 ? 36
+                                                   : 0x7fffffffU;
+        EXPECT_EQ(fixture.cu->read_sgpr(base), expected);
+        EXPECT_EQ(fixture.cu->read_sgpr(base + 1), operation == 1 ? 0 : 0xffffffffU);
+        EXPECT_EQ(fixture.wave->read_scc(), operation == 0 ? carry : true);
+        EXPECT_EQ(fixture.wave->exec(), 0U);
+      }
+    }
+  }
+}
+
+TEST(ArithBridgeTest, CdnaScalarScansPreserveCondition) {
+  struct Case {
+    uint64_t input;
+    uint32_t first, sign;
+  };
+  constexpr Case cases[] = {{0, UINT32_MAX, UINT32_MAX},
+                            {1, 0, 63},
+                            {0x8000000000000000ULL, 63, 1},
+                            {UINT64_MAX, 0, UINT32_MAX}};
+  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
+    for (bool signed_scan : {false, true}) {
+      for (const auto &test : cases) {
+        BridgeFixture fixture(arch, 32, {});
+        fixture.wave->set_exec(0);
+        fixture.wave->write_scc(signed_scan);
+        const auto base = fixture.wave->sgpr_alloc().base;
+        fixture.cu->write_sgpr(base, uint32_t(test.input));
+        fixture.cu->write_sgpr(base + 1, uint32_t(test.input >> 32));
+        std::array<uint32_t, 1> words;
+        if (arch == ROCJITSU_CODE_ARCH_CDNA3) {
+          words = cdna3::build_sop1(signed_scan ? cdna3::kSFlbitI32I64Sop1 : cdna3::kSFf1I32B64Sop1,
+                                    {.ssrc0 = 0, .sdst = 0});
+        } else if (arch == ROCJITSU_CODE_ARCH_CDNA4) {
+          words = cdna4::build_sop1(signed_scan ? cdna4::kSFlbitI32I64Sop1 : cdna4::kSFf1I32B64Sop1,
+                                    {.ssrc0 = 0, .sdst = 0});
+        } else {
+          words = cdna5::build_sop1(signed_scan ? cdna5::kSClsI32I64Sop1 : cdna5::kSCtzI32B64Sop1,
+                                    {.ssrc0 = 0, .sdst = 0});
+        }
+        auto instruction = fixture.decoder->decode_window(words);
+        ASSERT_TRUE(instruction.succeeded());
+        ASSERT_TRUE(
+            fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave).succeeded());
+        EXPECT_EQ(fixture.cu->read_sgpr(base), signed_scan ? test.sign : test.first);
+        EXPECT_EQ(fixture.cu->read_sgpr(base + 1), uint32_t(test.input >> 32));
+        EXPECT_EQ(fixture.wave->read_scc(), signed_scan);
+        EXPECT_EQ(fixture.wave->exec(), 0U);
+      }
+    }
+  }
+}
+
+TEST(ArithBridgeTest, Gfx1250ScalarCompareCompatibility) {
+  for (bool half : {false, true}) {
+    for (uint32_t input : {1U, half ? 0x7c01U : 0x7f800001U}) {
+      BridgeFixture fixture(ROCJITSU_CODE_ARCH_CDNA5, 32, {});
+      fixture.wave->set_exec(0);
+      fixture.wave->set_mode_raw(0); // Request guest input/output flushing.
+      fixture.wave->set_trapsts(0x80000000U);
+      fixture.cu->write_sgpr(fixture.wave->sgpr_alloc().base, input);
+      fixture.cu->write_sgpr(fixture.wave->sgpr_alloc().base + 1, 0);
+      const auto words = cdna5::build_sopc(half ? cdna5::kSCmpEqF16Sopc : cdna5::kSCmpEqF32Sopc,
+                                           {.ssrc0 = 0, .ssrc1 = 1});
+      auto instruction = fixture.decoder->decode_window(words);
+      ASSERT_TRUE(instruction.succeeded());
+      ASSERT_TRUE(
+          fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave).succeeded());
+      EXPECT_FALSE(fixture.wave->read_scc());
+      EXPECT_EQ(fixture.wave->trapsts(), 0x80000000U);
+      EXPECT_EQ(fixture.wave->exec(), 0U);
     }
   }
 }
