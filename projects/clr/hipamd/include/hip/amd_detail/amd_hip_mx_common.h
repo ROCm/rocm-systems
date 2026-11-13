@@ -34,37 +34,41 @@ enum hipRoundMode {
   hipRoundMinInf = 3,
 };
 
-#if defined(__clang__) && defined(__HIP__)
+#if (defined(__clang__) && (__clang_major__ > 17)) || (defined(__GNUC__) && (__GNUC__ >= 13))
 
 namespace internal {
 __host__ __device__ static inline __amd_fp16_storage_t half_to_f16(const __half val) {
-  __half_raw tmp = val;
-  return tmp.data;
+  const __half_raw tmp = val;
+  return __builtin_bit_cast(__amd_fp16_storage_t, tmp);
 }
 
 __host__ __device__ static inline __amd_fp16x2_storage_t half2_to_f16x2(const __half2 val) {
-  __half2_raw tmp = val;
-  return tmp.data;
+  const __half2_raw tmp = val;
+  return __builtin_bit_cast(__amd_fp16x2_storage_t, tmp);
 }
 
 __host__ __device__ static inline __amd_bf16_storage_t hipbf16_to_bf16(const __hip_bfloat16 val) {
-  static_assert(sizeof(__hip_bfloat16) == sizeof(__amd_bf16_storage_t));
-  union {
-    __hip_bfloat16 hip_bf16;
-    __amd_bf16_storage_t bf16;
-  } u{val};
-  return u.bf16;
+  const __hip_bfloat16_raw tmp = val;
+  return __builtin_bit_cast(__amd_bf16_storage_t, tmp);
+}
+
+__host__ __device__ static inline __amd_bf16x2_storage_t hipbf162_to_bf16x2(
+    const __hip_bfloat162_raw val) {
+  return __builtin_bit_cast(__amd_bf16x2_storage_t, val);
 }
 
 __host__ __device__ static inline __amd_bf16x2_storage_t hipbf162_to_bf16x2(const __hip_bfloat162 val) {
-  static_assert(sizeof(__hip_bfloat162) == sizeof(__amd_bf16x2_storage_t));
-  union {
-    __hip_bfloat162 hip_bf16;
-    __amd_bf16x2_storage_t bf16;
-  } u{val};
-  return u.bf16;
+  return hipbf162_to_bf16x2(static_cast<__hip_bfloat162_raw>(val));
+}
+
+__host__ __device__ static inline __half_raw f16_to_halfraw(const __amd_fp16_storage_t val) {
+  return __builtin_bit_cast(__half_raw, val);
+}
+
+__host__ __device__ static inline __half2_raw f16x2_to_halfraw2(const __amd_fp16x2_storage_t val) {
+  return __builtin_bit_cast(__half2_raw, val);
 }
 
 }  // namespace internal
 
-#endif  // defined(__clang__) && defined(__HIP__)
+#endif
