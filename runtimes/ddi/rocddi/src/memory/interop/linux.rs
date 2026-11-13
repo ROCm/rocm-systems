@@ -10,8 +10,6 @@
 use crate::memory::storage::TryPush;
 use std::io;
 use std::os::fd::{AsFd, BorrowedFd, OwnedFd, RawFd};
-use std::os::unix::fs::MetadataExt;
-use std::path::PathBuf;
 
 use crate::device::Device;
 use crate::driver::{DriverInstance, KfdDeviceState, KfdDriver};
@@ -54,68 +52,6 @@ pub fn duplicate_descriptor(descriptor: RawFd) -> Result<OwnedFd, Error> {
             operation: "descriptor duplication",
             source,
         })
-}
-
-/// Returns the length of a borrowed descriptor without taking its ownership.
-///
-/// # Errors
-/// Reports an invalid descriptor or native metadata failure.
-pub fn descriptor_length(descriptor: RawFd) -> io::Result<u64> {
-    os_file::descriptor_length(descriptor)
-}
-
-/// Resolves a reopenable filesystem path for a borrowed Linux descriptor.
-///
-/// The returned path owns its bytes and does not depend on the descriptor
-/// remaining open. An anonymous or unlinked file has no such path. The caller
-/// must keep the descriptor valid during this call.
-///
-/// # Errors
-/// Reports an invalid descriptor or a missing or changed filesystem path.
-pub fn descriptor_path(descriptor: RawFd) -> io::Result<PathBuf> {
-    if descriptor < 0 {
-        return Err(io::Error::from(io::ErrorKind::InvalidInput));
-    }
-    let link = format!("/proc/self/fd/{descriptor}");
-    let path = std::fs::read_link(&link)?;
-    if !path.is_absolute() {
-        return Err(io::Error::from(io::ErrorKind::InvalidData));
-    }
-    let source = std::fs::metadata(link)?;
-    let target = std::fs::metadata(&path)?;
-    if (source.dev(), source.ino()) != (target.dev(), target.ino()) {
-        return Err(io::Error::from(io::ErrorKind::InvalidData));
-    }
-    Ok(path)
-}
-
-/// Reads an entire fixed range from a borrowed descriptor without changing its
-/// shared file position.
-///
-/// # Errors
-/// Reports an invalid descriptor, short read, or native read failure.
-pub fn read_descriptor_exact_at(
-    descriptor: RawFd,
-    buffer: &mut [u8],
-    offset: u64,
-) -> io::Result<()> {
-    os_file::read_descriptor_exact_at(descriptor, buffer, offset)
-}
-
-/// Reads from a borrowed descriptor at a fixed offset.
-///
-/// # Errors
-/// Preserves the Linux read error, including its errno.
-pub fn read_descriptor_at(descriptor: RawFd, buffer: &mut [u8], offset: i64) -> io::Result<usize> {
-    os_file::read_descriptor_at(descriptor, buffer, offset)
-}
-
-/// Writes to a borrowed descriptor at a fixed offset.
-///
-/// # Errors
-/// Preserves the Linux write error, including its errno.
-pub fn write_descriptor_at(descriptor: RawFd, buffer: &[u8], offset: i64) -> io::Result<usize> {
-    os_file::write_descriptor_at(descriptor, buffer, offset)
 }
 
 /// Maximum bytes submitted in one AIS operation, matching Linux `MAX_RW_COUNT`.
@@ -182,10 +118,10 @@ pub fn ais_host_transfer(
         };
         let transferred = match &mut buffer {
             AisHostBuffer::Read(bytes) => {
-                read_descriptor_at(descriptor, &mut bytes[copied..size], offset)
+                os_file::read_descriptor_at(descriptor, &mut bytes[copied..size], offset)
             }
             AisHostBuffer::Write(bytes) => {
-                write_descriptor_at(descriptor, &bytes[copied..size], offset)
+                os_file::write_descriptor_at(descriptor, &bytes[copied..size], offset)
             }
         };
         let transferred = match transferred {
@@ -251,50 +187,6 @@ pub fn ais_transfer(
 pub struct KfdIpcMemoryHandle {
     /// Opaque words carried unchanged across the KFD IPC ABI.
     pub words: [u32; 8],
-}
-
-/// Location value accepted by Linux KFD SVM attribute operations.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum KfdSvmLocation {
-    /// Host system memory.
-    System,
-    /// No uniform or preferred location.
-    Undefined,
-    /// One activated endpoint, identified without exposing KFD's GPU ID.
-    Device([u8; 16]),
-}
-
-/// Per-device accessibility accepted by Linux KFD SVM operations.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum KfdSvmAccess {
-    /// Faulting access with migration permitted.
-    Accessible,
-    /// Non-faulting access without migration.
-    AccessibleInPlace,
-    /// Access denied.
-    NoAccess,
-}
-
-/// One Linux KFD SVM operation attribute.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum KfdSvmAttribute {
-    /// Preferred physical location.
-    PreferredLocation(KfdSvmLocation),
-    /// Immediate migration target or most recent prefetch location.
-    PrefetchLocation(KfdSvmLocation),
-    /// Access mode for one activated GPU endpoint.
-    Access {
-        /// Opaque rocddi endpoint identity.
-        device: [u8; 16],
-        /// Requested or returned access mode.
-        access: KfdSvmAccess,
-    },
-    /// KFD SVM flags to set.
-    SetFlags(u32),
-    /// KFD SVM flags to clear.
-    ClearFlags(u32),
-    /// Base-two logarithm of the migration page count.
-    MigrationGranularity(u32),
 }
 
 /// One owned DMA-BUF file descriptor plus immutable backing facts.
@@ -621,34 +513,6 @@ pub fn export_kfd_ipc_memory(allocation: &Allocation) -> Result<KfdIpcMemoryHand
     crate::driver::KfdDriver::export_kfd_ipc_memory(allocation.inner.linux_kfd()?.driver_state())
 }
 
-/// Applies Linux KFD SVM attributes to a process virtual-address range.
-///
-/// # Errors
-/// Rejects invalid ranges, endpoint identities, flags, or attributes and
-/// reports the native KFD operation failure.
-pub fn set_kfd_svm_attributes(
-    session: &Session,
-    address: u64,
-    size: u64,
-    attributes: &[KfdSvmAttribute],
-) -> Result<(), Error> {
-    kfd_driver(session)?.set_kfd_svm_attributes(address, size, attributes)
-}
-
-/// Queries Linux KFD SVM attributes for a process virtual-address range.
-///
-/// # Errors
-/// Rejects invalid ranges or query attributes and reports malformed or failed
-/// native KFD results without publishing partial translated output.
-pub fn get_kfd_svm_attributes(
-    session: &Session,
-    address: u64,
-    size: u64,
-    attributes: &mut [KfdSvmAttribute],
-) -> Result<(), Error> {
-    kfd_driver(session)?.get_kfd_svm_attributes(address, size, attributes)
-}
-
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod descriptor_tests {
@@ -686,8 +550,8 @@ mod descriptor_tests {
             .write(true)
             .open(&path)
             .unwrap();
-        assert!(descriptor_path(-1).is_err());
-        let resolved = descriptor_path(file.as_raw_fd()).unwrap();
+        assert!(crate::host::linux::duplicate_file(-1).is_err());
+        let resolved = crate::host::file::path(&file).unwrap();
         assert_eq!(resolved, path);
         drop(file);
         let _other = std::fs::File::open("/dev/null").unwrap();
@@ -695,7 +559,7 @@ mod descriptor_tests {
         assert!(std::fs::File::open(&resolved).is_ok());
         let unlinked = std::fs::File::open(&path).unwrap();
         std::fs::remove_file(path).unwrap();
-        assert!(descriptor_path(unlinked.as_raw_fd()).is_err());
+        assert!(crate::host::file::path(&unlinked).is_err());
     }
 
     #[test]

@@ -5,11 +5,13 @@
 /// @brief Client-side RPC stub for the rocjitsu daemon.
 
 #include "rocjitsu/kmd/linux/remote_driver.h"
+#include "rocjitsu/kmd/linux/host_mapping_lock.h"
 #include "rocjitsu/kmd/linux/kfd_ioctl_utils.h"
 #include "rocjitsu/kmd/linux/libc_passthrough.h"
 #include "rocjitsu/kmd/linux/linux_kfd.h"
 #include "rocjitsu/kmd/linux/memory_backing.h"
 #include "rocjitsu/kmd/linux/rpc.h"
+#include "rocjitsu/vm/amdgpu/mtype.h"
 #include "util/log.h"
 #include "util/unique_handle.h"
 
@@ -26,6 +28,7 @@
 #include <linux/mman.h>
 #include <optional>
 #include <string_view>
+#include <utility>
 #ifndef MADV_POPULATE_WRITE
 #define MADV_POPULATE_WRITE 23
 #endif
@@ -527,6 +530,8 @@ int RemoteDriver::open() {
     syscall(SYS_read, shutdown_efd_, &val, sizeof(val));
   }
   std::lock_guard<std::mutex> lock(rpc_mutex_);
+  potential_host_svm_ranges_.clear();
+  unbounded_host_svm_policy_ = false;
 
   RpcHeader hdr = {};
   hdr.opcode = RPC_HANDSHAKE;
@@ -701,6 +706,7 @@ void RemoteDriver::request_close() {
 
 int RemoteDriver::close() {
   request_close();
+  int result = 0;
   {
     std::lock_guard<std::mutex> lock(rpc_mutex_);
     if (disconnect_monitor_.joinable())
@@ -709,7 +715,15 @@ int RemoteDriver::close() {
       RpcHeader hdr{};
       hdr.opcode = RPC_CLOSE;
       hdr.request_id = next_id_++;
-      rpc_send_exact(sock_, &hdr, sizeof(hdr));
+      RpcHeader response{};
+      if (!rpc_send_exact(sock_, &hdr, sizeof(hdr)) ||
+          !rpc_recv_exact(sock_, &response, sizeof(response)) || response.opcode != RPC_CLOSE ||
+          response.request_id != hdr.request_id || response.reserved != 0 ||
+          response.payload_bytes != 0 || response.result > 0) {
+        result = -EIO;
+      } else {
+        result = response.result;
+      }
     }
 
     if (sock_ >= 0) {
@@ -735,10 +749,14 @@ int RemoteDriver::close() {
     // reclaimed when the last shared_ptr drops.
   }
 
-  return 0;
+  return result;
 }
 
-int RemoteDriver::ioctl(unsigned long request, void *arg) {
+int RemoteDriver::ioctl(unsigned long request, void *arg) { return ioctl(request, arg, {}); }
+
+int RemoteDriver::ioctl(unsigned long request, void *arg,
+                        const std::function<std::shared_ptr<LinuxKfd>()> &current_local_driver,
+                        uint32_t *export_mapping_flags) {
   assert(arg && "ioctl called with null arg");
   // Do NOT assert(sock_ >= 0) here: sock_ is guarded by rpc_mutex_ and a
   // concurrent teardown_remote() -> close() can set it to -1 while another
@@ -809,10 +827,12 @@ int RemoteDriver::ioctl(unsigned long request, void *arg) {
     return 0;
   }
 
-  return send_ioctl(request, arg);
+  return send_ioctl(request, arg, current_local_driver, export_mapping_flags);
 }
 
-int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
+int RemoteDriver::send_ioctl(unsigned long request, void *arg,
+                             const std::function<std::shared_ptr<LinuxKfd>()> &current_local_driver,
+                             uint32_t *export_mapping_flags) {
   std::lock_guard<std::mutex> lock(rpc_mutex_);
   // The stream is misaligned past a rejected reply; every later header would be
   // parsed out of stale bytes. Fail closed instead of returning bogus results.
@@ -836,6 +856,18 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
       if (userptr_cpu_address == 0)
         return -EINVAL;
     }
+  }
+
+  std::optional<std::pair<uint64_t, uint64_t>> new_host_svm_range;
+  if (is_svm_ioctl(request)) {
+    const auto *svm = static_cast<const kfd_ioctl_svm_args *>(arg);
+    if (svm->op == KFD_IOCTL_SVM_OP_SET_ATTR &&
+        std::ranges::any_of(svm->attrs, svm->attrs + svm->nattr, [](const auto &attr) {
+          return attr.type == KFD_IOCTL_SVM_ATTR_ACCESS ||
+                 attr.type == KFD_IOCTL_SVM_ATTR_ACCESS_IN_PLACE ||
+                 attr.type == KFD_IOCTL_SVM_ATTR_NO_ACCESS;
+        }))
+      new_host_svm_range = std::pair{svm->start_addr, svm->size};
   }
 
   // Save original embedded pointers before serialization. The daemon rewrites
@@ -973,11 +1005,16 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
     case AMDKFD_IOC_MAP_MEMORY_TO_GPU:
     case AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU: {
       auto *map_args = reinterpret_cast<kfd_ioctl_map_memory_to_gpu_args *>(args_base);
-      const auto *device_ids = reinterpret_cast<const void *>(map_args->device_ids_array_ptr);
-      const size_t inline_size = map_args->n_devices * sizeof(uint32_t);
+      const size_t payload_so_far = buf.size() - sizeof(RpcHeader);
+      if (payload_so_far > kMaxPayloadBytes ||
+          map_args->n_devices > (kMaxPayloadBytes - payload_so_far) / sizeof(uint32_t))
+        return -E2BIG;
+      const size_t inline_size = static_cast<size_t>(map_args->n_devices) * sizeof(uint32_t);
       size_t inline_offset = buf.size();
       buf.resize(inline_offset + inline_size);
-      std::memcpy(buf.data() + inline_offset, device_ids, inline_size);
+      if (inline_size != 0 && copy_ioctl_user_buffer(buf.data() + inline_offset,
+                                                     saved_device_ids_ptr, inline_size) != 0)
+        return -EFAULT;
       break;
     }
     case AMDKFD_IOC_GET_PROCESS_APERTURES_NEW: {
@@ -1159,6 +1196,8 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
   auto poison_reply = [&] {
     if (num_fds > 0 && received_fds[0] >= 0)
       syscall(SYS_close, received_fds[0]);
+    if (request == AMDKFD_IOC_EXPORT_DMABUF)
+      static_cast<kfd_ioctl_export_dmabuf_args *>(arg)->dmabuf_fd = static_cast<uint32_t>(-1);
     return poison_stream();
   };
 
@@ -1189,6 +1228,15 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
     // rest, which is the same misalignment as refusing it outright.
     if (!rpc_recv_exact(sock_, payload.data(), resp->payload_bytes))
       return poison_reply();
+
+    // The daemon's numeric fd has no meaning in this process. Refuse an
+    // incomplete export reply before copying that number into caller memory.
+    if (request == AMDKFD_IOC_EXPORT_DMABUF && resp->result == 0 &&
+        (resp->payload_bytes != arg_size + sizeof(uint32_t) || num_fds != 1 || received_fds[0] < 0))
+      return poison_reply();
+
+    if (request == AMDKFD_IOC_EXPORT_DMABUF && resp->result == 0 && export_mapping_flags)
+      std::memcpy(export_mapping_flags, payload.data() + arg_size, sizeof(uint32_t));
 
     size_t copy_size = std::min(arg_size, static_cast<size_t>(resp->payload_bytes));
     std::memcpy(arg, payload.data(), copy_size);
@@ -1395,7 +1443,7 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
       alloc_ranges_.push_back({va_addr, size, backing_fd});
   };
 
-  auto promote_userptr = [&](uint64_t va_addr, uint64_t size, int backing_fd) {
+  auto promote_userptr = [&](uint64_t handle, uint64_t va_addr, uint64_t size, int backing_fd) {
     auto *va = reinterpret_cast<void *>(va_addr);
     auto length = static_cast<size_t>(size);
 
@@ -1420,8 +1468,19 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
       syscall(SYS_munmap, temp, length);
     }
 
-    auto *mapped =
-        safe_mmap(va, length, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FIXED, backing_fd, 0);
+    void *mapped = MAP_FAILED;
+    const std::array replaced{std::pair{va_addr, size}};
+    const auto bare_mapping_change = [&] {
+      auto host_lock = host_mapping_lock().lock_exclusive();
+      mapped = safe_mmap(va, length, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FIXED, backing_fd, 0);
+      return mapped != MAP_FAILED;
+    };
+    if (auto local = current_local_driver ? current_local_driver() : nullptr)
+      local->run_host_vma_replacement(replaced, bare_mapping_change);
+    else
+      (void)bare_mapping_change();
+    if (mapped != MAP_FAILED)
+      (void)send_host_vma_replaced_locked(va_addr, size, handle);
     if (mapped != MAP_FAILED)
       syscall(SYS_madvise, mapped, length, MADV_POPULATE_WRITE);
   };
@@ -1430,12 +1489,17 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
   // Also register the address range for anonymous MAP_FIXED interception.
   if (request == AMDKFD_IOC_ALLOC_MEMORY_OF_GPU && resp->result == 0) {
     auto *alloc_args = static_cast<kfd_ioctl_alloc_memory_of_gpu_args *>(arg);
+    // A later FREE may leave a host-backed tombstone. USERPTR's CPU VMA can
+    // differ from the GPU VA returned by the daemon.
+    remember_host_svm_range_locked(alloc_args->va_addr, alloc_args->size);
+    if (alloc_args->flags & KFD_IOC_ALLOC_MEM_FLAGS_USERPTR)
+      remember_host_svm_range_locked(userptr_cpu_address, alloc_args->size);
     if (num_fds > 0 && received_fds[0] >= 0) {
       register_allocation(alloc_args->handle, alloc_args->va_addr, alloc_args->size,
                           received_fds[0]);
 
       if (alloc_args->flags & KFD_IOC_ALLOC_MEM_FLAGS_USERPTR)
-        promote_userptr(userptr_cpu_address, alloc_args->size, received_fds[0]);
+        promote_userptr(alloc_args->handle, userptr_cpu_address, alloc_args->size, received_fds[0]);
     }
   }
 
@@ -1446,18 +1510,16 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
       struct stat st {};
       if (stat_memory_backing(received_fds[0], &st) == 0)
         size = static_cast<uint64_t>(st.st_size);
+      // Imported views can also be freed while their client VA remains mapped.
+      remember_host_svm_range_locked(import_args->va_addr, size);
       register_allocation(import_args->handle, import_args->va_addr, size, received_fds[0]);
     }
   }
 
   if (request == AMDKFD_IOC_EXPORT_DMABUF && resp->result == 0) {
     auto *export_args = static_cast<kfd_ioctl_export_dmabuf_args *>(arg);
-    // A descriptor number in the payload belongs to the daemon. Without an
-    // SCM_RIGHTS transfer it could name an unrelated object in this process.
-    if (num_fds == 0 || received_fds[0] < 0) {
-      export_args->dmabuf_fd = static_cast<uint32_t>(-1);
-      return -EPROTO;
-    }
+    if (num_fds != 1 || received_fds[0] < 0)
+      return poison_reply();
     export_args->dmabuf_fd = received_fds[0];
   }
 
@@ -1472,10 +1534,18 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
     }
   }
 
+  if (new_host_svm_range && resp->result == 0)
+    remember_host_svm_range_locked(new_host_svm_range->first, new_host_svm_range->second);
+
   return resp->result;
 }
 
 void *RemoteDriver::mmap(void *addr, size_t length, int prot, int flags, off_t offset) {
+  return mmap(addr, length, prot, flags, offset, {});
+}
+
+void *RemoteDriver::mmap(void *addr, size_t length, int prot, int flags, off_t offset,
+                         const std::function<std::shared_ptr<LinuxKfd>()> &current_local_driver) {
   std::lock_guard<std::mutex> lock(rpc_mutex_);
   // Same fail-closed contract as send_ioctl(), and for the same reason: a
   // poisoned stream would hand back some other exchange's result. Answering with
@@ -1508,7 +1578,29 @@ void *RemoteDriver::mmap(void *addr, size_t length, int prot, int flags, off_t o
     return MAP_FAILED;
   }
 
-  // Resolve the backing descriptor for this allocation: prefer the mmap response fd, fall
+  const auto map_client = [&](int mapping_flags, int mapping_fd) {
+    void *mapped = MAP_FAILED;
+    const auto bare_mapping_change = [&] {
+      auto host_lock = host_mapping_lock().lock_exclusive();
+      mapped = safe_mmap(addr, length, PROT_READ | PROT_WRITE, mapping_flags, mapping_fd, 0);
+      return mapped != MAP_FAILED;
+    };
+    if ((flags & MAP_FIXED) && addr) {
+      const std::array replaced{
+          std::pair{reinterpret_cast<uint64_t>(addr), static_cast<uint64_t>(length)}};
+      if (auto local = current_local_driver ? current_local_driver() : nullptr)
+        local->run_host_vma_replacement(replaced, bare_mapping_change);
+      else
+        (void)bare_mapping_change();
+      if (mapped != MAP_FAILED)
+        (void)send_host_vma_replaced_locked(replaced[0].first, replaced[0].second);
+    } else {
+      (void)bare_mapping_change();
+    }
+    return mapped;
+  };
+
+  // Resolve the memfd for this allocation: prefer the mmap response fd, fall
   // back to the stored ALLOC_MEMORY fd (same underlying file, different fd).
   int mapping_backing = reply_fd.get();
   uint64_t type = static_cast<uint64_t>(offset) & (0x3ULL << 62);
@@ -1555,7 +1647,7 @@ void *RemoteDriver::mmap(void *addr, size_t length, int prot, int flags, off_t o
     int mflags = MAP_SHARED;
     if (flags & MAP_FIXED)
       mflags |= MAP_FIXED;
-    auto *mapped = safe_mmap(addr, length, PROT_READ | PROT_WRITE, mflags, mapping_backing, 0);
+    auto *mapped = map_client(mflags, mapping_backing);
     if (mapped != MAP_FAILED)
       syscall(SYS_madvise, mapped, length, MADV_POPULATE_WRITE);
     if (mapped != MAP_FAILED && rocjitsu::kmd::is_device_memory_backing(mapping_backing))
@@ -1568,10 +1660,13 @@ void *RemoteDriver::mmap(void *addr, size_t length, int prot, int flags, off_t o
   int mflags = MAP_ANONYMOUS | MAP_PRIVATE;
   if (flags & MAP_FIXED)
     mflags |= MAP_FIXED;
-  return safe_mmap(addr, length, PROT_READ | PROT_WRITE, mflags, -1, 0);
+  return map_client(mflags, -1);
 }
 
-int RemoteDriver::munmap(void *addr, size_t length) {
+int RemoteDriver::munmap(void *addr, size_t length) { return munmap(addr, length, {}); }
+
+int RemoteDriver::munmap(void *addr, size_t length,
+                         const std::function<std::shared_ptr<LinuxKfd>()> &current_local_driver) {
   std::lock_guard<std::mutex> lock(rpc_mutex_);
   // Fail closed on a poisoned stream rather than unmapping on the strength of a
   // reply that belongs to some other exchange.
@@ -1606,11 +1701,205 @@ int RemoteDriver::munmap(void *addr, size_t length) {
   // waiting to be misparsed as the next call's header.
   if (!rpc_recv_exact(sock_, &resp, sizeof(resp)))
     return poison_stream();
+  if (resp.opcode != hdr.opcode || resp.request_id != hdr.request_id || resp.reserved != 0 ||
+      resp.payload_bytes != 0 || resp.result > 0)
+    return poison_stream();
 
-  if (resp.result == 0)
-    syscall(SYS_munmap, addr, length);
+  if (resp.result == 0) {
+    int host_result = -1;
+    int host_errno = 0;
+    const auto bare_mapping_change = [&] {
+      auto host_lock = host_mapping_lock().lock_exclusive();
+      host_result = static_cast<int>(syscall(SYS_munmap, addr, length));
+      host_errno = errno;
+      return host_result == 0;
+    };
+    const std::array replaced{
+        std::pair{reinterpret_cast<uint64_t>(addr), static_cast<uint64_t>(length)}};
+    if (auto local = current_local_driver ? current_local_driver() : nullptr)
+      local->run_host_vma_replacement(replaced, bare_mapping_change);
+    else
+      (void)bare_mapping_change();
+    if (host_result != 0)
+      return -host_errno;
+    (void)send_host_vma_replaced_locked(replaced[0].first, replaced[0].second);
+  }
 
   return resp.result;
+}
+
+int RemoteDriver::send_host_vma_replaced_locked(uint64_t address, uint64_t length,
+                                                uint64_t preserve_userptr_handle) {
+  if (protocol_failed_.load(std::memory_order_acquire))
+    return -EPROTO;
+  RpcHostVmaReplacedRequest request{
+      .addr = address, .length = length, .preserve_userptr_handle = preserve_userptr_handle};
+  RpcHeader header{};
+  header.opcode = RPC_HOST_VMA_REPLACED;
+  header.request_id = next_id_++;
+  header.payload_bytes = sizeof(request);
+  uint8_t frame[sizeof(header) + sizeof(request)];
+  std::memcpy(frame, &header, sizeof(header));
+  std::memcpy(frame + sizeof(header), &request, sizeof(request));
+  if (!rpc_send_exact(sock_, frame, sizeof(frame)))
+    return poison_stream();
+  RpcHeader response{};
+  if (!rpc_recv_exact(sock_, &response, sizeof(response)) || response.opcode != header.opcode ||
+      response.request_id != header.request_id || response.reserved != 0 ||
+      response.payload_bytes != 0 || response.result != 0)
+    return poison_stream();
+  return 0;
+}
+
+int RemoteDriver::gem_va_preflight(uint64_t drm_file_id, uint64_t va_address, uint64_t map_size) {
+  return send_gem_va(RPC_GEM_VA_PREFLIGHT, nullptr, drm_file_id, va_address, 0, map_size, 0);
+}
+
+int RemoteDriver::gem_va_map(const WithBackingFd &with_backing_fd, uint64_t drm_file_id,
+                             uint64_t va_address, uint64_t offset_in_bo, uint64_t map_size,
+                             uint32_t alloc_flags, bool replace) {
+  return send_gem_va(replace ? RPC_GEM_VA_REPLACE : RPC_GEM_VA_MAP, &with_backing_fd, drm_file_id,
+                     va_address, offset_in_bo, map_size, alloc_flags);
+}
+
+int RemoteDriver::gem_va_unmap(uint64_t drm_file_id, uint64_t va_address, uint64_t map_size) {
+  return send_gem_va(RPC_GEM_VA_UNMAP, nullptr, drm_file_id, va_address, 0, map_size, 0);
+}
+
+int RemoteDriver::query_mtype_for_testing(uint64_t va_address) {
+  std::lock_guard lock(rpc_mutex_);
+  if (protocol_failed_.load(std::memory_order_acquire))
+    return -EPROTO;
+  if (sock_ < 0)
+    return -ENODEV;
+  RpcQueryMtypeRequest request{.va_address = va_address};
+  RpcHeader header{};
+  header.opcode = RPC_QUERY_MTYPE;
+  header.request_id = next_id_++;
+  header.payload_bytes = sizeof(request);
+  uint8_t frame[sizeof(header) + sizeof(request)];
+  std::memcpy(frame, &header, sizeof(header));
+  std::memcpy(frame + sizeof(header), &request, sizeof(request));
+  size_t sent = 0;
+  if (!rpc_send_exact(sock_, frame, sizeof(frame), &sent))
+    return sent > 0 ? poison_stream() : transport_errno();
+  RpcHeader response{};
+  if (!rpc_recv_exact(sock_, &response, sizeof(response)) || response.opcode != header.opcode ||
+      response.request_id != header.request_id || response.reserved != 0 ||
+      response.payload_bytes != 0 || response.result > static_cast<int>(amdgpu::Mtype::NT))
+    return poison_stream();
+  return response.result;
+}
+
+int RemoteDriver::send_gem_va(uint32_t operation, const WithBackingFd *with_backing_fd,
+                              uint64_t drm_file_id, uint64_t va_address, uint64_t offset_in_bo,
+                              uint64_t map_size, uint32_t alloc_flags) {
+  std::lock_guard lock(rpc_mutex_);
+  if (protocol_failed_.load(std::memory_order_acquire))
+    return -EPROTO;
+  if (sock_ < 0)
+    return -ENODEV;
+
+  RpcGemVaRequest request{.operation = operation,
+                          .alloc_flags = alloc_flags,
+                          .drm_file_id = drm_file_id,
+                          .va_address = va_address,
+                          .map_size = map_size,
+                          .offset_in_bo = offset_in_bo};
+  RpcHeader header{};
+  header.opcode = RPC_GEM_VA;
+  header.request_id = next_id_++;
+  header.payload_bytes = sizeof(request);
+  uint8_t frame[sizeof(header) + sizeof(request)];
+  std::memcpy(frame, &header, sizeof(header));
+  std::memcpy(frame + sizeof(header), &request, sizeof(request));
+
+  size_t sent = 0;
+  if (operation == RPC_GEM_VA_MAP || operation == RPC_GEM_VA_REPLACE) {
+    if (with_backing_fd == nullptr || !*with_backing_fd)
+      return -EBADF;
+    ssize_t first = -1;
+    do {
+      first = (*with_backing_fd)([&](int backing_fd) {
+        if (backing_fd < 0) {
+          errno = EBADF;
+          return ssize_t{-1};
+        }
+        return rpc_send_msg(sock_, frame, sizeof(frame), &backing_fd, 1);
+      });
+    } while (first < 0 && errno == EINTR);
+    if (first <= 0)
+      return transport_errno();
+    sent = static_cast<size_t>(first);
+    if (sent < sizeof(frame) && !rpc_send_exact(sock_, frame + sent, sizeof(frame) - sent))
+      return poison_stream();
+  } else if (!rpc_send_exact(sock_, frame, sizeof(frame), &sent)) {
+    return sent > 0 ? poison_stream() : transport_errno();
+  }
+
+  RpcHeader response{};
+  if (!rpc_recv_exact(sock_, &response, sizeof(response)) || response.opcode != header.opcode ||
+      response.request_id != header.request_id || response.reserved != 0 ||
+      response.payload_bytes != 0 || response.result > 0)
+    return poison_stream();
+  return response.result;
+}
+
+void RemoteDriver::remember_host_svm_range_locked(uint64_t address, uint64_t length) noexcept {
+  if (length == 0)
+    return;
+  if (length > UINT64_MAX - address) {
+    unbounded_host_svm_policy_ = true;
+    return;
+  }
+  try {
+    uint64_t start = address;
+    uint64_t end = address + length;
+    auto first = std::lower_bound(
+        potential_host_svm_ranges_.begin(), potential_host_svm_ranges_.end(), start,
+        [](const auto &range, uint64_t value) { return range.second < value; });
+    auto last = first;
+    while (last != potential_host_svm_ranges_.end() && last->first <= end) {
+      start = std::min(start, last->first);
+      end = std::max(end, last->second);
+      ++last;
+    }
+    first = potential_host_svm_ranges_.erase(first, last);
+    potential_host_svm_ranges_.insert(first, {start, end});
+  } catch (...) {
+    unbounded_host_svm_policy_ = true;
+  }
+}
+
+bool RemoteDriver::may_have_host_svm_policy_locked(uint64_t address, uint64_t length) const {
+  if (length == 0)
+    return false;
+  if (unbounded_host_svm_policy_)
+    return true;
+  static const long page_size = ::sysconf(_SC_PAGESIZE);
+  if (page_size <= 0 || length > UINT64_MAX - static_cast<uint64_t>(page_size - 1))
+    return true;
+  const uint64_t page = static_cast<uint64_t>(page_size);
+  const uint64_t rounded = ((length + page - 1) / page) * page;
+  if (rounded > UINT64_MAX - address)
+    return true;
+  const auto it = std::lower_bound(
+      potential_host_svm_ranges_.begin(), potential_host_svm_ranges_.end(), address,
+      [](const auto &range, uint64_t value) { return range.second <= value; });
+  return it != potential_host_svm_ranges_.end() && it->first < address + rounded;
+}
+
+void RemoteDriver::run_host_vma_replacement(std::span<const std::pair<uint64_t, uint64_t>> ranges,
+                                            const std::function<bool()> &bare_mapping_change) {
+  // A concurrent SVM ioctl uses this same lock, so it cannot install a new
+  // denial between the host syscall and the daemon's cleanup publication.
+  std::lock_guard lock(rpc_mutex_);
+  if (!bare_mapping_change())
+    return;
+  for (const auto &[address, length] : ranges)
+    if (length != 0 && may_have_host_svm_policy_locked(address, length) &&
+        send_host_vma_replaced_locked(address, length) != 0)
+      return;
 }
 
 int RemoteDriver::send_mmap(void *addr, size_t length, int prot, int flags, off_t offset,

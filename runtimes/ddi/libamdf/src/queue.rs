@@ -234,7 +234,10 @@ fn descriptor(
         if family.minimum_ring_byte_length == family.maximum_ring_byte_length {
             family.minimum_ring_byte_length
         } else {
-            DEFAULT_RING_BYTES
+            DEFAULT_RING_BYTES.clamp(
+                family.minimum_ring_byte_length,
+                family.maximum_ring_byte_length,
+            )
         }
     } else {
         info.ring_byte_length
@@ -336,6 +339,9 @@ fn transport(
     format_features: amdf_queue_format_features_t,
     device: bool,
 ) -> Result<amdf_user_queue_mapping_info_t, u64> {
+    if info.host_publication != queue::HostQueuePublication::Ordered64BitMmio {
+        return Err(UNSUPPORTED);
+    }
     match command_type {
         AMDF_QUEUE_COMMAND_TYPE_GPU_PM4
         | AMDF_QUEUE_COMMAND_TYPE_GPU_AQL
@@ -756,9 +762,7 @@ pub(crate) unsafe extern "C" fn destroy(pointer: *mut amdf_user_queue_t) -> u64 
                 // SAFETY: Mapping preflight established that no public producer
                 // borrow remains; the caller has exclusive queue access.
                 queue.native.destroy().map_err(|error| {
-                    if error.kind() == rocddi::ErrorKind::Busy
-                        && error.native_error_code().is_none()
-                    {
+                    if error.kind() == rocddi::ErrorKind::Busy && error.native_status().is_none() {
                         // Native preflight left the queue and its public
                         // producer contract intact for a later retry.
                         queue.destroying.store(false, Ordering::Release);
