@@ -3,6 +3,8 @@
 
 #include "rocjitsu/kmd/linux/legacy_gpu_vm.h"
 
+#include "rocjitsu/vm/amdgpu/vm_local_grants.h"
+
 #include <algorithm>
 #include <array>
 #include <limits>
@@ -47,6 +49,9 @@ public:
       : memory_(std::move(memory)), address_space_(std::make_shared<LegacyAddressSpace>(*memory_)),
         vmid_(vmid), original_request_mutex_(registration.request_mutex),
         mutation_epoch_(registration.mutation_epoch), prt_residency_(registration.prt_residency),
+        page_policies_(registration.page_table_cache_state),
+        local_grants_(address_space_->instance_id(), registration.local_grant_epoch,
+                      registration.local_grant),
         raw_write_gate_(registration.raw_write_gate),
         access_admission_(registration.access_admission), data_route_(registration.data_route),
         prepare_deferred_transfer_(registration.prepare_deferred_transfer),
@@ -102,6 +107,22 @@ public:
     return prt_residency_ ? prt_residency_->nonresident.load() : nullptr;
   }
 
+  bool local_ingress_mapped(std::span<const MemoryIngressSpan> spans, uint64_t begin,
+                            uint64_t end) const override {
+    return page_policies_ && address_space_->local_ingress_mapped(
+                                 spans, begin, end, vmid_, original_request_mutex_, page_policies_);
+  }
+
+  const VmLocalGrants *local_grants() const override {
+    return local_grants_.publication() ? &local_grants_ : nullptr;
+  }
+
+  LegacyDataRoute data_route(uint64_t address, size_t size, VmAccessKind access) const {
+    if (local_grants_.generation(address, size))
+      return {.first_extent_bytes = size};
+    return data_route_(address, size, access);
+  }
+
   [[nodiscard]] bool raw_write_route_is_local(uint64_t address, std::size_t size) const {
     if (!data_route_)
       return true;
@@ -110,7 +131,7 @@ public:
     std::size_t checked = 0;
     while (checked < size) {
       const LegacyDataRoute route =
-          data_route_(address + checked, size - checked, VmAccessKind::Write);
+          data_route(address + checked, size - checked, VmAccessKind::Write);
       if (route.route != VmDataRoute::Local || route.candidate != LegacyDeferredCandidate::None ||
           route.first_extent_bytes == 0)
         return false;
@@ -123,6 +144,8 @@ public:
                                                VmAccessKind access) const override {
     if (size == 0 || size - 1 > std::numeric_limits<uint64_t>::max() - address)
       return {.outcome = VmAccessOutcome::Malformed};
+    if (const auto generation = local_grants_.generation(address, size))
+      return {.generation = *generation};
     // The untokenized compatibility paths, including cache fills and borrowed
     // host pointers, must never consume an owned candidate directly.
     if (data_route_) {
@@ -130,7 +153,7 @@ public:
         if (!raw_write_route_is_local(address, size))
           return {.outcome = VmAccessOutcome::Faulted};
       } else {
-        const LegacyDataRoute route = data_route_(address, size, access);
+        const LegacyDataRoute route = data_route(address, size, access);
         if (route.route != VmDataRoute::Local || route.candidate != LegacyDeferredCandidate::None)
           return {.outcome = VmAccessOutcome::Faulted};
       }
@@ -166,7 +189,7 @@ public:
                                                 VmAccessKind access) const override {
     if (size == 0 || size - 1 > std::numeric_limits<uint64_t>::max() - address)
       return VmDataRoute::Faulted;
-    return data_route_ ? data_route_(address, size, access).route : VmDataRoute::Local;
+    return data_route_ ? data_route(address, size, access).route : VmDataRoute::Local;
   }
 
   [[nodiscard]] std::optional<VmTransferToken>
@@ -176,7 +199,7 @@ public:
     if (&physical != static_cast<const PhysicalMemoryAccess *>(this) || !data_route_ ||
         access != VmAccessKind::Read || size == 0 ||
         size - 1 > std::numeric_limits<uint64_t>::max() - address ||
-        data_route_(address, size, access).candidate != LegacyDeferredCandidate::Peer)
+        data_route(address, size, access).candidate != LegacyDeferredCandidate::Peer)
       return std::nullopt;
     // Untokenized callers must observe the deferred route and refuse it. They
     // have no executing snapshot to authorize an owned effect.
@@ -191,7 +214,7 @@ public:
         access != VmAccessKind::Read || size == 0 ||
         size - 1 > std::numeric_limits<uint64_t>::max() - address)
       return std::nullopt;
-    const auto route = data_route_(address, size, access);
+    const auto route = data_route(address, size, access);
     if (route.candidate != LegacyDeferredCandidate::Peer)
       return std::nullopt;
     const size_t page_bytes = kLegacyPageSize - (address & (kLegacyPageSize - 1));
@@ -213,7 +236,7 @@ public:
                          const std::shared_ptr<VmTransferEffectGate> &) const override {
     if (&physical != static_cast<const PhysicalMemoryAccess *>(this) || !data_route_ ||
         bytes.empty() || bytes.size() - 1 > std::numeric_limits<uint64_t>::max() - address ||
-        data_route_(address, bytes.size(), VmAccessKind::Write).candidate ==
+        data_route(address, bytes.size(), VmAccessKind::Write).candidate ==
             LegacyDeferredCandidate::None)
       return std::nullopt;
     return VmTransferToken(std::make_unique<FaultedDeferredTransfer>(), 1);
@@ -227,7 +250,7 @@ public:
     if (&physical != static_cast<const PhysicalMemoryAccess *>(this) || !data_route_ ||
         bytes.empty() || bytes.size() - 1 > std::numeric_limits<uint64_t>::max() - address)
       return std::nullopt;
-    const auto route = data_route_(address, bytes.size(), VmAccessKind::Write);
+    const auto route = data_route(address, bytes.size(), VmAccessKind::Write);
     if (route.candidate == LegacyDeferredCandidate::None)
       return std::nullopt;
     const size_t page_bytes = kLegacyPageSize - (address & (kLegacyPageSize - 1));
@@ -291,7 +314,7 @@ public:
     if (bytes.empty() || bytes.size() - 1 > std::numeric_limits<uint64_t>::max() - address)
       return {.outcome = VmAccessOutcome::Malformed, .report_translation_fault = true};
     if (data_route_) {
-      const auto route = data_route_(address, bytes.size(), access);
+      const auto route = data_route(address, bytes.size(), access);
       if (route.candidate != LegacyDeferredCandidate::None)
         return {.outcome = VmAccessOutcome::Faulted, .report_translation_fault = true};
       if (route.first_extent_bytes != 0)
@@ -315,7 +338,7 @@ public:
     if (bytes.empty() || bytes.size() - 1 > std::numeric_limits<uint64_t>::max() - address)
       return {.outcome = VmAccessOutcome::Malformed, .report_translation_fault = true};
     if (data_route_) {
-      const auto route = data_route_(address, bytes.size(), VmAccessKind::Write);
+      const auto route = data_route(address, bytes.size(), VmAccessKind::Write);
       if (route.candidate != LegacyDeferredCandidate::None)
         return {.outcome = VmAccessOutcome::Faulted, .report_translation_fault = true};
       if (route.first_extent_bytes != 0)
@@ -626,6 +649,8 @@ private:
   const std::shared_ptr<util::DistributedSharedMutex> original_request_mutex_;
   util::IntrusiveSharedPtr<const amdgpu::VmMutationEpoch> mutation_epoch_;
   std::shared_ptr<const PrtResidency> prt_residency_;
+  const std::shared_ptr<LegacyPageTableCacheState> page_policies_;
+  const VmLocalGrants local_grants_;
   std::shared_ptr<VmRawBackingWriteGate> raw_write_gate_;
   std::function<VmAccessAdmission(uint64_t, std::size_t, VmAccessKind)> access_admission_;
   std::function<LegacyDataRoute(uint64_t, std::size_t, VmAccessKind)> data_route_;

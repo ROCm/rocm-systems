@@ -7,6 +7,8 @@
 #pragma once
 
 #include <algorithm>
+#include <array>
+#include <atomic>
 #include <cassert>
 #include <cstdint>
 #include <limits>
@@ -27,11 +29,13 @@ public:
   class Permit {
   public:
     Permit() = default;
-    Permit(Permit &&other) noexcept : gate_(std::exchange(other.gate_, nullptr)), id_(other.id_) {}
+    Permit(Permit &&other) noexcept
+        : gate_(std::exchange(other.gate_, nullptr)), shard_(other.shard_), id_(other.id_) {}
     Permit &operator=(Permit &&other) noexcept {
       if (this != &other) {
         release();
         gate_ = std::exchange(other.gate_, nullptr);
+        shard_ = other.shard_;
         id_ = other.id_;
       }
       return *this;
@@ -42,15 +46,18 @@ public:
 
   private:
     friend class VmRawBackingWriteGate;
-    Permit(VmRawBackingWriteGate *gate, uint64_t id) : gate_(gate), id_(id) {}
+    Permit(VmRawBackingWriteGate *gate, size_t shard, uint64_t id)
+        : gate_(gate), shard_(shard), id_(id) {}
     void release() noexcept {
       if (gate_) {
-        std::lock_guard lock(gate_->mutex_);
-        erase_entry(gate_->active_, id_);
+        auto &shard = gate_->shards_[shard_];
+        std::lock_guard lock(shard.mutex);
+        erase_entry(shard.active, id_);
       }
       gate_ = nullptr;
     }
     VmRawBackingWriteGate *gate_ = nullptr;
+    size_t shard_ = 0;
     uint64_t id_ = 0;
   };
 
@@ -74,7 +81,7 @@ public:
     Closed(VmRawBackingWriteGate *gate, uint64_t id) : gate_(gate), id_(id) {}
     void reopen() noexcept {
       if (gate_) {
-        std::lock_guard lock(gate_->mutex_);
+        auto locks = gate_->lock_all_shards();
         erase_entry(gate_->closed_, id_);
       }
       gate_ = nullptr;
@@ -86,18 +93,22 @@ public:
   [[nodiscard]] std::optional<Permit> try_acquire(uint64_t begin, uint64_t size) noexcept {
     if (!valid(begin, size))
       return std::nullopt;
-    std::lock_guard lock(mutex_);
-    if (next_id_ == 0)
+    static std::atomic<size_t> next_shard{0};
+    static thread_local const size_t index =
+        next_shard.fetch_add(1, std::memory_order_relaxed) % kShards;
+    auto &shard = shards_[index];
+    std::lock_guard lock(shard.mutex);
+    if (shard.next_id == 0)
       return std::nullopt;
     const Span requested{begin, size};
     for (const Entry &closed : closed_)
       if (overlaps(requested, closed.span))
         return std::nullopt;
     try {
-      const uint64_t id = next_id_;
-      active_.push_back({requested, id});
-      ++next_id_;
-      return Permit(this, id);
+      const uint64_t id = shard.next_id;
+      shard.active.push_back({requested, id});
+      ++shard.next_id;
+      return Permit(this, index, id);
     } catch (const std::bad_alloc &) {
       return std::nullopt;
     }
@@ -106,13 +117,14 @@ public:
   [[nodiscard]] std::optional<Closed> try_close(uint64_t begin, uint64_t size) noexcept {
     if (!valid(begin, size))
       return std::nullopt;
-    std::lock_guard lock(mutex_);
+    auto locks = lock_all_shards();
     if (next_id_ == 0)
       return std::nullopt;
     const Span requested{begin, size};
-    for (const Entry &active : active_)
-      if (overlaps(requested, active.span))
-        return std::nullopt;
+    for (const auto &shard : shards_)
+      for (const Entry &active : shard.active)
+        if (overlaps(requested, active.span))
+          return std::nullopt;
     try {
       const uint64_t id = next_id_;
       closed_.push_back({requested, id});
@@ -153,8 +165,23 @@ private:
     }
   }
 
-  std::mutex mutex_;
-  std::vector<Entry> active_;
+  // Raw writes on independent CU workers only touch their own shard. Closing
+  // a controlled range takes every shard in order so the overlap check and
+  // publication are atomic with respect to all outstanding permits.
+  static constexpr size_t kShards = 16;
+  struct alignas(64) Shard {
+    std::mutex mutex;
+    std::vector<Entry> active;
+    uint64_t next_id = 1;
+  };
+  std::array<std::unique_lock<std::mutex>, kShards> lock_all_shards() {
+    std::array<std::unique_lock<std::mutex>, kShards> locks;
+    for (size_t i = 0; i < kShards; ++i)
+      locks[i] = std::unique_lock(shards_[i].mutex);
+    return locks;
+  }
+
+  std::array<Shard, kShards> shards_;
   std::vector<Entry> closed_;
   uint64_t next_id_ = 1;
 };
