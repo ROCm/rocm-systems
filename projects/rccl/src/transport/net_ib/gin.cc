@@ -100,11 +100,12 @@ static bool ncclNetIbDevIsMlx5(int dev) {
   return true;
 }
 
-// Anvil SDMA skips the IB RMA proxy; on gfx1250 under IB-CAST a second ibv_get_device_list SIGSEGVs (ionic, bng_re).
+// On gfx1250 under IB-CAST a second ibv_get_device_list SIGSEGVs (ionic, bng_re). Skipping leaves no RMA plugin, so
+// only that case skips, and only with NCCL_GIN_TYPE unset or Anvil SDMA; an explicit proxy or GDAKI type still inits.
 static bool ncclGinIbSkipVerbsInit(int type) {
-  if (type == (int)NCCL_NET_DEVICE_GIN_ANVIL_SDMA) return true;
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
-  if (type >= 0 || !rcclInternalNetIsIbCast()) return false;
+  if (type >= 0 && type != (int)NCCL_NET_DEVICE_GIN_ANVIL_SDMA) return false;
+  if (!rcclInternalNetIsIbCast()) return false;
   int dev = 0;
   if (cudaGetDevice(&dev) != cudaSuccess) return false;
   char arch[256];
