@@ -27,12 +27,11 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any, Callable, Dict, Hashable, List, Optional, Sequence, Set, Tuple
 
-from format_yaml import normalize_equation
-
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 # Make src/ importable.
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 from rocprof_compute_soc.metric_library import loader  # noqa: E402
+from utils.equation_format import normalize_equation
 from utils.metrics.expression import build_eval_string  # noqa: E402
 from utils.mi_gpu_spec import mi_gpu_specs  # noqa: E402
 from utils.utils_common import config_arch_members  # noqa: E402

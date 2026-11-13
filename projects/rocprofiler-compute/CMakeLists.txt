@@ -595,6 +595,13 @@ add_test(
 )
 
 add_test(
+    NAME test_equation_format
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_equation_format.xml
+        ${COV_OPTION} tests/unit/utils/test_equation_format.py ${WORKING_DIR_OPTION}
+)
+
+add_test(
     NAME test_list_metrics_cli
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_list_metrics_cli.xml
@@ -1169,6 +1176,7 @@ if(${ENABLE_COVERAGE})
         test_benchmark_base
         test_analysis_cli
         test_pattern_matching
+        test_equation_format
         test_list_metrics_cli
         test_memory_chart_loader
         test_memory_chart_units
