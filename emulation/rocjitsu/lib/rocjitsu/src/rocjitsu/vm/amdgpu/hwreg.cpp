@@ -519,12 +519,13 @@ HwregAccessResult read_raw_hwreg(Wavefront &wf, HwregState state, uint32_t &raw_
     raw_value = wf.mode_raw();
     return HwregAccessResult::Success;
   case HwregState::Gfx11Status:
+    // IDLE[28] tells a host reader that a wave has nothing in flight. The wave
+    // executing this S_GETREG never is, so it reads 0 (gfx1100 and gfx1201).
     raw_value = (wf.status_raw() & ~((7u << 9) | (1u << 12) | (1u << 16) | (1u << 28))) |
                 field_value(wf.exec() == 0, 9, 1) | field_value(wf.vcc_mask() == 0, 10, 1) |
                 field_value(wf.cu().in_multiwave_workgroup(), 11, 1) |
                 field_value(wf.state() == WfState::BARRIER, 12, 1) |
-                field_value(!wf.is_halted(), 16, 1) |
-                field_value(wf.wait_counters().empty(), 28, 1);
+                field_value(!wf.is_halted(), 16, 1);
     return HwregAccessResult::Success;
   case HwregState::GprAllocGfx11: {
     // The GFX11 CWSR handler interprets VGPR_SIZE+1 in units of four
@@ -573,15 +574,15 @@ HwregAccessResult read_raw_hwreg(Wavefront &wf, HwregState state, uint32_t &raw_
          wf.cu().arch() == ROCJITSU_CODE_ARCH_CDNA5)) {
       // SCC, user priority and HALT are in STATE_PRIV on GFX12. Derive the
       // live STATUS fields instead of exposing their legacy backing bits.
+      // IDLE[28] stays 0 for the reading wave, as for GFX11 above.
       constexpr uint32_t external_bits =
           (1u << 8) | (1u << 14) | (1u << 18) | (1u << 23) | (0xfu << 24) | (1u << 30);
-      raw_value =
-          (raw_value & external_bits) | field_value(wf.in_trap_handler(), 5, 1) |
-          field_value(wf.cu().trap_message_address(0x85) != 0, 6, 1) |
-          field_value(wf.exec() == 0, 9, 1) | field_value(wf.vcc_mask() == 0, 10, 1) |
-          field_value(wf.cu().in_multiwave_workgroup(), 11, 1) |
-          field_value(wf.trap_barrier_complete(), 15, 1) | field_value(!wf.is_halted(), 16, 1) |
-          field_value(wf.wait_counters().empty(), 28, 1) | field_value(wf.wf_size() == 64, 29, 1);
+      raw_value = (raw_value & external_bits) | field_value(wf.in_trap_handler(), 5, 1) |
+                  field_value(wf.cu().trap_message_address(0x85) != 0, 6, 1) |
+                  field_value(wf.exec() == 0, 9, 1) | field_value(wf.vcc_mask() == 0, 10, 1) |
+                  field_value(wf.cu().in_multiwave_workgroup(), 11, 1) |
+                  field_value(wf.trap_barrier_complete(), 15, 1) |
+                  field_value(!wf.is_halted(), 16, 1) | field_value(wf.wf_size() == 64, 29, 1);
     } else {
       constexpr uint32_t dynamic_bits = (1u << 6) | (7u << 9) | (1u << 12) | (1u << 16);
       raw_value = (raw_value & ~dynamic_bits) | ((wf.cu().trap_addresses().first != 0) << 6) |

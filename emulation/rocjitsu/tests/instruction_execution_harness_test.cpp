@@ -9793,12 +9793,57 @@ TEST(HwregTest, GetregReadsModeAndStatusTargetIds) {
     const auto arch = arch_case.arch;
     uint32_t expected = (kStatus & ~((1u << 6) | (1u << 11) | (1u << 12))) | (3u << 9) | (1u << 16);
     if (arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5)
-      expected |= kStatus & (1u << 6);
+      expected = (expected | (kStatus & (1u << 6))) & ~(1u << 28);
     if (arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5)
-      expected = 0x12054600u;
+      expected = 0x02054600u;
     EXPECT_EQ(cu->read_sgpr(sb + 5), expected);
     EXPECT_EQ(cu->read_sgpr(sb + 6), 0u);
 
+    if (!wf->is_halted())
+      wf->halt();
+  }
+}
+
+TEST(HwregTest, StatusNeverReportsTheReadingWaveIdle) {
+  // GFX11 and GFX12 STATUS.IDLE[28] is for a host reading another wave. The
+  // reading wave is executing S_GETREG: gfx1100 and gfx1201 read 0 there with
+  // no memory outstanding. CDNA3/4 keep IDLE in bit 31 of the raw word.
+  for (const HwregArchCase &arch_case : kHwregArchCases) {
+    SCOPED_TRACE(arch_case.name);
+    amdgpu::GpuMemory gpu_mem(std::string("hwreg_status_idle_mem_") + arch_case.name);
+    amdgpu::L2Cache l2(std::string("hwreg_status_idle_l2_") + arch_case.name);
+    amdgpu::ComputeUnitCore::Config cfg{};
+    cfg.arch = arch_case.arch;
+    cfg.num_wf_slots = 1;
+    cfg.sgprs_per_wf = 106;
+    cfg.vgprs_per_wf = 256;
+    cfg.lds_size_kb = 64;
+    auto cu = amdgpu::ComputeUnitCore::create(arch_case.name, cfg, &gpu_mem, &l2);
+    ASSERT_NE(cu, nullptr);
+    auto decoder = Decoder::create(arch_case.arch);
+    ASSERT_NE(decoder, nullptr);
+    const auto words = encode_sopk(arch_case.getreg_op, 4, encode_hwreg(2));
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+    ASSERT_NE(inst, nullptr);
+    auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+    ASSERT_NE(wf, nullptr);
+    wf->set_status_raw(0);
+    wf->set_exec(1);
+    wf->set_vcc_raw(1);
+    ASSERT_TRUE(wf->wait_counters().empty());
+    ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
+    const uint32_t idle_wave = cu->read_sgpr(wf->sgpr_alloc().base + 4);
+    EXPECT_EQ(idle_wave & (1u << 28), 0u);
+    const auto arch = arch_case.arch;
+    if (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) {
+      EXPECT_EQ(idle_wave, 1u << 16); // VALID only; IDLE[31] clear as before.
+    }
+    wf->wait_counters().vmcnt = 1;
+    uint32_t busy_wave = UINT32_MAX;
+    ASSERT_EQ(amdgpu::read_hwreg_field(*wf, encode_hwreg(2), busy_wave),
+              amdgpu::HwregAccessResult::Success);
+    EXPECT_EQ(busy_wave, idle_wave);
+    wf->wait_counters().vmcnt = 0;
     if (!wf->is_halted())
       wf->halt();
   }
