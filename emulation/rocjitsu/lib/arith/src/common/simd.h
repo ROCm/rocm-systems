@@ -12,6 +12,62 @@
 
 namespace rocjitsu::arith {
 #if defined(RJ_ARITH_HAVE_X86_64_V3)
+// CDNA FP32 pair-sum then C; preserve inactive lanes and aliases. Requires validated controls.
+void cdna_dot2_x86_64_v3(bool bf16, uint32_t exec_mask, uint32_t instruction_flags, uint32_t *d,
+                         const uint32_t *a, const uint32_t *b, const uint32_t *c);
+#endif
+
+#if defined(RJ_ARITH_HAVE_X86_64_V4)
+// CDNA FP32 pair-sum then C; preserve inactive lanes and aliases. Requires validated controls.
+void cdna_dot2_x86_64_v4(bool bf16, uint32_t exec_mask, uint32_t instruction_flags, uint32_t *d,
+                         const uint32_t *a, const uint32_t *b, const uint32_t *c);
+#endif
+
+#if defined(RJ_ARITH_HAVE_X86_64_V3)
+
+// Evaluate move half for the caller-selected operation. Preserve destination lanes outside
+// exec_mask.
+// Requires the named CPU features and validated instruction controls.
+void move_half_x86_64_v3(uint32_t exec_mask, uint32_t mode, uint32_t *d, const uint32_t *a);
+
+// Evaluate swap half for the caller-selected operation. Preserve destination lanes outside
+// exec_mask.
+// Requires the named CPU features and validated instruction controls.
+void swap_half_x86_64_v3(int lanes, uint64_t exec_mask, uint32_t mode, uint32_t *d, uint32_t *a);
+
+// Evaluate ds bpermute for the caller-selected operation. Preserve destination lanes outside
+// exec_mask.
+// Requires the named CPU features and validated instruction controls.
+void ds_bpermute_x86_64_v3(int lanes, int group, uint64_t exec_mask, uint32_t *d,
+                           const uint32_t *addr, const uint32_t *data, uint16_t offset);
+
+// Evaluate ds swizzle for the caller-selected operation. Preserve destination lanes outside
+// exec_mask.
+// Requires the named CPU features and validated instruction controls.
+void ds_swizzle_x86_64_v3(int lanes, uint64_t exec_mask, uint32_t *d, const uint32_t *a,
+                          uint16_t offset);
+
+// Evaluate move half for the caller-selected operation. Preserve destination lanes outside
+// exec_mask.
+// Requires the named CPU features and validated instruction controls.
+void move_half_x86_64_v3(uint32_t exec_mask, uint32_t mode, uint32_t *d, const uint32_t *a);
+
+// Evaluate swap half for the caller-selected operation. Preserve destination lanes outside
+// exec_mask.
+// Requires the named CPU features and validated instruction controls.
+void swap_half_x86_64_v3(int lanes, uint64_t exec_mask, uint32_t mode, uint32_t *d, uint32_t *a);
+
+// Evaluate ds bpermute for the caller-selected operation. Preserve destination lanes outside
+// exec_mask.
+// Requires the named CPU features and validated instruction controls.
+void ds_bpermute_x86_64_v3(int lanes, int group, uint64_t exec_mask, uint32_t *d,
+                           const uint32_t *addr, const uint32_t *data, uint16_t offset);
+
+// Evaluate ds swizzle for the caller-selected operation. Preserve destination lanes outside
+// exec_mask.
+// Requires the named CPU features and validated instruction controls.
+void ds_swizzle_x86_64_v3(int lanes, uint64_t exec_mask, uint32_t *d, const uint32_t *a,
+                          uint16_t offset);
 
 // Evaluate move half for the caller-selected operation. Preserve destination lanes outside
 // exec_mask.

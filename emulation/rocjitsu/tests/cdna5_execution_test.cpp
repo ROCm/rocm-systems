@@ -87,7 +87,7 @@ public:
   void execute_and_route(std::unique_ptr<Instruction> instruction, amdgpu::Wavefront &wave) {
     EXPECT_TRUE(execute_instruction(instruction.get(), wave).succeeded());
     if (instruction->is_memory_op())
-      route_memory_inst(instruction.release(), wave);
+      route_memory_inst(std::move(instruction), wave);
   }
 };
 
@@ -5720,6 +5720,51 @@ TEST(Gfx1250ExecutionTest, PkFmaF32SimdMatchesScalarWithPartialExec) {
   }
 }
 
+// Selected BF16 halves and source modifiers survive overlapping destination storage.
+TEST(Gfx1250ExecutionTest, FmaMixBf16AliasingAndExec) {
+  for (const uint16_t opcode :
+       {cdna5::kVFmaMixF32Bf16Vop3p, cdna5::kVFmaMixloBf16Vop3p, cdna5::kVFmaMixhiBf16Vop3p}) {
+    for (bool clamp : {false, true}) {
+      auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+      const auto words = cdna5::build_vop3p(opcode, {.vdst = 0,
+                                                     .neg_hi = 1,
+                                                     .opsel = 5,
+                                                     .opsel_hi_2 = 1,
+                                                     .clamp = uint8_t(clamp),
+                                                     .src0 = 256,
+                                                     .src1 = 257,
+                                                     .src2 = 258,
+                                                     .opsel_hi = 3,
+                                                     .neg = 1});
+      std::unique_ptr<Instruction> instruction(decode_valid(*decoder, words.data()));
+      ASSERT_NE(instruction, nullptr);
+      Gfx1250Sim sim;
+      ASSERT_NO_FATAL_FAILURE(sim.initialize());
+      auto *cu = sim.cu();
+      auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+      ASSERT_NE(wf, nullptr);
+      wf->set_exec(0x80000001U);
+      wf->set_trapsts(0x80000000U);
+      const auto base = wf->vgpr_alloc().base;
+      for (unsigned lane = 0; lane < 32; ++lane) {
+        cu->write_vgpr(base, lane, 0xc0003f80U);
+        cu->write_vgpr(base + 1, lane, 0x40404000U);
+        cu->write_vgpr(base + 2, lane, 0x3f803f00U);
+      }
+      ASSERT_TRUE(cu->execute_instruction(instruction.get(), *wf).succeeded());
+      // -abs(-2) * 2 + 1 = -3; CLAMP instead writes +0.
+      const uint32_t half = clamp ? 0 : 0xc040U;
+      const uint32_t result = opcode == cdna5::kVFmaMixF32Bf16Vop3p  ? half << 16
+                              : opcode == cdna5::kVFmaMixloBf16Vop3p ? 0xc0000000U | half
+                                                                     : (half << 16) | 0x3f80U;
+      for (unsigned lane = 0; lane < 32; ++lane) {
+        EXPECT_EQ(cu->read_vgpr(base, lane), lane == 0 || lane == 31 ? result : 0xc0003f80U);
+      }
+      EXPECT_EQ(wf->trapsts(), 0x80000000U);
+    }
+  }
+}
+
 TEST(Gfx1250ExecutionTest, FmaMixBf16ResultsHonorRoundModeAndClamp) {
   struct TestCase {
     uint32_t src0;
@@ -5986,9 +6031,13 @@ TEST(Gfx1250ExecutionTest, SwmmacIu8K128MatchesIndependentSparseLayoutOracle) {
       for (uint32_t lane = 0; lane < 32; ++lane)
         cu.write_vgpr(base + kAcc + reg, lane, 0);
 
-    amdgpu::exec_swmmac_i32<16, 16, 128>(cu, 8, base + kAcc, base + kA, base + kB, base + kAcc,
-                                         base + kIndex, 32, 0, amdgpu::extract_u8,
-                                         amdgpu::extract_u8, false);
+    auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+    const auto words = cdna5::build_vop3p(
+        cdna5::kVSwmmacI3216x16x128Iu8Vop3p,
+        {.vdst = kAcc, .src0 = 256 + kA, .src1 = 256 + kB, .src2 = 256 + kIndex});
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+    ASSERT_NE(inst, nullptr);
+    ASSERT_TRUE(cu.execute_instruction(inst.get(), *wf).succeeded());
 
     for (uint32_t row = 0; row < 16; ++row)
       for (uint32_t col = 0; col < 16; ++col) {
@@ -5996,6 +6045,42 @@ TEST(Gfx1250ExecutionTest, SwmmacIu8K128MatchesIndependentSparseLayoutOracle) {
         EXPECT_EQ(cu.read_vgpr(base + kAcc + out.reg, out.lane), expected[row * 16 + col])
             << "row=" << row << " col=" << col;
       }
+  }
+}
+
+// Independent source signs and CLAMP must survive decoded control forwarding.
+TEST(Gfx1250ExecutionTest, SwmmacIu8K128SignsAndClamp) {
+  Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
+  auto *wf = sim.dispatch_scratch_wf();
+  ASSERT_NE(wf, nullptr);
+  auto &cu = *sim.cu();
+  const auto base = wf->vgpr_alloc().base;
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  for (uint8_t signs : {0, 1, 2}) {
+    for (uint8_t clamp : {0, 1}) {
+      for (uint32_t lane = 0; lane < 32; ++lane) {
+        for (uint32_t reg = 0; reg < 8; ++reg) {
+          cu.write_vgpr(base + reg, lane, 0x80808080U);
+          cu.write_vgpr(base + 40 + reg, lane, signs ? 0 : INT32_MAX);
+        }
+        for (uint32_t reg = 16; reg < 32; ++reg)
+          cu.write_vgpr(base + reg, lane, 0xffffffffU);
+        for (uint32_t reg = 56; reg < 58; ++reg)
+          cu.write_vgpr(base + reg, lane, 0x44444444U);
+      }
+      const auto words = cdna5::build_vop3p(
+          cdna5::kVSwmmacI3216x16x128Iu8Vop3p,
+          {.vdst = 40, .clamp = clamp, .src0 = 256, .src1 = 272, .src2 = 312, .neg = signs});
+      std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+      ASSERT_NE(inst, nullptr);
+      ASSERT_TRUE(cu.execute_instruction(inst.get(), *wf).succeeded());
+      const uint32_t expected = signs == 1   ? uint32_t(-2088960)
+                                : signs == 2 ? uint32_t(-8192)
+                                : clamp      ? uint32_t(INT32_MAX)
+                                             : uint32_t(INT32_MAX) + 2088960U;
+      EXPECT_EQ(cu.read_vgpr(base + 40, 0), expected);
+    }
   }
 }
 
@@ -6871,6 +6956,41 @@ TEST(Gfx1250ExecutionTest, QsadAndMqsadUseFourSlidingWindowsAndMaskedReferenceBy
   EXPECT_EQ(read(13), UINT32_MAX);
   EXPECT_EQ(read(14), UINT32_MAX);
   EXPECT_EQ(read(15), UINT32_MAX);
+}
+
+// gfx1250 inherits rocjitsu's gfx12 MULLIT model, including guest MODE and OMOD order.
+TEST(Gfx1250ExecutionTest, MullitRetainsGuestRoundingAndFlushRules) {
+  Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
+  auto *cu = sim.cu();
+  auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+  ASSERT_NE(wf, nullptr);
+  const uint32_t base = wf->vgpr_alloc().base;
+  constexpr struct {
+    uint32_t a, b, c, expected, mode;
+    uint8_t omod;
+  } cases[] = {
+      {0x2d1d4000, 0x49032148, 0x44630000, 0x36a11862, 3 | (3 << 4), 0},
+      {0x3f800000, 0x3f800000, 1, 0xff7fffff, 2 << 4, 0},
+      {0x00c00000, 0x3f000000, 0x3f800000, 0, 3 << 4, 1},
+      {0x7f80002a, 0x3f800000, 0x3f800000, 0x7fc0002a, 3 << 4, 0},
+  };
+  for (const auto &sample : cases) {
+    wf->set_mode_raw(sample.mode);
+    wf->set_exec(1);
+    cu->write_vgpr(base, 0, sample.a);
+    cu->write_vgpr(base + 1, 0, sample.b);
+    cu->write_vgpr(base + 2, 0, sample.c);
+    cu->write_vgpr(base, 1, 0xdeadbeef);
+    auto words =
+        cdna5::build_vop3(cdna5::kVMullitF32Vop3,
+                          {.vdst = 0, .src0 = 256, .src1 = 257, .src2 = 258, .omod = sample.omod});
+    cdna5::VMullitF32Vop3 inst(words.data());
+    inst.execute_impl(*wf);
+    ASSERT_FALSE(wf->instruction_execution_failed());
+    EXPECT_EQ(cu->read_vgpr(base, 0), sample.expected);
+    EXPECT_EQ(cu->read_vgpr(base, 1), 0xdeadbeef);
+  }
 }
 
 TEST(Gfx1250ExecutionTest, MullitAndTrigPreopPreserveLegacyAndRangeReductionRules) {

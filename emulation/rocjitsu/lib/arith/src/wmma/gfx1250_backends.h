@@ -43,4 +43,10 @@ template <int M, int Block>
 void wmma_gfx1250_scaled_x86_64_v4(uint64_t controls, uint32_t *const *d, const uint32_t *const *a,
                                    const uint32_t *const *b, const uint32_t *const *c,
                                    const uint32_t *const *scale_a, const uint32_t *const *scale_b);
+template <int Bits, bool BfA, bool BfB, int Form>
+void swmmac_float_x86_64_v3(uint64_t flags, uint32_t *const *d, const uint32_t *const *a,
+                            const uint32_t *const *b, const uint32_t *const *index);
+template <int Bits, bool BfA, bool BfB, int Form>
+void swmmac_float_x86_64_v4(uint64_t flags, uint32_t *const *d, const uint32_t *const *a,
+                            const uint32_t *const *b, const uint32_t *const *index);
 } // namespace rocjitsu::arith
