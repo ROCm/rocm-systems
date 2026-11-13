@@ -1,12 +1,12 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-//! Public GPU native events over the shared KFD signal-page service.
+//! Public GPU native events over the qualified provider notification services.
 
 use crate::generated::amdf::*;
 use crate::instance::{self, Device};
 use crate::support::*;
-use rocddi::device::gpu::event::linux::{SignalEvent, SignalEventAddressing};
+use rocddi::device::gpu::event::{SignalEvent, SignalEventAddressing, SignalEventProtocol};
 use rocddi::memory::storage::Owned;
 
 struct Event {
@@ -62,6 +62,7 @@ pub(crate) unsafe extern "C" fn create(
             unregister(&device.events);
             return Err(LOST);
         }
+        let SignalEventProtocol::KfdSignal { event_id } = event.protocol();
         let owner = slot.write(Event {
             info: amdf_gpu_event_info_t {
                 device_id: device.id,
@@ -70,8 +71,8 @@ pub(crate) unsafe extern "C" fn create(
                 format_version: 1,
                 publication_modes: AMDF_QUEUE_PUBLICATION_MODE_USER,
                 mailbox_address: mailbox.device,
-                trigger_data: event.info().kfd_event_id,
-                interrupt_context: event.info().kfd_event_id,
+                trigger_data: event_id,
+                interrupt_context: event_id,
                 ..Default::default()
             },
             native: event,

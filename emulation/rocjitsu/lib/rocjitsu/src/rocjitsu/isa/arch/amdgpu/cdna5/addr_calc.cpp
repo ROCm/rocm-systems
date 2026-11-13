@@ -116,6 +116,8 @@ void flat_global_calculate_addresses(const Inst &inst, amdgpu::Wavefront &wf,
     d.exec_mask = amdgpu::wave32_exec_all_if_nonzero(d.exec_mask);
     d.lane_mask = d.exec_mask;
   }
+  if (d.transpose && !d.exec_mask)
+    return;
   uint64_t exec = d.exec_mask;
   int64_t offset = static_cast<int64_t>(signed_ioffset(inst.ioffset));
   bool saddr_present = has_saddr(inst.saddr);
@@ -247,6 +249,26 @@ uint32_t async_lds_lane_address(const VglobalMachineInst &inst, const amdgpu::Wa
   if (absolute_addr >= UINT32_MAX)
     return amdgpu::kInvalidLdsAddress;
   return static_cast<uint32_t>(absolute_addr);
+}
+
+AsyncLdsSource async_lds_lane_source(const VglobalMachineInst &inst, const amdgpu::Wavefront &wf,
+                                     uint32_t lds_operand, uint32_t access_size_bytes) {
+  // As in async_lds_lane_address, the 32-bit operand and IOFFSET wrap before
+  // the bounds check.
+  const uint32_t relative_addr = lds_operand + static_cast<uint32_t>(signed_ioffset(inst.ioffset));
+  const uint64_t lds_size = wf.lds_size();
+  if (relative_addr >= lds_size || access_size_bytes == 0)
+    return {};
+  // The ISA specifies out-of-range LDS behavior for async loads only (CDNA5 ISA
+  // 3.3.3). As a modeling choice, an async store reads every byte of its source
+  // inside the allocation, and zeros past it, so a race detector tracks every
+  // byte the store may read.
+  const auto bytes =
+      static_cast<uint32_t>(std::min<uint64_t>(access_size_bytes, lds_size - relative_addr));
+  const uint64_t absolute_addr = static_cast<uint64_t>(wf.lds_base()) + relative_addr;
+  if (bytes == 0 || absolute_addr + bytes > UINT32_MAX)
+    return {};
+  return {.address = static_cast<uint32_t>(absolute_addr), .bytes = bytes};
 }
 
 void flat_calculate_addresses(const VscratchMachineInst &inst, amdgpu::Wavefront &wf,
@@ -432,7 +454,7 @@ void ds_calculate_addresses_masked(const VdsMachineInst &inst, amdgpu::Wavefront
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(lane_mask & (1ULL << lane)))
       continue;
-    d.per_lane_addr[lane] = addresses[lane] + offset + wf.lds_base();
+    d.per_lane_addr[lane] = amdgpu::ds_address(wf.lds_base(), addresses[lane], offset);
   }
 }
 

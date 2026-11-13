@@ -2898,6 +2898,8 @@ TEST_F(ProxyLifecycleMicrotest, Create_CopiesCommSettingsAndStartsBothServiceThr
   comm_->buffSizes[1] = 777;
   comm_->ll128LineElems = 9;
   abort_ = 1;
+  ps->p2pCeStream = reinterpret_cast<hipStream_t>(0x77);
+  ps->p2pCeStreamRefs = 9;
   ps->refCount = 2;  // a split comm sharing an already running proxy
   ASSERT_EQ(ncclProxyCreate(comm_.get()), ncclSuccess);
   EXPECT_FALSE(ps->thread.joinable());
@@ -2914,6 +2916,8 @@ TEST_F(ProxyLifecycleMicrotest, Create_CopiesCommSettingsAndStartsBothServiceThr
   EXPECT_EQ(ps->p2pChunkSize, 1 << 19);
   EXPECT_EQ(ps->buffSizes[1], 777);
   EXPECT_EQ(ps->ll128LineElems, 9);
+  EXPECT_EQ(ps->p2pCeStream, nullptr);
+  EXPECT_EQ(ps->p2pCeStreamRefs, 0);
   EXPECT_EQ(ps->ginState, &res_.ginState);
   EXPECT_EQ(g_threadNames, 2);
   EXPECT_EQ(g_hipSetDevices, (std::vector<int>{5, 5}));

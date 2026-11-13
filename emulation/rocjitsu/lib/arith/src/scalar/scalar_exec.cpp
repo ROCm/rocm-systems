@@ -4,10 +4,10 @@
 // Scalar boolean operations on EXEC and saved-mask/SCC results.
 // Owns public entry points and their validation/dispatch policy.
 
-// Semantics follow rocjitsu generated/shared/execute_shared.h for RDNA3/RDNA4.
+// Semantics follow rocjitsu generated/shared/execute_shared.h.
 
-#include "common/internal.h"
-#include "rj_arith/rj_arith.h"
+#include "common/validation.h"
+#include "rj_arith/detail/rj_arith_scalar.h"
 
 #include <stdint.h>
 
@@ -347,4 +347,40 @@ int rj_arith_s_and_not1_wrexec_b64(uint64_t flags, uint64_t instruction_flags, u
   }
   uint64_t new_exec = a & ~exec_mask;
   return store_exec(flags, instruction_flags, d, new_exec, new_exec, exec, scc);
+}
+
+// Older CDNA spelling of AND_NOT0_SAVEEXEC; outputs and validation are identical.
+int rj_arith_s_andn1_saveexec_b64(uint64_t flags, uint64_t instruction_flags, uint64_t *d,
+                                  uint64_t a, uint64_t exec_mask, uint64_t *exec, uint32_t *scc) {
+  return rj_arith_s_and_not0_saveexec_b64(flags, instruction_flags, d, a, exec_mask, exec, scc);
+}
+
+// Older CDNA spelling of AND_NOT1_SAVEEXEC; outputs and validation are identical.
+int rj_arith_s_andn2_saveexec_b64(uint64_t flags, uint64_t instruction_flags, uint64_t *d,
+                                  uint64_t a, uint64_t exec_mask, uint64_t *exec, uint32_t *scc) {
+  return rj_arith_s_and_not1_saveexec_b64(flags, instruction_flags, d, a, exec_mask, exec, scc);
+}
+
+// Older CDNA spelling of OR_NOT0_SAVEEXEC; outputs and validation are identical.
+int rj_arith_s_orn1_saveexec_b64(uint64_t flags, uint64_t instruction_flags, uint64_t *d,
+                                 uint64_t a, uint64_t exec_mask, uint64_t *exec, uint32_t *scc) {
+  return rj_arith_s_or_not0_saveexec_b64(flags, instruction_flags, d, a, exec_mask, exec, scc);
+}
+
+// Older CDNA spelling of OR_NOT1_SAVEEXEC; outputs and validation are identical.
+int rj_arith_s_orn2_saveexec_b64(uint64_t flags, uint64_t instruction_flags, uint64_t *d,
+                                 uint64_t a, uint64_t exec_mask, uint64_t *exec, uint32_t *scc) {
+  return rj_arith_s_or_not1_saveexec_b64(flags, instruction_flags, d, a, exec_mask, exec, scc);
+}
+
+// Older CDNA spelling of AND_NOT0_WREXEC; outputs and validation are identical.
+int rj_arith_s_andn1_wrexec_b64(uint64_t flags, uint64_t instruction_flags, uint64_t *d, uint64_t a,
+                                uint64_t exec_mask, uint64_t *exec, uint32_t *scc) {
+  return rj_arith_s_and_not0_wrexec_b64(flags, instruction_flags, d, a, exec_mask, exec, scc);
+}
+
+// Older CDNA spelling of AND_NOT1_WREXEC; outputs and validation are identical.
+int rj_arith_s_andn2_wrexec_b64(uint64_t flags, uint64_t instruction_flags, uint64_t *d, uint64_t a,
+                                uint64_t exec_mask, uint64_t *exec, uint32_t *scc) {
+  return rj_arith_s_and_not1_wrexec_b64(flags, instruction_flags, d, a, exec_mask, exec, scc);
 }

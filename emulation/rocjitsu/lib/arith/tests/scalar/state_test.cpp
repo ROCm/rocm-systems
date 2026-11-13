@@ -3,7 +3,7 @@
 
 // Tests for guest rounding and denormal MODE-field updates.
 
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_scalar.h"
 
 #include "common/contracts.h"
 #include "common/cpu.h"

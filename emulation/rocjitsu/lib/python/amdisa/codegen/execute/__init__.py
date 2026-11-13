@@ -197,14 +197,17 @@ def _register_handlers() -> None:
         c.supports_dpp8,
         c.supports_sdwa,
         c.profile.dpp_bound_ctrl_applies_to_inactive_sources,
-        use_rj_arith=c.arch_name in ('rdna3', 'rdna4'),
+        use_rj_arith=c.arch_name in ('rdna3', 'rdna4', 'cdna3', 'cdna4', 'cdna5'),
         is_vop3=c.is_vop3,
+        stage_after_destination=c.arch_name == 'rdna3_5',
+        # Preserve legacy CDNA bit-move modifiers; RDNA treats signs as FP32.
+        apply_dpp_source_modifiers=c.arch_name in ('rdna3', 'rdna4'),
     )
     DISPATCH['vector_swaprel'] = lambda c: gen_vector_swaprel(
         c.dst_ops,
         c.src_ops,
         c.profile.uses_vgpr_msb_indexing,
-        use_rj_arith=c.arch_name in ('rdna3', 'rdna4'),
+        use_rj_arith=c.arch_name in ('rdna3', 'rdna4', 'cdna3', 'cdna4', 'cdna5'),
     )
     DISPATCH['vector_sat_pack'] = lambda c: gen_vector_sat_pack(
         c.dst_ops,
@@ -224,6 +227,7 @@ def _register_handlers() -> None:
         c.op,
         c.profile.uses_vgpr_msb_indexing,
         c.is_vop3 and c.inst.name in c.profile.integer_clamp_dtypes,
+        c.arch_name == 'rdna3_5',
     )
     DISPATCH['vector_trig_preop'] = lambda c: gen_vector_trig_preop(
         c.dst_ops, c.src_ops, c.is_vop3, c.has_abs
@@ -320,7 +324,12 @@ def _register_handlers() -> None:
 
     # Packed
     DISPATCH['pk_binop'] = lambda c: gen_pk_binop(
-        c.dst_ops, c.src_ops, c.op, c.dtype, opsel_exprs=c.opsel_exprs
+        c.dst_ops,
+        c.src_ops,
+        c.op,
+        c.dtype,
+        opsel_exprs=c.opsel_exprs,
+        multiply_clamp=c.profile.packed_mul_lo_u16_clamp,
     )
     DISPATCH['pk_ternary'] = lambda c: gen_pk_ternary(
         c.dst_ops,
@@ -368,12 +377,14 @@ def _register_handlers() -> None:
         op_sel_hi_2_expr=c.op_sel_hi_2_expr,
         opsel_exprs=c.opsel_exprs,
         use_cdna5_helpers=c.arch_name == 'cdna5',
-        fused_result=c.arch_name.startswith('rdna') or c.arch_name == 'cdna5',
+        fused_result=c.arch_name.startswith('rdna')
+        or c.arch_name in ('cdna1', 'cdna5'),
     )
     DISPATCH['mad_mixlo_f16'] = lambda c: gen_mad_mix_lo_hi(
         c.dst_ops,
         c.src_ops,
         is_lo=True,
+        fused_f32_intermediate=c.arch_name == 'cdna1',
         op_sel_hi_2_expr=c.op_sel_hi_2_expr,
         opsel_exprs=c.opsel_exprs,
         use_cdna5_helpers=c.arch_name == 'cdna5',
@@ -383,6 +394,7 @@ def _register_handlers() -> None:
         c.dst_ops,
         c.src_ops,
         is_lo=False,
+        fused_f32_intermediate=c.arch_name == 'cdna1',
         op_sel_hi_2_expr=c.op_sel_hi_2_expr,
         opsel_exprs=c.opsel_exprs,
         use_cdna5_helpers=c.arch_name == 'cdna5',
