@@ -30,6 +30,10 @@
 * `ROCSHMEM_SDMA_THRESHOLD` default changed from 256 to 1024 bytes.
   Wave and workgroup operations automatically scale the threshold by the wavefront size,
   avoiding SDMA for small-to-medium transfers where parallel IPC copy is faster.
+* Doubled the internal `ROCSHMEM_ALLTOALL_SYNC_SIZE` (and derived `ROCSHMEM_FCOLLECT_SYNC_SIZE`)
+  pSync allocation, from `BARRIER_SYNC_SIZE + 1` to `2 * BARRIER_SYNC_SIZE + 1`, to back the
+  double-buffered alltoall/fcollect thread-puts fast path. This changes the size of internal
+  pSync buffers; rocSHMEM has no stable binary ABI, so this does not require a version bump.
 
 ## rocSHMEM 3.8.0 for ROCm 10.2
 
