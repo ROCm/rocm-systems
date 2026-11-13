@@ -188,9 +188,7 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
 #endif
   }
 
-  // Each LL128 line carries its step's flag, so a step's stores to the peer need not complete before the next step;
-  // waiting for them costs a fabric round trip per step. A connFifo send is read by the proxy once the tail is
-  // posted, so it keeps the full fence.
+  // LL128 lines carry per-step flags, so skip waiting on peer stores; connFifo sends keep the fence for the proxy.
   inline __device__ void stepBarrier() {
 #if defined(__gfx1250__) || defined(__gfx1250_strict__)
     if (!fifoSend) {
@@ -694,7 +692,9 @@ public:
     loadRecvSync();
     // coverity[var_deref_model:FALSE]
     loadSendSync();
+#if defined(__gfx1250__) || defined(__gfx1250_strict__)
     for (int i = 0; i < nsend; i++) fifoSend |= channel->peers[sendPeers[i]]->send[connIndexSend].connFifo != nullptr;
+#endif
     userRegUsed = (e != nullptr) && (e->regUsed || e->netRegUsed);
     setDataPtrs(inputBuf, outputBuf, e != nullptr ? e->acc : nullptr);
 #if TDM_LL128_ON

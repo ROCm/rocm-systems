@@ -3486,6 +3486,27 @@
         }
       ]
     },
+    "net_ll128_post_send_fence": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 8,
+      "num_nodes": 1,
+      "num_gpus": 8,
+      "timeout": 300,
+      "description": "LL128 Ring AllReduce with every ring hop on NET. On gfx1250 this is the connFifo path, the one LL128 send that keeps the full fence at step barriers. NCCL_P2P_DISABLE and NCCL_SHM_DISABLE are cached per process, so they are set before launch.",
+      "env_variables": {
+        "NCCL_P2P_DISABLE": "1",
+        "NCCL_SHM_DISABLE": "1"
+      },
+      "tests": [
+        {
+          "name": "NetLl128_RingAllReduceEveryHopOnNet",
+          "description": "Regression test for the LL128 connFifo fences: without the full fence the NIC could send stale 128-byte lines and the receiver hung",
+          "test_filter": "NetLl128MPITest.RingAllReduceCompletesWithEveryHopOnNet"
+        }
+      ]
+    },
     "ubr_multi_node": {
       "extends": "default",
       "is_gtest": true,
@@ -6567,6 +6588,12 @@
       "name": "DDA AlltoAll In-Place - 8-Rank (gfx1250 buffer offsets)",
       "description": "gfx1250 AlltoAll at any buffer offset, in place and out of place, stays on DDA LL or LL128 with exact data, also with several peers per LL128 column, single node",
       "config": "dda_alltoall_inplace_mpi_8rank",
+      "enabled": true
+    },
+    {
+      "name": "NET LL128 connFifo Fence - 8-Rank",
+      "description": "Ring/LL128 AllReduce with P2P and SHM disabled so every hop goes through the network proxy, single node",
+      "config": "net_ll128_post_send_fence",
       "enabled": true
     },
     {
