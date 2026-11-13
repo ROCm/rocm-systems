@@ -1,5 +1,5 @@
 /**
- * @file mainpage.cpp
+ * @file mainpage.txt
  * @brief : DoxyGen Main Page.
  * @mainpage Heterogeneous-computing Interface for Portability (HIP)
  * @tableofcontents
