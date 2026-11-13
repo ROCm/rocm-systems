@@ -216,6 +216,12 @@ class StageBothPhases(unittest.TestCase):
     def test_megatron(self):
         self.check_pair()
 
+    def test_another_build_under_the_same_run_gets_another_tag(self):
+        # Saturday's nightly and weekly jobs share GITHUB_RUN_ID, not their baseline.
+        friday = self.stage(tm.BASELINE)
+        self.libs[tm.BASELINE].write_bytes(b"librccl of the previous Saturday")
+        self.assertNotEqual(self.stage(tm.BASELINE), friday)
+
     def test_megatron_kpack(self):
         for phase, lib in self.libs.items():
             (lib.parent / "rccl_gfx950.kpack").write_bytes(f"kpack {phase}".encode())
