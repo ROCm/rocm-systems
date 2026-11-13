@@ -31,6 +31,7 @@ THE SOFTWARE.
 #include <memory>
 #include <string>
 
+#include "common/rdc_fields_supported.h"
 #include "rdc.grpc.pb.h"  // NOLINT
 #include "rdc.pb.h"
 #include "rdc/rdc.h"
@@ -271,6 +272,11 @@ RdcAPIServiceImpl::~RdcAPIServiceImpl() {
   rdc_field_grp_t field_group_id;
   rdc_field_t field_ids[RDC_MAX_FIELD_IDS_PER_FIELD_GROUP];
   for (int i = 0; i < request_count; i++) {
+    // Checked as a number: an ID that RDC does not know is not a value of rdc_field_t.
+    if (!amd::rdc::is_field_id_valid(request->field_ids(i))) {
+      reply->set_status(RDC_ST_NOT_SUPPORTED);
+      return ::grpc::Status::OK;
+    }
     field_ids[i] = static_cast<rdc_field_t>(request->field_ids(i));
   }
   rdc_status_t result =
@@ -294,6 +300,10 @@ RdcAPIServiceImpl::~RdcAPIServiceImpl() {
     return ::grpc::Status(::grpc::StatusCode::INTERNAL, "Empty contents");
   }
 
+  if (!amd::rdc::is_field_id_valid(request->field_id())) {
+    reply->set_status(RDC_ST_NOT_SUPPORTED);
+    return ::grpc::Status::OK;
+  }
   rdc_status_t result = rdc_group_field_add_field(rdc_handle_, request->field_group_id(),
                                                   static_cast<rdc_field_t>(request->field_id()));
   reply->set_status(result);
@@ -363,6 +373,10 @@ RdcAPIServiceImpl::~RdcAPIServiceImpl() {
     return ::grpc::Status(::grpc::StatusCode::INTERNAL, "Empty contents");
   }
 
+  if (!amd::rdc::is_field_id_valid(request->field_id())) {
+    reply->set_status(RDC_ST_NOT_SUPPORTED);
+    return ::grpc::Status::OK;
+  }
   rdc_field_value value;
   rdc_status_t result = rdc_field_get_latest_value(
       rdc_handle_, request->gpu_index(), static_cast<rdc_field_t>(request->field_id()), &value);
@@ -394,6 +408,10 @@ RdcAPIServiceImpl::~RdcAPIServiceImpl() {
     return ::grpc::Status(::grpc::StatusCode::INTERNAL, "Empty contents");
   }
 
+  if (!amd::rdc::is_field_id_valid(request->field_id())) {
+    reply->set_status(RDC_ST_NOT_SUPPORTED);
+    return ::grpc::Status::OK;
+  }
   rdc_field_value value;
   uint64_t next_timestamp;
   rdc_status_t result = rdc_field_get_value_since(

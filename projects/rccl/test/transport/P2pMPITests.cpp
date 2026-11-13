@@ -508,6 +508,9 @@ public:
         // Step 5: Perform ncclSend/ncclRecv which internally triggers ncclRegisterP2pIpcBuffer
         const size_t count = num_floats;
 
+        // Drain setup leftovers so the check after the send/recv covers only that operation.
+        (void)hipGetLastError();
+
         auto nccl_result = ncclGroupStart();
         ASSERT_EQ(ncclSuccess, nccl_result)
             << "Rank " << config.world_rank << ": ncclGroupStart failed";
@@ -543,6 +546,13 @@ public:
         hip_result = hipStreamSynchronize(getActiveStream());
         ASSERT_EQ(hipSuccess, hip_result)
             << "Rank " << config.world_rank << ": hipStreamSynchronize failed";
+
+        // ROCM-33799: registration falls back silently for hipMalloc buffers and must not
+        // leave an error behind for the application's next hipGetLastError.
+        hip_result = hipGetLastError();
+        EXPECT_EQ(hipSuccess, hip_result)
+            << "Rank " << config.world_rank
+            << ": registered send/recv left a stale HIP error: " << hipGetErrorString(hip_result);
 
         if(config.world_rank == 0)
         {

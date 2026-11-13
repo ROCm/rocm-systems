@@ -18,28 +18,12 @@
 
 namespace rocjitsu::amdgpu::async_mma_policy {
 
-// Only the instruction families qualified for the production async adapter.
-constexpr bool supported(rj_code_arch_t arch) {
-  return arch == ROCJITSU_CODE_ARCH_CDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5;
-}
+// All formerly eligible handlers now use issuer-owned rj-arith error state.
+// Keep requested helper counts in configs/checkpoints, but allocate no workers
+// and use synchronous CUs until a handler can safely run on a helper again.
+constexpr bool supported(rj_code_arch_t) { return false; }
 
-inline bool candidate(std::string_view name) {
-  if (((name.starts_with("v_wmma_f32_16x16x64_") || name.starts_with("v_wmma_f32_16x16x128_")) &&
-       (name.ends_with("fp8_fp8") || name.ends_with("fp8_bf8") || name.ends_with("bf8_fp8") ||
-        name.ends_with("bf8_bf8"))) ||
-      name == "v_wmma_f32_32x16x128_f4" || name == "v_wmma_scale_f32_16x16x128_f8f6f4" ||
-      name == "v_wmma_f32_16x16x32_f16" || name == "v_wmma_f32_16x16x32_bf16")
-    return true;
-  if (name == "v_mfma_scale_f32_16x16x128_f8f6f4" || name == "v_mfma_scale_f32_32x32x64_f8f6f4" ||
-      name == "v_mfma_f32_16x16x128_f8f6f4" || name == "v_mfma_f32_32x32x64_f8f6f4")
-    return true;
-  if ((name.starts_with("v_mfma_f32_16x16x32_") || name.starts_with("v_mfma_f32_32x32x16_")) &&
-      (name.ends_with("fp8_fp8") || name.ends_with("fp8_bf8") || name.ends_with("bf8_fp8") ||
-       name.ends_with("bf8_bf8")))
-    return true;
-  return name == "v_mfma_f32_32x32x8_f16" || name == "v_mfma_f32_16x16x16_f16" ||
-         name == "v_mfma_f32_32x32x16_f16" || name == "v_mfma_f32_16x16x32_f16";
-}
+inline bool candidate(std::string_view) { return false; }
 
 // Reject non-MFMA encodings on CDNA4, and non-candidates in the CDNA5 allowlist.
 // This is only a hint: decoded eligibility remains authoritative.
@@ -57,8 +41,7 @@ inline bool encoding_may_be_candidate(rj_code_arch_t arch, uint32_t word) {
           opcode <= encoding + cdna5::kVWmmaF3216x16x128Bf8Bf8Vop3p) ||
          opcode == encoding + cdna5::kVWmmaF3232x16x128F4Vop3p ||
          // The scale prefix needs full decoding to check its paired WMMA.
-         opcode == encoding + 0x35 || opcode == encoding + cdna5::kVWmmaF3216x16x32F16Vop3p ||
-         opcode == encoding + cdna5::kVWmmaF3216x16x32Bf16Vop3p;
+         opcode == encoding + 0x35;
 }
 
 class Access {

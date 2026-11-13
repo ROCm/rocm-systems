@@ -1512,13 +1512,15 @@ class TestExecutor:
         parallel_jobs = self.build_config.get("parallel_jobs")
 
         if self.args.skip_mpi_check:
-            if "--enable-mpi-tests" in install_flags:
-                install_flags.remove("--enable-mpi-tests")
+            install_flags = [
+                flag for flag in install_flags
+                if flag not in ("--enable-mpi-tests", "--enable-rccl-ep-tests")
+            ]
             # Explicitly disable to override any cached CMake value from prior builds
             if cmake_options:
-                cmake_options += " -DENABLE_MPI_TESTS=OFF"
+                cmake_options += " -DENABLE_MPI_TESTS=OFF -DENABLE_RCCL_EP_TESTS=OFF"
             else:
-                cmake_options = "-DENABLE_MPI_TESTS=OFF"
+                cmake_options = "-DENABLE_MPI_TESTS=OFF -DENABLE_RCCL_EP_TESTS=OFF"
             print("NOTE: MPI tests disabled in build (--skip-mpi-check)")
 
         install_flags, cmake_options = configure_coverage_build(

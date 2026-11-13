@@ -4,6 +4,7 @@
 // Shared setup for a few decoded RDNA matrix regressions.
 #pragma once
 
+#include "compute_unit_test_util.h"
 #include "fixtures/float_dot/rdna_matrix_sample.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
@@ -118,7 +119,9 @@ inline void check(rj_code_arch_t arch, uint32_t width, std::array<uint32_t, 2> w
   cfg.sgprs_per_wf = 106;
   cfg.vgprs_per_wf = 256;
   cfg.lds_size_kb = 64;
-  auto cu = amdgpu::ComputeUnitCore::create("matrix_test", cfg, &memory, &cache);
+  std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+  ASSERT_NO_FATAL_FAILURE(
+      rocjitsu::test::initialize_compute_unit(cu, "matrix_test", cfg, &memory, &cache));
   auto *wave = cu->dispatch_wf(0, 0, 106, 256, width);
   ASSERT_NE(wave, nullptr);
   wave->set_exec(width == 64 ? ~uint64_t{0} : 0xffffffffu);

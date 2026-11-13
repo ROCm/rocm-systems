@@ -30,6 +30,42 @@ namespace {
 constexpr uint32_t kRecordType = 7;
 constexpr uint32_t kSlotCount = 4;
 
+TEST(LogRecordProbe, ArgumentsRejectAnOversizedSite) {
+  for (bool wave32 : {false, true}) {
+    util::FailureOr<std::vector<ProbeArgValue>> args =
+        log_record_probe_args(std::numeric_limits<uint32_t>::max(), wave32);
+    ASSERT_TRUE(args.succeeded());
+    EXPECT_EQ(args.value().back().immediate, std::numeric_limits<uint32_t>::max());
+    util::StringDiagnostic diagnostic;
+    EXPECT_TRUE(log_record_probe_args(uint64_t{1} << 32, wave32, diagnostic.emitter()).failed());
+    EXPECT_EQ(diagnostic.message(), "RjLogRecord::site is 32 bits");
+  }
+}
+
+TEST(LogRecordProbe, RejectsInvalidSlotCountsBeforeEmission) {
+  const std::vector<uint32_t> sentinel{0x12345678};
+  for (uint32_t slots : {0u, 3u, 128u}) {
+    std::vector<uint32_t> body = sentinel;
+    util::StringDiagnostic diagnostic;
+    EXPECT_TRUE(build_log_record_probe_body(ROCJITSU_CODE_ARCH_CDNA3, kRecordType, slots, body,
+                                            diagnostic.emitter())
+                    .failed());
+    EXPECT_EQ(diagnostic.message(), "slot_count must be a power of two no larger than 64");
+    EXPECT_EQ(body, sentinel);
+  }
+}
+
+TEST(LogRecordProbe, UnsupportedArchitectureStopsEmission) {
+  std::vector<uint32_t> body;
+  util::StringDiagnostic diagnostic;
+  EXPECT_TRUE(build_log_record_probe_body(ROCJITSU_CODE_ARCH_INVALID, kRecordType, kSlotCount, body,
+                                          diagnostic.emitter())
+                  .failed());
+  EXPECT_EQ(diagnostic.message(),
+            "Unimplemented instruction: v_readfirstlane_b32 for target architecture");
+  EXPECT_TRUE(body.empty());
+}
+
 // The header's footprint is the one the body has. Tests rely on it to keep the
 // probe's registers dead at their anchors, and nothing checks a probe's
 // registers against the kernel's allocation.
@@ -37,8 +73,8 @@ void expect_declared_footprint(rj_code_arch_t arch) {
   ProbeCallable callable;
   callable.symbol = "rj_log_record_probe";
   callable.arch = arch;
-  ASSERT_NO_FATAL_FAILURE(
-      build_log_record_probe_body(arch, kRecordType, kSlotCount, callable.body_words));
+  ASSERT_TRUE(
+      build_log_record_probe_body(arch, kRecordType, kSlotCount, callable.body_words).succeeded());
   callable.abi =
       *derive_probe_abi(ProbeCallingConvention::AmdGpuFuncReturnS30S31, kLogRecordProbeArgDwords);
   std::string err;
@@ -72,7 +108,7 @@ constexpr uint32_t kSWaitAluSaSdst = 0xbf88fffe; // s_wait_alu 0xfffe on gfx1200
 TEST(LogRecordProbe, Rdna4WaitsAfterEachSaluWriteLlvmFlags) {
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_RDNA4;
   std::vector<uint32_t> body;
-  ASSERT_NO_FATAL_FAILURE(build_log_record_probe_body(kArch, kRecordType, kSlotCount, body));
+  ASSERT_TRUE(build_log_record_probe_body(kArch, kRecordType, kSlotCount, body).succeeded());
   EXPECT_EQ(std::ranges::count(body, kSWaitAluSaSdst), 4);
 
   // The wait must be the word after @p inst, or after its literal when it has one.
@@ -103,7 +139,7 @@ TEST(LogRecordProbe, Rdna4WaitsAfterEachSaluWriteLlvmFlags) {
 TEST(LogRecordProbe, CdnaBodiesCarryNoRdna4Wait) {
   for (const rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
     std::vector<uint32_t> body;
-    ASSERT_NO_FATAL_FAILURE(build_log_record_probe_body(arch, kRecordType, kSlotCount, body));
+    ASSERT_TRUE(build_log_record_probe_body(arch, kRecordType, kSlotCount, body).succeeded());
     EXPECT_EQ(std::ranges::count(body, kSWaitAluSaSdst), 0);
   }
 }

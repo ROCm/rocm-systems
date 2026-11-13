@@ -3893,8 +3893,15 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
         start_context(rename_ctx, "kernel rename");
     }
 
-    // Track stream ID information via callback service
-    if(core_supports_kind(ROCPROFILER_CALLBACK_TRACING_HIP_STREAM))
+    // Track stream ID information via callback service. The stream stack is only read by
+    // set_kernel_rename_and_stream_correlation_id for the records below, and the tracing wraps
+    // every HIP function taking a stream, so only enable it when one of those is collected.
+    const auto& cfg              = tool::get_config();
+    const bool  needs_stream_ids = cfg.kernel_trace || cfg.memory_copy_trace ||
+                                  cfg.memory_allocation_trace || cfg.hip_runtime_api_trace ||
+                                  cfg.hip_event_trace || cfg.counter_collection ||
+                                  cfg.spm_counter_collection || cfg.kernel_replay;
+    if(needs_stream_ids && core_supports_kind(ROCPROFILER_CALLBACK_TRACING_HIP_STREAM))
     {
         auto hip_stream_display_ctx = rocprofiler_context_id_t{0};
 

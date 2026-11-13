@@ -9,7 +9,7 @@
 #include <cstddef>
 #include <format>
 
-namespace rocjitsu::cli {
+namespace rocjitsu::launcher {
 namespace {
 
 std::string_view trim(std::string_view text) {
@@ -242,4 +242,4 @@ HostSelection select_host_gpu(const std::vector<VisibleGpu> &visible_gpus,
                                      : HostSelection{HostSelectionStatus::Selected, match->gpu_id};
 }
 
-} // namespace rocjitsu::cli
+} // namespace rocjitsu::launcher

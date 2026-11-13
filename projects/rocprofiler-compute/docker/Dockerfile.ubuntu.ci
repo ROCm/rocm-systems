@@ -28,11 +28,17 @@ RUN apt-get dist-upgrade -y && \
     apt-get autoclean && \
     locale -a
 
+# TheRock no longer builds PyTorch for Python 3.10, so on 22.04 make Python 3.12
+# the default python3 to get the latest ROCm and PyTorch wheels.
 RUN OS_VERSION=$(grep '^VERSION_ID=' /etc/os-release | cut -d'=' -f2 | tr -d '"') && \
     OS_ID=$(grep '^ID=' /etc/os-release | cut -d'=' -f2 | tr -d '"') && \
     if [ "${OS_ID}" == "ubuntu" ] && [ "${OS_VERSION}" == "22.04" ]; then \
-        python3 -m pip install --upgrade pip; \
-        python3 -m pip install 'cmake==3.28.*'; \
+        add-apt-repository -y ppa:deadsnakes/ppa && \
+        apt-get update && \
+        apt-get install -y python3.12 python3.12-venv python3.12-dev && \
+        ln -sf /usr/bin/python3.12 /usr/bin/python3 && \
+        curl -sS https://bootstrap.pypa.io/get-pip.py | python3 - --break-system-packages && \
+        python3 -m pip install --break-system-packages 'cmake==3.28.*'; \
     else \
         python3 -m pip install --break-system-packages 'cmake==3.28.*'; \
     fi

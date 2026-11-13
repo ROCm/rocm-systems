@@ -3,16 +3,19 @@
 
 name: RCCL default behavior tests
 
-# Tests for .github/scripts/rccl_check_default_behavior.py. Do not make this a
-# required check: it installs pytest from PyPI, and neither an outage nor a
-# failing test should block PRs that do not touch the checker.
+# Tests for .github/scripts/rccl_check_default_behavior.py and
+# .github/scripts/rccl_assemble_changelog.py. Do not make this a required
+# check: it installs pytest from PyPI, and neither an outage nor a failing
+# test should block PRs that do not touch the scripts.
 
 on:
   pull_request:
     paths:
       - .github/scripts/rccl_check_default_behavior.py
+      - .github/scripts/rccl_assemble_changelog.py
       - .github/scripts/tests/conftest.py
       - .github/scripts/tests/rccl_check_default_behavior_test.py
+      - .github/scripts/tests/rccl_assemble_changelog_test.py
       - .github/workflows/rccl-default-behavior.yml
       - .github/workflows/rccl-default-behavior-test.yml
 
@@ -44,4 +47,7 @@ jobs:
         run: python3 -m pip install --disable-pip-version-check pytest
 
       - name: Run the tests
-        run: python3 -m pytest .github/scripts/tests/rccl_check_default_behavior_test.py
+        run: >-
+          python3 -m pytest
+          .github/scripts/tests/rccl_check_default_behavior_test.py
+          .github/scripts/tests/rccl_assemble_changelog_test.py

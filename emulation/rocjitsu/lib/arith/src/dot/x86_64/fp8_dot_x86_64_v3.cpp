@@ -4,9 +4,10 @@
 // AVX2 loose FP8/BF8 vector dot products with FP32 accumulation.
 // CPU-specific arithmetic stays here; public entry points select this backend.
 
+#include "common/compiler.h"
 #include "common/simd.h"
 #include "common/x86_64/fp8.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_dot.h"
 
 #include <immintrin.h>
 #include <stdint.h>
@@ -27,6 +28,7 @@ void dot(uint32_t exec_mask, uint32_t instruction_flags, uint32_t *d, const uint
     auto acc = _mm256_castsi256_ps(_mm256_xor_si256(
         _mm256_and_si256(_mm256_loadu_si256(reinterpret_cast<const __m256i *>(c + lane)), keep),
         flip));
+    RJ_ARITH_UNROLL(4)
     for (int shift = 0; shift < 32; shift += 8) {
       acc = _mm256_fmadd_ps(widen_fp8<Bf8A>(_mm256_srl_epi32(va, _mm_cvtsi32_si128(shift))),
                             widen_fp8<Bf8B>(_mm256_srl_epi32(vb, _mm_cvtsi32_si128(shift))), acc);

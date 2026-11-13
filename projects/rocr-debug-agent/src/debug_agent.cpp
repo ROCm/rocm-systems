@@ -28,6 +28,10 @@
    ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
    DEALINGS WITH THE SOFTWARE.  */
 
+#include "agent_config.h"
+#include "agent_dbgapi_logging.h"
+#include "agent_dbgapi_utils.h"
+#include "agent_utils.h"
 #include "code_object.h"
 #include "debug.h"
 #include "logging.h"
@@ -50,7 +54,6 @@
 #include <atomic>
 #include <cstdint>
 #include <cstdlib>
-#include <ctime>
 #include <future>
 #include <iomanip>
 #include <iostream>
@@ -107,7 +110,7 @@ using code_object_map_t
 
 std::optional<std::string> g_code_objects_dir;
 bool g_all_wavefronts{ false };
-bool g_precise_emmory{ false };
+bool g_precise_memory{ false };
 bool g_precise_alu_exceptions{ false };
 bool g_lazy{ true };
 bool g_delay_loading{ false };
@@ -238,54 +241,6 @@ static amd_dbgapi_callbacks_t dbgapi_callbacks = {
         agent_out () << "rocm-dbgapi: " << message << std::endl;
       }
 };
-
-std::string
-hex_string (const std::vector<uint8_t> &value)
-{
-  std::string value_string;
-  value_string.reserve (2 * value.size ());
-
-  for (size_t pos = value.size (); pos > 0; --pos)
-    {
-      static constexpr char hex_digits[] = "0123456789abcdef";
-      value_string.push_back (hex_digits[value[pos - 1] >> 4]);
-      value_string.push_back (hex_digits[value[pos - 1] & 0xF]);
-    }
-
-  return value_string;
-}
-
-std::string
-register_value_string (const std::string &register_type,
-                       const std::vector<uint8_t> &register_value)
-{
-  /* handle vector types..  */
-  if (size_t pos = register_type.find_last_of ('['); pos != std::string::npos)
-    {
-      const std::string element_type = register_type.substr (0, pos);
-      const size_t element_count = std::stoi (register_type.substr (pos + 1));
-      const size_t element_size = register_value.size () / element_count;
-
-      agent_assert ((register_value.size () % element_size) == 0);
-
-      std::stringstream ss;
-      for (size_t i = 0; i < element_count; ++i)
-        {
-          if (i != 0)
-            ss << " ";
-          ss << "[" << i << "] ";
-
-          std::vector<uint8_t> element_value (
-              &register_value[element_size * i],
-              &register_value[element_size * (i + 1)]);
-
-          ss << register_value_string (element_type, element_value);
-        }
-      return ss.str ();
-    }
-
-  return hex_string (register_value);
-}
 
 void
 print_registers (amd_dbgapi_wave_id_t wave_id)
@@ -823,54 +778,8 @@ print_wavefronts (amd_dbgapi_process_id_t process_id, bool all_wavefronts,
           if (!stop_reason_str.empty ())
             stop_reason_str += "|";
 
-          stop_reason_str += [] (amd_dbgapi_wave_stop_reasons_t reason) {
-            switch (reason)
-              {
-              case AMD_DBGAPI_WAVE_STOP_REASON_NONE:
-                return "NONE";
-              case AMD_DBGAPI_WAVE_STOP_REASON_BREAKPOINT:
-                return "BREAKPOINT";
-              case AMD_DBGAPI_WAVE_STOP_REASON_WATCHPOINT:
-                return "WATCHPOINT";
-              case AMD_DBGAPI_WAVE_STOP_REASON_SINGLE_STEP:
-                return "SINGLE_STEP";
-              case AMD_DBGAPI_WAVE_STOP_REASON_FP_INPUT_DENORMAL:
-                return "FP_INPUT_DENORMAL";
-              case AMD_DBGAPI_WAVE_STOP_REASON_FP_DIVIDE_BY_0:
-                return "FP_DIVIDE_BY_0";
-              case AMD_DBGAPI_WAVE_STOP_REASON_FP_OVERFLOW:
-                return "FP_OVERFLOW";
-              case AMD_DBGAPI_WAVE_STOP_REASON_FP_UNDERFLOW:
-                return "FP_UNDERFLOW";
-              case AMD_DBGAPI_WAVE_STOP_REASON_FP_INEXACT:
-                return "FP_INEXACT";
-              case AMD_DBGAPI_WAVE_STOP_REASON_FP_INVALID_OPERATION:
-                return "FP_INVALID_OPERATION";
-              case AMD_DBGAPI_WAVE_STOP_REASON_INT_DIVIDE_BY_0:
-                return "INT_DIVIDE_BY_0";
-              case AMD_DBGAPI_WAVE_STOP_REASON_DEBUG_TRAP:
-                return "DEBUG_TRAP";
-              case AMD_DBGAPI_WAVE_STOP_REASON_ASSERT_TRAP:
-                return "ASSERT_TRAP";
-              case AMD_DBGAPI_WAVE_STOP_REASON_TRAP:
-                return "TRAP";
-              case AMD_DBGAPI_WAVE_STOP_REASON_MEMORY_VIOLATION:
-                return "MEMORY_VIOLATION";
-              case AMD_DBGAPI_WAVE_STOP_REASON_ADDRESS_ERROR:
-                return "ADDRESS_ERROR";
-              case AMD_DBGAPI_WAVE_STOP_REASON_ILLEGAL_INSTRUCTION:
-                return "ILLEGAL_INSTRUCTION";
-              case AMD_DBGAPI_WAVE_STOP_REASON_ECC_ERROR:
-                return "ECC_ERROR";
-              case AMD_DBGAPI_WAVE_STOP_REASON_FATAL_HALT:
-                return "FATAL_HALT";
-#if AMD_DBGAPI_VERSION_MAJOR == 0 && AMD_DBGAPI_VERSION_MINOR < 58
-              case AMD_DBGAPI_WAVE_STOP_REASON_RESERVED:
-                return "RESERVED";
-#endif
-              }
-            return "";
-          }(static_cast<amd_dbgapi_wave_stop_reasons_t> (one_bit));
+          stop_reason_str += stop_reason_to_string (
+            static_cast<amd_dbgapi_wave_stop_reasons_t> (one_bit));
       } while (stop_reason_bits);
 
       agent_out () << " (";
@@ -929,191 +838,6 @@ print_wavefronts (amd_dbgapi_process_id_t process_id, bool all_wavefronts,
     resume_requested_stops (process_id);
 
   return code_objects_reported;
-}
-
-/* Expand `%' format tokens in a user-specified output path (the --output
-   file name or the --save-code-objects directory).
-
-   Supported tokens:
-     %p   process ID of the application being debugged
-     %h   host name
-     %t   timestamp (seconds since the Epoch) of when the path is expanded
-     %e   short name of the application being debugged
-     %u   real user ID (UID) of the process
-     %g   real group ID (GID) of the process
-     %%   a literal `%' character
-
-   An unrecognized token is left unchanged, including the leading `%'.  */
-std::string
-expand_format_tokens (const std::string &format)
-{
-  std::string result;
-  result.reserve (format.size ());
-
-  for (size_t i = 0; i < format.size (); ++i)
-    {
-      if (format[i] != '%' || i + 1 == format.size ())
-        {
-          result += format[i];
-          continue;
-        }
-
-      switch (format[++i])
-        {
-        case 'p':
-          result += std::to_string (::getpid ());
-          break;
-
-        case 'h':
-          {
-            char hostname[256] = {};
-            if (::gethostname (hostname, sizeof (hostname) - 1) == 0)
-              result += hostname;
-          }
-          break;
-
-        case 't':
-          result
-              += std::to_string (static_cast<long long> (std::time (nullptr)));
-          break;
-
-        case 'e':
-          {
-            std::ifstream comm ("/proc/self/comm");
-            std::string name;
-            if (comm && std::getline (comm, name))
-              result += name;
-          }
-          break;
-
-        case 'u':
-          result += std::to_string (::getuid ());
-          break;
-
-        case 'g':
-          result += std::to_string (::getgid ());
-          break;
-
-        case '%':
-          result += '%';
-          break;
-
-        default:
-          /* Leave unrecognized tokens unchanged.  */
-          result += '%';
-          result += format[i];
-          break;
-        }
-    }
-
-  return result;
-}
-
-void
-print_usage ()
-{
-  std::cerr << "ROCdebug-agent usage:" << std::endl;
-  std::cerr << "  -a, --all                   "
-               "Print all wavefronts."
-            << std::endl;
-  std::cerr << "  -s, --save-code-objects[=DIR]   "
-               "Save all loaded code objects. If the directory"
-            << std::endl
-            << "                              "
-               "is not specified, the code objects are saved in"
-            << std::endl
-            << "                              "
-               "the current directory. DIR may contain the same"
-            << std::endl
-            << "                              "
-               "format tokens as --output (see below)."
-            << std::endl;
-  std::cerr << "  -c, --load-all-code-objects "
-               "Load all code objects as soon as they are loaded"
-            << std::endl
-            << "                              " << "by the runtime."
-            << std::endl;
-  std::cerr << "  -z, --lazy                  "
-               "Delay inspecting the content of all loaded code "
-            << std::endl
-            << "                              "
-            << "obects until after an exception is reported."
-            << std::endl
-            << "                              "
-            << "Note that the application must not free the code "
-            << std::endl
-            << "                              "
-            << "objects' memory while they are loaded on the device."
-            << std::endl
-            << "                              "
-            << "This option is incompatible with -c."
-            << std::endl;
-  std::cerr << "  -p, --precise-memory        "
-            << "Enable precise memory mode which ensures that " << std::endl
-            << "                              "
-               "when an exception is reported, the PC points to"
-            << std::endl
-            << "                              "
-               "the instruction immediately after the one that"
-            << std::endl
-            << "                              "
-               "caused the exception."
-            << std::endl;
-  std::cerr << "  -o, --output=FILE           "
-               "Save the output in FILE. By default, the output"
-            << std::endl
-            << "                              "
-               "is redirected to stderr."
-            << std::endl
-            << "                              "
-               "FILE may contain the following format tokens,"
-            << std::endl
-            << "                              "
-               "which are expanded when the file is created:"
-            << std::endl
-            << "                              "
-               "  %p  process ID of the application"
-            << std::endl
-            << "                              "
-               "  %h  host name"
-            << std::endl
-            << "                              "
-               "  %t  timestamp (seconds since the Epoch)"
-            << std::endl
-            << "                              "
-               "  %e  short name of the application"
-            << std::endl
-            << "                              "
-               "  %u  real user ID (UID) of the process"
-            << std::endl
-            << "                              "
-               "  %g  real group ID (GID) of the process"
-            << std::endl
-            << "                              "
-               "  %%  a literal '%' character"
-            << std::endl;
-  std::cerr << "  -d, --disable-linux-signals "
-               "Disable installing a SIGQUIT signal handler, so"
-            << std::endl
-            << "                              "
-               "that the default Linux handler may dump a core"
-            << std::endl
-            << "                              "
-               "file."
-            << std::endl;
-  std::cerr << "  -l, --log-level={none|error|warning|info|verbose}"
-            << std::endl
-            << "                              "
-               "Change the Debug Agent and Debugger API log"
-            << std::endl
-            << "                              "
-               "level. The default log level is 'none'."
-            << std ::endl;
-  std::cerr << "  -h, --help                  "
-               "Display a usage message and abort the process."
-            << std::endl;
-
-  abort ();
 }
 
 /* Called when we expect dbgapi events to be present.  Fetch all events from
@@ -1348,68 +1072,8 @@ process_dbgapi_events (amd_dbgapi_process_id_t process_id, bool all_wavefronts,
       DBGAPI_CHECK (
           amd_dbgapi_wave_get_info (wave_id, AMD_DBGAPI_WAVE_INFO_STOP_REASON,
                                     sizeof (stop_reason), &stop_reason));
-      auto stop_reason_bits{ stop_reason };
 
-      std::underlying_type_t<amd_dbgapi_exceptions_t> resume_exceptions = 0;
-      do
-        {
-          auto one_bit
-              = stop_reason_bits ^ (stop_reason_bits & (stop_reason_bits - 1));
-          stop_reason_bits ^= one_bit;
-
-          switch (one_bit)
-            {
-            case AMD_DBGAPI_WAVE_STOP_REASON_NONE:
-            case AMD_DBGAPI_WAVE_STOP_REASON_DEBUG_TRAP:
-              resume_exceptions |= AMD_DBGAPI_EXCEPTION_NONE;
-              break;
-
-            case AMD_DBGAPI_WAVE_STOP_REASON_BREAKPOINT:
-            case AMD_DBGAPI_WAVE_STOP_REASON_WATCHPOINT:
-            case AMD_DBGAPI_WAVE_STOP_REASON_ASSERT_TRAP:
-            case AMD_DBGAPI_WAVE_STOP_REASON_TRAP:
-              resume_exceptions |= AMD_DBGAPI_EXCEPTION_WAVE_TRAP;
-              break;
-
-            case AMD_DBGAPI_WAVE_STOP_REASON_SINGLE_STEP:
-              /* Is this even possible?  */
-              resume_exceptions |= AMD_DBGAPI_EXCEPTION_NONE;
-              break;
-
-            case AMD_DBGAPI_WAVE_STOP_REASON_FP_INPUT_DENORMAL:
-            case AMD_DBGAPI_WAVE_STOP_REASON_FP_DIVIDE_BY_0:
-            case AMD_DBGAPI_WAVE_STOP_REASON_FP_OVERFLOW:
-            case AMD_DBGAPI_WAVE_STOP_REASON_FP_UNDERFLOW:
-            case AMD_DBGAPI_WAVE_STOP_REASON_FP_INEXACT:
-            case AMD_DBGAPI_WAVE_STOP_REASON_FP_INVALID_OPERATION:
-            case AMD_DBGAPI_WAVE_STOP_REASON_INT_DIVIDE_BY_0:
-              resume_exceptions |= AMD_DBGAPI_EXCEPTION_WAVE_MATH_ERROR;
-              break;
-
-            case AMD_DBGAPI_WAVE_STOP_REASON_MEMORY_VIOLATION:
-              resume_exceptions |= AMD_DBGAPI_EXCEPTION_WAVE_MEMORY_VIOLATION;
-              break;
-
-            case AMD_DBGAPI_WAVE_STOP_REASON_ADDRESS_ERROR:
-              resume_exceptions |= AMD_DBGAPI_EXCEPTION_WAVE_ADDRESS_ERROR;
-              break;
-
-            case AMD_DBGAPI_WAVE_STOP_REASON_ILLEGAL_INSTRUCTION:
-              resume_exceptions
-                  |= AMD_DBGAPI_EXCEPTION_WAVE_ILLEGAL_INSTRUCTION;
-              break;
-
-            case AMD_DBGAPI_WAVE_STOP_REASON_ECC_ERROR:
-            case AMD_DBGAPI_WAVE_STOP_REASON_FATAL_HALT:
-              resume_exceptions |= AMD_DBGAPI_EXCEPTION_WAVE_ABORT;
-              break;
-
-#if AMD_DBGAPI_VERSION_MAJOR == 0 && AMD_DBGAPI_VERSION_MINOR < 58
-            case AMD_DBGAPI_WAVE_STOP_REASON_RESERVED:
-              break;
-#endif
-            }
-      } while (stop_reason_bits != 0);
+      auto resume_exceptions = map_stop_reason_to_exceptions (stop_reason);
 
       DBGAPI_CHECK (amd_dbgapi_wave_resume (
           wave_id, AMD_DBGAPI_RESUME_MODE_NORMAL,
@@ -1647,7 +1311,7 @@ DebugAgentWorker::DebugAgentWorker ()
   m_write_pipe = pipefd[1];
 
   m_worker_thread = std::thread (dbgapi_worker, pipefd[0], g_all_wavefronts,
-                                 g_precise_emmory, g_precise_alu_exceptions);
+                                 g_precise_memory, g_precise_alu_exceptions);
 
   /* Wait for the worker thread to have setup dbgapi.  */
   init_future.wait ();
@@ -1841,156 +1505,53 @@ debug_agent_hsa_executable_destroy (hsa_executable_t executable)
 void
 start_agent ()
 {
-  bool disable_sigquit{ false };
-
+  /* Use the default log level until the options have been parsed.  */
   set_log_level (log_level_t::warning);
 
-  std::istringstream args_stream;
-  if (const char *env = ::getenv ("ROCM_DEBUG_AGENT_OPTIONS"))
-    args_stream.str (env);
-
-  std::vector<char *> args = { strdup ("rocm-debug-agent") };
-  std::transform (
-      std::istream_iterator<std::string> (args_stream),
-      std::istream_iterator<std::string> (), std::back_inserter (args),
-      [] (const std::string &str) { return strdup (str.c_str ()); });
-
-  char *const *argv = const_cast<char *const *> (args.data ());
-  int argc = args.size ();
-
-  static struct option options[]
-      = { { "all", no_argument, nullptr, 'a' },
-          { "disable-linux-signals", no_argument, nullptr, 'd' },
-          { "log-level", required_argument, nullptr, 'l' },
-          { "output", required_argument, nullptr, 'o' },
-          { "save-code-objects", optional_argument, nullptr, 's' },
-          { "lazy", no_argument, nullptr, 'z' },
-          { "load-all-code-objects", no_argument, nullptr, 'c' },
-          { "precise-memory", no_argument, nullptr, 'p' },
-          { "precise-alu-exceptions", no_argument, nullptr, 'e' },
-          { "help", no_argument, nullptr, 'h' },
-          { 0 } };
-
-  /* We use getopt_long locally, so make sure to preserve and reset the
-     global optind.  */
-  int saved_optind = optind;
-  optind = 1;
-
-  while (int c
-         = getopt_long (argc, argv, ":as::o:dpezcl:h", options, nullptr))
+  auto result
+    = parse_debug_agent_options (::getenv ("ROCM_DEBUG_AGENT_OPTIONS"));
+  const bool parse_failed = std::holds_alternative<std::string> (result);
+  if (parse_failed
+      || std::get<debug_agent_options_t> (result).help_requested)
     {
-      if (c == -1)
-        break;
+      if (parse_failed)
+        std::cerr << std::get<std::string> (result) << std::endl;
+      print_usage ();
 
-      std::optional<std::string> argument;
+      /* This runs from a static constructor while the library is being
+         loaded, so exit () would run atexit handlers and static destructors
+         against partially initialized state.  Use _exit () instead, after
+         flushing the standard streams.  */
+      std::cout.flush ();
+      std::cerr.flush ();
+      _exit (parse_failed ? EXIT_FAILURE : EXIT_SUCCESS);
+    }
 
-      if (!optarg && optind < argc && *argv[optind] != '-')
-        optarg = argv[optind++];
+  debug_agent_options_t options = std::get<debug_agent_options_t> (result);
 
-      if (optarg)
-        argument.emplace (optarg);
+  g_all_wavefronts = options.all_wavefronts;
+  g_precise_memory = options.precise_memory;
+  g_precise_alu_exceptions = options.precise_alu_exceptions;
+  g_lazy = options.lazy;
+  g_delay_loading = options.delay_loading;
+  g_code_objects_dir = options.code_objects_dir;
 
-      switch (c)
+  set_log_level (options.log_level);
+
+  if (options.output_file)
+    {
+      agent_out ().open (*options.output_file);
+      if (!agent_out ().is_open ())
         {
-        case 'a': /* -a or --all  */
-          g_all_wavefronts = true;
-          break;
+          std::cerr << "could not open `" << *options.output_file << "'"
+                    << std::endl;
 
-        case 'd': /* -d or --disable-linux-signals  */
-          disable_sigquit = true;
-          break;
-
-        case 'p': /* -p or --precise-memory  */
-          g_precise_emmory = true;
-          break;
-
-        case 'e': /* -e or --precise-alu-exceptions  */
-          g_precise_alu_exceptions = true;
-          break;
-
-        case 'l': /* -l or --log-level  */
-          if (!argument)
-            print_usage ();
-
-          if (argument == "none")
-            set_log_level (log_level_t::none);
-          else if (argument == "verbose")
-            set_log_level (log_level_t::verbose);
-          else if (argument == "info")
-            set_log_level (log_level_t::info);
-          else if (argument == "warning")
-            set_log_level (log_level_t::warning);
-          else if (argument == "error")
-            set_log_level (log_level_t::error);
-          else
-            print_usage ();
-          break;
-
-        case 'c': /* -c or --load-all-code-objects.  */
-          g_lazy = false;
-          break;
-
-        case 'z': /* -z or --lazy. */
-          g_delay_loading = true;
-          break;
-
-        case 's': /* -s or --save-code-objects  */
-          if (argument)
-            {
-              std::string dir = expand_format_tokens (*argument);
-
-              struct stat path_stat;
-              if (stat (dir.c_str (), &path_stat) == -1
-                  || !S_ISDIR (path_stat.st_mode))
-                {
-                  std::cerr
-                      << "error: Cannot access code object save directory `"
-                      << dir << "'" << std::endl;
-                  print_usage ();
-                }
-
-              g_code_objects_dir = std::move (dir);
-            }
-          else
-            {
-              g_code_objects_dir = ".";
-            }
-          break;
-
-        case 'o': /* -o or --output  */
-          if (!argument)
-            print_usage ();
-
-          {
-            std::string file_name = expand_format_tokens (*argument);
-            agent_out ().open (file_name);
-            if (!agent_out ().is_open ())
-              {
-                std::cerr << "could not open `" << file_name << "'"
-                          << std::endl;
-                abort ();
-              }
-          }
-          break;
-
-        case '?': /* Unrecognized option  */
-        case 'h': /* -h or --help */
-        default:
-          print_usage ();
+          /* Same policy as for the other option errors.  */
+          std::cout.flush ();
+          std::cerr.flush ();
+          _exit (EXIT_FAILURE);
         }
     }
-
-  if (!g_lazy && g_delay_loading)
-    {
-      std::cerr << "\"--load-all-code-objects\" and \"--lazy\" are mutually "
-                   "exclusive" << std::endl;
-      print_usage ();
-    }
-
-  /* Restore the global optind.  */
-  optind = saved_optind;
-
-  std::for_each (args.begin (), args.end (), [] (char *str) { free (str); });
 
   if (!agent_out ().is_open ())
     {
@@ -2001,7 +1562,7 @@ start_agent ()
 
   get_worker_thread ().start ();
 
-  if (!disable_sigquit)
+  if (!options.disable_sigquit)
     {
       struct sigaction sig_action;
 
