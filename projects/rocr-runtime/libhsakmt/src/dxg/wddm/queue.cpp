@@ -89,9 +89,6 @@ static inline uint64_t LoadSyncValue(const uint64_t* sync_addr) {
 
 static constexpr uint32_t kPoisonFenceHiDword = 0xFFFFFFFFu;
 
-// The WSL KMD poisons the monitored fence (high dword all-ones) when it tears the
-// queue down on a GPU reset. A healthy fence never carries this pattern, so it cleanly
-// distinguishes a real device fault from a queue merely blocked on a dependency.
 static inline bool IsFencePoisoned(const uint64_t* sync_addr) {
   return sync_addr && (LoadSyncValue(sync_addr) >> 32) == kPoisonFenceHiDword;
 }
@@ -224,11 +221,7 @@ void ComputeQueue::HandleError(hsa_status_t status) {
 
 void ComputeQueue::FaultMonitorThread(ComputeQueue* queue) {
   constexpr int kStallTimeoutMs = 30000;
-  // A healthy-fence stall is a legitimate dependency wait (slow host callback, slow
-  // host-side compile), not a fault — so we re-arm rather than abort. But a genuinely
-  // wedged queue whose fence the KMD never poisons must not hang forever, so bound the
-  // re-arming: after this many consecutive 30s windows with no progress we give up and
-  // abort as a last-resort hang timeout. 10 * 30s = 5 minutes.
+  // Bound how long a stall with a healthy fence is tolerated: 10 * 30s = 5 minutes.
   constexpr int kMaxStallWindows = 10;
   uint64_t last_rptr = 0;
   uint64_t last_fence = 0;
@@ -255,30 +248,22 @@ void ComputeQueue::FaultMonitorThread(ComputeQueue* queue) {
       if (current_rptr != last_rptr || current_fence != last_fence) {
         last_rptr = current_rptr;
         last_fence = current_fence;
-        stall_windows = 0;  // real progress — clear the hang accumulator
+        stall_windows = 0;
         last_progress = std::chrono::steady_clock::now();
       } else if (current_wptr > current_rptr) {
         auto stall_duration = std::chrono::steady_clock::now() - last_progress;
         if (stall_duration > std::chrono::milliseconds(kStallTimeoutMs)) {
-          // A poisoned fence is the KMD's unambiguous mark of a real GPU reset: abort
-          // immediately as a memory fault.
-          if (IsFencePoisoned(queue->sync_addr)) {
-            if (queue->thread_stop_.exchange(true)) return;
-            pr_err("GPU memory fault detected: monitored fence poisoned (0x%" PRIx64
-                   ") rptr=%" PRIu64 " wptr=%" PRIu64 " after %dms stall\n",
-                   current_fence, current_rptr, current_wptr, kStallTimeoutMs);
-            queue->HandleError(static_cast<hsa_status_t>(HSA_STATUS_ERROR_MEMORY_APERTURE_VIOLATION));
-            return;
-          }
-          // Healthy fence: a stalled rptr alone is not a fault. Re-arm the window and
-          // keep waiting, but bound how long we tolerate a never-poisoned stall.
+          // A real reset has already aborted above on the poisoned fence, so a stalled
+          // rptr alone is not a fault: re-arm the window.
           if (++stall_windows >= kMaxStallWindows) {
             if (queue->thread_stop_.exchange(true)) return;
             pr_err("GPU hang timeout: rptr=%" PRIu64 " wptr=%" PRIu64 " fence=%" PRIu64
                    " made no progress for %dms with a healthy fence — aborting queue\n",
                    current_rptr, current_wptr, current_fence,
                    kStallTimeoutMs * kMaxStallWindows);
-            queue->HandleError(static_cast<hsa_status_t>(HSA_STATUS_ERROR_MEMORY_APERTURE_VIOLATION));
+            // Not a memory fault: no fence was ever poisoned, so report a hang rather
+            // than sending the application looking for an aperture violation.
+            queue->HandleError(HSA_STATUS_ERROR_EXCEPTION);
             return;
           }
           last_progress = std::chrono::steady_clock::now();
