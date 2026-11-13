@@ -209,7 +209,7 @@ gfx942 has **16** multi-pass metrics and **10** unique PMC sets. Some metrics ap
 | vL1D hit | `COLLECT_SUM` non-RW hit + atom correction | Shown. The non-RW hit and the atom correction are each one pass, and the parent adds them, including the negative atom term |
 | Read Instructions | `COLLECT_SUM` load + (−store−atomic) | Shown. Load plus (−store−atomic). The pieces may sit on different passes |
 
-After Phase 2 YAML, the gfx942 allocator gate is `single_pass_metric_sets_without_pass == 0`, passes == **14**, `multi_pass_additional_passes == 0`, and `multi_pass_metric_count == 0`. `single_pass_metric_sets_without_pass` counts single-pass metric counter sets that still have no single pass holding every counter. `multi_pass_additional_passes` counts buckets `fill_multi_pass_metrics_into_existing_passes` opens after first-fit; it stays 0 when first-fit already placed those counters. `multi_pass_metric_count` counts metrics whose counters do not fit one pass. The 16 parents are then `COLLECT_*` expressions over parts, so they are not counted there. A validation run on code that does not yet have the Phase 2 YAML still reports `multi_pass_metric_count == 16`, because those 16 parents are still single expressions. Offline check: `tools/eval_single_pass_metrics.py --arch gfx942`.
+After Phase 2 YAML, the gfx942 gate is **14** passes and no multi-pass metrics. `tools/counter_grouping_inspector.py --arch gfx942` prints both: the pass count, and the metrics that no single pass holds. The 16 parents are then `COLLECT_*` expressions over parts, so they are not counted there. A run before the Phase 2 YAML still reports 16 multi-pass metrics, because those 16 parents are still single expressions.
 
 ### Decisions and alternatives
 
@@ -223,7 +223,7 @@ After Phase 2 YAML, the gfx942 allocator gate is `single_pass_metric_sets_withou
 | A metric that no pass holds reads each counter's first-pass value until Phase 2 | Those are the multi-pass metrics, and Phase 2 splits them into single-pass parts | Leaving the metric unset until Phase 2 |
 | Phase 2 only for the 16 multi-pass metrics | Those sets do not fit one pass after placement. None of them include GRBM | `WEIGHTED_AVG` for metrics whose set fits one pass |
 | A Phase 2 parent adds finished parts, including a negative part, or divides the pooled numerator by the pooled denominator | Each part is still one pass. The parts may come from different passes | Leaving a subtracted sum, or a ratio of parts, unset |
-| Largest-first greedy placement | It meets the gfx942 gates (`single_pass_metric_sets_without_pass == 0`, 14 passes). A solver on the allocate path is harder to explain when a metric is split | Using an optimization solver (OR-Tools CP-SAT) to allocate. That solver is no longer on the allocate path |
+| Largest-first greedy placement | On gfx942 it gives every single-pass metric a pass that holds all of its counters, in 14 passes. A solver on the allocate path is harder to explain when a metric is split | Using an optimization solver (OR-Tools CP-SAT) to allocate. That solver is no longer on the allocate path |
 | Table 1805's read, write, and atomic counters stay one PMC set | Those three request columns are one execution, and the row names all three, so packing keeps them in one pass. gfx942 stays at 14 passes | Giving read, write, and atomic each their own PMC set |
 
 ---
@@ -232,20 +232,20 @@ After Phase 2 YAML, the gfx942 allocator gate is `single_pass_metric_sets_withou
 
 ### Tests
 
-On gfx942, single-pass metric coverage is `single_pass_metric_sets_without_pass == 0`. Placing leftover multi-pass metric counters adds 0 passes.
+On gfx942, every single-pass metric gets a pass that holds all of its counters.
 
 | Layer | What it shows | Tied to |
 |-------|----------------|---------|
 | Unit | Packing (`test_allocator`, `test_counter_file`, `soc_base`), reading each metric from one pass (`test_utils_analysis`, `test_metric_evaluator`, CLI and database analyze), multi-pass metrics (`test_collectable`, `test_weighted_avg*`, `test_collect_ratio`) | FR-1, FR-2, FR-6, FR-7 |
-| Offline | After Phase 2 YAML, `tools/eval_single_pass_metrics.py --arch gfx942`: `single_pass_metric_sets_without_pass == 0`, **14** passes, `multi_pass_additional_passes == 0`, `multi_pass_metric_count == 0`. Those fields are defined under Design. A run before that YAML still reports `multi_pass_metric_count == 16` | FR-1, FR-5, NFR-1, NFR-2 |
+| Offline | After Phase 2 YAML, `tools/counter_grouping_inspector.py --arch gfx942`: **14** passes and no multi-pass metrics. A run before that YAML still reports 16 multi-pass metrics | FR-1, FR-5, NFR-1, NFR-2 |
 | End to end | Three workloads — `vcopy`, `nbody` (`mini-nbody`), `mega_kernel` — on gfx908, gfx90a, gfx942, gfx950, and gfx115x, including gfx1151. Not gfx1250. CPX is a host precondition for the gfx942 run. The baseline is a separate run of `rocprofiler-compute-develop` on the same workloads | FR-2, NFR-4, the tickets in System Context |
 | Phase 2 only | The 16 multi-pass metrics: each part fits one pass, and the parent adds those parts or divides the pooled numerator by the pooled denominator | FR-6, FR-7, FR-8 |
 
-A script runs this build and a separate `rocprofiler-compute-develop` checkout on the same workloads. The health test report compares the two runs' artifact directories. It checks that there are no unexpected negative values and that percents stay in 0–100% except documented exceptions. Re-check the tickets listed under System Context and generate a summary report. The report is not part of the packing algorithm.
+Profile the same workloads with this build and with a separate `rocprofiler-compute-develop` build, and analyze each profile to CSV with the build that made it. `tools/generate_metric_health_report.py` compares the two runs. It checks that there are no unexpected negative values and that percents stay in 0–100% except documented exceptions. Re-check the tickets listed under System Context. The report is not part of the packing algorithm.
 
 ### Debugging a bad ratio
 
-The failure mode is a wrong ratio, not a crash. Each pass table holds only that pass's counters, so the values an expression used can be read from that table. A metric that no pass holds reads the merged table. A Phase 2 parent stays unset when a part is missing or a denominator is zero. `eval_single_pass_metrics.py` prints the offline gates without a GPU. Compare against a `rocprofiler-compute-develop` run to tell a layout change from a change in which pass analyze reads.
+The failure mode is a wrong ratio, not a crash. Each pass table holds only that pass's counters, so the values an expression used can be read from that table. A metric that no pass holds reads the merged table. A Phase 2 parent stays unset when a part is missing or a denominator is zero. `tools/counter_grouping_inspector.py` prints the pass layout and the multi-pass metrics without a GPU. Compare against a `rocprofiler-compute-develop` run to tell a layout change from a change in which pass analyze reads.
 
 ### Security
 

@@ -49,7 +49,7 @@ arch_description(int arch_type)
 {
     switch(arch_type)
     {
-        case 1: return "MI250/MI250X (CDNA2/gfx90a)";
+        case 1: return "MI100/MI250 (CDNA1-2/gfx908|gfx90a)";
         case 2: return "MI300/MI300X (CDNA3/gfx942)";
         case 3: return "MI350/MI355X (CDNA4/gfx950)";
         case 4: return "RX 9060 series (RDNA4/gfx1200)";
