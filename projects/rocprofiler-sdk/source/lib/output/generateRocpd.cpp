@@ -263,7 +263,7 @@ read_schema_file(rocpd_db& db, rocpd_sql_schema_kind_t schema_kind)
 {
     auto _variables = common::init_public_api_struct(rocpd_sql_schema_jinja_variables_t{});
     auto _options   = ROCPD_SQL_OPTIONS_NONE;
-    auto _version   = rocpd_version_triplet_t{3, 0, 5};  // default schema version
+    auto _version   = rocpd_version_triplet_t{3, 0, 6};  // default schema version
 
     _variables.uuid = db.uuid.c_str();
     _variables.guid = db.guid.c_str();
@@ -1691,6 +1691,14 @@ write_rocpd(
                 auto        dispatch_id = info.dispatch_id;
 
                 auto evt_id = dispatch_evt_ids.at(dispatch_id);
+                // Every kernel-replay pass of a dispatch shares its event, so counters_collection
+                // needs replay_pass to average a counter collected by several passes instead of
+                // summing them. Pass 0 keeps the column default, so non-replay rows are unchanged;
+                // extdata is always bound so the insert batch keeps a single column list.
+                const auto extdata =
+                    (record.replay_pass == 0)
+                        ? std::string{"{}"}
+                        : fmt::format(R"({{"replay_pass":{}}})", record.replay_pass);
                 for(const auto& count : record.read())
                 {
                     get_insert_statement(db,
@@ -1700,6 +1708,7 @@ write_rocpd(
                                              insert_value("event_id", evt_id),
                                              insert_value("pmc_id", count.id.handle),
                                              insert_value("value", count.value),
+                                             insert_value("extdata", extdata),
                                          });
                 }
             }
