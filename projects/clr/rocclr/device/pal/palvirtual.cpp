@@ -2310,7 +2310,7 @@ void VirtualGPU::submitSvmFillMemory(amd::SvmFillMemoryCommand& vcmd) {
     size_t offset = reinterpret_cast<uintptr_t>(vcmd.dst()) -
                     reinterpret_cast<uintptr_t>(dstMemory->getSvmPtr());
 
-    pal::Memory* memory = dev().getGpuMemory(dstMemory);
+    dev().getGpuMemory(dstMemory);
 
     amd::Coord3D origin(offset, 0, 0);
     amd::Coord3D size(fillSize, 1, 1);
@@ -2661,7 +2661,7 @@ void VirtualGPU::PostDeviceEnqueue(const amd::Kernel& kernel, const pal::Kernel&
 
   // Make sure exculsive access to the device queue
   amd::ScopedLock(defQueue->lock());
-  Memory& schedParams = xferWrite().Acquire(sizeof(SchedulerParam));
+  xferWrite().Acquire(sizeof(SchedulerParam));
 
   if (GPU_PRINT_CHILD_KERNEL != 0) {
     waitForEvent(gpuEvent);
@@ -2963,9 +2963,10 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
       amd::Image* image = imageBuffer->owner()->asImage();
       amd::Coord3D offs(0);
       // Copy memory from the the backing store image into original buffer
-      bool result = blitMgr().copyImageToBuffer(*imageBuffer->CopyImageBuffer(), *buffer, offs,
-                                                offs, image->getRegion(), true,
-                                                image->getRowPitch(), image->getSlicePitch());
+      [[maybe_unused]] bool result =
+          blitMgr().copyImageToBuffer(*imageBuffer->CopyImageBuffer(), *buffer, offs, offs,
+                                      image->getRegion(), true, image->getRowPitch(),
+                                      image->getSlicePitch());
     }
   }
 
@@ -3199,8 +3200,6 @@ void VirtualGPU::submitThreadTrace(amd::ThreadTraceCommand& cmd) {
       } else {
         Pal::IPerfExperiment* palPerf = threadTrace->iPerf();
         if (cmd.getState() == amd::ThreadTraceCommand::Begin) {
-          amd::ThreadTrace::ThreadTraceConfig* traceCfg =
-              static_cast<amd::ThreadTrace::ThreadTraceConfig*>(cmd.threadTraceConfig());
           iCmd()->CmdBeginPerfExperiment(palPerf);
         } else if (cmd.getState() == amd::ThreadTraceCommand::End) {
           GpuEvent event;
@@ -3234,7 +3233,7 @@ void VirtualGPU::submitAcquireExtObjects(amd::AcquireExtObjectsCommand& vcmd) {
   for (const auto& it : vcmd.getMemList()) {
     // amd::Memory object should never be nullptr
     assert(it && "Memory object for interop is nullptr");
-    pal::Memory* memory = dev().getGpuMemory(it);
+    dev().getGpuMemory(it);
 
     // If resource is a shared copy of original resource, then
     // runtime needs to copy data from original resource. A failure leaves the staged
@@ -3258,7 +3257,7 @@ void VirtualGPU::submitReleaseExtObjects(amd::ReleaseExtObjectsCommand& vcmd) {
   for (const auto& it : vcmd.getMemList()) {
     // amd::Memory object should never be nullptr
     assert(it && "Memory object for interop is nullptr");
-    pal::Memory* memory = dev().getGpuMemory(it);
+    dev().getGpuMemory(it);
 
     // If resource is a shared copy of original resource, then
     // runtime needs to copy data back to original resource
@@ -3874,7 +3873,6 @@ bool VirtualGPU::processMemObjectsHSA(const amd::Kernel& kernel, const_address p
           gpuMem->wait(*this, WaitOnBusyEngine);
 
           addVmMemory(gpuMem);
-          const void* globalAddress = *reinterpret_cast<const void* const*>(params + desc.offset_);
           logVmMemory(desc.name_, gpuMem);
 
           //! Check if compiler expects read/write.
@@ -3894,7 +3892,7 @@ bool VirtualGPU::processMemObjectsHSA(const amd::Kernel& kernel, const_address p
                 amd::Image* image = mem->asImage();
                 amd::Coord3D offs(0);
                 // Copy memory from the original image buffer into the backing store image
-                bool result = blitMgr().copyBufferToImage(
+                [[maybe_unused]] bool result = blitMgr().copyBufferToImage(
                     *buffer, *imageBuffer->CopyImageBuffer(), offs, offs, image->getRegion(), true,
                     image->getRowPitch(), image->getSlicePitch());
                 // Make sure the copy operation is done

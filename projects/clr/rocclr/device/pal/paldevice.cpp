@@ -223,8 +223,6 @@ bool NullDevice::create(const char* palName, const amd::Isa& isa, Pal::AsicRevis
   properties.gfxTriple.major = isa.versionMajor();
   properties.gfxTriple.minor = isa.versionMinor();
   properties.gfxTriple.stepping = isa.versionStepping();
-  uint subtarget = 0;
-
   pal::Settings* palSettings = new pal::Settings();
   settings_ = palSettings;
 
@@ -1214,9 +1212,6 @@ device::VirtualDevice* Device::createVirtualDevice(amd::CommandQueue* queue, boo
   if (queue != nullptr) {
     profiling = queue->properties().test(CL_QUEUE_PROFILING_ENABLE);
     if (queue->asHostQueue() != nullptr) {
-      bool interopQueue = (0 != (queue->context().info().flags_ &
-                                 (amd::Context::GLDeviceKhr | amd::Context::D3D10DeviceKhr |
-                                  amd::Context::D3D11DeviceKhr)));
       rtCUs = queue->rtCUs();
     } else if (queue->asDeviceQueue() != nullptr) {
       deviceQueueSize = queue->asDeviceQueue()->size();
@@ -1546,7 +1541,7 @@ pal::Memory* Device::createBuffer(amd::Memory& owner, bool directAccess) const {
         amdParent->setHostMem(amdParent->getSvmPtr());
       }
       // Ignore a possible pinning error. Runtime will fallback to SW emulation
-      bool ok = gpuParent->pinSystemMemory(amdParent->getHostMem(), amdParent->getSize());
+      gpuParent->pinSystemMemory(amdParent->getHostMem(), amdParent->getSize());
     }
     return gpuParent->createBufferView(owner);
   }
@@ -1595,7 +1590,7 @@ pal::Memory* Device::createBuffer(amd::Memory& owner, bool directAccess) const {
       if (IS_LINUX ||
           // Or Win10
           (properties().gpuMemoryProperties.flags.supportPerSubmitMemRefs == false)) {
-        void* address = gpuMemory->map(nullptr);
+        [[maybe_unused]] void* address = gpuMemory->map(nullptr);
         CondLog(address == nullptr, "PAL failed lock of persistent memory!");
       }
     } else {
@@ -1875,9 +1870,9 @@ device::Memory* Device::createMemory(
       (memory->memoryType() != Resource::ExternalPhysical) &&
       ((owner.getHostMem() != nullptr) ||
        ((nullptr != owner.parent()) && (owner.getHostMem() != nullptr)))) {
-    bool ok = memory->pinSystemMemory(owner.getHostMem(), (owner.getHostMemRef()->size())
-                                                              ? owner.getHostMemRef()->size()
-                                                              : owner.getSize());
+    memory->pinSystemMemory(owner.getHostMem(), (owner.getHostMemRef()->size())
+                                                    ? owner.getHostMemRef()->size()
+                                                    : owner.getSize());
     //! \note: Ignore the pinning result for now
   }
 
@@ -2518,7 +2513,7 @@ void* Device::svmAlloc(amd::Context& context, size_t size, size_t alignment, cl_
     if (isFineGrainedSystem()) {
       mem->commitSvmMemory();
     } else {
-      pal::Memory* gpuMem = getGpuMemory(mem);
+      getGpuMemory(mem);
     }
     svmPtr = mem->getSvmPtr();
   }

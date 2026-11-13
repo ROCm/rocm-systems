@@ -52,7 +52,8 @@ class ManagedBuffer : public amd::EmbeddedObject {
   VirtualGPU& gpu() const { return gpu_; }
 
   void CpuReadBack() const {
-    volatile auto tmp = *reinterpret_cast<uint64_t*>(pool_[activeBuffer_].buf->data());
+    [[maybe_unused]] volatile auto tmp =
+        *reinterpret_cast<uint64_t*>(pool_[activeBuffer_].buf->data());
   }
 
  private:

@@ -102,7 +102,6 @@ GpuMemoryReference* GpuMemoryReference::Create(const Device& dev,
   }
 
   GpuMemoryReference* memRef = new (gpuMemSize) GpuMemoryReference(dev);
-  Pal::VaRange vaRange = Pal::VaRange::Default;
   if (memRef != nullptr) {
     result = dev.iDev()->CreatePinnedGpuMemory(createInfo, &memRef[1], &memRef->gpuMem_);
     if (result == Pal::Result::Success) {
@@ -1324,12 +1323,6 @@ bool Resource::CreateSvm(CreateParams* params, Pal::gpusize svmPtr) {
 
 // ================================================================================================
 bool Resource::create(MemoryType memType, CreateParams* params, bool forceLinear) {
-  bool imageCreateView = false;
-  bool foundCalRef = false;
-  bool viewDefined = false;
-  uint viewLayer = 0;
-  uint viewLevel = 0;
-  uint viewFlags = 0;
   Pal::ChannelMapping channels;
   Pal::ChNumFormat format = dev().getPalFormat(desc().format_, &channels);
   // Set the initial offset value for any resource to 0.

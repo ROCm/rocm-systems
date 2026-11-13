@@ -142,7 +142,7 @@ XferBuffer::XferBuffer(const Device& device, ManagedBuffer& mbuf, uint32_t size)
   params.offset_ = 0;
   params.size_ = size_;
   params.resource_ = mbuf_.activeMemory();
-  bool result = buffer_view_.create(Resource::View, &params);
+  [[maybe_unused]] bool result = buffer_view_.create(Resource::View, &params);
   assert(result && "View creaiton should never return an error!");
 }
 
@@ -150,7 +150,7 @@ XferBuffer::XferBuffer(const Device& device, ManagedBuffer& mbuf, uint32_t size)
 Memory& XferBuffer::Acquire(uint32_t size) {
   uint64_t vm_address;
   // Reserve space in the managed buffer
-  address cpu_address = mbuf_.reserve(size, &vm_address);
+  mbuf_.reserve(size, &vm_address);
   // Update a view for access
   buffer_view_.updateView(mbuf_.activeMemory(), vm_address - mbuf_.vmAddress(), size);
   return buffer_view_;

@@ -174,7 +174,7 @@ bool RgpCaptureMgr::RegisterTimedQueue(uint32_t queue_id, Pal::IQueue* iQueue,
   // Get the OS context handle for this queue (this is a thing that RGP needs on DX clients;
   // it may be optional for Vulkan, but we provide it anyway if available).
   Pal::KernelContextInfo kernelContextInfo = {};
-  Pal::Result palResult = iQueue->QueryKernelContextInfo(&kernelContextInfo);
+  iQueue->QueryKernelContextInfo(&kernelContextInfo);
 
   // Ensure we've acquired the debug VMID (note that some platforms do not
   // implement this function, so don't fail the whole trace if so)
@@ -268,7 +268,7 @@ void RgpCaptureMgr::PostDispatch(VirtualGPU* gpu) {
           // OS kills all threads on exit without any notification. That includes PAL RGP threads.
           {
             if (trace_.status_ == TraceStatus::WaitingForSqtt) {
-              auto result = EndRGPTrace(gpu);
+              EndRGPTrace(gpu);
             }
             // Check if runtime is waiting for the final trace results
             if (trace_.status_ == TraceStatus::WaitingForResults) {
@@ -286,7 +286,7 @@ void RgpCaptureMgr::PostDispatch(VirtualGPU* gpu) {
 
     if (IsQueueTimingActive()) {
       // Call TimedQueuePresent() to insert commands that collect GPU timestamp.
-      Pal::IQueue* pPalQueue = gpu->queue(MainEngine).iQueue_;
+      [[maybe_unused]] Pal::IQueue* pPalQueue = gpu->queue(MainEngine).iQueue_;
 
       // Currently nothing in the PresentInfo struct is used for inserting a timed present marker.
       GpuUtil::TimedQueuePresentInfo timedPresentInfo = {};
@@ -552,7 +552,7 @@ Pal::Result RgpCaptureMgr::PrepareRGPTrace(VirtualGPU* gpu) {
   } else {
     // We failed to prepare for the trace so abort it.
     if (rgp_server_ != nullptr) {
-      const DevDriver::Result devDriverResult = rgp_server_->AbortTrace();
+      [[maybe_unused]] const DevDriver::Result devDriverResult = rgp_server_->AbortTrace();
 
       // AbortTrace should always succeed unless we've used the api incorrectly.
       assert(devDriverResult == DevDriver::Result::Success);
@@ -725,7 +725,7 @@ void RgpCaptureMgr::FinishRGPTrace(VirtualGPU* gpu, bool aborted) {
   // If the trace was aborted, then make sure the current results are sent to RGP server
   if (aborted) {
     if (trace_.status_ == TraceStatus::WaitingForSqtt) {
-      auto result = EndRGPTrace(gpu);
+      EndRGPTrace(gpu);
       // The logic always checks for the trace status below and error can be ignored, since
       // runtime aborts the trace
     }
@@ -746,7 +746,7 @@ void RgpCaptureMgr::FinishRGPTrace(VirtualGPU* gpu, bool aborted) {
   }
 
   if (static_vm_id_) {
-    auto result = device_.iDev()->SetStaticVmidMode(false);
+    [[maybe_unused]] auto result = device_.iDev()->SetStaticVmidMode(false);
     assert(result == Pal::Result::Success && "Static VM ID setup failed!");
   }
 
@@ -794,7 +794,7 @@ bool RgpCaptureMgr::GpuSupportsTracing(const Pal::DeviceProperties& props,
 void RgpCaptureMgr::PostDeviceCreate() {
   amd::ScopedLock traceLock(&trace_mutex_);
 
-  auto* pDriverControlServer = dev_driver_server_->GetDriverControlServer();
+  [[maybe_unused]] auto* pDriverControlServer = dev_driver_server_->GetDriverControlServer();
 
   assert(pDriverControlServer != nullptr);
 }

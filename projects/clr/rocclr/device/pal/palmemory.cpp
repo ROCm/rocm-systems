@@ -329,8 +329,6 @@ bool Memory::createInterop() {
 
     d3dRes.owner_ = owner();
 
-    const amd::D3D9ObjDesc_t* objDesc = d3d9Object->getObjDesc();
-
     memType = Resource::D3D9Interop;
 
     // Get shared handle
@@ -732,8 +730,6 @@ void Memory::decIndMapCount() {
   if (--indirectMapCount_ == 0) {
     if (nullptr != mapMemory_) {
       amd::Memory* memory = mapMemory_;
-      amd::Memory* empty = nullptr;
-
       // Get GPU memory
       Memory* gpuMemory = mapMemory();
       gpuMemory->unmap(nullptr);
@@ -777,7 +773,7 @@ void* Memory::allocMapTarget(const amd::Coord3D& origin, const amd::Coord3D& reg
         return nullptr;
       }
       //! \note Ignore pinning result
-      bool ok = pinSystemMemory(owner()->getHostMem(), owner()->getSize());
+      pinSystemMemory(owner()->getHostMem(), owner()->getSize());
     }
   }
 
@@ -978,7 +974,7 @@ void Memory::mgpuCacheWriteBack(VirtualGPU& gpu) {
   // Make synchronization
   if (owner()->getHostMem() != nullptr) {
     //! \note Ignore pinning result
-    bool ok = pinSystemMemory(owner()->getHostMem(), owner()->getSize());
+    pinSystemMemory(owner()->getHostMem(), owner()->getSize());
     owner()->cacheWriteBack(&gpu);
   }
 }
