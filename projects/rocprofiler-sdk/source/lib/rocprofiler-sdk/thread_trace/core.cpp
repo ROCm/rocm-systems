@@ -759,7 +759,7 @@ DeviceThreadTracer::intersects(const DispatchThreadTracer& rhs) const
     const auto rhs_agents = rhs.configured_agents();
     auto       lock       = std::lock_guard{agent_mut};
     for(const auto& id : rhs_agents)
-        if(params.count(id)) return true;
+        if(params.count(id) > 0) return true;
     return false;
 }
 
@@ -773,7 +773,7 @@ DeviceThreadTracer::intersects(const DeviceThreadTracer& rhs) const
     }
     auto lock = std::scoped_lock{agent_mut, rhs.agent_mut};
     for(const auto& [id, _] : params)
-        if(rhs.params.count(id)) return true;
+        if(rhs.params.count(id) > 0) return true;
     return false;
 }
 
