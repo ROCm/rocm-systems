@@ -137,7 +137,9 @@ address Os::reserveMemory(address start, size_t size, size_t alignment, MemProt 
   return mem;
 }
 
-bool Os::releaseMemory(void* addr, size_t size) { return VirtualFree(addr, 0, MEM_RELEASE) != 0; }
+bool Os::releaseMemory(void* addr, size_t /*size*/) {
+  return VirtualFree(addr, 0, MEM_RELEASE) != 0;
+}
 
 bool Os::commitMemory(void* addr, size_t size, MemProt prot) {
   return VirtualAlloc(addr, size, MEM_COMMIT, memProtToOsProt(prot)) != NULL;
@@ -491,7 +493,7 @@ std::string Os::getTempFileName() {
 int Os::unlink(const std::string& path) { return ::_unlink(path.c_str()); }
 
 // shm_unlink is a nop on windows
-int Os::shm_unlink(const std::string& path) { return 0; }
+int Os::shm_unlink(const std::string& /*path*/) { return 0; }
 
 void Os::cpuid(int regs[4], int info) { return __cpuid(regs, info); }
 
@@ -557,7 +559,7 @@ void Os::getAppPathAndFileName(std::string& appName, std::string& appPathAndName
   return;
 }
 
-bool Os::GetURIFromMemory(const void* image, size_t image_size, std::string& uri_) {
+bool Os::GetURIFromMemory(const void* /*image*/, size_t /*image_size*/, std::string& uri_) {
   // Not implemented yet for windows
   uri_ = std::string();
   return true;
@@ -596,7 +598,8 @@ bool Os::GetFileHandle(const char* fname, FileDesc* fd_ptr, size_t* sz_ptr) {
   return true;
 }
 
-bool Os::MemoryMapFileDesc(FileDesc fdesc, size_t fsize, size_t foffset, const void** mmap_ptr) {
+bool Os::MemoryMapFileDesc(FileDesc fdesc, size_t /*fsize*/, size_t /*foffset*/,
+                           const void** mmap_ptr) {
   if (fdesc == INVALID_HANDLE_VALUE) {
     return false;
   }
@@ -612,7 +615,7 @@ bool Os::MemoryMapFileDesc(FileDesc fdesc, size_t fsize, size_t foffset, const v
   return (*mmap_ptr == NULL) ? false : true;
 }
 
-bool Os::MemoryUnmapFile(const void* mmap_ptr, size_t mmap_size) {
+bool Os::MemoryUnmapFile(const void* mmap_ptr, size_t /*mmap_size*/) {
   if (!UnmapViewOfFile(mmap_ptr)) {
     return false;
   }
@@ -736,7 +739,7 @@ void* Os::OpenIpcMemory(const char* fname, const FileDesc desc, size_t size) {
 }
 
 // ================================================================================================
-void Os::CloseIpcMemory(const FileDesc desc, const void* ptr, size_t size) {
+void Os::CloseIpcMemory(const FileDesc desc, const void* ptr, size_t /*size*/) {
   if (ptr != nullptr) {
     UnmapViewOfFile(ptr);
   }
@@ -782,7 +785,7 @@ uint32_t getCurrentNumaNode() {
 }
 
 // ================================================================================================
-NumaPolicy::NumaPolicy(const uint32_t numa_node_count) {
+NumaPolicy::NumaPolicy(const uint32_t /*numa_node_count*/) {
 }
 
 // ================================================================================================
@@ -792,7 +795,7 @@ bool NumaPolicy::GetMemPolicy() {
 }
 
 // ================================================================================================
-bool NumaPolicy::IsPolicySetAt(uint32_t node_index) const {
+bool NumaPolicy::IsPolicySetAt(uint32_t /*node_index*/) const {
   // Dummy as Windows doesn't support numa policy
   return false;
 }

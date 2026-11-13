@@ -895,7 +895,7 @@ bool Elf::isElfMagic(const char* p) {
   return true;
 }
 
-bool Elf::isCALTarget(const char* p, signed char ec) {
+bool Elf::isCALTarget(const char* p, signed char /*ec*/) {
   if (!isElfMagic(p)) {
     return false;
   }
