@@ -271,6 +271,10 @@ urllib.request.urlretrieve(
     "docs/tools/example_codes/multi_device_synchronization.hip"
 )
 urllib.request.urlretrieve(
+    "https://raw.githubusercontent.com/ROCm/rocm-examples/amd-staging/HIP-Doc/Programming-Guide/Using-HIP-Runtime-API/Multi-Device-Management/p2p_memcpy_peer/main.hip",
+    "docs/tools/example_codes/p2p_memcpy_peer.hip"
+)
+urllib.request.urlretrieve(
     "https://raw.githubusercontent.com/ROCm/rocm-examples/amd-staging/HIP-Doc/Programming-Guide/Using-HIP-Runtime-API/Multi-Device-Management/p2p_memory_access/main.hip",
     "docs/tools/example_codes/p2p_memory_access.hip"
 )
