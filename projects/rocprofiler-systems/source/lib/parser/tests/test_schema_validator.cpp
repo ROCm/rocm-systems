@@ -38,7 +38,7 @@ schema_param
 make_enum(param_type type = param_type::enumeration)
 {
     auto param    = make_param(type);
-    param.choices = { choice{ .value = "alpha" }, choice{ .value = "beta" } };
+    param.choices = { "alpha", "beta" };
     return param;
 }
 
@@ -83,13 +83,12 @@ add_profiler_params(schema& value)
                            .min         = k_frequency_minimum,
                            .max         = k_frequency_maximum,
                        });
-    add_checked(value,
-                schema_param{
-                    .id          = "mode",
-                    .description = "Mode",
-                    .type        = param_type::enumeration,
-                    .choices = { choice{ .value = "fast" }, choice{ .value = "slow" } },
-                });
+    add_checked(value, schema_param{
+                           .id          = "mode",
+                           .description = "Mode",
+                           .type        = param_type::enumeration,
+                           .choices     = { "fast", "slow" },
+                       });
     add_checked(value, schema_param{
                            .id          = "label",
                            .description = "Label",

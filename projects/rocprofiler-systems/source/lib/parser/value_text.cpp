@@ -143,8 +143,7 @@ number_in_range(double value, const schema_param& param)
 [[nodiscard]] bool
 choice_listed(const schema_param& param, std::string_view value)
 {
-    return std::ranges::any_of(param.choices,
-                               [&](const choice& item) { return item.value == value; });
+    return std::ranges::find(param.choices, value) != param.choices.end();
 }
 
 [[nodiscard]] bool

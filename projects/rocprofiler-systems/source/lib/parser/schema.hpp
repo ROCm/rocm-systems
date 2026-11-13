@@ -33,14 +33,6 @@ enum class param_level : std::uint8_t
 
 using value_map_t = std::map<std::string, std::string, std::less<>>;
 
-/// One allowed value. An alias is accepted and stored as value, so code that reads
-/// the parameter compares one spelling.
-struct choice
-{
-    std::string              value;
-    std::vector<std::string> aliases;
-};
-
 struct schema_param
 {
     /// Unique key, used by get() and as the key in a configuration file.
@@ -59,10 +51,13 @@ struct schema_param
     std::optional<double> min;
     std::optional<double> max;
     /// Allowed values of an enumeration or enumeration_list.
-    std::vector<choice> choices;
-    /// Accept a value that is not one of choices.
+    std::vector<std::string> choices;
+    /// Accept a value that is not one of choices. For example, the common
+    /// ROCPROFSYS_GPU_PERF_COUNTERS counters could be listed, but any counter the
+    /// device supports must still be accepted.
     bool allow_custom = false;
-    /// A command-line switch that takes no value. Present means true.
+    /// A command-line switch that takes no value, such as "--trace". Present means
+    /// true, and "--trace=false" sets false.
     bool flag = false;
     /// Environment variable that sets the parameter.
     std::optional<std::string> env;
@@ -79,8 +74,8 @@ struct schema_param
     std::vector<std::string> conflicts;
     /// Parameters that must also be set when this one is.
     std::vector<std::string> required;
-    /// Parameter id to the value it takes when this parameter is set by a source
-    /// other than its default. A target set by a higher source keeps its value.
+    /// Parameter ids and the values they take when this one is set. For example,
+    /// "--gpu" uses it to set use_amd_smi and use_process_sampling to "true".
     value_map_t assigns;
 };
 
@@ -92,11 +87,6 @@ list_separator(const schema_param& param) noexcept;
 /// @return nullopt when @p separator is empty. An empty @p value is an empty list.
 [[nodiscard]] std::optional<std::vector<std::string>>
 split_list(std::string_view value, std::string_view separator);
-
-/// Choice alias rewritten as the choice value. A list is rewritten element by
-/// element. Text that is not an alias is unchanged.
-[[nodiscard]] std::string
-canonical_choice(const schema_param& param, std::string_view value);
 
 /**
  * Parameters for one catalog.

@@ -36,7 +36,7 @@ schema_param
 make_list()
 {
     auto param    = make_param(param_type::enumeration_list);
-    param.choices = { choice{ .value = "alpha" }, choice{ .value = "beta" } };
+    param.choices = { "alpha", "beta" };
     return param;
 }
 }  // namespace

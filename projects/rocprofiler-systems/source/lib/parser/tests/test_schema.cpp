@@ -188,10 +188,7 @@ TEST(parser_schema, effect_fields_round_trip)
 {
     auto param          = make_param("flat_profile", "", "--flat-profile");
     param.assigns       = { { "log_level", "debug" } };
-    param.choices       = { choice{
-              .value   = "pftrace",
-              .aliases = { "proto" },
-    } };
+    param.choices       = { "pftrace", "proto" };
     param.arg_min_count = 1;
     param.arg_max_count = 2;
 
@@ -200,8 +197,7 @@ TEST(parser_schema, effect_fields_round_trip)
     const auto* stored = value.find_param("flat_profile");
     ASSERT_NE(stored, nullptr);
     EXPECT_EQ(stored->assigns.at("log_level"), "debug");
-    ASSERT_EQ(stored->choices.size(), 1U);
-    EXPECT_EQ(stored->choices.front().aliases, std::vector<std::string>({ "proto" }));
+    EXPECT_EQ(stored->choices, (std::vector<std::string>{ "pftrace", "proto" }));
     EXPECT_EQ(stored->arg, "--flat-profile");
     EXPECT_EQ(stored->arg_min_count, 1U);
     EXPECT_EQ(stored->arg_max_count, 2U);
@@ -246,25 +242,6 @@ TEST(parser_schema, rejects_an_empty_backend_or_a_backend_on_the_wrong_type)
         param.backend = "papi";
         EXPECT_TRUE(value.add_param(std::move(param))) << static_cast<int>(type);
     }
-}
-
-TEST(parser_schema, canonical_choice_rewrites_aliases)
-{
-    auto param    = make_param("format");
-    param.type    = param_type::enumeration;
-    param.choices = { choice{ .value = "pftrace", .aliases = { "proto" } },
-                      choice{ .value = "text", .aliases = { "txt" } } };
-
-    EXPECT_EQ(canonical_choice(param, "proto"), "pftrace");
-    EXPECT_EQ(canonical_choice(param, "pftrace"), "pftrace");
-    EXPECT_EQ(canonical_choice(param, "other"), "other");
-
-    param.type = param_type::enumeration_list;
-    EXPECT_EQ(canonical_choice(param, " proto , txt "), "pftrace,text");
-    EXPECT_EQ(canonical_choice(param, ""), "");
-
-    param.type = param_type::string;
-    EXPECT_EQ(canonical_choice(param, "proto"), "proto");
 }
 
 TEST(parser_schema, split_list_trims_and_rejects_an_empty_separator)
