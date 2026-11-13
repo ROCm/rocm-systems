@@ -67,10 +67,9 @@ struct local_context_control_t
 };
 
 // RAII: owns this replay loop's override map and installs it as the thread's active routing for the
-// guard's lifetime, clearing the routing on destruction; global context state is never touched.
-// Replays on one agent are serialized by the per-agent replay lock, so a loop never nests on a
-// thread -- the destructor just clears the routing. Real teardown that can fail (e.g. PC sampling
-// hardware) is done explicitly by the loop.
+// guard's lifetime, inheriting outer overrides and restoring outer routing on destruction; global
+// context state is never touched. Real teardown that can fail (e.g. PC sampling hardware) is done
+// explicitly by the loop.
 class scoped_local_context_control
 {
 public:
@@ -86,7 +85,9 @@ public:
     scoped_local_context_control& operator=(scoped_local_context_control&&) = delete;
 
 private:
-    local_context_control_t m_control{};  // this loop's overrides (owned)
+    local_context_control_t  m_control{};  // this loop's overrides (owned)
+    local_context_control_t* m_previous               = nullptr;
+    bool                     m_previous_toggles_armed = false;
 };
 
 // Arm/disarm the tool-facing toggle callbacks. execute_pass_phase_enter() brackets the tool's PASS
