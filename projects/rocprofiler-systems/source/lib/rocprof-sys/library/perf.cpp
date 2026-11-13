@@ -32,6 +32,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <string>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <sys/types.h>
@@ -70,7 +71,10 @@ read_perf_event_paranoid()
 {
     auto file  = std::ifstream{ k_paranoid_path };
     int  value = 0;
-    if(file >> value) return result<int, std::string>{ value };
+    if(file >> value)
+    {
+        return result<int, std::string>{ value };
+    }
     return result<int, std::string>{ failure{
         fmt::format("could not read {}", k_paranoid_path) } };
 }
