@@ -16,6 +16,7 @@
 
 // Defaults to bus id 0 for every device and ncclSuccess, as the plain stub did.
 extern std::function<ncclResult_t(int /*cudaDev*/, int64_t* /*busId*/)> g_getBusId;
+extern std::function<ncclResult_t(int64_t, char*)> g_int64ToBusId;
 
 void ResetUtilsFakes();
 

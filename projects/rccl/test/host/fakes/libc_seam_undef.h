@@ -17,6 +17,7 @@
 #undef atexit
 #undef ioctl
 #undef readlink
+#undef readlinkat
 #undef closedir
 #undef readdir
 #undef opendir
