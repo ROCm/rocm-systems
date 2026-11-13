@@ -197,18 +197,21 @@ typedef struct rocprofiler_callback_tracing_range_replay_data_t
     ///
     /// @var host_replay
     /// @brief [CONFIG] Set non-zero during CONFIG @ref ROCPROFILER_CALLBACK_PHASE_ENTER to re-run
-    /// the host code inside the range instead of re-submitting recorded packets. Requires the
-    /// application to open the range with @ref ROCPROFILER_RANGE_REPLAY_HOST_BEGIN; otherwise the
-    /// range declines with @ref ROCPROFILER_RANGE_REPLAY_STATUS_HOST_JMP_NOT_SET. Zero (the
-    /// default) keeps packet replay.
+    /// the host code inside the range. Requires the application to open the range with
+    /// @ref ROCPROFILER_RANGE_REPLAY_HOST_BEGIN; otherwise the range declines with
+    /// @ref ROCPROFILER_RANGE_REPLAY_STATUS_HOST_JMP_NOT_SET. Zero (the default) does not replay:
+    /// @ref rocprofiler_range_replay_end closes after the application's own run with
+    /// @ref ROCPROFILER_RANGE_REPLAY_STATUS_PACKET_REPLAY_UNSUPPORTED, unless an earlier decline
+    /// applies.
 } rocprofiler_callback_tracing_range_replay_data_t;
 
 /**
  * @brief Open a replay range on the calling thread.
  *
- * The dispatches the calling thread submits until the matching @ref rocprofiler_range_replay_end
- * are recorded, and a device-memory snapshot of the range's agent is taken before the first of them
- * executes. Ranges are thread-scoped and do not nest.
+ * This is the one-run entry. The calling thread's dispatches until
+ * @ref rocprofiler_range_replay_end are observed, and that end closes the range after the
+ * application's own run. It does not raise @ref ROCPROFILER_RANGE_REPLAY_PASS. Supported replay
+ * is @ref ROCPROFILER_RANGE_REPLAY_HOST_BEGIN. Ranges are thread-scoped and do not nest.
  *
  * Emits @ref ROCPROFILER_RANGE_REPLAY_CONFIG so the tool can supply the pass count.
  *
@@ -306,12 +309,14 @@ rocprofiler_status_t
 rocprofiler_range_replay_get_host_pass(uint64_t* pass) ROCPROFILER_API;
 
 /**
- * @brief Close the replay range open on the calling thread and run its extra passes.
+ * @brief Close the replay range open on the calling thread.
  *
- * Drains the agent, then re-executes the recorded dispatches from the snapshot taken at
- * @ref rocprofiler_range_replay_begin, raising @ref ROCPROFILER_RANGE_REPLAY_PASS around each pass
- * and @ref ROCPROFILER_RANGE_REPLAY_CLOSE once at the end. Blocks the calling thread for the
- * duration of the replay.
+ * A range opened with @ref rocprofiler_range_replay_begin runs once. This function raises
+ * @ref ROCPROFILER_RANGE_REPLAY_CLOSE and returns. It does not raise
+ * @ref ROCPROFILER_RANGE_REPLAY_PASS and it does not re-submit recorded packets. CLOSE status is
+ * @ref ROCPROFILER_RANGE_REPLAY_STATUS_PACKET_REPLAY_UNSUPPORTED when the tool asked for more than
+ * one pass, @ref ROCPROFILER_RANGE_REPLAY_STATUS_NO_PASS_COUNT when it opted out, or an earlier
+ * decline when one was recorded.
  *
  * For a host-replay range this function does not return after passes 0..N-2: it waits for every
  * GPU queue to go idle, restores device memory and the registered host regions, raises

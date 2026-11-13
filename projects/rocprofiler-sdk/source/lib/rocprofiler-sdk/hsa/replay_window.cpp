@@ -118,11 +118,10 @@ replay_drain_agent_or_fatal(hsa_agent_t agent)
 
     for(;;)
     {
-        int64_t in_flight = 0;
-        queue_controller->iterate_queues([&](const Queue* sibling) {
-            if(sibling != nullptr && sibling->get_agent().get_hsa_agent() == agent)
-                in_flight += sibling->active_async_packets();
-        });
+        // Includes queues destroy has already removed from the live map. Their completion
+        // handlers are still running until Queue::sync returns, and a snapshot taken in that
+        // window would race those handlers.
+        const auto in_flight = queue_controller->in_flight_async_packets(agent);
 
         if(in_flight == 0) return;
 

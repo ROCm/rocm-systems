@@ -624,29 +624,37 @@ QueueController::destroy_queue(hsa_queue_t* id)
 
     queue_interposition::destroy_queue_state(id);
 
-    // Drop the wrapper out of the map before waiting. sync waits for completion handlers, and
-    // those handlers can create or destroy another queue, which needs this same lock. Holding it
-    // across the wait deadlocks that callback. The unique_ptr keeps this queue alive for the wait.
-    std::unique_ptr<Queue> owned;
+    // Drop the wrapper out of the live map before waiting. sync waits for completion handlers,
+    // and those handlers can create or destroy another queue, which needs the lifetime lock.
+    // Holding that lock across the wait deadlocks the callback. The queue stays in _retiring
+    // until the wait finishes, so replay drain still counts its in-flight handlers. Both moves
+    // happen under the map write lock, which drain takes first, so drain cannot observe a gap
+    // where the queue is in neither set.
+    std::shared_ptr<Queue> retiring;
     _queues.wlock([&](auto& map) {
         for(auto itr = map.begin(); itr != map.end(); ++itr)
         {
             if(itr->second.get() == queue)
             {
-                owned = std::move(itr->second);
+                retiring = std::shared_ptr<Queue>(std::move(itr->second));
                 map.erase(itr);
                 break;
             }
         }
+        if(retiring) _retiring.wlock([&](auto& pending) { pending.emplace_back(retiring); });
     });
     lifetime_lock.unlock();
 
-    if(!owned) return;
+    if(!retiring) return;
     // One bounded wait. A timeout is reported and destruction still finishes: the runtime queue
     // is going away, so the wrapper cannot stay behind.
-    ROCP_WARNING_IF(!owned->sync()) << "queue destroy proceeding after sync timed out; a "
-                                       "completion callback may still be in flight";
-    if(owned->block_signal.handle != 0) get_core_table().hsa_signal_destroy_fn(owned->block_signal);
+    ROCP_WARNING_IF(!retiring->sync()) << "queue destroy proceeding after sync timed out; a "
+                                          "completion callback may still be in flight";
+    if(retiring->block_signal.handle != 0)
+        get_core_table().hsa_signal_destroy_fn(retiring->block_signal);
+    _retiring.wlock([&](auto& pending) {
+        pending.erase(std::remove(pending.begin(), pending.end(), retiring), pending.end());
+    });
 }
 
 ClientID
@@ -960,6 +968,26 @@ QueueController::iterate_queues_with_lifetime(const queue_iterator_cb_t& cb) con
     iterate_queues([&](const Queue* queue) { queues.emplace_back(queue); });
     for(const auto* queue : queues)
         cb(queue);
+}
+
+int64_t
+QueueController::in_flight_async_packets(hsa_agent_t agent) const
+{
+    int64_t    in_flight = 0;
+    const auto count     = [&](const Queue* queue) {
+        if(queue != nullptr && queue->get_agent().get_hsa_agent().handle == agent.handle)
+            in_flight += queue->active_async_packets();
+    };
+    // Map lock first, then the retiring set. destroy_queue uses that same order.
+    _queues.rlock([&](const queue_map_t& queues) {
+        for(const auto& itr : queues)
+            count(itr.second.get());
+        _retiring.rlock([&](const auto& pending) {
+            for(const auto& queue : pending)
+                count(queue.get());
+        });
+    });
+    return in_flight;
 }
 
 void

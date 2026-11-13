@@ -116,11 +116,12 @@ replay_drain_or_fatal(const Queue& queue);
 // per-sibling blocking drain there would block stream creation/destruction for the whole (up to
 // ~60s) drain. Instead poll each queue's in-flight async count under a brief read lock and sleep
 // between polls, so the map lock is held only for the microsecond poll -- never across the wait.
-// Safe against concurrent queue destruction: a Queue is only dereferenced while the read lock is
-// held (destroy_queue erases under the write lock), and the live set is re-read every poll. The
-// per-agent writer lock held by the replay window blocks new dispatches on the agent, so in-flight
-// work only decreases and the poll converges; fatal on a genuinely stuck queue (beta feature),
-// matching replay_drain_or_fatal.
+// Safe against concurrent queue destruction: a Queue is only dereferenced while the queue-map
+// read lock is held. A queue that destroy has already removed from that map stays reachable
+// through the retiring set until its completion handlers finish. The live and retiring sets are
+// re-read every poll. The per-agent writer lock held by the replay window blocks new dispatches
+// on the agent, so in-flight work only decreases and the poll converges; fatal on a genuinely
+// stuck queue (beta feature), matching replay_drain_or_fatal.
 void
 replay_drain_agent_or_fatal(hsa_agent_t agent);
 

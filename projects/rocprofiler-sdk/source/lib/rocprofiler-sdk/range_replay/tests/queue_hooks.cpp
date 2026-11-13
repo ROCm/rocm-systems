@@ -133,6 +133,36 @@ TEST(range_replay_queue_hooks, own_range_submission_also_notifies_foreign_ranges
     EXPECT_EQ(open->record.status(), ROCPROFILER_RANGE_REPLAY_STATUS_CONCURRENT_DISPATCH);
 }
 
+// A non-host range is not packet-replayed, so the submit hook must not capture device memory.
+// The old hook called ensure_entry_snapshot here. snapshot_taken stays false, and the range is
+// not declined as SNAPSHOT_FAILED.
+TEST(range_replay_queue_hooks, non_host_submission_does_not_snapshot)
+{
+    auto agent      = rocprofiler_agent_t{};
+    agent.id.handle = 0x2002;
+    agent.name      = "test";
+    auto ext        = noop_ext_table();
+    auto core       = noop_core_table();
+    auto cache =
+        rocprofiler::hsa::AgentCache{&agent, {.handle = 0x2002}, 0, {.handle = 0}, ext, core};
+    auto queue = rocprofiler::hsa::Queue{cache, core};
+
+    ASSERT_TRUE(range_replay::open_range(9));
+    auto* open                  = range_replay::current_range();
+    open->plan.replay_requested = true;
+    auto _take                  = rocprofiler::common::scope_destructor{[]() {
+        auto taken = range_replay::range_context_t{};
+        range_replay::take_range(taken);
+    }};
+
+    range_replay::submission_hook(&queue, nullptr, 0, false, nullptr);
+
+    EXPECT_FALSE(open->host.enabled);
+    EXPECT_FALSE(open->snapshot_taken);
+    EXPECT_NE(open->record.status(), ROCPROFILER_RANGE_REPLAY_STATUS_SNAPSHOT_FAILED);
+    EXPECT_TRUE(open->record.eligible());
+}
+
 TEST(range_replay_queue_hooks, non_compute_queues_are_not_replay_ring_targets)
 {
     auto agent      = rocprofiler_agent_t{};

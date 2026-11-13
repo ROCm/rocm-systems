@@ -106,6 +106,7 @@ begin
   application runs the range once
 end
   no siglongjmp
+  no entry snapshot of device memory
   no packet rewrite of the AQL ring
   CLOSE status = PACKET_REPLAY_UNSUPPORTED
   return

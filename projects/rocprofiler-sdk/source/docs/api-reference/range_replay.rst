@@ -7,11 +7,11 @@
 ROCprofiler-SDK range replay (experimental)
 ============================================
 
-Range replay re-executes a **recorded sequence of dispatches** inside one application run, restoring
-device memory to the sequence's entry state before each re-execution so every pass observes identical
-inputs. Where :ref:`kernel-replay-sdk-api` repeats one dispatch, range replay repeats a phase — an
-iteration, a layer, a collective step — whose kernels feed each other and therefore cannot be
-measured one at a time.
+Range replay re-runs a **phase of application code** inside one process, restoring device memory
+and registered host memory before each extra pass. Where :ref:`kernel-replay-sdk-api` repeats one
+dispatch, range replay repeats a phase — an iteration, a layer, a collective step — whose kernels
+feed each other and therefore cannot be measured one at a time. The supported way to replay is
+host replay (:ref:`range-replay-host`). Plain ``begin`` / ``end`` runs the phase once.
 
 .. warning::
 
@@ -46,28 +46,34 @@ The domain is single-subscriber: a second context configuring it gets
 it also enables the device-allocation tracker used for snapshot and restore, and enables HSA queue
 interception. A process that never configures the domain pays neither cost.
 
-Mark a range
-------------
+Mark a range that runs once
+---------------------------
+
+Plain ``begin`` / ``end`` does not replay. CONFIG fires at begin. The application runs the phase
+once. ``end`` raises CLOSE and returns, with no PASS callback. When the tool asked for more than
+one pass and nothing else declined the range, CLOSE status is
+``PACKET_REPLAY_UNSUPPORTED``. Requesting host replay without
+``ROCPROFILER_RANGE_REPLAY_HOST_BEGIN`` closes as ``HOST_JMP_NOT_SET``.
 
 .. code-block:: cpp
 
     rocprofiler_range_replay_begin(iteration_index);  // CONFIG callback fires here
 
-    // ... the application's dispatches for this phase: recorded, and executed as pass 0 ...
+    // ... the application's dispatches for this phase. One run. No PASS callback. ...
 
-    rocprofiler_range_replay_end();                   // PASS callbacks, then CLOSE
+    rocprofiler_range_replay_end();                   // CLOSE, then return
 
-Ranges are thread-scoped and do not nest; only the marking thread's dispatches are recorded.
-``rocprofiler_range_replay_end()`` blocks until the extra passes have run.
+Ranges are thread-scoped and do not nest. Replay that re-enters this code is the host-begin
+example below.
 
 Mark a range that re-runs host code
 -----------------------------------
 
-When the range contains copies, several streams, graph launches, or host computation the kernels
-depend on, packet replay declines it. Host replay re-runs the application's own code instead: the
-tool sets ``host_replay`` during ``CONFIG`` and the application opens the range with the macro, which
-takes a ``sigsetjmp`` in the caller's frame. ``rocprofiler_range_replay_end()`` restores device
-memory and registered host memory, then ``siglongjmp``\ s back for each extra pass.
+This is the supported replay. The tool sets ``host_replay`` during ``CONFIG`` and the application
+opens the range with the macro, which takes a ``sigsetjmp`` in the caller's frame.
+``rocprofiler_range_replay_end()`` restores device memory and registered host memory, then
+``siglongjmp``\ s back for each extra pass. Copies, several streams, graph launches, and host
+calls such as device synchronization run again because the application issues them again.
 
 .. code-block:: cpp
 
@@ -126,11 +132,12 @@ Pass count
 
 Same semantics as kernel replay, with pass 0 reinterpreted as the application's own execution:
 
-* ``NULL`` — the range is observed but never re-executed.
+* ``NULL`` — the range is observed but never re-executed (``NO_PASS_COUNT``).
 * returns ``1`` — same as ``NULL``.
-* returns ``N > 1`` — the recording is re-executed ``N - 1`` times; ``replay_continue_cb`` may still
-  stop early.
-* returns ``0`` — indefinite; ``replay_continue_cb`` is required.
+* returns ``N > 1`` — a host-replay range re-enters the application ``N - 1`` times;
+  ``replay_continue_cb`` may still stop early. Without ``host_replay``, CLOSE is
+  ``PACKET_REPLAY_UNSUPPORTED`` and no PASS callback is raised.
+* returns ``0`` — indefinite host replay; ``replay_continue_cb`` is required.
 
 An opt-out still produces a ``CLOSE`` callback, with status
 ``ROCPROFILER_RANGE_REPLAY_STATUS_NO_PASS_COUNT``, so a tool can tell its own decision apart from an
