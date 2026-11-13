@@ -256,6 +256,19 @@ TEST_F(HostHierAllReduceMPITest, GrowingSizesReuseChildComms)
     }
 }
 
+// With 8 ranks per host this is 208 MiB of fp32: three full 64 MiB rounds of the fused kernel and a shorter last one.
+// Launch with RCCL_HOST_HIER_ALLREDUCE_FUSED=1 to run it in the fused kernel, which auto mode does not pick at this size.
+// The pattern repeats every 13 elements, so data landing a power-of-two distance away does not match by chance.
+TEST_F(HostHierAllReduceMPITest, ShortLastRound)
+{
+    RunResult run = runAllReduce<float>(
+        comm(), getActiveStream(), countFor((size_t{13} << 22) / layout_.ranksPerHost), ncclFloat32, ncclSum, false,
+        false, [this](size_t i) { return static_cast<float>((rank_ + i) % 13); },
+        [this](size_t i, float v) { return v == rankSumMod(i, 13); });
+    ASSERT_RUN_OK(run);
+    ASSERT_MPI_TRUE(builtChildComms());
+}
+
 TEST_F(HostHierAllReduceMPITest, UnevenCountUsesDefaultPath)
 {
     RunResult run = fp32Sum(countFor(1024) + 1, false);
