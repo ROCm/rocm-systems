@@ -3,6 +3,7 @@
 
 // Tests for M0-relative scalar-register addressing and bounds.
 
+#include "rj_arith/detail/rj_arith_scalar.h"
 #include "scalar/integer_helpers.h"
 
 #include <array>

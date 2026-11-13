@@ -3,6 +3,7 @@
 
 // Tests for scalar floating-point rounding.
 
+#include "rj_arith/detail/rj_arith_scalar.h"
 #include "scalar/fp_helpers.h"
 #include <algorithm>
 #include <limits>

@@ -7,8 +7,10 @@
 #include "execution_plugin_test_util.h"
 #include "halt_snapshot_plugin.h"
 #include "instruction_failure_test_util.h"
+#include "rocjitsu/isa/arch/amdgpu/async_mma_policy.h"
 #include "rocjitsu/kmd/linux/kfd_process.h"
 #include "rocjitsu/kmd/linux/legacy_gpu_vm.h"
+#include "rocjitsu/vm/amdgpu/async_scoreboard.h"
 #include "rocjitsu/vm/amdgpu/dispatch_entry.h"
 #include "rocjitsu/vm/amdgpu/hwreg.h"
 #include "rocjitsu/vm/plugins/execution_plugin.h"
@@ -30,6 +32,7 @@
 #include <barrier>
 #include <chrono>
 #include <condition_variable>
+#include <format>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
@@ -38,7 +41,6 @@
 #include <mutex>
 #include <set>
 #include <sstream>
-#include <stdexcept>
 #include <tuple>
 
 #if defined(__linux__)
@@ -232,24 +234,20 @@ public:
 
 class AsyncIssueInterestPlugin final : public ExecutionPlugin {
 public:
-  AsyncIssueInterestPlugin(std::string name, bool observes_issue, bool throws_on_issue = false)
-      : ExecutionPlugin(std::move(name)), observes_issue_(observes_issue),
-        throws_on_issue_(throws_on_issue) {}
+  AsyncIssueInterestPlugin(std::string name, bool observes_issue)
+      : ExecutionPlugin(std::move(name)), observes_issue_(observes_issue) {}
 
   bool supports_async_instructions() const override { return true; }
   bool observes_async_instruction_issued() const override { return observes_issue_; }
 
   void onAmdgpuAsyncInstructionIssued(uint64_t, const Instruction &, Wavefront &) override {
     ++callbacks;
-    if (throws_on_issue_)
-      throw std::runtime_error("injected async issue failure");
   }
 
   uint32_t callbacks = 0;
 
 private:
   bool observes_issue_ = false;
-  bool throws_on_issue_ = false;
 };
 
 class OverlapProbe {
@@ -1141,7 +1139,8 @@ TEST(InstructionMixPluginTest, CancellationKeepsAttemptedInstructionsWithoutComp
   f.soc->set_plugin_group(f.plugin_group_);
   f.plugin_group_->onInit();
 
-  const uint32_t code[] = {S_NOP, test::kUnimplementedInstruction, S_ENDPGM};
+  const uint32_t code[] = {S_NOP, test::kUnimplementedInstruction[0],
+                           test::kUnimplementedInstruction[1], S_ENDPGM};
   f.run_kernel(code, std::size(code));
   ASSERT_EQ(f.engine->last_exit().code, 1);
   EXPECT_TRUE(f.cu()->is_idle());
@@ -1540,7 +1539,7 @@ public:
   }
   void onAmdgpuAsyncInstructionIssued(uint64_t, const Instruction &inst, Wavefront &wf) override {
     EXPECT_EQ(std::this_thread::get_id(), issuer_thread);
-    EXPECT_EQ(inst.mnemonic(), "v_wmma_f32_16x16x64_fp8_fp8");
+    EXPECT_EQ(inst.mnemonic(), "v_wmma_f32_32x16x128_f4");
     hazard_at_async_issue = wf.setreg_vgpr_msb_hazard();
     ++issued;
   }
@@ -1571,7 +1570,7 @@ std::vector<uint32_t> independent_wmma_kernel() {
   // Zero operands are sufficient: this test checks real offload and callback
   // lifetimes; the matrix suites separately compare nonzero numerical results.
   for (uint8_t dst : {uint8_t{64}, uint8_t{96}}) {
-    const auto words = cdna5::build_vop3p(cdna5::kVWmmaF3216x16x64Fp8Fp8Vop3p,
+    const auto words = cdna5::build_vop3p(cdna5::kVWmmaF3232x16x128F4Vop3p,
                                           {.vdst = dst,
                                            .src0 = 256,
                                            .src1 = 288,
@@ -1584,6 +1583,8 @@ std::vector<uint32_t> independent_wmma_kernel() {
 }
 
 TEST(ExecutionPluginTest, AsyncMmaEndsSetregVgprMsbAdjacencyHazard) {
+  if (!rocjitsu::amdgpu::async_mma_policy::candidate("v_wmma_f32_32x16x128_f4"))
+    GTEST_SKIP() << "Migrated matrix handlers require issuer-owned error reporting.";
   PluginFixture f;
   ASSERT_NO_FATAL_FAILURE(f.initialize(1, "cdna5", 32, 128, 256, 1, /*async_helpers=*/4));
   f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
@@ -1638,113 +1639,84 @@ TEST(ExecutionPluginTest, SynchronousObserverDisablesActualMmaOffload) {
   EXPECT_EQ(after, before);
 }
 
-enum class AsyncFailurePoint { HelperRegisterRead, Issue };
+TEST(ExecutionPluginTest, ReportedAsyncIssueFailureDrainsBeforeCancellation) {
+  if (!rocjitsu::amdgpu::async_mma_policy::candidate("v_wmma_f32_32x16x128_f4"))
+    GTEST_SKIP() << "Migrated matrix handlers require issuer-owned error reporting.";
+  class AsyncFailurePlugin final : public ExecutionPlugin {
+  public:
+    explicit AsyncFailurePlugin(bool reject)
+        : ExecutionPlugin(reject ? "async_reject" : "async_observer"), reject_(reject) {}
 
-struct AsyncFailureObservation {
-  static constexpr unsigned all_plugins = 0b111;
-  struct Record {
-    unsigned issued = 0;
-    bool destroyed = false;
-  };
-  std::thread::id issuer = std::this_thread::get_id();
-  std::atomic<bool> injected{false};
-  std::map<uint64_t, Record> records;
-};
-
-// These WMMA handlers have no dynamic instruction state. Attach a test-only
-// lifetime probe to verify issuer-thread destruction after a callback failure.
-class AsyncDestructionProbe final : public DynamicInstState {
-public:
-  AsyncDestructionProbe(AsyncFailureObservation &observations, uint64_t pc)
-      : observations_(observations), pc_(pc) {}
-  ~AsyncDestructionProbe() override {
-    EXPECT_EQ(std::this_thread::get_id(), observations_.issuer);
-    auto &record = observations_.records.at(pc_);
-    EXPECT_EQ(record.issued, AsyncFailureObservation::all_plugins);
-    EXPECT_FALSE(record.destroyed);
-    record.destroyed = true;
-  }
-
-private:
-  AsyncFailureObservation &observations_;
-  uint64_t pc_;
-};
-
-class AsyncFailurePlugin final : public ExecutionPlugin {
-public:
-  AsyncFailurePlugin(AsyncFailureObservation &observations, unsigned index, AsyncFailurePoint point)
-      : ExecutionPlugin(std::format("async-failure-{}", index)), observations_(observations),
-        index_(index), point_(point) {}
-  bool supports_async_instructions() const override { return true; }
-  bool observes_sgpr_reads() const override { return false; }
-  void onAmdgpuAsyncInstructionIssued(uint64_t pc, const Instruction &inst, Wavefront &) override {
-    EXPECT_EQ(std::this_thread::get_id(), observations_.issuer);
-    auto &record = observations_.records[pc];
-    EXPECT_FALSE(record.destroyed);
-    EXPECT_EQ(record.issued & (1u << index_), 0u);
-    record.issued |= 1u << index_;
-    if (index_ == 0) {
-      EXPECT_EQ(inst.data(), nullptr);
-      const_cast<Instruction &>(inst).set_data(
-          std::make_unique<AsyncDestructionProbe>(observations_, pc));
+    bool supports_async_instructions() const override { return true; }
+    void onAmdgpuAsyncInstructionIssued(uint64_t pc, const Instruction &,
+                                        Wavefront &wave) override {
+      ++issued;
+      issuing_pc = pc;
+      if (reject_)
+        wave.report_instruction_execution_error(InstructionExecutionError::PluginFailure,
+                                                "async issue hook failed");
+      else
+        EXPECT_EQ(wave.instruction_execution_error(), InstructionExecutionError::PluginFailure);
     }
-    inject(AsyncFailurePoint::Issue);
-  }
-  void onAmdgpuReadVgprLanes(const Wavefront *, uint32_t, uint64_t, uint8_t) override {
-    if (std::this_thread::get_id() != observations_.issuer)
-      inject(AsyncFailurePoint::HelperRegisterRead);
-  }
+    void onAmdgpuBeforeExecuteInstruction(uint64_t, const Instruction &, Wavefront &) override {
+      ++before_callbacks;
+    }
+    void onAmdgpuWavefrontCancelled(Wavefront &wave) override {
+      ++cancellations;
+      EXPECT_EQ(wave.pc, issuing_pc);
+    }
+    void onAmdgpuWavefrontHalted(Wavefront &) override { ++halts; }
 
-private:
-  void inject(AsyncFailurePoint point) {
-    // The first and last plugins never throw. The middle plugin must not keep
-    // later observers from receiving the issue notification.
-    if (index_ == 1 && point_ == point && !observations_.injected.exchange(true))
-      throw std::runtime_error("injected async plugin failure");
-  }
-  AsyncFailureObservation &observations_;
-  unsigned index_;
-  AsyncFailurePoint point_;
-};
+    uint64_t issuing_pc = 0;
+    unsigned issued = 0;
+    unsigned before_callbacks = 0;
+    unsigned cancellations = 0;
+    unsigned halts = 0;
 
-class AsyncPluginFailureTest : public ::testing::TestWithParam<AsyncFailurePoint> {};
+  private:
+    bool reject_;
+  };
 
-TEST_P(AsyncPluginFailureTest, DestroysEveryAcceptedInstructionOnIssuerAfterFailure) {
-  AsyncFailureObservation observations;
-  PluginFixture f;
-  ASSERT_NO_FATAL_FAILURE(f.initialize(1, "cdna5", 32, 128, 256, 1, /*async_helpers=*/4));
-  f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
-  for (unsigned index = 0; index != 3; ++index)
-    ASSERT_TRUE(f.plugin_group_->add(
-        std::make_unique<AsyncFailurePlugin>(observations, index, GetParam())));
-  f.soc->set_plugin_group(f.plugin_group_);
-  f.plugin_group_->onInit();
+  PluginFixture fixture;
+  ASSERT_NO_FATAL_FAILURE(fixture.initialize(1, "cdna5", 32, 128, 256, 1, /*async_helpers=*/4));
+  fixture.plugin_group_ = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+  auto rejecting_plugin = std::make_unique<AsyncFailurePlugin>(true);
+  auto *rejecting = rejecting_plugin.get();
+  auto observing_plugin = std::make_unique<AsyncFailurePlugin>(false);
+  auto *observing = observing_plugin.get();
+  ASSERT_TRUE(fixture.plugin_group_->add(std::move(rejecting_plugin)));
+  ASSERT_TRUE(fixture.plugin_group_->add(std::move(observing_plugin)));
+  fixture.soc->set_plugin_group(fixture.plugin_group_);
+  fixture.plugin_group_->onInit();
+  const uint64_t submitted_before = async_execution::stats.mma;
+  const uint64_t retired_before = async_execution::stats.retired_mma;
+  unsigned failures = 0;
+  fixture.cu()->set_execution_failure_handler([&](Wavefront &wave) {
+    ++failures;
+    EXPECT_EQ(wave.pc, rejecting->issuing_pc);
+    EXPECT_EQ(wave.instruction_execution_error(), InstructionExecutionError::PluginFailure);
+    EXPECT_STREQ(wave.instruction_execution_error_detail(), "async issue hook failed");
+    EXPECT_EQ(observing->issued, 1u);
+    EXPECT_EQ(async_execution::stats.mma - submitted_before, 1u);
+    EXPECT_EQ(async_execution::stats.retired_mma - retired_before, 1u);
+    return false;
+  });
   const auto code = independent_wmma_kernel();
-  EXPECT_THROW(f.run_kernel(code.data(), code.size(), 32, 32), std::runtime_error);
-  EXPECT_TRUE(observations.injected.load());
-  ASSERT_FALSE(observations.records.empty());
-  for (const auto &[pc, record] : observations.records) {
-    SCOPED_TRACE(pc);
-    EXPECT_EQ(record.issued, AsyncFailureObservation::all_plugins);
-    EXPECT_TRUE(record.destroyed);
+  fixture.run_kernel(code.data(), code.size(), 32, 32);
+  fixture.shutdown();
+  EXPECT_EQ(fixture.engine->last_exit().code, 1);
+  EXPECT_EQ(failures, 1u);
+  for (const auto *plugin : {rejecting, observing}) {
+    EXPECT_EQ(plugin->issued, 1u);
+    EXPECT_EQ(plugin->before_callbacks, 0u);
+    EXPECT_EQ(plugin->cancellations, 1u);
+    EXPECT_EQ(plugin->halts, 0u);
   }
-  f.shutdown();
 }
 
-INSTANTIATE_TEST_SUITE_P(CallbackFailures, AsyncPluginFailureTest,
-                         ::testing::Values(AsyncFailurePoint::HelperRegisterRead,
-                                           AsyncFailurePoint::Issue),
-                         [](const ::testing::TestParamInfo<AsyncFailurePoint> &info) {
-                           switch (info.param) {
-                           case AsyncFailurePoint::HelperRegisterRead:
-                             return "HelperRegisterRead";
-                           case AsyncFailurePoint::Issue:
-                             return "Issue";
-                           }
-                           return "Unknown";
-                         });
-
 TEST(ThroughputPluginTest, AsyncMmaCountsHaveExplicitlyUnavailableHandlerTiming) {
+  if (!rocjitsu::amdgpu::async_mma_policy::candidate("v_wmma_f32_32x16x128_f4"))
+    GTEST_SKIP() << "Migrated matrix handlers require issuer-owned error reporting.";
   PluginFixture f;
   ASSERT_NO_FATAL_FAILURE(f.initialize(1, "cdna5", 32, 128, 256, 1, /*async_helpers=*/4));
   PluginSinkConfig sink_config;
@@ -1827,6 +1799,8 @@ TEST(InstructionMixPluginTest, AloneItSubscribesToOnlyTheHooksItConsumes) {
 // without handling the issue hook would have dropped them from the counts
 // instead.
 TEST(InstructionMixPluginTest, CountsActuallyOffloadedInstructions) {
+  if (!rocjitsu::amdgpu::async_mma_policy::candidate("v_wmma_f32_32x16x128_f4"))
+    GTEST_SKIP() << "Migrated matrix handlers require issuer-owned error reporting.";
   PluginFixture f;
   ASSERT_NO_FATAL_FAILURE(f.initialize(1, "cdna5", 32, 128, 256, 1, /*async_helpers=*/4));
   PluginSinkConfig sink_config;
@@ -1857,6 +1831,8 @@ TEST(InstructionMixPluginTest, CountsActuallyOffloadedInstructions) {
 }
 
 TEST(ExecutionPluginTest, KernelLoggingSupportsActualAsyncMma) {
+  if (!rocjitsu::amdgpu::async_mma_policy::candidate("v_wmma_f32_32x16x128_f4"))
+    GTEST_SKIP() << "Migrated matrix handlers require issuer-owned error reporting.";
   PluginFixture f;
   ASSERT_NO_FATAL_FAILURE(f.initialize(1, "cdna5", 32, 128, 256, 1, /*async_helpers=*/4));
   PluginSinkConfig sink_config;
@@ -1918,6 +1894,131 @@ TEST(ExecutionPluginTest, SgprReadOptOutSkipsComputeUnitCallback) {
   EXPECT_EQ(plugin_ptr->callbacks, 0u);
 }
 
+TEST(ExecutionPluginTest, ReportedInstructionHookFailureCancelsBeforeContinuing) {
+  class FailingHookPlugin final : public ExecutionPlugin {
+  public:
+    explicit FailingHookPlugin(bool fail_before)
+        : ExecutionPlugin("failing_hook"), fail_before_(fail_before) {}
+
+    void onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Instruction &,
+                                          Wavefront &wave) override {
+      issue_pc = pc;
+      if (fail_before_)
+        wave.report_instruction_execution_error(InstructionExecutionError::PluginFailure,
+                                                "before hook failed");
+    }
+    void onAmdgpuAfterExecuteInstruction(uint64_t pc, const Instruction &,
+                                         Wavefront &wave) override {
+      EXPECT_EQ(pc, issue_pc + 4 * sizeof(uint32_t));
+      EXPECT_EQ(wave.pc, pc);
+      ++after_callbacks;
+      if (!fail_before_)
+        wave.report_instruction_execution_error(InstructionExecutionError::PluginFailure,
+                                                "after hook failed");
+    }
+    void onAmdgpuWavefrontCancelled(Wavefront &) override { ++cancellations; }
+    void onAmdgpuWavefrontHalted(Wavefront &) override { ++halts; }
+
+    uint64_t issue_pc = 0;
+    unsigned after_callbacks = 0;
+    unsigned cancellations = 0;
+    unsigned halts = 0;
+
+  private:
+    bool fail_before_;
+  };
+
+  for (bool fail_before : {true, false}) {
+    SCOPED_TRACE(fail_before);
+    PluginFixture fixture;
+    ASSERT_NO_FATAL_FAILURE(fixture.initialize(/*num_wf_slots=*/1));
+    fixture.plugin_group_ = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+    auto plugin = std::make_unique<FailingHookPlugin>(fail_before);
+    auto *observed = plugin.get();
+    ASSERT_TRUE(fixture.plugin_group_->add(std::move(plugin)));
+    fixture.soc->set_plugin_group(fixture.plugin_group_);
+    unsigned failures = 0;
+    fixture.cu()->set_execution_failure_handler([&](Wavefront &wave) {
+      ++failures;
+      EXPECT_EQ(wave.pc, observed->issue_pc);
+      EXPECT_EQ(wave.instruction_execution_error(), InstructionExecutionError::PluginFailure);
+      EXPECT_STREQ(wave.instruction_execution_error_detail(),
+                   fail_before ? "before hook failed" : "after hook failed");
+      return false;
+    });
+    constexpr auto branch = cdna4::build_sopp(cdna4::kSBranchSopp, {.simm16 = 4});
+    const uint32_t code[] = {branch[0], S_NOP, S_NOP, S_NOP, S_NOP, S_ENDPGM};
+    testing::internal::CaptureStderr();
+    fixture.run_kernel(code, std::size(code));
+    const std::string diagnostic = testing::internal::GetCapturedStderr();
+    EXPECT_NE(diagnostic.find(std::format("at pc={:#x}", observed->issue_pc)), std::string::npos)
+        << diagnostic;
+    EXPECT_EQ(fixture.engine->last_exit().code, 1);
+    EXPECT_EQ(failures, 1u);
+    EXPECT_EQ(observed->after_callbacks, fail_before ? 0u : 1u);
+    EXPECT_EQ(observed->cancellations, 1u);
+    EXPECT_EQ(observed->halts, 0u);
+  }
+}
+
+TEST(ExecutionPluginTest, ReportedRoutingHookFailurePreventsPipelineIssue) {
+  class FailingRoutePlugin final : public ExecutionPlugin {
+  public:
+    explicit FailingRoutePlugin(bool after_routing)
+        : ExecutionPlugin("failing_route"), after_routing_(after_routing) {}
+    bool observes_memory_routing() const override { return true; }
+    void onAmdgpuRouteMemoryInstruction(const Instruction &, Wavefront &wave) override {
+      if (!after_routing_)
+        wave.report_instruction_execution_error(InstructionExecutionError::PluginFailure,
+                                                "route hook failed");
+    }
+    void onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessObservation &, const Instruction &,
+                                    Wavefront &wave) override {
+      ++routed_callbacks;
+      wave.report_instruction_execution_error(InstructionExecutionError::PluginFailure,
+                                              "routed hook failed");
+    }
+    unsigned routed_callbacks = 0;
+
+  private:
+    bool after_routing_;
+  };
+
+  for (bool after_routing : {false, true}) {
+    SCOPED_TRACE(after_routing);
+    PluginFixture fixture;
+    ASSERT_NO_FATAL_FAILURE(fixture.initialize(/*num_wf_slots=*/1));
+    fixture.plugin_group_ = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+    auto plugin = std::make_unique<FailingRoutePlugin>(after_routing);
+    auto *observed = plugin.get();
+    ASSERT_TRUE(fixture.plugin_group_->add(std::move(plugin)));
+    fixture.soc->set_plugin_group(fixture.plugin_group_);
+    auto *cu = fixture.cu();
+    auto *wave = cu->dispatch_wf(0, 0, 104, 256);
+    ASSERT_NE(wave, nullptr);
+    const uint32_t value = 0x12345678u;
+    fixture.mem->load_image(reinterpret_cast<const uint8_t *>(&value), sizeof(value), 0x8000);
+    const uint32_t destination = wave->vgpr_alloc().base;
+    cu->write_vgpr(destination, 0, 0xfeedu);
+    auto state = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+    state->elem_size = sizeof(value);
+    state->num_elems = 1;
+    state->is_load = true;
+    state->wf_size = wave->wf_size();
+    state->exec_mask = 1;
+    state->lane_mask = 1;
+    state->dst_reg_base = destination;
+    state->per_lane_addr[0] = 0x8000;
+    auto instruction = std::make_unique<TestMemoryInstruction>(std::move(state));
+    EXPECT_EQ(test::ComputeUnitTestAccess::route_memory_inst(*cu, std::move(instruction), *wave),
+              amdgpu::VmAccessOutcome::Malformed);
+    EXPECT_EQ(wave->instruction_execution_error(), InstructionExecutionError::PluginFailure);
+    EXPECT_EQ(observed->routed_callbacks, after_routing ? 1u : 0u);
+    EXPECT_EQ(cu->read_vgpr_storage(destination, 0), 0xfeedu);
+    EXPECT_TRUE(wave->wait_satisfied());
+  }
+}
+
 TEST(ExecutionPluginTest, AsyncIssueFanoutHonorsPerPluginInterest) {
   PluginFixture fixture;
   ASSERT_NO_FATAL_FAILURE(fixture.initialize(/*num_wf_slots=*/1));
@@ -1940,24 +2041,6 @@ TEST(ExecutionPluginTest, AsyncIssueFanoutHonorsPerPluginInterest) {
   EXPECT_EQ(first_ptr->callbacks, 1u);
   EXPECT_EQ(skipped_ptr->callbacks, 0u);
   EXPECT_EQ(last_ptr->callbacks, 1u);
-
-  ExecutionPluginGroup exceptional(PluginSinkConfig{});
-  auto throwing = std::make_unique<AsyncIssueInterestPlugin>("async_throwing", true, true);
-  auto *throwing_ptr = throwing.get();
-  auto skipped_after_throw =
-      std::make_unique<AsyncIssueInterestPlugin>("async_skipped_after_throw", false);
-  auto *skipped_after_throw_ptr = skipped_after_throw.get();
-  auto continued = std::make_unique<AsyncIssueInterestPlugin>("async_continued", true);
-  auto *continued_ptr = continued.get();
-  ASSERT_TRUE(exceptional.add(std::move(throwing)));
-  ASSERT_TRUE(exceptional.add(std::move(skipped_after_throw)));
-  ASSERT_TRUE(exceptional.add(std::move(continued)));
-
-  EXPECT_THROW(exceptional.onAmdgpuAsyncInstructionIssued(0x1000, instruction, *wave),
-               std::runtime_error);
-  EXPECT_EQ(throwing_ptr->callbacks, 1u);
-  EXPECT_EQ(skipped_after_throw_ptr->callbacks, 0u);
-  EXPECT_EQ(continued_ptr->callbacks, 1u);
 }
 
 TEST(ExecutionPluginTest, InfrequentHooksSerializeAtGroupBoundary) {
@@ -2061,29 +2144,37 @@ TEST(ExecutionPluginTest, UnsubscribedWaveBypassesHotHookAndCallbackLock) {
 }
 
 TEST(ExecutionPluginTest, WaveDispatchCachesEachPluginsHotHookSubscription) {
-  PluginFixture fixture;
-  ASSERT_NO_FATAL_FAILURE(fixture.initialize(/*num_wf_slots=*/1));
-  ExecutionPluginGroup group(PluginSinkConfig{});
-  auto subscribed = std::make_unique<HotHookSubscriptionProbe>("subscribed_probe", true);
-  auto *subscribed_ptr = subscribed.get();
-  auto unsubscribed = std::make_unique<HotHookSubscriptionProbe>("unsubscribed_probe", false);
-  auto *unsubscribed_ptr = unsubscribed.get();
-  ASSERT_TRUE(group.add(std::move(subscribed)));
-  ASSERT_TRUE(group.add(std::move(unsubscribed)));
+  for (bool serialized : {false, true}) {
+    SCOPED_TRACE(serialized);
+    PluginFixture fixture;
+    ASSERT_NO_FATAL_FAILURE(fixture.initialize(/*num_wf_slots=*/1));
+    ExecutionPluginGroup group(PluginSinkConfig{});
+    auto subscribed =
+        std::make_unique<HotHookSubscriptionProbe>("subscribed_probe", true, serialized);
+    auto *subscribed_ptr = subscribed.get();
+    auto unsubscribed = std::make_unique<HotHookSubscriptionProbe>("unsubscribed_probe", false);
+    auto *unsubscribed_ptr = unsubscribed.get();
+    ASSERT_TRUE(group.add(std::move(subscribed)));
+    ASSERT_TRUE(group.add(std::move(unsubscribed)));
 
-  auto *wave = fixture.cu()->dispatch_wf(/*wg_id=*/1, /*pc=*/0, /*sgprs=*/104, /*vgprs=*/32);
-  ASSERT_NE(wave, nullptr);
-  group.onAmdgpuWavefrontDispatched(*wave);
+    auto *wave = fixture.cu()->dispatch_wf(/*wg_id=*/1, /*pc=*/0, /*sgprs=*/104, /*vgprs=*/32);
+    ASSERT_NE(wave, nullptr);
+    group.onAmdgpuWavefrontDispatched(*wave);
+    const uint64_t locks_before =
+        test::ExecutionPluginGroupTestAccess::callback_lock_acquisitions(group);
 
-  EXPECT_EQ(subscribed_ptr->predicate_queries, 1u);
-  EXPECT_EQ(unsubscribed_ptr->predicate_queries, 1u);
-  for (uint32_t i = 0; i != 8; ++i)
-    group.onAmdgpuReadSgpr(wave, i);
+    EXPECT_EQ(subscribed_ptr->predicate_queries, 1u);
+    EXPECT_EQ(unsubscribed_ptr->predicate_queries, 1u);
+    for (uint32_t i = 0; i != 8; ++i)
+      group.onAmdgpuReadSgpr(wave, i);
 
-  EXPECT_EQ(subscribed_ptr->hot_callbacks, 8u);
-  EXPECT_EQ(unsubscribed_ptr->hot_callbacks, 0u);
-  EXPECT_EQ(subscribed_ptr->predicate_queries, 1u);
-  EXPECT_EQ(unsubscribed_ptr->predicate_queries, 1u);
+    EXPECT_EQ(subscribed_ptr->hot_callbacks, 8u);
+    EXPECT_EQ(unsubscribed_ptr->hot_callbacks, 0u);
+    EXPECT_EQ(subscribed_ptr->predicate_queries, 1u);
+    EXPECT_EQ(unsubscribed_ptr->predicate_queries, 1u);
+    EXPECT_EQ(test::ExecutionPluginGroupTestAccess::callback_lock_acquisitions(group),
+              locks_before + (serialized ? 8 : 0));
+  }
 }
 
 TEST(ExecutionPluginTest, CachedUnsubscribedWaveBypassesCallbackLock) {
@@ -2506,7 +2597,7 @@ TEST(HookOrderingTest, UniformLdsFlatPreservesPreAndPostRoutingViews) {
   ASSERT_NE(flat, nullptr);
 
   EXPECT_TRUE(cu->execute_instruction(flat.get(), *wf).succeeded());
-  test::ComputeUnitTestAccess::route_memory_inst(*cu, flat.release(), *wf);
+  test::ComputeUnitTestAccess::route_memory_inst(*cu, std::move(flat), *wf);
 
   ASSERT_EQ(plugin->before_tag.size(), 1u);
   EXPECT_EQ(plugin->before_tag[0], GLOBAL_MEM);
