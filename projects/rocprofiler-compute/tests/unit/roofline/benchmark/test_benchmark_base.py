@@ -24,8 +24,6 @@ import roofline.benchmark.benchmark_base as benchmark_base
 import utils.utils_profile as utils_profile
 from roofline import run_benchmark
 from roofline.benchmark.gfx12.benchmark_gfx1201 import (
-    DRAM_BUS_BITS,
-    DRAM_GBPS_PER_PIN,
     INFINITY_CACHE_BYTES,
     L2_ROOF,
     MALL_WORKING_SET_DIVISOR,
@@ -231,13 +229,8 @@ def test_gfx1201_measures_vram_in_its_own_column():
     assert not runs_benchmark(bench, "HBM")
     assert runs_benchmark(bench, "VRAM")
     vram = bench.tests["VRAM"]
-    assert vram.func == bench.dram_pin_rated_bw_benchmark
-    assert vram.keywords == {
-        "kernel_name": "DRAM_bw",
-        "label": "VRAM",
-        "bus_bits": DRAM_BUS_BITS,
-        "gbps_per_pin": DRAM_GBPS_PER_PIN,
-    }
+    assert vram.func == bench.device_memory_bw_benchmark
+    assert vram.keywords == {"kernel_name": "DRAM_bw", "label": "VRAM"}
     assert list(bench.tests)[0] == "VRAM"
     assert bench.csv_cols_map["VRAM"] == "VRAMBw"
     assert "HBM" not in bench.csv_cols_map
@@ -272,24 +265,26 @@ def test_percent_of_ceiling_reports_an_unusable_ceiling_as_unavailable():
 
 
 def test_gfx1201_vram_test_runs_the_device_memory_benchmark_under_the_vram_name(
-    monkeypatch, capsys
+    monkeypatch,
 ):
     """The VRAM test launches the DRAM_bw kernel, labels it VRAM, and returns the
-    measured peak. The pin-rate reference it prints is a percentage of 640 GB/s."""
-    bench = BENCH_CLASSES["gfx1201"](0, dict(CACHE_SIZES), "gfx1201")
+    measured peak."""
     calls = []
 
-    def fake_device_memory_benchmark(device, kernel_name="HBM_bw", label="HBM"):
+    def fake_device_memory_benchmark(self, device, kernel_name="HBM_bw", label="HBM"):
         calls.append((device, kernel_name, label))
         return 480.0
 
+    # The VRAM test binds the method when the benchmark is created.
     monkeypatch.setattr(
-        bench, "device_memory_bw_benchmark", fake_device_memory_benchmark
+        BENCH_CLASSES["gfx1201"],
+        "device_memory_bw_benchmark",
+        fake_device_memory_benchmark,
     )
+    bench = BENCH_CLASSES["gfx1201"](0, dict(CACHE_SIZES), "gfx1201")
 
     assert bench.tests["VRAM"](0) == 480.0
     assert calls == [(0, "DRAM_bw", "VRAM")]
-    assert "(75.0%)" in capsys.readouterr().out
 
 
 def test_device_memory_benchmark_defaults_to_the_hbm_kernel_and_label(

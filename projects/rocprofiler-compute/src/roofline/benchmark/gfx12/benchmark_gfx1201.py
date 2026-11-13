@@ -49,11 +49,6 @@ class ResidentReadRoof(NamedTuple):
     instances_per_multiprocessor: bool = False
 
 
-def dram_pin_bandwidth_gbps(bus_bits: int, gbps_per_pin: float) -> float:
-    """Peak DRAM bandwidth in decimal GB/s from bus width and pin data rate."""
-    return bus_bits * gbps_per_pin / 8
-
-
 def pipe_bandwidth_gbps(instances: int, bytes_per_clock: int, clock_hz: float) -> float:
     """Aggregate pipe bandwidth in decimal GB/s. Matches the benchmark, which
     reports bytes/s divided by 1e9."""
@@ -150,10 +145,6 @@ L2_ROOF = ResidentReadRoof(
     "cache_resident_bw",
 )
 
-# Full 256-bit Navi 48 reference. The stored VRAMBw value is the measured read.
-DRAM_BUS_BITS = 256
-DRAM_GBPS_PER_PIN = 20
-
 
 # =============================================================================
 # Bench_gfx1201 Class
@@ -163,18 +154,13 @@ class Bench_gfx1201(benchmark_gfx12_base.Bench_gfx12):
         super().__init__(device_id, cache_sizes)
 
         # VRAM is the device-memory roofline test (CSV column VRAMBw). It runs
-        # the DRAM_bw kernel and returns the measured bandwidth. The printed
-        # line is the full Navi 48 pin-rate reference, not every board.
+        # the DRAM_bw kernel and returns the measured bandwidth.
         # Infinity Cache uses the MALL column. mi_gpu_spec.yaml lists no
         # F4/F6/F32/F64/I8 matrix path, so those tests are marked unsupported
         # by apply_roofline_spec. VRAM takes the slot of the gfx12 base's
         # device-memory test, so VRAMBw stays the first roofline.csv column.
         dram_bw_benchmark = partial(
-            self.dram_pin_rated_bw_benchmark,
-            kernel_name="DRAM_bw",
-            label="VRAM",
-            bus_bits=DRAM_BUS_BITS,
-            gbps_per_pin=DRAM_GBPS_PER_PIN,
+            self.device_memory_bw_benchmark, kernel_name="DRAM_bw", label="VRAM"
         )
         ordered_tests = {}
         for name, func in self.tests.items():
@@ -218,30 +204,8 @@ class Bench_gfx1201(benchmark_gfx12_base.Bench_gfx12):
         }
 
     # -----------------------------------------------------------------------------
-    # Device-memory, cache-resident, and resident-stream bandwidth benchmarks
+    # Cache-resident and resident-stream bandwidth benchmarks
     # -----------------------------------------------------------------------------
-    def dram_pin_rated_bw_benchmark(
-        self,
-        device: int,
-        kernel_name: str,
-        label: str,
-        bus_bits: int,
-        gbps_per_pin: float,
-    ) -> float:
-        """Measure device-memory read bandwidth.
-
-        The returned peak is the measured bandwidth. The printed line is the
-        full Navi 48 pin-rate reference, not the peak of every board.
-        """
-        peak = self.device_memory_bw_benchmark(device, kernel_name, label)
-        ceiling = dram_pin_bandwidth_gbps(bus_bits, gbps_per_pin)
-        print(
-            "Full Navi 48 pin-rate reference (not every board): "
-            f"{bus_bits}-bit x {gbps_per_pin} Gbps "
-            f"= {ceiling:.1f} GB/sec ({percent_of_ceiling(peak, ceiling)})"
-        )
-        return peak
-
     def cache_resident_bw(
         self, device: int, label: str, roof: ResidentReadRoof
     ) -> float:
