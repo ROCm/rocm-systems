@@ -7,7 +7,6 @@
 import re
 import signal
 import sys
-import threading
 import traceback
 import warnings
 from pathlib import Path
@@ -172,13 +171,19 @@ def verify_deps() -> None:
     )
 
 
+def set_signal_handlers() -> None:
+    """Set the signal handlers.
+
+    - SIGTERM: exit through SystemExit so finally blocks still run. For example,
+      container attach deletes its staging folder in the target's /tmp.
+    """
+    signal.signal(signal.SIGTERM, lambda signum, _frame: sys.exit(128 + signum))
+
+
 def main() -> None:
     """Main function for rocprofiler-compute"""
 
-    # Exit normally on SIGTERM, so that finally blocks still delete temporary folders.
-    # Python accepts signal handlers only from the main thread.
-    if threading.current_thread() is threading.main_thread():
-        signal.signal(signal.SIGTERM, lambda signum, _frame: sys.exit(128 + signum))
+    set_signal_handlers()
 
     # Baseline Python floor for any mode (profile is 3.8+); analyze adds its own
     check_python_version()
