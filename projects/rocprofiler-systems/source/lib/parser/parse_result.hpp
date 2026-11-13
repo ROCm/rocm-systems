@@ -9,6 +9,7 @@
 
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace rocprofsys::parser
@@ -23,7 +24,13 @@ struct parse_result
     /// Remainder, including the first unknown token, when parsing stops early.
     std::vector<std::string> unparsed;
 
-    /// Parse @p value once and store the parsed value, or record
+    /// Canonical text of a stored value. @p param_id must be present in values.
+    [[nodiscard]] std::string text(std::string_view param_id) const
+    {
+        return format_value(values.at(std::string{ param_id }));
+    }
+
+    /// Parse @p value once and store the typed result, or record
     /// invalid_value_message and store nothing.
     void store_if_valid(const schema_param& param, std::string_view value)
     {
@@ -34,6 +41,18 @@ struct parse_result
             return;
         }
         values.insert_or_assign(param.id, *parsed);
+    }
+
+    /// Store a value that is already typed, such as a JSON boolean, or record
+    /// invalid_value_message and store nothing.
+    void store_typed(const schema_param& param, config_value_t value)
+    {
+        if(!accepts_value(param, value))
+        {
+            errors.push_back(invalid_value_message(format_value(value), param.id));
+            return;
+        }
+        values.insert_or_assign(param.id, std::move(value));
     }
 };
 
