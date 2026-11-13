@@ -718,7 +718,9 @@ void VPermB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
-  amdgpu::execute_v_perm_b32_vop3(*this, wf);
+  amdgpu::arith::execute_ternary32(wf, rj_arith_v_perm_b32_w32, rj_arith_v_perm_b32_w64,
+                                   wf.cu().arithmetic_flags(),
+                                   inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u, vdst, src0, src1, src2);
 }
 
 RJ_NOINLINE void VPermB32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
@@ -737,7 +739,9 @@ RJ_NOINLINE void VPermB32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
-  amdgpu::execute_v_perm_b32_vop3(*this, wf);
+  amdgpu::arith::execute_ternary32(wf, rj_arith_v_perm_b32_w32, rj_arith_v_perm_b32_w64,
+                                   wf.cu().arithmetic_flags(),
+                                   inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u, vdst, src0, src1, src2);
   dpp_write_mask_scope_.restore();
 }
 

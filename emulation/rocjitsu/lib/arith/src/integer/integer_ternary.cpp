@@ -37,6 +37,9 @@ uint32_t evaluate(uint32_t a, uint32_t b, uint32_t c) {
   if constexpr (Op == rocjitsu::arith::IntegerTernary::XorAdd) {
     return (a ^ b) + c;
   }
+  if constexpr (Op == rocjitsu::arith::IntegerTernary::Mad) {
+    return a * b + c;
+  }
   if constexpr (Op == rocjitsu::arith::IntegerTernary::Lerp) {
     // Per-byte rounding follows rocjitsu's vector_alu.py LERP implementation.
     uint32_t result = 0;
@@ -347,4 +350,28 @@ int rj_arith_v_lerp_u8_w64(uint64_t flags, uint64_t exec_mask, uint64_t mode, ui
     return error;
   }
   return ternary_wave64<rocjitsu::arith::IntegerTernary::Lerp>(flags, exec_mask, mode, d, a, b, c);
+}
+
+// Multiply and add full 32-bit operands modulo 2^32; CLAMP is ignored.
+int rj_arith_v_mad_u32_w32(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *const *d,
+                           const uint32_t *const *a, const uint32_t *const *b,
+                           const uint32_t *const *c) {
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  return ternary<rocjitsu::arith::IntegerTernary::Mad>(flags, exec_mask, mode, d, a, b, c);
+}
+
+// Multiply and add full 32-bit operands modulo 2^32; CLAMP is ignored.
+int rj_arith_v_mad_u32_w64(uint64_t flags, uint64_t exec_mask, uint64_t mode, uint32_t *const *d,
+                           const uint32_t *const *a, const uint32_t *const *b,
+                           const uint32_t *const *c) {
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  return ternary_wave64<rocjitsu::arith::IntegerTernary::Mad>(flags, exec_mask, mode, d, a, b, c);
 }
