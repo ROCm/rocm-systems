@@ -305,6 +305,7 @@ class PlantedServerLogsTest(unittest.TestCase):
         self.assertGreater(tm.squash_log_spam(self.run_dir), 0)
         copy = self.run_dir / "slurm_output" / tm.SERVER_LOGS / "decode_NODE1.log"
         self.assertEqual(copy.read_bytes().count(b"is deprecated'"), 1)
+        self.assertEqual(stat.S_IMODE(copy.stat().st_mode), 0o600)
         self.assertEqual((logs / "decode_NODE1.log").read_bytes().count(b"x NCCL"), 3)
 
 

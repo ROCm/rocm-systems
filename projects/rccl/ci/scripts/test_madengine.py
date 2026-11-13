@@ -774,8 +774,13 @@ def squash_log_spam(run_dir: Path) -> int:
         dropped: dict[bytes, int] = {}
         tmp = path.with_name(path.name + ".squash")
         try:
-            before = path.stat().st_size
-            with path.open("rb") as src, tmp.open("wb") as dst:
+            st = path.stat()
+            before = st.st_size
+            tmp.unlink(missing_ok=True)
+            # os.replace() gives the log the temporary file's mode, and a
+            # snapshot_server_logs copy must stay the runner's alone.
+            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, stat.S_IMODE(st.st_mode))
+            with os.fdopen(fd, "wb") as dst, path.open("rb") as src:
                 for line in src:
                     m = _LOG_SPAM_RE.search(line)
                     if m:
