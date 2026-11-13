@@ -1161,6 +1161,42 @@ int rj_arith_v_cmpx_t_f64_w64(uint64_t flags, uint64_t exec_mask, uint64_t instr
                               uint64_t *d, const uint32_t *const *a, const uint32_t *const *b,
                               uint32_t *trapsts);
 
+// Constant I16/U16 predicates ignore both input values and halfword selectors.
+// F writes zero; T writes EXEC after DPP filtering. CMPX returns replacement EXEC.
+// Output storage is required; input pointers may be null. Errors preserve outputs.
+int rj_arith_v_cmp_f_i16_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                             uint32_t *d, const uint32_t *const *a, const uint32_t *const *b);
+int rj_arith_v_cmp_f_i16_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                             uint64_t *d, const uint32_t *const *a, const uint32_t *const *b);
+int rj_arith_v_cmp_f_u16_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                             uint32_t *d, const uint32_t *const *a, const uint32_t *const *b);
+int rj_arith_v_cmp_f_u16_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                             uint64_t *d, const uint32_t *const *a, const uint32_t *const *b);
+int rj_arith_v_cmp_t_i16_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                             uint32_t *d, const uint32_t *const *a, const uint32_t *const *b);
+int rj_arith_v_cmp_t_i16_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                             uint64_t *d, const uint32_t *const *a, const uint32_t *const *b);
+int rj_arith_v_cmp_t_u16_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                             uint32_t *d, const uint32_t *const *a, const uint32_t *const *b);
+int rj_arith_v_cmp_t_u16_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                             uint64_t *d, const uint32_t *const *a, const uint32_t *const *b);
+int rj_arith_v_cmpx_f_i16_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                              uint32_t *d, const uint32_t *const *a, const uint32_t *const *b);
+int rj_arith_v_cmpx_f_i16_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                              uint64_t *d, const uint32_t *const *a, const uint32_t *const *b);
+int rj_arith_v_cmpx_f_u16_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                              uint32_t *d, const uint32_t *const *a, const uint32_t *const *b);
+int rj_arith_v_cmpx_f_u16_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                              uint64_t *d, const uint32_t *const *a, const uint32_t *const *b);
+int rj_arith_v_cmpx_t_i16_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                              uint32_t *d, const uint32_t *const *a, const uint32_t *const *b);
+int rj_arith_v_cmpx_t_i16_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                              uint64_t *d, const uint32_t *const *a, const uint32_t *const *b);
+int rj_arith_v_cmpx_t_u16_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                              uint32_t *d, const uint32_t *const *a, const uint32_t *const *b);
+int rj_arith_v_cmpx_t_u16_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                              uint64_t *d, const uint32_t *const *a, const uint32_t *const *b);
+
 // RDNA3 constant integer comparisons. F writes zero; T writes participating
 // EXEC after DPP filtering. CMP produces the condition mask; CMPX produces
 // replacement EXEC in d. A/B values are ignored and their pointers may be null.

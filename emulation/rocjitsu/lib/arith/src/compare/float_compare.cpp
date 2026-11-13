@@ -16,11 +16,8 @@
 
 namespace {
 
-// Evaluate ordered/unordered FP predicates for the selected lanes. Reject invalid controls
-// before changing outputs.
-template <int Bits, unsigned Predicate>
-int compare_wave32(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *d,
-                   const uint32_t *const *a, const uint32_t *const *b, uint32_t *excp_flag_user) {
+// Validate floating-point comparison controls without accessing operands or outputs.
+template <int Bits> int validate_compare(uint64_t flags, uint64_t mode) {
   if (mode >> 32) {
     if constexpr (Bits == 64) {
       return RJ_ARITH_ERROR_INVALID_FLAGS;
@@ -38,6 +35,13 @@ int compare_wave32(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *
                                                 RJ_ARITH_FP_IEEE_MODE)) {
     return error;
   }
+  return RJ_ARITH_SUCCESS;
+}
+
+// Evaluate prevalidated floating-point controls for one Wave32 or half of a Wave64.
+template <int Bits, unsigned Predicate>
+int evaluate_wave32(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *d,
+                    const uint32_t *const *a, const uint32_t *const *b, uint32_t *excp_flag_user) {
   if (!exec_mask) {
     *d = 0;
     return RJ_ARITH_SUCCESS;
@@ -51,8 +55,8 @@ int compare_wave32(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *
       } else {
         exec_mask = rocjitsu::arith::dpp16_source(flags, exec_mask, mode, permuted, a[0]);
       }
-      return compare_wave32<Bits, Predicate>(flags, exec_mask, uint32_t(mode), d, &source, b,
-                                             excp_flag_user);
+      return evaluate_wave32<Bits, Predicate>(flags, exec_mask, uint32_t(mode), d, &source, b,
+                                              excp_flag_user);
     }
   }
   bool flush = flags & RJ_ARITH_FP_FLUSH_INPUT_DENORMALS;
@@ -134,6 +138,16 @@ int compare_wave32(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *
   return RJ_ARITH_SUCCESS;
 }
 
+// Validate controls before evaluating a public Wave32 comparison.
+template <int Bits, unsigned Predicate>
+int compare_wave32(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *d,
+                   const uint32_t *const *a, const uint32_t *const *b, uint32_t *excp_flag_user) {
+  if (int error = validate_compare<Bits>(flags, mode)) {
+    return error;
+  }
+  return evaluate_wave32<Bits, Predicate>(flags, exec_mask, mode, d, a, b, excp_flag_user);
+}
+
 // Evaluate ordered/unordered FP predicates for Wave64. Reject invalid controls before changing
 // outputs.
 template <int Bits, unsigned Predicate>
@@ -143,8 +157,7 @@ int compare_wave64(uint64_t flags, uint64_t exec_mask, uint64_t mode, uint64_t *
 
   // Validate before source accesses or writes. Stage both halves so result or
   // exception storage may overlap sources without changing the second half.
-  if (int error =
-          compare_wave32<Bits, Predicate>(flags, 0, mode, masks, nullptr, nullptr, nullptr)) {
+  if (int error = validate_compare<Bits>(flags, mode)) {
     return error;
   }
   const bool report = rocjitsu::arith::reports_fp_status(flags);
@@ -162,7 +175,7 @@ int compare_wave64(uint64_t flags, uint64_t exec_mask, uint64_t mode, uint64_t *
         source_a[word] = a[word] + half * 32;
         source_b[word] = b[word] + half * 32;
       }
-      if (int error = compare_wave32<Bits, Predicate>(
+      if (int error = evaluate_wave32<Bits, Predicate>(
               flags, uint32_t(exec_mask >> (half * 32)), half_instruction_flags, masks + half,
               source_a, source_b, report ? &exceptions : nullptr)) {
         return error;
