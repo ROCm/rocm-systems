@@ -40,8 +40,6 @@ from roofline.benchmark.gfx12.benchmark_gfx1201 import (
     L0_ROOF,
     L0_WORKGROUPS_PER_CU,
     L0_WORKING_SET_BYTES,
-    L1_ROOF,
-    L1_WORKING_SET_BYTES,
     L2_ROOF,
     L2_WORKING_SET_BYTES,
     MALL_WORKING_SET_DIVISOR,
@@ -266,17 +264,18 @@ def test_gfx1201_measures_vram_in_its_own_column():
 
 
 def test_gfx1201_cache_roofs_stay_inside_the_cache_that_serves_them():
-    """L0 fits in one GL0. L1 and L2 miss GL0 and still fit in GL2.
+    """L0 fits in one GL0. L2 misses GL0 and still fits in GL2.
 
-    GL1 is a buffer, so the L1 and L2 roofs are the 32-bank GL2 read return,
-    not the 8 x 128 B GL1 port. A GL2-resident read scored against that port
-    exceeds 100 percent.
+    GL1 is a buffer, not a cache, so there is no L1 roof. The L1 test is
+    skipped and L1Bw is written as 0.
     """
     bench = BENCH_CLASSES["gfx1201"](0, dict(CACHE_SIZES), "gfx1201")
 
-    for level, roof in (("L0", L0_ROOF), ("L1", L1_ROOF), ("L2", L2_ROOF)):
+    for level, roof in (("L0", L0_ROOF), ("L2", L2_ROOF)):
         assert bench.tests[level].func == bench.cache_resident_bw
         assert bench.tests[level].keywords == {"label": level, "roof": roof}
+    assert "L1" in bench.unsupported_data_types
+    assert bench.csv_cols_map["L1"] == "L1Bw"
     assert L0_ROOF == ResidentReadRoof(
         L0_WORKING_SET_BYTES,
         GL0_PER_MULTIPROCESSOR,
@@ -287,19 +286,15 @@ def test_gfx1201_cache_roofs_stay_inside_the_cache_that_serves_them():
         "cache_l0_bw",
         instances_per_multiprocessor=True,
     )
-    for roof, working_set in (
-        (L1_ROOF, L1_WORKING_SET_BYTES),
-        (L2_ROOF, L2_WORKING_SET_BYTES),
-    ):
-        assert roof == ResidentReadRoof(
-            working_set,
-            GL2_BANKS,
-            GL2_HIT_RETURN_BYTES_PER_CLOCK,
-            "GL2 hit return",
-            CACHE_WORKGROUPS_PER_CU,
-            CACHE_LOADS_IN_FLIGHT,
-            "cache_resident_bw",
-        )
+    assert L2_ROOF == ResidentReadRoof(
+        L2_WORKING_SET_BYTES,
+        GL2_BANKS,
+        GL2_HIT_RETURN_BYTES_PER_CLOCK,
+        "GL2 hit return",
+        CACHE_WORKGROUPS_PER_CU,
+        CACHE_LOADS_IN_FLIGHT,
+        "cache_resident_bw",
+    )
     assert_source_defines(
         bench.cache_resident_src, "cache_resident_bw", "gfx1201 cache"
     )
@@ -311,14 +306,10 @@ def test_gfx1201_cache_roofs_stay_inside_the_cache_that_serves_them():
     )
 
     assert L0_WORKING_SET_BYTES <= GL0_CAPACITY_BYTES
-    assert GL0_CAPACITY_BYTES < L1_WORKING_SET_BYTES < L2_WORKING_SET_BYTES
+    assert GL0_CAPACITY_BYTES < L2_WORKING_SET_BYTES
     # 6 MB is the smallest Navi 48 GL2.
     assert L2_WORKING_SET_BYTES < 6 * 1024 * 1024
-    for working_set in (
-        L0_WORKING_SET_BYTES,
-        L1_WORKING_SET_BYTES,
-        L2_WORKING_SET_BYTES,
-    ):
+    for working_set in (L0_WORKING_SET_BYTES, L2_WORKING_SET_BYTES):
         element_count = working_set // CACHE_ELEMENT_BYTES
         assert working_set % CACHE_ELEMENT_BYTES == 0
         assert element_count >= workgroup_size * CACHE_LOADS_IN_FLIGHT
@@ -458,7 +449,7 @@ def test_gfx1201_cache_roof_rejects_a_working_set_it_cannot_stream(
     power-of-two element count of at least that many loads."""
     bench = BENCH_CLASSES["gfx1201"](0, dict(CACHE_SIZES), "gfx1201")
 
-    roof = L1_ROOF._replace(
+    roof = L2_ROOF._replace(
         working_set_bytes=working_set_bytes,
         instances=1,
         bytes_per_clock=1,
@@ -524,25 +515,27 @@ def fake_gfx12_runtime(monkeypatch):
 def test_gfx1201_cache_roof_reports_the_fastest_launch_at_its_measured_clock(
     fake_gfx12_runtime, capsys
 ):
-    """The L1 roof reads a 1 MiB set from 8 x 32 workgroups, 256 passes to
+    """The L2 roof reads a 4 MiB set from 8 x 32 workgroups, 64 passes to
     reach 64 GiB. The 2 ms launch is the peak, and the GL2 hit return at the
     measured 2.97 GHz is 12,165.12 GB/s."""
     bench = BENCH_CLASSES["gfx1201"](0, dict(CACHE_SIZES), "gfx1201")
     launches = fake_gfx12_runtime(bench)
 
-    peak = bench.tests["L1"](0)
+    peak = bench.tests["L2"](0)
 
     assert peak == pytest.approx(68_719_476_736 / 2.0 / 1e6)
     assert len(launches) == 1 + benchmark_base.DEFAULT_NUM_EXPERIMENTS
     kernel, grid, args = launches[0]
     assert kernel == "cache_resident_bw"
     assert grid == [256, 1, 1]
-    assert args == [L1_WORKING_SET_BYTES, 65_536, 256, CACHE_ELEMENT_BYTES, 16]
+    assert args == [L2_WORKING_SET_BYTES, 262_144, 64, CACHE_ELEMENT_BYTES, 16]
     log = capsys.readouterr().out
-    assert "L1 BW, GPU ID: 0" in log
+    assert "L2 BW, GPU ID: 0" in log
     assert "GL2 hit return ceiling:12165.1 GB/sec (282.4% at 2970 MHz)" in log
 
 
+# TODO: Fold this into the cache-roof ceiling test above, parametrized by cache
+# level and multiprocessor count, instead of keeping a separate function.
 def test_gfx1201_l0_ceiling_follows_the_reported_multiprocessor_count(
     fake_gfx12_runtime, monkeypatch, capsys
 ):
