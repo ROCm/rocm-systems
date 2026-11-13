@@ -34,7 +34,7 @@ Panel Config:
           peak: 5
           pct_of_peak: true
         Wavefront Occupancy:
-          value: SUM(SQG_WAVE_CYCLES_sum) / SUM(GRBM_GUI_ACTIVE)
+          value: SUM(SQ_WAVE_CYCLES_sum) / SUM(GRBM_GUI_ACTIVE)
           unit: Wavefronts
           peak: $max_waves_per_cu * $cu_per_gpu
           pct_of_peak: true

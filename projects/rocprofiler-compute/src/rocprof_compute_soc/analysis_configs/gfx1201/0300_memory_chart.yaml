@@ -118,7 +118,7 @@ Panel Config:
         unit: Unit
       metric:
         Wavefront Occupancy:
-          value: ROUND(100 * SUM(SQG_WAVE_CYCLES_sum) / SUM(GRBM_GUI_ACTIVE * $cu_per_gpu * $max_waves_per_cu),
+          value: ROUND(100 * SUM(SQ_WAVE_CYCLES_sum) / SUM(GRBM_GUI_ACTIVE * $cu_per_gpu * $max_waves_per_cu),
             1)
           unit: Percent
         VGPR:
