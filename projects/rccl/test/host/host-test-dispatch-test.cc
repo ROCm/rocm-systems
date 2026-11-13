@@ -1962,9 +1962,11 @@ public:
                 args.at(1).substr(args.at(1).find(':') + 1);
             started_.push_back({path, filter, reportPath});
             if (silent_.count(nextPid_) == 0) {
+                const bool failing = failing_.count(nextPid_) != 0;
                 std::ofstream(reportPath, std::ios::binary | std::ios::trunc)
-                    << "<testsuites tests=\"1\" failures=\"0\"><testsuite name=\"" << filter
-                    << "\"/></testsuites>";
+                    << "<testsuites tests=\"1\" failures=\"" << (failing ? 1 : 0)
+                    << "\"><testsuite name=\"" << filter << "\" tests=\"1\" failures=\""
+                    << (failing ? 1 : 0) << "\"/></testsuites>";
             }
             live_.push_back(nextPid_);
             return nextPid_++;
@@ -1979,11 +1981,15 @@ public:
     // the interval the scheduler asked to wait, which is what makes the deadline deterministic.
     ReapFn reapNewestFirst()
     {
-        return [this](int &status, std::optional<std::chrono::milliseconds> within) {
-            status = 0;
+        return [this](ChildExit &exit, std::optional<std::chrono::milliseconds> within) {
+            exit = ChildExit{};
             boundedReaps_ += within.has_value() ? 1 : 0;
             const auto reapable = std::find_if(live_.rbegin(), live_.rend(), [this](pid_t pid) {
-                return hanging_.count(pid) == 0 || killed_.count(pid) != 0;
+                if (hanging_.count(pid) == 0 || killed_.count(pid) != 0) {
+                    return true;
+                }
+                // A child that outruns its signal ends at the first one, by its own hand.
+                return racing_.count(pid) != 0 && signalsSent_.count(pid) != 0;
             });
             if (reapable == live_.rend()) {
                 if (live_.empty()) {
@@ -2007,9 +2013,13 @@ public:
             const pid_t pid = *reapable;
             live_.erase(std::next(reapable).base());
             inFlightHighWater_ = std::max(inFlightHighWater_, live_.size() + 1);
-            const auto exit = exits_.find(pid);
-            status = killed_.count(pid) != 0 ? 128 + SIGKILL
-                                             : (exit == exits_.end() ? 0 : exit->second);
+            const auto ended = exits_.find(pid);
+            const auto signalled = signalled_.find(pid);
+            if (signalled != signalled_.end()) {
+                exit = ChildExit{128 + signalled->second, true};
+            } else {
+                exit = ChildExit{ended == exits_.end() ? 0 : ended->second, false};
+            }
             return pid;
         };
     }
@@ -2019,6 +2029,14 @@ public:
 
     // The child started *index*-th is reaped with *status* rather than 0.
     void exitChild(size_t index, int status) { exits_[static_cast<pid_t>(100 + index)] = status; }
+
+    // The child started *index*-th exits of its own accord even after it has been signalled,
+    // standing in for the child that was already on its way out when the kill was sent.
+    void outrunSignal(size_t index) { racing_.insert(static_cast<pid_t>(100 + index)); }
+
+    // The child started *index*-th writes a report of one failing case, as a binary whose tests
+    // failed does.
+    void failChild(size_t index) { failing_.insert(static_cast<pid_t>(100 + index)); }
 
     // The child started *index*-th leaves no report behind, as a binary dying partway does.
     void silenceChild(size_t index) { silent_.insert(static_cast<pid_t>(100 + index)); }
@@ -2038,6 +2056,12 @@ public:
             signals_.push_back({pid, signal});
             if (signal == SIGKILL) {
                 killed_.insert(pid);
+            }
+            // A signalled child dies of it, and is reaped as killed -- unless the test has said
+            // it was already on its way out, which is the race the dispatcher has to survive.
+            signalsSent_.insert(pid);
+            if (racing_.count(pid) == 0) {
+                signalled_[pid] = signal;
             }
         };
     }
@@ -2077,6 +2101,10 @@ private:
     std::set<pid_t> hanging_;
     std::set<pid_t> killed_;
     std::set<pid_t> silent_;
+    std::set<pid_t> failing_;
+    std::set<pid_t> racing_;
+    std::map<pid_t, int> signalled_;
+    std::set<pid_t> signalsSent_;
     std::map<pid_t, int> exits_;
     std::vector<std::pair<pid_t, int>> signals_;
     std::chrono::steady_clock::time_point now_{};
@@ -2263,7 +2291,7 @@ TEST(HostDispatchSchedulerMicrotest, AChildThatDiedWithoutAReportNamesItsStatusA
     ASSERT_EQ(fragments.size(), 1u);
     EXPECT_NE(fragments[0].xml.find("exit status 134"), std::string::npos) << fragments[0].xml;
     EXPECT_NE(fragments[0].xml.find("Alpha.log"), std::string::npos) << fragments[0].xml;
-    EXPECT_EQ(failures, 2);   // no report, and a status saying so too
+    EXPECT_EQ(failures, 1);   // one child, one failure, however many ways it showed
 }
 
 TEST(HostDispatchSchedulerMicrotest, AChildThatExitsNonzeroAfterAPassingReportFailsTheRun)
@@ -2492,6 +2520,81 @@ TEST(HostDispatchSchedulerMicrotest, AStoppedRunKillsItsChildrenAndKeepsWhatFini
     EXPECT_EQ(failures, 2);
 }
 
+TEST(HostDispatchSchedulerMicrotest, AStoppedRunKeepsTheReportOfAChildThatBeatItsKill)
+{
+    // The race the stop path has to survive: the child was signalled, but it had already
+    // finished and written its whole report. Treating "signalled" as "killed partway" would
+    // delete a complete report and replace it with a crash fragment -- the run would lose
+    // results it had, and fail over a binary that passed.
+    const ScopedDir dir("rccl-host-dispatch-scheduler");
+    FakeScheduler fake(dir.path());
+    std::vector<Selection> selections;
+    std::vector<std::vector<std::string>> filters;
+    for (const std::string &qualifier : {"Alpha", "Beta"}) {
+        selections.push_back(schedulerSelection(qualifier, 1));
+        filters.push_back(childFilters(selections.back()));
+    }
+    fake.stopAfter(1);      // the stop is seen with Alpha still in flight
+    fake.hangChild(0);      // so Alpha is the one still running when the SIGTERM goes out
+    fake.outrunSignal(0);   // and it exits by itself rather than of the signal
+
+    int failures = 0;
+    const std::vector<SuiteFragment> fragments =
+        runSelections(selections, filters, ScheduleOptions{2, ReportFormat::Xml, {}, ""},
+                      fake.ops(), failures);
+
+    ASSERT_EQ(fragments.size(), 2u);
+    EXPECT_NE(fragments[0].xml.find("AlphaCase0"), std::string::npos) << fragments[0].xml;
+    EXPECT_EQ(fragments[0].xml.find("run was stopped"), std::string::npos) << fragments[0].xml;
+    ASSERT_EQ(fake.signals().size(), 1u)
+        << "Alpha must have been signalled for this test to mean anything";
+    EXPECT_EQ(failures, 0) << "a child that wrote a complete report did not fail the run";
+}
+
+TEST(HostDispatchSchedulerMicrotest, AChildThatExitsZeroWithAFailingReportFailsTheRun)
+{
+    // The report is the result; the exit status is only how the binary happened to end. A child
+    // that reports failures and still exits zero -- a binary that does not return
+    // RUN_ALL_TESTS(), a death test harness, a wrapper swallowing the status -- would otherwise
+    // leave the front door exiting 0 while the merged report says failures="1".
+    const ScopedDir dir("rccl-host-dispatch-scheduler");
+    FakeScheduler fake(dir.path());
+    const Selection selection = schedulerSelection("Alpha", 1);
+    fake.failChild(0);
+
+    int failures = 0;
+    const std::vector<SuiteFragment> fragments =
+        runSelections({selection}, {childFilters(selection)},
+                      ScheduleOptions{1, ReportFormat::Xml, {}, ""}, fake.ops(), failures);
+
+    ASSERT_EQ(fragments.size(), 1u);
+    EXPECT_EQ(fragments[0].failures, 1);
+    EXPECT_EQ(failures, 1) << "a report of failures is a failed run whatever the exit status";
+}
+
+TEST(HostDispatchSchedulerMicrotest, ATimedOutChildThatExitedByItselfKeepsItsReport)
+{
+    // The same race as the stop path, on the deadline path: the child was past its deadline and
+    // was signalled, but it had already finished. What it wrote is complete, so it is judged on
+    // it rather than reported as a timeout that lost cases it did not lose.
+    const ScopedDir dir("rccl-host-dispatch-scheduler");
+    FakeScheduler fake(dir.path());
+    const Selection selection = schedulerSelection("Alpha", 1);
+    fake.hangChild(0);      // not reapable until it has been killed, so the deadline expires
+    fake.outrunSignal(0);   // but it exits by itself, not of the signal
+
+    int failures = 0;
+    const std::vector<SuiteFragment> fragments = runSelections(
+        {selection}, {childFilters(selection)},
+        ScheduleOptions{1, ReportFormat::Xml, {}, "", std::chrono::seconds{30}}, fake.ops(),
+        failures);
+
+    ASSERT_EQ(fragments.size(), 1u);
+    EXPECT_NE(fragments[0].xml.find("AlphaCase0"), std::string::npos) << fragments[0].xml;
+    EXPECT_EQ(fragments[0].xml.find("timed out"), std::string::npos) << fragments[0].xml;
+    EXPECT_EQ(failures, 0);
+}
+
 TEST(HostDispatchSchedulerMicrotest, AStoppedRunNamesTheBinariesItNeverStarted)
 {
     // Silence would read as a selection that was never asked for. The report says they did not
@@ -2709,9 +2812,9 @@ TEST(HostDispatchReapMicrotest, ABoundedWaitComesBackWhileTheChildIsStillRunning
     const pid_t pid = spawnChild("/bin/sh", {"-c", "sleep 5"});
     ASSERT_GT(pid, 0);
 
-    int status = -1;
+    ChildExit exit{-1, true};
     const std::chrono::steady_clock::time_point start = std::chrono::steady_clock::now();
-    const pid_t reaped = reapAnyChild(status, std::chrono::milliseconds{50});
+    const pid_t reaped = reapAnyChild(exit, std::chrono::milliseconds{50});
     const std::chrono::milliseconds elapsed =
         std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() -
                                                               start);
@@ -2721,7 +2824,7 @@ TEST(HostDispatchReapMicrotest, ABoundedWaitComesBackWhileTheChildIsStillRunning
     waitpid(pid, &discarded, 0);
 
     EXPECT_EQ(reaped, 0) << "a wait that elapsed reported a child as finished";
-    EXPECT_EQ(status, 0);
+    EXPECT_EQ(exit.status, 0);
     // Generous, so a loaded machine cannot fail it, and still far below the five seconds the
     // child runs for: anything near that means the wait blocked on the child after all.
     EXPECT_LT(elapsed, std::chrono::seconds{2}) << "the bounded wait blocked for "
@@ -2746,8 +2849,8 @@ TEST(HostDispatchReapMicrotest, AStopEndsATimedWaitLongBeforeItsDeadline)
     });
 
     const std::chrono::steady_clock::time_point start = std::chrono::steady_clock::now();
-    int status = -1;
-    const pid_t reaped = reapAnyChild(status, std::chrono::seconds{20});
+    ChildExit exit{-1, true};
+    const pid_t reaped = reapAnyChild(exit, std::chrono::seconds{20});
     const std::chrono::milliseconds elapsed = since(start);
 
     stopper.join();
@@ -2774,8 +2877,8 @@ TEST(HostDispatchReapMicrotest, AStopThatArrivesBeforeTheWaitBeginsIsNotLost)
     ::kill(::getpid(), SIGTERM);   // lands before the wait below begins
 
     const std::chrono::steady_clock::time_point start = std::chrono::steady_clock::now();
-    int status = -1;
-    const pid_t reaped = reapAnyChild(status, std::nullopt);
+    ChildExit exit{-1, true};
+    const pid_t reaped = reapAnyChild(exit, std::nullopt);
     const std::chrono::milliseconds elapsed = since(start);
 
     discardChild(pid);
@@ -2795,12 +2898,13 @@ TEST(HostDispatchReapMicrotest, AnUnboundedWaitIsWokenByTheChildItIsWaitingFor)
     ASSERT_GT(pid, 0);
 
     const std::chrono::steady_clock::time_point start = std::chrono::steady_clock::now();
-    int status = -1;
-    const pid_t reaped = reapAnyChild(status, std::nullopt);
+    ChildExit exit{-1, true};
+    const pid_t reaped = reapAnyChild(exit, std::nullopt);
     const std::chrono::milliseconds elapsed = since(start);
 
     EXPECT_EQ(reaped, pid);
-    EXPECT_EQ(status, 3);
+    EXPECT_EQ(exit.status, 3);
+    EXPECT_FALSE(exit.signalled) << "a child that exited by itself was reported as killed";
     // Below kWakeRecheckInterval deliberately. That safety net would otherwise collect the
     // child a second late and this would pass with nothing waking the wait at all, which is
     // the arrangement the test exists to rule out.
@@ -2818,11 +2922,12 @@ TEST(HostDispatchReapMicrotest, ABoundedWaitStillReapsAChildThatFinishesWithinIt
     const pid_t pid = spawnChild("/bin/sh", {"-c", "exit 7"});
     ASSERT_GT(pid, 0);
 
-    int status = 0;
-    const pid_t reaped = reapAnyChild(status, std::chrono::seconds{5});
+    ChildExit exit;
+    const pid_t reaped = reapAnyChild(exit, std::chrono::seconds{5});
 
     EXPECT_EQ(reaped, pid);
-    EXPECT_EQ(status, 7);
+    EXPECT_EQ(exit.status, 7);
+    EXPECT_FALSE(exit.signalled);
 }
 
 }  // namespace

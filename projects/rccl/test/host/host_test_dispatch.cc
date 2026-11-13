@@ -1426,8 +1426,19 @@ void waitForWake(std::optional<std::chrono::steady_clock::time_point> until)
     }
 }
 
-// Wait for whichever spawned child finishes first, setting *exitStatus* to its status (128+signal
-// if killed) and returning its pid; -1 when there is nothing left to wait for.
+// How a child ended: the status it is reported as having exited with, and whether it was killed
+// rather than having exited of its own accord.
+//
+// The two are kept apart because 128+signal is an encoding, not a status a child can be trusted
+// to have chosen: a child killed while it was already on its way out still has whatever it had
+// written, and only *signalled* says which of the two happened.
+struct ChildExit {
+    int status = 0;          // 128 + signal when it was killed
+    bool signalled = false;  // it did not exit of its own accord
+};
+
+// Wait for whichever spawned child finishes first, describing it in *exit* and returning its
+// pid; -1 when there is nothing left to wait for.
 //
 // 0 comes back for the two reasons a wait ends without a child: *within* elapsed, or the run was
 // asked to stop. Both are the caller's to interpret, and it can tell them apart by asking for
@@ -1438,7 +1449,7 @@ void waitForWake(std::optional<std::chrono::steady_clock::time_point> until)
 // the deadline all end it, and the check-then-block race that a bare waitpid() has is gone --
 // a signal arriving after the status check leaves a byte in the pipe and the poll returns at
 // once.
-pid_t reapAnyChild(int &exitStatus, std::optional<std::chrono::milliseconds> within)
+pid_t reapAnyChild(ChildExit &exit, std::optional<std::chrono::milliseconds> within)
 {
     const std::optional<std::chrono::steady_clock::time_point> deadline =
         within ? std::optional<std::chrono::steady_clock::time_point>(
@@ -1448,24 +1459,25 @@ pid_t reapAnyChild(int &exitStatus, std::optional<std::chrono::milliseconds> wit
         int status = 0;
         const pid_t pid = waitpid(-1, &status, WNOHANG);
         if (pid > 0) {
-            exitStatus = WIFEXITED(status) ? WEXITSTATUS(status)
-                                           : (WIFSIGNALED(status) ? 128 + WTERMSIG(status) : 1);
+            exit.signalled = !WIFEXITED(status);
+            exit.status = WIFEXITED(status) ? WEXITSTATUS(status)
+                                            : (WIFSIGNALED(status) ? 128 + WTERMSIG(status) : 1);
             return pid;
         }
         if (pid < 0 && errno != EINTR) {
             // ECHILD: nothing left to wait for.
-            exitStatus = 1;
+            exit = ChildExit{1, false};
             return -1;
         }
         // Tested after the reap, not before it: a child that exited is reported as having
         // exited even on the pass that notices the stop, so its result is never thrown away
         // for the sake of the news that the run is ending.
         if (g_stopRequested != 0) {
-            exitStatus = 0;
+            exit = ChildExit{};
             return 0;
         }
         if (deadline && std::chrono::steady_clock::now() >= *deadline) {
-            exitStatus = 0;
+            exit = ChildExit{};
             return 0;
         }
         waitForWake(deadline);
@@ -1560,13 +1572,14 @@ std::optional<std::string> listTestsOutput(const std::string &path, std::chrono:
                               std::chrono::duration_cast<std::chrono::milliseconds>(
                                   *due - std::chrono::steady_clock::now()));
         }
-        int status = 0;
-        const pid_t finished = reapAnyChild(status, within);
+        ChildExit exit;
+        const pid_t finished = reapAnyChild(exit, within);
         if (finished == pid) {
             // The exit status has to be read before the output is trusted: a non-zero one means
             // the listing is partial, whatever arrived on the way there.
-            return (status == 0 && !killed) ? std::optional<std::string>(readFile(listing.path()))
-                                            : std::nullopt;
+            return (exit.status == 0 && !killed)
+                       ? std::optional<std::string>(readFile(listing.path()))
+                       : std::nullopt;
         }
         if (finished < 0) {
             return std::nullopt;   // nothing left to wait for; the child is gone unaccounted for
@@ -1996,8 +2009,7 @@ void writeMergedCoverage(const std::string &directory, const std::vector<std::st
 using SpawnFn = std::function<pid_t(const std::string &path, const std::vector<std::string> &args,
                                     const std::string &logPath)>;
 // Returns the pid reaped, 0 if *within* elapsed first, or -1 if there was nothing to wait for.
-using ReapFn =
-    std::function<pid_t(int &exitStatus, std::optional<std::chrono::milliseconds> within)>;
+using ReapFn = std::function<pid_t(ChildExit &exit, std::optional<std::chrono::milliseconds> within)>;
 using KillFn = std::function<void(pid_t pid, int signal)>;
 using NowFn = std::function<std::chrono::steady_clock::time_point()>;
 using ReportPathFn = std::function<std::string(const std::string &qualifier, size_t part)>;
@@ -2021,8 +2033,108 @@ struct ScheduleOptions {
                                                      // likes, which is the unconfigured behaviour
 };
 
+// Everything the scheduler knows about a child once it has been reaped, other than its report.
+struct ChildOutcome {
+    ChildExit exit;           // how it ended
+    bool abandoned = false;   // it was signalled because the run itself was asked to stop
+    bool timedOut = false;    // it was signalled because it outlived its deadline
+};
+
+// The facts a fragment's prose needs, none of which the outcome itself carries.
+struct ChildContext {
+    std::string qualifier;
+    std::string logPath;                      // empty when the child inherited our stdio
+    std::chrono::seconds timeout{0};          // the deadline it was given
+    size_t remainingParts = 0;                // parts of this binary not yet run
+};
+
+// What to record for one child, and what it means for the run.
+struct ChildVerdict {
+    std::vector<SuiteFragment> fragments;
+    bool failed = false;           // counts once against the run, however many fragments there are
+    bool skipRemainingParts = false;
+};
+
+// Decide a child's fate from how it ended and what it left behind.
+//
+// One function rather than a chain of conditionals in the loop, because the interesting cases
+// are combinations -- stopped but already exited, timed out but exited of its own accord, exited
+// zero having written a report full of failures -- and each of those is a row here rather than a
+// branch ordering somewhere in the scheduler. It is also the whole of the policy, so it can be
+// read, and tested, without a scheduler at all.
+//
+// A killed child's report is thrown away: it stopped partway, so the cases it never reached are
+// simply absent, and a report missing them is worse than none. A child that was signalled but
+// exited by itself anyway -- the reap that races the kill -- kept everything it wrote, and is
+// judged on it like any other.
+ChildVerdict classifyChild(const ChildOutcome &outcome, const ChildContext &context,
+                           std::optional<SuiteFragment> report)
+{
+    const std::string where =
+        context.logPath.empty() ? std::string() : fmt::format("; output in {}", context.logPath);
+    const std::string skipped =
+        context.remainingParts == 0
+            ? std::string()
+            : fmt::format("; its {} remaining part(s) were skipped", context.remainingParts);
+
+    ChildVerdict verdict;
+    if (outcome.abandoned && outcome.exit.signalled) {
+        verdict.fragments.push_back(crashFragment(
+            context.qualifier,
+            fmt::format("run was stopped and this binary was killed before it finished{}", where)));
+        verdict.failed = true;
+        verdict.skipRemainingParts = true;
+        return verdict;
+    }
+    if (outcome.timedOut && outcome.exit.signalled) {
+        // Its remaining parts are skipped too, since they are more of the same binary and would
+        // each cost another timeout to learn the same thing.
+        verdict.fragments.push_back(crashFragment(
+            context.qualifier,
+            fmt::format("binary timed out after {} s and was killed{}{}", context.timeout.count(),
+                        where, skipped)));
+        verdict.failed = true;
+        verdict.skipRemainingParts = true;
+        return verdict;
+    }
+
+    bool cleanReport = false;
+    if (report) {
+        // A report of failures is a failed run even when the binary exited zero: the merged
+        // report would otherwise say failures="1" while the front door said everything passed.
+        cleanReport = report->failures == 0 && report->errors == 0;
+        verdict.failed = !cleanReport;
+        verdict.fragments.push_back(std::move(*report));
+    } else {
+        verdict.fragments.push_back(crashFragment(
+            context.qualifier, fmt::format("binary wrote no gtest report (exit status {}){}",
+                                           outcome.exit.status, where)));
+        verdict.failed = true;
+    }
+    if (outcome.exit.status != 0) {
+        if (cleanReport) {
+            verdict.fragments.push_back(crashFragment(
+                context.qualifier,
+                fmt::format("binary exited {} after writing a passing report",
+                            outcome.exit.status)));
+        }
+        verdict.failed = true;
+    }
+    if (outcome.abandoned && context.remainingParts != 0) {
+        // It finished on its own, but the run is ending, so the rest of this binary never runs.
+        verdict.fragments.push_back(crashFragment(
+            context.qualifier,
+            fmt::format("run was stopped{}",
+                        fmt::format("; its {} remaining part(s) were skipped",
+                                    context.remainingParts))));
+        verdict.failed = true;
+        verdict.skipRemainingParts = true;
+    }
+    return verdict;
+}
+
 // Run every part of every selection, at most *schedule.jobs* at a time, and return their
-// fragments in selection order. *failures* is incremented once per failing or missing report.
+// fragments in selection order. *failures* is incremented once per child that failed.
 //
 // Parts of one selection are never in flight together: each writes the same per-binary log, and
 // the next part is only made ready again once the previous one has been reaped.
@@ -2136,8 +2248,8 @@ std::vector<SuiteFragment> runSelections(const std::vector<Selection> &selection
                                   nearest->due - ops.now()));
         }
 
-        int status = 0;
-        const pid_t finished = ops.reap(status, within);
+        ChildExit exit;
+        const pid_t finished = ops.reap(exit, within);
         if (finished == 0) {
             if (!timed && !stopping) {
                 continue;   // an unbounded reap, interrupted by a signal: no deadline to act on
@@ -2174,65 +2286,18 @@ std::vector<SuiteFragment> runSelections(const std::vector<Selection> &selection
 
         const size_t index = slot->selection;
         const Selection &selection = selections[index];
-        if (slot->abandoned) {
-            // Killed partway through, so its report is missing whatever it had not reached; the
-            // cases it did run are lost with it, but every binary already finished is kept.
-            perSelection[index].push_back(crashFragment(
-                selection.qualifier,
-                fmt::format("run was stopped and this binary was killed before it finished{}",
-                            slot->logPath.empty() ? std::string()
-                                                  : fmt::format("; output in {}", slot->logPath))));
-            ++failures;
+        ChildVerdict verdict = classifyChild(
+            ChildOutcome{exit, slot->abandoned, slot->timedOut},
+            ChildContext{selection.qualifier, slot->logPath, schedule.childTimeout,
+                         filters[index].size() - nextPart[index]},
+            parseChildReport(readFile(slot->reportPath), selection.qualifier,
+                             schedule.outputFormat));
+        for (SuiteFragment &fragment : verdict.fragments) {
+            perSelection[index].push_back(std::move(fragment));
+        }
+        failures += verdict.failed ? 1 : 0;
+        if (verdict.skipRemainingParts) {
             nextPart[index] = filters[index].size();
-            std::error_code ec;
-            fs::remove(slot->reportPath, ec);
-            running.erase(slot);
-            continue;
-        }
-        if (slot->timedOut) {
-            // Whatever it exited with, and whatever report it left behind, it was killed partway
-            // through: the report would be missing exactly the cases that hung. Its remaining
-            // parts are skipped too, since they are more of the same binary and would each cost
-            // another timeout to learn the same thing.
-            const size_t remaining = filters[index].size() - nextPart[index];
-            perSelection[index].push_back(crashFragment(
-                selection.qualifier,
-                fmt::format("binary timed out after {} s and was killed{}{}",
-                            schedule.childTimeout.count(),
-                            slot->logPath.empty() ? std::string()
-                                                  : fmt::format("; output in {}", slot->logPath),
-                            remaining == 0
-                                ? std::string()
-                                : fmt::format("; its {} remaining part(s) were skipped",
-                                              remaining))));
-            ++failures;
-            nextPart[index] = filters[index].size();
-            std::error_code ec;
-            fs::remove(slot->reportPath, ec);
-            running.erase(slot);
-            continue;
-        }
-        bool cleanReport = false;
-        if (std::optional<SuiteFragment> fragment =
-                parseChildReport(readFile(slot->reportPath), selection.qualifier,
-                                 schedule.outputFormat)) {
-            cleanReport = fragment->failures == 0 && fragment->errors == 0;
-            perSelection[index].push_back(std::move(*fragment));
-        } else {
-            perSelection[index].push_back(crashFragment(
-                selection.qualifier,
-                fmt::format("binary wrote no gtest report (exit status {}){}", status,
-                            slot->logPath.empty() ? std::string()
-                                                  : fmt::format("; output in {}", slot->logPath))));
-            ++failures;
-        }
-        if (status != 0) {
-            if (cleanReport) {
-                perSelection[index].push_back(crashFragment(
-                    selection.qualifier,
-                    fmt::format("binary exited {} after writing a passing report", status)));
-            }
-            ++failures;
         }
         std::error_code ec;
         fs::remove(slot->reportPath, ec);
