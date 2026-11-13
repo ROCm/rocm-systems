@@ -10,6 +10,7 @@
 #include "common/env_vars.hpp"
 #include "common/environment.hpp"
 #include "common/path.hpp"
+#include "common/string_utility.hpp"
 #include "core/agent.hpp"
 #include "core/agent_manager.hpp"
 #include "core/common.hpp"
@@ -32,6 +33,7 @@
 #include "library/rocprofiler-sdk/domain_selection.hpp"
 #include "library/rocprofiler-sdk/domain_service.hpp"
 #include "library/rocprofiler-sdk/fwd.hpp"
+#include "library/rocprofiler-sdk/types.hpp"
 #include "library/thread_info.hpp"
 #include "library/tracing.hpp"
 #include "rocprofiler-sdk.hpp"
@@ -941,9 +943,9 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
     using sdk_backend_t    = backends::rocprofiler_sdk::backend<wrapper>;
     using tracing_config_t = tracing_config<sdk_backend_t, default_externals>;
 
-    auto const _counter_events = config::get_rocm_counter_events();
-    auto const _version        = tracing_config_t::get_version();
-    if(_version.formatted() == 0)
+    auto const counter_events = config::get_rocm_counter_events();
+    auto const sdk_version    = tracing_config_t::get_version();
+    if(sdk_version.formatted() == 0)
     {
         LOG_WARNING("rocprofiler-sdk version not initialized");
     }
@@ -951,7 +953,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
     auto* data        = static_cast<client_data*>(user_data);
     data->client_fini = fini_func;
 
-    if(!_counter_events.empty())
+    if(!counter_events.empty())
     {
         data->initialize_counter_info();
     }
@@ -971,64 +973,55 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
 
     // An exception escaping tool_init ends in an unrelated rocprofiler-sdk check
     // failure that does not name the cause, so log it here.
-    auto domain_requests = std::vector<tracing_config_t::domain_request>{};
     try
     {
-        domain_requests = tracing_config_t::get_domains();
+        // Backtrace checks run per SDK record, so they are keyed by the callback kind
+        // the domain service reports for each requested domain.
+        const auto available_domains = g_domain_service->available_domains();
+        for(auto& request : tracing_config_t::get_domains())
+        {
+            const auto domain = std::ranges::find_if(
+                available_domains, [&request](const domains::domain_info& info) {
+                    return utility::string::equals_ignore_case(info.name, request.name);
+                });
+            if(domain != available_domains.end() &&
+               domain->key.mode == domains::collection_mode::callback)
+            {
+                data->backtrace_operations.emplace(
+                    static_cast<sdk_backend_t::callback_tracing_kind_t>(
+                        domain->key.value),
+                    std::move(request.backtrace_operations));
+            }
+
+            domain_selection selection;
+            selection.name       = std::move(request.name);
+            selection.operations = std::move(request.operations);
+            // Only the restore-rescheduled event is traced for the KFD queue-event
+            // domain.
+            if(selection.name == "kfd_event_queue")
+            {
+                selection.operations = {
+                    "ROCPROFILER_KFD_EVENT_QUEUE_RESTORE_RESCHEDULED"
+                };
+            }
+            domain_selection_list.push_back(std::move(selection));
+        }
+
+        g_domain_service->configure(domain_selection_list);
     } catch(const std::exception& e)
     {
-        LOG_CRITICAL("tracing_config::get_domains failed: {}", e.what());
+        LOG_CRITICAL("ROCm domain configuration failed: {}", e.what());
         throw;
     }
 
-    // Backtrace checks run per SDK record, so they are keyed by the callback kind the
-    // domain service reports for each requested domain.
-    const auto available_domains = g_domain_service->available_domains();
-    for(auto& request : domain_requests)
-    {
-        const auto domain = std::ranges::find_if(
-            available_domains, [&request](const domains::domain_info& info) {
-                return utility::string::equals_ignore_case(info.name, request.name);
-            });
-        if(domain != available_domains.end() &&
-           domain->key.mode == domains::collection_mode::callback)
-        {
-            data->backtrace_operations.emplace(
-                static_cast<sdk_backend_t::callback_tracing_kind_t>(domain->key.value),
-                std::move(request.backtrace_operations));
-        }
-
-        domain_selection selection;
-        selection.name       = std::move(request.name);
-        selection.operations = std::move(request.operations);
-        // Only the restore-rescheduled event is traced for the KFD queue-event domain.
-        if(selection.name == "kfd_event_queue")
-        {
-            selection.operations = { "ROCPROFILER_KFD_EVENT_QUEUE_RESTORE_RESCHEDULED" };
-        }
-        domain_selection_list.push_back(std::move(selection));
-    }
-
-    try
-    {
-        if(g_domain_service)
-        {
-            g_domain_service->configure(domain_selection_list);
-        }
-    } catch(const std::exception& e)
-    {
-        LOG_CRITICAL("domain_service::configure failed: {}", e.what());
-        throw;
-    }
-
-    if(!_counter_events.empty())
+    if(!counter_events.empty())
     {
         // Resolve counter names to counter IDs per agent
         for(const auto& itr :
             get_agent_manager_instance().get_agents_by_type(agent_type::gpu))
         {
             const auto& agent_id = rocprofiler_agent_id_t{ itr->handle };
-            create_agent_profile(agent_id, _counter_events, data);
+            create_agent_profile(agent_id, counter_events, data);
         }
 
         // --- Dispatch-mode kernel counters ---

@@ -358,7 +358,8 @@ tracing_config<SdkBackend, Externals>::assemble_operation_env_names_for_kind(
 {
     if constexpr(std::same_as<TracingKind, typename SdkBackend::callback_tracing_kind_t>)
     {
-        const auto& entry = SdkBackend::get_callback_tracing_names()[kind];
+        const auto& table = SdkBackend::get_callback_tracing_names();
+        const auto& entry = table[kind];
         return assemble_operation_env_names(
             (kind == SdkBackend::CALLBACK_TRACING_MARKER_CORE_API)
                 ? std::string_view{ "MARKER_API" }
@@ -367,7 +368,8 @@ tracing_config<SdkBackend, Externals>::assemble_operation_env_names_for_kind(
     }
     else
     {
-        const auto& entry = SdkBackend::get_buffer_tracing_names()[kind];
+        const auto& table = SdkBackend::get_buffer_tracing_names();
+        const auto& entry = table[kind];
         return assemble_operation_env_names(entry.name, !entry.operations.empty());
     }
 }
@@ -408,6 +410,15 @@ tracing_config<SdkBackend, Externals>::get_domains()
         if(!apply_operation_settings(SdkBackend::get_callback_tracing_names(), request))
         {
             apply_operation_settings(SdkBackend::get_buffer_tracing_names(), request);
+        }
+        // An empty operation list would reach the SDK as (nullptr, 0), which means
+        // "trace every operation": the opposite of what the filters selected.
+        if(request.operations && request.operations->empty())
+        {
+            LOG_WARNING("ROCPROFSYS_ROCM_DOMAINS: domain '{}' is skipped because its "
+                        "operation filters leave no operation to trace.",
+                        request.name);
+            continue;
         }
         requests.push_back(std::move(request));
     }
@@ -485,7 +496,7 @@ template <policies::tracing_config::backend   SdkBackend,
 const std::unordered_map<std::string, std::vector<std::string>>&
 tracing_config<SdkBackend, Externals>::get_domain_aliases()
 {
-    static const auto s_aliases = [] {
+    static const auto k_aliases = [] {
         // marker_api and roctx expand to nothing: roctx_client traces them on its own
         // context, outside the domain service.
         auto aliases = std::unordered_map<std::string, std::vector<std::string>>{
@@ -508,7 +519,7 @@ tracing_config<SdkBackend, Externals>::get_domain_aliases()
         }
         return aliases;
     }();
-    return s_aliases;
+    return k_aliases;
 }
 
 template <policies::tracing_config::backend   SdkBackend,
@@ -535,35 +546,34 @@ bool
 tracing_config<SdkBackend, Externals>::apply_operation_settings(const Table&    table,
                                                                 domain_request& request)
 {
-    for(const auto& entry : table)
+    const auto entry = std::ranges::find_if(table, [&request](const auto& candidate) {
+        return utility::string::to_lower(candidate.name) == request.name;
+    });
+    if(entry == table.end())
     {
-        if(utility::string::to_lower(entry.name) != request.name)
-        {
-            continue;
-        }
+        return false;
+    }
 
-        const auto env_names =
-            assemble_operation_env_names(entry.name, !entry.operations.empty());
-        if(env_names.is_empty())
-        {
-            return true;
-        }
-
-        const auto items = collect_operation_items(entry);
-
-        if(const auto annotated = matching_operations(
-               env_names.operations_annotate_backtrace_env_name, items))
-        {
-            std::ranges::transform(*annotated,
-                                   std::inserter(request.backtrace_operations,
-                                                 request.backtrace_operations.end()),
-                                   [](const auto& item) { return item.first; });
-        }
-
-        request.operations = select_operation_names(env_names, items);
+    const auto env_names =
+        assemble_operation_env_names(entry->name, !entry->operations.empty());
+    if(env_names.is_empty())
+    {
         return true;
     }
-    return false;
+
+    const auto items = collect_operation_items(*entry);
+
+    if(const auto annotated =
+           matching_operations(env_names.operations_annotate_backtrace_env_name, items))
+    {
+        std::ranges::transform(*annotated,
+                               std::inserter(request.backtrace_operations,
+                                             request.backtrace_operations.end()),
+                               [](const auto& item) { return item.first; });
+    }
+
+    request.operations = select_operation_names(env_names, items);
+    return true;
 }
 
 template <policies::tracing_config::backend   SdkBackend,

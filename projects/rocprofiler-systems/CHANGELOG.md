@@ -13,6 +13,15 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
   bundled `install-skills.sh --agent <claude|codex|cursor>` to copy them into your AI coding
   agent's personal skills folder.
 
+### Changed
+
+- `ROCPROFSYS_ROCM_DOMAINS` accepts only domains that ROCm Systems Profiler can trace.
+  A value the ROCProfiler-SDK reports but the profiler has no handler for (for example
+  `marker_core_range_api` or `hip_graph`) is now an error at startup instead of being
+  ignored with a warning. Run `rocprof-sys-avail --list-domains` to see the valid names.
+- A domain whose `ROCPROFSYS_ROCM_<DOMAIN>_OPERATIONS` / `..._OPERATIONS_EXCLUDE` filters
+  leave no operation is skipped with a warning. Previously it was traced in full.
+
 ### Resolved issues
 
 - Sampled PAPI hardware-counter tracks use the short description instead of the raw event symbol.
