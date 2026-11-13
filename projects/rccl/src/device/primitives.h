@@ -56,6 +56,36 @@
     } \
   } while (0)
 
+// LL and LL128 step barriers order LDS only instead of waiting for the step's stores to the peer
+// (see storeFreeStepBarrier()). -DRCCL_STORE_FREE_STEP_BARRIER=0 restores the full-fence barriers.
+#ifndef RCCL_STORE_FREE_STEP_BARRIER
+#if defined(__gfx1250__) || defined(__gfx1250_strict__)
+#define RCCL_STORE_FREE_STEP_BARRIER 1
+#else
+#define RCCL_STORE_FREE_STEP_BARRIER 0
+#endif
+#endif
+
+#if RCCL_STORE_FREE_STEP_BARRIER
+// Orders LDS between the waves, but does not wait for their global or peer stores to complete. Only valid
+// where the receiver validates every line by its per-step flag and nothing publishes a tail for a proxy.
+inline __device__ void storeFreeStepBarrier(int nthreads, int threadsPerBlock, uint64_t& barrier_next,
+                                            uint64_t* barriers) {
+  if (nthreads != WARP_SIZE) {
+    __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup", "local");
+    barrier_generic_ordered(__atomic_signal_fence(__ATOMIC_SEQ_CST), nthreads, barrier_next, barriers, __ATOMIC_RELAXED,
+                            __ATOMIC_RELAXED);
+    __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup", "local");
+  }
+}
+
+inline __device__ bool anySendConnFifo(struct ncclDevChannel* channel, int const* sendPeers, int nsend, int connIndex) {
+  bool fifo = false;
+  for (int i = 0; i < nsend; i++) fifo |= channel->peers[sendPeers[i]]->send[connIndex].connFifo != nullptr;
+  return fifo;
+}
+#endif
+
 /* Protocol classes: ProtoSimple, ProtoLL, ProtoLL128
  * We use these as template args to the Primtiives class instead of integral
  * enums (e.g. NCCL_PROTO_LL) because for SIMPLE we need to carry a few extra
