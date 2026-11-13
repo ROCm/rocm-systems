@@ -1313,16 +1313,12 @@ def resolve_base_digest(base_image: str) -> str:
     `rocm/jax-training:maxtext-v26.6` is mutable. A digest is immutable, so
     resolving it once and writing it into both Dockerfiles closes it.
 
-    Falls back to the tag when the registry cannot tell.
+    Raises RuntimeError when the registry cannot tell: on the tag, a push
+    between the two phases' builds would split the pair unnoticed.
     """
     digest = registry_digest(base_image)
     if not digest:
-        log.warning(
-            "No digest for %s; both A/B images will use the tag, so a push "
-            "between the two phases' builds would split the pair.",
-            base_image,
-        )
-        return base_image
+        raise RuntimeError(f"the registry gave no digest for {base_image}")
     log.info("Base pinned for both A/B images: %s", digest)
     return digest
 
@@ -3099,7 +3095,11 @@ def main() -> None:
     # straddle a push to the mutable base tag between the two builds.
     base_ref = ""
     if not args.skip_overlay_build:
-        base_ref = resolve_base_digest(workload_config["base_image"])
+        try:
+            base_ref = resolve_base_digest(workload_config["base_image"])
+        except RuntimeError as exc:
+            log.error("Cannot pin the A/B base image: %s", exc)
+            sys.exit(1)
 
     # Step 3: Stage both phases' images (or use pre-built). Images are built on
     # the allocation's nodes, never here: this host's disk is shared by runners.
