@@ -6,6 +6,7 @@
 #include "parser/env_parser.hpp"
 #include "parser/parse_result.hpp"
 #include "parser/schema.hpp"
+#include "parser/value_text.hpp"
 
 #include <gtest/gtest.h>
 
@@ -363,6 +364,56 @@ parse_traces(std::vector<std::string> args)
         make_traces_schema());
 }
 
+/// What each source stores for one row from the same text; nullopt where it refuses.
+struct source_values
+{
+    std::optional<config_value_t> command_line;
+    std::optional<config_value_t> environment;
+    std::optional<config_value_t> default_value;
+};
+
+/// @p text given as "--arg=text", as the row's environment variable, and as its
+/// default.
+source_values
+from_every_source(const schema_param& row, const std::string& text)
+{
+    const auto stored = [&row](const parse_result& parsed) {
+        const auto found = parsed.values.find(row.id);
+        return found == parsed.values.end() ? std::nullopt
+                                            : std::optional{ found->second };
+    };
+    schema plain{};
+    add_param(plain, row);
+    const auto from_cli =
+        cli_parser{ { row.arg.value_or("") + "=" + text }, unknown_option::report }.parse(
+            plain);
+    const auto from_env =
+        env_parser{ [&row, &text](std::string_view name) -> std::optional<std::string> {
+            return name == row.env.value_or("") ? std::optional{ text } : std::nullopt;
+        } }.parse(plain);
+
+    auto with_default          = row;
+    with_default.default_value = text;
+    schema defaults{};
+    add_param(defaults, std::move(with_default));
+    return { .command_line  = stored(from_cli),
+             .environment   = stored(from_env),
+             .default_value = stored(default_parser{}.parse(defaults)) };
+}
+
+/// Each of @p texts gets the same verdict for @p row from every source.
+void
+expect_one_verdict(const schema_param& row, std::initializer_list<const char*> texts)
+{
+    for(const auto* text : texts)
+    {
+        SCOPED_TRACE(text);
+        const auto found = from_every_source(row, text);
+        EXPECT_EQ(found.command_line, found.environment);
+        EXPECT_EQ(found.command_line, found.default_value);
+    }
+}
+
 TEST(parser_cli, joins_tokens_until_the_next_option)
 {
     const auto parsed =
@@ -596,4 +647,35 @@ TEST(parser_cli, arguments_from_skips_the_program_name)
     const auto args = cli_parser::arguments_from(k_argc, argv);
     EXPECT_EQ(args, std::vector<std::string>{ "--trace" });
     EXPECT_TRUE(cli_parser::arguments_from(0, nullptr).empty());
+}
+
+TEST(parser_cli, reads_an_arg_alias)
+{
+    schema value{};
+    auto   format      = make_param("output_format", param_type::enumeration);
+    format.arg         = "--output-format";
+    format.arg_aliases = { "-f" };
+    format.choices     = { "pftrace", "rocpd" };
+    add_param(value, std::move(format));
+
+    for(const auto& args : { std::vector<std::string>{ "--output-format", "pftrace" },
+                             std::vector<std::string>{ "-f", "pftrace" },
+                             std::vector<std::string>{ "-f=pftrace" } })
+    {
+        const auto parsed = cli_parser{ args, unknown_option::report }.parse(value);
+        EXPECT_TRUE(parsed.errors.empty());
+        expect_stored(parsed.values, "output_format", std::string{ "pftrace" });
+    }
+}
+
+// A blank environment variable is unset, so blank text is not compared here.
+TEST(parser_sources, the_same_text_gets_the_same_verdict_from_every_source)
+{
+    auto freq = make_param("freq", param_type::integer);
+    freq.max  = k_frequency_limit;
+    freq.env  = "ROCPROFSYS_FREQ";
+    freq.arg  = "--freq";
+    expect_one_verdict(freq, { "2", " 2 ", "2x", "4" });
+    expect_one_verdict(make_traces(), { "hip", " hip , mpi ", "hip,", ",hip", ",", ",,",
+                                        " , ", "hip,,mpi", "hip,bogus" });
 }
