@@ -1666,6 +1666,30 @@ const int cuid_inventory_atfork = pthread_atfork(nullptr, nullptr, cuid_inventor
 }  // namespace
 #endif  // BUILD_CUID
 
+// A component whose metadata cannot be read after the listing, such as a
+// partition whose compute mode changed in between, is left out and the rest
+// are listed. A status that is no one component's fails the whole call: no
+// machine-id fails every component alike, and a rejected argument or buffer
+// is this code's fault.
+amdsmi_status_t amdsmi_cuid_collect_components(
+    uint32_t total, const std::function<amdsmi_status_t(uint32_t, amdsmi_cuid_component_t*)>& fill,
+    std::vector<amdsmi_cuid_component_t>* found) {
+  found->clear();
+  found->reserve(total);
+  for (uint32_t i = 0; i < total; ++i) {
+    amdsmi_cuid_component_t component = {};
+    const amdsmi_status_t status = fill(i, &component);
+    if (status == AMDSMI_STATUS_SUCCESS) {
+      found->push_back(component);
+    } else if (status == AMDSMI_STATUS_NO_DATA || status == AMDSMI_STATUS_INVAL ||
+               status == AMDSMI_STATUS_INSUFFICIENT_SIZE) {
+      found->clear();
+      return status;
+    }
+  }
+  return AMDSMI_STATUS_SUCCESS;
+}
+
 // The CUID entry points below are defined unconditionally and gate only
 // their bodies on BUILD_CUID: the exported symbol set must not depend on
 // whether libamdcuid was found, or a build without it would drop symbols from
@@ -1736,13 +1760,17 @@ amdsmi_status_t amdsmi_get_cuid_components(uint32_t* count, amdsmi_cuid_componen
   handles.resize(total);
 
   const auto partition_bdfs = cuid_partition_bdfs();
-  std::vector<amdsmi_cuid_component_t> found(total);
-  for (uint32_t i = 0; i < total; ++i) {
-    const amdsmi_status_t status = fill_cuid_component(handles[i], partition_bdfs, &found[i]);
-    if (status != AMDSMI_STATUS_SUCCESS) {
-      return status;
-    }
+  std::vector<amdsmi_cuid_component_t> found;
+  const amdsmi_status_t status = amdsmi_cuid_collect_components(
+      total,
+      [&](uint32_t i, amdsmi_cuid_component_t* component) {
+        return fill_cuid_component(handles[i], partition_bdfs, component);
+      },
+      &found);
+  if (status != AMDSMI_STATUS_SUCCESS) {
+    return status;
   }
+  total = static_cast<uint32_t>(found.size());
   std::sort(found.begin(), found.end(),
             [](const amdsmi_cuid_component_t& a, const amdsmi_cuid_component_t& b) {
               if (a.info.component_type != b.info.component_type) {
