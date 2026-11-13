@@ -62,108 +62,25 @@ bool GatherGetDevCommRequirements(int deviceImpl, ncclDevCommRequirements* reqs)
 #endif
 
 #if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,7)
-// Gather LSA<->SDMA crossover in bytes per rank: NCCL_GIN_ANVIL_SDMA_THRESHOLD_GATHER >
-// NCCL_GIN_ANVIL_SDMA_THRESHOLD > per-arch default. Fallback for archs not in the table below.
-static constexpr size_t kGatherSdmaThresholdDefault = 1u << 20;
-
-#if !defined(__CUDA_ARCH__) && !defined(__HIP_DEVICE_COMPILE__)
-static constexpr gin_sdma_allgather::ArchSdmaThreshold kGatherSdmaThresholdByArch[] = {
-  {"gfx942", 128u << 20},
-  {"gfx950", 32u << 20},
-  {"gfx1250", 512u << 10},
+// -D 3 launch settings for ginSdmaResolve*() (gin_sdma_allgather_reqs.h). The crossover is
+// NCCL_GIN_ANVIL_SDMA_THRESHOLD_GATHER > NCCL_GIN_ANVIL_SDMA_THRESHOLD > the per-arch default.
+// One CTA issues the root put; the LSA tier uses the per-arch ladder, or the AllGather
+// 16-CTA grid without one. NCCL_GIN_ANVIL_SDMA_GATHER_CTAS pins both tiers.
+struct GatherSdmaColl {
+  static constexpr const char* kThresholdEnv = gin_sdma_allgather::kGatherSdmaThresholdEnv;
+  static constexpr size_t kDefaultThreshold = gin_sdma_allgather::kGatherSdmaThresholdDefault;
+  static size_t hostThresholdDefault() {
+    return gin_sdma_allgather::gatherArchSdmaThreshold(ginSdmaGcnArchName());
+  }
+  static constexpr const char* kCtasEnv = gin_sdma_allgather::kGatherCtasEnv;
+  static constexpr const char* kCtasAlias = nullptr;
+  static constexpr int kSdmaCtas = 1;
+  static int lsaCtas(size_t chunkBytes) {
+    static const gin_sdma_allgather::ArchLsaCtaLadder* ladder =
+        gin_sdma_allgather::gatherLsaCtaLadder(ginSdmaGcnArchName());
+    return gin_sdma_allgather::gatherLsaCtas(ladder, chunkBytes);
+  }
 };
-
-// gcnArchName of the current device, read once per process; nullptr if unavailable.
-static const char* gatherGcnArchName() {
-  static char name[256] = "";
-  static const bool ok = [] {
-    int dev = 0;
-    hipDeviceProp_t prop;
-    if (hipGetDevice(&dev) != hipSuccess || hipGetDeviceProperties(&prop, dev) != hipSuccess) return false;
-    snprintf(name, sizeof(name), "%s", prop.gcnArchName);
-    return true;
-  }();
-  return ok ? name : nullptr;
-}
-
-static size_t gatherArchSdmaThreshold() {
-  return gin_sdma_allgather::archSdmaThreshold(
-      gatherGcnArchName(), kGatherSdmaThresholdByArch,
-      sizeof(kGatherSdmaThresholdByArch) / sizeof(kGatherSdmaThresholdByArch[0]),
-      kGatherSdmaThresholdDefault);
-}
-
-static size_t gatherSdmaThresholdOnce() {
-  return gin_sdma_allgather::resolveSdmaThresholdFromEnv(gin_sdma_allgather::kGatherSdmaThresholdEnv,
-                                                         gatherArchSdmaThreshold());
-}
-#endif
-
-static inline size_t GatherResolveSdmaThreshold() {
-#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-  return kGatherSdmaThresholdDefault;
-#else
-  static const size_t cached = gatherSdmaThresholdOnce();
-  return cached;
-#endif
-}
-
-// One CTA issues the root put. The LSA tier uses the AllGather 16-CTA store grid, except
-// on archs with a measured ladder below. NCCL_GIN_ANVIL_SDMA_GATHER_CTAS pins both tiers,
-// clamped to the barrier pool.
-static constexpr int kGatherCtasSdma = 1;
-
-#if !defined(__CUDA_ARCH__) && !defined(__HIP_DEVICE_COMPILE__)
-// Every CTA runs its own LSA barrier, so small chunks are barrier-bound and fewer CTAs win.
-// Measured per rank on 8x MI300X (gfx942): 1 CTA up to 2 KiB, 2 up to 8 KiB, 4 up to
-// 32 KiB, 8 up to 512 KiB, 16 above. On 8x MI350X (gfx950): 2 up to 16 KiB, 16 above.
-// On 4x MI455X (gfx1250): 1 up to 8 KiB, 2 up to 32 KiB, 8 above.
-static constexpr gin_sdma_allgather::LsaCtaStep kGatherLsaCtasGfx942[] = {
-  {2u << 10, 1},
-  {8u << 10, 2},
-  {32u << 10, 4},
-  {512u << 10, 8},
-};
-static constexpr gin_sdma_allgather::LsaCtaStep kGatherLsaCtasGfx950[] = {
-  {16u << 10, 2},
-};
-static constexpr gin_sdma_allgather::LsaCtaStep kGatherLsaCtasGfx1250[] = {
-  {8u << 10, 1},
-  {32u << 10, 2},
-};
-static constexpr gin_sdma_allgather::ArchLsaCtaLadder kGatherLsaCtasByArch[] = {
-  {"gfx942", kGatherLsaCtasGfx942, sizeof(kGatherLsaCtasGfx942) / sizeof(kGatherLsaCtasGfx942[0]), 16},
-  {"gfx950", kGatherLsaCtasGfx950, sizeof(kGatherLsaCtasGfx950) / sizeof(kGatherLsaCtasGfx950[0]), 16},
-  {"gfx1250", kGatherLsaCtasGfx1250, sizeof(kGatherLsaCtasGfx1250) / sizeof(kGatherLsaCtasGfx1250[0]), 8},
-};
-#endif
-
-static inline int GatherLsaCtas(size_t chunkBytes) {
-#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-  return gin_sdma_allgather::kAllGatherCtasLsa;
-#else
-  static const gin_sdma_allgather::ArchLsaCtaLadder* ladder = gin_sdma_allgather::archLsaCtaLadder(
-      gatherGcnArchName(), kGatherLsaCtasByArch,
-      sizeof(kGatherLsaCtasByArch) / sizeof(kGatherLsaCtasByArch[0]));
-  if (!ladder) return gin_sdma_allgather::kAllGatherCtasLsa;
-  return gin_sdma_allgather::lsaCtasFromLadder(chunkBytes, ladder->steps, ladder->nSteps,
-                                               ladder->above);
-#endif
-}
-
-static inline size_t GatherResolveCtasEnv() {
-#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-  return gin_sdma_allgather::kAllGatherCtasUnset;
-#else
-  static const size_t cached = gin_sdma_allgather::parseCtasEnv("NCCL_GIN_ANVIL_SDMA_GATHER_CTAS");
-  return cached;
-#endif
-}
-
-static inline int GatherResolveLaunchCtas(size_t chunkBytes, size_t sdmaThreshold, int poolCtas) {
-  return gin_sdma_allgather::allGatherCtas(chunkBytes, sdmaThreshold, GatherResolveCtasEnv(),
-                                           poolCtas, kGatherCtasSdma, GatherLsaCtas(chunkBytes));
-}
 
 // Each rank stores its chunk into root's recv slice. `root` is a world rank;
 // ncclGetPeerPointer maps it into the LSA window. Non-root recv buffers stay untouched.
@@ -258,17 +175,6 @@ __global__ void GinHybridGatherKernel(ncclWindow_t sendwin, size_t sendoffset, n
   ginGatherBody(sendwin, sendoffset, recvwin, recvoffset, chunkBytes, root, sdmaThreshold, devComm);
 }
 
-static testResult_t GatherLaunchDeviceKernel(void* sendbuff, size_t sendoffset,
-                                             void* recvbuff, size_t recvoffset, size_t chunkBytes,
-                                             int root, ncclComm_t comm, cudaStream_t stream,
-                                             size_t sdmaThreshold, int gridCtas) {
-  ncclDevComm* devComm = (ncclDevComm*)comm;
-  ncclWindow_t sendwin = (ncclWindow_t)sendbuff;
-  ncclWindow_t recvwin = (ncclWindow_t)recvbuff;
-  if (gridCtas < 1) gridCtas = 1;
-  GinHybridGatherKernel<<<gridCtas, 512, 0, stream>>>(sendwin, sendoffset, recvwin, recvoffset, chunkBytes, root, sdmaThreshold, *devComm);
-  return testSuccess;
-}
 #endif
 
 testResult_t GatherRunColl(void* sendbuff, size_t sendoffset, void* recvbuff, size_t recvoffset, size_t count, ncclDataType_t type, ncclRedOp_t op, int root, ncclComm_t comm, cudaStream_t stream, int deviceImpl, void* bias = nullptr) {
@@ -314,11 +220,10 @@ testResult_t GatherRunColl(void* sendbuff, size_t sendoffset, void* recvbuff, si
         }
 #endif
         if (count == 0) return testSuccess;
-        const size_t sdmaThreshold = GatherResolveSdmaThreshold();
+        const size_t sdmaThreshold = ginSdmaResolveSdmaThreshold<GatherSdmaColl>();
         const size_t chunkBytes = gin_sdma_allgather::chunkBytes(count, (size_t)wordSize(type));
-        const int gridCtas = GatherResolveLaunchCtas(
-            chunkBytes, sdmaThreshold, gin_sdma_allgather::allGatherPoolCtas(deviceCtaCount));
-        TESTCHECK(GatherLaunchDeviceKernel(sendbuff, sendoffset, recvbuff, recvoffset, chunkBytes, root, comm, stream, sdmaThreshold, gridCtas));
+        const int gridCtas = ginSdmaResolveLaunchCtas<GatherSdmaColl>(chunkBytes, sdmaThreshold);
+        TESTCHECK(ginSdmaLaunchDeviceKernel(GinHybridGatherKernel, sendbuff, sendoffset, recvbuff, recvoffset, chunkBytes, root, comm, stream, sdmaThreshold, gridCtas));
         return testSuccess;
       }
 #endif
@@ -329,6 +234,25 @@ testResult_t GatherRunColl(void* sendbuff, size_t sendoffset, void* recvbuff, si
   return testSuccess;
 }
 
+// Tier report for -D 3: every rank stores directly into root, over LSA up to the
+// crossover and with one GIN put above it. `count` is the per-rank element count.
+#if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,7)
+testResult_t GatherGetDeviceImplInfo(int /*deviceImpl*/, size_t count, ncclDataType_t type,
+    int /*nRanks*/, int /*lsaSize*/, char* algoOut, char* protoOut) {
+  snprintf(algoOut, 16, "%s", "T-DIRECT");
+  const size_t sdmaThreshold = ginSdmaResolveSdmaThreshold<GatherSdmaColl>();
+  const size_t chunkBytes = gin_sdma_allgather::chunkBytes(count, (size_t)wordSize(type));
+  snprintf(protoOut, 16, "%s", gin_sdma_allgather::chunkUsesLsaTier(chunkBytes, sdmaThreshold) ? "LSA" : "GIN");
+  return testSuccess;
+}
+#else
+testResult_t GatherGetDeviceImplInfo(int, size_t, ncclDataType_t, int, int, char* algoOut, char* protoOut) {
+  snprintf(algoOut, 16, "%s", "T-DIRECT");
+  snprintf(protoOut, 16, "%s", "GIN");
+  return testSuccess;
+}
+#endif
+
 struct testColl gatherTest = {
   "Gather",
   GatherGetCollByteCount,
@@ -336,7 +260,10 @@ struct testColl gatherTest = {
   GatherGetBw,
   GatherRunColl,
   NULL,
-  NULL
+  NULL,
+  NULL,
+  NULL,
+  GatherGetDeviceImplInfo
 };
 
 void GatherGetBuffSize(size_t *sendcount, size_t *recvcount, size_t count, int nranks) {

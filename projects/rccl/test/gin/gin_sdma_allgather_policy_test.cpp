@@ -77,44 +77,80 @@ TEST(AllGatherPolicyTier, AboveThresholdIsSdma) {
   EXPECT_TRUE(chunkUsesLsaTier(0, 0));
 }
 
-// ---- pickSdmaThreshold: per-collective > global env > compiled default -------
-
-TEST(AllGatherPolicyThreshold, PerCollectiveWins) {
-  // Per-collective override dominates the global env and the compiled default.
-  EXPECT_EQ(pickSdmaThreshold(/*perCollSet=*/true, /*perCollVal=*/4096,
-                              /*globalSet=*/true, /*globalVal=*/65536,
-                              /*compiledDefault=*/kAllGatherSdmaThresholdDefault),
-            4096u);
-}
-
-TEST(AllGatherPolicyThreshold, GlobalUsedWhenNoPerCollective) {
-  EXPECT_EQ(pickSdmaThreshold(false, 0, true, 65536, kAllGatherSdmaThresholdDefault), 65536u);
-}
-
 TEST(AllGatherPolicyThreshold, DefaultCrossoverAt32KiB) {
   EXPECT_TRUE(chunkUsesLsaTier(32768, kAllGatherSdmaThresholdDefault));
   EXPECT_FALSE(chunkUsesLsaTier(32769, kAllGatherSdmaThresholdDefault));
 }
 
-TEST(AllGatherPolicyThreshold, CompiledDefaultWhenNothingSet) {
-  // Behavioral: with nothing set, resolution returns the compiled default (rather
-  // than mirroring the constant's value, which only trips on a deliberate renumber).
-  EXPECT_EQ(pickSdmaThreshold(false, 0, false, 0, kAllGatherSdmaThresholdDefault),
-            kAllGatherSdmaThresholdDefault);
+// ---- resolveSdmaThresholdFromEnv: per-collective > global env > compiled default --
+
+class SdmaThresholdEnv : public ::testing::Test {
+ protected:
+  void SetUp() override { clear(); }
+  void TearDown() override { clear(); }
+  static void clear() {
+    unsetenv(kAllGatherSdmaThresholdEnv);
+    unsetenv(kGatherSdmaThresholdEnv);
+    unsetenv(kSdmaThresholdEnv);
+  }
+};
+
+TEST_F(SdmaThresholdEnv, EnvNames) {
+  EXPECT_STREQ(kSdmaThresholdEnv, "NCCL_GIN_ANVIL_SDMA_THRESHOLD");
+  EXPECT_STREQ(kAllGatherSdmaThresholdEnv, "NCCL_GIN_ANVIL_SDMA_THRESHOLD_ALLGATHER");
+  EXPECT_STREQ(kGatherSdmaThresholdEnv, "NCCL_GIN_ANVIL_SDMA_THRESHOLD_GATHER");
 }
 
-TEST(AllGatherPolicyThreshold, ExplicitZeroIsHonored) {
+TEST_F(SdmaThresholdEnv, PerCollectiveWins) {
+  setenv(kAllGatherSdmaThresholdEnv, "4096", 1);
+  setenv(kSdmaThresholdEnv, "65536", 1);
+  EXPECT_EQ(resolveSdmaThresholdFromEnv(), 4096u);
+}
+
+TEST_F(SdmaThresholdEnv, GlobalUsedWhenNoPerCollective) {
+  setenv(kSdmaThresholdEnv, "65536", 1);
+  EXPECT_EQ(resolveSdmaThresholdFromEnv(), 65536u);
+}
+
+TEST_F(SdmaThresholdEnv, CompiledDefaultWhenNothingSet) {
+  EXPECT_EQ(resolveSdmaThresholdFromEnv(), kAllGatherSdmaThresholdDefault);
+  EXPECT_EQ(resolveSdmaThresholdFromEnv(kGatherSdmaThresholdEnv, 1u << 20), 1u << 20);
+}
+
+TEST_F(SdmaThresholdEnv, ExplicitZeroIsHonored) {
   // An explicit 0 (all-SDMA tier) is honored at either precedence level.
-  EXPECT_EQ(pickSdmaThreshold(true, 0, true, 65536, kAllGatherSdmaThresholdDefault), 0u);
-  EXPECT_EQ(pickSdmaThreshold(false, 0, true, 0, kAllGatherSdmaThresholdDefault), 0u);
+  setenv(kAllGatherSdmaThresholdEnv, "0", 1);
+  setenv(kSdmaThresholdEnv, "65536", 1);
+  EXPECT_EQ(resolveSdmaThresholdFromEnv(), 0u);
+  unsetenv(kAllGatherSdmaThresholdEnv);
+  setenv(kSdmaThresholdEnv, "0", 1);
+  EXPECT_EQ(resolveSdmaThresholdFromEnv(), 0u);
 }
 
-TEST(AllGatherPolicyThreshold, LargeValueDoesNotWrap) {
+TEST_F(SdmaThresholdEnv, SizeSuffixesMatchBroadcast) {
+  // NCCL_GIN_ANVIL_SDMA_THRESHOLD is shared with Broadcast, so "1M" is 1 MiB for both.
+  setenv(kSdmaThresholdEnv, "1M", 1);
+  EXPECT_EQ(resolveSdmaThresholdFromEnv(), 1u << 20);
+  EXPECT_EQ(resolveSdmaThresholdFromEnv(), gin_sdma::parseSize("1M"));
+  setenv(kAllGatherSdmaThresholdEnv, "4K", 1);
+  EXPECT_EQ(resolveSdmaThresholdFromEnv(), 4096u);
+  setenv(kGatherSdmaThresholdEnv, "32m", 1);
+  EXPECT_EQ(resolveSdmaThresholdFromEnv(kGatherSdmaThresholdEnv, 0), 32u << 20);
+}
+
+TEST_F(SdmaThresholdEnv, UnparseableValueFallsThrough) {
+  setenv(kSdmaThresholdEnv, "8192", 1);
+  for (const char* bad : {"", "-4096", " -4K", "abc"}) {
+    setenv(kAllGatherSdmaThresholdEnv, bad, 1);
+    EXPECT_EQ(resolveSdmaThresholdFromEnv(), 8192u) << "'" << bad << "'";
+  }
+}
+
+TEST_F(SdmaThresholdEnv, LargeValueDoesNotWrap) {
   // Host resolution is 64-bit, so a >2 GiB threshold survives (unlike the
   // backend's int-typed inline-put threshold).
-  const unsigned long long big = 4ull * 1024 * 1024 * 1024;  // 4 GiB
-  EXPECT_EQ(pickSdmaThreshold(true, big, false, 0, kAllGatherSdmaThresholdDefault),
-            (size_t)big);
+  setenv(kAllGatherSdmaThresholdEnv, "4G", 1);
+  EXPECT_EQ(resolveSdmaThresholdFromEnv(), (size_t)4 << 30);
 }
 
 // ---- archSdmaThreshold: per-architecture compiled default ----------------------
@@ -147,11 +183,85 @@ TEST(AllGatherPolicyArchThreshold, UnknownOrMissingNameFallsBack) {
   EXPECT_EQ(archSdmaThreshold("gfx942", nullptr, 0, kArchFallback), kArchFallback);
 }
 
-TEST(AllGatherPolicyArchThreshold, EnvOverridesStillWinOverArchDefault) {
-  const size_t arch = archSdmaThreshold("gfx1250-strict", kArchTable, kArchTableSize, kArchFallback);
-  EXPECT_EQ(pickSdmaThreshold(true, 0, false, 0, arch), 0u);
-  EXPECT_EQ(pickSdmaThreshold(false, 0, true, 4096, arch), 4096u);
-  EXPECT_EQ(pickSdmaThreshold(false, 0, false, 0, arch), 1u << 17);
+// ---- Gather per-arch tables, keyed by real gcnArchName strings ------------------
+
+TEST(GatherPolicyArchTable, ThresholdPerArch) {
+  EXPECT_EQ(gatherArchSdmaThreshold("gfx942:sramecc+:xnack-"), 128u << 20);  // MI300X
+  EXPECT_EQ(gatherArchSdmaThreshold("gfx950:sramecc+:xnack-"), 32u << 20);   // MI350X
+  EXPECT_EQ(gatherArchSdmaThreshold("gfx1250"), 512u << 10);                 // MI455X
+  EXPECT_EQ(gatherArchSdmaThreshold("gfx1250-strict"), 512u << 10);
+}
+
+TEST(GatherPolicyArchTable, ThresholdFallsBackOffTable) {
+  EXPECT_EQ(gatherArchSdmaThreshold("gfx90a:sramecc+:xnack-"), kGatherSdmaThresholdDefault);
+  EXPECT_EQ(gatherArchSdmaThreshold("gfx1201"), kGatherSdmaThresholdDefault);
+  EXPECT_EQ(gatherArchSdmaThreshold(nullptr), kGatherSdmaThresholdDefault);
+}
+
+TEST(GatherPolicyArchTable, EveryThresholdRowIsReachable) {
+  for (const ArchSdmaThreshold& row : kGatherSdmaThresholdByArch) {
+    EXPECT_EQ(gatherArchSdmaThreshold(row.arch), row.threshold) << row.arch;
+  }
+}
+
+static int gatherCtasFor(const char* gcnArchName, size_t chunk) {
+  return gatherLsaCtas(gatherLsaCtaLadder(gcnArchName), chunk);
+}
+
+TEST(GatherPolicyArchTable, LadderGfx942) {
+  const char* a = "gfx942:sramecc+:xnack-";
+  EXPECT_EQ(gatherCtasFor(a, 0), 1);
+  EXPECT_EQ(gatherCtasFor(a, 2u << 10), 1);
+  EXPECT_EQ(gatherCtasFor(a, (2u << 10) + 1), 2);
+  EXPECT_EQ(gatherCtasFor(a, 8u << 10), 2);
+  EXPECT_EQ(gatherCtasFor(a, (8u << 10) + 1), 4);
+  EXPECT_EQ(gatherCtasFor(a, 32u << 10), 4);
+  EXPECT_EQ(gatherCtasFor(a, (32u << 10) + 1), 8);
+  EXPECT_EQ(gatherCtasFor(a, 512u << 10), 8);
+  EXPECT_EQ(gatherCtasFor(a, (512u << 10) + 1), 16);
+  EXPECT_EQ(gatherCtasFor(a, 128u << 20), 16);
+}
+
+TEST(GatherPolicyArchTable, LadderGfx950) {
+  const char* a = "gfx950:sramecc+:xnack-";
+  EXPECT_EQ(gatherCtasFor(a, 0), 2);
+  EXPECT_EQ(gatherCtasFor(a, 16u << 10), 2);
+  EXPECT_EQ(gatherCtasFor(a, (16u << 10) + 1), 16);
+  EXPECT_EQ(gatherCtasFor(a, 32u << 20), 16);
+}
+
+TEST(GatherPolicyArchTable, LadderGfx1250) {
+  for (const char* a : {"gfx1250", "gfx1250-strict"}) {
+    EXPECT_EQ(gatherCtasFor(a, 0), 1) << a;
+    EXPECT_EQ(gatherCtasFor(a, 8u << 10), 1) << a;
+    EXPECT_EQ(gatherCtasFor(a, (8u << 10) + 1), 2) << a;
+    EXPECT_EQ(gatherCtasFor(a, 32u << 10), 2) << a;
+    EXPECT_EQ(gatherCtasFor(a, (32u << 10) + 1), 8) << a;
+    EXPECT_EQ(gatherCtasFor(a, 512u << 10), 8) << a;
+  }
+}
+
+TEST(GatherPolicyArchTable, NoLadderUsesAllGatherGrid) {
+  EXPECT_EQ(gatherLsaCtaLadder("gfx90a:sramecc+:xnack-"), nullptr);
+  EXPECT_EQ(gatherLsaCtaLadder(nullptr), nullptr);
+  EXPECT_EQ(gatherCtasFor("gfx90a:sramecc+:xnack-", 1024), kAllGatherCtasLsa);
+  EXPECT_EQ(gatherCtasFor(nullptr, 1u << 20), kAllGatherCtasLsa);
+}
+
+TEST(GatherPolicyArchTable, EveryLadderIsReachableAndFitsThePool) {
+  // The pool is sized from allGatherMaxCtas(), so a larger step would be clamped.
+  for (const ArchLsaCtaLadder& row : kGatherLsaCtasByArch) {
+    EXPECT_EQ(gatherLsaCtaLadder(row.arch), &row) << row.arch;
+    EXPECT_GE(row.above, 1) << row.arch;
+    EXPECT_LE(row.above, allGatherMaxCtas()) << row.arch;
+    for (size_t i = 0; i < row.nSteps; i++) {
+      EXPECT_GE(row.steps[i].ctas, 1) << row.arch;
+      EXPECT_LE(row.steps[i].ctas, allGatherMaxCtas()) << row.arch;
+      if (i > 0) {
+        EXPECT_GT(row.steps[i].maxChunkBytes, row.steps[i - 1].maxChunkBytes) << row.arch;
+      }
+    }
+  }
 }
 
 // ---- allGatherCtas: size-adaptive ladder, clamped to the launched pool --------
@@ -360,27 +470,28 @@ TEST(AllGatherPolicyEnv, ResolveThresholdFromEnv) {
 }
 
 TEST(AllGatherPolicyEnv, ParseAllGatherCtasEnv) {
-  unsetenv("NCCL_GIN_ANVIL_SDMA_ALLGATHER_CTAS");
-  unsetenv("NCCL_GIN_ANVIL_AG_CTAS");
+  EXPECT_STREQ(kAllGatherCtasEnv, "NCCL_GIN_ANVIL_SDMA_ALLGATHER_CTAS");
+  EXPECT_STREQ(kAllGatherCtasEnvAlias, "NCCL_GIN_ANVIL_AG_CTAS");
+  unsetenv(kAllGatherCtasEnv);
+  unsetenv(kAllGatherCtasEnvAlias);
   EXPECT_EQ(parseAllGatherCtasEnv(), kAllGatherCtasUnset);
 
-  setenv("NCCL_GIN_ANVIL_SDMA_ALLGATHER_CTAS", "8", 1);
+  setenv(kAllGatherCtasEnv, "8", 1);
   EXPECT_EQ(parseAllGatherCtasEnv(), 8u);
 
-  unsetenv("NCCL_GIN_ANVIL_SDMA_ALLGATHER_CTAS");
-  setenv("NCCL_GIN_ANVIL_AG_CTAS", "4", 1);
+  unsetenv(kAllGatherCtasEnv);
+  setenv(kAllGatherCtasEnvAlias, "4", 1);
   EXPECT_EQ(parseAllGatherCtasEnv(), 4u);
 
-  unsetenv("NCCL_GIN_ANVIL_AG_CTAS");
+  unsetenv(kAllGatherCtasEnvAlias);
 
-  setenv("NCCL_GIN_ANVIL_SDMA_ALLGATHER_CTAS", "8foo", 1);
+  setenv(kAllGatherCtasEnv, "8foo", 1);
   EXPECT_EQ(parseAllGatherCtasEnv(), kAllGatherCtasUnset);
-  unsetenv("NCCL_GIN_ANVIL_SDMA_ALLGATHER_CTAS");
+  unsetenv(kAllGatherCtasEnv);
 }
 
 TEST(GatherPolicyEnv, ResolveThresholdReadsGatherEnv) {
-  EXPECT_STREQ(kGatherSdmaThresholdEnv, "NCCL_GIN_ANVIL_SDMA_THRESHOLD_GATHER");
-  const size_t archDefault = 512u << 10;
+  const size_t archDefault = gatherArchSdmaThreshold("gfx1250-strict");
   unsetenv(kGatherSdmaThresholdEnv);
   unsetenv(kAllGatherSdmaThresholdEnv);
   unsetenv(kSdmaThresholdEnv);
@@ -402,11 +513,12 @@ TEST(GatherPolicyEnv, ResolveThresholdReadsGatherEnv) {
 }
 
 TEST(GatherPolicyEnv, ParseGatherCtasEnvHasNoAlias) {
-  const char* kName = "NCCL_GIN_ANVIL_SDMA_GATHER_CTAS";
+  const char* kName = kGatherCtasEnv;
+  EXPECT_STREQ(kName, "NCCL_GIN_ANVIL_SDMA_GATHER_CTAS");
   unsetenv(kName);
-  setenv("NCCL_GIN_ANVIL_AG_CTAS", "4", 1);
+  setenv(kAllGatherCtasEnvAlias, "4", 1);
   EXPECT_EQ(parseCtasEnv(kName), kAllGatherCtasUnset);
-  unsetenv("NCCL_GIN_ANVIL_AG_CTAS");
+  unsetenv(kAllGatherCtasEnvAlias);
 
   setenv(kName, "1", 1);
   EXPECT_EQ(parseCtasEnv(kName), 1u);

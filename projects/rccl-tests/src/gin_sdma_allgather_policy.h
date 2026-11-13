@@ -21,6 +21,8 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "gin_sdma_broadcast_policy.h"
+
 #if !defined(__CUDA_ARCH__) && !defined(__HIP_DEVICE_COMPILE__)
 #include <cstdlib>
 #endif
@@ -71,19 +73,13 @@ GIN_SDMA_AG_HD inline bool chunkUsesLsaTier(size_t chunkBytes_, size_t sdmaThres
 // (NCCL_GIN_ANVIL_SDMA_THRESHOLD / ctx->sdmaThreshold), which stays global.
 static constexpr size_t kAllGatherSdmaThresholdDefault = 32768;
 
-// Resolve the per-collective AllGather crossover threshold with precedence:
-// per-collective env (NCCL_GIN_ANVIL_SDMA_THRESHOLD_ALLGATHER) > global env
-// (NCCL_GIN_ANVIL_SDMA_THRESHOLD) > compiled default. "Set" means the env var was
-// present and parsed (an explicit 0 is honored, forcing the all-SDMA tier). Pure
-// so the precedence is unit-testable without the environment; the getenv/parse
-// wrapper lives host-side in AllGatherResolveSdmaThreshold() (all_gather.cu).
-GIN_SDMA_AG_HD inline size_t pickSdmaThreshold(bool perCollSet, unsigned long long perCollVal,
-                                               bool globalSet, unsigned long long globalVal,
-                                               size_t compiledDefault) {
-  if (perCollSet) return (size_t)perCollVal;
-  if (globalSet) return (size_t)globalVal;
-  return compiledDefault;
-}
+// Env knobs of the AllGather and Gather -D 3 paths.
+static constexpr const char* kSdmaThresholdEnv = "NCCL_GIN_ANVIL_SDMA_THRESHOLD";
+static constexpr const char* kAllGatherSdmaThresholdEnv = "NCCL_GIN_ANVIL_SDMA_THRESHOLD_ALLGATHER";
+static constexpr const char* kGatherSdmaThresholdEnv = "NCCL_GIN_ANVIL_SDMA_THRESHOLD_GATHER";
+static constexpr const char* kAllGatherCtasEnv = "NCCL_GIN_ANVIL_SDMA_ALLGATHER_CTAS";
+static constexpr const char* kAllGatherCtasEnvAlias = "NCCL_GIN_ANVIL_AG_CTAS";  // deprecated
+static constexpr const char* kGatherCtasEnv = "NCCL_GIN_ANVIL_SDMA_GATHER_CTAS";
 
 // Measured LSA<->SDMA crossover for one GPU architecture, keyed by the base name
 // of hipDeviceProp_t::gcnArchName (e.g. "gfx942").
@@ -203,6 +199,58 @@ inline const ArchLsaCtaLadder* archLsaCtaLadder(const char* gcnArchName,
   return nullptr;
 }
 
+// Gather -D 3 LSA<->SDMA crossover in bytes per rank, per architecture.
+// Architectures not in the table use kGatherSdmaThresholdDefault.
+static constexpr size_t kGatherSdmaThresholdDefault = 1u << 20;
+static constexpr ArchSdmaThreshold kGatherSdmaThresholdByArch[] = {
+  {"gfx942", 128u << 20},
+  {"gfx950", 32u << 20},
+  {"gfx1250", 512u << 10},
+};
+
+inline size_t gatherArchSdmaThreshold(const char* gcnArchName) {
+  return archSdmaThreshold(gcnArchName, kGatherSdmaThresholdByArch,
+                           sizeof(kGatherSdmaThresholdByArch) / sizeof(kGatherSdmaThresholdByArch[0]),
+                           kGatherSdmaThresholdDefault);
+}
+
+// Gather -D 3 LSA-tier CTA ladders. Every CTA runs its own LSA barrier, so small
+// chunks are barrier-bound and fewer CTAs win. Measured per rank on 8x MI300X
+// (gfx942): 1 CTA up to 2 KiB, 2 up to 8 KiB, 4 up to 32 KiB, 8 up to 512 KiB, 16
+// above. On 8x MI350X (gfx950): 2 up to 16 KiB, 16 above. On 4x MI455X (gfx1250):
+// 1 up to 8 KiB, 2 up to 32 KiB, 8 above.
+static constexpr LsaCtaStep kGatherLsaCtasGfx942[] = {
+  {2u << 10, 1},
+  {8u << 10, 2},
+  {32u << 10, 4},
+  {512u << 10, 8},
+};
+static constexpr LsaCtaStep kGatherLsaCtasGfx950[] = {
+  {16u << 10, 2},
+};
+static constexpr LsaCtaStep kGatherLsaCtasGfx1250[] = {
+  {8u << 10, 1},
+  {32u << 10, 2},
+};
+static constexpr ArchLsaCtaLadder kGatherLsaCtasByArch[] = {
+  {"gfx942", kGatherLsaCtasGfx942, sizeof(kGatherLsaCtasGfx942) / sizeof(kGatherLsaCtasGfx942[0]), 16},
+  {"gfx950", kGatherLsaCtasGfx950, sizeof(kGatherLsaCtasGfx950) / sizeof(kGatherLsaCtasGfx950[0]), 16},
+  {"gfx1250", kGatherLsaCtasGfx1250, sizeof(kGatherLsaCtasGfx1250) / sizeof(kGatherLsaCtasGfx1250[0]), 8},
+};
+
+// The Gather ladder for an architecture, or nullptr when it has none.
+inline const ArchLsaCtaLadder* gatherLsaCtaLadder(const char* gcnArchName) {
+  return archLsaCtaLadder(gcnArchName, kGatherLsaCtasByArch,
+                          sizeof(kGatherLsaCtasByArch) / sizeof(kGatherLsaCtasByArch[0]));
+}
+
+// Gather LSA-tier CTAs for a chunk: the ladder's step, or the AllGather grid
+// without a ladder.
+inline int gatherLsaCtas(const ArchLsaCtaLadder* ladder, size_t chunkBytes_) {
+  if (!ladder) return kAllGatherCtasLsa;
+  return lsaCtasFromLadder(chunkBytes_, ladder->steps, ladder->nSteps, ladder->above);
+}
+
 // Element offset of rank r's contribution within EVERY peer's AllGather recv
 // buffer: rank r's send chunk lands at [r*count, r*count + count). Shared by the
 // production LSA-direct kernel (AllGatherLsaDirect) and the addressing tests so a
@@ -240,16 +288,6 @@ GIN_SDMA_AG_HD inline void bandwidthGBps(size_t perRankCount, size_t typeSize, d
 #if !defined(__CUDA_ARCH__) && !defined(__HIP_DEVICE_COMPILE__)
 // Host-side env resolution (unit-testable without pulling in all_gather.cu).
 
-inline bool parseEnvU64(const char* name, unsigned long long* val) {
-  const char* e = getenv(name);
-  if (!e || !e[0] || *e == '-') return false;
-  char* end = nullptr;
-  unsigned long long v = strtoull(e, &end, 10);
-  if (end == e) return false;
-  *val = v;
-  return true;
-}
-
 // CTA-count pin from env `name`, falling back to `alias` when `name` is unset or
 // empty. Returns kAllGatherCtasUnset when neither holds a plain decimal count.
 inline size_t parseCtasEnv(const char* name, const char* alias = nullptr) {
@@ -264,20 +302,15 @@ inline size_t parseCtasEnv(const char* name, const char* alias = nullptr) {
 }
 
 inline size_t parseAllGatherCtasEnv() {
-  return parseCtasEnv("NCCL_GIN_ANVIL_SDMA_ALLGATHER_CTAS", "NCCL_GIN_ANVIL_AG_CTAS");  // deprecated alias
+  return parseCtasEnv(kAllGatherCtasEnv, kAllGatherCtasEnvAlias);
 }
 
-static constexpr const char* kSdmaThresholdEnv = "NCCL_GIN_ANVIL_SDMA_THRESHOLD";
-static constexpr const char* kAllGatherSdmaThresholdEnv = "NCCL_GIN_ANVIL_SDMA_THRESHOLD_ALLGATHER";
-static constexpr const char* kGatherSdmaThresholdEnv = "NCCL_GIN_ANVIL_SDMA_THRESHOLD_GATHER";
-
-// Per-collective env `perCollName` > global kSdmaThresholdEnv > compiledDefault.
+// Per-collective env `perCollName` > global kSdmaThresholdEnv > compiledDefault, parsed
+// like Broadcast's thresholds ("4096", "4K", "2M"; an explicit 0 forces the SDMA tier).
 inline size_t resolveSdmaThresholdFromEnv(const char* perCollName = kAllGatherSdmaThresholdEnv,
                                           size_t compiledDefault = kAllGatherSdmaThresholdDefault) {
-  unsigned long long perCollVal = 0, globalVal = 0;
-  const bool perCollSet = parseEnvU64(perCollName, &perCollVal);
-  const bool globalSet = parseEnvU64(kSdmaThresholdEnv, &globalVal);
-  return pickSdmaThreshold(perCollSet, perCollVal, globalSet, globalVal, compiledDefault);
+  return gin_sdma::resolveThreshold(gin_sdma::parseSize(getenv(perCollName)),
+                                    gin_sdma::parseSize(getenv(kSdmaThresholdEnv)), compiledDefault);
 }
 
 #endif  // host env helpers

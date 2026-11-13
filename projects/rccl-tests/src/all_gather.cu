@@ -82,31 +82,19 @@ bool AllGatherGetDevCommRequirements(int deviceImpl, ncclDevCommRequirements* re
 
 #if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,28,7)
-// Host-resolve the AllGather LSA<->SDMA crossover (bytes/rank). Parsed once per
-// process; see gin_sdma_allgather::resolveSdmaThresholdFromEnv().
+// -D 3 launch settings for ginSdmaResolve*() (gin_sdma_allgather_reqs.h).
+struct AllGatherSdmaColl {
+  static constexpr const char* kThresholdEnv = gin_sdma_allgather::kAllGatherSdmaThresholdEnv;
+  static constexpr size_t kDefaultThreshold = gin_sdma_allgather::kAllGatherSdmaThresholdDefault;
+  static size_t hostThresholdDefault() { return kDefaultThreshold; }
+  static constexpr const char* kCtasEnv = gin_sdma_allgather::kAllGatherCtasEnv;
+  static constexpr const char* kCtasAlias = gin_sdma_allgather::kAllGatherCtasEnvAlias;
+  static constexpr int kSdmaCtas = gin_sdma_allgather::kAllGatherCtasSdma;
+  static int lsaCtas(size_t) { return gin_sdma_allgather::kAllGatherCtasLsa; }
+};
+
 static inline size_t AllGatherResolveSdmaThreshold() {
-#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-  return gin_sdma_allgather::kAllGatherSdmaThresholdDefault;
-#else
-  static const size_t cached = gin_sdma_allgather::resolveSdmaThresholdFromEnv();
-  return cached;
-#endif
-}
-
-// Parse NCCL_GIN_ANVIL_SDMA_ALLGATHER_CTAS once per process (deprecated alias
-// NCCL_GIN_ANVIL_AG_CTAS still honored in the policy helper).
-static inline size_t AllGatherResolveCtasEnv() {
-#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-  return gin_sdma_allgather::kAllGatherCtasUnset;
-#else
-  static const size_t cached = gin_sdma_allgather::parseAllGatherCtasEnv();
-  return cached;
-#endif
-}
-
-static inline int AllGatherResolveLaunchCtas(size_t chunkBytes, size_t sdmaThreshold, int poolCtas) {
-  return gin_sdma_allgather::allGatherCtas(
-      chunkBytes, sdmaThreshold, AllGatherResolveCtasEnv(), poolCtas);
+  return ginSdmaResolveSdmaThreshold<AllGatherSdmaColl>();
 }
 
 template <typename T>
@@ -212,22 +200,6 @@ __global__ void GinHybridAllGatherTimedKernel(ncclWindow_t sendwin, size_t sendo
   if (threadIdx.x == 0) end_time[blockIdx.x] = wall_clock64();
 }
 
-// AllGather-specific launch: mirrors testLaunchDeviceKernel() but threads the
-// host-resolved per-collective sdmaThreshold into the kernel (the shared launcher
-// has a fixed signature used by the other collectives, so it is left untouched).
-template <typename F>
-static testResult_t AllGatherLaunchDeviceKernel(F kernel, void* sendbuff, size_t sendoffset,
-                                                void* recvbuff, size_t recvoffset, size_t count,
-                                                int root, ncclComm_t comm, cudaStream_t stream,
-                                                size_t sdmaThreshold, int gridCtas) {
-  if (kernel == nullptr) return testNotImplemented;
-  ncclDevComm* devComm = (ncclDevComm*)comm;
-  ncclWindow_t sendwin = (ncclWindow_t)sendbuff;
-  ncclWindow_t recvwin = (ncclWindow_t)recvbuff;
-  if (gridCtas < 1) gridCtas = 1;
-  kernel<<<gridCtas, 512, 0, stream>>>(sendwin, sendoffset, recvwin, recvoffset, count, root, sdmaThreshold, *devComm);
-  return testSuccess;
-}
 #endif
 #endif
 
@@ -247,9 +219,8 @@ testResult_t AllGatherRunColl(void* sendbuff, size_t sendoffset, void* recvbuff,
         // pins a fixed count (diagnostic).
         const size_t agSdmaThreshold = AllGatherResolveSdmaThreshold();
         const size_t agChunkBytes = gin_sdma_allgather::chunkBytes(count, (size_t)wordSize(type));
-        const int agGridCtas = AllGatherResolveLaunchCtas(
-            agChunkBytes, agSdmaThreshold, gin_sdma_allgather::allGatherPoolCtas(deviceCtaCount));
-        TESTCHECK(AllGatherLaunchDeviceKernel(SPECIALIZE_KERNEL(GinHybridAllGatherKernel, type, op), sendbuff, sendoffset, recvbuff, recvoffset, count, root, comm, stream, agSdmaThreshold, agGridCtas));
+        const int agGridCtas = ginSdmaResolveLaunchCtas<AllGatherSdmaColl>(agChunkBytes, agSdmaThreshold);
+        TESTCHECK(ginSdmaLaunchDeviceKernel(SPECIALIZE_KERNEL(GinHybridAllGatherKernel, type, op), sendbuff, sendoffset, recvbuff, recvoffset, count, root, comm, stream, agSdmaThreshold, agGridCtas));
         return testSuccess;
       }
 #endif
@@ -289,8 +260,7 @@ testResult_t AllGatherDeviceTime(struct threadArgs* args, ncclDataType_t type, n
   if (kernel == nullptr) return testSuccess;
 
   const size_t sdmaThreshold = AllGatherResolveSdmaThreshold();
-  const int gridCtas = AllGatherResolveLaunchCtas(
-      chunkBytes, sdmaThreshold, gin_sdma_allgather::allGatherPoolCtas(deviceCtaCount));
+  const int gridCtas = ginSdmaResolveLaunchCtas<AllGatherSdmaColl>(chunkBytes, sdmaThreshold);
   double devUs = 0.0;
   TESTCHECK(gin_devtime::measure(args, gridCtas, loop,
       [&](int i, long long* d_start, long long* d_end) {
