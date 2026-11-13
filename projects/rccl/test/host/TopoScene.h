@@ -4,7 +4,7 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-// Topology fixtures for rccl-UnitTestsMicroTopo: NCCL_TOPO_FILE-style XML built in the test, parsed and
+// Topology fixtures for the src/graph microtests: NCCL_TOPO_FILE-style XML built in the test, parsed and
 // turned into a ncclTopoSystem by the real xml.cc/topo.cc, so paths and search run on real input.
 
 #ifndef RCCL_TEST_HOST_TOPO_SCENE_H_
@@ -27,7 +27,7 @@
 #include "graph/topo.h"
 #include "graph/xml.h"
 
-// Defined in topo-test.cc, which owns topo.cc's NCCL_NETDEVS_POLICY statics.
+// Defined in topo_include.cc, inside the TU owning topo.cc's NCCL_NETDEVS_POLICY statics.
 void TopoSetNetDevsPolicy(enum netDevsPolicy policy, int num);
 
 namespace topo_scene {
@@ -117,8 +117,9 @@ inline std::string Extra(const std::string& attrs) { return attrs.empty() ? "" :
 
 inline std::string System(const std::string& body) { return "<system version=\"2\">\n" + body + "</system>\n"; }
 
-constexpr const char* kAmdCpu = "arch=\"x86_64\" vendor=\"AuthenticAMD\" familyid=\"25\" modelid=\"1\"";
-constexpr const char* kRomeCpu = "arch=\"x86_64\" vendor=\"AuthenticAMD\" familyid=\"143\" modelid=\"49\"";
+// kAmdCpu is a Turin (family 1Ah) host, which is not Rome-class; kRomeCpu is a Rome (family 17h, model 0x31) host.
+constexpr const char* kAmdCpu = "arch=\"x86_64\" vendor=\"AuthenticAMD\" familyid=\"26\" modelid=\"2\"";
+constexpr const char* kRomeCpu = "arch=\"x86_64\" vendor=\"AuthenticAMD\" familyid=\"23\" modelid=\"49\"";
 constexpr const char* kIntelCpu = "arch=\"x86_64\" vendor=\"GenuineIntel\" familyid=\"6\" modelid=\"0x55\"";
 
 inline std::string Cpu(int numa, const std::string& body, const std::string& attrs = "", const char* ids = kAmdCpu) {

@@ -10,7 +10,12 @@ the simulated GPU. It operates in four modes:
 - **Daemon mode**: Spawns a daemon child process that hosts the simulation
   engine, then `LD_PRELOAD` + `execve`s the target. Client processes
   communicate with the daemon via RPC over a Unix domain socket. GPU memory
-  is shared using backing descriptors passed via SCM_RIGHTS.
+  is shared using backing descriptors passed via SCM_RIGHTS. After a
+  successful KFD open, losing this connection terminates the client process,
+  even if its GPU work has finished. An orderly daemon stop or restart also
+  terminates attached clients that are idle or doing only host work. The
+  interposer calls `_Exit(EXIT_FAILURE)`, which skips `atexit` handlers and
+  stdio flushing.
 - **Attach mode**: Launches an application against an already-running daemon.
 - **VFIO-user mode**: Serves each configured local GPU as a PCI function to an
   external VMM through its own AF_UNIX socket. This mode is available only in
@@ -19,17 +24,41 @@ the simulated GPU. It operates in four modes:
 Daemon mode supports vLLM's multiprocessing spawn, torchrun, torch.distributed,
 and NCCL --- workloads where multiple processes share a single simulated GPU.
 
-Daemon mode currently rejects dma-buf export with `EOPNOTSUPP`; its RPC protocol
-does not transfer exported descriptors. HIP VMM allocation (`hipMemCreate`)
-depends on that export even with `hipMemHandleTypeNone`, so ROCr may report it
-as out of memory. Use local mode for VMM allocation and its shareable-handle APIs.
-Ordinary daemon `hipMalloc`, copies, and kernel dispatch remain supported.
+Daemon mode transfers KFD dma-buf exports to clients. HIP VMM allocation,
+shareable-handle import and export, mapping, and access use remote DRM render
+files. GEM_VA sends the backing descriptor to the daemon, which maps it in the
+client's simulated GPU page table and retains it until unmap or client close.
 
 For HIP IPC between daemon clients (`hipIpcGetMemHandle` and
 `hipIpcOpenMemHandle`), set `HSA_ENABLE_IPC_MODE_LEGACY=1` before launching the
 clients to select the supported legacy KFD IPC path. The current runtime's
 default dma-buf IPC path fails at handle creation in both local and daemon
 mode; switching to local mode does not resolve that limitation.
+
+### Fatal instruction failures
+
+In native KFD/AQL execution, an instruction that the simulator cannot decode or
+execute terminates the simulation engine with a failure result. The affected
+queue cancels its outstanding dispatches without publishing successful kernel
+or barrier completion. When available, the queue owner also receives an
+illegal-instruction exception for a decode failure, or a queue-abort exception
+for a decoded instruction the simulator cannot execute. Runtime acceptance of
+that notification does not recover the simulator. A debugger-owned
+illegal-instruction stop is different: the debugger may repair the instruction
+and resume the wave without terminating the engine.
+
+The daemon hosts one shared simulation engine, not an isolated engine per
+client. A fatal instruction therefore shuts down the daemon and disconnects
+**every connected client**, including clients whose kernels are valid. Each
+interposer diagnoses the lost daemon connection and exits with failure; the
+faulting client's HIP queue-error callback may abort it first. Disconnect
+monitoring also interrupts clients waiting on shared-memory completion signals,
+which cannot complete successfully after engine shutdown.
+
+This policy prevents native clients from hanging or observing success after
+unsupported execution. Queue-error publication alone does not establish that
+the shared engine can safely continue. Recovering one client while preserving
+the others requires a separate queue/process recovery mechanism.
 
 ### The fork boundary
 
@@ -79,16 +108,16 @@ Usage: rocjitsu --config <config.json> [--daemon|--attach] -- <app> [args...]
 
 ```bash
 # Local mode: in-process simulation
-rocjitsu --config configs/gfx950_mi355x_kmd.json -- ./app
+rocjitsu --config configs/gfx950_mi350x_kmd.json -- ./app
 
 # Daemon mode: fork daemon + launch app
-rocjitsu --daemon --config configs/gfx950_mi355x_kmd.json -- ./app args...
+rocjitsu --daemon --config configs/gfx950_mi350x_kmd.json -- ./app args...
 
 # Daemon-only: run server (no app launched)
-rocjitsu --daemon --config configs/gfx950_mi355x_kmd.json
+rocjitsu --daemon --config configs/gfx950_mi350x_kmd.json
 
 # Attach to running daemon
-rocjitsu --attach --config configs/gfx950_mi355x_kmd.json -- ./app
+rocjitsu --attach --config configs/gfx950_mi350x_kmd.json -- ./app
 
 # Serve the gfx1250 PCI function to a VMM
 rocjitsu --config configs/gfx1250_mi455x.json \
@@ -174,6 +203,7 @@ All messages use a fixed 16-byte header followed by an opcode-specific payload:
 | `RPC_MMAP` | C->D->C | `RpcMmapRequest` / `RpcMmapResponse` | Optional |
 | `RPC_MUNMAP` | C->D->C | `RpcMunmapRequest` | No |
 | `RPC_IOCTL` | C->D->C | `RpcIoctlRequest` + raw args + inlined arrays | Optional |
+| `RPC_GEM_VA` | C->D->C | `RpcGemVaRequest` | On MAP |
 
 ### Embedded Pointer Serialization
 
@@ -198,6 +228,12 @@ Two RPC response forms carry backing descriptors with different lifetimes:
   backing. `RemoteDriver::mmap` closes the received alias on every exit, including
   size-check and mapping failures. If the reply has no descriptor, it borrows
   the stored allocation or import descriptor and leaves that descriptor open.
+- `RPC_GEM_VA` MAP requests: the client sends the PRIME-imported backing to the
+  daemon. The daemon retains its mapping until UNMAP or process close, after its
+  GPU page-table entries have been removed.
+- Successful KFD dma-buf export replies include the allocation's mapping flags
+  after the ioctl arguments, so a later PRIME import preserves the GPU cache
+  policy even if the KFD allocation is freed first.
 
 ### Thread Safety
 

@@ -15,6 +15,7 @@ rj_add_object_library(
     system_graph.cpp
     checkpoint.cpp
     effective_config.cpp
+    json_fields.cpp
 )
 
 # Config loader depends on FlatBuffers library (for runtime JSON parsing)

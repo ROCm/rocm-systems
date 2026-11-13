@@ -13,13 +13,40 @@ The information presented in this document is for informational purposes only an
 ## Note
 HRR Capture is now disabled by default on AMD platforms. The feature will be securely re-enabled in a future release
 
+## Tested environment
+
+HRR is tested on Linux only: an AMD Instinct MI350X (gfx950) under Ubuntu 22.04 LTS with
+Linux kernel 5.15, with HIP built from the `develop` branch of rocm-systems. Other GPUs,
+Linux distributions and kernels may work, or may not; they are not tested. Windows is not
+covered.
+
 ## Capture
 
 ```bash
 HIP_HRR_CAPTURE_OUTPUT=./my_capture.hrr ./my_hip_app
 ```
 
+Capture also needs your consent, given once per user: write the line `yes` to
+`${XDG_CONFIG_HOME:-$HOME/.config}/hrr/capture-consent`. Where no such file can be kept, as in CI or a container, set
+`HIP_HRR_CAPTURE_CONSENT=yes` instead. Without either, the process runs
+unrecorded and says why in one line on stderr. A set `HIP_HRR_CAPTURE_CONSENT` decides
+either way: any value other than `yes`, such as `no`, withholds consent even
+when the file says yes. The manifest metadata records which of the two gave consent as
+`capture_consent`.
+
+The variable applies to every process that inherits the environment, child processes
+and MPI ranks included. The file applies to that user on every host that shares the
+home directory. Whoever controls the user's environment or configuration directory can
+give consent. The file counts only as a regular file owned by the user, not reached
+through a symbolic link and with no other hard link.
+
+```bash
+d="${XDG_CONFIG_HOME:-$HOME/.config}/hrr" && mkdir -p "$d" && echo yes > "$d/capture-consent"
+```
+
 A process that initialises HIP with capture on says so once on stderr, whatever `AMD_LOG_LEVEL` is set to: the line begins with `[HRR capture] Recording` and names the process's own directory in the archive, such as `./my_capture.hrr/pid-4242`. Child processes record to their own `pid-*` directories in the same archive. A child started with `exec` prints a line of its own; a child created with `fork()` after HIP has started does not.
+
+The archive holds the process's code, models and data. Capture writes `NOTICE.txt` at its root, and the start line and `hrr-playback` point to it: read [Sharing an archive](PRIVACY.md#sharing-an-archive) before sharing one. What HRR takes care of, and what it leaves to the user, is under [Scope](PRIVACY.md#scope).
 
 Use the in-tree `libamdhip64` from the **same source commit** when testing capture changes:
 
@@ -52,6 +79,15 @@ cmake --build <hrr-build> --target hrr-playback -j"$(nproc)"
 Locate the binary: `find <hrr-build> -name hrr-playback -type f`
 (installed to `<prefix>/bin/hrr-playback`).
 
+### CMake options
+
+| Option | Default | Purpose |
+|--------|---------|---------|
+| `HRR_BUILD_PLAYBACK` | `ON` | Build the `hrr-playback` tool (requires HIP) |
+| `HRR_BUILD_TESTS` | `OFF` | Build the HRR unit tests |
+| `HRR_BUILD_INTEGRATION_TESTS` | `OFF` | Build the GPU capture/replay integration tests (requires `HRR_BUILD_PLAYBACK`) |
+| `HRR_ENABLE_WERROR` | `OFF` | Build the HRR targets with `-Wall -Werror` (Linux, GCC/Clang only). Off by default. |
+
 Details: [DESIGN.md § Build System](DESIGN.md#build-system).
 
 ## Inspecting and replaying captures
@@ -64,7 +100,7 @@ Point at a specific `pid-<pid>/` subdirectory when the capture root has multiple
 hrr-playback ./my_capture.hrr/pid-<pid>/ --info
 ```
 
-**Full replay** (Windows or Linux; requires AMD GPU and matching `hrr-playback` + HIP libraries):
+**Full replay** (Linux; requires AMD GPU and matching `hrr-playback` + HIP libraries):
 
 ```bash
 hrr-playback ./my_capture.hrr/pid-<pid>/
@@ -90,18 +126,21 @@ User-facing capture, replay, and validation knobs. Implementation details can be
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
+| `HIP_HRR_CAPTURE_CONSENT` | *(unset)* | `yes` consents to capture, without the per-user consent file, for every process that inherits it; any other value, such as `no`, withholds consent for them even when the file says yes. Blank counts as unset |
 | `HIP_HRR_CAPTURE_OUTPUT` | *(unset)* | Enable capture; path to the `.hrr` archive directory. An empty or blank value leaves capture off. Ignored, with one line on stderr, when Linux starts the program in secure-execution mode (set-user-ID, set-group-ID, file capabilities or an LSM transition) |
 | `HIP_HRR_DEBUG_ARGS` | off | Dump every captured kernel arg to the log (debug / provenance). Only a Debug build of the HIP runtime (no `NDEBUG`) reads it; a release build ignores it. Either way capture says on stderr whether it reads it, whatever the log level |
 | `HIP_HRR_HOST_SNAPSHOTS` | on | Record the pinned host memory each kernel reads before the launch, so replay can write it back. `HIP_HRR_HOST_SNAPSHOT_MAX_MB` (default `64`) caps the allocation size. The archive then holds that host memory (see DESIGN.md, Pinned Host Snapshots) |
+| `HIP_HRR_CAPTURE_MAX_MB` | 0 (no limit) | Largest size, in MiB, of each process's archive (`pid-<pid>/`), manifests aside. The write that would pass it is not made: capture stops with a `[HRR capture] Capture stopped` message on stderr, the archive is marked incomplete, and the application runs on. A process it forks afterwards still gets an archive of its own |
+| `HIP_HRR_CAPTURE_MAX_BLOB_MB` | 0 (no limit) | Largest copy, in MiB, stored as a blob. A larger one is recorded without its contents, the archive is marked incomplete with one message on stderr, and capture goes on. Replay refuses by name a host-to-device copy recorded so, whether `hipMemcpy`, `hipMemcpyAsync`, `hipMemcpyHtoD`, `hipMemcpyHtoDAsync`, `hipMemcpyWithStream`, a 2D or 3D copy or a to-symbol graph copy, a `hipHostRegister`, and a kernel launch outside a stream capture whose pinned host snapshot was left out. Code objects and the fat binaries HIP registers are always stored; a `hipLinkAddData` image is not, and replay refuses its link |
 
-On Linux the archive is readable only by the user who captured it (directories 0700, files 0600). What an archive contains, which of it each capture mode records, and why replaying an archive means running its GPU code: [PRIVACY.md](PRIVACY.md). If the archive cannot be set up, capture is disabled with a `[HRR capture] Capture disabled` message on stderr and the application runs normally.
+The archive is readable only by the user who captured it (capture creates the output directory 0700, every directory under it 0700 and every file 0600; an output directory that already exists keeps its own mode, and missing parent directories above it are created with the default mode). What an archive contains, and why replaying an archive means running its GPU code: [PRIVACY.md](PRIVACY.md). If the archive cannot be set up, capture is disabled with a `[HRR capture] Capture disabled` message on stderr and the application runs normally.
 
 ### `hrr-playback` CLI options
 
 | Option | Purpose |
 |--------|---------|
 | `--info` | Print archive summary and exit (no GPU) |
-| `--repair` | Rewrite an incomplete archive (torn tail, missing or miscounting trailer) with a clean trailer; on an archive root, repairs every process capture and rebuilds the root index. Repair writes through a checked directory descriptor to a new, unpredictably named file and renames it into place; it never follows a symbolic link, and refuses an archive whose `events.bin`, `manifest.json` or `pid-*` directory is one (a link in the path you name on the command line is resolved), and keeps the permissions of the files it replaces. The reader still follows links when it reads. On Windows a link or directory junction (any reparse point) is refused by checking the file attributes, but the write is not made through a checked directory handle, so a link swapped in between the check and the write is not caught |
+| `--repair` | Rewrite an incomplete archive (torn tail, missing or miscounting trailer) with a clean trailer; on an archive root, repairs every process capture and rebuilds the root index. Repair writes through a checked directory descriptor to a new, unpredictably named file and renames it into place; it never follows a symbolic link, and refuses an archive whose `events.bin`, `manifest.json` or `pid-*` directory is one (a link in the path you name on the command line is resolved), and keeps the permissions of the files it replaces. The reader still follows links when it reads. |
 | `--events` | With `--info`: print the full event log |
 | `--verbose` | Print each event as it is replayed |
 | `--skip-device-sync` | Skip `hipDeviceSynchronize` / `hipStreamSynchronize` events |
@@ -119,7 +158,7 @@ On Linux the archive is readable only by the user who captured it (directories 0
 | `--max-file-bytes N` | Refuse a blob or code object larger than `N` bytes (default `4294967296`, 4 GiB) |
 | `--max-threads N` | Refuse a `--multi-thread` replay of an archive that records more than `N` thread ids; checked before any thread is created (default `256`) |
 | `--max-events N` | Refuse an archive with more than `N` events; the reader stops loading at the first one past the cap. It counts events; each record's payload is separately limited in size (default `50000000`) |
-| `--max-host-bytes N` | Refuse an archive whose records, once loaded, would hold more than `N` bytes (each record's raw bytes, what is parsed out of a kernel launch, and each event; `--info` too), and end the replay when host memory held for the archive (blob and code-object caches, pinned and registered host buffers, graph operand buffers, D2H read-back buffers) would pass `N` bytes; a refusal ends the replay even under `--continue-on-error` (default `17179869184`, 16 GiB) |
+| `--max-host-bytes N` | Refuse an archive whose records, once loaded, would hold more than `N` bytes (each record's raw bytes, what is parsed out of a kernel launch, and each event; `--info` too), and end the replay when host memory held for the archive (blob and code-object caches, pinned and registered host buffers, `hipMallocManaged` allocations, `hipMemCreate` handles with a host location, graph operand buffers, D2H read-back buffers) would pass `N` bytes. A managed allocation and a host-located handle are charged for their full requested size (a managed one after `HIP_HRR_REPLAY_ALLOC_PAD_FACTOR` padding) when the call is made, whether or not the runtime commits the pages at once, and the charge is returned by `hipFree`, and for a handle once it is released and no `hipMemMap` still holds it; device-located `hipMalloc` and `hipMemCreate` memory is not counted; a refusal ends the replay even under `--continue-on-error` (default `17179869184`, 16 GiB) |
 | `--max-wall-seconds S` | End the run, with exit status 124, `S` seconds after it starts, so loading the archive counts, `--info` included; `--repair` is not limited (default `3600`; `0` = no limit; at most `31536000`, 365 days) |
 | `--trace-kernels` | One compact line before every kernel launch |
 | `--trace-sync` | Log sync begin/done around kernel syncs |
@@ -227,6 +266,7 @@ every check is skipped fails.
 ```
 capture.hrr/
   manifest.json
+  NOTICE.txt
   pid-<pid>/
     events.bin
     blobs/
@@ -253,6 +293,8 @@ capture.hrr/
   and `hipLinkAddData` inputs are stored as they were passed.
 - **manifest.json** — counts, versions and device properties; the GPU's PCI
   address, UUID and LUID are written blank
+- **NOTICE.txt** — what the archive can hold and how it may be shared; see
+  [Sharing an archive](PRIVACY.md#sharing-an-archive)
 - **Complete: NO** — original run crashed before clean shutdown; reader still recovers complete events
 
 Code objects read back from the runtime must start with `\x7fELF`,
@@ -265,8 +307,7 @@ Capture wire version must match the `hrr-playback` reader (see DESIGN.md wire-fo
 
 Optional Cursor/agent skill: [skills/decode-and-triage/SKILL.md](skills/decode-and-triage/SKILL.md).
 **Linux:** full workflow via `triage_archive.sh` (native replay, optional Docker replay, auto-build).
-**Windows:** full native replay via `triage_archive.ps1` + `ensure_playback.ps1`; Docker replay
-requires Linux or WSL2. Docker replay uses the image HRR stack by default; set
+Docker replay uses the image HRR stack by default; set
 `HRR_DOCKER_MOUNT_CLR=1` to overlay a host dev build (`CLR_BUILD` / `HRR_PLAYBACK`).
 
 For the other end, producing an archive in the first place:

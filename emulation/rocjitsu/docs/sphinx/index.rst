@@ -49,6 +49,7 @@ The rocJITsu public repository is located at
       * :doc:`Status codes and compiler macros reference <reference/api-status>`
       * :doc:`rj_dbt_translate command reference <reference/rj-dbt-translate>`
       * :doc:`rocjitsu CLI reference <reference/rocjitsu-cli>`
+      * :doc:`Python execution API <reference/python-api>`
       * :doc:`Environment variable reference <reference/environment-variables>`
       * :doc:`Supported GPU architectures <reference/supported-architectures>`
 

@@ -29,7 +29,7 @@ use std::path::{Path, PathBuf};
 /// config's file stem, which is unique and needs no table.
 const ESTABLISHED_NAMES: [(&str, &str); 3] = [
     ("gfx942_cdna3", "mi300x"),
-    ("gfx950_mi355x", "mi350x"),
+    ("gfx950_mi350x", "mi350x"),
     ("gfx1250_mi455x", "mi450x"),
 ];
 
@@ -175,8 +175,8 @@ fn device_key(stem: &str, config: &serde_json::Value) -> String {
 ///
 /// Lexical, from the naming convention `rocjitsu/docs/npi.md` lays down
 /// (`configs/<gpu>.json` plus `_kmd` and any multi-GPU variant), and
-/// deliberately so: it is the convention that makes `gfx950_mi355x` the
-/// config for the MI350X and `gfx950_mi355x_kmd_2gpu` a variant of it,
+/// deliberately so: it is the convention that makes `gfx950_mi350x` the
+/// config for the MI350X and `gfx950_mi350x_kmd_2gpu` a variant of it,
 /// and nothing inside the documents says which is which. A config
 /// following no convention scores 0 and simply competes on its stem.
 fn variant_rank(stem: &str) -> u32 {

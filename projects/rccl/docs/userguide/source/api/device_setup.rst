@@ -34,10 +34,15 @@ ncclDevComm
 
       Rank within the local :ref:`LSA <device_api_lsa>` team and its size (see :ref:`devapi_teams`).
 
-   .. c:member:: uint8_t ginContextCount
+   .. c:member:: uint32_t ginContextCount
 
-      The number of supported GIN contexts (see :cpp:class:`ncclGin`; available
-      since NCCL 2.28.7).
+      The number of GIN contexts actually allocated for this device communicator
+      (see :cpp:class:`ncclGin`; available since NCCL 2.28.7). This can be larger
+      than the ``ginContextCount`` request. RCCL rounds the
+      request up to a multiple of ``ginConnectionCount`` so every GIN
+      connection receives the same number of contexts, and this field reports
+      that rounded-up allocation (NCCL 2.31.2, NVIDIA/nccl#2301). Device code
+      must use this value, not the requested count, when indexing contexts.
 
 ncclDevCommCreate
 -----------------
@@ -91,6 +96,14 @@ ncclDevCommRequirements
 
       Specifies the number of network/rail hybrid barriers to allocate (see :cpp:class:`ncclBarrierSession`; available since NCCL 2.28.7).
 
+   .. c:member:: int ginContextCount
+
+      Requests a number of GIN contexts (default 4). This is a minimum request. The count
+      stored on the device communicator after creation is the request rounded
+      up to a multiple of the GIN connection count, so it may be larger than
+      the value set here. Available since NCCL 2.28.7; the rounded-up value
+      has been reported since NCCL 2.31.2.
+
    .. c:member:: int ginSignalCount
 
       Specifies the number of network signals to allocate (see :cpp:type:`ncclGinSignal_t`; available since NCCL 2.28.7).
@@ -117,6 +130,10 @@ ncclDevCommRequirements
    .. c:member:: int ginCustomStride
 
       Specifies the rank stride when :c:member:`ginConnectionType` is :c:enumerator:`NCCL_GIN_CONNECTION_CUSTOM_STRIDE <ncclGinConnectionType_t.NCCL_GIN_CONNECTION_CUSTOM_STRIDE>`.
+      Each rank is connected to ranks separated by this many communicator ranks.
+      The value must be positive, a multiple of :c:member:`ginMinStride`, and no greater than the rail-team stride.
+      A stride of ``0`` is rejected with :c:macro:`ncclInvalidUsage`. A stride larger than the rail team, or one that
+      is not a multiple of :c:member:`ginMinStride`, is rejected with :c:macro:`ncclInternalError`.
       Available since NCCL 2.31.
 
    .. c:member:: ncclDevResourceRequirements_t* resourceRequirementsList

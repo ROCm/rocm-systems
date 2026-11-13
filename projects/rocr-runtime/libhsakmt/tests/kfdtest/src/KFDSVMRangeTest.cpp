@@ -1343,7 +1343,7 @@ void KFDSVMRangeTest::MultiThreadMigrationTest(int gpuNode) {
     params.BufferSize = BufferSize;
     params.defaultGPUNode = gpuNode;
 
-    EXPECT_SUCCESS_GPU(sdmaQueue.Create(gpuNode), gpuNode);
+    ASSERT_SUCCESS_GPU(sdmaQueue.Create(gpuNode), gpuNode);
 
     for (HSAuint64 i = 0; i < BufferSize / 8; i++)
         pBuf[i] = i;
@@ -1415,7 +1415,7 @@ void KFDSVMRangeTest::MigrateFileBackedRangeTest(int gpuNode) {
     HsaSVMRange filebackedRange(MmapedFile, size, gpuNode, gpuNode);
 
     SDMAQueue sdmaQueue;
-    EXPECT_SUCCESS(sdmaQueue.Create(gpuNode));
+    ASSERT_SUCCESS(sdmaQueue.Create(gpuNode));
 
     sdmaQueue.PlaceAndSubmitPacket(SDMAFillDataPacket(sdmaQueue.GetFamilyId(),
                     MmapedFile, 0x33333333, size));
@@ -1848,7 +1848,7 @@ void KFDSVMRangeTest::PrefaultPartialRangeTest(int gpuNode) {
     EXPECT_SUCCESS_GPU(SVMRangePrefetchToNode(pBuf, BufSize, gpuNode), gpuNode);
 
     SDMAQueue sdmaQueue;
-    EXPECT_SUCCESS_GPU(sdmaQueue.Create(gpuNode), gpuNode);
+    ASSERT_SUCCESS_GPU(sdmaQueue.Create(gpuNode), gpuNode);
 
     sdmaQueue.PlaceAndSubmitPacket(SDMAFillDataPacket(sdmaQueue.GetFamilyId(),
                        pBuf, 0x01010101, PAGE_SIZE));

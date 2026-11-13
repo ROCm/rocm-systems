@@ -7,6 +7,7 @@
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/isa/target_registry.h"
 
 #include "../../dbi_test_util.h"
 
@@ -23,6 +24,47 @@ namespace rocjitsu::consan {
 namespace {
 
 constexpr const TargetProfile &kTarget = kNativeLdsTargets[2];
+
+TEST(ConSanInput, Gfx1100UsesConcreteModelOnlyDecoder) {
+  const IsaTargetRegistry &registry = default_isa_target_registry();
+  ASSERT_TRUE(registry.ok()) << registry.error();
+  const IsaTargetDescriptor *provider = registry.find(ROCJITSU_CODE_TARGET_GFX1100);
+  ASSERT_NE(provider, nullptr);
+  EXPECT_EQ(provider, registry.find("gfx1100"));
+  EXPECT_EQ(provider->architecture_id, ROCJITSU_CODE_ARCH_RDNA3);
+  EXPECT_FALSE(provider->supports_execution);
+
+  const IsaGpuTargetDescription *binding = registry.find_gpu_target(ROCJITSU_CODE_TARGET_GFX1100);
+  ASSERT_NE(binding, nullptr);
+  EXPECT_EQ(binding, registry.find_gpu_target_by_code_object_id("gfx1100"));
+  EXPECT_EQ(binding, registry.find_gpu_target_by_elf_machine(EF_AMDGPU_MACH_AMDGCN_GFX1100));
+  EXPECT_EQ(binding->gfx_target_version, 110000u);
+  EXPECT_FALSE(binding->capabilities.execution_implemented);
+
+  std::unique_ptr<Decoder> decoder = Decoder::create(registry, ROCJITSU_CODE_TARGET_GFX1100);
+  ASSERT_NE(decoder, nullptr);
+  constexpr std::array<uint32_t, 1> kNop = {0xbf800000u};
+  const DecodeResult decoded = decoder->decode_window(kNop);
+  ASSERT_TRUE(decoded.succeeded());
+  EXPECT_EQ(decoded.value()->mnemonic(), "s_nop");
+  EXPECT_EQ(decoded.value()->execute, nullptr);
+}
+
+TEST(ConSanInput, Gfx1100RequiresConcreteIdentityBeforeImageValidation) {
+  const TargetProfile *profile = target_profile("gfx1100");
+  ASSERT_NE(profile, nullptr);
+  EXPECT_EQ(profile->public_id, ROCJITSU_CODE_TARGET_GFX1100);
+
+  // An empty image distinguishes target admission from later ELF validation.
+  InputError error;
+  EXPECT_TRUE(build_input_program({}, *profile, "kernel", error).failed());
+  EXPECT_EQ(error.code, InputErrorCode::InvalidImage);
+
+  TargetProfile selected = *profile;
+  selected.public_id = ROCJITSU_CODE_TARGET_INVALID;
+  EXPECT_TRUE(build_input_program({}, selected, "kernel", error).failed());
+  EXPECT_EQ(error.code, InputErrorCode::UnsupportedTarget);
+}
 
 TEST(ConSanInput, TruncatedImageAndWrongSelectedTargetHaveDistinctErrors) {
   InputError error;
@@ -290,7 +332,9 @@ TEST_F(ConSanInputFixture, PrivateFrameAndMissingKernargCannotUseBootstrap) {
 TEST_F(ConSanInputFixture, BackedgeFailsClosed) {
   // Replace the original entry with an unconditional self-loop. No GPU executes
   // this input; it tests the production preparation admission gate.
-  put_word(text_offset_, build_s_branch(-1, ROCJITSU_CODE_ARCH_RDNA3));
+  constexpr util::FailureOr<uint32_t> branch = build_s_branch(-1, ROCJITSU_CODE_ARCH_RDNA3);
+  static_assert(branch.succeeded());
+  put_word(text_offset_, branch.value());
   EXPECT_TRUE(inspect(image_).failed());
   EXPECT_EQ(error_.code, InputErrorCode::UnsupportedFlow);
 }

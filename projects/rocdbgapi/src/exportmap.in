@@ -118,3 +118,7 @@ global: amd_dbgapi_property_list;
         amd_dbgapi_property_get_info;
         amd_dbgapi_process_set_property;
 } @AMD_DBGAPI_NAME@_0.82;
+
+@AMD_DBGAPI_NAME@_0.84 {
+global: amd_dbgapi_architecture_is_compatible;
+} @AMD_DBGAPI_NAME@_0.83;

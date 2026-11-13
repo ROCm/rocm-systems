@@ -23,9 +23,11 @@
 #include "fakes/dev_runtime_fakes.h"
 #include "fakes/enqueue_fakes.h"
 #include "fakes/nccl_stubs.h"
+#include "fakes/rccl_wrap_fakes.h"
 #include "fakes/sym_kernels_fakes.h"
 #include "fakes/sym_kernels_index_fakes.h"
 #include "fakes/tuning_fakes.h"
+#include "warp_speed_plan.h"
 
 // ENABLE_WARP_SPEED is this binary's own compile definition (CMakeLists.txt), not shared with any other TU.
 
@@ -34,7 +36,15 @@ const char* ncclAlgNameForSymk(int) { return "sym-kernel"; }
 
 // Hipify renames the allgatherv one to *_tmp.cc: src/enqueue/task_sched/allgatherv_sched.cc has the basename.
 #include ALLGATHERV_SCHED_CC_PATH
+
+// Seams for symmetric_sched.cc's argsBuf calloc/free, so tests can fail the allocation and see the error paths
+// release it. SchedulerMicrotest installs the recorders below into g_microCalloc/g_microFree.
+static bool g_symSchedCallocFail = false;
+static void* g_symSchedLastCalloc = nullptr;
+static std::vector<void*> g_symSchedFreed;
+#include "fakes/alloc_seam.h"
 #include SYMMETRIC_SCHED_CC_PATH
+#include "fakes/alloc_seam_undef.h"
 
 namespace {
 constexpr int kBaselineChannels = 4;
@@ -214,6 +224,15 @@ class SchedulerMicrotest : public ::testing::Test {
   // Suite-wide generous default: the canonical sym_kernels_fakes.cc default is false, silently halting classification.
   void SetUp() override {
     g_symkAvailable = [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t) { return true; };
+    g_microCalloc = [](size_t n, size_t size) -> void* {
+      if (g_symSchedCallocFail) return nullptr;
+      g_symSchedLastCalloc = ::calloc(n, size);
+      return g_symSchedLastCalloc;
+    };
+    g_microFree = [](void* p) {
+      if (p != nullptr) g_symSchedFreed.push_back(p);
+      ::free(p);
+    };
   }
   void TearDown() override {
     ResetEnqueueFakes();          // this file's own enqueue_fakes.{h,cc} seams
@@ -222,7 +241,12 @@ class SchedulerMicrotest : public ::testing::Test {
     ResetSymKernelsIndexFakes(); // g_symkGetKernelIndex's kernel-table arrays: plain globals, same reason
     ResetBootstrapStubs();       // covers g_bootstrapAllGather
     ResetDevRuntimeFakes();      // covers g_devrFindWindow/g_devrInitOnce/g_devrWindowHasSysmemSegment
+    ResetRcclWrapFakes();        // covers the plan-wide WarpSpeed eligibility predicate
     ResetTuningFakes();          // g_tuningCompute's canonical reset (its default is ncclSystemError, not success)
+    g_symSchedCallocFail = false;  // TU-local argsBuf seams
+    g_symSchedLastCalloc = nullptr;
+    g_symSchedFreed.clear();
+    ResetAllocSeam();
   }
 
   // symBatchAligned16B reads only comm->rank.
@@ -235,6 +259,40 @@ class SchedulerMicrotest : public ::testing::Test {
  private:
   std::unique_ptr<ncclComm> alignComm_;
 };
+
+TEST_F(SchedulerMicrotest, WarpSpeedPlanCap_UsesLeadingEligiblePrefix) {
+  auto comm = std::make_unique<ncclComm>();
+  auto plan = std::make_unique<ncclKernelPlan>();
+  ncclTaskColl head{};
+  comm->nNodes = 2;
+
+  EXPECT_FALSE(rcclShouldCapGroupedPlan(comm.get(), plan.get(), &head, /*nPlanColls=*/3));
+  EXPECT_EQ(0, g_rcclWarpSpeedSupportedCalls);
+
+  g_rcclWarpSpeedSupported = true;
+  EXPECT_TRUE(rcclShouldCapGroupedPlan(comm.get(), plan.get(), &head, /*nPlanColls=*/5));
+  EXPECT_EQ(1, g_rcclWarpSpeedSupportedCalls);
+  EXPECT_EQ(&head, g_rcclWarpSpeedSupportedLastCollHead);
+  EXPECT_EQ(RCCL_WARP_SPEED_MAX_PLAN_COLLS, g_rcclWarpSpeedSupportedLastNCollTasks);
+
+  g_rcclWarpSpeedSupported = false;
+  EXPECT_FALSE(rcclShouldCapGroupedPlan(comm.get(), plan.get(), &head, /*nPlanColls=*/5));
+}
+
+TEST_F(SchedulerMicrotest, WarpSpeedPlanCap_Ordinary58LayerGraphDoesNotSplitAtThree) {
+  auto comm = std::make_unique<ncclComm>();
+  auto plan = std::make_unique<ncclKernelPlan>();
+  ncclTaskColl head{};
+  comm->nNodes = 2;
+  g_rcclWarpSpeedSupported = false;
+
+  for (int nPlanColls = 0; nPlanColls <= 58; ++nPlanColls) {
+    EXPECT_FALSE(rcclShouldCapGroupedPlan(comm.get(), plan.get(), &head, nPlanColls))
+        << "nPlanColls=" << nPlanColls;
+  }
+  EXPECT_EQ(55, g_rcclWarpSpeedSupportedCalls);
+  EXPECT_EQ(RCCL_WARP_SPEED_MAX_PLAN_COLLS, g_rcclWarpSpeedSupportedLastNCollTasks);
+}
 
 TEST_F(SchedulerMicrotest, AgvChannelCount_MultiplierAtMost1_ReturnsTunedChannelsUnchanged) {
   std::unique_ptr<ncclComm> comm(new ncclComm{});
@@ -1124,6 +1182,30 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_SymkAvailable_ReceivesTaskField
   EXPECT_EQ(remainTasksHead, &task);
 }
 
+// Regression: ncclAllReduceWithBias must never reach the symmetric kernels, which have no
+// bias operand -- extracting such a task silently drops the bias from the result.
+// ncclAllReduceWithBias_impl bypasses rcclSelectAllReduce, so symkExtract stays at
+// RCCL_SYMK_EXTRACT_NONE and cannot gate this. Mirrors the guard in rcclUseCeAr2Shot().
+TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_AllReduceWithBias_StaysOnRemainderList) {
+  MakeSymmetricTaskList_Scene scene;
+  ncclTaskColl task = MakeSymmetricTaskList_MakeTask(scene, ncclFuncAllReduce, ncclFloat32);
+  task.count = 1024;
+  task.opHost = ncclSum;
+  task.opDev.op = ncclDevSum;
+  int biasBuffer = 0;
+  task.acc = &biasBuffer;
+
+  // Symmetric kernels report themselves available for these operands; the bias guard must
+  // still win. symTaskQueue is nullptr, so an incorrect extraction would not return success.
+  ScopedHook symkHook(g_symkAvailable,
+                      [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t) { return true; });
+  struct ncclTaskColl* remainTasksHead = nullptr;
+
+  EXPECT_EQ(ncclMakeSymmetricTaskList(scene.comm.get(), &task, nullptr, &remainTasksHead), ncclSuccess);
+  EXPECT_EQ(remainTasksHead, &task);
+  EXPECT_EQ(task.next, nullptr);
+}
+
 TEST_F(SchedulerMicrotest,
       MakeSymmetricTaskList_SymmetricTaskBetweenTwoRemainderTasks_AppendCorrectsStalePointer) {
   MakeSymmetricTaskList_Scene scene;
@@ -1201,6 +1283,95 @@ TEST_F(SchedulerMicrotest,
   EXPECT_EQ(remainTasksHead, nullptr);
   EXPECT_EQ(task.next, nullptr);
   EXPECT_EQ(scene.comm->planner.nTasksColl, 4);
+}
+
+// Across trays only an AllGather the selector admitted (ALLOW / ALLOW_TDM_ONLY) is extracted; other
+// collectives are unaffected.
+TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_CrossTrayAllGatherNeedsSelectorAllow) {
+  struct Case {
+    ncclFunc_t func;
+    rcclSymkExtract extract;
+  };
+  for (Case c : {Case{ncclFuncAllGather, RCCL_SYMK_EXTRACT_NONE}, Case{ncclFuncAllGather, RCCL_SYMK_EXTRACT_ALLOW},
+                 Case{ncclFuncAllGather, RCCL_SYMK_EXTRACT_ALLOW_TDM_ONLY},
+                 Case{ncclFuncReduceScatter, RCCL_SYMK_EXTRACT_NONE}}) {
+    MakeSymmetricTaskList_Scene scene;
+    scene.comm->planner.nTasksColl = 5;
+    scene.comm->spansTrays = true;
+    ncclTaskColl task{};
+    task.func = c.func;
+    task.symkExtract = c.extract;
+    g_symRegType = ncclSymSendRegRecvReg;
+    struct ncclTaskColl* remainTasksHead = nullptr;
+    SCOPED_TRACE(std::string(ncclFuncToString(c.func)) + " extract " + std::to_string((int)c.extract));
+    if (c.func == ncclFuncAllGather && c.extract == RCCL_SYMK_EXTRACT_NONE) {
+      EXPECT_EQ(ncclMakeSymmetricTaskList(scene.comm.get(), &task, nullptr, &remainTasksHead), ncclSuccess);
+      EXPECT_EQ(remainTasksHead, &task);
+      EXPECT_EQ(scene.comm->planner.nTasksColl, 5);
+    } else {
+      // Extracted, then stopped by the zero workArgsBytes guard like the cases below.
+      EXPECT_EQ(ncclMakeSymmetricTaskList(scene.comm.get(), &task, nullptr, &remainTasksHead), ncclInternalError);
+      EXPECT_EQ(remainTasksHead, nullptr);
+      EXPECT_EQ(scene.comm->planner.nTasksColl, 4);
+    }
+  }
+}
+
+namespace {
+constexpr uint64_t kTdmOnlyMask = 1ULL << (NCCL_TUNING_SYM_KERNEL_ID_OFFSET + ncclSymkKernelId_AllGather_TmaST);
+
+// Schedules a TDM-window AllGather (ALLOW_TDM_ONLY) and a plain one (ALLOW), windowFirst deciding which leads
+// the input. Returns the tuning mask each batch offered, in batch order, tagged 'w' or 'p' by its head task.
+std::vector<std::pair<char, uint64_t>> ScheduleWindowAndPlain(bool windowFirst, uint64_t windowAlgMask = 0) {
+  MakeSymmetricTaskList_Scene scene;
+  scene.comm->planner.nTasksColl = 5;
+  g_symRegType = ncclSymSendRegRecvReg;
+  scene.comm->workArgsBytes = static_cast<uint32_t>(ncclSymkDevWorkArgs::calcArgsSize(MAXCHANNELS, 5, false));
+  ScopedHook tmaMask(g_symkTmaKernelMask, [] { return 1 << (int)ncclSymkKernelId_AllGather_TmaST; });
+  std::vector<std::pair<char, uint64_t>> batches;
+  ScopedHook tuningHook(g_tuningCompute, [&](struct ncclTuningInput_t* in, struct ncclTuningResult_t*) {
+    batches.emplace_back(in->count == 64 ? 'w' : 'p', in->tuningMask);
+    return ncclSuccess;
+  });
+  ncclTaskColl window{};
+  window.func = ncclFuncAllGather;
+  window.datatype = ncclInt8;
+  window.count = 64;
+  window.algMask = windowAlgMask;
+  window.symkExtract = RCCL_SYMK_EXTRACT_ALLOW_TDM_ONLY;
+  ncclTaskColl plain{};
+  plain.func = ncclFuncAllGather;
+  plain.datatype = ncclInt8;
+  plain.count = 32;
+  plain.symkExtract = RCCL_SYMK_EXTRACT_ALLOW;
+  ncclTaskColl* head = windowFirst ? &window : &plain;
+  head->next = windowFirst ? &plain : &window;
+  struct ncclTaskColl* remainTasksHead = nullptr;
+  EXPECT_EQ(ncclMakeSymmetricTaskList(scene.comm.get(), head, nullptr, &remainTasksHead), ncclSuccess);
+  EXPECT_EQ(window.isSymLast, 1);
+  EXPECT_EQ(plain.isSymLast, 1);
+  return batches;
+}
+}  // namespace
+
+// A task the AllGather TDM window admitted offers the cost model only the TDM kernels, and batches alone,
+// whether it heads the bucket or follows another task. Classification reverses the input order.
+TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_TdmWindowTaskOffersOnlyTdmKernelsInItsOwnBatch) {
+  using Batches = std::vector<std::pair<char, uint64_t>>;
+  EXPECT_EQ(ScheduleWindowAndPlain(/*windowFirst=*/false),
+            (Batches{{'w', kTdmOnlyMask}, {'p', NCCL_TUNING_MASK_SYM_KERNELS}}));
+  EXPECT_EQ(ScheduleWindowAndPlain(/*windowFirst=*/true),
+            (Batches{{'p', NCCL_TUNING_MASK_SYM_KERNELS}, {'w', kTdmOnlyMask}}));
+}
+
+// An algSelection that leaves out the TDM kernels keeps its own symmetric kernels.
+TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_TdmWindowTaskKeepsAnAlgSelectionWithoutTdm) {
+  using Batches = std::vector<std::pair<char, uint64_t>>;
+  const uint64_t st = 1ULL << (NCCL_TUNING_SYM_KERNEL_ID_OFFSET + ncclSymkKernelId_AllGather_ST);
+  EXPECT_EQ(ScheduleWindowAndPlain(/*windowFirst=*/false, st),
+            (Batches{{'w', st}, {'p', NCCL_TUNING_MASK_SYM_KERNELS}}));
+  EXPECT_EQ(ScheduleWindowAndPlain(/*windowFirst=*/false, st | kTdmOnlyMask),
+            (Batches{{'w', kTdmOnlyMask}, {'p', NCCL_TUNING_MASK_SYM_KERNELS}}));
 }
 
 TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_UnregisteredRegType_StillEntersSymmetricBucket) {
@@ -2832,6 +3003,26 @@ TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_MakeDevWork_Fails_PropagatesEr
                              });
   EXPECT_EQ(ncclSymmetricTaskScheduler(scene.comm.get(), &scene.symTaskQueue, scene.plan.get()), ncclInternalError);
   EXPECT_EQ(makeDevWorkCalls, 1);  // task2 is never reached once task1's ncclSymkMakeDevWork call fails
+  EXPECT_EQ(scene.plan->kernelSymArgs, nullptr);
+  ASSERT_NE(g_symSchedLastCalloc, nullptr);
+  EXPECT_EQ(g_symSchedFreed, std::vector<void*>({g_symSchedLastCalloc}));  // fail: releases the unpublished argsBuf
+}
+
+TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_ArgsAllocFails_ReturnsSystemErrorWithoutBuildingWork) {
+  SymmetricTaskScheduler_Scene scene;
+  ncclTaskColl task = SymmetricTaskScheduler_MakeTask();
+  ncclIntruQueueEnqueue(&scene.symTaskQueue, &task);
+  int makeDevWorkCalls = 0;
+  ScopedHook makeDevWorkHook(g_symkMakeDevWork,
+                             [&](struct ncclComm*, struct ncclTaskColl*, struct ncclSymkDevWork*) {
+                               ++makeDevWorkCalls;
+                               return ncclSuccess;
+                             });
+  g_symSchedCallocFail = true;
+  EXPECT_EQ(ncclSymmetricTaskScheduler(scene.comm.get(), &scene.symTaskQueue, scene.plan.get()), ncclSystemError);
+  EXPECT_EQ(makeDevWorkCalls, 0);
+  EXPECT_EQ(scene.plan->kernelSymArgs, nullptr);
+  EXPECT_EQ(ncclIntruQueueHead(&scene.symTaskQueue), &task);  // nothing was dequeued
 }
 
 // The first for-loop pass on a fresh channel always sets sChannelId/nChannels directly (not via fracHi).
@@ -2958,15 +3149,18 @@ TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_IsSymLastBreak_StopsPackingLoo
   EXPECT_EQ(makeDevWorkCalls, 1);
 }
 
-TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_ChannelExhaustion_NotIsSymLast_SkipsTailCode) {
+// Every batch's final task carries isSymLast, so exhausting the channels before it is an internal error, not a
+// silent success with no kernel args.
+TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_ChannelExhaustion_NotIsSymLast_ReturnsInternalErrorAndFreesArgs) {
   SymmetricTaskScheduler_Scene scene;
   ncclTaskColl task = SymmetricTaskScheduler_MakeTask();
   task.nMaxChannels = 1;
   task.isSymLast = 0;  // not last: the exhaustion check below actually gets reached
   ncclIntruQueueEnqueue(&scene.symTaskQueue, &task);
-  // ncclSuccess here is a production bug: the goto fail at symmetric_sched.cc:442 never sets ret first.
-  EXPECT_EQ(ncclSymmetricTaskScheduler(scene.comm.get(), &scene.symTaskQueue, scene.plan.get()), ncclSuccess);
+  EXPECT_EQ(ncclSymmetricTaskScheduler(scene.comm.get(), &scene.symTaskQueue, scene.plan.get()), ncclInternalError);
   EXPECT_EQ(scene.plan->kernelSymArgs, nullptr);
+  ASSERT_NE(g_symSchedLastCalloc, nullptr);
+  EXPECT_EQ(g_symSchedFreed, std::vector<void*>({g_symSchedLastCalloc}));
 }
 
 // Cross-task continuation (symmetric_sched.cc:400-410): task1 ends via "<", leaving task2 to start mid-channel.

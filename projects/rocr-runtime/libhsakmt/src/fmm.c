@@ -56,6 +56,10 @@
 #define MPOL_F_STATIC_NODES     (1 << 15)
 #endif
 
+#ifndef MPOL_F_RELATIVE_NODES
+#define MPOL_F_RELATIVE_NODES   (1 << 14)
+#endif
+
 #define NON_VALID_GPU_ID 0
 
 static bool hsakmt_drm_supports_vm_timeline(uint32_t major, uint32_t minor)
@@ -852,13 +856,13 @@ static void reserved_aperture_release(manageable_aperture_t *app,
 		mbind(address, MemorySizeInBytes, MPOL_DEFAULT, NULL, 0, 0);
 
 		/*
-		 * Drop the CPU mapping to release shmem pages for MAP_SHARED
-		 * allocations, then re-reserve the VA range as PROT_NONE.
-		 * Callers hold fmm_mutex (see contract above), which serializes
-		 * this against aperture allocations, so no allocation can claim
-		 * the VA in the window between munmap() and mmap().
+		 * Atomically replace the CPU mapping with a PROT_NONE
+		 * reservation. MAP_FIXED over the existing range drops the
+		 * shmem pages (for MAP_SHARED allocations) and re-reserves the
+		 * VA in a single syscall, leaving no unmapped window that a
+		 * concurrent glibc mmap on another thread could claim
+		 * (fmm_mutex does not serialize glibc's own mmaps).
 		 */
-		munmap(address, MemorySizeInBytes);
 		mmap_ret = mmap(address, MemorySizeInBytes, PROT_NONE,
 			MAP_ANONYMOUS | MAP_NORESERVE | MAP_PRIVATE | MAP_FIXED,
 			-1, 0);
@@ -2892,6 +2896,24 @@ static void *fmm_allocate_host_cpu(HsaKFDContext *ctx, void *address, uint64_t M
 	return mem;
 }
 
+/* Returns true if the calling thread has an explicit NUMA memory policy
+ * (e.g. via numactl -m / set_mempolicy). Linux mempolicy is per-thread;
+ * numactl sets it before exec so every thread inherits it, which covers the
+ * common case. When set, ROCr should not override it with a per-agent mbind;
+ * the policy governs host placement.
+ */
+static bool thread_has_explicit_mempolicy(void)
+{
+	int mode = MPOL_DEFAULT;
+
+	/* flags=0, addr=NULL => returns the calling thread's default policy. */
+	if (get_mempolicy(&mode, NULL, 0, NULL, 0) != 0)
+		return false;
+
+	mode &= ~(MPOL_F_STATIC_NODES | MPOL_F_RELATIVE_NODES);
+	return mode != MPOL_DEFAULT;
+}
+
 static int bind_mem_to_numa(uint32_t numa_node_id, void *mem,
 			    uint64_t SizeInBytes, HsaMemFlags mflags)
 {
@@ -2910,6 +2932,16 @@ static int bind_mem_to_numa(uint32_t numa_node_id, void *mem,
 		else
 			return 0;
 	}
+
+	/* Honor an explicit memory policy (e.g. numactl -m) for substitutable
+	 * host allocations: leave placement to that policy instead of forcing the
+	 * per-agent node. Strict (NoSubstitute) allocations - e.g. the udmabuf APU
+	 * path - keep their hard per-agent bind and error handling below.
+	 * HSA_FORCE_MBIND=1 restores the legacy per-agent binding.
+	 */
+	if (!hsakmt_force_mbind && !mflags.ui32.NoSubstitute &&
+	    thread_has_explicit_mempolicy())
+		return 0;
 
 	num_node = numa_max_node() + 1;
 
@@ -3210,8 +3242,6 @@ static int __fmm_release_locked(HsaKFDContext *ctx,
 			pthread_mutex_unlock(&fmm_ctx->svm_api_mutex);
 			free(rr);
 		}
-
-		munmap(object->start, object->size);
 	}
 
 	aperture_release_area(aperture, object->start, object->size);

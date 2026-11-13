@@ -198,6 +198,8 @@ static inline mlx5dv_devx_umem* mlx5_umem_reg(const mlx5dv_funcs_t& mlx5dv,
   // to use dmabuf_fd, set comp_mask = MLX5DV_UMEM_MASK_DMABUF
   if (ibv.is_dmabuf_supported() && is_device_ptr(addr)) {
     CHECK_HSA(hsa_amd_portable_export_dmabuf(addr, size, &dmabuf_fd, &dmabuf_offset));
+    // man 3 mlx5dv_devx_umem_reg_ex: 'addr is interpreted as the starting offset of the dmabuf'
+    umem_in.addr = reinterpret_cast<void*>(dmabuf_offset);
     umem_in.comp_mask = MLX5DV_UMEM_MASK_DMABUF;
     umem_in.dmabuf_fd = dmabuf_fd;
   }

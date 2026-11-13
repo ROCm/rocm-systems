@@ -134,10 +134,13 @@ runs:
       run: |
         export HIP_DIR=$PWD/hip
         export CLR_DIR=$PWD/clr
+        # Required by CLR's profiling API generator.
+        python3 -m pip install cxxheaderparser
         echo "Install HIP..."
         cd $CLR_DIR
         cmake \
           -DHIP_COMMON_DIR=$HIP_DIR \
+          -DPython3_EXECUTABLE="$(command -v python3)" \
           -DCMAKE_BUILD_TYPE=RelWithDebInfo \
           -DCMAKE_C_COMPILER=${{ inputs.rocm-path }}/llvm/bin/clang \
           -DCMAKE_CXX_COMPILER=${{ inputs.rocm-path }}/llvm/bin/clang++ \
