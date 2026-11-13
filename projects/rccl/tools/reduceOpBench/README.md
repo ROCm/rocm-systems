@@ -1,6 +1,10 @@
 # reduceOpBench
 
-V1 GPU hardware probe for FP8 intrinsics. **Executes each intrinsic on the device** and reports whether it works — this is not an RCCL capability table.
+GPU probe for FP8/BF8 hardware intrinsics. Reports, per GPU, which ones the toolchain
+can emit for that target and — optionally — which ones actually execute correctly.
+
+This is not an RCCL capability table, and it does not measure performance yet: there is
+no timing anywhere in the tool.
 
 ## Build
 
@@ -10,25 +14,60 @@ make
 ./reduceOpBench
 ```
 
-Built with `--offload-arch=native`. Rebuild if probing a different GPU architecture.
+`make` generates `fp8_auto_probe.h` from the installed toolchain, then compiles with
+`--offload-arch=native`. Rebuild when probing a different GPU architecture.
 
-## Output legend
+| Target / variable | Purpose |
+|---|---|
+| `make regen` | Re-derive the probe list after a ROCm change (not automatic) |
+| `make clean` | Remove the binary and the generated header |
+| `ROCM_PATH` | ROCm install to read builtins from (default `/opt/rocm`) |
+| `AUTO_CATEGORIES` | `cvt` (default), or any of `mfma,wmma,dot,other`, or `all` |
+
+## Usage
+
+```
+./reduceOpBench [-d DEVICE] [-f] [-h]
+
+  -d DEVICE         Probe one GPU (default: all GPUs)
+  -f, --functional  Also run the hand-written execute+sanity suite
+  -h                Show help
+```
+
+## Modes
+
+**Default — availability.** Intrinsics are discovered from the installed toolchain and
+the device reports `__builtin_amdgcn_is_invocable()` for each. This is a compile-time
+answer for the offload target, so nothing is executed and nothing can fail.
 
 | Status | Meaning |
 |--------|---------|
-| `[yes]` | Intrinsic compiled for this GPU target, executed on device, sanity check passed |
-| `[fail]` | Executed on device but sanity check failed |
-| `[n/a]` | Not compiled for this GPU target (hardware/compiler does not expose it) |
+| `[yes]` | Invocable for this offload target |
+| `[n/a]` | Known to the toolchain but not invocable on this GPU |
 
-## What is probed
+**`-f` — functional.** Runs the curated suite in `fp8_probe.h`, which executes each
+intrinsic in a device kernel and checks the result. Covers the HIP `__hip_fp8_*` types,
+upcast and downcast for e4m3 and e5m2 (`cvt_pk_f32_*`, `cvt_sr_*`, `cvt_scalef32_pk_*`,
+inline `v_cvt_f32_fp8`), arithmetic (`v_pk_add_f32`, `v_pk_add_f16`, `fmed3f`), and
+end-to-end add chains (upcast → add → downcast) for e4m3/e5m2 in pk1 and pk2 form.
 
-- HIP FP8 types and conversion
-- Legacy/gfx942 paths: `cvt_pk_f32_fp8`, `cvt_pk_fp8_f32`, `cvt_sr_*`, gfx950 scalef32 pk2
-- **gfx1250 paths**: `cvt_pk_f16_fp8`, `cvt_pk_fp8_f16`, `cvt_scalef32_pk8_*`, `cvt_scale_pk8_*`
-- Assembly: `v_cvt_f32_fp8` (gfx942/950), `v_pk_add_f32`, `v_pk_add_f16`
-- End-to-end FP8 add chains (upcast → add → downcast) for e4m3/e5m2, pk1 and pk2
+| Status | Meaning |
+|--------|---------|
+| `[yes]` | Executed on device and passed its sanity check |
+| `[fail]` | Executed but the sanity check failed |
+| `[n/a]` | Not available for this GPU target |
 
-Availability is detected with `__builtin_amdgcn_is_invocable()` on the device, then each
-intrinsic is executed with a sanity check. This correctly distinguishes gfx1250 from gfx950.
+## How discovery works
 
-Each test runs in a device kernel on the selected GPU.
+`gen_auto_probe.py` emits the probe kernel, so the list tracks whatever the local ROCm
+knows rather than a hand-maintained checklist. It prefers Clang's
+`BuiltinsAMDGPU.def`/`.inc` under `$ROCM_PATH`. Runtime-only installs ship no
+`clang/Basic` headers, so it falls back to the builtin names embedded in the clang
+executable's string table.
+
+Output is grouped by Clang's target-feature string (`Feature: fp8-conversion-insts`)
+when the headers were available. The binary fallback cannot recover those strings, so
+it groups by a label derived from the instruction name instead (`Group: fp8 convert`).
+The per-intrinsic verdicts are identical either way.
+
+Pass `--builtins` to point the generator at a specific `.def`, `.inc`, or clang binary.
