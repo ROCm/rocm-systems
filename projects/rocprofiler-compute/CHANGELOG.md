@@ -97,6 +97,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Roofline metric ids such as `-b 4.1` now count as selecting roofline, like `-b 4` and `-b roof`. In profile mode they run the roofline benchmark, and in analyze mode they show the roofline section.
 
+* Renamed the analysis database column `hbm_cache_data` in `compute_kernel_roofline_data` to `device_memory_cache_data`, and changed the database schema version to 3.0.0. The column holds the arithmetic intensity at the device-memory level: HBM on Instinct and VRAM on Navi48. Tools that read analysis databases should use the column name that matches the `schema_version` in `compute_metadata`.
+
 ### Removed
 
 * Removed the experimental `--gui` and `--tui` analyze modes and the `--random-port` option. Use the default CLI analyze mode for terminal output, or `--output-format db` to explore results in ROCm Optiq.

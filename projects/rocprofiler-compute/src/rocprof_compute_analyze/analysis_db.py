@@ -436,7 +436,9 @@ class db_analysis(OmniAnalyze_Base):
                         l0_cache_data=getattr(roofline_data, "l0_cache_data", None),
                         l1_cache_data=getattr(roofline_data, "l1_cache_data", None),
                         l2_cache_data=getattr(roofline_data, "l2_cache_data", None),
-                        hbm_cache_data=getattr(roofline_data, "hbm_cache_data", None),
+                        device_memory_cache_data=getattr(
+                            roofline_data, "device_memory_cache_data", None
+                        ),
                         lds_cache_data=getattr(roofline_data, "lds_cache_data", None),
                         kernel=kernel_objs[kernel_key],
                     )
@@ -1564,8 +1566,8 @@ class db_analysis(OmniAnalyze_Base):
             roofline_data_expressions = dict(
                 zip(roofline_data_df["Metric"], roofline_data_df["Value"])
             )
-            # The database column stays hbm_cache_data. gfx1201 names the
-            # device-memory point AI VRAM; MI and the other archs keep AI HBM.
+            # The device-memory point is AI HBM on MI and the other archs, and
+            # AI VRAM on gfx1201.
             device_memory_ai = roofline_data_expressions.get(
                 "AI HBM", ""
             ) or roofline_data_expressions.get("AI VRAM", "")
@@ -1576,7 +1578,7 @@ class db_analysis(OmniAnalyze_Base):
                 "l0_cache_data": roofline_data_expressions.get("AI L0", ""),
                 "l1_cache_data": roofline_data_expressions.get("AI L1", ""),
                 "l2_cache_data": roofline_data_expressions.get("AI L2", ""),
-                "hbm_cache_data": device_memory_ai,
+                "device_memory_cache_data": device_memory_ai,
                 "lds_cache_data": roofline_data_expressions.get("AI LDS", ""),
             }
 
