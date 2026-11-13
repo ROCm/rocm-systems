@@ -7,14 +7,18 @@
 #include "parser/schema_validator.hpp"
 #include "parser/value_text.hpp"
 
+#include "common/string_utility.hpp"
+
 #include <fmt/format.h>
 
+#include <algorithm>
 #include <cstddef>
 #include <iterator>
 #include <limits>
 #include <string>
 #include <string_view>
 #include <utility>
+#include <variant>
 #include <vector>
 
 namespace rocprofsys::parser
@@ -77,14 +81,47 @@ blocks_value(const schema_param& param, std::string_view token)
     return starts_option(token) && !is_signed_number(param, token);
 }
 
-[[nodiscard]] bool
-accepts_list_token(const schema_param& param, std::string_view token)
+/// The tokens of one list option as one list value. A token boundary separates two
+/// names, and a separator already at the boundary is not doubled, so "hip," "mpi" and
+/// "hip" "," "mpi" are both hip,mpi, while "," alone stays a value that names nothing.
+std::string
+list_text(const std::vector<std::string>& tokens, std::string_view separator)
 {
-    if(param.type != param_type::enumeration_list)
+    std::string text;
+    for(const auto& token : tokens)
     {
-        return true;
+        const auto part = utility::string::trim(token);
+        if(part.empty())
+        {
+            continue;
+        }
+        if(!text.empty() && !text.ends_with(separator) && !part.starts_with(separator))
+        {
+            text.append(separator);
+        }
+        text.append(part);
     }
-    return is_valid_value(param, token);
+    return text;
+}
+
+/// The part of a refused list @p text to name: the first element that is not a valid
+/// choice, or the whole text when the list itself is malformed, as in "a,,b".
+std::string
+refused_part(const schema_param& param, const std::string& text)
+{
+    const auto parts = split_list(text, list_separator(param));
+    if(parts)
+    {
+        const auto found =
+            std::ranges::find_if(*parts, [&param](const std::string& part) {
+                return !part.empty() && !is_valid_value(param, part);
+            });
+        if(found != parts->end())
+        {
+            return *found;
+        }
+    }
+    return text;
 }
 
 std::string
@@ -199,7 +236,7 @@ private:
         }
         if(equals_at != std::string_view::npos)
         {
-            m_result.store_if_valid(*param, token.substr(equals_at + 1));
+            store_tokens(*param, { std::string{ token.substr(equals_at + 1) } });
             return true;
         }
         return consume_counted(*param);
@@ -222,9 +259,46 @@ private:
             }
             return true;
         }
-        m_result.store_if_valid(
-            param, join_tokens(tokens, 0, tokens.size(), list_separator(param)));
+        store_tokens(param, tokens);
         return true;
+    }
+
+    /// A list reads its tokens as one value and adds its elements to the ones given
+    /// earlier; nothing more is stored when that value is refused. Any other option
+    /// stores its tokens joined, and a repeat replaces the earlier value.
+    void store_tokens(const schema_param& param, const std::vector<std::string>& tokens)
+    {
+        const auto separator = list_separator(param);
+        if(param.type != param_type::enumeration_list)
+        {
+            m_result.store_if_valid(param,
+                                    join_tokens(tokens, 0, tokens.size(), separator));
+            return;
+        }
+        const auto text   = list_text(tokens, separator);
+        const auto parsed = parse_value(param, text);
+        if(!parsed)
+        {
+            m_result.errors.push_back(
+                invalid_value_message(refused_part(param, text), param.id));
+            return;
+        }
+        auto        elements = earlier_elements(param);
+        const auto& parts    = std::get<std::vector<std::string>>(*parsed);
+        elements.insert(elements.end(), parts.begin(), parts.end());
+        m_result.store_typed(param, std::move(elements));
+    }
+
+    [[nodiscard]] std::vector<std::string> earlier_elements(
+        const schema_param& param) const
+    {
+        const auto found = m_result.values.find(param.id);
+        if(found == m_result.values.end())
+        {
+            return {};
+        }
+        const auto* list = std::get_if<std::vector<std::string>>(&found->second);
+        return list == nullptr ? std::vector<std::string>{} : *list;
     }
 
     [[nodiscard]] bool store_bare_flag(const schema_param& param)
@@ -244,8 +318,7 @@ private:
         while(tokens.size() < maximum)
         {
             const auto next = m_index + 1;
-            if(next >= m_args.size() || blocks_value(param, m_args[next]) ||
-               !accepts_list_token(param, m_args[next]))
+            if(next >= m_args.size() || blocks_value(param, m_args[next]))
             {
                 break;
             }

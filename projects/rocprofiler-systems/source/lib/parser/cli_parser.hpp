@@ -28,10 +28,15 @@ enum class unknown_option : std::uint8_t
  * A value option accepts both "--name value" and "--name=value". arg_min_count and
  * arg_max_count select how many following tokens belong to the option. Unset counts
  * mean one value, or none when flag is set. An enumeration list with no
- * arg_max_count keeps reading valid elements until an option, "--", or a token
- * that is not a valid element. A following token that starts with '-' is the next
- * option, not a value. Tokens are joined with the list separator and stored on
- * that parameter. A flag stores "true" and does not consume the next token.
+ * arg_max_count reads every token up to the next option or "--", and its tokens are
+ * one list value: a token boundary separates two names, and a separator already at
+ * the boundary is not doubled, so "hip," "mpi" and "hip" "," "mpi" both give hip,mpi.
+ * That value is read like the same text from any other source, so "," alone is
+ * refused; the error names the element at fault, and the option then stores nothing.
+ * A repeated enumeration list adds to the elements given earlier. The tokens of any other
+ * option are joined with the list separator, and a repeat keeps the last value. A
+ * following token that starts with '-' is the next option, not a value. A flag
+ * stores "true" and does not consume the next token.
  * "--flag=false" still sets the value. An integer or number may be negative
  * ("--num -5"). A single-letter flag bundle such as "-qv" is accepted when every
  * letter is a flag. "--" ends option parsing, and only the tokens after it are the
