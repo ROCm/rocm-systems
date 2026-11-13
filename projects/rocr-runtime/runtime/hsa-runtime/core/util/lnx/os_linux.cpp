@@ -885,6 +885,15 @@ hsa_status_t DmaBufClose(int dmabuf) {
   return ::close(dmabuf) == 0 ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_RESOURCE_FREE;
 }
 
+int DmaBufDup(int dmabuf) {
+  if (dmabuf < 0) return -1;
+  int dup_fd = ::dup(dmabuf);
+  if (dup_fd < 0) {
+    return -1;
+  }
+  return dup_fd;
+}
+
 void* ReserveMemory(void* start, size_t size, size_t alignment, MemProt prot) {
   size = AlignUp(size, PageSize());
   // check for invalid input size

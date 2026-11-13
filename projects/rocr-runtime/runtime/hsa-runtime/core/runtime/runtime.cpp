@@ -4162,6 +4162,10 @@ Runtime::MemoryHandle::MemoryHandle(hsa_fabric_handle_t fabric_handle)
 Runtime::MemoryHandle::~MemoryHandle() {
   if (driver_handle.handle != 0 && region != nullptr)
     agentOwner()->driver().DestroyMemoryHandle(&driver_handle);
+  else if (imported && !is_fabric_handle)
+    /* Imported dmabuf fds are not closed by DestroyMemoryHandle (no region).
+     * VMemoryImportShareableHandle stores a dup the caller may already have closed. */
+    os::DmaBufClose(driver_handle.dmabuf_fd);
 }
 
 
@@ -4374,8 +4378,15 @@ hsa_status_t Runtime::VMemoryExportShareableHandle(int* dmabuf_fd,
 
 hsa_status_t Runtime::VMemoryImportShareableHandle(int dmabuf_fd,
                                                    hsa_amd_vmem_alloc_handle_t* memoryOnlyHandle) {
+  /* The per-GPU import of this dmabuf is deferred until hsa_amd_vmem_set_access is called, but the
+   * caller is free to close their fd as soon as this function returns. Duplicate the fd so the
+   * MemoryHandle owns a copy that stays valid until the deferred import. The MemoryHandle destructor
+   * closes this owned fd. */
+  int owned_fd = os::DmaBufDup(dmabuf_fd);
+  if (owned_fd < 0) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+
   std::lock_guard<std::shared_mutex> lock(memory_lock_);
-  auto memoryHandle = std::make_unique<MemoryHandle>(dmabuf_fd);
+  auto memoryHandle = std::make_unique<MemoryHandle>(owned_fd);
   *memoryOnlyHandle = MemoryHandle::Convert(memoryHandle.get());
   memory_handles.emplace(*memoryOnlyHandle, std::move(memoryHandle));
   return HSA_STATUS_SUCCESS;
