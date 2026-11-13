@@ -41,6 +41,14 @@ enum class config_source : std::uint8_t
     command_line,
 };
 
+/// One stored parameter, already parsed.
+struct config_slot
+{
+    std::string    id;
+    config_value_t value;
+    config_source  source = config_source::default_value;
+};
+
 /**
  * Values for the parameters of one schema.
  *
@@ -76,6 +84,13 @@ public:
      */
     void set(std::string_view param_id, std::string_view value, config_source source);
 
+    /**
+     * Store a value that is already parsed, such as one decoded from JSON.
+     * @throws std::runtime_error if the id is unknown or accepts_value() refuses it.
+     * Change callbacks follow the same rules as set().
+     */
+    void set_value(std::string_view param_id, config_value_t value, config_source source);
+
     [[nodiscard]] std::optional<std::string>   get(std::string_view param_id) const;
     [[nodiscard]] bool                         contains(std::string_view param_id) const;
     [[nodiscard]] std::optional<config_source> source_of(std::string_view param_id) const;
@@ -88,6 +103,9 @@ public:
         std::string_view category_id) const;
 
     [[nodiscard]] value_map_t values() const;
+
+    /// Stored slots, including the parsed value and its source.
+    [[nodiscard]] std::vector<config_slot> slots() const;
 
     /// @throws std::runtime_error if the id is unknown.
     void on_change(std::string_view param_id, change_callback_t callback);
@@ -109,6 +127,8 @@ private:
 
     [[nodiscard]] std::shared_ptr<const schema> locked_schema() const;
     [[nodiscard]] std::optional<stored_value>   lookup(std::string_view param_id) const;
+    void store_parsed(std::string_view param_id, config_value_t value,
+                      config_source source);
 
     std::shared_ptr<const schema>                                      m_schema;
     mutable std::shared_mutex                                          m_mutex;
