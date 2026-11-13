@@ -139,14 +139,9 @@
 // Architecture Detection Macros
 // ============================================================================
 
-// MI100 (CDNA1) — limited feature set; advanced MFMA/atomics paths often bypass
+// MI100 (CDNA1): limited feature set; many advanced tests are skipped.
 #if defined(__gfx908__)
-#define ARCH_MI100 1
 #define ARCH_NAME "MI100 (gfx908/CDNA1)"
-#define HAS_HW_FP64_ATOMICS 0
-#define HAS_FP8 0
-#define HAS_ASYNC_LDS 0
-#define HAS_TDM 0
 #endif
 
 // MI250/MI200 series (CDNA2)
@@ -156,7 +151,6 @@
 #define HAS_HW_FP64_ATOMICS 1
 #define HAS_FP8 0
 #define HAS_ASYNC_LDS 0
-#define HAS_TDM 0
 #endif
 
 // MI300 series (CDNA3)
@@ -166,7 +160,6 @@
 #define HAS_HW_FP64_ATOMICS 1
 #define HAS_FP8 1
 #define HAS_ASYNC_LDS 0  // May have limited support
-#define HAS_TDM 0
 #endif
 
 // MI350 series (CDNA4)
@@ -177,7 +170,6 @@
 #define HAS_FP8 1
 #define HAS_FP6_FP4 1
 #define HAS_ASYNC_LDS 1
-#define HAS_TDM 0  // TDM is gfx1250 only
 #endif
 
 // Strix Point / Strix Halo / Krackan Point (RDNA 3.5, gfx1150/gfx1151/gfx1152)
@@ -187,7 +179,6 @@
 #define HAS_HW_FP64_ATOMICS 0  // APU iGPUs have limited FP64
 #define HAS_FP8 0              // NO FP8 conversion builtins on RDNA 3.5 APU
 #define HAS_ASYNC_LDS 1        // Async LDS supported
-#define HAS_TDM 0              // TDM is gfx1250 only
 #define HAS_AI_ACCELERATORS 0  // Limited AI on APU
 #endif
 
@@ -198,7 +189,6 @@
 #define HAS_HW_FP64_ATOMICS 0  // Consumer GPUs have limited FP64
 #define HAS_FP8 1              // FP8 OCP format supported
 #define HAS_ASYNC_LDS 1        // Async LDS supported
-#define HAS_TDM 0              // TDM is gfx1250 only
 #define HAS_AI_ACCELERATORS 1  // AI accelerators for inference
 #endif
 
@@ -209,7 +199,6 @@
 #define HAS_HW_FP64_ATOMICS 1
 #define HAS_FP8 1
 #define HAS_ASYNC_LDS 1
-#define HAS_TDM 1
 #endif
 
 // Default fallback
@@ -218,7 +207,6 @@
 #define HAS_HW_FP64_ATOMICS 0
 #define HAS_FP8 0
 #define HAS_ASYNC_LDS 0
-#define HAS_TDM 0
 #endif
 
 // ============================================================================
@@ -3632,9 +3620,8 @@ extern "C" __global__ void mega_kernel(
     // 8. Transcendental Functions
     test_transcendental(results, lane_id);
 
-    // 9 / 9.5 Memory ops: run VMEM first on output_buffer as scratch so it does
-    // not clobber input_buffer. Then test_global_memory writes the host-side
-    // verify pattern (out[i] = in[i]*2+1).
+    // Memory ops: VMEM uses output_buffer as scratch, then test_global_memory
+    // writes the pattern the host verifies (out[i] = in[i] * 2 + 1).
     if (active) {
         test_vmem_operations(output_buffer, results, lane_id, tid, buffer_size, tex_obj,
                              surf_obj);

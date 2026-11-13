@@ -1,10 +1,8 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier:  MIT
 //
-// Compute-bound health workload. The run shape follows the mini-nbody block
-// sample in ROCm/HIP-Examples:
-// https://github.com/ROCm/HIP-Examples/blob/master/mini-nbody/hip/nbody-block.cpp
-// This file is not a copy of that sample.
+// Compute-bound n-body workload, written for this project. Its run shape
+// follows https://github.com/ROCm/HIP-Examples/blob/master/mini-nbody/hip/nbody-block.cpp
 //
 // Usage: mini-nbody-block <bodies> <iterations>
 

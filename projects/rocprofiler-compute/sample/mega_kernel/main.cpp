@@ -36,11 +36,8 @@
 #endif
 #include <vector>
 
-// Cluster launch needs hipLaunchAttributeClusterDimension / clusterDim. That
-// attribute is not in every HIP 7.2 install (some ROCm 7.2.0 installs have
-// hipLaunchKernelEx but no ClusterDimension enumerator). HIP_VERSION alone is
-// not a valid probe, and host/device ifdefs still fail the host pass on gfx90a.
-// Opt in only via -DMEGA_KERNEL_ENABLE_CLUSTER_LAUNCH (Makefile: gfx1250).
+// Opt-in (the Makefile sets it for gfx1250): some HIP 7.2 installs lack
+// hipLaunchAttributeClusterDimension.
 #if defined(MEGA_KERNEL_ENABLE_CLUSTER_LAUNCH)
 #    define MEGA_KERNEL_HAS_CLUSTER_LAUNCH 1
 #endif
