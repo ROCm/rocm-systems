@@ -4,11 +4,81 @@
 // Elementwise floating-point workload registration across CPU and semantics modes.
 
 #include "benchmark/workloads.h"
+#include "rj_arith/detail/rj_arith_fp.h"
 
 namespace rocjitsu::arith::test {
 
 // Append FP workloads and their supported CPU/semantics variants.
 void add_fp(std::vector<Benchmark> &cases) {
+  add(cases, "fp", "v_fma_mix_f32_bf16_w32", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_fma_mix_f32_bf16_w32(flags, UINT32_MAX, 0, r.d, r.a, r.b, r.c, &r.status);
+  });
+  add(cases, "fp", "v_fma_mixlo_bf16_w32", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_fma_mixlo_bf16_w32(flags, UINT32_MAX, 0, r.d, r.a, r.b, r.c, &r.status);
+  });
+  add(cases, "fp", "v_fma_mixhi_bf16_w32", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_fma_mixhi_bf16_w32(flags, UINT32_MAX, 0, r.d, r.a, r.b, r.c, &r.status);
+  });
+  add(cases, "fp", "v_mad_mix_f32_w32", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_mad_mix_f32_w32(flags, UINT32_MAX, 0, r.d, r.a, r.b, r.c, &r.status);
+  });
+  add(cases, "fp", "v_mad_mix_f32_w64", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_mad_mix_f32_w64(flags, UINT64_MAX, 0, r.d, r.a, r.b, r.c, &r.status);
+  });
+  add(cases, "fp", "v_mad_mixlo_f16_w32", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_mad_mixlo_f16_w32(flags, UINT32_MAX, 0, r.d, r.a, r.b, r.c, &r.status);
+  });
+  add(cases, "fp", "v_mad_mixlo_f16_w64", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_mad_mixlo_f16_w64(flags, UINT64_MAX, 0, r.d, r.a, r.b, r.c, &r.status);
+  });
+  add(cases, "fp", "v_mad_mixhi_f16_w32", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_mad_mixhi_f16_w32(flags, UINT32_MAX, 0, r.d, r.a, r.b, r.c, &r.status);
+  });
+  add(cases, "fp", "v_mad_mixhi_f16_w64", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_mad_mixhi_f16_w64(flags, UINT64_MAX, 0, r.d, r.a, r.b, r.c, &r.status);
+  });
+  add(cases, "fp", "v_pk_fma_f32_w32_gfx942", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_pk_fma_f32_w32_gfx942(flags, UINT32_MAX, 0, r.d, r.a, r.b, r.c, &r.status);
+  });
+  add(cases, "fp", "v_pk_fma_f32_w64_gfx942", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_pk_fma_f32_w64_gfx942(flags, UINT64_MAX, 0, r.d, r.a, r.b, r.c, &r.status);
+  });
+  add(cases, "fp", "v_pk_fma_f32_w32_gfx1250", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_pk_fma_f32_w32_gfx1250(flags, UINT32_MAX, 0, r.d, r.a, r.b, r.c, &r.status);
+  });
+  add(cases, "fp", "v_pk_add_f32_w32_gfx942", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_pk_add_f32_w32_gfx942(flags, UINT32_MAX, 0, r.d, r.a, r.b, &r.status);
+  });
+  add(cases, "fp", "v_pk_add_f32_w64_gfx942", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_pk_add_f32_w64_gfx942(flags, UINT64_MAX, 0, r.d, r.a, r.b, &r.status);
+  });
+  add(cases, "fp", "v_pk_add_f32_w32_gfx1250", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_pk_add_f32_w32_gfx1250(flags, UINT32_MAX, 0, r.d, r.a, r.b, &r.status);
+  });
+  add(cases, "fp", "v_pk_mul_f32_w32_gfx942", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_pk_mul_f32_w32_gfx942(flags, UINT32_MAX, 0, r.d, r.a, r.b, &r.status);
+  });
+  add(cases, "fp", "v_pk_mul_f32_w64_gfx942", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_pk_mul_f32_w64_gfx942(flags, UINT64_MAX, 0, r.d, r.a, r.b, &r.status);
+  });
+  add(cases, "fp", "v_pk_mul_f32_w32_gfx1250", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_pk_mul_f32_w32_gfx1250(flags, UINT32_MAX, 0, r.d, r.a, r.b, &r.status);
+  });
+  add(cases, "fp", "v_pk_fma_bf16_w32", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_pk_fma_bf16_w32(flags, UINT32_MAX, 0, r.d, r.a, r.b, r.c, &r.status);
+  });
+  add(cases, "fp", "v_pk_add_bf16_w32", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_pk_add_bf16_w32(flags, UINT32_MAX, 0, r.d, r.a, r.b, &r.status);
+  });
+  add(cases, "fp", "v_pk_mul_bf16_w32", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_pk_mul_bf16_w32(flags, UINT32_MAX, 0, r.d, r.a, r.b, &r.status);
+  });
+  add(cases, "fp", "v_pk_min_num_bf16_w32", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_pk_min_num_bf16_w32(flags, UINT32_MAX, 0, r.d, r.a, r.b, &r.status);
+  });
+  add(cases, "fp", "v_pk_max_num_bf16_w32", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_pk_max_num_bf16_w32(flags, UINT32_MAX, 0, r.d, r.a, r.b, &r.status);
+  });
   add(cases, "fp", "v_div_fmas_f32_w32", [](Operands &r, uint64_t flags) {
     return rj_arith_v_div_fmas_f32_w32(flags, UINT32_MAX, 0, r.d, r.a, r.b, r.c, 0, &r.status);
   });

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 //! Native rocddi contract checks for the first GPU target.
+#![cfg(target_os = "linux")]
 #![allow(unsafe_code)]
 #![allow(
     clippy::cast_possible_truncation,
@@ -19,7 +20,7 @@ use std::time::{Duration, Instant};
 
 use rocddi::device::gpu::queue::{
     KernelCommand, KernelQueueFormat, QueueAccessWidth, QueueParameters, QueuePriority,
-    QueueProducerMode, QueueRequest, QueueRingMemory, SdmaEngineSelection, ring_doorbell,
+    QueueProducerMode, QueueRequest, QueueRingMemory, SdmaEngineSelection, store_ordered_mmio64,
 };
 use rocddi::device::gpu::{CopyRect, GpuCopySequence};
 use rocddi::memory::device::{
@@ -215,7 +216,7 @@ fn gfx1201_sdma_copy_contract() -> Result<(), Box<dyn Error>> {
     gpu.preload_linear_copy().map_err(|failure| failure.error)?;
     gpu.preload_linear_copy().map_err(|failure| failure.error)?;
     let counters = gpu.clock_counters()?;
-    assert!(counters.gpu_frequency > 0);
+    assert!(counters.gpu_info.frequency_hz > 0);
 
     let access = DeviceAccess::READ | DeviceAccess::WRITE;
     let mut source = device.allocate(MemoryKind::System, 4096, 4096, access)?;
@@ -1170,7 +1171,7 @@ fn gfx1201_user_sdma_queue(ring_memory: QueueRingMemory) -> Result<(), Box<dyn E
     unsafe {
         (&*(transport.write_index_host_address as *const AtomicU64))
             .store(PACKET_BYTES as u64, Ordering::Release);
-        ring_doorbell(transport.doorbell_host_address, PACKET_BYTES as u64);
+        store_ordered_mmio64(transport.doorbell_host_address, PACKET_BYTES as u64);
     }
 
     let deadline = Instant::now() + Duration::from_secs(10);
@@ -1343,7 +1344,7 @@ fn gfx1201_aql_barrier(
         (&*(transport.ring_host_address as *const AtomicU16))
             .store(BARRIER_HEADER, Ordering::Release);
         (&*(transport.write_index_host_address as *const AtomicU64)).store(1, Ordering::Release);
-        ring_doorbell(transport.doorbell_host_address, 0);
+        store_ordered_mmio64(transport.doorbell_host_address, 0);
     }
 
     let deadline = Instant::now() + Duration::from_secs(10);

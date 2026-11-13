@@ -13,7 +13,7 @@ import tempfile
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from cargo_artifacts import Artifact, collect_messages, copy_changed
+from cargo_artifacts import Artifact, collect_messages, copy_changed, native_response
 from configure_rust import cmake_set, rust_flags, validate_host
 
 
@@ -152,9 +152,10 @@ runtime_rust_library(fixture PACKAGE unrelated LIBRARY unrelated TYPE SHARED
   SONAME_ENV FIXTURE_SONAME)
 get_target_property(location fixture IMPORTED_LOCATION)
 get_target_property(soname fixture IMPORTED_SONAME)
+get_target_property(implib fixture IMPORTED_IMPLIB)
 get_property(environment GLOBAL PROPERTY _runtime_soname_env)
 get_property(links GLOBAL PROPERTY _runtime_link_commands)
-file(WRITE "${{CMAKE_BINARY_DIR}}/result" "${{location}}\\n${{soname}}\\n${{environment}}\\n${{links}}\\n")
+file(WRITE "${{CMAKE_BINARY_DIR}}/result" "${{location}}\\n${{soname}}\\n${{environment}}\\n${{links}}\\n${{implib}}\\n")
 """
                 (root / "CMakeLists.txt").write_text(script)
                 result = subprocess.run(
@@ -173,9 +174,117 @@ file(WRITE "${{CMAKE_BINARY_DIR}}/result" "${{location}}\\n${{soname}}\\n${{envi
                         ["libunrelated.so.7", "FIXTURE_SONAME=libunrelated.so.7"],
                     )
                     self.assertIn("create_symlink;libunrelated.so.7.2;", lines[3])
+                elif system == "Windows":
+                    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                    lines = (root / "build/result").read_text().splitlines()
+                    self.assertTrue(lines[0].endswith("/lib/unrelated.dll"))
+                    self.assertEqual(lines[1], "soname-NOTFOUND")
+                    self.assertNotIn("create_symlink", lines[3])
+                    self.assertTrue(lines[4].endswith("/lib/unrelated.dll.lib"))
                 else:
                     self.assertNotEqual(result.returncode, 0)
                     self.assertIn(f"not implemented for {system}", result.stderr)
+
+    def test_finalized_cargo_commands_preserve_environment(self):
+        helpers = Path(__file__).resolve().parents[1]
+        environment = os.environ.copy()
+        environment.pop("FIXTURE_SONAME", None)
+        flags = '--cfg\x1flabel="semi;colon and spaces"'
+        for system, search_path, filenames in (
+            (
+                "Windows",
+                r"C:\Program Files\LLVM\bin;C:\Windows\System32;C:\Rust\bin",
+                ["fixture.dll", "fixture.dll.lib"],
+            ),
+            ("Linux", "/tools with spaces:/usr/bin:/bin", ["libfixture.so"]),
+        ):
+            with self.subTest(system=system), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                binary = root / "build"
+                binary.mkdir()
+                (binary / "cargo-metadata.json").write_text(json.dumps({
+                    "workspace_members": ["fixture"],
+                    "packages": [{"name": "fixture", "id": "fixture"}],
+                }))
+                artifacts = [root / name for name in filenames]
+                for artifact in artifacts:
+                    artifact.write_bytes(b"fixture artifact")
+                cargo = root / "fake cargo.py"
+                cargo.write_text(f"""import json
+import os
+from pathlib import Path
+import sys
+root = Path(__file__).parent
+command = sys.argv[1]
+(root / (command + ".json")).write_text(json.dumps({{
+    "arguments": sys.argv[1:],
+    "PATH": os.environ["PATH"],
+    "CARGO_ENCODED_RUSTFLAGS": os.environ["CARGO_ENCODED_RUSTFLAGS"],
+    "FIXTURE_SONAME": os.environ.get("FIXTURE_SONAME"),
+}}))
+if command == "build":
+    print(json.dumps({{
+        "reason": "compiler-artifact",
+        "package_id": "fixture",
+        "target": {{"name": "fixture"}},
+        "profile": {{"test": False}},
+        "filenames": {[str(path) for path in artifacts]!r},
+    }}))
+""")
+                script = """cmake_minimum_required(VERSION 3.25)
+project(CommandFixture LANGUAGES NONE)
+enable_testing()
+"""
+                script += cmake_set("CMAKE_SYSTEM_NAME", [system])
+                script += cmake_set("_runtime_source_dir", [helpers.parent.as_posix()])
+                script += cmake_set("_runtime_binary_dir", [binary.as_posix()])
+                script += cmake_set("_runtime_library_dir", [(binary / "lib").as_posix()])
+                script += cmake_set("_runtime_profile", ["dev"])
+                script += cmake_set("_runtime_cargo_command", [
+                    shutil.which("cmake"), "-E", "env",
+                    f"PATH={search_path}", f"CARGO_ENCODED_RUSTFLAGS={flags}",
+                    sys.executable, str(cargo),
+                ])
+                script += f"""include("{helpers.as_posix()}/RuntimeRust.cmake")
+runtime_rust_library(fixture PACKAGE fixture LIBRARY fixture TYPE SHARED
+  OUTPUT_NAME fixture VERSION 1.0 SOVERSION 1 SONAME_ENV FIXTURE_SONAME)
+runtime_rust_finalize()
+add_test(NAME cargo COMMAND ${{_runtime_cargo_command}} test --workspace)
+"""
+                (root / "CMakeLists.txt").write_text(script)
+                result = subprocess.run(
+                    ["cmake", "-S", str(root), "-B", str(binary), "-G", "Ninja"],
+                    capture_output=True,
+                    text=True,
+                )
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                for command, invocation in (
+                    ("build", ["cmake", "--build", str(binary)]),
+                    ("test", ["ctest", "--test-dir", str(binary), "--output-on-failure"]),
+                ):
+                    with self.subTest(command=command):
+                        result = subprocess.run(
+                            invocation, env=environment, capture_output=True, text=True
+                        )
+                        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                        observed = json.loads((root / f"{command}.json").read_text())
+                        self.assertEqual(observed["PATH"], search_path)
+                        self.assertEqual(observed["CARGO_ENCODED_RUSTFLAGS"], flags)
+                        self.assertEqual(
+                            observed["FIXTURE_SONAME"],
+                            "libfixture.so.1" if system == "Linux" else None,
+                        )
+                        expected = ["test", "--workspace"] if command == "test" else [
+                            "build", "--workspace", "--frozen", "--profile", "dev",
+                            "--message-format=json",
+                        ]
+                        self.assertEqual(observed["arguments"], expected)
+                        if command == "build":
+                            staged = ["libfixture.so.1.0"] if system == "Linux" else filenames
+                            for name in staged:
+                                self.assertEqual(
+                                    (binary / "lib" / name).read_bytes(), b"fixture artifact"
+                                )
 
     def test_native_host_architectures(self):
         for processor, host in (
@@ -214,6 +323,18 @@ file(WRITE "${{CMAKE_BINARY_DIR}}/result" "${{location}}\\n${{soname}}\\n${{envi
                 {"RUSTFLAGS": "ignored", "CARGO_ENCODED_RUSTFLAGS": ""}, compiler
             ),
         )
+
+    def test_windows_target_and_linker_flags(self):
+        validate_host("AMD64", "x86_64-pc-windows-msvc", "Windows")
+        with self.assertRaises(ValueError):
+            validate_host("AMD64", "x86_64-pc-windows-gnu", "Windows")
+        with self.assertRaises(ValueError):
+            validate_host("ARM64", "aarch64-pc-windows-msvc", "Windows")
+        linker = r"C:\Tools with spaces\lld-link.exe"
+        flags = rust_flags({"CARGO_ENCODED_RUSTFLAGS": "--cfg\x1fname=\"two words\""}, linker, "Windows").split("\x1f")
+        self.assertIn(f"linker={linker}", flags)
+        self.assertNotIn("link-arg=-fuse-ld=lld", flags)
+        self.assertEqual(flags[:2], ["--cfg", 'name="two words"'])
 
     def test_cmake_argument_roundtrip(self):
         values = [
@@ -264,6 +385,18 @@ class ArtifactTests(unittest.TestCase):
             collect_messages(
                 message("workspace#first", False, ["a.so", "b.so"]), [artifact]
             )
+
+    def test_windows_dll_pair_and_native_response_preserve_names(self):
+        dll = Artifact("workspace#runtime", "rocddi_runtime", ".dll", Path("rocddi_runtime.dll"))
+        implib = Artifact("workspace#runtime", "rocddi_runtime", ".dll.lib", Path("rocddi_runtime.dll.lib"))
+        output = json.dumps({"reason": "compiler-artifact", "package_id": dll.package_id,
+                             "target": {"name": dll.library}, "profile": {"test": False},
+                             "filenames": ["build/rocddi_runtime.dll", "build/rocddi_runtime.dll.lib", "build/rocddi_runtime.pdb"]})
+        found, _ = collect_messages(output, [dll, implib])
+        self.assertEqual(found[dll].name, "rocddi_runtime.dll")
+        self.assertEqual(found[implib].name, "rocddi_runtime.dll.lib")
+        closure = r'kernel32.lib "C:\Native libraries\工具.lib" kernel32.lib'
+        self.assertEqual(native_response(closure, "Windows"), closure + "\n")
 
     def test_copy_changed_preserves_mtime_and_rejects_empty(self):
         with tempfile.TemporaryDirectory() as directory:

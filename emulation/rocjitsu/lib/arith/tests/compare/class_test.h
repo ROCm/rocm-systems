@@ -14,7 +14,7 @@
 #include "common/wave.h"
 #include "compare/floating_point.h"
 #include "compare/helpers.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_compare.h"
 
 #include <gtest/gtest.h>
 #include <stdint.h>

@@ -6,16 +6,16 @@
 
 #include "fp/half_binary.h"
 #include "common/alu.h"
-#include "common/float_formats.h"
-#include "common/internal.h"
+#include "common/float_encoding.h"
 #include "common/packed_alu.h"
+#include "common/validation.h"
 #include "fp/binary.h"
 #include "fp/binary_impl.h"
 #include "fp/float_output.h"
 #include "fp/half_fma_scalar.h"
 #include "fp/minmax_impl.h"
 #include "register/dpp.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_fp.h"
 
 #include <stdint.h>
 
@@ -112,7 +112,7 @@ int packed_arithmetic_modes(uint64_t flags, uint32_t exec_mask, uint32_t instruc
 template <rocjitsu::arith::Binary Op, bool Rdna3>
 int arithmetic_modes(uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags,
                      uint32_t *const *d, const uint32_t *const *a, const uint32_t *const *b,
-                     bool compatibility) {
+                     bool compatibility, bool preserve_input_snan) {
   const unsigned rounding = unsigned((flags & RJ_ARITH_FP_ROUND_MASK) >> 24);
   const unsigned a_shift = instruction_flags & RJ_ARITH_ALU_HIGH_A ? 16 : 0;
   const unsigned b_shift = instruction_flags & RJ_ARITH_ALU_HIGH_B ? 16 : 0;
@@ -204,6 +204,14 @@ int arithmetic_modes(uint64_t flags, uint32_t exec_mask, uint32_t instruction_fl
     // OMOD has already zeroed tiny results; scaled results are normal.
     if ((flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS) && tiny) {
       encoded &= 0x8000;
+    }
+    // An unclamped NaN result keeps the selected input NaN unquieted.
+    if (preserve_input_snan && (encoded & 0x7fff) > 0x7c00) {
+      if ((x & 0x7fff) > 0x7c00) {
+        encoded = x;
+      } else if ((y & 0x7fff) > 0x7c00) {
+        encoded = y;
+      }
     }
     result[lane] = encoded;
   }
@@ -320,14 +328,14 @@ template <rocjitsu::arith::Binary Op, bool Packed, bool GuestDenormals, bool Rdn
         encoded = uint16_t(rocjitsu::arith::selection_output<16>(
             rocjitsu::arith::float_to_f16(value, false), m, flags));
       }
-      if constexpr (Packed && Rdna3 && arithmetic) {
-        // Packed gfx11 preserves input sNaNs when IEEE is clear. FP32/FP16
-        // conversions must not accidentally impose the ordinary FP16 quieting rule.
+      if constexpr (Rdna3 && arithmetic) {
+        // gfx11 preserves input sNaNs when IEEE is clear. The FP32/FP16 conversions are
+        // bit-exact for NaNs, so the modified source keeps its signaling bit.
         if (preserve_input_snan && !(m & RJ_ARITH_ALU_CLAMP)) {
-          if ((a_bits & 0x7fff) > 0x7c00) {
-            encoded = a_bits ^ (m & RJ_ARITH_ALU_NEG_A ? 0x8000 : 0);
-          } else if ((b_bits & 0x7fff) > 0x7c00) {
-            encoded = b_bits ^ (m & RJ_ARITH_ALU_NEG_B ? 0x8000 : 0);
+          if (__builtin_isnan(x)) {
+            encoded = rocjitsu::arith::float_to_f16(x);
+          } else if (__builtin_isnan(y)) {
+            encoded = rocjitsu::arith::float_to_f16(y);
           }
         }
       }
@@ -384,7 +392,9 @@ int half_binary(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags, 
           rocjitsu::arith::validate(flags, instruction_flags & ~known, fp_flags | mode_flags)) {
     return error;
   }
-  if (arithmetic &&
+  // RDNA3 packed ADD/MUL are exact through the guest-mode model below.
+  constexpr bool exact_capable = Packed && Rdna3;
+  if (arithmetic && !exact_capable &&
       (flags & RJ_ARITH_SEMANTICS_MASK) >= RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS) {
     return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
   }
@@ -394,21 +404,21 @@ int half_binary(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags, 
   if (exec_mask == 0) {
     return RJ_ARITH_SUCCESS;
   }
+  // gfx11 keeps signaling NaN inputs when IEEE is clear.
+  const bool preserve_input_snan = Rdna3 && compatibility && !(flags & RJ_ARITH_FP_IEEE_MODE);
   if constexpr (!Packed && arithmetic) {
     if (flags & RJ_ARITH_FP_ROUND_MASK) {
       return arithmetic_modes<Op, Rdna3>(flags, exec_mask, uint32_t(instruction_flags), d, a, b,
-                                         compatibility);
+                                         compatibility, preserve_input_snan);
     }
   }
   if constexpr (Packed && arithmetic) {
-    if ((flags & RJ_ARITH_FP_ROUND_MASK) ||
+    if ((flags & RJ_ARITH_FP_ROUND_MASK) || (exact_capable && rocjitsu::arith::is_exact(flags)) ||
         ((instruction_flags & RJ_ARITH_PK_CLAMP) && (flags & RJ_ARITH_FP_DX10_CLAMP_OFF))) {
       return packed_arithmetic_modes<Op, Rdna3>(flags, exec_mask, uint32_t(instruction_flags), d, a,
                                                 b);
     }
   }
-  const bool preserve_input_snan =
-      Packed && Rdna3 && compatibility && !(flags & RJ_ARITH_FP_IEEE_MODE);
 #if defined(RJ_ARITH_HAVE_X86_64_V3)
   if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
     rocjitsu::arith::half_binary_x86_64_v3<Op, Packed>(
