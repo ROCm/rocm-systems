@@ -30,12 +30,17 @@
 //
 // The directory is created under std::filesystem::temp_directory_path() (honouring TMPDIR), not
 // a hardcoded /tmp, so a test run with a TMPDIR of its own keeps its files there.
+//
+// *base* overrides that. A test that has to EXECUTE something it wrote needs it: TMPDIR is
+// mounted noexec on some developer machines and in some containers. See ExecutableScratch.h,
+// which picks a base that is known to allow it.
 class ScopedDir {
 public:
-    explicit ScopedDir(std::string_view prefix)
+    explicit ScopedDir(std::string_view prefix, std::string_view base = {})
     {
-        const std::string tmpl =
-            (std::filesystem::temp_directory_path() / (std::string(prefix) + "-XXXXXX")).string();
+        const std::filesystem::path parent =
+            base.empty() ? std::filesystem::temp_directory_path() : std::filesystem::path(base);
+        const std::string tmpl = (parent / (std::string(prefix) + "-XXXXXX")).string();
         std::string buffer = tmpl;
         // Dies rather than hands back an empty path, which would mean remove_all("") in the
         // destructor and silently working-directory-relative paths in the test body. Reported

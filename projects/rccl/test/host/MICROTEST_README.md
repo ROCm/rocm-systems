@@ -1615,6 +1615,40 @@ live in `micro/`).
 `host-coverage.lcov` plus the one binary the front door does not run, rather
 than unioning ~38 tracefiles of its own.
 
+### How the front door itself is tested
+
+Two binaries' worth, because the dispatcher has two halves that need different
+treatment.
+
+`host-test-dispatch-test.cc` is the ordinary microtest file: it includes
+`host_test_dispatch.cc` and tests its decisions one function at a time, with the
+scheduler driven through a fake. That reaches everything that is a *decision* —
+the listing parse, the qualification, the report merge, the argument handling —
+and nothing that is a *process*.
+
+`host-dispatch-e2e-test.cc`, in the same binary, covers what only exists in
+`main()`: discovery, the listing phase, the filter resolution gtest does
+in-process, the environment each child is handed, the exit code. Each test
+builds its own tree — a copy of the real `rccl-UnitTestsHostAll`, a `micro/`
+directory beside it, and a manifest — and runs it as a caller would. The
+binaries in that tree are copies of `host_test_dispatch_fixture.cc`, a stand-in
+that is not a gtest binary at all: it lists three cases, honours
+`--gtest_filter` and `--gtest_output`, and records the command line and the
+environment it was given so the test can read back what the dispatcher decided.
+
+This is what notices the failures no unit test can see, all of which are silent
+— forcing `also_run_disabled_tests` off, dropping the `is_reportable()` branch,
+dropping the `GTEST_*` strip or the per-child `LLVM_PROFILE_FILE` each leave the
+file-level tests green while quietly costing coverage or mis-reporting cases.
+
+The fixture tree is written under `ExecutableScratch.h`'s
+`executableScratchDirectory()`, not under `TMPDIR`: `TMPDIR` is mounted `noexec`
+on some developer machines and in many containers, and a test that execs a
+fixture it wrote there fails for a reason that has nothing to do with the code
+under test. It tries `RCCL_HOST_TEST_SCRATCH_DIR`, then the build directory,
+then `TMPDIR`, and these tests skip only if none of the three allows execution.
+`ScopedDir` takes that directory as its optional second argument.
+
 ## Standalone host-only build (no full librccl build)
 
 `test/host/CMakeLists.txt` is dual-mode. Alongside the in-RCCL-build target

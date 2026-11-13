@@ -625,6 +625,7 @@ function(rccl_define_micro_source_lists)
   # Own binary like every other unit under test; it also makes the dispatcher run its own tests.
   set(TEST_MICRO_HOST_DISPATCH_SOURCE_FILES
     host-test-dispatch-test.cc
+    host-dispatch-e2e-test.cc
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 
@@ -3381,9 +3382,28 @@ rccl_add_micro_binary(rccl-UnitTestsMicroMisc
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroHostDispatch
 # ---------------------------------------------------------------------------
+# The fixture binary host-dispatch-e2e-test.cc drives the real front door against. Deliberately
+# not a micro binary: it is absent from the manifest, so the front door this build ships never
+# fronts it, and it is built off to one side where the tests copy it from.
+add_executable(rccl-host-dispatch-fixture host_test_dispatch_fixture.cc)
+set_target_properties(rccl-host-dispatch-fixture PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/fixtures")
+target_compile_options(rccl-host-dispatch-fixture PRIVATE --offload-host-only)
+target_link_options(rccl-host-dispatch-fixture PRIVATE -no-hip-rt)
+
 rccl_add_micro_binary(rccl-UnitTestsMicroHostDispatch
   SOURCES ${TEST_MICRO_HOST_DISPATCH_SOURCE_FILES}
-  EXTRA_DEFS ${_MICRO_MODE_DEFS})
+  EXTRA_DEFS
+    ${_MICRO_MODE_DEFS}
+    HOST_DISPATCH_FIXTURE_PATH="$<TARGET_FILE:rccl-host-dispatch-fixture>"
+    # The front door is NOT made a target-level dependency: it already depends on every micro
+    # binary, this one included, and naming it here would close that into a cycle. The build that
+    # produces this binary produces that one too.
+    HOST_DISPATCH_FRONT_DOOR_PATH="$<TARGET_FILE:rccl-UnitTestsHostAll>"
+    # Somewhere these tests can write a file and then execute it, for the machines where TMPDIR
+    # is mounted noexec. See ExecutableScratch.h.
+    RCCL_HOST_TEST_BUILD_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+add_dependencies(rccl-UnitTestsMicroHostDispatch rccl-host-dispatch-fixture)
 
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroDdaIpcLifecycle -- host-only DDA IPC init/teardown lifecycle

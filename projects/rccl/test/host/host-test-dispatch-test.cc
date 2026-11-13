@@ -33,6 +33,7 @@
 
 #include <sched.h>
 
+#include "ExecutableScratch.h"
 #include "LogCapture.hpp"
 #include "ScopedDir.h"
 
@@ -1028,8 +1029,9 @@ TEST(HostDispatchManifestMicrotest, AManifestEntryThatIsAPathIsRefused)
 namespace {
 
 // An executable shell script named *name* under *dir*, or an empty string when this filesystem
-// will not let us run one. TMPDIR is mounted noexec on some developer machines and in some
-// containers, and a test that needs to exec a fixture has nothing to say there.
+// will not let us run one. Give *dir* an executableScratchDirectory() base (ExecutableScratch.h)
+// so this works where TMPDIR is mounted noexec; the empty return is for the machine where no
+// candidate directory allows it at all.
 std::string addScript(const ScopedDir &dir, const std::string &name, const std::string &body)
 {
     const std::filesystem::path file = std::filesystem::path(dir.path()) / name;
@@ -1048,10 +1050,10 @@ constexpr std::chrono::seconds kListingSlack{5};
 
 TEST(HostDispatchListTestsMicrotest, ABinaryThatAnswersIsListed)
 {
-    const ScopedDir dir("rccl-host-dispatch-listing");
+    const ScopedDir dir("rccl-host-dispatch-listing", rccl_host_test::executableScratchDirectory());
     const std::string script = addScript(dir, "lister", "echo 'Suite.'\necho '  Case'\n");
     if (script.empty()) {
-        GTEST_SKIP() << "TMPDIR is mounted noexec, so a fixture binary cannot be run here";
+        GTEST_SKIP() << "no directory here allows executing a file written to it";
     }
 
     const std::optional<std::string> output = listTestsOutput(script, std::chrono::seconds{0});
@@ -1065,11 +1067,11 @@ TEST(HostDispatchListTestsMicrotest, WhatABinarySaysOnStderrStaysOutOfItsListing
     // The listing is parsed, and a line of noise in the middle of it is indistinguishable from a
     // suite name. This used to be a 2>/dev/null in a shell command; the shell has gone, so the
     // redirection has to be done to the child itself.
-    const ScopedDir dir("rccl-host-dispatch-listing");
+    const ScopedDir dir("rccl-host-dispatch-listing", rccl_host_test::executableScratchDirectory());
     const std::string script =
         addScript(dir, "noisy", "echo 'Loading plugin' >&2\necho 'Suite.'\necho '  Case'\n");
     if (script.empty()) {
-        GTEST_SKIP() << "TMPDIR is mounted noexec, so a fixture binary cannot be run here";
+        GTEST_SKIP() << "no directory here allows executing a file written to it";
     }
 
     const std::optional<std::string> output = listTestsOutput(script, std::chrono::seconds{0});
@@ -1083,10 +1085,10 @@ TEST(HostDispatchListTestsMicrotest, ABinaryThatWillNotAnswerIsKilledAtItsTimeou
     // The failure this exists for. A listing was a popen(), which hands back no pid, so there
     // was nothing to time out and nothing to signal: one binary hanging in a static constructor
     // hung the entire run, and the child timeout the caller had set did not apply to it.
-    const ScopedDir dir("rccl-host-dispatch-listing");
+    const ScopedDir dir("rccl-host-dispatch-listing", rccl_host_test::executableScratchDirectory());
     const std::string script = addScript(dir, "hanger", "exec sleep 600\n");
     if (script.empty()) {
-        GTEST_SKIP() << "TMPDIR is mounted noexec, so a fixture binary cannot be run here";
+        GTEST_SKIP() << "no directory here allows executing a file written to it";
     }
 
     const std::chrono::steady_clock::time_point start = std::chrono::steady_clock::now();
@@ -1102,10 +1104,10 @@ TEST(HostDispatchListTestsMicrotest, AStopEndsAListingThatHasNoTimeout)
     // An unbounded listing is still the default, and must not be the one phase of the run that
     // a stop cannot reach.
     const ScopedStopHandling handling;
-    const ScopedDir dir("rccl-host-dispatch-listing");
+    const ScopedDir dir("rccl-host-dispatch-listing", rccl_host_test::executableScratchDirectory());
     const std::string script = addScript(dir, "hanger", "exec sleep 600\n");
     if (script.empty()) {
-        GTEST_SKIP() << "TMPDIR is mounted noexec, so a fixture binary cannot be run here";
+        GTEST_SKIP() << "no directory here allows executing a file written to it";
     }
 
     std::thread stopper([] {
