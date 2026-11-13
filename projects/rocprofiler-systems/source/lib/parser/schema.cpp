@@ -5,6 +5,7 @@
 
 #include "common/string_utility.hpp"
 
+#include <algorithm>
 #include <cstddef>
 #include <optional>
 #include <string>
@@ -73,14 +74,8 @@ namespace
 [[nodiscard]] bool
 alias_matches(const choice& item, std::string_view token)
 {
-    for(const auto& alias : item.aliases)
-    {
-        if(alias == token)
-        {
-            return true;
-        }
-    }
-    return false;
+    return std::ranges::any_of(item.aliases,
+                               [&](const std::string& alias) { return alias == token; });
 }
 
 std::string

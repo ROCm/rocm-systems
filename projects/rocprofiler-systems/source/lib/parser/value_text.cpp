@@ -2,12 +2,15 @@
 // SPDX-License-Identifier: MIT
 
 #include "parser/value_text.hpp"
+#include "parser/schema.hpp"
 
 #include "common/string_utility.hpp"
 
+#include <algorithm>
 #include <array>
 #include <charconv>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <limits>
 #include <optional>
@@ -15,65 +18,31 @@
 #include <string_view>
 #include <system_error>
 #include <utility>
+#include <variant>
 #include <vector>
-
-#if !defined(__cpp_lib_to_chars) || __cpp_lib_to_chars < 201611L
-#    include <cctype>
-#    include <cstddef>
-#    include <cstdio>
-#    include <stdexcept>
-#endif
 
 namespace rocprofsys::parser
 {
 std::optional<std::int64_t>
 parse_integer(std::string_view value)
 {
-    std::int64_t result{};
-    const auto*  last    = value.data() + value.size();
-    const auto [ptr, ec] = std::from_chars(value.data(), last, result);
-    if(ec != std::errc{} || ptr != last)
+    const auto parsed = utility::string::safe_from_chars<std::int64_t>(value);
+    if(parsed.is_error())
     {
         return std::nullopt;
     }
-    return result;
+    return parsed.value();
 }
 
 std::optional<double>
 parse_number(std::string_view value)
 {
-    double result{};
-#if defined(__cpp_lib_to_chars) && __cpp_lib_to_chars >= 201611L
-    const auto* last     = value.data() + value.size();
-    const auto [ptr, ec] = std::from_chars(value.data(), last, result);
-    if(ec != std::errc{} || ptr != last)
+    const auto parsed = utility::string::safe_from_chars<double>(value);
+    if(parsed.is_error() || !std::isfinite(parsed.value()))
     {
         return std::nullopt;
     }
-#else
-    // std::stod skips leading whitespace, which std::from_chars rejects.
-    if(value.empty() || std::isspace(static_cast<unsigned char>(value.front())) != 0)
-    {
-        return std::nullopt;
-    }
-    try
-    {
-        std::size_t consumed = 0;
-        result               = std::stod(std::string{ value }, &consumed);
-        if(consumed != value.size())
-        {
-            return std::nullopt;
-        }
-    } catch(const std::logic_error&)
-    {
-        return std::nullopt;
-    }
-#endif
-    if(!std::isfinite(result))
-    {
-        return std::nullopt;
-    }
-    return result;
+    return parsed.value();
 }
 
 std::optional<bool>
@@ -120,15 +89,15 @@ parse_boolean(std::string_view value)
     return *parsed != 0;
 }
 
-namespace
-{
-constexpr double k_int64_upper = 0x1p63;
-
-[[nodiscard]] std::optional<std::int64_t>
+std::optional<std::int64_t>
 exact_integer_bound(double bound)
 {
-    const auto lowest = static_cast<double>(std::numeric_limits<std::int64_t>::min());
-    if(bound < lowest || bound >= k_int64_upper)
+    // The std::int64_t maximum rounds up to 2^63 as a double, which is out of range.
+    constexpr auto k_int64_upper =
+        static_cast<double>(std::numeric_limits<std::int64_t>::max());
+    constexpr auto k_int64_lower =
+        static_cast<double>(std::numeric_limits<std::int64_t>::min());
+    if(std::isnan(bound) || bound < k_int64_lower || bound >= k_int64_upper)
     {
         return std::nullopt;
     }
@@ -139,6 +108,12 @@ exact_integer_bound(double bound)
     }
     return as_integer;
 }
+
+namespace
+{
+// Room for any std::int64_t, and for any double in general format.
+constexpr std::size_t k_integer_text_size = 32;
+constexpr std::size_t k_number_text_size  = 64;
 
 [[nodiscard]] bool
 integer_in_range(std::int64_t value, const schema_param& param)
@@ -168,14 +143,8 @@ number_in_range(double value, const schema_param& param)
 [[nodiscard]] bool
 choice_listed(const schema_param& param, std::string_view value)
 {
-    for(const auto& item : param.choices)
-    {
-        if(item.value == value)
-        {
-            return true;
-        }
-    }
-    return false;
+    return std::ranges::any_of(param.choices,
+                               [&](const choice& item) { return item.value == value; });
 }
 
 [[nodiscard]] bool
@@ -187,8 +156,8 @@ choice_accepted(const schema_param& param, std::string_view value)
 [[nodiscard]] std::string
 format_integer(std::int64_t value)
 {
-    std::array<char, 32> buffer{};
-    const auto           result =
+    std::array<char, k_integer_text_size> buffer{};
+    const auto                            result =
         std::to_chars(buffer.data(), buffer.data() + buffer.size(), value);
     return std::string{ buffer.data(), result.ptr };
 }
@@ -196,23 +165,14 @@ format_integer(std::int64_t value)
 [[nodiscard]] std::string
 format_number(double value)
 {
-#if defined(__cpp_lib_to_chars) && __cpp_lib_to_chars >= 201611L
-    std::array<char, 64> buffer{};
+    std::array<char, k_number_text_size> buffer{};
     const auto result = std::to_chars(buffer.data(), buffer.data() + buffer.size(), value,
                                       std::chars_format::general);
-    if(result.ec == std::errc{})
+    if(result.ec != std::errc{})
     {
-        return std::string{ buffer.data(), result.ptr };
+        return {};
     }
-#else
-    std::array<char, 64> buffer{};
-    const auto written = std::snprintf(buffer.data(), buffer.size(), "%g", value);
-    if(written > 0)
-    {
-        return std::string{ buffer.data() };
-    }
-#endif
-    return {};
+    return std::string{ buffer.data(), result.ptr };
 }
 
 [[nodiscard]] std::string
@@ -229,53 +189,58 @@ format_list(const std::vector<std::string>& parts)
     }
     return joined;
 }
+
+// One overload per config_value_t alternative: each accepts the parameter types
+// that are stored as that alternative.
+[[nodiscard]] bool
+accepts_held(const schema_param& param, bool /*value*/)
+{
+    return param.type == param_type::boolean;
+}
+
+[[nodiscard]] bool
+accepts_held(const schema_param& param, std::int64_t value)
+{
+    return param.type == param_type::integer && integer_in_range(value, param);
+}
+
+[[nodiscard]] bool
+accepts_held(const schema_param& param, double value)
+{
+    return param.type == param_type::number && number_in_range(value, param);
+}
+
+[[nodiscard]] bool
+accepts_held(const schema_param& param, const std::string& value)
+{
+    switch(param.type)
+    {
+        case param_type::string: return true;
+        case param_type::path: return !value.empty();
+        case param_type::enumeration: return choice_accepted(param, value);
+        case param_type::boolean:
+        case param_type::integer:
+        case param_type::number:
+        case param_type::enumeration_list: return false;
+    }
+    return false;
+}
+
+[[nodiscard]] bool
+accepts_held(const schema_param& param, const std::vector<std::string>& parts)
+{
+    return param.type == param_type::enumeration_list &&
+           std::ranges::all_of(parts, [&](const std::string& element) {
+               return !element.empty() && choice_accepted(param, element);
+           });
+}
 }  // namespace
 
 bool
 accepts_value(const schema_param& param, const config_value_t& value)
 {
-    switch(param.type)
-    {
-        case param_type::boolean: return std::holds_alternative<bool>(value);
-        case param_type::integer:
-        {
-            const auto* integer = std::get_if<std::int64_t>(&value);
-            return integer != nullptr && integer_in_range(*integer, param);
-        }
-        case param_type::number:
-        {
-            const auto* number = std::get_if<double>(&value);
-            return number != nullptr && number_in_range(*number, param);
-        }
-        case param_type::string: return std::holds_alternative<std::string>(value);
-        case param_type::path:
-        {
-            const auto* text = std::get_if<std::string>(&value);
-            return text != nullptr && !text->empty();
-        }
-        case param_type::enumeration:
-        {
-            const auto* text = std::get_if<std::string>(&value);
-            return text != nullptr && choice_accepted(param, *text);
-        }
-        case param_type::enumeration_list:
-        {
-            const auto* parts = std::get_if<std::vector<std::string>>(&value);
-            if(parts == nullptr)
-            {
-                return false;
-            }
-            for(const auto& element : *parts)
-            {
-                if(element.empty() || !choice_accepted(param, element))
-                {
-                    return false;
-                }
-            }
-            return true;
-        }
-    }
-    return false;
+    return std::visit([&param](const auto& held) { return accepts_held(param, held); },
+                      value);
 }
 
 std::optional<config_value_t>

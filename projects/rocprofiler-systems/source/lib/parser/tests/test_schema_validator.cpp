@@ -8,6 +8,8 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <cstdint>
+#include <limits>
 #include <string>
 #include <utility>
 #include <vector>
@@ -19,6 +21,7 @@ namespace
 constexpr double k_integer_max       = 10.0;
 constexpr double k_number_min        = 0.5;
 constexpr double k_number_max        = 1.5;
+constexpr double k_inverted_minimum  = 2.5;
 constexpr double k_frequency_minimum = 1.0;
 constexpr double k_frequency_maximum = 1000.0;
 
@@ -298,11 +301,17 @@ TEST(parser_schema_validator, reports_a_two_sided_exclusion_once)
 
 TEST(parser_schema_validator, integer_above_two_to_the_53_respects_its_maximum)
 {
-    constexpr double k_exact_integer_limit = 9007199254740992.0;
-    auto             param                 = make_param(param_type::integer);
-    param.max                              = k_exact_integer_limit;
-    EXPECT_TRUE(is_valid_value(param, "9007199254740992"));
-    EXPECT_FALSE(is_valid_value(param, "9007199254740993"));
+    // 2 ^ 53
+    constexpr int k_ieee_double_digits = 53;
+    static_assert(std::numeric_limits<double>::digits == k_ieee_double_digits);
+    constexpr auto k_exact_integer_limit = std::int64_t{ 1 }
+                                           << std::numeric_limits<double>::digits;
+
+    auto param = make_param(param_type::integer);
+    param.max  = static_cast<double>(k_exact_integer_limit);
+
+    EXPECT_TRUE(is_valid_value(param, std::to_string(k_exact_integer_limit)));
+    EXPECT_FALSE(is_valid_value(param, std::to_string(k_exact_integer_limit + 1)));
 }
 
 TEST(parser_schema_validator, catalog_check_accepts_the_profiler_fixture)
@@ -319,8 +328,8 @@ TEST(parser_schema_validator, catalog_check_reports_structural_errors)
                            .category      = "missing",
                            .type          = param_type::integer,
                            .default_value = "maybe",
-                           .min           = 2.5,
-                           .max           = 1.5,
+                           .min           = k_inverted_minimum,
+                           .max           = k_number_max,
                            .env           = "ROCPROFSYS_COUNT",
                            .conflicts     = { "absent" },
                        });

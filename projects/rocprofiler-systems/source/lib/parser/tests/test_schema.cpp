@@ -157,12 +157,9 @@ TEST(parser_schema, effect_fields_round_trip)
     EXPECT_EQ(stored->assigns.at("log_level"), "debug");
     ASSERT_EQ(stored->choices.size(), 1U);
     EXPECT_EQ(stored->choices.front().aliases, std::vector<std::string>({ "proto" }));
-    ASSERT_TRUE(stored->arg.has_value());
-    EXPECT_EQ(*stored->arg, "--flat-profile");
-    ASSERT_TRUE(stored->arg_min_count.has_value());
-    ASSERT_TRUE(stored->arg_max_count.has_value());
-    EXPECT_EQ(*stored->arg_min_count, 1U);
-    EXPECT_EQ(*stored->arg_max_count, 2U);
+    EXPECT_EQ(stored->arg, "--flat-profile");
+    EXPECT_EQ(stored->arg_min_count, 1U);
+    EXPECT_EQ(stored->arg_max_count, 2U);
 }
 
 TEST(parser_schema, records_a_backend_name)
@@ -227,11 +224,9 @@ TEST(parser_schema, canonical_choice_rewrites_aliases)
 
 TEST(parser_schema, split_list_trims_and_rejects_an_empty_separator)
 {
-    const auto parts = split_list(" alpha, beta ", ",");
-    ASSERT_TRUE(parts.has_value());
-    EXPECT_EQ(*parts, (std::vector<std::string>{ "alpha", "beta" }));
-    EXPECT_TRUE(split_list("", ",").has_value());
-    EXPECT_TRUE(split_list("", ",")->empty());
+    EXPECT_EQ(split_list(" alpha, beta ", ","),
+              (std::vector<std::string>{ "alpha", "beta" }));
+    EXPECT_EQ(split_list("", ","), std::vector<std::string>{});
     EXPECT_FALSE(split_list("alpha", "").has_value());
 }
 

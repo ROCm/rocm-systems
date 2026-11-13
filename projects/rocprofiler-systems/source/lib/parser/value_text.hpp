@@ -30,6 +30,12 @@ parse_integer(std::string_view value);
 [[nodiscard]] std::optional<double>
 parse_number(std::string_view value);
 
+/// The std::int64_t that @p bound names exactly, or nullopt when @p bound is NaN, has
+/// a fraction, or is outside the std::int64_t range. Integer min and max are stored
+/// as doubles.
+[[nodiscard]] std::optional<std::int64_t>
+exact_integer_bound(double bound);
+
 /// True when @p value is text the parameter accepts.
 [[nodiscard]] bool
 accepts_text(const schema_param& param, std::string_view value);

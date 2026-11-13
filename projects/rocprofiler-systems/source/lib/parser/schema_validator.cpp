@@ -8,37 +8,17 @@
 #include <fmt/format.h>
 
 #include <algorithm>
-#include <cstdint>
-#include <limits>
-#include <optional>
 #include <set>
 #include <string>
 #include <string_view>
 #include <utility>
+#include <variant>
 #include <vector>
 
 namespace rocprofsys::parser
 {
 namespace
 {
-constexpr double k_int64_upper = 0x1p63;
-
-[[nodiscard]] std::optional<std::int64_t>
-exact_integer_bound(double bound)
-{
-    const auto lowest = static_cast<double>(std::numeric_limits<std::int64_t>::min());
-    if(bound < lowest || bound >= k_int64_upper)
-    {
-        return std::nullopt;
-    }
-    const auto as_integer = static_cast<std::int64_t>(bound);
-    if(static_cast<double>(as_integer) != bound)
-    {
-        return std::nullopt;
-    }
-    return as_integer;
-}
-
 class configuration_checker
 {
 public:
