@@ -10,6 +10,7 @@
 #include "archinfo.h"
 #include "cudawrap.h"
 #include "gin/gin_host.h"
+#include "gin/gin_type_env.h"
 #include "gin.h"
 
 const int NCCL_GIN_IB_ALLGATHER_TAG = 0xa0;
@@ -100,12 +101,20 @@ static bool ncclNetIbDevIsMlx5(int dev) {
   return true;
 }
 
-// On gfx1250 under IB-CAST a second ibv_get_device_list SIGSEGVs (ionic, bng_re). Skipping leaves no RMA plugin, so
-// only that case skips, and only with NCCL_GIN_TYPE unset or Anvil SDMA; an explicit proxy or GDAKI type still inits.
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+// net_ib_cast/common.cc; -1 until IbCastInitDevices reaches its ibv_get_device_list.
+extern int IbCastNDevs;
+#endif
+
+// On gfx1250, once IB-CAST has listed the verbs devices, a second ibv_get_device_list SIGSEGVs (ionic, bng_re).
+// Skipping leaves no RMA plugin, so only that case skips, and only when no requested GIN type uses the IB RMA
+// proxy: NCCL_GIN_TYPE unset or Anvil SDMA, and RCCL_GIN_TYPE_LIST not naming proxy GIN.
 static bool ncclGinIbSkipVerbsInit(int type) {
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
   if (type >= 0 && type != (int)NCCL_NET_DEVICE_GIN_ANVIL_SDMA) return false;
-  if (!rcclInternalNetIsIbCast()) return false;
+  uint64_t ginTypeMask;
+  if (type < 0 && ncclGinTypeListMask(&ginTypeMask) && (ginTypeMask & (1ULL << NCCL_GIN_TYPE_PROXY))) return false;
+  if (!rcclInternalNetIsIbCast() || IbCastNDevs < 0) return false;
   int dev = 0;
   if (cudaGetDevice(&dev) != cudaSuccess) return false;
   char arch[256];
