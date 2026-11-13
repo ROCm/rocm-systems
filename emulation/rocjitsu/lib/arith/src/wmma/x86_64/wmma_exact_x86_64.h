@@ -11,7 +11,7 @@
 #include "common/bits.h"
 #include "common/compiler.h"
 #include "dot/x86_64/exact_dot_x86_64.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_wmma.h"
 #include "wmma/layout.h"
 
 #include <stdint.h>

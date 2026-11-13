@@ -4,8 +4,7 @@
 //! Compile the vendored `AddrLib3` source and its narrow C bridge.
 
 use std::env;
-use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::path::PathBuf;
 
 const SOURCES: &[&str] = &[
     "src/addrinterface.cpp",
@@ -22,89 +21,52 @@ const SOURCES: &[&str] = &[
     "src/gfx12/gfx12addrlib.cpp",
 ];
 
-fn run(command: &mut Command) -> Result<(), Box<dyn std::error::Error>> {
-    let status = command.status()?;
-    if !status.success() {
-        return Err(std::io::Error::other(format!("native AddrLib build failed: {status}")).into());
-    }
-    Ok(())
-}
-
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let target = env::var("CARGO_CFG_TARGET_OS")?;
-    if target != "linux" {
-        return Err(std::io::Error::other("rocaddr3 requires a Linux C++ toolchain").into());
+    if !matches!(target.as_str(), "linux" | "windows") {
+        return Err(
+            std::io::Error::other("rocaddr3 supports Linux and Windows native toolchains").into(),
+        );
     }
-    let crate_dir = PathBuf::from(
-        env::var_os("CARGO_MANIFEST_DIR")
-            .ok_or_else(|| std::io::Error::other("Cargo did not provide the crate directory"))?,
-    );
-    let output = PathBuf::from(
-        env::var_os("OUT_DIR")
-            .ok_or_else(|| std::io::Error::other("Cargo did not provide the output directory"))?,
-    );
-    let vendor = crate_dir.join("vendor/addrlib");
-    let include = [
-        vendor.clone(),
-        vendor.join("inc"),
-        vendor.join("src"),
-        vendor.join("src/core"),
-        vendor.join("src/gfx9"),
-        vendor.join("src/gfx10"),
-        vendor.join("src/gfx11"),
-        vendor.join("src/gfx12"),
-        vendor.join("src/chip/r800"),
-        vendor.join("src/chip/gfx9"),
-        vendor.join("src/chip/gfx10"),
-        vendor.join("src/chip/gfx11"),
-        vendor.join("src/chip/gfx12"),
-    ];
-    let compiler = env::var_os("CXX").unwrap_or_else(|| "c++".into());
-    let archiver = env::var_os("AR").unwrap_or_else(|| "ar".into());
-    println!("cargo:rerun-if-env-changed=CXX");
-    println!("cargo:rerun-if-env-changed=AR");
+    let vendor = PathBuf::from(env::var("CARGO_MANIFEST_DIR")?).join("vendor/addrlib");
+    let mut build = cc::Build::new();
+    build
+        .cpp(true)
+        .std("c++17")
+        .opt_level(2)
+        .pic(true)
+        .warnings(false)
+        .define("BRAHMA_BUILD", "1")
+        .define("AMD_INTERNAL_BUILD", None)
+        .define("LITTLEENDIAN_CPU", None);
+    if target == "linux" {
+        build.define("LINUX", None).define("UNIX_OS", None);
+    }
+    for directory in [
+        "",
+        "inc",
+        "src",
+        "src/core",
+        "src/gfx9",
+        "src/gfx10",
+        "src/gfx11",
+        "src/gfx12",
+        "src/chip/r800",
+        "src/chip/gfx9",
+        "src/chip/gfx10",
+        "src/chip/gfx11",
+        "src/chip/gfx12",
+    ] {
+        build.include(vendor.join(directory));
+    }
+    for source in SOURCES {
+        build.file(vendor.join(source));
+    }
+    build.file("src/bridge.cpp");
     println!("cargo:rerun-if-changed={}", vendor.display());
     println!("cargo:rerun-if-changed=src/bridge.cpp");
-    let mut objects = Vec::new();
-    for (index, source) in SOURCES.iter().enumerate() {
-        let path = vendor.join(source);
-        let object = output.join(format!("addr{index}.o"));
-        compile(&compiler, &path, &object, &include)?;
-        objects.push(object);
-    }
-    let bridge = crate_dir.join("src/bridge.cpp");
-    let object = output.join("bridge.o");
-    compile(&compiler, &bridge, &object, &include)?;
-    objects.push(object);
-    let archive = output.join("librocaddr3_native.a");
-    let mut command = Command::new(archiver);
-    command.arg("crs").arg(&archive).args(&objects);
-    run(&mut command)?;
-    println!("cargo:rustc-link-search=native={}", output.display());
-    println!("cargo:rustc-link-lib=static=rocaddr3_native");
-    println!("cargo:rustc-link-lib=dylib=stdc++");
+    // cc selects target compiler/archive flags and C++ runtime linkage. Its
+    // standard target-qualified CXX/AR variables also support provisioned SDKs.
+    build.try_compile("rocaddr3_native")?;
     Ok(())
-}
-
-fn compile(
-    compiler: &std::ffi::OsStr,
-    source: &Path,
-    object: &Path,
-    include: &[PathBuf],
-) -> Result<(), Box<dyn std::error::Error>> {
-    let mut command = Command::new(compiler);
-    command
-        .arg("-std=c++17")
-        .arg("-fPIC")
-        .arg("-O2")
-        .arg("-DBRAHMA_BUILD=1")
-        .arg("-DAMD_INTERNAL_BUILD")
-        .arg("-DLITTLEENDIAN_CPU")
-        .arg("-DLINUX")
-        .arg("-DUNIX_OS");
-    for directory in include {
-        command.arg("-I").arg(directory);
-    }
-    command.arg("-c").arg(source).arg("-o").arg(object);
-    run(&mut command)
 }

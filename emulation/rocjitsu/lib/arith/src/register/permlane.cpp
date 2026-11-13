@@ -7,8 +7,8 @@
 // Lane selection and inactive-source rules follow rocjitsu's RDNA4 VOP3 models.
 
 #include "register/permlane.h"
-#include "common/internal.h"
-#include "rj_arith/rj_arith.h"
+#include "common/validation.h"
+#include "rj_arith/detail/rj_arith_register.h"
 
 #include <stdint.h>
 

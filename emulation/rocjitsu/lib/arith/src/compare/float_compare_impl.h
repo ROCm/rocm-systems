@@ -7,7 +7,7 @@
 #include "common/isa.h"
 #include "compare/float_compare.h"
 #include "compare/predicate.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_common.h"
 #include <stdint.h>
 
 namespace rocjitsu::arith::RJ_ARITH_IMPL_NAMESPACE {

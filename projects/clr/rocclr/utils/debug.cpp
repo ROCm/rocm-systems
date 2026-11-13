@@ -308,7 +308,7 @@ void truncate_log_file() {
     long size = ftell(outFile);
 
     const size_t maxLogSize = AMD_LOG_LEVEL_SIZE * Mi;
-    if (size > maxLogSize) {
+    if (size > 0 && static_cast<size_t>(size) > maxLogSize) {
       if (nullptr == freopen(NULL, "w", outFile)) {
         outFile = stderr;
       }
