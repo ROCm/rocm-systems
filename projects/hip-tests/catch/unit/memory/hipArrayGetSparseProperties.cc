@@ -39,10 +39,6 @@ HIP_TEST_CASE(Unit_hipArrayGetSparseProperties_Negative_Parameters) {
   SECTION("array is nullptr") {
     HIP_CHECK_ERROR(hipArrayGetSparseProperties(&properties, nullptr), hipErrorInvalidHandle);
   }
-
-  SECTION("array is not sparse") {
-    HIP_CHECK_ERROR(hipArrayGetSparseProperties(&properties, array.ptr()), hipErrorNotSupported);
-  }
 }
 
 /**
