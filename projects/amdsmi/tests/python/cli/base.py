@@ -727,32 +727,21 @@ class TestCliBase(unittest.TestCase):
                     nameStr == "{min_power}" or nameStr == "{avg_power}" or nameStr == "{max_power}"
                 ):
                     # For setting --power-cap
-                    # Stop at the match; a later iteration would overwrite it with "N/A".
-                    for power_type in self.power_types:
-                        if power_type in cmd:
-                            power_type = self.static_data["gpu_data"][gpu_index]["limit"][
-                                power_type
-                            ]
+                    # Stop at the match; a later iteration would overwrite it with None.
+                    for sensor in self.power_types:
+                        if sensor in cmd:
                             break
                     else:
-                        power_type = "N/A"
-                    if (
-                        power_type == "N/A"
-                        or not isinstance(power_type, dict)
-                        or power_type["min_power_limit"] == "N/A"
-                        or power_type["max_power_limit"] == "N/A"
-                    ):
+                        sensor = None
+                    power_range = self._power_cap_range(sensor, gpu_index, explicit_gpu)
+                    if power_range is None:
                         cmd = ""
                     else:
+                        min_power, max_power, zero_cap = power_range
                         # A current cap of 0 means the CLI refuses every write to this
                         # sensor, whatever value is asked for.
-                        current_cap = power_type["socket_power_limit"]
-                        if isinstance(current_cap, dict) and current_cap["value"] == 0:
+                        if zero_cap:
                             cond = [*ok, AmdSmiExitCode.INVALID_PARAMETER_VALUE]
-                        # The CLI clamps its lower bound to 1, so a reported min of 0
-                        # is refused rather than being the smallest settable cap.
-                        min_power = max(power_type["min_power_limit"]["value"], 1)
-                        max_power = power_type["max_power_limit"]["value"]
                         avg_power = int((min_power + max_power) / 2)
                         if nameStr == "{min_power}":
                             cmd = cmd.replace("{min_power}", str(min_power), 1)
@@ -1026,23 +1015,78 @@ class TestCliBase(unittest.TestCase):
                 defaulting to it while actually running on every device.
 
         Returns:
-            int: the highest settable level plus one, or 0 when the device does
-            not expose the clock -- in which case the caller drops the command.
+            int: the highest settable level plus one, or 0 when the device -- or,
+            without an explicit --gpu, any device -- does not expose the clock, in
+            which case the caller drops the command.
         """
+        # Without an explicit --gpu the command runs on every device, so the mask has
+        # to be one the smallest table accepts, and every device must expose the
+        # clock: one that does not fails with a different code than the rest, and the
+        # CLI then exits MIXED_DEVICE_ERRORS. Explicit --gpu commands still cover each.
         if clk_type == "PCIE":
-            pcie_levels = self.static_data["gpu_data"][gpu_index]["bus"]["pcie_levels"]
-            return len(pcie_levels) if isinstance(pcie_levels, dict) else 0
+            if explicit_gpu:
+                indices = [gpu_index]
+            else:
+                indices = range(len(self.static_data["gpu_data"]))
+            per_gpu = []
+            for index in indices:
+                pcie_levels = self.static_data["gpu_data"][index]["bus"]["pcie_levels"]
+                if not isinstance(pcie_levels, dict) or not pcie_levels:
+                    return 0
+                per_gpu.append(len(pcie_levels))
+            return min(per_gpu) if per_gpu else 0
 
-        # Without an explicit --gpu the command runs on every device, so the mask
-        # has to be one the smallest table also accepts.
         tables = [self.clk_freq[gpu_index]] if explicit_gpu else self.clk_freq
         per_gpu = []
         for table in tables:
             freq = table.get(clk_type)
-            if freq and freq["num_supported"]:
-                # The deep-sleep row occupies a table slot but is not settable.
-                per_gpu.append(freq["num_supported"] - int(freq["has_deep_sleep"]))
+            if not freq or not freq["num_supported"]:
+                return 0
+            # The deep-sleep row occupies a table slot but is not settable.
+            per_gpu.append(freq["num_supported"] - int(freq["has_deep_sleep"]))
         return min(per_gpu) if per_gpu else 0
+
+    def _power_cap_range(self, sensor, gpu_index, explicit_gpu):
+        """The ``--power-cap`` range every target device accepts for *sensor*.
+
+        Without an explicit --gpu the command runs on every device, so the range is
+        the overlap of each device's range: on a mixed host a value one device
+        accepts can be out of range for another (e.g. 1-290 W next to 255-272 W).
+
+        Args:
+            sensor: power sensor named in the command (``ppt0``/``ppt1``), or None.
+            gpu_index: device the command reads its values from.
+            explicit_gpu: whether the command named that device.
+
+        Returns:
+            tuple: ``(min_power, max_power, zero_cap)``, ``zero_cap`` being whether
+            any target device's current cap is 0; or None when *sensor* is None, a
+            target device does not expose it, or the ranges do not overlap -- in
+            which case the caller drops the command.
+        """
+        if sensor is None:
+            return None
+        indices = [gpu_index] if explicit_gpu else range(len(self.static_data["gpu_data"]))
+        lows, highs, zero_cap = [], [], False
+        for index in indices:
+            limits = self.static_data["gpu_data"][index]["limit"][sensor]
+            if (
+                not isinstance(limits, dict)
+                or limits["min_power_limit"] == "N/A"
+                or limits["max_power_limit"] == "N/A"
+            ):
+                return None
+            # The CLI clamps its lower bound to 1, so a reported min of 0
+            # is refused rather than being the smallest settable cap.
+            lows.append(max(limits["min_power_limit"]["value"], 1))
+            highs.append(limits["max_power_limit"]["value"])
+            current_cap = limits["socket_power_limit"]
+            if isinstance(current_cap, dict) and current_cap["value"] == 0:
+                zero_cap = True
+        min_power, max_power = max(lows), min(highs)
+        if min_power > max_power:
+            return None
+        return min_power, max_power, zero_cap
 
     @staticmethod
     def _clk_limit_value(clocks, clk_type, bound):
