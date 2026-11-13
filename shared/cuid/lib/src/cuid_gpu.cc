@@ -232,6 +232,23 @@ unsigned mode_partition_count(const std::string& mode) {
   return 0;
 }
 
+// The partition count amdgpu lists in `parent`'s enforce_isolation, one
+// decimal value per partition (v6.12 and later), or 0 when the file is
+// missing, malformed or lists fewer than two: one partition is SPX, not CPX.
+unsigned listed_partition_count(const std::string& parent) {
+  const std::string text = CuidUtilities::read_sysfs_file(parent + "/enforce_isolation");
+  unsigned count = 0;
+  size_t at = 0;
+  while (at < text.size()) {
+    const size_t end = std::min(text.find(' ', at), text.size());
+    if (end == at || text.find_first_not_of("0123456789", at) < end) return 0;
+    ++count;
+    at = end + 1;
+    if (end < text.size() && at == text.size()) return 0;
+  }
+  return count >= 2 && count <= 8 ? count : 0;
+}
+
 // The driver bound to a PCI function directory, or "".
 std::string pci_driver(const std::string& function) {
   char target[256] = {};
@@ -262,9 +279,10 @@ constexpr const char kPciDevices[] = "/sys/bus/pci/devices";
 // or `device` is not the parent KFD names.
 //
 // Partition k of n has UnitID n*(n-1)/2 + 1 + k. In DPX, TPX and QPX the mode
-// fixes n, so a hidden node elsewhere does not matter, a visible count must
-// agree with it, and more nodes than n are never a partial view. In CPX, or
-// while amdgpu cannot report the mode (during a reset), n is the count of the
+// fixes n, and in CPX the parent's enforce_isolation lists n, so a hidden node
+// elsewhere does not matter, a visible count must agree with it, and more
+// nodes than n are never a partial view. In CPX without that list, or while
+// amdgpu cannot report the mode (during a reset), n is the count of the
 // parent's nodes, which needs every node, and n == 1 is the whole device.
 int kfd_rule(const std::string& device, const std::string& pci_root, const std::string& kfd_nodes) {
   const int minor = render_minor_of(device);
@@ -278,6 +296,7 @@ int kfd_rule(const std::string& device, const std::string& pci_root, const std::
   const auto mode = CuidUtilities::read_sysfs_file(parent + "/current_compute_partition");
   if (mode == "SPX") return 0;
   unsigned n = mode_partition_count(mode);
+  if (mode == "CPX") n = listed_partition_count(parent);
   if (n == 0) {
     if (!partition.complete || !partition.contiguous) return -1;
     n = partition.visible;

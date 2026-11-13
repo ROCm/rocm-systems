@@ -238,11 +238,17 @@ bool HaveMachineId() {
 }
 
 // The GPU as a whole and partition k of n, UnitID n*(n-1)/2 + 1 + k, each by
-// enumeration and each partition by its render node.
-void ExpectPartitions(int n) {
+// enumeration and each partition by its render node, except that the
+// partitions in `none` have no CUID.
+void ExpectPartitions(int n, const std::set<int>& none = {}) {
   if (!HaveMachineId()) GTEST_SKIP() << "no machine-id, so no temporary CUID";
   std::set<std::string> expected{Expected(0)};
-  for (int k = 0; k < n; ++k) expected.insert(Expected(CuidUtilities::partition_unit_id(n, k)));
+  std::set<std::string> any{Expected(0)};
+  for (int k = 0; k < n; ++k) {
+    const std::string cuid = Expected(CuidUtilities::partition_unit_id(n, k));
+    any.insert(cuid);
+    if (!none.count(k)) expected.insert(cuid);
+  }
   std::set<std::string> found;
   for (const auto& entry : Enumerate(AMDCUID_DEVICE_TYPE_GPU)) found.insert(entry.first);
   EXPECT_EQ(found, expected);
@@ -250,8 +256,12 @@ void ExpectPartitions(int n) {
     const std::string render = "/sys/class/drm/renderD" + std::to_string(128 + k);
     const std::string card = "/sys/class/drm/card" + std::to_string(1 + k);
     const std::string expected_cuid = Expected(CuidUtilities::partition_unit_id(n, k));
-    for (const std::string& path : {render, card, render + "/device/xcp"})
-      EXPECT_EQ(LookUp(path), expected_cuid) << path;
+    for (const std::string& path : {render, card, render + "/device/xcp"}) {
+      if (none.count(k))
+        EXPECT_EQ(any.count(LookUp(path)), 0u) << path;
+      else
+        EXPECT_EQ(LookUp(path), expected_cuid) << path;
+    }
   }
   EXPECT_EQ(LookUp("/sys/bus/pci/devices/0000:f5:00.0"), Expected(0));
 }
@@ -317,6 +327,48 @@ TEST(cuidtstSysfsLayout, DpxWithoutXcp) {
 TEST(cuidtstSysfsLayout, CpxWithXcp) {
   REQUIRE_SANDBOX();
   ExpectPartitions(8);
+}
+
+// KFD refuses with EPERM the properties of a partition outside the caller's
+// device cgroup, and the library treats an unreadable properties file as the
+// empty one written here. In CPX amdgpu lists the partitions in the parent's
+// enforce_isolation, so the other partitions keep their UnitIDs.
+TEST(cuidtst, CpxPartitionsBesideAHiddenOneAreCountedFromEnforceIsolation) {
+  for (const bool xcp : {false, true}) {
+    SCOPED_TRACE(xcp ? "xcp" : "no xcp");
+    SysTree tree;
+    const std::string dev = tree.PartitionedGpu(8, "CPX", xcp);
+    tree.Write(dev + "/enforce_isolation", "0 0 0 1 0 0 0 0\n");
+    tree.Write("/class/kfd/kfd/topology/nodes/4/properties", "");
+    RUN_IN_SANDBOX(tree, "CpxPartition3Hidden");
+  }
+}
+
+// Without a list that agrees with KFD, a CPX partition count is the count of
+// KFD nodes, which a hidden node makes unknown: then no partition has a CUID.
+TEST(cuidtst, CpxPartitionsWithoutAProvenCountHaveNoCuid) {
+  const std::pair<const char*, bool> cases[] = {
+      {nullptr, true}, {"0 0 0 0\n", true},          {"0 0 0 0 0 0 0 x\n", true}, {"0\n", true},
+      {"\n", true},    {"0 0 0 0 0 0 0 0 \n", true}, {"0 0 0 0 0 0 0\n", false}};
+  for (const auto& [listed, hidden] : cases) {
+    SCOPED_TRACE(std::string(listed ? listed : "no enforce_isolation") +
+                 (hidden ? ", partition 3 hidden" : ", every node read"));
+    SysTree tree;
+    const std::string dev = tree.PartitionedGpu(8, "CPX", false);
+    if (listed) tree.Write(dev + "/enforce_isolation", listed);
+    if (hidden) tree.Write("/class/kfd/kfd/topology/nodes/4/properties", "");
+    RUN_IN_SANDBOX(tree, "CpxNoPartitions");
+  }
+}
+
+TEST(cuidtstSysfsLayout, CpxPartition3Hidden) {
+  REQUIRE_SANDBOX();
+  ExpectPartitions(8, {3});
+}
+
+TEST(cuidtstSysfsLayout, CpxNoPartitions) {
+  REQUIRE_SANDBOX();
+  ExpectPartitions(8, {0, 1, 2, 3, 4, 5, 6, 7});
 }
 
 // While amdgpu cannot report the mode, as during a reset, the specification
