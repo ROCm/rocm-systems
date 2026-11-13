@@ -21,8 +21,7 @@ Wavefront::Wavefront(ComputeUnitCore &cu, uint32_t wf_id, uint32_t default_wf_si
                      bool mode_has_gpr_idx_en)
     : cu_(cu), cu_view_(cu, *this), wf_id_(wf_id), wf_size_(default_wf_size),
       default_wf_size_(default_wf_size), max_wf_size_(max_wf_size), max_sgprs_(max_sgprs),
-      max_vgprs_(max_vgprs), mode_has_gpr_idx_en_(mode_has_gpr_idx_en),
-      memory_wait_checks_enabled_(cu.config().memory_wait_checks_enabled()) {}
+      max_vgprs_(max_vgprs), mode_has_gpr_idx_en_(mode_has_gpr_idx_en) {}
 
 bool Wavefront::valu_destinations_allocated(const Instruction &inst) const {
   for (int i = 0; i < inst.num_dst_operands(); ++i) {

@@ -731,7 +731,7 @@ void ComputeUnitCore::deliver_memory_trap(Wavefront &wave) {
 
 void ComputeUnitCore::enter_trap_handler(Wavefront &wave, const TrapHandlerConfig &config,
                                          uint32_t trap_id, uint64_t saved_pc) {
-  if (arch() == ROCJITSU_CODE_ARCH_CDNA2 && config_.memory_wait_checks_enabled()) {
+  if (arch() == ROCJITSU_CODE_ARCH_CDNA2 && memory_wait_checks_enabled()) {
     if (auto *scoreboard = wave.memory_wait_scoreboard())
       scoreboard->clear();
   }
@@ -1655,23 +1655,30 @@ void ComputeUnitCore::report_memory_wait(void *context,
   auto &wf = *static_cast<Wavefront *>(context);
   auto &cu = wf.raw_cu();
   const bool replay = hazard.producer.counter == WaitCounterKind::X;
-  const auto count = replay ? ++cu.xcnt_diagnostic_count_ : ++cu.memory_wait_diagnostic_count_;
-  if (count > kMaxMemoryWaitDiagnostics)
-    return;
-  auto counter_name = wait_counter_name(hazard.producer.counter);
-  const auto model = waitcnt_model(cu.arch());
-  if (model.succeeded() && uses_legacy_waitcnt(model.value())) {
-    if (hazard.producer.counter == WaitCounterKind::Load)
-      counter_name = "vmcnt";
-    else if (hazard.producer.counter == WaitCounterKind::Store)
-      counter_name = "vscnt";
-    else if (hazard.producer.counter == WaitCounterKind::Ds)
-      counter_name = "lgkmcnt";
-  }
   const auto max_wait =
       WaitCounterPolicy::maximum_dependency_wait(cu.arch(), hazard.producer.counter);
   const auto required = max_wait.succeeded() ? std::min(hazard.required_wait, max_wait.value())
                                              : hazard.required_wait;
+  if (cu.observes_register_hazards_) {
+    const RegisterHazardObservation observation{hazard.producer.pc,
+                                                hazard.consumer_pc,
+                                                hazard.reg,
+                                                hazard.lanes,
+                                                hazard.bytes,
+                                                hazard.write,
+                                                hazard.producer.counter,
+                                                required,
+                                                hazard.producer.instruction,
+                                                hazard.consumer_instruction};
+    cu.plugin_group_->onAmdgpuRegisterHazard(observation, wf);
+  }
+  if ((replay ? cu.config_.xcnt_diagnostics : cu.config_.memory_wait_diagnostics) ==
+      MemoryWaitDiagnostics::Off)
+    return;
+  const auto count = replay ? ++cu.xcnt_diagnostic_count_ : ++cu.memory_wait_diagnostic_count_;
+  if (count > kMaxMemoryWaitDiagnostics)
+    return;
+  const auto counter_name = wait_counter_name(cu.arch(), hazard.producer.counter);
   const auto register_name = [&] {
     switch (hazard.reg.cls) {
     case RegClass::VGPR:
@@ -1719,6 +1726,21 @@ void ComputeUnitCore::report_memory_wait(void *context,
                               : "memory-wait: further diagnostics on this CU are suppressed");
 }
 
+void ComputeUnitCore::bind_memory_wait(MemoryWaitScoreboard &scoreboard, const Instruction &inst,
+                                       Wavefront &wf) {
+  if (!observes_register_hazards_) {
+    scoreboard.bind(wf.pc, &wf, &ComputeUnitCore::report_memory_wait);
+    return;
+  }
+  std::optional<InstructionSnapshot> instruction;
+  static_assert(InstructionSnapshot::kMaxWords == DecodedInstructionCache::kNumWords);
+  if (inst.raw_encoding() && inst.size() > 0 && inst.size() % sizeof(uint32_t) == 0 &&
+      static_cast<size_t>(inst.size()) <= InstructionSnapshot::kMaxWords * sizeof(uint32_t))
+    instruction.emplace(wf.pc, std::span(inst.raw_encoding(), inst.size() / sizeof(uint32_t)));
+  scoreboard.bind(wf.pc, &wf, &ComputeUnitCore::report_memory_wait,
+                  MemoryWaitScoreboard::Recovery::Retain, std::move(instruction));
+}
+
 void ComputeUnitCore::track_memory_wait(Instruction &inst, Wavefront &wf) {
   using namespace waitcheck_detail;
   // Common single-counter loads have one decoded full-dword destination.
@@ -1741,7 +1763,7 @@ void ComputeUnitCore::track_memory_wait(Instruction &inst, Wavefront &wf) {
                             ? WaitEventKind::Ds
                             : WaitEventKind::VmemNoSamplerLoad;
       auto &scoreboard = wf.ensure_memory_wait_scoreboard();
-      scoreboard.bind(wf.pc, &wf, &ComputeUnitCore::report_memory_wait);
+      bind_memory_wait(scoreboard, inst, wf);
       uint64_t lanes = scalar ? ~uint64_t{0}
                        : info->exec_masked
                            ? wf.exec()
@@ -1762,7 +1784,7 @@ void ComputeUnitCore::track_memory_wait(Instruction &inst, Wavefront &wf) {
               : uint32_t{1} << static_cast<unsigned>(kind);
       const auto sequence =
           scoreboard.issue(counter, scalar, ordering_kind, obligation.counter_increment());
-      if (config_.memory_wait_diagnostics == MemoryWaitDiagnostics::Off)
+      if (!memory_result_checks_enabled())
         return;
       assert(inst.num_dst_operands() == 1);
       const auto &operand = *inst.dst_operand(0);
@@ -1798,7 +1820,7 @@ void ComputeUnitCore::track_memory_wait(Instruction &inst, Wavefront &wf) {
       classified.empty())
     return;
   auto &scoreboard = wf.ensure_memory_wait_scoreboard();
-  scoreboard.bind(wf.pc, &wf, &ComputeUnitCore::report_memory_wait);
+  bind_memory_wait(scoreboard, inst, wf);
   const auto xevent =
       config_.xcnt_checks_enabled()
           ? std::ranges::find(classified, WaitCounterKind::X, &ClassifiedEvent::counter)
@@ -2014,7 +2036,7 @@ void ComputeUnitCore::track_memory_wait(Instruction &inst, Wavefront &wf) {
       xcnt_completion = counter;
     // Replay-only checking still needs completion positions to retire X, but
     // must not add result dependencies or report completion hazards.
-    if (config_.memory_wait_diagnostics == MemoryWaitDiagnostics::Off)
+    if (!memory_result_checks_enabled())
       continue;
     if (event.special_reg && MemoryWaitScoreboard::result_is_written(inst, wf)) {
       scoreboard.add({sequence, wf.pc, ~uint64_t{0}, *event.special_reg, counter,
@@ -2667,19 +2689,26 @@ ComputeUnitCore::issue_instruction_impl(Wavefront *active, MaybeAsyncWindow<Enab
   if (active->needs_execution_effect_mark() && inst->mnemonic() != "s_nop" &&
       inst->mnemonic() != "s_endpgm")
     active->note_potential_execution_effect();
-  auto *wait_state =
-      config_.memory_wait_checks_enabled() ? active->memory_wait_scoreboard() : nullptr;
+  auto *wait_state = memory_wait_checks_enabled() ? active->memory_wait_scoreboard() : nullptr;
   if (wait_state) {
     if (inst->is_waitcnt() || inst->has_embedded_memory_wait() || inst->is_memory_wait_producer() ||
         (config_.arch == ROCJITSU_CODE_ARCH_CDNA5 &&
          waitcheck_detail::WaitcheckTarget::is_xcnt_drain(*inst)))
       wait_state->before(*inst, config_.arch);
-    wait_state->bind(active->pc, active, &ComputeUnitCore::report_memory_wait);
+    bind_memory_wait(*wait_state, *inst, *active);
   }
   const bool wait_for_buffer_lanes =
       wait_state && !wait_state->empty() && inst->is_memory_wait_producer() &&
       MemoryWaitScoreboard::needs_buffer_payload_lanes(*inst, config_.arch);
   bool wait_checked = false;
+  const auto check_memory_wait = [&] {
+    wait_state->check_instruction(*inst, *active);
+    if (active->instruction_execution_failed()) [[unlikely]] {
+      fail_current_instruction();
+      return false;
+    }
+    return true;
+  };
 
   if constexpr (EnableAsync) {
     bool may_submit = true;
@@ -2707,7 +2736,8 @@ ComputeUnitCore::issue_instruction_impl(Wavefront *active, MaybeAsyncWindow<Enab
     if (window) {
       window->before(*inst);
       if (wait_state && !wait_for_buffer_lanes) {
-        wait_state->check_instruction(*inst, *active);
+        if (!check_memory_wait())
+          return IssueOutcome::Issued;
         wait_checked = true;
       }
       const bool submitted = may_submit && window->submit_mma(decoded.value());
@@ -2731,8 +2761,8 @@ ComputeUnitCore::issue_instruction_impl(Wavefront *active, MaybeAsyncWindow<Enab
     }
   }
 
-  if (wait_state && !wait_checked && !wait_for_buffer_lanes)
-    wait_state->check_instruction(*inst, *active);
+  if (wait_state && !wait_checked && !wait_for_buffer_lanes && !check_memory_wait())
+    return IssueOutcome::Issued;
 
   struct ProbeWaitIssue {
     MemoryWaitScoreboard::IssueSnapshot before;
@@ -2740,7 +2770,7 @@ ComputeUnitCore::issue_instruction_impl(Wavefront *active, MaybeAsyncWindow<Enab
     uint64_t wave_generation;
   };
   std::optional<ProbeWaitIssue> probe_wait_issue;
-  if (inst->is_memory_wait_producer() && config_.memory_wait_checks_enabled()) {
+  if (inst->is_memory_wait_producer() && memory_wait_checks_enabled()) {
     if (debugger_active)
       probe_wait_issue = ProbeWaitIssue{active->ensure_memory_wait_scoreboard().issue_snapshot(),
                                         active->pc, active->dispatch_generation()};
@@ -2876,7 +2906,8 @@ ComputeUnitCore::issue_instruction_impl(Wavefront *active, MaybeAsyncWindow<Enab
   const util::Result execution_result =
       execute_instruction(inst, *active, &execution_failure_detail_);
   if (wait_for_buffer_lanes) {
-    wait_state->check_instruction(*inst, *active);
+    if (!check_memory_wait())
+      return IssueOutcome::Issued;
     track_memory_wait(*inst, *active);
   }
 

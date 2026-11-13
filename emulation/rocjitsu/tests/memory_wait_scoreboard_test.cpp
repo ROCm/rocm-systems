@@ -109,6 +109,95 @@ TEST_F(MemoryWaitScoreboardTest, CancellingTheLatestIssuePreservesOlderCounterPo
   EXPECT_EQ(hazards[0].reg.index, 6u);
 }
 
+TEST_F(MemoryWaitScoreboardTest, RetainedFindingsPreserveDependenciesUntilAWait) {
+  load(5, WaitCounterKind::Load, 0b110, 0b0111);
+  for (uint64_t pc : {0x200, 0x204}) {
+    state.bind(
+        pc, &hazards,
+        [](void *p, const auto &hazard) { static_cast<decltype(hazards) *>(p)->push_back(hazard); },
+        MemoryWaitScoreboard::Recovery::Retain);
+    read(5, 0b101, 0b1110);
+    ASSERT_EQ(state.events().size(), 1u);
+    EXPECT_FALSE(state.events().front().reported);
+    EXPECT_EQ(state.outstanding(WaitCounterKind::Load), 1u);
+  }
+  ASSERT_EQ(hazards.size(), 2u);
+  EXPECT_EQ(hazards[0].consumer_pc, 0x200u);
+  EXPECT_EQ(hazards[1].consumer_pc, 0x204u);
+  for (const auto &hazard : hazards) {
+    EXPECT_EQ(hazard.producer.pc, 0x100u);
+    EXPECT_EQ(hazard.lanes, 0b100u);
+    EXPECT_EQ(hazard.bytes, 0b0110u);
+    EXPECT_EQ(hazard.required_wait, 0u);
+  }
+  state.wait(WaitCounterKind::Load, 0);
+  EXPECT_TRUE(state.empty());
+  EXPECT_EQ(state.outstanding(WaitCounterKind::Load), 0u);
+  read(5);
+  EXPECT_EQ(hazards.size(), 2u);
+}
+
+TEST_F(MemoryWaitScoreboardTest, DefaultRecoveryDoesNotProveCounterCompletion) {
+  load(5);
+  read(5);
+  ASSERT_EQ(hazards.size(), 1u);
+  EXPECT_TRUE(state.empty());
+  EXPECT_EQ(state.outstanding(WaitCounterKind::Load), 1u);
+  read(5);
+  EXPECT_EQ(hazards.size(), 1u);
+  state.wait(WaitCounterKind::Load, 0);
+  EXPECT_EQ(state.outstanding(WaitCounterKind::Load), 0u);
+}
+
+TEST_F(MemoryWaitScoreboardTest, RetainedFindingsOwnInstructionEvidenceAndExactRegisterOverlap) {
+  std::array<uint32_t, 2> words{0x11111111, 0x22222222};
+  const auto bind = [&](uint64_t pc) {
+    state.bind(
+        pc, &hazards,
+        [](void *p, const auto &hazard) { static_cast<decltype(hazards) *>(p)->push_back(hazard); },
+        MemoryWaitScoreboard::Recovery::Retain, InstructionSnapshot(pc, words));
+  };
+  bind(0x100);
+  state.add({state.issue(WaitCounterKind::Load),
+             0x100,
+             0b110,
+             {RegClass::VGPR, 4, 4},
+             WaitCounterKind::Load,
+             0x3});
+  words = {0x33333333, 0x44444444};
+  bind(0x200);
+  state.access({RegClass::VGPR, 6, 4}, 0b101, 0xf, true);
+  words.fill(0);
+  state.clear();
+  ASSERT_EQ(hazards.size(), 1u);
+  const auto &hazard = hazards.front();
+  EXPECT_EQ(hazard.reg, (RegisterRef{RegClass::VGPR, 6, 2}));
+  EXPECT_EQ(hazard.lanes, 0b100u);
+  EXPECT_EQ(hazard.bytes, 0x3u);
+  ASSERT_TRUE(hazard.producer.instruction);
+  EXPECT_EQ(hazard.producer.instruction->pc(), 0x100u);
+  EXPECT_EQ(hazard.producer.instruction->encoding()[0], 0x11111111u);
+  ASSERT_TRUE(hazard.consumer_instruction);
+  EXPECT_EQ(hazard.consumer_instruction->pc(), 0x200u);
+  EXPECT_EQ(hazard.consumer_instruction->encoding()[0], 0x33333333u);
+}
+
+TEST_F(MemoryWaitScoreboardTest, InstructionEvidenceIsNotBorrowedFromAnotherPcOrClearedWave) {
+  const std::array<uint32_t, 1> words{0xbf800000};
+  state.bind(0x300, nullptr, nullptr, MemoryWaitScoreboard::Recovery::Retain,
+             InstructionSnapshot(0x300, words));
+  load(5);
+  EXPECT_FALSE(state.events().front().instruction);
+  state.clear();
+  state.add({state.issue(WaitCounterKind::Load),
+             0x300,
+             1,
+             {RegClass::VGPR, 5, 1},
+             WaitCounterKind::Load,
+             0xf});
+  EXPECT_FALSE(state.events().front().instruction);
+}
+
 TEST_F(MemoryWaitScoreboardTest, CancellationRestoresACoalescedProducerAtTheSamePc) {
   load(5);
   const auto older = state.events().front();
@@ -229,13 +318,12 @@ TEST_F(MemoryWaitScoreboardTest, PartialWaitReleasesOnlyTheOlderLoad) {
 }
 
 TEST_F(MemoryWaitScoreboardTest, WideAccessReportsThePendingRegisterIntersection) {
-  for (auto cls : {RegClass::VGPR, RegClass::SGPR})
+  for (auto cls : {RegClass::VGPR, RegClass::SGPR, RegClass::TTMP})
     for (bool write : {false, true})
       for (const auto &[producer, consumer, overlap] :
-           {std::tuple{RegisterRef{cls, 51, 1}, RegisterRef{cls, 50, 4}, RegisterRef{cls, 51, 1}},
-            std::tuple{RegisterRef{cls, 48, 4}, RegisterRef{cls, 50, 4}, RegisterRef{cls, 50, 2}},
-            std::tuple{RegisterRef{cls, 50, 4}, RegisterRef{cls, 51, 1},
-                       RegisterRef{cls, 51, 1}}}) {
+           {std::tuple{RegisterRef{cls, 5, 1}, RegisterRef{cls, 4, 4}, RegisterRef{cls, 5, 1}},
+            std::tuple{RegisterRef{cls, 2, 4}, RegisterRef{cls, 4, 4}, RegisterRef{cls, 4, 2}},
+            std::tuple{RegisterRef{cls, 4, 4}, RegisterRef{cls, 5, 1}, RegisterRef{cls, 5, 1}}}) {
         SCOPED_TRACE(static_cast<unsigned>(cls));
         SCOPED_TRACE(write);
         SCOPED_TRACE(producer.index);
@@ -1327,6 +1415,77 @@ TEST(MemoryWaitExecutionTest, FormattedLoadsTrackRegisterLayoutInsteadOfMemoryFo
   }
 }
 
+TEST(MemoryWaitExecutionTest, D16ResultDependenciesFollowTargetEccWriteback) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_RDNA4}) {
+    SCOPED_TRACE(static_cast<unsigned>(arch));
+    GpuMemory memory("d16_ecc_wait_memory");
+    L2Cache l2("d16_ecc_wait_l2");
+    ComputeUnitCore::Config config{};
+    config.arch = arch;
+    config.memory_wait_diagnostics = MemoryWaitDiagnostics::Warn;
+    config.num_wf_slots = 1;
+    config.sgprs_per_wf = 128;
+    config.vgprs_per_wf = 32;
+    std::unique_ptr<ComputeUnitCore> cu;
+    ASSERT_NO_FATAL_FAILURE(
+        rocjitsu::test::initialize_compute_unit(cu, "d16_ecc_wait_cu", config, &memory, &l2));
+    auto *wave = cu->dispatch_wf(0, 0x100, 128, 32, arch == ROCJITSU_CODE_ARCH_CDNA4 ? 64 : 32);
+    ASSERT_NE(wave, nullptr);
+    wave->set_exec(1);
+    const bool ecc = arch != ROCJITSU_CODE_ARCH_RDNA4;
+    ASSERT_EQ(cu->sram_ecc(), ecc);
+    auto decoder = Decoder::create(arch);
+    auto &state = wave->ensure_memory_wait_scoreboard();
+    for (unsigned form = 0; form < 3; ++form) {
+      // CDNA5 has low/high D16 loads, but no packed formatted loads.
+      if (form == 2 && arch == ROCJITSU_CODE_ARCH_CDNA5)
+        continue;
+      std::vector<uint32_t> words;
+      auto set_words = [&](auto encoded) { words.assign(encoded.begin(), encoded.end()); };
+      if (arch == ROCJITSU_CODE_ARCH_CDNA4) {
+        const uint16_t opcodes[] = {cdna4::kBufferLoadUbyteD16Mubuf,
+                                    cdna4::kBufferLoadUbyteD16HiMubuf,
+                                    cdna4::kBufferLoadFormatD16XyzMubuf};
+        set_words(cdna4::build_mubuf(opcodes[form], {.vdata = 4, .srsrc = 0, .soffset = 128}));
+      } else if (arch == ROCJITSU_CODE_ARCH_CDNA5) {
+        set_words(cdna5::build_vbuffer(form == 0 ? cdna5::kBufferLoadD16U8Vbuffer
+                                                 : cdna5::kBufferLoadD16HiU8Vbuffer,
+                                       {.soffset = 124, .vdata = 4}));
+      } else {
+        const uint16_t opcodes[] = {rdna4::kBufferLoadD16U8Vbuffer,
+                                    rdna4::kBufferLoadD16HiU8Vbuffer,
+                                    rdna4::kBufferLoadD16FormatXyzVbuffer};
+        set_words(rdna4::build_vbuffer(opcodes[form], {.soffset = 124, .vdata = 4}));
+      }
+      util::StringDiagnostic error;
+      auto decoded = decoder->decode_window(words, wave->pc, error.emitter());
+      ASSERT_TRUE(decoded.succeeded()) << error.message();
+      SCOPED_TRACE(decoded.value()->mnemonic());
+      const uint8_t first = ecc || form == 2 ? 0xf : form == 1 ? 0xc : 0x3;
+      const uint8_t second = form == 2 ? (ecc ? 0xf : 0x3) : 0;
+      const std::array<uint8_t, 3> expected{first, second, 0};
+      for (uint16_t offset = 0; offset < expected.size(); ++offset)
+        for (uint8_t bytes : {0x3, 0xc})
+          for (uint64_t lanes : {1, 2})
+            for (bool write : {false, true})
+              for (bool waited : {false, true}) {
+                state.clear();
+                cu->track_memory_wait(*decoded.value(), *wave);
+                unsigned reports = 0;
+                state.bind(0x200, &reports,
+                           [](void *p, const auto &) { ++*static_cast<unsigned *>(p); });
+                if (waited)
+                  state.wait(WaitCounterKind::Load, 0);
+                state.access({RegClass::VGPR, static_cast<uint16_t>(4 + offset), 1}, lanes, bytes,
+                             write);
+                EXPECT_EQ(reports, !waited && lanes == 1 && (expected[offset] & bytes) ? 1u : 0u)
+                    << "offset=" << offset << " bytes=" << unsigned(bytes) << " lanes=" << lanes
+                    << " write=" << write << " waited=" << waited;
+              }
+    }
+  }
+}
+
 TEST(MemoryWaitExecutionTest, LdsStackTracksOnePointerWordAlongsideTwoPoppedNodes) {
   GpuMemory memory("stack_wait_memory");
   L2Cache l2("stack_wait_l2");
@@ -1818,10 +1977,17 @@ TEST(MemoryWaitExecutionTest, FlatLanesHaveSeparateDependenciesAndCounterPartici
 TEST(MemoryWaitExecutionTest, DecodedFlatPlansMatchExecutedAddressesBeforeAnyRegisterAccess) {
   class Observer final : public ExecutionPlugin {
   public:
+    bool observes_vgpr_reads() const override { return true; }
+    bool observes_scalar_register_reads() const override { return true; }
+    bool supports_async_instructions() const override { return false; }
+
     Observer() : ExecutionPlugin("flat_planning_observer") {}
     unsigned reads = 0;
     void onAmdgpuReadVgprLanes(const Wavefront *, uint32_t, uint64_t, uint8_t) override { ++reads; }
-    void onAmdgpuReadSgpr(const Wavefront *, uint32_t) override { ++reads; }
+    void onAmdgpuReadScalarRegister(const Wavefront *, RegisterRef reg) override {
+      if (reg.cls == RegClass::SGPR)
+        reads += reg.width;
+    }
   };
   constexpr uint64_t shared = uint64_t{2} << 32;
   constexpr uint64_t private_base = uint64_t{3} << 32;
@@ -3073,6 +3239,9 @@ TEST(MemoryWaitExecutionTest, SdwaExplicitCompareDoesNotOverwriteItsTemporaryVcc
 TEST(MemoryWaitExecutionTest, ScratchAddressChecksDoNotObserveGlobalOrInactiveLanes) {
   class AddressObserver final : public ExecutionPlugin {
   public:
+    bool observes_vgpr_reads() const override { return true; }
+    bool supports_async_instructions() const override { return false; }
+
     AddressObserver() : ExecutionPlugin("scratch_planning_observer") {}
     unsigned reads = 0;
     void onAmdgpuReadVgprLanes(const Wavefront *, uint32_t, uint64_t, uint8_t) override { ++reads; }
@@ -3576,7 +3745,7 @@ util::FailureOr<std::array<uint64_t, 2>> run_xcnt_kernel(std::vector<uint32_t> c
   EXPECT_EQ(sim.snapshot->snapshots().size(), 1u);
   if (wait_checking == "off" ||
       (wait_checking.empty() && memory_setting == "off" && xcnt_setting != "warn")) {
-    EXPECT_FALSE(sim.cu()->wf(0)->memory_wait_checks_enabled());
+    EXPECT_FALSE(sim.cu()->config().memory_wait_checks_enabled());
     EXPECT_EQ(sim.cu()->wf(0)->memory_wait_scoreboard(), nullptr);
   }
   return std::array<uint64_t, 2>{sim.cu()->xcnt_diagnostic_count(),
@@ -4272,6 +4441,10 @@ TEST(XcntExecutionTest, EmptyExecStoreCannotUseAnOlderCompletionToDrainReplaySou
 // and computes the footprint before executing the instruction.
 class MemoryWaitFootprintObserver final : public ExecutionPlugin {
 public:
+  bool observes_vgpr_reads() const override { return true; }
+  bool observes_vgpr_writes() const override { return true; }
+  bool supports_async_instructions() const override { return false; }
+
   MemoryWaitFootprintObserver() : ExecutionPlugin("wait_footprint_test") {}
   struct Access {
     std::array<uint64_t, 4> read{};
@@ -5368,10 +5541,13 @@ TEST(MemoryWaitExecutionTest, MemoryProducerOverwriteIsCheckedBeforeExecution) {
   using namespace rocjitsu::amdhsa;
   class BeforeObserver final : public ExecutionPlugin {
   public:
+    bool observes_before_execute_instruction() const override { return true; }
+    bool supports_async_instructions() const override { return false; }
+
     BeforeObserver(uint64_t pc, ComputeUnitCore *cu)
         : ExecutionPlugin("wait_before_test"), target(pc), cu(cu) {}
-    void onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Instruction &,
-                                          Wavefront &wf) override {
+    void onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Instruction &, Wavefront &wf,
+                                          std::span<const uint32_t>) override {
       if (pc == target) {
         ++visits;
         diagnostics = cu->memory_wait_diagnostic_count();
@@ -5782,6 +5958,9 @@ TEST(MemoryWaitExecutionTest, ModernRejectedBufferReadsOnlyItsRequiredDescriptor
 TEST(MemoryWaitExecutionTest, BufferTypeSuppressesResultsButKeepsEncodedSourceDependencies) {
   class Observer final : public ExecutionPlugin {
   public:
+    bool observes_scalar_register_reads() const override { return true; }
+    bool supports_async_instructions() const override { return false; }
+
     Observer() : ExecutionPlugin("planning_observer") {}
     void onAmdgpuReadScalarRegister(const Wavefront *, RegisterRef) override { ++reads; }
     unsigned reads = 0;
@@ -5997,6 +6176,10 @@ TEST(MemoryWaitExecutionTest, DecodedScalarIssueUsesArchitecturalWaitDomain) {
 TEST(MemoryWaitFootprintTest, ScalarRelativeAccessesMatchExecution) {
   class ScalarObserver final : public ExecutionPlugin {
   public:
+    bool observes_scalar_register_reads() const override { return true; }
+    bool observes_scalar_register_writes() const override { return true; }
+    bool supports_async_instructions() const override { return false; }
+
     ScalarObserver() : ExecutionPlugin("scalar_relative_footprint") {}
     std::vector<RegisterRef> reads, writes;
     void onAmdgpuReadScalarRegister(const Wavefront *, RegisterRef reg) override {
@@ -6820,6 +7003,10 @@ TEST(MemoryWaitExecutionTest,
      BufferResourceAliasesAndEncodedAddressInputsArePlannedBeforeExecution) {
   class Observer final : public ExecutionPlugin {
   public:
+    bool observes_vgpr_reads() const override { return true; }
+    bool observes_scalar_register_reads() const override { return true; }
+    bool supports_async_instructions() const override { return false; }
+
     Observer() : ExecutionPlugin("buffer_alias_observer") {}
     unsigned reads = 0;
     void onAmdgpuReadScalarRegister(const Wavefront *, RegisterRef) override { ++reads; }
@@ -7414,7 +7601,10 @@ TEST(MemoryWaitExecutionTest, DiagnosticBudgetsAndCountersAreIndependentAcrossCU
         0x200,
         {RegClass::VGPR, 0, 1},
         false,
-        0};
+        0,
+        1,
+        0xf,
+        std::nullopt};
     testing::internal::CaptureStderr();
     for (unsigned report = 0; report < 20; ++report)
       ComputeUnitCore::report_memory_wait(wf, hazard);

@@ -323,6 +323,9 @@ struct CapturedAccess {
 ///        told with what routing decided.
 class MemoryObservationPlugin final : public ExecutionPlugin {
 public:
+  bool observes_memory_instruction_routing() const override { return true; }
+  bool supports_async_instructions() const override { return false; }
+
   /// @param wants_hook What observes_memory_routing() answers. False models a
   ///        plugin that implements the hook but never opts in, which must
   ///        receive nothing.
@@ -330,19 +333,6 @@ public:
       : ExecutionPlugin(std::move(name)), wants_hook_(wants_hook) {}
 
   bool observes_memory_routing() const override { return wants_hook_; }
-
-  void onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessObservation &access,
-                                  const Instruction &inst, amdgpu::Wavefront &) override {
-    onAmdgpuMemoryAccessRouted(access);
-    const auto counters = CounterObservingPipeline{}.issue_counters(inst);
-    accesses.back().issued_counters.assign(counters.types.begin(),
-                                           counters.types.begin() + counters.size);
-    if (inst.data()->tag() == amdgpu::GLOBAL_MEM || inst.data()->tag() == amdgpu::LOCAL_MEM) {
-      const auto &addresses = inst.data_as<amdgpu::VectorMemState>()->per_lane_addr;
-      accesses.back().execution_addresses.assign(addresses.begin(),
-                                                 addresses.begin() + access.wavefront_size);
-    }
-  }
 
   void onAmdgpuRouteMemoryInstruction(const Instruction &inst, amdgpu::Wavefront &wf) override {
     before_tag.push_back(inst.data()->tag());
@@ -356,7 +346,8 @@ public:
     static_cast<void>(wf);
   }
 
-  void onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessObservation &access) override {
+  void onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessObservation &access,
+                                  const Instruction &inst, amdgpu::Wavefront &) override {
     CapturedAccess captured;
     captured.mnemonic = access.mnemonic;
     captured.pc = access.pc;
@@ -404,6 +395,13 @@ public:
                                           access.pre_routing_addresses.end());
     captured.secondary_addresses.assign(access.secondary_addresses.begin(),
                                         access.secondary_addresses.end());
+    const auto counters = CounterObservingPipeline{}.issue_counters(inst);
+    captured.issued_counters.assign(counters.types.begin(), counters.types.begin() + counters.size);
+    if (inst.data()->tag() == amdgpu::GLOBAL_MEM || inst.data()->tag() == amdgpu::LOCAL_MEM) {
+      const auto &addresses = inst.data_as<amdgpu::VectorMemState>()->per_lane_addr;
+      captured.execution_addresses.assign(addresses.begin(),
+                                          addresses.begin() + access.wavefront_size);
+    }
     accesses.push_back(std::move(captured));
   }
 
@@ -417,6 +415,15 @@ public:
 /// A plugin that records an ordered event log for ordering assertions.
 class OrderingPlugin : public ExecutionPlugin {
 public:
+  bool observes_before_execute_instruction() const override { return true; }
+  bool observes_after_execute_instruction() const override { return true; }
+  bool observes_memory_instruction_routing() const override { return true; }
+  bool observes_vgpr_reads() const override { return true; }
+  bool observes_vgpr_writes() const override { return true; }
+  bool observes_scalar_register_reads() const override { return true; }
+  bool observes_scalar_register_writes() const override { return true; }
+  bool supports_async_instructions() const override { return false; }
+
   OrderingPlugin() : ExecutionPlugin("ordering") {}
   std::vector<HookEvent> events;
 
@@ -451,13 +458,15 @@ public:
   }
 
   void onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint32_t wg_id,
-                                   uint32_t physical_vgpr_count, uint32_t physical_sgpr_count,
-                                   std::span<amdgpu::Wavefront *>) override {
+                                   std::span<amdgpu::Wavefront *> wavefronts) override {
     HookEvent e{HookEvent::WORKGROUP_DISPATCHED};
     e.dispatch_id = dispatch_id;
     e.wg_id = wg_id;
-    e.physical_vgpr_count = physical_vgpr_count;
-    e.physical_sgpr_count = physical_sgpr_count;
+    if (!wavefronts.empty()) {
+      const auto &cu = wavefronts.front()->cu();
+      e.physical_vgpr_count = cu.vgpr_allocation_block_size();
+      e.physical_sgpr_count = cu.sgprs_per_wf();
+    }
     events.push_back(e);
   }
 
@@ -484,8 +493,8 @@ public:
     events.push_back(e);
   }
 
-  void onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Instruction &inst,
-                                        amdgpu::Wavefront &wf) override {
+  void onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Instruction &inst, amdgpu::Wavefront &wf,
+                                        std::span<const uint32_t>) override {
     HookEvent e{HookEvent::BEFORE_INSTRUCTION};
     e.dispatch_id = wf.dispatch_id();
     e.wg_id = wf.wg_id();
@@ -548,15 +557,17 @@ public:
     events.push_back(e);
   }
 
-  void onAmdgpuReadSgpr(const amdgpu::Wavefront *wf, uint32_t physical_reg) override {
-    HookEvent e{HookEvent::READ_SGPR};
-    if (wf) {
+  void onAmdgpuReadScalarRegister(const amdgpu::Wavefront *wf, RegisterRef reg) override {
+    if (!wf || reg.cls != RegClass::SGPR)
+      return;
+    for (uint32_t offset = 0; offset < reg.width; ++offset) {
+      HookEvent e{HookEvent::READ_SGPR};
       e.dispatch_id = wf->dispatch_id();
       e.wg_id = wf->wg_id();
       e.wf_id = wf->wf_id();
+      e.physical_reg = wf->sgpr_alloc().base + reg.index + offset;
+      events.push_back(e);
     }
-    e.physical_reg = physical_reg;
-    events.push_back(e);
   }
 
   void onAmdgpuWriteScalarRegister(const amdgpu::Wavefront *wf, RegisterRef reg) override {
@@ -689,7 +700,8 @@ struct PluginFixture {
 
   void initialize(uint32_t num_wf_slots = 10, std::string_view arch = "cdna4",
                   uint32_t wavefront_size = 64, uint32_t sgprs_per_wf = 104,
-                  uint32_t vgprs_per_wf = 256, uint32_t num_cus = 1, uint32_t async_helpers = 0) {
+                  uint32_t vgprs_per_wf = 256, uint32_t num_cus = 1, uint32_t async_helpers = 0,
+                  std::string_view memory_wait_diagnostics = "warn") {
     util::StringDiagnostic admission_diagnostic;
     std::string cu_range = "cu[0:" + std::to_string(num_cus) + "]";
     std::string links;
@@ -716,7 +728,7 @@ struct PluginFixture {
               {{"key":"num_wf_slots","value":"{}"}},
               {{"key":"sgprs_per_wf","value":"{}"}},
               {{"key":"vgprs_per_wf","value":"{}"}},
-              {{"key":"memory_wait_diagnostics","value":"warn"}},
+              {{"key":"memory_wait_diagnostics","value":"{}"}},
               {{"key":"lds_size_kb","value":"64"}}
             ]}}
           ]}}
@@ -724,7 +736,7 @@ struct PluginFixture {
       ]}},"links":[{}]}}}}
     )",
                                    async_helpers, arch, wavefront_size, cu_range, num_wf_slots,
-                                   sgprs_per_wf, vgprs_per_wf, links);
+                                   sgprs_per_wf, vgprs_per_wf, memory_wait_diagnostics, links);
     config::LoadedConfig loaded;
     ASSERT_TRUE(load_valid_config_from_string(json, loaded));
     soc = loaded.soc();

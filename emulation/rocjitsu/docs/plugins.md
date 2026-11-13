@@ -8,14 +8,22 @@ wavefront dispatches, memory instructions, register reads, barriers, etc.
 
 | Plugin | Location | Description |
 |---|---|---|
-| `RaceDetectorPlugin` | `race_detector/` | Hooks memory instructions, register reads, barriers, and `s_waitcnt` to detect data races. Reports violations with disassembly traces. See [race-detector.md](race-detector.md). |
+| `RaceDetectorPlugin` | `race_detector/` | Reports core register findings and checks LDS ordering. Reports violations with disassembly traces. See [race-detector.md](race-detector.md). |
 | `KernelLoggingPlugin` | `logging/` | Logs kernel dispatches and detects MMA instruction usage. |
 | `ThroughputPlugin` | `throughput/` | Reports per-dispatch and aggregate wave-instruction MIPS with an exclusive instruction-family breakdown. |
 | `InstructionMixPlugin` | `instruction_mix/` | Records which ISA mnemonics a run executed and how often, per dispatch and in aggregate, for instruction-mix and instruction-coverage reporting. |
 | `PerfsimPlugin` | `perfsim/` | Adapts gfx1250 execution observations to an external Perfsim backend implementing FFM observer APIs v8 through v13. Built only when explicitly enabled. See the [Perfsim adapter README](../lib/rocjitsu/src/rocjitsu/vm/plugins/perfsim/README.md). |
 
-The race detector plugin contains both the core detection algorithm
-(`race_detector/core/`) and the rocjitsu adapter (`race_detector/plugin.h`).
+The race plugin owns LDS analysis (`race_detector/core/`) and report presentation
+(`race_detector/plugin.h`). Register readiness belongs to the emulator's core
+scoreboard; the plugin observes its findings rather than register accesses.
+
+Race detection is opt-in through `plugins.race`. Without that plugin, no
+workgroup race detector, per-wave race state, or LDS byte history is allocated.
+Core register-wait diagnostics are separate and default to warnings. For
+uninstrumented emulation, omit the plugins and set `wait_checking` to `off` to
+disable those diagnostics too. A register-finding observer such as `race`
+still requests core dependency tracking even when the warnings are disabled.
 
 ### Throughput Plugin
 
@@ -92,21 +100,11 @@ not active-lane operations — the same convention as the throughput plugin. Bot
 plugins classify through the shared `plugins/instruction_family.h`, so the two
 reports join on mnemonic and agree family for family.
 
-Offloaded instructions are counted too. The plugin opts in to async
-instructions and counts an issue notification exactly as it counts a
-synchronous execution, because the group ANDs that capability across its
-members: a plugin that stayed with the default would switch MMA offload off for
-every plugin loaded beside it, so a report meant to describe a run would have
-changed how the run executed.
-
-It subscribes to nothing else. Before-execute and async-issue are where the mix
-is counted, so the plugin opts out of after-execute, memory-instruction
-routing, and the scalar- and vector-register callbacks, none of which it reads.
-These are ORed across the group, so a plugin that does want them still gets
-them -- throughput keeps after-execute for its timing. Declining them matters
-when instruction-mix runs alone: the register hooks in particular keep
-`ComputeUnit::observes_register_access_` enabled, which puts an ownership check
-and a callback dispatch on every register access.
+The plugin subscribes only to before-execute and async-issue. Offloaded
+instructions count exactly as synchronous instructions, without requiring
+synchronous execution. Other plugins can request additional hooks; throughput,
+for example, also subscribes to after-execute for timing. None of these
+counting plugins enables register-access observation.
 
 It emits one JSON object per line using the `rocjitsu.instruction_mix.v1`
 schema: one `"record":"dispatch"` object per completed dispatch and one
@@ -381,6 +379,13 @@ The `ExecutionPlugin` interface (`execution_plugin.h`) defines hooks
 that the compute unit and command processor call during execution.
 Multiple plugins can be active simultaneously via `ExecutionPluginGroup`.
 
+### Workgroup initialization
+
+The workgroup-dispatched hook supplies dispatch and workgroup identities and
+the initialized waves. A wave's allocation counts and its CU's physical
+register block sizes are distinct quantities; consumers query the wave or CU
+for the metadata they need.
+
 ### VGPR observation precision
 
 `onAmdgpuWriteVgprLanes` observes instruction-level VGPR destinations rather
@@ -389,13 +394,12 @@ and byte masks for masked, sub-dword, and multi-register operands. Internal
 storage operations used to preserve unaffected register state do not produce
 additional architectural callbacks.
 
-Asynchronous memory operations are modeled separately. The race detector
-records their register dependencies when they are issued. A later completion
-updates storage without emitting the same instruction-level write again.
-Synchronization retires the corresponding outstanding operations using the
-counter family captured at issue. This distinguishes legacy combined
-`vmcnt`/`lgkmcnt` waits from split `loadcnt`, `storecnt`, `dscnt`, and `kmcnt`
-waits on newer targets.
+Asynchronous memory operations are modeled separately. The core scoreboard
+records their register dependencies at issue. A later completion updates storage
+without emitting the same instruction-level write again. Architectural waits and
+ordering guarantees release dependencies; eager storage writeback is not proof
+of readiness. Plugins needing register hazards should consume the structured
+findings below rather than reconstructing this analysis from access hooks.
 
 ### Scalar register identity
 
@@ -405,9 +409,42 @@ keeps plugins independent of encoded selector values and of the simulator's
 physical storage layout. In particular, ordinary SGPRs and wave-private TTMPs
 have distinct identities even though both can appear in scalar operand fields.
 
-The older `onAmdgpuReadSgpr` hook continues to expose physical SGPR indices for
-compatibility. New consumers that need architectural identity should use the
-typed scalar-register hooks. Scalar writes have only the typed callback.
+Both hooks report a complete logical range in one callback, including its
+width. Subscribe through `observes_scalar_register_reads()` and
+`observes_scalar_register_writes()`, respectively.
+
+### Core register findings
+
+`observes_register_hazards()` defaults to false. Opting in requests ordinary
+core register-dependency checking even when `memory_wait_diagnostics` or the
+global `wait_checking` setting disables stderr warnings. It does not enable
+register-access hooks. XCNT replay-source checking still requires its existing
+explicit setting; when enabled, its findings use the same hook.
+
+`onAmdgpuRegisterHazard(observation, wave)` runs on the issuer during instruction
+issue. It normally precedes the before-execute callback, and always precedes
+async submission. Buffer payload checks that need prepared lane masks instead
+run after address preparation, before the after-execute callback and memory
+publication. An instruction failure reported by the hook stops subsequent
+execution stages without interrupting the current callback fanout.
+The `RegisterHazardObservation` owns the producer and consumer instruction
+encodings when available and gives their PCs, overlapping register range, lane
+and byte masks, read/overwrite kind, counter, and sufficient wait threshold.
+Register indices are wave-relative physical indices, including selected VGPR
+banks. Scalar findings use an all-ones lane mask. An encoding can be absent for
+a synthetic producer or a dependency recorded before observer attachment;
+reporters must not invent bytes or discard the finding for that reason. The
+wave reference supplies current dispatch/workgroup context and is borrowed only
+for the callback.
+
+The core retains dependencies after reporting while any register-finding observer
+is attached. Waits and other architectural guarantees still retire them. The
+observer owns deduplication and output limits; it receives findings independently
+of the core stderr warning budget. It must not mutate the scoreboard or execute
+or replay an instruction from the callback. This is a finding interface, not a
+complete register-access stream: shadow-negative checks do not enumerate accesses.
+Eager memory writeback is not a wait proof, and register readiness does not prove
+cross-wave LDS synchronization. See [memory wait diagnostics](memory-wait-diagnostics.md).
 
 ### Dispatch threading
 
@@ -422,7 +459,7 @@ group divides hooks by frequency and synchronization cost:
   high-frequency callback. Recursive acquisition lets a callback synchronously
   read registers and fire register-observation hooks without deadlocking.
 - Instruction before/after, memory-routing, tensor-DMA issue, tensor-DMA
-  memory, and register-access callbacks are high-frequency and run concurrently
+  memory, register-finding, and register-access callbacks use the hot-hook policy and run concurrently
   with both other high-frequency callbacks and infrequent callbacks by default.
   Each callback is scoped to a wavefront below the simulation's shader-engine
   partition granularity. During the before-instruction callback, a memory
@@ -440,16 +477,21 @@ every high-frequency callback, serializing it with the infrequent callbacks
 without a per-instruction scan of the plugin list. Plugins that protect their
 own shared state should retain the parallel default.
 
-Plugins can opt out of individual high-frequency hooks by overriding
+Every high-frequency hook is opt-in. Override its callback and return `true`
+from the corresponding interest method:
 `observes_before_execute_instruction()`,
 `observes_after_execute_instruction()`,
 `observes_async_instruction_issued()`,
 `observes_memory_instruction_routing()`, `observes_vgpr_reads()`,
-`observes_vgpr_writes()`, `observes_sgpr_reads()`,
+`observes_vgpr_writes()`, `observes_scalar_register_reads()`,
 `observes_scalar_register_writes()`, `observes_memory_routing()`,
-`observes_tensor_dma_memory_access()`, or `observes_tensor_dma_issue()`. The
-group samples these stable flags when the plugin is added and avoids both
-fanout and upstream observation work when no contained plugin consumes a hook.
+`observes_tensor_dma_memory_access()`, `observes_tensor_dma_issue()`, or
+`observes_register_hazards()`. All default to `false`; overriding a callback
+alone does not subscribe to it. The group samples these stable flags once when
+the plugin is added and avoids both fanout and upstream observation work when
+no contained plugin consumes a hook. Lifecycle callbacks need no interest
+declaration. A no-op or lifecycle-only plugin enables no hot paths and leaves
+async execution enabled.
 
 For finer-grained selection, `observes_hot_hooks_for_wavefront(wf)` controls
 all high-frequency callbacks for one wavefront. After every plugin's
@@ -480,8 +522,13 @@ reports a `MemoryAccessObservation` describing the access the memory system is
 actually about to be asked for — the pipeline it was issued to, its routing-selected
 counter, and its effective addresses. The scalar `wait_counter` field does not
 describe the complete wait requirement: mixed FLAT retains its VMEM counter here,
-while `VectorMemState::routed_issue_info` carries both VMEM and LDS obligations.
-Consult that routed issue's `counter_obligations()` for the full set.
+while the resolved issue carries both VMEM and LDS obligations. Use
+`amdgpu::resolved_memory_issue_info(inst)` from `vm/amdgpu/mem_state.h` to borrow
+the same descriptor as the memory pipeline, then read its `counter_obligations()`.
+Without a routing override it returns the decoded metadata. A present, empty
+override means the resolved issue contributes no obligations; it does not fall
+back to the decoded domains. The pointer is valid only while the instruction
+and its current dynamic state remain unchanged.
 
 When all requesting FLAT lanes use the shared aperture, routing selects the
 LDS pipeline and sets `normalized_to_local` to `true`. This flag describes the
@@ -525,23 +572,13 @@ address, `pre_routing_addresses` contains the original per-lane span and
 changed; when present, both spans have `wavefront_size` entries and only lanes
 in `valid_lane_mask` are meaningful.
 
-Building the observation is real work on the per-instruction path, so it is
-skipped entirely unless a contained plugin asks for it. A plugin that overrides
-`onAmdgpuMemoryAccessRouted` must also override `observes_memory_routing()` to
-return `true`; the group samples this policy when each plugin is added, and its
-conservative default is `false`. Overriding the hook alone is silent — the
-plugin simply never sees an access.
+Resolved memory views are built only when a subscribed plugin requests them
+through `observes_memory_routing()`.
 
-The routed-memory callback has a source-compatible overload chain. Existing
-plugins may override the observation-only
-`onAmdgpuMemoryAccessRouted(access)` form. Plugins that need wave-local state may
-instead override `onAmdgpuMemoryAccessRouted(access, wf)`, avoiding a shared
-identity lookup. Plugins that also need the decoded instruction may override
-the context-preserving `onAmdgpuMemoryAccessRouted(access, inst, wf)` form.
-RocJITsu calls the most specific form; its defaults forward through the
-wavefront-aware form to the observation-only form. The borrowed instruction and
-wavefront already reflect the selected route and are valid only during the
-callback.
+`onAmdgpuMemoryAccessRouted(access, inst, wf)` supplies the resolved observation,
+instruction and wave together. Observers can inspect decoded metadata and use
+wave-local state directly. The instruction and wave already reflect the selected
+route and are borrowed only for the callback.
 
 The observation's spans borrow execution-owned storage and are valid only for
 the duration of the callback. A plugin that keeps one must copy them.
@@ -558,9 +595,9 @@ wavefront has moved past the instruction. Consumers must opt in through
 `observes_tensor_dma_memory_access()`. A consumer that retains addresses must
 use `size()` to budget and allocate the event, then call `copy_to()` during the
 callback; a failed copy means the observation is malformed and must be rejected.
-Tensor-DMA observers that need wave-local state may override
-`onAmdgpuTensorDmaMemoryAccess(access, wf)`; its default forwards to the
-observation-only overload.
+`onAmdgpuTensorDmaMemoryAccess(access, wf)` also supplies the issuing wave for
+wave-local state. The wave is borrowed only for the callback; its current PC can
+differ from the observation's PC when the transfer was deferred.
 
 `onAmdgpuTensorDmaIssued(issue, wf)` is the tensor DMA counterpart of
 `onAmdgpuMemoryAccessRouted`. It fires once for every tensor DMA instruction, in
@@ -588,11 +625,7 @@ still writes zeros to its global destination. Consumers must opt in through
 `observes_tensor_dma_issue()`.
 
 SGPR owner resolution is skipped when no contained plugin observes scalar
-register reads. Plugins that consume neither `onAmdgpuReadScalarRegister` nor
-`onAmdgpuReadSgpr` should override
-`observes_sgpr_reads()` to return `false`. The group samples this policy when
-each plugin is added. Its conservative default is `true`, so existing plugins
-continue receiving SGPR read callbacks unless they explicitly opt out.
+register reads. Raw storage reads do not produce observation callbacks.
 
 Pass the complete sink configuration to the group constructor and add plugins
 before publishing the group to simulation components. `add()` is not
@@ -615,11 +648,13 @@ instead copy the instruction's PC and encoding as it executes, and disassemble
 the copy when the report is written. Validate the encoding before copying it:
 `raw_encoding()` is null when the instruction has no encoding, and the copy
 needs `size()` to be a positive multiple of four bytes that fits the buffer.
-The CU normally fetches four words starting at the PC. GFX10 MIMG with
-NSA=3 uses a fifth word. The fetch-aware hook receives all five for that
-instruction. The example stores up to five words, as the race detector does,
-and rejects invalid sizes at capture. Perfsim's FFM event format has its own
-four-word encoding limit.
+The before-execute hook also receives the CU's borrowed fetch window: normally
+four words starting at the PC, including words after a shorter instruction.
+GFX10 MIMG with NSA=3 uses a fifth word, and the hook receives all five for that
+instruction. An empty span means no fetch window is available. This window is
+separate from the instruction's own encoding. The example stores up to five
+encoding words, as the race detector does, and rejects invalid sizes at capture.
+Perfsim's FFM event format has its own four-word encoding limit.
 
 ```cpp
 // Set for each wave in onAmdgpuWavefrontDispatched() with wf.set_plugin_state().
@@ -629,8 +664,12 @@ struct LastInstruction : WavefrontState {
   size_t word_count = 0; // Zero until the wave executes an instruction.
 };
 
+bool observes_before_execute_instruction() const override { return true; }
+bool supports_async_instructions() const override { return false; }
+
 void onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Instruction &inst,
-                                      amdgpu::Wavefront &wf) override {
+                                      amdgpu::Wavefront &wf,
+                                      std::span<const uint32_t>) override {
   auto &last = *static_cast<LastInstruction *>(wf.plugin_state(slot_index()));
   const int bytes = inst.size();
   if (!inst.raw_encoding() || bytes <= 0 || bytes % sizeof(uint32_t) != 0 ||
@@ -701,29 +740,29 @@ from this hook.
    high-frequency and infrequent callbacks. Override
    `requires_serial_hot_hooks()` when that state cannot be protected within the
    plugin.
-6. Override the per-hook `observes_*()` methods for the high-frequency hooks the
-   plugin consumes. Use `observes_hot_hooks_for_wavefront()` when subscription
+6. Return `true` from the per-hook `observes_*()` methods for every high-frequency
+   hook the plugin consumes. Use `observes_hot_hooks_for_wavefront()` when subscription
    also depends on the dispatched wavefront; keep that predicate lock-free,
-   thread-safe, and stable after dispatch. A consumer of
-   `onAmdgpuMemoryAccessRouted`, `onAmdgpuTensorDmaMemoryAccess`, or
-   `onAmdgpuTensorDmaIssued` must explicitly return `true` from the corresponding
-   interest method because those conservative defaults are `false`.
+   thread-safe, and stable after dispatch.
 7. Enable it by adding `"myname": { ... }` to the `plugins` section of
    the config file.
-8. Return `true` from `supports_async_instructions()` only when the plugin accepts
-   issuer-thread issue notifications and concurrent same-wave helper register
-   hooks. Keep the default `false` for ordered event state or complete
-   architectural snapshots. One non-opted-in plugin disables async execution
-   for the entire group.
+8. Return `false` from `supports_async_instructions()` when the plugin requires
+   synchronous state inspection or the before/after pair for every instruction.
+   One such plugin disables offload for the entire group. An instruction
+   observer that supports async must subscribe to accepted-issue notifications
+   as well as synchronous callbacks, and accommodate concurrent same-wave
+   helper register hooks when it subscribes to register accesses.
 9. Copy any instruction data that the plugin keeps beyond a callback; see
    [Retaining instruction information](#retaining-instruction-information).
 
 ## Asynchronous arithmetic
 
-Plugins default to synchronous execution. `supports_async_instructions()` opts
-into `onAmdgpuAsyncInstructionIssued`, replacing the ordinary before/after
-pair for offloaded instructions. The group samples this capability on `add()`;
-all contained plugins must opt in.
+`supports_async_instructions()` defaults to `true`, leaving the scheduler's
+offload policy unchanged. A plugin requiring synchronous inspection returns
+`false`. The group samples this requirement on `add()`; any such plugin
+disables offload for the group. This policy is independent of subscriptions:
+`observes_async_instruction_issued()` requests the accepted-issue notification,
+which replaces the ordinary before/after pair for offloaded instructions.
 
 The notification runs on the issuer after a helper accepts the instruction;
 helper register hooks may already have run. Issue callbacks may read metadata,
@@ -739,11 +778,18 @@ neither reading nor writing that field from a helper is safe. Issuer-thread issu
 callbacks may report failures. The CU checks the retained error after the full
 issue callback fanout and drains accepted jobs before cancelling the wave.
 
-Throughput, instruction mix, and kernel logging support this contract. The
-[simulator race detector](race-detector.md) keeps synchronous execution until
-its dependency-event access and diagnostic context support concurrent register
-hooks within one wave. Plugins and the host
-must be rebuilt together, as for other execution-plugin interface changes.
+Throughput, instruction mix, kernel logging, and the
+[simulator race detector](race-detector.md) support this contract. Race captures
+instruction evidence on the issuer without observing helper register accesses;
+the core checks register dependencies before async publication. A plugin that
+requires synchronous inspection still disables offload for the whole group.
+Plugins and the host must be rebuilt together, as for other execution-plugin
+interface changes.
+
+Plugin support does not make an instruction eligible for offload. The current
+arithmetic handlers require issuer-owned error state, so the core executes
+them synchronously even when helpers are requested. See
+[asynchronous instructions](async-instructions.md) for the current policy.
 
 Sampler instructions, regardless of filter mode, report one `onAmdgpuMemoryAccessRouted` callback per
 instruction. Samples with a prepared footprint use `image_sample_footprints`

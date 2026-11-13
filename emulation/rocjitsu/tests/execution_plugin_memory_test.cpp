@@ -10,6 +10,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/ds_transpose.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_selectors.h"
 #include "rocjitsu/vm/amdgpu/lds.h"
+#include "rocjitsu/vm/amdgpu/lds_allocation.h"
 #include "rocjitsu/vm/amdgpu/memory_wait_scoreboard.h"
 #include "rocjitsu/vm/plugins/race_detector/plugin.h"
 
@@ -23,6 +24,8 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna2/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
+
+#include <limits>
 
 namespace {
 
@@ -45,6 +48,42 @@ class TestScalarMemPipeline : public ScalarMemPipeline {
 public:
   using ScalarMemPipeline::ScalarMemPipeline;
 };
+
+TEST(LdsByteRangeTest, WholeElementsRespectExclusiveBounds) {
+  struct Case {
+    uint64_t address, bytes, element_bytes, end, retained;
+  };
+  constexpr auto max = std::numeric_limits<uint64_t>::max();
+  const Case cases[] = {
+      {64, 16, 4, 80, 16},     {64, 16, 4, 79, 12},       {64, 16, 1, 79, 15},
+      {80, 16, 4, 80, 0},      {81, 16, 4, 80, 0},        {64, 16, 0, 80, 0},
+      {64, 0, 4, 80, 0},       {max - 3, 8, 2, max, 2},   {max, 8, 1, max, 0},
+      {64, 6, 4, 80, 4},       {64, 3, 4, 80, 0},         {64, 16, 3, 80, 15},
+      {0, max, max, max, max}, {0, max - 1, max, max, 0}, {max - 8, max, 8, max, 8},
+  };
+  for (const auto &c : cases) {
+    SCOPED_TRACE(testing::Message()
+                 << c.address << ", " << c.bytes << ", " << c.element_bytes << ", " << c.end);
+    EXPECT_EQ(whole_element_bytes_in_range(c.address, c.bytes, c.element_bytes, c.end), c.retained);
+  }
+}
+
+TEST(LdsByteRangeTest, WholeElementsMatchBoundedEnumeration) {
+  for (uint64_t end = 0; end < 17; ++end) {
+    for (uint64_t address = 0; address < 19; ++address) {
+      for (uint64_t bytes = 0; bytes < 19; ++bytes) {
+        for (uint64_t element = 0; element < 9; ++element) {
+          SCOPED_TRACE(testing::Message()
+                       << address << ", " << bytes << ", " << element << ", " << end);
+          uint64_t expected = 0;
+          while (element != 0 && expected + element <= bytes && address + expected + element <= end)
+            expected += element;
+          ASSERT_EQ(whole_element_bytes_in_range(address, bytes, element, end), expected);
+        }
+      }
+    }
+  }
+}
 
 TEST(ExecutionPluginTest, MemoryPipelineCompletionDoesNotObserveInstructionWrite) {
   PluginFixture f;
@@ -249,6 +288,37 @@ TEST(ExecutionPluginTest, EmptyGlobalTransposeSkipsAddressesAndPreservesLoadCoun
       wave->halt();
     }
   }
+}
+
+TEST(ExecutionPluginTest, ResolvedMemoryIssueBorrowsTheRoutedDescriptorIncludingEmpty) {
+  CounterObservingPipeline pipeline;
+  for (const auto tag : {GLOBAL_MEM, LOCAL_MEM}) {
+    auto state = std::make_unique<VectorMemState>(tag);
+    auto *routed = state.get();
+    TestMemoryInstruction inst(std::move(state),
+                               {{WaitCounterType::VMCNT, MemoryCompletionClass::VMEM, 2},
+                                {WaitCounterType::LGKMCNT, MemoryCompletionClass::LDS}});
+    const auto *decoded = inst.amdgpu_memory_issue_info();
+    ASSERT_NE(decoded, nullptr);
+    EXPECT_EQ(resolved_memory_issue_info(inst), decoded);
+    EXPECT_EQ(pipeline.issue_counters(inst).size, 3);
+
+    for (const bool vmem : {false, true}) {
+      for (const bool lds : {false, true}) {
+        routed->routed_issue_info = decoded->for_flat_memory_domains(vmem, lds);
+        EXPECT_EQ(resolved_memory_issue_info(inst), &*routed->routed_issue_info);
+        const auto counters = pipeline.issue_counters(inst);
+        EXPECT_EQ(counters.size, 2 * vmem + lds);
+        const auto types = std::span(counters.types).first(counters.size);
+        EXPECT_EQ(std::ranges::count(types, WaitCounterType::VMCNT), vmem ? 2 : 0);
+        EXPECT_EQ(std::ranges::count(types, WaitCounterType::LGKMCNT), lds ? 1 : 0);
+      }
+    }
+    inst.set_data(nullptr);
+    EXPECT_EQ(resolved_memory_issue_info(inst), decoded);
+  }
+  Instruction no_memory("probe", nullptr);
+  EXPECT_EQ(resolved_memory_issue_info(no_memory), nullptr);
 }
 
 TEST(ExecutionPluginTest, MemoryPipelineHoldsDecodedCountersUntilCompletion) {
@@ -1086,7 +1156,7 @@ TEST(RoutedMemoryObservationTest, FlatLdsBoundsRetainNominalRequestsAndValidPref
   wave->set_lds_base(own_base);
   wave->set_lds_size(allocation_size);
   std::array<Wavefront *, 1> waves{wave};
-  fixture.plugin_group_->onAmdgpuWorkgroupDispatched(1, 0, 256, 128, waves);
+  fixture.plugin_group_->onAmdgpuWorkgroupDispatched(1, 0, waves);
   for (uint32_t address = 0; address < end + 256; address += 4)
     wave->lds().write32(address, address >= own_base && address < end ? 0x11223344u : 0x55aa33ccu);
   const std::array<uint32_t, 2> global{0x87654321u, 0xabcdef01u};
@@ -1103,7 +1173,7 @@ TEST(RoutedMemoryObservationTest, FlatLdsBoundsRetainNominalRequestsAndValidPref
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
   std::unique_ptr<Instruction> instruction(decode_valid(*decoder, words.data()));
   ASSERT_NE(instruction, nullptr);
-  fixture.plugin_group_->onAmdgpuBeforeExecuteInstruction(wave->pc, *instruction, *wave);
+  fixture.plugin_group_->onAmdgpuBeforeExecuteInstruction(wave->pc, *instruction, *wave, {});
   cu->track_memory_wait(*instruction, *wave);
   ASSERT_TRUE(cu->execute_instruction(instruction.get(), *wave).succeeded());
   ASSERT_EQ(test::ComputeUnitTestAccess::route_memory_inst(*cu, std::move(instruction), *wave),
@@ -1138,7 +1208,6 @@ TEST(RoutedMemoryObservationTest, FlatLdsBoundsRetainNominalRequestsAndValidPref
   ASSERT_NE(race_state, nullptr);
   const auto &events = race_state->race_state->getDetector()->events();
   ASSERT_EQ(events.totalAllocated(), 1);
-  EXPECT_EQ(events.execMask(EventId{0}), 0xfu);
   EXPECT_EQ(events.ldsIntervals(EventId{0}).getTotalBytes(), 12);
   EXPECT_TRUE(events.ldsIntervals(EventId{0}).contains(own_base + 0x40));
   EXPECT_TRUE(events.ldsIntervals(EventId{0}).contains(own_base + 0x47));
@@ -1670,9 +1739,8 @@ TEST(RoutedMemoryObservationTest, ASingleAccessCarriesNoSecondAddressSet) {
 }
 
 TEST(RoutedMemoryObservationTest, APluginThatDoesNotWantTheHookDoesNotPayForIt) {
-  // Building the observation is real work on the per-instruction path. A
-  // plugin that never implements the hook -- which is every plugin in the tree
-  // but one -- should not be charged for it.
+  // Building the observation is per-instruction work. Do not collect it when
+  // no plugin subscribes to the hook.
   PluginFixture fixture;
   ASSERT_NO_FATAL_FAILURE(fixture.initialize());
   auto *ordering = fixture.attach_ordering_plugin();
@@ -1725,7 +1793,8 @@ TEST(RoutedMemoryObservationTest, APluginThatDoesNotWantTheHookDoesNotPayForIt) 
   ASSERT_TRUE(mixed.observes_memory_routing());
 
   MemoryAccessObservation observation;
-  mixed.onAmdgpuMemoryAccessRouted(observation);
+  TestMemoryInstruction instruction(std::make_unique<VectorMemState>(LOCAL_MEM));
+  mixed.onAmdgpuMemoryAccessRouted(observation, instruction, *wave);
   EXPECT_TRUE(quiet_member_ptr->accesses.empty());
   ASSERT_EQ(wanting_member_ptr->accesses.size(), 1u);
 }
@@ -1762,17 +1831,18 @@ TEST(RoutedMemoryObservationTest, AnUnroutableAccessIsReportedRatherThanDropped)
 }
 
 TEST(ExecutionPluginTest, MemoryPipelineFlatCountersFollowRoutedRequests) {
+  using namespace plugins::race_detector;
   enum class Operation { Load, Store, ReturningAtomic, Atomic };
-  enum class Space { Global, Lds, Scratch, GlobalAndScratch };
+  enum class Space { Global, Lds, GlobalAndLds, Scratch, GlobalAndScratch };
   for (const std::string_view arch : {"cdna2", "cdna4", "rdna2", "rdna4", "cdna5"}) {
     for (const auto operation :
          {Operation::Load, Operation::Store, Operation::ReturningAtomic, Operation::Atomic}) {
-      for (const auto space :
-           {Space::Global, Space::Lds, Space::Scratch, Space::GlobalAndScratch}) {
+      for (const auto space : {Space::Global, Space::Lds, Space::GlobalAndLds, Space::Scratch,
+                               Space::GlobalAndScratch}) {
         // RDNA2's FLAT address calculator does not yet translate private pointers.
         if (arch == "rdna2" && (space == Space::Scratch || space == Space::GlobalAndScratch))
           continue;
-        for (const uint64_t exec : {0u, 2u, 3u}) {
+        for (const uint64_t exec : {0u, 1u, 2u, 3u}) {
           SCOPED_TRACE(arch);
           SCOPED_TRACE(static_cast<int>(operation));
           SCOPED_TRACE(static_cast<int>(space));
@@ -1783,7 +1853,17 @@ TEST(ExecutionPluginTest, MemoryPipelineFlatCountersFollowRoutedRequests) {
           PluginFixture f;
           ASSERT_NO_FATAL_FAILURE(
               f.initialize(1, std::string(arch), wave_size, cdna_legacy ? 104 : 128));
-          auto *observer = f.attach_memory_observation_plugin();
+          PluginSinkConfig sinks;
+          sinks.emplace<StringSink>();
+          f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sinks));
+          auto observation_plugin = std::make_unique<MemoryObservationPlugin>();
+          const auto *observer = observation_plugin.get();
+          ASSERT_TRUE(f.plugin_group_->add(std::move(observation_plugin)));
+          auto race_plugin = std::make_unique<RaceDetectorPlugin>();
+          const auto *race = race_plugin.get();
+          ASSERT_TRUE(f.plugin_group_->add(std::move(race_plugin)));
+          f.soc->set_plugin_group(f.plugin_group_);
+          f.plugin_group_->onInit();
           auto *cu = f.cu();
           constexpr uint64_t shared = 0x0001'0000'0000'0000ULL;
           constexpr uint64_t private_base = 0x0002'0000'0000'0000ULL;
@@ -1792,7 +1872,11 @@ TEST(ExecutionPluginTest, MemoryPipelineFlatCountersFollowRoutedRequests) {
           cu->set_apertures(shared, shared + 0xFFFF, private_base, private_base + 0xFFFF);
           auto *wf = cu->dispatch_wf(0, 0x100, cdna_legacy ? 104 : 128, 256, wave_size);
           ASSERT_NE(wf, nullptr);
+          wf->set_dispatch_id(1);
           wf->set_exec(exec);
+          std::array<Wavefront *, 1> waves{wf};
+          f.plugin_group_->onAmdgpuWorkgroupDispatched(1, 0, waves);
+          f.plugin_group_->onAmdgpuWavefrontDispatched(*wf);
           wf->set_scratch_base(scratch);
           wf->set_scratch_lane_size(256);
           const uint32_t vb = wf->vgpr_alloc().base;
@@ -1801,9 +1885,11 @@ TEST(ExecutionPluginTest, MemoryPipelineFlatCountersFollowRoutedRequests) {
                 space == Space::Scratch || (space == Space::GlobalAndScratch && lane == 1);
             const uint64_t private_address =
                 arch == "cdna5" ? scratch + (uint64_t{lane} << 52) + 0x20 : private_base + 0x20;
-            const uint64_t address = space == Space::Lds ? shared + lane * 4
-                                     : private_lane      ? private_address
-                                                         : global + lane * 4;
+            const bool lds_lane =
+                space == Space::Lds || (space == Space::GlobalAndLds && lane == 0);
+            const uint64_t address = lds_lane       ? shared + lane * 4
+                                     : private_lane ? private_address
+                                                    : global + lane * 4;
             cu->write_vgpr(vb, lane, static_cast<uint32_t>(address));
             cu->write_vgpr(vb + 1, lane, address >> 32);
             cu->write_vgpr(vb + 4, lane, 1);
@@ -1863,6 +1949,7 @@ TEST(ExecutionPluginTest, MemoryPipelineFlatCountersFollowRoutedRequests) {
           for (const auto obligation : inst->amdgpu_memory_issue_info()->counter_obligations())
             if (obligation.wait_counter_type() == WaitCounterType::EXPCNT)
               exports += obligation.counter_increment();
+          f.plugin_group_->onAmdgpuBeforeExecuteInstruction(wf->pc, *inst, *wf, {});
           ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
           test::ComputeUnitTestAccess::route_memory_inst(*cu, std::move(inst), *wf);
           ASSERT_EQ(observer->accesses.size(), 1u);
@@ -1873,9 +1960,20 @@ TEST(ExecutionPluginTest, MemoryPipelineFlatCountersFollowRoutedRequests) {
               : arch == "rdna2" && !result ? WaitCounterType::VSCNT
                                            : WaitCounterType::VMCNT;
           const auto ds_counter = split ? WaitCounterType::DSCNT : WaitCounterType::LGKMCNT;
-          EXPECT_EQ(std::ranges::count(counters, vm_counter), exec && space != Space::Lds ? 1 : 0);
-          EXPECT_EQ(std::ranges::count(counters, ds_counter), exec && space == Space::Lds ? 1 : 0);
+          const uint64_t lds_lanes = space == Space::Lds            ? exec
+                                     : space == Space::GlobalAndLds ? exec & 1
+                                                                    : 0;
+          EXPECT_EQ(std::ranges::count(counters, vm_counter), (exec & ~lds_lanes) != 0 ? 1 : 0);
+          EXPECT_EQ(std::ranges::count(counters, ds_counter), lds_lanes != 0 ? 1 : 0);
           EXPECT_EQ(std::ranges::count(counters, WaitCounterType::EXPCNT), exports);
+          const auto *race_state =
+              static_cast<RaceWavefrontState *>(wf->plugin_state(race->slot_index()));
+          const auto &events = race_state->race_state->getDetector()->events();
+          ASSERT_EQ(events.totalAllocated(), counters.empty() ? 0 : 1);
+          if (!counters.empty())
+            for (const auto counter : {vm_counter, ds_counter, WaitCounterType::EXPCNT})
+              EXPECT_EQ(events.pendingCounterIncrement(EventId{0}, counter),
+                        std::ranges::count(counters, counter));
         }
       }
     }

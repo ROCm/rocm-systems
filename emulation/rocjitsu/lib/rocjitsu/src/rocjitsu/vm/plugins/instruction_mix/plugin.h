@@ -87,29 +87,8 @@ public:
   explicit InstructionMixPlugin(const char *config_json = nullptr);
   ~InstructionMixPlugin() override;
 
-  /// This plugin reads neither scalar-register callback, and the group enables
-  /// their dispatch (and the physical-register owner lookup behind it) as soon
-  /// as any member asks for them. Opt out.
-  bool observes_sgpr_reads() const override { return false; }
-
-  /// The mix is counted entirely at before-execute and async-issue, so every
-  /// other observation hook is dead weight here. The group ORs these, so a
-  /// member that does want them (throughput takes after-execute) still gets
-  /// them; opting out only matters when instruction-mix runs alone. The
-  /// register hooks are the expensive ones: any member asking for them keeps
-  /// `ComputeUnit::observes_register_access_` on, which puts a VGPR-ownership
-  /// check and a callback dispatch on every register access.
-  bool observes_after_execute_instruction() const override { return false; }
-  bool observes_memory_instruction_routing() const override { return false; }
-  bool observes_vgpr_reads() const override { return false; }
-  bool observes_vgpr_writes() const override { return false; }
-  bool observes_scalar_register_writes() const override { return false; }
-
-  /// Offloaded instructions still executed, so they still belong in the mix.
-  /// The group ANDs this capability across its members, so inheriting the
-  /// `false` default would disable MMA offload for every plugin in the group --
-  /// a report meant to describe a run would have changed how the run executed.
-  bool supports_async_instructions() const override { return true; }
+  bool observes_before_execute_instruction() const override { return true; }
+  bool observes_async_instruction_issued() const override { return true; }
   void onAmdgpuAsyncInstructionIssued(uint64_t pc, const Instruction &inst,
                                       amdgpu::Wavefront &wf) override;
 
@@ -119,8 +98,8 @@ public:
   void onAmdgpuWavefrontDispatched(amdgpu::Wavefront &wf) override;
   void onAmdgpuWavefrontHalted(amdgpu::Wavefront &wf) override;
   void onAmdgpuWavefrontCancelled(amdgpu::Wavefront &wf) override;
-  void onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Instruction &inst,
-                                        amdgpu::Wavefront &wf) override;
+  void onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Instruction &inst, amdgpu::Wavefront &wf,
+                                        std::span<const uint32_t>) override;
 
   static InstructionFamily classify(const Instruction &inst);
   static std::string_view family_name(InstructionFamily family);

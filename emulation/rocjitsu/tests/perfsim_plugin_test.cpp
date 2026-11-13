@@ -570,6 +570,28 @@ TEST(PerfsimPluginConfigTest, RejectsInvalidObservedWorkgroupCaps) {
   }
 }
 
+TEST_F(PerfsimPluginTest, InterestsRequireSynchronousInstructionInspection) {
+  ExecutionPluginGroup group(PluginSinkConfig{});
+  auto plugin = std::make_unique<PerfsimPlugin>();
+  util::StringDiagnostic diagnostic;
+  ASSERT_TRUE(plugin->initialize(plugin_config().c_str(), diagnostic.emitter()).succeeded())
+      << diagnostic.message();
+  ASSERT_TRUE(group.add(std::move(plugin)));
+  EXPECT_FALSE(group.supports_async_instructions());
+  EXPECT_TRUE(group.observes_before_execute_instruction());
+  EXPECT_TRUE(group.observes_memory_routing());
+  EXPECT_TRUE(group.observes_tensor_dma_memory_access());
+  EXPECT_FALSE(group.observes_after_execute_instruction());
+  EXPECT_FALSE(group.observes_async_instruction_issued());
+  EXPECT_FALSE(group.observes_memory_instruction_routing());
+  EXPECT_FALSE(group.observes_vgpr_reads());
+  EXPECT_FALSE(group.observes_vgpr_writes());
+  EXPECT_FALSE(group.observes_scalar_register_reads());
+  EXPECT_FALSE(group.observes_scalar_register_writes());
+  EXPECT_FALSE(group.observes_tensor_dma_issue());
+  EXPECT_FALSE(group.observes_register_hazards());
+}
+
 TEST_F(PerfsimPluginTest, GpuCompilerSimV13StagesUntilDispatchIsAccepted) {
   WaveFixture fixture;
   ASSERT_FALSE(::testing::Test::HasFatalFailure());
@@ -591,7 +613,7 @@ TEST_F(PerfsimPluginTest, GpuCompilerSimV13StagesUntilDispatchIsAccepted) {
 
   const std::array<uint32_t, 1> end_words{0xBF810000};
   SyntheticInstruction end("s_endpgm", end_words, PROGRAM_TERMINATOR);
-  plugin.onAmdgpuBeforeExecuteInstruction(0x4000, end, wave);
+  plugin.onAmdgpuBeforeExecuteInstruction(0x4000, end, wave, {});
   plugin.onAmdgpuWavefrontHalted(wave);
 
   const auto partial_trace = lines(read_file(trace_.path()));
@@ -628,7 +650,7 @@ TEST_F(PerfsimPluginTest, CancellationRetainsFailureReasonAndReleasesWaveIdentit
     group->onAmdgpuWavefrontDispatched(failed);
     const std::array<uint32_t, 1> words{0x7E000200};
     SyntheticInstruction instruction("v_add_f32", words);
-    group->onAmdgpuBeforeExecuteInstruction(0x4000, instruction, failed);
+    group->onAmdgpuBeforeExecuteInstruction(0x4000, instruction, failed, {});
     failed.report_instruction_execution_error(InstructionExecutionError::UnimplementedInstruction);
     fixture.cu->abort_dispatch(kFailedDispatch);
     EXPECT_TRUE(failed.is_halted());
@@ -642,7 +664,7 @@ TEST_F(PerfsimPluginTest, CancellationRetainsFailureReasonAndReleasesWaveIdentit
     group->onAmdgpuWavefrontDispatched(next);
     const std::array<uint32_t, 1> end_words{0xBF810000};
     SyntheticInstruction end("s_endpgm", end_words, PROGRAM_TERMINATOR);
-    group->onAmdgpuBeforeExecuteInstruction(0x5000, end, next);
+    group->onAmdgpuBeforeExecuteInstruction(0x5000, end, next, {});
     next.halt();
     group->onAmdgpuDispatchExecutionEnd(kNextDispatch);
     group->onShutdown();
@@ -686,7 +708,7 @@ TEST_F(PerfsimPluginTest, SetupRollbackCanRetryTheSameLogicalWave) {
     group->onAmdgpuWavefrontDispatched(wave);
     const std::array<uint32_t, 1> words{0xBF810000};
     SyntheticInstruction end("s_endpgm", words, PROGRAM_TERMINATOR);
-    group->onAmdgpuBeforeExecuteInstruction(0x5000, end, wave);
+    group->onAmdgpuBeforeExecuteInstruction(0x5000, end, wave, {});
     wave.halt();
     group->onAmdgpuDispatchExecutionEnd(dispatch);
     group->onShutdown();
@@ -717,7 +739,7 @@ TEST_F(PerfsimPluginTest, ReclaimsFaultAbortedWaveStateBeforePhysicalSlotReuse) 
     plugin.onAmdgpuWavefrontDispatched(aborted);
     const std::array<uint32_t, 1> add_words{0x7E000200};
     SyntheticInstruction add("v_add_f32", add_words);
-    plugin.onAmdgpuBeforeExecuteInstruction(0x4000, add, aborted);
+    plugin.onAmdgpuBeforeExecuteInstruction(0x4000, add, aborted, {});
 
     // Terminal VM-fault recovery resets resident waves without delivering a
     // wave-halt callback. The next dispatch must safely reclaim this slot and
@@ -736,7 +758,7 @@ TEST_F(PerfsimPluginTest, ReclaimsFaultAbortedWaveStateBeforePhysicalSlotReuse) 
 
     const std::array<uint32_t, 1> end_words{0xBF810000};
     SyntheticInstruction end("s_endpgm", end_words, PROGRAM_TERMINATOR);
-    plugin.onAmdgpuBeforeExecuteInstruction(0x5000, end, reused);
+    plugin.onAmdgpuBeforeExecuteInstruction(0x5000, end, reused, {});
     plugin.onAmdgpuWavefrontHalted(reused);
     plugin.onAmdgpuDispatchExecutionEnd(ReusedDispatch);
     plugin.onShutdown();
@@ -778,7 +800,7 @@ TEST_F(PerfsimPluginTest, RetainsRejectedDispatchStateUntilLiveWaveRetires) {
     plugin.onAmdgpuDispatchExecutionEnd(Dispatch);
     const std::array<uint32_t, 1> add_words{0x7E000200};
     SyntheticInstruction add("v_add_f32", add_words);
-    plugin.onAmdgpuBeforeExecuteInstruction(0x4000, add, wave);
+    plugin.onAmdgpuBeforeExecuteInstruction(0x4000, add, wave, {});
     EXPECT_TRUE(plugin.observes_hot_hooks_for_wavefront(&wave));
 
     plugin.onAmdgpuWavefrontHalted(wave);
@@ -815,7 +837,7 @@ TEST_F(PerfsimPluginTest, SelectsExactDispatchNameWithoutRejectingOtherDispatche
     EXPECT_FALSE(plugin.observes_hot_hooks_for_wavefront(&setup_wave));
     const std::array<uint32_t, 1> add_words{0x7E000200};
     SyntheticInstruction add("v_add_f32", add_words);
-    plugin.onAmdgpuBeforeExecuteInstruction(0x1000, add, setup_wave);
+    plugin.onAmdgpuBeforeExecuteInstruction(0x1000, add, setup_wave, {});
     plugin.onAmdgpuWavefrontHalted(setup_wave);
     plugin.onAmdgpuDispatchExecutionEnd(setup.dispatch_id);
 
@@ -830,7 +852,7 @@ TEST_F(PerfsimPluginTest, SelectsExactDispatchNameWithoutRejectingOtherDispatche
     EXPECT_TRUE(plugin.observes_hot_hooks_for_wavefront(&target_wave));
     const std::array<uint32_t, 1> end_words{0xBF810000};
     SyntheticInstruction end("s_endpgm", end_words, PROGRAM_TERMINATOR);
-    plugin.onAmdgpuBeforeExecuteInstruction(0x2000, end, target_wave);
+    plugin.onAmdgpuBeforeExecuteInstruction(0x2000, end, target_wave, {});
     plugin.onAmdgpuWavefrontHalted(target_wave);
     plugin.onAmdgpuDispatchExecutionEnd(target.dispatch_id);
     plugin.onShutdown();
@@ -883,7 +905,7 @@ TEST_F(PerfsimPluginTest, DiscardsUnselectedFaultAbortedDispatchWithoutEnd) {
 
     const std::array<uint32_t, 1> end_words{0xBF810000};
     SyntheticInstruction end("s_endpgm", end_words, PROGRAM_TERMINATOR);
-    plugin.onAmdgpuBeforeExecuteInstruction(0x2000, end, target_wave);
+    plugin.onAmdgpuBeforeExecuteInstruction(0x2000, end, target_wave, {});
     plugin.onAmdgpuWavefrontHalted(target_wave);
     plugin.onAmdgpuDispatchExecutionEnd(target.dispatch_id);
     plugin.onShutdown();
@@ -973,7 +995,7 @@ TEST_F(PerfsimPluginTest, CapsStagingToFirstDistinctWorkgroupsWithoutBlockingRep
     // turn that intentional omission into a dispatch rejection.
     const std::array<uint32_t, 1> global_words{0xDC508000};
     SyntheticInstruction global("global_load_b32", global_words, MEMORY_OP);
-    group.onAmdgpuBeforeExecuteInstruction(0x5000, global, capped);
+    group.onAmdgpuBeforeExecuteInstruction(0x5000, global, capped, {});
     std::array<uint64_t, 32> addresses{};
     addresses[0] = 0x100000;
     MemoryAccessObservation memory_access;
@@ -1000,7 +1022,7 @@ TEST_F(PerfsimPluginTest, CapsStagingToFirstDistinctWorkgroupsWithoutBlockingRep
 
     const std::array<uint32_t, 3> tensor_words{0xD0710001, 0x7C000000, 0x18140C00};
     SyntheticInstruction tensor("tensor_load_to_lds", tensor_words, MEMORY_OP);
-    group.onAmdgpuBeforeExecuteInstruction(0x6000, tensor, capped);
+    group.onAmdgpuBeforeExecuteInstruction(0x6000, tensor, capped, {});
     const std::array<uint64_t, 2> tensor_addresses{0x300000, 0x300004};
     TensorDmaMemoryAccessObservation tensor_access;
     tensor_access.mnemonic = "tensor_load_to_lds";
@@ -1023,9 +1045,9 @@ TEST_F(PerfsimPluginTest, CapsStagingToFirstDistinctWorkgroupsWithoutBlockingRep
 
     const std::array<uint32_t, 1> end_words{0xBF810000};
     SyntheticInstruction end("s_endpgm", end_words, PROGRAM_TERMINATOR);
-    group.onAmdgpuBeforeExecuteInstruction(0x3000, end, first);
-    group.onAmdgpuBeforeExecuteInstruction(0x4000, end, same_workgroup);
-    group.onAmdgpuBeforeExecuteInstruction(0x7000, end, capped);
+    group.onAmdgpuBeforeExecuteInstruction(0x3000, end, first, {});
+    group.onAmdgpuBeforeExecuteInstruction(0x4000, end, same_workgroup, {});
+    group.onAmdgpuBeforeExecuteInstruction(0x7000, end, capped, {});
     group.onAmdgpuWavefrontHalted(first);
     group.onAmdgpuWavefrontHalted(same_workgroup);
     group.onAmdgpuWavefrontHalted(capped);
@@ -1068,7 +1090,7 @@ TEST_F(PerfsimPluginTest, RequestsV13AndForwardsOwnedFieldsInOrder) {
 
     const std::array<uint32_t, 2> wmma_words{0xCC400123, 0xABCDEF01};
     SyntheticInstruction wmma("v_wmma_f32_16x16x16_f16", wmma_words, MFMA);
-    plugin.onAmdgpuBeforeExecuteInstruction(0x12345678, wmma, wave);
+    plugin.onAmdgpuBeforeExecuteInstruction(0x12345678, wmma, wave, {});
 
     std::array<uint64_t, 32> addresses{};
     addresses[0] = 0x100000;
@@ -1093,12 +1115,12 @@ TEST_F(PerfsimPluginTest, RequestsV13AndForwardsOwnedFieldsInOrder) {
     access.valid_lane_mask = 0x9;
     access.request_lane_mask = 0x9;
     access.addresses = addresses;
-    plugin.onAmdgpuMemoryAccessRouted(access, wave);
+    plugin.onAmdgpuMemoryAccessRouted(access, wmma, wave);
     addresses[0] = 0xDEADBEEF;
 
     const std::array<uint32_t, 3> tensor_words{0xD0710001, 0x7C000000, 0x18140C00};
     SyntheticInstruction tensor("tensor_load_to_lds", tensor_words, MEMORY_OP);
-    plugin.onAmdgpuBeforeExecuteInstruction(0x12345680, tensor, wave);
+    plugin.onAmdgpuBeforeExecuteInstruction(0x12345680, tensor, wave, {});
     std::vector<uint64_t> tensor_addresses{0x300000, 0x300004, 0x300004};
     TensorDmaMemoryAccessObservation tensor_access;
     tensor_access.mnemonic = "tensor_load_to_lds";
@@ -1122,7 +1144,7 @@ TEST_F(PerfsimPluginTest, RequestsV13AndForwardsOwnedFieldsInOrder) {
 
     const std::array<uint32_t, 1> end_words{0xBF810000};
     SyntheticInstruction end("s_endpgm", end_words, PROGRAM_TERMINATOR);
-    plugin.onAmdgpuBeforeExecuteInstruction(0x1234568C, end, wave);
+    plugin.onAmdgpuBeforeExecuteInstruction(0x1234568C, end, wave, {});
     plugin.onAmdgpuWavefrontHalted(wave);
     plugin.onAmdgpuDispatchExecutionEnd(info.dispatch_id);
     plugin.onShutdown();
@@ -1190,7 +1212,7 @@ TEST_F(PerfsimPluginTest, FallsBackToV8AndForwardsLegacyPayloadPrefixes) {
 
     const std::array<uint32_t, 3> tensor_words{0xD0710001, 0x7C000000, 0x18140C00};
     SyntheticInstruction tensor("tensor_load_to_lds", tensor_words, MEMORY_OP);
-    plugin.onAmdgpuBeforeExecuteInstruction(0x12345680, tensor, wave);
+    plugin.onAmdgpuBeforeExecuteInstruction(0x12345680, tensor, wave, {});
     const std::array<uint64_t, 2> tensor_addresses{0x300000, 0x300004};
     TensorDmaMemoryAccessObservation tensor_access;
     tensor_access.mnemonic = "tensor_load_to_lds";
@@ -1209,11 +1231,11 @@ TEST_F(PerfsimPluginTest, FallsBackToV8AndForwardsLegacyPayloadPrefixes) {
     tensor_access.tensor_dim1_stride = 104;
     tensor_access.is_load = true;
     tensor_access.addresses = std::span<const uint64_t>(tensor_addresses);
-    plugin.onAmdgpuTensorDmaMemoryAccess(tensor_access);
+    plugin.onAmdgpuTensorDmaMemoryAccess(tensor_access, wave);
 
     const std::array<uint32_t, 1> end_words{0xBF810000};
     SyntheticInstruction end("s_endpgm", end_words, PROGRAM_TERMINATOR);
-    plugin.onAmdgpuBeforeExecuteInstruction(0x1234568C, end, wave);
+    plugin.onAmdgpuBeforeExecuteInstruction(0x1234568C, end, wave, {});
     plugin.onAmdgpuWavefrontHalted(wave);
     plugin.onAmdgpuDispatchExecutionEnd(info.dispatch_id);
     plugin.onShutdown();
@@ -1323,7 +1345,7 @@ TEST_F(PerfsimPluginTest, ReportsNegotiatedVersionForUnrepresentableInstruction)
 
     const std::array<uint32_t, 5> words{};
     SyntheticInstruction oversized("oversized", words);
-    plugin.onAmdgpuBeforeExecuteInstruction(0x2000, oversized, wave);
+    plugin.onAmdgpuBeforeExecuteInstruction(0x2000, oversized, wave, {});
     plugin.onAmdgpuWavefrontHalted(wave);
     plugin.onAmdgpuDispatchExecutionEnd(info.dispatch_id);
     plugin.onShutdown();
@@ -1373,7 +1395,7 @@ TEST_F(PerfsimPluginTest, RejectsMalformedTensorDmaMetadataIndependently) {
 
       const std::array<uint32_t, 3> words{0xD0710001, 0x7C000000, 0x18140C00};
       SyntheticInstruction tensor("tensor_load_to_lds", words, MEMORY_OP);
-      plugin.onAmdgpuBeforeExecuteInstruction(0x1280, tensor, wave);
+      plugin.onAmdgpuBeforeExecuteInstruction(0x1280, tensor, wave, {});
       const std::array<uint64_t, 1> addresses{0x300000};
       TensorDmaMemoryAccessObservation access;
       access.mnemonic = "tensor_load_to_lds";
@@ -1392,11 +1414,11 @@ TEST_F(PerfsimPluginTest, RejectsMalformedTensorDmaMetadataIndependently) {
       access.data_size = test_case.data_size;
       access.tensor_dim0_stride = test_case.tensor_dim0_stride;
       access.tensor_dim1_stride = test_case.tensor_dim1_stride;
-      plugin.onAmdgpuTensorDmaMemoryAccess(access);
+      plugin.onAmdgpuTensorDmaMemoryAccess(access, wave);
 
       const std::array<uint32_t, 1> end_words{0xBF810000};
       SyntheticInstruction end("s_endpgm", end_words, PROGRAM_TERMINATOR);
-      plugin.onAmdgpuBeforeExecuteInstruction(0x128C, end, wave);
+      plugin.onAmdgpuBeforeExecuteInstruction(0x128C, end, wave, {});
       plugin.onAmdgpuWavefrontHalted(wave);
       plugin.onAmdgpuDispatchExecutionEnd(info.dispatch_id);
       plugin.onShutdown();
@@ -1428,7 +1450,7 @@ TEST_F(PerfsimPluginTest, FilteredImageRecordsAllTexelsUnderOneInstruction) {
   plugin.onAmdgpuWavefrontDispatched(wave);
   const std::array<uint32_t, 1> words{0xDEAD0001};
   SyntheticInstruction sample("image_sample_lz", words, MEMORY_OP);
-  plugin.onAmdgpuBeforeExecuteInstruction(0x2000, sample, wave);
+  plugin.onAmdgpuBeforeExecuteInstruction(0x2000, sample, wave, {});
   std::array<std::array<uint64_t, 32>, 4> addresses{};
   std::array<ImageSampleFootprint, 4> taps{};
   for (uint32_t i = 0; i < 4; ++i) {
@@ -1453,10 +1475,10 @@ TEST_F(PerfsimPluginTest, FilteredImageRecordsAllTexelsUnderOneInstruction) {
   access.active_lane_mask = access.architectural_exec_lane_mask = 1;
   access.valid_lane_mask = access.request_lane_mask = 1;
   access.image_sample_footprints = taps;
-  plugin.onAmdgpuMemoryAccessRouted(access);
+  plugin.onAmdgpuMemoryAccessRouted(access, sample, wave);
   const std::array<uint32_t, 1> end_words{0xBF810000};
   SyntheticInstruction end("s_endpgm", end_words, PROGRAM_TERMINATOR);
-  plugin.onAmdgpuBeforeExecuteInstruction(0x2004, end, wave);
+  plugin.onAmdgpuBeforeExecuteInstruction(0x2004, end, wave, {});
   plugin.onAmdgpuWavefrontHalted(wave);
   plugin.onAmdgpuDispatchExecutionEnd(info.dispatch_id);
   plugin.onShutdown();
@@ -1497,7 +1519,7 @@ TEST_F(PerfsimPluginTest, PreservesMixedFlatAndDualLdsRecordOrder) {
 
   const std::array<uint32_t, 1> flat_words{0xDEAD0001};
   SyntheticInstruction flat("flat_load_dword", flat_words, MEMORY_OP);
-  plugin.onAmdgpuBeforeExecuteInstruction(0x2000, flat, wave);
+  plugin.onAmdgpuBeforeExecuteInstruction(0x2000, flat, wave, {});
 
   std::array<uint64_t, 32> flat_addresses{};
   flat_addresses[0] = 100;
@@ -1525,11 +1547,11 @@ TEST_F(PerfsimPluginTest, PreservesMixedFlatAndDualLdsRecordOrder) {
   flat_access.request_lane_mask = 0x7;
   flat_access.scratch_lane_mask = 0x5;
   flat_access.addresses = flat_addresses;
-  plugin.onAmdgpuMemoryAccessRouted(flat_access);
+  plugin.onAmdgpuMemoryAccessRouted(flat_access, flat, wave);
 
   const std::array<uint32_t, 1> ds_words{0xD8000000};
   SyntheticInstruction ds("ds_read2_b32", ds_words, MEMORY_OP);
-  plugin.onAmdgpuBeforeExecuteInstruction(0x2004, ds, wave);
+  plugin.onAmdgpuBeforeExecuteInstruction(0x2004, ds, wave, {});
   std::array<uint64_t, 32> primary{};
   std::array<uint64_t, 32> secondary{};
   primary[0] = 0x1000 + 400;
@@ -1549,11 +1571,11 @@ TEST_F(PerfsimPluginTest, PreservesMixedFlatAndDualLdsRecordOrder) {
   ds_access.scratch_lane_mask = 0;
   ds_access.addresses = primary;
   ds_access.secondary_addresses = secondary;
-  plugin.onAmdgpuMemoryAccessRouted(ds_access);
+  plugin.onAmdgpuMemoryAccessRouted(ds_access, ds, wave);
 
   const std::array<uint32_t, 1> flat_lds_words{0xDEAD0002};
   SyntheticInstruction flat_lds("flat_load_dword", flat_lds_words, MEMORY_OP);
-  plugin.onAmdgpuBeforeExecuteInstruction(0x2008, flat_lds, wave);
+  plugin.onAmdgpuBeforeExecuteInstruction(0x2008, flat_lds, wave, {});
   std::array<uint64_t, 32> effective_lds{};
   std::array<uint64_t, 32> aperture_addresses{};
   effective_lds[0] = 0x1000 + 40;
@@ -1577,11 +1599,11 @@ TEST_F(PerfsimPluginTest, PreservesMixedFlatAndDualLdsRecordOrder) {
   flat_lds_access.addresses = effective_lds;
   flat_lds_access.pre_routing_addresses = aperture_addresses;
   flat_lds_access.secondary_addresses = {};
-  plugin.onAmdgpuMemoryAccessRouted(flat_lds_access);
+  plugin.onAmdgpuMemoryAccessRouted(flat_lds_access, flat_lds, wave);
 
   const std::array<uint32_t, 1> append_words{0xD8340000};
   SyntheticInstruction append("ds_append", append_words, MEMORY_OP);
-  plugin.onAmdgpuBeforeExecuteInstruction(0x200C, append, wave);
+  plugin.onAmdgpuBeforeExecuteInstruction(0x200C, append, wave, {});
   std::array<uint64_t, 32> append_addresses{};
   append_addresses.fill(0x1000 + 1200);
   MemoryAccessObservation append_access = ds_access;
@@ -1594,16 +1616,16 @@ TEST_F(PerfsimPluginTest, PreservesMixedFlatAndDualLdsRecordOrder) {
   append_access.request_lane_mask = 0xF;
   append_access.addresses = append_addresses;
   append_access.secondary_addresses = {};
-  plugin.onAmdgpuMemoryAccessRouted(append_access);
+  plugin.onAmdgpuMemoryAccessRouted(append_access, append, wave);
 
   const std::array<uint32_t, 1> consume_words{0xD8350000};
   SyntheticInstruction consume("ds_consume", consume_words, MEMORY_OP);
-  plugin.onAmdgpuBeforeExecuteInstruction(0x2010, consume, wave);
+  plugin.onAmdgpuBeforeExecuteInstruction(0x2010, consume, wave, {});
   MemoryAccessObservation consume_access = append_access;
   consume_access.mnemonic = "ds_consume";
   consume_access.pc = 0x2010;
   consume_access.atomic_op = AtomicOp::CONSUME;
-  plugin.onAmdgpuMemoryAccessRouted(consume_access);
+  plugin.onAmdgpuMemoryAccessRouted(consume_access, consume, wave);
 
   const std::array<const char *, 7> other_ffm_silent_memory{"ds_load_tr4_b64",
                                                             "ds_load_tr6_b96",
@@ -1615,7 +1637,7 @@ TEST_F(PerfsimPluginTest, PreservesMixedFlatAndDualLdsRecordOrder) {
   for (size_t i = 0; i < other_ffm_silent_memory.size(); ++i) {
     const uint64_t pc = 0x2014 + i * 4;
     SyntheticInstruction silent(other_ffm_silent_memory[i], ds_words, MEMORY_OP);
-    plugin.onAmdgpuBeforeExecuteInstruction(pc, silent, wave);
+    plugin.onAmdgpuBeforeExecuteInstruction(pc, silent, wave, {});
     MemoryAccessObservation silent_access = append_access;
     silent_access.mnemonic = other_ffm_silent_memory[i];
     silent_access.pc = pc;
@@ -1624,11 +1646,11 @@ TEST_F(PerfsimPluginTest, PreservesMixedFlatAndDualLdsRecordOrder) {
       silent_access.decoded_space = DecodedMemorySpace::GLOBAL;
       silent_access.route = MemoryRoute::GLOBAL;
     }
-    plugin.onAmdgpuMemoryAccessRouted(silent_access);
+    plugin.onAmdgpuMemoryAccessRouted(silent_access, silent, wave);
   }
 
   SyntheticInstruction tr16("ds_load_tr16_b128", ds_words, MEMORY_OP);
-  plugin.onAmdgpuBeforeExecuteInstruction(0x2030, tr16, wave);
+  plugin.onAmdgpuBeforeExecuteInstruction(0x2030, tr16, wave, {});
   MemoryAccessObservation tr16_access = ds_access;
   tr16_access.mnemonic = "ds_load_tr16_b128";
   tr16_access.pc = 0x2030;
@@ -1638,11 +1660,11 @@ TEST_F(PerfsimPluginTest, PreservesMixedFlatAndDualLdsRecordOrder) {
   tr16_access.request_lane_mask = 0xFFFF'FFFF;
   tr16_access.architectural_exec_lane_mask = 0x3;
   tr16_access.secondary_addresses = {};
-  plugin.onAmdgpuMemoryAccessRouted(tr16_access);
+  plugin.onAmdgpuMemoryAccessRouted(tr16_access, tr16, wave);
 
   const std::array<uint32_t, 1> end_words{0xBF810000};
   SyntheticInstruction end("s_endpgm", end_words, PROGRAM_TERMINATOR);
-  plugin.onAmdgpuBeforeExecuteInstruction(0x2034, end, wave);
+  plugin.onAmdgpuBeforeExecuteInstruction(0x2034, end, wave, {});
   plugin.onAmdgpuWavefrontHalted(wave);
   plugin.onAmdgpuDispatchExecutionEnd(info.dispatch_id);
   plugin.onShutdown();
@@ -1690,7 +1712,7 @@ TEST_F(PerfsimPluginTest, SplitsMixedFlatResourcesInFirstRequestLaneOrder) {
 
   const std::array<uint32_t, 1> words{0xDEAD0004};
   SyntheticInstruction first_global("flat_load_dword", words, MEMORY_OP);
-  plugin.onAmdgpuBeforeExecuteInstruction(0x2200, first_global, wave);
+  plugin.onAmdgpuBeforeExecuteInstruction(0x2200, first_global, wave, {});
   std::array<uint64_t, 32> first_addresses{};
   first_addresses[0] = 100;
   first_addresses[1] = 500;
@@ -1723,10 +1745,10 @@ TEST_F(PerfsimPluginTest, SplitsMixedFlatResourcesInFirstRequestLaneOrder) {
   first.scratch_lane_mask = 0x4;
   first.addresses = first_effective_addresses;
   first.pre_routing_addresses = first_addresses;
-  plugin.onAmdgpuMemoryAccessRouted(first);
+  plugin.onAmdgpuMemoryAccessRouted(first, first_global, wave);
 
   SyntheticInstruction first_local("flat_load_dword", words, MEMORY_OP);
-  plugin.onAmdgpuBeforeExecuteInstruction(0x2204, first_local, wave);
+  plugin.onAmdgpuBeforeExecuteInstruction(0x2204, first_local, wave, {});
   std::array<uint64_t, 32> original_addresses{};
   original_addresses[0] = 600;
   original_addresses[1] = 700;
@@ -1746,11 +1768,11 @@ TEST_F(PerfsimPluginTest, SplitsMixedFlatResourcesInFirstRequestLaneOrder) {
   second.scratch_lane_mask = 0x2;
   second.addresses = effective_addresses;
   second.pre_routing_addresses = original_addresses;
-  plugin.onAmdgpuMemoryAccessRouted(second);
+  plugin.onAmdgpuMemoryAccessRouted(second, first_local, wave);
 
   const std::array<uint32_t, 1> end_words{0xBF810000};
   SyntheticInstruction end("s_endpgm", end_words, PROGRAM_TERMINATOR);
-  plugin.onAmdgpuBeforeExecuteInstruction(0x2208, end, wave);
+  plugin.onAmdgpuBeforeExecuteInstruction(0x2208, end, wave, {});
   plugin.onAmdgpuWavefrontHalted(wave);
   plugin.onAmdgpuDispatchExecutionEnd(info.dispatch_id);
   plugin.onShutdown();
@@ -1788,7 +1810,7 @@ TEST_F(PerfsimPluginTest, ReportsFlatDdsLoadsAsLdsWithOriginalAddresses) {
 
   const std::array<uint32_t, 1> words{0xDEAD0015};
   SyntheticInstruction load("flat_load_dword", words, MEMORY_OP);
-  plugin.onAmdgpuBeforeExecuteInstruction(0x2280, load, wave);
+  plugin.onAmdgpuBeforeExecuteInstruction(0x2280, load, wave, {});
 
   constexpr uint64_t kDdsAddress = 0x1234'0000'8000'0040;
   std::array<uint64_t, 32> effective_addresses{};
@@ -1818,11 +1840,11 @@ TEST_F(PerfsimPluginTest, ReportsFlatDdsLoadsAsLdsWithOriginalAddresses) {
   access.flat_dds_lane_mask = 1;
   access.addresses = effective_addresses;
   access.pre_routing_addresses = original_addresses;
-  plugin.onAmdgpuMemoryAccessRouted(access);
+  plugin.onAmdgpuMemoryAccessRouted(access, load, wave);
 
   const std::array<uint32_t, 1> end_words{0xBF810000};
   SyntheticInstruction end("s_endpgm", end_words, PROGRAM_TERMINATOR);
-  plugin.onAmdgpuBeforeExecuteInstruction(0x2284, end, wave);
+  plugin.onAmdgpuBeforeExecuteInstruction(0x2284, end, wave, {});
   plugin.onAmdgpuWavefrontHalted(wave);
   plugin.onAmdgpuDispatchExecutionEnd(info.dispatch_id);
   plugin.onShutdown();
@@ -1865,7 +1887,7 @@ TEST_F(PerfsimPluginTest, RejectsWholeDispatchForFlatDdsStoresAndAtomics) {
 
     const std::array<uint32_t, 1> words{0xDEAD0016};
     SyntheticInstruction instruction(test.mnemonic, words, MEMORY_OP);
-    plugin.onAmdgpuBeforeExecuteInstruction(0x22C0, instruction, wave);
+    plugin.onAmdgpuBeforeExecuteInstruction(0x22C0, instruction, wave, {});
     std::array<uint64_t, 32> effective_addresses{};
     std::array<uint64_t, 32> original_addresses{};
     effective_addresses[0] = 0x8000'0040;
@@ -1894,11 +1916,11 @@ TEST_F(PerfsimPluginTest, RejectsWholeDispatchForFlatDdsStoresAndAtomics) {
     access.flat_dds_lane_mask = 1;
     access.addresses = effective_addresses;
     access.pre_routing_addresses = original_addresses;
-    plugin.onAmdgpuMemoryAccessRouted(access);
+    plugin.onAmdgpuMemoryAccessRouted(access, instruction, wave);
 
     const std::array<uint32_t, 1> end_words{0xBF810000};
     SyntheticInstruction end("s_endpgm", end_words, PROGRAM_TERMINATOR);
-    plugin.onAmdgpuBeforeExecuteInstruction(0x22C4, end, wave);
+    plugin.onAmdgpuBeforeExecuteInstruction(0x22C4, end, wave, {});
     plugin.onAmdgpuWavefrontHalted(wave);
     plugin.onAmdgpuDispatchExecutionEnd(info.dispatch_id);
     plugin.onShutdown();
@@ -1958,7 +1980,7 @@ TEST_F(PerfsimPluginTest, MatchesFfmRegularMemoryCallbackSizes) {
     const auto &test = cases[i];
     const uint64_t pc = 0x2300 + i * 4;
     SyntheticInstruction instruction(test.mnemonic, words, MEMORY_OP);
-    plugin.onAmdgpuBeforeExecuteInstruction(pc, instruction, wave);
+    plugin.onAmdgpuBeforeExecuteInstruction(pc, instruction, wave, {});
 
     std::array<uint64_t, 32> addresses{};
     addresses[0] = test.space == DecodedMemorySpace::LOCAL ? 0x1100 : 0x2000;
@@ -1983,12 +2005,12 @@ TEST_F(PerfsimPluginTest, MatchesFfmRegularMemoryCallbackSizes) {
     access.valid_lane_mask = 1;
     access.request_lane_mask = 1;
     access.addresses = addresses;
-    plugin.onAmdgpuMemoryAccessRouted(access);
+    plugin.onAmdgpuMemoryAccessRouted(access, instruction, wave);
   }
 
   const std::array<uint32_t, 1> end_words{0xBF810000};
   SyntheticInstruction end("s_endpgm", end_words, PROGRAM_TERMINATOR);
-  plugin.onAmdgpuBeforeExecuteInstruction(0x2400, end, wave);
+  plugin.onAmdgpuBeforeExecuteInstruction(0x2400, end, wave, {});
   plugin.onAmdgpuWavefrontHalted(wave);
   plugin.onAmdgpuDispatchExecutionEnd(info.dispatch_id);
   plugin.onShutdown();
@@ -2034,7 +2056,7 @@ TEST_F(PerfsimPluginTest, ForwardsNominalWidthsForPartialOobVbufferAccesses) {
     const auto &test = cases[i];
     const uint64_t pc = 0x2500 + i * 4;
     SyntheticInstruction instruction(test.mnemonic, words, MEMORY_OP);
-    plugin.onAmdgpuBeforeExecuteInstruction(pc, instruction, wave);
+    plugin.onAmdgpuBeforeExecuteInstruction(pc, instruction, wave, {});
 
     std::array<uint64_t, 32> addresses{};
     addresses[0] = 0x2000 + i * 0x100;
@@ -2061,12 +2083,12 @@ TEST_F(PerfsimPluginTest, ForwardsNominalWidthsForPartialOobVbufferAccesses) {
     access.addresses = addresses;
     access.element_lane_masks =
         std::span<const uint64_t>(test.element_lane_masks).first(test.elements);
-    plugin.onAmdgpuMemoryAccessRouted(access);
+    plugin.onAmdgpuMemoryAccessRouted(access, instruction, wave);
   }
 
   const std::array<uint32_t, 1> end_words{0xBF810000};
   SyntheticInstruction end("s_endpgm", end_words, PROGRAM_TERMINATOR);
-  plugin.onAmdgpuBeforeExecuteInstruction(0x2600, end, wave);
+  plugin.onAmdgpuBeforeExecuteInstruction(0x2600, end, wave, {});
   plugin.onAmdgpuWavefrontHalted(wave);
   plugin.onAmdgpuDispatchExecutionEnd(info.dispatch_id);
   plugin.onShutdown();
@@ -2112,7 +2134,7 @@ TEST_F(PerfsimPluginTest, RejectsWholeDispatchWhenFlatAtomicResolvesToScratch) {
 
     const std::array<uint32_t, 1> atomic_words{0xDEAD0003};
     SyntheticInstruction atomic("flat_atomic_add", atomic_words, MEMORY_OP);
-    plugin.onAmdgpuBeforeExecuteInstruction(0x2100, atomic, wave);
+    plugin.onAmdgpuBeforeExecuteInstruction(0x2100, atomic, wave, {});
     std::array<uint64_t, 32> addresses{};
     addresses[0] = 0xABC000;
     MemoryAccessObservation access;
@@ -2137,11 +2159,11 @@ TEST_F(PerfsimPluginTest, RejectsWholeDispatchWhenFlatAtomicResolvesToScratch) {
     access.request_lane_mask = 1;
     access.scratch_lane_mask = 1;
     access.addresses = addresses;
-    plugin.onAmdgpuMemoryAccessRouted(access);
+    plugin.onAmdgpuMemoryAccessRouted(access, atomic, wave);
 
     const std::array<uint32_t, 1> end_words{0xBF810000};
     SyntheticInstruction end("s_endpgm", end_words, PROGRAM_TERMINATOR);
-    plugin.onAmdgpuBeforeExecuteInstruction(0x2104, end, wave);
+    plugin.onAmdgpuBeforeExecuteInstruction(0x2104, end, wave, {});
     plugin.onAmdgpuWavefrontHalted(wave);
     plugin.onAmdgpuDispatchExecutionEnd(info.dispatch_id);
     plugin.onShutdown();
@@ -2180,8 +2202,8 @@ TEST_F(PerfsimPluginTest, ReplaysInterleavedDispatchesAsOneGloballyOrderedEpoch)
 
   const std::array<uint32_t, 1> words{0xBF810000};
   SyntheticInstruction end("s_endpgm", words, PROGRAM_TERMINATOR);
-  plugin.onAmdgpuBeforeExecuteInstruction(0x3000, end, first);
-  plugin.onAmdgpuBeforeExecuteInstruction(0x4000, end, second);
+  plugin.onAmdgpuBeforeExecuteInstruction(0x3000, end, first, {});
+  plugin.onAmdgpuBeforeExecuteInstruction(0x4000, end, second, {});
   plugin.onAmdgpuWavefrontHalted(first);
   plugin.onAmdgpuWavefrontHalted(second);
   plugin.onAmdgpuDispatchExecutionEnd(21);
@@ -2231,11 +2253,11 @@ TEST_F(PerfsimPluginTest, ReplaysLargeEpochInOrder) {
   const std::array<uint32_t, 1> add_words{0x7E000200};
   SyntheticInstruction add("v_add_f32", add_words);
   for (uint32_t i = 0; i < kAddCount; ++i)
-    plugin.onAmdgpuBeforeExecuteInstruction(kFirstPc + i * 4, add, wave);
+    plugin.onAmdgpuBeforeExecuteInstruction(kFirstPc + i * 4, add, wave, {});
 
   const std::array<uint32_t, 1> end_words{0xBF810000};
   SyntheticInstruction end("s_endpgm", end_words, PROGRAM_TERMINATOR);
-  plugin.onAmdgpuBeforeExecuteInstruction(kFirstPc + kAddCount * 4, end, wave);
+  plugin.onAmdgpuBeforeExecuteInstruction(kFirstPc + kAddCount * 4, end, wave, {});
   plugin.onAmdgpuWavefrontHalted(wave);
   plugin.onAmdgpuDispatchExecutionEnd(info.dispatch_id);
   plugin.onShutdown();
@@ -2281,18 +2303,18 @@ TEST_F(PerfsimPluginTest, CompactsInterleavedChunksWithoutReorderingSurvivors) {
   const std::array<uint32_t, 1> add_words{0x7E000200};
   SyntheticInstruction add("v_add_f32", add_words);
   for (uint32_t i = 0; i < kAddCount; ++i) {
-    plugin.onAmdgpuBeforeExecuteInstruction(kRejectedFirstPc + i * 4, add, rejected_wave);
-    plugin.onAmdgpuBeforeExecuteInstruction(kSupportedFirstPc + i * 4, add, supported_wave);
+    plugin.onAmdgpuBeforeExecuteInstruction(kRejectedFirstPc + i * 4, add, rejected_wave, {});
+    plugin.onAmdgpuBeforeExecuteInstruction(kSupportedFirstPc + i * 4, add, supported_wave, {});
   }
 
   ScopedStderrCapture stderr_capture;
   SyntheticInstruction scratch("scratch_load_dword", add_words, MEMORY_OP);
-  plugin.onAmdgpuBeforeExecuteInstruction(0x30000, scratch, rejected_wave);
+  plugin.onAmdgpuBeforeExecuteInstruction(0x30000, scratch, rejected_wave, {});
 
   const std::array<uint32_t, 1> end_words{0xBF810000};
   SyntheticInstruction end("s_endpgm", end_words, PROGRAM_TERMINATOR);
   const uint64_t supported_end_pc = kSupportedFirstPc + kAddCount * 4;
-  plugin.onAmdgpuBeforeExecuteInstruction(supported_end_pc, end, supported_wave);
+  plugin.onAmdgpuBeforeExecuteInstruction(supported_end_pc, end, supported_wave, {});
   plugin.onAmdgpuWavefrontHalted(supported_wave);
   plugin.onAmdgpuDispatchExecutionEnd(34);
   const std::string diagnostic = stderr_capture.finish();
@@ -2352,7 +2374,7 @@ TEST_F(PerfsimPluginTest, RejectsLongLivedDispatchAtStagingBudgetAndReusesBudget
     const std::array<uint32_t, 1> add_words{0x7E000200};
     SyntheticInstruction add("v_add_f32", add_words);
     for (uint32_t i = 0; i < 512; ++i)
-      plugin.onAmdgpuBeforeExecuteInstruction(0x9000 + i * 4, add, rejected_wave);
+      plugin.onAmdgpuBeforeExecuteInstruction(0x9000 + i * 4, add, rejected_wave, {});
 
     plugin.onAmdgpuWavefrontHalted(rejected_wave);
     plugin.onAmdgpuDispatchExecutionEnd(rejected_info.dispatch_id);
@@ -2366,7 +2388,7 @@ TEST_F(PerfsimPluginTest, RejectsLongLivedDispatchAtStagingBudgetAndReusesBudget
     plugin.onAmdgpuWavefrontDispatched(supported_wave);
     const std::array<uint32_t, 1> end_words{0xBF810000};
     SyntheticInstruction end("s_endpgm", end_words, PROGRAM_TERMINATOR);
-    plugin.onAmdgpuBeforeExecuteInstruction(0xA000, end, supported_wave);
+    plugin.onAmdgpuBeforeExecuteInstruction(0xA000, end, supported_wave, {});
     plugin.onAmdgpuWavefrontHalted(supported_wave);
     plugin.onAmdgpuDispatchExecutionEnd(supported_info.dispatch_id);
     plugin.onShutdown();
@@ -2410,11 +2432,11 @@ TEST_F(PerfsimPluginTest, RejectedDispatchDoesNotBlockOverlappingSupportedDispat
   SyntheticInstruction add("v_add_f32", add_words);
   ScopedStderrCapture stderr_capture;
   for (uint32_t i = 0; i < 128; ++i)
-    plugin.onAmdgpuBeforeExecuteInstruction(0xB000 + i * 4, add, rejected_wave);
+    plugin.onAmdgpuBeforeExecuteInstruction(0xB000 + i * 4, add, rejected_wave, {});
 
   const std::array<uint32_t, 1> end_words{0xBF810000};
   SyntheticInstruction end("s_endpgm", end_words, PROGRAM_TERMINATOR);
-  plugin.onAmdgpuBeforeExecuteInstruction(0xC000, end, supported_wave);
+  plugin.onAmdgpuBeforeExecuteInstruction(0xC000, end, supported_wave, {});
   plugin.onAmdgpuWavefrontHalted(supported_wave);
   plugin.onAmdgpuDispatchExecutionEnd(28);
   const std::string diagnostic = stderr_capture.finish();
@@ -2463,7 +2485,7 @@ TEST_F(PerfsimPluginTest, IgnoresCallbacksAfterEarlyDispatchRejection) {
     const std::array<uint32_t, 1> add_words{0x7E000200};
     SyntheticInstruction add("v_add_f32", add_words);
     for (uint32_t i = 0; i < 512; ++i)
-      plugin.onAmdgpuBeforeExecuteInstruction(0xD000 + i * 4, add, rejected_wave);
+      plugin.onAmdgpuBeforeExecuteInstruction(0xD000 + i * 4, add, rejected_wave, {});
 
     const KernelDispatchInfo supported_info = dispatch_info(30);
     plugin.onAmdgpuDispatchPacketProcessed(supported_info);
@@ -2474,7 +2496,7 @@ TEST_F(PerfsimPluginTest, IgnoresCallbacksAfterEarlyDispatchRejection) {
     plugin.onAmdgpuWavefrontDispatched(supported_wave);
     const std::array<uint32_t, 1> end_words{0xBF810000};
     SyntheticInstruction end("s_endpgm", end_words, PROGRAM_TERMINATOR);
-    plugin.onAmdgpuBeforeExecuteInstruction(0xE000, end, supported_wave);
+    plugin.onAmdgpuBeforeExecuteInstruction(0xE000, end, supported_wave, {});
     plugin.onAmdgpuWavefrontHalted(supported_wave);
     plugin.onAmdgpuDispatchExecutionEnd(supported_info.dispatch_id);
 
@@ -2522,7 +2544,7 @@ TEST_F(PerfsimPluginTest, RejectsTensorDmaBeforeMaterializingAddressesOverBudget
 
     const std::array<uint32_t, 3> tensor_words{0xD0710001, 0x7C000000, 0x18140C00};
     SyntheticInstruction tensor("tensor_load_to_lds", tensor_words, MEMORY_OP);
-    plugin.onAmdgpuBeforeExecuteInstruction(0xF000, tensor, wave);
+    plugin.onAmdgpuBeforeExecuteInstruction(0xF000, tensor, wave, {});
     TensorDmaMemoryAccessObservation access;
     access.mnemonic = "tensor_load_to_lds";
     access.pc = 0xF000;
@@ -2545,7 +2567,7 @@ TEST_F(PerfsimPluginTest, RejectsTensorDmaBeforeMaterializingAddressesOverBudget
           std::ranges::fill(destination, 0x100000);
           return true;
         });
-    plugin.onAmdgpuTensorDmaMemoryAccess(access);
+    plugin.onAmdgpuTensorDmaMemoryAccess(access, wave);
 
     plugin.onAmdgpuWavefrontHalted(wave);
     plugin.onAmdgpuDispatchExecutionEnd(info.dispatch_id);
@@ -2584,8 +2606,8 @@ TEST_F(PerfsimPluginTest, PreservesCollidingWrappedFfmWaveIdentities) {
 
   const std::array<uint32_t, 1> words{0xBF810000};
   SyntheticInstruction end("s_endpgm", words, PROGRAM_TERMINATOR);
-  plugin.onAmdgpuBeforeExecuteInstruction(0x4100, end, first);
-  plugin.onAmdgpuBeforeExecuteInstruction(0x4200, end, second);
+  plugin.onAmdgpuBeforeExecuteInstruction(0x4100, end, first, {});
+  plugin.onAmdgpuBeforeExecuteInstruction(0x4200, end, second, {});
   plugin.onAmdgpuWavefrontHalted(first);
   plugin.onAmdgpuWavefrontHalted(second);
   plugin.onAmdgpuDispatchExecutionEnd(info.dispatch_id);
@@ -2619,7 +2641,7 @@ TEST_F(PerfsimPluginTest, RejectsWholeUnsupportedDispatchWithoutBackendCallbacks
     plugin.onAmdgpuWavefrontDispatched(wave);
     const std::array<uint32_t, 1> words{0xBF810000};
     SyntheticInstruction end("s_endpgm", words, PROGRAM_TERMINATOR);
-    plugin.onAmdgpuBeforeExecuteInstruction(0x5000, end, wave);
+    plugin.onAmdgpuBeforeExecuteInstruction(0x5000, end, wave, {});
     plugin.onAmdgpuWavefrontHalted(wave);
     plugin.onAmdgpuDispatchExecutionEnd(info.dispatch_id);
     plugin.onShutdown();
@@ -2659,11 +2681,11 @@ TEST_F(PerfsimPluginTest, ReusesOnlyConsecutiveRepeatedWaitOrdinals) {
 
   const std::array<uint32_t, 1> add_words{0x7E000200};
   SyntheticInstruction add("v_add_f32", add_words);
-  plugin.onAmdgpuBeforeExecuteInstruction(0x6004, add, wave);
-  plugin.onAmdgpuBeforeExecuteInstruction(0x6004, add, wave);
+  plugin.onAmdgpuBeforeExecuteInstruction(0x6004, add, wave, {});
+  plugin.onAmdgpuBeforeExecuteInstruction(0x6004, add, wave, {});
   const std::array<uint32_t, 1> end_words{0xBF810000};
   SyntheticInstruction end("s_endpgm", end_words, PROGRAM_TERMINATOR);
-  plugin.onAmdgpuBeforeExecuteInstruction(0x6008, end, wave);
+  plugin.onAmdgpuBeforeExecuteInstruction(0x6008, end, wave, {});
   plugin.onAmdgpuWavefrontHalted(wave);
   plugin.onAmdgpuDispatchExecutionEnd(info.dispatch_id);
   plugin.onShutdown();
@@ -2702,7 +2724,7 @@ TEST_F(PerfsimPluginTest, MatchesFfmSwmmacSmemAndClusterInstructionCounters) {
 
   const std::array<uint32_t, 1> swmmac_words{0xDEAD3601};
   SyntheticInstruction swmmac("v_swmmac_f32_16x16x16_f16", swmmac_words);
-  plugin.onAmdgpuBeforeExecuteInstruction(0x7000, swmmac, wave);
+  plugin.onAmdgpuBeforeExecuteInstruction(0x7000, swmmac, wave, {});
 
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
@@ -2712,15 +2734,15 @@ TEST_F(PerfsimPluginTest, MatchesFfmSwmmacSmemAndClusterInstructionCounters) {
   std::unique_ptr<Instruction> smem_cache = std::move(smem_result).value();
   ASSERT_EQ(smem_cache->mnemonic(), "s_dcache_inv");
   ASSERT_FALSE(smem_cache->is_memory_op());
-  plugin.onAmdgpuBeforeExecuteInstruction(0x7004, *smem_cache, wave);
+  plugin.onAmdgpuBeforeExecuteInstruction(0x7004, *smem_cache, wave, {});
 
   const std::array<uint32_t, 1> cluster_words{0xDEAD3603};
   SyntheticInstruction cluster_load("cluster_load_b128", cluster_words, MEMORY_OP);
-  plugin.onAmdgpuBeforeExecuteInstruction(0x7008, cluster_load, wave);
+  plugin.onAmdgpuBeforeExecuteInstruction(0x7008, cluster_load, wave, {});
 
   const std::array<uint32_t, 1> end_words{0xBF810000};
   SyntheticInstruction end("s_endpgm", end_words, PROGRAM_TERMINATOR);
-  plugin.onAmdgpuBeforeExecuteInstruction(0x700C, end, wave);
+  plugin.onAmdgpuBeforeExecuteInstruction(0x700C, end, wave, {});
   plugin.onAmdgpuWavefrontHalted(wave);
   plugin.onAmdgpuDispatchExecutionEnd(info.dispatch_id);
   plugin.onShutdown();
@@ -3082,7 +3104,7 @@ TEST_F(PerfsimPluginTest, RealBackendMatchesDirectFfmForCanonicalStream) {
     memory_access.valid_lane_mask = 1;
     memory_access.request_lane_mask = 1;
     memory_access.addresses = global_addresses;
-    plugin.onAmdgpuMemoryAccessRouted(memory_access, wave);
+    plugin.onAmdgpuMemoryAccessRouted(memory_access, global, wave);
 
     SyntheticInstruction tensor("tensor_load_to_lds", kTensorEncoding, MEMORY_OP);
     plugin.onAmdgpuBeforeExecuteInstruction(kTensorPc, tensor, wave, kTensorFetch);

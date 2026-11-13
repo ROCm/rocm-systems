@@ -46,10 +46,15 @@ public:
 
 class MemoryLifecyclePlugin final : public ExecutionPlugin {
 public:
+  bool observes_before_execute_instruction() const override { return true; }
+  bool observes_after_execute_instruction() const override { return true; }
+  bool observes_memory_instruction_routing() const override { return true; }
+  bool supports_async_instructions() const override { return false; }
+
   MemoryLifecyclePlugin() : ExecutionPlugin("vm-memory-lifecycle") {}
 
-  void onAmdgpuBeforeExecuteInstruction(uint64_t, const Instruction &inst,
-                                        amdgpu::Wavefront &) override {
+  void onAmdgpuBeforeExecuteInstruction(uint64_t, const Instruction &inst, amdgpu::Wavefront &,
+                                        std::span<const uint32_t>) override {
     if (inst.mnemonic() == kMnemonic)
       ++before_count;
   }
@@ -73,10 +78,14 @@ public:
 
 class InvalidAtomicOperationPlugin final : public ExecutionPlugin {
 public:
+  bool observes_before_execute_instruction() const override { return true; }
+  bool observes_memory_instruction_routing() const override { return true; }
+  bool supports_async_instructions() const override { return false; }
+
   InvalidAtomicOperationPlugin() : ExecutionPlugin("invalid-atomic-operation") {}
 
-  void onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Instruction &,
-                                        amdgpu::Wavefront &) override {
+  void onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Instruction &, amdgpu::Wavefront &,
+                                        std::span<const uint32_t>) override {
     if (pc == successor_pc)
       ++successor_executions;
   }
@@ -329,9 +338,13 @@ public:
 
 class InstructionVmPlugin final : public ExecutionPlugin {
 public:
+  bool observes_before_execute_instruction() const override { return true; }
+  bool observes_after_execute_instruction() const override { return true; }
+  bool supports_async_instructions() const override { return false; }
+
   InstructionVmPlugin() : ExecutionPlugin("instruction-vm") {}
-  void onAmdgpuBeforeExecuteInstruction(uint64_t, const Instruction &,
-                                        amdgpu::Wavefront &wf) override {
+  void onAmdgpuBeforeExecuteInstruction(uint64_t, const Instruction &, amdgpu::Wavefront &wf,
+                                        std::span<const uint32_t>) override {
     if (before_instruction)
       before_instruction(wf);
   }
@@ -3483,10 +3496,12 @@ TEST(GpuVmPipeline, DeferredTensorLoadCommitsLdsAfterPeerReadEffects) {
 TEST(GpuVmPipeline, DeferredTensorLoadReportsInstructionPcAtCompletion) {
   class TensorDmaPcObserver final : public ExecutionPlugin {
   public:
+    bool supports_async_instructions() const override { return false; }
+
     TensorDmaPcObserver() : ExecutionPlugin("tensor-dma-pc") {}
     bool observes_tensor_dma_memory_access() const override { return true; }
-    void
-    onAmdgpuTensorDmaMemoryAccess(const amdgpu::TensorDmaMemoryAccessObservation &access) override {
+    void onAmdgpuTensorDmaMemoryAccess(const amdgpu::TensorDmaMemoryAccessObservation &access,
+                                       const amdgpu::Wavefront &) override {
       pcs.push_back(access.pc);
     }
     std::vector<uint64_t> pcs;
@@ -3543,6 +3558,8 @@ TEST(GpuVmPipeline, DeferredTensorLoadReportsInstructionPcAtCompletion) {
 TEST(GpuVmPipeline, DeferredTensorLoadIssuesOnceAndCompletesAtItsInstructionPc) {
   class TensorDmaStepObserver final : public ExecutionPlugin {
   public:
+    bool supports_async_instructions() const override { return false; }
+
     TensorDmaStepObserver() : ExecutionPlugin("tensor-dma-step") {}
     bool observes_tensor_dma_issue() const override { return true; }
     bool observes_tensor_dma_memory_access() const override { return true; }
@@ -3553,12 +3570,12 @@ TEST(GpuVmPipeline, DeferredTensorLoadIssuesOnceAndCompletesAtItsInstructionPc) 
       if (on_issue)
         on_issue();
     }
-    void
-    onAmdgpuTensorDmaMemoryAccess(const amdgpu::TensorDmaMemoryAccessObservation &access) override {
+    void onAmdgpuTensorDmaMemoryAccess(const amdgpu::TensorDmaMemoryAccessObservation &access,
+                                       const amdgpu::Wavefront &) override {
       completion_pcs.push_back(access.pc);
     }
     int issues = 0;
-    std::vector<amdgpu::TensorDmaLdsRange> lds_ranges;
+    std::vector<amdgpu::LdsByteRange> lds_ranges;
     std::vector<uint64_t> completion_pcs;
     std::function<void()> on_issue;
   };
@@ -3606,7 +3623,7 @@ TEST(GpuVmPipeline, DeferredTensorLoadIssuesOnceAndCompletesAtItsInstructionPc) 
   EXPECT_EQ(observer->issues, 1);
   EXPECT_TRUE(lds_untouched_at_issue);
   EXPECT_EQ(observer->lds_ranges,
-            (std::vector<amdgpu::TensorDmaLdsRange>{{.address = lds_address, .bytes = 4}}));
+            (std::vector<amdgpu::LdsByteRange>{{.address = lds_address, .bytes = 4}}));
   EXPECT_EQ(context.wf->lds().read32(lds_address), kSentinel);
   EXPECT_TRUE(observer->completion_pcs.empty());
 
@@ -3621,16 +3638,19 @@ TEST(GpuVmPipeline, TensorLoadCompletionFailureStopsResidentAndDeferredExecution
   public:
     explicit FailingCompletionObserver(amdgpu::Wavefront &wave)
         : ExecutionPlugin("failing-tensor-completion"), wave_(wave) {}
+    bool supports_async_instructions() const override { return false; }
+    bool observes_before_execute_instruction() const override { return true; }
     bool observes_tensor_dma_memory_access() const override { return true; }
-    void
-    onAmdgpuTensorDmaMemoryAccess(const amdgpu::TensorDmaMemoryAccessObservation &access) override {
+    void onAmdgpuTensorDmaMemoryAccess(const amdgpu::TensorDmaMemoryAccessObservation &access,
+                                       const amdgpu::Wavefront &wave) override {
       ++completions;
+      EXPECT_EQ(&wave, &wave_);
       EXPECT_EQ(access.pc, 0x1000u);
       wave_.report_instruction_execution_error(amdgpu::InstructionExecutionError::PluginFailure,
                                                "tensor completion failed");
     }
-    void onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Instruction &,
-                                          amdgpu::Wavefront &) override {
+    void onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Instruction &, amdgpu::Wavefront &,
+                                          std::span<const uint32_t>) override {
       if (pc == 0x100c)
         ++successors;
     }

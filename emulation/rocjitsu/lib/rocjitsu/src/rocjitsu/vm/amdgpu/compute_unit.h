@@ -751,11 +751,12 @@ public:
     observes_memory_instruction_routing_ = plugin_group_->observes_memory_instruction_routing();
     observes_vgpr_reads_ = plugin_group_->observes_vgpr_reads();
     observes_vgpr_writes_ = plugin_group_->observes_vgpr_writes();
-    observes_sgpr_reads_ = plugin_group_->observes_sgpr_reads();
+    observes_scalar_register_reads_ = plugin_group_->observes_scalar_register_reads();
     observes_scalar_register_writes_ = plugin_group_->observes_scalar_register_writes();
     observes_memory_routing_ = plugin_group_->observes_memory_routing();
+    observes_register_hazards_ = plugin_group_->observes_register_hazards();
     observes_register_access_ = observes_vgpr_reads_ || observes_vgpr_writes_ ||
-                                observes_sgpr_reads_ || observes_scalar_register_writes_;
+                                observes_scalar_register_reads_ || observes_scalar_register_writes_;
   }
 
   /// Whether register notifications have a diagnostic or plugin consumer.
@@ -1189,6 +1190,14 @@ public:
 private:
   static bool nullify_unallocated_memory_result(Instruction &inst, const Wavefront &wf);
   VmAccessOutcome route_prepared_memory_inst(std::unique_ptr<Instruction> &&inst, Wavefront &wf);
+  bool memory_result_checks_enabled() const {
+    return config_.memory_wait_diagnostics != MemoryWaitDiagnostics::Off ||
+           observes_register_hazards_;
+  }
+  bool memory_wait_checks_enabled() const {
+    return config_.memory_wait_checks_enabled() || observes_register_hazards_;
+  }
+  void bind_memory_wait(MemoryWaitScoreboard &scoreboard, const Instruction &inst, Wavefront &wf);
 
   // RegisterAccess is the instruction-facing register boundary. These
   // ownership and SGPR access helpers validate the complete operation, fire
@@ -1244,7 +1253,7 @@ private:
   void notify_scalar_register_read(const Wavefront &wf, RegisterRef reg) const {
     if (!observes_register_access_)
       return;
-    if (observes_sgpr_reads_)
+    if (observes_scalar_register_reads_)
       observe_scalar_register_read(wf, reg);
   }
 
@@ -1277,7 +1286,7 @@ public:
   uint32_t read_sgpr(uint32_t reg_idx) const {
     if (reg_idx >= sgpr_file_.total_regs())
       return 0;
-    if (observes_sgpr_reads_)
+    if (observes_scalar_register_reads_)
       if (auto *wf = sgpr_owner(reg_idx))
         return read_sgpr(*wf, reg_idx);
     return sgpr_file_[reg_idx];
@@ -2003,10 +2012,11 @@ protected:
   bool observes_memory_instruction_routing_ = false;
   bool observes_vgpr_reads_ = false;
   bool observes_vgpr_writes_ = false;
-  bool observes_sgpr_reads_ = false;
+  bool observes_scalar_register_reads_ = false;
   bool observes_scalar_register_writes_ = false;
   bool pool_driven_ = false;
   bool observes_memory_routing_ = false;
+  bool observes_register_hazards_ = false;
   bool observes_register_access_ = false;
   uint64_t memory_wait_diagnostic_count_ = 0;
   // Written only when decoding or executing fails and cleared once reported,

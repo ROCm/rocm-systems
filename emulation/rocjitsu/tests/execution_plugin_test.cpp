@@ -28,20 +28,24 @@
 
 #include <gtest/gtest-spi.h>
 
+#include <array>
 #include <atomic>
 #include <barrier>
 #include <chrono>
 #include <condition_variable>
 #include <format>
 #include <fstream>
+#include <initializer_list>
 #include <iomanip>
 #include <iostream>
 #include <iterator>
 #include <map>
 #include <mutex>
 #include <set>
+#include <span>
 #include <sstream>
 #include <tuple>
+#include <type_traits>
 
 #if defined(__linux__)
 #include <unistd.h>
@@ -97,10 +101,13 @@ public:
 
 class ParallelColdHookRecorder final : public ExecutionPlugin {
 public:
+  bool observes_before_execute_instruction() const override { return true; }
+  bool supports_async_instructions() const override { return false; }
+
   ParallelColdHookRecorder() : ExecutionPlugin("parallel_cold_hook_recorder"), startup_(2) {}
 
-  void onAmdgpuBeforeExecuteInstruction(uint64_t, const Instruction &,
-                                        amdgpu::Wavefront &) override {
+  void onAmdgpuBeforeExecuteInstruction(uint64_t, const Instruction &, amdgpu::Wavefront &,
+                                        std::span<const uint32_t>) override {
     {
       std::lock_guard<std::mutex> lock(mutex_);
       hot_hook_threads_.insert(std::this_thread::get_id());
@@ -109,7 +116,7 @@ public:
       startup_.arrive_and_wait();
   }
 
-  void onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint32_t wg_id, uint32_t, uint32_t,
+  void onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint32_t wg_id,
                                    std::span<amdgpu::Wavefront *>) override {
     record(HookEvent::WORKGROUP_DISPATCHED, dispatch_id, wg_id);
   }
@@ -153,10 +160,15 @@ public:
 
 class UnsubscribedHotHookPlugin final : public ExecutionPlugin {
 public:
+  bool observes_scalar_register_reads() const override { return true; }
+  bool supports_async_instructions() const override { return false; }
+
   UnsubscribedHotHookPlugin() : ExecutionPlugin("unsubscribed_hot_hook") {}
   bool requires_serial_hot_hooks() const override { return true; }
   bool observes_hot_hooks_for_wavefront(const amdgpu::Wavefront *) const override { return false; }
-  void onAmdgpuReadSgpr(const amdgpu::Wavefront *, uint32_t) override { ++hot_callbacks; }
+  void onAmdgpuReadScalarRegister(const amdgpu::Wavefront *, RegisterRef) override {
+    ++hot_callbacks;
+  }
   void onAmdgpuWorkgroupCompleted(uint32_t, uint32_t) override { ++cold_callbacks; }
 
   uint32_t hot_callbacks = 0;
@@ -165,6 +177,9 @@ public:
 
 class HotHookSubscriptionProbe final : public ExecutionPlugin {
 public:
+  bool observes_scalar_register_reads() const override { return true; }
+  bool supports_async_instructions() const override { return false; }
+
   HotHookSubscriptionProbe(std::string name, bool subscribe_on_dispatch,
                            bool serial_hot_hooks = false)
       : ExecutionPlugin(std::move(name)), subscribe_on_dispatch_(subscribe_on_dispatch),
@@ -181,7 +196,7 @@ public:
     ++dispatch_callbacks;
     subscribed = subscribe_on_dispatch_;
     if (reenter_on_dispatch && group)
-      group->onAmdgpuReadSgpr(&wf, 0);
+      group->onAmdgpuReadScalarRegister(&wf, {RegClass::SGPR, 0, 1});
   }
 
   void onAmdgpuWavefrontHalted(amdgpu::Wavefront &wf) override {
@@ -189,7 +204,7 @@ public:
     if (unsubscribe_on_halt)
       subscribed = false;
     if (reenter_on_halt && group)
-      group->onAmdgpuReadSgpr(&wf, 0);
+      group->onAmdgpuReadScalarRegister(&wf, {RegClass::SGPR, 0, 1});
   }
 
   void onAmdgpuWavefrontCancelled(amdgpu::Wavefront &wf) override {
@@ -197,10 +212,12 @@ public:
     if (unsubscribe_on_cancellation)
       subscribed = false;
     if (reenter_on_cancellation && group)
-      group->onAmdgpuReadSgpr(&wf, 0);
+      group->onAmdgpuReadScalarRegister(&wf, {RegClass::SGPR, 0, 1});
   }
 
-  void onAmdgpuReadSgpr(const amdgpu::Wavefront *, uint32_t) override { ++hot_callbacks; }
+  void onAmdgpuReadScalarRegister(const amdgpu::Wavefront *, RegisterRef) override {
+    ++hot_callbacks;
+  }
 
   void set_subscribe_on_dispatch(bool value) { subscribe_on_dispatch_ = value; }
 
@@ -222,11 +239,10 @@ private:
   bool serial_hot_hooks_ = false;
 };
 
-class NoSgprReadPlugin final : public ExecutionPlugin {
+class NoScalarReadPlugin final : public ExecutionPlugin {
 public:
-  NoSgprReadPlugin() : ExecutionPlugin("no_sgpr_read") {}
-  bool observes_sgpr_reads() const override { return false; }
-  void onAmdgpuReadSgpr(const amdgpu::Wavefront *, uint32_t) override { ++callbacks; }
+  NoScalarReadPlugin() : ExecutionPlugin("no_scalar_read") {}
+  bool observes_scalar_register_reads() const override { return false; }
   void onAmdgpuReadScalarRegister(const amdgpu::Wavefront *, RegisterRef) override { ++callbacks; }
 
   uint32_t callbacks = 0;
@@ -301,12 +317,17 @@ private:
 
 class ConcurrencyProbePlugin final : public ExecutionPlugin {
 public:
+  bool observes_scalar_register_reads() const override { return true; }
+  bool supports_async_instructions() const override { return false; }
+
   explicit ConcurrencyProbePlugin(bool serialize_hot_hooks)
       : ExecutionPlugin("concurrency_probe"), serialize_hot_hooks_(serialize_hot_hooks) {}
 
   bool requires_serial_hot_hooks() const override { return serialize_hot_hooks_; }
 
-  void onAmdgpuReadSgpr(const amdgpu::Wavefront *, uint32_t) override { hot_probe_.observe(); }
+  void onAmdgpuReadScalarRegister(const amdgpu::Wavefront *, RegisterRef) override {
+    hot_probe_.observe();
+  }
 
   void onAmdgpuWorkgroupCompleted(uint32_t, uint32_t) override { cold_probe_.observe(); }
 
@@ -321,13 +342,18 @@ private:
 
 class CrossHookConcurrencyProbePlugin final : public ExecutionPlugin {
 public:
+  bool observes_scalar_register_reads() const override { return true; }
+  bool supports_async_instructions() const override { return false; }
+
   explicit CrossHookConcurrencyProbePlugin(bool serialize_hot_hooks)
       : ExecutionPlugin("cross_hook_concurrency_probe"), serialize_hot_hooks_(serialize_hot_hooks) {
   }
 
   bool requires_serial_hot_hooks() const override { return serialize_hot_hooks_; }
 
-  void onAmdgpuReadSgpr(const amdgpu::Wavefront *, uint32_t) override { probe_.observe(); }
+  void onAmdgpuReadScalarRegister(const amdgpu::Wavefront *, RegisterRef) override {
+    probe_.observe();
+  }
 
   void onAmdgpuWorkgroupCompleted(uint32_t, uint32_t) override { probe_.observe(); }
 
@@ -1361,7 +1387,7 @@ TEST(InstructionMixPluginTest, PicksTheSameEncodingRegardlessOfMergeOrder) {
       wf.set_dispatch_id(1);
       group.onAmdgpuWavefrontDispatched(wf);
       EncodedTestInstruction inst("v_lshlrev_b64", encoding);
-      group.onAmdgpuBeforeExecuteInstruction(0, inst, wf);
+      group.onAmdgpuBeforeExecuteInstruction(0, inst, wf, {});
       group.onAmdgpuWavefrontHalted(wf);
     }
     group.onAmdgpuDispatchExecutionEnd(1);
@@ -1411,7 +1437,7 @@ TEST(InstructionMixPluginTest, PicksTheSameEncodingSizeRegardlessOfMergeOrder) {
       wf.set_dispatch_id(1);
       group.onAmdgpuWavefrontDispatched(wf);
       EncodedTestInstruction inst("v_mov_b32_e32", /*encoding_id=*/63, /*opcode=*/1, size);
-      group.onAmdgpuBeforeExecuteInstruction(0, inst, wf);
+      group.onAmdgpuBeforeExecuteInstruction(0, inst, wf, {});
       group.onAmdgpuWavefrontHalted(wf);
     }
     group.onAmdgpuDispatchExecutionEnd(1);
@@ -1454,7 +1480,7 @@ TEST(InstructionMixPluginTest, ShutdownKeepsCoverageFromUnfinishedDispatches) {
     wf.set_dispatch_id(dispatch_id);
     group.onAmdgpuWavefrontDispatched(wf);
     InstructionMixTestInstruction inst(dispatch_id == 1 ? "s_nop" : "v_add_f32");
-    group.onAmdgpuBeforeExecuteInstruction(0, inst, wf);
+    group.onAmdgpuBeforeExecuteInstruction(0, inst, wf, {});
     group.onAmdgpuWavefrontHalted(wf);
   }
   group.onAmdgpuDispatchExecutionEnd(1);
@@ -1511,7 +1537,7 @@ TEST(InstructionMixPluginTest, OwnsMnemonicStorageWhenTheSourceIsNotStatic) {
   {
     std::string transient_mnemonic = "global_load_dwordx4_transient_storage";
     InstructionMixTestInstruction inst(transient_mnemonic, MEMORY_OP);
-    group.onAmdgpuBeforeExecuteInstruction(0, inst, wf);
+    group.onAmdgpuBeforeExecuteInstruction(0, inst, wf, {});
     // Scribble over the characters the view pointed at, then release them.
     transient_mnemonic.assign(transient_mnemonic.size(), 'X');
     transient_mnemonic = std::string();
@@ -1530,10 +1556,13 @@ TEST(InstructionMixPluginTest, OwnsMnemonicStorageWhenTheSourceIsNotStatic) {
 
 class AsyncEventPlugin final : public ExecutionPlugin {
 public:
+  bool observes_before_execute_instruction() const override { return true; }
+  bool observes_async_instruction_issued() const override { return true; }
+
   explicit AsyncEventPlugin(std::string name = "async-events") : ExecutionPlugin(std::move(name)) {}
   bool supports_async_instructions() const override { return true; }
-  bool observes_sgpr_reads() const override { return false; }
-  void onAmdgpuBeforeExecuteInstruction(uint64_t, const Instruction &inst, Wavefront &wf) override {
+  void onAmdgpuBeforeExecuteInstruction(uint64_t, const Instruction &inst, Wavefront &wf,
+                                        std::span<const uint32_t>) override {
     if (inst.mnemonic() == "s_set_vgpr_msb")
       hazard_before_set_vgpr = wf.setreg_vgpr_msb_hazard();
   }
@@ -1550,24 +1579,32 @@ public:
 };
 
 TEST(ExecutionPluginTest, AsyncSupportComesFromCapabilities) {
+  class SynchronousPlugin final : public ExecutionPlugin {
+  public:
+    SynchronousPlugin() : ExecutionPlugin("throughput") {}
+    bool supports_async_instructions() const override { return false; }
+  };
+
   ExecutionPluginGroup group(PluginSinkConfig{});
+  EXPECT_TRUE(group.supports_async_instructions());
+  ASSERT_TRUE(group.add(std::make_unique<ExecutionPlugin>("no-op")));
   EXPECT_TRUE(group.supports_async_instructions());
   ASSERT_TRUE(group.add(std::make_unique<AsyncEventPlugin>()));
   EXPECT_TRUE(group.supports_async_instructions());
   ASSERT_TRUE(group.add(std::make_unique<KernelLoggingPlugin>()));
   EXPECT_TRUE(group.supports_async_instructions());
   // A familiar name must not bypass the observation contract.
-  ASSERT_TRUE(group.add(std::make_unique<ExecutionPlugin>("throughput")));
+  ASSERT_TRUE(group.add(std::make_unique<SynchronousPlugin>()));
   EXPECT_FALSE(group.supports_async_instructions());
 
   ExecutionPluginGroup consan(PluginSinkConfig{});
   ASSERT_TRUE(consan.add(std::make_unique<RaceDetectorPlugin>()));
-  EXPECT_FALSE(consan.supports_async_instructions());
+  EXPECT_TRUE(consan.supports_async_instructions());
 }
 
 std::vector<uint32_t> independent_wmma_kernel() {
   std::vector<uint32_t> code;
-  // Zero operands are sufficient: this test checks real offload and callback
+  // Zero operands are sufficient: this test checks execution policy and callback
   // lifetimes; the matrix suites separately compare nonzero numerical results.
   for (uint8_t dst : {uint8_t{64}, uint8_t{96}}) {
     const auto words = cdna5::build_vop3p(cdna5::kVWmmaF3232x16x128F4Vop3p,
@@ -1580,6 +1617,51 @@ std::vector<uint32_t> independent_wmma_kernel() {
   }
   code.push_back(cdna5::build_sopp(cdna5::kSEndpgmSopp, {})[0]);
   return code;
+}
+
+TEST(ExecutionPluginTest, NoOpAndLifecycleObserversPreserveMmaEligibility) {
+  class LifecycleObserver final : public ExecutionPlugin {
+  public:
+    LifecycleObserver() : ExecutionPlugin("lifecycle") {}
+    void onAmdgpuWavefrontHalted(Wavefront &) override { ++halted; }
+    void onAmdgpuDispatchExecutionEnd(uint32_t) override { ++completed; }
+    unsigned halted = 0;
+    unsigned completed = 0;
+  };
+
+  for (bool no_op_first : {false, true}) {
+    SCOPED_TRACE(no_op_first);
+    PluginFixture f;
+    ASSERT_NO_FATAL_FAILURE(f.initialize(1, "cdna5", 32, 128, 256, 1, /*async_helpers=*/4));
+    f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+    if (no_op_first)
+      ASSERT_TRUE(f.plugin_group_->add(std::make_unique<ExecutionPlugin>("no-op")));
+    auto async_observer = std::make_unique<AsyncEventPlugin>();
+    auto *async_events = async_observer.get();
+    ASSERT_TRUE(f.plugin_group_->add(std::move(async_observer)));
+    auto lifecycle = std::make_unique<LifecycleObserver>();
+    auto *lifecycle_events = lifecycle.get();
+    ASSERT_TRUE(f.plugin_group_->add(std::move(lifecycle)));
+    auto snapshot = std::make_unique<test::HaltSnapshotPlugin>();
+    auto *snapshot_ptr = snapshot.get();
+    ASSERT_TRUE(f.plugin_group_->add(std::move(snapshot)));
+    if (!no_op_first)
+      ASSERT_TRUE(f.plugin_group_->add(std::make_unique<ExecutionPlugin>("no-op")));
+    EXPECT_TRUE(f.plugin_group_->supports_async_instructions());
+    f.soc->set_plugin_group(f.plugin_group_);
+    f.plugin_group_->onInit();
+    const auto code = independent_wmma_kernel();
+    f.run_kernel(code.data(), code.size(), 32, 32);
+    f.shutdown();
+    if (amdgpu::async_mma_policy::candidate("v_wmma_f32_32x16x128_f4"))
+      EXPECT_GT(async_events->issued, 0u);
+    else
+      EXPECT_EQ(async_events->issued, 0u);
+    EXPECT_EQ(lifecycle_events->halted, 1u);
+    EXPECT_EQ(lifecycle_events->completed, 1u);
+    ASSERT_EQ(snapshot_ptr->snapshots().size(), 1u);
+    EXPECT_FALSE(snapshot_ptr->snapshots().front().vgprs.empty());
+  }
 }
 
 TEST(ExecutionPluginTest, AsyncMmaEndsSetregVgprMsbAdjacencyHazard) {
@@ -1622,6 +1704,7 @@ TEST(ExecutionPluginTest, SynchronousObserverDisablesActualMmaOffload) {
   auto sync_observer = std::make_unique<OrderingPlugin>();
   auto *sync_events = sync_observer.get();
   ASSERT_TRUE(f.plugin_group_->add(std::move(sync_observer)));
+  ASSERT_TRUE(f.plugin_group_->add(std::make_unique<RaceDetectorPlugin>()));
   f.soc->set_plugin_group(f.plugin_group_);
   f.plugin_group_->onInit();
   const auto code = independent_wmma_kernel();
@@ -1648,6 +1731,8 @@ TEST(ExecutionPluginTest, ReportedAsyncIssueFailureDrainsBeforeCancellation) {
         : ExecutionPlugin(reject ? "async_reject" : "async_observer"), reject_(reject) {}
 
     bool supports_async_instructions() const override { return true; }
+    bool observes_async_instruction_issued() const override { return true; }
+    bool observes_before_execute_instruction() const override { return true; }
     void onAmdgpuAsyncInstructionIssued(uint64_t pc, const Instruction &,
                                         Wavefront &wave) override {
       ++issued;
@@ -1658,7 +1743,8 @@ TEST(ExecutionPluginTest, ReportedAsyncIssueFailureDrainsBeforeCancellation) {
       else
         EXPECT_EQ(wave.instruction_execution_error(), InstructionExecutionError::PluginFailure);
     }
-    void onAmdgpuBeforeExecuteInstruction(uint64_t, const Instruction &, Wavefront &) override {
+    void onAmdgpuBeforeExecuteInstruction(uint64_t, const Instruction &, Wavefront &,
+                                          std::span<const uint32_t>) override {
       ++before_callbacks;
     }
     void onAmdgpuWavefrontCancelled(Wavefront &wave) override {
@@ -1747,57 +1833,116 @@ TEST(ThroughputPluginTest, AsyncMmaCountsHaveExplicitlyUnavailableHandlerTiming)
   }
 }
 
-// The group ANDs supports_async_instructions() across its members, so a plugin
-// that inherits the false default silently disables MMA offload for everything
-// loaded beside it. An instruction-mix run must not change the execution mode
-// it is there to describe -- least of all when paired with throughput, whose
-// own report then measures something other than what it would have measured
-// alone.
 TEST(InstructionMixPluginTest, CombinedGroupKeepsOffloadAndDropsSgprCallbacks) {
   PluginSinkConfig sink_config;
   sink_config.emplace<StringSink>();
   ExecutionPluginGroup group(std::move(sink_config));
   ASSERT_TRUE(group.add(std::make_unique<plugins::throughput::ThroughputPlugin>()));
   EXPECT_TRUE(group.supports_async_instructions());
-  EXPECT_FALSE(group.observes_sgpr_reads());
+  EXPECT_FALSE(group.observes_scalar_register_reads());
 
   // Adding instruction-mix must not take either capability away.
   ASSERT_TRUE(group.add(std::make_unique<plugins::instruction_mix::InstructionMixPlugin>()));
   EXPECT_TRUE(group.supports_async_instructions());
-  EXPECT_FALSE(group.observes_sgpr_reads());
+  EXPECT_FALSE(group.observes_scalar_register_reads());
 
   // Throughput times instructions at after-execute, so the combined group must
   // keep that hook even though instruction-mix declines it. These are ORed.
   EXPECT_TRUE(group.observes_after_execute_instruction());
 }
 
-// Alone, instruction-mix should ask for nothing it does not consume. The
-// register hooks matter most: any member requesting them keeps
-// ComputeUnit::observes_register_access_ on for the whole run.
-TEST(InstructionMixPluginTest, AloneItSubscribesToOnlyTheHooksItConsumes) {
-  PluginSinkConfig sink_config;
-  sink_config.emplace<StringSink>();
-  ExecutionPluginGroup group(std::move(sink_config));
-  ASSERT_TRUE(group.add(std::make_unique<plugins::instruction_mix::InstructionMixPlugin>()));
-
-  // Counted here.
-  EXPECT_TRUE(group.observes_before_execute_instruction());
-  EXPECT_TRUE(group.supports_async_instructions());
-
-  // Never consumed.
-  EXPECT_FALSE(group.observes_after_execute_instruction());
-  EXPECT_FALSE(group.observes_memory_instruction_routing());
-  EXPECT_FALSE(group.observes_vgpr_reads());
-  EXPECT_FALSE(group.observes_vgpr_writes());
-  EXPECT_FALSE(group.observes_sgpr_reads());
-  EXPECT_FALSE(group.observes_scalar_register_writes());
+void expect_hot_hook_interests(const ExecutionPluginGroup &group,
+                               std::initializer_list<std::string_view> expected) {
+  using Query = bool (ExecutionPluginGroup::*)() const;
+  constexpr std::pair<std::string_view, Query> queries[] = {
+      {"before", &ExecutionPluginGroup::observes_before_execute_instruction},
+      {"after", &ExecutionPluginGroup::observes_after_execute_instruction},
+      {"async_issue", &ExecutionPluginGroup::observes_async_instruction_issued},
+      {"pre_route", &ExecutionPluginGroup::observes_memory_instruction_routing},
+      {"vgpr_read", &ExecutionPluginGroup::observes_vgpr_reads},
+      {"vgpr_write", &ExecutionPluginGroup::observes_vgpr_writes},
+      {"scalar_read", &ExecutionPluginGroup::observes_scalar_register_reads},
+      {"scalar_write", &ExecutionPluginGroup::observes_scalar_register_writes},
+      {"routed", &ExecutionPluginGroup::observes_memory_routing},
+      {"tensor_access", &ExecutionPluginGroup::observes_tensor_dma_memory_access},
+      {"tensor_issue", &ExecutionPluginGroup::observes_tensor_dma_issue},
+      {"register_hazard", &ExecutionPluginGroup::observes_register_hazards},
+  };
+  for (const auto &[name, query] : queries)
+    EXPECT_EQ((group.*query)(), std::ranges::find(expected, name) != expected.end()) << name;
 }
 
-// With helpers configured the WMMA instructions are actually offloaded, so they
-// arrive as issue notifications instead of before/after pairs. They still
-// executed, so they still have to appear in the mix -- opting in to async
-// without handling the issue hook would have dropped them from the counts
-// instead.
+TEST(ExecutionPluginTest, BuiltinInterestsMatchConsumedHooks) {
+  auto check = [](std::unique_ptr<ExecutionPlugin> plugin,
+                  std::initializer_list<std::string_view> expected) {
+    SCOPED_TRACE(plugin->name());
+    ExecutionPluginGroup group(PluginSinkConfig{});
+    ASSERT_TRUE(group.add(std::move(plugin)));
+    expect_hot_hook_interests(group, expected);
+    EXPECT_TRUE(group.supports_async_instructions());
+    ASSERT_TRUE(group.add(std::make_unique<ExecutionPlugin>("no-op")));
+    expect_hot_hook_interests(group, expected);
+    EXPECT_TRUE(group.supports_async_instructions());
+  };
+  check(std::make_unique<ExecutionPlugin>("empty"), {});
+  check(std::make_unique<plugins::instruction_mix::InstructionMixPlugin>(),
+        {"before", "async_issue"});
+  check(std::make_unique<plugins::throughput::ThroughputPlugin>(),
+        {"before", "after", "async_issue"});
+  check(std::make_unique<KernelLoggingPlugin>(), {"after", "async_issue"});
+  check(std::make_unique<RaceDetectorPlugin>(),
+        {"before", "after", "async_issue", "routed", "tensor_issue", "register_hazard"});
+}
+
+TEST(ExecutionPluginTest, InterestsAreInheritedAndCanBeExplicitlyDisabled) {
+  class BeforeObserver : public ExecutionPlugin {
+  public:
+    explicit BeforeObserver(std::string name) : ExecutionPlugin(std::move(name)) {}
+    bool observes_before_execute_instruction() const override { return true; }
+    bool supports_async_instructions() const override { return false; }
+    void onAmdgpuBeforeExecuteInstruction(uint64_t, const Instruction &, Wavefront &,
+                                          std::span<const uint32_t>) override {
+      ++before;
+    }
+    // An override alone must not enable this hook.
+    void onAmdgpuAfterExecuteInstruction(uint64_t, const Instruction &, Wavefront &) override {
+      ++after;
+    }
+    unsigned before = 0;
+    unsigned after = 0;
+  };
+  class InheritedObserver final : public BeforeObserver {
+  public:
+    InheritedObserver() : BeforeObserver("inherited") {}
+  };
+  class DisabledObserver final : public BeforeObserver {
+  public:
+    DisabledObserver() : BeforeObserver("disabled") {}
+    bool observes_before_execute_instruction() const override { return false; }
+  };
+
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(1));
+  auto *wave = f.cu()->dispatch_wf(1, 0, 32, 32);
+  ASSERT_NE(wave, nullptr);
+  ExecutionPluginGroup group(PluginSinkConfig{});
+  auto inherited = std::make_unique<InheritedObserver>();
+  auto *inherited_ptr = inherited.get();
+  auto disabled = std::make_unique<DisabledObserver>();
+  auto *disabled_ptr = disabled.get();
+  ASSERT_TRUE(group.add(std::move(inherited)));
+  ASSERT_TRUE(group.add(std::move(disabled)));
+  expect_hot_hook_interests(group, {"before"});
+  EXPECT_FALSE(group.supports_async_instructions());
+  Instruction instruction("s_nop", nullptr);
+  group.onAmdgpuBeforeExecuteInstruction(0, instruction, *wave, {});
+  group.onAmdgpuAfterExecuteInstruction(0, instruction, *wave);
+  EXPECT_EQ(inherited_ptr->before, 1u);
+  EXPECT_EQ(disabled_ptr->before, 0u);
+  EXPECT_EQ(inherited_ptr->after, 0u);
+  EXPECT_EQ(disabled_ptr->after, 0u);
+}
+
 TEST(InstructionMixPluginTest, CountsActuallyOffloadedInstructions) {
   if (!rocjitsu::amdgpu::async_mma_policy::candidate("v_wmma_f32_32x16x128_f4"))
     GTEST_SKIP() << "Migrated matrix handlers require issuer-owned error reporting.";
@@ -1817,7 +1962,7 @@ TEST(InstructionMixPluginTest, CountsActuallyOffloadedInstructions) {
   f.run_kernel(code.data(), code.size(), 32, 32);
   f.shutdown();
 
-  // Offload really happened: without the capability opt-in this is zero.
+  // Require actual offload, not just a declared capability.
   ASSERT_GT(events->issued, 0u);
 
   const auto records = parse_instruction_mix_jsonl(sink.str());
@@ -1865,22 +2010,141 @@ TEST(ExecutionPluginTest, HotHookPolicyComesFromContainedPlugins) {
   EXPECT_TRUE(group.requires_serial_hot_hooks());
 }
 
-TEST(ExecutionPluginTest, SgprReadPolicyComesFromContainedPlugins) {
-  ExecutionPluginGroup group(PluginSinkConfig{});
-  EXPECT_FALSE(group.observes_sgpr_reads());
+TEST(ExecutionPluginTest, HooksPreserveContextAndWaveSelection) {
+  static_assert(std::is_member_function_pointer_v<
+                decltype(&ExecutionPlugin::onAmdgpuBeforeExecuteInstruction)>);
+  static_assert(std::is_member_function_pointer_v<
+                decltype(&ExecutionPluginGroup::onAmdgpuBeforeExecuteInstruction)>);
+  static_assert(
+      std::is_member_function_pointer_v<decltype(&ExecutionPlugin::onAmdgpuMemoryAccessRouted)>);
+  static_assert(std::is_member_function_pointer_v<
+                decltype(&ExecutionPluginGroup::onAmdgpuMemoryAccessRouted)>);
+  static_assert(
+      std::is_member_function_pointer_v<decltype(&ExecutionPlugin::onAmdgpuTensorDmaMemoryAccess)>);
+  static_assert(std::is_member_function_pointer_v<
+                decltype(&ExecutionPluginGroup::onAmdgpuTensorDmaMemoryAccess)>);
 
-  ASSERT_TRUE(group.add(std::make_unique<NoSgprReadPlugin>()));
-  EXPECT_FALSE(group.observes_sgpr_reads());
+  class ContextObserver : public ExecutionPlugin {
+  public:
+    ContextObserver() : ExecutionPlugin("context") {}
+    bool observes_before_execute_instruction() const override { return true; }
+    bool observes_scalar_register_reads() const override { return true; }
+    bool observes_memory_routing() const override { return true; }
+    bool observes_tensor_dma_memory_access() const override { return true; }
+    bool observes_hot_hooks_for_wavefront(const Wavefront *wf) const override {
+      return wf == selected;
+    }
+    void onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Instruction &inst, Wavefront &wf,
+                                          std::span<const uint32_t> fetch_window) override {
+      EXPECT_EQ(&wf, selected);
+      EXPECT_EQ(pc, expected_pc);
+      EXPECT_EQ(&inst, expected_instruction);
+      EXPECT_EQ(fetch_window.data(), expected_fetch.data());
+      EXPECT_EQ(fetch_window.size(), expected_fetch.size());
+      ++before_calls;
+    }
+    void onAmdgpuReadScalarRegister(const Wavefront *wf, RegisterRef reg) override {
+      EXPECT_EQ(wf, selected);
+      EXPECT_EQ(reg, expected_register);
+      ++scalar_read_calls;
+    }
+    void onAmdgpuMemoryAccessRouted(const MemoryAccessObservation &access, const Instruction &inst,
+                                    Wavefront &wf) override {
+      EXPECT_EQ(&wf, selected);
+      memory = &access;
+      instruction = &inst;
+      ++memory_calls;
+    }
+    void onAmdgpuTensorDmaMemoryAccess(const TensorDmaMemoryAccessObservation &access,
+                                       const Wavefront &wf) override {
+      EXPECT_EQ(&wf, selected);
+      tensor = &access;
+      ++tensor_calls;
+    }
+    const Wavefront *selected = nullptr;
+    const MemoryAccessObservation *memory = nullptr;
+    const TensorDmaMemoryAccessObservation *tensor = nullptr;
+    const Instruction *instruction = nullptr;
+    uint64_t expected_pc = 0;
+    const Instruction *expected_instruction = nullptr;
+    std::span<const uint32_t> expected_fetch;
+    RegisterRef expected_register{};
+    unsigned before_calls = 0;
+    unsigned scalar_read_calls = 0;
+    unsigned memory_calls = 0;
+    unsigned tensor_calls = 0;
+  };
 
-  ASSERT_TRUE(group.add(std::make_unique<ParallelSafePlugin>()));
-  EXPECT_TRUE(group.observes_sgpr_reads());
+  PluginFixture fixture;
+  ASSERT_NO_FATAL_FAILURE(fixture.initialize(/*num_wf_slots=*/2));
+  fixture.plugin_group_ = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+  auto plugin = std::make_unique<ContextObserver>();
+  auto *observer = plugin.get();
+  ASSERT_TRUE(fixture.plugin_group_->add(std::move(plugin)));
+  fixture.soc->set_plugin_group(fixture.plugin_group_);
+  auto &group = fixture.plugin_group();
+  group.onInit();
+  std::array<Wavefront *, 2> waves;
+  for (auto &wave : waves) {
+    wave = fixture.cu()->dispatch_wf(/*wg_id=*/0, /*pc=*/0, /*sgprs=*/32, /*vgprs=*/32);
+    ASSERT_NE(wave, nullptr);
+  }
+  observer->selected = waves.back();
+  Instruction instruction("context", nullptr);
+  const MemoryAccessObservation memory;
+  const TensorDmaMemoryAccessObservation tensor;
+  constexpr uint64_t pc = 0x5000;
+  const std::array<uint32_t, 5> fetch_words{0x11111111, 0x22222222, 0x33333333, 0x44444444,
+                                            0x55555555};
+  const std::span<const uint32_t> fetch_window(fetch_words);
+  observer->expected_pc = pc;
+  observer->expected_instruction = &instruction;
+  for (const bool cached : {false, true}) {
+    for (auto *wave : waves) {
+      if (cached)
+        group.onAmdgpuWavefrontDispatched(*wave);
+      for (const auto window : {std::span<const uint32_t>{}, fetch_window.first(4), fetch_window}) {
+        observer->expected_fetch = window;
+        group.onAmdgpuBeforeExecuteInstruction(pc, instruction, *wave, window);
+      }
+      for (const auto cls : {RegClass::SGPR, RegClass::TTMP}) {
+        const RegisterRef reg{cls, 7, 2};
+        observer->expected_register = reg;
+        group.onAmdgpuReadScalarRegister(wave, reg);
+      }
+      group.onAmdgpuMemoryAccessRouted(memory, instruction, *wave);
+      group.onAmdgpuTensorDmaMemoryAccess(tensor, *wave);
+    }
+    EXPECT_EQ(observer->before_calls, cached ? 6u : 3u);
+    EXPECT_EQ(observer->scalar_read_calls, cached ? 4u : 2u);
+    EXPECT_EQ(observer->memory_calls, cached ? 2u : 1u);
+    EXPECT_EQ(observer->tensor_calls, cached ? 2u : 1u);
+    EXPECT_EQ(observer->memory, &memory);
+    EXPECT_EQ(observer->tensor, &tensor);
+    EXPECT_EQ(observer->instruction, &instruction);
+  }
+  fixture.shutdown();
 }
 
-TEST(ExecutionPluginTest, SgprReadOptOutSkipsComputeUnitCallback) {
+TEST(ExecutionPluginTest, ScalarReadPolicyComesFromContainedPlugins) {
+  ExecutionPluginGroup group(PluginSinkConfig{});
+  EXPECT_FALSE(group.observes_scalar_register_reads());
+
+  ASSERT_TRUE(group.add(std::make_unique<NoScalarReadPlugin>()));
+  EXPECT_FALSE(group.observes_scalar_register_reads());
+
+  ASSERT_TRUE(group.add(std::make_unique<ParallelSafePlugin>()));
+  EXPECT_FALSE(group.observes_scalar_register_reads());
+
+  ASSERT_TRUE(group.add(std::make_unique<OrderingPlugin>()));
+  EXPECT_TRUE(group.observes_scalar_register_reads());
+}
+
+TEST(ExecutionPluginTest, ScalarReadOptOutSkipsComputeUnitCallback) {
   PluginFixture f;
   ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1));
   auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
-  auto plugin = std::make_unique<NoSgprReadPlugin>();
+  auto plugin = std::make_unique<NoScalarReadPlugin>();
   auto *plugin_ptr = plugin.get();
   ASSERT_TRUE(group->add(std::move(plugin)));
   f.soc->set_plugin_group(group);
@@ -1900,8 +2164,11 @@ TEST(ExecutionPluginTest, ReportedInstructionHookFailureCancelsBeforeContinuing)
     explicit FailingHookPlugin(bool fail_before)
         : ExecutionPlugin("failing_hook"), fail_before_(fail_before) {}
 
-    void onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Instruction &,
-                                          Wavefront &wave) override {
+    bool supports_async_instructions() const override { return false; }
+    bool observes_before_execute_instruction() const override { return true; }
+    bool observes_after_execute_instruction() const override { return true; }
+    void onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Instruction &, Wavefront &wave,
+                                          std::span<const uint32_t>) override {
       issue_pc = pc;
       if (fail_before_)
         wave.report_instruction_execution_error(InstructionExecutionError::PluginFailure,
@@ -1966,6 +2233,8 @@ TEST(ExecutionPluginTest, ReportedRoutingHookFailurePreventsPipelineIssue) {
   public:
     explicit FailingRoutePlugin(bool after_routing)
         : ExecutionPlugin("failing_route"), after_routing_(after_routing) {}
+    bool supports_async_instructions() const override { return false; }
+    bool observes_memory_instruction_routing() const override { return true; }
     bool observes_memory_routing() const override { return true; }
     void onAmdgpuRouteMemoryInstruction(const Instruction &, Wavefront &wave) override {
       if (!after_routing_)
@@ -2080,8 +2349,6 @@ TEST(ExecutionPluginTest, MultiXcdBeginClaimCannotOutrunPublication) {
       run_staged_callbacks(claim_probe, std::chrono::milliseconds(20), publish_begin, [&]() {
         publish_begin();
         group.onAmdgpuWorkgroupDispatched(kDispatchId, /*wg_id=*/1,
-                                          /*physical_vgpr_count=*/0,
-                                          /*physical_sgpr_count=*/0,
                                           std::span<amdgpu::Wavefront *>{});
       });
 
@@ -2102,8 +2369,9 @@ TEST(ExecutionPluginTest, HighFrequencyHooksRunConcurrentlyByDefault) {
   ASSERT_TRUE(group.add(std::move(probe)));
   ASSERT_FALSE(group.requires_serial_hot_hooks());
 
-  const auto result = run_staged_threads(probe_ptr->hot_probe(), std::chrono::seconds(5),
-                                         [&]() { group.onAmdgpuReadSgpr(nullptr, 0); });
+  const auto result = run_staged_threads(probe_ptr->hot_probe(), std::chrono::seconds(5), [&]() {
+    group.onAmdgpuReadScalarRegister(nullptr, {RegClass::SGPR, 0, 1});
+  });
 
   EXPECT_TRUE(result.first_entered);
   EXPECT_TRUE(result.overlap_observed);
@@ -2117,8 +2385,10 @@ TEST(ExecutionPluginTest, HighFrequencyHooksHonorSerialOptIn) {
   ASSERT_TRUE(group.add(std::move(probe)));
   ASSERT_TRUE(group.requires_serial_hot_hooks());
 
-  const auto result = run_staged_threads(probe_ptr->hot_probe(), std::chrono::milliseconds(20),
-                                         [&]() { group.onAmdgpuReadSgpr(nullptr, 0); });
+  const auto result =
+      run_staged_threads(probe_ptr->hot_probe(), std::chrono::milliseconds(20), [&]() {
+        group.onAmdgpuReadScalarRegister(nullptr, {RegClass::SGPR, 0, 1});
+      });
 
   EXPECT_TRUE(result.first_entered);
   EXPECT_FALSE(result.overlap_observed);
@@ -2133,7 +2403,7 @@ TEST(ExecutionPluginTest, UnsubscribedWaveBypassesHotHookAndCallbackLock) {
   ASSERT_TRUE(group.requires_serial_hot_hooks());
 
   const uint64_t before = test::ExecutionPluginGroupTestAccess::callback_lock_acquisitions(group);
-  group.onAmdgpuReadSgpr(nullptr, 0);
+  group.onAmdgpuReadScalarRegister(nullptr, {RegClass::SGPR, 0, 1});
 
   EXPECT_EQ(plugin_ptr->hot_callbacks, 0u);
   EXPECT_EQ(test::ExecutionPluginGroupTestAccess::callback_lock_acquisitions(group), before);
@@ -2165,8 +2435,8 @@ TEST(ExecutionPluginTest, WaveDispatchCachesEachPluginsHotHookSubscription) {
 
     EXPECT_EQ(subscribed_ptr->predicate_queries, 1u);
     EXPECT_EQ(unsubscribed_ptr->predicate_queries, 1u);
-    for (uint32_t i = 0; i != 8; ++i)
-      group.onAmdgpuReadSgpr(wave, i);
+    for (uint16_t i = 0; i != 8; ++i)
+      group.onAmdgpuReadScalarRegister(wave, {RegClass::SGPR, i, 1});
 
     EXPECT_EQ(subscribed_ptr->hot_callbacks, 8u);
     EXPECT_EQ(unsubscribed_ptr->hot_callbacks, 0u);
@@ -2191,7 +2461,7 @@ TEST(ExecutionPluginTest, CachedUnsubscribedWaveBypassesCallbackLock) {
   group.onAmdgpuWavefrontDispatched(*wave);
   const uint64_t before = test::ExecutionPluginGroupTestAccess::callback_lock_acquisitions(group);
 
-  group.onAmdgpuReadSgpr(wave, 0);
+  group.onAmdgpuReadScalarRegister(wave, {RegClass::SGPR, 0, 1});
 
   EXPECT_EQ(plugin_ptr->predicate_queries, 1u);
   EXPECT_EQ(plugin_ptr->hot_callbacks, 0u);
@@ -2216,7 +2486,7 @@ TEST(ExecutionPluginTest, ReentrantDispatchHotHookFallsBackUntilCachePublication
   // then dispatch publishes one cached decision for all subsequent hooks.
   EXPECT_EQ(plugin_ptr->predicate_queries, 3u);
   EXPECT_EQ(plugin_ptr->hot_callbacks, 1u);
-  group.onAmdgpuReadSgpr(wave, 1);
+  group.onAmdgpuReadScalarRegister(wave, {RegClass::SGPR, 1, 1});
   EXPECT_EQ(plugin_ptr->predicate_queries, 3u);
   EXPECT_EQ(plugin_ptr->hot_callbacks, 2u);
 }
@@ -2235,7 +2505,7 @@ TEST(ExecutionPluginTest, HaltAndRedispatchCannotReuseAStaleHotHookSubscription)
   auto *wave = fixture.cu()->dispatch_wf(/*wg_id=*/1, /*pc=*/0, /*sgprs=*/104, /*vgprs=*/32);
   ASSERT_NE(wave, nullptr);
   group.onAmdgpuWavefrontDispatched(*wave);
-  group.onAmdgpuReadSgpr(wave, 0);
+  group.onAmdgpuReadScalarRegister(wave, {RegClass::SGPR, 0, 1});
   ASSERT_EQ(plugin_ptr->hot_callbacks, 1u);
   ASSERT_EQ(plugin_ptr->predicate_queries, 1u);
 
@@ -2249,7 +2519,7 @@ TEST(ExecutionPluginTest, HaltAndRedispatchCannotReuseAStaleHotHookSubscription)
   plugin_ptr->reenter_on_dispatch = false;
   group.onAmdgpuWavefrontDispatched(*wave);
   EXPECT_EQ(plugin_ptr->predicate_queries, 3u);
-  group.onAmdgpuReadSgpr(wave, 1);
+  group.onAmdgpuReadScalarRegister(wave, {RegClass::SGPR, 1, 1});
   EXPECT_EQ(plugin_ptr->predicate_queries, 3u);
   EXPECT_EQ(plugin_ptr->hot_callbacks, 1u);
 
@@ -2257,7 +2527,7 @@ TEST(ExecutionPluginTest, HaltAndRedispatchCannotReuseAStaleHotHookSubscription)
   // allocation for the next incarnation.
   plugin_ptr->subscribed = true;
   wave->reset();
-  group.onAmdgpuReadSgpr(wave, 2);
+  group.onAmdgpuReadScalarRegister(wave, {RegClass::SGPR, 2, 1});
   EXPECT_EQ(plugin_ptr->predicate_queries, 5u);
   EXPECT_EQ(plugin_ptr->hot_callbacks, 2u);
 }
@@ -2276,7 +2546,7 @@ TEST(ExecutionPluginTest, CancellationAndRetryCannotReuseAStaleHotHookSubscripti
   auto *wave = fixture.cu()->dispatch_wf(1, 0, 104, 32);
   ASSERT_NE(wave, nullptr);
   group.onAmdgpuWavefrontDispatched(*wave);
-  group.onAmdgpuReadSgpr(wave, 0);
+  group.onAmdgpuReadScalarRegister(wave, {RegClass::SGPR, 0, 1});
   ASSERT_EQ(observed->hot_callbacks, 1u);
   ASSERT_EQ(observed->predicate_queries, 1u);
 
@@ -2291,7 +2561,7 @@ TEST(ExecutionPluginTest, CancellationAndRetryCannotReuseAStaleHotHookSubscripti
   ASSERT_EQ(retried, wave);
   group.onAmdgpuWavefrontDispatched(*retried);
   EXPECT_EQ(observed->predicate_queries, 3u);
-  group.onAmdgpuReadSgpr(retried, 1);
+  group.onAmdgpuReadScalarRegister(retried, {RegClass::SGPR, 1, 1});
   EXPECT_EQ(observed->predicate_queries, 3u);
   EXPECT_EQ(observed->hot_callbacks, 1u);
 }
@@ -2306,7 +2576,7 @@ TEST(ExecutionPluginTest, InfrequentAndHighFrequencyHooksMayOverlapByDefault) {
   const auto result = run_staged_callbacks(
       probe_ptr->probe(), std::chrono::seconds(5),
       [&]() { group.onAmdgpuWorkgroupCompleted(0, 0); },
-      [&]() { group.onAmdgpuReadSgpr(nullptr, 0); });
+      [&]() { group.onAmdgpuReadScalarRegister(nullptr, {RegClass::SGPR, 0, 1}); });
 
   EXPECT_TRUE(result.first_entered);
   EXPECT_TRUE(result.overlap_observed);
@@ -2323,7 +2593,7 @@ TEST(ExecutionPluginTest, SerialHotHookOptInPreventsInfrequentAndHighFrequencyOv
   const auto result = run_staged_callbacks(
       probe_ptr->probe(), std::chrono::milliseconds(20),
       [&]() { group.onAmdgpuWorkgroupCompleted(0, 0); },
-      [&]() { group.onAmdgpuReadSgpr(nullptr, 0); });
+      [&]() { group.onAmdgpuReadScalarRegister(nullptr, {RegClass::SGPR, 0, 1}); });
 
   EXPECT_TRUE(result.first_entered);
   EXPECT_FALSE(result.overlap_observed);
@@ -2338,7 +2608,7 @@ TEST(ExecutionPluginTest, EmptyGroupDispatchBypassesCallbackLock) {
   run_two_threads([&]() {
     for (int i = 0; i < 10000; ++i) {
       group->onInit();
-      group->onAmdgpuReadSgpr(nullptr, 0);
+      group->onAmdgpuReadScalarRegister(nullptr, {RegClass::SGPR, 0, 1});
       group->onAmdgpuWorkgroupCompleted(0, 0);
     }
   });
@@ -2359,6 +2629,13 @@ int run_serial_hot_hook_halt_snapshot(PluginFixture &f) {
   if (!f.plugin_group_->add(std::make_unique<SerialHotHookPlugin>()))
     return 1;
 
+  // Keep register callbacks active so the halt snapshot reenters the group's
+  // callback lock.
+  auto observer = std::make_unique<OrderingPlugin>();
+  auto *observer_ptr = observer.get();
+  if (!f.plugin_group_->add(std::move(observer)))
+    return 6;
+
   auto snapshot = std::make_unique<test::HaltSnapshotPlugin>();
   auto *snapshot_ptr = snapshot.get();
   if (!f.plugin_group_->add(std::move(snapshot)))
@@ -2374,6 +2651,12 @@ int run_serial_hot_hook_halt_snapshot(PluginFixture &f) {
     return 4;
   if (snapshot_ptr->snapshots().front().vgprs.empty())
     return 5;
+  if (std::ranges::none_of(observer_ptr->events,
+                           [](const auto &event) { return event.kind == HookEvent::READ_SGPR; }))
+    return 7;
+  if (std::ranges::none_of(observer_ptr->events,
+                           [](const auto &event) { return event.kind == HookEvent::READ_VGPR; }))
+    return 8;
   return 0;
 }
 
@@ -2523,7 +2806,7 @@ TEST(HookOrderingTest, BarrierTwoWaves) {
   ASSERT_EQ(p->events.back().kind, HookEvent::SHUTDOWN);
 }
 
-TEST(HookOrderingTest, WorkgroupDispatchedReportsPhysicalRegisterBlockSizes) {
+TEST(HookOrderingTest, WorkgroupDispatchedExposesPhysicalRegisterBlockSizes) {
   PluginFixture f;
   ASSERT_NO_FATAL_FAILURE(f.initialize());
   auto *p = f.attach_ordering_plugin();

@@ -11466,6 +11466,8 @@ TEST_F(KfdCdna5PeerBindingTest, ProductionAqlTensorStoreRefreshesCachedRequester
         : ExecutionPlugin("initialize-tensor-store"), process_id_(process_id), address_(address),
           values_(values), endpoint_(endpoint), backing_word_(backing_word) {}
 
+    bool supports_async_instructions() const override { return false; }
+    bool observes_after_execute_instruction() const override { return true; }
     void onAmdgpuWavefrontDispatched(rocjitsu::amdgpu::Wavefront &wf) override {
       EXPECT_EQ(wf.process_id(), process_id_);
       wave = &wf;
@@ -28644,10 +28646,14 @@ TEST_F(KfdIoctlTest, OtherProcessDebuggerDoesNotClaimARevokedRuntimeProbe) {
   ASSERT_TRUE(process->queue_snapshot_map_.at(create.queue_id).has_runtime_exception_signal);
   class RevokeBeforeLoad final : public rocjitsu::ExecutionPlugin {
   public:
+    bool observes_before_execute_instruction() const override { return true; }
+    bool supports_async_instructions() const override { return false; }
+
     RevokeBeforeLoad(rocjitsu::amdgpu::GpuVm &vm, rocjitsu::amdgpu::AddressSpaceHandle handle)
         : ExecutionPlugin("revoke-runtime-load"), vm_(vm), handle_(handle) {}
     void onAmdgpuBeforeExecuteInstruction(uint64_t, const rocjitsu::Instruction &,
-                                          rocjitsu::amdgpu::Wavefront &) override {
+                                          rocjitsu::amdgpu::Wavefront &,
+                                          std::span<const uint32_t>) override {
       if (!revoked) {
         revoked = true;
         EXPECT_TRUE(vm_.invalidate(handle_));

@@ -12,48 +12,31 @@
 #include <vector>
 
 using namespace rocjitsu::plugins::race_detector;
+using rocjitsu::amdgpu::LdsByteRange;
 
 TEST(RaceDetector, EventRegistry_TrimmedWaveLocalEventsAreNotBarrierQueued) {
-  // This test protects the boundary between two event lifetimes:
-  //
-  //   * Wave-local events, such as GLOBAL_TO_VGPR, only matter to the wave
-  //     that issued them. After s_waitcnt says the load is complete, the race
-  //     detector no longer needs to keep the event for a later workgroup
-  //     barrier. EventRegistry is allowed to trim these WAVE_COMPLETE events.
-  //
-  //   * LDS events can matter to other waves in the same workgroup. After
-  //     s_waitcnt, they must remain live until s_barrier proves every wave has
-  //     reached the same synchronization point.
-  //
-  // The bug this test catches was that all WAVE_COMPLETE events were queued
-  // for later barrier retirement, including wave-local GLOBAL_TO_VGPR events.
-  // Once EventRegistry trimmed those wave-local events, the barrier queue still
-  // held stale EventIds. A later barrier flush could then try to retire an
-  // already-trimmed id, causing heap corruption and potentially corrupting LDS
-  // race bookkeeping.
-  int N = EventRegistry::kTrimAttemptInterval;
-  RaceDetector detector(/*nWaves=*/
-                        1, /*vgprCount=*/2, /*sgprCount=*/2, Dim3d(0), [](RaceViolation) {},
-                        counterCapacitiesForArch(ROCJITSU_CODE_ARCH_CDNA4),
-                        /*ldsSizeBytes=*/64 * 1024);
-  auto &wave = detector.getWaveRaceState(0);
+  // Counter-only events can be trimmed after completion; they carry no LDS
+  // evidence for peers. Queuing them for a barrier would leave stale EventIds
+  // after trimming.
+  for (const int nWaves : {1, 2}) {
+    SCOPED_TRACE(nWaves);
+    RaceDetector detector(
+        nWaves, Dim3d(0), [](RaceViolation) {}, counterCapacitiesForArch(ROCJITSU_CODE_ARCH_CDNA4),
+        /*ldsSizeBytes=*/64 * 1024);
+    auto &wave = detector.getWaveRaceState(0);
 
-  // Allocate enough wave-local loads to trigger EventRegistry trimming. Each
-  // load is immediately completed with vmcnt(0), so none should be waiting for
-  // a workgroup barrier.
-  for (int i = 0; i < N; ++i) {
-    wave.registerEvent(testInstruction(/*pc=*/static_cast<uint64_t>(i)),
-                       MemoryEventType::GLOBAL_TO_VGPR, std::vector<uint32_t>{0}, /*execMask=*/1);
-    PendingWaitCount wait;
-    wait.add(rocjitsu::amdgpu::WaitCounterType::VMCNT, 0);
-    wave.dispatch(wait);
+    // Complete each counter-only issue immediately and trigger registry trimming.
+    for (int i = 0; i < EventRegistry::kTrimAttemptInterval; ++i) {
+      wave.registerCounterEvent(
+          testInstruction(static_cast<uint64_t>(i)),
+          CounterObligations{rocjitsu::amdgpu::WaitCounterType::VMCNT, MemoryOrderClass::VMEM});
+      wave.applyWaitCounter(rocjitsu::amdgpu::WaitCounterType::VMCNT, 0);
+    }
+
+    EXPECT_GT(detector.events().trimmedCount(), 0);
+    EXPECT_TRUE(wave.getBarrierPendingEvents().empty());
+    wave.flushBarrierPendingEvents();
   }
-
-  EXPECT_GT(detector.events().trimmedCount(), 0);
-  // If wave-local events were incorrectly queued for barrier retirement, this
-  // would be non-empty. Flushing it after trimming would then touch stale ids.
-  EXPECT_TRUE(wave.getBarrierPendingEvents().empty());
-  wave.flushBarrierPendingEvents();
 }
 
 TEST(RaceDetector, EventRegistry_LdsEventsWithoutBytesAreTrimmedOnceComplete) {
@@ -66,7 +49,7 @@ TEST(RaceDetector, EventRegistry_LdsEventsWithoutBytesAreTrimmedOnceComplete) {
   // without LDS bytes lets these go.
   int N = EventRegistry::kTrimAttemptInterval;
   RaceDetector detector(/*nWaves=*/
-                        2, /*vgprCount=*/2, /*sgprCount=*/2, Dim3d(0), [](RaceViolation) {},
+                        2, Dim3d(0), [](RaceViolation) {},
                         counterCapacitiesForArch(ROCJITSU_CODE_ARCH_CDNA5),
                         /*ldsSizeBytes=*/64 * 1024);
   auto &wave = detector.getWaveRaceState(0);
@@ -74,12 +57,9 @@ TEST(RaceDetector, EventRegistry_LdsEventsWithoutBytesAreTrimmedOnceComplete) {
       rocjitsu::amdgpu::WaitCounterType::ASYNCCNT, MemoryOrderClass::ASYNC_STORE}};
 
   for (int i = 0; i < N; ++i) {
-    wave.registerLdsRangeEvent(testInstruction(/*pc=*/static_cast<uint64_t>(i)),
-                               MemoryEventType::LDS_TO_GLOBAL, /*ranges=*/{}, obligations,
-                               MemoryOrderClass::ASYNC_STORE);
-    PendingWaitCount wait;
-    wait.add(rocjitsu::amdgpu::WaitCounterType::ASYNCCNT, 0);
-    wave.dispatch(wait);
+    wave.registerLdsRangeEvent(testInstruction(/*pc=*/static_cast<uint64_t>(i)), LdsAccess::Read,
+                               /*ranges=*/{}, obligations, MemoryOrderClass::ASYNC_STORE);
+    wave.applyWaitCounter(rocjitsu::amdgpu::WaitCounterType::ASYNCCNT, 0);
   }
 
   // The trim attempt runs after event N - 1 is added, when every earlier event
@@ -123,20 +103,15 @@ TEST(InstructionSnapshotTest, EqualityComparesPcAndEncoding) {
 
 class RaceEventRegistrationTest : public ::testing::Test {
 protected:
-  RaceDetector detector{1,
-                        16,
-                        16,
-                        Dim3d(0),
-                        [this](RaceViolation v) { violations.push_back(v); },
-                        counterCapacitiesForArch(ROCJITSU_CODE_ARCH_CDNA4),
-                        1024};
+  RaceDetector detector{1, Dim3d(0), [this](RaceViolation v) { violations.push_back(v); },
+                        counterCapacitiesForArch(ROCJITSU_CODE_ARCH_CDNA4), 1024};
   std::vector<RaceViolation> violations;
 };
 
 TEST(EventRegistry, RetainsCapturedInstruction) {
   EventRegistry events;
-  const auto id = events.add(WaveId{0}, kInstruction, MemoryEventType::GLOBAL_TO_VGPR, {2}, 1, 0xf,
-                             {}, kObligations, MemoryOrderClass::UNORDERED);
+  const auto id = events.add(WaveId{0}, kInstruction, LdsAccess::None, {}, kObligations,
+                             MemoryOrderClass::UNORDERED);
   EXPECT_EQ(events.instruction(id), kInstruction);
 }
 
@@ -144,23 +119,23 @@ TEST_F(RaceEventRegistrationTest, WaveApisRetainCapturedPcAndEncoding) {
   auto &wave = detector.getWaveRaceState(0);
   const std::array<uint32_t, 1> addresses{8};
   const std::array<uint32_t, 1> secondAddresses{16};
+  const std::array ranges{LdsByteRange{24, 4}};
   auto at = [](int offset) { return InstructionSnapshot(kInstruction.pc() + offset, kWords); };
-  wave.registerEvent(at(0), MemoryEventType::GLOBAL_TO_VGPR, {2}, 1, 0xf, kObligations,
-                     MemoryOrderClass::UNORDERED);
-  wave.registerScalarLoad(at(1), RegisterRef{RegClass::SGPR, 2, 1}, 1, kObligations,
-                          MemoryOrderClass::UNORDERED);
-  wave.registerLdsEvent(at(2), MemoryEventType::LDS_TO_VGPR, {3}, 1, 1, addresses, 4, 0xf,
-                        kObligations, MemoryOrderClass::UNORDERED);
-  wave.registerLdsEvent(at(3), MemoryEventType::LDS_TO_VGPR, {4}, 1, 1, addresses, secondAddresses,
-                        4, 0xf, kObligations, MemoryOrderClass::UNORDERED);
-
+  wave.registerCounterEvent(at(0), kObligations);
+  wave.registerLdsEvent(at(1), LdsAccess::Read, 1, 1, addresses, 4, kObligations,
+                        MemoryOrderClass::UNORDERED);
+  wave.registerLdsEvent(at(2), LdsAccess::Read, 1, 1, addresses, secondAddresses, 4, kObligations,
+                        MemoryOrderClass::UNORDERED);
+  wave.registerLdsRangeEvent(at(3), LdsAccess::Write, ranges, kObligations,
+                             MemoryOrderClass::UNORDERED);
   ASSERT_EQ(detector.events().totalAllocated(), 4);
   for (int i = 0; i < 4; ++i)
     EXPECT_EQ(detector.events().instruction(EventId{i}), at(i));
-  const auto &intervals = detector.events().ldsIntervals(EventId{3});
+  const auto &intervals = detector.events().ldsIntervals(EventId{2});
   EXPECT_TRUE(intervals.overlapsRange(8, 12));
   EXPECT_TRUE(intervals.overlapsRange(16, 20));
   EXPECT_FALSE(intervals.overlapsRange(12, 16));
+  EXPECT_TRUE(detector.events().ldsIntervals(EventId{3}).overlapsRange(24, 28));
 }
 } // namespace
 
@@ -179,31 +154,78 @@ constexpr std::array kAsyncLoadObligations{
 
 std::unique_ptr<RaceDetector> makeDetector(int nWaves, std::vector<RaceViolation> &violations) {
   return std::make_unique<RaceDetector>(
-      nWaves, /*vgprCount=*/2, /*sgprCount=*/2, Dim3d(0),
-      [&violations](RaceViolation v) { violations.push_back(v); },
+      nWaves, Dim3d(0), [&violations](RaceViolation v) { violations.push_back(v); },
       counterCapacitiesForArch(ROCJITSU_CODE_ARCH_CDNA5), /*ldsSizeBytes=*/64 * 1024);
+}
+
+TEST(RaceDetector, CompletionRetainsOnlyLdsEvidenceForPeerWaves) {
+  struct Case {
+    LdsAccess access;
+    bool hasBytes;
+  };
+  const Case cases[] = {{LdsAccess::None, false},
+                        {LdsAccess::Read, false},
+                        {LdsAccess::Write, false},
+                        {LdsAccess::Read, true},
+                        {LdsAccess::Write, true}};
+  const std::array obligations{
+      MemoryCounterObligation{WaitCounterType::TENSORCNT, MemoryOrderClass::TENSOR},
+      MemoryCounterObligation{WaitCounterType::ASYNCCNT, MemoryOrderClass::ASYNC_LOAD}};
+  const std::array ranges{LdsByteRange{64, 4}};
+  for (const int nWaves : {1, 2}) {
+    for (const auto &c : cases) {
+      SCOPED_TRACE(testing::Message() << nWaves << ", " << int(c.access) << ", " << c.hasBytes);
+      std::vector<RaceViolation> violations;
+      auto detector = makeDetector(nWaves, violations);
+      auto &wave = detector->getWaveRaceState(0);
+      if (c.access == LdsAccess::None)
+        wave.registerCounterEvent(kInstruction, obligations);
+      else
+        wave.registerLdsRangeEvent(kInstruction, c.access,
+                                   std::span(ranges).first(c.hasBytes ? 1 : 0), obligations,
+                                   MemoryOrderClass::UNORDERED);
+      const EventId event{0};
+      wave.applyWaitCounter(WaitCounterType::TENSORCNT, 0);
+      wave.flushBarrierPendingEvents();
+      EXPECT_EQ(detector->events().status(event), EventStatus::ACTIVE);
+      EXPECT_EQ(wave.getWaveMemoryEvents().size(), 1u);
+      EXPECT_TRUE(wave.getBarrierPendingEvents().empty());
+
+      wave.applyWaitCounter(WaitCounterType::ASYNCCNT, 0);
+      const bool retained = c.hasBytes && nWaves > 1;
+      EXPECT_EQ(detector->events().status(event),
+                retained ? EventStatus::WAVE_COMPLETE : EventStatus::RETIRED);
+      EXPECT_TRUE(wave.getWaveMemoryEvents().empty());
+      EXPECT_EQ(wave.getBarrierPendingEvents().size(), retained ? 1u : 0u);
+      EXPECT_EQ(detector->getLdsReadEvents().size(),
+                retained && c.access == LdsAccess::Read ? 1u : 0u);
+      EXPECT_EQ(detector->getLdsWriteEvents().size(),
+                retained && c.access == LdsAccess::Write ? 1u : 0u);
+
+      wave.flushBarrierPendingEvents();
+      EXPECT_EQ(detector->events().status(event), EventStatus::RETIRED);
+      EXPECT_TRUE(detector->getLdsReadEvents().empty());
+      EXPECT_TRUE(detector->getLdsWriteEvents().empty());
+    }
+  }
 }
 
 /// An async store reading one tile: an LDS read on ASYNCcnt.
 void asyncStoreTile(WaveRaceState &wave, uint64_t pc, uint32_t address) {
   const LdsByteRange range{.address = address, .bytes = kTileBytes};
-  wave.registerLdsRangeEvent(testInstruction(pc), MemoryEventType::LDS_TO_GLOBAL,
-                             std::span(&range, 1), kAsyncStoreObligations,
-                             MemoryOrderClass::ASYNC_STORE);
+  wave.registerLdsRangeEvent(testInstruction(pc), LdsAccess::Read, std::span(&range, 1),
+                             kAsyncStoreObligations, MemoryOrderClass::ASYNC_STORE);
 }
 
 /// An async load writing one tile: an LDS write on ASYNCcnt.
 void asyncLoadTile(WaveRaceState &wave, uint64_t pc, uint32_t address) {
   const LdsByteRange range{.address = address, .bytes = kTileBytes};
-  wave.registerLdsRangeEvent(testInstruction(pc), MemoryEventType::GLOBAL_TO_LDS,
-                             std::span(&range, 1), kAsyncLoadObligations,
-                             MemoryOrderClass::ASYNC_LOAD);
+  wave.registerLdsRangeEvent(testInstruction(pc), LdsAccess::Write, std::span(&range, 1),
+                             kAsyncLoadObligations, MemoryOrderClass::ASYNC_LOAD);
 }
 
 void waitAsynccnt(WaveRaceState &wave, int count) {
-  PendingWaitCount wait;
-  wait.add(WaitCounterType::ASYNCCNT, count);
-  wave.dispatch(wait);
+  wave.applyWaitCounter(WaitCounterType::ASYNCCNT, count);
 }
 
 TEST(RaceDetector, SingleWave_CompletedLdsEventsAreRetiredWithoutABarrier) {
@@ -274,8 +296,8 @@ TEST(RaceDetector, SingleWave_DoubleBufferedStoreLoopKeepsOnlyPendingStores) {
   // The registry has not trimmed the last completed store yet: a trim attempt
   // runs while a store is being allocated, when the previous store is still
   // pending, so trimming stops before it.
-  EXPECT_TRUE(detector->events().isTrimmable(EventId{kIterations - 2}));
-  EXPECT_FALSE(detector->events().isTrimmable(EventId{kIterations - 1}));
+  EXPECT_EQ(detector->events().status(EventId{kIterations - 2}), EventStatus::RETIRED);
+  EXPECT_EQ(detector->events().status(EventId{kIterations - 1}), EventStatus::ACTIVE);
 }
 
 TEST(RaceDetector, SingleWave_RetiredLdsEventsAreTrimmed) {

@@ -2,8 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 /// @file wait_hazard_test.cpp
-/// @brief Shared wait-retirement and register-readiness tests for the core
-/// scoreboard and race plugin.
+/// @brief Shared wait-retirement tests for core register dependencies and LDS effects.
 
 #include "compute_unit_test_util.h"
 #include "race-detector/race_test_instruction.h"
@@ -32,8 +31,8 @@ using namespace plugins::race_detector;
 // Keep expected mappings independent of the production conversion.
 struct CounterDomain {
   WaitCounterKind core;
-  // Absent when the race plugin has no corresponding counter.
-  std::optional<WaitCounterType> race;
+  // Absent when LDS progress has no corresponding counter.
+  std::optional<WaitCounterType> lds;
 };
 
 constexpr CounterDomain kLoad{WaitCounterKind::Load, WaitCounterType::LOADCNT};
@@ -81,7 +80,7 @@ public:
     for (size_t i = 0; i < MemoryWaitShadow::kRegisters; ++i)
       EXPECT_FALSE(shadow_.test(i, true));
   }
-  bool reports(unsigned reg, uint64_t lanes = 1, uint8_t bytes = 0xf, bool write = false) {
+  bool pending(unsigned reg, uint64_t lanes = 1, uint8_t bytes = 0xf, bool write = false) {
     const auto before = reports_;
     state_.access({RegClass::VGPR, static_cast<uint16_t>(reg), 1}, lanes, bytes, write);
     return reports_ != before;
@@ -94,11 +93,11 @@ private:
   unsigned reports_ = 0;
 };
 
-class RaceWaitBackend {
+class LdsWaitBackend {
 public:
   static constexpr bool supports_embedded_waits = false;
 
-  explicit RaceWaitBackend(rj_code_arch_t arch) {
+  explicit LdsWaitBackend(rj_code_arch_t arch) {
     ComputeUnitCore::Config config{};
     config.arch = arch;
     config.num_wf_slots = 1;
@@ -122,47 +121,42 @@ public:
       return;
     wave_->set_exec(1);
     std::array<Wavefront *, 1> waves{wave_};
-    plugins_->onAmdgpuWorkgroupDispatched(1, 0, 256, 104, waves);
-    state_ =
-        static_cast<RaceWavefrontState *>(wave_->plugin_state(observer->slot_index()))->race_state;
+    plugins_->onAmdgpuWorkgroupDispatched(1, 0, waves);
+    state_ = static_cast<RaceWavefrontState *>(wave_->plugin_state(observer->slot_index()))
+                 ->race_state.get();
   }
   bool ready() const { return state_ != nullptr; }
-  static bool supports(CounterDomain domain) { return domain.race.has_value(); }
-  void load(CounterDomain domain, unsigned reg, bool unordered = false, uint64_t lanes = 1,
-            uint8_t bytes = 0xf) {
-    const uint64_t pc = 0x100 + reg * 4;
+  static bool supports(CounterDomain domain) { return domain.lds.has_value(); }
+  void load(CounterDomain domain, unsigned key, bool unordered = false) {
     const auto order = unordered ? MemoryOrderClass::UNORDERED : MemoryOrderClass::VMEM;
-    const std::array obligations{MemoryCounterObligation{*domain.race, order}};
-    state_->registerEvent(testInstruction(pc, kProbeWord), MemoryEventType::GLOBAL_TO_VGPR, {reg},
-                          lanes, bytes, obligations, order);
+    const std::array obligations{MemoryCounterObligation{*domain.lds, order}};
+    const std::array ranges{LdsByteRange{key * 4, 4}};
+    state_->registerLdsRangeEvent(testInstruction(0x100 + key * 4, kProbeWord), LdsAccess::Write,
+                                  ranges, obligations, MemoryOrderClass::UNORDERED);
   }
   void counter_only(CounterDomain domain) {
-    const std::array obligations{MemoryCounterObligation{*domain.race, MemoryOrderClass::VMEM}};
-    state_->registerEvent(testInstruction(0x800, kProbeWord), MemoryEventType::VGPR_TO_GLOBAL, {},
-                          1, 0xf, obligations, MemoryOrderClass::VMEM);
+    const std::array obligations{MemoryCounterObligation{*domain.lds, MemoryOrderClass::VMEM}};
+    state_->registerCounterEvent(testInstruction(0x800, kProbeWord), obligations);
   }
   void wait(uint32_t word) { wait(std::span<const uint32_t>(&word, 1)); }
   void wait(std::span<const uint32_t> words) {
     with_wait(cu_->arch(), words, [&](Instruction &inst) {
-      plugins_->onAmdgpuBeforeExecuteInstruction(wave_->pc, inst, *wave_);
+      plugins_->onAmdgpuBeforeExecuteInstruction(wave_->pc, inst, *wave_, {});
       ASSERT_TRUE(cu_->execute_instruction(&inst, *wave_).succeeded());
       plugins_->onAmdgpuAfterExecuteInstruction(wave_->pc, inst, *wave_);
     });
   }
   void expect_drained() const { EXPECT_TRUE(state_->getWaveMemoryEvents().empty()); }
-  bool reports(unsigned reg, uint64_t lanes = 1, uint8_t bytes = 0xf, bool write = false) {
+  bool pending(unsigned key) {
     const auto before = sink_->str().size();
-    wave_->pc = 0x1000 + reg * 4;
+    wave_->pc = 0x1000 + key * 4;
     auto decoder = Decoder::create(cu_->arch());
     auto probe = decoder->decode_window(std::span<const uint32_t>(&kProbeWord, 1), wave_->pc);
     EXPECT_TRUE(probe.succeeded());
     if (probe.failed())
       return false;
-    plugins_->onAmdgpuBeforeExecuteInstruction(wave_->pc, *probe.value(), *wave_);
-    if (write)
-      plugins_->onAmdgpuWriteVgprLanes(wave_, wave_->vgpr_alloc().base + reg, lanes, bytes);
-    else
-      plugins_->onAmdgpuReadVgprLanes(wave_, wave_->vgpr_alloc().base + reg, lanes, bytes);
+    plugins_->onAmdgpuBeforeExecuteInstruction(wave_->pc, *probe.value(), *wave_, {});
+    state_->getDetector()->validateRead(key * 4, WaveId{0}, 0, 4, MemoryOrderClass::UNORDERED);
     return sink_->str().size() != before;
   }
 
@@ -180,7 +174,7 @@ private:
 // Seed pending events directly to test wait retirement independently of
 // producer classification.
 template <typename Backend> class WaitHazardTest : public ::testing::Test {};
-using WaitBackends = ::testing::Types<CoreWaitBackend, RaceWaitBackend>;
+using WaitBackends = ::testing::Types<CoreWaitBackend, LdsWaitBackend>;
 TYPED_TEST_SUITE(WaitHazardTest, WaitBackends);
 
 TYPED_TEST(WaitHazardTest, TargetWaitEncodingsRetireTheirCounter) {
@@ -238,7 +232,7 @@ TYPED_TEST(WaitHazardTest, TargetWaitEncodingsRetireTheirCounter) {
     backend.load(c.counter, 5);
     backend.wait(c.word);
     backend.expect_drained();
-    EXPECT_FALSE(backend.reports(5));
+    EXPECT_FALSE(backend.pending(5));
   }
 }
 
@@ -281,7 +275,7 @@ TYPED_TEST(WaitHazardTest, FullDrainWaitsRetireEverySupportedCounter) {
       backend.wait(word);
       backend.expect_drained();
       for (unsigned i = 0; i < reg; ++i)
-        EXPECT_FALSE(backend.reports(i)) << "register " << i;
+        EXPECT_FALSE(backend.pending(i)) << "register " << i;
     }
   }
 }
@@ -301,7 +295,7 @@ TYPED_TEST(WaitHazardTest, Rdna1WaitIdleRetiresAggregateCounters) {
   backend.wait(0xbfa20000u); // RDNA1 s_wait_idle has a different opcode from GFX11/12.
   backend.expect_drained();
   for (unsigned i = 0; i < reg; ++i)
-    EXPECT_FALSE(backend.reports(i)) << "register " << i;
+    EXPECT_FALSE(backend.pending(i)) << "register " << i;
 }
 
 TYPED_TEST(WaitHazardTest, UnmappedWaitPreservesPendingOrdinaryLoads) {
@@ -312,12 +306,12 @@ TYPED_TEST(WaitHazardTest, UnmappedWaitPreservesPendingOrdinaryLoads) {
     backend.load(kLoad, 5);
     backend.load(kDs, 6);
     backend.wait(word);
-    EXPECT_TRUE(backend.reports(5));
-    EXPECT_TRUE(backend.reports(6));
+    EXPECT_TRUE(backend.pending(5));
+    EXPECT_TRUE(backend.pending(6));
   }
 }
 
-TYPED_TEST(WaitHazardTest, EmbeddedExpcntWaitIsCurrentlyCoreOnly) {
+TYPED_TEST(WaitHazardTest, EmbeddedExpcntWaitOnlyAffectsCoreRegisterState) {
   for (const auto arch :
        {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4}) {
     for (const uint32_t threshold : {0u, 1u, 7u}) {
@@ -340,12 +334,12 @@ TYPED_TEST(WaitHazardTest, EmbeddedExpcntWaitIsCurrentlyCoreOnly) {
         if (explicit_wait)
           backend.wait(arch == ROCJITSU_CODE_ARCH_RDNA4 ? 0xbfc40000u   // s_wait_expcnt 0.
                                                         : 0xbd7c0000u); // s_waitcnt_expcnt null, 0.
-        EXPECT_EQ(backend.reports(5),
+        EXPECT_EQ(backend.pending(5),
                   !explicit_wait && (!TypeParam::supports_embedded_waits || threshold == 7));
-        EXPECT_EQ(backend.reports(6),
+        EXPECT_EQ(backend.pending(6),
                   !explicit_wait && (!TypeParam::supports_embedded_waits || threshold != 0));
-        EXPECT_TRUE(backend.reports(7));
-        EXPECT_TRUE(backend.reports(8));
+        EXPECT_TRUE(backend.pending(7));
+        EXPECT_TRUE(backend.pending(8));
       }
     }
   }
@@ -409,10 +403,14 @@ TYPED_TEST(WaitHazardTest, UpperImmediateBitsAreIgnoredBeforeCheckingTheSentinel
         TypeParam backend(c.arch);
         ASSERT_TRUE(backend.ready());
         backend.load(c.counter, 5);
+        // More candidates than the field's maximum distinguish no wait from
+        // accidentally applying the sentinel as a numeric counter bound.
+        for (uint32_t i = 1; i < c.mask; ++i)
+          backend.counter_only(c.counter);
         backend.load(c.counter, 6);
         backend.wait(c.opcode | upper | count);
-        EXPECT_EQ(backend.reports(5, 1, 0xf, true), count == c.mask);
-        EXPECT_EQ(backend.reports(6, 1, 0xf, true), count != 0);
+        EXPECT_EQ(backend.pending(5), count == c.mask);
+        EXPECT_EQ(backend.pending(6), count != 0);
       }
     }
   }
@@ -425,8 +423,8 @@ TYPED_TEST(WaitHazardTest, PartialWaitCountsOperationsWithoutRegisterResults) {
   backend.counter_only(kLoad);
   backend.load(kLoad, 6);
   backend.wait(0xbfc00002u); // s_wait_loadcnt 2 releases the first of three operations.
-  EXPECT_FALSE(backend.reports(5));
-  EXPECT_TRUE(backend.reports(6));
+  EXPECT_FALSE(backend.pending(5));
+  EXPECT_TRUE(backend.pending(6));
 }
 
 TYPED_TEST(WaitHazardTest, CombinedWaitKeepsCounterThresholdsIndependent) {
@@ -449,14 +447,18 @@ TYPED_TEST(WaitHazardTest, CombinedWaitKeepsCounterThresholdsIndependent) {
           TypeParam backend(arch);
           ASSERT_TRUE(backend.ready());
           backend.load(c.load_or_store, 5);
+          for (unsigned i = 1; i < 63; ++i)
+            backend.counter_only(c.load_or_store);
           backend.load(c.load_or_store, 6);
           backend.load(kDs, 7);
+          for (unsigned i = 1; i < 63; ++i)
+            backend.counter_only(kDs);
           backend.load(kDs, 8);
           backend.wait(word);
-          EXPECT_EQ(backend.reports(5), load_or_store_count == 63);
-          EXPECT_EQ(backend.reports(6), load_or_store_count != 0);
-          EXPECT_EQ(backend.reports(7), ds_count == 63);
-          EXPECT_EQ(backend.reports(8), ds_count != 0);
+          EXPECT_EQ(backend.pending(5), load_or_store_count == 63);
+          EXPECT_EQ(backend.pending(6), load_or_store_count != 0);
+          EXPECT_EQ(backend.pending(7), ds_count == 63);
+          EXPECT_EQ(backend.pending(8), ds_count != 0);
         }
       }
     }
@@ -470,8 +472,8 @@ TYPED_TEST(WaitHazardTest, UnrelatedWaitDoesNotReuseAnEarlierThreshold) {
   backend.load(kLoad, 5);
   backend.load(kDs, 6);
   backend.wait(0xbfc60000u); // s_wait_dscnt 0.
-  EXPECT_TRUE(backend.reports(5));
-  EXPECT_FALSE(backend.reports(6));
+  EXPECT_TRUE(backend.pending(5));
+  EXPECT_FALSE(backend.pending(6));
 }
 
 TYPED_TEST(WaitHazardTest, NoWaitSentinelPreservesPendingResults) {
@@ -481,7 +483,7 @@ TYPED_TEST(WaitHazardTest, NoWaitSentinelPreservesPendingResults) {
     ASSERT_TRUE(backend.ready());
     backend.load(kLoad, 5);
     backend.wait(word);
-    EXPECT_TRUE(backend.reports(5));
+    EXPECT_TRUE(backend.pending(5));
   }
 }
 
@@ -494,17 +496,17 @@ TYPED_TEST(WaitHazardTest, UnorderedResultRequiresAZeroWait) {
     backend.load(scalar, 5, true);
     backend.counter_only(scalar);
     backend.wait(0xbfc70000u | threshold);
-    EXPECT_EQ(backend.reports(5), threshold != 0);
+    EXPECT_EQ(backend.pending(5), threshold != 0);
   }
 }
 
-TYPED_TEST(WaitHazardTest, RegisterLanesAndBytesKeepIndependentReadiness) {
-  TypeParam backend(ROCJITSU_CODE_ARCH_CDNA5);
+TEST(CoreWaitHazardTest, RegisterLanesAndBytesKeepIndependentReadiness) {
+  CoreWaitBackend backend(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_TRUE(backend.ready());
   backend.load(kLoad, 5, false, 1, 0x3);
-  EXPECT_FALSE(backend.reports(5, 2, 0xf));
-  EXPECT_FALSE(backend.reports(5, 1, 0xc, true));
-  EXPECT_TRUE(backend.reports(5, 1, 0x3));
+  EXPECT_FALSE(backend.pending(5, 2, 0xf));
+  EXPECT_FALSE(backend.pending(5, 1, 0xc, true));
+  EXPECT_TRUE(backend.pending(5, 1, 0x3));
 }
 
 } // namespace
