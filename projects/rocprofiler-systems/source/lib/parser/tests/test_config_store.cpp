@@ -54,8 +54,7 @@ add_sampling_params(schema& value)
     frequency.min   = 1.0;
     frequency.max   = k_frequency_limit;
     auto components = make_param("components", param_type::enumeration_list, "sampling");
-    components.choices = { choice{ .value = "wall_clock" },
-                           choice{ .value = "cpu_clock" } };
+    components.choices = { "wall_clock", "cpu_clock" };
     components.env     = "ROCPROFSYS_COMPONENTS";
     add_param(value, std::move(frequency));
     add_param(value, make_param("scale", param_type::number, "sampling"));
@@ -66,7 +65,7 @@ void
 add_general_params(schema& value)
 {
     auto mode    = make_param("mode", param_type::enumeration, "general");
-    mode.choices = { choice{ .value = "fast" }, choice{ .value = "slow" } };
+    mode.choices = { "fast", "slow" };
     add_param(value, make_param("output", param_type::path, "general"));
     add_param(value, std::move(mode));
 }
