@@ -87,7 +87,7 @@ static const char* hsakmtStatusName(HSAKMT_STATUS status) {
 
 #define CHECK_HSAKMT_SUCCESS(call, msg) do {                                  \
   if ((call) != HSAKMT_STATUS_SUCCESS)                                        \
-    LOG_ERROR_EXIT("%s", #call);                                              \
+    LOG_ERROR_EXIT("anvil: %s", #call);                                       \
 } while (0)
 
 // HSA agents discovered via hsa_iterate_agents (unordered).
@@ -137,7 +137,7 @@ hsa_status_t rocm_hsa_agent_callback(hsa_agent_t agent, hsa_device_type_t target
   hsa_device_type_t device_type{};
   hsa_status_t status{hsa_agent_get_info(agent, HSA_AGENT_INFO_DEVICE, &device_type)};
   if (status != HSA_STATUS_SUCCESS) {
-    LOG_TRACE("Failure to get device type: %#x", status);
+    LOG_TRACE("anvil: failure to get device type: %#x", status);
     return status;
   }
   if (device_type == target_device_type) {
@@ -202,7 +202,7 @@ SdmaQueue::SdmaQueue(int localDeviceId, int remoteDeviceId, const hsa_agent_t& l
   memFlags.ui32.ExecuteAccess = 1;
   memFlags.ui32.Uncached = 1;
 
-  LOG_TRACE("SDMA: Allocating Queue Buffer for device: %d remote device: %d engineId: %d",
+  LOG_TRACE("anvil: allocating queue buffer for device: %d remote device: %d engineId: %d",
             localDeviceId, remoteDeviceId, engineId);
 
   CHECK_HSAKMT_SUCCESS(hsaKmtAllocMemory(localNodeId, SDMA_QUEUE_SIZE, memFlags, &queueBuffer_),
@@ -493,15 +493,15 @@ void AnvilLib::init() {
     // HSA
     hsa_status_t status{hsa_init()};
     if (status != HSA_STATUS_SUCCESS) {
-      LOG_TRACE("Failure to open HSA connection: %#x", status);
+      LOG_TRACE("anvil: failure to open HSA connection: %#x", status);
     }
     status = hsa_iterate_agents(&rocm_hsa_gpu_agent_callback, &gpuAgents_);
     if (status != HSA_STATUS_SUCCESS && status != HSA_STATUS_INFO_BREAK) {
-      LOG_TRACE("Failure to iterate HSA GPU agents: %#x", status);
+      LOG_TRACE("anvil: failure to iterate HSA GPU agents: %#x", status);
     }
     status = hsa_iterate_agents(&rocm_hsa_cpu_agent_callback, &cpuAgents_);
     if (status != HSA_STATUS_SUCCESS && status != HSA_STATUS_INFO_BREAK) {
-      LOG_TRACE("Failure to iterate HSA CPU agents: %#x", status);
+      LOG_TRACE("anvil: failure to iterate HSA CPU agents: %#x", status);
     }
 
     buildGpuAgentMap();
@@ -591,7 +591,7 @@ bool AnvilLib::connect(int srcDeviceId, uint64_t peerKey, int dstDeviceId, int n
       rollback();
       return false;
     }
-    LOG_TRACE("SDMA: peer %#llx (%s) channel %d from device %d on engine %u", key,
+    LOG_TRACE("anvil: peer %#llx (%s) channel %d from device %d on engine %u", key,
               onThisHost ? "this host" : "another host", c, srcDeviceId, engineId);
     vec.emplace_back(std::move(queue));
     queuesUsedTotal_ += 1;
@@ -610,14 +610,14 @@ void AnvilLib::disconnect() {
   // Destroy all SDMA queues. SdmaQueue destructor calls hsaKmtDestroyQueue.
   peer_channels_.clear();
   queuesUsedTotal_ = 0;
-  LOG_TRACE("SDMA: Disconnected all queues");
+  LOG_TRACE("anvil: disconnected all queues");
 }
 void AnvilLib::disconnectPeer(uint64_t peerKey) {
   auto it = peer_channels_.find(peerKey);
   if (it == peer_channels_.end()) return;
   releaseQueues(it->second, 0);
   peer_channels_.erase(it);
-  LOG_TRACE("SDMA: Disconnected queues for peer %#llx", static_cast<unsigned long long>(peerKey));
+  LOG_TRACE("anvil: disconnected queues for peer %#llx", static_cast<unsigned long long>(peerKey));
 }
 SdmaQueue* AnvilLib::getQueue(uint64_t peerKey, int channel_idx) {
   auto it = peer_channels_.find(peerKey);
@@ -735,7 +735,7 @@ EngineSelection AnvilLib::getSdmaEngineId(int srcDeviceId, int dstDeviceId) {
                             static_cast<uint32_t>(engineId) < numSdmaEnginesTotal_)) {
         selection_.usedPreferred = true;
         selection_.engineId = engineId;
-        LOG_TRACE("SDMA: HSA preferred engine %d for %d -> %d (mask=0x%x)", engineId, srcDeviceId,
+        LOG_TRACE("anvil: HSA preferred engine %d for %d -> %d (mask=0x%x)", engineId, srcDeviceId,
                   dstDeviceId, selection_.preferredMask);
         return selection_;
       }

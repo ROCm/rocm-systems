@@ -205,7 +205,7 @@ void shutdownEndpoint();
 
 inline void checkHipError(hipError_t err, const char* msg, const char* file, int line) {
   if (err != hipSuccess) {
-    std::cerr << "HIP error at " << file << ":" << line << " - " << msg << "\n"
+    std::cerr << "anvil: HIP error at " << file << ":" << line << " - " << msg << "\n"
               << "  Code: " << err << " (" << hipGetErrorString(err) << ")" << std::endl;
     std::exit(EXIT_FAILURE);
   }
@@ -218,15 +218,15 @@ inline void EnablePeerAccess(int const deviceId, int const peerDeviceId) {
   int canAccess;
   ANVIL_CHECK_HIP_ERROR(hipDeviceCanAccessPeer(&canAccess, deviceId, peerDeviceId));
   if (!canAccess) {
-    std::cerr << "Unable to enable peer access from GPU devices " << deviceId << " to "
+    std::cerr << "anvil: unable to enable peer access from GPU devices " << deviceId << " to "
               << peerDeviceId << "\n";
   }
 
   ANVIL_CHECK_HIP_ERROR(hipSetDevice(deviceId));
   hipError_t error = hipDeviceEnablePeerAccess(peerDeviceId, 0);
   if (error != hipSuccess && error != hipErrorPeerAccessAlreadyEnabled) {
-    std::cerr << "Unable to enable peer to peer access from " << deviceId << "  to " << peerDeviceId
-              << " (" << hipGetErrorString(error) << ")\n";
+    std::cerr << "anvil: unable to enable peer to peer access from " << deviceId << "  to "
+              << peerDeviceId << " (" << hipGetErrorString(error) << ")\n";
   }
 }
 
