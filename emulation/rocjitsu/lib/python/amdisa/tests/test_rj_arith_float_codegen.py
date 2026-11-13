@@ -1390,11 +1390,12 @@ def test_pseudo_scalar_routing_and_semantics(arch):
 
     for name in PSEUDO_SCALAR_NAMES:
         body = gen_pseudo_scalar(context(arch, name, ['d'], ['a'], is_vop3=True))
-        if arch != 'rdna4':
+        if arch not in ('rdna4', 'cdna5'):
             assert body is None
             continue
         assert 'execute_pseudo_scalar' in body
         assert 'rj_arith_' + name.lower() in body
+        assert ('_gfx1250' in body) == (arch == 'cdna5')
         assert 'arithmetic_flags()' in body
         assert 'arithmetic_reports_fp_status' not in body
         assert 'wave64' not in body and 'exec_mask' not in body
