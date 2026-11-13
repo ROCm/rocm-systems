@@ -1400,6 +1400,10 @@ void installStopHandler()
     sigaction(SIGCHLD, &child, nullptr);
 }
 
+// Send *signal* to everything *pid* has spawned, and to *pid* itself.
+//
+// Falls back to the single pid when there is no such group, which is what a child that died
+// between the fork and its setpgid() leaves behind.
 void signalChildGroup(pid_t pid, int signal)
 {
     if (::kill(-pid, signal) == 0 || errno != ESRCH) {
