@@ -9,7 +9,7 @@
 #include "common/alu.h"
 #include "common/bits.h"
 #include "fp/fma_integer.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_common.h"
 
 #include <stdint.h>
 

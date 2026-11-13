@@ -73,14 +73,17 @@ typedef struct rocshmem_gin_qp_set* rocshmem_gin_qp_set_t;
  * @param[in]  allgather_ctx Opaque context passed to allgather.
  * @param[in]  traffic_class IB traffic class (0-255) for QP INIT->RTR.
  *                           Value 0 means no specific TC (default behavior).
+ * @param[in]  preferred_nic_name  ibverbs device name (e.g. "mlx5_0") selected by
+ *                           the caller's topology affinity (ncclTopoGetLocalNet).
+ *                           NULL or empty selects the first usable active device.
  * @param[out] out_qp_set   Opaque handle to the created QP set.
  * @param[out] out_gpu_qps  GPU-accessible array of nRanks QueuePair pointers.
  *
  * @return 0 on success, non-zero on failure.
  */
 GIN_QP_API int rocshmem_gin_create_qps(int nRanks, int myRank, int (*allgather)(void* ctx, void* buf, size_t size),
-                                       void* allgather_ctx, int traffic_class, rocshmem_gin_qp_set_t* out_qp_set,
-                                       void*** out_gpu_qps);
+                                       void* allgather_ctx, int traffic_class, const char* preferred_nic_name,
+                                       rocshmem_gin_qp_set_t* out_qp_set, void*** out_gpu_qps);
 
 /**
  * @brief Destroy a set of GIN QPs and release all IB resources.
@@ -141,16 +144,21 @@ GIN_QP_API int rocshmem_gin_get_provider(rocshmem_gin_qp_set_t qp_set);
 GIN_QP_API int rocshmem_gin_probe_devices(void);
 
 /**
- * @brief Initialize rocshmem __constant__ device memory for the GIN QP path.
+ * @brief Enumerate the ibverbs device names of GIN-capable NICs.
  *
- * Sets constmem.gda_provider and logd_constants so that QueuePair device
- * dispatchers use the fast scalar constant cache and error reporting works.
- * Called automatically after QP creation.
+ * Same selection as rocshmem_gin_probe_devices (recognized BNXT/IONIC/MLX5
+ * vendor, validated, with an active port), but also returns each NIC's ibverbs
+ * device name so the caller can build a per-NIC GIN device list for topology
+ * placement. Names are written NUL-terminated into the caller's buffer.
  *
- * @param[in] provider GDAProvider enum value from rocshmem_gin_get_provider().
- * @param[in] rank     This rank's index (for device-side log messages).
+ * @param[out] names     Caller array of char[max_count][name_stride] receiving
+ *                       device names; may be NULL to only count.
+ * @param[in]  max_count Capacity of the names array (entries).
+ * @param[in]  name_stride Bytes per name entry (e.g. sizeof(name[0])).
+ * @return Number of GIN-capable NICs found (may exceed max_count; only the
+ *         first max_count names are written).
  */
-GIN_QP_API void rocshmem_gin_init_constmem(int provider, int rank);
+GIN_QP_API int rocshmem_gin_list_devices(char* names, int max_count, int name_stride);
 
 #ifdef __cplusplus
 }

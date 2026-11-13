@@ -98,7 +98,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: "TheRock"
-          ref: 73aaa3386ad8d276fa51f1b474e3140c9493ea5a # 2026-11-03
+          ref: c0d2f4d21e7daffe3896b9be9ce9d1b2e0793827 # 2026-11-11
 
       - name: Install python deps
         run: |
@@ -271,6 +271,7 @@ jobs:
       artifact_run_id: ${{ inputs.artifact_run_id || github.run_id }}
       workload: llama-3.1-70b-training
       nodes: ${{ inputs.madengine_nodes || '2' }}
+      job_timeout_minutes: '390'
       notify_email: ${{ inputs.notify_email }}
       teams_webhook: ${{ inputs.notify_webhook }}
 
@@ -295,10 +296,21 @@ jobs:
       # One workload failing says nothing about the others.
       fail-fast: false
       max-parallel: 1
+      # job_timeout_minutes = 60 reserved + SLURM time_limit + 90 queue slack:
+      # 390 = 60 + 240 + 90.
       matrix:
         include:
           - workload: gpt-oss-120b-training
             nodes: '2'
+            job_timeout_minutes: '390'
+          - workload: llama-3.1-70b-pp4-training
+            nodes: '2'
+            job_timeout_minutes: '390'
+          # 4 nodes: validated at that scale in ROCm/MAD#228; fewer run out of
+          # memory. 450 = 60 + 300 (5 h time_limit) + 90.
+          - workload: llama-3.1-405b-maxtext
+            nodes: '4'
+            job_timeout_minutes: '450'
     uses: ./.github/workflows/therock-rccl-test-madengine.yml
     secrets: inherit
     with:
@@ -308,6 +320,7 @@ jobs:
       artifact_run_id: ${{ inputs.artifact_run_id || github.run_id }}
       workload: ${{ matrix.workload }}
       nodes: ${{ matrix.nodes }}
+      job_timeout_minutes: ${{ matrix.job_timeout_minutes }}
       notify_email: ${{ inputs.notify_email }}
       teams_webhook: ${{ inputs.notify_webhook }}
 

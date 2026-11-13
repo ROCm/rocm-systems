@@ -20,8 +20,6 @@ export async function readMetricGeometry(page) {
     return Array.from(element.children).map((cell) => {
       const style = getComputedStyle(cell);
       const box = cell.getBoundingClientRect();
-      let scale = 1;
-      for (let ancestor = cell; ancestor; ancestor = ancestor.parentElement) scale *= parseFloat(getComputedStyle(ancestor).zoom) || 1;
       const typography = Array.from(cell.children).filter((child) => child.classList.contains('MuiTypography-root'));
       const [label, value, caption, ...details] = typography;
       // These auto-width normal-flow blocks span the cell content box. Use its
@@ -31,15 +29,18 @@ export async function readMetricGeometry(page) {
         left: flow.left,
         right: flow.right,
         top: label.getBoundingClientRect().top,
-        bottom: box.bottom - (parseFloat(style.paddingBottom) + parseFloat(style.borderBottomWidth)) * scale,
+        bottom: box.bottom - (parseFloat(style.paddingBottom) + parseFloat(style.borderBottomWidth)),
       };
-      return { id: cell.dataset.testid, content, scale, text: value.textContent, value: textRects(value),
+      return { id: cell.dataset.testid, content, text: value.textContent, value: textRects(value),
         label: textRects(label), after: [caption, ...details].flatMap(textRects),
         allText: textRects(cell), valueStyle: { overflow: getComputedStyle(value).overflow, textOverflow: getComputedStyle(value).textOverflow },
       };
     });
   });
 }
+
+// Text measurement and layout can disagree by a fraction of a pixel; anything larger is real overflow.
+const EDGE_TOLERANCE_PX = 0.5;
 
 export function metricContainmentFailures(cells) {
   const failures = [];
@@ -48,8 +49,8 @@ export function metricContainmentFailures(cells) {
     if (!cell.value.length) failures.push(`${cell.id}: missing painted value`);
     if (cell.valueStyle.overflow !== 'visible' || cell.valueStyle.textOverflow === 'ellipsis') failures.push(`${cell.id}: clipped value`);
     for (const line of cell.value) {
-      for (const edge of ['left', 'top']) if (line[edge] < cell.content[edge]) failures.push(`${cell.id}: value outside ${edge}`);
-      for (const edge of ['right', 'bottom']) if (line[edge] > cell.content[edge]) failures.push(`${cell.id}: value outside ${edge}`);
+      for (const edge of ['left', 'top']) if (line[edge] < cell.content[edge] - EDGE_TOLERANCE_PX) failures.push(`${cell.id}: value outside ${edge}`);
+      for (const edge of ['right', 'bottom']) if (line[edge] > cell.content[edge] + EDGE_TOLERANCE_PX) failures.push(`${cell.id}: value outside ${edge}`);
       if ([...cell.label, ...cell.after].some((r) => overlaps(line, r))) failures.push(`${cell.id}: caption/commit collision`);
       if (cells.some((other) => other !== cell && other.allText.some((r) => overlaps(line, r)))) failures.push(`${cell.id}: adjacent text collision`);
     }

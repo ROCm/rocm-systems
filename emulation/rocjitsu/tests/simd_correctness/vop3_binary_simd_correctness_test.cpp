@@ -13,6 +13,7 @@
 /// with EXPECT_EQ (util::set_force_scalar_for_testing flips the gate in-process).
 /// In-process inactive lanes must stay preserved under full and partial EXEC.
 
+#include "compute_unit_test_util.h"
 #include "decode_test_util.h"
 #include "util/simd_test_hooks.h"
 
@@ -213,7 +214,9 @@ struct Fixture {
     cfg.sgprs_per_wf = SGPRS_PER_WF;
     cfg.vgprs_per_wf = VGPRS_PER_WF;
     cfg.lds_size_kb = 64;
-    cu = amdgpu::ComputeUnitCore::create("cu_vop3_bin_simd", cfg, &gpu_mem, &l2);
+    rocjitsu::test::initialize_compute_unit(cu, "cu_vop3_bin_simd", cfg, &gpu_mem, &l2);
+    if (!cu)
+      return;
     decoder = Decoder::create(arch);
     if (plugins)
       cu->set_plugin_group(std::move(plugins));
@@ -257,18 +260,19 @@ struct ForceScalarGuard {
   ~ForceScalarGuard() { util::set_force_scalar_for_testing(orig); }
 };
 
-// Hostile host state must survive both the scalar reference and SIMD execution.
+// Migrated RDNA paths assume default controls and may raise sticky flags.
+// Legacy CDNA paths still promise isolation from nondefault host state.
 struct SubtractionHostEnvironment {
   std::fenv_t saved{};
 #if RJ_HOST_ARCH_X86
   uint32_t saved_mxcsr = _mm_getcsr();
 #endif
-  SubtractionHostEnvironment() {
+  explicit SubtractionHostEnvironment(bool uses_arith) {
     EXPECT_EQ(std::feholdexcept(&saved), 0);
-    EXPECT_EQ(std::fesetround(FE_UPWARD), 0);
+    EXPECT_EQ(std::fesetround(uses_arith ? FE_TONEAREST : FE_UPWARD), 0);
     EXPECT_EQ(std::feraiseexcept(FE_DIVBYZERO), 0);
 #if RJ_HOST_ARCH_X86
-    _mm_setcsr(_mm_getcsr() | (1u << 6) | (1u << 15));
+    _mm_setcsr(uses_arith ? 0x1f80u : _mm_getcsr() | (1u << 6) | (1u << 15));
 #endif
   }
   ~SubtractionHostEnvironment() {
@@ -308,10 +312,11 @@ public:
 // Lanes reported per (write, register, bytes, rounding, flags, control), merging
 // the per-lane events of scalar execution with SIMD's per-view events.
 std::map<std::array<uint64_t, 6>, uint64_t>
-observed_coverage(const std::vector<std::array<uint64_t, 7>> &events) {
+observed_coverage(const std::vector<std::array<uint64_t, 7>> &events, bool uses_arith) {
   std::map<std::array<uint64_t, 6>, uint64_t> coverage;
   for (const auto &event : events)
-    coverage[{event[0], event[1], event[3], event[4], event[5], event[6]}] |= event[2];
+    coverage[{event[0], event[1], event[3], event[4], uses_arith ? 0 : event[5],
+              uses_arith ? event[6] & ~uint64_t(0x3f) : event[6]}] |= event[2];
   return coverage;
 }
 
@@ -387,12 +392,17 @@ TEST(Vop3BinarySimdCorrectness, SubtractionModesAndHostStateAcrossTargets) {
           }
           observer->events.clear();
           {
-            SubtractionHostEnvironment host;
+            SubtractionHostEnvironment host(rdna);
             const auto before = SubtractionHostEnvironment::snapshot();
             const bool succeeded = fx.cu->execute_instruction(inst.get(), *fx.wf).succeeded();
             const auto after = SubtractionHostEnvironment::snapshot();
             EXPECT_TRUE(succeeded);
-            EXPECT_EQ(after, before);
+            if (rdna) {
+              EXPECT_EQ(after[0], before[0]);
+              EXPECT_EQ(after[2] & ~0x3f, before[2] & ~0x3f);
+            } else {
+              EXPECT_EQ(after, before);
+            }
           }
           // Snapshotting storage must not add events to the observed execution.
           const auto events = observer->events;
@@ -409,7 +419,8 @@ TEST(Vop3BinarySimdCorrectness, SubtractionModesAndHostStateAcrossTargets) {
         // Scalar execution reports each lane, SIMD each register view. Both must
         // cover the same registers and lanes, and every callback must see the
         // caller's FP environment.
-        EXPECT_EQ(observed_coverage(actual.second), observed_coverage(reference.second));
+        EXPECT_EQ(observed_coverage(actual.second, rdna),
+                  observed_coverage(reference.second, rdna));
         if (!e64 && (exec & 1u)) {
           // 1 - 2^-25 is exactly halfway below 1. This independent rounding
           // witness also catches GCC moving the SIMD subtraction across MODE.
@@ -436,6 +447,8 @@ void check(const Case &c, uint32_t abs, uint32_t neg, uint32_t omod, uint32_t cl
   auto run_mode = [&](bool force_scalar) -> std::array<uint32_t, WF_SIZE> {
     util::set_force_scalar_for_testing(force_scalar);
     Fixture fx;
+    if (::testing::Test::HasFatalFailure())
+      return {};
     EXPECT_NE(fx.cu, nullptr);
     EXPECT_NE(fx.wf, nullptr);
     uint32_t words[4] = {0u, 0u, 0u, 0u};
@@ -557,6 +570,8 @@ void check_f16(const Case &c, uint32_t abs, uint32_t neg, uint32_t omod, uint32_
   auto run_mode = [&](bool force_scalar) -> std::array<uint32_t, WF_SIZE> {
     util::set_force_scalar_for_testing(force_scalar);
     Fixture fx;
+    if (::testing::Test::HasFatalFailure())
+      return {};
     EXPECT_NE(fx.cu, nullptr);
     EXPECT_NE(fx.wf, nullptr);
     uint32_t words[4] = {0u, 0u, 0u, 0u};

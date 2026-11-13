@@ -1,11 +1,15 @@
 import { fixtureRunPath } from '../fixtures/runPath.js';
 import { expect, test } from '@playwright/test';
+import { expectRunPicker, runPicker } from './helpers/runPicker.js';
 import { createMaintainedPublication } from '../fixtures/maintainedDataset.js';
 import { formatDuration, formatPercent } from '../../src/utils/formatters.js';
 import { adaptPublishedDashboardData } from '../../src/data/dashboardDataAdapter.js';
 import { readChart } from './helpers/chart.js';
 import { readMetricGeometry, metricContainmentFailures } from './helpers/metricGeometry.js';
 import { selectRunComparison } from '../../src/data/selectors.js';
+import { selectAutomaticReference } from '../../src/data/branchSelectors.js';
+import { compareRunExecution } from '../../src/data/runOrdering.js';
+import { benchmarkData } from '../fixtures/publishedData.js';
 import { installPublication, openDashboard, ready, selectRun } from './helpers/dashboard.js';
 
 const chartFor = (page) => page.getByRole('img', { name: 'Performance change by benchmark comparison chart' });
@@ -126,7 +130,7 @@ for (const width of [1440, 900, 390]) test(`comparison metric painted values rem
     await testInfo.attach(`metrics-${width}-${theme}-${scenario}-scrolled`, { body: await page.screenshot(), contentType: 'image/png' });
     expect(metricContainmentFailures(geometry), 'painted values must fit their own content bounds without adjacent/caption/commit collision').toEqual([]);
     if (scenario === 'ordinary') expect(geometry.every((cell) => new Set(cell.value.map((line) => line.top)).size === 1)).toBe(true);
-    const commits = page.getByTestId('comparison-metric-aggregate-change').getByTestId('compared-commits');
+    const commits = page.getByTestId('compared-commits');
     if (hasPair) await expect(commits).toBeVisible();
     else await expect(commits).toHaveCount(0);
     if (scenario === 'extreme' && width === 1440 && theme === 'light') {
@@ -164,9 +168,10 @@ for (const width of [1440, 900, 390]) test(`comparison metric painted values rem
 
 const metricValue = (page, name) => page.getByTestId(`comparison-metric-${name}`).locator(':scope > .MuiTypography-root').nth(1);
 
-async function expectPair(page, candidate, baseline) {
-  await expect(page.getByTestId('candidate-run-selected-identity')).toContainText(candidate);
-  await expect(page.getByTestId('baseline-run-selected-identity')).toContainText(baseline);
+async function expectPair(page, candidate, baseline, runs) {
+  // The URL check below proves each run by ID, so two runs that show the same picker text do not matter here.
+  await expectRunPicker(page, 'candidate-run', candidate, runs, { identityProvedElsewhere: true });
+  await expectRunPicker(page, 'baseline-run', baseline, runs, { identityProvedElsewhere: true });
   await expect.poll(() => {
     const params = new URL(page.url()).searchParams;
     return [params.get('compareCandidate'), params.get('compareBaseline')];
@@ -247,10 +252,11 @@ test('branch-only publications keep comparison filters usable and long linked id
   publication.index.runFiles = publication.runs.map(fixtureRunPath);
   // Valid fictional HTTP publication, with no develop attempts or disk fixture.
   await installPublication(page, { publication });
+  const { data: { allRuns: publishedRuns } } = adaptPublishedDashboardData(publication);
   const query = new URLSearchParams({ view: 'compare', compareCandidate: candidate.publication.id, compareBaseline: baseline.publication.id, targets: 'gfx1250', modes: 'single' });
   await openDashboard(page, `/?${query}`);
   await expect(page.getByTestId('dashboard-route-error')).toHaveCount(0);
-  await expectPair(page, candidate.publication.id, baseline.publication.id);
+  await expectPair(page, candidate.publication.id, baseline.publication.id, publishedRuns);
   await expect(metricValue(page, 'comparable')).toHaveText('4');
   await expect(chartFor(page)).toBeVisible();
   for (const [name, remaining] of [['gfx1250', '0'], ['single', '0'], ['Triton', '2'], ['Llama', '2']]) {
@@ -267,7 +273,7 @@ test('branch-only publications keep comparison filters usable and long linked id
   await page.reload();
   await ready(page);
   await expect(page.getByTestId('dashboard-route-error')).toHaveCount(0);
-  await expectPair(page, candidate.publication.id, baseline.publication.id);
+  await expectPair(page, candidate.publication.id, baseline.publication.id, publishedRuns);
   await expect(metricValue(page, 'comparable')).toHaveText('4');
   // Branch measurements must not become canonical Overview measurements.
   await page.getByRole('tab', { name: 'Overview', exact: true }).click();
@@ -276,13 +282,13 @@ test('branch-only publications keep comparison filters usable and long linked id
   await expect(page.getByRole('checkbox', { name: 'single', exact: true })).toBeChecked();
   await expect(duration.locator('[data-configuration]')).toHaveCount(1);
   await expect(duration.locator('[data-configuration="gfx1250/single"]')).toContainText('No shared workloads');
-  await expect(duration.locator('[data-configuration="gfx1250/single"] p').last()).toHaveText('No shared workloads');
+  await expect(duration.locator('[data-configuration="gfx1250/single"] > :last-child')).toHaveText('No shared workloads');
   await expect(page.getByTestId('speedup-empty-state')).toBeVisible();
   await expect(page.getByTestId('performance-trend').getByRole('img')).toHaveCount(0);
   await expect(page.getByTestId('recent-runs-table').locator('tbody tr')).toHaveCount(0);
   await expect(page.getByTestId('largest-changes').locator('[data-change-state]')).toHaveCount(0);
-  await page.getByRole('tab', { name: 'Run Comparison', exact: true }).click();
-  await expectPair(page, candidate.publication.id, baseline.publication.id);
+  await page.getByRole('tab', { name: 'Run comparison', exact: true }).click();
+  await expectPair(page, candidate.publication.id, baseline.publication.id, publishedRuns);
   await expect(page.getByRole('checkbox', { name: 'single', exact: true })).toBeEnabled();
   await expect(metricValue(page, 'comparable')).toHaveText('4');
 });
@@ -324,4 +330,42 @@ test('positive overflow ratios remain measured, arbitrary metadata stays aligned
   expect(html).not.toContain('<img');
   await expect(page.locator('img[src="x"]')).toHaveCount(0);
   expect(await page.evaluate(() => window.__tooltipInjection)).toBeUndefined();
+});
+
+test('opening Run comparison with no chosen pair selects the newest attempt against its automatic develop reference', async ({ page }) => {
+  const candidate = benchmarkData.allRuns.slice().sort(compareRunExecution).at(-1);
+  const baseline = selectAutomaticReference(benchmarkData, candidate).run;
+  expect(candidate.runId).not.toBe(baseline.runId);
+  // Independent anchor: the fixture's newest attempt and its develop reference, written out.
+  expect([candidate.runId, baseline.runId]).toEqual(['fictional-rattataking-test-branch', 'fictional-develop-20']);
+  await openDashboard(page, '/?view=compare');
+  await expectPair(page, candidate.runId, baseline.runId);
+  // The branch is part of both pickers' text and of the compared-commits line.
+  await expect(runPicker(page, 'candidate-run')).toHaveValue(new RegExp(`· ${candidate.branch}$`));
+  await expect(runPicker(page, 'baseline-run')).toHaveValue(new RegExp(`· ${baseline.branch}$`));
+  await expect(page.getByTestId('compared-commits')).toContainText(`(${candidate.branch})`);
+  await expect(page.getByTestId('compared-commits')).toContainText(`(${baseline.branch})`);
+});
+
+test('the default pair keeps both pickers readable with their branch on a phone', async ({ page }) => {
+  const candidate = benchmarkData.allRuns.slice().sort(compareRunExecution).at(-1);
+  const baseline = selectAutomaticReference(benchmarkData, candidate).run;
+  await page.setViewportSize({ width: 390, height: 900 });
+  await openDashboard(page, '/?view=compare');
+  await expectPair(page, 'fictional-rattataking-test-branch', 'fictional-develop-20');
+  for (const [kind, run] of [['candidate-run', candidate], ['baseline-run', baseline]]) {
+    await expect(runPicker(page, kind)).toBeInViewport();
+    // The input holds the full text, so the branch is there even where the control scrolls it.
+    await expect(runPicker(page, kind)).toHaveValue(new RegExp(`· ${run.branch}$`));
+    const box = await runPicker(page, kind).boundingBox();
+    expect(box.x + box.width, `${kind} stays inside the 390px viewport`).toBeLessThanOrEqual(390);
+  }
+});
+
+test('the run-picker helper rejects an unknown expected run instead of passing', async ({ page }) => {
+  await expect(expectRunPicker(page, 'candidate-run', 'no-such-run')).rejects.toThrow(/not among the given runs/);
+});
+
+test('the run-picker helper rejects a run whose label another run shares, unless identity is proved elsewhere', async ({ page }) => {
+  await expect(expectRunPicker(page, 'candidate-run', 'fictional-develop-00')).rejects.toThrow(/share the label/);
 });

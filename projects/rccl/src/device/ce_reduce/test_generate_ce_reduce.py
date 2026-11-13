@@ -340,6 +340,7 @@ class CeReducePersistentContractTest(unittest.TestCase):
             "NCCL_CE_REDUCE_MAX_BLOCKS",
             "NCCL_CE_REDUCE_DEFAULT_BLOCKS",
             "NCCL_CE_NUM_SLOTS",
+            "NCCL_CE_REDUCE_THREADS",
         ):
             with self.subTest(constant=name):
                 pattern = r"#define\s+%s\s+(\d+)" % name
@@ -376,8 +377,8 @@ class CeReducePersistentContractTest(unittest.TestCase):
         self.assertIn("ceReduceBfloat16AvgScale(nRanks)", self.impl)
 
     def test_launch_bounds_matches_launcher_thread_count(self) -> None:
-        bounds = re.search(r"__launch_bounds__\((\d+)\)", self.impl)
-        threads = re.search(r"const int threads\s*=\s*(\d+);", self.launcher)
+        bounds = re.search(r"__launch_bounds__\((\w+)\)", self.impl)
+        threads = re.search(r"const int threads\s*=\s*(\w+);", self.launcher)
         self.assertIsNotNone(bounds, "__launch_bounds__ not found in ce_reduce_impl.h")
         self.assertIsNotNone(threads, "thread count not found in the generated launcher")
         assert bounds is not None and threads is not None

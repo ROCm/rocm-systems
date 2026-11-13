@@ -5,8 +5,12 @@ in `memory_backing.h`.
 The private `rocjitsu-memory` helper creates fixed-size memfds within its own
 inherited hard file limit, raising only its own soft limit. If that limit
 cannot accommodate an allocation, it uses
-System V shared RAM instead. This also supports a finite inherited hard
-`RLIMIT_FSIZE` without changing the application's limits or signal disposition.
+System V shared RAM instead. Ordinary allocations stay on native memfds even
+when shmem lacks user xattrs. On export, an unsupported policy xattr causes the
+keeper to wrap that memfd in a token carrying the policy. The token retains the
+same file bytes and device/inode identity across descriptor transfers.
+This supports a finite inherited hard `RLIMIT_FSIZE` without changing the
+application's limits or signal disposition.
 Internal scratch that has no exportable handle uses shared anonymous memory
 with `MAP_NORESERVE`, preserving sharing across fork without file sizing.
 
@@ -16,24 +20,27 @@ growing the backing with `ftruncate`, as earlier versions did. This applies to
 both native memfds and tokens. Valid views, including a final partial page,
 remain supported; callers that need more storage must allocate a larger BO.
 
-Shared RAM is retained by opaque Unix socket descriptors. Kernel descriptor
-references preserve it across duplication, fork, and `SCM_RIGHTS` transfer while
-its creating keeper remains alive.
-The helper holds an attachment to each segment, marks it for removal, and drops
-that attachment when the final token closes. Mapped views can outlive all
+Fallback shared RAM and wrapped file exports are retained by opaque Unix socket
+descriptors. Kernel descriptor references preserve them across duplication,
+fork, and `SCM_RIGHTS` transfer while their creating keeper remains alive.
+For System V backing, the helper holds an attachment to each segment, marks it
+for removal, and drops that attachment when the final token closes. Wrapped
+file exports retain their source file instead. Mapped views can outlive all
 handles. Keeper failure invalidates its tokens: subsequent mapping and reopen
 requests fail with `ESTALE`, even if a pre-existing view still retains a segment.
-Existing views remain usable, but a token with no remaining view loses its data
-when the keeper dies. A replacement keeper serves new allocations; it cannot
-recover data from invalidated tokens. Mapping adapters use `shmat` and zero-old-size `mremap` aliases, retain
-read-only permissions, and support partial and fixed mappings without copying
-live buffer contents. These fallback descriptors require rocjitsu's mapping and
-metadata adapters; importing them into a different IPC namespace fails with
-`EXDEV`. Size queries through `lseek`/`lseek64` follow dma-buf semantics:
+Existing views remain usable, but a System V token with no remaining view loses
+its data when the keeper dies. A replacement keeper serves new allocations; it cannot
+recover data from invalidated tokens. System V token mappings use `shmat` and
+zero-old-size `mremap` aliases; wrapped file tokens obtain a temporary file
+descriptor from the keeper and use `mmap`. Both retain read-only permissions
+and support partial and fixed mappings without copying live buffer contents. Tokens require
+rocjitsu's mapping and metadata adapters. System V tokens cannot be imported
+into a different IPC namespace (`EXDEV`); wrapped file tokens can. Size queries
+through `lseek`/`lseek64` follow dma-buf semantics:
 zero-offset `SEEK_END` reports the size, zero-offset `SEEK_SET` reports zero,
 and other seeks fail with `EINVAL`. Ordinary memfds retain native Linux behavior.
 
-This fallback assumes trusted same-UID processes in the IPC namespace. A live
+The System V fallback assumes trusted same-UID processes in the IPC namespace. A live
 segment remains discoverable in `/proc/sysvipc/shm` and can be attached directly
 by another process with the same UID, without receiving a token. Socket names
 carry descriptive, unauthenticated metadata; they do not establish authority.
@@ -44,7 +51,7 @@ attachment disappears, even after `IPC_RMID`. The per-segment size limit
 `kernel.shmmax` can also reject an allocation even when IDs and aggregate
 capacity remain available.
 
-All token mappings temporarily attach the entire segment with `shmat`
+System V token mappings temporarily attach the entire segment with `shmat`
 before creating the requested view with a zero-old-size `mremap` alias and
 detaching the temporary attachment. They therefore need contiguous virtual
 address space for the full segment, plus space for the new view. A whole-buffer
@@ -52,8 +59,9 @@ view temporarily needs roughly twice the segment's address space; a partial
 view still needs the full segment plus the requested range. Either can fail
 with `ENOMEM` under `RLIMIT_AS`, even when the requested view is only one page.
 This is virtual address space, not eager physical allocation.
-A fence-only BO retains one fence page after mapping; only native memfd backing
-can create that page view without the temporary full-segment requirement.
+A fence-only BO retains one fence page after mapping; native memfds and wrapped
+file exports can create that page view without the temporary full-segment
+requirement.
 A failed fence mapping rejects submission and can be retried after sufficient
 address space becomes available.
 
@@ -65,8 +73,8 @@ is outside this KFD backing support for file limits.
 
 Device allocations retain GPU dump classification across descriptor transfers.
 Native memfds carry their render-node name. Device tokens carry the same
-classification in their socket metadata and use a reserved creation-key prefix
-for System V segments. The keeper attaches and immediately marks each segment
+classification in their socket metadata. Device System V tokens use a reserved
+creation-key prefix. The keeper attaches and immediately marks each segment
 for removal, releasing its key; the kernel retains the original `/SYSV` name
 on surviving views. This avoids process-local address tracking across `mremap`,
 fork, or closing the final descriptor. Non-device token backing still uses
@@ -126,19 +134,48 @@ removes it. The helper waits for the lock through an independently opened file
 description. Retirement unmaps the lease without closing a long-lived application
 descriptor, so concurrent `close_range` or descriptor replacement cannot make it
 close an unrelated file. A helper thread waits for release of the lock and
-notifies the event loop. The helper retires
-on owner exit or exec, preserving any exported tokens until they close, without
-retaining application mappings. The interposer starts it before application
-code can lower file limits. A forked child starts its own helper under the
-child's then-current hard limits. Generated topology files and proc-maps
-snapshots are sized there and populated through mappings; these small metadata
-files must fit that helper's hard file limit. Topology population failures emit
-a warning identifying the file. Application writes, including runtime compiler
-temporary files, continue to obey the application's current limit.
+notifies the event loop. On owner exit or exec, the helper closes its listener
+and private request connections, including idle connections inherited by forked
+children. It continues serving exported tokens until they close. During
+initialization the interposer calls
+`prepare_memory_keeper` and waits for readiness before application code can
+lower file limits. A forked child starts its own helper under the child's
+then-current hard limits.
+Generated topology files and proc-maps snapshots are sized there. Topology
+files with small payloads travel with the sizing request and are written by the helper
+with positional I/O. Larger topology files and proc-maps snapshots are
+populated through shared mappings.
+Both paths preserve the caller's file offset. Metadata files must fit the
+helper's hard file limit. Topology population
+failures emit a warning identifying the file. Application writes, including
+runtime compiler temporary files, continue to obey the application's current
+limit.
+
+The owner records the helper's kernel-supplied PID from the inherited startup
+channel. Before sending a backing descriptor, it checks the listener's PID
+and credentials against the process identity reported at startup. On kernels
+with 64-bit pidfs, the helper's pidfd inode identifies that process across PID
+reuse. Otherwise the owner requires a private cookie from the startup channel
+before transferring a backing descriptor. If the helper cannot answer before
+the timeout and its lifetime is ambiguous, preparation returns `EAGAIN` and
+preserves its lease. Preparation can be retried when the helper responds.
+
+Allocation and metadata requests use temporary private connections for both
+requests and responses. Consecutive nonempty topology files share a connection. The helper
+acknowledges groups of small writes before the caller publishes the tree. Empty
+files are truncated locally, in order, without holding a connection. The caller closes each inline file descriptor after passing it to
+the helper and keeps only the current file for mapped writes. Batch size does
+not increase the application's descriptor requirement. If the kernel limits
+descriptors in flight, the caller drains the batch before retrying. At the end
+of the batch it shuts down the connection so a forked child cannot keep the
+helper endpoint open.
+
+Token reopen requests retain separate reply socket pairs because a token may
+be shared by multiple callers, including callers in different processes.
 
 Changing effective user or group credentials retires the previous helper's
 lease before using a new helper; previously exported tokens retain their keeper
-and storage. New token mappings still check the caller's current System V IPC
+and storage. New System V token mappings still check the caller's current IPC
 permissions. Segments use mode 0600; a different effective UID without
 `CAP_IPC_OWNER` receives `EACCES`, even when it retained a token. Already mapped
 views remain usable. Group-only changes do not remove the owning UID's access.
@@ -159,7 +196,8 @@ sizing and application limits unchanged.
 
 Installed objects locate the helper in their installation. Only objects inside
 the configured build tree may fall back to its helper executable; an incomplete
-installation fails rather than using another build's private protocol.
+installation fails rather than using another build's private protocol. The
+startup reply identifies the private protocol before any allocation is sent.
 
 File-limit handling does not require `HSA_ENABLE_IPC_MODE_LEGACY=1`. Ordinary HIP
 allocation, copies, dispatch, and local VMM work with the runtime's default IPC

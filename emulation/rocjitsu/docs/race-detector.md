@@ -10,15 +10,10 @@ instructions.
 
 ## Target scope
 
-The race detector focuses on pre-GFX12 architectures. Its current end-to-end
-coverage exercises gfx942 (GFX9/CDNA3), gfx950 (GFX9/CDNA4), and gfx1151
-(GFX11.5/RDNA3.5). GFX12
-and later architectures are not supported. Some GFX12 split-counter behavior
-is already modeled and covered by plugin tests, including partial load waits
-and address-dependent FLAT counter participation. This partial
-coverage does not establish complete counter, scheduling, or writeback support;
-issue-time counter-capacity backpressure remains limited to CDNA1 through CDNA4
-and GFX11.
+The race detector supports gfx942 (GFX9/CDNA3), gfx950 (GFX9/CDNA4) and
+gfx1151 (GFX11.5/RDNA3.5), with end-to-end tests for each. Support for gfx1250
+(CDNA5) is limited and under active development; end-to-end tests currently
+cover its tensor DMA races (see Tensor DMA races below).
 
 ## Quick start
 
@@ -197,7 +192,67 @@ races. Some examples:
   wave has an outstanding read of the same byte, without an intervening
   `s_barrier`;
   or a wave reads bytes targeted by its own outstanding direct-to-LDS operation
-  before the required `s_waitcnt vmcnt`.
+  before the required `s_waitcnt vmcnt`. A direct-to-LDS write over bytes of
+  the same wave's pending DS read is also reported, on every target with
+  direct-to-LDS, until a DS wait completes the read. That is a conservative
+  rule: the ISA does not establish that the write waits for the read. Compilers
+  can emit such a pair without a DS wait (on gfx1250, LLVM may place only
+  `s_wait_kmcnt 0` between a `ds_load_b32` and a `global_load_async_to_lds_b32`
+  to the same dword), and the detector reports it.
+- **Tensor DMA races** (gfx1250): `tensor_load_to_lds` writes and
+  `tensor_store_from_lds` reads are LDS events on `tensorcnt`. Any wave,
+  including the issuing one, that reads a load's destination or overwrites a
+  store's source before `s_wait_tensorcnt` is reported; other waves also need an
+  `s_barrier`. A load covers every element of its tile, including elements
+  outside the tensor, which it zero-fills; padding bytes are excluded. A store
+  covers only the elements inside the tensor. Either way, only bytes inside the
+  wave's LDS allocation are tracked, because bytes past it are not transferred:
+  an i32 at offset 254 of a 256-byte allocation contributes only bytes 254 and
+  255. Transfers from one wave complete
+  on `tensorcnt` in issue order (CDNA5 ISA 10.11.1), so a partial
+  `s_wait_tensorcnt` retires the oldest. The ISA does not specify the relative
+  timing of their LDS reads and writes, so as a conservative rule the detector
+  reports a tensor load and a tensor store from the same wave that touch the
+  same LDS byte, in either order, until `s_wait_tensorcnt` retires the earlier
+  one. Two stores of the same tile only read it, which is safe; two loads over
+  the same bytes are an LDS write/write conflict, which the detector does not
+  check (see Limitations). Each instruction is registered when it issues, as
+  other memory instructions are, so an instruction that moves no data still
+  occupies its `tensorcnt` slot, and a transfer that waits for memory is pending
+  from the moment it issues.
+- **Async copy races** (gfx1250): `global_load_async_to_lds_*` and
+  `cluster_load_async_to_lds_*` writes and `global_store_async_from_lds_*` reads
+  are LDS events on `asynccnt`, one per instruction, with each lane's bytes at
+  its LDS address. Any wave, including the issuing one, that reads a load's
+  destination or overwrites a store's source before `s_wait_asynccnt` is
+  reported; other waves also need an `s_barrier`. Synchronizing other waves
+  through an LDS barrier cell instead is not modeled (see False positives with
+  LDS barrier synchronization). Async copies may access LDS out of order with
+  each other (CDNA5 ISA 10.8), so a store is also reported when it reads bytes
+  of the same wave's pending async load, and an async load when it overwrites
+  the source of the same wave's pending async store. The ISA does not
+  establish the LDS access order of an async copy relative to DS instructions
+  or tensor DMA, so as a conservative rule the detector also
+  reports a store that reads bytes of the same wave's pending DS write or tensor
+  load, until a DS or tensor wait completes it. Compilers can emit such a pair
+  without a DS wait (on gfx1250, Clang places no `s_wait_dscnt` between the
+  `ds_store_b32` of a shared-memory assignment and a following
+  `global_store_async_from_lds_b32` builtin that reads the same bytes), and the
+  detector reports it. Async loads complete in issue order with other async
+  loads and async stores with other async stores, but loads and stores
+  complete out of order with each other, so a partial `s_wait_asynccnt`
+  retires the oldest of each kind only when the count guarantees it: after a
+  load and then a store, `s_wait_asynccnt 1` retires neither. `ds_atomic_async_barrier_arrive_b64` also completes on `asynccnt`, in
+  order with async loads (10.8), so partial waits count it with the loads. The
+  ISA specifies out-of-range LDS behavior for async loads only: their LDS write
+  is dropped (CDNA5 ISA 3.3.3). As modeling choices, a load lane with any byte
+  past the wave's LDS allocation writes nothing and is not tracked, while a
+  store lane reads, and is tracked for, the bytes of its source inside the
+  allocation, and zeros past it, so every byte a store may read is tracked. A
+  copy with no active lanes touches no LDS but issues and counts on
+  `asynccnt`; the hardware may skip it only when no load, store, async or
+  tensor operation is pending (3.2.2.1), and counting it then retires no later
+  copy early. Either way, the instruction occupies its `asynccnt` slot.
 
 Detection is at byte granularity: D16 (half-register) loads only flag races on
 the affected bytes, and LDS races are tracked per byte.
@@ -211,14 +266,26 @@ following lifecycle:
    the same wave remain ordered with respect to each other, so a later
    same-wave DS read or write does not race solely because the earlier DS event
    is still active. Direct-to-LDS VMEM writes still require the owning wave to
-   wait for `vmcnt` before reading the destination bytes.
+   wait for `vmcnt` before reading the destination bytes. Tensor DMA transfers
+   complete in issue order, but as a conservative rule an active tensor load or
+   store still conflicts with a later, overlapping transfer in the other
+   direction from the same wave (see Tensor DMA races above). An active async
+   store's LDS source likewise conflicts with any later, overlapping LDS write
+   from the same wave (see Async copy races above).
 1. **WAVE_COMPLETE** — waits have satisfied every counter obligation for the
    event. This means the event is no longer in flight from the perspective of
    the wave that issued the operation, but is still in flight from the
    perspective of other waves in the same workgroup.
 1. **RETIRED** — `s_barrier` has synchronized all waves. The event is fully
    retired and, from the perspective of all threads in all wavefronts, the
-   operation is complete.
+   operation is complete. A workgroup with a single wave has no other wave to
+   race with, so its LDS events are retired as soon as they are wave-complete,
+   without a barrier. They then leave the LDS lists that race checks scan, so
+   those checks do not slow down as completed events add up in long
+   single-wave kernels. Retired events stay in the event registry until it
+   trims them, and it trims only from the oldest event: an older event that is
+   still pending, such as a global load waiting on `loadcnt`, keeps every
+   later retired event in the registry.
 
 Generic `FLAT_*` instructions select counter domains from their resolved memory
 requests. Global and scratch requests use the vector-memory counter; LDS
@@ -351,6 +418,10 @@ wave can bypass the interval scan because those operations are ordered. A
 mixed chunk uses the scan until its count drains. The history remains available
 for checks by other waves until a barrier retires it. Direct-to-LDS and unordered
 memory operations still require their own completion checks.
+For a DS or FLAT instruction, the plugin first merges the active lanes' byte
+ranges into intervals and checks the chunk counts under them. When no chunk can
+hold a conflict, it skips the per-lane checks. The same intervals become the
+instruction's event.
 
 **VGPR race detection** tracks events per register, using the stored exec mask
 to determine which lanes are affected. Tracking is at byte granularity within
@@ -420,9 +491,8 @@ race_detector/
     ├── event_registry.h      append-only event store with prefix trimming
     ├── interval_set.h        half-open byte range tracking for LDS
     ├── types.h               core enum types and structs
-    ├── common_register.h     SGPR/VGPR classification helpers
-    ├── dim3d.h               3D coordinate helpers
-    └── profiler_interface.h  optional hook profiling
+    ├── common_register.h     memory event types and ordering
+    └── dim3d.h               3D coordinate helpers
 ```
 
 Explicit wait decoding is shared with the core checker in
@@ -436,12 +506,15 @@ Tests are part of the rocjitsu test suite (`emulation/rocjitsu/tests/`):
   via `race_test_builder.h`, covering VGPR, SGPR, LDS, D16, DTL, exec mask,
   multi-workgroup, and mixed counter scenarios.
 - `interval_set_tests.cpp` — unit tests for `IntervalSet`.
+- `execution_plugin_race_test.cpp` — drives the plugin's hooks, including
+  tensor DMA transfers and async copies on gfx1250.
 - `wait_hazard_test.cpp` — wait/readiness tests shared with the core checker.
 - The `race` suite in
   [ROCm/rocjitsu-test-corpus](https://github.com/ROCm/rocjitsu-test-corpus)
-  owns the gfx942, gfx950 and gfx1151 end-to-end HIP programs. The
-  `rocjitsu-test-corpus` workflow builds them with the corpus HIP toolchain
-  and runs each case under the emulator with the `race` plugin enabled.
+  owns the gfx942, gfx950, gfx1151 and gfx1250 end-to-end HIP programs; the
+  gfx1250 program covers tensor DMA. The `rocjitsu-test-corpus` workflow builds
+  them with the corpus HIP toolchain and runs each case under the emulator with
+  the `race` plugin enabled.
 
 ```bash
 # Core detection tests
@@ -452,8 +525,9 @@ To run the HIP cases locally, follow the corpus's
 [race-suite instructions](https://github.com/ROCm/rocjitsu-test-corpus#rocjitsu-race-detector-integration)
 and point the wrapper at the RocJITsu build being tested. Set
 `ROCJITSU_RACE_CONFIG` to `tests/race-detector/race_test_gfx942_config.json` for gfx942,
-`tests/race-detector/race_test_config.json` for gfx950 or `configs/gfx1151.json` for
-gfx1151, using absolute paths from this source tree. The original
+`tests/race-detector/race_test_config.json` for gfx950, `configs/gfx1151.json` for
+gfx1151 or `configs/gfx1250_mi455x.json` for gfx1250, using absolute paths from
+this source tree. The original
 `RaceTest.<target>_<name>` selectors remain available through the corpus's
 `--case` option. Shared atomic and FLAT-to-LDS cases use
 `RaceTest.vmem_<target>_<name>`, for example
@@ -485,6 +559,47 @@ gfx1151, using absolute paths from this source tree. The original
   `wait_exp:7` (no wait), both keep those results pending. The shared
   `wait_hazard_test.cpp` suite records this boundary. Supporting embedded waits
   requires retirement before the instruction's register accesses.
+
+- **Tensor DMA scope**: only the LDS side of a transfer is tracked. Its global
+  memory accesses are not checked.
+
+- **Async copy scope**: only the LDS side of an async copy is tracked. Its
+  global memory accesses are not checked.
+
+- **Async copy LDS alignment**: async copies use their LDS addresses as
+  computed. DS instructions have their LDS address aligned in every alignment
+  mode except unaligned (CDNA5 ISA 3.3.4.1), but the ISA does not say whether
+  async copies follow that rule, so neither the emulator nor the detector
+  applies it to them.
+
+- **False positives with LDS barrier synchronization**: a producer can hand
+  LDS data to another wave through an LDS barrier cell instead of a wait and
+  `s_barrier`. A tensor load can request an arrival on a barrier cell when it
+  completes, and `ds_atomic_async_barrier_arrive_b64` advances a barrier only
+  after the producer's earlier async loads complete (CDNA5 ISA 11.2.2). A
+  consumer wave can then wait for the barrier's phase and read the tile, or
+  copy it out with an async store, without the producer waiting on
+  `s_wait_tensorcnt` or `s_wait_asynccnt` or the workgroup passing `s_barrier`.
+  The detector does not observe this synchronization: it retires a transfer
+  only through wait-counter instructions and `s_barrier`. A consumer that is
+  correctly synchronized through the barrier cell is therefore reported as
+  racing with the tensor or async load. These reports are false positives, not
+  missing coverage.
+
+- **NULL tensor descriptors**: like the emulator, the detector counts a NULL
+  descriptor (`count = 0`) on `tensorcnt`. That is an emulator assumption:
+  hardware behavior for this encoding is not established. If hardware does not
+  count it, a nonzero `s_wait_tensorcnt` that the detector accepts can leave an
+  earlier transfer pending, so a real race would go unreported.
+
+- **No counter-capacity backpressure on gfx1250**: hardware stalls issue when a
+  wait counter is full, which proves the oldest pending entry complete without
+  an explicit wait. The detector models this only on CDNA1 through CDNA4 and
+  GFX11. On gfx1250, code that relies on a full counter instead of a wait
+  gets false positives: a wave that issues 64 tensor transfers has completed
+  its first, because the 6-bit `tensorcnt` holds at most 63, but the detector
+  still reports a read of the first transfer's LDS bytes as a race. Explicit
+  `s_wait_*` waits are handled correctly.
 
 - **Conservative DPP/SDWA write masks**: WAW precision depends on the execution
   plugin's instruction-write lane and byte masks. DPP destinations can currently

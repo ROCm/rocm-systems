@@ -334,6 +334,7 @@ struct ncclConnector {
   int connected;
   int hasSeen;
   int p2pOnly;
+  bool useCe;
   struct ncclProxyConnector proxyConn;
   struct ncclTransportComm* transportComm;
   void* transportResources;
@@ -379,6 +380,7 @@ struct ncclDirect {
 };
 
 #define NCCL_CONN_IDX_P2P_NET 2
+#define NCCL_CONN_IDX_P2P_CE 3
 #define NCCL_MAX_NVLS_ARITY 32
 #define NCCL_MAX_NVLS_TREE_ARITY 3
 struct ncclNvls {
@@ -397,7 +399,7 @@ struct ncclNvls {
 #define NCCL_MAX_ARITY NCCL_MAX_DIRECT_ARITY
 #endif
 
-#define NCCL_MAX_CONNS 3
+#define NCCL_MAX_CONNS 4
 struct ncclChannelPeer {
   struct ncclConnector send[NCCL_MAX_CONNS];
   struct ncclConnector recv[NCCL_MAX_CONNS];
@@ -809,6 +811,9 @@ __device__ __forceinline__ int ncclChannelMaskNthChannelId(struct channelMasks c
   return -1;
 }
 
+#define RCCL_DEV_FLAG_PROFILER 0x1 // profiler plugin loaded
+#define RCCL_DEV_FLAG_PROGRESS 0x2 // comm->deviceCountersBlock is allocated iff device progress counters are enabled
+
 struct alignas(16) ncclDevKernelArgs {
   struct ncclKernelComm* comm;
 #ifdef ENABLE_WARP_SPEED
@@ -816,6 +821,7 @@ struct alignas(16) ncclDevKernelArgs {
 #endif
   struct channelMasks channelMask;
   enum ncclDevWorkStorageType workStorageType;
+  uint8_t devFlags; // RCCL_DEV_FLAG_* bits; uses the padding before workMask, so sizeof is unchanged
   uint32_t workMask;
   void* workBuf;
   // A channel's first batch is at `blockIdx.x`. Use `nextJump` to follow rest of list.

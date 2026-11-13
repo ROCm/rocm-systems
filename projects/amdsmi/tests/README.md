@@ -46,6 +46,9 @@ tests/amd_smi_test/
 ├── unit/                  no hardware; plain TEST(), self-registering
 │   ├── gpu/               dynamic_metrics, cper_read, mock_cper, wsl_backend
 │   │   └── mock_cper/     committed .cper fixtures (AMDSMI_TEST_MOCK_DIR)
+│   ├── nic/               NicUnit: TEST_F on one shared fixture (nic_unit_fixture.h);
+│   │                      transport parsing, type layout, RDMA status, socket
+│   │                      ownership, driver-statistics retry
 │   └── system/            lib_loader
 │
 └── functional/            live device; TestBase subclasses, .h + _test.cc pair
@@ -54,7 +57,9 @@ tests/amd_smi_test/
     ├── system/            flat — no feature leaf
     ├── ifoe/{fabric,identity}/
     ├── cpu/{clock,power}/            placeholder_test.cc stubs
-    ├── nic/{discovery,identity}/     placeholder_test.cc stubs
+    ├── nic/{discovery,identity,telemetry,transport}/
+    │                                 discovery: placeholder_test.cc stub; the others have
+    │                                 tests that skip or return early when no NIC is present
     └── wsl/smi/                      only when ENABLE_WSL_BACKEND
 ```
 
@@ -87,6 +92,7 @@ Suite names are the only selection mechanism — `<Component><Type>[<Operation>]
   Currently registered:
     GpuUnit          GpuFunctionalReadOnly     GpuFunctionalReadWrite
     SystemUnit       SystemFunctionalReadOnly
+    NicUnit          NicFunctionalReadOnly
                      IfoeFunctionalReadOnly
                      WslFunctionalReadOnly   (gated)
 ```
@@ -109,10 +115,11 @@ tests/python/
 │
 ├── unit/          ◄── unit_tests.py         no hardware
 │   ├── gpu/       test_apu_metrics, test_cli_set_clk_limit, ...
-│   └── system/    test_bdf, test_check_res, test_output_file_stdin
+│   └── system/    test_bdf, test_check_res, test_output_file_stdin, and the NIC
+│                  CLI and interface tests (test_*nic*.py, stubbed amdsmi)
 │
 ├── functional/    ◄── integration_test.py   live device + root
-│   └── gpu/ cpu/ nic/ ifoe/ system/   test_<feature>.py
+│   └── gpu/ cpu/ ifoe/ system/        test_<feature>.py
 │
 └── cli/           ◄── cli_unit_test.py      drives the installed amd-smi binary
     ├── base.py    TestCliBase — cached setUpClass, one --json baseline
@@ -170,8 +177,12 @@ The install target remaps the tree to the historical path:
 ```text
 tests/
 ├── abi_check/          abi_check.py + abi_check_test.py   header ABI diff vs the merge base
+│                       abi_gate.py + abi_gate_test.py     blocking layout gate (README.md there)
 ├── amdsmi_build/       run_amdsmi_build.py + tests        distro/pkg-mgr build driver
 ├── dme_integration/    metrics/services/submodules + tests
+├── nic/                standalone NIC C++ suites: test_nic_*_suite.cpp (no hardware;
+│                       registered with ctest, installed beside amdsmitst) plus tools
+│                       that need a live interface (transport suite, benchmark, devlink probes)
 ├── python/test_*_guard.py, test_packaging_scriptlets.py, test_abi_compat.py
 │                       static assertions on CPack/DEBIAN/RPM templates
 ├── run_amdsmi_*.py     live package-manager harnesses (install/upgrade/remove/conflict)
@@ -183,6 +194,7 @@ tests/
 ```text
  pre-commit ──► check_test_conventions.py   (layout + naming gate)
             ├─► abi_check_test.py           (when tests/abi_check/ changes)
+            ├─► abi_gate_test.py            (when abi_gate* or abi/ changes)
             └─► clang-format, ruff-format, gersemi, codespell
 
  CI (.github/workflows/)
@@ -193,6 +205,7 @@ tests/
                             ./unit_tests.py -v
                         └─► run_amdsmi_build.py summarize
    abi-compliance-check.yml ──► abi_check.py (major, then minor)
+   amdsmi-abi-gate.yml ──► abi_gate.py gate (base commit's copy)
    amdsmi-python-versions.yml ─► run_amdsmi_python_versions_test.py (3.6.8 → latest)
    amdsmi-upgrade-downgrade.yml ► run_amdsmi_upgrade_downgrade_test.py
                                   run_amdsmi_component_removal_test.py

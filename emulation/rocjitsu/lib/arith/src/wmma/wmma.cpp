@@ -6,11 +6,11 @@
 // SIMD kernels live in x86_64/, and bit-exact dot arithmetic lives in dot/.
 
 #include "common/float_formats.h"
-#include "common/internal.h"
 #include "common/packed16.h"
 #include "common/simd.h"
 #include "dot/dot.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_wmma.h"
+#include "wmma/flags.h"
 #include "wmma/layout.h"
 
 #include <stdint.h>
