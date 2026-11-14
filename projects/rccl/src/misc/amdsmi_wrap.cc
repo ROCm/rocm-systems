@@ -439,7 +439,7 @@ ncclResult_t amd_smi_getDeviceIndexByPciBusId(const char* pciBusId, uint32_t* de
       // However, it is incompatible with the format enforced by NCCL in utils.cc:int64ToBusId
       // !! To be reconciled after discussion with amdsmi team !!
       bdf.function_number = (busid & 0xf);
-      bdf.device_number = (busid & 0xff) >> 4;
+      bdf.device_number = (busid & 0xff0) >> 4;
       bdf.bus_number = (busid & 0xff000) >> 12;
       bdf.domain_number = busid >> 20;
 
