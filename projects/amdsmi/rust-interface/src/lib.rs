@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: MIT
 
 #![allow(dead_code)]
+#[cfg(feature = "dynamic-loading")]
+mod runtime;
 mod amdsmi_wrapper;
 
 #[macro_use]
