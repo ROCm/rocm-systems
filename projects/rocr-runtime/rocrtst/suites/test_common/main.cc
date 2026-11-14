@@ -498,44 +498,44 @@ TEST(rocrtstFunc, FP_Exception_Shutdown) {
 
 TEST(rocrtstFunc, GL2_PersistingCache_QueryMax) {
     GL2CacheTest gl2;
-    if (!RunCustomTestProlog(&gl2)) return;
-    gl2.QueryMaxPersistingCacheSize();
-    RunCustomTestEpilog(&gl2);
+    gl2.SetSubtest([&]() { gl2.QueryMaxPersistingCacheSize(); });
+    RunGenericTest(&gl2);
 }
 
 TEST(rocrtstFunc, GL2_PersistingCache_QueryRequest) {
     GL2CacheTest gl2;
-    if (!RunCustomTestProlog(&gl2)) return;
-    gl2.QueryRequestPersistingCacheSize();
-    RunCustomTestEpilog(&gl2);
+    gl2.SetSubtest([&]() { gl2.QueryRequestPersistingCacheSize(); });
+    RunGenericTest(&gl2);
 }
 
 TEST(rocrtstFunc, GL2_PersistingCache_Set) {
     GL2CacheTest gl2;
-    if (!RunCustomTestProlog(&gl2)) return;
-    gl2.SetPersistingCacheSize();
-    RunCustomTestEpilog(&gl2);
+    gl2.SetSubtest([&]() { gl2.SetPersistingCacheSize(); });
+    RunGenericTest(&gl2);
 }
 
 TEST(rocrtstFunc, GL2_PersistingCache_SetAndReadBack) {
     GL2CacheTest gl2;
-    if (!RunCustomTestProlog(&gl2)) return;
-    gl2.SetAndReadBackPersistingCacheSize();
-    RunCustomTestEpilog(&gl2);
+    gl2.SetSubtest([&]() { gl2.SetAndReadBackPersistingCacheSize(); });
+    RunGenericTest(&gl2);
 }
 
 TEST(rocrtstFunc, GL2_PersistingCache_NegativeInvalidSize) {
     GL2CacheTest gl2;
-    if (!RunCustomTestProlog(&gl2)) return;
-    gl2.NegativeInvalidSize();
-    RunCustomTestEpilog(&gl2);
+    gl2.SetSubtest([&]() { gl2.NegativeInvalidSize(); });
+    RunGenericTest(&gl2);
 }
 
 TEST(rocrtstFunc, GL2_PersistingCache_NegativeCPUAgent) {
     GL2CacheTest gl2;
-    if (!RunCustomTestProlog(&gl2)) return;
-    gl2.NegativeCPUAgent();
-    RunCustomTestEpilog(&gl2);
+    gl2.SetSubtest([&]() { gl2.NegativeCPUAgent(); });
+    RunGenericTest(&gl2);
+}
+
+TEST(rocrtstFunc, GL2_PersistingCache_QueryStatusConsistency) {
+    GL2CacheTest gl2;
+    gl2.SetSubtest([&]() { gl2.QueryStatusConsistency(); });
+    RunGenericTest(&gl2);
 }
 
 TEST(rocrtstFunc, Signal_Batch_Host_Pool) {

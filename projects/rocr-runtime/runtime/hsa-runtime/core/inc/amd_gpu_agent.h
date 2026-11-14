@@ -801,10 +801,6 @@ class GpuAgent : public GpuAgentInt {
   // @brief Query the driver to get the cache properties.
   void InitCacheList();
 
-  // @brief Get the maximum persisting L2 cache size supported by this GPU.
-  // @return Maximum size in bytes, or 0 if not supported.
-  size_t GetMaxPersistingL2CacheSize() const;
-
   // @brief Create internal queues and blits.
   void InitDma();
 
