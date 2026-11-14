@@ -17,6 +17,7 @@ ASSERT_HOOK_MATCHES_PROD(g_symkAvailable, ncclSymkAvailable);
 ASSERT_HOOK_MATCHES_PROD(g_symkKernelIdIsLL, rcclSymkKernelIdIsLL);
 ASSERT_HOOK_MATCHES_PROD(g_symkKernelIdIsTma, rcclSymkKernelIdIsTma);
 ASSERT_HOOK_MATCHES_PROD(g_symkFinalize, ncclSymkFinalize);
+ASSERT_HOOK_MATCHES_PROD(g_symkRsHierLaunchChunkSize, ncclSymkRsHierLaunchChunkSize);
 #undef ASSERT_HOOK_MATCHES_PROD
 
 ncclSymRegType_t g_symRegType = ncclSymSendNonregRecvNonreg;
@@ -57,6 +58,14 @@ static ncclResult_t DefaultSymkFinalize(struct ncclComm*) { return ncclSuccess; 
 std::function<ncclResult_t(struct ncclComm*)> g_symkFinalize = DefaultSymkFinalize;
 ncclResult_t ncclSymkFinalize(struct ncclComm* comm) { return g_symkFinalize(comm); }
 
+static uint32_t DefaultSymkRsHierLaunchChunkSize(struct ncclComm* comm, size_t) {
+  return comm->symkState.kcomm.rsHierChunkSize;
+}
+std::function<uint32_t(struct ncclComm*, size_t)> g_symkRsHierLaunchChunkSize = DefaultSymkRsHierLaunchChunkSize;
+uint32_t ncclSymkRsHierLaunchChunkSize(struct ncclComm* comm, size_t blockBytes) {
+  return g_symkRsHierLaunchChunkSize(comm, blockBytes);
+}
+
 void ResetSymKernelsFakes() {
   g_symRegType = ncclSymSendNonregRecvNonreg;
   g_getSymRegTypeResult = ncclSuccess;
@@ -67,4 +76,5 @@ void ResetSymKernelsFakes() {
   g_symkKernelIdIsLL = DefaultSymkKernelIdIsLL;
   g_symkKernelIdIsTma = DefaultSymkKernelIdIsTma;
   g_symkFinalize = DefaultSymkFinalize;
+  g_symkRsHierLaunchChunkSize = DefaultSymkRsHierLaunchChunkSize;
 }

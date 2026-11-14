@@ -1,3 +1,4 @@
+#pragma once
 #if defined(__HIP_PLATFORM_AMD__)
 #include "symmetric/primitives.h"
 #else
@@ -8,6 +9,16 @@ struct SMemTag {}; // Shared memory
 struct GMemTag {}; // Streaming global memory
 struct GMemTemporalTag {}; // Cached global memory with expected temporal reuse
 struct GenMemTag {}; // Generic memory (either global or shared)
+struct GMemApertureTag {}; // Cached global memory, accessed through the global aperture
+
+// Qualifies the pointee of a GMemApertureTag access. A generic pointer compiles to flat instructions, which
+// may reach LDS, so each wait on them also waits for the LDS counter. Limited to gfx1250, the only target
+// the hierarchical kernels run on; elsewhere the access stays generic.
+#if defined(__gfx1250__) || defined(__gfx1250_strict__)
+#define NCCL_SYMK_GMEM_APERTURE __attribute__((address_space(1)))
+#else
+#define NCCL_SYMK_GMEM_APERTURE
+#endif
 
 // Memory-space aware load. GMemTag uses streaming cache policy; GMemTemporalTag
 // uses the compiler's default cached global load.
@@ -71,6 +82,33 @@ static __device__ __forceinline__ T loadMem(GMemTag, T* p) {
   return x;
 }
 
+template <typename T>
+static __device__ __forceinline__ T loadMem(GMemApertureTag, T* p) {
+#if defined(__HIP_PLATFORM_AMD__)
+  union {
+    T x;
+    uint8_t u8[sizeof(T)];
+    uint16_t u16[(sizeof(T) + 2 - 1) / 2];
+    uint32_t u32[(sizeof(T) + 4 - 1) / 4];
+    uint64_t u64[(sizeof(T) + 8 - 1) / 8];
+  };
+  if constexpr (alignof(T) == 1) {
+    for (int i = 0; i < sizeof(T) / 1; i++) u8[i] = ((NCCL_SYMK_GMEM_APERTURE uint8_t*)p)[i];
+  } else if constexpr (alignof(T) == 2) {
+    for (int i = 0; i < sizeof(T) / 2; i++) u16[i] = ((NCCL_SYMK_GMEM_APERTURE uint16_t*)p)[i];
+  } else if constexpr (alignof(T) == 4) {
+    for (int i = 0; i < sizeof(T) / 4; i++) u32[i] = ((NCCL_SYMK_GMEM_APERTURE uint32_t*)p)[i];
+  } else if constexpr (alignof(T) == 8 || alignof(T) == 16) {
+    for (int i = 0; i < sizeof(T) / 8; i++) u64[i] = ((NCCL_SYMK_GMEM_APERTURE uint64_t*)p)[i];
+  } else {
+    __builtin_unreachable();
+  }
+  return x;
+#else
+  return *p;
+#endif
+}
+
 // Memory-space aware store. GMemTag uses streaming cache policy; GMemTemporalTag
 // uses the compiler's default global store.
 template <typename T>
@@ -130,6 +168,33 @@ static __device__ __forceinline__ void storeMem(GMemTag, T* p, T val) {
   default:
     __builtin_unreachable();
   }
+#endif
+}
+
+template <typename T>
+static __device__ __forceinline__ void storeMem(GMemApertureTag, T* p, T val) {
+#if defined(__HIP_PLATFORM_AMD__)
+  union {
+    T x;
+    uint8_t u8[sizeof(T)];
+    uint16_t u16[(sizeof(T) + 2 - 1) / 2];
+    uint32_t u32[(sizeof(T) + 4 - 1) / 4];
+    uint64_t u64[(sizeof(T) + 8 - 1) / 8];
+  };
+  x = val;
+  if constexpr (alignof(T) == 1) {
+    for (int i = 0; i < sizeof(T) / 1; i++) ((NCCL_SYMK_GMEM_APERTURE uint8_t*)p)[i] = u8[i];
+  } else if constexpr (alignof(T) == 2) {
+    for (int i = 0; i < sizeof(T) / 2; i++) ((NCCL_SYMK_GMEM_APERTURE uint16_t*)p)[i] = u16[i];
+  } else if constexpr (alignof(T) == 4) {
+    for (int i = 0; i < sizeof(T) / 4; i++) ((NCCL_SYMK_GMEM_APERTURE uint32_t*)p)[i] = u32[i];
+  } else if constexpr (alignof(T) == 8 || alignof(T) == 16) {
+    for (int i = 0; i < sizeof(T) / 8; i++) ((NCCL_SYMK_GMEM_APERTURE uint64_t*)p)[i] = u64[i];
+  } else {
+    __builtin_unreachable();
+  }
+#else
+  *p = val;
 #endif
 }
 
@@ -214,13 +279,90 @@ static __device__ __forceinline__ void storePacks(Pack (&packs)[nPacks], MemTag 
   }
 }
 
-template <typename Elt, template <typename> typename Red, typename Acc, typename AccPack, int UnrollData,
-          typename GetSrcFn>
+// Compile-time variations of reduceBatch, which a caller overrides by deriving from this.
+struct ReduceBatchMode {
+  // Memory tag the sources load with.
+  using SrcSpace = GMemTag;
+  // Deals the blobs to the warps batch entry by batch entry within each blob, so that the warps work on
+  // every entry at once, instead of finishing an entry's blobs before starting the next entry's.
+  static constexpr bool Interleave = false;
+  // Keeps a blob's source loads in flight together: each group of sources issues all of its loads
+  // before its first add, with no test in between.
+  static constexpr bool Overlap = false;
+};
+
+// Adds N sources, from srcIx on, into accs, issuing all of their loads before the first add. Init starts
+// accs from the first of them instead. Partial stops at nSrcs, which must leave at least one.
+template <typename Elt, int N, bool Init, bool Partial, typename Mode, template <typename> typename Red, typename Acc,
+          typename AccPack, int UnrollData, typename GetSrcFn>
+static __device__ __forceinline__ void accumulateGroup(Red<Acc> red, AccPack (&accs)[UnrollData], int stride,
+                                                       bool lastPackEmpty, int srcIx, int nSrcs, GetSrcFn getSrc) {
+  using EltPack = ncclDecayType_t<decltype(*getSrc(0))>;
+  EltPack tmp[N][UnrollData] = {};
+  NVCC_PRAGMA_UNROLL(N)
+  for (int su = 0; su < N; su++) {
+    EltPack* srcPtr = getSrc(srcIx + su);
+    if (!(Partial && su != 0 && nSrcs <= srcIx + su)) {
+      NVCC_PRAGMA_UNROLL(UnrollData)
+      for (int du = 0; du < UnrollData; du++) {
+        if (du != UnrollData - 1 || !lastPackEmpty) {
+          tmp[su][du] = loadMem(typename Mode::SrcSpace(), srcPtr + du * stride);
+        }
+      }
+    }
+  }
+#if defined(__HIP_PLATFORM_AMD__) && __has_builtin(__builtin_amdgcn_sched_barrier)
+  // Otherwise the scheduler starts adding before the group's last loads issue.
+  __builtin_amdgcn_sched_barrier(0);
+#endif
+  NVCC_PRAGMA_UNROLL(N)
+  for (int su = 0; su < N; su++) {
+    if (Partial && su != 0 && nSrcs <= srcIx + su) break;
+    NVCC_PRAGMA_UNROLL(UnrollData)
+    for (int du = 0; du < UnrollData; du++) {
+      if (du != UnrollData - 1 || !lastPackEmpty) {
+        AccPack a = fromPack<AccPack>(applyCast<Elt, Acc>(tmp[su][du]));
+        accs[du] = su == 0 && Init ? a : applyReduce(red, accs[du], a);
+      }
+    }
+  }
+}
+
+template <typename Elt, typename Mode = ReduceBatchMode, template <typename> typename Red, typename Acc,
+          typename AccPack, int UnrollData, typename GetSrcFn>
 static __device__ __forceinline__ void accumulateLoads(Red<Acc> red, bool inPlace, AccPack (&accs)[UnrollData],
                                                        int stride, bool lastPackEmpty, int nSrcs, GetSrcFn getSrc) {
   using EltPack = ncclDecayType_t<decltype(*getSrc(0))>;
   static_assert(sizeof(Acc) / sizeof(Elt) == sizeof(AccPack) / sizeof(EltPack), "Required");
   constexpr int UnrollSrcs = 4 * 16 < sizeof(AccPack) * UnrollData ? 2 : 1 * 16 <= sizeof(AccPack) * UnrollData ? 4 : 8;
+  if NCCL_IF_CONSTEXPR (Mode::Overlap) {
+    // Whole groups, the first starting accs unless inPlace, then the leftover sources as one partial group.
+    constexpr int UnrollTail = UnrollSrcs - 1 ? UnrollSrcs - 1 : 1;
+    int srcIx = 0;
+    bool accValid = inPlace;
+    if (!accValid && UnrollSrcs <= nSrcs) {
+      accumulateGroup<Elt, UnrollSrcs, /*Init=*/true, /*Partial=*/false, Mode>(red, accs, stride, lastPackEmpty, srcIx,
+                                                                               nSrcs, getSrc);
+      accValid = true;
+      srcIx += UnrollSrcs;
+    }
+    NVCC_PRAGMA_UNROLL_DISABLED
+    while (srcIx + UnrollSrcs <= nSrcs) {
+      accumulateGroup<Elt, UnrollSrcs, /*Init=*/false, /*Partial=*/false, Mode>(red, accs, stride, lastPackEmpty,
+                                                                                srcIx, nSrcs, getSrc);
+      srcIx += UnrollSrcs;
+    }
+    if (srcIx < nSrcs) {
+      if (accValid) {
+        accumulateGroup<Elt, UnrollTail, /*Init=*/false, /*Partial=*/true, Mode>(red, accs, stride, lastPackEmpty,
+                                                                                 srcIx, nSrcs, getSrc);
+      } else {
+        accumulateGroup<Elt, UnrollTail, /*Init=*/true, /*Partial=*/true, Mode>(red, accs, stride, lastPackEmpty,
+                                                                                srcIx, nSrcs, getSrc);
+      }
+    }
+    return;
+  }
   int srcIx = 0;
   bool accValid = inPlace;
   NVCC_PRAGMA_UNROLL_DISABLED
@@ -232,7 +374,7 @@ static __device__ __forceinline__ void accumulateLoads(Red<Acc> red, bool inPlac
       NVCC_PRAGMA_UNROLL(UnrollData)
       for (int du = 0; du < UnrollData; du++) {
         if (du != UnrollData - 1 || !lastPackEmpty) {
-          tmp[su][du] = loadMem(GMemTag(), srcPtr + du * stride);
+          tmp[su][du] = loadMem(typename Mode::SrcSpace(), srcPtr + du * stride);
         }
       }
     }
@@ -259,7 +401,7 @@ static __device__ __forceinline__ void accumulateLoads(Red<Acc> red, bool inPlac
         NVCC_PRAGMA_UNROLL(UnrollData)
         for (int du = 0; du < UnrollData; du++) {
           if (du != UnrollData - 1 || !lastPackEmpty) {
-            tmp[su][du] = loadMem(GMemTag(), srcPtr + du * stride);
+            tmp[su][du] = loadMem(typename Mode::SrcSpace(), srcPtr + du * stride);
           }
         }
       }
@@ -288,8 +430,10 @@ static __device__ inline unsigned getWorstPackCount(unsigned nElts, unsigned nEl
   return (nElts + 2 * (nEltPerPack - 1)) / nEltPerPack;
 }
 
-template <typename Coop, typename DstSpace, typename GetDst, template <typename> typename Red, typename Acc,
-          typename GetSrc, typename GetSrcPtrMasked>
+// PostOp applies the reduction's post-op (e.g. the divide of an average) to each sum before it is stored.
+// Mode is a ReduceBatchMode.
+template <bool PostOp = false, typename Mode = ReduceBatchMode, typename Coop, typename DstSpace, typename GetDst,
+          template <typename> typename Red, typename Acc, typename GetSrc, typename GetSrcPtrMasked>
 __device__ void reduceBatch(Coop coop, bool inPlace, int nBatch, int nElts, DstSpace dstMem, unsigned dstAlignMin,
                             /*(int i)->DstT* */ GetDst getDst, Red<Acc> red, int nSrcs,
                             /*(int i, int srcIx)->SrcT* */ GetSrc getSrc,
@@ -318,17 +462,19 @@ __device__ void reduceBatch(Coop coop, bool inPlace, int nBatch, int nElts, DstS
     int nPacks = getWorstPackCount(nElts, nEltPerPack);
     constexpr int UnrollData = 8;
     constexpr int nPackPerBlob = UnrollData * 32; // A blob is a whole warp's worth of unrolled packs
-    int nBlobs = unsigned(nPacks) / nPackPerBlob;
+    // With Overlap, blobs are taken only while nElts fills them whatever the padding, so that none of
+    // their packs is empty. The packs that leaves go one at a time below.
+    int nBlobs = Mode::Overlap ? unsigned(nElts) / (nPackPerBlob * nEltPerPack) : unsigned(nPacks) / nPackPerBlob;
     NVCC_PRAGMA_UNROLL_DISABLED
     for (int row = unsigned(t) / 32; row < nBatch * nBlobs; row += unsigned(tn) / 32) {
-      int batchIx = unsigned(row) / unsigned(nBlobs);
-      int blobIx = unsigned(row) % unsigned(nBlobs);
+      int batchIx = Mode::Interleave ? unsigned(row) % unsigned(nBatch) : unsigned(row) / unsigned(nBlobs);
+      int blobIx = Mode::Interleave ? unsigned(row) / unsigned(nBatch) : unsigned(row) % unsigned(nBlobs);
       int padElts = (getSrcPtrMasked(batchIx) % sizeof(SrcPack)) / sizeof(SrcT);
       DstT* dstPtr = getDst(batchIx);
 
       int lane = unsigned(t) % 32;
       int packIx = blobIx * nPackPerBlob + lane;
-      bool lastPackEmpty = padElts + nElts <= (packIx + (UnrollData - 1) * 32) * nEltPerPack;
+      bool lastPackEmpty = !Mode::Overlap && padElts + nElts <= (packIx + (UnrollData - 1) * 32) * nEltPerPack;
       AccPack acc[UnrollData] = {};
       if (inPlace) {
         DstPack dstVal[UnrollData];
@@ -336,10 +482,14 @@ __device__ void reduceBatch(Coop coop, bool inPlace, int nBatch, int nElts, DstS
         NVCC_PRAGMA_UNROLL_AUTO
         for (int u = 0; u < UnrollData; u++) acc[u] = applyCast<DstT, Acc>(dstVal[u]);
       }
-      accumulateLoads<SrcT>(red, inPlace, acc, /*stride=*/32, lastPackEmpty, nSrcs,
+      accumulateLoads<SrcT, Mode>(red, inPlace, acc, /*stride=*/32, lastPackEmpty, nSrcs,
                             [&] __device__(int srcIx) -> SrcPack* {
                               return (SrcPack*)(getSrc(batchIx, srcIx) - padElts) + packIx;
                             });
+      if NCCL_IF_CONSTEXPR (PostOp) {
+        NVCC_PRAGMA_UNROLL_AUTO
+        for (int u = 0; u < UnrollData; u++) acc[u] = applyPostOp(red, acc[u]);
+      }
       DstPack dstVal[UnrollData];
       NVCC_PRAGMA_UNROLL_AUTO
       for (int u = 0; u < UnrollData; u++) dstVal[u] = applyCast<Acc, DstT>(acc[u]);
@@ -362,10 +512,11 @@ __device__ void reduceBatch(Coop coop, bool inPlace, int nBatch, int nElts, DstS
           loadPacks(dstVal, dstMem, dstAlignMin, dstPtr, nElts, padElts, packIx, tn, false);
           acc[0] = applyCast<DstT, Acc>(dstVal[0]);
         }
-        accumulateLoads<SrcT>(red, inPlace, acc, /*stride(no data unroll)=*/0, /*lastPackEmpty=*/false, nSrcs,
+        accumulateLoads<SrcT, Mode>(red, inPlace, acc, /*stride(no data unroll)=*/0, /*lastPackEmpty=*/false, nSrcs,
                               [&] __device__(int srcIx) -> SrcPack* {
                                 return (SrcPack*)(getSrc(batchIx, srcIx) - padElts) + packIx;
                               });
+        if NCCL_IF_CONSTEXPR (PostOp) acc[0] = applyPostOp(red, acc[0]);
         DstPack dstVal[1] = {applyCast<Acc, DstT>(acc[0])};
         storePacks(dstVal, dstMem, dstAlignMin, dstPtr, nElts, padElts, packIx, tn, false);
       }
@@ -378,8 +529,9 @@ __device__ void reduceBatch(Coop coop, bool inPlace, int nBatch, int nElts, DstS
       DstT* dstPtr = getDst(batchIx);
       Acc acc[1];
       if (inPlace) acc[0] = (Acc)loadMem(dstMem, dstPtr + eltIx);
-      accumulateLoads<SrcT>(red, inPlace, acc, /*stride(no data unroll)=*/0, /*lastPackEmpty=*/false, nSrcs,
+      accumulateLoads<SrcT, Mode>(red, inPlace, acc, /*stride(no data unroll)=*/0, /*lastPackEmpty=*/false, nSrcs,
                             [&] __device__(int srcIx) -> SrcT* { return getSrc(batchIx, srcIx) + eltIx; });
+      if NCCL_IF_CONSTEXPR (PostOp) acc[0] = applyPostOp(red, acc[0]);
       storeMem(dstMem, dstPtr + eltIx, (DstT)acc[0]);
     }
   }

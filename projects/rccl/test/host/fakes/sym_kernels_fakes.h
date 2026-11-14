@@ -10,6 +10,7 @@
 #define RCCL_TEST_HOST_SYM_KERNELS_FAKES_H_
 
 #include <cstddef>
+#include <cstdint>
 #include <functional>
 
 #include "nccl.h"
@@ -29,6 +30,7 @@ extern std::function<bool(struct ncclComm*, ncclFunc_t, int, ncclDataType_t, siz
 extern std::function<bool(int)> g_symkKernelIdIsLL;
 extern std::function<bool(int)> g_symkKernelIdIsTma;
 extern std::function<ncclResult_t(struct ncclComm*)> g_symkFinalize;
+extern std::function<uint32_t(struct ncclComm*, size_t)> g_symkRsHierLaunchChunkSize;
 
 // The ncclSymk* index seams (kernel masks, ncclSymkGetKernelIndex, ncclSymkKernelIdToString,
 // ncclSymkMakeDevWork) live in sym_kernels_index_fakes.h, not here. rccl-UnitTestsMicro cannot link

@@ -44,7 +44,7 @@
 #include "common/SymmetricBufferHelpers.hpp"  // RCCLTestHelpers::SymBuf (RAII deregister+free)
 #include "common/SymmetricKernelLog.hpp"
 #include "rccl_common.h"  // rcclGetCollImplInfo, rcclSymKGetInfo, rcclGetAlgoName, rcclGetProtocolName, rcclAddonAlgos_t
-#include "sym_kernels.h"  // ncclSymkMaxBlocks, ncclSymkAgHierMaxBlocks
+#include "sym_kernels.h"  // ncclSymkMaxBlocks, ncclSymkAgHierMaxBlocks, ncclSymkRsHierMaxBlocks
 
 // rccl_common.h drags in RCCL's internal NCCLCHECK (which `return`s). These tests
 // live in void functions, so use a gtest-friendly, non-returning check instead.
@@ -416,13 +416,13 @@ namespace RcclUnitTesting
             << "symk did not report " << sel.algoName << " though dispatch ran it\nLOG:\n" << log;
 
           // Symmetric block count: at least 1 because the model rejects a zero count, at most
-          // ncclSymkMaxBlocks, or ncclSymkAgHierMaxBlocks where AllGather may take its hierarchical
-          // kernel. Device independent, since the model clamps to those constants and to maxCTAs and
-          // never to the CU count. Was -1 before the model set maxChannels, which is the regression
-          // this guards.
-          const int maxSymkBlocks =
-            sel.symKernel == "AllGather_HierLsaST"    ? ncclSymkAgHierMaxBlocks :
-            sel.symKernel == "AllGather_HierLsaTmaST" ? ncclSymkAgHierTmaMaxBlocks : ncclSymkMaxBlocks;
+          // ncclSymkMaxBlocks, or the hierarchical kernels' own caps (ncclSymkAgHierMaxBlocks,
+          // ncclSymkRsHierMaxBlocks) where AllGather or ReduceScatter takes one. Device independent,
+          // since the model clamps to those constants and to maxCTAs and never to the CU count. Was -1
+          // before the model set maxChannels, which is the regression this guards.
+          const int maxSymkBlocks = sel.symKernel == "AllGather_HierLsaST" ? ncclSymkAgHierMaxBlocks :
+                                    sel.symKernel == "AllGather_HierLsaTmaST" ? ncclSymkAgHierTmaMaxBlocks :
+                                    sel.symKernel == "ReduceScatter_HierLsaLDST" ? ncclSymkRsHierMaxBlocks :
           EXPECT_GE(symk.channels, 1)
             << "symk reported SYM without a channel count\nLOG:\n" << log;
           EXPECT_LE(symk.channels, maxSymkBlocks)
