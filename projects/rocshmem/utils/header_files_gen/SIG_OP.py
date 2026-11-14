@@ -38,6 +38,18 @@ types = [
     ("unsigned int", "uint"),
     ("unsigned long", "ulong"),
     ("unsigned long long", "ulonglong"),
+    ("__half", "half"),
+    ("__hip_bfloat16", "bfloat16"),
+    ("int8_t", "int8"),
+    ("int16_t", "int16"),
+    ("int32_t", "int32"),
+    ("int64_t", "int64"),
+    ("uint8_t", "uint8"),
+    ("uint16_t", "uint16"),
+    ("uint32_t", "uint32"),
+    ("uint64_t", "uint64"),
+    ("size_t", "size"),
+    ("ptrdiff_t", "ptrdiff"),
 ]
 
 
@@ -77,6 +89,12 @@ def generate_signal_api():
 
     return "".join([signaling_api_dec(suffix) for suffix in suffixes])
 
+def fetch_api_dec(suffix):
+    return f"__device__ ATTR_NO_INLINE uint64_t rocshmem_signal_fetch{suffix}(const uint64_t *sig_addr);\n"
+
+def generate_fetch_api():
+    suffixes = ["", "_wg", "_wave"]
+    return "".join([fetch_api_dec(suffix) for suffix in suffixes])
 
 def signal_op_dec(operation):
     return (
@@ -141,6 +159,32 @@ def add_misc_apis():
 __global__ ATTR_NO_INLINE void rocshmem_putmem_signal_kernel(
     void *dest, const void *source, size_t nelems, uint64_t *sig_addr,
     uint64_t signal, int sig_op, int pe);
+
+/**
+ * @brief Kernel wrapper for signal_add operation on stream
+ *
+ * @param[in] sig_addr  Address of signal variable on remote PE
+ * @param[in] signal    Value to add to the signal variable
+ * @param[in] pe        PE of the remote process
+ *
+ * @return void
+ */
+__global__ ATTR_NO_INLINE void rocshmem_signal_add_kernel(uint64_t *sig_addr,
+                                                          uint64_t signal,
+                                                          int pe);
+
+/**
+ * @brief Kernel wrapper for signal_set operation on stream
+ *
+ * @param[in] sig_addr  Address of signal variable on remote PE
+ * @param[in] signal    Value to store in the signal variable
+ * @param[in] pe        PE of the remote process
+ *
+ * @return void
+ */
+__global__ ATTR_NO_INLINE void rocshmem_signal_set_kernel(uint64_t *sig_addr,
+                                                          uint64_t signal,
+                                                          int pe);
 
 /**
  * @brief Kernel wrapper for signal_wait_until operation on stream

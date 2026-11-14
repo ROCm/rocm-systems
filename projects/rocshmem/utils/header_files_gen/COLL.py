@@ -38,16 +38,63 @@ types = [
     ("unsigned int", "uint"),
     ("unsigned long", "ulong"),
     ("unsigned long long", "ulonglong"),
+    ("__half", "half"),
+    ("__hip_bfloat16", "bfloat16"),
+    ("int8_t", "int8"),
+    ("int16_t", "int16"),
+    ("int32_t", "int32"),
+    ("int64_t", "int64"),
+    ("uint8_t", "uint8"),
+    ("uint16_t", "uint16"),
+    ("uint32_t", "uint32"),
+    ("uint64_t", "uint64"),
+    ("size_t", "size"),
+    ("ptrdiff_t", "ptrdiff"),
 ]
 
-def alltoall_ctx_wg_api(T, TNAME):
-    return (
-        f"__device__ ATTR_NO_INLINE void rocshmem_ctx_{TNAME}_alltoall_wg(\n"
-        f"    rocshmem_ctx_t ctx, rocshmem_team_t team, {T} *dest,\n"
-        f"    const {T} *source, int nelems);\n\n"
-    )
+_int_types = [
+    0, # ("float", "float"),
+    0, # ("double", "double"),
+    1, # ("char", "char"),
+    1, # ("signed char", "schar"),
+    1, # ("short", "short"),
+    1, # ("int", "int"),
+    1, # ("long", "long"),
+    1, # ("long long", "longlong"),
+    1, # ("unsigned char", "uchar"),
+    1, # ("unsigned short", "ushort"),
+    1, # ("unsigned int", "uint"),
+    1, # ("unsigned long", "ulong"),
+    1, # ("unsigned long long", "ulonglong"),
+    0, # ("__half", "half"),
+    0, # ("__hip_bfloat16", "bfloat16"),
+    1, # ("int8_t", "int8"),
+    1, # ("int16_t", "int16"),
+    1, # ("int32_t", "int32"),
+    1, # ("int64_t", "int64"),
+    1, # ("uint8_t", "uint8"),
+    1, # ("uint16_t", "uint16"),
+    1, # ("uint32_t", "uint32"),
+    1, # ("uint64_t", "uint64"),
+    1, # ("size_t", "size"),
+    1, # ("ptrdiff_t", "ptrdiff"),
+]
 
-def alltoall_api(T, TNAME):
+# bfloat16 reductions are disabled on HIP 7.16/7.17 due to a compiler bug
+# (cannot select v2bf16 scalar_to_vector). Keep this guard in sync with the
+# one around the __hip_bfloat16 reduction instantiations in src/.
+_BF16_REDUCE_GUARD = (
+    "#if !(HIP_VERSION_MAJOR == 7 && "
+    "(HIP_VERSION_MINOR == 16 || HIP_VERSION_MINOR == 17))\n"
+)
+
+def guard_bf16_reduce(T, code):
+    if T == "__hip_bfloat16":
+        return _BF16_REDUCE_GUARD + code + "#endif\n"
+    return code
+
+
+def alltoall_ctx_wg_api(T, TNAME):
     return (
         f"__device__ ATTR_NO_INLINE void rocshmem_ctx_{TNAME}_alltoall_wg(\n"
         f"    rocshmem_ctx_t ctx, rocshmem_team_t team, {T} *dest,\n"
@@ -143,6 +190,26 @@ def generate_alltoall_wave_api():
  */\n"""
     for type_, tname_ in types:
         expanded_code += alltoall_wave_api(type_, tname_)
+    expanded_code += """/**
+ * @name ROCSHMEM_ALLTOALLMEM_WAVE
+ * @brief Exchanges a fixed amount of contiguous data blocks between all pairs
+ * of PEs participating in the collective routine.
+ *
+ * This function must be called as a wave collective.
+ *
+ * @param[in] ctx          The ROCSHMEM context associated with this operation.
+ * @param[in] team         The team participating in the collective.
+ * @param[in] dest         Destination address. Must be an address on the
+ *                         symmetric heap.
+ * @param[in] source       Source address. Must be an address on the symmetric
+ *                         heap.
+ * @param[in] nelems       Number of data blocks transferred per pair of PEs.
+ *
+ * @return int; zero on success, non-zero otherwise
+ */
+__device__ int rocshmem_ctx_alltoallmem_wave(rocshmem_ctx_t ctx,
+    rocshmem_team_t team, void *dest, const void *source, int nelems);
+"""
 
     for type_, tname_ in types:
         expanded_code += alltoall_wave_non_ctx_api(type_, tname_)
@@ -440,24 +507,14 @@ def generate_reduction_wave_api():
  * @return int (Zero on successful local completion. Nonzero otherwise.)
  */\n"""
 
-    int_types = [
-        ("short", "short"),
-        ("int", "int"),
-        ("long", "long"),
-        ("long long", "longlong")
-    ]
-
-    float_types = [
-        ("float", "float"),
-        ("double", "double")
-    ]
-
-    for type_, tname_ in int_types:
+    # int types
+    for type_, tname_ in [_type for _type, cond in zip(types, _int_types) if cond]:
         expanded_code += arith_reduction_wave_api(type_, tname_)
         expanded_code += bitwise_reduction_wave_api(type_, tname_)
 
-    for type_, tname_ in float_types:
-        expanded_code += arith_reduction_wave_api(type_, tname_)
+    # float types
+    for type_, tname_ in [_type for _type, cond in zip(types, _int_types) if not cond]:
+        expanded_code += guard_bf16_reduce(type_, arith_reduction_wave_api(type_, tname_))
 
     return expanded_code
 
@@ -506,25 +563,14 @@ def generate_reducescatter_wg_api():
  * @return int (Zero on successful local completion. Nonzero otherwise.)
  */\n"""
 
-
-    int_types = [
-        ("short", "short"),
-        ("int", "int"),
-        ("long", "long"),
-        ("long long", "longlong")
-    ]
-
-    float_types = [
-        ("float", "float"),
-        ("double", "double")
-    ]
-
-    for type_, tname_ in int_types:
+    # int types
+    for type_, tname_ in [_type for _type, cond in zip(types, _int_types) if cond]:
         expanded_code += arith_reducescatter_api(type_, tname_)
         expanded_code += bitwise_reducescatter_api(type_, tname_)
 
-    for type_, tname_ in float_types:
-        expanded_code += arith_reducescatter_api(type_, tname_)
+    # float types
+    for type_, tname_ in [_type for _type, cond in zip(types, _int_types) if not cond]:
+        expanded_code += guard_bf16_reduce(type_, arith_reducescatter_api(type_, tname_))
 
     return expanded_code
 
@@ -553,25 +599,14 @@ def generate_reducescatter_wave_api():
  * Only the wave (wavefront) participates. Returns ROCSHMEM_SUCCESS on success.
  */\n"""
 
-
-    int_types = [
-        ("short", "short"),
-        ("int", "int"),
-        ("long", "long"),
-        ("long long", "longlong")
-    ]
-
-    float_types = [
-        ("float", "float"),
-        ("double", "double")
-    ]
-
-    for type_, tname_ in int_types:
+    # int types
+    for type_, tname_ in [_type for _type, cond in zip(types, _int_types) if cond]:
         expanded_code += arith_reducescatter_wave_api(type_, tname_)
         expanded_code += bitwise_reducescatter_wave_api(type_, tname_)
 
-    for type_, tname_ in float_types:
-        expanded_code += arith_reducescatter_wave_api(type_, tname_)
+    # float types
+    for type_, tname_ in [_type for _type, cond in zip(types, _int_types) if not cond]:
+        expanded_code += guard_bf16_reduce(type_, arith_reducescatter_wave_api(type_, tname_))
 
     return expanded_code
 
@@ -599,25 +634,14 @@ def generate_reducescatter_host_api():
  * of source[i*nreduce..(i+1)*nreduce-1] across all PEs.
  */\n"""
 
-
-    int_types = [
-        ("short", "short"),
-        ("int", "int"),
-        ("long", "long"),
-        ("long long", "longlong")
-    ]
-
-    float_types = [
-        ("float", "float"),
-        ("double", "double")
-    ]
-
-    for type_, tname_ in int_types:
+    # int types
+    for type_, tname_ in [_type for _type, cond in zip(types, _int_types) if cond]:
         expanded_code += arith_reducescatter_host_api(type_, tname_)
         expanded_code += bitwise_reducescatter_host_api(type_, tname_)
 
-    for type_, tname_ in float_types:
-        expanded_code += arith_reducescatter_host_api(type_, tname_)
+    # float types
+    for type_, tname_ in [_type for _type, cond in zip(types, _int_types) if not cond]:
+        expanded_code += guard_bf16_reduce(type_, arith_reducescatter_host_api(type_, tname_))
 
     return expanded_code
 
@@ -658,24 +682,14 @@ def generate_reduction_api():
  * @return int (Zero on successful local completion. Nonzero otherwise.)
  */\n"""
 
-    int_types = [
-        ("short", "short"),
-        ("int", "int"),
-        ("long", "long"),
-        ("long long", "longlong")
-    ]
-
-    float_types = [
-        ("float", "float"),
-        ("double", "double")
-    ]
-
-    for type_, tname_ in int_types:
+    # int types
+    for type_, tname_ in [_type for _type, cond in zip(types, _int_types) if cond]:
         expanded_code += arith_reduction_api(type_, tname_)
         expanded_code += bitwise_reduction_api(type_, tname_)
 
-    for type_, tname_ in float_types:
-        expanded_code += arith_reduction_api(type_, tname_)
+    # float types
+    for type_, tname_ in [_type for _type, cond in zip(types, _int_types) if not cond]:
+        expanded_code += guard_bf16_reduce(type_, arith_reduction_api(type_, tname_))
 
     return expanded_code
 
@@ -698,24 +712,14 @@ def generate_reduce_on_stream_api():
  * @return int (Zero on successful local completion. Nonzero otherwise.)
  */\n"""
 
-    int_types = [
-        ("short", "short"),
-        ("int", "int"),
-        ("long", "long"),
-        ("long long", "longlong")
-    ]
-
-    float_types = [
-        ("float", "float"),
-        ("double", "double")
-    ]
-
-    for type_, tname_ in int_types:
+    # int types
+    for type_, tname_ in [_type for _type, cond in zip(types, _int_types) if cond]:
         expanded_code += arith_reduce_on_stream_api(type_, tname_)
         expanded_code += bitwise_reduce_on_stream_api(type_, tname_)
 
-    for type_, tname_ in float_types:
-        expanded_code += arith_reduce_on_stream_api(type_, tname_)
+    # float types
+    for type_, tname_ in [_type for _type, cond in zip(types, _int_types) if not cond]:
+        expanded_code += guard_bf16_reduce(type_, arith_reduce_on_stream_api(type_, tname_))
 
     return expanded_code
 
@@ -1088,6 +1092,8 @@ def generate_COLL_header(output_dir, copyright):
     expanded_code += """
 #ifndef LIBRARY_INCLUDE_ROCSHMEM_COLL_HPP
 #define LIBRARY_INCLUDE_ROCSHMEM_COLL_HPP
+
+#include <hip/hip_version.h>
 
 namespace rocshmem {
 """
