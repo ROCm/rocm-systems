@@ -181,3 +181,7 @@ RUN chmod +x /usr/local/bin/show-ubx-info
 
 WORKDIR /workspace
 CMD ["/bin/bash"]
+
+# Build/development image that runs as root by design.
+# trivy:ignore:DS-0002
+USER root
