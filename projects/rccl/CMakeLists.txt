@@ -371,6 +371,19 @@ if(NOT _enable_full_coverage_request STREQUAL "OFF")
       "${CMAKE_CXX_COMPILER}"
       RCCL_DEVICE_PROFILE_RT
       _device_coverage_capability_error)
+    if(NOT _device_coverage_capability_error)
+      rccl_compiler_supports_rdc_host_coverage(
+        "${CMAKE_CXX_COMPILER}"
+        "${CMAKE_BINARY_DIR}/CMakeFiles/rccl-rdc-coverage-probe"
+        _rdc_host_coverage_ok
+        _rdc_host_coverage_error)
+      if(NOT _rdc_host_coverage_ok)
+        string(CONCAT _device_coverage_capability_error
+          "it fails to compile -fgpu-rdc host code with -fprofile-instr-generate when the "
+          "file has a dynamic initializer (llvm/llvm-project#233655, fixed in ROCm 10.3). "
+          "Compiler output:\n${_rdc_host_coverage_error}")
+      endif()
+    endif()
     rccl_find_host_rocm_profile_runtime(
       "${CMAKE_CXX_COMPILER}"
       RCCL_HOST_ROCM_PROFILE_RT)

@@ -44,6 +44,37 @@ function(rccl_compiler_supports_device_coverage compiler output_supported output
 endfunction()
 
 
+# Report whether <compiler> can compile the host half of an instrumented
+# -fgpu-rdc TU that has a dynamic initializer, as the device linker's mixed
+# TUs are under ENABLE_FULL_COVERAGE. Some clang 24 builds before ROCm 10.3
+# emit two llvm.global_ctors lists there (llvm/llvm-project#233655).
+# <work_dir> receives the probe source and object.
+function(rccl_compiler_supports_rdc_host_coverage compiler work_dir output_supported output_reason)
+  file(MAKE_DIRECTORY "${work_dir}")
+  file(WRITE "${work_dir}/rdc_host_coverage.hip"
+    "int rccl_probe_init();\nint rccl_probe_value = rccl_probe_init();\n")
+  execute_process(
+    COMMAND "${compiler}" -x hip --offload-new-driver -fgpu-rdc --offload-host-only
+            -nogpuinc -nogpulib -fprofile-instr-generate -fcoverage-mapping
+            -c "${work_dir}/rdc_host_coverage.hip" -o "${work_dir}/rdc_host_coverage.o"
+    OUTPUT_QUIET
+    ERROR_VARIABLE probe_error
+    ERROR_STRIP_TRAILING_WHITESPACE
+    RESULT_VARIABLE probe_result)
+
+  if(NOT probe_result EQUAL 0)
+    # Callers end the reason with their own period.
+    string(REGEX REPLACE "\\.$" "" probe_error "${probe_error}")
+    set(${output_supported} FALSE PARENT_SCOPE)
+    set(${output_reason} "${probe_error}" PARENT_SCOPE)
+    return()
+  endif()
+
+  set(${output_supported} TRUE PARENT_SCOPE)
+  set(${output_reason} "" PARENT_SCOPE)
+endfunction()
+
+
 # Locate the amdgcn LLVM profile runtime archive for <compiler>. Sets
 # <output_runtime> to the archive path (empty when unavailable) and, when it is
 # empty, <output_reason> to a human-readable diagnostic.

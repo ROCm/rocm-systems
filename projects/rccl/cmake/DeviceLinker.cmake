@@ -29,22 +29,36 @@ else()
   find_program(DL_CLANG NAMES amdclang++ clang++
     HINTS "${_dl_compiler_dir}" "${ROCM_PATH}/bin" REQUIRED)
 endif()
-# Pick clang-offload-bundler from the SAME toolchain as DL_CLANG: a bundler from a
+# Pick the offload tools from the SAME toolchain as DL_CLANG: the packaged image
+# has to match what that toolchain's clang-linker-wrapper reads, and a tool from a
 # different LLVM build can load a foreign libclang-cpp.so and crash at startup.
 get_filename_component(_dl_clang_dir "${DL_CLANG}" REALPATH)
 get_filename_component(_dl_clang_dir "${_dl_clang_dir}" DIRECTORY)
-unset(DL_BUNDLER CACHE)
-unset(DL_BUNDLER)
-find_program(DL_BUNDLER NAMES clang-offload-bundler
-  HINTS "${_dl_clang_dir}" "${_dl_compiler_dir}/../lib/llvm/bin"
-        "${ROCM_PATH}/llvm/bin")
-if(NOT DL_BUNDLER)
-  message(FATAL_ERROR
-    "Device Linker: clang-offload-bundler was not found next to the selected "
-    "compiler '${DL_CLANG}' (searched '${_dl_clang_dir}', "
-    "'${_dl_compiler_dir}/../lib/llvm/bin', '${ROCM_PATH}/llvm/bin').")
+set(_dl_tool_hints "${_dl_clang_dir}" "${_dl_compiler_dir}/../lib/llvm/bin" "${ROCM_PATH}/llvm/bin")
+foreach(_dl_tool PACKAGER OBJDUMP)
+  unset(DL_${_dl_tool} CACHE)
+  unset(DL_${_dl_tool})
+endforeach()
+# clang-offload-packager was renamed llvm-offload-binary; ROCm 7.0 has only the old name.
+find_program(DL_PACKAGER NAMES llvm-offload-binary clang-offload-packager
+  HINTS ${_dl_tool_hints} NO_DEFAULT_PATH)
+find_program(DL_OBJDUMP NAMES llvm-objdump HINTS ${_dl_tool_hints} NO_DEFAULT_PATH)
+foreach(_dl_tool PACKAGER OBJDUMP)
+  if(NOT DL_${_dl_tool})
+    message(FATAL_ERROR
+      "Device Linker: no ${_dl_tool} tool was found next to the selected compiler "
+      "'${DL_CLANG}' (searched ${_dl_tool_hints}).")
+  endif()
+endforeach()
+message(STATUS "Device Linker: offload packager = ${DL_PACKAGER}")
+# Each target's relocatable device.o is ~300 MB uncompressed, so a full TheRock target list
+# packs several GB into device_image.o, past what the link can read back. ROCm 7.0's packager
+# cannot compress.
+execute_process(COMMAND "${DL_PACKAGER}" --help OUTPUT_VARIABLE _dl_packager_help ERROR_QUIET)
+set(DL_PACKAGER_FLAGS "")
+if(_dl_packager_help MATCHES "--compress")
+  set(DL_PACKAGER_FLAGS --compress)
 endif()
-message(STATUS "Device Linker: clang-offload-bundler = ${DL_BUNDLER}")
 
 # Extract --hip-path and --hip-device-lib-path from CMAKE_CXX_FLAGS.
 # TheRock's amd-hip toolchain injects these so amdclang++ can locate HIP
@@ -80,7 +94,7 @@ set(SPECIALIZED_DIR  "${GEN_DIR}/specialized")
 # own -x hip / --offload-arch, and --offload-host-only would suppress the very
 # device code these commands exist to produce), -parallel-jobs (would
 # oversubscribe an already parallel build), --offload-compress (packaging, see
-# ENABLE_COMPRESS below) and diagnostics (generated sources are compiled
+# RULE_LAUNCH_LINK in src/CMakeLists.txt) and diagnostics (generated sources are compiled
 # quietly by design, and some need -w).
 #
 # Also dropped are options that are only meaningful to something other than the
@@ -124,6 +138,34 @@ dl_parse_gpu_targets(TARGETS ${GPU_TARGETS}
   FLAGS_VAR DL_OFFLOAD_ARCH_FLAGS
   ID_PREFIX DL_TARGET_ID_)
 message(STATUS "Device Linker: GPU targets = ${GPU_TARGETS}")
+
+# The device objects are handed to clang-linker-wrapper tagged with the triple
+# this compiler gives HIP device code, so that the wrapper links them into the
+# same image as other -fgpu-rdc device code on the link line (librocshmem.a).
+# Newer compilers use a subarch triple (amdgpu9.50-amd-amdhsa), ROCm 7.0 uses
+# amdgcn-amd-amdhsa; a mismatch makes the wrapper build two images for one GPU.
+# One compile per target, since a compile can't mix gfx950 and gfx950:xnack+.
+set(_dl_probe_dir "${CMAKE_BINARY_DIR}/CMakeFiles/rccl-device-triple-probe")
+file(MAKE_DIRECTORY "${_dl_probe_dir}")
+file(WRITE "${_dl_probe_dir}/probe.hip" "__attribute__((device)) int rccl_probe_var;\n")
+foreach(_dl_gpu IN LISTS DL_GPU_TARGETS)
+  execute_process(
+    COMMAND "${CMAKE_CXX_COMPILER}" -x hip --offload-new-driver -fgpu-rdc
+            --offload-arch=${DL_TARGET_ID_${_dl_gpu}} -nogpuinc -nogpulib
+            -c "${_dl_probe_dir}/probe.hip" -o "${_dl_probe_dir}/probe-${_dl_gpu}.o"
+    RESULT_VARIABLE _dl_probe_result ERROR_VARIABLE _dl_probe_error OUTPUT_QUIET)
+  if(_dl_probe_result EQUAL 0)
+    execute_process(
+      COMMAND "${DL_OBJDUMP}" --offloading "${_dl_probe_dir}/probe-${_dl_gpu}.o"
+      RESULT_VARIABLE _dl_probe_result OUTPUT_VARIABLE _dl_probe_out ERROR_VARIABLE _dl_probe_error)
+  endif()
+  if(NOT _dl_probe_result EQUAL 0 OR NOT _dl_probe_out MATCHES "\ntriple +([^ \n]+)")
+    message(FATAL_ERROR
+      "Device Linker: could not read the device triple '${CMAKE_CXX_COMPILER}' uses "
+      "for ${DL_TARGET_ID_${_dl_gpu}}.\n${_dl_probe_error}${_dl_probe_out}")
+  endif()
+  set(DL_DEVICE_TRIPLE_${_dl_gpu} "${CMAKE_MATCH_1}")
+endforeach()
 
 # ---------------------------------------------------------------------------
 # Optimization flags (passed to both compile and link modes of the driver)
@@ -183,6 +225,7 @@ endif()
 # __llvm_prf_{cnts,data} sections so the boundary symbols are always defined; when a
 # TU does emit counters the empty sections merge in as a zero-byte no-op. The anchor
 # is generic amdgcn bitcode (no mcpu) so every per-arch device link LTO-compiles it.
+# It goes on each per-arch link line with the mixed-TU device objects.
 set(DL_DEVICE_PROFILE_ANCHOR "")
 if(DL_DEVICE_PROFILE_RT)
   file(MAKE_DIRECTORY "${DEVICE_BUILD_DIR}")
@@ -209,28 +252,6 @@ if(DL_DEVICE_PROFILE_RT)
   set(DL_DEVICE_PROFILE_ANCHOR "${_dl_anchor_bc}")
   message(STATUS "Device Linker: profile section anchor = ${DL_DEVICE_PROFILE_ANCHOR}")
 endif()
-
-# Standalone fat-object compiles (onerank.o, collectives.o, dda_all_reduce_ipc.o,
-# sym_*.o) are built as full `-x hip` objects, so each -c step performs its own
-# embedded device link (clang-linker-wrapper -> ld.lld). That link must resolve
-# __llvm_profile_instrument_gpu from the device profile RT. The rccl-device-compile
-# --link path passes the archive to ld.lld directly; here we forward it to the
-# clang driver's offload linker via -Xoffload-linker.
-#
-# The profile RT is a separate bitcode LTO module, so clang's auto-injected
-# -amdgpu-internalize-symbols dead-strips the hidden __llvm_profile_instrument_gpu; disable it.
-# The anchor supplies the __llvm_prf_{cnts,data} boundary sections (see above).
-set(DL_DEVICE_PROFILE_RT_LINK_FLAGS "")
-if(DL_DEVICE_PROFILE_RT)
-  set(DL_DEVICE_PROFILE_RT_LINK_FLAGS
-    -Xoffload-linker -plugin-opt=-amdgpu-internalize-symbols=false
-    -Xoffload-linker "${DL_DEVICE_PROFILE_ANCHOR}"
-    -Xoffload-linker "${DL_DEVICE_PROFILE_RT}")
-endif()
-
-# Instrumentation plus the profile-runtime link flags for the standalone `-x hip`
-# fat-object compiles below. Both expand to nothing unless ENABLE_FULL_COVERAGE.
-set(DL_DEVICE_COVERAGE_FLAGS ${DL_COVERAGE_FLAGS} ${DL_DEVICE_PROFILE_RT_LINK_FLAGS})
 
 # ---------------------------------------------------------------------------
 # Main-module coverage drain: deterministic compilation-unit ID (-cuid).
@@ -317,6 +338,25 @@ endif()
 target_include_directories(rccl_device_defs SYSTEM INTERFACE
   "${PROJECT_SOURCE_DIR}/external/fmt/include")
 
+# The same, as flags for the compiles below that bypass the RCCLDEV language.
+get_target_property(_iface_defs rccl_device_defs INTERFACE_COMPILE_DEFINITIONS)
+list(TRANSFORM _iface_defs PREPEND "-D")
+set(_link_def_flags -DRCCL_DEVICE_LINKER ${_iface_defs})
+list(REMOVE_DUPLICATES _link_def_flags)
+
+get_target_property(_dev_includes rccl_device_defs INTERFACE_INCLUDE_DIRECTORIES)
+list(TRANSFORM _dev_includes PREPEND "-I" OUTPUT_VARIABLE _link_inc_flags)
+get_target_property(_dev_sys_includes rccl_device_defs INTERFACE_SYSTEM_INCLUDE_DIRECTORIES)
+foreach(_inc ${_dev_sys_includes})
+  if(NOT _inc IN_LIST CMAKE_CXX_IMPLICIT_INCLUDE_DIRECTORIES)
+    list(APPEND _link_inc_flags "-isystem${_inc}")
+  endif()
+endforeach()
+
+# The tail of every host+device TU's compile: the fat objects and common.cu.cpp's host half.
+set(DL_TU_FLAGS ${_link_def_flags} ${_link_inc_flags} ${DL_OPT_FLAGS}
+  ${DL_INHERITED_FLAGS} ${DL_COVERAGE_FLAGS} -std=c++17 -fPIC)
+
 # ---------------------------------------------------------------------------
 # Read specialized file list
 # ---------------------------------------------------------------------------
@@ -357,21 +397,150 @@ function(dl_evaluate_guard GUARD GPU_TARGET RESULT_VAR)
   set(${RESULT_VAR} FALSE PARENT_SCOPE)
 endfunction()
 
-# ---------------------------------------------------------------------------
-# Derive host triple for the offload bundler
-# ---------------------------------------------------------------------------
-string(TOLOWER "${CMAKE_SYSTEM_NAME}" _dl_sys_name)
-if(NOT _dl_sys_name)
-  set(_dl_sys_name "linux")
+# ===========================================================================
+# Fat objects: mixed host+device TUs outside the specialized-kernel pipeline. Each device half
+# joins its target's device.o; the host half, with the same -cuid, carries the offload entries.
+# ===========================================================================
+set(DEVICE_LINKER_OBJECTS "")
+
+# dl_add_fat_object(<name> <source> [SUPPRESS_WARNINGS] [DEPFILE_TRACKING]
+#                   [GPU_TARGETS ...] [DEFINES ...] [EXTRA_FLAGS ...]
+#                   [EXTRA_DEPENDS ...])
+# EXTRA_FLAGS and EXTRA_DEPENDS apply to the device half only.
+# GPU_TARGETS (bare names, e.g. gfx942) limits the object to those of the
+# build's targets; if none of them are being built, the object is skipped.
+function(dl_add_fat_object NAME SRC)
+  cmake_parse_arguments(FO "SUPPRESS_WARNINGS;DEPFILE_TRACKING" ""
+    "GPU_TARGETS;DEFINES;EXTRA_FLAGS;EXTRA_DEPENDS" ${ARGN})
+  if(FO_UNPARSED_ARGUMENTS)
+    message(FATAL_ERROR "dl_add_fat_object(${NAME}): unknown arguments: ${FO_UNPARSED_ARGUMENTS}")
+  endif()
+  set(_targets ${DL_GPU_TARGETS})
+  set(_arch_flags ${DL_OFFLOAD_ARCH_FLAGS})
+  if(FO_GPU_TARGETS)
+    set(_targets "")
+    set(_arch_flags "")
+    foreach(_gpu ${DL_GPU_TARGETS})
+      if(_gpu IN_LIST FO_GPU_TARGETS)
+        list(APPEND _targets ${_gpu})
+        list(APPEND _arch_flags "--offload-arch=${DL_TARGET_ID_${_gpu}}")
+      endif()
+    endforeach()
+    if(NOT _targets)
+      message(STATUS "Device Linker: skipping ${NAME}, none of ${FO_GPU_TARGETS} in GPU_TARGETS")
+      return()
+    endif()
+  endif()
+  list(TRANSFORM FO_DEFINES PREPEND "-D")
+  set(_flags ${DL_HIP_COMPILER_FLAGS} --offload-new-driver -fgpu-rdc -cuid=${NAME}
+    ${FO_DEFINES} ${DL_TU_FLAGS})
+  if(FO_SUPPRESS_WARNINGS)
+    list(APPEND _flags -w)
+  endif()
+  foreach(_half host ${_targets})
+    if(_half STREQUAL "host")
+      set(_obj "${DEVICE_BUILD_DIR}/${NAME}.o")
+      set(_half_flags --offload-host-only ${_arch_flags})
+      set(_out "${_obj}")
+      set(_codegen "")
+      set(_deps "")
+    else()
+      set(_obj "${DEVICE_BUILD_DIR}/${_half}/${NAME}.o")
+      file(MAKE_DIRECTORY "${DEVICE_BUILD_DIR}/${_half}")
+      # Self-contained on the device, so internalize; codegen is a separate step, see ir_codegen_cmd.
+      set(_half_flags --offload-device-only --offload-arch=${DL_TARGET_ID_${_half}}
+        -fno-offload-lto -mllvm -amdgpu-internalize-symbols ${FO_EXTRA_FLAGS} -emit-llvm)
+      set(_out "${_obj}.bc")
+      set(_codegen COMMAND ${CMAKE_RCCLDEV_COMPILER} --ir-codegen --arch=${_half}
+        --target-id=${DL_TARGET_ID_${_half}} --clang=${DL_CLANG}
+        ${_flags} -o ${_obj} ${_out})
+      set(_deps ${FO_EXTRA_DEPENDS})
+      set(DL_MIXED_DEVICE_OBJS_${_half} ${DL_MIXED_DEVICE_OBJS_${_half}} "${_obj}" PARENT_SCOPE)
+    endif()
+    # Only <source> is a DEPENDS, so without a depfile a header edit leaves the
+    # object stale. CMake < 3.20 has no DEPFILE for custom commands.
+    set(_depfile "")
+    if(FO_DEPFILE_TRACKING AND CMAKE_VERSION VERSION_GREATER_EQUAL "3.20")
+      list(APPEND _half_flags -MD -MF "${_obj}.d" -MT "${_obj}")
+      set(_depfile DEPFILE "${_obj}.d")
+    endif()
+    add_custom_command(
+      OUTPUT  ${_obj}
+      COMMAND ${DL_CLANG} -x hip ${_half_flags} ${_flags} -c -o ${_out} ${SRC}
+      ${_codegen}
+      DEPENDS ${SRC} ${_deps}
+      ${_depfile}
+      COMMENT "DL compile (${_half}): ${NAME}"
+      VERBATIM
+    )
+  endforeach()
+  set(DEVICE_LINKER_OBJECTS ${DEVICE_LINKER_OBJECTS} "${DEVICE_BUILD_DIR}/${NAME}.o" PARENT_SCOPE)
+endfunction()
+
+dl_add_fat_object(onerank ${HIPIFY_DIR}/src/device/onerank.cu.cpp)
+dl_add_fat_object(collectives ${HIPIFY_DIR}/src/collectives.cc DEPFILE_TRACKING)
+
+# One TU per (type, redop); src/device/ce_reduce/generate.py says why.
+file(GLOB _ce_reduce_srcs CONFIGURE_DEPENDS "${HIPIFY_DIR}/gensrc/ce_reduce/*.cpp")
+foreach(_src IN LISTS _ce_reduce_srcs)
+  get_filename_component(_name "${_src}" NAME_WE)
+  dl_add_fat_object(${_name} ${_src} SUPPRESS_WARNINGS)
+endforeach()
+
+dl_add_fat_object(diagnostics_p2p ${HIPIFY_DIR}/src/diagnostics/device/p2p.cu.cpp)
+
+set(_dda_dir ${HIPIFY_DIR}/src/algorithms/dda)
+foreach(_coll all_reduce reduce_scatter all_gather alltoall)
+  dl_add_fat_object(dda_${_coll}_ipc ${_dda_dir}/${_coll}/dda_${_coll}_ipc.cu.cpp)
+endforeach()
+foreach(_coll all_reduce reduce_scatter all_gather alltoall)
+  foreach(_proto "" _ll _ll128)
+    dl_add_fat_object(dda_${_coll}_fabric${_proto}
+      ${_dda_dir}/${_coll}/dda_${_coll}_fabric${_proto}.cu.cpp SUPPRESS_WARNINGS)
+  endforeach()
+endforeach()
+foreach(_proto _ll _ll128)
+  dl_add_fat_object(dda_broadcast_fabric${_proto}
+    ${_dda_dir}/broadcast/dda_broadcast_fabric${_proto}.cu.cpp SUPPRESS_WARNINGS)
+endforeach()
+
+# ===========================================================================
+# Symmetric kernels: per-instantiation device TUs from gensrc/symmetric/.
+# Each instantiation file defines a handful of __global__ ncclSymkDevKernel_*
+# entries.
+# ===========================================================================
+if(GENERATE_SYM_KERNELS)
+  file(GLOB _sym_srcs CONFIGURE_DEPENDS "${HIPIFY_DIR}/gensrc/symmetric/*.cpp")
+  foreach(_sym_src IN LISTS _sym_srcs)
+    get_filename_component(_sym_name "${_sym_src}" NAME_WE)
+    # GIN symmetric kernels get constmem-free QP code straight from the copied
+    # (provider-override) headers, so no rocSHMEM QP bitcode is injected here.
+    dl_add_fat_object(sym_${_sym_name} ${_sym_src})
+  endforeach()
 endif()
-set(_dl_host_triple "${CMAKE_SYSTEM_PROCESSOR}-unknown-${_dl_sys_name}-gnu")
+
+# The GIN defines go here because these files are filtered out of the rccl
+# target, so per-source properties never apply. Leaving only SDMA on keeps
+# ncclGinCallImpl on its single backend branch. GDA must stay off, as these
+# objects get no QP bitcode. gfx1250 GinScatter and gfx950 two-shot both use
+# Anvil SDMA gin.put().
+if(ENABLE_ROCSHMEM_GIN)
+  foreach(_coll alltoall all_reduce)
+    dl_add_fat_object(gin_${_coll}_sdma
+      ${HIPIFY_DIR}/src/algorithms/gin/sdma/gin_${_coll}_sdma.cu.cpp
+      DEFINES NCCL_GIN_ANVIL_SDMA_ENABLE=1 NCCL_GIN_PROXY_ENABLE=0
+              NCCL_GIN_ROCSHMEM_GDA_ENABLE=0)
+  endforeach()
+  dl_add_fat_object(gin_anvil_conn_check_device
+    ${HIPIFY_DIR}/src/gin/gin_anvil_conn_check_device.cc
+    DEFINES ENABLE_ROCSHMEM_GIN)
+endif()
 
 # ===========================================================================
 # Per-GPU-target: OBJECT library (compile) + link custom command
 # ===========================================================================
-set(ALL_DEVICE_ELFS "")
-set(DL_BUNDLER_TARGETS "host-${_dl_host_triple}-")
-set(DL_BUNDLER_INPUTS "--input=/dev/null")
+set(ALL_DEVICE_OBJS "")
+set(DL_PACKAGER_IMAGES "")
 set(ALL_IR_FILES "")
 
 foreach(DL_GPU_TARGET ${DL_GPU_TARGETS})
@@ -449,76 +618,23 @@ foreach(DL_GPU_TARGET ${DL_GPU_TARGETS})
   if(ENABLE_ROCSHMEM AND TARGET rocshmem_static)
     add_dependencies(${_dev_target} rocshmem_static)
   endif()
-  # Pass rocshmem device bitcode to per-kernel compiles so the full-rocshmem
-  # collectives (AlltoAllGda etc., gated on ENABLE_ROCSHMEM) resolve rocshmem
-  # device symbols (rocshmem_n_pes, alltoall_wg) at the per-arch device.elf link.
-  # NOT for ENABLE_ROCSHMEM_GIN: its device code is purely header, no bc.
-  if(ENABLE_ROCSHMEM AND ROCSHMEM_INSTALL_DIR)
-    set(_rocshmem_bc "${ROCSHMEM_INSTALL_DIR}/lib/librocshmem_device_${DL_GPU_TARGET}.bc")
-    target_compile_options(${_dev_target} PRIVATE --rocshmem-bitcode=${_rocshmem_bc})
-  endif()
-
   if(ENABLE_ROCSHMEM_GIN AND TARGET copy_rocshmem_headers)
     add_dependencies(${_dev_target} copy_rocshmem_headers)
   endif()
-
   # =========================================================================
-  # Link step: driver --link mode produces device.elf
+  # Link step: driver --link mode produces the relocatable device.o, which
+  # clang-linker-wrapper links into the device image when librccl.so is linked.
   # =========================================================================
-  set(ARCH_DEVICE_ELF "${DL_ARCH_DIR}/device.elf")
+  set(ARCH_DEVICE_OBJ "${DL_ARCH_DIR}/device.o")
 
-  # Gather definitions and includes for the dispatcher compilation inside --link.
-  # The driver forwards these to amdclang++ when compiling common.cu.cpp.
-  get_target_property(_dev_defs ${_dev_target} COMPILE_DEFINITIONS)
-  set(_link_def_flags "")
-  if(_dev_defs)
-    foreach(_d ${_dev_defs})
-      list(APPEND _link_def_flags "-D${_d}")
-    endforeach()
+  set(_mixed_objs ${DL_MIXED_DEVICE_OBJS_${DL_GPU_TARGET}})
+  if(DL_DEVICE_PROFILE_ANCHOR)
+    list(APPEND _mixed_objs "${DL_DEVICE_PROFILE_ANCHOR}")
   endif()
-  # Also add interface definitions from rccl_device_defs
-  get_target_property(_iface_defs rccl_device_defs INTERFACE_COMPILE_DEFINITIONS)
-  if(_iface_defs)
-    foreach(_d ${_iface_defs})
-      list(APPEND _link_def_flags "-D${_d}")
-    endforeach()
-  endif()
-  list(REMOVE_DUPLICATES _link_def_flags)
-
-  get_target_property(_dev_includes rccl_device_defs INTERFACE_INCLUDE_DIRECTORIES)
-  set(_link_inc_flags "")
-  if(_dev_includes)
-    foreach(_inc ${_dev_includes})
-      list(APPEND _link_inc_flags "-I${_inc}")
-    endforeach()
-  endif()
-  get_target_property(_dev_sys_includes rccl_device_defs INTERFACE_SYSTEM_INCLUDE_DIRECTORIES)
-  if(_dev_sys_includes)
-    foreach(_inc ${_dev_sys_includes})
-      if(NOT _inc IN_LIST CMAKE_CXX_IMPLICIT_INCLUDE_DIRECTORIES)
-        list(APPEND _link_inc_flags "-isystem${_inc}")
-      endif()
-    endforeach()
-  endif()
-
+  list(JOIN _mixed_objs "\n" _mixed_objs_lines)
   set(_link_rsp "${DL_ARCH_DIR}/link_objects.rsp")
   file(GENERATE OUTPUT "${_link_rsp}"
-    CONTENT "$<JOIN:$<TARGET_OBJECTS:${_dev_target}>,\n>\n")
-
-  # When rocSHMEM is enabled, pass the per-arch device bitcode to the driver.
-  # rocSHMEM device API symbols have hidden visibility and must be statically
-  # present in the device ELF — they cannot be imported from a shared library.
-  set(_rocshmem_bitcode_arg "")
-  set(_rocshmem_link_depends "")
-  # Not ENABLE_ROCSHMEM_GIN: no object here references rocSHMEM, and the full
-  # device bitcode carries unresolved IPC and RO symbols that break the ELF load.
-  if(ENABLE_ROCSHMEM AND ROCSHMEM_INSTALL_DIR)
-    set(_rocshmem_bc "${ROCSHMEM_INSTALL_DIR}/lib/librocshmem_device_${DL_GPU_TARGET}.bc")
-    set(_rocshmem_bitcode_arg "--rocshmem-bitcode=${_rocshmem_bc}")
-    if(TARGET rocshmem_static)
-      list(APPEND _rocshmem_link_depends rocshmem_static)
-    endif()
-  endif()
+    CONTENT "$<JOIN:$<TARGET_OBJECTS:${_dev_target}>,\n>\n${_mixed_objs_lines}\n")
 
   set(_dl_profile_rt_arg "")
   if(DL_DEVICE_PROFILE_RT)
@@ -526,7 +642,7 @@ foreach(DL_GPU_TARGET ${DL_GPU_TARGETS})
   endif()
 
   add_custom_command(
-    OUTPUT  ${ARCH_DEVICE_ELF}
+    OUTPUT  ${ARCH_DEVICE_OBJ}
     COMMAND ${CMAKE_RCCLDEV_COMPILER}
       --link
       --arch=${DL_GPU_TARGET}
@@ -534,7 +650,6 @@ foreach(DL_GPU_TARGET ${DL_GPU_TARGETS})
       --clang=${DL_CLANG}
       ${DL_HIP_COMPILER_FLAGS}
       --dispatcher=${HIPIFY_DIR}/src/device/common.cu.cpp
-      ${_rocshmem_bitcode_arg}
       ${_dl_profile_rt_arg}
       ${_link_def_flags}
       ${_link_inc_flags}
@@ -543,31 +658,31 @@ foreach(DL_GPU_TARGET ${DL_GPU_TARGETS})
       ${DL_COVERAGE_FLAGS}
       ${DL_MAIN_MODULE_CUID_FLAGS}
       -std=c++17
-      -o ${ARCH_DEVICE_ELF}
+      -o ${ARCH_DEVICE_OBJ}
       @${_link_rsp}
-    DEPENDS ${_dev_target} ${HIPIFY_DIR}/src/device/common.cu.cpp ${_rocshmem_link_depends}
-    COMMENT "DL [${DL_GPU_TARGET}] link: device.elf"
+    DEPENDS ${_dev_target} ${HIPIFY_DIR}/src/device/common.cu.cpp ${_mixed_objs}
+    COMMENT "DL [${DL_GPU_TARGET}] link: device.o"
     VERBATIM
     COMMAND_EXPAND_LISTS
   )
 
-  list(APPEND ALL_DEVICE_ELFS "${ARCH_DEVICE_ELF}")
-  # The runtime matches this entry against the agent at load time, so it needs
+  list(APPEND ALL_DEVICE_OBJS "${ARCH_DEVICE_OBJ}")
+  # The runtime matches the image against the agent at load time, so it needs
   # the target ID, not the bare name.
-  list(APPEND DL_BUNDLER_TARGETS "hip-amdgcn-amd-amdhsa--${DL_TARGET_ID}")
-  list(APPEND DL_BUNDLER_INPUTS "--input=${ARCH_DEVICE_ELF}")
+  list(APPEND DL_PACKAGER_IMAGES
+    "--image=file=${ARCH_DEVICE_OBJ},triple=${DL_DEVICE_TRIPLE_${DL_GPU_TARGET}},arch=${DL_TARGET_ID},kind=hip")
 
-  # Friendly symlink next to librccl.so: device-${arch}.elf -> device_build/<dir>/device.elf
+  # Friendly symlink next to librccl.so: device-${arch}.elf -> device_build/<dir>/device.o
   # Lets coverage workflows (and inspection in general) reference the per-arch
-  # device ELF without the leading-hyphen directory wart we use for CDNA build
-  # scheduling. Same byte content that ends up packed into .hip_fatbin; llvm-cov
-  # only needs this file + the merged .profdata for device-side reports.
+  # device code without the leading-hyphen directory wart we use for CDNA build
+  # scheduling. It carries the coverage mapping the device image is built from;
+  # llvm-cov only needs this file + the merged .profdata for device-side reports.
   set(_dev_elf_link "${PROJECT_BINARY_DIR}/device-${DL_GPU_TARGET}.elf")
   add_custom_command(
     OUTPUT  ${_dev_elf_link}
-    COMMAND ${CMAKE_COMMAND} -E create_symlink ${ARCH_DEVICE_ELF} ${_dev_elf_link}
-    DEPENDS ${ARCH_DEVICE_ELF}
-    COMMENT "DL [${DL_GPU_TARGET}] symlink: device-${DL_GPU_TARGET}.elf -> device_build/.../device.elf"
+    COMMAND ${CMAKE_COMMAND} -E create_symlink ${ARCH_DEVICE_OBJ} ${_dev_elf_link}
+    DEPENDS ${ARCH_DEVICE_OBJ}
+    COMMENT "DL [${DL_GPU_TARGET}] symlink: device-${DL_GPU_TARGET}.elf -> device_build/.../device.o"
     VERBATIM
   )
   list(APPEND DEVICE_ELF_SYMLINKS "${_dev_elf_link}")
@@ -617,191 +732,58 @@ foreach(DL_GPU_TARGET ${DL_GPU_TARGETS})
 endforeach()  # end per-GPU-target loop
 
 # ===========================================================================
-# Bundle all per-arch device.elf files into a single .hipfb fat binary
+# Package all per-arch device.o files into one offload binary
 # ===========================================================================
-set(DEVICE_HIPFB "${DEVICE_BUILD_DIR}/device.hipfb")
-
-list(JOIN DL_BUNDLER_TARGETS "," _bundler_targets_str)
-
-set(DL_BUNDLER_COMPRESS "")
-if(ENABLE_COMPRESS)
-  set(DL_BUNDLER_COMPRESS "--compress")
-endif()
+set(DEVICE_OFFLOAD_BINARY "${DEVICE_BUILD_DIR}/device.offload")
 
 add_custom_command(
-  OUTPUT  ${DEVICE_HIPFB}
-  COMMAND ${DL_BUNDLER}
-    --type=bc
-    --targets=${_bundler_targets_str}
-    ${DL_BUNDLER_INPUTS}
-    --output=${DEVICE_HIPFB}
-    ${DL_BUNDLER_COMPRESS}
-  DEPENDS ${ALL_DEVICE_ELFS}
-  COMMENT "DL bundle: device.elf(s) -> device.hipfb [${GPU_TARGETS}]"
+  OUTPUT  ${DEVICE_OFFLOAD_BINARY}
+  COMMAND ${DL_PACKAGER} ${DL_PACKAGER_FLAGS} -o ${DEVICE_OFFLOAD_BINARY} ${DL_PACKAGER_IMAGES}
+  COMMAND ${CMAKE_COMMAND} -DOFFLOAD_BINARY=${DEVICE_OFFLOAD_BINARY}
+          -P ${PROJECT_SOURCE_DIR}/cmake/scripts/check_offload_size.cmake
+  DEPENDS ${ALL_DEVICE_OBJS} ${PROJECT_SOURCE_DIR}/cmake/scripts/check_offload_size.cmake
+  COMMENT "DL package: device.o(s) -> device.offload [${GPU_TARGETS}]"
   VERBATIM
 )
 
 # ===========================================================================
-# Host compile common.cu.cpp with embedded device binary
+# common.cu.cpp's host half
 # ===========================================================================
 set(COMMON_FAT_OBJ "${DEVICE_BUILD_DIR}/common.o")
-
-set(DL_HOST_COMPRESS "")
-if(ENABLE_COMPRESS)
-  set(DL_HOST_COMPRESS "--offload-compress")
-endif()
-
-# Gather include flags for host compile (same paths as device)
-set(_host_inc_flags "")
-if(_dev_includes)
-  foreach(_inc ${_dev_includes})
-    list(APPEND _host_inc_flags "-I${_inc}")
-  endforeach()
-endif()
-if(_dev_sys_includes)
-  foreach(_inc ${_dev_sys_includes})
-    if(NOT _inc IN_LIST CMAKE_CXX_IMPLICIT_INCLUDE_DIRECTORIES)
-      list(APPEND _host_inc_flags "-isystem${_inc}")
-    endif()
-  endforeach()
-endif()
-
 add_custom_command(
   OUTPUT  ${COMMON_FAT_OBJ}
   COMMAND ${DL_CLANG}
     -x hip --offload-host-only ${DL_OFFLOAD_ARCH_FLAGS}
     ${DL_HIP_COMPILER_FLAGS}
-    -Xclang -fcuda-include-gpubinary -Xclang ${DEVICE_HIPFB}
-    -DRCCL_DEVICE_LINKER
-    ${_link_def_flags}
-    ${_host_inc_flags}
-    ${DL_OPT_FLAGS}
-    ${DL_INHERITED_FLAGS}
-    ${DL_COVERAGE_FLAGS}
+    --offload-new-driver -fgpu-rdc
     ${DL_MAIN_MODULE_CUID_FLAGS}
-    -std=c++17
-    -fPIC
-    ${DL_HOST_COMPRESS}
+    ${DL_TU_FLAGS}
     -c -o ${COMMON_FAT_OBJ}
     ${HIPIFY_DIR}/src/device/common.cu.cpp
-  DEPENDS ${DEVICE_HIPFB} ${HIPIFY_DIR}/src/device/common.cu.cpp
-  COMMENT "DL host compile: common.cu.cpp with embedded device binary"
+  DEPENDS ${HIPIFY_DIR}/src/device/common.cu.cpp
+  COMMENT "DL compile (host): common"
   VERBATIM
 )
 
-# ===========================================================================
-# Fat objects: host+device TUs that launch their own kernels. They cannot take
-# the rccl target's --offload-host-only compile, or __hip_fatbin_* stays
-# undefined in librccl.so.
-# ===========================================================================
-set(DEVICE_LINKER_OBJECTS ${COMMON_FAT_OBJ})
-
-# dl_add_fat_object(<name> <source> [SUPPRESS_WARNINGS] [DEPFILE_TRACKING]
-#                   [DEFINES ...] [EXTRA_FLAGS ...] [EXTRA_DEPENDS ...])
-# Builds ${DEVICE_BUILD_DIR}/<name>.o and appends it to DEVICE_LINKER_OBJECTS.
-function(dl_add_fat_object NAME SRC)
-  cmake_parse_arguments(FO "SUPPRESS_WARNINGS;DEPFILE_TRACKING" ""
-    "DEFINES;EXTRA_FLAGS;EXTRA_DEPENDS" ${ARGN})
-  if(FO_UNPARSED_ARGUMENTS)
-    message(FATAL_ERROR "dl_add_fat_object(${NAME}): unknown arguments: ${FO_UNPARSED_ARGUMENTS}")
-  endif()
-  set(_obj "${DEVICE_BUILD_DIR}/${NAME}.o")
-  list(TRANSFORM FO_DEFINES PREPEND "-D")
-  set(_flags "")
-  set(_depfile "")
-  if(FO_SUPPRESS_WARNINGS)
-    list(APPEND _flags -w)
-  endif()
-  # Only <source> is a DEPENDS, so without a depfile a header edit leaves the
-  # object stale. CMake < 3.20 has no DEPFILE for custom commands.
-  if(FO_DEPFILE_TRACKING AND CMAKE_VERSION VERSION_GREATER_EQUAL "3.20")
-    list(APPEND _flags -MD -MF "${DEVICE_BUILD_DIR}/${NAME}.d")
-    set(_depfile DEPFILE "${DEVICE_BUILD_DIR}/${NAME}.d")
-  endif()
-  add_custom_command(
-    OUTPUT  ${_obj}
-    COMMAND ${DL_CLANG}
-      -x hip ${DL_OFFLOAD_ARCH_FLAGS}
-      ${DL_HIP_COMPILER_FLAGS}
-      -DRCCL_DEVICE_LINKER
-      ${FO_DEFINES}
-      ${_link_def_flags}
-      ${_host_inc_flags}
-      ${DL_OPT_FLAGS}
-      ${DL_INHERITED_FLAGS}
-      ${DL_DEVICE_COVERAGE_FLAGS}
-      -std=c++17
-      -fPIC
-      ${_flags}
-      ${FO_EXTRA_FLAGS}
-      -c -o ${_obj}
-      ${SRC}
-    DEPENDS ${SRC} ${FO_EXTRA_DEPENDS}
-    ${_depfile}
-    COMMENT "DL compile: ${NAME}"
-    VERBATIM
-  )
-  set(DEVICE_LINKER_OBJECTS ${DEVICE_LINKER_OBJECTS} ${_obj} PARENT_SCOPE)
-endfunction()
-
-dl_add_fat_object(onerank ${HIPIFY_DIR}/src/device/onerank.cu.cpp)
-dl_add_fat_object(collectives ${HIPIFY_DIR}/src/collectives.cc DEPFILE_TRACKING)
-
-# One TU per (type, redop); src/device/ce_reduce/generate.py says why.
-file(GLOB _ce_reduce_srcs CONFIGURE_DEPENDS "${HIPIFY_DIR}/gensrc/ce_reduce/*.cpp")
-foreach(_src IN LISTS _ce_reduce_srcs)
-  get_filename_component(_name "${_src}" NAME_WE)
-  dl_add_fat_object(${_name} ${_src} SUPPRESS_WARNINGS)
-endforeach()
-
-dl_add_fat_object(diagnostics_p2p ${HIPIFY_DIR}/src/diagnostics/device/p2p.cu.cpp)
-
-set(_dda_dir ${HIPIFY_DIR}/src/algorithms/dda)
-foreach(_coll all_reduce reduce_scatter all_gather alltoall)
-  dl_add_fat_object(dda_${_coll}_ipc ${_dda_dir}/${_coll}/dda_${_coll}_ipc.cu.cpp)
-endforeach()
-foreach(_coll all_reduce reduce_scatter all_gather alltoall)
-  foreach(_proto "" _ll _ll128)
-    dl_add_fat_object(dda_${_coll}_fabric${_proto}
-      ${_dda_dir}/${_coll}/dda_${_coll}_fabric${_proto}.cu.cpp SUPPRESS_WARNINGS)
-  endforeach()
-endforeach()
-foreach(_proto _ll _ll128)
-  dl_add_fat_object(dda_broadcast_fabric${_proto}
-    ${_dda_dir}/broadcast/dda_broadcast_fabric${_proto}.cu.cpp SUPPRESS_WARNINGS)
-endforeach()
-
-# ===========================================================================
-# Symmetric kernels: per-instantiation device TUs from gensrc/symmetric/.
-# Each instantiation file defines a handful of __global__ ncclSymkDevKernel_*
-# entries. Compiled standalone as multi-arch fat objects, mirroring onerank.o.
-# ===========================================================================
-if(GENERATE_SYM_KERNELS)
-  file(GLOB _sym_srcs CONFIGURE_DEPENDS "${HIPIFY_DIR}/gensrc/symmetric/*.cpp")
-  foreach(_sym_src IN LISTS _sym_srcs)
-    get_filename_component(_sym_name "${_sym_src}" NAME_WE)
-    # GIN symmetric kernels get constmem-free QP code straight from the copied
-    # (provider-override) headers, so no rocSHMEM QP bitcode is injected here.
-    dl_add_fat_object(sym_${_sym_name} ${_sym_src})
-  endforeach()
-endif()
-
-# The GIN defines go here because these files are filtered out of the rccl
-# target, so per-source properties never apply. Leaving only SDMA on keeps
-# ncclGinCallImpl on its single backend branch. GDA must stay off, as these
-# objects get no QP bitcode. gfx1250 GinScatter and gfx950 two-shot both use
-# Anvil SDMA gin.put().
-if(ENABLE_ROCSHMEM_GIN)
-  foreach(_coll alltoall all_reduce)
-    dl_add_fat_object(gin_${_coll}_sdma
-      ${HIPIFY_DIR}/src/algorithms/gin/sdma/gin_${_coll}_sdma.cu.cpp
-      DEFINES NCCL_GIN_ANVIL_SDMA_ENABLE=1 NCCL_GIN_PROXY_ENABLE=0
-              NCCL_GIN_ROCSHMEM_GDA_ENABLE=0)
-  endforeach()
-  dl_add_fat_object(gin_anvil_conn_check_device
-    ${HIPIFY_DIR}/src/gin/gin_anvil_conn_check_device.cc
-    DEFINES ENABLE_ROCSHMEM_GIN)
-endif()
+# An otherwise empty host object carrying device.offload, as a -fgpu-rdc compile
+# would carry its own device code. librccl.so is linked with --hip-link, so
+# clang-linker-wrapper links it, with any other device code on the link line,
+# into one image per GPU target, and registers that image with every kernel and
+# variable in DEVICE_LINKER_OBJECTS' offload entries.
+set(DL_IMAGE_OBJ "${DEVICE_BUILD_DIR}/device_image.o")
+set(_image_src "${DEVICE_BUILD_DIR}/device_image.hip")
+file(WRITE "${_image_src}" "// Carries RCCL's device code to clang-linker-wrapper; see DeviceLinker.cmake.\n")
+add_custom_command(
+  OUTPUT  ${DL_IMAGE_OBJ}
+  COMMAND ${DL_CLANG} -x hip --offload-host-only --offload-new-driver -fgpu-rdc
+    -nogpuinc -nogpulib -fPIC
+    -Xclang -fembed-offload-object=${DEVICE_OFFLOAD_BINARY}
+    -c -o ${DL_IMAGE_OBJ} ${_image_src}
+  DEPENDS ${DEVICE_OFFLOAD_BINARY}
+  COMMENT "DL compile: embed device.offload"
+  VERBATIM
+)
+list(PREPEND DEVICE_LINKER_OBJECTS ${DL_IMAGE_OBJ} ${COMMON_FAT_OBJ})
 
 # ===========================================================================
 # Top-level target
