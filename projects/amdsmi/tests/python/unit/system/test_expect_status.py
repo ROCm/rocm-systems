@@ -9,8 +9,6 @@ whether a sweep is open: on its own it raises at the failing call, inside a swee
 it hands the failure over to be reported at the end.
 """
 
-from __future__ import annotations
-
 import unittest
 
 from common.common import ERROR_MAP, PASS, VERBOSITY_QUIET, Common, amdsmi

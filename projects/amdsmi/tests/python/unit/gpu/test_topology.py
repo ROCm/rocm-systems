@@ -4,8 +4,6 @@
 
 """Topology API handle-validation unit tests (hardware-free)."""
 
-from __future__ import annotations
-
 import unittest
 
 from common.common import amdsmi

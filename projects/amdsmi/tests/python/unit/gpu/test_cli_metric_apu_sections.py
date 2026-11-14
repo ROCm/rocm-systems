@@ -74,8 +74,14 @@ def _build_fake_amdsmi():
     Any ``amdsmi_*`` entry point that a test does not stub explicitly raises
     ``_FakeLibraryException``, standing in for a sensor the APU does not expose.
     """
+
+    class _Interface(types.ModuleType):
+        # A class-level hook, unlike a module __getattr__, also works on Python 3.6.
+        def __getattr__(self, name):
+            return _unsupported(name)
+
     amdsmi_pkg = types.ModuleType("amdsmi")
-    interface = types.ModuleType("amdsmi.amdsmi_interface")
+    interface = _Interface("amdsmi.amdsmi_interface")
     exception = types.ModuleType("amdsmi.amdsmi_exception")
 
     interface.AMDSMI_MAX_NUM_GFX_CLKS = 8
@@ -109,8 +115,6 @@ def _build_fake_amdsmi():
 
             return _raise
         raise AttributeError(name)
-
-    interface.__getattr__ = _unsupported
 
     exception.AmdSmiException = _FakeAmdSmiException
     exception.AmdSmiLibraryException = _FakeLibraryException

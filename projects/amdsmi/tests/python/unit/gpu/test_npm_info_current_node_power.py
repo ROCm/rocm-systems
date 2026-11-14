@@ -23,8 +23,6 @@ used for `"ubb_power_threshold"`/`"max_node_power_limit"` (see
 `_validate_if_max_uint` usage in `amdsmi_get_npm_info()`, amdsmi_interface.py).
 """
 
-from __future__ import annotations
-
 import ctypes
 import unittest
 from unittest import mock

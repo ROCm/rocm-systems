@@ -436,8 +436,10 @@ class _StubHelpersForSetGpu:
 
 
 _AmppConfigureArgs = collections.namedtuple(
-    "_AmppConfigureArgs", ["profile_name", "fields", "file_path"], defaults=[None]
+    "_AmppConfigureArgs", ["profile_name", "fields", "file_path"]
 )
+# namedtuple(defaults=) is Python 3.7+.
+_AmppConfigureArgs.__new__.__defaults__ = (None,)
 
 
 class TestSetGpuAmppConfigureCallSite(unittest.TestCase):
