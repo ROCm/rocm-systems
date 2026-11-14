@@ -535,10 +535,13 @@ ADDR_E_RETURNCODE Gfx12Lib::HwlComputeSurfaceInfo(
      ADDR3_COMPUTE_SURFACE_INFO_OUTPUT*      pOut    ///< [out] output structure
      ) const
 {
+    // A trimmable linear surface is laid out on the 128B pitch block, not the 256B block the
+    // slice size is otherwise padded to - the same distinction the surfSize assert below makes.
     ComputeBlockDimensionForSurf(&pOut->blockExtent,
                                  pIn->bpp,
                                  pIn->numSamples,
-                                 pIn->swizzleMode);
+                                 pIn->swizzleMode,
+                                 CanTrimLinearPadding(pIn));
 
     ADDR_E_RETURNCODE  returnCode = ApplyCustomizedPitchHeight(pIn, pOut);
 

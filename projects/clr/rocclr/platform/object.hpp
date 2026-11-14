@@ -35,10 +35,14 @@
   F(cl_mem, Memory)                                                                                \
   F(cl_sampler, Sampler)
 
+// cl_semaphore_khr is a KHR type, but unlike the other KHR types the Khronos headers
+// only forward declare struct _cl_semaphore_khr. It is listed here so DECLARE_CL_TYPES
+// generates the struct body carrying the ICD dispatch pointer.
 #define AMD_CL_TYPES_DO(F)                                                                         \
   F(cl_counter_amd, Counter)                                                                       \
   F(cl_perfcounter_amd, PerfCounter)                                                               \
-  F(cl_threadtrace_amd, ThreadTrace)
+  F(cl_threadtrace_amd, ThreadTrace)                                                               \
+  F(cl_semaphore_khr, Semaphore)
 
 #define CL_TYPES_DO(F)                                                                             \
   KHR_CL_TYPES_DO(F)                                                                               \
@@ -159,7 +163,8 @@ class RuntimeObject : public ReferenceCountedObject, public ICDDispatchedObject 
     ObjectTypeQueue = 8,
     ObjectTypeSampler = 9,
     ObjectTypeThreadTrace = 10,
-    ObjectTypeVMMAlloc = 11
+    ObjectTypeVMMAlloc = 11,
+    ObjectTypeSemaphore = 12
   };
 
   virtual ObjectType objectType() const = 0;
