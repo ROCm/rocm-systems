@@ -95,10 +95,11 @@ __launch_bounds__(1024)
       scatterSlot + s * (size_t)kDdaLL128WireWordsPerSlice + 2 * lane, regs, flag, flagLane);
   }
 
-  // Local copy sendbuff -> recvbuff[selfRank].
-  {
+  // In-place AllGather already has this rank's input in its output slot.
+  char* localRecv = reinterpret_cast<char*>(recvbuff) + (size_t)selfRank * perRankBytes;
+  if (reinterpret_cast<const char*>(sendbuff) != localRecv) {
     v4u_gptr s4 = (v4u_gptr)sendbuff;
-    v4u_gptr d4 = (v4u_gptr)(reinterpret_cast<char*>(recvbuff) + (size_t)selfRank * perRankBytes);
+    v4u_gptr d4 = (v4u_gptr)localRecv;
     const size_t nVec = perRankBytes >> 4; // 16B chunks
     const size_t gtid = (size_t)flatBlockId * (size_t)nthreads + (size_t)tid;
     const size_t stride = (size_t)total * (size_t)nthreads;
