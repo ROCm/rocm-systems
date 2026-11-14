@@ -81,6 +81,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 * The gfx1250 AllToAll DDA fabric LL128 kernel caps its grid at the communicator's CU budget, so every block is co-resident. On DPX, the tuning table caps it further at 72 blocks from 256 KiB to 16 MiB total.
 * gfx1250 AllToAll skips the DDA fabric paths under `NCCL_CHECK_MODE` or on a suspended or revoked communicator, and takes the next path.
 * `RCCL_DDA_LL128_A2A_THREADS` now defaults to `0`, which reads the arch table and keeps 256 threads where it sets none. It still overrides the table with a multiple of 32 up to 1024 (it took a multiple of 16 before). `RCCL_DDA_LL128_A2A_MAXBPP` (was default `64`) and `RCCL_DDA_LL128_A2A_LPB` (was default `4`) are now unset by default, so each warp moves one slice and the block budget alone caps the grid; when set, MAXBPP caps the blocks per peer column and LPB sizes them from 120-byte lines, both within the block budget.
+* On gfx1250, a single-node FP8 e4m3 or e5m2 `ncclAllReduce` with more than 8 ranks no longer gets the 1024x ring penalty at or above the DDA LL128 ceiling, so the tuner can select Ring. The penalty stays when that ceiling is zero and for every other FP8 ring above 8 ranks.
 
 ### Removed
 
@@ -121,6 +122,8 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 * Fixed communicator initialization leaking memory when connecting rings or trees failed.
 * Fixed communicator creation with socket encryption (`ncclSetEncryption`) failing intermittently on 2-rank communicators, including one process driving 2 GPUs, and on any communicator with `NCCL_BOOTSTRAP_BIDIR_ALLGATHER=0`. The TLS server sent session tickets that bootstrap clients which only write never read, so closing such a socket reset the connection and dropped the bootstrap data still queued. RCCL no longer sends TLS session tickets.
 * Fixed a Socket communicator's cached "no GPU Direct RDMA" verdict being reused by later IB communicators on the same GPU, including `ncclCommSplit` children.
+* Fixed collectives failing with `unspecified launch failure` when `NCCL_ENQUEUE_REARCH_ENABLE=1`. The re-architected enqueue path sized thread blocks for NVIDIA's 32-thread warp plus a sync warp, so ring and tree collectives launched up to 576 threads per block on 64-lane AMD GPUs, past the 256 that RCCL kernels are built for. With `NCCL_PROTO=LL128` it also requested `ncclAllReduce`, `ncclAllGather` and `ncclBroadcast` kernels that RCCL does not build. The path now sizes blocks, slices single-node rings and selects kernels the way the default path does, and keeps the `ncclAllReduceWithBias` accumulator, which it used to drop and so returned wrong results. Direct ReduceScatter is not used on this path, because the path does not issue the per-peer transfers that Direct ReduceScatter needs.
+* Fixed mid-size multi-node Simple send latency on builds without the 128-bit global load/store builtins (for example ROCm older than 7.0.2, or `-DDWORDX4_INTRINSICS=OFF`). On these builds every Simple send took the full system-scope fence, which writes back and invalidates the L2 cache, even when the cheap post-send fence was enabled. Simple sends to unregistered buffers use the cheap post-send fence again. Registered user buffers and point-to-point sends keep the full fence.
 
 ### Known issues
 
