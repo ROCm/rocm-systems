@@ -57,15 +57,17 @@ test_categories:
 # Exclusions are not listed here. Each test case declares its own in the
 # `disabled:` (temporary regression) or `unsupported:` (permanent capability
 # gap) field of its group config (unit/<group>.yaml, or <group>.yaml for the
-# non-unit groups). Both fields take the same targets, either as a flat list
-# or as a mapping with a `targets` list and an optional `reason`:
+# non-unit groups). Both fields take the same targets. A non-empty field uses
+# the mapping form, with a `reason`; a `disabled` reason must cite a Jira key:
 #
 #   Unit_hipMemsetDSync:
 #     <<: *level_default
-#     disabled: [amd_linux, linux_<arch>]
+#     disabled:
+#       targets: [amd_linux, linux_<arch>]
+#       reason: "SWDEV-123456: intermittent mismatch after async memset"
 #     unsupported:
 #       targets: [windows_<arch>]
-#       reason: "..."
+#       reason: "requires a hardware feature not present on this architecture"
 #
 # Every accepted target, where <arch> is the exact architecture the build
 # targets (a gfx name):
@@ -87,6 +89,16 @@ test_categories:
 #   Build flavour
 #     asan                       AddressSanitizer builds only
 #
+#   Groups
+#     all                        every build (only for disabled)
+#     amd                        amd_linux, amd_windows, amd_wsl
+#     nvidia                     nvidia_linux, nvidia_windows
+#
+# Targets in a field are additive: the case is skipped wherever any of them
+# applies, so adding `all` to an existing list disables it everywhere. `amd`
+# and `nvidia` are valid in both fields. 'all' is not permitted to be used
+# with unsupported, just remove the test.
+#
 # A matching case is tagged [disabled] and registered DISABLED TRUE in ctest,
 # so `ctest -L quick` already skips it. Note that Windows builds do not carry
 # a gfx architecture, so the windows_<arch> forms never match at build time -
@@ -94,9 +106,14 @@ test_categories:
 #
 # Every target additionally produces an [exclude_<target>] tag, and therefore a
 # ctest label, whether or not it matched this build - so a runner can query or
-# filter them directly:
+# filter them directly. A group also produces the tag of every target it
+# covers, so `all` yields exclude_all, exclude_amd, exclude_amd_linux, and so
+# on:
 #
-#   ctest -L standard -LE exclude_amd_wsl
+#   ctest -L standard -LE '^exclude_amd_wsl$'
+#
+# Anchor the pattern: ctest labels are regular expressions, and an unanchored
+# exclude_amd would also match exclude_amd_linux.
 #
 # amd_wsl is the one reason resolved at discovery time rather than build time,
 # because the Linux package is shared between native Linux and WSL; see the
