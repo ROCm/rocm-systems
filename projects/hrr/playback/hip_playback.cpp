@@ -1720,6 +1720,9 @@ hipError_t playback_hipModuleLaunchCooperativeKernel(PlaybackContext& ctx,
                                 /*launch_ex=*/false, /*cooperative=*/true);
 }
 
+hipError_t playback_hipGraphLaunch(PlaybackContext& ctx, const uint8_t* payload);
+hipError_t playback_hipGraphLaunch_spt(PlaybackContext& ctx, const uint8_t* payload);
+
 bool hrr_is_launch_handler(hipError_t (*fn)(PlaybackContext&, const uint8_t*)) {
     return fn == playback_hipModuleLaunchKernel ||
            fn == playback_hipExtModuleLaunchKernel ||
@@ -1730,7 +1733,9 @@ bool hrr_is_launch_handler(hipError_t (*fn)(PlaybackContext&, const uint8_t*)) {
            fn == playback_hipLaunchCooperativeKernel_spt ||
            fn == playback_hipDrvLaunchKernelEx ||
            fn == playback_hipLaunchKernelExC ||
-           fn == playback_hipModuleLaunchCooperativeKernel;
+           fn == playback_hipModuleLaunchCooperativeKernel ||
+           fn == playback_hipGraphLaunch ||
+           fn == playback_hipGraphLaunch_spt;
 }
 
 // ---------------------------------------------------------------------------
@@ -3402,40 +3407,48 @@ static void free_replaced_host_alloc(PlaybackContext& ctx, uint64_t rec) {
     if (block.cur.get() == buf) block.retired.push_back(std::move(block.cur));
 }
 
-hipError_t playback_hipHostMalloc(PlaybackContext& ctx, const uint8_t* pl) {
-    const auto* a = reinterpret_cast<const hrr_args_hipHostMalloc*>(pl);
+// The four pinned host allocators differ only in the runtime call. A call that
+// failed the same way at capture is not a replay failure.
+template <typename Alloc>
+static hipError_t alloc_host_memory(PlaybackContext& ctx, uint64_t rec_ptr, uint64_t size,
+                                    int32_t recorded_ret, const char* api, Alloc alloc) {
     void* live = nullptr;
-    free_replaced_host_alloc(ctx, a->ptr);
-    if (!ctx.charge_host(a->size, "hipHostMalloc")) return hipErrorMemoryAllocation;
-    hipError_t r = hipHostMalloc(&live, static_cast<size_t>(a->size), a->flags);
+    free_replaced_host_alloc(ctx, rec_ptr);
+    if (!ctx.charge_host(size, api)) return hipErrorMemoryAllocation;
+    hipError_t r = alloc(&live, static_cast<size_t>(size));
     if (r == hipSuccess)
-        ctx.record_alloc(a->ptr, live, static_cast<size_t>(a->size), AllocKind::HostMalloc);
+        ctx.record_alloc(rec_ptr, live, static_cast<size_t>(size), AllocKind::HostMalloc);
     else
-        ctx.host_budget.release(a->size);
-    // A call that failed the same way at capture is not a replay failure.
-    if (r != hipSuccess && a->ret != 0 && static_cast<int32_t>(r) == a->ret) {
-        hrr_note_recorded_error(ctx, "hipHostMalloc", a->ret);
+        ctx.host_budget.release(size);
+    if (r != hipSuccess && recorded_ret != 0 && static_cast<int32_t>(r) == recorded_ret) {
+        hrr_note_recorded_error(ctx, api, recorded_ret);
         return hipSuccess;
     }
     return r;
 }
 
+hipError_t playback_hipHostMalloc(PlaybackContext& ctx, const uint8_t* pl) {
+    const auto* a = reinterpret_cast<const hrr_args_hipHostMalloc*>(pl);
+    return alloc_host_memory(ctx, a->ptr, a->size, a->ret, "hipHostMalloc",
+                             [a](void** p, size_t n) { return hipHostMalloc(p, n, a->flags); });
+}
+
 hipError_t playback_hipMallocHost(PlaybackContext& ctx, const uint8_t* pl) {
     const auto* a = reinterpret_cast<const hrr_args_hipMallocHost*>(pl);
-    void* live = nullptr;
-    free_replaced_host_alloc(ctx, a->ptr);
-    if (!ctx.charge_host(a->size, "hipMallocHost")) return hipErrorMemoryAllocation;
-    hipError_t r = hipMallocHost(&live, static_cast<size_t>(a->size));
-    if (r == hipSuccess)
-        ctx.record_alloc(a->ptr, live, static_cast<size_t>(a->size), AllocKind::HostMalloc);
-    else
-        ctx.host_budget.release(a->size);
-    // A call that failed the same way at capture is not a replay failure.
-    if (r != hipSuccess && a->ret != 0 && static_cast<int32_t>(r) == a->ret) {
-        hrr_note_recorded_error(ctx, "hipMallocHost", a->ret);
-        return hipSuccess;
-    }
-    return r;
+    return alloc_host_memory(ctx, a->ptr, a->size, a->ret, "hipMallocHost",
+                             [](void** p, size_t n) { return hipMallocHost(p, n); });
+}
+
+hipError_t playback_hipHostAlloc(PlaybackContext& ctx, const uint8_t* pl) {
+    const auto* a = reinterpret_cast<const hrr_args_hipHostAlloc*>(pl);
+    return alloc_host_memory(ctx, a->ptr, a->size, a->ret, "hipHostAlloc",
+                             [a](void** p, size_t n) { return hipHostAlloc(p, n, a->flags); });
+}
+
+hipError_t playback_hipMemAllocHost(PlaybackContext& ctx, const uint8_t* pl) {
+    const auto* a = reinterpret_cast<const hrr_args_hipMemAllocHost*>(pl);
+    return alloc_host_memory(ctx, a->ptr, a->size, a->ret, "hipMemAllocHost",
+                             [](void** p, size_t n) { return hipMemAllocHost(p, n); });
 }
 
 // hipHostFree and hipFreeHost differ only in the runtime call. The exclusive
@@ -4323,25 +4336,59 @@ hipError_t playback_hipGraphInstantiateWithFlags(PlaybackContext& ctx,
     return r;
 }
 
+// hipStreamPerThread, and the null stream of an _spt call, mean this thread's
+// default stream. translate_stream would send both to the legacy null stream.
+static hipStream_t spt_aware_stream(PlaybackContext& ctx, uint64_t rec, bool spt) {
+    if (rec == reinterpret_cast<uint64_t>(hipStreamPerThread) || (spt && rec == 0))
+        return hipStreamPerThread;
+    return ctx.translate_stream(rec);
+}
+
 // ---------------------------------------------------------------------------
 // Manual playback: hipGraphLaunch
 // ---------------------------------------------------------------------------
-// Payload layout (after 32-byte EventHeader):
-//   ret(4) graphExec(8) stream(8)
-hipError_t playback_hipGraphLaunch(PlaybackContext& ctx,
-                                   const uint8_t* payload) {
+// Payload: the fixed hrr_args struct, u16 num_snapshots, then that many 41-byte
+// pinned host snapshot records. The copies are queued ahead of the graph.
+static hipError_t playback_graph_launch(PlaybackContext& ctx, const uint8_t* payload,
+                                        const char* api, bool spt) {
+    const auto* hdr = reinterpret_cast<const hrr_event_header*>(payload);
     const auto* a = reinterpret_cast<const hrr_args_hipGraphLaunch*>(payload);
+    static_assert(sizeof(hrr_args_hipGraphLaunch) == sizeof(hrr_args_hipGraphLaunch_spt),
+                  "graph launch spellings share a prefix");
     if (a->ret != hipSuccess) return hipSuccess;  // original call failed — skip
 
     hipGraphExec_t exec = ctx.translate_graph_exec(a->graphExec);
     if (!exec) {
         if (ctx.verbose)
-            fprintf(stderr, "[HRR] hipGraphLaunch: graphExec 0x%llx not found in map\n",
-                    (unsigned long long)a->graphExec);
+            fprintf(stderr, "[HRR] %s: graphExec 0x%llx not found in map\n",
+                    api, (unsigned long long)a->graphExec);
         return hipSuccess;  // non-fatal — exec not yet created
     }
 
-    hipStream_t stream = ctx.translate_stream(a->stream);
+    const uint8_t* end = payload + hdr->payload_length;
+    const uint8_t* rec = payload + sizeof(hrr_args_hipGraphLaunch);
+    uint16_t n = 0;
+    if (rec != end) {
+        if (end < rec + 2) {
+            fprintf(stderr, "[HRR] %s: pinned host snapshot count is truncated — refused\n", api);
+            ctx.host_snapshots_refused++;
+            return hipErrorInvalidValue;
+        }
+        memcpy(&n, rec, 2);
+        rec += 2;
+        if (!hrr_host_snapshots_fit(rec, end, n)) {
+            fprintf(stderr, "[HRR] %s: pinned host snapshot records run past the event"
+                    " — refused\n", api);
+            ctx.host_snapshots_refused += n;
+            return hipErrorInvalidValue;
+        }
+    }
+
+    hipStream_t stream = spt_aware_stream(ctx, a->stream, spt);
+    if (n) {
+        if (hipError_t sr = restore_host_snapshots(ctx, rec, n, stream, api); sr != hipSuccess)
+            return sr;
+    }
 
     thread_local hipEvent_t tl_g_start = nullptr;
     thread_local hipEvent_t tl_g_stop  = nullptr;
@@ -4360,14 +4407,17 @@ hipError_t playback_hipGraphLaunch(PlaybackContext& ctx,
     if (timing_ok)
         timing_ok = (HRR_HIP_CHECK(hipEventRecord(tl_g_start, stream)) == hipSuccess);
 
-    hipError_t r = hipGraphLaunch(exec, stream);
+    hipError_t r = spt ? hipGraphLaunch_spt(exec, stream) : hipGraphLaunch(exec, stream);
+    // Release before the sync below: it can wait on a graph that waits for
+    // work yet to replay.
+    hrr_launch_release();
 
     if (timing_ok)
         timing_ok = (HRR_HIP_CHECK(hipEventRecord(tl_g_stop, stream)) == hipSuccess);
 
     if (r != hipSuccess) {
-        fprintf(stderr, "[HRR] hipGraphLaunch failed: %d (%s) exec=0x%llx stream=0x%llx\n",
-                r, hipGetErrorString(r),
+        fprintf(stderr, "[HRR] %s failed: %d (%s) exec=0x%llx stream=0x%llx\n",
+                api, r, hipGetErrorString(r),
                 (unsigned long long)a->graphExec, (unsigned long long)a->stream);
         return r;
     }
@@ -4385,9 +4435,17 @@ hipError_t playback_hipGraphLaunch(PlaybackContext& ctx,
     }
 
     if (ctx.verbose)
-        fprintf(stderr, "[HRR] hipGraphLaunch: exec 0x%llx on stream 0x%llx -> OK\n",
-                (unsigned long long)a->graphExec, (unsigned long long)a->stream);
+        fprintf(stderr, "[HRR] %s: exec 0x%llx on stream 0x%llx -> OK\n",
+                api, (unsigned long long)a->graphExec, (unsigned long long)a->stream);
     return r;
+}
+
+hipError_t playback_hipGraphLaunch(PlaybackContext& ctx, const uint8_t* payload) {
+    return playback_graph_launch(ctx, payload, "hipGraphLaunch", false);
+}
+
+hipError_t playback_hipGraphLaunch_spt(PlaybackContext& ctx, const uint8_t* payload) {
+    return playback_graph_launch(ctx, payload, "hipGraphLaunch_spt", true);
 }
 
 // ---------------------------------------------------------------------------
@@ -4873,15 +4931,6 @@ hipError_t playback_hipMemcpy3D(PlaybackContext& ctx, const uint8_t* pl) {
     return replay_memcpy3d(ctx, pl, /*spt=*/false);
 }
 
-// hipStreamPerThread is a token rather than a stream capture saw created, so
-// translate_stream would send it, and the null stream of an _spt call, to the
-// legacy null stream. Both mean this thread's default stream.
-static hipStream_t memcpy3d_async_stream(PlaybackContext& ctx, uint64_t rec, bool spt) {
-    if (rec == reinterpret_cast<uint64_t>(hipStreamPerThread) || (spt && rec == 0))
-        return hipStreamPerThread;
-    return ctx.translate_stream(rec);
-}
-
 static hipError_t replay_memcpy3d_async(PlaybackContext& ctx, const uint8_t* pl, bool spt) {
     const auto* a = reinterpret_cast<const hrr_args_hipMemcpy3DAsync*>(pl);
     hipMemcpy3DParms parms{};
@@ -4892,7 +4941,7 @@ static hipError_t replay_memcpy3d_async(PlaybackContext& ctx, const uint8_t* pl,
     if (memcpy3d_is_host_array(parms))
         return refuse_host_array_copy(ctx, spt ? "hipMemcpy3DAsync_spt" : "hipMemcpy3DAsync",
                                       parms, a->d2h_hash_lo, a->d2h_hash_hi);
-    hipStream_t stream = memcpy3d_async_stream(ctx, a->stream, spt);
+    hipStream_t stream = spt_aware_stream(ctx, a->stream, spt);
 
     if (parms.kind == hipMemcpyHostToDevice) {
         hipError_t r = memcpy3d_h2d_src(ctx, "hipMemcpy3DAsync", a->blob_hash_lo,

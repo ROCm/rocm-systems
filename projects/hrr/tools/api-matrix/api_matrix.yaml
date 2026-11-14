@@ -205,9 +205,7 @@ tiers:
       that replay as no-ops (hipGraphExecUpdate among them) leave
       ggml/llama.cpp replaying the first token's parameters for every token,
       with no error at all; a no-op hipStreamWriteValue64 would make XLA's
-      VMM allocator hang rather than fail;
-      hipHostAlloc allocates nothing, and HIPIFY funnels ported CUDA code onto
-      exactly that spelling.
+      VMM allocator hang rather than fail.
     # Coverage floor: every API in the tier except
     # hipGraphExecChildGraphNodeSetParams, which T4's graph workload records
     # instead because it builds the child graph this one does not need.
@@ -243,10 +241,9 @@ tiers:
       - hipStreamWriteValue64
       - hipStreamWaitValue32
       - hipStreamWaitValue64
-      # Pinned host allocation. hipHostAlloc and hipMemAllocHost allocate
-      # nothing at replay (cudaHostAlloc hipifies to the former);
-      # hipMallocHost and hipFreeHost have real handlers charged to the host
-      # budget.
+      # Pinned host allocation. hipHostAlloc, hipMemAllocHost, hipMallocHost
+      # and hipFreeHost allocate and free for real and are charged to the
+      # host budget.
       - hipHostAlloc
       - hipFreeHost
       - hipMallocHost
@@ -869,13 +866,6 @@ overrides:
       measured REAL here, so the class is derived again rather than pinned to
       NOOP and the hang is closed. The workload still runs under the
       watchdog, which is what would catch a regression back to the no-op.
-  hipHostAlloc:
-    expect: NOOP
-    note: >-
-      Allocates nothing at replay. cudaHostAlloc hipifies to this spelling
-      while cudaMallocHost hipifies to the working hipHostMalloc, so which
-      spelling a ported codebase happened to use decides replay fidelity.
-      FAISS and MIGraphX use the broken one.
   hipGraphExecUpdate:
     expect: NOOP
     note: >-

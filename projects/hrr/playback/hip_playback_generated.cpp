@@ -2258,15 +2258,7 @@ static hipError_t playback_hipGraphicsUnregisterResource(PlaybackContext& ctx, c
   return hipErrorNotSupported;
 }
 
-static hipError_t playback_hipHostAlloc(PlaybackContext& ctx, const uint8_t* payload) {
-  (void)ctx; (void)payload;
-  static std::atomic<bool> warned{false};
-  if (!warned.exchange(true)) {
-    fprintf(stderr, "[HRR] NOOP playback handler called for hipHostAlloc — "
-            "this API is not replayed; results may differ from capture.\n");
-  }
-  return hipSuccess;
-}
+extern hipError_t playback_hipHostAlloc(PlaybackContext& ctx, const uint8_t* payload);
 
 extern hipError_t playback_hipHostFree(PlaybackContext& ctx, const uint8_t* payload);
 
@@ -2482,15 +2474,7 @@ static hipError_t playback_hipMemAdvise(PlaybackContext& ctx, const uint8_t* pay
   return _r;
 }
 
-static hipError_t playback_hipMemAllocHost(PlaybackContext& ctx, const uint8_t* payload) {
-  (void)ctx; (void)payload;
-  static std::atomic<bool> warned{false};
-  if (!warned.exchange(true)) {
-    fprintf(stderr, "[HRR] NOOP playback handler called for hipMemAllocHost — "
-            "this API is not replayed; results may differ from capture.\n");
-  }
-  return hipSuccess;
-}
+extern hipError_t playback_hipMemAllocHost(PlaybackContext& ctx, const uint8_t* payload);
 
 static hipError_t playback_hipMemAllocPitch(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
@@ -4056,25 +4040,7 @@ extern hipError_t playback_hipLaunchCooperativeKernel_spt(PlaybackContext& ctx, 
 
 extern hipError_t playback_hipLaunchKernel_spt(PlaybackContext& ctx, const uint8_t* payload);
 
-static hipError_t playback_hipGraphLaunch_spt(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipGraphLaunch_spt*>(payload);
-  if (a->graphExec != 0 && ctx.translate_graph_exec(a->graphExec) == nullptr) {
-    static bool warned = false;
-    if (!warned) {
-      warned = true;
-      fprintf(stderr, "[HRR] hipGraphLaunch_spt: graphExec 0x%llx was "
-              "never built at replay, so this call is skipped.\n",
-              (unsigned long long)a->graphExec);
-    }
-    return hipSuccess;
-  }
-  hipError_t _r = (hipError_t)hipGraphLaunch_spt((hipGraphExec_t)ctx.translate_graph_exec(a->graphExec), (hipStream_t)ctx.translate_stream(a->stream));
-  if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
-    hrr_note_recorded_error(ctx, "hipGraphLaunch_spt", a->ret);
-    return hipSuccess;
-  }
-  return _r;
-}
+extern hipError_t playback_hipGraphLaunch_spt(PlaybackContext& ctx, const uint8_t* payload);
 
 static hipError_t playback_hipStreamBeginCapture_spt(PlaybackContext& ctx, const uint8_t* payload) {
   const auto* a = reinterpret_cast<const hrr_args_hipStreamBeginCapture_spt*>(payload);
