@@ -1749,6 +1749,9 @@ namespace elf {
       const char *UseDynsym = getenv("LOADER_USE_DYNSYM");
       if (UseDynsym && std::strncmp(UseDynsym, "0", 1) != 0)
         return dynsym();
+      if (!symtabSection && dynsymSection) {
+        return dynsymSection;
+      }
       return symtab();
     }
 

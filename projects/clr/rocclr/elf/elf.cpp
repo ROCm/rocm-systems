@@ -223,12 +223,9 @@ bool Elf::InitElf() {
 
     // Set up _strtab_ndx
     section* strtab_sec = _elfio.sections[ElfSecDesc[STRTAB].name];
-    if (strtab_sec == nullptr) {
-      logElfError("failed: null sections(STRTAB)");
-      return false;
+    if (strtab_sec != nullptr) {
+      _strtab_ndx = strtab_sec->get_index();
     }
-
-    _strtab_ndx = strtab_sec->get_index();
 
     section* symtab_sec = _elfio.sections[ElfSecDesc[SYMTAB].name];
 
