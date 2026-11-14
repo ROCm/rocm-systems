@@ -43,8 +43,8 @@
 cmake_minimum_required ( VERSION 3.7 )
 
 # Import target 'clang' and 'llvm-objcopy'
-find_package(Clang REQUIRED HINTS ${CMAKE_PREFIX_PATH}/llvm PATHS /opt/rocm/llvm )
-find_package(LLVM REQUIRED HINTS ${CMAKE_PREFIX_PATH}/llvm PATHS /opt/rocm/llvm )
+find_package(Clang REQUIRED CONFIG HINTS ${ROCM_PATH}/llvm PATHS /opt/rocm/llvm )
+find_package(LLVM REQUIRED CONFIG HINTS ${ROCM_PATH}/llvm PATHS /opt/rocm/llvm )
 
 # gfx1250 is built twice from the same source.  The default build takes no
 # -defsym and so drops the trap-during-VOP3PX instruction fixup; it serves

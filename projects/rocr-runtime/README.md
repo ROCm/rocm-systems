@@ -61,11 +61,14 @@ Ensure you have the following installed:
     ```
 3. **Configure the build (example)**
     ```sh
-    cmake -DCMAKE_INSTALL_PREFIX=<rocm install dir> ..
+    cmake \
+        -DCMAKE_PREFIX_PATH="<rocm install root>;<llvm install root>" \
+        -DCMAKE_INSTALL_PREFIX=<rocm install dir> \
+        ..
     ```
     e.g:
     ```
-    cmake -DCMAKE_INSTALL_PREFIX=/opt/rocm ..
+    cmake -DCMAKE_PREFIX_PATH="/opt/rocm;/opt/rocm/llvm" -DCMAKE_INSTALL_PREFIX=/opt/rocm ..
     ```
 4. **Compile the project**
     ```sh
