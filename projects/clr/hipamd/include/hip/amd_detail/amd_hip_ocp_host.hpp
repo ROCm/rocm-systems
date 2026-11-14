@@ -14,6 +14,11 @@
 #include <cmath>
 #endif
 
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wpsabi"
+#endif
+
 namespace fcbx {
 constexpr __hip_int8_t OCP_SCALE_EXP_NAN = -128;
 
@@ -892,3 +897,7 @@ __OCP_FP_HOST_DEVICE_STATIC__ OutType fp6_cvt_packedx32(InType in, __hip_int8_t 
   }
 }
 }  // namespace fcbx
+
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic pop
+#endif

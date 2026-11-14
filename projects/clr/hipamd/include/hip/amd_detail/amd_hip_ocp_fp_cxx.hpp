@@ -11,6 +11,11 @@
 #include "amd_hip_ocp_host.hpp"
 #endif
 
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wpsabi"
+#endif
+
 static_assert(sizeof(__amd_shortx2_storage_t) == sizeof(__amd_fp8x2_storage_t[2]));
 
 struct __hipext_ocp_fp8_e4m3 {
@@ -718,7 +723,8 @@ struct __hipext_ocp_fp6x32_e2m3 {
       : __x(__builtin_amdgcn_cvt_scalef32_sr_pk32_fp6_f32(in, round, __amd_scale_to_float(scale))){}
 #else
       : __x(fcbx::fp6_cvt_packedx32<__amd_floatx32_storage_t, __amd_fp6x32_storage_t, float,
-                                    fcbx::Encoding::IEEE754, fcbx::Encoding::E2M3>(in, scale)) {
+                                    fcbx::Encoding::IEEE754, fcbx::Encoding::E2M3, true>(
+            in, scale, round)) {
   }
 #endif
 
@@ -831,7 +837,8 @@ struct __hipext_ocp_fp6x32_e3m2 {
       : __x(__builtin_amdgcn_cvt_scalef32_sr_pk32_bf6_f32(in, round, __amd_scale_to_float(scale))){}
 #else
       : __x(fcbx::fp6_cvt_packedx32<__amd_floatx32_storage_t, __amd_fp6x32_storage_t, float,
-                                    fcbx::Encoding::IEEE754, fcbx::Encoding::E3M2>(in, scale)) {
+                                    fcbx::Encoding::IEEE754, fcbx::Encoding::E3M2, true>(
+            in, scale, round)) {
   }
 #endif
 
@@ -1092,5 +1099,9 @@ struct __hipext_ocp_fp4x2_e2m1 {
 #endif
   }
 };
+
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
 
 #endif  // _HIP_INCLUDE_HIP_AMD_DETAIL_HIP_OCP_FP_CXX_HPP_
