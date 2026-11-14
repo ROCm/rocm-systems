@@ -276,6 +276,9 @@ ncclResult_t ncclBroadcast(const void* sendbuff, void* recvbuff, size_t count, n
 
 #if defined(ENABLE_ROCSHMEM_GIN)
 // The GIN-SDMA launchers (src/algorithms/gin/sdma/*.cu) have no fakes file yet.
+ncclResult_t ncclAllGatherGinSdma(const void* s, void* r, size_t n, ncclDataType_t t, ncclComm* c, hipStream_t st) {
+  return RecordAddon("ncclAllGatherGinSdma", s, r, n, t, ncclNumOps, c, st);
+}
 ncclResult_t ncclAllToAllGinSdma(const void* s, void* r, size_t n, ncclDataType_t t, ncclComm* c, hipStream_t st) {
   return RecordAddon("ncclAllToAllGinSdma", s, r, n, t, ncclNumOps, c, st);
 }

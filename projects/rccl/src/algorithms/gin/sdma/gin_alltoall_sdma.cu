@@ -203,6 +203,11 @@ bool ncclAllToAllGinSdmaEligible(ncclComm* comm, const void* sendbuff, void* rec
   struct ncclDevrWindow* recvWin = nullptr;
   if (ncclDevrFindWindow(comm, sendbuff, &sendWin) != ncclSuccess || sendWin == nullptr) return false;
   if (ncclDevrFindWindow(comm, recvbuff, &recvWin) != ncclSuccess || recvWin == nullptr) return false;
+  // HIP leaves GPU-only multi-segment windows unregistered with GIN.
+  if ((ncclDevrWindowIsMultiSegment(sendWin) && !ncclDevrWindowHasSysmemSegment(sendWin)) ||
+      (ncclDevrWindowIsMultiSegment(recvWin) && !ncclDevrWindowHasSysmemSegment(recvWin))) {
+    return false;
+  }
 
   // The LSA copy stores 16B vectors, so the window offsets and the per-peer stride
   // have to be aligned. Below one vector the loop never runs, and SDMA is exempt.

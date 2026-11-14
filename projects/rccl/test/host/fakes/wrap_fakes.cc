@@ -168,10 +168,28 @@ ncclResult_t rcclReserveHierarchicalTempBuffer(struct ncclComm* comm) { return g
 // ---------------------------------------------------------------------------
 
 #ifdef ENABLE_ROCSHMEM_GIN
-// The real definitions live in gin_alltoall_sdma.cu / gin_all_reduce_sdma.cu,
-// which this host-only binary intentionally does not compile. Keep GIN-SDMA
-// out of the selector by default so ENABLE_ROCSHMEM_GIN builds retain the
-// non-GIN test behaviour.
+// The real definitions live in gin_all_gather_sdma.cu / gin_alltoall_sdma.cu /
+// gin_all_reduce_sdma.cu, which this host-only binary intentionally does not
+// compile. Keep GIN-SDMA out of the selector by default so ENABLE_ROCSHMEM_GIN
+// builds retain the non-GIN test behaviour.
+// Channel count rcclSelectAllGather publishes when the eligibility seam is true.
+constexpr int kAllGatherGinSdmaFakeCtas = 4;
+
+static bool DefaultAllGatherGinSdmaEligible(ncclComm*, const void*, void*, size_t, ncclDataType_t) { return false; }
+std::function<bool(ncclComm*, const void*, void*, size_t, ncclDataType_t)> g_allGatherGinSdmaEligible =
+    DefaultAllGatherGinSdmaEligible;
+
+bool ncclAllGatherGinSdmaEligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
+                                  ncclDataType_t datatype) {
+  return g_allGatherGinSdmaEligible(comm, sendbuff, recvbuff, count, datatype);
+}
+
+// The null probe matches a hook that returns true unconditionally. A hook that
+// inspects its comm still links, and reports no channels until it accepts null.
+int ncclAllGatherGinSdmaCtaCount(int, size_t bytes) {
+  return g_allGatherGinSdmaEligible(nullptr, nullptr, nullptr, bytes, ncclFloat32) ? kAllGatherGinSdmaFakeCtas : 0;
+}
+
 bool ncclAllToAllGinSdmaEligible(ncclComm*, const void*, void*, size_t, ncclDataType_t) {
   return false;
 }

@@ -8,6 +8,7 @@
 #include "common/ProcessIsolatedTestRunner.hpp"
 
 #include "algorithms/gin/gin_all_reduce.h"
+#include "dev_runtime_internal.h"
 #include "nccl_device/net_device.h"
 
 #include "gtest/gtest.h"
@@ -187,6 +188,24 @@ TEST_F(GinAllReduceEligibilityTest, Gfx1250OptIn)
             .clearVariable("NCCL_GIN_ALLREDUCE_GFX1250_ENABLE"),
         cleared(ProcessIsolatedTestRunner::TestConfig("Gfx1250EnabledBands", checkEnabled))
             .setVariable("NCCL_GIN_ALLREDUCE_GFX1250_ENABLE", "1"));
+}
+
+// Otherwise-eligible gfx950 window. GPU-only multi-segment registration publishes
+// no GIN segments, so deleting the gate would flip this from false to true.
+TEST_F(GinAllReduceEligibilityTest, RejectsGpuOnlyMultiSegment)
+{
+    Gfx1250EligibleStandIn standIn;
+    std::memset(standIn.arch_, 0, sizeof(standIn.arch_));
+    std::memcpy(standIn.arch_, "gfx950", 6);
+    const size_t count = kGinAllReduceGinTwoShotMinBytes / sizeof(float);
+    ncclDevrMemory mem{};
+    mem.maxGlobalNumSegments = 1;
+    standIn.win.memory = &mem;
+    EXPECT_TRUE(ncclAllReduceGinSdmaEligible(standIn.get(), standIn.send(), standIn.recv(), count, ncclFloat32,
+                                             ncclSum));
+    mem.maxGlobalNumSegments = 2;
+    EXPECT_FALSE(ncclAllReduceGinSdmaEligible(standIn.get(), standIn.send(), standIn.recv(), count, ncclFloat32,
+                                              ncclSum));
 }
 
 #endif // ENABLE_ROCSHMEM_GIN

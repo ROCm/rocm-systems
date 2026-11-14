@@ -9,6 +9,7 @@
 #define NCCL_SYMMETRIC_SCHED_H_
 
 #include "device.h"
+#include "dev_runtime.h"
 #include "nccl.h"
 #include "scheduler.h"
 #include "tuning.h"
@@ -231,6 +232,13 @@ ncclResult_t ncclMakeSymmetricTaskList(struct ncclComm* comm, struct ncclTaskCol
                       ncclAllGatherIsInPlace(headTask->sendbuff, headTask->recvbuff, comm->rank,
                                              headTask->count * ncclTypeSize(headTask->datatype));
       input.symAligned16B = symBatchAligned16B(comm, headTask);
+      input.ginWindowsUnregistered = false;
+      for (struct ncclTaskColl* scan = headTask; scan != nullptr; scan = scan->next) {
+        if (ncclDevrWindowMissingGinSegments(scan->sendWin) || ncclDevrWindowMissingGinSegments(scan->recvWin)) {
+          input.ginWindowsUnregistered = true;
+        }
+        if (scan->isSymLast) break;
+      }
       input.minCTAs = headTask->minCTAs;
       input.maxCTAs = headTask->maxCTAs;
       input.CTAPolicy = headTask->CTAPolicy;

@@ -12,6 +12,7 @@
 #include "algorithms/gin/gin_alltoall.h"
 #include "comm.h"
 #include "dev_runtime.h"
+#include "dev_runtime_internal.h"
 #include "gtest/gtest.h"
 
 namespace RcclUnitTesting
@@ -191,6 +192,19 @@ TEST_F(GinAlltoAllEligibilityTest, SdmaActiveButNotDefault)
 TEST_F(GinAlltoAllEligibilityTest, GinFinalized)
 {
     mockComm_.sharedRes.ginState.finalized = true;
+    EXPECT_FALSE(eligible(kCount));
+}
+
+// HIP leaves GPU-only multi-segment windows unregistered with GIN, so this gate
+// is what keeps them off the kernel.
+TEST_F(GinAlltoAllEligibilityTest, GpuOnlyMultiSegment)
+{
+    if (paramRejectsAll()) GTEST_SKIP() << "a pinned param rejects every size";
+    ncclDevrMemory mem{};
+    mem.maxGlobalNumSegments = 1;
+    mockComm_.window.memory = &mem;
+    EXPECT_TRUE(eligible(kCount));
+    mem.maxGlobalNumSegments = 2;
     EXPECT_FALSE(eligible(kCount));
 }
 

@@ -445,7 +445,7 @@ static bool ncclSymkImplemented(ncclFunc_t coll, int /*ncclDevRedOp_t*/ red, ncc
 }
 
 uint32_t ncclSymkMask(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRedOp_t*/ red, ncclDataType_t ty,
-                      size_t nElts, bool symAligned16B) {
+                      size_t nElts, bool symAligned16B, bool ginWindowsUnregistered) {
   uint32_t kmask = kernelMask_coll(coll);
 
   bool hasSTMC = comm->symkState.hasLsaMultimem;
@@ -490,7 +490,8 @@ uint32_t ncclSymkMask(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRedOp
   // Tma kernel degrades to normal selection instead of ending up with an empty mask.
   if (ncclSymkTmaForced(comm) && (kmask & kernelMask_Tma) != 0) kmask &= kernelMask_Tma;
 
-  bool hasGin = ncclParamSymGinKernelsEnable() != 0 && !comm->symkState.ginBackendUnsupported;
+  bool hasGin = ncclParamSymGinKernelsEnable() != 0 && !comm->symkState.ginBackendUnsupported &&
+                !ginWindowsUnregistered;
   if (!hasGin) kmask &= ~kernelMask_Gin;
   bool needGin = ncclTeamLsa(comm).nRanks < comm->nRanks;
   kmask &= needGin ? kernelMask_Gin : ~kernelMask_Gin;

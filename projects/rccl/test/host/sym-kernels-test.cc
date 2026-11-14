@@ -376,6 +376,25 @@ TEST_F(SymKernelMaskTest, NeedGinTrue_HasGinFalse_EverythingCleared) {
   EXPECT_EQ(kmask, 0u);
 }
 
+// A window left without GIN segments must not keep the rail kernels: their put
+// would read a null segment table. The default argument still keeps them.
+TEST_F(SymKernelMaskTest, NeedGinTrue_UnregisteredGinWindow_EverythingCleared) {
+  ScopedHook teamLsa(g_ncclTeamLsa, [](ncclComm_t) {
+    ncclTeam_t t{};
+    t.nRanks = 2;
+    return t;
+  });
+  ScopedHook loadParam(g_loadParam, SymGinKernelsEnable(1));
+  uint32_t blocked =
+      ncclSymkMask(comm_.get(), ncclFuncAllGather, ncclDevSum, kTy, /*nElts=*/1024, /*symAligned16B=*/true,
+                   /*ginWindowsUnregistered=*/true);
+  EXPECT_EQ(blocked, 0u);
+  uint32_t kept =
+      ncclSymkMask(comm_.get(), ncclFuncAllGather, ncclDevSum, kTy, /*nElts=*/1024, /*symAligned16B=*/true,
+                   /*ginWindowsUnregistered=*/false);
+  EXPECT_TRUE(KernelBitSet(kept, ncclSymkKernelId_AllGather_RailRing_LsaST));
+}
+
 // Init marks the GIN backend unsupported (Anvil SDMA): the same empty mask as SYM_GIN_KERNELS_ENABLE=0.
 TEST_F(SymKernelMaskTest, NeedGinTrue_GinBackendUnsupported_EverythingCleared) {
   ScopedHook teamLsa(g_ncclTeamLsa, [](ncclComm_t) {
