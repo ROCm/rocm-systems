@@ -133,6 +133,7 @@ jobs:
           # Empty on forked PRs (secrets unavailable) — only the notification
           # is skipped; tests always run regardless.
           NOTIFY_WEBHOOK: ${{ inputs.notify_webhook || secrets.RCCL_CI_TEAMS_WEBHOOK }}
+          TEST_SCOPE: ${{ inputs.test_scope || 'smoke' }}
         run: |
           # The dynamic linker caches LD_LIBRARY_PATH at process startup.
           # PyTorch's import chain (rocm_sdk.preload_libraries -> ctypes.CDLL)
@@ -153,7 +154,7 @@ jobs:
             --artifact-dir ${{ env.OUTPUT_ARTIFACTS_DIR }} \
             --pytorch-src ${{ env.PYTORCH_SRC }} \
             --results-log ${{ env.PYTORCH_SRC }}/pytorch_c10d_results.log \
-            --test-scope ${{ inputs.test_scope || 'smoke' }} \
+            --test-scope "${TEST_SCOPE}" \
             "${NOTIFY_ARGS[@]}"
 
       - name: Upload test results

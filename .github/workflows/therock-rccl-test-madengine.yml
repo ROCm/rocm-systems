@@ -140,9 +140,11 @@ jobs:
           path: rocm-systems
 
       - name: Validate arch
+        env:
+          AMDGPU_FAMILIES: ${{ inputs.amdgpu_families }}
         run: |
-          if [ "${{ inputs.amdgpu_families }}" != "gfx950-dcgpu" ]; then
-            echo "Unsupported arch for MADEngine: ${{ inputs.amdgpu_families }}"
+          if [ "${AMDGPU_FAMILIES}" != "gfx950-dcgpu" ]; then
+            echo "Unsupported arch for MADEngine: ${AMDGPU_FAMILIES}"
             exit 1
           fi
 
@@ -202,18 +204,19 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GITHUB_TOKEN: ${{ github.token }}
+          ARTIFACT_GROUP: ${{ inputs.artifact_group }}
         run: |
           run_id="$(python3 -c "
-          import sys, contextlib
+          import os, sys, contextlib
           sys.path.insert(0, 'build_tools')
           from find_latest_artifacts import find_latest_artifacts
           with contextlib.redirect_stdout(sys.stderr):
               results = find_latest_artifacts(
-                  artifact_groups=['${{ inputs.artifact_group }}'],
+                  artifact_groups=[os.environ['ARTIFACT_GROUP']],
                   verbose=True,
               )
           if not results:
-              print('No artifacts found for ${{ inputs.artifact_group }}', file=sys.stderr)
+              print('No artifacts found for ' + os.environ['ARTIFACT_GROUP'], file=sys.stderr)
               sys.exit(1)
           print(results[0].workflow_run_id)
           ")"
@@ -223,10 +226,11 @@ jobs:
       - name: Fetch RCCL artifacts
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          ARTIFACT_GROUP: ${{ inputs.artifact_group }}
         run: |
           python3 build_tools/install_rocm_from_artifacts.py \
             --run-id="${ARTIFACT_RUN_ID}" \
-            --artifact-group="${{ inputs.artifact_group }}" \
+            --artifact-group="${ARTIFACT_GROUP}" \
             --output-dir="${OUTPUT_ARTIFACTS_DIR}" \
             --rccl
 

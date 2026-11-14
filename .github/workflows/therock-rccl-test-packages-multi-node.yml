@@ -53,8 +53,10 @@ jobs:
 
       # Centralized arch-specific configuration
       - name: Set arch-specific paths
+        env:
+          INPUTS_AMDGPU_FAMILIES: ${{ inputs.amdgpu_families }}
         run: |
-          case "${{ inputs.amdgpu_families }}" in
+          case "${INPUTS_AMDGPU_FAMILIES}" in
             gfx950-dcgpu)
               echo "OUTPUT_ARTIFACTS_DIR=/apps/cvs_tests/dist_new/dist/rocm" >> $GITHUB_ENV
               echo "AWS_SHARED_CREDENTIALS_FILE=/apps/cvs_tests/awsconfig/credentials.ini" >> $GITHUB_ENV
@@ -70,7 +72,7 @@ jobs:
               ;;
 
             *)
-              echo "Unsupported arch: ${{ inputs.amdgpu_families }}"
+              echo "Unsupported arch: ${INPUTS_AMDGPU_FAMILIES}"
               exit 1
               ;;
           esac
@@ -131,11 +133,13 @@ jobs:
       - name: Post test report upload
         if: always()
         working-directory: ${{ github.workspace }}
+        env:
+          INPUTS_AMDGPU_FAMILIES: ${{ inputs.amdgpu_families }}
         run: |
           export PYTHONPATH="${PYTHONPATH}:${{ github.workspace }}/build_tools"
           python3 build_tools/github_actions/upload_test_report_script.py \
             --run-id "${{ github.run_id }}" \
-            --amdgpu-family "${{ inputs.amdgpu_families }}" \
+            --amdgpu-family "${INPUTS_AMDGPU_FAMILIES}" \
             --report-path "${REPORT_PATH}" \
             --log-destination "${LOG_DEST}" \
             --index-file-name "index_rccl_test_report.html"
