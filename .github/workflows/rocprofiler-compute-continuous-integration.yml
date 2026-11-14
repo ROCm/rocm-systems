@@ -98,7 +98,7 @@ jobs:
       gfx1151_runner: ${{ steps.runner.outputs.gfx1151_runner }}
     steps:
       - name: Checkout workflow actions
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           sparse-checkout: .github/actions/rocprofiler-sdk-util/resolve-ci-config
           set-safe-directory: true
@@ -117,7 +117,7 @@ jobs:
       mode: ${{ steps.generate_matrix.outputs.mode }}
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           sparse-checkout: projects/rocprofiler-compute/.github
 
@@ -216,7 +216,7 @@ jobs:
         --pull always
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.event_name == 'schedule' && 'rocprofiler-compute-develop' || github.ref }}
           sparse-checkout: |

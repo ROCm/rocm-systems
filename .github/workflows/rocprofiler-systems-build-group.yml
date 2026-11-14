@@ -82,7 +82,7 @@ jobs:
       # Step anchors: steps shared identically with the system-deps job are
       # anchored here (_step-*) and aliased below to avoid duplication.
       - &_step-checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           sparse-checkout: |
             projects/rocprofiler-systems/
@@ -248,7 +248,7 @@ jobs:
       - &_step-upload-junit-results
         name: Upload JUnit test results
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: junit-build-${{ inputs.group_key }}-${{ github.job }}-${{ strategy.job-index }}
           path: projects/rocprofiler-systems/build/test-results.xml
@@ -351,7 +351,7 @@ jobs:
         name: CTest artifacts
         if: failure()
         continue-on-error: true
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ctest-${{ inputs.group_key }}-${{ github.job }}-${{ strategy.job-index }}-log
           path: |
@@ -361,7 +361,7 @@ jobs:
         name: Data artifacts
         if: failure()
         continue-on-error: true
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: data-${{ inputs.group_key }}-${{ github.job }}-${{ strategy.job-index }}-files
           path: |
