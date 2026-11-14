@@ -2033,6 +2033,12 @@ memory:
   Unit_hipArray3DCreate_Negative_Non2DTextureGather:
     <<: *level_default
     tags: [image, P1]
+  Unit_hipMalloc3DArray_MaxExtent_RoundTrip:
+    <<: *level_default
+    tags: [transfer, image, P1]
+  Unit_hipMalloc3DArray_Layered_MaxExtent_RoundTrip:
+    <<: *level_default
+    tags: [transfer, image, P1]
   Unit_hipDrvMemcpy3D_Positive_Basic:
     <<: *level_default
     tags: [transfer, P1]
