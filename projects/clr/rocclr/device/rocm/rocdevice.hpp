@@ -71,9 +71,10 @@ class ProfilingSignal : public amd::ReferenceCountedObject {
   uint32_t dispatch_slot_ = kNoDispatchSlot;
   std::recursive_mutex lock_;  //!< Signal lock for update
 
-  //! Reuse bookkeeping, touched only by the owning RetiringSignalTracker. Kept out of flags_
-  //! because timestamp processing updates flags_ from other threads.
-  uint64_t use_seq_ = 0;         //!< Queue sequence of the last use, 0 if unused
+  //! Reuse bookkeeping, touched only by the owning tracker: use_seq_ and use_fence_ by every
+  //! tracker, the rest by RetiringSignalTracker. Kept out of flags_ because timestamp processing
+  //! updates flags_ from other threads.
+  uint64_t use_seq_ = 0;         //!< Queue sequence of the last use, 0 if none or rolled back
   uint64_t use_aql_slot_ = kInvalidAqlSlot;  //!< AQL packet completing the use, if it retires
                                              //!< in queue order
   uint64_t use_queue_gen_ = 0;   //!< HW queue generation the packet was submitted to

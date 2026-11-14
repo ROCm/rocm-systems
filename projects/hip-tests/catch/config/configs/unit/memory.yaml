@@ -902,6 +902,12 @@ memory:
   Unit_hipMemcpyBatchAsync_P2P_IndirectCopy:
     <<: *level_default
     tags: [transfer, multigpu]
+  Unit_hipMemcpyBatchAsync_P2P_Allgather_BackToBack:
+    <<: *level_default
+    tags: [transfer, multigpu, stream]
+  Unit_hipMemcpyBatchAsync_P2P_Allgather_BackToBack_AllDevices:
+    <<: *level_3
+    tags: [transfer, multigpu, stream]
   Unit_hipMemcpyBatchAsync_Negative:
     <<: *level_default
     tags: [transfer]
@@ -926,6 +932,12 @@ memory:
   Unit_hipMemcpyBatchAsync_Mixed_Functional:
     <<: *level_default
     tags: [transfer]
+  Unit_hipMemcpyBatchAsync_MixedDirections_BackToBack:
+    <<: *level_default
+    tags: [transfer, stream]
+  Unit_hipMemcpyBatchAsync_Mixed_QueuedShaderWait_BackToBack:
+    <<: *level_default
+    tags: [transfer, stream]
   Unit_hipMemcpyBatchAsync_Stream:
     <<: *level_default
     tags: [transfer, stream]
