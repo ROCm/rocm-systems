@@ -192,8 +192,11 @@ TEST(cuidtstUnprivileged, TemporaryNeedsAValidMachineId) {
   EXPECT_EQ(std::memcmp(out, kMachineId, 16), 0);
 }
 
-// One warning for the host, not one per component.
-TEST(cuidtstUnprivileged, NoMachineIdWarnsOnce) {
+// A host without a machine-id is an ordinary container. The library is linked
+// into other programs, so by default it says nothing on their stderr; the
+// status is the answer.
+TEST(cuidtstUnprivileged, NoMachineIdIsSilentByDefault) {
+  ASSERT_GE(Logger::instance().level(), WARN);
   ::testing::internal::CaptureStderr();
   for (int i = 0; i < 3; ++i) {
     uint8_t out[16];
@@ -201,11 +204,7 @@ TEST(cuidtstUnprivileged, NoMachineIdWarnsOnce) {
               AMDCUID_STATUS_HW_FINGERPRINT_NOT_FOUND);
   }
   const std::string err = ::testing::internal::GetCapturedStderr();
-  size_t count = 0;
-  for (size_t at = err.find("No machine identity"); at != std::string::npos;
-       at = err.find("No machine identity", at + 1))
-    ++count;
-  EXPECT_LE(count, 1u) << err;
+  EXPECT_EQ(err.find("No machine identity"), std::string::npos) << err;
 }
 
 TEST(cuidtstUnprivileged, BdfWithAVmdSegmentParses) {

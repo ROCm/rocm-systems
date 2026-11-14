@@ -56,7 +56,11 @@ amdcuid_status_t CuidNic::discover(const std::string& nic_base_path, std::vector
   for (const auto& nic : by_bdf) {
     amdcuid_nic_info info = {};
     const auto status = discover_single(&info, nic.second);
-    if (status != AMDCUID_STATUS_SUCCESS) return status;
+    if (status != AMDCUID_STATUS_SUCCESS) {
+      LOG(DEBUG, "CUID discovery: skipping NIC " << nic.first << " ("
+                                                 << amdcuid_status_to_string(status) << ")");
+      continue;
+    }
     nics.emplace_back(std::make_shared<CuidNic>(info));
   }
   if (nics.size() == 0) return AMDCUID_STATUS_DEVICE_NOT_FOUND;
