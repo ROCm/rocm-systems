@@ -13,6 +13,9 @@ __shared__ ncclShmemData ncclShmem;
 #if __CUDA_ARCH__ < 700
 __shared__ ulong2 ncclShmemPerWarp[ncclShmemScratchWarpSize() * (NCCL_MAX_NTHREADS / WARP_SIZE) / sizeof(ulong2)];
 #endif
+#if RCCL_HAVE_NAMED_BARRIERS
+__shared__ __amdgpu_named_workgroup_barrier_t ncclNamedBarriers[NCCL_NUM_NAMED_BARRIERS];
+#endif
 #endif
 
 struct RunWorkNop {
