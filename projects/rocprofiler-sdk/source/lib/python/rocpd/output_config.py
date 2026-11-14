@@ -1,7 +1,7 @@
 ###############################################################################
 # MIT License
 #
-# Copyright (c) 2023 Advanced Micro Devices, Inc.
+# Copyright (c) 2023-2026 Advanced Micro Devices, Inc.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -33,7 +33,7 @@ try:
 except Exception:
     pass
 
-from . import libpyrocpd
+from . import bindings
 
 __all__ = ["format_path", "output_config", "add_args", "add_generic_args"]
 
@@ -50,10 +50,10 @@ def _generate_attribute_docs(data):
     return "\n\t- ".join(properties)
 
 
-class output_config(libpyrocpd.output_config):
+class output_config(bindings.output_config):
     __doc__ = f"""Output configuration
 
-    Read/Write properties:\n\t- {_generate_attribute_docs(libpyrocpd.output_config.__dict__)}
+    Read/Write properties:\n\t- {_generate_attribute_docs(bindings.output_config.__dict__)}
 
     Example:
         # folder for output data
@@ -77,11 +77,11 @@ class output_config(libpyrocpd.output_config):
             if hasattr(self, key):
                 if key == "agent_index_value":
                     if itr == "absolute":
-                        setattr(self, key, libpyrocpd.agent_indexing.node)
+                        setattr(self, key, bindings.agent_indexing.node)
                     elif itr == "type-relative":
-                        setattr(self, key, libpyrocpd.agent_indexing.logical_node_type)
+                        setattr(self, key, bindings.agent_indexing.logical_node_type)
                     else:
-                        setattr(self, key, libpyrocpd.agent_indexing.logical_node)
+                        setattr(self, key, bindings.agent_indexing.logical_node)
                 else:
                     setattr(self, key, itr)
             elif _strict:
@@ -90,7 +90,7 @@ class output_config(libpyrocpd.output_config):
 
 
 def format_path(path, tag=os.path.basename(sys.executable)):
-    return libpyrocpd.format_path(path, tag)
+    return bindings.format_path(path, tag)
 
 
 def sanitize_input_list(input: list):
@@ -176,9 +176,9 @@ def add_generic_args(parser):
         default=False,
     )
 
-    generic_options = parser.add_argument_group("Generic options")
+    agent_index_options = parser.add_argument_group("Agent index options")
 
-    generic_options.add_argument(
+    agent_index_options.add_argument(
         "--agent-index-value",
         choices=("absolute", "relative", "type-relative"),
         help="""Device identification format in CSV/Perfetto/OTF2 output (default: relative):
