@@ -22,6 +22,7 @@
 #include "library/components/callchain.hpp"
 #include "library/perf.hpp"
 #include "library/pmc/sampler.hpp"
+#include "library/process_sampler.hpp"
 #include "library/runtime.hpp"
 #include "library/thread_data.hpp"
 #include "library/thread_info.hpp"
@@ -62,6 +63,7 @@
 #include <array>
 #include <atomic>
 #include <csignal>
+#include <cstdlib>
 #include <cstring>
 #include <ctime>
 #include <initializer_list>
@@ -806,9 +808,17 @@ configure(bool _setup, std::int64_t _tid)
             {
                 LOG_CRITICAL("perf backend for overflow failed to activate: {}",
                              *_perf_open_error);
-                ::rocprofsys::state::process::set(
-                    ::rocprofsys::state::process::Finalized);
-                std::exit(1);
+                // Keep the state below Finalized so the exit hook still runs
+                // rocprofsys_finalize(). During startup nothing else joins the process
+                // sampler, so stop it here: a joinable thread destroyed in exit() calls
+                // std::terminate().
+                _perf_sampler.reset();
+                if(::rocprofsys::state::process::get() !=
+                   ::rocprofsys::state::process::Active)
+                {
+                    ::rocprofsys::process_sampler::sampler::shutdown();
+                }
+                std::exit(EXIT_FAILURE);
             }
 
             _perf_sampler->set_ready_signal(get_sampling_overflow_signal());
