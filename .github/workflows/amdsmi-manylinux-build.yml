@@ -86,7 +86,7 @@ jobs:
       # rocm-systems is a large monorepo; the wheel build only needs the amdsmi
       # project and the CUID sources it builds in-tree, so sparse-checkout keeps
       # the fetch cheap.
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           sparse-checkout: |
             projects/amdsmi
@@ -148,7 +148,7 @@ jobs:
       # Not consumed by any downstream job; kept so a reviewer can download the
       # built wheel from a run. Named by commit SHA for traceability.
       - name: Upload wheels
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ${{matrix.target.artifact-prefix}}-${{github.sha}}
           path: ${{github.workspace}}/wheels/*.whl

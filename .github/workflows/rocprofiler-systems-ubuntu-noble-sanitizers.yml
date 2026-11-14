@@ -39,7 +39,7 @@ jobs:
           apt-get install -y --no-install-recommends git ca-certificates
           git --version
 
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           sparse-checkout: |
             projects/rocprofiler-systems/
@@ -293,7 +293,7 @@ jobs:
 
       - name: Upload JUnit test results
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: junit-sanitizer-${{ matrix.sanitizer-type }}-${{ github.job }}-${{ strategy.job-index }}
           path: projects/rocprofiler-systems/build/test-results.xml
@@ -308,7 +308,7 @@ jobs:
 
       - name: Upload sanitizer summary status
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: sanitizer-summary-${{ matrix.sanitizer-type }}-${{ github.job }}-${{ strategy.job-index }}
           path: sanitizer-summary/${{ matrix.sanitizer-type }}.json
@@ -327,7 +327,7 @@ jobs:
       - name: CTest Artifacts
         if: failure()
         continue-on-error: True
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ctest-${{ matrix.sanitizer-type }}-${{ github.job }}-${{ strategy.job-index }}-log
           path: |
@@ -336,7 +336,7 @@ jobs:
       - name: Data Artifacts
         if: failure()
         continue-on-error: True
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: data-${{ matrix.sanitizer-type }}-${{ github.job }}-${{ strategy.job-index }}-files
           path: |

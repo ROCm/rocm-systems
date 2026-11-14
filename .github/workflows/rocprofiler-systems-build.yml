@@ -65,7 +65,7 @@ jobs:
       pull-requests: write
     steps:
       - name: Checkout summary comment action
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           sparse-checkout: |
             .github/actions/upsert-ci-summary-comment
@@ -108,7 +108,7 @@ jobs:
       rhel_has_system_deps: ${{ steps.rhel.outputs.has_system_deps }}
     steps:
       - name: Checkout matrix helper
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           sparse-checkout: |
             projects/rocprofiler-systems/.github/ci-build-matrix.json
@@ -228,7 +228,7 @@ jobs:
       CCACHE_DIR: ${{ github.workspace }}/.ccache
 
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           sparse-checkout: |
             projects/rocprofiler-systems
@@ -358,7 +358,7 @@ jobs:
       pull-requests: write
     steps:
       - name: Checkout summary tooling
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           sparse-checkout: |
             projects/rocprofiler-systems/scripts/summarize-junit-results.py
@@ -366,7 +366,7 @@ jobs:
           sparse-checkout-cone-mode: false
 
       - name: Download build JUnit artifacts
-        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         continue-on-error: true
         with:
           pattern: junit-build-*
@@ -374,7 +374,7 @@ jobs:
           merge-multiple: false
 
       - name: Download sanitizer JUnit artifacts
-        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         continue-on-error: true
         with:
           pattern: junit-sanitizer-*
@@ -382,7 +382,7 @@ jobs:
           merge-multiple: false
 
       - name: Download sanitizer status artifacts
-        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         continue-on-error: true
         with:
           pattern: sanitizer-summary-*
