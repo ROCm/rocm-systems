@@ -635,6 +635,10 @@ class GinMPIDeviceTests : public MPITestBase {
       putBasicConsumerKernel<<<kGinKernelBlocks, kGinKernelThreads, 0, stream>>>(
           kSigIdx, /*expectedSignalValue=*/1, devComm);
     }
+    // A launch that fails (for example hipErrorInvalidImage when no code object
+    // matches the device) enqueues nothing, so the sync below would still pass and
+    // the failure would surface only as a byte mismatch on rank 1.
+    ASSERT_MPI_EQ(hipSuccess, hipGetLastError());
     ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(stream));
 
     // Sync so rank 1's verify isn't racing rank 0's kernel completion.
