@@ -58,6 +58,9 @@ struct State {
   int bootstrapAllGatherCalls = 0;
   int lastWideAllGatherSize = 0;
   int wideAllGatherOverruns = 0;
+  int wideAllGatherSlotTagBase = -1;
+  std::vector<int> factoryGatheredDeviceIds;
+  std::vector<uint64_t> factoryGatheredHostIds;
   int intraNodeAllGatherCalls = 0;
   void* lsaSelfAddr = reinterpret_cast<void*>(0x70001000ULL);
   bool useFabricMem = false;
@@ -145,6 +148,9 @@ int GetLastIntraNodeAllGatherNranks() { return g.lastIntraNodeAllGather.nranks; 
 int GetBootstrapAllGatherCalls() { return g.bootstrapAllGatherCalls; }
 int GetLastWideAllGatherSize() { return g.lastWideAllGatherSize; }
 int GetWideAllGatherOverruns() { return g.wideAllGatherOverruns; }
+void SetWideAllGatherSlotTagBase(int base) { g.wideAllGatherSlotTagBase = base; }
+const std::vector<int>& GetFactoryGatheredDeviceIds() { return g.factoryGatheredDeviceIds; }
+const std::vector<uint64_t>& GetFactoryGatheredHostIds() { return g.factoryGatheredHostIds; }
 int GetIntraNodeAllGatherCalls() { return g.intraNodeAllGatherCalls; }
 const std::vector<int>& GetLastIntraNodeBarrierRanks() { return g.lastIntraNodeBarrier.ranks; }
 int GetLastIntraNodeBarrierRank() { return g.lastIntraNodeBarrier.rank; }
@@ -271,6 +277,17 @@ static ncclResult_t stubWideAllGather(void* allData, int nranks, int size) {
   // that into a nonzero "yes" vote.
   unsigned char* bytes = static_cast<unsigned char*>(allData);
   std::vector<unsigned char> zero(slot, 0);
+  // Tag mode: each peer reports its world rank, so a caller that reads the
+  // wrong slot sees the wrong tag. Only the caller's slot is nonzero on entry.
+  if (GinAnvilPluginStubs::g.wideAllGatherSlotTagBase >= 0 && slot >= sizeof(int32_t)) {
+    for (int i = 0; i < nranks; ++i) {
+      unsigned char* p = bytes + static_cast<size_t>(i) * slot;
+      if (memcmp(p, zero.data(), slot) != 0) continue;
+      const int32_t tag = GinAnvilPluginStubs::g.wideAllGatherSlotTagBase + i;
+      memcpy(p, &tag, sizeof(tag));
+    }
+    return ncclSuccess;
+  }
   const unsigned char* src = nullptr;
   for (int i = 0; i < nranks && src == nullptr; ++i) {
     const unsigned char* p = bytes + static_cast<size_t>(i) * slot;
@@ -364,6 +381,12 @@ extern "C" int gin_anvil_sdma_create(int nRanks, int myRank, int my_device_id, u
   std::vector<gin_anvil_sdma_peer_t> peers(static_cast<size_t>(nRanks), gin_anvil_sdma_peer_t{0, 0, 0});
   peers[static_cast<size_t>(myRank)] = gin_anvil_sdma_peer_t{my_device_id, 0, my_host_id};
   if (allgather(allgather_ctx, peers.data(), sizeof(gin_anvil_sdma_peer_t)) != 0) return -1;
+  GinAnvilPluginStubs::g.factoryGatheredDeviceIds.clear();
+  GinAnvilPluginStubs::g.factoryGatheredHostIds.clear();
+  for (const gin_anvil_sdma_peer_t& p : peers) {
+    GinAnvilPluginStubs::g.factoryGatheredDeviceIds.push_back(p.device_id);
+    GinAnvilPluginStubs::g.factoryGatheredHostIds.push_back(p.host_id);
+  }
   for (int i = 0; i < nRanks; ++i) {
     if (peers[static_cast<size_t>(i)].device_id < 0) return -1;
   }

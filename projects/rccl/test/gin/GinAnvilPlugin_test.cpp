@@ -309,19 +309,36 @@ TEST_F(GinAnvilPluginTest, Connect_PassesOwnHostHash) {
 
 // Under NCCL_GIN_CONNECTION_RAIL the GIN team is smaller than the communicator,
 // but bootstrapAllGather writes one record per communicator rank, so the
-// factory's team-sized gather has to go through a world-sized buffer.
+// factory's team-sized gather has to go through a world-sized buffer. World
+// rank 3 is team rank 1 of the rail {1, 3}, so team ranks 0 and 1 must read
+// world slots 1 and 3.
 TEST_F(GinAnvilPluginTest, Connect_RailTeamGathersIntoWorldBuffer) {
+  constexpr uint64_t kHost = 0x3333;
+  constexpr int kTagBase = 100;
   setupFabricComm(4);
   mockComm_.comm.globalGinSupport = NCCL_GIN_CONNECTION_RAIL;
   mockComm_.comm.contiguousRanksPerHost = 2;
   mockComm_.comm.rank = 3;
+  ncclPeerInfo peers[4] = {};
+  for (ncclPeerInfo& p : peers) p.hostHash = kHost + mockComm_.comm.commHash;
+  mockComm_.comm.peerInfo = peers;
+  GinAnvilPluginStubs::SetWideAllGatherSlotTagBase(kTagBase);
   void* ictx = nullptr;
   initCtx(&ictx);
   void* coll = nullptr;
   connectColl(ictx, &coll, /*nranks=*/2, /*ginRank=*/1);
   ASSERT_NE(coll, nullptr);
   EXPECT_EQ(GinAnvilPluginStubs::GetWideAllGatherOverruns(), 0);
+  const std::vector<int>& devs = GinAnvilPluginStubs::GetFactoryGatheredDeviceIds();
+  const std::vector<uint64_t>& hosts = GinAnvilPluginStubs::GetFactoryGatheredHostIds();
+  ASSERT_EQ(devs.size(), 2u);
+  ASSERT_EQ(hosts.size(), 2u);
+  EXPECT_EQ(devs[0], kTagBase + 1);
+  EXPECT_EQ(hosts[0], 0u);
+  EXPECT_EQ(hosts[1], kHost);
+  EXPECT_NE(devs[1], kTagBase + 3);
   EXPECT_EQ(plugin_.closeColl(coll), ncclSuccess);
+  mockComm_.comm.peerInfo = nullptr;
   EXPECT_EQ(plugin_.finalize(ictx), ncclSuccess);
 }
 

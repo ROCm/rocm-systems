@@ -67,6 +67,12 @@ int GetBootstrapAllGatherCalls();
 int GetLastWideAllGatherSize();
 // Non-int bootstrapAllGather calls whose buffer could not hold one slot per world rank.
 int GetWideAllGatherOverruns();
+// With base >= 0, each non-int bootstrapAllGather fills every empty slot i with
+// device_id base + i instead of copying the caller's record (default -1: copy).
+void SetWideAllGatherSlotTagBase(int base);
+// Per-rank device_id and host_id the last gin_anvil_sdma_create gathered.
+const std::vector<int>& GetFactoryGatheredDeviceIds();
+const std::vector<uint64_t>& GetFactoryGatheredHostIds();
 int GetIntraNodeAllGatherCalls();
 const std::vector<int>& GetLastIntraNodeBarrierRanks();
 int GetLastIntraNodeBarrierRank();
