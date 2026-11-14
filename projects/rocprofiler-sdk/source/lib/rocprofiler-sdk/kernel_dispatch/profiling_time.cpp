@@ -60,7 +60,8 @@ get_dispatch_time(hsa_agent_t             _hsa_agent,
             "hsa_amd_profiling_get_dispatch_time",
             _profile_time,
             tracing::profiling_time{
-                HSA_STATUS_SUCCESS, _baseline.value_or(dispatch_time.start), ts});
+                HSA_STATUS_SUCCESS, _baseline.value_or(dispatch_time.start), ts},
+            tracing::profiling_time_bounds_policy::clip);
     }
     else
     {
