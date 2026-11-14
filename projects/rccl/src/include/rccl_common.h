@@ -26,6 +26,7 @@ THE SOFTWARE.
 #include "param.h"
 #include "core.h"
 #include "rccl_decision.h"
+#include "nccl_tuner.h"
 #include "sym_kernels.h"
 #include "archinfo.h"
 
