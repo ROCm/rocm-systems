@@ -28,7 +28,7 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <experimental/filesystem>
+#include <filesystem>
 #include <fstream>
 #include <memory>
 #include <optional>
@@ -51,7 +51,7 @@
     if ((call) != 0) fatal("%s", roctracer_error_string());                                        \
   } while (false)
 
-namespace fs = std::experimental::filesystem;
+namespace fs = std::filesystem;
 
 namespace {
 

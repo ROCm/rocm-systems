@@ -8,6 +8,7 @@
 #include <cassert>
 #include <cinttypes>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 
 #include "rocm_smi/rocm_smi.h"
