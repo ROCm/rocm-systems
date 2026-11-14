@@ -143,6 +143,12 @@ pub(crate) struct TestDriver {
     kind: EndpointKind,
     lifetime: DriverContextLifetime,
     host_registration: bool,
+    owned_allocation: bool,
+    pub(crate) advice_enabled: bool,
+    pub(crate) advice_prefetch_gate: Option<Arc<(std::sync::Barrier, std::sync::Barrier)>>,
+    pub(crate) advice_calls: AtomicUsize,
+    pub(crate) advice_results: Mutex<Vec<crate::memory::advice::AdviceValue>>,
+    pub(crate) advice_changes: Mutex<Vec<crate::memory::advice::AdviceChange>>,
     pub(crate) shutdowns: Arc<AtomicUsize>,
     pub(crate) fail_shutdown: Arc<AtomicBool>,
     pub(crate) enumerations: Arc<AtomicUsize>,
@@ -160,6 +166,7 @@ pub(crate) struct TestDriver {
 #[derive(Clone)]
 pub(crate) struct TestDevice {
     id: [u8; 16],
+    pub(crate) asic_family_id: u32,
     events: Arc<TestEvents>,
 }
 
@@ -310,6 +317,12 @@ impl TestDriver {
             kind,
             lifetime,
             host_registration: false,
+            owned_allocation: false,
+            advice_enabled: false,
+            advice_prefetch_gate: None,
+            advice_calls: AtomicUsize::new(0),
+            advice_results: Mutex::new(Vec::new()),
+            advice_changes: Mutex::new(Vec::new()),
             shutdowns: Arc::new(AtomicUsize::new(0)),
             fail_shutdown: Arc::new(AtomicBool::new(false)),
             enumerations: Arc::new(AtomicUsize::new(0)),
@@ -366,6 +379,11 @@ impl TestDriver {
         Ok(state.waiters != 0)
     }
 
+    pub(crate) fn with_owned_allocation(mut self) -> Self {
+        self.owned_allocation = true;
+        self
+    }
+
     pub(crate) fn with_host_registration(mut self) -> Self {
         self.host_registration = true;
         self
@@ -411,6 +429,7 @@ impl TestDriver {
                 doorbell_host_address: 0x7000,
                 doorbell_device_address: request.device_producer.then_some(0x8000),
                 doorbell_width: QueueAccessWidth::Bits64,
+                host_publication: crate::device::gpu::queue::HostQueuePublication::Ordered64BitMmio,
             },
             fail_destroy: self.fail_queue_destroy.clone(),
             destroys: self.queue_destroys.clone(),
@@ -507,7 +526,6 @@ impl Driver for TestDriver {
     fn populate_endpoint(&self, endpoint: &mut Endpoint) -> Result<(), Error> {
         endpoint.product_name = Some("Test endpoint".to_owned());
         if let EndpointKind::Gpu { info } = &mut endpoint.kind {
-            info.drm_asic_family_id = Some(42);
             info.counter_frequency_hz = Some(1_000_000);
         }
         Ok(())
@@ -522,6 +540,7 @@ impl Driver for TestDriver {
         }
         Ok(TestDevice {
             id: self.id,
+            asic_family_id: 42,
             events: self.events.clone(),
         })
     }
@@ -529,6 +548,42 @@ impl Driver for TestDriver {
 
 impl AllocationOperations for TestDriver {
     type Allocation = TestAllocation;
+
+    fn memory_capabilities(
+        &self,
+        endpoint: &Endpoint,
+        request: crate::memory::device::MemoryCapabilityRequest<'_>,
+    ) -> Result<crate::memory::device::DeviceMemoryCapabilities, Error> {
+        use crate::memory::device::{DeviceMemoryCapabilities, MemoryCapabilityRequest};
+        if endpoint.id != self.id || endpoint.driver_instance != self.instance {
+            return Err(super::instance::unsupported_test_gpu());
+        }
+        let registered = match request {
+            MemoryCapabilityRequest::Allocation(MemoryKind::System) if self.owned_allocation => {
+                false
+            }
+            MemoryCapabilityRequest::Registration(_) if self.host_registration => true,
+            _ => return Err(super::instance::unsupported_test_gpu()),
+        };
+        let page = crate::memory::host::host_page_size()?;
+        Ok(DeviceMemoryCapabilities {
+            native: crate::memory::constraints::AllocationLimits {
+                alignment: page,
+                granularity: page,
+                maximum_size: 1 << 30,
+            },
+            maximum_alignment: 1 << 20,
+            logical_alignment: if registered { 1 } else { page },
+            logical_size_granularity: 1,
+            required_access: DeviceAccess::READ,
+            supported_access: DeviceAccess::READ | DeviceAccess::WRITE,
+            host_visible: true,
+            host_cacheability: Some(crate::memory::HostCacheability::WriteBack),
+            host_writable: true,
+            host_coherent: false,
+            queue_storage: false,
+        })
+    }
 
     fn supports_host_registration(&self, _: &Endpoint) -> bool {
         self.host_registration
@@ -575,17 +630,30 @@ impl AllocationOperations for TestDriver {
 
     fn allocate_owned(
         &self,
-        _: &Self::DeviceState,
-        _: &[&Self::DeviceState],
-        _: MemoryKind,
-        _: u64,
-        _: u64,
-        _: DeviceAccess,
+        device: &Self::DeviceState,
+        peers: &[&Self::DeviceState],
+        kind: MemoryKind,
+        size: u64,
+        alignment: u64,
+        _permissions: DeviceAccess,
     ) -> Result<Owned<Self::Allocation>, Error> {
-        Err(Error::Operation {
-            kind: ErrorKind::Unsupported,
-            detail: "test driver has no owned allocation",
-        })
+        if !self.owned_allocation || kind != MemoryKind::System || !peers.is_empty() {
+            return Err(Error::Operation {
+                kind: ErrorKind::Unsupported,
+                detail: "unsupported test allocation",
+            });
+        }
+        let host = crate::memory::host::HostAllocation::allocate(size, alignment)?;
+        let info = host.info();
+        let backing = host.registration_lease()?;
+        Ok(Owned::new(TestAllocation {
+            id: device.id,
+            host_address: info.host_address,
+            device_address: info.host_address as u64,
+            size,
+            released: false,
+            backing: Some(backing),
+        })?)
     }
 
     /// # Safety
@@ -619,5 +687,74 @@ impl AllocationOperations for TestDriver {
             released: false,
             backing: request.backing,
         })?)
+    }
+}
+
+// A clock-only provider needs no PC sampling, SPM, or trap implementation.
+impl super::GpuClockOperations for TestDriver {
+    fn clock_counters(
+        &self,
+        _device: &TestDevice,
+    ) -> Result<crate::device::gpu::profiling::ClockCounters, Error> {
+        Ok(crate::device::gpu::profiling::ClockCounters {
+            gpu: 17,
+            host: 29,
+            system: None,
+            gpu_info: crate::host::clock::ClockInfo {
+                frequency_hz: 25_000_000,
+                counter_bit_count: 64,
+            },
+        })
+    }
+}
+
+impl super::MemoryAdviceOperations for TestDriver {
+    fn advice_capabilities(&self) -> Result<crate::memory::advice::AdviceCapabilities, Error> {
+        Ok(crate::memory::advice::AdviceCapabilities {
+            prefetch_completion: crate::memory::advice::PrefetchCompletion::Migration,
+            range_alignment: 4096,
+            minimum_migration_granularity: 4096,
+            maximum_migration_granularity: 1 << 30,
+        })
+    }
+    fn advice_set(
+        &self,
+        _address: u64,
+        _size: u64,
+        changes: &[crate::memory::advice::AdviceChange],
+    ) -> Result<(), Error> {
+        self.advice_calls.fetch_add(1, Ordering::Relaxed);
+        self.advice_changes
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .extend_from_slice(changes);
+        Ok(())
+    }
+    fn advice_query(
+        &self,
+        _address: u64,
+        _size: u64,
+        _queries: &[crate::memory::advice::AdviceQuery],
+    ) -> Result<Vec<crate::memory::advice::AdviceValue>, Error> {
+        self.advice_calls.fetch_add(1, Ordering::Relaxed);
+        Ok(self
+            .advice_results
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone())
+    }
+    fn advice_prefetch(
+        &self,
+        _address: u64,
+        _size: u64,
+        _location: crate::memory::advice::AdviceLocation,
+        _completion: crate::memory::advice::PrefetchCompletion,
+    ) -> Result<(), Error> {
+        if let Some(gate) = &self.advice_prefetch_gate {
+            gate.0.wait();
+            gate.1.wait();
+        }
+        self.advice_calls.fetch_add(1, Ordering::Relaxed);
+        Ok(())
     }
 }

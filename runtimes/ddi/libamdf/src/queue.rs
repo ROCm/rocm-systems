@@ -115,6 +115,15 @@ struct Mapping {
 }
 
 impl Queue {
+    fn require_current_process(&self) -> Result<(), u64> {
+        #[cfg(test)]
+        if matches!(self.native, NativeQueue::Fixture(_)) {
+            return Ok(());
+        }
+        // SAFETY: A live queue borrows its registered device.
+        unsafe { &*self.device }.require_current_process()
+    }
+
     fn observe_loss(&self) {
         #[cfg(test)]
         if matches!(self.native, NativeQueue::Fixture(_)) {
@@ -225,7 +234,10 @@ fn descriptor(
         if family.minimum_ring_byte_length == family.maximum_ring_byte_length {
             family.minimum_ring_byte_length
         } else {
-            DEFAULT_RING_BYTES
+            DEFAULT_RING_BYTES.clamp(
+                family.minimum_ring_byte_length,
+                family.maximum_ring_byte_length,
+            )
         }
     } else {
         info.ring_byte_length
@@ -327,6 +339,9 @@ fn transport(
     format_features: amdf_queue_format_features_t,
     device: bool,
 ) -> Result<amdf_user_queue_mapping_info_t, u64> {
+    if info.host_publication != queue::HostQueuePublication::Ordered64BitMmio {
+        return Err(UNSUPPORTED);
+    }
     match command_type {
         AMDF_QUEUE_COMMAND_TYPE_GPU_PM4
         | AMDF_QUEUE_COMMAND_TYPE_GPU_AQL
@@ -469,6 +484,7 @@ pub(crate) unsafe extern "C" fn create(
         output_pointer(out)?;
         let create_info = input(create_info, AMDF_STRUCTURE_TYPE_GPU_USER_QUEUE_CREATE_INFO)?;
         let device = object(pointer.cast::<Device>())?;
+        device.require_current_process()?;
         let family = instance::family(device.native.endpoint(), create_info.queue_family_ordinal)?;
         let (scratch, scratch_memory) = scratch_descriptor(&create_info, &family, pointer.cast())?;
         let desc = descriptor(&create_info, &family, scratch)?;
@@ -587,6 +603,7 @@ pub(crate) unsafe extern "C" fn map(
     crate::support::boundary(|| unsafe {
         output_pointer(out)?;
         let queue = object(pointer.cast::<Queue>())?;
+        queue.require_current_process()?;
         queue.require_usable()?;
         let host = producer.is_null();
         let peer = if host || producer.cast::<Device>() == queue.device {
@@ -673,6 +690,7 @@ pub(crate) unsafe extern "C" fn mapping_info(
 pub(crate) unsafe extern "C" fn unmap(pointer: *mut amdf_user_queue_mapping_t) -> u64 {
     crate::support::boundary(|| unsafe {
         let mapping = object(pointer.cast::<Mapping>())?;
+        (*mapping.queue).require_current_process()?;
         if let Some(counter) = mapping.producer_queues {
             unregister(&*counter);
         }
@@ -689,6 +707,7 @@ pub(crate) unsafe extern "C" fn status(
     crate::support::boundary(|| unsafe {
         let out = output(out, AMDF_STRUCTURE_TYPE_USER_QUEUE_STATUS)?;
         let queue = object(pointer.cast::<Queue>())?;
+        queue.require_current_process()?;
         out.publish(queue.sample()?);
         Ok(())
     })
@@ -703,6 +722,7 @@ pub(crate) unsafe extern "C" fn wait(
     crate::support::boundary(|| unsafe {
         let start = Instant::now();
         let queue = object(pointer.cast::<Queue>())?;
+        queue.require_current_process()?;
         wait_consumed(queue, target, timeout, poll, start)
     })
 }
@@ -711,6 +731,7 @@ pub(crate) unsafe extern "C" fn destroy(pointer: *mut amdf_user_queue_t) -> u64 
     crate::support::boundary(|| {
         unsafe {
             let queue = object(pointer.cast::<Queue>())?;
+            queue.require_current_process()?;
             if queue.mappings.load(Ordering::Acquire) != 0 {
                 return Err(BUSY);
             }
@@ -741,9 +762,7 @@ pub(crate) unsafe extern "C" fn destroy(pointer: *mut amdf_user_queue_t) -> u64 
                 // SAFETY: Mapping preflight established that no public producer
                 // borrow remains; the caller has exclusive queue access.
                 queue.native.destroy().map_err(|error| {
-                    if error.kind() == rocddi::ErrorKind::Busy
-                        && error.native_error_code().is_none()
-                    {
+                    if error.kind() == rocddi::ErrorKind::Busy && error.native_status().is_none() {
                         // Native preflight left the queue and its public
                         // producer contract intact for a later retry.
                         queue.destroying.store(false, Ordering::Release);

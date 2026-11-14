@@ -56,10 +56,10 @@ Models the GPU hardware pipeline:
   files, LDS, and scratch memory. Supports functional and cycle-accurate
   modes.
 - **CompletionTracker** — Tracks per-dispatch workgroup retirement.
-  Fires completion signals in submission order. Writes queue-inactive
-  signal on HQD idle. Guest-visible publication is journaled across transient
-  backing stalls; only the affected queue pauses while independent queues keep
-  fetching and dispatching.
+  Fires completion signals in submission order. On HQD idle, it writes the queue
+  event's mailbox when present and delivers the idle interrupts. Guest-visible
+  publication is journaled across transient backing stalls. Only the affected
+  queue pauses while independent queues keep fetching and dispatching.
 - **ShaderEngine / XCD / IOD** — Hierarchical GPU topology matching
   real hardware (shader engines contain CU arrays, XCDs contain SEs).
 - **GpuVm** — Frontend-neutral owner of address-space identity, lifetime,

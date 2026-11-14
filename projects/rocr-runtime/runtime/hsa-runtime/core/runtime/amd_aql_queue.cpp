@@ -634,14 +634,41 @@ void AqlQueue::AllocRegisteredRingBuffer(uint32_t queue_size_pkts) {
   }
 
   assert(ring_buf_ != NULL && "AQL queue memory allocation failure");
+  if (ring_buf_metadata_alloc_bytes_)
+    ring_buf_metadata_ = reinterpret_cast<uint8_t*>(ring_buf_) + ring_buf_alloc_bytes_;
+
+  if (IsDeviceMemRingBuf()) {
+    // Fill the ring buffers with whole invalid packets in non-temporal stores. A host that maps
+    // device memory write-back (coherent xGMI) would otherwise keep every line of the ring in its
+    // cache, and the CP would have to snoop the host for each packet of the first lap. Whole lines
+    // also reach a write-combined BAR as full writes instead of one partial write per header.
+    core::AqlPacket invalid_packet = {};
+    invalid_packet.dispatch.header = HSA_PACKET_TYPE_INVALID;
+    auto* packets = static_cast<core::AqlPacket*>(ring_buf_);
+    for (uint32_t pkt_id = 0; pkt_id < queue_size_pkts; ++pkt_id)
+      nontemporal_copy(&packets[pkt_id], &invalid_packet, sizeof(invalid_packet));
+
+    if (ring_buf_metadata_alloc_bytes_) {
+      core::AqlMetadataPrefetchPacket invalid_metadata_packet = {};
+      invalid_metadata_packet.packet.header0.type = HSA_PACKET_TYPE_INVALID;
+      invalid_metadata_packet.packet.header1.type = HSA_PACKET_TYPE_INVALID;
+      invalid_metadata_packet.packet.header2.type = HSA_PACKET_TYPE_INVALID;
+      invalid_metadata_packet.packet.header3.type = HSA_PACKET_TYPE_INVALID;
+      auto* metadata_packets = static_cast<core::AqlMetadataPrefetchPacket*>(ring_buf_metadata_);
+      for (uint32_t pkt_id = 0; pkt_id < queue_size_pkts; ++pkt_id)
+        nontemporal_copy(&metadata_packets[pkt_id], &invalid_metadata_packet,
+                         sizeof(invalid_metadata_packet));
+    }
+    store_fence();
+    return;
+  }
+
   // Fill the ring buffer with invalid packet headers.
   // Leave packet content uninitialized to help track errors.
   for (uint32_t pkt_id = 0; pkt_id < queue_size_pkts; ++pkt_id)
     (((core::AqlPacket*)ring_buf_)[pkt_id]).dispatch.header = HSA_PACKET_TYPE_INVALID;
 
   if (ring_buf_metadata_alloc_bytes_) {
-    ring_buf_metadata_ = reinterpret_cast<uint8_t*>(ring_buf_) + ring_buf_alloc_bytes_;
-
     // Fill the metadata ring buffer with invalid packet headers.
     for (uint32_t pkt_id = 0; pkt_id < queue_size_pkts; ++pkt_id) {
       ((((core::AqlMetadataPrefetchPacket*)ring_buf_metadata_)[pkt_id]).packet.header0).type = HSA_PACKET_TYPE_INVALID;

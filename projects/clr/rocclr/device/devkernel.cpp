@@ -21,16 +21,6 @@
 namespace amd::device {
 
 // ================================================================================================
-static constexpr clk_value_type_t ClkValueMapType[6][6] = {
-    {T_CHAR, T_CHAR2, T_CHAR3, T_CHAR4, T_CHAR8, T_CHAR16},
-    {T_SHORT, T_SHORT2, T_SHORT3, T_SHORT4, T_SHORT8, T_SHORT16},
-    {T_INT, T_INT2, T_INT3, T_INT4, T_INT8, T_INT16},
-    {T_LONG, T_LONG2, T_LONG3, T_LONG4, T_LONG8, T_LONG16},
-    {T_FLOAT, T_FLOAT2, T_FLOAT3, T_FLOAT4, T_FLOAT8, T_FLOAT16},
-    {T_DOUBLE, T_DOUBLE2, T_DOUBLE3, T_DOUBLE4, T_DOUBLE8, T_DOUBLE16},
-};
-
-// ================================================================================================
 amd_comgr_status_t getMetaBuf(const amd_comgr_metadata_node_t meta,
                    std::string* str) {
   size_t size = 0;
@@ -81,7 +71,6 @@ static amd_comgr_status_t populateArgs(const amd_comgr_metadata_node_t key,
   std::string buf;
 
   // get the key of the argument field
-  size_t size = 0;
   status = amd::Comgr::get_metadata_kind(key, &kind);
   if (kind == AMD_COMGR_METADATA_KIND_STRING && status == AMD_COMGR_STATUS_SUCCESS) {
     status = getMetaBuf(key, &buf);
@@ -320,16 +309,16 @@ static amd_comgr_status_t populateCodeProps(const amd_comgr_metadata_node_t key,
       kernel->workGroupInfo()->size_ = atoi(buf.c_str());
       break;
     case CodePropField::IsDynamicCallStack: {
-      size_t mIsDynamicCallStack = (buf.compare("true") == 0);
+      [[maybe_unused]] size_t mIsDynamicCallStack = (buf.compare("true") == 0);
     } break;
     case CodePropField::IsXNACKEnabled: {
-      size_t mIsXNACKEnabled = (buf.compare("true") == 0);
+      [[maybe_unused]] size_t mIsXNACKEnabled = (buf.compare("true") == 0);
     } break;
     case CodePropField::NumSpilledSGPRs: {
-      size_t mNumSpilledSGPRs = atoi(buf.c_str());
+      [[maybe_unused]] size_t mNumSpilledSGPRs = atoi(buf.c_str());
     } break;
     case CodePropField::NumSpilledVGPRs: {
-      size_t mNumSpilledVGPRs = atoi(buf.c_str());
+      [[maybe_unused]] size_t mNumSpilledVGPRs = atoi(buf.c_str());
     } break;
     default:
       return AMD_COMGR_STATUS_ERROR;
@@ -344,7 +333,6 @@ static amd_comgr_status_t populateArgsV3(const amd_comgr_metadata_node_t key,
   std::string buf;
 
   // get the key of the argument field
-  size_t size = 0;
   status = amd::Comgr::get_metadata_kind(key, &kind);
   if (kind == AMD_COMGR_METADATA_KIND_STRING && status == AMD_COMGR_STATUS_SUCCESS) {
     status = getMetaBuf(key, &buf);
@@ -564,10 +552,10 @@ static amd_comgr_status_t populateKernelMetaV3(const amd_comgr_metadata_node_t k
       kernel->workGroupInfo()->size_ = atoi(buf.c_str());
       break;
     case KernelField::NumSpilledSGPRs: {
-      size_t mNumSpilledSGPRs = atoi(buf.c_str());
+      [[maybe_unused]] size_t mNumSpilledSGPRs = atoi(buf.c_str());
     } break;
     case KernelField::NumSpilledVGPRs: {
-      size_t mNumSpilledVGPRs = atoi(buf.c_str());
+      [[maybe_unused]] size_t mNumSpilledVGPRs = atoi(buf.c_str());
     } break;
     case KernelField::SymbolName:
       kernel->SetSymbolName(buf);

@@ -46,6 +46,7 @@
 #include "rocjitsu/vm/amdgpu/gpu_memory_access.h"
 #include "rocjitsu/vm/amdgpu/gpu_vm.h"
 #include "rocjitsu/vm/amdgpu/gws_device.h"
+#include "rocjitsu/vm/amdgpu/instruction_cache.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "rocjitsu/vm/amdgpu/matrix_coexecution.h"
 #include "rocjitsu/vm/amdgpu/xcd.h"
@@ -85,7 +86,7 @@ constexpr std::array<TargetInfo, static_cast<size_t>(FuzzTarget::Count)> kTarget
     {"gfx950", ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_TARGET_GFX950},
     {"gfx1010", ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_TARGET_INVALID},
     {"gfx1030", ROCJITSU_CODE_ARCH_RDNA2, ROCJITSU_CODE_TARGET_INVALID},
-    {"gfx1100", ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_TARGET_INVALID},
+    {"gfx1100", ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_TARGET_GFX1100},
     {"gfx1151", ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_TARGET_INVALID},
     {"gfx1200", ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_TARGET_GFX1200},
     {"gfx1201", ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_TARGET_GFX1201},
@@ -256,6 +257,8 @@ const std::vector<std::vector<uint8_t>> &instruction_seeds(FuzzTarget target) {
   return seeds[static_cast<size_t>(target)];
 }
 
+} // namespace
+
 uint32_t terminating_instruction(FuzzTarget target) {
   switch (target_info(target).arch) {
   case ROCJITSU_CODE_ARCH_CDNA1:
@@ -283,8 +286,6 @@ uint32_t terminating_instruction(FuzzTarget target) {
   }
 }
 
-} // namespace
-
 std::optional<FuzzTarget> parse_target(std::string_view name) {
   for (size_t index = 0; index < kTargets.size(); ++index)
     if (kTargets[index].name == name)
@@ -295,6 +296,8 @@ std::optional<FuzzTarget> parse_target(std::string_view name) {
 std::string_view target_name(FuzzTarget target) { return target_info(target).name; }
 
 rj_code_arch_t target_arch(FuzzTarget target) { return target_info(target).arch; }
+
+rj_code_target_id_t target_id(FuzzTarget target) { return target_info(target).id; }
 
 bool targets_cover_amdgpu_execution_registry() {
   for (const IsaTargetDescriptor &descriptor : default_isa_target_registry().targets()) {
@@ -329,18 +332,33 @@ std::optional<FuzzTarget> indexed_target(uint8_t index) {
   return static_cast<FuzzTarget>(index);
 }
 
+std::vector<uint8_t> terminated_program(std::span<const uint8_t> instructions, FuzzTarget target) {
+  const std::unique_ptr<Decoder> decoder = Decoder::create(target_arch(target));
+  if (!decoder)
+    throw std::logic_error("execution fuzz target has no decoder");
+  const std::size_t max_words = decoder->max_instruction_words();
+  std::vector<uint8_t> code(instructions.begin(), instructions.end());
+  while (code.size() % sizeof(uint32_t) != 0)
+    code.push_back(0);
+  // A trailing partial instruction can consume up to max_words - 1 words
+  // before reaching the next instruction boundary.
+  const uint32_t end = terminating_instruction(target);
+  for (std::size_t word = 0; word < max_words; ++word)
+    for (unsigned byte = 0; byte < sizeof(end); ++byte)
+      code.push_back(static_cast<uint8_t>(end >> (8 * byte)));
+  // The last terminator still needs a full CU instruction fetch.
+  const std::size_t padding_bytes =
+      std::max(max_words * sizeof(uint32_t), amdgpu::InstructionCache::kFetchBytes - sizeof(end));
+  code.resize(code.size() + padding_bytes);
+  return code;
+}
+
 namespace {
 RunStats run_input_once(
     std::span<const uint8_t> input, std::span<const uint8_t> instructions,
     FuzzTarget resolved_target,
     const std::shared_ptr<amdgpu::matrix_coexecution::ExecutionResources> &async_resources) {
-  std::vector<uint8_t> code(instructions.begin(), instructions.end());
-  while (code.size() % sizeof(uint32_t) != 0)
-    code.push_back(0);
-  const uint32_t end = terminating_instruction(resolved_target);
-  for (unsigned byte = 0; byte < 4; ++byte)
-    code.push_back(static_cast<uint8_t>(end >> (8 * byte)));
-  code.resize(code.size() + 16);
+  const std::vector<uint8_t> code = terminated_program(instructions, resolved_target);
 
   // Keep a mapped data island near the program. Address-bearing initial state
   // points into this region while other registers retain high-entropy values.
@@ -546,12 +564,13 @@ std::vector<uint8_t> random_input(uint64_t seed, size_t size, std::optional<Fuzz
   const uint64_t mode_seed = seed;
   const FuzzTarget resolved_target =
       target.value_or(static_cast<FuzzTarget>(static_cast<uint8_t>(seed) % kTargets.size()));
-  constexpr std::array first_wmma =
-      cdna5::build_vop3p(cdna5::kVWmmaF3216x16x128Fp8Fp8Vop3p,
-                         {.vdst = 64, .src0 = 256, .src1 = 288, .src2 = 320, .opsel_hi = 3});
-  constexpr std::array second_wmma =
-      cdna5::build_vop3p(cdna5::kVWmmaF3216x16x128Fp8Fp8Vop3p,
-                         {.vdst = 96, .src0 = 256, .src1 = 288, .src2 = 352, .opsel_hi = 3});
+  // Alternate migrated issuer-only FP8 and still helper-eligible FP4 pairs.
+  const auto opcode =
+      (seed & 16) ? cdna5::kVWmmaF3232x16x128F4Vop3p : cdna5::kVWmmaF3216x16x128Fp8Fp8Vop3p;
+  const std::array first_wmma = cdna5::build_vop3p(
+      opcode, {.vdst = 64, .src0 = 256, .src1 = 288, .src2 = 320, .opsel_hi = 3});
+  const std::array second_wmma = cdna5::build_vop3p(
+      opcode, {.vdst = 96, .src0 = 256, .src1 = 288, .src2 = 352, .opsel_hi = 3});
   constexpr size_t wmma_prefix_size = (first_wmma.size() + second_wmma.size()) * sizeof(uint32_t);
   const bool async_wmma_bias = target_info(resolved_target).arch == ROCJITSU_CODE_ARCH_CDNA5 &&
                                (seed & 15) == 1 && size - cursor >= wmma_prefix_size;

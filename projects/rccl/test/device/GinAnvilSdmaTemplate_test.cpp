@@ -2109,6 +2109,59 @@ TEST_F(GinAnvilSdmaTemplateTest, FlushTimeout_PartlyDrainedPeerStaysDirty) {
   EXPECT_EQ(env.polls(2), 1ULL);
 }
 
+// H38: the Anvil-SDMA backend has no SQ lock to elide, so it must IGNORE the
+// resource-sharing hint -- passing GPU / CTA / THREAD must all behave identically.
+// Mirrors H4 (IPC data-land) parametrized over the mode to prove the hint is a
+// harmless no-op on a backend that does not act on it.
+__global__ void kernelPutDataMode(TemplateHarness* h, size_t bytes, uint8_t mode) {
+  if (threadIdx.x != 0) return;
+  ncclGinCtx ginCtx{};
+  ginCtx.handle = &h->ctx;
+  ginCtx.nRanks = 2;
+  ginCtx.resourceSharingMode = mode;
+  ncclGinSignalDescriptor sig{};
+  sig.type = NCCL_GIN_SIGNAL_TYPE_NONE;
+  ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ANVIL_SDMA>::call(
+      ginCtx, ncclCoopThread{}, 1, true, reinterpret_cast<ncclGinWindow_t>(&h->dstMh), 0,
+      reinterpret_cast<ncclGinWindow_t>(&h->srcMh), 0, bytes, sig, ncclGinSignalInc, 0, false, 0,
+      false, nullptr, cuda::thread_scope_system, cuda::thread_scope_system);
+}
+
+// Self-contained (does its own device sync, so it is not tied to the fixture's
+// syncAndCheck member): launch a mode-tagged put and assert the data lands.
+static auto expectSdmaModeDataLands = [](uint8_t mode) {
+  constexpr int kN = 64;
+  std::vector<uint8_t> pat(kN);
+  for (int i = 0; i < kN; ++i) pat[static_cast<size_t>(i)] = static_cast<uint8_t>(0xC0 + i);
+  DeviceBuffer<uint8_t> d_src(static_cast<size_t>(kN));
+  DeviceBuffer<uint8_t> d_dst(static_cast<size_t>(kN));
+  d_src.copyFrom(pat);
+  d_dst.zero();
+  DeviceBuffer<ncclGinAnvilIpcBufEntry> d_entry(1);
+  DeviceBuffer<sdma_anvil::SdmaQueueDeviceHandle> d_q(1);
+  DeviceBuffer<sdma_anvil::SdmaQueueDeviceHandle*> d_row(2);
+  DeviceBuffer<TemplateHarness> d_h(1);
+  TemplateHarness host{};
+  uploadHarness(&d_h, &host, &d_src, &d_dst, &d_entry, &d_q, &d_row, 0);
+  kernelPutDataMode<<<1, 1>>>(d_h.ptr, static_cast<size_t>(kN), mode);
+  ASSERT_EQ(hipGetLastError(), hipSuccess);
+  ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+  auto got = d_dst.copyTo();
+  for (int i = 0; i < kN; ++i) EXPECT_EQ(got[static_cast<size_t>(i)], pat[static_cast<size_t>(i)]);
+};
+
+TEST_F(GinAnvilSdmaTemplateTest, Put_GpuModeIgnoredDataLands) {
+  expectSdmaModeDataLands(NCCL_GIN_RESOURCE_SHARING_GPU);
+}
+
+TEST_F(GinAnvilSdmaTemplateTest, Put_CtaModeIgnoredDataLands) {
+  expectSdmaModeDataLands(NCCL_GIN_RESOURCE_SHARING_CTA);
+}
+
+TEST_F(GinAnvilSdmaTemplateTest, Put_ThreadModeIgnoredDataLands) {
+  expectSdmaModeDataLands(NCCL_GIN_RESOURCE_SHARING_THREAD);
+}
+
 #endif  // NCCL_GIN_ANVIL_SDMA_ENABLE
 
 }  // namespace RcclUnitTesting

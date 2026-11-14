@@ -10,12 +10,15 @@ import json
 import os
 from pathlib import Path
 import re
-import subprocess
 import sys
 import tempfile
 
 HERE = Path(__file__).resolve().parent
 RUNTIMES = HERE.parents[3]
+# Both frontends use the workspace's native compiler adapter.
+sys.path.insert(0, str(RUNTIMES / "cmake"))
+from abi_probe import compile_c, run
+
 HEADERS = RUNTIMES / "api-headers/include"
 BINDINGS = HERE.parents[1] / "src/generated/amdf.rs"
 IDENT = r"[A-Za-z_]\w*"
@@ -28,12 +31,6 @@ RUST_KEYWORDS = {
 }
 EXPECTED_RECORDS = 973  # Pinned C snapshot; update only with the headers.
 
-
-def run(command: list[str]) -> str:
-    completed = subprocess.run(command, capture_output=True, text=True, check=False)
-    if completed.returncode:
-        raise RuntimeError(f"{command[0]} failed:\n{completed.stderr}")
-    return completed.stdout
 
 
 def rust_probe(c_lines: list[str]) -> str:
@@ -88,23 +85,10 @@ def rust_probe(c_lines: list[str]) -> str:
 def main() -> int:
     with tempfile.TemporaryDirectory(prefix="rocddi-amdf-layout-") as temporary:
         output = Path(temporary)
-        c_binary = output / "c_layout"
-        rust_binary = output / "rust_layout"
+        c_binary = output / ("c_layout.exe" if os.name == "nt" else "c_layout")
+        rust_binary = output / ("rust_layout.exe" if os.name == "nt" else "rust_layout")
         rust_source = output / "rust_layout.rs"
-        run(
-            [
-                os.environ.get("CC", "cc"),
-                "-std=c11",
-                "-Wall",
-                "-Wextra",
-                "-Werror",
-                "-I",
-                str(HEADERS),
-                str(HERE / "amdf_layout.c"),
-                "-o",
-                str(c_binary),
-            ]
-        )
+        compile_c(HERE / "amdf_layout.c", c_binary, HEADERS)
         c_lines = run([str(c_binary)]).splitlines()
         if len(c_lines) != EXPECTED_RECORDS:
             raise ValueError(

@@ -7,7 +7,7 @@
 #pragma once
 
 #include "common/isa.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_common.h"
 
 #include <immintrin.h>
 #include <stdint.h>
@@ -26,12 +26,16 @@ inline __m256 flush_denorm_f16(__m256 input) {
 
 // Applies FP16 OMOD tiny-result handling before output scaling. OMOD must be
 // enabled; values are FP16 arithmetic results represented as FP32.
+// AfterRounding treats exact wider values as alu_output_f16 does.
+template <bool AfterRounding = false>
 inline __m256 prepare_omod_f16(__m256 value, uint32_t instruction_flags) {
+  constexpr int smallest_normal = AfterRounding ? 0x387ff000 : 0x38800000;
+  constexpr int twice_smallest_normal = AfterRounding ? 0x38fff000 : 0x39000000;
   auto bits = _mm256_castps_si256(value);
   auto magnitude = _mm256_and_si256(bits, _mm256_set1_epi32(0x7fffffff));
-  auto tiny = _mm256_cmpgt_epi32(_mm256_set1_epi32(0x38800000), magnitude);
+  auto tiny = _mm256_cmpgt_epi32(_mm256_set1_epi32(smallest_normal), magnitude);
   if ((instruction_flags & RJ_ARITH_ALU_OMOD_HALF) == RJ_ARITH_ALU_OMOD_HALF) {
-    auto underflow = _mm256_cmpgt_epi32(_mm256_set1_epi32(0x39000000), magnitude);
+    auto underflow = _mm256_cmpgt_epi32(_mm256_set1_epi32(twice_smallest_normal), magnitude);
     auto sign = _mm256_and_si256(bits, _mm256_set1_epi32(int(0x80000000u)));
     bits = _mm256_blendv_epi8(bits, sign, underflow);
   }

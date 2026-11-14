@@ -6,12 +6,12 @@
 
 #include "fp/half_exponent.h"
 #include "common/alu.h"
-#include "common/float_formats.h"
-#include "common/internal.h"
+#include "common/float_encoding.h"
 #include "common/math.h"
+#include "common/validation.h"
 #include "fp/half_fma_scalar.h"
 #include "register/dpp.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_fp.h"
 
 #include <stdint.h>
 
@@ -21,7 +21,8 @@ namespace {
 // pipeline. Bounded finite powers of two are exact in double; integer narrowing
 // applies guest rounding without the original ScopedFenv guards.
 int ldexp_rounded(uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags,
-                  uint32_t *const *d, const uint32_t *const *a, const uint32_t *const *b) {
+                  uint32_t *const *d, const uint32_t *const *a, const uint32_t *const *b,
+                  bool quiet_snan) {
   const unsigned a_shift = instruction_flags & RJ_ARITH_ALU_HIGH_A ? 16 : 0;
   const unsigned b_shift = instruction_flags & RJ_ARITH_ALU_HIGH_B ? 16 : 0;
   const unsigned d_shift = instruction_flags & RJ_ARITH_ALU_HIGH_D ? 16 : 0;
@@ -40,7 +41,7 @@ int ldexp_rounded(uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags
     const unsigned magnitude = bits & 0x7fff;
     uint16_t encoded;
     if (magnitude >= 0x7c00) {
-      encoded = bits | (magnitude > 0x7c00 ? 0x200 : 0);
+      encoded = bits | (magnitude > 0x7c00 && quiet_snan ? 0x200 : 0);
       if ((instruction_flags & RJ_ARITH_ALU_CLAMP) &&
           !(magnitude > 0x7c00 && (flags & RJ_ARITH_FP_DX10_CLAMP_OFF))) {
         encoded = rocjitsu::arith::half_fma_clamp(encoded);
@@ -120,7 +121,10 @@ int half_exponent(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags
   }
   if constexpr (Ldexp) {
     if (rocjitsu::arith::is_exact(flags) || (flags & RJ_ARITH_FP_ROUND_MASK)) {
-      return ldexp_rounded(flags, exec_mask, uint32_t(instruction_flags), d, a, b);
+      // gfx11 exact semantics keep signaling NaNs when IEEE is clear.
+      const bool quiet_snan =
+          !rdna3 || (flags & RJ_ARITH_FP_IEEE_MODE) || !rocjitsu::arith::is_exact(flags);
+      return ldexp_rounded(flags, exec_mask, uint32_t(instruction_flags), d, a, b, quiet_snan);
     }
     if constexpr (!GuestDenormals) {
       if (flags & (RJ_ARITH_FP_FLUSH_INPUT_DENORMALS | RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS |

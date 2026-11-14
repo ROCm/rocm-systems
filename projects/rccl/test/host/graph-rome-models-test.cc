@@ -393,9 +393,9 @@ TEST_F(GraphRomeModelsMicrotest, A2a8P_SkipsOtherShapes) {
   EXPECT_EQ(0, ring->nChannels);
 }
 
-// The GPU permutation table is not freed when no model matches. Pins AICOMRCCL-3029; a fix flips this pin.
-TEST_F(GraphRomeModelsMicrotest, A2a8P_KnownBug_NoMatchLeaksThePermutationTable) {
-  if (kAsan) GTEST_SKIP() << "the leak would fail LeakSanitizer";
+// The GPU permutation table is freed when no model matches (AICOMRCCL-3029). Under ASan mallinfo is not
+// tracked, so LeakSanitizer is what checks this.
+TEST_F(GraphRomeModelsMicrotest, A2a8P_NoMatchFreesThePermutationTable) {
   UseModel(romeTopoModels[44], -1, kAmdCpu);
   system_->nodes[DEV].nodes[0].links[0].bw /= 2;  // no model has a narrower link
   ASSERT_EQ(ncclSuccess, ncclTopoComputePaths(system_.get(), nullptr));
@@ -403,10 +403,10 @@ TEST_F(GraphRomeModelsMicrotest, A2a8P_KnownBug_NoMatchLeaksThePermutationTable)
 
   size_t before = InUseBytes();
   ASSERT_EQ(ncclSuccess, parseA2a8P(system_.get(), ring.get(), nullptr));
-  int64_t leaked = (int64_t)InUseBytes() - (int64_t)before;
+  int64_t retained = (int64_t)InUseBytes() - (int64_t)before;
 
   EXPECT_EQ(0, ring->nChannels);
-  EXPECT_GE(leaked, (int64_t)(24 * 24 * 8 * sizeof(int)));
+  EXPECT_LT(retained, (int64_t)(24 * 24 * 8 * sizeof(int)));
 }
 
 TEST_F(GraphRomeModelsMicrotest, A2a8P_EvenHostCountsAlternateTheRingDirection) {
@@ -471,10 +471,8 @@ TEST_F(GraphRomeModelsMicrotest, P1H16P_MatchesSixteenGpuModels) {
   EXPECT_TRUE(system_->ll128Enabled);  // rome_model_59's options
 }
 
-// As in parseA2a8P, the 21 MB permutation table is not freed when no model matches.
-// Pins AICOMRCCL-3029; a fix flips this pin.
-TEST_F(GraphRomeModelsMicrotest, P1H16P_KnownBug_NoMatchLeaksThePermutationTable) {
-  if (kAsan) GTEST_SKIP() << "the leak would fail LeakSanitizer";
+// As in parseA2a8P, the 21 MB permutation table is freed when no model matches (AICOMRCCL-3029).
+TEST_F(GraphRomeModelsMicrotest, P1H16P_NoMatchFreesThePermutationTable) {
   rcclRomeModel rewired = romeTopoModels[24];
   auto link = [&](int a, int b, int v) { rewired.connMatrix[a * 16 + b] = rewired.connMatrix[b * 16 + a] = v; };
   link(0, 1, 0), link(8, 9, 0), link(0, 8, 1), link(1, 9, 1);  // same link counts, different shape
@@ -483,11 +481,11 @@ TEST_F(GraphRomeModelsMicrotest, P1H16P_KnownBug_NoMatchLeaksThePermutationTable
 
   size_t before = InUseBytes();
   ASSERT_EQ(ncclSuccess, parse1H16P(system_.get(), ring.get()));
-  int64_t leaked = (int64_t)InUseBytes() - (int64_t)before;
+  int64_t retained = (int64_t)InUseBytes() - (int64_t)before;
 
   EXPECT_EQ(0, ring->nChannels);
   EXPECT_EQ(RCCL_ROME_TOPO_PRESET_MODEL_IDX_NONE, system_->romeTopoModelIdx);
-  EXPECT_GE(leaked, (int64_t)(24u * 24 * 24 * 24 * 16 * sizeof(int)));
+  EXPECT_LT(retained, (int64_t)(24u * 24 * 24 * 24 * 16 * sizeof(int)));
 }
 
 TEST_F(GraphRomeModelsMicrotest, P1H16P_NeedsRomeAndSixteenGpus) {

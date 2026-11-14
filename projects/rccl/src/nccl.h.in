@@ -139,7 +139,7 @@ typedef struct ncclConfig_v23100 {
   int nvlsCTAs;                /*!< Number of NVLS cooperative thread arrays (blocks)*/
   int nChannelsPerNetPeer;     /*!< Number of channels per NET peer*/
   int nvlinkCentricSched;      /*!< nvlinkCentricSched*/
-  int graphUsageMode;          /*!< CUDA Graph usage mode hint*/
+  int graphUsageMode;          /*!< Graph usage mode: 0 no graphs (default), 1 one graph at a time, 2 graph mixing; see NCCL_GRAPH_MIXING_SUPPORT*/
   int numRmaCtx;               /*!< Number of RMA contexts*/
   int maxP2pPeers;             /*!< Maximum number of P2P peers*/
   int graphStreamOrdering;     /*!< CUDA Graph stream ordering mode*/

@@ -25,6 +25,14 @@
 
 namespace hrr_test {
 
+// True when HIP sees at least one device. Handler tests that depend on a device
+// SKIP without one, because the call under test then fails before it reaches
+// the behaviour being checked.
+inline bool have_device() {
+  int n = 0;
+  return hipGetDeviceCount(&n) == hipSuccess && n > 0;
+}
+
 // Run `fn` with stderr redirected to a temporary file and return what it wrote.
 template <typename Fn>
 std::string capture_stderr(Fn&& fn) {
