@@ -1792,8 +1792,13 @@ def gen_vector_cvt_pk(
             L.extend(vop3_src_mod('s1', 1, has_abs))
         L.append(f'    uint32_t lo = util::f32_to_f16_mode(s0, wf.fp16_ovfl());')
         L.append(f'    uint32_t hi = util::f32_to_f16_mode(s1, wf.fp16_ovfl());')
+        packed = (
+            'amdgpu::fp_mode::pack_f16_results(lo, hi, wf.fp_denorm_mode_f16_f64())'
+            if arch_name == 'cdna5'
+            else 'lo | (hi << 16)'
+        )
         L.append(
-            f'    amdgpu::RegisterAccess(wf).write_lane({dst[0]}, lane, lo | (hi << 16));'
+            f'    amdgpu::RegisterAccess(wf).write_lane({dst[0]}, lane, {packed});'
         )
     elif cls == 'vector_cvt_pk_bf16_f32':
         L.append(
@@ -1984,6 +1989,11 @@ def _scale_lowp_bits(fmt: str) -> int:
     raise ValueError(f'unsupported scaled low-precision format: {fmt}')
 
 
+def cvt_scale_layout(source_format: str) -> str:
+    """CDNA5 ISA 7.6.3 selects the E8M0 layout by the packed source format."""
+    return 'f8' if _scale_lowp_bits(source_format) == 8 else 'f4_f6'
+
+
 def _scale_read_vgpr_base(L: list[str], var: str, operand: str) -> None:
     L.append(
         f'    uint32_t {var} = wf.vgpr_alloc().base + '
@@ -2047,14 +2057,6 @@ def _scale_source_reader(src_fmt: str) -> list[str]:
     raise ValueError(f'unsupported scaled conversion source format: {src_fmt}')
 
 
-def _scale_e8m0_unpack_scale(scale_src: str) -> list[str]:
-    return [
-        f'    uint32_t scale_payload = amdgpu::RegisterAccess(wf).read_lane({scale_src}, lane);',
-        '    uint32_t scale_byte = (scale_payload >> ((inst_.opsel & 0x3u) * 8u)) & 0xffu;',
-        '    float scale = util::e8m0_to_f32(static_cast<uint8_t>(scale_byte));',
-    ]
-
-
 def gen_vector_cvt_scale(
     dst: list[str],
     src: list[str],
@@ -2095,6 +2097,11 @@ def gen_vector_cvt_scale(
         raise ValueError(f'unsupported vector_cvt_scale direction: {direction}')
 
     L: list[str] = []
+    if direction == 'unpack':
+        layout = cvt_scale_layout(in_fmt)
+        L.append(
+            f'  const auto selection = amdgpu::CvtScaleSelection::{layout}(inst_.opsel);'
+        )
     L.append('  uint64_t exec = wf.exec();')
     if (
         direction == 'unpack'
@@ -2154,7 +2161,14 @@ def gen_vector_cvt_scale(
     L.append('      continue;')
     scale_src = src[2] if stochastic else src[1]
     if direction == 'unpack':
-        L.extend(_scale_e8m0_unpack_scale(scale_src))
+        L.extend(
+            [
+                '    const unsigned scale_lane = selection.lane(lane);',
+                '    const unsigned scale_byte = selection.byte(lane);',
+                f'    const amdgpu::RegisterAccess::OperandReadView scales = regs.read_operand({scale_src}, uint64_t{{1}} << scale_lane, 1u << scale_byte);',
+                '    const float scale = util::e8m0_to_f32(static_cast<uint8_t>(scales.lane(scale_lane) >> (8 * scale_byte)));',
+            ]
+        )
     else:
         L.append(
             f'    float scale = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane({scale_src}, lane));'

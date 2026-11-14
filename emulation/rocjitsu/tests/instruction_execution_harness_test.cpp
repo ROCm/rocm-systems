@@ -7203,13 +7203,13 @@ TEST(Gfx1250CvtF16Test, PackedStochasticConversionsUseSeparateSeedHalves) {
   struct FormatCase {
     uint32_t opcode;
     uint32_t midpoint;
-    uint16_t bias;
+    uint16_t round_up_seed;
     uint16_t one;
     uint32_t overflow_input;
     uint16_t infinity;
   };
   for (const FormatCase &format_case : {
-           FormatCase{cdna5::kVCvtSrPkF16F32Vop3, 0x3f801000, 0x1000, 0x3c00,
+           FormatCase{cdna5::kVCvtSrPkF16F32Vop3, 0x3f801000, 0xffff, 0x3c00,
                       std::bit_cast<uint32_t>(70000.0f), 0x7c00},
            FormatCase{cdna5::kVCvtSrPkBf16F32Vop3, 0x3f808000, 0x8000, 0x3f80, 0x7f7fffff, 0x7f80},
        }) {
@@ -7226,12 +7226,19 @@ TEST(Gfx1250CvtF16Test, PackedStochasticConversionsUseSeparateSeedHalves) {
     };
 
     wf->set_mode_raw(0);
-    check(format_case.midpoint, format_case.midpoint, pack16(format_case.bias, 0),
+    check(format_case.midpoint, format_case.midpoint, pack16(format_case.round_up_seed, 0),
           pack16(format_case.one + 1, format_case.one));
-    check(format_case.midpoint, format_case.midpoint, pack16(0, format_case.bias),
+    check(format_case.midpoint, format_case.midpoint, pack16(0, format_case.round_up_seed),
           pack16(format_case.one, format_case.one + 1));
-    if (format_case.opcode == cdna5::kVCvtSrPkF16F32Vop3)
-      check(0x3f801000u, 0x3f800000u, 0x80000000u, 0x3c043c00u);
+    if (format_case.opcode == cdna5::kVCvtSrPkF16F32Vop3) {
+      // Measured on gfx1250: the nonzero upper seed leaves FP16 1.0 exact.
+      check(0x3f801000u, 0x3f800000u, 0x80000000u, 0x3c003c00u);
+      check(0xbf800000u, 0x3f800000u, 0xffffffffu, 0x3c00bc00u);
+      // Model expectation for an inexact midpoint: 0x1000 rounds down and 0xe000 rounds up
+      // when using the leading seed bits. Using the low bits reverses the two results.
+      check(format_case.midpoint, format_case.midpoint, pack16(0x1000, 0xe000),
+            pack16(format_case.one, format_case.one + 1));
+    }
     // A zero addend truncates even above the midpoint.
     check(format_case.midpoint + 1, format_case.midpoint + 1, 0,
           pack16(format_case.one, format_case.one));
@@ -8469,7 +8476,7 @@ TEST(Gfx1250CvtFp8Test, E5M3ClampSelectsUnsignedFp8Format) {
     wf->halt();
 }
 
-TEST(Gfx1250CvtScaleTest, UnpackUsesSelectedE8M0ScaleByte) {
+TEST(Gfx1250CvtScaleTest, UnpackSelectsE8M0ScaleLaneAndByte) {
   amdgpu::GpuMemory gpu_mem("gfx1250_cvt_scale_e8m0_mem");
   amdgpu::L2Cache l2("gfx1250_cvt_scale_e8m0_l2");
 
@@ -8477,7 +8484,7 @@ TEST(Gfx1250CvtScaleTest, UnpackUsesSelectedE8M0ScaleByte) {
   cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
   cfg.num_wf_slots = 1;
   cfg.sgprs_per_wf = 106;
-  cfg.vgprs_per_wf = 256;
+  cfg.vgprs_per_wf = 512;
   cfg.lds_size_kb = 64;
 
   auto cu = amdgpu::ComputeUnitCore::create("gfx1250", cfg, &gpu_mem, &l2);
@@ -8488,37 +8495,97 @@ TEST(Gfx1250CvtScaleTest, UnpackUsesSelectedE8M0ScaleByte) {
 
   auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
   ASSERT_NE(wf, nullptr);
-  wf->set_exec(1);
-
   const uint32_t vb = wf->vgpr_alloc().base;
-  const uint32_t e8m0_scales = 0x817E807Fu; // 1.0, 2.0, 0.5, 4.0
+  wf->set_vgpr_msb_mode(1u << 2); // SRC1 in VGPR bank 1.
+  constexpr uint32_t kSentinel = 0xdeadbeef;
+  for (uint32_t lane = 0; lane < 32; ++lane)
+    cu->write_vgpr(vb + 256 + 10, lane, 0x43424140u + 0x04040404u * lane);
 
-  cu->write_vgpr(vb + 0, 0, 0x38383838u);
-  cu->write_vgpr(vb + 1, 0, 0x38383838u);
-  cu->write_vgpr(vb + 10, 0, e8m0_scales);
+  // CDNA5 ISA section 7.6.3, Tables 36 and 37. The two byte indices
+  // correspond to data lanes 0..15 and 16..31 respectively.
+  struct Selection {
+    unsigned first_scale_lane;
+    unsigned low_byte;
+    unsigned high_byte;
+  };
+  constexpr Selection f4_f6[] = {{0, 0, 1}, {16, 0, 1}, {0, 2, 3}, {16, 2, 3},
+                                 {0, 0, 2}, {16, 0, 2}, {0, 1, 3}, {16, 1, 3}};
+  constexpr Selection f8[] = {{0, 0, 0}, {16, 0, 0}, {0, 2, 2}, {16, 2, 2}, {0, 1, 1},  {16, 1, 1},
+                              {0, 3, 3}, {16, 3, 3}, {0, 0, 1}, {0, 0, 1},  {16, 2, 3}, {16, 2, 3}};
+  struct Case {
+    uint16_t opcode;
+    // Every packed element is 1.0 in the source format.
+    std::array<uint32_t, 3> input;
+    unsigned elements;
+    std::span<const Selection> selectors;
+  };
+  const Case cases[] = {
+      {cdna5::kVCvtScalePk8F32Fp4Vop3, {0x22222222u, 0, 0}, 8, f4_f6},
+      {cdna5::kVCvtScalePk16F32Fp6Vop3, {0x08208208u, 0x82082082u, 0x20820820u}, 16, f4_f6},
+      {cdna5::kVCvtScalePk8F32Fp8Vop3, {0x38383838u, 0x38383838u, 0}, 8, f8},
+      {cdna5::kVCvtScalePk8F32Bf8Vop3, {0x3c3c3c3cu, 0x3c3c3c3cu, 0}, 8, f8},
+  };
+  for (const Case &test : cases) {
+    for (uint32_t lane = 0; lane < 32; ++lane)
+      for (unsigned reg = 0; reg < test.input.size(); ++reg)
+        cu->write_vgpr(vb + reg, lane, test.input[reg]);
+    const unsigned selector_count = test.selectors.size() == 8 ? 16 : test.selectors.size();
+    for (uint8_t opsel = 0; opsel < selector_count; ++opsel) {
+      const auto words = cdna5::build_vop3(
+          test.opcode, {.vdst = 16, .opsel = opsel, .src0 = vgpr_src(0), .src1 = vgpr_src(10)});
+      std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+      ASSERT_NE(inst, nullptr);
+      SCOPED_TRACE(testing::Message() << inst->mnemonic() << " scale_sel=" << unsigned(opsel));
+      // Each pair of corresponding lanes has one active destination. The scale
+      // may come from its inactive partner in the other half-wave.
+      for (uint32_t exec : {0xaaaa5555u, 0x5555aaaau}) {
+        wf->set_exec(exec);
+        for (unsigned reg = 0; reg < test.elements; ++reg)
+          for (uint32_t lane = 0; lane < 32; ++lane)
+            cu->write_vgpr(vb + 16 + reg, lane, kSentinel);
+        ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
+        const Selection &sel = test.selectors[opsel % test.selectors.size()];
+        for (uint32_t lane = 0; lane < 32; ++lane) {
+          const unsigned source_lane = sel.first_scale_lane + lane % 16;
+          const unsigned byte = lane < 16 ? sel.low_byte : sel.high_byte;
+          const uint32_t exponent = 0x40u + 4 * source_lane + byte;
+          const uint32_t expected = (exec & (1u << lane)) ? exponent << 23 : kSentinel;
+          for (unsigned reg = 0; reg < test.elements; ++reg)
+            EXPECT_EQ(cu->read_vgpr(vb + 16 + reg, lane), expected)
+                << "lane=" << lane << " element=" << reg;
+        }
+      }
+    }
+  }
 
-  // v_cvt_scale_pk8_f32_fp8 v[2:9], v[0:1], v10 scale_sel:2
-  const uint32_t pk8_words[] = {0xD6AA1002U, 0x02021500U};
-  std::unique_ptr<Instruction> pk8_inst(decode_valid(*decoder, pk8_words));
-  ASSERT_NE(pk8_inst, nullptr);
-  ASSERT_EQ(std::string_view(pk8_inst->mnemonic()), "v_cvt_scale_pk8_f32_fp8");
-  EXPECT_TRUE(cu->execute_instruction(pk8_inst.get(), *wf).succeeded());
-  for (uint32_t i = 2; i <= 9; ++i)
-    EXPECT_EQ(cu->read_vgpr(vb + i, 0), std::bit_cast<uint32_t>(0.5f)) << "vgpr=" << i;
-
-  cu->write_vgpr(vb + 0, 0, 0x08208208u);
-  cu->write_vgpr(vb + 1, 0, 0x82082082u);
-  cu->write_vgpr(vb + 2, 0, 0x20820820u);
-  cu->write_vgpr(vb + 10, 0, e8m0_scales);
-
-  // v_cvt_scale_pk16_f32_fp6 v[18:33], v[0:2], v10 scale_sel:1
-  const uint32_t pk16_words[] = {0xD6C90812U, 0x02021500U};
-  std::unique_ptr<Instruction> pk16_inst(decode_valid(*decoder, pk16_words));
-  ASSERT_NE(pk16_inst, nullptr);
-  ASSERT_EQ(std::string_view(pk16_inst->mnemonic()), "v_cvt_scale_pk16_f32_fp6");
-  EXPECT_TRUE(cu->execute_instruction(pk16_inst.get(), *wf).succeeded());
-  for (uint32_t i = 18; i <= 33; ++i)
-    EXPECT_EQ(cu->read_vgpr(vb + i, 0), std::bit_cast<uint32_t>(2.0f)) << "vgpr=" << i;
+  // A scalar source supplies the same packed scale word to every provider lane.
+  // Selector 3 takes bytes 2 and 3 in the lower and upper data halves.
+  wf->set_exec((1u << 0) | (1u << 16));
+  cu->write_vgpr(vb, 0, 0x22222222u);
+  cu->write_vgpr(vb, 16, 0x22222222u);
+  cu->write_sgpr(wf->sgpr_alloc().base + 5, 0x83828180u);
+  struct UniformCase {
+    uint16_t source;
+    uint32_t literal;
+    float low_result;
+    float high_result;
+  };
+  const UniformCase uniform[] = {
+      {5, 0, 8.0f, 16.0f},            // s5
+      {255, 0x81818181, 4, 4},        // Literal E8M0 scale repeated across all bytes.
+      {128, 0, 0x1p-127f, 0x1p-127f}, // Inline zero, including both upper bytes.
+  };
+  for (const auto &test : uniform) {
+    const auto words =
+        cdna5::build_vop3(cdna5::kVCvtScalePk8F32Fp4Vop3,
+                          {.vdst = 16, .opsel = 3, .src0 = vgpr_src(0), .src1 = test.source});
+    const uint32_t encoding[] = {words[0], words[1], test.literal};
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, encoding));
+    ASSERT_NE(inst, nullptr);
+    ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
+    EXPECT_EQ(cu->read_vgpr(vb + 16, 0), std::bit_cast<uint32_t>(test.low_result));
+    EXPECT_EQ(cu->read_vgpr(vb + 16, 16), std::bit_cast<uint32_t>(test.high_result));
+  }
 
   // Compare the literal fast path against the per-lane register scale with
   // overlapping source and destination tuples and inactive lanes.

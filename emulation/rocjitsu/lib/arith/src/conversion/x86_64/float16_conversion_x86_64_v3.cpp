@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: MIT
 
 // AVX2 FP16/BF16 conversions preserving inherited NaN, subnormal and overflow rules.
-#include "conversion/float16_conversion.h"
+#include "conversion/float16_conversion_impl.h"
+#include "conversion/x86_64/lanes.h"
 #include "rj_arith/detail/rj_arith_common.h"
 #include <immintrin.h>
 #include <stdint.h>
@@ -113,18 +114,6 @@ __m256i source_sign(__m256i raw, uint32_t mode, int operand) {
   return raw;
 }
 
-// Match the packed instruction's independent half-word addends.
-__m256i narrow_packed_sr(rocjitsu::arith::Float16Format format, __m256i raw, __m256i addend,
-                         bool saturate) {
-  if (format == rocjitsu::arith::Float16Format::F16) {
-    auto magnitude = _mm256_and_si256(raw, _mm256_set1_epi32(0x7fffffff));
-    raw = select(_mm256_cmpgt_epi32(_mm256_set1_epi32(0x47800000), magnitude),
-                 _mm256_add_epi32(raw, addend), raw);
-    return narrow_f16(raw, _mm256_setzero_si256(), true, saturate);
-  }
-  return narrow_bf16(raw, _mm256_slli_epi32(addend, 16), true, saturate);
-}
-
 } // namespace
 
 namespace rocjitsu::arith {
@@ -152,17 +141,17 @@ void float16_conversion_x86_64_v3(Float16Format format, Float16Conversion op, ui
       } else {
         if (op == Float16Conversion::StochasticPack) {
           auto seed = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(c + lane));
-          auto low = _mm256_and_si256(seed, _mm256_set1_epi32(0xffff));
-          auto high = _mm256_srli_epi32(seed, 16);
+          auto low_seed = _mm256_slli_epi32(seed, 16);
+          auto high_seed = _mm256_and_si256(seed, _mm256_set1_epi32(int(0xffff0000U)));
           value =
-              _mm256_or_si256(narrow_packed_sr(format, av, low, saturate),
-                              _mm256_slli_epi32(narrow_packed_sr(format, bv, high, saturate), 16));
+              _mm256_or_si256(narrow(format, av, low_seed, true, saturate),
+                              _mm256_slli_epi32(narrow(format, bv, high_seed, true, saturate), 16));
         } else {
+          using V = conversion_simd::Lanes<32>;
           auto zero = _mm256_setzero_si256();
-          value = _mm256_or_si256(
-              narrow(format, source_sign(av, mode, 0), zero, false, saturate),
-              _mm256_slli_epi32(narrow(format, source_sign(bv, mode, 1), zero, false, saturate),
-                                16));
+          const V low(narrow(format, source_sign(av, mode, 0), zero, false, saturate));
+          const V high(narrow(format, source_sign(bv, mode, 1), zero, false, saturate));
+          value = pack_rounded_halves(low, high, flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS).bits;
         }
       }
     }

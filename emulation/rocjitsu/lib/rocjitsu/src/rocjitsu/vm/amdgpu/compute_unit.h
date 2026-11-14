@@ -195,13 +195,14 @@ public:
     return isa_diagnostic_count_.load(std::memory_order_relaxed);
   }
   /// @brief Report static encoding restrictions on the issuing thread.
-  void check_static_isa_diagnostics(const Instruction &inst, const Wavefront &wf) {
+  void check_static_isa_diagnostics(const Instruction &inst, Wavefront &wf) {
     constexpr uint64_t mask = INVALID_MFMA_BROADCAST | INVALID_VOPD_OPERANDS |
-                              INVALID_IU_MODIFIERS | MISALIGNED_SCALAR_DATA;
+                              INVALID_IU_MODIFIERS | MISALIGNED_SCALAR_DATA |
+                              RESERVED_CVT_SCALE_SELECTOR | CHECK_CVT_SCALE_OVERLAP;
     if (inst.flags() & mask) [[unlikely]]
       report_static_isa_diagnostics(inst, wf);
   }
-  void report_static_isa_diagnostics(const Instruction &inst, const Wavefront &wf);
+  void report_static_isa_diagnostics(const Instruction &inst, Wavefront &wf);
   /// @brief Report only conditions explicitly undefined for the executing architecture.
   void report_undefined_behavior(const Wavefront &wf, std::string_view reason);
   /// @brief Register a producer using planned FLAT lanes before execution.

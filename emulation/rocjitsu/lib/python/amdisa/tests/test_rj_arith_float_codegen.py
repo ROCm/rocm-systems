@@ -1669,6 +1669,9 @@ def test_float16_conversion_architectures_and_layouts(arch):
                 assert body is None
                 continue
             assert 'rj_arith_' + name.lower() + '_w64' in body
+            assert ('RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS' in body) == (
+                arch == 'cdna5' and name == 'V_CVT_PK_F16_F32'
+            )
             assert 'FP16_OVFL' in body
             assert ('execute_bf16_widen_sdwa' in body) == (
                 widen and not vop3 and arch == 'cdna4'

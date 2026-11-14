@@ -1519,7 +1519,7 @@ class TestDeriveVectorUnary:
         else:
             assert encode_helper in cpp
         assert 'util::e8m0_to_f32' in cpp
-        assert '((inst_.opsel & 0x3u) * 8u)' in cpp
+        assert 'amdgpu::CvtScaleSelection::f4_f6(inst_.opsel)' in cpp
         assert (
             'std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src1, lane))'
             not in cpp

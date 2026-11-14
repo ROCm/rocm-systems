@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: MIT
 
 // AVX-512 FP16/BF16 conversions preserving inherited NaN, subnormal and overflow rules.
-#include "conversion/float16_conversion.h"
+#include "conversion/float16_conversion_impl.h"
+#include "conversion/x86_64/lanes.h"
 #include "rj_arith/detail/rj_arith_common.h"
 #include <immintrin.h>
 #include <stdint.h>
@@ -115,18 +116,6 @@ __m512i source_sign(__m512i raw, uint32_t mode, int operand) {
   return raw;
 }
 
-// Match the packed instruction's independent half-word addends.
-__m512i narrow_packed_sr(rocjitsu::arith::Float16Format format, __m512i raw, __m512i addend,
-                         bool saturate) {
-  if (format == rocjitsu::arith::Float16Format::F16) {
-    auto magnitude = _mm512_and_si512(raw, _mm512_set1_epi32(0x7fffffff));
-    raw = select(_mm512_cmpgt_epi32_mask(_mm512_set1_epi32(0x47800000), magnitude),
-                 _mm512_add_epi32(raw, addend), raw);
-    return narrow_f16(raw, _mm512_setzero_si512(), true, saturate);
-  }
-  return narrow_bf16(raw, _mm512_slli_epi32(addend, 16), true, saturate);
-}
-
 } // namespace
 
 namespace rocjitsu::arith {
@@ -154,17 +143,17 @@ void float16_conversion_x86_64_v4(Float16Format format, Float16Conversion op, ui
       } else {
         if (op == Float16Conversion::StochasticPack) {
           auto seed = _mm512_loadu_si512(reinterpret_cast<const __m512i *>(c + lane));
-          auto low = _mm512_and_si512(seed, _mm512_set1_epi32(0xffff));
-          auto high = _mm512_srli_epi32(seed, 16);
+          auto low_seed = _mm512_slli_epi32(seed, 16);
+          auto high_seed = _mm512_and_si512(seed, _mm512_set1_epi32(int(0xffff0000U)));
           value =
-              _mm512_or_si512(narrow_packed_sr(format, av, low, saturate),
-                              _mm512_slli_epi32(narrow_packed_sr(format, bv, high, saturate), 16));
+              _mm512_or_si512(narrow(format, av, low_seed, true, saturate),
+                              _mm512_slli_epi32(narrow(format, bv, high_seed, true, saturate), 16));
         } else {
+          using V = conversion_simd::Lanes<32>;
           auto zero = _mm512_setzero_si512();
-          value = _mm512_or_si512(
-              narrow(format, source_sign(av, mode, 0), zero, false, saturate),
-              _mm512_slli_epi32(narrow(format, source_sign(bv, mode, 1), zero, false, saturate),
-                                16));
+          const V low(narrow(format, source_sign(av, mode, 0), zero, false, saturate));
+          const V high(narrow(format, source_sign(bv, mode, 1), zero, false, saturate));
+          value = pack_rounded_halves(low, high, flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS).bits;
         }
       }
     }
