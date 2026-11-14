@@ -198,6 +198,14 @@ if ( CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   endif()
 endif()
 
+## ThreadSanitizer flags
+if ( THREAD_SANITIZER OR THEROCK_SANITIZER STREQUAL "TSAN" OR DEFINED ENV{THREAD_SANITIZER} OR "$ENV{THEROCK_SANITIZER}" STREQUAL "TSAN" )
+  # Use -O1 per ThreadSanitizer documentation: aggressive optimization can mask race conditions
+  set ( HSA_CXX_FLAGS ${HSA_CXX_FLAGS} -fsanitize=thread -g -O1 -Wno-tsan )
+  set ( HSA_SHARED_LINK_FLAGS "${HSA_SHARED_LINK_FLAGS} -fsanitize=thread" )
+  message(STATUS "hsa-runtime64: ThreadSanitizer (TSAN) enabled")
+endif()
+
 ## UndefinedBehaviorSanitizer flags
 if ( UNDEFINED_SANITIZER OR THEROCK_SANITIZER STREQUAL "UBSAN" OR DEFINED ENV{UNDEFINED_SANITIZER} OR "$ENV{THEROCK_SANITIZER}" STREQUAL "UBSAN" )
   set ( HSA_CXX_FLAGS ${HSA_CXX_FLAGS} -fsanitize=undefined -fsanitize-recover=undefined -g )
