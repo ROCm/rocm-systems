@@ -272,15 +272,15 @@ hsa_status_t KfdVirtioDriver::AllocateMemory(const core::MemoryRegion& mem_regio
                                                               : kmt_alloc_flags.ui32.Contiguous);
   }
 
-  //// Only allow using the suballocator for ordinary VRAM.
+  //// Use separate suballocators for ordinary and executable VRAM.
   if (m_region.IsLocalMemory() && !kmt_alloc_flags.ui32.NoAddress) {
     bool subAllocEnabled = !core::Runtime::runtime_singleton_->flag().disable_fragment_alloc();
-    // Avoid modifying executable or queue allocations.
+    // Other special allocations retain their original path and requirements.
     bool useSubAlloc = subAllocEnabled;
-    useSubAlloc &= ((alloc_flags & (~core::MemoryRegion::AllocateRestrict)) == 0);
+    useSubAlloc &= m_region.fragment_alloc_supported(size, alloc_flags);
 
     if (useSubAlloc) {
-      mem = m_region.fragment_alloc(size);
+      mem = m_region.fragment_alloc(size, alloc_flags & core::MemoryRegion::AllocateExecutable);
 
       if ((alloc_flags & core::MemoryRegion::AllocateAsan)) {
         // TODO: Implement ASAN support for VIRTIO driver

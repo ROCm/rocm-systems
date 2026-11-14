@@ -452,13 +452,41 @@ void MemoryAllocationTest::MemoryBasicAllocationAndFree(hsa_agent_t agent,
     ASSERT_EQ(err, HSA_STATUS_SUCCESS);
     max_size = (max_size > kMemoryAllocSize) ? kMemoryAllocSize : max_size;
 
-    char *memoryPtr;
-    err = hsa_amd_memory_pool_allocate(pool, max_size , 0,
-                                       reinterpret_cast<void**>(&memoryPtr));
-    ASSERT_EQ(err, HSA_STATUS_SUCCESS);
-    if (memoryPtr) {
-      err = hsa_amd_memory_pool_free(memoryPtr);
+    for (uint32_t flags : {0u, uint32_t(HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG)}) {
+      void* memoryPtr = nullptr;
+      err = hsa_amd_memory_pool_allocate(pool, max_size, flags, &memoryPtr);
       ASSERT_EQ(err, HSA_STATUS_SUCCESS);
+      ASSERT_NE(memoryPtr, nullptr);
+      ASSERT_EQ(hsa_amd_memory_pool_free(memoryPtr), HSA_STATUS_SUCCESS);
+    }
+
+    // Keep ordinary and executable allocations live together, then free them
+    // out of order. The runtime must retain each fragment's identity and bounds.
+    auto free_pool = [](void* p) {
+      if (p != nullptr) EXPECT_EQ(hsa_amd_memory_pool_free(p), HSA_STATUS_SUCCESS);
+    };
+    std::vector<std::unique_ptr<void, decltype(free_pool)>> allocations;
+    for (size_t i = 0; i < 64; ++i) {
+      const size_t bytes = pool_i.alloc_granule * (1 + i % 3);
+      const uint32_t flags = i % 2 ? HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG : 0;
+      void* p = nullptr;
+      ASSERT_EQ(hsa_amd_memory_pool_allocate(pool, bytes, flags, &p), HSA_STATUS_SUCCESS);
+      allocations.emplace_back(p, free_pool);
+      ASSERT_NE(p, nullptr);
+      hsa_amd_pointer_info_t info{};
+      info.size = sizeof(info);
+      ASSERT_EQ(hsa_amd_pointer_info(p, &info, nullptr, nullptr, nullptr), HSA_STATUS_SUCCESS);
+      EXPECT_EQ(info.agentBaseAddress, p);
+      EXPECT_GE(info.sizeInBytes, bytes);
+    }
+    for (size_t i = 0; i < allocations.size(); i += 2) allocations[i].reset();
+    for (size_t i = 1; i < allocations.size(); i += 2) {
+      hsa_amd_pointer_info_t info{};
+      info.size = sizeof(info);
+      ASSERT_EQ(hsa_amd_pointer_info(allocations[i].get(), &info, nullptr, nullptr, nullptr),
+                HSA_STATUS_SUCCESS);
+      EXPECT_EQ(info.agentBaseAddress, allocations[i].get());
+      EXPECT_GE(info.sizeInBytes, pool_i.alloc_granule * (1 + i % 3));
     }
   }
   return;
