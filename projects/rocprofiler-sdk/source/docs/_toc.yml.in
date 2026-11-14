@@ -40,6 +40,7 @@ subtrees:
     - file: how-to/using-rocprofv3-on-wsl
     - file: how-to/using-spm
     - file: how-to/using-kernel-replay
+    - file: how-to/using-kernel-replay-rocprofv3
     - file: how-to/samples
       title: Samples
   - caption: API reference

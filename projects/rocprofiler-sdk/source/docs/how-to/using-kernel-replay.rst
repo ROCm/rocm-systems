@@ -8,29 +8,39 @@
 Using kernel replay
 ===================
 
-Kernel replay is an experimental ROCprofiler-SDK **callback tracing domain**. A custom tool
-subscribes to ``ROCPROFILER_CALLBACK_TRACING_KERNEL_REPLAY``, tells the SDK how many times to
-re-execute a dispatch, and the SDK snapshots tracked device memory, runs that many passes, and
-restores the snapshot between them so every pass observes identical captured inputs.
+Kernel replay is an experimental ROCprofiler-SDK callback tracing domain. A custom tool
+subscribes to ``ROCPROFILER_CALLBACK_TRACING_KERNEL_REPLAY`` and specifies how many times to
+re-execute a dispatch. The SDK then snapshots tracked device memory, runs that many passes, and
+restores the snapshot between passes so every pass observes identical inputs.
 
-The domain is not tied to hardware counters. A tool can use it for counters, timing, PC sampling,
+The domain doesn't depend on hardware counters. A tool can use it for counters, timing, PC sampling,
 thread trace, or any other per-pass work.
 
-This page is the SDK how-to: it covers subscribing to the replay domain from a custom tool.
-Conceptual and API detail live under :ref:`kernel-replay-conceptual` and
-:ref:`kernel-replay-sdk-api`. For the ``rocprofv3`` command-line option
+This topic explains how to use kernel replay from the SDK: it covers subscribing to the replay domain from a custom tool.
+For conceptual and API details, see :ref:`kernel-replay-conceptual` and
+:ref:`kernel-replay-sdk-api`. For the ``rocprofv3`` command-line options for kernel replay
 (``--replay-mode kernel --kernel-replay-beta-enabled``), see the rocprofv3 how-to guide (:ref:`using-kernel-replay-rocprofv3`).
 
 .. warning::
 
    Kernel replay is **experimental**. The public header is
-   ``<rocprofiler-sdk/experimental/kernel_replay.h>``. The domain, payload, and limitations
-   below are expected to change before a stable release.
+   ``<rocprofiler-sdk/experimental/kernel_replay.h>``. The
+   :ref:`domain <kernel-replay-configure-domain>`,
+   :ref:`payload <kernel-replay-set-pass-count>`, and
+   :ref:`limitations <kernel-replay-limitations>` are expected to change
+   before a stable release.
+
+Procedure
+=========
+
+Using kernel replay takes two steps: subscribe to the domain, then set how many passes to run.
+
+.. _kernel-replay-configure-domain:
 
 Configure the domain
-====================
+--------------------
 
-There is no dedicated ``rocprofiler_configure_kernel_replay_*`` entry point. Subscribe through
+There's no dedicated ``rocprofiler_configure_kernel_replay_*`` entry point. Subscribe through
 ordinary callback tracing:
 
 .. code-block:: cpp
@@ -49,13 +59,15 @@ ordinary callback tracing:
    rocprofiler_start_context(ctx);
 
 Configuring the domain also enables the device-allocation tracker used for snapshot and restore.
-A process that never configures the domain does not pay that tracking cost. Only one context may
+A process that never configures the domain doesn't pay that tracking cost. Only one context might
 subscribe; a second configure call returns ``ROCPROFILER_STATUS_ERROR_SERVICE_ALREADY_CONFIGURED``.
 
-Set ``replay_pass_count``
-=====================
+.. _kernel-replay-set-pass-count:
 
-``CONFIG`` ``PHASE_ENTER`` is where the tool installs the pass-count callback. The SDK calls
+Set replay_pass_count
+---------------------
+
+During ``CONFIG`` ``PHASE_ENTER``, the tool installs the pass-count callback. The SDK calls
 that callback after ``CONFIG`` ``PHASE_ENTER`` returns:
 
 .. code-block:: cpp
@@ -92,6 +104,9 @@ that callback after ``CONFIG`` ``PHASE_ENTER`` returns:
        return groups_for_agent(dispatch_info.agent_id);
    }
 
+The combination of ``replay_pass_count`` and ``replay_continue`` return values determines the
+resulting behavior:
+
 .. list-table::
    :header-rows: 1
    :widths: 22 28 50
@@ -116,13 +131,18 @@ that callback after ``CONFIG`` ``PHASE_ENTER`` returns:
      - Indefinite loop until continue callback returns zero.
    * - returns ``0``
      - ``NULL``
-     - Rejected: the SDK warns and the dispatch is not replayed.
+     - Rejected: the SDK warns and doesn't replay the dispatch.
 
-One dispatch id is reserved before ``CONFIG`` and reused for every pass. The application observes
+The SDK reserves one dispatch ID before ``CONFIG`` and reuses it for every pass. The application observes
 exactly one kernel completion regardless of pass count.
 
+Additional techniques
+======================
+
+These build on the preceding procedure; neither is required to use kernel replay.
+
 Carry state with ``user_data``
-==============================
+------------------------------
 
 The tracing callback receives a ``rocprofiler_user_data_t*`` for the current dispatch. Set it
 during ``CONFIG PHASE_ENTER`` to carry state through the complete replay sequence:
@@ -133,8 +153,8 @@ during ``CONFIG PHASE_ENTER`` to carry state through the complete replay sequenc
 The SDK copies the union value after ``CONFIG PHASE_ENTER`` and supplies it to
 ``replay_pass_count``, ``replay_continue``, and every ``PASS`` callback.
 
-Each pass gets its own copy, so replacing the union value during ``PASS PHASE_ENTER`` is scoped to
-that one pass:
+Each pass gets its own copy, so replacing the union value during ``PASS PHASE_ENTER`` only affects
+that one pass. The following table shows which value each callback or phase observes:
 
 .. list-table::
    :header-rows: 1
@@ -153,8 +173,8 @@ that one pass:
      - the ``CONFIG PHASE_ENTER`` value
 
 ``replay_continue`` runs after ``PASS PHASE_EXIT`` but still receives the ``CONFIG`` value, so a
-tool cannot signal an early exit by overwriting ``user_data->value`` during a pass. Put anything
-that has to influence the continue decision behind ``user_data->ptr`` instead: mutations to the
+tool can't signal an early exit by overwriting ``user_data->value`` during a pass. Put anything
+influencing the continue decision behind ``user_data->ptr`` instead: mutations to the
 pointed-to object are visible from every callback, because the pointer itself never changes.
 
 ``samples/kernel_replay/basic_client_with_user_data.cpp`` demonstrates the pointer form. It stores
@@ -163,13 +183,14 @@ tool state in ``user_data.ptr``, reads the requested maximum from ``replay_pass_
 table above.
 
 Localized context control
-=========================
+-------------------------
 
-During ``PASS`` ``PHASE_ENTER`` the payload carries ``replay_start_context`` /
-``replay_stop_context``. Use them to enable or disable override-aware contexts for that
-pass (for example counters on selected passes and thread trace once) without calling global
-``rocprofiler_start_context`` / ``rocprofiler_stop_context``. PC sampling is agent-wide and does
-not currently honor these callbacks, so it cannot be isolated to one replay pass.
+During ``PASS`` ``PHASE_ENTER`` the payload carries ``replay_start_context`` and
+``replay_stop_context``. Use ``replay_start_context`` to enable, and ``replay_stop_context`` to
+disable, override-aware contexts for that pass — for example, enabling counters only on selected
+passes, or thread trace only once — without calling the global ``rocprofiler_start_context`` /
+``rocprofiler_stop_context``. PC sampling is agent-wide and
+doesn't currently honor these callbacks, so they can't isolate it to one replay pass.
 
 Overrides are sticky across passes and scoped to the replay loop. See
 :ref:`kernel-replay-callback-api` for the contract.
@@ -177,10 +198,12 @@ Overrides are sticky across passes and scoped to the replay loop. See
 In-tree examples
 ================
 
+The ROCprofiler-SDK source tree includes these kernel replay examples:
+
 * ``samples/kernel_replay/basic_client_with_user_data.cpp`` — threads mutable tool state through
-  ``user_data.ptr`` without a dispatch-id side table.
+  ``user_data.ptr`` without a dispatch-ID side table.
 * ``tests/kernel-replay-concurrency/`` — custom client that replays one kernel and opts another
-  out, asserting concurrent non-replayed work is not corrupted by snapshot/restore.
+  out, asserting snapshot/restore doesn't corrupt concurrent non-replayed work.
 * ``tests/kernel-replay-local-context/`` — custom client that starts/stops per-service contexts
   across passes.
 * ``source/lib/rocprofiler-sdk/kernel_replay/tests/`` — unit tests for configure, local context,
@@ -195,16 +218,17 @@ Between passes, kernel replay restores:
   ``hsa_amd_memory_pool_allocate`` / ``hsa_memory_allocate``.
 * Module-scope ``__device__`` and ``__constant__`` variables in loaded executables.
 
-It does **not** restore:
+Kernel replay **doesn't** restore:
 
 * Unified or managed memory.
 * ``hipMallocAsync`` and other pool-backed, stream-ordered allocations.
 * Host, fine-grained, kernarg, or executable allocations (excluded by design).
 * HIP graph-managed memory.
 
-Capture is a **full in-memory copy** of every tracked region into host RAM. Cost is
-``O(tracked_bytes × passes)``, not kernel time alone. The last executed pass is **not** restored,
-so the application sees the memory the kernel actually produced.
+Capture takes a **full in-memory copy** of every tracked region into host RAM, so its cost scales
+as ``O(tracked_bytes × passes)`` — not just kernel execution time. The one exception is the last
+pass: kernel replay **doesn't** restore memory after it, so the application sees the memory the
+kernel actually produced.
 
 .. _kernel-replay-limitations:
 
@@ -214,18 +238,20 @@ Limitations
 * **Beta.** The domain, payload, and snapshot policy may change.
 * **Single** ``KERNEL_REPLAY`` **subscriber.**
 * **Coarse-grained device VRAM only**, plus module-scope device/constant variables.
-* **HIP graph launches are not replayed.** The interceptor warns once and the graph runs once on
-  the ordinary path. A graph dispatch does **not** hard-error at the replay gate.
-* **Only single-packet, single-dispatch submissions** are replayed. Multi-packet batches warn once
-  and run once.
+* **Kernel replay doesn't replay HIP graph launches.** The interceptor warns once and the graph
+  runs once on the ordinary path. A graph dispatch **doesn't** hard-error at the replay gate.
+* **Kernel replay replays only single-packet, single-dispatch submissions.** Multi-packet batches
+  warn once and run once.
 * **Writer lock serializes the agent** for the whole replay window. Different GPUs use different
-  locks (multi-GPU concurrent at the SDK), but there is no in-tree multi-GPU test and no MPI
+  locks (multi-GPU concurrent at the SDK), but there's no in-tree multi-GPU test and no MPI
   coordination.
-* **Async copies are not fenced.** ``hsa_amd_memory_async_copy`` (or HIP async memcpy) on another
+* **Kernel replay doesn't fence async copies.** ``hsa_amd_memory_async_copy`` (or HIP async memcpy) on another
   thread can mutate device memory during the replay window.
-* **Stuck drains abort the process** rather than hanging (roughly 60 s bounds inside the window).
+* **Stuck drains abort the process** rather than hanging (bounded to roughly 60 s within the
+  window).
 * **Host RAM duplication** of the tracked device footprint for the duration of the replay. Under
-  host memory pressure the snapshot is declined and the dispatch runs once rather than aborting.
+  host memory pressure, kernel replay declines the snapshot and runs the dispatch once rather
+  than aborting.
 
 See also
 ========

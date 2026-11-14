@@ -124,6 +124,19 @@ is snapshotted and restored between passes):
 
 **Documentation:** :ref:`using-kernel-replay-rocprofv3`
 
+Streaming Performance Monitor (SPM) (beta)
+--------------------------------------------
+
+.. code-block:: bash
+
+   # Check which counters support SPM sampling
+   rocprofv3 --list-avail
+
+   # Enable SPM sampling
+   rocprofv3 --spm-beta-enabled --spm SQ_WAVES --spm-sample-interval 1200 -- ./your_app
+
+**Documentation:** :ref:`using-spm`
+
 Process attachment
 ------------------
 
@@ -327,6 +340,8 @@ Installation and setup
 
 Quick troubleshooting tips
 ===========================
+
+- **Unclear failures:** Run ``rocprofv3 --doctor`` first; it checks your machine and ROCm installation and reports what would prevent ``rocprofv3`` from working, with a fix for each problem. See :ref:`using-rocprofv3-doctor`.
 
 - **Permission issues:** Ensure proper access to GPU devices and ``/dev/kfd``.
 

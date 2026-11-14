@@ -25,8 +25,8 @@ context control are documented in :ref:`using-kernel-replay`.
 
 .. warning::
 
-   Kernel replay is **experimental**. Use ``--replay-mode kernel`` together with
-   ``--kernel-replay-beta-enabled`` to acknowledge that the behaviour may change in a future
+   Kernel replay is **experimental**. Use ``--replay-mode kernel`` to enable the feature, and
+   ``--kernel-replay-beta-enabled`` to acknowledge that the behaviour might change in a future
    release. The SDK header lives under ``rocprofiler-sdk/experimental/``. Use it when you
    understand the limitations below.
 
