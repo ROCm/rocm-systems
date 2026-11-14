@@ -304,38 +304,14 @@ trap_entry:
 
   s_load_dwordx2                        ttmp[2:3], ttmp[14:15], 0   // ttmp[2:3] = host_trap_buffers base
 .if .amdgcn.gfx_generation_minor >= 4
-  // GFX9.4+ (multi-XCC): PC sampling bits cleared at trap_entry (bits 21-22)
-  // Multi-XCC: Load per_xcc_size and XCC_ID for offset calculation
-  s_load_dword                          ttmp4, ttmp[14:15], 0x10        // ttmp4 = per_xcc_size
-  s_getreg_b32                          ttmp5, hwreg(HW_REG_XCC_ID)     // ttmp5 = XCC_ID
+  // GFX9.4+ (multi-XCC): mark hosttrap and branch to profile handler
   s_setreg_imm32_b32                    hwreg(HW_REG_TRAPSTS, SQ_WAVE_TRAPSTS_HOST_TRAP_SHIFT, 1), 0
   s_bitset1_b32                         ttmp13, TTMP13_PCS_IS_HOSTTRAP  // set bit 22 in TTMP13
-  s_waitcnt                             lgkmcnt(0)
-
-  // Check if host_trap_buffers is NULL (not configured for hosttrap).
-  // If NULL, exit cleanly - hosttrap and stochastic are mutually exclusive.
-  s_cmp_eq_u64                          ttmp[2:3], 0
-  s_cbranch_scc1                        .exit_trap
-
-  // Calculate offset directly into ttmp14:15 (TMA2 pointer no longer needed after loads complete)
-  s_mul_i32                             ttmp14, ttmp4, ttmp5            // ttmp14 = lo32(offset)
-  s_mul_hi_u32                          ttmp15, ttmp4, ttmp5            // ttmp15 = hi32(offset)
-
-  // ttmp14:15 = base (ttmp2:3) + offset (ttmp14:15)
-  s_add_u32                             ttmp14, ttmp2, ttmp14
-  s_addc_u32                            ttmp15, ttmp3, ttmp15
   s_branch                              .profile_trap_handlers_gfx9
 .else
   // GFX9.0-9.3 (single-XCC): Simple pointer copy, no per-XCC offset needed
   s_bitset1_b32                         ttmp11, TTMP11_PCS_IS_HOSTTRAP  // Set bit 22 in TTMP11
   s_waitcnt                             lgkmcnt(0)
-
-  // Check if host_trap_buffers is NULL (not configured for hosttrap).
-  // If NULL, exit cleanly - nothing to do (no stochastic on GFX9.0-9.3).
-  s_cmp_eq_u64                          ttmp[2:3], 0
-  s_cbranch_scc1                        .exit_trap
-
-  s_mov_b64                             ttmp[14:15], ttmp[2:3]          // ttmp14:15 = host_trap_buffers
   s_branch                              .profile_trap_handlers_gfx9
 .endif
 .else
@@ -373,28 +349,11 @@ trap_entry:
   s_bitcmp1_b32                         ttmp7, SQ_WAVE_TRAPSTS_PERF_SNAPSHOT_SHIFT   // is stochastic_sample_trap
   s_cbranch_scc0                        .no_skip_debugtrap
 
-  // Handle stochastic trap (PC sampling bits cleared at trap_entry)
-  s_setreg_imm32_b32                    hwreg(HW_REG_TRAPSTS, SQ_WAVE_TRAPSTS_PERF_SNAPSHOT_SHIFT, 1), 0
+  // Handle stochastic trap: load buffer base, mark in ttmp13, branch to profile handler
   s_load_dwordx2                        ttmp[2:3], ttmp[14:15], 0x8     // ttmp[2:3] = stochastic_trap_buffers base
-  // Multi-XCC: Load per_xcc_size and XCC_ID for offset calculation
-  s_load_dword                          ttmp4, ttmp[14:15], 0x10        // ttmp4 = per_xcc_size
-  s_getreg_b32                          ttmp5, hwreg(HW_REG_XCC_ID)     // ttmp5 = XCC_ID
+  s_setreg_imm32_b32                    hwreg(HW_REG_TRAPSTS, SQ_WAVE_TRAPSTS_PERF_SNAPSHOT_SHIFT, 1), 0
   s_bitset1_b32                         ttmp13, TTMP13_PCS_IS_STOCHASTIC  // set bit 21 in TTMP13
-  s_waitcnt                             lgkmcnt(0)
-
-  // Check if stochastic_trap_buffers is NULL (not configured for stochastic).
-  // If NULL, exit cleanly - nothing to do for this trap.
-  s_cmp_eq_u64                          ttmp[2:3], 0
-  s_cbranch_scc1                        .exit_trap
-
-  // Calculate offset directly into ttmp14:15 (TMA2 pointer no longer needed after loads complete)
-  s_mul_i32                             ttmp14, ttmp4, ttmp5            // ttmp14 = lo32(offset)
-  s_mul_hi_u32                          ttmp15, ttmp4, ttmp5            // ttmp15 = hi32(offset)
-
-  // ttmp14:15 = base (ttmp2:3) + offset (ttmp14:15)
-  s_add_u32                             ttmp14, ttmp2, ttmp14
-  s_addc_u32                            ttmp15, ttmp3, ttmp15
-  s_branch                              .profile_trap_handlers_gfx9      // Off to the profile handlers
+  s_branch                              .profile_trap_handlers_gfx9
 .else
   s_branch                              .no_skip_debugtrap
 .endif // PC_SAMPLING_GFX9
@@ -439,8 +398,26 @@ trap_entry:
   //  }
   //}
 
-  // ttmp[14:15] is tma->host_trap_buffers; Available: ttmp[2:3], ttmp[4:5], ttmp7, ttmp13
+  // ttmp[14:15] is tma->host_trap_buffers; ttmp[2:3] is buffer base (for NULL check); Available: ttmp[4:5], ttmp7, ttmp13
 .profile_trap_handlers_gfx9:
+  // Exit immediately if the buffer pointer is NULL (sampling not configured for this trap type).
+  s_cmp_eq_u64                          ttmp[2:3], 0
+  s_cbranch_scc1                        .exit_trap
+
+.if .amdgcn.gfx_generation_minor >= 4
+  // GFX9.4+ (multi-XCC): ttmp[14:15] = ttmp[2:3] + (XCC_ID * per_xcc_size)
+  s_load_dword                          ttmp4, ttmp[14:15], 0x10        // ttmp4 = per_xcc_size
+  s_getreg_b32                          ttmp5, hwreg(HW_REG_XCC_ID)     // ttmp5 = XCC_ID
+  s_waitcnt                             lgkmcnt(0)
+  s_mul_i32                             ttmp14, ttmp4, ttmp5            // lo32(offset)
+  s_mul_hi_u32                          ttmp15, ttmp4, ttmp5            // hi32(offset)
+  s_add_u32                             ttmp14, ttmp2, ttmp14
+  s_addc_u32                            ttmp15, ttmp3, ttmp15
+.else
+  // GFX9.0-9.3 (single-XCC): buffer pointer needs no per-XCC adjustment
+  s_mov_b64                             ttmp[14:15], ttmp[2:3]
+.endif
+
   s_mov_b64                             ttmp[2:3], 1                    // atomic increment buf_write_val
   s_atomic_add_x2                       ttmp[2:3], ttmp[14:15], glc     // ttmp[2:3] = packed local_entry
   S_LOAD_DWORD_PCS_TTMP_REG1            ttmp[14:15], 0x8                // TTMP_REG1 = tma->buf_size
@@ -477,32 +454,9 @@ trap_entry:
 
  .if .amdgcn.gfx_generation_number == 9
 
- .if .amdgcn.gfx_generation_minor >= 4
-  // Check if it's a stochastic trap
-  s_bitcmp1_b32                         ttmp13, TTMP13_PCS_IS_STOCHASTIC
-  s_cbranch_scc1                        .fill_sample_stochastic
-  // Check if it's a host trap
-  s_bitcmp1_b32                         ttmp13, TTMP13_PCS_IS_HOSTTRAP
-  s_cbranch_scc1                        .fill_sample_hosttrap
-.else
- // Check if it's a host trap
-  s_bitcmp1_b32                         ttmp11, TTMP11_PCS_IS_HOSTTRAP
-  s_cbranch_scc1                        .fill_sample_hosttrap
-
-.endif
-.endif
-  // If neither bit is set, this is unexpected.
-  // This branch is not expected to be taken.
-  s_branch                              .no_skip_debugtrap
-
-  // ttmp7 contains local_entry, ttmp[4:5] contains "&bufferX",
-  // ttmp[14:15] holds 'tma->host_trap_buffers' pointer
-  // ttmp[2:3] and ttmp13 are available for gathering perf sample info
-  // ttmp[14:15] is live out
-
   // fill_sample(...) - begin //
   // typedef struct {
-  // [0x00]  uint64_t pc;
+  // [0x00]  uint64_t pc;              // host trap PC, or stochastic snapshot PC
   // [0x08]  uint64_t exec_mask;
   // [0x10]  uint32_t workgroup_id_x;
   // [0x14]  uint32_t workgroup_id_y;
@@ -512,89 +466,103 @@ trap_entry:
   //         uint32_t chiplet    : 3;    // XCC_ID on gfx94x, zero on older gfx9
   //         uint32_t reserved   : 21;
   // [0x20]  uint32_t hw_id;
-  // [0x24]  uint32_t reserved0;
-  // [0x28]  uint64_t reserved1;
+  // [0x24]  uint32_t reserved0;        // stochastic: snapshot DATA
+  // [0x28]  uint64_t reserved1;        // stochastic: snapshot DATA1
   // [0x30]  uint64_t timestamp;
   // [0x38]  uint64_t correlation_id;
   // } perf_sample_hosttrap_v1_t;
-  //
-  // __device__ void fill_sample_hosttrap_v1(perf_sample_hosttrap_v1_t* buf) {
-  //    buf->pc = ((ttmp1 & 0xffff) << 32) | ttmp0;
-  //    buf->exec_mask = EXEC;
-  //    buf->workgroup_id_x = ttmp8;
-  //    buf->workgroup_id_y = ttmp9;
-  //    buf->workgroup_id_z = ttmp10;
-  //    buf->chiplet_and_wave_id = ttmp11 & 0x3f;
-  //    buf->hw_id = s_getreg_b32(HW_REG_HW_ID);
-  //    buf->timestamp = s_memrealtime;
-  //    buf->correlation_id = get_correlation_id();
-  // }
-.fill_sample_hosttrap:
+
+  // Calculate buffer entry address: ttmp[2:3] = &bufferX[local_entry]
   s_mul_i32                             ttmp2, ttmp7, 0x40              // offset into buffer for 64B objects
-  s_mul_hi_u32                          ttmp3, ttmp7, 0x40              // ttmp[2:3] will contain byte ...
+  s_mul_hi_u32                          ttmp3, ttmp7, 0x40
   s_add_u32                             ttmp2, ttmp2, ttmp4
   s_addc_u32                            ttmp3, ttmp3, ttmp5             // ttmp[2:3]=&bufferX[local_entry]
+
+  // Read timestamp (wait deferred until first use for latency hiding)
   s_memrealtime                         ttmp[4:5]
-  s_and_b32                             ttmp1, ttmp1, 0xffff            // clear out extra data from PC_HI
-  s_store_dwordx2                       ttmp[0:1], ttmp[2:3]            // store PC
-  s_waitcnt                             lgkmcnt(0)                      // wait for timestamp
+
+.if (.amdgcn.gfx_generation_minor >= 4)
+  // GFX9.4+: store common fields shared by both sample types
+
+  // Store EXEC mask at offset 0x08-0x0c (can execute during s_memrealtime latency)
+  s_mov_b32                             ttmp6, exec_lo
+  s_store_dword                         ttmp6, ttmp[2:3], 0x8
+  s_mov_b32                             ttmp6, exec_hi
+  s_store_dword                         ttmp6, ttmp[2:3], 0xc
+
+  // Now wait for timestamp before storing it
+  s_waitcnt                             lgkmcnt(0)
+
+  // Store timestamp at offset 0x30
+  s_store_dwordx2                       ttmp[4:5], ttmp[2:3], 0x30
+
+  // Store workgroup IDs at offsets 0x10-0x18
+  s_store_dwordx2                       ttmp[8:9], ttmp[2:3], 0x10
+  s_store_dword                         ttmp10, ttmp[2:3], 0x18
+
+  // Store wave_in_wg and chiplet (XCC_ID) at offset 0x1c
+  s_getreg_b32                          ttmp4, hwreg(HW_REG_XCC_ID)
+  s_lshl_b32                            ttmp4, ttmp4, 8
+  s_and_b32                             ttmp5, ttmp11, TTMP11_WAVE_IN_WG_MASK
+  s_or_b32                              ttmp4, ttmp4, ttmp5
+  s_store_dword                         ttmp4, ttmp[2:3], 0x1c
+
+  // Store HW_ID at offset 0x20
+  s_getreg_b32                          ttmp4, hwreg(HW_REG_HW_ID)
+  s_store_dword                         ttmp4, ttmp[2:3], 0x20
+
+  // Check if it’s a stochastic trap
+  s_bitcmp1_b32                         ttmp13, TTMP13_PCS_IS_STOCHASTIC
+  s_cbranch_scc1                        .fill_sample_stochastic
+  // Check if it’s a host trap
+  s_bitcmp1_b32                         ttmp13, TTMP13_PCS_IS_HOSTTRAP
+  s_cbranch_scc1                        .fill_sample_hosttrap
+.else
+  // GFX9.0-9.3: store common fields inline (no XCC_ID, different register usage)
+  // Store EXEC and workgroup IDs while s_memrealtime latency is hidden
   S_MOV_B32_SRC_PCS_TTMP_REG1           exec_lo
   S_STORE_DWORD_PCS_TTMP_REG1           ttmp[2:3], 0x8                  // store EXEC_LO
   S_MOV_B32_SRC_PCS_TTMP_REG1           exec_hi
   S_STORE_DWORD_PCS_TTMP_REG1           ttmp[2:3], 0xc                  // store EXEC_HI
   s_store_dwordx2                       ttmp[8:9], ttmp[2:3], 0x10      // store wg_id_x and wg_id_y
   s_store_dword                         ttmp10, ttmp[2:3], 0x18         // store wg_id_z
+  // Now wait for timestamp before storing it
+  s_waitcnt                             lgkmcnt(0)
   s_store_dwordx2                       ttmp[4:5], ttmp[2:3], 0x30      // store timestamp
-
-.if (.amdgcn.gfx_generation_number == 9 && .amdgcn.gfx_generation_minor >= 4)
-  s_getreg_b32                          ttmp4, hwreg(HW_REG_XCC_ID)     //store XCC_ID
-  s_lshl_b32                            ttmp4, ttmp4, 8
-  s_and_b32                             ttmp5, ttmp11, TTMP11_WAVE_IN_WG_MASK
-  s_or_b32                              ttmp4, ttmp4, ttmp5
-  s_store_dword                         ttmp4, ttmp[2:3], 0x1c          // store wave_in_wg
-.else
   s_and_b32                             ttmp4, ttmp11, 0x3f
   s_store_dword                         ttmp4, ttmp[2:3], 0x1c          // store wave_in_wg
+  s_getreg_b32                          ttmp4, hwreg(HW_REG_HW_ID)
+  s_store_dword                         ttmp4, ttmp[2:3], 0x20          // store HW_ID
+
+  // Check if it’s a host trap
+  s_bitcmp1_b32                         ttmp11, TTMP11_PCS_IS_HOSTTRAP
+  s_cbranch_scc1                        .fill_sample_hosttrap
 .endif
-  s_getreg_b32                          ttmp4, hwreg(HW_REG_HW_ID)
-  s_store_dword                         ttmp4, ttmp[2:3], 0x20          // store HW_ID
+  // If neither bit is set, this is unexpected.
+  // This branch is not expected to be taken.
+  s_branch                              .no_skip_debugtrap
 
+  // ttmp[2:3]=&bufferX[local_entry]; ttmp[4:5] free (timestamp already stored above on gfx94+)
+  // ttmp[14:15] is live out
+
+.fill_sample_hosttrap:
+  // Store hosttrap-specific field: PC at offset 0x00
+  s_and_b32                             ttmp1, ttmp1, 0xffff            // clear out extra data from PC_HI
+  s_store_dwordx2                       ttmp[0:1], ttmp[2:3]            // store PC
   s_branch                              .get_correlation_id
 
-.if .amdgcn.gfx_generation_number == 9 && .amdgcn.gfx_generation_minor >= 4
+.if .amdgcn.gfx_generation_minor >= 4
 .fill_sample_stochastic:
-  s_mul_i32                             ttmp2, ttmp7, 0x40              // offset into buffer for 64B objects
-  s_mul_hi_u32                          ttmp3, ttmp7, 0x40
-  s_add_u32                             ttmp2, ttmp2, ttmp4
-  s_addc_u32                            ttmp3, ttmp3, ttmp5             // ttmp[2:3]=&buffer[local_entry]
-  s_memrealtime                         ttmp[4:5]
-  s_waitcnt                             lgkmcnt(0)                      // Wait for timestamp
-  s_store_dwordx2                       ttmp[4:5], ttmp[2:3] 0x30       // Store timestamp
-
-  s_getreg_b32                          ttmp4, hwreg(HW_REG_SQ_PERF_SNAPSHOT_PC_LO)
-  s_getreg_b32                          ttmp5, hwreg(HW_REG_SQ_PERF_SNAPSHOT_PC_HI)
-  s_store_dwordx2                       ttmp[4:5], ttmp[2:3] 0x00       // store snapshot data
-  s_getreg_b32                          ttmp5, hwreg(HW_REG_SQ_PERF_SNAPSHOT_DATA1)
-  s_getreg_b32                          ttmp4, hwreg(HW_REG_SQ_PERF_SNAPSHOT_DATA)
-  s_store_dwordx2                       ttmp[4:5], ttmp[2:3], 0x24            // store snapshot PC
-
-  s_mov_b32                             ttmp6, exec_lo
-  s_store_dword                         ttmp6, ttmp[2:3], 0x8           // store EXEC_LO
-  s_mov_b32                             ttmp6, exec_hi
-  s_store_dword                         ttmp6, ttmp[2:3], 0xc           // store EXEC_HI
-
-  s_store_dwordx2                       ttmp[8:9], ttmp[2:3], 0x10      // store wg_id_x and wg_id_y
-  s_store_dword                         ttmp10, ttmp[2:3], 0x18         // store wg_id_z
-  s_getreg_b32                          ttmp4, hwreg(HW_REG_XCC_ID)
-  s_lshl_b32                            ttmp4, ttmp4, 8
-  s_and_b32                             ttmp5, ttmp11, TTMP11_WAVE_IN_WG_MASK
-  s_or_b32                              ttmp4, ttmp4, ttmp5
-  s_store_dword                         ttmp4, ttmp[2:3], 0x1c          // store chiplet_and_wave_id
-  s_getreg_b32                          ttmp4, hwreg(HW_REG_HW_ID)
-  s_store_dword                         ttmp4, ttmp[2:3], 0x20          // store HW_ID
-  // ttmp[2:3]=&buffer[local_entry]; ttmp[4:5], ttmp[6:7] are free
-  // ttmp[14:15]=ptr to ‘tma’ and is live out; ttmp11.b31 is buf_to_use, 0 or 1
+  // Store stochastic-specific fields: snapshot PC at 0x00, snapshot data at 0x24
+  s_getreg_b32                          ttmp6, hwreg(HW_REG_SQ_PERF_SNAPSHOT_PC_LO)
+  s_getreg_b32                          ttmp7, hwreg(HW_REG_SQ_PERF_SNAPSHOT_PC_HI)
+  s_store_dwordx2                       ttmp[6:7], ttmp[2:3], 0x00      // store snapshot PC at offset 0x00
+  s_getreg_b32                          ttmp7, hwreg(HW_REG_SQ_PERF_SNAPSHOT_DATA1)
+  s_getreg_b32                          ttmp6, hwreg(HW_REG_SQ_PERF_SNAPSHOT_DATA)
+  s_store_dwordx2                       ttmp[6:7], ttmp[2:3], 0x24      // store snapshot data at offset 0x24
   s_branch                              .get_correlation_id
+
+.endif
 
 .endif
 
