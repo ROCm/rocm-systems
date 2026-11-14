@@ -273,11 +273,31 @@ using name = perfetto_category<Tp...>;
 #    define TIMEMORY_PERFETTO_CATEGORIES ROCPROFSYS_PERFETTO_CATEGORIES
 #endif
 
+#include <cstddef>
 #include <set>
 #include <string>
+#include <string_view>
 
 namespace rocprofsys
 {
+/** Name and description of a category, as given to ROCPROFSYS_DEFINE_CATEGORY. */
+struct category_names
+{
+    /** The category name, e.g. "amd_smi". */
+    std::string_view name;
+    /** One-line description of the category. */
+    std::string_view description;
+};
+
+/**
+ * Name and description of a category id (ROCPROFSYS_CATEGORY_*), without timemory in the
+ * caller.
+ * @throws std::out_of_range for an id outside (ROCPROFSYS_CATEGORY_NONE,
+ * ROCPROFSYS_CATEGORY_LAST)
+ */
+[[nodiscard]] category_names
+category_info(std::size_t category_id);
+
 inline namespace config
 {
 std::set<std::string>
