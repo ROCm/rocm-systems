@@ -301,6 +301,13 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
 - **`rccl-UnitTestsMicroCrypt`** — `misc/crypt.cc` (via `CRYPT_CC_PATH`, from
   `crypt-test.cc`); suite `Crypt*`. Its own binary keeps `crypt.cc`'s file-scope
   state isolated. See `test_categories_micro_crypt.yaml`.
+- **`rccl-UnitTestsMicroCryptOpenssl3`** — `misc/crypt.cc` with the OpenSSL 3 TLS backend (via
+  `CRYPT_CC_PATH`, from `crypt-openssl3-test.cc`); suite `CryptPskHandshakeTest.*`. Drives real
+  PSK handshakes over a socketpair: two PSK peers connect, and a certificate-only server that
+  ignores the PSK is refused. Builds the backend when the OpenSSL 3 headers are present (the suite
+  skips otherwise; libssl is dlopened at run time). Its own binary because `crypt-test.cc` builds
+  `crypt.cc` without a TLS backend and one binary cannot link it twice. See
+  `test_categories_micro_crypt_openssl3.yaml`.
 - **`rccl-UnitTestsMicroStrongstream`** — `misc/strongstream.cc` (via
   `STRONGSTREAM_CC_PATH`, from `strongstream-test.cc`); suite `Strongstream*`. Its own
   binary because the test defines the HIP stream, event and graph calls it records, and

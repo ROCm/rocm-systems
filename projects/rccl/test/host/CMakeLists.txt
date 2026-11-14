@@ -606,6 +606,13 @@ function(rccl_define_micro_source_lists)
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 
+  # rccl-UnitTestsMicroCryptOpenssl3 -- src/misc/crypt.cc with the OpenSSL 3 TLS backend. Own binary:
+  # crypt-test.cc builds crypt.cc without a TLS backend, and one binary cannot link it twice.
+  set(TEST_MICRO_CRYPT_OPENSSL3_SOURCE_FILES
+    crypt-openssl3-test.cc
+    ../common/main_altrsmi.cpp
+    PARENT_SCOPE)
+
   # rccl-UnitTestsMicroStrongstream -- src/misc/strongstream.cc. Own binary: the test defines the HIP
   # calls it records, and strongstream_stubs.cc / nccl_fakes.cc already define this unit's symbols.
   set(TEST_MICRO_STRONGSTREAM_SOURCE_FILES
@@ -2040,6 +2047,16 @@ rccl_add_micro_binary(rccl-UnitTestsMicroCrypt
     ${_MICRO_MODE_DEFS}
     CRYPT_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/misc/crypt.cc"
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_crypt.yaml")
+
+# ---------------------------------------------------------------------------
+# rccl-UnitTestsMicroCryptOpenssl3
+# ---------------------------------------------------------------------------
+rccl_add_micro_binary(rccl-UnitTestsMicroCryptOpenssl3
+  SOURCES ${TEST_MICRO_CRYPT_OPENSSL3_SOURCE_FILES}
+  EXTRA_DEFS
+    ${_MICRO_MODE_DEFS}
+    CRYPT_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/misc/crypt.cc"
+  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_crypt_openssl3.yaml")
 
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroStrongstream
