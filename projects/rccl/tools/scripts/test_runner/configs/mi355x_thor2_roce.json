@@ -1538,6 +1538,24 @@
           "test_filter": "Recorder.RedOpRecordBinary"
         },
         {
+          "name": "Recorder.LogLevelNonNumeric",
+          "description": "Recorder rejects non-numeric log levels without throwing and keeps the default",
+          "test_filter": "Recorder.LogLevelNonNumeric",
+          "timeout": 60
+        },
+        {
+          "name": "Recorder.LogLevelNumeric",
+          "description": "Recorder accepts a numeric log level and writes named-call records",
+          "test_filter": "Recorder.LogLevelNumeric",
+          "timeout": 60
+        },
+        {
+          "name": "Recorder.LogLevelNumericPrefix",
+          "description": "Recorder preserves a numeric log-level prefix",
+          "test_filter": "Recorder.LogLevelNumericPrefix",
+          "timeout": 60
+        },
+        {
           "name": "ProxyTrace.nonEmptySingleton",
           "description": "Proxy trace non-empty singleton",
           "test_filter": "ProxyTraceTestFixture.nonEmptySingleton"
