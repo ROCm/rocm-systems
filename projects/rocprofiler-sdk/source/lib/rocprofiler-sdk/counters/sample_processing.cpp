@@ -36,8 +36,6 @@
 
 #include <rocprofiler-sdk/fwd.h>
 
-#include <pthread.h>
-
 namespace rocprofiler
 {
 namespace counters
@@ -186,15 +184,7 @@ callback_thread_slot()
 callback_consumer_t&
 callback_thread_get()
 {
-    auto&                 consumer = *CHECK_NOTNULL(callback_thread_slot());
-    static std::once_flag once;
-    std::call_once(once, []() {
-        ::pthread_atfork(nullptr, nullptr, []() {
-            if(auto* v = callback_thread_slot())
-                ::new(v) callback_consumer_t{&process_completed_cb};
-        });
-    });
-    return consumer;
+    return *CHECK_NOTNULL(callback_thread_slot());
 }
 
 // Reference count for the callback consumer thread. Incremented by callback_thread_start()

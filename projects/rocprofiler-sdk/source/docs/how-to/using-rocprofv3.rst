@@ -26,6 +26,12 @@ Before tracing or profiling your HIP application using ``rocprofv3``, build it u
    cmake -B <build-directory> <source-directory> -DCMAKE_PREFIX_PATH=/opt/rocm
    cmake --build <build-directory> --target all --parallel <N>
 
+Process creation
+----------------
+
+Profiling a child that continues after ``fork()`` without ``exec()`` is unsupported. Use
+``fork()`` followed by ``exec()`` or a spawn operation to profile a new child process.
+
 .. _gpu-performance-level:
 
 Setting GPU performance level for PMC profiling

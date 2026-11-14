@@ -268,23 +268,11 @@ get_task_groups()
 }
 
 void
-create_forked_callback_threads()
+mark_forked_callback_threads_stale()
 {
-    // Bump BEFORE any replacement TaskGroup is constructed, so child-created pools
-    // carry the new generation and destroy normally while inherited pools stay
-    // stale. First statement so no third atfork registration can reorder ahead of
-    // it. Release pairs with fork_stale()/the destructor guard's acquire.
+    // Worker threads do not survive fork. Mark inherited task groups stale without recreating
+    // threads or invoking callbacks from the child handler.
     g_fork_generation.fetch_add(1, std::memory_order_release);
-
-    if(get_task_groups())
-    {
-        for(auto& itr : *get_task_groups())
-        {
-            notify_pre_internal_thread_create(ROCPROFILER_LIBRARY);
-            itr = new task_group_t{};
-            notify_post_internal_thread_create(ROCPROFILER_LIBRARY);
-        }
-    }
 }
 }  // namespace
 
@@ -305,8 +293,7 @@ initialize()
         // will be destroyed before finalize is invoked.
         create_callback_thread();
         ::atexit(&registration::finalize);
-        // ensure the callback threads are created on the forked process
-        ::pthread_atfork(nullptr, nullptr, create_forked_callback_threads);
+        ::pthread_atfork(nullptr, nullptr, mark_forked_callback_threads_stale);
     });
 }
 

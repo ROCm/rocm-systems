@@ -1677,10 +1677,8 @@ init()
     if(!init_done)
     {
         pthread_atfork(nullptr, nullptr, []() {
-            // null out child's copy on fork and reinitialize
-            // otherwise all children wait on the same thread to join
+            // Drop the child's pointer to the inherited worker without recreating worker state.
             config::reset_on_fork();
-            init(std::make_index_sequence<KFD_EVENT_LAST>{});
         });
 
         retcode   = init(std::make_index_sequence<KFD_EVENT_LAST>{});

@@ -144,6 +144,8 @@ rocprofv3_error_signal_handler(int signo, siginfo_t*, void*);
 
 namespace
 {
+const pid_t tool_owner_pid = ::getpid();
+
 // Thread for safe cleanup output generation
 auto output_generation_thread = common::Synchronized<std::optional<std::thread>>{};
 
@@ -4968,6 +4970,15 @@ rocprofv3_error_signal_handler(int signo, siginfo_t* info, void* ucontext)
     (void) info;
     (void) ucontext;
 
+    // A pre-exec fork child shares the parent's eventfd but not its worker thread. Do not let a
+    // signal in the child wake the parent's finalization worker.
+    if(tool_owner_pid != ::getpid())
+    {
+        restore_signal_disposition(signo);
+        raise(signo);
+        return;
+    }
+
     auto& sw = get_signal_worker();
 
     // Our handler being installed means the app doesn't coordinate shutdown.
@@ -5278,35 +5289,12 @@ rocprofv3_main(int argc, char** argv, char** envp)
     if(!get_sigaction_function())
         get_sigaction_function() = (sigaction_func_t) dlsym(RTLD_NEXT, "sigaction");
 
-    // fork+exec and spawn children re-init through the normal init path. Plain fork children
-    // re-init worker state via the pthread_atfork handler below. GPU use in a forked child is
-    // illegal (runtime not fork-safe) so it usually dies first, but host-side data like roctx
-    // markers still flushes if reached (covered by a test).
+    // fork+exec and spawn children initialize normally after exec. Plain-fork child profiling is
+    // unsupported, so do not recreate this inherited worker after fork.
     {
         auto& sw   = get_signal_worker();
         sw.eventfd = eventfd(0, EFD_CLOEXEC);
         if(sw.eventfd >= 0) sw.thread = std::thread{signal_finalization_worker};
-
-        // Register atfork handler so fork() children get a fresh worker thread.
-        // Without this, fork children inherit the parent's stale eventfd/thread.
-        static bool atfork_registered = false;
-        if(!atfork_registered)
-        {
-            atfork_registered = true;
-            pthread_atfork(nullptr, nullptr, []() {
-                // Child handler: reset stale state and spawn a fresh worker.
-                auto& child_sw = get_signal_worker();
-                if(child_sw.eventfd >= 0 && ::close(child_sw.eventfd) != 0)
-                {
-                    ROCP_WARNING << "signal worker: close(eventfd) after fork failed: "
-                                 << strerror(errno);
-                }
-
-                ::new(static_cast<void*>(&child_sw)) signal_worker_state{};
-                child_sw.eventfd = eventfd(0, EFD_CLOEXEC);
-                if(child_sw.eventfd >= 0) child_sw.thread = std::thread{signal_finalization_worker};
-            });
-        }
     }
 
     initialize_signal_handler(get_sigaction_function());

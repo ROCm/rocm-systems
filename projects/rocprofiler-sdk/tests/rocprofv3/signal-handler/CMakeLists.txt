@@ -29,7 +29,8 @@ set(BASE_OUT_DIR ${CMAKE_CURRENT_BINARY_DIR})
 # add_signal_handler_test(<name> [keyword args])
 #
 #   <name>                            : scenario name; ctest is registered as "app-<name>-<type>"
-#   PROCESS_TYPE <type>               : single-process | fork | fork-exec | spawn | lingering-child
+#   PROCESS_TYPE <type>               : single-process | fork-exec | spawn |
+#                                       coordinated-shutdown | preexec-signal | lingering-child
 #   VALIDATE_EXPECT <outcome>         : what validate.py asserts:
 #                                          clean-exit: app exits cleanly via atexit, exit_marker present
 #                                          flushed-markers: profiler flushed >10 markers before signal death
@@ -39,6 +40,7 @@ set(BASE_OUT_DIR ${CMAKE_CURRENT_BINARY_DIR})
 #                                       (e.g. --app-signal-handler / --no-app-signal-handler)
 #   ROCPROFV3_EXTRA_FLAGS <flags...>  : inserted into the rocprofv3 command
 #                                       (e.g. --disable-signal-handlers)
+#   ENVIRONMENT <name=value...>       : additional environment for the execute test
 #
 # Registers the {cleanup, execute, validate} triad for one scenario:
 #   cleanup wipes the output dir (FIXTURES_SETUP <name>-clean)
@@ -48,7 +50,7 @@ set(BASE_OUT_DIR ${CMAKE_CURRENT_BINARY_DIR})
 function(add_signal_handler_test NAME)
     cmake_parse_arguments(
         arg "NO_TIMEOUT_SIGNAL" "PROCESS_TYPE;VALIDATE_EXPECT;PASS_REGEX"
-        "APP_EXTRA_FLAGS;ROCPROFV3_EXTRA_FLAGS" ${ARGN})
+        "APP_EXTRA_FLAGS;ROCPROFV3_EXTRA_FLAGS;ENVIRONMENT" ${ARGN})
 
     set(_name "app-${NAME}-${arg_PROCESS_TYPE}")
     set(_subdir "${NAME}-${arg_PROCESS_TYPE}")
@@ -79,6 +81,7 @@ function(add_signal_handler_test NAME)
         TIMEOUT ${CTEST_TIMEOUT}
         LABELS "integration-tests;signal-handler"
         PRELOAD "${PRELOAD_ENV}"
+        ENVIRONMENT ${arg_ENVIRONMENT}
         PASS_REGULAR_EXPRESSION "${arg_PASS_REGEX}"
         FIXTURES_REQUIRED ${_name}-clean
         FIXTURES_SETUP ${_name})
@@ -107,14 +110,6 @@ add_signal_handler_test(
 
 add_signal_handler_test(
     with-signal-handling
-    PROCESS_TYPE fork
-    VALIDATE_EXPECT clean-exit
-    PASS_REGEX "clean exit"
-    APP_EXTRA_FLAGS --app-signal-handler
-    ROCPROFV3_EXTRA_FLAGS --disable-signal-handlers)
-
-add_signal_handler_test(
-    with-signal-handling
     PROCESS_TYPE fork-exec
     VALIDATE_EXPECT clean-exit
     PASS_REGEX "clean exit"
@@ -129,18 +124,22 @@ add_signal_handler_test(
     APP_EXTRA_FLAGS --app-signal-handler
     ROCPROFV3_EXTRA_FLAGS --disable-signal-handlers)
 
+# Supported fork+exec case: deliver SIGINT after fork but before exec. The inherited
+# rocprofv3 handler must restore and run the app handler without notifying the parent's
+# shared eventfd. Parent work after the child exits proves parent profiling stayed active.
+add_signal_handler_test(
+    owner-pid
+    PROCESS_TYPE preexec-signal
+    VALIDATE_EXPECT clean-exit
+    PASS_REGEX "clean exit"
+    APP_EXTRA_FLAGS --app-signal-handler
+    NO_TIMEOUT_SIGNAL)
+
 # bad case: app does NOT handle signals, so rocprofv3's handler catches the signal and
 # flushes profiling data before the process dies.
 add_signal_handler_test(
     without-signal-handling
     PROCESS_TYPE single-process
-    VALIDATE_EXPECT flushed-markers
-    PASS_REGEX "tool finalization"
-    APP_EXTRA_FLAGS --no-app-signal-handler)
-
-add_signal_handler_test(
-    without-signal-handling
-    PROCESS_TYPE fork
     VALIDATE_EXPECT flushed-markers
     PASS_REGEX "tool finalization"
     APP_EXTRA_FLAGS --no-app-signal-handler)
@@ -160,20 +159,18 @@ add_signal_handler_test(
     APP_EXTRA_FLAGS --no-app-signal-handler)
 
 # Coordinated-shutdown case: profiler signal handlers are ON while the app runs its own
-# coordinated multi-process shutdown (the sglang/vLLM tensor-parallel pattern). Worker
-# children ignore SIGINT and only exit once the parent tells them to. The profiler must
-# re-raise to the app's handler before waiting for children to exit, else it deadlocks
-# because parent waits for children that are waiting for the parent and the test hangs,
-# which triggers a ctest TIMEOUT.
-#
-# NOTE: unlike the good case, this does NOT pass --disable-signal-handlers, so the
-# profiler's handlers are exercised alongside the app's own --app-signal-handler.
+# multi-process shutdown. The fork+exec workers block SIGINT and only exit once the parent
+# app's chained handler runs and the parent sends their shutdown command. Waiting for the
+# children before re-raising would deadlock. A profiler wait budget longer than the ctest
+# timeout makes that regression fail via ctest instead of escaping through the default
+# production wait budget.
 add_signal_handler_test(
-    coordinated-shutdown
-    PROCESS_TYPE fork
+    chained-handler
+    PROCESS_TYPE coordinated-shutdown
     VALIDATE_EXPECT flushed-markers
     PASS_REGEX "clean exit"
-    APP_EXTRA_FLAGS --app-signal-handler)
+    APP_EXTRA_FLAGS --app-signal-handler ENVIRONMENT
+                    "ROCPROF_FINALIZE_WAIT_TIMEOUT_SECONDS=60")
 
 # PR# 6717 regression: profiled app leaves a long-lived child alive at NORMAL exit.
 #
