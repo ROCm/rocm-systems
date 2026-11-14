@@ -5,6 +5,7 @@
 ### Added
 
   - CHANGELOG added.
+  - `ROCPROFILER_REGISTER_LIBRARY_NO_FORCE_LOAD` names the rocprofiler-sdk library to load without causing it to be loaded. `ROCPROFILER_REGISTER_LIBRARY` does both: a non-empty value is also taken as a request to load rocprofiler-sdk even in a process which has no tool, so a value inherited by a child process loads rocprofiler-sdk there too. The new variable supplies the same path with no such request, and is used when `ROCPROFILER_REGISTER_LIBRARY` is empty.
 
 ### Resolved issues
 

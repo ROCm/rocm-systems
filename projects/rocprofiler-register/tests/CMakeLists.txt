@@ -585,3 +585,57 @@ set_tests_properties(
         "LD_LIBRARY_PATH=${CMAKE_LIBRARY_OUTPUT_DIRECTORY};LD_PRELOAD=librocprofiler-register.so;ROCPROFILER_REGISTER_LIBRARY=$<TARGET_SONAME_FILE:rocprofiler>;ROCPROFILER_REGISTER_SECURE=yes;ROCPROFILER_REGISTER_VERBOSE=3;ROCPROFILER_REGISTER_MONOCHROME=true;${ROCPROFILER_REGISTER_MEMCHECK_PRELOAD_ENV}"
         LABELS
         "dlopen;secure")
+
+# A copy of the rocprofiler stub under a name which is deliberately not one of the default
+# library candidates (librocprofiler-sdk.so, .so.0, .so.1). Nothing can find it by
+# searching, so a test which observes it being loaded has proven that something named it
+# explicitly.
+set(ROCPROFILER_REGISTER_EXPLICIT_PATH_LIBRARY
+    "${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/librocprofiler-sdk-explicit-path-only.so")
+
+add_custom_target(
+    rocprofiler-explicit-path-only-library ALL
+    COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_SONAME_FILE:rocprofiler>"
+            "${ROCPROFILER_REGISTER_EXPLICIT_PATH_LIBRARY}"
+    BYPRODUCTS "${ROCPROFILER_REGISTER_EXPLICIT_PATH_LIBRARY}"
+    VERBATIM)
+
+add_dependencies(rocprofiler-explicit-path-only-library rocprofiler)
+
+# ROCPROFILER_REGISTER_LIBRARY_NO_FORCE_LOAD names the rocprofiler-sdk library without
+# being a reason to load one, so a process with no tool must load nothing and the stub
+# must never announce itself. Contrast test-rocprofiler-register-library-absolute-path
+# above, which names the same library through ROCPROFILER_REGISTER_LIBRARY and does load
+# it.
+add_test(
+    NAME test-rocprofiler-register-library-no-force-load-without-tool
+    COMMAND $<TARGET_FILE:test-amdhip-hsart-roctx>
+    WORKING_DIRECTORY ${PROJECT_BINARY_DIR})
+
+set_tests_properties(
+    test-rocprofiler-register-library-no-force-load-without-tool
+    PROPERTIES
+        ENVIRONMENT
+        "LD_LIBRARY_PATH=${CMAKE_LIBRARY_OUTPUT_DIRECTORY};LD_PRELOAD=librocprofiler-register.so;ROCPROFILER_REGISTER_LIBRARY_NO_FORCE_LOAD=${ROCPROFILER_REGISTER_EXPLICIT_PATH_LIBRARY};ROCPROFILER_REGISTER_SECURE=yes;ROCPROFILER_REGISTER_VERBOSE=3;ROCPROFILER_REGISTER_MONOCHROME=true;${ROCPROFILER_REGISTER_MEMCHECK_PRELOAD_ENV}"
+        FAIL_REGULAR_EXPRESSION
+        "\\[rocprofiler\\.cpp\\]"
+        LABELS
+        "dlopen;secure")
+
+# ...and once a tool is present it must select exactly the library it names. The expected
+# library is reachable by no other means, so matching it proves the variable was read
+# rather than ignored and the default candidate search having found an equivalent library.
+add_test(
+    NAME test-rocprofiler-register-library-no-force-load-with-tool
+    COMMAND $<TARGET_FILE:test-amdhip-hsart-roctx>
+    WORKING_DIRECTORY ${PROJECT_BINARY_DIR})
+
+set_tests_properties(
+    test-rocprofiler-register-library-no-force-load-with-tool
+    PROPERTIES
+        ENVIRONMENT
+        "LD_LIBRARY_PATH=${CMAKE_LIBRARY_OUTPUT_DIRECTORY};LD_PRELOAD=librocprofiler-register.so:libgeneric-tool.so;ROCPROFILER_REGISTER_LIBRARY_NO_FORCE_LOAD=${ROCPROFILER_REGISTER_EXPLICIT_PATH_LIBRARY};ROCPROFILER_REGISTER_SECURE=yes;ROCPROFILER_REGISTER_LOG_LEVEL=info;ROCPROFILER_REGISTER_MONOCHROME=true;${ROCPROFILER_REGISTER_MEMCHECK_PRELOAD_ENV}"
+        PASS_REGULAR_EXPRESSION
+        "selected .*librocprofiler-sdk-explicit-path-only\\.so for entry point"
+        LABELS
+        "dlopen;secure")

@@ -90,6 +90,7 @@ main(int argc, char** argv)
 
     bool send_signal                 = false;
     bool poison_register_library_env = false;
+    bool poison_no_force_load_env    = false;
     for(int i = 3; i < argc; ++i)
     {
         std::string arg{argv[i]};
@@ -100,6 +101,10 @@ main(int argc, char** argv)
         else if(arg == "--stale-register-library")
         {
             poison_register_library_env = true;
+        }
+        else if(arg == "--stale-no-force-load-library")
+        {
+            poison_no_force_load_env = true;
         }
         else
         {
@@ -131,11 +136,12 @@ main(int argc, char** argv)
     if(pid1 == 0 || pid2 == 0)
     {
         // Child process
-        if(poison_register_library_env)
+        if(poison_register_library_env || poison_no_force_load_env)
         {
             // These values should reach the target only through rocattach's injected
             // environment buffer, not through normal fork/exec inheritance.
             unsetenv("ROCPROFILER_REGISTER_LIBRARY");
+            unsetenv("ROCPROFILER_REGISTER_LIBRARY_NO_FORCE_LOAD");
             unsetenv("ROCPROFILER_TEST_FORWARDING");
         }
         std::cout << "child executing " << argv[1] << std::endl;
@@ -168,13 +174,22 @@ main(int argc, char** argv)
         }
 
         setenv("ROCPROF_ATTACH_TOOL_LIBRARY", argv[2], true);
+        // Model a stale host SDK path in the attaching process. Both variables name the
+        // rocprofiler-sdk library rocprofiler-register should load, so a path which only
+        // exists on the attaching side must not reach the target through either of them.
+        // The sentinel verifies that other ROCPROFILER_* variables are still forwarded.
+        constexpr auto stale_library_path =
+            "/tmp/rocattach-missing-librocprofiler-sdk.so.999.999.999";
         if(poison_register_library_env)
         {
-            // Model a stale host SDK path in the attaching process. The sentinel verifies
-            // that other ROCPROFILER_* variables are still forwarded to the target.
-            setenv("ROCPROFILER_REGISTER_LIBRARY",
-                   "/tmp/rocattach-missing-librocprofiler-sdk.so.999.999.999",
-                   true);
+            setenv("ROCPROFILER_REGISTER_LIBRARY", stale_library_path, true);
+        }
+        if(poison_no_force_load_env)
+        {
+            setenv("ROCPROFILER_REGISTER_LIBRARY_NO_FORCE_LOAD", stale_library_path, true);
+        }
+        if(poison_register_library_env || poison_no_force_load_env)
+        {
             setenv("ROCPROFILER_TEST_FORWARDING", "preserved", true);
         }
 

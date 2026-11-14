@@ -473,9 +473,17 @@ rocp_reg_scan_for_tools()
     auto* _configure_func = dlsym(RTLD_DEFAULT, "rocprofiler_configure");
     auto  _rocp_tool_libs = common::get_env("ROCP_TOOL_LIBRARIES", std::string{});
     auto  _rocp_reg_lib = common::get_env("ROCPROFILER_REGISTER_LIBRARY", std::string{});
-    bool  _force_tool =
+    auto  _rocp_reg_lib_no_force =
+        common::get_env("ROCPROFILER_REGISTER_LIBRARY_NO_FORCE_LOAD", std::string{});
+    bool _force_tool =
         common::get_env("ROCPROFILER_REGISTER_FORCE_LOAD",
                         !_rocp_reg_lib.empty() || !_rocp_tool_libs.empty());
+
+    // ROCPROFILER_REGISTER_LIBRARY_NO_FORCE_LOAD names the rocprofiler-sdk instance to
+    // load without being a reason to load one, so it is deliberately absent from the
+    // _force_tool derivation above and must stay that way. ROCPROFILER_REGISTER_LIBRARY
+    // wins when both name a library.
+    if(_rocp_reg_lib.empty()) _rocp_reg_lib = _rocp_reg_lib_no_force;
 
     bool _found_tool =
         (rocprofiler_configure != nullptr || _configure_func != nullptr || _force_tool);

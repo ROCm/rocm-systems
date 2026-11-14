@@ -23,6 +23,8 @@ etc.
 | `ROCPROFILER_REGISTER_ENABLED`    | Set to 0/false/no to disable rocprofiler-register                         | true (bool)    |
 | `ROCPROFILER_REGISTER_SECURE`     | Additional checks to ensure authenticity of runtime libraries             | false (bool)   |
 | `ROCPROFILER_REGISTER_FORCE_LOAD` | Load rocprofiler-sdk library regardless of whether there is a tool or not | false (bool)   |
+| `ROCPROFILER_REGISTER_LIBRARY`    | Path to the rocprofiler-sdk library to load. A non-empty value also causes the library to be loaded even when no tool is present | Empty (string) |
+| `ROCPROFILER_REGISTER_LIBRARY_NO_FORCE_LOAD` | Path to the rocprofiler-sdk library to load, used only when a tool is present. Takes effect when `ROCPROFILER_REGISTER_LIBRARY` is empty | Empty (string) |
 
 ## Contributing
 

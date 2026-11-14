@@ -275,6 +275,18 @@ main(int argc, char** argv)
         std::cout << "Attachment test observed ROCPROFILER_TEST_FORWARDING=" << forwarding_test
                   << "\n";
     }
+    // Both of these name the rocprofiler-sdk library rocprofiler-register should load, and a
+    // path which resolves only in the attaching process must not reach here. Reporting them
+    // lets a test detect the leak directly, rather than relying on the library resolution to
+    // fail visibly in whichever rocprofiler-register this process happens to have loaded.
+    for(const auto* library_env :
+        {"ROCPROFILER_REGISTER_LIBRARY", "ROCPROFILER_REGISTER_LIBRARY_NO_FORCE_LOAD"})
+    {
+        if(const auto* value = std::getenv(library_env))
+        {
+            std::cout << "Attachment test inherited " << library_env << "=" << value << "\n";
+        }
+    }
     std::cout << "Attachment test app finished" << std::endl;
 
     if(child_pid > 0)

@@ -239,8 +239,14 @@ set_rocprofiler_register_library()
         ROCP_INFO << fmt::format("rocprofiler-sdk library path: '{}'", _this_library_path);
         // opt out of setting the ROCPROFILER_REGISTER_LIBRARY env var
         auto enabled = common::get_env("ROCPROFILER_SET_ROCPROFILER_REGISTER_LIBRARY", true);
+        // A library named by ROCPROFILER_REGISTER_LIBRARY_NO_FORCE_LOAD says which
+        // rocprofiler-sdk instance to use without being a reason to load one into a process
+        // that has no tool. Setting ROCPROFILER_REGISTER_LIBRARY as well would restore the
+        // forced load the caller opted out of, so the caller's choice is left untouched.
+        auto _no_force_lib =
+            common::get_env("ROCPROFILER_REGISTER_LIBRARY_NO_FORCE_LOAD", std::string{});
         // ensures that rocprofiler-register uses this library path
-        if(!_this_library_path.empty() && enabled)
+        if(!_this_library_path.empty() && enabled && _no_force_lib.empty())
         {
             // used to check for conflicts if already set
             auto _existing = common::get_env("ROCPROFILER_REGISTER_LIBRARY", std::string{});

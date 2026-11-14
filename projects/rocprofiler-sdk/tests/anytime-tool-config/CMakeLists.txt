@@ -54,3 +54,6 @@ add_subdirectory(early-hiprccl-late-hiprcclmemcpy)
 # is unavailable.
 add_subdirectory(early-hip-late-rocdecode)
 add_subdirectory(early-hip-late-rocjpeg)
+
+# Tracing started after the runtimes registered their API tables.
+add_subdirectory(late-start-tracing)
