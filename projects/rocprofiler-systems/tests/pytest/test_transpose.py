@@ -480,3 +480,164 @@ class TestTransposeGPUPerfCounters(RocprofsysTest):
             subtest_name="ROCpd GPU perf counter validation",
             rules_files=[rules_dir / "gpu-perf-counter-rules.json"],
         )
+
+
+# ============================================================================
+# rocprof-sys-sample flags on the transpose HIP workload
+# ============================================================================
+
+# transpose: threads, kernel iterations, sync interval
+TRANSPOSE_SAMPLE_ARGS = ["2", "100", "50"]
+
+# Printed perfetto row ends with the slice name padded, then " |".
+# "hipFree " does not match hipFreeAsync.
+HIP_FREE_SLICE = r"hipFree\s+\|"
+
+HIP_MALLOC_TRACE = {"categories": ["rocm_hip_api"], "labels": ["hipMalloc"]}
+
+
+@pytest.mark.sampling
+@pytest.mark.timeout(180)
+@pytest.mark.class_name("transpose-sample-flags")
+class TestTransposeSampleFlags(RocprofsysTest):
+    def run_transpose(self, sampling_args, env=None):
+        return self.run_test(
+            "sampling",
+            "transpose",
+            env=env,
+            sampling_args=sampling_args,
+            run_args=TRANSPOSE_SAMPLE_ARGS,
+            check_target_arch=True,
+        )
+
+    @pytest.mark.parametrize(
+        "flag_args, pass_regex",
+        [
+            pytest.param(
+                ["--perfetto-flush-period-ms=250"],
+                [r"ROCPROFSYS_PERFETTO_FLUSH_PERIOD_MS=250"],
+                id="perfetto-flush-period",
+            ),
+            pytest.param(
+                ["--causal-backend=timer"],
+                [r"ROCPROFSYS_CAUSAL_BACKEND=timer"],
+                id="causal-backend",
+            ),
+            pytest.param(
+                ["--kill-delay=1"],
+                [r"ROCPROFSYS_KILL_DELAY=1"],
+                id="kill-delay",
+            ),
+        ],
+    )
+    def test_setting(self, flag_args, pass_regex):
+        result = self.run_transpose(flag_args)
+        self.assert_regex(result, pass_regex=pass_regex)
+        self.assert_perfetto(result, **HIP_MALLOC_TRACE)
+
+    @pytest.mark.parametrize(
+        "flag_args, pass_regex",
+        [
+            pytest.param(
+                ["--rocm-hip-runtime-api-operations", "hipMalloc"],
+                [r"ROCPROFSYS_ROCM_HIP_RUNTIME_API_OPERATIONS=hipMalloc"],
+                id="include",
+            ),
+            pytest.param(
+                ["--rocm-hip-runtime-api-operations-exclude", "hipFree"],
+                [r"ROCPROFSYS_ROCM_HIP_RUNTIME_API_OPERATIONS_EXCLUDE=hipFree"],
+                id="exclude",
+            ),
+        ],
+    )
+    def test_runtime_api(self, flag_args, pass_regex):
+        result = self.run_transpose(flag_args)
+        self.assert_regex(result, pass_regex=pass_regex)
+        self.assert_perfetto(result, **HIP_MALLOC_TRACE, fail_regex=[HIP_FREE_SLICE])
+
+    def test_annotate_backtrace(self):
+        # The trace cache records the backtrace when the rocpd backend is on.
+        # Two threads each call hipMalloc twice, so four slices carry frame#0.
+        result = self.run_transpose(
+            ["--rocm-hip-runtime-api-operations-annotate-backtrace", "hipMalloc"],
+            env={"ROCPROFSYS_USE_ROCPD": "ON"},
+        )
+        self.assert_regex(
+            result,
+            pass_regex=[
+                r"ROCPROFSYS_ROCM_HIP_RUNTIME_API_OPERATIONS_ANNOTATE_BACKTRACE=hipMalloc"
+            ],
+        )
+        self.assert_perfetto(
+            result,
+            **HIP_MALLOC_TRACE,
+            key_names=["frame#0"],
+            key_counts=[4],
+            pass_regex=[r"string_value\s*::\s*hipMalloc"],
+        )
+
+    def test_output(self):
+        # Harness already sets OUTPUT_PATH, so the flag has to land somewhere else.
+        out_dir = self.test_output_dir / "custom"
+        result = self.run_transpose(["--output", str(out_dir), "sample-out"])
+        self.assert_regex(
+            result,
+            pass_regex=[
+                r"ROCPROFSYS_OUTPUT_PATH=.*/custom",
+                r"ROCPROFSYS_OUTPUT_PREFIX=sample-out",
+            ],
+        )
+        self.assert_perfetto(
+            result,
+            perfetto_file=Path("custom") / "sample-out-perfetto-trace.proto",
+            **HIP_MALLOC_TRACE,
+        )
+
+    def test_trace(self):
+        result = self.run_transpose(["--trace"], env={"ROCPROFSYS_TRACE": "OFF"})
+        self.assert_regex(result, pass_regex=[r"ROCPROFSYS_TRACE=true"])
+        self.assert_perfetto(result, **HIP_MALLOC_TRACE)
+
+    def test_trace_legacy(self):
+        # Both writers produce the same slices, so only the log tells them apart:
+        # legacy writes the proto in-process, the default path from the trace cache.
+        result = self.run_transpose(["--trace-legacy"])
+        self.assert_regex(
+            result,
+            pass_regex=[
+                r"ROCPROFSYS_TRACE_LEGACY=true",
+                r"\[perfetto\]> Outputting",
+            ],
+            fail_regex=[
+                r"Generating \[[^\]]*perfetto[^\]]*\] format\(s\) with collected data from trace cache"
+            ],
+        )
+        self.assert_perfetto(result, **HIP_MALLOC_TRACE)
+
+    def test_profile(self):
+        # Call-stack profile nests HIP calls under the parent (`|_hipMalloc`).
+        result = self.run_transpose(["--profile"], env={"ROCPROFSYS_PROFILE": "OFF"})
+        self.assert_regex(result, pass_regex=[r"ROCPROFSYS_PROFILE=true"])
+        self.assert_file_regex(
+            result.output_dir / "wall_clock.txt",
+            pass_regex=[r"\|_hipMalloc"],
+        )
+
+    def test_flat_profile(self):
+        # Flat profile lists each function at depth 0, with no `|_` nesting.
+        result = self.run_transpose(
+            ["--flat-profile"],
+            env={"ROCPROFSYS_PROFILE": "OFF", "ROCPROFSYS_FLAT_PROFILE": "OFF"},
+        )
+        self.assert_regex(
+            result,
+            pass_regex=[
+                r"ROCPROFSYS_FLAT_PROFILE=true",
+                r"ROCPROFSYS_PROFILE=true",
+            ],
+        )
+        self.assert_file_regex(
+            result.output_dir / "wall_clock.txt",
+            pass_regex=[r">>> hipMalloc"],
+            fail_regex=[r"\|_hipMalloc"],
+        )
