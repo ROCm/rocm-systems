@@ -8,7 +8,9 @@ Unit tests for GPU-specific test counter selection.
 from __future__ import annotations
 
 import getpass
+import json
 import os
+import sqlite3
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -190,6 +192,76 @@ class TestGPUInfo(RocprofsysTest):
         match = GFX_XXXX_PATTERN.search(line)
         assert match is not None
         assert match.group(1) == expected
+
+
+@pytest.mark.class_name("rocpd-validation-rules")
+class TestRocpdValidationRules(RocprofsysTest):
+    @pytest.mark.parametrize(
+        ("metric_name", "metric_value"),
+        [
+            ("device_xgmi_link_speed", 64.0),
+            ("device_xgmi_link_width", 16.0),
+            ("device_pcie_link_speed", 32.0),
+            ("device_pcie_link_width", 16.0),
+        ],
+    )
+    def test_link_metric_requires_valid_sample_per_gpu(
+        self, validation_rules_dir, metric_name, metric_value
+    ):
+        rules_path = validation_rules_dir / "gpu-connect" / "amd-smi-rules.json"
+        rules = json.loads(rules_path.read_text())
+        event_rule = next(
+            rule
+            for rule in rules["required_tables"]
+            if rule.get("name_prefix") == "rocpd_pmc_event"
+        )
+        validation = next(
+            rule
+            for rule in event_rule["validation_queries"]
+            if f"info.name = '{metric_name}'" in rule["query"]
+        )
+
+        assert validation["comparison"] == "equals"
+        assert validation["expected_result"] == 0
+
+        with sqlite3.connect(":memory:") as connection:
+            cursor = connection.cursor()
+            cursor.execute("CREATE TABLE rocpd_info_agent (id INTEGER, type TEXT)")
+            cursor.execute(
+                "CREATE TABLE rocpd_info_pmc (id INTEGER, agent_id INTEGER, name TEXT)"
+            )
+            cursor.execute(
+                "CREATE TABLE rocpd_pmc_event "
+                "(event_id INTEGER, pmc_id INTEGER, value REAL)"
+            )
+
+            gpu_ids = range(2, 6)
+            cursor.executemany(
+                "INSERT INTO rocpd_info_agent VALUES (?, 'GPU')",
+                [(gpu_id,) for gpu_id in gpu_ids],
+            )
+            cursor.executemany(
+                "INSERT INTO rocpd_info_pmc VALUES (?, ?, ?)",
+                [(gpu_id, gpu_id, metric_name) for gpu_id in gpu_ids],
+            )
+            cursor.executemany(
+                "INSERT INTO rocpd_pmc_event VALUES (?, ?, ?)",
+                [
+                    (sample + gpu_id * 20, gpu_id, metric_value)
+                    for gpu_id in gpu_ids
+                    for sample in range(20)
+                ],
+            )
+
+            query = validation["query"].format(table_name="rocpd_pmc_event")
+            # A short run may produce only 20 samples per GPU (80 total). Verify
+            # that valid data from every GPU passes without an aggregate threshold.
+            assert cursor.execute(query).fetchone()[0] == 0
+
+            # Make one GPU's samples invalid and verify that the rule identifies
+            # exactly one GPU without a positive link metric sample.
+            cursor.execute("UPDATE rocpd_pmc_event SET value = 0 WHERE pmc_id = 5")
+            assert cursor.execute(query).fetchone()[0] == 1
 
 
 @pytest.mark.class_name("test-result")
