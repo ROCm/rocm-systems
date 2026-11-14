@@ -23,6 +23,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from rccl_ci_utils import (
+    SetupFailureReport,
     find_rccl_library,
     parse_junit_xml,
     send_email_report,
@@ -67,6 +68,10 @@ XLA_ENV = {
         "--xla_gpu_enable_cublaslt=false"
     ),
 }
+
+REPORT_SUBJECT = "RCCL JAX Collective Test"
+
+setup_report = SetupFailureReport(REPORT_SUBJECT)
 
 
 def find_lib_dirs(artifact_dir: Path) -> list[Path]:
@@ -373,8 +378,10 @@ def main() -> None:
     )
 
     args = parser.parse_args()
+    setup_report.notify(args.notify_email, args.notify_webhook)
 
     # Step 1: Discover RCCL library and all lib dirs in artifacts
+    setup_report.step("Discover RCCL library")
     rccl_lib = find_rccl_library(args.artifact_dir)
     rccl_lib_dir = rccl_lib.parent
     lib_dirs = find_lib_dirs(args.artifact_dir)
@@ -385,21 +392,27 @@ def main() -> None:
         return
 
     # Step 2: Set up library paths and verify override
+    setup_report.step("Set up library paths")
     populate_rocm_lib_dir(lib_dirs)
     setup_ld_library_path(lib_dirs)
     verify_rccl_override(rccl_lib_dir)
 
     # Step 2b: Configure kpack device code loading for TheRock-built RCCL
+    setup_report.step("Install CI-built kpack device code")
     setup_kpack_device_code(args.artifact_dir)
 
     # Step 3: Set XLA environment variables
+    setup_report.step("Set XLA environment")
     setup_xla_environment()
 
     # Step 4: Clone JAX test sources
+    setup_report.step("Clone JAX test sources")
     clone_jax_test_sources(args.jax_src)
 
     # Step 5: Print environment info and run tests
+    setup_report.step("Check JAX devices")
     print_environment_info()
+    setup_report.tests_started()
     exit_code, summary = run_tests(args.jax_src, args.results_log)
 
     # Step 6: Generate and distribute summary report
@@ -414,13 +427,13 @@ def main() -> None:
     status = "PASSED" if exit_code == 0 else "FAILED"
     if args.notify_email:
         send_email_report(report, args.notify_email, status,
-                          subject_prefix="RCCL JAX Collective Test")
+                          subject_prefix=REPORT_SUBJECT)
     if args.notify_webhook:
         send_teams_webhook(report, args.notify_webhook, status,
-                           subject_prefix="RCCL JAX Collective Test")
+                           subject_prefix=REPORT_SUBJECT)
 
     sys.exit(exit_code)
 
 
 if __name__ == "__main__":
-    main()
+    setup_report.run(main)

@@ -25,6 +25,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from rccl_ci_utils import (
+    SetupFailureReport,
     find_pip_sdk_lib_dirs,
     find_rccl_library,
     override_bundled_hip_runtime,
@@ -69,6 +70,10 @@ SMOKE_TESTS = [
     "test_batch_send_recv_subgroup",
     "test_collectives",
 ]
+
+REPORT_SUBJECT = "RCCL PyTorch c10d Test"
+
+setup_report = SetupFailureReport(REPORT_SUBJECT)
 
 
 def find_rocm_lib_dir(artifact_dir: Path) -> Path | None:
@@ -403,8 +408,10 @@ def main() -> None:
     )
 
     args = parser.parse_args()
+    setup_report.notify(args.notify_email, args.notify_webhook)
 
     # Step 1: Discover RCCL library path
+    setup_report.step("Discover RCCL library")
     rccl_lib = find_rccl_library(args.artifact_dir)
     rccl_lib_dir = rccl_lib.parent
     rocm_lib_dir = find_rocm_lib_dir(args.artifact_dir)
@@ -419,38 +426,48 @@ def main() -> None:
     # Step 2: Create symlinks for soname version mismatches between
     # CI-built libraries and pip-installed packages (must run before
     # quarantine so pip dirs get compatibility symlinks)
+    setup_report.step("Reconcile library soname versions")
     pip_lib_dirs = find_pip_sdk_lib_dirs()
     reconcile_soname_versions([rccl_lib_dir] + pip_lib_dirs)
 
     # Step 3: Quarantine TheRock-bundled libamd_smi and rocm_sysdeps to
     # prevent the nl_genl destructor crash (SIGSEGV in containers).
     # After this, libamd_smi resolves from pip dirs (via symlinks above).
+    setup_report.step("Quarantine TheRock amd-smi and sysdeps")
     quarantine_rocm_sysdeps(rccl_lib_dir)
 
     # Step 4: Replace pip-bundled librccl.so with CI-built version
+    setup_report.step("Replace pip-bundled RCCL")
     override_bundled_rccl(rccl_lib_dir)
 
     # Step 4b: Replace pip-bundled libamdhip64.so with TheRock's version
     # so the HIP runtime matches the compiler that built RCCL's device
     # code objects (prevents findSymbol → guarantee → abort)
+    setup_report.step("Replace pip-bundled HIP runtime")
     override_bundled_hip_runtime(rccl_lib_dir)
 
     # Step 4b-2: ROCr must be replaced as a pair with HIP above, and both
     # must complete before the first `import torch` in step 5.
+    setup_report.step("Replace pip-bundled ROCr runtime")
     override_bundled_hsa_runtime(rccl_lib_dir)
 
     # Step 4c: Configure kpack device code loading — TheRock-built libraries
     # have device code stripped into separate .kpack archives per GPU arch
+    setup_report.step("Install CI-built kpack device code")
     setup_kpack_device_code(args.artifact_dir)
 
+    setup_report.step("Set up library paths")
     setup_ld_library_path(rccl_lib_dir, rocm_lib_dir)
 
     # Step 5: Clone PyTorch test sources
+    setup_report.step("Clone PyTorch test sources")
     clone_pytorch_test_sources(args.pytorch_src)
 
     # Step 6: Patch missing modules, print environment info, and run tests
+    setup_report.step("Check PyTorch environment")
     patch_missing_torch_modules()
     print_environment_info()
+    setup_report.tests_started()
     exit_code, summary = run_tests(args.pytorch_src, args.results_log, args.test_scope)
 
     # Step 7: Generate and distribute summary report
@@ -465,13 +482,13 @@ def main() -> None:
     status = "PASSED" if exit_code == 0 else "FAILED"
     if args.notify_email:
         send_email_report(report, args.notify_email, status,
-                          subject_prefix="RCCL PyTorch c10d Test")
+                          subject_prefix=REPORT_SUBJECT)
     if args.notify_webhook:
         send_teams_webhook(report, args.notify_webhook, status,
-                           subject_prefix="RCCL PyTorch c10d Test")
+                           subject_prefix=REPORT_SUBJECT)
 
     sys.exit(exit_code)
 
 
 if __name__ == "__main__":
-    main()
+    setup_report.run(main)
