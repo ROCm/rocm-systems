@@ -32,6 +32,8 @@ pub(crate) fn isa_name(
         0 => gfx_target_name(gpu.gfx_major, gpu.gfx_minor, gpu.gfx_stepping),
         1 if gpu.gfx_major == 9 && matches!(gpu.gfx_minor, 4 | 5) => "gfx9-4-generic".to_owned(),
         1 if gpu.gfx_major == 9 => return None,
+        1 if gpu.gfx_major == 10 => format!("gfx10-{}-generic", gpu.gfx_minor),
+        1 if gpu.gfx_major == 11 && gpu.gfx_minor == 7 => "gfx11-7-generic".to_owned(),
         1 if gpu.gfx_major == 12 && gpu.gfx_minor == 5 => "gfx12-5-generic".to_owned(),
         1 => format!("gfx{}-generic", gpu.gfx_major),
         _ => return None,
@@ -42,6 +44,8 @@ pub(crate) fn isa_name(
             if gpu.sram_ecc_enabled { '+' } else { '-' },
             if xnack_enabled { '+' } else { '-' }
         )
+    } else if gpu.gfx_major == 10 && gpu.gfx_minor == 1 {
+        format!(":xnack{}", if xnack_enabled { '+' } else { '-' })
     } else {
         String::new()
     };

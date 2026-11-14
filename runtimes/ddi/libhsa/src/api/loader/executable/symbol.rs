@@ -13,10 +13,10 @@ use crate::loader::executable::symbol::*;
 use crate::runtime::{boundary, initialized_mut, lock};
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_executable_get_info")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Writes the requested executable attribute.
 pub unsafe extern "C" fn hsa_executable_get_info(
     executable: HsaExecutable,
@@ -63,10 +63,10 @@ pub unsafe extern "C" fn hsa_executable_get_info(
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_executable_get_symbol_by_name")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Finds an executable symbol by its name and agent.
 pub unsafe extern "C" fn hsa_executable_get_symbol_by_name(
     executable: HsaExecutable,
@@ -113,10 +113,10 @@ pub unsafe extern "C" fn hsa_executable_get_symbol_by_name(
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_executable_symbol_get_info")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Writes the requested executable-symbol attribute.
 pub unsafe extern "C" fn hsa_executable_symbol_get_info(
     symbol: HsaExecutableSymbol,
@@ -216,10 +216,10 @@ pub unsafe extern "C" fn hsa_executable_symbol_get_info(
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_executable_get_symbol")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Finds an executable symbol by its qualified name.
 pub unsafe extern "C" fn hsa_executable_get_symbol(
     executable: HsaExecutable,
@@ -277,10 +277,10 @@ pub unsafe extern "C" fn hsa_executable_get_symbol(
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_executable_global_variable_define")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Binds a program-global variable to host storage.
 pub unsafe extern "C" fn hsa_executable_global_variable_define(
     executable: HsaExecutable,
@@ -316,10 +316,10 @@ pub unsafe extern "C" fn hsa_executable_global_variable_define(
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_executable_agent_global_variable_define")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Binds an agent-global variable to host storage.
 pub unsafe extern "C" fn hsa_executable_agent_global_variable_define(
     executable: HsaExecutable,
@@ -359,10 +359,10 @@ pub unsafe extern "C" fn hsa_executable_agent_global_variable_define(
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_executable_readonly_variable_define")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Binds a read-only variable to host storage.
 pub unsafe extern "C" fn hsa_executable_readonly_variable_define(
     executable: HsaExecutable,
@@ -402,10 +402,10 @@ pub unsafe extern "C" fn hsa_executable_readonly_variable_define(
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_executable_iterate_symbols")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Visits symbols in a live executable.
 pub unsafe extern "C" fn hsa_executable_iterate_symbols(
     executable: HsaExecutable,
@@ -441,10 +441,10 @@ pub unsafe extern "C" fn hsa_executable_iterate_symbols(
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_executable_iterate_agent_symbols")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Visits executable symbols for one agent.
 pub unsafe extern "C" fn hsa_executable_iterate_agent_symbols(
     executable: HsaExecutable,
@@ -485,10 +485,10 @@ pub unsafe extern "C" fn hsa_executable_iterate_agent_symbols(
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_executable_iterate_program_symbols")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Visits executable symbols in program scope.
 pub unsafe extern "C" fn hsa_executable_iterate_program_symbols(
     executable: HsaExecutable,

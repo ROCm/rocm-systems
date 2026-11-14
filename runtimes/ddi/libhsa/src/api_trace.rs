@@ -4,9 +4,9 @@
 //! `ROCr` tool ABI tables and dispatch ownership.
 //!
 //! Each public HSA symbol jumps through an atomic function slot. The
-//! registrar layer uses stable bridges into retained C tables so existing
-//! late attachment remains visible. Legacy `OnLoad` edits are snapshotted
-//! after its callback returns, and its staging tables remain pinned.
+//! registrar uses generation-leased update transactions and immutable snapshots.
+//! Legacy `OnLoad` edits are snapshotted after its callback returns; staging
+//! storage and published snapshots remain pinned for process lifetime.
 
 use crate::platform::tooling;
 use rocddi::host::module::ResidentModule;
@@ -15,7 +15,7 @@ use std::ffi::{CStr, CString, c_char, c_void};
 use std::mem::size_of;
 use std::ptr::NonNull;
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicPtr, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
 
 /// Generated support for this frontend.
 mod generated {
@@ -132,7 +132,7 @@ impl ApiTables {
             core: ApiTable::new(2, 0, functions.core),
             amd_ext: ApiTable::new(2, generated::AMD_EXT_STEP, functions.amd_ext),
             finalizer_ext: ApiTable::new(2, 0, functions.finalizer_ext),
-            image_ext: ApiTable::new(2, 1, functions.image_ext),
+            image_ext: ApiTable::new(2, generated::IMAGE_EXT_STEP, functions.image_ext),
             tools: ApiTable::new(1, 0, functions.tools),
             pc_sampling_ext: ApiTable::new(1, 0, functions.pc_sampling_ext),
         });
@@ -168,14 +168,6 @@ impl ApiTables {
     }
 }
 
-/// Leaked table allocation retained by the registrar across HSA generations.
-struct ProfilerTable(NonNull<ApiTables>);
-
-// SAFETY: Rust never dereferences these allocations after registration. The
-// registrar can rewrite their fields, and assembly bridges read them under
-// the existing HSA tool ABI. Moving the pointer does not touch those fields.
-unsafe impl Send for ProfilerTable {}
-
 /// Tool module whose exported code remains resident through process exit.
 struct ToolLibrary(ResidentModule);
 
@@ -207,9 +199,8 @@ impl ToolLibrary {
 struct ToolState {
     /// Private source for the last published function snapshot.
     tables: Box<ApiTables>,
-    /// Each registration stays pinned because the registrar can retain and
-    /// rewrite its C table after the corresponding HSA generation ends.
-    profiler_tables: Vec<ProfilerTable>,
+    /// One process registration reused across all HSA generations.
+    profiler_id: Option<u64>,
     /// A tool can retain a table pointer after `OnUnload`; keep every staging
     /// table alive until process exit, including failed attachment attempts.
     #[allow(clippy::vec_box, reason = "each C table needs a stable address")]
@@ -281,15 +272,111 @@ type OnLoad = unsafe extern "C" fn(*mut RootTable, u64, u64, *const *const c_cha
 type OnUnload = unsafe extern "C" fn();
 /// rocprofiler import-registration entry point.
 type RegisterImport = extern "C" fn() -> u32;
-/// Existing rocprofiler-register C ABI for one root API table.
+/// Synchronous mutator supplied by the versioned registrar. It may retain
+/// staging addresses for reads, but all writes finish before it returns.
+type ProfilerUpdater = unsafe extern "C" fn(*mut c_void, *mut *mut c_void, u64, u64) -> i32;
+/// Runtime-owned transaction entry point used by registrar ABI version 2.
+type ProfilerTransaction = unsafe extern "C" fn(*mut c_void, ProfilerUpdater, *mut c_void) -> u32;
+/// Executes a worker's bounded synchronous native work under its generation.
+type ProfilerCleanup = unsafe extern "C" fn(
+    *mut c_void,
+    u64,
+    unsafe extern "C" fn(*mut c_void) -> i32,
+    *mut c_void,
+) -> u32;
+
+/// ABI shared with rocprofiler-register's v2 provider header.
+#[repr(C)]
+struct ProfilerProvider {
+    /// Extensible structure byte size.
+    size: usize,
+    /// Publication protocol version, independently of the HSA table version.
+    version: u64,
+    /// Process-lived provider context; this runtime uses static state.
+    data: *mut c_void,
+    /// Runs an updater inside admission and publishes its complete result.
+    update: ProfilerTransaction,
+    /// Admits bounded worker operations while active or preparing retirement.
+    run_cleanup: ProfilerCleanup,
+}
+
+/// Registers the process-owned version 2 provider.
 type Register = unsafe extern "C" fn(
     *const c_char,
     RegisterImport,
     u32,
-    *mut *mut c_void,
-    u64,
+    *const ProfilerProvider,
     *mut u64,
 ) -> u32;
+/// Refreshes or quiesces one process registration identifier.
+type Refresh = unsafe extern "C" fn(u64) -> u32;
+/// Prepares SDK worker retirement while native callback services remain usable.
+type Prepare = unsafe extern "C" fn(u64, u64) -> u32;
+
+/// Last profiler layer, protected independently of legacy attachment. This
+/// mutex is never acquired while the HSA lifecycle mutex is held.
+static PROFILER: Mutex<Option<Box<ApiTables>>> = Mutex::new(None);
+/// Tool cleanup may use a private native-call lease after public admission
+/// closes. That lease must never authorize another table update.
+static PROFILER_QUIESCING: AtomicBool = AtomicBool::new(true);
+
+/// Runs bounded native work without permitting a worker to carry its lease
+/// into another callback or runtime generation.
+unsafe extern "C" fn profiler_cleanup(
+    _: *mut c_void,
+    generation: u64,
+    work: unsafe extern "C" fn(*mut c_void) -> i32,
+    data: *mut c_void,
+) -> u32 {
+    let Ok(_lease) = crate::runtime::enter_delegated_tool_cleanup(generation) else {
+        return 9; // ROCP_REG_ATTACHMENT_NOT_AVAILABLE
+    };
+    // SAFETY: The v2 callback is synchronous and must not unwind or retain the
+    // supplied native-call lease beyond this call.
+    if unsafe { work(data) } == 0 { 0 } else { 6 }
+}
+
+/// Executes a versioned foreign update without exposing its mutable table to
+/// dispatch readers. Closing process admission fences this transaction against
+/// final shutdown, including native calls made synchronously by the updater.
+unsafe extern "C" fn profiler_update(
+    _: *mut c_void,
+    updater: ProfilerUpdater,
+    data: *mut c_void,
+) -> u32 {
+    const INVALID_ARGUMENT: u32 = 8;
+    const INACTIVE: u32 = 9;
+    if PROFILER_QUIESCING.load(Ordering::Acquire) {
+        return INACTIVE;
+    }
+    let Some(token) = crate::runtime::process_admission().enter() else {
+        return INACTIVE;
+    };
+    let generation = token.generation();
+    let _lease = crate::runtime::ApiLeaseScope::enter(token);
+    // Registrar serializes its calls and rejects recursive updates. The
+    // independent mutex also protects the retained seed across generations.
+    let Ok(mut profiler) = PROFILER.lock() else {
+        return INVALID_ARGUMENT;
+    };
+    let staging = profiler.as_ref().map_or_else(ApiTables::new, |tables| {
+        ApiTables::from_functions(&tables.functions())
+    });
+    // Pin before invoking foreign code: even a failed updater may retain the
+    // root or children. No subsequent runtime mutation reaches this table.
+    let staging = Box::leak(staging);
+    let mut root = (&raw mut staging.root).cast::<c_void>();
+    // SAFETY: The registrar's versioned contract permits synchronous writes
+    // to this private table and requires all such writes to finish on return.
+    if unsafe { updater(data, &raw mut root, 1, generation) } != 0 || !generated::valid(staging) {
+        return 6; // ROCP_REG_ROCPROFILER_ERROR
+    }
+    let snapshot = ApiTables::from_functions(&staging.functions());
+    generated::publish_profiler(&snapshot);
+    *profiler = Some(snapshot);
+    0
+}
+
 /// ABI version value for HSA register.
 const HSA_REGISTER_VERSION: u32 = 12_100;
 
@@ -330,53 +417,58 @@ fn parse_tool_names(names: &str) -> Vec<String> {
     parsed
 }
 
-/// Registers a retained table through the existing rocprofiler ABI.
-///
-/// The registrar can rewrite this table after the call returns. Bridges read
-/// those fields to preserve late attachment; the C ABI provides no update
-/// callback or synchronization with those reads.
+/// Registers one process provider, or refreshes its existing generation.
+/// The old retained-mutable-table ABI is deliberately not called: it has no
+/// writer fence. Synchronous legacy `OnLoad` tools remain available below.
 fn register_profiler(state: &mut ToolState) -> bool {
-    let Some(library) = ToolLibrary::open(tooling::REGISTRAR) else {
+    if state.registration.is_none() {
+        state.registration = ToolLibrary::open(tooling::REGISTRAR);
+    }
+    let Some(library) = state.registration.as_ref() else {
         return false;
     };
-    let symbol = library.symbol(c"rocprofiler_register_library_api_table");
-    if symbol.is_null() || state.profiler_tables.try_reserve(1).is_err() {
+    let register = library.symbol(c"rocprofiler_register_library_api_table_v2");
+    let refresh = library.symbol(c"rocprofiler_register_refresh_library_api_table_v2");
+    let quiesce = library.symbol(c"rocprofiler_register_quiesce_library_api_table_v2");
+    let prepare = library.symbol(c"rocprofiler_register_prepare_library_api_table_v2");
+    if register.is_null() || refresh.is_null() || quiesce.is_null() || prepare.is_null() {
         return false;
     }
-    // SAFETY: The symbol has the public rocprofiler-register C signature.
-    let register: Register = unsafe { std::mem::transmute(symbol) };
-    // The registrar has no unregister API. Leak this allocation into process
-    // ownership before handing its address to C, including failure paths.
-    let tables = ProfilerTable(NonNull::from(Box::leak(ApiTables::new())));
-    // SAFETY: The allocation remains valid for the process lifetime, and
-    // forming a raw field address does not read a concurrently changed slot.
-    let mut root = unsafe { &raw mut (*tables.0.as_ptr()).root }.cast::<c_void>();
-    let mut identifier = 0u64;
-    let tables_ptr = tables.0.as_ptr();
-    state.profiler_tables.push(tables);
-    // SAFETY: The root and child tables are pinned by the process allocation
-    // even if registration fails after retaining their addresses.
-    let status = unsafe {
-        register(
-            c"hsa".as_ptr(),
-            rocprofiler_register_import_hsa,
-            HSA_REGISTER_VERSION,
-            &raw mut root,
-            1,
-            &raw mut identifier,
-        )
+    // SAFETY: Symbol names select the exact v2 C signatures defined above.
+    let register: Register = unsafe { std::mem::transmute(register) };
+    let refresh: Refresh = unsafe { std::mem::transmute(refresh) };
+    let status = if let Some(identifier) = state.profiler_id {
+        unsafe { refresh(identifier) }
+    } else {
+        let provider = ProfilerProvider {
+            size: size_of::<ProfilerProvider>(),
+            version: 2,
+            data: std::ptr::null_mut(),
+            update: profiler_update,
+            run_cleanup: profiler_cleanup,
+        };
+        let mut identifier = u64::MAX;
+        // SAFETY: Registrar copies the descriptor synchronously. Its callback
+        // and context remain valid through process exit, including failure.
+        let status = unsafe {
+            register(
+                c"hsa".as_ptr(),
+                rocprofiler_register_import_hsa,
+                HSA_REGISTER_VERSION,
+                &raw const provider,
+                &raw mut identifier,
+            )
+        };
+        if identifier != u64::MAX {
+            state.profiler_id = Some(identifier);
+        }
+        status
     };
-    state.registration = Some(library);
     if status > 1 {
         return false;
     }
-    // SAFETY: The pointer still names the leaked table. The generated helper
-    // computes field addresses only; it does not read registrar-owned values.
-    unsafe { generated::publish_profiler(tables_ptr) };
     state.tables.restore(&generated::bridge_functions());
     publish(&state.tables);
-    // NO_TOOLS (1) may still have installed the attachment queue shim. The
-    // bridge remains live while legacy tools are attached after this call.
     status == 0
 }
 
@@ -492,7 +584,7 @@ pub(crate) fn load() {
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         let state = guard.get_or_insert_with(|| ToolState {
             tables: ApiTables::new(),
-            profiler_tables: Vec::new(),
+            profiler_id: None,
             legacy_tables: Vec::new(),
             libraries: Vec::new(),
             registration: None,
@@ -502,6 +594,7 @@ pub(crate) fn load() {
             return;
         }
         state.phase = ToolPhase::Loading;
+        PROFILER_QUIESCING.store(false, Ordering::Release);
     }
     let mut guard = STATE
         .lock()
@@ -509,6 +602,12 @@ pub(crate) fn load() {
     let Some(state) = guard.as_mut() else {
         return;
     };
+    // A generation is built from native functions. The registrar reinstalls
+    // the attachment layer before the SDK; feeding the previous SDK wrappers
+    // back into its initializer could make their downstream calls recursive.
+    *PROFILER
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
     let registered = register_profiler(state);
     let v1_requested = std::env::var("HSA_TOOLS_ROCPROFILER_V1_TOOLS")
         .is_ok_and(|value| !matches!(value.as_str(), "0" | "off" | "false" | "no"));
@@ -518,8 +617,36 @@ pub(crate) fn load() {
     state.phase = ToolPhase::Active;
 }
 
-/// Detaches loaded tools and restores original API function pointers.
-pub(crate) fn unload() {
+/// Stops existing SDK work while the runtime's explicit cleanup window permits
+/// its workers to finish native operations. Public table updates stay closed.
+pub(crate) fn prepare_shutdown(generation: u64) -> crate::ffi::Status {
+    PROFILER_QUIESCING.store(true, Ordering::Release);
+    let guard = STATE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let Some(state) = guard
+        .as_ref()
+        .filter(|state| state.phase == ToolPhase::Active)
+    else {
+        return crate::ffi::SUCCESS;
+    };
+    if let (Some(library), Some(identifier)) = (&state.registration, state.profiler_id) {
+        let symbol = library.symbol(c"rocprofiler_register_prepare_library_api_table_v2");
+        if symbol.is_null() {
+            return crate::ffi::ERROR;
+        }
+        // SAFETY: The named versioned symbol has the two-identifier C signature.
+        let prepare: Prepare = unsafe { std::mem::transmute(symbol) };
+        if unsafe { prepare(identifier, generation) } > 1 {
+            return crate::ffi::ERROR;
+        }
+    }
+    crate::ffi::SUCCESS
+}
+
+/// Retires the SDK after native queues and callback producers have stopped.
+pub(crate) fn retire_profiler() -> crate::ffi::Status {
+    PROFILER_QUIESCING.store(true, Ordering::Release);
     let mut guard = STATE
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -527,7 +654,35 @@ pub(crate) fn unload() {
         .as_mut()
         .filter(|state| state.phase == ToolPhase::Active)
     else {
-        return;
+        return crate::ffi::SUCCESS;
+    };
+    // The lifecycle owner supplies a synchronous native cleanup lease only
+    // around this call, after prepare and native stop have succeeded.
+    if let (Some(library), Some(identifier)) = (&state.registration, state.profiler_id) {
+        let symbol = library.symbol(c"rocprofiler_register_quiesce_library_api_table_v2");
+        if symbol.is_null() {
+            return crate::ffi::ERROR;
+        }
+        // SAFETY: The v2 symbol uses the same one-identifier C signature.
+        let quiesce: Refresh = unsafe { std::mem::transmute(symbol) };
+        if unsafe { quiesce(identifier) } > 1 {
+            return crate::ffi::ERROR;
+        }
+    }
+    crate::ffi::SUCCESS
+}
+
+/// Detaches loaded tools and restores original API function pointers.
+pub(crate) fn unload() -> crate::ffi::Status {
+    PROFILER_QUIESCING.store(true, Ordering::Release);
+    let mut guard = STATE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let Some(state) = guard
+        .as_mut()
+        .filter(|state| state.phase == ToolPhase::Active)
+    else {
+        return crate::ffi::SUCCESS;
     };
     for library in state.libraries.iter().rev() {
         let symbol = library.symbol(c"OnUnload");
@@ -546,11 +701,12 @@ pub(crate) fn unload() {
     state.tables.restore(&generated::initial_functions());
     state.libraries.clear();
     state.phase = ToolPhase::Inactive;
+    crate::ffi::SUCCESS
 }
 
 /// The v1 image extension has a different field order from the tool trace
 /// table. Return public trampolines in the extension's own ABI order.
-pub(crate) fn image_extension_table() -> [usize; 14] {
+pub(crate) fn image_extension_table() -> [usize; 15] {
     [
         "hsa_ext_image_get_capability",
         "hsa_ext_image_data_get_info",
@@ -566,12 +722,13 @@ pub(crate) fn image_extension_table() -> [usize; 14] {
         "hsa_ext_image_data_get_info_with_layout",
         "hsa_ext_image_create_with_layout",
         "hsa_ext_sampler_create_v2",
+        "hsa_ext_sampler_create_v3",
     ]
     .map(|name| generated::public_address(name).unwrap_or(0))
 }
 
 /// Returns the AMD loader extension function table.
-pub(crate) fn loader_extension_table() -> [usize; 7] {
+pub(crate) fn loader_extension_table() -> [usize; 9] {
     [
         "hsa_ven_amd_loader_query_host_address",
         "hsa_ven_amd_loader_query_segment_descriptors",
@@ -580,6 +737,8 @@ pub(crate) fn loader_extension_table() -> [usize; 7] {
         "hsa_ven_amd_loader_loaded_code_object_get_info",
         "hsa_ven_amd_loader_code_object_reader_create_from_file_with_offset_size",
         "hsa_ven_amd_loader_iterate_executables",
+        "hsa_ven_amd_loader_code_object_reader_get_load_size",
+        "hsa_ven_amd_loader_executable_load_agent_code_object_at_address",
     ]
     .map(|name| generated::public_address(name).unwrap_or(0))
 }

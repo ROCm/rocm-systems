@@ -292,8 +292,9 @@ impl GpuDevice<'_> {
     /// valid trap instructions, and a nonzero memory address must refer to the
     /// writable argument record required by those instructions. The caller
     /// must keep both allocations live and unchanged while the handler can
-    /// run, including after an ambiguous native result, until a successful
-    /// removal or conclusive device teardown.
+    /// run, including after an ambiguous native result. Successful removal
+    /// prevents future entry but does not retire waves already in the handler;
+    /// those waves must also finish before backing is reclaimed.
     #[doc(hidden)]
     #[allow(unsafe_code)]
     pub unsafe fn set_trap_handler(
@@ -302,7 +303,7 @@ impl GpuDevice<'_> {
         memory_address: u64,
     ) -> Result<(), Error> {
         // SAFETY: The public caller retains the handler code and argument
-        // storage until successful removal or conclusive device teardown.
+        // storage until removal and retirement of all handler users.
         unsafe {
             self.driver
                 .set_trap_handler(handler_address, memory_address)

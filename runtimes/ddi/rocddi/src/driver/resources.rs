@@ -787,7 +787,10 @@ impl QueueState {
     /// # Safety
     /// The command processor has stopped the queue and scratch remains live.
     #[allow(unsafe_code)]
-    pub(crate) unsafe fn set_scratch(&mut self, scratch: QueueScratch) -> Result<(), Error> {
+    pub(crate) unsafe fn set_scratch(
+        &mut self,
+        scratch: Option<QueueScratch>,
+    ) -> Result<(), Error> {
         match self {
             #[cfg(not(target_os = "linux"))]
             Self::Unavailable(never, ..) => match *never {},
@@ -797,6 +800,31 @@ impl QueueState {
             #[cfg(test)]
             // SAFETY: The caller preserves the stopped queue and backing.
             Self::Test(queue) => unsafe { queue.set_scratch(scratch) },
+        }
+    }
+
+    pub(crate) fn enable_async_scratch(&mut self) -> Result<(), Error> {
+        match self {
+            #[cfg(not(target_os = "linux"))]
+            Self::Unavailable(never, ..) => match *never {},
+            #[cfg(target_os = "linux")]
+            Self::LinuxKfd(queue) => queue.enable_async_scratch(),
+            #[cfg(test)]
+            Self::Test(queue) => queue.enable_async_scratch(),
+        }
+    }
+
+    pub(crate) fn reclaim_scratch(
+        &mut self,
+        cancel: &std::sync::atomic::AtomicBool,
+    ) -> Result<(), Error> {
+        match self {
+            #[cfg(not(target_os = "linux"))]
+            Self::Unavailable(never, ..) => match *never {},
+            #[cfg(target_os = "linux")]
+            Self::LinuxKfd(queue) => queue.reclaim_scratch(cancel),
+            #[cfg(test)]
+            Self::Test(queue) => queue.reclaim_scratch(cancel),
         }
     }
 

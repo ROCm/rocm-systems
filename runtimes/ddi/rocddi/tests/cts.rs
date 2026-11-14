@@ -1118,6 +1118,7 @@ fn gfx1201_user_sdma_queue(ring_memory: QueueRingMemory) -> Result<(), Box<dyn E
     // producer writes one complete packet and stops before destruction.
     let mut queue = unsafe {
         device.gpu()?.create_queue(QueueRequest {
+            control_memory: rocddi::device::gpu::queue::QueueRingMemory::System,
             ring_size_bytes: 4096,
             parameters: QueueParameters::SdmaByEngine {
                 selection: SdmaEngineSelection::Id(0),
@@ -1302,6 +1303,7 @@ fn gfx1201_aql_barrier(
     // doorbell. Its completion signal stays mapped until native retirement.
     let mut queue = unsafe {
         gpu.create_queue(QueueRequest {
+            control_memory: rocddi::device::gpu::queue::QueueRingMemory::System,
             ring_size_bytes: 4096,
             parameters: QueueParameters::Aql {
                 producer_mode: if global_work_sync {

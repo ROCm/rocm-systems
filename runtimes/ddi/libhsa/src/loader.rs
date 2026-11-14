@@ -174,8 +174,16 @@ pub(crate) struct Executable {
     pub(crate) profile: u32,
     /// Default floating-point rounding mode.
     pub(crate) default_rounding: u32,
+    /// Stable native debugger maps; unlinked before any image owner drops.
+    pub(crate) debugger: crate::debugger::ExecutableDebugInfo,
     /// Loader-owned images and scoped symbol index.
     pub(crate) core: rocloader::Executable<LoadedMetadata>,
+}
+
+impl Drop for Executable {
+    fn drop(&mut self) {
+        self.debugger.unpublish();
+    }
 }
 
 /// Resolves a complete range in a loaded executable to its CPU mapping.
@@ -190,6 +198,25 @@ pub(crate) fn loaded_host_range(
             Ok(None) => {}
             Err(rocloader::Error::InvalidRange) => return Err(INVALID_ALLOCATION),
             Err(error) => return Err(map_loader_error(error)),
+        }
+    }
+    Ok(None)
+}
+
+/// Resolves a loaded range for read-only inspection, including staged images.
+pub(crate) fn loaded_query_host_range(
+    loader: &LoaderState,
+    address: usize,
+) -> Result<Option<usize>, Status> {
+    for executable in loader.executables.values() {
+        for object in executable.core.loaded() {
+            if let Some(host) = object
+                .image
+                .query_host_range(address as u64, 1)
+                .map_err(map_loader_error)?
+            {
+                return Ok(Some(host));
+            }
         }
     }
     Ok(None)
@@ -240,12 +267,20 @@ impl LoaderState {
     }
 
     /// Drops HSA symbol handles before their executable and reader owners.
+    /// The caller must first establish `can_release()`.
     pub(crate) fn clear(&mut self) {
         self.symbols.clear();
         self.executables.clear();
         self.readers.clear();
         self.code_symbols.clear();
         self.code_objects.clear();
+    }
+
+    /// Whether all executable publication work has conclusively retired.
+    pub(crate) fn can_release(&self) -> bool {
+        self.executables
+            .values()
+            .all(|executable| executable.core.can_release())
     }
 
     /// Registers a caller-owned code-object reader snapshot.
@@ -263,11 +298,11 @@ pub(crate) mod code_object;
 pub(crate) mod executable;
 pub(crate) mod query;
 
-use code_object::map_loader_error;
+pub(crate) use code_object::map_loader_error;
 
-#[cfg(any(test, not(all(target_os = "linux", target_arch = "x86_64"))))]
+#[cfg(any(test, not(hsa_tool_dispatch)))]
 /// Returns the loader extension functions in public ABI table order.
-pub(crate) fn loader_extension_table() -> [usize; 7] {
+pub(crate) fn loader_extension_table() -> [usize; 9] {
     [
         crate::api::loader::query::hsa_ven_amd_loader_query_host_address as *const () as usize,
         crate::api::loader::query::hsa_ven_amd_loader_query_segment_descriptors as *const () as usize,
@@ -277,6 +312,8 @@ pub(crate) fn loader_extension_table() -> [usize; 7] {
         crate::api::loader::query::hsa_ven_amd_loader_code_object_reader_create_from_file_with_offset_size as *const ()
             as usize,
         crate::api::loader::query::hsa_ven_amd_loader_iterate_executables as *const () as usize,
+        crate::api::loader::query::hsa_ven_amd_loader_code_object_reader_get_load_size as *const () as usize,
+        crate::api::loader::executable::state::hsa_ven_amd_loader_executable_load_agent_code_object_at_address as *const () as usize,
     ]
 }
 

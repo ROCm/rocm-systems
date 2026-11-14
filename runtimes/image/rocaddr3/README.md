@@ -3,9 +3,9 @@
 
 # rocaddr3
 
-`rocaddr3` computes GFX12 image layouts from the device's GB_ADDR_CONFIG,
-surface dimensions, format size, and mip count. It wraps AMD AddrLib3 behind a
-small Rust interface. Its row-mapping operation returns checked byte offsets
+`rocaddr3` computes GFX9–GFX12 image layouts from the device's GB_ADDR_CONFIG,
+family/revision, surface dimensions, format size, and mip count. It wraps AMD
+AddrLib2 and AddrLib3 behind a small Rust interface. Its row-mapping operation returns checked byte offsets
 for individual mip levels and array or depth slices. The included AddrLib
 source is copied from
 `projects/rocr-runtime/runtime/hsa-runtime/image/addrlib` in this repository;

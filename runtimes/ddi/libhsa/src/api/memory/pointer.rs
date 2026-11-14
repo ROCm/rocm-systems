@@ -12,10 +12,10 @@ use crate::memory::pool::*;
 use crate::runtime::{boundary, initialized_mut, lock, map_error};
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_amd_pointer_info")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Writes the allocation type, bounds, and owner for a pointer.
 pub unsafe extern "C" fn hsa_amd_pointer_info(
     pointer: *const c_void,
@@ -91,10 +91,10 @@ pub unsafe extern "C" fn hsa_amd_pointer_info(
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_amd_pointer_info_set_userdata")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Associates caller-owned data with a tracked allocation.
 pub unsafe extern "C" fn hsa_amd_pointer_info_set_userdata(
     pointer: *const c_void,
@@ -121,10 +121,10 @@ pub unsafe extern "C" fn hsa_amd_pointer_info_set_userdata(
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_amd_agents_allow_access")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Grants the listed agents access to a memory allocation.
 pub unsafe extern "C" fn hsa_amd_agents_allow_access(
     num_agents: u32,
@@ -255,10 +255,10 @@ pub unsafe extern "C" fn hsa_amd_agents_allow_access(
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_amd_memory_pool_can_migrate")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Reports whether memory can migrate between two pools.
 pub unsafe extern "C" fn hsa_amd_memory_pool_can_migrate(
     source_pool: HsaMemoryPool,
@@ -289,10 +289,10 @@ pub unsafe extern "C" fn hsa_amd_memory_pool_can_migrate(
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_amd_memory_migrate")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Migrates an allocation to the requested memory pool.
 pub unsafe extern "C" fn hsa_amd_memory_migrate(
     pointer: *const c_void,

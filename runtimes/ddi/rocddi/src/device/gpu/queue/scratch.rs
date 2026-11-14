@@ -48,7 +48,8 @@ pub fn plan_scratch(
     }
     let (alignment, maximum_wave_units) =
         match gpu.target_profile.scratch_encoding(gpu.wavefront_size) {
-            Some(GpuScratchEncoding::Gfx9) => (1024_u64, 0x1fff),
+            Some(GpuScratchEncoding::Gfx9 | GpuScratchEncoding::Gfx10) => (1024_u64, 0x1fff),
+            Some(GpuScratchEncoding::Gfx11) => (256_u64, 0x7fff),
             Some(GpuScratchEncoding::Gfx12) => (256_u64, 0x3_ffff),
             None => return Err(invalid_scratch()),
         };
@@ -82,7 +83,10 @@ pub fn plan_scratch(
     if wave_bytes / alignment > maximum_wave_units {
         return Err(invalid_scratch());
     }
-    let representable_bytes = u64::from(u32::MAX) / GPU_PAGE_BYTES * GPU_PAGE_BYTES;
+    // The control descriptor's byte-size field is per XCC. Round each
+    // partition to a GPU page so total storage remains divisible by XCCs.
+    let allocation_alignment = GPU_PAGE_BYTES * u64::from(gpu.xcc_count);
+    let representable_bytes = u64::from(u32::MAX) / GPU_PAGE_BYTES * allocation_alignment;
     let representable_waves = u32::try_from(representable_bytes / wave_bytes)
         .unwrap_or(u32::MAX)
         .min(maximum_waves);
@@ -94,9 +98,9 @@ pub fn plan_scratch(
         .checked_mul(u64::from(maximum_wave_count))
         .ok_or_else(invalid_scratch)?;
     let byte_length = required
-        .checked_add(GPU_PAGE_BYTES - 1)
-        .map(|size| size / GPU_PAGE_BYTES * GPU_PAGE_BYTES)
-        .filter(|size| u32::try_from(*size).is_ok())
+        .checked_add(allocation_alignment - 1)
+        .map(|size| size / allocation_alignment * allocation_alignment)
+        .filter(|size| *size <= representable_bytes)
         .ok_or_else(invalid_scratch)?;
     Ok(ScratchPlan {
         byte_length,
@@ -171,5 +175,16 @@ mod tests {
                 maximum_wave_count: 2048,
             })
         );
+    }
+    #[test]
+    fn multi_xcc_scratch_keeps_per_partition_size_without_global_u32_cap() -> Result<(), Error> {
+        let mut gpu = gfx1201();
+        gpu.xcc_count = 4;
+        gpu.compute_unit_count = 256;
+        let plan = plan_scratch(gpu, 32768, 32)?;
+        assert_eq!(plan.byte_length, 8_u64 << 30);
+        assert_eq!(plan.byte_length % (4096 * 4), 0);
+        assert!(u32::try_from(plan.byte_length / 4).is_ok());
+        Ok(())
     }
 }

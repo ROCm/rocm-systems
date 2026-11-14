@@ -23,10 +23,10 @@ const AMD_AGENT_PRELOAD_SKIP_BLITS: u64 = 1 << 1;
 /// `hsa_shut_down` does not release the stream. Calls made recursively from a
 /// custom stream callback are rejected. Null selects stderr.
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_amd_enable_logging")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_amd_enable_logging(flags: *mut u8, file: *mut c_void) -> Status {
     boundary(|| {
         if runtime::LogWriteScope::active() {
@@ -59,10 +59,10 @@ pub unsafe extern "C" fn hsa_amd_enable_logging(flags: *mut u8, file: *mut c_voi
 /// The callback must remain callable until runtime shutdown. `data` must stay
 /// live and synchronized with event-worker access for that interval.
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_amd_register_system_event_handler")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_amd_register_system_event_handler(
     callback: SystemEventCallback,
     data: *mut c_void,
@@ -88,10 +88,10 @@ pub unsafe extern "C" fn hsa_amd_register_system_event_handler(
 /// # Safety
 /// Any non-null `kind` must address writable `u32` storage.
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_amd_coherency_get_type")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_amd_coherency_get_type(agent: HsaAgent, kind: *mut u32) -> Status {
     boundary(|| {
         let guard = match lock() {
@@ -114,10 +114,10 @@ pub unsafe extern "C" fn hsa_amd_coherency_get_type(agent: HsaAgent, kind: *mut 
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_amd_coherency_set_type")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Sets the coherency policy exposed by a GPU agent.
 pub extern "C" fn hsa_amd_coherency_set_type(agent: HsaAgent, kind: u32) -> Status {
     boundary(|| {
@@ -144,10 +144,10 @@ pub extern "C" fn hsa_amd_coherency_set_type(agent: HsaAgent, kind: u32) -> Stat
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_amd_agent_preload")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Requests that the selected agent preload its runtime state.
 pub extern "C" fn hsa_amd_agent_preload(agent: HsaAgent, flags: u64) -> Status {
     boundary(|| {
@@ -181,14 +181,14 @@ pub extern "C" fn hsa_amd_agent_preload(agent: HsaAgent, flags: u64) -> Status {
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_amd_agent_set_async_scratch_limit")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
-/// Rejects asynchronous scratch reclaim, which this backend does not expose.
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
+/// Updates the asynchronous scratch threshold observed by queue workers.
 pub extern "C" fn hsa_amd_agent_set_async_scratch_limit(
     agent: HsaAgent,
-    _threshold: usize,
+    threshold: usize,
 ) -> Status {
     boundary(|| {
         let guard = match lock() {
@@ -198,19 +198,27 @@ pub extern "C" fn hsa_amd_agent_set_async_scratch_limit(
         let Some(runtime) = guard.as_ref() else {
             return NOT_INITIALIZED;
         };
-        if runtime.gpu_index(agent).is_none() {
+        let Some(index) = runtime.gpu_index(agent) else {
             return INVALID_AGENT;
+        };
+        let gpu = &runtime.gpus[index];
+        if !gpu.scratch.asynchronous
+            || threshold as u64 > gpu.info().maximum_scratch_aperture_bytes()
+        {
+            return INVALID_ARGUMENT;
         }
-        // GFX1201 does not advertise asynchronous scratch reclaim.
-        INVALID_ARGUMENT
+        gpu.scratch
+            .async_limit
+            .store(threshold as u64, std::sync::atomic::Ordering::Release);
+        SUCCESS
     })
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_amd_profiling_async_copy_enable")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Enables or disables timestamps for asynchronous copies.
 pub extern "C" fn hsa_amd_profiling_async_copy_enable(enable: bool) -> Status {
     boundary(|| {
@@ -233,10 +241,10 @@ pub extern "C" fn hsa_amd_profiling_async_copy_enable(enable: bool) -> Status {
 /// # Safety
 /// Any non-null `system_tick` must address writable `u64` storage.
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_amd_profiling_convert_tick_to_system_domain")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_amd_profiling_convert_tick_to_system_domain(
     agent: HsaAgent,
     agent_tick: u64,
@@ -277,10 +285,10 @@ pub unsafe extern "C" fn hsa_amd_profiling_convert_tick_to_system_domain(
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_amd_spm_acquire")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Acquires the agent’s streaming performance monitor.
 pub extern "C" fn hsa_amd_spm_acquire(agent: HsaAgent) -> Status {
     boundary(|| {
@@ -296,10 +304,10 @@ pub extern "C" fn hsa_amd_spm_acquire(agent: HsaAgent) -> Status {
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_amd_spm_release")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Releases the SPM resource.
 pub extern "C" fn hsa_amd_spm_release(agent: HsaAgent) -> Status {
     boundary(|| {
@@ -334,10 +342,10 @@ pub(crate) fn retained_gpu_device(
 /// replacement or unset, or conclusive teardown; a failed call may leave
 /// either reachable.
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_amd_spm_set_dest_buffer")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_amd_spm_set_dest_buffer(
     agent: HsaAgent,
     size: usize,

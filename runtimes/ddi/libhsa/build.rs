@@ -21,7 +21,7 @@ const TABLES: [(&str, &str); 6] = [
 ];
 
 /// Extension exports that must remain visible in the public ABI.
-const PUBLIC_EXTENSION_SYMBOLS: [&str; 28] = [
+const PUBLIC_EXTENSION_SYMBOLS: [&str; 31] = [
     "hsa_ext_image_get_capability",
     "hsa_ext_image_data_get_info",
     "hsa_ext_image_create",
@@ -36,6 +36,7 @@ const PUBLIC_EXTENSION_SYMBOLS: [&str; 28] = [
     "hsa_ext_image_data_get_info_with_layout",
     "hsa_ext_image_create_with_layout",
     "hsa_ext_sampler_create_v2",
+    "hsa_ext_sampler_create_v3",
     "hsa_ven_amd_loader_query_host_address",
     "hsa_ven_amd_loader_query_segment_descriptors",
     "hsa_ven_amd_loader_query_executable",
@@ -43,6 +44,8 @@ const PUBLIC_EXTENSION_SYMBOLS: [&str; 28] = [
     "hsa_ven_amd_loader_loaded_code_object_get_info",
     "hsa_ven_amd_loader_code_object_reader_create_from_file_with_offset_size",
     "hsa_ven_amd_loader_iterate_executables",
+    "hsa_ven_amd_loader_code_object_reader_get_load_size",
+    "hsa_ven_amd_loader_executable_load_agent_code_object_at_address",
     "hsa_ven_amd_pcs_iterate_configuration",
     "hsa_ven_amd_pcs_create",
     "hsa_ven_amd_pcs_create_from_id",
@@ -233,7 +236,12 @@ fn macro_u32(header: &str, name: &str) -> Result<u32, io::Error> {
 
 #[allow(clippy::too_many_lines)]
 /// Generates Rust table layouts and original implementation pointers.
-fn generate_rust(exports: &[String], tables: &[(&str, Vec<String>)], amd_step: u32) -> String {
+fn generate_rust(
+    exports: &[String],
+    tables: &[(&str, Vec<String>)],
+    amd_step: u32,
+    image_step: u32,
+) -> String {
     let runtime_functions: HashSet<&str> = exports
         .iter()
         .map(String::as_str)
@@ -278,6 +286,8 @@ fn generate_rust(exports: &[String], tables: &[(&str, Vec<String>)], amd_step: u
         ),
         "/// AMD extension table revision read from the public header.".to_owned(),
         format!("pub(super) const AMD_EXT_STEP: u32 = {amd_step};"),
+        "/// Image extension table revision read from the public header.".to_owned(),
+        format!("pub(super) const IMAGE_EXT_STEP: u32 = {image_step};"),
     ];
     for (member, fields) in tables {
         lines.push(format!("/// Number of `{member}` API function slots."));
@@ -339,17 +349,10 @@ fn generate_rust(exports: &[String], tables: &[(&str, Vec<String>)], amd_step: u
     lines.extend([
         "];".to_owned(),
         String::new(),
-        "/// Addresses of registrar fields read by the assembly bridges.".to_owned(),
+        "/// One atomically replaced, immutable profiler function snapshot.".to_owned(),
         "#[unsafe(no_mangle)]".to_owned(),
-        "static hsa_profiler_slots: [AtomicPtr<c_void>; BRIDGE_COUNT] = [".to_owned(),
-    ]);
-    for index in 0..bridge_names.len() {
-        lines.push(format!(
-            "    AtomicPtr::new(std::ptr::addr_of!(hsa_profiler_default_slots[{index}]) as *mut c_void),"
-        ));
-    }
-    lines.extend([
-        "];".to_owned(),
+        "static hsa_profiler_snapshot: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());"
+            .to_owned(),
         String::new(),
         "/// Collects the native functions that seed every tool API table.".to_owned(),
         "pub(super) fn initial_functions() -> InitialFunctions {".to_owned(),
@@ -422,30 +425,29 @@ fn generate_rust(exports: &[String], tables: &[(&str, Vec<String>)], amd_step: u
     lines.extend([
         "}".to_owned(),
         String::new(),
-        "/// Points bridges at retained registrar fields after registration.".to_owned(),
-        "pub(super) unsafe fn publish_profiler(tables: *mut super::ApiTables) {".to_owned(),
+        "/// Publishes a complete immutable snapshot after the foreign updater returns.".to_owned(),
+        "pub(super) fn publish_profiler(tables: &super::ApiTables) {".to_owned(),
+        "    let mut snapshot = Box::new([std::ptr::null_mut(); BRIDGE_COUNT]);".to_owned(),
     ]);
     for (member, fields) in tables {
         for (index, name) in fields.iter().enumerate() {
             if let Some(position) = bridge_positions.get(name.as_str()) {
                 lines.push(format!(
-                    "    hsa_profiler_slots[{position}].store((unsafe {{ &raw const (*tables).{member}.functions[{index}] }}) as *mut c_void, Ordering::Release);"
+                    "    snapshot[{position}] = tables.{member}.functions[{index}];"
                 ));
             }
         }
     }
     lines.extend([
+        "    // Readers can retain an old pointer while calling a wrapper. Keep every".to_owned(),
+        "    // snapshot immutable and allocated until process exit, like tool code.".to_owned(),
+        "    hsa_profiler_snapshot.store(Box::into_raw(snapshot).cast(), Ordering::Release);"
+            .to_owned(),
         "}".to_owned(),
         String::new(),
-        "/// Restores bridges to native or no-op storage.".to_owned(),
+        "/// Restores bridges to native fallbacks after the generation drains.".to_owned(),
         "pub(super) fn reset_profiler() {".to_owned(),
-    ]);
-    for index in 0..bridge_names.len() {
-        lines.push(format!(
-            "    hsa_profiler_slots[{index}].store(std::ptr::addr_of!(hsa_profiler_default_slots[{index}]) as *mut c_void, Ordering::Release);"
-        ));
-    }
-    lines.extend([
+        "    hsa_profiler_snapshot.store(std::ptr::null_mut(), Ordering::Release);".to_owned(),
         "}".to_owned(),
         String::new(),
         "/// Publishes a snapshot of the tool tables to atomic dispatch slots.".to_owned(),
@@ -513,7 +515,7 @@ fn generate_dispatch(exports: &[String], tables: &[(&str, Vec<String>)]) -> Stri
         ".text".to_owned(),
         ".hidden hsa_process_witness".to_owned(),
         ".hidden hsa_dispatch_slots".to_owned(),
-        ".hidden hsa_profiler_slots".to_owned(),
+        ".hidden hsa_profiler_snapshot".to_owned(),
         ".hidden hsa_profiler_default_slots".to_owned(),
     ];
     for name in exports
@@ -558,15 +560,15 @@ fn generate_dispatch(exports: &[String], tables: &[(&str, Vec<String>)]) -> Stri
             "    cmp dword ptr [r11], 0".to_owned(),
             format!("    jz .Lhsa_bridge_forked_{index}"),
             format!(".Lhsa_bridge_dispatch_{index}:"),
-            format!(
-                "    mov r11, qword ptr [rip + hsa_profiler_slots + {}]",
-                index * 8
-            ),
-            "    mov r11, qword ptr [r11]".to_owned(),
+            "    mov r11, qword ptr [rip + hsa_profiler_snapshot]".to_owned(),
+            "    test r11, r11".to_owned(),
+            format!("    jz .Lhsa_bridge_default_{index}"),
+            format!("    mov r11, qword ptr [r11 + {}]", index * 8),
         ]);
         lines.extend([
             "    test r11, r11".to_owned(),
             format!("    jnz .Lhsa_bridge_call_{index}"),
+            format!(".Lhsa_bridge_default_{index}:"),
             format!(
                 "    mov r11, qword ptr [rip + hsa_profiler_default_slots + {}]",
                 index * 8
@@ -589,10 +591,150 @@ fn generate_dispatch(exports: &[String], tables: &[(&str, Vec<String>)]) -> Stri
     lines.join("\n")
 }
 
+/// Generates AAPCS64 tail-call veneers without touching argument registers.
+fn generate_dispatch_aarch64(exports: &[String], tables: &[(&str, Vec<String>)]) -> String {
+    let bridge_names: Vec<&str> = exports
+        .iter()
+        .map(String::as_str)
+        .chain(PRIVATE_TABLE_FUNCTIONS)
+        .chain(
+            tables
+                .iter()
+                .find(|(member, _)| *member == "tools")
+                .into_iter()
+                .flat_map(|(_, fields)| fields.iter().map(String::as_str)),
+        )
+        .collect();
+    let mut lines = vec![
+        "/* Copyright (c) 2026 Advanced Micro Devices, Inc. */".to_owned(),
+        "/* SPDX-License-Identifier: MIT */".to_owned(),
+        ".text".to_owned(),
+        ".hidden hsa_process_witness".to_owned(),
+        ".hidden hsa_dispatch_slots".to_owned(),
+        ".hidden hsa_profiler_snapshot".to_owned(),
+        ".hidden hsa_profiler_default_slots".to_owned(),
+    ];
+    for name in exports
+        .iter()
+        .map(String::as_str)
+        .chain(PRIVATE_TABLE_FUNCTIONS)
+    {
+        lines.push(format!(".hidden __hsa_impl_{name}"));
+    }
+    // x16/x17 are the AAPCS64 inter-procedure scratch registers. x8 (indirect
+    // result), x0-x7, SIMD arguments, link register and stack arguments survive.
+    for (index, name) in exports.iter().enumerate() {
+        lines.extend([
+            format!(".globl {name}"),
+            format!(".type {name}, %function"),
+            format!("{name}:"),
+            "    adrp x16, hsa_process_witness".to_owned(),
+            "    add x16, x16, :lo12:hsa_process_witness".to_owned(),
+            "    ldar x16, [x16]".to_owned(),
+            format!("    cbz x16, .Lhsa_export_dispatch_{index}"),
+            "    ldar w17, [x16]".to_owned(),
+            format!("    cbz w17, .Lhsa_export_forked_{index}"),
+            format!(".Lhsa_export_dispatch_{index}:"),
+            format!("    adrp x16, hsa_dispatch_slots+{}", index * 8),
+            format!("    add x16, x16, :lo12:hsa_dispatch_slots+{}", index * 8),
+            "    ldar x16, [x16]".to_owned(),
+            "    br x16".to_owned(),
+            format!(".Lhsa_export_forked_{index}:"),
+            format!("    b __hsa_impl_{name}"),
+            format!(".size {name}, .-{name}"),
+        ]);
+    }
+    for (index, name) in bridge_names.iter().enumerate() {
+        lines.extend([
+            format!(".hidden __hsa_bridge_{name}"),
+            format!(".globl __hsa_bridge_{name}"),
+            format!(".type __hsa_bridge_{name}, %function"),
+            format!("__hsa_bridge_{name}:"),
+            "    adrp x16, hsa_process_witness".to_owned(),
+            "    add x16, x16, :lo12:hsa_process_witness".to_owned(),
+            "    ldar x16, [x16]".to_owned(),
+            format!("    cbz x16, .Lhsa_bridge_dispatch_{index}"),
+            "    ldar w17, [x16]".to_owned(),
+            format!("    cbz w17, .Lhsa_bridge_forked_{index}"),
+            format!(".Lhsa_bridge_dispatch_{index}:"),
+            "    adrp x16, hsa_profiler_snapshot".to_owned(),
+            "    add x16, x16, :lo12:hsa_profiler_snapshot".to_owned(),
+            "    ldar x16, [x16]".to_owned(),
+            format!("    cbz x16, .Lhsa_bridge_default_{index}"),
+            format!("    ldr x16, [x16, #{}]", index * 8),
+            format!("    cbnz x16, .Lhsa_bridge_call_{index}"),
+            format!(".Lhsa_bridge_default_{index}:"),
+            format!("    adrp x16, hsa_profiler_default_slots+{}", index * 8),
+            format!(
+                "    add x16, x16, :lo12:hsa_profiler_default_slots+{}",
+                index * 8
+            ),
+            "    ldar x16, [x16]".to_owned(),
+            format!(".Lhsa_bridge_call_{index}:"),
+            "    br x16".to_owned(),
+            format!(".Lhsa_bridge_forked_{index}:"),
+        ]);
+        if exports.iter().any(|export| export == name) || PRIVATE_TABLE_FUNCTIONS.contains(name) {
+            lines.push(format!("    b __hsa_impl_{name}"));
+        } else {
+            lines.extend([
+                format!("    adrp x16, hsa_profiler_default_slots+{}", index * 8),
+                format!(
+                    "    add x16, x16, :lo12:hsa_profiler_default_slots+{}",
+                    index * 8
+                ),
+                "    ldar x16, [x16]".to_owned(),
+                "    br x16".to_owned(),
+            ]);
+        }
+        lines.push(format!(".size __hsa_bridge_{name}, .-__hsa_bridge_{name}"));
+    }
+    lines.push(String::new());
+    lines.join("\n")
+}
+
+/// Detects mirror drift when building inside the source-authority checkout.
+/// Standalone runtime source packages do not require the parent `ROCr` tree.
+fn check_hsa_header_mirrors(manifest: &Path) -> Result<(), Box<dyn Error>> {
+    let primary = manifest.join("../../../projects/rocr-runtime/runtime/hsa-runtime/inc");
+    if !primary.is_dir() {
+        return Ok(());
+    }
+    let mirror = manifest.join("../../api-headers/include/hsa");
+    for entry in fs::read_dir(mirror)? {
+        let path = entry?.path();
+        if path.extension().is_none_or(|extension| extension != "h") {
+            continue;
+        }
+        let Some(name) = path.file_name() else {
+            continue;
+        };
+        let source = primary.join(name);
+        println!("cargo:rerun-if-changed={}", source.display());
+        println!("cargo:rerun-if-changed={}", path.display());
+        if fs::read(&source)? != fs::read(&path)? {
+            return Err(format!(
+                "HSA header mirror differs from its primary source: {}",
+                path.display()
+            )
+            .into());
+        }
+    }
+    Ok(())
+}
+
 /// Regenerates the ABI tables and dispatch assembly when their inputs change.
 fn main() -> Result<(), Box<dyn Error>> {
+    println!("cargo:rustc-check-cfg=cfg(hsa_tool_dispatch)");
+    let target_arch = env::var("CARGO_CFG_TARGET_ARCH")?;
+    let target_os = env::var("CARGO_CFG_TARGET_OS")?;
+    if target_os == "linux" && matches!(target_arch.as_str(), "x86_64" | "aarch64") {
+        println!("cargo:rustc-cfg=hsa_tool_dispatch");
+    }
+
     let manifest = env::var("CARGO_MANIFEST_DIR")?;
     let manifest = Path::new(&manifest);
+    check_hsa_header_mirrors(manifest)?;
     let header = manifest.join("../../api-headers/include/hsa/hsa_api_trace.h");
     let versions = manifest.join("../../api-headers/include/hsa/hsa_api_trace_version.h");
     let exports = manifest.join("src/exports_linux.S");
@@ -603,10 +745,9 @@ fn main() -> Result<(), Box<dyn Error>> {
     println!("cargo:rerun-if-changed={}", source_root.display());
 
     let header = fs::read_to_string(header)?;
-    let amd_step = macro_u32(
-        &fs::read_to_string(versions)?,
-        "HSA_AMD_EXT_API_TABLE_STEP_VERSION",
-    )?;
+    let versions = fs::read_to_string(versions)?;
+    let amd_step = macro_u32(&versions, "HSA_AMD_EXT_API_TABLE_STEP_VERSION")?;
+    let image_step = macro_u32(&versions, "HSA_IMAGE_API_TABLE_STEP_VERSION")?;
     let exports = exported_symbols(&fs::read_to_string(exports)?)?;
     check_api_organization(&source_root, &exports)?;
     let tables = TABLES
@@ -617,11 +758,15 @@ fn main() -> Result<(), Box<dyn Error>> {
     let out = Path::new(&out);
     fs::write(
         out.join("api_trace_generated.rs"),
-        generate_rust(&exports, &tables, amd_step),
+        generate_rust(&exports, &tables, amd_step, image_step),
     )?;
     fs::write(
         out.join("api_trace_dispatch_linux.S"),
-        generate_dispatch(&exports, &tables),
+        if target_arch == "aarch64" {
+            generate_dispatch_aarch64(&exports, &tables)
+        } else {
+            generate_dispatch(&exports, &tables)
+        },
     )?;
     Ok(())
 }

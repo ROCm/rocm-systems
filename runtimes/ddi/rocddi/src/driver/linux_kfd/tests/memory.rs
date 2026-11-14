@@ -65,6 +65,7 @@ struct Fixture {
 
 fn node() -> sysfs::KfdNode {
     sysfs::KfdNode {
+        host_atomics: false,
         node: 1,
         gpu_id: 42,
         render_minor: Some(128),
@@ -768,6 +769,7 @@ fn secondary_extended_registration_reaches_drm_only_for_gfx1201() {
     let make_device = |gfx_target| super::super::DeviceState {
         vm: fixture.vm.clone(),
         native: sysfs::KfdNode {
+            host_atomics: false,
             queues: sysfs::KfdQueueProperties {
                 gfx_target,
                 target_profile: crate::topology::GpuTargetProfile::from_kfd_target(gfx_target),
@@ -2763,7 +2765,7 @@ fn concurrent_initialization_keeps_the_same_render_file_after_public_owners_drop
             .map(|_| {
                 scope.spawn(|| {
                     bindings
-                        .device_with_render(&kfd, &native, |minor| {
+                        .device_with_render(&kfd, &native, None, None, |minor| {
                             assert_eq!(minor, 128);
                             File::open("/dev/null")
                         })
@@ -2784,7 +2786,9 @@ fn concurrent_initialization_keeps_the_same_render_file_after_public_owners_drop
     assert_eq!(bindings.bindings.lock().unwrap().devices.len(), 1);
     let fresh = initialization_endpoint(acquisitions.clone(), false);
     let vm = bindings
-        .device_with_render(&fresh, &native, |_| panic!("reopened a bound render file"))
+        .device_with_render(&fresh, &native, None, None, |_| {
+            panic!("reopened a bound render file")
+        })
         .unwrap();
     assert_eq!(acquisitions.load(Ordering::Relaxed), 1);
     assert_eq!(std::ptr::from_ref(&*vm), retained_address);
@@ -2792,7 +2796,9 @@ fn concurrent_initialization_keeps_the_same_render_file_after_public_owners_drop
     replacement.unique_id = Some(999);
     assert_eq!(
         bindings
-            .device_with_render(&fresh, &replacement, |_| panic!("opened replaced device"))
+            .device_with_render(&fresh, &replacement, None, None, |_| panic!(
+                "opened replaced device"
+            ))
             .err()
             .unwrap()
             .kind(),
@@ -2806,7 +2812,7 @@ fn existing_foreign_vm_is_busy_and_fork_rejection_precedes_the_inherited_lock() 
     let kfd = initialization_endpoint(Arc::new(AtomicUsize::new(0)), true);
     assert_eq!(
         bindings
-            .device_with_render(&kfd, &node(), |_| File::open("/dev/null"))
+            .device_with_render(&kfd, &node(), None, None, |_| File::open("/dev/null"))
             .err()
             .unwrap()
             .kind(),
@@ -2819,7 +2825,9 @@ fn existing_foreign_vm_is_busy_and_fork_rejection_precedes_the_inherited_lock() 
     let held = bindings.bindings.lock().unwrap();
     assert_eq!(
         bindings
-            .device_with_render(&kfd, &node(), |_| panic!("fork child opened render node"))
+            .device_with_render(&kfd, &node(), None, None, |_| panic!(
+                "fork child opened render node"
+            ))
             .err()
             .unwrap()
             .kind(),
@@ -2829,19 +2837,50 @@ fn existing_foreign_vm_is_busy_and_fork_rejection_precedes_the_inherited_lock() 
 }
 
 #[test]
-fn runtime_enable_allows_recreation_and_late_distinct_device_activation() {
+fn retained_primary_vm_cannot_reactivate_after_sticky_device_loss() {
+    let fixture = Fixture::new([]);
+    let bindings = VmBindings::new();
+    bindings
+        .bindings
+        .lock()
+        .unwrap()
+        .devices
+        .push(fixture.vm.clone());
+    fixture.hardware.store(2, Ordering::Release);
+    for _ in 0..2 {
+        assert_eq!(
+            bindings
+                .device_with_render(&fixture.vm.kfd_owner(), &node(), None, None, |_| {
+                    panic!("device loss reopened an existing render endpoint")
+                })
+                .err()
+                .unwrap()
+                .kind(),
+            ErrorKind::DeviceLost
+        );
+        // A later native wait reporting no new event must not clear the latch.
+        fixture.hardware.store(0, Ordering::Release);
+    }
+    fixture.exhausted();
+}
+
+#[test]
+fn runtime_reenable_reuses_exact_vm_and_allows_late_distinct_device_activation() {
     let mut bindings = VmBindings::new();
     let acquisitions = Arc::new(AtomicUsize::new(0));
     let mut kfd = initialization_endpoint(acquisitions.clone(), false);
     let native = node();
     let first = bindings
-        .device_with_render(&kfd, &native, |_| File::open("/dev/null"))
+        .device_with_render(&kfd, &native, None, None, |_| File::open("/dev/null"))
         .unwrap();
-    kfd.enable_runtime().unwrap();
+    kfd.disable_runtime().unwrap();
     let recreated = bindings
-        .device_with_render(&kfd, &native, |_| panic!("reopened the bound device"))
+        .device_with_render(&kfd, &native, None, None, |_| {
+            panic!("reopened the bound device")
+        })
         .unwrap();
     let second = sysfs::KfdNode {
+        host_atomics: false,
         node: 2,
         gpu_id: 43,
         render_minor: Some(129),
@@ -2850,7 +2889,7 @@ fn runtime_enable_allows_recreation_and_late_distinct_device_activation() {
         ..native
     };
     let second = bindings
-        .device_with_render(&kfd, &second, |minor| {
+        .device_with_render(&kfd, &second, None, None, |minor| {
             assert_eq!(minor, 129);
             File::open("/dev/null")
         })

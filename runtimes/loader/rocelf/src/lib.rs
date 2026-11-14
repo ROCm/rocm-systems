@@ -746,6 +746,10 @@ pub fn amdgpu_symbols<'a>(
                 let section_address = read_u64(section, 16)?;
                 let section_offset = usize::try_from(read_u64(section, 24)?).ok()?;
                 let offset = usize::try_from(value.checked_sub(section_address)?).ok()?;
+                let section_size = usize::try_from(read_u64(section, 32)?).ok()?;
+                if offset.checked_add(64)? > section_size {
+                    return None;
+                }
                 bytes.get(section_offset.checked_add(offset)?..)?.get(..64)
             })
         } else {
@@ -767,8 +771,8 @@ pub fn amdgpu_symbols<'a>(
     Ok(symbols)
 }
 
-fn add_relocation_base(base: u64, value: u64, addend: i64) -> Option<u64> {
-    let result = i128::from(base) + i128::from(value) + i128::from(addend);
+fn add_relocation_base(base: i128, value: u64, addend: i64) -> Option<u64> {
+    let result = base + i128::from(value) + i128::from(addend);
     u64::try_from(result).ok()
 }
 
@@ -789,9 +793,9 @@ pub fn apply_amdgpu_relocations(
     image: &mut [u8],
     resolve_external: impl Fn(&str) -> Option<u64>,
 ) -> Result<(), Error> {
-    let load_bias = device_base
-        .checked_sub(virtual_base)
-        .ok_or(Error::InvalidObject)?;
+    // An application-owned destination may be below the ELF virtual base.
+    // Keep the bias signed until the complete relocated address is checked.
+    let load_bias = i128::from(device_base) - i128::from(virtual_base);
     for section_index in 0..layout.section_count {
         let section = table_entry(
             bytes,

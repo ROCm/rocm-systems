@@ -25,14 +25,32 @@ use crate::driver::{self, Driver, UserQueueResource};
 use crate::memory::storage::{Owned, Shared};
 use crate::{Error, ErrorKind};
 
-/// Drains host packet stores before notifying a GPU queue through its doorbell.
+/// Completes prior host stores before publishing a packet or notifying a queue.
 ///
 /// CPU mappings of local rings can be write-combined. An ordinary release
-/// fence does not drain those writes on x86, so the engine could observe the
-/// doorbell before the packet. On the x86-64 host path, this
-/// operation orders earlier stores before the 64-bit notification, including
-/// stores to write-combined ring memory. Other hosts use a sequentially
-/// consistent fence and require native queue-publication qualification.
+/// fence does not drain those writes on x86. AQL producers must complete the
+/// body stores before publishing the header; a later doorbell barrier is too
+/// late for an engine already inspecting the ring. The x86-64 path uses SFENCE,
+/// and `AArch64` uses an outer-shareable store-completion barrier. Other hosts
+/// still require a native queue-publication implementation.
+#[inline]
+#[allow(unsafe_code)]
+pub fn complete_host_stores() {
+    #[cfg(target_arch = "x86_64")]
+    // SAFETY: x86-64 has SSE2, and SFENCE drains earlier write-combined stores.
+    unsafe {
+        std::arch::x86_64::_mm_sfence();
+    }
+    #[cfg(target_arch = "aarch64")]
+    // SAFETY: The barrier completes prior stores in the outer-shareable domain.
+    unsafe {
+        core::arch::asm!("dsb oshst", options(nostack, preserves_flags))
+    };
+    #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+    std::sync::atomic::fence(std::sync::atomic::Ordering::SeqCst);
+}
+
+/// Drains host packet stores before notifying a GPU queue through its doorbell.
 ///
 /// # Safety
 /// `address` must be a live, aligned, writable 64-bit MMIO doorbell mapping
@@ -41,13 +59,7 @@ use crate::{Error, ErrorKind};
 /// ring, index storage, and doorbell mapping live through this call.
 #[allow(unsafe_code)]
 pub unsafe fn store_ordered_mmio64(address: usize, value: u64) {
-    #[cfg(target_arch = "x86_64")]
-    // SAFETY: x86-64 has SSE2, and SFENCE drains earlier write-combined stores.
-    unsafe {
-        std::arch::x86_64::_mm_sfence();
-    }
-    #[cfg(not(target_arch = "x86_64"))]
-    std::sync::atomic::fence(std::sync::atomic::Ordering::SeqCst);
+    complete_host_stores();
     // SAFETY: The caller retains the live, aligned MMIO mapping.
     unsafe { (address as *mut u64).write_volatile(value) };
 }
@@ -145,9 +157,23 @@ impl<D: Driver, Q: UserQueueResource<DeviceState = D::DeviceState>> DriverQueue<
     /// the new scratch backing and synchronizes its inactive signal until
     /// replacement or conclusive queue teardown.
     #[allow(unsafe_code)]
-    pub(crate) unsafe fn set_scratch(&mut self, scratch: QueueScratch) -> Result<(), Error> {
+    pub(crate) unsafe fn set_scratch(
+        &mut self,
+        scratch: Option<QueueScratch>,
+    ) -> Result<(), Error> {
         // SAFETY: The caller keeps the stopped-queue and backing obligations.
         unsafe { self.inner.set_scratch(scratch) }
+    }
+
+    pub(crate) fn enable_async_scratch(&mut self) -> Result<(), Error> {
+        self.inner.enable_async_scratch()
+    }
+
+    pub(crate) fn reclaim_scratch(
+        &mut self,
+        cancel: &std::sync::atomic::AtomicBool,
+    ) -> Result<(), Error> {
+        self.inner.reclaim_scratch(cancel)
     }
 
     pub(crate) fn check(&self) -> Result<(), Error> {
@@ -466,7 +492,38 @@ impl Queue {
     #[allow(unsafe_code)]
     pub unsafe fn set_scratch(&mut self, scratch: QueueScratch) -> Result<(), Error> {
         // SAFETY: The public caller supplies the stopped-queue and backing contract.
-        unsafe { self.inner.set_scratch(scratch) }
+        unsafe { self.inner.set_scratch(Some(scratch)) }
+    }
+    /// Clears scratch after CP has reported that its last use has retired.
+    ///
+    /// # Errors
+    /// Propagates native control-publication or queue availability failures.
+    ///
+    /// # Safety
+    /// CP must be stopped for its use-once reclamation event. The old backing
+    /// must stay live until this update succeeds and the inactive signal is
+    /// released by the caller.
+    #[allow(unsafe_code)]
+    pub unsafe fn clear_scratch(&mut self) -> Result<(), Error> {
+        // SAFETY: Caller supplies the stopped-queue and retired-use contract.
+        unsafe { self.inner.set_scratch(None) }
+    }
+    /// Enables CP V2 bookkeeping on an empty, unpublished AQL queue.
+    ///
+    /// # Errors
+    /// Rejects published or unsupported queues and propagates native errors.
+    pub fn enable_async_scratch(&mut self) -> Result<(), Error> {
+        self.inner.enable_async_scratch()
+    }
+    /// Bounds the current scratch lifetime and checks whether its last user retired.
+    /// A busy result retains the bound for a later retry without polling.
+    /// Caller keeps all scratch backing until success or conclusive queue destruction.
+    ///
+    /// # Errors
+    /// Returns unsupported, cancellation, or native errors without permitting
+    /// the caller to free the current scratch on failure.
+    pub fn reclaim_scratch(&mut self, cancel: &std::sync::atomic::AtomicBool) -> Result<(), Error> {
+        self.inner.reclaim_scratch(cancel)
     }
     /// Checks loss and transport availability without reading queue progress.
     /// Success establishes no completion frontier and does not refresh the
@@ -698,6 +755,7 @@ mod queue_resource_tests {
 
     fn request() -> QueueRequest {
         QueueRequest {
+            control_memory: crate::device::gpu::queue::QueueRingMemory::System,
             ring_size_bytes: 4096,
             parameters: QueueParameters::Sdma,
             priority: QueuePriority::Normal,
@@ -790,7 +848,7 @@ mod queue_resource_tests {
             self.check()
         }
 
-        unsafe fn set_scratch(&mut self, _: QueueScratch) -> Result<(), Error> {
+        unsafe fn set_scratch(&mut self, _: Option<QueueScratch>) -> Result<(), Error> {
             Err(failure("fake queue has no scratch"))
         }
 

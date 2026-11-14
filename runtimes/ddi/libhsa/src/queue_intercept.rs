@@ -19,7 +19,7 @@ use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
 use rocddi::device::Device;
-use rocddi::device::gpu::queue::AqlControlRegion;
+use rocddi::device::gpu::queue::{AqlControlRegion, QueueRingMemory, complete_host_stores};
 use rocddi::memory::device::{Allocation, DeviceAccess, MemoryKind};
 
 use crate::callback_arg::CallbackArg;
@@ -47,6 +47,21 @@ const INTERCEPT_MARKER_FORMAT: u8 = 0xfe;
 
 const _: () = assert!(CONTROL_ABI_BYTES <= SIGNAL_OFFSET);
 const _: () = assert!(SIGNAL_OFFSET + std::mem::size_of::<AmdSignal>() <= CONTROL_BYTES as usize);
+
+/// Preserve the requested public ring/control placement. Native queue creation
+/// has already checked host visibility and coherent local-control eligibility.
+fn proxy_memory(placement: QueueRingMemory) -> MemoryKind {
+    match placement {
+        QueueRingMemory::System => MemoryKind::System,
+        QueueRingMemory::HostVisibleLocal => MemoryKind::DeviceLocal {
+            host_visible: true,
+            coherent: true,
+            extended_coherent: true,
+            uncached: false,
+            contiguous: false,
+        },
+    }
+}
 
 /// C callback that writes intercepted AQL packets.
 pub(crate) type PacketWriter = unsafe extern "C" fn(*const c_void, u64);
@@ -217,6 +232,8 @@ pub(crate) struct InterceptQueue {
     pub(crate) public: usize,
     /// Number of packets in the power-of-two proxy ring.
     size: u32,
+    /// Placement shared by the proxy and lower packet rings.
+    ring_memory: QueueRingMemory,
     /// CPU address of the proxy packet ring.
     ring_address: usize,
     /// CPU address of the proxy doorbell signal.
@@ -238,11 +255,14 @@ pub(crate) struct InterceptQueue {
 }
 
 impl InterceptQueue {
-    /// Creates an intercept queue and its backing hardware queue.
+    /// Creates a proxy for an unpublished hardware queue.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn create(
         device: &Device,
         lower: usize,
         size: u32,
+        ring_memory: QueueRingMemory,
+        control_memory: QueueRingMemory,
         callback: QueueErrorCallback,
         callback_data: CallbackArg,
     ) -> Result<Arc<Self>, Status> {
@@ -253,7 +273,7 @@ impl InterceptQueue {
         let permissions = DeviceAccess::READ | DeviceAccess::WRITE;
         let control = device
             .allocate(
-                MemoryKind::System,
+                proxy_memory(control_memory),
                 CONTROL_BYTES,
                 CONTROL_BYTES,
                 permissions,
@@ -261,7 +281,7 @@ impl InterceptQueue {
             .map_err(map_error)?;
         let ring = device
             .allocate(
-                MemoryKind::System,
+                proxy_memory(ring_memory),
                 ring_bytes.max(CONTROL_BYTES),
                 CONTROL_BYTES,
                 permissions,
@@ -311,6 +331,7 @@ impl InterceptQueue {
             lower,
             public,
             size,
+            ring_memory,
             ring_address,
             signal_address: public + SIGNAL_OFFSET,
             active: AtomicBool::new(true),
@@ -331,6 +352,13 @@ impl InterceptQueue {
                 owner.public,
                 Arc::as_ptr(&owner) as usize,
             ));
+        }
+        if ring_memory == QueueRingMemory::HostVisibleLocal
+            || control_memory == QueueRingMemory::HostVisibleLocal
+        {
+            // Complete local initialization before any producer or worker can
+            // observe the public queue, packet headers, or doorbell signal.
+            complete_host_stores();
         }
         Ok(owner)
     }
@@ -404,10 +432,9 @@ impl InterceptQueue {
         // Forwarding may ring the lower queue through an HSA signal store.
         // Keep that nested work in the admitted generation even if final
         // shutdown commits while this drain is running.
-        let Some(process) = crate::runtime::process_admission().enter() else {
+        let Some(_lease_scope) = crate::runtime::enter_runtime_service() else {
             return;
         };
-        let _lease_scope = crate::runtime::ApiLeaseScope::enter(process);
         if !self.active.load(Ordering::Acquire) {
             return;
         }
@@ -507,6 +534,11 @@ impl InterceptQueue {
             // invalidation lets its producer reuse it after the read advance.
             unsafe { &*(address as *const AtomicU16) }
                 .store(PACKET_TYPE_INVALID, Ordering::Release);
+            if self.ring_memory == QueueRingMemory::HostVisibleLocal {
+                // A producer may reuse the slot as soon as it sees the read
+                // advance, so complete the local invalidation first.
+                complete_host_stores();
+            }
             state.next_packet += 1;
             // SAFETY: The control allocation retains this aligned read index.
             let read_address = unsafe { AqlControlRegion::read_index_address_at(self.public) };
@@ -572,6 +604,11 @@ impl InterceptQueue {
                     ptr::addr_of_mut!((*destination).payload).cast::<u8>(),
                     std::mem::size_of::<PacketPayload>(),
                 );
+                if self.ring_memory == QueueRingMemory::HostVisibleLocal {
+                    // The CP can observe a valid header before the doorbell;
+                    // drain the write-combined body before publishing it.
+                    complete_host_stores();
+                }
                 (&*ptr::addr_of_mut!((*destination).header).cast::<AtomicU16>())
                     .store(packet.header, Ordering::Release);
                 crate::api::signal::atomic::hsa_signal_store_screlease(
@@ -612,6 +649,36 @@ pub(crate) unsafe fn ring(owner: usize) {
 /// Stops marker callbacks before removing the wrapped queue from the runtime.
 /// A failed native destroy restores both owners for a later retry.
 pub(crate) fn destroy(owner: &InterceptQueue) -> Status {
+    let cooperative_agent = {
+        let mut guard = match lock() {
+            Ok(guard) => guard,
+            Err(status) => return status,
+        };
+        let runtime = match initialized_mut(&mut guard) {
+            Ok(runtime) => runtime,
+            Err(status) => return status,
+        };
+        let Some(lower) = runtime.queue_state.queues.get_mut(&owner.lower) else {
+            return INVALID_QUEUE;
+        };
+        if lower.cooperative_refs > 1 {
+            lower.cooperative_refs -= 1;
+            return SUCCESS;
+        }
+        let agent = (lower.cooperative_refs == 1).then_some(lower.agent.handle);
+        if let Some(agent) = agent {
+            if runtime
+                .queue_state
+                .cooperative_teardown
+                .try_reserve(1)
+                .is_err()
+            {
+                return OUT_OF_RESOURCES;
+            }
+            runtime.queue_state.cooperative_teardown.insert(agent);
+        }
+        agent
+    };
     if let Err(status) = owner.stop() {
         return status;
     }
@@ -652,6 +719,13 @@ pub(crate) fn destroy(owner: &InterceptQueue) -> Status {
             .intercept_queues
             .insert(owner.public, registered);
         return status;
+    }
+    if let Some(agent) = cooperative_agent {
+        if let Ok(mut guard) = lock() {
+            if let Some(runtime) = guard.as_mut() {
+                runtime.queue_state.cooperative_teardown.remove(&agent);
+            }
+        }
     }
     SUCCESS
 }

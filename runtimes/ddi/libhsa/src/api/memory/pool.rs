@@ -10,10 +10,10 @@ use crate::memory::pool::*;
 use crate::runtime::{boundary, cache_handles_in_level_order, lock};
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_amd_agent_iterate_memory_pools")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Visits pools visible to an HSA agent.
 pub unsafe extern "C" fn hsa_amd_agent_iterate_memory_pools(
     agent: HsaAgent,
@@ -54,10 +54,10 @@ pub unsafe extern "C" fn hsa_amd_agent_iterate_memory_pools(
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_agent_iterate_regions")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Visits memory regions visible to an HSA agent.
 pub unsafe extern "C" fn hsa_agent_iterate_regions(
     agent: HsaAgent,
@@ -101,10 +101,10 @@ pub unsafe extern "C" fn hsa_agent_iterate_regions(
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_agent_iterate_caches")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Visits cache handles associated with an HSA agent.
 pub unsafe extern "C" fn hsa_agent_iterate_caches(
     agent: HsaAgent,
@@ -143,10 +143,10 @@ pub unsafe extern "C" fn hsa_agent_iterate_caches(
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_cache_get_info")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Writes the requested cache attribute.
 pub unsafe extern "C" fn hsa_cache_get_info(
     cache: HsaCache,
@@ -185,10 +185,10 @@ pub unsafe extern "C" fn hsa_cache_get_info(
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_amd_memory_pool_get_info")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Writes the requested memory-pool attribute.
 pub unsafe extern "C" fn hsa_amd_memory_pool_get_info(
     pool: HsaMemoryPool,
@@ -213,10 +213,10 @@ pub unsafe extern "C" fn hsa_amd_memory_pool_get_info(
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_region_get_info")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Writes the requested memory-region attribute.
 pub unsafe extern "C" fn hsa_region_get_info(
     region: HsaRegion,

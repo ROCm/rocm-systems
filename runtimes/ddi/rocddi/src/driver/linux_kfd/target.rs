@@ -16,8 +16,8 @@ impl KfdTargetProfile for GpuTargetProfile {
     fn from_kfd_target(target: u32) -> Self {
         match target {
             90008 | 90010 | 90402 | 90500 => Self::Gfx9,
-            100_100..=109_999 => Self::Gfx10,
-            110_000..=119_999 => Self::Gfx11,
+            100_100..=100_103 | 100_300..=100_306 => Self::Gfx10,
+            110_000..=110_003 | 110_500..=110_503 | 110_700..=110_701 => Self::Gfx11,
             120_000 => Self::Gfx1200,
             120_001 => Self::Gfx1201,
             120_500 => Self::Gfx1250,

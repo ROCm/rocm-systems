@@ -39,7 +39,7 @@ fn device_target(
 
 /// Applies HSA policy after validating the complete frontend batch.
 pub(crate) fn set(
-    runtime: &HsaState,
+    runtime: &mut HsaState,
     address: u64,
     size: u64,
     pairs: &[HsaAmdSvmAttributePair],
@@ -137,6 +137,7 @@ pub(crate) fn set(
     if let Some(enabled) = host_access {
         changes.push(AdviceChange::Property(AdviceProperty::HostAccess, enabled));
     }
+    crate::memory::svm::commit_registration(runtime, &service, address, size)?;
     service.set(address, size, &changes).map_err(map_error)
 }
 
