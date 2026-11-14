@@ -210,10 +210,13 @@ public:
     // merge. Runs reaching past capacity keep the per-element path, which
     // zero-fills each such element.
     const auto load_run = [&](const CoalescedLaneRun &run) RJ_ALWAYS_INLINE {
-      if (fits(run))
+      if (fits(run)) {
+        if (copied_runs_) [[unlikely]]
+          copied_runs_->push_back({run.address, run.size, /*store=*/false});
         read_backing(static_cast<uint32_t>(run.address), dst + run.first_lane * stride, run.size);
-      else
+      } else {
         load_lanes(addrs, run.lane_mask, elem_size, num_elems, dst);
+      }
       return true;
     };
     for_each_lane_ordered_run(addrs, lane_mask, 64, stride, load_run);
@@ -228,14 +231,28 @@ public:
     // As in vector_load(), a zero-stride (GWS) request has no lanes.
     const uint32_t stride = num_elems * elem_size;
     const auto store_run = [&](const CoalescedLaneRun &run) RJ_ALWAYS_INLINE {
-      if (fits(run))
+      if (fits(run)) {
+        if (copied_runs_) [[unlikely]]
+          copied_runs_->push_back({run.address, run.size, /*store=*/true});
         write_backing(static_cast<size_t>(run.address), src + run.first_lane * stride, run.size);
-      else
+      } else {
         store_lanes(addrs, run.lane_mask, elem_size, num_elems, src);
+      }
       return true;
     };
     for_each_lane_ordered_run(addrs, lane_mask, 64, stride, store_run);
   }
+
+  /// @brief A lane run that vector_load() or vector_store() moved with one copy.
+  struct CopiedRun {
+    uint64_t address;
+    uint32_t size;
+    bool store;
+  };
+
+  /// @brief Tests only: append each run copied as one block to @p runs, or stop
+  /// recording with nullptr. Lets a test see that a request reached the run scan.
+  void record_copied_runs_for_test(std::vector<CopiedRun> *runs) { copied_runs_ = runs; }
 
   /// @brief Zero all LDS contents.
   void clear() {
@@ -350,6 +367,7 @@ private:
 
   size_t capacity_bytes_ = 0;
   std::vector<uint8_t> data_;
+  std::vector<CopiedRun> *copied_runs_ = nullptr;
 };
 
 } // namespace amdgpu
