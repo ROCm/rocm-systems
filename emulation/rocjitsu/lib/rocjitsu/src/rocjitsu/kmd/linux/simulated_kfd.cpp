@@ -6795,6 +6795,7 @@ int SimulatedKfd::free_memory_ioctl(
     // The final grant publication can allocate. Preserve the descriptor and
     // tombstones until that publication succeeds, then retire IPC and backing.
     auto prior_retired_ranges = proc.retired_gpu_ranges_;
+    const size_t prior_retired_view_count = proc.retired_identity_views_.size();
     try {
       if (alloc.flags & KFD_IOC_ALLOC_MEM_FLAGS_USERPTR) {
         // A separate GPU VA has no host VMA whose removal can clear its
@@ -6806,7 +6807,30 @@ int SimulatedKfd::free_memory_ioctl(
       } else {
         proc.retire_gpu_range_locked(alloc.gpu_va, alloc.size);
       }
+      const uint32_t kind =
+          alloc.flags & (KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_GTT |
+                         KFD_IOC_ALLOC_MEM_FLAGS_USERPTR);
+      if (!daemon_mode_ && alloc.user_va && !alloc.imported &&
+          (kind == KFD_IOC_ALLOC_MEM_FLAGS_VRAM || kind == KFD_IOC_ALLOC_MEM_FLAGS_GTT)) {
+        // Host changes may have split the primary view into client fragments.
+        // Retain only their overlap with this BO's GPU VA, before publication
+        // can commit the FREE and discard the allocation's mapping records.
+        const auto retain_identity_view = [&](void *pointer, size_t size, HostMappingKind mapping) {
+          if (!pointer ||
+              (mapping != HostMappingKind::Caller && mapping != HostMappingKind::CallerMapped))
+            return;
+          const uint64_t address = reinterpret_cast<uintptr_t>(pointer);
+          const uint64_t start = std::max(address, alloc.gpu_va);
+          const uint64_t end = std::min(address + size, alloc.gpu_va + alloc.size);
+          if (start < end)
+            proc.retired_identity_views_.push_back({start, end - start});
+        };
+        retain_identity_view(alloc.host_ptr, alloc.host_mapping_size, alloc.host_mapping_kind);
+        for (const auto &view : alloc.client_views)
+          retain_identity_view(view.ptr, view.size, view.kind);
+      }
     } catch (...) {
+      proc.retired_identity_views_.resize(prior_retired_view_count);
       proc.retired_gpu_ranges_.swap(prior_retired_ranges);
       throw;
     }
@@ -6818,6 +6842,7 @@ int SimulatedKfd::free_memory_ioctl(
       proc.publish_gpu_grants_locked(*va_transaction);
     } catch (...) {
       proc.allocations_.insert(std::move(retired));
+      proc.retired_identity_views_.resize(prior_retired_view_count);
       proc.retired_gpu_ranges_.swap(prior_retired_ranges);
       throw;
     }
@@ -6835,30 +6860,6 @@ int SimulatedKfd::free_memory_ioctl(
           dmabuf_it != proc.imported_dmabufs_.end()) {
         proc.fd_to_import_handle_.erase(dmabuf_it->second.fd);
         proc.imported_dmabufs_.erase(dmabuf_it);
-      }
-    }
-    const uint32_t kind =
-        freed.flags & (KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_GTT |
-                       KFD_IOC_ALLOC_MEM_FLAGS_USERPTR);
-    const bool primary_fixed_identity_view =
-        freed.host_ptr && freed.host_mapping_caller_reserved() &&
-        reinterpret_cast<uintptr_t>(freed.host_ptr) == freed.gpu_va &&
-        (!freed.host_mapping_created_by_driver() || freed.host_mapping_size == freed.size);
-    const bool client_fixed_identity_view =
-        std::ranges::any_of(freed.client_views, [&](const auto &view) {
-          return (view.kind == KfdProcess::GpuAllocation::HostMappingKind::Caller ||
-                  view.kind == KfdProcess::GpuAllocation::HostMappingKind::CallerMapped) &&
-                 reinterpret_cast<uintptr_t>(view.ptr) == freed.gpu_va && view.size == freed.size;
-        });
-    const bool retired_fixed_identity_view =
-        !daemon_mode_ && freed.user_va && !freed.imported &&
-        (kind == KFD_IOC_ALLOC_MEM_FLAGS_VRAM || kind == KFD_IOC_ALLOC_MEM_FLAGS_GTT) &&
-        (primary_fixed_identity_view || client_fixed_identity_view);
-    if (retired_fixed_identity_view) {
-      try {
-        proc.retired_identity_views_.push_back({freed.gpu_va, freed.size});
-      } catch (const std::bad_alloc &) {
-        // Keep the freed VA denied if its later CPU unmap cannot be tracked.
       }
     }
     release_allocation_mappings(proc, freed);
