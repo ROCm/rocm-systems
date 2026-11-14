@@ -3,6 +3,7 @@
 
 #include "profiler-hub/reader.hpp"
 #include "profiler-hub/storage.hpp"
+#include "profiler-hub/version.hpp"
 #include "profiler-hub/writer.hpp"
 #include "profiler-hub/writer_types.hpp"
 
@@ -32,9 +33,11 @@ protected:
 
     void TearDown() override { std::filesystem::remove(m_db_path); }
 
-    [[nodiscard]] std::unique_ptr<writer_t> make_writer() const
+    [[nodiscard]] std::unique_ptr<writer_t> make_writer(
+        version_t schema_version = version_t{ 3, 0, 1 }) const
     {
-        return std::make_unique<writer_t>(std::make_unique<storage_t>(m_db_path, m_uuid));
+        return std::make_unique<writer_t>(
+            std::make_unique<storage_t>(m_db_path, m_uuid, schema_version));
     }
 
     // Registers a minimal node + process pair that most register_*/insert_* calls
@@ -57,6 +60,105 @@ protected:
     // insert_statements, so it must be a valid identifier fragment - no hyphens.
     std::string m_uuid = "testuuid0000";
 };
+
+TEST_F(writer_test, get_storage_version_defaults_to_3_0_1_when_not_specified)
+{
+    const storage_t storage{ m_db_path, m_uuid };
+
+    const auto version = storage.get_storage_version();
+    EXPECT_EQ(version.major, 3);
+    EXPECT_EQ(version.minor, 0);
+    EXPECT_EQ(version.patch, 1);
+}
+
+TEST_F(writer_test, get_storage_version_returns_explicitly_passed_version)
+{
+    const storage_t storage{ m_db_path, m_uuid, version_t{ 3, 0, 0 } };
+
+    const auto version = storage.get_storage_version();
+    EXPECT_EQ(version.major, 3);
+    EXPECT_EQ(version.minor, 0);
+    EXPECT_EQ(version.patch, 0);
+}
+
+TEST_F(writer_test, get_storage_version_resolves_unspecified_to_newest_writable)
+{
+    const storage_t storage{ m_db_path, m_uuid, version_t{} };
+
+    const auto version = storage.get_storage_version();
+    EXPECT_EQ(version.major, 3);
+    EXPECT_EQ(version.minor, 0);
+    EXPECT_EQ(version.patch, 1);
+}
+
+TEST_F(writer_test, initialize_schema_default_version_succeeds)
+{
+    // writer_t initializes the schema for the storage version.
+    EXPECT_NO_THROW({ auto writer = make_writer(); });
+}
+
+TEST_F(writer_test, initialize_schema_latest_sentinel_version_succeeds)
+{
+    // version_t{} selects the newest schema the writer can populate, currently 3.0.1.
+    EXPECT_NO_THROW({ auto writer = make_writer(version_t{}); });
+}
+
+TEST_F(writer_test, initialize_schema_called_twice_is_a_no_op)
+{
+    EXPECT_NO_THROW({
+        auto first  = make_writer(version_t{ 3, 0, 1 });
+        auto second = make_writer(version_t{ 3, 0, 1 });
+    });
+}
+
+TEST_F(writer_test, construct_storage_accepts_supported_writable_schemas)
+{
+    EXPECT_NO_THROW((storage_t{ m_db_path, m_uuid, version_t{ 3, 0, 0 } }));
+    EXPECT_NO_THROW((storage_t{ m_db_path, m_uuid, version_t{ 3, 0, 1 } }));
+}
+
+TEST_F(writer_test, construct_storage_rejects_schema_the_writer_cannot_write)
+{
+    // 3.0.2 and 3.0.5 are embedded. The writer can populate 3.0.0 and 3.0.1.
+    EXPECT_THROW((storage_t{ m_db_path, m_uuid, version_t{ 3, 0, 2 } }),
+                 std::runtime_error);
+    EXPECT_THROW((storage_t{ m_db_path, m_uuid, version_t{ 3, 0, 5 } }),
+                 std::runtime_error);
+}
+
+TEST_F(writer_test, initialize_schema_unsupported_version_throws_runtime_error)
+{
+    EXPECT_THROW(
+        { auto writer = make_writer(version_t{ 99, 0, 0 }); }, std::runtime_error);
+}
+
+TEST_F(writer_test, register_agent_info_nic_rejected_on_3_0_0)
+{
+    auto writer = make_writer(version_t{ 3, 0, 0 });
+    register_node_and_process(*writer);
+
+    writer_types::agent_info_t nic;
+    nic.unique_id.agent_type = "NIC";
+    nic.unique_id.type_index = 0;
+    nic.absolute_index       = 0;
+    nic.logical_index        = 0;
+    nic.uuid                 = 456;
+    nic.node_id              = 1;
+    nic.process_id           = 100;
+
+    EXPECT_THROW(writer->register_agent_info(nic), std::runtime_error);
+
+    // A rejected insert must not leave the prepared statement broken for later inserts.
+    writer_types::agent_info_t gpu;
+    gpu.unique_id.agent_type = "GPU";
+    gpu.unique_id.type_index = 0;
+    gpu.absolute_index       = 0;
+    gpu.logical_index        = 0;
+    gpu.uuid                 = 123;
+    gpu.node_id              = 1;
+    gpu.process_id           = 100;
+    EXPECT_NO_THROW(writer->register_agent_info(gpu));
+}
 
 TEST_F(writer_test, construct_with_null_storage_throws_invalid_argument)
 {
@@ -190,7 +292,8 @@ TEST_F(writer_test, register_agent_info_with_invalid_agent_type_throws_invalid_a
 
 TEST_F(writer_test, register_agent_info_nic_is_readable_after_flush)
 {
-    auto writer = make_writer();
+    // 3.0.0 allows only CPU and GPU. NIC needs 3.0.1 or newer.
+    auto writer = make_writer(version_t{ 3, 0, 1 });
     register_node_and_process(*writer);
 
     writer_types::agent_info_t agent_info;
@@ -217,7 +320,8 @@ TEST_F(writer_test, register_agent_info_nic_is_readable_after_flush)
 
 TEST_F(writer_test, register_pmc_info_with_nic_target_arch_is_readable_after_flush)
 {
-    auto writer = make_writer();
+    // 3.0.0 allows only CPU and GPU. NIC needs 3.0.1 or newer.
+    auto writer = make_writer(version_t{ 3, 0, 1 });
     register_node_and_process(*writer);
 
     writer_types::pmc_info_t pmc_info;

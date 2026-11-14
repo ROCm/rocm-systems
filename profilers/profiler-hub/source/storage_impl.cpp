@@ -6,6 +6,7 @@
 #include "profiler-hub/version.hpp"
 
 #include "data_storage/backends/sqlite_backend.hpp"
+#include "data_storage/backends/sqlite_backend_impl.hpp"
 
 #include <memory>
 #include <stdexcept>
@@ -42,10 +43,25 @@ struct storage_t::impl::database_factory_t
     }
 };
 
-storage_t::impl::impl(std::string database_path, std::string uuid)
+storage_t::impl::impl(std::string             database_path,
+                      std::string             uuid,
+                      profiler_hub::version_t schema_version)
 : m_database_path(std::move(database_path))
 , m_uuid(std::move(uuid))
-{}
+{
+    // Store the schema the writer will create. version_t{} is unspecified and resolves
+    // to the newest writable schema. An embedded schema the writer cannot populate,
+    // such as 3.0.5, fails here before a database is created.
+    const auto* schema = resolve_writable_schema(schema_version);
+    if(schema == nullptr)
+    {
+        throw std::runtime_error(
+            "Unsupported rocpd schema version requested: " + schema_version.to_string() +
+            ". Writable schemas: " + supported_writable_schemas());
+    }
+    m_schema_version =
+        profiler_hub::version_t{ schema->major, schema->minor, schema->patch };
+}
 
 std::string
 storage_t::impl::get_database_path() const
@@ -62,7 +78,7 @@ storage_t::impl::get_uuid() const
 profiler_hub::version_t
 storage_t::impl::get_storage_version() const
 {
-    return m_version;
+    return m_schema_version;
 }
 
 std::shared_ptr<data_storage::sqlite_backend>
