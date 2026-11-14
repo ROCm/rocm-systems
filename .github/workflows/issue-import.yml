@@ -51,14 +51,27 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          echo "Actor is: ${{ github.actor }}"
+          echo "Actor is: ${GITHUB_ACTOR}"
           PERMISSION=$(gh api \
-            repos/${{ github.repository }}/collaborators/${{ github.actor }}/permission \
+            repos/${{ github.repository }}/collaborators/${GITHUB_ACTOR}/permission \
             --jq .permission)
           if [[ "$PERMISSION" != "admin" && "$PERMISSION" != "maintain" ]]; then
-            echo "❌ User ${{ github.actor }} is not authorized to run this workflow"
+            echo "❌ User ${GITHUB_ACTOR} is not authorized to run this workflow"
             exit 1
           fi
+
+      - name: Validate source repository
+        id: source
+        env:
+          SOURCE_REPO: ${{ github.event.inputs.source_repo }}
+        run: |
+          # source_repo is "<owner>/<name>" under this repository's owner,
+          # e.g. "ROCm/rocprofiler-sdk".
+          if [[ ! "${SOURCE_REPO}" =~ ^${GITHUB_REPOSITORY_OWNER}/([A-Za-z0-9._-]+)$ ]]; then
+            echo "❌ source_repo must be ${GITHUB_REPOSITORY_OWNER}/<name>, got '${SOURCE_REPO}'"
+            exit 1
+          fi
+          echo "name=${BASH_REMATCH[1]}" >> "$GITHUB_OUTPUT"
 
       - name: Generate a token
         id: generate-token
@@ -66,26 +79,33 @@ jobs:
         with:
           app-id: ${{ secrets.APP_ID }}
           private-key: ${{ secrets.APP_PRIVATE_KEY }}
-          owner: ${{ github.repository_owner }}
+          repositories: |
+            ${{ github.event.repository.name }}
+            ${{ steps.source.outputs.name }}
+          permission-issues: write
 
       - name: Fetch issue and comments from source repo
         id: fetch
         env:
           GH_TOKEN: ${{ steps.generate-token.outputs.token }}
+          SOURCE_REPO: ${{ github.event.inputs.source_repo }}
+          ISSUE_NUMBER: ${{ github.event.inputs.issue_number }}
         run: |
-          gh api "repos/${{ github.event.inputs.source_repo }}/issues/${{ github.event.inputs.issue_number }}" > issue.json
-          gh api "repos/${{ github.event.inputs.source_repo }}/issues/${{ github.event.inputs.issue_number }}/comments" > comments.json
+          gh api "repos/${SOURCE_REPO}/issues/${ISSUE_NUMBER}" > issue.json
+          gh api "repos/${SOURCE_REPO}/issues/${ISSUE_NUMBER}/comments" > comments.json
 
       - name: Create issue in target repo
         id: create
         env:
             GH_TOKEN: ${{ steps.generate-token.outputs.token }}
+            SOURCE_REPO: ${{ github.event.inputs.source_repo }}
+            ISSUE_NUMBER: ${{ github.event.inputs.issue_number }}
         run: |
           TITLE=$(jq -r .title issue.json)
           AUTHOR=$(jq -r .user.login issue.json)
           BODY=$(jq -r .body issue.json)
 
-          LINK_TO_OLD="**[Migrated from original issue] ${{ github.event.inputs.source_repo }}#${{ github.event.inputs.issue_number }}**"
+          LINK_TO_OLD="**[Migrated from original issue] ${SOURCE_REPO}#${ISSUE_NUMBER}**"
           AUTHOR_LINE="*Original issue author: @$AUTHOR*"
           FULL_BODY=$(printf "%b\n\n%b\n\n%s" "$LINK_TO_OLD" "$AUTHOR_LINE" "$BODY")
 
@@ -115,6 +135,7 @@ jobs:
       - name: Recreate comments on new issue
         env:
             GH_TOKEN: ${{ steps.generate-token.outputs.token }}
+            NEW_ISSUE_NUMBER: ${{ steps.create.outputs.new_issue_number }}
         run: |
           jq -c '.[]' comments.json | while read -r comment; do
             AUTHOR=$(echo "$comment" | jq -r .user.login)
@@ -124,15 +145,18 @@ jobs:
             ORIG_AUTHOR="**Comment by @$AUTHOR on $CREATED_AT**"
             FORMATTED_BODY=$(printf "%b\n\n%s" "$ORIG_AUTHOR" "$BODY")
 
-            gh api "repos/${{ github.repository }}/issues/${{ steps.create.outputs.new_issue_number }}/comments" \
+            gh api "repos/${{ github.repository }}/issues/${NEW_ISSUE_NUMBER}/comments" \
               -f body="$FORMATTED_BODY"
           done
 
       - name: Optionally comment back on original issue
         env:
             GH_TOKEN: ${{ steps.generate-token.outputs.token }}
+            NEW_ISSUE_NUMBER: ${{ steps.create.outputs.new_issue_number }}
+            SOURCE_REPO: ${{ github.event.inputs.source_repo }}
+            ISSUE_NUMBER: ${{ github.event.inputs.issue_number }}
         run: |
-          COMMENT="This issue has been migrated to: https://github.com/${{ github.repository }}/issues/${{ steps.create.outputs.new_issue_number }}"
+          COMMENT="This issue has been migrated to: https://github.com/${{ github.repository }}/issues/${NEW_ISSUE_NUMBER}"
 
-          gh api "repos/${{ github.event.inputs.source_repo }}/issues/${{ github.event.inputs.issue_number }}/comments" \
+          gh api "repos/${SOURCE_REPO}/issues/${ISSUE_NUMBER}/comments" \
             -f body="$COMMENT"
