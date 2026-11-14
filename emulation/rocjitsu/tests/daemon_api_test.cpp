@@ -1006,9 +1006,58 @@ TEST(DaemonApi, MunmapReturnsDriverFailureAndKeepsConnectionUsable) {
   ASSERT_GE(kfd_fd, 0);
 
   EXPECT_EQ(client.munmap(reinterpret_cast<void *>(0x12345000), 4096), -ENOENT);
+  EXPECT_EQ(client.munmap(reinterpret_cast<void *>(0x12345001), 4096), -EINVAL);
+  EXPECT_EQ(client.munmap(reinterpret_cast<void *>(0x12345000), 0), -EINVAL);
   kfd_ioctl_get_version_args version{};
   EXPECT_EQ(client.ioctl(AMDKFD_IOC_GET_VERSION, &version), 0);
   EXPECT_EQ(version.major_version, KFD_IOCTL_MAJOR_VERSION);
+  EXPECT_EQ(client.close(), 0);
+  close(kfd_fd);
+}
+
+TEST(DaemonApi, ClientMunmapDoesNotClaimDaemonBackingAtTheSameAddress) {
+  TempDirectory directory;
+  const auto socket_path = directory.path() / "daemon.sock";
+  TestDaemon daemon(socket_path);
+  ASSERT_EQ(daemon.start_status(), ROCJITSU_STATUS_SUCCESS);
+  const int connection = connect_to(socket_path);
+  ASSERT_GE(connection, 0);
+  RemoteDriver client(connection);
+  const int kfd_fd = client.open();
+  ASSERT_GE(kfd_fd, 0);
+
+  kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+  allocation.size = 4096;
+  allocation.gpu_id = client.gpu_info()->gpu_id;
+  allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(client.ioctl(AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+
+  // The wire reply names the daemon's view. Use it to make the numeric
+  // collision independent of where ASLR placed the two processes' mappings.
+  RpcMmapRequest map{.addr = 0,
+                     .length = allocation.size,
+                     .prot = PROT_READ | PROT_WRITE,
+                     .flags = MAP_SHARED,
+                     .offset = static_cast<int64_t>(allocation.mmap_offset)};
+  RpcHeader header{};
+  header.opcode = RPC_MMAP;
+  header.payload_bytes = sizeof(map);
+  ASSERT_TRUE(rpc_send_exact(connection, &header, sizeof(header)));
+  ASSERT_TRUE(rpc_send_exact(connection, &map, sizeof(map)));
+  struct {
+    RpcHeader header;
+    RpcMmapResponse map;
+  } reply{};
+  ASSERT_TRUE(rpc_recv_exact(connection, &reply, sizeof(reply)));
+  ASSERT_EQ(reply.header.result, 0);
+  ASSERT_EQ(reply.header.payload_bytes, sizeof(reply.map));
+  ASSERT_NE(reply.map.mapped_addr, 0u);
+  EXPECT_EQ(client.munmap(reinterpret_cast<void *>(reply.map.mapped_addr), allocation.size),
+            -ENOENT);
+
+  kfd_ioctl_free_memory_of_gpu_args freed{};
+  freed.handle = allocation.handle;
+  EXPECT_EQ(client.ioctl(AMDKFD_IOC_FREE_MEMORY_OF_GPU, &freed), 0);
   EXPECT_EQ(client.close(), 0);
   close(kfd_fd);
 }

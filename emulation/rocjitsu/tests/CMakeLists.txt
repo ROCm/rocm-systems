@@ -4649,6 +4649,7 @@ if(RJ_ENABLE_HIP_TESTS)
             DaemonTest.InterposerDupKeepsRoutingAfterPrimaryCloseRemote
             DaemonTest.InterposerDup2OverPrimaryInvalidatesRemote
             DaemonTest.InterposerProcMapsNamesRemoteKfdMarker
+            DaemonTest.ClientMunmapClearsOnlyReplacedSvmPolicy
             DaemonTest.RemotePrimeImportRetainsExportedBacking
             TokenBackingDaemonTest.RemotePrimeImportRetainsExportedBacking
             DaemonTest.RemoteGemVaPartialClearKeepsRemainingRange
