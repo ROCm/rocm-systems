@@ -818,19 +818,10 @@ __device__ int IPCContext::broadcast_wave(rocshmem_team_t team,
     team == ROCSHMEM_TEAM_INVALID)
     return ROCSHMEM_ERROR;
 
-  IPCTeam *team_obj = reinterpret_cast<IPCTeam *>(team);
-
-  int stride = team_obj->tinfo_wrt_world->stride;
-  int pe_start = team_obj->tinfo_wrt_world->pe_start;
-  int pe_size = team_obj->tinfo_wrt_world->size;
-  long *p_sync = team_obj->bcast_pSync;
-
-  // Passed pe_root is relative to team, convert to world root
-  int pe_root_world = team_obj->get_pe_in_world(PE_root);
-  internal_broadcast_wave<T>(dest, source, nelems, pe_root_world,
-                              pe_start, stride, pe_size, p_sync);
-
-  return ROCSHMEM_SUCCESS;
+  // Route through the generic dispatcher so this path exercises the new
+  // thread-puts fast path (and its size/SDMA gating) instead of
+  // reimplementing it here.
+  return broadcastmem_wave(team, dest, source, nelems * sizeof(T), PE_root);
 }
 
 template <typename T>
@@ -851,17 +842,10 @@ __device__ void IPCContext::internal_broadcast_wave(T *dst, const T *src, int ne
 template <typename T>
 __device__ void IPCContext::broadcast_wg(rocshmem_team_t team, T *dst,
                                       const T *src, int nelems, int pe_root) {
-  IPCTeam *team_obj = reinterpret_cast<IPCTeam *>(team);
-
-  int stride = team_obj->tinfo_wrt_world->stride;
-  int pe_start = team_obj->tinfo_wrt_world->pe_start;
-  int pe_size = team_obj->tinfo_wrt_world->size;
-  long *p_sync = team_obj->bcast_pSync;
-
-  // Passed pe_root is relative to team, convert to world root
-  int pe_root_world = team_obj->get_pe_in_world(pe_root);
-  internal_broadcastmem_wg(dst, src, nelems * sizeof(T), pe_root_world, pe_start, stride,
-               pe_size, p_sync);
+  // Route through the generic dispatcher so this path exercises the new
+  // thread-puts fast path (and its size/SDMA gating) instead of
+  // reimplementing it here.
+  broadcastmem_wg(team, dst, src, nelems * sizeof(T), pe_root);
 }
 
 template <typename T>
@@ -885,7 +869,7 @@ __device__ void IPCContext::alltoall_linear_wg(rocshmem_team_t team, T *dst,
   int pe_start = team_obj->tinfo_wrt_world->pe_start;
   int pe_size = team_obj->num_pes;
   int stride = team_obj->tinfo_wrt_world->stride;
-  long *pSync = team_obj->alltoall_pSync;
+  long *pSync = team_obj->barrier_pSync;
   int my_pe_in_team = team_obj->my_pe;
 
   // Have each PE put their designated data to the other PEs
@@ -911,7 +895,7 @@ __device__ void IPCContext::alltoall_linear_thread_puts_wg(rocshmem_team_t team,
   size_t alltoall_pSync_offset = (team_obj->alltoall_sequence_number % 2) * pe_size;
 
   int tid = get_flat_block_id();
-  int step_size = min(get_flat_block_size(), WF_SIZE);
+  int step_size = get_flat_block_size();
 
   // Have each PE put their designated data to the other PEs
   for (int j = tid; j < pe_size; j += step_size) {
@@ -929,14 +913,13 @@ __device__ void IPCContext::alltoall_linear_thread_puts_wg(rocshmem_team_t team,
 
   // wait until everyone has obtained their designated data
   for (int j = tid; j < pe_size; j+= step_size) {
-    int dest_pe = team_obj->get_pe_in_world(j);
 
-    long *sync_flag = &pSync[alltoall_pSync_offset + dest_pe];
+    long *sync_flag = &pSync[alltoall_pSync_offset + j];
     while (uncached_load(sync_flag) != 1) { }
 
     //quiet(dest_pe);// needed to quiet add when it is nbi in gda, it is not nbi in ipc
 
-    pSync[alltoall_pSync_offset + dest_pe] = ROCSHMEM_SYNC_VALUE;
+    pSync[alltoall_pSync_offset + j] = ROCSHMEM_SYNC_VALUE;
   }
 
   if (is_thread_zero_in_block()) {
@@ -969,7 +952,10 @@ __device__ void IPCContext::alltoallv([[maybe_unused]] rocshmem_team_t team,
 template <typename T>
 __device__ void IPCContext::fcollect_wg(rocshmem_team_t team, T *dst,
                                      const T *src, int nelems) {
-  fcollectmem_linear_wg(team, dst, src, nelems * sizeof(T));
+  // Route through the generic dispatcher so this path exercises the new
+  // thread-puts fast path (and its size/SDMA gating) instead of
+  // reimplementing it here.
+  fcollectmem_wg(team, dst, src, nelems * sizeof(T));
 }
 
 template <typename T>
@@ -978,7 +964,7 @@ __device__ int IPCContext::fcollect_wave(rocshmem_team_t team, T *dst,
   if (dst == nullptr || src == nullptr || team == ROCSHMEM_TEAM_INVALID)
     return ROCSHMEM_ERROR;
 
-  fcollectmem_linear_wave(team, dst, src, nelems * sizeof(T));
+  internal_fcollectmem_wave(team, dst, src, nelems * sizeof(T));
 
   return ROCSHMEM_SUCCESS;
 }

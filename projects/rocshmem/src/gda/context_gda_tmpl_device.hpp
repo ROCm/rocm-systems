@@ -962,18 +962,10 @@ __device__ int GDAContext::broadcast_wave(rocshmem_team_t team, T *dest,
     team == ROCSHMEM_TEAM_INVALID)
     return ROCSHMEM_ERROR;
 
-  GDATeam *team_obj = reinterpret_cast<GDATeam *>(team);
-
-  int stride = team_obj->tinfo_wrt_world->stride;
-  int pe_start = team_obj->tinfo_wrt_world->pe_start;
-  int pe_size = team_obj->tinfo_wrt_world->size;
-  long *p_sync = team_obj->bcast_pSync;
-
-  // Passed pe_root is relative to team, convert to world root
-  int pe_root_world = team_obj->get_pe_in_world(PE_root);
-  internal_broadcast_wave<T>(dest, source, nelems, pe_root_world, pe_start, stride,
-               pe_size, p_sync);
-  return ROCSHMEM_SUCCESS;
+  // Route through the generic dispatcher so this path exercises the
+  // thread-puts fast path (and its size gating) instead of reimplementing
+  // it here.
+  return broadcastmem_wave(team, dest, source, nelems * sizeof(T), PE_root);
 }
 
 template <typename T>
@@ -996,17 +988,7 @@ __device__ void GDAContext::internal_broadcast_wave(T *dst, const T *src,
 template <typename T>
 __device__ void GDAContext::broadcast_wg(rocshmem_team_t team, T *dst,
     const T *src, int nelems, int pe_root) {
-  GDATeam *team_obj = reinterpret_cast<GDATeam *>(team);
-
-  int stride = team_obj->tinfo_wrt_world->stride;
-  int pe_start = team_obj->tinfo_wrt_world->pe_start;
-  int pe_size = team_obj->tinfo_wrt_world->size;
-  long *p_sync = team_obj->bcast_pSync;
-
-  // Passed pe_root is relative to team, convert to world root
-  int pe_root_world = team_obj->get_pe_in_world(pe_root);
-  internal_broadcastmem_wg(dst, src, nelems * sizeof(T), pe_root_world, pe_start, stride,
-               pe_size, p_sync);
+  broadcastmem_wg(team, dst, src, nelems * sizeof(T), pe_root);
 }
 
 template <typename T>
@@ -1211,7 +1193,7 @@ __device__ int GDAContext::alltoall_wave(rocshmem_team_t team,
 template <typename T>
 __device__ void GDAContext::fcollect_wg(rocshmem_team_t team, T *dst,
                                      const T *src, int nelems) {
-  fcollectmem_linear_wg(team, dst, src, nelems * sizeof(T));
+  fcollectmem_wg(team, dst, src, nelems * sizeof(T));
 }
 
 template <typename T>
@@ -1219,8 +1201,7 @@ __device__ int GDAContext::fcollect_wave(rocshmem_team_t team, T *dst,
                                      const T *src, int nelems) {
   if (dst == nullptr || src == nullptr || team == ROCSHMEM_TEAM_INVALID)
     return ROCSHMEM_ERROR;
-
-  fcollectmem_linear_wave(team, dst, src, nelems * sizeof(T));
+  fcollectmem_wave(team, dst, src, nelems * sizeof(T));
 
   return ROCSHMEM_SUCCESS;
 }

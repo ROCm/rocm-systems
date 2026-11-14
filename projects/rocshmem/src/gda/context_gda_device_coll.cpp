@@ -335,8 +335,11 @@ __device__ int GDAContext::broadcastmem_wave(rocshmem_team_t team, void *dest,
 
   // Passed pe_root is relative to team, convert to world root
   int pe_root_world = team_obj->get_pe_in_world(PE_root);
-  internal_broadcastmem_wave(dest, source, nelems, pe_root_world, pe_start, stride,
-               pe_size, p_sync);
+  if (nelems < 512)
+    broadcastmem_linear_thread_puts_wave(team, dest, source, nelems, PE_root);
+  else
+    internal_broadcastmem_wave(dest, source, nelems, pe_root_world, pe_start, stride,
+                 pe_size, p_sync);
   return ROCSHMEM_SUCCESS;
 }
 
@@ -389,8 +392,11 @@ __device__ void GDAContext::broadcastmem_wg(rocshmem_team_t team, void *dst,
 
   // Passed pe_root is relative to team, convert to world root
   int pe_root_world = team_obj->get_pe_in_world(pe_root);
-  internal_broadcastmem_wg(dst, src, nelems, pe_root_world, pe_start, stride,
-               pe_size, p_sync);
+  if (nelems < 512)
+    broadcastmem_linear_thread_puts_wg(team, dst, src, nelems, pe_root);
+  else
+    internal_broadcastmem_wg(dst, src, nelems, pe_root_world, pe_start, stride,
+                 pe_size, p_sync);
 }
 
 __device__ void GDAContext::internal_broadcastmem_wg(void *dst, const void *src,
@@ -408,6 +414,89 @@ __device__ void GDAContext::internal_broadcastmem_wg(void *dst, const void *src,
   internal_sync_wg(constmem.my_pe, pe_start, stride, pe_size, p_sync, wf_info);
 }
 
+__device__ void GDAContext::broadcastmem_linear_thread_puts_wave(rocshmem_team_t team,
+    void *dst, const void *src, int nelems, int PE_root) {
+  GDATeam *team_obj = reinterpret_cast<GDATeam *>(team);
+
+  int pe_size = team_obj->num_pes;
+  long *pSync = team_obj->bcast_pSync;
+  int pe_root_world = team_obj->get_pe_in_world(PE_root);
+  // Monotonic and never reset, so a fast root cannot outrun a slow poller.
+  long expected = static_cast<long>(team_obj->bcast_sequence_number + 1);
+
+  // Lane id within the calling wave, so waves other than wave 0 also work.
+  int tid = get_flat_block_id() % WF_SIZE;
+  int step_size = get_flat_block_size() < WF_SIZE ? get_flat_block_size() : WF_SIZE;
+
+  // Root: each lane puts src to its assigned subset of dest PEs, then
+  // signals slot pe_size on that PE - the single counter every PE polls.
+  if (constmem.my_pe == pe_root_world) {
+    for (int j = tid; j < pe_size; j += step_size) {
+      int dest_pe = team_obj->get_pe_in_world(j);
+      qps[dest_pe].put_nbi_single(dst, src, nelems, PostOpt{RingDB<false>});
+      qps[dest_pe].atomic_add_single(&pSync[ROCSHMEM_BCAST_SYNC_SIZE - 1], 1);
+    }
+    // Belt and suspenders with the sync_wave(team) below, matching the
+    // _wg variant and the alltoall/fcollect _wave variants.
+    for (int j = tid; j < pe_size; j += step_size) {
+      int dest_pe = team_obj->get_pe_in_world(j);
+      qps[dest_pe].quiet_single();
+    }
+  }
+
+  // All PEs (including root, which signals itself) poll that slot.
+  // BCAST_SYNC_SIZE - 1 is used instead of pe_size because the
+  // barrier algorithms never touch it, unlike pe_size, which a
+  // >=BCAST_SYNC_SIZE-PE team would alias into the next pool
+  // index's slot 0.
+  long *sync_flag = &pSync[ROCSHMEM_BCAST_SYNC_SIZE - 1];
+  while (uncached_load(sync_flag) < expected) { }
+
+  if (is_thread_zero_in_wave()) {
+    team_obj->bcast_sequence_number++;
+  }
+
+  sync_wave(team);
+}
+
+__device__ void GDAContext::broadcastmem_linear_thread_puts_wg(rocshmem_team_t team,
+    void *dst, const void *src, int nelems, int PE_root) {
+  GDATeam *team_obj = reinterpret_cast<GDATeam *>(team);
+
+  int pe_size = team_obj->num_pes;
+  long *pSync = team_obj->bcast_pSync;
+  int pe_root_world = team_obj->get_pe_in_world(PE_root);
+  long expected = static_cast<long>(team_obj->bcast_sequence_number + 1);
+
+  int tid = get_flat_block_id();
+  // Workgroup variant: every thread in the block takes a distinct dest PE.
+  int step_size = get_flat_block_size();
+
+  if (constmem.my_pe == pe_root_world) {
+    for (int j = tid; j < pe_size; j += step_size) {
+      int dest_pe = team_obj->get_pe_in_world(j);
+      qps[dest_pe].put_nbi_single(dst, src, nelems, PostOpt{RingDB<false>});
+      qps[dest_pe].atomic_add_single(&pSync[ROCSHMEM_BCAST_SYNC_SIZE - 1], 1);
+    }
+    // Belt and suspenders with the sync_wg(team) below: quiet each dest
+    // PE's QP explicitly here rather than relying solely on sync_wg's own
+    // internal completion fence, until that's been evaluated further.
+    for (int j = tid; j < pe_size; j += step_size) {
+      int dest_pe = team_obj->get_pe_in_world(j);
+      qps[dest_pe].quiet_single();
+    }
+  }
+
+  __syncthreads();
+  if (is_thread_zero_in_block()) {
+    long *sync_flag = &pSync[ROCSHMEM_BCAST_SYNC_SIZE - 1];
+    while (uncached_load(sync_flag) < expected) { }
+    team_obj->bcast_sequence_number++;
+  }
+
+  sync_wg(team);
+}
+
 __device__ void GDAContext::alltoallmem_wg(rocshmem_team_t team, void *dst,
                                      const void *src, int nelems) {
   alltoallmem_linear_thread_puts_wg(team, dst, src, nelems);
@@ -423,8 +512,8 @@ __device__ void GDAContext::alltoallmem_linear_thread_puts_wg(rocshmem_team_t te
   uint64_t alltoall_pSync_offset = (team_obj->alltoall_sequence_number % 2) * pe_size;
 
   int tid = get_flat_block_id();
-  // min(get_flat_block_size(), WF_SIZE)
-  int step_size = get_flat_block_size() < WF_SIZE ? get_flat_block_size() : WF_SIZE;
+  // Workgroup variant: every thread in the block takes a distinct dest PE.
+  int step_size = get_flat_block_size();
 
   // Have each PE put their designated data to the other PEs
   for (int j = tid; j < pe_size; j += step_size) {
@@ -436,22 +525,23 @@ __device__ void GDAContext::alltoallmem_linear_thread_puts_wg(rocshmem_team_t te
   }
 
   // wait until everyone has obtained their designated data
-  for (int j = tid; j < pe_size; j+= step_size) {
+  for (int j = tid; j < pe_size; j += step_size) {
     int dest_pe = team_obj->get_pe_in_world(j);
 
-    long *sync_flags = &pSync[alltoall_pSync_offset + dest_pe];
+    long *sync_flags = &pSync[alltoall_pSync_offset + j];
     while (uncached_load(sync_flags) != 1) { }
 
     qps[dest_pe].quiet_single();
 
-    pSync[alltoall_pSync_offset + dest_pe] = ROCSHMEM_SYNC_VALUE;
+    pSync[alltoall_pSync_offset + j] = ROCSHMEM_SYNC_VALUE;
   }
 
+  __syncthreads();
   if (is_thread_zero_in_block()) {
     team_obj->alltoall_sequence_number++;
   }
 
-  __syncthreads();
+  sync_wg(team);
 }
 
 __device__ int GDAContext::alltoallmem_wave(rocshmem_team_t team,
@@ -473,7 +563,7 @@ __device__ void GDAContext::alltoallmem_linear_wave(rocshmem_team_t team, void *
   int pe_start = team_obj->tinfo_wrt_world->pe_start;
   int pe_size = team_obj->num_pes;
   int stride = team_obj->tinfo_wrt_world->stride;
-  long *pSync = team_obj->alltoall_pSync;
+  long *pSync = team_obj->barrier_pSync;
   int my_pe_in_team = team_obj->my_pe;
 
   int wf_id = get_flat_block_id() / WF_SIZE;
@@ -505,7 +595,7 @@ __device__ void GDAContext::alltoallmem_linear_thread_puts_wave(rocshmem_team_t 
   int my_pe_in_team = team_obj->my_pe;
   uint64_t alltoall_pSync_offset = (team_obj->alltoall_sequence_number % 2) * pe_size;
 
-  // Use lane ID within the wave so any wave in a multi-wave WG works correctly.
+  // Lane id within the calling wave, so waves other than wave 0 also work.
   int tid = get_flat_block_id() % WF_SIZE;
   int step_size = get_flat_block_size() < WF_SIZE ? get_flat_block_size() : WF_SIZE;
 
@@ -519,15 +609,15 @@ __device__ void GDAContext::alltoallmem_linear_thread_puts_wave(rocshmem_team_t 
   }
 
   // wait until everyone has obtained their designated data
-  for (int j = tid; j < pe_size; j+= step_size) {
+  for (int j = tid; j < pe_size; j += step_size) {
     int dest_pe = team_obj->get_pe_in_world(j);
 
-    long *sync_flags = &pSync[alltoall_pSync_offset + dest_pe];
+    long *sync_flags = &pSync[alltoall_pSync_offset + j];
     while (uncached_load(sync_flags) != 1) { }
 
     qps[dest_pe].quiet_single();
 
-    pSync[alltoall_pSync_offset + dest_pe] = ROCSHMEM_SYNC_VALUE;
+    pSync[alltoall_pSync_offset + j] = ROCSHMEM_SYNC_VALUE;
   }
 
   if (is_thread_zero_in_wave()) {
@@ -539,7 +629,13 @@ __device__ void GDAContext::alltoallmem_linear_thread_puts_wave(rocshmem_team_t 
 
 __device__ void GDAContext::fcollectmem_wg(rocshmem_team_t team, void *dst,
                                      const void *src, int nelems) {
-  fcollectmem_linear_wg(team, dst, src, nelems);
+  GDATeam *team_obj_dispatch = reinterpret_cast<GDATeam *>(team);
+  // Size the fast path needs: 2 double-buffered slots per PE.
+  size_t fcollect_pSync_slots_needed = 2 * team_obj_dispatch->num_pes;
+  if (nelems < 512 && fcollect_pSync_slots_needed <= ROCSHMEM_ALLTOALL_SYNC_SIZE)
+    fcollectmem_linear_thread_puts_wg(team, dst, src, nelems);
+  else
+    fcollectmem_linear_wg(team, dst, src, nelems);
 }
 
 __device__ void GDAContext::fcollectmem_linear_wg(rocshmem_team_t team, void *dst,
@@ -549,7 +645,7 @@ __device__ void GDAContext::fcollectmem_linear_wg(rocshmem_team_t team, void *ds
   int pe_start = team_obj->tinfo_wrt_world->pe_start;
   int pe_size = team_obj->num_pes;
   int stride = team_obj->tinfo_wrt_world->stride;
-  long *pSync = team_obj->alltoall_pSync;
+  long *pSync = team_obj->barrier_pSync;
   int my_pe_in_team = team_obj->my_pe;
 
   ActiveWFInfo wf_info(ctx_id_, ThreadScope::wg);
@@ -576,7 +672,13 @@ __device__ int GDAContext::fcollectmem_wave(rocshmem_team_t team, void *dst,
   if (dst == nullptr || src == nullptr || team == ROCSHMEM_TEAM_INVALID)
     return ROCSHMEM_ERROR;
 
-  fcollectmem_linear_wave(team, dst, src, nelems);
+  GDATeam *team_obj_dispatch = reinterpret_cast<GDATeam *>(team);
+  // Size the fast path needs: 2 double-buffered slots per PE.
+  size_t fcollect_pSync_slots_needed = 2 * team_obj_dispatch->num_pes;
+  if (nelems < 512 && fcollect_pSync_slots_needed <= ROCSHMEM_ALLTOALL_SYNC_SIZE)
+    fcollectmem_linear_thread_puts_wave(team, dst, src, nelems);
+  else
+    fcollectmem_linear_wave(team, dst, src, nelems);
 
   return ROCSHMEM_SUCCESS;
 }
@@ -588,7 +690,7 @@ __device__ void GDAContext::fcollectmem_linear_wave(rocshmem_team_t team, void *
   int pe_start = team_obj->tinfo_wrt_world->pe_start;
   int pe_size = team_obj->num_pes;
   int stride = team_obj->tinfo_wrt_world->stride;
-  long *pSync = team_obj->alltoall_pSync;
+  long *pSync = team_obj->barrier_pSync;
   int my_pe_in_team = team_obj->my_pe;
 
   ActiveWFInfo wf_info(ctx_id_, ThreadScope::wave);
@@ -599,7 +701,7 @@ __device__ void GDAContext::fcollectmem_linear_wave(rocshmem_team_t team, void *
       nelems, dest_pe, dest_pe, wf_info);
   }
 
-  if (is_thread_zero_in_block()) {
+  if (is_thread_zero_in_wave()) {
     // Iterate through 0th qp of each PE
     for (int j = 0; j < pe_size; j++) {
       int dest_pe = team_obj->get_pe_in_world(j);
@@ -610,4 +712,87 @@ __device__ void GDAContext::fcollectmem_linear_wave(rocshmem_team_t team, void *
   internal_sync_wave(constmem.my_pe, pe_start, stride, pe_size, pSync, wf_info);
 }
 
+
+__device__ void GDAContext::fcollectmem_linear_thread_puts_wave(rocshmem_team_t team,
+    void *dst, const void *src, int nelems) {
+  GDATeam *team_obj = reinterpret_cast<GDATeam *>(team);
+
+  int pe_size = team_obj->num_pes;
+  long *pSync = team_obj->alltoall_pSync;
+  int my_pe_in_team = team_obj->my_pe;
+  uint64_t alltoall_pSync_offset = (team_obj->alltoall_sequence_number % 2) * pe_size;
+
+  // Lane id within the calling wave, so waves other than wave 0 also work.
+  int tid = get_flat_block_id() % WF_SIZE;
+  int step_size = get_flat_block_size() < WF_SIZE ? get_flat_block_size() : WF_SIZE;
+
+  // Have each PE put their designated data to the other PEs
+  for (int j = tid; j < pe_size; j += step_size) {
+    int dest_pe = team_obj->get_pe_in_world(j);
+    char *dst_local = reinterpret_cast<char *>(dst) + my_pe_in_team * nelems;
+    const char *src_local = reinterpret_cast<const char *>(src);
+    qps[dest_pe].put_nbi_single(dst_local, src_local, nelems, PostOpt{RingDB<false>});
+    qps[dest_pe].atomic_add_single(&pSync[alltoall_pSync_offset + my_pe_in_team], 1);
+  }
+
+  // wait until everyone has obtained their designated data
+  for (int j = tid; j < pe_size; j += step_size) {
+    int dest_pe = team_obj->get_pe_in_world(j);
+
+    long *sync_flags = &pSync[alltoall_pSync_offset + j];
+    while (uncached_load(sync_flags) != 1) { }
+
+    qps[dest_pe].quiet_single();
+
+    pSync[alltoall_pSync_offset + j] = ROCSHMEM_SYNC_VALUE;
+  }
+
+  if (is_thread_zero_in_wave()) {
+    team_obj->alltoall_sequence_number++;
+  }
+
+  sync_wave(team);
+}
+
+__device__ void GDAContext::fcollectmem_linear_thread_puts_wg(rocshmem_team_t team,
+    void *dst, const void *src, int nelems) {
+  GDATeam *team_obj = reinterpret_cast<GDATeam *>(team);
+
+  int pe_size = team_obj->num_pes;
+  long *pSync = team_obj->alltoall_pSync;
+  int my_pe_in_team = team_obj->my_pe;
+  uint64_t alltoall_pSync_offset = (team_obj->alltoall_sequence_number % 2) * pe_size;
+
+  int tid = get_flat_block_id();
+  // Workgroup variant: every thread in the block takes a distinct dest PE.
+  int step_size = get_flat_block_size();
+
+  // Have each PE put their designated data to the other PEs
+  for (int j = tid; j < pe_size; j += step_size) {
+    int dest_pe = team_obj->get_pe_in_world(j);
+    char *dst_local = reinterpret_cast<char *>(dst) + my_pe_in_team * nelems;
+    const char *src_local = reinterpret_cast<const char *>(src);
+    qps[dest_pe].put_nbi_single(dst_local, src_local, nelems, PostOpt{RingDB<false>});
+    qps[dest_pe].atomic_add_single(&pSync[alltoall_pSync_offset + my_pe_in_team], 1);
+  }
+
+  // wait until everyone has obtained their designated data
+  for (int j = tid; j < pe_size; j += step_size) {
+    int dest_pe = team_obj->get_pe_in_world(j);
+
+    long *sync_flags = &pSync[alltoall_pSync_offset + j];
+    while (uncached_load(sync_flags) != 1) { }
+
+    qps[dest_pe].quiet_single();
+
+    pSync[alltoall_pSync_offset + j] = ROCSHMEM_SYNC_VALUE;
+  }
+
+  __syncthreads();
+  if (is_thread_zero_in_block()) {
+    team_obj->alltoall_sequence_number++;
+  }
+
+  sync_wg(team);
+}
 }  // namespace rocshmem
