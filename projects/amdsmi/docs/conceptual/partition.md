@@ -342,8 +342,8 @@ Changing partition settings has strict requirements:
 
 - **Root/sudo privileges** -- required for every set call, and to query accelerator partition
   profiles (`amdsmi_get_gpu_accelerator_partition_profile_config()`).
-- **Primary partition only** -- set calls on a secondary partition return
-  `AMDSMI_STATUS_NOT_SUPPORTED`.
+- **Primary partition only** -- only the primary partition has the partition mode sysfs files, so
+  set calls on a secondary partition return `AMDSMI_STATUS_NOT_SUPPORTED`.
 - **Idle GPU** -- no workloads may run on any partition of the physical GPU.
 - **Driver reload for memory partition changes** -- after the set call succeeds, stop all GPU
   processes and run:
@@ -522,8 +522,7 @@ device reports as supported.
 
 `amdsmi_get_gpu_accelerator_partition_profile()` returns the active
 `amdsmi_accelerator_partition_profile_t` (the same structure as one entry of the config array) and
-the partition's ID in `partition_id[0]`. On hypervisor hosts, `partition_id` instead lists every
-partition of the physical GPU.
+the partition's ID in `partition_id[0]`. The other entries of `partition_id` are not written.
 
 On a secondary partition, it returns `AMDSMI_STATUS_NOT_SUPPORTED` but still fills
 `partition_id[0]`. See [Primary and secondary partitions](#primary-and-secondary-partitions).
