@@ -9,10 +9,19 @@
 #include <unistd.h>
 #endif
 
+#include <algorithm>
 #include <array>
+#include <cstring>
 #include <iostream>
+#include <limits>
+#include <vector>
 
 #include <hip_test_common.hh>
+
+#if HT_AMD && HT_LINUX
+#include <hsa/hsa.h>
+#include <hsa/hsa_ext_amd.h>
+#endif
 
 /**
  * @addtogroup hipDeviceGetAttribute hipDeviceGetAttribute
@@ -284,6 +293,112 @@ HIP_TEST_CASE(Unit_hipGetDeviceAttribute_hipDeviceAttributeHostAllocDmaBufSuppor
   INFO("hipDeviceAttributeHostAllocDmaBufSupported: " << hostAllocDmaBufSupported);
   REQUIRE((hostAllocDmaBufSupported == 0 || hostAllocDmaBufSupported == 1));
 }
+
+#if HT_AMD
+/**
+ * Test Description
+ * ------------------------
+ *  - Query L3 cache size on every visible device. Zero is valid when no cache
+ *    information is available. Check null output and invalid device errors.
+ * Test source
+ * ------------------------
+ *  - unit/device/hipGetDeviceAttribute.cc
+ * Test requirements
+ * ------------------------
+ *  - AMD platform
+ */
+HIP_TEST_CASE(Unit_hipGetDeviceAttribute_hipDeviceAttributeL3CacheSize) {
+  int deviceCount = 0;
+  HIP_CHECK(hipGetDeviceCount(&deviceCount));
+  REQUIRE(deviceCount > 0);
+  for (int device = 0; device < deviceCount; ++device) {
+    INFO("device: " << device);
+    int l3 = -1;
+    HIP_CHECK(hipDeviceGetAttribute(&l3, hipDeviceAttributeL3CacheSize, device));
+    INFO("L3CacheSize: " << l3);
+    REQUIRE(l3 >= 0);
+    HIP_CHECK_ERROR(hipDeviceGetAttribute(nullptr, hipDeviceAttributeL3CacheSize, device),
+                    hipErrorInvalidValue);
+    (void)hipGetLastError();
+  }
+
+  int l3 = -1;
+  for (int device : {-1, deviceCount, std::numeric_limits<int>::max()}) {
+    INFO("invalid device: " << device);
+    HIP_CHECK_ERROR(hipDeviceGetAttribute(&l3, hipDeviceAttributeL3CacheSize, device),
+                    hipErrorInvalidDevice);
+  }
+  // Clear the sticky errors from the intentional negative calls above so they
+  // cannot leak into a later case in the same process.
+  (void)hipGetLastError();
+}
+
+#if HT_LINUX
+// The Linux AMD test suite already links HSA. Match agents by UUID, since HIP
+// visibility and ordering need not match HSA enumeration order.
+HIP_TEST_CASE(Unit_hipGetDeviceAttribute_L3CacheSize_HsaConsistency) {
+  int deviceCount = 0;
+  HIP_CHECK(hipGetDeviceCount(&deviceCount));
+  REQUIRE(deviceCount > 0);
+  std::vector<hsa_agent_t> agents;
+  const hsa_status_t iterateStatus = hsa_iterate_agents(
+      [](hsa_agent_t agent, void* data) {
+        static_cast<std::vector<hsa_agent_t>*>(data)->push_back(agent);
+        return HSA_STATUS_SUCCESS;
+      },
+      &agents);
+  if (iterateStatus != HSA_STATUS_SUCCESS) {
+    HIP_SKIP_TEST("HSA agent enumeration is unavailable on this platform");
+  }
+
+  int checked = 0;
+  for (int device = 0; device < deviceCount; ++device) {
+    INFO("device: " << device);
+    hipUUID uuid{};
+    HIP_CHECK(hipDeviceGetUuid(&uuid, device));
+    hsa_agent_t match{};
+    int matches = 0;
+    for (auto agent : agents) {
+      hsa_device_type_t type;
+      REQUIRE(hsa_agent_get_info(agent, HSA_AGENT_INFO_DEVICE, &type) == HSA_STATUS_SUCCESS);
+      if (type != HSA_DEVICE_TYPE_GPU) continue;
+      char hsaUuid[32] = {};
+      if (hsa_agent_get_info(agent, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_UUID),
+                             hsaUuid) == HSA_STATUS_SUCCESS &&
+          std::memcmp(hsaUuid, "GPU-", 4) == 0 && hsaUuid[20] == '\0' &&
+          std::all_of(hsaUuid + 4, hsaUuid + 20, [](char digit) {
+            return (digit >= '0' && digit <= '9') || (digit >= 'a' && digit <= 'f') ||
+                   (digit >= 'A' && digit <= 'F');
+          }) &&
+          std::memcmp(uuid.bytes, hsaUuid + 4, sizeof(uuid.bytes)) == 0) {
+        match = agent;
+        ++matches;
+      }
+    }
+    // Only compare cache sizes when the agent can be identified unambiguously.
+    if (matches != 1) {
+      WARN("No unique HSA UUID match for device " << device);
+      continue;
+    }
+    uint32_t cacheSizes[4] = {};
+    if (hsa_agent_get_info(match, HSA_AGENT_INFO_CACHE_SIZE, cacheSizes) != HSA_STATUS_SUCCESS) {
+      WARN("HSA cache sizes unavailable for device " << device);
+      continue;
+    }
+    int l3 = -1;
+    HIP_CHECK(hipDeviceGetAttribute(&l3, hipDeviceAttributeL3CacheSize, device));
+    const auto expected = std::min<uint32_t>(cacheSizes[2], std::numeric_limits<int>::max());
+    INFO("HSA L3 cache size: " << cacheSizes[2]);
+    REQUIRE(l3 == static_cast<int>(expected));
+    ++checked;
+  }
+  if (checked == 0) {
+    HIP_SKIP_TEST("No HSA cache information could be matched to a HIP device");
+  }
+}
+#endif  // HT_LINUX
+#endif  // HT_AMD
+
 /**
  * End doxygen group DeviceTest.
  * @}

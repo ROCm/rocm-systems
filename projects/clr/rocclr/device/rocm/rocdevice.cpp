@@ -1764,6 +1764,7 @@ bool Device::populateOCLDeviceConstants() {
     info_.asicRevision_ = asic_revision;
 
     info_.l2CacheSize_ = cache_sizes[1];
+    info_.l3CacheSize_ = cache_sizes[2];
     info_.persistingL2CacheMaxSize_ = PersistingL2CacheSizeMax();
     info_.timeStampFrequency_ = 1000000;
     info_.globalMemChannelBanks_ = 4;

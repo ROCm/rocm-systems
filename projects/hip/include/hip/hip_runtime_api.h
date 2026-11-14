@@ -651,6 +651,14 @@ typedef enum hipDeviceAttribute_t {
                                                  ///< '0' otherwise.
   hipDeviceAttributeMaxDynDataPrefetchRegions,   ///< Maximum number of dynamic data prefetch regions
                                                  ///< per kernel launch (0 if unsupported).
+  hipDeviceAttributeL3CacheSize,                 ///< Size of L3 cache in bytes, capped at INT_MAX.
+                                                 ///< 0 if no cache information is available.
+                                                 ///< AMD-specific: populated by the ROCm (ROCr)
+                                                 ///< backend; the PAL backend reports 0.
+                                                 ///< On a partitioned AMD Instinct GPU this is
+                                                 ///< the partition's L3 share, scaled by the
+                                                 ///< memory-partition (NPS) mode, not by the
+                                                 ///< compute-partition count.
 
   hipDeviceAttributeAmdSpecificEnd = 19999,
   hipDeviceAttributeVendorSpecificBegin = 20000,

@@ -13,8 +13,8 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 
 | Tier | Cases | Tagged | Missing `@asserts` |
 |---|---:|---:|---:|
-| `contract` | 635 | 635 | 0 |
-| **total** | **635** | **635** | **0** |
+| `contract` | 638 | 638 | 0 |
+| **total** | **638** | **638** | **0** |
 
 ## Tier: `contract`
 
@@ -135,7 +135,7 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 | `Contract_Copy3D_HipMemcpy3D_Default_HostDeviceRoundTripsExtent` | hipMemcpy3D | a full-extent H2D then D2H 3D copy round-trips all bytes unchanged |
 | `Contract_Copy3D_HipMemcpy3D_Default_SingleSliceRoundTripsBytes` | hipMemcpy3D | a single-slice (depth=1) H2D then D2H 3D copy round-trips that slice's bytes |
 
-### `device` (11 cases)
+### `device` (14 cases)
 
 | Case | API | Asserts |
 |---|---|---|
@@ -143,6 +143,9 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 | `Contract_Device_HipDeviceFlushGPUDirectRDMAWrites_InvalidTarget_IsRejected` | hipDeviceFlushGPUDirectRDMAWrites | an out-of-range target is rejected as an invalid argument |
 | `Contract_Device_HipDeviceFlushGPUDirectRDMAWrites_ToAllDevices_AcceptedOrUnsupported` | hipDeviceFlushGPUDirectRDMAWrites | a flush to all-devices scope is accepted or reports unsupported |
 | `Contract_Device_HipDeviceFlushGPUDirectRDMAWrites_ToOwner_AcceptedOrUnsupported` | hipDeviceFlushGPUDirectRDMAWrites | a flush to owner scope is accepted or reports unsupported |
+| `Contract_Device_HipDeviceGetAttribute_L3CacheSize_InvalidDeviceIsRejected` | hipDeviceGetAttribute | an out-of-range device for hipDeviceAttributeL3CacheSize is rejected |
+| `Contract_Device_HipDeviceGetAttribute_L3CacheSize_IsNonNegative` | hipDeviceGetAttribute | hipDeviceAttributeL3CacheSize returns a non-negative size in bytes |
+| `Contract_Device_HipDeviceGetAttribute_L3CacheSize_NullOutputIsRejected` | hipDeviceGetAttribute | a null output pointer for hipDeviceAttributeL3CacheSize is rejected |
 | `Contract_Device_HipDeviceGetAttribute_WarpSize_MatchesProperties` | hipDeviceGetAttribute | hipDeviceAttributeWarpSize matches the warp size from hipGetDeviceProperties |
 | `Contract_Device_HipGetDeviceProperties_GetProperties_SucceedsForCurrentDevice` | hipGetDeviceProperties | succeeds in populating properties for the current device |
 | `Contract_Device_HipGetDeviceProperties_MultiProcessorCount_IsPositive` | hipGetDeviceProperties | reported multiprocessor count is positive |

@@ -120,6 +120,15 @@ contract:
   Contract_Device_HipDeviceFlushGPUDirectRDMAWrites_InvalidTarget_IsRejected:
     <<: *level_0
     tags: [device, P0]
+  Contract_Device_HipDeviceGetAttribute_L3CacheSize_IsNonNegative:
+    <<: *level_0
+    tags: [device, P0]
+  Contract_Device_HipDeviceGetAttribute_L3CacheSize_NullOutputIsRejected:
+    <<: *level_0
+    tags: [device, P0]
+  Contract_Device_HipDeviceGetAttribute_L3CacheSize_InvalidDeviceIsRejected:
+    <<: *level_0
+    tags: [device, P0]
   Contract_Device_HipGetDevice_CurrentOrdinal_IsWithinDeviceCount:
     <<: *level_0
     tags: [device, P0]
