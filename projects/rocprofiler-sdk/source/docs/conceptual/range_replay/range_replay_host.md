@@ -116,6 +116,7 @@ Any difference is reported as `divergence_count` on CLOSE.
 | The entry snapshot could not be captured (host memory pressure) | `SNAPSHOT_FAILED` |
 | No dispatch in the application's own run | `NO_DISPATCH` |
 | Queue interposition (write-pointer virtualization) is in use | `UNSUPPORTED_QUEUE_PATH` |
+| Another process of the job declined, or could not be reached (`peer_sync_cb` returned 0) | `PEER_DECLINED` |
 
 None of these apply to host replay: `MULTI_QUEUE`, `MULTI_AGENT`, `GRAPH_LAUNCH`,
 `PROGRAM_TOO_LARGE`, `UNKNOWN_KERNARG_SIZE`, `STAGING_FAILED`, or a copy made by the range's own
@@ -157,6 +158,42 @@ locals. The code between the macro and `end` must follow these rules:
    `hipStreamCreate` / `hipStreamDestroy`, as long as it does not allocate device memory that
    outlives the pass. Pool allocators that cache across frees (`hipMallocAsync`) are not.
 
+## Multi-process jobs (MPI)
+
+A range that runs in several cooperating processes must be replayed by all of them or by none. A
+process that re-ran its range while its neighbor did not would call `MPI_Sendrecv` or
+`MPI_Allreduce` with nobody to pair with, and the job would hang. Host replay re-executes the
+application's own code, MPI calls included, so every rank re-runs them in the same order: the
+collectives pair up on every pass provided the ranks agree which pass they are on.
+
+The tool provides that agreement through `peer_sync_cb`, a collective it implements with MPI (or
+any other transport) and sets during CONFIG on every rank:
+
+1. At the end of every pass, on every rank, the SDK calls `peer_sync_cb(PASS_END)` with two flags:
+   `ELIGIBLE` (nothing declined this range here) and `CONTINUE` (this rank wants another pass). The
+   tool returns the bitwise AND over the job, which is an `MPI_Allreduce` with `MPI_BAND`. The call
+   is made under the writer locks and before the restore, so a peer that is still reading this
+   rank's device memory (xGMI peer-to-peer) has finished before the memory is rewound.
+2. If every rank is eligible and wants to continue, every rank restores and re-executes. A
+   `RESTORED` barrier follows the restore, so no rank starts the next pass while a peer's memory is
+   still being rewound.
+3. Otherwise every rank stops at this boundary. A rank that was eligible reports `PEER_DECLINED`
+   when the stop is because another rank declined, and `REPLAYED` when it is only because a rank
+   wanted fewer passes (the job runs the smallest pass count any rank asks for).
+
+Every rank calls the collective exactly once per pass boundary, however that rank's pass ended, so a
+rank that declined early (or never armed the jump) still meets its peers. The agreement happens
+before any rank rewinds anything, which is what makes the decline safe. The one case that cannot be
+undone is a rank that fails *after* every rank agreed to restore (another thread dispatched at the
+last moment, or the restore itself failed): its peers are already re-running, so the job aborts with
+an error that names the range.
+
+Within a node, peer-to-peer device writes land in each rank's own allocations, so per-rank snapshots
+cover them. Inter-node transfers involve NIC and proxy state that no device snapshot rewinds; bracket
+the compute phases around communication for those jobs. Buffers shared between processes (IPC
+handles, peer-mapped allocations) are not rewound consistently and should not be used inside a range.
+The callback must not submit GPU work. Packet replay is not supported across processes.
+
 ## Interaction with services
 
 Re-executed passes are the application's own submissions, so every service sees them as ordinary
@@ -191,3 +228,12 @@ runtime, just as for packet replay. See [Performance](range_replay_performance.m
   was rewound. They also check the PASS order, a divergence count of 0, and the exact counter record
   count. Two negative variants check that packet replay declines the same range and that an unarmed
   application declines `HOST_JMP_NOT_SET`.
+- `tests/range-replay-host-mpi` is the MPI integration test (built and run only when MPI is found).
+  Two ranks run a ring halo-exchange solver (`MPI_Sendrecv` and `MPI_Allreduce` every step) in one
+  range, with the tool implementing `peer_sync_cb` with MPI collectives. The scenarios are four
+  lockstep passes, ranks asking for different pass counts (the job runs the smaller), one rank
+  leaking a device allocation (it declines `ALLOCATION_CHANGED_IN_RANGE`, its peer `PEER_DECLINED`),
+  and one rank not arming the jump (`HOST_JMP_NOT_SET` and `PEER_DECLINED`). Every pass must end in
+  the same device checksum and reduced value, and the MPI call count must match the pass count.
+- `range-replay-peer-sync-test` is a GPU-free unit test of the agreement rule, including an
+  exhaustive check that all ranks leave at the same pass boundary.

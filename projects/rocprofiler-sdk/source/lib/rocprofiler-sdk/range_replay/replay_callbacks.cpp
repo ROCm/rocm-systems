@@ -133,6 +133,7 @@ execute_config_callback(uint64_t                range_id,
     plan.pass_count_cb            = plan.config_data.pass_count_cb;
     plan.replay_continue_cb       = plan.config_data.replay_continue_cb;
     plan.host_replay              = (plan.config_data.host_replay != 0);
+    plan.peer_sync_cb             = plan.config_data.peer_sync_cb;
     plan.config_contexts          = std::move(config_contexts);
     plan.external_correlation_ids = std::move(extern_corr_ids);
     plan.user_data                = plan.config_contexts.front().user_data;
@@ -273,6 +274,25 @@ execute_close_callback(const range_plan_t&               plan,
                                           ROCPROFILER_CALLBACK_TRACING_RANGE_REPLAY,
                                           ROCPROFILER_RANGE_REPLAY_CLOSE,
                                           close_data);
+}
+
+bool
+uses_peer_sync(const range_plan_t& plan)
+{
+    return plan.host_replay && plan.peer_sync_cb != nullptr;
+}
+
+uint32_t
+execute_peer_sync(const range_plan_t&                       plan,
+                  uint64_t                                  pass,
+                  rocprofiler_range_replay_peer_sync_phase_t phase,
+                  uint32_t                                  local_flags)
+{
+    if(!uses_peer_sync(plan)) return local_flags;
+
+    const auto global =
+        plan.peer_sync_cb(plan.config_data.range_id, pass, phase, local_flags, plan.user_data);
+    return (phase == ROCPROFILER_RANGE_REPLAY_PEER_SYNC_PASS_END) ? global : 0;
 }
 
 bool

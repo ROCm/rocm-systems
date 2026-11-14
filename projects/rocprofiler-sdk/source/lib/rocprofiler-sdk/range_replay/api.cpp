@@ -85,6 +85,10 @@ end_range()
         return 0;
     }
 
+    // The tool configured host replay but the application did not arm the jump. The peers of a
+    // multi-process job still expect this process at their first pass boundary.
+    host::exchange_unarmed_boundary(*live);
+
     auto ctx = range_context_t{};
     if(!take_range(ctx)) return -1;
 
