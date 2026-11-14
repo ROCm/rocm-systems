@@ -436,6 +436,12 @@ __device__ void GDAContext::broadcastmem_linear_thread_puts_wave(rocshmem_team_t
       qps[dest_pe].put_nbi_single(dst, src, nelems, PostOpt{RingDB<false>});
       qps[dest_pe].atomic_add_single(&pSync[ROCSHMEM_BCAST_SYNC_SIZE - 1], 1);
     }
+    // Belt and suspenders with the sync_wave(team) below, matching the
+    // _wg variant and the alltoall/fcollect _wave variants.
+    for (int j = tid; j < pe_size; j += step_size) {
+      int dest_pe = team_obj->get_pe_in_world(j);
+      qps[dest_pe].quiet_single();
+    }
   }
 
   // All PEs (including root, which signals itself) poll that slot.
