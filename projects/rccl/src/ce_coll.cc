@@ -9,6 +9,7 @@
 #include "register_inline.h"
 #include <algorithm>
 #include <atomic>
+#include <climits>
 #include <cuda.h>
 #include <vector>
 #include "rocmwrap.h"
@@ -109,7 +110,9 @@ static const uint32_t CE_COLL_INTRA_BATCH_SYNC_FREQ = 8;
 // Message threshold for intra-batch synchronization
 static const uint64_t CE_COLL_INTRA_BATCH_SYNC_MSG_THRESHOLD = 512 * 1024 * 1024;
 // cudaMemcpyBatchAsync supports CUDA graph capture starting with CUDA 13.5.
-static const int CE_COLL_MEMCPY_BATCH_CAPTURE_DRIVER_VERSION = 13050;
+// [RCCL] hipMemcpyBatchAsync does not support graph capture in any HIP release, so no driver version
+// qualifies. Lower this to the first HIP driver version that captures it correctly.
+static const int CE_COLL_MEMCPY_BATCH_CAPTURE_DRIVER_VERSION = INT_MAX;
 
 static void ceDestroyCopyStreams(struct ncclComm* comm, int nPairs) {
   for (int j = 0; j < nPairs; j++) {
@@ -895,13 +898,21 @@ ncclResult_t ncclCeLaunchBatchOps(struct ncclComm* comm, struct ncclCeBatchOpsPa
   if (params->numOps == 0) goto exit;
 
 #ifdef CE_BATCH_ASYNC_SUPPORTED
-  // Captured batch copies are opt-in (NCCL_CE_BATCH_CAPTURE_ENABLE) and still subject
-  // to the runtime batch-API support check.
+  // Captured batch copies are opt-in (NCCL_CE_BATCH_CAPTURE_ENABLE) and, as upstream, need a driver
+  // that can capture batch copies, besides the runtime batch-API support check.
   if (capturing && !isLegacyStream && ncclParamCeBatchCaptureEnable() && ncclCeBatchAsyncEnable()) {
-    batchUnderCapture = true;
+    int driverVersion = 0;
     static int reported = 0;
-    if (comm->rank == 0 && COMPILER_ATOMIC_EXCHANGE(&reported, 1, std::memory_order_relaxed) == 0)
-      INFO(NCCL_INIT, "hipMemcpyBatchAsync enabled under graph capture");
+    if (ncclCudaDriverVersion(&driverVersion) == ncclSuccess &&
+        driverVersion >= CE_COLL_MEMCPY_BATCH_CAPTURE_DRIVER_VERSION) {
+      batchUnderCapture = true;
+      if (comm->rank == 0 && COMPILER_ATOMIC_EXCHANGE(&reported, 1, std::memory_order_relaxed) == 0)
+        INFO(NCCL_INIT, "hipMemcpyBatchAsync enabled under graph capture");
+    } else if (comm->rank == 0 && COMPILER_ATOMIC_EXCHANGE(&reported, 1, std::memory_order_relaxed) == 0) {
+      INFO(NCCL_INIT, "NCCL_CE_BATCH_CAPTURE_ENABLE ignored: hipMemcpyBatchAsync does not support graph capture "
+                      "with driver version %d",
+           driverVersion);
+    }
   }
 #endif
 
