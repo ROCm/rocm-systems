@@ -69,9 +69,13 @@ __host__ __device__ constexpr size_t ddaLLSpreadShardPkts(size_t nPk, int nRanks
 constexpr size_t kDdaLLSpreadBlockAlignPkts = 16;
 
 // Packets of every shard each of `blocks` blocks owns: the even split rounded up to kDdaLLSpreadBlockAlignPkts, so
-// trailing blocks run short or idle.
+// trailing blocks run short or idle. An even split below kDdaLLSpreadBlockAlignPkts (above 32 ranks on the one-shot
+// grid) is kept as is: rounding it would idle most blocks and can split a slice over more LDS passes.
 __host__ __device__ constexpr size_t ddaLLSpreadBlockPkts(size_t shardPkts, size_t blocks) {
   const size_t even = (shardPkts + blocks - 1) / blocks;
+  if (even < kDdaLLSpreadBlockAlignPkts) {
+    return even;
+  }
   return (even + kDdaLLSpreadBlockAlignPkts - 1) / kDdaLLSpreadBlockAlignPkts * kDdaLLSpreadBlockAlignPkts;
 }
 

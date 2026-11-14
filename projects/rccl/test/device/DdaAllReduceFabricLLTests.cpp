@@ -466,9 +466,9 @@ TEST_F(DdaAllReduceFabricLL, SpreadMatchesOneShotBitwise) {
 TEST_F(DdaAllReduceFabricLL, SpreadPassesIdleBlocksAndShortShards) {
   spreadCase<float, 4>(4, kSelf, kBufBytes, 1);  // 768-packet shards, 512 a pass
   spreadCase<float, 0>(12, kSelf, kBufBytes, 1);  // 256-packet shards, 170 a pass
-  spreadCase<float, 0>(12, 11, 400, 8);  // 50 packets in shards of 5: ranks 10 and 11 own none, blocks 1 to 7 idle
-  spreadCase<float, 0>(12, 11, 448, 2);  // 56 packets: my shard is one packet, block 1 idle
-  spreadCase<float, 0>(12, 11, 1560, 2);  // 195 packets in shards of 17, mine 8: block 1 (packet 16) reduces nothing
+  spreadCase<float, 0>(12, 11, 400, 8);  // 50 packets in shards of 5: ranks 10 and 11 own none, blocks 5 to 7 idle
+  spreadCase<float, 0>(12, 11, 448, 2);  // 56 packets: my shard is one packet, so block 1 reduces nothing
+  spreadCase<float, 0>(12, 11, 1560, 2);  // 195 packets in shards of 17, mine 8: block 1 (packets 9-16) reduces nothing
 }
 
 // Results stay the one-shot's when 16-packet slices leave trailing blocks short (5 ranks on 7 blocks) or idle (8 on 5).
