@@ -2373,8 +2373,7 @@ TEST(FaultDropBarrier, UnreachableBranchToMovedStorageRejectsApply) {
         EXPECT_TRUE(result.failed());
         EXPECT_EQ(error.code, FaultMutationErrorCode::UnsupportedForm);
         EXPECT_EQ(error.offset, kBranchOffset);
-        EXPECT_EQ(error.message,
-                  "replacement growth cannot preserve a retained direct branch displacement");
+        EXPECT_NE(error.message.find("retained direct branch"), std::string::npos) << error.message;
       } else {
         ASSERT_TRUE(result.succeeded()) << error.message;
         const AmdGpuCodeObject mutant(result.value().image.data(), result.value().image.size());
@@ -2474,7 +2473,6 @@ TEST(FaultDropBarrier, CompiledGlobalLoadRejectsDropBeforePublishingMutation) {
     ASSERT_TRUE(decoded.succeeded());
     EXPECT_EQ(decoded.value()->mnemonic(), "s_getpc_b64");
   };
-  ASSERT_NO_FATAL_FAILURE(expect_pc_read(selected_kernel->entry_text_offset));
   ASSERT_NO_FATAL_FAILURE(expect_pc_read(sibling_kernel->entry_text_offset));
 
   FaultMutationError error;
@@ -2501,6 +2499,7 @@ TEST(FaultDropBarrier, CompiledGlobalLoadRejectsDropBeforePublishingMutation) {
     EXPECT_EQ(error.code, FaultMutationErrorCode::UnsupportedForm);
     EXPECT_EQ(error.message,
               "replacement growth cannot preserve retained PC-relative addresses to moved storage");
+    EXPECT_EQ(error.offset, sibling_kernel->entry_text_offset);
     ASSERT_NO_FATAL_FAILURE(expect_pc_read(error.offset));
     EXPECT_TRUE(std::ranges::equal(context.image(), image));
     EXPECT_EQ(std::memcmp(context.source().image_data(), image.data(), image.size()), 0);

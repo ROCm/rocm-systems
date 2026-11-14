@@ -196,7 +196,9 @@ The ownership profile admits closed direct CFGs with independent kernel entries.
 shared helpers/calls, indirect or unresolved flow,
 firmware-preload entries, and declared executable owners outside the analyzed
 text. Non-aliasing unselected sections are preserved; their executable flag alone
-does not imply another text section. Detailed admission and diagnostics are in
+does not imply another text section. Additional allocated executable sections
+must decode completely and satisfy the shared source checks before discovery
+can return an inventory. Detailed admission and diagnostics are in
 the [frontend](../lib/rocjitsu/src/rocjitsu/code/patch/fault_injection/drop_barrier.cpp)
 and [shared Instrumentor contract](../lib/rocjitsu/src/rocjitsu/code/patch/instrumentor.h).
 
