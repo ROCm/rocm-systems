@@ -357,6 +357,12 @@ class GDAContext : public Context {
   __device__ void internal_sync_wg(int pe, int PE_start, int stride,
     int PE_size, int64_t *pSync, ActiveWFInfo &wf_info);
 
+  __device__ void internal_sync_wave_put_only(int pe, int PE_start, int stride,
+      int PE_size, int64_t *pSync, ActiveWFInfo &wf_info);
+
+  __device__ void internal_sync_wg_put_only(int pe, int PE_start, int stride,
+      int PE_size, int64_t *pSync, ActiveWFInfo &wf_info);
+
   __device__ void internal_direct_barrier(int pe, int PE_start, int stride,
       int n_pes, int64_t *pSync, ActiveWFInfo &wf_info);
 
