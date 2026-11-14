@@ -457,15 +457,13 @@ amdsmi_status_t WSLGPUBackend::GetGpuActivity(amdsmi_engine_usage_t* info) {
   // Feature support checked before nullptr so NOT_SUPPORTED takes priority over INVAL.
   if (info == nullptr) return AMDSMI_STATUS_INVAL;
   std::memset(info, 0, sizeof(*info));
-  // amdsmi_engine_usage_t's activity fields use the 16-bit sentinel 0xFFFF (not
-  // 0xFFFFFFFF) per their doc comment in amdsmi.h, inherited from the uint16_t
-  // average_*_activity fields on bare metal. Guard against rocdxg's uint32
-  // UINT32_MAX sentinel so it isn't passed through as a bogus ~4.29 billion %
-  // reading.
+  // amdsmi_engine_usage_t's activity fields report an unavailable usage as
+  // UINT32_MAX, as bare metal does. rocdxg has no MM activity.
   info->gfx_activity =
-      (metrics.average_gfx_activity <= 0xFFFEU) ? metrics.average_gfx_activity : 0xFFFFU;
+      (metrics.average_gfx_activity <= 0xFFFEU) ? metrics.average_gfx_activity : UINT32_MAX;
   info->umc_activity =
-      (metrics.average_umc_activity <= 0xFFFEU) ? metrics.average_umc_activity : 0xFFFFU;
+      (metrics.average_umc_activity <= 0xFFFEU) ? metrics.average_umc_activity : UINT32_MAX;
+  info->mm_activity = UINT32_MAX;
   return AMDSMI_STATUS_SUCCESS;
 }
 
