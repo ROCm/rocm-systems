@@ -207,19 +207,15 @@ private:
         }
     }
 
-    /** Copies one core metric into the row. The device lists its cores in the order of
-     * cpu_ids; a core it did not report keeps k_no_value. */
+    /** Copies one core metric into the row. The device lists every monitored core, in
+     * the order of cpu_ids; a core it could not read has k_no_value. */
     static void fill_cores(socket_stream& socket, const core_block& block,
                            const std::vector<catalog::cpu::core_t>& cores)
     {
         const auto count = std::min(socket.cpu_ids.size(), cores.size());
         for(std::size_t i = 0; i < count; ++i)
         {
-            // A core the device skipped shifts the rest: never copy onto another core
-            if(cores[i].cpu_id == socket.cpu_ids[i])
-            {
-                socket.rows.row[block.first + i] = block.metric->read(cores[i], 0, 0);
-            }
+            socket.rows.row[block.first + i] = block.metric->read(cores[i], 0, 0);
         }
     }
 

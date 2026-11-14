@@ -3,89 +3,56 @@
 
 #pragma once
 
-#include "common/defines.h"
-#include "core/common.hpp"
-#include "core/components/fwd.hpp"
-#include "core/state.hpp"
-#include "library/thread_data.hpp"
-
-#include <atomic>
-#include <chrono>
-#include <cstdint>
-#include <functional>
-#include <future>
 #include <memory>
-#include <type_traits>
-#include <vector>
+
+namespace rocprofsys::collection
+{
+class source_interface;
+}  // namespace rocprofsys::collection
 
 namespace rocprofsys::process_sampler
 {
-struct instance
-{
-    std::function<void()> setup               = []() {};
-    std::function<void()> shutdown            = []() {};
-    std::function<void()> config              = []() {};
-    std::function<void()> sample              = []() {};
-    std::function<void()> post_process        = []() {};
-    std::function<void()> pause               = []() {};
-    std::function<void()> flush_pending_pause = []() {};
-};
-//
-struct sampler
-{
-    using msec_t    = std::chrono::milliseconds;
-    using usec_t    = std::chrono::microseconds;
-    using nsec_t    = std::chrono::nanoseconds;
-    using promise_t = std::promise<void>;
-    using future_t  = std::future<void>;
-    using state_t   = state::process::State;
+/**
+ * Adds a source that cannot exist when setup() runs (SDK perf counters). Used at once
+ * when the sampler runs (started paused if paused), by the next setup() otherwise; only
+ * once.
+ */
+void
+add_source(std::unique_ptr<collection::source_interface> source);
 
-    using timestamp_t = std::int64_t;
+/** (Re)starts the sampler with the default sources and the queued ones. */
+void
+setup();
 
-    template <typename Tp = nsec_t>
-        requires(!std::is_same_v<std::decay_t<Tp>, nsec_t>)
-    static void poll(std::atomic<state_t>* _state, Tp&& _interval, promise_t* _prom)
-    {
-        poll(_state, std::chrono::duration_cast<nsec_t>(_interval), _prom);
-    }
+/** Stops every poll thread. Called on a poll thread (a source that exits the process),
+ * it marks the sampler finalized and waits for the other sources' polls in flight,
+ * without joining any thread. */
+void
+shutdown();
 
-    static void setup();
-    static void shutdown();
-    static void post_process();
-    static void pause();
-    static void resume();
-    static void set_state(state_t);
-    static void poll(std::atomic<state_t>* _state, nsec_t _interval, promise_t*);
-};
-//
-inline void
-setup()
-{
-    sampler::setup();
-}
+/** Destroys the sampler and its providers. A no-op on a poll thread. */
+void
+post_process();
 
-inline void
-shutdown()
-{
-    sampler::shutdown();
-}
+/** Any thread; never waits for setup() or a poll. */
+void
+pause();
 
-inline void
-post_process()
-{
-    sampler::post_process();
-}
+/** Any thread; never waits for setup() or a poll. */
+void
+resume();
 
-inline void
-pause()
-{
-    sampler::pause();
-}
+/** Before fork(), any thread including a poll thread: waits for the running polls and
+ * keeps new ones from starting until unblock(). */
+void
+block();
 
-inline void
-resume()
-{
-    sampler::resume();
-}
-//
+/** After fork() in the parent. No AMD SMI call. */
+void
+unblock();
+
+/** Forked child: abandons the whole state (its threads do not exist here) and starts a
+ * fresh, idle one. No AMD SMI or provider call. */
+void
+postfork_child();
 }  // namespace rocprofsys::process_sampler

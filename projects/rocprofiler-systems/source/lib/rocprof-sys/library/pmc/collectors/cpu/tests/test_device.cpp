@@ -8,6 +8,7 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include <cmath>
 #include <memory>
 
 using namespace rocprofsys::pmc::collectors::cpu;
@@ -341,7 +342,7 @@ TEST_F(cpu_device_test, single_cpu_monitored)
     EXPECT_EQ(cpu2_count, 1u);
 }
 
-TEST_F(cpu_device_test, nonexistent_cpu_id_has_zero_metrics)
+TEST_F(cpu_device_test, nonexistent_cpu_id_has_no_value)
 {
     EXPECT_CALL(*mock_backend, read_proc_stat()).Times(2);        // init + 1 sample
     EXPECT_CALL(*mock_backend, read_cpu_frequencies()).Times(2);  // init + 1 sample
@@ -351,13 +352,10 @@ TEST_F(cpu_device_test, nonexistent_cpu_id_has_zero_metrics)
     device<MockBackend>    dev(mock_backend, 0, nonexistent);
     auto                   result = dev.get_cpu_metrics(all_enabled);
 
-    // make_empty_metrics pre-populates zero entries for all monitored CPUs,
-    // even if they don't appear in /proc/stat. This ensures Perfetto tracks
-    // show zero rather than retaining stale values.
     ASSERT_EQ(result.cpu_data.size(), 1u);
     EXPECT_EQ(result.cpu_data[0].cpu_id, 99u);
-    EXPECT_DOUBLE_EQ(result.cpu_data[0].load, 0.0);
-    EXPECT_FLOAT_EQ(result.cpu_data[0].frequency, 0.0f);
+    EXPECT_TRUE(std::isnan(result.cpu_data[0].load));
+    EXPECT_TRUE(std::isnan(result.cpu_data[0].frequency));
 }
 
 TEST_F(cpu_device_test, multiple_samples_accumulate_correctly)
@@ -452,7 +450,7 @@ TEST_F(cpu_device_test, only_frequency_enabled_skips_load_and_process)
     for(const auto& cpu : result.cpu_data)
     {
         EXPECT_FLOAT_EQ(cpu.frequency, 2400.0f);
-        EXPECT_DOUBLE_EQ(cpu.load, 0.0);
+        EXPECT_TRUE(std::isnan(cpu.load));
     }
     EXPECT_EQ(result.process_data.page_rss, 0);
     EXPECT_EQ(result.process_data.virt_mem, 0);
@@ -485,7 +483,7 @@ TEST_F(cpu_device_test, only_load_enabled_skips_frequency_and_process)
     for(const auto& cpu : result.cpu_data)
     {
         EXPECT_NEAR(cpu.load, 10.0, 0.001);
-        EXPECT_FLOAT_EQ(cpu.frequency, 0.0f);
+        EXPECT_TRUE(std::isnan(cpu.frequency));
     }
     EXPECT_EQ(result.process_data.page_rss, 0);
 }
@@ -529,12 +527,11 @@ TEST_F(cpu_device_test, no_metrics_enabled_skips_all_reads)
     device<MockBackend> dev(mock_backend, 0, monitored_cpus);
     auto const          result = dev.get_cpu_metrics(none);
 
-    // Per-CPU entries exist (from make_empty_metrics) but all values are zero
     EXPECT_EQ(result.cpu_data.size(), 4u);
     for(const auto& cpu : result.cpu_data)
     {
-        EXPECT_FLOAT_EQ(cpu.frequency, 0.0f);
-        EXPECT_DOUBLE_EQ(cpu.load, 0.0);
+        EXPECT_TRUE(std::isnan(cpu.frequency));
+        EXPECT_TRUE(std::isnan(cpu.load));
     }
     EXPECT_EQ(result.process_data.page_rss, 0);
     EXPECT_EQ(result.process_data.virt_mem, 0);
