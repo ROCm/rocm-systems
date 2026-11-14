@@ -292,7 +292,18 @@ HIP_TEST_CASE(Unit_Grid_Group_Sync_Positive_Basic) {
   params[2] = reinterpret_cast<void*>(&uint_arr_dev);
   params[3] = reinterpret_cast<void*>(&loops);
 
-  HIP_CHECK(hipLaunchCooperativeKernel(sync_kernel, blocks, threads, params, 0, 0));
+  {
+    hipError_t launch_err = hipLaunchCooperativeKernel(sync_kernel, blocks, threads, params, 0, 0);
+    if (launch_err == hipErrorCooperativeLaunchTooLarge) {
+      // Grid exceeds physical CU capacity for cooperative launch — skip this combo
+      HIP_CHECK(hipFree(per_loop_atomic_val));
+      HIP_CHECK(hipFree(atomic_val));
+      HIP_CHECK(hipHostFree(uint_arr));
+      HIP_CHECK(hipFree(uint_arr_dev));
+      return;
+    }
+    HIP_CHECK(launch_err);
+  }
 
   HIP_CHECK(hipMemcpy(uint_arr, uint_arr_dev, array_len * sizeof(*uint_arr),
                       hipMemcpyDeviceToHost));
