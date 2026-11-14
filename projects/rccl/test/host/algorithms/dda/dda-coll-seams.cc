@@ -31,6 +31,7 @@ static int DefaultDdaFabricA2aLL128Threads(const ncclComm*, size_t) { return 0; 
 static int DefaultDdaFabricA2aLL128Blocks(const ncclComm* comm, size_t) {
   return comm != nullptr ? comm->ddaFabricMaxBlocks : 0;
 }
+static int DefaultDdaFabricBcLL128Threads(const ncclComm*) { return 0; }  // no table: 512 threads
 static bool DefaultDdaDatatypeSupported(const ncclComm* comm, ncclDataType_t datatype) {
   switch (datatype) {
   case ncclFloat32:
@@ -54,6 +55,7 @@ std::function<int(const ncclComm*, size_t)> g_rcclDdaFabricAgLL128Threads = Defa
 std::function<int(const ncclComm*, size_t)> g_rcclDdaFabricAgLL128Blocks = DefaultDdaFabricAgLL128Blocks;
 std::function<int(const ncclComm*, size_t)> g_rcclDdaFabricA2aLL128Threads = DefaultDdaFabricA2aLL128Threads;
 std::function<int(const ncclComm*, size_t)> g_rcclDdaFabricA2aLL128Blocks = DefaultDdaFabricA2aLL128Blocks;
+std::function<int(const ncclComm*)> g_rcclDdaFabricBcLL128Threads = DefaultDdaFabricBcLL128Threads;
 std::function<bool(const ncclComm*, ncclDataType_t)> g_rcclDdaDatatypeSupported = DefaultDdaDatatypeSupported;
 
 size_t rcclDdaLLThreshold(const ncclComm* comm, ncclFunc_t func) { return g_rcclDdaLLThreshold(comm, func); }
@@ -73,6 +75,7 @@ int rcclDdaFabricA2aLL128Threads(const ncclComm* comm, size_t totalBytes) {
 int rcclDdaFabricA2aLL128Blocks(const ncclComm* comm, size_t totalBytes) {
   return g_rcclDdaFabricA2aLL128Blocks(comm, totalBytes);
 }
+int rcclDdaFabricBcLL128Threads(const ncclComm* comm) { return g_rcclDdaFabricBcLL128Threads(comm); }
 bool rcclDdaDatatypeSupported(const ncclComm* comm, ncclDataType_t datatype) {
   return g_rcclDdaDatatypeSupported(comm, datatype);
 }
@@ -88,6 +91,7 @@ void ResetDdaCollSeams() {
   g_rcclDdaFabricAgLL128Blocks = DefaultDdaFabricAgLL128Blocks;
   g_rcclDdaFabricA2aLL128Threads = DefaultDdaFabricA2aLL128Threads;
   g_rcclDdaFabricA2aLL128Blocks = DefaultDdaFabricA2aLL128Blocks;
+  g_rcclDdaFabricBcLL128Threads = DefaultDdaFabricBcLL128Threads;
   g_rcclDdaDatatypeSupported = DefaultDdaDatatypeSupported;
 }
 
