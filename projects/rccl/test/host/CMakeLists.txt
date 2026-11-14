@@ -188,6 +188,12 @@ while(_rccl_cast_pins)
   rccl_assert_source_line("${_rccl_src_root}/${_src}" "${_prod}" "fakes/${_fake}")
   rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/${_fake}" "${_copy}" "the ${_src} copy")
 endwhile()
+rccl_assert_source_line("${_rccl_src_root}/graph/paths.cc"
+  "RCCL_PARAM(SaturateP2pNChannels, \"SATURATE_P2P_NCHANNELS\", RCCL_VALUE_UNSET)"
+  "fakes/enqueue_test_deps.cc: rcclParamSaturateP2pNChannels()")
+rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/enqueue_test_deps.cc"
+  "int64_t rcclParamSaturateP2pNChannels() { return g_loadParam(\"RCCL_SATURATE_P2P_NCHANNELS\", RCCL_VALUE_UNSET); }"
+  "the SaturateP2pNChannels fake default")
 rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/tuning_fakes.cc"
   "int64_t g_paramMinNchannels = -2;" "the MinNchannels fake default")
 rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/tuning_fakes.cc"

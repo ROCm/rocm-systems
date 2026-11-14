@@ -431,6 +431,138 @@ TEST_F(EnqueueMicrotest, P2pPolicyChannels_ScatterBelowPerPeerReturnsItsParts) {
   EXPECT_EQ(-1, rcclP2pPolicyChannels(comm.get(), nullptr));
 }
 
+// gfx942 remote alltoall cap (enqueue.cc). The fit loop divides
+// p2pnChannelsPerPeer by two while fitted * nRanks is strictly greater than
+// p2pnChannels, then returns 2 only when the result is still above 2. The peer
+// in this table is on the other node. A same-node peer, every other collective,
+// arch, node count, a user-set nChannelsPerNetPeer, and RCCL_SATURATE_P2P_NCHANNELS
+// fall through. gfx110 alltoall still reaches its own table entry.
+TEST_F(EnqueueMicrotest, P2pPolicyChannels_Gfx942MultiNodeAlltoallCapsAboveTwoFittedChannels) {
+  struct Case {
+    const char* name;
+    int nNodes, nRanks, channels, perPeer;
+    const char* gcn;
+    ncclFunc_t coll;
+    bool userSet;
+    int user;
+    int expect;
+  };
+  const Case cases[] = {
+    // 4 * 16 == 64, so the strict > does not halve. fitted stays 4.
+    {"2x8 alltoall", 2, 16, 64, 4, "gfx942", ncclFuncAlltoAll, false, 0, 2},
+    // 16*16=256 > 64 -> 8; 8*16=128 > 64 -> 4; 4*16 == 64 stops.
+    {"two halvings still above 2", 2, 16, 64, 16, "gfx942", ncclFuncAlltoAll, false, 0, 2},
+    // 8*16=128 > 64 -> 4; 4*16 == 64 stops. 4 > 2.
+    {"one halving still above 2", 2, 16, 64, 8, "gfx942", ncclFuncAlltoAll, false, 0, 2},
+    // 6*16=96 > 64 -> 3; 3*16=48 stops. Integer halving is not pow2.
+    {"non-pow2 per peer", 2, 16, 64, 6, "gfx942", ncclFuncAlltoAll, false, 0, 2},
+    // IsArchMatch is a prefix compare, so a stepping suffix still matches.
+    {"gfx942 stepping", 2, 16, 64, 4, "gfx942:xnack-", ncclFuncAlltoAll, false, 0, 2},
+    // 2*128 > 64 -> 1, and 1*128 is still greater, but the loop refuses to halve past 1.
+    {"stops at one channel", 16, 128, 64, 2, "gfx942", ncclFuncAlltoAll, false, 0, -1},
+    // 4*32=128 > 64 -> 2; 2*32 == 64 stops. 2 > 2 is false.
+    {"fitted lands on 2", 4, 32, 64, 4, "gfx942", ncclFuncAlltoAll, false, 0, -1},
+    // 4*64 > 64 -> 2; 2*64 > 64 -> 1. The loop stops at 1.
+    {"fitted lands on 1", 8, 64, 64, 4, "gfx942", ncclFuncAlltoAll, false, 0, -1},
+    // 2*16=32 is not greater than 64.
+    {"already 2", 2, 16, 64, 2, "gfx942", ncclFuncAlltoAll, false, 0, -1},
+    {"single node", 1, 8, 64, 4, "gfx942", ncclFuncAlltoAll, false, 0, -1},
+    {"gfx950", 2, 16, 64, 4, "gfx950", ncclFuncAlltoAll, false, 0, -1},
+    // Misses gfx942, then the gfx110 table returns 1. Single node must too:
+    // the new gate is not allowed to swallow that entry.
+    {"gfx110 multi-node", 2, 16, 64, 4, "gfx1100", ncclFuncAlltoAll, false, 0, 1},
+    {"gfx110 single-node", 1, 8, 64, 4, "gfx1100", ncclFuncAlltoAll, false, 0, 1},
+    {"send", 2, 16, 64, 4, "gfx942", ncclFuncSend, false, 0, -1},
+    {"recv", 2, 16, 64, 4, "gfx942", ncclFuncRecv, false, 0, -1},
+    {"sendrecv", 2, 16, 64, 4, "gfx942", ncclFuncSendRecv, false, 0, -1},
+    {"gather", 2, 16, 64, 4, "gfx942", ncclFuncGather, false, 0, -1},
+    {"alltoallv", 2, 16, 64, 4, "gfx942", ncclFuncAlltoAllv, false, 0, -1},
+    // Either explicit count skips the cap, including one equal to the cap.
+    {"user count 4", 2, 16, 64, 4, "gfx942", ncclFuncAlltoAll, true, 4, -1},
+    {"user count 2", 2, 16, 64, 4, "gfx942", ncclFuncAlltoAll, true, 2, -1},
+  };
+
+  for (const Case& k : cases) {
+    auto topo = std::unique_ptr<ncclTopoSystem>(new ncclTopoSystem{});
+    auto comm = P2pPartsComm(k.nNodes, k.nRanks, k.channels, k.perPeer);
+    comm->topo = topo.get();
+    topo->nodes[GPU].count = 1;
+    std::snprintf(topo->nodes[GPU].nodes[0].gpu.gcn,
+                  sizeof(topo->nodes[GPU].nodes[0].gpu.gcn), "%s", k.gcn);
+    if (k.userSet) comm->config.nChannelsPerNetPeer = k.user;
+    int rankNode[2] = {0, 1};
+    comm->node = 0;
+    comm->rankToNode = rankNode;
+    ncclTaskP2p task{};
+    task.collAPI = k.coll;
+    task.root = 1;
+    EXPECT_EQ(k.expect, rcclP2pPolicyChannels(comm.get(), &task)) << k.name;
+  }
+
+  // task->root is the peer. Both ends see the other node, so both cap; a peer
+  // on this node does not.
+  auto topo = std::unique_ptr<ncclTopoSystem>(new ncclTopoSystem{});
+  auto comm = P2pPartsComm(/*nNodes=*/2, /*nRanks=*/16, /*p2pnChannels=*/64, /*perPeer=*/4);
+  comm->topo = topo.get();
+  topo->nodes[GPU].count = 1;
+  std::snprintf(topo->nodes[GPU].nodes[0].gpu.gcn, sizeof(topo->nodes[GPU].nodes[0].gpu.gcn), "gfx942");
+  int rankNode[2] = {0, 1};
+  comm->rankToNode = rankNode;
+  ncclTaskP2p task{};
+  task.collAPI = ncclFuncAlltoAll;
+  comm->node = 0;
+  task.root = 1;
+  EXPECT_EQ(2, rcclP2pPolicyChannels(comm.get(), &task)) << "node 0 to node 1";
+  comm->node = 1;
+  task.root = 0;
+  EXPECT_EQ(2, rcclP2pPolicyChannels(comm.get(), &task)) << "node 1 to node 0";
+  comm->node = 0;
+  task.root = 0;
+  EXPECT_EQ(-1, rcclP2pPolicyChannels(comm.get(), &task)) << "same-node peer";
+}
+
+TEST_F(EnqueueMicrotest, P2pPolicyChannels_P2pDisableReturnsBeforeTheGfx942Cap) {
+  // The disable check is above the arch read. A null topology must not be
+  // dereferenced, or this case crashes instead of returning -1.
+  g_loadParam = [](const char* env, int64_t deft) {
+    return std::strcmp(env, "P2P_DISABLE") == 0 ? int64_t(1) : deft;
+  };
+  auto comm = P2pPartsComm(/*nNodes=*/2, /*nRanks=*/16, /*p2pnChannels=*/64, /*perPeer=*/4);
+  ncclTaskP2p task{};
+  task.collAPI = ncclFuncAlltoAll;
+  EXPECT_EQ(nullptr, comm->topo);
+  EXPECT_EQ(-1, rcclP2pPolicyChannels(comm.get(), &task));
+}
+
+TEST_F(EnqueueMicrotest, P2pPolicyChannels_SaturateP2pSkipsTheGfx942Cap) {
+  auto topo = std::unique_ptr<ncclTopoSystem>(new ncclTopoSystem{});
+  auto comm = P2pPartsComm(/*nNodes=*/2, /*nRanks=*/16, /*p2pnChannels=*/64, /*perPeer=*/4);
+  comm->topo = topo.get();
+  topo->nodes[GPU].count = 1;
+  std::snprintf(topo->nodes[GPU].nodes[0].gpu.gcn, sizeof(topo->nodes[GPU].nodes[0].gpu.gcn), "gfx942");
+  int rankNode[2] = {0, 1};
+  comm->node = 0;
+  comm->rankToNode = rankNode;
+  ncclTaskP2p task{};
+  task.collAPI = ncclFuncAlltoAll;
+  task.root = 1;
+
+  // paths.cc turns saturation on for every value other than 0 and UNSET (-2),
+  // including -1. A <= 0 gate caps -1 and still passes a test that only sets 1 and 0.
+  for (int64_t on : {int64_t(1), int64_t(-1)}) {
+    g_loadParam = [on](const char* env, int64_t deft) {
+      return std::strcmp(env, "RCCL_SATURATE_P2P_NCHANNELS") == 0 ? on : deft;
+    };
+    EXPECT_EQ(-1, rcclP2pPolicyChannels(comm.get(), &task)) << "saturate " << on;
+  }
+  for (int64_t off : {int64_t(0), int64_t(RCCL_VALUE_UNSET)}) {
+    g_loadParam = [off](const char* env, int64_t deft) {
+      return std::strcmp(env, "RCCL_SATURATE_P2P_NCHANNELS") == 0 ? off : deft;
+    };
+    EXPECT_EQ(2, rcclP2pPolicyChannels(comm.get(), &task)) << "saturate " << off;
+  }
+}
+
 TEST_F(EnqueueMicrotest, P2pReservationChannels_P2pNetPreservesAinicScatterLimit) {
   g_rcclUseAinicValue = true;
   auto comm = P2pPartsComm(/*nNodes=*/4, /*nRanks=*/32, /*p2pnChannels=*/32, /*perPeer=*/2);

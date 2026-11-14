@@ -1390,6 +1390,8 @@ int rcclP2pTaskParts(struct ncclComm* comm, ncclFunc_t collAPI, int peer) {
   return comm->p2pnChannelsPerPeer;
 }
 
+RCCL_PARAM_DECLARE(SaturateP2pNChannels);
+
 static int rcclP2pPolicyChannels(struct ncclComm* comm, struct ncclTaskP2p* task) {
   struct Policy {
     const char* arch;
@@ -1403,6 +1405,19 @@ static int rcclP2pPolicyChannels(struct ncclComm* comm, struct ncclTaskP2p* task
   // The policies below target direct P2P/IPC traffic only. When P2P is disabled,
   // preserve the normal channel selection for the fallback transport.
   if (ncclParamP2pDisable()) return -1;
+  // Remote gfx942 alltoall peers share one NIC, so a lone-peer count
+  // oversubscribes it. Same-node peers, send, and sendrecv are not capped.
+  // Skipped when the nRanks fit already gives 2 or less, or the user set
+  // nChannelsPerNetPeer or RCCL_SATURATE_P2P_NCHANNELS.
+  if (comm->nNodes > 1 && task->collAPI == ncclFuncAlltoAll &&
+      comm->config.nChannelsPerNetPeer == NCCL_CONFIG_UNDEF_INT &&
+      (rcclParamSaturateP2pNChannels() == 0 || rcclParamSaturateP2pNChannels() == RCCL_VALUE_UNSET) &&
+      comm->rankToNode[task->root] != comm->node &&
+      IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx942")) {
+    int fitted = comm->p2pnChannelsPerPeer;
+    while (fitted * comm->nRanks > comm->p2pnChannels && fitted > 1) fitted /= 2;
+    if (fitted > 2) return 2;
+  }
   constexpr Policy policies[] = {
     // Two-channel full-mesh traffic has high variance on gfx110x. Keep the
     // workaround specific to AllToAll so Gather, SendRecv and Scatter (outside the
