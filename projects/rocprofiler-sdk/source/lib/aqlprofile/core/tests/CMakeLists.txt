@@ -51,3 +51,5 @@ rocprofiler_add_unit_test(
            "AqlProfileV2ApiTest.SpmQueryAgentConfigurations_NullCallback"
            "AqlProfileV2ApiTest.SpmQueryAgentConfigurations_InvalidAgent"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+
+add_subdirectory(packet-dump)

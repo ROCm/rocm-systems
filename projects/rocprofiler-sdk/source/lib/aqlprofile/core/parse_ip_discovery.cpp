@@ -34,6 +34,7 @@
 #include <cassert>
 
 #include "lib/aqlprofile/core/ip_discovery.h"
+#include "lib/common/environment.hpp"
 
 #define PCI_BUS_NUM(x)  (((x) >> 8) & 0xff)
 #define PCI_SLOT(devfn) (((devfn) >> 3) & 0x1f)
@@ -43,6 +44,8 @@ namespace fs = std::filesystem;
 
 namespace
 {
+constexpr auto ip_discovery_path_env = "AQLPROFILE_CUSTOM_IP_DISCOVERY_PATH";
+
 /**
  * @brief Reads a single integer (decimal or hexadecimal) from a sysfs file.
  *
@@ -80,20 +83,26 @@ read_sysfs_single_int(const fs::path& path)
  *         if successful, or `std::nullopt` if the file does not exist, cannot be opened,
  *         or contains invalid data.
  */
-std::optional<base_addr_segments_t>
+struct parsed_base_addr_segments
+{
+    base_addr_segments_t values{};
+    size_t               count = 0;
+};
+
+std::optional<parsed_base_addr_segments>
 read_sysfs_base_addr_segments(const fs::path& path)
 {
     std::ifstream file(path);
     if(!file.is_open()) return std::nullopt;  // Failed to open file
 
-    base_addr_segments_t segments{0};
-    std::string          databuf;
-    size_t               x = 0;
-    while(std::getline(file, databuf) && x < segments.size())
+    parsed_base_addr_segments segments{};
+    std::string               databuf;
+    while(std::getline(file, databuf) && segments.count < segments.values.size())
     {
         std::stringstream ss(databuf);
-        ss >> std::hex >> segments[x++];
+        ss >> std::hex >> segments.values[segments.count];
         if(ss.fail()) return std::nullopt;  // Failed to parse data
+        ++segments.count;
     }
 
     return segments;
@@ -131,13 +140,17 @@ parse_ip_instances(int die_num, const fs::path& diepath, const std::string& ipna
 
         discovery_table_entry_t table_entry{};
         table_entry.die = die_num;
+        table_entry.id  = std::stoi(dir_entry.path().filename());
 
         // "/sys/bus/pci/devices/{domain_bdf_str}/ip_discovery/die{die_num}/{ipname}/{instance_num}"
         fs::path instance_path = dir_path / dir_entry.path().filename();
 
         // base_addr list
         if(auto segments = read_sysfs_base_addr_segments(instance_path / "base_addr"))
-            table_entry.segments = *segments;
+        {
+            table_entry.segments      = segments->values;
+            table_entry.segment_count = segments->count;
+        }
         else
             throw std::runtime_error("Failed to read IP base_addr segments for ipname=" + ipname +
                                      " die=" + std::to_string(die_num));
@@ -219,6 +232,12 @@ get_domain_bdf_str(uint32_t domain, uint32_t bdf)
 
 }  // namespace
 
+bool
+use_custom_ip_discovery_path()
+{
+    return rocprofiler::common::get_env_optional(ip_discovery_path_env).has_value();
+}
+
 /**
  * @brief Parses IP discovery information for a given PCI domain and BDF (Bus:Device.Function).
  *
@@ -234,9 +253,9 @@ get_domain_bdf_str(uint32_t domain, uint32_t bdf)
  *                            or if no IP instances are found.
  *
  * @details
- * - Constructs the sysfs path for the PCI device using the domain and BDF values.
- * - Iterates over the dies in the `/sys/bus/pci/devices/{domain_bdf_str}/ip_discovery/die`
- * directory.
+ * - Uses `AQLPROFILE_CUSTOM_IP_DISCOVERY_PATH` as the PCI device directory when it is set.
+ * - Otherwise, constructs the sysfs path for the PCI device using the domain and BDF values.
+ * - Iterates over the dies in the selected directory.
  * - For each die, iterates over the IP directories and calls `parse_ip_instances` to parse
  *   individual IP instance data.
  * - If no IP instances are found, throws an exception.
@@ -245,12 +264,19 @@ discovery_table_t
 parse_ip_discovery(uint32_t domain, uint32_t bdf)
 {
     // /sys/bus/pci/devices/{domain_bdf_str}/ip_discovery/die
-    const fs::path die_path =
+    const auto ip_discover_override = rocprofiler::common::get_env_optional(ip_discovery_path_env);
+    if(ip_discover_override && ip_discover_override->empty())
+        throw std::runtime_error(std::string{ip_discovery_path_env} + " is set but empty");
+
+    const auto sysfs_path =
         fs::path("/sys/bus/pci/devices") / get_domain_bdf_str(domain, bdf) / "ip_discovery/die";
+
+    const fs::path die_path =
+        ip_discover_override ? fs::path{*ip_discover_override} / "ip_discovery/die" : sysfs_path;
 
     if(!fs::exists(die_path) || !fs::is_directory(die_path))
     {
-        throw std::runtime_error("sysfs path does not exist or is not a directory: " +
+        throw std::runtime_error("IP discovery path does not exist or is not a directory: " +
                                  die_path.string());
     }
 
