@@ -41,13 +41,18 @@ It is copied verbatim from the Linux revision above; refresh it from that
 upstream file so the per-queue reset and CAP2 definitions remain in sync.
 
 The HSA headers and Rust `ddi/libhsa` provider expose AMD extension revision
-1.36. Signal batches are supported in fine-grained system pools and in
-qualified host-visible GPU pools. PCIe-backed GPU signal stores use a
-readback to flush posted writes. Async copy and SVM completion signals require
-host atomic support, so PCIe-backed batch members cannot serve as completions.
-Query `HSA_AMD_MEMORY_POOL_INFO_SIGNAL_CAPABLE` for each pool and
-`HSA_AMD_AGENT_INFO_SIGNAL_HINTS_SUPPORTED` before using completion hints.
-The provider currently reports signal hints unsupported because it does not
-probe the CP firmware's queue capability bit.
+1.39, including rectangular batches and managed SVM pointer classification.
+The loader 1.04 table includes caller-owned executable destinations, and the
+image table includes sampler v3. Builds inside this repository check the HSA
+mirrors against their primary files.
+
+Signal batches are supported in fine-grained system pools and in qualified
+host-visible GPU pools. PCIe-backed GPU signal stores use a readback to flush
+posted writes. Async copy and SVM completion signals require host atomic
+support, so PCIe-backed batch members cannot serve as completions. Query
+`HSA_AMD_MEMORY_POOL_INFO_SIGNAL_CAPABLE` for each pool. Completion hints
+require the `HSA_AMD_AQL_PROPERTY_SIGNAL_HINTS` bit index in
+`HSA_AMD_AGENT_INFO_AQL_EXTENSIONS`; the provider probes CP with a completed
+AQL packet before reporting this capability.
 
 `abce` is not a mirror: `include/abce` is its primary location.

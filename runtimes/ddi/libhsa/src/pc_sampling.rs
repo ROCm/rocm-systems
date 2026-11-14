@@ -182,7 +182,7 @@ pub(crate) fn create_session(args: &CreateArgs) -> Status {
         unit,
         interval: args.interval as u64,
     };
-    let (handle, device, info, page_size, quarantine, _token) = {
+    let (handle, device, info, page_size, quarantine, restore, _token) = {
         let mut guard = match lock() {
             Ok(guard) => guard,
             Err(status) => return status,
@@ -197,12 +197,21 @@ pub(crate) fn create_session(args: &CreateArgs) -> Status {
             return INVALID_AGENT;
         };
         let info = runtime.gpus[index].info();
-        if !session::supported_gpu(info) {
+        if !session::supported_gpu(&info) {
             return NOT_SUPPORTED;
         }
         if runtime.pc_sampling_state.agent_busy(args.agent) {
             return RESOURCE_BUSY;
         }
+        let Some(restore) = runtime
+            .debugger
+            .as_ref()
+            .and_then(|debugger| debugger.restore_token(&runtime.gpus[index].device))
+        else {
+            // A shared native context may belong to another adapter. Do not
+            // replace a trap binding whose restoration/lifetime we do not own.
+            return NOT_SUPPORTED;
+        };
         let Some(token) = runtime.inflight.enter() else {
             return OUT_OF_RESOURCES;
         };
@@ -217,6 +226,7 @@ pub(crate) fn create_session(args: &CreateArgs) -> Status {
             info,
             runtime.host_page_size,
             runtime.pc_sampling_state.quarantine.clone(),
+            restore,
             token,
         )
     };
@@ -225,13 +235,14 @@ pub(crate) fn create_session(args: &CreateArgs) -> Status {
     let callback_data = unsafe { CallbackArg::new(args.callback_data) };
     let result = Resources::prepare(
         device,
-        info,
+        &info,
         request,
         args.trace_id,
         args.buffer_size,
         page_size,
         args.callback,
         callback_data,
+        restore,
     )
     .and_then(|resources| SessionHandle::create(resources, args.agent, &quarantine));
     let mut guard = match lock() {

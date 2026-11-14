@@ -147,8 +147,10 @@ impl VmBindings {
         &self,
         kfd: &Shared<sys::Kfd>,
         node: &sysfs::KfdNode,
+        xnack_requested: Option<crate::session::XnackModeRequest>,
+        debugger: Option<sys::RuntimeDebuggerRegistration>,
     ) -> Result<Shared<DeviceVm>, Error> {
-        self.device_with_render(kfd, node, sysfs::open_render)
+        self.device_with_render(kfd, node, xnack_requested, debugger, sysfs::open_render)
     }
 
     // Supplying the opener lets tests exercise concurrent initialization and
@@ -161,6 +163,8 @@ impl VmBindings {
         &self,
         kfd: &Shared<sys::Kfd>,
         node: &sysfs::KfdNode,
+        xnack_requested: Option<crate::session::XnackModeRequest>,
+        debugger: Option<sys::RuntimeDebuggerRegistration>,
         open_render: impl FnOnce(u32) -> io::Result<File>,
     ) -> Result<Shared<DeviceVm>, Error> {
         kfd.check_process()
@@ -168,6 +172,12 @@ impl VmBindings {
         let mut runtime = kfd
             .runtime_guard()
             .map_err(|source| native_error("KFD runtime serialization", source))?;
+        kfd.configure_debugger_locked(&mut runtime, debugger)
+            .map_err(|source| native_error("KFD debugger registration", source))?;
+        if let Some(request) = xnack_requested {
+            kfd.configure_xnack_mode_locked(&mut runtime, request)
+                .map_err(|source| native_error("KFD XNACK configuration", source))?;
+        }
         let process = std::process::id();
         let owner = self
             .process

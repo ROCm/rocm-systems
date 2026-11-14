@@ -390,7 +390,7 @@ impl HsaLifecycle {
                 // This is the single public admission boundary for final
                 // shutdown. Existing leases finish before state is detached.
                 let runtime = self.state.as_ref().ok_or(ERROR)?;
-                runtime.request_stop();
+                runtime.request_shutdown();
                 self.references = 0;
                 self.phase = LifecyclePhase::Preparing(generation);
                 Ok(ShutdownWork::Prepare(generation))
@@ -517,6 +517,9 @@ impl Drop for LifecycleTransition {
             // Some handle APIs intentionally bypass the registry mutex. Fence
             // those entry points when a failed transition retains live state.
             process_admission().close();
+            if let Some(state) = &registry.state {
+                state.request_stop();
+            }
             registry.quarantine = Some(match registry.state.take() {
                 Some(state) => Quarantine::RetainedGeneration {
                     _state: RetainOnDrop::new(state),
@@ -567,6 +570,76 @@ pub(crate) fn begin_init_waiting(
 /// Returns mutable initialized state or an HSA lifecycle error.
 pub(crate) fn initialized_mut(runtime: &mut HsaLifecycle) -> Result<&mut HsaState, Status> {
     runtime.as_mut().ok_or(NOT_INITIALIZED)
+}
+
+/// Admits synchronous v2 tool resource destruction after ordinary admission
+/// and callback producers have drained. The scope must end before legacy
+/// unload callbacks or generation detachment.
+#[cfg(all(hsa_tool_dispatch, not(test)))]
+pub(crate) fn enter_tool_cleanup() -> Result<ApiLeaseScope, Status> {
+    let registry = lock()?;
+    let LifecyclePhase::Preparing(generation) = registry.phase else {
+        return Err(INVALID_RUNTIME_STATE);
+    };
+    if registry.state.is_none() {
+        return Err(INVALID_RUNTIME_STATE);
+    }
+    let token = process_admission()
+        .enter_cleanup(generation)
+        .ok_or(INVALID_RUNTIME_STATE)?;
+    Ok(ApiLeaseScope::enter(token))
+}
+
+/// Opens explicit cleanup delegation while native and callback services live.
+#[cfg(all(hsa_tool_dispatch, not(test)))]
+pub(crate) fn begin_tool_preparation() -> Result<admission::ToolCleanupScope, Status> {
+    let registry = lock()?;
+    let LifecyclePhase::Preparing(generation) = registry.phase else {
+        return Err(INVALID_RUNTIME_STATE);
+    };
+    if registry
+        .state
+        .as_ref()
+        .is_none_or(|state| state.health.is_quarantined())
+    {
+        return Err(INVALID_RUNTIME_STATE);
+    }
+    process_admission()
+        .begin_cleanup(generation)
+        .ok_or(INVALID_RUNTIME_STATE)
+}
+
+/// Grants a worker access only to the currently preparing generation.
+#[cfg(all(hsa_tool_dispatch, not(test)))]
+pub(crate) fn enter_delegated_tool_cleanup(generation: u64) -> Result<ApiLeaseScope, Status> {
+    let registry = lock()?;
+    if registry
+        .state
+        .as_ref()
+        .is_none_or(|state| state.health.is_quarantined())
+    {
+        return Err(INVALID_RUNTIME_STATE);
+    }
+    let token = match registry.phase {
+        LifecyclePhase::Active(current) | LifecyclePhase::LoadingTools(current)
+            if current == generation =>
+        {
+            process_admission().enter_tool_work(generation)
+        }
+        LifecyclePhase::Preparing(current) if current == generation => {
+            if ApiLeaseScope::cleanup() {
+                // Final synchronous destruction may use the same executor.
+                // Its parent lease already retains this generation; this does
+                // not reopen delegation to another worker after preparation.
+                process_admission().enter_tool_work(generation)
+            } else {
+                process_admission().enter_delegated_cleanup(generation)
+            }
+        }
+        _ => None,
+    }
+    .ok_or(INVALID_RUNTIME_STATE)?;
+    Ok(ApiLeaseScope::enter(token))
 }
 
 #[cfg(test)]

@@ -40,15 +40,17 @@
 // export the shared library's versioned ABI symbols.
 #[cfg(all(target_os = "linux", not(test)))]
 core::arch::global_asm!(include_str!("exports_linux.S"));
-#[cfg(all(target_os = "linux", target_arch = "x86_64", not(test)))]
+#[cfg(all(hsa_tool_dispatch, not(test)))]
 core::arch::global_asm!(include_str!(concat!(
     env!("OUT_DIR"),
     "/api_trace_dispatch_linux.S"
 )));
 
-#[cfg(all(target_os = "linux", target_arch = "x86_64", not(test)))]
+#[cfg(all(hsa_tool_dispatch, not(test)))]
 mod api_trace;
 mod callback_arg;
+mod debugger;
+mod dispatch;
 mod ffi;
 mod image_abi;
 mod image_gfx12;

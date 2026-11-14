@@ -101,7 +101,52 @@ fn vmem_pointer_description(runtime: &HsaState, address: usize) -> Option<Pointe
         .range(..=address)
         .next_back()
         .filter(|(_, reservation)| reservation.contains_range(address, 1))
-        .map(|(_, reservation)| reservation.description.clone())
+        .map(|(_, reservation)| {
+            let mut description = reservation.description.clone();
+            if let Some((start, size)) = svm::committed_range(&reservation.svm_ranges, address)
+            {
+                description.pointer_type = POINTER_TYPE_SVM;
+                description.agent_base = start;
+                description.host_base = Some(start);
+                description.size = size;
+                description.alloc_flags = POINTER_ALLOC_HOST_ACCESS;
+                description.accessible = runtime.cpus.iter().enumerate()
+                    .map(|(index, _)| HsaAgent { handle: CPU_AGENT + index as u64 }).collect();
+                if let Ok(service) = svm_service(runtime, None) {
+                    use rocddi::memory::advice::{AdviceProperty, AdviceQuery, AdviceState, AdviceValue};
+                    if let Ok(values) = service.query(start as u64, size as u64, &[
+                        AdviceQuery::Property(AdviceProperty::HostAccess),
+                        AdviceQuery::Property(AdviceProperty::Coherent),
+                    ]) {
+                        if let [AdviceValue::Property(host), AdviceValue::Property(coherent)] = values.as_slice() {
+                            if *host != AdviceState::Enabled {
+                                description.host_base = None;
+                                description.alloc_flags = 0;
+                                description.accessible.clear();
+                            }
+                            description.global_flags = match coherent {
+                                AdviceState::Enabled => POOL_FLAG_FINE,
+                                AdviceState::Disabled => POOL_FLAG_COARSE,
+                                AdviceState::Mixed => 0,
+                            };
+                        }
+                    }
+                    for (index, gpu) in runtime.gpus.iter().enumerate() {
+                        let Ok(target) = service.target(&gpu.device) else { continue; };
+                        let query = rocddi::memory::advice::AdviceQuery::Access(target);
+                        if service.query(start as u64, size as u64, &[query]).is_ok_and(|values| {
+                            matches!(values.as_slice(), [rocddi::memory::advice::AdviceValue::Access(
+                                rocddi::memory::advice::AdviceAccess::Accessible
+                                | rocddi::memory::advice::AdviceAccess::AccessibleInPlace
+                            )])
+                        }) {
+                            description.accessible.push(HsaAgent { handle: GPU_AGENT_BASE + index as u64 });
+                        }
+                    }
+                }
+            }
+            description
+        })
 }
 
 /// Returns a host-accessible address for a validated copy range.

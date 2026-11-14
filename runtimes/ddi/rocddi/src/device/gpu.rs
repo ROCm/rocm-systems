@@ -15,6 +15,7 @@ use crate::memory::Allocation;
 use crate::topology::{CacheAssociations, CacheInfo, CacheKind, GpuInfo};
 use crate::{Error, ErrorKind};
 
+mod code_cache;
 mod copy;
 pub mod event;
 pub mod image;
@@ -74,6 +75,8 @@ pub struct GpuDevice<'a> {
 pub struct GpuSurfaceConfig {
     /// Provider-resolved ASIC family for the same activated GPU.
     pub asic_family_id: u32,
+    /// External ASIC revision in the address-library family namespace.
+    pub chip_revision: u32,
     /// Hardware `GB_ADDR_CONFIG` register value.
     pub gb_addr_config: u32,
 }

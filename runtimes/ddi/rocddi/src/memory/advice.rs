@@ -263,6 +263,70 @@ impl Provider {
 }
 
 impl MemoryAdvice {
+    /// Enables demand-paged host access to an owned anonymous reservation.
+    /// The operation does not register a device mapping or set SVM policy.
+    ///
+    /// # Safety
+    /// The caller owns this complete anonymous range, excludes overlapping
+    /// native mappings and protection changes, and retains it through return.
+    ///
+    /// # Errors
+    /// Rejects invalid ranges, an inherited service, or unsupported host services.
+    #[allow(unsafe_code)]
+    pub unsafe fn commit_host_range(&self, address: u64, size: u64) -> Result<(), Error> {
+        self.check_range(address, size)?;
+        #[cfg(target_os = "linux")]
+        {
+            let address = usize::try_from(address)
+                .map_err(|_| error(ErrorKind::InvalidArgument, "SVM address exceeds host width"))?;
+            let size = usize::try_from(size)
+                .map_err(|_| error(ErrorKind::InvalidArgument, "SVM size exceeds host width"))?;
+            // SAFETY: The caller retains the entire anonymous reservation.
+            unsafe { crate::os::linux::memory::commit_svm_range(address, size) }
+                .map_err(|source| crate::os::native_error("commit SVM host range", source))
+        }
+        #[cfg(not(target_os = "linux"))]
+        Err(error(
+            ErrorKind::Unsupported,
+            "SVM host backing is unavailable",
+        ))
+    }
+
+    /// Discards anonymous host pages after any required device migration.
+    /// With `immediate` false, Linux may reclaim the contents under pressure;
+    /// with it true, later host reads observe fresh zero-filled pages.
+    ///
+    /// # Safety
+    /// The caller retains this anonymous, host-accessible mapping and excludes
+    /// host/device accesses whose data must survive. Device users must have
+    /// retired or migrated before their physical pages can be discarded.
+    ///
+    /// # Errors
+    /// Rejects invalid ranges or unavailable native discard; propagates OS errors.
+    #[allow(unsafe_code)]
+    pub unsafe fn discard_host_range(
+        &self,
+        address: u64,
+        size: u64,
+        immediate: bool,
+    ) -> Result<(), Error> {
+        self.check_range(address, size)?;
+        #[cfg(target_os = "linux")]
+        {
+            let address = usize::try_from(address)
+                .map_err(|_| error(ErrorKind::InvalidArgument, "SVM address exceeds host width"))?;
+            let size = usize::try_from(size)
+                .map_err(|_| error(ErrorKind::InvalidArgument, "SVM size exceeds host width"))?;
+            // SAFETY: The caller retains and synchronizes the anonymous mapping.
+            unsafe { crate::os::linux::memory::discard_svm_range(address, size, immediate) }
+                .map_err(|source| crate::os::native_error("discard SVM host range", source))
+        }
+        #[cfg(not(target_os = "linux"))]
+        Err(error(
+            ErrorKind::Unsupported,
+            "SVM host discard is unavailable",
+        ))
+    }
     fn check(&self) -> Result<(), Error> {
         self.process.check().map_err(|_| {
             error(

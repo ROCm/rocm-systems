@@ -3,7 +3,7 @@
 
 //! Process initialization and shutdown entry points for the HSA C ABI.
 
-#[cfg(all(target_os = "linux", target_arch = "x86_64", not(test)))]
+#[cfg(all(hsa_tool_dispatch, not(test)))]
 use crate::api_trace;
 use crate::ffi::*;
 use crate::runtime;
@@ -33,7 +33,40 @@ fn finish_prepared_shutdown(generation: u64) -> Status {
     // A borrowed FILE can call back into HSA from fwrite. Stop logging only
     // after releasing the lifecycle mutex so that callback can finish.
     logging.stop();
-    inflight.wait_idle();
+    if !inflight.wait_idle_for(std::time::Duration::from_secs(5)) {
+        return RESOURCE_BUSY;
+    }
+    #[cfg(all(hsa_tool_dispatch, not(test)))]
+    {
+        // SDK stop packets and completion callbacks need live HSA services.
+        // Public admission stays closed; only this scope and explicitly
+        // delegated workers can enter the retained generation.
+        let preparation = match runtime::begin_tool_preparation() {
+            Ok(preparation) => preparation,
+            Err(status) => return status,
+        };
+        let status = api_trace::prepare_shutdown(generation);
+        drop(preparation);
+        if status != SUCCESS {
+            return status;
+        }
+        {
+            let guard = match lock() {
+                Ok(guard) => guard,
+                Err(status) => return status,
+            };
+            let Some(runtime) = guard.as_ref() else {
+                return ERROR;
+            };
+            // Preparation proved the SDK no longer needs completion services.
+            // Cancel asynchronous cleanup descendants before draining their
+            // leases, including work enqueued by a callback during prepare.
+            runtime.request_stop();
+        }
+        if !inflight.wait_idle_for(std::time::Duration::from_secs(5)) {
+            return RESOURCE_BUSY;
+        }
+    }
     let callbacks = {
         let mut guard = match lock() {
             Ok(guard) => guard,
@@ -48,11 +81,46 @@ fn finish_prepared_shutdown(generation: u64) -> Status {
     if status != SUCCESS {
         return status;
     }
-    #[cfg(all(target_os = "linux", target_arch = "x86_64", not(test)))]
     {
-        // Tools can still inspect storage they own, but copied HSA functions
-        // observe the final reference count of zero and reject new admission.
-        api_trace::unload();
+        let mut guard = match lock() {
+            Ok(guard) => guard,
+            Err(status) => return status,
+        };
+        if guard
+            .as_ref()
+            .is_none_or(|runtime| runtime.health.is_quarantined())
+        {
+            // Tool-owned copy/trace operands may still be native-visible.
+            // Do not ask a tool to release them before retaining this generation.
+            return INVALID_RUNTIME_STATE;
+        }
+        let Some(runtime) = guard.as_mut() else {
+            return ERROR;
+        };
+        // Callback and submission producers have stopped. KFD inactivation
+        // unmaps/drains each queue before tool-owned operands may be released.
+        // Keep every public descriptor live for the SDK's final destruction.
+        if let Err(status) = runtime.queue_state.stop_native_for_tool_cleanup() {
+            return status;
+        }
+    }
+    #[cfg(all(hsa_tool_dispatch, not(test)))]
+    {
+        let _cleanup = match runtime::enter_tool_cleanup() {
+            Ok(cleanup) => cleanup,
+            Err(status) => return status,
+        };
+        let status = api_trace::retire_profiler();
+        if status != SUCCESS {
+            return status;
+        }
+    }
+    #[cfg(all(hsa_tool_dispatch, not(test)))]
+    {
+        let status = api_trace::unload();
+        if status != SUCCESS {
+            return status;
+        }
     }
     let runtime = {
         let mut guard = match lock() {
@@ -80,10 +148,10 @@ fn finish_prepared_shutdown(generation: u64) -> Status {
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_init")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Initializes the process HSA runtime and increments its reference count.
 pub extern "C" fn hsa_init() -> Status {
     plain_boundary(|| {
@@ -123,7 +191,7 @@ pub extern "C" fn hsa_init() -> Status {
         };
         drop(guard);
         if published {
-            #[cfg(all(target_os = "linux", target_arch = "x86_64", not(test)))]
+            #[cfg(all(hsa_tool_dispatch, not(test)))]
             api_trace::load();
             let mut guard = match lock() {
                 Ok(guard) => guard,
@@ -141,10 +209,10 @@ pub extern "C" fn hsa_init() -> Status {
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_shut_down")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Releases one HSA initialization reference and tears down the final state.
 pub extern "C" fn hsa_shut_down() -> Status {
     plain_boundary(|| {

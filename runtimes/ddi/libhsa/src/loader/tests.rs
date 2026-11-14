@@ -26,8 +26,9 @@ fn memory_reader_rejects_oversized_slice_before_access() {
 }
 
 #[test]
-/// Verifies that loader extension table contains every version 1 03 entry point.
-fn loader_extension_table_contains_every_version_1_03_entry_point() {
+/// Verifies that loader extension table contains every version 1.04 entry point.
+fn loader_extension_table_contains_every_version_1_04_entry_point() {
+    assert_eq!(loader_extension_table().len(), 9);
     assert!(loader_extension_table().into_iter().all(|entry| entry != 0));
 }
 
@@ -38,6 +39,17 @@ fn file_reader_entry_point_matches_the_public_abi() {
         hsa_code_object_reader_create_from_file;
     let _: unsafe extern "C" fn(HsaFile, usize, usize, *mut HsaCodeObjectReader) -> Status =
         crate::api::loader::query::hsa_ven_amd_loader_code_object_reader_create_from_file_with_offset_size;
+    let _: unsafe extern "C" fn(HsaCodeObjectReader, *mut usize) -> Status =
+        crate::api::loader::query::hsa_ven_amd_loader_code_object_reader_get_load_size;
+    let _: unsafe extern "C" fn(
+        HsaExecutable,
+        HsaAgent,
+        HsaCodeObjectReader,
+        *const c_char,
+        *mut c_void,
+        usize,
+        *mut HsaLoadedCodeObject,
+    ) -> Status = hsa_ven_amd_loader_executable_load_agent_code_object_at_address;
 }
 
 #[test]

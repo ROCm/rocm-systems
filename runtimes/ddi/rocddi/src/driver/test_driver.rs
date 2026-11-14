@@ -250,7 +250,7 @@ impl UserQueueResource for TestQueue {
         self.check()
     }
 
-    unsafe fn set_scratch(&mut self, _: QueueScratch) -> Result<(), Error> {
+    unsafe fn set_scratch(&mut self, _: Option<QueueScratch>) -> Result<(), Error> {
         Err(Error::Operation {
             kind: ErrorKind::Unsupported,
             detail: "test queue has no scratch",
@@ -310,6 +310,10 @@ impl CachedInfo for TestAllocation {
 }
 
 impl TestDriver {
+    #[allow(
+        clippy::large_types_passed_by_value,
+        reason = "test driver takes ownership of its endpoint snapshot"
+    )]
     pub(crate) fn new(id: [u8; 16], kind: EndpointKind, lifetime: DriverContextLifetime) -> Self {
         Self {
             instance: super::new_driver_instance(),

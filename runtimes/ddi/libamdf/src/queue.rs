@@ -265,6 +265,7 @@ fn descriptor(
         _ => return Err(UNSUPPORTED),
     };
     Ok(QueueRequest {
+        control_memory: rocddi::device::gpu::queue::QueueRingMemory::System,
         ring_size_bytes: ring,
         parameters,
         priority,

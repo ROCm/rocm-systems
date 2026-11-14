@@ -6,7 +6,7 @@
 use std::ffi::c_void;
 
 use crate::ffi::HsaQueue;
-#[cfg(all(target_os = "linux", target_arch = "x86_64", not(test)))]
+#[cfg(all(hsa_tool_dispatch, not(test)))]
 use crate::runtime::CallbackScope;
 
 /// Tool table slot for scratch-allocation start events.
@@ -61,14 +61,14 @@ struct ScratchFree {
 
 /// Invokes the selected tool event hook when a tool has installed one.
 fn emit(slot: usize, event: *const c_void) {
-    #[cfg(all(target_os = "linux", target_arch = "x86_64", not(test)))]
+    #[cfg(all(hsa_tool_dispatch, not(test)))]
     if let Some(callback) = crate::api_trace::scratch_callback(slot) {
         let _scope = CallbackScope::enter();
         // SAFETY: The stack event has the C layout required by this slot and
         // lives through the synchronous tool callback.
         let _ = unsafe { callback(event) };
     }
-    #[cfg(not(all(target_os = "linux", target_arch = "x86_64", not(test))))]
+    #[cfg(not(all(hsa_tool_dispatch, not(test))))]
     let _ = (slot, event);
 }
 

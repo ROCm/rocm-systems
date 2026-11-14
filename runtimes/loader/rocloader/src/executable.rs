@@ -5,7 +5,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::{Error, LoadedImage, Symbol};
+use crate::{Error, ImagePublication, LoadedImage, Symbol};
 
 /// Scope in which an executable symbol is defined and queried.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -42,6 +42,8 @@ pub struct LoadedObject<M> {
 pub struct Executable<M> {
     /// Prevents mutation after executable publication.
     frozen: bool,
+    /// Rejects mutations while publication runs outside the frontend lock.
+    freezing: bool,
     /// Enforces the single program-scope object rule.
     program_loaded: bool,
     /// Loaded images retained for the executable's lifetime.
@@ -60,6 +62,7 @@ impl<M> Executable<M> {
     pub fn new(frozen: bool) -> Self {
         Self {
             frozen,
+            freezing: false,
             program_loaded: false,
             loaded: Vec::new(),
             names: HashMap::new(),
@@ -74,16 +77,56 @@ impl<M> Executable<M> {
         self.frozen
     }
 
-    /// Freezes the executable and its symbol addresses.
+    /// Reserves the freeze transition and returns retained publication work.
     ///
     /// # Errors
-    /// Returns `Frozen` if it was already frozen.
-    pub fn freeze(&mut self) -> Result<(), Error> {
+    /// Returns `Frozen` or `Busy` when another transition prevents publication.
+    pub fn begin_freeze(&mut self) -> Result<Vec<ImagePublication>, Error> {
         if self.frozen {
             return Err(Error::Frozen);
         }
+        if !self.can_release() {
+            return Err(Error::Busy);
+        }
+        let mut publications = Vec::new();
+        publications
+            .try_reserve_exact(self.loaded.len())
+            .map_err(|_| Error::OutOfResources)?;
+        publications.extend(
+            self.loaded
+                .iter()
+                .filter_map(|object| object.image.publication()),
+        );
+        self.freezing = true;
+        Ok(publications)
+    }
+
+    /// Completes a reserved freeze after all publication work has returned.
+    /// A retired failure permits retry; uncertain native work blocks release.
+    ///
+    /// # Errors
+    /// Returns `Busy` unless every pending image was published successfully.
+    pub fn finish_freeze(&mut self) -> Result<(), Error> {
+        if !self.freezing {
+            return Err(Error::Busy);
+        }
+        self.freezing = false;
+        if self.loaded.iter().any(|object| {
+            object
+                .image
+                .publication()
+                .is_some_and(|publication| !publication.is_complete())
+        }) {
+            return Err(Error::Busy);
+        }
         self.frozen = true;
         Ok(())
+    }
+
+    /// Whether destruction cannot race a pending or uncertain native publication.
+    #[must_use]
+    pub fn can_release(&self) -> bool {
+        !self.freezing && self.loaded.iter().all(|object| object.image.can_release())
     }
 
     /// Checks whether another object of the given scope may be loaded.
@@ -93,6 +136,9 @@ impl<M> Executable<M> {
     pub fn can_load(&self, program: bool) -> Result<(), Error> {
         if self.frozen {
             return Err(Error::Frozen);
+        }
+        if !self.can_release() {
+            return Err(Error::Busy);
         }
         if program && self.program_loaded {
             return Err(Error::ProgramAlreadyLoaded);
@@ -192,6 +238,9 @@ impl<M> Executable<M> {
         if self.frozen {
             return Err(Error::Frozen);
         }
+        if !self.can_release() {
+            return Err(Error::Busy);
+        }
         if !definition.symbol.is_definition {
             return Err(Error::InvalidObject);
         }
@@ -223,5 +272,41 @@ impl<M> Executable<M> {
             }
         }
         Ok(None)
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+    use crate::{VariableAllocation, VariableSegment};
+
+    #[test]
+    fn reserved_freeze_prevents_mutation_and_release() {
+        let mut executable = Executable::<()>::new(false);
+        assert!(executable.begin_freeze().unwrap().is_empty());
+        assert!(!executable.is_frozen());
+        assert!(!executable.can_release());
+        assert!(matches!(executable.can_load(false), Err(Error::Busy)));
+        assert!(matches!(executable.begin_freeze(), Err(Error::Busy)));
+        let definition = Definition {
+            symbol: Symbol::external_variable(
+                "global",
+                0x1000,
+                VariableAllocation::Program,
+                VariableSegment::Global,
+            ),
+            scope: Scope::Program,
+            id: 1,
+        };
+        assert!(matches!(
+            executable.define_external(definition),
+            Err(Error::Busy)
+        ));
+        assert!(executable.symbol_ids().is_empty());
+        executable.finish_freeze().unwrap();
+        assert!(executable.is_frozen());
+        assert!(executable.can_release());
+        assert!(matches!(executable.begin_freeze(), Err(Error::Frozen)));
     }
 }

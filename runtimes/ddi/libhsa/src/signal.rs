@@ -26,6 +26,7 @@ use rocddi::device::gpu::event::{
     SignalEvent, SignalEventAddressing, SignalEventProtocol, SignalEventService,
 };
 use rocddi::memory::device::{Allocation, DeviceAccess, MemoryKind};
+use rocddi::memory::host::HostAllocation;
 #[cfg(test)]
 use rocddi::session::DriverContextLifetime;
 
@@ -317,8 +318,8 @@ impl AsyncSignalRecord {
 
 /// Stable device-visible storage from which ordinary signals are carved.
 pub(crate) struct SignalSlab {
-    /// GPU-visible allocation retaining every signal slot in this slab.
-    _allocation: Allocation,
+    /// Allocation retaining every signal slot in this slab.
+    _backing: SignalBacking,
     /// CPU address of the first signal slot.
     host: usize,
     /// Index of the next never-used slot.
@@ -327,18 +328,29 @@ pub(crate) struct SignalSlab {
 
 /// One contiguous native allocation retained by its public handle and members.
 #[allow(dead_code, reason = "the backing is held for its lifetime, not read")]
-enum SignalBatchBacking {
+enum SignalBacking {
     /// Dedicated native allocation backing an interrupt-capable signal.
     Native(Allocation),
+    /// Host pages used when this generation has no GPU consumers.
+    Host(HostAllocation),
     #[cfg(test)]
     /// In-memory signal records used to test batch ownership without KFD.
     Test(Box<[AmdSignal]>),
 }
 
+impl SignalBacking {
+    /// Allocates aligned signal pages without requiring a GPU or KFD event.
+    fn host(bytes: usize, page: usize) -> Result<(Self, usize), Status> {
+        let allocation = HostAllocation::allocate(bytes as u64, page as u64).map_err(map_error)?;
+        let host = allocation.info().host_address;
+        Ok((Self::Host(allocation), host))
+    }
+}
+
 /// Owns native signal backing and tracks free and live slots.
 struct SignalBatchStorage {
     /// Native allocation retained for the lifetime of this batch.
-    _backing: SignalBatchBacking,
+    _backing: SignalBacking,
     /// Number of batch slots that have not been allocated.
     remaining: usize,
     /// Whether the public batch handle is still valid.
@@ -363,7 +375,15 @@ impl Drop for SignalBatchStorage {
 impl SignalSlab {
     /// Allocates native backing for a device-visible signal batch.
     fn create(runtime: &HsaState) -> Result<Self, Status> {
-        let (gpu, other_gpus) = runtime.gpus.split_first().ok_or(OUT_OF_RESOURCES)?;
+        let bytes = (SIGNAL_BYTES * SIGNALS_PER_SLAB).max(runtime.host_page_size);
+        let Some((gpu, other_gpus)) = runtime.gpus.split_first() else {
+            let (backing, host) = SignalBacking::host(bytes, runtime.host_page_size)?;
+            return Ok(Self {
+                _backing: backing,
+                host,
+                next: 0,
+            });
+        };
         let peers = other_gpus
             .iter()
             .map(|peer| &peer.device)
@@ -373,14 +393,14 @@ impl SignalSlab {
             .allocate_with_peers(
                 &peers,
                 MemoryKind::System,
-                (SIGNAL_BYTES * SIGNALS_PER_SLAB).max(runtime.host_page_size) as u64,
+                bytes as u64,
                 runtime.host_page_size as u64,
                 DeviceAccess::READ | DeviceAccess::WRITE,
             )
             .map_err(crate::runtime::map_error)?;
         let host = allocation.info().host_address.ok_or(OUT_OF_RESOURCES)?;
         Ok(Self {
-            _allocation: allocation,
+            _backing: SignalBacking::Native(allocation),
             host,
             next: 0,
         })
@@ -602,45 +622,50 @@ impl HsaState {
                 .try_reserve(1)
                 .map_err(|_| OUT_OF_RESOURCES)?;
         }
-        let owner = self
-            .gpus
-            .get(owner_index)
-            .ok_or(OUT_OF_RESOURCES)?
-            .device
-            .clone();
-        let peers = self
-            .gpus
-            .iter()
-            .enumerate()
-            .filter(|(index, _)| *index != owner_index)
-            .filter(|(index, _)| {
-                matches!(pool, SignalBatchPool::System)
-                    || consumers.is_empty()
-                    || consumers
-                        .iter()
-                        .any(|agent| agent.handle == GPU_AGENT_BASE + *index as u64)
-            })
-            .map(|(_, gpu)| gpu.device.clone())
-            .collect::<Vec<_>>();
-        let peer_refs = peers.iter().collect::<Vec<_>>();
-        let allocation = owner
-            .allocate_with_peers(
-                &peer_refs,
-                kind,
-                allocation_bytes as u64,
-                page as u64,
-                DeviceAccess::READ | DeviceAccess::WRITE,
-            )
-            .map_err(map_error)?;
-        let info = allocation.info();
-        let host = info.host_address.ok_or(OUT_OF_RESOURCES)?;
+        let (backing, host) = if self.gpus.is_empty() && matches!(pool, SignalBatchPool::System) {
+            SignalBacking::host(allocation_bytes, page)?
+        } else {
+            let owner = self
+                .gpus
+                .get(owner_index)
+                .ok_or(OUT_OF_RESOURCES)?
+                .device
+                .clone();
+            let peers = self
+                .gpus
+                .iter()
+                .enumerate()
+                .filter(|(index, _)| *index != owner_index)
+                .filter(|(index, _)| {
+                    matches!(pool, SignalBatchPool::System)
+                        || consumers.is_empty()
+                        || consumers
+                            .iter()
+                            .any(|agent| agent.handle == GPU_AGENT_BASE + *index as u64)
+                })
+                .map(|(_, gpu)| gpu.device.clone())
+                .collect::<Vec<_>>();
+            let peer_refs = peers.iter().collect::<Vec<_>>();
+            let allocation = owner
+                .allocate_with_peers(
+                    &peer_refs,
+                    kind,
+                    allocation_bytes as u64,
+                    page as u64,
+                    DeviceAccess::READ | DeviceAccess::WRITE,
+                )
+                .map_err(map_error)?;
+            let info = allocation.info();
+            let host = info.host_address.ok_or(OUT_OF_RESOURCES)?;
+            if info.device_address != host as u64
+                || info.size < bytes as u64
+                || host % SIGNAL_BYTES != 0
+            {
+                return Err(OUT_OF_RESOURCES);
+            }
+            (SignalBacking::Native(allocation), host)
+        };
         let end = host.checked_add(bytes).ok_or(OUT_OF_RESOURCES)?;
-        if info.device_address != host as u64
-            || info.size < bytes as u64
-            || host % SIGNAL_BYTES != 0
-        {
-            return Err(OUT_OF_RESOURCES);
-        }
         self.signal_state
             .batches
             .try_reserve(1)
@@ -704,7 +729,7 @@ impl HsaState {
         self.signal_state.batches.insert(
             batch.handle,
             SignalBatchStorage {
-                _backing: SignalBatchBacking::Native(allocation),
+                _backing: backing,
                 remaining: values.len(),
                 handle_live: true,
                 host_atomics_supported: !flush,

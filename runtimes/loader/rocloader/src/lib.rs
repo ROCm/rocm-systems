@@ -13,11 +13,14 @@ mod executable;
 mod image;
 
 pub use code_object::{
-    CodeObject, Symbol, SymbolKind, SymbolLinkage, SymbolTableOrder, Target, VariableAllocation,
-    VariableSegment,
+    CodeObject, CodeObjectContract, FloatRoundingMode, Profile, Symbol, SymbolKind, SymbolLinkage,
+    SymbolTableOrder, Target, VariableAllocation, VariableSegment, supports_target,
 };
 pub use executable::{Definition, Executable, LoadedObject, Scope};
-pub use image::{LoadedImage, LoadedSegment, load_image, loaded_segments};
+pub use image::{
+    ImagePublication, LoadedImage, LoadedSegment, load_image, load_image_at_address,
+    load_image_with_peers, loaded_segments,
+};
 
 /// Failure while parsing, loading, or changing an executable.
 #[derive(Debug)]
@@ -42,6 +45,8 @@ pub enum Error {
     ProgramAlreadyLoaded,
     /// An executable already contains the same symbol in the same scope.
     AlreadyDefined,
+    /// A publication is in progress or its native retirement is uncertain.
+    Busy,
 }
 
 impl From<rocelf::Error> for Error {

@@ -245,10 +245,50 @@ fn encode_timestamp(command: &mut [u32], offset: usize, address: u64) {
     clippy::cast_possible_truncation,
     reason = "the timestamp address is deliberately split into low and high dwords"
 )]
-pub(super) fn encode_gfx9_timestamp(command: &mut [u32], offset: usize, address: u64) {
+fn encode_gfx9_timestamp(command: &mut [u32], offset: usize, address: u64) {
     command[offset] = SDMA_TIMESTAMP_GET_GLOBAL_GFX9;
     command[offset + 1] = address as u32;
     command[offset + 2] = (address >> 32) as u32;
+}
+
+#[allow(
+    clippy::cast_possible_truncation,
+    reason = "the fence address is deliberately split into low and high dwords"
+)]
+pub(super) fn encode_fence(words: &mut [u32], address: u64, protocol: SdmaProtocol) {
+    words[0] = match protocol {
+        SdmaProtocol::Gfx9 => 5,
+        SdmaProtocol::Gfx10 | SdmaProtocol::Gfx11 => 5 | (3 << 16),
+        SdmaProtocol::Gfx12_0 => 5 | (3 << 16) | (1 << 20),
+        SdmaProtocol::Gfx12_5 => 5 | (3 << 16) | (1 << 20) | (3 << 24),
+    };
+    words[1] = address as u32;
+    words[2] = (address >> 32) as u32;
+    words[3] = 1;
+}
+
+fn encode_gfx9_transfer(
+    words: &mut [u32],
+    destination: u64,
+    source: u64,
+    size: u32,
+    timing: Option<TimingAddresses>,
+    opcode: u32,
+) -> u64 {
+    words.fill(0);
+    let mut offset = 0;
+    if let Some(start) = timing.and_then(|timing| timing.start) {
+        encode_gfx9_timestamp(words, offset, start);
+        offset += TIMESTAMP_PACKET_BYTES / 4;
+    }
+    encode_copy_packet(words, offset, destination, source, size);
+    words[offset] = opcode;
+    offset += COPY_PACKET_BYTES / 4;
+    if let Some(timing) = timing {
+        encode_gfx9_timestamp(words, offset, timing.end);
+        offset += TIMESTAMP_PACKET_BYTES / 4;
+    }
+    (offset * 4) as u64
 }
 
 fn encode_timed_copy(
@@ -257,16 +297,23 @@ fn encode_timed_copy(
     source: u64,
     size: u32,
     timing: TimingAddresses,
+    protocol: SdmaProtocol,
 ) -> u64 {
     let copy_offset = 5 + usize::from(timing.start.is_some()) * TIMESTAMP_PACKET_BYTES / 4;
     let end_offset = copy_offset + COPY_PACKET_BYTES / 4;
     let trailing_gcr = end_offset + TIMESTAMP_PACKET_BYTES / 4;
     encode_cache_envelope(command, trailing_gcr);
+    // GFX10/11 share the OSS5 copy layout but have no timestamp scope field.
+    let timestamp = if matches!(protocol, SdmaProtocol::Gfx12_0) {
+        encode_timestamp
+    } else {
+        encode_gfx9_timestamp
+    };
     if let Some(start) = timing.start {
-        encode_timestamp(command, 5, start);
+        timestamp(command, 5, start);
     }
     encode_copy_packet(command, copy_offset, destination, source, size);
-    encode_timestamp(command, end_offset, timing.end);
+    timestamp(command, end_offset, timing.end);
     ((trailing_gcr + GCR_PACKET_BYTES / 4) * 4) as u64
 }
 
@@ -315,24 +362,12 @@ impl SdmaCommand {
             } => match protocol {
                 SdmaProtocol::Gfx9 => {
                     debug_assert!(options.is_plain());
-                    words.fill(0);
-                    let mut offset = 0;
-                    if let Some(start) = timing.and_then(|timing| timing.start) {
-                        encode_gfx9_timestamp(words, offset, start);
-                        offset += TIMESTAMP_PACKET_BYTES / 4;
-                    }
-                    encode_copy_packet(words, offset, destination, source, size);
-                    offset += COPY_PACKET_BYTES / 4;
-                    if let Some(timing) = timing {
-                        encode_gfx9_timestamp(words, offset, timing.end);
-                        offset += TIMESTAMP_PACKET_BYTES / 4;
-                    }
-                    (offset * 4) as u64
+                    encode_gfx9_transfer(words, destination, source, size, timing, SDMA_COPY_LINEAR)
                 }
-                SdmaProtocol::Gfx12_0 => {
+                SdmaProtocol::Gfx10 | SdmaProtocol::Gfx11 | SdmaProtocol::Gfx12_0 => {
                     debug_assert!(options.is_plain());
                     if let Some(timing) = timing {
-                        encode_timed_copy(words, destination, source, size, timing)
+                        encode_timed_copy(words, destination, source, size, timing, protocol)
                     } else {
                         encode_copy(words, destination, source, size);
                         COMMAND_BYTES as u64
@@ -370,7 +405,7 @@ impl SdmaCommand {
                         words[4] = (count - 1) * 4;
                         FILL_PACKET_BYTES as u64
                     }
-                    SdmaProtocol::Gfx12_0 => {
+                    SdmaProtocol::Gfx10 | SdmaProtocol::Gfx11 | SdmaProtocol::Gfx12_0 => {
                         encode_fill(words, destination, value, count);
                         FILL_COMMAND_BYTES as u64
                     }
@@ -383,8 +418,10 @@ impl SdmaCommand {
                 size,
                 options,
             } => {
-                debug_assert!(!matches!(protocol, SdmaProtocol::Gfx9));
-                if options.is_plain() {
+                if matches!(protocol, SdmaProtocol::Gfx9) {
+                    debug_assert!(options.is_plain());
+                    encode_gfx9_transfer(words, address_b, address_a, size, timing, SDMA_COPY_SWAP)
+                } else if options.is_plain() {
                     encode_gfx1250_swap(words, address_a, address_b, size, timing)
                 } else {
                     encode_gfx1250_controlled(
@@ -538,5 +575,104 @@ mod tests {
         assert_eq!(command[10], SDMA_USER_GCR);
         assert_eq!(command[12], GCR_WRITEBACK);
         assert_eq!(command[14], 0);
+    }
+}
+
+#[cfg(test)]
+mod rdna_tests {
+    use super::*;
+
+    #[test]
+    fn rdna_copy_orders_cache_controls_and_uses_the_pre_gfx12_fence() {
+        for protocol in [SdmaProtocol::Gfx10, SdmaProtocol::Gfx11] {
+            let mut words = [0; 32];
+            let length = SdmaCommand::Copy {
+                destination: 0x2000,
+                source: 0x1000,
+                size: 64,
+                options: GpuCopyOptions::default(),
+            }
+            .encode(&mut words, None, protocol);
+            assert_eq!(length, 68);
+            assert_eq!(words[0], 0x111);
+            assert_eq!(&words[5..12], &[1, 63, 0, 0x1000, 0, 0x2000, 0]);
+            assert_eq!(words[12], 0x111);
+            encode_fence(&mut words[17..], 0x1234_0000_1000, protocol);
+            assert_eq!(&words[17..21], &[5 | (3 << 16), 0x1000, 0x1234, 1]);
+        }
+    }
+
+    #[test]
+    fn rdna_timestamps_leave_the_reserved_scope_bits_clear() {
+        for protocol in [SdmaProtocol::Gfx10, SdmaProtocol::Gfx11] {
+            for start in [None, Some(0x1_0000_3000)] {
+                let mut words = [u32::MAX; 32];
+                let length = SdmaCommand::Copy {
+                    destination: 0x2000,
+                    source: 0x1000,
+                    size: 64,
+                    options: GpuCopyOptions::default(),
+                }
+                .encode(
+                    &mut words,
+                    Some(TimingAddresses {
+                        start,
+                        end: 0x2_0000_4000,
+                    }),
+                    protocol,
+                );
+                let copy_offset = if start.is_some() { 8 } else { 5 };
+                let end_offset = copy_offset + 7;
+                assert_eq!(length, ((end_offset + 8) * 4) as u64);
+                assert_eq!(words[0], 0x111);
+                if start.is_some() {
+                    assert_eq!(&words[5..8], &[0x20d, 0x3000, 1]);
+                }
+                assert_eq!(words[copy_offset], 1);
+                assert_eq!(&words[end_offset..end_offset + 3], &[0x20d, 0x4000, 2]);
+                assert_eq!(words[end_offset + 3], 0x111);
+            }
+        }
+    }
+
+    #[test]
+    fn cdna_swap_keeps_the_legacy_layout_and_optional_timestamps() {
+        for timing in [
+            None,
+            Some(TimingAddresses {
+                start: None,
+                end: 0x2_0000_4000,
+            }),
+            Some(TimingAddresses {
+                start: Some(0x1_0000_3000),
+                end: 0x2_0000_4000,
+            }),
+        ] {
+            let mut words = [u32::MAX; 32];
+            let length = SdmaCommand::Swap {
+                address_a: 0x3_0000_1000,
+                address_b: 0x4_0000_2000,
+                size: 64,
+                options: GpuCopyOptions::default(),
+            }
+            .encode(&mut words, timing, SdmaProtocol::Gfx9);
+            let swap_offset = if timing.is_some_and(|value| value.start.is_some()) {
+                assert_eq!(&words[..3], &[0x20d, 0x3000, 1]);
+                3
+            } else {
+                0
+            };
+            assert_eq!(
+                &words[swap_offset..swap_offset + 7],
+                &[0x901, 63, 0, 0x1000, 3, 0x2000, 4]
+            );
+            let mut end = swap_offset + 7;
+            if timing.is_some() {
+                assert_eq!(&words[end..end + 3], &[0x20d, 0x4000, 2]);
+                end += 3;
+            }
+            assert_eq!(length, (end * 4) as u64);
+            assert!(words[end..].iter().all(|word| *word == 0));
+        }
     }
 }

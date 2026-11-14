@@ -53,7 +53,7 @@ impl CacheMaintenance {
                 Recipe::WriteBack { line_size_bytes }
             }
             CachePolicy::WriteCombined => {
-                if !cfg!(target_arch = "x86_64") {
+                if !cfg!(any(target_arch = "x86_64", target_arch = "aarch64")) {
                     return Err(Error::Operation {
                         kind: ErrorKind::Unsupported,
                         detail: "write-combined host fence is unavailable",
@@ -130,7 +130,25 @@ impl CacheMaintenance {
                     unsafe { std::arch::x86_64::_mm_mfence() };
                     Ok(())
                 }
-                #[cfg(not(target_arch = "x86_64"))]
+                #[cfg(target_arch = "aarch64")]
+                {
+                    // SAFETY: Linux permits EL0 cache maintenance (or emulates
+                    // it). CTR_EL0 supplies the system's safe minimum stride;
+                    // the caller retains every intersecting normal-memory line.
+                    unsafe { core::arch::asm!("dsb osh", options(nostack, preserves_flags)) };
+                    loop {
+                        unsafe {
+                            core::arch::asm!("dc civac, {line}", line = in(reg) line, options(nostack, preserves_flags))
+                        };
+                        if line == last {
+                            break;
+                        }
+                        line += line_size;
+                    }
+                    unsafe { core::arch::asm!("dsb osh", options(nostack, preserves_flags)) };
+                    Ok(())
+                }
+                #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
                 {
                     let _ = (line, last);
                     Err(Error::Operation {
@@ -146,7 +164,14 @@ impl CacheMaintenance {
                     unsafe { std::arch::x86_64::_mm_mfence() };
                     Ok(())
                 }
-                #[cfg(not(target_arch = "x86_64"))]
+                #[cfg(target_arch = "aarch64")]
+                {
+                    // SAFETY: An outer-shareable completion barrier orders
+                    // normal noncacheable/Device stores before notification.
+                    unsafe { core::arch::asm!("dsb osh", options(nostack, preserves_flags)) };
+                    Ok(())
+                }
+                #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
                 Err(Error::Operation {
                     kind: ErrorKind::Unsupported,
                     detail: "write-combined host fence is unavailable",
@@ -194,7 +219,17 @@ fn qualified_line_size() -> io::Result<u32> {
         }
         Ok(bytes)
     }
-    #[cfg(not(target_arch = "x86_64"))]
+    #[cfg(target_arch = "aarch64")]
+    {
+        let ctr: u64;
+        // SAFETY: Linux exposes a sanitized CTR_EL0 to userspace, including
+        // when heterogeneous systems need to trap and emulate the register.
+        unsafe {
+            core::arch::asm!("mrs {ctr}, ctr_el0", ctr = out(reg) ctr, options(nomem, nostack, preserves_flags))
+        };
+        Ok(4_u32 << ((ctr >> 16) & 15))
+    }
+    #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
     Err(io::Error::from(io::ErrorKind::Unsupported))
 }
 
@@ -205,7 +240,7 @@ mod tests {
 
     #[test]
     fn qualification_keeps_line_flush_and_fence_recipes_distinct() {
-        if cfg!(target_arch = "x86_64") {
+        if cfg!(any(target_arch = "x86_64", target_arch = "aarch64")) {
             let fence = CacheMaintenance::qualify(CachePolicy::WriteCombined).unwrap();
             assert_eq!(fence.line_size_bytes(), None);
             assert_eq!(fence.policy(), CachePolicy::WriteCombined);

@@ -164,6 +164,10 @@ pub(super) fn run_async_dispatcher(
 ) {
     let mut handlers = Vec::new();
     while !stop.load(Ordering::Acquire) {
+        let Some(_lease) = crate::runtime::enter_runtime_service() else {
+            thread::sleep(Duration::from_millis(1));
+            continue;
+        };
         if handlers.is_empty() {
             match receiver.recv_timeout(Duration::from_millis(1)) {
                 Ok(request) => {

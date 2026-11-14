@@ -232,7 +232,7 @@ pub(super) fn sdma_available_rings(file: &File) -> io::Result<u32> {
 pub(super) struct DeviceInfoPrefix {
     pub(super) device_id: u32,
     chip_revision: u32,
-    external_revision: u32,
+    pub(super) external_revision: u32,
     pci_revision: u32,
     pub(super) family_id: u32,
     shader_engine_count: u32,

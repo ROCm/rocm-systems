@@ -23,7 +23,7 @@ sys.path.insert(0, str(RUNTIMES / "cmake"))
 from abi_probe import compile_c, run
 
 HEADERS = RUNTIMES / "api-headers/include"
-EXPECTED_RECORDS = 34
+EXPECTED_RECORDS = 43
 
 
 def main() -> int:

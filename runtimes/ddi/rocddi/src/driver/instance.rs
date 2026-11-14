@@ -677,6 +677,7 @@ impl GpuDriverRef<'_> {
             #[cfg(test)]
             Self::Test { state, .. } => Ok(crate::device::gpu::GpuSurfaceConfig {
                 asic_family_id: state.asic_family_id,
+                chip_revision: 1,
                 gb_addr_config: 0,
             }),
         }

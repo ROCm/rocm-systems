@@ -18,7 +18,7 @@ pub(crate) struct AqlQueueHeader {
     pub(crate) id: u64,
 }
 
-/// Native 256-byte AQL control layout shared with the command processor.
+/// Native V2 AQL control layout shared with the command processor.
 #[allow(dead_code, clippy::missing_docs_in_private_items)]
 #[repr(C, align(64))]
 pub(crate) struct AqlControlLayout {
@@ -50,10 +50,24 @@ pub(crate) struct AqlControlLayout {
     pub(crate) alt_scratch_wave64_lane_byte_size: u32,
     pub(crate) alt_compute_tmpring_size: u32,
     pub(crate) reserved5: u32,
+    /// CP-published main/alternate last-use indices for up to 128 XCCs.
+    pub(crate) scratch_last_used_index: [[u64; 2]; 128],
 }
 
 #[allow(unsafe_code)]
 impl AqlControlRegion {
+    /// Finds the CP-written capability word in a live AQL control allocation.
+    ///
+    /// # Safety
+    /// `base` must be a live, aligned AQL control base retained by the caller.
+    #[inline]
+    #[must_use]
+    pub unsafe fn caps_address_at(base: usize) -> usize {
+        let layout = base as *const AqlControlLayout;
+        // SAFETY: The caller guarantees the complete typed control allocation.
+        unsafe { std::ptr::addr_of!((*layout).caps) as usize }
+    }
+
     /// Finds the read-index field in a live AQL control allocation.
     ///
     /// # Safety

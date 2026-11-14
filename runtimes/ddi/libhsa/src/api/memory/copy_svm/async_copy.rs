@@ -13,10 +13,10 @@ use crate::memory::copy_svm::*;
 use crate::runtime::{boundary, initialized_mut, lock};
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_amd_memory_async_copy")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Submits a copy after dependency signals complete.
 pub unsafe extern "C" fn hsa_amd_memory_async_copy(
     dst: *mut c_void,
@@ -41,15 +41,16 @@ pub unsafe extern "C" fn hsa_amd_memory_async_copy(
             dependencies,
             completion,
             None,
+            false,
         )
     }
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_amd_memory_async_copy_on_engine")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Submits a copy on the requested SDMA engine.
 pub unsafe extern "C" fn hsa_amd_memory_async_copy_on_engine(
     dst: *mut c_void,
@@ -61,7 +62,7 @@ pub unsafe extern "C" fn hsa_amd_memory_async_copy_on_engine(
     dependencies: *const HsaSignal,
     completion: HsaSignal,
     engine: u32,
-    _force: bool,
+    force: bool,
 ) -> Status {
     // SAFETY: The caller supplies readable dependency handles and live copy
     // ranges for the HSA asynchronous operation.
@@ -76,15 +77,16 @@ pub unsafe extern "C" fn hsa_amd_memory_async_copy_on_engine(
             dependencies,
             completion,
             Some(engine),
+            force,
         )
     }
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_amd_memory_async_batch_copy")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Submits a batch of copy entries with control operations.
 pub unsafe extern "C" fn hsa_amd_memory_async_batch_copy(
     copy_operations: *const HsaAmdMemoryCopyOp,
@@ -140,10 +142,10 @@ pub unsafe extern "C" fn hsa_amd_memory_async_batch_copy(
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_amd_memory_async_copy_rect")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Submits a rectangular copy between pitched ranges.
 pub unsafe extern "C" fn hsa_amd_memory_async_copy_rect(
     dst: *const HsaPitchedPtr,
@@ -202,10 +204,11 @@ pub unsafe extern "C" fn hsa_amd_memory_async_copy_rect(
         if range.x == 0 || range.y == 0 || range.z == 0 {
             return SUCCESS;
         }
-        if !runtime.gpus[index]
-            .device
-            .gpu()
-            .is_ok_and(|gpu| gpu.supports_linear_copy())
+        if !runtime.sdma_enabled
+            || !runtime.gpus[index]
+                .device
+                .gpu()
+                .is_ok_and(|gpu| gpu.supports_linear_copy())
         {
             return NOT_SUPPORTED;
         }
@@ -251,6 +254,7 @@ pub unsafe extern "C" fn hsa_amd_memory_async_copy_rect(
             runtime,
             ResolvedAsyncCopy {
                 route: AsyncCopyRoute::Gpu {
+                    compute: false,
                     device: Box::new(runtime.gpus[index].device.clone()),
                     index,
                     entry: GpuCopyEntry::Rect(CopyRect {
@@ -275,10 +279,10 @@ pub unsafe extern "C" fn hsa_amd_memory_async_copy_rect(
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_amd_memory_copy_engine_status")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Reports copy engines currently available for an agent.
 pub unsafe extern "C" fn hsa_amd_memory_copy_engine_status(
     dst: HsaAgent,
@@ -315,10 +319,10 @@ pub unsafe extern "C" fn hsa_amd_memory_copy_engine_status(
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_amd_memory_get_preferred_copy_engine")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Selects the preferred engine for a copy route.
 pub unsafe extern "C" fn hsa_amd_memory_get_preferred_copy_engine(
     dst: HsaAgent,

@@ -66,6 +66,7 @@ fn backing_file() -> File {
 
 fn native_node() -> sysfs::KfdNode {
     sysfs::KfdNode {
+        host_atomics: false,
         node: 1,
         gpu_id: 42,
         render_minor: Some(128),
@@ -93,8 +94,50 @@ fn native_node() -> sysfs::KfdNode {
     }
 }
 
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+#[test]
+fn user_sdma_engine_masks_follow_qualified_topology() {
+    use super::super::{DeviceState, LinuxKfdDriver};
+    use crate::driver::GpuKernelQueueOperations;
+
+    let driver = LinuxKfdDriver::new();
+    let kfd = shared(sys::Kfd::with_hook(
+        File::open("/dev/null").unwrap(),
+        Arc::new(|call| match call {
+            sys::Call::DestroyEvent(_) => Ok(()),
+            _ => panic!("engine enumeration must not issue KFD ioctls"),
+        }),
+    ));
+    for (gfx_target, profile) in [
+        (90_010, GpuTargetProfile::Gfx9),
+        (100_300, GpuTargetProfile::Gfx10),
+        (110_000, GpuTargetProfile::Gfx11),
+        (0, GpuTargetProfile::Other),
+    ] {
+        for qualified in [false, true] {
+            let mut native = native_node();
+            native.queues.gfx_target = gfx_target;
+            native.queues.target_profile = profile;
+            native.queues.sdma_qualified = qualified;
+            let device = DeviceState {
+                vm: memory::queue_fixture(kfd.clone(), File::open("/dev/null").unwrap(), native),
+                native,
+                asic_family_id: 0,
+                gpu_counter_frequency_hz: 0,
+            };
+            let result = driver.available_sdma_engines(&device);
+            if qualified && profile != GpuTargetProfile::Other {
+                assert_eq!(result.unwrap(), 0b11, "{profile:?}");
+            } else {
+                assert_eq!(result.unwrap_err().kind(), ErrorKind::Unsupported);
+            }
+        }
+    }
+}
+
 fn descriptor(parameters: QueueParameters) -> QueueRequest {
     QueueRequest {
+        control_memory: crate::device::gpu::queue::QueueRingMemory::System,
         ring_size_bytes: 4096,
         parameters,
         priority: QueuePriority::Normal,
@@ -169,6 +212,7 @@ struct State {
     svm_errno: Option<i32>,
     svm_context: Option<(u64, u64)>,
     updates: Vec<uapi::UpdateQueue>,
+    update_errno: VecDeque<Option<i32>>,
     cu_masks: Vec<(uapi::SetCuMask, Vec<u32>)>,
 }
 
@@ -651,6 +695,9 @@ impl Fixture {
                         assert!(state.live, "updated a queue after native destruction");
                         assert_eq!(args.queue_id, 0, "zero is a valid queue ID");
                         state.updates.push(**args);
+                        if let Some(Some(errno)) = state.update_errno.pop_front() {
+                            return Err(io::Error::from_raw_os_error(errno));
+                        }
                     }
                     sys::Call::SetCuMask(args, mask) => {
                         assert!(state.live, "masked a queue after native destruction");
@@ -1065,10 +1112,7 @@ fn targeted_sdma_local_ring_is_mapped_and_released() {
     native.queues.gfx_target = 120_000;
     native.queues.target_profile = crate::topology::GpuTargetProfile::Gfx1200;
     native.public_memory_bytes = 1 << 30;
-    assert_eq!(
-        Request::validate(&native, desc).err().unwrap().kind(),
-        ErrorKind::Unsupported
-    );
+    assert!(Request::validate(&native, desc).is_ok());
 }
 
 #[test]
@@ -1205,10 +1249,24 @@ fn host_visible_local_aql_ring_requires_sufficient_public_vram() {
     assert!(Request::validate(&native, desc).is_ok());
     native.queues.gfx_target = 120_000;
     native.queues.target_profile = crate::topology::GpuTargetProfile::Gfx1200;
-    assert_eq!(
-        Request::validate(&native, desc).err().unwrap().kind(),
-        ErrorKind::Unsupported
-    );
+    assert!(Request::validate(&native, desc).is_ok());
+}
+
+#[test]
+fn sdma_priority_updates_reject_unsupported_scheduling_before_native_mutation() {
+    let fixture = Fixture::new(true);
+    let mut queue = fixture.create(descriptor(QueueParameters::Sdma)).unwrap();
+    for priority in [QueuePriority::Low, QueuePriority::High] {
+        assert_eq!(
+            queue.set_priority(priority).unwrap_err().kind(),
+            ErrorKind::Unsupported
+        );
+    }
+    assert!(fixture.state.lock().unwrap().updates.is_empty());
+    queue.set_priority(QueuePriority::Normal).unwrap();
+    assert_eq!(fixture.state.lock().unwrap().updates[0].priority, 7);
+    queue.destroy().unwrap();
+    fixture.assert_released();
 }
 
 #[test]
@@ -1375,7 +1433,7 @@ fn stopped_gfx1201_queue_accepts_replacement_scratch_without_recreation() {
         lanes_per_wave: 32,
         maximum_wave_count: 128,
     };
-    queue.set_scratch(scratch).unwrap();
+    queue.set_scratch(Some(scratch)).unwrap();
     assert_eq!(fixture.state.lock().unwrap().creates, 1);
     assert_eq!(
         fixture.read_aql_u32(&queue, offset_of!(AqlControlLayout, compute_tmpring_size)),
@@ -1436,6 +1494,7 @@ fn invalid_scratch_geometry_fails_before_native_acquisition() {
             Request::validate(
                 &native_node(),
                 QueueRequest {
+                    control_memory: crate::device::gpu::queue::QueueRingMemory::System,
                     parameters: QueueParameters::Aql {
                         producer_mode: QueueProducerMode::Single,
                         ring_memory: QueueRingMemory::System,
@@ -1459,23 +1518,28 @@ fn unsupported_options_and_missing_context_sizes_fail_before_acquisition() {
     let base = descriptor(aql(QueueProducerMode::Single));
     for desc in [
         QueueRequest {
+            control_memory: crate::device::gpu::queue::QueueRingMemory::System,
             ring_size_bytes: 512,
             ..base
         },
         QueueRequest {
+            control_memory: crate::device::gpu::queue::QueueRingMemory::System,
             ring_size_bytes: 1 << 32,
             ..base
         },
         QueueRequest {
+            control_memory: crate::device::gpu::queue::QueueRingMemory::System,
             ring_size_bytes: 1536,
             ..base
         },
         QueueRequest {
+            control_memory: crate::device::gpu::queue::QueueRingMemory::System,
             parameters: QueueParameters::Sdma,
             priority: QueuePriority::High,
             ..base
         },
         QueueRequest {
+            control_memory: crate::device::gpu::queue::QueueRingMemory::System,
             parameters: QueueParameters::Aql {
                 producer_mode: QueueProducerMode::Single,
                 ring_memory: QueueRingMemory::System,
@@ -1505,14 +1569,17 @@ fn unsupported_options_and_missing_context_sizes_fail_before_acquisition() {
     let pm4 = descriptor(QueueParameters::Pm4);
     for invalid in [
         QueueRequest {
+            control_memory: crate::device::gpu::queue::QueueRingMemory::System,
             ring_size_bytes: 8192,
             ..pm4
         },
         QueueRequest {
+            control_memory: crate::device::gpu::queue::QueueRingMemory::System,
             priority: QueuePriority::High,
             ..pm4
         },
         QueueRequest {
+            control_memory: crate::device::gpu::queue::QueueRingMemory::System,
             device_producer: true,
             ..pm4
         },
@@ -2238,4 +2305,261 @@ fn pm4_progress_expands_a_ring_relative_read_index_after_multiple_wraps() {
     assert_eq!(queue.progress().unwrap(), (producer, producer));
     queue.destroy().unwrap();
     fixture.assert_released();
+}
+
+#[test]
+fn rdna_scratch_uses_the_correct_swizzle_resource_and_wave_limits() {
+    for (profile, swizzle, word3, wave_count) in [
+        (GpuTargetProfile::Gfx10, 1 << 31, 0x2181_4fac, 128),
+        (GpuTargetProfile::Gfx11, 1 << 30, 0x2081_4fac, 64),
+    ] {
+        let mut properties = native_node().queues;
+        properties.target_profile = profile;
+        let scratch = QueueScratch {
+            device_address: 0x1234_5678_0000,
+            byte_length: 128 * 64 * 32,
+            maximum_private_segment_byte_length: 64,
+            lanes_per_wave: 32,
+            maximum_wave_count: 128,
+        };
+        let control = validate_scratch(properties, Some(scratch))
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            control.resource,
+            [0x5678_0000, 0x1234 | swizzle, 262_144, word3]
+        );
+        let units = if profile == GpuTargetProfile::Gfx10 {
+            2
+        } else {
+            8
+        };
+        assert_eq!(control.tmpring_size, wave_count | (units << 12));
+        let mut empty = [0; std::mem::size_of::<AqlControlLayout>()];
+        put_aql_scratch(&mut empty, profile, None);
+        let resource = std::mem::offset_of!(AqlControlLayout, scratch_resource_descriptor);
+        assert_eq!(
+            u32::from_ne_bytes(empty[resource + 4..resource + 8].try_into().unwrap()),
+            swizzle
+        );
+        assert_eq!(
+            u32::from_ne_bytes(empty[resource + 12..resource + 16].try_into().unwrap()),
+            word3
+        );
+    }
+}
+
+#[test]
+fn async_scratch_reclaim_preserves_the_last_use_bound_after_reconnect() {
+    let fixture = Fixture::new(true);
+    let scratch = QueueScratch {
+        device_address: 0x1234_0000,
+        byte_length: 65536,
+        maximum_private_segment_byte_length: 16,
+        lanes_per_wave: 32,
+        maximum_wave_count: 128,
+    };
+    fixture.state.lock().unwrap().expected_scratch = Some(scratch);
+    let mut queue = fixture
+        .create(descriptor(QueueParameters::Aql {
+            producer_mode: QueueProducerMode::Single,
+            ring_memory: QueueRingMemory::System,
+            global_work_sync: false,
+            inactive_signal: None,
+            error_event: None,
+            scratch: Some(scratch),
+        }))
+        .unwrap();
+    queue.enable_async_scratch().unwrap();
+    let backing = queue.backing[1].as_mut().unwrap();
+    backing
+        .write_bytes(offset_of!(AqlControlLayout, caps), &3_u32.to_ne_bytes())
+        .unwrap();
+    backing
+        .write_bytes(
+            offset_of!(AqlControlLayout, scratch_last_used_index),
+            &1_u64.to_ne_bytes(),
+        )
+        .unwrap();
+    backing
+        .write_bytes(AQL_READ_OFFSET, &2_u64.to_ne_bytes())
+        .unwrap();
+    backing
+        .write_bytes(AQL_WRITE_OFFSET, &2_u64.to_ne_bytes())
+        .unwrap();
+    queue
+        .reclaim_scratch(&std::sync::atomic::AtomicBool::new(false))
+        .unwrap();
+    assert!(queue.aql.as_ref().unwrap().scratch.is_none());
+    assert_eq!(
+        fixture.read_aql_u32(&queue, offset_of!(AqlControlLayout, scratch_max_use_index)),
+        1
+    );
+    assert_eq!(
+        fixture.read_aql_u32(&queue, offset_of!(AqlControlLayout, compute_tmpring_size)),
+        0
+    );
+    {
+        let state = fixture.state.lock().unwrap();
+        assert_eq!(
+            state
+                .updates
+                .iter()
+                .map(|update| update.percentage)
+                .collect::<Vec<_>>(),
+            [0, 100, 0, 100]
+        );
+        assert!(state.updates.iter().all(|update| update.ring_address
+            == queue.info.ring_device_address
+            && update.ring_size == 4096));
+    }
+    queue.destroy().unwrap();
+    fixture.assert_released();
+}
+
+#[test]
+fn failed_async_scratch_updates_retain_backing_and_stop_native_retries() {
+    for reconnect in [false, true] {
+        for failure in [errno::ENOMEM, errno::EBUSY, errno::EOPNOTSUPP] {
+            let fixture = Fixture::new(true);
+            let mut queue = fixture
+                .create(descriptor(aql(QueueProducerMode::Single)))
+                .unwrap();
+            queue.enable_async_scratch().unwrap();
+            queue
+                .set_scratch(Some(QueueScratch {
+                    device_address: 0x1234_0000,
+                    byte_length: 65536,
+                    maximum_private_segment_byte_length: 16,
+                    lanes_per_wave: 32,
+                    maximum_wave_count: 128,
+                }))
+                .unwrap();
+            let backing = queue.backing[1].as_mut().unwrap();
+            backing
+                .write_bytes(offset_of!(AqlControlLayout, caps), &3_u32.to_ne_bytes())
+                .unwrap();
+            backing
+                .write_bytes(AQL_READ_OFFSET, &1_u64.to_ne_bytes())
+                .unwrap();
+            backing
+                .write_bytes(AQL_WRITE_OFFSET, &1_u64.to_ne_bytes())
+                .unwrap();
+            {
+                let mut state = fixture.state.lock().unwrap();
+                if reconnect {
+                    state.update_errno.push_back(None);
+                }
+                state.update_errno.push_back(Some(failure));
+            }
+            let cancel = std::sync::atomic::AtomicBool::new(false);
+            let error = queue.reclaim_scratch(&cancel).unwrap_err();
+            assert_eq!(error.native_status().unwrap().errno_code(), Some(failure));
+            assert!(queue.aql.as_ref().unwrap().scratch.is_some());
+            assert!(queue.check().is_err());
+            assert!(queue.progress().is_err());
+            let updates = fixture.state.lock().unwrap().updates.len();
+            assert_eq!(updates, if reconnect { 4 } else { 3 });
+            assert!(queue.reclaim_scratch(&cancel).is_err());
+            assert_eq!(fixture.state.lock().unwrap().updates.len(), updates);
+            assert_eq!(
+                queue.destroy().unwrap_err().kind(),
+                ErrorKind::DriverContract
+            );
+            drop(queue);
+            let state = fixture.state.lock().unwrap();
+            assert!(state.live);
+            assert_eq!(state.destroys, 0);
+            assert_eq!(state.frees, 0);
+            assert!(!state.buffers.is_empty());
+        }
+    }
+}
+
+#[test]
+fn cancelled_async_reclaim_does_not_release_the_scratch_owner() {
+    let fixture = Fixture::new(true);
+    let mut queue = fixture
+        .create(descriptor(aql(QueueProducerMode::Single)))
+        .unwrap();
+    queue.enable_async_scratch().unwrap();
+    queue
+        .set_scratch(Some(QueueScratch {
+            device_address: 0x1234_0000,
+            byte_length: 65536,
+            maximum_private_segment_byte_length: 16,
+            lanes_per_wave: 32,
+            maximum_wave_count: 128,
+        }))
+        .unwrap();
+    queue.backing[1]
+        .as_mut()
+        .unwrap()
+        .write_bytes(offset_of!(AqlControlLayout, caps), &3_u32.to_ne_bytes())
+        .unwrap();
+    let error = queue
+        .reclaim_scratch(&std::sync::atomic::AtomicBool::new(true))
+        .unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::Busy);
+    assert!(queue.aql.as_ref().unwrap().scratch.is_some());
+    assert_eq!(queue.set_scratch(None).unwrap_err().kind(), ErrorKind::Busy);
+    assert!(queue.aql.as_ref().unwrap().scratch.is_some());
+    let updates = fixture.state.lock().unwrap().updates.len();
+    queue.backing[1]
+        .as_mut()
+        .unwrap()
+        .write_bytes(AQL_READ_OFFSET, &1_u64.to_ne_bytes())
+        .unwrap();
+    queue.backing[1]
+        .as_mut()
+        .unwrap()
+        .write_bytes(AQL_WRITE_OFFSET, &1_u64.to_ne_bytes())
+        .unwrap();
+    queue
+        .reclaim_scratch(&std::sync::atomic::AtomicBool::new(false))
+        .unwrap();
+    assert_eq!(fixture.state.lock().unwrap().updates.len(), updates);
+    assert!(queue.aql.as_ref().unwrap().scratch.is_none());
+    queue.destroy().unwrap();
+    fixture.assert_released();
+}
+
+#[test]
+fn local_queue_controls_require_host_coherent_atomics_before_acquisition() {
+    let mut native = native_node();
+    let mut desc = descriptor(aql(QueueProducerMode::Single));
+    desc.control_memory = QueueRingMemory::HostVisibleLocal;
+    assert_eq!(
+        Request::validate(&native, desc).err().unwrap().kind(),
+        ErrorKind::Unsupported
+    );
+    native.host_atomics = true;
+    let request = Request::validate(&native, desc).unwrap();
+    assert_eq!(request.control_memory, QueueRingMemory::HostVisibleLocal);
+    native.public_memory_bytes = 0;
+    assert_eq!(
+        Request::validate(&native, desc).err().unwrap().kind(),
+        ErrorKind::Unsupported
+    );
+}
+
+#[test]
+fn local_ring_placement_is_independent_of_the_selected_queue_generation() {
+    for (target, profile, waves) in [
+        (90_008, GpuTargetProfile::Gfx9, 64),
+        (100_100, GpuTargetProfile::Gfx10, 32),
+        (100_300, GpuTargetProfile::Gfx10, 32),
+        (110_000, GpuTargetProfile::Gfx11, 32),
+        (120_000, GpuTargetProfile::Gfx1200, 32),
+    ] {
+        let mut native = native_node();
+        native.queues.gfx_target = target;
+        native.queues.target_profile = profile;
+        native.queues.wavefront_size = waves;
+        let mut desc = descriptor(aql(QueueProducerMode::Single));
+        if let QueueParameters::Aql { ring_memory, .. } = &mut desc.parameters {
+            *ring_memory = QueueRingMemory::HostVisibleLocal;
+        }
+        assert!(Request::validate(&native, desc).is_ok(), "target {target}");
+    }
 }

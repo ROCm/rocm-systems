@@ -118,8 +118,11 @@ impl GpuSurfaceOperations for LinuxKfdDriver {
             .kfd()
             .tile_config(device.native.gpu_id)
             .map_err(|source| native_error("KFD tile configuration query", source))?;
+        let native = drm::device_info_prefix(device.vm.render()?)
+            .map_err(|source| native_error("DRM image ASIC revision query", source))?;
         Ok(crate::device::gpu::GpuSurfaceConfig {
             asic_family_id: device.asic_family_id,
+            chip_revision: native.external_revision,
             gb_addr_config: config.gb_addr_config,
         })
     }
@@ -185,15 +188,20 @@ impl GpuKernelQueueOperations for LinuxKfdDriver {
     type KernelQueue = KfdKernelQueue;
 
     fn available_sdma_engines(&self, device: &DeviceState) -> Result<u32, Error> {
+        use crate::topology::GpuTargetProfile;
+
         self.ensure_open()?;
-        if cfg!(target_arch = "x86_64")
-            && device.native.queues.target_profile == crate::topology::GpuTargetProfile::Gfx9
+        if cfg!(any(target_arch = "x86_64", target_arch = "aarch64"))
+            && matches!(
+                device.native.queues.target_profile,
+                GpuTargetProfile::Gfx9 | GpuTargetProfile::Gfx10 | GpuTargetProfile::Gfx11
+            )
             && device.native.queues.sdma_qualified
         {
             let count = device.native.queues.sdma_engines.min(u32::BITS);
             return Ok(u32::MAX >> (u32::BITS - count));
         }
-        if !cfg!(target_arch = "x86_64")
+        if !cfg!(any(target_arch = "x86_64", target_arch = "aarch64"))
             || !device
                 .native
                 .queues
@@ -218,7 +226,7 @@ impl GpuKernelQueueOperations for LinuxKfdDriver {
         format: KernelQueueFormat,
     ) -> Result<Owned<KfdKernelQueue>, Error> {
         self.ensure_open()?;
-        if !cfg!(target_arch = "x86_64")
+        if !cfg!(any(target_arch = "x86_64", target_arch = "aarch64"))
             || !device
                 .native
                 .queues
@@ -981,8 +989,16 @@ impl UserQueueResource for KfdQueue {
     }
 
     #[allow(unsafe_code)]
-    unsafe fn set_scratch(&mut self, scratch: QueueScratch) -> Result<(), Error> {
+    unsafe fn set_scratch(&mut self, scratch: Option<QueueScratch>) -> Result<(), Error> {
         KfdQueue::set_scratch(self, scratch)
+    }
+
+    fn enable_async_scratch(&mut self) -> Result<(), Error> {
+        KfdQueue::enable_async_scratch(self)
+    }
+
+    fn reclaim_scratch(&mut self, cancel: &std::sync::atomic::AtomicBool) -> Result<(), Error> {
+        KfdQueue::reclaim_scratch(self, cancel)
     }
 
     #[allow(unsafe_code)]

@@ -78,4 +78,13 @@ fn main() {
     member!(HsaExtControlDirectives, required_workgroup_size);
     member!(HsaExtControlDirectives, required_dim);
     member!(HsaExtControlDirectives, reserved2);
+    record!(HsaExtSamplerDescriptorV3);
+    member!(HsaExtSamplerDescriptorV3, coordinate_mode);
+    member!(HsaExtSamplerDescriptorV3, filter_mode);
+    member!(HsaExtSamplerDescriptorV3, mipmap_filter_mode);
+    member!(HsaExtSamplerDescriptorV3, address_modes);
+    member!(HsaExtSamplerDescriptorV3, max_anisotropy);
+    record!(HsaAmdMemoryCopyRectPtr);
+    member!(HsaAmdMemoryCopyRectPtr, pitched_ptr);
+    member!(HsaAmdMemoryCopyRectPtr, offset);
 }

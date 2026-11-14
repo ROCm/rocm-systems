@@ -297,6 +297,7 @@ fn first_and_later_gpu_activation_failures_retire_the_session_join() {
         let live = Arc::new(AtomicUsize::new(completed_activations));
         let joins = Arc::new(AtomicUsize::new(1));
         let mut pending = PendingInit {
+            debugger: None,
             session: Some(Joined {
                 live: live.clone(),
                 joins: joins.clone(),
@@ -337,6 +338,7 @@ fn failed_or_unwound_initialization_retains_the_native_session() {
     for panic_on_retire in [false, true] {
         let drops = Arc::new(AtomicUsize::new(0));
         let mut pending = PendingInit {
+            debugger: None,
             session: Some(SessionProbe {
                 drops: drops.clone(),
                 panic_on_retire,

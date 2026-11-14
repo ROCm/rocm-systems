@@ -498,6 +498,7 @@ mod tests {
         ))
         .unwrap();
         let node = sysfs::KfdNode {
+            host_atomics: false,
             node: 1,
             gpu_id: 42,
             render_minor: Some(128),

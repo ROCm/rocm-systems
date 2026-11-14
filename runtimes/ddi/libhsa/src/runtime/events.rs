@@ -204,6 +204,10 @@ fn system_event_worker_with(
     let mut retry_delay = Duration::from_millis(1);
     let mut driver_failures = 0u8;
     while !stop.load(Ordering::Acquire) {
+        let Some(_lease) = enter_runtime_service() else {
+            pause(Duration::from_millis(1));
+            continue;
+        };
         match wait(Duration::from_millis(1)) {
             Ok(Some(DeviceEvent::GpuMemoryFault(fault))) => {
                 retry_delay = Duration::from_millis(1);
