@@ -121,6 +121,8 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 * Fixed communicator initialization leaking memory when connecting rings or trees failed.
 * Fixed communicator creation with socket encryption (`ncclSetEncryption`) failing intermittently on 2-rank communicators, including one process driving 2 GPUs, and on any communicator with `NCCL_BOOTSTRAP_BIDIR_ALLGATHER=0`. The TLS server sent session tickets that bootstrap clients which only write never read, so closing such a socket reset the connection and dropped the bootstrap data still queued. RCCL no longer sends TLS session tickets.
 * Fixed a Socket communicator's cached "no GPU Direct RDMA" verdict being reused by later IB communicators on the same GPU, including `ncclCommSplit` children.
+* Fixed `ncclAllGather` returning `ncclInvalidArgument` instead of falling back to another algorithm when `RCCL_DDA_THRESHOLD` is raised above the DDA scratch size and the gathered total does not fit the scratch. The DDA IPC and fabric AllGather eligibility checks now test the gathered total, as their launchers do.
+* Fixed DDA kernels launching with `blockDim.x=0` for payloads of 64 GiB or more, which `RCCL_DDA_THRESHOLD` can make reachable on the DDA fabric path.
 
 ### Known issues
 

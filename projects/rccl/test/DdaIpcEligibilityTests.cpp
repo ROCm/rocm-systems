@@ -77,6 +77,25 @@ TEST_F(DdaIpcEligibilityTest, AllGather_ScratchTooSmall)
         mockComm_.get(), sendbuff_, recvbuff_, 4, ncclFloat32));
 }
 
+// The launcher checks nRanks * sendcount against scratch, so gate on the total.
+TEST_F(DdaIpcEligibilityTest, AllGather_PerRankFitsButTotalExceedsScratch)
+{
+    const size_t nRanks       = static_cast<size_t>(mockComm_.comm.nRanks);
+    const size_t maxSendCount = DDA_IPC_BUFFER_SIZE / (nRanks * sizeof(float));
+    ASSERT_LE((maxSendCount + 4) * sizeof(float), mockComm_.comm.ddaScratchBytes);
+    EXPECT_FALSE(ncclAllGatherDdaIpcEligible(
+        mockComm_.get(), sendbuff_, recvbuff_, maxSendCount + 4, ncclFloat32));
+}
+
+TEST_F(DdaIpcEligibilityTest, AllGather_TotalAtScratchEligible)
+{
+    const size_t nRanks       = static_cast<size_t>(mockComm_.comm.nRanks);
+    const size_t maxSendCount = DDA_IPC_BUFFER_SIZE / (nRanks * sizeof(float));
+    ASSERT_EQ(maxSendCount * nRanks * sizeof(float), mockComm_.comm.ddaScratchBytes);
+    EXPECT_TRUE(ncclAllGatherDdaIpcEligible(
+        mockComm_.get(), sendbuff_, recvbuff_, maxSendCount, ncclFloat32));
+}
+
 TEST_F(DdaIpcEligibilityTest, AllGather_UnalignedCount)
 {
     EXPECT_FALSE(ncclAllGatherDdaIpcEligible(

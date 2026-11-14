@@ -352,6 +352,15 @@ test_categories:
       - "NCCL_DEBUG=WARN"
       - "NCCL_BOOTSTRAP_BIDIR_ALLGATHER=1"
       - "NCCL_BOOTSTRAP_BIDIR_THRESHOLD=0"
+  quick_env_dda_allgather_threshold:
+    description: "DDA IPC AllGather fallback above scratch. RCCL_PARAM caches RCCL_DDA_THRESHOLD for the process lifetime, so AboveScratchFallsBack only runs when it is set before launch."
+    test_patterns:
+      - "DdaMPI_AllGatherThreshold.*"
+    exclude_windows: *mpi_exclude_windows
+    labels: *mpi_quick_labels
+    env_variables:
+      - "NCCL_DEBUG=INFO"
+      - "RCCL_DDA_THRESHOLD=1073741824"
   standard:
     description: "MPI regression — all transport / IB / implicit-launch / UBR / graph-capture suites (same patterns as comprehensive; lighter env)."
     test_patterns: &mpi_all_patterns
@@ -382,6 +391,7 @@ test_categories:
       - "DdaAlltoAllPeerColumnsMPI.*"
       - "DdaFabricBlockCap.*"
       - "DdaFabricBarrierStress.*"
+      - "DdaMPI_AllGather.*"
       # Skips under comprehensive: NCCL_LAUNCH_ORDER_IMPLICIT=1 disables DDA, so standard is where it runs.
       - "DdaIpcMPI_IndexData.*"
       - "DdaMPI_CollOpCount.*"
@@ -795,6 +805,7 @@ execution_settings:
     quick_env_qpshare_depth_ceiling: 1200
     quick_env_bootstrap_tls_unidir: 1200
     quick_env_bootstrap_tls_bidir: 1200
+    quick_env_dda_allgather_threshold: 1200
     standard: 1200
     standard_env_gdr_flush_flag: 1200
     standard_env_gdr_flush_flag_4qps: 1200

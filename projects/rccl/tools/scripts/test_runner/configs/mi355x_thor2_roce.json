@@ -4048,6 +4048,19 @@
           }
         },
         {
+          "name": "DDA_AllGatherSlicePlacement_8Ranks",
+          "description": "DDA IPC AllGather writes each rank's slice at the sender's offset on every rank, out of place and in place, at one-block and grid-stride sizes",
+          "test_filter": "DdaMPI_AllGather.SlicePlacement*"
+        },
+        {
+          "name": "DDA_AllGatherThresholdAboveScratch_8Ranks",
+          "description": "RCCL_DDA_THRESHOLD above the IPC scratch: an AllGather whose total exceeds scratch falls back and succeeds instead of returning ncclInvalidArgument",
+          "test_filter": "DdaMPI_AllGatherThreshold.AboveScratchFallsBack",
+          "env_variables": {
+            "RCCL_DDA_THRESHOLD": "1073741824"
+          }
+        },
+        {
           "name": "DDA_IpcAllReduceIndexData_8Ranks",
           "description": "DDA IPC flat and tree AllReduce with rank- and index-dependent fp32/bf16 data, out-of-place and in-place, checked exactly on every rank",
           "test_filter": "DdaIpcMPI_IndexData.AllReduce*"
