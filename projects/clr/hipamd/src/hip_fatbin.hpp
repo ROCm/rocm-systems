@@ -32,11 +32,14 @@ class FatBinaryInfo {
   explicit FatBinaryInfo(KpackParams kpack_params);
   ~FatBinaryInfo();
 
+  // Dynamic loads opt in to eager metadata/symbol reuse. Output storage may be
+  // borrowed in either mode; static registration keeps metadata loading lazy.
   hipError_t ExtractFatBinaryUsingCOMGR(const std::vector<hip::Device*>& devices,
-                                        std::vector<char>* image_storage = nullptr);
+                                        std::vector<char>* image_storage = nullptr,
+                                        bool reuse_unbundled_data = false);
   hipError_t ExtractKpackBinary(const std::vector<hip::Device*>& devices);
   hipError_t AddDevProgram(hip::Device* device, const void* binary_image, size_t binary_size,
-                           amd::Os::FileDesc fdesc);
+                           amd::Os::FileDesc fdesc, amd_comgr_data_t data = {0});
   hipError_t BuildProgram(const int device_id);
 
   // Device Id bounds check
@@ -88,6 +91,9 @@ class FatBinaryInfo {
 
   std::recursive_mutex fb_lock_;                          //!< Lock for the fat binary access
   std::unordered_set<const void*> code_obj_allocations_;  //!< Track allocations for code objects
+  // One owning COMGR reference per borrowed output address, released after the
+  // device programs. These addresses must never enter code_obj_allocations_.
+  std::unordered_map<const void*, amd_comgr_data_t> code_obj_data_;
 };
 
 };  // namespace hip

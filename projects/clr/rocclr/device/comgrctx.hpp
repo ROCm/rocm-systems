@@ -28,6 +28,8 @@ typedef amd_comgr_status_t (*t_amd_comgr_set_data)(amd_comgr_data_t data, size_t
 typedef amd_comgr_status_t (*t_amd_comgr_set_data_name)(amd_comgr_data_t data, const char* name);
 typedef amd_comgr_status_t (*t_amd_comgr_get_data)(amd_comgr_data_t data, size_t* size,
                                                    char* bytes);
+typedef amd_comgr_status_t (*t_amd_comgr_get_data_pointer)(amd_comgr_data_t data, size_t* size,
+                                                           const char** bytes);
 typedef amd_comgr_status_t (*t_amd_comgr_get_data_name)(amd_comgr_data_t data, size_t* size,
                                                         char* name);
 typedef amd_comgr_status_t (*t_amd_comgr_get_data_isa_name)(amd_comgr_data_t data, size_t* size,
@@ -138,6 +140,7 @@ struct ComgrEntryPoints {
   t_amd_comgr_set_data amd_comgr_set_data;
   t_amd_comgr_set_data_name amd_comgr_set_data_name;
   t_amd_comgr_get_data amd_comgr_get_data;
+  t_amd_comgr_get_data_pointer amd_comgr_get_data_pointer;
   t_amd_comgr_get_data_name amd_comgr_get_data_name;
   t_amd_comgr_get_data_isa_name amd_comgr_get_data_isa_name;
   t_amd_comgr_get_data_metadata amd_comgr_get_data_metadata;
@@ -242,6 +245,24 @@ class Comgr : public amd::AllStatic {
   }
   static amd_comgr_status_t get_data(amd_comgr_data_t data, size_t* size, char* bytes) {
     return COMGR_DYN(amd_comgr_get_data)(data, size, bytes);
+  }
+  // Dynamic loading probes the optional symbol; static linking requires headers
+  // declaring it. Older COMGR builds keep the get_data copying fallback.
+  static bool has_data_pointer() {
+#if defined(COMGR_DYN_DLL)
+    return cep_.amd_comgr_get_data_pointer != nullptr;
+#elif defined(AMD_COMGR_VERSION_3_6)
+    return true;
+#else
+    return false;
+#endif
+  }
+  static amd_comgr_status_t get_data_pointer(amd_comgr_data_t data, size_t* size,
+                                             const char** bytes) {
+#if defined(COMGR_DYN_DLL) || defined(AMD_COMGR_VERSION_3_6)
+    if (has_data_pointer()) return COMGR_DYN(amd_comgr_get_data_pointer)(data, size, bytes);
+#endif
+    return AMD_COMGR_STATUS_ERROR;
   }
   static amd_comgr_status_t get_data_name(amd_comgr_data_t data, size_t* size, char* name) {
     return COMGR_DYN(amd_comgr_get_data_name)(data, size, name);
