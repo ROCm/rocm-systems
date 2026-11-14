@@ -169,7 +169,7 @@ enum class QueueIdlePublicationPhase : uint8_t {
   ReadEventId,
   StoreMailbox,
   DeliverEventInterrupt,
-  DeliverGenericInterrupt,
+  NotifyIdle,
   Complete,
 };
 

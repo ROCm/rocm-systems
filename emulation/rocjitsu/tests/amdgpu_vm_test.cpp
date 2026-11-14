@@ -2200,7 +2200,7 @@ TEST(AqlDispatchTest, RevokedWaveSetupRecoversOnlyOnTheSameRoot) {
       uint32_t exception_count = 0;
       amdgpu::InterruptSubscription owner([&](uint32_t process_id, uint32_t event_id) {
         EXPECT_EQ(process_id, kProcessId);
-        if (event_id == 0)
+        if (event_id == 0) // Polling kernel completion has no KFD event ID.
           return;
         EXPECT_EQ(event_id, kExceptionEvent);
         ++exception_count;
@@ -2324,7 +2324,7 @@ TEST(AqlDispatchTest, RevokedInFlightLoadPublishesQueueMemoryException) {
     uint64_t exception_status = 0;
     amdgpu::InterruptSubscription owner([&](uint32_t process_id, uint32_t event_id) {
       EXPECT_EQ(process_id, kProcessId);
-      if (event_id == 0) // Ordinary queue-idle notification.
+      if (event_id == 0) // Polling kernel completion has no KFD event ID.
         return;
       EXPECT_EQ(event_id, kExceptionEvent);
       ++exception_count;
@@ -6215,6 +6215,112 @@ TEST(CommandProcessorTest, KfdQueueRequestsResizesAndReclaimsDynamicScratchBefor
   })) << "the CP used a physical wave slot beyond COMPUTE_TMPRING_SIZE.WAVES";
 }
 
+TEST(CommandProcessorTest, DynamicScratchWaitsForRuntimeReleaseBeforeReadingBacking) {
+  using namespace rocjitsu::amdhsa;
+  constexpr uint32_t kProcessId = 7;
+  constexpr uint32_t kQueueId = 19;
+  constexpr uint32_t kPrivateBytes = 288;
+  constexpr uint64_t kRing = 0xF0000000;
+  constexpr uint64_t kQueueDescriptor = 0xF0010000;
+  constexpr uint64_t kQueueSignal = 0xE0000000;
+  constexpr uint64_t kCompletion = 0xE0001000;
+  constexpr uint64_t kScratchBacking = 0x00800000;
+  constexpr uint32_t kEventId = 41;
+
+  for (const auto *arch : {"cdna1", "cdna2", "cdna3", "cdna4", "cdna5", "rdna1", "rdna2", "rdna3",
+                           "rdna3_5", "rdna4"}) {
+    SCOPED_TRACE(arch);
+    VmFixture fixture;
+    ASSERT_NO_FATAL_FAILURE(fixture.initialize(arch, /*num_cus=*/1, /*num_wf_slots=*/2));
+    fixture.engine->register_as_primary();
+    const auto address_space = fixture.soc_ptr->gpu_vm().register_translated(
+        kProcessId, std::make_shared<amdgpu::IdentityAddressSpaceTranslator>(),
+        std::make_shared<amdgpu::GpuMemoryPhysicalAccess>(*fixture.mem()));
+    ASSERT_TRUE(address_space);
+    const auto target = fixture.cu()->arch();
+    const auto endpgm = build_s_endpgm(target);
+    ASSERT_TRUE(endpgm.succeeded());
+    const uint32_t code[] = {endpgm.value()};
+    const uint64_t kernel = fixture.write_kernel(0x1000, code, sizeof(code));
+    fixture.mem()->write32(kernel + offsetof(kernel_descriptor_t, private_segment_fixed_size),
+                           kPrivateBytes);
+    kernel_descriptor_t descriptor{};
+    RJ_AMDHSA_BITS_SET(descriptor.kernel_code_properties,
+                       KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32, 1);
+    const uint32_t wave_size = kernel_wavefront_size(target, descriptor);
+    const uint64_t expected_request = wave_size == 32 ? 0x401 : 1;
+    const uint64_t read_pointer = kQueueDescriptor + offsetof(amd_queue_t, read_dispatch_id);
+    const uint64_t write_pointer = kQueueDescriptor + offsetof(amd_queue_t, write_dispatch_id);
+    fixture.mem()->write64(read_pointer, 0);
+    fixture.mem()->write64(write_pointer, 1);
+    fixture.mem()->write64(kQueueDescriptor + offsetof(amd_queue_t, queue_inactive_signal),
+                           kQueueSignal);
+    fixture.mem()->write64(kQueueSignal + 8, 0);
+    fixture.mem()->write32(kQueueSignal + 24, kEventId);
+    fixture.mem()->write64(kCompletion + 8, 1);
+    uint32_t requests = 0;
+    amdgpu::InterruptSubscription subscription([&](uint32_t process_id, uint32_t event_id) {
+      if (fixture.mem()->read64(kQueueSignal + 8) != expected_request)
+        return;
+      EXPECT_EQ(process_id, kProcessId);
+      EXPECT_EQ(event_id, kEventId);
+      ++requests;
+    });
+    amdgpu::ComputeQueueConfig queue{};
+    queue.interrupt_sink = subscription.sink();
+    queue.address_space = address_space;
+    queue.process_id = kProcessId;
+    queue.queue_id = kQueueId;
+    queue.ring_base_va = kRing;
+    queue.ring_size = amdgpu::kAqlPacketBytes;
+    queue.read_ptr_va = read_pointer;
+    queue.write_ptr_va = write_pointer;
+    queue.doorbell_mode = amdgpu::QueueDoorbellMode::Explicit;
+    queue.uses_kfd_queue_abi = true;
+    queue.queue_desc_va = kQueueDescriptor;
+    const uint64_t registration = fixture.cp()->register_queue(std::move(queue));
+    ASSERT_NE(registration, 0u);
+    auto packet = make_dispatch_packet(kernel, 0, wave_size, wave_size);
+    packet.private_segment_size = kPrivateBytes;
+    packet.completion_signal.handle = kCompletion;
+    fixture.mem()->load_image(reinterpret_cast<const uint8_t *>(&packet), sizeof(packet), kRing);
+    fixture.cp()->notify_queue_doorbell(registration, 0);
+    while (requests == 0)
+      ASSERT_TRUE(fixture.engine->step());
+
+    // Sufficient fields can become visible while the host still owns the
+    // descriptor. The inactive signal is the publication boundary.
+    const uint32_t granule = isa_properties(target).compute_tmpring_wavesize_granule;
+    const uint32_t wave_units = (kPrivateBytes * wave_size + granule - 1) / granule;
+    fixture.mem()->write64(
+        kQueueDescriptor + offsetof(amd_queue_t, scratch_backing_memory_location), kScratchBacking);
+    fixture.mem()->write32(kQueueDescriptor + offsetof(amd_queue_t, compute_tmpring_size),
+                           1u | (wave_units << 12));
+    const uint64_t passes = fixture.cp()->doorbell_handle_count_for_test();
+    fixture.engine->schedule_event_now(fixture.cp()->doorbell_event());
+    while (fixture.cp()->doorbell_handle_count_for_test() == passes)
+      ASSERT_TRUE(fixture.engine->step());
+    EXPECT_EQ(fixture.cp()->accepted_entry_count_for_test(kQueueId, kProcessId), 0u);
+    EXPECT_EQ(fixture.mem()->read64(read_pointer), 0u);
+    EXPECT_EQ(fixture.mem()->read64(kCompletion + 8), 1u);
+    EXPECT_EQ(fixture.mem()->read64(kQueueSignal + 8), expected_request);
+
+    // Replacing scratch may invalidate the request's old VM snapshot. The
+    // runtime's acknowledgement must be observed through a current snapshot.
+    ASSERT_TRUE(fixture.soc_ptr->gpu_vm().invalidate(address_space));
+    fixture.mem()->write64(kQueueSignal + 8, 0);
+    while (fixture.mem()->read64(read_pointer) == 0)
+      ASSERT_TRUE(fixture.engine->step());
+    fixture.engine->primary_release();
+    fixture.engine->run();
+    EXPECT_EQ(requests, 1u);
+    EXPECT_EQ(fixture.cp()->accepted_entry_count_for_test(kQueueId, kProcessId), 1u);
+    EXPECT_EQ(fixture.mem()->read64(read_pointer), 1u);
+    EXPECT_EQ(fixture.mem()->read64(kCompletion + 8), 0u);
+    EXPECT_FALSE(fixture.cp()->queue_faulted_for_test(kQueueId, kProcessId));
+  }
+}
+
 TEST(CommandProcessorTest, RuntimeScratchStrideSurvivesLargeThenSmallPrivateSegments) {
   using namespace rocjitsu::amdhsa;
   constexpr uint64_t kRing = 0xF0000000;
@@ -6340,6 +6446,207 @@ TEST(CommandProcessorTest, Cdna5RuntimeScratchAcceptsTargetGranules) {
     EXPECT_EQ(wave.scratch_base, kBacking + wave.scratch_scoreboard_id * kStride);
   EXPECT_EQ(f.mem()->read64(kQueue + offsetof(amd_queue_t, read_dispatch_id)), 1u);
   EXPECT_FALSE(f.cp()->queue_faulted_for_test(19, 7));
+}
+
+TEST(CommandProcessorTest, AqlPublicationAcceptsOutOfOrderDoorbells) {
+  constexpr uint32_t kQueueId = 20;
+  constexpr uint64_t kRing = 0xF0100000;
+  constexpr uint64_t kReadPointer = kRing + 256;
+  constexpr uint64_t kWritePointer = kReadPointer + 8;
+  constexpr uint64_t kFirstSignal = kRing + 512;
+  constexpr uint64_t kSecondSignal = kFirstSignal + 64;
+
+  for (const uint64_t index : {uint64_t{0}, uint64_t{3}, (uint64_t{1} << 32) + 3}) {
+    SCOPED_TRACE(index);
+    for (const bool observe_later_first : {false, true}) {
+      SCOPED_TRACE(observe_later_first);
+      uint64_t doorbell = UINT64_MAX;
+      VmFixture fixture;
+      ASSERT_NO_FATAL_FAILURE(fixture.initialize("cdna4", /*num_cus=*/1));
+      const uint64_t first_slot = kRing + (index % 4) * amdgpu::kAqlPacketBytes;
+      const uint64_t second_slot = kRing + ((index + 1) % 4) * amdgpu::kAqlPacketBytes;
+      fixture.mem()->write32(first_slot, HSA_PACKET_TYPE_INVALID);
+      fixture.mem()->write32(second_slot, HSA_PACKET_TYPE_INVALID);
+      fixture.mem()->write64(kReadPointer, index);
+      fixture.mem()->write64(kWritePointer, index + 2);
+      fixture.mem()->write64(kFirstSignal + 8, 1);
+      fixture.mem()->write64(kSecondSignal + 8, 1);
+      amdgpu::ComputeQueueConfig queue{};
+      queue.queue_id = kQueueId;
+      queue.ring_base_va = kRing;
+      queue.ring_size = 4 * amdgpu::kAqlPacketBytes;
+      queue.read_ptr_va = kReadPointer;
+      queue.write_ptr_va = kWritePointer;
+      queue.doorbell_mode = amdgpu::QueueDoorbellMode::HostPolled;
+      queue.doorbell_base = &doorbell;
+      queue.last_doorbell = UINT64_MAX;
+      const uint64_t registration = fixture.cp()->register_queue(std::move(queue));
+      ASSERT_NE(registration, 0u);
+
+      hsa_barrier_and_packet_t packet{};
+      packet.header = HSA_PACKET_TYPE_BARRIER_AND;
+      packet.completion_signal.handle = kSecondSignal;
+      fixture.mem()->load_image(reinterpret_cast<const uint8_t *>(&packet), sizeof(packet),
+                                second_slot);
+      std::atomic_ref(doorbell).store(index + 1, std::memory_order_release);
+      fixture.cp()->notify_queue_doorbell(registration, index + 1);
+      if (observe_later_first) {
+        ASSERT_TRUE(fixture.engine->step());
+        EXPECT_EQ(fixture.cp()->queue_last_doorbell_for_test(registration), index + 1);
+        EXPECT_EQ(fixture.mem()->read64(kReadPointer), index);
+        EXPECT_EQ(fixture.mem()->read64(kSecondSignal + 8), 1u);
+      }
+
+      // The lower-index publisher can overwrite the doorbell before the CP sees
+      // the higher index. Reservation and valid headers still expose both slots.
+      packet.completion_signal.handle = kFirstSignal;
+      fixture.mem()->load_image(reinterpret_cast<const uint8_t *>(&packet), sizeof(packet),
+                                first_slot);
+      std::atomic_ref(doorbell).store(index, std::memory_order_release);
+      fixture.cp()->notify_queue_doorbell(registration, index);
+      fixture.engine->run();
+      EXPECT_EQ(fixture.mem()->read64(kReadPointer), index + 2);
+      EXPECT_EQ(fixture.mem()->read64(kFirstSignal + 8), 0u);
+      EXPECT_EQ(fixture.mem()->read64(kSecondSignal + 8), 0u);
+      EXPECT_FALSE(fixture.cp()->queue_faulted_for_test(kQueueId, 0));
+      EXPECT_EQ(fixture.mem()->read32(first_slot) & 0xFFu, HSA_PACKET_TYPE_INVALID);
+      EXPECT_EQ(fixture.mem()->read32(second_slot) & 0xFFu, HSA_PACKET_TYPE_INVALID);
+    }
+  }
+}
+
+TEST(CommandProcessorTest, AqlReservationsWaitForRingSlotRetirement) {
+  constexpr uint32_t kQueueId = 20;
+  constexpr uint32_t kCapacity = 4;
+  constexpr uint64_t kRing = 0xF0100000;
+  constexpr uint64_t kReadPointer = kRing + kCapacity * amdgpu::kAqlPacketBytes;
+  constexpr uint64_t kWritePointer = kReadPointer + 8;
+  constexpr uint64_t kDoorbell = kWritePointer + 8;
+  constexpr uint64_t kSignals = kRing + 512;
+
+  for (const uint64_t index : {uint64_t{0}, uint64_t{3}, (uint64_t{1} << 32) + 3}) {
+    SCOPED_TRACE(index);
+    for (const auto mode :
+         {amdgpu::QueueDoorbellMode::HostPolled, amdgpu::QueueDoorbellMode::VmPolled,
+          amdgpu::QueueDoorbellMode::Explicit}) {
+      SCOPED_TRACE(static_cast<int>(mode));
+      uint64_t doorbell = index + kCapacity - 1;
+      VmFixture fixture;
+      ASSERT_NO_FATAL_FAILURE(fixture.initialize("cdna4", /*num_cus=*/1));
+      // The host still owns a producer waiting to publish after retirement.
+      fixture.engine->register_as_primary();
+      std::vector<uint32_t> code(amdgpu::ComputeUnitCore::kFunctionalQuantum * 2, SOPP_S_NOP);
+      code.push_back(SOPP_S_ENDPGM);
+      const uint64_t kernel =
+          fixture.write_kernel(0x1000, code.data(), code.size() * sizeof(uint32_t));
+      fixture.mem()->write64(kReadPointer, index);
+      fixture.mem()->write64(kWritePointer, index + kCapacity);
+      fixture.mem()->write64(kDoorbell, doorbell);
+      for (uint32_t offset = 0; offset < kCapacity; ++offset) {
+        const uint64_t signal = kSignals + offset * 64;
+        auto packet = make_dispatch_packet(kernel, 0, 64, 64);
+        packet.completion_signal.handle = signal;
+        fixture.mem()->write64(signal + 8, 1);
+        const uint64_t slot = kRing + ((index + offset) % kCapacity) * amdgpu::kAqlPacketBytes;
+        fixture.mem()->load_image(reinterpret_cast<const uint8_t *>(&packet), sizeof(packet), slot);
+      }
+      amdgpu::ComputeQueueConfig queue{};
+      queue.queue_id = kQueueId;
+      queue.ring_base_va = kRing;
+      queue.ring_size = kCapacity * amdgpu::kAqlPacketBytes;
+      queue.read_ptr_va = kReadPointer;
+      queue.write_ptr_va = kWritePointer;
+      queue.doorbell_mode = mode;
+      queue.doorbell_base = &doorbell;
+      queue.doorbell_va = kDoorbell;
+      queue.last_doorbell = UINT64_MAX;
+      const uint64_t registration = fixture.cp()->register_queue(std::move(queue));
+      ASSERT_NE(registration, 0u);
+      fixture.cp()->notify_queue_doorbell(registration, doorbell);
+      ASSERT_TRUE(fixture.engine->step());
+      ASSERT_EQ(fixture.cp()->dispatched_count(), kCapacity);
+      ASSERT_EQ(fixture.mem()->read64(kReadPointer), index);
+      const uint64_t wrapped_slot = kRing + (index % kCapacity) * amdgpu::kAqlPacketBytes;
+      ASSERT_EQ(fixture.mem()->read32(wrapped_slot) & 0xFFu, HSA_PACKET_TYPE_KERNEL_DISPATCH);
+
+      // Reserve the next index while every ring slot still belongs to live
+      // work. Its producer cannot overwrite the old header or ring yet.
+      fixture.mem()->write64(kWritePointer, index + kCapacity + 1);
+      const uint64_t passes = fixture.cp()->doorbell_handle_count_for_test();
+      fixture.engine->schedule_event_now(fixture.cp()->doorbell_event());
+      while (fixture.cp()->doorbell_handle_count_for_test() == passes)
+        ASSERT_TRUE(fixture.engine->step());
+      EXPECT_EQ(fixture.cp()->dispatched_count(), kCapacity);
+      EXPECT_EQ(fixture.mem()->read64(kReadPointer), index);
+      while (fixture.mem()->read64(kReadPointer) < index + kCapacity)
+        ASSERT_TRUE(fixture.engine->step());
+      EXPECT_EQ(fixture.cp()->dispatched_count(), kCapacity);
+      EXPECT_EQ(fixture.mem()->read64(kReadPointer), index + kCapacity);
+      for (uint32_t offset = 0; offset < kCapacity; ++offset)
+        EXPECT_EQ(fixture.mem()->read64(kSignals + offset * 64 + 8), 0u);
+
+      // Only retirement releases the wrapped slot. Publish the genuine next
+      // packet and verify it still executes exactly once.
+      const uint64_t signal = kSignals + kCapacity * 64;
+      auto packet = make_dispatch_packet(kernel, 0, 64, 64);
+      packet.completion_signal.handle = signal;
+      fixture.mem()->write64(signal + 8, 1);
+      fixture.mem()->load_image(reinterpret_cast<const uint8_t *>(&packet), sizeof(packet),
+                                wrapped_slot);
+      std::atomic_ref(doorbell).store(index + kCapacity, std::memory_order_release);
+      fixture.mem()->write64(kDoorbell, index + kCapacity);
+      fixture.cp()->notify_queue_doorbell(registration, index + kCapacity);
+      while (fixture.mem()->read64(kReadPointer) < index + kCapacity + 1)
+        ASSERT_TRUE(fixture.engine->step());
+      fixture.engine->primary_release();
+      fixture.engine->run();
+      EXPECT_EQ(fixture.cp()->dispatched_count(), kCapacity + 1);
+      EXPECT_EQ(fixture.mem()->read64(kReadPointer), index + kCapacity + 1);
+      EXPECT_EQ(fixture.mem()->read64(signal + 8), 0u);
+      EXPECT_EQ(fixture.mem()->read32(wrapped_slot) & 0xFFu, HSA_PACKET_TYPE_INVALID);
+      EXPECT_FALSE(fixture.cp()->queue_faulted_for_test(kQueueId, 0));
+    }
+  }
+}
+
+TEST(CommandProcessorTest, AqlPublicationWaitsForFirstDoorbell) {
+  constexpr uint64_t kRing = 0xF0100000;
+  constexpr uint64_t kReadPointer = kRing + 256;
+  constexpr uint64_t kWritePointer = kReadPointer + 8;
+  constexpr uint64_t kSignal = kRing + 512;
+  uint64_t doorbell = UINT64_MAX;
+  VmFixture fixture;
+  ASSERT_NO_FATAL_FAILURE(fixture.initialize("cdna4", /*num_cus=*/1));
+  fixture.mem()->write64(kReadPointer, 0);
+  fixture.mem()->write64(kWritePointer, 1);
+  fixture.mem()->write64(kSignal + 8, 1);
+  hsa_barrier_and_packet_t packet{};
+  packet.header = HSA_PACKET_TYPE_BARRIER_AND;
+  packet.completion_signal.handle = kSignal;
+  fixture.mem()->load_image(reinterpret_cast<const uint8_t *>(&packet), sizeof(packet), kRing);
+  amdgpu::ComputeQueueConfig queue{};
+  queue.queue_id = 20;
+  queue.ring_base_va = kRing;
+  queue.ring_size = 4 * amdgpu::kAqlPacketBytes;
+  queue.read_ptr_va = kReadPointer;
+  queue.write_ptr_va = kWritePointer;
+  queue.doorbell_mode = amdgpu::QueueDoorbellMode::HostPolled;
+  queue.doorbell_base = &doorbell;
+  queue.last_doorbell = UINT64_MAX;
+  const uint64_t registration = fixture.cp()->register_queue(std::move(queue));
+  ASSERT_NE(registration, 0u);
+
+  fixture.engine->schedule_event_now(fixture.cp()->doorbell_event());
+  ASSERT_TRUE(fixture.engine->step());
+  EXPECT_EQ(fixture.cp()->queue_last_doorbell_for_test(registration), UINT64_MAX);
+  EXPECT_EQ(fixture.mem()->read64(kReadPointer), 0u);
+  EXPECT_EQ(fixture.mem()->read64(kSignal + 8), 1u);
+  std::atomic_ref(doorbell).store(0, std::memory_order_release);
+  fixture.cp()->notify_queue_doorbell(registration, 0);
+  fixture.engine->run();
+  EXPECT_EQ(fixture.mem()->read64(kReadPointer), 1u);
+  EXPECT_EQ(fixture.mem()->read64(kSignal + 8), 0u);
+  EXPECT_FALSE(fixture.cp()->queue_faulted_for_test(20, 0));
 }
 
 TEST(CommandProcessorTest, DynamicScratchRequestBlocksRemovalOnlyUntilDelivery) {

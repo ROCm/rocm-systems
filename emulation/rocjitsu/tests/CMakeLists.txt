@@ -859,11 +859,19 @@ set(_rj_idle_wakeup_cases
     AsyncCausalityTest.StaleWakeDoesNotHideConcurrentPublication
     AsyncCausalityTest.QuiescentPublicationsToEveryPartitionMakeProgress
 )
+set(_rj_pm4_interrupt_cases
+    KfdTargets/KfdNativePm4Test.ReleaseInterruptUsesContextAndMarkedMailboxes/gfx1100
+    KfdTargets/KfdNativePm4Test.ReleaseInterruptUsesContextAndMarkedMailboxes/gfx1201
+    KfdTargets/KfdNativePm4Test.ReleaseInterruptUsesContextAndMarkedMailboxes/gfx1151
+)
 # Exclude exactly the cases registered below, so future cases still participate
 # in normal discovery until they receive an explicit timeout registration.
 set(_rj_gtest_exclusions
     "-*Benchmark*:*RequestExitWakesAllPartitions*:MatrixCoexecutionTest.SharedPoolMakesProgressUnderConcurrentHandoffs:*DispatchedWaitSurvivesAConcurrentFinalClose*:*EffectiveConfigTest.ReadsNativeLaunchConfigHandoff:*EffectiveConfigTest.ReadsSelectedNodeLaunchConfigHandoff"
 )
+foreach(_pm4_interrupt_case IN LISTS _rj_pm4_interrupt_cases)
+    string(APPEND _rj_gtest_exclusions ":${_pm4_interrupt_case}")
+endforeach()
 foreach(_idle_wakeup_case IN LISTS _rj_idle_wakeup_cases)
     string(APPEND _rj_gtest_exclusions ":${_idle_wakeup_case}")
 endforeach()
@@ -1001,6 +1009,21 @@ if(RJ_ENABLE_TSAN)
         )
     endforeach()
 endif()
+
+# Native queue progress is asynchronous; bound a lost doorbell or stalled
+# retirement in the outer harness, including installed tests.
+foreach(_pm4_interrupt_case IN LISTS _rj_pm4_interrupt_cases)
+    rj_add_test(
+        NAME "${_pm4_interrupt_case}"
+        COMMAND
+            $<TARGET_FILE:rocjitsu_tests>
+            "--gtest_filter=${_pm4_interrupt_case}"
+        TIMEOUT 30
+        INSTALL_COMMAND
+            "bin/rocjitsu_tests"
+            "--gtest_filter=${_pm4_interrupt_case}"
+    )
+endforeach()
 
 # Bound worker joins in the idle notification and CPU-use regressions.
 # Register explicitly so build-tree and installed tests have the same timeout.

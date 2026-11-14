@@ -213,8 +213,8 @@ void process_pm4_packets(ComputeQueueRecord &queue, GpuVm *gpu_vm,
       case Pm4Opcode::PredExec: {
         if (require(1).failed())
           return util::Result::failure();
-        if ((context.arch != ROCJITSU_CODE_ARCH_CDNA3 &&
-             context.arch != ROCJITSU_CODE_ARCH_CDNA4) ||
+        if ((context.arch != ROCJITSU_CODE_ARCH_CDNA3 && context.arch != ROCJITSU_CODE_ARCH_CDNA4 &&
+             context.arch != ROCJITSU_CODE_ARCH_CDNA5) ||
             (words[0] & 0x00ffc000) || context.xcc_id >= 8)
           return fail("unsupported PRED_EXEC control or target");
         const uint32_t skip = words[0] & 0x3fff;
@@ -334,15 +334,19 @@ void process_pm4_packets(ComputeQueueRecord &queue, GpuVm *gpu_vm,
           return fail("unsupported ATOMIC_MEM operation or alignment");
         if (flush_caches().failed())
           return util::Result::failure();
+        // A non-returning exchange publishes to host atomic waiters too.
+        if (operation == 7) {
+          if (access->atomic_store(address(1), width, address(3)) != VmAccessOutcome::Complete)
+            return fail("PM4 ATOMIC_MEM access failed");
+          break;
+        }
         // TC opcodes are shared by the ME and MEC. Reuse shader-memory atomic
         // arithmetic after decoding the packet's operation and operand order.
         static constexpr AtomicOp tc_operations[] = {AtomicOp::ADD,  AtomicOp::SUB,  AtomicOp::SMIN,
                                                      AtomicOp::UMIN, AtomicOp::SMAX, AtomicOp::UMAX,
                                                      AtomicOp::AND,  AtomicOp::OR,   AtomicOp::XOR,
                                                      AtomicOp::INC,  AtomicOp::DEC};
-        const AtomicOp atomic = operation == 7   ? AtomicOp::SWAP
-                                : operation == 8 ? AtomicOp::CMPSWAP
-                                                 : tc_operations[operation - 15];
+        const AtomicOp atomic = operation == 8 ? AtomicOp::CMPSWAP : tc_operations[operation - 15];
         const auto mutate = [&]<typename T>() {
           return access->atomic_modify(address(1), sizeof(T), [&](std::span<std::byte> bytes) {
             T value;
@@ -362,6 +366,9 @@ void process_pm4_packets(ComputeQueueRecord &queue, GpuVm *gpu_vm,
       case Pm4Opcode::ReleaseMem: {
         if (require(7).failed())
           return util::Result::failure();
+        const uint32_t interrupt = (words[1] >> 24) & 7;
+        if (interrupt > 4)
+          return fail("unsupported RELEASE_MEM conditional interrupt");
         if (flush_caches().failed())
           return util::Result::failure();
         const uint32_t selection = words[1] >> 29;
@@ -370,10 +377,13 @@ void process_pm4_packets(ComputeQueueRecord &queue, GpuVm *gpu_vm,
           value = gpu_timestamp(context.arch);
         else if (selection != 0 && selection != 1 && selection != 2)
           return fail("unsupported RELEASE_MEM data source");
-        const size_t bytes = selection == 0 ? 0 : selection == 1 ? 4 : 8;
-        if (bytes && access->write(address(2), {reinterpret_cast<const std::byte *>(&value),
-                                                bytes}) != VmAccessOutcome::Complete)
+        const uint32_t bytes = selection == 0 ? 0 : selection == 1 ? 4 : 8;
+        if (bytes && access->atomic_store(address(2), bytes, value, VmAccessKind::Write) !=
+                         VmAccessOutcome::Complete)
           return fail("PM4 RELEASE_MEM failed");
+        // Publish before waking the host; later packets may wait for its reply.
+        if (interrupt == 1 || interrupt == 2 || interrupt == 4)
+          queue.interrupt_sink.deliver(queue.process_id, words[6]);
         break;
       }
       case Pm4Opcode::CopyData: {
@@ -439,16 +449,16 @@ void process_pm4_packets(ComputeQueueRecord &queue, GpuVm *gpu_vm,
           // completes the modeled request before its acknowledgement.
           value = words[3];
         } else if (space == 1 && (operation == 0 || operation == 3)) {
-          const auto loaded =
-              access->read(address(1), {reinterpret_cast<std::byte *>(&value), sizeof(value)});
-          if (loaded == VmAccessOutcome::Unavailable) {
+          const auto loaded = access->atomic_load(address(1), sizeof(value), VmAccessKind::Read);
+          if (loaded.outcome == VmAccessOutcome::Unavailable) {
             ib.address -= count * 4;
             ib.dwords += count;
             context.retry();
             return util::Result::success();
           }
-          if (loaded != VmAccessOutcome::Complete)
+          if (loaded.outcome != VmAccessOutcome::Complete)
             return fail("PM4 WAIT_REG_MEM read failed");
+          value = static_cast<uint32_t>(loaded.value);
         } else {
           return fail("unsupported WAIT_REG_MEM register space or operation");
         }

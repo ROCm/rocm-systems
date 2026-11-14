@@ -11,6 +11,7 @@ RJ_DIAGNOSTIC_POP
 
 #include <gtest/gtest.h>
 
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <thread>
@@ -36,8 +37,10 @@ protected:
       kfd_ioctl_set_event_args args{};
       args.event_id = id;
       EXPECT_EQ(events.set_event(&args), 0);
+    } else if (source == 1) {
+      events.signal_interrupt(id);
     } else {
-      events.signal_interrupt(source == 1 ? id : 0);
+      events.notify_idle();
     }
   }
 
@@ -133,10 +136,52 @@ TEST_P(KfdEventOrderingTest, AutoResetSignalReachesWaiter) {
   expect_unsignaled(id);
 }
 
-INSTANTIATE_TEST_SUITE_P(SetInterruptBroadcast, KfdEventOrderingTest,
+INSTANTIATE_TEST_SUITE_P(SetInterruptIdle, KfdEventOrderingTest,
                          ::testing::Combine(::testing::Values(0, 1, 2),
                                             ::testing::Values(uint64_t{0}, uint64_t{1}),
                                             ::testing::Bool()));
+
+TEST_F(KfdEventsTest, InvalidInterruptConsumesOnlyMarkedMailboxes) {
+  std::array<uint64_t, 8> slots;
+  slots.fill(UINT64_MAX);
+  events.adopt_page(slots.data(), sizeof(slots));
+  const auto first = create();
+  const auto second = create();
+  for (uint32_t context : {0u, UINT32_MAX}) {
+    SCOPED_TRACE(context);
+    events.signal_interrupt(context);
+    expect_unsignaled(first);
+    expect_unsignaled(second);
+    std::atomic_ref<uint64_t>(slots[second]).store(second, std::memory_order_release);
+    events.signal_interrupt(context);
+    expect_unsignaled(first);
+    Wait ready(events, {second}, 0, true, true);
+    ready.complete();
+    EXPECT_EQ(slots[second], UINT64_MAX);
+    events.signal_interrupt(context);
+    expect_unsignaled(second);
+  }
+  // CPU state and event ages are not GPU mailbox messages. A reset or an
+  // auto-reset wait must also leave an independently published mailbox intact.
+  signal(first);
+  Wait cpu(events, {first}, 0, true, true);
+  cpu.complete();
+  EXPECT_EQ(slots[first], UINT64_MAX);
+  std::atomic_ref<uint64_t>(slots[first]).store(first, std::memory_order_release);
+  reset(first);
+  events.signal_interrupt(0);
+  Wait gpu(events, {first}, 0, true, true);
+  gpu.complete();
+  EXPECT_EQ(slots[first], UINT64_MAX);
+  events.signal_interrupt(first);
+  std::atomic_ref<uint64_t>(slots[first]).store(first, std::memory_order_release);
+  Wait previous(events, {first}, 0, true, true);
+  previous.complete();
+  events.signal_interrupt(0);
+  Wait next(events, {first}, 0, true, true);
+  next.complete();
+  EXPECT_EQ(slots[first], UINT64_MAX);
+}
 
 TEST_F(KfdEventsTest, AutoResetSignalReachesEveryRegisteredWaiter) {
   const auto id = create();

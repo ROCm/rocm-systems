@@ -2042,7 +2042,7 @@ void CommandProcessor::doorbell_poll_loop(std::stop_token stop) {
         }
       }
       for (const auto &[interrupt_sink, process_id] : idle_queues)
-        interrupt_sink.deliver(process_id, 0);
+        interrupt_sink.notify_idle(process_id);
     }
 
     if (poll_count % 5000 == 1) {
@@ -3719,8 +3719,18 @@ AqlAdmissionResult CommandProcessor::request_dynamic_scratch(ComputeQueueRecord 
       queue.interrupt_sink.deliver(queue.process_id, state.event_id);
       return {.status = AqlAdmissionStatus::Blocked};
 
-    case QueueScratchRequestPhase::WaitingForRuntime:
+    case QueueScratchRequestPhase::WaitingForRuntime: {
+      // Replacing the backing may revoke the request's publication snapshot.
+      const AtomicLoadResult released = transaction_access.atomic_load(
+          state.signal_address + kSignalValueOffset, sizeof(uint64_t));
+      if (released.outcome != VmAccessOutcome::Complete)
+        return admission_from_vm_outcome(released.outcome);
+      if (released.value == 0)
+        state.reset();
+      // The replacement may include new mappings. End this transaction so the
+      // next admission takes a VM snapshot after the runtime's release.
       return {.status = AqlAdmissionStatus::Blocked};
+    }
     }
   }
 }
@@ -3945,6 +3955,10 @@ AqlAdmissionResult CommandProcessor::admit_kernel_dispatch(
     const hsa_kernel_dispatch_packet_t &pkt, ComputeQueueRecord &queue,
     const GpuVmAccess &transaction_access, uint64_t pkt_addr, uint32_t queue_packet_id,
     uint64_t aql_packet_id, ClusterDispatchShape cluster_shape) {
+  // The runtime owns descriptor fields until it releases a scratch request.
+  if (queue.scratch_request.active())
+    return request_dynamic_scratch(queue, transaction_access, aql_packet_id,
+                                   queue.scratch_request.status);
   const bool uses_kfd_queue_abi = queue.uses_kfd_queue_abi;
   using namespace rocjitsu::amdhsa;
   const KernelDescriptorReadResult descriptor =
@@ -4158,7 +4172,6 @@ AqlAdmissionResult CommandProcessor::admit_kernel_dispatch(
             wave_size == 32 ? kInsufficientScratchWave32 : kInsufficientScratchWave64;
         return request_dynamic_scratch(queue, transaction_access, aql_packet_id, status);
       }
-      queue.scratch_request.reset();
 
       uint32_t queue_properties = 0;
       const VmAccessOutcome properties_outcome =
@@ -4646,31 +4659,31 @@ void CommandProcessor::fetch_from_queue(ComputeQueueRecord &queue, simdojo::Tick
                         write_idx - read_idx);
   });
 
-  // AQL doorbell clamping (compute queues only).
+  static_assert(sizeof(hsa_kernel_dispatch_packet_t) == kAqlPacketBytes);
+  const uint32_t num_slots = queue.ring_size / kAqlPacketBytes;
+  // Reservations can advance beyond a full ring while its live headers remain
+  // valid. Bound admission by the public retirement cursor before replacing it
+  // with the private fetch cursor; a reservation does not release a ring slot.
+  uint64_t process_limit = write_idx;
+  if (write_idx > read_idx && write_idx - read_idx > num_slots)
+    process_limit = read_idx + num_slots;
+
   // Use the CP-private fetch cursor as the authoritative next-packet index. It
   // stays ahead of the consumer cursor while admitted dispatches are live, so
   // those packets remain visible without being fetched twice.
   read_idx = std::max(read_idx, queue.fetch_cursor);
-  uint64_t process_limit = write_idx;
   if (queue.doorbell_mode != QueueDoorbellMode::VmPolled) {
     const uint64_t doorbell = queue.last_doorbell;
-    // KFD initializes a new queue's doorbell to UINT64_MAX, meaning that no
-    // packet has been published yet. The producer may reserve a ring slot by
-    // advancing write_ptr before it initializes the packet and release-stores
-    // the header. Treating the sentinel as an unclamped producer cursor lets a
-    // concurrent CP read that partially initialized slot.
+    // KFD leaves the queue unarmed until its first doorbell notification.
     if (doorbell == std::numeric_limits<uint64_t>::max())
       return;
-    uint64_t doorbell_limit = doorbell + 1;
-    if (doorbell_limit < process_limit)
-      process_limit = doorbell_limit;
-    process_limit = std::max(process_limit, read_idx);
-  } else {
-    process_limit = std::max(process_limit, read_idx);
+    // Explicit frontends provide an admission bound. A polled host doorbell
+    // can lose a higher value when publishers ring out of reservation order;
+    // its write index and acquired valid headers below govern admission.
+    if (queue.doorbell_mode == QueueDoorbellMode::Explicit)
+      process_limit = std::min(process_limit, doorbell + 1);
   }
-
-  static_assert(sizeof(hsa_kernel_dispatch_packet_t) == kAqlPacketBytes);
-  const uint32_t num_slots = queue.ring_size / kAqlPacketBytes;
+  process_limit = std::max(process_limit, read_idx);
 
   while (read_idx < process_limit) {
     const uint32_t slot = static_cast<uint32_t>(read_idx % num_slots);
