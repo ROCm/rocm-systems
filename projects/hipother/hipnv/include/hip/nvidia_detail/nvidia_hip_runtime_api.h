@@ -30,6 +30,7 @@
 #define CUDA_12030 12030
 #define CUDA_12080 12080
 #define CUDA_13000 13000
+#define CUDA_13040 13040
 
 #ifdef __cplusplus
 extern "C" {
@@ -484,6 +485,9 @@ typedef cudaDevResourceType hipDevResourceType;
 #define hipDevResourceTypeWorkqueue cudaDevResourceTypeWorkqueue
 #define hipDevSmResourceGroupDefault cudaDevSmResourceGroupDefault
 #define hipDevSmResourceGroupBackfill cudaDevSmResourceGroupBackfill
+#if CUDA_VERSION >= CUDA_13040
+#define hipDevSmResourceGroupLocalityDomainId cudaDevSmResourceGroupLocalityDomainId
+#endif
 #define hipDevSmResourceSplitIgnoreSmCoscheduling cudaDevSmResourceSplitIgnoreSmCoscheduling
 #define hipDevSmResourceSplitMaxPotentialClusterSize cudaDevSmResourceSplitMaxPotentialClusterSize
 #define hipDevWorkqueueConfigScopeDeviceCtx cudaDevWorkqueueConfigScopeDeviceCtx
@@ -967,6 +971,10 @@ typedef enum cudaMemPoolAttr hipMemPoolAttr;
 #define hipMemPoolAttrReservedMemHigh cudaMemPoolAttrReservedMemHigh
 #define hipMemPoolAttrUsedMemCurrent cudaMemPoolAttrUsedMemCurrent
 #define hipMemPoolAttrUsedMemHigh cudaMemPoolAttrUsedMemHigh
+#if CUDA_VERSION >= CUDA_13040
+#define hipMemPoolAttrLocationType cudaMemPoolAttrLocationType
+#define hipMemPoolAttrLocalityDomainId cudaMemPoolAttrLocalityDomainId
+#endif
 typedef struct cudaMemLocation hipMemLocation;
 typedef struct cudaMemPoolProps hipMemPoolProps;
 typedef struct cudaMemAccessDesc hipMemAccessDesc;
@@ -1031,6 +1039,9 @@ typedef CUDA_RESOURCE_VIEW_DESC HIP_RESOURCE_VIEW_DESC;
   CU_POINTER_ATTRIBUTE_IS_GPU_DIRECT_RDMA_CAPABLE
 #define HIP_POINTER_ATTRIBUTE_ACCESS_FLAGS CU_POINTER_ATTRIBUTE_ACCESS_FLAGS
 #define HIP_POINTER_ATTRIBUTE_MEMPOOL_HANDLE CU_POINTER_ATTRIBUTE_MEMPOOL_HANDLE
+#if CUDA_VERSION >= CUDA_13040
+#define HIP_POINTER_ATTRIBUTE_LOCALITY_DOMAIN_ORDINAL CU_POINTER_ATTRIBUTE_LOCALITY_DOMAIN_ORDINAL
+#endif
 
 typedef enum cudaGraphInstantiateFlags hipGraphInstantiateFlags;
 #define hipGraphInstantiateFlagAutoFreeOnLaunch cudaGraphInstantiateFlagAutoFreeOnLaunch
@@ -2004,6 +2015,9 @@ typedef enum cudaMemLocationType hipMemLocationType;
 #define hipMemLocationTypeHost cudaMemLocationTypeHost
 #define hipMemLocationTypeHostNuma cudaMemLocationTypeHostNuma
 #define hipMemLocationTypeHostNumaCurrent cudaMemLocationTypeHostNumaCurrent
+#if CUDA_VERSION >= CUDA_13040
+#define hipMemLocationTypeDeviceLocalityDomain cudaMemLocationTypeDeviceLocalityDomain
+#endif
 #define hipMemHandleTypeNone cudaMemHandleTypeNone
 #define hipMemHandleTypePosixFileDescriptor cudaMemHandleTypePosixFileDescriptor
 #define hipMemHandleTypeWin32 cudaMemHandleTypeWin32
@@ -3245,6 +3259,14 @@ inline static hipError_t hipDeviceGetAttribute(int* pi, hipDeviceAttribute_t att
     case hipDeviceAttributeHostNumaId:
       cdattr = cudaDevAttrHostNumaId;
       break;
+#if CUDA_VERSION >= CUDA_13040
+    case hipDeviceAttributeLocalityDomainCount:
+      cdattr = cudaDevAttrLocalityDomainCount;
+      break;
+    case hipDeviceAttributeLocalityDomainMultiprocessorCount:
+      cdattr = cudaDevAttrLocalityDomainMultiprocessorCount;
+      break;
+#endif
     default:
       return hipCUDAErrorTohipError(cudaErrorInvalidValue);
   }
@@ -3480,7 +3502,12 @@ inline static hipError_t hipPointerGetAttributes(hipPointerAttribute_t* attribut
     attributes->device = cPA.device;
     attributes->devicePointer = cPA.devicePointer;
     attributes->hostPointer = cPA.hostPointer;
-    attributes->isManaged = 0;
+    // CUDA dropped `isManaged` from cudaPointerAttributes (deprecated in 10.x, gone by 11.x),
+    // but the information is still available from the memory type.
+    attributes->isManaged = (memType == cudaMemoryTypeManaged) ? 1 : 0;
+    // `allocationFlags` is a HIP extension with no cudaPointerAttributes counterpart - it
+    // reports the flags passed at allocation time, which CUDA only exposes per-API
+    // (e.g. cudaHostGetFlags). Left 0 on this backend.
     attributes->allocationFlags = 0;
   }
   return err;

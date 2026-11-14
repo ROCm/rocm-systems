@@ -1,0 +1,35 @@
+---
+locality_domain:
+  # --- Device attributes -------------------------------------------------
+  Unit_hipLocalityDomain_Attributes_Basic:
+    <<: *level_default
+  Unit_hipLocalityDomain_Attributes_Consistency:
+    <<: *level_default
+  Unit_hipLocalityDomain_Attributes_Negative:
+    <<: *level_default
+  Unit_hipLocalityDomain_PointerOrdinal_Basic:
+    <<: *level_default
+
+  # --- Green context locality placement ----------------------------------
+  Unit_hipLocalityDomain_GreenCtx_Basic:
+    <<: *level_default
+  Unit_hipLocalityDomain_GreenCtx_Functional:
+    <<: *level_default
+  Unit_hipLocalityDomain_GreenCtx_FlagOptIn:
+    <<: *level_default
+  Unit_hipLocalityDomain_GreenCtx_Negative:
+    <<: *level_default
+  Unit_hipLocalityDomain_GreenCtx_GenerateDesc_Negative:
+    <<: *level_default
+
+  # --- Memory pool locality placement ------------------------------------
+  Unit_hipLocalityDomain_MemPool_Basic:
+    <<: *level_default
+  Unit_hipLocalityDomain_MemPool_Functional:
+    <<: *level_default
+  Unit_hipLocalityDomain_MemPool_SingleDomainEquivalence:
+    <<: *level_default
+  Unit_hipLocalityDomain_MemPool_Negative:
+    <<: *level_default
+  Unit_hipLocalityDomain_Location_Rejected_Negative:
+    <<: *level_default

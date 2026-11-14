@@ -602,6 +602,13 @@ typedef enum hipDeviceAttribute_t {
                                                   ///< giving the scope at which GPUDirect RDMA
                                                   ///< writes are naturally ordered, i.e. visible
                                                   ///< without an explicit flush
+  hipDeviceAttributeLocalityDomainCount,  ///< Number of locality domains on the device. A
+                                          ///< locality domain is a portion of the device that
+                                          ///< contains compute units and device memory. Always
+                                          ///< at least 1; devices with no exploitable NUMA
+                                          ///< structure report 1.
+  hipDeviceAttributeLocalityDomainMultiprocessorCount,  ///< Number of compute units in each
+                                                        ///< locality domain
 
   hipDeviceAttributeCudaCompatibleEnd = 9999,
   hipDeviceAttributeAmdSpecificBegin = 10000,
@@ -778,6 +785,9 @@ typedef enum hipDevResourceType {
 typedef enum hipDevSmResourceGroup_flags {
   hipDevSmResourceGroupDefault = 0,
   hipDevSmResourceGroupBackfill = 0x1,
+  /** The SMs must be located on the locality domain given by localityDomainId. If the
+      backfill flag is also set, SMs may be assigned from other locality domains. */
+  hipDevSmResourceGroupLocalityDomainId = 0x1 << 1,
 } hipDevSmResourceGroup_flags;
 typedef enum hipDevSmResourceSplitByCount_flags {
   hipDevSmResourceSplitIgnoreSmCoscheduling = 0x1,
@@ -795,6 +805,9 @@ typedef struct hipDevSmResource {
   unsigned int minSmPartitionSize;
   unsigned int smCoscheduledAlignment;
   unsigned int flags;
+  /** Locality domain the SMs are located on. Only valid when
+      hipDevSmResourceGroupLocalityDomainId is set in flags. */
+  unsigned int localityDomainId;
 } hipDevSmResource;
 
 typedef struct hipDevWorkqueueConfigResource {
@@ -824,7 +837,10 @@ typedef struct hipDevSmResourceGroupParams_st {
   unsigned int coscheduledSmCount;
   unsigned int preferredCoscheduledSmCount;
   unsigned int flags;
-  unsigned int reserved[12];
+  /** Locality domain the partitioned SMs must be located on. Only valid when
+      hipDevSmResourceGroupLocalityDomainId is set in flags. */
+  unsigned int localityDomainId;
+  unsigned int reserved[11];
 } hipDevSmResourceGroupParams;
 
 // Note many APIs also use integer deviceIds as an alternative to the device pointer:
@@ -1350,7 +1366,19 @@ typedef enum hipMemPoolAttr {
    * High watermark of the amount of memory from the pool that was in use by the application since
    * the last time it was reset. High watermark can only be reset to zero.
    */
-  hipMemPoolAttrUsedMemHigh = 0x8
+  hipMemPoolAttrUsedMemHigh = 0x8,
+  /**
+   * (value type = int)
+   * Location type of the pool. Pinned to CUDA's value; 0x9-0xB are CUDA attributes
+   * HIP has not adopted.
+   */
+  hipMemPoolAttrLocationType = 0xC,
+  /**
+   * (value type = int)
+   * Locality domain id of the pool, or -1 when the pool is not localized to a
+   * locality domain. Pinned to CUDA's value; 0xD-0xE are unadopted CUDA attributes.
+   */
+  hipMemPoolAttrLocalityDomainId = 0xF
 } hipMemPoolAttr;
 
 /**
