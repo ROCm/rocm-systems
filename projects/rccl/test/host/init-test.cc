@@ -1636,6 +1636,50 @@ TEST_F(InitMicrotest, CopyCommConfig_EnvConfigOverrideFails_PropagatesErrorAfter
   EXPECT_EQ(13, child->config.maxP2pPeers);
 }
 
+// A NULL-config child (ncclCommSplit, ncclCommShrink, existing ranks of ncclCommGrow) takes
+// copyCommConfig, whose envConfigOverride puts NCCL_GRAPH_STREAM_ORDERING=0 back on top of the parent's
+// parseCommConfig fallback. The unsupported pair must fall back again, and say so, instead of reaching the child.
+TEST_F(InitMicrotest, CopyCommConfig_StreamOrderingEnvZeroWithGraphMixing_FallsBackAndLogs) {
+  SetParams({{"GRAPH_STREAM_ORDERING", 0}});
+  auto parent = std::make_unique<ncclComm>();
+  auto child = std::make_unique<ncclComm>();
+  FillParentConfig(parent->config);  // graphUsageMode=2, graphStreamOrdering=1: a parent its own fallback corrected
+  FillChildConfig(child->config);
+  ScopedNetName freeNetName(child.get());
+
+  ncclResult_t res = ncclInternalError;
+  const std::string log = CaptureInfoLog([&] { res = copyCommConfig(child.get(), parent.get()); });
+
+  ASSERT_EQ(ncclSuccess, res);
+  // Anchor: the env reached the copied value, so ordering 1 below can only come from the fallback.
+  EXPECT_TRUE(LogHas(log, "Comm config graphStreamOrdering reset to NCCL_GRAPH_STREAM_ORDERING=0"))
+      << "actual log:\n" << log;
+  EXPECT_EQ(2, child->config.graphUsageMode);
+  EXPECT_EQ(1, child->config.graphStreamOrdering);
+  EXPECT_TRUE(LogHas(log, "graphStreamOrdering=0 with graphUsageMode=2")) << "actual log:\n" << log;
+}
+
+// Control for the test above: without graph mixing the same env value is supported and reaches the child as-is.
+TEST_F(InitMicrotest, CopyCommConfig_StreamOrderingEnvZeroWithoutGraphMixing_KeepsZeroAndIsSilent) {
+  SetParams({{"GRAPH_STREAM_ORDERING", 0}});
+  auto parent = std::make_unique<ncclComm>();
+  auto child = std::make_unique<ncclComm>();
+  FillParentConfig(parent->config);
+  parent->config.graphUsageMode = 0;  // differs from FillChildConfig's 1, so 0 below proves the copy landed
+  FillChildConfig(child->config);
+  ScopedNetName freeNetName(child.get());
+
+  ncclResult_t res = ncclInternalError;
+  const std::string log = CaptureInfoLog([&] { res = copyCommConfig(child.get(), parent.get()); });
+
+  ASSERT_EQ(ncclSuccess, res);
+  EXPECT_TRUE(LogHas(log, "Comm config graphStreamOrdering reset to NCCL_GRAPH_STREAM_ORDERING=0"))
+      << "actual log:\n" << log;
+  EXPECT_EQ(0, child->config.graphUsageMode);
+  EXPECT_EQ(0, child->config.graphStreamOrdering);
+  EXPECT_FALSE(LogHas(log, "graphStreamOrdering=0 with graphUsageMode=2")) << "actual log:\n" << log;
+}
+
 TEST_F(InitMicrotest, ComputeBuffSizes_SingleNodeOwner_UsesDefaultsAndSetsShared) {
   auto comm = std::make_unique<ncclComm>();
   auto sr = std::make_unique<ncclSharedResources>();

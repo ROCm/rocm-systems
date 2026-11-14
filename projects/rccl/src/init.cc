@@ -3849,6 +3849,12 @@ static ncclResult_t envConfigOverride(ncclComm_t comm) {
 static ncclResult_t copyCommConfig(ncclComm_t childComm, ncclComm_t parnet) {
   memcpy(&childComm->config, &parnet->config, sizeof(ncclConfig_t));
   NCCLCHECK(envConfigOverride(childComm));
+  // [RCCL] envConfigOverride can turn graphStreamOrdering back to 0, so apply parseCommConfig's fallback here too.
+  if (childComm->config.graphStreamOrdering == 0 && childComm->config.graphUsageMode == 2) {
+    INFO(NCCL_INIT, "graphStreamOrdering=0 with graphUsageMode=2 (graph mixing) is not supported; "
+                    "falling back to graphStreamOrdering=1 for this communicator");
+    childComm->config.graphStreamOrdering = 1;
+  }
   return ncclSuccess;
 }
 
