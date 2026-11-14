@@ -40,6 +40,8 @@
 //
 ////////////////////////////////////////////////////////////////////////////////
 
+#include <thread>
+
 #include "core/inc/interrupt_signal.h"
 #include "core/inc/runtime.h"
 #include "core/util/locks.h"
@@ -205,6 +207,15 @@ hsa_signal_value_t InterruptSignal::WaitRelaxed(hsa_signal_condition_t condition
       static_cast<uint32_t>(std::min<uint64_t>(remaining_ms, 0xFFFFFFFEUL)),
       static_cast<uint32_t>(signal_abort_timeout ? signal_abort_timeout * 1000 : 0xFFFFFFFFUL)
     );
+
+    // The per-process KFD event slots can be exhausted. A signal with no
+    // event can still be updated by the GPU, but cannot block in the driver.
+    if (event_ == nullptr) {
+      constexpr auto poll_interval = std::chrono::microseconds(50);
+      if (fast_timeout - (now - start_time) >= poll_interval)
+        std::this_thread::sleep_for(poll_interval);
+      continue;
+    }
 
     HSAKMT_CALL(hsaKmtWaitOnEvent_Ext(event_, wait_ms, &event_age));
 
