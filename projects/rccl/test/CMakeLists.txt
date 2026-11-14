@@ -437,6 +437,7 @@ if(BUILD_TESTS)
       device/TestTdmReduceCopy.cpp
       device/TestAsyncCopy.cpp
       device/TestLdsTransfer.cpp
+      device/TestDataMover.cpp
       device/GinDeviceTests.cpp
       device/GinBackendMaskDispatch_test.cpp
       device/HierarchicalShuffleTests.cpp
