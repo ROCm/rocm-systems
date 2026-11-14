@@ -18,6 +18,7 @@ include(GNUInstallDirs)
 
 add_library(rccl-profiler-accl SHARED
     ${CMAKE_CURRENT_SOURCE_DIR}/accl_profiler.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/accl_net_counters.cc
 )
 
 target_include_directories(rccl-profiler-accl PRIVATE
@@ -30,7 +31,7 @@ target_compile_features(rccl-profiler-accl PRIVATE cxx_std_14)
 
 target_compile_options(rccl-profiler-accl PRIVATE -Wall -Wextra)
 
-target_link_libraries(rccl-profiler-accl PRIVATE pthread)
+target_link_libraries(rccl-profiler-accl PRIVATE pthread ${CMAKE_DL_LIBS})
 
 set_target_properties(rccl-profiler-accl PROPERTIES
     OUTPUT_NAME "rccl-profiler-accl"
@@ -51,5 +52,6 @@ install(TARGETS rccl-profiler-accl
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT runtime
 )
 install(PROGRAMS ${CMAKE_CURRENT_SOURCE_DIR}/accl_report.py
+    ${CMAKE_CURRENT_SOURCE_DIR}/net_tel_report.py
     DESTINATION ${CMAKE_INSTALL_DATADIR}/rccl/accl COMPONENT runtime
 )

@@ -11,6 +11,9 @@ to all four key event types for full root-cause triage.
 ncclProfileColl | ncclProfileKernelCh | ncclProfileProxyOp | ncclProfileProxyStep
 ```
 
+`ncclProfileKernelLaunch | ncclProfileNetPlugin` are added with `ACCL_NET_COUNTERS=1`
+(see [Network Counters](#network-counters-opt-in)).
+
 | Event Type | What it captures |
 |---|---|
 | `ncclProfileColl` | Collective lifecycle (host-side start/stop) |
@@ -155,6 +158,105 @@ The report classifies bottlenecks per message size (evaluated in this order):
 - **ENQUEUE-DELAY** — enqueue-to-first-kernel delay dominates (>40%)
 - **GPU-COMPUTE** — kernel time dominates (>50% of wall time)
 - **mixed** — no single component dominates
+
+## Network Counters (opt-in)
+
+For accuracy-first diagnostics, build RCCL and this plugin from the same tree:
+
+```bash
+ACCL_NET_COUNTERS=1 ACCL_NET_STRICT=1 ACCL_NET_DEVICES=rdma0 \
+ACCL_PROFILER_MIN_SIZE_BYTES=0 NCCL_OOB_NET_ENABLE=0 NCCL_SOCKET_IFNAME=eno0 \
+NCCL_NET=IB-CAST <serialized application>
+```
+
+Strict mode supports an eager, serialized application with one collective per
+plan, one GPU per process, and one active communicator per process. Every rank
+must enable it consistently. The measured NICs must be isolated from unrelated
+producers. Graphs, host-callback plans, grouped/P2P plans, symmetric/GPU-initiated
+operations, and CE/RMA paths are unsupported. Unsupported or unverified windows
+cannot produce CLEAN. Aborted runs can lose the final snapshot and report it.
+Every rank takes part in the boundary exchange of every plan that contains a
+collective, voting invalid when its plan is unsupported, so one rank's local
+state cannot leave its peers waiting; P2P-only plans take no part.
+
+The sequence is:
+
+```
+previous GPU work retires
+all registered proxy operations complete (including ones that start late)
+all ranks establish a drained boundary through socket bootstrap
+worker reads until two consecutive hardware snapshots match (up to six reads)
+accept settled S1 (N's after and N+1's before)
+all ranks finish reading
+launch N+1
+```
+
+The ordinary eager `KernelLaunch` callback performs the wait before GPU launch.
+Coll start never waits for reads. A final boundary runs during normal communicator
+finalization while bootstrap and progress threads are still alive. Any failed
+drain/read coordination invalidates attribution; it does not manufacture a delta.
+`ACCL_NET_WAIT_MS` (default 1000) bounds local waits. Distributed bootstrap follows
+RCCL's normal abort behavior, so diagnostic jobs should have an external timeout.
+
+RCCL supplies a small optional protocol through existing v5 NetPlugin events:
+registration begins before GPU completion events are posted, and each actual
+proxy operation is counted before posting. Coll stop closes registration.
+The completion predicate waits for the registered count as well as all GPU
+channels and all observed proxy operations. Profiler ABI layouts are unchanged.
+The events go only to this plugin (`ACCL-Profiler`). Older RCCL builds without
+this protocol produce unverified counter windows: still measured, never CLEAN.
+
+RDMA netlink STAT_GET reads bypass the sysfs lifespan cache. ethtool pause/PFC
+counters are stale context on ionic and never determine a collective verdict.
+Software counters require `RCCL_TELEMETRY_ENABLE=1`. AINIC ucast hardware bytes
+include CTS control traffic; they are not identical to application payload bytes.
+
+Each `net_counters` object contains:
+
+- per-device deltas, overlap/unavailability flags, `completion_verified`, and
+  `coordinated`;
+- raw `snapshot_before` and `snapshot_after`, with IDs, every RDMA value, overall
+  read intervals, each device's read interval, stability status, and read attempts;
+- host-observed collective start/completion times and `launch_wait_us`;
+- `counter_discontinuities`: decreasing/reset/wrapped counters invalidate the
+  affected device's delta instead of silently erasing error evidence;
+- software payload-byte/CQ-error deltas and explicitly stale ethtool context.
+
+Snapshots are reused only across the coordinated quiescent boundary. The worker
+does the hardware reads. Several configured NICs are read sequentially, so their
+timestamps differ; no atomic multi-NIC latch is claimed. Two identical reads validate observed stability, not a firmware visibility fence.
+Counter visibility still depends on driver/firmware semantics and must be checked against hardware.
+
+Configuration retained for passive compatibility:
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `ACCL_NET_COUNTERS` | off | Enable counters |
+| `ACCL_NET_STRICT` | off | Coordinate accuracy-first boundaries; required for CLEAN |
+| `ACCL_NET_DEVICES` | required | Explicit RDMA devices, port 1 |
+| `ACCL_NET_DEVICE_SELECT` | all | `local_rank` uses rank modulo uniform ranks/node; verify routing |
+| `ACCL_NET_WAIT_MS` | 1000 | Local completion/read timeout |
+| `ACCL_NET_GRACE_US` | 1000 | Passive-mode grace only |
+
+`net_tel_report.py OUTPUT --warmup 0 --trace trace.json` reports per-communicator,
+collective, and size. CLEAN requires registered/coordinated valid windows, all
+expected ranks, and at least three complete collective instances. Recognized
+loss/congestion in any measured window, passive mode included, produces
+NETWORK_SUSPECT; unclassified non-volume counter changes produce INCONCLUSIVE.
+Missing rank files cannot imply a healthy network.
+
+The Perfetto trace has separate lanes for host-observed collective activity,
+NIC totals for that collective, and deduplicated raw hardware snapshots. Select
+a collective slice to inspect all NIC deltas, raw-read metadata, payload counters,
+and validity. GPU duration is a detail field; host callback placement is not
+presented as an exactly aligned GPU timeline. Counter graphs show per-collective
+totals, not instantaneous rates. Each host's CLOCK_MONOTONIC origin is normalized
+independently: timelines from different hosts are not clock synchronized.
+
+Measured GPU times are reported unchanged. `--estimate-read-skew` optionally
+shows the older heuristic subtraction with an explicit warning; it does not
+recover the uninstrumented execution time. Snapshot waits and coordination alter
+the workload's natural overlap and congestion behavior.
 
 ## Requirements
 

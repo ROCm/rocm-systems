@@ -16,6 +16,7 @@
 #include "bootstrap.h"
 
 #include <cuda_runtime.h>
+#include <iostream>
 
 #include <algorithm>
 #include <vector>

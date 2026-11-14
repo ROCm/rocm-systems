@@ -40,6 +40,7 @@
 
 #include "signature-drift.h"
 ASSERT_HOOK_MATCHES_PROD(g_ncclProfilerPluginFinalize, ncclProfilerPluginFinalize);
+ASSERT_HOOK_MATCHES_PROD(g_ncclProfilerAcclFinalizeBoundary, ncclProfilerAcclFinalizeBoundary);
 ASSERT_HOOK_MATCHES_PROD(g_ncclProfilerThreadDestroy,  ncclProfilerThreadDestroy);
 #undef ASSERT_HOOK_MATCHES_PROD
 
@@ -121,6 +122,12 @@ ncclResult_t ncclNetFinalize(struct ncclComm* comm) { return ncclSuccess; }
 static ncclResult_t DefaultNcclProfilerPluginFinalize(struct ncclComm*) { return ncclSuccess; }
 std::function<ncclResult_t(struct ncclComm*)> g_ncclProfilerPluginFinalize = DefaultNcclProfilerPluginFinalize;
 ncclResult_t ncclProfilerPluginFinalize(struct ncclComm* comm) { return g_ncclProfilerPluginFinalize(comm); }
+static ncclResult_t DefaultNcclProfilerAcclFinalizeBoundary(struct ncclComm*) { return ncclSuccess; }
+std::function<ncclResult_t(struct ncclComm*)> g_ncclProfilerAcclFinalizeBoundary =
+    DefaultNcclProfilerAcclFinalizeBoundary;
+ncclResult_t ncclProfilerAcclFinalizeBoundary(struct ncclComm* comm) {
+  return g_ncclProfilerAcclFinalizeBoundary(comm);
+}
 ncclResult_t ncclProfilerPluginInit(struct ncclComm* comm) { ::abort(); }
 ncclResult_t ncclProfilerThreadCreate(struct ncclComm* comm, struct ncclComm* parent) { return ncclSuccess; }
 static ncclResult_t DefaultNcclProfilerThreadDestroy(struct ncclComm*) { return ncclSuccess; }
@@ -289,6 +296,7 @@ void ResetNcclStubs() {
   g_ncclDdaIpcCommClosePeerMappings = DefaultNcclDdaIpcCommClosePeerMappings;
   g_ncclProfilerThreadDestroy = DefaultNcclProfilerThreadDestroy;
   g_ncclProfilerPluginFinalize = DefaultNcclProfilerPluginFinalize;
+  g_ncclProfilerAcclFinalizeBoundary = DefaultNcclProfilerAcclFinalizeBoundary;
   g_ncclTunerPluginUnload = DefaultNcclTunerPluginUnload;
   g_cleanupCallOrder.clear();
   g_ncclCeFinalizeResult = ncclSuccess;
