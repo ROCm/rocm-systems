@@ -3,13 +3,16 @@
 
 This script handles:
   1. Installing madengine from source into the CI Python environment
-  2. Building a Docker overlay image with the CI-built RCCL
+  2. Staging two overlays of one base image: the RCCL of the reference CI
+     build (baseline) and the RCCL of this CI build (candidate)
   3. Generating a manifest.json per A/B phase
-  4. Running both phases back to back inside one SLURM allocation: the stock
-     base image (baseline) and the same image with the CI RCCL laid over it
-     (candidate)
+  4. Running both phases back to back inside one SLURM allocation
   5. Scoring the candidate against the baseline measured on the same nodes
   6. Appending both absolute values and their ratio to a JSONL datastore
+
+The reference build is the previous scheduled CI build of the workload's
+schedule, nightly or weekly (``--resolve-baseline``), or the one a dispatch
+names.
 
 Usage from GitHub Actions (on ruby-linux-slurm-scale-runner):
   python3 rocm-systems/projects/rccl/ci/scripts/test_madengine.py \
@@ -72,7 +75,7 @@ _METRIC_ALIASES: dict[str, set[str]] = {
 _TFLOPS_METRICS = {"TFLOPS_per_gpu_avg"}
 
 # Applied to the candidate/baseline ratio of one same-node A/B pair.
-REGRESSION_THRESHOLD_TRAINING = 0.02  # 2%
+REGRESSION_THRESHOLD_TRAINING = 0.03  # 3%
 REGRESSION_THRESHOLD_INFERENCE = 0.05  # 5%
 
 BASELINE = "baseline"
@@ -82,17 +85,14 @@ CANDIDATE = "candidate"
 # live sbatch logs, and tarring a file that is still growing fails the build.
 OVERLAY_CTX = "overlay_ctx"
 OVERLAY_DOCKERFILE = "Dockerfile.rccl-overlay"
-# The maxtext family needs a second image: its A/B baseline cannot be the stock
-# registry tag, which carries no Primus. See stage_maxtext_baseline().
-MAXTEXT_BASELINE_DOCKERFILE = "Dockerfile.maxtext-baseline"
-# Likewise for sglang-disagg, whose baseline is MAD's Dockerfile.
-SGLANG_BASELINE_DOCKERFILE = "Dockerfile.sglang-baseline"
-SGLANG_MAD_DOCKERFILE = "docker/sglang_disagg_inference_full_overlay.ubuntu.amd.Dockerfile"
-# Families whose baseline is built here rather than pulled as the stock tag.
-LOCAL_BASELINE_DOCKERFILES = {
-    "maxtext": MAXTEXT_BASELINE_DOCKERFILE,
-    "sglang-disagg": SGLANG_BASELINE_DOCKERFILE,
+# Both phases are overlays, each of its own RCCL build, so each needs its own
+# recipe and library directory in the shared context.
+OVERLAY_DOCKERFILES = {
+    CANDIDATE: OVERLAY_DOCKERFILE,
+    BASELINE: "Dockerfile.rccl-overlay-baseline",
 }
+OVERLAY_LIBS = {CANDIDATE: "rccl_libs", BASELINE: "rccl_libs_baseline"}
+SGLANG_MAD_DOCKERFILE = "docker/sglang_disagg_inference_full_overlay.ubuntu.amd.Dockerfile"
 
 # Must not predate ROCm/madengine#213: the A/B runs madengine inside salloc.
 MADENGINE_REPO = "https://github.com/ROCm/madengine.git"
@@ -117,6 +117,9 @@ PRIMUS_REF = "v26.7.0"
 WORKLOAD_CONFIGS = {
     "llama-3.1-70b-training": {
         "type": "training",
+        # The run therock-rccl-ci-linux.yml gives it, and with that its A/B
+        # baseline: the previous scheduled build of this schedule.
+        "schedule": "nightly",
         "model_repo": "primus_pyt_megatron_lm_train_llama-3.1-70b",
         "model_repo_aliases": [
             "primus_pyt_megatron_lm_train_llama-3.1-70b_overlay",
@@ -149,6 +152,7 @@ WORKLOAD_CONFIGS = {
     # (ROCm/MAD#284).
     "llama-3.1-70b-pp4-training": {
         "type": "training",
+        "schedule": "weekly",
         "model_repo": "primus_pyt_megatron_lm_train_llama-3.1-70b",
         "base_image": "rocm/primus:v26.4",
         "gpu_target": "gfx950",
@@ -171,6 +175,7 @@ WORKLOAD_CONFIGS = {
     },
     "gpt-oss-120b-training": {
         "type": "training",
+        "schedule": "weekly",
         "model_repo": "primus_pyt_megatron_lm_train_gpt-oss-120b",
         "base_image": "rocm/primus:v26.4",
         "gpu_target": "gfx950",
@@ -212,6 +217,7 @@ WORKLOAD_CONFIGS = {
     #       stalls silently at "Initialize clique".
     "llama-3.1-405b-maxtext": {
         "type": "training",
+        "schedule": "weekly",
         "family": "maxtext",
         # MAD's models.json calls this "jax-maxtext/maxtext_MI355X_...", but the
         # directory prefix must NOT travel into the manifest: madengine builds
@@ -295,6 +301,7 @@ WORKLOAD_CONFIGS = {
     # stage_sglang_baseline().
     "deepseek-r1-sglang-disagg": {
         "type": "inference",
+        "schedule": "weekly",
         "family": "sglang-disagg",
         # madengine names each result row <this>_2p2d_isl<I>_osl<O>_con<C>.
         "model_repo": "sglang-disagg-deepseek-r1",
@@ -1306,16 +1313,12 @@ def resolve_base_digest(base_image: str) -> str:
     `rocm/jax-training:maxtext-v26.6` is mutable. A digest is immutable, so
     resolving it once and writing it into both Dockerfiles closes it.
 
-    Falls back to the tag when the registry cannot tell.
+    Raises RuntimeError when the registry cannot tell: on the tag, a push
+    between the two phases' builds would split the pair unnoticed.
     """
     digest = registry_digest(base_image)
     if not digest:
-        log.warning(
-            "No digest for %s; both A/B images will use the tag, so a push "
-            "between the two phases' builds would split the pair.",
-            base_image,
-        )
-        return base_image
+        raise RuntimeError(f"the registry gave no digest for {base_image}")
     log.info("Base pinned for both A/B images: %s", digest)
     return digest
 
@@ -1323,7 +1326,7 @@ def resolve_base_digest(base_image: str) -> str:
 def base_identity(from_ref: str) -> str:
     """Short, stable token for the exact base an A/B image was built from.
 
-    Both MaxText tags carry it so the tag changes whenever the base does.
+    Both A/B tags carry it so the tag changes whenever the base does.
     Without it the run id alone identified the images, and a workflow *re-run*
     keeps GITHUB_RUN_ID: on the second attempt resolve_base_digest() could pick
     up a moved tag, the baseline would rebuild on it, and the candidate's
@@ -1333,44 +1336,6 @@ def base_identity(from_ref: str) -> str:
     same staleness reaches them.
     """
     return hashlib.sha256(from_ref.encode()).hexdigest()[:10]
-
-
-def stage_maxtext_baseline(
-    base_image: str,
-    work_dir: Path,
-    primus_dir: Path,
-    run_token: str,
-    from_ref: str,
-) -> str:
-    """Stage the A/B baseline for the MaxText family: Primus, stock RCCL.
-
-    The Megatron workloads use the stock registry image as their baseline, but
-    that cannot work here: ``rocm/jax-training:maxtext-*`` ships MaxText and no
-    Primus, so ``scripts/jax-maxtext/run.sh`` would not find ``primus-cli`` and
-    the baseline phase would die before step 0.
-
-    So the baseline is the base image plus the Primus payload and nothing else.
-    That makes the pair *tighter* than the Megatron A/B rather than looser: the
-    two images differ by the librccl swap alone, which is exactly the variable
-    the ratio is supposed to isolate.
-
-    Only the Dockerfile and its context are written here; node 0 of the
-    allocation builds the image and the other nodes load it.
-    """
-    ctx_dir = work_dir / OVERLAY_CTX
-    ctx_dir.mkdir(exist_ok=True)
-    _stage_primus_context(ctx_dir, primus_dir)
-
-    dockerfile = ctx_dir / MAXTEXT_BASELINE_DOCKERFILE
-    dockerfile.write_text(f"FROM {from_ref}\n\n{MAXTEXT_PRIMUS_PAYLOAD}")
-
-    # A per-run tag, with the same token the candidate uses: a node holding an
-    # image under a reused tag would skip the build and could pair a fresh
-    # candidate with a stale baseline, breaking the one invariant this pair
-    # exists to hold -- that the two differ by the RCCL swap alone.
-    tag = f"{base_image}-primus-{PRIMUS_REF}-{run_token}-{base_identity(from_ref)}"
-    log.info("MaxText baseline (Primus, stock RCCL), built on the nodes: %s", tag)
-    return tag
 
 
 # MAD's Dockerfile ends with `dpkg -r --force-all` on the distro rdma-core,
@@ -1399,28 +1364,6 @@ def sglang_recipe(mad_dir: Path, from_ref: str) -> str:
     return f"{pinned}\n{SGLANG_SWAP_TOOLS}"
 
 
-def stage_sglang_baseline(
-    base_image: str,
-    work_dir: Path,
-    run_token: str,
-    from_ref: str,
-) -> str:
-    """Stage the A/B baseline for sglang-disagg: MAD's image, stock RCCL.
-
-    The base alone is not what MAD runs: its Dockerfile adds rdma-core 63,
-    without which queue-pair creation fails on Thor2. Built on the nodes and
-    tagged like the MaxText baseline, for the same reasons.
-    """
-    ctx_dir = work_dir / OVERLAY_CTX
-    ctx_dir.mkdir(exist_ok=True)
-    dockerfile = ctx_dir / SGLANG_BASELINE_DOCKERFILE
-    dockerfile.write_text(sglang_recipe(work_dir / "MAD", from_ref))
-
-    tag = f"{base_image}-mad-{MAD_REF[:8]}-{run_token}-{base_identity(from_ref)}"
-    log.info("sglang baseline (MAD recipe, stock RCCL), built on the nodes: %s", tag)
-    return tag
-
-
 def stage_rccl_overlay(
     rccl_lib: Path,
     base_image: str,
@@ -1429,32 +1372,41 @@ def stage_rccl_overlay(
     family: str = "megatron",
     primus_dir: Path | None = None,
     from_ref: str = "",
+    phase: str = CANDIDATE,
 ) -> str:
-    """Stage the candidate image (base + CI-built RCCL) under ``overlay_ctx``.
+    """Stage one A/B phase's image (base + *rccl_lib*) under ``overlay_ctx``.
 
     Returns the tag. Nothing is built here; the allocation's nodes build it.
+    Both phases go through here with the same base and recipe, so the pair
+    differs by the RCCL build alone.
 
     *family* selects the recipe. ``megatron`` keeps the two layout-specific
-    branches that target the Primus image; ``maxtext`` layers the same Primus
-    payload as the baseline and then a discovery-based swap, because its base
-    has neither Primus nor the SDK venv paths those branches write to.
+    branches that target the Primus image; ``maxtext`` layers the Primus
+    payload and then a discovery-based swap, because its base has neither
+    Primus nor the SDK venv paths those branches write to.
     """
     rccl_commit = get_rccl_commit(rccl_lib)
-    tag = f"{base_image}-rccl-{gpu_target}-{rccl_commit}"
-    if family in ("maxtext", "sglang-disagg") and from_ref:
-        # Same identity the baseline carries, for the same reason: the run id
-        # alone survives a re-run, so without this the candidate could hit the
-        # previous attempt's image and skip its build while the baseline was
+    # The run token is this test run's, shared by both phases; the phase keeps
+    # their tags apart. The library's hash keeps apart one phase's builds that
+    # share the token: on Saturdays the nightly and weekly jobs run in one
+    # workflow run with different baselines, and a node that kept the
+    # nightly's image would otherwise serve it to the weekly as its own.
+    lib_id = hashlib.sha256(rccl_lib.read_bytes()).hexdigest()[:12]
+    tag = f"{base_image}-rccl-{gpu_target}-{rccl_commit}-{phase}-{lib_id}"
+    if from_ref:
+        # The run id alone survives a re-run, so without this a phase could hit
+        # the previous attempt's image and skip its build while the other was
         # rebuilt on a base that had moved.
         tag = f"{tag}-{base_identity(from_ref)}"
 
     ctx_dir = work_dir / OVERLAY_CTX
     ctx_dir.mkdir(exist_ok=True)
-    dockerfile = ctx_dir / OVERLAY_DOCKERFILE
+    dockerfile = ctx_dir / OVERLAY_DOCKERFILES[phase]
+    libs = OVERLAY_LIBS[phase]
     rccl_lib_dir = rccl_lib.parent
     uses_kpack = _rccl_uses_kpack(rccl_lib)
 
-    staging_dir = ctx_dir / "rccl_libs"
+    staging_dir = ctx_dir / libs
     staging_dir.mkdir(exist_ok=True)
     for so_file in rccl_lib_dir.glob("librccl*"):
         dest = staging_dir / so_file.name
@@ -1491,7 +1443,12 @@ def stage_rccl_overlay(
             log.info("Found %d kpack file(s): %s",
                      len(kpack_files), [f.name for f in kpack_files])
         else:
-            log.warning("RCCL .so has kpack references but no .kpack files found in artifacts")
+            # The image keeps its own RCCL's .kpack under the same kernel name,
+            # so the library would load and run the base image's kernels.
+            raise RuntimeError(
+                f"{rccl_lib} loads its GPU kernels from a .kpack, and none was "
+                f"found next to it or under {rccl_lib.parent.parent}"
+            )
 
     if family == "maxtext":
         if primus_dir is None or not (primus_dir / "primus-cli").is_file():
@@ -1505,28 +1462,28 @@ def stage_rccl_overlay(
             bridge=_soname_bridge_discovered(rccl_needed),
             kpack=has_kpack_files,
         )
-        # The payload is byte-identical to the baseline's, so those layers come
-        # straight out of the cache and only the swap actually builds here.
+        # The payload is byte-identical across the two phases, so the second
+        # build takes those layers from the cache and only builds the swap.
         # Staged AFTER it so anything those layers drop on disk -- a wheel
         # vendoring its own librccl, say -- is caught by the sweep too.
-        # The same pinned digest the baseline used. A tag here would let the
+        # The same pinned digest for both phases. A tag here would let the
         # two images build from different versions of a mutable base and the
         # ratio would then be measuring more than RCCL.
         dockerfile.write_text(
             f"FROM {from_ref or base_image}\n\n{MAXTEXT_PRIMUS_PAYLOAD}\n"
-            f"COPY rccl_libs/ /tmp/rccl_ci/\n{swap}\nENV NCCL_DEBUG=WARN\n"
+            f"COPY {libs}/ /tmp/rccl_ci/\n{swap}\nENV NCCL_DEBUG=WARN\n"
         )
     elif family == "sglang-disagg":
-        # The baseline's recipe plus the swap, as for MaxText: the sgl-dev
-        # base does not have the Primus image's layout, so the targets are
-        # discovered rather than assumed.
+        # MAD's recipe plus the swap, as for MaxText: the sgl-dev base does
+        # not have the Primus image's layout, so the targets are discovered
+        # rather than assumed.
         swap = _librccl_swap_snippet(
             bridge=_soname_bridge_discovered(rccl_needed),
             kpack=has_kpack_files,
         )
         dockerfile.write_text(
             f"{sglang_recipe(work_dir / 'MAD', from_ref or base_image)}\n"
-            f"COPY rccl_libs/ /tmp/rccl_ci/\n{swap}\nENV NCCL_DEBUG=WARN\n"
+            f"COPY {libs}/ /tmp/rccl_ci/\n{swap}\nENV NCCL_DEBUG=WARN\n"
         )
     elif uses_kpack:
         log.info(
@@ -1536,8 +1493,8 @@ def stage_rccl_overlay(
             base_image,
         )
         dockerfile.write_text(f"""\
-FROM {base_image}
-COPY rccl_libs/ /tmp/rccl_ci/
+FROM {from_ref or base_image}
+COPY {libs}/ /tmp/rccl_ci/
 RUN set -e; \\
     SDK_LIB="/opt/venv/lib/python3.12/site-packages/_rocm_sdk_libraries/lib"; \\
     SDK_DEV="/opt/venv/lib/python3.12/site-packages/_rocm_sdk_devel/lib"; \\
@@ -1559,8 +1516,8 @@ ENV NCCL_DEBUG=WARN
             rccl_lib.stat().st_size / 1e6,
         )
         dockerfile.write_text(f"""\
-FROM {base_image}
-COPY rccl_libs/ /tmp/rccl_ci/
+FROM {from_ref or base_image}
+COPY {libs}/ /tmp/rccl_ci/
 RUN set -e; \\
     RCCL_REAL=$(readlink -f /opt/rocm/lib/librccl.so 2>/dev/null || \\
                 find /opt/rocm*/lib -name 'librccl.so.*.*' -not -type l 2>/dev/null | head -1); \\
@@ -1570,7 +1527,7 @@ RUN set -e; \\
 ENV NCCL_DEBUG=WARN
 """)
 
-    log.info("Candidate (CI RCCL), built on the nodes: %s", tag)
+    log.info("%s (RCCL %s), built on the nodes: %s", phase, rccl_lib, tag)
     return tag
 
 
@@ -1589,7 +1546,6 @@ def generate_manifest(
     work_dir: Path,
     rccl_lib: Path | None = None,
     run_dir: Path | None = None,
-    pull_only: bool = False,
     dockerfile_name: str = OVERLAY_DOCKERFILE,
 ) -> Path:
     """Generate a madengine manifest.json for the workload.
@@ -1600,7 +1556,6 @@ def generate_manifest(
     in ``context.docker_mounts``.
 
     *run_dir*: madengine's working directory for this phase; gets the manifest.
-    *pull_only*: a stock registry image, pulled per node rather than built.
     """
     gpus_per_node = workload_config["gpus_per_node"]
 
@@ -1744,38 +1699,26 @@ def generate_manifest(
 
     overlay_dockerfile = work_dir / OVERLAY_CTX / dockerfile_name
 
-    if pull_only:
-        image_entry = {
-            "docker_image": overlay_image,
-            "local_image": False,
-            "registry_image": overlay_image,
-            "registry": None,
-            "base_docker": overlay_image,
-            "build_status": "SKIPPED",
-            "build_duration": 0,
-            "gpu_vendor": "AMD",
-        }
-    else:
-        image_entry = {
-            "docker_image": overlay_image,
-            "local_image": True,
-            "registry_image": None,
-            "registry": None,
-            "base_docker": workload_config["base_image"],
-            "build_status": "SKIPPED",
-            "build_duration": 0,
-            "gpu_vendor": "AMD",
-            # Lets a compute node build the image it can neither find nor
-            # pull; the context is this file's own directory, overlay_ctx.
-            # Advertised only when it exists: --skip-overlay-build writes no
-            # Dockerfile, and a dead path would turn madengine's fallback
-            # into a guaranteed failure.
-            **(
-                {"dockerfile": str(overlay_dockerfile)}
-                if overlay_dockerfile.is_file()
-                else {}
-            ),
-        }
+    image_entry = {
+        "docker_image": overlay_image,
+        "local_image": True,
+        "registry_image": None,
+        "registry": None,
+        "base_docker": workload_config["base_image"],
+        "build_status": "SKIPPED",
+        "build_duration": 0,
+        "gpu_vendor": "AMD",
+        # Lets a compute node build the image it can neither find nor
+        # pull; the context is this file's own directory, overlay_ctx.
+        # Advertised only when it exists: --skip-overlay-build writes no
+        # Dockerfile, and a dead path would turn madengine's fallback
+        # into a guaranteed failure.
+        **(
+            {"dockerfile": str(overlay_dockerfile)}
+            if overlay_dockerfile.is_file()
+            else {}
+        ),
+    }
 
     manifest = {
         "built_images": {image_key: image_entry},
@@ -1943,13 +1886,14 @@ def copy_overlay_ctx(src: Path, dst: Path) -> None:
     """Copy the build context without the duplicate librccl names.
 
     stage_rccl_overlay() stages every ``librccl*`` the artifact carries,
-    but each recipe reads only ``rccl_libs/librccl.so`` and ``rccl_libs/.kpack``,
+    but each recipe reads only ``<libs>/librccl.so`` and ``<libs>/.kpack``,
     and the other names are byte-identical copies of the same library.
     """
-    lib = src / "rccl_libs" / "librccl.so"
+    libs = {src / name: src / name / "librccl.so" for name in OVERLAY_LIBS.values()}
 
     def ignore(dirpath: str, names: list[str]) -> list[str]:
-        if Path(dirpath) != lib.parent or not lib.is_file():
+        lib = libs.get(Path(dirpath))
+        if lib is None or not lib.is_file():
             return []
         return [
             n for n in names
@@ -1970,11 +1914,21 @@ def repro_env(
     images: dict[str, str],
     base_digest: str,
     env: dict,
+    baseline_fingerprint: dict | None = None,
 ) -> dict[str, str]:
     """Provenance of this run, plus the cluster setting the manifest cannot carry."""
     repo = env.get("GITHUB_REPOSITORY", "")
     run_id = env.get("GITHUB_RUN_ID", "")
     artifact_run_id = env.get("ARTIFACT_RUN_ID", "") or run_id
+    baseline_run_id = env.get("BASELINE_ARTIFACT_RUN_ID", "")
+    baseline_fingerprint = baseline_fingerprint or {}
+
+    def bucket_url(build: str) -> str:
+        if not (repo and build):
+            return ""
+        return (f"https://{THEROCK_ARTIFACT_BUCKET}.s3.amazonaws.com/"
+                f"{repo.replace('/', '-')}/{build}-linux/")
+
     s3_prefix = (
         f"{repo.replace('/', '-')}/{artifact_run_id}-linux/"
         if repo and artifact_run_id else ""
@@ -1999,6 +1953,11 @@ def repro_env(
         ),
         "RCCL_MD5": rccl_fingerprint.get("md5", ""),
         "RCCL_VERSION": rccl_fingerprint.get("version", ""),
+        # Provenance only, as above: the library is in overlay_ctx/rccl_libs_baseline.
+        "BASELINE_ARTIFACT_RUN_ID": baseline_run_id,
+        "BASELINE_RCCL_ARTIFACTS_URL": bucket_url(baseline_run_id),
+        "BASELINE_RCCL_MD5": baseline_fingerprint.get("md5", ""),
+        "BASELINE_RCCL_VERSION": baseline_fingerprint.get("version", ""),
         "CANDIDATE_IMAGE": images.get(CANDIDATE, ""),
         "BASELINE_IMAGE": images.get(BASELINE, ""),
         "BASE_IMAGE": workload_config["base_image"],
@@ -2025,9 +1984,11 @@ REPRO_README = """\
 
 {CI_RUN_URL}
 
-Everything the run needs is in this directory: the image's build context with
-the CI-built RCCL (`overlay_ctx/`), the MAD model scripts (`scripts/`), and one
-manifest per A/B phase with paths relative to this directory. `repro.env` holds
+Everything the run needs is in this directory: the images' build context with
+both RCCL builds (`overlay_ctx/rccl_libs` for the candidate,
+`overlay_ctx/rccl_libs_baseline` for the baseline), the MAD model scripts
+(`scripts/`), and one manifest per A/B phase with paths relative to this
+directory. `repro.env` holds
 the refs, image digests and cluster settings. The run's own numbers are in the
 `madengine-results-*` artifact of the same CI run.
 
@@ -2051,9 +2012,8 @@ the refs, image digests and cluster settings. The run's own numbers are in the
   mounts them.
 - To shorten a Megatron run, add `"PRIMUS_TRAIN_ITERS": "15"` to both
   `context.docker_env_vars` and `deployment_config.env_vars`.
-- `BASE_DIGEST` is what `BASE_IMAGE` pointed to when CI ran. MaxText and
-  sglang-disagg images build from that digest; Megatron ones from `BASE_IMAGE`
-  by tag, so if the base has moved since, the image differs.
+- `BASE_DIGEST` is what `BASE_IMAGE` pointed to when CI ran; both phases'
+  images build from it.
 """
 
 
@@ -2068,16 +2028,17 @@ def write_repro_bundle(
     images: dict[str, str],
     base_digest: str,
     env: dict | None = None,
+    baseline_fingerprint: dict | None = None,
 ) -> Path | None:
     """Write ``WORK_DIR/repro``: what a rerun by hand needs once WORK_DIR is gone.
 
     The CI manifests are left exactly as the run uses them; the bundle carries
     rewritten copies.
 
-    Writes nothing when the candidate bind-mounts its RCCL from this host, as
-    with --skip-overlay-build: the bundle carries neither that library nor a
-    way to rewrite the mount, so it could not reproduce the candidate anywhere
-    else. CI always builds the overlay; that mode is for local runs.
+    Writes nothing when the phases bind-mount their RCCL from this host, as
+    with --skip-overlay-build: the bundle carries neither those libraries nor
+    a way to rewrite the mounts, so it could not reproduce the pair anywhere
+    else. CI always builds the overlays; that mode is for local runs.
     """
     bundle = work_dir / REPRO_DIR
     if bundle.exists():
@@ -2104,6 +2065,7 @@ def write_repro_bundle(
         workload_name, workload_config, cluster_config, nodes,
         rccl_fingerprint, images, base_digest,
         os.environ if env is None else env,
+        baseline_fingerprint=baseline_fingerprint,
     )
     (bundle / "repro.env").write_text(
         "# Source before running; see REPRO.md.\n"
@@ -2339,6 +2301,8 @@ def run_ab_in_one_allocation(
         pass
 
     env = os.environ.copy()
+    # Only the build lookups here need it; the nodes do not.
+    env.pop("GITHUB_TOKEN", None)
     docker_builds_dir = work_dir / "docker_builds"
     docker_builds_dir.mkdir(exist_ok=True)
     env["MAD_DOCKER_BUILDS"] = str(docker_builds_dir)
@@ -2674,81 +2638,100 @@ def check_ab_regression(
     return False, f"No regression — {msg}"
 
 
-def check_ratio_regression(
-    ratio: float,
-    previous: float,
-    workload_type: str,
-) -> tuple[bool, str]:
-    """Score this run's candidate/stock ratio against the previous run's.
+# The scheduled producer of the RCCL builds, and the weekday its weekly run
+# falls on (plan_rccl_ci.py sets test_scope=all on Saturdays, UTC).
+CI_WORKFLOW = "therock-rccl-ci.yml"
+CI_BRANCH = "develop"
+WEEKLY_WEEKDAY = 5
 
-    The stock baseline is the same image every night, so it divides out the
-    node pair the scheduler handed each run: the two ratios are comparable
-    where the absolute numbers are not. The vs-stock check above cannot do
-    this job on its own -- a workload whose image ships a much slower RCCL
-    has a ratio far above 1 and passes it whatever the candidate does.
 
-    Returns (is_regression, message).
-    """
-    threshold = (
-        REGRESSION_THRESHOLD_TRAINING
-        if workload_type == "training"
-        else REGRESSION_THRESHOLD_INFERENCE
+def _github_json(path: str, env: dict, timeout: int = 30) -> dict:
+    """GET *path* from the Actions API of this repository."""
+    request = urllib.request.Request(
+        f"{env.get('GITHUB_API_URL', 'https://api.github.com')}"
+        f"/repos/{env['GITHUB_REPOSITORY']}{path}",
+        headers={"Accept": "application/vnd.github+json",
+                 **({"Authorization": f"Bearer {env['GITHUB_TOKEN']}"}
+                    if env.get("GITHUB_TOKEN") else {})},
     )
-    change = ratio / previous
-    msg = (
-        f"ratio {ratio:.4f} vs {previous:.4f} previously = "
-        f"{change:.4f} ({change - 1:+.1%}), threshold: -{threshold:.0%}"
-    )
-    if change < 1 - threshold:
-        return True, f"REGRESSION DETECTED — {msg}"
-    return False, f"No regression — {msg}"
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        return json.load(response)
 
 
-def previous_comparison(
-    results_dir: Path,
-    workload_name: str,
-    scale: str,
-    precision: str,
-    base_image: str,
-) -> dict | None:
-    """The latest earlier passing run's candidate row for this workload.
+def artifact_build(build: str, env: dict | None = None) -> dict:
+    """``{"event", "sha", "created_at"}`` of the run that built *build*'s RCCL.
 
-    Called before this run appends its own rows, so the latest match is the
-    previous run's. Same workload, scale, precision and base image only: a
-    ratio depends on all four. The base image is the denominator -- a bump
-    moves the ratio with no change in the candidate, and since only passing
-    runs become references, matching across it would fail every night after
-    the bump with nothing to reset it. After a bump the first run has no
-    previous and becomes the new reference.
-
-    Only runs whose own verdict was a pass count. A failed run's ratio would
-    otherwise become the reference: a regression that failed one night would
-    pass the next, and a run whose candidate never loaded the CI RCCL would
-    set it to about 1.0. Rows written before the verdict was recorded have
-    none and are skipped for the same reason.
+    A run testing its own build knows the first two already. Anything else
+    asks the Actions API; a lookup that fails leaves the fields empty.
     """
+    env = os.environ if env is None else env
+    if build and build == env.get("GITHUB_RUN_ID"):
+        known = {"event": env.get("GITHUB_EVENT_NAME", ""), "sha": env.get("GITHUB_SHA", "")}
+    else:
+        known = {"event": "", "sha": ""}
+    if not (build and env.get("GITHUB_REPOSITORY")):
+        return {**known, "created_at": ""}
     try:
-        with open(results_dir / PERF_DATASTORE) as f:
-            fcntl.flock(f, fcntl.LOCK_SH)
-            lines = f.readlines()
-    except OSError:
-        return None
-    for line in reversed(lines):
-        try:
-            row = json.loads(line)
-        except ValueError:
+        run = _github_json(f"/actions/runs/{build}", env)
+    except (OSError, ValueError) as exc:
+        log.warning("Could not look up run %s: %s", build, exc)
+        return {**known, "created_at": ""}
+    return {"event": run.get("event", ""), "sha": run.get("head_sha", ""),
+            "created_at": run.get("created_at", "")}
+
+
+def rccl_artifact_url(build: str, gpu_target: str, repo: str) -> str:
+    """Where TheRock keeps *build*'s RCCL runtime for *gpu_target*."""
+    return (f"https://{THEROCK_ARTIFACT_BUCKET}.s3.amazonaws.com/"
+            f"{repo.replace('/', '-')}/{build}-linux/rccl_lib_{gpu_target}.tar.zst")
+
+
+def rccl_artifact_exists(build: str, gpu_target: str, repo: str, timeout: int = 30) -> bool:
+    request = urllib.request.Request(rccl_artifact_url(build, gpu_target, repo), method="HEAD")
+    try:
+        with urllib.request.urlopen(request, timeout=timeout):
+            return True
+    except urllib.error.HTTPError as exc:
+        if exc.code in (403, 404):
+            return False
+        raise
+
+
+def previous_scheduled_build(
+    candidate: str,
+    schedule: str,
+    gpu_target: str,
+    env: dict | None = None,
+) -> str | None:
+    """The newest scheduled CI build of *schedule* older than *candidate*.
+
+    Nightly means the previous scheduled run, weekly the previous Saturday's.
+    Runs whose RCCL is not in the bucket are skipped; whether a run passed
+    does not matter.
+    """
+    env = os.environ if env is None else env
+    query = {"event": "schedule", "branch": CI_BRANCH, "per_page": "100"}
+    if candidate:
+        # Without it the newest scheduled build would win, newer than an
+        # older candidate a dispatch names, and the ratio would run backwards.
+        created = artifact_build(candidate, env)["created_at"]
+        if not created:
+            raise RuntimeError(f"could not tell when candidate build {candidate} ran")
+        query["created"] = f"<{created}"
+    runs = _github_json(
+        f"/actions/workflows/{CI_WORKFLOW}/runs?{urllib.parse.urlencode(query)}", env,
+    ).get("workflow_runs", [])
+    for run in sorted(runs, key=lambda r: r["created_at"], reverse=True):
+        build = str(run["id"])
+        if build == candidate:
             continue
-        if (
-            row.get("phase") == CANDIDATE
-            and row.get("workload") == workload_name
-            and row.get("scale") == scale
-            and row.get("precision") == precision
-            and row.get("base_image") == base_image
-            and row.get("verdict") == "pass"
-            and isinstance(row.get("ratio"), (int, float))
-            and _usable_metric(float(row["ratio"]))
-        ):
-            return row
+        started = datetime.fromisoformat(run["created_at"].replace("Z", "+00:00"))
+        if schedule == "weekly" and started.weekday() != WEEKLY_WEEKDAY:
+            continue
+        if rccl_artifact_exists(build, gpu_target, env["GITHUB_REPOSITORY"]):
+            return build
+        log.info("Scheduled build %s has no rccl_lib_%s in the bucket; skipping",
+                 build, gpu_target)
     return None
 
 
@@ -2873,10 +2856,12 @@ def generate_summary_report(
     job_id: str = "",
     phase_rccl: dict[str, str] | None = None,
     unit: str = "tok/s/GPU",
+    builds: dict[str, str] | None = None,
 ) -> str:
     """Generate a plain-text summary report."""
     status = "PASSED" if exit_code == 0 else "FAILED"
     phase_rccl = phase_rccl or {}
+    builds = builds or {}
     lines = [
         "RCCL MADEngine Workload Test Report",
         "=" * 40,
@@ -2886,14 +2871,15 @@ def generate_summary_report(
         f"Workload:   {workload_name}",
         f"Scale:      {scale}",
         f"Cluster:    {cluster}",
-        f"Baseline:   RCCL {phase_rccl.get(BASELINE) or 'unknown'}",
-        f"Candidate:  RCCL {phase_rccl.get(CANDIDATE) or 'unknown'} (CI build {rccl_commit})",
+        f"Baseline:   RCCL {phase_rccl.get(BASELINE) or 'unknown'} "
+        f"(CI build {builds.get(BASELINE) or 'unknown'})",
+        f"Candidate:  RCCL {phase_rccl.get(CANDIDATE) or 'unknown'} "
+        f"(CI build {builds.get(CANDIDATE) or rccl_commit})",
         f"Nodes:      {nodelist or 'unknown'} (job {job_id or 'unknown'})",
         "",
         "Both numbers below were measured on those same nodes, back to back,",
-        "inside one allocation. Baseline is the stock image; candidate is the",
-        "same image with the CI-built RCCL laid over it. Throughput in",
-        f"{unit}.",
+        "inside one allocation, with the two CI builds' RCCL laid over the",
+        f"same base image. Throughput in {unit}.",
         "",
     ]
 
@@ -2904,11 +2890,6 @@ def generate_summary_report(
             lines.append(f"{c['precision'] or '?':>5}:  ratio {ratio_s}")
             lines.append(f"        baseline  {_format_phase(c[BASELINE])}")
             lines.append(f"        candidate {_format_phase(c[CANDIDATE])}")
-            if c.get("previous_ratio") is not None:
-                lines.append(
-                    f"        previous  ratio {c['previous_ratio']:.4f} "
-                    f"(run {c.get('previous_run_id') or '?'})"
-                )
     else:
         lines.append("Throughput: N/A (workload did not produce metrics)")
 
@@ -2926,14 +2907,59 @@ def generate_summary_report(
     return "\n".join(lines)
 
 
+def resolve_baseline(
+    workload_name: str,
+    gpu_target: str,
+    env: dict | None = None,
+) -> str:
+    """This run's baseline build: the dispatcher's, else previous_scheduled_build()'s.
+
+    Raises RuntimeError when there is neither.
+    """
+    env = os.environ if env is None else env
+    chosen = env.get("BASELINE_ARTIFACT_RUN_ID", "").strip()
+    if chosen:
+        if not chosen.isdigit():
+            raise RuntimeError(
+                f"baseline_artifact_run_id must be a run ID, got {chosen!r}")
+        log.info("Baseline build %s, as dispatched", chosen)
+        return chosen
+    schedule = WORKLOAD_CONFIGS[workload_name]["schedule"]
+    candidate = env.get("ARTIFACT_RUN_ID", "")
+    try:
+        build = previous_scheduled_build(candidate, schedule, gpu_target, env)
+    except (OSError, ValueError, KeyError) as exc:
+        raise RuntimeError(f"could not look up the scheduled CI builds: {exc}") from exc
+    if build is None:
+        raise RuntimeError(
+            f"no {schedule} CI build before {candidate or 'now'} has its RCCL in "
+            f"the bucket; dispatch with baseline_artifact_run_id"
+        )
+    log.info("Baseline build %s: the %s build before %s", build, schedule,
+             candidate or "now")
+    return build
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument(
         "--artifact-dir",
         type=Path,
-        required=True,
-        help="Directory containing CI-built RCCL artifacts",
+        help="RCCL artifacts of the CI build under test (the candidate)",
+    )
+    parser.add_argument(
+        "--baseline-artifact-dir",
+        type=Path,
+        help="RCCL artifacts of the reference CI build (the baseline)",
+    )
+    parser.add_argument(
+        "--resolve-baseline",
+        action="store_true",
+        help="Print the baseline build as artifact_run_id=<id>, for "
+             "$GITHUB_OUTPUT, and exit. BASELINE_ARTIFACT_RUN_ID, when set, "
+             "is taken as is; otherwise the previous scheduled build of the "
+             "workload's schedule.",
     )
     parser.add_argument(
         "--workload",
@@ -2989,7 +3015,8 @@ def main() -> None:
     parser.add_argument(
         "--skip-overlay-build",
         action="store_true",
-        help="Skip Docker overlay build (use pre-built image specified via --overlay-image)",
+        help="Skip Docker overlay build: run both phases on --overlay-image, "
+             "each with its RCCL bind-mounted",
     )
     parser.add_argument(
         "--overlay-image",
@@ -3024,20 +3051,49 @@ def main() -> None:
     scale = f"{args.nodes}N/{args.nodes * workload_config['gpus_per_node']}GPU"
 
     results_dir = args.results_dir or Path(cluster_config["results_base"])
+    if args.resolve_baseline:
+        try:
+            build = resolve_baseline(args.workload, cluster_config["gpu_target"])
+        except RuntimeError as exc:
+            log.error("No A/B baseline: %s", exc)
+            sys.exit(1)
+        print(f"artifact_run_id={build}")
+        sys.exit(0)
+    if not (args.artifact_dir and args.baseline_artifact_dir):
+        parser.error("--artifact-dir and --baseline-artifact-dir are required")
     work_dir = args.work_dir or Path(tempfile.mkdtemp(prefix="madengine_ci_"))
     log.info("Work directory: %s", work_dir)
     log.info("Results directory: %s", results_dir)
 
-    # Step 1: Find RCCL library and fingerprint it
+    # Step 1: Find both RCCL libraries and fingerprint them
     rccl_lib = find_rccl_library(args.artifact_dir)
-    log.info("RCCL library: %s", rccl_lib)
+    baseline_lib = find_rccl_library(args.baseline_artifact_dir)
+    libs = {BASELINE: baseline_lib, CANDIDATE: rccl_lib}
     rccl_commit = get_rccl_commit(rccl_lib)
-    log.info("RCCL commit/tag: %s", rccl_commit)
-    rccl_fingerprint = get_rccl_fingerprint(rccl_lib)
-    if rccl_fingerprint["md5"]:
-        log.info("RCCL fingerprint: md5=%s version=%s size=%d",
-                 rccl_fingerprint["md5"], rccl_fingerprint["version"],
-                 rccl_fingerprint["size"])
+    log.info("Run token: %s", rccl_commit)
+    builds = {
+        CANDIDATE: os.environ.get("ARTIFACT_RUN_ID", ""),
+        BASELINE: os.environ.get("BASELINE_ARTIFACT_RUN_ID", ""),
+    }
+    fingerprints = {}
+    sources = {}
+    for phase, lib in libs.items():
+        fingerprints[phase] = get_rccl_fingerprint(lib)
+        sources[phase] = artifact_build(builds[phase])
+        log.info("%s: %s from build %s (%s at %s), md5=%s version=%s",
+                 phase, lib, builds[phase] or "?", sources[phase]["event"] or "?",
+                 sources[phase]["sha"][:12] or "?", fingerprints[phase]["md5"],
+                 fingerprints[phase]["version"])
+    # Without a version, verify_rccl_replacement() cannot tell a phase's build
+    # from the image's own RCCL, and that phase would be measured unverified.
+    unreadable = [phase for phase in libs if not fingerprints[phase]["version"]]
+    if unreadable:
+        log.error("Could not read the RCCL version of the %s library, so its "
+                  "phase could not be verified to run it", " and ".join(unreadable))
+        sys.exit(1)
+    rccl_fingerprint = fingerprints[CANDIDATE]
+    if rccl_fingerprint["md5"] and rccl_fingerprint["md5"] == fingerprints[BASELINE]["md5"]:
+        log.info("Both builds carry the same librccl: this run is an A/A")
 
     # Step 2: Install madengine
     family = workload_config.get("family", "megatron")
@@ -3049,83 +3105,54 @@ def main() -> None:
     # Resolved once and written into both A/B Dockerfiles, so the pair cannot
     # straddle a push to the mutable base tag between the two builds.
     base_ref = ""
-    if family in ("maxtext", "sglang-disagg") and not args.skip_overlay_build:
-        base_ref = resolve_base_digest(workload_config["base_image"])
+    if not args.skip_overlay_build:
+        try:
+            base_ref = resolve_base_digest(workload_config["base_image"])
+        except RuntimeError as exc:
+            log.error("Cannot pin the A/B base image: %s", exc)
+            sys.exit(1)
 
-    # Step 3: Stage the candidate image (or use pre-built). Images are built on
+    # Step 3: Stage both phases' images (or use pre-built). Images are built on
     # the allocation's nodes, never here: this host's disk is shared by runners.
     if args.skip_overlay_build:
         if not args.overlay_image:
             log.error("--skip-overlay-build requires --overlay-image")
             sys.exit(1)
-        overlay_image = args.overlay_image
+        images = {phase: args.overlay_image for phase in libs}
     else:
-        overlay_image = stage_rccl_overlay(
-            rccl_lib,
-            workload_config["base_image"],
-            cluster_config["gpu_target"],
-            work_dir,
-            family=family,
-            primus_dir=primus_dir,
-            from_ref=base_ref,
-        )
-
-    # The maxtext baseline cannot be the stock tag: that image ships MaxText
-    # but no Primus, so run.sh would not find primus-cli and the baseline
-    # phase would die before step 0. Stage base + Primus instead, which also
-    # makes the pair differ by the RCCL swap and nothing else. Staged, not
-    # built: the nodes build both images of the pair, this host neither.
-    if family == "maxtext":
-        baseline_image = stage_maxtext_baseline(
-            workload_config["base_image"], work_dir, primus_dir,
-            # Same token the candidate tag carries, so the pair is unambiguously
-            # from one run, and the same pinned base digest.
-            run_token=rccl_commit,
-            from_ref=base_ref or workload_config["base_image"],
-        )
-        baseline_pull_only = False
-    elif family == "sglang-disagg":
-        baseline_image = stage_sglang_baseline(
-            workload_config["base_image"], work_dir,
-            run_token=rccl_commit,
-            from_ref=base_ref or workload_config["base_image"],
-        )
-        baseline_pull_only = False
-    else:
-        baseline_image = workload_config["base_image"]
-        baseline_pull_only = True
+        images = {
+            phase: stage_rccl_overlay(
+                lib,
+                workload_config["base_image"],
+                cluster_config["gpu_target"],
+                work_dir,
+                family=family,
+                primus_dir=primus_dir,
+                from_ref=base_ref,
+                phase=phase,
+            )
+            for phase, lib in libs.items()
+        }
 
     # Step 4: Generate one manifest per A/B phase
     phases: list[tuple[str, Path]] = []
-    for phase, image, pull_only in (
-        (BASELINE, baseline_image, baseline_pull_only),
-        (CANDIDATE, overlay_image, False),
-    ):
+    for phase in (BASELINE, CANDIDATE):
         run_dir = prepare_phase_dir(work_dir, phase)
         generate_manifest(
             args.workload,
             workload_config,
             cluster_config,
-            image,
+            images[phase],
             args.nodes,
             work_dir,
-            # The bind-mount of the CI library is what makes a --skip-overlay-build
-            # run the candidate; the baseline must keep the image's own copy.
-            rccl_lib=(
-                rccl_lib if args.skip_overlay_build and phase == CANDIDATE else None
-            ),
+            # The bind-mount is what puts each phase's library into a
+            # --skip-overlay-build image.
+            rccl_lib=libs[phase] if args.skip_overlay_build else None,
             run_dir=run_dir,
-            pull_only=pull_only,
-            # A maxtext baseline is built on the nodes, so its manifest must
-            # advertise ITS OWN dockerfile. Left at the default it would hand
-            # a node the candidate recipe and have it build the swapped image
-            # under the baseline tag -- an A/B comparing the CI RCCL against
-            # itself.
-            dockerfile_name=(
-                LOCAL_BASELINE_DOCKERFILES.get(family, OVERLAY_DOCKERFILE)
-                if phase == BASELINE
-                else OVERLAY_DOCKERFILE
-            ),
+            # Each phase must advertise ITS OWN dockerfile. A shared one would
+            # have a node build one phase's RCCL under the other's tag -- an
+            # A/B comparing a build against itself.
+            dockerfile_name=OVERLAY_DOCKERFILES[phase],
         )
         phases.append((phase, run_dir))
 
@@ -3138,8 +3165,9 @@ def main() -> None:
         write_repro_bundle(
             work_dir, phase_dirs, args.workload, workload_config, cluster_config,
             args.nodes, rccl_fingerprint,
-            images={BASELINE: baseline_image, CANDIDATE: overlay_image},
+            images=images,
             base_digest=base_ref or registry_digest(workload_config["base_image"]),
+            baseline_fingerprint=fingerprints[BASELINE],
         )
     except Exception:
         log.exception("Could not write the repro bundle; continuing without it")
@@ -3153,11 +3181,8 @@ def main() -> None:
         workload_config,
         cluster_config,
         args.timeout_minutes,
-        # A --skip-overlay-build image and a stock baseline are not ours to remove.
-        built_images=(
-            ([] if args.skip_overlay_build else [overlay_image])
-            + ([] if baseline_pull_only else [baseline_image])
-        ),
+        # A --skip-overlay-build image is not ours to remove.
+        built_images=[] if args.skip_overlay_build else list(images.values()),
     )
     exit_code = max(allocation["exit_codes"].values(), default=1)
 
@@ -3169,17 +3194,17 @@ def main() -> None:
             log.info("%s: dropped %.1f MB of repeated RCCL warnings from the node logs",
                      phase, saved / 1e6)
 
-    # Step 5b: Verify RCCL replacement. Only the candidate is meant to carry the
-    # CI library — the baseline runs the image's bundled copy by design.
+    # Step 5b: Verify RCCL replacement in both phases: each must have run its
+    # own build's library, not the image's bundled copy.
     rccl_verification_failed = False
-    if rccl_fingerprint.get("version"):
+    for phase, run_dir in phases:
         rccl_ok, rccl_msg = verify_rccl_replacement(
-            phase_dirs[CANDIDATE], rccl_fingerprint, args.nodes,
+            run_dir, fingerprints[phase], args.nodes,
         )
         if rccl_ok:
-            log.info("RCCL verification: %s", rccl_msg)
+            log.info("%s RCCL verification: %s", phase, rccl_msg)
         else:
-            log.error("RCCL verification FAILED: %s", rccl_msg)
+            log.error("%s RCCL verification FAILED: %s", phase, rccl_msg)
             rccl_verification_failed = True
             exit_code = max(exit_code, 1)
 
@@ -3253,31 +3278,7 @@ def main() -> None:
         reg, msg = check_ab_regression(
             base["metric_value"], cand["metric_value"], workload_config["type"],
         )
-        regression_msgs.append(f"[{prec}] vs stock:    {msg}")
-        if reg:
-            log.warning(msg)
-            exit_code = max(exit_code, 1)
-        else:
-            log.info(msg)
-
-        # Read before Step 8 appends this run's rows, so it is the previous run.
-        prev = previous_comparison(
-            results_dir, args.workload, scale, c["precision"],
-            base_ref or workload_config["base_image"],
-        )
-        if prev is None:
-            regression_msgs.append(
-                f"[{prec}] vs previous: no earlier comparison recorded — not scored"
-            )
-            continue
-        c["previous_ratio"] = float(prev["ratio"])
-        c["previous_run_id"] = prev.get("run_id", "")
-        reg, msg = check_ratio_regression(
-            c["ratio"], c["previous_ratio"], workload_config["type"],
-        )
-        regression_msgs.append(
-            f"[{prec}] vs previous: {msg} (run {c['previous_run_id'] or '?'})"
-        )
+        regression_msgs.append(f"[{prec}] {msg}")
         if reg:
             log.warning(msg)
             exit_code = max(exit_code, 1)
@@ -3292,28 +3293,26 @@ def main() -> None:
     # Step 8: Append to datastore — one record per phase per precision, with
     # absolute values kept for trend analysis and the ratio on the candidate.
     extra = {
-        # What previous_comparison() keys the reference on: the stock
-        # image is the ratio's denominator. Pinned by digest when it was
-        # resolved, so a push to the mutable tag starts a fresh history.
+        # Both phases' base, pinned by digest when it was resolved.
         "base_image": base_ref or workload_config["base_image"],
         # The run's own gate verdict, final by now: it covers the phase exit
-        # codes, RCCL verification and both regression checks. A later run
-        # takes only a passing one as its reference.
+        # codes, RCCL verification and the regression check.
         "verdict": "pass" if exit_code == 0 else "fail",
         "cluster": args.cluster,
-        "overlay_image": overlay_image,
+        "overlay_image": images[CANDIDATE],
         "nodelist": allocation["nodelist"],
         "slurm_job_id": allocation["job_id"],
-        # run_id names this test run; these name the RCCL binary it tested.
-        "artifact_run_id": os.environ.get("ARTIFACT_RUN_ID", ""),
+        "event": os.environ.get("GITHUB_EVENT_NAME", ""),
+        # run_id names this test run; these name the RCCL builds it tested.
+        "artifact_run_id": builds[CANDIDATE],
+        "artifact_event": sources[CANDIDATE]["event"],
+        "artifact_sha": sources[CANDIDATE]["sha"],
         "rccl_md5": rccl_fingerprint["md5"],
-    }
-    # baseline_image, not workload_config["base_image"]: for maxtext the
-    # baseline is a locally built Primus image, and recording the stock tag
-    # would put a provenance in the datastore that was never run.
-    phase_images = {
-        BASELINE: baseline_image,
-        CANDIDATE: overlay_image,
+        "rccl_version": rccl_fingerprint["version"],
+        "baseline_artifact_run_id": builds[BASELINE],
+        "baseline_artifact_sha": sources[BASELINE]["sha"],
+        "baseline_rccl_md5": fingerprints[BASELINE]["md5"],
+        "baseline_rccl_version": fingerprints[BASELINE]["version"],
     }
     if all_rows:
         for c in comparisons:
@@ -3321,12 +3320,9 @@ def main() -> None:
                 row = c[phase]
                 if row is None:
                     continue
-                phase_extra = {**extra, "phase": phase, "image": phase_images[phase]}
+                phase_extra = {**extra, "phase": phase, "image": images[phase]}
                 if phase == CANDIDATE and c["ratio"] is not None:
                     phase_extra["ratio"] = c["ratio"]
-                    if c.get("previous_ratio") is not None:
-                        phase_extra["previous_ratio"] = c["previous_ratio"]
-                        phase_extra["previous_run_id"] = c["previous_run_id"]
                 append_result(
                     results_dir,
                     args.workload,
@@ -3366,6 +3362,7 @@ def main() -> None:
             for phase, run_dir in phases
         },
         unit=workload_config.get("metric_unit", "tok/s/GPU"),
+        builds=builds,
     )
     log.info("\n%s", report)
     write_github_summary(report)

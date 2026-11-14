@@ -11,6 +11,12 @@ on:
         type: string
       artifact_run_id:
         type: string
+        required: true
+      baseline_artifact_run_id:
+        # Empty: the previous scheduled build of the workload's schedule
+        # (WORKLOAD_CONFIGS[...]["schedule"]), nightly or weekly.
+        type: string
+        default: ''
       workload:
         # A key of WORKLOAD_CONFIGS in test_madengine.py, which validates it.
         # workflow_call inputs cannot be typed as choice, so the list of
@@ -53,9 +59,17 @@ on:
       test_runs_on:
         type: string
         default: 'ruby-linux-slurm-scale-runner'
+      # No default: its RCCL is the A/B candidate, so the dispatcher picks the
+      # build. The latest TheRock run would carry TheRock's pinned RCCL, not
+      # this repository's.
       artifact_run_id:
-        description: 'Reuse artifacts from a previous build run ID'
+        description: 'rocm-systems run ID whose RCCL build is the A/B candidate (e.g. a develop nightly of TheRock CI for rccl)'
         type: string
+        required: true
+      baseline_artifact_run_id:
+        description: 'rocm-systems run ID whose RCCL build is the A/B baseline (default: the previous scheduled build of the same schedule as the workload, nightly or weekly)'
+        type: string
+        default: ''
       workload:
         description: 'MADEngine workload to run'
         type: choice
@@ -112,6 +126,8 @@ jobs:
       # ROCm tree is only read on the head node, and /apps/cvs_tests/dist_new
       # belongs to the CVS suite, which this job may neither traverse nor wipe.
       OUTPUT_ARTIFACTS_DIR: "./build"
+      # The baseline build's RCCL, fetched the same way.
+      BASELINE_ARTIFACTS_DIR: "./build-baseline"
       CLUSTER: "ruby"
       # ruby's per-job private /tmp is invisible to the Docker daemon, so a -v
       # bind mount of the workspace lands empty; /var/tmp is visible.
@@ -197,37 +213,47 @@ jobs:
           python3 -m pip install --upgrade pip
           python3 -m pip install -r requirements.txt
 
-      - name: Resolve TheRock artifact run
-        if: ${{ inputs.artifact_run_id == '' }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GITHUB_TOKEN: ${{ github.token }}
-        run: |
-          run_id="$(python3 -c "
-          import sys, contextlib
-          sys.path.insert(0, 'build_tools')
-          from find_latest_artifacts import find_latest_artifacts
-          with contextlib.redirect_stdout(sys.stderr):
-              results = find_latest_artifacts(
-                  artifact_groups=['${{ inputs.artifact_group }}'],
-                  verbose=True,
-              )
-          if not results:
-              print('No artifacts found for ${{ inputs.artifact_group }}', file=sys.stderr)
-              sys.exit(1)
-          print(results[0].workflow_run_id)
-          ")"
-          echo "Resolved TheRock run_id=${run_id}"
-          echo "ARTIFACT_RUN_ID=${run_id}" >> $GITHUB_ENV
-
       - name: Fetch RCCL artifacts
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
+          # `required` does not stop an API dispatch from passing an empty string.
+          if [ -z "${ARTIFACT_RUN_ID}" ]; then
+            echo "::error::artifact_run_id is required: it names the RCCL build tested as the candidate"
+            exit 1
+          fi
           python3 build_tools/install_rocm_from_artifacts.py \
             --run-id="${ARTIFACT_RUN_ID}" \
             --artifact-group="${{ inputs.artifact_group }}" \
             --output-dir="${OUTPUT_ARTIFACTS_DIR}" \
+            --rccl
+
+      # Before the allocation: a run with nothing to compare against fails
+      # here, not after hours of queueing.
+      - name: Resolve the A/B baseline build
+        id: baseline
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          BASELINE_ARTIFACT_RUN_ID: ${{ inputs.baseline_artifact_run_id }}
+          WORKLOAD: ${{ inputs.workload }}
+          NODES: ${{ inputs.nodes }}
+        run: |
+          python3 rocm-systems/projects/rccl/ci/scripts/test_madengine.py \
+            --resolve-baseline \
+            --workload "${WORKLOAD}" \
+            --cluster "${CLUSTER}" \
+            --nodes "${NODES}" >> "$GITHUB_OUTPUT"
+
+      - name: Fetch baseline RCCL artifacts
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          BASELINE_ARTIFACT_RUN_ID: ${{ steps.baseline.outputs.artifact_run_id }}
+          ARTIFACT_GROUP: ${{ inputs.artifact_group }}
+        run: |
+          python3 build_tools/install_rocm_from_artifacts.py \
+            --run-id="${BASELINE_ARTIFACT_RUN_ID}" \
+            --artifact-group="${ARTIFACT_GROUP}" \
+            --output-dir="${BASELINE_ARTIFACTS_DIR}" \
             --rccl
 
       # Both A/B phases in one allocation, plus its queue wait.
@@ -235,6 +261,9 @@ jobs:
         env:
           NCCL_DEBUG: WARN
           MAD_SECRETS_HFTOKEN: ${{ secrets.HF_TOKEN || '' }}
+          # Read-only: looks up the event and commit of each RCCL build's run.
+          GITHUB_TOKEN: ${{ github.token }}
+          BASELINE_ARTIFACT_RUN_ID: ${{ steps.baseline.outputs.artifact_run_id }}
           JOB_TIMEOUT_MINUTES: ${{ inputs.job_timeout_minutes }}
           # Nodes to keep out of the allocation, as a SLURM hostlist.
           MADENGINE_SLURM_EXCLUDE: ${{ vars.RCCL_MADENGINE_SLURM_EXCLUDE || '' }}
@@ -288,6 +317,7 @@ jobs:
 
           python3 rocm-systems/projects/rccl/ci/scripts/test_madengine.py \
             --artifact-dir "${OUTPUT_ARTIFACTS_DIR}" \
+            --baseline-artifact-dir "${BASELINE_ARTIFACTS_DIR}" \
             --workload "${WORKLOAD}" \
             --cluster "${CLUSTER}" \
             --nodes "${NODES}" \
@@ -357,7 +387,7 @@ jobs:
         with:
           name: madengine-repro-${{ inputs.workload }}-${{ inputs.nodes }}N-${{ inputs.amdgpu_families }}
           path: ${{ env.WORK_DIR }}/repro
-          # The kpack GPU kernels sit in overlay_ctx/rccl_libs/.kpack, and
+          # The kpack GPU kernels sit in overlay_ctx/rccl_libs*/.kpack, and
           # upload-artifact drops dot-paths unless told otherwise.
           include-hidden-files: true
           if-no-files-found: warn
