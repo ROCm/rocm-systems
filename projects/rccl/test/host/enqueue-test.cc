@@ -28,6 +28,7 @@
 #include "../common/LogCapture.hpp"
 #include "ScopedHook.h"
 #include "fakes/enqueue_test_deps.h"
+#include "fakes/rccl_wrap_fakes.h"
 #include "fakes/strongstream_stubs.h"
 
 // alloc.h first, so its macros are visible to be #undef'd before enqueue.cc's
@@ -6779,4 +6780,220 @@ TEST_F(EnqueueMicrotest, TopoGetAlgoInfo_Nvls_UsesNvlsChannelsCappedByCommOnlyFo
     EXPECT_EQ(c.algo, task.algorithm);
     EXPECT_EQ(c.nMaxChannels, task.nMaxChannels) << c.algo << " nNodes=" << c.nNodes;
   }
+}
+
+// ===========================================================================
+// ncclGroupSimulateEnd estimatedTime: a tuner-forced 0 reports the cost-model
+// time of the chosen algorithm, and a direct AllGather is still costed.
+// ===========================================================================
+
+namespace {
+constexpr float kChosenModelUs = 25.0f;
+constexpr float kOtherModelUs = 100.0f;
+
+void ScriptCellTime(int algo, int proto, float chosen, float other) {
+  g_topoGetAlgoTime = [=](struct ncclComm*, int, int a, int p, size_t, int, float* time) {
+    if (time) *time = (a == algo && p == proto) ? chosen : other;
+    return ncclSuccess;
+  };
+}
+
+// The CSV tuner writes 0 into the cell it wants. The 0 selects; it is not a time.
+ncclResult_t ZeroTreeLlCell(void*, ncclFunc_t, size_t, int, float** collCostTable, int, int, int, int* nChannels) {
+  float (*table)[NCCL_NUM_PROTOCOLS] = (float (*)[NCCL_NUM_PROTOCOLS])collCostTable;
+  table[NCCL_ALGO_TREE][NCCL_PROTO_LL] = 0.0f;
+  if (nChannels) *nChannels = 0;
+  return ncclSuccess;
+}
+
+void AttachZeroTuner(ncclComm* comm, ncclTuner_t* tuner) {
+  *tuner = ncclTuner_t{};
+  tuner->getCollInfo = ZeroTreeLlCell;
+  comm->tuner = tuner;
+  // An empty registration cache makes regBuff false once the graph is invalid,
+  // so getAlgoInfo does not consult graph registration.
+  comm->planner.capturingGraph = ncclCudaGraphNone(comm->config.graphUsageMode);
+}
+
+// Empty collective sorter, one send queue. ncclPrepareTasks reaches
+// rcclSimulateDirectAllGather without scheduling a collective. The fast-path
+// hook aborts unless a test installs it; ncclPrepareTasks calls it unconditionally.
+struct DirectAllGatherScene {
+  AlgoInfoComm cc;
+  std::vector<ncclKernelPlanner::Peer> peers;
+  ncclTaskP2p p2p{};
+  bool algoNeedConnect[NCCL_NUM_ALGORITHMS] = {};
+  bool needConnect = false;
+
+  DirectAllGatherScene() : peers(static_cast<size_t>(cc.get()->nRanks)) {
+    ncclComm* comm = cc.get();
+    comm->planner.peers = peers.data();
+    comm->planner.capturingGraph = ncclCudaGraphNone(comm->config.graphUsageMode);
+    comm->symmetricSupport = false;
+    g_rcclSetCeAllReduceFastPath = [](struct ncclComm*) {};
+  }
+
+  void enqueue(ncclFunc_t collAPI, size_t count) {
+    p2p = ncclTaskP2p{};
+    p2p.collAPI = collAPI;
+    p2p.count = count;
+    p2p.datatype = ncclFloat32;
+    ncclIntruQueueEnqueue(&peers[0].sendQueue, &p2p);
+  }
+
+  ncclResult_t run(ncclSimInfo_t* sim) {
+    return ncclPrepareTasks(cc.get(), algoNeedConnect, &needConnect, sim);
+  }
+};
+}  // namespace
+
+TEST_F(EnqueueMicrotest, GetAlgoInfo_TunerZero_ReportsCostModelTimeOfTheChosenAlgo) {
+  AlgoInfoComm cc;
+  ncclTuner_t tuner{};
+  AttachZeroTuner(cc.get(), &tuner);
+  ScriptCellTime(NCCL_ALGO_TREE, NCCL_PROTO_LL, kChosenModelUs, kOtherModelUs);
+  ncclTaskColl task = CostTask(ncclFuncAllReduce);
+  task.count = 1024;
+  ncclSimInfo_t sim = NCCL_SIM_INFO_INITIALIZER;
+
+  ASSERT_EQ(ncclSuccess, getAlgoInfo(cc.get(), &task, /*collNetSupport=*/0, /*nvlsSupport=*/0,
+                                     /*numPipeOps=*/1, &sim));
+  EXPECT_EQ(NCCL_ALGO_TREE, task.algorithm) << "the 0 must still win selection";
+  EXPECT_EQ(NCCL_PROTO_LL, task.protocol);
+  EXPECT_FLOAT_EQ(kChosenModelUs, sim.estimatedTime)
+      << "estimatedTime must be the cost-model time, not the tuner's 0";
+}
+
+TEST_F(EnqueueMicrotest, GetAlgoInfo_TunerZero_NullSimInfoSucceeds) {
+  // A real launch passes a null simulation. The tuner branch must not
+  // dereference it, and the 0 must still select TREE/LL.
+  AlgoInfoComm cc;
+  ncclTuner_t tuner{};
+  AttachZeroTuner(cc.get(), &tuner);
+  ScriptCellTime(NCCL_ALGO_TREE, NCCL_PROTO_LL, kChosenModelUs, kOtherModelUs);
+  ncclTaskColl task = CostTask(ncclFuncAllReduce);
+  task.count = 1024;
+
+  ASSERT_EQ(ncclSuccess, getAlgoInfo(cc.get(), &task, 0, 0, 1, nullptr));
+  EXPECT_EQ(NCCL_ALGO_TREE, task.algorithm);
+  EXPECT_EQ(NCCL_PROTO_LL, task.protocol);
+}
+
+TEST_F(EnqueueMicrotest, GetAlgoInfo_TunerZero_KeepsZeroWhenCostModelHasNoPositiveTime) {
+  AlgoInfoComm cc;
+  ncclTuner_t tuner{};
+  AttachZeroTuner(cc.get(), &tuner);
+  ScriptCellTime(NCCL_ALGO_TREE, NCCL_PROTO_LL, NCCL_ALGO_PROTO_IGNORE, kOtherModelUs);
+  ncclTaskColl task = CostTask(ncclFuncAllReduce);
+  task.count = 1024;
+  ncclSimInfo_t sim = NCCL_SIM_INFO_INITIALIZER;
+
+  ASSERT_EQ(ncclSuccess, getAlgoInfo(cc.get(), &task, 0, 0, 1, &sim));
+  EXPECT_EQ(NCCL_ALGO_TREE, task.algorithm);
+  EXPECT_EQ(NCCL_PROTO_LL, task.protocol);
+  EXPECT_FLOAT_EQ(0.0f, sim.estimatedTime)
+      << "a non-positive model time must not be reported in place of the sentinel";
+}
+
+TEST_F(EnqueueMicrotest, GetAlgoInfo_TunerZero_ShortCircuitDoesNotQueryTheCostModel) {
+  // These 0s come from updateCollCostTable, not from a tuner choice. AlltoAllPivot
+  // is past NCCL_NUM_FUNCTIONS, so ncclTopoGetAlgoTime would read off the end of
+  // comm->bandwidths. One rank is the other arm of that same short circuit.
+  struct {
+    int nRanks;
+    ncclFunc_t func;
+  } const cases[] = {{8, ncclFuncAlltoAllPivot}, {1, ncclFuncAllReduce}};
+  for (const auto& c : cases) {
+    AlgoInfoComm cc;
+    cc.get()->nRanks = c.nRanks;
+    ncclTuner_t tuner{};
+    AttachZeroTuner(cc.get(), &tuner);
+    ScriptCellTime(NCCL_ALGO_RING, NCCL_PROTO_SIMPLE, kChosenModelUs, kOtherModelUs);
+    g_topoGetAlgoTimeCalls = 0;
+    ncclTaskColl task = CostTask(c.func);
+    task.count = 1024;
+    ncclSimInfo_t sim = NCCL_SIM_INFO_INITIALIZER;
+
+    ASSERT_EQ(ncclSuccess, getAlgoInfo(cc.get(), &task, 0, 0, 1, &sim)) << c.func;
+    EXPECT_EQ(0, g_topoGetAlgoTimeCalls) << c.func;
+    EXPECT_FLOAT_EQ(0.0f, sim.estimatedTime) << c.func;
+  }
+}
+
+TEST_F(EnqueueMicrotest, GetAlgoInfo_SingleRankZeroCost_StaysZeroWithoutATuner) {
+  // nRanks == 1 writes RING/SIMPLE = 0 and never asks the cost model. That 0 is
+  // a real cost, and there is no tuner sentinel to replace.
+  AlgoInfoComm cc;
+  cc.get()->nRanks = 1;
+  ScriptCellTime(NCCL_ALGO_RING, NCCL_PROTO_SIMPLE, kChosenModelUs, kOtherModelUs);
+  ncclTaskColl task = CostTask(ncclFuncAllReduce);
+  task.count = 1024;
+  ncclSimInfo_t sim = NCCL_SIM_INFO_INITIALIZER;
+
+  ASSERT_EQ(ncclSuccess, getAlgoInfo(cc.get(), &task, 0, 0, 1, &sim));
+  EXPECT_EQ(0, g_topoGetAlgoTimeCalls) << "the single-rank short circuit must not query the model";
+  EXPECT_EQ(NCCL_ALGO_RING, task.algorithm);
+  EXPECT_EQ(NCCL_PROTO_SIMPLE, task.protocol);
+  EXPECT_FLOAT_EQ(0.0f, sim.estimatedTime);
+}
+
+TEST_F(EnqueueMicrotest, PrepareTasks_DirectAllGather_ReportsCostModelTime) {
+  DirectAllGatherScene scene;
+  constexpr size_t count = 1024;
+  scene.enqueue(ncclFuncAllGather, count);
+  // getAlgoInfo costs count * nRanks for AllGather. A wrong func or count must
+  // not still report this time.
+  const size_t nBytes =
+    ncclTypeSize(ncclFloat32) * ncclFuncMaxSendRecvCount(ncclFuncAllGather, scene.cc.get()->nRanks, count);
+  g_topoGetAlgoTime = [=](struct ncclComm*, int coll, int, int, size_t bytes, int, float* time) {
+    if (time) *time = (coll == ncclFuncAllGather && bytes == nBytes) ? kChosenModelUs : NCCL_ALGO_PROTO_IGNORE;
+    return ncclSuccess;
+  };
+  ncclSimInfo_t sim = NCCL_SIM_INFO_INITIALIZER;
+
+  ASSERT_EQ(ncclSuccess, scene.run(&sim));
+  EXPECT_FLOAT_EQ(kChosenModelUs, sim.estimatedTime)
+      << "a direct AllGather never creates a collective task; the simulation still has to cost it";
+}
+
+TEST_F(EnqueueMicrotest, PrepareTasks_DirectAllGather_LeavesANonNegativeEstimate) {
+  // A collective earlier in the group would already have stored a time, including
+  // a literal 0. Direct AllGather must not overwrite either.
+  for (float already : {0.0f, 7.0f}) {
+    DirectAllGatherScene scene;
+    scene.enqueue(ncclFuncAllGather, 1024);
+    ScriptCellTime(NCCL_ALGO_TREE, NCCL_PROTO_LL, kChosenModelUs, kChosenModelUs);
+    ncclSimInfo_t sim = NCCL_SIM_INFO_INITIALIZER;
+    sim.estimatedTime = already;
+
+    ASSERT_EQ(ncclSuccess, scene.run(&sim)) << already;
+    EXPECT_FLOAT_EQ(already, sim.estimatedTime) << already;
+  }
+}
+
+TEST_F(EnqueueMicrotest, PrepareTasks_NonAllGatherSend_LeavesEstimateUnset) {
+  DirectAllGatherScene scene;
+  scene.enqueue(ncclFuncReduceScatter, 1024);
+  ScriptCellTime(NCCL_ALGO_TREE, NCCL_PROTO_LL, kChosenModelUs, kChosenModelUs);
+  ncclSimInfo_t sim = NCCL_SIM_INFO_INITIALIZER;
+
+  ASSERT_EQ(ncclSuccess, scene.run(&sim));
+  EXPECT_FLOAT_EQ(NCCL_UNDEF_FLOAT, sim.estimatedTime);
+}
+
+TEST_F(EnqueueMicrotest, PrepareTasks_ZeroCountAllGather_LeavesEstimateUnset) {
+  DirectAllGatherScene scene;
+  scene.enqueue(ncclFuncAllGather, 0);
+  ScriptCellTime(NCCL_ALGO_TREE, NCCL_PROTO_LL, kChosenModelUs, kChosenModelUs);
+  ncclSimInfo_t sim = NCCL_SIM_INFO_INITIALIZER;
+
+  ASSERT_EQ(ncclSuccess, scene.run(&sim));
+  EXPECT_FLOAT_EQ(NCCL_UNDEF_FLOAT, sim.estimatedTime);
+}
+
+TEST_F(EnqueueMicrotest, PrepareTasks_NullSimInfo_Succeeds) {
+  // A real launch passes a null simulation. The direct-AllGather costing must not run.
+  DirectAllGatherScene scene;
+  scene.enqueue(ncclFuncAllGather, 1024);
+  ASSERT_EQ(ncclSuccess, scene.run(nullptr));
 }

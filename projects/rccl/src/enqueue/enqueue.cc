@@ -604,6 +604,34 @@ ncclResult_t ncclValidateCollConfigLaunchCompletionEvents(struct ncclComm* comm)
   return ncclSuccess;
 }
 
+// Direct AllGather is lowered to per-peer sends, so no collective task is costed and
+// ncclGroupSimulateEnd leaves estimatedTime at the initializer (-1). Estimate the
+// AllGather the caller issued. This runs only for a simulation, on a stack task
+// the planner does not launch, so the algorithm that actually runs stays Direct.
+static ncclResult_t rcclSimulateDirectAllGather(struct ncclComm* comm, ncclSimInfo_t* simInfo) {
+  if (simInfo == nullptr || simInfo->estimatedTime >= 0.0f) return ncclSuccess;
+  for (int peer = 0; peer < comm->nRanks; peer++) {
+    for (struct ncclTaskP2p* p2p = ncclIntruQueueHead(&comm->planner.peers[peer].sendQueue); p2p != nullptr;
+         p2p = p2p->next) {
+      if (p2p->collAPI != ncclFuncAllGather || p2p->count == 0) continue;
+      struct ncclTaskColl task = {};
+      task.func = ncclFuncAllGather;
+      task.sendbuff = p2p->buff;
+      task.count = p2p->count;
+      task.datatype = p2p->datatype;
+      task.opHost = ncclSum;
+      task.minCTAs = comm->config.minCTAs;
+      task.maxCTAs = comm->config.maxCTAs;
+      task.nvlsCTAs = comm->config.nvlsCTAs;
+      task.cgaClusterSize = comm->config.cgaClusterSize;
+      task.CTAPolicy = comm->config.CTAPolicy;
+      int nvlsSupport = ncclNvlsTransportEnabled(comm) ? 1 : 0;
+      return getAlgoInfo(comm, &task, /*collNetSupport=*/0, nvlsSupport, /*numPipeOps=*/1, simInfo);
+    }
+  }
+  return ncclSuccess;
+}
+
 // Called once per ncclGroup to organize the user submitted tasks in
 // comm->planner so that they can be peeled off into plans.
 ncclResult_t ncclPrepareTasks(struct ncclComm* comm, bool* algoNeedConnect, bool* needConnect, ncclSimInfo_t* simInfo) {
@@ -855,6 +883,7 @@ ncclResult_t ncclPrepareTasks(struct ncclComm* comm, bool* algoNeedConnect, bool
     }
   }
 
+  NCCLCHECK(rcclSimulateDirectAllGather(comm, simInfo));
   return ncclSuccess;
 }
 
@@ -3504,6 +3533,17 @@ rccl_static ncclResult_t getAlgoInfo(struct ncclComm* comm, struct ncclTaskColl*
     NCCLCHECK(comm->tuner->getCollInfo(comm->tunerContext, info->func, nBytes, numPipeOps, (float**)collCostTable,
                                        NCCL_NUM_ALGORITHMS, NCCL_NUM_PROTOCOLS, regBuff, &nMaxChannels));
     NCCLCHECK(topoGetAlgoInfo(comm, info, nBytes, (float**)collCostTable, simInfo));
+    // The CSV tuner forces its choice by writing 0 into that cost-table cell. The 0
+    // selects the algorithm; it is not the cost model's time. Report that time.
+    // updateCollCostTable also stores 0, and does not ask the model, for one rank
+    // and for any collective at or past NCCL_NUM_FUNCTIONS. The bandwidth tables
+    // have that many rows, so those 0s stay 0.
+    if (simInfo != nullptr && simInfo->estimatedTime == 0.0f && comm->nRanks > 1 &&
+        (int)info->func < NCCL_NUM_FUNCTIONS) {
+      float modelTime = NCCL_ALGO_PROTO_IGNORE;
+      NCCLCHECK(ncclTopoGetAlgoTime(comm, info->func, info->algorithm, info->protocol, nBytes, numPipeOps, &modelTime));
+      if (modelTime > 0.0f) simInfo->estimatedTime = modelTime;
+    }
   } else {
     NCCLCHECK(topoGetAlgoInfo(comm, info, nBytes, (float**)collCostTable, simInfo));
     // override algo, tree doesn't work with fewer than 64 bytes
