@@ -12,6 +12,7 @@ active API exported by `nccl_device_wrapper__impl.h` on real GPU hardware:
 | B1–B5 | `ncclCoopAnyInit{Thread,Warp,Lanes,WarpSpan,Cta}` + `ncclCoopSize/ThreadRank/NumThreads` |
 | B6 | `ncclCoopSync` (all five coop types) |
 | B7 | `ncclLsaBarrierSession_C` structural check (runtime calls skipped) |
+| D | typed ReduceCopy thunks: exactly the `util.h` op/type set exported (D0, no GPU needed); `ncclLocalReduceSumCopy_{I8,F32,BF16}` run (D1, `IR_reduce_copy_test.cpp`) |
 
 Unlike the rest of `rccl-UnitTests`, this test cannot be built by the default
 RCCL CMake invocation: it links `librccl_device.bc` into the AMDGPU device-side
@@ -45,6 +46,9 @@ If you prefer, configuring with `-DEMIT_LLVM_IR=ON -DBITCODE_LIB_ARCH=gfx942`
 and building the `llvm_ir` target pre-produces the bitcode, and the harness
 will reuse it. GoogleTest is taken from `GTEST_ROOT` (the RCCL build installs
 it under `build/release/gtest`, or point at a system install such as `/usr`).
+The ROCm LLVM tools (`clang++`, `opt`, `llvm-dis`, `llvm-as`) are taken from
+`$ROCM_PATH/llvm/bin`, `$ROCM_PATH/lib/llvm/bin` or the directory
+`$ROCM_PATH/bin/amdclang++` resolves into.
 
 ## Configuration (environment variables)
 
@@ -74,6 +78,10 @@ pytest -v -m lsa_barrier
 ```
 
 Build and per-test logs are written to `logs/`.
+
+`bash run_tests.sh [pytest args]` does the same without a prepared venv: it
+keeps a `gfx*` `ARCH` or else picks it from the GPU, finds GoogleTest and
+pytest, and exits 77 when nothing ran (e.g. `RCCL_BUILD=... bash run_tests.sh -m reduce_copy`).
 
 ## CI integration
 

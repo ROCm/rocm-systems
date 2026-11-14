@@ -21,7 +21,9 @@ symmetric-memory support), GoogleTest SKIPs and exits 0 — without this mapping
 those would misleadingly show as PASSED.
 """
 
+import os
 import re
+import subprocess
 
 import pytest
 
@@ -122,6 +124,106 @@ def test_composite_barrier_session(run_gtest):
     """[C2] composite ncclBarrierSession structural check (+ runtime skipped)."""
     proc, log = run_gtest("IRDeviceTest.C2*", "ir_composite_barrier.log")
     _summarize_gtest(proc, log, "ncclBarrierSession")
+
+
+@pytest.mark.ir_device
+@pytest.mark.reduce_copy
+def test_reduce_copy_typed_exports(ir_bitcode, paths):
+    """[D0] librccl_device.bc exports exactly the typed ReduceCopy thunks.
+
+    The op and type matrix is read from where the thunks are defined (util.h
+    type lists, expanded for HIP by the preprocessor, and the
+    NCCL_IR_DEFINE_API_* lines of nccl_device_wrapper__impl.h). The bitcode
+    checked here comes from the bindings/ir Makefile, so its public-API list
+    is covered by what the bitcode exports; the -DEMIT_LLVM_IR=ON bitcode is
+    covered by comparing the thunk list bindings/ir/CMakeLists.txt builds
+    with the same matrix.
+    """
+    ir_dir = os.path.join(paths.RCCL_DIR, "bindings", "ir")
+    types = subprocess.run(
+        [os.path.join(paths.LLVM_BIN, "clang++"), "-E", "-P", "-x", "c++",
+         "-D__HIP_PLATFORM_AMD__", "-I", ir_dir, "-"],
+        input='#include "util.h"\n#define NCCL_IR_TYPE_NAME(name, type) name\n'
+              "ALL NCCL_IR_TYPES(NCCL_IR_TYPE_NAME)\n"
+              "MULTIMEM NCCL_IR_MULTIMEM_TYPES(NCCL_IR_TYPE_NAME)\n",
+        stdout=subprocess.PIPE, universal_newlines=True, check=True).stdout
+    types = dict(line.split(None, 1) for line in types.splitlines() if line.strip())
+    types = {k: v.split() for k, v in types.items()}
+    with open(os.path.join(ir_dir, "nccl_device_wrapper__impl.h")) as fh:
+        ops = re.findall(r"^NCCL_IR_DEFINE_API_(ALL|MULTIMEM)_TYPES\((\w+)\)", fh.read(), re.M)
+    assert ops and types.get("ALL") and types.get("MULTIMEM"), (
+        f"could not read the ReduceCopy op/type matrix: ops={ops} types={types}")
+    expected = {f"{op}_{t}" for kind, op in ops for t in types[kind]}
+
+    ir = subprocess.run([os.path.join(paths.LLVM_BIN, "llvm-dis"), ir_bitcode, "-o", "-"],
+                        stdout=subprocess.PIPE, universal_newlines=True, check=True).stdout
+    exported = set(re.findall(r"^define (?!internal |private )[^@\n]*@(\w+)\(", ir, re.M))
+    thunk = re.compile(r"(?:%s)_[A-Z][A-Z0-9]*$" % "|".join(op for _, op in ops))
+    problems = []
+
+    def compare(where, have, only_thunks):
+        missing = sorted(expected - have)
+        unexpected = sorted(s for s in have - expected if not only_thunks or thunk.match(s))
+        if missing:
+            problems.append(f"{where}: {len(missing)} of {len(expected)} missing "
+                            f"({', '.join(missing[:6])})")
+        if unexpected:
+            problems.append(f"{where}: {len(unexpected)} not in the util.h / nccl_device_wrapper__impl.h matrix "
+                            f"({', '.join(unexpected[:6])})")
+
+    compare(f"exported from {ir_bitcode}", exported, only_thunks=True)
+
+    # CMake builds its own public-API list (foreach(_op ...) x foreach(_ty
+    # ${<types var>})); expand it the same way from the set() type lists.
+    with open(os.path.join(ir_dir, "CMakeLists.txt")) as fh:
+        cmake = fh.read()
+    cmake_types = {name: vals.split() for name, vals in
+                   re.findall(r"^\s*set\((RCCL_IR_\w+_TYPES)\s+([^)]*)\)", cmake, re.M)}
+    loops = re.findall(r"foreach\(_op\s+([^)]*)\)\s*foreach\(_ty\s+\$\{(\w+)\}\)", cmake)
+    assert loops and all(var in cmake_types for _, var in loops), (
+        f"could not read the ReduceCopy thunk list from bindings/ir/CMakeLists.txt: "
+        f"loops={loops} types={cmake_types}")
+    compare("bindings/ir/CMakeLists.txt public API",
+            {f"{op}_{t}" for op_list, var in loops
+             for op in op_list.split() for t in cmake_types[var]},
+            only_thunks=False)
+
+    assert not problems, "typed ReduceCopy thunks: " + "; ".join(problems)
+
+
+@pytest.mark.ir_device
+@pytest.mark.reduce_copy
+def test_reduce_copy_typed_local(run_gtest, paths, monkeypatch):
+    """[D1] ncclLocalReduceSumCopy_{I8,F32,BF16}: 3 sources -> 2 destinations."""
+    # D1 raises the stack limit (up to 64 KiB). HSA_NO_SCRATCH_RECLAIM=1 makes
+    # ROCr map that for every wave slot of the GPU, more than MI300X's scratch
+    # aperture holds; with reclaim it maps what this dispatch needs.
+    monkeypatch.setenv("HSA_NO_SCRATCH_RECLAIM", "0")
+    # Too small a stack can fault, return wrong sums or hang, so every failure
+    # names the stack limit the probe in IR_reduce_copy_test.cpp chose.
+    log = os.path.join(paths.LOGDIR, "ir_reduce_copy.log")
+    try:
+        proc, log = run_gtest("IRReduceCopyTest.*", "ir_reduce_copy.log")
+        timed_out = None
+    except subprocess.TimeoutExpired as e:
+        proc, timed_out = None, e
+    try:
+        with open(log) as fh:
+            out = fh.read()
+    except OSError:
+        out = ""
+    stack = re.search(r"\[IRReduceCopyTest\] (.*)", out)
+    stack = stack.group(1) if stack else "stack probe did not report"
+    if timed_out:
+        raise AssertionError(f"typed ReduceCopy thunks hung ({timed_out}) [{stack}]")
+    try:
+        _summarize_gtest(proc, log, "typed ReduceCopy thunks")
+    except AssertionError as e:
+        raise AssertionError(f"{e} [{stack}]") from None
+    # an empty filter match would also exit 0
+    for t in ("I8", "F32", "BF16"):
+        assert f"[       OK ] IRReduceCopyTest.D1_LocalReduceSumCopy_{t}" in out, (
+            f"D1 {t} did not run, see {log} [{stack}]")
 
 
 @pytest.mark.ir_device

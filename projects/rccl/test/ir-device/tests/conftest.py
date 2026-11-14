@@ -54,11 +54,31 @@ IR_OUTDIR = os.environ.get("IR_OUTDIR", os.path.join(WORKDIR, "ir_test_build"))
 
 IR_DIR = os.path.join(RCCL_DIR, "bindings", "ir")
 IR_TEST_SRC = os.path.join(IR_DIR, "test", "IR_test.cpp")
+# [D] typed ReduceCopy cases, linked into the same IR_test.exe.
+IR_REDUCE_COPY_SRC = os.path.join(_THIS_DIR, "..", "IR_reduce_copy_test.cpp")
 BITCODE = os.path.join(RCCL_BUILD, "lib", "librccl_device.bc")
 HIPIFY_INC = os.path.join(RCCL_BUILD, "hipify", "src", "include")
 GENERATED_INC = os.path.join(RCCL_BUILD, "include")
 AMDCLANGPP = os.path.join(ROCM_PATH, "bin", "amdclang++")
 TEST_EXE = os.path.join(IR_OUTDIR, "IR_test.exe")
+
+# ROCm LLVM tools for the bitcode build and its export check.
+LLVM_TOOLS = ("clang++", "opt", "llvm-dis", "llvm-as")
+
+
+def _find_llvm_bin():
+    """Return the first LLVM bin dir holding all LLVM_TOOLS, or None, trying
+    amdclang++'s own dir before $ROCM_PATH/llvm/bin and lib/llvm/bin."""
+    dirs = [os.path.dirname(os.path.realpath(AMDCLANGPP)),
+            os.path.join(ROCM_PATH, "llvm", "bin"),
+            os.path.join(ROCM_PATH, "lib", "llvm", "bin")]
+    for d in dirs:
+        if all(os.path.isfile(os.path.join(d, t)) for t in LLVM_TOOLS):
+            return os.path.normpath(d)
+    return None
+
+
+LLVM_BIN = _find_llvm_bin()
 
 # --- Multi-rank GIN/composite barrier functional test (separate MPI binary) ---
 # This one needs the host RCCL library + MPI in addition to the bitcode, so it
@@ -94,6 +114,50 @@ def _find_gtest_libdir():
     return None
 
 
+def _has_amd_gpu():
+    """Return True when ROCm can see an AMD GPU.
+
+    Asks rocm_agent_enumerator, which lists one gfx target per GPU agent plus
+    gfx000 for the CPU. Probing device nodes alone misses ROCm under WSL2,
+    which reaches the GPU through /dev/dxg rather than /dev/kfd or /dev/dri,
+    so the node check is only the fallback when the enumerator cannot run.
+    """
+    enumerator = os.path.join(ROCM_PATH, "bin", "rocm_agent_enumerator")
+    try:
+        proc = subprocess.run(
+            [enumerator], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+            universal_newlines=True, timeout=60,
+        )
+    except (OSError, subprocess.SubprocessError):
+        proc = None
+    if proc is not None and proc.returncode == 0:
+        return any(
+            line.strip().startswith("gfx") and line.strip() != "gfx000"
+            for line in proc.stdout.splitlines()
+        )
+    return any(os.path.exists(n) for n in ("/dev/kfd", "/dev/dri", "/dev/dxg"))
+
+
+def _missing_bitcode_prerequisite():
+    """Return a reason string if librccl_device.bc cannot be built here.
+
+    Only the LLVM tools and the hipify-staged headers: no GPU, GoogleTest or
+    amdclang++, so bitcode-only checks also run on a CPU-only build host.
+    """
+    if LLVM_BIN is None:
+        return (
+            f"ROCm LLVM tools ({' '.join(LLVM_TOOLS)}) not found under "
+            f"{ROCM_PATH}/llvm/bin, {ROCM_PATH}/lib/llvm/bin or beside "
+            "amdclang++ (install ROCm llvm tools for IR device tests)"
+        )
+    if not os.path.isdir(HIPIFY_INC):
+        return (
+            f"hipify staging dir not found at {HIPIFY_INC} "
+            "(build RCCL once so the staged nccl_device headers exist)"
+        )
+    return None
+
+
 def _missing_prerequisite():
     """Return a human-readable reason string if a prerequisite is missing.
 
@@ -106,22 +170,20 @@ def _missing_prerequisite():
         return f"IR_test.cpp not found at {IR_TEST_SRC}"
     if not os.path.isfile(AMDCLANGPP):
         return f"amdclang++ not found at {AMDCLANGPP} (set ROCM_PATH)"
-    llvm_dis = os.path.join(ROCM_PATH, "llvm", "bin", "llvm-dis")
-    if not os.path.isfile(llvm_dis):
-        return f"llvm-dis not found at {llvm_dis} (install ROCm llvm tools for IR device tests)"
-    if not os.path.isdir(HIPIFY_INC):
-        return (
-            f"hipify staging dir not found at {HIPIFY_INC} "
-            "(build RCCL once so the staged nccl_device headers exist)"
-        )
+    reason = _missing_bitcode_prerequisite()
+    if reason:
+        return reason
     gtest_inc = os.path.join(GTEST_ROOT, "include")
     if (
         not os.path.isfile(os.path.join(gtest_inc, "gtest", "gtest.h"))
         or _find_gtest_libdir() is None
     ):
         return f"GoogleTest not found under GTEST_ROOT={GTEST_ROOT}"
-    if not os.path.isdir("/dev/dri") and not os.path.exists("/dev/kfd"):
-        return "no AMD GPU device nodes (/dev/kfd, /dev/dri) present"
+    if not _has_amd_gpu():
+        return (
+            "no AMD GPU found (rocm_agent_enumerator lists no gfx agent, or "
+            "it is unavailable and /dev/kfd, /dev/dri, /dev/dxg are absent)"
+        )
     return None
 
 
@@ -140,6 +202,8 @@ def _build_bitcode():
         f"BITCODE_LIB_ARCH={ARCH}",
         f"BUILDDIR={RCCL_BUILD}",
         f"ROCM_PATH={ROCM_PATH}",
+        # The Makefile defaults to $(ROCM_PATH)/llvm, which not every ROCm has.
+        f"ROCM_LLVM={os.path.dirname(LLVM_BIN)}",
         "llvm_ir",
     ]
     build_log = os.path.join(LOGDIR, "ir_bitcode_build.log")
@@ -189,6 +253,7 @@ def _build_test_binary():
         f"-I{gtest_inc}",
         f"-I{os.path.join(ROCM_PATH, 'include')}",
         IR_TEST_SRC,
+        IR_REDUCE_COPY_SRC,
         "-Xoffload-linker", BITCODE,
         "-Xoffload-linker", "-plugin-opt=-amdgpu-internalize-symbols=false",
         f"-L{os.path.join(ROCM_PATH, 'lib')}", "-lamdhip64",
@@ -224,7 +289,7 @@ def _find_rccl_libdir():
 def _missing_mpi_prerequisite():
     """Reason string if the MPI GIN functional test cannot be built/run.
 
-    Builds on _missing_prerequisite() (hipcc / hipify / gtest / GPU nodes) and
+    Builds on _missing_prerequisite() (hipcc / hipify / gtest / GPU) and
     adds the host-library + MPI requirements unique to the multi-rank test. The
     GIN-runtime gates (>=2 GPUs, IB GIN, NCCL_GIN_TYPE/CUMEM/INTRANET env) are
     enforced inside the test itself via GTEST_SKIP, so they are not duplicated
@@ -361,15 +426,14 @@ def run_gin_mpi_gtest(ir_gin_mpi_binary):
 
 
 @pytest.fixture(scope="session")
-def ir_test_binary():
-    """Update the bitcode, then compile IR_test.cpp against it once.
+def ir_bitcode():
+    """Update librccl_device.bc once and return its path.
 
-    Skips the entire suite if prerequisites are missing. Returns the path to
-    the compiled GoogleTest executable.
+    Needs no GPU, so bitcode-only tests (D0) do not skip on a build host.
     """
-    reason = _missing_prerequisite()
+    reason = _missing_bitcode_prerequisite()
     if reason:
-        pytest.skip(f"IR device tests skipped: {reason}")
+        pytest.skip(f"IR bitcode tests skipped: {reason}")
 
     # Always invoke make so dependency timestamps decide whether the artifact
     # is current. Merely checking that BITCODE exists can reuse an artifact
@@ -378,6 +442,22 @@ def ir_test_binary():
     logger.info("Updating librccl_device.bc at %s (arch=%s)...", BITCODE, ARCH)
     bc_log = _build_bitcode()
     logger.info("librccl_device.bc READY at %s (log: %s)", BITCODE, bc_log)
+    return BITCODE
+
+
+@pytest.fixture(scope="session")
+def ir_test_binary(request):
+    """Update the bitcode, then compile IR_test.cpp against it once.
+
+    Skips the entire suite if prerequisites are missing. Returns the path to
+    the compiled GoogleTest executable.
+    """
+    reason = _missing_prerequisite()
+    if reason:
+        pytest.skip(f"IR device tests skipped: {reason}")
+    # Requested only now, so a host that cannot run IR_test skips before
+    # spending a bitcode build on it.
+    request.getfixturevalue("ir_bitcode")
 
     logger.info(
         "Compiling IR_test.cpp -> %s (amdclang++ -O0, arch=%s)...", TEST_EXE, ARCH)
@@ -393,6 +473,7 @@ def paths():
         RCCL_DIR=RCCL_DIR,
         RCCL_BUILD=RCCL_BUILD,
         ROCM_PATH=ROCM_PATH,
+        LLVM_BIN=LLVM_BIN,
         ARCH=ARCH,
         GTEST_ROOT=GTEST_ROOT,
         IR_OUTDIR=IR_OUTDIR,
