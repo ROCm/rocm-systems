@@ -31,6 +31,8 @@ enum class type_identifier_t : std::uint32_t
     kfd_sample              = 0x000B,
     gpu_perf_counter_sample = 0x000C,
     hipfile_pmc_sample      = 0x000D,
+    counter_batch           = 0x000E,
+    gap_marker              = 0x000F,
     fragmented_space        = 0xFFFF
 };
 

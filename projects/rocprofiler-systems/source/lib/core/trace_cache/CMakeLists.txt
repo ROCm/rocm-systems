@@ -4,6 +4,7 @@
 set(trace_cache_sources
     ${CMAKE_CURRENT_LIST_DIR}/cache_manager.cpp
     ${CMAKE_CURRENT_LIST_DIR}/buffer_storage.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/collection_sink.cpp
     ${CMAKE_CURRENT_LIST_DIR}/data_types.cpp
     ${CMAKE_CURRENT_LIST_DIR}/discovery.cpp
     ${CMAKE_CURRENT_LIST_DIR}/metadata_registry.cpp
@@ -17,6 +18,9 @@ set(trace_cache_headers
     ${CMAKE_CURRENT_LIST_DIR}/archive.hpp
     ${CMAKE_CURRENT_LIST_DIR}/record_header.hpp
     ${CMAKE_CURRENT_LIST_DIR}/cache_manager.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/collection_sink.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/counter_samples.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/counter_schema_table.hpp
     ${CMAKE_CURRENT_LIST_DIR}/data_types.hpp
     ${CMAKE_CURRENT_LIST_DIR}/discovery.hpp
     ${CMAKE_CURRENT_LIST_DIR}/storage_parser.hpp

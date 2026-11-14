@@ -6,11 +6,14 @@
 #include "common/md5sum.hpp"
 #include "common/units/data_size.hpp"
 #include "core/agent_manager.hpp"
+#include "core/collection/schema.hpp"
 #include "core/common_types.hpp"
 #include "core/config.hpp"
 #include "core/demangler.hpp"
 #include "core/node_info.hpp"
 #include "core/output/output_summary.hpp"
+#include "core/trace_cache/cacheable.hpp"
+#include "core/trace_cache/counter_samples.hpp"
 #include "core/trace_cache/metadata_registry.hpp"
 #include "core/trace_cache/rocpd_helpers.hpp"
 #include "core/trace_cache/sample_type.hpp"
@@ -42,8 +45,10 @@
 #include <fmt/ranges.h>
 #include <memory>
 #include <optional>
+#include <set>
 #include <stdexcept>
 #include <string>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -89,6 +94,69 @@ generate_db_output_path(int pid)
     return rocprofsys::get_database_absolute_path(db_name, tag);
 }
 
+info::pmc
+make_counter_pmc_info(const collection::schema&      description,
+                      const collection::column_spec& column)
+{
+    return { .type             = description.agent,
+             .agent_type_index = description.device,
+             .target_arch      = description.target_arch,
+             .event_code       = 0,
+             .instance_id      = 0,
+             .name             = column.pmc_name,
+             .symbol           = column.symbol,
+             .description      = column.description,
+             .long_description = {},
+             .component        = {},
+             .units            = column.unit,
+             .value_type       = k_absolute,
+             .block            = column.block,
+             .expression       = column.expression,
+             .is_constant      = column.is_constant ? 1U : 0U,
+             .is_derived       = column.is_derived ? 1U : 0U,
+             .extdata          = "{}" };
+}
+
+// Appends the counter-schema PMCs the registry does not have; registry order is kept.
+std::vector<info::pmc>
+merge_counter_pmc_infos(std::vector<info::pmc>                 pmc_infos,
+                        const std::vector<collection::schema>& schemas)
+{
+    std::unordered_set<info::pmc, info::pmc_info_hash, info::pmc_info_equal> known{
+        pmc_infos.begin(), pmc_infos.end()
+    };
+    const auto add_if_new = [&known, &pmc_infos](info::pmc pmc_info) {
+        if(known.insert(pmc_info).second)
+        {
+            pmc_infos.push_back(std::move(pmc_info));
+        }
+    };
+    for(const auto& description : schemas)
+    {
+        for(const auto& column : description.columns)
+        {
+            add_if_new(make_counter_pmc_info(description, column));
+        }
+    }
+    return pmc_infos;
+}
+
+std::set<info::track, info::track_less>
+merge_counter_tracks(const std::vector<info::track>&        tracks,
+                     const std::vector<collection::schema>& schemas)
+{
+    std::set<info::track, info::track_less> merged{ tracks.begin(), tracks.end() };
+    for(const auto& description : schemas)
+    {
+        for(const auto& column : description.columns)
+        {
+            merged.insert(info::track{ .track_name = column.rocpd_track_name,
+                                       .thread_id  = std::nullopt,
+                                       .extdata    = "{}" });
+        }
+    }
+    return merged;
+}
 }  // namespace
 
 namespace detail
@@ -982,6 +1050,96 @@ rocpd_processor_t::handle([[maybe_unused]] const cpu_pmc_sample& cpu_pmc_smpl)
 }
 
 void
+rocpd_processor_t::handle(const counter_batch& batch)
+{
+    m_counters.for_each_value(batch, [this, &batch](counter_slot& slot, double value) {
+        if(slot.skip)
+        {
+            return;
+        }
+        insert_counter_value(slot, batch.timestamp, value);
+        slot.had_value = true;
+    });
+}
+
+void
+rocpd_processor_t::handle(const gap_marker& gap)
+{
+    // columns that never had a value get no zero
+    m_counters.for_each_slot([this, &gap](const counter_slot& slot) {
+        if(!slot.skip && slot.had_value)
+        {
+            insert_counter_value(slot, gap.begin_ns, 0.0);
+        }
+    });
+}
+
+void
+rocpd_processor_t::insert_counter_value(const counter_slot& slot, std::uint64_t timestamp,
+                                        double value)
+{
+    profiler_hub::writer_types::pmc_event_data_t pmc_data;
+    pmc_data.event            = make_event(0, 0, 0, slot.category);
+    pmc_data.value            = value;
+    pmc_data.sample.timestamp = timestamp;
+    pmc_data.sample.track     = slot.track;
+    try_insert_pmc_event(pmc_data, slot.uid, "Counter sample");
+}
+
+void
+rocpd_processor_t::build_counter_slots()
+{
+    const auto process_id = m_metadata->get_process_info().pid;
+    m_counters.build(m_metadata->get_counter_schemas(),
+                     [this, process_id](const collection::schema&      description,
+                                        const collection::column_spec& column) {
+                         return make_counter_slot(description, column, process_id);
+                     });
+}
+
+rocpd_processor_t::counter_slot
+rocpd_processor_t::make_counter_slot(
+    const collection::schema& description, const collection::column_spec& column,
+    profiler_hub::writer_types::process_id_t process_id) const
+{
+    const agent* pmc_agent = nullptr;
+    try
+    {
+        pmc_agent = &find_pmc_agent(description.agent, description.device);
+    } catch(const std::out_of_range& error)
+    {
+        if(&column == &description.columns.front())
+        {
+            LOG_WARNING(
+                "Counter schema skipped: no agent for agent_type_index={}, type={}: {}",
+                description.device, to_string(description.agent), error.what());
+        }
+        return counter_slot{ .uid = {}, .track = {}, .skip = true };
+    }
+
+    counter_slot slot;
+    slot.uid.name         = column.pmc_name;
+    slot.uid.agent_id     = make_agent_uid(*pmc_agent);
+    slot.track.name       = column.rocpd_track_name;
+    slot.track.node_id    = node_info::get_instance().id;
+    slot.track.process_id = process_id;
+    slot.category         = description.event_category.c_str();
+    return slot;
+}
+
+const agent&
+rocpd_processor_t::find_pmc_agent(agent_type type, std::size_t index) const
+{
+    try
+    {
+        return m_agent_manager->get_agent_by_type_index(index, type);
+    } catch(const std::out_of_range&)
+    {
+        return m_agent_manager->get_agent_by_id(index, type);
+    }
+}
+
+void
 rocpd_processor_t::handle(const kfd_sample& kfd)
 {
     auto const& n_info       = node_info::get_instance();
@@ -1114,6 +1272,7 @@ rocpd_processor_t::prepare_for_processing()
 {
     LOG_DEBUG("Preparing rocpd processor for processing");
     post_process_metadata();
+    build_counter_slots();
     LOG_TRACE("Rocpd processor prepared for processing");
 }
 
@@ -1251,17 +1410,9 @@ rocpd_processor_t::post_process_metadata()
         m_writer->register_thread_info(thread_info);
     }
 
-    // Register tracks
-    auto const track_info_list = m_metadata->get_track_info_list();
-    for(auto const& track : track_info_list)
-    {
-        profiler_hub::writer_types::track_info_t track_info;
-        track_info.name       = track.track_name;
-        track_info.node_id    = n_info.id;
-        track_info.process_id = process_info.pid;
-        track_info.thread_id  = track.thread_id;
-        m_writer->register_track_info(track_info);
-    }
+    // Tracks and PMC info of the counter schemas are registered with the registry ones
+    auto const counter_schemas = m_metadata->get_counter_schemas();
+    register_tracks(counter_schemas, process_info.pid);
 
     // Register code objects
     auto const code_object_list = m_metadata->get_code_object_list();
@@ -1345,33 +1496,51 @@ rocpd_processor_t::post_process_metadata()
         m_writer->register_stream_info(str_info);
     }
 
-    // Register PMC info
-    auto const pmc_info_list = m_metadata->get_pmc_info_list();
+    register_pmc_infos(counter_schemas, process_info.pid);
+}
+
+void
+rocpd_processor_t::register_tracks(const std::vector<collection::schema>& counter_schemas,
+                                   profiler_hub::writer_types::process_id_t process_id)
+{
+    const auto node_id = node_info::get_instance().id;
+    auto const track_info_list =
+        merge_counter_tracks(m_metadata->get_track_info_list(), counter_schemas);
+    for(auto const& track : track_info_list)
+    {
+        profiler_hub::writer_types::track_info_t track_info;
+        track_info.name       = track.track_name;
+        track_info.node_id    = node_id;
+        track_info.process_id = process_id;
+        track_info.thread_id  = track.thread_id;
+        m_writer->register_track_info(track_info);
+    }
+}
+
+void
+rocpd_processor_t::register_pmc_infos(
+    const std::vector<collection::schema>&   counter_schemas,
+    profiler_hub::writer_types::process_id_t process_id)
+{
+    const auto node_id = node_info::get_instance().id;
+    auto const pmc_info_list =
+        merge_counter_pmc_infos(m_metadata->get_pmc_info_list(), counter_schemas);
     for(const auto& pmc_info : pmc_info_list)
     {
-        const agent* pmc_agent_ptr = nullptr;
+        const agent* pmc_agent = nullptr;
         try
         {
-            pmc_agent_ptr = &m_agent_manager->get_agent_by_type_index(
-                pmc_info.agent_type_index, pmc_info.type);
-        } catch(const std::out_of_range&)
+            pmc_agent = &find_pmc_agent(pmc_info.type, pmc_info.agent_type_index);
+        } catch(const std::out_of_range& error)
         {
-            try
-            {
-                pmc_agent_ptr = &m_agent_manager->get_agent_by_id(
-                    pmc_info.agent_type_index, pmc_info.type);
-            } catch(const std::out_of_range& e)
-            {
-                LOG_WARNING("PMC info registration skipped: agent lookup failed for "
-                            "agent_type_index={}, type={}: {}",
-                            pmc_info.agent_type_index, to_string(pmc_info.type),
-                            e.what());
-                continue;
-            }
+            LOG_WARNING("PMC info registration skipped: agent lookup failed for "
+                        "agent_type_index={}, type={}: {}",
+                        pmc_info.agent_type_index, to_string(pmc_info.type),
+                        error.what());
+            continue;
         }
 
-        const auto& pmc_agent     = *pmc_agent_ptr;
-        auto        pmc_agent_uid = make_agent_uid(pmc_agent);
+        auto pmc_agent_uid = make_agent_uid(*pmc_agent);
 
         LOG_TRACE("Inserting PMC description: agent_uid: {}, pmc_info: {}",
                   pmc_agent_uid.type_index, pmc_info.name);
@@ -1402,8 +1571,8 @@ rocpd_processor_t::post_process_metadata()
         pmc_info_data.expression       = pmc_info.expression;
         pmc_info_data.is_constant      = pmc_info.is_constant;
         pmc_info_data.is_derived       = pmc_info.is_derived;
-        pmc_info_data.node_id          = n_info.id;
-        pmc_info_data.process_id       = process_info.pid;
+        pmc_info_data.node_id          = node_id;
+        pmc_info_data.process_id       = process_id;
         m_writer->register_pmc_info(pmc_info_data);
     }
 }
