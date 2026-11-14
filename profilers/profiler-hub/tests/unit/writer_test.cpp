@@ -500,6 +500,7 @@ TEST_F(writer_test, register_pmc_info_is_readable_after_flush)
     ASSERT_EQ(pmc_infos.size(), 1);
     EXPECT_EQ(pmc_infos[0]->name, "occupancy");
     EXPECT_EQ(pmc_infos[0]->symbol, "occupancy_symbol");
+    EXPECT_EQ(pmc_infos[0]->target_arch, "");
 }
 
 TEST_F(writer_test, insert_pmc_event_data_does_not_throw)

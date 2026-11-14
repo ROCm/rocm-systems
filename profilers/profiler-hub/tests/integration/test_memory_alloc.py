@@ -1,0 +1,73 @@
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
+"""Validate memory-alloc writer data persisted to SQLite.
+
+The example binary writes one deterministic memory allocation. Python opens the
+generated DB and validates the rows and metadata relationships written by the
+writer API.
+"""
+
+from __future__ import annotations
+
+import pytest
+
+from profiler_hub_db import COMMON_METADATA_EXPECTED, EMPTY_EVENT_CONTEXT
+
+pytestmark = pytest.mark.timeout(120)
+
+# Values below are hand-transcribed from the record built by
+# examples/schema_v3/memory_alloc_writer.cpp (see its make_node/make_process/
+# make_thread/make_agent/make_queue/make_stream/make_alloc/make_env functions).
+# If that writer changes, update this dict to match.
+EXPECTED = {
+    "type": "ALLOC",
+    "level": "SCRATCH",
+    "start_timestamp": 1000000,
+    "end_timestamp": 1100000,
+    "address": 0,
+    "size": 8192,
+    "extdata": "{test data alloc}",
+    "thread_info.thread_id": 100,
+    "thread_info.name": "integration-thread",
+    "thread_info.start": 900000,
+    "thread_info.end": 1200000,
+    "agent_info.agent_type": "GPU",
+    "agent_info.absolute_index": 0,
+    "agent_info.logical_index": 0,
+    "agent_info.type_index": 0,
+    "agent_info.uuid": 42,
+    "agent_info.name": "integration-gpu",
+    "agent_info.model_name": "gfx-integration",
+    "agent_info.vendor_name": "AMD",
+    "agent_info.product_name": "Integration GPU",
+    "agent_info.user_name": "gpu0",
+    "agent_info.node_info.node_id": 1,
+    "agent_info.process_info.pid": 1000,
+    "queue_info.db_id": 0,
+    "queue_info.name": "integration-queue",
+    "queue_info.node_info.node_id": 1,
+    "queue_info.process_info.pid": 1000,
+    "stream_info.db_id": 0,
+    "stream_info.name": "integration-stream",
+    "stream_info.node_info.node_id": 1,
+    "stream_info.process_info.pid": 1000,
+    "event.stack_id": 1,
+    "event.parent_stack_id": 0,
+    "event.correlation_id": 1,
+    "event.event_category": "SCRATCH_MEMORY",
+    "event.extdata": "{test data event}",
+    **EMPTY_EVENT_CONTEXT,
+    **COMMON_METADATA_EXPECTED,
+}
+
+
+@pytest.fixture(scope="module")
+def read_info(read_example_db):
+    return read_example_db(
+        "memory_alloc_writer", "read_memory_alloc_info", "memory_alloc.db"
+    )
+
+
+def test_memory_alloc_db_matches_writer_fixture(read_info):
+    assert read_info == EXPECTED
