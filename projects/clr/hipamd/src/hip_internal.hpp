@@ -273,7 +273,8 @@ HIP_PUBLIC_API void __hipOnError(const void *err_info);
 // Helper: invalidate all capturing streams on the current device and return an error.
 // Invalidation is device-scoped, not thread-scoped or mode-scoped. A sync API invalidates
 // all captures on the same device, regardless of which thread they belong to or what
-// capture mode they use.
+// capture mode they use. Non-blocking streams are skipped because legacy stream sync APIs
+// have no implicit dependency on them (SWDEV-612450).
 #define INVALIDATE_DEVICE_CAPTURING_AND_RETURN(err)                                                \
   {                                                                                                \
     int _devId = hip::ihipGetDevice();                                                             \
@@ -282,6 +283,9 @@ HIP_PUBLIC_API void __hipOnError(const void *err_info);
       amd::ScopedLock lock(g_streamSetLock);                                                      \
       for (auto* _s : g_allCapturingStreams) {                                                    \
         if (_s->DeviceId() == _devId) {                                                           \
+          if (_s->Flags() & hipStreamNonBlocking) {                                                \
+            continue;                                                                              \
+          }                                                                                        \
           _s->InvalidateCapture();                                                                 \
           _found = true;                                                                           \
         }                                                                                          \
