@@ -842,25 +842,10 @@ __device__ void IPCContext::internal_broadcast_wave(T *dst, const T *src, int ne
 template <typename T>
 __device__ void IPCContext::broadcast_wg(rocshmem_team_t team, T *dst,
                                       const T *src, int nelems, int pe_root) {
-#if defined(USE_SDMA)
-  if (sizeof(T) * nelems < 512 || constmem.ipc_sdma_threshold != SDMA_THRESHOLD_DISABLED)
-#else
-  if (sizeof(T) * nelems < 512)
-#endif
-    broadcastmem_linear_thread_puts_wg(team, dst, src, nelems * sizeof(T), pe_root);
-  else {
-    IPCTeam *team_obj = reinterpret_cast<IPCTeam *>(team);
-
-    int stride = team_obj->tinfo_wrt_world->stride;
-    int pe_start = team_obj->tinfo_wrt_world->pe_start;
-    int pe_size = team_obj->tinfo_wrt_world->size;
-    long *p_sync = team_obj->bcast_pSync;
-
-    // Passed pe_root is relative to team, convert to world root
-    int pe_root_world = team_obj->get_pe_in_world(pe_root);
-    internal_broadcastmem_wg(dst, src, nelems * sizeof(T), pe_root_world, pe_start, stride,
-                 pe_size, p_sync);
-  }
+  // Route through the generic dispatcher so this path exercises the new
+  // thread-puts fast path (and its size/SDMA gating) instead of
+  // reimplementing it here.
+  broadcastmem_wg(team, dst, src, nelems * sizeof(T), pe_root);
 }
 
 template <typename T>
@@ -967,14 +952,10 @@ __device__ void IPCContext::alltoallv([[maybe_unused]] rocshmem_team_t team,
 template <typename T>
 __device__ void IPCContext::fcollect_wg(rocshmem_team_t team, T *dst,
                                      const T *src, int nelems) {
-#if defined(USE_SDMA)
-  if (sizeof(T) * nelems < 512 || constmem.ipc_sdma_threshold != SDMA_THRESHOLD_DISABLED)
-#else
-  if (sizeof(T) * nelems < 512)
-#endif
-    fcollectmem_linear_thread_puts_wg(team, dst, src, nelems * sizeof(T));
-  else
-    fcollectmem_linear_wg(team, dst, src, nelems * sizeof(T));
+  // Route through the generic dispatcher so this path exercises the new
+  // thread-puts fast path (and its size/SDMA gating) instead of
+  // reimplementing it here.
+  fcollectmem_wg(team, dst, src, nelems * sizeof(T));
 }
 
 template <typename T>
