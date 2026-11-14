@@ -67,9 +67,15 @@ ncclResult_t ncclAllReduceDdaFabricLL(const void* sendbuff, void* recvbuff, size
 bool ncclAllReduceDdaFabricLL128Eligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
                                          ncclDataType_t datatype, ncclRedOp_t op);
 
+// Whether the LL128 peer-split takes the message. *bound is the grid under `cap` of the launch it replaces, else `cap`.
+bool ncclAllReduceDdaFabricLL128SplitEligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
+                                              ncclDataType_t datatype, ncclRedOp_t op, rcclDdaLaunchCap cap,
+                                              bool vmmFirst, rcclDdaLaunchCap* bound);
+
+// `split` runs the peer-split two-shot within `cap`, the bound ncclAllReduceDdaFabricLL128SplitEligible gave.
 ncclResult_t ncclAllReduceDdaFabricLL128(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
-                                         ncclRedOp_t op, ncclComm* comm, cudaStream_t stream,
-                                         rcclDdaLaunchCap cap = {});
+                                         ncclRedOp_t op, ncclComm* comm, cudaStream_t stream, rcclDdaLaunchCap cap = {},
+                                         bool split = false);
 
 // Total CTAs (grid blocks) each DDA allreduce launcher would use for the given
 // operands. Mirrors the launch grid math so reporting reflects real occupancy.
@@ -78,6 +84,9 @@ uint32_t ncclAllReduceDdaFabricBlocks(ncclComm* comm, size_t count, ncclDataType
 uint32_t ncclAllReduceDdaFabricLLBlocks(ncclComm* comm, size_t count, ncclDataType_t datatype,
                                         rcclDdaLaunchCap cap = {});
 uint32_t ncclAllReduceDdaFabricLL128Blocks(ncclComm* comm, size_t count, ncclDataType_t datatype,
-                                           rcclDdaLaunchCap cap = {});
+                                           rcclDdaLaunchCap cap = {}, bool split = false);
+// Blocks and threads per block of the ncclAllReduceDdaFabric launch.
+rcclDdaLaunchCap ncclAllReduceDdaFabricGrid(ncclComm* comm, size_t count, ncclDataType_t datatype,
+                                            rcclDdaLaunchCap cap = {});
 
 #endif

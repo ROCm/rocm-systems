@@ -473,9 +473,8 @@ TEST_F(DdaMPI_AllReduce, LL128TwoShotMultiRank)
     runAllReduce(count, kLL128TwoShotLogNeedle, "DdaMPI_AllReduce/LL128TwoShotMultiRank");
 }
 
-// RCCL_DDA_LL128_ASYNC_WIRE=1 gives LL128 two-shot shards from 2 MiB the LDS-staged writer. Same thresholds as
-// LL128TwoShotMultiRank, so it needs its own process. Integer sums are exact in any fold order, hence bit for bit what
-// the cooperative writer returns; the COLL log names the writer of each launch.
+// RCCL_DDA_LL128_ASYNC_WIRE=1: staged writer for 2 MiB+ shards on two ranks, peer-split from three; own process.
+// Integer sums are exact in any fold order, so bit for bit the cooperative writer's; the COLL log names each writer.
 TEST_F(DdaMPI_AllReduce, LL128StagedWireTwoShotMultiRank)
 {
     if(!validateTestPrerequisites(kMinProcessesForMPI))
@@ -549,8 +548,15 @@ TEST_F(DdaMPI_AllReduce, LL128StagedWireTwoShotMultiRank)
     }
 
     EXPECT_TRUE(logContainsNeedle(kLL128TwoShotLogNeedle)) << "Rank " << rank << ": no LL128 two-shot launch";
-    EXPECT_TRUE(logContainsNeedle("wire=0 lds=0")) << "Rank " << rank << ": 1 MiB shards left the cooperative writer";
-    EXPECT_TRUE(logContainsNeedle("wire=1 lds=")) << "Rank " << rank << ": 2 MiB shards missed the staged writer";
+    if(nRanks > 2)
+    {
+        EXPECT_GE(countLogNeedle("(peer-split"), 2u) << "Rank " << rank << ": a message missed the peer-split";
+    }
+    else
+    {
+        EXPECT_TRUE(logContainsNeedle("wire=0 lds=0")) << "Rank " << rank << ": 1 MiB shards left the coop writer";
+        EXPECT_TRUE(logContainsNeedle("wire=1 lds=")) << "Rank " << rank << ": 2 MiB shards missed the staged writer";
+    }
 }
 
 // Whatever backend the default selection picks for 256 KiB to 4 MiB, every rank must get the same bits back.

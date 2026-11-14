@@ -15,9 +15,11 @@
 #include <cstdint>
 #include <map>
 #include <string>
+#include <vector>
 
 #include "../common/DdaFabricTestHelpers.hpp"
 #include "algorithms/dda/DdaCollSeams.h"
+#include "algorithms/dda/dda_init_detail.h"
 
 #include DDA_ALL_REDUCE_FABRIC_LL_CC_PATH
 
@@ -211,6 +213,39 @@ class DdaAllReduceFabricLLMicrotest : public ::testing::Test {
       EXPECT_FALSE(Eligible(fn, 64)) << "missing resource " << missing;
     }
     mock_.setFabricResourcesPresent(true);
+  }
+
+  // The selector's question: whether the peer-split takes `count` elements, and the bound it runs within under `cap`.
+  bool TakesSplit(size_t count, ncclDataType_t datatype = ncclFloat32, rcclDdaLaunchCap cap = {}, bool vmmFirst = false,
+                  rcclDdaLaunchCap* bound = nullptr) {
+    rcclDdaLaunchCap unused = {};
+    return ncclAllReduceDdaFabricLL128SplitEligible(mock_.get(), kSendbuff, kRecvbuff, count, datatype, ncclSum, cap,
+                                                    vmmFirst, bound != nullptr ? bound : &unused);
+  }
+
+  // TakesSplit for a float message of `bytes`.
+  bool TakesSplitBytes(size_t bytes, bool vmmFirst = false) {
+    return TakesSplit(bytes / sizeof(float), ncclFloat32, {}, vmmFirst);
+  }
+
+  // The LL128 launch of the selector's decision: the peer-split within its bound where it takes the message.
+  const DdaLaunch& RunSelectedLL128(size_t count, ncclDataType_t datatype = ncclFloat32, rcclDdaLaunchCap cap = {},
+                                    bool vmmFirst = false) {
+    rcclDdaLaunchCap bound = {};
+    const bool split = TakesSplit(count, datatype, cap, vmmFirst, &bound);
+    g_ddaLaunches.clear();
+    EXPECT_EQ(ncclAllReduceDdaFabricLL128(kSendbuff, kRecvbuff, count, datatype, ncclSum, mock_.get(), kStream, bound,
+                                          split),
+              ncclSuccess);
+    return Only();
+  }
+
+  // The launch the split replaces: the LL, else the LL128, launcher with RCCL_DDA_LL128_ASYNC_WIRE=0 (no window).
+  DdaLaunch RunReplaced(bool ll, size_t count, rcclDdaLaunchCap cap = {}) {
+    params_["RCCL_DDA_LL128_ASYNC_WIRE"] = 0;
+    const DdaLaunch launch = ll ? RunOneLL(count, ncclFloat32, cap) : RunOneLL128(count, ncclFloat32, cap);
+    params_["RCCL_DDA_LL128_ASYNC_WIRE"] = 1;
+    return launch;
   }
 
   DdaFabricMockComm mock_;
@@ -826,21 +861,25 @@ const void* LL128TwoShotW() {
 constexpr int kAsync = dda::common::kDdaLL128WireAsync;
 constexpr size_t kMiB = 1024 * 1024;
 
-// RCCL_DDA_LL128_ASYNC_WIRE unset or 0: a gfx1250 wave32 comm keeps the cooperative writer and no LDS at every shard.
-TEST_F(DdaAllReduceFabricLLMicrotest, RunLL128_StagedWriterOffByDefault) {
+// RCCL_DDA_LL128_ASYNC_WIRE unset or 1: a gfx1250 wave32 comm takes the staged writer from a 2 MiB shard; 0 keeps coop.
+TEST_F(DdaAllReduceFabricLLMicrotest, RunLL128_StagedWriterOnByDefault) {
   comm().WarpSize = 32;
   for (const bool unset : {true, false}) {
     if (!unset) {
-      params_["RCCL_DDA_LL128_ASYNC_WIRE"] = 0;
+      params_["RCCL_DDA_LL128_ASYNC_WIRE"] = 1;
     }
     for (const size_t count : {16 * kMiB / 4, 32 * kMiB / 4}) {  // 8 ranks: 2 and 4 MiB shards, two-shot
       const DdaLaunch& launch = RunOneLL128(count);
-      EXPECT_EQ(launch.kernel, (LL128TwoShot<float, 8>())) << "unset " << unset << " count " << count;
-      EXPECT_EQ(launch.sharedMemBytes, 0u) << "unset " << unset << " count " << count;
+      EXPECT_EQ(launch.kernel, (LL128TwoShotW<float, 8, kAsync>())) << "unset " << unset << " count " << count;
+      EXPECT_EQ(launch.sharedMemBytes, launch.block.x / 32 * 2 * kSliceWire) << "unset " << unset << " count " << count;
     }
   }
-  params_["RCCL_DDA_LL128_ASYNC_WIRE"] = 1;
-  EXPECT_EQ(RunOneLL128(16 * kMiB / 4).kernel, (LL128TwoShotW<float, 8, kAsync>())) << "1 opts in";
+  params_["RCCL_DDA_LL128_ASYNC_WIRE"] = 0;
+  for (const size_t count : {16 * kMiB / 4, 32 * kMiB / 4}) {
+    const DdaLaunch& launch = RunOneLL128(count);
+    EXPECT_EQ(launch.kernel, (LL128TwoShot<float, 8>())) << "0 turns it off, count " << count;
+    EXPECT_EQ(launch.sharedMemBytes, 0u) << "0 turns it off, count " << count;
+  }
 }
 
 // With RCCL_DDA_LL128_ASYNC_WIRE=1, from a 2 MiB shard a gfx1250 wave32 comm takes the staged writer on the same grid.
@@ -906,6 +945,365 @@ TEST_F(DdaAllReduceFabricLLMicrotest, RunLL128_StagedKernelsPerRankCountAndDatat
   EXPECT_EQ(RunOneLL128(16 * kMiB / 2, ncclFloat16).kernel, (LL128TwoShotW<half, 8, kAsync>()));
   EXPECT_EQ(RunOneLL128(16 * kMiB, ncclFloat8e4m3).kernel, (LL128TwoShotW<dda::common::fp8e4m3, 8, kAsync>()));
   EXPECT_EQ(RunOneLL128(16 * kMiB, ncclFloat8e5m2).kernel, (LL128TwoShotW<dda::common::fp8e5m2, 8, kAsync>()));
+}
+
+// ---- Peer-split LL128 two-shot ----
+
+template <typename T>
+const void* LL128Split() {
+  return KernelPtr(&dda::common::ddaAllReduceTwoShotLL128Split<T>);
+}
+
+// Slices of one shard of a `bytes` message on nRanks.
+size_t ShardSlices(size_t bytes, int nRanks) {
+  return dda::common::ddaLL128Slices(bytes / (size_t)nRanks);
+}
+
+// The split's grid: within the replaced launch's blocks and the shard's slices, none past the units, else a warp each.
+void ExpectSplitGrid(const DdaLaunch& split, unsigned replacedBlocks, size_t bytes, int nRanks) {
+  const size_t slices = ShardSlices(bytes, nRanks);
+  const size_t units = slices * (size_t)(nRanks - 1);
+  const size_t warps = split.block.x / kDdaLL128Warp;
+  EXPECT_LE(split.grid.x, replacedBlocks) << "within the replaced launch's blocks";
+  EXPECT_LE(split.grid.x, slices) << "a block owns whole slices";
+  EXPECT_LT((split.grid.x - 1) * warps, units) << "a block past the units";
+  EXPECT_TRUE(split.grid.x == std::min<size_t>(replacedBlocks, slices) || split.grid.x * warps >= units)
+      << "fewer warps than units";
+}
+
+// The gfx1250 tables' tiers (LL128 to 256 MiB, LL to nRanks x 2 MiB) on wave32 with RCCL_DDA_LL128_ASYNC_WIRE=1.
+void SplitTiersOn(ncclComm& c, std::map<std::string, int64_t>& params) {
+  params["RCCL_DDA_LL128_ASYNC_WIRE"] = 1;
+  g_rcclDdaLL128Threshold = [](const ncclComm*, ncclFunc_t) { return 256 * kMiB; };
+  g_rcclDdaLLThreshold = [](const ncclComm* cm, ncclFunc_t) { return (size_t)cm->nRanks * 2 * kMiB; };
+  g_rcclDdaLLTwoShotThreshold = [](const ncclComm* cm) { return (size_t)cm->nRanks * 2 * kMiB; };
+  c.WarpSize = kDdaLL128Warp;
+}
+
+// From 2 MiB the split runs a warp per (slice, peer) unit within the LL two-shot's blocks; Blocks reports its grid.
+TEST_F(DdaAllReduceFabricLLMicrotest, RunLL128_PeerSplitTakesTheWindowWithinTheReplacedGrid) {
+  SplitTiersOn(comm(), params_);
+  const struct {
+    int nRanks;
+    size_t bytes;
+  } cells[] = {{4, 2 * kMiB}, {8, 2 * kMiB}, {8, 4 * kMiB}, {16, 2 * kMiB}, {16, 8 * kMiB}, {32, 16 * kMiB}};
+  for (const auto& c : cells) {
+    SCOPED_TRACE(testing::Message() << c.nRanks << "r " << c.bytes);
+    comm().nRanks = c.nRanks;
+    const size_t shard = c.bytes / c.nRanks;
+    const DdaLaunch replaced = RunReplaced(/*ll=*/true, c.bytes / 4);
+    ASSERT_EQ(replaced.block.x, kDdaArLLTwoShotThreads) << "the LL two-shot";
+    const DdaLaunch& l = RunSelectedLL128(c.bytes / 4);
+    EXPECT_EQ(l.kernel, LL128Split<float>());
+    EXPECT_EQ(l.block.x, kDdaArLL128Threads);
+    ExpectSplitGrid(l, replaced.grid.x, c.bytes, c.nRanks);
+    EXPECT_EQ(l.sharedMemBytes, dda::common::ddaLL128ArSplitSharedBytes(kDdaArLL128Threads, c.nRanks));
+    EXPECT_EQ(l.Arg<size_t>(3), shard) << "shard bytes";
+    EXPECT_EQ(l.Arg<size_t>(8), ShardSlices(c.bytes, c.nRanks)) << "shard slices";
+    rcclDdaLaunchCap bound = {};
+    ASSERT_TRUE(TakesSplit(c.bytes / 4, ncclFloat32, {}, /*vmmFirst=*/false, &bound));
+    EXPECT_EQ(ncclAllReduceDdaFabricLL128Blocks(mock_.get(), c.bytes / 4, ncclFloat32, bound, /*split=*/true),
+              l.grid.x);
+  }
+  comm().nRanks = 8;
+  EXPECT_EQ(RunSelectedLL128(2 * kMiB / 2, ncclBfloat16).kernel, (LL128Split<bf16>()));
+  EXPECT_EQ(RunSelectedLL128(2 * kMiB / 2, ncclFloat16).kernel, (LL128Split<half>()));
+  EXPECT_EQ(RunSelectedLL128(2 * kMiB, ncclFloat8e4m3).kernel, (LL128Split<dda::common::fp8e4m3>()));
+  EXPECT_EQ(RunSelectedLL128(2 * kMiB, ncclFloat8e5m2).kernel, (LL128Split<dda::common::fp8e5m2>()));
+}
+
+// The window: above two ranks, from 2 MiB with no shard cap, up to the LL128 cap and past a pinned LL128 one-shot.
+TEST_F(DdaAllReduceFabricLLMicrotest, Split_Window) {
+  SplitTiersOn(comm(), params_);
+  EXPECT_TRUE(TakesSplitBytes(2 * kMiB)) << "8r: the 2 MiB cutoff";
+  EXPECT_FALSE(TakesSplitBytes(2 * kMiB - 8 * 16)) << "8r just below 2 MiB";
+  EXPECT_TRUE(TakesSplitBytes(8 * kMiB)) << "8r 8 MiB: 1 MiB shard";
+  EXPECT_TRUE(TakesSplitBytes(64 * kMiB)) << "8r 64 MiB: 8 MiB shard, past the LL tier";
+  comm().nRanks = 4;
+  EXPECT_TRUE(TakesSplitBytes(4 * kMiB)) << "4r 4 MiB: 1 MiB shard";
+  comm().nRanks = 3;
+  EXPECT_TRUE(TakesSplitBytes(3 * kMiB)) << "3 ranks: two peers";
+  comm().nRanks = 2;
+  EXPECT_FALSE(TakesSplitBytes(3 * kMiB)) << "2 ranks: one peer";
+  comm().nRanks = 8;
+  comm().WarpSize = 2 * kDdaLL128Warp;
+  EXPECT_FALSE(TakesSplitBytes(2 * kMiB)) << "an LL128 warp must be one wave";
+  comm().WarpSize = kDdaLL128Warp;
+  comm().archName = const_cast<char*>("gfx1201");
+  EXPECT_FALSE(TakesSplitBytes(2 * kMiB)) << "no async LDS stores";
+  comm().archName = const_cast<char*>("gfx1250");
+  g_rcclDdaLL128Threshold = [](const ncclComm*, ncclFunc_t) { return 0; };
+  EXPECT_FALSE(TakesSplitBytes(2 * kMiB)) << "LL128 tier off";
+  g_rcclDdaLL128Threshold = [](const ncclComm*, ncclFunc_t) { return 8 * kMiB; };
+  EXPECT_TRUE(TakesSplitBytes(8 * kMiB)) << "at the LL128 cap";
+  EXPECT_FALSE(TakesSplitBytes(8 * kMiB + 8 * 16)) << "past the LL128 cap";
+  g_rcclDdaArLL128OneShotPinnedByEnv = [] { return true; };
+  params_["RCCL_DDA_LL128_ONESHOT_THRESHOLD"] = 3 * kMiB;
+  EXPECT_FALSE(TakesSplitBytes(3 * kMiB)) << "the pinned LL128 one-shot's cap";
+  EXPECT_TRUE(Eligible(&ddaLL128ArOneShotEligible, 3 * kMiB / 4)) << "the pinned LL128 one-shot keeps it";
+  EXPECT_TRUE(TakesSplitBytes(3 * kMiB + 8 * 16)) << "past the pinned LL128 one-shot's cap";
+}
+
+// The split launch passes the two-shot's arguments: peers, buffers, shard bytes and slices, rank, epoch and bank.
+TEST_F(DdaAllReduceFabricLLMicrotest, RunLL128_PeerSplitPassesTheTwoShotsArguments) {
+  SplitTiersOn(comm(), params_);
+  const DdaLaunch& launch = RunSelectedLL128(2 * kMiB / 2, ncclBfloat16);
+  EXPECT_EQ(launch.kernel, (LL128Split<bf16>()));
+  EXPECT_EQ(launch.stopEvent, kStopEvent);
+  EXPECT_EQ(launch.sharedMemBytes, dda::common::ddaLL128ArSplitSharedBytes(launch.block.x, 8));
+  ASSERT_EQ(launch.args.size(), 11u);
+  EXPECT_EQ(launch.Arg<bf16**>(0), comm().ddaPeerPtrsDev);
+  EXPECT_EQ(launch.Arg<bf16*>(1), kRecvbuff);
+  EXPECT_EQ(launch.Arg<const bf16*>(2), kSendbuff);
+  EXPECT_EQ(launch.Arg<size_t>(3), 2 * kMiB / 8);
+  EXPECT_EQ(launch.Arg<int>(4), 5);
+  EXPECT_EQ(launch.Arg<int>(5), 8);
+  EXPECT_EQ(launch.Arg<uint32_t*>(6), comm().ddaLLEpochDev);
+  EXPECT_EQ(launch.Arg<int>(7), comm().ddaLLEpochLen);
+  EXPECT_EQ(launch.Arg<size_t>(8), ShardSlices(2 * kMiB, 8));
+  EXPECT_EQ(launch.Arg<size_t>(9), dda::common::ddaBankSize(comm().ddaScratchBytes));
+  EXPECT_EQ(launch.Arg<dda::common::DdaKernelParams>(10).flag, comm().abortFlagDev);
+}
+
+// The split's bound is the replaced launch's grid: the LL two-shot in the LL tier, else the LL128 one-shot or two-shot.
+TEST_F(DdaAllReduceFabricLLMicrotest, Split_BoundIsTheReplacedLaunchersGrid) {
+  SplitTiersOn(comm(), params_);
+  const size_t count = 2 * kMiB / 4;  // 8 ranks: 256 KiB shards
+  auto bound = [&] {
+    rcclDdaLaunchCap b = {};
+    EXPECT_TRUE(TakesSplit(count, ncclFloat32, {}, /*vmmFirst=*/false, &b));
+    return b;
+  };
+  auto expectSplitWithin = [&](const DdaLaunch& replaced, const char* tier) {
+    SCOPED_TRACE(tier);
+    EXPECT_EQ(bound().blocks, replaced.grid.x);
+    EXPECT_EQ(bound().threads, replaced.block.x);
+    const DdaLaunch& l = RunSelectedLL128(count);
+    EXPECT_EQ(l.kernel, (LL128Split<float>()));
+    ExpectSplitGrid(l, replaced.grid.x, 2 * kMiB, 8);
+  };
+  const DdaLaunch ll = RunReplaced(/*ll=*/true, count);
+  EXPECT_EQ(ll.kernel, (LLTwoShot<float, 8>()));
+  expectSplitWithin(ll, "LL two-shot");
+
+  g_rcclDdaLLThreshold = [](const ncclComm*, ncclFunc_t) { return kMiB; };
+  const DdaLaunch oneShot = RunReplaced(/*ll=*/false, count);
+  EXPECT_EQ(oneShot.kernel, (LL128OneShot<float, 8>())) << "LL tier short of the message";
+  expectSplitWithin(oneShot, "LL128 one-shot");
+  EXPECT_LT(RunSelectedLL128(count).grid.x, oneShot.grid.x) << "the units need fewer blocks than the one-shot's";
+
+  params_["RCCL_DDA_LL128_ONESHOT_THRESHOLD"] = kMiB;
+  const DdaLaunch twoShot = RunReplaced(/*ll=*/false, count);
+  EXPECT_EQ(twoShot.kernel, (LL128TwoShot<float, 8>()));
+  expectSplitWithin(twoShot, "LL128 two-shot");
+}
+
+// Past the LL tier the split replaces the LL128 two-shot and fills its grid.
+TEST_F(DdaAllReduceFabricLLMicrotest, Split_PastTheLLTierFillsTheLL128TwoShotGrid) {
+  SplitTiersOn(comm(), params_);
+  const size_t bytes = 64 * kMiB;  // 8 ranks: 8 MiB shards, past the 16 MiB LL tier
+  const DdaLaunch replaced = RunReplaced(/*ll=*/false, bytes / 4);
+  EXPECT_EQ(replaced.kernel, (LL128TwoShot<float, 8>()));
+  const DdaLaunch& l = RunSelectedLL128(bytes / 4);
+  EXPECT_EQ(l.kernel, (LL128Split<float>()));
+  EXPECT_EQ(l.grid.x, replaced.grid.x) << "units fill every replaced block";
+}
+
+// A block owns whole slices, so a bound with more blocks than the shard has slices launches one block per slice.
+TEST_F(DdaAllReduceFabricLLMicrotest, Split_NoMoreBlocksThanShardSlices) {
+  SplitTiersOn(comm(), params_);
+  const size_t count = 2 * kMiB / 4;
+  for (const int nRanks : {32, 64}) {
+    SCOPED_TRACE(testing::Message() << nRanks << "r 2 MiB");
+    comm().nRanks = nRanks;
+    const size_t slices = ShardSlices(2 * kMiB, nRanks);
+    const unsigned vmm = ncclAllReduceDdaFabricBlocks(mock_.get(), count, ncclFloat32);
+    ASSERT_GT(vmm, slices) << "the VMM grid the split replaces has more blocks than slices";
+    ASSERT_GT(slices * (nRanks - 1), slices * (kDdaArLL128Threads / kDdaLL128Warp)) << "and so do the units";
+    const DdaLaunch& l = RunSelectedLL128(count, ncclFloat32, {}, /*vmmFirst=*/true);
+    EXPECT_EQ(l.kernel, (LL128Split<float>()));
+    EXPECT_EQ(l.grid.x, slices);
+    ExpectSplitGrid(l, vmm, 2 * kMiB, nRanks);
+    rcclDdaLaunchCap bound = {};
+    ASSERT_TRUE(TakesSplit(count, ncclFloat32, {}, /*vmmFirst=*/true, &bound));
+    EXPECT_EQ(ncclAllReduceDdaFabricLL128Blocks(mock_.get(), count, ncclFloat32, bound, /*split=*/true), slices);
+  }
+}
+
+// The VMM-first window's sizes stay in the split's window, so the selector leaves them to the LL128 tier.
+TEST_F(DdaAllReduceFabricLLMicrotest, Split_TakesVmmFirstSizes) {
+  SplitTiersOn(comm(), params_);
+  comm().nRanks = 32;
+  EXPECT_TRUE(TakesSplitBytes(4 * kMiB, /*vmmFirst=*/true)) << "32r 4 MiB, a VMM-first size";
+  EXPECT_TRUE(TakesSplitBytes(16 * kMiB, /*vmmFirst=*/true));
+  EXPECT_FALSE(TakesSplitBytes(kMiB, /*vmmFirst=*/true)) << "below 2 MiB";
+  params_["RCCL_DDA_LL128_ASYNC_WIRE"] = 0;
+  EXPECT_FALSE(TakesSplitBytes(4 * kMiB, /*vmmFirst=*/true)) << "staged writer off: the VMM-first window keeps it";
+  params_["RCCL_DDA_LL128_ASYNC_WIRE"] = 1;
+  comm().WarpSize = 2 * kDdaLL128Warp;
+  EXPECT_FALSE(TakesSplitBytes(4 * kMiB, /*vmmFirst=*/true)) << "an LL128 warp must be one wave";
+}
+
+// Declining, the predicate leaves the bound at the cap, so the LL128 launch it leads to stays within the cap.
+TEST_F(DdaAllReduceFabricLLMicrotest, Split_DeclinedBoundIsTheCap) {
+  SplitTiersOn(comm(), params_);
+  const size_t count = kMiB / 4;  // 8 ranks, below the 2 MiB window
+  const rcclDdaLaunchCap cap = {3, 256};
+  const DdaLaunch uncapped = RunOneLL128(count);
+  ASSERT_TRUE(uncapped.grid.x > cap.blocks || uncapped.block.x > cap.threads) << "the cap binds";
+  rcclDdaLaunchCap bound = {};
+  EXPECT_FALSE(TakesSplit(count, ncclFloat32, cap, /*vmmFirst=*/false, &bound));
+  EXPECT_EQ(bound.blocks, 3u);
+  EXPECT_EQ(bound.threads, 256u);
+  const DdaLaunch& l = RunSelectedLL128(count, ncclFloat32, cap);
+  EXPECT_NE(l.kernel, (LL128Split<float>()));
+  EXPECT_LE(l.grid.x, cap.blocks);
+  EXPECT_LE(l.block.x, cap.threads);
+}
+
+// In the VMM-first window the split replaces the VMM launch, so its bound is the VMM grid: its blocks and threads.
+TEST_F(DdaAllReduceFabricLLMicrotest, Split_InTheVmmFirstWindowTakesTheVmmGrid) {
+  SplitTiersOn(comm(), params_);
+  comm().nRanks = 32;
+  const size_t count = 4 * kMiB / 4;  // 128 KiB shards
+  const unsigned llTwoShot = RunReplaced(/*ll=*/true, count).grid.x;
+  EXPECT_EQ(RunSelectedLL128(count).grid.x, llTwoShot) << "outside the VMM-first window: the LL two-shot's grid";
+  ASSERT_TRUE(ncclAllReduceDdaFabricEligible(mock_.get(), kSendbuff, kRecvbuff, count, ncclFloat32, ncclSum));
+  const unsigned vmm = ncclAllReduceDdaFabricBlocks(mock_.get(), count, ncclFloat32);
+  ASSERT_GT(vmm, llTwoShot);
+  const DdaLaunch& l = RunSelectedLL128(count, ncclFloat32, {}, /*vmmFirst=*/true);
+  EXPECT_EQ(l.kernel, (LL128Split<float>()));
+  ExpectSplitGrid(l, vmm, 4 * kMiB, 32);
+  EXPECT_EQ(l.block.x, kDdaArLL128Threads);
+  // Without a VMM-eligible comm (no fabric barrier) the selector would not run VMM: the LL two-shot's grid stays.
+  auto* const barrier = comm().ddaFabricBarrierState;
+  comm().ddaFabricBarrierState = nullptr;
+  EXPECT_EQ(RunSelectedLL128(count, ncclFloat32, {}, /*vmmFirst=*/true).grid.x, llTwoShot);
+  comm().ddaFabricBarrierState = barrier;
+  // A smaller VMM grid than the LL two-shot's still bounds the split.
+  g_rcclDdaFabricVmmBlocks = [](const ncclComm*) { return 4; };
+  ASSERT_LT(ncclAllReduceDdaFabricBlocks(mock_.get(), count, ncclFloat32), llTwoShot);
+  EXPECT_EQ(RunSelectedLL128(count, ncclFloat32, {}, /*vmmFirst=*/true).grid.x, 4u);
+
+  // Under a launch cap the split stays within the capped VMM launch: its blocks and its threads per block.
+  g_rcclDdaFabricVmmBlocks = [](const ncclComm* c) { return c->ddaFabricMaxBlocks; };
+  comm().ddaFabricBarrierState = SharedBarrierState<nccl_dda_detail::DdaFabricBarrierState>(0x5a);
+  std::vector<DdaCopy> copies;
+  RecordDdaCopies(&copies);
+  const rcclDdaLaunchCap caps[] = {{3, 256}, {0, 128}, {200, 0}, {7, 1024}};
+  for (const rcclDdaLaunchCap& cap : caps) {
+    SCOPED_TRACE(testing::Message() << "cap={" << cap.blocks << "," << cap.threads << "}");
+    g_ddaLaunches.clear();
+    ASSERT_EQ(ncclAllReduceDdaFabric(kSendbuff, kRecvbuff, count, ncclFloat32, ncclSum, mock_.get(), kStream, cap),
+              ncclSuccess);
+    const DdaLaunch vmmLaunch = Only();
+    const DdaLaunch& capped = RunSelectedLL128(count, ncclFloat32, cap, /*vmmFirst=*/true);
+    EXPECT_EQ(capped.kernel, (LL128Split<float>()));
+    ExpectSplitGrid(capped, vmmLaunch.grid.x, 4 * kMiB, 32);
+    EXPECT_EQ(capped.block.x, vmmLaunch.block.x);
+  }
+}
+
+// A user-set LL or LL128 one-shot threshold keeps the window's messages wherever that tier can take them.
+TEST_F(DdaAllReduceFabricLLMicrotest, Eligible_PeerSplitWindowLeavesAPinnedTier) {
+  SplitTiersOn(comm(), params_);
+  const size_t count = 2 * kMiB / 4;
+  g_rcclDdaArLL128OneShotPinnedByEnv = [] { return true; };
+  EXPECT_FALSE(TakesSplit(count)) << "LL128 one-shot pinned";
+  EXPECT_TRUE(Eligible(&ddaLLArTwoShotEligible, count)) << "LL unpinned, LL128 one-shot pinned: the split is off";
+  EXPECT_TRUE(Eligible(&ddaLL128ArOneShotEligible, count));
+  g_rcclDdaArLL128OneShotPinnedByEnv = [] { return false; };
+  g_rcclDdaArLLTierPinnedByEnv = [] { return true; };
+  EXPECT_FALSE(TakesSplit(count)) << "LL pinned, the LL two-shot can take it";
+  EXPECT_TRUE(Eligible(&ddaLLArTwoShotEligible, count));
+  EXPECT_TRUE(Eligible(&ddaLL128ArOneShotEligible, count));
+  g_rcclDdaLLTwoShotThreshold = [](const ncclComm*) { return kMiB; };
+  EXPECT_TRUE(TakesSplit(count)) << "past both pinned LL shots the split still runs";
+  EXPECT_FALSE(Eligible(&ddaLL128ArOneShotEligible, count));
+  params_["RCCL_DDA_LL_ONESHOT_THRESHOLD"] = 2 * kMiB;
+  ASSERT_TRUE(Eligible(&ddaLLArOneShotEligible, count));
+  EXPECT_FALSE(TakesSplit(count)) << "the pinned LL one-shot can take it";
+}
+
+// A pinned LL tier keeps only the messages within its threshold: past it the split still takes them.
+TEST_F(DdaAllReduceFabricLLMicrotest, Eligible_PinnedLLTierBelowTheMessageLeavesItToTheSplit) {
+  SplitTiersOn(comm(), params_);
+  comm().nRanks = 4;
+  const size_t count = 2 * kMiB / 4;
+  g_rcclDdaArLLTierPinnedByEnv = [] { return true; };
+  EXPECT_FALSE(TakesSplit(count)) << "the pinned LL tier takes 2 MiB";
+  g_rcclDdaLLThreshold = [](const ncclComm*, ncclFunc_t) { return kMiB / 2; };
+  EXPECT_TRUE(TakesSplit(count)) << "RCCL_DDA_LL_THRESHOLD=512K: the LL tier cannot take 2 MiB";
+}
+
+// RCCL_DDA_LL_TWOSHOT_THRESHOLD set at 32 ranks: the split leaves the VMM-first window, so the selector runs VMM there.
+TEST_F(DdaAllReduceFabricLLMicrotest, Eligible_PinnedLLTwoShotLeavesTheVmmFirstWindowToVmm) {
+  SplitTiersOn(comm(), params_);
+  comm().nRanks = 32;
+  const size_t count = 4 * kMiB / 4;
+  EXPECT_TRUE(TakesSplit(count, ncclFloat32, {}, /*vmmFirst=*/true)) << "unpinned: the split takes the VMM-first size";
+  g_rcclDdaArLLTierPinnedByEnv = [] { return true; };
+  EXPECT_FALSE(TakesSplit(count, ncclFloat32, {}, /*vmmFirst=*/true)) << "pinned: the VMM-first window keeps it";
+  EXPECT_TRUE(Eligible(&ddaLLArTwoShotEligible, count)) << "the LL entry agrees with the selector";
+}
+
+// The LL two-shot and the LL128 one-shot leave window messages to the LL128 two-shot, as the selector does.
+TEST_F(DdaAllReduceFabricLLMicrotest, Eligible_PeerSplitWindowLeavesTheLLTwoShotAndTheLL128OneShot) {
+  SplitTiersOn(comm(), params_);
+  const size_t count = 2 * kMiB / 4;
+  EXPECT_FALSE(Eligible(&ddaLLArTwoShotEligible, count));
+  EXPECT_FALSE(Eligible(&ncclAllReduceDdaFabricLLEligible, count));
+  EXPECT_FALSE(Eligible(&ddaLL128ArOneShotEligible, count));
+  EXPECT_TRUE(Eligible(&ddaLL128ArTwoShotEligible, count));
+  EXPECT_TRUE(Eligible(&ncclAllReduceDdaFabricLL128Eligible, count));
+  comm().WarpSize = 2 * kDdaLL128Warp;
+  EXPECT_TRUE(Eligible(&ddaLLArTwoShotEligible, count)) << "no split on wave64: the LL two-shot keeps it";
+}
+
+// RCCL_DDA_LL128_ASYNC_WIRE unset or 1 splits window messages; 0 keeps them on the LL and cooperative LL128 tiers.
+TEST_F(DdaAllReduceFabricLLMicrotest, RunLL128_PeerSplitFollowsTheStagedWireFlag) {
+  SplitTiersOn(comm(), params_);
+  const size_t count = 2 * kMiB / 4;  // 8 ranks: 256 KiB shards
+  for (const bool unset : {true, false}) {
+    SCOPED_TRACE(testing::Message() << "unset " << unset);
+    if (unset) {
+      params_.erase("RCCL_DDA_LL128_ASYNC_WIRE");
+    } else {
+      params_["RCCL_DDA_LL128_ASYNC_WIRE"] = 1;
+    }
+    EXPECT_TRUE(TakesSplit(count));
+    EXPECT_FALSE(Eligible(&ddaLLArTwoShotEligible, count));
+    EXPECT_FALSE(Eligible(&ddaLL128ArOneShotEligible, count));
+    EXPECT_EQ(RunSelectedLL128(count).kernel, (LL128Split<float>()));
+  }
+  params_["RCCL_DDA_LL128_ASYNC_WIRE"] = 0;
+  EXPECT_FALSE(TakesSplit(count));
+  EXPECT_TRUE(Eligible(&ddaLLArTwoShotEligible, count));
+  EXPECT_TRUE(Eligible(&ddaLL128ArOneShotEligible, count));
+  EXPECT_EQ(RunOneLL(count).kernel, (LLTwoShot<float, 8>()));
+  EXPECT_EQ(RunSelectedLL128(count).kernel, (LL128OneShot<float, 8>()));
+  params_["RCCL_DDA_LL128_ONESHOT_THRESHOLD"] = kMiB;
+  const DdaLaunch& two = RunSelectedLL128(count);
+  EXPECT_EQ(two.kernel, (LL128TwoShot<float, 8>()));
+  EXPECT_EQ(two.sharedMemBytes, 0u);
+}
+
+// Under a launch cap the split stays within the blocks and threads of the capped launch it replaces (the LL two-shot).
+TEST_F(DdaAllReduceFabricLLMicrotest, RunLL128_PeerSplitStaysWithinTheCappedReplacedLaunch) {
+  SplitTiersOn(comm(), params_);
+  const size_t count = 2 * kMiB / 4;  // 8 ranks: 256 KiB shards
+  const rcclDdaLaunchCap caps[] = {{3, 192}, {17, 0}, {0, 256}, {1000, 1024}, {2, 64}, {0, 96}};
+  for (const rcclDdaLaunchCap& cap : caps) {
+    SCOPED_TRACE(testing::Message() << "cap={" << cap.blocks << "," << cap.threads << "}");
+    const DdaLaunch replaced = RunReplaced(/*ll=*/true, count, cap);
+    EXPECT_EQ(replaced.kernel, (LLTwoShot<float, 8>()));
+    const DdaLaunch& l = RunSelectedLL128(count, ncclFloat32, cap);
+    EXPECT_EQ(l.kernel, (LL128Split<float>()));
+    EXPECT_EQ(l.block.x, std::min(kDdaArLL128Threads, replaced.block.x));
+    EXPECT_EQ(l.block.x % 64, 0u);
+    ExpectSplitGrid(l, replaced.grid.x, 2 * kMiB, 8);
+    EXPECT_EQ(l.sharedMemBytes, dda::common::ddaLL128ArSplitSharedBytes(l.block.x, 8));
+  }
 }
 
 }  // namespace

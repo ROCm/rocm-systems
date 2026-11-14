@@ -92,6 +92,8 @@ extern std::function<size_t(const ncclComm*, ncclFunc_t)> g_rcclDdaLLThreshold;
 extern std::function<size_t(const ncclComm*, ncclFunc_t)> g_rcclDdaLL128Threshold;
 extern std::function<size_t(const ncclComm*)> g_rcclDdaLLTwoShotThreshold;
 extern std::function<size_t(const ncclComm*)> g_rcclDdaLL128TwoShotThreshold;
+extern std::function<bool()> g_rcclDdaArLLTierPinnedByEnv;
+extern std::function<bool()> g_rcclDdaArLL128OneShotPinnedByEnv;
 extern std::function<int(const ncclComm*)> g_rcclDdaFabricVmmBlocks;
 extern std::function<int(const ncclComm*, size_t)> g_rcclDdaFabricAgLL128Threads;
 extern std::function<int(const ncclComm*, size_t)> g_rcclDdaFabricAgLL128Blocks;
