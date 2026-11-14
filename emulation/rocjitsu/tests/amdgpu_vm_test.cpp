@@ -6270,7 +6270,6 @@ TEST(CommandProcessorTest, DynamicScratchWaitsForRuntimeReleaseBeforeReadingBack
     // runtime's acknowledgement must be observed through a current snapshot.
     ASSERT_TRUE(fixture.soc_ptr->gpu_vm().invalidate(address_space));
     fixture.mem()->write64(kQueueSignal + 8, 0);
-    fixture.cp()->notify_queue_doorbell(registration, 0);
     while (fixture.mem()->read64(read_pointer) == 0)
       ASSERT_TRUE(fixture.engine->step());
     fixture.engine->primary_release();
