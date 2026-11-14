@@ -56,6 +56,8 @@ bool LoadPlatformDynamicApis(ThunkLoader* loader, void* thunk_handle) {
 void BindPlatformStaticApis(ThunkLoader* loader) {
   loader->DRM_PFN(drmCommandWriteRead) =
       (ThunkLoader::DRM_DEF(drmCommandWriteRead)*)(&drmCommandWriteRead);
+  loader->HSAKMT_PFN(hsaKmtSetPersistingCacheSize) =
+      (ThunkLoader::HSAKMT_DEF(hsaKmtSetPersistingCacheSize)*)(&hsaKmtSetPersistingCacheSize);
 }
 
 }  // namespace core

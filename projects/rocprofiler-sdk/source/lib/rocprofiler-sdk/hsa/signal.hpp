@@ -32,6 +32,14 @@ namespace hsa
 struct signal_t
 {
     hsa_signal_t value = {.handle = 0};
+
+    // signal_pool_fini() destroys the HSA signal but deliberately preserves this handle. Retired
+    // pool storage can still be referenced by an async packet, and keeping the identity lets its
+    // completion path recognize the pooled signal instead of destroying the same handle twice.
+    bool matches(hsa_signal_t signal) const noexcept
+    {
+        return signal.handle != 0 && signal.handle == value.handle;
+    }
 };
 }  // namespace hsa
 }  // namespace rocprofiler
