@@ -252,7 +252,7 @@ static ncclResult_t addProxyOpIfNeeded(struct ncclComm* comm, struct ncclKernelP
 
 static void addWorkBatchToPlan(struct ncclComm* comm, struct ncclKernelPlan* plan, int channelId,
                                enum ncclDevWorkType workType, int devFuncId, int progressSlot, uint32_t workOffset,
-                               int p2pRound = -1, bool batchP2P = false) {
+                               int p2pRound = -1, bool batchP2P = false, bool wideP2P = false) {
   ncclKernelPlanner::WipPlan::Channel* chan = &comm->planner.wipPlan.channels[channelId];
   size_t workSize = ncclDevWorkSize(workType);
   // Conditions causing us to create a new blank batch.
@@ -268,15 +268,24 @@ static void addWorkBatchToPlan(struct ncclComm* comm, struct ncclKernelPlan* pla
     // wipBatch.workBytes and wipBatch.nP2ps aren't reset to 0 for a new extension
     // batch further down.
     if (workType == ncclDevWorkTypeP2p) {
-      newBatch |= !chan->wipBatch.batchP2P;
-      newBatch |= (comm->nNodes > 2 && batchP2P) ? (chan->wipBatch.nP2ps == NCCL_MAX_DEV_WORK_P2P_PER_BATCH) :
-                                                   (chan->wipBatch.nP2ps == 1);
+      // Widened tiles of different rounds overlap, so widened works on a channel share a batch and
+      // run concurrently instead of one round after another. They only use proxy-less P2P
+      // connections, so no peer depends on how this rank batches them.
+      bool shareWide = wideP2P && chan->wipBatch.wideP2P;
+      if (shareWide) {
+        newBatch |= chan->wipBatch.nP2ps == NCCL_MAX_DEV_WORK_P2P_PER_BATCH;
+      } else {
+        newBatch |= !chan->wipBatch.batchP2P;
+        newBatch |= (comm->nNodes > 2 && batchP2P) ? (chan->wipBatch.nP2ps == NCCL_MAX_DEV_WORK_P2P_PER_BATCH) :
+                                                     (chan->wipBatch.nP2ps == 1);
+      }
       for (int i = 0; i < chan->wipBatch.nP2ps; i++) {
         newBatch |= p2pRound == chan->wipBatch.p2pRounds[i];
         // Make sure we only aggregate p2p operations within the same p2p round epoch (one epoch is NCCL_MAX_DEV_WORK_P2P_PER_BATCH ops).
         // This enforces uniform batching accross ranks in the communicator and prevents hangs.
-        newBatch |= (p2pRound / NCCL_MAX_DEV_WORK_P2P_PER_BATCH) !=
-                    (chan->wipBatch.p2pRounds[i] / NCCL_MAX_DEV_WORK_P2P_PER_BATCH);
+        if (!shareWide)
+          newBatch |= (p2pRound / NCCL_MAX_DEV_WORK_P2P_PER_BATCH) !=
+                      (chan->wipBatch.p2pRounds[i] / NCCL_MAX_DEV_WORK_P2P_PER_BATCH);
       }
     }
     if (workType == ncclDevWorkTypeBcast) {
@@ -326,7 +335,10 @@ static void addWorkBatchToPlan(struct ncclComm* comm, struct ncclKernelPlan* pla
     // if batching is enabled (RCCL_P2P_BATCH_ENABLE=1),
     // but this op is not eligible for batching with other ops (i.e. alltoallv where sendBytes != recvBytes),
     // mark eligibility/ineligibility so that future ops that may be eligible, are not batched with ineligible ones
-    if (chan->wipBatch.nP2ps == 0) chan->wipBatch.batchP2P = batchP2P;
+    if (chan->wipBatch.nP2ps == 0) {
+      chan->wipBatch.batchP2P = batchP2P;
+      chan->wipBatch.wideP2P = wideP2P;
+    }
     // We need to ensure that a single batch doesn't have multiple p2p's
     // of the same round since they would use the same connections.
     chan->wipBatch.p2pRounds[chan->wipBatch.nP2ps++] = p2pRound;
@@ -1344,6 +1356,10 @@ NCCL_PARAM(ChunkSize, "CHUNK_SIZE", 0);
 // Fusion size cutoff policy: see rcclP2pBatchCutoff in channel.h.
 RCCL_PARAM(P2pBatchEnable, "P2P_BATCH_ENABLE", -1);
 RCCL_PARAM(P2pBatchThreshold, "P2P_BATCH_THRESHOLD", -1);
+// Let direct Send/Recv/SendRecv operations use a wider P2P channel tile while
+// preserving the communicator-wide peer split for P2P-backed collectives.
+// 128 is the largest validated grid; 256-channel P2P kernels can starve progress.
+RCCL_PARAM(P2pDirectMaxChannels, "P2P_DIRECT_MAX_CHANNELS", 0);
 
 int rcclEffectiveP2pBatchEnable(struct ncclComm* comm) {
   auto userInput = rcclParamP2pBatchEnable();
@@ -1416,6 +1432,89 @@ static int rcclP2pPolicyChannels(struct ncclComm* comm, struct ncclTaskP2p* task
   return -1;
 }
 
+// Peers reached through the P2P transport: the same host, or the same MNNVL clique.
+bool rcclP2pPeerIsLocal(struct ncclComm* comm, int peer) {
+  if (peer < 0 || peer >= comm->nRanks || comm->peerInfo == nullptr) return false;
+  if (comm->peerInfo[peer].hostHash == comm->peerInfo[comm->rank].hostHash) return true;
+  if (!comm->MNNVL || comm->clique.ranks == nullptr) return false;
+  for (int i = 0; i < comm->clique.size; i++)
+    if (comm->clique.ranks[i] == peer) return true;
+  return false;
+}
+
+// Depends only on what both ends of a transfer share (API, peer pair, comm-wide sizes), never on
+// the other tasks of a group, so sender and receiver agree on the channels.
+int rcclP2pChannelStrideForApi(struct ncclComm* comm, ncclFunc_t collAPI, int peer, int directMaxChannels,
+                               bool useMemcpy) {
+  bool directApi = collAPI == ncclFuncSend || collAPI == ncclFuncRecv || collAPI == ncclFuncSendRecv;
+  // A self transfer is one local copy work with one partitioning for both directions. Mixed API
+  // groups can otherwise widen only one side and copy beyond the other side's final partition.
+  if (peer == comm->rank || directMaxChannels <= 0 || !directApi || useMemcpy || ncclParamP2pDisable() ||
+      comm->p2pNet || !rcclP2pPeerIsLocal(comm, peer))
+    return comm->p2pnChannelsPerPeer;
+  // A split round needs batches for the widened plus the per-peer tile, and must fit an empty plan.
+  int argsRoom = ncclDevMaxChannelsForArgsBytes(comm->workArgsBytes) - comm->p2pnChannelsPerPeer;
+  // The shifted multi-node mapping only tells p2pnChannels >> shift parts apart.
+  int poolParts = (comm->nNodes > 2 && comm->p2pChannelShiftSize >= 0) ?
+                    comm->p2pnChannels >> comm->p2pChannelShiftSize :
+                    comm->p2pnChannels;
+  int limit = std::min(std::min(poolParts, argsRoom), std::min(directMaxChannels, 128));
+  if (limit <= comm->p2pnChannelsPerPeer) return comm->p2pnChannelsPerPeer;
+  return std::max(comm->p2pnChannelsPerPeer, pow2Down(limit));
+}
+
+static int rcclP2pChannelStride(struct ncclComm* comm, const struct ncclTaskP2p* task) {
+  if (task == nullptr) return comm->p2pnChannelsPerPeer;
+  return rcclP2pChannelStrideForApi(comm, task->collAPI, task->root, rcclParamP2pDirectMaxChannels(),
+                                    ncclP2pUsesMemcpy());
+}
+
+struct rcclP2pConnectorSummary {
+  bool hasLL;
+  bool hasLL128;
+  bool network;
+  bool proxied;
+  bool proxySameProcess;
+  bool copyEngine;
+  int stepSize;
+};
+
+static struct rcclP2pConnectorSummary rcclP2pScanConnectors(struct ncclComm* comm, int peer, uint8_t base, int nParts,
+                                                            int channelStride, bool isSendNotRecv, int connIndex) {
+  struct rcclP2pConnectorSummary out = {/*hasLL=*/true,    /*hasLL128=*/true,         /*network=*/false,
+                                        /*proxied=*/false, /*proxySameProcess=*/true, /*copyEngine=*/false,
+                                        /*stepSize=*/0};
+  for (int part = 0; part < nParts; part++) {
+    int channelId =
+      ncclP2pChannelForPart(comm->p2pnChannels, base, part, channelStride, comm->nNodes, comm->p2pChannelShiftSize);
+    struct ncclConnector* conn = isSendNotRecv ? &comm->channels[channelId].peers[peer]->send[connIndex] :
+                                                 &comm->channels[channelId].peers[peer]->recv[connIndex];
+    out.hasLL &= conn->conn.buffs[NCCL_PROTO_LL] != nullptr;
+    out.hasLL128 &= conn->conn.buffs[NCCL_PROTO_LL128] != nullptr;
+    bool isNet = conn->transportComm == (isSendNotRecv ? &netTransport.send : &netTransport.recv);
+    out.network |= isNet;
+    out.proxied |= conn->proxyConn.proxyProgress != nullptr;
+    if (isNet) out.proxySameProcess &= conn->proxyConn.sameProcess;
+    out.copyEngine |= conn->useCe;
+    int partStepSize = rcclP2pConnectorStepSize(comm->p2pChunkSize, conn->useCe, conn->conn.stepSize);
+    out.stepSize = out.stepSize == 0 ? partStepSize : std::min(out.stepSize, partStepSize);
+  }
+  return out;
+}
+
+// Match addP2pToPlan's transport check before reserving the round. A direct task
+// can be local by peer identity yet use NET or another proxy transport, in
+// which case addP2pToPlan keeps it on the per-peer tile.
+static bool rcclP2pTaskUsesNarrowTransport(struct ncclComm* comm, const struct ncclTaskP2p* task, int p2pRound,
+                                           bool isSendNotRecv) {
+  if (task == nullptr || task->root == comm->rank) return false;
+  int connIndex = comm->p2pNet && task->bytes > rcclParamP2pNetThreshold() ? NCCL_CONN_IDX_P2P_NET : 1;
+  uint8_t base = ncclP2pChannelBaseForRound(comm, p2pRound, rcclEffectiveP2pBatchEnable(comm));
+  struct rcclP2pConnectorSummary summary = rcclP2pScanConnectors(comm, task->root, base, comm->p2pnChannelsPerPeer,
+                                                                 comm->p2pnChannelsPerPeer, isSendNotRecv, connIndex);
+  return summary.network || summary.proxied;
+}
+
 // Put p2p op in plan assuming there is sizeof(ncclDevWorkBatch) in batch budget
 // and sizeof(ncclDevWorkP2p) in work budget. "sendRank" and "recvRank" must
 // match the corresponding values for this round of the p2p schedule (no -1's).
@@ -1423,8 +1522,10 @@ static int rcclP2pPolicyChannels(struct ncclComm* comm, struct ncclTaskP2p* task
 static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* plan, int nChannelsMin, int nChannelsMax,
                                  int p2pRound, int sendRank, void* sendAddr, ssize_t sendBytes, int recvRank,
                                  void* recvAddr, ssize_t recvBytes, uint64_t sendOpCount, uint64_t recvOpCount,
-                                 const int planTotalTasks[], struct ncclTaskP2p** p2pTasks) {
+                                 const int planTotalTasks[], struct ncclTaskP2p** p2pTasks,
+                                 bool* recvFirstOut = nullptr) {
   ncclResult_t ret = ncclSuccess;
+  if (recvFirstOut) *recvFirstOut = false;
   int connIndex[2] = {p2pTasks[0] ? rcclP2pTaskConnIndex(comm, p2pTasks[0]->collAPI, recvRank) : 1,
                       p2pTasks[1] ? rcclP2pTaskConnIndex(comm, p2pTasks[1]->collAPI, sendRank) : 1};
   bool selfSend = (sendRank == comm->rank);
@@ -1434,10 +1535,11 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
   bool hasLL[2] = {!selfSend, !selfSend};
   bool hasLL128[2] = {!selfSend, !selfSend};
   bool network[2] = {false, false};
+  bool proxied[2] = {false, false}; // connections progressed by the proxy thread
   bool proxySameProcess[2] = {true, true};
   bool copyEngine[2] = {false, false};
   void** handles[2] = {NULL, NULL};
-  uint64_t p2pDirChannelMask[2] = {0, 0}; // per-direction channels (idx 0 recv, 1 send)
+  struct channelMasks p2pDirChannelMask[2] = {}; // per-direction channels (idx 0 recv, 1 send)
   // Keep policy direction-local so a different task paired in the same planner
   // round cannot change the channel count selected by this task's peer.
   int kChannels[2] = {rcclP2pPolicyChannels(comm, p2pTasks[0]), rcclP2pPolicyChannels(comm, p2pTasks[1])};
@@ -1510,30 +1612,31 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
 
   int connStepSize[2] = {0, 0};
   if (!selfSend) {
-    for (int part = 0; part < nChannelsMax; part++) {
-      int channelId =
-        ncclP2pChannelForPart(comm->p2pnChannels, base, part, nChannelsMax, comm->nNodes, comm->p2pChannelShiftSize);
-      struct ncclChannelPeer** channelPeers = comm->channels[channelId].peers;
-      for (int dir = 0; dir <= 1; dir++) {
-        if (part >= taskParts[dir]) continue;
-        int peerRank = dir ? sendRank : recvRank;
-        struct ncclConnector* conn =
-          dir ? &channelPeers[peerRank]->send[connIndex[dir]] : &channelPeers[peerRank]->recv[connIndex[dir]];
-        // Record which latency staging buffers exist. Protocol selection below picks LL, LL128,
-        // or SIMPLE per dir; missing buffers drop that protocol, not the other LL-family one.
-        hasLL[dir] &= conn->conn.buffs[NCCL_PROTO_LL] != nullptr;
-        hasLL128[dir] &= conn->conn.buffs[NCCL_PROTO_LL128] != nullptr;
-        int partStepSize = rcclP2pConnectorStepSize(comm->p2pChunkSize, conn->useCe, conn->conn.stepSize);
-        connStepSize[dir] = connStepSize[dir] == 0 ? partStepSize : std::min(connStepSize[dir], partStepSize);
-        copyEngine[dir] |= conn->useCe;
-        bool isNet = conn->transportComm == (dir ? &netTransport.send : &netTransport.recv);
-        network[dir] |= isNet;
-        // Only AND sameProcess on NET connectors. Unused/unconnected P2P parts
-        // leave sameProcess=0 (calloc), which previously blocked NET UBR for
-        // Direct AllGather even when the live IB proxy was in-process.
-        if (isNet) proxySameProcess[dir] &= conn->proxyConn.sameProcess;
-      }
+    for (int dir = 0; dir <= 1; dir++) {
+      int peerRank = dir ? sendRank : recvRank;
+      struct rcclP2pConnectorSummary summary = rcclP2pScanConnectors(comm, peerRank, base, taskParts[dir], nChannelsMax,
+                                                                     /*isSendNotRecv=*/dir, connIndex[dir]);
+      // Record which latency staging buffers exist. Protocol selection below picks LL, LL128,
+      // or SIMPLE per dir; missing buffers drop that protocol, not the other LL-family one.
+      hasLL[dir] = summary.hasLL;
+      hasLL128[dir] = summary.hasLL128;
+      network[dir] = summary.network;
+      proxied[dir] = summary.proxied;
+      // Only NET connectors contribute to sameProcess; unused P2P connectors
+      // leave it zero-initialized and must not disable NET UBR.
+      proxySameProcess[dir] = summary.proxySameProcess;
+      copyEngine[dir] = summary.copyEngine;
+      connStepSize[dir] = summary.stepSize;
     }
+  }
+
+  // nChannelsMax is the per-peer tile. A widened direct direction starts from its whole tile; both
+  // ends see the same transport, so network connections stay on the per-peer tile on both.
+  int dirMax[2], dirMin[2];
+  for (int dir = 0; dir < 2; dir++) {
+    dirMax[dir] =
+      (network[dir] || proxied[dir]) ? nChannelsMax : std::max(nChannelsMax, rcclP2pChannelStride(comm, p2pTasks[dir]));
+    dirMin[dir] = dirMax[dir] > nChannelsMax ? dirMax[dir] : nChannelsMin;
   }
 
   ssize_t paramChunkSize = ncclParamChunkSize();
@@ -1563,15 +1666,15 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
       // sides of a P2P pair agree on nChStart — planTotalTasks varies per rank.
       bool asymmetric =
         p2pTasks[dir] && (p2pTasks[dir]->collAPI == ncclFuncGather || p2pTasks[dir]->collAPI == ncclFuncScatter);
-      int nChMax = kChannels[dir] > 0 ? std::min(kChannels[dir], nChannelsMax) : nChannelsMax;
-      int nChStart =
-        kChannels[dir] > 0 ? nChMax : ((comm->nNodes <= 1 && asymmetric) ? nChannelsMax : nChannelsMin);
+      int nChMax = kChannels[dir] > 0 ? std::min(kChannels[dir], dirMax[dir]) : dirMax[dir];
+      int nChStart = kChannels[dir] > 0 ? nChMax : ((comm->nNodes <= 1 && asymmetric) ? dirMax[dir] : dirMin[dir]);
       nChannels[dir] = std::min<int>(nChStart, divUp(bytes[dir], minPartSize));
       size_t partSize = std::max(minPartSize, divUp(bytes[dir], nChannels[dir]));
       while (partSize > maxPartSize && nChannels[dir] <= nChMax / 2) {
         nChannels[dir] *= 2;
         partSize = divUp(bytes[dir], nChannels[dir]);
       }
+      nChannels[dir] = rcclP2pDirectTileChannels(nChannels[dir], nChannelsMax, dirMax[dir]);
     }
 
     // Select protocol. gfx1250 ENABLE=1 SendRecv uses a message-size window (not per-channel):
@@ -1684,15 +1787,15 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
       // sides of a P2P pair agree on nChStart — planTotalTasks varies per rank.
       bool asymmetric =
         p2pTasks[dir] && (p2pTasks[dir]->collAPI == ncclFuncGather || p2pTasks[dir]->collAPI == ncclFuncScatter);
-      int nChMax = kChannels[dir] > 0 ? std::min(kChannels[dir], nChannelsMax) : nChannelsMax;
-      int nChStart =
-        kChannels[dir] > 0 ? nChMax : ((comm->nNodes <= 1 && asymmetric) ? nChannelsMax : nChannelsMin);
+      int nChMax = kChannels[dir] > 0 ? std::min(kChannels[dir], dirMax[dir]) : dirMax[dir];
+      int nChStart = kChannels[dir] > 0 ? nChMax : ((comm->nNodes <= 1 && asymmetric) ? dirMax[dir] : dirMin[dir]);
       nChannels[dir] = std::min<int>(nChStart, divUp(bytes[dir], minPartSize));
       size_t partSize = std::max(minPartSize, divUp(bytes[dir], nChannels[dir]));
       while (partSize > maxPartSize && nChannels[dir] <= nChMax / 2) {
         nChannels[dir] *= 2;
         partSize = divUp(bytes[dir], nChannels[dir]);
       }
+      nChannels[dir] = rcclP2pDirectTileChannels(nChannels[dir], nChannelsMax, dirMax[dir]);
     }
     // Tune channel count for registered NET buffers
     if (netRegistered[dir]) {
@@ -1707,50 +1810,6 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
     if (p2pTasks[dir]) p2pTasks[dir]->nChannels = nChannels[dir];
   }
   useLL128SendRecv = protocol[0] == NCCL_PROTO_LL128 || protocol[1] == NCCL_PROTO_LL128;
-
-  struct ncclWorkList* workNode;
-  workNode = ncclMemoryStackAllocInlineArray<ncclWorkList, ncclDevWorkP2p>(&comm->memScoped, 1);
-  workNode->workType = ncclDevWorkTypeP2p;
-  workNode->size = sizeof(struct ncclDevWorkP2p);
-  ncclIntruQueueEnqueue(&plan->workQueue, workNode);
-  uint32_t workOffset;
-  workOffset = plan->workBytes;
-  plan->workBytes += sizeof(struct ncclDevWorkP2p);
-
-  struct ncclDevWorkP2p* work;
-  work = (struct ncclDevWorkP2p*)(workNode + 1);
-  work->nP2pChannels = comm->p2pnChannels;
-  work->channelBase = base;
-  work->nSendChannels = nChannels[1];
-  work->sendProtoLL = protoLatency[1];
-  work->sendNetReg = netRegistered[1];
-  work->sendIpcReg = ipcRegistered[1];
-  work->sendChunkSize_u32fp8 = chunkDataSize_u32fp8[1];
-  work->sendRank = sendRank;
-  work->sendAddr = sendAddr;
-  work->sendBytes = sendBytes == -1 ? 0 : sendBytes;
-  work->sendConnIndex = connIndex[1];
-  work->sendOpCount = sendOpCount;
-  work->nRecvChannels = nChannels[0];
-  work->recvProtoLL = protoLatency[0];
-  work->recvNetReg = netRegistered[0];
-  work->recvIpcReg = ipcRegistered[0];
-  work->recvChunkSize_u32fp8 = chunkDataSize_u32fp8[0];
-  work->recvRank = recvRank;
-  work->recvAddr = recvAddr;
-  work->recvBytes = recvBytes == -1 ? 0 : recvBytes;
-  // One bit covers both directions, so it has to hold if either task asked for KernelCh.
-  work->profilerEnabled = 0;
-  if (ncclProfilerPluginLoaded()) {
-    for (int dir = 0; dir < 2; dir++) {
-      if (p2pTasks[dir] && (p2pTasks[dir]->eActivationMask & ncclProfileKernelCh)) {
-        work->profilerEnabled = 1;
-        break;
-      }
-    }
-  }
-  work->recvConnIndex = connIndex[0];
-  work->recvOpCount = recvOpCount;
 
   for (int dir = 0; dir < nProxyOps; dir++) {
     struct ncclProxyOp* op = &proxyOps[dir];
@@ -1776,84 +1835,155 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
     // op->buffer, op->nbytes, op->nsteps = ...;
   }
 
-  nChannelsMax = std::max(nChannels[0], nChannels[1]);
-  // Determine how many peers this plan will target concurrently. Make a
-  // simplifying assumption that each task targets a different peer.
-  // Each task is striped across 'nChannelsMax' of 'p2pnChannels' channels.
-  // Each channel runs up to NCCL_MAX_DEV_WORK_P2P_PER_BATCH tasks concurrently.
-  int maxConcurrent;
-  int concurrentTasks[2];
-  maxConcurrent = comm->p2pnChannels / nChannelsMax * NCCL_MAX_DEV_WORK_P2P_PER_BATCH;
-  concurrentTasks[0] = std::min(planTotalTasks[0], maxConcurrent);
-  concurrentTasks[1] = std::min(planTotalTasks[1], maxConcurrent);
-  ++plan->p2pPairCounter;
-  for (int i = 0; i < 2; i++) {
-    if (p2pTasks[i]) p2pTasks[i]->p2pPairId = plan->p2pPairCounter;
-  }
-  for (int part = 0; part < nChannelsMax; part++) {
-    int channelId = ncclP2pChannelForPart(comm->p2pnChannels, base, part, comm->p2pnChannelsPerPeer, comm->nNodes,
-                                          comm->p2pChannelShiftSize);
-    plan->channelMask.masks[channelId / 64] |= uint64_t(1) << (channelId % 64);
-    // Each direction uses its first nChannels[dir] parts; track per-direction
-    // channels so the profiler emits KernelCh per direction (see profiler.cc).
-    for (int i = 0; i < 2; i++)
-      if (part < nChannels[i]) p2pDirChannelMask[i] |= uint64_t(1) << channelId;
-    // Add batch first.
+  {
+    // Determine how many peers this plan will target concurrently. Make a
+    // simplifying assumption that each task targets a different peer.
+    // Each task is striped across 'roundChannels' of 'p2pnChannels' channels.
+    // Each channel runs up to NCCL_MAX_DEV_WORK_P2P_PER_BATCH tasks concurrently.
+    int roundChannels = std::max(nChannels[0], nChannels[1]);
+    int maxConcurrent = comm->p2pnChannels / roundChannels * NCCL_MAX_DEV_WORK_P2P_PER_BATCH;
+    int concurrentTasks[2] = {std::min(planTotalTasks[0], maxConcurrent), std::min(planTotalTasks[1], maxConcurrent)};
     int funcIdx = ncclDevFuncId_P2p(useLL128SendRecv);
     if (funcIdx < 0) {
       WARN("%s: unsupported collective. Please ensure the collective has been enabled in build.", __func__);
-      return ncclInvalidUsage;
+      ret = ncclInvalidUsage;
+      goto cleanup;
     }
-    addWorkBatchToPlan(comm, plan, channelId, ncclDevWorkTypeP2p, funcIdx, NCCL_PROGRESS_P2P_COUNTER_INDEX, workOffset,
-                       p2pRound, batchP2P);
-    // Add proxy ops.
-    for (int dir = 0; dir < nProxyOps; dir++) {
-      // Partition steps across channels.
-      int nParts = dir ? work->nSendChannels : work->nRecvChannels;
-      void* addr = dir ? work->sendAddr : work->recvAddr;
-      size_t bytes = dir ? work->sendBytes : work->recvBytes;
-      if (ncclProfilerProxyDiagEnabled()) {
-        proxyOps[dir].totalBytes = bytes;
-      }
-      proxyOps[dir].recvbuff = nullptr;
-      if (nParts <= part) {
-        proxyOps[dir].nsteps = 0;
-      } else if (bytes == 0) {
-        proxyOps[dir].nsteps = 1;
-        proxyOps[dir].nbytes = 0;
-      } else {
-        size_t chunkDataSize = u32fp8Decode(dir ? work->sendChunkSize_u32fp8 : work->recvChunkSize_u32fp8);
-        size_t partBeg, partEnd;
-        ncclP2pPartBounds(nParts, part, bytes, &partBeg, &partEnd);
-        if (proxyOps[dir].reg) {
-          (dir ? proxyOps[dir].sendbuff : proxyOps[dir].recvbuff) = (uint8_t*)addr + partBeg;
-          (dir ? proxyOps[dir].sendMhandle : proxyOps[dir].recvMhandle) = handles[dir][part];
-          proxyOps[dir].nbytes = partEnd - partBeg;
-          proxyOps[dir].nsteps = DIVUP(proxyOps[dir].nbytes, NCCL_MAX_NET_SIZE);
-        } else {
-          proxyOps[dir].nsteps = divUp(partEnd - partBeg, chunkDataSize);
-          proxyOps[dir].nbytes = std::min(partEnd - partBeg, chunkDataSize);
-        }
-        if (proxyOps[dir].protocol == NCCL_PROTO_LL) {
-          // Convert data bytes to wire bytes (legacy LL carries one flag word per data word).
-          proxyOps[dir].nbytes *= 2;
-          proxyOps[dir].nbytes = roundUp(proxyOps[dir].nbytes, sizeof(union ncclLLFifoLine));
-        } else if (proxyOps[dir].protocol == NCCL_PROTO_LL128) {
-          // Convert data bytes to wire bytes (LL128 data lines carry an extra flag word).
-          proxyOps[dir].nbytes = divUp(proxyOps[dir].nbytes, comm->ll128DataElems * sizeof(uint64_t)) *
-                                 comm->ll128LineElems * sizeof(uint64_t);
-        }
-      }
 
-      if (proxyOps[dir].nsteps != 0) {
-        // Calculate the opCount after adding batch since then the batch count will
-        // equal one plus the batch index this p2p settled in.
-        proxyOps[dir].channelId = channelId;
-        proxyOps[dir].opCount = uint64_t(comm->planner.wipPlan.channels[channelId].nWorkBatchesP2p) << 1 | 1;
-        proxyOps[dir].nChannels = nChannels[dir];
-        proxyOps[dir].nPeers = concurrentTasks[dir];
-        NCCLCHECKGOTO(ncclAddProxyOpIfNeeded(comm, plan, &proxyOps[dir]), ret, cleanup);
+    // A work maps its parts with one stride (see sendrecv.h), the larger of the per-peer tile and
+    // its channel count.
+    auto addWork = [&](bool useRecv, bool useSend) -> ncclResult_t {
+      int workChannels[2] = {useRecv ? nChannels[0] : 0, useSend ? nChannels[1] : 0};
+      int nWorkParts = std::max(workChannels[0], workChannels[1]);
+      int channelStride = ncclP2pWorkChannelStride(comm->p2pnChannelsPerPeer, workChannels[1], workChannels[0]);
+      bool wideP2P = channelStride > comm->p2pnChannelsPerPeer && !(useRecv && proxied[0]) && !(useSend && proxied[1]);
+
+      struct ncclWorkList* workNode =
+        ncclMemoryStackAllocInlineArray<ncclWorkList, ncclDevWorkP2p>(&comm->memScoped, 1);
+      workNode->workType = ncclDevWorkTypeP2p;
+      workNode->size = sizeof(struct ncclDevWorkP2p);
+      ncclIntruQueueEnqueue(&plan->workQueue, workNode);
+      uint32_t workOffset = plan->workBytes;
+      plan->workBytes += sizeof(struct ncclDevWorkP2p);
+
+      struct ncclDevWorkP2p* work = (struct ncclDevWorkP2p*)(workNode + 1);
+      work->nP2pChannels = comm->p2pnChannels;
+      work->channelBase = base;
+      work->nSendChannels = workChannels[1];
+      work->sendProtoLL = protoLatency[1];
+      work->sendNetReg = netRegistered[1];
+      work->sendIpcReg = ipcRegistered[1];
+      work->sendChunkSize_u32fp8 = chunkDataSize_u32fp8[1];
+      work->sendRank = sendRank;
+      work->sendAddr = sendAddr;
+      work->sendBytes = (!useSend || sendBytes == -1) ? 0 : sendBytes;
+      work->sendConnIndex = connIndex[1];
+      work->sendOpCount = sendOpCount;
+      work->nRecvChannels = workChannels[0];
+      work->recvProtoLL = protoLatency[0];
+      work->recvNetReg = netRegistered[0];
+      work->recvIpcReg = ipcRegistered[0];
+      work->recvChunkSize_u32fp8 = chunkDataSize_u32fp8[0];
+      work->recvRank = recvRank;
+      work->recvAddr = recvAddr;
+      work->recvBytes = (!useRecv || recvBytes == -1) ? 0 : recvBytes;
+      // One bit covers both directions, so it has to hold if either task asked for KernelCh.
+      work->profilerEnabled = 0;
+      if (ncclProfilerPluginLoaded()) {
+        for (int dir = 0; dir < 2; dir++) {
+          if (workChannels[dir] && p2pTasks[dir] && (p2pTasks[dir]->eActivationMask & ncclProfileKernelCh)) {
+            work->profilerEnabled = 1;
+            break;
+          }
+        }
       }
+      work->recvConnIndex = connIndex[0];
+      work->recvOpCount = recvOpCount;
+
+      for (int part = 0; part < nWorkParts; part++) {
+        int channelId =
+          ncclP2pChannelForPart(comm->p2pnChannels, base, part, channelStride, comm->nNodes, comm->p2pChannelShiftSize);
+        plan->channelMask.masks[channelId / 64] |= uint64_t(1) << (channelId % 64);
+        // Each direction uses its first nChannels[dir] parts; track per-direction
+        // channels so the profiler emits KernelCh per direction (see profiler.cc).
+        for (int i = 0; i < 2; i++)
+          if (part < workChannels[i]) p2pDirChannelMask[i].masks[channelId / 64] |= uint64_t(1) << (channelId % 64);
+        // Add batch first.
+        addWorkBatchToPlan(comm, plan, channelId, ncclDevWorkTypeP2p, funcIdx, NCCL_PROGRESS_P2P_COUNTER_INDEX,
+                           workOffset, p2pRound, batchP2P, wideP2P);
+        // Add proxy ops.
+        for (int dir = 0; dir < nProxyOps; dir++) {
+          // Partition steps across channels.
+          int nParts = dir ? work->nSendChannels : work->nRecvChannels;
+          void* addr = dir ? work->sendAddr : work->recvAddr;
+          size_t bytes = dir ? work->sendBytes : work->recvBytes;
+          if (ncclProfilerProxyDiagEnabled()) {
+            proxyOps[dir].totalBytes = bytes;
+          }
+          proxyOps[dir].recvbuff = nullptr;
+          if (nParts <= part) {
+            proxyOps[dir].nsteps = 0;
+          } else if (bytes == 0) {
+            proxyOps[dir].nsteps = 1;
+            proxyOps[dir].nbytes = 0;
+          } else {
+            size_t chunkDataSize = u32fp8Decode(dir ? work->sendChunkSize_u32fp8 : work->recvChunkSize_u32fp8);
+            size_t partBeg, partEnd;
+            ncclP2pPartBounds(nParts, part, bytes, &partBeg, &partEnd);
+            if (proxyOps[dir].reg) {
+              (dir ? proxyOps[dir].sendbuff : proxyOps[dir].recvbuff) = (uint8_t*)addr + partBeg;
+              (dir ? proxyOps[dir].sendMhandle : proxyOps[dir].recvMhandle) = handles[dir][part];
+              proxyOps[dir].nbytes = partEnd - partBeg;
+              proxyOps[dir].nsteps = DIVUP(proxyOps[dir].nbytes, NCCL_MAX_NET_SIZE);
+            } else {
+              proxyOps[dir].nsteps = divUp(partEnd - partBeg, chunkDataSize);
+              proxyOps[dir].nbytes = std::min(partEnd - partBeg, chunkDataSize);
+            }
+            if (proxyOps[dir].protocol == NCCL_PROTO_LL) {
+              // Convert data bytes to wire bytes (legacy LL carries one flag word per data word).
+              proxyOps[dir].nbytes *= 2;
+              proxyOps[dir].nbytes = roundUp(proxyOps[dir].nbytes, sizeof(union ncclLLFifoLine));
+            } else if (proxyOps[dir].protocol == NCCL_PROTO_LL128) {
+              // Convert data bytes to wire bytes (LL128 data lines carry an extra flag word).
+              proxyOps[dir].nbytes = divUp(proxyOps[dir].nbytes, comm->ll128DataElems * sizeof(uint64_t)) *
+                                     comm->ll128LineElems * sizeof(uint64_t);
+            }
+          }
+
+          if (proxyOps[dir].nsteps != 0) {
+            // Calculate the opCount after adding batch since then the batch count will
+            // equal one plus the batch index this p2p settled in.
+            proxyOps[dir].channelId = channelId;
+            proxyOps[dir].opCount = uint64_t(comm->planner.wipPlan.channels[channelId].nWorkBatchesP2p) << 1 | 1;
+            proxyOps[dir].nChannels = nChannels[dir];
+            proxyOps[dir].nPeers = concurrentTasks[dir];
+            NCCLCHECK(ncclAddProxyOpIfNeeded(comm, plan, &proxyOps[dir]));
+          }
+        }
+      }
+      return ncclSuccess;
+    };
+
+    // Each direction uses the per-peer tile, or the widened tile of a large direct transfer, as
+    // the peer does. Directions on different tiles need separate works; the widened one goes first
+    // on every rank so both ends see the same order on channels the two tiles share.
+    int tile[2] = {std::max(comm->p2pnChannelsPerPeer, nChannels[0]),
+                   std::max(comm->p2pnChannelsPerPeer, nChannels[1])};
+    // The profiler counts one KernelCh step per work and channel, so each work of a split round is a
+    // pair of its own, numbered in emission order.
+    if (!selfSend && bytes[0] != -1 && bytes[1] != -1 && tile[0] != tile[1]) {
+      bool recvFirst = tile[0] > tile[1];
+      p2pTasks[recvFirst ? 0 : 1]->p2pPairId = ++plan->p2pPairCounter;
+      NCCLCHECKGOTO(addWork(recvFirst, !recvFirst), ret, cleanup);
+      p2pTasks[recvFirst ? 1 : 0]->p2pPairId = ++plan->p2pPairCounter;
+      NCCLCHECKGOTO(addWork(!recvFirst, recvFirst), ret, cleanup);
+      if (recvFirstOut) *recvFirstOut = recvFirst;
+    } else {
+      ++plan->p2pPairCounter;
+      for (int i = 0; i < 2; i++) {
+        if (p2pTasks[i]) p2pTasks[i]->p2pPairId = plan->p2pPairCounter;
+      }
+      NCCLCHECKGOTO(addWork(true, true), ret, cleanup);
     }
   }
   for (int i = 0; i < 2; i++) {
@@ -1946,22 +2076,37 @@ static ncclResult_t scheduleP2pTasksToPlan(struct ncclComm* comm, int* p2pEpoch,
         comm->planner.nTasksP2pSend -= 1;
         comm->planner.nTasksP2pRecv -= 1;
       } else {
-        // Ensure room for worst case of one new batch per channel.
-        int reservationChannels = rcclP2pReservationChannels(comm, recv, send);
-        if (!ncclTestBudget(budget, plan->nWorkBatches + reservationChannels,
-                            plan->workBytes + sizeof(struct ncclDevWorkP2p))) {
+        struct ncclTaskP2p* p2pTasks[2] = {recv, send};
+        // Start with the connector-aware normal reservation (CE caps, Scatter limits and P2P-NET).
+        int roundBatches = rcclP2pReservationChannels(comm, recv, send);
+        int roundWorks = 1;
+        // A widened round is still one work unless one direction stays on the
+        // per-peer tile; then reserve both tiles and both work items.
+        int strides[2] = {rcclP2pChannelStride(comm, recv), rcclP2pChannelStride(comm, send)};
+        int maxStride = std::max(strides[0], strides[1]);
+        if (maxStride > nChannelsMax) {
+          if (rcclP2pTaskUsesNarrowTransport(comm, recv, *p2pRound, /*isSendNotRecv=*/false)) strides[0] = nChannelsMax;
+          if (rcclP2pTaskUsesNarrowTransport(comm, send, *p2pRound, /*isSendNotRecv=*/true)) strides[1] = nChannelsMax;
+          maxStride = std::max(strides[0], strides[1]);
+          bool maySplit =
+            recv && send && sendRank != comm->rank && (strides[0] != strides[1] || recvBytes != sendBytes);
+          roundBatches = maySplit ? maxStride + nChannelsMax : maxStride;
+          roundWorks = maySplit ? 2 : 1;
+        }
+        if (!ncclTestBudget(budget, plan->nWorkBatches + roundBatches,
+                            plan->workBytes + roundWorks * sizeof(struct ncclDevWorkP2p))) {
           if (plan->nWorkBatches == 0) {
-            WARN("P2P round with %d channels per peer does not fit an empty kernel plan (%zd bytes of kernel args); "
-                 "lower NCCL_MAX_P2P_NCHANNELS",
-                 reservationChannels, budget->inArgsBytes);
+            WARN("P2P round requiring %d batches does not fit an empty kernel plan (%zd bytes of kernel args); "
+                 "lower NCCL_MAX_P2P_NCHANNELS or RCCL_P2P_DIRECT_MAX_CHANNELS",
+                 roundBatches, budget->inArgsBytes);
             return ncclInvalidUsage;
           }
           return ncclSuccess;
         }
-        struct ncclTaskP2p* p2pTasks[2] = {recv, send};
+        bool recvFirst = false;
         NCCLCHECK(addP2pToPlan(comm, plan, nChannelsMin, nChannelsMax, *p2pRound, sendRank, sendBuff, sendBytes,
                                recvRank, recvBuff, recvBytes, send ? send->opCount : 0, recv ? recv->opCount : 0,
-                               planTotalTasks, p2pTasks));
+                               planTotalTasks, p2pTasks, &recvFirst));
         if (send != nullptr) {
           ncclIntruQueueDequeue(&peers[sendRank].sendQueue);
           // Profiler - We can overwrite groupAPI event handles here since all operations here belong to the same group
@@ -1969,7 +2114,6 @@ static ncclResult_t scheduleP2pTasksToPlan(struct ncclComm* comm, int* p2pEpoch,
           if (send->launchCompletionEvent != nullptr) {
             plan->launchCompletionEvent = send->launchCompletionEvent;
           }
-          ncclIntruQueueEnqueue(&plan->p2pTaskQueue, send);
           comm->planner.nTasksP2p -= 1;
           comm->planner.nTasksP2pSend -= 1;
         }
@@ -1980,10 +2124,12 @@ static ncclResult_t scheduleP2pTasksToPlan(struct ncclComm* comm, int* p2pEpoch,
           if (recv->launchCompletionEvent != nullptr) {
             plan->launchCompletionEvent = recv->launchCompletionEvent;
           }
-          ncclIntruQueueEnqueue(&plan->p2pTaskQueue, recv);
           comm->planner.nTasksP2p -= 1;
           comm->planner.nTasksP2pRecv -= 1;
         }
+        // The profiler posts KernelCh steps in p2pTaskQueue order, which must follow work emission.
+        for (struct ncclTaskP2p* task : {recvFirst ? recv : send, recvFirst ? send : recv})
+          if (task != nullptr) ncclIntruQueueEnqueue(&plan->p2pTaskQueue, task);
       }
     }
     *p2pRound = 0;
@@ -4103,73 +4249,85 @@ static ncclResult_t p2pTaskAppend(struct ncclComm* comm, struct ncclInfo* info, 
   if (isSendNotRecv) planner->nTasksP2pSend += 1;
   else planner->nTasksP2pRecv += 1;
 
-  // Mark channels that need pre-connect
+  // Mark channels that need pre-connect. A widened direct task uses the per-peer tile for smaller
+  // transfers and the widened tile for larger ones, so it connects both.
   if (comm->rank != peer) {
     int connIndex = rcclP2pTaskConnIndex(comm, collAPI, peer);
-    bool& seen =
-      isSendNotRecv ?
-        (connIndex == NCCL_CONN_IDX_P2P_CE ? planner->peers[peer].sendCeSeen : planner->peers[peer].sendSeen) :
-        (connIndex == NCCL_CONN_IDX_P2P_CE ? planner->peers[peer].recvCeSeen : planner->peers[peer].recvSeen);
-    if (!seen) {
-      int nParts = rcclP2pTaskParts(comm, collAPI, peer);
-      // planner->peers[peer].send/recvSeen is private to each comm, so we need to set it anyway.
-      // Leave it clear when only some parts are connected, so a later task to this peer that uses
-      // all of them still connects the rest.
-      if (nParts == comm->p2pnChannelsPerPeer || connIndex == NCCL_CONN_IDX_P2P_CE) seen = true;
+    int normalParts = rcclP2pTaskParts(comm, collAPI, peer);
+    int directStride = rcclP2pChannelStride(comm, p2p);
+    struct rcclP2pPreconnectPolicy policy =
+      rcclP2pPreconnectPolicyForTask(comm->p2pnChannelsPerPeer, normalParts, directStride);
+    bool& ceSeen = isSendNotRecv ? planner->peers[peer].sendCeSeen : planner->peers[peer].recvCeSeen;
+    uint8_t& kernelSeen = isSendNotRecv ? planner->peers[peer].sendSeen : planner->peers[peer].recvSeen;
+    if (connIndex == NCCL_CONN_IDX_P2P_CE) {
+      if (ceSeen) goto p2p_preconnect_done;
+      ceSeen = true;
+      policy.nTiles = 1;
+      policy.partCounts[0] = normalParts;
+      policy.mappingStrides[0] = comm->p2pnChannelsPerPeer;
+      policy.completeMask = 1;
+    }
+    for (int t = 0; t < policy.nTiles; t++) {
+      // A partial policy tile, such as multi-node AINIC Scatter, does not cover
+      // the normal per-peer tile. Leave it unmarked so a later direct task can
+      // connect the remaining channels.
+      bool completeTile = policy.completeMask & (1 << t);
+      if (connIndex != NCCL_CONN_IDX_P2P_CE && completeTile && (kernelSeen & (1 << t))) continue;
+      if (connIndex != NCCL_CONN_IDX_P2P_CE && completeTile) kernelSeen |= 1 << t;
       int round = 0;
       while (peer != (isSendNotRecv ? comm->p2pSchedule[round].sendRank : comm->p2pSchedule[round].recvRank)) {
         round += 1;
       }
       uint8_t base = ncclP2pChannelBaseForRound(comm, round, rcclEffectiveP2pBatchEnable(comm));
-      for (int c = 0; c < nParts; c++) {
-          int channelId = ncclP2pChannelForPart(comm->p2pnChannels, base, c, comm->p2pnChannelsPerPeer, comm->nNodes,
-                                                comm->p2pChannelShiftSize);
-          if (isSendNotRecv) {
-            if (comm->channels[channelId].peers[peer]->send[connIndex].hasSeen == 0) {
-              // P2P uses only 1 connector
-              // the send/recv connector is shared among split shared comms. We need to set hasSeen to
-              // 1 in order to avoid duplicate connection setup if user group sendrecv ops with split
-              // shared comms together.
-              comm->channels[channelId].peers[peer]->send[connIndex].hasSeen = 1;
-              comm->channels[channelId].peers[peer]->send[connIndex].p2pOnly = 1;
-              // comm->connectSend[peer] |= (1UL<<channelId);
-              comm->connectSend[peer + CHANNEL_MASK_OFFSET(comm->nRanks, connIndex)].masks[channelId / 64] |=
-                (1UL << (channelId % 64));
-              ncclGroupCommPreconnect(comm);
-            }
-            if (comm->p2pNet && comm->channels[channelId].peers[peer]->send[NCCL_CONN_IDX_P2P_NET].hasSeen == 0) {
-              comm->channels[channelId].peers[peer]->send[NCCL_CONN_IDX_P2P_NET].hasSeen = 1;
-              comm->channels[channelId].peers[peer]->send[NCCL_CONN_IDX_P2P_NET].p2pOnly = 1;
-              // comm->connectSend[peer+comm->nRanks*NCCL_CONN_IDX_P2P_NET] |= (1UL<<channelId);
-              comm->connectSend[peer + comm->nRanks * NCCL_CONN_IDX_P2P_NET].masks[channelId / 64] |=
-                (1UL << (channelId % 64));
-              ncclGroupCommPreconnect(comm);
-            }
-          } else {
-            if (comm->channels[channelId].peers[peer]->recv[connIndex].hasSeen == 0) {
-              // P2P uses only 1 connector
-              comm->channels[channelId].peers[peer]->recv[connIndex].hasSeen = 1;
-              comm->channels[channelId].peers[peer]->recv[connIndex].p2pOnly = 1;
-              // comm->connectRecv[peer] |= (1UL<<channelId);
-              comm->connectRecv[peer + CHANNEL_MASK_OFFSET(comm->nRanks, connIndex)].masks[channelId / 64] |=
-                (1UL << (channelId % 64));
-              ncclGroupCommPreconnect(comm);
-            }
-            if (comm->p2pNet && comm->channels[channelId].peers[peer]->recv[NCCL_CONN_IDX_P2P_NET].hasSeen == 0) {
-              comm->channels[channelId].peers[peer]->recv[NCCL_CONN_IDX_P2P_NET].hasSeen = 1;
-              comm->channels[channelId].peers[peer]->recv[NCCL_CONN_IDX_P2P_NET].p2pOnly = 1;
-              // comm->connectRecv[peer+comm->nRanks*NCCL_CONN_IDX_P2P_NET] |= (1UL<<channelId);
-              comm->connectRecv[peer + comm->nRanks * NCCL_CONN_IDX_P2P_NET].masks[channelId / 64] |=
-                (1UL << (channelId % 64));
-              ncclGroupCommPreconnect(comm);
-            }
+      for (int c = 0; c < policy.partCounts[t]; c++) {
+        int channelId = ncclP2pChannelForPart(comm->p2pnChannels, base, c, policy.mappingStrides[t], comm->nNodes,
+                                              comm->p2pChannelShiftSize);
+        if (isSendNotRecv) {
+          if (comm->channels[channelId].peers[peer]->send[connIndex].hasSeen == 0) {
+            // P2P uses only 1 connector
+            // the send/recv connector is shared among split shared comms. We need to set hasSeen to
+            // 1 in order to avoid duplicate connection setup if user group sendrecv ops with split
+            // shared comms together.
+            comm->channels[channelId].peers[peer]->send[connIndex].hasSeen = 1;
+            comm->channels[channelId].peers[peer]->send[connIndex].p2pOnly = 1;
+            // comm->connectSend[peer] |= (1UL<<channelId);
+            comm->connectSend[peer + CHANNEL_MASK_OFFSET(comm->nRanks, connIndex)].masks[channelId / 64] |=
+              (1UL << (channelId % 64));
+            ncclGroupCommPreconnect(comm);
+          }
+          if (comm->p2pNet && comm->channels[channelId].peers[peer]->send[NCCL_CONN_IDX_P2P_NET].hasSeen == 0) {
+            comm->channels[channelId].peers[peer]->send[NCCL_CONN_IDX_P2P_NET].hasSeen = 1;
+            comm->channels[channelId].peers[peer]->send[NCCL_CONN_IDX_P2P_NET].p2pOnly = 1;
+            // comm->connectSend[peer+comm->nRanks*NCCL_CONN_IDX_P2P_NET] |= (1UL<<channelId);
+            comm->connectSend[peer + comm->nRanks * NCCL_CONN_IDX_P2P_NET].masks[channelId / 64] |=
+              (1UL << (channelId % 64));
+            ncclGroupCommPreconnect(comm);
+          }
+        } else {
+          if (comm->channels[channelId].peers[peer]->recv[connIndex].hasSeen == 0) {
+            // P2P uses only 1 connector
+            comm->channels[channelId].peers[peer]->recv[connIndex].hasSeen = 1;
+            comm->channels[channelId].peers[peer]->recv[connIndex].p2pOnly = 1;
+            // comm->connectRecv[peer] |= (1UL<<channelId);
+            comm->connectRecv[peer + CHANNEL_MASK_OFFSET(comm->nRanks, connIndex)].masks[channelId / 64] |=
+              (1UL << (channelId % 64));
+            ncclGroupCommPreconnect(comm);
+          }
+          if (comm->p2pNet && comm->channels[channelId].peers[peer]->recv[NCCL_CONN_IDX_P2P_NET].hasSeen == 0) {
+            comm->channels[channelId].peers[peer]->recv[NCCL_CONN_IDX_P2P_NET].hasSeen = 1;
+            comm->channels[channelId].peers[peer]->recv[NCCL_CONN_IDX_P2P_NET].p2pOnly = 1;
+            // comm->connectRecv[peer+comm->nRanks*NCCL_CONN_IDX_P2P_NET] |= (1UL<<channelId);
+            comm->connectRecv[peer + comm->nRanks * NCCL_CONN_IDX_P2P_NET].masks[channelId / 64] |=
+              (1UL << (channelId % 64));
+            ncclGroupCommPreconnect(comm);
           }
         }
+      }
         // A direct CE task may switch to the P2P-NET connector at plan time for
         // large messages. Keep that connector's masks uncapped while the CE
         // connector itself stays within its per-peer resource limit.
         if (comm->p2pNet && connIndex == NCCL_CONN_IDX_P2P_CE) {
-          for (int c = nParts; c < comm->p2pnChannelsPerPeer; c++) {
+          for (int c = normalParts; c < comm->p2pnChannelsPerPeer; c++) {
             int channelId = ncclP2pChannelForPart(comm->p2pnChannels, base, c, comm->p2pnChannelsPerPeer, comm->nNodes,
                                                   comm->p2pChannelShiftSize);
             struct ncclConnector* netConn = isSendNotRecv ?
@@ -4188,6 +4346,7 @@ static ncclResult_t p2pTaskAppend(struct ncclComm* comm, struct ncclInfo* info, 
         }
     }
   }
+p2p_preconnect_done:
   ncclProfilerStopP2pApiEvent();
   return ncclSuccess;
 }

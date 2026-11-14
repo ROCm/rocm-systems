@@ -453,6 +453,11 @@ inline __host__ __device__ void ncclP2pPartBounds(int nParts, int part, size_t b
 // implemented in channel.h
 inline __host__ uint8_t ncclP2pChannelBaseForRound(struct ncclComm* comm, int p2pRound, int p2pBatchEnable);
 
+inline __host__ __device__ int ncclP2pWorkChannelStride(int channelsPerPeer, int nSendChannels, int nRecvChannels) {
+  int workChannels = nSendChannels > nRecvChannels ? nSendChannels : nRecvChannels;
+  return channelsPerPeer > workChannels ? channelsPerPeer : workChannels;
+}
+
 // ncclP2pChannelToPart and ncclP2pChannelForPart are inverses. The device code
 // uses ncclP2pChannelToPart to determine which part "this" channel is responsible for.
 inline __host__ int ncclP2pChannelForPart(int nP2pChannels, int base, int part, int nParts, int nNodes, int shiftSize) {
@@ -837,17 +842,14 @@ struct alignas(16) ncclDevKernelArgsStorage {
 };
 
 typedef ncclDevKernelArgsStorage<(5 << 10)> ncclDevKernelArgs5K;
+typedef ncclDevKernelArgsStorage<(8 << 10)> ncclDevKernelArgs8K;
 typedef ncclDevKernelArgsStorage<(4 << 10)> ncclDevKernelArgs4K;
 // typedef ncclDevKernelArgsStorage<(32<<10)-4> ncclDevKernelArgs31K;
 
-#ifdef ENABLE_WARP_SPEED
-// needed extra storage for accomodating more channels than 128 for WarpSpeed support
-// 256 channels (i.e. 256 warps) would hang without this extra storage
-// 5KB should be sufficient for now
-typedef ncclDevKernelArgs5K ncclDevKernelArgsDefaultStorage;
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+// 8 KiB accommodates the kernel-args header plus one batch per channel at 256 channels on ROCm.
+typedef ncclDevKernelArgs8K ncclDevKernelArgsDefaultStorage;
 #else
-// 5KB needed so 256-channel non-WarpSpeed builds can fit one batch per channel
-// in the kernel-args buffer (4KB only fits ~252 batches).
 typedef ncclDevKernelArgs5K ncclDevKernelArgsDefaultStorage;
 #endif
 __host__ __device__ constexpr int ncclMaxKernelArgsSize(/*int cudaDriver, */ int cudaArch = NCCL_CUDA_ARCH) {

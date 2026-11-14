@@ -8,6 +8,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <climits>
 #include <cstdlib>
 #include <cstring>
@@ -16,6 +17,10 @@
 
 #include "TaskPrepScene.h"
 #include "fakes/bootstrap_stubs.h"
+
+// transport/p2p.cc owns this policy getter; the isolated TaskPrep target does
+// not compile that transport TU.
+bool ncclP2pUsesMemcpy() { return false; }
 
 #include TASK_POSTTUNING_CC_PATH
 
@@ -1314,7 +1319,7 @@ class TaskPostTuning_P2pScene {
     return isSendNotRecv ? connectSend_[peer] : connectRecv_[peer];
   }
 
-  bool& Seen(bool isSendNotRecv, int peer) {
+  uint8_t& Seen(bool isSendNotRecv, int peer) {
     return isSendNotRecv ? planPeers_[peer].sendSeen : planPeers_[peer].recvSeen;
   }
   bool& CeSeen(bool isSendNotRecv, int peer) {
@@ -1525,6 +1530,28 @@ TEST_F(TaskPostTuningMicrotest, P2pRecordPreconnect_FreshRecvPeer_ClaimsItsRecvC
   EXPECT_TRUE(TaskPostTuning_MaskHasExactly(p2p.connectRecv(kP2pPeer), recvChannels));
   EXPECT_TRUE(TaskPostTuning_MaskHasExactly(p2p.connectSend(kP2pPeer), {}));
   EXPECT_TRUE(TaskPostTuning_MaskHasExactly(p2p.connectRecv(kP2pRank), {}));
+}
+
+TEST_F(TaskPostTuningMicrotest, P2pRecordPreconnect_WidenedDirectTaskConnectsBothTiles) {
+  for (bool isSendNotRecv : {kIsSend, kIsRecv}) {
+    TaskPostTuning_P2pScene p2p;
+    ScopedHook stride(g_rcclP2pChannelStrideForApi,
+                      [](struct ncclComm*, ncclFunc_t, int, int, bool) { return 4; });
+    int round = isSendNotRecv ? kP2pSendRound : kP2pRecvRound;
+    std::vector<int> expected =
+      TaskPostTuning_SingleNodeChannels(round, kP2pChannelsPerPeer, kP2pChannels);
+    std::vector<int> wide = TaskPostTuning_SingleNodeChannels(round, 4, kP2pChannels);
+    for (int channel : wide)
+      if (std::find(expected.begin(), expected.end(), channel) == expected.end()) expected.push_back(channel);
+    bool needPreconnect = false;
+
+    ASSERT_EQ(ncclSuccess,
+              postTuneP2pRecordPreconnect(p2p.comm(), kP2pPeer, isSendNotRecv, ncclFuncSendRecv, &needPreconnect));
+
+    EXPECT_TRUE(needPreconnect);
+    EXPECT_EQ(3, p2p.Seen(isSendNotRecv, kP2pPeer));
+    EXPECT_TRUE(TaskPostTuning_MaskHasExactly(p2p.connect(isSendNotRecv, kP2pPeer), expected));
+  }
 }
 
 // Scatter with fewer parts than p2pnChannelsPerPeer claims only its own channels and leaves the side

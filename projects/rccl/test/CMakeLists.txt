@@ -842,6 +842,7 @@ if(BUILD_TESTS)
       IpcsocketTests.cpp
       TopoEnvPolicyTests.cpp
       P2pCeChannelCap_test.cpp
+      P2pDirectMaxChannels_test.cpp
       P2pMaxNchannelsTests.cpp
       TopoNicFusionTests.cpp
       NetSocketTests.cpp

@@ -33,6 +33,7 @@ int64_t ncclParamMinCTAs();
 int64_t ncclParamMaxCTAs();
 int64_t ncclParamNvlsChannels();
 int64_t ncclParamCGAClusterSize();
+int64_t rcclParamP2pDirectMaxChannels();
 
 static inline int ncclFuncTrafficPerByte(ncclFunc_t func, int nRanks) {
   switch (func) {
@@ -166,49 +167,62 @@ static ncclResult_t postTuneP2pRecordPreconnect(struct ncclComm* comm, int peer,
   if (peer < 0 || peer >= comm->nRanks) return ncclInvalidArgument;
   if (comm->rank == peer) return ncclSuccess;
   int connIndex = rcclP2pTaskConnIndex(comm, collAPI, peer);
-  bool& seen = isSendNotRecv ?
-                 (connIndex == NCCL_CONN_IDX_P2P_CE ? planner->peers[peer].sendCeSeen : planner->peers[peer].sendSeen) :
-                 (connIndex == NCCL_CONN_IDX_P2P_CE ? planner->peers[peer].recvCeSeen : planner->peers[peer].recvSeen);
-  if (seen) return ncclSuccess;
+  // A widened direct task uses the per-peer tile for smaller transfers and the widened tile for
+  // larger ones, so it connects both.
+  int normalParts = rcclP2pTaskParts(comm, collAPI, peer);
+  int directStride =
+    rcclP2pChannelStrideForApi(comm, collAPI, peer, rcclParamP2pDirectMaxChannels(), ncclP2pUsesMemcpy());
+  struct rcclP2pPreconnectPolicy policy =
+    rcclP2pPreconnectPolicyForTask(comm->p2pnChannelsPerPeer, normalParts, directStride);
+  uint8_t tileMask = policy.nTiles == 2 ? 3 : 1;
+  bool& ceSeen = isSendNotRecv ? planner->peers[peer].sendCeSeen : planner->peers[peer].recvCeSeen;
+  uint8_t* kernelSeen = isSendNotRecv ? &planner->peers[peer].sendSeen : &planner->peers[peer].recvSeen;
+  if (connIndex == NCCL_CONN_IDX_P2P_CE) {
+    if (ceSeen) return ncclSuccess;
+    ceSeen = true;
+    policy.nTiles = 1;
+    policy.partCounts[0] = normalParts;
+    policy.mappingStrides[0] = comm->p2pnChannelsPerPeer;
+    policy.completeMask = 1;
+    tileMask = 1;
+  } else {
+    bool partialNormalTile = !(policy.completeMask & 1);
+    if (!partialNormalTile && (*kernelSeen & tileMask) == tileMask) return ncclSuccess;
+  }
 
   NCCLCHECK(postTuneP2pChannelBase(comm, peer, isSendNotRecv, &base));
 
   // Mark channels that need pre-connect. planner->peers[peer].send/recvSeen is
-  // private to each comm, so we need to set it anyway. Leave it clear when only
-  // some parts are connected, so a later task to this peer still connects the rest.
-  int nParts = rcclP2pTaskParts(comm, collAPI, peer);
-  if (nParts == comm->p2pnChannelsPerPeer || connIndex == NCCL_CONN_IDX_P2P_CE) seen = true;
-  for (int c = 0; c < nParts; c++) {
-    int channelId = ncclP2pChannelForPart(comm->p2pnChannels, base, c, comm->p2pnChannelsPerPeer, comm->nNodes,
-                                          comm->p2pChannelShiftSize);
+  // private to each comm, so we need to set it anyway.
+  for (int t = 0; t < policy.nTiles; t++) {
+    if (!(tileMask & (1 << t))) continue;
+    bool completeTile = policy.completeMask & (1 << t);
+    if (connIndex != NCCL_CONN_IDX_P2P_CE && completeTile && (*kernelSeen & (1 << t))) continue;
+    if (connIndex != NCCL_CONN_IDX_P2P_CE && completeTile) *kernelSeen |= 1 << t;
+    for (int c = 0; c < policy.partCounts[t]; c++) {
+      int channelId = ncclP2pChannelForPart(comm->p2pnChannels, base, c, policy.mappingStrides[t], comm->nNodes,
+                                            comm->p2pChannelShiftSize);
 
-    // P2P uses only 1 connector. The send/recv connector is shared among split
-    // shared comms, so set hasSeen to avoid duplicate connection setup if user
-    // groups sendrecv ops with split shared comms together.
-    if (isSendNotRecv) {
-      if (comm->channels[channelId].peers[peer]->send[connIndex].hasSeen == 0) {
-        comm->channels[channelId].peers[peer]->send[connIndex].hasSeen = 1;
-        comm->channels[channelId].peers[peer]->send[connIndex].p2pOnly = 1;
-        comm->connectSend[peer + CHANNEL_MASK_OFFSET(comm->nRanks, connIndex)].masks[channelId / 64] |=
-          (1ULL << (channelId % 64));
-        *needPreconnect = true;
-      }
-    } else {
-      if (comm->channels[channelId].peers[peer]->recv[connIndex].hasSeen == 0) {
-        comm->channels[channelId].peers[peer]->recv[connIndex].hasSeen = 1;
-        comm->channels[channelId].peers[peer]->recv[connIndex].p2pOnly = 1;
-        comm->connectRecv[peer + CHANNEL_MASK_OFFSET(comm->nRanks, connIndex)].masks[channelId / 64] |=
-          (1ULL << (channelId % 64));
+      // P2P uses only 1 connector. The send/recv connector is shared among split
+      // shared comms, so set hasSeen to avoid duplicate connection setup if user
+      // groups sendrecv ops with split shared comms together.
+      struct ncclConnector* conn = isSendNotRecv ? &comm->channels[channelId].peers[peer]->send[connIndex] :
+                                                   &comm->channels[channelId].peers[peer]->recv[connIndex];
+      if (conn->hasSeen == 0) {
+        conn->hasSeen = 1;
+        conn->p2pOnly = 1;
+        struct channelMasks* masks = isSendNotRecv ?
+                                       &comm->connectSend[peer + CHANNEL_MASK_OFFSET(comm->nRanks, connIndex)] :
+                                       &comm->connectRecv[peer + CHANNEL_MASK_OFFSET(comm->nRanks, connIndex)];
+        masks->masks[channelId / 64] |= 1ULL << (channelId % 64);
         *needPreconnect = true;
       }
     }
   }
-
-  // P2P-NET selection is size-dependent and happens later in addP2pToPlan.
-  // Record a complete tile only when lifting a CE-specific cap; preserve
-  // intentional limits such as multi-node AINIC Scatter for kernel P2P.
+  // P2P-NET selection happens later. Lift only a CE-specific channel cap;
+  // kernel tiles retain intentional policies such as AINIC Scatter.
   if (comm->p2pNet) {
-    int netParts = connIndex == NCCL_CONN_IDX_P2P_CE ? comm->p2pnChannelsPerPeer : nParts;
+    int netParts = connIndex == NCCL_CONN_IDX_P2P_CE ? comm->p2pnChannelsPerPeer : normalParts;
     for (int c = 0; c < netParts; c++) {
       int channelId = ncclP2pChannelForPart(comm->p2pnChannels, base, c, comm->p2pnChannelsPerPeer, comm->nNodes,
                                             comm->p2pChannelShiftSize);
@@ -220,7 +234,7 @@ static ncclResult_t postTuneP2pRecordPreconnect(struct ncclComm* comm, int peer,
         netConn->p2pOnly = 1;
         struct channelMasks* masks = isSendNotRecv ? &comm->connectSend[peer + comm->nRanks * NCCL_CONN_IDX_P2P_NET] :
                                                      &comm->connectRecv[peer + comm->nRanks * NCCL_CONN_IDX_P2P_NET];
-        masks->masks[channelId / 64] |= (1ULL << (channelId % 64));
+        masks->masks[channelId / 64] |= 1ULL << (channelId % 64);
         *needPreconnect = true;
       }
     }
