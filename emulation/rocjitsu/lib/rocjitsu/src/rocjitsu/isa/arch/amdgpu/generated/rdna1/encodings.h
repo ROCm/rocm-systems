@@ -864,6 +864,7 @@ public:
 class Mimg : public IsaInstruction<Isa> {
 public:
   Mimg(std::string_view mnemonic, const MimgMachineInst *inst, ExecuteFn exec_fn);
+  std::string full_image_resource_name() const;
   bool should_print_dst_operand(uint8_t operand_index) const override {
     // Image atomics have one encoded VDATA tuple, printed as a source.
     return !mnemonic_.starts_with("image_atomic_") &&
@@ -878,6 +879,11 @@ public:
       const auto last = first + operand->size_bits() / 32;
       out += first == last ? "v" + std::to_string(first)
                            : "v[" + std::to_string(first) + ":" + std::to_string(last) + "]";
+      return;
+    }
+    // LLVM spells regular T# operands with eight SGPRs even in R128 mode.
+    if (inst_.r128 && operand_index && src_operands_[operand_index - 1] == nsa_vaddr_operand_) {
+      out += full_image_resource_name();
       return;
     }
     Instruction::append_src_operand(out, operand_index);

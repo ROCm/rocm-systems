@@ -408,7 +408,7 @@ struct MimgBuilderFields {
   std::array<uint32_t, 2> words{};
   builder_detail::set_field(words, op, 18, 7);
   builder_detail::set_field(words, 60, 26, 6);
-  builder_detail::set_field(words, fields.opm, 0, 1);
+  builder_detail::set_field(words, fields.opm | (op >> 7), 0, 1);
   builder_detail::set_field(words, fields.dmask, 8, 4);
   builder_detail::set_field(words, fields.unorm, 12, 1);
   builder_detail::set_field(words, fields.glc, 13, 1);

@@ -1015,6 +1015,7 @@ public:
 class Vsample : public IsaInstruction<Isa> {
 public:
   Vsample(std::string_view mnemonic, const VsampleMachineInst *inst, ExecuteFn exec_fn);
+  void append_src_operand(std::string &out, uint8_t index) const override;
   void build_modifiers(std::string &out) const override {
     auto *inst = &inst_;
     (void)inst;

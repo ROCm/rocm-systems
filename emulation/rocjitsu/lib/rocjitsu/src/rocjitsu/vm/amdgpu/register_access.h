@@ -1173,6 +1173,9 @@ public:
   [[nodiscard]] std::array<std::optional<RegisterRef>, 4>
   buffer_resource_registers(const Operand &op, unsigned scalar_words) const;
 
+  /// Inspect a scalar control input without publishing an architectural register read.
+  std::optional<uint32_t> scalar_control_value(uint32_t selector) const;
+
   // Scalar and per-lane operand access. Instruction implementations use these
   // for value-semantic operand reads and writes; Operand remains the
   // ISA-specific resolver/backend.
@@ -1997,7 +2000,6 @@ private:
   }
   /// Read an encoding-selected control word while planning an instruction's
   /// accesses. This does not constitute an executed register access.
-  std::optional<uint32_t> scalar_control_value(uint32_t selector) const;
   std::optional<uint64_t> vector_control_value(RegisterRef reg, unsigned lane) const;
 
   [[nodiscard]] uint32_t vgpr_region_wave_size(uint32_t physical_base, uint32_t reg_count) const {

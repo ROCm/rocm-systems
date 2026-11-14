@@ -2130,6 +2130,83 @@ TEST(GpuVmPipeline, LegacyVectorPeerLaneUsesOneDeferredOwnerEffect) {
   EXPECT_EQ(memory->backing->posts, 2u);
 }
 
+TEST(GpuVmPipeline, GraphicsSampleRoutesOnlyContributingTapsBeforeLoading) {
+  constexpr uint64_t first = 0x340, second = 0x680, inactive = 0x900;
+  constexpr uint32_t first_value = 0x12345678, second_value = 0xabcdef01;
+  class Pipeline : public amdgpu::GlobalMemPipeline {
+  public:
+    using GlobalMemPipeline::GlobalMemPipeline;
+    using GlobalMemPipeline::initiate_access;
+  };
+  for (bool legacy : {false, true}) {
+    SCOPED_TRACE(legacy);
+    TranslatedPipelineContext context;
+    ASSERT_NO_FATAL_FAILURE(context.initialize(legacy));
+    context.external->store(first, first_value);
+    context.external->store(second, second_value);
+    auto sample = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+    sample->is_load = true;
+    sample->elem_size = sizeof(uint32_t);
+    sample->num_elems = 1;
+    sample->mtype = amdgpu::Mtype::UC;
+    sample->wf_size = context.wf->wf_size();
+    sample->exec_mask = sample->lane_mask = 1;
+    sample->graphics_sample = std::make_unique<amdgpu::GraphicsSampleAccess>();
+    auto &graphics = *sample->graphics_sample;
+    graphics.tap_count = 3;
+    graphics.taps[0].addresses[0] = first;
+    graphics.taps[0].lane_mask = 1;
+    graphics.taps[1].addresses[0] = inactive;
+    graphics.taps[2].addresses[0] = second;
+    graphics.taps[2].lane_mask = 1;
+    auto &state = *sample;
+    TestMemoryInstruction instruction(std::move(sample));
+    Pipeline pipeline(&context.cu->l1_vector(), context.cu->l2());
+    bool open = false;
+    std::vector<uint64_t> routed, admitted;
+    context.external->data_route = [&](uint64_t address, size_t bytes, amdgpu::VmAccessKind kind) {
+      EXPECT_EQ(bytes, sizeof(uint32_t));
+      EXPECT_EQ(kind, amdgpu::VmAccessKind::Read);
+      routed.push_back(address);
+      return amdgpu::VmDataRoute::Local;
+    };
+    pipeline.set_ingress_handler([&](uint32_t, const amdgpu::GpuVmAccess &,
+                                     std::span<const amdgpu::MemoryIngressSpan> spans) {
+      for (const auto &span : spans)
+        admitted.push_back(span.address);
+      return amdgpu::MemoryIngressAdmission{.outcome = open ? amdgpu::VmAccessOutcome::Complete
+                                                            : amdgpu::VmAccessOutcome::Unavailable,
+                                            .permit = {}};
+    });
+    if (legacy) {
+      EXPECT_EQ(pipeline.initiate_access(instruction, *context.wf),
+                amdgpu::VmAccessOutcome::Unavailable);
+      EXPECT_TRUE(state.response_data.empty());
+      EXPECT_EQ(routed, (std::vector<uint64_t>{first, second}));
+      EXPECT_EQ(admitted, routed);
+    } else {
+      context.external->unavailable_translation_address = second;
+      EXPECT_EQ(pipeline.initiate_access(instruction, *context.wf),
+                amdgpu::VmAccessOutcome::Unavailable);
+      EXPECT_EQ(state.translated.request_index, 1u);
+      context.external->unavailable_translation_address.reset();
+    }
+    open = true;
+    EXPECT_EQ(pipeline.initiate_access(instruction, *context.wf),
+              amdgpu::VmAccessOutcome::Complete);
+    ASSERT_EQ(state.response_data.size(), 3u * state.wf_size * sizeof(uint32_t));
+    auto tap = [&](unsigned index) {
+      uint32_t value;
+      std::memcpy(&value, state.response_data.data() + index * state.wf_size * sizeof(value),
+                  sizeof(value));
+      return value;
+    };
+    EXPECT_EQ(tap(0), first_value);
+    EXPECT_EQ(tap(1), 0u);
+    EXPECT_EQ(tap(2), second_value);
+  }
+}
+
 TEST(GpuVmPipeline, LegacyVectorAndAtomicIngressRetryBeforeAnyLocalEffect) {
   TranslatedPipelineContext context;
   ASSERT_NO_FATAL_FAILURE(context.initialize(/*legacy_cache_compatible=*/true));

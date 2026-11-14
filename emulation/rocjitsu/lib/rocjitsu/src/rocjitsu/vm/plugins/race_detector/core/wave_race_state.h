@@ -47,6 +47,8 @@ class WaveRaceState {
 public:
   WaveRaceState(int vgprCount, int sgprCount, WaveId, RaceDetector *, CounterCapacities);
 
+  [[nodiscard]] bool hasPendingCounter(amdgpu::WaitCounterType counter) const;
+
   /// Apply the issue backpressure required before an instruction adds one
   /// token to a finite hardware counter. Call before operand checks when the
   /// counter is known statically, or after routing for address-dependent FLAT.
@@ -71,7 +73,8 @@ public:
   void registerEvent(InstructionSnapshot instruction, MemoryEventType type,
                      std::vector<uint32_t> registers, uint64_t execMask, uint8_t byteMask,
                      std::span<const amdgpu::MemoryCounterObligation> counterObligations,
-                     MemoryOrderClass memoryOrder, uint8_t lastRegisterByteMask = 0);
+                     VgprWriteOrder writeOrder, uint8_t lastRegisterByteMask = 0,
+                     ConditionalVgprWrite feedback = {});
 
   /// Register an in-flight scalar load using its architectural destination.
   void registerScalarLoad(InstructionSnapshot instruction, RegisterRef destination,
@@ -146,8 +149,8 @@ public:
                                   std::vector<uint32_t> registers, uint64_t execMask,
                                   uint8_t byteMask, IntervalSet ldsIntervals,
                                   std::span<const amdgpu::MemoryCounterObligation>,
-                                  MemoryOrderClass memoryOrder, uint8_t lastRegisterByteMask = 0,
-                                  LdsAccess ldsAccess = {});
+                                  VgprWriteOrder writeOrder, uint8_t lastRegisterByteMask = 0,
+                                  LdsAccess ldsAccess = {}, ConditionalVgprWrite feedback = {});
 
   /// Dispatch the counter thresholds changed by one wait instruction.
   void dispatch(const PendingWaitCount &);
@@ -170,7 +173,7 @@ public:
   /// Check an asynchronous memory destination write. On supported targets,
   /// operations in the same non-UNORDERED class cannot overtake one another.
   void checkVgprWrite(int reg, uint64_t execMask, uint8_t byteMask,
-                      MemoryOrderClass currentMemoryOrder) const;
+                      VgprWriteOrder currentMemoryOrder) const;
 
   /// Check a scalar register read for races. Calls the RaceHandler on
   /// violation (outstanding scalar load targeting the same register).

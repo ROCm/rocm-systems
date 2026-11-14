@@ -66,6 +66,11 @@ and the incoming producer share an ordered completion class. On legacy RDNA,
 ordinary loads, image samples and BVH results share VMcnt but keep separate
 classes. A newer result supersedes a fully covered older dependency only within
 the same ordered class; other classes and unordered results remain tracked.
+On RDNA1 through RDNA3.5, a partial VMcnt wait retires these reads in issue
+order across writeback classes. RDNA3 ISA §5.6 distinguishes VGPR write order
+from in-order counter decrement. LLVM's SIInsertWaitcnts normalizes sample and
+BVH reads to VMEM reads on these targets in counterOutOfOrder, while checking
+the VMEM writeback type separately for overwrites.
 
 Indexed LDS results are written to registers in issue order on every target, so
 an incoming indexed LDS load does not need a wait before overwriting a pending

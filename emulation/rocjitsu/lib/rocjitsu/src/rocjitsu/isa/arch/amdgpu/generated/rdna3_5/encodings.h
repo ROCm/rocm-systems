@@ -940,21 +940,33 @@ public:
   Mimg(std::string_view mnemonic, const MimgMachineInst *inst, ExecuteFn exec_fn);
   bool omits_gfx11_mimg_dim_dmask() const;
   uint32_t gfx11_mimg_nsa_group_width(uint32_t index, uint32_t vaddr_words) const;
+  std::string full_image_resource_name() const;
   bool should_print_dst_operand(uint8_t operand_index) const override {
     // Image atomics have one encoded VDATA tuple, printed as a source.
     return !mnemonic_.starts_with("image_atomic_") &&
            Instruction::should_print_dst_operand(operand_index);
   }
   void capture_nsa_words(const MachineInst *inst, const Operand *vaddr);
+  std::string image_vdata_name(int bits) const;
+  void append_dst_operand(std::string &out, uint8_t index) const override {
+    const auto *operand = dst_operands_[index];
+    const bool status = flags_ & CONDITIONAL_LAST_VGPR_DEF;
+    if (operand->is_vgpr() && !omits_gfx11_mimg_dim_dmask() && status != bool(inst_.tfe))
+      out += image_vdata_name(operand->size_bits() + 32 * (int(inst_.tfe) - int(status)));
+    else
+      Instruction::append_dst_operand(out, index);
+  }
   void append_src_operand(std::string &out, uint8_t operand_index) const override {
     const ::rocjitsu::Operand *operand = src_operands_[operand_index];
-    if (operand_index == 0 && inst_.tfe && mnemonic_.starts_with("image_atomic_")) {
-      // VDATA is the first source. Assembly includes the status slot;
-      // the source dependency includes only the atomic payload.
-      const auto first = operand->encoding_value();
-      const auto last = first + operand->size_bits() / 32;
-      out += first == last ? "v" + std::to_string(first)
-                           : "v[" + std::to_string(first) + ":" + std::to_string(last) + "]";
+    if (inst_.tfe && operand_index == 0 && operand->is_vgpr() && operand != nsa_vaddr_operand_) {
+      // Store and atomic payloads never consume the spelled TFE slot.
+      out += image_vdata_name(operand->size_bits() + 32);
+      return;
+    }
+    // LLVM spells regular T# operands with eight SGPRs even in R128 mode.
+    if (inst_.r128 && !omits_gfx11_mimg_dim_dmask() && operand_index &&
+        src_operands_[operand_index - 1] == nsa_vaddr_operand_) {
+      out += full_image_resource_name();
       return;
     }
     if (!inst_.nsa || operand != nsa_vaddr_operand_) {

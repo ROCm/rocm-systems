@@ -9,6 +9,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/image_resource.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/image_sample.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
+#include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/data_types.h"
 #include "util/except.h"
@@ -40,7 +41,8 @@ void ImageLoadMimg::execute_impl(amdgpu::Wavefront &wf) {
            .da = bool(inst_.da),
            .unorm = bool(inst_.unorm),
            .mip = false,
-           .gather = false})
+           .gather = false},
+          amdgpu::RegisterAccess(wf).vgpr_results_fit_allocation(*this))
           .failed()) {
     return;
   }
@@ -66,7 +68,8 @@ void ImageLoadMipMimg::execute_impl(amdgpu::Wavefront &wf) {
            .da = bool(inst_.da),
            .unorm = bool(inst_.unorm),
            .mip = true,
-           .gather = false})
+           .gather = false},
+          amdgpu::RegisterAccess(wf).vgpr_results_fit_allocation(*this))
           .failed()) {
     return;
   }
@@ -156,9 +159,9 @@ void ImageStoreMipPckMimg::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void ImageGetResinfoMimg::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_image_resource_info(wf, inst_.srsrc * 4, inst_.vaddr,
-                                      wf.vgpr_alloc().base + 0u + inst_.vdata, inst_.dmask,
-                                      inst_.r128, inst_.a16);
+  amdgpu::execute_image_resource_info(
+      wf, inst_.srsrc * 4, inst_.vaddr, wf.vgpr_alloc().base + 0u + inst_.vdata, inst_.dmask,
+      inst_.r128, inst_.a16, amdgpu::RegisterAccess(wf).vgpr_results_fit_allocation(*this));
 }
 
 void ImageAtomicSwapMimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -261,7 +264,8 @@ void ImageSampleMimg::execute_impl(amdgpu::Wavefront &wf) {
            .unorm = bool(inst_.unorm),
            .mip = false,
            .gather = false},
-          amdgpu::ImageSampleMode::Implicit)
+          amdgpu::ImageSampleMode::Implicit,
+          amdgpu::RegisterAccess(wf).vgpr_results_fit_allocation(*this))
           .failed()) {
     return;
   }
@@ -293,7 +297,8 @@ void ImageSampleDMimg::execute_impl(amdgpu::Wavefront &wf) {
            .unorm = bool(inst_.unorm),
            .mip = false,
            .gather = false},
-          amdgpu::ImageSampleMode::Derivatives)
+          amdgpu::ImageSampleMode::Derivatives,
+          amdgpu::RegisterAccess(wf).vgpr_results_fit_allocation(*this))
           .failed()) {
     return;
   }
@@ -325,7 +330,8 @@ void ImageSampleLMimg::execute_impl(amdgpu::Wavefront &wf) {
            .unorm = bool(inst_.unorm),
            .mip = false,
            .gather = false},
-          amdgpu::ImageSampleMode::Explicit)
+          amdgpu::ImageSampleMode::Explicit,
+          amdgpu::RegisterAccess(wf).vgpr_results_fit_allocation(*this))
           .failed()) {
     return;
   }
@@ -362,7 +368,8 @@ void ImageSampleLzMimg::execute_impl(amdgpu::Wavefront &wf) {
            .unorm = bool(inst_.unorm),
            .mip = false,
            .gather = false},
-          amdgpu::ImageSampleMode::Zero)
+          amdgpu::ImageSampleMode::Zero,
+          amdgpu::RegisterAccess(wf).vgpr_results_fit_allocation(*this))
           .failed()) {
     return;
   }
@@ -544,7 +551,8 @@ void ImageGather4LzMimg::execute_impl(amdgpu::Wavefront &wf) {
            .unorm = bool(inst_.unorm),
            .mip = false,
            .gather = true},
-          amdgpu::ImageSampleMode::Zero)
+          amdgpu::ImageSampleMode::Zero,
+          amdgpu::RegisterAccess(wf).vgpr_results_fit_allocation(*this))
           .failed()) {
     return;
   }

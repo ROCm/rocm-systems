@@ -1594,6 +1594,35 @@ Mtbuf::Mtbuf(std::string_view mnemonic, const MtbufMachineInst *inst, ExecuteFn 
   opcode_ = inst_.op;
 }
 
+bool Mimg::omits_gfx11_mimg_dim_dmask() const { return (inst_.op >= 25 && inst_.op <= 26); }
+
+uint32_t Mimg::gfx11_mimg_nsa_group_width(uint32_t index, uint32_t vaddr_words) const {
+  switch (inst_.op) {
+  case 25:
+    if (inst_.a16) {
+      static constexpr uint8_t widths[] = {1, 1, 3, 3};
+      return index < 4 ? widths[index] : 0;
+    }
+    {
+      static constexpr uint8_t widths[] = {1, 1, 3, 3, 3};
+      return index < 5 ? widths[index] : 0;
+    }
+  case 26:
+    if (inst_.a16) {
+      static constexpr uint8_t widths[] = {2, 1, 3, 3};
+      return index < 4 ? widths[index] : 0;
+    }
+    {
+      static constexpr uint8_t widths[] = {2, 1, 3, 3, 3};
+      return index < 5 ? widths[index] : 0;
+    }
+  default:
+    if (index < 4)
+      return 1;
+    return index == 4 && vaddr_words > 4 ? vaddr_words - 4 : 0;
+  }
+}
+
 Mimg::Mimg(std::string_view mnemonic, const MimgMachineInst *inst, ExecuteFn exec_fn)
     : IsaInstruction<Isa>(mnemonic, exec_fn), inst_(*inst) {
   flags_ |= VMEM;
@@ -1604,9 +1633,9 @@ Mimg::Mimg(std::string_view mnemonic, const MimgMachineInst *inst, ExecuteFn exe
 }
 
 void Mimg::capture_nsa_words(const MachineInst *inst, const Operand *vaddr) {
+  nsa_vaddr_operand_ = vaddr;
   if (!inst_.nsa)
     return;
-  nsa_vaddr_operand_ = vaddr;
   size_ = sizeof(OpEncoding) + 1u * sizeof(MachineInst);
   std::memcpy(raw_words_.data(), inst, size_);
   raw_encoding_ = raw_words_.data();
