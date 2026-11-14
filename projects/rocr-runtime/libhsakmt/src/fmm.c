@@ -4201,10 +4201,17 @@ HSAKMT_STATUS hsakmt_fmm_init_process_apertures(HsaKFDContext *ctx,
 		for (i = 0 ; i < num_of_sysfs_nodes ; i++) {
 			uintptr_t alt_base;
 			uint64_t alt_size;
+			uint32_t nodeId;
 			int err;
 
 			if (!IS_CANONICAL_ADDR(process_apertures[i].gpuvm_limit))
 				continue;
+
+			/* Skip GPUs with no VM; kernel rejects their policy */
+			gpu_mem_id = gpu_mem_find_by_gpu_id(fmm_ctx, process_apertures[i].gpu_id);
+			if (gpu_mem_id < 0)
+				continue;
+			nodeId = gpu_mem[gpu_mem_id].node_id;
 
 			/* Set memory policy to match the SVM apertures */
 			alt_base = (uintptr_t)fmm_ctx->svm.dgpu_alt_aperture->base;
@@ -4217,7 +4224,7 @@ HSAKMT_STATUS hsakmt_fmm_init_process_apertures(HsaKFDContext *ctx,
 						    KFD_IOC_CACHE_POLICY_NONCOHERENT,
 						    KFD_IOC_CACHE_POLICY_COHERENT,
 						    alt_base, alt_size,
-						    hsakmt_get_gfxv_by_node_id(ctx, i) == GFX_VERSION_GFX950 ?
+						    hsakmt_get_gfxv_by_node_id(ctx, nodeId) == GFX_VERSION_GFX950 ?
 						    mfma_high_precision_mode : 0);
 			if (err) {
 				pr_err("Failed to set mem policy for GPU [0x%x]\n",
