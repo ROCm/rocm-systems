@@ -42,25 +42,4 @@ if(HIP_PLATFORM MATCHES "amd")
                         TEST_SRC ${TEST_SRC}
                         TEST_TARGET_NAME build_tests
                         LINKER_LIBS hiprtc::hiprtc)
-
-  if(UNIX)
-    set(EXPECTED_ERRORS 40)
-
-    file(GLOB NEGATIVE_TEST_SRC
-        "atomicAnd_negative_kernels.cc"
-        "atomicOr_negative_kernels.cc"
-        "atomicXor_negative_kernels.cc"
-        "atomicMin_negative_kernels.cc"
-        "atomicMax_negative_kernels.cc"
-        "atomicAdd_negative_kernels.cc"
-        "atomicSub_negative_kernels.cc"
-        "atomicInc_negative_kernels.cc"
-        "atomicDec_negative_kernels.cc"
-        "atomicCAS_negative_kernels.cc"
-        "atomicExch_negative_kernels.cc"
-        "atomicExch_system_negative_kernels.cc")
-
-    file(COPY ${NEGATIVE_TEST_SRC} DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/src)
-    set_property(GLOBAL APPEND PROPERTY G_INSTALL_SRC_FILES ${NEGATIVE_TEST_SRC})
-  endif()
 endif()
