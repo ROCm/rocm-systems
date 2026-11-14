@@ -426,7 +426,11 @@ ComputeQueue::~ComputeQueue() {
     fault_monitor_thread_.join();
   }
 
-  device->DestroyQueue(this);
+  const bool queue_destroyed = device->DestroyQueue(this);
+  if (queue_destroyed)
+    retired_scratch_.ReleaseAfterQueueDestroy();
+  else
+    retired_scratch_.AbandonAfterFailedQueueDestroy();
 
   if (scratch_base_) {
     auto scratch_gpu_mem = GpuMemory::Convert(scratch_mem_);
@@ -579,6 +583,11 @@ void ComputeQueue::InitScratchSRD() {
   return;
 }
 
+void ComputeQueue::ReapRetiredScratch() {
+  if (retired_scratch_.Count() && sync_addr)
+    retired_scratch_.Reap(LoadSyncValue(sync_addr), sync_point);
+}
+
 bool ComputeQueue::UpdateScratch(uint32_t private_segment_size, bool wave32) {
   const uint32_t wavefront = wave32 ? 32 : 64;
   const uint32_t alignment = 1024 / wavefront;
@@ -599,6 +608,11 @@ bool ComputeQueue::UpdateScratch(uint32_t private_segment_size, bool wave32) {
   pr_debug("need realloc scratch buffer, size %" PRIx64 " -> %" PRIx64 "\n",
            scratch_size_, scratch_size);
 
+  const uint64_t fence = sync_addr ? LoadSyncValue(sync_addr) : UINT64_MAX;
+  if (retired_scratch_.Count()) retired_scratch_.Reap(fence, sync_point);
+  const bool old_scratch_pending = scratch_base_ &&
+      !ScratchRetirement<GpuMemory>::Completed(
+          fence, sync_point, sync_point);
   GpuMemoryCreateInfo create_info{};
   create_info.size = scratch_size;
   create_info.domain = Wkmi::kLocal;
@@ -609,7 +623,14 @@ bool ComputeQueue::UpdateScratch(uint32_t private_segment_size, bool wave32) {
 
   if (scratch_base_) {
     auto scratch_gpu_mem = GpuMemory::Convert(scratch_mem_);
-    delete scratch_gpu_mem;
+    if (old_scratch_pending) {
+      if (!retired_scratch_.Retire(scratch_gpu_mem, sync_point)) {
+        delete gpu_mem;
+        return false;
+      }
+    } else {
+      delete scratch_gpu_mem;
+    }
   }
 
   scratch_size_per_wave_ = scratch_size_per_wave;
@@ -821,6 +842,7 @@ hsa_status_t ComputeQueue::EndSubmit(void) {
 }
 
 hsa_status_t ComputeQueue::Submit(void) {
+  if (retired_scratch_.Count()) ReapRetiredScratch();
   hsa_status_t ret = PreSubmit();
   if (ret) return HSA_STATUS_ERROR;
 
