@@ -3711,6 +3711,13 @@ typedef union rocprofiler_hip_api_args_t
         hipStream_t                stream;
     } hipMemcpy3DWithAttributesAsync;
 #endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 41
+    struct
+    {
+        hipArraySparseProperties* sparseProperties;
+        hipArray_t                array;
+    } hipArrayGetSparseProperties;
+#endif
 } rocprofiler_hip_api_args_t;
 
 ROCPROFILER_EXTERN_C_FINI

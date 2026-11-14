@@ -5170,6 +5170,28 @@ hipError_t hipMipmappedArrayGetMemoryRequirements(hipArrayMemoryRequirements* me
   HIP_RETURN(ihipMipmappedArrayGetMemoryRequirements(memoryRequirements, mipmap, device));
 }
 
+hipError_t hipArrayGetSparseProperties(hipArraySparseProperties* sparseProperties,
+                                       hipArray_t array) {
+  HIP_INIT_API(hipArrayGetSparseProperties, sparseProperties, array);
+
+  if (sparseProperties == nullptr) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+
+  {
+    amd::ScopedLock lock(hipArraySetLock);
+    if (hip::hipArraySet.find(array) == hip::hipArraySet.end()) {
+      HIP_RETURN(hipErrorInvalidHandle);
+    }
+  }
+
+  *sparseProperties = {};
+
+  amd::Device* device = hip::getCurrentDevice()->devices()[0];
+  LogPrintfError("Sparse arrays not supported on the device %s", device->info().name_);
+  HIP_RETURN(hipErrorNotSupported);
+}
+
 hipError_t hipMallocMipmappedArray(hipMipmappedArray_t* mipmappedArray,
                                    const hipChannelFormatDesc* desc, hipExtent extent,
                                    unsigned int numLevels, unsigned int flags) {

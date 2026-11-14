@@ -2263,6 +2263,27 @@ typedef struct hipArrayMemoryRequirements {
 } hipArrayMemoryRequirements;
 
 /**
+ * Indicates that the layered sparse HIP array or HIP mipmapped array has a single mip tail region
+ * for all layers.
+ */
+#define hipArraySparsePropertiesSingleMipTail 0x1
+
+/**
+ * Sparse HIP array and HIP mipmapped array properties.
+ */
+typedef struct hipArraySparseProperties {
+  struct {
+    unsigned int width;   ///< Width of sparse tile in elements
+    unsigned int height;  ///< Height of sparse tile in elements
+    unsigned int depth;   ///< Depth of sparse tile in elements
+  } tileExtent;
+  unsigned int miptailFirstLevel;  ///< First mip level at which the mip tail begins
+  unsigned long long miptailSize;  ///< Total size of the mip tail
+  unsigned int flags;  ///< Zero or ::hipArraySparsePropertiesSingleMipTail
+  unsigned int reserved[4];  ///< Reserved for future use, must be zero now
+} hipArraySparseProperties;
+
+/**
  * Requested handle type for address range.
  */
 typedef enum hipMemRangeHandleType {
@@ -6572,6 +6593,20 @@ hipError_t hipMemcpy3DPeerAsync(hipMemcpy3DPeerParms* p, hipStream_t stream __dp
  */
 hipError_t hipMipmappedArrayGetMemoryRequirements(hipArrayMemoryRequirements* memoryRequirements,
                                                   hipMipmappedArray_t mipmap, hipDevice_t device);
+
+/**
+ * @brief Returns the layout properties of a sparse HIP array.
+ *
+ * @param [out] sparseProperties - Pointer to hipArraySparseProperties
+ * @param [in] array - HIP array to get the sparse properties of
+ *
+ * @returns #hipErrorInvalidValue, #hipErrorInvalidHandle, #hipErrorNotSupported
+ *
+ * @note Sparse HIP arrays are not currently supported on AMD devices;
+ * This function always reports #hipErrorNotSupported for well-formed arguments.
+ */
+hipError_t hipArrayGetSparseProperties(hipArraySparseProperties* sparseProperties,
+                                       hipArray_t array);
 // doxygen end Memory
 /**
  * @}

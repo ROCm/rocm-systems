@@ -1314,6 +1314,9 @@ contract:
   Contract_MemMapArray_HipMemMapArrayAsync_ZeroCount_IsRejected:
     <<: *level_0
     tags: [mem_map_array, P0]
+  Contract_MemMapArray_HipArrayGetSparseProperties_InvalidArgs_AreRejected:
+    <<: *level_0
+    tags: [mem_map_array, image, P0]
   Contract_Copy3D_HipMalloc3D_Default_ReturnsPitchedPtr:
     <<: *level_0
     tags: [copy3d, P0]

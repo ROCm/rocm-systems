@@ -205,7 +205,8 @@ set(TEST_SRC
     hipHostAlloc.cc
     hipMemSetMemPool.cc
     hipMemGetMemPool.cc
-    hipMemGetDefaultMemPool.cc)
+    hipMemGetDefaultMemPool.cc
+    hipArrayGetSparseProperties.cc)
 
 if(HIP_PLATFORM MATCHES "amd")
   set(TEST_SRC

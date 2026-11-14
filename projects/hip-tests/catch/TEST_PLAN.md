@@ -13,8 +13,8 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 
 | Tier | Cases | Tagged | Missing `@asserts` |
 |---|---:|---:|---:|
-| `contract` | 635 | 635 | 0 |
-| **total** | **635** | **635** | **0** |
+| `contract` | 636 | 636 | 0 |
+| **total** | **636** | **636** | **0** |
 
 ## Tier: `contract`
 
@@ -837,10 +837,11 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 | `Contract_MemLocationPool_HipMemGetMemPool_Default_ReturnsPoolForDeviceLocation` | hipMemGetMemPool | a location-based pool query returns a non-null pool for a valid device location |
 | `Contract_MemLocationPool_HipMemSetMemPool_Default_RoundTripsThroughGetMemPool` | hipMemSetMemPool | a pool set for a location round-trips through a subsequent hipMemGetMemPool query |
 
-### `mem_map_array` (2 cases)
+### `mem_map_array` (3 cases)
 
 | Case | API | Asserts |
 |---|---|---|
+| `Contract_MemMapArray_HipArrayGetSparseProperties_InvalidArgs_AreRejected` | hipArrayGetSparseProperties | rejects a null properties-out pointer, a null array handle, or a non-sparse array with a non-success status |
 | `Contract_MemMapArray_HipMemMapArrayAsync_NullMapList_IsRejected` | hipMemMapArrayAsync | rejects a null map-info list with a non-success status |
 | `Contract_MemMapArray_HipMemMapArrayAsync_ZeroCount_IsRejected` | hipMemMapArrayAsync | rejects a zero operation count with a non-success status |
 

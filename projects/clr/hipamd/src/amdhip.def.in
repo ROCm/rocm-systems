@@ -571,4 +571,5 @@ hipKernelNameRefByPtr
 hipModuleEnumerateFunctions
 hipDeviceFlushGPUDirectRDMAWrites
 hipExtMemcpyBatchAsync
+hipArrayGetSparseProperties
 @HSA_EXPORTS@
