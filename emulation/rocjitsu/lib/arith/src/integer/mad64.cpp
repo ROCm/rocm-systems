@@ -229,3 +229,39 @@ int rj_arith_v_mad_i64_i32_w64(uint64_t flags, uint64_t exec_mask, uint64_t inst
   }
   return rj_arith_v_mad_co_i64_i32_w64(flags, exec_mask, instruction_flags, d, carry, a, b, c);
 }
+
+// Multiply-add with the same saturation and vector results as the carry form, without scalar
+// output.
+int rj_arith_v_mad_nc_u64_u32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  const uint32_t *const *b, const uint32_t *const *c) {
+  uint32_t carry;
+  return rj_arith_v_mad_co_u64_u32_w32(flags, exec_mask, instruction_flags, d, &carry, a, b, c);
+}
+
+// Multiply-add with the same saturation and vector results as the carry form, without scalar
+// output.
+int rj_arith_v_mad_nc_i64_i32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  const uint32_t *const *b, const uint32_t *const *c) {
+  uint32_t carry;
+  return rj_arith_v_mad_co_i64_i32_w32(flags, exec_mask, instruction_flags, d, &carry, a, b, c);
+}
+
+// Multiply-add with the same saturation and vector results as the carry form, without scalar
+// output.
+int rj_arith_v_mad_nc_u64_u32_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  const uint32_t *const *b, const uint32_t *const *c) {
+  uint64_t carry;
+  return rj_arith_v_mad_co_u64_u32_w64(flags, exec_mask, instruction_flags, d, &carry, a, b, c);
+}
+
+// Multiply-add with the same saturation and vector results as the carry form, without scalar
+// output.
+int rj_arith_v_mad_nc_i64_i32_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  const uint32_t *const *b, const uint32_t *const *c) {
+  uint64_t carry;
+  return rj_arith_v_mad_co_i64_i32_w64(flags, exec_mask, instruction_flags, d, &carry, a, b, c);
+}
