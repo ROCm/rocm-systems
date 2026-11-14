@@ -3,9 +3,9 @@
 
 #pragma once
 
-#include "profiler-hub/reader.hpp"
-#include "profiler-hub/reader_types.hpp"
-#include "profiler-hub/storage.hpp"
+#include "profiler-hub/cpp/reader.hpp"
+#include "profiler-hub/cpp/reader_types.hpp"
+#include "profiler-hub/cpp/storage.hpp"
 
 #include "data_storage/backends/sqlite_backend.hpp"
 #include "data_storage/read_statements.hpp"

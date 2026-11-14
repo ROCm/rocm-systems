@@ -7,7 +7,7 @@
 //   - find_package(profiler-hub) resolves the profiler-hub::profiler-hub target
 //   - the library links and a public API symbol is reachable at runtime
 
-#include <profiler-hub/storage.hpp>
+#include <profiler-hub/cpp/storage.hpp>
 
 #include <iostream>
 

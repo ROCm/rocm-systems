@@ -14,9 +14,9 @@ set(ROCPROFSYS_PROFILER_HUB_GIT_REPOSITORY
 )
 
 set(ROCPROFSYS_PROFILER_HUB_GIT_TAG
-    "37d64c8ace8a3637c6ff4a1df60bc9bdb419eb1a"
+    "develop"
     CACHE STRING
-    "Git commit for profiler-hub fallback sparse checkout (pinned to merged #9968: C++20; includes #10459 NIC agent and RocPD schema 3.0.1)"
+    "Git ref (branch, tag or commit) for profiler-hub fallback sparse checkout; the default 'develop' is re-fetched on every configure"
 )
 
 set(ROCPROFSYS_PROFILER_HUB_GIT_SUBDIR
@@ -31,17 +31,23 @@ option(ROCPROFSYS_PROFILER_HUB_LINK_STATIC "Link profiler-hub statically" OFF)
 # ------------------------------------------------------------------------------
 # Resolution order:
 #   1. find_package(profiler-hub) - use installed package if present
-#   2. fallback: sparse checkout of ROCPROFSYS_PROFILER_HUB_GIT_SUBDIR from
+#   2. in-tree: ../../profilers/profiler-hub of this source checkout, if present
+#   3. fallback: sparse checkout of ROCPROFSYS_PROFILER_HUB_GIT_SUBDIR from
 #      ROCPROFSYS_PROFILER_HUB_GIT_REPOSITORY at ROCPROFSYS_PROFILER_HUB_GIT_TAG
 # ------------------------------------------------------------------------------
 set(ROCPROFSYS_PROFILER_HUB_MIN_VERSION
-    "0.2.0"
+    "0.3.0"
     CACHE STRING
-    "Minimum profiler-hub package version; older installs fall back to the git pin"
+    "Minimum profiler-hub package version; older installs fall back to in-tree or git sources"
 )
 
 set(_PROFILER_HUB_IS_EXTERNAL FALSE)
 set(_PROFILER_HUB_SOURCE_DIR "")
+get_filename_component(
+    _PROFILER_HUB_IN_TREE_DIR
+    "${PROJECT_SOURCE_DIR}/../../profilers/profiler-hub"
+    ABSOLUTE
+)
 
 # Pass the min version into find_package so an old install is skipped, not loaded.
 # Not REQUIRED: we fall back to git. ~/.cmake/packages can still pick another tree.
@@ -54,6 +60,9 @@ if(profiler-hub_FOUND)
         "${profiler-hub_DIR}"
     )
     set(_PROFILER_HUB_IS_EXTERNAL TRUE)
+elseif(EXISTS "${_PROFILER_HUB_IN_TREE_DIR}/CMakeLists.txt")
+    message(STATUS "[profiler-hub] Using in-tree sources at ${_PROFILER_HUB_IN_TREE_DIR}")
+    set(_PROFILER_HUB_SOURCE_DIR "${_PROFILER_HUB_IN_TREE_DIR}")
 else()
     message(
         STATUS
@@ -70,13 +79,15 @@ else()
     )
     set(_PROFILER_HUB_STAMP "${_PROFILER_HUB_ROOT}/.checkout.stamp")
 
+    set(_PROFILER_HUB_TAG "${ROCPROFSYS_PROFILER_HUB_GIT_TAG}")
+
     set(_PROFILER_HUB_NEEDS_CHECKOUT TRUE)
-    if(EXISTS "${_PROFILER_HUB_STAMP}")
+    if(NOT _PROFILER_HUB_TAG STREQUAL "develop" AND EXISTS "${_PROFILER_HUB_STAMP}")
         file(READ "${_PROFILER_HUB_STAMP}" _stamp_contents)
         if(
             _stamp_contents
                 STREQUAL
-                "${ROCPROFSYS_PROFILER_HUB_GIT_REPOSITORY}@${ROCPROFSYS_PROFILER_HUB_GIT_TAG}:${ROCPROFSYS_PROFILER_HUB_GIT_SUBDIR}"
+                "${ROCPROFSYS_PROFILER_HUB_GIT_REPOSITORY}@${_PROFILER_HUB_TAG}:${ROCPROFSYS_PROFILER_HUB_GIT_SUBDIR}"
         )
             set(_PROFILER_HUB_NEEDS_CHECKOUT FALSE)
         endif()
@@ -86,7 +97,7 @@ else()
         message(
             STATUS
             "[profiler-hub] Fetching ${ROCPROFSYS_PROFILER_HUB_GIT_SUBDIR} "
-            "@ ${ROCPROFSYS_PROFILER_HUB_GIT_TAG} into ${_PROFILER_HUB_CHECKOUT}"
+            "@ ${_PROFILER_HUB_TAG} into ${_PROFILER_HUB_CHECKOUT}"
         )
 
         if(EXISTS "${_PROFILER_HUB_CHECKOUT}")
@@ -121,7 +132,7 @@ else()
         execute_process(
             COMMAND
                 ${GIT_EXECUTABLE} fetch --filter=blob:none --depth 1 origin
-                ${ROCPROFSYS_PROFILER_HUB_GIT_TAG}
+                ${_PROFILER_HUB_TAG}
             WORKING_DIRECTORY ${_PROFILER_HUB_CHECKOUT}
             RESULT_VARIABLE _git_result
             OUTPUT_VARIABLE _git_output
@@ -182,12 +193,12 @@ else()
 
         file(
             WRITE "${_PROFILER_HUB_STAMP}"
-            "${ROCPROFSYS_PROFILER_HUB_GIT_REPOSITORY}@${ROCPROFSYS_PROFILER_HUB_GIT_TAG}:${ROCPROFSYS_PROFILER_HUB_GIT_SUBDIR}"
+            "${ROCPROFSYS_PROFILER_HUB_GIT_REPOSITORY}@${_PROFILER_HUB_TAG}:${ROCPROFSYS_PROFILER_HUB_GIT_SUBDIR}"
         )
     else()
         message(
             STATUS
-            "[profiler-hub] Already have pin ${ROCPROFSYS_PROFILER_HUB_GIT_TAG} at "
+            "[profiler-hub] Already have pin ${_PROFILER_HUB_TAG} at "
             "${_PROFILER_HUB_SOURCE_DIR}"
         )
     endif()

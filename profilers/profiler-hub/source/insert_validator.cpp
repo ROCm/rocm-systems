@@ -3,7 +3,7 @@
 
 #include "insert_validator.hpp"
 
-#include "profiler-hub/writer_types.hpp"
+#include "profiler-hub/cpp/writer_types.hpp"
 
 #include "common/string_conversions.hpp"
 #include "entity_registry.hpp"

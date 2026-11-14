@@ -28,9 +28,19 @@ downstream consumer of the library.
 ### Changed
 
 - CMake configure now prints the profiler-hub version and the RocPD schema version. The project version moved to a `VERSION` file.
+- Public C++ headers moved from `<prefix>/include/profiler-hub/*.hpp` to
+  `<prefix>/include/profiler-hub/cpp/*.hpp` (e.g.
+  `#include <profiler-hub/cpp/storage.hpp>`). Groups the public C++ API
+  headers under their own subdirectory, mirroring the language-scoped
+  layout other public interfaces (e.g. a future C ABI) will use.
 - The installed `profiler-hub-config.cmake` now only looks up `fmt` and `spdlog`
   when the `static` component is requested, so shared-only consumers no longer get
   `fmt::fmt` / `spdlog::spdlog` imported into their project.
+
+### Deprecated
+
+- The old include paths `<prefix>/include/profiler-hub/*.hpp` still work via
+  forwarding headers and will be removed in a future release.
 
 ## [0.2.0] - 2026-09-02
 
@@ -113,6 +123,7 @@ Initial release.
 - Cobertura code coverage reports via the `coverage-xml` CMake target.
 - clang-tidy custom target using the bundled `.clang-tidy` configuration.
 
-[Unreleased]: https://github.com/ROCm/rocm-systems/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/ROCm/rocm-systems/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/ROCm/rocm-systems/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/ROCm/rocm-systems/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/ROCm/rocm-systems/releases/tag/v0.1.0
