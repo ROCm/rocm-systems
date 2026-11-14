@@ -61,3 +61,7 @@ CMD ["sh", "-c", "\
     make -C build -j $(nproc) && \
     cp /tmp/src/py-interface/amdsmi_wrapper.py /src/py-interface/amdsmi_wrapper.py \
 "]
+
+# Build/development image that runs as root by design.
+# trivy:ignore:DS-0002
+USER root
