@@ -7,11 +7,15 @@ gets a pass that holds all of them."""
 from typing import Dict, FrozenSet, Iterable, List, Optional, Set, Tuple
 
 from utils.counters.counter_file import CounterFile, flat_counters_in_perfmon_file
-from utils.logger import console_debug, console_error, console_warning
+from utils.logger import console_debug, console_error
 from utils.utils_counter_defs import (
     extract_counters_and_variables,
     parse_counters_text,
 )
+
+# On gfx1250, counters with these name prefixes never share a pass. Both use SQ
+# slots, and SP_VALU_* counters read zero in a pass with SQ_VMEM_* counters.
+_GFX1250_SPLIT_PREFIXES = ("SP_VALU_", "SQ_VMEM_")
 
 
 def metric_counter_sets(
@@ -70,28 +74,23 @@ def allocate_single_pass_metrics(
     counters: Set[str],
     metric_counter_sets: List[FrozenSet[str]],
     perfmon_config: Dict[str, int],
-) -> Optional[List[CounterFile]]:
+    gpu_arch: str,
+) -> List[CounterFile]:
     """Pack counters into perfmon passes.
 
     Each metric whose counters fit one empty pass gets a pass that holds all
     of them, and a counter is copied into more passes when needed. The other
-    counters go into the first pass with room. Returns None if a metric that
-    fits one pass ends up without such a pass.
+    counters go into the first pass with room.
     """
-    single_pass_sets = _single_pass_sets(metric_counter_sets, perfmon_config)
+    split_prefixes = _GFX1250_SPLIT_PREFIXES if gpu_arch == "gfx1250" else ()
+    single_pass_sets = _single_pass_sets(
+        metric_counter_sets, perfmon_config, split_prefixes
+    )
     files: List[CounterFile] = []
     for metric_set in single_pass_sets:
-        files = _place_together(files, metric_set, perfmon_config)
+        files = _place_together(files, metric_set, perfmon_config, split_prefixes)
     for counter in sorted(counters - _counters_in(files)):
-        files = _place_first_fit(files, counter, perfmon_config)
-
-    if not all(_held(files, metric_set) for metric_set in single_pass_sets):
-        console_warning(
-            "profiling",
-            "Single-pass packing left a metric without a pass that holds all of "
-            "its counters.",
-        )
-        return None
+        files = _place_first_fit(files, counter, perfmon_config, split_prefixes)
     for index, counter_file in enumerate(files):
         counter_file.name = str(index)
     console_debug(
@@ -105,6 +104,7 @@ def allocate_single_pass_metrics(
 def _single_pass_sets(
     metric_counter_sets: List[FrozenSet[str]],
     perfmon_config: Dict[str, int],
+    split_prefixes: Tuple[str, ...],
 ) -> List[FrozenSet[str]]:
     """Return the unique metric counter sets that fit one empty pass, largest
     first."""
@@ -113,7 +113,8 @@ def _single_pass_sets(
         {
             metric_set
             for metric_set in metric_counter_sets
-            if _with_counters(empty, metric_set, perfmon_config) is not None
+            if _with_counters(empty, metric_set, perfmon_config, split_prefixes)
+            is not None
         },
         key=lambda metric_set: (-len(metric_set), sorted(metric_set)),
     )
@@ -123,13 +124,22 @@ def _with_counters(
     counter_file: CounterFile,
     counters: Iterable[str],
     perfmon_config: Dict[str, int],
+    split_prefixes: Tuple[str, ...],
 ) -> Optional[CounterFile]:
     """Return a copy of counter_file that also holds counters, or None when
     they do not fit."""
+    all_counters = set(flat_counters_in_perfmon_file(counter_file)) | set(counters)
+    # A pass holds counters of at most one of the split prefixes
+    prefixes_held = {
+        prefix
+        for prefix in split_prefixes
+        for counter in all_counters
+        if counter.startswith(prefix)
+    }
+    if len(prefixes_held) > 1:
+        return None
     extended = CounterFile(counter_file.name, perfmon_config)
-    for counter in sorted(
-        set(flat_counters_in_perfmon_file(counter_file)) | set(counters)
-    ):
+    for counter in sorted(all_counters):
         if not extended.add(counter):
             return None
     return extended
@@ -155,6 +165,7 @@ def _place_together(
     files: List[CounterFile],
     metric_set: FrozenSet[str],
     perfmon_config: Dict[str, int],
+    split_prefixes: Tuple[str, ...],
 ) -> List[CounterFile]:
     """Make one pass hold all of metric_set.
 
@@ -165,13 +176,18 @@ def _place_together(
         return files
     best: Optional[Tuple[int, int, CounterFile]] = None
     for index, counter_file in enumerate(files):
-        extended = _with_counters(counter_file, metric_set, perfmon_config)
+        extended = _with_counters(
+            counter_file, metric_set, perfmon_config, split_prefixes
+        )
         overlap = len(metric_set & set(flat_counters_in_perfmon_file(counter_file)))
         if extended is not None and (best is None or overlap > best[0]):
             best = (overlap, index, extended)
     if best is None:
         new_file = CounterFile(str(len(files)), perfmon_config)
-        return [*files, _with_counters(new_file, metric_set, perfmon_config)]
+        return [
+            *files,
+            _with_counters(new_file, metric_set, perfmon_config, split_prefixes),
+        ]
     _overlap, index, extended = best
     return [*files[:index], extended, *files[index + 1 :]]
 
@@ -180,14 +196,20 @@ def _place_first_fit(
     files: List[CounterFile],
     counter: str,
     perfmon_config: Dict[str, int],
+    split_prefixes: Tuple[str, ...],
 ) -> List[CounterFile]:
     """Add counter to the first pass with room for it, or to a new pass."""
     for index, counter_file in enumerate(files):
-        extended = _with_counters(counter_file, [counter], perfmon_config)
+        extended = _with_counters(
+            counter_file, [counter], perfmon_config, split_prefixes
+        )
         if extended is not None:
             return [*files[:index], extended, *files[index + 1 :]]
     new_file = _with_counters(
-        CounterFile(str(len(files)), perfmon_config), [counter], perfmon_config
+        CounterFile(str(len(files)), perfmon_config),
+        [counter],
+        perfmon_config,
+        split_prefixes,
     )
     if new_file is None:
         console_error("profiling", f"{counter} does not fit an empty perfmon pass.")

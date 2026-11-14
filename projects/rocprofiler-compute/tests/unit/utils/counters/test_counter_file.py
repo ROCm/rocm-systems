@@ -48,35 +48,6 @@ def test_limited_set_tcc_channel_coalescing():
     assert len(ls.elements) == 3
 
 
-def test_limited_set_reserve_succeeds_within_capacity():
-    """`reserve(n)` debits avail by n and returns True when capacity remains."""
-    ls = LimitedSet(4)
-    assert ls.add("SQ_WAVES") is True
-    assert ls.reserve(2) is True
-
-
-def test_limited_set_reserve_refuses_when_insufficient():
-    """`reserve(n)` returns False and leaves avail untouched when n > avail."""
-    ls = LimitedSet(2)
-    assert ls.reserve(3) is False
-    assert ls.avail == 2
-    assert ls.elements == []
-
-
-def test_limited_set_reserve_does_not_add_elements():
-    """
-    Reservation is opaque: it does not record a counter name and leaves
-    subsequent add() free to use whatever capacity remains.
-    """
-    ls = LimitedSet(3)
-    assert ls.reserve(2) is True
-    assert ls.elements == []
-    assert ls.avail == 1
-    assert ls.add("SQ_WAVES") is True
-    assert ls.elements == ["SQ_WAVES"]
-    assert ls.avail == 0
-
-
 # =============================================================================
 # CounterFile
 # =============================================================================
@@ -110,26 +81,6 @@ def test_counter_file_add_and_block_mapping(perfmon_config):
     # TCP maps to its own block (capacity 3)
     assert cf.add("TCP_READ") is True
     assert cf.blocks["TCP"].avail == 2
-
-
-def test_counter_file_reserve_delegates_to_block(perfmon_config):
-    """
-    `reserve(counter, n)` debits the LimitedSet for the block selected by
-    counter_to_block(counter) and returns the underlying boolean.
-    """
-    cf = CounterFile("0", perfmon_config)
-    assert cf.add("SQ_WAVES") is True  # SQ avail: 5 -> 4
-
-    assert cf.reserve("SQ_INSTS", 2) is True
-    assert cf.blocks["SQ"].avail == 2  # 4 - 2
-
-    # TA capacity is 2 in the fixture, so reserving 3 must fail.
-    assert cf.reserve("TA_EXTRA", 3) is False
-    assert cf.blocks["TA"].avail == 2  # unchanged after failed reserve
-
-    # Reserve must never record a counter name in the block's elements.
-    assert cf.blocks["SQ"].elements == ["SQ_WAVES"]
-    assert cf.blocks["TA"].elements == []
 
 
 # =============================================================================

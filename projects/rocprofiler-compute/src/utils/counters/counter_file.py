@@ -44,12 +44,6 @@ class LimitedSet:
             return True
         return False
 
-    def reserve(self, n: int) -> bool:
-        if self.avail < n:
-            return False
-        self.avail -= n
-        return True
-
 
 # Represents a file that lists PMC counters. Number of counters for each
 # block limited according to perfmon config.
@@ -62,6 +56,3 @@ class CounterFile:
 
     def add(self, counter: str) -> bool:
         return self.blocks[counter_to_block(counter)].add(counter, slot_cost(counter))
-
-    def reserve(self, counter: str, n: int) -> bool:
-        return self.blocks[counter_to_block(counter)].reserve(n)
