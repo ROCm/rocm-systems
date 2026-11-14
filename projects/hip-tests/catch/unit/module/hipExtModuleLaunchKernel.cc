@@ -691,6 +691,12 @@ bool ModuleLaunchKernel::ExtModule_Corner_tests() {
                                  {1, maxgridY, 1, 1, 1, 1},  {1, 1, maxgridZ, 1, 1, 1}};
 
   for (int i = 0; i < 6; i++) {
+    // The maxgridX case launches ~2.1B workgroups. Draining that many empty
+    // workgroups dominates the runtime of the whole quick pass, so skip it
+    // there; the remaining five corner cases still cover the API.
+    if (isQuickLevel() && test[i].gridX == maxgridX) {
+      continue;
+    }
     err = hipExtModuleLaunchKernel(DummyKernel, test[i].gridX, test[i].gridY, test[i].gridZ,
                                    test[i].blockX, test[i].blockY, test[i].blockZ, 0, stream1, NULL,
                                    reinterpret_cast<void**>(&config1), nullptr, nullptr, 0);
