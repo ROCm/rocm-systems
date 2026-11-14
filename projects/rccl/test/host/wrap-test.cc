@@ -8930,6 +8930,30 @@ TEST(WrapMicrotestIsolated, DdaFabricAgLL128Shape_FromDpxTable) {
       });
 }
 
+// Only the gfx1250 SPX table runs the ReduceScatter LL128 kernel on 256 threads. The DPX table,
+// RCCL_IGNORE_ARCH_TABLE=1 and no comm leave 0, which keeps 512.
+TEST(WrapMicrotestIsolated, DdaFabricRsLL128Threads_FromSpxTable) {
+  RUN_ISOLATED_TEST(
+      "Wrap_DdaFabricRsLL128Threads_FromSpxTable",
+      []() {
+        int64_t ignoreTable = 0;
+        g_loadParam = [&ignoreTable](const char* env, int64_t def) -> int64_t {
+          return std::strcmp(env, "RCCL_IGNORE_ARCH_TABLE") == 0 ? ignoreTable : def;
+        };
+        ncclComm* comm = MakeCommWithArch("gfx1250");
+        comm->archThresholds = real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_DPX);
+        ASSERT_NE(nullptr, comm->archThresholds);
+        EXPECT_EQ(0, rcclDdaFabricRsLL128Threads(comm)) << "DPX";
+        comm->archThresholds = real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_SPX);
+        ASSERT_NE(nullptr, comm->archThresholds);
+        EXPECT_EQ(256, rcclDdaFabricRsLL128Threads(comm)) << "SPX";
+        ignoreTable = 1;
+        EXPECT_EQ(0, rcclDdaFabricRsLL128Threads(comm)) << "RCCL_IGNORE_ARCH_TABLE=1";
+        EXPECT_EQ(0, rcclDdaFabricRsLL128Threads(nullptr));
+        DeleteCommWithArch(comm);
+      });
+}
+
 // DDA LL128 AlltoAll reads its own ddaA2aLL128* window, inclusive at both ends; a synthetic table pins
 // the accessors. The real tables and no table keep 0 threads; SPX and no table keep the init cap, and DPX
 // caps the grid at 72 blocks from 256 KiB to 16 MiB, where DPX runs LL128 (LL stops at 128 KiB).
@@ -9097,6 +9121,16 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_DdaFabricLL128ChosenWhenLLNotEli
                                  [](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) {
                                    return true;
                                  });
+        ncclComm* blocksComm = nullptr;
+        size_t blocksCount = 0;
+        ncclDataType_t blocksType = ncclInt8;
+        ScopedHook ll128Blocks(g_reduceScatterDdaFabricLL128Blocks,
+                               [&](ncclComm* c, size_t count, ncclDataType_t type) -> uint32_t {
+                                 blocksComm = c;
+                                 blocksCount = count;
+                                 blocksType = type;
+                                 return 134;
+                               });
         ncclComm* comm = MakeCommWithArch("gfx1250");
         comm->nRanks = 1;
         comm->nNodes = 1;
@@ -9106,6 +9140,10 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_DdaFabricLL128ChosenWhenLLNotEli
         EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL128, decision.algo);
 
         EXPECT_EQ(NCCL_PROTO_LL128, decision.protocol);
+        EXPECT_EQ(134u, decision.nMaxChannels);  // proves ncclReduceScatterDdaFabricLL128Blocks ran, not a sibling
+        EXPECT_EQ(comm, blocksComm);
+        EXPECT_EQ(8u, blocksCount);
+        EXPECT_EQ(ncclFloat32, blocksType);
         DeleteCommWithArch(comm);
       });
 }

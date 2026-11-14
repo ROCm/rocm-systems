@@ -84,8 +84,6 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 
 ### Removed
 
-* `RCCL_DDA_LL128_RS_THREADS` removed (was default `1024`): reduce-scatter LL128 now launches a fixed 512-thread block, one warp per slice, so the thread count is no longer a tuning knob.
-
 ### Resolved issues
 * When mlx5 data-direct DMA-BUF registration is missing or fails, RCCL uses `ibv_reg_dmabuf_mr` and reports a failed data-direct attempt once per protection domain. A missing `mlx5dv_reg_dmabuf_mr` leaves data-direct off.
 * Fixed `RCCL_REPLAY_FILE` output paths containing dotted directories, relative path components or multiple filename dots. Failed output-file opens now produce a warning.

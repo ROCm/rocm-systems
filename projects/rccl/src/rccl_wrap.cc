@@ -1424,6 +1424,11 @@ int rcclDdaFabricA2aLL128Blocks(const ncclComm* comm, size_t totalBytes) {
   return std::min(cap, table->ddaA2aLL128MaxBlocks);
 }
 
+int rcclDdaFabricRsLL128Threads(const ncclComm* comm) {
+  const rcclArchThresholds* table = extAlgoArchTable(comm);
+  return table != nullptr ? table->ddaRsLL128Threads : 0;
+}
+
 // Widest window any enabled DDA tier can serve for this collective. The entry
 // gate only decides whether the per-tier checks run, so a tier tuned off (0)
 // must not hide the tiers that are still on: gfx1250 ReduceScatter has
@@ -2628,7 +2633,7 @@ ncclResult_t rcclSelectReduceScatter(struct ncclComm* comm, const void* sendbuff
     }
 
     // (2) DDA fast paths. Symmetric wins when buffers are registered (-R 2); DDA
-    // enters only when symk is unavailable. No Blocks helpers -> nMaxChannels 0.
+    // enters only when symk is unavailable. Only LL128 has a Blocks helper, so the other tiers report 0.
     const size_t rsDdaVmmMax =
       rcclDdaVmmThresholdCtxTab(archTable, ncclFuncReduceScatter, rsWinRegType, /*graphMode=*/false, comm->nRanks);
     const size_t rsDdaEntryMax = rcclDdaEntryThresholdTab(archTable, ncclFuncReduceScatter, comm->nRanks);
@@ -2647,6 +2652,7 @@ ncclResult_t rcclSelectReduceScatter(struct ncclComm* comm, const void* sendbuff
             ncclReduceScatterDdaFabricLL128Eligible(comm, sendbuff, recvbuff, recvcount, datatype, op)) {
           decision->algo = RCCL_DDA_FABRIC_LL128;
           decision->protocol = NCCL_PROTO_LL128;
+          decision->nMaxChannels = ncclReduceScatterDdaFabricLL128Blocks(comm, recvcount, datatype);
           return rcclSelectDone("RS", query, decision);
         }
         // The entry gate now admits the widest tier, so VMM re-checks its own cap.

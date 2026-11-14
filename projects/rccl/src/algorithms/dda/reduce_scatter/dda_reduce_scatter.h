@@ -52,4 +52,8 @@ ncclResult_t ncclReduceScatterDdaFabricLL128(const void* sendbuff, void* recvbuf
                                              ncclDataType_t datatype, ncclRedOp_t op, ncclComm* comm,
                                              cudaStream_t stream);
 
+// Total CTAs (grid blocks) the DDA LL128 reduce-scatter launcher would use for the given
+// operands. Mirrors the launch grid math so reporting reflects real occupancy.
+uint32_t ncclReduceScatterDdaFabricLL128Blocks(ncclComm* comm, size_t recvcount, ncclDataType_t datatype);
+
 #endif

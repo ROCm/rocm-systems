@@ -272,6 +272,57 @@ TEST_F(DdaReduceScatterFabricLL128Microtest, Launch_GridFollowsShardSlicesWithin
   EXPECT_EQ(RunOne(16 * 100 * kSliceFloats).grid.x, 1u);
 }
 
+// The reported block count is the launch grid, caps included.
+TEST_F(DdaReduceScatterFabricLL128Microtest, Blocks_MatchTheLaunchedGrid) {
+  struct Case {
+    size_t count;
+    ncclDataType_t datatype;
+  };
+  const Case cases[] = {{8, ncclFloat16},
+                        {16 * kSliceFloats + 4, ncclFloat32},
+                        {32 * kSliceFloats, ncclBfloat16},
+                        {16 * 100 * kSliceFloats, ncclFloat32}};
+  for (int maxBlocks : {256, 6}) {
+    comm().ddaFabricMaxBlocks = maxBlocks;
+    for (const Case& c : cases) {
+      EXPECT_EQ(ncclReduceScatterDdaFabricLL128Blocks(mock_.get(), c.count, c.datatype),
+                RunOne(c.count, c.datatype).grid.x)
+        << "count " << c.count << " maxBlocks " << maxBlocks;
+    }
+  }
+}
+
+TEST_F(DdaReduceScatterFabricLL128Microtest, Launch_ThreadsOverrideMustBeAWarpMultipleUpTo512) {
+  const std::pair<int64_t, unsigned> cases[] = {{256, 256}, {32, 32},   {512, 512}, {16, 512},
+                                                {48, 512},  {544, 512}, {0, 512},   {-32, 512}};
+  for (const auto& [env, threads] : cases) {
+    params_["RCCL_DDA_LL128_RS_THREADS"] = env;
+    EXPECT_EQ(RunOne(8).block.x, threads) << "DDA_LL128_RS_THREADS " << env;
+  }
+  // 256 threads are 8 warps, so 9 slices take a second block.
+  params_["RCCL_DDA_LL128_RS_THREADS"] = 256;
+  EXPECT_EQ(RunOne(9 * kSliceFloats).grid.x, 2u);
+  EXPECT_EQ(RunOne(8 * kSliceFloats).grid.x, 1u);
+  EXPECT_EQ(ncclReduceScatterDdaFabricLL128Blocks(mock_.get(), 9 * kSliceFloats, ncclFloat32), 2u);
+}
+
+// The arch table picks the block size, 512 when it sets none or one the launch bound rules out.
+// A valid DDA_LL128_RS_THREADS overrides it.
+TEST_F(DdaReduceScatterFabricLL128Microtest, Launch_ThreadsFromArchTableUnlessOverridden) {
+  g_rcclDdaFabricRsLL128Threads = [](const ncclComm*) { return 256; };
+  // 256 threads are 8 warps, so 9 slices take a second block.
+  EXPECT_EQ(RunOne(9 * kSliceFloats).block.x, 256u);
+  EXPECT_EQ(RunOne(9 * kSliceFloats).grid.x, 2u);
+  EXPECT_EQ(ncclReduceScatterDdaFabricLL128Blocks(mock_.get(), 9 * kSliceFloats, ncclFloat32), 2u);
+  params_["RCCL_DDA_LL128_RS_THREADS"] = 512;
+  EXPECT_EQ(RunOne(9 * kSliceFloats).block.x, 512u);
+  params_.erase("RCCL_DDA_LL128_RS_THREADS");
+  for (int tuned : {0, 48, 1024}) {
+    g_rcclDdaFabricRsLL128Threads = [tuned](const ncclComm*) { return tuned; };
+    EXPECT_EQ(RunOne(8).block.x, 512u) << "table " << tuned;
+  }
+}
+
 TEST_F(DdaReduceScatterFabricLL128Microtest, Launch_LaunchErrorIsReported) {
   g_hipGetLastError = [] { return hipErrorLaunchFailure; };
   EXPECT_EQ(Run(4), ncclUnhandledCudaError);
@@ -318,13 +369,16 @@ void ExpectPollWalkCoversPeersInRankOrder() {
 
 // Every peer is polled once in rank order after self; a past-the-end entry names self, whose own slot is never written.
 TEST_F(DdaReduceScatterFabricLL128Microtest, PollBatch_WalkVisitsEveryPeerOnceInRankOrder) {
-  static_assert(dda::common::kDdaLL128RsPollBatch<float> == 3);
-  static_assert(dda::common::kDdaLL128RsPollBatch<half> == 3);
-  static_assert(dda::common::kDdaLL128RsPollBatch<bf16> == 3);
-  static_assert(dda::common::kDdaLL128RsPollBatch<dda::common::fp8e4m3> == 2);
-  static_assert(dda::common::kDdaLL128RsPollBatch<dda::common::fp8e5m2> == 2);
+  static_assert(dda::common::kDdaLL128RsPollBatch<float> == 8);
+  static_assert(dda::common::kDdaLL128RsPollBatch<half> == 8);
+  static_assert(dda::common::kDdaLL128RsPollBatch<bf16> == 8);
+  static_assert(dda::common::kDdaLL128RsPollBatch<dda::common::fp8e4m3> == 4);
+  static_assert(dda::common::kDdaLL128RsPollBatch<dda::common::fp8e5m2> == 4);
   ExpectPollWalkCoversPeersInRankOrder<dda::common::kDdaLL128RsPollBatch<float>>();
   ExpectPollWalkCoversPeersInRankOrder<dda::common::kDdaLL128RsPollBatch<dda::common::fp8e4m3>>();
+  // The 4- and 8-rank instances cap the batch at their peer count.
+  ExpectPollWalkCoversPeersInRankOrder<3>();
+  ExpectPollWalkCoversPeersInRankOrder<7>();
 }
 
 }  // namespace
