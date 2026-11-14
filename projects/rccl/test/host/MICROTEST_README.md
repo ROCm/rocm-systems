@@ -306,6 +306,11 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   binary because the test defines the HIP stream, event and graph calls it records, and
   `strongstream_stubs.cc` / `nccl_fakes.cc` already define this unit's symbols. See
   `test_categories_micro_strongstream.yaml`.
+- **`rccl-UnitTestsMicroRmaIbProxy`** — `ncclRmaIbProxyTest()` in `transport/net_ib/gin.cc`
+  (via `NET_IB_GIN_CC_PATH`, from `rma-ib-proxy-test.cc`); suite `RmaIbProxyTest.*`, against a
+  fake CQ that returns a scripted completion batch. Its own binary because `gin.cc` defines
+  symbols `rccl-UnitTestsMicro` fakes, and the test defines every extern `gin.cc` needs. See
+  `test_categories_micro_rma_ib_proxy.yaml`.
 - **`rccl-UnitTestsMicroUtils`** — `misc/utils.cc` (via `UTILS_CC_PATH`, from
   `utils-test.cc`); suite `Utils*`. Its own binary because the test seams HIP, env and
   libc (allocation, hostname, boot id, `readlink`, `sysconf`) around a unit other
