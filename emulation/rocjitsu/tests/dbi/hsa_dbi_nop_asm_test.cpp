@@ -32,6 +32,7 @@ RJ_DIAGNOSTIC_POP
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <memory>
@@ -300,23 +301,18 @@ void HsaDbiNopAsmCdna2Hardware::run_tail_backing_case(bool file_backed) {
   ASSERT_TRUE(original.is_valid());
   ASSERT_EQ(original.text_sections().size(), 1u);
   const Section &text = *original.text_sections().front();
-  std::unique_ptr<Decoder> decoder = Decoder::create(kCdna2Params.arch);
-  ASSERT_NE(decoder, nullptr);
   const uint64_t live_end = original_live_end_;
   ASSERT_GT(live_end, anchor_offsets_.front());
-  ASSERT_LE(live_end + sizeof(uint32_t), text.size());
-  const uint32_t padding_word =
-      test_support::read_elf_struct_for_test<uint32_t>(image, text.sectionOffset() + live_end);
-  const DecodeResult padding = decoder->decode_window(std::span(&padding_word, 1));
-  ASSERT_TRUE(padding.succeeded());
-  ASSERT_EQ(padding.value()->mnemonic(), "s_nop");
+  ASSERT_LE(live_end, text.size());
 
-  const Elf64_Ehdr header = test_support::read_elf_struct_for_test<Elf64_Ehdr>(image, 0);
+  Elf64_Ehdr header = test_support::read_elf_struct_for_test<Elf64_Ehdr>(image, 0);
   ASSERT_TRUE(text.sectionHeaderIndex());
   const size_t text_index = *text.sectionHeaderIndex();
   ASSERT_LT(text_index, header.e_shnum);
-  Elf64_Shdr text_header = test_support::read_elf_struct_for_test<Elf64_Shdr>(
-      image, header.e_shoff + text_index * header.e_shentsize);
+  std::optional<std::vector<Elf64_Shdr>> sections =
+      read_elf_table<Elf64_Shdr>(image, header.e_shoff, header.e_shnum, header.e_shentsize);
+  ASSERT_TRUE(sections);
+  Elf64_Shdr &text_header = (*sections)[text_index];
   const std::optional<Elf64_Sym> kernel =
       test_support::find_elf_symbol_for_test(image, "vector_add");
   ASSERT_TRUE(kernel);
@@ -339,16 +335,57 @@ void HsaDbiNopAsmCdna2Hardware::run_tail_backing_case(bool file_backed) {
   ASSERT_EQ((*segments)[owner].p_filesz, text.size());
   ASSERT_EQ((*segments)[owner].p_memsz, text.size());
 
-  // Consume existing unreachable linker padding without moving another section.
-  // The only difference between the two cases is this tail word's file backing.
+  // Reserve the unreachable word even when .dynamic immediately follows .text.
+  // Shift file storage by an aligned gap while keeping all runtime addresses.
+  const uint64_t tail_offset = text.sectionOffset() + live_end;
+  const uint64_t tail_vaddr = text.vaddr() + live_end;
+  uint64_t gap = alignof(Elf64_Shdr);
+  for (const Elf64_Shdr &section : *sections)
+    gap = std::max(gap, section.sh_addralign);
+  for (const Elf64_Phdr &segment : *segments)
+    gap = std::max(gap, segment.p_align);
+  for (size_t index = 0; index < sections->size(); ++index) {
+    Elf64_Shdr &section = (*sections)[index];
+    ASSERT_TRUE(section.sh_addralign <= 1 || gap % section.sh_addralign == 0);
+    if (index == text_index)
+      continue;
+    ASSERT_TRUE(section.sh_type == SHT_NOBITS || section.sh_offset >= tail_offset ||
+                section.sh_size <= tail_offset - section.sh_offset);
+    if (section.sh_offset >= tail_offset)
+      section.sh_offset += gap;
+  }
+  for (size_t index = 0; index < segments->size(); ++index) {
+    Elf64_Phdr &segment = (*segments)[index];
+    ASSERT_TRUE(segment.p_align <= 1 || gap % segment.p_align == 0);
+    if (index == owner)
+      continue;
+    ASSERT_TRUE(segment.p_offset >= tail_offset ||
+                segment.p_filesz <= tail_offset - segment.p_offset);
+    if (segment.p_type == PT_LOAD && segment.p_memsz != 0) {
+      ASSERT_TRUE(segment.p_vaddr >= tail_vaddr + sizeof(uint32_t) ||
+                  segment.p_vaddr + segment.p_memsz <= tail_vaddr);
+    }
+    if (segment.p_offset >= tail_offset)
+      segment.p_offset += gap;
+  }
+  image.insert(image.begin() + static_cast<std::ptrdiff_t>(tail_offset), gap, 0);
+  if (header.e_shoff >= tail_offset)
+    header.e_shoff += gap;
+  if (header.e_phoff >= tail_offset)
+    header.e_phoff += gap;
+  const util::FailureOr<uint32_t> nop = build_s_nop(0, kCdna2Params.arch);
+  ASSERT_TRUE(nop.succeeded());
   text_header.sh_size = live_end + sizeof(uint32_t);
   (*segments)[owner].p_filesz = live_end + (file_backed ? sizeof(uint32_t) : 0);
   (*segments)[owner].p_memsz = text_header.sh_size;
-  test_support::write_value_for_test<uint32_t>(image, text.sectionOffset() + live_end, 0);
-  test_support::write_elf_struct_for_test(image, header.e_shoff + text_index * header.e_shentsize,
-                                          text_header);
-  test_support::write_elf_struct_for_test(image, header.e_phoff + owner * header.e_phentsize,
-                                          (*segments)[owner]);
+  test_support::write_value_for_test(image, tail_offset, nop.value());
+  test_support::write_elf_struct_for_test(image, 0, header);
+  for (size_t index = 0; index < sections->size(); ++index)
+    test_support::write_elf_struct_for_test(image, header.e_shoff + index * header.e_shentsize,
+                                            (*sections)[index]);
+  for (size_t index = 0; index < segments->size(); ++index)
+    test_support::write_elf_struct_for_test(image, header.e_phoff + index * header.e_phentsize,
+                                            (*segments)[index]);
   const std::vector<uint8_t> pristine = image;
   AmdGpuCodeObject source(image.data(), image.size());
   ASSERT_TRUE(source.is_valid());
