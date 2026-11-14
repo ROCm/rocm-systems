@@ -275,13 +275,16 @@ struct DdaLL128SplitUnit {
 // An aborted wait leaves only its warp, before anything that depends on it is stored.
 // In place is safe: A reads only the peers' shards and D writes (peer, slice) only after the peer folded my copy of it.
 // The rank count is runtime only: the peer loops do not unroll, and a compile-time count adds no resident block.
-template <typename T>
+// kDdaLL128FlagBytesNarrow runs the narrow flag: slicesTotal counts 1984 B slices; units and fold order hold.
+template <typename T, int kFlagBytes = kDdaLL128FlagBytesWide>
 __launch_bounds__(kDdaLL128ArThreads) __global__
   void ddaAllReduceTwoShotLL128Split(T* const* __restrict__ peerScratch, T* __restrict__ recvbuff,
                                      const T* __restrict__ sendbuff, size_t shardBytes, int selfRank, int nRanks,
                                      uint32_t* __restrict__ epochDev, int epochLen, size_t slicesTotal, size_t bankSize,
                                      DdaKernelParams params) {
   constexpr int kWire = kDdaLL128WireAsync;
+  constexpr size_t kSliceData = (size_t)ddaLL128DataBytesPerSliceOf<kFlagBytes>();
+  static_assert(kFlagBytes == kDdaLL128FlagBytesWide || sizeof(T) <= 4, "the narrow layout moves whole dwords");
   constexpr uint32_t kPairMask = (1u << kDdaLL128SplitPollSlices) - 1;  // both slices of a poll pair
   const int lane = threadIdx.x % kDdaLL128Warp;
   // Wave uniform where an LL128 warp is a wave (wave32), so the unit bookkeeping below stays in scalar registers.
@@ -334,9 +337,9 @@ __launch_bounds__(kDdaLL128ArThreads) __global__
     const int p = selfRank + 1 + (int)pi;
     return p < nRanks ? p : p - nRanks;
   };
-  auto eltIn = [&](uint32_t s) { return ddaLL128SliceBytes(shardBytes, s); };
+  auto eltIn = [&](uint32_t s) { return ddaLL128SliceBytesOf<kFlagBytes>(shardBytes, s); };
   auto shardAt = [&](auto* base, int rank, uint32_t s) {
-    return base + (size_t)rank * shardBytes + (size_t)s * (size_t)kDdaLL128DataBytesPerSlice;
+    return base + (size_t)rank * shardBytes + (size_t)s * kSliceData;
   };
   // Slice s of rank's slot in the staging area `area` words into the scratch at base.
   auto slotAt = [&](uint64_t* base, uint64_t area, int rank, uint32_t s) {
@@ -351,14 +354,14 @@ __launch_bounds__(kDdaLL128ArThreads) __global__
 
   // A. scatter, units striding by warp, two loads ahead: send slice s of the peer's shard to its first area, slot[me].
   auto load = [&](DdaLL128SplitUnit x, DdaLL128Raw& raw) {
-    ddaLL128LoadRaw<int8_t>(raw, shardAt(srcBytes, peerOf(x.pi), x.s), eltIn(x.s), lane, flagLane);
+    ddaLL128LoadRaw<int8_t, kFlagBytes>(raw, shardAt(srcBytes, peerOf(x.pi), x.s), eltIn(x.s), lane, flagLane);
   };
   auto send = [&](DdaLL128SplitUnit x, const DdaLL128Raw& raw) {
     uint64_t regs[kDdaLL128WordsPerThread];
-    ddaLL128RawToRegs<int8_t>(raw, regs, eltIn(x.s), lane, flagLane);
-    ddaLL128StageFill<kWire>(stage, regs, flag, flagLane, lane);
-    ddaLL128StagePush<kWire>(stage, slotAt(peerTbl[peerOf(x.pi)], bankWords, selfRank, x.s), regs, flag, flagLane,
-                             lane);
+    ddaLL128RawToRegs<int8_t, kFlagBytes>(raw, regs, eltIn(x.s), lane, flagLane);
+    ddaLL128StageFill<kWire, kFlagBytes>(stage, regs, flag, flagLane, lane);
+    ddaLL128StagePush<kWire, kFlagBytes>(stage, slotAt(peerTbl[peerOf(x.pi)], bankWords, selfRank, x.s), regs, flag,
+                                         flagLane, lane);
   };
   if (warp < units) {
     // Look-ahead loads past the last unit reload the one just sent, so every wait count stays exact.
@@ -391,14 +394,14 @@ __launch_bounds__(kDdaLL128ArThreads) __global__
 #pragma unroll 1
   for (uint32_t s = s0 + warp; s < s0 + nSlices; s += nwarps) {
     uint64_t acc[kDdaLL128WordsPerThread] = {};
-    ddaLL128LoadRegs<int8_t>(acc, shardAt(srcBytes, selfRank, s), eltIn(s), lane, flagLane);
+    ddaLL128LoadRegs<int8_t, kFlagBytes>(acc, shardAt(srcBytes, selfRank, s), eltIn(s), lane, flagLane);
 #pragma unroll 1
     for (uint32_t pi = 0; pi < peers; pi += kDdaLL128SplitPollSlices) {
       const uint32_t mask = pi + 1 < peers ? kPairMask : 1u;
       const uint64_t* at[kDdaLL128SplitPollSlices] = {wireAt(bankWords, peerOf(pi), s),
                                                       wireAt(bankWords, peerOf(pi + 1), s)};
       uint64_t v[kDdaLL128SplitPollSlices][kDdaLL128WordsPerThread];
-      if (!ddaLL128PollWireN(at, mask, v, flag, lane, params)) {
+      if (!ddaLL128PollWireN<kDdaLL128SplitPollSlices, kFlagBytes>(at, mask, v, flag, lane, params)) {
         quit();
         return;
       }
@@ -412,8 +415,8 @@ __launch_bounds__(kDdaLL128ArThreads) __global__
         }
       }
     }
-    ddaLL128StoreWire(wireAt(bankWordsNext, selfRank, s), acc, flag, flagLane);
-    ddaLL128StoreRegs<int8_t>(shardAt(dstBytes, selfRank, s), acc, eltIn(s), lane, flagLane);
+    ddaLL128StoreWire<kFlagBytes>(wireAt(bankWordsNext, selfRank, s), acc, flag, flagLane);
+    ddaLL128StoreRegs<int8_t, kFlagBytes>(shardAt(dstBytes, selfRank, s), acc, eltIn(s), lane, flagLane);
   }
 
   // C. push my reduced slices to every peer, each warp an equal run of the units, polling and filling each slice once.
@@ -428,16 +431,16 @@ __launch_bounds__(kDdaLL128ArThreads) __global__
     for (; x.u < hi; ++x.u) {
       if (x.u == lo || x.pi == 0) {
         const uint64_t* mine[1] = {wireAt(bankWordsNext, selfRank, x.s)};
-        if (!ddaLL128PollWireN(mine, 1u, cur, flag, lane, params)) {
+        if (!ddaLL128PollWireN<1, kFlagBytes>(mine, 1u, cur, flag, lane, params)) {
           quit();
           return;
         }
         // lastOps must stay scalar: an EXEC-masked rung of the wait ladder would wait to 0.
         stage.lastOps = __builtin_amdgcn_readfirstlane(stage.lastOps);
-        ddaLL128StageFill<kWire>(stage, cur[0], flag, flagLane, lane);
+        ddaLL128StageFill<kWire, kFlagBytes>(stage, cur[0], flag, flagLane, lane);
       }
-      ddaLL128StagePush<kWire>(stage, slotAt(peerTbl[peerOf(x.pi)], bankWordsNext, selfRank, x.s), cur[0], flag,
-                               flagLane, lane);
+      ddaLL128StagePush<kWire, kFlagBytes>(stage, slotAt(peerTbl[peerOf(x.pi)], bankWordsNext, selfRank, x.s), cur[0],
+                                           flag, flagLane, lane);
       if (++x.pi == peers) {
         x.pi = 0;
         ++x.s;
@@ -454,13 +457,13 @@ __launch_bounds__(kDdaLL128ArThreads) __global__
       const uint64_t* at[kDdaLL128SplitPollSlices] = {wireAt(bankWordsNext, peerOf(a.pi), a.s),
                                                       wireAt(bankWordsNext, peerOf(b.pi), b.s)};
       uint64_t v[kDdaLL128SplitPollSlices][kDdaLL128WordsPerThread];
-      if (!ddaLL128PollWireN(at, mask, v, flag, lane, params)) {
+      if (!ddaLL128PollWireN<kDdaLL128SplitPollSlices, kFlagBytes>(at, mask, v, flag, lane, params)) {
         quit();
         return;
       }
-      ddaLL128StoreRegs<int8_t>(shardAt(dstBytes, peerOf(a.pi), a.s), v[0], eltIn(a.s), lane, flagLane);
+      ddaLL128StoreRegs<int8_t, kFlagBytes>(shardAt(dstBytes, peerOf(a.pi), a.s), v[0], eltIn(a.s), lane, flagLane);
       if ((mask >> 1) & 1u) {
-        ddaLL128StoreRegs<int8_t>(shardAt(dstBytes, peerOf(b.pi), b.s), v[1], eltIn(b.s), lane, flagLane);
+        ddaLL128StoreRegs<int8_t, kFlagBytes>(shardAt(dstBytes, peerOf(b.pi), b.s), v[1], eltIn(b.s), lane, flagLane);
       }
       a = next(b);
     }

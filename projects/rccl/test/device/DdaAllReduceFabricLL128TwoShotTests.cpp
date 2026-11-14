@@ -23,6 +23,10 @@ namespace {
 
 using dda::common::DdaKernelParams;
 using dda::common::kDdaLL128DataBytesPerSlice;
+using dda::common::kDdaLL128FlagBytesNarrow;
+using dda::common::kDdaLL128FlagBytesWide;
+using dda::common::kDdaLL128NarrowDataBytesPerSlice;
+using dda::common::kDdaLL128Pairs;
 using dda::common::kDdaLL128Warp;
 using dda::common::kDdaLL128WireAsync;
 using dda::common::kDdaLL128WireCoop;
@@ -40,7 +44,12 @@ constexpr uint8_t kUntouched = 0xA5;
 // A launch still running past this hangs: the test raises the abort and fails.
 constexpr std::chrono::seconds kDrainTimeout{60};
 
-enum class Kind { kCoop, kStaged, kSplit };
+// kSplitNarrow: the split with the narrow 4 B flag.
+enum class Kind { kCoop, kStaged, kSplit, kSplitNarrow };
+
+int flagBytes(Kind kind) {
+  return kind == Kind::kSplitNarrow ? kDdaLL128FlagBytesNarrow : kDdaLL128FlagBytesWide;
+}
 
 struct Case {
   int nRanks;
@@ -63,6 +72,12 @@ size_t slices(size_t shardBytes) {
   return dda::common::ddaLL128Slices(shardBytes);
 }
 
+// Shard slices of a launch of `kind`: the narrow flag's are 1984 B.
+size_t slicesOf(Kind kind, size_t shardBytes) {
+  return kind == Kind::kSplitNarrow ? dda::common::ddaLL128SlicesOf<kDdaLL128FlagBytesNarrow>(shardBytes) :
+                                     slices(shardBytes);
+}
+
 // A bank of exactly two staging areas of nRanks slots, each slot one shard's slices.
 size_t bankBytes(int nRanks, size_t shardBytes) {
   return 2 * (size_t)nRanks * slices(shardBytes) * kDdaLL128WireWordsPerSlice * sizeof(uint64_t);
@@ -77,35 +92,42 @@ uint64_t wireFlag(uint32_t flag) {
 }
 
 // Writes slice s of rows[peer] into area + peer * slotWords as the LL128 line that peer sends; one warp.
+template <int kFlagBytes = kDdaLL128FlagBytesWide>
 __device__ void PublishLine(uint64_t* area, const int8_t* rows, int peer, size_t s, size_t slotWordsArg,
                             size_t shardBytes, uint64_t flag) {
   const int lane = threadIdx.x;
   const bool flagLane = dda::common::ddaLL128IsFlagLane(lane);
-  const size_t sliceByte = s * (size_t)kDdaLL128DataBytesPerSlice;
+  const size_t sliceByte = s * (size_t)dda::common::ddaLL128DataBytesPerSliceOf<kFlagBytes>();
   uint64_t regs[kDdaLL128WordsPerThread] = {};
-  dda::common::ddaLL128LoadRegs<int8_t>(regs, rows + (size_t)peer * shardBytes + sliceByte,
-                                        dda::common::ddaLL128SliceBytes(shardBytes, s), lane, flagLane);
-  dda::common::ddaLL128StoreWire(area + (size_t)peer * slotWordsArg + s * kDdaLL128WireWordsPerSlice + 2 * lane, regs,
-                                 flag, flagLane);
+  dda::common::ddaLL128LoadRegs<int8_t, kFlagBytes>(regs, rows + (size_t)peer * shardBytes + sliceByte,
+                                                    dda::common::ddaLL128SliceBytesOf<kFlagBytes>(shardBytes, s), lane,
+                                                    flagLane);
+  dda::common::ddaLL128StoreWire<kFlagBytes>(
+    area + (size_t)peer * slotWordsArg + s * kDdaLL128WireWordsPerSlice + 2 * lane, regs, flag, flagLane);
 }
 
-// One warp per (peers[blockIdx.x], slice blockIdx.y).
+// One warp per (peers[blockIdx.x], slice blockIdx.y), once `ticks` of wall clock passed (0: at once).
+template <int kFlagBytes = kDdaLL128FlagBytesWide>
 __global__ void PublishLines(uint64_t* area, const int8_t* rows, const int* peers, size_t slotWordsArg,
-                             size_t shardBytes, uint64_t flag) {
-  PublishLine(area, rows, peers[blockIdx.x], blockIdx.y, slotWordsArg, shardBytes, flag);
+                             size_t shardBytes, uint64_t flag, long long ticks) {
+  const long long start = wall_clock64();
+  while (wall_clock64() - start < ticks) {
+  }
+  PublishLine<kFlagBytes>(area, rows, peers[blockIdx.x], blockIdx.y, slotWordsArg, shardBytes, flag);
 }
 
 // In place, peer peers[blockIdx.x] publishes its reduced slices in order, each once my copy of it reached the peer.
+template <int kFlagBytes = kDdaLL128FlagBytesWide>
 __global__ void PublishLinesAfterMyCopy(uint64_t* area, const int8_t* rows, const int* peers, size_t slotWordsArg,
                                         size_t shardBytes, uint64_t flag, uint64_t* const* myCopyAt,
                                         DdaKernelParams params) {
-  for (size_t s = 0; s < dda::common::ddaLL128Slices(shardBytes); ++s) {
-    uint64_t seen[kDdaLL128WordsPerThread];
-    if (!dda::common::ddaLL128PollWire(myCopyAt[blockIdx.x] + s * kDdaLL128WireWordsPerSlice + 2 * threadIdx.x, seen,
-                                       flag, threadIdx.x, params)) {
+  for (size_t s = 0; s < dda::common::ddaLL128SlicesOf<kFlagBytes>(shardBytes); ++s) {
+    const uint64_t* at[1] = {myCopyAt[blockIdx.x] + s * kDdaLL128WireWordsPerSlice + 2 * threadIdx.x};
+    uint64_t seen[1][kDdaLL128WordsPerThread];
+    if (!dda::common::ddaLL128PollWireN<1, kFlagBytes>(at, 1u, seen, flag, threadIdx.x, params)) {
       return;
     }
-    PublishLine(area, rows, peers[blockIdx.x], s, slotWordsArg, shardBytes, flag);
+    PublishLine<kFlagBytes>(area, rows, peers[blockIdx.x], s, slotWordsArg, shardBytes, flag);
   }
 }
 
@@ -148,16 +170,22 @@ void launch(const Case& c, T** scratch, T* recv, const T* send, uint32_t* epoch,
                          dda::common::ddaLL128ArSplitSharedBytes(c.block, c.nRanks), stream, scratch, recv, send,
                          c.shardBytes, c.self, c.nRanks, epoch, epochLen(c), n, bank, params);
       break;
+    case Kind::kSplitNarrow:
+      hipLaunchKernelGGL((dda::common::ddaAllReduceTwoShotLL128Split<T, kDdaLL128FlagBytesNarrow>), grid, block,
+                         dda::common::ddaLL128ArSplitSharedBytes(c.block, c.nRanks), stream, scratch, recv, send,
+                         c.shardBytes, c.self, c.nRanks, epoch, epochLen(c), slicesOf(c.kind, c.shardBytes), bank,
+                         params);
+      break;
   }
 }
 
-// Inexact float sums pin the fold order: my shard first, then the peers from me + 1 on.
-std::vector<std::vector<uint8_t>> FloatMessages(int nRanks, size_t shardBytes) {
+// Inexact float sums pin the fold order: my shard first, then the peers from me + 1 on. `seed` varies the values.
+std::vector<std::vector<uint8_t>> FloatMessages(int nRanks, size_t shardBytes, int seed = 0) {
   std::vector<std::vector<uint8_t>> send((size_t)nRanks, std::vector<uint8_t>((size_t)nRanks * shardBytes));
   for (int r = 0; r < nRanks; ++r) {
     float* f = reinterpret_cast<float*>(send[(size_t)r].data());
     for (size_t i = 0; i < (size_t)nRanks * shardBytes / sizeof(float); ++i) {
-      f[i] = 1.0f / (float)(3 + r) + (float)((r * 131 + (int)i * 17) % 1000) * 1.0e-3f;
+      f[i] = 1.0f / (float)(3 + r + seed) + (float)((r * 131 + (int)i * 17) % 1000) * 1.0e-3f;
     }
   }
   return send;
@@ -175,6 +203,52 @@ std::vector<std::vector<uint8_t>> FloatReduced(const std::vector<std::vector<uin
       for (int r = 1; r < nRanks; ++r) {
         acc[i] = acc[i] + reinterpret_cast<const float*>(send[(size_t)((j + r) % nRanks)].data())[at];
       }
+    }
+  }
+  return reduced;
+}
+
+// bf16 a + b as the device folds it: the fp32 sum rounded to nearest even (DdaVecElementAddTests' Bf16AddRef).
+uint16_t Bf16Add(uint16_t a, uint16_t b) {
+  float x;
+  float y;
+  const uint32_t ua = (uint32_t)a << 16;
+  const uint32_t ub = (uint32_t)b << 16;
+  std::memcpy(&x, &ua, sizeof(x));
+  std::memcpy(&y, &ub, sizeof(y));
+  const float sum = x + y;
+  uint32_t u;
+  std::memcpy(&u, &sum, sizeof(u));
+  return (uint16_t)((u + 0x7FFFu + ((u >> 16) & 1u)) >> 16);
+}
+
+// FloatMessages' values as bf16, truncated: every value finite, the 8-rank sums inexact.
+std::vector<std::vector<uint8_t>> Bf16Messages(int nRanks, size_t shardBytes) {
+  const std::vector<std::vector<uint8_t>> f = FloatMessages(nRanks, 2 * shardBytes);
+  std::vector<std::vector<uint8_t>> send((size_t)nRanks, std::vector<uint8_t>((size_t)nRanks * shardBytes));
+  for (int r = 0; r < nRanks; ++r) {
+    for (size_t i = 0; i < send[(size_t)r].size() / 2; ++i) {
+      std::memcpy(&send[(size_t)r][2 * i], &f[(size_t)r][4 * i + 2], 2);
+    }
+  }
+  return send;
+}
+
+// FloatReduced in bf16.
+std::vector<std::vector<uint8_t>> Bf16Reduced(const std::vector<std::vector<uint8_t>>& send, int nRanks,
+                                              size_t shardBytes) {
+  std::vector<std::vector<uint8_t>> reduced((size_t)nRanks, std::vector<uint8_t>(shardBytes));
+  for (int j = 0; j < nRanks; ++j) {
+    for (size_t i = 0; i < shardBytes / 2; ++i) {
+      const size_t at = (size_t)j * shardBytes + 2 * i;
+      uint16_t acc;
+      std::memcpy(&acc, &send[(size_t)j][at], sizeof(acc));
+      for (int r = 1; r < nRanks; ++r) {
+        uint16_t v;
+        std::memcpy(&v, &send[(size_t)((j + r) % nRanks)][at], sizeof(v));
+        acc = Bf16Add(acc, v);
+      }
+      std::memcpy(&reduced[(size_t)j][2 * i], &acc, sizeof(acc));
     }
   }
   return reduced;
@@ -251,8 +325,6 @@ class DdaAllReduceFabricLL128TwoShot : public DeviceTestBase {
     nRanks_ = nRanks;
     self_ = self;
     shardBytes_ = shardBytes;
-    send_ = send;
-    reduced_ = reduced;
     scratch_.clear();
     std::vector<uint8_t*> ptrs;
     for (int r = 0; r < nRanks; ++r) {
@@ -262,8 +334,15 @@ class DdaAllReduceFabricLL128TwoShot : public DeviceTestBase {
     scratchPtrs_ = std::make_unique<DeviceBuffer<uint8_t*>>(ptrs.size());
     scratchPtrs_->copyFrom(ptrs);
     sendBuf_ = std::make_unique<DeviceBuffer<uint8_t>>((size_t)nRanks * shardBytes);
-    sendBuf_->copyFrom(send_[(size_t)self]);
     recvBuf_ = std::make_unique<DeviceBuffer<uint8_t>>((size_t)nRanks * shardBytes);
+    setMessages(send, reduced);
+  }
+
+  // New messages on the same scratch: send_, reduced_ and my sendbuff.
+  void setMessages(const std::vector<std::vector<uint8_t>>& send, const std::vector<std::vector<uint8_t>>& reduced) {
+    send_ = send;
+    reduced_ = reduced;
+    sendBuf_->copyFrom(send_[(size_t)self_]);
   }
 
   // setUp for c on FloatMessages and their host fold.
@@ -285,14 +364,11 @@ class DdaAllReduceFabricLL128TwoShot : public DeviceTestBase {
     }
     epoch_.copyFrom(std::vector<uint32_t>(kEpochCells, c.flag - 1));
     *abortHost_ = abortFlag;
+    kind_ = c.kind;
     bankOffset_ = (c.flag & 1u) * bankBytes(nRanks_, shardBytes_);
 
-    std::vector<int8_t> copies((size_t)nRanks_ * shardBytes_);
-    std::vector<int8_t> reduced((size_t)nRanks_ * shardBytes_);
-    for (int p = 0; p < nRanks_; ++p) {
-      std::memcpy(&copies[(size_t)p * shardBytes_], &send_[(size_t)p][(size_t)self_ * shardBytes_], shardBytes_);
-      std::memcpy(&reduced[(size_t)p * shardBytes_], reduced_[(size_t)p].data(), shardBytes_);
-    }
+    const std::vector<int8_t> copies = copyRows();
+    const std::vector<int8_t> reduced = reducedRows();
     publish(area(self_, 0), copies, skipCopy, c.flag);
     if (c.inPlace) {
       pendingReduced_ = std::make_unique<DeviceBuffer<int8_t>>(reduced.size());
@@ -300,6 +376,24 @@ class DdaAllReduceFabricLL128TwoShot : public DeviceTestBase {
     } else {
       publish(area(self_, nRanks_), reduced, skipReduced, c.flag);
     }
+  }
+
+  // Row p: peer p's copy of my shard, which it sends to my first area.
+  std::vector<int8_t> copyRows() {
+    std::vector<int8_t> copies((size_t)nRanks_ * shardBytes_);
+    for (int p = 0; p < nRanks_; ++p) {
+      std::memcpy(&copies[(size_t)p * shardBytes_], &send_[(size_t)p][(size_t)self_ * shardBytes_], shardBytes_);
+    }
+    return copies;
+  }
+
+  // Row p: peer p's reduced shard, which it sends to my second area.
+  std::vector<int8_t> reducedRows() {
+    std::vector<int8_t> reduced((size_t)nRanks_ * shardBytes_);
+    for (int p = 0; p < nRanks_; ++p) {
+      std::memcpy(&reduced[(size_t)p * shardBytes_], reduced_[(size_t)p].data(), shardBytes_);
+    }
+    return reduced;
   }
 
   // Rank r's staging area that starts `slot` slots into c's bank.
@@ -318,16 +412,26 @@ class DdaAllReduceFabricLL128TwoShot : public DeviceTestBase {
     return peers;
   }
 
-  void publish(uint64_t* at, const std::vector<int8_t>& rows, int skip, uint32_t flag) {
+  // The peers but skip publish rows at `at` in kind_'s line format; on `stream` after `ticks` of wall clock, else now.
+  void publish(uint64_t* at, const std::vector<int8_t>& rows, int skip, uint32_t flag, hipStream_t stream = nullptr,
+               long long ticks = 0) {
     const std::vector<int> peers = peersBut(skip);
-    DeviceBuffer<int8_t> dRows(rows.size());
-    dRows.copyFrom(rows);
-    DeviceBuffer<int> dPeers(peers.size());
-    dPeers.copyFrom(peers);
-    hipLaunchKernelGGL(PublishLines, dim3((unsigned)peers.size(), (unsigned)slices(shardBytes_)), dim3(kDdaLL128Warp),
-                       0, 0, at, dRows.ptr, dPeers.ptr, slotWords(nRanks_, shardBytes_), shardBytes_, wireFlag(flag));
+    auto dRows = std::make_shared<DeviceBuffer<int8_t>>(rows.size());
+    dRows->copyFrom(rows);
+    auto dPeers = std::make_shared<DeviceBuffer<int>>(peers.size());
+    dPeers->copyFrom(peers);
+    const dim3 grid((unsigned)peers.size(), (unsigned)slicesOf(kind_, shardBytes_));
+    auto* kernel = flagBytes(kind_) == kDdaLL128FlagBytesNarrow ? &PublishLines<kDdaLL128FlagBytesNarrow> :
+                                                                  &PublishLines<kDdaLL128FlagBytesWide>;
+    hipLaunchKernelGGL(kernel, grid, dim3(kDdaLL128Warp), 0, stream, at, dRows->ptr, dPeers->ptr,
+                       slotWords(nRanks_, shardBytes_), shardBytes_, wireFlag(flag), ticks);
     HIP_CHECK(hipGetLastError());
-    HIP_CHECK(hipDeviceSynchronize());
+    if (stream == nullptr) {
+      HIP_CHECK(hipDeviceSynchronize());
+    } else {
+      latePublishBuffers_.push_back(dRows);
+      latePublishBuffers_.push_back(dPeers);
+    }
   }
 
   bool drain(const std::vector<hipStream_t>& streams) {
@@ -353,9 +457,13 @@ class DdaAllReduceFabricLL128TwoShot : public DeviceTestBase {
       dPeers->copyFrom(peers);
       dCopyAt = std::make_unique<DeviceBuffer<uint64_t*>>(copyAt.size());
       dCopyAt->copyFrom(copyAt);
-      hipLaunchKernelGGL(PublishLinesAfterMyCopy, dim3((unsigned)peers.size()), dim3(kDdaLL128Warp), 0, side_,
-                         area(self_, nRanks_), pendingReduced_->ptr, dPeers->ptr, slotWords(nRanks_, shardBytes_),
-                         shardBytes_, wireFlag(c.flag), dCopyAt->ptr, DdaKernelParams{abortDev_});
+      auto* publisher = &PublishLinesAfterMyCopy<kDdaLL128FlagBytesWide>;
+      if (flagBytes(c.kind) == kDdaLL128FlagBytesNarrow) {
+        publisher = &PublishLinesAfterMyCopy<kDdaLL128FlagBytesNarrow>;
+      }
+      hipLaunchKernelGGL(publisher, dim3((unsigned)peers.size()), dim3(kDdaLL128Warp), 0, side_, area(self_, nRanks_),
+                         pendingReduced_->ptr, dPeers->ptr, slotWords(nRanks_, shardBytes_), shardBytes_,
+                         wireFlag(c.flag), dCopyAt->ptr, DdaKernelParams{abortDev_});
       HIP_CHECK(hipGetLastError());
       streams.push_back(side_);
     }
@@ -446,7 +554,74 @@ class DdaAllReduceFabricLL128TwoShot : public DeviceTestBase {
     }
   }
 
+  // The shard in rank r's narrow slot `slot` of the bank; *flagged is false if a line lacks the flag.
+  std::vector<uint8_t> decodeNarrow(int r, int slot, uint32_t flag, bool* flagged) {
+    const std::vector<uint8_t> bytes = scratch_[(size_t)r].copyTo();
+    const uint64_t* words =
+      reinterpret_cast<const uint64_t*>(bytes.data() + bankOffset_) + (size_t)slot * slotWords(nRanks_, shardBytes_);
+    std::vector<uint8_t> out(shardBytes_, kUntouched);
+    *flagged = true;
+    for (size_t s = 0; s < slicesOf(Kind::kSplitNarrow, shardBytes_); ++s) {
+      const uint64_t* wire = words + s * kDdaLL128WireWordsPerSlice;
+      for (int lane = 0; lane < kDdaLL128Warp; ++lane) {
+        const bool flagLane = dda::common::ddaLL128IsFlagLane(lane);
+        uint64_t regs[kDdaLL128WordsPerThread];
+        for (int g = 0; g < kDdaLL128Pairs; ++g) {
+          regs[2 * g] = wire[(size_t)g * 2 * kDdaLL128Warp + 2 * lane];
+          regs[2 * g + 1] = wire[(size_t)g * 2 * kDdaLL128Warp + 2 * lane + 1];
+          if (flagLane && !dda::common::ddaLL128NarrowFlagSeen(regs[2 * g + 1], wireFlag(flag))) {
+            *flagged = false;
+          }
+        }
+        dda::common::ddaLL128NarrowUnpack(regs, flagLane);
+        for (int g = 0; g < kDdaLL128Pairs; ++g) {
+          const size_t at =
+            s * kDdaLL128NarrowDataBytesPerSlice + 16 * (size_t)dda::common::ddaLL128NarrowChunkIx(g, lane);
+          if ((!flagLane || g < dda::common::kDdaLL128NarrowFullPairs) && at < shardBytes_) {
+            std::memcpy(&out[at], &regs[2 * g], 16);
+          }
+        }
+      }
+    }
+    return out;
+  }
+
+  // The narrow split c matches the cooperative writer; each peer holds my copy and reduced shard as narrow lines.
+  template <typename T>
+  void expectNarrowMatchesCoop(const Case& c, const char* type) {
+    SCOPED_TRACE(testing::Message() << type << " " << c.nRanks << "r narrow shard " << c.shardBytes << " " << c.grid
+                                    << "x" << c.block << " flag " << c.flag << " epochLen " << epochLen(c)
+                                    << " inPlace " << c.inPlace);
+    Case ref = c;
+    ref.kind = Kind::kCoop;
+    ref.inPlace = false;
+    reset(ref, 0);
+    run<T>(ref);
+    const std::vector<uint8_t> want = recvBuf_->copyTo();
+    reset(c, 0);
+    run<T>(c);
+    EXPECT_TRUE(recvBuf_->copyTo() == want) << "recvbuff differs from the cooperative writer's";
+    const std::vector<uint8_t> mine(want.begin() + (ptrdiff_t)(self_ * shardBytes_),
+                                    want.begin() + (ptrdiff_t)((self_ + 1) * shardBytes_));
+    for (int p = 0; p < nRanks_; ++p) {
+      if (p == self_) {
+        continue;
+      }
+      bool flagged = false;
+      const std::vector<uint8_t> copy(send_[(size_t)self_].begin() + (ptrdiff_t)(p * shardBytes_),
+                                      send_[(size_t)self_].begin() + (ptrdiff_t)((p + 1) * shardBytes_));
+      EXPECT_TRUE(decodeNarrow(p, self_, c.flag, &flagged) == copy) << "peer " << p << ": my copy of its shard";
+      EXPECT_TRUE(flagged) << "peer " << p << ": a copy line lacks the flag";
+      EXPECT_TRUE(decodeNarrow(p, nRanks_ + self_, c.flag, &flagged) == mine) << "peer " << p << ": my reduced shard";
+      EXPECT_TRUE(flagged) << "peer " << p << ": a reduced line lacks the flag";
+    }
+    expectEpochAdvanced(c);
+  }
+
   static constexpr size_t kEpochCells = 32;
+  Kind kind_ = Kind::kCoop;
+  // Rows and peer lists of publish() calls still in flight on a stream.
+  std::vector<std::shared_ptr<void>> latePublishBuffers_;
   int nRanks_ = 0;
   int self_ = 0;
   size_t shardBytes_ = 0;
@@ -533,7 +708,11 @@ TEST_F(DdaAllReduceFabricLL128TwoShot, AbortInTheReduceLeavesNoPartialSum) {
                {eight, 6},
                {eight, 7},
                {{5, 2, 0, Kind::kSplit, 1, 64, kSmallShardBytes}, 3},
-               {{8, 5, 8, Kind::kSplit, 8, 512, kLargeShardBytes, kFlag + 1, 12}, 7}};
+               {{8, 5, 8, Kind::kSplit, 8, 512, kLargeShardBytes, kFlag + 1, 12}, 7},
+               {{8, 5, 8, Kind::kSplitNarrow, 2, 512, kSmallShardBytes}, 1},
+               {{8, 5, 8, Kind::kSplitNarrow, 2, 512, kSmallShardBytes}, 6},
+               {{5, 2, 0, Kind::kSplitNarrow, 1, 64, kSmallShardBytes}, 3},
+               {{8, 5, 8, Kind::kSplitNarrow, 8, 512, kLargeShardBytes, kFlag + 1, 12}, 7}};
   for (const auto& cell : cells) {
     const Case& c = cell.c;
     SCOPED_TRACE(testing::Message() << c.nRanks << "r kind " << (int)c.kind << " shard " << c.shardBytes
@@ -550,8 +729,10 @@ TEST_F(DdaAllReduceFabricLL128TwoShot, AbortInTheReduceLeavesNoPartialSum) {
 // A peer that never sends its reduced shard aborts the split's gather: my shard is still stored, the peer's untouched.
 TEST_F(DdaAllReduceFabricLL128TwoShot, SplitAbortInTheGatherKeepsMyReducedShard) {
   for (const Case& c : {Case{8, 5, 8, Kind::kSplit, 2, 512, kSmallShardBytes},
-                        Case{5, 2, 0, Kind::kSplit, 4, 512, kMediumShardBytes, kFlag + 1}}) {
-    SCOPED_TRACE(testing::Message() << c.nRanks << "r shard " << c.shardBytes);
+                        Case{5, 2, 0, Kind::kSplit, 4, 512, kMediumShardBytes, kFlag + 1},
+                        Case{8, 5, 8, Kind::kSplitNarrow, 2, 512, kSmallShardBytes},
+                        Case{5, 2, 0, Kind::kSplitNarrow, 4, 512, kMediumShardBytes, kFlag + 1}}) {
+    SCOPED_TRACE(testing::Message() << c.nRanks << "r kind " << (int)c.kind << " shard " << c.shardBytes);
     setUpFloat(c);
     const int missing = (c.self + 3) % c.nRanks;
     reset(c, 1, -1, missing);
@@ -604,7 +785,7 @@ TEST_F(DdaAllReduceFabricLL128TwoShot, SplitDrainsWhenTheGridIsNotCoResident) {
     HIP_CHECK(hipExtStreamCreateWithCUMask(&streams[(size_t)r], (uint32_t)mask.size(), mask.data()));
   }
 
-  // The masks must hold fewer blocks than the grid, or this run proves nothing.
+  // With fewer blocks resident than the grid the run proves the drain; with all resident it still checks the harness.
   DeviceBuffer<int> counts(2);
   counts.zero();
   hipLaunchKernelGGL(CountResident, dim3(c.grid), dim3(c.block),
@@ -613,11 +794,19 @@ TEST_F(DdaAllReduceFabricLL128TwoShot, SplitDrainsWhenTheGridIsNotCoResident) {
   ASSERT_EQ(waitStreamBounded(streams[0], kDrainTimeout), hipSuccess) << "the residency probe did not finish";
   const int mostResident = counts.copyTo()[1];
 
-  if (mostResident < (int)c.grid) {
+  // The 8 B split, then the narrow one on the next epoch and bank.
+  for (const Kind kind : {Kind::kSplit, Kind::kSplitNarrow}) {
+    SCOPED_TRACE(testing::Message() << "kind " << (int)kind);
+    // Host and null-stream work first: between two launches it would queue rank r + 1 behind rank r, which waits on it.
+    *abortHost_ = 0;
+    for (DeviceBuffer<uint8_t>& b : recvBufs) {
+      HIP_CHECK(hipMemset(b.ptr, kUntouched, b.count));
+    }
     float** table = reinterpret_cast<float**>(scratchPtrs_->ptr);
     for (int r = 0; r < kRanks; ++r) {
       Case rank = c;
       rank.self = r;
+      rank.kind = kind;
       launch<float, 4>(rank, table, reinterpret_cast<float*>(recvBufs[(size_t)r].ptr),
                        reinterpret_cast<const float*>(sendBufs[(size_t)r].ptr), epochs[(size_t)r].ptr, abortDev_,
                        streams[(size_t)r]);
@@ -626,7 +815,10 @@ TEST_F(DdaAllReduceFabricLL128TwoShot, SplitDrainsWhenTheGridIsNotCoResident) {
     const bool drained = drain(streams);
     EXPECT_TRUE(drained) << "the split did not drain with at most " << mostResident << " of " << c.grid
                          << " blocks resident per rank";
-    for (int r = 0; drained && r < kRanks; ++r) {
+    if (!drained) {
+      break;  // the abort left this pass's lines and epochs half done
+    }
+    for (int r = 0; r < kRanks; ++r) {
       EXPECT_TRUE(recvBufs[(size_t)r].copyTo() == expected) << "rank " << r << " recvbuff is not the host fold";
     }
   }
@@ -635,8 +827,93 @@ TEST_F(DdaAllReduceFabricLL128TwoShot, SplitDrainsWhenTheGridIsNotCoResident) {
     HIP_EXPECT(hipStreamDestroy(st));
   }
   if (mostResident >= (int)c.grid) {
-    GTEST_SKIP() << "the CU masks left all " << c.grid << " blocks resident";
+    GTEST_SKIP() << "drained and folded, but the CU masks left all " << c.grid << " blocks resident";
   }
+}
+
+// ---- The split with the narrow 4 B flag ----
+
+// Shards at the narrow slice's edges: one chunk, one short of a slice, one slice, one chunk past it, a partial third.
+const size_t kNarrowEdgeShards[] = {16, kDdaLL128NarrowDataBytesPerSlice - 16, kDdaLL128NarrowDataBytesPerSlice,
+                                   kDdaLL128NarrowDataBytesPerSlice + 16, 2 * kDdaLL128NarrowDataBytesPerSlice + 112};
+
+// Every split case and the 1984 B slice edges in float: the host fold, and narrow lines carrying my shards.
+TEST_F(DdaAllReduceFabricLL128TwoShot, SplitNarrowMatchesTheHostFold) {
+  std::vector<Case> cases;
+  for (const Case& c : kSplitCases) {
+    cases.push_back(c);
+    cases.back().kind = Kind::kSplitNarrow;
+  }
+  for (const size_t shard : kNarrowEdgeShards) {
+    cases.push_back({8, 5, 8, Kind::kSplitNarrow, 2, 512, shard});
+    cases.push_back({5, 2, 0, Kind::kSplitNarrow, 1, 64, shard, kFlag, 0, true});
+  }
+  for (const Case& c : cases) {
+    setUpFloat(c);
+    expectNarrowMatchesCoop<float>(c, "float");
+    EXPECT_TRUE(recvBuf_->copyTo() == Concat(reduced_)) << "not the host fold";
+  }
+}
+
+// bf16 against its host fold, half and both fp8 against the cooperative writer, out of place and in place.
+TEST_F(DdaAllReduceFabricLL128TwoShot, SplitNarrowMatchesOnSmallerTypes) {
+  const Case cases[] = {{5, 2, 0, Kind::kSplitNarrow, 1, 64, kSmallShardBytes},
+                        {8, 5, 8, Kind::kSplitNarrow, 2, 512, kMediumShardBytes, kFlag + 1},
+                        {8, 5, 8, Kind::kSplitNarrow, 8, 512, kLargeShardBytes},
+                        {16, 9, 0, Kind::kSplitNarrow, 16, 512, kMediumShardBytes, kFlag, 0, true}};
+  for (const Case& c : cases) {
+    const auto send = Bf16Messages(c.nRanks, c.shardBytes);
+    setUp(c.nRanks, c.self, c.shardBytes, send, Bf16Reduced(send, c.nRanks, c.shardBytes));
+    expectNarrowMatchesCoop<bf16>(c, "bf16");
+    EXPECT_TRUE(recvBuf_->copyTo() == Concat(reduced_)) << "bf16: not the host fold";
+    expectNarrowMatchesCoop<half>(c, "half");  // the same bits are finite halves
+    setUp(c.nRanks, c.self, c.shardBytes, Fp8Rows(c.nRanks, (size_t)c.nRanks * c.shardBytes, 0),
+          Fp8Rows(c.nRanks, c.shardBytes, 5));
+    expectNarrowMatchesCoop<dda::common::fp8e4m3>(c, "fp8e4m3");
+    expectNarrowMatchesCoop<dda::common::fp8e5m2>(c, "fp8e5m2");
+  }
+}
+
+// 12 launches through the 2^32 wrap, peers 1 ms late, on a scratch first holding launch 0's plain epoch in every dword.
+TEST_F(DdaAllReduceFabricLL128TwoShot, SplitNarrowFlagWrapsAcrossLaunches) {
+  constexpr int kLaunches = 12;
+  constexpr uint32_t kFirstCell = 0xFFFFFFF8u;
+  Case c{8, 5, 8, Kind::kSplitNarrow, 2, 512, kMediumShardBytes};
+  int clockKhz = 0;
+  HIP_CHECK(hipDeviceGetAttribute(&clockKhz, hipDeviceAttributeWallClockRate, 0));
+  const long long ticks = clockKhz;  // 1 ms
+  setUpFloat(c);
+  kind_ = c.kind;
+  const std::vector<uint32_t> poison(2 * bankBytes(c.nRanks, c.shardBytes) / sizeof(uint32_t), kFirstCell + 1);
+  for (DeviceBuffer<uint8_t>& b : scratch_) {
+    HIP_CHECK(hipMemcpy(b.ptr, poison.data(), b.count, hipMemcpyHostToDevice));
+  }
+  epoch_.copyFrom(std::vector<uint32_t>(kEpochCells, kFirstCell));
+  uint32_t cell = kFirstCell;
+  for (int i = 0; i < kLaunches; ++i) {
+    *abortHost_ = 0;
+    c.flag = cell + 1 == 0 ? 2 : cell + 1;
+    SCOPED_TRACE(testing::Message() << "launch " << i << " epoch " << c.flag);
+    const auto send = FloatMessages(c.nRanks, c.shardBytes, i);
+    setMessages(send, FloatReduced(send, c.nRanks, c.shardBytes));
+    HIP_CHECK(hipMemset(recvBuf_->ptr, kUntouched, recvBuf_->count));
+    bankOffset_ = (c.flag & 1u) * bankBytes(nRanks_, shardBytes_);
+    publish(area(self_, 0), copyRows(), -1, c.flag, side_, ticks);
+    publish(area(self_, nRanks_), reducedRows(), -1, c.flag, side_, ticks);
+    run<float>(c);
+    EXPECT_TRUE(drain({side_})) << "the late peers did not finish";
+    latePublishBuffers_.clear();
+    if (*abortHost_ != 0) {
+      break;  // a drain timed out: later launches would start aborted
+    }
+    EXPECT_TRUE(recvBuf_->copyTo() == Concat(reduced_)) << "not the host fold";
+    const std::vector<uint32_t> epoch = epoch_.copyTo();
+    for (int e = 0; e < (int)kEpochCells; ++e) {
+      EXPECT_EQ(epoch[(size_t)e], e < epochLen(c) ? c.flag : kFirstCell) << "cell " << e;
+    }
+    cell = c.flag;
+  }
+  EXPECT_EQ(cell, 2u + kLaunches - 8) << "the run crossed the wrap";
 }
 
 }  // namespace
