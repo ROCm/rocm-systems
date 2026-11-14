@@ -1130,7 +1130,7 @@ void VaContext::ProbeAllProfileCaps(uint32_t va_ctx_idx) {
     if (max_entrypoints <= 0) {
         ErrorLog(g_rocdec_logger, "vaMaxNumEntrypoints() returned " + ROCDEC_TOSTR(max_entrypoints) +
                  " for device_id=" + ROCDEC_TOSTR(ctx.device_id) +
-                 ". No decode profile could be probed, so every codec will be reported as unsupported.");
+                 ". No decode profile could be probed, so capability queries will fail.");
         return;
     }
     std::vector<VAEntrypoint> entrypoints(max_entrypoints);
@@ -1177,12 +1177,13 @@ void VaContext::ProbeAllProfileCaps(uint32_t va_ctx_idx) {
 
     // Individual profile failures above are skipped silently, since a driver legitimately
     // advertises profiles it cannot decode. Probing none of them is different: the cache stays
-    // empty and every later rocDecGetDecoderCaps() reports "unsupported", which looks like a
-    // GPU without decode support rather than a failed probe. Say so once, here.
+    // empty, and rather than answer every later rocDecGetDecoderCaps() with "unsupported" -- which
+    // reads as a GPU without decode support rather than a failed probe -- CheckDecCapForCodecType()
+    // fails those queries outright. Record the reason once here, where the detail is still known.
     if (ctx.profile_caps.empty()) {
-        WarningLog(g_rocdec_logger, "No VLD-capable VA profile could be probed out of " +
-                   ROCDEC_TOSTR(ctx.num_va_profiles) + " profile(s) advertised for device_id=" +
-                   ROCDEC_TOSTR(ctx.device_id) + ". Every codec will be reported as unsupported.");
+        ErrorLog(g_rocdec_logger, "No VLD-capable VA profile could be probed out of " +
+                 ROCDEC_TOSTR(ctx.num_va_profiles) + " profile(s) advertised for device_id=" +
+                 ROCDEC_TOSTR(ctx.device_id) + ". Capability queries for this device will fail.");
     }
 }
 #endif
@@ -1204,6 +1205,42 @@ rocDecStatus VaContext::CheckDecCapForCodecType(RocdecDecodeCaps *dec_cap) {
     }
 
     std::lock_guard<std::mutex> lock(mutex);
+
+    // A probe that produced no decode profile is not an answer about the hardware: it means the VA
+    // stack is unusable -- the driver failed to load, the render node is inaccessible, or libva and
+    // the driver disagree on a version. Reporting that as is_supported=0 makes a driver regression
+    // indistinguishable from a GPU that never had a decoder, which is how a conformance sweep ends
+    // up skipping every stream and reporting success. Fail the query instead, so the caller gets an
+    // error rather than a verdict it cannot tell apart from a hardware limitation.
+#ifndef _WIN32
+    // A positive count is not evidence of decode capability: drivers advertise VAProfileNone for
+    // the video post-processing entrypoint, so a list holding nothing else is the same failed-probe
+    // case as an empty one.
+    const int num_probed_profiles = std::max(va_contexts_[va_ctx_id].num_va_profiles, 0);
+    const bool probe_empty = std::none_of(va_contexts_[va_ctx_id].va_profile_list.begin(),
+                                          va_contexts_[va_ctx_id].va_profile_list.begin() + num_probed_profiles,
+                                          [](VAProfile p) { return p != VAProfileNone; });
+#else
+    // On Windows every capability query is answered from the profile_caps cache, so an empty cache
+    // is the failure even when the driver did advertise profiles: none of them probed VLD-capable.
+    const bool probe_empty = va_contexts_[va_ctx_id].profile_caps.empty();
+#endif
+    if (probe_empty) {
+        ErrorLog(g_rocdec_logger, "No decode profile could be probed for device_id=" +
+                 ROCDEC_TOSTR(va_contexts_[va_ctx_id].device_id) + " out of " +
+                 ROCDEC_TOSTR(va_contexts_[va_ctx_id].num_va_profiles) + " VA profile(s) advertised. "
+                 "No capability can be reported; this is not a statement that the GPU lacks a decoder.");
+        dec_cap->is_supported = 0;
+        dec_cap->num_decoders = 0;
+        dec_cap->output_format_mask = 0;
+        dec_cap->max_width = 0;
+        dec_cap->max_height = 0;
+        dec_cap->min_width = 0;
+        dec_cap->min_height = 0;
+        FunctionExitLog(g_rocdec_logger);
+        return ROCDEC_NOT_INITIALIZED;
+    }
+
     dec_cap->is_supported = 1; // init value
     VAProfile va_profile = VAProfileNone;
     switch (dec_cap->codec_type) {
