@@ -44,6 +44,7 @@
  */
 
 #include <algorithm>
+#include <cstring>
 #include <iostream>
 #include <vector>
 
@@ -54,6 +55,20 @@
 #include "common/hsatimer.h"
 #include "gtest/gtest.h"
 #include "hsa/hsa.h"
+#include "hsa/hsa_ext_amd.h"
+
+namespace {
+
+// gfx12.5 and later place a workgroup cluster on one shader engine.
+// Processor names are "gfx12<minor>..." with an optional "-strict" suffix.
+bool WorkgroupClustersSupported(const char* name) {
+  if (std::strncmp(name, "gfx12", 5) != 0)
+    return false;
+  const char minor = name[5];
+  return minor >= '5' && minor <= '9';
+}
+
+}  // namespace
 
 static const uint32_t kNumBufferElements = 256;
 
@@ -232,6 +247,69 @@ void AgentPropTest::QueryAgentClockCounters() {
 
   for (uint32_t idx = 0 ; idx < gpus.size(); ++idx) {
     QueryAgentProp(gpus[idx], (hsa_agent_info_t)HSA_AMD_AGENT_INFO_CLOCK_COUNTERS);
+  }
+
+  if (verbosity() > 0) {
+    std::cout << "  *** Execution completed - subtest Passed " << " ***" << std::endl;
+  }
+}
+
+void AgentPropTest::QueryGpuShaderEngineTopology() {
+  hsa_status_t err;
+  if (verbosity() > 0) {
+    PrintAgentPropsSubtestHeader("Validate GPU shader-engine topology");
+  }
+
+  std::vector<hsa_agent_t> gpus;
+  err = hsa_iterate_agents(rocrtst::IterateGPUAgents, &gpus);
+  ASSERT_EQ(err, HSA_STATUS_SUCCESS);
+
+  for (uint32_t idx = 0; idx < gpus.size(); ++idx) {
+    const hsa_agent_t agent = gpus[idx];
+    char name[64] = {};
+    err = hsa_agent_get_info(agent, HSA_AGENT_INFO_NAME, name);
+    ASSERT_EQ(err, HSA_STATUS_SUCCESS) << "GPU index " << idx;
+
+    uint32_t num_shader_engines = 0;
+    uint32_t num_simds_per_cu = 0;
+    uint32_t num_cus = 0;
+    err = hsa_agent_get_info(
+        agent, (hsa_agent_info_t)HSA_AMD_AGENT_INFO_NUM_SHADER_ENGINES,
+        &num_shader_engines);
+    ASSERT_EQ(err, HSA_STATUS_SUCCESS) << name;
+    err = hsa_agent_get_info(
+        agent, (hsa_agent_info_t)HSA_AMD_AGENT_INFO_NUM_SIMDS_PER_CU,
+        &num_simds_per_cu);
+    ASSERT_EQ(err, HSA_STATUS_SUCCESS) << name;
+    err = hsa_agent_get_info(
+        agent, (hsa_agent_info_t)HSA_AMD_AGENT_INFO_COMPUTE_UNIT_COUNT, &num_cus);
+    ASSERT_EQ(err, HSA_STATUS_SUCCESS) << name;
+
+    // Zero shader engines, zero SIMDs per CU, or fewer active CUs than shader
+    // engines cannot describe a cluster. That topology is invalid.
+    ASSERT_GT(num_shader_engines, 0u) << name << " has no shader engines";
+    ASSERT_GT(num_simds_per_cu, 0u) << name << " has no SIMDs per CU";
+    ASSERT_GT(num_cus / num_shader_engines, 0u)
+        << name << " has " << num_cus << " CUs and " << num_shader_engines
+        << " shader engines";
+
+    hsa_amd_dim3_t cluster_dim = {};
+    uint64_t cluster_max = 0;
+    err = hsa_agent_get_info(
+        agent, (hsa_agent_info_t)HSA_AMD_AGENT_INFO_CLUSTER_MAX_DIM, &cluster_dim);
+    ASSERT_EQ(err, HSA_STATUS_SUCCESS) << name;
+    err = hsa_agent_get_info(
+        agent, (hsa_agent_info_t)HSA_AMD_AGENT_INFO_CLUSTER_MAX_SIZE, &cluster_max);
+    ASSERT_EQ(err, HSA_STATUS_SUCCESS) << name;
+
+    // gfx12.5 reports the active CUs in one shader engine. Other GPUs report 1.
+    const uint64_t expected = WorkgroupClustersSupported(name)
+                                  ? num_cus / num_shader_engines
+                                  : 1;
+    ASSERT_EQ(cluster_max, expected) << name;
+    ASSERT_EQ(cluster_dim.x, expected) << name;
+    ASSERT_EQ(cluster_dim.y, expected) << name;
+    ASSERT_EQ(cluster_dim.z, expected) << name;
   }
 
   if (verbosity() > 0) {
