@@ -9,7 +9,16 @@
 
 #include <gtest/gtest.h>
 
+#if defined(__PPC__)
+namespace { constexpr const char* kHostArch = "ppc64"; }
+#elif defined(__aarch64__)
+namespace { constexpr const char* kHostArch = "arm64"; }
+#elif defined(__x86_64__) || defined(_M_X64) || defined(_M_AMD64)
 #include <cpuid.h>
+namespace { constexpr const char* kHostArch = "x86_64"; }
+#else
+#error "ncclTopoGetXmlFromCpu has no arch for this target; see xml.cc"
+#endif
 
 #include <map>
 #include <string>
@@ -691,6 +700,7 @@ TEST_F(XmlMicrotest, CheckBDFFormat_NeedsTwelveHexCharsWithSeparators) {
 
 // --- Autodetection: CPU and sysfs
 
+#if defined(__x86_64__) || defined(_M_X64) || defined(_M_AMD64)
 struct CpuId {
   std::string vendor;
   int family;
@@ -711,6 +721,7 @@ CpuId HostCpuId() {
   if (family == 15) family += (eax >> 20) & 0xff;
   return {vendor, family, model};
 }
+#endif // defined(__x86_64__) || defined(_M_X64) || defined(_M_AMD64)
 
 class XmlSysfsMicrotest : public XmlMicrotest {
  protected:
@@ -743,6 +754,7 @@ class XmlSysfsMicrotest : public XmlMicrotest {
   }
 };
 
+#if defined(__x86_64__) || defined(_M_X64) || defined(_M_AMD64)
 TEST_F(XmlSysfsMicrotest, GetXmlFromCpu_FillsAffinityArchAndCpuid) {
   ncclXmlNode* cpu = Add(system_, "cpu", {{"numaid", "3"}});
   g_numaCpumap[3] = "0000ffff";
@@ -758,6 +770,8 @@ TEST_F(XmlSysfsMicrotest, GetXmlFromCpu_FillsAffinityArchAndCpuid) {
   EXPECT_EQ(std::to_string(host.family), Attr(cpu, "familyid"));
   EXPECT_EQ(std::to_string(host.model), Attr(cpu, "modelid"));
 }
+
+#endif // defined(__x86_64__) || defined(_M_X64) || defined(_M_AMD64)
 
 TEST_F(XmlSysfsMicrotest, GetXmlFromCpu_KeepsWhatTheTopologyFileProvides) {
   ncclXmlNode* cpu = Add(system_, "cpu", {{"affinity", "1"}, {"arch", "arm64"}, {"vendor", "V"}, {"familyid", "7"}});
@@ -896,7 +910,7 @@ TEST_F(XmlSysfsMicrotest, GetXmlFromSys_NoSysfsAttachesToTheUnknownCpu) {
   ASSERT_NE(nullptr, cpu);
   EXPECT_EQ(cpu, b->parent);
   EXPECT_EQ("-1", Attr(cpu, "numaid"));
-  EXPECT_EQ("x86_64", Attr(cpu, "arch"));
+  EXPECT_EQ(kHostArch, Attr(cpu, "arch"));
   ASSERT_EQ(2, cpu->nSubs);
   EXPECT_EQ(a, cpu->subs[0]);  // ordered by bus id, not by arrival
   EXPECT_EQ(b, cpu->subs[1]);
@@ -978,7 +992,7 @@ TEST_F(XmlSysfsMicrotest, GetXmlFromSys_ExistingParentIsFilledInTurn) {
   ASSERT_EQ(ncclSuccess, ncclTopoGetXmlFromSys(pci, xml_.get()));
   ASSERT_EQ(ncclSuccess, ncclTopoGetXmlFromSys(orphan, xml_.get()));
 
-  EXPECT_EQ("x86_64", Attr(cpu, "arch"));
+  EXPECT_EQ(kHostArch, Attr(cpu, "arch"));
   EXPECT_EQ(system_, orphan->parent);
 }
 
