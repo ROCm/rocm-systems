@@ -28,7 +28,7 @@ texture:
     <<: *level_default
     tags: [image]
   Unit_hipTextureObj2D_Check:
-    <<: *level_default
+    level: [*level_0, *level_default]
     disabled:
       targets: [asan]
       reason: "AIRUNTIME-2892 - fails under device ASAN on gfx90a but passes on the non-ASAN build; disabled on asan pending re-triage."
@@ -526,7 +526,7 @@ texture:
     <<: *level_default
     tags: [image]
   Unit_tex1Dfetch_Positive_ReadModeElementType:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [image]
   Unit_tex1Dfetch_Positive_ReadModeNormalizedFloat:
     <<: *level_default
@@ -562,7 +562,7 @@ texture:
     <<: *level_default
     tags: [sample, image]
   Unit_tex2D_Positive_ReadModeElementType:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [image]
   Unit_tex2D_Positive_ReadModeNormalizedFloat:
     <<: *level_default

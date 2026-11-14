@@ -1,13 +1,13 @@
 ---
 stream:
   Unit_hipStreamCreate_default:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [lifecycle, smoke, P0]
   Unit_hipStreamCreate_Negative:
     <<: *level_default
     tags: [lifecycle, P1]
   Unit_hipStreamGetFlags_Basic:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [properties, P0]
   Unit_hipStreamGetFlags_Negative:
     <<: *level_default
@@ -28,7 +28,7 @@ stream:
     <<: *level_default
     tags: [properties, P1]
   Unit_hipStreamGetPriority_stream_priority:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [properties, P1]
   Unit_hipStreamGetPriority_StreamsWithCUMask:
     <<: *level_default
@@ -56,7 +56,7 @@ stream:
     <<: *level_default
     tags: [callback, P1]
   Unit_hipStreamAddCallback_WithCreatedStream:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [callback, P0]
   Unit_hipStreamAttachMemAsync_Negative:
     <<: *level_default
@@ -77,7 +77,7 @@ stream:
     <<: *level_default
     tags: [lifecycle, P1]
   Unit_hipStreamCreateWithFlags_Default:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [lifecycle, P0]
   Unit_hipStreamCreateWithFlags_DefaultStreamInteraction:
     <<: *level_default
@@ -107,7 +107,7 @@ stream:
     <<: *level_default
     tags: [lifecycle, P1]
   Unit_hipStreamCreateWithPriority_VerifyKernelResults:
-    <<: *level_default
+    level: [*level_0, *level_default]
     disabled:
       targets: [amd_windows]
       reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
@@ -158,7 +158,7 @@ stream:
     <<: *level_default
     tags: [lifecycle, P1]
   Unit_hipStreamDestroy_WithFinishedWork:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [lifecycle, P0]
   Unit_hipStreamDestroy_WithPendingWork:
     <<: *level_default
@@ -194,7 +194,7 @@ stream:
     <<: *level_default
     tags: [synchronization, P0]
   Unit_hipStreamSynchronize_FinishWork:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [synchronization, smoke, P0]
   Unit_hipStreamSynchronize_NullStreamSynchronization:
     <<: *level_default
@@ -221,7 +221,7 @@ stream:
     <<: *level_default
     tags: [synchronization, P0]
   Unit_hipStreamQuery_WithFinishedWork:
-    <<: *level_default
+    level: [*level_0, *level_default]
     disabled:
       targets: [amd_windows]
       reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
@@ -239,7 +239,7 @@ stream:
       reason: "AIRUNTIME-2744 - amd_linux Rock Linux failures on gfx94X; needs to be re-triaged on amd_linux"
     tags: [synchronization, P0]
   Unit_hipDeviceGetStreamPriorityRange_Default:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [properties, P1]
   Unit_hipStreamAddCallback_StrmSyncTiming:
     <<: *level_default
@@ -248,7 +248,7 @@ stream:
       reason: "AIRUNTIME-2892 - amd_wsl disabled due to defect EXSWHTEC-203; gfx1201 (amd_wsl) flaky, passed then failed within 10 runs; needs to be re-triaged. amd_windows re-disabled (AIRUNTIME-2892): test passes but the full suite exceeds the 120min CI timeout with these tests enabled; improve test runtimes or raise the TheRock total timeout."
     tags: [callback, P1]
   Unit_hipLaunchHostFunc_basic:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [callback, P0]
   Unit_hipLaunchHostFunc_Negative:
     <<: *level_default
@@ -287,7 +287,7 @@ stream:
     <<: *level_default
     tags: [properties, P1]
   Unit_hipStreamGetDevice_Usecase:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [properties, P0]
   Unit_hipStreamGetDevice_MThread:
     <<: *level_default
@@ -350,7 +350,7 @@ stream:
     <<: *level_default
     tags: [properties]
   Unit_hipStreamGetId_Basic:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [properties]
   Unit_hipStreamGetId_WithDifferentStreamCreateAPIs:
     <<: *level_default
@@ -365,13 +365,13 @@ stream:
     <<: *level_default
     tags: [properties]
   Unit_hipExtStreamGetCUMask_verifyDefaultAndCustomMask:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [properties, P1]
   Unit_hipExtStreamGetCUMask_Negative:
     <<: *level_default
     tags: [properties, P1]
   Unit_hipExtStreamCreateWithCUMask_ValidateCallbackFunc:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [properties, P1]
   Unit_hipExtStreamCreateWithCUMask_Functionality:
     <<: *level_default
@@ -395,7 +395,7 @@ stream:
     <<: *level_default
     tags: [synchronization, P1]
   Unit_hipStreamWaitEvent_Default:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [synchronization, smoke, P0]
   Unit_hipStreamWaitEvent_DifferentStreams:
     <<: *level_default
@@ -491,7 +491,7 @@ stream:
       reason: "AIRUNTIME-2892 - gfx1201 (amd_windows) fails: result == 0x1234 -> 0 == 4660 (0x1234); needs to be re-triaged on nvidia"
     tags: [synchronization, memory]
   Unit_hipStreamSetAttribute_hipStreamGetAttribute_Basic:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [properties]
   Unit_hipStreamGetAttribute_Negative:
     <<: *level_default
@@ -500,7 +500,7 @@ stream:
     <<: *level_default
     tags: [properties]
   Unit_hipStreamCopyAttributes_Basic:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [properties]
   Unit_hipStreamCopyAttributes_Negative:
     <<: *level_default

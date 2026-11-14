@@ -1,17 +1,17 @@
 ---
 virtualMemoryManagement:
   Unit_hipMemGetAllocationGranularity_AllGPUs:
-    <<: *level_default
+    level: [*level_0, *level_default]
   Unit_hipMemGetAllocationGranularity_NegativeTests:
     <<: *level_default
   Unit_hipMemGetAllocationGranularity_Capture: *level_default
   Unit_hipMemRetainAllocationHandle_SetGet:
-    <<: *level_default
+    level: [*level_0, *level_default]
   Unit_hipMemRetainAllocationHandle_NegTst:
     <<: *level_default
   Unit_hipMemRetainAllocationHandle_Capture: *level_default
   Unit_hipMemImportFromShareableHandle_Positive_Basic:
-    <<: *level_default
+    level: [*level_0, *level_default]
     disabled:
       targets: [asan]
       reason: "AIRUNTIME-2892 - fails under device ASAN on gfx90a but passes on the non-ASAN build; disabled on asan pending re-triage."
@@ -37,7 +37,7 @@ virtualMemoryManagement:
       reason: "AIRUNTIME-2892 - fails under device-side ASAN on gfx942 (heap-use-after-free in libamdhip64 / LeakSanitizer leaks); needs re-triage on asan."
   Unit_hipMemGetHandleForAddressRange_Negative: *level_default
   Unit_hipMemGetHandleForAddressRange_DeviceMemory:
-    <<: *level_default
+    level: [*level_0, *level_default]
     disabled:
       targets: [asan]
       reason: "AIRUNTIME-2744 - does not play well with ASAN; needs to be re-triaged."
@@ -99,7 +99,7 @@ virtualMemoryManagement:
   Unit_hipMemCreate_BasicAllocateDeAlloc_MultGranularity:
     <<: *level_default
   Unit_hipMemCreate_ChkDev2HstMemcpy_ReleaseHdlPostUnmap:
-    <<: *level_default
+    level: [*level_0, *level_default]
   Unit_hipMemCreate_ChkDev2HstMemcpy_ReleaseHdlPreUse:
     <<: *level_default
   Unit_hipMemCreate_ChkWithKerLaunch:
@@ -176,7 +176,7 @@ virtualMemoryManagement:
       targets: [asan, amd_wsl]
       reason: "AIRUNTIME-2744 - gfx1201 (amd_wsl) self-skips the variant; needs to be re-triaged. AIRUNTIME-2892 - fails under device-side ASAN on gfx942 (heap-use-after-free in libamdhip64 / LeakSanitizer leaks); needs re-triage on asan."
   Unit_hipMemSetAccess_SetGet:
-    <<: *level_default
+    level: [*level_0, *level_default]
     disabled:
       targets: [amd_windows]
       reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
@@ -267,7 +267,7 @@ virtualMemoryManagement:
       targets: [amd_windows, amd_wsl]
       reason: "AIRUNTIME-2892 - needs to be further investigated. gfx1201 (amd_windows) FAILs with a crash/abort (access violation); gfx1201 (amd_wsl) FAILs 1/1 variants."
   Unit_hipMemGetAllocationPropertiesFromHandle_functional:
-    <<: *level_default
+    level: [*level_0, *level_default]
   Unit_hipMemGetAllocationPropertiesFromHandle_Negative:
     <<: *level_default
   Unit_hipMemGetAllocationPropertiesFromHandle_Capture: *level_default

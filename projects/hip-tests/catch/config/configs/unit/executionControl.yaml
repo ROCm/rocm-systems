@@ -10,7 +10,7 @@ executionControl:
     <<: *level_default
     tags: [attributes, kernel]
   Unit_hipLaunchKernel_Positive_Basic:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [kernel, launch]
   Unit_hipLaunchKernel_Positive_Parameters:
     <<: *level_default
@@ -26,7 +26,7 @@ executionControl:
     tags: [kernel, launch]
   Unit_hipLaunchKernel_Verify_Capture: *level_default
   Unit_hipLaunchCooperativeKernel_Positive_Basic:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [kernel]
   Unit_hipLaunchCooperativeKernel_Positive_Parameters:
     <<: *level_default
@@ -45,7 +45,7 @@ executionControl:
     <<: *level_default
     tags: [kernel, multigpu]
   Unit_hipExtLaunchKernel_Positive_Basic:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [kernel, launch]
   Unit_hipExtLaunchKernel_Positive_Parameters:
     <<: *level_default
@@ -88,7 +88,7 @@ executionControl:
     <<: *level_default
     tags: [kernel]
   Unit_hipFuncSetCacheConfig_Positive_Basic:
-    <<: *level_default
+    level: [*level_0, *level_default]
     disabled:
       targets: [amd_windows]
       reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
@@ -118,7 +118,7 @@ executionControl:
     <<: *level_default
     tags: [attributes, kernel]
   Unit_hipFuncSetAttribute_Positive_MaxDynamicSharedMemorySize:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [attributes, kernel]
   Unit_hipFuncSetAttribute_Positive_PreferredSharedMemoryCarveout:
     <<: *level_default

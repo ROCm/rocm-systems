@@ -34,7 +34,7 @@ event:
     <<: *level_default
     tags: [synchronization, P1]
   Unit_hipEventElapsedTime:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [synchronization, smoke, P0]
   Unit_hipEventElapsedTime_Verify_Capture:
     <<: *level_default
@@ -76,13 +76,13 @@ event:
     <<: *level_default
     tags: [lifecycle]
   Unit_hipEventCreate_Positive:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [lifecycle, smoke, P0]
   Unit_hipEventCreate_Verify_Capture:
     <<: *level_default
     tags: [lifecycle]
   Unit_hipEventCreateWithFlags_Positive:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [lifecycle, P0]
   Unit_hipEventCreateWithFlags_DisableSystemFence_HstVisMem:
     <<: *level_default
@@ -124,7 +124,7 @@ event:
     <<: *level_default
     tags: [lifecycle]
   Unit_hipEventSynchronize_Default_Positive:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [synchronization, smoke, P0]
   Unit_hipEventSynchronize_NoEventRecord_Positive:
     <<: *level_default

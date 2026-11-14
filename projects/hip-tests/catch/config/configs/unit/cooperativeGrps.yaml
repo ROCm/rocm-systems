@@ -7,7 +7,7 @@ cooperativeGrps:
       reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [cooperative, groups]
   Unit_Thread_Block_Getters_Via_Base_Type_Positive_Basic:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [cooperative, groups]
   Unit_Thread_Block_Getters_Via_Non_Member_Functions_Positive_Basic:
     <<: *level_default
@@ -154,7 +154,7 @@ cooperativeGrps:
       reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [cooperative, ops]
   Unit_Coalesced_Group_Getters_Positive_Basic:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [cooperative, groups]
   Unit_Coalesced_Group_Getters_Via_Base_Type_Positive_Basic:
     <<: *level_default
@@ -187,7 +187,7 @@ cooperativeGrps:
       reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [cooperative, ops]
   Unit_Grid_Group_Getters_Positive_Basic:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [cooperative, groups]
   Unit_Grid_Group_Getters_Via_Non_Member_Functions_Positive_Basic:
     <<: *level_default
@@ -199,7 +199,7 @@ cooperativeGrps:
       reason: "AIRUNTIME-2744 - does not play well with ASAN; needs to be re-triaged."
     tags: [cooperative, groups]
   Unit_tiled_groups_metagrp_basic:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [cooperative, groups]
   Unit_tiled_groups_metagrp_rank:
     <<: *level_default
@@ -208,10 +208,10 @@ cooperativeGrps:
     <<: *level_default
     tags: [cooperative, groups]
   Unit_cg_binary_part:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [cooperative, ops]
   Unit_coopgroups_ballot:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [cooperative, ops]
   Unit_binary_part_ballot:
     <<: *level_default
@@ -223,7 +223,7 @@ cooperativeGrps:
     <<: *level_default
     tags: [cooperative, ops]
   Unit_coopgroups_match_any_coal:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [cooperative, ops]
   Unit_coopgroups_match_all_coal:
     <<: *level_default
@@ -232,7 +232,7 @@ cooperativeGrps:
     <<: *level_default
     tags: [cooperative, ops]
   Unit_coop_thread_block_split_barrier:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [cooperative, ops]
   Unit_cg_invoke_one:
     <<: *level_2
@@ -262,7 +262,8 @@ cooperativeGrps:
     <<: *level_default
     tags: [cooperative, ops]
   Unit_Thread_Block_Coalesced_Reduce_arithmetic: *level_default
-  Unit_Thread_Block_Tile_Reduce_Basic: *level_default
+  Unit_Thread_Block_Tile_Reduce_Basic:
+    level: [*level_0, *level_default]
   Unit_Thread_Block_Tile_Reduce_Custom_Op: *level_default
   Unit_Thread_Block_Tile_Scan_Custom_Op: *level_default
   Unit_Thread_Block_Tile_Reduce_Random_arithmetic: *level_default
@@ -288,7 +289,7 @@ cooperativeGrps:
       targets: [amd_windows, amd_wsl]
       reason: "AIRUNTIME-2744 - Rock window failures on gfx1151 need re-triage; gfx1201 (amd_windows) and gfx1201 (amd_wsl) both self-skip because cooperative launch is not supported."
   Unit_Thread_Block_Tile_Reduce_Basic:
-    <<: *level_default
+    level: [*level_0, *level_default]
     disabled:
       targets: [amd_windows, amd_wsl]
       reason: "AIRUNTIME-2744 - Rock window failures on gfx1151 need re-triage; gfx1201 (amd_windows) self-skips because cooperative launch is not supported; gfx1201 (amd_wsl) self-skips the variant."
@@ -338,7 +339,7 @@ cooperativeGrps:
       targets: [amd_windows, amd_wsl]
       reason: "AIRUNTIME-2744 - Rock window failures on gfx1151 need re-triage; gfx1201 (amd_windows) and gfx1201 (amd_wsl) both self-skip because cooperative launch is not supported."
   Unit_Thread_Block_Tile_Inclusive_Scan_Basic:
-    <<: *level_default
+    level: [*level_0, *level_default]
     disabled:
       targets: [amd_windows, amd_wsl]
       reason: "AIRUNTIME-2744 - Rock window failures on gfx1151 need re-triage; gfx1201 (amd_windows) and gfx1201 (amd_wsl) both self-skip because cooperative launch is not supported."

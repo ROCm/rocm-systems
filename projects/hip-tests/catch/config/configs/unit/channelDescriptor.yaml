@@ -1,7 +1,7 @@
 ---
 channelDescriptor:
   Unit_ChannelDescriptor_Positive_Basic_1D:
-    <<: *level_default
+    level: [*level_0, *level_default]
     disabled:
       targets: [nvidia_windows]
       reason: "AIRUNTIME-2744 - fails in external CI for hip-tests PR 215 on nvidia_windows. Needs re-triage."

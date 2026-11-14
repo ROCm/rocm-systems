@@ -46,7 +46,7 @@ memory:
     <<: *level_default
     tags: [multigpu, transfer, image, P1]
   Unit_hipMemcpy3D_Positive_Basic:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [transfer, P0]
   Unit_hipMemcpy3D_Positive_Synchronization_Behavior:
     <<: *level_default
@@ -139,7 +139,7 @@ memory:
     <<: *level_default
     tags: [multigpu, transfer, P1]
   Unit_hipMemcpy2D_Positive_Basic:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [transfer, P0]
   Unit_hipMemcpy2D_Positive_Synchronization_Behavior:
     <<: *level_default
@@ -350,7 +350,7 @@ memory:
     # disabling due to flaky segfault in CI nightly https://github.com/ROCm/TheRock/issues/4111
     tags: [P1]
   Unit_hipHostRegister_DirectReferenceFromKernel:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [P1]
   Unit_hipHostRegister_DirectReferenceMultGpu:
     <<: *level_default
@@ -443,7 +443,7 @@ memory:
       reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [query, P1]
   Unit_hipHostGetDevicePointer_UseCase:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [query, P0]
   Unit_hipHostGetDevicePointer_Capture:
     <<: *level_default
@@ -559,7 +559,7 @@ memory:
   Unit_hipMemset_Capture: *level_default
   Unit_hipMemsetD8_Capture: *level_default
   Unit_hipMemset3D_BasicFunctional:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [memset, P1]
   Unit_hipMemset3DAsync_BasicFunctional:
     <<: *level_default
@@ -573,7 +573,7 @@ memory:
   Unit_hipMemset3D_Capture:
     <<: *level_default
   Unit_hipMemset2D_BasicFunctional:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [memset, P1]
   Unit_hipMemset2DAsync_BasicFunctional:
     <<: *level_default
@@ -650,7 +650,7 @@ memory:
     <<: *level_default
     tags: [query, P1]
   Unit_hipMallocManaged_Basic:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [alloc, smoke, P0, managed_memory]
   Unit_hipMallocManaged_Advanced:
     <<: *level_default
@@ -814,7 +814,7 @@ memory:
     <<: *level_default
     tags: [transfer, image]
   Unit_hipMemcpy3DBatchAsync_PointerToPointer_MatchesSourceAfterSync:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [transfer]
   Unit_hipMemcpy3DBatchAsync_PointerToArray_MatchesSourceAfterSync:
     <<: *level_default
@@ -909,7 +909,7 @@ memory:
     <<: *level_default
     tags: [transfer]
   Unit_hipMemcpyBatchAsync_H2D_Functional:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [transfer, P1]
   Unit_hipMemcpyBatchAsync_H2D_Pageable_DuringApiCall_SourceAccess:
     <<: *level_default
@@ -1104,7 +1104,7 @@ memory:
     <<: *level_default
     tags: [alloc, P1]
   Unit_hipMemPtrGetInfo_Basic:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [query, P0]
   Unit_hipMemPtrGetInfo_SizeZeroAllocation:
     <<: *level_default
@@ -1134,7 +1134,7 @@ memory:
     <<: *level_default
     tags: [query, P1]
   Unit_hipExtMallocWithFlags_Positive_Basic:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [alloc, P0]
   Unit_hipExtMallocWithFlags_Positive_Zero_Size:
     <<: *level_default
@@ -1167,7 +1167,7 @@ memory:
     <<: *level_default
     tags: [alloc, P1, managed_memory]
   Unit_hipMemVmm_Basic:
-    <<: *level_default
+    level: [*level_0, *level_default]
     disabled:
       targets: [amd_windows]
       reason: "amd_windows disabled (AIRUNTIME-2892): test passes but the full suite exceeds the 120min CI timeout with these tests enabled; improve test runtimes or raise the TheRock total timeout."
@@ -1260,12 +1260,12 @@ memory:
     <<: *level_default
     tags: [multigpu, P1]
   Unit_hipGetSymbolSizeAddress_Positive_Basic:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [query, P0]
   Unit_hipGetSymbolAddress_Negative_Parameters: *level_default
   Unit_hipGetSymbolSize_Negative_Parameters: *level_default
   Unit_hipMemPrefetchAsync_v2_Device_Host:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [query, managed_memory]
   Unit_hipMemPrefetchAsync_v2_HostNuma_HostNumaCurrent:
     <<: *level_default
@@ -1298,7 +1298,7 @@ memory:
     <<: *level_default
     tags: [transfer, P1]
   Unit_hipMemcpyToFromSymbol_SyncAndAsync:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [transfer, P0]
   Unit_hipMemcpyToFromSymbol_Capture:
     <<: *level_default
@@ -1451,7 +1451,7 @@ memory:
     <<: *level_default
     tags: [alloc, P1]
   Unit_hipMemPoolCreate_Without_maxSize:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [alloc, P1]
   Unit_hipMemPoolCreate_DeviceTest:
     <<: *level_default
@@ -1481,7 +1481,7 @@ memory:
       reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [alloc, P1]
   Unit_hipMallocFromPoolAsync_Basic_OneAlloc:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [alloc, P0]
   Unit_hipMallocFromPoolAsync_Basic_TwoAllocs:
     <<: *level_default
@@ -1619,7 +1619,7 @@ memory:
     <<: *level_default
     tags: [transfer, P1]
   Unit_hipMemcpy_Positive_Basic:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [transfer, P0]
   Unit_hipMemcpy_Positive_Synchronization_Behavior:
     <<: *level_default
@@ -1640,7 +1640,7 @@ memory:
       reason: "AIRUNTIME-2744 - test does not play well with ASAN; needs to be re-triaged."
     tags: [transfer, P1]
   Unit_hipMemsetAsync_VerifyExecutionWithKernel:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [memset, P1]
   Unit_hipMemset2DAsync_WithKernel:
     <<: *level_default
@@ -1658,7 +1658,7 @@ memory:
     <<: *level_default
     tags: [multigpu, transfer, P1]
   Unit_hipHostMalloc_Basic:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [alloc, smoke, P0]
   Unit_hipHostMalloc_Negative:
     <<: *level_default
@@ -1688,7 +1688,7 @@ memory:
     <<: *level_default
     tags: [multigpu, P1]
   Unit_hipMemcpyDtoH_Positive_Basic:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [transfer, P0]
   Unit_hipMemcpyDtoH_Positive_Synchronization_Behavior:
     <<: *level_default
@@ -1697,7 +1697,7 @@ memory:
     <<: *level_default
     tags: [transfer, P1]
   Unit_hipMemcpyHtoD_Positive_Basic:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [transfer, P0]
   Unit_hipMemcpyHtoD_Positive_Synchronization_Behavior:
     <<: *level_default
@@ -1715,7 +1715,7 @@ memory:
     <<: *level_default
     tags: [transfer, P1]
   Unit_hipMemcpyAsync_Positive_Basic:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [transfer, smoke, P0]
   Unit_hipMemcpyAsync_Positive_Synchronization_Behavior:
     <<: *level_default
@@ -1850,7 +1850,7 @@ memory:
     <<: *level_default
     tags: [memset, P1]
   Unit_hipMalloc_Positive_Basic:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [alloc, smoke, P0]
   Unit_hipMalloc_Positive_Zero_Size:
     <<: *level_default
@@ -1881,7 +1881,7 @@ memory:
       reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [alloc, P0]
   Unit_hipMemAllocPitch_ValidatePitch:
-    <<: *level_default
+    level: [*level_0, *level_default]
     disabled:
       targets: [amd_windows]
       reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
@@ -2034,7 +2034,7 @@ memory:
     <<: *level_default
     tags: [image, P1]
   Unit_hipDrvMemcpy3D_Positive_Basic:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [transfer, P1]
   Unit_hipDrvMemcpy3D_Positive_Synchronization_Behavior:
     <<: *level_default
@@ -2136,7 +2136,7 @@ memory:
     <<: *level_default
     tags: [query, managed_memory]
   Unit_hipPointerGetAttribute_KernelUpdation:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [query, P1]
   Unit_hipPointerGetAttribute_PeerGPU:
     <<: *level_default
@@ -2163,7 +2163,7 @@ memory:
     <<: *level_default
     tags: [query, P1]
   Unit_hipDrvPtrGetAttributes_Functional:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [query, P1]
   Unit_hipMemPrefetchAsync_Basic_AllDevices:
     <<: *level_default
@@ -2181,7 +2181,7 @@ memory:
     <<: *level_default
     tags: [query]
   Unit_hipMemPrefetchBatchAsync_SingleOperationSingleLocation:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [query, managed_memory]
   Unit_hipMemPrefetchBatchAsync_LocationDistribution:
     <<: *level_default
@@ -2254,13 +2254,14 @@ memory:
   Unit_hipMemDiscardAndPrefetchBatchAsync_NegativeTests:
     <<: *level_default
     tags: [query]
-  Unit_hipMemDiscardAndPrefetchBatchAsync_SingleBuffer: *level_default
+  Unit_hipMemDiscardAndPrefetchBatchAsync_SingleBuffer:
+    level: [*level_0, *level_default]
   Unit_hipMemDiscardAndPrefetchBatchAsync_MultipleSameDevice: *level_default
   Unit_hipMemDiscardAndPrefetchBatchAsync_ParitySeparateCalls: *level_default
   Unit_hipMemDiscardAndPrefetchBatchAsync_Atomicity: *level_default
   Unit_hipDrvMemDiscardAndPrefetchBatchAsync_SingleBuffer: *level_default
   Unit_hipMemGetInfo_FreeLessThanTotal:
-    <<: *level_default
+    level: [*level_0, *level_default]
     disabled:
       targets: [amd_linux]
       reason: "AIRUNTIME-2744 - needs to be re-triaged."
@@ -2411,7 +2412,7 @@ memory:
       reason: "AIRUNTIME-2744 - disabled on Windows; gfx1201 (amd_windows) and gfx1201 (amd_wsl) both self-skip because the GPU does not support managed memory; needs to be re-triaged."
     tags: [multigpu, query, P1, managed_memory]
   Unit_hipMemAdvise_Set_Unset_Basic:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [query, P1, managed_memory]
   Unit_hipMemAdvise_No_Flag_Interference:
     <<: *level_default
@@ -2441,7 +2442,7 @@ memory:
     <<: *level_default
     tags: [query, P1, managed_memory]
   Unit_hipMemRangeGetAttributes_Positive_Basic:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [query, P1, managed_memory]
   Unit_hipMemRangeGetAttributes_Negative_Parameters:
     <<: *level_default
@@ -2483,7 +2484,7 @@ memory:
     <<: *level_default
     tags: [alloc, P1]
   Unit_hipMallocAsync_basic:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [alloc, P1]
   Unit_hipMallocAsync_Multistream_Concurrent:
     <<: *level_default
@@ -2531,7 +2532,7 @@ memory:
     <<: *level_2
     tags: [alloc, transfer, P1]
   Unit_hipStreamAttachMemAsync_Positive_Basic:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [query, P1, managed_memory]
   Unit_hipStreamAttachMemAsync_Positive_Pageable:
     <<: *level_default
@@ -2865,7 +2866,8 @@ memory:
     <<: *level_default
     tags: []
   Unit_hipMemGetMemPool_Negative: *level_default
-  Unit_hipMemGetMemPool_Basic: *level_default
+  Unit_hipMemGetMemPool_Basic:
+    level: [*level_0, *level_default]
   Unit_hipMemSetMemPool_Negative: *level_default
   Unit_hipMemSetMemPool_Basic: *level_default
   Unit_hipFreeHost_Capture_negative:

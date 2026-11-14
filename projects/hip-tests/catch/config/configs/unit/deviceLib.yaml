@@ -4,13 +4,13 @@ deviceLib:
     <<: *level_default
     tags: [math, P0]
   Unit_AnyAll_CompileTest:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [warp, P0]
   Unit_ballot:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [warp, P0]
   Unit_clz:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [bitops, P0]
   Unit_ffs:
     <<: *level_default
@@ -22,10 +22,10 @@ deviceLib:
     <<: *level_default
     tags: [bitops, P0]
   Unit_popc:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [bitops, P0]
   Unit_ldg:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [bitops, P0]
   Unit_threadfence_system:
     <<: *level_default
@@ -40,7 +40,7 @@ deviceLib:
     <<: *level_default
     tags: [synchronization, P0]
   Unit_deviceAllocation_Malloc_PerThread_PrimitiveDataType:
-    <<: *level_default
+    level: [*level_0, *level_default]
     disabled:
       targets: [amd_windows]
       reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
@@ -133,22 +133,22 @@ deviceLib:
     <<: *level_default
     tags: [math, P0]
   Unit_SimpleAtomicsTest:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [atomics, P0]
   Unit_hipTestAtomicAdd:
     <<: *level_default
     tags: [atomics, P0]
   Unit_StdComplex:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [types, P0]
   Unit_hipTestClock:
     <<: *level_default
     tags: [misc, P0]
   Unit_kernel_trigger:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [math, P0]
   Unit_ToAndFroMemCpyToDevice:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [memory, P0]
   Unit_TestIncludeMathPreciseFloat:
     <<: *level_default
@@ -157,7 +157,7 @@ deviceLib:
     <<: *level_default
     tags: [math, P0]
   Unit_hipMemcpyToSymbolAsync_ToNFrom:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [misc, P0]
   Unit_hipGetSymbolAddressAndSize_Validation:
     <<: *level_default
@@ -172,7 +172,7 @@ deviceLib:
     <<: *level_default
     tags: [misc, P0]
   Unit_hipThreadFence:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [synchronization, P0]
   Unit_hipDeviceTrigFunc_Float:
     <<: *level_default
@@ -181,7 +181,7 @@ deviceLib:
     <<: *level_default
     tags: [misc, P0]
   Unit_hipTrigDeviceFunc_Double:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [misc, P0]
   Unit_TestDevice_DoublePrecisionMathFunc:
     <<: *level_default
@@ -235,13 +235,13 @@ deviceLib:
     <<: *level_default
     tags: [types, P0]
   Unit_hipVectorTypes_test_on_device:
-    <<: *level_default
+    level: [*level_0, *level_default]
     disabled:
       targets: [amd_windows]
       reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [types, P0]
   Unit_hipTestHalf:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [types, P0]
   Unit_TestMathFuncComplex:
     <<: *level_default
@@ -265,7 +265,7 @@ deviceLib:
     <<: *level_default
     tags: [types, P0]
   Unit_bf162_basic:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [types, P0]
   Unit_bf16_operators_host:
     <<: *level_default
@@ -295,13 +295,13 @@ deviceLib:
     <<: *level_default
     tags: [atomics]
   Unit_fp16_arith:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [types, P0]
   Unit_fp162_arith:
     <<: *level_default
     tags: [types, P0]
   Unit_fp16_host_operations:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [types]
   Unit_half_isnan_host:
     <<: *level_default
@@ -319,7 +319,7 @@ deviceLib:
     <<: *level_default
     tags: [types]
   Unit_bf16_atomic_add:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [atomics, types]
   Unit_fp16_atomic_add:
     <<: *level_default
@@ -334,7 +334,7 @@ deviceLib:
     <<: *level_default
     tags: [types, P0]
   Unit_fp8_ocp_vector_basic_conversions:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [types, P0]
   Unit_fp8_fnuz_bool_host:
     <<: *level_default
@@ -352,7 +352,7 @@ deviceLib:
     <<: *level_default
     tags: [types]
   Unit__hip_cvt_float_to_e8m0:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [types]
   Unit__hip_cvt_double_to_e8m0:
     <<: *level_default
@@ -382,7 +382,7 @@ deviceLib:
     <<: *level_default
     tags: [types]
   Unit_all_fp6_ocp_vector_cvt_interger_data:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [types]
   Unit_all_fp6_ocp_vector_cvt_unsigned_interger_data:
     <<: *level_default
@@ -394,10 +394,10 @@ deviceLib:
     <<: *level_default
     tags: [types]
   Unit_all_fp4_from_double:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [types]
   Unit_all_fp4_from_double_device:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [types]
   Unit_all_fp4_from_interger_data:
     <<: *level_default
@@ -427,7 +427,7 @@ deviceLib:
     <<: *level_default
     tags: [types]
   Unit_ext_ocp_fp8_roundtrip_host:
-    <<: *level_default
+    level: [*level_0, *level_default]
     unsupported:
       targets: [amd_windows]
       reason: "AIRUNTIME-2744 - OCP host-reference packed-bitfield ABI differs on Windows; unit/deviceLib/CMakeLists.txt compiles ext_ocp_fp4/fp6/fp8 only if(NOT WIN32), so this is never built or run on native Windows"
@@ -463,13 +463,13 @@ deviceLib:
       reason: "AIRUNTIME-2744 - OCP host-reference packed-bitfield ABI differs on Windows; unit/deviceLib/CMakeLists.txt compiles ext_ocp_fp4/fp6/fp8 only if(NOT WIN32), so this is never built or run on native Windows"
     tags: [types]
   Unit_ext_ocp_fp8_device_matches_host:
-    <<: *level_default
+    level: [*level_0, *level_default]
     unsupported:
       targets: [amd_windows]
       reason: "AIRUNTIME-2744 - OCP host-reference packed-bitfield ABI differs on Windows; unit/deviceLib/CMakeLists.txt compiles ext_ocp_fp4/fp6/fp8 only if(NOT WIN32), so this is never built or run on native Windows"
     tags: [types]
   Unit_ext_ocp_fp4_roundtrip_host:
-    <<: *level_default
+    level: [*level_0, *level_default]
     unsupported:
       targets: [amd_windows]
       reason: "AIRUNTIME-2744 - OCP host-reference packed-bitfield ABI differs on Windows; unit/deviceLib/CMakeLists.txt compiles ext_ocp_fp4/fp6/fp8 only if(NOT WIN32), so this is never built or run on native Windows"
@@ -499,7 +499,7 @@ deviceLib:
       reason: "AIRUNTIME-2744 - OCP host-reference packed-bitfield ABI differs on Windows; unit/deviceLib/CMakeLists.txt compiles ext_ocp_fp4/fp6/fp8 only if(NOT WIN32), so this is never built or run on native Windows"
     tags: [types]
   Unit_ext_ocp_fp4_device_matches_host:
-    <<: *level_default
+    level: [*level_0, *level_default]
     unsupported:
       targets: [amd_windows]
       reason: "AIRUNTIME-2744 - OCP host-reference packed-bitfield ABI differs on Windows; unit/deviceLib/CMakeLists.txt compiles ext_ocp_fp4/fp6/fp8 only if(NOT WIN32), so this is never built or run on native Windows"
@@ -511,7 +511,7 @@ deviceLib:
       reason: "AIRUNTIME-2744 - OCP host-reference packed-bitfield ABI differs on Windows; unit/deviceLib/CMakeLists.txt compiles ext_ocp_fp4/fp6/fp8 only if(NOT WIN32), so this is never built or run on native Windows"
     tags: [types]
   Unit_ext_ocp_fp6_roundtrip_host:
-    <<: *level_default
+    level: [*level_0, *level_default]
     unsupported:
       targets: [amd_windows]
       reason: "AIRUNTIME-2744 - OCP host-reference packed-bitfield ABI differs on Windows; unit/deviceLib/CMakeLists.txt compiles ext_ocp_fp4/fp6/fp8 only if(NOT WIN32), so this is never built or run on native Windows"
@@ -535,7 +535,7 @@ deviceLib:
       reason: "AIRUNTIME-2744 - OCP host-reference packed-bitfield ABI differs on Windows; unit/deviceLib/CMakeLists.txt compiles ext_ocp_fp4/fp6/fp8 only if(NOT WIN32), so this is never built or run on native Windows"
     tags: [types]
   Unit_ext_ocp_fp6_device_matches_host:
-    <<: *level_default
+    level: [*level_0, *level_default]
     unsupported:
       targets: [amd_windows]
       reason: "AIRUNTIME-2744 - OCP host-reference packed-bitfield ABI differs on Windows; unit/deviceLib/CMakeLists.txt compiles ext_ocp_fp4/fp6/fp8 only if(NOT WIN32), so this is never built or run on native Windows"
@@ -595,7 +595,7 @@ deviceLib:
     <<: *level_default
     tags: [atomics]
   Unit_fp8_fnuz_compare_host_device:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [types]
   Unit_fp8x2_fnuz_compare_host_device:
     <<: *level_default
@@ -655,7 +655,7 @@ deviceLib:
       reason: "AIRUNTIME-2892 - gfx1030 (amd_linux) genuine 180s hang/SIGTERM (stale DeviceTest; matches TheRock_Bump_Windows_timeout #4547); gfx1201 (amd_windows) and gfx1201 (amd_wsl) hang (>300s timeout); needs to be re-triaged"
     tags: [misc]
   Unit_coop_memcpy_async_thread_block_tile_Basic:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [cooperative, ops]
   Unit_coop_memcpy_async_coalesced_group_Basic:
     <<: *level_default
