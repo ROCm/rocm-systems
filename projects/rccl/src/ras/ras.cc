@@ -175,13 +175,24 @@ ncclResult_t ncclRasCommFini(const struct ncclComm* comm) {
 }
 
 // Global destructor.  Notifies the RAS thread to release all the resources
-// and terminate.  Waits for the thread to terminate.
+// and terminate.  Waits for the thread unless the notification cannot be
+// delivered, in which case the thread is detached (joining would block the
+// exit forever).
 static void rasTerminate() {
   struct rasNotification msg;
-  if (!rasInitialized) return;
-  memset(&msg, '\0', sizeof(msg));
-  msg.type = RAS_TERMINATE;
-  if (rasLocalNotify(&msg) == ncclSuccess) rasThread.join();
+  if (!rasThread.joinable()) return;
+  if (rasInitialized) {
+    memset(&msg, '\0', sizeof(msg));
+    msg.type = RAS_TERMINATE;
+    if (rasLocalNotify(&msg) != ncclSuccess) {
+      // The thread never got the request: join() would hang, and a joinable ~std::thread() calls std::terminate.
+      rasThread.detach();
+      return;
+    }
+  }
+  // Either the notification was delivered, or the thread already ran
+  // rasThreadCleanup() (which clears rasInitialized) and is about to return.
+  rasThread.join();
 }
 
 // Invoked by regular NCCL threads on every (non-split) comm initialization.  Provides info on all the ranks within

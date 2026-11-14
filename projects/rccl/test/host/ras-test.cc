@@ -13,6 +13,7 @@
 #include <poll.h>
 
 #include <atomic>
+#include <chrono>
 #include <climits>
 #include <cstdlib>
 #include <cstring>
@@ -839,14 +840,40 @@ TEST_F(RasMicrotest, TerminateNotifiesAndJoinsThread) {
   EXPECT_EQ(RAS_TERMINATE, reinterpret_cast<const rasNotification*>(g_pairBytes.data())->type);
 }
 
-TEST_F(RasMicrotest, TerminateWriteFailureLeavesThreadForCallerToJoin) {
+TEST_F(RasMicrotest, TerminateAfterSelfCleanupJoinsThread) {
+  rasThread = std::thread([] {});
+  // rasInitialized stays false: the thread already ran rasThreadCleanup().
+  rasTerminate();
+  EXPECT_FALSE(rasThread.joinable());
+  EXPECT_TRUE(g_pairBytes.empty());
+}
+
+TEST_F(RasMicrotest, TerminateWriteFailureDetachesThread) {
   rasInitialized = true;
   rasNotificationPipe[1] = 52;
   g_pairWriteResult = ncclSystemError;
-  rasThread = std::thread([] {});
+  auto stop = std::make_shared<std::atomic<bool>>(false);
+  auto done = std::make_shared<std::atomic<bool>>(false);
+  rasThread = std::thread([stop, done] {
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (!stop->load(std::memory_order_acquire) &&
+           std::chrono::steady_clock::now() < deadline) {
+      std::this_thread::yield();
+    }
+    done->store(true, std::memory_order_release);
+  });
+  auto start = std::chrono::steady_clock::now();
   rasTerminate();
-  EXPECT_TRUE(rasThread.joinable());
-  rasThread.join();
+  auto elapsed = std::chrono::steady_clock::now() - start;
+  EXPECT_FALSE(rasThread.joinable());
+  // detach() returns while the thread is still running; join() would wait for it.
+  EXPECT_LT(elapsed, std::chrono::milliseconds(500));
+  EXPECT_FALSE(done->load(std::memory_order_acquire));
+  stop->store(true, std::memory_order_release);
+  for (int i = 0; i < 5000 && !done->load(std::memory_order_acquire); ++i) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  EXPECT_TRUE(done->load(std::memory_order_acquire));
 }
 
 TEST_F(RasMicrotest, MessageDispatchRoutesExternalTypesAndPropagatesErrors) {
