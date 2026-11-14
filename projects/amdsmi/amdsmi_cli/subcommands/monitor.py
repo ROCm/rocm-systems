@@ -487,6 +487,11 @@ class MonitorCommands:
             if not args.default_output:
                 try:
                     mem_clock = gpu_metrics_info["current_uclk"]
+                    # Newer gpu_metrics report UCLK per AID only; use the first reported AID
+                    if mem_clock == "N/A":
+                        uclk_aid = gpu_metrics_info.get("current_uclk_aid", "N/A")
+                        if isinstance(uclk_aid, list):
+                            mem_clock = next((c for c in uclk_aid if c != "N/A"), "N/A")
                     # Fallback to APU current UCLK, then average
                     if mem_clock == "N/A":
                         mem_clock = gpu_metrics_info.get("apu_metrics.current_uclk", "N/A")

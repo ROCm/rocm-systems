@@ -1138,6 +1138,11 @@ class MetricCommands:
                     # Populate MEM clock value
                     try:
                         current_mem_clock = gpu_metric["current_uclk"]  # single value
+                        # Newer gpu_metrics report UCLK per AID only; use the first reported AID
+                        if current_mem_clock == "N/A":
+                            uclk_aid = gpu_metric.get("current_uclk_aid", "N/A")
+                            if isinstance(uclk_aid, list):
+                                current_mem_clock = next((c for c in uclk_aid if c != "N/A"), "N/A")
                         if current_mem_clock != "N/A":
                             clocks["mem_0"]["clk"] = self.helpers.unit_format(
                                 self.logger, current_mem_clock, clock_unit
