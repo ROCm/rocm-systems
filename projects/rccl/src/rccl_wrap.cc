@@ -400,17 +400,29 @@ static bool rcclRemoteFlushTuneNodes(struct ncclComm* comm) {
   return (comm->nNodes >= 2 && comm->nNodes <= 8) || comm->nNodes == 16;
 }
 
+// gfx1250 LL128 slices are 32 words per thread (NCCL_LL128_SHMEM_ELEMS_PER_THREAD), 4x gfx9's, but the default
+// buffer still holds 120 words per thread per step, so a warp gets 3.75 slices per step where upstream NCCL's
+// layout (120 words per thread over 8-word slices) gives 15. x4 restores 15. Single node, 4 GPUs, Ring/LL128:
+// +17-22% bus bandwidth from 64 MB on 32 channels (-2-3% at 8-16 MB), up to +4% at 512 MB-1 GB on 192.
+static constexpr int kGfx1250CollLl128BuffScale = 4;
+
 // Ring all_reduce moves one LL128 chunk per channel per rank per loop, so data past chunk * nChannels * nRanks
 // needs a second loop at full ring latency and loses about a third of its bandwidth. A larger buffer lifts that
 // limit; send/recv keeps the default size (comm->p2pLl128BuffSize), since it allocates one buffer per network
 // peer and channel and would grow with the node count. Not applied when NCCL_LL128_BUFFSIZE is set.
 void rcclScaleCollLl128BuffSize(struct ncclComm* comm) {
-  if (rcclParamIbGdrFlushFlagTune() == 0 || !rcclRemoteFlushTuneNodes(comm) || !comm->topo->ll128Enabled ||
-      !rcclRemoteFlushTuned(comm))
+  if (!comm->topo->ll128Enabled) return;
+  int scale;
+  if (IsArchMatch(comm->archName, "gfx1250")) {
+    scale = kGfx1250CollLl128BuffScale;
+  } else if (rcclParamIbGdrFlushFlagTune() != 0 && rcclRemoteFlushTuneNodes(comm) && rcclRemoteFlushTuned(comm)) {
+    scale = kRemoteFlushLl128BuffScale;
+  } else {
     return;
-  comm->buffSizes[NCCL_PROTO_LL128] = comm->p2pLl128BuffSize * kRemoteFlushLl128BuffScale;
+  }
+  comm->buffSizes[NCCL_PROTO_LL128] = comm->p2pLl128BuffSize * scale;
   INFO(NCCL_INIT, "LL128 buffer for collectives %d (x%d), for send/recv %d", comm->buffSizes[NCCL_PROTO_LL128],
-       kRemoteFlushLl128BuffScale, comm->p2pLl128BuffSize);
+       scale, comm->p2pLl128BuffSize);
 }
 
 // Bytes per node that Ring/LL128 all_reduce moves in one loop.
