@@ -2394,6 +2394,7 @@ static ncclResult_t addPersistentPlanRef(struct ncclComm* comm, struct ncclCudaG
 }
 
 NCCL_PARAM(GraphStreamOrdering, "GRAPH_STREAM_ORDERING", NCCL_CONFIG_UNDEF_INT);
+RCCL_PARAM(AddonDoneEventOrdering, "ADDON_DONE_EVENT_ORDERING", 1);
 
 namespace {
 enum ncclImplicitOrder {
@@ -2460,6 +2461,7 @@ static ncclResult_t rcclAddonCaptureOrderEnd(struct ncclComm* comm, cudaStream_t
 ncclResult_t rcclAddonLaunchBegin(struct ncclComm* comm, cudaStream_t stream, struct rcclAddonLaunchState* state) {
   state->savedDev = -1;
   state->eventOffered = false;
+  state->doneEventOrdering = rcclParamAddonDoneEventOrdering() != 0;
   state->capturing = false;
   state->deviceStreamAcquired = false;
   state->deviceStream = nullptr;
@@ -2475,7 +2477,7 @@ ncclResult_t rcclAddonLaunchBegin(struct ncclComm* comm, cudaStream_t stream, st
   NCCLCHECK(ncclCudaGetCapturingGraph(&state->graph, stream, comm->config.graphUsageMode));
   state->capturing = ncclCudaGraphValid(state->graph);
 
-  if (streamChanged && !state->capturing) {
+  if (state->doneEventOrdering && streamChanged && !state->capturing) {
     // doneEvent may carry a node from another capture or from outside one, and waiting on such an
     // event inside a capture breaks capture isolation, so a captured stream gets no edge here and is
     // ordered through deviceStream below instead, as native captured launches are.
@@ -2486,7 +2488,7 @@ ncclResult_t rcclAddonLaunchBegin(struct ncclComm* comm, cudaStream_t stream, st
   // records instead, exactly as the native general path does.
   if (state->capturing) {
     NCCLCHECK(rcclAddonCaptureOrderBegin(comm, stream, state));
-  } else {
+  } else if (state->doneEventOrdering) {
     state->eventOffered = true;
     comm->addonStopEvent = comm->doneEvent;
   }
@@ -2503,11 +2505,11 @@ ncclResult_t rcclAddonLaunchEnd(struct ncclComm* comm, cudaStream_t stream,
   comm->addonStopEvent = nullptr;
 
   if (result == ncclSuccess) {
-    if (!taken) {
+    if (state.doneEventOrdering && !taken) {
       CUDACHECKGOTO(hipEventRecord(comm->doneEvent, stream), result, release);
     }
-    // The tag advances however the event was recorded: it is what tells the next collective on
-    // another stream that an edge is needed.
+    // The tag advances however the event was recorded, and also when ordering is disabled and it
+    // was not: it is what tells the next collective on another stream that an edge is needed.
     comm->lastStreamTag = ncclStreamTag(stream);
     if (state.capturing) {
       NCCLCHECKGOTO(rcclAddonCaptureOrderEnd(comm, stream, state), result, release);

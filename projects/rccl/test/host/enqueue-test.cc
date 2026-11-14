@@ -2764,6 +2764,65 @@ TEST_F(EnqueueMicrotest, AddonLaunch_LaunchFailed_RecordsNothingAndLeavesTheTag)
   EXPECT_EQ(0u, ac.c()->lastStreamTag);
 }
 
+// RCCL_ADDON_DONE_EVENT_ORDERING. The two cases below differ only in the param: a collective on a new
+// stream waits on doneEvent and offers it as the stop event by default, and does neither when disabled.
+namespace {
+hipStream_t const kAddonPrevStream = reinterpret_cast<hipStream_t>(0x9E5);
+}  // namespace
+
+TEST_F(EnqueueMicrotest, AddonLaunch_DoneEventOrderingDefault_StreamSwitchWaitsAndOffersTheEvent) {
+  AddonComm ac;
+  ac.c()->lastStreamTag = ncclStreamTag(kAddonPrevStream);
+  ScopedHook notCapturing(g_cudaGetCapturingGraph,
+                          [](struct ncclCudaGraph* graph, hipStream_t, int mode) {
+                            if (graph) *graph = ncclCudaGraphNone(mode);
+                            return ncclSuccess;
+                          });
+  ScopedHook wait(g_hipStreamWaitEvent, [](hipStream_t stream, hipEvent_t event, unsigned int) {
+    EXPECT_EQ(kAddonStream, stream);
+    EXPECT_EQ(kAddonDoneEvent, event);
+    return hipSuccess;
+  });
+  ScopedHook record(g_hipEventRecord, [](hipEvent_t, hipStream_t) { return hipErrorInvalidValue; });
+
+  hipEvent_t stopEvent = nullptr;
+  EXPECT_EQ(ncclSuccess, rcclAddonLaunch(ac.c(), kAddonStream, [&] {
+    stopEvent = rcclTakeAddonStopEvent(ac.c());
+    return ncclSuccess;
+  }));
+
+  EXPECT_EQ(1, wait.calls);
+  EXPECT_EQ(kAddonDoneEvent, stopEvent);
+  EXPECT_EQ(0, record.calls);
+  EXPECT_EQ(ncclStreamTag(kAddonStream), ac.c()->lastStreamTag);
+}
+
+TEST_F(EnqueueMicrotest, AddonLaunch_DoneEventOrderingDisabled_NeitherWaitsNorRecords) {
+  AddonComm ac;
+  ac.c()->lastStreamTag = ncclStreamTag(kAddonPrevStream);
+  SetParam("RCCL_ADDON_DONE_EVENT_ORDERING", 0);
+  ScopedHook notCapturing(g_cudaGetCapturingGraph,
+                          [](struct ncclCudaGraph* graph, hipStream_t, int mode) {
+                            if (graph) *graph = ncclCudaGraphNone(mode);
+                            return ncclSuccess;
+                          });
+  ScopedHook wait(g_hipStreamWaitEvent, [](hipStream_t, hipEvent_t, unsigned int) { return hipErrorInvalidValue; });
+  ScopedHook record(g_hipEventRecord, [](hipEvent_t, hipStream_t) { return hipErrorInvalidValue; });
+
+  hipEvent_t stopEvent = kAddonDoneEvent;  // poison
+  EXPECT_EQ(ncclSuccess, rcclAddonLaunch(ac.c(), kAddonStream, [&] {
+    stopEvent = rcclTakeAddonStopEvent(ac.c());
+    return ncclSuccess;
+  }));
+
+  EXPECT_EQ(0, wait.calls);
+  EXPECT_EQ(nullptr, stopEvent);
+  EXPECT_EQ(0, record.calls);
+  EXPECT_EQ(nullptr, ac.c()->addonStopEvent);
+  // The tag still advances, so a later native launch on another stream takes the stream-change path.
+  EXPECT_EQ(ncclStreamTag(kAddonStream), ac.c()->lastStreamTag);
+}
+
 // Begin fails, so launch() must not run. cudaDev 5 != current 3 makes the set and the restore observable.
 TEST_F(EnqueueMicrotest, AddonLaunch_SetDeviceFailed_SkipsLaunchAndRestoresTheDevice) {
   AddonComm ac;
@@ -2964,6 +3023,44 @@ TEST_F(EnqueueMicrotest, AddonLaunch_CapturedWithStreamOrdering_JoinsTheDeviceSt
 
   EXPECT_EQ((std::vector<std::string>{"acquire", "wait", "launch", "recordDone", "advance", "release"}), calls);
   EXPECT_EQ(0, advanceToEvent.calls);
+}
+
+// RCCL_ADDON_DONE_EVENT_ORDERING=0 drops only the doneEvent record; the capture chain is still joined.
+TEST_F(EnqueueMicrotest, AddonLaunch_CapturedDoneEventOrderingDisabled_JoinsTheChainWithoutRecordingDone) {
+  CapturingAddonComm ac(/*graphStreamOrdering=*/1);
+  SetParam("RCCL_ADDON_DONE_EVENT_ORDERING", 0);
+  std::vector<std::string> calls;
+  ScopedHook capturing(g_cudaGetCapturingGraph, CapturingGraph);
+  ScopedHook acquire(g_strongStreamAcquire,
+                     [&](struct ncclCudaGraph, struct ncclStrongStream*, bool, hipStream_t* workStream) {
+                       *workStream = kAddonDeviceStream;
+                       calls.push_back("acquire");
+                       return ncclSuccess;
+                     });
+  ScopedHook waitStream(g_ncclStreamWaitStream, [&](hipStream_t, hipStream_t, hipEvent_t) {
+    calls.push_back("wait");
+    return ncclSuccess;
+  });
+  ScopedHook record(g_hipEventRecord, [&](hipEvent_t event, hipStream_t) {
+    calls.push_back(event == kAddonDoneEvent ? "recordDone" : "recordOther");
+    return hipSuccess;
+  });
+  ScopedHook advance(g_ncclStreamAdvanceToStream, [&](hipStream_t, hipStream_t) {
+    calls.push_back("advance");
+    return ncclSuccess;
+  });
+  ScopedHook release(g_strongStreamRelease, [&](struct ncclCudaGraph, struct ncclStrongStream*, bool) {
+    calls.push_back("release");
+    return ncclSuccess;
+  });
+
+  EXPECT_EQ(ncclSuccess, rcclAddonLaunch(ac.c(), kAddonStream, [&] {
+    EXPECT_EQ(nullptr, rcclTakeAddonStopEvent(ac.c()));
+    calls.push_back("launch");
+    return ncclSuccess;
+  }));
+
+  EXPECT_EQ((std::vector<std::string>{"acquire", "wait", "launch", "advance", "release"}), calls);
 }
 
 TEST_F(EnqueueMicrotest, AddonLaunch_CapturedWithoutStreamOrdering_WaitsOnAndRecordsTheSerialEvent) {
