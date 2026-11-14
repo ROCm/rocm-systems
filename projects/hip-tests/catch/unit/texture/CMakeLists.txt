@@ -86,7 +86,7 @@ set(NOT_FOR_gfx90a_AND_ABOVE_TEST
 )
 
 if (HIP_PLATFORM MATCHES "amd")
-  set(${TEST_SRC} ${TEST_SRC} hipTextureMipmapObj1D.cc
+  set(TEST_SRC ${TEST_SRC} hipTextureMipmapObj1D.cc
       hipTextureMipmapObj2D.cc
     hipTextureMipmapObj3D.cc
 )
