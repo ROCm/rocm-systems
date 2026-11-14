@@ -250,7 +250,7 @@ bool Os::installExceptionHandlers(CrashCallback callback) {
   return crashExceptionHandler != NULL;
 }
 
-void Os::uninstallExceptionHandlers() {
+void Os::uninstallExceptionHandlers(CrashCallback) {
   if (crashExceptionHandler != NULL) {
     RemoveVectoredExceptionHandler(crashExceptionHandler);
     crashExceptionHandler = NULL;
