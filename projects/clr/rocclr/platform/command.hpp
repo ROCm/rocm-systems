@@ -96,6 +96,7 @@ class Event : public RuntimeObject {
 
   std::atomic<CallBackEntry*> callbacks_;  //!< linked list of callback entries.
   std::atomic<int32_t> status_;            //!< current execution status.
+  std::atomic<bool> deferResourceRelease_{false};  //!< Hold resources until device completion
   std::atomic_flag notified_;              //!< Command queue was notified
 
   void* hw_event_;        //!< HW event ID associated with SW event
@@ -193,6 +194,15 @@ class Event : public RuntimeObject {
   //! Return this command's execution status.
   int32_t status() const { return status_.load(std::memory_order_relaxed); }
 
+  //! Release resources held back by setStatus(). Returns false if none were held.
+  bool ReleaseDeferredResources() {
+    if (!deferResourceRelease_.exchange(false)) {
+      return false;
+    }
+    releaseResources();
+    return true;
+  }
+
   //! Insert the given \a callback into the callback stack.
   bool setCallback(int32_t status, CallBackFunction callback, void* data, bool blocking = true);
 
@@ -204,7 +214,7 @@ class Event : public RuntimeObject {
    *
    *  \see amd::Event::awaitCompletion
    */
-  bool setStatus(int32_t status, uint64_t timeStamp = 0);
+  bool setStatus(int32_t status, uint64_t timeStamp = 0, bool deferRelease = false);
 
   //! Reset the status of the command for reuse
   bool resetStatus(int32_t status);
@@ -588,10 +598,11 @@ class UserEvent : public Command {
   //! Sets the execution status of the user event
   bool SetExecutionStatus(cl_int status) {
     if (AMD_DIRECT_DISPATCH) {
-      // If it's invalid status, then mark dependent commands as invalid
+      // If it's invalid status, then mark dependent commands as invalid. They are already
+      // submitted, so their resources are held until the device reports them complete.
       if (status < CL_COMPLETE) {
         for (auto it : dependents_) {
-          it->setStatus(CL_EXEC_STATUS_ERROR_FOR_EVENTS_IN_WAIT_LIST);
+          it->setStatus(CL_EXEC_STATUS_ERROR_FOR_EVENTS_IN_WAIT_LIST, 0, true);
         }
       }
       dependents_.clear();
