@@ -22,7 +22,7 @@
 #include <string>
 #include <vector>
 
-#if defined(HRR_PLAYBACK_EXE) && defined(HRR_TEST_EXE)
+#if defined(HRR_PLAYBACK_BIN) && defined(HRR_TEST_EXE)
 
 namespace {
 constexpr int    kElems = 1024;
@@ -141,7 +141,7 @@ HRR_TEST_CASE(Unit_HRR_VaPlacement_StoredPointer) {
   }
 }
 
-#endif  // HRR_PLAYBACK_EXE && HRR_TEST_EXE
+#endif  // HRR_PLAYBACK_BIN && HRR_TEST_EXE
 
 /**
  * @}

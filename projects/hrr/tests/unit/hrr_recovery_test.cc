@@ -150,7 +150,7 @@ struct TmpRootArchive {
 
 static std::pair<int, std::string> run_hrr_playback(const fs::path& archive,
                                                     const std::string& args) {
-  hrr::test::SpawnProc proc(HRR_PLAYBACK_EXE, /*capture_stdout=*/true);
+  hrr::test::SpawnProc proc(hrr_playback_bin(), /*capture_stdout=*/true);
   set_proc_search_path(proc);
 #ifdef _WIN32
   std::string path_arg = "\"" + archive.string() + "\"";

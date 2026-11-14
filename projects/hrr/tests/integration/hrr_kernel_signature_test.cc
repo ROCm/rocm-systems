@@ -41,7 +41,7 @@
 #include <utility>
 #include <vector>
 
-#if defined(HRR_PLAYBACK_EXE) && defined(HRR_TEST_EXE)
+#if defined(HRR_PLAYBACK_BIN) && defined(HRR_TEST_EXE)
 
 namespace {
 constexpr int kScale = 3;
@@ -317,7 +317,7 @@ TEST_CASE("Unit_HRR_KernelSignature_MismatchedArchiveRefused", "[.][hrr]") {
   }
 }
 
-#endif  // HRR_PLAYBACK_EXE && HRR_TEST_EXE
+#endif  // HRR_PLAYBACK_BIN && HRR_TEST_EXE
 
 /**
  * @}

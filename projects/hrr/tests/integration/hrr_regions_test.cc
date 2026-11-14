@@ -519,7 +519,7 @@ TEST_CASE("Unit_HRR_Regions_StreamFraming", "[.][hrr]") {
 // GPU: replay against a synthetic sidecar
 // ===========================================================================
 
-#if defined(HRR_PLAYBACK_EXE) && defined(HRR_TEST_EXE)
+#if defined(HRR_PLAYBACK_BIN) && defined(HRR_TEST_EXE)
 
 namespace {
 
@@ -783,7 +783,7 @@ TEST_CASE("Unit_HRR_Regions_MemcpyFirstTouchMaterialization", "[.][hrr]") {
 }
 #endif  // HRR_HAVE_HSA
 
-#endif  // HRR_PLAYBACK_EXE && HRR_TEST_EXE
+#endif  // HRR_PLAYBACK_BIN && HRR_TEST_EXE
 
 /**
  * @}

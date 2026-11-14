@@ -31,7 +31,7 @@
 #include <string>
 #include <vector>
 
-#if defined(HRR_PLAYBACK_EXE) && defined(HRR_TEST_EXE)
+#if defined(HRR_PLAYBACK_BIN) && defined(HRR_TEST_EXE)
 
 namespace {
 #define HRR_CAPS_IPC "HRR_CAPS_IPC"
@@ -285,7 +285,7 @@ HRR_TEST_CASE(Unit_HRR_CaptureCapabilities) {
   // Its export and its import both hold zeros, and replay must not pair them:
   // the import is reported as unmatched instead of opening the local export.
   // The event open cannot be replayed from zeros either; keep going past it.
-  hrr::test::SpawnProc replay(HRR_PLAYBACK_EXE, /*capture_stdout=*/true,
+  hrr::test::SpawnProc replay(hrr_playback_bin(), /*capture_stdout=*/true,
                               /*capture_stderr=*/true);
   set_proc_search_path(replay);
   (void)replay.run("--continue-on-error " + hrr_quote_path(importer));
@@ -295,7 +295,7 @@ HRR_TEST_CASE(Unit_HRR_CaptureCapabilities) {
   CHECK(log.find("(hipIpcOpenMemHandle) returned") == std::string::npos);
 }
 
-#endif  // HRR_PLAYBACK_EXE && HRR_TEST_EXE
+#endif  // HRR_PLAYBACK_BIN && HRR_TEST_EXE
 
 /**
  * @}

@@ -123,8 +123,15 @@ inline std::string hrr_self_exe() {
 // hrr-playback sits next to the test binary
 // (.../hrr/playback next to .../hrr/tests/integration). Resolving it from the
 // running executable keeps it on the same mount the parent was started from.
-inline std::string hrr_playback_exe() {
-#if !defined(_WIN32) && defined(HRR_PLAYBACK_EXE)
+//
+// HRR_PLAYBACK_BIN in the environment overrides both: the installed test tree
+// (share/hrr/test) sets it, because the build-tree path compiled in below does
+// not exist there.
+inline std::string hrr_playback_bin() {
+  if (const char* env = std::getenv("HRR_PLAYBACK_BIN")) {
+    if (*env) return env;
+  }
+#if !defined(_WIN32) && defined(HRR_PLAYBACK_BIN)
   const std::string self = hrr_self_exe();
   const std::size_t slash = self.find_last_of('/');
   if (slash != std::string::npos) {
@@ -134,8 +141,8 @@ inline std::string hrr_playback_exe() {
     if (::realpath(candidate.c_str(), resolved) != nullptr) return resolved;
   }
 #endif
-#if defined(HRR_PLAYBACK_EXE)
-  return HRR_PLAYBACK_EXE;
+#if defined(HRR_PLAYBACK_BIN)
+  return HRR_PLAYBACK_BIN;
 #else
   return {};
 #endif
@@ -277,7 +284,7 @@ inline bool hrr_d2h_mismatch_exit(int ret, const std::string& out) {
 inline void hrr_run_playback(const fs::path& cap_path,
                              const std::string& extra_args = "",
                              bool require_d2h = true) {
-  hrr::test::SpawnProc proc(hrr_playback_exe(), /*capture_stdout=*/true);
+  hrr::test::SpawnProc proc(hrr_playback_bin(), /*capture_stdout=*/true);
   set_proc_search_path(proc);
   std::string path_arg = hrr_quote_path(cap_path);
   int ret = proc.run(path_arg + (extra_args.empty() ? "" : " " + extra_args));
@@ -413,7 +420,7 @@ inline std::pair<int, std::string> hrr_playback_env(
     const fs::path& cap_path,
     const std::vector<std::pair<std::string, std::string>>& env,
     const std::string& extra_args = "") {
-  hrr::test::SpawnProc proc(hrr_playback_exe(), /*capture_stdout=*/true);
+  hrr::test::SpawnProc proc(hrr_playback_bin(), /*capture_stdout=*/true);
   set_proc_search_path(proc);
   for (const auto& kv : env) proc.setEnv(kv.first, kv.second);
   std::string path_arg = hrr_quote_path(cap_path);
@@ -423,7 +430,7 @@ inline std::pair<int, std::string> hrr_playback_env(
 
 inline std::pair<int, std::string> run_playback_raw(const fs::path& cap_path,
                                                     const std::string& extra_args) {
-  hrr::test::SpawnProc proc(hrr_playback_exe(), /*capture_stdout=*/true);
+  hrr::test::SpawnProc proc(hrr_playback_bin(), /*capture_stdout=*/true);
   set_proc_search_path(proc);
   std::string path_arg = cap_path.string();
   int ret = proc.run(path_arg + (extra_args.empty() ? "" : " " + extra_args));
@@ -507,7 +514,7 @@ inline std::pair<int, std::string> hrr_playback_merged(
     const fs::path& cap_path,
     const std::string& extra_args = "",
     const std::vector<std::pair<std::string, std::string>>& env = {}) {
-  hrr::test::SpawnProc proc(hrr_playback_exe(), /*capture_stdout=*/true,
+  hrr::test::SpawnProc proc(hrr_playback_bin(), /*capture_stdout=*/true,
                       /*capture_stderr=*/true);
   set_proc_search_path(proc);
   for (const auto& kv : env) proc.setEnv(kv.first, kv.second);
@@ -535,7 +542,7 @@ inline constexpr int kHrrWatchdogKilled = hrr::test::SpawnProc::kKilledOnTimeout
 inline std::pair<int, std::string> hrr_playback_watchdog(
     const fs::path& cap_path, int timeout_seconds,
     const std::string& extra_args = "") {
-  hrr::test::SpawnProc proc(hrr_playback_exe(), /*capture_stdout=*/true,
+  hrr::test::SpawnProc proc(hrr_playback_bin(), /*capture_stdout=*/true,
                             /*capture_stderr=*/true);
   set_proc_search_path(proc);
   std::string path_arg = hrr_quote_path(cap_path);
