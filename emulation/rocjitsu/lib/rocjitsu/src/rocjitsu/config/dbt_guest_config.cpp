@@ -18,6 +18,7 @@
 #include <fstream>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <unistd.h>
 #include <utility>
 #include <vector>
@@ -48,6 +49,264 @@ util::FailureOr<DbtSiliconRevision> silicon_revision_from_fb(fb::DbtSiliconRevis
     return DbtSiliconRevision::Gfx1250B0;
   }
   return emit_error.emit() << "dbt_guest silicon revision is invalid";
+}
+
+bool is_filler(char c) { return c == ' ' || c == '\t' || c == '\r' || c == '\n'; }
+
+void skip_filler(std::string_view json, size_t &at) {
+  while (at < json.size()) {
+    if (is_filler(json[at])) {
+      ++at;
+    } else if (json.compare(at, 2, "//") == 0) {
+      const size_t line_end = json.find_first_of("\r\n", at + 2);
+      at = line_end == std::string_view::npos ? json.size() : line_end + 1;
+    } else if (json.compare(at, 2, "/*") == 0) {
+      const size_t block_end = json.find("*/", at + 2);
+      at = block_end == std::string_view::npos ? json.size() : block_end + 2;
+    } else {
+      return;
+    }
+  }
+}
+
+bool skip_quoted_string(std::string_view json, size_t &at) {
+  if (at >= json.size() || (json[at] != '"' && json[at] != '\''))
+    return false;
+  const char quote = json[at++];
+  while (at < json.size()) {
+    const char c = json[at++];
+    if (c == quote)
+      return true;
+    if (c == '\\' && at < json.size())
+      ++at;
+  }
+  return false;
+}
+
+bool skip_json_value(std::string_view json, size_t &at) {
+  skip_filler(json, at);
+  if (at >= json.size())
+    return false;
+  if (json[at] == '"' || json[at] == '\'')
+    return skip_quoted_string(json, at);
+  if (json[at] == '{' || json[at] == '[') {
+    std::vector<char> closers;
+    closers.push_back(json[at++] == '{' ? '}' : ']');
+    while (at < json.size()) {
+      skip_filler(json, at);
+      if (at >= json.size())
+        return false;
+      if (json[at] == '"' || json[at] == '\'') {
+        if (!skip_quoted_string(json, at))
+          return false;
+        continue;
+      }
+      const char c = json[at++];
+      if (c == '{') {
+        closers.push_back('}');
+      } else if (c == '[') {
+        closers.push_back(']');
+      } else if (c == '}' || c == ']') {
+        if (closers.empty() || c != closers.back())
+          return false;
+        closers.pop_back();
+        if (closers.empty())
+          return true;
+      }
+    }
+    return false;
+  }
+
+  while (at < json.size() && json[at] != ',' && json[at] != '}' && json[at] != ']' &&
+         !is_filler(json[at])) {
+    if (json.compare(at, 2, "//") == 0 || json.compare(at, 2, "/*") == 0)
+      break;
+    ++at;
+  }
+  return true;
+}
+
+std::optional<uint32_t> parse_hex_digits(std::string_view json, size_t &at, size_t count) {
+  if (json.size() - at < count)
+    return std::nullopt;
+  const std::string_view digits = json.substr(at, count);
+  uint32_t value = 0;
+  const auto [ptr, ec] = std::from_chars(digits.data(), digits.data() + digits.size(), value, 16);
+  if (ec != std::errc{} || ptr != digits.data() + digits.size())
+    return std::nullopt;
+  at += count;
+  return value;
+}
+
+bool append_utf8(uint32_t code_point, std::string &decoded) {
+  if (code_point <= 0x7f) {
+    decoded += static_cast<char>(code_point);
+  } else if (code_point <= 0x7ff) {
+    decoded += static_cast<char>(0xc0 | (code_point >> 6));
+    decoded += static_cast<char>(0x80 | (code_point & 0x3f));
+  } else if (code_point <= 0xffff) {
+    decoded += static_cast<char>(0xe0 | (code_point >> 12));
+    decoded += static_cast<char>(0x80 | ((code_point >> 6) & 0x3f));
+    decoded += static_cast<char>(0x80 | (code_point & 0x3f));
+  } else if (code_point <= 0x10ffff) {
+    decoded += static_cast<char>(0xf0 | (code_point >> 18));
+    decoded += static_cast<char>(0x80 | ((code_point >> 12) & 0x3f));
+    decoded += static_cast<char>(0x80 | ((code_point >> 6) & 0x3f));
+    decoded += static_cast<char>(0x80 | (code_point & 0x3f));
+  } else {
+    return false;
+  }
+  return true;
+}
+
+std::optional<std::string> parse_quoted_field_name(std::string_view json, size_t &at) {
+  if (at >= json.size() || (json[at] != '"' && json[at] != '\''))
+    return std::nullopt;
+  const char quote = json[at++];
+  std::string decoded;
+  int unicode_high_surrogate = -1;
+  while (at < json.size()) {
+    const char c = json[at++];
+    if (c == quote) {
+      if (unicode_high_surrogate != -1)
+        return std::nullopt;
+      return decoded;
+    }
+    if (static_cast<unsigned char>(c) < ' ')
+      return std::nullopt;
+    if (c != '\\') {
+      if (unicode_high_surrogate != -1)
+        return std::nullopt;
+      decoded += c;
+      continue;
+    }
+    if (at >= json.size())
+      return std::nullopt;
+    const char escape = json[at++];
+    if (unicode_high_surrogate != -1 && escape != 'u')
+      return std::nullopt;
+    switch (escape) {
+    case 'n':
+      decoded += '\n';
+      break;
+    case 't':
+      decoded += '\t';
+      break;
+    case 'r':
+      decoded += '\r';
+      break;
+    case 'b':
+      decoded += '\b';
+      break;
+    case 'f':
+      decoded += '\f';
+      break;
+    case '"':
+    case '\'':
+    case '\\':
+    case '/':
+      decoded += escape;
+      break;
+    case 'u': {
+      std::optional<uint32_t> digits = parse_hex_digits(json, at, 4);
+      if (!digits)
+        return std::nullopt;
+      const uint32_t value = *digits;
+      if (value >= 0xd800 && value <= 0xdbff) {
+        if (unicode_high_surrogate != -1)
+          return std::nullopt;
+        unicode_high_surrogate = static_cast<int>(value);
+      } else if (value >= 0xdc00 && value <= 0xdfff) {
+        if (unicode_high_surrogate == -1)
+          return std::nullopt;
+        const uint32_t code_point =
+            0x10000 + ((static_cast<uint32_t>(unicode_high_surrogate) & 0x3ff) << 10) +
+            (value & 0x3ff);
+        if (!append_utf8(code_point, decoded))
+          return std::nullopt;
+        unicode_high_surrogate = -1;
+      } else {
+        if (unicode_high_surrogate != -1 || !append_utf8(value, decoded))
+          return std::nullopt;
+      }
+      break;
+    }
+    default:
+      return std::nullopt;
+    }
+  }
+  return std::nullopt;
+}
+
+std::optional<std::string> parse_field_name(std::string_view json, size_t &at) {
+  skip_filler(json, at);
+  if (at >= json.size())
+    return std::nullopt;
+
+  if (json[at] == '"' || json[at] == '\'')
+    return parse_quoted_field_name(json, at);
+
+  const size_t name_begin = at;
+  while (at < json.size()) {
+    const unsigned char c = static_cast<unsigned char>(json[at]);
+    const bool identifier_char =
+        (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_';
+    if (!identifier_char)
+      break;
+    ++at;
+  }
+  if (name_begin == at)
+    return std::nullopt;
+  return std::string(json.substr(name_begin, at - name_begin));
+}
+
+bool is_ignored_dbt_strict_top_level_field(std::string_view name) {
+  // The DBT strict pass catches misspelled dbt_guest keys before handoff. The
+  // plugin loader owns its top-level policy fields, so they bypass only this
+  // DBT-specific validation and are still parsed by the plugin layer.
+  return name == "plugins" || name == "require_all_plugins" || name == "required_plugins";
+}
+
+std::string json_without_dbt_strict_ignored_top_level_fields(std::string_view json) {
+  size_t at = 0;
+  skip_filler(json, at);
+  if (at >= json.size() || json[at] != '{')
+    return std::string(json);
+  ++at;
+
+  std::string rewritten = "{";
+  bool first_field = true;
+  while (at < json.size()) {
+    skip_filler(json, at);
+    if (at < json.size() && json[at] == '}')
+      break;
+
+    const size_t field_begin = at;
+    std::optional<std::string> name = parse_field_name(json, at);
+    if (!name)
+      return std::string(json);
+    skip_filler(json, at);
+    if (at >= json.size() || json[at] != ':')
+      return std::string(json);
+    ++at;
+    if (!skip_json_value(json, at))
+      return std::string(json);
+    const size_t field_end = at;
+
+    if (!is_ignored_dbt_strict_top_level_field(*name)) {
+      if (!first_field)
+        rewritten += ",";
+      rewritten.append(json.substr(field_begin, field_end - field_begin));
+      first_field = false;
+    }
+
+    skip_filler(json, at);
+    if (at < json.size() && json[at] == ',')
+      ++at;
+  }
+
+  rewritten += "}";
+  return rewritten;
 }
 
 util::Result validate_guest_device_geometry(const KfdDeviceConfig &device,
@@ -191,8 +450,9 @@ load_dbt_guest_config_from_file(const std::string &path, util::DiagnosticEmitter
   // Simulation configs remain forward-compatible with unknown fields, but a
   // DBT guest block selects execution behavior and must reject misspelled keys
   // instead of silently falling back to the hardware backend.
+  const std::string strict_json = json_without_dbt_strict_ignored_top_level_fields(json.value());
   return with_parsed_simulation_config_json(
-      json.value(), rocjitsu::kEmbeddedSchema, emit_error,
+      strict_json, rocjitsu::kEmbeddedSchema, emit_error,
       [emit_error](const fb::SimulationConfig *config) {
         return dbt_guest_from_fb(config->dbt_guest(), emit_error);
       },

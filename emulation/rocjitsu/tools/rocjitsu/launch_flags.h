@@ -164,6 +164,21 @@ struct LaunchFlags {
           {},
           "Override wait checks: off disables checks, on enables ordinary checks, and all includes "
           "gfx1250 XCNT checks. Not available with --attach"});
+  std::shared_ptr<rjtools::NonEmptyStringFlag> exec_mode =
+      std::make_shared<rjtools::NonEmptyStringFlag>(
+          ucli::FlagInfo{
+              "--exec-mode", {}, "Override exec_mode for this launch: functional or clocked"},
+          "requires functional or clocked");
+  std::shared_ptr<rjtools::StringListFlag> plugin = std::make_shared<rjtools::StringListFlag>(
+      ucli::FlagInfo{"--plugin",
+                     {},
+                     "Require an execution plugin for this launch; config entries provide defaults",
+                     ucli::ValueMode::Required,
+                     "NAME"},
+      "requires a plugin name");
+  std::shared_ptr<rjtools::OptionalUInt32Flag> gpus_per_node =
+      std::make_shared<rjtools::OptionalUInt32Flag>(
+          ucli::FlagInfo{"--gpus-per-node", {}, "Override the emulated GPU count for this launch"});
   std::shared_ptr<rjtools::StringListFlag> option = std::make_shared<rjtools::StringListFlag>(
       ucli::FlagInfo{"--option",
                      {"-o"},
@@ -242,8 +257,8 @@ struct LaunchFlags {
   util::Result register_flags(ucli::Command &command, util::DiagnosticEmitter diagnostic) const {
     if (command
             .add_flags("Simulation configuration",
-                       {config, profile, node, cpu_thread_budget, wait_checking, option,
-                        thread_budget_table},
+                       {config, profile, node, exec_mode, plugin, gpus_per_node, cpu_thread_budget,
+                        wait_checking, option, thread_budget_table},
                        diagnostic)
             .failed() ||
         command
