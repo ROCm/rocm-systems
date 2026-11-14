@@ -54,7 +54,7 @@ class Bench_gfx90a(benchmark_gfx9_base.Bench_gfx9):
         extern "C" __global__ void mfma_f16(int iter, float *dummy)
         {
             vec16<float> result = {0};
-            vec4<__fp16> a;
+            vec4<_Float16> a;
             a[3] = a[2] = a[1] = a[0] = threadIdx.x;
 
             for(int i = 0; i < iter; ++i)
