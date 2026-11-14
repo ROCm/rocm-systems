@@ -169,6 +169,7 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
   uint64_t* barriers;
   uint64_t barrier_next = 0;
   bool skip_fence = false;
+  bool fifoSend = false;
 #if TDM_LL128_ON
   // Read from shmem once here, not per slice: the hot path tests a register.
   bool tdmEnable = false;
@@ -185,6 +186,17 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
 #else
     barrier_sync(15 - group, nthreads);
 #endif
+  }
+
+  // LL128 lines carry per-step flags, so skip waiting on peer stores; connFifo sends keep the fence for the proxy.
+  inline __device__ void stepBarrier() {
+#if RCCL_STORE_FREE_STEP_BARRIER
+    if (!fifoSend) {
+      storeFreeStepBarrier(nthreads, threadsPerBlock, barrier_next, barriers);
+      return;
+    }
+#endif
+    barrier();
   }
 
   int abort = 0;
@@ -535,7 +547,7 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
     nelem = nelem < 0 ? 0 : nelem;
 
     if (SEND) waitSend(divUp(nelem, DataEltPerSlice) * WireWordPerSlice * sizeof(uint64_t));
-    barrier();
+    stepBarrier();
 
     sqtt_marker_enter("PRIM_LL128_DATA_PROCESS");
     nelem -= DataEltPerSlice * warp;
@@ -582,7 +594,7 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
     tdmDrain();
 #endif
 
-    barrier();
+    stepBarrier();
 
     sqtt_marker_exit("PRIM_LL128_DATA_PROCESS");
 
@@ -676,6 +688,9 @@ public:
     loadRecvSync();
     // coverity[var_deref_model:FALSE]
     loadSendSync();
+#if RCCL_STORE_FREE_STEP_BARRIER
+    fifoSend = anySendConnFifo(channel, sendPeers, nsend, connIndexSend);
+#endif
     userRegUsed = (e != nullptr) && (e->regUsed || e->netRegUsed);
     setDataPtrs(inputBuf, outputBuf, e != nullptr ? e->acc : nullptr);
 #if TDM_LL128_ON

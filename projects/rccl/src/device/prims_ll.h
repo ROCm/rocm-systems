@@ -107,6 +107,7 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL, P2p, isNetOffload, Metadata, Pi
 
   uint64_t* barriers;
   uint64_t barrier_next = 0;
+  bool fifoSend = false;
 
   inline __device__ void barrier() {
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
@@ -123,6 +124,17 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL, P2p, isNetOffload, Metadata, Pi
       barrier_sync(15 - group, nthreads);
     }
 #endif
+  }
+
+  // LL lines carry per-step flags, so skip waiting on peer stores; connFifo sends keep the fence for the proxy.
+  inline __device__ void stepBarrier() {
+#if RCCL_STORE_FREE_STEP_BARRIER
+    if (!fifoSend) {
+      storeFreeStepBarrier(nthreads, threadsPerBlock, barrier_next, barriers);
+      return;
+    }
+#endif
+    barrier();
   }
 
   int abort = 0;
@@ -155,14 +167,14 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL, P2p, isNetOffload, Metadata, Pi
       }
       sendConnHead += 1;
     }
-    barrier();
+    stepBarrier();
   }
 
   inline __device__ void incRecv(int i) {
     recvStep[i] += 1;
   }
   inline __device__ void postRecv() {
-    barrier();
+    stepBarrier();
     if (recvConnHeadPtr) STORE(recvConnHeadPtr, recvConnHead += 1);
   }
 
@@ -609,6 +621,9 @@ public:
     loadRecvSync();
     // coverity[var_deref_model:FALSE]
     loadSendSync();
+#if RCCL_STORE_FREE_STEP_BARRIER
+    fifoSend = anySendConnFifo(channel, sendPeers, nsend, connIndexSend);
+#endif
     setDataPtrs(inputBuf, outputBuf, e != nullptr ? e->acc : nullptr);
   }
 
