@@ -34,6 +34,7 @@
 #include <hip/hip_ext.h>
 
 #include <algorithm>
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <type_traits>
@@ -273,22 +274,72 @@ static bool ddaArSplitSmallGrid(unsigned blocks) {
   return blocks <= kDdaArSplitSmallGridBlocks;
 }
 
-// Peer-split grid in `bound`: a warp per (slice, peer) unit, whole slices a block, and the flag bytes.
+// Peer-split grid: the replaced launch's blocks and threads, a warp per unit a block owns on 8 B flag slices.
 // Ranks must agree on it: it sets the wire format.
 static std::pair<dim3, dim3> ddaArLL128SplitGrid(const ncclComm* comm, size_t bytes, rcclDdaLaunchCap bound,
                                                  int* flagBytes = nullptr) {
   const size_t n = (size_t)std::max(comm->nRanks, 2);
   const size_t slices = ddaLL128Slices(bytes / n);
-  auto geom = ddaArFabricLLGrid(comm, slices * (n - 1), kDdaArLL128Threads, kDdaLL128Warp, bound);
-  geom.first.x = (unsigned)std::min<size_t>(geom.first.x, slices);
-  const bool narrow = !ddaArSplitSmallGrid(geom.first.x);
+  size_t blocks = bound.blocks;
+  if (blocks == 0) {
+    blocks = ddaArFabricLLGrid(comm, slices * (n - 1), kDdaArLL128Threads, kDdaLL128Warp, bound).first.x;
+  }
+  blocks = std::max<size_t>(std::min({blocks, slices, (size_t)std::max(comm->ddaFabricMaxBlocks, 1)}), 1);
+  const size_t maxThreads = bound.threads > 0 ? std::min(bound.threads, kDdaArLL128Threads) : kDdaArLL128Threads;
+  const size_t unitThreads = (size_t)kDdaLL128Warp * ((slices + blocks - 1) / blocks) * (n - 1);
+  const size_t threads = std::max<size_t>(std::min(unitThreads, maxThreads) / kDdaLL128Warp, 1) * kDdaLL128Warp;
+  const bool narrow = !ddaArSplitSmallGrid((unsigned)blocks);
   if (narrow) {
-    geom.first.x = (unsigned)std::min<size_t>(geom.first.x, ddaLL128SlicesOf<kDdaLL128FlagBytesNarrow>(bytes / n));
+    blocks = std::min(blocks, ddaLL128SlicesOf<kDdaLL128FlagBytesNarrow>(bytes / n));
   }
   if (flagBytes != nullptr) {
     *flagBytes = narrow ? kDdaLL128FlagBytesNarrow : kDdaLL128FlagBytesWide;
   }
-  return geom;
+  return std::make_pair(dim3((unsigned)blocks), dim3((unsigned)threads));
+}
+
+// The B -> C hand-off: past the small grid, at most 17 slices a block and a unit a warp; else the own-slot path.
+constexpr size_t kDdaArSplitHandoffMaxSlices = 17;
+constexpr size_t kDdaArSplitHandoffMinUnitsPerWarp = 1;
+static_assert(kDdaArSplitHandoffMaxSlices <= dda::common::kDdaArSplitHandoffSlices, "the cap fits the hand-off area");
+
+// Whether a split launch of `slices` slices on `blocks` x `threads` takes the B -> C hand-off.
+static bool ddaArSplitTakesHandoff(int nRanks, size_t slices, unsigned blocks, unsigned threads) {
+  if (ddaArSplitSmallGrid(blocks)) {
+    return false;
+  }
+  const size_t blockSlices = (slices + blocks - 1) / blocks;
+  const size_t warps = (size_t)blocks * (threads / kDdaLL128Warp);
+  return blockSlices <= kDdaArSplitHandoffMaxSlices &&
+         (size_t)(nRanks - 1) * slices >= kDdaArSplitHandoffMinUnitsPerWarp * warps;
+}
+
+// Devices (a bit each, below 64) on which the hand-off kernel of T may use its largest LDS.
+template <typename T>
+std::atomic<uint64_t> ddaArSplitHandoffLdsDevs{0};
+
+// Raises the hand-off kernel's dynamic LDS limit once per device; false (the own-slot path) if the runtime refuses.
+template <typename T>
+static bool ddaArSplitHandoffLdsOk() {
+  int dev = 0;
+  if (cudaGetDevice(&dev) != cudaSuccess) {
+    (void)cudaGetLastError();
+    return false;
+  }
+  const uint64_t devBit = dev < 64 ? uint64_t{1} << dev : 0;
+  if ((ddaArSplitHandoffLdsDevs<T>.load(std::memory_order_acquire) & devBit) != 0) {
+    return true;
+  }
+  const void* kernel =
+    reinterpret_cast<const void*>(&dda::common::ddaAllReduceTwoShotLL128Split<T, kDdaLL128FlagBytesNarrow, true>);
+  const int lds = (int)dda::common::ddaLL128ArSplitSharedBytes(kDdaArLL128Threads, dda::common::kDdaMaxNranks, true);
+  if (cudaFuncSetAttribute(kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, lds) != cudaSuccess) {
+    (void)cudaGetLastError();
+    INFO(NCCL_COLL, "DDA fabric AllReduce LL128 peer-split: no %d B dynamic LDS, no hand-off", lds);
+    return false;
+  }
+  ddaArSplitHandoffLdsDevs<T>.fetch_or(devBit, std::memory_order_release);
+  return true;
 }
 
 // One warp carries one slice, so the grid is sized in slices rather than in
@@ -361,12 +412,16 @@ static ncclResult_t ncclAllReduceDdaFabricLL128TwoShotTyped(const void* sendbuff
   const size_t slices = narrow ? ddaLL128SlicesOf<kDdaLL128FlagBytesNarrow>(shardBytes) : ddaLL128Slices(shardBytes);
   const dim3 grid = geom.first;
   const dim3 block = geom.second;
+  // Past the small grid the flag is narrow, so the hand-off runs only with the narrow flag.
+  const bool handoff = narrow && ddaArSplitTakesHandoff(nRanks, slices, grid.x, block.x) && ddaArSplitHandoffLdsOk<T>();
   const int wire = split ? dda::common::kDdaLL128WireAsync : ddaArLL128Wire(comm, bytes);
   const size_t lds =
-    split ? dda::common::ddaLL128ArSplitSharedBytes(block.x, nRanks) : ddaArLL128SharedBytes(wire, block.x);
-  const DdaArLL128Kernel<T> kernel = narrow ? &dda::common::ddaAllReduceTwoShotLL128Split<T, kDdaLL128FlagBytesNarrow> :
-                                     split  ? &dda::common::ddaAllReduceTwoShotLL128Split<T> :
-                                              ddaArLL128TwoShotKernel<T>(nRanks, wire);
+    split ? dda::common::ddaLL128ArSplitSharedBytes(block.x, nRanks, handoff) : ddaArLL128SharedBytes(wire, block.x);
+  const DdaArLL128Kernel<T> kernel =
+    handoff ? &dda::common::ddaAllReduceTwoShotLL128Split<T, kDdaLL128FlagBytesNarrow, true> :
+    narrow  ? &dda::common::ddaAllReduceTwoShotLL128Split<T, kDdaLL128FlagBytesNarrow> :
+    split   ? &dda::common::ddaAllReduceTwoShotLL128Split<T> :
+              ddaArLL128TwoShotKernel<T>(nRanks, wire);
 
   T** peers = reinterpret_cast<T**>(comm->ddaPeerPtrsDev);
   // Same epoch counter every other LL/LL128 tier uses.
@@ -375,8 +430,8 @@ static ncclResult_t ncclAllReduceDdaFabricLL128TwoShotTyped(const void* sendbuff
 
   INFO(NCCL_COLL,
        "DDA fabric AllReduce LL128 two-shot: nRanks=%d bytes=%zu shardBytes=%zu slices=%zu grid=%u block=%u wire=%d "
-       "lds=%zu flag=%dB (%s, bankSize=%zu)",
-       nRanks, bytes, shardBytes, slices, grid.x, block.x, wire, lds, flagBytes,
+       "lds=%zu flag=%dB handoff=%d (%s, bankSize=%zu)",
+       nRanks, bytes, shardBytes, slices, grid.x, block.x, wire, lds, flagBytes, (int)handoff,
        split ? "peer-split" : "warp-per-slice", bankSize);
 
   const dda::common::DdaKernelParams params{comm->abortFlagDev};

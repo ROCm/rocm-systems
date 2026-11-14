@@ -15,6 +15,7 @@
 #include "DeviceTestBase.hpp"
 #include "StreamWaitHelpers.hpp"
 #include "algorithms/dda/all_reduce/all_reduce_dda_ll128_twoshot.h"
+#include "algorithms/dda/fabric/fabric_gpu_barrier.h"
 #include "gtest/gtest.h"
 
 namespace RcclUnitTesting {
@@ -62,6 +63,7 @@ struct Case {
   uint32_t flag = kFlag;  // the epoch the launch takes: kFlag + 1 uses bank 1
   int epochLen = 0;       // epoch cells the launch owns; 0 is one per block
   bool inPlace = false;   // sendbuff == recvbuff
+  bool handoff = false;   // the split's B -> C hand-off through LDS
 };
 
 int epochLen(const Case& c) {
@@ -147,6 +149,27 @@ __global__ void CountResident(int* live, int* most, long long ticks) {
   __syncthreads();
 }
 
+// The split with kFlagBytes, handing B -> C off through LDS (its LDS limit raised first) where c.handoff.
+template <typename T, int kFlagBytes>
+void launchSplit(const Case& c, T** scratch, T* recv, const T* send, uint32_t* epoch, const DdaKernelParams& params,
+                 hipStream_t stream) {
+  const size_t lds = dda::common::ddaLL128ArSplitSharedBytes(c.block, c.nRanks, c.handoff);
+  auto* kernel = c.handoff ? &dda::common::ddaAllReduceTwoShotLL128Split<T, kFlagBytes, true> :
+                             &dda::common::ddaAllReduceTwoShotLL128Split<T, kFlagBytes>;
+  if (c.handoff) {
+    HIP_CHECK(
+      hipFuncSetAttribute(reinterpret_cast<const void*>(kernel), hipFuncAttributeMaxDynamicSharedMemorySize, (int)lds));
+  }
+  hipLaunchKernelGGL(kernel, dim3(c.grid), dim3(c.block), lds, stream, scratch, recv, send, c.shardBytes, c.self,
+                     c.nRanks, epoch, epochLen(c), slicesOf(c.kind, c.shardBytes), bankBytes(c.nRanks, c.shardBytes),
+                     params);
+}
+
+// Whether c's blocks own at most the hand-off area's slices.
+bool handoffFits(const Case& c) {
+  return (slicesOf(c.kind, c.shardBytes) + c.grid - 1) / c.grid <= dda::common::kDdaArSplitHandoffSlices;
+}
+
 template <typename T, int N>
 void launch(const Case& c, T** scratch, T* recv, const T* send, uint32_t* epoch, uint32_t* abortFlag,
             hipStream_t stream) {
@@ -166,15 +189,10 @@ void launch(const Case& c, T** scratch, T* recv, const T* send, uint32_t* epoch,
                          c.nRanks, epoch, epochLen(c), n, bank, params);
       break;
     case Kind::kSplit:
-      hipLaunchKernelGGL((dda::common::ddaAllReduceTwoShotLL128Split<T>), grid, block,
-                         dda::common::ddaLL128ArSplitSharedBytes(c.block, c.nRanks), stream, scratch, recv, send,
-                         c.shardBytes, c.self, c.nRanks, epoch, epochLen(c), n, bank, params);
+      launchSplit<T, kDdaLL128FlagBytesWide>(c, scratch, recv, send, epoch, params, stream);
       break;
     case Kind::kSplitNarrow:
-      hipLaunchKernelGGL((dda::common::ddaAllReduceTwoShotLL128Split<T, kDdaLL128FlagBytesNarrow>), grid, block,
-                         dda::common::ddaLL128ArSplitSharedBytes(c.block, c.nRanks), stream, scratch, recv, send,
-                         c.shardBytes, c.self, c.nRanks, epoch, epochLen(c), slicesOf(c.kind, c.shardBytes), bank,
-                         params);
+      launchSplit<T, kDdaLL128FlagBytesNarrow>(c, scratch, recv, send, epoch, params, stream);
       break;
   }
 }
@@ -510,7 +528,8 @@ class DdaAllReduceFabricLL128TwoShot : public DeviceTestBase {
   Snapshot expectMatchesCoop(const Case& c) {
     SCOPED_TRACE(testing::Message() << c.nRanks << "r kind " << (int)c.kind << " ct " << c.ct << " shard "
                                     << c.shardBytes << " " << c.grid << "x" << c.block << " flag " << c.flag
-                                    << " epochLen " << epochLen(c) << " inPlace " << c.inPlace);
+                                    << " epochLen " << epochLen(c) << " inPlace " << c.inPlace << " handoff "
+                                    << c.handoff);
     Case ref = c;
     ref.kind = Kind::kCoop;
     ref.inPlace = false;
@@ -591,7 +610,7 @@ class DdaAllReduceFabricLL128TwoShot : public DeviceTestBase {
   void expectNarrowMatchesCoop(const Case& c, const char* type) {
     SCOPED_TRACE(testing::Message() << type << " " << c.nRanks << "r narrow shard " << c.shardBytes << " " << c.grid
                                     << "x" << c.block << " flag " << c.flag << " epochLen " << epochLen(c)
-                                    << " inPlace " << c.inPlace);
+                                    << " inPlace " << c.inPlace << " handoff " << c.handoff);
     Case ref = c;
     ref.kind = Kind::kCoop;
     ref.inPlace = false;
@@ -618,7 +637,17 @@ class DdaAllReduceFabricLL128TwoShot : public DeviceTestBase {
     expectEpochAdvanced(c);
   }
 
-  static constexpr size_t kEpochCells = 32;
+  // The 8 B or the narrow split c against the cooperative writer.
+  template <typename T>
+  void expectSplitMatchesCoop(const Case& c, const char* type) {
+    if (c.kind == Kind::kSplitNarrow) {
+      expectNarrowMatchesCoop<T>(c, type);
+    } else {
+      expectMatchesCoop<T>(c);
+    }
+  }
+
+  static constexpr size_t kEpochCells = 64;
   Kind kind_ = Kind::kCoop;
   // Rows and peer lists of publish() calls still in flight on a stream.
   std::vector<std::shared_ptr<void>> latePublishBuffers_;
@@ -666,6 +695,8 @@ const Case kSplitCases[] = {
   {5, 2, 0, Kind::kSplit, 2, 512, kMediumShardBytes, kFlag + 1, 7},
   {8, 5, 8, Kind::kSplit, 2, 512, kMediumShardBytes, kFlag, 0, true},  // in place
   {5, 2, 0, Kind::kSplit, 4, 512, kLargeShardBytes, kFlag + 1, 9, true},
+  {4, 1, 4, Kind::kSplit, 4, 480, kMediumShardBytes},  // 15 and 12 warps a block, as the 4-rank grids at 2 and 4 MiB
+  {4, 2, 4, Kind::kSplit, 16, 384, kMediumShardBytes, kFlag + 1},
 };
 
 // The cooperative two-shot gives the host fold, and the staged writer and the split leave its recvbuff and peer lines.
@@ -712,7 +743,10 @@ TEST_F(DdaAllReduceFabricLL128TwoShot, AbortInTheReduceLeavesNoPartialSum) {
                {{8, 5, 8, Kind::kSplitNarrow, 2, 512, kSmallShardBytes}, 1},
                {{8, 5, 8, Kind::kSplitNarrow, 2, 512, kSmallShardBytes}, 6},
                {{5, 2, 0, Kind::kSplitNarrow, 1, 64, kSmallShardBytes}, 3},
-               {{8, 5, 8, Kind::kSplitNarrow, 8, 512, kLargeShardBytes, kFlag + 1, 12}, 7}};
+               {{8, 5, 8, Kind::kSplitNarrow, 8, 512, kLargeShardBytes, kFlag + 1, 12}, 7},
+               {{8, 5, 8, Kind::kSplit, 2, 512, kSmallShardBytes, kFlag, 0, false, /*handoff=*/true}, 2},
+               {{8, 5, 8, Kind::kSplitNarrow, 2, 512, kSmallShardBytes, kFlag, 0, false, /*handoff=*/true}, 7},
+               {{5, 2, 0, Kind::kSplitNarrow, 2, 64, kMediumShardBytes, kFlag + 1, 0, false, /*handoff=*/true}, 3}};
   for (const auto& cell : cells) {
     const Case& c = cell.c;
     SCOPED_TRACE(testing::Message() << c.nRanks << "r kind " << (int)c.kind << " shard " << c.shardBytes
@@ -731,7 +765,10 @@ TEST_F(DdaAllReduceFabricLL128TwoShot, SplitAbortInTheGatherKeepsMyReducedShard)
   for (const Case& c : {Case{8, 5, 8, Kind::kSplit, 2, 512, kSmallShardBytes},
                         Case{5, 2, 0, Kind::kSplit, 4, 512, kMediumShardBytes, kFlag + 1},
                         Case{8, 5, 8, Kind::kSplitNarrow, 2, 512, kSmallShardBytes},
-                        Case{5, 2, 0, Kind::kSplitNarrow, 4, 512, kMediumShardBytes, kFlag + 1}}) {
+                        Case{5, 2, 0, Kind::kSplitNarrow, 4, 512, kMediumShardBytes, kFlag + 1},
+                        Case{8, 5, 8, Kind::kSplitNarrow, 2, 512, kSmallShardBytes, kFlag, 0, false, /*handoff=*/true},
+                        Case{5, 2, 0, Kind::kSplit, 4, 512, kMediumShardBytes, kFlag + 1, 0, false,
+                             /*handoff=*/true}}) {
     SCOPED_TRACE(testing::Message() << c.nRanks << "r kind " << (int)c.kind << " shard " << c.shardBytes);
     setUpFloat(c);
     const int missing = (c.self + 3) % c.nRanks;
@@ -794,26 +831,37 @@ TEST_F(DdaAllReduceFabricLL128TwoShot, SplitDrainsWhenTheGridIsNotCoResident) {
   ASSERT_EQ(waitStreamBounded(streams[0], kDrainTimeout), hipSuccess) << "the residency probe did not finish";
   const int mostResident = counts.copyTo()[1];
 
-  // The 8 B split, then the narrow one on the next epoch and bank.
-  for (const Kind kind : {Kind::kSplit, Kind::kSplitNarrow}) {
-    SCOPED_TRACE(testing::Message() << "kind " << (int)kind);
+  // The 8 B split, the narrow one, then the narrow one handing off on 64 blocks (17 slices each), each a new epoch.
+  struct Pass {
+    Kind kind;
+    bool handoff;
+    unsigned grid;
+    uint32_t cell;  // every epoch cell before the launch
+  };
+  const Pass passes[] = {{Kind::kSplit, false, c.grid, c.flag - 1}, {Kind::kSplitNarrow, false, c.grid, c.flag},
+                         {Kind::kSplitNarrow, true, 64, c.flag + 1}};
+  for (const Pass& pass : passes) {
+    SCOPED_TRACE(testing::Message() << "kind " << (int)pass.kind << " handoff " << pass.handoff);
     // Host and null-stream work first: between two launches it would queue rank r + 1 behind rank r, which waits on it.
     *abortHost_ = 0;
-    for (DeviceBuffer<uint8_t>& b : recvBufs) {
-      HIP_CHECK(hipMemset(b.ptr, kUntouched, b.count));
+    for (int r = 0; r < kRanks; ++r) {
+      epochs[(size_t)r].copyFrom(std::vector<uint32_t>(kEpochCells, pass.cell));
+      HIP_CHECK(hipMemset(recvBufs[(size_t)r].ptr, kUntouched, recvBufs[(size_t)r].count));
     }
     float** table = reinterpret_cast<float**>(scratchPtrs_->ptr);
     for (int r = 0; r < kRanks; ++r) {
       Case rank = c;
       rank.self = r;
-      rank.kind = kind;
+      rank.kind = pass.kind;
+      rank.handoff = pass.handoff;
+      rank.grid = pass.grid;
       launch<float, 4>(rank, table, reinterpret_cast<float*>(recvBufs[(size_t)r].ptr),
                        reinterpret_cast<const float*>(sendBufs[(size_t)r].ptr), epochs[(size_t)r].ptr, abortDev_,
                        streams[(size_t)r]);
       HIP_CHECK(hipGetLastError());
     }
     const bool drained = drain(streams);
-    EXPECT_TRUE(drained) << "the split did not drain with at most " << mostResident << " of " << c.grid
+    EXPECT_TRUE(drained) << "the split did not drain with at most " << mostResident << " of " << pass.grid
                          << " blocks resident per rank";
     if (!drained) {
       break;  // the abort left this pass's lines and epochs half done
@@ -914,6 +962,50 @@ TEST_F(DdaAllReduceFabricLL128TwoShot, SplitNarrowFlagWrapsAcrossLaunches) {
     cell = c.flag;
   }
   EXPECT_EQ(cell, 2u + kLaunches - 8) << "the run crossed the wrap";
+}
+
+// ---- The split's B -> C hand-off through LDS ----
+
+// Every split case whose blocks fit the hand-off area, with each flag, 18 slices a block and the area's 32 in place.
+TEST_F(DdaAllReduceFabricLL128TwoShot, SplitHandoffMatchesTheHostFold) {
+  // The runtime accepts the limit the launcher raises once per device: a full block and the most ranks.
+  HIP_CHECK(hipFuncSetAttribute(
+    reinterpret_cast<const void*>(&dda::common::ddaAllReduceTwoShotLL128Split<float, kDdaLL128FlagBytesNarrow, true>),
+    hipFuncAttributeMaxDynamicSharedMemorySize,
+    (int)dda::common::ddaLL128ArSplitSharedBytes(dda::common::kDdaLL128ArThreads, dda::common::kDdaMaxNranks, true)));
+  std::vector<Case> cases(std::begin(kSplitCases), std::end(kSplitCases));
+  cases.push_back({8, 5, 8, Kind::kSplit, 64, 512, kLargeShardBytes});
+  cases.push_back({4, 1, 4, Kind::kSplit, 1, 512, 32 * kDdaLL128DataBytesPerSlice, kFlag, 0, true});
+  for (Case c : cases) {
+    c.handoff = true;
+    for (const Kind kind : {Kind::kSplit, Kind::kSplitNarrow}) {
+      c.kind = kind;
+      if (!handoffFits(c)) {
+        continue;
+      }
+      setUpFloat(c);
+      expectSplitMatchesCoop<float>(c, "float");
+      EXPECT_TRUE(recvBuf_->copyTo() == Concat(reduced_)) << "not the host fold";
+    }
+  }
+}
+
+// bf16 against its host fold and fp8 against the cooperative writer, handed off with each flag, in place too.
+TEST_F(DdaAllReduceFabricLL128TwoShot, SplitHandoffMatchesOnBf16AndFp8) {
+  for (Case c : {Case{8, 5, 8, Kind::kSplit, 2, 512, kMediumShardBytes, kFlag + 1},
+                 Case{16, 9, 0, Kind::kSplit, 16, 512, kMediumShardBytes, kFlag, 0, true}}) {
+    c.handoff = true;
+    for (const Kind kind : {Kind::kSplit, Kind::kSplitNarrow}) {
+      c.kind = kind;
+      const auto send = Bf16Messages(c.nRanks, c.shardBytes);
+      setUp(c.nRanks, c.self, c.shardBytes, send, Bf16Reduced(send, c.nRanks, c.shardBytes));
+      expectSplitMatchesCoop<bf16>(c, "bf16");
+      EXPECT_TRUE(recvBuf_->copyTo() == Concat(reduced_)) << "bf16: not the host fold";
+      setUp(c.nRanks, c.self, c.shardBytes, Fp8Rows(c.nRanks, (size_t)c.nRanks * c.shardBytes, 0),
+            Fp8Rows(c.nRanks, c.shardBytes, 5));
+      expectSplitMatchesCoop<dda::common::fp8e4m3>(c, "fp8e4m3");
+    }
+  }
 }
 
 }  // namespace
