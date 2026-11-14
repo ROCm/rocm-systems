@@ -538,15 +538,24 @@ NCCL_DEVICE_INLINE T nccl_ldg(const T* ptr) {
 //
 // DWORDX4 detection replicated from rccl_ptr.h (hip_compat.h must be
 // self-contained and cannot include rccl_ptr.h).
+// Prefers the av builtins, which upstream LLVM also has, over the AMD-LLVM-only global ones, as rccl_ptr.h's
+// RCCL_STORE_B128_SYS does (see there for why).
 #if defined(__HIP_DEVICE_COMPILE__)
-#if (defined(__gfx942__) || defined(__gfx950__)) && __has_builtin(__builtin_amdgcn_global_load_b128) && \
+#if (defined(__gfx942__) || defined(__gfx950__)) && __has_builtin(__builtin_amdgcn_av_load_b128) && \
+  __has_builtin(__builtin_amdgcn_av_store_b128) && !defined(DWORDX4_INTRINSICS_FORCE_OFF)
+#define NCCL_COMPAT_HAVE_DWORDX4 1
+#define NCCL_COMPAT_USE_AV_B128 1
+#elif (defined(__gfx942__) || defined(__gfx950__)) && __has_builtin(__builtin_amdgcn_global_load_b128) && \
   __has_builtin(__builtin_amdgcn_global_store_b128) && !defined(DWORDX4_INTRINSICS_FORCE_OFF)
 #define NCCL_COMPAT_HAVE_DWORDX4 1
+#define NCCL_COMPAT_USE_AV_B128 0
 #else
 #define NCCL_COMPAT_HAVE_DWORDX4 0
+#define NCCL_COMPAT_USE_AV_B128 0
 #endif
 #else
 #define NCCL_COMPAT_HAVE_DWORDX4 0
+#define NCCL_COMPAT_USE_AV_B128 0
 #endif
 
 typedef __attribute__((__vector_size__(4 * sizeof(unsigned int)))) unsigned int nccl_compat_v4u;
@@ -561,7 +570,9 @@ NCCL_DEVICE_INLINE void nccl_st_volatile_v4_u32(void* ptr, uint32_t v0, uint32_t
   u.u32[1] = v1;
   u.u32[2] = v2;
   u.u32[3] = v3;
-#if NCCL_COMPAT_HAVE_DWORDX4
+#if NCCL_COMPAT_USE_AV_B128
+  __builtin_amdgcn_av_store_b128((nccl_compat_v4u_gptr)ptr, u.vec, __MEMORY_SCOPE_SYSTEM);
+#elif NCCL_COMPAT_HAVE_DWORDX4
   __builtin_amdgcn_global_store_b128((nccl_compat_v4u_gptr)ptr, u.vec, "");
 #else
   typedef __attribute__((address_space(1))) uint64_t* u64_gptr_t;
@@ -577,7 +588,9 @@ NCCL_DEVICE_INLINE void nccl_ld_volatile_v4_u32(const void* ptr, uint32_t& v0, u
     nccl_compat_v4u vec;
     uint32_t u32[4];
   } u;
-#if NCCL_COMPAT_HAVE_DWORDX4
+#if NCCL_COMPAT_USE_AV_B128
+  u.vec = __builtin_amdgcn_av_load_b128((nccl_compat_v4u_gptr)ptr, __MEMORY_SCOPE_SYSTEM);
+#elif NCCL_COMPAT_HAVE_DWORDX4
   u.vec = __builtin_amdgcn_global_load_b128((nccl_compat_v4u_gptr)ptr, "");
 #else
   typedef __attribute__((address_space(1))) uint64_t* u64_gptr_t;

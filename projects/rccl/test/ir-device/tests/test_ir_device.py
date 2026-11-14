@@ -21,7 +21,9 @@ symmetric-memory support), GoogleTest SKIPs and exits 0 — without this mapping
 those would misleadingly show as PASSED.
 """
 
+import os
 import re
+import subprocess
 
 import pytest
 
@@ -153,3 +155,65 @@ def test_composite_barrier_session_functional_mpi(run_gin_mpi_gtest):
         "ir_composite_barrier_mpi.log",
     )
     _summarize_gtest(proc, log, "composite barrier functional (2-rank)")
+
+
+# Every device-API helper that does a system-scope 128-bit access. librccl_device.bc covers only
+# the GIN proxy descriptor store: the LL all-to-all and hip_compat helpers are not in its public API.
+_B128_PROBE_SRC = r"""
+#include "nccl.h"
+#include "nccl_device.h"
+extern "C" __global__ void st_volatile(void* p, uint32_t a) { nccl_st_volatile_v4_u32(p, a, a + 1, a + 2, a + 3); }
+extern "C" __global__ void ld_volatile(const void* p, uint32_t* o) {
+  uint32_t a, b, c, d;
+  nccl_ld_volatile_v4_u32(p, a, b, c, d);
+  o[0] = a ^ b ^ c ^ d;
+}
+extern "C" __global__ void lla2a_store(uint32_t* p, uint32_t a) { amdLLA2aStoreLine(p, a, a + 1, a + 2, a + 3); }
+extern "C" __global__ void lla2a_load(const uint32_t* p, uint32_t* o) {
+  uint32_t a, b, c, d;
+  amdLLA2aLoadLine(p, a, b, c, d);
+  o[0] = a ^ b ^ c ^ d;
+}
+"""
+
+_LEGACY_B128 = r"@llvm\.amdgcn\.global\.(?:store|load)\.b128\b"
+
+
+@pytest.mark.ir_device
+def test_b128_accesses_use_upstream_builtins(ir_bitcode, paths, tmp_path):
+    """The device API's 128-bit system-scope accesses use __builtin_amdgcn_av_{store,load}_b128
+    when the compiler has them. The AMD-only llvm.amdgcn.global.{store,load}.b128 they replace
+    abort upstream-LLVM consumers such as Triton, while AMD's LLVM lowers both to the same
+    instructions, so only the IR can tell them apart. Checks librccl_device.bc (the GIN proxy
+    descriptor store) and a probe of the LL all-to-all and hip_compat helpers, which the bitcode
+    does not contain.
+    """
+    has_av = subprocess.run(
+        [paths.AMDCLANGPP, "-x", "hip", "--cuda-device-only", f"--offload-arch={paths.ARCH}", "-E", "-"],
+        input="#if __has_builtin(__builtin_amdgcn_av_store_b128) && __has_builtin(__builtin_amdgcn_av_load_b128)\n"
+        "RCCL_AV_B128_AVAILABLE\n#endif\n",
+        capture_output=True, text=True, check=True,
+    )
+    if "RCCL_AV_B128_AVAILABLE" not in has_av.stdout:
+        pytest.skip(f"compiler lacks __builtin_amdgcn_av_{{store,load}}_b128 for {paths.ARCH}")
+
+    bitcode_ir = subprocess.run([paths.LLVM_DIS, ir_bitcode, "-o", "-"], capture_output=True, text=True, check=True).stdout
+    legacy = sorted(set(re.findall(_LEGACY_B128, bitcode_ir)))
+    assert not legacy, f"{ir_bitcode} still calls the AMD-only {legacy}; use RCCL_STORE_B128_SYS / RCCL_LOAD_B128_SYS"
+    # Not vacuous: the GIN barrier's proxy descriptor writes are 128-bit stores.
+    assert re.search(r"@llvm\.amdgcn\.av\.store\.b128", bitcode_ir), f"no 128-bit system-scope store in {ir_bitcode}"
+
+    src = tmp_path / "b128_probe.hip"
+    src.write_text(_B128_PROBE_SRC)
+    probe = subprocess.run(
+        [paths.AMDCLANGPP, "-x", "hip", "--cuda-device-only", f"--offload-arch={paths.ARCH}", "-O3",
+         "-D__HIP_PLATFORM_AMD__=1", "-DNCCL_DEVICE_PERMIT_EXPERIMENTAL_CODE=1",
+         f"-I{paths.HIPIFY_INC}", f"-I{os.path.join(paths.HIPIFY_INC, 'nccl_device')}", f"-I{paths.GENERATED_INC}",
+         "-emit-llvm", "-S", "-o", "-", str(src)],
+        capture_output=True, text=True,
+    )
+    assert probe.returncode == 0, f"compiling the b128 probe failed:\n{probe.stderr[-2000:]}"
+    legacy = sorted(set(re.findall(_LEGACY_B128, probe.stdout)))
+    assert not legacy, f"the LL all-to-all / hip_compat helpers still call the AMD-only {legacy}"
+    for op in ("store", "load"):
+        assert re.search(rf"@llvm\.amdgcn\.av\.{op}\.b128", probe.stdout), f"no av.{op}.b128 in the helper probe"

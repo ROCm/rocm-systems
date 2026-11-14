@@ -14,7 +14,7 @@
 
 #if NCCL_CHECK_CUDACC
 NCCL_DEVICE_INLINE void amdLLA2aStoreLine(uint32_t* dst, uint32_t a0, uint32_t a1, uint32_t a2, uint32_t a3) {
-#if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
+#if RCCL_HAVE_SYS_B128
   union {
     v4u v;
     uint32_t w[4];
@@ -23,7 +23,7 @@ NCCL_DEVICE_INLINE void amdLLA2aStoreLine(uint32_t* dst, uint32_t a0, uint32_t a
   u.w[1] = a1;
   u.w[2] = a2;
   u.w[3] = a3;
-  __builtin_amdgcn_global_store_b128((v4u_gptr)dst, u.v, RCCL_SYSTEM_SYNCSCOPE);
+  RCCL_STORE_B128_SYS(dst, u.v);
 #else
   __builtin_nontemporal_store(a0, (u32_gptr)dst + 0);
   __builtin_nontemporal_store(a1, (u32_gptr)dst + 1);
@@ -35,12 +35,12 @@ NCCL_DEVICE_INLINE void amdLLA2aStoreLine(uint32_t* dst, uint32_t a0, uint32_t a
 
 NCCL_DEVICE_INLINE void amdLLA2aLoadLine(const uint32_t* src, uint32_t& o0, uint32_t& o1, uint32_t& o2, uint32_t& o3) {
   asm volatile("" ::: "memory");
-#if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
+#if RCCL_HAVE_SYS_B128
   union {
     v4u v;
     uint32_t w[4];
   } u;
-  u.v = __builtin_amdgcn_global_load_b128((v4u_gptr)src, RCCL_SYSTEM_SYNCSCOPE);
+  u.v = RCCL_LOAD_B128_SYS(src);
   o0 = u.w[0];
   o1 = u.w[1];
   o2 = u.w[2];

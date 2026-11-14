@@ -58,6 +58,7 @@ BITCODE = os.path.join(RCCL_BUILD, "lib", "librccl_device.bc")
 HIPIFY_INC = os.path.join(RCCL_BUILD, "hipify", "src", "include")
 GENERATED_INC = os.path.join(RCCL_BUILD, "include")
 AMDCLANGPP = os.path.join(ROCM_PATH, "bin", "amdclang++")
+LLVM_DIS = os.path.join(ROCM_PATH, "llvm", "bin", "llvm-dis")
 TEST_EXE = os.path.join(IR_OUTDIR, "IR_test.exe")
 
 # --- Multi-rank GIN/composite barrier functional test (separate MPI binary) ---
@@ -94,6 +95,24 @@ def _find_gtest_libdir():
     return None
 
 
+def _missing_bitcode_prerequisite():
+    """Return a reason string if librccl_device.bc cannot be emitted here.
+
+    Needs only the toolchain and the hipify-staged headers that a prior RCCL
+    CMake build produces; no GPU or GoogleTest.
+    """
+    if not os.path.isfile(AMDCLANGPP):
+        return f"amdclang++ not found at {AMDCLANGPP} (set ROCM_PATH)"
+    if not os.path.isfile(LLVM_DIS):
+        return f"llvm-dis not found at {LLVM_DIS} (install ROCm llvm tools for IR device tests)"
+    if not os.path.isdir(HIPIFY_INC):
+        return (
+            f"hipify staging dir not found at {HIPIFY_INC} "
+            "(build RCCL once so the staged nccl_device headers exist)"
+        )
+    return None
+
+
 def _missing_prerequisite():
     """Return a human-readable reason string if a prerequisite is missing.
 
@@ -104,16 +123,9 @@ def _missing_prerequisite():
     """
     if not os.path.isfile(IR_TEST_SRC):
         return f"IR_test.cpp not found at {IR_TEST_SRC}"
-    if not os.path.isfile(AMDCLANGPP):
-        return f"amdclang++ not found at {AMDCLANGPP} (set ROCM_PATH)"
-    llvm_dis = os.path.join(ROCM_PATH, "llvm", "bin", "llvm-dis")
-    if not os.path.isfile(llvm_dis):
-        return f"llvm-dis not found at {llvm_dis} (install ROCm llvm tools for IR device tests)"
-    if not os.path.isdir(HIPIFY_INC):
-        return (
-            f"hipify staging dir not found at {HIPIFY_INC} "
-            "(build RCCL once so the staged nccl_device headers exist)"
-        )
+    reason = _missing_bitcode_prerequisite()
+    if reason:
+        return reason
     gtest_inc = os.path.join(GTEST_ROOT, "include")
     if (
         not os.path.isfile(os.path.join(gtest_inc, "gtest", "gtest.h"))
@@ -387,12 +399,27 @@ def ir_test_binary():
 
 
 @pytest.fixture(scope="session")
+def ir_bitcode():
+    """Update librccl_device.bc (no GPU or GoogleTest needed) and return its path."""
+    reason = _missing_bitcode_prerequisite()
+    if reason:
+        pytest.skip(f"IR bitcode tests skipped: {reason}")
+    logger.info("Updating librccl_device.bc at %s (arch=%s)...", BITCODE, ARCH)
+    _build_bitcode()
+    return BITCODE
+
+
+@pytest.fixture(scope="session")
 def paths():
     return SimpleNamespace(
         WORKDIR=WORKDIR,
         RCCL_DIR=RCCL_DIR,
         RCCL_BUILD=RCCL_BUILD,
         ROCM_PATH=ROCM_PATH,
+        AMDCLANGPP=AMDCLANGPP,
+        LLVM_DIS=LLVM_DIS,
+        HIPIFY_INC=HIPIFY_INC,
+        GENERATED_INC=GENERATED_INC,
         ARCH=ARCH,
         GTEST_ROOT=GTEST_ROOT,
         IR_OUTDIR=IR_OUTDIR,
