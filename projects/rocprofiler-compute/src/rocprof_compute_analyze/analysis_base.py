@@ -23,10 +23,7 @@ from utils.logger import (
     demarcate,
 )
 from utils.metrics.expression import build_metric_value_string
-from utils.utils_analysis import (
-    impute_counters_iteration_multiplex,
-    validate_workload,
-)
+from utils.utils_analysis import validate_workload
 from utils.utils_common import (
     PC_SAMPLING_BLOCK_IDS,
     ROOFLINE_PANEL_ID,
@@ -153,12 +150,6 @@ class OmniAnalyze_Base:
 
     def get_socs(self) -> Optional[dict[str, OmniSoC_Base]]:
         return self.__socs
-
-    @demarcate
-    def iteration_multiplex_impute_counters(
-        self, df: pd.DataFrame, policy: str, workload_dir: Path
-    ) -> pd.DataFrame:
-        return impute_counters_iteration_multiplex(df, policy, workload_dir)
 
     @demarcate
     def generate_configs(

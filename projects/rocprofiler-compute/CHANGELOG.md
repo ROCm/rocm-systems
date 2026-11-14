@@ -93,7 +93,11 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Roofline metric ids such as `-b 4.1` now count as selecting roofline, like `-b 4` and `-b roof`. In profile mode they run the roofline benchmark, and in analyze mode they show the roofline section.
 
+* `rocprof-compute profile` collects all counters of a metric in the same replay when they fit, so metric values are more accurate. Profiling can take more replays.
+
 ### Removed
+
+* Removed the "Counter variance corrected" warning and the clamping it reported. Each metric now reads its counters from the same replay, so a counter difference no longer goes negative from replay-to-replay variation.
 
 * Removed the experimental `--gui` and `--tui` analyze modes and the `--random-port` option. Use the default CLI analyze mode for terminal output, or `--output-format db` to explore results in ROCm Optiq.
   * The `dash`, `dash-bootstrap-components`, `dash-svg`, `textual`, and `textual_plotext` dependencies are no longer installed.

@@ -119,6 +119,7 @@
 #include <cstring>
 #include <cmath>
 
+#include "atomic_global_buffers.h"
 #include "mega_kernel_types.h"
 
 // ============================================================================
@@ -138,6 +139,11 @@
 // Architecture Detection Macros
 // ============================================================================
 
+// MI100 (CDNA1): limited feature set; many advanced tests are skipped.
+#if defined(__gfx908__)
+#define ARCH_NAME "MI100 (gfx908/CDNA1)"
+#endif
+
 // MI250/MI200 series (CDNA2)
 #if defined(__gfx90a__)
 #define ARCH_MI250 1
@@ -145,7 +151,6 @@
 #define HAS_HW_FP64_ATOMICS 1
 #define HAS_FP8 0
 #define HAS_ASYNC_LDS 0
-#define HAS_TDM 0
 #endif
 
 // MI300 series (CDNA3)
@@ -155,7 +160,6 @@
 #define HAS_HW_FP64_ATOMICS 1
 #define HAS_FP8 1
 #define HAS_ASYNC_LDS 0  // May have limited support
-#define HAS_TDM 0
 #endif
 
 // MI350 series (CDNA4)
@@ -166,7 +170,6 @@
 #define HAS_FP8 1
 #define HAS_FP6_FP4 1
 #define HAS_ASYNC_LDS 1
-#define HAS_TDM 0  // TDM is gfx1250 only
 #endif
 
 // Strix Point / Strix Halo / Krackan Point (RDNA 3.5, gfx1150/gfx1151/gfx1152)
@@ -176,7 +179,6 @@
 #define HAS_HW_FP64_ATOMICS 0  // APU iGPUs have limited FP64
 #define HAS_FP8 0              // NO FP8 conversion builtins on RDNA 3.5 APU
 #define HAS_ASYNC_LDS 1        // Async LDS supported
-#define HAS_TDM 0              // TDM is gfx1250 only
 #define HAS_AI_ACCELERATORS 0  // Limited AI on APU
 #endif
 
@@ -187,7 +189,6 @@
 #define HAS_HW_FP64_ATOMICS 0  // Consumer GPUs have limited FP64
 #define HAS_FP8 1              // FP8 OCP format supported
 #define HAS_ASYNC_LDS 1        // Async LDS supported
-#define HAS_TDM 0              // TDM is gfx1250 only
 #define HAS_AI_ACCELERATORS 1  // AI accelerators for inference
 #endif
 
@@ -198,7 +199,6 @@
 #define HAS_HW_FP64_ATOMICS 1
 #define HAS_FP8 1
 #define HAS_ASYNC_LDS 1
-#define HAS_TDM 1
 #endif
 
 // Default fallback
@@ -207,7 +207,6 @@
 #define HAS_HW_FP64_ATOMICS 0
 #define HAS_FP8 0
 #define HAS_ASYNC_LDS 0
-#define HAS_TDM 0
 #endif
 
 // ============================================================================
@@ -1745,7 +1744,8 @@ __device__ void test_vmem_operations([[maybe_unused]] float* global_ptr,
     if (surf_obj != 0 && buffer_size > 0) {
         int idx = tid % buffer_size;
         float store_val = (float)tid + 1000.0f;
-        surf1Dwrite(store_val, surf_obj, idx);
+        // surf1Dwrite x coordinate is a byte offset.
+        surf1Dwrite(store_val, surf_obj, idx * (int)sizeof(float));
         tex_store_passed = true;
     }
 #endif
@@ -3162,15 +3162,17 @@ __device__ void test_multicast_load(float* global_mem,
                                     TestResults* results,
                                     int lane_id,
                                     int tid) {
-    // Thread 0 writes a known value to a shared broadcast location
-    if (tid == 0) {
-        global_mem[512] = 99.0f;   // use slot 512 to avoid aliasing with other tests
+    // Each block writes the same value, so no block waits on another block's
+    // store (__syncthreads() is block-local).
+    float* slot = &global_mem[MEGA_KERNEL_MULTICAST_FLOAT_INDEX];
+    if (threadIdx.x == 0) {
+        *slot = 99.0f;
     }
     __syncthreads();
 
     // ALL threads read from the SAME address → potential GL0/GL1 multicast
     // Use a volatile read so the compiler doesn't hoist or collapse loads
-    volatile float bval = ((volatile float*)global_mem)[512];
+    volatile float bval = *(volatile float*)slot;
 
     bool passed = (fabsf(bval - 99.0f) < 0.01f);
     if (lane_id == 0) {
@@ -3618,14 +3620,12 @@ extern "C" __global__ void mega_kernel(
     // 8. Transcendental Functions
     test_transcendental(results, lane_id);
 
-    // 9. Memory Operations (guard with active flag to avoid out-of-bounds access)
+    // Memory ops: VMEM uses output_buffer as scratch, then test_global_memory
+    // writes the pattern the host verifies (out[i] = in[i] * 2 + 1).
     if (active) {
+        test_vmem_operations(output_buffer, results, lane_id, tid, buffer_size, tex_obj,
+                             surf_obj);
         test_global_memory(input_buffer, output_buffer, results, lane_id, tid);
-    }
-
-    // 9.5. VMEM (Vector Memory) Comprehensive Tests
-    if (active) {
-        test_vmem_operations(input_buffer, results, lane_id, tid, buffer_size, tex_obj, surf_obj);
     }
     __syncthreads();
 
@@ -3675,7 +3675,7 @@ extern "C" __global__ void mega_kernel(
     __syncthreads();
 
     // 19. Multicast Load (all threads load same address)
-    test_multicast_load(input_buffer, results, lane_id, tid);
+    test_multicast_load(global_float, results, lane_id, tid);
     __syncthreads();
 
     // Calculate totals on thread 0

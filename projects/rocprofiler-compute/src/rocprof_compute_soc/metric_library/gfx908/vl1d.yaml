@@ -41,7 +41,7 @@ vl1d.cache_bw:
   peak: $max_sclk / 1000 * 64 * $cu_per_gpu
 vl1d.cache_hits:
   name: vL1D Cache Hits
-  formula: SUM(TCP_TOTAL_CACHE_ACCESSES_sum - (TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum)) / SUM($denom)
+  formula: SUM($vl1d_accesses_minus_read_write_misses - $vl1d_atomic_requests) / SUM($denom)
   unit: (Requests + $normUnit)
   description: >-
     The number of cache accesses minus the number of outgoing requests to the L2 cache,
@@ -79,7 +79,7 @@ vl1d.coalescing:
     ideal number of thread-requests per instruction.
 vl1d.hit_rate:
   name: vL1D Cache Hit Rate
-  formula: 100 - 100 * SUM(TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum) / SUM(TCP_TOTAL_CACHE_ACCESSES_sum)
+  formula: 100 - $vl1d_read_write_miss_rate - $vl1d_atomic_miss_rate
   unit: Percent
   description: >-
     The ratio of the number of vL1D cache line requests that hit in vL1D cache over the

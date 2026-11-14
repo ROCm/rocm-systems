@@ -22,6 +22,7 @@ from utils.utils_analysis import (
     check_backends_traced,
     copy_matched_operator_subtree,
     filter_forest_by_backends,
+    impute_counters_iteration_multiplex,
     iter_call_tree_paths,
     process_ml_api_trace_output,
     rollup_node_stats,
@@ -235,15 +236,17 @@ class cli_analysis(OmniAnalyze_Base):
             if args.list_operators is not None:
                 _check_listed_backends(args.list_operators, path_info[0])
                 process_ml_api_trace_output(workload, path_info[0])
-                workload.raw_pmc = file_io.create_df_pmc(
+                workload.raw_pmc, _pass_tables = file_io.create_df_pmc(
                     path_info[0],
                     args.verbose,
                 )
                 if self._profiling_config.get("iteration_multiplexing") is not None:
-                    workload.raw_pmc = self.iteration_multiplex_impute_counters(
-                        workload.raw_pmc,
-                        policy=self._profiling_config["iteration_multiplexing"],
-                        workload_dir=Path(path_info[0]),
+                    workload.raw_pmc, _pass_tables = (
+                        impute_counters_iteration_multiplex(
+                            workload.raw_pmc,
+                            policy=self._profiling_config["iteration_multiplexing"],
+                            workload_dir=Path(path_info[0]),
+                        )
                     )
                 kernel_top_df, dispatch_info_df = file_io.create_df_kernel_top_stats(
                     df_in=workload.raw_pmc,
@@ -264,9 +267,8 @@ class cli_analysis(OmniAnalyze_Base):
                 process_ml_api_trace_output(workload, path_info[0])
                 pmc_group_keys = self.apply_operator_filter(workload, path_info[0])
                 labels = _labels_for_backends(list(workload.operator_patterns))
-                workload.raw_pmc, slot_to_id = file_io.create_df_pmc_with_slot_ids(
-                    path_info[0],
-                    args.verbose,
+                workload.raw_pmc, slot_to_id, workload.pass_tables = (
+                    file_io.create_df_pmc_with_slot_ids(path_info[0], args.verbose)
                 )
                 operator_dispatch_ids = _analyze_ids_from_pmc_group_keys(
                     pmc_group_keys, slot_to_id, labels
@@ -283,16 +285,17 @@ class cli_analysis(OmniAnalyze_Base):
                     "for metric analysis.",
                 )
             else:
-                workload.raw_pmc = file_io.create_df_pmc(
-                    path_info[0],
-                    args.verbose,
+                workload.raw_pmc, workload.pass_tables = file_io.create_df_pmc(
+                    path_info[0], args.verbose
                 )
 
             if self._profiling_config.get("iteration_multiplexing") is not None:
-                workload.raw_pmc = self.iteration_multiplex_impute_counters(
-                    workload.raw_pmc,
-                    policy=self._profiling_config["iteration_multiplexing"],
-                    workload_dir=Path(path_info[0]),
+                workload.raw_pmc, workload.pass_tables = (
+                    impute_counters_iteration_multiplex(
+                        workload.raw_pmc,
+                        policy=self._profiling_config["iteration_multiplexing"],
+                        workload_dir=Path(path_info[0]),
+                    )
                 )
 
             kernel_top_df, dispatch_info_df = file_io.create_df_kernel_top_stats(

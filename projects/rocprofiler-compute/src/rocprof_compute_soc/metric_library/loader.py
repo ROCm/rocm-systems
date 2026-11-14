@@ -23,7 +23,7 @@ METRIC_LIBRARY_PARENT_ARCH: Dict[str, Optional[str]] = {
     "gfx115x": None,
     "gfx1250": None,
 }
-VARIABLES_FILENAME = "variables.yaml"
+COLLECTABLES_FILENAME = "collectables.yaml"
 SETS_FILENAME = "sets.yaml"
 # Top-level key for the list of parent ids to drop in a child file.
 REMOVE_KEY = "remove"
@@ -169,18 +169,18 @@ def _kind(value: object) -> str:
 
 
 class MetricLibrary:
-    """One arch's metrics, built-in variables and sets."""
+    """One arch's metrics, collectables and sets."""
 
     def __init__(
         self,
         arch: str,
         metrics: Dict[str, Dict[str, Any]],
-        variables: Dict[str, Dict[str, Any]],
+        collectables: Dict[str, Dict[str, Any]],
         sets: Dict[str, Dict[str, Any]],
     ) -> None:
         self.arch = arch
         self.metrics = metrics
-        self.variables = variables
+        self.collectables = collectables
         self.sets = sets
 
     @classmethod
@@ -190,14 +190,12 @@ class MetricLibrary:
             file_name: load_file(paths)
             for file_name, paths in arch_files(metric_dir, arch).items()
         }
-        variables = documents.pop(VARIABLES_FILENAME, {})
+        collectables = documents.pop(COLLECTABLES_FILENAME, {})
         sets = documents.pop(SETS_FILENAME, {})
         metrics = combine_metric_documents(documents)
-        return cls(canonical_config_arch(arch), metrics, variables, sets)
+        return cls(canonical_config_arch(arch), metrics, collectables, sets)
 
-    def get_counters_for_metrics(
-        self, metric_ids: List[str], gpu_series: str
-    ) -> Set[str]:
+    def get_counters_for_metrics(self, metric_ids: List[str]) -> Set[str]:
         """Return the hardware counters in the formulas and peaks of metric_ids.
 
         Raises ValueError if an id is not a metric of the arch.
@@ -215,5 +213,6 @@ class MetricLibrary:
             for field in COUNTER_EXPRESSION_FIELDS
             if self.metrics[metric_id].get(field) is not None
         ]
-        counters, _ = extract_counters_and_variables("\n".join(expressions), gpu_series)
+        formulas = {name: entry["formula"] for name, entry in self.collectables.items()}
+        counters, _ = extract_counters_and_variables("\n".join(expressions), formulas)
         return counters
