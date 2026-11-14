@@ -274,8 +274,8 @@ INSTANTIATE_TEST_SUITE_P(
     // Two slots: shifting (delta 129) on a 4KB window, and not shifting on a window wide enough for two anyway.
     BlockCase{65536 + 37,  4096,  5, 4, 32,  "two_slot_shift"},
     BlockCase{(1 << 18) + 5, 32768, 0, 0, 32, "two_slot_wide"},
-    // Two slots with each warp's run a whole number of chunks, so the last store is a full chunk: the tryTdmCopy
-    // shape (16KB windows, 8KB chunks, head 0, delta 0), and shifting by delta 1 (head 256B, 7936B chunks).
+    // Two slots with each warp's run a whole number of chunks, so the last store is a full chunk: the aligned
+    // tryTdmCopy shape (16KB windows, 8KB chunks, head 0, delta 0), and shifting by delta 1 (head 256B, 7936B chunks).
     BlockCase{65536,       32768, 0, 128, 64, "two_slot_whole_chunks"},
     BlockCase{256 + 2 * 7936, 16384, 1, 128, 32, "two_slot_shift_whole_chunks"},
     // One slot with dst 16B past a boundary (delta 240: head 240B, 3840B chunks on a 4KB window), the run
