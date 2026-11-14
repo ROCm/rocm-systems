@@ -2657,10 +2657,19 @@ ncclResult_t rcclSelectReduceScatter(struct ncclComm* comm, const void* sendbuff
           decision->algo = RCCL_DDA_FABRIC_VMM;
           return rcclSelectDone("RS", query, decision);
         }
-      } else if (rsDdaVmmMax != 0 && totalBytes <= rsDdaVmmMax &&
-                 ncclReduceScatterDdaIpcEligible(comm, sendbuff, recvbuff, recvcount, datatype, op)) {
-        decision->algo = RCCL_DDA_IPC;
-        return rcclSelectDone("RS", query, decision);
+      } else {
+        const size_t rsDdaLLMax = rcclDdaLLThresholdTab(archTable, ncclFuncReduceScatter, comm->nRanks);
+        if (rsDdaLLMax > 0 && totalBytes <= rsDdaLLMax &&
+            ncclReduceScatterDdaFabricLLEligible(comm, sendbuff, recvbuff, recvcount, datatype, op)) {
+          decision->algo = RCCL_DDA_FABRIC_LL;
+          decision->protocol = NCCL_PROTO_LL;
+          return rcclSelectDone("RS", query, decision);
+        }
+        if (rsDdaVmmMax != 0 && totalBytes <= rsDdaVmmMax &&
+            ncclReduceScatterDdaIpcEligible(comm, sendbuff, recvbuff, recvcount, datatype, op)) {
+          decision->algo = RCCL_DDA_IPC;
+          return rcclSelectDone("RS", query, decision);
+        }
       }
     }
 

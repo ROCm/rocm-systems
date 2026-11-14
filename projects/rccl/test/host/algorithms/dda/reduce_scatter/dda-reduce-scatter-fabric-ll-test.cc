@@ -95,16 +95,26 @@ TEST_F(DdaReduceScatterFabricLLMicrotest, Eligible_NeedsCommAndBootstrap) {
   EXPECT_FALSE(Eligible(4));
 }
 
-TEST_F(DdaReduceScatterFabricLLMicrotest, Eligible_NeedsHandlerScratchAndPeersButNotBarrier) {
+TEST_F(DdaReduceScatterFabricLLMicrotest, Eligible_NeedsHandlerScratchPeersAndEpochButNotBarrier) {
   comm().ddaFabricBarrierState = nullptr;
   EXPECT_TRUE(Eligible(4));
-  for (int missing = 0; missing < 3; ++missing) {
+  for (int missing = 0; missing < 4; ++missing) {
     mock_.setFabricResourcesPresent(true);
     comm().ddaFabricMemHandler = missing == 0 ? nullptr : comm().ddaFabricMemHandler;
     comm().ddaScratch = missing == 1 ? nullptr : comm().ddaScratch;
     comm().ddaPeerPtrsDev = missing == 2 ? nullptr : comm().ddaPeerPtrsDev;
+    comm().ddaLLEpochDev = missing == 3 ? nullptr : comm().ddaLLEpochDev;
     EXPECT_FALSE(Eligible(4)) << "missing resource " << missing;
   }
+}
+
+// The IPC DDA scratch (gfx950) carries the LL kernel too: an IPC handler stands in for the fabric one.
+TEST_F(DdaReduceScatterFabricLLMicrotest, Eligible_IpcHandlerStandsInForFabric) {
+  comm().ddaFabricMemHandler = nullptr;
+  comm().ddaIpcMemHandler = reinterpret_cast<ncclIpcMemHandler*>(0x9);
+  EXPECT_TRUE(Eligible(4));
+  comm().ddaLLEpochDev = nullptr;
+  EXPECT_FALSE(Eligible(4));
 }
 
 TEST_F(DdaReduceScatterFabricLLMicrotest, Eligible_ZeroCountRejects) {
@@ -199,7 +209,7 @@ TEST_F(DdaReduceScatterFabricLLMicrotest, Launch_FourAndEightRanksUnrolledOthers
   }
 }
 
-// A block per 256 packets (2 KiB) of the shard, capped at ddaFabricMaxBlocks and at the epoch cells.
+// A block per 256 packets (2 KiB) of the shard, capped at ddaFabricMaxBlocks (unset on IPC) and at the epoch cells.
 TEST_F(DdaReduceScatterFabricLLMicrotest, Launch_GridFollowsShardPacketsWithinCaps) {
   EXPECT_EQ(RunOne(1, ncclFloat16).grid.x, 1u);
   EXPECT_EQ(RunOne(512).grid.x, 1u);
@@ -209,7 +219,8 @@ TEST_F(DdaReduceScatterFabricLLMicrotest, Launch_GridFollowsShardPacketsWithinCa
   comm().ddaFabricMaxBlocks = 6;
   EXPECT_EQ(RunOne(1u << 18).grid.x, 6u);
   comm().ddaFabricMaxBlocks = 0;
-  EXPECT_EQ(RunOne(1u << 18).grid.x, 1u);
+  comm().ddaLLEpochLen = 40;
+  EXPECT_EQ(RunOne(1u << 18).grid.x, 40u);
   comm().ddaFabricMaxBlocks = 256;
   comm().ddaLLEpochLen = 9;
   EXPECT_EQ(RunOne(1u << 18).grid.x, 9u);

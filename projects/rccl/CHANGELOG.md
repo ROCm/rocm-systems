@@ -81,6 +81,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 * The gfx1250 AllToAll DDA fabric LL128 kernel caps its grid at the communicator's CU budget, so every block is co-resident. On DPX, the tuning table caps it further at 72 blocks from 256 KiB to 16 MiB total.
 * gfx1250 AllToAll skips the DDA fabric paths under `NCCL_CHECK_MODE` or on a suspended or revoked communicator, and takes the next path.
 * `RCCL_DDA_LL128_A2A_THREADS` now defaults to `0`, which reads the arch table and keeps 256 threads where it sets none. It still overrides the table with a multiple of 32 up to 1024 (it took a multiple of 16 before). `RCCL_DDA_LL128_A2A_MAXBPP` (was default `64`) and `RCCL_DDA_LL128_A2A_LPB` (was default `4`) are now unset by default, so each warp moves one slice and the block budget alone caps the grid; when set, MAXBPP caps the blocks per peer column and LPB sizes them from 120-byte lines, both within the block budget.
+* On gfx950, single-node 8-rank sum `ncclReduceScatter` up to 512 KiB (float, half and bfloat16) runs the DDA LL kernel over the IPC scratch instead of the DDA-IPC kernel, whose two GPU barriers it replaces with per-line flags. 1-4 KiB drops from about 8.0 to 4.8 us eager and from 7.0 to 3.3 us in graph capture. `RCCL_DDA_LL_THRESHOLD=0` or `RCCL_DDA_LL=0` restores DDA-IPC.
 
 ### Removed
 
