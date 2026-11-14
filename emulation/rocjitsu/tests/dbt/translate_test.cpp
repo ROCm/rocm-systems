@@ -1016,8 +1016,8 @@ TEST(BinaryTranslatorE2E, LegacyAtomicMinMaxRequiresSemanticExpansion) {
 }
 
 TEST(BinaryTranslatorE2E, LegacyCacheAtomicAddRequiresSemanticExpansion) {
-  // Input denormals flush on CDNA4 and survive on RDNA4. A direct opcode
-  // substitution changes 0x00000001 + 0x00000001 from zero to 0x00000002.
+  // CDNA4 and RDNA4 L2 F32 ADD both keep input denormals, but their FLAT-to-LDS
+  // denormal policies still differ, so the instruction needs an expansion.
   const std::array<uint32_t, 2> atomic =
       cdna4::build_flat(cdna4::kFlatAtomicAddF32Flat,
                         {.seg = 2, .sc0 = 1, .addr = 4, .data = 0, .saddr = 4, .vdst = 6});
@@ -1027,6 +1027,29 @@ TEST(BinaryTranslatorE2E, LegacyCacheAtomicAddRequiresSemanticExpansion) {
   AmdGpuCodeObject source(image.data(), image.size());
   ASSERT_TRUE(source.is_valid());
   BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA4);
+  const TranslatedCodeObject result = translator.translate(source);
+  std::string diagnostics;
+  for (const TranslationDiagnostic &diagnostic : result.diagnostics)
+    diagnostics += diagnostic.message + "\n";
+  EXPECT_FALSE(result.ok());
+  EXPECT_EQ(result.elf_bytes, image);
+  EXPECT_TRUE(has_error_containing(result, DiagnosticKind::ExpandMissing,
+                                   "no expansion rule is implemented"))
+      << diagnostics;
+}
+
+TEST(BinaryTranslatorE2E, Gfx950CacheAtomicAddToGfx1100RequiresSemanticExpansion) {
+  // MI350X L2 F32 ADD keeps input denormals (0x00000001 + 0x00000001 = 0x00000002);
+  // the RDNA3 L2 F32 ADD policy flushes them to zero, so direct substitution is refused.
+  const std::array<uint32_t, 2> atomic =
+      cdna4::build_flat(cdna4::kFlatAtomicAddF32Flat,
+                        {.seg = 2, .sc0 = 1, .addr = 4, .data = 0, .saddr = 4, .vdst = 6});
+  const std::array<uint32_t, 3> words = {atomic[0], atomic[1], 0xbf810000u};
+  const std::vector<uint8_t> image =
+      make_minimal_amdgpu_elf_with_descriptor_after_text({words[0], words[1], words[2]});
+  AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+  BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA3);
   const TranslatedCodeObject result = translator.translate(source);
   std::string diagnostics;
   for (const TranslationDiagnostic &diagnostic : result.diagnostics)

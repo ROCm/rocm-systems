@@ -317,10 +317,13 @@ public:
   /// Separate LDS and L2 modes cover FLAT requests routed to either pipeline.
   uint32_t atomic_denorm_mode = 3;
   uint32_t atomic_lds_denorm_mode = 3;
-  /// Older MIN/MAX compare flushed inputs but return the original selected bits.
-  /// They also propagate signaling NaNs instead of treating them as missing numbers.
+  /// Current emulator policy for older MIN/MAX: compare flushed inputs, return the original
+  /// selected bits and propagate signaling NaNs instead of treating them as missing numbers.
   bool atomic_legacy_minmax = true;
-  /// L2 ADD on qualified RDNA4 targets selects the incoming NaN first.
+  /// MI300A/MI350X MIN/MAX select flushed inputs but still return a quieted
+  /// signaling NaN, the data operand's first.
+  bool atomic_minmax_snan_wins = false;
+  /// L2 ADD on qualified RDNA4 and CDNA3/4 targets selects the incoming NaN first.
   /// Indexed LDS has an independent source-first policy.
   bool atomic_source_nan_first = false;
   bool lds_dword_extend = false; ///< Narrow LDS transfers extend to a full DWORD per lane.

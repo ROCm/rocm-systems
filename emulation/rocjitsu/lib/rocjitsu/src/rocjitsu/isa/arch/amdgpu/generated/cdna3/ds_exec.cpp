@@ -554,7 +554,7 @@ void DsCmpstF32Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_op = amdgpu::AtomicOp::FCMPSWAP;
   d->atomic_denorm_mode = wf.fp_denorm_mode_f32();
   d->atomic_lds_denorm_mode = wf.fp_denorm_mode_f32();
-  d->atomic_legacy_minmax = true;
+  d->atomic_legacy_minmax = false;
   d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
@@ -587,7 +587,8 @@ void DsMinF32Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_op = amdgpu::AtomicOp::FMIN;
   d->atomic_denorm_mode = wf.fp_denorm_mode_f32();
   d->atomic_lds_denorm_mode = wf.fp_denorm_mode_f32();
-  d->atomic_legacy_minmax = true;
+  d->atomic_legacy_minmax = false;
+  d->atomic_minmax_snan_wins = true;
   d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
@@ -616,7 +617,8 @@ void DsMaxF32Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_op = amdgpu::AtomicOp::FMAX;
   d->atomic_denorm_mode = wf.fp_denorm_mode_f32();
   d->atomic_lds_denorm_mode = wf.fp_denorm_mode_f32();
-  d->atomic_legacy_minmax = true;
+  d->atomic_legacy_minmax = false;
+  d->atomic_minmax_snan_wins = true;
   d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
@@ -647,7 +649,7 @@ void DsAddF32Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_op = amdgpu::AtomicOp::FADD;
   d->atomic_denorm_mode = 2;
   d->atomic_lds_denorm_mode = wf.fp_denorm_mode_f32();
-  d->atomic_legacy_minmax = true;
+  d->atomic_legacy_minmax = false;
   d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
@@ -1325,7 +1327,7 @@ void DsCmpstRtnF32Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_op = amdgpu::AtomicOp::FCMPSWAP;
   d->atomic_denorm_mode = wf.fp_denorm_mode_f32();
   d->atomic_lds_denorm_mode = wf.fp_denorm_mode_f32();
-  d->atomic_legacy_minmax = true;
+  d->atomic_legacy_minmax = false;
   d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
@@ -1359,7 +1361,8 @@ void DsMinRtnF32Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_op = amdgpu::AtomicOp::FMIN;
   d->atomic_denorm_mode = wf.fp_denorm_mode_f32();
   d->atomic_lds_denorm_mode = wf.fp_denorm_mode_f32();
-  d->atomic_legacy_minmax = true;
+  d->atomic_legacy_minmax = false;
+  d->atomic_minmax_snan_wins = true;
   d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
@@ -1389,7 +1392,8 @@ void DsMaxRtnF32Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_op = amdgpu::AtomicOp::FMAX;
   d->atomic_denorm_mode = wf.fp_denorm_mode_f32();
   d->atomic_lds_denorm_mode = wf.fp_denorm_mode_f32();
-  d->atomic_legacy_minmax = true;
+  d->atomic_legacy_minmax = false;
+  d->atomic_minmax_snan_wins = true;
   d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
@@ -1449,7 +1453,7 @@ void DsAddRtnF32Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_op = amdgpu::AtomicOp::FADD;
   d->atomic_denorm_mode = 2;
   d->atomic_lds_denorm_mode = wf.fp_denorm_mode_f32();
-  d->atomic_legacy_minmax = true;
+  d->atomic_legacy_minmax = false;
   d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
@@ -2239,7 +2243,7 @@ void DsCmpstF64Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_op = amdgpu::AtomicOp::FCMPSWAP;
   d->atomic_denorm_mode = wf.fp_denorm_mode_f16_f64();
   d->atomic_lds_denorm_mode = wf.fp_denorm_mode_f16_f64();
-  d->atomic_legacy_minmax = true;
+  d->atomic_legacy_minmax = false;
   d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
@@ -2276,7 +2280,8 @@ void DsMinF64Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_op = amdgpu::AtomicOp::FMIN;
   d->atomic_denorm_mode = 3;
   d->atomic_lds_denorm_mode = wf.fp_denorm_mode_f16_f64();
-  d->atomic_legacy_minmax = true;
+  d->atomic_legacy_minmax = false;
+  d->atomic_minmax_snan_wins = true;
   d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
@@ -2307,7 +2312,8 @@ void DsMaxF64Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_op = amdgpu::AtomicOp::FMAX;
   d->atomic_denorm_mode = 3;
   d->atomic_lds_denorm_mode = wf.fp_denorm_mode_f16_f64();
-  d->atomic_legacy_minmax = true;
+  d->atomic_legacy_minmax = false;
+  d->atomic_minmax_snan_wins = true;
   d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
@@ -2494,7 +2500,7 @@ void DsAddF64Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_op = amdgpu::AtomicOp::FADD;
   d->atomic_denorm_mode = 3;
   d->atomic_lds_denorm_mode = 3;
-  d->atomic_legacy_minmax = true;
+  d->atomic_legacy_minmax = false;
   d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
@@ -3068,7 +3074,7 @@ void DsCmpstRtnF64Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_op = amdgpu::AtomicOp::FCMPSWAP;
   d->atomic_denorm_mode = wf.fp_denorm_mode_f16_f64();
   d->atomic_lds_denorm_mode = wf.fp_denorm_mode_f16_f64();
-  d->atomic_legacy_minmax = true;
+  d->atomic_legacy_minmax = false;
   d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
@@ -3106,7 +3112,8 @@ void DsMinRtnF64Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_op = amdgpu::AtomicOp::FMIN;
   d->atomic_denorm_mode = 3;
   d->atomic_lds_denorm_mode = wf.fp_denorm_mode_f16_f64();
-  d->atomic_legacy_minmax = true;
+  d->atomic_legacy_minmax = false;
+  d->atomic_minmax_snan_wins = true;
   d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
@@ -3138,7 +3145,8 @@ void DsMaxRtnF64Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_op = amdgpu::AtomicOp::FMAX;
   d->atomic_denorm_mode = 3;
   d->atomic_lds_denorm_mode = wf.fp_denorm_mode_f16_f64();
-  d->atomic_legacy_minmax = true;
+  d->atomic_legacy_minmax = false;
+  d->atomic_minmax_snan_wins = true;
   d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
@@ -3271,7 +3279,7 @@ void DsAddRtnF64Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_op = amdgpu::AtomicOp::FADD;
   d->atomic_denorm_mode = 3;
   d->atomic_lds_denorm_mode = 3;
-  d->atomic_legacy_minmax = true;
+  d->atomic_legacy_minmax = false;
   d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();

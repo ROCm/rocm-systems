@@ -671,6 +671,11 @@ protected:
     return GetParam() == ROCJITSU_CODE_ARCH_CDNA5 || GetParam() == ROCJITSU_CODE_ARCH_RDNA4;
   }
 
+  // Float atomic rules captured on MI300A (gfx942) and MI350X (gfx950).
+  bool measured_cdna() const {
+    return GetParam() == ROCJITSU_CODE_ARCH_CDNA3 || GetParam() == ROCJITSU_CODE_ARCH_CDNA4;
+  }
+
   bool compare_first() const {
     return GetParam() == ROCJITSU_CODE_ARCH_CDNA1 || GetParam() == ROCJITSU_CODE_ARCH_CDNA2 ||
            GetParam() == ROCJITSU_CODE_ARCH_CDNA3 || GetParam() == ROCJITSU_CODE_ARCH_CDNA4 ||
@@ -882,8 +887,38 @@ protected:
 
   uint32_t execute_memory(bool buffer, uint32_t old_bits, uint32_t source_bits, uint32_t mode,
                           bool comparison = false, uint32_t compare_bits = 0) {
+    return static_cast<uint32_t>(execute_memory_words(
+        memory_words(buffer, comparison), buffer, old_bits, source_bits, mode, 4, compare_bits));
+  }
+
+  // CDNA3/4 BUFFER or GLOBAL atomic with an explicit opcode and width.
+  uint64_t execute_cdna_memory(uint16_t opcode, bool buffer, uint64_t old_bits,
+                               uint64_t source_bits, uint32_t mode, uint32_t width) {
+    std::array<uint32_t, 2> words{};
+    if (GetParam() == ROCJITSU_CODE_ARCH_CDNA4)
+      words = buffer
+                  ? cdna4::build_mubuf(
+                        opcode, {.sc0 = 1, .vaddr = 4, .vdata = 0, .srsrc = 1, .soffset = 128})
+                  : cdna4::build_flat(
+                        opcode, {.seg = 2, .sc0 = 1, .addr = 4, .data = 0, .saddr = 4, .vdst = 6});
+    else
+      words = buffer
+                  ? cdna3::build_mubuf(
+                        opcode, {.sc0 = 1, .vaddr = 4, .vdata = 0, .srsrc = 1, .soffset = 128})
+                  : cdna3::build_flat(
+                        opcode, {.seg = 2, .sc0 = 1, .addr = 4, .data = 0, .saddr = 4, .vdst = 6});
+    return execute_memory_words({words[0], words[1], 0}, buffer, old_bits, source_bits, mode,
+                                width);
+  }
+
+  uint64_t execute_memory_words(const std::array<uint32_t, 3> &words, bool buffer,
+                                uint64_t old_bits, uint64_t source_bits, uint32_t mode,
+                                uint32_t width, uint32_t compare_bits = 0) {
     constexpr uint32_t kAddress = 0x1000;
-    memory_.write32(kAddress, old_bits);
+    if (width == 8)
+      memory_.write64(kAddress, old_bits);
+    else
+      memory_.write32(kAddress, static_cast<uint32_t>(old_bits));
     wave_->set_mode_raw(mode);
     const uint32_t scalar_base = wave_->sgpr_alloc().base;
     compute_unit_->write_sgpr(scalar_base + 4, kAddress);
@@ -899,12 +934,13 @@ protected:
     else if (arch_is_cdna_4_or_lower(GetParam()))
       word3 = kGfx9DataFormat32;
     compute_unit_->write_sgpr(scalar_base + 7, word3);
-    compute_unit_->write_vgpr(base_, 0, source_bits);
-    compute_unit_->write_vgpr(base_ + 1, 0, compare_bits);
+    compute_unit_->write_vgpr(base_, 0, static_cast<uint32_t>(source_bits));
+    compute_unit_->write_vgpr(base_ + 1, 0,
+                              width == 8 ? static_cast<uint32_t>(source_bits >> 32) : compare_bits);
     compute_unit_->write_vgpr(base_ + 4, 0, 0);
     compute_unit_->write_vgpr(base_ + 5, 0, 0);
     compute_unit_->write_vgpr(base_ + 6, 0, 0xbad);
-    const std::array<uint32_t, 3> words = memory_words(buffer, comparison);
+    compute_unit_->write_vgpr(base_ + 7, 0, 0xbad);
     std::unique_ptr<Instruction> instruction(decode_valid(*decoder_, words.data()));
     if (!instruction) {
       ADD_FAILURE() << "Invalid memory atomic";
@@ -919,9 +955,18 @@ protected:
     amdgpu::GlobalMemPipeline pipeline(nullptr, &cache_);
     pipeline.issue(instruction.release(), *wave_);
     // MI100 floating atomics only support the non-returning encoding.
-    const auto expected =
-        GetParam() == ROCJITSU_CODE_ARCH_CDNA1 ? (buffer ? source_bits : 0xbadu) : old_bits;
-    EXPECT_EQ(compute_unit_->read_vgpr(base_ + (buffer ? 0 : 6), 0), expected);
+    const uint32_t returned = base_ + (buffer ? 0 : 6);
+    if (GetParam() == ROCJITSU_CODE_ARCH_CDNA1) {
+      EXPECT_EQ(compute_unit_->read_vgpr(returned, 0),
+                buffer ? static_cast<uint32_t>(source_bits) : 0xbadu);
+    } else {
+      EXPECT_EQ(compute_unit_->read_vgpr(returned, 0), static_cast<uint32_t>(old_bits));
+      if (width == 8) {
+        EXPECT_EQ(compute_unit_->read_vgpr(returned + 1, 0), static_cast<uint32_t>(old_bits >> 32));
+      }
+    }
+    if (width == 8)
+      return memory_.read64(kAddress);
     return memory_.read32(kAddress);
   }
 
@@ -1024,7 +1069,7 @@ TEST_P(AtomicPolicyExecutionTest, DsScalarDenormalModesAndRounding) {
       EXPECT_EQ(restored_round, host_round);
     }
   }
-  EXPECT_EQ(execute_ds(18, 1, 0x3f800000, 0, 0), modern_policy() ? 0u : 1u);
+  EXPECT_EQ(execute_ds(18, 1, 0x3f800000, 0, 0), modern_policy() || measured_cdna() ? 0u : 1u);
   EXPECT_EQ(execute_ds(18, 0, 0x80000000, 0, 0xf0), 0x80000000u);
   EXPECT_EQ(execute_ds(19, 0x80000000, 0, 0, 0xf0), 0u);
   EXPECT_EQ(execute_ds(21, 0x7fc00002, 0x7fc00004, 0, 0), 0x7fc00004u);
@@ -1038,7 +1083,7 @@ TEST_P(AtomicPolicyExecutionTest, DsScalarDenormalModesAndRounding) {
     EXPECT_EQ(execute_ds(opcode, 0x7fc00002, 0x3f800000, 0, 0), 0x3f800000u);
     EXPECT_EQ(execute_ds(opcode, 0x3f800000, 0x7fc00004, 0, 0), 0x3f800000u);
     EXPECT_EQ(execute_ds(opcode, 0x7fc00002, 0x7fc00004, 0, 0),
-              modern_policy() ? 0x7fc00004u : 0x7fc00002u);
+              modern_policy() || measured_cdna() ? 0x7fc00004u : 0x7fc00002u);
     EXPECT_EQ(execute_ds(opcode, 0x7fc00002, 0x7f800004, 0, 0), 0x7fc00004u);
   }
 }
@@ -1072,10 +1117,48 @@ TEST_P(AtomicPolicyExecutionTest, DsMinMaxBothNanPayloads) {
       for (bool quiet_source : {false, true}) {
         const uint64_t old_bits = old_nan | (quiet_old ? quiet : 0);
         const uint64_t source_bits = source_nan | (quiet_source ? quiet : 0);
-        const uint64_t selected =
-            modern_policy() || (quiet_old && !quiet_source) ? source_bits : old_bits;
+        // MI300A/MI350X: a signaling data operand first, then signaling memory.
+        uint64_t selected = source_bits;
+        if (measured_cdna())
+          selected = quiet_source && !quiet_old ? old_bits : source_bits;
+        else if (!modern_policy() && !(quiet_old && !quiet_source))
+          selected = old_bits;
         EXPECT_EQ(execute_ds(opcode, old_bits, source_bits, 0, 0xf0, width), selected | quiet);
       }
+    }
+  }
+}
+
+// MI300A (gfx942) and MI350X (gfx950) probe lanes at the MODE shown, identical on both chips
+// and in the returning forms: MIN/MAX return the winner among the operands flushed by the
+// MODE input control. NaN priority matches the L2 atomics.
+TEST_P(AtomicPolicyExecutionTest, DsMinMaxMatchMi300aAndMi350x) {
+  if (!measured_cdna())
+    GTEST_SKIP() << "Captured on MI300A and MI350X";
+  struct Row {
+    uint16_t opcode;
+    uint32_t width, mode;
+    uint64_t memory, data, expected;
+  };
+  constexpr std::array<Row, 10> kRows = {{
+      {cdna4::kDsMaxF32Ds, 4, 0x300, 0x00000001, 0x80000000, 0x00000000},        // lane 54
+      {cdna4::kDsMinF32Ds, 4, 0x300, 0x00000001, 0x00000001, 0x00000000},        // lane 106
+      {cdna4::kDsMinF32Ds, 4, 0x300, 0x80000001, 0x00000000, 0x80000000},        // lane 14
+      {cdna4::kDsMaxF32Ds, 4, 0x310, 0x00000001, 0x00000000, 0x00000001},        // lane 2
+      {cdna4::kDsMaxF32Ds, 4, 0x320, 0x00000001, 0x00000000, 0x00000000},        // lane 2
+      {cdna4::kDsMaxF32Ds, 4, 0x300, 0xffc00000, 0x7fc00000, 0x7fc00000},        // lane 594
+      {cdna4::kDsMaxF32Ds, 4, 0x300, 0x7fa12345, 0x7f800001, 0x7fc00001},        // lane 648
+      {cdna4::kDsMinF64Ds, 8, 0x300, 0x8000000000000001, 0, 0x8000000000000000}, // lane 14
+      {cdna4::kDsMaxF64Ds, 8, 0x300, 0xfff8000000000000, 0x7ff8000000000000,
+       0x7ff8000000000000}, // lane 517
+      {cdna4::kDsMaxF64Ds, 8, 0x300, 0x7ff4000012345678, 0x7ff0000000000001,
+       0x7ff8000000000001}, // lane 564
+  }};
+  for (const Row &row : kRows) {
+    for (uint16_t opcode : {row.opcode, static_cast<uint16_t>(row.opcode + 32)}) {
+      SCOPED_TRACE(testing::Message() << std::hex << "opcode=" << opcode << " mode=" << row.mode
+                                      << " memory=" << row.memory << " data=" << row.data);
+      EXPECT_EQ(execute_ds(opcode, row.memory, row.data, 0, row.mode, row.width), row.expected);
     }
   }
 }
@@ -1369,12 +1452,13 @@ TEST_P(AtomicPolicyExecutionTest, MemoryAddDenormalsAndHostRounding) {
     GTEST_SKIP() << "No F32 atomic add on this ISA";
   for (bool buffer : {false, true}) {
     for (uint32_t mode : {0u, 0xffu}) {
-      // Physical RDNA3 L2 chooses memory's NaN; RDNA4 chooses the operand.
+      // Physical RDNA3 L2 chooses memory's NaN; RDNA4, MI300A and MI350X choose the operand.
+      const bool source_nan = GetParam() == ROCJITSU_CODE_ARCH_RDNA4 || measured_cdna();
       for (uint32_t old_nan : {0x7f800002u, 0x7fc00002u})
-        for (uint32_t source_nan : {0xff800004u, 0xffc00004u})
-          EXPECT_EQ(execute_memory(buffer, old_nan, source_nan, mode),
-                    (GetParam() == ROCJITSU_CODE_ARCH_RDNA4 ? source_nan : old_nan) | 0x400000u);
-      EXPECT_EQ(execute_memory(buffer, 1, 1, mode), modern_policy() ? 2u : 0u);
+        for (uint32_t source_nan_bits : {0xff800004u, 0xffc00004u})
+          EXPECT_EQ(execute_memory(buffer, old_nan, source_nan_bits, mode),
+                    (source_nan ? source_nan_bits : old_nan) | 0x400000u);
+      EXPECT_EQ(execute_memory(buffer, 1, 1, mode), modern_policy() || measured_cdna() ? 2u : 0u);
       EXPECT_EQ(execute_memory(buffer, 0x00800001, 0x80800000, mode), 1u);
       for (int host_round : {FE_TONEAREST, FE_UPWARD, FE_DOWNWARD, FE_TOWARDZERO}) {
         const int saved_round = std::fegetround();
@@ -1384,6 +1468,53 @@ TEST_P(AtomicPolicyExecutionTest, MemoryAddDenormalsAndHostRounding) {
         std::fesetround(saved_round);
         EXPECT_EQ(result, 0x3f800000u);
         EXPECT_EQ(restored_round, host_round);
+      }
+    }
+  }
+}
+
+// MI300A (gfx942) and MI350X (gfx950) probe lanes, identical on both chips: L2 float atomics
+// never flush and the data operand's NaN wins. Each row holds at all 21 captured MODEs and in
+// the BUFFER and GLOBAL, returning and non-returning captures.
+TEST_P(AtomicPolicyExecutionTest, MemoryFloatAtomicsMatchMi300aAndMi350x) {
+  if (!measured_cdna())
+    GTEST_SKIP() << "Captured on MI300A and MI350X";
+  struct Row {
+    uint16_t opcode; ///< Shared by MUBUF and FLAT.
+    uint32_t width;
+    uint64_t memory, data, expected;
+  };
+  constexpr std::array<Row, 13> kRows = {{
+      {cdna4::kFlatAtomicAddF32Flat, 4, 0x00800000, 0x807fffff, 0x00000001}, // lane 160
+      {cdna4::kFlatAtomicAddF32Flat, 4, 0x00000001, 0x00000001, 0x00000002}, // lane 106
+      {cdna4::kFlatAtomicAddF32Flat, 4, 0x7f800001, 0x7fc00000, 0x7fc00000}, // lane 584
+      {cdna4::kFlatAtomicAddF32Flat, 4, 0x7fc00000, 0x7f800001, 0x7fc00001}, // lane 635
+      {cdna4::kFlatAtomicAddF64Flat, 8, 0x7ff0000000000001, 0x7ff8000000000000,
+       0x7ff8000000000000},                       // lane 507
+      {cdna4::kFlatAtomicAddF64Flat, 8, 1, 1, 2}, // lane 92
+      {cdna4::kFlatAtomicMaxF64Flat, 8, 0xfff8000000000000, 0x7ff8000000000000,
+       0x7ff8000000000000},                       // lane 517
+      {cdna4::kFlatAtomicMaxF64Flat, 8, 1, 0, 1}, // lane 2
+      {cdna4::kFlatAtomicMaxF64Flat, 8, 0x7ff4000012345678, 0x7ff0000000000001,
+       0x7ff8000000000001}, // lane 564
+      {cdna4::kFlatAtomicMinF64Flat, 8, 0x7ff0000000000001, 0x7ff8000000000000,
+       0x7ff8000000000001},                                                         // lane 507
+      {cdna4::kFlatAtomicMinF64Flat, 8, 1, 0x8000000000000000, 0x8000000000000000}, // lane 47
+      {cdna4::kFlatAtomicPkAddF16Flat, 4, 0x7c013800, 0x7e00bc00, 0x7e00b800},      // lane 265
+      {cdna4::kFlatAtomicPkAddBf16Flat, 4, 0x7f813f00, 0x7fc0bf80, 0x7fc0bf00},     // lane 211
+  }};
+  for (const Row &row : kRows) {
+    for (bool buffer : {false, true}) {
+      // CDNA3 has GLOBAL_ATOMIC_PK_ADD_BF16 only.
+      if (buffer && row.opcode == cdna4::kFlatAtomicPkAddBf16Flat &&
+          GetParam() == ROCJITSU_CODE_ARCH_CDNA3)
+        continue;
+      for (uint32_t mode : {0x300u, 0x3f0u}) {
+        SCOPED_TRACE(testing::Message()
+                     << std::hex << "opcode=" << row.opcode << " buffer=" << buffer
+                     << " mode=" << mode << " memory=" << row.memory << " data=" << row.data);
+        EXPECT_EQ(execute_cdna_memory(row.opcode, buffer, row.memory, row.data, mode, row.width),
+                  row.expected);
       }
     }
   }
