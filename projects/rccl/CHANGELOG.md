@@ -37,6 +37,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 * `RCCL_DDA_BC_MAX_BLOCKS` (default `0`): lowers the per-rank block budget of the DDA `ncclBroadcast` kernels below the CU-derived cap (`RCCL_DDA_FABRIC_MAXBLOCKS` or the CU count); it cannot raise it. `0` keeps the cap.
 * `RCCL_DDA_LL_BC_THREADS` (default `256`): block size of the DDA LL one-shot `ncclBroadcast` kernel. Values that are not a multiple of the wave size or exceed 512 fall back to the default.
 * `RCCL_DDA_BC_ALLOW_IPC` (default `0`): development only. Lets the `ncclBroadcast` selector also consider the DDA LL tier on the non-fabric (IPC) path. Not intended for production use.
+* `rccl_ep` internode dispatch and combine: a group spanning several nodes keeps load/store access within each node and reaches the other nodes with `ncclSend`/`ncclRecv`, so any RCCL network transport works. New C entry points `ep_create_nodes`, `ep_inter_counts` and `ep_inter_bind`; up to 64 ranks, 16 per node and 16 nodes.
 
 ### Changed
 * An empty `NCCL_GIN_TYPE` now counts as unset for the in-tree GIN backends, as it already did for the backend filter: Anvil SDMA initializes and `RCCL_GIN_TYPE_LIST` applies. Previously an empty value turned Anvil SDMA off.
@@ -81,6 +82,8 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 * The gfx1250 AllToAll DDA fabric LL128 kernel caps its grid at the communicator's CU budget, so every block is co-resident. On DPX, the tuning table caps it further at 72 blocks from 256 KiB to 16 MiB total.
 * gfx1250 AllToAll skips the DDA fabric paths under `NCCL_CHECK_MODE` or on a suspended or revoked communicator, and takes the next path.
 * `RCCL_DDA_LL128_A2A_THREADS` now defaults to `0`, which reads the arch table and keeps 256 threads where it sets none. It still overrides the table with a multiple of 32 up to 1024 (it took a multiple of 16 before). `RCCL_DDA_LL128_A2A_MAXBPP` (was default `64`) and `RCCL_DDA_LL128_A2A_LPB` (was default `4`) are now unset by default, so each warp moves one slice and the block budget alone caps the grid; when set, MAXBPP caps the blocks per peer column and LPB sizes them from 120-byte lines, both within the block budget.
+* `rccl_ep` C entry points check their arguments and fail with one `[rccl_ep] <fn>: <reason>` line before launching anything or changing any state, and `ep_create` fails on every rank of the group when any rank's device is not wave64. The standalone `rccl_ep` build compiles gfx9 targets only, and configuring with `ENABLE_RCCL_EP_TESTS` but without `ENABLE_MPI_TESTS` is an error instead of silently building no `rccl_ep` tests.
+* `rccl_ep` dispatch no longer synchronizes the host between pushing tokens and compacting them, the routing plan scans each destination with a block of waves instead of one wave, and combine reduces a token's rows lane-parallel. Results are bit-identical; the EP window is 256 bytes smaller.
 
 ### Removed
 
@@ -121,6 +124,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 * Fixed communicator initialization leaking memory when connecting rings or trees failed.
 * Fixed communicator creation with socket encryption (`ncclSetEncryption`) failing intermittently on 2-rank communicators, including one process driving 2 GPUs, and on any communicator with `NCCL_BOOTSTRAP_BIDIR_ALLGATHER=0`. The TLS server sent session tickets that bootstrap clients which only write never read, so closing such a socket reset the connection and dropped the bootstrap data still queued. RCCL no longer sends TLS session tickets.
 * Fixed a Socket communicator's cached "no GPU Direct RDMA" verdict being reused by later IB communicators on the same GPU, including `ncclCommSplit` children.
+* Fixed `rccl_ep` combine reading top-k weights past the EP window for a top-k id of `num_experts` or more. Such ids are now ignored on that path, as on every other.
 
 ### Known issues
 

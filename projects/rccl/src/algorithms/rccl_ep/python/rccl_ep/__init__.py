@@ -19,6 +19,11 @@ __all__ = ["ElasticBuffer", "EventOverlap", "EPHandle", "topk_idx_t"]
 
 topk_idx_t = torch.int64
 
+# The fp8 payload dtypes dispatch accepts: 1-byte e4m3, in whichever variant the caller's GPU uses.
+_FP8_DTYPES = tuple(getattr(torch, n) for n in ("float8_e4m3fn", "float8_e4m3fnuz")
+                    if hasattr(torch, n))
+_INT_DTYPES = (torch.int8, torch.int16, torch.int32, torch.int64, torch.uint8)
+
 _LIB = None
 
 
@@ -63,9 +68,13 @@ def _lib():
         # The unique id is an opaque binary blob, not a string: raw pointers
         # rather than c_char_p, which is for NUL-terminated data.
         lib.ep_create.argtypes = [I, I, ctypes.c_void_p, I, I, I]
+        # ep_create with the ranks per node: ep_create is ep_create_nodes(..., num_ranks).
+        lib.ep_create_nodes.restype = ctypes.c_void_p
+        lib.ep_create_nodes.argtypes = [I, I, ctypes.c_void_p, I, I, I, I]
         lib.ep_configure.argtypes = [ctypes.c_void_p, I, I]
         lib.ep_window_bytes.restype = ctypes.c_size_t
         lib.ep_window_bytes.argtypes = [ctypes.c_void_p]
+        lib.ep_destroy.restype = None
         lib.ep_destroy.argtypes = [ctypes.c_void_p]
         # Every data-path entry takes the caller's stream as a trailing argument.
         lib.ep_barrier.argtypes = [ctypes.c_void_p, P]
@@ -80,6 +89,10 @@ def _lib():
                                           I, I, P, I, I, P, P, I, P]
         lib.ep_combine.restype = I
         lib.ep_combine.argtypes = [ctypes.c_void_p, P, P, P, P, P, I, P, I, P, P, I, P, P, I, P]
+        # Internode: the host int32 arrays are raw pointers, and ep_inter_bind,
+        # which only records its arguments for the next call, takes no stream.
+        lib.ep_inter_counts.argtypes = [ctypes.c_void_p, P, ctypes.c_void_p, P]
+        lib.ep_inter_bind.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, P, I]
         lib.ep_get_unique_id.argtypes = [ctypes.c_void_p]
         lib.ep_unique_id_size.restype = I
         _LIB = lib
@@ -90,7 +103,19 @@ def _ptr(t: Optional[torch.Tensor]) -> int:
     return 0 if t is None else t.data_ptr()
 
 
-def _bias(t: Optional[torch.Tensor], name: str) -> Optional[torch.Tensor]:
+def _desc(t) -> str:
+    """An argument as a ValueError describes it: dtype and shape for a tensor, else its type."""
+    return f"{t.dtype} {tuple(t.shape)}" if isinstance(t, torch.Tensor) else type(t).__name__
+
+
+def _on_current_device(t: torch.Tensor, name: str):
+    dev = torch.device("cuda", torch.cuda.current_device())
+    if t.device != dev:
+        raise ValueError(f"{name} is on {t.device}, not the current device {dev}")
+
+
+def _bias(t: Optional[torch.Tensor], name: str, num_tokens: int,
+          hidden: int) -> Optional[torch.Tensor]:
     """Normalise a combine bias to what the kernel actually reads.
 
     combine.h loads bias0/bias1 as a dense bf16 [num_tokens, hidden] at 16-byte
@@ -99,11 +124,16 @@ def _bias(t: Optional[torch.Tensor], name: str) -> Optional[torch.Tensor]:
     raises anywhere, they just read from the wrong offsets. Copy the first and
     refuse the second, rather than converting silently -- a down-cast to bf16
     would change the result the strict-order accumulation exists to make exact.
+    A bias of any other shape would be read past its end.
     """
     if t is None:
         return None
     if t.dtype != torch.bfloat16:
         raise TypeError(f"{name} must be bfloat16, got {t.dtype}")
+    if tuple(t.shape) != (num_tokens, hidden):
+        raise ValueError(f"{name} must be [{num_tokens}, {hidden}] (num_tokens, hidden), "
+                         f"got {tuple(t.shape)}")
+    _on_current_device(t, name)
     return t.contiguous()
 
 
@@ -144,6 +174,8 @@ class EPHandle:
     def __init__(self):
         self.topk_idx = None                            # as passed, or a copy
         self.topk_idx_i32 = None
+        # The dispatch's expert count, which a cached replay takes from here.
+        self.num_experts = None
         self.slot = None                                # routing plan
         self.send_list = None                           # dense slot -> token
         self.sendc = None
@@ -161,10 +193,34 @@ class EPHandle:
         self.expert_alignment = 1
         self.expanded = False
         self.num_expanded_rows = 0
+        # Internode only: this plan's [sendc] and [recvc] on the host, from the count
+        # exchange; every dispatch or combine on the handle binds them (_inter_bind).
+        self.inter_sendc = None
+        self.inter_recvc = None
+
+
+def _node_size(group) -> int:
+    """The ranks per node of `group`, which is the whole group on one node. Nodes are grouped by
+    NCCL_HOSTID, which is what RCCL itself groups ranks by, else the host name; they must be
+    equal in size, each holding contiguous ranks (ValueError otherwise). Collective over group."""
+    world = dist.get_world_size(group)
+    if world == 1:
+        return 1
+    import socket
+    hosts = [None] * world
+    dist.all_gather_object(hosts, os.environ.get("NCCL_HOSTID") or socket.gethostname(), group)
+    if len(set(hosts)) == 1:
+        return world
+    node_size = hosts.count(hosts[0])
+    if (world % node_size != 0 or len(set(hosts)) != world // node_size
+            or any(hosts[r] != hosts[r - r % node_size] for r in range(world))):
+        raise ValueError(f"the internode path needs equal nodes, each holding contiguous "
+                         f"ranks; this communicator's nodes are {hosts}")
+    return node_size
 
 
 class ElasticBuffer:
-    """Intranode expert-parallel dispatch/combine buffer.
+    """Expert-parallel dispatch/combine buffer.
 
     Implemented: BF16 and FP8 dispatch, expanded (grouped-by-expert) dispatch
     with alignment and zero padding, cached replay, both combine reduction
@@ -172,9 +228,21 @@ class ElasticBuffer:
     inherent here, since routing uses no atomics and no arrival-order
     dependence, so repeated runs are byte-identical.
 
-    Scale-up only: every peer must be reachable by load and store, so a
-    communicator spanning more than one node is rejected at construction.
+    Within a node every peer is reached by load and store. A group that spans
+    several nodes takes the internode path, which reaches peers on other nodes
+    by RCCL send/recv, as one flat (1, num_ranks) domain. Nodes are grouped by
+    NCCL_HOSTID, else the host name; they must be equal in size, each holding
+    contiguous ranks. allow_hybrid_mode is accepted and does not change this: a
+    group that spans nodes takes the same direct path with or without it.
+
+    Tokens are 2-D: dispatch takes x as [num_tokens, hidden] (pass x.view(-1, hidden)
+    for [batch, seq, hidden] activations) and combine returns that shape. A top-k id
+    of -1 or outside [0, num_experts) is ignored. An expert repeated within one token's
+    top-k is delivered in each of its slots.
     """
+
+    # Single node unless the constructor finds that the group spans nodes.
+    internode = False
 
     def __init__(self, group, num_max_tokens_per_rank, hidden,
                  num_experts=None, num_topk=None,
@@ -188,24 +256,20 @@ class ElasticBuffer:
         #
         # hybrid mode: on a single node there is no scale-out leg, so
         # num_scaleout_ranks is 1 and every hybrid branch degenerates to the
-        # pure scale-up path we implement. Accepting it is therefore honest
-        # HERE and only here -- across nodes it would silently do the wrong
-        # thing, so the single-node property is verified rather than assumed.
-        if allow_hybrid_mode:
-            import socket
-            hosts = [None] * dist.get_world_size(group)
-            dist.all_gather_object(hosts, socket.gethostname(), group)
-            if len(set(hosts)) != 1:
-                raise NotImplementedError(
-                    f"allow_hybrid_mode needs a scale-out leg, which this path does "
-                    f"not provide, and this communicator spans {len(set(hosts))} "
-                    f"nodes. It is accepted only on a single node, where it "
-                    f"degenerates to the scale-up path.")
+        # pure scale-up path. Across nodes this package has only the direct
+        # internode path, which the group takes with or without the flag, and
+        # the domain stays (1, num_ranks).
+        #
         # multiple reduction: the expanded combine has to apply the per-rank
         # grouped reduction before sending, instead of shipping one row per
         # (token, expert). Implemented; see combine().
         self.allow_multiple_reduction = bool(allow_multiple_reduction)
         self.allow_hybrid_mode = bool(allow_hybrid_mode)
+        # The internode path is taken when the group spans more than one node.
+        # ep_configure checks node_size against RCCL's LSA team, which RCCL
+        # builds from the same host grouping.
+        node_size = _node_size(group)
+        self.internode = node_size < dist.get_world_size(group)
 
         self.group = group
         self.rank_idx = dist.get_rank(group)
@@ -241,9 +305,10 @@ class ElasticBuffer:
         t = t.cpu()
         raw = bytes(bytearray(t.tolist()))
 
-        self._h = lib.ep_create(self.rank_idx, self.num_ranks, raw,
-                                num_max_tokens_per_rank, hidden,
-                                torch.cuda.current_device())
+        # node_size is the whole group on a single node, where ep_create_nodes is ep_create.
+        self._h = lib.ep_create_nodes(self.rank_idx, self.num_ranks, raw,
+                                      num_max_tokens_per_rank, hidden,
+                                      torch.cuda.current_device(), node_size)
         if not self._h:
             raise RuntimeError("ep_create failed")
 
@@ -282,6 +347,44 @@ class ElasticBuffer:
             self._h = None
 
     # ---- internals -------------------------------------------------------
+    def _check_tokens(self, x, x_sf, topk_idx, topk_weights):
+        """Check a dispatch's inputs before anything is allocated or launched; ValueError if not.
+
+        Tokens are 2-D: x is [num_tokens, hidden] on the current device (a caller holding
+        [batch, seq, hidden] passes x.view(-1, hidden)), bf16, or for an fp8 dispatch a 1-byte
+        float8 e4m3 dtype with x_sf a floating-point [num_tokens, ceil(hidden / 128)] tensor, one
+        scale per 128-element block, which the kernels take as float32. topk_idx is an integer
+        [num_tokens, num_topk] tensor on that device, and topk_weights, when given, has its shape."""
+        if not isinstance(x, torch.Tensor) or x.dim() != 2 or x.shape[1] != self.hidden:
+            raise ValueError(f"x must be 2-D [num_tokens, {self.hidden}] (reshape with "
+                             f".view(-1, {self.hidden})), got {_desc(x)}")
+        _on_current_device(x, "x")
+        n = x.shape[0]
+        if x_sf is None:
+            if x.dtype != torch.bfloat16:
+                raise ValueError(f"x must be bfloat16, or an (fp8 x, x_sf) tuple, got {x.dtype}")
+        else:
+            if x.dtype not in _FP8_DTYPES:
+                raise ValueError(f"an fp8 dispatch's x must be one of {_FP8_DTYPES}, got {x.dtype}")
+            sf_shape = (n, (self.hidden + 127) // 128)
+            if (not isinstance(x_sf, torch.Tensor) or not x_sf.is_floating_point()
+                    or tuple(x_sf.shape) != sf_shape):
+                raise ValueError(f"x_sf must be a floating-point {list(sf_shape)} tensor, one scale "
+                                 f"per 128-element block (other scale layouts are not supported), "
+                                 f"got {_desc(x_sf)}")
+            _on_current_device(x_sf, "x_sf")
+        if (not isinstance(topk_idx, torch.Tensor) or topk_idx.dim() != 2 or topk_idx.shape[0] != n
+                or topk_idx.dtype not in _INT_DTYPES):
+            raise ValueError(f"topk_idx must be an integer [{n}, num_topk] tensor, "
+                             f"got {_desc(topk_idx)}")
+        _on_current_device(topk_idx, "topk_idx")
+        if topk_weights is not None:
+            if (not isinstance(topk_weights, torch.Tensor)
+                    or tuple(topk_weights.shape) != tuple(topk_idx.shape)):
+                raise ValueError(f"topk_weights must have topk_idx's shape "
+                                 f"{tuple(topk_idx.shape)}, got {_desc(topk_weights)}")
+            _on_current_device(topk_weights, "topk_weights")
+
     def _configure(self, num_experts, num_topk):
         key = (num_experts, num_topk)
         if self._configured == key:
@@ -294,6 +397,26 @@ class ElasticBuffer:
             raise RuntimeError(f"ep_configure({num_experts}, {num_topk}) failed")
         self._configured = key
         self.num_experts, self.num_topk = num_experts, num_topk
+
+    def _inter_counts(self, h, stream):
+        """Internode: exchange the plan's send counts (ep_inter_counts, one host sync) and
+        keep [sendc, recvc] on the handle, where every later call on it binds them."""
+        R = self.num_ranks
+        out = (ctypes.c_int32 * (2 * R))()
+        if _lib().ep_inter_counts(self._h, h.sendc.data_ptr(), ctypes.addressof(out), stream) != 0:
+            raise RuntimeError("ep_inter_counts failed")
+        h.inter_sendc = (ctypes.c_int32 * R)(*out[:R])
+        h.inter_recvc = (ctypes.c_int32 * R)(*out[R:])
+
+    def _inter_bind(self, h):
+        """Internode: bind the handle's counts and plan for the dispatch or combine that
+        follows -- the transport posts receives of exactly these sizes."""
+        if not self.internode:
+            return
+        if _lib().ep_inter_bind(self._h, ctypes.addressof(h.inter_sendc),
+                                ctypes.addressof(h.inter_recvc), h.send_list.data_ptr(),
+                                h.num_tokens) != 0:
+            raise RuntimeError("ep_inter_bind failed")
 
     @property
     def num_local_experts(self):
@@ -338,7 +461,16 @@ class ElasticBuffer:
         lib = _lib()
         use_fp8 = isinstance(x, tuple)
         x, x_sf = x if use_fp8 else (x, None)
+        if use_fp8 and x_sf is None:
+            raise ValueError("an (x, x_sf) tuple is an fp8 dispatch and needs x_sf; pass a bf16 x "
+                             "on its own")
         cached = handle is not None
+        # The plan, the window and recv_src_metadata are all laid out at the constructor's
+        # capacity, so a per-call value can only repeat it.
+        if (num_max_tokens_per_rank is not None
+                and num_max_tokens_per_rank != self.num_max_tokens_per_rank):
+            raise ValueError(f"num_max_tokens_per_rank={num_max_tokens_per_rank}, but this buffer "
+                             f"was built for {self.num_max_tokens_per_rank}; leave it out")
 
         # `async_with_compute_stream` and `allocate_on_comm_stream` are accepted
         # for API compatibility and ignored: the data path is synchronous on the
@@ -358,8 +490,14 @@ class ElasticBuffer:
                 raise ValueError(
                     "cached dispatch replays the handle's routing; pass "
                     "topk_idx=None")
+            if num_experts is not None and num_experts != handle.num_experts:
+                raise ValueError(f"cached dispatch: num_experts={num_experts}, but the handle "
+                                 f"was built with {handle.num_experts}; leave it out to reuse "
+                                 f"the handle's")
             topk_idx = handle.topk_idx
-            num_experts = self.num_experts
+            # The expert count it was planned for, not the buffer's latest: another layer's
+            # dispatch may have configured the window for its own since.
+            num_experts = handle.num_experts
             # Same reasoning for the alignment it was built with.
             expert_alignment = handle.expert_alignment
         if num_experts is None:
@@ -368,6 +506,9 @@ class ElasticBuffer:
                 raise ValueError(
                     "num_experts must be passed to dispatch() or to the "
                     "ElasticBuffer constructor")
+        if topk_idx is None:
+            raise ValueError("an uncached dispatch needs topk_idx")
+        self._check_tokens(x, x_sf, topk_idx, topk_weights)
 
         num_tokens = x.shape[0]
         # The plan tensors are shaped (num_ranks, plan-time num_tokens) and the
@@ -392,8 +533,14 @@ class ElasticBuffer:
         x_sf = x_sf.contiguous().float() if x_sf is not None else None
         # Cached: the handle's own int32 copy, so dispatch pushes exactly the
         # routing combine() will reduce against. Also saves a cast per replay.
-        ti32 = (handle.topk_idx_i32 if cached
-                else topk_idx.to(torch.int32).contiguous())
+        if cached:
+            ti32 = handle.topk_idx_i32
+        elif topk_idx.dtype == torch.int64:
+            # The cast would truncate an id past the int32 range onto a valid expert; clamped
+            # first, every id outside [0, num_experts) stays outside it, which the library ignores.
+            ti32 = topk_idx.clamp(-1, num_experts).to(torch.int32).contiguous()
+        else:
+            ti32 = topk_idx.to(torch.int32).contiguous()
         tw = (topk_weights if topk_weights is not None
               else torch.zeros(topk_idx.shape, dtype=torch.float32,
                                device=x.device)).to(torch.float32).contiguous()
@@ -407,6 +554,7 @@ class ElasticBuffer:
             h = EPHandle()
             h.num_tokens = num_tokens
             h.expert_alignment = expert_alignment
+            h.num_experts = num_experts
             # do_handle_copy is observable: callers compare data_ptr identity.
             h.topk_idx = topk_idx.clone() if do_handle_copy else topk_idx
             h.topk_idx_i32 = ti32
@@ -418,10 +566,18 @@ class ElasticBuffer:
                            send_list.data_ptr(), sendc.data_ptr(), stream) != 0:
                 raise RuntimeError("ep_plan failed")
             h.slot, h.sendc, h.send_list = slot, sendc, send_list
+            if self.internode:
+                self._inter_counts(h, stream)
 
         cap = self.num_ranks * self.num_max_tokens_per_rank
+        if self.internode:
+            # The count exchange put the receive total on the host, so size outputs to it: a
+            # slice of a window-capacity buffer would keep the whole buffer alive while the
+            # caller holds it. At least one row, so a rank that receives nothing still passes
+            # valid pointers.
+            cap = max(1, sum(h.inter_recvc))
         hidden_sf = (self.hidden + 127) // 128
-        rx = (torch.empty((cap, self.hidden), dtype=torch.float8_e4m3fn, device=x.device)
+        rx = (torch.empty((cap, self.hidden), dtype=x.dtype, device=x.device)
               if use_fp8 else
               torch.empty((cap, self.hidden), dtype=torch.bfloat16, device=x.device))
         rsf = torch.empty((cap, hidden_sf), dtype=torch.float32, device=x.device) if use_fp8 else None
@@ -429,6 +585,7 @@ class ElasticBuffer:
         rtw = torch.empty((cap, num_topk), dtype=torch.float32, device=x.device)
         rsrc = torch.empty((cap,), dtype=torch.int32, device=x.device)
 
+        self._inter_bind(h)
         n = lib.ep_dispatch(self._h, x.data_ptr(), _ptr(x_sf), ti32.data_ptr(), tw.data_ptr(),
                             num_tokens, send_list.data_ptr(), sendc.data_ptr(),
                             1 if use_fp8 else 0, num_sms,
@@ -481,7 +638,7 @@ class ElasticBuffer:
         if rows < 0:
             raise RuntimeError("ep_expand_build failed")
 
-        ex = (torch.empty((rows, self.hidden), dtype=torch.float8_e4m3fn, device=x.device)
+        ex = (torch.empty((rows, self.hidden), dtype=x.dtype, device=x.device)
               if use_fp8 else
               torch.empty((rows, self.hidden), dtype=torch.bfloat16, device=x.device))
         ew = torch.empty((rows,), dtype=torch.float32, device=x.device)
@@ -526,6 +683,31 @@ class ElasticBuffer:
                 allocate_on_comm_stream=0, previous_event=None, **kwargs):
         if handle is None:
             raise ValueError("combine requires the handle returned by dispatch")
+        # The plan addresses the window by its expert-to-rank map and top-k width, so a window
+        # since re-sized for another shape would reduce into the wrong rows.
+        shape = (handle.num_experts, handle.topk_idx_i32.shape[1])
+        if self._configured != shape:
+            raise ValueError(f"this handle was dispatched for (num_experts, num_topk) = {shape}, "
+                             f"but the window is now configured for {self._configured}; combine "
+                             f"before dispatching another shape, or replay the handle first")
+        # x is 2-D bf16 [rows, hidden] with the rows the handle implies: one per received token,
+        # or one per expanded row.
+        if (not isinstance(x, torch.Tensor) or x.dim() != 2 or x.shape[1] != self.hidden
+                or x.dtype != torch.bfloat16):
+            raise ValueError(f"x must be bfloat16 [rows, {self.hidden}], got {_desc(x)}")
+        _on_current_device(x, "x")
+        rows = handle.num_expanded_rows if handle.expanded else handle.num_recv
+        if x.shape[0] != rows:
+            raise ValueError(f"x has {x.shape[0]} rows, but this handle's combine reads {rows}")
+        # The kernel reads one weight per expanded row, or num_topk per received token: what
+        # dispatch returned for this handle.
+        if topk_weights is not None:
+            w_shape = (rows,) if handle.expanded else (rows, shape[1])
+            if (not isinstance(topk_weights, torch.Tensor) or not topk_weights.is_floating_point()
+                    or tuple(topk_weights.shape) != w_shape):
+                raise ValueError(f"topk_weights must be a floating-point {list(w_shape)} tensor, as "
+                                 f"dispatch returned it for this handle, got {_desc(topk_weights)}")
+            _on_current_device(topk_weights, "topk_weights")
         lib = _lib()
         # See dispatch(): the comm-stream arguments are accepted and ignored.
         if previous_event is not None:
@@ -536,7 +718,8 @@ class ElasticBuffer:
         b0, b1 = (bias, None)
         if isinstance(bias, tuple):
             b0, b1 = bias
-        b0, b1 = _bias(b0, "bias0"), _bias(b1, "bias1")
+        b0 = _bias(b0, "bias0", num_tokens, self.hidden)
+        b1 = _bias(b1, "bias1", num_tokens, self.hidden)
         in_w = topk_weights.contiguous().float() if topk_weights is not None else None
 
         out = torch.empty((num_tokens, self.hidden), dtype=torch.bfloat16, device=x.device)
@@ -553,6 +736,7 @@ class ElasticBuffer:
         # inline, the copy is dropped as soon as data_ptr() returns and the
         # allocator can hand the block out again before the kernel reads it.
         recv_src = handle.recv_src_metadata[:, 0].contiguous()
+        self._inter_bind(handle)
         rc = lib.ep_combine(self._h, x.data_ptr(), _ptr(in_w),
                             _ptr(handle.row_map) if handle.expanded else 0,
                             handle.recv_topk_idx.data_ptr(),
