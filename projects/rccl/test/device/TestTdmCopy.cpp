@@ -514,15 +514,22 @@ __global__ void kLl128StoreScalar(uint64_t* dst, const uint64_t* regsIn) {
 }
 
 // Replica of tdmStoreRegs: stage the warp's slice in LDS, push it out as one
-// bulk transfer. Mirrors ll128Tdm.h step for step, including the fence that
-// orders the lanes' LDS writes against the mover's read of the window.
+// bulk transfer. Mirrors ll128Tdm.h step for step, including the window placed
+// at the destination's offset within its 128B line and the fence that orders
+// the lanes' LDS writes against the mover's read of the window. Block b stores
+// `bytes` of its slice to dst + b * stride + dstOff.
 __global__ void kLl128StoreTdm([[maybe_unused]] uint8_t* dst,
-                               [[maybe_unused]] const uint64_t* regsIn) {
+                               [[maybe_unused]] const uint64_t* regsIn,
+                               [[maybe_unused]] size_t stride,
+                               [[maybe_unused]] size_t dstOff,
+                               [[maybe_unused]] size_t bytes) {
 #if TDM_SUPPORTED
   extern __shared__ __align__(128) uint8_t lds[];
   const int wid  = static_cast<int>(threadIdx.x);
   const bool flg = llIsFlagThread(wid);
-  uint64_t* shm8 = reinterpret_cast<uint64_t*>(lds);
+  uint8_t* out = dst + static_cast<size_t>(blockIdx.x) * stride + dstOff;
+  uint8_t* window = lds + (reinterpret_cast<uintptr_t>(out) & 127);
+  uint64_t* shm8 = reinterpret_cast<uint64_t*>(window);
   const uint64_t* regs = regsIn + static_cast<size_t>(wid) * kLlWordPerThread;
 
   tdm::tdmWait();  // drain the previous slice before overwriting the window
@@ -536,8 +543,7 @@ __global__ void kLl128StoreTdm([[maybe_unused]] uint8_t* dst,
   // above against it; __syncwarp() is empty on AMD.
   __threadfence_block();
 
-  tdm::asyncStoreFromLDS<SyncPolicy::Async, DEFAULT_CACHE_POLICY, false>(
-      lds, dst + static_cast<size_t>(blockIdx.x) * kLlDataBytes, kLlDataBytes);
+  tdm::asyncStoreFromLDS<SyncPolicy::Async, DEFAULT_CACHE_POLICY, false>(window, out, bytes);
   tdm::tdmWait();
 #endif
 }
@@ -629,7 +635,8 @@ TEST_F(Ll128TdmStoreTest, Ll128StoreLegMatchesScalarPath) {
 
     kLl128StoreScalar<<<kBlocks, kLlWarpSz>>>(d_ref.ptr, d_regs.ptr);
     syncAndCheck();
-    kLl128StoreTdm<<<kBlocks, kLlWarpSz, kLlDataBytes + 128>>>(d_tdm.ptr, d_regs.ptr);
+    kLl128StoreTdm<<<kBlocks, kLlWarpSz, kLlDataBytes + 128>>>(d_tdm.ptr, d_regs.ptr, kLlDataBytes, 0,
+                                                                 kLlDataBytes);
     syncAndCheck();
 
     auto h_ref = d_ref.copyTo();
@@ -648,6 +655,51 @@ TEST_F(Ll128TdmStoreTest, Ll128StoreLegMatchesScalarPath) {
                          << "from the scalar path in " << wrong << " of " << bytes
                          << " bytes, first at byte " << firstBad << " (block "
                          << firstBad / kLlDataBytes << ", offset " << firstBad % kLlDataBytes << ")";
+  }
+}
+
+TEST_F(Ll128TdmStoreTest, Ll128StoreLegAtDstOffsets) {
+  // User destinations need not be line-aligned, and the last slice of a run is
+  // partial. With dst off its line the window moves off its line too, so the
+  // lanes' LDS stores are as misaligned as dst.
+  if (!supported_) GTEST_SKIP() << "TDM not supported on this device";
+  ASSERT_EQ(warpSize_, kLlWarpSz) << "LL128 TDM geometry assumes a 32-wide wave";
+
+  constexpr size_t kStride = kLlDataBytes + 256;  // room for the offset and a guard
+  constexpr uint8_t kGuard = 0xAB;
+  const size_t words = static_cast<size_t>(kBlocks) * (kLlDataBytes / sizeof(uint64_t));
+  const size_t outBytes = static_cast<size_t>(kBlocks) * kStride;
+
+  auto h_regs = makeRegs(0x0FF5E7u);
+  DeviceBuffer<uint64_t> d_regs(h_regs.size());
+  d_regs.copyFrom(h_regs);
+  DeviceBuffer<uint64_t> d_ref(words);
+  d_ref.zero();
+  kLl128StoreScalar<<<kBlocks, kLlWarpSz>>>(d_ref.ptr, d_regs.ptr);
+  syncAndCheck();
+  auto h_ref = d_ref.copyTo();
+  const uint8_t* ref8 = reinterpret_cast<const uint8_t*>(h_ref.data());
+
+  const std::vector<uint8_t> guard(outBytes, kGuard);
+  for (size_t off : {1, 2, 3, 4, 8, 16, 100, 127, 128}) {
+    for (size_t n : {size_t(kLlDataBytes), size_t(kLlDataBytes - 6), size_t(1003), size_t(2)}) {
+      DeviceBuffer<uint8_t> d_tdm(outBytes);
+      d_tdm.copyFrom(guard);
+      kLl128StoreTdm<<<kBlocks, kLlWarpSz, kLlDataBytes + 128>>>(d_tdm.ptr, d_regs.ptr, kStride, off, n);
+      syncAndCheck();
+      auto h_tdm = d_tdm.copyTo();
+
+      for (size_t b = 0; b < static_cast<size_t>(kBlocks); ++b) {
+        const uint8_t* got = h_tdm.data() + b * kStride;
+        const uint8_t* want = ref8 + b * kLlDataBytes;
+        for (size_t i = 0; i < kStride; ++i) {
+          const bool inside = i >= off && i < off + n;
+          const uint8_t expect = inside ? want[i - off] : kGuard;
+          ASSERT_EQ(got[i], expect) << "dst offset " << off << ", " << n << " bytes: block " << b << " byte " << i
+                                    << (inside ? " differs from the scalar path" : " is outside the slice but written");
+        }
+      }
+    }
   }
 }
 

@@ -22,9 +22,13 @@ __device__ __forceinline__ int tdmSlotIx(int g) const {
   return ll128SlotIx<NCCL_LL128_LINEELEMS, WARP_SIZE>(g, wid);
 }
 
-__device__ __forceinline__ uint8_t* tdmWindow() const {
+// At dst's offset within its line: the store's head aligns dst and moves the LDS side by the same
+// amount, so a line-aligned window under an offset dst leaves every bulk row misaligned in LDS.
+// The lane stores into the window are then only as aligned as dst, which relies on the unaligned
+// LDS access mode ROCm enables.
+__device__ __forceinline__ uint8_t* tdmWindow(const void* dst) const {
   uint8_t* p = reinterpret_cast<uint8_t*>(ncclScratchForWarp(warpInBlock));
-  return p + ((-reinterpret_cast<uintptr_t>(p)) & (TdmAlign - 1));
+  return p + ((-reinterpret_cast<uintptr_t>(p)) & (TdmAlign - 1)) + (reinterpret_cast<uintptr_t>(dst) & (TdmAlign - 1));
 }
 
 // Stages the destination slice in LDS and pushes it out as one bulk store.
@@ -32,11 +36,11 @@ template <int WordPerThread>
 __device__ __forceinline__ bool tdmStoreRegs(T* dst, uint64_t (&regs)[WordPerThread], int eltN) {
   constexpr int WireBytes = WordPerThread * WARP_SIZE * sizeof(uint64_t);
   constexpr int DataBytes = WireBytes - WireBytes / NCCL_LL128_LINEELEMS;
-  static_assert(ncclShmemScratchWarpSize() >= DataBytes + TdmAlign - 1,
-                "LL128 TDM needs one aligned data slice of per-warp scratch");
+  static_assert(ncclShmemScratchWarpSize() >= DataBytes + 2 * (TdmAlign - 1),
+                "LL128 TDM needs one line-matched data slice of per-warp scratch");
   if (!tdmEnable) return false;
   tdm::tdmWait();  // drain the previous slice before overwriting the window
-  uint64_t* shm8 = shmemCvtPtr(reinterpret_cast<uint64_t*>(tdmWindow()));
+  uint64_t* shm8 = shmemCvtPtr(reinterpret_cast<uint64_t*>(tdmWindow(dst)));
 #pragma unroll
   for (int g = 0; g < WordPerThread / 2; g++) {
     int ix = tdmSlotIx(g);
@@ -45,7 +49,7 @@ __device__ __forceinline__ bool tdmStoreRegs(T* dst, uint64_t (&regs)[WordPerThr
   // The mover reads the window by descriptor, so nothing orders the lane stores above
   // against it; __syncwarp() is empty on AMD (common.h:19).
   __threadfence_block();
-  const uint8_t* src8 = tdmWindow();
+  const uint8_t* src8 = tdmWindow(dst);
   size_t bytes = static_cast<size_t>(eltN) * sizeof(T);
   if (userBypass()) {
     tdm::asyncStoreFromLDS<SyncPolicy::Async, TdmStoreSysPolicy, false>(src8, reinterpret_cast<uint8_t*>(dst), bytes);
