@@ -23,10 +23,20 @@
 #include "hsakmt/hsakmt_virtio.h"
 #include "hsakmt_virtio_device.h"
 #include <stddef.h>
+#include <sys/mman.h>
 #include <unistd.h>
 #include <xf86drm.h>
 
 #define VHSA_GL_METADATA_MAX_SIZE (0x50)
+
+/* Parameters for the SVM/userptr blob registration path. */
+struct vhsakmt_svm_map_params {
+  void* addr;
+  size_t size;
+  bool use_svm;
+  bool read_only;
+  HsaMemFlags mem_flags;
+};
 
 vhsakmt_bo_handle vhsakmt_entry_to_bo_handle(bo_entry e) { return (vhsakmt_bo_handle)e; }
 bo_entry vhsakmt_bo_handle_to_entry(vhsakmt_bo_handle bo) { return &bo->rbtn; }
@@ -156,7 +166,8 @@ int vhsakmt_bo_cpu_map(vhsakmt_bo_handle bo, void** cpu, void* fixed_cpu) {
   pthread_mutex_lock(&bo->map_mutex);
 
   if (!bo->cpu_addr) {
-    r = virtio_gpu_map_handle(bo->dev->vgdev, bo->real.handle, bo->size, cpu, fixed_cpu);
+    r = virtio_gpu_map_handle(bo->dev->vgdev, bo->real.handle, bo->size, cpu, fixed_cpu,
+                              PROT_READ | PROT_WRITE);
     if (r) {
       pthread_mutex_unlock(&bo->map_mutex);
       return r;
@@ -236,16 +247,27 @@ int vhsakmt_init_host_blob(vhsakmt_device_handle dev, size_t size, uint32_t blob
   return 0;
 }
 
-static int vhsakmt_init_userptr_blob(vhsakmt_device_handle dev, void* addr, size_t size,
+static int vhsakmt_init_userptr_blob(vhsakmt_device_handle dev,
+                                     const struct vhsakmt_svm_map_params* p,
+                                     void* addr, size_t size,
                                      vhsakmt_bo_handle* bo_handle, uint64_t* offset) {
   int r;
+  uint32_t blob_flags = p->use_svm ? VIRTGPU_BLOB_FLAG_USE_SVM
+                                   : VIRTGPU_BLOB_FLAG_USE_USERPTR;
+  if (p->read_only)
+    blob_flags |= p->use_svm ? VIRTGPU_BLOB_FLAG_SVM_RDONLY
+                              : VIRTGPU_BLOB_FLAG_USERPTR_RDONLY;
+
   struct drm_virtgpu_resource_create_blob args = {
       .blob_mem = VIRTGPU_BLOB_MEM_HOST3D_GUEST,
-      .blob_flags = VIRTGPU_BLOB_FLAG_USE_USERPTR,
+      .blob_flags = blob_flags,
       .size = size,
       .blob_id = vhsakmt_atomic_inc_return(&dev->next_blob_id),
-      .blob_userptr = (uint64_t)addr,
   };
+  if (p->use_svm)
+    args.blob_svm = (uint64_t)addr;
+  else
+    args.blob_userptr = (uint64_t)addr;
 
   r = virtio_gpu_create_blob(dev->vgdev, &args);
   if (r < 0) return r;
@@ -327,7 +349,8 @@ HSAKMT_STATUS HSAKMTAPI vhsaKmtAllocMemoryAlign(HSAuint32 PreferredNode, HSAuint
   if (!rsp->memory_handle) return -ENOMEM;
 
   r = vhsakmt_init_host_blob(dev, SizeInBytes, VIRTGPU_BLOB_MEM_HOST3D,
-                             vhsakmt_mappable(MemFlags) ? VIRTGPU_BLOB_FLAG_USE_MAPPABLE : 0,
+                             (vhsakmt_mappable(MemFlags) || MemFlags.ui32.NoAddress)
+                                 ? VIRTGPU_BLOB_FLAG_USE_MAPPABLE : 0,
                              req.blob_id, VHSA_BO_KFD_MEM, (void*)rsp->memory_handle, &bo);
   if (r) return r;
   bo->flags = MemFlags;
@@ -359,6 +382,34 @@ HSAKMT_STATUS HSAKMTAPI vhsaKmtAllocMemoryAlign(HSAuint32 PreferredNode, HSAuint
 HSAKMT_STATUS HSAKMTAPI vhsaKmtAllocMemory(HSAuint32 PreferredNode, HSAuint64 SizeInBytes,
                                            HsaMemFlags MemFlags, void** MemoryAddress) {
   return vhsaKmtAllocMemoryAlign(PreferredNode, SizeInBytes, 0, MemFlags, MemoryAddress);
+}
+
+/* Blob-map the physical handle (NoAddress allocation) at a reserved VA for VMM. */
+HSAKMT_STATUS HSAKMTAPI vhsaKmtVirtioMapHandleToVA(void* MemoryHandle, void* Va, HSAuint64 Size,
+                                                   int Prot) {
+  CHECK_VIRTIO_KFD_OPEN();
+
+  vhsakmt_bo_handle bo = (vhsakmt_bo_handle)MemoryHandle;
+  if (!bo) return HSAKMT_STATUS_INVALID_HANDLE;
+
+  void* cpu = Va;
+  int r = virtio_gpu_map_handle(bo->dev->vgdev, bo->real.handle, Size, &cpu, Va, Prot);
+  if (r || cpu != Va) {
+    vhsa_err("%s: blob map failed va=%p size=%lx handle=%u r=%d cpu=%p\n", __FUNCTION__, Va, Size,
+             bo->real.handle, r, cpu);
+    return HSAKMT_STATUS_ERROR;
+  }
+
+  vhsa_debug("%s: mapped blob handle=%u at va=%p size=%lx\n", __FUNCTION__, bo->real.handle, Va,
+             Size);
+  return HSAKMT_STATUS_SUCCESS;
+}
+
+HSAKMT_STATUS HSAKMTAPI vhsaKmtVirtioUnmapHandleFromVA(void* Va, HSAuint64 Size) {
+  CHECK_VIRTIO_KFD_OPEN();
+
+  virtio_gpu_unmap(Va, Size);
+  return HSAKMT_STATUS_SUCCESS;
 }
 
 int vhsakmt_bo_free(vhsakmt_device_handle dev, vhsakmt_bo_handle bo) {
@@ -631,14 +682,18 @@ static int vhsakmt_map_userptr(vhsakmt_device_handle dev, void* addr, size_t siz
   return rsp->ret;
 }
 
-static vhsakmt_bo_handle vhsakmt_map_to_gpu(void* addr, size_t size, bool use_svm) {
+static vhsakmt_bo_handle vhsakmt_map_to_gpu(const struct vhsakmt_svm_map_params* p) {
   vhsakmt_device_handle dev = vhsakmt_dev();
+  void* addr = p->addr;
+  size_t size = p->size;
+  bool use_svm = p->use_svm;
   size_t page_size = getpagesize();
   size_t addr_offset = (uint64_t)addr % page_size;
   void* blob_addr;
   size_t blob_size;
   uint64_t userptr_offset = 0, userptr_handle = 0;
   vhsakmt_bo_handle userptr;
+  int r_init;
   int r;
 
   if (use_svm) {
@@ -652,9 +707,9 @@ static vhsakmt_bo_handle vhsakmt_map_to_gpu(void* addr, size_t size, bool use_sv
   vhsa_debug("%s: addr: %p, size: 0x%lx, offset: 0x%lx, blob_addr: %p, blob_size: 0x%lx, svm: %d\n",
              __FUNCTION__, addr, size, addr_offset, blob_addr, blob_size, use_svm);
 
-  r = vhsakmt_init_userptr_blob(dev, blob_addr, blob_size, &userptr, &userptr_offset);
-  if (r < 0) {
-    vhsa_debug("%s: userptr create failed at address: %p, ret = %d\n", __FUNCTION__, addr, r);
+  r_init = vhsakmt_init_userptr_blob(dev, p, blob_addr, blob_size, &userptr, &userptr_offset);
+  if (r_init < 0) {
+    vhsa_debug("%s: userptr create failed at address: %p, ret = %d\n", __FUNCTION__, addr, r_init);
     return NULL;
   }
 
@@ -672,7 +727,7 @@ static vhsakmt_bo_handle vhsakmt_map_to_gpu(void* addr, size_t size, bool use_sv
     userptr->host_addr = VHSA_UINT64_TO_VPTR(userptr_handle);
   }
 
-  if (r > 0) {
+  if (r_init > 0) {
     vhsa_debug("%s: userptr: %p already registered, offset: %lx\n", __FUNCTION__, addr,
                userptr_offset);
     userptr->host_addr =
@@ -717,7 +772,7 @@ HSAKMT_STATUS HSAKMTAPI vhsaKmtRegisterMemoryWithFlags(void* MemoryAddress,
                                                 (uint64_t)MemoryAddress + MemorySizeInBytes - 1UL);
     if (bo) {
       vhsa_debug(
-          "%s: memory already registered, MemoryAddress:%p, bo address: %p, size: %x, "
+          "%s: memory already registered, MemoryAddress:%p, bo address: %p, size: %lx, "
           "res_id: %d, count: %d\n",
           __FUNCTION__, MemoryAddress, bo->cpu_addr, bo->size, bo->real.res_id, bo->refcount);
       (void)vhsakmt_atomic_inc_return(&bo->refcount);
@@ -725,7 +780,14 @@ HSAKMT_STATUS HSAKMTAPI vhsaKmtRegisterMemoryWithFlags(void* MemoryAddress,
     }
   }
 
-  userptr = vhsakmt_map_to_gpu(MemoryAddress, MemorySizeInBytes, dev->use_svm);
+  struct vhsakmt_svm_map_params map_params = {
+      .addr = MemoryAddress,
+      .size = MemorySizeInBytes,
+      .use_svm = dev->use_svm,
+      .read_only = MemFlags.ui32.ReadOnly,
+      .mem_flags = MemFlags,
+  };
+  userptr = vhsakmt_map_to_gpu(&map_params);
 
   if (!userptr) {
     vhsa_debug(
@@ -801,7 +863,7 @@ static int vhsakmt_deregister_userptr_non_svm(vhsakmt_device_handle dev, void* M
   while (n) {
     vhsakmt_bo_handle bo = (vhsakmt_bo_handle)((char*)n - offsetof(struct vhsakmt_bo, itn));
     if (bo->cpu_addr == (void*)aligned_addr) {
-      vhsa_debug("%s: found userptr: %p, size: %x, res_id: %d, count: %d\n", __FUNCTION__,
+      vhsa_debug("%s: found userptr: %p, size: %lx, res_id: %d, count: %d\n", __FUNCTION__,
                  bo->cpu_addr, bo->size, bo->real.res_id, bo->refcount);
 
       if (vhsakmt_atomic_dec_return(&bo->refcount) > 0) {
@@ -820,7 +882,7 @@ static int vhsakmt_deregister_userptr_non_svm(vhsakmt_device_handle dev, void* M
           hsakmt_interval_tree_iter_next(&dev->userptr_tree, n, aligned_addr, aligned_addr);
 
       if (bo->cpu_addr == (void*)aligned_addr) {
-        vhsa_debug("%s: destroying userptr: %p, size: %x, res_id: %d\n", __FUNCTION__, bo->cpu_addr,
+        vhsa_debug("%s: destroying userptr: %p, size: %lx, res_id: %d\n", __FUNCTION__, bo->cpu_addr,
                    bo->size, bo->real.res_id);
 
         hsakmt_interval_tree_remove(&dev->userptr_tree, &bo->itn);

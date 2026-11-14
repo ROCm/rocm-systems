@@ -149,6 +149,9 @@ HSAKMT_STATUS vhsaKmtGetAMDGPUDeviceHandle(HSAuint32 NodeId, HsaAMDGPUDeviceHand
   return rsp->ret;
 }
 
+/* Not implemented for virtio: some callers require success even though there's no
+ * real mapping here, and CPU mmap of a bo is instead handled via the blob-map path
+ * (vhsaKmtVirtioMapHandleToVA) rather than this libdrm-amdgpu-style API. */
 int vamdgpu_bo_cpu_map(amdgpu_bo_handle buf_handle, void** cpu) {
   return 0;
 }
