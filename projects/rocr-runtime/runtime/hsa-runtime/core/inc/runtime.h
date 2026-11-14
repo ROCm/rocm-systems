@@ -277,6 +277,13 @@ class Runtime {
 
   hsa_status_t DeregisterReleaseNotifier(void* ptr, hsa_amd_deallocation_callback_t callback);
 
+  hsa_status_t RegisterReservedAddressNotifier(void* ptr,
+                                               hsa_amd_deallocation_callback_t callback,
+                                               void* user_data);
+
+  hsa_status_t DeregisterReservedAddressNotifier(void* ptr,
+                                                 hsa_amd_deallocation_callback_t callback);
+
 /// @brief Blocking memory copy from src to dst.
 ///
 /// @param [in] dst Memory address of the destination.
@@ -1104,6 +1111,7 @@ class Runtime {
     bool registered;
     // Set once hsa_amd_svm_attributes_set succeeds on any part of this reservation.
     bool svm_attrib;
+    std::unique_ptr<std::vector<AllocationRegion::notifier_t>> notifiers;
   };
   std::map<const void*, AddressHandle> reserved_address_map_;  // Indexed by VA
 

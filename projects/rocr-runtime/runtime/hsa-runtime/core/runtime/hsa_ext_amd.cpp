@@ -249,132 +249,6 @@ template <class T> static __forceinline T handleExceptionT() {
   abort();
   return T();
 }
-
-// Vmem Allocation Registry
-// Internal registry to track vmem allocations and their deallocation callbacks
-namespace {
-
-struct VmemCallbackEntry {
-  void* ptr;  // Registered pointer (may be offset from base)
-  hsa_amd_deallocation_callback_t callback;
-  void* user_data;
-};
-
-struct VmemAllocationMetadata {
-  void* base_address;
-  size_t reserved_size;
-  std::vector<VmemCallbackEntry> callbacks;
-};
-
-class VmemAllocationRegistry {
-public:
-  VmemAllocationRegistry() = default;
-
-  hsa_status_t register_allocation(void* addr, size_t size) {
-    std::lock_guard<std::mutex> lock(mutex_);
-    // (Re)create metadata for this base address to avoid stale size/callbacks
-    auto& meta = allocations_[addr];
-    meta.base_address = addr;
-    meta.reserved_size = size;
-    meta.callbacks.clear();  // Clear any stale callbacks from previous reservation
-    return HSA_STATUS_SUCCESS;
-  }
-
-  hsa_status_t register_dealloc_callback(void* ptr, hsa_amd_deallocation_callback_t callback,
-                                         void* user_data) {
-    std::lock_guard<std::mutex> lock(mutex_);
-    VmemAllocationMetadata* meta = find_unlocked(ptr);
-    if (!meta) {
-      return HSA_STATUS_ERROR_INVALID_ALLOCATION;
-    }
-    VmemCallbackEntry entry;
-    entry.ptr = ptr;  // Store the registered pointer (may be offset)
-    entry.callback = callback;
-    entry.user_data = user_data;
-    meta->callbacks.push_back(entry);
-    return HSA_STATUS_SUCCESS;
-  }
-
-  hsa_status_t deregister_dealloc_callback(void* ptr, hsa_amd_deallocation_callback_t callback) {
-    std::lock_guard<std::mutex> lock(mutex_);
-    VmemAllocationMetadata* meta = find_unlocked(ptr);
-    if (!meta) {
-      return HSA_STATUS_ERROR_INVALID_ALLOCATION;
-    }
-    // Remove matching callback (must match both pointer and callback function)
-    auto& cbs = meta->callbacks;
-    auto it = std::find_if(cbs.begin(), cbs.end(),
-                           [ptr, callback](const VmemCallbackEntry& e) {
-                             return e.ptr == ptr && e.callback == callback;
-                           });
-    if (it != cbs.end()) {
-      cbs.erase(it);
-      return HSA_STATUS_SUCCESS;
-    }
-    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-  }
-
-  void invoke_callbacks(void* addr) {
-    std::vector<VmemCallbackEntry> callbacks_to_invoke;
-    {
-      std::lock_guard<std::mutex> lock(mutex_);
-      VmemAllocationMetadata* meta = find_unlocked(addr);
-      if (meta) {
-        callbacks_to_invoke = meta->callbacks;
-      }
-    }
-    // Invoke callbacks outside of lock to prevent deadlocks
-    for (const auto& entry : callbacks_to_invoke) {
-      try {
-        entry.callback(entry.ptr, entry.user_data);  // Pass registered pointer, not base address
-      } catch (...) {
-        std::throw_with_nested(std::runtime_error("Callback exception"));
-      }
-    }
-  }
-
-  hsa_status_t unregister_allocation(void* addr) {
-    std::lock_guard<std::mutex> lock(mutex_);
-    auto it = allocations_.find(addr);
-    if (it == allocations_.end()) {
-      return HSA_STATUS_ERROR_INVALID_ALLOCATION;
-    }
-    allocations_.erase(it);
-    return HSA_STATUS_SUCCESS;
-  }
-
-private:
-  VmemAllocationMetadata* find_unlocked(void* ptr) {
-    // First try exact match
-    auto it = allocations_.find(ptr);
-    if (it != allocations_.end()) {
-      return &it->second;
-    }
-
-    // Try to find allocation containing this pointer (offset pointer support)
-    // Use upper_bound for O(log N) instead of O(N) linear search
-    it = allocations_.upper_bound(ptr);
-    if (it != allocations_.begin()) {
-      --it;
-      uintptr_t base = reinterpret_cast<uintptr_t>(it->first);
-      uintptr_t ptr_val = reinterpret_cast<uintptr_t>(ptr);
-      if (ptr_val >= base && ptr_val < base + it->second.reserved_size) {
-        return &it->second;
-      }
-    }
-
-    return nullptr;
-  }
-
-  std::map<void*, VmemAllocationMetadata> allocations_;
-  std::mutex mutex_;
-};
-
-// Global vmem allocation registry
-static VmemAllocationRegistry g_vmem_registry;
-
-}  // anonymous namespace
-
 hsa_status_t hsa_amd_coherency_get_type(hsa_agent_t agent_handle, hsa_amd_coherency_type_t* type) {
   TRY;
   IS_OPEN();
@@ -1830,29 +1704,12 @@ hsa_status_t hsa_amd_register_deallocation_callback(void* ptr,
   IS_BAD_PTR(ptr);
   IS_BAD_PTR(callback);
 
-  // Detect pointer type and route to appropriate mechanism
-  hsa_amd_pointer_info_t info{};
-  info.size = sizeof(hsa_amd_pointer_info_t);
-  hsa_status_t status = ::hsa_amd_pointer_info(ptr, &info, nullptr, nullptr, nullptr);
-
-  if (status == HSA_STATUS_SUCCESS) {
-    if (info.type == HSA_EXT_POINTER_TYPE_HSA_VMEM ||
-        info.type == HSA_EXT_POINTER_TYPE_RESERVED_ADDR ||
-        info.type == HSA_EXT_POINTER_TYPE_SVM) {
-      // Route to vmem registry (vmem or reserved addresses)
-      hsa_status_t vmem_status = g_vmem_registry.register_dealloc_callback(ptr, callback, user_data);
-      if (vmem_status != HSA_STATUS_ERROR_INVALID_ALLOCATION) {
-        return vmem_status;
-      }
-      // Fall through if registry doesn't recognize it
-    } else if (info.type == HSA_EXT_POINTER_TYPE_HSA) {
-      // Route to traditional mechanism
-      return core::Runtime::runtime_singleton_->RegisterReleaseNotifier(ptr, callback, user_data);
-    }
-  }
-
-  // If pointer_info fails or type is unknown, try traditional mechanism as fallback
-  return core::Runtime::runtime_singleton_->RegisterReleaseNotifier(ptr, callback, user_data);
+  hsa_status_t status =
+      core::Runtime::runtime_singleton_->RegisterReleaseNotifier(ptr, callback, user_data);
+  if (status == HSA_STATUS_ERROR_INVALID_ALLOCATION)
+    status = core::Runtime::runtime_singleton_->RegisterReservedAddressNotifier(ptr, callback,
+                                                                               user_data);
+  return status;
 
   CATCH;
 }
@@ -1864,25 +1721,11 @@ hsa_status_t hsa_amd_deregister_deallocation_callback(void* ptr,
   IS_BAD_PTR(ptr);
   IS_BAD_PTR(callback);
 
-  // Detect pointer type and route to appropriate mechanism
-  hsa_amd_pointer_info_t info{};
-  info.size = sizeof(hsa_amd_pointer_info_t);
-  hsa_status_t status = ::hsa_amd_pointer_info(ptr, &info, nullptr, nullptr, nullptr);
-
-  if (status == HSA_STATUS_SUCCESS &&
-      (info.type == HSA_EXT_POINTER_TYPE_HSA_VMEM ||
-       info.type == HSA_EXT_POINTER_TYPE_RESERVED_ADDR ||
-       info.type == HSA_EXT_POINTER_TYPE_SVM)) {
-    // Route to vmem registry (vmem or reserved addresses)
-    hsa_status_t vmem_status = g_vmem_registry.deregister_dealloc_callback(ptr, callback);
-    if (vmem_status != HSA_STATUS_ERROR_INVALID_ALLOCATION) {
-      return vmem_status;
-    }
-    // Fall through if registry doesn't recognize it
-  }
-
-  // Traditional mechanism (HSA or unknown)
-  return core::Runtime::runtime_singleton_->DeregisterReleaseNotifier(ptr, callback);
+  hsa_status_t status =
+      core::Runtime::runtime_singleton_->DeregisterReleaseNotifier(ptr, callback);
+  if (status == HSA_STATUS_ERROR_INVALID_ARGUMENT)
+    status = core::Runtime::runtime_singleton_->DeregisterReservedAddressNotifier(ptr, callback);
+  return status;
 
   CATCH;
 }
@@ -2034,11 +1877,6 @@ hsa_status_t hsa_amd_vmem_address_reserve(void** va, size_t size, uint64_t addre
 
   hsa_status_t status = core::Runtime::runtime_singleton_->VMemoryAddressReserve(va, size, address, 0, flags);
 
-  // Option B: Register allocation in vmem registry
-  if (status == HSA_STATUS_SUCCESS && va && *va) {
-    g_vmem_registry.register_allocation(*va, size);
-  }
-
   return status;
   CATCH;
 }
@@ -2053,11 +1891,6 @@ hsa_status_t hsa_amd_vmem_address_reserve_align(void** va, size_t size, uint64_t
 
   hsa_status_t status = core::Runtime::runtime_singleton_->VMemoryAddressReserve(va, size, address, alignment, flags);
 
-  // Register allocation in vmem registry
-  if (status == HSA_STATUS_SUCCESS && va && *va) {
-    g_vmem_registry.register_allocation(*va, size);
-  }
-
   return status;
   CATCH;
 }
@@ -2069,15 +1902,7 @@ hsa_status_t hsa_amd_vmem_address_free(void* va, size_t size) {
   IS_BAD_PTR(va);
   IS_ZERO(size);
 
-  hsa_status_t status = core::Runtime::runtime_singleton_->VMemoryAddressFree(va, size);
-
-  // Invoke callbacks and unregister only when free succeeded
-  if (status == HSA_STATUS_SUCCESS) {
-    g_vmem_registry.invoke_callbacks(va);
-    (void)g_vmem_registry.unregister_allocation(va);
-  }
-
-  return status;
+  return core::Runtime::runtime_singleton_->VMemoryAddressFree(va, size);
   CATCH;
 }
 

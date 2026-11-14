@@ -600,6 +600,49 @@ hsa_status_t Runtime::DeregisterReleaseNotifier(void* ptr,
   return ret;
 }
 
+hsa_status_t Runtime::RegisterReservedAddressNotifier(
+    void* ptr, hsa_amd_deallocation_callback_t callback, void* user_data) {
+  std::lock_guard<std::shared_mutex> lock(memory_lock_);
+  auto mem = reserved_address_map_.upper_bound(ptr);
+  if (mem != reserved_address_map_.begin()) {
+    mem--;
+    if ((mem->first <= ptr) &&
+        (ptr < reinterpret_cast<const uint8_t*>(mem->first) + mem->second.size)) {
+      auto& notifiers = mem->second.notifiers;
+      if (!notifiers) notifiers.reset(new std::vector<AllocationRegion::notifier_t>);
+      AllocationRegion::notifier_t notifier = {
+          ptr, AMD::callback_t<hsa_amd_deallocation_callback_t>(callback), user_data};
+      notifiers->push_back(notifier);
+      return HSA_STATUS_SUCCESS;
+    }
+  }
+  return HSA_STATUS_ERROR_INVALID_ALLOCATION;
+}
+
+hsa_status_t Runtime::DeregisterReservedAddressNotifier(
+    void* ptr, hsa_amd_deallocation_callback_t callback) {
+  hsa_status_t ret = HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  std::lock_guard<std::shared_mutex> lock(memory_lock_);
+  auto mem = reserved_address_map_.upper_bound(ptr);
+  if (mem != reserved_address_map_.begin()) {
+    mem--;
+    if ((mem->first <= ptr) &&
+        (ptr < reinterpret_cast<const uint8_t*>(mem->first) + mem->second.size)) {
+      auto& notifiers = mem->second.notifiers;
+      if (!notifiers) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+      for (size_t i = 0; i < notifiers->size(); i++) {
+        if (((*notifiers)[i].ptr == ptr) && ((*notifiers)[i].callback) == callback) {
+          (*notifiers)[i] = std::move((*notifiers)[notifiers->size() - 1]);
+          notifiers->pop_back();
+          i--;
+          ret = HSA_STATUS_SUCCESS;
+        }
+      }
+    }
+  }
+  return ret;
+}
+
 hsa_status_t Runtime::CopyMemory(void* dst, const void* src, size_t size) {
   void* source = const_cast<void*>(src);
 
@@ -4553,31 +4596,44 @@ hsa_status_t Runtime::VMemoryAddressReserve(void** va, size_t size, uint64_t add
 }
 
 hsa_status_t Runtime::VMemoryAddressFree(void* va, size_t size) {
-  std::lock_guard<std::shared_mutex> lock(memory_lock_);
-  std::map<const void*, AddressHandle>::iterator it = reserved_address_map_.find(va);
+  std::unique_ptr<std::vector<AllocationRegion::notifier_t>> notifiers;
 
-  if (it == reserved_address_map_.end()) {
-    debug_warning(false && "Can't find address in reserved address");
-    return HSA_STATUS_ERROR_INVALID_ALLOCATION;
-  }
+  {
+    std::lock_guard<std::shared_mutex> lock(memory_lock_);
+    std::map<const void*, AddressHandle>::iterator it = reserved_address_map_.find(va);
 
-  if (size != it->second.size) {
-    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-  }
+    if (it == reserved_address_map_.end()) {
+      debug_warning(false && "Can't find address in reserved address");
+      return HSA_STATUS_ERROR_INVALID_ALLOCATION;
+    }
 
-  if (it->second.use_count > 0) {
-    return HSA_STATUS_ERROR_RESOURCE_FREE;
-  }
+    if (size != it->second.size) {
+      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    }
 
-  if (it->second.registered) {
-    if (HSAKMT_CALL(hsaKmtFreeMemory(it->second.os_addr, size)) != HSAKMT_STATUS_SUCCESS) {
+    if (it->second.use_count > 0) {
+      return HSA_STATUS_ERROR_RESOURCE_FREE;
+    }
+
+    notifiers = std::move(it->second.notifiers);
+
+    if (it->second.registered) {
+      if (HSAKMT_CALL(hsaKmtFreeMemory(it->second.os_addr, size)) != HSAKMT_STATUS_SUCCESS) {
+        return HSA_STATUS_ERROR;
+      }
+    } else if (!rocr::os::ReleaseMemory(it->second.os_addr, size)) {
       return HSA_STATUS_ERROR;
     }
-  } else if (!rocr::os::ReleaseMemory(it->second.os_addr, size)) {
-    return HSA_STATUS_ERROR;
+
+    reserved_address_map_.erase(it);
   }
 
-  reserved_address_map_.erase(it);
+  if (notifiers) {
+    for (auto& notifier : *notifiers) {
+      notifier.callback(notifier.ptr, notifier.user_data);
+    }
+  }
+
   return HSA_STATUS_SUCCESS;
 }
 
