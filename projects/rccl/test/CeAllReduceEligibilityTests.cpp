@@ -357,16 +357,8 @@ TEST(RcclCeAllReduceEligibility, RcclUseCeAllReduce_Isolated)
         // One node, but the LSA team is narrower than the comm.
         {"SplitLsaTeamRejected_Isolated", 4, 1, true, NCCL_CTA_POLICY_ZERO, 4096, ncclSum, ncclFloat32, false, baseEnv, "", 2},
         {"SplitLsaTeamSixRanksRejected_Isolated", 6, 1, true, NCCL_CTA_POLICY_ZERO, 4098, ncclSum, ncclFloat32, false, baseEnv, "", 3},
-        // Min-bound env-override: RCCL_CE_AR_2SHOT_MIN_BYTES=1024.
-        // 252 * sizeof(float) = 1008 bytes < 1024 -- rejected.
-        // 256 * sizeof(float) = 1024 bytes == min  -- accepted.
-        // Both counts are divisible by nRanks=4.
-        {"MinBoundRejects_Isolated", 4, 1, true, NCCL_CTA_POLICY_ZERO, 252, ncclSum, ncclFloat32, false,
-            {{"RCCL_CE_ALLREDUCE", "1"}, {"RCCL_CE_AR_2SHOT_MAX_BYTES", std::to_string(kCeArMaxMsgBytesDefault)},
-             {"RCCL_CE_AR_2SHOT_MIN_BYTES", "1024"}}},
-        {"AtMinBoundPasses_Isolated", 4, 1, true, NCCL_CTA_POLICY_ZERO, 256, ncclSum, ncclFloat32, true,
-            {{"RCCL_CE_ALLREDUCE", "1"}, {"RCCL_CE_AR_2SHOT_MAX_BYTES", std::to_string(kCeArMaxMsgBytesDefault)},
-             {"RCCL_CE_AR_2SHOT_MIN_BYTES", "1024"}}},
+        // RCCL_CE_AR_2SHOT_MIN_BYTES is not a case here: rcclUseCeAr2Shot has no size
+        // check. See SelectAllReduce_ZeroPolicyMinBound_Isolated below.
     };
 
     for(const auto& tc : cases)
@@ -548,10 +540,9 @@ TEST(RcclCeAllReduceEligibility, SelectAllReduce_MessageTooLargeDeclinesCe_Isola
 }
 
 
-// ceZeroStagedWindow is exercised here with RCCL_FORCE_CE_ALLREDUCE absent (defaults to 1,
-// but rcclParamForceCeAllReduce() returns 0 when set to 0 below) so ceForceStagedWindow
-// stays false. ceArMaxBytes is set via RCCL_CE_AR_2SHOT_MAX_BYTES; ZERO policy makes
-// ceZeroStagedWindow true and the call takes CE.
+// With RCCL_FORCE_CE_ALLREDUCE unset, ceForceStagedWindow stays false and ZERO policy alone must
+// take CE via ceZeroStagedWindow, capped by rcclCeArNonRegCap (the staging-buffer default here).
+// ncclProd, as above: ncclSum would run ncclSymkInitOnce, which this mock does not support.
 TEST(RcclCeAllReduceEligibility, SelectAllReduce_ZeroPolicyNoForce_TakesCe_Isolated)
 {
     if (!isCeRuntimeDriverSupported()) GTEST_SKIP() << "CE is unsupported by this runtime";
@@ -568,25 +559,23 @@ TEST(RcclCeAllReduceEligibility, SelectAllReduce_ZeroPolicyNoForce_TakesCe_Isola
                 mock.comm.symmetricSupport = true;
                 mock.comm.config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
                 mock.comm.ceColl.ceARTmpBuf = nullptr;
-                // Set ceArMaxBytes to the default cap so a small message fits.
-                mock.comm.ceColl.ceArMaxBytes = kCeArMaxMsgBytesDefault;
 
                 const size_t count = 1024; // well within the cap
                 rcclCollDecision decision{};
                 ncclResult_t res = rcclSelectAllReduce(
                     mock.get(), reinterpret_cast<void*>(0x1000), reinterpret_cast<void*>(0x2000),
-                    count, ncclFloat32, ncclSum,
+                    count, ncclFloat32, ncclProd,
                     /*stream=*/nullptr, /*query=*/true, /*graphCapturingHint=*/false, &decision);
                 EXPECT_EQ(res, ncclSuccess);
                 EXPECT_EQ(decision.algo, RCCL_CE_REGISTERED)
-                    << "ZERO policy with ceArMaxBytes set must select CE via ceZeroStagedWindow "
+                    << "ZERO policy must select CE via ceZeroStagedWindow "
                        "even when RCCL_FORCE_CE_ALLREDUCE is not set";
             })
-            // RCCL_FORCE_CE_ALLREDUCE intentionally absent: ceForceStagedWindow stays false.
-            // RCCL_CE_AR_2SHOT_MAX_BYTES sets ceArMaxBytes in ncclCeInit, but the mock sets
-            // it directly above so the env var is not required here.
             .withEnvironment({{"RCCL_CE_ALLREDUCE", "1"},
                               {"RCCL_DDA_ENABLE", "0"}})
+            // An inherited RCCL_FORCE_CE_ALLREDUCE would close ceZeroStagedWindow (0) or open
+            // ceForceStagedWindow (1).
+            .clearVariable("RCCL_FORCE_CE_ALLREDUCE")
             .withTimeout(std::chrono::seconds(30))
             .withNumGpus(0));
 
@@ -598,7 +587,7 @@ TEST(RcclCeAllReduceEligibility, SelectAllReduce_ZeroPolicyNoForce_TakesCe_Isola
 
 // With RCCL_FORCE_CE_ALLREDUCE=0, rcclParamForceCeAllReduce() returns 0, suppressing
 // ceZeroStagedWindow even under ZERO policy. ceForceStagedWindow is also false.
-// No CE candidate is recorded and the call falls through to the ring fallback.
+// No CE candidate is recorded and the call falls through to the ring fallback. ncclProd, as above.
 TEST(RcclCeAllReduceEligibility, SelectAllReduce_ZeroPolicyForceOff_NoCe_Isolated)
 {
     if (!isCeRuntimeDriverSupported()) GTEST_SKIP() << "CE is unsupported by this runtime";
@@ -615,13 +604,12 @@ TEST(RcclCeAllReduceEligibility, SelectAllReduce_ZeroPolicyForceOff_NoCe_Isolate
                 mock.comm.symmetricSupport = true;
                 mock.comm.config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
                 mock.comm.ceColl.ceARTmpBuf = nullptr;
-                mock.comm.ceColl.ceArMaxBytes = kCeArMaxMsgBytesDefault;
 
                 const size_t count = 1024;
                 rcclCollDecision decision{};
                 ncclResult_t res = rcclSelectAllReduce(
                     mock.get(), reinterpret_cast<void*>(0x1000), reinterpret_cast<void*>(0x2000),
-                    count, ncclFloat32, ncclSum,
+                    count, ncclFloat32, ncclProd,
                     /*stream=*/nullptr, /*query=*/false, /*graphCapturingHint=*/false, &decision);
                 EXPECT_EQ(res, ncclSuccess);
                 EXPECT_NE(decision.algo, RCCL_CE_REGISTERED)
@@ -633,6 +621,68 @@ TEST(RcclCeAllReduceEligibility, SelectAllReduce_ZeroPolicyForceOff_NoCe_Isolate
                               {"RCCL_DDA_ENABLE", "0"}})
             .withTimeout(std::chrono::seconds(30))
             .withNumGpus(0));
+
+    ProcessIsolatedTestRunner::ExecutionOptions options;
+    options.stopOnFirstFailure = false;
+    options.verboseLogging = true;
+    EXPECT_TRUE(ProcessIsolatedTestRunner::executeAllTests(options));
+}
+
+// RCCL_CE_AR_2SHOT_MIN_BYTES bounds the unregistered CE arms in rcclSelectAllReduce; rcclUseCeAr2Shot
+// has no size check. With no staging buffer and no force, ceZeroStagedWindow is the only CE arm here.
+// ncclProd, as above.
+TEST(RcclCeAllReduceEligibility, SelectAllReduce_ZeroPolicyMinBound_Isolated)
+{
+    if (!isCeRuntimeDriverSupported()) GTEST_SKIP() << "CE is unsupported by this runtime";
+
+    struct ZeroPolicyMinBoundCase
+    {
+        std::string name;
+        size_t      count;
+        bool        expectCe;
+    };
+    // Both counts divide by nRanks=4. 252 floats = 1008 B < 1024 B; 256 floats = 1024 B.
+    const std::vector<ZeroPolicyMinBoundCase> cases = {
+        {"ZeroPolicyBelowMin_NoCe_Isolated", 252, false},
+        {"ZeroPolicyAtMin_TakesCe_Isolated", 256, true},
+    };
+
+    for (const auto& tc : cases)
+    {
+        ProcessIsolatedTestRunner::registerTest(
+            ProcessIsolatedTestRunner::TestConfig(
+                tc.name,
+                [tc]()
+                {
+                    CeAllReduceMockComm mock;
+                    mock.comm.nRanks = 4;
+                    mock.comm.devrState.lsaSize = mock.comm.nRanks;
+                    mock.comm.nNodes = 1;
+                    mock.comm.symmetricSupport = true;
+                    mock.comm.config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+                    mock.comm.ceColl.ceARTmpBuf = nullptr;
+
+                    rcclCollDecision decision{};
+                    // query=false keeps the declined case's ring fallback off getAlgoInfo.
+                    ncclResult_t res = rcclSelectAllReduce(
+                        mock.get(), reinterpret_cast<void*>(0x1000), reinterpret_cast<void*>(0x2000),
+                        tc.count, ncclFloat32, ncclProd,
+                        /*stream=*/nullptr, /*query=*/false, /*graphCapturingHint=*/false, &decision);
+                    EXPECT_EQ(res, ncclSuccess);
+                    EXPECT_EQ(decision.algo == RCCL_CE_REGISTERED, tc.expectCe)
+                        << tc.name << ": algo=" << decision.algo;
+                    EXPECT_NE(decision.algo, RCCL_CE_2SHOT) << tc.name;
+                })
+                .withEnvironment({{"RCCL_CE_ALLREDUCE", "1"},
+                                  {"RCCL_CE_AR_2SHOT_MAX_BYTES", std::to_string(kCeArMaxMsgBytesDefault)},
+                                  {"RCCL_CE_AR_2SHOT_MIN_BYTES", "1024"},
+                                  {"RCCL_DDA_ENABLE", "0"}})
+                // An inherited RCCL_FORCE_CE_ALLREDUCE would close ceZeroStagedWindow (0) or open
+                // ceForceStagedWindow (1).
+                .clearVariable("RCCL_FORCE_CE_ALLREDUCE")
+                .withTimeout(std::chrono::seconds(30))
+                .withNumGpus(0));
+    }
 
     ProcessIsolatedTestRunner::ExecutionOptions options;
     options.stopOnFirstFailure = false;
