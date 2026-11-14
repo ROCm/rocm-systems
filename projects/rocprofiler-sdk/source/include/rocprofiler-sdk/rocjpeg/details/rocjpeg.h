@@ -411,6 +411,161 @@ rocJpegDecodeBatched(RocJpegHandle              handle,
 extern const char* ROCJPEGAPI
 rocJpegGetErrorName(RocJpegStatus rocjpeg_status);
 
+/**
+ * @def
+ * @ingroup group_amd_rocjpeg
+ * Number of RocJpegChromaSubsampling values (ROCJPEG_CSS_444 to ROCJPEG_CSS_400), excluding
+ * ROCJPEG_CSS_UNKNOWN.
+ */
+#define ROCJPEG_NUM_CHROMA_SUBSAMPLINGS 6
+
+/**
+ * @ingroup group_amd_rocjpeg
+ * @brief Enum representing the layout of the decoded image produced by the VCN JPEG decoder.
+ *
+ * This is the layout written to the RocJpegImage channels for ROCJPEG_OUTPUT_NATIVE. It is reported
+ * per chroma subsampling in RocJpegDecodeCaps::native_surface_format.
+ */
+typedef enum
+{
+    ROCJPEG_SURFACE_FORMAT_NONE    = 0, /**< The chroma subsampling is not supported. */
+    ROCJPEG_SURFACE_FORMAT_YUV444P = 1, /**< 3 planes: Y, U, and V at full resolution (4:4:4). */
+    ROCJPEG_SURFACE_FORMAT_YUV440P = 2, /**< 3 planes: Y, U, and V, with U and V at half height. */
+    ROCJPEG_SURFACE_FORMAT_YUYV    = 3, /**< 1 plane: packed YUYV (4:2:2). */
+    ROCJPEG_SURFACE_FORMAT_NV12 =
+        4,                         /**< 2 planes: Y, and interleaved UV at half width and height. */
+    ROCJPEG_SURFACE_FORMAT_Y8 = 5, /**< 1 plane: Y (4:0:0). */
+} RocJpegSurfaceFormat;
+
+/**
+ * @ingroup group_amd_rocjpeg
+ * @brief Enum representing the JPEG coding processes (ISO/IEC 10918-1).
+ *
+ * Reported as a bitmask in RocJpegDecodeCaps::coding_process_mask, using bit
+ * (1u << RocJpegCodingProcess).
+ */
+typedef enum
+{
+    ROCJPEG_CODING_PROCESS_BASELINE    = 0, /**< Baseline sequential DCT, Huffman, 8-bit (SOF0). */
+    ROCJPEG_CODING_PROCESS_EXTENDED    = 1, /**< Extended sequential DCT (SOF1). */
+    ROCJPEG_CODING_PROCESS_PROGRESSIVE = 2, /**< Progressive DCT (SOF2). */
+    ROCJPEG_CODING_PROCESS_LOSSLESS    = 3, /**< Lossless (SOF3). */
+} RocJpegCodingProcess;
+
+/**
+ * @struct RocJpegDecodeCaps
+ * @ingroup group_amd_rocjpeg
+ * @brief Structure representing the JPEG decode capabilities of a rocJPEG handle.
+ *
+ * This structure is filled by rocJpegGetDecoderCaps(). All fields are output fields. The structure
+ * size is fixed at 128 bytes. New fields will be carved out of the reserved array.
+ */
+typedef struct
+{
+    uint8_t  is_supported;     /**< 1 if the handle can decode JPEG streams, 0 otherwise. */
+    uint8_t  roi_decode;       /**< 1 if the crop_rectangle of RocJpegDecodeParams is supported. */
+    uint8_t  hw_roi_decode;    /**< 1 if cropping is performed by the VCN JPEG decoder. */
+    uint8_t  max_components;   /**< Maximum number of color components per image. */
+    uint32_t num_jpeg_cores;   /**< Number of VCN JPEG cores available to the handle. */
+    uint32_t min_width;        /**< Minimum supported image width in pixels. */
+    uint32_t min_height;       /**< Minimum supported image height in pixels. */
+    uint32_t max_width;        /**< Maximum supported image width in pixels. */
+    uint32_t max_height;       /**< Maximum supported image height in pixels. */
+    uint32_t subsampling_mask; /**< Supported RocJpegChromaSubsampling values, one bit each. */
+    uint32_t output_format_mask;      /**< Supported RocJpegOutputFormat values, one bit each. */
+    uint32_t hw_rgb_subsampling_mask; /**< Subsamplings color converted by the VCN JPEG decoder. */
+    uint32_t hw_rgb_output_format_mask; /**< Output formats color converted by the VCN decoder. */
+    uint32_t native_surface_format[ROCJPEG_NUM_CHROMA_SUBSAMPLINGS]; /**< RocJpegSurfaceFormat for
+                                                                         each subsampling. */
+    uint32_t coding_process_mask; /**< Supported RocJpegCodingProcess values, one bit each. */
+    uint32_t reserved[15];        /**< Reserved for future use. Set to zero by the library. */
+} RocJpegDecodeCaps;
+
+/**
+ * @fn RocJpegStatus ROCJPEGAPI rocJpegDecodeAsync(RocJpegHandle handle, RocJpegStreamHandle
+ * jpeg_stream_handle, const RocJpegDecodeParams *decode_params, RocJpegImage *destination);
+ * @ingroup group_amd_rocjpeg
+ * @brief Submits a JPEG decode operation without waiting for the output.
+ *
+ * The caller must subsequently call rocJpegDecodeSync() on the same handle to wait for completion
+ * and retrieve the decoded output.
+ *
+ * @param handle The rocJPEG handle.
+ * @param jpeg_stream_handle The rocJPEG stream handle.
+ * @param decode_params The decoding parameters.
+ * @param destination The output image.
+ * @return A RocJpegStatus indicating the success or failure of the submit operation.
+ */
+RocJpegStatus ROCJPEGAPI
+rocJpegDecodeAsync(RocJpegHandle              handle,
+                   RocJpegStreamHandle        jpeg_stream_handle,
+                   const RocJpegDecodeParams* decode_params,
+                   RocJpegImage*              destination);
+
+/**
+ * @fn RocJpegStatus ROCJPEGAPI rocJpegDecodeSync(RocJpegHandle handle, RocJpegImage *destination);
+ * @ingroup group_amd_rocjpeg
+ * @brief Synchronizes a pending asynchronous JPEG decode and retrieves the decoded output.
+ *
+ * @param handle The rocJPEG handle.
+ * @param destination A pointer to RocJpegImage where the decoded image will be stored.
+ * @return A RocJpegStatus indicating the success or failure of the sync operation.
+ */
+RocJpegStatus ROCJPEGAPI
+rocJpegDecodeSync(RocJpegHandle handle, RocJpegImage* destination);
+
+/**
+ * @fn RocJpegStatus ROCJPEGAPI rocJpegDecodeBatchedAsync(RocJpegHandle handle,
+ * RocJpegStreamHandle *jpeg_stream_handles, int batch_size, const RocJpegDecodeParams
+ * *decode_params, RocJpegImage *destinations);
+ * @ingroup group_amd_rocjpeg
+ * @brief Submits a batch of JPEG decode operations without waiting for the output.
+ *
+ * The caller must subsequently call rocJpegDecodeBatchedSync() on the same handle to wait for
+ * completion and retrieve the decoded output.
+ *
+ * @param handle The rocJPEG handle.
+ * @param jpeg_stream_handles An array of rocJPEG stream handles representing the input streams.
+ * @param batch_size The number of JPEG streams in the batch.
+ * @param decode_params An array of RocJpegDecodeParams structs, one for each image.
+ * @param destinations An array of RocJpegImage structs representing the output decoded images.
+ * @return A RocJpegStatus indicating the success or failure of the submit operation.
+ */
+RocJpegStatus ROCJPEGAPI
+rocJpegDecodeBatchedAsync(RocJpegHandle              handle,
+                          RocJpegStreamHandle*       jpeg_stream_handles,
+                          int                        batch_size,
+                          const RocJpegDecodeParams* decode_params,
+                          RocJpegImage*              destinations);
+
+/**
+ * @fn RocJpegStatus ROCJPEGAPI rocJpegDecodeBatchedSync(RocJpegHandle handle, RocJpegImage
+ * *destinations, int batch_size);
+ * @ingroup group_amd_rocjpeg
+ * @brief Synchronizes a pending asynchronous batched JPEG decode and retrieves the decoded output.
+ *
+ * @param handle The rocJPEG handle.
+ * @param destinations The images identifying the pending batch, as passed to
+ * rocJpegDecodeBatchedAsync.
+ * @param batch_size The number of images in the batch.
+ * @return A RocJpegStatus indicating the success or failure of the sync operation.
+ */
+RocJpegStatus ROCJPEGAPI
+rocJpegDecodeBatchedSync(RocJpegHandle handle, RocJpegImage* destinations, int batch_size);
+
+/**
+ * @fn RocJpegStatus ROCJPEGAPI rocJpegGetDecoderCaps(RocJpegHandle handle, RocJpegDecodeCaps
+ * *decode_caps);
+ * @ingroup group_amd_rocjpeg
+ * @brief Queries the JPEG decode capabilities of a rocJPEG handle.
+ *
+ * @param handle The rocJPEG handle created by rocJpegCreate().
+ * @param decode_caps A pointer to a RocJpegDecodeCaps structure that will store the capabilities.
+ * @return A RocJpegStatus indicating the success or failure of the operation.
+ */
+RocJpegStatus ROCJPEGAPI
+rocJpegGetDecoderCaps(RocJpegHandle handle, RocJpegDecodeCaps* decode_caps);
+
 #if defined(__cplusplus)
 }
 #endif
