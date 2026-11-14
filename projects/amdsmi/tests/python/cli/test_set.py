@@ -191,6 +191,8 @@ class TestSet(TestCliBase):
                     )
                 )
 
+        # Runs after the sweep even if a command above fails, so the level is always put back.
+        self.addCleanup(self.RestorePerfLevels)
         self.common.print("Restore Starting Values")
         self.RunCmds(cmds)
 

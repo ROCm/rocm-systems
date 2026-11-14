@@ -30,6 +30,7 @@ class TestGpuClock(unittest.TestCase):
     def tearDown(self):
         amdsmi.amdsmi_shut_down()
 
+    @common.restores_gpu_perf_level
     def test_set_clk_freq(self):
         self.common.print_func_name("")
 
@@ -111,6 +112,7 @@ class TestGpuClock(unittest.TestCase):
 
     # integration
 
+    @common.restores_gpu_perf_level
     def test_set_gpu_pci_bandwidth(self):
         self.common.print_func_name("")
 

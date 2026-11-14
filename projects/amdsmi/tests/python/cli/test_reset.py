@@ -16,5 +16,9 @@ class TestReset(TestCliBase):
         cmds = self.CreateCmds(
             "reset", "Reset Arguments:", "Device Arguments:", "Command Modifiers:", ""
         )
+        # Registered before the sweep so a failing command still restores: reset
+        # --clocks forces AUTO, which is not what the machine started on if the
+        # level was anything else.
+        self.addCleanup(self.RestorePerfLevels)
         self.RunCmds(cmds)
         return
