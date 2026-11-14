@@ -54,8 +54,9 @@ resolve_execution_threads(const ExecutionThreadRequest &request, uint32_t host_t
                           uint32_t xcds, std::span<const uint32_t> dispatch_capacities,
                           bool async_supported, std::span<const ExecutionThreadChoice> choices,
                           util::DiagnosticEmitter emit_error, bool clocked) {
-  if (request.helpers < -1 || request.helpers > 128)
-    return emit_error.emit() << "async_helper_threads must be -1 or between 0 and 128";
+  if (!is_valid_async_helper_threads(request.helpers))
+    return emit_error.emit() << "async_helper_threads must be -1 or between 0 and "
+                             << kMaxAsyncHelperThreads;
   const uint32_t budget = request.budget ? request.budget : std::max(host_threads, 1u);
   xcds = std::max(xcds, 1u);
   if (clocked) {
@@ -79,9 +80,11 @@ resolve_execution_threads(const ExecutionThreadRequest &request, uint32_t host_t
   auto result = effective({});
   uint64_t best_cost = 0;
   for (auto choice : choices) {
-    if (!choice.engines || !choice.dispatch || choice.helpers > 128)
+    if (!choice.engines || !choice.dispatch ||
+        choice.helpers > static_cast<uint32_t>(kMaxAsyncHelperThreads))
       return emit_error.emit() << "thread_allocations require num_threads >= 1, "
-                                  "cpu_dispatch_threads >= 1 and async_helper_threads <= 128";
+                                  "cpu_dispatch_threads >= 1 and async_helper_threads <= "
+                               << kMaxAsyncHelperThreads;
     auto candidate = effective(choice);
     uint64_t cpu_cost = candidate.engines;
     for (uint32_t width : candidate.dispatch)

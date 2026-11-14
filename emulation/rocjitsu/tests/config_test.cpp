@@ -3355,6 +3355,23 @@ TEST(EffectiveConfigTest, CombinesWaitCheckingAndBudgetWithoutChangingOtherField
           .failed());
 }
 
+TEST(EffectiveConfigTest, AppliesThreadLaunchOptionsWithoutChangingNestedNames) {
+  const std::string json =
+      R"({"num_threads":8,"cpu_dispatch_threads":17,"async_helper_threads":8,"vm":{"num_threads":4}})";
+
+  auto rewritten = config::json_with_launch_overrides(
+      json, {.num_threads = 2, .cpu_dispatch_threads = 3, .async_helper_threads = 0});
+  ASSERT_TRUE(rewritten.succeeded());
+  EXPECT_EQ(
+      rewritten.value(),
+      R"({"num_threads":2,"cpu_dispatch_threads":3,"async_helper_threads":0,"vm":{"num_threads":4}})");
+
+  auto automatic_helpers = config::json_with_launch_overrides(R"({"async_helper_threads":0})",
+                                                              {.async_helper_threads = -1});
+  ASSERT_TRUE(automatic_helpers.succeeded());
+  EXPECT_EQ(automatic_helpers.value(), R"({"async_helper_threads":-1})");
+}
+
 TEST(EffectiveConfigTest, AddsLaunchPluginsAndPreservesExistingRequirements) {
   const std::string json =
       R"({"require_all_plugins": false, "required_plugins": ["site-tracer"], "plugins": {"site-tracer": {"mode": "best_effort"}}})";
