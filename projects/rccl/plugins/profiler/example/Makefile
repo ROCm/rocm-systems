@@ -4,7 +4,7 @@
 #
 # See LICENSE.txt for license information
 #
-.DEFAULT_GOAL: build
+.DEFAULT_GOAL := build
 ROCM_PATH ?= /opt/rocm
 ifeq ($(origin CXX),default)
 CXX := $(ROCM_PATH)/bin/amdclang++

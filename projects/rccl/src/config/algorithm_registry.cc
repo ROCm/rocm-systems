@@ -22,10 +22,11 @@
 // Each row's mask bit IS its cost-model tuning id, so the mask lines up 1:1 with
 // src/tuning/cost_model.cc modelMap[] (collMask mirrors modelMap[].enabled[func]):
 //   general    -> bit (algo*NCCL_NUM_PROTOCOLS + proto), the [0,21) space
-//   symmetric  -> bit (NCCL_TUNING_SYM_KERNEL_ID_OFFSET + symKernelId), the [21,42) space
+//   Symk       -> bit (NCCL_TUNING_SYM_KERNEL_ID_OFFSET + symKernelId), [21,42)
+//   Genk       -> bit (NCCL_TUNING_SYM_KERNEL_ID_OFFSET + symKernelId), [42,60)
 // Commented rows are algo/proto combinations that do not exist today; they mark where a
 // future kernel would slot into the tuning-id space.
-// IMPORTANT: this table need must be consistent with the modelMap in src/tuning/cost_model.cc
+// IMPORTANT: this table must be consistent with the modelMap in src/tuning/cost_model.cc
 // clang-format off:  hand-aligned table
 static constexpr struct ncclAlgRegEntry algRegistry[] = {
   // name / mask / collMask / algo / proto / symkKernelId
@@ -50,7 +51,7 @@ static constexpr struct ncclAlgRegEntry algRegistry[] = {
   // ALGBIT(18) PAT x LL     -- combo not implemented
   // ALGBIT(19) PAT x LL128  -- combo not implemented
   {"PAT_SIMPLE",             ALGBIT(20), F_AG | F_RS,        NCCL_ALGO_PAT,            NCCL_PROTO_SIMPLE, -1},
-  // Symmetric AllReduce kernels (bit = NCCL_TUNING_SYM_KERNEL_ID_OFFSET(21) + symKernelId)
+  // Symmetric AllReduce kernels
   {"SYMK_AGxLL_R",           ALGBIT(21), F_AR, -1, -1, ncclSymkKernelId_AllReduce_AGxLL_R},
   {"SYMK_AGxLLMC_R",         ALGBIT(22), F_AR, -1, -1, ncclSymkKernelId_AllReduce_AGxLLMC_R},
   {"SYMK_RSxTmaLD_AGxTmaST", ALGBIT(23), F_AR, -1, -1, ncclSymkKernelId_AllReduce_RSxTmaLD_AGxTmaST},
@@ -74,6 +75,25 @@ static constexpr struct ncclAlgRegEntry algRegistry[] = {
   {"SYMK_LDMC",              ALGBIT(39), F_RS, -1, -1, ncclSymkKernelId_ReduceScatter_LDMC},
   {"SYMK_RailA2A_LsaLD",     ALGBIT(40), F_RS, -1, -1, ncclSymkKernelId_ReduceScatter_RailA2A_LsaLD},
   {"SYMK_RailA2A_LsaLDMC",   ALGBIT(41), F_RS, -1, -1, ncclSymkKernelId_ReduceScatter_RailA2A_LsaLDMC},
+  // Genk shares the tuning-ID space; collMask disambiguates repeated selection names.
+  {"GENK_RING_SIMPLE",       ALGBIT(42), F_AR, -1, -1, ncclSymkKernelId_AllReduce_Ring_Simple},
+  {"GENK_TREE_SIMPLE",       ALGBIT(43), F_AR, -1, -1, ncclSymkKernelId_AllReduce_Tree_Simple},
+  {"GENK_RING_SIMPLE",       ALGBIT(44), F_AG, -1, -1, ncclSymkKernelId_AllGather_Ring_Simple},
+  {"GENK_RING_SIMPLE",       ALGBIT(45), F_RS, -1, -1, ncclSymkKernelId_ReduceScatter_Ring_Simple},
+  {"GENK_RING_SIMPLE",       ALGBIT(46), F_BC, -1, -1, ncclSymkKernelId_Broadcast_Ring_Simple},
+  {"GENK_RING_SIMPLE",       ALGBIT(47), F_RD, -1, -1, ncclSymkKernelId_Reduce_Ring_Simple},
+  {"GENK_RING_LL",           ALGBIT(48), F_AR, -1, -1, ncclSymkKernelId_AllReduce_Ring_LL},
+  {"GENK_TREE_LL",           ALGBIT(49), F_AR, -1, -1, ncclSymkKernelId_AllReduce_Tree_LL},
+  {"GENK_RING_LL",           ALGBIT(50), F_AG, -1, -1, ncclSymkKernelId_AllGather_Ring_LL},
+  {"GENK_RING_LL",           ALGBIT(51), F_RS, -1, -1, ncclSymkKernelId_ReduceScatter_Ring_LL},
+  {"GENK_RING_LL",           ALGBIT(52), F_BC, -1, -1, ncclSymkKernelId_Broadcast_Ring_LL},
+  {"GENK_RING_LL",           ALGBIT(53), F_RD, -1, -1, ncclSymkKernelId_Reduce_Ring_LL},
+  {"GENK_RING_LL128",        ALGBIT(54), F_AR, -1, -1, ncclSymkKernelId_AllReduce_Ring_LL128},
+  {"GENK_TREE_LL128",        ALGBIT(55), F_AR, -1, -1, ncclSymkKernelId_AllReduce_Tree_LL128},
+  {"GENK_RING_LL128",        ALGBIT(56), F_AG, -1, -1, ncclSymkKernelId_AllGather_Ring_LL128},
+  {"GENK_RING_LL128",        ALGBIT(57), F_RS, -1, -1, ncclSymkKernelId_ReduceScatter_Ring_LL128},
+  {"GENK_RING_LL128",        ALGBIT(58), F_BC, -1, -1, ncclSymkKernelId_Broadcast_Ring_LL128},
+  {"GENK_RING_LL128",        ALGBIT(59), F_RD, -1, -1, ncclSymkKernelId_Reduce_Ring_LL128},
 };
 // clang-format on
 static constexpr int algRegistryCount = (int)(sizeof(algRegistry) / sizeof(algRegistry[0]));

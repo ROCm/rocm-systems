@@ -98,7 +98,11 @@ ProcessIsolatedTestRunner::TestConfig makeTeamTopologyConfig(const std::string& 
       {"NCCL_IB_DISABLE", "1"}
     })
     .withTimeout(std::chrono::seconds(60))
-    .withNumGpus(static_cast<size_t>(numGpus));
+    .withNumGpus(static_cast<size_t>(numGpus))
+    // Every test here asserts exact team sizes, which these override.
+    .clearVariable("NCCL_LSA_TEAM_SIZE")
+    .clearVariable("NCCL_CFT_UC_TEAM_SIZE")
+    .clearVariable("NCCL_CFT_MC_TEAM_SIZE");
 }
 
 // A 1-rank comm plus the golden LSA team, which proves ncclDevrInitOnce ran before the pins below.
@@ -175,8 +179,10 @@ void runRankToLsaNoBoundsCheckTest() {
   }
 }
 
-// Known defect, pinned red-on-fix: cftSize is stuck at 1, so HIER_LSA computes 1 / lsaSize and truncates to 0.
-void runCftHierLsaMultiRankDefectTest() {
+// On ROCm, computeCftSizes keeps cftSize and cftMcSize at 1 (no logical endpoints, gpuCftSupport == 0), so HIER_LSA
+// computes 1 / lsaSize and truncates to an empty team. This is intended on AMD; the test keeps its name so its CI
+// history stays attached.
+void runCftHierLsaMultiRankTest() {
   // Never add a GTEST_SKIP() to this body: the harness scores a skipped isolated child as a passed parent test.
   CommResources resources(kDualRank);
   ASSERT_EQ(ncclCommInitAll(resources.comms.data(), kDualRank, nullptr), ncclSuccess);
@@ -186,10 +192,9 @@ void runCftHierLsaMultiRankDefectTest() {
     const ncclTeam_t lsaTeam = ncclTeamLsa(resources.comms[rank]);
     EXPECT_EQ(lsaTeam.nRanks, kDualRank) << "two GPUs on one node share one LSA domain";
 
-    // cftMcSize stays 1 while lsaSize is 2, so CftMultimem must stay a singleton and not track the LSA team.
+    // cftMcSize stays 1 on ROCm while lsaSize is 2, so CftMultimem stays a singleton and does not track the LSA team.
     expectTeamEquals(ncclTeamCftMultimem(resources.comms[rank]), 1, 0, 1);
-
-    // FLAT reads cftSize and HIER_MULTIMEM factors by cftMcSize, both 1 here, so neither may track lsaSize, which is 2.
+    // FLAT reads cftSize and HIER_MULTIMEM factors by cftMcSize, both 1 on ROCm, so neither tracks lsaSize.
     expectTeamEquals(ncclTeamCft(resources.comms[rank], NCCL_CFT_TEAM_FLAT), 1, 0, 1);
     expectTeamEquals(ncclTeamCft(resources.comms[rank], NCCL_CFT_TEAM_HIER_MULTIMEM), 1, 0, 1);
 
@@ -197,11 +202,9 @@ void runCftHierLsaMultiRankDefectTest() {
     EXPECT_EQ(ncclTeamRankToLsa(resources.comms[rank], ncclTeam_t{/*nRanks=*/2, /*rank=*/0, /*stride=*/1}, 0), rank);
     EXPECT_EQ(ncclTeamRankToWorld(resources.comms[rank], ncclTeam_t{/*nRanks=*/2, /*rank=*/0, /*stride=*/1}, 0), rank);
 
+    // cftSize / lsaSize = 1 / 2 truncates to an empty outer team on ROCm.
     const ncclTeam_t hierLsa = ncclTeamCft(resources.comms[rank], NCCL_CFT_TEAM_HIER_LSA);
-    EXPECT_EQ(hierLsa.nRanks, 0) << "A non-zero nRanks means the cftSize / lsaSize truncation in ncclTeamCft was "
-                                 << "fixed. Invert this pin into a real assertion on the outer-factor team, drop "
-                                 << "the defect note above, and re-check the FLAT and HIER_MULTIMEM tests, which "
-                                 << "also assume cftSize is stuck at 1.";
+    EXPECT_EQ(hierLsa.nRanks, 0);
     // stride proves HIER_LSA ran rather than the invalid-mode branch, which yields nRanks 0 with stride 0.
     EXPECT_EQ(hierLsa.stride, lsaTeam.nRanks);
   }
@@ -255,10 +258,8 @@ TEST(TeamTopologyTests, Cft_HierLsa_MultiRank_ReturnsEmptyTeam_PinsKnownDefect) 
     }
     GTEST_SKIP() << "This test requires at least 2 visible GPUs to make lsaSize exceed 1.";
   }
-  // Only bites on the symmetric path: the ROCm non-symmetric path overwrites lsaSize with comm->localRanks anyway.
   RUN_ISOLATED_TESTS(makeTeamTopologyConfig("TeamTopologyTests.Cft_HierLsa_MultiRank_ReturnsEmptyTeam_PinsKnownDefect",
-                                            []() { runCftHierLsaMultiRankDefectTest(); }, kDualRank)
-                       .clearVariable("NCCL_LSA_TEAM_SIZE"));
+                                            []() { runCftHierLsaMultiRankTest(); }, kDualRank));
 }
 
 } // namespace RcclUnitTesting

@@ -29,6 +29,9 @@ ASSERT_HOOK_MATCHES_PROD(g_cuStreamBatchMemOp,  ncclCuStreamBatchMemOp);
 #ifndef RCCL_RMA_FAKES_OMIT_ncclRmaInitialized
 ASSERT_HOOK_MATCHES_PROD(g_rmaInitialized,      ncclRmaInitialized);
 #endif
+#ifndef RCCL_RMA_FAKES_OMIT_ncclRmaProxyWorldToPeer
+ASSERT_HOOK_MATCHES_PROD(g_rmaProxyWorldToPeer, ncclRmaProxyWorldToPeer);
+#endif
 
 #undef ASSERT_HOOK_MATCHES_PROD
 
@@ -80,6 +83,18 @@ static bool DefaultRmaInitialized(struct ncclComm*) { return false; }
 std::function<bool(struct ncclComm*)> g_rmaInitialized = DefaultRmaInitialized;
 #endif
 
+// ncclRmaProxyWorldToPeer (src/rma/rma_proxy.cc): with comm->rmaBaseStride == 1 (one rail spanning every rank,
+// the only layout these tests build) the real mapping is the identity for every in-range world rank. Tests that
+// need a rail mapping or a rejected rank install their own.
+#ifndef RCCL_RMA_FAKES_OMIT_ncclRmaProxyWorldToPeer
+static ncclResult_t DefaultRmaProxyWorldToPeer(const struct ncclRmaProxyCtx*, int worldRank, int* peer) {
+  *peer = worldRank;
+  return ncclSuccess;
+}
+std::function<ncclResult_t(const struct ncclRmaProxyCtx*, int, int*)> g_rmaProxyWorldToPeer =
+    DefaultRmaProxyWorldToPeer;
+#endif
+
 // ---------------------------------------------------------------------------
 // Externals the compiled TU links against
 // ---------------------------------------------------------------------------
@@ -115,6 +130,13 @@ ncclResult_t ncclRmaCePutLaunch(struct ncclComm* comm, struct ncclKernelPlan* pl
 // Omitted where the target compiles the real rma.cc as its unit under test and defines this itself.
 #ifndef RCCL_RMA_FAKES_OMIT_ncclRmaInitialized
 bool ncclRmaInitialized(struct ncclComm* comm) { return g_rmaInitialized(comm); }
+#endif
+
+// Omitted where the target compiles the real rma_proxy.cc (rccl-UnitTestsMicroRmaProxy).
+#ifndef RCCL_RMA_FAKES_OMIT_ncclRmaProxyWorldToPeer
+ncclResult_t ncclRmaProxyWorldToPeer(const struct ncclRmaProxyCtx* ctx, int worldRank, int* peer) {
+  return g_rmaProxyWorldToPeer(ctx, worldRank, peer);
+}
 #endif
 
 // ---------------------------------------------------------------------------
@@ -162,6 +184,19 @@ int ncclRmaProxyWaitNumStreamOps(const struct ncclRmaProxyDesc*) {
 ncclResult_t ncclRmaProxyWaitParams(struct ncclRmaProxyCtx*, struct ncclRmaProxyDesc*, hipStreamBatchMemOpParams*) {
   FailLoudUnfaked("rma_fakes", "ncclRmaProxyWaitParams");
 }
+int ncclRmaProxyWaitStartNumOps(const struct ncclRmaProxyDesc*) {
+  FailLoudUnfaked("rma_fakes", "ncclRmaProxyWaitStartNumOps");
+}
+ncclResult_t ncclRmaProxyWaitStartParams(struct ncclRmaProxyDesc*, hipStreamBatchMemOpParams*) {
+  FailLoudUnfaked("rma_fakes", "ncclRmaProxyWaitStartParams");
+}
+int ncclRmaProxyWaitDoneNumOps(const struct ncclRmaProxyDesc*) {
+  FailLoudUnfaked("rma_fakes", "ncclRmaProxyWaitDoneNumOps");
+}
+ncclResult_t ncclRmaProxyWaitDoneParams(struct ncclRmaProxyCtx*, struct ncclRmaProxyDesc*,
+                                        hipStreamBatchMemOpParams*) {
+  FailLoudUnfaked("rma_fakes", "ncclRmaProxyWaitDoneParams");
+}
 ncclResult_t ncclRmaProxyEnqueueDesc(struct ncclRmaProxyCtx*, struct ncclRmaProxyDesc**) {
   FailLoudUnfaked("rma_fakes", "ncclRmaProxyEnqueueDesc");
 }
@@ -177,5 +212,8 @@ void ResetRmaFakes() {
   g_cuStreamBatchMemOp  = DefaultCuStreamBatchMemOp;
 #ifndef RCCL_RMA_FAKES_OMIT_ncclRmaInitialized
   g_rmaInitialized      = DefaultRmaInitialized;
+#endif
+#ifndef RCCL_RMA_FAKES_OMIT_ncclRmaProxyWorldToPeer
+  g_rmaProxyWorldToPeer = DefaultRmaProxyWorldToPeer;
 #endif
 }

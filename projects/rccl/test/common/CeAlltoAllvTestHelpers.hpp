@@ -47,8 +47,8 @@ struct CeAlltoAllvMockComm
         comm.config.CTAPolicy  = NCCL_CTA_POLICY_ZERO;
         // Keep mock LSA state initialized so eligibility does not inspect absent topology.
         comm.devrState.bigSize = 1;
-        comm.devrState.lsaSize = comm.nRanks;
-        comm.devrState.lsaSelf = comm.rank;
+        comm.devrState.lsaTeamSize = comm.nRanks;
+        comm.devrState.lsaTeamSelf = comm.rank;
     }
 
     // Multi-node local-only LSA so ncclHierCeAvailable can pass (bigSize skips CUDA init).
@@ -67,12 +67,15 @@ struct CeAlltoAllvMockComm
         // globalRmaProxySupport, and ncclRmaProxyEnabled reads it directly, so
         // setting only hostRmaSupport would describe a comm that cannot exist.
         comm.globalRmaProxySupport = true;
+        // init.cc sets globalRmaProxySupport from a nonzero rmaBaseStride; 1 is the
+        // cross-NIC (world-connected) case that hierarchical CE AlltoAll requires.
+        comm.rmaBaseStride    = 1;
         comm.config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
         comm.config.numRmaCtx = 1;
         comm.maxLocalRanks    = localRanks;
         comm.devrState.bigSize = 1;
-        comm.devrState.lsaSize = localRanks;
-        comm.devrState.lsaSelf = 0;
+        comm.devrState.lsaTeamSize = localRanks;
+        comm.devrState.lsaTeamSelf = 0;
     }
 
     ncclComm* get() { return &comm; }

@@ -24,6 +24,7 @@
 #include "gin/gin_host.h"
 #endif
 #include "os.h"
+#include "profiler_event.h"
 
 #include <atomic>
 #include <mutex>
@@ -120,6 +121,7 @@ struct ncclProxyOp {
   union ncclProxyOpSpecifics specifics;
   int nChannels;
   int nPeers;
+  int minPeers;
 
   // Profiler plugin
   union {
@@ -127,7 +129,7 @@ struct ncclProxyOp {
     struct ncclTaskP2p* p2p;
   } task;
   int eActivationMask;
-  void* taskEventHandle;
+  struct ncclProfilerEventRef taskEventHandle;
   int rank;
   int peer;
   ncclPid_t pid;
@@ -145,7 +147,7 @@ struct ncclProxyOp {
 struct ncclProxySubArgs;
 
 struct ncclProxyEventHandle {
-  void* stepEventHandle;
+  struct ncclProfilerEventRef stepEventHandle;
   struct ncclProxySubArgs* subArgPtr;
 };
 
@@ -183,9 +185,9 @@ struct ncclProxySubArgs {
   int rank;
   ncclPid_t pid;
   void* profilerContext;
-  void* taskEventHandle;
-  void* opEventHandle;
-  void* kernelEventHandle;
+  struct ncclProfilerEventRef taskEventHandle;
+  struct ncclProfilerEventRef opEventHandle;
+  struct ncclProfilerEventRef kernelEventHandle;
   struct ncclProxyEventHandle pHandles[NCCL_STEPS];
   size_t transSize;
   uint64_t workCounter;
@@ -223,6 +225,7 @@ struct ncclProxyArgs {
   int sharedSize[NCCL_STEPS];
   int nChannels;
   int nPeers;
+  int minPeers;
 
   int idle;
   uint64_t hdp_flushed;
@@ -264,6 +267,14 @@ struct ncclProxyOpsPool {
 static inline size_t ncclProxyOpsPoolSize(int tpLocalnRanks) {
   return offsetof(struct ncclProxyOpsPool, ops) + (size_t)tpLocalnRanks * MAX_OPS_PER_PEER * sizeof(struct ncclProxyOp);
 }
+
+// Profiler handles sit inside both this pool and the ncclProxyArgs pool, which
+// together replicate them hundreds of thousands of times per rank (millions on
+// RCCL, whose MAXCHANNELS is 256 or 512). See profiler_event.h for the per-slot
+// cost before relaxing this.
+static_assert(sizeof(struct ncclProfilerEventRef) <= 2 * sizeof(void*),
+              "NCCL_PROFILER_MAX_PLUGINS is replicated across the proxy op and proxy args pools; "
+              "each additional slot costs megabytes of host memory per rank");
 
 struct ncclProxyOps {
   ncclProxyOpsPool* pool;
@@ -378,9 +389,9 @@ struct ncclProxyState {
   int p2pLl128BuffSize;
   bool allocP2pNetLLBuffers;
   bool dmaBufSupport;
+  bool cuMemHostEnabled;
   ncclNet_t* ncclNet;
   ncclCollNet_t* ncclCollNet;
-  struct ncclGinState* ginState;
   uint32_t* abortFlag;
   bool directMode;
   struct ncclMemManager* memManager; // Shared memory manager for proxy allocations

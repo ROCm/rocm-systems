@@ -45,8 +45,8 @@ struct GinAlltoAllMockComm
         comm.globalGinSupport = NCCL_GIN_CONNECTION_FULL;
 
         comm.devrState.bigSize = 1;
-        comm.devrState.lsaSize = comm.nRanks;
-        comm.devrState.lsaSelf = comm.rank;
+        comm.devrState.lsaTeamSize = comm.nRanks;
+        comm.devrState.lsaTeamSelf = comm.rank;
 
         // One window spanning both buffers is enough for ncclDevrFindWindow.
         window.userPtr                = reinterpret_cast<void*>(kSendAddr);
@@ -62,8 +62,8 @@ struct GinAlltoAllMockComm
     void setBackends(std::initializer_list<ncclGinType_t> types)
     {
         int n = 0;
-        for (ncclGinType_t type : types) sharedRes.ginState.backends[n++].ginType = type;
-        sharedRes.ginState.numActiveBackends = n;
+        for (ncclGinType_t type : types) comm.ginState.backends[n++].ginType = type;
+        comm.ginState.numActiveBackends = n;
     }
 
     ncclComm* get() { return &comm; }
@@ -135,7 +135,7 @@ TEST_F(GinAlltoAllEligibilityTest, MultiNode)
 TEST_F(GinAlltoAllEligibilityTest, TooManyRanks)
 {
     mockComm_.comm.nRanks            = 32;
-    mockComm_.comm.devrState.lsaSize = mockComm_.comm.nRanks;
+    mockComm_.comm.devrState.lsaTeamSize = mockComm_.comm.nRanks;
     EXPECT_FALSE(eligible(kCount));
 }
 
@@ -159,7 +159,7 @@ TEST_F(GinAlltoAllEligibilityTest, PartialGinConnectivity)
 // with stores, so the alltoall has to fall back even on one node.
 TEST_F(GinAlltoAllEligibilityTest, LsaTeamSmallerThanComm)
 {
-    mockComm_.comm.devrState.lsaSize = mockComm_.comm.nRanks / 2;
+    mockComm_.comm.devrState.lsaTeamSize = mockComm_.comm.nRanks / 2;
     EXPECT_FALSE(eligible(kCount));
 }
 
@@ -190,7 +190,7 @@ TEST_F(GinAlltoAllEligibilityTest, SdmaActiveButNotDefault)
 // A finalized backend list is kept only for plugin teardown and must not be selected.
 TEST_F(GinAlltoAllEligibilityTest, GinFinalized)
 {
-    mockComm_.sharedRes.ginState.finalized = true;
+    mockComm_.comm.ginState.finalized = true;
     EXPECT_FALSE(eligible(kCount));
 }
 

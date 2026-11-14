@@ -905,15 +905,15 @@ protected:
     // Idempotent, and runs even when a fatal assertion cut the test body short.
     ReleaseProxyWaitArrays(plan_.get());
     comm_->planner.rmaTaskQueues = nullptr;  // borrowed from ctxQueues_
-    comm_->devrState.lsaRankList = nullptr;  // borrowed from lsaRanks_
+    comm_->devrState.lsaTeamRankList = nullptr;  // borrowed from lsaRanks_
     RmaTestBase::TearDown();
   }
 
   // isLsaAccessible scans this list, so membership is what routes a task to CE.
   void SetLsaRanks(std::vector<int> ranks) {
     lsaRanks_ = std::move(ranks);
-    comm_->devrState.lsaSize = static_cast<int>(lsaRanks_.size());
-    comm_->devrState.lsaRankList = lsaRanks_.empty() ? nullptr : lsaRanks_.data();
+    comm_->devrState.lsaTeamSize = static_cast<int>(lsaRanks_.size());
+    comm_->devrState.lsaTeamRankList = lsaRanks_.empty() ? nullptr : lsaRanks_.data();
   }
 
   // Size the per-context queues the way init.cc does.
@@ -1179,7 +1179,7 @@ TEST_F(RmaScheduleTest, WaitSignal_ZeroPeers_ProducesNoTasks) {
   EXPECT_EQ(comm_->planner.nTasksRma, 0);
 }
 
-// lsaSize == 0: the scan body never runs, so every peer is remote.
+// lsaTeamSize == 0: the scan body never runs, so every peer is remote.
 TEST_F(RmaScheduleTest, WaitSignal_EmptyLsaTeam_RoutesEveryPeerToProxy) {
   SetLsaRanks({});
   EnqueueWait(/*ctx=*/0, {0, 1});
@@ -1690,19 +1690,19 @@ protected:
   }
 
   void TearDown() override {
-    comm_->devrState.lsaRankList = nullptr;  // borrowed from lsaRanks_
+    comm_->devrState.lsaTeamRankList = nullptr;  // borrowed from lsaRanks_
     RmaTestBase::TearDown();
   }
 
   // ncclDevrIsOneLsaTeam is dev_runtime.cc's real predicate here, derived from
-  // computeLsaSize; a non-zero bigSize short-circuits that to lsaSize, so the
-  // team is "one" exactly when lsaSize == nRanks. Move nRanks, not lsaSize, so
-  // lsaSize keeps matching lsaRanks_ -- isLsaAccessible walks it by lsaSize.
+  // computeLsaTeamSize; a non-zero bigSize short-circuits that to lsaTeamSize, so the
+  // team is "one" exactly when lsaTeamSize == nRanks. Move nRanks, not lsaTeamSize, so
+  // lsaTeamSize keeps matching lsaRanks_ -- isLsaAccessible walks it by lsaTeamSize.
   void SetOneLsaTeam(bool oneTeam) {
     comm_->devrState.bigSize = 1;
     lsaRanks_ = {0, 1};
-    comm_->devrState.lsaSize = static_cast<int>(lsaRanks_.size());
-    comm_->devrState.lsaRankList = lsaRanks_.data();
+    comm_->devrState.lsaTeamSize = static_cast<int>(lsaRanks_.size());
+    comm_->devrState.lsaTeamRankList = lsaRanks_.data();
     comm_->nRanks = oneTeam ? 2 : 4;
   }
 

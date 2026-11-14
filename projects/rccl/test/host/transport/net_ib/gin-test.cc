@@ -532,8 +532,13 @@ TEST_F(NetIbGinMicrotest, Connect_RetriesNullCommsAndPublishesRingContext) {
     ncclIbDevs[1].context = &verbsContext;
     ncclIbDevs[1].pd = &pd;
 
-    ASSERT_EQ(ncclGinIbConnect(nullptr, handles, 3, 1, &listen, reinterpret_cast<void**>(&published)), ncclSuccess);
+    volatile uint32_t abortFlag = 0;
+
+    ASSERT_EQ(ncclGinIbConnect(nullptr, handles, 3, 1, &listen, reinterpret_cast<void**>(&published), &abortFlag),
+              ncclSuccess);
     ASSERT_NE(published, nullptr);
+    // The abort flag is kept so the coll comm's all-gather can bail out on abort.
+    EXPECT_EQ(published->abortFlag, &abortFlag);
     EXPECT_EQ(connect.calls, 2);
     EXPECT_EQ(accept.calls, 2);
     EXPECT_EQ(published->rank, 1);
@@ -564,8 +569,36 @@ TEST_F(NetIbGinMicrotest, Connect_AcceptFailureClosesEstablishedSendComm) {
   });
   void* coll = reinterpret_cast<void*>(0x1);
 
-  EXPECT_EQ(ncclGinIbConnect(nullptr, handles, 1, 0, &listen, &coll), ncclSystemError);
+  EXPECT_EQ(ncclGinIbConnect(nullptr, handles, 1, 0, &listen, &coll, nullptr), ncclSystemError);
   EXPECT_EQ(coll, nullptr);
+  EXPECT_EQ(closeSend.calls, 1);
+  EXPECT_TRUE(g_hostAllocs.live.empty());
+}
+
+TEST_F(NetIbGinMicrotest, Connect_AbortFlagStopsRetryLoopAndClosesEstablishedSendComm) {
+  ncclIbListenComm listen{};
+  void* handles[1] = {nullptr};
+  int sendToken = 1;
+  volatile uint32_t abortFlag = 0;
+  ScopedHook connect(g_ginConnect, [&](void*, int, void*, void** comm, ncclNetDeviceHandle_t**, int, int) {
+    *comm = &sendToken;
+    return ncclSuccess;
+  });
+  // The peer never shows up; the abort is raised while waiting for it.
+  ScopedHook accept(g_ginAccept, [&](void*, void**, ncclNetDeviceHandle_t**, int) {
+    abortFlag = 1;
+    return ncclSuccess;
+  });
+  ScopedHook closeSend(g_ginNetCloseSend, [&](void* comm) {
+    EXPECT_EQ(comm, &sendToken);
+    return ncclSuccess;
+  });
+  void* coll = reinterpret_cast<void*>(0x1);
+
+  EXPECT_EQ(ncclGinIbConnect(nullptr, handles, 1, 0, &listen, &coll, &abortFlag), ncclInternalError);
+  EXPECT_EQ(coll, nullptr);
+  EXPECT_EQ(connect.calls, 1);
+  EXPECT_EQ(accept.calls, 1);
   EXPECT_EQ(closeSend.calls, 1);
   EXPECT_TRUE(g_hostAllocs.live.empty());
 }
@@ -586,7 +619,7 @@ TEST_F(NetIbGinMicrotest, ProxyConnect_GdrSupportedBuildsProxyConnection) {
   });
   void* coll = nullptr;
 
-  ASSERT_EQ(ncclRmaIbProxyConnect(nullptr, handles, 1, 0, &listen, &coll), ncclSuccess);
+  ASSERT_EQ(ncclRmaIbProxyConnect(nullptr, handles, 1, 0, &listen, &coll, nullptr), ncclSuccess);
   ASSERT_NE(coll, nullptr);
   g_hostAllocs.Free(coll);
 }
@@ -597,7 +630,7 @@ TEST_F(NetIbGinMicrotest, ProxyConnect_NoGdrReturnsInvalidUsageBeforeConnecting)
   });
   void* coll = nullptr;
 
-  EXPECT_EQ(ncclRmaIbProxyConnect(nullptr, nullptr, 1, 0, nullptr, &coll), ncclInvalidUsage);
+  EXPECT_EQ(ncclRmaIbProxyConnect(nullptr, nullptr, 1, 0, nullptr, &coll, nullptr), ncclInvalidUsage);
   EXPECT_EQ(connect.calls, 0);
   EXPECT_EQ(coll, nullptr);
 }
@@ -726,7 +759,6 @@ TEST_F(NetIbGinMicrotest, CreateContext_SingleRankBuildsContextsAndClampsBatchSi
     });
     ncclRmaConfig_t config{};
     config.nContexts = 2;
-    config.rankStride = 1;
     config.trafficClass = 7;
     ncclRmaIbProxyCtx* contexts = nullptr;
 
@@ -751,12 +783,15 @@ TEST_F(NetIbGinMicrotest, CreateContext_SingleRankBuildsContextsAndClampsBatchSi
   }
 }
 
-TEST_F(NetIbGinMicrotest, CreateContext_RankStrideConnectsForwardAndAcceptsBackward) {
-  // Six ranks, not four: with a stride of 2, rank + 2 and rank - 2 coincide mod 4, which would hide a swapped peer.
+TEST_F(NetIbGinMicrotest, CreateContext_PeerArrayConnectsForwardAndAcceptsBackward) {
+  // Six ranks, not four: with peers two apart, rank + 2 and rank - 2 coincide mod 4, which would hide a swapped peer.
+  // {1, 3, 5} is the sorted peerArray ncclRmaProxyCreateContext builds for rail peer 1 at rankStride 2.
   GinCreateContextScene scene(/*nranks=*/6, /*rank=*/1);
+  int peerArray[] = {1, 3, 5};
   ncclRmaConfig_t config{};
   config.nContexts = 1;
-  config.rankStride = 2;
+  config.peerArray = peerArray;
+  config.peerArrayCount = 3;
   ncclRmaIbProxyCtx* contexts = nullptr;
 
   ASSERT_EQ(ncclRmaIbProxyCreateContext(&scene.coll, &config, reinterpret_cast<void**>(&contexts)), ncclSuccess);
@@ -766,8 +801,13 @@ TEST_F(NetIbGinMicrotest, CreateContext_RankStrideConnectsForwardAndAcceptsBackw
   EXPECT_EQ(scene.connectPeers, (std::vector<int>{1, 3, 5}));
   EXPECT_EQ(scene.connectSlots, (std::vector<void**>{&sends[1], &sends[3], &sends[5]}));
   EXPECT_EQ(scene.acceptSlots, (std::vector<void**>{&recvs[1], &recvs[5], &recvs[3]}));
-  // A ring barrier of nranks - 1 sends after each of the three peers.
-  EXPECT_EQ(scene.isend.calls, 3 * 5);
+  for (int r : {0, 2, 4}) {
+    EXPECT_EQ(sends[r], nullptr) << r;
+    EXPECT_EQ(recvs[r], nullptr) << r;
+  }
+  // Every one of the nranks rounds runs a ring barrier of nranks - 1 sends, wanted peer or not, so ranks with
+  // different peer counts stay in lockstep.
+  EXPECT_EQ(scene.isend.calls, 6 * 5);
 
   ASSERT_EQ(ncclRmaIbProxyDestroyContext(contexts), ncclSuccess);
   EXPECT_EQ(scene.closeSend.calls, 6);
@@ -775,15 +815,35 @@ TEST_F(NetIbGinMicrotest, CreateContext_RankStrideConnectsForwardAndAcceptsBackw
   g_hostAllocs.Free(contexts);
 }
 
-TEST_F(NetIbGinMicrotest, CreateContext_NoRankStrideConnectsEveryRank) {
+TEST_F(NetIbGinMicrotest, CreateContext_FullPeerArrayConnectsEveryRank) {
   GinCreateContextScene scene(/*nranks=*/4, /*rank=*/1);
+  int peerArray[] = {0, 1, 2, 3};
   ncclRmaConfig_t config{};
   config.nContexts = 1;
-  config.rankStride = 0;
+  config.peerArray = peerArray;
+  config.peerArrayCount = 4;
   ncclRmaIbProxyCtx* contexts = nullptr;
 
   ASSERT_EQ(ncclRmaIbProxyCreateContext(&scene.coll, &config, reinterpret_cast<void**>(&contexts)), ncclSuccess);
   EXPECT_EQ(scene.connectPeers, (std::vector<int>{1, 2, 3, 0}));
+  ASSERT_EQ(ncclRmaIbProxyDestroyContext(contexts), ncclSuccess);
+  g_hostAllocs.Free(contexts);
+}
+
+TEST_F(NetIbGinMicrotest, CreateContext_EmptyPeerArrayConnectsOnlySelf) {
+  // peerArrayCount 0 means this rank needs no RMA connectivity; only the self QP iFlush relies on is built, but the
+  // per-round barriers still run so the other ranks are not left waiting.
+  GinCreateContextScene scene(/*nranks=*/4, /*rank=*/1);
+  ncclRmaConfig_t config{};
+  config.nContexts = 1;
+  config.peerArray = nullptr;
+  config.peerArrayCount = 0;
+  ncclRmaIbProxyCtx* contexts = nullptr;
+
+  ASSERT_EQ(ncclRmaIbProxyCreateContext(&scene.coll, &config, reinterpret_cast<void**>(&contexts)), ncclSuccess);
+  EXPECT_EQ(scene.connectPeers, (std::vector<int>{1}));
+  EXPECT_EQ(scene.acceptSlots, (std::vector<void**>{&contexts[0].fullRecvComm[1]}));
+  EXPECT_EQ(scene.isend.calls, 4 * 3);
   ASSERT_EQ(ncclRmaIbProxyDestroyContext(contexts), ncclSuccess);
   g_hostAllocs.Free(contexts);
 }
@@ -801,9 +861,11 @@ TEST_F(NetIbGinMicrotest, CreateContext_PeerConnectionsTakeGinIbTcOverIbTc) {
       if (std::strcmp(name, "IB_TC") == 0) return int64_t{4};
       return fallback;
     });
+    int peerArray[] = {0, 1};
     ncclRmaConfig_t config{};
     config.nContexts = 1;
-    config.rankStride = 1;
+    config.peerArray = peerArray;
+    config.peerArrayCount = 2;
     ncclRmaIbProxyCtx* contexts = nullptr;
 
     ASSERT_EQ(ncclRmaIbProxyCreateContext(&scene.coll, &config, reinterpret_cast<void**>(&contexts)), ncclSuccess);
@@ -813,16 +875,30 @@ TEST_F(NetIbGinMicrotest, CreateContext_PeerConnectionsTakeGinIbTcOverIbTc) {
   }
 }
 
-TEST_F(NetIbGinMicrotest, CreateContext_NonDivisibleStrideIsRejectedBeforeAllocation) {
-  ncclGinIbCollComm coll{};
-  coll.nranks = 3;
+TEST_F(NetIbGinMicrotest, CreateContext_PeerArrayWithoutSelfStillConnectsSelf) {
+  // Three ranks with a peer set that neither divides nranks nor names this rank: the self QP (used by iFlush) is
+  // always built, and only the listed peer is added to it.
+  GinCreateContextScene scene(/*nranks=*/3, /*rank=*/1);
+  int peerArray[] = {2};
   ncclRmaConfig_t config{};
   config.nContexts = 1;
-  config.rankStride = 2;
-  void* context = reinterpret_cast<void*>(0x1);
+  config.peerArray = peerArray;
+  config.peerArrayCount = 1;
+  ncclRmaIbProxyCtx* contexts = nullptr;
 
-  EXPECT_EQ(ncclRmaIbProxyCreateContext(&coll, &config, &context), ncclInternalError);
-  EXPECT_EQ(g_hostAllocs.calls, 0);
+  ASSERT_EQ(ncclRmaIbProxyCreateContext(&scene.coll, &config, reinterpret_cast<void**>(&contexts)), ncclSuccess);
+  ASSERT_NE(contexts, nullptr);
+  void** sends = contexts[0].fullSendComm;
+  void** recvs = contexts[0].fullRecvComm;
+  EXPECT_EQ(scene.connectPeers, (std::vector<int>{1, 2}));
+  EXPECT_EQ(scene.connectSlots, (std::vector<void**>{&sends[1], &sends[2]}));
+  EXPECT_EQ(scene.acceptSlots, (std::vector<void**>{&recvs[1], &recvs[2]}));
+  EXPECT_EQ(sends[0], nullptr);
+  EXPECT_EQ(recvs[0], nullptr);
+  EXPECT_EQ(scene.isend.calls, 3 * 2);
+
+  ASSERT_EQ(ncclRmaIbProxyDestroyContext(contexts), ncclSuccess);
+  g_hostAllocs.Free(contexts);
 }
 
 // AICOMRCCL-3094: partial context creation must release child arrays allocated
@@ -845,7 +921,6 @@ TEST_F(NetIbGinMicrotest, DISABLED_CreateContext_PartialAllocationFailureRelease
   g_hostAllocs.failCall = 4;
   ncclRmaConfig_t config{};
   config.nContexts = 1;
-  config.rankStride = 1;
   void* context = nullptr;
 
   EXPECT_EQ(ncclRmaIbProxyCreateContext(&coll, &config, &context), ncclSystemError);
@@ -891,7 +966,6 @@ TEST_F(NetIbGinMicrotest, DISABLED_CreateContext_BarrierFailureClosesEstablished
   g_hostAllocs.failCall = 5;
   ncclRmaConfig_t config{};
   config.nContexts = 1;
-  config.rankStride = 1;
   void* context = nullptr;
 
   EXPECT_EQ(ncclRmaIbProxyCreateContext(&coll, &config, &context), ncclSystemError);

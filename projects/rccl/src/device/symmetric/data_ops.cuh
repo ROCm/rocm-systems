@@ -1,7 +1,7 @@
 #if defined(__HIP_PLATFORM_AMD__)
-#include "symmetric/primitives.h"
+#include "symmetric/symk.h"
 #else
-#include "primitives.cuh"
+#include "symk.cuh"
 #endif
 
 struct SMemTag {}; // Shared memory

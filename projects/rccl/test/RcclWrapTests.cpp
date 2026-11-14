@@ -2556,7 +2556,7 @@ static void CreateCeAllReduceEligibleComm(
     mockComm->config.CTAPolicy   = NCCL_CTA_POLICY_ZERO;
     // Preset LSA state so ncclDevrIsOneLsaTeam does not walk the absent rankToNode.
     mockComm->devrState.bigSize  = 1;
-    mockComm->devrState.lsaSize  = nRanks;
+    mockComm->devrState.lsaTeamSize  = nRanks;
 }
 
 // A count of float32 divisible by the 8 mock ranks; well within RCCL_CE_AR_2SHOT_MAX_BYTES.
