@@ -9,7 +9,7 @@ import textwrap
 import pytest
 from format_yaml import check_file
 
-# A panel with one per-channel equation that needs formatting and one equation
+# A panel with one equation that needs formatting and one equation
 # with a dangling operator.
 PANEL_WITH_BROKEN_EQUATION = textwrap.dedent("""\
     Panel Config:
@@ -19,7 +19,7 @@ PANEL_WITH_BROKEN_EQUATION = textwrap.dedent("""\
           id: 401
           metric:
             L2 Hit:
-              value: SUM(TCC_HIT[0] * 2)
+              value: SUM(TCC_HIT_sum * 2)
             AI LDS:
               value: SUM(SQ_INSTS_VALU_MFMA_MOPS_F64 * 512 + ) / SUM(SQ_LDS_IDX_ACTIVE)
 """)
@@ -42,7 +42,7 @@ class TestErrorHandling:
             "cannot parse equation: "
         )
         content = panel.read_text(encoding="utf-8")
-        assert "value: 2 * SUM(TCC_HIT[0])" in content
+        assert "value: 2 * SUM(TCC_HIT_sum)" in content
         assert "MOPS_F64 * 512 + ) /" in content
 
 

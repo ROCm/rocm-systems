@@ -10,7 +10,6 @@ halves, so a caller can change the syntax tree in between. Standard library only
 YAML formatting hook runs with only PyYAML installed.
 """
 
-import re
 from dataclasses import dataclass
 from enum import Enum, auto
 from typing import List, Optional
@@ -23,9 +22,6 @@ AGGREGATION_FUNCTIONS = {"SUM", "MIN", "MAX", "AVG"}
 
 # Operator precedence for parentheses minimization
 OPERATOR_PRECEDENCE = {"+": 1, "-": 1, "*": 2, "/": 2}
-
-# Index suffix of a per-channel counter name, such as TCC_HIT[0]
-COUNTER_INDEX_SUFFIX = re.compile(r"\[\d+\]")
 
 # Channel placeholder of a per-channel template, such as TCC_HIT[::_1]; analyze
 # expands the template once per channel, so the formatter leaves it as written
@@ -188,9 +184,6 @@ class Tokenizer:
             self.text[self.pos].isalnum() or self.text[self.pos] == "_"
         ):
             self.pos += 1
-        index_suffix = COUNTER_INDEX_SUFFIX.match(self.text, self.pos)
-        if index_suffix:
-            self.pos = index_suffix.end()
         return self.text[start : self.pos]
 
     def _read_variable(self) -> str:
