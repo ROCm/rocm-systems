@@ -2390,25 +2390,6 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
             $<TARGET_FILE:register_observer_probe>
     )
 
-    if(NOT ROCJITSU_ENABLE_INTERPOSER AND NOT RJ_ENABLE_HOST_FAULT_RECOVERY)
-        add_executable(vm_embedding_api_test vm_embedding_api_test.cpp)
-        target_link_libraries(
-            vm_embedding_api_test
-            PRIVATE GTest::gtest_main ${CMAKE_DL_LIBS}
-        )
-        rj_configure_target(vm_embedding_api_test TEST)
-        rj_add_test_path(
-            vm_embedding_api_test
-            RJ_VM_API_LIBRARY
-            "$<TARGET_FILE:rocjitsu_shared>"
-        )
-        add_dependencies(vm_embedding_api_test rocjitsu_shared rocjitsu_memory)
-        gtest_discover_tests(
-            vm_embedding_api_test
-            PROPERTIES ENVIRONMENT "LD_PRELOAD=" TIMEOUT 30
-        )
-    endif()
-
     # Resolve only public C symbols through RTLD_LOCAL. Linking simulator
     # objects here would hide whether an ordinary embedder can map its handles.
     add_executable(vm_shared_memory_api_test vm_shared_memory_api_test.cpp)
@@ -2447,6 +2428,25 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
             )
         endforeach()
     endforeach()
+
+    if(NOT ROCJITSU_ENABLE_INTERPOSER AND NOT RJ_ENABLE_HOST_FAULT_RECOVERY)
+        add_executable(vm_embedding_api_test vm_embedding_api_test.cpp)
+        target_link_libraries(
+            vm_embedding_api_test
+            PRIVATE GTest::gtest_main ${CMAKE_DL_LIBS}
+        )
+        rj_configure_target(vm_embedding_api_test TEST)
+        rj_add_test_path(
+            vm_embedding_api_test
+            RJ_VM_API_LIBRARY
+            "$<TARGET_FILE:rocjitsu_shared>"
+        )
+        add_dependencies(vm_embedding_api_test rocjitsu_shared rocjitsu_memory)
+        gtest_discover_tests(
+            vm_embedding_api_test
+            PROPERTIES ENVIRONMENT "LD_PRELOAD=" TIMEOUT 30
+        )
+    endif()
 endif()
 
 add_library(early_mmap_preload SHARED early_mmap_preload_test.cpp)
