@@ -458,8 +458,14 @@ TEST_F(XmlMicrotest, AttrSetters_FormatTheirTypeAndOverwriteInPlace) {
   EXPECT_EQ("4", Attr(node, "i"));
   EXPECT_EQ("2", Attr(node, "f"));
   EXPECT_EQ("0x10", Attr(node, "l"));
-  EXPECT_EQ("0x0", Attr(node, "u"));
+  // Upstream v2.32.6 formats uint64 attrs with "%#" PRIx64, which drops the
+  // "0x" prefix for zero.
+  EXPECT_EQ("0", Attr(node, "u"));
   EXPECT_EQ("first", Attr(node, "s"));
+
+  ASSERT_EQ(ncclSuccess, xmlSetAttrUint64(node, "u", 0xabc));
+  EXPECT_EQ("0xabc", Attr(node, "u"));
+  EXPECT_EQ(5, node->nAttrs);
 }
 
 TEST_F(XmlMicrotest, AttrSetters_FailOnceTheNodeIsFull) {

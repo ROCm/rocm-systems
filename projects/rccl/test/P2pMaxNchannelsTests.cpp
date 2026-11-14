@@ -95,6 +95,8 @@ struct P2pChannelsComm
         comm->nChannels                 = nChannels;
         comm->p2pnChannelsPerPeer       = seedP2pPerPeer;
         comm->config.nChannelsPerNetPeer = NCCL_CONFIG_UNDEF_INT;
+        // ncclParseCommConfig's default. NCCL 2.32.6 caps p2pnChannels at pow2Down(config.maxCTAs).
+        comm->config.maxCTAs            = MAXCHANNELS;
         // Matches what paths.cc resolves an unset maxP2pPeers to. Override for a smaller set.
         comm->p2pMaxPeers               = nRanks;
     }

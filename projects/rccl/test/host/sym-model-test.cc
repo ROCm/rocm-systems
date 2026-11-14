@@ -34,6 +34,18 @@
 #include SYM_MODEL_LSA_BASE_CC_PATH
 #include SYM_MODEL_LSA_A2A_CC_PATH
 
+// NCCL 2.32.6: sym_model.cc reads these params, defined in src/tuning/tuning.cc and src/group.cc, neither of which this
+// binary compiles. Both resolve through g_loadParam with their production defaults.
+int64_t ncclParamSymNoWinEnable() { return g_loadParam("SYM_NOWIN_ENABLE", 0); }
+int64_t ncclParamSingleProcMemRegEnable() { return g_loadParam("SINGLE_PROC_MEM_REG_ENABLE", 0); }
+
+// src/tuning/genk_model.cc: sym_model.cc delegates Genk kernels to it. AMD builds no Genk kernels (no SYM_GENK, so
+// ncclSymkMask clears kernelMask_Genk) and these tests pass none, so reaching it is a test bug.
+ncclResult_t ncclTuningGenkModelSim(struct ncclTuningInput_t* const, struct ncclTuningResult_t* const) {
+  ADD_FAILURE() << "ncclTuningGenkModelSim reached, but no Genk kernels are built on AMD";
+  return ncclInternalError;
+}
+
 namespace {
 
 constexpr int kRanks = 4;
@@ -110,7 +122,7 @@ class SymModelTdmTest : public ::testing::Test {
     ncclTuningResult_t r{};
     r.symKernelId = kernelId;
     r.valid = 1;
-    EXPECT_EQ(ncclTuningSymkModelSim(&in, &r), ncclSuccess);
+    EXPECT_EQ(ncclTuningSymkModelSim(&in, &r, /*internal=*/nullptr), ncclSuccess);  // NCCL 2.32.6 added the unused model-state arg
     return r;
   }
 

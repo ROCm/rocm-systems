@@ -43,6 +43,8 @@ struct ncclComm;
 
 // ncclNetInit/ncclNetInitFromParent live in init-test.cc: they need the full ncclComm/ncclNet_t layout.
 extern ncclResult_t g_ncclNetInitResult;
+// ncclCuMemHostEnable() return value (src/misc/rocmwrap.cc fake); reset to 0.
+extern int g_cuMemHostEnable;
 
 void InstallCommAllocSuccess();
 

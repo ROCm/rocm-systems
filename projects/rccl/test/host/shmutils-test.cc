@@ -46,6 +46,9 @@ class ShmutilsMicrotest : public LinuxTestBase {
     std::unique_ptr<ncclComm> comm(new ncclComm());
     comm->localRank = localRank;
     comm->localRanks = localRanks;
+    // NCCL 2.32.6's ncclShmemAllgather polls comm->abortFlag while it waits for its peers.
+    static uint32_t noAbort = 0;
+    comm->abortFlag = &noAbort;
     return comm;
   }
   ncclShmemCollBuff coll_ = {};

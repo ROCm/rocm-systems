@@ -1,5 +1,5 @@
 # rccl-UnitTestsMicroProfiler — shared/ctest schema.
-# Host-only micro-tests for src/plugin/profiler.cc and the profiler/profiler_v1..v7.cc adapters (no GPU, no librccl).
+# Host-only micro-tests for src/plugin/profiler.cc and the profiler/profiler_v1..v8.cc adapters (no GPU, no librccl).
 # RCCL does not support Windows: exclude_windows matches all tests so generated suites are empty on Windows.
 
 test_categories:

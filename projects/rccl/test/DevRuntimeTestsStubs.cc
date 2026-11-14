@@ -76,6 +76,7 @@ struct ncclDevCommCompat ncclDevCommCompat_v22902 = {};
 struct ncclDevCommCompat ncclDevCommCompat_v22907 = {};
 struct ncclDevCommCompat ncclDevCommCompat_v23000 = {};
 struct ncclDevCommCompat ncclDevCommCompat_v23100 = {};
+struct ncclDevCommCompat ncclDevCommCompat_v23204 = {};
 
 // ---------------------------------------------------------------------------
 // Debug / error.
@@ -247,8 +248,9 @@ ncclResult_t ncclGetRailedGinType(struct ncclComm*, ncclGinType_t* ginType) {
   return ncclSuccess;
 }
 ncclResult_t ncclGinConnectOnce(struct ncclComm*) { return ncclSuccess; }
-ncclResult_t ncclGinDevCommSetup(struct ncclComm*, struct ncclDevCommRequirements const*, struct ncclDevComm*,
-                                 uint32_t) {
+ncclResult_t ncclGinDevCommSetup(struct ncclComm*, struct ncclDevCommRequirements const*,
+                                 struct ncclDevResourceRequirements*, struct ncclGinBarrierReq const*, int,
+                                 struct ncclDevComm*, uint32_t, struct ncclDevCommCompat const*) {
   return ncclSuccess;
 }
 ncclResult_t ncclGinDevCommFree(struct ncclComm*, struct ncclDevComm const*) { return ncclSuccess; }
@@ -282,8 +284,12 @@ ncclResult_t ncclRmaProxyDeregister(struct ncclComm*, void*[NCCL_GIN_MAX_CONNECT
 // ---------------------------------------------------------------------------
 // CFT / LE helpers pulled in via #include of hipified dev_runtime.cc.
 // ---------------------------------------------------------------------------
-int computeCftSize(struct ncclComm*) { return 1; }
-int computeCftMcSize(struct ncclComm*) { return 1; }
+// Real computeCftSizes on ROCm (gpuCftSupport == 0, no logical endpoints) with
+// NCCL_CFT_{UC,MC}_TEAM_SIZE unset: both sizes are 1.
+ncclResult_t computeCftSizes(struct ncclComm* /*comm*/, int* cftSize, int* cftMcSize) {
+  *cftSize = *cftMcSize = 1;
+  return ncclSuccess;
+}
 ncclResult_t symBindTeamLe(struct ncclComm*, struct ncclDevrMemory*, ncclCftLeId) { return ncclSuccess; }
 ncclResult_t symUnbindTeamLe(struct ncclComm*, struct ncclDevrMemory*, ncclCftLeId) { return ncclSuccess; }
 ncclResult_t symTeamObtainUcLe(struct ncclComm*, struct ncclDevrTeam*, struct ncclDevrState*, bool* needBarrier,

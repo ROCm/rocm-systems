@@ -25,6 +25,7 @@
 #include <deque>
 #include <functional>
 #include <memory>
+#include <utility>
 #include <vector>
 
 #include "ScopedHook.h"
@@ -225,6 +226,12 @@ protected:
 
         ctx_ = std::make_unique<ncclRmaProxyCtx>();
         ctx_->comm = comm_.get();
+        // One rail spanning every rank: what ncclRmaProxyCreateContext sets up for rmaBaseStride 1 and
+        // rankStride 1 (ctxStride = rmaBaseStride * rankStride). rma_fakes.cc's ncclRmaProxyWorldToPeer then
+        // maps world rank r to rail peer r, as the real one does for this layout. Progress steps peers by
+        // ctxStride, so it must be non-zero.
+        comm_->rmaBaseStride = 1;
+        ctx_->ctxStride = 1;
         ctx_->queueSize = kQueueSize;
         ctx_->maxInflightRequests = 256;
         ctx_->rmaCtx = &net_.ctxH;
@@ -871,6 +878,64 @@ TEST_F(RmaProxyProgressTest, Progress_EmptyPeerKeepsRotatedOrder) {
     // Visit order from rank 1: 1, 2, 3 (empty), 0.
     EXPECT_EQ(issued, (std::vector<uint32_t>{1, 2, 0}));
     EXPECT_EQ(net_.issueCalls, 3);
+}
+
+// NCCL 2.32.6: a context addresses only world ranks at its ctxStride from this rank, so progress
+// visits just those peers, still starting at its own rank.
+TEST_F(RmaProxyProgressTest, Progress_VisitsOnlyPeersOnThisContextsStride) {
+    RebuildRanks(/*nRanks=*/4, /*rank=*/1);
+    ctx_->ctxStride = 2;
+    for (int peer = 0; peer < nRanks_; peer++) {
+        PushPendingPutSignal(peer, static_cast<uint32_t>(peer));
+    }
+
+    ASSERT_EQ(ncclRmaProxyProgress(&rma_, ctx_.get()), ncclSuccess);
+
+    std::vector<uint32_t> issued;
+    for (const auto& req : net_.owned) issued.push_back(req->targetRank);
+    // Visit order from rank 1 with stride 2: 1, 3. Peers 0 and 2 are another context's.
+    EXPECT_EQ(issued, (std::vector<uint32_t>{1, 3}));
+    EXPECT_EQ(net_.issueCalls, 2);
+    EXPECT_EQ(cis_[0], 0u);
+    EXPECT_EQ(cis_[2], 0u);
+}
+
+// NCCL 2.32.6: the network was connected per rail peer, so iput/iputSignal get the rail peer
+// ncclRmaProxyWorldToPeer maps the op's world target to; the credit stays indexed by world rank.
+TEST_F(RmaProxyProgressTest, IssuePutSignal_PassesRailPeerToNetworkAndCreditsWorldTarget) {
+    RebuildRanks(/*nRanks=*/4, /*rank=*/1);
+    std::vector<std::pair<const ncclRmaProxyCtx*, int>> mapped;
+    ScopedHook toPeer(g_rmaProxyWorldToPeer, [&](const ncclRmaProxyCtx* ctx, int worldRank, int* peer) {
+        mapped.emplace_back(ctx, worldRank);
+        *peer = worldRank / 2;  // a two-rank rail stride
+        return ncclSuccess;
+    });
+
+    for (int signalOp : {0, 1}) {
+        SCOPED_TRACE(signalOp);
+        ncclRmaPutSignalOp op{};
+        op.targetRank = 3;
+        op.signal.op = signalOp;  // 0: iput, otherwise iputSignal
+        ASSERT_EQ(ncclRmaProxyIssuePutSignal(&rma_, ctx_.get(), &op), ncclSuccess);
+        ASSERT_FALSE(net_.owned.empty());
+        EXPECT_EQ(net_.owned.back()->targetRank, 1u);
+    }
+    EXPECT_EQ(mapped, (std::vector<std::pair<const ncclRmaProxyCtx*, int>>{{ctx_.get(), 3}, {ctx_.get(), 3}}));
+    EXPECT_EQ(inflight_[3], 2u);
+    EXPECT_EQ(inflight_[1], 0u);
+}
+
+// A world rank this context cannot reach is rejected before anything is issued or credited.
+TEST_F(RmaProxyProgressTest, IssuePutSignal_WorldToPeerFailurePropagatesWithoutIssuing) {
+    ScopedHook toPeer(g_rmaProxyWorldToPeer,
+                      [](const ncclRmaProxyCtx*, int, int*) { return ncclInvalidArgument; });
+    ncclRmaPutSignalOp op{};
+    op.targetRank = 1;
+
+    EXPECT_EQ(ncclRmaProxyIssuePutSignal(&rma_, ctx_.get(), &op), ncclInvalidArgument);
+    EXPECT_EQ(net_.issueCalls, 0);
+    EXPECT_EQ(inflight_[1], 0u);
+    EXPECT_EQ(op.request, nullptr);
 }
 
 }  // namespace

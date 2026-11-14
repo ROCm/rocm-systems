@@ -82,9 +82,10 @@ rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/init_fakes.cc"
   "int64_t ncclParamTreeCompact() { return g_loadParam(\"TREE_COMPACT\", 0); }"
   "the TreeCompact fake default")
 rccl_assert_source_line("${_rccl_src_root}/transport/net_ib/connect.cc"
-  "NCCL_PARAM(IbQpsPerConn, \"IB_QPS_PER_CONNECTION\", 1)" "fakes/transport_net_ib_fakes.cc: ncclParamIbQpsPerConn()")
+  "DEFINE_NCCL_PARAM(ncclParamIbQpsPerConn, int32_t, NCCL_IB_QPS_PER_CONNECTION, 1,"
+  "fakes/transport_net_ib_fakes.cc: ncclParamIbQpsPerConn")
 rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/transport_net_ib_fakes.cc"
-  "int64_t ncclParamIbQpsPerConn() { return g_loadParam(\"IB_QPS_PER_CONNECTION\", 1); }"
+  "DEFINE_NCCL_PARAM(ncclParamIbQpsPerConn, int32_t, NCCL_IB_QPS_PER_CONNECTION, 1, NCCL_PARAM_FLAG_NONE,"
   "the IbQpsPerConn fake default")
 # The net_ib_cast connect / qp_sharing fakes repeat these params; both copies must agree.
 foreach(_param
@@ -342,31 +343,39 @@ rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/transport_stubs.cc"
   "int64_t ncclParamNetOptionalRecvCompletion() { return g_loadParam(\"NET_OPTIONAL_RECV_COMPLETION\", 1); }"
   "the NetOptionalRecvCompletion fake default")
 # DiagnosticsTests.cpp (rccl-UnitTests) finds failed checks by kDiagFailureMarkers; each marker must stay
-# both in that list and in the report line it marks.
+# both in that list and in the report line it marks. Since NCCL 2.32.6 only the core lines are DIAG_PRINT lines on
+# stdout; p2p.cc logs the per-edge details as INFO(NCCL_DIAG, "P2P %s ...", issue, ...) and the rest as
+# INFO(NCCL_DIAG, "P2P ...").
 set(_rccl_diag_tests "${CMAKE_CURRENT_LIST_DIR}/../DiagnosticsTests.cpp")
 set(_rccl_diag_core_markers "transport detect returned" "p2p: check returned")
-set(_rccl_diag_p2p_markers
-  "p2p: setup failed" "p2p: destination buffer unavailable" "p2p: peer-memory import failed"
-  "p2p: write mismatch" "p2p: read mismatch" "p2p: topology check failed" "p2p: launch/check failed"
-  "p2p: resource cleanup failed")
+set(_rccl_diag_issue_markers
+  "destination buffer unavailable" "peer-memory import failed" "write mismatch" "read mismatch"
+  "topology check failed" "launch/check failed")
+set(_rccl_diag_info_markers "setup failed" "resource cleanup failed")
 foreach(_marker IN LISTS _rccl_diag_core_markers)
   rccl_assert_source_line("${_rccl_src_root}/diagnostics.cc"
     "NCCL DIAG [INFO] ${_marker}" "kDiagFailureMarkers in test/DiagnosticsTests.cpp")
+  rccl_assert_source_line("${_rccl_diag_tests}" "\"${_marker}\"," "the report line it marks in src/diagnostics.cc")
 endforeach()
-foreach(_marker IN LISTS _rccl_diag_p2p_markers)
+foreach(_marker IN LISTS _rccl_diag_issue_markers)
   rccl_assert_source_line("${_rccl_src_root}/diagnostics/p2p.cc"
-    "NCCL DIAG [INFO] ${_marker}" "kDiagFailureMarkers in test/DiagnosticsTests.cpp")
+    "issue = \"${_marker}\"" "kDiagFailureMarkers in test/DiagnosticsTests.cpp")
 endforeach()
-# The local setup line is assembled from NCCL_DIAG_P2P_RUNTIME; Report_EachReasonHasItsOwnLine in
+foreach(_marker IN LISTS _rccl_diag_info_markers)
+  rccl_assert_source_line("${_rccl_src_root}/diagnostics/p2p.cc"
+    "\"P2P ${_marker}" "kDiagFailureMarkers in test/DiagnosticsTests.cpp")
+endforeach()
+# The local setup issue is assembled from NCCL_DIAG_P2P_RUNTIME; Report_EachReasonHasItsOwnLine in
 # diag-p2p-test.cc checks its printed form.
 rccl_assert_source_line("${_rccl_src_root}/diagnostics/p2p.cc"
-  "NCCL DIAG [INFO] p2p: local \" NCCL_DIAG_P2P_RUNTIME" "kDiagFailureMarkers in test/DiagnosticsTests.cpp")
-foreach(_marker IN LISTS _rccl_diag_core_markers _rccl_diag_p2p_markers ITEMS "p2p: local HIP setup failed")
-  rccl_assert_source_line("${_rccl_diag_tests}" "\"${_marker}\"," "the report line it marks in src/diagnostics")
+  "issue = \"local \" NCCL_DIAG_P2P_RUNTIME \" setup failed\"" "kDiagFailureMarkers in test/DiagnosticsTests.cpp")
+foreach(_marker IN LISTS _rccl_diag_issue_markers _rccl_diag_info_markers ITEMS "local HIP setup failed")
+  rccl_assert_source_line("${_rccl_diag_tests}" "\"P2P ${_marker}\"," "the report line it marks in src/diagnostics")
 endforeach()
 unset(_rccl_diag_tests)
 unset(_rccl_diag_core_markers)
-unset(_rccl_diag_p2p_markers)
+unset(_rccl_diag_issue_markers)
+unset(_rccl_diag_info_markers)
 unset(_rccl_src_root)
 
 # Define the per-target micro-test source lists shared by BOTH build paths.
@@ -388,6 +397,7 @@ function(rccl_define_micro_source_lists)
     ras-diagnostics-gpu-test.cc              # src/ras/diagnostics_gpu.cc
     ras-peers-test.cc                    # src/ras/peers.cc
     ras-diagnostics-env-test.cc          # src/ras/diagnostics_env.cc
+    ras-diagnostics-net-test.cc          # src/ras/diagnostics_net.cc
     ras-param-test.cc                    # src/ras/ras_param.cc
     tuning-test.cc                       # src/tuning/tuning.cc
     tuning-general-test.cc
@@ -1102,7 +1112,7 @@ function(rccl_define_micro_source_lists)
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 
-  # rccl-UnitTestsMicroProfiler -- src/plugin/profiler.cc and its profiler_v1..v7.cc adapters. Own binary: the
+  # rccl-UnitTestsMicroProfiler -- src/plugin/profiler.cc and its profiler_v1..v8.cc adapters. Own binary: the
   # tests define the logging, env, plugin-open and dlsym seams the shared fakes also define.
   set(TEST_MICRO_PROFILER_SOURCE_FILES
     profiler-test.cc
@@ -1113,6 +1123,7 @@ function(rccl_define_micro_source_lists)
     profiler-v5-test.cc
     profiler-v6-test.cc
     profiler-v7-test.cc
+    profiler-v8-test.cc
     fakes/utils_fakes.cc
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
@@ -1909,6 +1920,7 @@ rccl_add_micro_binary(rccl-UnitTestsMicro
     RAS_DIAGNOSTICS_GPU_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/diagnostics_gpu.cc"
     RAS_PEERS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/peers.cc"
     RAS_DIAGNOSTICS_ENV_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/diagnostics_env.cc"
+    RAS_DIAGNOSTICS_NET_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/diagnostics_net.cc"
     RAS_PARAM_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/ras_param.cc"
     COMM_DUMP_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/commDump.cc"
     # graph/tuning.cc keeps the basename, so add_file_unique() renames this one.
@@ -1919,7 +1931,9 @@ rccl_add_micro_binary(rccl-UnitTestsMicro
     CSV_TUNER_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/plugin/tuner/csv_tuner.cc"
     # Source tuner/ dir, so a test can check the generator embedded the CSVs verbatim.
     RCCL_TUNER_CSV_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../../tuner"
-    RING_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/tuning/ring.cc"
+    # ring_tmp.cc, not ring.cc: tuning/pipeline_model/ring.cc keeps the basename, so add_file_unique()
+    # renames this one.
+    RING_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/tuning/ring_tmp.cc"
     RAS_CLIENT_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/client.cc"
     RMA_PROXY_LAUNCH_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/rma/rma_proxy_launch.cc"
     RMA_PROXY_PROGRESS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/rma/rma_proxy_progress.cc"
@@ -1933,6 +1947,7 @@ rccl_add_micro_binary(rccl-UnitTestsMicro
     GROUP_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/group.cc"
     DEVCOMM_V22902_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/devcomm/devcomm_v22902.cc"
     DEVCOMM_V22907_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/devcomm/devcomm_v22907.cc"
+    DEVCOMM_V23204_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/devcomm/devcomm_v23204.cc"
     WRAP_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/rccl_wrap.cc"
     REGISTER_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/register/register.cc"
     COLL_REG_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/register/coll_reg.cc"
@@ -1957,6 +1972,9 @@ rccl_add_micro_binary(rccl-UnitTestsMicro
 # wrap-test.cc includes rccl_wrap.cc. Production librccl always compiles the LL128
 # arm; without this the broadcast protocol tests exercise the compiled-out fallback.
 set_source_files_properties(wrap-test.cc PROPERTIES COMPILE_DEFINITIONS ENABLE_LL128)
+# channel_fakes.cc compiles the real channel-layout arithmetic from src/channel.cc (see the comment there).
+set_source_files_properties(fakes/channel_fakes.cc PROPERTIES
+  COMPILE_DEFINITIONS CHANNEL_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/channel.cc")
 
 # Fake ibverbs provider dv libraries for dv_symbols_test.cc; the SONAME is what the builders' dlopen matches.
 # The test finds them beside its own executable, in the build tree and in an install.
@@ -2146,6 +2164,8 @@ rccl_add_micro_binary(rccl-UnitTestsMicroRmaProxy
   EXTRA_DEFS
     ${_MICRO_MODE_DEFS}
     RMA_PROXY_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/rma/rma_proxy.cc"
+    # rma_proxy.cc defines ncclRmaProxyWorldToPeer itself.
+    RCCL_RMA_FAKES_OMIT_ncclRmaProxyWorldToPeer
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_rma_proxy.yaml")
 
 # ---------------------------------------------------------------------------
@@ -2512,6 +2532,7 @@ rccl_add_micro_binary(rccl-UnitTestsMicroProfiler
     PROFILER_V5_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/plugin/profiler/profiler_v5.cc"
     PROFILER_V6_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/plugin/profiler/profiler_v6.cc"
     PROFILER_V7_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/plugin/profiler/profiler_v7.cc"
+    PROFILER_V8_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/plugin/profiler/profiler_v8.cc"
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_profiler.yaml")
 
 # ---------------------------------------------------------------------------

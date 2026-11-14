@@ -194,10 +194,10 @@ protected:
 
     ncclDevrState* devr = &comm_->devrState;
     devr->bigSize = 1;                // ncclDevrInitOnce: already-initialised
-    devr->lsaSize = kLsaSize;
-    devr->lsaSelf = kLsaSelf;
+    devr->lsaTeamSize = kLsaSize;
+    devr->lsaTeamSelf = kLsaSelf;
     lsaRankList_.assign(std::begin(kLsaWorld), std::end(kLsaWorld));
-    devr->lsaRankList = lsaRankList_.data();
+    devr->lsaTeamRankList = lsaRankList_.data();
 
     // Distinct hashes per rank, so no peer looks like it shares our process --
     // windowRegisterNonSym leaves same-process peers unmapped.
@@ -289,7 +289,7 @@ protected:
     free(comm_->devrState.winSorted);   // opaque here, but free() needs no type
     comm_->devrState.winSorted = nullptr;
     comm_->devrState.winSortedCount = comm_->devrState.winSortedCapacity = 0;
-    comm_->devrState.lsaRankList = nullptr;   // borrowed, not malloc'd
+    comm_->devrState.lsaTeamRankList = nullptr;   // borrowed, not malloc'd
     ResetCeFakes();
     // g_cuStreamBatchMemOp lives in rma_fakes, and the launch fixtures bind a
     // this-capturing lambda to it; without this the global outlives the fixture.
@@ -420,7 +420,7 @@ TEST_F(RmaCeInitTest, Init_DevrInitOnceFails_PropagatesAndLeavesUninitialised) {
   EXPECT_NE(ncclRmaCeInit(comm_.get()), ncclSuccess);
   EXPECT_FALSE(comm_->rmaState.rmaCeState.initialized);
   EXPECT_EQ(granularity.calls, 1);
-  comm_->devrState.lsaRankList = nullptr;  // freed on that failure path already
+  comm_->devrState.lsaTeamRankList = nullptr;  // pointed into lsaDomainRankList, freed on that failure path
 }
 
 // A failed window registration unwinds mid-context rather than leaving the state

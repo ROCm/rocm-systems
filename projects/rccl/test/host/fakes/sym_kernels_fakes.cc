@@ -17,6 +17,7 @@ ASSERT_HOOK_MATCHES_PROD(g_symkAvailable, ncclSymkAvailable);
 ASSERT_HOOK_MATCHES_PROD(g_symkKernelIdIsLL, rcclSymkKernelIdIsLL);
 ASSERT_HOOK_MATCHES_PROD(g_symkKernelIdIsTma, rcclSymkKernelIdIsTma);
 ASSERT_HOOK_MATCHES_PROD(g_symkFinalize, ncclSymkFinalize);
+ASSERT_HOOK_MATCHES_PROD(g_symkAlltoAllLLForced, ncclSymkAlltoAllLLForced);
 #undef ASSERT_HOOK_MATCHES_PROD
 
 ncclSymRegType_t g_symRegType = ncclSymSendNonregRecvNonreg;
@@ -57,6 +58,12 @@ static ncclResult_t DefaultSymkFinalize(struct ncclComm*) { return ncclSuccess; 
 std::function<ncclResult_t(struct ncclComm*)> g_symkFinalize = DefaultSymkFinalize;
 ncclResult_t ncclSymkFinalize(struct ncclComm* comm) { return g_symkFinalize(comm); }
 
+// NCCL 2.32.6: whether the tuner forced the AlltoAll LL symmetric kernel. Default false, as for a comm whose
+// tuning context forces nothing.
+static bool DefaultSymkAlltoAllLLForced(struct ncclComm*) { return false; }
+std::function<bool(struct ncclComm*)> g_symkAlltoAllLLForced = DefaultSymkAlltoAllLLForced;
+bool ncclSymkAlltoAllLLForced(struct ncclComm* comm) { return g_symkAlltoAllLLForced(comm); }
+
 void ResetSymKernelsFakes() {
   g_symRegType = ncclSymSendNonregRecvNonreg;
   g_getSymRegTypeResult = ncclSuccess;
@@ -67,4 +74,5 @@ void ResetSymKernelsFakes() {
   g_symkKernelIdIsLL = DefaultSymkKernelIdIsLL;
   g_symkKernelIdIsTma = DefaultSymkKernelIdIsTma;
   g_symkFinalize = DefaultSymkFinalize;
+  g_symkAlltoAllLLForced = DefaultSymkAlltoAllLLForced;
 }

@@ -13,8 +13,7 @@
 #include "nccl_tuner.h"
 #include "device.h"
 #include "compiler.h"
-
-#define NCCL_MAX_NET_SIZE (1024 * 1024 * 1024L) // Rather than send INT_MAX which is 2G-1, send a power of two.
+#include "coll_sizes.h"
 
 // Keep host proxy scheduling and device kernel dispatch on the same compile-time capability.
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
@@ -28,31 +27,12 @@ static inline bool ncclUseOneRpnNetRegChannelCap(ncclFunc_t func) {
          (func == ncclFuncAllGather && NCCL_ALLGATHER_NET_OFFLOAD_SUPPORTED);
 }
 
-// CHUNKSIZE must be a multiple of SLICESIZE
 // RCCL: Benchmarking on single node for MI300X showed improved throughput for single node always using
 // a single slice, so we have separate configurations for single node and multi-node.  Single node configs
-// are suffixed with _SINGLE_NODE.
-#define ALLREDUCE_SLICESTEPS (NCCL_STEPS / 4)
+// are suffixed with _SINGLE_NODE. The multi-node *_SLICESTEPS/*_CHUNKSTEPS live in coll_sizes.h.
 #define ALLREDUCE_SLICESTEPS_SINGLE_NODE (NCCL_STEPS / 2)
-#define ALLREDUCE_CHUNKSTEPS (NCCL_STEPS / 2)
-#define ALLGATHER_SLICESTEPS (NCCL_STEPS / 4)
 #define ALLGATHER_SLICESTEPS_SINGLE_NODE (NCCL_STEPS / 2)
-#define ALLGATHER_CHUNKSTEPS (NCCL_STEPS / 2)
-#define ALLTOALL_SLICESTEPS 1
-#define ALLTOALL_CHUNKSTEPS 1
-#define REDUCESCATTER_SLICESTEPS (NCCL_STEPS / 4)
 #define REDUCESCATTER_SLICESTEPS_SINGLE_NODE (NCCL_STEPS / 2)
-#define REDUCESCATTER_CHUNKSTEPS (NCCL_STEPS / 2)
-#define BROADCAST_SLICESTEPS 1
-#define BROADCAST_CHUNKSTEPS 1
-#define GATHER_SLICESTEPS 1
-#define GATHER_CHUNKSTEPS 1
-#define SCATTER_SLICESTEPS 1
-#define SCATTER_CHUNKSTEPS 1
-#define REDUCE_SLICESTEPS 1
-#define REDUCE_CHUNKSTEPS 1
-#define NCCL_MAX_SLICE_PER_CHUNK 2  // max value for CHUNKSTEPS/SLICESTEPS, must accord with above
-#define NCCL_MAX_NET_SIZE (1024 * 1024 * 1024L) // Rather than send INT_MAX which is 2G-1, send a power of two.
 #define ALLTOALL_PIVOT_SLICESTEPS 2
 #define ALLTOALL_PIVOT_CHUNKSTEPS 4
 
@@ -68,29 +48,6 @@ const char* ncclDevRedOpToString(ncclDevRedOp_t op);
 const char* ncclDatatypeToString(ncclDataType_t type);
 const char* ncclAlgoToString(int algo);
 const char* ncclProtoToString(int proto);
-
-inline int ncclTypeSize(ncclDataType_t type) {
-  switch (type) {
-  case ncclInt8:
-  case ncclUint8:
-  case ncclFloat8e4m3:
-  case ncclFloat8e5m2:
-    return 1;
-  case ncclFloat16:
-  case ncclBfloat16:
-    return 2;
-  case ncclInt32:
-  case ncclUint32:
-  case ncclFloat32:
-    return 4;
-  case ncclInt64:
-  case ncclUint64:
-  case ncclFloat64:
-    return 8;
-  default:
-    return -1;
-  }
-}
 
 #include <sys/types.h>
 
@@ -174,7 +131,7 @@ public:
     chunkId = (ringIndex + nRanks - 1 - chunkStage) % nRanks;
     chunkOffset = chunkId * curChunkSize;
     nelem = std::min(remSize - chunkOffset, curChunkSize);
-    curSliceSize = std::max(divUp(nelem / elemSize, 16 * slicePerChunk) * 16, sliceSize / elemSize / 32) * elemSize;
+    curSliceSize = ncclSimpleSliceSize(nelem / elemSize, slicePerChunk, sliceSize / elemSize) * elemSize;
     sliceOffset = sliceStage * curSliceSize;
 
     if (nelem <= sliceOffset) {
@@ -223,7 +180,7 @@ public:
 
     chunkOffset = chunkId * curChunkSize;
     nelem = std::min(remSize - chunkOffset, curChunkSize);
-    curSliceSize = std::max(divUp(nelem / elemSize, 16 * slicePerChunk) * 16, sliceSize / elemSize / 32) * elemSize;
+    curSliceSize = ncclSimpleSliceSize(nelem / elemSize, slicePerChunk, sliceSize / elemSize) * elemSize;
     sliceOffset = sliceStage * curSliceSize;
     if (nelem <= sliceOffset) {
       *recvbuffOut = recvbuff;
@@ -283,7 +240,7 @@ public:
     uint8_t* buff;
     void* mhandle;
 
-    curSliceSize = std::max(divUp(chunkSize / elemSize, 16 * slicePerChunk) * 16, sliceSize / elemSize / 32) * elemSize;
+    curSliceSize = ncclSimpleSliceSize(chunkSize / elemSize, slicePerChunk, sliceSize / elemSize) * elemSize;
     sliceOffset = sliceStage * curSliceSize;
     if (chunkStage == 0) {
       rankDest = ringRanks[0];
@@ -315,7 +272,7 @@ public:
     ssize_t size;
     int rankDest;
 
-    curSliceSize = std::max(divUp(chunkSize / elemSize, 16 * slicePerChunk) * 16, sliceSize / elemSize / 32) * elemSize;
+    curSliceSize = ncclSimpleSliceSize(chunkSize / elemSize, slicePerChunk, sliceSize / elemSize) * elemSize;
     sliceOffset = sliceStage * curSliceSize;
     if (chunkStage == 0) {
       rankDest = ringRanks[1];
@@ -472,7 +429,7 @@ struct ncclPatPeer {
   uint64_t* tailPtr;
   uint64_t stepCache;
   long long int accSize;
-  int connStepSize;
+  uint32_t connStepSize;
 };
 
 #define NCCL_SHMEM_PAT_STEPS 32

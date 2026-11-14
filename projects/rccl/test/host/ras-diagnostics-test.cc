@@ -46,6 +46,8 @@
 #define rasDiagnosticsNvidiaDriverVersionSummarize DiagnosticsTestNvidiaDriverVersionSummarize
 #define rasDiagnosticsPathsCollectLocal DiagnosticsTestPathsCollectLocal
 #define rasDiagnosticsPathsSummarize DiagnosticsTestPathsSummarize
+#define rasDiagnosticsNetDeviceCollectLocal DiagnosticsTestNetDeviceCollectLocal
+#define rasDiagnosticsNetDeviceSummarize DiagnosticsTestNetDeviceSummarize
 
 #include "comm.h"
 #include "ras/diagnostics.h"
@@ -205,6 +207,7 @@ DEFINE_CHECK_FAKE(RAS_DIAG_CHECK_XID_SXID, rasDiagnosticsXidCollectLocal, rasDia
 DEFINE_CHECK_FAKE(RAS_DIAG_CHECK_NVIDIA_DRIVER_VERSION, rasDiagnosticsNvidiaDriverVersionCollectLocal,
                   rasDiagnosticsNvidiaDriverVersionSummarize)
 DEFINE_CHECK_FAKE(RAS_DIAG_CHECK_PATHS, rasDiagnosticsPathsCollectLocal, rasDiagnosticsPathsSummarize)
+DEFINE_CHECK_FAKE(RAS_DIAG_CHECK_NET_DEVICE, rasDiagnosticsNetDeviceCollectLocal, rasDiagnosticsNetDeviceSummarize)
 
 #undef DEFINE_CHECK_FAKE
 
@@ -1440,6 +1443,8 @@ TEST_F(RasDiagnosticsMicrotest, Start_SendFailureFreesStaleCollectiveAndCleansUp
   free(client);
 }
 
+#undef rasDiagnosticsNetDeviceSummarize
+#undef rasDiagnosticsNetDeviceCollectLocal
 #undef rasDiagnosticsPathsSummarize
 #undef rasDiagnosticsPathsCollectLocal
 #undef rasDiagnosticsNvidiaDriverVersionSummarize

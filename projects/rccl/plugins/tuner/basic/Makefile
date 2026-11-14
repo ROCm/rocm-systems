@@ -4,7 +4,7 @@
 #
 # See LICENSE.txt for license information
 #
-.DEFAULT_GOAL: build
+.DEFAULT_GOAL := build
 SRCDIR   ?= $(abspath ../../..)
 BUILDDIR ?= .
 NCCLDIR  := $(BUILDDIR)

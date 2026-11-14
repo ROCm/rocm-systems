@@ -435,12 +435,12 @@ void setXferNetAttrs(struct ncclProxyState* proxyState, struct ncclProxyArgs* ar
 
   if (send) {
     netAttr.sendCommAttr.maxConcurrentPeers = args->nPeers;
-    netAttr.sendCommAttr.minConcurrentPeers = args->nPeers;
+    netAttr.sendCommAttr.minConcurrentPeers = args->minPeers;
     netAttr.sendCommAttr.maxFlowsPerPeer = args->nChannels;
     netAttr.sendCommAttr.minFlowsPerPeer = args->nChannels;
   } else {
     netAttr.recvCommAttr.maxConcurrentPeers = args->nPeers;
-    netAttr.recvCommAttr.minConcurrentPeers = args->nPeers;
+    netAttr.recvCommAttr.minConcurrentPeers = args->minPeers;
     netAttr.recvCommAttr.maxFlowsPerPeer = args->nChannels;
     netAttr.recvCommAttr.minFlowsPerPeer = args->nChannels;
   }
@@ -619,8 +619,9 @@ static ncclResult_t netMapShm(struct ncclComm* comm, struct ncclProxyConnector* 
 }
 
 static ncclResult_t netCreateShm(struct ncclProxyState* proxyState, struct connectMapMem* mem) {
-  NCCLCHECK(ncclShmAllocateShareableBuffer(mem->size, false, &mem->createDesc, (void**)&mem->cpuPtr,
-                                           (void**)&mem->gpuPtr));
+  // The proxy only needs CPU access to this buffer (the sender registers its own mapping).
+  NCCLCHECK(ncclShmAllocateShareableBuffer(mem->size, !proxyState->cuMemHostEnabled, &mem->createDesc,
+                                           (void**)&mem->cpuPtr, nullptr));
   return ncclSuccess;
 }
 
@@ -1480,10 +1481,11 @@ static ncclResult_t sendProxyConnect(struct ncclProxyConnection* connection, str
           CUCHECK(cuMemGetHandleForAddressRange((void*)&dmabuf_fd, (CUdeviceptr)resources->buffers[p],
                                                 resources->buffSizes[p], CU_MEM_RANGE_HANDLE_TYPE_DMA_BUF_FD,
                                                 getHandleForAddressRangeFlags(resources->useGdr)));
-          NCCLCHECK(proxyState->ncclNet->regMrDmaBuf(resources->netSendComm, resources->buffers[p],
-                                                     resources->buffSizes[p], type, 0ULL, dmabuf_fd,
-                                                     &resources->mhandles[p]));
+          ncclResult_t dmaBufRegRes =
+            proxyState->ncclNet->regMrDmaBuf(resources->netSendComm, resources->buffers[p], resources->buffSizes[p], type,
+                                             0ULL, dmabuf_fd, &resources->mhandles[p]);
           (void)close(dmabuf_fd);
+          NCCLCHECK(dmaBufRegRes);
         }
       } else // FALL-THROUGH to the HSA DMA-BUF export path
 #endif
@@ -1494,12 +1496,13 @@ static ncclResult_t sendProxyConnect(struct ncclProxyConnection* connection, str
         uint64_t offset;
         HSACHECK(hsa_amd_portable_export_dmabuf((const void*)resources->buffers[p], resources->buffSizes[p], &dmabuf_fd,
                                                 &offset));
-        NCCLCHECK(proxyState->ncclNet->regMrDmaBuf(resources->netSendComm, resources->buffers[p],
-                                                   resources->buffSizes[p], type, offset, dmabuf_fd,
-                                                   &resources->mhandles[p]));
+        ncclResult_t dmaBufRegRes =
+          proxyState->ncclNet->regMrDmaBuf(resources->netSendComm, resources->buffers[p], resources->buffSizes[p], type,
+                                           offset, dmabuf_fd, &resources->mhandles[p]);
         (void)close(dmabuf_fd);
         TRACE(NCCL_INIT | NCCL_NET, "hsa_amd_portable_export_dmabuf buffer %p size %d handle %x offset %ld",
               (const void*)resources->buffers[p], resources->buffSizes[p], dmabuf_fd, offset);
+        NCCLCHECK(dmaBufRegRes);
       } else // FALL-THROUGH to nv_peermem GDR path
 #endif
       {
@@ -1733,10 +1736,11 @@ static ncclResult_t recvProxyConnect(struct ncclProxyConnection* connection, str
           CUCHECK(cuMemGetHandleForAddressRange((void*)&dmabuf_fd, (CUdeviceptr)resources->buffers[p],
                                                 resources->buffSizes[p], CU_MEM_RANGE_HANDLE_TYPE_DMA_BUF_FD,
                                                 getHandleForAddressRangeFlags(resources->useGdr)));
-          NCCLCHECK(proxyState->ncclNet->regMrDmaBuf(resources->netRecvComm, resources->buffers[p],
-                                                     resources->buffSizes[p], type, 0ULL, dmabuf_fd,
-                                                     &resources->mhandles[p]));
+          ncclResult_t dmaBufRegRes =
+            proxyState->ncclNet->regMrDmaBuf(resources->netRecvComm, resources->buffers[p], resources->buffSizes[p], type,
+                                             0ULL, dmabuf_fd, &resources->mhandles[p]);
           (void)close(dmabuf_fd);
+          NCCLCHECK(dmaBufRegRes);
         }
       } else // FALL-THROUGH to the HSA DMA-BUF export path
 #endif
@@ -1747,12 +1751,13 @@ static ncclResult_t recvProxyConnect(struct ncclProxyConnection* connection, str
         uint64_t offset;
         HSACHECK(hsa_amd_portable_export_dmabuf((const void*)resources->buffers[p], resources->buffSizes[p], &dmabuf_fd,
                                                 &offset));
-        NCCLCHECK(proxyState->ncclNet->regMrDmaBuf(resources->netRecvComm, resources->buffers[p],
-                                                   resources->buffSizes[p], type, offset, dmabuf_fd,
-                                                   &resources->mhandles[p]));
+        ncclResult_t dmaBufRegRes =
+          proxyState->ncclNet->regMrDmaBuf(resources->netRecvComm, resources->buffers[p], resources->buffSizes[p], type,
+                                           offset, dmabuf_fd, &resources->mhandles[p]);
         (void)close(dmabuf_fd);
         TRACE(NCCL_INIT | NCCL_NET, "hsa_amd_portable_export_dmabuf buffer %p size %d handle %x offset %ld",
               (const void*)resources->buffers[p], resources->buffSizes[p], dmabuf_fd, offset);
+        NCCLCHECK(dmaBufRegRes);
       } else // FALL-THROUGH to nv_peermem GDR path
 #endif
       {
@@ -2191,8 +2196,11 @@ static ncclResult_t recvProxyProgress(struct ncclProxyState* proxyState, struct 
             if (resources->shared) {
               if (sub->reg) {
                 // Wait until CUDA kernel has started before we access the user buffer directly.
-                if (!sub->regBufferReady && connFifo[sub->base % NCCL_STEPS].size == -1) continue;
-                sub->regBufferReady = 1;
+                if (!sub->regBufferReady) {
+                  if (connFifo[sub->base % NCCL_STEPS].size == -1) continue;
+                  sub->regBufferReady = 1;
+                  connFifo[sub->base % NCCL_STEPS].size = -1;
+                }
                 ptrs[subCount] = sub->recvbuff + sub->posted * NCCL_MAX_NET_SIZE;
                 sizes[subCount] =
                   std::min((ssize_t)NCCL_MAX_NET_SIZE, (ssize_t)(sub->nbytes - sub->posted * NCCL_MAX_NET_SIZE));
@@ -2206,8 +2214,11 @@ static ncclResult_t recvProxyProgress(struct ncclProxyState* proxyState, struct 
               }
             } else {
               if (sub->reg) {
-                if (!sub->regBufferReady && connFifo[sub->base % NCCL_STEPS].size == -1) continue;
-                sub->regBufferReady = 1;
+                if (!sub->regBufferReady) {
+                  if (connFifo[sub->base % NCCL_STEPS].size == -1) continue;
+                  sub->regBufferReady = 1;
+                  connFifo[sub->base % NCCL_STEPS].size = -1;
+                }
                 sub->ringAlgo->getNextRecvAddr(sub->posted, (uint8_t**)&ptrs[subCount], &sizes[subCount],
                                                &sub->recvMhandle);
               } else {
@@ -2277,10 +2288,6 @@ static ncclResult_t recvProxyProgress(struct ncclProxyState* proxyState, struct 
             struct ncclProxySubArgs* sub = subGroup + i;
 
             int receivedStepId = sub->received;
-            int buffSlot = (sub->base + sub->received) % NCCL_STEPS;
-            struct recvNetResources* resources = (struct recvNetResources*)(sub->connection->transportResources);
-            volatile struct ncclConnFifo* connFifo = (volatile struct ncclConnFifo*)resources->recvMem->connFifo;
-            connFifo[buffSlot].size = -1;
             sub->transSize = sizes[i];
             sub->received += args->sliceSteps;
             ncclProfilerRecordProxyStepEventState(s + i, args, receivedStepId, ncclProfilerProxyStepRecvFlushWait);

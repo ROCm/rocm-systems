@@ -31,6 +31,7 @@
 #include "nccl_device/gin_barrier.h"
 
 #include "fakes/dev_runtime_micro_fakes.h"
+#include "fakes/fail_loud.h"
 #include "fakes/hip_fakes.h"   // shared HIP seams + InstallHipVmmEmulator()
 #include "fakes/mgmt_task_enq_fakes.h"  // ResetMgmtTaskEnqFakes()
 #include "fakes/nccl_device_core_fakes.h"  // ncclTeam* accessors + ResetNcclDeviceCoreFakes()
@@ -57,7 +58,7 @@
 
 
 // devcomm compat tables (defined in devcomm/devcomm_v*.cc in the real build).
-// devcomm-test.cc supplies v22902 and v22907 by compiling their sources; the
+// devcomm-test.cc supplies v22902, v22907 and v23204 by compiling their sources; the
 // rest only need to exist for getNcclVersionCompat's table to link.
 struct ncclDevCommCompat ncclDevCommCompat_v23000 = {};
 struct ncclDevCommCompat ncclDevCommCompat_v23100 = {};
@@ -306,16 +307,23 @@ ncclResult_t ncclGinConnectOnce(struct ncclComm* comm) { return g_devrGinConnect
 // stream-capture mode. The default succeeds; a test that needs GIN setup to fail
 // installs its own so the capture-mode restore can be observed.
 static ncclResult_t DefaultGinDevCommSetup(struct ncclComm*, struct ncclDevCommRequirements const*,
-                                           struct ncclDevComm*, uint32_t) {
+                                           struct ncclDevResourceRequirements*, struct ncclGinBarrierReq const*, int,
+                                           struct ncclDevComm*, uint32_t, struct ncclDevCommCompat const*) {
   return ncclSuccess;
 }
-std::function<ncclResult_t(struct ncclComm*, struct ncclDevCommRequirements const*, struct ncclDevComm*, uint32_t)>
+std::function<ncclResult_t(struct ncclComm*, struct ncclDevCommRequirements const*,
+                           struct ncclDevResourceRequirements*, struct ncclGinBarrierReq const*, int,
+                           struct ncclDevComm*, uint32_t, struct ncclDevCommCompat const*)>
     g_devrGinDevCommSetup = DefaultGinDevCommSetup;
 ASSERT_HOOK_MATCHES_PROD(g_devrGinDevCommSetup, ncclGinDevCommSetup);
 
 ncclResult_t ncclGinDevCommSetup(struct ncclComm* comm, struct ncclDevCommRequirements const* reqs,
-                                 struct ncclDevComm* devComm, uint32_t deviceCodeVersion) {
-  return g_devrGinDevCommSetup(comm, reqs, devComm, deviceCodeVersion);
+                                 struct ncclDevResourceRequirements* resReqs,
+                                 struct ncclGinBarrierReq const* barrierReqs, int nBarrierReqs,
+                                 struct ncclDevComm* devComm, uint32_t deviceCodeVersion,
+                                 struct ncclDevCommCompat const* devCompat) {
+  return g_devrGinDevCommSetup(comm, reqs, resReqs, barrierReqs, nBarrierReqs, devComm, deviceCodeVersion,
+                               devCompat);
 }
 ncclResult_t ncclGinDevCommFree(struct ncclComm*, struct ncclDevComm const*) { return ncclSuccess; }
 void ncclGinDevCommClearFields(struct ncclDevComm*) {}
@@ -448,20 +456,27 @@ ncclResult_t ncclDevrCheckRegistrationSupport(void* userPtr, size_t userSize, st
 // ---------------------------------------------------------------------------
 // CFT logical endpoints (real in cft_dev_runtime.cc).
 // ---------------------------------------------------------------------------
-// Sizes first: ncclDevrInitOnce stores both into devrState, so the defaults
-// mirror the real pair's answer on a GPU without CFT support (gpuCftSupport
-// below 13030), which is what a zero-initialised test comm reports.
-static int DefaultComputeCftSize(struct ncclComm* comm) {
-  return (comm != nullptr && comm->devrState.bigSize != 0) ? comm->devrState.cftSize : 1;
+// Sizes first: ncclDevrInitOnce stores both into devrState, so the default
+// mirrors the real computeCftSizes on a GPU without logical-endpoint cliques
+// (gpuCftSupport below 13040) and with NCCL_CFT_{UC,MC}_TEAM_SIZE unset, which is
+// what a zero-initialised test comm reports: both sizes are the LSA team size.
+// computeLsaTeamSize is the real one where dev_runtime.cc is compiled (#included into
+// dev-runtime-test.cc in rccl-UnitTestsMicro). Other binaries linking this file
+// (rccl-UnitTestsMicroDiagnostics) don't compile it, so the reference is weak and
+// only the real ncclDevrInitOnce, which lives in dev_runtime.cc too, reaches it.
+extern int computeLsaTeamSize(struct ncclComm* comm) __attribute__((weak));
+static ncclResult_t DefaultComputeCftSizes(struct ncclComm* comm, int* cftSize, int* cftMcSize) {
+  if (&computeLsaTeamSize == nullptr) FailLoudUnfaked("dev_runtime_micro_fakes", "computeLsaTeamSize");
+  int lsaTeamSize = computeLsaTeamSize(comm);
+  *cftSize = lsaTeamSize;
+  *cftMcSize = lsaTeamSize;
+  return ncclSuccess;
 }
-std::function<int(struct ncclComm*)> g_devrComputeCftSize = DefaultComputeCftSize;
-int computeCftSize(struct ncclComm* comm) { return g_devrComputeCftSize(comm); }
-
-static int DefaultComputeCftMcSize(struct ncclComm* comm) {
-  return (comm != nullptr && comm->devrState.bigSize != 0) ? comm->devrState.cftMcSize : 1;
+std::function<ncclResult_t(struct ncclComm*, int*, int*)> g_devrComputeCftSizes = DefaultComputeCftSizes;
+ncclResult_t computeCftSizes(struct ncclComm* comm, int* cftSize, int* cftMcSize) {
+  return g_devrComputeCftSizes(comm, cftSize, cftMcSize);
 }
-std::function<int(struct ncclComm*)> g_devrComputeCftMcSize = DefaultComputeCftMcSize;
-int computeCftMcSize(struct ncclComm* comm) { return g_devrComputeCftMcSize(comm); }
+ASSERT_HOOK_MATCHES_PROD(g_devrComputeCftSizes, computeCftSizes);
 
 // The bind/obtain half. Every call site is guarded by a live logical-endpoint
 // id or an explicit CFT request, and a zero-initialised comm has neither, so
@@ -550,8 +565,7 @@ void ResetDevRuntimeMicroFakes() {
   g_devrIntruAddressMapInsert                   = DefaultIntruAddressMapInsert;
   g_devrNcclCommWindowDeregister                = DefaultCommWindowDeregister;
   ResetNcclDeviceCoreFakes();
-  g_devrComputeCftSize                          = DefaultComputeCftSize;
-  g_devrComputeCftMcSize                        = DefaultComputeCftMcSize;
+  g_devrComputeCftSizes                         = DefaultComputeCftSizes;
   g_devrNcclCommRegister                        = DefaultCommRegister;
   g_devrNcclCommDeregister                      = DefaultCommDeregister;
   g_devrRmaProxyDeregister                      = DefaultRmaProxyDeregister;

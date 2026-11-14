@@ -7,8 +7,8 @@
 #
 # This file is meant to be pulled in from the top-level RCCL CMakeLists.txt
 # via:
-#     option(EMIT_LLVM_IR "Generate LLVM IR/bitcode for device APIs" OFF)
-#     if(EMIT_LLVM_IR)
+#     option(NCCL_EMIT_LLVM_IR "Generate LLVM IR/bitcode for device APIs" OFF)
+#     if(NCCL_EMIT_LLVM_IR)
 #       add_subdirectory(bindings/ir)
 #       add_dependencies(llvm_ir copy_nccl_device_headers)
 #       add_custom_target(rccl_with_ir ALL DEPENDS rccl llvm_ir)
@@ -19,9 +19,17 @@
 #   ${CMAKE_BINARY_DIR}/obj/llvm_ir/*.bc.{un,}optimized
 #   ${CMAKE_BINARY_DIR}/obj/llvm_ir/librccl_device.ll  (textual IR)
 #   ${CMAKE_BINARY_DIR}/include/nccl_device_wrapper.h  (public C wrapper)
+#
+# NCCL's src/nccl_device_ir.cu + nccl_device_ir.h (the ncclIr* ABI) only
+# build with Clang CUDA or NVCC (#error otherwise, PTX inline asm), so the
+# HIP bitcode is still built from RCCL's nccl_device_wrapper{,__impl}.h.
+# The shared ReduceCopy type lists now live in src/util.h.
 
 ##### Source and output paths #####
 set(LLVM_SRC      ${CMAKE_CURRENT_SOURCE_DIR}/nccl_device_wrapper__impl.h)
+set(LLVM_IMPL_HEADERS
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/util.h
+)
 set(OBJDIR        ${CMAKE_BINARY_DIR}/obj/llvm_ir)
 set(LIBDIR        ${CMAKE_BINARY_DIR}/lib)
 set(INCLUDEDIR    ${CMAKE_BINARY_DIR}/include)
@@ -35,7 +43,12 @@ set(WRAPPER_HEADER ${INCLUDEDIR}/nccl_device_wrapper.h)
 
 ##### Build configuration #####
 # Default GPU architecture for the bitcode artifact. Override via:
-#     cmake -DEMIT_LLVM_IR=ON -DBITCODE_LIB_ARCH=gfx942 ...
+#     cmake -DNCCL_EMIT_LLVM_IR=ON -DBITCODE_LIB_ARCH=gfx942 ...
+# IR_ARCH (NCCL's unified IR architecture option) is accepted as an alias, as in the Makefile.
+if(DEFINED IR_ARCH AND NOT DEFINED CACHE{BITCODE_LIB_ARCH})
+  set(BITCODE_LIB_ARCH "${IR_ARCH}" CACHE STRING
+      "AMDGPU architecture for the LLVM bitcode (e.g. gfx942, gfx950)")
+endif()
 set(BITCODE_LIB_ARCH "gfx950" CACHE STRING
     "AMDGPU architecture for the LLVM bitcode (e.g. gfx942, gfx950)")
 set(BITCODE_CXX_STD  "c++17"  CACHE STRING
@@ -59,7 +72,7 @@ find_program(LLVM_AS_EXECUTABLE  NAMES llvm-as            HINTS ${ROCM_LLVM_BIN}
 foreach(_tool CLANG_EXECUTABLE OPT_EXECUTABLE LLVM_DIS_EXECUTABLE LLVM_AS_EXECUTABLE)
   if(NOT ${_tool})
     message(FATAL_ERROR
-      "RCCL IR (EMIT_LLVM_IR=ON): could not locate ${_tool} under "
+      "RCCL IR (NCCL_EMIT_LLVM_IR=ON): could not locate ${_tool} under "
       "${ROCM_LLVM_BIN}. Install the ROCm LLVM toolchain or override "
       "${_tool} on the command line.")
   endif()
@@ -97,6 +110,12 @@ set(ROCM_INCLUDES
   -I${ROCM_PATH}/include
 )
 
+# util.h moved to src/; searched after the hipify dirs so it cannot shadow
+# same-named RCCL headers (src/include/core.h, gin.h).
+set(IR_SRC_INCLUDES
+  -I${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+
 ##### Compiler flags #####
 # HIP device-only compilation. --offload-device-only is the modern,
 # target-agnostic spelling of NCCL's --cuda-device-only.
@@ -110,6 +129,7 @@ set(COMMON_CLANG_FLAGS
   --offload-arch=${BITCODE_LIB_ARCH}
   ${RCCL_INCLUDES}
   ${ROCM_INCLUDES}
+  ${IR_SRC_INCLUDES}
   -D__clang_llvm_bitcode_lib__
   -D__CUDACC_EXTENDED_LAMBDA__
   ${NCCL_DEVICE_DEFINES}
@@ -138,10 +158,10 @@ add_custom_command(
   COMMAND ${CMAKE_COMMAND} -E make_directory ${OBJDIR}
   COMMAND ${CLANG_EXECUTABLE} ${CLANG_FLAGS} ${LLVM_SRC} -o ${UNOPTIMIZED_BC}
   # Track both the impl TU (clang's direct input) and the staged wrapper
-  # header it transitively includes (plus util.h's type lists). Without
+  # header it transitively includes (plus src/util.h's type lists). Without
   # the WRAPPER_HEADER dep, editing nccl_device_wrapper.h would not
   # retrigger this command.
-  DEPENDS ${LLVM_SRC} ${WRAPPER_HEADER} ${CMAKE_CURRENT_SOURCE_DIR}/util.h
+  DEPENDS ${LLVM_SRC} ${LLVM_IMPL_HEADERS} ${WRAPPER_HEADER}
   COMMENT "Generating unoptimized LLVM bitcode for ${BITCODE_LIB_ARCH}..."
   VERBATIM
 )
@@ -178,7 +198,7 @@ set(RCCL_DEVICE_BC_PUBLIC_API
     ncclBarrierSessionSync
 )
 # [D] ReduceCopy: one thunk per op and type, matching NCCL_IR_TYPES /
-# NCCL_IR_MULTIMEM_TYPES in util.h.
+# NCCL_IR_MULTIMEM_TYPES in src/util.h.
 set(RCCL_IR_ALL_TYPES      I8 U8 I32 U32 I64 U64 F16 F32 F64 BF16)
 set(RCCL_IR_MULTIMEM_TYPES I32 U32 I64 U64 F16 F32 F64 BF16)
 foreach(_op ncclLsaReduceSum ncclLsaCopy ncclLsaReduceSumCopy ncclLocalReduceSumCopy)
