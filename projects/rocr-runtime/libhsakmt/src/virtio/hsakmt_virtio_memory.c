@@ -1183,24 +1183,32 @@ HSAKMT_STATUS HSAKMTAPI vhsaKmtRegisterSharedHandleToNodes(
   vhsakmt_device_handle dev = vhsakmt_dev();
   vhsakmt_bo_handle bo;
   struct vhsakmt_ccmd_memory_rsp* rsp;
-  struct vhsakmt_ccmd_memory_req req = {
-      .hdr = VHSAKMT_CCMD(
-          MEMORY, sizeof(struct vhsakmt_ccmd_memory_req) + NumberOfNodes * sizeof(NodeArray)),
-      .type = VHSAKMT_CCMD_MEMORY_REGISTER_SHARED_HANDLE,
-      .blob_id = vhsakmt_atomic_inc_return(&dev->next_blob_id),
-      .register_shared_handle_args = {
-          .NumberOfNodes = NumberOfNodes,
-      }};
+  size_t req_len =
+      VHSA_ALIGN_UP(sizeof(struct vhsakmt_ccmd_memory_req) + NumberOfNodes * sizeof(*NodeArray), 8);
+  struct vhsakmt_ccmd_memory_req* req;
+  uint64_t blob_id;
   int r;
 
-  rsp = vhsakmt_alloc_rsp(dev, &req.hdr, sizeof(struct vhsakmt_ccmd_memory_rsp));
-  if (!rsp) return -ENOMEM;
+  req = calloc(1, req_len);
+  if (!req) return -ENOMEM;
+  req->hdr = VHSAKMT_CCMD(MEMORY, req_len);
+  req->type = VHSAKMT_CCMD_MEMORY_REGISTER_SHARED_HANDLE;
+  req->blob_id = blob_id = vhsakmt_atomic_inc_return(&dev->next_blob_id);
+  req->register_shared_handle_args.NumberOfNodes = NumberOfNodes;
 
-  memcpy(req.payload, NodeArray, NumberOfNodes * sizeof(NodeArray));
-  memcpy(&req.register_shared_handle_args.SharedMemoryHandle, SharedMemoryHandle,
+  rsp = vhsakmt_alloc_rsp(dev, &req->hdr, sizeof(struct vhsakmt_ccmd_memory_rsp));
+  if (!rsp) {
+    free(req);
+    return -ENOMEM;
+  }
+
+  memcpy(req->payload, NodeArray, NumberOfNodes * sizeof(*NodeArray));
+  memcpy(&req->register_shared_handle_args.SharedMemoryHandle, SharedMemoryHandle,
          sizeof(HsaSharedMemoryHandle));
 
-  vhsakmt_execbuf_cpu(dev, &req.hdr, __FUNCTION__);
+  r = vhsakmt_execbuf_cpu(dev, &req->hdr, __FUNCTION__);
+  free(req);
+  if (r) return r;
   if (rsp->ret) return rsp->ret;
 
   if (!rsp->register_shared_handle_rsp.memory_handle || !rsp->register_shared_handle_rsp.size)
@@ -1208,7 +1216,7 @@ HSAKMT_STATUS HSAKMTAPI vhsaKmtRegisterSharedHandleToNodes(
 
   // treat as VHSA_BO_KFD_MEM for shared handle memory
   r = vhsakmt_init_host_blob(dev, rsp->register_shared_handle_rsp.size, VIRTGPU_BLOB_MEM_HOST3D,
-                             VIRTGPU_BLOB_FLAG_USE_MAPPABLE, req.blob_id, VHSA_BO_KFD_MEM,
+                             VIRTGPU_BLOB_FLAG_USE_MAPPABLE, blob_id, VHSA_BO_KFD_MEM,
                              (void*)rsp->register_shared_handle_rsp.memory_handle, &bo);
   if (r) return r;
 
@@ -1313,27 +1321,32 @@ HSAKMT_STATUS HSAKMTAPI vhsaKmtSVMSetAttr(void* start_addr, HSAuint64 size, unsi
   vhsakmt_bo_handle bo;
   struct vhsakmt_ccmd_memory_rsp* rsp;
   size_t req_len = sizeof(struct vhsakmt_ccmd_memory_req) + nattr * sizeof(HSA_SVM_ATTRIBUTE);
-  struct vhsakmt_ccmd_memory_req req = {
-      .hdr = VHSAKMT_CCMD(MEMORY, req_len),
-      .type = VHSAKMT_CCMD_MEMORY_SVM_SET_ATTR,
-      .svm_attr_args =
-          {
-              .start_addr = (uint64_t)start_addr,
-              .size = size,
-              .nattr = nattr,
-          },
-  };
+  struct vhsakmt_ccmd_memory_req* req;
+  int r;
 
   bo = vhsakmt_find_bo_by_addr(dev, start_addr);
   if (!bo) return HSAKMT_STATUS_INVALID_HANDLE;
-  req.res_id = bo->real.res_id;
 
-  memcpy(req.payload, attrs, nattr * sizeof(HSA_SVM_ATTRIBUTE));
+  req = calloc(1, req_len);
+  if (!req) return -ENOMEM;
+  req->hdr = VHSAKMT_CCMD(MEMORY, req_len);
+  req->type = VHSAKMT_CCMD_MEMORY_SVM_SET_ATTR;
+  req->svm_attr_args.start_addr = (uint64_t)start_addr;
+  req->svm_attr_args.size = size;
+  req->svm_attr_args.nattr = nattr;
+  req->res_id = bo->real.res_id;
 
-  rsp = vhsakmt_alloc_rsp(dev, &req.hdr, sizeof(struct vhsakmt_ccmd_memory_rsp));
-  if (!rsp) return -ENOMEM;
+  memcpy(req->payload, attrs, nattr * sizeof(HSA_SVM_ATTRIBUTE));
 
-  vhsakmt_execbuf_cpu(dev, &req.hdr, __FUNCTION__);
+  rsp = vhsakmt_alloc_rsp(dev, &req->hdr, sizeof(struct vhsakmt_ccmd_memory_rsp));
+  if (!rsp) {
+    free(req);
+    return -ENOMEM;
+  }
+
+  r = vhsakmt_execbuf_cpu(dev, &req->hdr, __FUNCTION__);
+  free(req);
+  if (r) return r;
   if (rsp->ret) return rsp->ret;
 
   return rsp->ret;
