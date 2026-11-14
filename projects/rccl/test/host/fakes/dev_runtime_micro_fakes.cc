@@ -457,19 +457,11 @@ ncclResult_t ncclDevrCheckRegistrationSupport(void* userPtr, size_t userSize, st
 // CFT logical endpoints (real in cft_dev_runtime.cc).
 // ---------------------------------------------------------------------------
 // Sizes first: ncclDevrInitOnce stores both into devrState, so the default
-// mirrors the real computeCftSizes on a GPU without logical-endpoint cliques
-// (gpuCftSupport below 13040) and with NCCL_CFT_{UC,MC}_TEAM_SIZE unset, which is
-// what a zero-initialised test comm reports: both sizes are the LSA team size.
-// computeLsaTeamSize is the real one where dev_runtime.cc is compiled (#included into
-// dev-runtime-test.cc in rccl-UnitTestsMicro). Other binaries linking this file
-// (rccl-UnitTestsMicroDiagnostics) don't compile it, so the reference is weak and
-// only the real ncclDevrInitOnce, which lives in dev_runtime.cc too, reaches it.
-extern int computeLsaTeamSize(struct ncclComm* comm) __attribute__((weak));
-static ncclResult_t DefaultComputeCftSizes(struct ncclComm* comm, int* cftSize, int* cftMcSize) {
-  if (&computeLsaTeamSize == nullptr) FailLoudUnfaked("dev_runtime_micro_fakes", "computeLsaTeamSize");
-  int lsaTeamSize = computeLsaTeamSize(comm);
-  *cftSize = lsaTeamSize;
-  *cftMcSize = lsaTeamSize;
+// mirrors the real computeCftSizes on ROCm (gpuCftSupport == 0, no logical endpoints):
+// both sizes are 1, matching DevRuntimeTestsStubs.cc and cft_dev_runtime.cc:128-136.
+static ncclResult_t DefaultComputeCftSizes(struct ncclComm* /*comm*/, int* cftSize, int* cftMcSize) {
+  *cftSize = 1;
+  *cftMcSize = 1;
   return ncclSuccess;
 }
 std::function<ncclResult_t(struct ncclComm*, int*, int*)> g_devrComputeCftSizes = DefaultComputeCftSizes;

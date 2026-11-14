@@ -119,7 +119,8 @@ ncclResult_t ncclSymkLsaModel(struct ncclTuningInput_t* input, enum ncclSymkKern
   NCCLCHECK(evaluateLsaEstimate(input, kernelId, nBytes, nMaxBlocks, &candidates[nMaxBlocks], &modeled));
   if (!modeled) return ncclSuccess;
   *nBlocks = nMaxBlocks;
-  // Evaluate every candidate before choosing the fewest CTAs within withinPeakFactor of the best estimate.
+  // Evaluate every candidate before choosing the fewest CTAs within withinPeakFactor of the best estimate
+  // (2.5% upstream; per-kernel via rcclSymkLsaWithinPeakFactor on AMD).
   double bestCtaSelectionTimeUs = candidates[nMaxBlocks].ctaSelectionTimeUs;
   for (int candidate = nMinBlocks; candidate < nMaxBlocks; candidate += candidate == 1 ? 1 : 2) {
     struct ncclSymkLsaEstimate& candidateEstimate = candidates[candidate];

@@ -323,7 +323,9 @@ ncclResult_t ncclDevrInitOnce(struct ncclComm* comm) {
     // team above cannot represent. Reuse the lsaTeam* fields for this team.
     // Without MNNVL or cross-clique P2P the LSA domain is exactly the node-local ranks, so the team can alias the
     // domain list. With MNNVL (AMD scale-up fabric under HIP_FABRIC_API) the domain is the fabric clique and can
-    // span nodes, so narrow it back to the node-local ranks first. Only the sym path reads the clique-wide domain.
+    // span nodes, so narrow it back to the node-local ranks first (sym path keeps the clique-wide domain).
+    // diagnostics/p2p.cc (ncclDiagP2pBuildRankSet) also reads lsaDomainRankList and therefore probes node-local
+    // peers on non-sym MNNVL comms after this narrowing; that is intentional.
     if (comm->localRanks <= 0 || comm->localRankToRank == nullptr || devr->lsaDomainRankList == nullptr) {
       // Host-only / mock communicators have no node-local rank map yet.
       devr->lsaTeamSize = 0;
