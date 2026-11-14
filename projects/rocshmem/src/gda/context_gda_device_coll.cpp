@@ -472,6 +472,13 @@ __device__ void GDAContext::broadcastmem_linear_thread_puts_wg(rocshmem_team_t t
       qps[dest_pe].put_nbi_single(dst, src, nelems, PostOpt{RingDB<false>});
       qps[dest_pe].atomic_add_single(&pSync[ROCSHMEM_BCAST_SYNC_SIZE - 1], 1);
     }
+    // Belt and suspenders with the sync_wg(team) below: quiet each dest
+    // PE's QP explicitly here rather than relying solely on sync_wg's own
+    // internal completion fence, until that's been evaluated further.
+    for (int j = tid; j < pe_size; j += step_size) {
+      int dest_pe = team_obj->get_pe_in_world(j);
+      qps[dest_pe].quiet_single();
+    }
   }
 
   __syncthreads();
@@ -481,11 +488,6 @@ __device__ void GDAContext::broadcastmem_linear_thread_puts_wg(rocshmem_team_t t
     team_obj->bcast_sequence_number++;
   }
 
-  // sync_wg(team) is a real team-wide barrier: no PE can pass it until
-  // every PE (root included) has observed this call's completion, which
-  // only happens after root's quiet of each dest PE's QP as part of the
-  // barrier protocol itself. That makes root's puts to every dest PE
-  // complete before this call returns, with no separate quiet needed here.
   sync_wg(team);
 }
 
@@ -533,7 +535,7 @@ __device__ void GDAContext::alltoallmem_linear_thread_puts_wg(rocshmem_team_t te
     team_obj->alltoall_sequence_number++;
   }
 
-  __syncthreads();
+  sync_wg(team);
 }
 
 __device__ int GDAContext::alltoallmem_wave(rocshmem_team_t team,
@@ -785,6 +787,6 @@ __device__ void GDAContext::fcollectmem_linear_thread_puts_wg(rocshmem_team_t te
     team_obj->alltoall_sequence_number++;
   }
 
-  __syncthreads();
+  sync_wg(team);
 }
 }  // namespace rocshmem
