@@ -99,6 +99,27 @@ rocprofiler_destroy_buffer(rocprofiler_buffer_id_t buffer_id) ROCPROFILER_API;
 /**
  * @brief Flush buffer.
  *
+ * For buffered kernel-dispatch tracing, a successful call delivers records for dispatches that
+ * the application synchronized before entering this function. This applies to both signal and
+ * signal-less completion, including records from a context that has subsequently been stopped.
+ * Records already discarded by the configured buffer policy cannot be recovered by flushing.
+ *
+ * This call does not synchronize GPU execution or wait for unfinished dispatches. It waits for
+ * a finite snapshot of SDK completion work and invokes the buffer callback before returning.
+ * Work submitted concurrently need not be included. There is no wall-clock timeout for this
+ * synchronous delivery; a blocked tool callback can block the caller.
+ *
+ * Synchronize the application work, then flush before consuming its records. Stopping the
+ * context may precede or follow the flush if no new work is submitted in between; stopping
+ * alone does not deliver buffered kernel records.
+ *
+ * ::ROCPROFILER_STATUS_ERROR_BUFFER_BUSY means the records already in the buffer were delivered
+ * but the window is not guaranteed complete. It is returned when the caller is an SDK completion
+ * or buffer-callback thread, where waiting could deadlock, and when a completion pipeline is no
+ * longer draining. Treat it as an incomplete window rather than a failed call: retry from an
+ * application thread if the cause was re-entry. Always check the status; do not treat a
+ * non-success return as fatal.
+ *
  * @param [in] buffer_id
  * @return ::rocprofiler_status_t
  */

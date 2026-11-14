@@ -45,6 +45,9 @@ namespace hsa
 {
 namespace queue_interposition
 {
+bool
+interposition_fence_records();
+
 /**
  * @brief Per-queue state for SDK-level write pointer virtualization
  *

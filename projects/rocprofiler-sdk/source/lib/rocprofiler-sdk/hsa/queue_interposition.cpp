@@ -70,6 +70,7 @@
 #include <cstdint>
 #include <cstring>
 #include <functional>
+#include <future>
 #include <limits>
 #include <memory>
 #include <mutex>
@@ -599,7 +600,13 @@ class completion_monitor
     friend void completion_monitor_loop(completion_monitor&);
 
 public:
+    // One per in-flight interposition_fence_records call. The monitor answers it with the emitter
+    // ticket that covers everything retired by then; the requester holds the other end, so an
+    // unanswered request is a hang rather than a broken promise.
+    using fence_request_t = std::shared_ptr<std::promise<uint64_t>>;
+
     common::Synchronized<std::vector<pending_completion>> incoming    = {};
+    common::Synchronized<std::vector<fence_request_t>>    fences      = {};
     hsa_signal_t                                          wake_signal = {};
     std::atomic<monitor_state>                            state       = {monitor_state::stopped};
 
@@ -615,7 +622,7 @@ public:
     // Runs emit_dispatch_records, which calls into tool code, so the monitor thread only does
     // bounded work between waits. One thread, because records are emitted in retirement order. Not
     // in get_task_groups(), so no tool can name it. Declared last: destroying it joins it.
-    std::unique_ptr<internal_threading::task_group_t> record_emitter = {};
+    std::shared_ptr<internal_threading::task_group_t> record_emitter = {};
 };
 
 completion_monitor&
@@ -1009,6 +1016,26 @@ retire_completed(completion_monitor& mon, pending_completion_vector_t& scratch)
     scratch.clear();
 }
 
+// Hand every queued fence request the emitter ticket that covers the work submitted so far, and
+// clear the queue. Callers must have already moved the inbox and retired what the GPU finished,
+// because the ticket is only as good as the submissions that precede it. Every exit path that can
+// strand a requester calls this: the monitor on each pass, and stop_completion_monitor once the
+// loop has gone.
+void
+answer_pending_fences(completion_monitor& mon)
+{
+    auto requests = mon.fences.wlock([](auto& pending) {
+        auto taken = std::vector<completion_monitor::fence_request_t>{};
+        taken.swap(pending);
+        return taken;
+    });
+    if(requests.empty()) return;
+
+    const auto ticket = mon.record_emitter ? mon.record_emitter->get_async_fence() : 0;
+    for(auto& request : requests)
+        request->set_value(ticket);
+}
+
 // Retire every entry, whether or not its signal dropped, discarding the profiling data of the ones
 // that did not. Teardown only: a batch the GPU never finished still drops its correlation-id
 // references and produces no dispatch record, and keeps its pooled signal rather than handing one
@@ -1056,7 +1083,18 @@ completion_monitor_loop(completion_monitor& mon)
         get_core_table()->hsa_signal_store_screlease_fn(mon.wake_signal, 0);
 
         // One more drain closes the window between the pre-wait drain and the reset.
+        const bool have_fences =
+            mon.fences.rlock([](const auto& pending) { return !pending.empty(); });
         move_incoming_to_active(mon);
+
+        // Retire first, so the ticket answer_pending_fences reads already covers every batch the
+        // GPU had finished when the request arrived. Unfinished batches stay in `active` and are
+        // deliberately not waited on.
+        if(have_fences)
+        {
+            retire_completed(mon, scratch);
+            answer_pending_fences(mon);
+        }
 
         // Break only when stop is requested. stop_completion_monitor moves the state to `stopped`
         // and bumps `wake_signal`, so the wait always returns even if no completion signal
@@ -2283,6 +2321,48 @@ interposition_sync()
     drain_completion_monitor();
 }
 
+bool
+interposition_fence_records()
+{
+    if(internal_threading::is_task_group_thread() || internal_threading::fork_stale() ||
+       registration::get_fini_status() != 0)
+        return false;
+    if(!s_intercept_installed.load(std::memory_order_acquire)) return true;
+
+    auto  request = std::make_shared<std::promise<uint64_t>>();
+    auto  ready   = request->get_future();
+    auto& monitor = get_completion_monitor();
+
+    // Under the handle lock, so the state read cannot be overtaken by stop_completion_monitor's
+    // exchange: either the request is queued while the monitor is still running (and the loop or
+    // the stop path answers it), or the monitor is already gone and the ticket is read here.
+    auto emitter = monitor.thread.rlock([&monitor, &request](const auto&) {
+        if(monitor.state.load(std::memory_order_acquire) == monitor_state::active)
+        {
+            monitor.fences.wlock([&request](auto& pending) { pending.emplace_back(request); });
+            get_core_table()->hsa_signal_store_screlease_fn(monitor.wake_signal, 1);
+        }
+        else
+        {
+            request->set_value(monitor.record_emitter ? monitor.record_emitter->get_async_fence()
+                                                      : 0);
+        }
+        return monitor.record_emitter;
+    });
+    if(!emitter) return true;
+
+    // A broken promise means the monitor went away without answering, which is a delivery the
+    // caller must not be told completed -- but it must never become an exception thrown through
+    // the C API, so it degrades to an incomplete-delivery report here.
+    try
+    {
+        return emitter->wait_async(ready.get());
+    } catch(const std::future_error&)
+    {
+        return false;
+    }
+}
+
 // Create the wake signal and launch the monitor thread. A second call while it is already
 // running does nothing.
 void
@@ -2367,6 +2447,15 @@ stop_completion_monitor()
         // precedes it is retired here, and one that follows is declined.
         move_incoming_to_active(mon);
         force_retire_all(mon);
+
+        // Fences last, so the ticket they hand back covers the batches force_retire_all just
+        // submitted. The monitor loop swaps the fence queue once per pass and then tests for
+        // stop, so a request that lands in that gap is never serviced by the loop: without this
+        // drain its promise is kept alive by the requester's own shared_ptr and
+        // interposition_fence_records blocks forever. Safe inside the handle lock because
+        // interposition_fence_records enqueues under a reader lock on the same handle, so every
+        // request that observed `active` is already queued by the time the exchange above runs.
+        answer_pending_fences(mon);
 
         get_core_table()->hsa_signal_destroy_fn(mon.wake_signal);
         mon.wake_signal = {};
@@ -2504,5 +2593,6 @@ join_signal_less_tasks()
 {
     hsa::queue_interposition::interposition_sync();
 }
+
 }  // namespace kfd
 }  // namespace rocprofiler

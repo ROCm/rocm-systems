@@ -58,6 +58,12 @@ struct correlation_id;
 }  // namespace context
 namespace hsa
 {
+bool
+is_async_signal_handler_thread();
+
+bool
+flush_async_signal_records();
+
 enum class queue_state
 {
     normal       = 0,
