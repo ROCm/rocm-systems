@@ -116,8 +116,6 @@ GpuAgent::GpuAgent(HSAuint32 node, const HsaNodeProperties& node_props, bool xna
       memory_max_frequency_(0),
       enum_index_(index),
       ape1_base_(0),
-      pending_copy_req_ref_(0),
-      pending_copy_stat_check_ref_(0),
       sdma_blit_used_mask_(0),
       scratch_limit_async_threshold_(0),
       scratch_cache_(
@@ -1074,13 +1072,7 @@ void GpuAgent::InitDma() {
       if (ret != nullptr) return ret;
     }
 
-    // pending_copy_stat_check_ref_ will prevent unnecessary compute queue creation
-    // since there is no graceful way to handle lazy loading when the caller needs to know
-    // the status of available SDMA HW resources without a fallback.
-    // Call to isSDMA should be used as a proxy error check if !blit_copy_fallback.
-    auto ret = pending_copy_stat_check_ref_.load(std::memory_order_acquire) ?
-                                              new AMD::BlitKernel(NULL) :
-                                              CreateBlitKernel((*queue).get());
+    auto ret = CreateBlitKernel((*queue).get());
     if (ret == nullptr)
       throw AMD::hsa_exception(HSA_STATUS_ERROR_OUT_OF_RESOURCES, "Blit creation failed.");
     return ret;
@@ -1227,32 +1219,6 @@ hsa_status_t GpuAgent::DmaCopy(void* dst, const void* src, size_t size) {
   return blits_[BlitDevToDev]->SubmitLinearCopyCommand(dst, src, size);
 }
 
-void GpuAgent::SetCopyRequestRefCount(bool set) {
-  std::unique_lock<std::mutex> lock(blit_lock_);
-  while (pending_copy_stat_check_ref_.load(std::memory_order_acquire)) {
-    lock.unlock();
-    os::YieldThread();
-    lock.lock();
-  }
-  if (!set && pending_copy_req_ref_.load(std::memory_order_relaxed))
-    pending_copy_req_ref_.fetch_sub(1, std::memory_order_release);
-  else
-    pending_copy_req_ref_.fetch_add(1, std::memory_order_release);
-}
-
-void GpuAgent::SetCopyStatusCheckRefCount(bool set) {
-  std::unique_lock<std::mutex> lock(blit_lock_);
-  while (pending_copy_req_ref_.load(std::memory_order_acquire)) {
-    lock.unlock();
-    os::YieldThread();
-    lock.lock();
-  }
-  if (!set && pending_copy_stat_check_ref_.load(std::memory_order_relaxed))
-    pending_copy_stat_check_ref_.fetch_sub(1, std::memory_order_release);
-  else
-    pending_copy_stat_check_ref_.fetch_add(1, std::memory_order_release);
-}
-
 // Assign direct peer gang factor to GPU
 void GpuAgent::RegisterGangPeer(core::Agent& peer, unsigned int max_bandwidth_factor) {
   gang_peers_info_[peer.public_handle().handle] = max_bandwidth_factor;
@@ -1331,8 +1297,6 @@ hsa_status_t GpuAgent::DmaCopy(void* dst, core::Agent& dst_agent,
   // and separate blit objects, no serialization needed.
   if (gang_factor == 1) {
     const bool is_h2d = (src_agent.device_type() == core::Agent::kAmdCpuDevice);
-    SetCopyRequestRefCount(true);
-    MAKE_SCOPE_GUARD([&]() { SetCopyRequestRefCount(false); });
     lazy_ptr<core::Blit>& blit = GetBlitObject(is_h2d ? BlitHostToDev : BlitDevToHost);
     std::vector<core::Signal*> no_gang;
     return blit->SubmitLinearCopyCommand(dst, src, size, dep_signals, out_signal, no_gang);
@@ -1368,8 +1332,6 @@ hsa_status_t GpuAgent::DmaCopy(void* dst, core::Agent& dst_agent,
   int gang_sig_count = 0;
   for (int i = 0; i < gang_factor; i++) {
     // Set leader and gang status to blit
-    SetCopyRequestRefCount(true);
-    MAKE_SCOPE_GUARD([&]() { SetCopyRequestRefCount(false); });
     lazy_ptr<core::Blit>& blit = gang_factor > 1 ?
                                  (has_aux_gang ? blits_[i + 1] : blits_[i + DefaultBlitCount]) :
                                  GetBlitObject(dst_agent, src_agent, size);
@@ -1464,8 +1426,6 @@ hsa_status_t GpuAgent::DmaCopyOnEngine(void* dst, core::Agent& dst_agent,
     engine_offset = is_same_gpu && !force_copy_on_sdma ? BlitDevToDev : engine_offset;
   }
 
-  SetCopyRequestRefCount(true);
-  MAKE_SCOPE_GUARD([&]() { SetCopyRequestRefCount(false); });
   lazy_ptr<core::Blit>& blit = GetBlitObject(engine_offset);
 
   if (profiling_enabled()) {
@@ -1493,14 +1453,16 @@ hsa_status_t GpuAgent::DmaCopyOnEngine(void* dst, core::Agent& dst_agent,
 }
 
 bool GpuAgent::DmaEngineIsFree(uint32_t engine_offset) {
-  SetCopyStatusCheckRefCount(true);
-  MAKE_SCOPE_GUARD([&]() { SetCopyStatusCheckRefCount(false); });
   // Atomic load to pair with atomic write in GetBlitObject
   uint32_t mask = sdma_blit_used_mask_.load(std::memory_order_relaxed);
-  bool is_free = !!!(mask & (1 << engine_offset)) ||
-                    (blits_[engine_offset]->isSDMA() &&
-                     !!!blits_[engine_offset]->PendingBytes());
-  return is_free;
+  if (!(mask & (1 << engine_offset))) return true;
+
+  // A status query must not construct the blit, since blits_[] caches it for every
+  // later copy. Nothing is queued on an engine whose blit is not built yet.
+  lazy_ptr<core::Blit>& blit = blits_[engine_offset];
+  if (blit.empty()) return true;
+
+  return blit->isSDMA() && !blit->PendingBytes();
 }
 
 hsa_status_t GpuAgent::DmaCopyStatus(core::Agent& dst_agent, core::Agent& src_agent,
@@ -1610,10 +1572,6 @@ hsa_status_t GpuAgent::DmaCopyFanOutOp(
     uint32_t coord_engine,
     uint32_t max_engines,
     const size_t* dst_size_list) {
-
-  SetCopyRequestRefCount(true);
-  MAKE_SCOPE_GUARD([&]() { SetCopyRequestRefCount(false); });
-
   if (profiling_enabled())
     out_signal.async_copy_agent(core::Agent::Convert(this->public_handle()));
 
@@ -2005,9 +1963,6 @@ hsa_status_t GpuAgent::DmaCopyBroadcast(
 
   // Try HW broadcast/multicast or linearB2B on one engine.
   {
-    SetCopyRequestRefCount(true);
-    MAKE_SCOPE_GUARD([&]() { SetCopyRequestRefCount(false); });
-
     lazy_ptr<core::Blit>& blit = GetBlitObject(BlitHostToDev);
     if (blit->isSDMA()) {
       BlitSdmaBase* sdma_blit = static_cast<BlitSdmaBase*>((*blit).get());
@@ -2314,8 +2269,6 @@ hsa_status_t GpuAgent::DmaCopyRect(const hsa_amd_memory_copy_rect_ptr_t* srcs,
                                    core::Signal& out_signal) {
   if (supported_isas()[0]->GetMajorVersion() < 9) return HSA_STATUS_ERROR_INVALID_AGENT;
 
-  SetCopyRequestRefCount(true);
-  MAKE_SCOPE_GUARD([&]() { SetCopyRequestRefCount(false); });
   lazy_ptr<core::Blit>& blit = GetBlitObject((dir == hsaHostToDevice) ? BlitHostToDev :
                                                                         BlitDevToHost);
 
