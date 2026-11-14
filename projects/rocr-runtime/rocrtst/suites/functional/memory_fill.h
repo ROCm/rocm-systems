@@ -35,6 +35,10 @@ class MemoryFill : public TestBase {
 
   void MemoryFillTest(void);
 
+  // @Brief: Copy queued behind a dependency that is held longer than the SDMA
+  // command timeout, then released; the copy must still retire (ROCM-27963).
+  void LongDependencyCopyTest(void);
+
 
  private:
   void MemoryFillTest(hsa_agent_t cpuAgent, hsa_agent_t gpuAgent);
