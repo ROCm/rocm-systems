@@ -2886,7 +2886,7 @@ hipError_t hipGraphExecUpdate(hipGraphExec_t hGraphExec, hipGraph_t hGraph,
 
   auto graph = reinterpret_cast<hip::Graph*>(hGraph);
   auto graphExec = reinterpret_cast<hip::GraphExecBase*>(hGraphExec);
-  std::vector<hip::GraphNode*>& oldGraphExecNodes = graphExec->GetNodes();
+  const std::vector<hip::GraphNode*>& oldGraphExecNodes = graphExec->GetNodes();
   const bool originalTopologyUnchanged = graphExec->getOriginalGraph() == graph &&
       graphExec->GetOriginalGraphID() == graph->GetID() &&
       graphExec->GetOriginalTopologyVersion() == graph->GetTopologyVersion();
