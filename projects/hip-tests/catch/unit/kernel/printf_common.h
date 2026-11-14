@@ -48,6 +48,13 @@ class CaptureStream {
     }
   }
 
+  void abortCapture() {
+    if (dup2(orig_fd, fileno(stdout)) == -1) {
+      error(0, errno, "Error");
+      assert(false);
+    }
+  }
+
   void endCapture() {
     // End Capture
     fflush(stdout);
