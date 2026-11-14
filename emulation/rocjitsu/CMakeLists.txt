@@ -121,6 +121,12 @@ option(
     "Recover invalid host memory accesses using SIGSEGV and SIGBUS handlers"
     ON
 )
+# GNU-unique symbols make glibc retain a DSO after dlclose. All objects in
+# an unloadable explicit library, including its static dependencies, must use
+# ordinary C++ symbol binding instead.
+if(NOT ROCJITSU_ENABLE_INTERPOSER AND NOT RJ_ENABLE_HOST_FAULT_RECOVERY)
+    add_compile_options($<$<COMPILE_LANG_AND_ID:CXX,GNU>:-fno-gnu-unique>)
+endif()
 option(
     ROCJITSU_ENABLE_PERFSIM_PLUGIN
     "Build the optional RocJITsu adapter for an external Perfsim observer plugin"

@@ -41,9 +41,9 @@ typedef enum rj_vm_mode_t {
   /// Topology and driver are not initialized — the caller drives the
   /// simulation via rj_vm_step or rj_vm_run.
   RJ_VM_MODE_DEFAULT = 0,
-  /// @brief Single-process serving (LD_PRELOAD interposer). Engine runs
-  /// indefinitely, topology is generated, and the driver is opened so that
-  /// a host runtime (e.g., ROCR) can issue ioctls through the interposer.
+  /// @brief Single-process serving through the C API or LD_PRELOAD interposer.
+  /// Engine runs indefinitely, topology is generated, and the driver is opened
+  /// for in-process KFD commands. The interposer is not required for C API use.
   RJ_VM_MODE_LOCAL = 1,
   /// @brief Multi-process serving (daemon). Same as LOCAL, plus all GPU
   /// allocations have shareable backing handles (memfds or opaque tokens)

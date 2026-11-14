@@ -100,8 +100,8 @@ void exercise_lifecycle(Lifecycle lifecycle) {
         expect_same_action(action, actions[index]);
       }
     };
-    std::unique_ptr<void, decltype(&dlclose)> library(
-        dlopen(RJ_VM_API_LIBRARY, RTLD_NOW | RTLD_LOCAL), dlclose);
+    std::unique_ptr<void, int (*)(void *)> library(dlopen(RJ_VM_API_LIBRARY, RTLD_NOW | RTLD_LOCAL),
+                                                   dlclose);
     ASSERT_NE(library, nullptr) << dlerror();
     ASSERT_EQ(dlsym(RTLD_DEFAULT, "rj_vm_create_from_string"), nullptr);
     ASSERT_NO_FATAL_FAILURE(check_actions());
@@ -303,7 +303,7 @@ void exercise_lifecycle(Lifecycle lifecycle) {
     ASSERT_NO_FATAL_FAILURE(check_actions());
     EXPECT_EQ(dlclose(library.release()), 0);
     EXPECT_EQ(keeper_lease_count(), initial_leases);
-    std::unique_ptr<void, decltype(&dlclose)> retained(
+    std::unique_ptr<void, int (*)(void *)> retained(
         dlopen(RJ_VM_API_LIBRARY, RTLD_NOW | RTLD_LOCAL | RTLD_NOLOAD), dlclose);
     EXPECT_EQ(retained, nullptr) << "library retained after VM and worker teardown";
     ASSERT_NO_FATAL_FAILURE(check_actions());
@@ -384,8 +384,8 @@ void exercise_code_inspection(bool basic_blocks) {
   const size_t initial_leases = keeper_lease_count();
   for (unsigned cycle = 0; cycle < 2; ++cycle) {
     SCOPED_TRACE(cycle);
-    std::unique_ptr<void, decltype(&dlclose)> library(
-        dlopen(RJ_VM_API_LIBRARY, RTLD_NOW | RTLD_LOCAL), dlclose);
+    std::unique_ptr<void, int (*)(void *)> library(dlopen(RJ_VM_API_LIBRARY, RTLD_NOW | RTLD_LOCAL),
+                                                   dlclose);
     ASSERT_NE(library, nullptr) << dlerror();
     const auto create = load_function<decltype(&rj_code_executable_create)>(
         library.get(), "rj_code_executable_create");
@@ -434,7 +434,7 @@ void exercise_code_inspection(bool basic_blocks) {
     object.reset();
     EXPECT_EQ(dlclose(library.release()), 0);
     EXPECT_EQ(keeper_lease_count(), initial_leases);
-    std::unique_ptr<void, decltype(&dlclose)> retained(
+    std::unique_ptr<void, int (*)(void *)> retained(
         dlopen(RJ_VM_API_LIBRARY, RTLD_NOW | RTLD_LOCAL | RTLD_NOLOAD), dlclose);
     EXPECT_EQ(retained, nullptr) << "library retained after code inspection";
   }

@@ -54,7 +54,12 @@ cmake --build build --target rocjitsu_shared
 ```
 
 The host loads `librocjitsu`, creates VMs through the C API, and retains the
-library through their lifetimes. Before destroying a VM, it requests exit and
+library through their lifetimes. For in-process KFD commands, create the VM
+with `RJ_VM_MODE_LOCAL`; this initializes the topology and opens the driver
+without requiring the interposer. `RJ_VM_MODE_DEFAULT` is for standalone
+simulation and does not initialize that driver or topology. GCC builds disable
+GNU-unique symbols in this configuration so that `dlclose` can unload the
+library. Before destroying a VM, the host requests exit and
 joins any thread calling `rj_vm_run`. It destroys every VM before closing the
 library. Excluding the interposer also gives the default execution-plugin group
 and the current process's memory-keeper owner lease the library's lifetime.
