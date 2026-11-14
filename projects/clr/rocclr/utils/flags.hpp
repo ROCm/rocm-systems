@@ -300,9 +300,13 @@ release(uint, DEBUG_CLR_USE_MOVDIR64B, 1,                                     \
 release(bool, DEBUG_CLR_ENABLE_KDQ, true,                                     \
         "Kernel dispatch metadata (prefetch) queue, 0 = disable")             \
 release(bool, DEBUG_CLR_GRAPH_DEV_SIGNALS, true,                              \
-        "Place graph signals in device memory (large BAR only)")              \
-release(bool, DEBUG_CLR_DEV_SIGNALS, false,                                   \
-        "Place queue signals in device memory (large BAR only)")              \
+        "Place graph signals in device memory when ROCr reports a "           \
+        "signal-capable device pool, the device has a large BAR, and no "     \
+        "profiler tool is attached")                                          \
+release(bool, DEBUG_CLR_DEV_SIGNALS, true,                                    \
+        "Place queue signals in device memory when ROCr reports a "           \
+        "signal-capable device pool, the device has a large BAR, and no "     \
+        "profiler tool is attached")                                          \
 release(bool, DEBUG_CLR_GRAPH_FAST_LAUNCH, true,                             \
         "Graph launches on several streams: one-packet end markers with a "  \
         "gate for the other queues, fork waits without marker commands, "     \
