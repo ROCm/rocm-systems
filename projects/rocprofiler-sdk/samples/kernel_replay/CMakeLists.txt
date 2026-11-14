@@ -101,8 +101,8 @@ function(add_kernel_replay_sample NAME CLIENT_SRC)
                    "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
                    SKIP_REGULAR_EXPRESSION
                    "PC sampling unavailable|SPM unavailable|ATT unavailable"
-                   RUN_SERIAL
-                   ON
+                   RESOURCE_LOCK
+                   "${ROCPROFILER_SAMPLES_GPU_PROFILING_LOCK}"
                    DISABLED
                    "${_disabled}")
 endfunction()

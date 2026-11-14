@@ -77,7 +77,7 @@ set_tests_properties(
                "${PRELOAD_ENV}"
                LABELS
                "samples;thread-trace"
-               RUN_SERIAL
-               ON
+               RESOURCE_LOCK
+               "${ROCPROFILER_SAMPLES_GPU_PROFILING_LOCK}"
                DISABLED
                ${IS_DISABLED})
