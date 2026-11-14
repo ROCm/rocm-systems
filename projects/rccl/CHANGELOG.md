@@ -84,6 +84,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 * On gfx1250, the DDA LL128 peer-split two-shot `ncclAllReduce` carries 124 data bytes in each 128-byte line with a 4-byte flag (1984 bytes a slice instead of 1920) on launches of more than 8 blocks (counted for the 8-byte flag). Smaller launches keep the 8-byte flag.
 * On gfx1250, the DDA LL128 peer-split two-shot `ncclAllReduce` runs on the blocks of the launch it replaces, with a warp for each (slice, peer) unit a block owns. On launches of more than 8 blocks with at most 17 slices a block and at least one unit a warp, each reduced slice goes from the reduce to the push through LDS instead of the scratch.
 * On gfx1250, the DDA LL128 peer-split two-shot `ncclAllReduce` folds each block's peer copies from LDS on hand-off launches of shards up to 256 KiB: all copies of a round's slices at once with at most 8 peers and 8 slices a block, or 8 copies at a time with at least 17 peers, 17 blocks and at most 5 slices a block.
+* On gfx1250, the DDA LL128 peer-split two-shot `ncclAllReduce` gathers each block's peer copies into LDS with async loads before folding them on hand-off launches of shards up to 512 KiB where those copies are at least 128 KiB and a block owns at most 9 slices, all held at once. These include 9-rank launches otherwise folded with all copies at once, but not launches folded 8 copies at a time. These launches keep the 8-byte flag.
 
 ### Removed
 
