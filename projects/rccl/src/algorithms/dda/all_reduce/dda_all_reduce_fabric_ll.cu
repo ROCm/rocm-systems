@@ -50,11 +50,15 @@ namespace {
 using dda::common::ddaLLArSlotPkts;
 using dda::common::ddaLLArTwoShotSlotPkts;
 
+using dda::common::DdaArSplitB;
 using dda::common::ddaBankSize;
 using dda::common::ddaLL128ArSlotWords;
 using dda::common::ddaLL128ArTwoShotSlotWords;
 using dda::common::ddaLL128Slices;
 using dda::common::ddaLL128SlicesOf;
+using dda::common::kDdaArSplitBPairwise;
+using dda::common::kDdaArSplitBWide;
+using dda::common::kDdaArSplitBWideChunked;
 using dda::common::kDdaLL128FlagBytesNarrow;
 using dda::common::kDdaLL128FlagBytesWide;
 using dda::common::kDdaLL128Warp;
@@ -314,12 +318,40 @@ static bool ddaArSplitTakesHandoff(int nRanks, size_t slices, unsigned blocks, u
          (size_t)(nRanks - 1) * slices >= kDdaArSplitHandoffMinUnitsPerWarp * warps;
 }
 
-// Devices (a bit each, below 64) on which the hand-off kernel of T may use its largest LDS.
-template <typename T>
+// Wide B folds a hand-off launch's B from LDS: up to a chunk's copies of a slice (8: one 16 KiB group) and 8 slices
+// a block; chunked wide B from 17 copies on, on 17 blocks or more with at most 5 slices a block. Both only on shards
+// of at most kDdaArSplitWideMaxShardBytes, a provisional cap until a shard sweep tunes it (past it pairwise B wins).
+constexpr int kDdaArSplitWideMaxCopies = (int)dda::common::kDdaArSplitWideChunkCopies;
+constexpr size_t kDdaArSplitWideMaxSlices = 8;
+constexpr int kDdaArSplitWideChunkMinCopies = 17;
+constexpr unsigned kDdaArSplitWideChunkMinBlocks = 17;
+constexpr size_t kDdaArSplitWideChunkMaxSlices = 5;
+constexpr size_t kDdaArSplitWideMaxShardBytes = 256 * 1024;
+static_assert(dda::common::ddaArSplitWideRoundSlices(kDdaArSplitWideMaxCopies + 1) >= 1, "a slice's copies fit");
+
+// B's form of a hand-off launch of `slices` slices of `shardBytes` shards on `blocks`.
+static DdaArSplitB ddaArSplitB(int nRanks, size_t shardBytes, size_t slices, unsigned blocks) {
+  if (shardBytes > kDdaArSplitWideMaxShardBytes || blocks == 0) {
+    return kDdaArSplitBPairwise;
+  }
+  const size_t blockSlices = (slices + blocks - 1) / blocks;
+  if (nRanks - 1 <= kDdaArSplitWideMaxCopies && blockSlices <= kDdaArSplitWideMaxSlices) {
+    return kDdaArSplitBWide;
+  }
+  if (nRanks - 1 >= kDdaArSplitWideChunkMinCopies && blocks >= kDdaArSplitWideChunkMinBlocks &&
+      blockSlices <= kDdaArSplitWideChunkMaxSlices) {
+    return kDdaArSplitBWideChunked;
+  }
+  return kDdaArSplitBPairwise;
+}
+
+// Devices (a bit each, below 64) on which the hand-off kernel of T with B form kB may use its largest LDS.
+template <typename T, DdaArSplitB kB = kDdaArSplitBPairwise>
 std::atomic<uint64_t> ddaArSplitHandoffLdsDevs{0};
 
-// Raises the hand-off kernel's dynamic LDS limit once per device; false (the own-slot path) if the runtime refuses.
-template <typename T>
+// Raises the hand-off kernel's dynamic LDS limit once per device; false (the own-slot path, or pairwise B for a wide
+// form) if the runtime refuses.
+template <typename T, DdaArSplitB kB = kDdaArSplitBPairwise>
 static bool ddaArSplitHandoffLdsOk() {
   int dev = 0;
   if (cudaGetDevice(&dev) != cudaSuccess) {
@@ -327,19 +359,47 @@ static bool ddaArSplitHandoffLdsOk() {
     return false;
   }
   const uint64_t devBit = dev < 64 ? uint64_t{1} << dev : 0;
-  if ((ddaArSplitHandoffLdsDevs<T>.load(std::memory_order_acquire) & devBit) != 0) {
+  if ((ddaArSplitHandoffLdsDevs<T, kB>.load(std::memory_order_acquire) & devBit) != 0) {
     return true;
   }
   const void* kernel =
-    reinterpret_cast<const void*>(&dda::common::ddaAllReduceTwoShotLL128Split<T, kDdaLL128FlagBytesNarrow, true>);
-  const int lds = (int)dda::common::ddaLL128ArSplitSharedBytes(kDdaArLL128Threads, dda::common::kDdaMaxNranks, true);
+    reinterpret_cast<const void*>(&dda::common::ddaAllReduceTwoShotLL128Split<T, kDdaLL128FlagBytesNarrow, true, kB>);
+  const int lds =
+    (int)dda::common::ddaLL128ArSplitSharedBytes(kDdaArLL128Threads, dda::common::kDdaMaxNranks, /*handoff=*/true, kB);
   if (cudaFuncSetAttribute(kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, lds) != cudaSuccess) {
     (void)cudaGetLastError();
-    INFO(NCCL_COLL, "DDA fabric AllReduce LL128 peer-split: no %d B dynamic LDS, no hand-off", lds);
+    INFO(NCCL_COLL, "DDA fabric AllReduce LL128 peer-split: no %d B dynamic LDS for b=%d, %s", lds, (int)kB,
+         kB == kDdaArSplitBPairwise ? "no hand-off" : "pairwise B");
     return false;
   }
-  ddaArSplitHandoffLdsDevs<T>.fetch_or(devBit, std::memory_order_release);
+  ddaArSplitHandoffLdsDevs<T, kB>.fetch_or(devBit, std::memory_order_release);
   return true;
+}
+
+// The 4 B flag's hand-off kernel of T for B form b.
+template <typename T>
+static DdaArLL128Kernel<T> ddaArLL128SplitHandoffKernel(DdaArSplitB b) {
+  switch (b) {
+  case kDdaArSplitBWide:
+    return &dda::common::ddaAllReduceTwoShotLL128Split<T, kDdaLL128FlagBytesNarrow, true, kDdaArSplitBWide>;
+  case kDdaArSplitBWideChunked:
+    return &dda::common::ddaAllReduceTwoShotLL128Split<T, kDdaLL128FlagBytesNarrow, true, kDdaArSplitBWideChunked>;
+  default:
+    return &dda::common::ddaAllReduceTwoShotLL128Split<T, kDdaLL128FlagBytesNarrow, true>;
+  }
+}
+
+// B's form of a hand-off launch as ddaArSplitB says, pairwise where the runtime refuses the wide form's LDS.
+template <typename T>
+static DdaArSplitB ddaArSplitBGranted(int nRanks, size_t shardBytes, size_t slices, unsigned blocks) {
+  switch (ddaArSplitB(nRanks, shardBytes, slices, blocks)) {
+  case kDdaArSplitBWide:
+    return ddaArSplitHandoffLdsOk<T, kDdaArSplitBWide>() ? kDdaArSplitBWide : kDdaArSplitBPairwise;
+  case kDdaArSplitBWideChunked:
+    return ddaArSplitHandoffLdsOk<T, kDdaArSplitBWideChunked>() ? kDdaArSplitBWideChunked : kDdaArSplitBPairwise;
+  default:
+    return kDdaArSplitBPairwise;
+  }
 }
 
 // One warp carries one slice, so the grid is sized in slices rather than in
@@ -414,11 +474,12 @@ static ncclResult_t ncclAllReduceDdaFabricLL128TwoShotTyped(const void* sendbuff
   const dim3 block = geom.second;
   // Past the small grid the flag is narrow, so the hand-off runs only with the narrow flag.
   const bool handoff = narrow && ddaArSplitTakesHandoff(nRanks, slices, grid.x, block.x) && ddaArSplitHandoffLdsOk<T>();
+  const DdaArSplitB b = handoff ? ddaArSplitBGranted<T>(nRanks, shardBytes, slices, grid.x) : kDdaArSplitBPairwise;
   const int wire = split ? dda::common::kDdaLL128WireAsync : ddaArLL128Wire(comm, bytes);
   const size_t lds =
-    split ? dda::common::ddaLL128ArSplitSharedBytes(block.x, nRanks, handoff) : ddaArLL128SharedBytes(wire, block.x);
+    split ? dda::common::ddaLL128ArSplitSharedBytes(block.x, nRanks, handoff, b) : ddaArLL128SharedBytes(wire, block.x);
   const DdaArLL128Kernel<T> kernel =
-    handoff ? &dda::common::ddaAllReduceTwoShotLL128Split<T, kDdaLL128FlagBytesNarrow, true> :
+    handoff ? ddaArLL128SplitHandoffKernel<T>(b) :
     narrow  ? &dda::common::ddaAllReduceTwoShotLL128Split<T, kDdaLL128FlagBytesNarrow> :
     split   ? &dda::common::ddaAllReduceTwoShotLL128Split<T> :
               ddaArLL128TwoShotKernel<T>(nRanks, wire);
@@ -430,8 +491,8 @@ static ncclResult_t ncclAllReduceDdaFabricLL128TwoShotTyped(const void* sendbuff
 
   INFO(NCCL_COLL,
        "DDA fabric AllReduce LL128 two-shot: nRanks=%d bytes=%zu shardBytes=%zu slices=%zu grid=%u block=%u wire=%d "
-       "lds=%zu flag=%dB handoff=%d (%s, bankSize=%zu)",
-       nRanks, bytes, shardBytes, slices, grid.x, block.x, wire, lds, flagBytes, (int)handoff,
+       "lds=%zu flag=%dB handoff=%d b=%d (%s, bankSize=%zu)",
+       nRanks, bytes, shardBytes, slices, grid.x, block.x, wire, lds, flagBytes, (int)handoff, (int)b,
        split ? "peer-split" : "warp-per-slice", bankSize);
 
   const dda::common::DdaKernelParams params{comm->abortFlagDev};

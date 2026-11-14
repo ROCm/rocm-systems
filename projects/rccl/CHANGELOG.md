@@ -83,6 +83,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 * `RCCL_DDA_LL128_A2A_THREADS` now defaults to `0`, which reads the arch table and keeps 256 threads where it sets none. It still overrides the table with a multiple of 32 up to 1024 (it took a multiple of 16 before). `RCCL_DDA_LL128_A2A_MAXBPP` (was default `64`) and `RCCL_DDA_LL128_A2A_LPB` (was default `4`) are now unset by default, so each warp moves one slice and the block budget alone caps the grid; when set, MAXBPP caps the blocks per peer column and LPB sizes them from 120-byte lines, both within the block budget.
 * On gfx1250, the DDA LL128 peer-split two-shot `ncclAllReduce` carries 124 data bytes in each 128-byte line with a 4-byte flag (1984 bytes a slice instead of 1920) on launches of more than 8 blocks (counted for the 8-byte flag). Smaller launches keep the 8-byte flag.
 * On gfx1250, the DDA LL128 peer-split two-shot `ncclAllReduce` runs on the blocks of the launch it replaces, with a warp for each (slice, peer) unit a block owns. On launches of more than 8 blocks with at most 17 slices a block and at least one unit a warp, each reduced slice goes from the reduce to the push through LDS instead of the scratch.
+* On gfx1250, the DDA LL128 peer-split two-shot `ncclAllReduce` folds each block's peer copies from LDS on hand-off launches of shards up to 256 KiB: all copies of a round's slices at once with at most 8 peers and 8 slices a block, or 8 copies at a time with at least 17 peers, 17 blocks and at most 5 slices a block.
 
 ### Removed
 
