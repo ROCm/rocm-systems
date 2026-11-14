@@ -119,8 +119,10 @@ Result CheckedTextEdits::apply(std::span<const CheckedTextEdit> edits,
                                         text.size() / sizeof(uint32_t));
   size_t cursor = 0;
   size_t boundary_index = 0;
+  const TextAlignmentGaps alignment_gaps(source_, architecture_);
   while (cursor < words.size()) {
-    if (is_text_padding_word(architecture_, words[cursor])) {
+    if (is_text_padding_word(architecture_, words[cursor]) ||
+        (words[cursor] == 0 && alignment_gaps.contains(cursor * sizeof(uint32_t)))) {
       ++cursor;
       continue;
     }

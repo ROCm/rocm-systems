@@ -33,7 +33,6 @@ RJ_DIAGNOSTIC_POP
 #include <cstdint>
 #include <cstring>
 #include <memory>
-#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -95,44 +94,14 @@ protected:
                                reinterpret_cast<const uint8_t *>(co->image_data()) +
                                    co->image_size());
 
-    // Decode .text and find the first v_add_f32-mnemonic anchor that the
-    // trampoline machinery considers relocatable. Decode-and-search so the
-    // test is stable across compiler revisions.
-    // TODO: instrument multiple instructions
-    auto decoder = Decoder::create(params_.arch);
-    ASSERT_NE(decoder, nullptr);
-    auto block_result = BasicBlock::build(*co, *decoder, params_.arch);
-    ASSERT_TRUE(block_result.succeeded());
-    auto blocks = std::move(block_result).value();
-
-    ASSERT_FALSE(co->text_sections().empty());
-    const auto *text = co->text_sections().front();
-    const std::span<const uint8_t> text_bytes(reinterpret_cast<const uint8_t *>(text->data()),
-                                              text->size());
-
-    for (const auto &block : blocks) {
-      uint64_t cur = block->start_offset();
-      for (const Instruction &inst : block->instructions()) {
-        if (is_relocatable_anchor(inst, cur, text_bytes, params_.arch)) {
-          anchor_offsets_.push_back(cur); // Instrumentor will need offset
-          anchor_mnemonics_.push_back(std::string(inst.mnemonic()));
-          ++anchor_count_;
-        }
-        cur += static_cast<uint64_t>(inst.size());
-        if (anchor_count_ == 2)
-          break;
-      }
-      if (anchor_count_ == 2)
-        break;
-    }
-    ASSERT_NE(anchor_count_, 0u) << "No relocatable anchor in " << params_.kernel_fixture
-                                 << ".o; did the compiler change the lowering?";
+    ASSERT_NO_FATAL_FAILURE(find_vector_add_anchors(*co, params_.arch, anchor_offsets_));
+    ASSERT_GE(anchor_offsets_.size(), 2u);
+    anchor_offsets_.resize(2);
 
     // Apply the inline-nop trampoline.
     Instrumentor instrumentor(*co, params_.arch);
-    for (uint64_t anchor_idx = 0; anchor_idx < anchor_count_; ++anchor_idx) {
-      instrumentor.add_point_by_offset(anchor_offsets_[anchor_idx]);
-    }
+    for (uint64_t offset : anchor_offsets_)
+      instrumentor.add_point_by_offset(offset);
     auto result = instrumentor.patch_with_debug_summaries();
     ASSERT_TRUE(result.errors.empty())
         << "Instrumentor::patch failed: "
@@ -153,9 +122,7 @@ protected:
   std::vector<uint8_t> original_elf_bytes_;
   std::vector<uint8_t> patched_elf_bytes_;
   std::vector<uint64_t> anchor_offsets_;
-  std::vector<std::string> anchor_mnemonics_;
   std::vector<InstrumentationPatch> patches_;
-  uint64_t anchor_count_ = 0;
 };
 
 // Hardware suites for this test. DbiHardwareBase supplies the per-target HSA
@@ -181,8 +148,7 @@ void HsaDbiNopAsmFixture::run_patched_elf_actually_contains_instrumentation() {
   ASSERT_NE(patched_elf_bytes_, original_elf_bytes_)
       << "Patched ELF is byte-identical to original - patcher silently no-oped?";
 
-  // (b) The patched .text at anchor_offsets_[idx] now decodes as s_branch, not the
-  //     original instructions we recorded as anchor_mnemonics_[idx].
+  // (b) Each relocatable anchor now contains the branch to its trampoline.
   AmdGpuCodeObject patched(patched_elf_bytes_.data(), patched_elf_bytes_.size());
   ASSERT_TRUE(patched.is_valid());
   ASSERT_FALSE(patched.text_sections().empty());
@@ -191,19 +157,16 @@ void HsaDbiNopAsmFixture::run_patched_elf_actually_contains_instrumentation() {
 
   auto decoder = Decoder::create(params_.arch);
   ASSERT_NE(decoder, nullptr);
-  for (uint64_t anchor_idx = 0; anchor_idx < anchor_count_; ++anchor_idx) {
+  for (uint64_t offset : anchor_offsets_) {
     rj_code_binary_inst_t anchor_word = 0;
-    std::memcpy(&anchor_word, text->data() + anchor_offsets_[anchor_idx], sizeof(anchor_word));
+    std::memcpy(&anchor_word, text->data() + offset, sizeof(anchor_word));
     auto decode_result = decoder->decode(&anchor_word);
     ASSERT_TRUE(decode_result.succeeded());
     std::unique_ptr<Instruction> decoded = std::move(decode_result).value();
     ASSERT_NE(decoded, nullptr);
     EXPECT_NE(decoded->mnemonic().find("s_branch"), std::string_view::npos)
-        << "Anchor at offset " << anchor_offsets_[anchor_idx]
+        << "Anchor at offset " << offset
         << " should now decode as s_branch; got: " << decoded->mnemonic();
-    EXPECT_NE(decoded->mnemonic(), anchor_mnemonics_[anchor_idx])
-        << "Anchor mnemonic unchanged (" << anchor_mnemonics_[anchor_idx]
-        << ") - was the patch applied?";
   }
 
   // (c) The trampoline cave was appended to .text
@@ -239,7 +202,7 @@ void HsaDbiNopAsmHardwareBase<Params>::run_trampoline_is_actually_executed_by_gp
   ASSERT_FALSE(parsed.text_sections().empty());
   const Section *text = parsed.text_sections().front();
 
-  ASSERT_EQ(this->anchor_count_, 2u);
+  ASSERT_EQ(this->anchor_offsets_.size(), 2u);
   ASSERT_EQ(this->patches_.size(), 2u);
   ASSERT_GE(text->size(), this->patches_[1].trampoline_offset + 4);
   // File offset of the first trampoline's placeholder word.
