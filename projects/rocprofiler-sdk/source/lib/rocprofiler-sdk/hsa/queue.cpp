@@ -1140,10 +1140,11 @@ WriteInterceptor(const void* packets,
             // (b) agent-scoped snapshots so a replay only saves/restores its own agent's device
             // memory (other GPUs untouched). Different agents hold different locks and run
             // concurrently.
-            const auto& core         = queue.core_api();
-            hsa_agent_t replay_agent = queue.get_agent().get_hsa_agent();
-            const auto  replay_guard = std::unique_lock<std::shared_mutex>{
-                agent_replay_mutex(queue.get_agent().get_rocp_agent()->id)};
+            const auto& core            = queue.core_api();
+            hsa_agent_t replay_agent    = queue.get_agent().get_hsa_agent();
+            const auto  replay_agent_id = queue.get_agent().get_rocp_agent()->id;
+            const auto  replay_guard =
+                std::unique_lock<std::shared_mutex>{agent_replay_mutex(replay_agent_id)};
 
             // The app's original completion signal (completion_signal is at the same offset for
             // dispatch and ext-dispatch packets, per the static_asserts at the top of this file).
@@ -1232,6 +1233,16 @@ WriteInterceptor(const void* packets,
                 kernel_replay::execute_pass_phase_enter(
                     replay_plan, pass, thr_id, internal_corr_id, ancestor_corr_id, pass_state);
 
+#if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
+                // PC sampling is agent-wide, so unlike dispatch-scoped services it must be
+                // stopped or started explicitly after the tool selects this pass's contexts.
+                // A successful stop includes a buffer flush and therefore completes before a
+                // counter pass is submitted and changes clock gating.
+                ROCP_FATAL_IF(pc_sampling::sync_replay_service(replay_agent_id) !=
+                              ROCPROFILER_STATUS_SUCCESS)
+                    << "kernel replay: failed to apply the PC sampling pass override";
+#endif
+
                 process_packet_batch(packets_arr,
                                      1,
                                      forward_to_writer,
@@ -1262,6 +1273,14 @@ WriteInterceptor(const void* packets,
                     "kernel replay: restore failed between passes (partial host->device copy); "
                     "aborting rather than continuing with corrupted device memory");
             }
+
+#if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
+            // Local overrides do not alter context start/stop state. Restore the agent session to
+            // that global intent before releasing the replay lock and leaving the TLS scope.
+            ROCP_FATAL_IF(pc_sampling::restore_replay_service(replay_agent_id) !=
+                          ROCPROFILER_STATUS_SUCCESS)
+                << "kernel replay: failed to restore PC sampling after the replay loop";
+#endif
 
             kernel_replay::execute_config_phase_exit(
                 replay_plan, thr_id, internal_corr_id, ancestor_corr_id);
