@@ -41,6 +41,13 @@ set_tests_properties(
 # contaminate the per-pass counters or performance baseline.
 set(REPLAY_PASSES 5)
 
+# The untracked-memory app issues three host-pinned saxpy launches and, when supported,
+# three fine-grained device launches. Each runs once despite two --pmc groups. The app
+# records the expected launch counts after checking device support and application
+# results.
+set(REPLAY_UNTRACKED_PASS_COUNTS_FILE
+    "${CMAKE_CURRENT_BINARY_DIR}/kernel-replay-untracked-memory-pass-counts.txt")
+
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-kernel-replay-generate
     COMMAND
@@ -162,6 +169,46 @@ rocprofiler_add_integration_validate_test(
     PYTHON_PATH
         "${rocprofiler-sdk_LIB_DIR}/python${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}/site-packages"
     FIXTURES_REQUIRED rocprofv3-test-kernel-replay-iteration-range-data)
+
+# The app checks that host-pinned and fine-grained device saxpy launches each apply their
+# update once. Pass counts also verify replay was declined: correct output alone cannot
+# distinguish a run-once dispatch from one replayed with restored inputs. Numeric dispatch
+# ids are not pinned.
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-kernel-replay-untracked-memory-generate
+    COMMAND
+        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --pmc SQ_WAVES SQ_INSTS_VALU GRBM_COUNT
+        --pmc SQ_WAVES SQ_INSTS_VALU GRBM_GUI_ACTIVE --replay-mode kernel
+        --kernel-include-regex saxpy --kernel-replay-beta-enabled --output-format json -d
+        ${CMAKE_CURRENT_BINARY_DIR}/kernel-replay-untracked-memory -o out --
+        $<TARGET_FILE:kernel-replay> 65536 1 untracked
+        ${REPLAY_UNTRACKED_PASS_COUNTS_FILE}
+    DEPENDS kernel-replay
+    TIMEOUT 120
+    LABELS "kernel-replay"
+    ENVIRONMENT "${rocprofv3-generate-env}"
+    FIXTURES_SETUP rocprofv3-test-kernel-replay-untracked-memory-data)
+
+rocprofiler_add_integration_validate_test(
+    rocprofv3-test-kernel-replay-untracked-memory-validate BUNDLE_TESTS
+    TEST_PATHS validate.py
+    COPY conftest.py
+    ARGS --json-input
+         ${CMAKE_CURRENT_BINARY_DIR}/kernel-replay-untracked-memory/out_results.json
+         --passes
+         2
+         --expected-pass-counts-file
+         ${REPLAY_UNTRACKED_PASS_COUNTS_FILE}
+         --common-counters
+         SQ_WAVES
+         SQ_INSTS_VALU
+         -k
+         "pass_counts_per_dispatch"
+    TIMEOUT 120
+    LABELS "kernel-replay"
+    PYTHON_PATH
+        "${rocprofiler-sdk_LIB_DIR}/python${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}/site-packages"
+    FIXTURES_REQUIRED rocprofv3-test-kernel-replay-untracked-memory-data)
 
 # One-pass baseline for performance scaling checks (same workload, single --pmc group).
 rocprofiler_add_integration_execute_test(

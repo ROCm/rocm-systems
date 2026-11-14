@@ -77,7 +77,7 @@ what makes snapshots agent-scoped.
 captures two categories:
 
 1. **Tracked allocations** owned by `agent`, as filtered above.
-2. **Module-scope `__device__` and `__constant__` variables** visible to `agent`.
+2. **Module-scope `__device__` and `__constant__` variables** exposed as HSA variable symbols to `agent`.
 
 Capture is a plain device-to-host copy through `hsa_memory_copy`, taken from rocprofiler's captured
 HSA table so it uses the original, un-wrapped function.
@@ -90,7 +90,8 @@ would leak that mutation into the next pass. `snap()` therefore discovers them s
 iterates the loaded code objects and, for each one, calls `hsa_executable_iterate_agent_symbols` for
 the replaying agent, collecting symbols of kind `HSA_SYMBOL_KIND_VARIABLE` along with their device
 address and size. Symbols with a zero address or size are skipped, as is anything larger than 1 GiB
-(a sanity cap).
+(a sanity cap). Internal or static device state that is not exposed as an HSA variable symbol is
+not discovered or restored; writes to it can accumulate across replay passes.
 
 Iterating for a specific agent naturally scopes the walk to executables loaded on that agent —
 others yield no symbols — which matches `snap()`'s per-agent contract.
@@ -119,8 +120,8 @@ under the agent writer lock. The application sees a normal, un-replayed executio
 
 ## What `restore()` writes back
 
-`restore()` copies each captured region back host-to-device and returns the number of regions
-successfully restored. The two categories are handled differently:
+`restore()` copies each captured region back host-to-device and returns whether all required
+copies succeeded. The two categories are handled differently:
 
 - **Tracked allocations** are re-validated first. The lookup and the copy happen together under the
   inventory read lock, so a concurrent free cannot race between the check and the write. If the
@@ -130,7 +131,8 @@ successfully restored. The two categories are handled differently:
 - **Module-scope variables** live in the loaded executable and are always present, so they are
   restored directly.
 
-A failed individual copy is logged and skipped; it does not abort the replay.
+A failed individual copy returns failure; the replay loop aborts rather than executing another
+pass with partially restored memory.
 
 ## HIP graphs
 
@@ -162,8 +164,15 @@ Stated plainly, because each one has a concrete cause in the mechanism above.
   variants are not kernel dispatches, so they bypass both the AQL queues and the per-agent replay
   gate. The source marks serializing them as a follow-up. See
   [Concurrency and isolation](kernel_replay_concurrency_and_isolation.md#what-is-not-isolated).
-- **Coarse-grained device memory only.** Kernarg, host, fine-grained and executable allocations are
-  excluded by design, as is unified and managed memory.
+- **Coarse-grained device memory only in the tracker.** Kernarg, host, fine-grained and executable
+  allocations are excluded by design, as is unified and managed memory. Detected argument pointers
+  to memory outside the snapshot cause the dispatch to run once without replay. Pointer discovery
+  is best effort: indirect pointers and some aggregate fields can be missed, allowing writes
+  outside the snapshot to accumulate across passes. Scalar values can also cause false declines.
+- **Kernarg-buffer access fails closed.** If the allocation extent cannot be verified or the buffer
+  cannot be copied safely for inspection, the dispatch runs once without replay.
+- **Selected runtime copy/fill kernels bypass argument checks.** Overlapping copies are not
+  detected and may not be repeatable.
 - **HIP graph launches are not replayed** (warn once, run once), as described above.
 - **Only single-packet, single-dispatch submissions are replayed.** The replay gate requires exactly
   one packet in the batch and exactly one dispatch packet in it; anything else takes the normal path.
@@ -188,6 +197,8 @@ All paths are relative to `projects/rocprofiler-sdk/`.
 | Allocation recording | `source/lib/rocprofiler-sdk/kernel_replay/memory_tracker.cpp` | `record_alloc()`, `record_free()` |
 | Agent-scoped inventory | `source/lib/rocprofiler-sdk/kernel_replay/memory_tracker.cpp` | `snap_inventory()` |
 | Trackability classifier | `source/lib/rocprofiler-sdk/kernel_replay/utils.cpp` | `query_alloc()` |
+| Untracked-argument guard | `source/lib/rocprofiler-sdk/kernel_replay/untracked_memory.cpp` | `can_replay_dispatch()`, `scan_kernarg()` |
+| Argument layout from metadata | `source/lib/rocprofiler-sdk/code_object/hip/code_object.cpp` | `get_metadata_from_executable()` |
 | Tracking activation | `source/lib/rocprofiler-sdk/callback_tracing.cpp` | `rocprofiler_configure_callback_tracing_service()` |
 | Snapshot-declined fallback | `source/lib/rocprofiler-sdk/hsa/queue.cpp` | `snapshot.ok` branch in `WriteInterceptor` |
 | HIP graph warn-once + run-once | `source/lib/rocprofiler-sdk/hsa/queue.cpp` | `_warned_graph_replay`; `graph_launch_active` excluded from the replay gate |
