@@ -87,8 +87,6 @@ SUPPORTED_CALL: dict[str, str] = {
     "MOD": "to_mod",
     # String concatenation operation
     "CONCAT": "to_concat",
-    # Threshold-based clamping for multi-pass profiling noise
-    "NOISE_CLAMP": "to_noise_clamp",
 }
 
 

@@ -7,6 +7,7 @@ from utils.counters.allocator import allocate_single_pass_metrics, metric_counte
 from utils.counters.counter_file import flat_counters_in_perfmon_file
 
 THREE_SQ_SLOTS = {"SQ": 3}
+ARCH_WITHOUT_GFX1250_SPLIT = "gfx942"
 
 
 def layout(files):
@@ -21,7 +22,7 @@ def test_metric_counter_sets_match_channels_and_skip_unprofiled_metrics():
 
     counter_sets = metric_counter_sets(
         [["AVG(TCC_HIT[0] / SQ_WAVES)"], ["SUM(TA_BUSY_avr)"]],
-        "MI300",
+        {},
         profile_counters,
     )
 
@@ -38,7 +39,9 @@ def test_allocate_copies_a_counter_so_each_metric_has_one_pass():
         frozenset({"SQ_B", "SQ_D"}),
     ]
 
-    files = allocate_single_pass_metrics(counters, metric_sets, THREE_SQ_SLOTS)
+    files = allocate_single_pass_metrics(
+        counters, metric_sets, THREE_SQ_SLOTS, ARCH_WITHOUT_GFX1250_SPLIT
+    )
 
     assert layout(files) == [
         ["SQ_A", "SQ_B", "SQ_F"],
@@ -53,7 +56,7 @@ def test_allocate_puts_other_counters_in_the_first_pass_with_room():
     counters = {"SQ_A", "SQ_B", "SQ_C", "SQ_D"}
 
     files = allocate_single_pass_metrics(
-        counters, [frozenset(counters)], THREE_SQ_SLOTS
+        counters, [frozenset(counters)], THREE_SQ_SLOTS, ARCH_WITHOUT_GFX1250_SPLIT
     )
 
     assert layout(files) == [["SQ_A", "SQ_B", "SQ_C"], ["SQ_D"]]
@@ -68,6 +71,25 @@ def test_allocate_extends_the_pass_holding_most_of_a_metric():
         frozenset({"TA_X", "TA_Y"}),
     ]
 
-    files = allocate_single_pass_metrics(counters, metric_sets, {"SQ": 2, "TA": 2})
+    files = allocate_single_pass_metrics(
+        counters, metric_sets, {"SQ": 2, "TA": 2}, ARCH_WITHOUT_GFX1250_SPLIT
+    )
 
     assert layout(files) == [["SQ_A", "SQ_B"], ["SQ_C", "TA_X", "TA_Y"]]
+
+
+def test_allocate_keeps_sp_valu_and_sq_vmem_apart_only_on_gfx1250():
+    """On gfx1250 an SP_VALU_* and an SQ_VMEM_* counter never share a pass, so
+    a metric that reads both has no pass of its own. Other archs allow it."""
+    counters = {"SP_VALU_A", "SQ_VMEM_B", "SQ_C"}
+    metric_sets = [frozenset(counters)]
+
+    gfx1250_files = allocate_single_pass_metrics(
+        counters, metric_sets, THREE_SQ_SLOTS, "gfx1250"
+    )
+    other_files = allocate_single_pass_metrics(
+        counters, metric_sets, THREE_SQ_SLOTS, ARCH_WITHOUT_GFX1250_SPLIT
+    )
+
+    assert layout(gfx1250_files) == [["SP_VALU_A", "SQ_C"], ["SQ_VMEM_B"]]
+    assert layout(other_files) == [["SP_VALU_A", "SQ_C", "SQ_VMEM_B"]]

@@ -392,6 +392,8 @@ If your PR modifies **metric configurations** — panel YAMLs under `src/rocprof
 
 For full details, see the [metric config management README](./tools/config_management/README.md).
 
+A metric whose counters do not fit one profiling pass is split into collectables. The [metric library README](./src/rocprof_compute_soc/metric_library/README.md#collectables) explains how.
+
 ### Metric Library
 
 The metric library in `src/rocprof_compute_soc/metric_library/` defines each metric once per architecture. Until production reads the library, a metric change goes into both the panel YAMLs and the metric library. See the [metric library README](./src/rocprof_compute_soc/metric_library/README.md) for its layout, inheritance and checks.
