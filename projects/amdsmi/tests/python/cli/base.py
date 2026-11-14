@@ -1044,7 +1044,26 @@ class TestCliBase(unittest.TestCase):
                 return 0
             # The deep-sleep row occupies a table slot but is not settable.
             per_gpu.append(freq["num_supported"] - int(freq["has_deep_sleep"]))
-        return min(per_gpu) if per_gpu else 0
+        if not per_gpu:
+            return 0
+        # A table's middle levels can come and go as the command runs (a fine-grained
+        # domain lists its current clock as a level only while it sits between min and
+        # max). Every device then refuses a vanished level the same way, which the
+        # caller tolerates -- unless the devices are different models: the one that
+        # lost the level fails with another code than the rest, and the CLI exits
+        # MIXED_DEVICE_ERRORS. So on a mixed host, name only levels 0 and 1, which
+        # every table with two or more levels always lists.
+        if not explicit_gpu and self._mixed_gpu_models():
+            return min(min(per_gpu), 2)
+        return min(per_gpu)
+
+    def _mixed_gpu_models(self):
+        """Whether the host has GPUs of more than one model (graphics target)."""
+        targets = {
+            gpu.get("asic", {}).get("target_graphics_version")
+            for gpu in self.static_data["gpu_data"]
+        }
+        return len(targets) > 1
 
     def _power_cap_range(self, sensor, gpu_index, explicit_gpu):
         """The ``--power-cap`` range every target device accepts for *sensor*.
