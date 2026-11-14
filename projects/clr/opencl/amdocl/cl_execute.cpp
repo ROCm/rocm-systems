@@ -252,6 +252,30 @@ RUNTIME_ENTRY(cl_int, clEnqueueNDRangeKernel,
 
   amd::NDRangeContainer ndrange((size_t)work_dim, global_work_offset, global_work_size,
                                 local_work_size);
+
+  // Check the work-group count against the device limit. Resolve the local size the same
+  // way the device layer will at submit time, in case the app didn't provide it.
+  {
+    amd::NDRange local(ndrange.local());
+    const amd::NDRange global(ndrange.global());
+    devKernel->FindLocalWorkSize(work_dim, global, local);
+    for (cl_uint dim = 0; dim < work_dim; ++dim) {
+      const uint32_t maxCount = device.info().maxWorkGroupCount_[dim];
+      if ((maxCount == 0) || (local[dim] == 0)) {
+        continue;
+      }
+      const size_t numGroups = (global[dim] + local[dim] - 1) / local[dim];
+      if (numGroups > maxCount) {
+        LogPrintfError(
+            "Kernel %s: %zu work-groups in dimension %u exceed the device limit of %u "
+            "(global size %zu, local size %zu). Use a larger local size in this dimension or "
+            "put the largest dimension in X.",
+            amdKernel->name().c_str(), numGroups, dim, maxCount, global[dim], local[dim]);
+        return CL_INVALID_GLOBAL_WORK_SIZE;
+      }
+    }
+  }
+
   amd::NDRangeKernelCommand* command =
       new amd::NDRangeKernelCommand(hostQueue, eventWaitList, *as_amd(kernel), ndrange);
   if (command == NULL) {

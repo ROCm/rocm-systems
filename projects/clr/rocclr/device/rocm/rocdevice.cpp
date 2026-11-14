@@ -1480,6 +1480,14 @@ bool Device::populateOCLDeviceConstants() {
   info_.maxGridDim_[1] = std::min(grid_max_dim.y, static_cast<uint32_t>(std::numeric_limits<int32_t>::max()));
   info_.maxGridDim_[2] = std::min(grid_max_dim.z, static_cast<uint32_t>(std::numeric_limits<int32_t>::max()));
 
+  // gfx12+ packs workgroup IDs Y and Z into 16-bit halves of an architected SGPR,
+  // so a kernel can't address more than 2^16 work-groups in those dimensions.
+  if (isa().versionMajor() >= 12) {
+    constexpr uint32_t kMaxWorkGroupCountYZ = std::numeric_limits<uint16_t>::max() + 1;
+    info_.maxWorkGroupCount_[1] = kMaxWorkGroupCountYZ;
+    info_.maxWorkGroupCount_[2] = kMaxWorkGroupCountYZ;
+  }
+
   info_.nativeVectorWidthChar_ = info_.preferredVectorWidthChar_ = 4;
   info_.nativeVectorWidthShort_ = info_.preferredVectorWidthShort_ = 2;
   info_.nativeVectorWidthInt_ = info_.preferredVectorWidthInt_ = 1;

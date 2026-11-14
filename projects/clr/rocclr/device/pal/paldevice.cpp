@@ -651,10 +651,19 @@ void NullDevice::fillDeviceInfo(const Pal::DeviceProperties& palProp,
     }
   }
 #if PAL_CLIENT_INTERFACE_MAJOR_VERSION >= 989
-  info_.hasExpertSchedMode_ = palProp.gfxTriple >= Pal::IpLevel(12, 0);
+  const bool isGfx12Plus = palProp.gfxTriple >= Pal::IpLevel(12, 0);
 #else
-  info_.hasExpertSchedMode_ = palProp.gfxLevel >= Pal::GfxIpLevel::GfxIp12;
+  const bool isGfx12Plus = palProp.gfxLevel >= Pal::GfxIpLevel::GfxIp12;
 #endif
+  info_.hasExpertSchedMode_ = isGfx12Plus;
+
+  // gfx12+ packs workgroup IDs Y and Z into 16-bit halves of an architected SGPR,
+  // so a kernel can't address more than 2^16 work-groups in those dimensions.
+  if (isGfx12Plus) {
+    constexpr uint32_t kMaxWorkGroupCountYZ = std::numeric_limits<uint16_t>::max() + 1;
+    info_.maxWorkGroupCount_[1] = kMaxWorkGroupCountYZ;
+    info_.maxWorkGroupCount_[2] = kMaxWorkGroupCountYZ;
+  }
 }
 
 Device::XferBuffers::~XferBuffers() {
