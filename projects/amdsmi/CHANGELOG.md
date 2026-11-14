@@ -6,6 +6,11 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ## amd_smi_lib for ROCm 10.3.0
 
+### Changed
+
+- **The `amdsmi` Python wheel now uses standard SPDX license metadata**.  
+  - `pip show amdsmi` reports `License-Expression: MIT`; building the wheel from source now needs setuptools 77 or later (Python 3.9 or later).
+
 ### Resolved Issues
 
 - **Fixed `amd-smi ras --cper` crashing with `TypeError` when no GPU devices are available**.
