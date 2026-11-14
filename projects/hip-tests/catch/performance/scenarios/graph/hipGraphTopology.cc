@@ -364,42 +364,54 @@ static void run_graph_topology_test(const TestOptions& opt) {
   double first_launch_cpu_us = std::chrono::duration<double, std::micro>(t_first_end - t_first_begin).count();
   double first_e2e_us = std::chrono::duration<double, std::micro>(t_e2e_end - t_first_begin).count();
 
-  // Repeat launches
-  std::vector<double> cpu_over_us;
+  // Repeat launches.
+  //
+  // Timed with the host clock rather than hipEvent timestamps. Events span only
+  // GPU-side execution, so they miss both the enqueue and the synchronize the
+  // caller actually waits through — and hipEventRecord is not free to observe
+  // with: it injects barrier packets carrying completion signals into the
+  // stream, which changes the thing being measured (on the ROCr PM4 path a
+  // completion signal terminates a packet merge run, so the instrumentation
+  // perturbs the backend it is instrumenting). The host clock brackets the
+  // whole operation and adds nothing to the stream.
+  std::vector<double> cpu_over_us;    // hipGraphLaunch() alone — enqueue cost
+  std::vector<double> wall_total_us;  // launch + execute + synchronize
+  std::vector<double> exec_wall_us;   // the above, minus enqueue
   cpu_over_us.reserve(opt.repeats);
-  double device_us_sum = 0.0;
-  hipEvent_t evt_start{}, evt_stop{};
-  HIP_CHECK(hipEventCreate(&evt_start));
-  HIP_CHECK(hipEventCreate(&evt_stop));
+  wall_total_us.reserve(opt.repeats);
+  exec_wall_us.reserve(opt.repeats);
 
   for (int r = 0; r < opt.repeats; ++r) {
-    HIP_CHECK(hipEventRecord(evt_start, stream));
     auto t0 = std::chrono::steady_clock::now();
     HIP_CHECK(hipGraphLaunch(gexec, stream));
     auto t1 = std::chrono::steady_clock::now();
-    HIP_CHECK(hipEventRecord(evt_stop, stream));
-    HIP_CHECK(hipEventSynchronize(evt_stop));
-    float ms = 0.0f;
-    HIP_CHECK(hipEventElapsedTime(&ms, evt_start, evt_stop));
-    device_us_sum += (double)ms * 1000.0;
-    cpu_over_us.push_back(std::chrono::duration<double, std::micro>(t1 - t0).count());
+    HIP_CHECK(hipStreamSynchronize(stream));
+    auto t2 = std::chrono::steady_clock::now();
+    const double enqueue_us = std::chrono::duration<double, std::micro>(t1 - t0).count();
+    const double total_us = std::chrono::duration<double, std::micro>(t2 - t0).count();
+    cpu_over_us.push_back(enqueue_us);
+    wall_total_us.push_back(total_us);
+    exec_wall_us.push_back(total_us - enqueue_us);
   }
 
-  HIP_CHECK(hipEventDestroy(evt_start));
-  HIP_CHECK(hipEventDestroy(evt_stop));
+  // Calculate statistics. Sorts in place, so the per-iteration pairing above has
+  // to be done before any of this runs.
+  auto summarize = [](std::vector<double>& v, double& avg, double& p50, double& p99) {
+    avg = p50 = p99 = 0.0;
+    if (v.empty()) return;
+    for (double x : v) avg += x;
+    avg /= static_cast<double>(v.size());
+    std::sort(v.begin(), v.end());
+    p50 = v[v.size() * 50 / 100];
+    p99 = v[v.size() * 99 / 100];
+  };
 
-  // Calculate statistics
-  double repeat_cpu_avg_us = 0.0;
-  for (double v : cpu_over_us) repeat_cpu_avg_us += v;
-  repeat_cpu_avg_us /= opt.repeats;
-
-  double repeat_cpu_p50_us = 0.0, repeat_cpu_p99_us = 0.0;
-  if (!cpu_over_us.empty()) {
-    std::sort(cpu_over_us.begin(), cpu_over_us.end());
-    repeat_cpu_p50_us = cpu_over_us[cpu_over_us.size() * 50 / 100];
-    repeat_cpu_p99_us = cpu_over_us[cpu_over_us.size() * 99 / 100];
-  }
-  double repeat_device_avg_us = device_us_sum / opt.repeats;
+  double repeat_cpu_avg_us, repeat_cpu_p50_us, repeat_cpu_p99_us;
+  double repeat_wall_avg_us, repeat_wall_p50_us, repeat_wall_p99_us;
+  double repeat_exec_avg_us, repeat_exec_p50_us, repeat_exec_p99_us;
+  summarize(cpu_over_us, repeat_cpu_avg_us, repeat_cpu_p50_us, repeat_cpu_p99_us);
+  summarize(wall_total_us, repeat_wall_avg_us, repeat_wall_p50_us, repeat_wall_p99_us);
+  summarize(exec_wall_us, repeat_exec_avg_us, repeat_exec_p50_us, repeat_exec_p99_us);
 
   auto per_node_ns = [&](double total_us) -> double {
     return (total_us * 1000.0) / nodes_total;
@@ -423,7 +435,12 @@ static void run_graph_topology_test(const TestOptions& opt) {
   CONSOLE_PRINT("%-32s %11.3f us   (%9.1f ns/node)", "Repeat launch CPU avg", repeat_cpu_avg_us, per_node_ns(repeat_cpu_avg_us));
   CONSOLE_PRINT("%-32s %11.3f us   (%9.1f ns/node)", "Repeat launch CPU p50", repeat_cpu_p50_us, per_node_ns(repeat_cpu_p50_us));
   CONSOLE_PRINT("%-32s %11.3f us   (%9.1f ns/node)", "Repeat launch CPU p99", repeat_cpu_p99_us, per_node_ns(repeat_cpu_p99_us));
-  CONSOLE_PRINT("%-32s %11.3f us   (%9.1f ns/node)", "Device runtime avg(Events)", repeat_device_avg_us, per_node_ns(repeat_device_avg_us));
+  CONSOLE_PRINT("%-32s %11.3f us   (%9.1f ns/node)", "Repeat end-to-end wall avg", repeat_wall_avg_us, per_node_ns(repeat_wall_avg_us));
+  CONSOLE_PRINT("%-32s %11.3f us   (%9.1f ns/node)", "Repeat end-to-end wall p50", repeat_wall_p50_us, per_node_ns(repeat_wall_p50_us));
+  CONSOLE_PRINT("%-32s %11.3f us   (%9.1f ns/node)", "Repeat end-to-end wall p99", repeat_wall_p99_us, per_node_ns(repeat_wall_p99_us));
+  CONSOLE_PRINT("%-32s %11.3f us   (%9.1f ns/node)", "Repeat exec+sync wall avg", repeat_exec_avg_us, per_node_ns(repeat_exec_avg_us));
+  CONSOLE_PRINT("%-32s %11.3f us   (%9.1f ns/node)", "Repeat exec+sync wall p50", repeat_exec_p50_us, per_node_ns(repeat_exec_p50_us));
+  CONSOLE_PRINT("%-32s %11.3f us   (%9.1f ns/node)", "Repeat exec+sync wall p99", repeat_exec_p99_us, per_node_ns(repeat_exec_p99_us));
 
   // Cleanup
   if (opt.topology == "mixed") {
