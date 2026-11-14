@@ -2226,7 +2226,16 @@ hsa_status_t GpuAgent::DmaCopyBatch(const hsa_amd_memory_copy_op_t* ops,
     // that SDMA is enabled/disabled globally (the HSA_ENABLE_SDMA=0 case this
     // fallback targets). If per-direction SDMA availability ever diverges this
     // probe would need to move per-entry, but today all blits share one state.
-    if (!GetBlitObject(BlitHostToDev)->isSDMA()) {
+    //
+    // RECT ops read the flag instead: the probe creates an H2D SDMA queue on the copy agent, and
+    // those queues are few and shared by every process (8 per host-facing engine). A process
+    // that finds none would get a shader blit and have every RECT op rejected, though the op
+    // would not use that queue. DmaCopyRect checks the engine it does use.
+    const bool sdma_off =
+        (op.type == HSA_AMD_MEMORY_COPY_OP_RECT)
+            ? core::Runtime::runtime_singleton_->flag().enable_sdma() == Flag::SDMA_DISABLE
+            : !GetBlitObject(BlitHostToDev)->isSDMA();
+    if (sdma_off) {
       status = DmaCopyBatchFallback(op, dep_signals);
       if (status != HSA_STATUS_SUCCESS)
         return status;
@@ -2292,9 +2301,21 @@ hsa_status_t GpuAgent::DmaCopyBatch(const hsa_amd_memory_copy_op_t* ops,
     case HSA_AMD_MEMORY_COPY_OP_RECT: {
       const bool from_host =
           core::Agent::Convert(op.src_agent)->device_type() == core::Agent::kAmdCpuDevice;
-      status =
-          DmaCopyRect(op.rect_src, op.rect_dst, op.range_list, op.num_entries,
-                      from_host ? hsaHostToDevice : hsaDeviceToDevice, dep_signals, out_signal);
+      // The op completes as one, on one engine: only an op whose rects all go to one GPU can
+      // take the engine of the link to it.
+      core::Agent* peer = nullptr;
+      if (!from_host) {
+        peer = core::Agent::Convert(op.dst_agent_list[0]);
+        for (uint16_t e = 1; e < op.num_entries; ++e) {
+          if (op.dst_agent_list[e].handle != op.dst_agent_list[0].handle) {
+            peer = nullptr;
+            break;
+          }
+        }
+      }
+      status = DmaCopyRect(op.rect_src, op.rect_dst, op.range_list, op.num_entries,
+                           from_host ? hsaHostToDevice : hsaDeviceToDevice, dep_signals,
+                           out_signal, peer);
       break;
     }
     default:
@@ -2313,15 +2334,37 @@ hsa_status_t GpuAgent::DmaCopyRect(const hsa_amd_memory_copy_rect_ptr_t* srcs,
                                    const hsa_dim3_t* ranges, uint16_t num_rects,
                                    hsa_amd_copy_direction_t dir,
                                    std::vector<core::Signal*>& dep_signals,
-                                   core::Signal& out_signal) {
+                                   core::Signal& out_signal, core::Agent* peer_agent) {
   if (supported_isas()[0]->GetMajorVersion() < 9) return HSA_STATUS_ERROR_INVALID_AGENT;
 
   SetCopyRequestRefCount(true);
   MAKE_SCOPE_GUARD([&]() { SetCopyRequestRefCount(false); });
-  lazy_ptr<core::Blit>& blit = GetBlitObject((dir == hsaHostToDevice) ? BlitHostToDev :
-                                                                        BlitDevToHost);
 
-  if (!blit->isSDMA()) {
+  // On platforms with dedicated xGMI engines, rects to another GPU of the hive go on
+  // that link's engine, as DmaCopy does for linear copies; the blit queues are shared by every
+  // peer and copy direction, and a host-facing engine cannot drive the xGMI link. Elsewhere
+  // (PCIe peers, gfx125+ where every engine is equivalent) rects keep the blit queues.
+  const bool use_peer_engine =
+      dir != hsaHostToDevice && peer_agent != nullptr &&
+      peer_agent->device_type() == core::Agent::kAmdGpuDevice &&
+      peer_agent->public_handle().handle != public_handle_.handle && peer_agent->HiveId() &&
+      peer_agent->HiveId() == HiveId() && properties_.NumSdmaXgmiEngines &&
+      core::Runtime::runtime_singleton_->flag().enable_peer_sdma() != Flag::SDMA_DISABLE;
+  lazy_ptr<core::Blit>* blit = nullptr;
+  if (use_peer_engine) {
+    uint32_t rec_mask = 0;
+    DmaPreferredEngine(*peer_agent, *this, &rec_mask);
+    const uint32_t rec_sdma_eng = NthSdmaEngine(rec_mask, 0);
+    blit = (rec_sdma_eng >= DefaultBlitCount && rec_sdma_eng < blits_.size())
+               ? &GetBlitObject(rec_sdma_eng)
+               : &GetXgmiBlit(*peer_agent);
+    if (!(*blit)->isSDMA()) blit = nullptr;
+  }
+  if (blit == nullptr) {
+    blit = &GetBlitObject((dir == hsaHostToDevice) ? BlitHostToDev : BlitDevToHost);
+  }
+
+  if (!(*blit)->isSDMA()) {
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
   }
 
@@ -2331,7 +2374,7 @@ hsa_status_t GpuAgent::DmaCopyRect(const hsa_amd_memory_copy_rect_ptr_t* srcs,
     out_signal.async_copy_agent(core::Agent::Convert(this->public_handle()));
   }
 
-  BlitSdmaBase* sdmaBlit = static_cast<BlitSdmaBase*>((*blit).get());
+  BlitSdmaBase* sdmaBlit = static_cast<BlitSdmaBase*>((**blit).get());
   hsa_status_t stat =
       sdmaBlit->SubmitCopyRectCommand(srcs, dsts, ranges, num_rects, dep_signals, out_signal);
 
