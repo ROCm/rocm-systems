@@ -19,7 +19,7 @@ including:
 
 .. note::
 
-  * For AMD Ryzen™ / RDNA™ APUs (e.g. gfx115x/RDNA3.5), see :doc:`RDNA3 <../rdna/rdna-performance-model>`.
+  * For AMD Ryzen™ / RDNA™ APUs and Radeon GPUs (RDNA3.5 and RDNA4), see :doc:`RDNA3-RDNA4 <../rdna/rdna-performance-model>`.
 
   * For top-level metrics details on CDNA and RDNA architecture, see :doc:`../performance-model`.
 
