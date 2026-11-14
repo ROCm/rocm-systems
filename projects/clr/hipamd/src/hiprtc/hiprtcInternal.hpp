@@ -59,27 +59,24 @@ template <typename T, typename... Args> inline std::string ToString(T first, Arg
   return ToString(first) + ", " + ToString(args...);
 }
 
-inline void PrintHiprtcPathOnce() {
-  static std::once_flag printed_flag;
-  std::call_once(printed_flag, []() { amd::Os::PrintLibraryLocation(); });
+inline bool InitOnce() {
+  static const bool init_successfull = [] {
+    if (!amd::Flag::init()) {
+      return false;
+    }
+    amd::Os::PrintLibraryLocation();
+    return true;
+  }();
+  return init_successfull;
 }
 
 }  // namespace internal
 }  // namespace hiprtc
 
-#define PRINT_HIPRTC_PATH()                                                                        \
-  do {                                                                                             \
-    hiprtc::internal::PrintHiprtcPathOnce();                                                       \
-  } while (0)
-
-// hiprtcInit lock
-static amd::Monitor g_hiprtcInitlock{};
 #define HIPRTC_INIT_API_INTERNAL(...)                                                              \
-  amd::ScopedLock lock(g_hiprtcInitlock);                                                          \
-  if (!amd::Flag::init()) {                                                                        \
+  if (!hiprtc::internal::InitOnce()) {                                                             \
     HIPRTC_RETURN(HIPRTC_ERROR_INTERNAL_ERROR);                                                    \
-  }                                                                                                \
-  PRINT_HIPRTC_PATH();
+  }
 
 #define HIPRTC_INIT_API(...)                                                                       \
   HIPRTC_INIT_API_INTERNAL(0, __VA_ARGS__)                                                         \
