@@ -2287,7 +2287,8 @@ void VCvtScalePk8F32Fp8Vop3::execute_impl(amdgpu::Wavefront &wf) {
   const auto selection = amdgpu::CvtScaleSelection::f8(inst_.opsel);
   uint64_t exec = wf.exec();
   if (const auto scale = src1.const_value(); scale &&
-                                             uint8_t(*scale >> ((inst_.opsel & 3u) * 8u)) == 127u &&
+                                             uint8_t(*scale >> (selection.byte(0) * 8u)) == 127u &&
+                                             uint8_t(*scale >> (selection.byte(16) * 8u)) == 127u &&
                                              exec && !wf.cu().observes_register_access()) {
     uint32_t dst_base =
         wf.vgpr_alloc().base +
@@ -2410,7 +2411,8 @@ void VCvtScalePk8F32Bf8Vop3::execute_impl(amdgpu::Wavefront &wf) {
   const auto selection = amdgpu::CvtScaleSelection::f8(inst_.opsel);
   uint64_t exec = wf.exec();
   if (const auto scale = src1.const_value(); scale &&
-                                             uint8_t(*scale >> ((inst_.opsel & 3u) * 8u)) == 127u &&
+                                             uint8_t(*scale >> (selection.byte(0) * 8u)) == 127u &&
+                                             uint8_t(*scale >> (selection.byte(16) * 8u)) == 127u &&
                                              exec && !wf.cu().observes_register_access()) {
     uint32_t dst_base =
         wf.vgpr_alloc().base +
