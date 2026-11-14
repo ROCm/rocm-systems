@@ -50,6 +50,7 @@ import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
+import fetch_rccl_build
 from rccl_ci_utils import (
     find_rccl_library,
     send_email_report,
@@ -722,7 +723,8 @@ def get_rccl_fingerprint(rccl_lib: Path) -> dict:
         git_ref = ""
         for line in result.stdout.splitlines():
             if not semver:
-                m = re.match(r"^(\d+\.\d+\.\d+)$", line)
+                # RCCL 2.28 (ROCm 7.13) has it only inside the banner's literal.
+                m = re.match(r"^(?:RCCL version : )?(\d+\.\d+\.\d+)$", line)
                 if m:
                     semver = m.group(1)
             if not git_ref:
@@ -1956,6 +1958,7 @@ def repro_env(
         # Provenance only, as above: the library is in overlay_ctx/rccl_libs_baseline.
         "BASELINE_ARTIFACT_RUN_ID": baseline_run_id,
         "BASELINE_RCCL_ARTIFACTS_URL": bucket_url(baseline_run_id),
+        "BASELINE_RCCL_SOURCE": env.get("BASELINE_RCCL_SOURCE", ""),
         "BASELINE_RCCL_MD5": baseline_fingerprint.get("md5", ""),
         "BASELINE_RCCL_VERSION": baseline_fingerprint.get("version", ""),
         "CANDIDATE_IMAGE": images.get(CANDIDATE, ""),
@@ -2669,7 +2672,8 @@ def artifact_build(build: str, env: dict | None = None) -> dict:
         known = {"event": env.get("GITHUB_EVENT_NAME", ""), "sha": env.get("GITHUB_SHA", "")}
     else:
         known = {"event": "", "sha": ""}
-    if not (build and env.get("GITHUB_REPOSITORY")):
+    # A release or nightly (fetch_rccl_build.py) was not built by a run.
+    if not (build.isdigit() and env.get("GITHUB_REPOSITORY")):
         return {**known, "created_at": ""}
     try:
         run = _github_json(f"/actions/runs/{build}", env)
@@ -2832,6 +2836,45 @@ def pair_by_precision(
     return [comparisons[p] for p in sorted(comparisons)]
 
 
+def score_comparisons(
+    comparisons: list[dict],
+    workload_type: str,
+    report_only: bool = False,
+) -> tuple[list[str], bool]:
+    """One regression line per precision, and whether they fail the run.
+
+    A missing side always fails; a regression does not when *report_only*.
+    """
+    msgs = []
+    failed = False
+    for c in comparisons:
+        prec = c["precision"] or "?"
+        base, cand = c[BASELINE], c[CANDIDATE]
+        if c["ratio"] is None:
+            # A missing side is a job failure, not evidence about RCCL.
+            msgs.append(
+                f"[{prec}] no comparison — baseline={_format_phase(base)}, "
+                f"candidate={_format_phase(cand)}"
+            )
+            log.error("No comparison possible for %s", prec)
+            failed = True
+            continue
+        reg, msg = check_ab_regression(
+            base["metric_value"], cand["metric_value"], workload_type,
+        )
+        msgs.append(f"[{prec}] {msg}")
+        if reg:
+            log.warning(msg)
+            failed = failed or not report_only
+        else:
+            log.info(msg)
+
+    if not comparisons:
+        msgs.append("no metrics from either phase — nothing to compare")
+        failed = True
+    return msgs, failed
+
+
 def _format_phase(row: dict | None) -> str:
     """One side of a comparison line, or why it is absent."""
     if not row:
@@ -2857,11 +2900,18 @@ def generate_summary_report(
     phase_rccl: dict[str, str] | None = None,
     unit: str = "tok/s/GPU",
     builds: dict[str, str] | None = None,
+    report_only: bool = False,
 ) -> str:
     """Generate a plain-text summary report."""
     status = "PASSED" if exit_code == 0 else "FAILED"
+    if report_only:
+        status += " (report only: a regression does not fail the run)"
     phase_rccl = phase_rccl or {}
     builds = builds or {}
+
+    def build_label(build: str) -> str:
+        return f"CI build {build}" if build.isdigit() else build
+
     lines = [
         "RCCL MADEngine Workload Test Report",
         "=" * 40,
@@ -2872,13 +2922,13 @@ def generate_summary_report(
         f"Scale:      {scale}",
         f"Cluster:    {cluster}",
         f"Baseline:   RCCL {phase_rccl.get(BASELINE) or 'unknown'} "
-        f"(CI build {builds.get(BASELINE) or 'unknown'})",
+        f"({build_label(builds.get(BASELINE) or 'unknown')})",
         f"Candidate:  RCCL {phase_rccl.get(CANDIDATE) or 'unknown'} "
-        f"(CI build {builds.get(CANDIDATE) or rccl_commit})",
+        f"({build_label(builds.get(CANDIDATE) or rccl_commit)})",
         f"Nodes:      {nodelist or 'unknown'} (job {job_id or 'unknown'})",
         "",
         "Both numbers below were measured on those same nodes, back to back,",
-        "inside one allocation, with the two CI builds' RCCL laid over the",
+        "inside one allocation, with the two builds' RCCL laid over the",
         f"same base image. Throughput in {unit}.",
         "",
     ]
@@ -2905,6 +2955,23 @@ def generate_summary_report(
         lines.append(f"CI run: {run_url}/{repo}/actions/runs/{run_id}")
 
     return "\n".join(lines)
+
+
+def baseline_source(env: dict | None = None) -> str:
+    """The published build this run's baseline is, as a fetch_rccl_build spec, or ''.
+
+    BASELINE_ARTIFACT_RUN_ID carries one in place of a run ID. Raises
+    RuntimeError on a spec fetch_rccl_build.py does not take.
+    """
+    env = os.environ if env is None else env
+    chosen = env.get("BASELINE_ARTIFACT_RUN_ID", "").strip()
+    if ":" not in chosen:
+        return ""
+    try:
+        fetch_rccl_build.parse_source(chosen)
+    except ValueError as exc:
+        raise RuntimeError(str(exc)) from exc
+    return chosen
 
 
 def resolve_baseline(
@@ -2956,10 +3023,11 @@ def main() -> None:
     parser.add_argument(
         "--resolve-baseline",
         action="store_true",
-        help="Print the baseline build as artifact_run_id=<id>, for "
-             "$GITHUB_OUTPUT, and exit. BASELINE_ARTIFACT_RUN_ID, when set, "
-             "is taken as is; otherwise the previous scheduled build of the "
-             "workload's schedule.",
+        help="Print the baseline build as artifact_run_id=<id> and "
+             "rccl_source=<spec>, for $GITHUB_OUTPUT, and exit. "
+             "BASELINE_ARTIFACT_RUN_ID, when set, is taken as is: a run ID, "
+             "or a fetch_rccl_build.py spec of a published build; otherwise "
+             "the previous scheduled build of the workload's schedule.",
     )
     parser.add_argument(
         "--workload",
@@ -3024,6 +3092,12 @@ def main() -> None:
         default="",
         help="Pre-built overlay image to use (requires --skip-overlay-build)",
     )
+    parser.add_argument(
+        "--report-only",
+        action="store_true",
+        help="Report and record a regression without failing on it; a phase "
+             "that fails or runs the wrong RCCL still fails the run",
+    )
 
     args = parser.parse_args()
     # madengine runs inside our allocation only for multi-node workloads; a
@@ -3053,11 +3127,13 @@ def main() -> None:
     results_dir = args.results_dir or Path(cluster_config["results_base"])
     if args.resolve_baseline:
         try:
-            build = resolve_baseline(args.workload, cluster_config["gpu_target"])
+            source = baseline_source()
+            build = "" if source else resolve_baseline(args.workload, cluster_config["gpu_target"])
         except RuntimeError as exc:
             log.error("No A/B baseline: %s", exc)
             sys.exit(1)
         print(f"artifact_run_id={build}")
+        print(f"rccl_source={source}")
         sys.exit(0)
     if not (args.artifact_dir and args.baseline_artifact_dir):
         parser.error("--artifact-dir and --baseline-artifact-dir are required")
@@ -3071,9 +3147,10 @@ def main() -> None:
     libs = {BASELINE: baseline_lib, CANDIDATE: rccl_lib}
     rccl_commit = get_rccl_commit(rccl_lib)
     log.info("Run token: %s", rccl_commit)
+    published_baseline = os.environ.get("BASELINE_RCCL_SOURCE", "")
     builds = {
         CANDIDATE: os.environ.get("ARTIFACT_RUN_ID", ""),
-        BASELINE: os.environ.get("BASELINE_ARTIFACT_RUN_ID", ""),
+        BASELINE: os.environ.get("BASELINE_ARTIFACT_RUN_ID", "") or published_baseline,
     }
     fingerprints = {}
     sources = {}
@@ -3234,8 +3311,11 @@ def main() -> None:
                   if workload_config["type"] == "inference" else None),
         )
 
-        # Matrix legs share GITHUB_RUN_ID, so the workload keeps them apart.
-        run_artifacts = results_dir / "runs" / run_id / args.workload / phase
+        # Matrix legs share GITHUB_RUN_ID, so the workload keeps them apart,
+        # and RUN_LABEL legs of one workload.
+        run_label = os.environ.get("RUN_LABEL", "")
+        leg = f"{args.workload}-{run_label}" if run_label else args.workload
+        run_artifacts = results_dir / "runs" / run_id / leg / phase
         try:
             run_artifacts.mkdir(parents=True, exist_ok=True)
             for f in ["perf.csv", "perf_entry_super.csv", "perf_entry_super.json"]:
@@ -3262,31 +3342,10 @@ def main() -> None:
         phase_results.get(BASELINE, []), phase_results.get(CANDIDATE, []),
         expected=workload_config.get("precisions", []),
     )
-    regression_msgs = []
-    for c in comparisons:
-        prec = c["precision"] or "?"
-        base, cand = c[BASELINE], c[CANDIDATE]
-        if c["ratio"] is None:
-            # A missing side is a job failure, not evidence about RCCL.
-            regression_msgs.append(
-                f"[{prec}] no comparison — baseline={_format_phase(base)}, "
-                f"candidate={_format_phase(cand)}"
-            )
-            log.error("No comparison possible for %s", prec)
-            exit_code = max(exit_code, 1)
-            continue
-        reg, msg = check_ab_regression(
-            base["metric_value"], cand["metric_value"], workload_config["type"],
-        )
-        regression_msgs.append(f"[{prec}] {msg}")
-        if reg:
-            log.warning(msg)
-            exit_code = max(exit_code, 1)
-        else:
-            log.info(msg)
-
-    if not comparisons:
-        regression_msgs.append("no metrics from either phase — nothing to compare")
+    regression_msgs, regression_failed = score_comparisons(
+        comparisons, workload_config["type"], report_only=args.report_only,
+    )
+    if regression_failed:
         exit_code = max(exit_code, 1)
     regression_msg = "\n".join(regression_msgs)
 
@@ -3298,6 +3357,8 @@ def main() -> None:
         # The run's own gate verdict, final by now: it covers the phase exit
         # codes, RCCL verification and the regression check.
         "verdict": "pass" if exit_code == 0 else "fail",
+        "report_only": args.report_only,
+        "run_label": os.environ.get("RUN_LABEL", ""),
         "cluster": args.cluster,
         "overlay_image": images[CANDIDATE],
         "nodelist": allocation["nodelist"],
@@ -3309,7 +3370,8 @@ def main() -> None:
         "artifact_sha": sources[CANDIDATE]["sha"],
         "rccl_md5": rccl_fingerprint["md5"],
         "rccl_version": rccl_fingerprint["version"],
-        "baseline_artifact_run_id": builds[BASELINE],
+        "baseline_artifact_run_id": os.environ.get("BASELINE_ARTIFACT_RUN_ID", ""),
+        "baseline_rccl_source": published_baseline,
         "baseline_artifact_sha": sources[BASELINE]["sha"],
         "baseline_rccl_md5": fingerprints[BASELINE]["md5"],
         "baseline_rccl_version": fingerprints[BASELINE]["version"],
@@ -3363,6 +3425,7 @@ def main() -> None:
         },
         unit=workload_config.get("metric_unit", "tok/s/GPU"),
         builds=builds,
+        report_only=args.report_only,
     )
     log.info("\n%s", report)
     write_github_summary(report)

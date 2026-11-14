@@ -14,9 +14,20 @@ on:
         required: true
       baseline_artifact_run_id:
         # Empty: the previous scheduled build of the workload's schedule
-        # (WORKLOAD_CONFIGS[...]["schedule"]), nightly or weekly.
+        # (WORKLOAD_CONFIGS[...]["schedule"]), nightly or weekly. A release:,
+        # nightly: or url: spec of fetch_rccl_build.py names a build
+        # published outside CI instead.
         type: string
         default: ''
+      run_label:
+        # Keeps apart several calls for one workload from one workflow run,
+        # in WORK_DIR and the artifact names. [A-Za-z0-9._-] only.
+        type: string
+        default: ''
+      report_only:
+        # Report a regression without failing the job on it.
+        type: boolean
+        default: false
       workload:
         # A key of WORKLOAD_CONFIGS in test_madengine.py, which validates it.
         # workflow_call inputs cannot be typed as choice, so the list of
@@ -67,7 +78,7 @@ on:
         type: string
         required: true
       baseline_artifact_run_id:
-        description: 'rocm-systems run ID whose RCCL build is the A/B baseline (default: the previous scheduled build of the same schedule as the workload, nightly or weekly)'
+        description: 'rocm-systems run ID whose RCCL build is the A/B baseline, or a published build: release:<version>, nightly:<version>, url:<amd.com wheel or tarball> (default: the previous scheduled build of the same schedule as the workload, nightly or weekly)'
         type: string
         default: ''
       workload:
@@ -120,8 +131,10 @@ jobs:
       # run_attempt too: run_id is stable across re-runs, and the cleanup step
       # leaves the result files behind, so a re-run could parse a previous
       # attempt's perf.csv.  The workload is in the path because the scheduled
-      # caller runs several of them from one workflow run, which shares both.
-      WORK_DIR: "/apps/rccl-ci/madengine/workdir/${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.workload }}"
+      # caller runs several of them from one workflow run, which shares both;
+      # the run label because the history sweep runs one workload several times.
+      WORK_DIR: "/apps/rccl-ci/madengine/workdir/${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.workload }}${{ inputs.run_label && format('-{0}', inputs.run_label) || '' }}"
+      RUN_LABEL: "${{ inputs.run_label }}"
       # Workspace-local, as in the JAX and PyTorch test workflows: the fetched
       # ROCm tree is only read on the head node, and /apps/cvs_tests/dist_new
       # belongs to the CVS suite, which this job may neither traverse nor wipe.
@@ -140,8 +153,8 @@ jobs:
       # pip reads XDG_CACHE_HOME; conda does not, and keeps its own under
       # ~/.conda. The literal is repeated because entries in this block cannot
       # reference each other.
-      XDG_CACHE_HOME: "/apps/rccl-ci/madengine/workdir/${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.workload }}/cache"
-      CONDA_PKGS_DIRS: "/apps/rccl-ci/madengine/workdir/${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.workload }}/cache/conda-pkgs"
+      XDG_CACHE_HOME: "/apps/rccl-ci/madengine/workdir/${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.workload }}${{ inputs.run_label && format('-{0}', inputs.run_label) || '' }}/cache"
+      CONDA_PKGS_DIRS: "/apps/rccl-ci/madengine/workdir/${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.workload }}${{ inputs.run_label && format('-{0}', inputs.run_label) || '' }}/cache/conda-pkgs"
     steps:
       - name: Checkout TheRock repository
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -155,12 +168,20 @@ jobs:
           sparse-checkout: projects/rccl/ci/scripts
           path: rocm-systems
 
+      # The always() steps below upload from WORK_DIR and delete under it,
+      # which is why they wait for this one to vouch for the run label in it.
       - name: Validate arch
+        id: validate
         run: |
           if [ "${{ inputs.amdgpu_families }}" != "gfx950-dcgpu" ]; then
             echo "Unsupported arch for MADEngine: ${{ inputs.amdgpu_families }}"
             exit 1
           fi
+          case "${RUN_LABEL}" in
+            *[!A-Za-z0-9._-]*|.*)
+              echo "::error::run_label may only hold [A-Za-z0-9._-] and not start with a dot, got '${RUN_LABEL}'"
+              exit 1 ;;
+          esac
 
       # The runner account's home is a separate, much smaller allotment than
       # /apps, and exhausting it fails the conda step below with a bare
@@ -245,6 +266,7 @@ jobs:
             --nodes "${NODES}" >> "$GITHUB_OUTPUT"
 
       - name: Fetch baseline RCCL artifacts
+        if: ${{ steps.baseline.outputs.artifact_run_id != '' }}
         env:
           GITHUB_TOKEN: ${{ github.token }}
           BASELINE_ARTIFACT_RUN_ID: ${{ steps.baseline.outputs.artifact_run_id }}
@@ -256,6 +278,17 @@ jobs:
             --output-dir="${BASELINE_ARTIFACTS_DIR}" \
             --rccl
 
+      - name: Fetch published baseline RCCL
+        if: ${{ steps.baseline.outputs.rccl_source != '' }}
+        env:
+          BASELINE_RCCL_SOURCE: ${{ steps.baseline.outputs.rccl_source }}
+          AMDGPU_FAMILIES: ${{ inputs.amdgpu_families }}
+        run: |
+          python3 rocm-systems/projects/rccl/ci/scripts/fetch_rccl_build.py \
+            --source "${BASELINE_RCCL_SOURCE}" \
+            --amdgpu-family "${AMDGPU_FAMILIES}" \
+            --output-dir "${BASELINE_ARTIFACTS_DIR}"
+
       # Both A/B phases in one allocation, plus its queue wait.
       - name: Run MADEngine workload
         env:
@@ -264,6 +297,8 @@ jobs:
           # Read-only: looks up the event and commit of each RCCL build's run.
           GITHUB_TOKEN: ${{ github.token }}
           BASELINE_ARTIFACT_RUN_ID: ${{ steps.baseline.outputs.artifact_run_id }}
+          BASELINE_RCCL_SOURCE: ${{ steps.baseline.outputs.rccl_source }}
+          REPORT_ONLY: ${{ inputs.report_only }}
           JOB_TIMEOUT_MINUTES: ${{ inputs.job_timeout_minutes }}
           # Nodes to keep out of the allocation, as a SLURM hostlist.
           MADENGINE_SLURM_EXCLUDE: ${{ vars.RCCL_MADENGINE_SLURM_EXCLUDE || '' }}
@@ -286,6 +321,10 @@ jobs:
           fi
           if [ -n "${TEAMS_WEBHOOK}" ]; then
             NOTIFY_ARGS+=(--teams-webhook "${TEAMS_WEBHOOK}")
+          fi
+          REPORT_ARGS=()
+          if [ "${REPORT_ONLY}" = "true" ]; then
+            REPORT_ARGS+=(--report-only)
           fi
 
           # Every input this step uses is read from the environment and
@@ -324,7 +363,8 @@ jobs:
             --timeout-minutes "${SCRIPT_TIMEOUT}" \
             --results-dir "${RESULTS_DIR}" \
             --work-dir "${WORK_DIR}" \
-            "${NOTIFY_ARGS[@]}"
+            "${NOTIFY_ARGS[@]}" \
+            "${REPORT_ARGS[@]}"
 
       # Cancelling a run does not signal the driver: the runner kills this
       # job's process tree outright and then reports "Terminate orphan
@@ -359,10 +399,10 @@ jobs:
           scancel --me --name "${name}" || echo "::warning::scancel --name ${name} failed"
 
       - name: Upload results
-        if: always()
+        if: always() && steps.validate.outcome == 'success'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: madengine-results-${{ inputs.workload }}-${{ inputs.nodes }}N-${{ inputs.amdgpu_families }}
+          name: madengine-results-${{ inputs.workload }}-${{ inputs.nodes }}N-${{ inputs.amdgpu_families }}${{ inputs.run_label && format('-{0}', inputs.run_label) || '' }}
           # slurm_output is here because without it a failure on the compute
           # nodes can only be read by someone with cluster access: the job log
           # shows that SLURM failed, not why.
@@ -382,10 +422,10 @@ jobs:
       # the overlay's build context with the CI RCCL, the model scripts, and
       # manifests with paths relative to the bundle. See its REPRO.md.
       - name: Upload repro bundle
-        if: always()
+        if: always() && steps.validate.outcome == 'success'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: madengine-repro-${{ inputs.workload }}-${{ inputs.nodes }}N-${{ inputs.amdgpu_families }}
+          name: madengine-repro-${{ inputs.workload }}-${{ inputs.nodes }}N-${{ inputs.amdgpu_families }}${{ inputs.run_label && format('-{0}', inputs.run_label) || '' }}
           path: ${{ env.WORK_DIR }}/repro
           # The kpack GPU kernels sit in overlay_ctx/rccl_libs*/.kpack, and
           # upload-artifact drops dot-paths unless told otherwise.
@@ -394,7 +434,7 @@ jobs:
           retention-days: 30
 
       - name: Cleanup work directory
-        if: always()
+        if: always() && steps.validate.outcome == 'success'
         run: |
           # `ab` too, and it is the one that actually accumulates. The upload
           # step above already keeps everything worth keeping out of it -- the

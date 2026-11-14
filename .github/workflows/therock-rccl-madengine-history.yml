@@ -1,0 +1,118 @@
+name: TheRock MADEngine RCCL history sweep
+
+# By hand only. One same-node A/B per baseline, every one against the same
+# candidate CI build, to chart RCCL throughput across past releases and
+# nightlies. A regression is reported, not failed on: the legs collect
+# history, they do not gate anything.
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_artifact_run_id:
+        description: 'rocm-systems run ID whose RCCL is the candidate (default: the newest scheduled build with its RCCL still in the bucket)'
+        type: string
+        default: ''
+      baselines:
+        description: 'Comma-separated baselines: a run ID, release:<version>, nightly:<version> or url:<amd.com rocm_sdk_libraries wheel or dist tarball>'
+        type: string
+        required: true
+      workload:
+        description: 'MADEngine workload to run'
+        type: choice
+        options:
+          - llama-3.1-70b-training
+          - llama-3.1-70b-pp4-training
+          - gpt-oss-120b-training
+          - llama-3.1-405b-maxtext
+          - deepseek-r1-sglang-disagg
+        default: 'llama-3.1-70b-training'
+      nodes:
+        description: 'Number of SLURM nodes to allocate'
+        type: string
+        default: '2'
+      job_timeout_minutes:
+        description: 'Budget for each leg; the script gets 60 min less'
+        type: string
+        default: '390'
+
+permissions:
+  contents: read
+
+jobs:
+  # Every baseline is looked up here, so a typo or an expired run fails in a
+  # minute instead of after the legs before it have held the nodes for hours.
+  plan:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      candidate: ${{ steps.plan.outputs.candidate }}
+      matrix: ${{ steps.plan.outputs.matrix }}
+    steps:
+      - name: Checkout rocm-systems scripts
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          sparse-checkout: projects/rccl/ci/scripts
+
+      - name: Plan the A/B legs
+        id: plan
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          CANDIDATE_ARTIFACT_RUN_ID: ${{ inputs.candidate_artifact_run_id }}
+          BASELINES: ${{ inputs.baselines }}
+        run: |
+          python3 projects/rccl/ci/scripts/rccl_history.py plan \
+            --amdgpu-family gfx950-dcgpu >> "$GITHUB_OUTPUT"
+
+  ab:
+    name: 'A/B vs ${{ matrix.baseline }}'
+    needs: plan
+    permissions:
+      contents: read
+      id-token: write
+    strategy:
+      fail-fast: false
+      # Each leg takes an exclusive allocation on the same partition.
+      max-parallel: 1
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    uses: ./.github/workflows/therock-rccl-test-madengine.yml
+    secrets: inherit
+    with:
+      amdgpu_families: gfx950-dcgpu
+      artifact_group: gfx950-dcgpu
+      test_runs_on: ruby-linux-slurm-scale-runner
+      artifact_run_id: ${{ needs.plan.outputs.candidate }}
+      baseline_artifact_run_id: ${{ matrix.baseline }}
+      run_label: ${{ matrix.label }}
+      report_only: true
+      workload: ${{ inputs.workload }}
+      nodes: ${{ inputs.nodes }}
+      job_timeout_minutes: ${{ inputs.job_timeout_minutes }}
+
+  summary:
+    needs: [plan, ab]
+    if: ${{ always() && needs.plan.result == 'success' }}
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout rocm-systems scripts
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          sparse-checkout: projects/rccl/ci/scripts
+
+      - name: Download the legs' results
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: madengine-results-*
+          path: results
+
+      - name: Sum up the sweep
+        env:
+          MATRIX: ${{ needs.plan.outputs.matrix }}
+          WORKLOAD: ${{ inputs.workload }}
+          NODES: ${{ inputs.nodes }}
+        run: |
+          python3 projects/rccl/ci/scripts/rccl_history.py summary \
+            --artifacts-dir results \
+            --matrix "${MATRIX}" \
+            --artifact-prefix "madengine-results-${WORKLOAD}-${NODES}N-gfx950-dcgpu" \
+            >> "$GITHUB_STEP_SUMMARY"
