@@ -412,6 +412,7 @@ ncclResult_t ncclAllGather_impl(const void* sendbuff, void* recvbuff, size_t sen
                                 ncclComm_t comm, cudaStream_t stream) {
   NVTX3_FUNC_WITH_PARAMS(AllGather, NcclNvtxParamsAllGather,
                          NVTX3_PAYLOAD(comm ? comm->commHash : 0, sendcount * ncclTypeSize(datatype), datatype));
+  NCCLCHECK(ncclEnqueueCommCheck(comm, "AllGather"));
     // RCCL update slice steps for AllGather if single node
   const bool isGfx950 = IsArchMatch(comm->archName, "gfx950");
 
@@ -510,6 +511,7 @@ ncclResult_t ncclAlltoAll_impl(const void* sendbuff, void* recvbuff, size_t coun
   NVTX3_FUNC_WITH_PARAMS(AlltoAll, NcclNvtxParamsAlltoAll,
                          NVTX3_PAYLOAD(comm ? comm->commHash : 0, count * ncclTypeSize(datatype), datatype));
 
+  NCCLCHECK(ncclEnqueueCommCheck(comm, "AlltoAll"));
   NCCLCHECK(Recorder::instance().record(rrAllToAll, sendbuff, recvbuff, count, datatype, comm, stream));
 
   struct rcclCollDecision decision;
@@ -613,9 +615,11 @@ ncclResult_t ncclAlltoAllv_impl(const void* sendbuff, const size_t sendcounts[],
                                 const size_t recvcounts[], const size_t rdispls[], ncclDataType_t datatype,
                                 ncclComm_t comm, hipStream_t stream) {
   NVTX3_FUNC_WITH_PARAMS(AlltoAllv, NcclNvtxParamsAlltoAllv,
-                         NVTX3_PAYLOAD(comm ? comm->commHash : 0, sendcounts[comm->rank] * ncclTypeSize(datatype),
-                                       recvcounts[comm->rank] * ncclTypeSize(datatype), datatype));
+                         NVTX3_PAYLOAD(comm ? comm->commHash : 0,
+                                       comm ? sendcounts[comm->rank] * ncclTypeSize(datatype) : 0,
+                                       comm ? recvcounts[comm->rank] * ncclTypeSize(datatype) : 0, datatype));
 
+  NCCLCHECK(ncclEnqueueCommCheck(comm, "AlltoAllv"));
   NCCLCHECK(Recorder::instance().record(rrAllToAllv, sendbuff, recvbuff, 0, datatype, comm, stream, -1, sendcounts,
                                         sdispls, recvcounts, rdispls));
 
@@ -768,6 +772,9 @@ ncclResult_t ncclAllReduce_impl(const void* sendbuff, void* recvbuff, size_t cou
   NVTX3_FUNC_WITH_PARAMS(AllReduce, NcclNvtxParamsAllReduce,
                          NVTX3_PAYLOAD(comm ? comm->commHash : 0, count * ncclTypeSize(datatype), op, datatype));
 
+  // Slice steps and implementation selection read comm, so reject a NULL or revoked comm first.
+  NCCLCHECK(ncclEnqueueCommCheck(comm, "AllReduce"));
+
   // RCCL update slice steps for AllReduce if single node
   const bool isGfx950 = IsArchMatch(comm->archName, "gfx950");
   int chunkSteps = (isGfx950 && comm->rcclUseOneSlice) ? 1 : ALLREDUCE_CHUNKSTEPS;
@@ -869,6 +876,7 @@ ncclResult_t ncclAllReduceWithBias_impl(const void* sendbuff, void* recvbuff, si
   NVTX3_FUNC_WITH_PARAMS(AllReduce, NcclNvtxParamsAllReduce,
                          NVTX3_PAYLOAD(comm ? comm->commHash : 0, count * ncclTypeSize(datatype), op, datatype));
 
+  NCCLCHECK(ncclEnqueueCommCheck(comm, "AllReduceWithBias"));
   if (acc == nullptr) {
     WARN("ncclAllReduceWithBias : acc cannot be nullptr");
     return ncclInvalidArgument;
@@ -916,6 +924,8 @@ ncclResult_t ncclBroadcast_impl(const void* sendbuff, void* recvbuff, size_t cou
                                 ncclComm_t comm, cudaStream_t stream) {
   NVTX3_FUNC_WITH_PARAMS(Broadcast, NcclNvtxParamsBroadcast,
                          NVTX3_PAYLOAD(comm ? comm->commHash : 0, count * ncclTypeSize(datatype), root, datatype));
+
+  NCCLCHECK(ncclEnqueueCommCheck(comm, "Broadcast"));
 
   struct ncclInfo info = {ncclFuncBroadcast,
                           "Broadcast",
@@ -1195,6 +1205,7 @@ ncclResult_t ncclReduceScatter_impl(const void* sendbuff, void* recvbuff, size_t
                                     ncclRedOp_t op, ncclComm* comm, cudaStream_t stream) {
   NVTX3_FUNC_WITH_PARAMS(ReduceScatter, NcclNvtxParamsReduceScatter,
                          NVTX3_PAYLOAD(comm ? comm->commHash : 0, recvcount * ncclTypeSize(datatype), op, datatype));
+  NCCLCHECK(ncclEnqueueCommCheck(comm, "ReduceScatter"));
   // RCCL update slice steps for ReduceScatter if single node
   const bool isGfx950 = IsArchMatch(comm->archName, "gfx950");
 
