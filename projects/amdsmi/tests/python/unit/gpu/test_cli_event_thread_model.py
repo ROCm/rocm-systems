@@ -664,21 +664,20 @@ class TestEventRealThreads(unittest.TestCase):
             os.write(write_fd, b"x\n")
             time.sleep(0.05)
             os.write(write_fd, b"q\n")
-            os.close(write_fd)
 
         feeder = threading.Thread(target=_feed)
         feeder.start()
-        start = time.monotonic()
         try:
             with mock.patch.object(sys, "stdin", real_stdin):
                 self._run_with_timeout(commands, _build_event_args([0]))
         finally:
             feeder.join()
+            os.close(write_fd)
+            remaining_input = real_stdin.read()
             real_stdin.close()
-        elapsed = time.monotonic() - start
 
         self.assertTrue(commands.stop)
-        self.assertGreaterEqual(elapsed, 0.05)
+        self.assertEqual(remaining_input, "")
 
 
 class TestEventOpenListenersRealRecordOrRaise(unittest.TestCase):
