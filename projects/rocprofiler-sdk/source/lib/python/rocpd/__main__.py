@@ -124,7 +124,7 @@ Example usage:
     $ rocpd summary -i db0.db --region-categories NONE
 
     Aggregate 2 databases and output all summary files to HTML, only include HIP and MARKER regions, include domain summary
-    $ rocpd summary -i db{0,1}.db --region-categories HIP MARKERS --domain-summary --format html
+    $ rocpd summary -i db{0,1}.db --region-categories HIP MARKER --domain-summary --format html
 
     Do not automerge the databases (4 < limit of 8) and output summary tables organized by rank/process ID, to console
     $ rocpd summary -i db{0..3}.db --summary-by-rank --automerge-limit 8

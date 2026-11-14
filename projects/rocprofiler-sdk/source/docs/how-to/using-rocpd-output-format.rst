@@ -585,7 +585,7 @@ The following commands demonstrate the usage of advanced analysis options such a
 
 **Output files:**
 
-- ``files.{format}`` - List of files provided to help map the file to rank number, hostname, and process ID.
+- ``files.{format}`` - List of files provided to help map the file to hostname, process ID, and rank number (when by rank is generated).
 
 - ``kernels_summary.{format}`` - GPU kernel execution summary.
 
@@ -595,7 +595,7 @@ The following commands demonstrate the usage of advanced analysis options such a
 
 - ``memory_summary.{format}`` - Memory operation statistics.
 
-- ``markers_summary.{format}`` - Marker event analysis.
+- ``marker_summary.{format}`` - Marker event analysis.
 
 Generating performance summary using rocpd
 -------------------------------------------
@@ -925,11 +925,11 @@ The following table provides a detailed listing of the ``rocpd merge`` command-l
                 </tr>
                 <tr>
                   <td rowspan="2">Output configuration</td>
-                  <td>-o OUTPUT_FILE``, --output-file OUTPUT_FILE</td>
+                  <td>-o OUTPUT_FILE, --output-file OUTPUT_FILE</td>
                   <td>Sets the base output filename. Default value: merged. The .db extension is added automatically if not provided.</td>
                 </tr>
                 <tr>
-                  <td>-d OUTPUT_DIRECTORY``, --output-directory OUTPUT_DIRECTORY</td>
+                  <td>-d OUTPUT_DIRECTORY, --output-directory OUTPUT_DIRECTORY</td>
                   <td>Specifies the output directory path. Default value: ./rocpd-output-data.</td>
                 </tr>
                 <tr>
