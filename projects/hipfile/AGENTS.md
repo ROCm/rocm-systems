@@ -155,9 +155,14 @@ Notes:
     that supports it (check with `tools/ais-check/ais-check`); they fail
     without it unless configured with
     `-DHIPFILE_ALLOW_SKIP_FASTPATH_TESTS=ON`.
-  - `stress`: `state_mt` and `batch_mt`, short concurrency tests run under
-    `gdb`. They can pass for a while after a bug lands, so a failure may not
-    come from the change you're looking at.
+  - `stress`: short concurrency tests run under `gdb`: `state_mt`,
+    `batch_mt`, and `hipfileread-cpu-visibility`, which runs once with only
+    fastpath and once with only fallback in `HIPFILE_CAPABLE_DIR`. The
+    `hipfileread-cpu-visibility` tests are skipped on GPUs whose VRAM the CPU
+    can't map, and `-DHIPFILE_ALLOW_SKIP_FASTPATH_TESTS=ON` also skips its
+    fastpath run where fastpath is unavailable. The stress tests can pass for
+    a while after a bug lands, so a failure may not come from the change
+    you're looking at.
 
   System and stress tests may not work on every machine. CI runs them on
   self-hosted AIS runners

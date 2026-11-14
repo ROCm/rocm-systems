@@ -139,3 +139,16 @@
 #define HIPFILE_WARN_NO_GLOBAL_CTOR_OFF
 #define HIPFILE_WARN_NO_GLOBAL_CTOR_ON
 #endif
+
+/* Suppress Clang's unsafe buffer usage warnings where the operation can't be
+ * avoided, such as in glibc's CPU_ZERO, CPU_SET, and CPU_ISSET macros, which
+ * memset and index the cpu_set_t bit array through a raw pointer and are the
+ * standard interface to CPU affinity masks.
+ */
+#if defined(__clang__) && __clang_major__ >= 16
+#define HIPFILE_WARN_UNSAFE_BUFFER_USAGE_OFF HIPFILE_WARN_OFF("unsafe-buffer-usage")
+#define HIPFILE_WARN_UNSAFE_BUFFER_USAGE_ON  HIPFILE_WARN_ON("unsafe-buffer-usage")
+#else
+#define HIPFILE_WARN_UNSAFE_BUFFER_USAGE_OFF
+#define HIPFILE_WARN_UNSAFE_BUFFER_USAGE_ON
+#endif
