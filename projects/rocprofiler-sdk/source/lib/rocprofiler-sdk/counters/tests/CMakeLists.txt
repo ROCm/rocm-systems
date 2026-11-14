@@ -94,12 +94,19 @@ target_link_libraries(
 set(_ROCPROFILER_SHARE_DIR
     "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_DATAROOTDIR}/${PACKAGE_NAME}")
 
+# code coverage slows the device counting tests down by about 10x
+if(ROCPROFILER_BUILD_CODECOV)
+    set(_COUNTER_TESTS_TIMEOUT 90)
+else()
+    set(_COUNTER_TESTS_TIMEOUT 45)
+endif()
+
 # unstable counter collection test: Generates HW exception leading to GPU hang or memory
 # access fault
 rocprofiler_add_unit_test(
     TARGET counter-tests
     SOURCES ${ROCPROFILER_LIB_COUNTER_TEST_SOURCES}
-    TIMEOUT 45
+    TIMEOUT ${_COUNTER_TESTS_TIMEOUT}
     ENVIRONMENT
         "ROCPROFILER_METRICS_PATH=${_ROCPROFILER_SHARE_DIR}"
         "LD_LIBRARY_PATH=${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}:${CMAKE_LIBRARY_OUTPUT_DIRECTORY}:${CMAKE_INSTALL_PREFIX}/lib:${CMAKE_INSTALL_PREFIX}/llvm/lib:${ROCM_PATH}/lib:${ROCM_PATH}/llvm/lib:$ENV{LD_LIBRARY_PATH}"

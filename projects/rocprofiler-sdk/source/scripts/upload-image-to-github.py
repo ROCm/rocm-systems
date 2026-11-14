@@ -2,7 +2,7 @@
 
 # MIT License
 #
-# Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -116,18 +116,17 @@ if __name__ == "__main__":
 
         run([git_cmd, "--version"])
 
+        # only the image ref is fetched below: cloning the whole repo can take
+        # longer than the step timeout
+        run([git_cmd, "init", "--quiet", tmpdir], check=True)
+
+        os.chdir(tmpdir)
+
         run(
-            [
-                git_cmd,
-                "clone",
-                repo_url_secure,
-                tmpdir,
-            ],
+            [git_cmd, "remote", "add", "origin", repo_url_secure],
             sensitive=True,
             check=True,
         )
-
-        os.chdir(tmpdir)
 
         if args.bot:
             run(
