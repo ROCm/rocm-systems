@@ -81,11 +81,16 @@ class SdmaQueue {
   // Status of the queue-creation attempt, so the caller can tell an exhausted queue budget
   // (NO_MEMORY) apart from other failures.
   HSAKMT_STATUS createStatus() const;
+  uint32_t engineId() const { return engineId_; }
+  // How the engine was chosen, so a test can check the choice against the mask HSA reported.
+  const EngineSelection& selection() const { return selection_; }
 
  private:
   bool valid_{false};
   HSAKMT_STATUS createStatus_{HSAKMT_STATUS_ERROR};
   int remoteDeviceId_{-1};
+  uint32_t engineId_{0};
+  EngineSelection selection_;
   uint64_t* cachedWptr_{nullptr};
   uint64_t* committedWptr_{nullptr};
   void* queueBuffer_{nullptr};
@@ -109,20 +114,29 @@ class AnvilLib {
 
  public:
   void init();
-  bool connect(int srcDeviceId, int dstDeviceId, int numChannels = 1);
+  // dstDeviceId for a peer on another host. Its copies reach the peer through fabric-mapped memory,
+  // so there is no device on this host to name.
+  static constexpr int kOffHostPeer = -1;
+  // Give the peer named by peerKey numChannels queues of its own. Peers never share a queue: a
+  // queue is an in-order ring, so sharing one would serialize their copies. A peer on this host
+  // (dstDeviceId is its HIP device) takes the least loaded engine of the HSA preferred mask for the
+  // pair; a peer on another host (kOffHostPeer) has no agent to ask, so it takes the least loaded
+  // usable engine. The engine choice is the only difference: the queue itself is the same.
+  bool connect(int srcDeviceId, uint64_t peerKey, int dstDeviceId, int numChannels = 1);
   void disconnect();
-  // Drop only the queues held for one destination. The channel map is process-global and a
-  // second communicator reuses a previous create's queues, so a failed create must not take
+  // Drop only the queues held for one peer. The channel map is process-global and a second
+  // communicator reuses a previous create's queues, so a failed create must not take
   // disconnect()'s whole-process path and destroy handles already live on the GPU.
-  void disconnectDevice(int dstDeviceId);
+  void disconnectPeer(uint64_t peerKey);
   // Queues this process currently holds, counted across all engines. The budget is otherwise only
   // visible in a log line, which leaves the refusal in connect() and the teardown in
-  // disconnectDevice() with nothing a test can assert: a refused connect must leave this unchanged
+  // disconnectPeer() with nothing a test can assert: a refused connect must leave this unchanged
   // and a fully abandoned create must bring it back to where it started.
   uint32_t queuesUsed() const { return queuesUsedTotal_; }
-  SdmaQueue* getSdmaQueue(int srcDeviceId, int dstDeviceId, int channel_idx = 0);
-  SdmaQueue* createSdmaQueue(int srcDeviceId, int dstDeviceId, uint32_t engineId,
-                             const EngineSelection& selection, int* channelIdx = nullptr);
+  SdmaQueue* getQueue(uint64_t peerKey, int channel_idx = 0);
+  // This process's queues per engine; empty when the engine total is unknown.
+  // Public for the same reason as queuesUsed(): it is the load the engine choice is made from.
+  std::vector<uint32_t> queuesPerEngine() const;
 
  private:
   /*
@@ -178,7 +192,8 @@ class AnvilLib {
 
   std::once_flag init_flag;
   std::vector<hsa_agent_t> gpuAgentsByHipDev_;
-  std::unordered_map<int, std::vector<std::unique_ptr<SdmaQueue>>> sdma_channels_;
+  // Queues by the caller's peer key, for peers on this host and on other hosts alike.
+  std::unordered_map<uint64_t, std::vector<std::unique_ptr<SdmaQueue>>> peer_channels_;
 };
 
 extern AnvilLib& anvil;
@@ -190,7 +205,7 @@ void shutdownEndpoint();
 
 inline void checkHipError(hipError_t err, const char* msg, const char* file, int line) {
   if (err != hipSuccess) {
-    std::cerr << "HIP error at " << file << ":" << line << " - " << msg << "\n"
+    std::cerr << "anvil: HIP error at " << file << ":" << line << " - " << msg << "\n"
               << "  Code: " << err << " (" << hipGetErrorString(err) << ")" << std::endl;
     std::exit(EXIT_FAILURE);
   }
@@ -203,15 +218,15 @@ inline void EnablePeerAccess(int const deviceId, int const peerDeviceId) {
   int canAccess;
   ANVIL_CHECK_HIP_ERROR(hipDeviceCanAccessPeer(&canAccess, deviceId, peerDeviceId));
   if (!canAccess) {
-    std::cerr << "Unable to enable peer access from GPU devices " << deviceId << " to "
+    std::cerr << "anvil: unable to enable peer access from GPU devices " << deviceId << " to "
               << peerDeviceId << "\n";
   }
 
   ANVIL_CHECK_HIP_ERROR(hipSetDevice(deviceId));
   hipError_t error = hipDeviceEnablePeerAccess(peerDeviceId, 0);
   if (error != hipSuccess && error != hipErrorPeerAccessAlreadyEnabled) {
-    std::cerr << "Unable to enable peer to peer access from " << deviceId << "  to " << peerDeviceId
-              << " (" << hipGetErrorString(error) << ")\n";
+    std::cerr << "anvil: unable to enable peer to peer access from " << deviceId << "  to "
+              << peerDeviceId << " (" << hipGetErrorString(error) << ")\n";
   }
 }
 
