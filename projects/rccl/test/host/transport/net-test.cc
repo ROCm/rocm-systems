@@ -29,6 +29,13 @@
 #include <utility>
 #include <vector>
 
+// Include immintrin.h before the macro so gdrwrap.h's wc_store_fence() reaches ObserveSfence() on x86_64.
+static void ObserveSfence();
+#if defined(__x86_64__)
+#include <immintrin.h>
+#define _mm_sfence() ObserveSfence()
+#endif
+
 #include "ScopedHook.h"
 #include "fakes/env_fakes.h"
 #include "fakes/hip_fakes.h"
@@ -53,6 +60,15 @@
 // non-null ncclGdrCopy selects net.cc's GDRCopy arms.
 struct allocationTracker allocTracker[MAX_ALLOC_TRACK_NGPU] = {};
 gdr_t ncclGdrCopy = nullptr;
+
+// The send connection a fence is checked against, and whether a fence ran while its GDRCopy sync word held the
+// initial credit.
+static sendNetResources* g_fenceWatch = nullptr;
+static bool g_creditFenced = false;
+
+static void ObserveSfence() {
+  if (g_fenceWatch && g_fenceWatch->gdcSync && *g_fenceWatch->gdcSync == (uint64_t)-NCCL_STEPS) g_creditFenced = true;
+}
 
 namespace {
 
@@ -2860,6 +2876,24 @@ TEST_F(NetSendProxyConnectMicrotest, GdrCopy_HeadLivesInGdcMemory) {
   EXPECT_EQ(r->sendMem->head, 0u);
   EXPECT_EQ(resp_.mems[NCCL_NET_MAP_GDCMEM].cpuPtr, reinterpret_cast<char*>(r->gdcSync));
   EXPECT_EQ(resp_.mems[NCCL_NET_MAP_GDCMEM].size, (ssize_t)sizeof(uint64_t));
+}
+
+// The initial credit is written through the GDRCopy WC mapping, so wc_store_fence() must follow it.
+TEST_F(NetSendProxyConnectMicrotest, GdrCopy_InitialCreditIsFencedOut) {
+#if !defined(__x86_64__)
+  GTEST_SKIP() << "wc_store_fence() is observed through _mm_sfence(), x86_64 only";
+#endif
+  ncclGdrCopy = reinterpret_cast<gdr_t>(0x1);
+  sendNetResources* r = AddConn(/*shared=*/1);
+  g_fenceWatch = r;
+  g_creditFenced = false;
+
+  ncclResult_t res = Connect();
+  g_fenceWatch = nullptr;
+
+  ASSERT_EQ(res, ncclSuccess);
+  ASSERT_NE(r->gdcSync, nullptr);
+  EXPECT_TRUE(g_creditFenced) << "initial credit written to the GDRCopy sync word without wc_store_fence()";
 }
 
 TEST_F(NetSendProxyConnectMicrotest, GdrCopyNotApplicable_HeadStaysInHostMemory) {

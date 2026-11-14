@@ -22,6 +22,13 @@
 #include <utility>
 #include <vector>
 
+// wc_store_fence() is _mm_sfence() on x86_64: include the intrinsic first, then route coll_net.cc's fences here.
+static void ObserveSfence();
+#if defined(__x86_64__)
+#include <immintrin.h>
+#define _mm_sfence() ObserveSfence()
+#endif
+
 #include "ScopedHook.h"
 #include "fakes/bootstrap_stubs.h"
 #include "fakes/channel_fakes.h"
@@ -36,6 +43,15 @@
 #include "fakes/param_redirect.h"
 
 #include COLL_NET_CC_PATH
+
+// The send connection a fence is checked against, and whether a fence ran while its GDRCopy sync word held the
+// initial credit.
+static sendResources* g_fenceWatch = nullptr;
+static bool g_creditFenced = false;
+
+static void ObserveSfence() {
+  if (g_fenceWatch && g_fenceWatch->gdcSync && *g_fenceWatch->gdcSync == (uint64_t)-NCCL_STEPS) g_creditFenced = true;
+}
 
 namespace {
 
@@ -1578,6 +1594,24 @@ TEST_F(CollNetSendProxyConnectMicrotest, GdrCopy_HeadCreditsLiveInGdcWord) {
   EXPECT_EQ(r->map.mems[NCCL_NET_MAP_GDCMEM].gpuPtr, (char*)r->gdcSync);  // AMD maps device memory 1:1
   EXPECT_EQ(r->map.mems[NCCL_NET_MAP_GDCMEM].size, (int)sizeof(uint64_t));
   EXPECT_NE(r->gdrDesc, nullptr);
+}
+
+// The CPU writes the initial credit through the GDRCopy write-combining mapping, so it must be fenced out before
+// the proxy moves on.
+TEST_F(CollNetSendProxyConnectMicrotest, GdrCopy_InitialCreditIsFencedOut) {
+#if !defined(__x86_64__)
+  GTEST_SKIP() << "wc_store_fence() is observed through _mm_sfence(), x86_64 only";
+#endif
+  ncclGdrCopy = reinterpret_cast<gdr_t>(0x1);
+  g_fenceWatch = R();
+  g_creditFenced = false;
+
+  ncclResult_t res = Connect();
+  g_fenceWatch = nullptr;
+
+  ASSERT_EQ(res, ncclSuccess);
+  ASSERT_NE(R()->gdcSync, nullptr);
+  EXPECT_TRUE(g_creditFenced) << "initial credit written to the GDRCopy sync word without wc_store_fence()";
 }
 
 TEST_F(CollNetSendProxyConnectMicrotest, GdrCopySyncDisabled_KeepsHeadInHostMemory) {
