@@ -75,6 +75,24 @@
 
 #include "AMDHSAKernelDescriptor.h"
 
+// Debug logging for trampoline/managed variable investigation
+// Enable with: ROCR_LOADER_DEBUG=1
+static bool IsLoaderDebugEnabled() {
+  static int enabled = -1;
+  if (enabled < 0) {
+    const char* env = getenv("ROCR_LOADER_DEBUG");
+    enabled = (env && strcmp(env, "1") == 0) ? 1 : 0;
+  }
+  return enabled == 1;
+}
+
+#define LOADER_DEBUG(fmt, ...) \
+  do { \
+    if (IsLoaderDebugEnabled()) { \
+      fprintf(stderr, "[LOADER_DEBUG] " fmt "\n", ##__VA_ARGS__); \
+    } \
+  } while (0)
+
 using namespace rocr::amd::hsa;
 using namespace rocr::amd::hsa::common;
 
@@ -2327,6 +2345,9 @@ hsa_status_t ExecutableImpl::InstallTrampolinesGfx125x(hsa_agent_t agent) {
   objects.push_back(tramp);               // freed via Destroy() in ~ExecutableImpl
   trampoline_segments_.push_back(tramp);  // frozen in ExecutableImpl::Freeze
 
+  LOADER_DEBUG("InstallTrampolinesGfx125x: installing %zu trampolines, pool_size=0x%lx",
+               n, (unsigned long)pool);
+
   for (size_t i = 0; i < n; ++i) {
     const KdFixup& f = fixups[i];
     const uint64_t stub_off = i * kTrampolineStubStride;
@@ -2335,6 +2356,16 @@ hsa_status_t ExecutableImpl::InstallTrampolinesGfx125x(hsa_agent_t agent) {
     const uint64_t entry_dev =
         reinterpret_cast<uint64_t>(f.code_seg->Address(f.kd_vaddr + f.entry_off));
     const uint64_t stub_dev = reinterpret_cast<uint64_t>(tramp->Address(stub_off));
+
+    LOADER_DEBUG("  Trampoline[%zu]: kd_vaddr=0x%lx kd_dev=0x%lx entry_off=0x%lx "
+                 "entry_dev=0x%lx stub_off=0x%lx stub_dev=0x%lx",
+                 i,
+                 (unsigned long)f.kd_vaddr,
+                 (unsigned long)kd_dev,
+                 (unsigned long)f.entry_off,
+                 (unsigned long)entry_dev,
+                 (unsigned long)stub_off,
+                 (unsigned long)stub_dev);
 
     uint8_t blob[kTrampolineStubStride];
     BuildTrampolineGfx1250(blob, entry_dev);
@@ -2345,6 +2376,14 @@ hsa_status_t ExecutableImpl::InstallTrampolinesGfx125x(hsa_agent_t agent) {
 
     // Redirect dispatch onto the stub: kernel_object(kd_dev) + new_off == stub.
     int64_t new_off = static_cast<int64_t>(stub_dev) - static_cast<int64_t>(kd_dev);
+
+    LOADER_DEBUG("  Trampoline[%zu]: REWRITING kernel_code_entry_byte_offset: "
+                 "old=0x%lx new=0x%lx (delta=0x%lx)",
+                 i,
+                 (unsigned long)f.entry_off,
+                 (long)new_off,
+                 (long)(new_off - f.entry_off));
+
     f.code_seg->Copy(f.kd_vaddr + llvm::amdhsa::KERNEL_CODE_ENTRY_BYTE_OFFSET_OFFSET, &new_off,
                      sizeof(new_off));  // -> code host shadow
   }
@@ -2456,6 +2495,15 @@ hsa_status_t ExecutableImpl::LoadDefinitionSymbol(hsa_agent_t agent,
                                     address);
     symbol = kernel_symbol;
   } else if (sym->IsVariableSymbol()) {
+    LOADER_DEBUG("LoadDefinitionSymbol VARIABLE: name=%s vaddr=0x%lx sec_off=0x%lx "
+                 "size=0x%lx address=0x%lx trampoline_enabled=%d",
+                 sym->GetSymbolName().c_str(),
+                 (unsigned long)sym->VAddr(),
+                 (unsigned long)sym->SectionOffset(),
+                 (unsigned long)sym->Size(),
+                 (unsigned long)address,
+                 trampoline_enabled_gfx125x_ ? 1 : 0);
+
     symbol = std::make_shared<VariableSymbol>(true,
                        sym->GetModuleName(),
                        sym->GetSymbolName(),
@@ -2567,17 +2615,46 @@ uint64_t ExecutableImpl::SymbolAddress(hsa_agent_t agent, code::Symbol* sym)
   // dereferencing it in SectionSegment()/VAddr().
   if (!sec) { return 0; }
   Segment* seg = SectionSegment(agent, sec);
-  return nullptr == seg ? 0 : (uint64_t) (uintptr_t) seg->Address(sym->VAddr());
+  uint64_t result = nullptr == seg ? 0 : (uint64_t) (uintptr_t) seg->Address(sym->VAddr());
+
+  LOADER_DEBUG("SymbolAddress(code::Symbol): name=%s vaddr=0x%lx sec_addr=0x%lx sec_off=0x%lx "
+               "seg_vaddr=0x%lx seg_ptr=%p result=0x%lx trampoline_enabled=%d",
+               sym->Name().c_str(),
+               (unsigned long)sym->VAddr(),
+               (unsigned long)(sec ? sec->addr() : 0),
+               (unsigned long)sym->SectionOffset(),
+               (unsigned long)(seg ? seg->VAddr() : 0),
+               seg ? seg->Ptr() : nullptr,
+               (unsigned long)result,
+               trampoline_enabled_gfx125x_ ? 1 : 0);
+
+  return result;
 }
 
 uint64_t ExecutableImpl::SymbolAddress(hsa_agent_t agent, elf::Symbol* sym)
 {
   elf::Section* sec = sym->section();
-  if(!sec) { return NULL; }
+  if(!sec) {
+    LOADER_DEBUG("SymbolAddress(elf::Symbol): name=%s NO SECTION", sym->name().c_str());
+    return NULL;
+  }
 
   Segment* seg = SectionSegment(agent, sec);
   uint64_t vaddr = sec->addr() + sym->value();
-  return nullptr == seg ? 0 : (uint64_t) (uintptr_t) seg->Address(vaddr);
+  uint64_t result = nullptr == seg ? 0 : (uint64_t) (uintptr_t) seg->Address(vaddr);
+
+  LOADER_DEBUG("SymbolAddress(elf::Symbol): name=%s sym_value=0x%lx sec_addr=0x%lx "
+               "vaddr=0x%lx seg_vaddr=0x%lx seg_ptr=%p result=0x%lx trampoline_enabled=%d",
+               sym->name().c_str(),
+               (unsigned long)sym->value(),
+               (unsigned long)sec->addr(),
+               (unsigned long)vaddr,
+               (unsigned long)(seg ? seg->VAddr() : 0),
+               seg ? seg->Ptr() : nullptr,
+               (unsigned long)result,
+               trampoline_enabled_gfx125x_ ? 1 : 0);
+
+  return result;
 }
 
 Segment* ExecutableImpl::SymbolSegment(hsa_agent_t agent, code::Symbol* sym)
@@ -2657,6 +2734,14 @@ hsa_status_t ExecutableImpl::ApplyStaticRelocation(hsa_agent_t agent, amd::hsa::
   // sec->addr() + rel->offset() can wrap on crafted input; Copy()'s range check
   // rejects any wrapped destination that falls outside the target segment.
   size_t reladdr = sec->addr() + rel->offset();
+
+  LOADER_DEBUG("ApplyStaticRelocation: sym=%s type=%u reladdr=0x%lx offset=0x%lx addend=0x%lx",
+               sym ? sym->name().c_str() : "<null>",
+               rel->type(),
+               (unsigned long)reladdr,
+               (unsigned long)rel->offset(),
+               (long)rel->addend());
+
   switch (rel->type()) {
     case R_AMDGPU_V1_32_LOW:
     case R_AMDGPU_V1_32_HIGH:
@@ -2669,6 +2754,7 @@ hsa_status_t ExecutableImpl::ApplyStaticRelocation(hsa_agent_t agent, amd::hsa::
         case STT_AMDGPU_HSA_KERNEL:
         case STT_AMDGPU_HSA_INDIRECT_FUNCTION:
           addr = SymbolAddress(agent, sym);
+          LOADER_DEBUG("  -> sym_type=%u addr=0x%lx", sym->type(), (unsigned long)addr);
           if (!addr) { return HSA_STATUS_ERROR_INVALID_CODE_OBJECT; }
           break;
         case STT_COMMON: {
@@ -2835,6 +2921,16 @@ hsa_status_t ExecutableImpl::ApplyDynamicRelocation(hsa_agent_t agent, amd::hsa:
   // the symbol table's range; reject rather than dereferencing it below.
   if (!rel->symbol()) { return HSA_STATUS_ERROR_INVALID_CODE_OBJECT; }
   uint64_t symAddr = 0;
+
+  LOADER_DEBUG("ApplyDynamicRelocation: sym=%s sym_type=%u rel_type=%u "
+               "rel_offset=0x%lx addend=0x%lx sym_value=0x%lx",
+               rel->symbol() ? rel->symbol()->name().c_str() : "<null>",
+               rel->symbol() ? rel->symbol()->type() : 0,
+               rel->type(),
+               (unsigned long)rel->offset(),
+               (long)rel->addend(),
+               rel->symbol() ? (unsigned long)rel->symbol()->value() : 0);
+
   switch (rel->symbol()->type()) {
     case STT_OBJECT:
     case STT_AMDGPU_HSA_KERNEL:
@@ -2843,6 +2939,9 @@ hsa_status_t ExecutableImpl::ApplyDynamicRelocation(hsa_agent_t agent, amd::hsa:
       Segment* symSeg = VirtualAddressSegment(rel->symbol()->value());
       if (!symSeg) { return HSA_STATUS_ERROR_INVALID_CODE_OBJECT; }
       symAddr = reinterpret_cast<uint64_t>(symSeg->Address(rel->symbol()->value()));
+      LOADER_DEBUG("  -> STT_OBJECT/KERNEL/FUNC: symSeg_vaddr=0x%lx symAddr=0x%lx",
+                   symSeg ? (unsigned long)symSeg->VAddr() : 0,
+                   (unsigned long)symAddr);
       break;
     }
 
@@ -2908,6 +3007,12 @@ hsa_status_t ExecutableImpl::ApplyDynamicRelocation(hsa_agent_t agent, amd::hsa:
         return HSA_STATUS_ERROR_VARIABLE_UNDEFINED;
       }
 
+      LOADER_DEBUG("  -> R_AMDGPU_ABS64: writing symAddr=0x%lx to rel_offset=0x%lx "
+                   "(device_addr=0x%lx)",
+                   (unsigned long)symAddr,
+                   (unsigned long)rel->offset(),
+                   relSeg ? (unsigned long)(uintptr_t)relSeg->Address(rel->offset()) : 0);
+
       if (!relSeg->Copy(rel->offset(), &symAddr, sizeof(symAddr))) { return HSA_STATUS_ERROR_INVALID_CODE_OBJECT; }
       break;
     }
@@ -2916,6 +3021,15 @@ hsa_status_t ExecutableImpl::ApplyDynamicRelocation(hsa_agent_t agent, amd::hsa:
     {
       int64_t baseDelta = reinterpret_cast<uint64_t>(relSeg->Address(0)) - relSeg->VAddr();
       uint64_t relocatedAddr = baseDelta + rel->addend();
+
+      LOADER_DEBUG("  -> R_AMDGPU_RELATIVE64: baseDelta=0x%lx addend=0x%lx "
+                   "relocatedAddr=0x%lx rel_offset=0x%lx (device_addr=0x%lx)",
+                   (long)baseDelta,
+                   (long)rel->addend(),
+                   (unsigned long)relocatedAddr,
+                   (unsigned long)rel->offset(),
+                   relSeg ? (unsigned long)(uintptr_t)relSeg->Address(rel->offset()) : 0);
+
       if (!relSeg->Copy(rel->offset(), &relocatedAddr, sizeof(relocatedAddr))) { return HSA_STATUS_ERROR_INVALID_CODE_OBJECT; }
       break;
     }
