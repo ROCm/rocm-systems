@@ -2965,7 +2965,21 @@ bool KernelBlitManager::useShaderCopyBufferPath(const Memory& srcMemory, const M
   bool nonP2PIpcOrDirectAccess =
       !isP2pOrIpc && neitherMemoryIsHostDirectAccess && !isSdmaPreference;
 
-  return smallSizeWithNonSdmaPreference || nonP2PIpcOrDirectAccess || isBlitPreference;
+  // When only 1 same-device SDMA engine is available and both source and
+  // destination are on the same device, use the blit kernel to avoid serializing
+  // concurrent copies from different streams onto that single engine.
+  // Uses GetSdmaD2DMask() (self-to-self query) — not GetSdmaValidMask() which
+  // drives engine allocation and must not be constrained by the D2D mask.
+  bool singleSdmaD2D = false;
+  if (imported && isP2pOrIpc && neitherMemoryIsHostDirectAccess && !isSdmaPreference) {
+    uint32_t d2dMask = dev().GetSdmaD2DMask();
+    if (d2dMask == 0) d2dMask = dev().GetSdmaValidMask(HwQueueEngine::SdmaD2D);
+    if (&srcMemory.dev() == &dstMemory.dev() && __builtin_popcount(d2dMask) <= 1) {
+      singleSdmaD2D = true;
+    }
+  }
+
+  return smallSizeWithNonSdmaPreference || nonP2PIpcOrDirectAccess || isBlitPreference || singleSdmaD2D;
 }
 
 // ================================================================================================
