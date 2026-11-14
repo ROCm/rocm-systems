@@ -32,7 +32,8 @@ static ncclResult_t ncclReduceScatterDdaFabricLLTyped(const void* sendbuff, void
   const size_t nPk = bytes >> 3;              // 8 payload bytes per packet
 
   const unsigned threads = 256;
-  int nBlocksMax = comm->ddaFabricMaxBlocks;
+  // The IPC path leaves ddaFabricMaxBlocks unset; its epoch cells bound the grid.
+  int nBlocksMax = comm->ddaFabricMaxBlocks > 0 ? comm->ddaFabricMaxBlocks : comm->ddaLLEpochLen;
   if (nBlocksMax < 1) {
     nBlocksMax = 1;
   }
@@ -92,7 +93,8 @@ bool ncclReduceScatterDdaFabricLLEligible(ncclComm* comm, const void* sendbuff, 
   if (comm == nullptr || comm->bootstrap == nullptr) {
     return false;
   }
-  if (comm->ddaFabricMemHandler == nullptr || comm->ddaScratch == nullptr || comm->ddaPeerPtrsDev == nullptr) {
+  if ((comm->ddaFabricMemHandler == nullptr && comm->ddaIpcMemHandler == nullptr) || comm->ddaScratch == nullptr ||
+      comm->ddaPeerPtrsDev == nullptr || comm->ddaLLEpochDev == nullptr) {
     return false;
   }
   if (comm->nRanks < 2 || comm->nRanks > dda::common::kDdaMaxNranks) {

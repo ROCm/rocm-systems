@@ -9190,6 +9190,71 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_DdaIpcChosenOnNonGfx1250Arch) {
       });
 }
 
+// A non-fabric arch with an LL cap (gfx950) runs the LL kernel over the IPC scratch up to it, then DDA IPC.
+TEST(WrapMicrotestIsolated, SelectReduceScatter_DdaLLOverIpcOnGfx950UpToCap) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectReduceScatter_DdaLLOverIpcOnGfx950UpToCap",
+      []() {
+        rcclArchThresholds t{};
+        t.ddaLLMax[ncclFuncReduceScatter] = 512 * 1024;
+        t.ddaVmmMax[ncclFuncReduceScatter] = 128 * kMiB;
+        ScopedHook llEligible(g_reduceScatterDdaFabricLLEligible,
+                              [](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) {
+                                return true;
+                              });
+        ScopedHook ipcEligible(g_reduceScatterDdaIpcEligible,
+                               [](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) {
+                                 return true;
+                               });
+        ncclComm* comm = MakeCommWithArch("gfx950");
+        comm->archThresholds = &t;
+        comm->nRanks = 8;
+        comm->nNodes = 1;
+        constexpr size_t kCapCount = 512 * 1024 / 8 / sizeof(float);
+        rcclCollDecision atCap{};
+        EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr, kCapCount, ncclFloat32, ncclSum,
+                                                        /*query=*/false, &atCap));
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL, atCap.algo);
+        EXPECT_EQ(NCCL_PROTO_LL, atCap.protocol);
+        rcclCollDecision pastCap{};
+        EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr, kCapCount + 4, ncclFloat32, ncclSum,
+                                                        /*query=*/false, &pastCap));
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_IPC, pastCap.algo);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// The LL-over-IPC tier is gfx950 only: gfx942 stays on DDA IPC even with an LL cap and an eligible LL kernel.
+TEST(WrapMicrotestIsolated, SelectReduceScatter_DdaLLOverIpcNotOnGfx942) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectReduceScatter_DdaLLOverIpcNotOnGfx942",
+      []() {
+        rcclArchThresholds t{};
+        t.ddaLLMax[ncclFuncReduceScatter] = 512 * 1024;
+        t.ddaVmmMax[ncclFuncReduceScatter] = 128 * kMiB;
+        int llCalls = 0;
+        ScopedHook llEligible(g_reduceScatterDdaFabricLLEligible,
+                              [&llCalls](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) {
+                                ++llCalls;
+                                return true;
+                              });
+        ScopedHook ipcEligible(g_reduceScatterDdaIpcEligible,
+                               [](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) {
+                                 return true;
+                               });
+        ncclComm* comm = MakeCommWithArch("gfx942");
+        comm->archThresholds = &t;
+        comm->nRanks = 8;
+        comm->nNodes = 1;
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr, /*recvcount=*/8, ncclFloat32, ncclSum,
+                                                        /*query=*/false, &decision));
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_IPC, decision.algo);
+        EXPECT_EQ(0, llCalls);
+        DeleteCommWithArch(comm);
+      });
+}
+
 // Hierarchical, live mode: sidesteps rcclHierarchicalAlgoInfo's inter/intra
 // sub-comm dereferencing (only called when query=true), same reasoning as
 // the AllGather Hierarchical test.

@@ -515,14 +515,15 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250_dpx = {
   .bcRingLL128MaxBytes = 512ULL*1024*1024,
 };
 
-// gfx950: DDA-IPC cap is 64 MiB for AG, 128 MiB for AR/RS and 4 MiB for AlltoAll. No fabric LL/LL128.
+// gfx950: DDA-IPC cap is 64 MiB for AG, 128 MiB for AR/RS and 4 MiB for AlltoAll. ReduceScatter runs the
+// LL kernel over the IPC scratch up to 512 KiB; no other LL/LL128 tier.
 static const rcclArchThresholds rcclArchThresholds_gfx950 = {
-  // ddaLLMax: no fabric LL on gfx950.
+  // ddaLLMax: only ReduceScatter has an LL tier on gfx950, over the IPC scratch.
   .ddaLLMax = {
     0,                    // [0] Broadcast      -- not used
     0,                    // [1] Reduce          -- not used
-    0,                    // [2] AllGather       -- no fabric LL
-    0,                    // [3] ReduceScatter   -- no fabric LL
+    0,                    // [2] AllGather       -- no LL
+    512ULL*1024,          // [3] ReduceScatter   -- LL beats DDA-IPC 1.5-2.2x to 512K, ties at 1M (8 ranks)
     0,                    // [4] AllReduce       -- no fabric LL
     0,                    // [5] SendRecv        -- not used
     0,                    // [6] Send            -- not used
