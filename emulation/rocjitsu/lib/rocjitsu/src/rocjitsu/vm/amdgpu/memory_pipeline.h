@@ -85,6 +85,7 @@ public:
     WaitCounterTokens counters;
     uint64_t wave_generation;
     uint64_t issue_pc;
+    bool routing_observed = false;
   };
 
   /// @brief Issue a memory instruction to this pipeline.
@@ -100,7 +101,7 @@ public:
   /// @details Returning Complete means the pipeline accepted ownership, whether
   /// the backing completed synchronously or the request was queued. Permanent
   /// failures are returned synchronously and leave no retained instruction.
-  VmAccessOutcome issue_deferred(Instruction *inst, Wavefront &wf);
+  VmAccessOutcome issue_deferred(Instruction *inst, Wavefront &wf, bool routing_observed = false);
 
   /// @brief Retry every request that was unavailable on its preceding attempt.
   void tick();
@@ -142,7 +143,8 @@ protected:
                                                  MemoryAccessDeferredCompletion complete) = 0;
 
   void retry_entries(bool all_queues, uint32_t process_id, uint32_t queue_id);
-  VmAccessOutcome issue_impl(Instruction *inst, Wavefront &wf, bool retain_unavailable);
+  VmAccessOutcome issue_impl(Instruction *inst, Wavefront &wf, bool retain_unavailable,
+                             bool routing_observed);
   [[nodiscard]] WaitCounterTokens issue_counters(const Instruction &inst) const;
   void acquire_wait_counters(Wavefront &wf, const WaitCounterTokens &counters);
   void release_wait_counters(Wavefront &wf, const WaitCounterTokens &counters);

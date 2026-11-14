@@ -6101,13 +6101,13 @@ TEST_P(ImageSamplerControlTest, BvhWaitTargetsItsOwnOutstandingCounter) {
   if (arch() != ROCJITSU_CODE_ARCH_RDNA4)
     GTEST_SKIP();
   wf_->wait_counters().increment(amdgpu::WaitCounterType::BVHCNT);
-  wf_->set_wait_counter("wait_bvhcnt", 0);
+  wf_->wait_for({.bvhcnt = 0});
   EXPECT_FALSE(wf_->wait_satisfied());
   wf_->wait_counters().decrement(amdgpu::WaitCounterType::BVHCNT);
   wf_->wait_counters().increment(amdgpu::WaitCounterType::VMCNT);
   EXPECT_TRUE(wf_->wait_satisfied());
   wf_->wait_counters().decrement(amdgpu::WaitCounterType::VMCNT);
-  wf_->set_wait_counter("wait_bvhcnt", amdgpu::WaitCounters::BVHCNT_MAX);
+  wf_->wait_for({.bvhcnt = amdgpu::WaitCounters::BVHCNT_MAX});
   wf_->wait_counters().increment(amdgpu::WaitCounterType::BVHCNT);
   wf_->set_wait_all();
   EXPECT_FALSE(wf_->wait_satisfied());

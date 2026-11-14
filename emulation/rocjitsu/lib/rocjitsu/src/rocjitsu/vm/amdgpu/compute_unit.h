@@ -1688,6 +1688,7 @@ protected:
   /// Rejected instructions stay with the issuer until it reports the failure.
   /// @param wf The issuing wavefront.
   VmAccessOutcome route_memory_inst(std::unique_ptr<Instruction> &&inst, Wavefront &wf);
+  void lock_gds_sources(const Instruction &inst, Wavefront &wf, uint64_t sequence);
 
   [[nodiscard]] bool owns_memory_result_vgprs(const Wavefront &wf, uint32_t base,
                                               uint32_t count) const {

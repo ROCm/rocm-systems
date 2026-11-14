@@ -64,12 +64,11 @@ public:
         memoryOrder);
   }
 
-  /// Register a generic FLAT load whose active lanes resolve uniformly to
-  /// global memory. The caller supplies architecture-specific counter
-  /// obligations because their domains and ordering vary by target.
-  void flatGlobalLoad(int wave, int vgprBase, int numRegs,
-                      std::span<const amdgpu::MemoryCounterObligation> counterObligations,
-                      uint64_t exec = 0) {
+  /// Register a global load with caller-supplied counter obligations.
+  void
+  globalLoadWithObligations(int wave, int vgprBase, int numRegs,
+                            std::span<const amdgpu::MemoryCounterObligation> counterObligations,
+                            uint64_t exec = 0) {
     if (!exec)
       exec = defaultExec_;
     const MemoryOrderClass memoryOrder = memoryOrderForObligations(counterObligations);
@@ -219,16 +218,14 @@ public:
         CounterObligations{waitCounterType, memoryOrder, additionalWaitCounterType}, memoryOrder);
   }
 
-  /// Register a CDNA1-4 generic FLAT load whose active lanes resolve uniformly
-  /// to LDS. Its unordered VMCNT and LGKMCNT obligations are independent of
-  /// that resolved memory route.
-  void flatLdsLoad(int wave, int lane, int addr, int bytes, int vgprDst) {
+  /// Inject an unordered LDS read with independent VMCNT and LGKMCNT obligations.
+  void unorderedLdsRead(int wave, int lane, int addr, int bytes, int vgprDst) {
     ldsRead(wave, lane, addr, bytes, vgprDst, /*byteMask=*/0xF, amdgpu::WaitCounterType::VMCNT,
             MemoryOrderClass::UNORDERED, amdgpu::WaitCounterType::LGKMCNT);
   }
 
-  /// Register a CDNA1-4 generic FLAT store whose active lane resolves to LDS.
-  void flatLdsStore(int wave, int lane, int addr, int bytes) {
+  /// Inject an unordered LDS write with independent VMCNT and LGKMCNT obligations.
+  void unorderedLdsWrite(int wave, int lane, int addr, int bytes) {
     ldsWrite(wave, lane, addr, bytes, MemoryOrderClass::UNORDERED, amdgpu::WaitCounterType::VMCNT,
              amdgpu::WaitCounterType::LGKMCNT);
   }
@@ -256,11 +253,7 @@ public:
   }
 
   /// Barrier: flush all waves' barrier-pending events (simulates s_barrier).
-  void barrier() {
-    for (auto *w : waves_) {
-      w->flushBarrierPendingEvents();
-    }
-  }
+  void barrier() { detector_->flushWorkgroupBarrierEvents(); }
 
   // -- Trigger race checks --
 

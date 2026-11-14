@@ -60,17 +60,27 @@ public:
                           VgprWriteOrder writeOrder, uint8_t lastRegisterByteMask = 0,
                           LdsAccess ldsAccess = {});
 
+  /// Attach the LDS footprint after a mixed FLAT issue successfully translates its global lanes.
+  void attachLdsIntervals(EventId event, IntervalSet intervals);
+
   /// Transition an event from ACTIVE to WAVE_COMPLETE.
   void markEventWaveComplete(EventId);
 
   /// Satisfy the event's obligations covered by one wait-counter update.
   /// Returns true once every obligation for the event has been satisfied.
   bool satisfyEventWaitCounter(EventId, amdgpu::WaitCounterType);
+  bool appendCounterOnly(EventId id, amdgpu::MemoryCounterObligation issue,
+                         EventRegistry::RoutedChanges *changes) {
+    return events_.appendCounterOnly(id, issue, changes);
+  }
 
   /// Retire an event. For LDS-touching events, removes from live lists
   /// and decrements per-byte counts. All events are marked RETIRED in the
   /// registry, enabling prefix trimming.
   void retireEvent(EventId);
+  /// Publish a completed LDS portion at a workgroup barrier. Its VGPR result
+  /// and other counter obligations may still be active.
+  void retireLdsIntervals(EventId);
 
   /// Check for RAW hazards: no outstanding LDS writes overlap the range.
   /// Same-wave operations are ordered only when both belong to the same
@@ -110,6 +120,13 @@ public:
     return std::min(bytes, ldsSizeBytes_ - address) / elementBytes * elementBytes;
   }
 
+  void restoreRoutedChanges(const EventRegistry::RoutedChanges &changes) {
+    events_.restoreRoutedChanges(changes);
+  }
+  void supersedeFlatResult(EventId id, VgprWriteOrder replacement, uint32_t reg, uint64_t lanes,
+                           uint8_t bytes, EventRegistry::RoutedChanges *changes) {
+    events_.supersedeFlatResult(id, replacement, reg, lanes, bytes, changes);
+  }
   void setConditionalVgprWrite(EventId id, ConditionalVgprWrite feedback) {
     events_.setConditionalVgprWrite(id, feedback);
   }
@@ -135,6 +152,8 @@ public:
   }
 
 private:
+  void indexLdsIntervals(EventId event);
+
   struct LdsChunkCounts {
     int bytes = 0;
     /// When bytes > 0, a nonnegative owner proves that every counted event

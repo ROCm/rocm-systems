@@ -555,16 +555,28 @@ public:
   ///
   /// Wave32 leaves EXEC_HI available as scalar scratch. Vector instructions
   /// that update the execution mask must therefore preserve the non-lane bits.
-  void set_exec(uint64_t val) { exec_ = (exec_ & ~lane_mask()) | (val & lane_mask()); }
+  void set_exec(uint64_t val) {
+    exec_ = (exec_ & ~lane_mask()) | (val & lane_mask());
+    exec_written_words_ |= wf_size_ == 64 ? 3 : 1;
+  }
 
   /// @brief Write both architectural EXEC words as a scalar instruction result.
-  void write_exec(uint64_t val) { exec_ = val; }
+  void write_exec(uint64_t val) {
+    exec_ = val;
+    exec_written_words_ = 3;
+  }
 
   /// Write only EXEC_LO, including when both halves contain active lanes.
-  void write_exec_lo(uint32_t val) { exec_ = (exec_ & 0xffffffff00000000ULL) | val; }
+  void write_exec_lo(uint32_t val) {
+    exec_ = (exec_ & 0xffffffff00000000ULL) | val;
+    exec_written_words_ |= 1;
+  }
 
   /// Write only EXEC_HI, including when it is scalar scratch in wave32.
-  void write_exec_hi(uint32_t val) { exec_ = (exec_ & 0xffffffffu) | (uint64_t{val} << 32); }
+  void write_exec_hi(uint32_t val) {
+    exec_ = (exec_ & 0xffffffffu) | (uint64_t{val} << 32);
+    exec_written_words_ |= 2;
+  }
 
   /// Restore raw EXEC without recording an instruction write.
   void set_exec_raw(uint64_t val) { exec_ = val; }
@@ -734,15 +746,7 @@ public:
   /// @brief Retire one outstanding wait-counter operation and wake the wave if ready.
   void release_wait_counter(WaitCounterType type);
 
-  /// @brief Set the s_waitcnt target thresholds and stall if not yet satisfied.
-  ///
-  /// @details Used by GFX9 (CDNA1-4), GFX10 (RDNA1/2), and GFX11 (RDNA3/3.5)
-  /// for the monolithic S_WAITCNT instruction.  Sets vmcnt, lgkmcnt, expcnt
-  /// thresholds and transitions to WAITCNT if any counter currently exceeds
-  /// its target.
-  /// @param vmcnt VM counter threshold.
-  /// @param lgkmcnt LGKM counter threshold.
-  /// @param expcnt Export counter threshold.
+  /// Thresholds installed by the current wait instruction.
   const WaitTarget &wait_target() const { return wait_target_; }
 
   /// Install the thresholds of the current wait instruction. Unspecified
@@ -755,132 +759,22 @@ public:
 
   /// Wait for every modeled memory pipeline, including stores and async DMA.
   void set_wait_all() {
-    wait_target_ = {.vmcnt = 0,
-                    .lgkmcnt = 0,
-                    .expcnt = 0,
-                    .vscnt = 0,
-                    .dscnt = 0,
-                    .kmcnt = 0,
-                    .tensorcnt = 0,
-                    .asynccnt = 0,
-                    .samplecnt = 0,
-                    .bvhcnt = 0};
-    if (!wait_satisfied())
-      set_state(WfState::WAITCNT);
+    wait_for({.vmcnt = 0,
+              .lgkmcnt = 0,
+              .expcnt = 0,
+              .vscnt = 0,
+              .dscnt = 0,
+              .kmcnt = 0,
+              .tensorcnt = 0,
+              .asynccnt = 0,
+              .samplecnt = 0,
+              .bvhcnt = 0});
   }
 
+  /// Install the monolithic S_WAITCNT thresholds for GFX9 through GFX11.
+  /// This resets VSCNT and every split counter to its no-wait value.
   void set_wait_target(uint8_t vmcnt, uint8_t lgkmcnt, uint8_t expcnt) {
-    wait_target_.vmcnt = vmcnt;
-    wait_target_.lgkmcnt = lgkmcnt;
-    wait_target_.expcnt = expcnt;
-    if (!wait_satisfied())
-      set_state(WfState::WAITCNT);
-  }
-
-  /// @brief Set the VSCNT target (GFX10 S_WAITCNT_VSCNT).
-  void set_wait_target_vscnt(uint8_t threshold) {
-    wait_target_.vscnt = threshold;
-    if (!wait_satisfied())
-      set_state(WfState::WAITCNT);
-  }
-
-  /// @brief Set the LOADCNT target (GFX11+ S_WAITCNT_VMCNT / S_WAIT_LOADCNT).
-  void set_wait_target_loadcnt(uint8_t threshold) {
-    wait_target_.vmcnt = threshold;
-    if (!wait_satisfied())
-      set_state(WfState::WAITCNT);
-  }
-
-  /// @brief Set the STORECNT target (GFX11+ S_WAITCNT_VSCNT / S_WAIT_STORECNT).
-  void set_wait_target_storecnt(uint8_t threshold) {
-    wait_target_.vscnt = threshold;
-    if (!wait_satisfied())
-      set_state(WfState::WAITCNT);
-  }
-
-  /// @brief Set the DSCNT target (GFX11+ S_WAITCNT_LGKMCNT / S_WAIT_DSCNT).
-  void set_wait_target_dscnt(uint8_t threshold) {
-    wait_target_.dscnt = threshold;
-    if (!wait_satisfied())
-      set_state(WfState::WAITCNT);
-  }
-
-  /// @brief Set the KMCNT target (GFX11+ S_WAIT_KMCNT).
-  void set_wait_target_kmcnt(uint8_t threshold) {
-    wait_target_.kmcnt = threshold;
-    if (!wait_satisfied())
-      set_state(WfState::WAITCNT);
-  }
-
-  /// @brief Set the TENSORCNT target (GFX12.5 S_WAIT_TENSORCNT).
-  void set_wait_target_tensorcnt(uint8_t threshold) {
-    wait_target_.tensorcnt = threshold;
-    if (!wait_satisfied())
-      set_state(WfState::WAITCNT);
-  }
-
-  /// @brief Set the ASYNCCNT target (GFX12.5 S_WAIT_ASYNCCNT).
-  void set_wait_target_asynccnt(uint8_t threshold) {
-    wait_target_.asynccnt = threshold;
-    if (!wait_satisfied())
-      set_state(WfState::WAITCNT);
-  }
-
-  /// @brief Set combined STORECNT + DSCNT targets (GFX12 S_WAIT_STORECNT_DSCNT).
-  void set_wait_target_storecnt_dscnt(uint8_t storecnt, uint8_t dscnt) {
-    wait_target_.vscnt = storecnt;
-    wait_target_.dscnt = dscnt;
-    if (!wait_satisfied())
-      set_state(WfState::WAITCNT);
-  }
-
-  /// @brief Set combined LOADCNT + DSCNT targets (GFX12 S_WAIT_LOADCNT_DSCNT).
-  void set_wait_target_loadcnt_dscnt(uint8_t loadcnt, uint8_t dscnt) {
-    wait_target_.vmcnt = loadcnt;
-    wait_target_.dscnt = dscnt;
-    if (!wait_satisfied())
-      set_state(WfState::WAITCNT);
-  }
-
-  /// @brief Set a single split-wait counter threshold by name.
-  ///
-  /// Used by the generated S_WAIT_* / S_WAITCNT_* instruction execute()
-  /// bodies.  Maps the instruction's semantic name to the correct target.
-  void set_wait_counter(const char *counter_name, uint16_t threshold) {
-    using namespace std::string_view_literals;
-    std::string_view name{counter_name};
-    auto t = static_cast<uint8_t>(threshold);
-    if (name == "wait_loadcnt")
-      set_wait_target_loadcnt(t);
-    else if (name == "wait_storecnt")
-      set_wait_target_storecnt(t);
-    else if (name == "wait_dscnt")
-      set_wait_target_dscnt(t);
-    else if (name == "wait_kmcnt")
-      set_wait_target_kmcnt(t);
-    else if (name == "wait_tensorcnt")
-      set_wait_target_tensorcnt(t);
-    else if (name == "wait_asynccnt")
-      set_wait_target_asynccnt(t);
-    else if (name == "wait_expcnt") {
-      wait_target_.expcnt = static_cast<uint8_t>(threshold & 0x07);
-      if (!wait_satisfied())
-        set_state(WfState::WAITCNT);
-    } else if (name == "wait_samplecnt") {
-      wait_target_.samplecnt = static_cast<uint8_t>(threshold & 0x3f);
-      if (!wait_satisfied())
-        set_state(WfState::WAITCNT);
-    } else if (name == "wait_bvhcnt") {
-      wait_target_.bvhcnt = static_cast<uint8_t>(t & WaitCounters::BVHCNT_MAX);
-      if (!wait_satisfied())
-        set_state(WfState::WAITCNT);
-    } else if (name == "wait_loadcnt_dscnt") {
-      set_wait_target_loadcnt_dscnt(static_cast<uint8_t>((threshold >> 8) & 0x3F),
-                                    static_cast<uint8_t>(threshold & 0x3F));
-    } else if (name == "wait_storecnt_dscnt") {
-      set_wait_target_storecnt_dscnt(static_cast<uint8_t>((threshold >> 8) & 0x3F),
-                                     static_cast<uint8_t>(threshold & 0x3F));
-    }
+    wait_for({.vmcnt = vmcnt, .lgkmcnt = lgkmcnt, .expcnt = expcnt});
   }
 
   /// @brief Check whether all wait counter thresholds are satisfied.
@@ -973,7 +867,31 @@ public:
     instruction_execution_error_mnemonic_.clear();
   }
 
-  void begin_instruction_execution() { clear_instruction_execution_error(); }
+  struct LdsSourceRead {
+    uint32_t address;
+    uint32_t bytes;
+  };
+
+  void begin_instruction_execution() {
+    clear_instruction_execution_error();
+    lds_source_read_.bytes = 0;
+    exec_written_words_ = 0;
+  }
+
+  /// EXEC words actually written by this instruction, even when the values agree.
+  std::optional<RegisterRef> instruction_exec_write() const {
+    if (!exec_written_words_)
+      return std::nullopt;
+    return RegisterRef{RegClass::EXEC, static_cast<uint16_t>(exec_written_words_ == 2),
+                       static_cast<uint8_t>(exec_written_words_ == 3 ? 2 : 1)};
+  }
+
+  /// The GFX10 direct operand broadcasts one range. Repeated lane evaluations
+  /// describe the same synchronous read to after-execute observers.
+  void record_lds_source_read(uint32_t address, uint32_t bytes) const {
+    lds_source_read_ = {address, bytes};
+  }
+  LdsSourceRead lds_source_read() const { return lds_source_read_; }
 
   // -- KFD debugger (trap) state --
   //
@@ -1385,6 +1303,8 @@ public:
       t = 0;
     trapsts_ = 0;
     pending_alu_causes_ = 0;
+    lds_source_read_ = {};
+    exec_written_words_ = 0;
     pending_memory_trap_ = MemoryTrapDelivery::None;
     instruction_execution_error_ = InstructionExecutionError::None;
     instruction_execution_error_detail_ = nullptr;
@@ -1450,6 +1370,7 @@ protected:
   std::shared_ptr<uint32_t> scratch_lease_;      ///< Resident PM4 scratch slot.
   uint32_t queue_id_ = 0; ///< KFD queue ID that launched this wave (debugger correlation).
   mutable InstructionExecutionError instruction_execution_error_ = InstructionExecutionError::None;
+  uint8_t exec_written_words_ = 0;
   mutable const char *instruction_execution_error_detail_ = nullptr;
   mutable std::string instruction_execution_error_mnemonic_;
   uint32_t lds_base_ = 0;     ///< Per-WG LDS base offset (set per dispatch).
@@ -1612,7 +1533,8 @@ private:
   uint64_t ready_cycle_ = 0;
   uint64_t nop_ready_cycle_ = 0;
   EndReason end_reason_ = EndReason::None;
-  WaitTarget wait_target_; ///< Current s_waitcnt thresholds.
+  WaitTarget wait_target_;                  ///< Current s_waitcnt thresholds.
+  mutable LdsSourceRead lds_source_read_{}; ///< Valid for one instruction when bytes is nonzero.
 
   friend class ::rocjitsu::config::Gfx10CheckpointResources;
   friend class ::rocjitsu::config::Gfx10CheckpointScheduler;
@@ -1624,6 +1546,7 @@ private:
   // storage. They intentionally bypass instruction read-observation because
   // completion writes produced memory results rather than instruction source
   // reads.
+  friend class MemoryPipeline;
   friend class GlobalMemPipeline;
   friend class LocalMemPipeline;
   friend class ScalarMemPipeline;

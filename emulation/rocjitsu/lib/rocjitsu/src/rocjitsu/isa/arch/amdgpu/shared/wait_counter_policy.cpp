@@ -3,6 +3,7 @@
 
 #include "rocjitsu/isa/arch/amdgpu/shared/wait_counter_policy.h"
 
+#include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_selectors.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/operand.h"
 
@@ -100,6 +101,20 @@ WaitCounterPolicy::counter_no_wait_value(rj_code_arch_t arch, WaitCounterKind co
   }
 }
 
+bool WaitCounterPolicy::is_gfx10_sopk_wait(const Instruction &inst, rj_code_arch_t arch) {
+  // Of the explicit GFX10 waits, only the SOPK forms have two source operands.
+  return (arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2) &&
+         inst.is_waitcnt() && inst.num_src_operands() == 2;
+}
+
+util::FailureOr<std::optional<WaitFields>>
+WaitCounterPolicy::executed_wait_fields(const Instruction &inst, rj_code_arch_t arch,
+                                        const WaitFields &executed_limits) {
+  if (is_gfx10_sopk_wait(inst, arch))
+    return executed_limits;
+  return explicit_wait_fields(inst, arch);
+}
+
 [[nodiscard]] util::FailureOr<std::optional<WaitFields>>
 WaitCounterPolicy::explicit_wait_fields(const Instruction &inst, rj_code_arch_t arch) {
   const auto model = waitcnt_model(arch);
@@ -158,17 +173,21 @@ WaitCounterPolicy::explicit_wait_fields(const Instruction &inst, rj_code_arch_t 
                            mnemonic == "s_waitcnt_expcnt" || mnemonic == "s_waitcnt_lgkmcnt";
     if (!sopk_wait)
       return std::nullopt;
-    const auto value = operand_value(1);
-    if (!value)
+    const auto selector = operand_value(0);
+    const auto imm = operand_value(1);
+    if (!selector || !imm)
       return std::nullopt;
+    if (!scalar_selector_is_null(arch, *selector))
+      return std::nullopt;
+    const uint32_t value = *imm;
     if (mnemonic == "s_waitcnt_vmcnt")
-      set_field(WaitCounterKind::Load, *value);
+      set_field(WaitCounterKind::Load, value);
     else if (mnemonic == "s_waitcnt_vscnt")
-      set_field(WaitCounterKind::Store, *value);
+      set_field(WaitCounterKind::Store, value);
     else if (mnemonic == "s_waitcnt_expcnt")
-      set_field(WaitCounterKind::Exp, *value);
+      set_field(WaitCounterKind::Exp, value);
     else
-      set_field(WaitCounterKind::Ds, *value);
+      set_field(WaitCounterKind::Ds, value);
     return fields;
   }
 

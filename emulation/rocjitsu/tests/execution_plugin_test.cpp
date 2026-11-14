@@ -8,6 +8,7 @@
 #include "halt_snapshot_plugin.h"
 #include "instruction_failure_test_util.h"
 #include "rocjitsu/isa/arch/amdgpu/async_mma_policy.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/lds_direct.h"
 #include "rocjitsu/kmd/linux/kfd_process.h"
 #include "rocjitsu/kmd/linux/legacy_gpu_vm.h"
 #include "rocjitsu/vm/amdgpu/async_scoreboard.h"
@@ -1863,6 +1864,40 @@ TEST(ExecutionPluginTest, HotHookPolicyComesFromContainedPlugins) {
 
   ASSERT_TRUE(group.add(std::make_unique<SerialHotHookPlugin>()));
   EXPECT_TRUE(group.requires_serial_hot_hooks());
+}
+
+TEST(ExecutionPluginTest, LdsDirectObserverCanInspectTheSameOperand) {
+  class Observer final : public ExecutionPlugin {
+  public:
+    Observer() : ExecutionPlugin("lds_read") {}
+    bool observes_lds_direct_reads() const override { return true; }
+    void onAmdgpuLdsDirectRead(const Wavefront &wave, uint32_t address, uint32_t bytes,
+                               uint32_t lane) override {
+      ++calls;
+      EXPECT_EQ(address, wave.lds_base() + 4);
+      EXPECT_EQ(bytes, 2u);
+      EXPECT_EQ(lane, 3u);
+      if (calls == 1) {
+        EXPECT_EQ(read_lds_direct_src0(wave, lane), 0x1234u);
+      }
+    }
+    unsigned calls = 0;
+  };
+
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(1, "rdna1", 32, 106, 32));
+  auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+  auto observer = std::make_unique<Observer>();
+  auto *probe = observer.get();
+  ASSERT_TRUE(group->add(std::move(observer)));
+  f.soc->set_plugin_group(group);
+  auto *wave = f.cu()->dispatch_wf(0, 0, 106, 16, 32);
+  ASSERT_NE(wave, nullptr);
+  wave->set_lds_size(8);
+  wave->set_m0((1u << 16) | 4);
+  wave->lds().write16(wave->lds_base() + 4, 0x1234);
+  EXPECT_EQ(read_lds_direct_src0(*wave, 3), 0x1234u);
+  EXPECT_EQ(probe->calls, 1u);
 }
 
 TEST(ExecutionPluginTest, SgprReadPolicyComesFromContainedPlugins) {
