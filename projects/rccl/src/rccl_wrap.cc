@@ -2658,7 +2658,10 @@ ncclResult_t rcclSelectReduceScatter(struct ncclComm* comm, const void* sendbuff
           return rcclSelectDone("RS", query, decision);
         }
       } else {
-        const size_t rsDdaLLMax = rcclDdaLLThresholdTab(archTable, ncclFuncReduceScatter, comm->nRanks);
+        // The LL tier over the IPC scratch is measured on gfx950 only, so a user LL threshold leaves gfx942 alone.
+        const size_t rsDdaLLMax = IsArchMatch(comm->archName, "gfx950")
+                                    ? rcclDdaLLThresholdTab(archTable, ncclFuncReduceScatter, comm->nRanks)
+                                    : 0;
         if (rsDdaLLMax > 0 && totalBytes <= rsDdaLLMax &&
             ncclReduceScatterDdaFabricLLEligible(comm, sendbuff, recvbuff, recvcount, datatype, op)) {
           decision->algo = RCCL_DDA_FABRIC_LL;
