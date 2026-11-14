@@ -624,6 +624,10 @@ class GinMPIDeviceTests : public MPITestBase {
     // Sync so neither rank launches before the other has finished setup.
     MPI_Barrier(MPI_COMM_WORLD);
 
+    // Drain a HIP error left by setup. An untyped DevComm can fail one backend
+    // and fall back; that leftover must not look like a launch failure.
+    (void)hipGetLastError();
+
     // Rank 0 puts the payload + bumps the signal; rank 1 waits on it.
     if (rank == 0) {
       putBasicProducerKernel<<<kGinKernelBlocks, kGinKernelThreads, 0, stream>>>(
@@ -635,9 +639,7 @@ class GinMPIDeviceTests : public MPITestBase {
       putBasicConsumerKernel<<<kGinKernelBlocks, kGinKernelThreads, 0, stream>>>(
           kSigIdx, /*expectedSignalValue=*/1, devComm);
     }
-    // A launch that fails (for example hipErrorInvalidImage when no code object
-    // matches the device) enqueues nothing, so the sync below would still pass and
-    // the failure would surface only as a byte mismatch on rank 1.
+    // A failed launch enqueues nothing, so the sync passes; catch it here, not as a byte mismatch on rank 1.
     ASSERT_MPI_EQ(hipSuccess, hipGetLastError());
     ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(stream));
 
