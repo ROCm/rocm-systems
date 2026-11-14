@@ -168,7 +168,15 @@ private:
   // Raw writes on independent CU workers only touch their own shard. Closing
   // a controlled range takes every shard in order so the overlap check and
   // publication are atomic with respect to all outstanding permits.
+  // A large CU pool should not share its ordinary write locks. Under TSan,
+  // leave space in the held-lock tracker for the caller's other locks.
+#if defined(__SANITIZE_THREAD__)
   static constexpr size_t kShards = 16;
+#elif defined(__has_feature)
+  static constexpr size_t kShards = __has_feature(thread_sanitizer) ? 16 : 64;
+#else
+  static constexpr size_t kShards = 64;
+#endif
   struct alignas(64) Shard {
     std::mutex mutex;
     std::vector<Entry> active;
