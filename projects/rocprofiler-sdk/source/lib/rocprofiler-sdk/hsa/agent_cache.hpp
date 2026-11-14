@@ -65,6 +65,7 @@ public:
     CONST_NONCONST_ACCESSOR(hsa_amd_memory_pool_t, cpu_pool, m_cpu_pool);
     CONST_NONCONST_ACCESSOR(hsa_amd_memory_pool_t, kernarg_pool, m_kernarg_pool);
     CONST_NONCONST_ACCESSOR(hsa_amd_memory_pool_t, gpu_pool, m_gpu_pool);
+    CONST_NONCONST_ACCESSOR(hsa_amd_memory_pool_t, signal_pool, m_signal_pool);
     CONST_NONCONST_ACCESSOR(hsa_agent_t, get_hsa_agent, m_hsa_agent);
     CONST_NONCONST_ACCESSOR(hsa_agent_t, near_cpu, m_nearest_cpu);
 
@@ -91,6 +92,8 @@ private:
     hsa_amd_memory_pool_t m_cpu_pool{.handle = 0};
     hsa_amd_memory_pool_t m_kernarg_pool{.handle = 0};
     hsa_amd_memory_pool_t m_gpu_pool{.handle = 0};
+    // device pool hsa_amd_signal_batch_create accepts, zero if none
+    hsa_amd_memory_pool_t m_signal_pool{.handle = 0};
 
     std::string_view     m_name          = {};
     mutable hsa_queue_t* m_profile_queue = {};
