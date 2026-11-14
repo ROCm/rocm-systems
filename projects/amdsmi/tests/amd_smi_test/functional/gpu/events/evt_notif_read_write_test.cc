@@ -202,8 +202,27 @@ void TestEvtNotifReadWrite::Run(void) {
   const bool trigger_reset = ResetRequested();
   const uint64_t window_start_ns = BootTimeNs();
 
-  // KFD gpu_id per device. Every device under test must report one: it is what the events'
-  // node field is checked against. kUnknownKfdId stands for a failure already reported here.
+  for (dv_ind = 0; dv_ind < num_monitor_devs(); ++dv_ind) {
+    DISPLAY_AMDSMI_API("amdsmi_init_gpu_event_notification", "gpu=" + std::to_string(dv_ind),
+                       VERB(STANDARD));
+    ret = amdsmi_init_gpu_event_notification(processor_handles_[dv_ind]);
+    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
+    if (ret == AMDSMI_STATUS_NOT_SUPPORTED) {
+      return;
+    }
+    ASSERT_EQ(ret, AMDSMI_STATUS_SUCCESS);
+    std::ostringstream mask_desc;
+    mask_desc << "gpu=" << dv_ind << ", mask=0x" << std::hex << std::uppercase << kAllEventsMask;
+    DISPLAY_AMDSMI_API("amdsmi_set_gpu_event_notification_mask", mask_desc.str(), VERB(STANDARD));
+    ret = amdsmi_set_gpu_event_notification_mask(processor_handles_[dv_ind], kAllEventsMask);
+    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
+    ASSERT_EQ(ret, AMDSMI_STATUS_SUCCESS);
+  }
+
+  // KFD gpu_id per device. Read only once event notification is known to be supported: a
+  // platform without it (no KFD, e.g. WSL) has returned above and has no gpu_id to report.
+  // Every device under test must report one: it is what the events' node field is checked
+  // against. kUnknownKfdId stands for a failure already reported here.
   std::map<amdsmi_processor_handle, uint64_t> kfd_ids;
   for (dv_ind = 0; dv_ind < num_monitor_devs(); ++dv_ind) {
     amdsmi_kfd_info_t kfd_info = {};
@@ -222,23 +241,6 @@ void TestEvtNotifReadWrite::Run(void) {
     EXPECT_NE(kfd_info.kfd_id, UINT64_MAX) << "gpu " << dv_ind << ": kfd_id is not supported";
     const bool known = ret == AMDSMI_STATUS_SUCCESS && kfd_info.kfd_id != UINT64_MAX;
     kfd_ids[processor_handles_[dv_ind]] = known ? kfd_info.kfd_id : kUnknownKfdId;
-  }
-
-  for (dv_ind = 0; dv_ind < num_monitor_devs(); ++dv_ind) {
-    DISPLAY_AMDSMI_API("amdsmi_init_gpu_event_notification", "gpu=" + std::to_string(dv_ind),
-                       VERB(STANDARD));
-    ret = amdsmi_init_gpu_event_notification(processor_handles_[dv_ind]);
-    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
-    if (ret == AMDSMI_STATUS_NOT_SUPPORTED) {
-      return;
-    }
-    ASSERT_EQ(ret, AMDSMI_STATUS_SUCCESS);
-    std::ostringstream mask_desc;
-    mask_desc << "gpu=" << dv_ind << ", mask=0x" << std::hex << std::uppercase << kAllEventsMask;
-    DISPLAY_AMDSMI_API("amdsmi_set_gpu_event_notification_mask", mask_desc.str(), VERB(STANDARD));
-    ret = amdsmi_set_gpu_event_notification_mask(processor_handles_[dv_ind], kAllEventsMask);
-    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
-    ASSERT_EQ(ret, AMDSMI_STATUS_SUCCESS);
   }
 
   if (trigger_reset) {
