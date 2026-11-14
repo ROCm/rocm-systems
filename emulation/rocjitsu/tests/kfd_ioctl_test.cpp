@@ -112,6 +112,23 @@ extern char **environ;
 
 namespace rocjitsu::amdgpu {
 
+class KfdInterruptTestAccess {
+public:
+  // Install before queue creation and retain the returned owner until teardown.
+  // Forward the driver's actual packet route, including its GPU mailbox rule,
+  // while isolating the independent synthetic idle channel.
+  [[nodiscard]] static InterruptSubscription isolate_cp_packet_interrupts(SimulatedKfd &driver,
+                                                                          uint32_t gpu_id) {
+    auto &subscription = driver.find_gpu(gpu_id)->cp_interrupt_subscription;
+    auto owner = std::move(subscription);
+    subscription =
+        InterruptSubscription([sink = owner.sink()](uint32_t process_id, uint32_t event_id) {
+          sink.deliver(process_id, event_id);
+        });
+    return owner;
+  }
+};
+
 class KfdPreparedProviderTestAccess {
 public:
   static auto ordinary_resolver(SimulatedKfd &driver) { return driver.cache_writeback_resolver(); }
@@ -2457,21 +2474,14 @@ TEST_P(KfdNativePm4Test, ReleaseInterruptUsesContextAndMarkedMailboxes) {
   const uint32_t process_id = driver_->local_process_id();
   const auto process = driver_->find_process(process_id);
   ASSERT_NE(process, nullptr);
-  // Keep packet delivery in the real EventState while isolating the synthetic
-  // startup-idle policy. A context-zero packet still reaches signal_interrupt;
-  // the observer's empty idle channel cannot satisfy these packet assertions.
-  driver_->set_interrupt_callback_for_testing([process_id, weak_process = std::weak_ptr(process)](
-                                                  uint32_t delivered_process, uint32_t event_id) {
-    EXPECT_EQ(delivered_process, process_id);
-    const auto owner = weak_process.lock();
-    ASSERT_NE(owner, nullptr);
-    owner->event_state_.signal_interrupt(event_id);
-  });
+  const auto packet_route = rocjitsu::amdgpu::KfdInterruptTestAccess::isolate_cp_packet_interrupts(
+      *driver_, GetParam().gpu_id);
+  ASSERT_TRUE(packet_route);
   process->map_pages(reinterpret_cast<uint64_t>(&pointers), &pointers, sizeof(pointers));
   uint64_t *mailboxes = nullptr;
   for (uint32_t interrupt : {0u, 1u, 2u, 3u, 4u})
     for (uint32_t context : {0u, 1u, UINT32_MAX})
-      for (bool marked : {false, true}) {
+      for (uint32_t marked : {0u, 1u, 2u}) {
         SCOPED_TRACE(::testing::Message() << interrupt << ':' << context << ':' << marked);
         std::array<kfd_ioctl_create_event_args, 2> events{};
         for (auto &event : events) {
@@ -2487,7 +2497,7 @@ TEST_P(KfdNativePm4Test, ReleaseInterruptUsesContextAndMarkedMailboxes) {
           mailboxes = static_cast<uint64_t *>(page);
         }
         pointers = {};
-        const size_t mailbox_index = context == 1 ? 0 : 1;
+        const size_t mailbox_index = marked == 2 ? 1 : 0;
         const uint64_t mailbox =
             reinterpret_cast<uint64_t>(&mailboxes[events[mailbox_index].event_slot_index]);
         const uint64_t gate = reinterpret_cast<uint64_t>(&pointers.wait_word);
@@ -2495,7 +2505,7 @@ TEST_P(KfdNativePm4Test, ReleaseInterruptUsesContextAndMarkedMailboxes) {
             0xc0064900u, 0u, (marked ? 2u << 29 : 0u) | (interrupt << 24), uint32_t(mailbox),
             uint32_t(mailbox >> 32), events[mailbox_index].event_id, 0u,
             context == 1 ? events[0].event_id : context,
-            // Keep a successor blocked so synthetic idle cannot satisfy either event.
+            // Observe interrupt delivery while the queue still has pending work.
             0xc0053c00u, (1u << 4) | 3u, uint32_t(gate), uint32_t(gate >> 32), 1u, UINT32_MAX, 4u};
         std::copy(packets.begin(), packets.end(), ring.begin());
         kfd_ioctl_create_queue_args queue{};
@@ -2525,7 +2535,7 @@ TEST_P(KfdNativePm4Test, ReleaseInterruptUsesContextAndMarkedMailboxes) {
           kfd_ioctl_wait_events_args wait{};
           wait.events_ptr = reinterpret_cast<uint64_t>(&event);
           wait.num_events = 1;
-          const bool expected = enabled && (context == 1 ? index == 0 : marked && index == 1);
+          const bool expected = enabled && marked != 0 && index == marked - 1;
           ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_WAIT_EVENTS, &wait), 0);
           EXPECT_EQ(wait.wait_result,
                     expected ? KFD_IOC_WAIT_RESULT_COMPLETE : KFD_IOC_WAIT_RESULT_TIMEOUT);
@@ -17558,6 +17568,174 @@ class KfdIoctlCdna3Test : public KfdIoctlTest {
 protected:
   void SetUp() override { SetUpWithConfig(CDNA3_CONFIG_PATH); }
 };
+
+TEST_F(KfdIoctlCdna5Test, SdmaInterruptRequiresMarkedMailbox) {
+  alignas(4096) std::array<uint32_t, 1024> ring{};
+  alignas(64) std::array<uint64_t, 2> cursors{};
+  const uint32_t process_id = driver_->local_process_id();
+  std::array<kfd_ioctl_create_event_args, 2> events{};
+  for (auto &event : events) {
+    event.event_type = KFD_IOC_EVENT_SIGNAL;
+    event.auto_reset = 1;
+    ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_CREATE_EVENT, &event), 0);
+  }
+  void *page = driver_->mmap(nullptr, 4096, PROT_READ | PROT_WRITE, MAP_SHARED,
+                             static_cast<off_t>(events[0].event_page_offset));
+  ASSERT_NE(page, MAP_FAILED);
+  auto *mailboxes = static_cast<uint64_t *>(page);
+  kfd_ioctl_create_queue_args queue{};
+  queue.gpu_id = kCdna5GpuId;
+  queue.queue_type = KFD_IOC_QUEUE_TYPE_SDMA;
+  queue.ring_base_address = reinterpret_cast<uint64_t>(ring.data());
+  queue.ring_size = sizeof(ring);
+  queue.read_pointer_address = reinterpret_cast<uint64_t>(&cursors[0]);
+  queue.write_pointer_address = reinterpret_cast<uint64_t>(&cursors[1]);
+  queue.queue_percentage = 100;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_CREATE_QUEUE, &queue), 0);
+  void *doorbell = driver_->mmap(nullptr, 4096, PROT_READ | PROT_WRITE, MAP_SHARED,
+                                 static_cast<off_t>(queue.doorbell_offset));
+  ASSERT_NE(doorbell, MAP_FAILED);
+
+  size_t count = 0;
+  for (uint32_t context : {0u, events[0].event_id, uint32_t{KFD_SIGNAL_EVENT_LIMIT}})
+    for (uint32_t marked : {0u, 1u, 2u}) {
+      SCOPED_TRACE(::testing::Message() << context << ':' << marked);
+      for (size_t index = 0; index < events.size(); ++index)
+        std::atomic_ref<uint64_t>(mailboxes[events[index].event_slot_index])
+            .store(marked == index + 1 ? events[index].event_id : UINT64_MAX,
+                   std::memory_order_release);
+      ring[count++] = 6; // SDMA_OP_TRAP; GC 12.1 still requires its mailbox.
+      ring[count++] = context;
+      const uint64_t bytes = count * sizeof(uint32_t);
+      std::atomic_ref<uint64_t>(cursors[1]).store(bytes, std::memory_order_release);
+      std::atomic_ref<uint64_t>(*static_cast<uint64_t *>(doorbell))
+          .store(bytes, std::memory_order_release);
+      ASSERT_TRUE(
+          soc_->sdma_queue_scheduler().synchronize_host_queue_for_test(process_id, queue.queue_id));
+      EXPECT_EQ(std::atomic_ref<uint64_t>(cursors[0]).load(std::memory_order_acquire), bytes);
+      for (size_t index = 0; index < events.size(); ++index) {
+        kfd_event_data event{};
+        event.event_id = events[index].event_id;
+        kfd_ioctl_wait_events_args wait{};
+        wait.events_ptr = reinterpret_cast<uint64_t>(&event);
+        wait.num_events = 1;
+        ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_WAIT_EVENTS, &wait), 0);
+        EXPECT_EQ(wait.wait_result,
+                  marked == index + 1 ? KFD_IOC_WAIT_RESULT_COMPLETE : KFD_IOC_WAIT_RESULT_TIMEOUT);
+      }
+    }
+  kfd_ioctl_destroy_queue_args destroy{};
+  destroy.queue_id = queue.queue_id;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DESTROY_QUEUE, &destroy), 0);
+  for (const auto &event : events) {
+    kfd_ioctl_destroy_event_args destroy_event{};
+    destroy_event.event_id = event.event_id;
+    EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DESTROY_EVENT, &destroy_event), 0);
+  }
+  EXPECT_EQ(driver_->munmap(process_id, doorbell, 4096), 0);
+  EXPECT_EQ(driver_->munmap(process_id, page, 4096), 0);
+}
+
+TEST_F(KfdIoctlCdna5Test, Pm4InterruptSignalsAnUnmarkedNamedEvent) {
+  struct alignas(4096) Storage {
+    // ROCr queue descriptor, including the producer and retirement indices.
+    amd_queue_v2_t descriptor{};
+    // One vendor packet carries the PM4 indirect buffer through the AQL queue.
+    alignas(64) std::array<hsa_kernel_dispatch_packet_t, 64> ring{};
+    // First-XCD command stream; the other replicas skip its effects.
+    std::array<uint32_t, 64> commands{};
+    // Unsatisfied successor predicate that keeps the IB active.
+    uint32_t gate = 0;
+    // WRITE_DATA confirms that the preceding interrupt has been delivered.
+    uint32_t stage = 0;
+  } storage;
+  auto &descriptor = storage.descriptor;
+  auto &ring = storage.ring;
+  for (auto &packet : ring)
+    packet.header = HSA_PACKET_TYPE_INVALID;
+  descriptor.hsa_queue.base_address = ring.data();
+  descriptor.hsa_queue.size = ring.size();
+  descriptor.hsa_queue.type = HSA_QUEUE_TYPE_MULTI;
+  descriptor.hsa_queue.features = HSA_QUEUE_FEATURE_KERNEL_DISPATCH;
+  const uint32_t process_id = driver_->local_process_id();
+  const auto process = driver_->find_process(process_id);
+  ASSERT_NE(process, nullptr);
+  const auto packet_route =
+      rocjitsu::amdgpu::KfdInterruptTestAccess::isolate_cp_packet_interrupts(*driver_, kCdna5GpuId);
+  ASSERT_TRUE(packet_route);
+  process->map_pages(reinterpret_cast<uint64_t>(&storage), &storage, sizeof(storage));
+  const uint64_t gate = reinterpret_cast<uint64_t>(&storage.gate);
+  const uint64_t stage = reinterpret_cast<uint64_t>(&storage.stage);
+  std::array<kfd_ioctl_create_event_args, 2> events{};
+  for (auto &event : events) {
+    event.event_type = KFD_IOC_EVENT_SIGNAL;
+    event.auto_reset = 1;
+    ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_CREATE_EVENT, &event), 0);
+  }
+  void *page = driver_->mmap(nullptr, 4096, PROT_READ | PROT_WRITE, MAP_SHARED,
+                             static_cast<off_t>(events[0].event_page_offset));
+  ASSERT_NE(page, MAP_FAILED);
+  auto *mailboxes = static_cast<uint64_t *>(page);
+  std::atomic_ref<uint64_t>(mailboxes[events[1].event_slot_index])
+      .store(events[1].event_id, std::memory_order_release);
+  const std::array commands{0xc0002300u, (1u << 24) | 20u,
+                            // Interrupt-only RELEASE_MEM names A without writing either mailbox.
+                            0xc0064900u, 0u, 1u << 24, 0u, 0u, 0u, 0u, events[0].event_id,
+                            0xc0033700u, 0x100u, uint32_t(stage), uint32_t(stage >> 32), 1u,
+                            0xc0053c00u, 0x13u, uint32_t(gate), uint32_t(gate >> 32), 1u,
+                            UINT32_MAX, 4u};
+  std::copy(commands.begin(), commands.end(), storage.commands.begin());
+  ring[0] = rocjitsu::test::make_pm4_ib_packet(reinterpret_cast<uint64_t>(storage.commands.data()),
+                                               commands.size());
+  kfd_ioctl_create_queue_args queue{};
+  queue.gpu_id = kCdna5GpuId;
+  queue.queue_type = KFD_IOC_QUEUE_TYPE_COMPUTE_AQL;
+  queue.ring_base_address = reinterpret_cast<uint64_t>(ring.data());
+  queue.ring_size = sizeof(ring);
+  queue.read_pointer_address = reinterpret_cast<uint64_t>(&descriptor.read_dispatch_id);
+  queue.write_pointer_address = reinterpret_cast<uint64_t>(&descriptor.write_dispatch_id);
+  queue.queue_percentage = 100;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_CREATE_QUEUE, &queue), 0);
+  void *doorbell = driver_->mmap(nullptr, 4096, PROT_READ | PROT_WRITE, MAP_SHARED,
+                                 static_cast<off_t>(queue.doorbell_offset));
+  ASSERT_NE(doorbell, MAP_FAILED);
+  std::atomic_ref<uint64_t>(const_cast<uint64_t &>(descriptor.write_dispatch_id))
+      .store(1, std::memory_order_release);
+  std::atomic_ref<uint64_t>(*static_cast<uint64_t *>(doorbell)).store(0, std::memory_order_release);
+  auto *cp = soc_->xcd(0)->command_processor();
+  // PM4 byte copies do not provide ordered host accesses. The existing queue
+  // lock serializes this observation with packet processing.
+  bool ready = false;
+  while (!ready) {
+    cp->with_queue_lock_for_test([&] { ready = storage.stage == 1; });
+    if (!ready) {
+      (void)engine_->step();
+      std::this_thread::yield();
+    }
+  }
+  for (size_t index = 0; index < events.size(); ++index) {
+    kfd_event_data event{};
+    event.event_id = events[index].event_id;
+    kfd_ioctl_wait_events_args wait{};
+    wait.events_ptr = reinterpret_cast<uint64_t>(&event);
+    wait.num_events = 1;
+    ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_WAIT_EVENTS, &wait), 0);
+    EXPECT_EQ(wait.wait_result,
+              index == 0 ? KFD_IOC_WAIT_RESULT_COMPLETE : KFD_IOC_WAIT_RESULT_TIMEOUT);
+  }
+  EXPECT_EQ(mailboxes[events[0].event_slot_index], UINT64_MAX);
+  EXPECT_EQ(mailboxes[events[1].event_slot_index], events[1].event_id);
+  kfd_ioctl_destroy_queue_args destroy{};
+  destroy.queue_id = queue.queue_id;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DESTROY_QUEUE, &destroy), 0);
+  for (const auto &event : events) {
+    kfd_ioctl_destroy_event_args destroy_event{};
+    destroy_event.event_id = event.event_id;
+    EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DESTROY_EVENT, &destroy_event), 0);
+  }
+  EXPECT_EQ(driver_->munmap(process_id, doorbell, 4096), 0);
+  EXPECT_EQ(driver_->munmap(process_id, page, 4096), 0);
+}
 
 TEST_F(KfdIoctlCdna5Test, SdmaCreateNormalizesSmallRingsAndRejectsNonPowersOfTwo) {
   alignas(4096) std::array<std::byte, 4096> ring{};

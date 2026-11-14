@@ -859,6 +859,7 @@ set(_rj_idle_wakeup_cases
     AsyncCausalityTest.QuiescentPublicationsToEveryPartitionMakeProgress
 )
 set(_rj_pm4_interrupt_cases
+    KfdIoctlCdna5Test.Pm4InterruptSignalsAnUnmarkedNamedEvent
     KfdTargets/KfdNativePm4Test.ReleaseInterruptUsesContextAndMarkedMailboxes/gfx1100
     KfdTargets/KfdNativePm4Test.ReleaseInterruptUsesContextAndMarkedMailboxes/gfx1201
     KfdTargets/KfdNativePm4Test.ReleaseInterruptUsesContextAndMarkedMailboxes/gfx1151

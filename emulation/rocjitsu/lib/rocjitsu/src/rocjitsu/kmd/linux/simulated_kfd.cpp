@@ -2723,8 +2723,10 @@ SimulatedKfd::~SimulatedKfd() {
   }
   // CPs may outlive this frontend. Revoke callback admission and drain any
   // callback already executing before touching the state captured by them.
-  for (GpuDevice &gpu : gpus_)
+  for (GpuDevice &gpu : gpus_) {
     gpu.interrupt_subscription.reset();
+    gpu.cp_interrupt_subscription.reset();
+  }
 
   debug_session_reaper_.request_stop();
   debug_session_reaper_.join();
@@ -3068,35 +3070,44 @@ void SimulatedKfd::init_command_processors_locked() {
     // SH_MEM_BASES bank through Wavefront::set_process_id.
     const kfd_process_device_apertures ap = gpu_apertures(static_cast<uint32_t>(i));
     g.soc->set_apertures(ap.lds_base, ap.lds_limit, ap.scratch_base, ap.scratch_limit);
-    g.interrupt_subscription = amdgpu::InterruptSubscription(
-        [this](uint32_t process_id, uint32_t event_id) {
-          if (const auto override = interrupt_override_for_testing_.sink()) {
-            override.deliver(process_id, event_id);
-            return;
-          }
-          std::lock_guard<std::mutex> ilk(interrupt_mutex_);
-          const std::unordered_map<uint32_t, EventState *>::iterator event =
-              event_dispatch_.find(process_id);
-          if (event != event_dispatch_.end()) {
-            util::Logger::cp("INTERRUPT_ROUTE: pid=", process_id, " event_id=", event_id,
-                             " found=true");
-            event->second->signal_interrupt(event_id);
-          } else {
-            util::Logger::cp("INTERRUPT_ROUTE: pid=", process_id, " event_id=", event_id,
-                             " found=false");
-          }
-        },
-        {},
-        [this](uint32_t process_id) {
-          if (const auto override = interrupt_override_for_testing_.sink()) {
-            override.notify_idle(process_id);
-            return;
-          }
-          std::lock_guard<std::mutex> lock(interrupt_mutex_);
-          const auto event = event_dispatch_.find(process_id);
-          if (event != event_dispatch_.end())
-            event->second->notify_idle();
-        });
+    const auto subscribe_interrupts = [this](bool signal_mailbox_updated) {
+      return amdgpu::InterruptSubscription(
+          [this, signal_mailbox_updated](uint32_t process_id, uint32_t event_id) {
+            if (const auto override = interrupt_override_for_testing_.sink()) {
+              override.deliver(process_id, event_id);
+              return;
+            }
+            std::lock_guard<std::mutex> ilk(interrupt_mutex_);
+            const std::unordered_map<uint32_t, EventState *>::iterator event =
+                event_dispatch_.find(process_id);
+            if (event != event_dispatch_.end()) {
+              util::Logger::cp("INTERRUPT_ROUTE: pid=", process_id, " event_id=", event_id,
+                               " found=true");
+              event->second->signal_interrupt(event_id, signal_mailbox_updated);
+            } else {
+              util::Logger::cp("INTERRUPT_ROUTE: pid=", process_id, " event_id=", event_id,
+                               " found=false");
+            }
+          },
+          {},
+          [this](uint32_t process_id) {
+            if (const auto override = interrupt_override_for_testing_.sink()) {
+              override.notify_idle(process_id);
+              return;
+            }
+            std::lock_guard<std::mutex> lock(interrupt_mutex_);
+            const auto event = event_dispatch_.find(process_id);
+            if (event != event_dispatch_.end())
+              event->second->notify_idle();
+          });
+    };
+    // SDMA and SQ always require marked mailboxes. Only GC 12.1 CP completions
+    // can signal directly by ID, so compute queues retain a distinct route.
+    g.interrupt_subscription = subscribe_interrupts(true);
+    g.cp_interrupt_subscription =
+        subscribe_interrupts(i >= gpu_infos_.size() || kmd::gc_ip_version_for_gfx_target_version(
+                                                           gpu_infos_[i].gfx_target_version) !=
+                                                           kmd::make_gc_ip_version(12, 1, 0));
     g.soc->for_each_cp([this, i](amdgpu::CommandProcessor *cp) {
       // Tests register synthetic queues directly with these CPs without the
       // KFD queue ABI. Only those queues use these backing hooks;
@@ -7582,7 +7593,8 @@ int SimulatedKfd::create_queue_ioctl(KfdProcess &proc, void *arg) {
     }
 
     queue_request.identity = {.address_space = gs.address_space,
-                              .interrupt_sink = gpu->interrupt_subscription.sink(),
+                              .interrupt_sink = is_sdma ? gpu->interrupt_subscription.sink()
+                                                        : gpu->cp_interrupt_subscription.sink(),
                               .process_id = proc.process_id(),
                               .queue_id = queue_id};
     queue_request.ring = {.base_address = args->ring_base_address,

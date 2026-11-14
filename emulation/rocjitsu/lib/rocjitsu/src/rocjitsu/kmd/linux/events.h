@@ -108,9 +108,10 @@ public:
   [[nodiscard]] bool overlaps_page(const void *ptr, size_t size) const;
 
   /// @brief Deliver a packet interrupt, acknowledging its GPU-written mailbox.
-  /// @details A valid nonzero ID targets one signal event. An absent or invalid
-  /// ID scans marked slots; unmarked slots never activate an event.
-  void signal_interrupt(uint32_t event_id);
+  /// @param signal_mailbox_updated Whether this interrupt requires a
+  /// marked mailbox. GC 12.1 CP can signal directly by ID; other handlers require
+  /// a marked named slot. An absent, invalid, or unmarked ID scans marked slots.
+  void signal_interrupt(uint32_t event_id, bool signal_mailbox_updated);
 
   /// @brief Preserve the simulator's synthetic wake of signal waiters on queue idle.
   /// @details This notification is not a hardware interrupt with event context zero.

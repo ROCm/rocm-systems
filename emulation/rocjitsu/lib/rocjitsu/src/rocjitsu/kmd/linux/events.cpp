@@ -95,19 +95,23 @@ void EventState::signal_event(GpuEvent &event) {
   activate_waiters(event);
 }
 
-void EventState::signal_interrupt(uint32_t event_id) {
+void EventState::signal_interrupt(uint32_t event_id, bool signal_mailbox_updated) {
   std::lock_guard<std::mutex> lock(mutex_);
-  auto event = events_.find(event_id);
-  if (event != events_.end() && event->second.event_type == KFD_IOC_EVENT_SIGNAL) {
-    write_event_slot(page_, page_size_, event_id, kUnsignaledEventSlot);
-    signal_event(event->second);
-    return;
-  }
-  // Invalid or absent interrupt context identifies no event. As in KFD,
-  // recover the intended signals from GPU-written mailboxes, not event ages.
   if (!page_)
     return;
   auto *slots = static_cast<uint64_t *>(page_);
+  auto event = events_.find(event_id);
+  if (event != events_.end() && event->second.event_type == KFD_IOC_EVENT_SIGNAL &&
+      event_id < page_size_ / sizeof(uint64_t)) {
+    const uint64_t previous = std::atomic_ref<uint64_t>(slots[event_id])
+                                  .exchange(kUnsignaledEventSlot, std::memory_order_acq_rel);
+    if (!signal_mailbox_updated || previous != kUnsignaledEventSlot) {
+      signal_event(event->second);
+      return;
+    }
+  }
+  // An absent, invalid, or unmarked context can still accompany other marked
+  // mailboxes. KFD falls back to scanning those slots.
   for (auto &[id, pending] : events_) {
     if (pending.event_type != KFD_IOC_EVENT_SIGNAL || id >= page_size_ / sizeof(uint64_t))
       continue;
