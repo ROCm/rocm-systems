@@ -9,6 +9,12 @@ Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](htt
 - **`rdc_health_get()` returns `RDC_ST_GROUP_NOT_FOUND` for a GPU group that does not exist**.
   - It returned `RDC_ST_OK` with no health watches, so `rdci health -f` showed every watch as Off and exited successfully, and `rdci health -c` failed asking for watches to be enabled. Both commands now fail with a message that the group does not exist.
 
+- `rdc_job_start_stats()` returns `RDC_ST_MAX_LIMIT` for a group of more than `RDC_MAX_NUM_GPUS_PER_JOB` (16) GPUs, the most that `rdc_job_info_t` holds.
+
+- `rdc_job_get_stats()` fills `gpus[0]` to `gpus[num_gpus - 1]`, ordered by `gpu_id`, which names the GPU or GPU partition of each entry. It used to place each GPU at the index of its GPU ID. The summary averages each statistic over the GPUs that have samples for it.
+
+- `rdci stats -j` labels each GPU by its ID, such as `GPU 3`, or `GPU g0.1` for partition 1 of GPU 0, instead of by its position in the job. The JSON keys follow, such as `gpu_3` and `gpu_g0.1`. A statistic without samples prints as `N/A` in the text output and as `null` in JSON, instead of zeros and a minimum of 18446744073709551615. PCIe standard deviations print with two decimals, like the other statistics.
+
 ### Resolved Issues
 
 - `rdci health -s` on a GPU group that does not exist no longer leaves an unused field group in rdcd. Repeated failures filled the field group table, and commands that need a new field group, such as `rdci dmon`, then failed until rdcd was restarted.
@@ -32,6 +38,8 @@ Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](htt
   - If you signed requests that other people created, check the certificates in the `newcerts` directory of your CA for `CA:TRUE`. If you find one, create a new root certificate and reissue all certificates.
 
 - `rdci discovery` now reports an error instead of exiting successfully with an incomplete GPU list when `rdcd` cannot read a GPU's attributes. Failed `rdc_device_get_attributes()` calls now return zeroed attributes, and `rdcd` replies to failed requests no longer contain garbage values.
+
+- `rdc_job_get_stats()` and `rdci stats -j` report every GPU of a job. Only the GPU with the lowest ID was summarized, and the entries of the other GPUs were not filled in. Job statistics for a GPU partition, or for a GPU whose ID is above 15, no longer crash `rdcd`. A GPU without a total memory reading reports memory utilization as unavailable instead of failing the call, and memory utilization is no longer inflated on GPUs with 400 GiB of memory or more.
 
 - `rdcd` no longer crashes during `rdci diag`, and later diagnostic runs and profiler fields keep working. Repeated `rdci diag` runs also no longer use up GPU memory in `rdcd`.
   - After the first `rdci diag`, `rdcd` keeps the ROCm runtime loaded until it stops, as it already does after the first profiler field read, so changing the GPU partition mode needs `rdcd` stopped. `rdci diag` requests now run one at a time.
