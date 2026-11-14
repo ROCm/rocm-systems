@@ -9367,6 +9367,7 @@ int64_t EnabledCeReduceScatterParams(const char* env, int64_t deft) {
 
 // rcclUseCeReduceScatter requires ncclCeImplemented. Opt-in CE RS select tests
 // must flip the driver seam or every arm declines before CTA/staging checks run.
+
 void EnableCeReduceScatterForSelectTest() {
   g_loadParam = EnabledCeReduceScatterParams;
   g_ceImplemented = true;
@@ -9839,7 +9840,7 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_LateCeRegisteredPreemptsSymmetri
       });
 }
 
-// Late arm must reuse ceReduceScatterAllowed (incl. nNodes==1). On a multi-node
+// Late arm must reuse ceReduceScatterEligible (incl. nNodes==1). On a multi-node
 // CTA-ZERO comm where DDA/hier/Direct decline, CE must not be selected.
 TEST(WrapMicrotestIsolated, SelectReduceScatter_LateCeRegisteredDeclinedOnMultiNode) {
   RUN_ISOLATED_TEST(
@@ -9888,10 +9889,11 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_LateCeRegisteredRejectsFloat8) {
       });
 }
 
-// Both CE arms require ncclGroupDepth == 0.
-TEST(WrapMicrotestIsolated, SelectReduceScatter_InsideGroupExcludesCe) {
+// Eager CE_2SHOT requires ncclGroupDepth == 0; inside a group the call must
+// stay queued as CE_REGISTERED rather than falling through to the ring.
+TEST(WrapMicrotestIsolated, SelectReduceScatter_InsideGroupSelectsRegisteredNotEager) {
   RUN_ISOLATED_TEST(
-      "Wrap_SelectReduceScatter_InsideGroupExcludesCe",
+      "Wrap_SelectReduceScatter_InsideGroupSelectsRegisteredNotEager",
       []() {
         EnableCeReduceScatterForSelectTest();
         ncclComm* comm = MakeSelectComm();
@@ -9904,8 +9906,58 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_InsideGroupExcludesCe) {
         EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr, /*recvcount=*/8, ncclFloat32,
                                                        ncclSum, /*query=*/false, &decision));
         EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_2SHOT, decision.algo);
-        EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, decision.algo);
-        EXPECT_EQ(NCCL_ALGO_RING, decision.algo);
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, decision.algo);
+        ncclGroupDepth = 0;
+        DeleteCommWithArch(comm);
+      });
+}
+
+
+// Primus coalesces the GPT-OSS gradient bucket into 139,370,448 BF16 values
+// per rank. CE ReduceScatter has no message-size cap and pipelines through
+// staging. With CTA_POLICY_ZERO the late CE arm still preempts an otherwise-
+// eligible symk path and accepts BF16 Avg. Inside ncclGroupStart/End the call
+// stays queued as CE_REGISTERED rather than eager CE_2SHOT or symk.
+TEST(WrapMicrotestIsolated, SelectReduceScatter_PipelinesPrimusBfloat16AvgAboveCap) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectReduceScatter_PipelinesPrimusBfloat16AvgAboveCap",
+      []() {
+        EnableCeReduceScatterForSelectTest();
+        ScopedHook symRequested(g_isSymmetricKernelRequested, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
+                                                                  size_t, const void*, void*, bool) { return true; });
+        alignas(16) static uint8_t staging;
+        ncclComm* comm = MakeSelectComm();
+        ArmSpanningLsaTeam(comm);
+        comm->nRanks = 8;
+        ArmSpanningLsaTeam(comm);
+        comm->nNodes = 1;
+        comm->symmetricSupport = true;
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+        comm->ceColl.graphModeSeen = false;
+        comm->ceColl.ceARTmpBuf = nullptr;
+        rcclCollDecision decision{};
+        constexpr size_t kPrimusRecvCount = 139370448;
+        EXPECT_EQ(ncclSuccess,
+                  rcclSelectReduceScatter(comm, nullptr, nullptr, kPrimusRecvCount, ncclBfloat16, ncclAvg,
+                                          /*query=*/false, &decision));
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, decision.algo);
+
+        comm->ceColl.ceARTmpBuf = &staging;
+        EXPECT_EQ(ncclSuccess,
+                  rcclSelectReduceScatter(comm, nullptr, nullptr, kPrimusRecvCount, ncclBfloat16, ncclAvg,
+                                          /*query=*/false, &decision));
+        // Early arms defer to symk; the late CE arm still wins with staging ready.
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, decision.algo);
+
+        // Primus issues the same collective between ncclGroupStart/End. Eager
+        // 2-shot is closed; queued CE_REGISTERED must win over symk.
+        ncclGroupDepth = 1;
+        EXPECT_EQ(ncclSuccess,
+                  rcclSelectReduceScatter(comm, nullptr, nullptr, kPrimusRecvCount, ncclBfloat16, ncclAvg,
+                                          /*query=*/false, &decision));
+        EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_2SHOT, decision.algo);
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, decision.algo);
+        ncclGroupDepth = 0;
         DeleteCommWithArch(comm);
       });
 }
@@ -10132,7 +10184,7 @@ TEST(WrapMicrotestIsolated, HierarchicalAlgoInfo_ReduceScatterIntraNeverUsesDire
 // RCCL_CE_REDUCESCATTER at 0 keeps every CE arm out even with every CE seam forced true, the exact
 // combination that WOULD give CE_REGISTERED in rcclSelectAllReduce/AllGather. The param does it,
 // not an absent call: rcclUseCeReduceScatter returns on its first guard, so
-// ceReduceScatterAllowed is false for both the early and late CE arms.
+// ceReduceScatterEligible is false for both the early and late CE arms.
 TEST(WrapMicrotestIsolated, SelectReduceScatter_DoesNotChooseCeWhenParamsDefaultOff) {
   RUN_ISOLATED_TEST(
       "Wrap_SelectReduceScatter_DoesNotChooseCeWhenParamsDefaultOff",
@@ -10189,11 +10241,72 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_CeOptInSelectsRegisteredThenEage
       });
 }
 
+// Primus' default gradient collective is BF16 Avg. CE implements that by
+// accumulating the BF16 sum and applying the reciprocal rank count once.
+TEST(WrapMicrotestIsolated, SelectReduceScatter_Bfloat16AvgSelectsCeRegistered) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectReduceScatter_Bfloat16AvgSelectsCeRegistered",
+      []() {
+        EnableCeReduceScatterForSelectTest();
+        ScopedHook ceAvailable(
+            g_ceAvailable,
+            [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t,
+               struct ncclDevrWindow*, struct ncclDevrWindow*) { return true; });
+        ncclComm* comm = MakeSelectComm();
+        comm->nRanks = 8;
+        ArmSpanningLsaTeam(comm);
+        comm->nNodes = 1;
+        comm->symmetricSupport = true;
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr, /*recvcount=*/8, ncclBfloat16,
+                                                        ncclAvg, /*query=*/false, &decision));
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, decision.algo);
+        DeleteCommWithArch(comm);
+      });
+}
 // symEligible's own query-mode reporting block (`if (query) { ... }` inside
 // `if (symEligible)`) had never been entered for ReduceScatter -- only
 // AllReduce/AllGather had a symmetric-reported query test. rcclSymkQuery
 // is scripted to return LL with a sentinel channel count so all three fields
 // written by the reporting block are pinned.
+
+// Host decisions that pick the finite per-chunk reducer and its staging-slot
+// pool. Without these, GroupedPipelinedBfloat16Average passes identically if
+// RCCL_CE_REDUCE_PER_CHUNK is ignored.
+TEST(WrapMicrotest, CeReduceScatterPerChunkHostDecisions) {
+  EXPECT_FALSE(ncclCeReduceScatterPerChunkReduce(/*totalSteps=*/1, /*perChunkParam=*/1));
+  EXPECT_FALSE(ncclCeReduceScatterPerChunkReduce(/*totalSteps=*/4, /*perChunkParam=*/0));
+  EXPECT_TRUE(ncclCeReduceScatterPerChunkReduce(/*totalSteps=*/4, /*perChunkParam=*/1));
+
+  EXPECT_EQ((size_t)NCCL_CE_NUM_SLOTS,
+            ncclCeReduceScatterNumStagingSlots(/*ceReduceScatterEnabled=*/false, /*perChunkParam=*/1,
+                                              /*perChunkSlotsParam=*/NCCL_CE_REDUCE_PER_CHUNK_SLOTS));
+  EXPECT_EQ((size_t)NCCL_CE_NUM_SLOTS,
+            ncclCeReduceScatterNumStagingSlots(/*ceReduceScatterEnabled=*/true, /*perChunkParam=*/0,
+                                              /*perChunkSlotsParam=*/NCCL_CE_REDUCE_PER_CHUNK_SLOTS));
+  EXPECT_EQ((size_t)NCCL_CE_REDUCE_PER_CHUNK_SLOTS,
+            ncclCeReduceScatterNumStagingSlots(/*ceReduceScatterEnabled=*/true, /*perChunkParam=*/1,
+                                              /*perChunkSlotsParam=*/NCCL_CE_REDUCE_PER_CHUNK_SLOTS));
+  EXPECT_EQ((size_t)8,
+            ncclCeReduceScatterNumStagingSlots(/*ceReduceScatterEnabled=*/true, /*perChunkParam=*/1,
+                                              /*perChunkSlotsParam=*/8));
+  EXPECT_EQ((size_t)NCCL_CE_NUM_SLOTS, ncclCeResolvePerChunkSlots(/*requested=*/1));
+  EXPECT_EQ((size_t)NCCL_CE_REDUCE_PER_CHUNK_SLOTS, ncclCeResolvePerChunkSlots(/*requested=*/0));
+  EXPECT_EQ((size_t)NCCL_CE_REDUCE_PER_CHUNK_SLOTS, ncclCeResolvePerChunkSlots(/*requested=*/-1));
+}
+
+// Pins the runtime block-cap clamp at both ends. CI uses 64 (strictly inside
+// [1, NCCL_CE_REDUCE_MAX_BLOCKS]) so a body that ignored the param and returned
+// the ceiling would still fail that config plus this test.
+TEST(WrapMicrotest, CeClampReduceMaxBlocks) {
+  EXPECT_EQ(1, ncclCeClampReduceMaxBlocks(0));
+  EXPECT_EQ(1, ncclCeClampReduceMaxBlocks(-1));
+  EXPECT_EQ(64, ncclCeClampReduceMaxBlocks(64));
+  EXPECT_EQ(NCCL_CE_REDUCE_MAX_BLOCKS, ncclCeClampReduceMaxBlocks(NCCL_CE_REDUCE_MAX_BLOCKS));
+  EXPECT_EQ(NCCL_CE_REDUCE_MAX_BLOCKS, ncclCeClampReduceMaxBlocks(NCCL_CE_REDUCE_MAX_BLOCKS + 1));
+}
+
 TEST(WrapMicrotestIsolated, SelectReduceScatter_SymmetricReportedWhenQueryAndEligible) {
   RUN_ISOLATED_TEST(
       "Wrap_SelectReduceScatter_SymmetricReportedWhenQueryAndEligible",
