@@ -26,6 +26,8 @@
 #include "ShaderStore.hpp"
 #include "Assemble.hpp"
 
+#include <llvm/Config/llvm-config.h>
+
 void KFDASMTest::SetUp() {}
 void KFDASMTest::TearDown() {}
 
@@ -75,6 +77,15 @@ TEST_F(KFDASMTest, AssembleShaders) {
 
     for (auto &t : TargetList) {
         Assembler asmblr(t);
+
+        /* One clear failure per target instead of one per shader */
+        if (asmblr.RunAssemble(ShaderList[0])) {
+            ADD_FAILURE() << "LLVM " << LLVM_VERSION_STRING << " cannot assemble for "
+                          << asmblr.GetTargetAsic() << ". Build kfdtest against an LLVM "
+                          << "that supports it, or exclude this test with "
+                          << "--gtest_filter=-KFDASMTest.*";
+            continue;
+        }
 
         LOG() << "Running ASM test for target " << asmblr.GetTargetAsic() << std::endl;
 
