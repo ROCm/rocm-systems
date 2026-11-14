@@ -10,6 +10,7 @@
 #ifndef RCCL_TEST_HOST_FAKES_SYM_KERNELS_INDEX_FAKES_H_
 #define RCCL_TEST_HOST_FAKES_SYM_KERNELS_INDEX_FAKES_H_
 
+#include <cstdint>
 #include <functional>
 
 #include "nccl.h"
@@ -20,14 +21,14 @@ struct ncclTaskColl;
 struct ncclSymkDevWork;
 
 // sym_kernels.cc's ncclSymkLLKernelMask: default has no bits set (the LL-kernel-init-once check never fires).
-extern std::function<int()> g_symkLLKernelMask;
+extern std::function<uint64_t()> g_symkLLKernelMask;  // ncclSymkKernelMask (NCCL 2.32.6: uint64_t)
 
 // sym_kernels.cc's ncclSymkDynamicSmemKernelMask: default has no bits set (kernelDynSmem stays 0).
-extern std::function<int()> g_symkDynamicSmemKernelMask;
+extern std::function<uint64_t()> g_symkDynamicSmemKernelMask;  // ncclSymkKernelMask (NCCL 2.32.6: uint64_t)
 
 // sym_kernels.cc's ncclSymkTmaKernelMask: default has no bits set, so the scheduler's tile-staging
 // LDS check never fires.
-extern std::function<int()> g_symkTmaKernelMask;
+extern std::function<uint64_t()> g_symkTmaKernelMask;  // ncclSymkKernelMask (NCCL 2.32.6: uint64_t)
 
 // sym_kernels.cc's ncclSymkGetKernelIndex: default always selects index 0.
 extern std::function<int(ncclSymkKernelId, int, ncclDataType_t)> g_symkGetKernelIndex;
@@ -38,6 +39,12 @@ extern std::function<const char*(int)> g_symkKernelIdToString;
 // sym_kernels.cc's ncclSymkMakeDevWork: trivial success; does not populate *outDevWork.
 extern std::function<ncclResult_t(struct ncclComm*, struct ncclTaskColl*, struct ncclSymkDevWork*)>
     g_symkMakeDevWork;
+
+// NCCL 2.32.6 Genk seams: mask 0 and index -1 (AMD builds no Genk kernels); init start/end succeed.
+extern std::function<uint64_t()> g_genkKernelMask;
+extern std::function<int(ncclSymkKernelId, int, ncclDataType_t)> g_genkGetKernelIndex;
+extern std::function<ncclResult_t(struct ncclComm*, bool*)> g_genkInitStart;
+extern std::function<ncclResult_t(struct ncclComm*)> g_genkInitEnd;
 
 void ResetSymKernelsIndexFakes();
 

@@ -203,9 +203,9 @@ class CeCollDoneEventMicrotest : public CeCollMicrotest {
     comm_->planner.capturingGraph.graphId = ULLONG_MAX;  // not capturing
     comm_->doneEvent = doneEvent_;
     comm_->nRanks = 1;
-    comm_->devrState.lsaSize = 1;
-    comm_->devrState.lsaSelf = 0;
-    comm_->devrState.lsaRankList = lsaRankList_;
+    comm_->devrState.lsaTeamSize = 1;
+    comm_->devrState.lsaTeamSelf = 0;
+    comm_->devrState.lsaTeamRankList = lsaRankList_;
     syncWin_.userPtr = syncFlags_;
     comm_->ceColl.baseUCSymReadyPtr = reinterpret_cast<uint8_t*>(&syncFlags_[0]);
     comm_->ceColl.baseUCSymComplPtr = reinterpret_cast<uint8_t*>(&syncFlags_[1]);
@@ -629,7 +629,7 @@ class CeAlltoAllvSyncMicrotest : public ::testing::TestWithParam<LaunchPath> {
     g_hipEventRecord = [](hipEvent_t, hipStream_t) { return hipSuccess; };
     g_hipStreamWaitEvent = [](hipStream_t, hipEvent_t, unsigned int) { return hipSuccess; };
     g_devrGetLsaRankPtr = [](ncclComm* comm, ncclDevrWindow*, size_t offset, int lsaRank, void** outPtr) {
-      if (lsaRank < 0 || lsaRank >= comm->devrState.lsaSize) {
+      if (lsaRank < 0 || lsaRank >= comm->devrState.lsaTeamSize) {
         return ncclInvalidArgument;
       }
       *outPtr = reinterpret_cast<void*>(kPeerWindowBase + lsaRank * kPeerWindowStride + offset);
@@ -688,9 +688,9 @@ class CeAlltoAllvSyncMicrotest : public ::testing::TestWithParam<LaunchPath> {
       auto comm = std::make_unique<ncclComm>();
       comm->rank = rank;
       comm->nRanks = nRanks;
-      comm->devrState.lsaSize = nRanks;
-      comm->devrState.lsaSelf = rank;
-      comm->devrState.lsaRankList = lsaRankList.data();
+      comm->devrState.lsaTeamSize = nRanks;
+      comm->devrState.lsaTeamSelf = rank;
+      comm->devrState.lsaTeamRankList = lsaRankList.data();
       comm->symkState.hasLsaMultimem = false;
       comm->planner.capturingGraph.graphId = path == LaunchPath::kGraphCapture ? kCaptureGraphId : ULLONG_MAX;
       comm->ceColl.intraBatchSyncFreq = freq;

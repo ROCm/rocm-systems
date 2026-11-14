@@ -29,7 +29,9 @@ std::vector<char> BuildRecords(const std::vector<std::pair<rasDiagnosticsRankHea
 
 struct OwnedComm {
   OwnedComm(uint64_t commHash, uint64_t hostHash, uint64_t pidHash, int rank, bool peerInfoValid = true)
-      : comm(std::make_unique<ncclComm>()), peers(std::make_unique<ncclPeerInfo[]>(1)) {
+      // Entries 0..rank: the snapshot reads its comm identity from peerInfo[0] and, since NCCL 2.32.6, its node
+      // identity from peerInfo[comm->rank]. Every entry carries the same hashes.
+      : comm(std::make_unique<ncclComm>()), peers(std::make_unique<ncclPeerInfo[]>(rank + 1)) {
     comm->commHash = commHash;
     comm->peerInfo = peers.get();
     comm->peerInfoValid = peerInfoValid;
@@ -40,8 +42,10 @@ struct OwnedComm {
     comm->busId = 0x1000 + rank;
     comm->localRank = rank % 4;
     comm->localRanks = 4;
-    peers[0].hostHash = hostHash;
-    peers[0].pidHash = pidHash;
+    for (int r = 0; r <= rank; r++) {
+      peers[r].hostHash = hostHash;
+      peers[r].pidHash = pidHash;
+    }
   }
 
   std::unique_ptr<ncclComm> comm;

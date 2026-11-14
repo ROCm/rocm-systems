@@ -39,6 +39,7 @@
 // so they must resolve at link time. ncclPluginLibPaths, ncclClosePluginLib,
 // ncclGetNetPluginLib and ncclGetPluginLibName are owned by gin-plugin-init-test.cc
 // in the same binary, so they are deliberately not redefined here.
+ncclRma_t* getNcclRma_v17(void*) { return nullptr; }
 ncclRma_t* getNcclRma_v16(void*) { return nullptr; }
 ncclRma_t* getNcclRma_v15(void*) { return nullptr; }
 ncclRma_t* getNcclRma_v14(void*) { return nullptr; }

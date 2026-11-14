@@ -340,11 +340,12 @@ enum P2pCollChildExit {
 // Runs entirely inside a forked child process — first HIP/NCCL call is here.
 static int p2pCollRunRank(int rank, int nranks, P2pCollShared* shared)
 {
-    // Must exceed nChannels * NCCL_P2P_LL_THRESHOLD (default 8192 bytes) so
-    // that addP2pToPlan selects NCCL_PROTO_SIMPLE. Only with SIMPLE does it
+    // addP2pToPlan must select NCCL_PROTO_SIMPLE: only with SIMPLE does it
     // enter the ncclRegisterP2pIpcBuffer branch that leads to ipcRegisterBuffer
-    // (lines 1188-1222, where the GH#1859 fix lives). 16k floats = 65536 bytes
-    // is above the threshold for any plausible channel count.
+    // (where the GH#1859 fix lives). 16k floats = 65536 bytes exceeds
+    // nChannels * NCCL_P2P_LL_THRESHOLD for any plausible channel count, but
+    // since NCCL 2.32.6 legacy LL may also take sizes up to the LL channel
+    // plan's capacity, so the test config pins NCCL_P2P_LL_THRESHOLD=0.
     const size_t numElements = 16 * 1024;                  // 64 KB of float
     const size_t bufBytes    = numElements * sizeof(float);
 

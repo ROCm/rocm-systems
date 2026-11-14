@@ -46,30 +46,34 @@ static constexpr int kMaxGpus            = 8;
 static constexpr size_t kAllReduceElems  = 1 << 20;
 
 static const char* const kDiagPrefix  = "NCCL DIAG ";
+// Since NCCL 2.32.6 p2p.cc logs failure details and notices as INFO(NCCL_DIAG, "P2P ...") lines, which reach
+// stdout only with NCCL_DEBUG=INFO and NCCL_DEBUG_SUBSYS including DIAG (set by clearDiagEnv()).
+static const char* const kDiagInfoPrefix = " NCCL INFO P2P ";
 static const char* const kDiagHeader  = "NCCL DIAG === NCCL Diagnostics ===";
 static const char* const kDiagSummary
     = "NCCL DIAG [OK]   p2p: verified P2P access in both directions between every GPU pair";
 static const char* const kDiagPartialSummary = "GPU-to-GPU peer accesses passed verification";
 
-// Report lines that indicate a failed or incomplete check (src/diagnostics.cc, src/diagnostics/p2p.cc).
+// Report lines that indicate a failed or incomplete check (src/diagnostics.cc, src/diagnostics/p2p.cc): the
+// "NCCL DIAG" lines and, for p2p.cc's details, the INFO(NCCL_DIAG) lines.
 // test/host/CMakeLists.txt fails the configure step when a marker leaves this list or the product text.
 static const char* const kDiagFailureMarkers[] = {
     "transport detect returned",
     "p2p: check returned",
-    "p2p: setup failed",
-    "p2p: destination buffer unavailable",
-    "p2p: local HIP setup failed",
-    "p2p: peer-memory import failed",
-    "p2p: write mismatch",
-    "p2p: read mismatch",
-    "p2p: topology check failed",
-    "p2p: launch/check failed",
-    "p2p: resource cleanup failed",
+    "P2P setup failed",
+    "P2P destination buffer unavailable",
+    "P2P local HIP setup failed",
+    "P2P peer-memory import failed",
+    "P2P write mismatch",
+    "P2P read mismatch",
+    "P2P topology check failed",
+    "P2P launch/check failed",
+    "P2P resource cleanup failed",
 };
 
 struct DiagReport
 {
-    std::vector<std::string> lines;  // Report lines with the "<host>:<pid> " prefix stripped.
+    std::vector<std::string> lines;  // Report lines with the "<host>:<pid> " (or INFO log) prefix stripped.
 
     int count(const std::string& needle) const
     {
@@ -108,8 +112,11 @@ static DiagReport parseDiagReport(const std::string& captured)
     while(std::getline(is, line))
     {
         const size_t pos = line.find(kDiagPrefix);
+        const size_t infoPos = line.find(kDiagInfoPrefix);
         if(pos != std::string::npos)
             report.lines.push_back(line.substr(pos));
+        else if(infoPos != std::string::npos)
+            report.lines.push_back(line.substr(infoPos + std::strlen(" NCCL INFO ")));
     }
     return report;
 }
@@ -215,13 +222,18 @@ static void expectEdgeSummaries(const DiagReport& report, const std::vector<std:
 // The parent test environment (e.g. CI categories) may carry these; each case sets what it needs.
 // cuMem is pinned off rather than unset: the default auto-enables it on gfx1250, and the check cannot map a
 // same-process peer buffer through cuMem on ROCm, so every cross-device edge would report an import failure.
+// The DIAG INFO lines carry the p2p failure details and the peer-access notice, so they are enabled (and only
+// they: the other subsystems stay out of the captured stdout).
 static void clearDiagEnv()
 {
     unsetenv("NCCL_RUN_DIAGNOSTICS");
     unsetenv("NCCL_RUN_RAS_DIAGNOSTICS");
     unsetenv("NCCL_P2P_DISABLE");
     unsetenv("NCCL_P2P_LEVEL");
+    unsetenv("NCCL_DEBUG_FILE");
     setenv("NCCL_CUMEM_ENABLE", "0", 1);
+    setenv("NCCL_DEBUG", "INFO", 1);
+    setenv("NCCL_DEBUG_SUBSYS", "DIAG", 1);
 }
 
 // Creates nGpus communicators on devices 0..nGpus-1 while capturing stdout. Callers wrap the call in
@@ -559,7 +571,7 @@ TEST_F(Diagnostics, ReportOnStdoutOnly)
 }
 
 // One process driving several GPUs on the legacy (non-cuMem) path: a rank that newly enables context-wide
-// peer access to a peer prints one informational notice (src/diagnostics/p2p.cc). The check runs before
+// peer access to a peer logs one informational INFO(NCCL_DIAG) notice (src/diagnostics/p2p.cc). The check runs before
 // transport setup (src/init.cc), so in a fresh process on a full XGMI mesh every rank enables access and prints
 // the notice. The notice is not a failure.
 TEST_F(Diagnostics, SingleProcessPeerAccessNotice)
@@ -577,7 +589,7 @@ TEST_F(Diagnostics, SingleProcessPeerAccessNotice)
 
         const std::vector<int> devices = firstDevices(nGpus);
         const bool full                = xgmiFullMesh(devices);
-        const std::string notice = "NCCL DIAG [INFO] p2p: temporarily enabled context-wide HIP peer access rank=";
+        const std::string notice = "P2P temporarily enabled context-wide HIP peer access rank=";
         EXPECT_LE(report.count(notice), nGpus) << report.dump();
         for(int rank = 0; rank < nGpus; ++rank)
         {
@@ -604,7 +616,7 @@ TEST_F(Diagnostics, ReportParserOnFixedCapture)
           "(56 peer accesses)\n"
           "NCCL INFO unrelated log line\n"
           "node01:4242 NCCL DIAG [INFO] p2p: only 3/12 GPU-to-GPU peer accesses passed verification\n"
-          "node01:4242 NCCL DIAG [INFO] p2p: write mismatch srcRank=0 dstRank=1\n"
+          "node01:4242:4243 [0] NCCL INFO P2P write mismatch srcRank=0 dstRank=1\n"
           "node01:4242 NCCL DIAG NCCL diagnostics completed in 37.1 ms across 8 ranks\n";
     const DiagReport report = parseDiagReport(captured);
 
@@ -616,7 +628,7 @@ TEST_F(Diagnostics, ReportParserOnFixedCapture)
     EXPECT_EQ(okEdgeCount(report.lines[2]), 56);
     EXPECT_EQ(okEdgeCount(report.lines[3]), -1);
     ASSERT_EQ(report.failures().size(), 1u) << report.dump();
-    EXPECT_NE(report.failures().front().find("p2p: write mismatch"), std::string::npos);
+    EXPECT_EQ(report.failures().front(), "P2P write mismatch srcRank=0 dstRank=1");
     EXPECT_TRUE(parseDiagReport("no report here\n").lines.empty());
 
     // One line per failure marker, in the product wording.
@@ -624,15 +636,15 @@ TEST_F(Diagnostics, ReportParserOnFixedCapture)
         = "node01:4242 NCCL DIAG === NCCL Diagnostics ===\n"
           "node01:4242 NCCL DIAG [INFO] transport detect returned 3\n"
           "node01:4242 NCCL DIAG [INFO] p2p: check returned 3\n"
-          "node01:4242 NCCL DIAG [INFO] p2p: setup failed on rank 2 result=1\n"
-          "node01:4242 NCCL DIAG [INFO] p2p: destination buffer unavailable srcRank=0 dstRank=1 reason=noDescriptor\n"
-          "node01:4242 NCCL DIAG [INFO] p2p: local HIP setup failed srcRank=0 dstRank=1 reason=localCuda\n"
-          "node01:4242 NCCL DIAG [INFO] p2p: peer-memory import failed srcRank=0 dstRank=1 reason=import\n"
-          "node01:4242 NCCL DIAG [INFO] p2p: write mismatch srcRank=0 dstRank=1 expected=0x1 got=0x0\n"
-          "node01:4242 NCCL DIAG [INFO] p2p: read mismatch srcRank=0 dstRank=1 expected=0x1 got=0x0\n"
-          "node01:4242 NCCL DIAG [INFO] p2p: topology check failed srcRank=0 dstRank=1 reason=topo\n"
-          "node01:4242 NCCL DIAG [INFO] p2p: launch/check failed srcRank=0 dstRank=1 reason=writeLaunch\n"
-          "node01:4242 NCCL DIAG [INFO] p2p: resource cleanup failed rank=0 result=1\n";
+          "node01:4242:4243 [0] NCCL INFO P2P setup failed on rank 2 result=1\n"
+          "node01:4242:4243 [0] NCCL INFO P2P destination buffer unavailable srcRank=0 dstRank=1 reason=noDescriptor\n"
+          "node01:4242:4243 [0] NCCL INFO P2P local HIP setup failed srcRank=0 dstRank=1 reason=localCuda\n"
+          "node01:4242:4243 [0] NCCL INFO P2P peer-memory import failed srcRank=0 dstRank=1 reason=import\n"
+          "node01:4242:4243 [0] NCCL INFO P2P write mismatch srcRank=0 dstRank=1 expected=0x1 got=0x0\n"
+          "node01:4242:4243 [0] NCCL INFO P2P read mismatch srcRank=0 dstRank=1 expected=0x1 got=0x0\n"
+          "node01:4242:4243 [0] NCCL INFO P2P topology check failed srcRank=0 dstRank=1 reason=topo\n"
+          "node01:4242:4243 [0] NCCL INFO P2P launch/check failed srcRank=0 dstRank=1 reason=writeLaunch\n"
+          "node01:4242:4243 [0] NCCL INFO P2P resource cleanup failed rank=0 result=1\n";
     const DiagReport failReport             = parseDiagReport(failing);
     const std::vector<std::string> failures = failReport.failures();
     EXPECT_EQ(failures.size(), std::size(kDiagFailureMarkers)) << failReport.dump();

@@ -16,7 +16,7 @@ ASSERT_HOOK_MATCHES_PROD(g_ncclP2pImportShareableBuffer, ncclP2pImportShareableB
 ASSERT_HOOK_MATCHES_PROD(g_ncclP2pFreeShareableBuffer, ncclP2pFreeShareableBuffer);
 
 static ncclResult_t DefaultNcclP2pAllocateShareableBuffer(size_t size, int, ncclIpcDesc* ipcDesc, void** ptr, int,
-                                                          struct ncclMemManager*, ncclMemType_t) {
+                                                          struct ncclMemManager*, ncclMemType_t, bool) {
   if (size == 0 || ipcDesc == nullptr || ptr == nullptr) {
     return ncclInvalidArgument;
   }
@@ -28,7 +28,8 @@ static ncclResult_t DefaultNcclP2pAllocateShareableBuffer(size_t size, int, nccl
   std::memcpy(ipcDesc, ptr, sizeof(*ptr));
   return ncclSuccess;
 }
-std::function<ncclResult_t(size_t, int, ncclIpcDesc*, void**, int, struct ncclMemManager*, ncclMemType_t)>
+// NCCL 2.32.6 appended skipLegacyIpcExport.
+std::function<ncclResult_t(size_t, int, ncclIpcDesc*, void**, int, struct ncclMemManager*, ncclMemType_t, bool)>
     g_ncclP2pAllocateShareableBuffer = DefaultNcclP2pAllocateShareableBuffer;
 
 static ncclResult_t DefaultNcclP2pImportShareableBuffer(struct ncclComm*, int, size_t, ncclIpcDesc* ipcDesc,
@@ -47,8 +48,10 @@ static ncclResult_t DefaultNcclP2pFreeShareableBuffer(ncclIpcDesc*) { return ncc
 std::function<ncclResult_t(ncclIpcDesc*)> g_ncclP2pFreeShareableBuffer = DefaultNcclP2pFreeShareableBuffer;
 
 ncclResult_t ncclP2pAllocateShareableBuffer(size_t size, int directMap, ncclIpcDesc* ipcDesc, void** ptr,
-                                            int peerRank, struct ncclMemManager* manager, ncclMemType_t memtype) {
-  return g_ncclP2pAllocateShareableBuffer(size, directMap, ipcDesc, ptr, peerRank, manager, memtype);
+                                            int peerRank, struct ncclMemManager* manager, ncclMemType_t memtype,
+                                            bool skipLegacyIpcExport) {
+  return g_ncclP2pAllocateShareableBuffer(size, directMap, ipcDesc, ptr, peerRank, manager, memtype,
+                                          skipLegacyIpcExport);
 }
 
 ncclResult_t ncclP2pImportShareableBuffer(struct ncclComm* comm, int peer, size_t size, ncclIpcDesc* ipcDesc,

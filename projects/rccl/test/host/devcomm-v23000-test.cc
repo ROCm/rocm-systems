@@ -19,6 +19,14 @@
 
 #include DEVCOMM_V23000_CC_PATH
 
+// Real definition lives in dev_runtime.cc, not linked into this standalone binary.
+// devcomm_v23000.cc's ncclDevCommCompat_v23000 table references it by address.
+ncclResult_t ncclDevCommGinSignalsPerBarrier_v22902(ncclComm_t, struct ncclGinBackendState const*, int nRanks,
+                                                    int* outSlots) {
+  *outSlots = nRanks;
+  return ncclSuccess;
+}
+
 namespace {
 
 using devcomm_test::FirstDiff;
@@ -124,8 +132,8 @@ TEST_F(DevcommV23000Microtest, Compat_ExportsVersionRangeAndCallbacks) {
 TEST_F(DevcommV23000Microtest, RequirementsFilter_UnfinalizedUsesFirstBackend) {
   ncclDevCommRequirements_t requirements{};
   requirements.ginContextCount = 19;
-  shared_->ginState.backends[0].ginType = NCCL_GIN_TYPE_PROXY;
-  shared_->ginState.backends[1].ginType = NCCL_GIN_TYPE_NONE;
+  comm_->ginState.backends[0].ginType = NCCL_GIN_TYPE_PROXY;
+  comm_->ginState.backends[1].ginType = NCCL_GIN_TYPE_NONE;
 
   ASSERT_EQ(ncclSuccess, ncclDevCommCompat_v23000.devCommRequirementsFilter(comm_.get(), &requirements));
 
@@ -136,8 +144,8 @@ TEST_F(DevcommV23000Microtest, RequirementsFilter_UnfinalizedUsesFirstBackend) {
 TEST_F(DevcommV23000Microtest, RequirementsFilter_FinalizedDisablesGin) {
   ncclDevCommRequirements_t requirements{};
   requirements.ginType = NCCL_GIN_TYPE_PROXY;
-  shared_->ginState.backends[0].ginType = NCCL_GIN_TYPE_PROXY;
-  shared_->ginState.finalized = true;
+  comm_->ginState.backends[0].ginType = NCCL_GIN_TYPE_PROXY;
+  comm_->ginState.finalized = true;
 
   ASSERT_EQ(ncclSuccess, ncclDevCommRequirementsFilter_v23000(comm_.get(), &requirements));
 

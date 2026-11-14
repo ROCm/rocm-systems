@@ -32,7 +32,7 @@
  *          — runtime invocations: SKIP (require a live ncclDevComm + GIN net)
  *
  * Build is NOT a normal CMake/GTest build: librccl_device.bc must already
- * exist (cmake -DEMIT_LLVM_IR=ON) and the translation unit must be compiled
+ * exist (cmake -DNCCL_EMIT_LLVM_IR=ON) and the translation unit must be compiled
  * by hipcc at -O0 with the bitcode routed to the AMDGPU device-side LTO link.
  * The pytest harness in test/ir-device/ drives the build + run in CI (it links
  * GTest and emits the bitcode on demand); see test/ir-device/tests/conftest.py.

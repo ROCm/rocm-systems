@@ -17,7 +17,12 @@
 
 // Is cuMem API usage enabled
 extern int ncclCuMemEnable();
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+// [RCCL] rocmwrap.cc keeps the int return (rocmwrap.h declares it too).
 extern int ncclCuMemHostEnable();
+#else
+extern bool ncclCuMemHostEnable();
+#endif
 
 #if CUDART_VERSION >= 11030
 #include <cudaTypedefs.h>
@@ -110,7 +115,7 @@ DECLARE_CUDA_PFN_EXTERN(cuInit, 2000);
 DECLARE_CUDA_PFN_EXTERN(cuDeviceGet, 2000);
 DECLARE_CUDA_PFN_EXTERN(cuDeviceGetCount, 2000);
 DECLARE_CUDA_PFN_EXTERN(cuDeviceGetAttribute, 2000);
-DECLARE_CUDA_PFN_EXTERN(cuDeviceGetUuid, 9020);
+DECLARE_CUDA_PFN_EXTERN(cuDeviceGetUuid, 11040);
 DECLARE_CUDA_PFN_EXTERN(cuGetErrorString, 6000);
 DECLARE_CUDA_PFN_EXTERN(cuGetErrorName, 6000);
 DECLARE_CUDA_PFN_EXTERN(cuMemGetAddressRange, 3020);
@@ -187,6 +192,11 @@ DECLARE_CUDA_PFN_EXTERN_V13030(cuLogicalEndpointImport,    uint32_t id, CUlogica
 DECLARE_CUDA_PFN_EXTERN_V13030(cuLogicalEndpointBindAddr,  uint32_t id, CUdevice dev, size_t offset, void* addr, size_t size, int flags);
 DECLARE_CUDA_PFN_EXTERN_V13030(cuLogicalEndpointUnbind,    uint32_t id, CUdevice dev, size_t offset, size_t size);
 // clang-format on
+
+#if CUDA_VERSION >= 13040
+DECLARE_CUDA_PFN_EXTERN(cuDeviceGetCliqueCount, 13040);
+DECLARE_CUDA_PFN_EXTERN(cuDeviceGetCliqueInfo, 13040);
+#endif
 
 #if CUDA_VERSION >= 12010
 /* NVSwitch Multicast support */

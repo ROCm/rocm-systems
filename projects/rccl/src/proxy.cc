@@ -379,7 +379,8 @@ ncclResult_t dumpProxyState(struct ncclProxyProgressState* state) {
   return ncclSuccess;
 }
 
-static ncclResult_t ncclProxyOpToArgs(struct ncclProxyOp* op, struct ncclProxyArgs* args, int subIndex) {
+static ncclResult_t ncclProxyOpToArgs(struct ncclProxyOp* op, struct ncclProxyArgs* args, int subIndex,
+                                      void* localProfilerContext) {
   struct ncclProxySubArgs* sub = args->subs + subIndex;
   if (subIndex >= NCCL_PROXY_MAX_SUBS) {
     WARN("Proxy append out of bounds");
@@ -405,7 +406,8 @@ static ncclResult_t ncclProxyOpToArgs(struct ncclProxyOp* op, struct ncclProxyAr
   sub->taskEventHandle = op->taskEventHandle;
   sub->rank = op->rank;
   sub->pid = op->pid;
-  sub->profilerContext = op->profilerContext;
+  // Use the connection's process identity to keep foreign profiler contexts local.
+  sub->profilerContext = sub->connection->sameProcess ? op->profilerContext : localProfilerContext;
   sub->ringAlgo = op->ringAlgo;
   sub->workCounter = op->workCounter;
   args->nsubs = subIndex + 1;
@@ -423,6 +425,7 @@ static ncclResult_t ncclProxyOpToArgs(struct ncclProxyOp* op, struct ncclProxyAr
   if (subIndex) {
     args->nChannels = std::min(args->nChannels, op->nChannels);
     args->nPeers = std::min(args->nPeers, op->nPeers);
+    args->minPeers = std::min(args->minPeers, op->minPeers);
     if ((args->sliceSteps != op->sliceSteps) || (args->chunkSteps != op->chunkSteps) ||
         (args->protocol != op->protocol) || (args->dtype != op->dtype) || (args->redOp != op->redOp) ||
         (args->coll != op->coll)) {
@@ -450,6 +453,7 @@ static ncclResult_t ncclProxyOpToArgs(struct ncclProxyOp* op, struct ncclProxyAr
   args->algorithm = op->algorithm;
   args->nChannels = op->nChannels;
   args->nPeers = op->nPeers;
+  args->minPeers = op->minPeers;
   args->specifics = op->specifics;
   args->state = ncclProxyOpReady;
   args->progress = op->connection->tcomm->proxyProgress;
@@ -463,20 +467,21 @@ exit:
   return ncclSuccess;
 }
 
-static ncclResult_t ProxyAppend(struct ncclProxyProgressState* state, struct ncclProxyOp* op) {
+static ncclResult_t ProxyAppend(struct ncclProxyState* proxyState, struct ncclProxyOp* op) {
+  struct ncclProxyProgressState* state = &proxyState->progressState;
   struct ncclProxyConnection* connection = op->connection;
   int shared = connection->shared;
   struct ncclProxyArgs* args = *connection->proxyAppendPtr;
 
   if (args) {
     if (shared && args->opCount == op->opCount) {
-      NCCLCHECK(ncclProxyOpToArgs(op, args, args->nsubs));
+      NCCLCHECK(ncclProxyOpToArgs(op, args, args->nsubs, proxyState->profilerContext));
       DEBUG_PROXY_PRINT("Insert (%d/%5ld/%5ld) as group with %5ld\n", shared, args->opCount, op->opCount,
                         OP_INDEX(args));
     } else {
       struct ncclProxyArgs* prevArgs = args;
       NCCLCHECK(allocateArgs(state, &args));
-      NCCLCHECK(ncclProxyOpToArgs(op, args, 0));
+      NCCLCHECK(ncclProxyOpToArgs(op, args, 0, proxyState->profilerContext));
       prevArgs->nextPeer = args;
       DEBUG_PROXY_PRINT("Insert  %5ld (%d/%5ld/%5ld) as nextPeer of %5ld\n", OP_INDEX(args), shared, prevArgs->opCount,
                         args->opCount, OP_INDEX(prevArgs));
@@ -485,7 +490,7 @@ static ncclResult_t ProxyAppend(struct ncclProxyProgressState* state, struct ncc
   } else {
     // Nothing running for that peer. Add to the list
     NCCLCHECK(allocateArgs(state, &args));
-    NCCLCHECK(ncclProxyOpToArgs(op, args, 0));
+    NCCLCHECK(ncclProxyOpToArgs(op, args, 0, proxyState->profilerContext));
     if (state->active == NULL) {
       // Create the list
       DEBUG_PROXY_PRINT("Insert  %5ld (%d/%5ld) as first element\n", OP_INDEX(args), shared, args->opCount);
@@ -871,10 +876,10 @@ static ncclResult_t ncclProxyGetPostedOps(struct ncclProxyState* proxyState, int
   struct ncclProxyProgressState* state = &proxyState->progressState;
   if (state->opsPool == NULL) return ncclInternalError;
   struct ncclProxyOpsPool* pool = state->opsPool;
+  struct ncclProfilerEventRef eHandle = {};
 
   if (state->nextOps != -1) goto process_nextops;
 
-  void* eHandle;
   // If we have ops to progress, no need to block waiting for something to arrive or even wait for the lock
   // to be available. Exit, continue progress, and come back later.
   {
@@ -899,12 +904,12 @@ static ncclResult_t ncclProxyGetPostedOps(struct ncclProxyState* proxyState, int
 #endif
         {
           ncclProfilerStartProxyCtrlEvent(proxyState->profilerContext, &eHandle);
-          ncclProfilerRecordProxyCtrlEventState(eHandle, 0, ncclProfilerProxyCtrlSleep);
+          ncclProfilerRecordProxyCtrlEventState(&eHandle, 0, ncclProfilerProxyCtrlSleep);
           // Predicate avoids lost wakeups and guarantees we observe stop after ncclProxyProgressDestroy.
           pool->cond.wait(lock,
                           [&]() { return pool->nextOps != -1 || state->stop.load(std::memory_order_acquire) != 0; });
-          ncclProfilerRecordProxyCtrlEventState(eHandle, 0, ncclProfilerProxyCtrlWakeup);
-          ncclProfilerStopProxyCtrlEvent(eHandle);
+          ncclProfilerRecordProxyCtrlEventState(&eHandle, 0, ncclProfilerProxyCtrlWakeup);
+          ncclProfilerStopProxyCtrlEvent(&eHandle);
         }
       }
     }
@@ -914,7 +919,7 @@ static ncclResult_t ncclProxyGetPostedOps(struct ncclProxyState* proxyState, int
 
 process_nextops:
   ncclProfilerStartProxyCtrlEvent(proxyState->profilerContext, &eHandle);
-  ncclProfilerRecordProxyCtrlEventState(eHandle, 0, ncclProfilerProxyCtrlAppend);
+  ncclProfilerRecordProxyCtrlEventState(&eHandle, 0, ncclProfilerProxyCtrlAppend);
   TIME_START(2);
   int freeOp[NCCL_MAX_PROXY_CONNECTIONS];
   int freeOpEnd[NCCL_MAX_PROXY_CONNECTIONS];
@@ -932,7 +937,7 @@ process_nextops:
     lastPeer = peer;
     if (peerOp->connection == NULL) return ncclInternalError;
     if (peerOp->next != -1) COMPILER_PREFETCH(pool->ops + peerOp->next);
-    NCCLCHECK(ProxyAppend(state, peerOp));
+    NCCLCHECK(ProxyAppend(proxyState, peerOp));
     (*added)++;
     int lastOpIndex = opIndex;
     opIndex = peerOp->next;
@@ -961,8 +966,8 @@ process_nextops:
                                                /*success=*/std::memory_order_release,
                                                /*failure=*/std::memory_order_acquire));
   }
-  ncclProfilerRecordProxyCtrlEventState(eHandle, *added, ncclProfilerProxyCtrlAppendEnd);
-  ncclProfilerStopProxyCtrlEvent(eHandle);
+  ncclProfilerRecordProxyCtrlEventState(&eHandle, *added, ncclProfilerProxyCtrlAppendEnd);
+  ncclProfilerStopProxyCtrlEvent(&eHandle);
   TIME_STOP(2);
   return ncclSuccess;
 }
@@ -1038,11 +1043,11 @@ void* ncclProxyProgress(void* proxyState_) {
       break;
     }
     if ((lastIdle == 0 && idle == 1) || (lastIdle == 1 && idle == 0)) {
-      void* eHandle;
+      struct ncclProfilerEventRef eHandle = {};
       ncclProfilerStartProxyCtrlEvent(proxyState->profilerContext, &eHandle);
-      if (lastIdle == 0 && idle == 1) ncclProfilerRecordProxyCtrlEventState(eHandle, 0, ncclProfilerProxyCtrlIdle);
-      if (lastIdle == 1 && idle == 0) ncclProfilerRecordProxyCtrlEventState(eHandle, 0, ncclProfilerProxyCtrlActive);
-      ncclProfilerStopProxyCtrlEvent(eHandle);
+      if (lastIdle == 0 && idle == 1) ncclProfilerRecordProxyCtrlEventState(&eHandle, 0, ncclProfilerProxyCtrlIdle);
+      if (lastIdle == 1 && idle == 0) ncclProfilerRecordProxyCtrlEventState(&eHandle, 0, ncclProfilerProxyCtrlActive);
+      ncclProfilerStopProxyCtrlEvent(&eHandle);
     }
     if (idle || !state->active || (++proxyOpAppendCounter == ncclParamProgressAppendOpFreq())) {
       int added = 0;
@@ -1563,9 +1568,8 @@ static ncclResult_t proxyProgressInit(struct ncclProxyState* proxyState) {
     char shmPath[sizeof("/dev/shm/nccl-XXXXXX")];
     shmPath[0] = '\0';
 #elif defined(NCCL_OS_WINDOWS)
-    char shmPath[64];
-    snprintf(shmPath, sizeof(shmPath), "Local\\nccl-shm-%08x-%02x", (unsigned)GetCurrentProcessId(),
-             proxyState->cudaDev & 0xff);
+    char shmPath[sizeof("Local\\nccl-shm-XXXXXX")];
+    shmPath[0] = '\0';
 #endif
     NCCLCHECK(ncclShmOpen(shmPath, sizeof(shmPath), size, (void**)&pool, NULL, proxyState->tpLocalnRanks,
                           &state->handle));
@@ -2017,7 +2021,7 @@ void* ncclProxyService(void* _args) {
       if (pollfds[s].fd == NCCL_INVALID_SOCKET) continue;
 
       // Progress all ops for this ncclProxyLocalPeer
-      if (stop == PROXY_ABORT && ncclCuMemEnable() && ncclCuMemHostEnable() && !proxyState->directMode &&
+      if (stop == PROXY_ABORT && proxyState->cuMemHostEnabled && !proxyState->directMode &&
           COMPILER_ATOMIC_LOAD(&proxyState->stop, std::memory_order_acquire)) {
         closeConn = 1;
       }
@@ -2265,7 +2269,6 @@ ncclResult_t ncclProxyCreate(struct ncclComm* comm) {
     proxyState->dmaBufSupport = comm->dmaBufSupport;
     proxyState->ncclNet = comm->ncclNet;
     proxyState->ncclCollNet = comm->ncclCollNet;
-    proxyState->ginState = &comm->sharedRes->ginState;
     proxyState->netContext = comm->netContext;
     proxyState->collNetContext = comm->collNetContext;
     proxyState->profilerContext = comm->profilerContext;

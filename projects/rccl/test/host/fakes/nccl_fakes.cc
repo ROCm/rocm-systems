@@ -138,6 +138,27 @@ static int64_t DefaultLoadParam(const char* /*env*/, int64_t deftVal)
 
 std::function<int64_t(const char*, int64_t)> g_loadParam = DefaultLoadParam;
 
+// --- ncclParam<T> runtime (src/param/param.cc, src/param/param_registry.cc) ---
+// DEFINE_NCCL_PARAM objects in the compiled production units (e.g. net_ib/connect.cc) register
+// themselves and load their value through ncclParamEnvPluginGet. Weak, so a binary that links the
+// real param runtime keeps it. Every read is uncached and routed through g_loadParam under the
+// key without its "NCCL_" prefix, the same name NCCL_PARAM passes, so tests flip these params
+// exactly like the NCCL_PARAM ones; unset (g_loadParam returns the sentinel) yields the default.
+__attribute__((weak)) ncclResult_t ncclParamRegistry::add(std::string /*key*/, ncclParamInfo_t /*info*/,
+                                                          ncclParamInterface* /*param*/) {
+    return ncclSuccess;
+}
+extern "C" __attribute__((weak)) bool ncclParamIsCacheDisabled(const char* /*key*/) { return true; }
+extern "C" __attribute__((weak)) const char* ncclParamEnvPluginGet(const char* key, bool /*envInit*/) {
+    constexpr int64_t unset = INT64_MIN;
+    const char* name = strncmp(key, "NCCL_", 5) == 0 ? key + 5 : key;
+    int64_t value = g_loadParam(name, unset);
+    if (value == unset) return nullptr;
+    static thread_local char buf[32];
+    snprintf(buf, sizeof(buf), "%lld", (long long)value);
+    return buf;
+}
+
 // ---------------------------------------------------------------------------
 // Seams worth controlling from tests (return failure by default)
 // ---------------------------------------------------------------------------

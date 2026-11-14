@@ -389,10 +389,11 @@ TEST(ParameterApiTests, GetU64_Max_RoundTripsExactly) {
 // Boundary / overflow behavior
 //
 // The integer parser uses strtoll/strtoull. Values that overflow (unsigned)
-// long long set errno==ERANGE and are rejected -> fall back to default. Values
-// that fit long long but overflow the narrow target width are silently
-// truncated by static_cast, and validate() runs on the truncated value, so
-// they are accepted (wrapped), not rejected.
+// long long set errno==ERANGE and are rejected -> fall back to default. Since
+// NCCL 2.32.6 the parsed value is also range-checked against the narrow target
+// type before the cast, so values that fit long long but not T are rejected the
+// same way instead of wrapping. The *_Wraps tests below predate that check and
+// keep their names so their CI history stays attached; they assert the rejection.
 // ===========================================================================
 
 TEST(ParameterApiTests, GetI64_WordOverflow_FallsBackToDefault) {
@@ -421,8 +422,8 @@ TEST(ParameterApiTests, GetU64_WordOverflow_FallsBackToDefault) {
       {{"NCCL_TEST_PARAM_U64", "99999999999999999999999999"}});
 }
 
-// "32768" fits in long long, then truncates to int16_t(-32768); validate() sees the already
-// wrapped value and passes, so the wrapped result is returned.
+// "32768" fits in long long but not int16_t. Since NCCL 2.32.6 the parser range-checks against T
+// and rejects it (it used to wrap to -32768), so the getter falls back to the default.
 TEST(ParameterApiTests, GetI16_SubWordOverflow_Wraps) {
   RUN_ISOLATED_TEST_WITH_ENV(
       "GetI16_SubWordOverflow",
@@ -431,7 +432,7 @@ TEST(ParameterApiTests, GetI16_SubWordOverflow_Wraps) {
         ASSERT_EQ(ncclParamBind(&h, "NCCL_TEST_PARAM_I16"), ncclSuccess);
         int16_t v = 0;
         ASSERT_EQ(ncclParamGetI16(h, &v), ncclSuccess);
-        ASSERT_EQ(v, static_cast<int16_t>(-32768)) << "32768 wraps to -32768 for int16_t";
+        ASSERT_EQ(v, 7) << "32768 is out of int16_t range -> default";
       },
       {{"NCCL_TEST_PARAM_I16", "32768"}});
 }
@@ -443,9 +444,10 @@ TEST(ParameterApiTests, GetU16_Negative_Wraps) {
         ncclParamHandle_t h = nullptr;
         ASSERT_EQ(ncclParamBind(&h, "NCCL_TEST_PARAM_U16"), ncclSuccess);
         uint16_t v = 0;
-        // strtoull("-1") wraps to ULLONG_MAX (no ERANGE), truncates to 0xFFFF.
+        // "-1" used to truncate to 0xFFFF. The parser now rejects a leading '-' for every unsigned type
+        // before strtoull runs ([RCCL], parser_default.h), so the default is returned.
         ASSERT_EQ(ncclParamGetU16(h, &v), ncclSuccess);
-        ASSERT_EQ(v, static_cast<uint16_t>(0xFFFF));
+        ASSERT_EQ(v, 7u);
       },
       {{"NCCL_TEST_PARAM_U16", "-1"}});
 }
@@ -463,8 +465,8 @@ TEST(ParameterApiTests, GetI8_InRange_ReturnsValue) {
       {{"NCCL_TEST_PARAM_I8", "127"}});
 }
 
-// "128" fits in long long, then truncates to int8_t(-128); validate() sees the
-// already-wrapped value and passes, so the wrapped result is returned.
+// "128" fits in long long but not int8_t. Since NCCL 2.32.6 the parser range-checks against T
+// and rejects it (it used to wrap to -128), so the getter falls back to the default.
 TEST(ParameterApiTests, GetI8_SubWordOverflow_Wraps) {
   RUN_ISOLATED_TEST_WITH_ENV(
       "GetI8_SubWordOverflow",
@@ -473,7 +475,7 @@ TEST(ParameterApiTests, GetI8_SubWordOverflow_Wraps) {
         ASSERT_EQ(ncclParamBind(&h, kI8Key), ncclSuccess);
         int8_t v = 0;
         ASSERT_EQ(ncclParamGetI8(h, &v), ncclSuccess);
-        ASSERT_EQ(v, static_cast<int8_t>(-128)) << "128 wraps to -128 for int8_t";
+        ASSERT_EQ(v, 7) << "128 is out of int8_t range -> default";
       },
       {{"NCCL_TEST_PARAM_I8", "128"}});
 }
@@ -485,9 +487,10 @@ TEST(ParameterApiTests, GetU8_Negative_Wraps) {
         ncclParamHandle_t h = nullptr;
         ASSERT_EQ(ncclParamBind(&h, kU8Key), ncclSuccess);
         uint8_t v = 0;
-        // strtoull("-1") wraps to ULLONG_MAX (no ERANGE), truncates to 0xFF.
+        // "-1" used to truncate to 0xFF. The parser now rejects a leading '-' for every unsigned type
+        // before strtoull runs ([RCCL], parser_default.h), so the default is returned.
         ASSERT_EQ(ncclParamGetU8(h, &v), ncclSuccess);
-        ASSERT_EQ(v, static_cast<uint8_t>(0xFF));
+        ASSERT_EQ(v, 7u);
       },
       {{"NCCL_TEST_PARAM_U8", "-1"}});
 }

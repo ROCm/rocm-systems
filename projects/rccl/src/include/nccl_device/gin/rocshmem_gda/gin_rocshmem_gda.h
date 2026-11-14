@@ -353,4 +353,12 @@ struct ncclGinApi_SupportsStrongSignal<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA> {
   }
 };
 
+// Mirrors ginRocshmemGdaGetGinProperties()'s barrierOptions on the host side.
+template <>
+struct ncclGinApi_BarrierOptions<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA> {
+  NCCL_DEVICE_INLINE static ncclGinBarrierOptions_t call(ncclGinCtx) {
+    return NCCL_GIN_BARRIER_DEFAULT;
+  }
+};
+
 #endif /* _NCCL_DEVICE_GIN_ROCSHMEM_GDA_H_ */

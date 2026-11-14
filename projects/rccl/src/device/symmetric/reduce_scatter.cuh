@@ -8,10 +8,10 @@
 #include "sym_kernels.h"
 #if defined(__HIP_PLATFORM_AMD__)
 #include "symmetric/kernel.h"
-#include "symmetric/primitives.h"
+#include "symmetric/symk.h"
 #else
 #include "kernel.cuh"
-#include "primitives.cuh"
+#include "symk.cuh"
 #endif
 
 template <int BytePerPack, int UnrollPacks, int UnrollPeers, typename T, bool EnableTma, typename Red>
@@ -22,7 +22,6 @@ static __device__ void reduceDeep(ncclSymkArgsHandler const& handler, int tn, in
   using Acc = typename Red::EltType;
   using AccPack = BytePack<BytePerPack * sizeof(Acc) / sizeof(T)>;
 
-  ncclTeam world = ncclTeamWorld(handler.comm);
   int wn = tn / WARP_SIZE;
   int w = t / WARP_SIZE;
   int lane = t % WARP_SIZE;
@@ -41,6 +40,7 @@ static __device__ void reduceDeep(ncclSymkArgsHandler const& handler, int tn, in
                                 EnableTma ? 0 :
 #endif
                                             lane);
+  ncclSymkWorldPointerGetter<Pack> inpPeer(inpPacks, handler.comm);
 
   Pack acc0[UnrollPacks];
 
@@ -61,13 +61,13 @@ static __device__ void reduceDeep(ncclSymkArgsHandler const& handler, int tn, in
   if (0 < nIters) {
 #if NCCL_SYMK_ASYNC_TILE
     if NCCL_IF_CONSTEXPR (EnableTma) {
-      ncclSymkTileLoad(tmaSmem->buff[0], inpPacks.peerPtr(world, rank), tileSize, tmaSmem->bar, tmaSize, lane);
+      ncclSymkTileLoad(tmaSmem->buff[0], inpPeer(rank), tileSize, tmaSmem->bar, tmaSize, lane);
     } else
 #endif
     {
       NVCC_PRAGMA_UNROLL_AUTO
       for (int u = 0; u < UnrollPacks; u++) {
-        acc0[u] = inpPacks.peerPtr(world, rank)[u * WARP_SIZE];
+        acc0[u] = inpPeer(rank)[u * WARP_SIZE];
       }
     }
   }
@@ -83,14 +83,14 @@ static __device__ void reduceDeep(ncclSymkArgsHandler const& handler, int tn, in
         Pack tmp1[UnrollPacks];
 #if NCCL_SYMK_ASYNC_TILE
         if NCCL_IF_CONSTEXPR (EnableTma) {
-          ncclSymkTileLoad(tmaSmem->buff[1], inpPacks.peerPtr(world, r), tileSize, tmaSmem->bar, tmaSize, lane);
+          ncclSymkTileLoad(tmaSmem->buff[1], inpPeer(r), tileSize, tmaSmem->bar, tmaSize, lane);
           ncclSymkTileLoadWait</*Arrivers=*/WARP_SIZE>(tmaSmem->bar, tmaSize, lane);
         } else
 #endif
         {
           NVCC_PRAGMA_UNROLL_AUTO
           for (int u = 0; u < UnrollPacks; u++) {
-            tmp1[u] = inpPacks.peerPtr(world, r)[u * WARP_SIZE];
+            tmp1[u] = inpPeer(r)[u * WARP_SIZE];
           }
         }
         NVCC_PRAGMA_UNROLL_AUTO
@@ -129,13 +129,13 @@ static __device__ void reduceDeep(ncclSymkArgsHandler const& handler, int tn, in
             if (partial && ur != 0 && dr + ur == nRanks) break;
 #if NCCL_SYMK_ASYNC_TILE
             if NCCL_IF_CONSTEXPR (EnableTma) {
-              ncclSymkTileLoad(tmaSmem->buff[ur], inpPacks.peerPtr(world, r), tileSize, tmaSmem->bar, tmaSize, lane);
+              ncclSymkTileLoad(tmaSmem->buff[ur], inpPeer(r), tileSize, tmaSmem->bar, tmaSize, lane);
             } else
 #endif
             {
               NVCC_PRAGMA_UNROLL(UnrollPacks)
               for (int u = 0; u < UnrollPacks; u++) {
-                tmp1[ur][u] = inpPacks.peerPtr(world, r)[u * WARP_SIZE];
+                tmp1[ur][u] = inpPeer(r)[u * WARP_SIZE];
               }
             }
             r += 1;
@@ -195,19 +195,20 @@ static __device__ void reduceDeep(ncclSymkArgsHandler const& handler, int tn, in
 
       inpPacks += intptr_t(wn) * UnrollPacks * WARP_SIZE;
       outPacks += intptr_t(wn) * UnrollPacks * WARP_SIZE;
+      inpPeer.advance(intptr_t(wn) * UnrollPacks * WARP_SIZE);
       nIters -= wn;
       if (nIters <= 0) break;
 
 #if NCCL_SYMK_ASYNC_TILE
       if NCCL_IF_CONSTEXPR (EnableTma) {
-        ncclSymkTileLoad(tmaSmem->buff[0], inpPacks.peerPtr(world, rank), tileSize, tmaSmem->bar, tmaSize, lane);
+        ncclSymkTileLoad(tmaSmem->buff[0], inpPeer(rank), tileSize, tmaSmem->bar, tmaSize, lane);
       } else
 #endif
       {
         // Load data for next iteration.
         NVCC_PRAGMA_UNROLL_AUTO
         for (int u = 0; u < UnrollPacks; u++) {
-          acc0[u] = inpPacks.peerPtr(world, rank)[u * WARP_SIZE];
+          acc0[u] = inpPeer(rank)[u * WARP_SIZE];
         }
       }
     }
@@ -219,16 +220,16 @@ static __device__ void reduceEnds(ncclSymkArgsHandler const& handler, int tn, in
                                   ncclSymPtr<T> output, size_t nElts, uint32_t nPreElts, size_t nSufElts) {
   using Acc = typename Red::EltType;
 
-  ncclTeam world = ncclTeamWorld(handler.comm);
   int const& rank = handler.comm.rank;
   int const& nRanks = handler.comm.nRanks;
 
   ncclSymPtr<BytePack<sizeof(T)>> inpPacks = (ncclSymPtr<BytePack<sizeof(T)>>)input;
   ncclSymPtr<BytePack<sizeof(T)>> outPacks = (ncclSymPtr<BytePack<sizeof(T)>>)output;
+  ncclSymkWorldPointerGetter<BytePack<sizeof(T)>> inpPeer(inpPacks, handler.comm);
   NVCC_PRAGMA_UNROLL_DISABLED
   for (size_t i = t; i < nPreElts + nSufElts; i += tn) {
     size_t elt = i < nPreElts ? i : nElts - nSufElts - nPreElts + i;
-    BytePack<sizeof(T)> acc0 = inpPacks.peerPtr(world, rank)[elt];
+    BytePack<sizeof(T)> acc0 = inpPeer(rank)[elt];
     BytePack<sizeof(Acc)> acc1;
     BytePack<sizeof(T)> tmp[UnrollPeers];
     int dr = 1;
@@ -245,7 +246,7 @@ static __device__ void reduceEnds(ncclSymkArgsHandler const& handler, int tn, in
         NVCC_PRAGMA_UNROLL_AUTO
         for (int u = 0; u < UnrollPeers - partial; u++) {
           if (partial && u != 0 && dr + u == nRanks) break;
-          tmp[u] = inpPacks.peerPtr(world, r)[elt];
+          tmp[u] = inpPeer(r)[elt];
           r += 1;
           if (r == nRanks) r = 0;
         }
@@ -290,11 +291,11 @@ static __device__ void reduce(ncclSymkArgsHandler const& handler, int tn, int t,
   uint32_t alignment = uint32_t(input.offset - output.offset);
   size_t nBytes = nElts * sizeof(T);
 
-  uint32_t nPreBytes = (16u - input.offset) % 16u;
+  uint32_t nPreBytes = (ncclSymkBytePerPack - input.offset) % ncclSymkBytePerPack;
   nPreBytes = min((size_t)nPreBytes, nBytes);
   uintptr_t cursor = nPreBytes;
 
-  if (alignment % 16 == 0) {
+  if (alignment % ncclSymkBytePerPack == 0) {
 #if defined(__gfx950__)
     // Dropping to one pack cuts BytePerChunk to a quarter, which brings 16 MB within this tier's
     // floor instead of falling through to 4-byte packs, and doubles iterations per warp at 32 MB.
@@ -323,15 +324,16 @@ static __device__ void reduce(ncclSymkArgsHandler const& handler, int tn, int t,
     }
   }
 
-  if (sizeof(T) == 4 || (sizeof(T) < 4 && alignment % 4 == 0)) {
+  if (sizeof(T) == ncclSymkSmallBytePerPack ||
+      (sizeof(T) < ncclSymkSmallBytePerPack && alignment % ncclSymkSmallBytePerPack == 0)) {
 #if defined(__gfx950__)
     // Only reached by 16-byte misaligned buffers, since the tier above shares this chunk size.
     constexpr int UnrollPeers = 8;
 #else
     constexpr int UnrollPeers = 4;
 #endif
-    constexpr int BytePerPack = 4, UnrollPacks = 4;
-    constexpr int BytePerChunk = ncclSymkMinWarpsPerBlock * UnrollPacks * WARP_SIZE * BytePerPack;
+    constexpr int BytePerPack = ncclSymkSmallBytePerPack, UnrollPacks = ncclSymkSmallUnrollPacks;
+    constexpr int BytePerChunk = ncclSymkSmallBytePerChunk;
     uint32_t chunks = (nBytes - cursor) / BytePerChunk;
 #if !defined(__gfx950__)
     chunks -= imodFast32(chunks, nRanks * nBlocks, nRanks_nBlocks_rcp32);
@@ -371,7 +373,7 @@ __device__ __forceinline__ void ncclSymkRun_ReduceScatter_LD_impl(ncclSymkDevWor
 
   bool waitNeeded = !EnableProfiler;
   handler.forEachWork<T>([&] __device__(int block, int nBlocks, size_t nElts, size_t nAllElts, ncclSymPtr<T> input,
-                                        ncclSymPtr<T> output) {
+                                        ncclSymPtr<T> output, uint64_t /*redOpArg*/) {
         // Round robin warps over blocks.
     int t =
       flattenIx(threadIdx.x % WARP_SIZE, WARP_SIZE, block, nBlocks, threadIdx.x / WARP_SIZE, blockDim.x / WARP_SIZE);
@@ -469,7 +471,7 @@ __device__ __forceinline__ void ncclSymkRun_ReduceScatter_LDMC(ncclSymkDevWorkAr
   if NCCL_IF_CONSTEXPR (EnableProfiler) ncclSymkProfilerPhase(args, NCCL_KERNEL_PHASE_AFTER_OPEN);
 
   handler.forEachWork<T>([&] __device__(int block, int nBlocks, size_t nElts, size_t nAllElts, ncclSymPtr<T> input,
-                                        ncclSymPtr<T> output) {
+                                        ncclSymPtr<T> output, uint64_t /*redOpArg*/) {
         // Round robin warps over blocks.
     int t =
       flattenIx(threadIdx.x % WARP_SIZE, WARP_SIZE, block, nBlocks, threadIdx.x / WARP_SIZE, blockDim.x / WARP_SIZE);

@@ -34,7 +34,8 @@
  */
 
 /*
- * Emit __activemask() as inline asm, like CUDA's sm_30_intrinsics.hpp does.
+ * Emit __activemask() as an inline-asm device function (a call, not a statement
+ * expression, so it is usable in every context the native headers need).
  * Clang's version returns __nvvm_activemask(), which libNVVM 13.3.27 fails to
  * lower: the PTX calls an .extern llvm.nvvm.activemask that ptxas rejects.
  *
@@ -42,13 +43,13 @@
  * expand. Device pass only: CUDA declares __activemask in the host pass.
  */
 #if defined(__clang__) && defined(__CUDA_ARCH__)
+__attribute__((device)) __attribute__((always_inline)) static unsigned ncclIrActivemask() {
+  unsigned mask;
+  asm volatile("activemask.b32 %0;" : "=r"(mask));
+  return mask;
+}
 #undef __activemask
-#define __activemask()                                                        \
-  (__extension__({                                                            \
-    unsigned _nccl_activemask_ret;                                            \
-    asm volatile("activemask.b32 %0;" : "=r"(_nccl_activemask_ret));          \
-    _nccl_activemask_ret;                                                     \
-  }))
+#define __activemask ncclIrActivemask
 #endif
 
 /*
@@ -153,6 +154,17 @@
   #endif
 #endif
 
+/* [RCCL] NCCL_IR_EXTERN_C used to come from nccl_device/utility.h; upstream
+ * dropped IR linkage decorators from the native device headers, so this
+ * wrapper keeps its own definition. */
+#ifndef NCCL_IR_EXTERN_C
+  #ifdef __clang_llvm_bitcode_lib__
+    #define NCCL_IR_EXTERN_C extern "C"
+  #else
+    #define NCCL_IR_EXTERN_C
+  #endif
+#endif
+
 /* ========================================================================
  * [A] Always-on APIs
  *
@@ -247,7 +259,7 @@ void ncclLsaBarrierSessionSync(ncclLsaBarrierSession_C* session,
  * [C] GIN + composite Barrier Session APIs
  *
  * Underlying RCCL primitives (present since the NCCL v2.29.x GIN sync):
- *   - ncclGin / ncclGin_C, ncclGinBarrierSession<Coop>, ncclGinBarrierHandle,
+ *   - ncclGin (ncclGin_C below), ncclGinBarrierSession<Coop>, ncclGinBarrierHandle,
  *     ncclGinFenceLevel         (nccl_device/gin.h, gin_barrier.h)
  *   - ncclBarrierSession<Coop>   (composite inner-LSA + outer-GIN barrier;
  *                                 nccl_device/barrier.h)
@@ -258,6 +270,17 @@ void ncclLsaBarrierSessionSync(ncclLsaBarrierSession_C* session,
  * consumes (true under clang -x hip), so no shared-header change is needed
  * to enable them here.
  * ======================================================================*/
+
+/* [RCCL] ncclGin_C used to live in nccl_device/gin.h; upstream removed it
+ * along with the runtime backend mask and now drives the native ALL-mask
+ * ncclGin directly. Keep the IR-facing name here as a thin ncclGin with the
+ * same layout. backendMask_ is retained for source compatibility only: the
+ * dispatch is always NCCL_GIN_BACKEND_MASK_ALL. */
+struct ncclGin_C : ncclGin {
+  NCCL_DEVICE_INLINE ncclGin_C(ncclDevComm const& comm_, unsigned backendMask_, int contextIndex,
+                               ncclGinResourceSharingMode resourceSharingMode_ = NCCL_GIN_RESOURCE_SHARING_GPU)
+      : ncclGin(comm_, contextIndex, resourceSharingMode_) { (void)backendMask_; }
+};
 
 /* Struct definitions */
 struct ncclGinBarrierSession_C {

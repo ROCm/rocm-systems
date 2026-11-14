@@ -130,6 +130,17 @@ static ncclResult_t DiagCuMemFreeAddr(void* ptr, struct ncclMemManager* manager,
 #undef ncclCuMemFreeAddr
 #undef free
 
+// src/dev_runtime.cc is not in this binary. ncclDiagP2pBuildRankSet takes its rank set from the LSA domain
+// that ncclDevrInitOnce fills in devrState; the default leaves devrState as the fixture set it.
+static ncclResult_t DefaultDiagDevrInitOnce(struct ncclComm*) {
+  return ncclSuccess;
+}
+static std::function<ncclResult_t(struct ncclComm*)> g_diagDevrInitOnce = DefaultDiagDevrInitOnce;
+ASSERT_HOOK_MATCHES_PROD(g_diagDevrInitOnce, ncclDevrInitOnce);
+ncclResult_t ncclDevrInitOnce(struct ncclComm* comm) {
+  return g_diagDevrInitOnce(comm);
+}
+
 namespace {
 
 constexpr uint64_t kHostHash = 0x40570000ULL;
@@ -157,6 +168,38 @@ std::string DiagLine(const std::string& body) {
   return std::string(diagLogHost) + ":" + std::to_string(diagLogPid) + " " + body + "\n";
 }
 
+// Since 2.32.6 per-edge failure details, setup failures, cleanup failures and the peer-access notice go to
+// INFO(NCCL_DIAG, "P2P ...") rather than DIAG_PRINT: runs body with INFO/DIAG enabled, returns the debug log and
+// stores what reached stdout in *out.
+template <typename Fn>
+std::string CaptureDiagInfo(Fn&& body, std::string* out) {
+  ScopedDebugLogging debug(NCCL_LOG_INFO, NCCL_DIAG);
+  return CaptureLog([&] { *out = CaptureStdout(std::forward<Fn>(body)); });
+}
+
+int CountOf(const std::string& text, const std::string& needle) {
+  int count = 0;
+  for (size_t at = text.find(needle); at != std::string::npos; at = text.find(needle, at + 1)) {
+    count++;
+  }
+  return count;
+}
+
+// One INFO(NCCL_DIAG, ...) line as LogHas sees it: after the logger's "file:line" prefix.
+std::string DiagInfo(const std::string& body) {
+  return " " + body + "\n";
+}
+
+// Each body appears in log as an INFO line, in the given order.
+void ExpectInfoLinesInOrder(const std::string& log, const std::vector<std::string>& bodies) {
+  size_t from = 0;
+  for (const std::string& body : bodies) {
+    const size_t at = log.find(DiagInfo(body), from);
+    EXPECT_NE(at, std::string::npos) << "missing or out of order: " << body << "\n" << log;
+    if (at != std::string::npos) from = at + 1;
+  }
+}
+
 std::string DiagP2pOkLine(int edges) {
   return DiagLine("NCCL DIAG [OK]   p2p: verified P2P access in both directions between every GPU pair (" +
                   std::to_string(edges) + " peer accesses)");
@@ -167,14 +210,18 @@ std::string DiagP2pPartialLine(int passed, int tested) {
                   " GPU-to-GPU peer accesses passed verification");
 }
 
-std::string DiagP2pSetupFailLine(int rank, ncclResult_t result) {
-  return DiagLine("NCCL DIAG [INFO] p2p: setup failed on rank " + std::to_string(rank) +
-                  " result=" + std::to_string(result));
+// Follows a partial summary when INFO/DIAG logging is off, pointing at where the failure details went.
+std::string DiagP2pDetailsHintLine() {
+  return DiagLine("NCCL DIAG [INFO] p2p: for failure details, rerun with NCCL_DEBUG=INFO NCCL_DEBUG_SUBSYS=DIAG");
 }
 
-std::string DiagP2pCleanupLine(int rank, int result) {
-  return DiagLine("NCCL DIAG [INFO] p2p: resource cleanup failed rank=" + std::to_string(rank) +
-                  " result=" + std::to_string(result) + "; some temporary resources may remain");
+std::string DiagP2pSetupFailBody(int rank, ncclResult_t result) {
+  return std::string("P2P setup failed on rank " + std::to_string(rank) + " result=" + std::to_string(result));
+}
+
+std::string DiagP2pCleanupBody(int rank, int result) {
+  return std::string("P2P resource cleanup failed rank=" + std::to_string(rank) + " result=" + std::to_string(result) +
+                  "; some temporary resources may remain");
 }
 
 ncclDiagP2pEdgeInfo Edge(int pathType, int handleType) {
@@ -215,6 +262,7 @@ class DiagP2pMicrotest : public ::testing::Test {
     g_diagCallocFailBytes = 0;
     g_diagCallocFailNth = 0;
     g_diagCallocPad = false;
+    g_diagDevrInitOnce = DefaultDiagDevrInitOnce;
     ExpectNoLeaks(&g_diagHostLive, "host");
     g_diagHostFrees.clear();
     ncclCuMemHandleType = hipMemHandleTypePosixFileDescriptor;
@@ -250,6 +298,11 @@ class DiagP2pMicrotest : public ::testing::Test {
         comm_->localRank = slot;
       }
     }
+    // What ncclDevrInitOnce's initLsaDomainData derives for a non-MNNVL, non-cross-clique comm: the local ranks.
+    // Borrowed from localRanks_, so nothing frees it.
+    comm_->devrState.lsaDomainRankList = localRanks_.data();
+    comm_->devrState.lsaDomainSelf = comm_->localRank;
+    comm_->devrState.lsaDomainSize = comm_->localRanks;
   }
 
   void BuildGroupComm() {
@@ -401,9 +454,11 @@ constexpr int kAllHandles[] = {0,
                                ncclDiagP2pHandleCuMemOther};
 
 // Report free text without its key=value tokens, which keep their NCCL names (handle=LEGACY_CUDA_IPC) for log
-// parsers; starts at the report prefix, so the "<host>:<pid> " before it is not checked either.
+// parsers; starts at the report prefix ("NCCL DIAG " on stdout, " P2P " for the per-edge INFO(NCCL_DIAG) lines),
+// so the "<host>:<pid> " before it is not checked either.
 std::string DiagFreeText(const std::string& line) {
-  const size_t prefix = line.find("NCCL DIAG ");
+  size_t prefix = line.find("NCCL DIAG ");
+  if (prefix == std::string::npos) prefix = line.find(" P2P ");
   std::istringstream words(prefix == std::string::npos ? line : line.substr(prefix));
   std::string word, text;
   while (words >> word) {
@@ -425,6 +480,8 @@ void ExpectNoNvidiaTerms(const std::string& text, const std::string& context) {
 TEST_F(DiagP2pMicrotest, DiagFreeText_DropsKeyValueTokensAndHostPrefix) {
   EXPECT_EQ(DiagFreeText("cuda-ci:42 NCCL DIAG [INFO] p2p: write mismatch srcRank=0 handle=LEGACY_CUDA_IPC; x"),
             "NCCL DIAG [INFO] p2p: write mismatch x ");
+  EXPECT_EQ(DiagFreeText("cuda-ci:42:42 [0] NCCL INFO P2P write mismatch srcRank=0 handle=LEGACY_CUDA_IPC; x"),
+            "P2P write mismatch x ");
 }
 
 // AMD GPUs have no IMEX fabric domain, so a fabric handle or a NET path does not change the advice.
@@ -559,7 +616,7 @@ TEST_F(DiagP2pMicrotest, NcclSuccess_FailureWarnsWithResult) {
 
 TEST_F(DiagP2pMicrotest, LogEdge_InfoLineCarriesBothPeersAndOptionalExtra) {
   BuildComm(6, 4, {4, 1});
-  ScopedDebugLogging debug(NCCL_LOG_INFO, NCCL_INIT);
+  ScopedDebugLogging debug(NCCL_LOG_INFO, NCCL_DIAG);
   ncclDiagP2pEdgeInfo edge = Edge(PATH_PXB, ncclDiagP2pHandleLegacyIpc);
   edge.read = 1;
   const std::string log = CaptureLog([&] {
@@ -567,11 +624,11 @@ TEST_F(DiagP2pMicrotest, LogEdge_InfoLineCarriesBothPeersAndOptionalExtra) {
     ncclDiagP2pLogEdge(comm_.get(), "import", 1, 4, &edge, "import=1");
   });
   EXPECT_TRUE(LogHas(log,
-                     " Diagnostics P2P write srcRank=4 srcCudaDev=4 srcNvmlDev=14 dstRank=1 dstCudaDev=1 "
+                     " P2P write srcRank=4 srcCudaDev=4 srcNvmlDev=14 dstRank=1 dstCudaDev=1 "
                      "dstNvmlDev=11 path=PXB handle=LEGACY_CUDA_IPC topoRead=1\n"))
       << log;
   EXPECT_TRUE(LogHas(log,
-                     " Diagnostics P2P import srcRank=1 srcCudaDev=1 srcNvmlDev=11 dstRank=4 dstCudaDev=4 "
+                     " P2P import srcRank=1 srcCudaDev=1 srcNvmlDev=11 dstRank=4 dstCudaDev=4 "
                      "dstNvmlDev=14 path=PXB handle=LEGACY_CUDA_IPC topoRead=1 import=1\n"))
       << log;
 }
@@ -611,7 +668,12 @@ TEST_F(DiagP2pMicrotest, ReportSummary_PrintsOnlyOnRankZeroWithCountsSummedOverR
   comm_->rank = 0;
   EXPECT_EQ(CaptureStdout([&] { ncclDiagP2pReportSummary(comm_.get(), summaries); }), DiagP2pOkLine(6));
   summaries[1] = {3, 1};
-  EXPECT_EQ(CaptureStdout([&] { ncclDiagP2pReportSummary(comm_.get(), summaries); }), DiagP2pPartialLine(4, 6));
+  EXPECT_EQ(CaptureStdout([&] { ncclDiagP2pReportSummary(comm_.get(), summaries); }),
+            DiagP2pPartialLine(4, 6) + DiagP2pDetailsHintLine());
+  // With INFO/DIAG on the details are already in the log, so the hint is dropped.
+  std::string out;
+  CaptureDiagInfo([&] { ncclDiagP2pReportSummary(comm_.get(), summaries); }, &out);
+  EXPECT_EQ(out, DiagP2pPartialLine(4, 6));
 }
 
 TEST_F(DiagP2pMicrotest, ReportSummary_SilentWhenNothingTested) {
@@ -632,34 +694,45 @@ TEST_F(DiagP2pMicrotest, Report_EachReasonHasItsOwnLine) {
     std::string line;
   } kCases[] = {
       {ncclDiagP2pReasonNoDescriptor,
-       "NCCL DIAG [INFO] p2p: destination buffer unavailable " + fields +
+       "P2P destination buffer unavailable " + fields +
            " reason=noDescriptor; inspect earlier allocation, export, or initialization errors on the destination "
            "rank, then " + kPcieAdvice},
       {ncclDiagP2pReasonLocalCuda,
-       "NCCL DIAG [INFO] p2p: local HIP setup failed " + fields +
+       "P2P local HIP setup failed " + fields +
            " reason=localCuda; inspect preceding device, stream, allocation, or initialization errors on the source "
            "rank"},
       {ncclDiagP2pReasonImport,
-       "NCCL DIAG [INFO] p2p: peer-memory import failed " + fields +
+       "P2P peer-memory import failed " + fields +
            " reason=import; check HIP IPC support, GPU visibility, and process or container isolation"},
       {ncclDiagP2pReasonWriteMismatch,
-       "NCCL DIAG [INFO] p2p: write mismatch " + fields +
+       "P2P write mismatch " + fields +
            " expected=0x4000000200000001 got=0x0000000000000abc verify=0x0000000000000def; " + kPcieAdvice},
       {ncclDiagP2pReasonReadMismatch,
-       "NCCL DIAG [INFO] p2p: read mismatch " + fields + " expected=0x8000000080000004 got=0x0000000000000123; " +
+       "P2P read mismatch " + fields + " expected=0x8000000080000004 got=0x0000000000000123; " +
            kPcieAdvice},
-      {ncclDiagP2pReasonTopo, "NCCL DIAG [INFO] p2p: topology check failed " + fields +
+      {ncclDiagP2pReasonTopo, "P2P topology check failed " + fields +
                                   " reason=topo; inspect preceding topology records, then " + kPcieAdvice},
-      {ncclDiagP2pReasonWriteLaunch, "NCCL DIAG [INFO] p2p: launch/check failed " + fields +
+      {ncclDiagP2pReasonWriteLaunch, "P2P launch/check failed " + fields +
                                          " reason=writeLaunch; inspect preceding HIP or NCCL warnings, then " +
                                          kPcieAdvice},
-      {ncclDiagP2pReasonReadLaunch, "NCCL DIAG [INFO] p2p: launch/check failed " + fields +
+      {ncclDiagP2pReasonReadLaunch, "P2P launch/check failed " + fields +
                                         " reason=readLaunch; inspect preceding HIP or NCCL warnings, then " +
                                         kPcieAdvice},
   };
   for (const auto& c : kCases) {
     const ncclDiagP2pEdgeResult result = {1, c.reason, 0xabc, 0xdef, 0x123};
-    EXPECT_EQ(CaptureStdout([&] { ncclDiagP2pReport(comm_.get(), 4, 1, &edge, &result); }), DiagLine(c.line));
+    std::string out;
+    const std::string log = CaptureDiagInfo([&] { ncclDiagP2pReport(comm_.get(), 4, 1, &edge, &result); }, &out);
+    EXPECT_EQ(out, "") << c.line;
+    EXPECT_EQ(CountOf(log, " P2P "), 1) << log;
+    EXPECT_TRUE(LogHas(log, DiagInfo(c.line).c_str())) << log;
+    // INFO-gated: nothing at all with logging off.
+    std::string quietLog;
+    EXPECT_EQ(CaptureStdout([&] {
+                quietLog = CaptureLog([&] { ncclDiagP2pReport(comm_.get(), 4, 1, &edge, &result); });
+              }),
+              "");
+    EXPECT_EQ(quietLog, "") << c.line;
   }
 }
 
@@ -670,10 +743,14 @@ TEST_F(DiagP2pMicrotest, Report_FreeTextNamesNoNvidiaTermsForAnyReasonPathOrHand
       for (int handle : kAllHandles) {
         const ncclDiagP2pEdgeInfo edge = Edge(path, handle);
         const ncclDiagP2pEdgeResult result = {1, reason, 0xabc, 0xdef, 0x123};
-        const std::string line = CaptureStdout([&] { ncclDiagP2pReport(comm_.get(), 4, 1, &edge, &result); });
+        // Since 2.32.6 the per-edge report is an INFO(NCCL_DIAG) line, not a stdout line.
+        std::string out;
+        const std::string line =
+          CaptureDiagInfo([&] { ncclDiagP2pReport(comm_.get(), 4, 1, &edge, &result); }, &out);
         const std::string context =
             "reason " + std::to_string(reason) + " path " + std::to_string(path) + " handle " + std::to_string(handle);
-        ASSERT_NE(line.find("NCCL DIAG [INFO] p2p: "), std::string::npos) << context << ": " << line;
+        EXPECT_EQ(out, "") << context;
+        ASSERT_EQ(CountOf(line, " P2P "), 1) << context << ": " << line;
         ExpectNoNvidiaTerms(DiagFreeText(line), context);
       }
     }
@@ -693,102 +770,83 @@ TEST_F(DiagP2pMicrotest, ReportGroupFailures_ReportsTestedFailuresBySlotRanksInO
   results[0 * kN + 2] = {1, ncclDiagP2pReasonNone, 0, 0, 0};
   results[1 * kN + 0] = {0, ncclDiagP2pReasonIndirect, 0, 0, 0};
   results[2 * kN + 1] = {1, ncclDiagP2pReasonTopo, 0, 0, 0};
-  const std::string importLine = std::string("NCCL DIAG [INFO] p2p: peer-memory import failed ") + kFields41 +
+  const std::string importLine = std::string("P2P peer-memory import failed ") + kFields41 +
                                  " reason=import; check HIP IPC support, GPU visibility, and process or container "
                                  "isolation";
   const std::string topoLine = std::string(
-                                   "NCCL DIAG [INFO] p2p: topology check failed srcRank=5 srcCudaDev=5 srcNvmlDev=15 "
+                                   "P2P topology check failed srcRank=5 srcCudaDev=5 srcNvmlDev=15 "
                                    "dstRank=1 dstCudaDev=1 dstNvmlDev=11 path=SYS handle=CUMEM_OTHER reason=topo; "
                                    "inspect preceding topology records, then ") +
                                kPcieAdvice;
-  EXPECT_EQ(
-      CaptureStdout([&] { ncclDiagP2pReportGroupFailures(comm_.get(), localRanks_.data(), kN, edges, results); }),
-      DiagLine(importLine) + DiagLine(topoLine));
+  std::string out;
+  const std::string log = CaptureDiagInfo(
+      [&] { ncclDiagP2pReportGroupFailures(comm_.get(), localRanks_.data(), kN, edges, results); }, &out);
+  EXPECT_EQ(out, "");
+  EXPECT_EQ(CountOf(log, " P2P "), 2) << log;
+  const size_t importAt = log.find(DiagInfo(importLine));
+  const size_t topoAt = log.find(DiagInfo(topoLine));
+  ASSERT_NE(importAt, std::string::npos) << log;
+  ASSERT_NE(topoAt, std::string::npos) << log;
+  EXPECT_LT(importAt, topoAt) << log;
 }
 
-TEST_F(DiagP2pMicrotest, BuildRankSet_LocalRanksOrMnnvlClique) {
+// Since 2.32.6 ncclDiagP2pBuildRankSet no longer derives the rank set itself (local ranks, MNNVL clique, or the
+// cross-clique same-clusterUuid scan): it runs ncclDevrInitOnce and returns the LSA domain that initLsaDomainData in
+// src/dev_runtime.cc stored in devrState. That derivation is dev_runtime.cc's, so it is not tested here.
+TEST_F(DiagP2pMicrotest, BuildRankSet_ReturnsDevrLsaDomainFilledByInitOnce) {
   BuildComm(6, 1, {4, 1, 5});
+  int domainRanks[] = {0, 2, 1, 3};
+  ScopedHook init(g_diagDevrInitOnce, [&](ncclComm* comm) {
+    EXPECT_EQ(comm, comm_.get());
+    comm->devrState.lsaDomainRankList = domainRanks;
+    comm->devrState.lsaDomainSelf = 2;
+    comm->devrState.lsaDomainSize = 4;
+    return ncclSuccess;
+  });
   int* ranks = nullptr;
   int rank = -7;
   int nRanks = -7;
   EXPECT_EQ(ncclDiagP2pBuildRankSet(comm_.get(), &ranks, &rank, &nRanks), ncclSuccess);
-  EXPECT_EQ(ranks, localRanks_.data());
-  EXPECT_EQ(rank, 1);
-  EXPECT_EQ(nRanks, 3);
-  int cliqueRanks[] = {0, 2, 1, 3};
-  comm_->MNNVL = 1;
-  comm_->clique.ranks = cliqueRanks;
-  comm_->clique.size = 4;
-  comm_->cliqueRank = 2;
-  EXPECT_EQ(ncclDiagP2pBuildRankSet(comm_.get(), &ranks, &rank, &nRanks), ncclSuccess);
-  EXPECT_EQ(ranks, cliqueRanks);
+  EXPECT_EQ(init.calls, 1);
+  EXPECT_EQ(ranks, domainRanks);  // borrowed from devrState, not a copy
   EXPECT_EQ(rank, 2);
   EXPECT_EQ(nRanks, 4);
 }
 
-void SetUuids(std::vector<ncclPeerInfo>* peers, const std::vector<uint8_t>& tags) {
-  for (size_t r = 0; r < tags.size(); r++) {
-    std::memset((*peers)[r].fabricInfo.clusterUuid, 0, sizeof((*peers)[r].fabricInfo.clusterUuid));
-    (*peers)[r].fabricInfo.clusterUuid[15] = tags[r];
-  }
-}
-
-TEST_F(DiagP2pMicrotest, BuildRankSet_CrossCliqueCollectsSameUuidInRankOrder) {
-  BuildComm(6, 5, {4, 5});
-  comm_->p2pCrossClique = true;
-  comm_->MNNVL = 1;
-  SetUuids(&peers_, {7, 9, 7, 9, 7, 9});
-  comm_->nvlDomainSize = 3;
-  int* ranks = nullptr;
-  int rank = -7;
-  int nRanks = -7;
-  ASSERT_EQ(ncclDiagP2pBuildRankSet(comm_.get(), &ranks, &rank, &nRanks), ncclSuccess);
-  EXPECT_EQ(std::vector<int>(ranks, ranks + 3), (std::vector<int>{1, 3, 5}));
-  EXPECT_EQ(rank, 2);
-  EXPECT_EQ(nRanks, 3);
-  DiagFree(ranks);
-}
-
-TEST_F(DiagP2pMicrotest, BuildRankSet_CrossCliqueRejectsDomainSizeMismatch) {
-  BuildComm(4, 2, {0, 1, 2, 3});
-  comm_->p2pCrossClique = true;
-  SetUuids(&peers_, {3, 8, 8, 8});
-  int* ranks = nullptr;
-  int rank = -7;
-  int nRanks = -7;
-  for (int domainSize : {0, -1}) {
-    comm_->nvlDomainSize = domainSize;
-    EXPECT_EQ(ncclDiagP2pBuildRankSet(comm_.get(), &ranks, &rank, &nRanks), ncclInternalError);
+TEST_F(DiagP2pMicrotest, BuildRankSet_InitOnceFailurePropagatesBeforeReadingDevr) {
+  BuildComm(3, 1, {0, 1, 2});
+  for (ncclResult_t failure : {ncclInternalError, ncclSystemError}) {
+    ScopedHook init(g_diagDevrInitOnce, [&](ncclComm*) { return failure; });
+    int* ranks = nullptr;
+    int rank = -7;
+    int nRanks = -7;
+    EXPECT_EQ(ncclDiagP2pBuildRankSet(comm_.get(), &ranks, &rank, &nRanks), failure);
+    EXPECT_EQ(init.calls, 1);
     EXPECT_EQ(ranks, nullptr);
     EXPECT_EQ(rank, -7);
     EXPECT_EQ(nRanks, -7);
   }
-  g_diagCallocPad = true;
-  for (int domainSize : {2, 4}) {
-    comm_->nvlDomainSize = domainSize;
-    EXPECT_EQ(ncclDiagP2pBuildRankSet(comm_.get(), &ranks, &rank, &nRanks), ncclInternalError) << domainSize;
-    EXPECT_EQ(nRanks, domainSize);
-    ASSERT_NE(ranks, nullptr) << domainSize;
-    EXPECT_EQ(ranks[domainSize], 0);
-    DiagFree(ranks);
-    ranks = nullptr;
-  }
-  comm_->nvlDomainSize = 3;
-  EXPECT_EQ(ncclDiagP2pBuildRankSet(comm_.get(), &ranks, &rank, &nRanks), ncclSuccess);
-  EXPECT_EQ(rank, 1);
-  DiagFree(ranks);
 }
 
-TEST_F(DiagP2pMicrotest, BuildRankSet_CrossCliqueCallocFailurePropagates) {
-  BuildComm(3, 1, {0, 1, 2});
-  comm_->p2pCrossClique = true;
-  comm_->nvlDomainSize = 3;
-  FailCallocOf(3 * sizeof(int), 1);
+TEST_F(DiagP2pMicrotest, BuildRankSet_RejectsMissingListOrSelfOutsideDomain) {
+  BuildComm(4, 2, {0, 1, 2, 3});
   int* ranks = nullptr;
   int rank = -7;
   int nRanks = -7;
-  EXPECT_EQ(ncclDiagP2pBuildRankSet(comm_.get(), &ranks, &rank, &nRanks), ncclSystemError);
-  EXPECT_EQ(ranks, nullptr);
+  comm_->devrState.lsaDomainRankList = nullptr;
+  EXPECT_EQ(ncclDiagP2pBuildRankSet(comm_.get(), &ranks, &rank, &nRanks), ncclInternalError);
+  comm_->devrState.lsaDomainRankList = localRanks_.data();
+  for (int self : {-1, 4, 5}) {
+    comm_->devrState.lsaDomainSelf = self;
+    EXPECT_EQ(ncclDiagP2pBuildRankSet(comm_.get(), &ranks, &rank, &nRanks), ncclInternalError) << self;
+  }
+  for (int self : {0, 3}) {
+    comm_->devrState.lsaDomainSelf = self;
+    EXPECT_EQ(ncclDiagP2pBuildRankSet(comm_.get(), &ranks, &rank, &nRanks), ncclSuccess) << self;
+    EXPECT_EQ(ranks, localRanks_.data());
+    EXPECT_EQ(rank, self);
+    EXPECT_EQ(nRanks, 4);
+  }
 }
 
 ::testing::AssertionResult VerifyNcclDiagP2pEdgeInfo(const ncclDiagP2pEdgeInfo& actual,
@@ -848,7 +906,7 @@ TEST_F(DiagP2pMicrotest, DiscoverLocalEdges_ClassifiesEachPeerInOwnRowOnly) {
   });
   int outPeers[kN] = {99, 99, 99, 99, 99};
   int outPeerCount = 99;
-  ScopedDebugLogging debug(NCCL_LOG_INFO, NCCL_INIT);
+  ScopedDebugLogging debug(NCCL_LOG_INFO, NCCL_DIAG);
   const std::string log = CaptureLog([&] {
     ncclDiagP2pDiscoverLocalEdges(comm_.get(), localRanks_.data(), kSelf, kN, edges.data(), results.data(), outPeers,
                                   &outPeerCount);
@@ -873,10 +931,15 @@ TEST_F(DiagP2pMicrotest, DiscoverLocalEdges_ClassifiesEachPeerInOwnRowOnly) {
     }
   }
   EXPECT_TRUE(LogHas(log,
-                     " Diagnostics P2P skip srcRank=4 srcCudaDev=3 srcNvmlDev=14 dstRank=5 dstCudaDev=5 dstNvmlDev=15 "
+                     " P2P skip srcRank=4 srcCudaDev=3 srcNvmlDev=14 dstRank=5 dstCudaDev=5 dstNvmlDev=15 "
                      "path=PIX handle=LEGACY_CUDA_IPC topoRead=0 reason=indirect\n"))
       << log;
-  EXPECT_TRUE(LogHas(log, " Diagnostics P2P topo check failed srcRank=4 dstRank=2 result=2\n")) << log;
+  EXPECT_TRUE(LogHas(log, " P2P topo check failed srcRank=4 dstRank=2 result=2\n")) << log;
+  // Since 2.32.6 a direct non-P2P peer is logged as skipped too.
+  EXPECT_TRUE(LogHas(log,
+                     " P2P skip srcRank=4 srcCudaDev=3 srcNvmlDev=14 dstRank=0 dstCudaDev=0 dstNvmlDev=10 "
+                     "path=PHB handle=LEGACY_CUDA_IPC topoRead=1 reason=notP2P\n"))
+      << log;
 }
 
 struct DiagP2pInboundScene {
@@ -1008,7 +1071,7 @@ TEST_F(DiagP2pMicrotest, MapSameProcess_LegacyEnableFailureLeavesMappingInactive
   DiagP2pMapScene s;
   ScopedHook enable(g_hipDeviceEnablePeerAccess, [](int, unsigned) { return hipErrorInvalidDevice; });
   ScopedHook lastError(g_hipGetLastError, [] { return hipSuccess; });
-  ScopedDebugLogging debug(NCCL_LOG_INFO, NCCL_INIT);
+  ScopedDebugLogging debug(NCCL_LOG_INFO, NCCL_DIAG);
   ncclResult_t ret = ncclSuccess;
   const std::string log = CaptureLog([&] { ret = ncclDiagP2pMapSameProcess(comm_.get(), 1, &s.desc, &s.mapping); });
   EXPECT_EQ(ret, ncclUnhandledCudaError);
@@ -1016,7 +1079,7 @@ TEST_F(DiagP2pMicrotest, MapSameProcess_LegacyEnableFailureLeavesMappingInactive
   EXPECT_EQ(s.mapping.ptr, nullptr);
   EXPECT_EQ(s.mapping.active, 0);
   EXPECT_EQ(s.mapping.peerAccessEnabled, 0);
-  EXPECT_TRUE(LogHas(log, " Diagnostics: failed to enable peer access to dev 3: [hip_fake] stub error\n")) << log;
+  EXPECT_TRUE(LogHas(log, " P2P failed to enable peer access to dev 3: [hip_fake] stub error\n")) << log;
 }
 
 TEST_F(DiagP2pMicrotest, FreeMapping_NullMappingIsNoOp) {
@@ -1149,7 +1212,7 @@ struct DiagP2pImportScene {
   }
 };
 
-constexpr char kImportFields[] = " Diagnostics P2P import srcRank=4 srcCudaDev=4 srcNvmlDev=14 dstRank=";
+constexpr char kImportFields[] = " P2P import srcRank=4 srcCudaDev=4 srcNvmlDev=14 dstRank=";
 
 TEST_F(DiagP2pMicrotest, ImportMappings_RoutesByProcessAndRecordsMappingKind) {
   BuildGroupComm();
@@ -1168,7 +1231,7 @@ TEST_F(DiagP2pMicrotest, ImportMappings_RoutesByProcessAndRecordsMappingKind) {
     *ptr = s.peerSlots[3];
     return ncclSuccess;
   });
-  ScopedDebugLogging debug(NCCL_LOG_INFO, NCCL_INIT);
+  ScopedDebugLogging debug(NCCL_LOG_INFO, NCCL_DIAG);
   const std::string log = CaptureLog([&] { s.Run(comm_.get(), localRanks_.data(), true, kStream); });
   EXPECT_EQ(peers, std::vector<int>{5});
   EXPECT_EQ(s.Reason(0), ncclDiagP2pReasonNone);
@@ -1184,11 +1247,11 @@ TEST_F(DiagP2pMicrotest, ImportMappings_RoutesByProcessAndRecordsMappingKind) {
   EXPECT_EQ(s.mappings[3].active, 0);
   const std::string tail = " path=SYS handle=LEGACY_CUDA_IPC topoRead=0 import=0 reason=noDescriptor\n";
   EXPECT_TRUE(LogHas(log, (std::string(kImportFields) +
-                           "1 dstCudaDev=4 dstNvmlDev=11 path=XGMI handle=DIRECT topoRead=0 import=1\n")
+                           "1 dstCudaDev=4 dstNvmlDev=11 path=XGMI handle=DIRECT topoRead=0 import=1 status=success\n")
                               .c_str()))
       << log;
   EXPECT_TRUE(LogHas(log, (std::string(kImportFields) +
-                           "5 dstCudaDev=5 dstNvmlDev=15 path=PIX handle=LEGACY_CUDA_IPC topoRead=0 import=1\n")
+                           "5 dstCudaDev=5 dstNvmlDev=15 path=PIX handle=LEGACY_CUDA_IPC topoRead=0 import=1 status=success\n")
                               .c_str()))
       << log;
   EXPECT_TRUE(LogHas(log, (std::string(kImportFields) + "2 dstCudaDev=2 dstNvmlDev=12" + tail).c_str())) << log;
@@ -1205,7 +1268,7 @@ TEST_F(DiagP2pMicrotest, ImportMappings_CuMemTracksOnlySuccessfulImportsAndFlags
                           *ptr = s.peerSlots[1];
                           return peer == 2 ? ncclSystemError : ncclSuccess;
                         });
-  ScopedDebugLogging debug(NCCL_LOG_INFO, NCCL_INIT);
+  ScopedDebugLogging debug(NCCL_LOG_INFO, NCCL_DIAG);
   const std::string log = CaptureLog([&] { s.Run(comm_.get(), localRanks_.data(), true, kStream); });
   EXPECT_EQ(s.Reason(2), ncclDiagP2pReasonNone);
   EXPECT_EQ(s.Reason(3), ncclDiagP2pReasonImport);
@@ -1247,7 +1310,7 @@ TEST_F(DiagP2pMicrotest, ImportMappings_LocalCudaFailureSkipsEveryImport) {
     DiagP2pImportScene s;
     s.results[OwnEdge(3)].reason = ncclDiagP2pReasonTopo;
     s.memDescs[2].valid = 0;
-    ScopedDebugLogging debug(NCCL_LOG_INFO, NCCL_INIT);
+    ScopedDebugLogging debug(NCCL_LOG_INFO, NCCL_DIAG);
     const std::string log =
         CaptureLog([&] { s.Run(comm_.get(), localRanks_.data(), usable, usable ? nullptr : kStream); });
     EXPECT_EQ(s.Reason(0), ncclDiagP2pReasonLocalCuda);
@@ -1384,14 +1447,6 @@ bool IsDeviceBuffer(const void* ptr) {
   return std::count(g_diagDeviceLive.begin(), g_diagDeviceLive.end(), ptr) == 1;
 }
 
-int CountOf(const std::string& text, const std::string& needle) {
-  int count = 0;
-  for (size_t at = text.find(needle); at != std::string::npos; at = text.find(needle, at + 1)) {
-    count++;
-  }
-  return count;
-}
-
 // One real rank; the scene plays every peer's side of each collective.
 struct DiagP2pRunScene {
   DiagP2pRunScene(ncclComm* runComm, std::vector<int> runRanks)
@@ -1424,6 +1479,13 @@ struct DiagP2pRunScene {
   ncclResult_t Run() {
     ncclResult_t ret = ncclNumResults;
     out = CaptureStdout([&] { ret = ncclDiagP2pRun(comm); });
+    return ret;
+  }
+
+  // Run with INFO/DIAG logging on: the per-edge / setup / cleanup details land in log, the summary in out.
+  ncclResult_t RunWithDiagInfo() {
+    ncclResult_t ret = ncclNumResults;
+    log = CaptureDiagInfo([&] { ret = ncclDiagP2pRun(comm); }, &out);
     return ret;
   }
 
@@ -1597,6 +1659,7 @@ struct DiagP2pRunScene {
 
   std::vector<DiagP2pStage> stages;
   std::string out;
+  std::string log;  // RunWithDiagInfo only
   ncclResult_t mySetup = ncclNumResults;
   ncclDiagP2pMemDesc myDesc{};
   std::vector<ncclDiagP2pEdgeInfo> myEdges;
@@ -1639,7 +1702,8 @@ struct DiagP2pRunScene {
       }};
   HookOf<decltype(g_ncclP2pAllocateShareableBuffer)> alloc{
       g_ncclP2pAllocateShareableBuffer,
-      [this](size_t size, int map, ncclIpcDesc*, void** ptr, int peer, ncclMemManager* manager, ncclMemType_t type) {
+      [this](size_t size, int map, ncclIpcDesc*, void** ptr, int peer, ncclMemManager* manager, ncclMemType_t type,
+          bool) {
         EXPECT_EQ(peer, -1);
         EXPECT_EQ(manager, comm->memManager);
         EXPECT_EQ(type, ncclMemScratch);
@@ -1766,14 +1830,20 @@ TEST_F(DiagP2pMicrotest, Run_HappyPathOnRankZero_PrintsOkAndReleasesEverything) 
   EXPECT_EQ(std::count(g_diagHostFrees.begin(), g_diagHostFrees.end(), run.rankSet), 0);
 }
 
-TEST_F(DiagP2pMicrotest, Run_CrossClique_FreesTheRankSetItBuilt) {
+// Since 2.32.6 the rank set is devrState's LSA domain (owned by dev_runtime.cc), so ncclDiagP2pRun gathers over
+// it and no longer frees it; before, it freed the cross-clique set it had built itself.
+TEST_F(DiagP2pMicrotest, Run_GathersOverDevrLsaDomainWithoutFreeingIt) {
   BuildComm(4, 2, {0, 1, 2, 3});
-  comm_->p2pCrossClique = true;
-  comm_->nvlDomainSize = 4;
+  std::vector<int> domain = localRanks_;  // a distinct array, so the gather's rank pointer identifies its source
+  ScopedHook init(g_diagDevrInitOnce, [&](ncclComm* comm) {
+    comm->devrState.lsaDomainRankList = domain.data();
+    return ncclSuccess;
+  });
   DiagP2pRunScene run(comm_.get(), localRanks_);
   EXPECT_EQ(run.Run(), ncclSuccess);
-  EXPECT_NE(run.rankSet, localRanks_.data());
-  EXPECT_EQ(std::count(g_diagHostFrees.begin(), g_diagHostFrees.end(), run.rankSet), 1);
+  EXPECT_EQ(init.calls, 1);
+  EXPECT_EQ(run.rankSet, domain.data());
+  EXPECT_EQ(std::count(g_diagHostFrees.begin(), g_diagHostFrees.end(), run.rankSet), 0);
 }
 
 TEST_F(DiagP2pMicrotest, Run_HappyPathOnOtherSlot_ContributesExactRowsAndLogsEachEdge) {
@@ -1781,7 +1851,7 @@ TEST_F(DiagP2pMicrotest, Run_HappyPathOnOtherSlot_ContributesExactRowsAndLogsEac
   comm_->cudaDev = 3;
   DiagP2pRunScene run(comm_.get(), localRanks_);
   run.savedDevice = 3;
-  ScopedDebugLogging debug(NCCL_LOG_INFO, NCCL_INIT);
+  ScopedDebugLogging debug(NCCL_LOG_INFO, NCCL_DIAG);
   const std::string log = CaptureLog([&] { EXPECT_EQ(run.Run(), ncclSuccess); });
   EXPECT_EQ(run.out, "");
   EXPECT_TRUE(run.setDevices.empty());
@@ -1790,11 +1860,17 @@ TEST_F(DiagP2pMicrotest, Run_HappyPathOnOtherSlot_ContributesExactRowsAndLogsEac
   EXPECT_EQ(run.mySummary.tested, 0u);
   EXPECT_EQ(run.ipcClose.calls, kGroupN - 1);
   const std::string fields = "srcRank=4 srcCudaDev=4 srcNvmlDev=14 dstRank=1 dstCudaDev=1 dstNvmlDev=11 path=DIS "
-                             "handle=LEGACY_CUDA_IPC topoRead=0\n";
-  EXPECT_EQ(CountOf(log, " Diagnostics P2P write "), 3) << log;
-  EXPECT_EQ(CountOf(log, " Diagnostics P2P read "), 3) << log;
-  EXPECT_TRUE(LogHas(log, (" Diagnostics P2P write " + fields).c_str())) << log;
-  EXPECT_TRUE(LogHas(log, (" Diagnostics P2P read " + fields).c_str())) << log;
+                             "handle=LEGACY_CUDA_IPC topoRead=0";
+  // Since 2.32.6 each of the three outbound edges logs status=started at launch and status=success once verified.
+  EXPECT_EQ(CountOf(log, " P2P write "), 6) << log;
+  EXPECT_EQ(CountOf(log, " P2P read "), 6) << log;
+  EXPECT_EQ(CountOf(log, " status=started\n"), 6) << log;
+  for (const char* phase : {"write", "read"}) {
+    for (const char* status : {"started", "success"}) {
+      EXPECT_TRUE(LogHas(log, (std::string(" P2P ") + phase + " " + fields + " status=" + status + "\n").c_str()))
+          << phase << " " << status << "\n" << log;
+    }
+  }
   ASSERT_EQ(run.myResults.size(), static_cast<size_t>(kGroupN));
   ASSERT_EQ(run.myEdges.size(), static_cast<size_t>(kGroupN));
   ASSERT_EQ(run.myObs.size(), static_cast<size_t>(kGroupN));
@@ -1833,16 +1909,23 @@ TEST_F(DiagP2pMicrotest, Run_PeerSetupFailures_ReportedThenLastReturnedBeforeEdg
     DiagP2pRunScene run(comm_.get(), localRanks_);
     run.peerSetup[2] = ncclSystemError;
     run.peerSetup[3] = ncclInvalidUsage;
-    EXPECT_EQ(run.Run(), ncclInvalidUsage);
+    EXPECT_EQ(run.RunWithDiagInfo(), ncclInvalidUsage);
     EXPECT_EQ(run.stages, std::vector<DiagP2pStage>{DiagP2pStage::kSetup});
-    EXPECT_EQ(run.out, DiagP2pSetupFailLine(2, ncclSystemError) + DiagP2pSetupFailLine(3, ncclInvalidUsage));
+    EXPECT_EQ(run.out, "");
+    EXPECT_EQ(CountOf(run.log, " P2P setup failed "), 2) << run.log;
+    const size_t at2 = run.log.find(DiagInfo(DiagP2pSetupFailBody(2, ncclSystemError)));
+    const size_t at3 = run.log.find(DiagInfo(DiagP2pSetupFailBody(3, ncclInvalidUsage)));
+    ASSERT_NE(at2, std::string::npos) << run.log;
+    ASSERT_NE(at3, std::string::npos) << run.log;
+    EXPECT_LT(at2, at3) << run.log;
     EXPECT_EQ(run.streamDestroy.calls, 1);
   }
   BuildGroupComm();
   DiagP2pRunScene run(comm_.get(), localRanks_);
   run.peerSetup[0] = ncclSystemError;
-  EXPECT_EQ(run.Run(), ncclSystemError);
+  EXPECT_EQ(run.RunWithDiagInfo(), ncclSystemError);
   EXPECT_EQ(run.out, "");
+  EXPECT_EQ(CountOf(run.log, " P2P setup failed "), 0) << run.log;  // only rank 0 reports
 }
 
 TEST_F(DiagP2pMicrotest, Run_LocalSetupFailure_IsSharedThroughAgreementGather) {
@@ -1850,14 +1933,17 @@ TEST_F(DiagP2pMicrotest, Run_LocalSetupFailure_IsSharedThroughAgreementGather) {
   // Rank set failure leaves p2pNRanks 0; a later mappings calloc failure does not, so cleanup must skip null mappings.
   for (const bool rankSetFails : {true, false}) {
     SCOPED_TRACE(rankSetFails);
-    comm_->p2pCrossClique = rankSetFails;
+    ScopedHook init(g_diagDevrInitOnce, [&](ncclComm*) { return rankSetFails ? ncclInternalError : ncclSuccess; });
     DiagP2pRunScene run(comm_.get(), localRanks_);
     FailCallocOf(rankSetFails ? 0 : run.n * sizeof(ncclDiagP2pMapping), 1);
     const ncclResult_t want = rankSetFails ? ncclInternalError : ncclSystemError;
-    EXPECT_EQ(run.Run(), want);
+    EXPECT_EQ(run.RunWithDiagInfo(), want);
+    EXPECT_EQ(init.calls, 1);
     EXPECT_EQ(run.mySetup, want);
     EXPECT_EQ(run.stages, std::vector<DiagP2pStage>{DiagP2pStage::kSetup});
-    EXPECT_EQ(run.out, DiagP2pSetupFailLine(0, want));
+    EXPECT_EQ(run.out, "");
+    EXPECT_EQ(CountOf(run.log, " P2P setup failed "), 1) << run.log;
+    EXPECT_TRUE(LogHas(run.log, DiagInfo(DiagP2pSetupFailBody(0, want)).c_str())) << run.log;
   }
 }
 
@@ -1898,12 +1984,12 @@ struct DiagP2pFault {
 // Each fault runs in a fresh scene and must still mark every outbound edge `reason` and return `result`.
 void ExpectEachFault(ncclComm* comm, const std::vector<int>& ranks, int reason, const std::vector<DiagP2pFault>& faults,
                      const std::function<void(const DiagP2pRunScene&)>& check = [](const DiagP2pRunScene&) {},
-                     ncclResult_t result = ncclSuccess) {
+                     ncclResult_t result = ncclSuccess, bool withDiagInfo = false) {
   for (const auto& f : faults) {
     SCOPED_TRACE(f.name);
     DiagP2pRunScene run(comm, ranks);
     f.arm(&run);
-    EXPECT_EQ(run.Run(), result);
+    EXPECT_EQ(withDiagInfo ? run.RunWithDiagInfo() : run.Run(), result);
     EXPECT_EQ(run.Reasons(), run.RowOf(reason));
     check(run);
   }
@@ -2013,21 +2099,28 @@ TEST_F(DiagP2pMicrotest, Run_MismatchesAndMissingDescriptor_ReportEachFailedEdge
   run.writeCorruption = 0x10;
   run.peerSlots[3][0].readPattern = 0xbad;
   run.noDescPeer = 2;
-  EXPECT_EQ(run.Run(), ncclSuccess);
+  EXPECT_EQ(run.RunWithDiagInfo(), ncclSuccess);
   EXPECT_EQ(run.Reasons(), (std::vector<int>{0, ncclDiagP2pReasonWriteMismatch, ncclDiagP2pReasonNoDescriptor,
                                              ncclDiagP2pReasonReadMismatch}));
   const std::string head = "srcRank=0 srcCudaDev=1 srcNvmlDev=10 dstRank=";
   const std::string tail = " path=DIS handle=LEGACY_CUDA_IPC";
-  EXPECT_EQ(run.out,
-            DiagP2pPartialLine(9, 12) +
-                DiagLine("NCCL DIAG [INFO] p2p: write mismatch " + head + "3 dstCudaDev=0 dstNvmlDev=13" + tail +
-                         " expected=0x4000000000000003 got=0x4000000000000013 verify=0x4000000000000013; " +
-                         kGenericAdvice) +
-                DiagLine("NCCL DIAG [INFO] p2p: destination buffer unavailable " + head + "1 dstCudaDev=2 " +
-                         "dstNvmlDev=11" + tail + " reason=noDescriptor; inspect earlier allocation, export, or " +
-                         "initialization errors on the destination rank, then " + kGenericAdvice) +
-                DiagLine("NCCL DIAG [INFO] p2p: read mismatch " + head + "2 dstCudaDev=3 dstNvmlDev=12" + tail +
-                         " expected=0x8000000100000000 got=0x0000000000000bad; " + kGenericAdvice));
+  // The summary stays on stdout; the per-edge failure details are INFO(NCCL_DIAG) lines since 2.32.6.
+  EXPECT_EQ(run.out, DiagP2pPartialLine(9, 12));
+  ExpectInfoLinesInOrder(
+      run.log, {"P2P write mismatch " + head + "3 dstCudaDev=0 dstNvmlDev=13" + tail +
+                    " expected=0x4000000000000003 got=0x4000000000000013 verify=0x4000000000000013; " + kGenericAdvice,
+                "P2P destination buffer unavailable " + head + "1 dstCudaDev=2 " + "dstNvmlDev=11" + tail +
+                    " reason=noDescriptor; inspect earlier allocation, export, or " +
+                    "initialization errors on the destination rank, then " + kGenericAdvice,
+                "P2P read mismatch " + head + "2 dstCudaDev=3 dstNvmlDev=12" + tail +
+                    " expected=0x8000000100000000 got=0x0000000000000bad; " + kGenericAdvice});
+  // With INFO/DIAG off, only the summary and the pointer to the details reach the user.
+  DiagP2pRunScene quiet(comm_.get(), localRanks_);
+  quiet.writeCorruption = 0x10;
+  quiet.peerSlots[3][0].readPattern = 0xbad;
+  quiet.noDescPeer = 2;
+  EXPECT_EQ(quiet.Run(), ncclSuccess);
+  EXPECT_EQ(quiet.out, DiagP2pPartialLine(9, 12) + DiagP2pDetailsHintLine());
 }
 
 // Pins misattribution: a destination-local failure reads as a write mismatch; a fix flips this pin.
@@ -2047,7 +2140,10 @@ TEST_F(DiagP2pMicrotest, Run_CleanupFailures_PrintedButNotReturnedWithoutRunErro
   BuildLeaderComm();
   const auto printed = [](int result) {
     return [result](const DiagP2pRunScene& run) {
-      EXPECT_EQ(run.out, DiagP2pOkLine(12) + DiagP2pCleanupLine(0, result));
+      // The cleanup failure is an INFO(NCCL_DIAG) line since 2.32.6; stdout keeps only the summary.
+      EXPECT_EQ(run.out, DiagP2pOkLine(12));
+      EXPECT_EQ(CountOf(run.log, " P2P resource cleanup failed "), 1) << run.log;
+      EXPECT_TRUE(LogHas(run.log, DiagInfo(DiagP2pCleanupBody(0, result)).c_str())) << run.log;
       EXPECT_EQ(run.stages.empty() ? DiagP2pStage::kNone : run.stages.back(), DiagP2pStage::kFreed);
       EXPECT_EQ(run.deviceFrees, 4);
     };
@@ -2063,11 +2159,11 @@ TEST_F(DiagP2pMicrotest, Run_CleanupFailures_PrintedButNotReturnedWithoutRunErro
           {"ipcClose", [](DiagP2pRunScene* r) { r->failIpcClose = true; }},
           {"restoreDevice", [](DiagP2pRunScene* r) { r->failSetDeviceCall = 2; }},
       },
-      printed(ncclUnhandledCudaError), ncclSuccess);
+      printed(ncclUnhandledCudaError), ncclSuccess, /*withDiagInfo=*/true);
   ExpectEachFault(
       comm_.get(), localRanks_, none,
       {{"importsFreedBarrier", [](DiagP2pRunScene* r) { r->failStage = DiagP2pStage::kFreed; }}},
-      printed(ncclRemoteError), ncclSuccess);
+      printed(ncclRemoteError), ncclSuccess, /*withDiagInfo=*/true);
   // Later stream and device faults must not overwrite the first printed cleanup error.
   std::vector<DiagP2pFault> deviceFrees;
   for (int nth = 1; nth <= 4; nth++) {
@@ -2077,13 +2173,16 @@ TEST_F(DiagP2pMicrotest, Run_CleanupFailures_PrintedButNotReturnedWithoutRunErro
                              r->failSetDeviceCall = 2;
                            }});
   }
-  ExpectEachFault(comm_.get(), localRanks_, none, deviceFrees, printed(ncclSystemError), ncclSuccess);
+  ExpectEachFault(comm_.get(), localRanks_, none, deviceFrees, printed(ncclSystemError), ncclSuccess,
+                  /*withDiagInfo=*/true);
   // A run error still propagates and wins over the (printed) cleanup error.
   DiagP2pRunScene run(comm_.get(), localRanks_);
   run.failStreamDestroy = true;
   run.failStage = DiagP2pStage::kReported;
-  EXPECT_EQ(run.Run(), ncclRemoteError);
-  EXPECT_EQ(run.out, DiagP2pOkLine(12) + DiagP2pCleanupLine(0, ncclUnhandledCudaError));
+  EXPECT_EQ(run.RunWithDiagInfo(), ncclRemoteError);
+  EXPECT_EQ(run.out, DiagP2pOkLine(12));
+  EXPECT_EQ(CountOf(run.log, " P2P resource cleanup failed "), 1) << run.log;
+  EXPECT_TRUE(LogHas(run.log, DiagInfo(DiagP2pCleanupBody(0, ncclUnhandledCudaError)).c_str())) << run.log;
 }
 
 // ROCm gaps: cuMem same-process import fails (reported) and handle release fails (printed in cleanup),
@@ -2093,16 +2192,15 @@ TEST_F(DiagP2pMicrotest, Run_CuMemSameProcessPeer_FailsImportAndCleanupOnRocm) {
   peers_[3].pidHash = peers_[0].pidHash;
   ScopedHook cuMem(g_cuMemEnable, [] { return 1; });
   DiagP2pRunScene run(comm_.get(), localRanks_);
-  EXPECT_EQ(run.Run(), ncclSuccess);
+  EXPECT_EQ(run.RunWithDiagInfo(), ncclSuccess);
   EXPECT_EQ(run.directMap, 1);
   EXPECT_EQ(run.remoteCounts, (std::vector<int>{2, 2}));
   EXPECT_EQ(run.Reasons(), (std::vector<int>{0, ncclDiagP2pReasonImport, 0, 0}));
-  EXPECT_EQ(run.out,
-            DiagP2pPartialLine(11, 12) +
-                DiagLine("NCCL DIAG [INFO] p2p: peer-memory import failed srcRank=0 srcCudaDev=0 srcNvmlDev=10 "
-                         "dstRank=3 dstCudaDev=3 dstNvmlDev=13 path=DIS handle=DIRECT reason=import; inspect "
-                         "preceding HIP peer-access or virtual-memory mapping errors on the source rank") +
-                DiagP2pCleanupLine(0, ncclInternalError));
+  EXPECT_EQ(run.out, DiagP2pPartialLine(11, 12));
+  ExpectInfoLinesInOrder(run.log, {"P2P peer-memory import failed srcRank=0 srcCudaDev=0 srcNvmlDev=10 "
+                                   "dstRank=3 dstCudaDev=3 dstNvmlDev=13 path=DIS handle=DIRECT reason=import; inspect "
+                                   "preceding HIP peer-access or virtual-memory mapping errors on the source rank",
+                                   DiagP2pCleanupBody(0, ncclInternalError)});
 }
 
 TEST_F(DiagP2pMicrotest, Run_LegacySameProcessPeer_EnablesPeerAccessThenDisablesIt) {
@@ -2117,14 +2215,16 @@ TEST_F(DiagP2pMicrotest, Run_LegacySameProcessPeer_EnablesPeerAccessThenDisables
     return hipSuccess;
   });
   DiagP2pRunScene run(comm_.get(), localRanks_);
-  EXPECT_EQ(run.Run(), ncclSuccess);
+  EXPECT_EQ(run.RunWithDiagInfo(), ncclSuccess);
   EXPECT_EQ(run.Reasons(), run.RowOf(ncclDiagP2pReasonNone));
   EXPECT_EQ(disabled, std::vector<int>{6});
   EXPECT_EQ(run.ipcClose.calls, run.n - 2);
-  EXPECT_EQ(run.out,
-            DiagLine("NCCL DIAG [INFO] p2p: temporarily enabled context-wide HIP peer access rank=0 cudaDev=5; "
-                     "avoid concurrent HIP use on this context until diagnostics completes") +
-                DiagP2pOkLine(12));
+  // The peer-access notice is an INFO(NCCL_DIAG) line since 2.32.6; stdout keeps only the summary.
+  EXPECT_EQ(run.out, DiagP2pOkLine(12));
+  EXPECT_TRUE(LogHas(run.log, DiagInfo("P2P temporarily enabled context-wide HIP peer access rank=0 cudaDev=5; "
+                                       "avoid concurrent HIP use on this context until diagnostics completes")
+                                  .c_str()))
+      << run.log;
 }
 
 TEST_F(DiagP2pMicrotest, Run_RankMapCopyFailure_WarnsAsSlotInitFailure) {

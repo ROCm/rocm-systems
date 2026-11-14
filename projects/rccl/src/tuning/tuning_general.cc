@@ -8,6 +8,9 @@
 #include "cost_model.h"
 #include "nccl_tuner.h"
 #include "comm.h"
+#include "cudawrap.h"
+#include "channel.h"
+#include "platforms/platforms.h"
 
 NCCL_PARAM(Nthreads, "NTHREADS", -2);
 NCCL_PARAM(Ll128Nthreads, "LL128_NTHREADS", -2);
@@ -24,6 +27,10 @@ int ncclTuningGetNsteps(int coll, int nRanks) {
 
 int ncclTuningGetCompCapIndex(struct ncclComm* comm) {
   int minCompCap = comm->minCompCap;
+#if !defined(__HIP_PLATFORM_AMD__)
+  // [RCCL] AMD compCap values (e.g. gfx1250 -> 125) overlap RUBIN_AND_LATER; never select the Rubin tables on AMD.
+  if (RUBIN_AND_LATER(minCompCap)) return NCCL_RUBIN_COMPCAP_IDX;
+#endif
   if (minCompCap >= 100) {
     return NCCL_BLACKWELL_COMPCAP_IDX;
   } else if (minCompCap >= 90) {
@@ -36,11 +43,12 @@ int ncclTuningGetCompCapIndex(struct ncclComm* comm) {
 }
 
 void ncclTuningGetConstantsIndexes(struct ncclComm* comm, int* index1, int* index2) {
-  *index2 = comm->nNodes <= 2 ? comm->nNodes - 1 : 2;
+  if (index2 != nullptr) *index2 = comm->nNodes <= 2 ? comm->nNodes - 1 : 2;
   // LL: for single node, we look at GPU type; for multi-node, we look at CPU type
-  *index1 = comm->nNodes == 1 ? ncclTuningGetCompCapIndex(comm) :
-            (comm->cpuVendor == NCCL_TOPO_CPU_VENDOR_AMD || comm->cpuVendor == NCCL_TOPO_CPU_VENDOR_MIXED) ? 1 :
-                                                                                                             0;
+  if (index1 != nullptr)
+    *index1 = comm->nNodes == 1 ? ncclTuningGetCompCapIndex(comm) :
+              (comm->cpuVendor == NCCL_TOPO_CPU_VENDOR_AMD || comm->cpuVendor == NCCL_TOPO_CPU_VENDOR_MIXED) ? 1 :
+                                                                                                               0;
 }
 
 void ncclTuningGetHwIndexes(struct ncclComm* comm, int a, int* intraHw, int* interHw) {
@@ -49,7 +57,7 @@ void ncclTuningGetHwIndexes(struct ncclComm* comm, int a, int* intraHw, int* int
   if (interHw != nullptr) *interHw = comm->nNodes == 1 ? intra : NCCL_HW_NET;
 }
 
-float ncclTuningGetTime(struct ncclTuningInput_t* const inputs, int a, float* lat, float* bw) {
+float ncclTuningGetTime(struct ncclTuningInput_t* const inputs, int a, float lat /* usec */, float bw /* GB/s */) {
   int latCount = a == NCCL_ALGO_RING ? inputs->numPipeOps : DIVUP(inputs->numPipeOps, NCCL_MAX_DEV_WORK_BATCH_COLLS);
 
   // Relegate fp8 reduction trees of sufficient depth that they incur precision loss
@@ -62,7 +70,9 @@ float ncclTuningGetTime(struct ncclTuningInput_t* const inputs, int a, float* la
                             rcclDdaLL128Threshold(inputs->comm, ncclFuncAllReduce), inputs->comm->archName);
   }
 
-  return (*lat * latCount + inputs->nBytes / (1000 * (*bw))) * precision_ratio;
+  float time = lat * latCount * precision_ratio;
+  if (bw > 0) time += inputs->nBytes / (1000 * bw) * precision_ratio;
+  return time;
 }
 
 static int ncclTuningGetNthreads(const char* name, int env, int min, int max, int def) {
@@ -139,8 +149,10 @@ ncclResult_t ncclTuningSetThreadThresholds(struct ncclComm* comm) {
   return ncclSuccess;
 }
 
-ncclResult_t ncclTuningGetChannels(struct ncclTuningInput_t* const input, struct ncclTuningResult_t* const result) {
+ncclResult_t ncclTuningGetChannels(struct ncclTuningInput_t* const input, struct ncclTuningResult_t* const result,
+                                   bool forceMaxTreeThreads) {
   int nc = input->comm->nChannels;
+  NCCLCHECK(ncclTuningPlatformChannelTuning(input, result, &nc));
   int nt = input->comm->tuningContext.maxThreads[result->algo][result->proto];
   int threadThreshold = input->comm->tuningContext.threadThresholds[result->algo][result->proto];
   if (result->algo == NCCL_ALGO_COLLNET_DIRECT) {
@@ -175,6 +187,8 @@ ncclResult_t ncclTuningGetChannels(struct ncclTuningInput_t* const input, struct
 
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
   // RCCL: host WARP_SIZE is a placeholder and kernels cap at NCCL_MAX_NTHREADS; size as topoGetAlgoInfo() does.
+  // rcclOptThreadBlockSize sizes Tree too, so the forced-max Tree threads below do not apply on AMD.
+  (void)forceMaxTreeThreads;
   {
     struct ncclTaskColl info = {};
     info.func = input->func;
@@ -197,7 +211,7 @@ ncclResult_t ncclTuningGetChannels(struct ncclTuningInput_t* const input, struct
     if (result->algo == NCCL_ALGO_TREE) nt += 4 * WARP_SIZE;
   }
   nt = nt / WARP_SIZE < 3 ? 3 * WARP_SIZE : nt;
-  if (result->algo == NCCL_ALGO_TREE) nt = NCCL_MAX_NTHREADS; // Tree now uses all threads always.
+  if (result->algo == NCCL_ALGO_TREE && forceMaxTreeThreads) nt = NCCL_MAX_NTHREADS;
   if (result->algo == NCCL_ALGO_PAT) nt = NCCL_MAX_NTHREADS;
 #endif
   if (result->maxChannels > 0 && result->maxChannels < nc) {
@@ -238,4 +252,29 @@ ncclResult_t ncclTuningExpandId(int tuningId, int* algo, int* proto, int* symKer
     *ceMethodId = tuningId - NCCL_TUNING_CE_METHOD_ID_OFFSET;
   }
   return ncclSuccess;
+}
+
+// Model one collective on an otherwise empty plan. Aggregation can move a
+// task's starting channel and changes the traffic budget shared by the plan.
+int ncclTuningGetActiveChannels(struct ncclTuningInput_t* const input, const struct ncclTuningResult_t* result) {
+  int maxChannels = result->maxChannels > 0 ? result->maxChannels : result->nChannels;
+  maxChannels = ncclClampChannels(maxChannels, input->minCTAs, input->maxCTAs);
+
+  int isCollnet = result->algo == NCCL_ALGO_COLLNET_CHAIN || result->algo == NCCL_ALGO_COLLNET_DIRECT ||
+                  (result->algo == NCCL_ALGO_NVLS && input->comm->nNodes > 1);
+  int isNvls = result->algo == NCCL_ALGO_NVLS || result->algo == NCCL_ALGO_NVLS_TREE ||
+               (result->algo == NCCL_ALGO_PAT && !input->comm->isOneRPN);
+  maxChannels = std::min(maxChannels, ncclCommNMaxChannels(input->comm, isCollnet, isNvls));
+
+  if (maxChannels <= 0 || input->count == 0) return 0;
+
+  int trafficPerByte = ncclFuncTrafficPerByte(input->func, input->comm->nRanks);
+  if (result->proto == NCCL_PROTO_LL) trafficPerByte *= 4;
+
+  size_t elementSize = ncclTypeSize(input->datatype);
+  size_t trafficBytes = std::max(ncclMinTrafficPerChannel, input->count * elementSize * trafficPerByte);
+  size_t trafficPerChannel = ncclCollTrafficPerChannel(trafficBytes, maxChannels);
+  return ncclComputeCollChannelLayout(input->count, elementSize, trafficPerByte, trafficPerChannel,
+                                      /*currentTraffic=*/0, /*channelId=*/0, maxChannels)
+    .nChannels;
 }

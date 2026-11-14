@@ -39,7 +39,7 @@ ASSERT_HOOK_MATCHES_PROD(g_ncclArgsGlobalCheck, ncclArgsGlobalCheck);
 #undef ASSERT_HOOK_MATCHES_PROD
 
 // enqueue.h
-ncclResult_t ncclPrepareTasks(struct ncclComm*, bool*, bool*, ncclSimInfo_t*) { ::abort(); }
+ncclResult_t ncclPrepareTasks(struct ncclComm*, bool*, bool*, bool*, ncclSimInfo_t*) { ::abort(); }
 // group.cc validates every comm's launch-completion events on the happy path, so mirror
 // enqueue.cc rather than abort: at most one per communicator per group.
 ncclResult_t ncclValidateCollConfigLaunchCompletionEvents(struct ncclComm* comm) {

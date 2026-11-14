@@ -26,9 +26,10 @@
 #include <mutex>
 #include <string.h>
 
-// RCCL env-var parameters for traffic class (defined in transport/net_ib/)
+// RCCL env-var parameters for traffic class (defined in transport/net_ib/). NCCL_IB_TC is an
+// ncclParam<int32_t> object since 2.32.6; NCCL_PARAM_VAL_AUTO (-1) is its unset value.
 extern int64_t ncclParamGinIbTc();
-extern int64_t ncclParamIbTc();
+USE_NCCL_PARAM(ncclParamIbTc, int32_t);
 
 // collComm: per-connection state, returned by connect()
 struct ginRocshmemGdaCollCtx {
@@ -156,6 +157,7 @@ static ncclResult_t ginRocshmemGdaDevices(int* ndev) {
 static ncclResult_t ginRocshmemGdaGetGinProperties(ncclGinProperties_t* ginProps) {
   ginProps->supportsStrongSignals = true;
   ginProps->supportsVASignals = true;
+  ginProps->barrierOptions = NCCL_GIN_BARRIER_DEFAULT;
   return ncclSuccess;
 }
 
@@ -191,7 +193,7 @@ static ncclResult_t ginRocshmemGdaListen(void* ctx, int dev, void* handle, void*
 }
 
 static ncclResult_t ginRocshmemGdaConnect(void* ctx, void* handles[], int nranks, int rank, void* listenComm,
-                                          void** collComm) {
+                                          void** collComm, volatile uint32_t* /*abortFlag*/) {
   struct ginRocshmemInitCtx* ictx = (struct ginRocshmemInitCtx*)ctx;
   auto* cctx = new ginRocshmemGdaCollCtx{};
   cctx->nranks = nranks;

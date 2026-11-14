@@ -719,6 +719,8 @@ TEST(SearchPcieOrderedRing, UnroutableUnsetDegradesInsteadOfFailing)
 // Topology order cannot close a ring here, but another order can. Mode 1 must drop the order
 // and search again, yielding a real ring. Falling straight through to the no-path ring would
 // leave a degraded graph (1 channel, bwIntra 0.1) where the knob off builds a full one.
+// The retry also re-enters ncclTopoCompute's search with the NET selection cache still installed,
+// so creating that cache after the retry label fails it with ncclInternalError.
 TEST(SearchPcieOrderedRing, UnorderableRetriesUnpinnedInsteadOfDegrading)
 {
     RUN_ISOLATED_TEST("UnorderableRetriesUnpinnedInsteadOfDegrading",

@@ -14,8 +14,8 @@
 # need RCCL device-side primitives without recompiling RCCL from source.
 #
 # Usage (standalone, from projects/rccl/bindings/ir):
-#     make EMIT_LLVM_IR=1 BITCODE_LIB_ARCH=gfx942
-#     make EMIT_LLVM_IR=1 RCCL_ROOT=/path/to/projects/rccl BUILDDIR=/path/to/build
+#     make NCCL_EMIT_LLVM_IR=1 BITCODE_LIB_ARCH=gfx942
+#     make NCCL_EMIT_LLVM_IR=1 RCCL_ROOT=/path/to/projects/rccl BUILDDIR=/path/to/build
 #
 # Prerequisites:
 #   - ROCm LLVM toolchain (clang++, opt, llvm-dis, llvm-as) under
@@ -25,10 +25,19 @@
 #     Example: cmake --build $(BUILDDIR) --target hipify_all
 #
 
-ifneq ($(EMIT_LLVM_IR), 0)
+# EMIT_LLVM_IR is the name before NCCL 2.32.6; it still applies when
+# NCCL_EMIT_LLVM_IR is not set. Unset, IR generation is on.
+NCCL_EMIT_LLVM_IR ?= $(EMIT_LLVM_IR)
+
+ifneq ($(NCCL_EMIT_LLVM_IR), 0)
 
 ##### Source #####
+# NCCL's src/nccl_device_ir.cu (the ncclIr* ABI) only builds with Clang CUDA
+# or NVCC (#error otherwise, PTX inline asm), so the HIP bitcode is still built
+# from RCCL's nccl_device_wrapper{,__impl}.h. The shared ReduceCopy type lists
+# now live in src/util.h.
 LLVM_SRC := nccl_device_wrapper__impl.h
+LLVM_IMPL_HEADERS := src/util.h
 
 ##### RCCL root (bindings/ir -> projects/rccl) #####
 RCCL_ROOT ?= $(abspath ../..)
@@ -53,7 +62,9 @@ LLVM_AS  ?= $(ROCM_LLVM)/bin/llvm-as
 ##### Build configuration #####
 # Default GPU architecture; override on the command line, e.g.:
 #     make BITCODE_LIB_ARCH=gfx942
-BITCODE_LIB_ARCH ?= gfx950
+# IR_ARCH (NCCL's unified IR architecture option) is accepted as an alias.
+IR_ARCH          ?= gfx950
+BITCODE_LIB_ARCH ?= $(IR_ARCH)
 
 # RCCL device APIs are C++17.
 BITCODE_CXX_STD  ?= gnu++17
@@ -126,7 +137,7 @@ check_hipify:
 	@if [ ! -d "$(HIPIFY_INC)" ]; then \
 		echo "ERROR: hipify staging directory not found: $(HIPIFY_INC)" >&2; \
 		echo "Run the RCCL CMake build first to populate it, e.g.:" >&2; \
-		echo "  cmake -B $(BUILDDIR) -DEMIT_LLVM_IR=ON $(RCCL_ROOT)" >&2; \
+		echo "  cmake -B $(BUILDDIR) -DNCCL_EMIT_LLVM_IR=ON $(RCCL_ROOT)" >&2; \
 		echo "  cmake --build $(BUILDDIR) --target hipify_all" >&2; \
 		exit 1; \
 	fi
@@ -137,7 +148,7 @@ $(WRAPPER_HEADER): nccl_device_wrapper.h
 	@echo "Copying nccl_device_wrapper.h -> $@"
 	cp -f $< $@
 
-$(UNOPTIMIZED_BC): $(LLVM_SRC) $(WRAPPER_HEADER) util.h check_hipify
+$(UNOPTIMIZED_BC): $(LLVM_SRC) $(LLVM_IMPL_HEADERS) $(WRAPPER_HEADER) check_hipify
 	@mkdir -p $(OBJDIR)
 	@echo "Generating unoptimized LLVM bitcode for $(BITCODE_LIB_ARCH)..."
 	$(CLANG) $(CLANG_FLAGS) $(LLVM_SRC) -o $@
@@ -168,10 +179,10 @@ llvm_ir: $(FINAL_BC) $(OPTIMIZED_BC) $(WRAPPER_HEADER)
 	@echo "  Final BC:          $(FINAL_BC)"
 	@echo "  Wrapper Header:    $(WRAPPER_HEADER)"
 
-else  # EMIT_LLVM_IR == 0
+else  # NCCL_EMIT_LLVM_IR == 0
 
 llvm_ir:
-	@echo "RCCL LLVM IR generation disabled (EMIT_LLVM_IR=0)"
+	@echo "RCCL LLVM IR generation disabled (NCCL_EMIT_LLVM_IR=0)"
 
 endif
 

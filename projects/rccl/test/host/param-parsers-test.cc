@@ -133,18 +133,42 @@ TEST(ParamParsersMicrotest, Integer_RejectsOverflowOfTheIntermediateLongLong) {
             ncclParamParserDefault<uint32_t>::resolve("999999999999999999999999999", unsignedOut));
 }
 
-TEST(ParamParsersMicrotest, Integer_KnownBug_NegativeUnsignedWraps) {
-  // strtoull() negates a leading '-' rather than rejecting it; a fix flips this pin.
-  uint32_t out = 0;
-  EXPECT_EQ(ncclSuccess, ncclParamParserDefault<uint32_t>::resolve("-1", out));
-  EXPECT_EQ(0xFFFFFFFFu, out);
+TEST(ParamParsersMicrotest, Integer_NegativeForNarrowUnsignedIsRejectedAsOutOfRange) {
+  // NCCL 2.32.6 range-checks the parsed value against T, so strtoull()'s wrapped "-1" (ULLONG_MAX) no longer fits a
+  // uint32_t: the pin this replaces (resolve succeeded with 0xFFFFFFFF) flipped. out is left untouched.
+  uint32_t out = 7;
+  EXPECT_EQ(ncclInvalidArgument, ncclParamParserDefault<uint32_t>::resolve("-1", out));
+  EXPECT_EQ(7u, out);
 }
 
-TEST(ParamParsersMicrotest, Integer_KnownBug_NarrowerTypeTruncates) {
-  // Only long long's range is checked, so this truncates silently; a fix flips this pin.
-  int8_t out = 0;
-  EXPECT_EQ(ncclSuccess, ncclParamParserDefault<int8_t>::resolve("200", out));
-  EXPECT_EQ(static_cast<int8_t>(200), out);
+TEST(ParamParsersMicrotest, Integer_NegativeUint64IsRejected) {
+  // The range check cannot catch the wrap at full width (ULLONG_MAX is a valid uint64_t), so the parser rejects the
+  // sign itself, after any leading whitespace strtoull would skip. out is left untouched.
+  uint64_t out = 7;
+  EXPECT_EQ(ncclInvalidArgument, ncclParamParserDefault<uint64_t>::resolve("-1", out));
+  EXPECT_EQ(ncclInvalidArgument, ncclParamParserDefault<uint64_t>::resolve(" -1", out));
+  EXPECT_EQ(7u, out);
+  EXPECT_EQ(ncclSuccess, ncclParamParserDefault<uint64_t>::resolve("18446744073709551615", out));
+  EXPECT_EQ(UINT64_MAX, out);
+}
+
+TEST(ParamParsersMicrotest, Integer_NarrowerTypeRangeIsChecked) {
+  // NCCL 2.32.6 checks T's range, not just long long's, so "200" no longer truncates into an int8_t (the pin this
+  // replaces flipped); both bounds are inclusive.
+  int8_t out = 5;
+  EXPECT_EQ(ncclInvalidArgument, ncclParamParserDefault<int8_t>::resolve("200", out));
+  EXPECT_EQ(5, out);
+  EXPECT_EQ(ncclInvalidArgument, ncclParamParserDefault<int8_t>::resolve("-129", out));
+  EXPECT_EQ(5, out);
+  EXPECT_EQ(ncclSuccess, ncclParamParserDefault<int8_t>::resolve("127", out));
+  EXPECT_EQ(127, out);
+  EXPECT_EQ(ncclSuccess, ncclParamParserDefault<int8_t>::resolve("-128", out));
+  EXPECT_EQ(-128, out);
+  uint8_t uout = 1;
+  EXPECT_EQ(ncclInvalidArgument, ncclParamParserDefault<uint8_t>::resolve("256", uout));
+  EXPECT_EQ(1, uout);
+  EXPECT_EQ(ncclSuccess, ncclParamParserDefault<uint8_t>::resolve("255", uout));
+  EXPECT_EQ(255, uout);
 }
 
 TEST(ParamParsersMicrotest, Integer_ValidateAlwaysTrue) {

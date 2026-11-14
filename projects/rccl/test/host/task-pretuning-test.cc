@@ -25,8 +25,10 @@ constexpr size_t kFloatSize = sizeof(float);
 constexpr size_t kDoubleSize = sizeof(double);
 constexpr size_t kCollSendBytes = kCount * kFloatSize;
 constexpr size_t kAllGatherRecvBytes = kRanks * kCount * kFloatSize;
-constexpr size_t kAllGatherQueriedSendBytes = kCount;
-constexpr size_t kAllGatherQueriedRecvBytes = kRanks * kCount;
+// AllGather extents in bytes-as-elements (count * 1): what the lookup used before v2.32.6 sized it from the
+// user element type.
+constexpr size_t kAllGatherByteCountSendBytes = kCount;
+constexpr size_t kAllGatherByteCountRecvBytes = kRanks * kCount;
 constexpr size_t kReduceScatterSendBytes = kRanks * kCount * kFloatSize;
 constexpr int kTwoRanks = 2;
 constexpr int kEnvCTAs = 7;
@@ -542,8 +544,8 @@ TEST_F(TaskPreTuningMicrotest, FillCollTuningInput_AllGatherRegistrationShorterT
     struct ncclRawTask* raw = scene.NewColl(ncclFuncAllGather);
     RegisteredRanges registered(
       &scene,
-      {{raw->coll.sendbuff, shortenSend ? kAllGatherQueriedSendBytes - 1 : kCollSendBytes},
-       {raw->coll.recvbuff, shortenSend ? kAllGatherRecvBytes : kAllGatherQueriedRecvBytes - 1}});
+      {{raw->coll.sendbuff, shortenSend ? kCollSendBytes - 1 : kCollSendBytes},
+       {raw->coll.recvbuff, shortenSend ? kAllGatherRecvBytes : kAllGatherRecvBytes - 1}});
     TaskPreTuning_LocallyValidRegistrations isValid;
     ncclTuningInput_t in = TaskPrep_Poisoned<ncclTuningInput_t>();
 
@@ -578,7 +580,7 @@ TEST_F(TaskPreTuningMicrotest, FillCollTuningInput_RegistrationsSizedFromTheComm
     size_t sendBytes;
     size_t recvBytes;
   };
-  const std::vector<Case> cases = {{ncclFuncAllGather, kCount, kTwoRanks * kCount},
+  const std::vector<Case> cases = {{ncclFuncAllGather, kCollSendBytes, kTwoRanks * kCount * kFloatSize},
                                    {ncclFuncReduceScatter, kTwoRanks * kCount * kFloatSize, kCollSendBytes}};
   for (const Case& c : cases) {
     TaskPrepScene scene(kTwoRanks, 0);
@@ -594,24 +596,25 @@ TEST_F(TaskPreTuningMicrotest, FillCollTuningInput_RegistrationsSizedFromTheComm
   }
 }
 
-// AICOMRCCL-2421: task_pretuning.cc:68-69 should size the lookup from the real extent, so this must become 0.
+// AICOMRCCL-2421 (fixed by v2.32.6): the lookup is sized from the user element type, so registrations covering
+// only the byte-normalized count no longer count as registered.
 TEST_F(TaskPreTuningMicrotest,
-       FillCollTuningInput_AllGatherRegistrationShorterThanTheRealExtent_TodaySetsRegBuff) {
+       FillCollTuningInput_AllGatherRegistrationShorterThanTheRealExtent_ClearsRegBuff) {
   struct ncclRawTask* raw = scene_.NewColl(ncclFuncAllGather);
-  RegisteredRanges registered(&scene_, {{raw->coll.sendbuff, kAllGatherQueriedSendBytes},
-                                       {raw->coll.recvbuff, kAllGatherQueriedRecvBytes}});
+  RegisteredRanges registered(&scene_, {{raw->coll.sendbuff, kAllGatherByteCountSendBytes},
+                                       {raw->coll.recvbuff, kAllGatherByteCountRecvBytes}});
   TaskPreTuning_LocallyValidRegistrations isValid;
   ncclTuningInput_t in = TaskPrep_Poisoned<ncclTuningInput_t>();
 
   ASSERT_EQ(ncclSuccess, fillCollTuningInput(scene_.comm(), &raw->coll, &in));
 
-  EXPECT_EQ(1, in.regBuff);
+  EXPECT_EQ(0, in.regBuff);
   EXPECT_EQ(kAllGatherRecvBytes, in.nBytes) << "nBytes uses the scaled count and stays correct";
 }
 
-// AICOMRCCL-2421 again: Broadcast takes the same elementSize = 1 branch, so an AllGather-only fix misses it.
+// AICOMRCCL-2421 again: Broadcast takes the same byte-normalization branch, so an AllGather-only fix would miss it.
 TEST_F(TaskPreTuningMicrotest,
-       FillCollTuningInput_BroadcastRegistrationShorterThanTheRealExtent_TodaySetsRegBuff) {
+       FillCollTuningInput_BroadcastRegistrationShorterThanTheRealExtent_ClearsRegBuff) {
   struct ncclRawTask* raw = scene_.NewColl(ncclFuncBroadcast, ncclFloat64);
   RegisteredRanges registered(&scene_, {{raw->coll.sendbuff, kCount}, {raw->coll.recvbuff, kCount}});
   TaskPreTuning_LocallyValidRegistrations isValid;
@@ -619,8 +622,20 @@ TEST_F(TaskPreTuningMicrotest,
 
   ASSERT_EQ(ncclSuccess, fillCollTuningInput(scene_.comm(), &raw->coll, &in));
 
-  EXPECT_EQ(1, in.regBuff);
+  EXPECT_EQ(0, in.regBuff);
   EXPECT_EQ(kCount * kDoubleSize, in.nBytes) << "nBytes uses the scaled count and stays correct";
+}
+
+TEST_F(TaskPreTuningMicrotest, FillCollTuningInput_BroadcastRegistrationsCoverTheRealExtent_SetsRegBuff) {
+  struct ncclRawTask* raw = scene_.NewColl(ncclFuncBroadcast, ncclFloat64);
+  RegisteredRanges registered(&scene_, {{raw->coll.sendbuff, kCount * kDoubleSize},
+                                       {raw->coll.recvbuff, kCount * kDoubleSize}});
+  TaskPreTuning_LocallyValidRegistrations isValid;
+  ncclTuningInput_t in = TaskPrep_Poisoned<ncclTuningInput_t>();
+
+  ASSERT_EQ(ncclSuccess, fillCollTuningInput(scene_.comm(), &raw->coll, &in));
+
+  EXPECT_EQ(1, in.regBuff);
 }
 
 TEST_F(TaskPreTuningMicrotest, FillCollTuningInput_CTABoundsInRange_PreferEnvThenCallThenComm) {

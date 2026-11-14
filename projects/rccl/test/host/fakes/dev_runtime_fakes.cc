@@ -23,7 +23,7 @@ ASSERT_HOOK_MATCHES_PROD(g_devrInitOnce, ncclDevrInitOnce);
 ASSERT_HOOK_MATCHES_PROD(g_devrGetLsaRankPtr, ncclDevrGetLsaRankPtr);
 ASSERT_HOOK_MATCHES_PROD(g_devrWindowRegisterInGroup, ncclDevrWindowRegisterInGroup);
 ASSERT_HOOK_MATCHES_PROD(g_devrNcclCommWindowDeregister, ncclCommWindowDeregister);
-ASSERT_HOOK_MATCHES_PROD(g_computeLsaSize, computeLsaSize);
+ASSERT_HOOK_MATCHES_PROD(g_computeLsaTeamSize, computeLsaTeamSize);
 ASSERT_HOOK_MATCHES_PROD(g_devrWinRegEnabled, ncclDevrWinRegEnabled);
 ASSERT_HOOK_MATCHES_PROD(g_symTeamObtain, symTeamObtain);
 ASSERT_HOOK_MATCHES_PROD(g_findCommAndHostWindowFromDeviceWindow, findCommAndHostWindowFromDeviceWindow);
@@ -96,9 +96,9 @@ ncclResult_t ncclCommWindowDeregister(ncclComm_t comm, ncclWindow_t win) {
   return g_devrNcclCommWindowDeregister(comm, win);
 }
 
-static int DefaultComputeLsaSize(struct ncclComm*) { FailLoudUnfaked("dev_runtime_fakes", "computeLsaSize"); }
-std::function<int(struct ncclComm*)> g_computeLsaSize = DefaultComputeLsaSize;
-int computeLsaSize(struct ncclComm* comm) { return g_computeLsaSize(comm); }
+static int DefaultComputeLsaTeamSize(struct ncclComm*) { FailLoudUnfaked("dev_runtime_fakes", "computeLsaTeamSize"); }
+std::function<int(struct ncclComm*)> g_computeLsaTeamSize = DefaultComputeLsaTeamSize;
+int computeLsaTeamSize(struct ncclComm* comm) { return g_computeLsaTeamSize(comm); }
 
 static bool DefaultDevrWinRegEnabled(int, ncclDevrRegisterCapability) {
   FailLoudUnfaked("dev_runtime_fakes", "ncclDevrWinRegEnabled");
@@ -160,7 +160,7 @@ void ResetDevRuntimeFakes() {
   g_devrGetLsaRankPtr = DefaultDevrGetLsaRankPtr;
   g_devrWindowRegisterInGroup = DefaultDevrWindowRegisterInGroup;
   g_devrNcclCommWindowDeregister = DefaultCommWindowDeregister;
-  g_computeLsaSize = DefaultComputeLsaSize;
+  g_computeLsaTeamSize = DefaultComputeLsaTeamSize;
   g_devrWinRegEnabled = DefaultDevrWinRegEnabled;
   g_symTeamObtain = DefaultSymTeamObtain;
   g_findCommAndHostWindowFromDeviceWindow = DefaultFindCommAndHostWindow;

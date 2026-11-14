@@ -13,6 +13,7 @@
 
 #include "bootstrap.h"
 #include "debug.h"
+#include "param.h"
 #include "common_cast.h"  // ncclIbDev / IbCastDevs / MAX_IB_DEVS / MAXNAMESIZE
 #include <dlfcn.h>
 #include <hip/hip_runtime.h>
@@ -95,7 +96,15 @@ void ncclDebugLog(ncclDebugLogLevel level, unsigned long flags, const char* file
 // Real definitions live in transport/net_ib/, which this target does not link.
 // -1 is the NCCL_PARAM default and leaves the plugin on its comm->config rung.
 int64_t ncclParamGinIbTc() { return -1; }
-int64_t ncclParamIbTc() { return -1; }
+// NCCL_IB_TC is an ncclParam<int32_t> object (net_ib/connect.cc), left at NCCL_PARAM_VAL_AUTO (-1). The param
+// runtime (src/param/) is not linked either: no env plugin, nothing registered, every read yields the default.
+DEFINE_NCCL_PARAM(ncclParamIbTc, int32_t, NCCL_IB_TC, NCCL_PARAM_VAL_AUTO, NCCL_PARAM_FLAG_NONE, NCCL_PARAM_DEFAULT,
+                  "stub");
+ncclResult_t ncclParamRegistry::add(std::string /*key*/, ncclParamInfo_t /*info*/, ncclParamInterface* /*param*/) {
+  return ncclSuccess;
+}
+extern "C" const char* ncclParamEnvPluginGet(const char* /*key*/, bool /*envInit*/) { return nullptr; }
+extern "C" bool ncclParamIsCacheDisabled(const char* /*key*/) { return false; }
 
 // IB-CAST device table + enumeration. Real definitions live in
 // transport/net_ib_cast/, which this target does not link. The plugin's NIC

@@ -264,7 +264,7 @@ TEST(DeviceResourceRequirementTests, GinInboxA2ACreateRequirement_BufferSizeAndS
 
 // A 1-rank team makes nPeers = 0, and idivRcp32(0) (bitops.h) divides by zero at runtime: a real
 // defect, unreachable from any in-tree caller (src/sym_kernels.cc guards nRanks >= 2 via
-// computeLsaSize's GCD construction). A crash-containment pin, not an assertion on the exact
+// computeLsaTeamSize's GCD construction). A crash-containment pin, not an assertion on the exact
 // signal: ProcessIsolatedTestRunner's public API clears per-test results before executeAllTests()
 // returns, so nothing here can read back WTERMSIG. A gtest death test would pin SIGFPE precisely,
 // but this file compiles for both host and the gfx1151 device pass, which never defines __linux__,

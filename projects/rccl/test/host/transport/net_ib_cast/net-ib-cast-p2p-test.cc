@@ -574,6 +574,22 @@ TEST_F(NetIbCastP2pIsendMicrotest, Isend_ById_CarriesTheRequestIdAndAPlainWrId) 
   EXPECT_EQ(send_->base.remapWrId[0].state, NCCL_NET_IB_REMAP_UNUSED);
 }
 
+// The receiver finds the request at immData % NET_IB_MAX_REQUESTS, so the immediate must keep the id's low 32 bits
+// across 2^32 - 1 and 2^32 for the slot to stay the sender's.
+TEST_F(NetIbCastP2pIsendMicrotest, Isend_ById_ImmediateKeepsTheReceiveSlotPastTheIdWrap) {
+  WireSend(1, 1, BY_ID);
+  const uint64_t heads[] = {UINT32_MAX, (1ull << 32) + 5};
+  for (size_t i = 0; i < sizeof(heads) / sizeof(heads[0]); i++) {
+    send_->base.fifoHead = heads[i];
+    Cts(0, 1, 1, 4096);
+    void* req = nullptr;
+    ASSERT_EQ(Isend(64, 1, &req), ncclSuccess) << i;
+    const uint32_t imm = be32toh(Chain(0, i)[0].wr.imm_data);
+    EXPECT_EQ(imm, (uint32_t)heads[i]) << i;
+    EXPECT_EQ(imm % NET_IB_MAX_REQUESTS, heads[i] % NET_IB_MAX_REQUESTS) << i;
+  }
+}
+
 // A sharing sender stamps its commId into wr_id[63:48] and the receiver's commId into the BY_ID immediate.
 TEST_F(NetIbCastP2pIsendMicrotest, Isend_QpSharing_EncodesBothCommIds) {
   WireSend(1, 1, BY_ID);

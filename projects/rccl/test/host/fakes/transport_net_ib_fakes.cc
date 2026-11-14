@@ -16,7 +16,12 @@
 #include "net.h"
 #include "transport/net_ib/common.h"
 
-int64_t ncclParamIbQpsPerConn() { return g_loadParam("IB_QPS_PER_CONNECTION", 1); }
+// connect.cc defines this as an ncclParam<int32_t> object (USE_NCCL_PARAM in ib_write_bw.cc). The value
+// comes from ncclParamEnvPluginGet, which nccl_fakes.cc routes through g_loadParam uncached. The
+// parser is NCCL_PARAM_DEFAULT, not connect.cc's ncclParamBounded(1, 128), so ib_write_bw.cc's own qps < 1
+// check stays reachable.
+DEFINE_NCCL_PARAM(ncclParamIbQpsPerConn, int32_t, NCCL_IB_QPS_PER_CONNECTION, 1, NCCL_PARAM_FLAG_NONE,
+                  NCCL_PARAM_DEFAULT, "fake");
 
 bool g_ibGdrFlushFlagLocalSupport = false;
 bool ncclIbGdrFlushFlagLocalSupport() { return g_ibGdrFlushFlagLocalSupport; }

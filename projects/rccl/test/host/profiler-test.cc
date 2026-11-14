@@ -73,6 +73,7 @@ std::function<void*(const char*)> g_openProfilerLib;
 std::vector<std::string> g_openedNames;
 void* g_netPluginLib = nullptr;
 std::vector<void*> g_closedLibs;
+std::vector<void*> g_detachedLibs;
 int64_t g_enableProxyTrace = 0;
 const char* g_dladdrFname = nullptr;
 uint64_t g_pid = 4242;
@@ -105,9 +106,12 @@ void* ncclOpenProfilerPluginLib(const char* name) {
 void* ncclGetNetPluginLib(enum ncclPluginType type) {
   return type == ncclPluginTypeProfiler ? g_netPluginLib : nullptr;
 }
-ncclResult_t ncclClosePluginLib(void* handle, enum ncclPluginType type) {
+ncclResult_t ncclClosePluginLibHandle(void* handle, enum ncclPluginType type) {
   if (type == ncclPluginTypeProfiler) g_closedLibs.push_back(handle);
   return ncclSuccess;
+}
+void ncclDetachPluginLibHandle(void* handle, enum ncclPluginType type) {
+  if (type == ncclPluginTypeProfiler) g_detachedLibs.push_back(handle);
 }
 
 void* ncclOsDlsym(ncclOsLibraryHandle handle, const char* symbol) {
@@ -130,6 +134,45 @@ hipError_t hipSetDevice(int device) {
 }
 const char* hipGetErrorString(hipError_t) { return "fake hip error"; }
 hipError_t hipGetLastError() { return hipSuccess; }
+
+// GPU->CPU clock calibration (v8 gpuClockSync) seams: a host-memory probe buffer and a probe "kernel" that reports
+// g_gpuClock, plus the wall-clock rate the AMD build scales those ticks by.
+namespace {
+std::atomic<uint64_t> g_gpuClock{0};
+int g_wallClockRateKHz = 0;
+hipError_t g_streamCreateResult = hipSuccess;
+std::atomic<int> g_probeCalls{0};
+}  // namespace
+hipError_t hipGetDevice(int* device) {
+  *device = 5;
+  return hipSuccess;
+}
+hipError_t hipDeviceGetAttribute(int* value, hipDeviceAttribute_t attr, int) {
+  if (attr != hipDeviceAttributeWallClockRate || g_wallClockRateKHz == 0) return hipErrorInvalidValue;
+  *value = g_wallClockRateKHz;
+  return hipSuccess;
+}
+hipError_t hipStreamCreateWithFlags(hipStream_t* stream, unsigned int) {
+  *stream = reinterpret_cast<hipStream_t>(0x5A);
+  return g_streamCreateResult;
+}
+hipError_t hipStreamDestroy(hipStream_t) { return hipSuccess; }
+hipError_t hipStreamSynchronize(hipStream_t) { return hipSuccess; }
+hipError_t hipHostMalloc(void** ptr, size_t size, unsigned int) {
+  *ptr = std::calloc(1, size);
+  return hipSuccess;
+}
+hipError_t hipHostFree(void* ptr) {
+  std::free(ptr);
+  return hipSuccess;
+}
+hipError_t hipThreadExchangeStreamCaptureMode(hipStreamCaptureMode*) { return hipSuccess; }
+ncclResult_t ncclProfilerProbeGpuClock(unsigned long long* devOut, hipStream_t) {
+  g_probeCalls++;
+  *devOut = g_gpuClock.load();
+  return ncclSuccess;
+}
+ncclSymkKernelMask ncclGenkKernelMask() { return 0; }  // the sym tests use symk (not genk) argument buffers
 
 static const char* const kFuncNames[] = {"F0", "F1", "F2", "F3", "F4", "F5", "F6", "F7",
                                          "F8", "F9", "F10", "F11", "F12", "F13", "F14", "F15"};
@@ -164,6 +207,12 @@ bool waitUntil(Pred pred, std::chrono::milliseconds budget = kWait) {
 }
 
 void* H(uintptr_t v) { return reinterpret_cast<void*>(v); }
+// An event reference whose slot-0 (single-plugin) handle is H(v).
+ncclProfilerEventRef R(uintptr_t v) {
+  ncclProfilerEventRef r{};
+  r.h[0] = H(v);
+  return r;
+}
 
 struct StartCall {
   void* ctx;
@@ -177,11 +226,12 @@ struct RecordCall {
   ncclProfilerEventStateArgs_t args;
 };
 
-// The v7 (native) plugin. Called from the profiler thread as well, so every list is mutex-guarded.
+// The v8 (native) plugin. Called from the profiler thread as well, so every list is mutex-guarded.
 struct FakePlugin {
   std::mutex mu;
   std::vector<StartCall> starts;
   std::vector<void*> stops;
+  std::vector<ncclProfilerEventDescr_t> stopDescrs;  // a zeroed descriptor stands in for a NULL one
   std::vector<RecordCall> records;
   std::vector<void*> finalized;
   int initCalls = 0;
@@ -192,6 +242,9 @@ struct FakePlugin {
   std::string initCommName;
   int initNNodes = -1, initNRanks = -1, initRank = -1;
   ncclDebugLogger_t initLogfn = nullptr;
+  ncclProfilerConfig_t* initConfigPtr = nullptr;
+  ncclProfilerConfig_t initConfigSeen{};      // what NCCL handed in
+  ncclProfilerConfig_t initConfigRequest{};   // what the plugin writes back
   uintptr_t nextHandle = 0x1000;
   uint64_t nullHandleType = 0;  // starts of this type hand back a null handle
   std::function<void()> onStart;
@@ -203,7 +256,7 @@ struct FakePlugin {
   }
 
   static ncclResult_t Init(void** context, uint64_t commId, int* mask, const char* name, int nNodes, int nRanks,
-                           int rank, ncclDebugLogger_t logfn) {
+                           int rank, ncclDebugLogger_t logfn, ncclProfilerConfig_t* config) {
     FakePlugin& f = *cur();
     f.initCalls++;
     f.initCommId = commId;
@@ -212,6 +265,11 @@ struct FakePlugin {
     f.initNRanks = nRanks;
     f.initRank = rank;
     f.initLogfn = logfn;
+    f.initConfigPtr = config;
+    if (config) {
+      f.initConfigSeen = *config;
+      *config = f.initConfigRequest;
+    }
     *mask = f.initMask;
     *context = f.ctx;
     return f.initResult;
@@ -224,10 +282,11 @@ struct FakePlugin {
     f.starts.push_back({ctx, *d, *eHandle});
     return ncclSuccess;
   }
-  static ncclResult_t Stop(void* eHandle) {
+  static ncclResult_t Stop(void* eHandle, ncclProfilerEventDescr_t* d) {
     FakePlugin& f = *cur();
     std::lock_guard<std::mutex> lock(f.mu);
     f.stops.push_back(eHandle);
+    f.stopDescrs.push_back(d ? *d : ncclProfilerEventDescr_t{});
     return ncclSuccess;
   }
   static ncclResult_t Record(void* eHandle, ncclProfilerEventState_t s, ncclProfilerEventStateArgs_t* a) {
@@ -268,6 +327,7 @@ struct FakePlugin {
     std::lock_guard<std::mutex> lock(mu);
     starts.clear();
     stops.clear();
+    stopDescrs.clear();
     records.clear();
   }
 };
@@ -276,9 +336,12 @@ struct FakePlugin {
 void ResetProfilerStatics() {
   profilerPluginStatus = profilerPluginLoadReady;
   profilerPluginRefCount = 0;
-  profilerPluginLib = nullptr;
+  std::memset(profilerPlugins, 0, sizeof(profilerPlugins));
+  profilerPluginCount = 0;
   ncclProfiler = nullptr;
-  ncclProfilerProxyTraceDumpFn = nullptr;
+  profilerLegacyNetPlugin = false;
+  profilerTsMode = 0;
+  std::memset(ncclProfilerProxyTraceDumpFn, 0, sizeof(ncclProfilerProxyTraceDumpFn));
   pid = 0;
   ncclProfilerEventMask = 0;
   ncclProfilerRasOverrideActive = false;
@@ -299,14 +362,19 @@ class ProfilerMicrotest : public ::testing::Test {
     g_env.clear();
     g_openedNames.clear();
     g_closedLibs.clear();
+    g_detachedLibs.clear();
     g_netPluginLib = nullptr;
     g_enableProxyTrace = 0;
     g_dladdrFname = "/opt/rocm/lib/librccl.so";
     g_setDeviceResult = hipSuccess;
     g_setDeviceArg.store(-1);
+    g_gpuClock = 0;
+    g_wallClockRateKHz = 0;
+    g_streamCreateResult = hipSuccess;
+    g_probeCalls = 0;
     for (auto& p : ncclPluginLibPaths) p = nullptr;
     FakePlugin::cur() = &fake_;
-    lib_ = {{"ncclProfiler_v7", &fake_.vtable}};
+    lib_ = {{"ncclProfiler_v8", &fake_.vtable}};
     g_openProfilerLib = [this](const char*) -> void* { return &lib_; };
     comm_ = NewComm(H(0xC0));
   }
@@ -373,11 +441,19 @@ TEST_F(ProfilerMicrotest, PluginInit_NoLibAnywhere_FailsOnceAndDoesNotRetry) {
   EXPECT_TRUE(g_closedLibs.empty());
 }
 
-TEST_F(ProfilerMicrotest, PluginInit_V7Plugin_InitsWithTheCommIdentity) {
+TEST_F(ProfilerMicrotest, PluginInit_V8Plugin_InitsWithTheCommIdentityAndAZeroedConfig) {
   fake_.initMask = ncclProfileColl;
   ASSERT_EQ(ncclSuccess, ncclProfilerPluginInit(comm_.get()));
   EXPECT_TRUE(ncclProfilerPluginLoaded());
-  EXPECT_EQ(ncclProfiler, &fake_.vtable);
+  // The loaded plugin's vtable is copied into the plugin list; a native v8 plugin is called directly.
+  EXPECT_EQ(profilerPluginCount, 1);
+  EXPECT_EQ(ncclProfiler, &profilerPlugins[0].api);
+  EXPECT_EQ(ncclProfiler->init, &FakePlugin::Init);
+  EXPECT_EQ(ncclProfiler->stopEvent, &FakePlugin::Stop);
+  EXPECT_EQ(profilerPlugins[0].activate, nullptr);
+  EXPECT_EQ(profilerPlugins[0].target, &fake_.vtable);
+  EXPECT_FALSE(profilerPlugins[0].legacyNetPlugin);
+  EXPECT_EQ(g_detachedLibs, std::vector<void*>{&lib_});
   EXPECT_EQ(fake_.initCalls, 1);
   EXPECT_EQ(fake_.initCommId, 0xABCDu);
   EXPECT_EQ(fake_.initCommName, "c0");
@@ -385,27 +461,30 @@ TEST_F(ProfilerMicrotest, PluginInit_V7Plugin_InitsWithTheCommIdentity) {
   EXPECT_EQ(fake_.initNRanks, 8);
   EXPECT_EQ(fake_.initRank, 3);
   EXPECT_EQ(fake_.initLogfn, &ncclDebugLog);
+  ASSERT_NE(fake_.initConfigPtr, nullptr);
+  EXPECT_EQ(fake_.initConfigSeen.cpuClock, (uint32_t)ncclProfilerCpuClockNone);
+  EXPECT_EQ(fake_.initConfigSeen.gpuClockSync, 0u);
   EXPECT_EQ(comm_->profilerContext, fake_.ctx);
+  EXPECT_TRUE(comm_->profiler.contextValid);
   EXPECT_EQ(ncclProfilerEventMask, ncclProfileColl);
-  // No name was requested, so there is nothing to report as loaded.
-  EXPECT_FALSE(Logged(NCCL_LOG_INFO, "Successfully loaded external profiler plugin"));
+  // The plugin is now reported by its own name, whether or not one was requested.
+  EXPECT_TRUE(Logged(NCCL_LOG_INFO, "Successfully loaded external profiler plugin FakeProfiler"));
 
   ncclProxyOp op{};
   ASSERT_EQ(ncclSuccess, ncclProfilerAddPidToProxyOp(&op));
   EXPECT_EQ(op.pid, 4242);
 }
 
-TEST_F(ProfilerMicrotest, PluginInit_NamedPlugin_LogsTheNameOrTheResolvedPath) {
-  g_env["NCCL_PROFILER_PLUGIN"] = "myprof";
-  ASSERT_EQ(ncclSuccess, ncclProfilerPluginInit(comm_.get()));
-  EXPECT_EQ(g_openedNames, std::vector<std::string>{"myprof"});
-  EXPECT_TRUE(Logged(NCCL_LOG_INFO, "Successfully loaded external profiler plugin myprof"));
-  ASSERT_EQ(ncclSuccess, ncclProfilerPluginFinalize(comm_.get()));
-
+// The load log names the plugin by its vtable name; the requested name and resolved path are no longer used.
+TEST_F(ProfilerMicrotest, PluginInit_NamedPlugin_OpensTheNameAndLogsThePluginsOwnName) {
+  g_env["NCCL_PROFILER_PLUGIN"] = "  myprof ";
   char path[] = "/x/libnccl-profiler-myprof.so";
   ncclPluginLibPaths[ncclPluginTypeProfiler] = path;
   ASSERT_EQ(ncclSuccess, ncclProfilerPluginInit(comm_.get()));
-  EXPECT_TRUE(Logged(NCCL_LOG_INFO, "Successfully loaded external profiler plugin /x/libnccl-profiler-myprof.so"));
+  EXPECT_EQ(g_openedNames, std::vector<std::string>{"myprof"});  // list entries are trimmed
+  EXPECT_TRUE(Logged(NCCL_LOG_INFO, "Successfully loaded external profiler plugin FakeProfiler"));
+  EXPECT_FALSE(Logged(NCCL_LOG_INFO, "Successfully loaded external profiler plugin myprof"));
+  EXPECT_FALSE(Logged(NCCL_LOG_INFO, "Successfully loaded external profiler plugin /x/"));
 }
 
 TEST_F(ProfilerMicrotest, PluginInit_SecondComm_SharesTheLibUntilTheLastFinalize) {
@@ -430,48 +509,50 @@ TEST_F(ProfilerMicrotest, PluginInit_SecondComm_SharesTheLibUntilTheLastFinalize
 }
 
 TEST_F(ProfilerMicrotest, PluginLoad_PicksTheNewestVersionTheLibExports) {
-  static const char* const kNames[] = {nullptr, "v1", "v2", "v3", "v4", "v5", "v6"};
+  static const char* const kNames[] = {nullptr, "v1", "v2", "v3", "v4", "v5", "v6", "v7"};
   ncclProfiler_v1_t v1{kNames[1]};
   ncclProfiler_v2_t v2{kNames[2]};
   ncclProfiler_v3_t v3{kNames[3]};
   ncclProfiler_v4_t v4{kNames[4]};
   ncclProfiler_v5_t v5{kNames[5]};
   ncclProfiler_v6_t v6{kNames[6]};
-  void* const vtables[] = {nullptr, &v1, &v2, &v3, &v4, &v5, &v6};
-  for (int newest = 1; newest <= 6; newest++) {
+  ncclProfiler_v7_t v7{kNames[7]};
+  void* const vtables[] = {nullptr, &v1, &v2, &v3, &v4, &v5, &v6, &v7};
+  for (int newest = 1; newest <= 7; newest++) {
     SCOPED_TRACE(newest);
     lib_.clear();
     for (int v = 1; v <= newest; v++) lib_["ncclProfiler_v" + std::to_string(v)] = vtables[v];
     ASSERT_EQ(ncclSuccess, ncclProfilerPluginLoad());
     ASSERT_TRUE(ncclProfilerPluginLoaded());
     EXPECT_STREQ(ncclProfiler->name, kNames[newest]);
+    // Pre-v8 plugins are served through a shim that profilerActivate() points at the plugin before each call.
+    EXPECT_EQ(profilerPlugins[0].target, vtables[newest]);
+    EXPECT_NE(profilerPlugins[0].activate, nullptr);
+    // Pre-v6 plugins keep implicit proxy ancestors for NetPlugin events.
+    EXPECT_EQ(profilerPlugins[0].legacyNetPlugin, newest <= 5);
     ASSERT_EQ(ncclSuccess, ncclProfilerPluginUnload());
   }
-  lib_ = {{"ncclProfiler_v1", &v1}, {"ncclProfiler_v7", &fake_.vtable}};
+  lib_ = {{"ncclProfiler_v1", &v1}, {"ncclProfiler_v8", &fake_.vtable}};
   ASSERT_EQ(ncclSuccess, ncclProfilerPluginLoad());
-  EXPECT_EQ(ncclProfiler, &fake_.vtable);
+  EXPECT_EQ(ncclProfiler->init, &FakePlugin::Init);
+  EXPECT_EQ(profilerPlugins[0].activate, nullptr);
 }
 
-TEST_F(ProfilerMicrotest, PluginLoad_NoKnownSymbol_ClosesTheLibAndSaysWhyOnlyIfNamed) {
+// The default lib is reported at INFO without a name; a lib named in NCCL_PROFILER_PLUGIN is an ATTN.
+TEST_F(ProfilerMicrotest, PluginLoad_NoKnownSymbol_ClosesTheLibAndAttnsOnlyIfNamed) {
   lib_.clear();
   ASSERT_EQ(ncclSuccess, ncclProfilerPluginInit(comm_.get()));
   EXPECT_FALSE(ncclProfilerPluginLoaded());
   EXPECT_EQ(g_closedLibs, std::vector<void*>{&lib_});
-  EXPECT_FALSE(Logged(NCCL_LOG_ATTN, "is unsupported"));
-  EXPECT_FALSE(Logged(NCCL_LOG_INFO, "is unsupported"));
-
-  ResetProfilerStatics();
-  char path[] = "/x/libauto.so";
-  ncclPluginLibPaths[ncclPluginTypeProfiler] = path;
-  ASSERT_EQ(ncclSuccess, ncclProfilerPluginInit(comm_.get()));
-  EXPECT_TRUE(Logged(NCCL_LOG_INFO, "External profiler plugin /x/libauto.so is unsupported"));
+  EXPECT_TRUE(Logged(NCCL_LOG_INFO, "External profiler plugin is unsupported"));
   EXPECT_FALSE(Logged(NCCL_LOG_ATTN, "is unsupported"));
 
   ResetProfilerStatics();
-  ncclPluginLibPaths[ncclPluginTypeProfiler] = nullptr;
+  TakeLog();
   g_env["NCCL_PROFILER_PLUGIN"] = "libbad.so";
   ASSERT_EQ(ncclSuccess, ncclProfilerPluginInit(comm_.get()));
   EXPECT_TRUE(Logged(NCCL_LOG_ATTN, "External profiler plugin libbad.so is unsupported"));
+  EXPECT_FALSE(ncclProfilerPluginLoaded());
 }
 
 TEST_F(ProfilerMicrotest, PluginLoad_NoProfilerLib_FallsBackToTheNetPluginLib) {
@@ -480,8 +561,10 @@ TEST_F(ProfilerMicrotest, PluginLoad_NoProfilerLib_FallsBackToTheNetPluginLib) {
   g_netPluginLib = &lib_;
   ASSERT_EQ(ncclSuccess, ncclProfilerPluginInit(comm_.get()));
   EXPECT_TRUE(ncclProfilerPluginLoaded());
-  // The net plugin's lib is not the one that was named, so its name is not reported.
-  EXPECT_FALSE(Logged(NCCL_LOG_INFO, "Successfully loaded external profiler plugin"));
+  EXPECT_TRUE(Logged(NCCL_LOG_ATTN, "External profiler plugin missing was not found"));
+  // Every loaded plugin is now reported by its own name, including the net plugin's lib.
+  EXPECT_TRUE(Logged(NCCL_LOG_INFO, "Successfully loaded external profiler plugin FakeProfiler"));
+  EXPECT_EQ(g_detachedLibs, std::vector<void*>{&lib_});
 }
 
 TEST_F(ProfilerMicrotest, PluginLoad_ProxyTraceEnabled_OpensTheSiblingNextToRccl) {
@@ -568,8 +651,9 @@ TEST_F(ProfilerMicrotest, PluginInit_PluginInitFails_UnloadsAndContinuesWithoutP
   EXPECT_EQ(g_closedLibs, std::vector<void*>{&lib_});
 }
 
-// A failed plugin init() unloads twice, closing the lib under a live comm; a fix flips this pin.
-TEST_F(ProfilerMicrotest, PluginInit_KnownBug_FailedInitThenFinalize_ClosesTheLibUnderAnotherLiveComm) {
+// A comm whose plugin init() failed holds no reference (contextValid stays false), so its finalize leaves the lib
+// loaded for the comm that is still live.
+TEST_F(ProfilerMicrotest, PluginInit_FailedInitThenFinalize_KeepsTheLibForTheLiveComm) {
   auto failing = NewComm(nullptr);
   ASSERT_EQ(ncclSuccess, ncclProfilerPluginInit(comm_.get()));
   fake_.initResult = ncclInternalError;
@@ -577,14 +661,17 @@ TEST_F(ProfilerMicrotest, PluginInit_KnownBug_FailedInitThenFinalize_ClosesTheLi
   ASSERT_EQ(ncclSuccess, ncclProfilerPluginInit(failing.get()));
   EXPECT_TRUE(ncclProfilerPluginLoaded());
 
+  EXPECT_FALSE(failing->profiler.contextValid);
   ASSERT_EQ(ncclSuccess, ncclProfilerPluginFinalize(failing.get()));
+  EXPECT_TRUE(ncclProfilerPluginLoaded());
+  EXPECT_TRUE(g_closedLibs.empty());
+
+  // The surviving comm's context reaches the plugin's finalize and drops the last reference.
+  ASSERT_EQ(ncclSuccess, ncclProfilerPluginFinalize(comm_.get()));
+  EXPECT_EQ(fake_.finalized, std::vector<void*>{H(0xC0)});
+  EXPECT_EQ(profilerPluginRefCount, 0);
   EXPECT_FALSE(ncclProfilerPluginLoaded());
   EXPECT_EQ(g_closedLibs, std::vector<void*>{&lib_});
-
-  // The surviving comm's context never reaches the plugin's finalize.
-  ASSERT_EQ(ncclSuccess, ncclProfilerPluginFinalize(comm_.get()));
-  EXPECT_TRUE(fake_.finalized.empty());
-  EXPECT_EQ(profilerPluginRefCount, -1);
 }
 
 TEST_F(ProfilerMicrotest, PluginFinalize_FinalizesTheCommContextUnlessItIsNull) {
@@ -605,7 +692,8 @@ TEST_F(ProfilerMicrotest, PluginInit_KernelPhaseWithoutKernelCh_TurnsKernelChOn)
   fake_.initMask = ncclProfileKernelPhase;
   ASSERT_EQ(ncclSuccess, ncclProfilerPluginInit(comm_.get()));
   EXPECT_EQ(ncclProfilerEventMask, ncclProfileKernelPhase | ncclProfileKernelCh);
-  EXPECT_TRUE(Logged(NCCL_LOG_INFO, "enabling ncclProfileKernelCh implicitly (plugin set ncclProfileKernelPhase"));
+  EXPECT_TRUE(
+    Logged(NCCL_LOG_INFO, "enabling ncclProfileKernelCh implicitly (FakeProfiler set ncclProfileKernelPhase"));
 
   TakeLog();
   fake_.initMask = ncclProfileKernelPhase | ncclProfileKernelCh;
@@ -618,19 +706,27 @@ TEST_F(ProfilerMicrotest, PrintEventMask_NamesEachEnabledBit) {
                                 "KernelCh", "NetPlugin", "GroupApi", "CollApi", "P2pApi",      "KernelLaunch",
                                 "CeColl",   "CeSync",    "CeBatch", "KernelPhase", "ProxyDiag"};
   for (int bit = 0; bit <= 16; bit++) {
-    printProfilerEventMask(1 << bit);
+    printProfilerEventMask(1 << bit, nullptr);
     char want[128];
     std::snprintf(want, sizeof(want), "Profiler event mask: 0x%x (%d) - Enabled: %s ", 1 << bit, 1 << bit,
                   kNames[bit]);
     EXPECT_EQ(TakeLog(), std::vector<std::string>{want});
   }
-  printProfilerEventMask(0);
-  printProfilerEventMask(0x1ffff);
+  printProfilerEventMask(0, nullptr);
+  printProfilerEventMask(0x1ffff, nullptr);
   auto log = TakeLog();
   ASSERT_EQ(log.size(), 1u);
   EXPECT_NE(log[0].find("Enabled: Group Coll P2p ProxyOp ProxyStep ProxyCtrl KernelCh KernelPhase NetPlugin "
                         "GroupApi CollApi P2pApi KernelLaunch CeColl CeSync CeBatch ProxyDiag "),
             std::string::npos);
+}
+
+// Per-plugin masks are logged under the plugin's name, even when empty.
+TEST_F(ProfilerMicrotest, PrintEventMask_Named_LogsThePluginNameEvenForAnEmptyMask) {
+  printProfilerEventMask(0, "P0");
+  printProfilerEventMask(ncclProfileColl, "P1");
+  EXPECT_EQ(TakeLog(), (std::vector<std::string>{"Profiler P0 event mask: 0x0 (0) - Enabled: ",
+                                                 "Profiler P1 event mask: 0x2 (2) - Enabled: Coll "}));
 }
 
 TEST_F(ProfilerMicrotest, SetRasOverride_SurvivesALaterPluginInit) {
@@ -654,6 +750,225 @@ TEST_F(ProfilerMicrotest, SetRasOverride_KernelPhase_AddsKernelChAndLogsWhenLoad
   EXPECT_TRUE(Logged(NCCL_LOG_INFO, "Enabled: KernelCh KernelPhase "));
 }
 
+// v8 timestamps and the config handshake
+
+uint64_t MonoNowNs() {
+  timespec t;
+  clock_gettime(CLOCK_MONOTONIC, &t);
+  return uint64_t(t.tv_sec) * 1000000000ull + uint64_t(t.tv_nsec);
+}
+
+TEST_F(ProfilerMicrotest, V8Config_CpuClockRequested_StampsHostEventsButNotCeEvents) {
+  fake_.initConfigRequest.cpuClock = ncclProfilerCpuClockMonotonic;
+  Load(ncclProfileGroupApi | ncclProfileCeColl);
+  EXPECT_EQ(comm_->profiler.config.cpuClock, (uint32_t)ncclProfilerCpuClockMonotonic);
+  EXPECT_EQ(PROF_TS_MODE_CLOCK(profilerTsModeGet()), (uint32_t)ncclProfilerCpuClockMonotonic);
+  EXPECT_FALSE(PROF_TS_MODE_GPUSYNC(profilerTsModeGet()));
+  EXPECT_TRUE(Logged(NCCL_LOG_INFO, "plugin requested NCCL-sourced timings on CLOCK_MONOTONIC"));
+  EXPECT_FALSE(Logged(NCCL_LOG_INFO, "enabling GPU->CPU clock calibration"));
+
+  ncclInfo info = MakeInfo(ncclFuncAllReduce);
+  const uint64_t before = MonoNowNs();
+  ASSERT_EQ(ncclSuccess, ncclProfilerStartGroupApiEvent(&info, false));
+  ASSERT_EQ(ncclSuccess, ncclProfilerRecordGroupApiEventState(ncclProfilerGroupStartApiStop));
+  ASSERT_EQ(ncclSuccess, ncclProfilerStopGroupApiEvent());
+  const uint64_t after = MonoNowNs();
+  auto starts = fake_.StartsOf(ncclProfileGroupApi);
+  ASSERT_EQ(starts.size(), 1u);
+  auto records = fake_.Records();
+  ASSERT_EQ(records.size(), 1u);
+  ASSERT_EQ(fake_.stopDescrs.size(), 1u);
+  const uint64_t tStart = starts[0].d.tsCpu, tRecord = records[0].args.tsCpu, tStop = fake_.stopDescrs[0].tsCpu;
+  EXPECT_LE(before, tStart);
+  EXPECT_LE(tStart, tRecord);
+  EXPECT_LE(tRecord, tStop);
+  EXPECT_LE(tStop, after);
+  EXPECT_EQ(starts[0].d.tsCpuUncertainty, 0u);  // host-side reads are exact
+  EXPECT_EQ(records[0].args.tsCpuUncertainty, 0u);
+  // Only the timestamp is meaningful in a stop descriptor.
+  EXPECT_EQ(fake_.stopDescrs[0].type, 0u);
+  EXPECT_EQ(fake_.stopDescrs[0].parentObj, nullptr);
+
+  // CE completion is timed by the plugin, so CE events are never stamped.
+  fake_.Clear();
+  ncclCeCollArgs ce{};
+  ce.func = ncclFuncAllGather;
+  ce.datatype = ncclFloat32;
+  ASSERT_EQ(ncclSuccess, ncclProfilerStartCeCollEvent(comm_.get(), &ce, nullptr));
+  ASSERT_EQ(ncclSuccess, ncclProfilerStopCeCollEvent(comm_.get(), &ce, nullptr));
+  starts = fake_.StartsOf(ncclProfileCeColl);
+  ASSERT_EQ(starts.size(), 1u);
+  EXPECT_EQ(starts[0].d.tsCpu, NCCL_PROFILER_TS_NONE);
+  ASSERT_EQ(fake_.stopDescrs.size(), 1u);
+  EXPECT_EQ(fake_.stopDescrs[0].tsCpu, NCCL_PROFILER_TS_NONE);
+
+  // Unloading resets the process-wide mode.
+  ASSERT_EQ(ncclSuccess, ncclProfilerPluginFinalize(comm_.get()));
+  EXPECT_EQ(profilerTsModeGet(), 0u);
+}
+
+TEST_F(ProfilerMicrotest, V8Config_NoOrUnknownClock_LeavesEveryTimestampUnset) {
+  fake_.initConfigRequest.cpuClock = 7;  // unknown: treated as None
+  fake_.initConfigRequest.gpuClockSync = 1;  // ignored without a CPU clock
+  Load(ncclProfileGroupApi);
+  EXPECT_EQ(profilerTsModeGet(), 0u);
+  EXPECT_EQ(comm_->profiler.config.cpuClock, 7u);  // the plugin's answer is kept as given
+  EXPECT_FALSE(Logged(NCCL_LOG_INFO, "NCCL-sourced timings"));
+  ncclInfo info = MakeInfo(ncclFuncAllReduce);
+  ASSERT_EQ(ncclSuccess, ncclProfilerStartGroupApiEvent(&info, false));
+  ASSERT_EQ(ncclSuccess, ncclProfilerStopGroupApiEvent());
+  auto starts = fake_.StartsOf(ncclProfileGroupApi);
+  ASSERT_EQ(starts.size(), 1u);
+  EXPECT_EQ(starts[0].d.tsCpu, NCCL_PROFILER_TS_NONE);
+  ASSERT_EQ(fake_.stopDescrs.size(), 1u);
+  EXPECT_EQ(fake_.stopDescrs[0].tsCpu, NCCL_PROFILER_TS_NONE);
+}
+
+// The first CPU clock any comm selects stays fixed until unload; a later comm can only add GPU sync on that clock.
+TEST_F(ProfilerMicrotest, V8Config_FirstClockWins_LaterCommMayAddGpuSyncOnTheSameClock) {
+  fake_.initConfigRequest.cpuClock = ncclProfilerCpuClockRealtime;
+  ASSERT_EQ(ncclSuccess, ncclProfilerPluginInit(comm_.get()));
+  EXPECT_TRUE(Logged(NCCL_LOG_INFO, "NCCL-sourced timings on CLOCK_REALTIME"));
+  auto other = NewComm(H(0xC7));
+  fake_.initConfigRequest = {ncclProfilerCpuClockMonotonic, 1};
+  ASSERT_EQ(ncclSuccess, ncclProfilerPluginInit(other.get()));
+  EXPECT_EQ(profilerTsModeGet(), PROF_TS_MODE(ncclProfilerCpuClockRealtime, false));
+  fake_.initConfigRequest = {ncclProfilerCpuClockRealtime, 1};
+  ASSERT_EQ(ncclSuccess, ncclProfilerPluginInit(other.get()));
+  EXPECT_EQ(profilerTsModeGet(), PROF_TS_MODE(ncclProfilerCpuClockRealtime, true));
+}
+
+// Two plugins
+
+struct FakePlugin2 {
+  static std::vector<StartCall>& starts() {
+    static std::vector<StartCall> v;
+    return v;
+  }
+  static std::vector<void*>& stops() {
+    static std::vector<void*> v;
+    return v;
+  }
+  static std::vector<void*>& finalized() {
+    static std::vector<void*> v;
+    return v;
+  }
+  static int& initMask() {
+    static int m = 0;
+    return m;
+  }
+  static ncclResult_t Init(void** context, uint64_t, int* mask, const char*, int, int, int, ncclDebugLogger_t,
+                           ncclProfilerConfig_t*) {
+    *mask = initMask();
+    *context = H(0xD2);
+    return ncclSuccess;
+  }
+  static ncclResult_t Start(void* ctx, void** eHandle, ncclProfilerEventDescr_t* d) {
+    *eHandle = H(0x2000 + starts().size());
+    starts().push_back({ctx, *d, *eHandle});
+    return ncclSuccess;
+  }
+  static ncclResult_t Stop(void* eHandle, ncclProfilerEventDescr_t*) {
+    stops().push_back(eHandle);
+    return ncclSuccess;
+  }
+  static ncclResult_t Record(void*, ncclProfilerEventState_t, ncclProfilerEventStateArgs_t*) { return ncclSuccess; }
+  static ncclResult_t Finalize(void* ctx) {
+    finalized().push_back(ctx);
+    return ncclSuccess;
+  }
+  static void Reset() {
+    starts().clear();
+    stops().clear();
+    finalized().clear();
+    initMask() = 0;
+  }
+};
+
+TEST_F(ProfilerMicrotest, PluginList_TwoPlugins_EachGetsItsOwnContextMaskAndHandles) {
+  FakePlugin2::Reset();
+  ncclProfiler_v8_t vtable2{"FakeProfiler2", &FakePlugin2::Init, &FakePlugin2::Start, &FakePlugin2::Stop,
+                            &FakePlugin2::Record, &FakePlugin2::Finalize};
+  FakeLib lib2{{"ncclProfiler_v8", &vtable2}};
+  FakeLib lib3{{"ncclProfiler_v8", &vtable2}};
+  g_openProfilerLib = [&](const char* name) -> void* {
+    std::string n = name ? name : "";
+    return n == "a" ? static_cast<void*>(&lib_) : n == "b" ? static_cast<void*>(&lib2) : static_cast<void*>(&lib3);
+  };
+  g_env["NCCL_PROFILER_PLUGIN"] = "a, a ,b,c";
+  fake_.initMask = ncclProfileGroupApi;
+  FakePlugin2::initMask() = ncclProfileProxyCtrl;
+  ASSERT_EQ(ncclSuccess, ncclProfilerPluginInit(comm_.get()));
+  EXPECT_EQ(g_openedNames, (std::vector<std::string>{"a", "a", "b", "c"}));
+  EXPECT_TRUE(Logged(NCCL_LOG_INFO, "External profiler plugin is already loaded, skipping it"));
+  EXPECT_TRUE(Logged(NCCL_LOG_WARN, "at most 2 profiler plugins; ignoring additional entry 4"));
+  EXPECT_EQ(g_closedLibs, (std::vector<void*>{&lib_, &lib3}));  // the duplicate and the one over the limit
+  ASSERT_EQ(profilerPluginCount, 2);
+  EXPECT_STREQ(profilerPlugins[1].api.name, "FakeProfiler2");
+  // Each plugin owns its own mask word; the process-wide mask is their union.
+  EXPECT_EQ(profilerPlugins[0].maskPtr, &profilerPlugins[0].mask);
+  EXPECT_EQ(profilerPlugins[0].mask, ncclProfileGroupApi);
+  EXPECT_EQ(profilerPlugins[1].mask, ncclProfileProxyCtrl);
+  EXPECT_EQ(ncclProfilerEventMask, ncclProfileGroupApi | ncclProfileProxyCtrl);
+  // The comm's context is NCCL's own multi-plugin context, not either plugin's.
+  ASSERT_NE(comm_->profilerContext, nullptr);
+  EXPECT_NE(comm_->profilerContext, fake_.ctx);
+  EXPECT_TRUE(Logged(NCCL_LOG_INFO, "Profiler FakeProfiler event mask: 0x100 (256) - Enabled: GroupApi "));
+  EXPECT_TRUE(Logged(NCCL_LOG_INFO, "Profiler FakeProfiler2 event mask: 0x20 (32) - Enabled: ProxyCtrl "));
+
+  // Each event reaches only the plugins whose own mask gates it, under that plugin's context and handle slot.
+  fake_.Clear();
+  ncclInfo info = MakeInfo(ncclFuncAllReduce);
+  ASSERT_EQ(ncclSuccess, ncclProfilerStartGroupApiEvent(&info, false));
+  auto starts = fake_.StartsOf(ncclProfileGroupApi);
+  ASSERT_EQ(starts.size(), 1u);
+  EXPECT_EQ(starts[0].ctx, fake_.ctx);
+  EXPECT_EQ(ncclProfilerApiState.groupApiEventHandle.h[0], starts[0].handle);
+  EXPECT_EQ(ncclProfilerApiState.groupApiEventHandle.h[1], nullptr);
+
+  ncclProfilerEventRef ctrl{};
+  ASSERT_EQ(ncclSuccess, ncclProfilerStartProxyCtrlEvent(comm_->profilerContext, &ctrl));
+  EXPECT_TRUE(fake_.StartsOf(ncclProfileProxyCtrl).empty());
+  ASSERT_EQ(FakePlugin2::starts().size(), 1u);
+  EXPECT_EQ(FakePlugin2::starts()[0].ctx, H(0xD2));
+  EXPECT_EQ(ctrl.h[0], nullptr);
+  EXPECT_EQ(ctrl.h[1], FakePlugin2::starts()[0].handle);
+  ASSERT_EQ(ncclSuccess, ncclProfilerStopProxyCtrlEvent(&ctrl));
+  EXPECT_EQ(FakePlugin2::stops(), std::vector<void*>{FakePlugin2::starts()[0].handle});
+  ASSERT_EQ(ncclSuccess, ncclProfilerStopGroupApiEvent());
+  EXPECT_EQ(fake_.Stops(), std::vector<void*>{starts[0].handle});
+
+  ASSERT_EQ(ncclSuccess, ncclProfilerPluginFinalize(comm_.get()));
+  EXPECT_EQ(fake_.finalized, std::vector<void*>{fake_.ctx});
+  EXPECT_EQ(FakePlugin2::finalized(), std::vector<void*>{H(0xD2)});
+  EXPECT_EQ(comm_->profilerContext, nullptr);
+  EXPECT_FALSE(ncclProfilerPluginLoaded());
+  EXPECT_EQ(g_closedLibs, (std::vector<void*>{&lib_, &lib3, &lib_, &lib2}));
+  FakePlugin2::Reset();
+}
+
+// A pre-v6 plugin's NetPlugin events still hang off proxy events, so NetPlugin implies ProxyOp and ProxyStep.
+TEST_F(ProfilerMicrotest, PluginInit_LegacyPluginRequestingNetPlugin_EnablesItsProxyAncestors) {
+  static int legacyMask = 0;
+  ncclProfiler_v5_t v5{"v5",
+                       [](void** ctx, uint64_t, int* mask, const char*, int, int, int, ncclDebugLogger_t) {
+                         *mask = legacyMask;
+                         *ctx = H(0xC5);
+                         return ncclSuccess;
+                       },
+                       nullptr, nullptr, nullptr,
+                       [](void*) { return ncclSuccess; }};
+  lib_ = {{"ncclProfiler_v5", &v5}};
+  legacyMask = ncclProfileNetPlugin;
+  ASSERT_EQ(ncclSuccess, ncclProfilerPluginInit(comm_.get()));
+  ASSERT_TRUE(ncclProfilerPluginLoaded());
+  EXPECT_TRUE(profilerPlugins[0].legacyNetPlugin);
+  EXPECT_EQ(ncclProfilerEventMask, ncclProfileNetPlugin | ncclProfileProxyOp | ncclProfileProxyStep);
+  EXPECT_TRUE(Logged(NCCL_LOG_INFO, "enabling ProxyOp and ProxyStep ancestors for legacy NetPlugin events (v5)"));
+  ASSERT_EQ(ncclSuccess, ncclProfilerPluginFinalize(comm_.get()));
+  EXPECT_FALSE(profilerLegacyNetPlugin);
+}
+
 // API events
 
 TEST_F(ProfilerMicrotest, StartGroupApi_OutermostGroup_StartsAndRecordsTheDepth) {
@@ -667,7 +982,7 @@ TEST_F(ProfilerMicrotest, StartGroupApi_OutermostGroup_StartsAndRecordsTheDepth)
   EXPECT_EQ(starts[0].d.rank, 3);
   EXPECT_TRUE(starts[0].d.groupApi.graphCaptured);
   EXPECT_EQ(starts[0].d.groupApi.groupDepth, 2);
-  EXPECT_EQ(ncclProfilerApiState.groupApiEventHandle, starts[0].handle);
+  EXPECT_EQ(ncclProfilerApiState.groupApiEventHandle.h[0], starts[0].handle);
   EXPECT_EQ(ncclProfilerApiState.profilerGroupDepth, 2);
   EXPECT_EQ(ncclProfilerApiState.state, ncclProfilerGroupApiStartStateStarted);
 
@@ -681,7 +996,7 @@ TEST_F(ProfilerMicrotest, StartGroupApi_OnlyApiAndTaskBitsStartIt) {
                          ncclProfileGroup,    ncclProfileColl,      ncclProfileP2p,       ncclProfileProxyOp,
                          ncclProfileProxyStep, ncclProfileKernelCh, ncclProfileNetPlugin, ncclProfileCeColl,
                          ncclProfileCeSync,   ncclProfileCeBatch};
-  const int kNoStart[] = {ncclProfileProxyCtrl, ncclProfileKernelPhase, ncclProfileProxyDiag};
+  const int kNoStart[] = {ncclProfileProxyCtrl, ncclProfileProxyDiag};
   Load(0);
   ncclInfo info = MakeInfo(ncclFuncAllReduce);
   for (int bit : kStarts) {
@@ -701,6 +1016,13 @@ TEST_F(ProfilerMicrotest, StartGroupApi_OnlyApiAndTaskBitsStartIt) {
     EXPECT_TRUE(fake_.StartsOf(ncclProfileGroupApi).empty());
     EXPECT_EQ(ncclProfilerApiState.eActivationMask, bit);
   }
+  // The mask snapshot now applies the KernelPhase->KernelCh dependency, and KernelCh starts the group.
+  ncclProfilerApiState = {};
+  fake_.Clear();
+  ncclProfilerEventMask = ncclProfileKernelPhase;
+  ASSERT_EQ(ncclSuccess, ncclProfilerStartGroupApiEvent(&info, false));
+  EXPECT_EQ(ncclProfilerApiState.eActivationMask, ncclProfileKernelPhase | ncclProfileKernelCh);
+  EXPECT_EQ(fake_.StartsOf(ncclProfileGroupApi).size(), 1u);
 }
 
 TEST_F(ProfilerMicrotest, StartGroupApi_NoPlugin_OnlySnapshotsTheMask) {
@@ -708,29 +1030,29 @@ TEST_F(ProfilerMicrotest, StartGroupApi_NoPlugin_OnlySnapshotsTheMask) {
   ncclInfo info = MakeInfo(ncclFuncAllReduce);
   ASSERT_EQ(ncclSuccess, ncclProfilerStartGroupApiEvent(&info, false));
   EXPECT_EQ(ncclProfilerApiState.eActivationMask, ncclProfileGroupApi);
-  EXPECT_EQ(ncclProfilerApiState.groupApiEventHandle, nullptr);
+  EXPECT_EQ(ncclProfilerApiState.groupApiEventHandle.h[0], nullptr);
   EXPECT_EQ(ncclProfilerApiState.state, ncclProfilerGroupApiStartStateReset);
 }
 
 TEST_F(ProfilerMicrotest, StopGroupApi_OnlyAtDepthZero_StopsAndClearsTheHandle) {
   Load(ncclProfileGroupApi);
-  ncclProfilerApiState.groupApiEventHandle = H(0x71);
+  ncclProfilerApiState.groupApiEventHandle = R(0x71);
   ncclProfilerApiState.profilerGroupDepth = 1;
   ASSERT_EQ(ncclSuccess, ncclProfilerStopGroupApiEvent());
   EXPECT_EQ(fake_.NumStops(), 0u);
-  EXPECT_EQ(ncclProfilerApiState.groupApiEventHandle, H(0x71));
+  EXPECT_EQ(ncclProfilerApiState.groupApiEventHandle.h[0], H(0x71));
 
   ncclProfilerApiState.profilerGroupDepth = 0;
   ASSERT_EQ(ncclSuccess, ncclProfilerStopGroupApiEvent());
   EXPECT_EQ(fake_.Stops(), std::vector<void*>{H(0x71)});
-  EXPECT_EQ(ncclProfilerApiState.groupApiEventHandle, nullptr);
+  EXPECT_EQ(ncclProfilerApiState.groupApiEventHandle.h[0], nullptr);
   ASSERT_EQ(ncclSuccess, ncclProfilerStopGroupApiEvent());
   EXPECT_EQ(fake_.NumStops(), 1u);
 }
 
 TEST_F(ProfilerMicrotest, RecordGroupApiState_FollowsStartStopThenEndStart) {
   Load(ncclProfileGroupApi);
-  ncclProfilerApiState.groupApiEventHandle = H(0x71);
+  ncclProfilerApiState.groupApiEventHandle = R(0x71);
   ncclProfilerApiState.state = ncclProfilerGroupApiStartStateStarted;
 
   ASSERT_EQ(ncclSuccess, ncclProfilerRecordGroupApiEventState(ncclProfilerGroupEndApiStart));  // out of order
@@ -746,7 +1068,8 @@ TEST_F(ProfilerMicrotest, RecordGroupApiState_FollowsStartStopThenEndStart) {
   ASSERT_EQ(records.size(), 2u);
   EXPECT_EQ(records[0].handle, H(0x71));
   EXPECT_EQ(records[0].state, ncclProfilerGroupStartApiStop);
-  EXPECT_FALSE(records[0].hasArgs);
+  EXPECT_TRUE(records[0].hasArgs);  // v8 recordEventState always gets args (zeroed here), never NULL
+  EXPECT_EQ(records[0].args.tsCpu, NCCL_PROFILER_TS_NONE);
   EXPECT_EQ(records[1].state, ncclProfilerGroupEndApiStart);
 }
 
@@ -761,7 +1084,7 @@ TEST_F(ProfilerMicrotest, RecordGroupApiState_NoHandle_AdvancesTheStateWithoutRe
 TEST_F(ProfilerMicrotest, StartP2pApi_FillsTheDescriptorUnderTheGroupApiParent) {
   Load(ncclProfileP2pApi);
   ncclProfilerApiState.eActivationMask = ncclProfileP2pApi;
-  ncclProfilerApiState.groupApiEventHandle = H(0x77);
+  ncclProfilerApiState.groupApiEventHandle = R(0x77);
   ncclInfo info = MakeInfo(ncclFuncSend);
   ASSERT_EQ(ncclSuccess, ncclProfilerStartP2pApiEvent(&info, false));
   auto starts = fake_.StartsOf(ncclProfileP2pApi);
@@ -775,11 +1098,11 @@ TEST_F(ProfilerMicrotest, StartP2pApi_FillsTheDescriptorUnderTheGroupApiParent) 
   EXPECT_EQ(d.p2pApi.stream, H(0x55));
   EXPECT_FALSE(d.p2pApi.graphCaptured);
   EXPECT_EQ(d.p2pApi.userTag, 9u);
-  EXPECT_EQ(ncclProfilerApiState.p2pApiEventHandle, starts[0].handle);
+  EXPECT_EQ(ncclProfilerApiState.p2pApiEventHandle.h[0], starts[0].handle);
 
   ASSERT_EQ(ncclSuccess, ncclProfilerStopP2pApiEvent());
   EXPECT_EQ(fake_.Stops(), std::vector<void*>{starts[0].handle});
-  EXPECT_EQ(ncclProfilerApiState.p2pApiEventHandle, nullptr);
+  EXPECT_EQ(ncclProfilerApiState.p2pApiEventHandle.h[0], nullptr);
   ASSERT_EQ(ncclSuccess, ncclProfilerStopP2pApiEvent());
   EXPECT_EQ(fake_.NumStops(), 1u);
 }
@@ -792,14 +1115,16 @@ TEST_F(ProfilerMicrotest, StartP2pApi_OnlyP2pRelatedBitsStartIt) {
   ncclInfo info = MakeInfo(ncclFuncSend);
   for (int bit : kStarts) {
     fake_.Clear();
-    ncclProfilerApiState.eActivationMask = bit;
+    ncclProfilerEventMask = bit;  // each API event snapshots the current mask itself
     ASSERT_EQ(ncclSuccess, ncclProfilerStartP2pApiEvent(&info, false));
+    EXPECT_EQ(ncclProfilerApiState.eActivationMask, bit);
     EXPECT_EQ(fake_.StartsOf(ncclProfileP2pApi).size(), 1u) << bit;
   }
   for (int bit : kNoStart) {
     fake_.Clear();
-    ncclProfilerApiState.eActivationMask = bit;
+    ncclProfilerEventMask = bit;  // each API event snapshots the current mask itself
     ASSERT_EQ(ncclSuccess, ncclProfilerStartP2pApiEvent(&info, false));
+    EXPECT_EQ(ncclProfilerApiState.eActivationMask, bit);
     EXPECT_TRUE(fake_.StartsOf(ncclProfileP2pApi).empty()) << bit;
   }
 }
@@ -825,7 +1150,7 @@ TEST_F(ProfilerMicrotest, StartApiEvents_GraphCapturedWithGraphUsageModeZero_Log
 TEST_F(ProfilerMicrotest, StartCollApi_FillsTheDescriptorIncludingRoot) {
   Load(ncclProfileCollApi);
   ncclProfilerApiState.eActivationMask = ncclProfileCollApi;
-  ncclProfilerApiState.groupApiEventHandle = H(0x77);
+  ncclProfilerApiState.groupApiEventHandle = R(0x77);
   ncclInfo info = MakeInfo(ncclFuncBroadcast);
   ASSERT_EQ(ncclSuccess, ncclProfilerStartCollApiEvent(&info, true));
   auto starts = fake_.StartsOf(ncclProfileCollApi);
@@ -840,11 +1165,11 @@ TEST_F(ProfilerMicrotest, StartCollApi_FillsTheDescriptorIncludingRoot) {
   EXPECT_EQ(d.collApi.root, 6);
   EXPECT_TRUE(d.collApi.graphCaptured);
   EXPECT_EQ(d.collApi.userTag, 9u);
-  EXPECT_EQ(ncclProfilerApiState.collApiEventHandle, starts[0].handle);
+  EXPECT_EQ(ncclProfilerApiState.collApiEventHandle.h[0], starts[0].handle);
 
   ASSERT_EQ(ncclSuccess, ncclProfilerStopCollApiEvent());
   EXPECT_EQ(fake_.Stops(), std::vector<void*>{starts[0].handle});
-  EXPECT_EQ(ncclProfilerApiState.collApiEventHandle, nullptr);
+  EXPECT_EQ(ncclProfilerApiState.collApiEventHandle.h[0], nullptr);
   ASSERT_EQ(ncclSuccess, ncclProfilerStopCollApiEvent());
   EXPECT_EQ(fake_.NumStops(), 1u);
 }
@@ -858,14 +1183,16 @@ TEST_F(ProfilerMicrotest, StartCollApi_OnlyCollRelatedBitsStartIt) {
   ncclInfo info = MakeInfo(ncclFuncAllReduce);
   for (int bit : kStarts) {
     fake_.Clear();
-    ncclProfilerApiState.eActivationMask = bit;
+    ncclProfilerEventMask = bit;  // each API event snapshots the current mask itself
     ASSERT_EQ(ncclSuccess, ncclProfilerStartCollApiEvent(&info, false));
+    EXPECT_EQ(ncclProfilerApiState.eActivationMask, bit);
     EXPECT_EQ(fake_.StartsOf(ncclProfileCollApi).size(), 1u) << bit;
   }
   for (int bit : kNoStart) {
     fake_.Clear();
-    ncclProfilerApiState.eActivationMask = bit;
+    ncclProfilerEventMask = bit;  // each API event snapshots the current mask itself
     ASSERT_EQ(ncclSuccess, ncclProfilerStartCollApiEvent(&info, false));
+    EXPECT_EQ(ncclProfilerApiState.eActivationMask, bit);
     EXPECT_TRUE(fake_.StartsOf(ncclProfileCollApi).empty()) << bit;
   }
 }
@@ -900,23 +1227,23 @@ class ProfilerPlanMicrotest : public ProfilerMicrotest {
 
 TEST_F(ProfilerPlanMicrotest, StartKernelLaunch_FirstMaskedCollTaskGivesTheParent) {
   Load(ncclProfileKernelLaunch);
-  AddColl(0)->groupApiEventHandle = H(0x90);
-  AddColl(ncclProfileKernelLaunch)->groupApiEventHandle = H(0x91);
-  AddP2p(ncclProfileKernelLaunch)->groupApiEventHandle = H(0x92);
+  AddColl(0)->groupApiEventHandle = R(0x90);
+  AddColl(ncclProfileKernelLaunch)->groupApiEventHandle = R(0x91);
+  AddP2p(ncclProfileKernelLaunch)->groupApiEventHandle = R(0x92);
   ASSERT_EQ(ncclSuccess, ncclProfilerStartKernelLaunchEvent(plan_.get(), reinterpret_cast<hipStream_t>(0x56)));
   auto starts = fake_.StartsOf(ncclProfileKernelLaunch);
   ASSERT_EQ(starts.size(), 1u);
   EXPECT_EQ(starts[0].d.rank, 3);
   EXPECT_EQ(starts[0].d.parentObj, H(0x91));
   EXPECT_EQ(starts[0].d.kernelLaunch.stream, H(0x56));
-  EXPECT_EQ(plan_->kernelLaunchEventHandle, starts[0].handle);
+  EXPECT_EQ(plan_->kernelLaunchEventHandle.h[0], starts[0].handle);
 }
 
 TEST_F(ProfilerPlanMicrotest, StartKernelLaunch_NoMaskedCollTask_FallsBackToP2p) {
   Load(ncclProfileKernelLaunch);
   AddColl(0);
-  AddP2p(0)->groupApiEventHandle = H(0x92);
-  AddP2p(ncclProfileKernelLaunch)->groupApiEventHandle = H(0x93);
+  AddP2p(0)->groupApiEventHandle = R(0x92);
+  AddP2p(ncclProfileKernelLaunch)->groupApiEventHandle = R(0x93);
   ASSERT_EQ(ncclSuccess, ncclProfilerStartKernelLaunchEvent(plan_.get(), nullptr));
   auto starts = fake_.StartsOf(ncclProfileKernelLaunch);
   ASSERT_EQ(starts.size(), 1u);
@@ -938,16 +1265,16 @@ TEST_F(ProfilerPlanMicrotest, StartKernelLaunch_FirstMaskedTaskLacksKernelLaunch
   EXPECT_TRUE(fake_.StartsOf(ncclProfileKernelLaunch).empty());
 }
 
-// Unlike the group and task stops, the KernelLaunch stop leaves its handle set, so a second stop repeats it.
-TEST_F(ProfilerPlanMicrotest, StopKernelLaunch_StopsButKeepsTheHandle) {
+// Like every other stop, the KernelLaunch stop now clears its event reference, so a second stop is a no-op.
+TEST_F(ProfilerPlanMicrotest, StopKernelLaunch_StopsOnceAndClearsTheHandle) {
   Load(ncclProfileKernelLaunch);
   ASSERT_EQ(ncclSuccess, ncclProfilerStopKernelLaunchEvent(plan_.get()));
   EXPECT_EQ(fake_.NumStops(), 0u);
-  plan_->kernelLaunchEventHandle = H(0x94);
+  plan_->kernelLaunchEventHandle = R(0x94);
   ASSERT_EQ(ncclSuccess, ncclProfilerStopKernelLaunchEvent(plan_.get()));
   ASSERT_EQ(ncclSuccess, ncclProfilerStopKernelLaunchEvent(plan_.get()));
-  EXPECT_EQ(fake_.Stops(), (std::vector<void*>{H(0x94), H(0x94)}));
-  EXPECT_EQ(plan_->kernelLaunchEventHandle, H(0x94));
+  EXPECT_EQ(fake_.Stops(), std::vector<void*>{H(0x94)});
+  EXPECT_EQ(plan_->kernelLaunchEventHandle.h[0], nullptr);
 }
 
 TEST_F(ProfilerPlanMicrotest, StartGroup_OnlyTaskLevelBitsStartIt) {
@@ -962,7 +1289,7 @@ TEST_F(ProfilerPlanMicrotest, StartGroup_OnlyTaskLevelBitsStartIt) {
     ASSERT_EQ(ncclSuccess, ncclProfilerStartGroupEvent(plan_.get()));
     auto starts = fake_.StartsOf(ncclProfileGroup);
     ASSERT_EQ(starts.size(), 1u) << bit;
-    EXPECT_EQ(plan_->groupEventHandle, starts[0].handle);
+    EXPECT_EQ(plan_->groupEventHandle.h[0], starts[0].handle);
     EXPECT_EQ(starts[0].ctx, H(0xC0));
   }
   for (int bit : kNoStart) {
@@ -995,16 +1322,16 @@ TEST_F(ProfilerPlanMicrotest, StartGroup_FirstMaskedTaskDecides_P2pWhenNoCollIsM
 
 TEST_F(ProfilerPlanMicrotest, StopGroup_StopsOnceAndClearsTheHandle) {
   Load(ncclProfileGroup);
-  plan_->groupEventHandle = H(0x95);
+  plan_->groupEventHandle = R(0x95);
   ASSERT_EQ(ncclSuccess, ncclProfilerStopGroupEvent(plan_.get()));
   ASSERT_EQ(ncclSuccess, ncclProfilerStopGroupEvent(plan_.get()));
   EXPECT_EQ(fake_.Stops(), std::vector<void*>{H(0x95)});
-  EXPECT_EQ(plan_->groupEventHandle, nullptr);
+  EXPECT_EQ(plan_->groupEventHandle.h[0], nullptr);
 }
 
 TEST_F(ProfilerPlanMicrotest, StartTaskEvents_CollDescriptorCarriesTheTaskAndBumpsSeqNumber) {
   Load(ncclProfileColl);
-  plan_->groupEventHandle = H(0x30);
+  plan_->groupEventHandle = R(0x30);
   comm_->seqNumber[ncclFuncAllReduce] = 7;
   ncclTaskColl* ct = AddColl(ncclProfileColl);
   ct->func = ncclFuncAllReduce;
@@ -1018,7 +1345,7 @@ TEST_F(ProfilerPlanMicrotest, StartTaskEvents_CollDescriptorCarriesTheTaskAndBum
   ct->algorithm = NCCL_ALGO_RING;
   ct->protocol = NCCL_PROTO_LL;
   ct->profilerTag = 11;
-  ct->collApiEventHandle = H(0x31);
+  ct->collApiEventHandle = R(0x31);
   ASSERT_EQ(ncclSuccess, ncclProfilerStartTaskEvents(plan_.get()));
   auto starts = fake_.StartsOf(ncclProfileColl);
   ASSERT_EQ(starts.size(), 1u);
@@ -1040,7 +1367,7 @@ TEST_F(ProfilerPlanMicrotest, StartTaskEvents_CollDescriptorCarriesTheTaskAndBum
   EXPECT_EQ(d.coll.kernelVariant, nullptr);
   EXPECT_FALSE(d.coll.isSymColl);
   EXPECT_EQ(d.coll.userTag, 11u);
-  EXPECT_EQ(ct->eventHandle, starts[0].handle);
+  EXPECT_EQ(ct->eventHandle.h[0], starts[0].handle);
   EXPECT_EQ(comm_->seqNumber[ncclFuncAllReduce], 8u);
 }
 
@@ -1064,24 +1391,26 @@ TEST_F(ProfilerPlanMicrotest, StartTaskEvents_OnlyCollTaskBitsStartACollEvent) {
   }
 }
 
-TEST_F(ProfilerPlanMicrotest, StartTaskEvents_SymPlan_AdvertisesTheKernelVariantAndPlanChannels) {
+// The sym scheduler now sets each task's nChannels, so the plan's channel mask no longer overrides the head task's.
+TEST_F(ProfilerPlanMicrotest, StartTaskEvents_SymPlan_AdvertisesTheKernelVariantAndTaskChannels) {
   Load(ncclProfileColl);
   plan_->isSymColl = true;
   plan_->channelMask.masks[0] = 0xB;  // 3 channels
   ncclTaskColl* head = AddColl(ncclProfileColl);
   head->devFuncId = 1;  // "AGxLL_R"
+  head->nChannels = 2;
   ncclTaskColl* tail = AddColl(ncclProfileColl);
   tail->devFuncId = 2;  // "NoUnderscore"
   tail->nChannels = 5;
   ASSERT_EQ(ncclSuccess, ncclProfilerStartTaskEvents(plan_.get()));
   auto starts = fake_.StartsOf(ncclProfileColl);
   ASSERT_EQ(starts.size(), 2u);
-  EXPECT_EQ(starts[0].d.coll.nChannels, 3);
+  EXPECT_EQ(starts[0].d.coll.nChannels, 2);
   EXPECT_TRUE(starts[0].d.coll.isSymColl);
   EXPECT_STREQ(starts[0].d.coll.kernelVariant, "AGxLL_R");
   EXPECT_STREQ(starts[0].d.coll.algo, "R");
   EXPECT_STREQ(starts[0].d.coll.proto, "");
-  EXPECT_EQ(starts[1].d.coll.nChannels, 5);  // only the head task takes the plan's channel count
+  EXPECT_EQ(starts[1].d.coll.nChannels, 5);
   EXPECT_STREQ(starts[1].d.coll.algo, "NoUnderscore");
 }
 
@@ -1106,14 +1435,14 @@ TEST_F(ProfilerPlanMicrotest, StartTaskEvents_GraphCapturedPlan_CountsSeqNumberO
   EXPECT_EQ(comm_->seqNumber[ncclFuncAllGather], 1u);
 
   Load(ncclProfileKernelCh);
-  ct->eventHandle = nullptr;
+  ct->eventHandle = {};
   ASSERT_EQ(ncclSuccess, ncclProfilerStartTaskEvents(plan_.get()));  // neither parent handle
   EXPECT_EQ(comm_->seqNumber[ncclFuncAllGather], 1u);
-  plan_->groupEventHandle = H(0x30);
+  plan_->groupEventHandle = R(0x30);
   ASSERT_EQ(ncclSuccess, ncclProfilerStartTaskEvents(plan_.get()));
   EXPECT_EQ(comm_->seqNumber[ncclFuncAllGather], 2u);
-  plan_->groupEventHandle = nullptr;
-  ct->collApiEventHandle = H(0x31);
+  plan_->groupEventHandle = {};
+  ct->collApiEventHandle = R(0x31);
   ASSERT_EQ(ncclSuccess, ncclProfilerStartTaskEvents(plan_.get()));
   EXPECT_EQ(comm_->seqNumber[ncclFuncAllGather], 3u);
   ct->eActivationMask = ncclProfileColl;
@@ -1123,7 +1452,7 @@ TEST_F(ProfilerPlanMicrotest, StartTaskEvents_GraphCapturedPlan_CountsSeqNumberO
 
 TEST_F(ProfilerPlanMicrotest, StartTaskEvents_P2pDescriptorAdvertisesItsChannels) {
   Load(ncclProfileP2p);
-  plan_->groupEventHandle = H(0x30);
+  plan_->groupEventHandle = R(0x30);
   ncclTaskP2p* pt = AddP2p(ncclProfileP2p);
   pt->func = ncclFuncRecv;
   pt->buff = H(0x300);
@@ -1133,7 +1462,7 @@ TEST_F(ProfilerPlanMicrotest, StartTaskEvents_P2pDescriptorAdvertisesItsChannels
   pt->nChannels = 2;
   pt->channelMask = 0x7;
   pt->profilerTag = 12;
-  pt->p2pApiEventHandle = H(0x32);
+  pt->p2pApiEventHandle = R(0x32);
   ASSERT_EQ(ncclSuccess, ncclProfilerStartTaskEvents(plan_.get()));
   auto starts = fake_.StartsOf(ncclProfileP2p);
   ASSERT_EQ(starts.size(), 1u);
@@ -1148,7 +1477,7 @@ TEST_F(ProfilerPlanMicrotest, StartTaskEvents_P2pDescriptorAdvertisesItsChannels
   EXPECT_EQ(d.p2p.peer, 4);
   EXPECT_EQ(d.p2p.nChannels, 2);
   EXPECT_EQ(d.p2p.userTag, 12u);
-  EXPECT_EQ(pt->eventHandle, starts[0].handle);
+  EXPECT_EQ(pt->eventHandle.h[0], starts[0].handle);
 
   // With KernelCh the count is the per-direction channel mask.
   fake_.Clear();
@@ -1180,19 +1509,19 @@ TEST_F(ProfilerPlanMicrotest, StartTaskEvents_OnlyP2pTaskBitsStartAP2pEvent) {
 }
 
 TEST_F(ProfilerPlanMicrotest, StopTaskEvents_StopsEachStartedTaskOnce) {
-  AddColl(0)->eventHandle = H(0x41);
+  AddColl(0)->eventHandle = R(0x41);
   AddColl(0);
-  AddP2p(0)->eventHandle = H(0x42);
+  AddP2p(0)->eventHandle = R(0x42);
   AddP2p(0);
   ASSERT_EQ(ncclSuccess, ncclProfilerStopTaskEvents(plan_.get()));  // no plugin
-  EXPECT_EQ(colls_[0]->eventHandle, H(0x41));
+  EXPECT_EQ(colls_[0]->eventHandle.h[0], H(0x41));
 
   Load(ncclProfileColl);
   ASSERT_EQ(ncclSuccess, ncclProfilerStopTaskEvents(plan_.get()));
   ASSERT_EQ(ncclSuccess, ncclProfilerStopTaskEvents(plan_.get()));
   EXPECT_EQ(fake_.Stops(), (std::vector<void*>{H(0x41), H(0x42)}));
-  EXPECT_EQ(colls_[0]->eventHandle, nullptr);
-  EXPECT_EQ(p2ps_[0]->eventHandle, nullptr);
+  EXPECT_EQ(colls_[0]->eventHandle.h[0], nullptr);
+  EXPECT_EQ(p2ps_[0]->eventHandle.h[0], nullptr);
 }
 
 // Proxy events
@@ -1210,7 +1539,7 @@ class ProfilerProxyMicrotest : public ProfilerMicrotest {
     args_->opCount = 12;
     args_->progress = netSendProgress;
     sub_->eActivationMask = ncclProfileProxyOp;
-    sub_->taskEventHandle = H(0x41);
+    sub_->taskEventHandle = R(0x41);
     sub_->rank = 3;
     sub_->pid = 99;
     sub_->channelId = 7;
@@ -1244,7 +1573,7 @@ TEST_F(ProfilerProxyMicrotest, StartProxyOp_ScalesStepsBySliceStepsAndZeroesDiag
   EXPECT_EQ(d.proxyOp.traceTotalBytes, 0u);
   EXPECT_EQ(d.proxyOp.proxyNbytes, 0u);
   EXPECT_EQ(d.proxyOp.rawProxyNsteps, 0);
-  EXPECT_EQ(sub_->opEventHandle, starts[0].handle);
+  EXPECT_EQ(sub_->opEventHandle.h[0], starts[0].handle);
 
   fake_.Clear();
   args_->progress = nullptr;
@@ -1270,8 +1599,9 @@ TEST_F(ProfilerProxyMicrotest, StartProxyOp_ProxyDiag_CarriesTheTraceFields) {
 }
 
 TEST_F(ProfilerProxyMicrotest, StartProxyOp_OnlyProxyBitsStartIt) {
-  const int kStarts[] = {ncclProfileProxyOp, ncclProfileProxyStep, ncclProfileNetPlugin, ncclProfileProxyDiag};
-  const int kNoStart[] = {ncclProfileColl, ncclProfileKernelCh, ncclProfileProxyCtrl};
+  const int kStarts[] = {ncclProfileProxyOp, ncclProfileProxyStep, ncclProfileProxyDiag};
+  // NetPlugin no longer implies proxy events for a v6+ plugin (its parent is just NULL without them).
+  const int kNoStart[] = {ncclProfileColl, ncclProfileKernelCh, ncclProfileProxyCtrl, ncclProfileNetPlugin};
   ASSERT_EQ(ncclSuccess, ncclProfilerStartProxyOpEvent(1, args_.get()));  // no plugin
   Load(0);
   for (int bit : kStarts) {
@@ -1290,18 +1620,18 @@ TEST_F(ProfilerProxyMicrotest, StartProxyOp_OnlyProxyBitsStartIt) {
 
 TEST_F(ProfilerProxyMicrotest, StopProxyOp_StopsOnceAndClearsTheHandle) {
   Load(ncclProfileProxyOp);
-  sub_->opEventHandle = H(0x43);
+  sub_->opEventHandle = R(0x43);
   ASSERT_EQ(ncclSuccess, ncclProfilerStopProxyOpEvent(1, args_.get()));
   ASSERT_EQ(ncclSuccess, ncclProfilerStopProxyOpEvent(1, args_.get()));
   EXPECT_EQ(fake_.Stops(), std::vector<void*>{H(0x43)});
-  EXPECT_EQ(sub_->opEventHandle, nullptr);
+  EXPECT_EQ(sub_->opEventHandle.h[0], nullptr);
 }
 
 TEST_F(ProfilerProxyMicrotest, StartProxyStep_SendAndRecv_FileTheHandleUnderTheSliceStep) {
   using StartFn = ncclResult_t (*)(int, ncclProxyArgs*, int);
   Load(ncclProfileProxyStep);
   sub_->eActivationMask = ncclProfileProxyStep;
-  sub_->opEventHandle = H(0x43);
+  sub_->opEventHandle = R(0x43);
   for (StartFn start : {&ncclProfilerStartSendProxyStepEvent, &ncclProfilerStartRecvProxyStepEvent}) {
     fake_.Clear();
     std::memset(sub_->pHandles, 0, sizeof(sub_->pHandles));
@@ -1313,17 +1643,17 @@ TEST_F(ProfilerProxyMicrotest, StartProxyStep_SendAndRecv_FileTheHandleUnderTheS
     EXPECT_EQ(starts[0].d.parentObj, H(0x43));
     EXPECT_EQ(starts[0].d.rank, 3);
     EXPECT_EQ(starts[0].d.proxyStep.step, NCCL_STEPS + 1);
-    EXPECT_EQ(sub_->pHandles[1].stepEventHandle, starts[0].handle);
+    EXPECT_EQ(sub_->pHandles[1].stepEventHandle.h[0], starts[0].handle);
     EXPECT_EQ(sub_->pHandles[1].subArgPtr, sub_);
 
     ASSERT_EQ(ncclSuccess, start(1, args_.get(), 3));  // DIVUP(3, 2) = 2
     EXPECT_EQ(fake_.StartsOf(ncclProfileProxyStep).back().d.proxyStep.step, 2);
-    EXPECT_NE(sub_->pHandles[2].stepEventHandle, nullptr);
+    EXPECT_NE(sub_->pHandles[2].stepEventHandle.h[0], nullptr);
   }
 }
 
 TEST_F(ProfilerProxyMicrotest, StartProxyStep_OnlyStepBitsStartIt_ButTheSubArgIsAlwaysLinked) {
-  const int kStarts[] = {ncclProfileProxyStep, ncclProfileNetPlugin, ncclProfileProxyDiag};
+  const int kStarts[] = {ncclProfileProxyStep, ncclProfileProxyDiag};
   ASSERT_EQ(ncclSuccess, ncclProfilerStartSendProxyStepEvent(1, args_.get(), 2));  // no plugin
   EXPECT_EQ(sub_->pHandles[1].subArgPtr, sub_);
   ASSERT_EQ(ncclSuccess, ncclProfilerStartRecvProxyStepEvent(1, args_.get(), 4));
@@ -1336,32 +1666,37 @@ TEST_F(ProfilerProxyMicrotest, StartProxyStep_OnlyStepBitsStartIt_ButTheSubArgIs
     ASSERT_EQ(ncclSuccess, ncclProfilerStartRecvProxyStepEvent(1, args_.get(), 2));
     EXPECT_EQ(fake_.StartsOf(ncclProfileProxyStep).size(), 2u) << bit;
   }
-  fake_.Clear();
-  sub_->eActivationMask = ncclProfileProxyOp;
-  ASSERT_EQ(ncclSuccess, ncclProfilerStartSendProxyStepEvent(1, args_.get(), 2));
-  ASSERT_EQ(ncclSuccess, ncclProfilerStartRecvProxyStepEvent(1, args_.get(), 2));
-  EXPECT_TRUE(fake_.StartsOf(ncclProfileProxyStep).empty());
+  // NetPlugin no longer implies proxy events for a v6+ plugin; a slot that starts nothing is left cleared.
+  for (int bit : {ncclProfileProxyOp, ncclProfileNetPlugin}) {
+    fake_.Clear();
+    sub_->eActivationMask = bit;
+    sub_->pHandles[1].stepEventHandle = R(0xBAD);
+    ASSERT_EQ(ncclSuccess, ncclProfilerStartSendProxyStepEvent(1, args_.get(), 2));
+    ASSERT_EQ(ncclSuccess, ncclProfilerStartRecvProxyStepEvent(1, args_.get(), 2));
+    EXPECT_TRUE(fake_.StartsOf(ncclProfileProxyStep).empty()) << bit;
+    EXPECT_EQ(sub_->pHandles[1].stepEventHandle.h[0], nullptr) << bit;
+  }
 }
 
 TEST_F(ProfilerProxyMicrotest, StopProxyStep_StopsTheSlotOnceAndClearsIt) {
-  sub_->pHandles[2].stepEventHandle = H(0x44);
+  sub_->pHandles[2].stepEventHandle = R(0x44);
   ASSERT_EQ(ncclSuccess, ncclProfilerStopProxyStepEvent(1, args_.get(), 3));  // no plugin
-  EXPECT_EQ(sub_->pHandles[2].stepEventHandle, H(0x44));
+  EXPECT_EQ(sub_->pHandles[2].stepEventHandle.h[0], H(0x44));
   Load(ncclProfileProxyStep);
   ASSERT_EQ(ncclSuccess, ncclProfilerStopProxyStepEvent(1, args_.get(), 3));
   ASSERT_EQ(ncclSuccess, ncclProfilerStopProxyStepEvent(1, args_.get(), 3));
   EXPECT_EQ(fake_.Stops(), std::vector<void*>{H(0x44)});
-  EXPECT_EQ(sub_->pHandles[2].stepEventHandle, nullptr);
+  EXPECT_EQ(sub_->pHandles[2].stepEventHandle.h[0], nullptr);
 }
 
 TEST_F(ProfilerProxyMicrotest, ProxyCtrl_FollowsTheGlobalMask) {
-  void* h = H(0xBAD);
+  ncclProfilerEventRef h = R(0xBAD);
   ASSERT_EQ(ncclSuccess, ncclProfilerStartProxyCtrlEvent(H(0xC2), &h));  // no plugin
-  EXPECT_EQ(h, nullptr);
+  EXPECT_EQ(h.h[0], nullptr);
   Load(ncclProfileProxyOp);
-  h = H(0xBAD);
+  h = R(0xBAD);
   ASSERT_EQ(ncclSuccess, ncclProfilerStartProxyCtrlEvent(H(0xC2), &h));
-  EXPECT_EQ(h, nullptr);
+  EXPECT_EQ(h.h[0], nullptr);
   EXPECT_TRUE(fake_.StartsOf(ncclProfileProxyCtrl).empty());
 
   ncclProfilerEventMask = ncclProfileProxyCtrl;
@@ -1369,21 +1704,27 @@ TEST_F(ProfilerProxyMicrotest, ProxyCtrl_FollowsTheGlobalMask) {
   auto starts = fake_.StartsOf(ncclProfileProxyCtrl);
   ASSERT_EQ(starts.size(), 1u);
   EXPECT_EQ(starts[0].ctx, H(0xC2));
-  EXPECT_EQ(h, starts[0].handle);
+  EXPECT_EQ(h.h[0], starts[0].handle);
+  void* started = h.h[0];
 
-  ASSERT_EQ(ncclSuccess, ncclProfilerRecordProxyCtrlEventState(h, 6, ncclProfilerProxyCtrlAppend));
-  ASSERT_EQ(ncclSuccess, ncclProfilerRecordProxyCtrlEventState(nullptr, 6, ncclProfilerProxyCtrlAppend));
-  ASSERT_EQ(ncclSuccess, ncclProfilerStopProxyCtrlEvent(h));
-  ASSERT_EQ(ncclSuccess, ncclProfilerStopProxyCtrlEvent(nullptr));
+  ncclProfilerEventRef none{};
+  ASSERT_EQ(ncclSuccess, ncclProfilerRecordProxyCtrlEventState(&h, 6, ncclProfilerProxyCtrlAppend));
+  ASSERT_EQ(ncclSuccess, ncclProfilerRecordProxyCtrlEventState(&none, 6, ncclProfilerProxyCtrlAppend));
+  ASSERT_EQ(ncclSuccess, ncclProfilerStopProxyCtrlEvent(&h));
+  EXPECT_EQ(h.h[0], nullptr);  // the stop clears the reference, so a repeat is a no-op
+  ASSERT_EQ(ncclSuccess, ncclProfilerStopProxyCtrlEvent(&h));
+  ASSERT_EQ(ncclSuccess, ncclProfilerStopProxyCtrlEvent(&none));
   ncclProfilerEventMask = ncclProfileProxyOp;
-  ASSERT_EQ(ncclSuccess, ncclProfilerRecordProxyCtrlEventState(h, 7, ncclProfilerProxyCtrlAppend));
+  ncclProfilerEventRef stale{};
+  stale.h[0] = started;
+  ASSERT_EQ(ncclSuccess, ncclProfilerRecordProxyCtrlEventState(&stale, 7, ncclProfilerProxyCtrlAppend));
 
   auto records = fake_.Records();
   ASSERT_EQ(records.size(), 1u);
-  EXPECT_EQ(records[0].handle, h);
+  EXPECT_EQ(records[0].handle, started);
   EXPECT_EQ(records[0].state, ncclProfilerProxyCtrlAppend);
   EXPECT_EQ(records[0].args.proxyCtrl.appendedProxyOps, 6);
-  EXPECT_EQ(fake_.Stops(), std::vector<void*>{h});
+  EXPECT_EQ(fake_.Stops(), std::vector<void*>{started});
 }
 
 TEST_F(ProfilerProxyMicrotest, RecordProxyOpAndStep_NeedTheirHandles) {
@@ -1392,11 +1733,11 @@ TEST_F(ProfilerProxyMicrotest, RecordProxyOpAndStep_NeedTheirHandles) {
   ASSERT_EQ(ncclSuccess, ncclProfilerRecordProxyStepEventState(1, args_.get(), 3, ncclProfilerProxyStepSendWait));
   EXPECT_TRUE(fake_.Records().empty());
 
-  sub_->opEventHandle = H(0x43);
+  sub_->opEventHandle = R(0x43);
   ASSERT_EQ(ncclSuccess, ncclProfilerRecordProxyStepEventState(1, args_.get(), 3, ncclProfilerProxyStepSendWait));
   EXPECT_TRUE(fake_.Records().empty());  // no step handle in slot 2
 
-  sub_->pHandles[2].stepEventHandle = H(0x44);
+  sub_->pHandles[2].stepEventHandle = R(0x44);
   sub_->transSize = 8192;
   ASSERT_EQ(ncclSuccess, ncclProfilerRecordProxyOpEventState(1, args_.get(), ncclProfilerProxyOpInProgress_v4));
   ASSERT_EQ(ncclSuccess, ncclProfilerRecordProxyStepEventState(1, args_.get(), 3, ncclProfilerProxyStepSendWait));
@@ -1418,14 +1759,14 @@ TEST_F(ProfilerProxyMicrotest, ProxyDiag_RecordsCountersOnlyWhenEnabledAndStarte
   ncclProfilerEventMask = ncclProfileProxyDiag;
   EXPECT_TRUE(ncclProfilerProxyDiagEnabled());
 
-  sub_->opEventHandle = H(0x43);
+  sub_->opEventHandle = R(0x43);
   ASSERT_EQ(ncclSuccess, ncclProfilerRecordProxyDiagState(1, args_.get(), 1, 2, 3, 4));  // sub not diag
   sub_->eActivationMask = ncclProfileProxyDiag;
-  sub_->opEventHandle = nullptr;
+  sub_->opEventHandle = {};
   ASSERT_EQ(ncclSuccess, ncclProfilerRecordProxyDiagState(1, args_.get(), 1, 2, 3, 4));  // not started
   EXPECT_TRUE(fake_.Records().empty());
 
-  sub_->opEventHandle = H(0x43);
+  sub_->opEventHandle = R(0x43);
   ASSERT_EQ(ncclSuccess, ncclProfilerRecordProxyDiagState(1, args_.get(), 9, -5, 1LL << 40, 3));
   auto records = fake_.Records();
   ASSERT_EQ(records.size(), 1u);
@@ -1438,7 +1779,7 @@ TEST_F(ProfilerProxyMicrotest, ProxyDiag_RecordsCountersOnlyWhenEnabledAndStarte
 }
 
 TEST_F(ProfilerProxyMicrotest, NetPluginCallback_StartStopUpdate) {
-  ncclProxyEventHandle p{H(0x44), sub_};
+  ncclProxyEventHandle p{R(0x44), sub_};
   void* h = nullptr;
   ASSERT_EQ(ncclSuccess, ncclProfilerCallback(&h, ncclProfilerNetEventStart, &p, 17, H(0xE0)));  // no plugin
   Load(ncclProfileNetPlugin);
@@ -1455,22 +1796,38 @@ TEST_F(ProfilerProxyMicrotest, NetPluginCallback_StartStopUpdate) {
   EXPECT_EQ(starts[0].d.netPlugin.id, 17);
   EXPECT_EQ(starts[0].d.netPlugin.data, H(0xE0));
   EXPECT_EQ(h, starts[0].handle);
+  void* first = h;
 
   ASSERT_EQ(ncclSuccess, ncclProfilerCallback(&h, ncclProfilerNetEventUpdate, nullptr, 0, H(0xE1)));
   ASSERT_EQ(ncclSuccess, ncclProfilerCallback(&h, ncclProfilerNetEventStop, nullptr, 0, nullptr));
+  EXPECT_EQ(h, nullptr);  // the stop clears the caller's handle
+  ASSERT_EQ(ncclSuccess, ncclProfilerCallback(&h, ncclProfilerNetEventStop, nullptr, 0, nullptr));  // no-op
+
+  ASSERT_EQ(ncclSuccess, ncclProfilerCallback(&h, ncclProfilerNetEventStart, &p, 18, H(0xE0)));
+  void* second = h;
+  ASSERT_NE(second, nullptr);
   ASSERT_EQ(ncclSuccess, ncclProfilerCallback(&h, ncclProfilerNetEventUpdateAndStop, nullptr, 0, H(0xE2)));
+  EXPECT_EQ(h, nullptr);
+  // With no live handle the update is a one-off: it still reaches the plugin, with a NULL handle.
+  ASSERT_EQ(ncclSuccess, ncclProfilerCallback(&h, ncclProfilerNetEventUpdateAndStop, nullptr, 0, H(0xE3)));
+
   auto records = fake_.Records();
-  ASSERT_EQ(records.size(), 2u);
+  ASSERT_EQ(records.size(), 3u);
+  EXPECT_EQ(records[0].handle, first);
   EXPECT_EQ(records[0].state, ncclProfilerNetPluginUpdate);
   EXPECT_EQ(records[0].args.netPlugin.data, H(0xE1));
+  EXPECT_EQ(records[1].handle, second);
+  EXPECT_EQ(records[1].state, ncclProfilerNetPluginUpdate);
   EXPECT_EQ(records[1].args.netPlugin.data, H(0xE2));
-  EXPECT_EQ(fake_.Stops(), (std::vector<void*>{h, h}));
+  EXPECT_EQ(records[2].handle, nullptr);
+  EXPECT_EQ(records[2].args.netPlugin.data, H(0xE3));
+  EXPECT_EQ(fake_.Stops(), (std::vector<void*>{first, second}));
 }
 
 TEST_F(ProfilerMicrotest, KernelCh_StartsUnderTheTaskAndStopRecordsTheStopTime) {
   ncclProfilerWorkOp op{};
   op.eActivationMask = ncclProfileKernelCh;
-  op.taskEventHandle = H(0x51);
+  op.taskEventHandle = R(0x51);
   op.channelId = 9;
   op.profilerContext = H(0xC3);
   ASSERT_EQ(ncclSuccess, ncclProfilerStartKernelChEvent(&op, 111));  // no plugin
@@ -1489,15 +1846,16 @@ TEST_F(ProfilerMicrotest, KernelCh_StartsUnderTheTaskAndStopRecordsTheStopTime) 
   EXPECT_EQ(starts[0].d.parentObj, H(0x51));
   EXPECT_EQ(starts[0].d.kernelCh.channelId, 9);
   EXPECT_EQ(starts[0].d.kernelCh.pTimer, 111u);
-  EXPECT_EQ(op.kernelEventHandle, starts[0].handle);
+  EXPECT_EQ(op.kernelEventHandle.h[0], starts[0].handle);
 
   ASSERT_EQ(ncclSuccess, ncclProfilerStopKernelChEvent(&op, 222));
   auto records = fake_.Records();
   ASSERT_EQ(records.size(), 1u);
-  EXPECT_EQ(records[0].handle, op.kernelEventHandle);
+  EXPECT_EQ(records[0].handle, starts[0].handle);
   EXPECT_EQ(records[0].state, ncclProfilerKernelChStop);
   EXPECT_EQ(records[0].args.kernelCh.pTimer, 222u);
-  EXPECT_EQ(fake_.Stops(), std::vector<void*>{op.kernelEventHandle});
+  EXPECT_EQ(fake_.Stops(), std::vector<void*>{starts[0].handle});
+  EXPECT_EQ(op.kernelEventHandle.h[0], nullptr);  // the stop clears the reference
 }
 
 TEST_F(ProfilerMicrotest, DeviceMode_FollowsKernelChAndKernelPhase) {
@@ -1522,7 +1880,7 @@ class ProfilerCeMicrotest : public ProfilerMicrotest {
     args_.nElts = 64;
     args_.sendBuff = reinterpret_cast<uint8_t*>(0x100);
     args_.recvBuff = reinterpret_cast<uint8_t*>(0x200);
-    args_.collApiEventHandle = H(0x31);
+    args_.collApiEventHandle = R(0x31);
     args_.userTag = 13;
     comm_->ceColl.ceSeqNum = 21;
     comm_->ceColl.useCompletePtr = true;
@@ -1559,7 +1917,7 @@ TEST_F(ProfilerCeMicrotest, StartCeColl_FillsTheDescriptorWhenAnyCeBitIsSet) {
   EXPECT_EQ(d.ceColl.ceSeqNum, 21u);
   EXPECT_EQ(d.ceColl.stream, H(0x57));
   EXPECT_EQ(d.ceColl.userTag, 13u);
-  EXPECT_EQ(args_.ceCollProfHandle, starts[0].handle);
+  EXPECT_EQ(args_.ceCollProfHandle.h[0], starts[0].handle);
 
   comm_->symkState.hasLsaMultimem = true;
   ASSERT_EQ(ncclSuccess, ncclProfilerStartCeCollEvent(comm_.get(), &args_, nullptr));
@@ -1572,18 +1930,18 @@ TEST_F(ProfilerCeMicrotest, StopCeColl_StopsTheStartedHandleAndToleratesNullArgs
   ASSERT_EQ(ncclSuccess, ncclProfilerStopCeCollEvent(comm_.get(), nullptr, nullptr));
   ASSERT_EQ(ncclSuccess, ncclProfilerStopCeCollEvent(comm_.get(), &args_, nullptr));
   EXPECT_EQ(fake_.NumStops(), 0u);
-  args_.ceCollProfHandle = H(0x45);
+  args_.ceCollProfHandle = R(0x45);
   ASSERT_EQ(ncclSuccess, ncclProfilerStopCeCollEvent(comm_.get(), &args_, nullptr));
   EXPECT_EQ(fake_.Stops(), std::vector<void*>{H(0x45)});
 }
 
 TEST_F(ProfilerCeMicrotest, CeSync_NeedsTheCeSyncBitAndAStartedParent) {
-  void* h = nullptr;
+  ncclProfilerEventRef h{};
   ASSERT_EQ(ncclSuccess, ncclProfilerStartCeSyncEvent(comm_.get(), &args_, nullptr, &h));  // no plugin
   Load(ncclProfileCeSync);
   ASSERT_EQ(ncclSuccess, ncclProfilerStartCeSyncEvent(comm_.get(), nullptr, nullptr, &h));
   ASSERT_EQ(ncclSuccess, ncclProfilerStartCeSyncEvent(comm_.get(), &args_, nullptr, &h));  // no parent
-  args_.ceCollProfHandle = H(0x45);
+  args_.ceCollProfHandle = R(0x45);
   ncclProfilerEventMask = ncclProfileCeColl;
   ASSERT_EQ(ncclSuccess, ncclProfilerStartCeSyncEvent(comm_.get(), &args_, nullptr, &h));
   EXPECT_TRUE(fake_.StartsOf(ncclProfileCeSync).empty());
@@ -1596,11 +1954,13 @@ TEST_F(ProfilerCeMicrotest, CeSync_NeedsTheCeSyncBitAndAStartedParent) {
   EXPECT_EQ(starts[0].d.rank, 3);
   EXPECT_TRUE(starts[0].d.ceCollSync.isComplete);
   EXPECT_EQ(starts[0].d.ceCollSync.nRanks, 8);
-  EXPECT_EQ(h, starts[0].handle);
+  EXPECT_EQ(h.h[0], starts[0].handle);
 
-  ASSERT_EQ(ncclSuccess, ncclProfilerStopCeSyncEvent(comm_.get(), nullptr, nullptr));
-  ASSERT_EQ(ncclSuccess, ncclProfilerStopCeSyncEvent(comm_.get(), h, nullptr));
-  EXPECT_EQ(fake_.Stops(), std::vector<void*>{h});
+  ncclProfilerEventRef none{};
+  ASSERT_EQ(ncclSuccess, ncclProfilerStopCeSyncEvent(comm_.get(), &none, nullptr));
+  ASSERT_EQ(ncclSuccess, ncclProfilerStopCeSyncEvent(comm_.get(), &h, nullptr));
+  EXPECT_EQ(fake_.Stops(), std::vector<void*>{starts[0].handle});
+  EXPECT_EQ(h.h[0], nullptr);
 }
 
 TEST_F(ProfilerCeMicrotest, CeBatch_SumsTheOpSizes) {
@@ -1609,12 +1969,12 @@ TEST_F(ProfilerCeMicrotest, CeBatch_SumsTheOpSizes) {
   params.sizes = sizes;
   params.numOps = 3;
   params.intraBatchSync = true;
-  void* h = nullptr;
+  ncclProfilerEventRef h{};
   ASSERT_EQ(ncclSuccess, ncclProfilerStartCeBatchEvent(comm_.get(), &args_, &params, nullptr, &h));  // no plugin
   Load(ncclProfileCeBatch);
   ASSERT_EQ(ncclSuccess, ncclProfilerStartCeBatchEvent(comm_.get(), nullptr, &params, nullptr, &h));
   ASSERT_EQ(ncclSuccess, ncclProfilerStartCeBatchEvent(comm_.get(), &args_, &params, nullptr, &h));  // no parent
-  args_.ceCollProfHandle = H(0x45);
+  args_.ceCollProfHandle = R(0x45);
   ncclProfilerEventMask = ncclProfileCeSync;
   ASSERT_EQ(ncclSuccess, ncclProfilerStartCeBatchEvent(comm_.get(), &args_, &params, nullptr, &h));
   EXPECT_TRUE(fake_.StartsOf(ncclProfileCeBatch).empty());
@@ -1628,11 +1988,13 @@ TEST_F(ProfilerCeMicrotest, CeBatch_SumsTheOpSizes) {
   EXPECT_EQ(starts[0].d.ceCollBatch.numOps, 3);
   EXPECT_EQ(starts[0].d.ceCollBatch.totalBytes, 600u);
   EXPECT_TRUE(starts[0].d.ceCollBatch.useIntraSync);
-  EXPECT_EQ(h, starts[0].handle);
+  EXPECT_EQ(h.h[0], starts[0].handle);
 
-  ASSERT_EQ(ncclSuccess, ncclProfilerStopCeBatchEvent(comm_.get(), nullptr, nullptr));
-  ASSERT_EQ(ncclSuccess, ncclProfilerStopCeBatchEvent(comm_.get(), h, nullptr));
-  EXPECT_EQ(fake_.Stops(), std::vector<void*>{h});
+  ncclProfilerEventRef none{};
+  ASSERT_EQ(ncclSuccess, ncclProfilerStopCeBatchEvent(comm_.get(), &none, nullptr));
+  ASSERT_EQ(ncclSuccess, ncclProfilerStopCeBatchEvent(comm_.get(), &h, nullptr));
+  EXPECT_EQ(fake_.Stops(), std::vector<void*>{starts[0].handle});
+  EXPECT_EQ(h.h[0], nullptr);
 }
 
 // KernelCh profiler thread
@@ -1713,7 +2075,8 @@ class ProfilerThreadMicrotest : public ProfilerPlanMicrotest {
     ncclTaskColl* ct = AddColl(ncclProfileKernelCh);
     ct->channelLo = lo;
     ct->channelHi = hi;
-    ct->eventHandle = eventHandle;
+    ct->eventHandle = {};
+    ct->eventHandle.h[0] = eventHandle;
     return ct;
   }
 };
@@ -1733,7 +2096,7 @@ TEST_F(ProfilerThreadMicrotest, ThreadCreate_BindsTheCommDeviceAndLogsItsCap) {
   EXPECT_EQ(g_setDeviceArg.load(), 5);
   EXPECT_TRUE(Logged(NCCL_LOG_INFO, "SetDevice(5) failed: fake hip error"));
   char want[96];
-  std::snprintf(want, sizeof(want), "started (cudaDev=5, maxInflight=%d)",
+  std::snprintf(want, sizeof(want), "started (cudaDev=5, maxInflight=%d, tsMode=0x0)",
                 MAXCHANNELS * MAX_PROFILER_EVENTS_PER_CHANNEL * 4);
   EXPECT_TRUE(Logged(NCCL_LOG_INFO, want));
   Destroy(comm_.get());
@@ -1846,11 +2209,11 @@ TEST_F(ProfilerThreadMicrotest, PostPlanWork_P2pPair_SharesOneCounterBumpPerChan
   ncclTaskP2p* send = AddP2p(ncclProfileKernelCh);
   send->p2pPairId = 1;
   send->channelMask = 0x3;
-  send->eventHandle = H(0x61);
+  send->eventHandle = R(0x61);
   ncclTaskP2p* recv = AddP2p(ncclProfileKernelCh);
   recv->p2pPairId = 1;
   recv->channelMask = 0x6;
-  recv->eventHandle = H(0x62);
+  recv->eventHandle = R(0x62);
   ASSERT_EQ(ncclSuccess, ncclProfilerPostPlanWork(comm_.get(), plan_.get()));
   for (int ch : {0, 1, 2}) EXPECT_EQ(comm_->profiler.workCounter[ch], 1u) << ch;
   EXPECT_EQ(comm_->profiler.workCounter[3], 0u);
@@ -1942,6 +2305,74 @@ TEST_F(ProfilerThreadMicrotest, ReserveSymCounters_EmptyPlan_ReservesNothing) {
   EXPECT_EQ(Inflight(comm_.get()), 0u);
 }
 
+// GPU->CPU timestamp mapping (v8 gpuClockSync) on the profiler thread
+
+class ProfilerClockSyncMicrotest : public ProfilerThreadMicrotest {
+ protected:
+  // Runs one KernelCh op whose kernel starts at GPU tick 1100 and ends at 1300, after the probe read tick 1000.
+  void RunKernelCh(StartCall* start, RecordCall* record, ncclProfilerEventDescr_t* stop) {
+    fake_.initConfigRequest = {ncclProfilerCpuClockMonotonic, 1};
+    Load(ncclProfileKernelCh);
+    EXPECT_TRUE(PROF_TS_MODE_GPUSYNC(profilerTsModeGet()));
+    g_gpuClock = 1000;
+    CreateThread(comm_.get());
+    Stamp(started_, 0, 1, 1100);
+    Stamp(completed_, 0, 1, 1300);
+    AddKernelChColl(0, 0, H(0x51));
+    ASSERT_EQ(ncclSuccess, ncclProfilerPostPlanWork(comm_.get(), plan_.get()));
+    ASSERT_TRUE(waitUntil([this] { return fake_.NumStops() == 1; }));
+    auto starts = fake_.StartsOf(ncclProfileKernelCh);
+    auto records = fake_.Records();
+    ASSERT_EQ(starts.size(), 1u);
+    ASSERT_EQ(records.size(), 1u);
+    *start = starts[0];
+    *record = records[0];
+    std::lock_guard<std::mutex> lock(fake_.mu);
+    *stop = fake_.stopDescrs[0];
+  }
+};
+
+// [RCCL] The probe and device stamps read wall_clock64(), so ticks are scaled by the device's wall-clock rate.
+TEST_F(ProfilerClockSyncMicrotest, KernelCh_MapsGpuTicksOntoTheCpuClockAtTheWallClockRate) {
+  g_wallClockRateKHz = 100000;  // 100 MHz: 10 ns per tick
+  StartCall start;
+  RecordCall record;
+  ncclProfilerEventDescr_t stop;
+  ASSERT_NO_FATAL_FAILURE(RunKernelCh(&start, &record, &stop));
+  EXPECT_GT(g_probeCalls.load(), 0);
+  EXPECT_EQ(start.d.kernelCh.pTimer, 1100u);  // the raw GPU stamp is still reported as is
+  EXPECT_EQ(record.args.kernelCh.pTimer, 1300u);
+  ASSERT_NE(start.d.tsCpu, NCCL_PROFILER_TS_NONE);
+  EXPECT_EQ(record.args.tsCpu, stop.tsCpu);
+  EXPECT_EQ(start.d.tsCpuUncertainty, record.args.tsCpuUncertainty);
+#if defined(__HIP_PLATFORM_AMD__)
+  EXPECT_EQ(record.args.tsCpu - start.d.tsCpu, 2000u);  // 200 ticks * 10 ns
+#else
+  EXPECT_EQ(record.args.tsCpu - start.d.tsCpu, 200u);
+#endif
+}
+
+TEST_F(ProfilerClockSyncMicrotest, KernelCh_NoWallClockRate_TreatsTicksAsNanoseconds) {
+  StartCall start;
+  RecordCall record;
+  ncclProfilerEventDescr_t stop;
+  ASSERT_NO_FATAL_FAILURE(RunKernelCh(&start, &record, &stop));
+  ASSERT_NE(start.d.tsCpu, NCCL_PROFILER_TS_NONE);
+  EXPECT_EQ(record.args.tsCpu - start.d.tsCpu, 200u);
+}
+
+TEST_F(ProfilerClockSyncMicrotest, KernelCh_CalibrationUnavailable_LeavesGpuEventsUnstamped) {
+  g_streamCreateResult = hipErrorOutOfMemory;
+  StartCall start;
+  RecordCall record;
+  ncclProfilerEventDescr_t stop;
+  ASSERT_NO_FATAL_FAILURE(RunKernelCh(&start, &record, &stop));
+  EXPECT_EQ(g_probeCalls.load(), 0);
+  EXPECT_EQ(start.d.tsCpu, NCCL_PROFILER_TS_NONE);
+  EXPECT_EQ(record.args.tsCpu, NCCL_PROFILER_TS_NONE);
+  EXPECT_EQ(stop.tsCpu, NCCL_PROFILER_TS_NONE);
+}
+
 class ProfilerSymThreadMicrotest : public ProfilerThreadMicrotest {
  protected:
   alignas(16) ncclSymkDevWorkArgs4K buf_;
@@ -1955,7 +2386,7 @@ class ProfilerSymThreadMicrotest : public ProfilerThreadMicrotest {
     plan_->isSymColl = true;
     plan_->channelMask.masks[0] = 0x1;
     ct_ = AddColl(ncclProfileKernelCh | ncclProfileKernelPhase);
-    ct_->eventHandle = H(0x52);
+    ct_->eventHandle = R(0x52);
   }
   void SetPhases(int ch, uint64_t wc, std::initializer_list<uint64_t> ts) {
     auto& slot = phases_[ch].data[wc % MAX_PROFILER_EVENTS_PER_CHANNEL];
@@ -2005,7 +2436,9 @@ TEST_F(ProfilerSymThreadMicrotest, PostPlanWork_SymKernel_FiresThePhasesBeforeTh
   EXPECT_EQ(records[3].state, ncclProfilerKernelChStop);
   EXPECT_EQ(records[3].args.kernelCh.pTimer, 50u);
   EXPECT_EQ(fake_.Stops(), (std::vector<void*>{phases[0].handle, phases[1].handle, phases[2].handle, kch[0].handle}));
-  for (uint64_t t : phases_[0].data[1].timestamps) EXPECT_EQ(t, 0u);
+  // Phases are folded in a local copy (tasks of a sym plan share the record), so the device record is left intact.
+  const uint64_t kWant[] = {10, 20, 30, 40};
+  for (int i = 0; i < 4; i++) EXPECT_EQ(phases_[0].data[1].timestamps[i], kWant[i]) << i;
 }
 
 TEST_F(ProfilerSymThreadMicrotest, PhaseEvents_MissingInnerBoundaries_FoldOntoTheOuterOnes) {
@@ -2039,7 +2472,8 @@ TEST_F(ProfilerSymThreadMicrotest, PhaseEvents_NoInnerBoundaries_FiresNoPhases) 
   SetPhases(0, 1, {10, 0, 0, 40});
   EXPECT_TRUE(RunSym().empty());
   EXPECT_EQ(fake_.NumStops(), 1u);
-  for (uint64_t t : phases_[0].data[1].timestamps) EXPECT_EQ(t, 0u);
+  const uint64_t kWant[] = {10, 0, 0, 40};  // the device record is left intact
+  for (int i = 0; i < 4; i++) EXPECT_EQ(phases_[0].data[1].timestamps[i], kWant[i]) << i;
 }
 
 TEST_F(ProfilerSymThreadMicrotest, PhaseEvents_UnstampedOuterBoundaries_AreNotFolded) {

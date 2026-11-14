@@ -261,7 +261,7 @@ class ConfigComm {
 
   ncclResult_t RunParse(ncclConfig_t* cfg) {
     ran_ = true;
-    result_ = parseCommConfig(comm_.get(), cfg);
+    result_ = ncclParseCommConfig(comm_.get(), cfg);
     return result_;
   }
 
@@ -851,6 +851,24 @@ class P2pScheduleComm {
       ++i;
     }
     schedule_.resize(nRanks > 0 ? nRanks : 0);
+    // NCCL 2.32.6 also counts NET receive peers per schedule group: it reads the caller's own node
+    // (localRanks/localRankToRank/peerInfo hostHash) and classifies a peer as NET when
+    // ncclTopoRankToIndex cannot find it in comm->topo. Model one host per node whose topo holds
+    // exactly that node's GPUs.
+    peerInfo_.resize(std::max(nRanks, nextRank) > 0 ? std::max(nRanks, nextRank) : 0);
+    for (size_t n = 0; n < rankTables_.size(); ++n)
+      for (int r : rankTables_[n]) peerInfo_[r].hostHash = 0x1000 + n;
+    const bool haveNode = node < static_cast<int>(rankTables_.size());
+    const std::vector<int>* own = haveNode ? &rankTables_[node] : nullptr;
+    topo_->nodes[GPU].count = own ? static_cast<int>(own->size()) : 0;
+    for (int i = 0; own && i < static_cast<int>(own->size()); ++i) topo_->nodes[GPU].nodes[i].gpu.rank = (*own)[i];
+    comm_->rank = (own && localRank < static_cast<int>(own->size())) ? (*own)[localRank] : 0;
+    comm_->localRanks = own ? static_cast<int>(own->size()) : 0;
+    comm_->localRankToRank = own ? const_cast<int*>(own->data()) : nullptr;
+    comm_->peerInfo = peerInfo_.data();
+    comm_->topo = topo_.get();
+    comm_->p2pnChannels = 1;
+    comm_->p2pnChannelsPerPeer = 1;
     comm_->nNodes = nNodes;
     comm_->node = node;
     comm_->localRank = localRank;
@@ -867,6 +885,8 @@ class P2pScheduleComm {
   std::vector<ncclNodeRanks> nodeRanks_;
   std::vector<std::vector<int>> rankTables_;
   std::vector<ncclComm::P2pSchedulePair> schedule_;
+  std::vector<ncclPeerInfo> peerInfo_;
+  std::unique_ptr<ncclTopoSystem> topo_{new ncclTopoSystem{}};
   std::unique_ptr<ncclComm> comm_;
 };
 
@@ -997,6 +1017,41 @@ TEST_F(InitMicrotest, P2pSchedule_SecondCallocFails_ReturnsSystemError) {
   P2pScheduleComm c(/*nNodes=*/1, /*node=*/0, /*localRank=*/0, /*nRanks=*/4,
                     /*maxLocalRanks=*/4, {4});
   EXPECT_EQ(ncclSystemError, ncclP2pSchedule(c.get()));
+}
+
+// NCCL 2.32.6: the per-epoch NET receive peer range. 2 nodes x 4 ranks, groupSize 2 -> 4 groups, the two on
+// node 1 use NET. With p2pnChannels/p2pnChannelsPerPeer = 4 one epoch spans all groups. PXN folds a group's
+// 2 ranks into divUp(2, 4 GPUs/host) = 1 peer, so the epoch sees 2 NET peers; without PXN it sees 4.
+TEST_F(InitMicrotest, P2pSchedule_NetGroups_RecordA2aPeerRange_PxnAggregates) {
+  SetParams({{"P2P_SCHEDULE_GROUP_SIZE", 2}});
+  P2pScheduleComm c(/*nNodes=*/2, /*node=*/0, /*localRank=*/0, /*nRanks=*/8,
+                    /*maxLocalRanks=*/4, {4, 4});
+  c.get()->p2pnChannels = 4;
+  ASSERT_EQ(ncclSuccess, ncclP2pSchedule(c.get()));
+  EXPECT_EQ(2, c.get()->p2pA2aMinPeers);
+  EXPECT_EQ(2, c.get()->p2pA2aMaxPeers);
+}
+
+TEST_F(InitMicrotest, P2pSchedule_NetGroups_RecordA2aPeerRange_NoPxnCountsEveryRank) {
+  SetParams({{"P2P_SCHEDULE_GROUP_SIZE", 2}});
+  g_pxnDisable = [](ncclComm*) { return 1; };
+  P2pScheduleComm c(/*nNodes=*/2, /*node=*/0, /*localRank=*/0, /*nRanks=*/8,
+                    /*maxLocalRanks=*/4, {4, 4});
+  c.get()->p2pnChannels = 4;
+  ASSERT_EQ(ncclSuccess, ncclP2pSchedule(c.get()));
+  EXPECT_EQ(4, c.get()->p2pA2aMinPeers);
+  EXPECT_EQ(4, c.get()->p2pA2aMaxPeers);
+}
+
+// Every peer resolves in the local topo, so no epoch has NET peers and the INT_MAX sentinel collapses to 0.
+TEST_F(InitMicrotest, P2pSchedule_SingleNode_NoNetPeers_A2aRangeIsZero) {
+  P2pScheduleComm c(/*nNodes=*/1, /*node=*/0, /*localRank=*/0, /*nRanks=*/4,
+                    /*maxLocalRanks=*/4, {4});
+  c.get()->p2pA2aMinPeers = -1;
+  c.get()->p2pA2aMaxPeers = -1;
+  ASSERT_EQ(ncclSuccess, ncclP2pSchedule(c.get()));
+  EXPECT_EQ(0, c.get()->p2pA2aMinPeers);
+  EXPECT_EQ(0, c.get()->p2pA2aMaxPeers);
 }
 
 TEST_F(InitMicrotest, P2pSchedule_ZeroNodes_AllocatesNothingAndSucceeds) {
@@ -1170,7 +1225,7 @@ ncclResult_t ParseWith(const std::function<void(ncclConfig_t&)>& tweak) {
   auto comm = std::make_unique<ncclComm>();
   ncclConfig_t cfg = NCCL_CONFIG_INITIALIZER;
   tweak(cfg);
-  return parseCommConfig(comm.get(), &cfg);
+  return ncclParseCommConfig(comm.get(), &cfg);
 }
 }  // namespace
 
@@ -1201,7 +1256,7 @@ TEST_F(InitMicrotest, ParseCommConfig_BadMaxP2pPeers_ReturnsInvalidArgument) {
 TEST_F(InitMicrotest, ParseCommConfig_ValidDefault_ReturnsSuccessAndAssigns) {
   auto comm = std::make_unique<ncclComm>();
   ncclConfig_t cfg = NCCL_CONFIG_INITIALIZER;
-  EXPECT_EQ(ncclSuccess, parseCommConfig(comm.get(), &cfg));
+  EXPECT_EQ(ncclSuccess, ncclParseCommConfig(comm.get(), &cfg));
   EXPECT_EQ(1, comm->config.blocking);                       // undef -> default 1
   EXPECT_EQ(NCCL_CTA_POLICY_DEFAULT, comm->config.CTAPolicy);  // undef -> default
 }
@@ -1643,7 +1698,7 @@ TEST_F(InitMicrotest, ComputeBuffSizes_SingleNodeOwner_UsesDefaultsAndSetsShared
   sr->owner = comm.get();      // owner==comm -> sets sharedRes->tpP2pChunkSize
   comm->nNodes = 1;
   comm->isAllNvlink = false;   // -> p2pChunkSize from P2P_PCI_CHUNKSIZE default
-  EXPECT_EQ(ncclSuccess, computeBuffSizes(comm.get()));
+  EXPECT_EQ(ncclSuccess, ncclComputeBuffSizes(comm.get()));
   EXPECT_EQ(1 << 22, comm->buffSizes[NCCL_PROTO_SIMPLE]);   // default from fake
   EXPECT_EQ(1 << 17, comm->p2pChunkSize);                   // P2P_PCI default
   EXPECT_EQ(comm->p2pChunkSize, sr->tpP2pChunkSize);
@@ -1667,9 +1722,7 @@ TEST_F(InitMicrotest, GetAsyncError_ProxyError_Propagates) {
 }
 TEST_F(InitMicrotest, GetAsyncError_GinError_ReturnsRemoteError) {
   ReadyComm rc;
-  auto sr = std::make_unique<ncclSharedResources>();
-  sr->ginState.connected = true;
-  rc.get()->sharedRes = sr.get();
+  rc.get()->ginState.connected = true;
   g_ginHasError = true;  // ncclGinQueryLastError -> hasError
   ncclResult_t e = ncclSuccess;
   EXPECT_EQ(ncclSuccess, ncclCommGetAsyncError_impl(rc.get(), &e));
@@ -1677,15 +1730,13 @@ TEST_F(InitMicrotest, GetAsyncError_GinError_ReturnsRemoteError) {
 }
 TEST_F(InitMicrotest, GetAsyncError_GinNotConnected_SkipsTheGinQuery) {
   ReadyComm rc;
-  auto sr = std::make_unique<ncclSharedResources>();
   // A loaded-but-unconnected plugin: 2.31 moved the per-plugin ncclGin pointer
   // into the per-backend records, so a loaded plugin is one active backend
   // holding it. It must be non-null for this to pin the connected check, and
   // is never dereferenced here since the guard skips the block.
-  sr->ginState.numActiveBackends = 1;
-  sr->ginState.backends[0].ncclGin = reinterpret_cast<ncclGin_t*>(0x1);
-  sr->ginState.connected = false;
-  rc.get()->sharedRes = sr.get();
+  rc.get()->ginState.numActiveBackends = 1;
+  rc.get()->ginState.backends[0].ncclGin = reinterpret_cast<ncclGin_t*>(0x1);
+  rc.get()->ginState.connected = false;
   g_ginHasError = true;  // would surface as ncclRemoteError if queried
   ncclResult_t e = ncclSuccess;
   EXPECT_EQ(ncclSuccess, ncclCommGetAsyncError_impl(rc.get(), &e));
@@ -1887,7 +1938,7 @@ TEST_F(InitMicrotest, FillInfo_AllocOk_DmaBufSupported_EnablesGdrDirectly) {
 // globalGinTypeBitMask, so it decides whether ncclGinSetDefaultBackend runs.
 TEST_F(InitMicrotest, FillInfo_LiveGinBackend_AdvertisesItsType) {
   FillInfoComm c;
-  struct ncclGinState* ginState = &c.get()->sharedRes->ginState;
+  struct ncclGinState* ginState = &c.get()->ginState;
   ginState->numActiveBackends = 1;
   ginState->backends[0].ginType = NCCL_GIN_TYPE_PROXY;
   ncclPeerInfo info{};
@@ -1900,7 +1951,7 @@ TEST_F(InitMicrotest, FillInfo_LiveGinBackend_AdvertisesItsType) {
 // through a ginInstance whose owning comm may already be freed.
 TEST_F(InitMicrotest, FillInfo_FinalizedGinBackends_AdvertiseNoType) {
   FillInfoComm c;
-  struct ncclGinState* ginState = &c.get()->sharedRes->ginState;
+  struct ncclGinState* ginState = &c.get()->ginState;
   ginState->numActiveBackends = 1;
   ginState->backends[0].ginType = NCCL_GIN_TYPE_PROXY;
   ginState->finalized = true;
@@ -3364,19 +3415,15 @@ TEST_F(InitMicrotest, GinGate_NoSupportedGinTypeOrNoCuMemGdr_RefusesGin) {
 // a multi-host communicator can leave no backend, and that communicator must stay NONE.
 TEST_F(InitMicrotest, GinConnectionType_NoBackendLeft_StaysNone) {
   auto comm = std::make_unique<ncclComm>();
-  auto sr = std::make_unique<ncclSharedResources>();
-  comm->sharedRes = sr.get();
   comm->contiguousRanksPerHost = 8;
-  sr->ginState.supported = false;
+  comm->ginState.supported = false;
   EXPECT_EQ(ginConnectionType(comm.get(), /*globalCrossNicSupport=*/true), NCCL_GIN_CONNECTION_NONE);
   EXPECT_EQ(ginConnectionType(comm.get(), /*globalCrossNicSupport=*/false), NCCL_GIN_CONNECTION_NONE);
 }
 
 TEST_F(InitMicrotest, GinConnectionType_BackendLeft_FullOrRail) {
   auto comm = std::make_unique<ncclComm>();
-  auto sr = std::make_unique<ncclSharedResources>();
-  comm->sharedRes = sr.get();
-  sr->ginState.supported = true;
+  comm->ginState.supported = true;
   comm->contiguousRanksPerHost = 8;
   EXPECT_EQ(ginConnectionType(comm.get(), /*globalCrossNicSupport=*/true), NCCL_GIN_CONNECTION_FULL);
   EXPECT_EQ(ginConnectionType(comm.get(), /*globalCrossNicSupport=*/false), NCCL_GIN_CONNECTION_RAIL);
@@ -5176,17 +5223,15 @@ TEST_F(InitMicrotest, CommEnsureReady_NotAborting_ReportsTheCommsAsyncError) {
 namespace {
 class Dtor_GinComm {
  public:
-  explicit Dtor_GinComm(bool needsProxyProgress) : sr_(new ncclSharedResources{}) {
-    sr_->ginState.connected = true;
-    sr_->ginState.proxyThreadsCreated = needsProxyProgress;
-    rc_.get()->sharedRes = sr_.get();
+  explicit Dtor_GinComm(bool needsProxyProgress) {
+    rc_.get()->ginState.connected = true;
+    rc_.get()->ginState.proxyThreadsCreated = needsProxyProgress;
   }
   ncclComm* get() { return rc_.get(); }
-  struct ncclGinState* gin() { return &sr_->ginState; }
+  struct ncclGinState* gin() { return &rc_.get()->ginState; }
 
  private:
   ReadyComm rc_;
-  std::unique_ptr<ncclSharedResources> sr_;
 };
 }  // namespace
 
@@ -5467,7 +5512,7 @@ TEST_F(InitMicrotestIsolated, InitEnv_PluginFails_LatchesThatErrorAndCallsThePlu
       });
 }
 
-// --- parseCommConfig: version negotiation, per-field validation, defaulting (init.cc:3243-3462) ---
+// --- ncclParseCommConfig: version negotiation, per-field validation, defaulting (init.cc:3243-3462) ---
 
 namespace {
 constexpr char ParseCfg_kNetName[] = "microfake-net";
@@ -5923,7 +5968,7 @@ TEST_F(InitMicrotest, ParseCommConfig_GraphMixingWithStreamOrderingOne_StaysOneA
   EXPECT_TRUE(LogHas(log, "Comm config graphStreamOrdering set to 1")) << "actual log:\n" << log;
 }
 
-// --- computeBuffSizes: the multi-node, chunk-clamp and shared-resource arms (init.cc:1299-1315) ---
+// --- ncclComputeBuffSizes: the multi-node, chunk-clamp and shared-resource arms (init.cc:1299-1315) ---
 
 namespace {
 class BuffSizes_Scene {
@@ -5945,14 +5990,14 @@ TEST_F(InitMicrotest, ComputeBuffSizes_MultiNode_UsesNetChunkSizeNotTheNvlinkOne
   BuffSizes_Scene s;
   s.comm()->nNodes = 2;
   s.comm()->isAllNvlink = true;  // would yield the 512 kB NVL size if the node count were misread
-  EXPECT_EQ(ncclSuccess, computeBuffSizes(s.comm()));
+  EXPECT_EQ(ncclSuccess, ncclComputeBuffSizes(s.comm()));
   EXPECT_EQ(1 << 17, s.comm()->p2pChunkSize);
 }
 TEST_F(InitMicrotest, ComputeBuffSizes_SingleNodeAllNvlink_UsesTheNvlinkChunkSize) {
   BuffSizes_Scene s;
   s.comm()->nNodes = 1;
   s.comm()->isAllNvlink = true;
-  EXPECT_EQ(ncclSuccess, computeBuffSizes(s.comm()));
+  EXPECT_EQ(ncclSuccess, ncclComputeBuffSizes(s.comm()));
   EXPECT_EQ(1 << 19, s.comm()->p2pChunkSize);
 }
 TEST_F(InitMicrotest, ComputeBuffSizes_ChunkExceedsSimpleBuffer_ClampsToOneStep) {
@@ -5960,7 +6005,7 @@ TEST_F(InitMicrotest, ComputeBuffSizes_ChunkExceedsSimpleBuffer_ClampsToOneStep)
   s.comm()->nNodes = 1;
   s.comm()->isAllNvlink = false;
   SetParams({{"BUFFSIZE", 1 << 16}, {"P2P_PCI_CHUNKSIZE", 1 << 15}});
-  EXPECT_EQ(ncclSuccess, computeBuffSizes(s.comm()));
+  EXPECT_EQ(ncclSuccess, ncclComputeBuffSizes(s.comm()));
   EXPECT_EQ(1 << 16, s.comm()->buffSizes[NCCL_PROTO_SIMPLE]);
   EXPECT_EQ((1 << 16) / NCCL_STEPS, s.comm()->p2pChunkSize);
 }
@@ -5969,7 +6014,7 @@ TEST_F(InitMicrotest, ComputeBuffSizes_ChunkFitsSimpleBuffer_IsLeftAlone) {
   s.comm()->nNodes = 1;
   s.comm()->isAllNvlink = false;
   SetParams({{"BUFFSIZE", 1 << 22}, {"P2P_PCI_CHUNKSIZE", 1 << 15}});
-  EXPECT_EQ(ncclSuccess, computeBuffSizes(s.comm()));
+  EXPECT_EQ(ncclSuccess, ncclComputeBuffSizes(s.comm()));
   EXPECT_EQ(1 << 15, s.comm()->p2pChunkSize);
 }
 TEST_F(InitMicrotest, ComputeBuffSizes_NotSharedResOwner_CapsToTheSharedChunkSize) {
@@ -5980,7 +6025,7 @@ TEST_F(InitMicrotest, ComputeBuffSizes_NotSharedResOwner_CapsToTheSharedChunkSiz
   s.comm()->nNodes = 1;
   s.comm()->isAllNvlink = false;
   SetParams({{"P2P_PCI_CHUNKSIZE", 1 << 15}});
-  EXPECT_EQ(ncclSuccess, computeBuffSizes(s.comm()));
+  EXPECT_EQ(ncclSuccess, ncclComputeBuffSizes(s.comm()));
   EXPECT_EQ(4096, s.comm()->p2pChunkSize);
   EXPECT_EQ(4096, s.shared()->tpP2pChunkSize);
 }
@@ -5992,12 +6037,12 @@ TEST_F(InitMicrotest, ComputeBuffSizes_NotSharedResOwnerWithLargerShared_KeepsIt
   s.comm()->nNodes = 1;
   s.comm()->isAllNvlink = false;
   SetParams({{"P2P_PCI_CHUNKSIZE", 1 << 15}});
-  EXPECT_EQ(ncclSuccess, computeBuffSizes(s.comm()));
+  EXPECT_EQ(ncclSuccess, ncclComputeBuffSizes(s.comm()));
   EXPECT_EQ(1 << 15, s.comm()->p2pChunkSize);
   EXPECT_EQ(1 << 20, s.shared()->tpP2pChunkSize);
 }
 
-// --- computeBuffSizes: the collective LL128 scaling (rcclScaleCollLl128BuffSize) and its shared-parent override ---
+// --- ncclComputeBuffSizes: the collective LL128 scaling (rcclScaleCollLl128BuffSize) and its shared-parent override ---
 
 namespace {
 // The rcclScaleCollLl128BuffSize fake multiplies buffSizes[NCCL_PROTO_LL128] by this factor.
@@ -6017,7 +6062,7 @@ TEST_F(InitMicrotest, ComputeBuffSizes_DefaultLl128_ScalesTheCollectiveBufferOnl
   ScopedLl128ScaleFake scale(4);
   BuffSizes_Scene s;
   s.comm()->nNodes = 2;
-  EXPECT_EQ(ncclSuccess, computeBuffSizes(s.comm()));
+  EXPECT_EQ(ncclSuccess, ncclComputeBuffSizes(s.comm()));
   EXPECT_EQ(1, g_rcclScaleCollLl128BuffSizeCalls);
   ASSERT_GT(s.comm()->p2pLl128BuffSize, 0);
   EXPECT_EQ(4 * s.comm()->p2pLl128BuffSize, s.comm()->buffSizes[NCCL_PROTO_LL128])
@@ -6028,7 +6073,7 @@ TEST_F(InitMicrotest, ComputeBuffSizes_UserLl128BuffSize_SkipsTheScaling) {
   BuffSizes_Scene s;
   s.comm()->nNodes = 2;
   SetParams({{"LL128_BUFFSIZE", 1 << 20}});
-  EXPECT_EQ(ncclSuccess, computeBuffSizes(s.comm()));
+  EXPECT_EQ(ncclSuccess, ncclComputeBuffSizes(s.comm()));
   EXPECT_EQ(0, g_rcclScaleCollLl128BuffSizeCalls) << "NCCL_LL128_BUFFSIZE turns the scaling off";
   EXPECT_EQ(1 << 20, s.comm()->buffSizes[NCCL_PROTO_LL128]);
   EXPECT_EQ(1 << 20, s.comm()->p2pLl128BuffSize);
@@ -6056,7 +6101,7 @@ TEST_F(InitMicrotest, ComputeBuffSizes_RankSharingAProxy_TakesItsLl128Sizes) {
       s.comm()->rank = 0;
       auto peers = SharedLl128Peers({sharedFactor * (448 << 10), sharedFactor * (448 << 10)});
       s.comm()->peerInfo = peers.data();
-      EXPECT_EQ(ncclSuccess, computeBuffSizes(s.comm()));
+      EXPECT_EQ(ncclSuccess, ncclComputeBuffSizes(s.comm()));
       EXPECT_EQ(sharedFactor * (448 << 10), s.comm()->buffSizes[NCCL_PROTO_LL128])
           << "shared x" << sharedFactor << ", own x" << ownFactor;
       EXPECT_EQ(448 << 10, s.comm()->p2pLl128BuffSize) << "shared x" << sharedFactor << ", own x" << ownFactor;
@@ -6073,7 +6118,7 @@ TEST_F(InitMicrotest, ComputeBuffSizes_GrowNewRank_AdoptsTheExistingRanksLl128Si
   s.comm()->rank = 3;
   auto peers = SharedLl128Peers({0, 448 << 10, 448 << 10, 0});
   s.comm()->peerInfo = peers.data();
-  EXPECT_EQ(ncclSuccess, computeBuffSizes(s.comm()));
+  EXPECT_EQ(ncclSuccess, ncclComputeBuffSizes(s.comm()));
   EXPECT_EQ(448 << 10, s.comm()->buffSizes[NCCL_PROTO_LL128]);
   EXPECT_EQ(448 << 10, s.comm()->p2pLl128BuffSize);
 }
@@ -6085,7 +6130,7 @@ TEST_F(InitMicrotest, ComputeBuffSizes_OwnSharedSizeWinsOverLowerRanks) {
   s.comm()->rank = 1;
   auto peers = SharedLl128Peers({448 << 10, 4 * (448 << 10)});
   s.comm()->peerInfo = peers.data();
-  EXPECT_EQ(ncclSuccess, computeBuffSizes(s.comm()));
+  EXPECT_EQ(ncclSuccess, ncclComputeBuffSizes(s.comm()));
   EXPECT_EQ(4 * (448 << 10), s.comm()->buffSizes[NCCL_PROTO_LL128]) << "this rank's own proxy sizes";
 }
 TEST_F(InitMicrotest, ComputeBuffSizes_NoRankShares_KeepsItsOwnLl128Sizes) {
@@ -6096,7 +6141,7 @@ TEST_F(InitMicrotest, ComputeBuffSizes_NoRankShares_KeepsItsOwnLl128Sizes) {
   s.comm()->rank = 0;
   auto peers = SharedLl128Peers({0, 0});
   s.comm()->peerInfo = peers.data();
-  EXPECT_EQ(ncclSuccess, computeBuffSizes(s.comm()));
+  EXPECT_EQ(ncclSuccess, ncclComputeBuffSizes(s.comm()));
   ASSERT_GT(s.comm()->p2pLl128BuffSize, 0);
   EXPECT_EQ(4 * s.comm()->p2pLl128BuffSize, s.comm()->buffSizes[NCCL_PROTO_LL128]);
 }
@@ -9593,15 +9638,15 @@ ncclResult_t Shrink_RejectedWithoutLaunching(std::vector<int> exclude, const cha
 }  // namespace
 
 TEST_F(InitMicrotest, CommShrink_NegativeExcludedRank_ReturnsInvalidArgument) {
-  EXPECT_EQ(ncclInvalidArgument, Shrink_RejectedWithoutLaunching({1, -1}, "must be in [0, 4)"));
+  EXPECT_EQ(ncclInvalidArgument, Shrink_RejectedWithoutLaunching({1, -1}, "Rank -1 is out-of-bounds"));
 }
 
 TEST_F(InitMicrotest, CommShrink_ExcludedRankEqualToNRanks_ReturnsInvalidArgument) {
-  EXPECT_EQ(ncclInvalidArgument, Shrink_RejectedWithoutLaunching({4, 0}, "must be in [0, 4)"));
+  EXPECT_EQ(ncclInvalidArgument, Shrink_RejectedWithoutLaunching({4, 0}, "Rank 4 is out-of-bounds"));
 }
 
 TEST_F(InitMicrotest, CommShrink_DuplicateExcludedRank_ReturnsInvalidArgument) {
-  EXPECT_EQ(ncclInvalidArgument, Shrink_RejectedWithoutLaunching({1, 2, 1}, "contains rank 1 more than once"));
+  EXPECT_EQ(ncclInvalidArgument, Shrink_RejectedWithoutLaunching({1, 2, 1}, "Rank 1 is listed more than once"));
 }
 
 
@@ -9935,13 +9980,15 @@ TEST_F(InitMicrotest, CommGrow_MiddleRank_SkipsHandleBroadcastAndLaunchesWithout
   Rank_ReleaseComm(out, /*ownsAbortResources=*/true);
 }
 
-TEST_F(InitMicrotest, CommGrow_SingleRankParent_SkipsHandleBroadcast) {
+// NCCL 2.32.6 dropped the `comm->nRanks > 1` guard: rank 0 of a one-rank parent is both boundary ranks,
+// so it receives the grow handle like any other boundary rank.
+TEST_F(InitMicrotest, CommGrow_SingleRankParent_ReceivesHandleBroadcast) {
   Grow_AllowHostAlloc();
   Grow_ParentComm parent;
   parent->nRanks = 1;
   parent->rank = 0;
-  ScopedHook bcast(g_bcastGrowHandle, [&](struct ncclBootstrapHandle*, ncclComm*, bool) {
-    ADD_FAILURE() << "a one-rank parent has no coordinator to receive from";
+  ScopedHook bcast(g_bcastGrowHandle, [&](struct ncclBootstrapHandle* h, ncclComm*, bool) {
+    h->magic = hashCombine(kGrow_ParentMagic, 1);
     return ncclSuccess;
   });
   Grow_LaunchSpy spy;
@@ -9949,7 +9996,8 @@ TEST_F(InitMicrotest, CommGrow_SingleRankParent_SkipsHandleBroadcast) {
 
   ASSERT_EQ(ncclSuccess, Grow_RunExisting(parent.get(), /*nRanks=*/2, /*uniqueId=*/nullptr, &out, nullptr));
 
-  EXPECT_EQ(0, bcast.calls);
+  EXPECT_EQ(1, bcast.calls);
+  EXPECT_EQ(1, spy.rec().nId);
   EXPECT_EQ(1, parent->childCount);
   Rank_ReleaseComm(out, /*ownsAbortResources=*/true);
 }
@@ -9986,7 +10034,9 @@ TEST_F(InitMicrotest, CommGrow_AbortFlagAllocFails_ReturnsSystemErrorAndReleases
 
   EXPECT_EQ(nullptr, out);
   EXPECT_EQ(0, spy.calls());
-  ASSERT_EQ(3u, frees.freed().size()) << "the half-built comm and its two unset abort slots are all released";
+  // NCCL 2.32.6 also frees config.netName, still NULL here because the config was never parsed.
+  ASSERT_EQ(4u, frees.freed().size()) << "the half-built comm, its two unset abort slots and its netName";
+  EXPECT_EQ(nullptr, frees.freed()[2]) << "config.netName";
   for (void* p : frees.freed()) {
     ::free(p);
   }
@@ -10005,7 +10055,8 @@ TEST_F(InitMicrotest, CommGrow_AbortFlagDevAllocFails_ReturnsCudaErrorAndSkipsLa
   EXPECT_EQ(nullptr, out);
   EXPECT_EQ(1, hostMalloc.calls);
   EXPECT_EQ(0, spy.calls());
-  ASSERT_EQ(3u, frees.freed().size());
+  ASSERT_EQ(4u, frees.freed().size()) << "abortFlag, abortFlagRefCount, config.netName and the comm";
+  EXPECT_EQ(nullptr, frees.freed()[2]) << "config.netName was never parsed";
   for (void* p : frees.freed()) {
     ::free(p);
   }
@@ -10030,9 +10081,10 @@ TEST_F(InitMicrotest, CommGrow_AbortFlagRefCountAllocFails_ReturnsSystemErrorAnd
   EXPECT_EQ(nullptr, out);
   EXPECT_EQ(0, spy.calls());
   EXPECT_EQ(1, hostFrees) << "abortFlagDev was already mapped when the refcount calloc failed";
-  ASSERT_EQ(3u, frees.freed().size());
+  ASSERT_EQ(4u, frees.freed().size());
   EXPECT_NE(nullptr, frees.freed()[0]) << "abortFlag really was allocated, unlike on the +1 rung";
   EXPECT_EQ(nullptr, frees.freed()[1]) << "abortFlagRefCount never became non-NULL";
+  EXPECT_EQ(nullptr, frees.freed()[2]) << "config.netName was never parsed";
   for (void* p : frees.freed()) {
     ::free(p);
   }
@@ -10052,7 +10104,8 @@ TEST_F(InitMicrotest, CommGrow_ParentDoesNotShare_FailPathReleasesAbortResources
 
   EXPECT_EQ(nullptr, out);
   EXPECT_EQ(0, spy.calls());
-  ASSERT_EQ(3u, frees.freed().size()) << "abortFlag, abortFlagRefCount and the comm itself";
+  ASSERT_EQ(4u, frees.freed().size()) << "abortFlag, abortFlagRefCount, config.netName and the comm itself";
+  EXPECT_EQ(nullptr, frees.freed()[2]) << "a rejected config never publishes netName";
   for (void* p : frees.freed()) {
     ::free(p);
   }
@@ -10074,7 +10127,12 @@ TEST_F(InitMicrotest, CommGrow_ParentSharesResources_FailPathStillReleasesItsOwn
 
   EXPECT_EQ(nullptr, out);
   EXPECT_EQ(0, spy.calls());
-  ASSERT_EQ(3u, frees.freed().size()) << "abortFlag, abortFlagRefCount and the comm itself";
+  ASSERT_EQ(4u, frees.freed().size()) << "abortFlag, abortFlagRefCount, config.netName and the comm itself";
+  EXPECT_NE(nullptr, frees.freed()[0]);
+  EXPECT_NE(parent->abortFlag, frees.freed()[0]) << "the grown comm's own abort flag, never the parent's";
+  EXPECT_NE(nullptr, frees.freed()[1]);
+  EXPECT_EQ(nullptr, frees.freed()[2]);
+  EXPECT_EQ(NCCL_MAGIC, static_cast<ncclComm*>(frees.freed()[3])->startMagic);
   EXPECT_EQ(1, *parent->abortFlagRefCount) << "the parent's own reference is untouched";
   for (void* p : frees.freed()) {
     ::free(p);
@@ -10154,10 +10212,10 @@ TEST_F(InitMicrotest, CommGrow_ExistingRankHappyPath_LaunchesInitRankFuncOnTheNe
   EXPECT_EQ(kGrow_ParentRank, r.key);
   EXPECT_EQ(0, r.color);
   EXPECT_TRUE(r.isGrow);
-  EXPECT_EQ(1, r.nId);
+  // NCCL 2.32.6 discards an existing rank's uniqueId argument; only boundary ranks get one, from bcastGrowHandle.
+  EXPECT_EQ(0, r.nId) << "a middle existing rank's caller-supplied uniqueId is ignored";
   EXPECT_EQ("ncclCommGrow", r.funcName);
-  ASSERT_TRUE(r.hasCommId);
-  EXPECT_EQ(0, std::memcmp(&r.commId, &id, sizeof(id)));
+  EXPECT_FALSE(r.hasCommId);
   EXPECT_EQ(ncclInProgress, out->initState);
   EXPECT_EQ(NCCL_MAGIC, out->startMagic);
   EXPECT_EQ(NCCL_MAGIC, out->endMagic);
@@ -10238,14 +10296,19 @@ TEST_F(InitMicrotest, CommGrow_NewRankGetDeviceFails_ReleasesTheJobAndClearsNewc
   EXPECT_EQ(1, watch.hits());
 }
 
+// Only a boundary rank has a commId to copy (NCCL 2.32.6 drops an existing rank's uniqueId argument).
 TEST_F(InitMicrotest, CommGrow_CommIdAllocFails_ReturnsSystemErrorAndClearsNewcomm) {
   Grow_AllowHostAlloc();
   Grow_ParentComm parent;
-  const ncclUniqueId id = Grow_MakeUniqueId(0x7E);
+  parent->rank = 0;
+  ScopedHook bcast(g_bcastGrowHandle, [&](struct ncclBootstrapHandle* h, ncclComm*, bool) {
+    h->magic = hashCombine(kGrow_ParentMagic, 1);
+    return ncclSuccess;
+  });
   Grow_LaunchSpy spy;
   g_callocFailAt = g_callocCallIndex + 3;
   ncclComm_t out = kGrow_NewcommPoison;
-  EXPECT_EQ(ncclSystemError, Grow_RunExisting(parent.get(), kGrow_TargetRanks, &id, &out, nullptr));
+  EXPECT_EQ(ncclSystemError, Grow_RunExisting(parent.get(), kGrow_TargetRanks, nullptr, &out, nullptr));
   EXPECT_EQ(nullptr, out);
   EXPECT_EQ(0, spy.calls());
 }
@@ -10255,7 +10318,11 @@ TEST_F(InitMicrotest, CommGrow_CommIdAllocFails_ReturnsSystemErrorAndClearsNewco
 TEST_F(InitMicrotest, CommGrow_AsyncLaunchFails_PropagatesClearsNewcommAndReleasesTheJobAndCommIdOnce) {
   Grow_AllowHostAlloc();
   Grow_ParentComm parent;
-  const ncclUniqueId id = Grow_MakeUniqueId(0x7E);
+  parent->rank = 0;  // a boundary rank, so the job carries a commId (the received grow handle)
+  ScopedHook bcast(g_bcastGrowHandle, [&](struct ncclBootstrapHandle* h, ncclComm*, bool) {
+    h->magic = hashCombine(kGrow_ParentMagic, 1);
+    return ncclSuccess;
+  });
   DeleteWatch watch(nullptr);
   void* commId = nullptr;
   Grow_LaunchSpy spy(ncclInternalError, [&](ncclCommInitRankAsyncJob* job) {
@@ -10265,7 +10332,7 @@ TEST_F(InitMicrotest, CommGrow_AsyncLaunchFails_PropagatesClearsNewcommAndReleas
   ncclComm_t out = nullptr;
   Grow_FreeSpy frees;
 
-  EXPECT_EQ(ncclInternalError, Grow_RunExisting(parent.get(), kGrow_TargetRanks, &id, &out, nullptr));
+  EXPECT_EQ(ncclInternalError, Grow_RunExisting(parent.get(), kGrow_TargetRanks, nullptr, &out, nullptr));
 
   EXPECT_EQ(1, spy.calls());
   EXPECT_EQ(nullptr, out) << "a failed launch must not publish a half-built comm";
@@ -10579,8 +10646,10 @@ TEST_F(InitMicrotest, InitChildComm_AbortFlagDevAllocFails_ReleasesChildAndClear
 
   EXPECT_EQ(nullptr, out);
   EXPECT_EQ(0, spy.calls());
-  ASSERT_EQ(2u, frees.freed().size()) << "the child's abort flag and the child itself";
-  EXPECT_NE(frees.freed()[0], frees.freed()[1]);
+  // NCCL 2.32.6 also frees config.netName, still NULL because the config was never parsed.
+  ASSERT_EQ(3u, frees.freed().size()) << "the child's abort flag, its netName and the child itself";
+  EXPECT_EQ(nullptr, frees.freed()[1]) << "config.netName";
+  EXPECT_NE(frees.freed()[0], frees.freed()[2]);
   for (void* p : frees.freed()) {
     ::free(p);
   }
@@ -10622,7 +10691,9 @@ TEST_F(InitMicrotest, InitChildComm_SharedSplitConfigFails_DropsTheReferenceOnTh
   EXPECT_EQ(0, spy.calls());
   ASSERT_TRUE(parent->shareResources);
   EXPECT_EQ(1, *parent->abortFlagRefCount);
-  ASSERT_EQ(1u, frees.freed().size()) << "only the child; the shared abort flags stay with the parent";
+  // NCCL 2.32.6's fail: also frees config.netName, which a rejected config never set.
+  ASSERT_EQ(2u, frees.freed().size()) << "config.netName and the child; the shared abort flags stay with the parent";
+  EXPECT_EQ(nullptr, frees.freed()[0]);
   for (void* p : frees.freed()) {
     ::free(p);
   }
@@ -10645,7 +10716,9 @@ TEST_F(InitMicrotest, InitChildComm_SplitConfigFails_UnlinksTheFreedChildAbortFl
   EXPECT_EQ(0, spy.calls());
   ASSERT_FALSE(parent->shareResources);
   EXPECT_EQ(nullptr, parent->childAbortFlag);
-  ASSERT_EQ(3u, frees.freed().size()) << "abortFlag, abortFlagRefCount and the child itself";
+  // NCCL 2.32.6's fail: also frees config.netName, which a rejected config never set.
+  ASSERT_EQ(4u, frees.freed().size()) << "abortFlag, abortFlagRefCount, config.netName and the child itself";
+  EXPECT_EQ(nullptr, frees.freed()[2]);
   for (void* p : frees.freed()) {
     ::free(p);
   }
@@ -10673,8 +10746,9 @@ TEST_F(InitMicrotest, InitChildComm_ExcludeListAllocFails_ReturnsSystemErrorAndS
   EXPECT_EQ(0, spy.calls());
   ASSERT_TRUE(watch.armed()) << "the job was never allocated";
   EXPECT_EQ(1, watch.hits()) << "fail: must delete the job it still owns before launch";
-  EXPECT_EQ(0, std::count(freed.begin(), freed.end(), nullptr))
-      << "childCommCleanupJob skips the never-allocated exclude list";
+  // The one null free is the child's never-set config.netName (NCCL 2.32.6's fail: frees it).
+  EXPECT_EQ(1, std::count(freed.begin(), freed.end(), nullptr))
+      << "only config.netName is freed as null: childCommCleanupJob skips the never-allocated exclude list";
   for (void* p : freed) {
     ::free(p);
   }

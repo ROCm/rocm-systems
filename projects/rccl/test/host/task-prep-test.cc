@@ -312,7 +312,9 @@ TEST_F(TaskPrepMicrotest, TaskPrepare_TuningExcludedCollFuncs_SkipTuningAndCarry
   ncclSimInfo_t sim = PoisonedSimInfo();
   ASSERT_EQ(ncclSuccess, ncclTaskPrepare(scene.comm(), &sim));
 
-  EXPECT_EQ(std::vector<ncclFunc_t>{ncclFuncAllReduce}, spy.funcs());
+  // Since v2.32.6 AlltoAll has a tuning slot (ncclTuningFuncIndex maps it to NCCL_NUM_FUNCTIONS), so it is tuned
+  // and, without a sym kernel, still lowered to p2p; Scatter, Gather and AllGatherV remain untuned.
+  EXPECT_EQ((std::vector<ncclFunc_t>{ncclFuncAllReduce, ncclFuncAlltoAll}), spy.funcs());
   struct ncclClassifiedTaskQueues* ctq = &scene.comm()->classifiedTaskQueues;
   std::vector<struct ncclTaskTuningInfo*> legacy = QueueTasks(&ctq->legacyTaskQueue);
   ASSERT_EQ(2u, legacy.size());
@@ -375,7 +377,8 @@ TEST_F(TaskPrepMicrotest, TaskPrepare_ClassificationFails_PropagatesWithoutPostT
   ncclSimInfo_t sim = PoisonedSimInfo();
   EXPECT_EQ(ncclInternalError, ncclTaskPrepare(scene.comm(), &sim));
 
-  EXPECT_EQ(1, tuning.calls);
+  // Both colls are tuned (AlltoAll gained a tuning slot in v2.32.6) before classification fails.
+  EXPECT_EQ(2, tuning.calls);
   EXPECT_FLOAT_EQ(kUnwrittenEstimate, sim.estimatedTime);
 }
 
