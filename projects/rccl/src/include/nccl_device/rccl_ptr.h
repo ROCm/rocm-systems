@@ -31,10 +31,19 @@ THE SOFTWARE.
 // These are cheaper than flat loads and stores.
 // Verify the intended effect by inspecting assembly.  If you see
 // flat in the name of the emitted instruction, something is wrong.
-using u64_gptr = __attribute__((address_space(1))) uint64_t*;
-using u32_gptr = __attribute__((address_space(1))) uint32_t*;
-using u16_gptr = __attribute__((address_space(1))) uint16_t*;
-using u8_gptr = __attribute__((address_space(1))) uint8_t*;
+#if defined(__HIPCC__) || defined(__CUDACC__)
+// address_space is meaningful only for a device compile; a plain host C++
+// compiler warns that the attribute is ignored (and -Werror turns that into a
+// Host compilers ignore address_space and warn, which -Werror makes fatal.
+#define RCCL_GLOBAL_ADDRSPACE __attribute__((address_space(1)))
+#else
+#define RCCL_GLOBAL_ADDRSPACE
+#endif
+
+using u64_gptr = RCCL_GLOBAL_ADDRSPACE uint64_t*;
+using u32_gptr = RCCL_GLOBAL_ADDRSPACE uint32_t*;
+using u16_gptr = RCCL_GLOBAL_ADDRSPACE uint16_t*;
+using u8_gptr = RCCL_GLOBAL_ADDRSPACE uint8_t*;
 
 #ifdef __HIP_DEVICE_COMPILE__
 #if (defined(__gfx942__) || defined(__gfx950__) || (defined(__gfx1250__) || defined(__gfx1250_strict__))) && \
@@ -82,10 +91,10 @@ __host__ __device__ inline bool rcclSimplePostSendRegisteredOrP2p(const CollWork
 #endif
 
 typedef __attribute__((__vector_size__(4 * sizeof(unsigned int)))) unsigned int v4u;
-typedef __attribute__((address_space(1))) v4u* v4u_gptr;
+typedef RCCL_GLOBAL_ADDRSPACE v4u* v4u_gptr;
 
 typedef __attribute__((__vector_size__(4 * sizeof(int)))) int v4i;
-typedef __attribute__((address_space(1))) v4i* v4i_gptr;
+typedef RCCL_GLOBAL_ADDRSPACE v4i* v4i_gptr;
 
 // "" means system scope, "agent" means device.  Adding this here because I don't think it's obvious otherwise that
 // "" means system scope.
