@@ -344,6 +344,8 @@ from .amdsmi_interface import AmdSmiVirtualizationMode
 from .amdsmi_interface import AmdSmiVramType
 from .amdsmi_interface import AmdSmiAffinityScope
 from .amdsmi_interface import AmdSmiPtlData
+from .amdsmi_interface import AmdSmiHawkInsertionPriority
+from .amdsmi_interface import AmdSmiPowerStabilizationParamId
 from .amdsmi_interface import AmdSmiNpmBalancingMode
 
 from .amdsmi_interface import amdsmi_get_gpu_uma_carveout_info
@@ -351,6 +353,10 @@ from .amdsmi_interface import amdsmi_set_gpu_uma_carveout
 from .amdsmi_interface import amdsmi_get_ttm_info
 from .amdsmi_interface import amdsmi_set_ttm_pages_limit
 from .amdsmi_interface import amdsmi_reset_ttm_pages_limit
+
+# Power Stabilization (HAWK dummy-compute insertion + Ramp Management)
+from .amdsmi_interface import amdsmi_get_power_stabilization_info
+from .amdsmi_interface import amdsmi_set_power_stabilization_param
 
 # AMPP (amdsmi power profile)
 from .amdsmi_interface import amdsmi_get_ampp_profiles

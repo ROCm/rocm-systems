@@ -5837,3 +5837,86 @@ extern "C" {
 extern "C" {
     pub fn amdsmi_reset_ttm_pages_limit() -> AmdsmiStatusT;
 }
+#[repr(u32)]
+#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
+pub enum AmdsmiHawkInsertionPriorityT {
+    AmdsmiHawkInsertionPriorityOpportunistic = 0,
+    AmdsmiHawkInsertionPriorityGuaranteed = 1,
+    AmdsmiHawkInsertionPriorityDynamic = 2,
+}
+impl AmdsmiPowerStabilizationParamIdT {
+    pub const AmdsmiPowerStabilizationParamLast: AmdsmiPowerStabilizationParamIdT =
+        AmdsmiPowerStabilizationParamIdT::AmdsmiPowerStabilizationParamRampStopDelay;
+}
+#[repr(u32)]
+#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
+pub enum AmdsmiPowerStabilizationParamIdT {
+    AmdsmiPowerStabilizationParamEnable = 0,
+    AmdsmiPowerStabilizationParamPowerFloor = 1,
+    AmdsmiPowerStabilizationParamDelay = 2,
+    AmdsmiPowerStabilizationParamInsertionPriority = 3,
+    AmdsmiPowerStabilizationParamRampEnable = 4,
+    AmdsmiPowerStabilizationParamRampMaxRampUpRate = 5,
+    AmdsmiPowerStabilizationParamRampMaxRampDownRate = 6,
+    AmdsmiPowerStabilizationParamRampMinTimeAtPowerFloor = 7,
+    AmdsmiPowerStabilizationParamRampStopDelay = 8,
+}
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct AmdsmiPowerStabilizationInfoT {
+    pub host_control_enabled: bool,
+    pub enabled: bool,
+    pub power_floor: u32,
+    pub delay: u32,
+    pub insertion_priority: AmdsmiHawkInsertionPriorityT,
+    pub ramp_enabled: bool,
+    pub ramp_max_ramp_up_rate: u32,
+    pub ramp_max_ramp_down_rate: u32,
+    pub ramp_min_time_at_power_floor: u32,
+    pub ramp_stop_delay: u32,
+    pub reserved: [u64; 11usize],
+}
+#[allow(clippy::unnecessary_operation, clippy::identity_op)]
+const _: () = {
+    ["Size of AmdsmiPowerStabilizationInfoT"]
+        [::std::mem::size_of::<AmdsmiPowerStabilizationInfoT>() - 128usize];
+    ["Alignment of AmdsmiPowerStabilizationInfoT"]
+        [::std::mem::align_of::<AmdsmiPowerStabilizationInfoT>() - 8usize];
+    ["Offset of field: AmdsmiPowerStabilizationInfoT::host_control_enabled"]
+        [::std::mem::offset_of!(AmdsmiPowerStabilizationInfoT, host_control_enabled) - 0usize];
+    ["Offset of field: AmdsmiPowerStabilizationInfoT::enabled"]
+        [::std::mem::offset_of!(AmdsmiPowerStabilizationInfoT, enabled) - 1usize];
+    ["Offset of field: AmdsmiPowerStabilizationInfoT::power_floor"]
+        [::std::mem::offset_of!(AmdsmiPowerStabilizationInfoT, power_floor) - 4usize];
+    ["Offset of field: AmdsmiPowerStabilizationInfoT::delay"]
+        [::std::mem::offset_of!(AmdsmiPowerStabilizationInfoT, delay) - 8usize];
+    ["Offset of field: AmdsmiPowerStabilizationInfoT::insertion_priority"]
+        [::std::mem::offset_of!(AmdsmiPowerStabilizationInfoT, insertion_priority) - 12usize];
+    ["Offset of field: AmdsmiPowerStabilizationInfoT::ramp_enabled"]
+        [::std::mem::offset_of!(AmdsmiPowerStabilizationInfoT, ramp_enabled) - 16usize];
+    ["Offset of field: AmdsmiPowerStabilizationInfoT::ramp_max_ramp_up_rate"]
+        [::std::mem::offset_of!(AmdsmiPowerStabilizationInfoT, ramp_max_ramp_up_rate) - 20usize];
+    ["Offset of field: AmdsmiPowerStabilizationInfoT::ramp_max_ramp_down_rate"]
+        [::std::mem::offset_of!(AmdsmiPowerStabilizationInfoT, ramp_max_ramp_down_rate) - 24usize];
+    ["Offset of field: AmdsmiPowerStabilizationInfoT::ramp_min_time_at_power_floor"][::std::mem::offset_of!(
+        AmdsmiPowerStabilizationInfoT,
+        ramp_min_time_at_power_floor
+    ) - 28usize];
+    ["Offset of field: AmdsmiPowerStabilizationInfoT::ramp_stop_delay"]
+        [::std::mem::offset_of!(AmdsmiPowerStabilizationInfoT, ramp_stop_delay) - 32usize];
+    ["Offset of field: AmdsmiPowerStabilizationInfoT::reserved"]
+        [::std::mem::offset_of!(AmdsmiPowerStabilizationInfoT, reserved) - 40usize];
+};
+extern "C" {
+    pub fn amdsmi_get_power_stabilization_info(
+        processor_handle: AmdsmiProcessorHandle,
+        info: *mut AmdsmiPowerStabilizationInfoT,
+    ) -> AmdsmiStatusT;
+}
+extern "C" {
+    pub fn amdsmi_set_power_stabilization_param(
+        processor_handle: AmdsmiProcessorHandle,
+        param_id: AmdsmiPowerStabilizationParamIdT,
+        value: i64,
+    ) -> AmdsmiStatusT;
+}

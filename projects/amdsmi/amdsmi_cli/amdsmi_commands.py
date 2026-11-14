@@ -89,6 +89,7 @@ class AMDSMICommands(
         self.cpu_handles = []
         self.core_handles = []
         self.node_handle = None
+        self.primary_gpu_handle = None
         self.stop = ""
         self.group_check_printed = False
 
@@ -138,6 +139,7 @@ class AMDSMICommands(
                 nh = amdsmi_interface.amdsmi_get_node_handle(dev)
                 if nh is not None:
                     self.node_handle = nh
+                    self.primary_gpu_handle = dev
                     # Only need one handle, break after first success
                     break
             except amdsmi_exception.AmdSmiLibraryException as e:

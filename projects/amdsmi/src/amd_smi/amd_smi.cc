@@ -9627,6 +9627,116 @@ amdsmi_status_t amdsmi_reset_ttm_pages_limit(void) {
   return AMDSMI_STATUS_SUCCESS;
 }
 
+amdsmi_status_t amdsmi_get_power_stabilization_info(amdsmi_processor_handle processor_handle,
+                                                    amdsmi_power_stabilization_info_t* info) {
+  AMDSMI_CHECK_INIT();
+
+  if (info == nullptr) {
+    return AMDSMI_STATUS_INVAL;
+  }
+
+#ifdef ENABLE_WSL_BACKEND
+  if (amd::smi::WSLGPUBackend::IsActive()) {
+    return AMDSMI_STATUS_NOT_SUPPORTED;
+  }
+#endif
+
+  static_assert(
+      sizeof(amdsmi_power_stabilization_info_t) == sizeof(rsmi_power_stabilization_info_t),
+      "AMDSMI and RSMI Power Stabilization info structs must match");
+  static_assert(offsetof(amdsmi_power_stabilization_info_t, host_control_enabled) ==
+                    offsetof(rsmi_power_stabilization_info_t, host_control_enabled),
+                "AMDSMI and RSMI Power Stabilization info host_control_enabled offsets must match");
+  static_assert(offsetof(amdsmi_power_stabilization_info_t, enabled) ==
+                    offsetof(rsmi_power_stabilization_info_t, enabled),
+                "AMDSMI and RSMI Power Stabilization info enabled offsets must match");
+  static_assert(offsetof(amdsmi_power_stabilization_info_t, power_floor) ==
+                    offsetof(rsmi_power_stabilization_info_t, power_floor),
+                "AMDSMI and RSMI Power Stabilization info power_floor offsets must match");
+  static_assert(offsetof(amdsmi_power_stabilization_info_t, delay) ==
+                    offsetof(rsmi_power_stabilization_info_t, delay),
+                "AMDSMI and RSMI Power Stabilization info delay offsets must match");
+  static_assert(offsetof(amdsmi_power_stabilization_info_t, insertion_priority) ==
+                    offsetof(rsmi_power_stabilization_info_t, insertion_priority),
+                "AMDSMI and RSMI Power Stabilization info insertion_priority offsets must match");
+  // The reinterpret_cast below carries insertion_priority across as-is, so
+  // the two enums must also agree on their underlying values.
+  static_assert(static_cast<int>(AMDSMI_HAWK_INSERTION_PRIORITY_OPPORTUNISTIC) ==
+                        static_cast<int>(RSMI_HAWK_INSERTION_PRIORITY_OPPORTUNISTIC) &&
+                    static_cast<int>(AMDSMI_HAWK_INSERTION_PRIORITY_GUARANTEED) ==
+                        static_cast<int>(RSMI_HAWK_INSERTION_PRIORITY_GUARANTEED) &&
+                    static_cast<int>(AMDSMI_HAWK_INSERTION_PRIORITY_DYNAMIC) ==
+                        static_cast<int>(RSMI_HAWK_INSERTION_PRIORITY_DYNAMIC),
+                "amdsmi_hawk_insertion_priority_t and rsmi_hawk_insertion_priority_t "
+                "enumerators must match");
+  static_assert(offsetof(amdsmi_power_stabilization_info_t, ramp_enabled) ==
+                    offsetof(rsmi_power_stabilization_info_t, ramp_enabled),
+                "AMDSMI and RSMI Power Stabilization info ramp_enabled offsets must match");
+  static_assert(
+      offsetof(amdsmi_power_stabilization_info_t, ramp_max_ramp_up_rate) ==
+          offsetof(rsmi_power_stabilization_info_t, ramp_max_ramp_up_rate),
+      "AMDSMI and RSMI Power Stabilization info ramp_max_ramp_up_rate offsets must match");
+  static_assert(
+      offsetof(amdsmi_power_stabilization_info_t, ramp_max_ramp_down_rate) ==
+          offsetof(rsmi_power_stabilization_info_t, ramp_max_ramp_down_rate),
+      "AMDSMI and RSMI Power Stabilization info ramp_max_ramp_down_rate offsets must match");
+  static_assert(
+      offsetof(amdsmi_power_stabilization_info_t, ramp_min_time_at_power_floor) ==
+          offsetof(rsmi_power_stabilization_info_t, ramp_min_time_at_power_floor),
+      "AMDSMI and RSMI Power Stabilization info ramp_min_time_at_power_floor offsets must match");
+  static_assert(offsetof(amdsmi_power_stabilization_info_t, ramp_stop_delay) ==
+                    offsetof(rsmi_power_stabilization_info_t, ramp_stop_delay),
+                "AMDSMI and RSMI Power Stabilization info ramp_stop_delay offsets must match");
+  static_assert(offsetof(amdsmi_power_stabilization_info_t, reserved) ==
+                    offsetof(rsmi_power_stabilization_info_t, reserved),
+                "AMDSMI and RSMI Power Stabilization info reserved offsets must match");
+
+  return rsmi_wrapper(rsmi_dev_power_stabilization_info_get, processor_handle, 0,
+                      reinterpret_cast<rsmi_power_stabilization_info_t*>(info));
+}
+
+amdsmi_status_t amdsmi_set_power_stabilization_param(amdsmi_processor_handle processor_handle,
+                                                     amdsmi_power_stabilization_param_id_t param_id,
+                                                     int64_t value) {
+  AMDSMI_CHECK_INIT();
+
+  if (param_id > AMDSMI_POWER_STABILIZATION_PARAM_LAST) {
+    return AMDSMI_STATUS_INVAL;
+  }
+
+#ifdef ENABLE_WSL_BACKEND
+  if (amd::smi::WSLGPUBackend::IsActive()) {
+    return AMDSMI_STATUS_NOT_SUPPORTED;
+  }
+#endif
+
+  // AMDSMI_DRY_RUN is an amdsmi-level operational mode (not part of the
+  // sysfs mechanics), so it is honored here rather than in rsmi_dev_
+  // power_stabilization_param_set. Probe the handle and sysfs support first
+  // (matching amdsmi_set_gpu_uma_carveout()'s pattern) so a dry run against
+  // an invalid handle or an unsupported device still reports failure
+  // instead of SUCCESS. Uses the narrow check_support probe, not
+  // amdsmi_get_power_stabilization_info(): the real write only ever touches
+  // param_id's own sysfs node, so the dry run's validation scope shouldn't
+  // be wider and fail on an unrelated field's malformed sysfs content.
+  if (is_dry_run()) {
+    amdsmi_status_t probe_ret =
+        rsmi_wrapper(rsmi_dev_power_stabilization_check_support, processor_handle, 0);
+    if (probe_ret != AMDSMI_STATUS_SUCCESS) {
+      return probe_ret;
+    }
+
+    std::ostringstream ss;
+    ss << "[DRY_RUN] Would write " << value << " for power_stabilization param_id "
+       << static_cast<int>(param_id);
+    LOG_INFO(ss);
+    return AMDSMI_STATUS_SUCCESS;
+  }
+
+  return rsmi_wrapper(rsmi_dev_power_stabilization_param_set, processor_handle, 0,
+                      static_cast<rsmi_power_stabilization_param_id_t>(param_id), value);
+}
+
 // Test-only wrapper: acquires the device mutex for |seconds| seconds.
 // Not declared in amdsmi.h — internal use via amd_smi_test_internal.h only.
 // rsmi_test_sleep is undocumented and not in rocm_smi.h, so forward-declare it.

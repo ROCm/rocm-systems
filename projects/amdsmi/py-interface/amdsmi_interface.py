@@ -828,6 +828,28 @@ class AmdSmiPowerCapType(IntEnum):
     PPT1 = amdsmi_wrapper.AMDSMI_POWER_CAP_TYPE_PPT1
 
 
+class AmdSmiHawkInsertionPriority(IntEnum):
+    OPPORTUNISTIC = amdsmi_wrapper.AMDSMI_HAWK_INSERTION_PRIORITY_OPPORTUNISTIC
+    GUARANTEED = amdsmi_wrapper.AMDSMI_HAWK_INSERTION_PRIORITY_GUARANTEED
+    DYNAMIC = amdsmi_wrapper.AMDSMI_HAWK_INSERTION_PRIORITY_DYNAMIC
+
+
+class AmdSmiPowerStabilizationParamId(IntEnum):
+    ENABLE = amdsmi_wrapper.AMDSMI_POWER_STABILIZATION_PARAM_ENABLE
+    POWER_FLOOR = amdsmi_wrapper.AMDSMI_POWER_STABILIZATION_PARAM_POWER_FLOOR
+    DELAY = amdsmi_wrapper.AMDSMI_POWER_STABILIZATION_PARAM_DELAY
+    INSERTION_PRIORITY = amdsmi_wrapper.AMDSMI_POWER_STABILIZATION_PARAM_INSERTION_PRIORITY
+    RAMP_ENABLE = amdsmi_wrapper.AMDSMI_POWER_STABILIZATION_PARAM_RAMP_ENABLE
+    RAMP_MAX_RAMP_UP_RATE = amdsmi_wrapper.AMDSMI_POWER_STABILIZATION_PARAM_RAMP_MAX_RAMP_UP_RATE
+    RAMP_MAX_RAMP_DOWN_RATE = (
+        amdsmi_wrapper.AMDSMI_POWER_STABILIZATION_PARAM_RAMP_MAX_RAMP_DOWN_RATE
+    )
+    RAMP_MIN_TIME_AT_POWER_FLOOR = (
+        amdsmi_wrapper.AMDSMI_POWER_STABILIZATION_PARAM_RAMP_MIN_TIME_AT_POWER_FLOOR
+    )
+    RAMP_STOP_DELAY = amdsmi_wrapper.AMDSMI_POWER_STABILIZATION_PARAM_RAMP_STOP_DELAY
+
+
 class AmdSmiNpmBalancingMode(IntEnum):
     INVALID = amdsmi_wrapper.AMDSMI_NPM_BALANCING_MODE_INVALID
     POWER_BALANCING = amdsmi_wrapper.AMDSMI_NPM_BALANCING_MODE_POWER_BALANCING
@@ -8059,3 +8081,95 @@ def amdsmi_reset_ttm_pages_limit():
         AmdSmiException: If the function fails
     """
     _check_res(amdsmi_wrapper.amdsmi_reset_ttm_pages_limit())
+
+
+def amdsmi_get_power_stabilization_info(processor_handle: processor_handle_t) -> Dict[str, Any]:
+    """
+    Get Power Stabilization (HAWK dummy-compute insertion plus Ramp Management) info.
+
+    Args:
+        processor_handle: GPU processor handle
+
+    Returns:
+        dict: Dictionary with keys matching amdsmi_power_stabilization_info_t
+        fields: host_control_enabled, enabled, power_floor, delay,
+        insertion_priority (AmdSmiHawkInsertionPriority), ramp_enabled,
+        ramp_max_ramp_up_rate, ramp_max_ramp_down_rate,
+        ramp_min_time_at_power_floor, ramp_stop_delay
+
+    Raises:
+        AmdSmiParameterException: If processor_handle is invalid
+        AmdSmiException: If the function fails
+    """
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
+
+    info = amdsmi_wrapper.amdsmi_power_stabilization_info_t()
+    _check_res(
+        amdsmi_wrapper.amdsmi_get_power_stabilization_info(processor_handle, ctypes.byref(info))
+    )
+
+    return {
+        "host_control_enabled": info.host_control_enabled,
+        "enabled": info.enabled,
+        "power_floor": info.power_floor,
+        "delay": info.delay,
+        "insertion_priority": AmdSmiHawkInsertionPriority(info.insertion_priority),
+        "ramp_enabled": info.ramp_enabled,
+        "ramp_max_ramp_up_rate": info.ramp_max_ramp_up_rate,
+        "ramp_max_ramp_down_rate": info.ramp_max_ramp_down_rate,
+        "ramp_min_time_at_power_floor": info.ramp_min_time_at_power_floor,
+        "ramp_stop_delay": info.ramp_stop_delay,
+    }
+
+
+def amdsmi_set_power_stabilization_param(
+    processor_handle: processor_handle_t,
+    param_id: AmdSmiPowerStabilizationParamId,
+    value: Union[int, float],
+) -> None:
+    """
+    Set a single Power Stabilization parameter.
+
+    Args:
+        processor_handle: GPU processor handle
+        param_id: Parameter to set
+        value: New value, written as a signed 64-bit integer -- every
+        param_id, including the two ramp rates despite being a %PL/sec
+        rate, is an int64_t (this parameter's sysfs node cannot accept
+        floating-point values). A float value must be a whole number
+        (e.g. 3.0, not 3.9, NaN, or inf).
+
+    Raises:
+        AmdSmiParameterException: If processor_handle, param_id, or value is
+        invalid, including an int64 value out of signed 64-bit range or a
+        non-whole-number float
+        AmdSmiException: If the function fails (AMDSMI_STATUS_NOT_SUPPORTED,
+        AMDSMI_STATUS_NO_PERM, AMDSMI_STATUS_INVAL, or AMDSMI_STATUS_FILE_ERROR)
+    """
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
+
+    if not isinstance(param_id, AmdSmiPowerStabilizationParamId):
+        raise AmdSmiParameterException(param_id, AmdSmiPowerStabilizationParamId)
+
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        # bool is a subclass of int; reject it explicitly rather than
+        # silently writing 0/1 (same idiom as amdsmi_configure_ampp_profile's
+        # field_value check).
+        raise AmdSmiParameterException(value, Union[int, float])
+
+    if isinstance(value, float) and not value.is_integer():
+        # Also catches NaN/inf (is_integer() is False for both), which
+        # int() would otherwise raise a raw ValueError/OverflowError on
+        # instead of the documented AmdSmiParameterException.
+        raise AmdSmiParameterException(value, int, msg=f"value {value!r} is not a whole number")
+    int_value = int(value)
+    if not -(2**63) <= int_value < 2**63:
+        raise AmdSmiParameterException(
+            value, ctypes.c_int64, msg=f"value {value!r} does not fit in a signed 64-bit integer"
+        )
+
+    _check_res(
+        amdsmi_wrapper.amdsmi_set_power_stabilization_param(processor_handle, param_id, int_value)
+    )

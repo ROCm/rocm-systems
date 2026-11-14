@@ -120,6 +120,7 @@ class StaticCommands:
         clock=None,
         profile=None,
         mem_carveout=None,
+        power_stabilization=None,
         ampp=None,
         cuid=None,
         cuid_primary=None,
@@ -191,6 +192,8 @@ class StaticCommands:
             args.clock = clock
         if mem_carveout:
             args.mem_carveout = mem_carveout
+        if power_stabilization:
+            args.power_stabilization = power_stabilization
         if ampp:
             args.ampp = ampp
 
@@ -265,13 +268,21 @@ class StaticCommands:
                 args.xgmi_plpd = xgmi_plpd
             if profile:
                 args.profile = profile
-            current_platform_args += ["ras", "limit", "soc_pstate", "xgmi_plpd", "profile"]
+            current_platform_args += [
+                "ras",
+                "limit",
+                "soc_pstate",
+                "xgmi_plpd",
+                "profile",
+                "power_stabilization",
+            ]
             current_platform_values += [
                 args.ras,
                 args.limit,
                 args.soc_pstate,
                 args.xgmi_plpd,
                 args.profile,
+                args.power_stabilization,
             ]
 
         if self.helpers.is_linux():
@@ -1243,6 +1254,75 @@ class StaticCommands:
                     "Failed to get mem carveout info for gpu %s | %s", gpu_id, e.get_error_info()
                 )
 
+        if "power_stabilization" in current_platform_args:
+            if args.power_stabilization:
+                try:
+                    ps_info = amdsmi_interface.amdsmi_get_power_stabilization_info(args.gpu)
+                    ps_dict = {
+                        "host_control_enabled": ps_info["host_control_enabled"],
+                        "enabled": ps_info["enabled"],
+                        "power_floor": self.helpers.unit_format(
+                            self.logger, ps_info["power_floor"], "%"
+                        ),
+                        "delay": self.helpers.unit_format(self.logger, ps_info["delay"], "ms"),
+                        "insertion_priority": ps_info["insertion_priority"].name,
+                        "ramp_enabled": ps_info["ramp_enabled"],
+                        "ramp_max_ramp_up_rate": self.helpers.unit_format(
+                            self.logger, ps_info["ramp_max_ramp_up_rate"], "%PL/sec"
+                        ),
+                        "ramp_max_ramp_down_rate": self.helpers.unit_format(
+                            self.logger, ps_info["ramp_max_ramp_down_rate"], "%PL/sec"
+                        ),
+                        "ramp_min_time_at_power_floor": self.helpers.unit_format(
+                            self.logger, ps_info["ramp_min_time_at_power_floor"], "sec"
+                        ),
+                        "ramp_stop_delay": self.helpers.unit_format(
+                            self.logger, ps_info["ramp_stop_delay"], "sec"
+                        ),
+                    }
+                    if self.logger.is_csv_format():
+                        # Flatten completely to avoid a nested dict in a CSV cell
+                        for key, value in ps_dict.items():
+                            static_dict[f"power_stabilization_{key}"] = value
+                    else:
+                        static_dict["power_stabilization"] = ps_dict
+                except amdsmi_exception.AmdSmiLibraryException as e:
+                    # NOT_SUPPORTED covers both "unsupported platform" and "multi-VF
+                    # device" (the driver never creates the sysfs node in either case).
+                    not_supported = (
+                        e.get_error_code()
+                        == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED
+                    )
+                    if not_supported and not (
+                        self.logger.is_json_format() or self.logger.is_csv_format()
+                    ):
+                        static_dict["power_stabilization"] = (
+                            "N/A (Power Stabilization is not supported on this ASIC/platform)"
+                        )
+                    elif self.logger.is_csv_format():
+                        # Emit every column the supported case does so a mixed
+                        # node doesn't produce a ragged CSV header.
+                        for key in (
+                            "host_control_enabled",
+                            "enabled",
+                            "power_floor",
+                            "delay",
+                            "insertion_priority",
+                            "ramp_enabled",
+                            "ramp_max_ramp_up_rate",
+                            "ramp_max_ramp_down_rate",
+                            "ramp_min_time_at_power_floor",
+                            "ramp_stop_delay",
+                        ):
+                            static_dict[f"power_stabilization_{key}"] = "N/A"
+                    else:
+                        static_dict["power_stabilization"] = "N/A"
+                    logging.debug(
+                        "Failed to get power stabilization status for gpu %s | %s",
+                        gpu_id,
+                        e.get_error_info(),
+                    )
+
         if getattr(args, "ampp", None):
             try:
                 ampp_version, ampp_profiles = amdsmi_interface.amdsmi_get_ampp_profiles(args.gpu)
@@ -1659,6 +1739,7 @@ class StaticCommands:
         clock=None,
         profile=None,
         mem_carveout=None,
+        power_stabilization=None,
         ampp=None,
     ):
         """Get Static information for target gpu and cpu
@@ -1739,6 +1820,7 @@ class StaticCommands:
             "clock",
             "profile",
             "mem_carveout",
+            "power_stabilization",
             "ampp",
         ]
         for attr in gpu_attributes:
@@ -1791,6 +1873,7 @@ class StaticCommands:
                     clock,
                     profile,
                     mem_carveout,
+                    power_stabilization,
                     ampp,
                 )
         elif self.helpers.is_amd_hsmp_initialized():  # Only CPU is initialized
@@ -1827,6 +1910,7 @@ class StaticCommands:
                 clock,
                 profile,
                 mem_carveout,
+                power_stabilization,
                 ampp,
             )
 
