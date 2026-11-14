@@ -29,6 +29,7 @@
 #include "rocm_smi/rocm_smi_board_temp.h"
 #include "rocm_smi/rocm_smi_common.h"  // Should go before rocm_smi.h
 #include "rocm_smi/rocm_smi_counters.h"
+#include "rocm_smi/rocm_smi_cpu_link.h"
 #include "rocm_smi/rocm_smi_device.h"
 #include "rocm_smi/rocm_smi_exception.h"
 #include "rocm_smi/rocm_smi_gpu_metrics.h"
@@ -5777,6 +5778,43 @@ rsmi_status_t rsmi_topo_get_link_type(uint32_t dv_ind_src, uint32_t dv_ind_dst, 
   }
 
   return status;
+  CATCH
+}
+
+rsmi_status_t rsmi_topo_get_cpu_links(uint32_t dv_ind, uint32_t* num_links,
+                                      rsmi_cpu_link_t* links) {
+  TRY
+
+      GET_DEV_AND_KFDNODE_FROM_INDX
+
+      if (num_links == nullptr) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+
+  std::vector<amd::smi::GpuCpuLink> cpu_links;
+  if (amd::smi::DiscoverGpuCpuLinks(kfd_node->node_index(), &cpu_links) != 0) {
+    return RSMI_STATUS_FILE_ERROR;
+  }
+
+  uint32_t capacity = *num_links;
+  *num_links = static_cast<uint32_t>(cpu_links.size());
+  for (uint32_t i = 0; i < cpu_links.size() && links != nullptr && i < capacity; i++) {
+    links[i] = rsmi_cpu_link_t{};
+    links[i].numa_node_id = cpu_links[i].numa_node_id;
+    switch (cpu_links[i].type) {
+      case amd::smi::IOLINK_TYPE_XGMI:
+        links[i].type = RSMI_IOLINK_TYPE_XGMI;
+        break;
+      case amd::smi::IOLINK_TYPE_PCIEXPRESS:
+        links[i].type = RSMI_IOLINK_TYPE_PCIEXPRESS;
+        break;
+      default:
+        links[i].type = RSMI_IOLINK_TYPE_UNDEFINED;
+        break;
+    }
+  }
+
+  return RSMI_STATUS_SUCCESS;
   CATCH
 }
 

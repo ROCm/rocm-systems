@@ -4888,6 +4888,46 @@ def amdsmi_topo_get_link_type(
     return {"hops": hops_64.value, "type": type_32.value}
 
 
+def amdsmi_get_gpu_cpu_links(processor_handle: processor_handle_t):
+    """Return this GPU's directly-connected CPU link(s), of any link type, via KFD io_link only.
+
+    An empty list is a normal, successful result on GPUs that have no CPU
+    io_link at all -- it means "no such links exist", not a failure.
+
+    Returns:
+        list[dict]: one entry per connected CPU, each
+        ``{"package_id": int, "link_type": int}`` where
+        ``package_id`` is the real physical socket id of the connected CPU
+        (not a NUMA node id -- a package can expose multiple NUMA nodes) and
+        ``link_type`` is a value of :class:`amdsmi_link_type_t` (e.g. XGMI,
+        PCIE). Callers that only care about one link type should filter the
+        returned list by ``link_type`` themselves.
+    """
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
+
+    num_cpu_links = ctypes.c_uint32(0)
+    null_ptr = ctypes.POINTER(amdsmi_wrapper.amdsmi_cpu_link_t)()
+    _check_res(
+        amdsmi_wrapper.amdsmi_get_gpu_cpu_links(
+            processor_handle, ctypes.byref(num_cpu_links), null_ptr
+        )
+    )
+
+    cpu_links = (amdsmi_wrapper.amdsmi_cpu_link_t * num_cpu_links.value)()
+    _check_res(
+        amdsmi_wrapper.amdsmi_get_gpu_cpu_links(
+            processor_handle, ctypes.byref(num_cpu_links), cpu_links
+        )
+    )
+
+    links = []
+    for i in range(num_cpu_links.value):
+        links.append({"package_id": cpu_links[i].package_id, "link_type": cpu_links[i].link_type})
+
+    return links
+
+
 def amdsmi_get_link_topology(
     processor_handle_src: processor_handle_t, processor_handle_dst: processor_handle_t
 ):

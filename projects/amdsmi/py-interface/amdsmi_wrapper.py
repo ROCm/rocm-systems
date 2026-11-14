@@ -1641,6 +1641,18 @@ struct_amdsmi_link_metrics_t._fields_ = [
 ]
 
 amdsmi_link_metrics_t = struct_amdsmi_link_metrics_t
+class struct_amdsmi_cpu_link_t(Structure):
+    pass
+
+struct_amdsmi_cpu_link_t._pack_ = 1 # source:False
+struct_amdsmi_cpu_link_t._layout_ = 'ms'
+struct_amdsmi_cpu_link_t._fields_ = [
+    ('package_id', ctypes.c_uint32),
+    ('link_type', amdsmi_link_type_t),
+    ('reserved', ctypes.c_uint32 * 4),
+]
+
+amdsmi_cpu_link_t = struct_amdsmi_cpu_link_t
 class struct_amdsmi_vram_info_t(Structure):
     pass
 
@@ -4592,6 +4604,12 @@ try:
 except AttributeError:
     pass
 try:
+    amdsmi_get_gpu_cpu_links = _libraries['libamd_smi.so'].amdsmi_get_gpu_cpu_links
+    amdsmi_get_gpu_cpu_links.restype = amdsmi_status_t
+    amdsmi_get_gpu_cpu_links.argtypes = [amdsmi_processor_handle, ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(struct_amdsmi_cpu_link_t)]
+except AttributeError:
+    pass
+try:
     amdsmi_get_link_topology = _libraries['libamd_smi.so'].amdsmi_get_link_topology
     amdsmi_get_link_topology.restype = amdsmi_status_t
     amdsmi_get_link_topology.argtypes = [amdsmi_processor_handle, amdsmi_processor_handle, ctypes.POINTER(struct_amdsmi_link_topology_t)]
@@ -5937,7 +5955,7 @@ __all__ = \
     'amdsmi_cper_notify_type_t', 'amdsmi_cper_sev_t',
     'amdsmi_cper_timestamp_t', 'amdsmi_cper_valid_bits_t',
     'amdsmi_cpu_apb_disable', 'amdsmi_cpu_apb_enable',
-    'amdsmi_cpu_info_t', 'amdsmi_cpu_util_t',
+    'amdsmi_cpu_info_t', 'amdsmi_cpu_link_t', 'amdsmi_cpu_util_t',
     'amdsmi_cpusocket_handle', 'amdsmi_cuid_component_t',
     'amdsmi_cuid_component_type_t', 'amdsmi_cuid_info_t',
     'amdsmi_cuid_source_t', 'amdsmi_ddr_bw_metrics_t',
@@ -6020,11 +6038,12 @@ __all__ = \
     'amdsmi_get_gpu_compute_process_gpus',
     'amdsmi_get_gpu_compute_process_info',
     'amdsmi_get_gpu_compute_process_info_by_pid',
-    'amdsmi_get_gpu_cper_entries', 'amdsmi_get_gpu_cuid_info',
-    'amdsmi_get_gpu_device_bdf', 'amdsmi_get_gpu_device_cuid',
-    'amdsmi_get_gpu_device_uuid', 'amdsmi_get_gpu_driver_info',
-    'amdsmi_get_gpu_ecc_count', 'amdsmi_get_gpu_ecc_enabled',
-    'amdsmi_get_gpu_ecc_status', 'amdsmi_get_gpu_enumeration_info',
+    'amdsmi_get_gpu_cper_entries', 'amdsmi_get_gpu_cpu_links',
+    'amdsmi_get_gpu_cuid_info', 'amdsmi_get_gpu_device_bdf',
+    'amdsmi_get_gpu_device_cuid', 'amdsmi_get_gpu_device_uuid',
+    'amdsmi_get_gpu_driver_info', 'amdsmi_get_gpu_ecc_count',
+    'amdsmi_get_gpu_ecc_enabled', 'amdsmi_get_gpu_ecc_status',
+    'amdsmi_get_gpu_enumeration_info',
     'amdsmi_get_gpu_event_notification', 'amdsmi_get_gpu_fabric_info',
     'amdsmi_get_gpu_fan_rpms', 'amdsmi_get_gpu_fan_speed',
     'amdsmi_get_gpu_fan_speed_max', 'amdsmi_get_gpu_id',
@@ -6193,12 +6212,12 @@ __all__ = \
     'struct_amdsmi_clk_info_t', 'struct_amdsmi_counter_value_t',
     'struct_amdsmi_cper_guid_t', 'struct_amdsmi_cper_hdr_t',
     'struct_amdsmi_cper_timestamp_t', 'struct_amdsmi_cpu_info_t',
-    'struct_amdsmi_cpu_util_t', 'struct_amdsmi_cuid_component_t',
-    'struct_amdsmi_cuid_info_t', 'struct_amdsmi_ddr_bw_metrics_t',
-    'struct_amdsmi_dimm_power_t', 'struct_amdsmi_dimm_thermal_t',
-    'struct_amdsmi_dpm_level_t', 'struct_amdsmi_dpm_policy_entry_t',
-    'struct_amdsmi_dpm_policy_t', 'struct_amdsmi_driver_info_t',
-    'struct_amdsmi_engine_usage_t',
+    'struct_amdsmi_cpu_link_t', 'struct_amdsmi_cpu_util_t',
+    'struct_amdsmi_cuid_component_t', 'struct_amdsmi_cuid_info_t',
+    'struct_amdsmi_ddr_bw_metrics_t', 'struct_amdsmi_dimm_power_t',
+    'struct_amdsmi_dimm_thermal_t', 'struct_amdsmi_dpm_level_t',
+    'struct_amdsmi_dpm_policy_entry_t', 'struct_amdsmi_dpm_policy_t',
+    'struct_amdsmi_driver_info_t', 'struct_amdsmi_engine_usage_t',
     'struct_amdsmi_enumeration_info_t', 'struct_amdsmi_error_count_t',
     'struct_amdsmi_evt_notification_data_t',
     'struct_amdsmi_fabric_info_t', 'struct_amdsmi_fabric_info_v1_t',

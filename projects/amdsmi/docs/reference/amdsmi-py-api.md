@@ -5847,6 +5847,60 @@ finally:
     amdsmi.amdsmi_shut_down()
 ```
 
+### amdsmi_get_gpu_cpu_links
+
+Description: Return this GPU's directly-connected CPU link(s), of any link type, via KFD io_link only.
+
+An empty list is a normal, successful result on GPUs that have no CPU io_link at all -- it means "no such links exist", not a failure.
+
+Input parameters:
+
+* `processor_handle` the device handle for which to query CPU links
+
+Output: list of dictionaries, one per connected CPU, each with fields:
+
+Field | Description
+---|---
+`package_id` | The real physical socket id of the connected CPU (not a NUMA node id -- a package can expose multiple NUMA nodes)
+`link_type` | The connection type as an int. This should be translated according to the enum amdsmi_link_type_t. Refer to the example below for more details.
+
+Exceptions that can be thrown by `amdsmi_get_gpu_cpu_links` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device_num, device in enumerate(devices):
+            cpu_links = amdsmi.amdsmi_get_gpu_cpu_links(device)
+            for link in cpu_links:
+                print(link['package_id'])
+                if link['link_type'] == amdsmi.AmdSmiLinkType.AMDSMI_LINK_TYPE_XGMI:
+                    print('xgmi')
+                if link['link_type'] == amdsmi.AmdSmiLinkType.AMDSMI_LINK_TYPE_PCIE:
+                    print('pcie')
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
 ### amdsmi_get_link_topology
 
 Description: Return GPU link topology using the host API's fields.

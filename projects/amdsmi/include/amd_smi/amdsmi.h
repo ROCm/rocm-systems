@@ -1318,6 +1318,18 @@ typedef struct {
 } amdsmi_link_metrics_t;
 
 /**
+ * @brief One GPU<->CPU link, of any link type (e.g. MI450's XGMI-typed
+ * GPU-to-CPU-socket connection, or another ASIC's PCIe-typed one).
+ *
+ * @cond @tag{gpu_bm_linux} @endcond
+ */
+typedef struct {
+  uint32_t package_id;           //!< The connected CPU's real physical socket id
+  amdsmi_link_type_t link_type;  //!< e.g. ::AMDSMI_LINK_TYPE_XGMI, ::AMDSMI_LINK_TYPE_PCIE.
+  uint32_t reserved[4];
+} amdsmi_cpu_link_t;
+
+/**
  * @brief VRam Information
  *
  * @cond @tag{gpu_bm_linux} @tag{host} @endcond
@@ -7404,6 +7416,47 @@ amdsmi_status_t amdsmi_get_minmax_bandwidth_between_processors(
 amdsmi_status_t amdsmi_topo_get_link_type(amdsmi_processor_handle processor_handle_src,
                                           amdsmi_processor_handle processor_handle_dst,
                                           uint64_t* hops, amdsmi_link_type_t* type);
+
+/**
+ *  @brief Retrieve a GPU's directly-connected CPU link(s), of any link type
+ *
+ *  @ingroup tagHWTopology
+ *
+ *  @platform{gpu_bm_linux}
+ *
+ *  @details Discovers @p processor_handle's directly-connected CPU
+ *  link(s) -- regardless of link type -- and writes up to
+ *  @p *num_cpu_links of them to @p cpu_links. On return, @p *num_cpu_links
+ *  holds the number of links found, which may be larger than the caller's
+ *  buffer. Each entry's @p link_type field (e.g. ::AMDSMI_LINK_TYPE_XGMI,
+ *  ::AMDSMI_LINK_TYPE_PCIE) tells the caller what kind of connection it is;
+ *  callers that only care about one link type (e.g. a feature specific to
+ *  XGMI) should filter @p cpu_links by @p link_type themselves.
+ *
+ *  @note If @p processor_handle has no CPU link of any kind, this returns
+ *  ::AMDSMI_STATUS_SUCCESS with @p *num_cpu_links set to 0 -- that is a
+ *  normal, successful answer ("no such links exist"), not an error.
+ *
+ *  @param[in] processor_handle the GPU processor handle
+ *
+ *  @param[in,out] num_cpu_links As input, the value passed through this
+ *  parameter is the number of ::amdsmi_cpu_link_t that may be safely
+ *  written to the memory pointed to by @p cpu_links. On return,
+ *  @p num_cpu_links contains the number of entries written to @p cpu_links,
+ *  or the number that could have been written if enough memory had been
+ *  provided. If @p cpu_links is NULL, as output @p num_cpu_links will
+ *  contain how many CPU links this GPU has, with nothing written.
+ *
+ *  @param[out] cpu_links A pointer to a block of memory to which the
+ *  ::amdsmi_cpu_link_t values will be written. This value may be NULL, in
+ *  which case this function can be used to query how many CPU links this
+ *  GPU has.
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success (including
+ *  when zero links are found), non-zero on fail
+ */
+amdsmi_status_t amdsmi_get_gpu_cpu_links(amdsmi_processor_handle processor_handle,
+                                         uint32_t* num_cpu_links, amdsmi_cpu_link_t* cpu_links);
 
 /**
  *  @brief Retrieve the unified link topology information between 2 GPUs

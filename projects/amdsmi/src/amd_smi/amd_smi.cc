@@ -3914,6 +3914,64 @@ amdsmi_status_t amdsmi_topo_get_link_type(amdsmi_processor_handle processor_hand
   return amd::smi::rsmi_to_amdsmi_status(rstatus);
 }
 
+amdsmi_status_t amdsmi_get_gpu_cpu_links(amdsmi_processor_handle processor_handle,
+                                         uint32_t* num_cpu_links, amdsmi_cpu_link_t* cpu_links) {
+  AMDSMI_CHECK_INIT();
+  if (num_cpu_links == nullptr) return AMDSMI_STATUS_INVAL;
+
+  amd::smi::AMDSmiGPUDevice* device = nullptr;
+  amdsmi_status_t r = get_gpu_device_from_handle(processor_handle, &device);
+  if (r != AMDSMI_STATUS_SUCCESS) return r;
+#ifdef ENABLE_WSL_BACKEND
+  if (device->backend()) return AMDSMI_STATUS_NOT_SUPPORTED;
+#endif
+
+  // Discover the raw KFD-level links with our own query-then-fetch, separate
+  // from the caller's buffer: some raw entries get dropped below if their
+  // NUMA node can't be resolved to a physical package, so the count the
+  // caller sees (post-resolution) isn't known until every entry is checked.
+  uint32_t raw_count = 0;
+  auto rstatus = rsmi_topo_get_cpu_links(device->get_gpu_id(), &raw_count, nullptr);
+  if (rstatus != RSMI_STATUS_SUCCESS) return amd::smi::rsmi_to_amdsmi_status(rstatus);
+
+  std::vector<rsmi_cpu_link_t> rsmi_links(raw_count);
+  if (raw_count > 0) {
+    rstatus = rsmi_topo_get_cpu_links(device->get_gpu_id(), &raw_count, rsmi_links.data());
+    if (rstatus != RSMI_STATUS_SUCCESS) return amd::smi::rsmi_to_amdsmi_status(rstatus);
+  }
+
+  std::vector<amdsmi_cpu_link_t> resolved;
+  resolved.reserve(rsmi_links.size());
+  for (const auto& link : rsmi_links) {
+    auto packages = amd::smi::AMDSmiSystem::getInstance().get_cpu_sockets_from_numa_node(
+        static_cast<int32_t>(link.numa_node_id));
+    if (packages.empty()) {
+      continue;  // can't resolve this NUMA node to a physical package; drop it
+    }
+    amdsmi_cpu_link_t resolved_link{};
+    resolved_link.package_id = packages[0];
+    switch (link.type) {
+      case RSMI_IOLINK_TYPE_XGMI:
+        resolved_link.link_type = AMDSMI_LINK_TYPE_XGMI;
+        break;
+      case RSMI_IOLINK_TYPE_PCIEXPRESS:
+        resolved_link.link_type = AMDSMI_LINK_TYPE_PCIE;
+        break;
+      default:
+        resolved_link.link_type = AMDSMI_LINK_TYPE_UNKNOWN;
+        break;
+    }
+    resolved.push_back(resolved_link);
+  }
+
+  uint32_t copy_count = std::min(static_cast<uint32_t>(resolved.size()), *num_cpu_links);
+  for (uint32_t i = 0; i < copy_count && cpu_links != nullptr; i++) {
+    cpu_links[i] = resolved[i];
+  }
+  *num_cpu_links = static_cast<uint32_t>(resolved.size());
+  return AMDSMI_STATUS_SUCCESS;
+}
+
 amdsmi_status_t amdsmi_is_P2P_accessible(amdsmi_processor_handle processor_handle_src,
                                          amdsmi_processor_handle processor_handle_dst,
                                          bool* accessible) {
