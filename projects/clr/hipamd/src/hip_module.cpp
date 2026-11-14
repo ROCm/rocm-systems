@@ -35,6 +35,23 @@ static bool multiplyOverflow(__hip_uint32_t operand,
 #endif
 }
 
+// Returns true if the launch needs more workgroups in any dimension than the device allows.
+// Counts with ceiling division so a non-uniform launch still counts its partial final workgroup.
+static bool exceedsMaxGridDim(const amd::LaunchParams& launchParams, const amd::Device& device) {
+  const auto& info = device.info();
+  for (size_t i = 0; i < 3; ++i) {
+    // A zero local size is rejected by the existing config checks; skip to avoid dividing by zero.
+    if (launchParams.local_[i] == 0) {
+      continue;
+    }
+    const size_t numWorkgroups =
+        (static_cast<size_t>(launchParams.global_[i]) + launchParams.local_[i] - 1) /
+        launchParams.local_[i];
+    if (numWorkgroups > info.maxGridDim_[i]) {
+      return true;
+    }
+  }
+  return false;
 static hipError_t ihipValidateClusterSize(const dim3& clusterDim, size_t clusterMaxSize) {
   __hip_uint32_t clusterSize;
   if (multiplyOverflow(clusterDim.x, clusterDim.y, clusterSize) ||
@@ -383,6 +400,12 @@ hipError_t ihipLaunchKernel_validate(hipFunction_t f, const amd::LaunchParams& l
   if (launch_params.local_.product() > info.maxWorkGroupSize_) {
     return hipErrorInvalidConfiguration;
   }
+
+  // Make sure dispatch doesn't exceed max grid dimensions
+  if (exceedsMaxGridDim(launch_params, *device)) {
+    return hipErrorInvalidValue;
+  }
+
   amd::Kernel* kernel = hip::asKernel(f);
   if (!kernel) {
     LogPrintfError("%s", "Kernel object is invalid or null, possibly due to architecture mismatch.");

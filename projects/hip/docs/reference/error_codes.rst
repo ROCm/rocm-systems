@@ -486,7 +486,8 @@ Kernel and Launch Errors
   hipErrorInvalidValue
 
     Error returned when a grid dimension check finds any input global work size
-    dimension is zero, or a shared memory size check finds the size exceeds the size limit. 
+    dimension is zero or the launch exceeds the device's maximum grid dimensions, or a shared
+    memory size check finds the size exceeds the size limit.
 
   hipErrorInvalidDeviceFunction
 
@@ -505,7 +506,7 @@ Kernel and Launch Errors
     or other configurable operation contains invalid parameters. Common scenarios include:
 
     * Block dimensions exceeding hardware limits (too many threads per block)
-    * Grid dimensions that are invalid (zero size or exceeding limits)
+    * Grid dimensions that are invalid (zero size)
     * Invalid shared memory configuration
     * Incompatible combination of launch parameters
     * Block dimensions that don't match kernel requirements

@@ -21,6 +21,7 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 * `hipDeviceGetCacheConfig` now returns the value set by `hipDeviceSetCacheConfig` on devices with a configurable LDS carveout.
 * Resolved a segmentation fault on every call to the eight external-semaphore graph node APIs (`hipGraphAddExternalSemaphoresSignalNode`, `hipGraphAddExternalSemaphoresWaitNode`, and their `GetParams`/`SetParams`/`Exec...SetParams` APIs). Their runtime dispatch-table entries were never set; they now route to the implementations, and `hipGraphAddExternalSemaphoresSignalNode` returns `hipErrorInvalidValue` for invalid arguments as the wait variant does.
 * `hipCtxDestroy` no longer releases the device context for a context the caller did not create with `hipCtxCreate`, which could free the context while the runtime still referenced it.
+* A kernel launch that exceeds the device's `hipDeviceProp_t.maxGridSize` limits is now rejected and reports `hipErrorInvalidValue`, matching CUDA. The workgroup count is rounded up, so a non-uniform launch cannot bypass the limit with a partial final workgroup.
 
 ### Changed
 
