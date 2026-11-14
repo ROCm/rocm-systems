@@ -6,6 +6,15 @@
 
 #pragma once
 
+#ifndef __HIP_DEPRECATED_OCML
+// These declarations expose device-library internals that are not part of the
+// HIP API.
+#define __HIP_DEPRECATED_OCML                                                                      \
+  __attribute__((                                                                                  \
+      deprecated("not part of the HIP API; use the equivalent HIP function or compiler builtin")))
+#endif
+
+
 // /*
 // Half Math Functions
 // */
@@ -14,15 +23,17 @@
 #endif
 extern "C" {
 __device__ _Float16 __ocml_cos_f16(_Float16);
-__device__ __attribute__((const)) _Float16 __ocml_fabs_f16(_Float16);
-__device__ __attribute__((const)) int __ocml_isinf_f16(_Float16);
-__device__ __attribute__((const)) int __ocml_isnan_f16(_Float16);
-__device__ __attribute__((const)) _Float16 __ocml_rint_f16(_Float16);
+__device__ __HIP_DEPRECATED_OCML __attribute__((const)) _Float16 __ocml_fabs_f16(_Float16);
+__device__ __HIP_DEPRECATED_OCML __attribute__((const)) int __ocml_isinf_f16(_Float16);
+__device__ __HIP_DEPRECATED_OCML __attribute__((const)) int __ocml_isnan_f16(_Float16);
+__device__ __HIP_DEPRECATED_OCML __attribute__((const)) _Float16 __ocml_rint_f16(_Float16);
 __device__ __attribute__((const)) _Float16 __ocml_rsqrt_f16(_Float16);
 __device__ _Float16 __ocml_sin_f16(_Float16);
-__device__ __attribute__((const)) _Float16 __ocml_trunc_f16(_Float16);
-__device__ __attribute__((const)) _Float16 __ocml_fmax_f16(_Float16, _Float16);
-__device__ __attribute__((const)) _Float16 __ocml_fmin_f16(_Float16, _Float16);
+__device__ __HIP_DEPRECATED_OCML __attribute__((const)) _Float16 __ocml_trunc_f16(_Float16);
+__device__ __HIP_DEPRECATED_OCML __attribute__((const)) _Float16 __ocml_fmax_f16(_Float16,
+                                                                                 _Float16);
+__device__ __HIP_DEPRECATED_OCML __attribute__((const)) _Float16 __ocml_fmin_f16(_Float16,
+                                                                                 _Float16);
 
 typedef _Float16 __2f16 __attribute__((ext_vector_type(2)));
 

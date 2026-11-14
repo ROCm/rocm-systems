@@ -15,6 +15,15 @@
 #ifndef HIP_INCLUDE_HIP_AMD_DETAIL_DEVICE_LIBRARY_DECLS_H
 #define HIP_INCLUDE_HIP_AMD_DETAIL_DEVICE_LIBRARY_DECLS_H
 
+#ifndef __HIP_DEPRECATED_OCML
+// These declarations expose device-library internals that are not part of the
+// HIP API.
+#define __HIP_DEPRECATED_OCML                                                                      \
+  __attribute__((                                                                                  \
+      deprecated("not part of the HIP API; use the equivalent HIP function or compiler builtin")))
+#endif
+
+
 #if !defined(__HIPCC_RTC__)
 #include "hip/amd_detail/host_defines.h"
 #if __cplusplus
@@ -36,12 +45,15 @@ extern "C" __device__ uint __ockl_activelane_u32(void);
 
 extern "C" __device__ __attribute__((const)) uint __ockl_mul24_u32(uint, uint);
 extern "C" __device__ __attribute__((const)) int __ockl_mul24_i32(int, int);
-extern "C" __device__ __attribute__((const)) uint __ockl_mul_hi_u32(uint, uint);
-extern "C" __device__ __attribute__((const)) int __ockl_mul_hi_i32(int, int);
+extern "C" __device__ __HIP_DEPRECATED_OCML
+    __attribute__((const)) uint __ockl_mul_hi_u32(uint, uint);
+extern "C" __device__ __HIP_DEPRECATED_OCML __attribute__((const)) int __ockl_mul_hi_i32(int, int);
 extern "C" __device__ __attribute__((const)) uint __ockl_sadd_u32(uint, uint, uint);
 
-extern "C" __device__ __attribute__((const)) float __ocml_fmin_f32(float, float);
-extern "C" __device__ __attribute__((const)) float __ocml_fmax_f32(float, float);
+extern "C" __device__ __HIP_DEPRECATED_OCML __attribute__((const)) float __ocml_fmin_f32(float,
+                                                                                         float);
+extern "C" __device__ __HIP_DEPRECATED_OCML __attribute__((const)) float __ocml_fmax_f32(float,
+                                                                                         float);
 
 extern "C" __device__ __attribute__((const)) float __ocml_cvtrtn_f32_f64(double);
 extern "C" __device__ __attribute__((const)) float __ocml_cvtrtp_f32_f64(double);
@@ -69,7 +81,7 @@ extern "C" __device__ __attribute__((const)) double __ocml_cvtrtz_f64_u64(__hip_
 
 extern "C" __device__ __attribute__((convergent)) void __ockl_gws_barrier(uint nwm1, uint rid);
 
-extern "C" __device__ __attribute__((const)) __hip_uint32_t __ockl_lane_u32();
+extern "C" __device__ __HIP_DEPRECATED_OCML __attribute__((const)) __hip_uint32_t __ockl_lane_u32();
 extern "C" __device__ __attribute__((const)) int __ockl_grid_is_valid(void);
 extern "C" __device__ __attribute__((convergent)) void __ockl_grid_sync(void);
 extern "C" __device__ __attribute__((const)) uint __ockl_multi_grid_num_grids(void);
@@ -81,7 +93,7 @@ extern "C" __device__ __attribute__((convergent)) void __ockl_multi_grid_sync(vo
 extern "C" __device__ __attribute__((const)) uint __ockl_grid_bar_arrive(void);
 extern "C" __device__ __attribute__((convergent)) void __ockl_grid_bar_wait(uint);
 
-extern "C" __device__ void __ockl_atomic_add_noret_f32(float*, float);
+extern "C" __device__ __HIP_DEPRECATED_OCML void __ockl_atomic_add_noret_f32(float*, float);
 
 extern "C" __device__ __attribute__((convergent)) int __ockl_wgred_add_i32(int a);
 extern "C" __device__ __attribute__((convergent)) int __ockl_wgred_and_i32(int a);
@@ -98,7 +110,7 @@ extern "C" __device__ __hip_uint64_t __ockl_fprintf_append_string_n(__hip_uint64
                                                                     __hip_uint32_t is_last);
 
 // Using hip.amdgcn.bc - sync threads
-#define __CLK_LOCAL_MEM_FENCE  0x01
+#define __CLK_LOCAL_MEM_FENCE 0x01
 #define __CLK_GLOBAL_MEM_FENCE 0x02
 typedef unsigned __cl_mem_fence_flags;
 
