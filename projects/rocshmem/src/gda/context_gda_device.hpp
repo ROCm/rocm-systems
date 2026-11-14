@@ -32,6 +32,8 @@
 
 namespace rocshmem {
 
+struct TileView;
+
 class GDAContext : public Context {
  public:
   __host__ GDAContext(Backend *b, unsigned int ctx_id);
@@ -521,6 +523,19 @@ class GDAContext : public Context {
                                           size_t src_s0, size_t src_s1,
                                           size_t extent0, size_t extent1,
                                           size_t element_size, int pe,
+                                          int qp_index, int worker_id,
+                                          int worker_count);
+
+  /**
+   * @brief Post NBI puts for an N-D strided tile, striped across workers.
+   * A packed innermost dimension is posted as one transfer per run;
+   * otherwise one transfer is posted per element.
+   */
+  __device__ void tile_put_strided_nd_nbi(const TileView &view, int pe,
+                                          int qp_index, int worker_id,
+                                          int worker_count);
+  /** @brief Post NBI gets for an N-D strided tile. See tile_put_strided_nd_nbi. */
+  __device__ void tile_get_strided_nd_nbi(const TileView &view, int pe,
                                           int qp_index, int worker_id,
                                           int worker_count);
 

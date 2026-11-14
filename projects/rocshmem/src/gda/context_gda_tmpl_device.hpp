@@ -1587,6 +1587,67 @@ __device__ inline void GDAContext::tile_get_strided_2d_nbi(
   }
 }
 
+// Shape of the per-WQE decomposition of an N-D strided tile: the number of
+// leading dimensions iterated over, the bytes per chunk, and the chunk count.
+struct GdaTileNdChunks {
+  int outer_ndim;
+  size_t chunk_bytes;
+  size_t num_chunks;
+};
+
+__device__ __forceinline__ GdaTileNdChunks
+gda_tile_nd_chunks(const TileView &view) {
+  const int last = view.ndim - 1;
+  const bool inner_contig = view.src_s[last] == 1 && view.dst_s[last] == 1;
+  GdaTileNdChunks c;
+  c.outer_ndim = inner_contig ? last : view.ndim;
+  c.chunk_bytes = (inner_contig ? view.ext[last] : 1) * view.element_size;
+  c.num_chunks = 1;
+  for (int d = 0; d < c.outer_ndim; d++) c.num_chunks *= view.ext[d];
+  if (c.chunk_bytes == 0) c.num_chunks = 0;
+  return c;
+}
+
+__device__ __forceinline__ void gda_tile_nd_chunk_offsets(
+    const TileView &view, int outer_ndim, size_t idx, size_t *dst_off,
+    size_t *src_off) {
+  size_t s = 0, d_off = 0, rem = idx;
+  for (int d = outer_ndim - 1; d >= 0; d--) {
+    const size_t coord = rem % view.ext[d];
+    rem /= view.ext[d];
+    s += coord * view.src_s[d];
+    d_off += coord * view.dst_s[d];
+  }
+  *dst_off = d_off * view.element_size;
+  *src_off = s * view.element_size;
+}
+
+__device__ inline void GDAContext::tile_put_strided_nd_nbi(
+    const TileView &view, int pe, int qp_index, int worker_id,
+    int worker_count) {
+  const GdaTileNdChunks c = gda_tile_nd_chunks(view);
+  for (size_t idx = static_cast<size_t>(worker_id); idx < c.num_chunks;
+       idx += static_cast<size_t>(worker_count)) {
+    size_t dst_off, src_off;
+    gda_tile_nd_chunk_offsets(view, c.outer_ndim, idx, &dst_off, &src_off);
+    tile_put_chunk_nbi(view.dst_base + dst_off, view.src_base + src_off,
+                       c.chunk_bytes, pe, qp_index);
+  }
+}
+
+__device__ inline void GDAContext::tile_get_strided_nd_nbi(
+    const TileView &view, int pe, int qp_index, int worker_id,
+    int worker_count) {
+  const GdaTileNdChunks c = gda_tile_nd_chunks(view);
+  for (size_t idx = static_cast<size_t>(worker_id); idx < c.num_chunks;
+       idx += static_cast<size_t>(worker_count)) {
+    size_t dst_off, src_off;
+    gda_tile_nd_chunk_offsets(view, c.outer_ndim, idx, &dst_off, &src_off);
+    tile_get_chunk_nbi(view.dst_base + dst_off, view.src_base + src_off,
+                       c.chunk_bytes, pe, qp_index);
+  }
+}
+
 __device__ inline void GDAContext::tile_put_gda_workers(
     void *dst_data, const void *src_data, const size_t *dst_strides,
     const size_t *src_strides, const size_t *start_coord,
@@ -1671,25 +1732,13 @@ __device__ inline void GDAContext::tile_put_gda_workers(
                         pe, qp_index, 0, 1);
     }
   } else {
-    // N-D (ndim > 2): flatten all dimensions; worker 0 handles element-by-element.
-    size_t total = 1;
-    for (int d = 0; d < view.ndim; d++) total *= view.ext[d];
     if (tile_classify(view) == TileLayout::Contiguous) {
+      size_t total = 1;
+      for (int d = 0; d < view.ndim; d++) total *= view.ext[d];
       tile_put_contig_slices_nbi(dst_base, src_base, total * element_size,
                                  pe, qp_index, worker_id, worker_count);
-    } else if (worker_id == 0) {
-      for (size_t idx = 0; idx < total; idx++) {
-        size_t src_off = 0, dst_off = 0, rem = idx;
-        for (int d = view.ndim - 1; d >= 0; d--) {
-          const size_t coord = rem % view.ext[d];
-          rem /= view.ext[d];
-          src_off += coord * view.src_s[d];
-          dst_off += coord * view.dst_s[d];
-        }
-        tile_put_chunk_nbi(dst_base + dst_off * element_size,
-                           src_base + src_off * element_size,
-                           element_size, pe, qp_index);
-      }
+    } else {
+      tile_put_strided_nd_nbi(view, pe, qp_index, worker_id, worker_count);
     }
   }
 
@@ -1780,25 +1829,13 @@ __device__ inline void GDAContext::tile_get_gda_workers(
                         pe, qp_index, 0, 1);
     }
   } else {
-    // N-D (ndim > 2): flatten all dimensions; worker 0 handles element-by-element.
-    size_t total = 1;
-    for (int d = 0; d < view.ndim; d++) total *= view.ext[d];
     if (tile_classify(view) == TileLayout::Contiguous) {
+      size_t total = 1;
+      for (int d = 0; d < view.ndim; d++) total *= view.ext[d];
       tile_get_contig_slices_nbi(dst_base, src_base, total * element_size,
                                  pe, qp_index, worker_id, worker_count);
-    } else if (worker_id == 0) {
-      for (size_t idx = 0; idx < total; idx++) {
-        size_t src_off = 0, dst_off = 0, rem = idx;
-        for (int d = view.ndim - 1; d >= 0; d--) {
-          const size_t coord = rem % view.ext[d];
-          rem /= view.ext[d];
-          src_off += coord * view.src_s[d];
-          dst_off += coord * view.dst_s[d];
-        }
-        tile_get_chunk_nbi(dst_base + dst_off * element_size,
-                           src_base + src_off * element_size,
-                           element_size, pe, qp_index);
-      }
+    } else {
+      tile_get_strided_nd_nbi(view, pe, qp_index, worker_id, worker_count);
     }
   }
 

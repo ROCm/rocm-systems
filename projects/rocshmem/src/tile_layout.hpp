@@ -114,12 +114,16 @@ __device__ __forceinline__ TileView tile_make_view(
 
   size_t src_offset = 0;
   size_t dst_offset = 0;
-  for (int d = 0; d < ndim; d++) {
-    view.src_s[d] = src_strides[d];
-    view.dst_s[d] = dst_strides[d];
-    view.ext[d]   = boundary[d] - start_coord[d];
-    src_offset   += start_coord[d] * src_strides[d];
-    dst_offset   += start_coord[d] * dst_strides[d];
+  // Unrolled with constant indices so the view can be kept in registers.
+#pragma unroll
+  for (int d = 0; d < TileView::MAX_NDIM; d++) {
+    if (d < ndim) {
+      view.src_s[d] = src_strides[d];
+      view.dst_s[d] = dst_strides[d];
+      view.ext[d]   = boundary[d] - start_coord[d];
+      src_offset   += start_coord[d] * src_strides[d];
+      dst_offset   += start_coord[d] * dst_strides[d];
+    }
   }
   view.src_base += src_offset * element_size;
   view.dst_base += dst_offset * element_size;
