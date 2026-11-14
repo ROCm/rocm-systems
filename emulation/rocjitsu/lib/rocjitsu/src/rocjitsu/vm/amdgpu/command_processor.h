@@ -204,6 +204,9 @@ public:
   /// @brief Whether this CP currently owns any AQL or PM4 queue state.
   [[nodiscard]] bool has_registered_queues() const;
 
+  /// @brief Whether an admitted AQL entry has workgroups left to launch or a signal to publish.
+  [[nodiscard]] bool has_pending_aql_dispatch_work() const;
+
   /// @brief Compute queues whose root ring initially processes PM4.
   /// @details Test-only visibility for cross-layer teardown assertions.
   [[nodiscard]] size_t registered_pm4_queue_count_for_test() const;
@@ -227,6 +230,10 @@ public:
   /// publication state for explicit force-cancel/reset handling.
   [[nodiscard]] QueuePrepareCloseStatus
   prepare_unregister_queue_registration(uint64_t registration_id) noexcept;
+
+  /// @brief Stop pending execution once committed queue publication is complete.
+  [[nodiscard]] QueuePrepareCloseStatus
+  prepare_preempt_queue_registration(uint64_t registration_id) noexcept;
 
   /// @brief Register one DRM indirect-buffer submission queue.
   [[nodiscard]] bool register_drm_queue(ComputeQueueConfig config);
@@ -366,6 +373,22 @@ public:
 
   [[nodiscard]] size_t next_cu_index() const { return next_cu_; }
 
+  /// Return the next id after wiring this XCD into its SoC.
+  [[nodiscard]] uint32_t next_dispatch_id_for_topology(uint32_t rank, uint32_t count) const {
+    return dispatch_id_base_ == rank + 1 && dispatch_id_stride_ == count ? next_dispatch_id_
+                                                                         : rank + 1;
+  }
+
+  /// Restore this XCD's sequence before queues can allocate new dispatch ids.
+  bool restore_dispatch_id_sequence(uint32_t rank, uint32_t count, uint32_t next) {
+    if (rank >= count || next < rank + 1 || (next - rank - 1) % count != 0)
+      return false;
+    dispatch_id_base_ = rank + 1;
+    dispatch_id_stride_ = count;
+    next_dispatch_id_ = next;
+    return true;
+  }
+
   /// @brief Number of entries (@p queue_id, @p process_id) accepted on this CP.
   ///
   /// @details Test-only. Acceptance is recorded at the queue's single ordered push
@@ -420,6 +443,17 @@ public:
           return candidate.queue_id == queue_id && candidate.process_id == process_id;
         });
     return queue == compute_queues_.end() ? AddressSpaceHandle{} : queue->address_space;
+  }
+
+  /// @brief Numeric identity namespace retained by a registered queue.
+  [[nodiscard]] std::optional<ProcessIdentityKind>
+  queue_process_identity_kind_for_test(uint32_t queue_id, uint32_t process_id) const {
+    std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
+    const auto queue = std::ranges::find_if(compute_queues_, [&](const ComputeQueueRecord &entry) {
+      return entry.queue_id == queue_id && entry.process_id == process_id;
+    });
+    return queue == compute_queues_.end() ? std::nullopt
+                                          : std::optional(queue->process_identity_kind);
   }
 
   /// @brief Address-space identity carried by the first accepted queue entry.
@@ -552,6 +586,20 @@ public:
            });
   }
 
+  /// @brief Whether a completed dispatch retained its scoped cache flush after a retry.
+  /// @details Test-only. The queued entry and ordinary VM snapshot remain live while
+  /// the blocked flush has not published the grid share or completion signal.
+  [[nodiscard]] bool completion_flush_retry_pending_for_test(uint32_t queue_id,
+                                                             uint32_t process_id) {
+    std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
+    const ComputeQueueRecord *state = find_compute_queue(queue_id, process_id);
+    if (state == nullptr || !state->publication_retry_pending || state->entries.empty())
+      return false;
+    const DispatchEntry &head = state->entries.front();
+    return head.fully_completed() && !head.grid_share_published &&
+           static_cast<bool>(head.completion_publication.flush_access);
+  }
+
   void drain_fanout_inbox_for_test() {
     drain_dispatch_fault_inbox();
     drain_fanout_inbox();
@@ -595,8 +643,10 @@ private:
   };
 
   uint64_t register_queue(ComputeQueueConfig queue, bool fanout_replica);
+  [[nodiscard]] QueuePrepareCloseStatus
+  prepare_close_queue_registration(uint64_t registration_id, QueueCloseMode mode) noexcept;
   [[nodiscard]] QueuePrepareCloseStatus close_queue_registration(uint64_t registration_id,
-                                                                 bool force) noexcept;
+                                                                 QueueCloseMode mode) noexcept;
 
   struct DispatchLaunchMetadata {
     std::array<uint32_t, 4> scratch_resource_descriptor{};
@@ -918,7 +968,7 @@ private:
   // leaf mutex, never hw_queue_mutex_: a peer appends here while holding its own
   // hw_queue_mutex_, so acquiring anything else under this one would reintroduce
   // the cross-CP lock cycle it exists to avoid.
-  std::mutex fanout_inbox_mutex_;
+  mutable std::mutex fanout_inbox_mutex_;
   std::vector<DispatchEntry> fanout_inbox_;
   std::unordered_map<uint32_t, DispatchLaunchMetadata> fanout_launch_metadata_inbox_;
 

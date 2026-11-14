@@ -5,7 +5,7 @@
 // CPU-specific arithmetic stays here; public entry points select this backend.
 
 #include "conversion/normalized.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_conversion.h"
 
 #include <immintrin.h>
 #include <stdint.h>
@@ -57,7 +57,7 @@ __m256i normalized(__m256i raw, uint32_t mode, bool flush_input) {
 // Requires the named CPU features and validated instruction controls.
 template <bool Unsigned, NormalizedForm Form>
 void normalized_x86_64_v3(uint32_t exec_mask, uint32_t mode, uint32_t *d, const uint32_t *a,
-                          const uint32_t *b, bool flush_input) {
+                          const uint32_t *b, bool flush_input, bool preserve_half) {
   constexpr bool unary = Form == NormalizedForm::Half;
   constexpr bool half = Form != NormalizedForm::PackedFloat;
   auto shift = _mm_cvtsi32_si128(mode & RJ_ARITH_ALU_HIGH_D ? 16 : 0);
@@ -65,10 +65,12 @@ void normalized_x86_64_v3(uint32_t exec_mask, uint32_t mode, uint32_t *d, const 
     auto raw = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(a + lane));
     auto result = normalized<Unsigned, half>(raw, mode, flush_input);
     if constexpr (unary) {
-      auto original = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(d + lane));
-      auto selected = _mm256_sll_epi32(_mm256_set1_epi32(65535), shift);
-      result =
-          _mm256_or_si256(_mm256_andnot_si256(selected, original), _mm256_sll_epi32(result, shift));
+      if (preserve_half || (mode & RJ_ARITH_ALU_HIGH_D)) {
+        auto original = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(d + lane));
+        auto selected = _mm256_sll_epi32(_mm256_set1_epi32(65535), shift);
+        result = _mm256_or_si256(_mm256_andnot_si256(selected, original),
+                                 _mm256_sll_epi32(result, shift));
+      }
     } else {
       auto vb = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(b + lane));
       result = _mm256_or_si256(
@@ -82,21 +84,22 @@ void normalized_x86_64_v3(uint32_t exec_mask, uint32_t mode, uint32_t *d, const 
 
 template void normalized_x86_64_v3<false, NormalizedForm::PackedFloat>(uint32_t, uint32_t,
                                                                        uint32_t *, const uint32_t *,
-                                                                       const uint32_t *, bool);
+                                                                       const uint32_t *, bool,
+                                                                       bool);
 template void normalized_x86_64_v3<true, NormalizedForm::PackedFloat>(uint32_t, uint32_t,
                                                                       uint32_t *, const uint32_t *,
-                                                                      const uint32_t *, bool);
+                                                                      const uint32_t *, bool, bool);
 template void normalized_x86_64_v3<false, NormalizedForm::PackedHalf>(uint32_t, uint32_t,
                                                                       uint32_t *, const uint32_t *,
-                                                                      const uint32_t *, bool);
+                                                                      const uint32_t *, bool, bool);
 template void normalized_x86_64_v3<true, NormalizedForm::PackedHalf>(uint32_t, uint32_t, uint32_t *,
                                                                      const uint32_t *,
-                                                                     const uint32_t *, bool);
+                                                                     const uint32_t *, bool, bool);
 template void normalized_x86_64_v3<false, NormalizedForm::Half>(uint32_t, uint32_t, uint32_t *,
                                                                 const uint32_t *, const uint32_t *,
-                                                                bool);
+                                                                bool, bool);
 template void normalized_x86_64_v3<true, NormalizedForm::Half>(uint32_t, uint32_t, uint32_t *,
                                                                const uint32_t *, const uint32_t *,
-                                                               bool);
+                                                               bool, bool);
 
 } // namespace rocjitsu::arith

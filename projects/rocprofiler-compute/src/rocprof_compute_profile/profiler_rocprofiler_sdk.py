@@ -83,7 +83,7 @@ class rocprofiler_sdk_profiler(RocProfCompute_Base):
 
         if args.iteration_multiplexing:
             options.update({
-                "ROCPROF_ITERATION_MULTIPLEXING": args.iteration_multiplexing,
+                "ROCPROF_ITERATION_MULTIPLEXING": "1",
             })
 
         if args.attach_pid:

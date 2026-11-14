@@ -61,13 +61,16 @@ namespace rocjitsu::test {
 
 class ComputeUnitTestAccess {
 public:
+  static void tick_memory_pipelines(amdgpu::ComputeUnitCore &cu) { cu.tick_pipelines(); }
+
   static amdgpu::Wavefront *sgpr_owner(const amdgpu::ComputeUnitCore &cu, uint32_t reg_idx) {
     return cu.sgpr_owner(reg_idx);
   }
 
-  static amdgpu::VmAccessOutcome route_memory_inst(amdgpu::ComputeUnitCore &cu, Instruction *inst,
+  static amdgpu::VmAccessOutcome route_memory_inst(amdgpu::ComputeUnitCore &cu,
+                                                   std::unique_ptr<Instruction> inst,
                                                    amdgpu::Wavefront &wf) {
-    return cu.route_memory_inst(inst, wf);
+    return cu.route_memory_inst(std::move(inst), wf);
   }
 };
 
@@ -749,6 +752,11 @@ struct PluginFixture {
     RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
                        granulated_sgpr_count);
     RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 2);
+    if (cu()->arch() == ROCJITSU_CODE_ARCH_CDNA2 || cu()->arch() == ROCJITSU_CODE_ARCH_CDNA3 ||
+        cu()->arch() == ROCJITSU_CODE_ARCH_CDNA4) {
+      // These kernels use the 256-register allocation for ordinary VGPRs.
+      RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc3, COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET, 63);
+    }
     kd.group_segment_fixed_size = group_segment_fixed_size;
     mem->load_image(reinterpret_cast<const uint8_t *>(&kd), sizeof(kd), addr);
     mem->load_image(reinterpret_cast<const uint8_t *>(code), num_words * 4,

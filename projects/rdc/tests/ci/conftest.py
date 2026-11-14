@@ -8,6 +8,12 @@ import subprocess
 import time
 
 import pytest
+from fake_gpu_stress import (  # noqa: F401
+    pytest_configure,
+    pytest_runtest_logreport,
+    pytest_runtest_setup,
+    pytest_sessionfinish,
+)
 
 
 def _find_binary(name):

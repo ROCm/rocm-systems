@@ -7,7 +7,8 @@
 
 #pragma once
 
-#include "rj_arith/rj_arith.h"
+#include "common/compiler.h"
+#include "rj_arith/detail/rj_arith_wmma.h"
 #include "wmma/layout.h"
 
 #include <stdint.h>
@@ -68,11 +69,13 @@ void integer_wmma_impl(uint32_t modifiers, uint32_t *const *d, const uint32_t *c
     int reg = Rdna3 ? row / Groups : row % 8;
     int lane = Rdna3 ? 16 * group : 16 * (row / 8);
     V acc[16 / Ops::width];
+    RJ_ARITH_UNROLL(2)
     for (int chunk = 0; chunk < 16 / Ops::width; ++chunk) {
       acc[chunk] = Ops::load(c[reg] + lane + chunk * Ops::width);
     }
     for (int stage = 0; stage < stages; ++stage) {
       V sums[16 / Ops::width];
+      RJ_ARITH_UNROLL(2)
       for (auto &sum : sums) {
         sum = Ops::splat(0);
       }
@@ -81,11 +84,13 @@ void integer_wmma_impl(uint32_t modifiers, uint32_t *const *d, const uint32_t *c
                 : clamp ? rocjitsu::arith::wmma_gfx12_integer_stage_k(stage, local)
                         : local;
         V left = Ops::splat_bits(packed[group][0][k / 2][row]);
+        RJ_ARITH_UNROLL(2)
         for (int chunk = 0; chunk < 16 / Ops::width; ++chunk) {
           sums[chunk] =
               Ops::dot(sums[chunk], left, Ops::load(packed[group][1][k / 2] + chunk * Ops::width));
         }
       }
+      RJ_ARITH_UNROLL(2)
       for (int chunk = 0; chunk < 16 / Ops::width; ++chunk) {
         V sum = Ops::add(acc[chunk], sums[chunk]);
         // Each stage's dot fits int32. Saturate its addition to the current
@@ -98,6 +103,7 @@ void integer_wmma_impl(uint32_t modifiers, uint32_t *const *d, const uint32_t *c
         acc[chunk] = sum;
       }
     }
+    RJ_ARITH_UNROLL(2)
     for (int chunk = 0; chunk < 16 / Ops::width; ++chunk) {
       Ops::store(result[reg] + lane + chunk * Ops::width, acc[chunk]);
     }

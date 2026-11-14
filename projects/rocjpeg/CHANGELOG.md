@@ -5,9 +5,18 @@ Documentation for rocJPEG is available at
 
 ## (unreleased) rocJPEG 1.14.0
 
+### Added
+
+* Added the `-n` option to the `jpegDecodePerf` sample to decode the input images the given number of times, so that a run lasts long enough to measure. With `-n`, `jpegDecodePerf` can run more threads than there are images.
+
 ### Resolved issues
 
 * Fixed the RGB, RGB planar, Y, and YUV planar outputs writing past the image when its width is not a multiple of 8 or its height is odd. With output buffers sized exactly to the image, this overwrote memory after the buffer and made the right and bottom edges of the image nondeterministic.
+
+### Changed
+
+* The decode APIs (`rocJpegDecode`, `rocJpegDecodeAsync`, `rocJpegDecodeBatched`, and `rocJpegDecodeBatchedAsync`) now return `ROCJPEG_STATUS_INVALID_PARAMETER` when the crop rectangle in `RocJpegDecodeParams` does not lie within the image.
+* The `jpegDecodePerf` sample accepts up to 64 decoding threads (`-t`), up from 32.
 
 ## rocJPEG 1.13.0 for ROCm 10.2.0
 
@@ -17,10 +26,6 @@ Documentation for rocJPEG is available at
 * Added the `RocJpegSurfaceFormat` enum to describe the layout of the decoded image produced by the VCN JPEG decoder, and the `RocJpegCodingProcess` enum to report the supported JPEG coding processes.
 * Added the `jpegDecodeCaps` sample to demonstrate the `rocJpegGetDecoderCaps` API.
 * Added HIP-based color conversion kernels to the batched decode path, improving batched decoding performance.
-
-### Changed
-
-* The decode APIs (`rocJpegDecode`, `rocJpegDecodeAsync`, `rocJpegDecodeBatched`, and `rocJpegDecodeBatchedAsync`) now return `ROCJPEG_STATUS_INVALID_PARAMETER` when the crop rectangle in `RocJpegDecodeParams` does not lie within the image.
 
 ## rocJPEG 1.10.0 for ROCm 10.1.0
 

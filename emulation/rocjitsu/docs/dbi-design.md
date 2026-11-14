@@ -46,12 +46,12 @@ seven target/wave modes; hardware and simulator coverage must be distinguished.
 │                                                                  │
 │  ┌──────────────────────────────────────────────────────────────┐│
 │  │  CodeObjectPatcher                                           ││
-│  │  ELF mutation: splice + grow .text with trampoline cave, emit││
+│  │  ELF mutation: grow .text, fix ELF references, emit          ││
 │  └──────────────────────────────────────────────────────────────┘│
 └──────────────────────────────────────────────────────────────────┘
 ```
 
-The orchestrator owns the multi-stage pipeline. All per-site validation and builder output is *preflighted* before the patcher mutates anything — a late failure (e.g. branch-range overflow) cannot leak a half-built ELF.
+The orchestrator owns the multi-stage pipeline. It builds a private candidate and publishes ELF bytes and site maps only after validation, code emission, layout, and resource updates succeed. A late failure (e.g. branch-range overflow) returns diagnostics without publishing a partial image.
 
 ---
 
@@ -59,7 +59,7 @@ The orchestrator owns the multi-stage pipeline. All per-site validation and buil
 
 **Files:** `code/patch/instrumentor.h`, `code/patch/instrumentor.cpp`
 
-The Instrumentor is the top-level orchestrator. Callers queue `InstrumentationPoint`s (requests) and then invoke `patch()`. The orchestrator runs the pipeline: validate each anchor, plan a trampoline per site, build it, then mutate the ELF.
+The Instrumentor is the top-level orchestrator. Callers queue `InstrumentationPoint`s (requests) and then invoke `patch()`. The orchestrator validates each anchor, plans and builds a trampoline per site, then checks and applies the original-text anchor batch before appending the local cave. The checked operation borrows the source, decoded boundaries, decoder, and patcher already owned by this observation call.
 
 ### Pipeline stages
 
@@ -72,7 +72,9 @@ ResolvedInstrumentationSite -- one validated anchor + snapshot of the
       |  make_trampoline_plan() + TrampolineBuilder::build()
       v
 (preflight: per-site plan + built bytes, accumulated locally)
-      |  splice anchors + append trampoline caves into .text + emit()
+      |  local checked-edit batch on original text
+      |  append probes/stub/trampolines, then replace_text()
+      |  (KernelEntry callbacks retarget only the entry-stub branch)
       v
 InstrumentedCodeObject      -- patch(): patched ELF + diagnostics
 InstrumentedCodeObjectDebug -- patch_with_debug_summaries(): same result
@@ -85,9 +87,9 @@ ConSan uses this orchestrator for its compiled probe calls. See
 [Extending ConSan](consan.md#extending-consan) for the ownership boundary and
 current limits.
 
-- Lazy CFG construction: blocks are decoded on the first call that needs them via `Decoder::create(arch)` + `BasicBlock::build(obj, *decoder)`. Decoder creation failure (RV32I/RV64I/INVALID) surfaces as a structured `ValidationResult` / `InstrumentedCodeObject` error, not a crash.
-- `validate_points()` looks up the decoded `Instruction` at each requested `anchor_offset` and runs `validate_anchor()`. All-or-nothing today: any per-site failure empties `sites` and reports diagnostics in `errors`.
-- `patch()` runs validation, then per-site `make_trampoline_plan()` + `TrampolineBuilder::build()` as preflight. Only after every site succeeds does it splice patched anchor bytes into a local `.text` copy, `append_words()` each trampoline after the original bytes as a local code cave, and grow the section in one `replace_text()` call. Returns `InstrumentedCodeObject` with ELF bytes, diagnostics, production site maps, and planned resources.
+- Source-derived decoding: a concrete ELF target selects its concrete decoder features. Without a concrete target binding, the caller's architecture supplies the decoder; a recognized conflicting ELF architecture is rejected. CFG construction is lazy and uses `BasicBlock::build`. The checked batch uses this same decoder selection and the existing full-section instruction, clause, and direct-reference index after verifying complete coverage. It does not introduce a second target-admission policy.
+- `validate_points()` looks up the decoded `Instruction` at each requested `anchor_offset` and runs `validate_anchor()`. All-or-nothing today: any per-site failure empties `sites` and reports diagnostics in `errors`. Success establishes per-site eligibility, not that the final patch will succeed: batch, reference, and layout checks still run during `patch()`. Checked-edit failures also expose `edit_error` with a category and text-relative offset; the diagnostic types do not expose the private writer.
+- `patch()` builds trampolines, then checks their original-text anchor replacements together. The local transaction checks expected bytes, complete instruction extents, replacement encoding, clauses, overlap, and the collected references described under [Checked edits](#checked-edits-codepatchchecked_text_editsh) before changing the private text buffer. Existing kernel descriptor entries are supplied by observation resolution. `KernelEntry` callbacks retarget the entry-stub branch without adding original-text edits. The orchestrator appends copied probe bodies, the entry stub, and trampolines, then grows the section in one `CodeObjectPatcher::replace_text()` call. It returns ELF bytes, diagnostics, production site maps, and planned resources.
 - `patch_with_debug_summaries()` is a test/debug entry point returning `InstrumentedCodeObjectDebug` (extends `InstrumentedCodeObject` with per-site `InstrumentationPatch` summaries — schema unstable; production callers use `patch()` and its `InstrumentedSite` maps).
 - Single-attempt: both entry points share one budget. After `patched_ = true`, subsequent calls return a fatal error. Recoverable errors require constructing a new Instrumentor.
 
@@ -215,7 +217,7 @@ Defense-in-depth check that the orchestrator-produced `TrampolinePlan` matches t
 | `TrampolinePlan` | builder input | `arch`, `anchor_offset`, `original_size`, `original_words`, `trampoline_offset`, `return_target`, `before_items`, `after_items`, `emit_original`, `kernel_sgpr_count`, `entry_storage_base`; probe-call: `is_probe_call`, `probe_after_original`, `probe_target_offset`, `link_pair_base`, `arg_vgpr_base`, `probe_args`, `force_full_exec`, `target_pair_base`, `scc_temp`, `preserve_scc`, `preserve_exec`, `preserve_vcc`, `preserve_m0`, `special_state_saves`, `vgpr_spills`, `sgpr_spills`, `acc_spills`, `spill_bridge_vgpr`, `planned_envelope_word_count`, `builder_clobbers` |
 | `TrampolineBytes` | builder output | `patched_anchor_bytes`, `trampoline_words`, `original_byte_offset`, `call_envelope_byte_offset`, `call_envelope_byte_size` |
 | `InstrumentationPatch` | per-site summary (test/debug) | `anchor_offset`, `original_size`, `trampoline_offset`, optional `return_target`, `original_bytes`, `patched_anchor_bytes`; probe-call: `is_probe_call`, `probe_symbol`, `probe_target_offset`, `link_pair_base`, `target_pair_base` |
-| `InstrumentedCodeObject` | `patch()` output | `elf_bytes`, `errors`, `warnings`, `sites`, `resources` |
+| `InstrumentedCodeObject` | `patch()` output | `elf_bytes`, `errors`, optional typed `edit_error`, `warnings`, `sites`, `resources` |
 | `InstrumentedCodeObjectDebug` | `patch_with_debug_summaries()` output | `InstrumentedCodeObject` + `patches` |
 
 The debug `return_target` records the emitted plan's return branch destination.
@@ -231,8 +233,9 @@ The intermediate site/plan types are expected to thicken as the framework grows 
 
 ### Code Object Patcher (`code/patch/code_object_patcher.h`) [shared with DBT]
 
-Owns ELF-level mutations. The DBI orchestrator reads the original payload via
-`text_bytes()`, assembles the new `.text` locally (each anchor spliced in place,
+Owns ELF-level mutations. The orchestrator applies validated original-text
+anchor edits to a local text buffer, then
+assembles the new `.text` (the already-edited original text,
 then the probe bodies, the `s_nop`-padded entry-prologue stub if there is one, and
 every trampoline appended after the original bytes with `append_words()` /
 `append_nop_padding()`), and applies it with a single `replace_text()`. A patch
@@ -253,6 +256,39 @@ The patcher accepts any well-formed mutation request; layout decisions stay in
 the orchestrator. Trampolines live inside `.text` as a local code cave (the same
 layout DBT uses) rather than a separate section, so cave offsets are plain
 `.text`-relative bytes in `[text_size, text_size + cave_bytes)`.
+
+### Checked edits (`code/patch/checked_text_edits.h`)
+
+The checked operation is local to one original-text anchor batch. It requires
+the unchanged source, full-section decoded boundaries, selected decoder, and
+existing patcher; these inputs remain owned by Instrumentor for the duration of
+the call. Its edit extents are the 4/8-byte anchors supported by observation.
+It does not cache source facts, create a fallback decoder or patcher,
+or expose a reusable context. All edits are validated before writing the
+orchestrator's private text buffer. Probe admission, layout, and resource policy
+remain with Instrumentor, and CodeObjectPatcher remains the ELF writer.
+
+The reference checks cover decoded direct-branch destinations, text-symbol
+start/end offsets, raw symbol-less RELATIVE64 destinations under the existing
+allocation policy, and the kernel entries already collected by observation
+resolution. A destination strictly inside an edited instruction is rejected,
+including a direct reference from unreachable code. Exact start/end boundaries
+remain permitted by this check. Direct branches are resolved with checked
+arithmetic in source virtual-address coordinates before comparison with text
+offsets. A valid backward branch into an earlier unchanged executable section
+is not an address underflow; genuinely unrepresentable addresses are rejected.
+ET_REL symbol values are section-relative;
+linked-image symbol values are normalized by the text address. Relocation
+admission and symbol remapping inspect complete records before a partial tail;
+unrelated and nonallocated references retain the existing patcher policy.
+
+These checks do not resolve addresses computed by instruction sequences, such
+as `s_getpc_b64` followed by arithmetic and a load or `s_setpc_b64`. They do not
+prove that no other instruction can access the edited bytes. A nonempty anchor
+batch rejects known `s_cbranch_cdbg*`, `s_subvector_loop_begin`, and
+`s_subvector_loop_end` forms lacking destination metadata rather than treating
+their missing metadata as an absent reference; adding full branch metadata or
+computed-address analysis is separate work.
 
 ### Instruction Builder (`code/builders/instruction_builder.h`) [shared with DBT]
 
@@ -402,10 +438,10 @@ ISA-independent register-file model. `RegisterRef` is `(RegClass, uint16_t index
 
 For a code object with one queued `InstrumentationPoint` at `anchor_offset`:
 
-1. **Lazy block decode:** On the first stage that needs the CFG, `Decoder::create(arch)` + `BasicBlock::build(obj, *decoder)` populates `blocks_`. Unsupported arch surfaces as a fatal error here.
+1. **Lazy block decode:** On the first stage that needs the CFG, check source-target admission and select the concrete-target decoder, or the caller architecture's decoder when no concrete target binding exists. `BasicBlock::build` populates `blocks_`, and decoded instructions populate the full-text `InstructionBoundaries` index. An unsupported architecture or recognized source mismatch surfaces as a fatal error here. The final checked batch uses this same selection.
 2. **Validate:** `validate_points()` walks `points_`; for each, `find_instruction_at_offset()` locates the decoded `Instruction`, then `validate_anchor()` runs milestone-scoped + structural checks and produces a `ResolvedInstrumentationSite` capturing the original bytes.
 3. **Plan + build (preflight):** For each site, `make_trampoline_plan(site, arch, trampoline_offset)` produces a canonical inline-nop plan (`before_items = {{ s_nop 0 }}`, `emit_original = true`); `validate_inline_nop_plan()` rechecks shape; `TrampolineBuilder::build(plan)` lowers it to `TrampolineBytes`. The trampoline cursor begins at `patcher.text_size()` (the first byte of the local cave) and advances by each built trampoline's size. Nothing is written to the patcher yet.
-4. **Assemble + replace:** Once every site preflighted, copy `.text` into a local buffer, `memcpy` each `patched_anchor_bytes` into its `anchor_offset`, then `append_words()` every trampoline after the original bytes as a local code cave. A single `patcher.replace_text()` grows `.text` in place and fixes up the surrounding ELF (section/segment sizes, moved symbols, descriptor entries).
+4. **Assemble + replace:** Once every site preflighted, collect the original-text anchor edits and apply them as one local checked transaction to the private text buffer, borrowing the source, selected decoder, full-text index, patcher, and collected kernel entries. Append probe bodies, the entry stub, and trampolines in their planned order. A KernelEntry callback changes the appended stub branch and does not produce an original-text anchor edit. A single `patcher.replace_text()` grows `.text` in place and fixes up the surrounding ELF (section/segment sizes, moved symbols, descriptor entries); Instrumentor retains responsibility for resource metadata.
 5. **Emit:** `patcher.emit()` returns the patched ELF.
 
 The trampolines live inside `.text`, immediately after the original kernel bytes (like what DBT currently does). Keeping a single executable `.text` section avoids loaders that only treat `.text` as executable, and keeps cave offsets expressible as `.text`-relative bytes. Because the original bytes do not move, no branch offsets in the original code are relocated — only the in-place `s_branch` at each anchor is rewritten. One site lays out as:
@@ -647,7 +683,7 @@ Each aborts the whole patch with its own diagnostic. Those raised while planning
 - **Spill sim e2e (`tests/dbi/dbi_spill_sim_test.cpp`):** Runs the full `s_swappc` envelope + spill bracket through `DbiSim` and reads back registers after execution, each with a negative control that nops the restore. Fixtures cover VGPR, SGPR (VGPR-bridged), two-SGPR, reused-spilled-bridge, AccVGPR (CDNA), combined VGPR+SGPR+ACC, EXEC preserve (wave32 partial mask), full-mask EXEC-widen spill, and probe-runs-under-anchor-mask — parameterized across **CDNA3, CDNA4, and RDNA4** (AGPR is CDNA-only).
 - **Mask sim e2e (`tests/dbi/dbi_mask_sim_test.cpp`):** Covers the `force_full_exec` policy. The kernel narrows `EXEC` before the anchor (`s_mov_b64 exec, 3`), which is what makes the policy observable at all. A probe writing a sentinel into a dead observation VGPR reaches lanes 0..1 under the default policy and every lane under `force_full_exec`, so the two cases are each other's control. That pair runs in two envelope shapes: with no arguments the full-mask window never opens, so the masked probe inherits an untouched `EXEC`; with an argument in a live `v0` the window opens, `v0` spills, and the masked case additionally exercises the anchor-mask restore that `force_full_exec` is defined by skipping. Mask-as-value cases pass `AnchorExecLo` (all targets) and both dwords (Wave64 only, asserting `{3, 0}` against a preset register so the zero high dword is not vacuous), and the Wave32 target asserts the `AnchorExecHi` rejection instead — which is what makes its Wave32 descriptor load-bearing rather than decorative. A further pair covers a probe that narrows `EXEC` and returns without putting it back, at a site with a live argument VGPR: the post-call re-widen is the only thing that lets the spill reload reach the lanes the probe switched off, and no other probe here exercises it (they all return with `EXEC` already `-1`, where the re-widen is a no-op). Two negative controls, each nopping one `exec, -1` write: without the opening widen the full-exec probe falls back to the anchor's lanes, and without the re-widen the reload strands every lane the probe switched off. Parameterized across **CDNA3, CDNA4, and RDNA4**.
 - **Wave32 sim e2e (`tests/dbi/dbi_wave32_sim_test.cpp`):** The only suite that executes Wave32 (`DbiSim::set_wave32_dispatch()`). An RDNA4 kernel saves `EXEC` in `s1` and narrows it; after the anchor it compares into `s0` with `v_cmp_eq_u32_e64`, restores `EXEC` from `s1`, and writes `v3` on every lane. A Wave32 compare writes only `s0`. Liveness that took it to write `s[0:1]` would free `s1` for the call envelope's temps, and the restore would bring back the envelope's value, so the test requires every lane to have written `v3`. A second kernel holds a value in `s3` across a call to a probe that compares into `s2`; the probe's clobbers leave `s3` out, so the call does not spill it (the kernel has no scratch), and every lane must read the value back from `s3`. RDNA4 only.
-- **Argument sim e2e (`tests/dbi/dbi_arg_sim_test.cpp`):** Runs a probe call that passes an argument at an anchor where the argument register `v0` is *live*, so one execution covers the whole chain — argument VGPRs into `builder_clobbers`, into the spill set, argument write, probe read, restore. Asserts both halves out of one dispatch: the probe received the value the site passed, and the guest's `v0` survived carrying it. Negative control nops the two `v_mov_b32 v0, <literal>` words and requires the probe to read the guest's value instead. Parameterized across **CDNA3, CDNA4, and RDNA4**. Shares `test::DbiSim` (`tests/dbi/dbi_sim.h`) with the spill suite; note that harness dispatches its own descriptor with the full register file, so the register-ownership gates are exercised at patch time only.
+- **Argument sim e2e (`tests/dbi/dbi_arg_sim_test.cpp`):** Runs a probe call that passes an argument at an anchor where the argument register `v0` is *live*, so one execution covers the whole chain — argument VGPRs into `builder_clobbers`, into the spill set, argument write, probe read, restore. Asserts both halves out of one dispatch: the probe received the value the site passed, and the guest's `v0` survived carrying it. Negative control nops the two `v_mov_b32 v0, <literal>` words and requires the probe to read the guest's value instead. Parameterized across **CDNA3, CDNA4, and RDNA4**. Shares `test::DbiSim` (`tests/dbi/dbi_sim.h`) with the spill suite; note that harness dispatches its own descriptor with the target fixture's SGPR allocation and 256 VGPRs, so the VGPR ownership gates are exercised at patch time.
 - **Entry-prologue sim e2e (`tests/dbi/dbi_entry_prologue_sim_test.cpp`):** The only suite that *runs* the prologue. Two kernels, because its two halves are observed differently. The delivery kernel destroys the kernarg SGPR pair before the anchor, which is what makes the reason for the prologue observable rather than assumed: a probe that still receives the payload pointer received it from the framework's storage and not from a register that happened to survive. Emitting the argument from the kernarg pair instead of the reserved pair fails it on all three targets. The restore kernel reads the pair back into VGPRs after the anchor, which both observes the restore and keeps the pair live there, since dead registers are what the call envelope takes for its own temps. Two negative controls: nopping the payload `s_load_dwordx2` must stop the pointer arriving, and nopping the two restore moves must leave the guest seeing the CP's wrapper pointer. Call-and-return variants of both kernels put an `s_call_b64` to a helper returning through `s_setpc_b64` ahead of the anchor, so the storage and the restored kernarg pointer are shown to survive a call and an indirect return. Entry-point variants put the site on the entry itself, so the stub's branch runs into the entry's spliced trampoline. Re-entry variants come back to the original entry once, through a loop backedge, through a helper that rewrites its return address, and through a plain indirect jump built from `s_getpc_b64`, and assert the same two values plus the pass count, so the prologue is shown to run once. Two negative controls: sending the backedge to the stub instead must disturb the guest's kernarg pointer in a kernel that still completes both passes, and dispatching at the original entry must not deliver the payload. `DbiSim::set_entry_offset` is what dispatches at the stub. The wrapper image is built through `write_kernarg_extension_wrapper`, so the offsets loaded from are the ones a runtime would write. Parameterized across **CDNA3, CDNA4, and RDNA4**, though this suite dispatches Wave64 on all three; the prologue is pure scalar, so nothing here turns on the executing wave size. **No nop-the-wait control:** the simulator retires scalar loads synchronously, so it would fail to fail. Separately, `build_s_load_dwordx2` always sets RDNA4's SMEM `soffset` to NULL, so although the model reads that field nothing exercises a non-NULL value. Both need hardware.
 - **CP kernarg placement (`tests/dbi/kernarg_sgpr_slot_test.cpp`):** Pins `CommandProcessor::init_wavefront_regs`'s user-SGPR walk against `kernarg_segment_ptr_slot` by dispatching all eight combinations of the properties preceding the kernarg pointer. Each case writes the expected slot as a literal and asserts both sides independently, so neither computes the other; a ninth case checks the adjacent pairs are clear. A consistency check between two in-tree copies of the AMDHSA contract, not a conformance check against hardware.
 - **DbiSim memory (`tests/dbi/dbi_sim_memory_test.cpp`):** Pins the test-local global load/store encoders (`tests/dbi/global_memory_builders.h`, dword through dwordx4) against llvm-mc on CDNA3, CDNA4, and RDNA4, plus three guards: the CDNA offset field, the even base gfx942 and gfx950 require of a multi-dword VGPR tuple, and an SGPR base pair that is even and within the target's ordinary SGPRs (llvm-mc rejects an odd base and the simulator does not; past the ordinary SGPRs the field names a special register, RDNA4's `off`, or wraps to `s0`). A copy kernel then moves a word seeded with `DbiSim::write_memory` to a second address, read back with `run_and_read_memory`; the negative control replaces the store with `s_nop`s and requires the destination to stay zero, so the read-back is shown to observe the kernel's store rather than the seed. A `DbiSim` runs only its first dispatch, so a second dispatch on the same instance reads back nothing even when its kernel would halt, and a kernel that never halts reads back nothing. Each case runs on **CDNA3, CDNA4, and RDNA4**.

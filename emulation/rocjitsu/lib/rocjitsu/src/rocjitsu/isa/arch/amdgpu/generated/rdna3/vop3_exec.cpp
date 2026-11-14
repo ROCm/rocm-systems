@@ -3059,7 +3059,7 @@ void VCndmaskB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
       ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
       ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u);
   amdgpu::arith::execute_conditional<false>(
-      wf, rj_arith_v_cndmask_b32_w32, rj_arith_v_cndmask_b32_w64, wf.cu().arithmetic_flags(),
+      *this, wf, rj_arith_v_cndmask_b32_w32, rj_arith_v_cndmask_b32_w64, wf.cu().arithmetic_flags(),
       modifiers, vdst, src0, src1, amdgpu::read_wave_mask_scalar(src2, wf));
 }
 
@@ -3085,7 +3085,7 @@ RJ_NOINLINE void VCndmaskB32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
       ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
       ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u);
   amdgpu::arith::execute_conditional<false>(
-      wf, rj_arith_v_cndmask_b32_w32, rj_arith_v_cndmask_b32_w64, wf.cu().arithmetic_flags(),
+      *this, wf, rj_arith_v_cndmask_b32_w32, rj_arith_v_cndmask_b32_w64, wf.cu().arithmetic_flags(),
       modifiers, vdst, src0, src1, amdgpu::read_wave_mask_scalar(src2, wf));
   dpp_write_mask_scope_.restore();
 }
@@ -6637,7 +6637,7 @@ void VCndmaskB16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   modifiers |= ((opsel & 1) ? RJ_ARITH_ALU_HIGH_A : 0u) | ((opsel & 2) ? RJ_ARITH_ALU_HIGH_B : 0u) |
                ((opsel & 8) ? RJ_ARITH_ALU_HIGH_D : 0u);
   amdgpu::arith::execute_conditional<true>(
-      wf, rj_arith_v_cndmask_b16_w32, rj_arith_v_cndmask_b16_w64, wf.cu().arithmetic_flags(),
+      *this, wf, rj_arith_v_cndmask_b16_w32, rj_arith_v_cndmask_b16_w64, wf.cu().arithmetic_flags(),
       modifiers, vdst, src0, src1, amdgpu::read_wave_mask_scalar(src2, wf));
 }
 
@@ -6668,7 +6668,7 @@ RJ_NOINLINE void VCndmaskB16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   modifiers |= ((opsel & 1) ? RJ_ARITH_ALU_HIGH_A : 0u) | ((opsel & 2) ? RJ_ARITH_ALU_HIGH_B : 0u) |
                ((opsel & 8) ? RJ_ARITH_ALU_HIGH_D : 0u);
   amdgpu::arith::execute_conditional<true>(
-      wf, rj_arith_v_cndmask_b16_w32, rj_arith_v_cndmask_b16_w64, wf.cu().arithmetic_flags(),
+      *this, wf, rj_arith_v_cndmask_b16_w32, rj_arith_v_cndmask_b16_w64, wf.cu().arithmetic_flags(),
       modifiers, vdst, src0, src1, amdgpu::read_wave_mask_scalar(src2, wf));
   dpp_write_mask_scope_.restore();
 }

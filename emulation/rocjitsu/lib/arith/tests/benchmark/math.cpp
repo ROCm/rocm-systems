@@ -4,6 +4,7 @@
 // Unary math workload registration across CPU and semantics modes.
 
 #include "benchmark/workloads.h"
+#include "rj_arith/detail/rj_arith_math.h"
 
 namespace rocjitsu::arith::test {
 

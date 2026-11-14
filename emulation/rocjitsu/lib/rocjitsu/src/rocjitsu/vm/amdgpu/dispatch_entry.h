@@ -15,7 +15,7 @@
 #include "rocjitsu/vm/amdgpu/consumer_cursor_journal.h"
 #include "rocjitsu/vm/amdgpu/gpu_handles.h"
 #include "rocjitsu/vm/amdgpu/gpu_queue_registry.h"
-#include "rocjitsu/vm/amdgpu/gpu_vm.h"
+#include "rocjitsu/vm/amdgpu/gpu_vm_access.h"
 #include "rocjitsu/vm/amdgpu/interrupt_sink.h"
 #include "rocjitsu/vm/amdgpu/pm4/pm4.h"
 #include "rocjitsu/vm/amdgpu/pm4/pm4_packet_types.h"
@@ -65,6 +65,7 @@ struct ComputeQueueConfig {
   AddressSpaceHandle address_space;
   InterruptSink interrupt_sink{};
   uint32_t process_id = 0;
+  ProcessIdentityKind process_identity_kind = ProcessIdentityKind::Pasid;
   uint32_t queue_id = 0;
   QueueCuSelection enabled_cus = std::nullopt;
   uint64_t ring_base_va = 0;
@@ -143,7 +144,12 @@ enum class CompletionPublicationPhase : uint8_t {
 class CompletionPublicationState {
 public:
   CompletionPublicationPhase phase = CompletionPublicationPhase::ExecutionEnd;
-  util::IntrusiveSharedPtr<GpuVmAccessSnapshot> access;
+  /// Ordinary binding used to select and publish this dispatch's L2 lines.
+  /// Replacement revokes it, so a refused flush cannot resume on a new root.
+  util::IntrusiveSharedPtr<GpuVmAccessSnapshot> flush_access;
+  /// Pinned dispatch binding used by the retryable signal journal. It can
+  /// finish an already committed signal after the ordinary root is replaced.
+  util::IntrusiveSharedPtr<GpuVmAccessSnapshot> signal_access;
   uint64_t start_timestamp = 0;
   uint64_t end_timestamp = 0;
   uint64_t mailbox_pointer = 0;
@@ -316,11 +322,21 @@ struct DispatchEntry {
   /// Wrapped AQL ring slot exposed in saved wave context.
   uint32_t queue_packet_id = 0;
   AddressSpaceHandle address_space;
-  /// Immutable VM snapshot captured by the queue-service transaction that
-  /// admitted this dispatch. Every wave in the dispatch shares this snapshot.
+  /// Immutable VM snapshot captured when this packet was admitted. Kernel
+  /// waves and completion publication share its backing generation.
   util::IntrusiveSharedPtr<const GpuVmAccessSnapshot> execution_access;
+  /// VM generation selected for execution and completion. A revoked snapshot
+  /// can be refreshed after invalidation; root replacement leaves it pinned.
+  uint64_t execution_translation_epoch = 0;
+  /// Write-admission sequence captured before this dispatch's waves start.
+  /// Missing or saturated proof fails closed on invalidation.
+  uint64_t execution_cache_write_sequence = UINT64_MAX;
+  /// Shared by all waves and XCD shards. Once a potentially effectful
+  /// instruction runs, completion cannot rebind its signal after invalidation.
+  std::shared_ptr<std::atomic_bool> execution_effect_possible;
   InterruptSink interrupt_sink;
   uint32_t process_id = 0;
+  ProcessIdentityKind process_identity_kind = ProcessIdentityKind::Pasid;
 
   /// Snapshot of the queue's physical CU selection; nullopt means unrestricted.
   QueueCuSelection enabled_cus = std::nullopt;
@@ -340,6 +356,7 @@ struct DispatchEntry {
   uint32_t wfs_per_workgroup = 1;
   uint32_t sgprs_per_wf = 104;
   uint32_t vgprs_per_wf = 256;
+  uint32_t accum_vgpr_base = 0;
   uint64_t kernarg_addr = 0;
   uint32_t kernarg_size = 0;
   uint32_t num_user_sgprs = 2;
@@ -348,6 +365,7 @@ struct DispatchEntry {
   bool pm4_abi = false;
   /// DRM maps shader addresses in the high half at sign-extended VAs.
   bool drm_shader_addresses = false;
+  bool uses_kfd_queue_abi = false; ///< KFD AQL dispatches use the calibrated GPU clock.
   std::shared_ptr<Pm4FailureState>
       pm4_failure{};                     ///< Shared with all waves and the owning submission.
   std::array<uint32_t, 16> user_sgprs{}; ///< PM4 COMPUTE_USER_DATA register values.
@@ -359,6 +377,7 @@ struct DispatchEntry {
   uint8_t kernel_wave_size = 0;
   uint16_t kernarg_preload = 0;
   uint32_t initial_mode_raw = 0;
+  uint32_t initial_ib_sts2 = 0; ///< GFX11 memory-order and forward-progress state.
   uint64_t dispatch_ptr = 0;
   uint64_t queue_ptr = 0;
   uint32_t workgroup_id_offset = 0;
@@ -384,6 +403,7 @@ struct DispatchEntry {
   bool enable_wg_id_y = false;
   bool enable_wg_id_z = false;
   bool enable_wg_info = false;
+  /// Enable the private-segment wave-offset SGPR at dispatch.
   bool enable_private_segment = false;
   uint8_t enable_vgpr_workitem_id = 0;
   uint16_t workgroup_size_x = 64;
@@ -414,7 +434,7 @@ struct DispatchEntry {
   uint32_t completed_wgs = 0;
 
   uint64_t completion_signal = 0;
-  /// @brief HSA-system-clock tick captured when the CP accepted this dispatch.
+  /// @brief GPU reference-clock timestamp from gpu_timestamp() when the CP accepted this dispatch.
   ///
   /// @details ROCR's `hsa_amd_profiling_get_dispatch_time` reads dispatch
   /// timestamps from the completion signal after the packet retires. Real CP
@@ -432,6 +452,9 @@ struct DispatchEntry {
   /// An AMD vendor packet executes this PM4 buffer before publishing completion.
   uint64_t aql_pm4_ib_address = 0;
   uint32_t aql_pm4_ib_dwords = 0;
+  /// Standard HSA barrier with no acquire or release fence scope. Such a
+  /// packet has no cache effects of its own across a VM root replacement.
+  bool no_fence_aql_barrier = false;
   /// Completion hooks and signal have already been delivered.
   bool completion_notified = false;
   bool execution_begun = false;
