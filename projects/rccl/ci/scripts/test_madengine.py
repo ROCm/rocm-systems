@@ -48,6 +48,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from rccl_ci_utils import (
+    SetupFailureReport,
     find_rccl_library,
     send_email_report,
     send_teams_webhook,
@@ -59,6 +60,8 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 log = logging.getLogger(__name__)
 
 PERF_DATASTORE = "madengine_results.jsonl"
+
+setup_report = SetupFailureReport("RCCL MADEngine")
 
 # madengine's perf_entry_super.json uses short metric names that differ
 # from our canonical workload-config keys.  Map each config key to the
@@ -2999,6 +3002,9 @@ def main() -> None:
     )
 
     args = parser.parse_args()
+    report_subject = f"RCCL MADEngine {args.workload}"
+    setup_report.notify(args.notify_email, args.teams_webhook, report_subject)
+    setup_report.step("Check arguments")
     # madengine runs inside our allocation only for multi-node workloads; a
     # single-node phase gets its own sbatch, possibly on other nodes.
     if args.nodes < 2:
@@ -3029,6 +3035,7 @@ def main() -> None:
     log.info("Results directory: %s", results_dir)
 
     # Step 1: Find RCCL library and fingerprint it
+    setup_report.step("Discover RCCL library")
     rccl_lib = find_rccl_library(args.artifact_dir)
     log.info("RCCL library: %s", rccl_lib)
     rccl_commit = get_rccl_commit(rccl_lib)
@@ -3040,6 +3047,7 @@ def main() -> None:
                  rccl_fingerprint["size"])
 
     # Step 2: Install madengine
+    setup_report.step("Install madengine")
     family = workload_config.get("family", "megatron")
     install_madengine(work_dir, family=family)
     check_mad_knobs(work_dir, workload_config)
@@ -3054,6 +3062,7 @@ def main() -> None:
 
     # Step 3: Stage the candidate image (or use pre-built). Images are built on
     # the allocation's nodes, never here: this host's disk is shared by runners.
+    setup_report.step("Stage A/B images")
     if args.skip_overlay_build:
         if not args.overlay_image:
             log.error("--skip-overlay-build requires --overlay-image")
@@ -3096,6 +3105,7 @@ def main() -> None:
         baseline_pull_only = True
 
     # Step 4: Generate one manifest per A/B phase
+    setup_report.step("Generate manifests")
     phases: list[tuple[str, Path]] = []
     for phase, image, pull_only in (
         (BASELINE, baseline_image, baseline_pull_only),
@@ -3145,6 +3155,7 @@ def main() -> None:
         log.exception("Could not write the repro bundle; continuing without it")
 
     # Step 5: Run both phases on the same nodes, in one allocation
+    setup_report.tests_started()
     allocation = run_ab_in_one_allocation(
         phases,
         work_dir,
@@ -3387,13 +3398,13 @@ def main() -> None:
     report_status = "PASSED" if exit_code == 0 else "FAILED"
     if args.notify_email:
         send_email_report(report, args.notify_email, report_status,
-                          subject_prefix=f"RCCL MADEngine {args.workload}")
+                          subject_prefix=report_subject)
     if args.teams_webhook:
         send_teams_webhook(report, args.teams_webhook, report_status,
-                           subject_prefix=f"RCCL MADEngine {args.workload}")
+                           subject_prefix=report_subject)
 
     sys.exit(exit_code)
 
 
 if __name__ == "__main__":
-    main()
+    setup_report.run(main)
