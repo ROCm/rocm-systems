@@ -1617,16 +1617,24 @@ void execute_lds_access(VectorMemState &d, Wavefront &wf, Lds &lds,
                                : d.elem_size;
   const uint64_t reporting_lanes = rdna2 ? d.flat_local_lane_mask : 0;
   uint64_t rejected = lane_mask & d.flat_local_oob_lane_mask;
+  // Lanes that stay but whose whole transfer does not fit the window.
+  uint64_t clipped = 0;
   for (uint64_t lanes = checked_lanes; lanes; lanes &= lanes - 1) {
     const uint32_t lane = std::countr_zero(lanes);
     const uint64_t address = addresses[lane];
     if (!window.contains(address,
                          full_tuple || d.atomic_op != AtomicOp::NONE ? bytes_per_lane : granule))
       rejected |= uint64_t{1} << lane;
+    else if (!window.contains(address, bytes_per_lane))
+      clipped |= uint64_t{1} << lane;
   }
   lane_mask &= ~rejected;
   d.address_range_violation_lanes |= rejected & reporting_lanes;
-  if (d.atomic_op == AtomicOp::NONE && granule != 0) {
+  // With no lane to clip, every surviving transfer is whole and in the window,
+  // so the coalescing vector copies below move them. Otherwise this loop moves
+  // every lane, keeping the target's clipping rules and the order of
+  // overlapping stores in one place.
+  if (d.atomic_op == AtomicOp::NONE && granule != 0 && (clipped & lane_mask) != 0) {
     // gfx1201 FLAT bounds retain complete DWORDs, including for byte-unaligned
     // accesses. Stores crossing the end also discard the incomplete DWORD;
     // the DS unaligned byte-store rule does not describe these FLAT requests.

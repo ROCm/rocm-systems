@@ -9058,6 +9058,60 @@ TEST(DsAddtidExecutionTest, ByteBaseAndOffsetApplyToLoadsAndStoresAcrossArchitec
   }
 }
 
+TEST(DsAddtidExecutionTest, FullWaveInWindowTransferIsOneRun) {
+  // The window checks must hand lanes that need no clipping to the run scan:
+  // the bytes come out the same per lane, so only the copies show the bypass.
+  amdgpu::GpuMemory memory("addtid_run");
+  amdgpu::L2Cache l2("addtid_run_l2");
+  amdgpu::ComputeUnitCore::Config config{};
+  config.arch = ROCJITSU_CODE_ARCH_CDNA4;
+  config.num_wf_slots = 1;
+  config.sgprs_per_wf = 102;
+  config.vgprs_per_wf = 16;
+  config.lds_size_kb = 64;
+  std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+  ASSERT_NO_FATAL_FAILURE(
+      rocjitsu::test::initialize_compute_unit(cu, "addtid_run_cu", config, &memory, &l2));
+  auto decoder = Decoder::create(config.arch);
+  auto *wf = cu->dispatch_wf(0, 0, 102, 16);
+  ASSERT_NE(wf, nullptr);
+  ASSERT_EQ(wf->wf_size(), 64u);
+  wf->set_lds_base(128);
+  wf->set_lds_size(config.lds_size_kb * 1024 - 128);
+  wf->set_m0(0);
+  wf->set_exec(~uint64_t{0});
+  const auto vb = wf->vgpr_alloc().base;
+  for (uint32_t lane = 0; lane < 64; ++lane)
+    cu->write_vgpr(vb + 2, lane, 0x12340000 + lane);
+
+  // Lane l addresses LDS base + (M0 + OFFSET) + 4 * l: consecutive dwords from 0x184.
+  constexpr uint64_t kFirst = 128 + 0x104;
+  std::vector<amdgpu::Lds::CopiedRun> runs;
+  wf->lds().record_copied_runs_for_test(&runs);
+  for (bool load : {false, true}) {
+    SCOPED_TRACE(load ? "load" : "store");
+    runs.clear();
+    const auto words =
+        cdna4::build_ds(load ? cdna4::kDsReadAddtidB32Ds : cdna4::kDsWriteAddtidB32Ds,
+                        {.offset0 = 4, .offset1 = 1, .data0 = 2, .vdst = 4});
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+    ASSERT_NE(inst, nullptr);
+    ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
+    amdgpu::LocalMemPipeline pipeline;
+    ASSERT_EQ(pipeline.issue(inst.release(), *wf), amdgpu::VmAccessOutcome::Complete);
+    ASSERT_EQ(runs.size(), 1u);
+    EXPECT_EQ(runs[0].address, kFirst);
+    EXPECT_EQ(runs[0].size, 256u);
+    EXPECT_EQ(runs[0].store, !load);
+  }
+  wf->lds().record_copied_runs_for_test(nullptr);
+  for (uint32_t lane = 0; lane < 64; ++lane) {
+    EXPECT_EQ(wf->lds().read32(kFirst + lane * 4), 0x12340000 + lane);
+    EXPECT_EQ(cu->read_vgpr(vb + 4, lane), 0x12340000 + lane);
+  }
+  wf->halt();
+}
+
 TEST(Cdna1ValuTest, AccumulatorInputsAndVectorResults) {
   amdgpu::GpuMemory memory("gfx908_valu");
   amdgpu::L2Cache cache("gfx908_valu_l2");
