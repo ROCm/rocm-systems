@@ -174,7 +174,7 @@
   // Oracle/Fujitsu SPARC.
   #define TF_CACHELINE_SIZE 64
 
-#elif defined(__loongarch64)
+#elif defined(__loongarch_lp64)
   // LoongArch (Loongson 3A5000 and later).
   #define TF_CACHELINE_SIZE 64
 
