@@ -15,5 +15,7 @@ struct ncclComm;
 
 // rcclCollectiveMustUseEnqueuePath. Default false: a plain comm in default check mode, neither suspended nor revoked.
 extern std::function<bool(struct ncclComm*)> g_collectiveMustUseEnqueuePath;
+// ncclCommIsSuspended. Default false.
+extern std::function<bool(struct ncclComm*)> g_commIsSuspended;
 
 #endif  // RCCL_TEST_HOST_FAKES_COLLECTIVES_FAKES_H_

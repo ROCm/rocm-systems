@@ -849,6 +849,8 @@ static ncclResult_t commAlloc(struct ncclComm* comm, struct ncclComm* parent, in
   comm->ddaScratch = nullptr;
   comm->ddaScratchBytes = 0;
   comm->ddaScratchIsVmm = false;
+  comm->ddaIpcLazyScratchBytes = 0;
+  comm->ddaIpcLazyCalls = 0;
   comm->ddaPeerPtrsDev = nullptr;
   comm->ddaPeerPtrsHost = nullptr;
   comm->ddaIpcBarrierState = nullptr;

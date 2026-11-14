@@ -29,6 +29,7 @@
 #include "common.h"
 #include "api_trace.h"
 #include "rccl_common.h"
+#include "algorithms/dda/ipc/ipc_init.h"
 #include "archinfo.h"
 #include "warp_speed_plan.h"
 #include "rccl_float8.h"
@@ -5020,6 +5021,14 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
          rcclAllGatherCeRegisteredWindow(comm, recvBytes, winRegType, ceCapturing));
       const bool allGatherDecided = (info->coll == ncclFuncAllGather && info->decisionValid);
       const bool alltoAllDecided = (info->coll == ncclFuncAlltoAll && info->decisionValid);
+      // Deferred DDA IPC setup for the CE-scratch branch below, on its rank-invariant gates. Depth 1
+      // is ncclEnqueueCheck's own group: a user group may order comms differently per rank.
+      if (comm->ddaIpcLazyScratchBytes != 0 && ncclGroupDepth == 1 && !rcclNcclAlgoEnvIsSet() && !allGatherDecided &&
+          !alltoAllDecided && rcclForceCeScratchEnabled(comm) && CeScratchAvailable && !hasSysmemSegment &&
+          recvBytes <= ncclDdaScratchCapacity(comm) && info->coll != ncclFuncAllReduce &&
+          info->coll != ncclFuncReduceScatter) {
+        NCCLCHECK(ncclDdaIpcEnsureInit(comm, ceCapturing));
+      }
       if ((info->coll == ncclFuncAllReduce || info->coll == ncclFuncReduceScatter) && info->decisionValid) {
         // Backend was already chosen once by rcclSelectAllReduce() / rcclSelectReduceScatter();
         // honor it here instead of recomputing CE eligibility.

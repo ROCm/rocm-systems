@@ -50,22 +50,40 @@ ncclResult_t ncclIpcMemHandler::exchangeMemPtrs() {
   if (exchanged_) {
     return ncclSuccess;
   }
-  if (memPtrs_[static_cast<size_t>(rank_)] == nullptr) {
+
+  // Every rank reaches the allgather, even without a handle to publish, so a local failure fails the
+  // exchange instead of leaving the peers blocked in it.
+  struct PublishedHandle {
+    cudaIpcMemHandle_t handle;
+    int valid;
+  };
+  std::vector<PublishedHandle> published(static_cast<size_t>(nranks_));
+  void* self = memPtrs_[static_cast<size_t>(rank_)];
+  if (self == nullptr) {
     WARN("ncclIpcMemHandler::exchangeMemPtrs: local device pointer was not set");
-    return ncclInvalidUsage;
+  } else {
+    cudaError_t err = cudaIpcGetMemHandle(&published[rank_].handle, self);
+    if (err == cudaSuccess) {
+      published[rank_].valid = 1;
+    } else {
+      WARN("ncclIpcMemHandler::exchangeMemPtrs: cudaIpcGetMemHandle failed (%s)", cudaGetErrorString(err));
+      (void)cudaGetLastError();
+    }
   }
+  NCCLCHECK(bootstrapAllGather(bootstrap_, published.data(), static_cast<int>(sizeof(PublishedHandle))));
 
-  const int handleBytes = static_cast<int>(sizeof(cudaIpcMemHandle_t));
-
-  std::vector<cudaIpcMemHandle_t> ipcHandles(static_cast<size_t>(nranks_));
-  CUDACHECK(cudaIpcGetMemHandle(&ipcHandles[rank_], memPtrs_[static_cast<size_t>(rank_)]));
-  NCCLCHECK(bootstrapAllGather(bootstrap_, ipcHandles.data(), handleBytes));
-
+  for (int i = 0; i < nranks_; ++i) {
+    if (!published[i].valid) {
+      if (i != rank_) INFO(NCCL_INIT, "ncclIpcMemHandler::exchangeMemPtrs: rank %d published no handle", i);
+      return self == nullptr ? ncclInvalidUsage : ncclRemoteError;
+    }
+  }
   for (int i = 0; i < nranks_; ++i) {
     if (i == rank_) {
       continue;
     }
-    CUDACHECK(cudaIpcOpenMemHandle(&memPtrs_[static_cast<size_t>(i)], ipcHandles[i], cudaIpcMemLazyEnablePeerAccess));
+    CUDACHECK(cudaIpcOpenMemHandle(&memPtrs_[static_cast<size_t>(i)], published[i].handle,
+                                   cudaIpcMemLazyEnablePeerAccess));
   }
   exchanged_ = true;
   return ncclSuccess;

@@ -46,6 +46,7 @@
 #include <functional>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include "../common/LogCapture.hpp"                 // RcclUnitTesting::CaptureLog
 #include "../common/ProcessIsolatedTestRunner.hpp"  // RUN_ISOLATED_TEST
@@ -7000,6 +7001,237 @@ TEST(WrapMicrotestIsolated, SelectAllGather_DdaIpcChosenOnNonGfx1250Arch) {
 
         DeleteCommWithArch(comm);
       });
+}
+
+// A deferred DDA IPC setup runs on the first live call whose shape could take the IPC path,
+// before the resource-dependent eligibility check, so that call can already pick DDA IPC.
+TEST(WrapMicrotestIsolated, SelectAllGather_LiveCallRunsDeferredDdaIpcSetup) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllGather_LiveCallRunsDeferredDdaIpcSetup",
+      []() {
+        ncclComm* comm = MakeCommWithArch("gfx942");
+        comm->nRanks = 8;
+        comm->nNodes = 1;
+        comm->ddaIpcLazyScratchBytes = 1 << 20;
+        std::vector<bool> ensureCapturing;
+        ScopedHook shape(g_allGatherDdaIpcShapeEligible, [](ncclComm*, size_t, ncclDataType_t) { return true; });
+        ScopedHook ensure(g_ddaIpcEnsureInit, [&](ncclComm* c, bool capturing) {
+          ensureCapturing.push_back(capturing);
+          c->ddaIpcLazyScratchBytes = 0;
+          return ncclSuccess;
+        });
+        ScopedHook ipcEligible(g_allGatherDdaIpcEligible, [&](ncclComm*, const void*, void*, size_t, ncclDataType_t) {
+          return !ensureCapturing.empty();
+        });
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess, rcclSelectAllGather(comm, nullptr, nullptr, /*sendcount=*/8, ncclFloat32,
+                                                   /*stream=*/nullptr, /*query=*/false, /*graphCapturingHint=*/false,
+                                                   &decision));
+        EXPECT_EQ(std::vector<bool>{false}, ensureCapturing);
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_IPC, decision.algo);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// Reporting queries never run the collective setup, and neither does a shape the IPC path
+// cannot take: both are decided from the deferred state alone.
+TEST(WrapMicrotestIsolated, SelectAllGather_QueryAndIneligibleShapeLeaveDdaIpcDeferred) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllGather_QueryAndIneligibleShapeLeaveDdaIpcDeferred",
+      []() {
+        ncclComm* comm = MakeCommWithArch("gfx942");
+        comm->nRanks = 8;
+        comm->nNodes = 1;
+        comm->ddaIpcLazyScratchBytes = 1 << 20;
+        bool shapeOk = true;
+        int ensureCalls = 0;
+        ScopedHook shape(g_allGatherDdaIpcShapeEligible,
+                         [&](ncclComm*, size_t, ncclDataType_t) { return shapeOk; });
+        ScopedHook ensure(g_ddaIpcEnsureInit, [&](ncclComm*, bool) {
+          ensureCalls++;
+          return ncclSuccess;
+        });
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess, rcclSelectAllGather(comm, nullptr, nullptr, /*sendcount=*/8, ncclFloat32,
+                                                   /*stream=*/nullptr, /*query=*/true, /*graphCapturingHint=*/false,
+                                                   &decision));
+        EXPECT_EQ(0, ensureCalls);
+        shapeOk = false;
+        EXPECT_EQ(ncclSuccess, rcclSelectAllGather(comm, nullptr, nullptr, /*sendcount=*/8, ncclFloat32,
+                                                   /*stream=*/nullptr, /*query=*/false, /*graphCapturingHint=*/false,
+                                                   &decision));
+        EXPECT_EQ(0, ensureCalls);
+        EXPECT_NE((int)rcclAddonAlgos_t::RCCL_DDA_IPC, decision.algo);
+        DeleteCommWithArch(comm);
+      });
+}
+
+namespace {
+// An 8-rank gfx942 comm whose DDA IPC setup is deferred. The IPC shape checks return ipcShape, and
+// the ensure seam records each call's capturing flag and, like the real setup, hands out a scratch.
+struct DeferredDdaIpcScene {
+  DeferredDdaIpcScene() : comm(MakeCommWithArch("gfx942")) {
+    comm->nRanks = 8;
+    comm->nNodes = 1;
+    comm->ddaIpcLazyScratchBytes = 1 << 20;
+  }
+  ~DeferredDdaIpcScene() { DeleteCommWithArch(comm); }
+
+  ncclComm* comm;
+  bool ipcShape = true;
+  std::vector<bool> ensureCapturing;
+  HookFor<decltype(g_allReduceDdaIpcShapeEligible)> arShape{
+      g_allReduceDdaIpcShapeEligible, [this](ncclComm*, size_t, ncclDataType_t, ncclRedOp_t) { return ipcShape; }};
+  HookFor<decltype(g_allGatherDdaIpcShapeEligible)> agShape{
+      g_allGatherDdaIpcShapeEligible, [this](ncclComm*, size_t, ncclDataType_t) { return ipcShape; }};
+  HookFor<decltype(g_reduceScatterDdaIpcShapeEligible)> rsShape{
+      g_reduceScatterDdaIpcShapeEligible, [this](ncclComm*, size_t, ncclDataType_t, ncclRedOp_t) { return ipcShape; }};
+  HookFor<decltype(g_allToAllDdaIpcShapeEligible)> a2aShape{
+      g_allToAllDdaIpcShapeEligible, [this](ncclComm*, size_t, ncclDataType_t) { return ipcShape; }};
+  HookFor<decltype(g_ddaIpcEnsureInit)> ensure{g_ddaIpcEnsureInit, [this](ncclComm* c, bool capturing) {
+    ensureCapturing.push_back(capturing);
+    c->ddaIpcLazyScratchBytes = 0;
+    c->ddaScratch = reinterpret_cast<void*>(0x1000);
+    c->ddaScratchBytes = 1 << 20;
+    return ncclSuccess;
+  }};
+};
+
+// The CE-scratch selector branches, forced by CTA_POLICY_ZERO, with the DDA IPC branch kept out.
+struct DeferredCeScratchScene : DeferredDdaIpcScene {
+  DeferredCeScratchScene() {
+    ipcShape = false;
+    comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+  }
+  HookFor<decltype(g_ceScratchAvailable)> ceScratch{
+      g_ceScratchAvailable, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t) { return true; }};
+};
+
+HookFor<decltype(g_cudaGetCapturingGraph)> CapturingStream() {
+  return HookFor<decltype(g_cudaGetCapturingGraph)>(
+      g_cudaGetCapturingGraph, [](struct ncclCudaGraph* graph, hipStream_t, int mode) {
+        *graph = ncclCudaGraphNone(mode);
+#if ROCM_VERSION >= 60100
+        graph->graphId = 1;
+#endif
+        return ncclSuccess;
+      });
+}
+}  // namespace
+
+TEST(WrapMicrotestIsolated, SelectAllReduce_LiveCallRunsDeferredDdaIpcSetup) {
+  RUN_ISOLATED_TEST("Wrap_SelectAllReduce_LiveCallRunsDeferredDdaIpcSetup", []() {
+    DeferredDdaIpcScene scene;
+    ScopedHook shouldTakeDda(g_allReduceShouldTakeDdaPath,
+                             [](const struct ncclComm*, size_t, ncclDataType_t, bool, bool) { return true; });
+    rcclCollDecision decision{};
+    EXPECT_EQ(ncclSuccess, rcclSelectAllReduce(scene.comm, nullptr, nullptr, /*count=*/8, ncclFloat32, ncclSum,
+                                                /*stream=*/nullptr, /*query=*/false, /*graphCapturingHint=*/false,
+                                                &decision));
+    EXPECT_EQ(std::vector<bool>{false}, scene.ensureCapturing);
+  });
+}
+
+// ReduceScatter's live caller passes the stream's capture state through graphCapturingHint.
+TEST(WrapMicrotestIsolated, SelectReduceScatter_LiveCallPassesCaptureStateToDeferredDdaIpcSetup) {
+  RUN_ISOLATED_TEST("Wrap_SelectReduceScatter_LiveCallPassesCaptureStateToDeferredDdaIpcSetup", []() {
+    DeferredDdaIpcScene scene;
+    rcclCollDecision decision{};
+    EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(scene.comm, nullptr, nullptr, /*recvcount=*/8, ncclFloat32, ncclSum,
+                                                    /*query=*/false, &decision, /*graphCapturingHint=*/true));
+    EXPECT_EQ(std::vector<bool>{true}, scene.ensureCapturing);
+  });
+}
+
+TEST(WrapMicrotestIsolated, SelectAlltoAll_LiveCallOnCapturingStreamPassesCaptureState) {
+  RUN_ISOLATED_TEST("Wrap_SelectAlltoAll_LiveCallOnCapturingStreamPassesCaptureState", []() {
+    DeferredDdaIpcScene scene;
+    auto capturing = CapturingStream();
+    rcclCollDecision decision{};
+    EXPECT_EQ(ncclSuccess, rcclSelectAlltoAll(scene.comm, nullptr, nullptr, /*count=*/8, ncclFloat32,
+                                               /*stream=*/nullptr, /*query=*/false, /*graphCapturingHint=*/false,
+                                               &decision));
+    EXPECT_EQ(std::vector<bool>{true}, scene.ensureCapturing);
+  });
+}
+
+// CE-scratch reads the DDA IPC scratch, so its branch runs the deferred setup and then takes it.
+TEST(WrapMicrotestIsolated, SelectAllGather_CeScratchRunsDeferredDdaIpcSetup) {
+  RUN_ISOLATED_TEST("Wrap_SelectAllGather_CeScratchRunsDeferredDdaIpcSetup", []() {
+    DeferredCeScratchScene scene;
+    rcclCollDecision decision{};
+    EXPECT_EQ(ncclSuccess, rcclSelectAllGather(scene.comm, nullptr, nullptr, /*sendcount=*/8, ncclFloat32,
+                                               /*stream=*/nullptr, /*query=*/false, /*graphCapturingHint=*/false,
+                                               &decision));
+    EXPECT_EQ(std::vector<bool>{false}, scene.ensureCapturing);
+    EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_SCRATCH, decision.algo);
+  });
+}
+
+TEST(WrapMicrotestIsolated, SelectAlltoAll_CeScratchRunsDeferredDdaIpcSetup) {
+  RUN_ISOLATED_TEST("Wrap_SelectAlltoAll_CeScratchRunsDeferredDdaIpcSetup", []() {
+    DeferredCeScratchScene scene;
+    rcclCollDecision decision{};
+    EXPECT_EQ(ncclSuccess, rcclSelectAlltoAll(scene.comm, nullptr, nullptr, /*count=*/8, ncclFloat32,
+                                               /*stream=*/nullptr, /*query=*/false, /*graphCapturingHint=*/false,
+                                               &decision));
+    EXPECT_EQ(std::vector<bool>{false}, scene.ensureCapturing);
+    EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_SCRATCH, decision.algo);
+  });
+}
+
+// A user group may order comms differently per rank, and a revoked or suspended comm is about to be
+// rejected: none of them runs the collective setup.
+TEST(WrapMicrotestIsolated, SelectAllGather_GroupedRevokedOrSuspendedCallLeavesDdaIpcDeferred) {
+  RUN_ISOLATED_TEST("Wrap_SelectAllGather_GroupedRevokedOrSuspendedCallLeavesDdaIpcDeferred", []() {
+    DeferredCeScratchScene scene;
+    rcclCollDecision decision{};
+    ncclGroupDepth = 1;
+    EXPECT_EQ(ncclSuccess, rcclSelectAllGather(scene.comm, nullptr, nullptr, /*sendcount=*/8, ncclFloat32,
+                                               /*stream=*/nullptr, /*query=*/false, /*graphCapturingHint=*/false,
+                                               &decision));
+    ncclGroupDepth = 0;
+    EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_SCRATCH, decision.algo);
+    scene.comm->revokedFlag = 1;
+    EXPECT_EQ(ncclSuccess, rcclSelectAllGather(scene.comm, nullptr, nullptr, /*sendcount=*/8, ncclFloat32,
+                                               /*stream=*/nullptr, /*query=*/false, /*graphCapturingHint=*/false,
+                                               &decision));
+    EXPECT_TRUE(scene.ensureCapturing.empty());
+    EXPECT_NE(0u, scene.comm->ddaIpcLazyScratchBytes);
+    scene.comm->revokedFlag = 0;
+    {
+      ScopedHook suspended(g_commIsSuspended, [](ncclComm*) { return true; });
+      EXPECT_EQ(ncclSuccess, rcclSelectAllGather(scene.comm, nullptr, nullptr, /*sendcount=*/8, ncclFloat32,
+                                                 /*stream=*/nullptr, /*query=*/false, /*graphCapturingHint=*/false,
+                                                 &decision));
+    }
+    EXPECT_TRUE(scene.ensureCapturing.empty());
+    EXPECT_NE(0u, scene.comm->ddaIpcLazyScratchBytes);
+  });
+}
+
+// A query reports what the live call would pick, so a deferred comm reports DDA IPC and CE-scratch.
+TEST(WrapMicrotestIsolated, SelectQuery_ReportsDeferredDdaIpcAndCeScratch) {
+  RUN_ISOLATED_TEST("Wrap_SelectQuery_ReportsDeferredDdaIpcAndCeScratch", []() {
+    {
+      DeferredDdaIpcScene scene;
+      rcclCollDecision decision{};
+      EXPECT_EQ(ncclSuccess, rcclSelectAllGather(scene.comm, nullptr, nullptr, /*sendcount=*/8, ncclFloat32,
+                                                 /*stream=*/nullptr, /*query=*/true, /*graphCapturingHint=*/false,
+                                                 &decision));
+      EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_IPC, decision.algo);
+      EXPECT_TRUE(scene.ensureCapturing.empty());
+    }
+    {
+      DeferredCeScratchScene scene;
+      rcclCollDecision decision{};
+      EXPECT_EQ(ncclSuccess, rcclSelectAlltoAll(scene.comm, nullptr, nullptr, /*count=*/8, ncclFloat32,
+                                                 /*stream=*/nullptr, /*query=*/true, /*graphCapturingHint=*/false,
+                                                 &decision));
+      EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_SCRATCH, decision.algo);
+      EXPECT_TRUE(scene.ensureCapturing.empty());
+    }
+  });
 }
 
 // Proves `!symEligible` really gates DDA here: with DDA fully eligible

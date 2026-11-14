@@ -18,6 +18,7 @@
 #include "ScopedHook.h"
 #include "fakes/bootstrap_stubs.h"
 #include "fakes/hip_fakes.h"
+#include "fakes/rccl_wrap_fakes.h"
 
 #include "algorithms/dda/dda_init_detail.h"
 #include "algorithms/dda/ipc/ipc_gpu_barrier.h"
@@ -76,6 +77,8 @@ class IpcInitMicrotest : public ::testing::Test {
  protected:
   void SetUp() override {
     g_ipcBarrierFails = false;
+    // Most cases drive the setup through eager comm init.
+    g_rcclParamDdaIpcLazyInit = 0;
     g_hipDeviceCanAccessPeer = [](int* canAccess, int, int) {
       *canAccess = 1;
       return hipSuccess;
@@ -102,9 +105,16 @@ class IpcInitMicrotest : public ::testing::Test {
       return hipSuccess;
     };
     g_hipGetLastError = [] { return hipSuccess; };
-    // Every peer publishes this rank's flag unless peerReady_ overrides one.
+    // Every peer publishes this rank's flag unless peerReady_ overrides one. The one-byte gather is the
+    // scratch vote that precedes the setup; every peer mirrors it.
     g_bootstrapAllGather = [this](void* state, void* allData, int size) {
       EXPECT_EQ(kBootstrap, state);
+      if (size == static_cast<int>(sizeof(uint8_t))) {
+        auto* votes = static_cast<uint8_t*>(allData);
+        scratchVotes_.push_back(votes[kRank]);
+        for (int r = 0; r < kNRanks; ++r) votes[r] = votes[kRank];
+        return ncclSuccess;
+      }
       EXPECT_EQ(static_cast<int>(sizeof(int)), size);
       auto* slots = static_cast<int*>(allData);
       published_.push_back(slots[kRank]);
@@ -133,6 +143,7 @@ class IpcInitMicrotest : public ::testing::Test {
     g_ipcBarrierFails = false;
     ResetBootstrapStubs();
     ResetHipFakes();
+    ResetRcclWrapFakes();
   }
 
   hipError_t Alloc(void** ptr, size_t size) {
@@ -163,6 +174,7 @@ class IpcInitMicrotest : public ::testing::Test {
   int peerReady_ = -1;  // < 0: peers mirror this rank
   ncclResult_t gatherResult_ = ncclSuccess;
   std::vector<int> published_;
+  std::vector<uint8_t> scratchVotes_;
   std::vector<void*> epochAllocs_;
   std::set<void*> live_;
   std::vector<ncclPeerInfo> peerInfo_;
@@ -172,6 +184,7 @@ class IpcInitMicrotest : public ::testing::Test {
 TEST_F(IpcInitMicrotest, CommInit_AllRanksReady_KeepsEpochCells) {
   EXPECT_EQ(ncclSuccess, ncclDdaIpcCommInit(comm_.get()));
 
+  EXPECT_EQ(std::vector<uint8_t>{1}, scratchVotes_);
   EXPECT_EQ(std::vector<int>{2}, published_);
   EXPECT_NE(nullptr, comm_->ddaIpcMemHandler);
   ASSERT_EQ(1u, epochAllocs_.size());
@@ -218,6 +231,26 @@ TEST_F(IpcInitMicrotest, CommInit_LocalBarrierFails_StillJoinsTheReadyGather) {
   EXPECT_EQ(std::vector<int>{0}, published_);
   EXPECT_TRUE(epochAllocs_.empty());
   ExpectNoDda();
+}
+
+// The deferred setup on the first DDA IPC collective builds the same resources, epoch cells included.
+TEST_F(IpcInitMicrotest, LazyInit_FirstEnsureKeepsEpochCells) {
+  g_rcclParamDdaIpcLazyInit = 1;
+
+  EXPECT_EQ(ncclSuccess, ncclDdaIpcCommInit(comm_.get()));
+  EXPECT_TRUE(scratchVotes_.empty());
+  EXPECT_TRUE(live_.empty());
+  ExpectNoDda();
+  EXPECT_NE(0u, comm_->ddaIpcLazyScratchBytes);
+
+  EXPECT_EQ(ncclSuccess, ncclDdaIpcEnsureInit(comm_.get(), /*capturing=*/false));
+
+  EXPECT_EQ(std::vector<uint8_t>{1}, scratchVotes_);
+  EXPECT_EQ(std::vector<int>{2}, published_);
+  EXPECT_EQ(0u, comm_->ddaIpcLazyScratchBytes);
+  EXPECT_NE(nullptr, comm_->ddaIpcMemHandler);
+  ASSERT_EQ(1u, epochAllocs_.size());
+  EXPECT_EQ(epochAllocs_[0], comm_->ddaLLEpochDev);
 }
 
 TEST_F(IpcInitMicrotest, CommInit_ReadyGatherFails_SkipsDdaIpc) {

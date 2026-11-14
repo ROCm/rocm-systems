@@ -35,6 +35,9 @@ extern std::function<ncclResult_t(struct ncclComm*, ncclFunc_t, size_t, int&)>
     g_rcclOverrideChannels;
 extern int g_rcclOverrideChannelsCalls;
 extern bool g_rcclIsArchSupportedForFunc;
+// rcclForceCeScratchEnabled / rcclNcclAlgoEnvIsSet. Fail loud until a test installs them.
+extern std::function<bool(const struct ncclComm*)> g_rcclForceCeScratchEnabled;
+extern std::function<bool()> g_rcclNcclAlgoEnvIsSet;
 
 // RCCL_PARAM(DirectReduceScatterThreshold). Only referenced once a test hooks
 // ncclRegisterCollBuffers: the aborting stub makes the rest of the loop unreachable.
@@ -147,6 +150,8 @@ extern std::function<bool(struct ncclComm*, size_t&)> g_rcclUseAllGatherDirect;
 extern std::function<bool(struct ncclComm*, size_t&)> g_rcclUseReduceScatterDirect;
 // RCCL_PARAM(DdaEnable, "DDA_ENABLE", 1).
 extern int64_t g_rcclParamDdaEnable;
+// RCCL_PARAM(DdaIpcLazyInit, "DDA_IPC_LAZY_INIT", 1).
+extern int64_t g_rcclParamDdaIpcLazyInit;
 
 // NET user-buffer registration (net.cc's ncclNet{Local,Graph}RegisterBuffer). Both segment
 // counts default to keeping the caller's *numSegments; rcclNetRegCommit records its calls.

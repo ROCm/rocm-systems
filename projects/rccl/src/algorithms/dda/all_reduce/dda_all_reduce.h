@@ -18,6 +18,9 @@ struct ncclComm;
 // IPC path (single node, fixed kDdaNranks ranks).
 bool ncclAllReduceDdaIpcEligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
                                  ncclDataType_t datatype, ncclRedOp_t op);
+// Eligible minus the IPC resources and the buffer addresses: every rank gets the same answer,
+// so a deferred IPC setup can be triggered from it.
+bool ncclAllReduceDdaIpcShapeEligible(ncclComm* comm, size_t count, ncclDataType_t datatype, ncclRedOp_t op);
 
 ncclResult_t ncclAllReduceDdaIpc(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
                                  ncclRedOp_t op, ncclComm* comm, cudaStream_t stream);
