@@ -65,11 +65,14 @@ launchKernels(const long NUM_LAUNCH, const long SYNC_INTERVAL, const int DEV_ID)
 {
     // Normal HIP Calls
     HIP_CALL(hipSetDevice(DEV_ID));
+    // Workaround for MI325: ensure device ready before first malloc
+    HIP_CALL(hipDeviceSynchronize());
     [[maybe_unused]] hipDeviceProp_t devProp;
     HIP_CALL(hipGetDeviceProperties(&devProp, DEV_ID));
 
     int* gpuMem = nullptr;
     HIP_CALL(hipMalloc((void**) &gpuMem, 1 * sizeof(int)));
+    HIP_CALL(hipDeviceSynchronize());
 
     for(long i = 0; i < NUM_LAUNCH; i++)
     {
@@ -92,7 +95,9 @@ launchKernels(const long NUM_LAUNCH, const long SYNC_INTERVAL, const int DEV_ID)
     HIP_CALL(hipDeviceSynchronize());
 
     HIP_CALL(hipMalloc(&A_d, Nbytes));
+    HIP_CALL(hipDeviceSynchronize());
     HIP_CALL(hipMalloc(&C_d, Nbytes));
+    HIP_CALL(hipDeviceSynchronize());
     HIP_CALL(hipMemcpy(A_d, A_h, Nbytes, hipMemcpyHostToDevice));
     HIP_CALL(hipDeviceSynchronize());
     const unsigned blocks          = 512;

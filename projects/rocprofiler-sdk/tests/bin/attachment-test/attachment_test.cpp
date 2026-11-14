@@ -82,6 +82,8 @@ execute_kernels(const size_t tid, const size_t device_id)
 {
     // Set device
     HIP_ASSERT(hipSetDevice(device_id));
+    // Workaround for MI325: ensure device ready before allocations
+    HIP_ASSERT(hipDeviceSynchronize());
 
     auto* stream = hipStream_t{nullptr};
     HIP_ASSERT(hipStreamCreate(&stream));
@@ -94,7 +96,9 @@ execute_kernels(const size_t tid, const size_t device_id)
     float* d_data = nullptr;
 
     HIP_ASSERT(hipHostMalloc(&h_data, bytes));
+    HIP_ASSERT(hipDeviceSynchronize());
     HIP_ASSERT(hipMalloc(&d_data, bytes));
+    HIP_ASSERT(hipDeviceSynchronize());
 
     // Initialize data
     for(int i = 0; i < size; ++i)

@@ -114,7 +114,10 @@ public:
     hipMemory(size_t size = DATA_SIZE)
     {
         HIP_API_CALL(hipMalloc(&ptr, size * sizeof(float)));
+        // Workaround for MI325: ensure allocation completes before memset
+        HIP_API_CALL(hipDeviceSynchronize());
         HIP_API_CALL(hipMemset(ptr, 0, size * sizeof(float)));
+        HIP_API_CALL(hipDeviceSynchronize());
     }
     ~hipMemory()
     {
