@@ -8,6 +8,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Resolved Issues
 
+- **Fixed `amd-smi monitor -m` and `amd-smi metric -c` reporting N/A for the memory clock on GPUs that report UCLK per AID**.
+  - The memory clock now falls back to the per-AID UCLK value when the single current UCLK value is not reported.
+
 - **Fixed `amd-smi ras --cper` crashing with `TypeError` when no GPU devices are available**.
   - When the `amdgpu` driver is not loaded, the command now exits with a clear driver-not-loaded message and exit code 206 instead of an unhandled exception.
 
