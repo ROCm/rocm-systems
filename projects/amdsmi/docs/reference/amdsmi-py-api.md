@@ -6299,7 +6299,7 @@ Refer to [amd_smi_partition_example.py](https://github.com/ROCm/rocm-systems/blo
 
 ### amdsmi_set_gpu_memory_partition_mode
 
-Description: Set the memory partition mode for the given GPU using the newer partition mode API. All GPU processes must be idle before calling this function.
+Description: Set the memory partition mode for the given GPU using the newer partition mode API. All GPU processes must be idle before calling this function. The change takes effect at the next driver reload. Requesting the current mode cancels a pending change; older amdgpu drivers ignore that request because of a driver bug.
 
 Input parameters:
 

@@ -2721,7 +2721,7 @@ class AMDSMIParser(argparse.ArgumentParser):
                 accelerator_set_choices_str = ", ".join(accelerator_set_choices)
                 set_compute_partition_help = f"Set one of the following accelerator TYPE or profile INDEX:\n\t{accelerator_set_choices_str}.\n\tUse `sudo amd-smi partition --accelerator` to find acceptable values."
                 set_compute_partition_hint = f"\nValid inputs are: {accelerator_set_choices_str}.\nUse `sudo amd-smi partition --accelerator` to find acceptable values."
-                set_memory_partition_help = f"Set one of the following the memory partition modes:\n\t{memory_partition_choices_str}"
+                set_memory_partition_help = f"Set one of the following memory partition modes:\n\t{memory_partition_choices_str}\n\tThe mode applies at the next driver reload.\n\tSetting the current mode cancels a pending change."
                 soc_pstate_help_info = ", ".join(self.helpers.get_soc_pstates())
                 set_soc_pstate_help = f"Set the GPU soc pstate policy using policy id, an integer. Valid id's include:\n\t{soc_pstate_help_info}"
                 xgmi_plpd_help_info = ", ".join(self.helpers.get_xgmi_plpd_policies())

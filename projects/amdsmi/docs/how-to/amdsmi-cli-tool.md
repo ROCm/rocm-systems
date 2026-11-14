@@ -768,8 +768,10 @@ Set Arguments:
                                               Set one of the following the accelerator TYPE or profile INDEX:
                                                 N/A.
                                                 Use `sudo amd-smi partition --accelerator` to find acceptable values.
-  -M, --memory-partition PARTITION            Set one of the following the memory partition modes:
+  -M, --memory-partition PARTITION            Set one of the following memory partition modes:
                                                 NPS1, NPS2, NPS4, NPS8
+                                                The mode applies at the next driver reload.
+                                                Setting the current mode cancels a pending change.
   -a, --compute-partition-mem-alloc-mode MODE Set compute partition memory allocation mode (requires sudo):
                                                 CAPPING - each XCP is capped to an even share of partition memory
                                                 ALL     - each XCP may use the full partition memory
