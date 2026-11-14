@@ -281,15 +281,23 @@ inline uint32_t cvt_f32_f16(float source, rj_code_arch_t arch, bool ieee_mode) {
   return bits;
 }
 
-/// @brief Convert one V_CVT_SR_PK_F16_F32 component with its 16-bit addend.
-inline uint16_t cvt_sr_pk_f16_f32(uint32_t bits, uint16_t addend, bool fp16_ovfl) {
-  // Model the full 16-bit addition in the CDNA5 pseudocode (p. 646) and the
-  // truncation in section 7.6. The upper three addend bits can change an exact
-  // F16 value by several ULPs. Their placement still needs a gfx1250 measurement.
-  // At 2^16 and above the F16 result has already overflowed, or the input is Inf/NaN.
-  if ((bits & fp_format::F32::kMagnitude) < std::bit_cast<uint32_t>(0x1p16f))
-    bits += addend;
-  return util::f32_to_f16_sr_mode(std::bit_cast<float>(bits), 0, fp16_ovfl);
+/// @brief Pack two rounded F16 results, applying the destination denormal mode to each half.
+/// @details gfx1250 flushes the exact subnormal 2^-20. At the normal boundary,
+/// the packed conversion models tininess using the rounded FP16 encoding.
+template <typename V> inline V pack_f16_results(V low, V high, uint32_t denorm_mode) {
+  const auto output = output_denormal::Policy::make(denorm_mode);
+  return output_denormal::flush_output<fp_format::F16>(low, output) |
+         (output_denormal::flush_output<fp_format::F16>(high, output) << 16);
+}
+
+/// @brief Convert one V_CVT_SR_PK_F16_F32 component with its half of the seed.
+inline uint16_t cvt_sr_pk_f16_f32(uint32_t bits, uint16_t seed, bool fp16_ovfl) {
+  // CDNA5 ISA 15.14, p. 646 adds the seed directly to the F32 bits. For 1.0,
+  // 0x3f800000 + 0x8000 gives 0x3f808000, or FP16 0x3c04. gfx1250 returns 0x3c00.
+  // Use the CDNA4 single-result helper util::f32_to_f16_sr_mode with the high 13
+  // seed bits. The exact-input capture also permits the low 13 bits and leaves
+  // the packed opcode's output denormal behavior unmeasured.
+  return util::f32_to_f16_sr_mode(std::bit_cast<float>(bits), uint32_t{seed} << 16, fp16_ovfl);
 }
 
 /// @brief Convert one V_CVT_SR_PK_BF16_F32 component with its 16-bit addend.

@@ -1860,8 +1860,41 @@ VmAccessOutcome GlobalMemPipeline::initiate_texel_access(VectorMemState &d, Wave
   // active requests first so one peer lane cannot enter L1 before another lane
   // reveals a route or a denial. Retain the route decision with this instruction
   // once a deferred request has been prepared.
-  if (d.translated.access && d.translated.access->info().legacy_cache_compatible &&
-      !d.translated.peer_data_route) {
+  MemoryIngressAdmission ingress;
+  bool local_range_admitted = false;
+  if (local_range_handler_ && request_lanes && !swizzled_lanes && d.atomic_op == AtomicOp::NONE &&
+      d.translated.access && d.translated.access->info().legacy_cache_compatible &&
+      !d.translated.peer_data_route && d.translated.requests.empty()) {
+    uint64_t begin = UINT64_MAX, last = 0;
+    if (request_lanes == UINT64_MAX || request_lanes == UINT32_MAX) {
+      const unsigned lanes = request_lanes == UINT64_MAX ? 64 : 32;
+      for (unsigned lane = 0; lane < lanes; ++lane) {
+        begin = std::min(begin, d.per_lane_addr[lane]);
+        last = std::max(last, d.per_lane_addr[lane]);
+      }
+    } else {
+      for (uint64_t mask = request_lanes; mask; mask &= mask - 1) {
+        const uint64_t address = d.per_lane_addr[std::countr_zero(mask)];
+        begin = std::min(begin, address);
+        last = std::max(last, address);
+      }
+    }
+    const uint64_t bytes = uint64_t{d.elem_size} * d.num_elems;
+    // Bound speculation across inactive gaps in a strided wave. The exact-lane
+    // path below handles wider requests without probing unrequested pages.
+    constexpr uint64_t page = IdentityAddressSpaceTranslator::kPageSize;
+    if (bytes && bytes <= UINT64_MAX - last && last + bytes - begin <= 128 * page) {
+      auto local = local_range_handler_(
+          wf.process_id(), *d.translated.access,
+          {begin, last + bytes - begin, d.is_load ? VmAccessKind::Read : VmAccessKind::Write});
+      if (local && local->outcome == VmAccessOutcome::Complete) {
+        ingress = std::move(*local);
+        local_range_admitted = true;
+      }
+    }
+  }
+  if (!local_range_admitted && d.translated.access &&
+      d.translated.access->info().legacy_cache_compatible && !d.translated.peer_data_route) {
     if (d.translated.access->revoked()) {
       auto refreshed = wf.snapshot_vm_access();
       if (!refreshed || refreshed->revoked())
@@ -1905,8 +1938,8 @@ VmAccessOutcome GlobalMemPipeline::initiate_texel_access(VectorMemState &d, Wave
       d.translated.access &&
       (!d.translated.access->info().legacy_cache_compatible || d.translated.peer_data_route);
 
-  MemoryIngressAdmission ingress;
-  if (!translated_address_space && d.translated.access && has_ingress_handler()) {
+  if (!local_range_admitted && !translated_address_space && d.translated.access &&
+      has_ingress_handler()) {
     std::vector<MemoryIngressSpan> spans;
     const VmAccessKind access = d.atomic_op != AtomicOp::NONE ? VmAccessKind::Atomic
                                 : d.is_load                   ? VmAccessKind::Read

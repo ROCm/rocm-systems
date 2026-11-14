@@ -251,6 +251,26 @@ uint32_t async_lds_lane_address(const VglobalMachineInst &inst, const amdgpu::Wa
   return static_cast<uint32_t>(absolute_addr);
 }
 
+AsyncLdsSource async_lds_lane_source(const VglobalMachineInst &inst, const amdgpu::Wavefront &wf,
+                                     uint32_t lds_operand, uint32_t access_size_bytes) {
+  // As in async_lds_lane_address, the 32-bit operand and IOFFSET wrap before
+  // the bounds check.
+  const uint32_t relative_addr = lds_operand + static_cast<uint32_t>(signed_ioffset(inst.ioffset));
+  const uint64_t lds_size = wf.lds_size();
+  if (relative_addr >= lds_size || access_size_bytes == 0)
+    return {};
+  // The ISA specifies out-of-range LDS behavior for async loads only (CDNA5 ISA
+  // 3.3.3). As a modeling choice, an async store reads every byte of its source
+  // inside the allocation, and zeros past it, so a race detector tracks every
+  // byte the store may read.
+  const auto bytes =
+      static_cast<uint32_t>(std::min<uint64_t>(access_size_bytes, lds_size - relative_addr));
+  const uint64_t absolute_addr = static_cast<uint64_t>(wf.lds_base()) + relative_addr;
+  if (bytes == 0 || absolute_addr + bytes > UINT32_MAX)
+    return {};
+  return {.address = static_cast<uint32_t>(absolute_addr), .bytes = bytes};
+}
+
 void flat_calculate_addresses(const VscratchMachineInst &inst, amdgpu::Wavefront &wf,
                               amdgpu::VectorMemState &d) {
   // Scratch SGPR/VGPR offsets are signed 32-bit values. Widen before combining
@@ -342,11 +362,8 @@ void mubuf_calculate_addresses(const VbufferMachineInst &inst, amdgpu::Wavefront
   uint32_t vbase = 0;
   if (inst.idxen || inst.offen)
     vbase = resolved_vgpr_base(wf, inst.vaddr, amdgpu::VgprMsbRole::Src0);
-  std::optional<amdgpu::RegisterAccess::VgprReadRegion> vaddr_region;
-  if (inst.idxen || inst.offen) {
-    uint32_t reg_count = (inst.idxen && inst.offen) ? 2 : 1;
-    vaddr_region.emplace(regs.read_vgpr_region(vbase, reg_count, exec));
-  }
+  const auto address_regs =
+      amdgpu::addr_calc::read_buffer_address_registers(regs, vbase, inst.idxen, inst.offen, exec);
   assert(d.elem_size != 0 && d.num_elems != 0);
   d.element_lane_masks.clear();
   if (ioff < 0) {
@@ -358,27 +375,20 @@ void mubuf_calculate_addresses(const VbufferMachineInst &inst, amdgpu::Wavefront
   }
   if (!resource.swizzle_enabled)
     d.element_lane_masks.assign(d.num_elems, exec);
-  // Triton PR 12512 reports raw B128 crossings with 4/8 aligned bytes left
-  // that differ from CDNA5 ISA 9.4.1's exact per-DWORD check. Follow the PR's
-  // stated end + 4 <= NUM_RECORDS rule for crossing accesses, retaining all
-  // DWORDs when the whole access fits. Other widths and byte-granular bounds
-  // are model extensions awaiting gfx1250 qualification. Keep structured
-  // accesses on the documented rule until their behavior is measured.
+  // For a crossing raw vector access, keep a DWORD when its end + 4 <= NUM_RECORDS
+  // (Triton PR 12512). This differs from the exact per-DWORD check in CDNA5 ISA 9.4.1.
+  // gfx1250 loads confirm the crossing rule for B64 with 4 bytes left and B128
+  // with 4 or 8 bytes left, with SOFFSET encoded as null or an SGPR containing zero.
+  // Other raw crossing cases extrapolate this rule. Whole accesses retain all DWORDs,
+  // including exact fits. Structured accesses use the documented check.
   constexpr uint32_t kDwordBytes = sizeof(uint32_t);
+  const uint32_t access_size = d.elem_size * d.num_elems;
   d.lane_mask = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t index = 0;
-    uint32_t voffset = 0;
-    if (inst.idxen && inst.offen) {
-      index = vaddr_region->lane(0, lane);
-      voffset = vaddr_region->lane(1, lane);
-    } else if (inst.idxen) {
-      index = vaddr_region->lane(0, lane);
-    } else if (inst.offen) {
-      voffset = vaddr_region->lane(0, lane);
-    }
+    const uint32_t index = inst.idxen ? address_regs.indices[lane] : 0;
+    const uint32_t voffset = inst.offen ? address_regs.offsets[lane] : 0;
     if (resource.swizzle_enabled) {
       uint64_t buffer_offset =
           swizzled_buffer_offset(index, resource.stride, voffset, ioff, soffset_val);
@@ -393,9 +403,14 @@ void mubuf_calculate_addresses(const VbufferMachineInst &inst, amdgpu::Wavefront
 
     int64_t record_offset = static_cast<int64_t>(soffset_val) + voffset + ioff;
     int64_t total_offset = static_cast<int64_t>(soffset_val) + logical_offset;
+    const bool crosses_buffer = byte_range_exceeds(total_offset, access_size, resource.num_records);
+    if (!crosses_buffer && (!resource.oob_select ||
+                            !byte_range_exceeds(record_offset, access_size, resource.stride))) {
+      d.lane_mask |= uint64_t{1} << lane;
+      continue;
+    }
     const bool raw_vector_crosses_bound =
-        !inst.idxen && d.elem_size == kDwordBytes && d.num_elems > 1 &&
-        byte_range_exceeds(total_offset, d.elem_size * d.num_elems, resource.num_records);
+        !inst.idxen && d.elem_size == kDwordBytes && d.num_elems > 1 && crosses_buffer;
     const uint32_t component_bound_size =
         d.elem_size + (raw_vector_crosses_bound ? kDwordBytes : 0);
     for (uint32_t elem = 0; elem < d.num_elems; ++elem) {

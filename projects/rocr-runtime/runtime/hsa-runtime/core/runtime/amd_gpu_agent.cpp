@@ -306,8 +306,10 @@ GpuAgent::GpuAgent(HSAuint32 node, const HsaNodeProperties& node_props, bool xna
     }
   }
 
-  auto& first_cpu = core::Runtime::runtime_singleton_->cpu_agents()[0];
-  auto link_info = core::Runtime::runtime_singleton_->GetLinkInfo(first_cpu->node_id(), node_id());
+  // Nearest CPU, not the first: with several CPU nodes the first may reach this GPU only over
+  // the fabric. The same link sets the xGMI host check and large BAR.
+  const auto link_info =
+      core::Runtime::runtime_singleton_->GetLinkInfo(GetNearestCpuAgent()->node_id(), node_id());
   xgmi_cpu_gpu_ = (link_info.info.link_type == HSA_AMD_LINK_INFO_TYPE_XGMI);
 
   if (link_info.num_hop >= 1 && !properties_.Integrated) {
@@ -2381,6 +2383,10 @@ void GpuAgent::GetAqlInfoProperties(uint8_t value[8]) const {
   // Fill the HSA_AMD_AQL_PROPERTY_EXT_DISPATCH
   if (ExtendedAqlDispatchSupported())
       setFlag(HSA_AMD_AQL_PROPERTY_EXT_DISPATCH);
+
+  // Fill the HSA_AMD_AQL_PROPERTY_SIGNAL_HINTS
+  if (SignalHintsSupported())
+      setFlag(HSA_AMD_AQL_PROPERTY_SIGNAL_HINTS);
 }
 
 
@@ -2817,9 +2823,6 @@ hsa_status_t GpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) const {
       break;
     case HSA_AMD_AGENT_INFO_HOST_ATOMICS_SUPPORTED:
       *static_cast<bool*>(value) = HostAtomicsSupported();
-      break;
-    case HSA_AMD_AGENT_INFO_SIGNAL_HINTS_SUPPORTED:
-      *static_cast<bool*>(value) = SignalHintsSupported();
       break;
     default:
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;

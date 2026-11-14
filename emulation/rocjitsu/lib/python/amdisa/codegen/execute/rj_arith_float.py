@@ -294,7 +294,11 @@ def gen_pseudo_scalar(ctx: ExecuteContext) -> str | None:
     dst = ctx.dst_ops
     src = ctx.src_ops
     is_vop3 = ctx.is_vop3
-    if arch != 'rdna4' or mnemonic not in PSEUDO_SCALAR_NAMES or not is_vop3:
+    if (
+        arch not in ('rdna4', 'cdna5')
+        or mnemonic not in PSEUDO_SCALAR_NAMES
+        or not is_vop3
+    ):
         return None
     if len(dst) != 1 or len(src) != 1:
         return None
@@ -305,7 +309,8 @@ def gen_pseudo_scalar(ctx: ExecuteContext) -> str | None:
             '      ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) |',
             '      (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) |',
             '      (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);',
-            f'  amdgpu::arith::execute_pseudo_scalar(wf, rj_arith_{mnemonic.lower()},',
+            f'  amdgpu::arith::execute_pseudo_scalar(wf, rj_arith_{mnemonic.lower()}'
+            f'{"_gfx1250" if arch == "cdna5" else ""},',
             f'      wf.cu().arithmetic_flags(),',
             f'      modifiers, {dst[0]}, {src[0]}, {str(half).lower()});',
         ]
@@ -808,8 +813,12 @@ def gen_float16_conversion(ctx: ExecuteContext) -> str | None:
     lines = prefix + [
         '  uint64_t flags = wf.cu().arithmetic_flags();',
         '  if (wf.fp16_ovfl()) flags |= RJ_ARITH_FP16_OVFL;',
-        f'  const uint64_t modifiers = {mode};',
     ]
+    if arch == 'cdna5' and name == 'V_CVT_PK_F16_F32':
+        lines.append(
+            '  if (!(wf.fp_denorm_mode_f16_f64() & 2)) flags |= RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS;'
+        )
+    lines.append(f'  const uint64_t modifiers = {mode};')
     if widen and not ctx.is_vop3 and arch == 'cdna4':
         lines += [
             '  if (inst_.src0 == amdgpu::SRC_SDWA) {',

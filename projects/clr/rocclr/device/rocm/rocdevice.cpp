@@ -1310,12 +1310,14 @@ bool Device::populateOCLDeviceConstants() {
                       static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_PCIE_STORES_NEED_FLUSH),
                       &pcie_stores_need_flush_);
   // CP firmware without hint support takes a hinted handle as the signal address. Left false by
-  // a runtime without the query. A profiler tool hands packet completion signals to ROCr, which
-  // rejects a hinted handle.
+  // a runtime that does not report the AQL extension. A profiler tool hands packet completion
+  // signals to ROCr, which rejects a hinted handle.
   if (!tool_attached) {
+    uint8_t aql_extensions[8] = {};
     Hsa::agent_get_info(bkendDevice_,
-                        static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_SIGNAL_HINTS_SUPPORTED),
-                        &signal_hints_);
+                        static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_AQL_EXTENSIONS),
+                        aql_extensions);
+    signal_hints_ = hsa_flag_isset64(aql_extensions, HSA_AMD_AQL_PROPERTY_SIGNAL_HINTS);
   }
   ClPrint(amd::LOG_INFO, amd::LOG_INIT,
           "Signal pool: %s. Device memory: graph signals %d, queue signals %d, "
@@ -1678,7 +1680,7 @@ bool Device::populateOCLDeviceConstants() {
   // extension.  They must be set unconditionally so that hipMallocPitch /
   // hipMalloc3D produce correct pitch alignment even when IMAGE_SUPPORT is
   // off.  The PAL backend already sets them unconditionally.
-  info_.imagePitchAlignment_ = 256;
+  info_.imagePitchAlignment_ = (isa().versionMajor() >= 12) ? 128 : 256;
   info_.imageBaseAddressAlignment_ = 256;
   info_.bufferFromImageSupport_ = false;
 

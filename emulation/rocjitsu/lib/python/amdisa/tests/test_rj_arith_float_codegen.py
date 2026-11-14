@@ -1390,11 +1390,12 @@ def test_pseudo_scalar_routing_and_semantics(arch):
 
     for name in PSEUDO_SCALAR_NAMES:
         body = gen_pseudo_scalar(context(arch, name, ['d'], ['a'], is_vop3=True))
-        if arch != 'rdna4':
+        if arch not in ('rdna4', 'cdna5'):
             assert body is None
             continue
         assert 'execute_pseudo_scalar' in body
         assert 'rj_arith_' + name.lower() in body
+        assert ('_gfx1250' in body) == (arch == 'cdna5')
         assert 'arithmetic_flags()' in body
         assert 'arithmetic_reports_fp_status' not in body
         assert 'wave64' not in body and 'exec_mask' not in body
@@ -1668,6 +1669,9 @@ def test_float16_conversion_architectures_and_layouts(arch):
                 assert body is None
                 continue
             assert 'rj_arith_' + name.lower() + '_w64' in body
+            assert ('RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS' in body) == (
+                arch == 'cdna5' and name == 'V_CVT_PK_F16_F32'
+            )
             assert 'FP16_OVFL' in body
             assert ('execute_bf16_widen_sdwa' in body) == (
                 widen and not vop3 and arch == 'cdna4'

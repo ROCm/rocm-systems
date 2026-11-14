@@ -4,6 +4,7 @@
 #include "rocjitsu/vm/amdgpu/gpu_vm.h"
 
 #include "rocjitsu/vm/amdgpu/device_cache_coherence.h"
+#include "rocjitsu/vm/amdgpu/vm_local_grants.h"
 
 #include "util/log.h"
 
@@ -41,6 +42,41 @@ uint64_t allocate_vm_access_state_id() {
 
 class GpuVmRootLineage {};
 
+// Every CU contributes to the same monotonic write count. Recovery reads it
+// at dispatch boundaries, while ordinary writes only update a private stripe.
+class CacheWriteSequence {
+public:
+  void increment() {
+    static std::atomic<size_t> next{0};
+    static thread_local const size_t index =
+        next.fetch_add(1, std::memory_order_relaxed) % kStripes;
+    auto &count = stripes_[index].count;
+    uint64_t previous = count.load(std::memory_order_relaxed);
+    while (previous != UINT64_MAX &&
+           !count.compare_exchange_weak(previous, previous + 1, std::memory_order_release,
+                                        std::memory_order_relaxed)) {
+    }
+  }
+
+  uint64_t read() const {
+    uint64_t total = 0;
+    for (const auto &stripe : stripes_) {
+      const uint64_t count = stripe.count.load(std::memory_order_acquire);
+      if (count > UINT64_MAX - total)
+        return UINT64_MAX;
+      total += count;
+    }
+    return total;
+  }
+
+private:
+  static constexpr size_t kStripes = 64;
+  struct alignas(64) Stripe {
+    std::atomic<uint64_t> count{0};
+  };
+  std::array<Stripe, kStripes> stripes_;
+};
+
 class GpuVmAccessState {
 public:
   class FaultReporter {
@@ -68,13 +104,14 @@ public:
   GpuVmAccessState(std::shared_ptr<AddressSpaceTranslator> translator = {},
                    std::shared_ptr<PhysicalMemoryAccess> physical_memory = {},
                    std::shared_ptr<const FaultReporter> fault_reporter = {},
-                   std::shared_ptr<std::atomic<uint64_t>> cache_write_sequence = {},
+                   std::shared_ptr<CacheWriteSequence> cache_write_sequence = {},
                    std::shared_ptr<const GpuVmRootLineage> root_lineage = {})
       : translator(std::move(translator)), physical_memory(std::move(physical_memory)),
         fixed_execute_admission(this->translator && this->translator->execute_admission_is_fixed()),
+        local_grants(this->translator ? this->translator->local_grants() : nullptr),
         fault_reporter(std::move(fault_reporter)), cache_identity(allocate_vm_access_state_id()),
         cache_write_sequence(cache_write_sequence ? std::move(cache_write_sequence)
-                                                  : std::make_shared<std::atomic<uint64_t>>(0)),
+                                                  : std::make_shared<CacheWriteSequence>()),
         root_lineage(root_lineage ? std::move(root_lineage)
                                   : std::make_shared<GpuVmRootLineage>()) {}
 
@@ -83,11 +120,20 @@ public:
   const std::shared_ptr<AddressSpaceTranslator> translator;
   const std::shared_ptr<PhysicalMemoryAccess> physical_memory;
   const bool fixed_execute_admission;
+  const VmLocalGrants *const local_grants;
+
+  std::optional<uint64_t> local_generation(uint64_t address, size_t size) const {
+    if (!local_grants)
+      return std::nullopt;
+    const auto generation = local_grants->generation(address, size);
+    return valid.load(std::memory_order_acquire) ? generation : std::nullopt;
+  }
+
   // Generations share the callable too: pinning must not copy its target while
   // a fault callback is running under another generation's shared lease.
   const std::shared_ptr<const FaultReporter> fault_reporter;
   const uint64_t cache_identity;
-  const std::shared_ptr<std::atomic<uint64_t>> cache_write_sequence;
+  const std::shared_ptr<CacheWriteSequence> cache_write_sequence;
   // Invalidation retains this identity; an explicit backing/root replacement
   // rotates it even if the caller reuses the same translator objects.
   const std::shared_ptr<const GpuVmRootLineage> root_lineage;
@@ -472,6 +518,7 @@ bool GpuVm::protect_controlled_cache_backing(AddressSpaceHandle handle, uint64_t
   replacement->push_back({handle, binding->vmid, address, address + size - 1,
                           binding->binding_state, std::make_shared<std::atomic<bool>>(true)});
   controlled_backings_.store(std::move(replacement), std::memory_order_release);
+  has_controlled_backings_.store(true, std::memory_order_release);
   return true;
 }
 
@@ -493,6 +540,8 @@ bool GpuVm::controlled_cache_backing_overlaps(uint32_t vmid, uint64_t address,
     return false;
   if (size - 1 > std::numeric_limits<uint64_t>::max() - address)
     return true;
+  if (!has_controlled_backings_.load(std::memory_order_acquire))
+    return false;
   const auto current = controlled_backings_.load(std::memory_order_acquire);
   if (!current)
     return false;
@@ -554,6 +603,35 @@ bool GpuVmAccess::execute_admission_is_fixed() const {
   return access_state_ != nullptr && access_state_->fixed_execute_admission;
 }
 
+bool GpuVmAccess::local_ingress_mapped(std::span<const MemoryIngressSpan> spans, uint64_t begin,
+                                       uint64_t end) const {
+  return access_state_ && access_state_->local_grants &&
+         access_state_->valid.load(std::memory_order_acquire) &&
+         access_state_->translator->local_ingress_mapped(spans, begin, end);
+}
+
+bool GpuVmAccess::uses_local_grants(const std::atomic<uint64_t> &publication) const {
+  return access_state_ && access_state_->local_grants &&
+         access_state_->local_grants->publication() == &publication;
+}
+
+std::optional<uint64_t> GpuVmAccess::local_grant_generation(uint64_t address, size_t size) const {
+  return access_state_ ? access_state_->local_generation(address, size) : std::nullopt;
+}
+
+VmLocalGrantView GpuVmAccess::local_grant_view(uint64_t address, size_t size) const {
+  if (!access_state_ || !access_state_->local_grants)
+    return {};
+  const auto &grants = *access_state_->local_grants;
+  const auto *publication = grants.publication();
+  const uint64_t epoch = publication->load(std::memory_order_acquire);
+  const auto *grant = grants.find(address, size);
+  if (!grant || epoch != publication->load(std::memory_order_acquire) ||
+      !access_state_->valid.load(std::memory_order_acquire))
+    return {};
+  return {*grant, *publication, access_state_->valid, epoch, access_state_->cache_identity};
+}
+
 bool GpuVmAccess::supports_translated_local_cache() const {
   if (access_state_ == nullptr)
     return false;
@@ -563,9 +641,8 @@ bool GpuVmAccess::supports_translated_local_cache() const {
 }
 
 uint64_t GpuVmAccess::cache_write_sequence() const {
-  return access_state_ != nullptr
-             ? access_state_->cache_write_sequence->load(std::memory_order_acquire)
-             : std::numeric_limits<uint64_t>::max();
+  return access_state_ != nullptr ? access_state_->cache_write_sequence->read()
+                                  : std::numeric_limits<uint64_t>::max();
 }
 
 bool GpuVmAccess::same_root_lineage(const GpuVmAccess &other) const {
@@ -600,6 +677,9 @@ VmAccessAdmission GpuVmAccess::admit_access(uint64_t address, std::size_t size, 
                                             bool report_fault) const {
   if (access_state_ == nullptr)
     return {.outcome = VmAccessOutcome::Unavailable};
+  if (access == VmAccessKind::Read || access == VmAccessKind::Execute)
+    if (const auto generation = access_state_->local_generation(address, size))
+      return {.generation = *generation};
   std::shared_lock state_lock(access_state_->mutex);
   if (!access_state_->valid)
     return {.outcome = VmAccessOutcome::Revoked};
@@ -607,14 +687,8 @@ VmAccessAdmission GpuVmAccess::admit_access(uint64_t address, std::size_t size, 
     return {.outcome = VmAccessOutcome::Unavailable};
   const VmAccessAdmission admission =
       access_state_->translator->admit_access(address, size, access);
-  if (admission && (access == VmAccessKind::Write || access == VmAccessKind::Atomic)) {
-    auto &sequence = *access_state_->cache_write_sequence;
-    uint64_t previous = sequence.load(std::memory_order_relaxed);
-    while (previous != std::numeric_limits<uint64_t>::max() &&
-           !sequence.compare_exchange_weak(previous, previous + 1, std::memory_order_release,
-                                           std::memory_order_relaxed)) {
-    }
-  }
+  if (admission && (access == VmAccessKind::Write || access == VmAccessKind::Atomic))
+    access_state_->cache_write_sequence->increment();
   if (report_fault)
     report_terminal_fault(address, access, admission.outcome);
   return admission;
@@ -623,6 +697,8 @@ VmAccessAdmission GpuVmAccess::admit_access(uint64_t address, std::size_t size, 
 VmAccessAdmission GpuVmAccess::query_cache_write_grant(uint64_t address, std::size_t size) const {
   if (access_state_ == nullptr)
     return {.outcome = VmAccessOutcome::Unavailable};
+  if (const auto generation = access_state_->local_generation(address, size))
+    return {.generation = *generation};
   std::shared_lock state_lock(access_state_->mutex);
   if (!access_state_->valid)
     return {.outcome = VmAccessOutcome::Revoked};
@@ -706,6 +782,8 @@ VmDataRoute GpuVmAccess::classify_data_route(uint64_t address, std::size_t size,
                                              VmAccessKind access, bool report_fault) const {
   if (access_state_ == nullptr)
     return VmDataRoute::Faulted;
+  if (access_state_->local_generation(address, size))
+    return VmDataRoute::Local;
   std::shared_lock state_lock(access_state_->mutex);
   if (!access_state_->valid || access_state_->translator == nullptr)
     return VmDataRoute::Faulted;
@@ -868,6 +946,20 @@ VmAccessOutcome GpuVmAccess::probe_impl(uint64_t address, std::size_t size, VmAc
   MemoryIngressAdmission pt_admitted = admit_pt_rewalk();
   if (pt_admitted.outcome != VmAccessOutcome::Complete)
     return pt_admitted.outcome;
+  // A cache fill probes the same ordinary pages that CU ingress has just
+  // validated. Reuse numeric coverage only for a positive bounded read probe.
+  // The actual data transfer still acquires its backing and revocation leases.
+  if (!report_fault && access == VmAccessKind::Read && access_state_->local_grants && size &&
+      size <= IdentityAddressSpaceTranslator::kPageSize && size <= UINT64_MAX - address) {
+    const uint64_t epoch =
+        access_state_->local_grants->publication()->load(std::memory_order_acquire);
+    const MemoryIngressSpan span{address, size, access};
+    if (access_state_->local_generation(address, size) &&
+        local_ingress_mapped({&span, 1}, address, address + size) &&
+        access_state_->local_grants->publication()->load(std::memory_order_acquire) == epoch &&
+        access_state_->valid.load(std::memory_order_acquire))
+      return VmAccessOutcome::Complete;
+  }
   std::shared_lock state_lock(access_state_->mutex);
   if (!access_state_->valid)
     return VmAccessOutcome::Revoked;

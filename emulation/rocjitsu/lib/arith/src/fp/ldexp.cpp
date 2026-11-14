@@ -22,13 +22,13 @@ namespace {
 template <int Width>
 typename rocjitsu::arith::IeeeFormat<Width>::Bits
 ldexp_bits(typename rocjitsu::arith::IeeeFormat<Width>::Bits bits, int32_t adjustment,
-           uint64_t flags) {
+           uint64_t flags, bool quiet_snan) {
   using F = rocjitsu::arith::IeeeFormat<Width>;
   using T = typename F::Bits;
   const T implicit = T(1) << F::fraction;
   const T sign = bits & F::sign, magnitude = bits & (F::sign - 1);
   if (magnitude >= F::infinity) {
-    return bits | (magnitude > F::infinity ? F::quiet : 0);
+    return bits | (magnitude > F::infinity && quiet_snan ? F::quiet : 0);
   }
   int exponent = int(magnitude >> F::fraction);
   T significand = magnitude & (implicit - 1);
@@ -72,7 +72,8 @@ ldexp_bits(typename rocjitsu::arith::IeeeFormat<Width>::Bits bits, int32_t adjus
 // Scale floating-point encodings by powers of two with guest rounding and output modifiers.
 template <bool Fp64>
 int ldexp_rounded(uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags,
-                  uint32_t *const *d, const uint32_t *const *a, const uint32_t *const *b) {
+                  uint32_t *const *d, const uint32_t *const *a, const uint32_t *const *b,
+                  bool quiet_snan) {
   constexpr unsigned width = Fp64 ? 64 : 32;
   using F = rocjitsu::arith::IeeeFormat<width>;
   using T = typename F::Bits;
@@ -91,10 +92,11 @@ int ldexp_rounded(uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags
     }
     int32_t adjustment = rocjitsu::arith::bit_cast<int32_t>(b[0][lane]);
     // Tininess is tested before rounding; active OMOD also flushes that domain.
-    T value = ldexp_bits<width>(input, adjustment,
-                                flags | ((instruction_flags & RJ_ARITH_ALU_OMOD_HALF)
-                                             ? RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS
-                                             : 0));
+    T value = ldexp_bits<width>(
+        input, adjustment,
+        flags |
+            ((instruction_flags & RJ_ARITH_ALU_OMOD_HALF) ? RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS : 0),
+        quiet_snan);
     const bool outward = rounding == (value & F::sign ? 2u : 1u);
     const T overflow = rounding == 0 || outward ? F::infinity : F::infinity - 1;
     const bool preserve_nan =
@@ -145,7 +147,10 @@ int ldexp(uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags, uint32
   }
   if ((flags & RJ_ARITH_SEMANTICS_MASK) != RJ_ARITH_SEMANTICS_LOOSE ||
       (flags & RJ_ARITH_FP_ROUND_MASK)) {
-    return ldexp_rounded<Fp64>(flags, exec_mask, instruction_flags, d, a, b);
+    // gfx11 exact semantics keep signaling NaNs when IEEE is clear.
+    const bool quiet_snan =
+        !Rdna3 || (flags & RJ_ARITH_FP_IEEE_MODE) || !rocjitsu::arith::is_exact(flags);
+    return ldexp_rounded<Fp64>(flags, exec_mask, instruction_flags, d, a, b, quiet_snan);
   }
   if constexpr (!GuestDenormals) {
     if (flags & (RJ_ARITH_FP_FLUSH_INPUT_DENORMALS | RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS |
