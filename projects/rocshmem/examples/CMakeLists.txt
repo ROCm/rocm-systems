@@ -79,3 +79,65 @@ foreach(SOURCE_FILE IN LISTS EXAMPLE_SOURCES)
   )
 endforeach()
 
+###############################################################################
+# tile_ck_gemm — optional example requiring AMD Composable Kernels (CK Tile)
+#
+# Pass -DCK_INSTALL_DIR=<path> at configure time to point at a CK install.
+# ck_tile is header-only so no library link is required.
+###############################################################################
+set(CK_INSTALL_DIR "" CACHE PATH "Path to composablekernel install directory")
+
+find_package(composable_kernel QUIET
+  COMPONENTS utility
+  HINTS ${CK_INSTALL_DIR}/lib/cmake/composable_kernel)
+if(composable_kernel_FOUND)
+  # Derive CK architecture defines from GPU_TARGETS so that the correct
+  # CK tile/warp configurations are selected for the actual build target.
+  # Hardcoding gfx950-specific defines for other targets (gfx90a, gfx94x,
+  # gfx11x, gfx12x) would instantiate the wrong MFMA/warp geometry.
+  set(_ck_arch_defines "")
+  foreach(_tgt IN LISTS GPU_TARGETS)
+    if(_tgt MATCHES "gfx950")
+      list(APPEND _ck_arch_defines -DCK_USE_GFX950 -DCK_GFX950_SUPPORT)
+    elseif(_tgt MATCHES "gfx94")
+      list(APPEND _ck_arch_defines -DCK_USE_GFX94)
+    elseif(_tgt MATCHES "gfx90a")
+      list(APPEND _ck_arch_defines -DCK_USE_GFX90A)
+    elseif(_tgt MATCHES "gfx125")
+      list(APPEND _ck_arch_defines -DCK_USE_GFX1250 -DUSE_GFX1250)
+    elseif(_tgt MATCHES "gfx11")
+      list(APPEND _ck_arch_defines -DCK_USE_WMMA)
+    elseif(_tgt MATCHES "gfx12")
+      list(APPEND _ck_arch_defines -DCK_USE_WMMA)
+    endif()
+  endforeach()
+  list(REMOVE_DUPLICATES _ck_arch_defines)
+
+  if(NOT _ck_arch_defines)
+    message(WARNING
+      "tile_ck_gemm: none of the configured GPU_TARGETS (${GPU_TARGETS}) "
+      "map to a known CK architecture define. "
+      "The example may use incorrect tile/warp geometry.")
+  endif()
+
+  message(STATUS "Found composable_kernel ${composable_kernel_VERSION}: building tile_ck_gemm example")
+  message(STATUS "  CK arch defines: ${_ck_arch_defines}")
+  add_executable(tile_ck_gemm tile_ck_gemm.cc)
+  target_link_libraries(tile_ck_gemm
+    PRIVATE
+      roc::rocshmem
+      composable_kernel::utility
+      $<TARGET_NAME_IF_EXISTS:MPI::MPI_CXX>
+  )
+  # Force CK_INSTALL_DIR/include before the ROCm system includes so hipcc
+  # picks up the source-built ck_tile headers rather than /opt/rocm's copy.
+  target_compile_options(tile_ck_gemm PRIVATE
+    -I${CK_INSTALL_DIR}/include
+    ${_ck_arch_defines}
+    -mllvm -enable-noalias-to-md-conversion=0
+  )
+else()
+  message(STATUS "composable_kernel not found — skipping tile_ck_gemm example")
+  message(STATUS "  Re-run cmake with -DCK_INSTALL_DIR=<path-to-ck-install>")
+endif()
+
