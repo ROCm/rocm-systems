@@ -74,6 +74,7 @@
 #include <memory>
 #include <mutex>
 #include <thread>
+#include <unordered_map>
 #include <vector>
 
 #if defined(__x86_64__) || defined(__i386__)
@@ -580,7 +581,7 @@ move_incoming_to_active(completion_monitor&);
 void
 retire_completed(completion_monitor&, pending_completion_vector_t&);
 void
-force_retire_all(completion_monitor&);
+drain_active_completions(completion_monitor&);
 void
 completion_monitor_loop(completion_monitor&);
 
@@ -593,12 +594,63 @@ class completion_monitor
     // stop_completion_monitor has joined it.
     std::vector<pending_completion> active = {};
 
+    // A signal value is not object ownership. Track every handle handed to the monitor so the
+    // hsa_signal_destroy wrapper can defer caller destruction until final status/timing access.
+    struct retained_signal
+    {
+        uint64_t references        = 0;
+        bool     destroy_requested = false;
+    };
+
+    std::mutex                                    retained_mutex   = {};
+    std::unordered_map<uint64_t, retained_signal> retained_signals = {};
+
     friend void move_incoming_to_active(completion_monitor&);
     friend void retire_completed(completion_monitor&, pending_completion_vector_t&);
-    friend void force_retire_all(completion_monitor&);
+    friend void drain_active_completions(completion_monitor&);
     friend void completion_monitor_loop(completion_monitor&);
 
 public:
+    void retain_signal(hsa_signal_t signal)
+    {
+        if(signal.handle == 0) return;
+        auto lock = std::lock_guard<std::mutex>{retained_mutex};
+        ++retained_signals[signal.handle].references;
+    }
+
+    void release_signal(hsa_signal_t signal)
+    {
+        if(signal.handle == 0) return;
+        auto destroy = false;
+        {
+            auto lock = std::lock_guard<std::mutex>{retained_mutex};
+            auto itr  = retained_signals.find(signal.handle);
+            ROCP_FATAL_IF(itr == retained_signals.end() || itr->second.references == 0)
+                << "completion signal retention underflow";
+            if(--itr->second.references == 0)
+            {
+                destroy = itr->second.destroy_requested;
+                retained_signals.erase(itr);
+            }
+        }
+        if(destroy)
+        {
+            auto status = destroy_signal_next(signal);
+            ROCP_CI_LOG_IF(ERROR, status != HSA_STATUS_SUCCESS)
+                << "deferred hsa_signal_destroy failed with status " << status;
+        }
+    }
+
+    bool defer_destruction(hsa_signal_t signal)
+    {
+        if(signal.handle == 0) return false;
+        auto lock = std::lock_guard<std::mutex>{retained_mutex};
+        auto itr  = retained_signals.find(signal.handle);
+        if(itr == retained_signals.end()) return false;
+        itr->second.destroy_requested = true;
+        return true;
+    }
+
     common::Synchronized<std::vector<pending_completion>> incoming    = {};
     hsa_signal_t                                          wake_signal = {};
     std::atomic<monitor_state>                            state       = {monitor_state::stopped};
@@ -660,6 +712,8 @@ register_pending_completion(pending_completion&& pending)
     auto  declined = pending_completion{};
 
     mon.incoming.wlock([&mon, &pending, &declined](auto& inbox) {
+        for(const auto& packet : pending.session->packet_data)
+            mon.retain_signal(packet.completion_signal);
         // The lock orders this load against teardown's state store, so relaxed suffices.
         if(mon.state.load(std::memory_order_relaxed) == monitor_state::stopped)
         {
@@ -677,12 +731,25 @@ register_pending_completion(pending_completion&& pending)
 
 // A batch is complete once its completion signal drops below the value it was enqueued at. The load
 // is acquire so the GPU's timestamp writes into that same signal are ordered before the reads they
-// authorize; force_retire_all reaches this with no waiting call ahead of it.
+// authorize; teardown's drain waits on the same condition before reading timing.
 bool
 has_completed(const pending_completion& pending)
 {
     return get_core_table()->hsa_signal_load_scacquire_fn(pending.completion_signal) <
            pending.starting_value;
+}
+
+void
+wait_until_completed(const pending_completion& pending)
+{
+    auto value =
+        get_core_table()->hsa_signal_wait_scacquire_fn(pending.completion_signal,
+                                                       HSA_SIGNAL_CONDITION_LT,
+                                                       pending.starting_value,
+                                                       std::numeric_limits<uint64_t>::max(),
+                                                       HSA_WAIT_STATE_BLOCKED);
+    ROCP_FATAL_IF(value >= pending.starting_value)
+        << "completion signal wait returned before the batch completed";
 }
 
 // What release_completion_signals hands to emit_dispatch_records: the session, plus the dispatch
@@ -948,15 +1015,14 @@ signal_less_batch_eligible(Queue*                                            que
 }
 
 // Complete a batch, handing the record emit to the record-emitter group so no tool code runs on the
-// monitor thread or under the thread handle lock. `completed` is false for a batch forced out at
-// teardown before the GPU wrote its timestamps. The group is created once and destroyed only by
+// monitor thread or under the thread handle lock. The group is created once and destroyed only by
 // ~completion_monitor.
 void
-retire_completion_async(completion_monitor&                          mon,
-                        const std::shared_ptr<queue_info_session_t>& session,
-                        bool                                         completed)
+retire_completion_async(completion_monitor& mon, const pending_completion& pending, bool completed)
 {
-    auto batch = release_completion_signals(session, completed);
+    auto batch = release_completion_signals(pending.session, completed);
+    for(const auto& packet : pending.session->packet_data)
+        mon.release_signal(packet.completion_signal);
 
     ROCP_FATAL_IF(!mon.record_emitter)
         << "record-emitter group missing while the completion monitor is running";
@@ -996,7 +1062,7 @@ retire_completed(completion_monitor& mon, pending_completion_vector_t& scratch)
     {
         if(has_completed(pending))
         {
-            retire_completion_async(mon, pending.session, true);
+            retire_completion_async(mon, pending, true);
         }
         else
             scratch.emplace_back(std::move(pending));
@@ -1009,28 +1075,18 @@ retire_completed(completion_monitor& mon, pending_completion_vector_t& scratch)
     scratch.clear();
 }
 
-// Retire every entry, whether or not its signal dropped, discarding the profiling data of the ones
-// that did not. Teardown only: a batch the GPU never finished still drops its correlation-id
-// references and produces no dispatch record, and keeps its pooled signal rather than handing one
-// back while a kernel is still running.
+// Teardown only: wait for every remaining batch before reading its timing and releasing its
+// completion signal. Caller-owned signal destruction is retained by completion_monitor until each
+// retire_completion_async call has completed those final signal accesses.
 void
-force_retire_all(completion_monitor& mon)
+drain_active_completions(completion_monitor& mon)
 {
-    auto incomplete = uint64_t{0};
-
     for(auto& pending : mon.active)
     {
-        const auto completed = has_completed(pending);
-        if(!completed) ++incomplete;
-
-        retire_completion_async(mon, pending.session, completed);
+        wait_until_completed(pending);
+        retire_completion_async(mon, pending, true);
     }
     mon.active.clear();
-
-    ROCP_WARNING_IF(incomplete > 0) << fmt::format(
-        "Completion monitor retired {} batch(es) still in flight at teardown; their dispatch "
-        "records were omitted because the GPU had not written their timestamps",
-        incomplete);
 }
 
 // Body of the single completion-monitor thread. Waits on every in-flight completion signal at once
@@ -1894,30 +1950,21 @@ process_doorbell_impl(const queue_state_ptr_t& state,
     // Batches the monitor declined because it had already stopped, retired across the gate lock
     // rather than after it. Emitting records runs tool code, which must never run under a lock
     // the doorbell path takes, so it waits for the unlock below.
-    auto retired    = std::vector<retired_batch>{};
-    auto incomplete = uint64_t{0};
+    auto retired = std::vector<retired_batch>{};
 
     retired.reserve(declined.size());
     for(auto& orphan : declined)
     {
-        const auto completed = has_completed(orphan);
-        if(!completed) ++incomplete;
-
-        retired.emplace_back(release_completion_signals(orphan.session, completed));
+        wait_until_completed(orphan);
+        retired.emplace_back(release_completion_signals(orphan.session, true));
+        for(const auto& packet : orphan.session->packet_data)
+            get_completion_monitor().release_signal(packet.completion_signal);
     }
 
     lock.unlock();
 
     for(auto& batch : retired)
         emit_dispatch_records(std::move(batch));
-
-    // Almost always the whole declined set: the doorbell was rung a few lines above, so the GPU
-    // has had no time to write these timestamps. Waiting for it here is not the alternative --
-    // that would put an unbounded GPU wait on a producer thread that has just released the gate.
-    ROCP_WARNING_IF(incomplete > 0) << fmt::format(
-        "Completion monitor declined {} batch(es) after it stopped; their dispatch records were "
-        "omitted because the GPU had not written their timestamps",
-        incomplete);
 }
 
 std::shared_ptr<QueueState>
@@ -2337,6 +2384,16 @@ start_completion_monitor()
     });
 }
 
+bool
+defer_pending_signal_destruction(hsa_signal_t signal)
+{
+    if(signal.handle == 0 || !s_intercept_installed.load(std::memory_order_acquire) ||
+       registration::get_fini_status() > 0 || internal_threading::fork_stale())
+        return false;
+
+    return get_completion_monitor().defer_destruction(signal);
+}
+
 // Stop the monitor, wake it so it observes the state change, and join. Every caller returns with
 // the monitor thread dead, every registered batch retired, and every record delivered -- a second
 // caller blocks on the handle lock until the first has finished rather than returning early.
@@ -2366,7 +2423,7 @@ stop_completion_monitor()
         // path may have enqueued since. This drain is the last one: a producer whose inbox lock
         // precedes it is retired here, and one that follows is declined.
         move_incoming_to_active(mon);
-        force_retire_all(mon);
+        drain_active_completions(mon);
 
         get_core_table()->hsa_signal_destroy_fn(mon.wake_signal);
         mon.wake_signal = {};
@@ -2381,8 +2438,8 @@ stop_completion_monitor()
     // This wait is unbounded: it ends when the tool callbacks queued on the emitter return. It is
     // the only drain that runs on this path -- drain_completion_monitor, which
     // queue_controller_fini reaches through queue_controller_sync just before this call, returns
-    // immediately once finalization has begun, leaving force_retire_all above and this join to
-    // dispose of everything.
+    // immediately once finalization has begun, leaving drain_active_completions above and this
+    // join to dispose of everything.
     if(mon.record_emitter) mon.record_emitter->join();
 }
 

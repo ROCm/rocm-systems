@@ -61,11 +61,11 @@ def input_data(request):
 
 @pytest.fixture
 def expected_dispatches(request):
-    """Kernel nodes the workload launches, which is the floor on dispatch records rather
-    than the exact total. Per replay: one root node, then per layer `width` branch kernels
-    and one join. The geometry is passed in by the test definition so it cannot drift from
-    the arguments the workload actually ran with."""
+    """Exact kernel records the dedicated workload launches. Setup has one memset kernel per
+    branch buffer. Each replay has one root node, then per layer `width` branch kernels and one
+    join. The geometry is passed in by the test definition so it cannot drift from the arguments
+    the workload actually ran with."""
     width = request.config.getoption("--width")
     depth = request.config.getoption("--depth")
     replays = request.config.getoption("--replays")
-    return replays * (1 + depth * (width + 1))
+    return width + replays * (1 + depth * (width + 1))
