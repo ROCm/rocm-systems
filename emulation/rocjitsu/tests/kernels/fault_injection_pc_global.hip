@@ -6,9 +6,10 @@
 extern "C" {
 __device__ int value = 7;
 
+// Keep value reads in the sibling so admission must inspect the whole image.
 __global__ void selected(int *output) {
   __syncthreads();
-  output[threadIdx.x] = value;
+  output[threadIdx.x] = 11;
 }
 
 __global__ void sibling(int *output) {

@@ -188,7 +188,8 @@ struct DropBarrierResult {
 /// Reject unresolved/shared ownership. Multi-text,
 /// helpers and indirect flow remain outside this slice. Admission is not runtime or
 /// detector qualification.
-/// Non-aliasing unselected executable sections are preserved; declared executable
+/// Non-aliasing unselected executable sections are preserved after shared source checks;
+/// additional allocated executable sections must decode completely. Declared executable
 /// function/kernel owners outside .text require broader ownership analysis.
 [[nodiscard]] FailureOr<FaultBarrierInventory>
 discover_drop_barriers(const FaultMutationContext &context, std::string_view entry,
