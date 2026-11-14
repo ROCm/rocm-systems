@@ -42,6 +42,7 @@
 
 #include "core/inc/ipc_signal.h"
 
+#include <algorithm>
 #include <utility>
 
 #include "core/inc/runtime.h"
@@ -52,6 +53,13 @@ namespace rocr {
 namespace core {
 
 std::mutex IPCSignal::lock_;
+std::map<IPCSignal::IPCHandleKey, IPCSignal*> IPCSignal::attachments_;
+
+IPCSignal::~IPCSignal() {
+  std::lock_guard<std::mutex> lock(lock_);
+  auto it = attachments_.find(ipc_handle_);
+  if (it != attachments_.end() && it->second == this) attachments_.erase(it);
+}
 
 SharedMemory::SharedMemory(const hsa_amd_ipc_memory_t* handle, size_t len) {
   hsa_status_t err = Runtime::runtime_singleton_->IPCAttach(handle, len, 0, NULL, &ptr_);
@@ -78,6 +86,20 @@ void IPCSignal::CreateHandle(Signal* signal, hsa_amd_ipc_signal_t* ipc_handle) {
 }
 
 Signal* IPCSignal::Attach(const hsa_amd_ipc_signal_t* ipc_signal_handle) {
+  IPCHandleKey key;
+  std::copy_n(ipc_signal_handle->handle, key.size(), key.begin());
+
+  // Reuse an existing attachment before importing the shared memory again. The
+  // underlying DRM import is not idempotent for repeated imports of the same
+  // handle, while HSA signal handles are reference-counted.
+  std::lock_guard<std::mutex> lock(lock_);
+  auto it = attachments_.find(key);
+  if (it != attachments_.end()) {
+    Signal* ret = Signal::DuplicateHandle(Signal::Convert(it->second));
+    if (ret != nullptr) return ret;
+    attachments_.erase(it);
+  }
+
   SharedMemorySignal shared(ipc_signal_handle);
 
   if (!(shared.signal()->IsIPC()))
@@ -86,9 +108,11 @@ Signal* IPCSignal::Attach(const hsa_amd_ipc_signal_t* ipc_signal_handle) {
 
   hsa_signal_t handle = SharedSignal::Convert(shared.signal());
 
-  std::lock_guard<std::mutex> lock(lock_);
   Signal* ret = core::Signal::DuplicateHandle(handle);
-  if (ret == nullptr) ret = new IPCSignal(std::move(shared));
+  if (ret == nullptr) {
+    ret = new IPCSignal(std::move(shared), key);
+    attachments_.emplace(key, static_cast<IPCSignal*>(ret));
+  }
   return ret;
 }
 
