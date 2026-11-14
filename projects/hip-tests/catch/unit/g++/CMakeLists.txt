@@ -7,6 +7,7 @@ if(HIP_PLATFORM MATCHES "amd" AND UNIX AND GXX_EXEC)
     set(TEST_SRC
         hipMalloc.cc
         half_types.cc
+        host_defines_test.cc
     )
 
     add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/malloc.o
@@ -27,10 +28,17 @@ if(HIP_PLATFORM MATCHES "amd" AND UNIX AND GXX_EXEC)
     set_property(TARGET half_types PROPERTY IMPORTED_OBJECTS
         "${CMAKE_CURRENT_BINARY_DIR}/half_types.o")
 
+    add_custom_target(host_defines_custom COMMAND ${GXX_EXEC} -c
+        ${CMAKE_CURRENT_SOURCE_DIR}/host_defines_test.cpp -I${HIP_INCLUDE_DIR}
+        -fPIC -D__HIP_PLATFORM_AMD__ -o host_defines.o BYPRODUCTS host_defines.o)
+    add_library(host_defines OBJECT IMPORTED)
+    set_property(TARGET host_defines PROPERTY IMPORTED_OBJECTS
+        "${CMAKE_CURRENT_BINARY_DIR}/host_defines.o")
+
     hip_add_exe_to_target(NAME gppTests
                         TEST_SRC ${TEST_SRC}
                         TEST_TARGET_NAME build_tests
-                        LINKER_LIBS malloc_gpp half_types)
+                        LINKER_LIBS malloc_gpp half_types host_defines)
 
-    add_dependencies(gppTests malloc_custom half_custom)
+    add_dependencies(gppTests malloc_custom half_custom host_defines_custom)
 endif()
