@@ -120,7 +120,7 @@ fabric.rd_uncached:
     counted as two 32B uncached data requests.
 fabric.remote_rd:
   name: L2-Fabric Remote Read Requests
-  formula: SUM(NOISE_CLAMP(TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_DRAM_sum, TCC_EA0_RDREQ_sum)) / SUM($denom)
+  formula: SUM(TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_DRAM_sum) / SUM($denom)
   unit: (Requests + $normUnit)
   description: >-
     The total number of L2 requests to Infinity Fabric to read 32B or 64B of data
@@ -138,7 +138,7 @@ fabric.remote_rd_traffic:
     the L2-Fabric Read bandwidth directed to a remote location.
 fabric.remote_wr_atomic:
   name: L2-Fabric Remote Write and Atomic Requests
-  formula: SUM(NOISE_CLAMP(TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_DRAM_sum, TCC_EA0_WRREQ_sum)) / SUM($denom)
+  formula: SUM(TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_DRAM_sum) / SUM($denom)
   unit: (Requests + $normUnit)
   description: >-
     The total number of L2 requests to Infinity Fabric to write or atomically update
@@ -183,7 +183,7 @@ fabric.uncached_wr_atomic_traffic:
     to uncached memory allocations.
 fabric.wr_atomic_32b:
   name: L2-Fabric Write and Atomic Requests (32B)
-  formula: AVG(NOISE_CLAMP((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum) / $denom, TCC_EA0_WRREQ_sum))
+  formula: AVG((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum) / $denom)
   unit: (Requests + $normUnit)
   description: >-
     The total number of L2 requests to Infinity Fabric to write or atomically update

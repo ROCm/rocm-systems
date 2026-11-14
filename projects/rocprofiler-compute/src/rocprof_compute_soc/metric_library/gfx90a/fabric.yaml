@@ -2,7 +2,7 @@ remove:
   - fabric.rd_bw_norm
 fabric.ai_hbm:
   name: HBM Arithmetic Intensity
-  formula: SUM($wave_size * (SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16 + 2 * SQ_INSTS_VALU_FMA_F16 + SQ_INSTS_VALU_TRANS_F16 + SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32 + 2 * SQ_INSTS_VALU_FMA_F32 + SQ_INSTS_VALU_TRANS_F32 + SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64 + 2 * SQ_INSTS_VALU_FMA_F64 + SQ_INSTS_VALU_TRANS_F64) + SQ_INSTS_VALU_MFMA_MOPS_F16 * 512 + SQ_INSTS_VALU_MFMA_MOPS_BF16 * 512 + SQ_INSTS_VALU_MFMA_MOPS_F32 * 512 + SQ_INSTS_VALU_MFMA_MOPS_F64 * 512) / SUM(TCC_EA_RDREQ_32B_sum * 32 + (TCC_EA_RDREQ_sum - TCC_EA_RDREQ_32B_sum) * 64 + TCC_EA_WRREQ_64B_sum * 64 + (TCC_EA_WRREQ_sum - TCC_EA_WRREQ_64B_sum) * 32)
+  formula: SUM($valu_f16_flops + $valu_f32_flops + $valu_f64_flops + $mfma_f16_flops + $mfma_bf16_flops + $mfma_f32_flops + $mfma_f64_flops) / SUM($hbm_read_bytes + $hbm_write_bytes)
   unit: FLOPs/Byte
   description: >-
     The Arithmetic Intensity (AI) relative to High-Bandwidth Memory (HBM). It is the
@@ -42,11 +42,11 @@ fabric.rd_lat:
 fabric.rd_uncached:
   formula: SUM(TCC_EA_RD_UNCACHED_32B_sum) / SUM($denom)
 fabric.remote_rd:
-  formula: SUM(NOISE_CLAMP(TCC_EA_RDREQ_sum - TCC_EA_RDREQ_DRAM_sum, TCC_EA_RDREQ_sum)) / SUM($denom)
+  formula: SUM(TCC_EA_RDREQ_sum - TCC_EA_RDREQ_DRAM_sum) / SUM($denom)
 fabric.remote_rd_traffic:
   formula: 100 * SUM(TCC_EA_RDREQ_sum - TCC_EA_RDREQ_DRAM_sum) / SUM(TCC_EA_RDREQ_sum)
 fabric.remote_wr_atomic:
-  formula: SUM(NOISE_CLAMP(TCC_EA_WRREQ_sum - TCC_EA_WRREQ_DRAM_sum, TCC_EA_WRREQ_sum)) / SUM($denom)
+  formula: SUM(TCC_EA_WRREQ_sum - TCC_EA_WRREQ_DRAM_sum) / SUM($denom)
 fabric.remote_wr_atomic_traffic:
   formula: 100 * SUM(TCC_EA_WRREQ_sum - TCC_EA_WRREQ_DRAM_sum) / SUM(TCC_EA_WRREQ_sum)
 fabric.uncached_rd_traffic:
@@ -54,7 +54,7 @@ fabric.uncached_rd_traffic:
 fabric.uncached_wr_atomic_traffic:
   formula: 100 * SUM(TCC_EA_WR_UNCACHED_32B_sum) / SUM(TCC_EA_WRREQ_sum)
 fabric.wr_atomic_32b:
-  formula: AVG(NOISE_CLAMP((TCC_EA_WRREQ_sum - TCC_EA_WRREQ_64B_sum) / $denom, TCC_EA_WRREQ_sum))
+  formula: AVG((TCC_EA_WRREQ_sum - TCC_EA_WRREQ_64B_sum) / $denom)
 fabric.wr_atomic_64b:
   formula: SUM(TCC_EA_WRREQ_64B_sum) / SUM($denom)
 fabric.wr_atomic_bw:

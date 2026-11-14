@@ -16,7 +16,7 @@ between old and new formats, and what each self-contained PR delivers.
 
 **Scope:** Layers 2 and 3 -- metric library, display/view, and the compatibility adapter.
 Layer 1.5 (collectables) is a separate epic
-([single-pass metrics plan](../../single-pass_and_multi-pass_metrics/hld-plan.md#terms)).
+([single-pass metrics plan](../single-pass-and-multi-pass-metrics/hld-plan.md#terms)).
 Layer 1 (`sdk_config.yaml`) is out of scope. The metric formula evaluation engine (`eval_metric`, `build_eval_string`, `MetricEvaluator`) is unchanged --
 only where formulas are defined and how they reach the engine changes.
 
