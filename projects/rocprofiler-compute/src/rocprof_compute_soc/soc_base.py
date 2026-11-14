@@ -450,10 +450,8 @@ class OmniSoC_Base:
 
     @demarcate
     def perfmon_coalesce(self, counters: Set[str]) -> None:
-        """
-        Sort and bucket all related performance counters to minimize required
-        application passes
-        """
+        """Pack counters into perfmon passes and write one pmc_perf_<N>.yaml per
+        pass."""
         workload_perfmon_dir = Path(self.get_args().output_directory) / "perfmon"
         workload_perfmon_dir.mkdir(parents=True, exist_ok=True)
 
