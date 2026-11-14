@@ -164,6 +164,13 @@ struct LaunchFlags {
           {},
           "Override wait checks: off disables checks, on enables ordinary checks, and all includes "
           "gfx1250 XCNT checks. Not available with --attach"});
+  std::shared_ptr<rjtools::StringListFlag> option = std::make_shared<rjtools::StringListFlag>(
+      ucli::FlagInfo{"--option",
+                     {"-o"},
+                     "Override one top-level config value",
+                     ucli::ValueMode::Required,
+                     "KEY=VALUE"},
+      "requires KEY=VALUE");
   std::shared_ptr<ucli::BoolFlag> thread_budget_table = std::make_shared<ucli::BoolFlag>(
       ucli::FlagInfo{"--thread-budget-table",
                      {},
@@ -181,6 +188,35 @@ struct LaunchFlags {
                      {},
                      "Capture bounded directed GPU fabric effects in daemon or VFIO server mode",
                      ucli::ValueMode::Switch});
+  std::shared_ptr<rjtools::StringListFlag> env = std::make_shared<rjtools::StringListFlag>(
+      ucli::FlagInfo{"--env",
+                     {},
+                     "Add or replace an environment variable for the launched app",
+                     ucli::ValueMode::Required,
+                     "KEY=VALUE"},
+      "requires KEY=VALUE");
+  std::shared_ptr<ucli::BoolFlag> clear_env_vars = std::make_shared<ucli::BoolFlag>(
+      ucli::FlagInfo{"--clear-env-vars",
+                     {},
+                     "Start the launched app with a clean environment",
+                     ucli::ValueMode::Switch});
+  std::shared_ptr<rjtools::NonEmptyStringFlag> workdir =
+      std::make_shared<rjtools::NonEmptyStringFlag>(
+          ucli::FlagInfo{"--workdir",
+                         {},
+                         "Run the launched app from this directory",
+                         ucli::ValueMode::Required,
+                         "DIR"},
+          "requires a directory");
+  std::shared_ptr<ucli::BoolFlag> gdb = std::make_shared<ucli::BoolFlag>(
+      ucli::FlagInfo{"--gdb", {}, "Run the launched app under rocgdb", ucli::ValueMode::Switch});
+  std::shared_ptr<rjtools::StringListFlag> gdb_ex = std::make_shared<rjtools::StringListFlag>(
+      ucli::FlagInfo{"--gdb-ex",
+                     {},
+                     "Add a rocgdb command before the program",
+                     ucli::ValueMode::Required,
+                     "CMD"},
+      "requires a command");
   std::shared_ptr<rjtools::StringListFlag> vfio_socket = std::make_shared<rjtools::StringListFlag>(
       ucli::FlagInfo{
           "--vfio-socket",
@@ -205,14 +241,15 @@ struct LaunchFlags {
 
   util::Result register_flags(ucli::Command &command, util::DiagnosticEmitter diagnostic) const {
     if (command
-            .add_flags(
-                "Simulation configuration",
-                {config, profile, node, cpu_thread_budget, wait_checking, thread_budget_table},
-                diagnostic)
+            .add_flags("Simulation configuration",
+                       {config, profile, node, cpu_thread_budget, wait_checking, option,
+                        thread_budget_table},
+                       diagnostic)
             .failed() ||
         command
             .add_flags("Launch modes",
-                       {daemon, attach, fabric_effect_trace, vfio_socket, vfio_ready_fd},
+                       {daemon, attach, fabric_effect_trace, env, clear_env_vars, workdir, gdb,
+                        gdb_ex, vfio_socket, vfio_ready_fd},
                        diagnostic)
             .failed())
       return util::Result::failure();

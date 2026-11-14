@@ -19,7 +19,9 @@
 #include <cassert>
 #include <cstdint>
 #include <cstring>
+#include <optional>
 #include <string>
+#include <string_view>
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <sys/un.h>
@@ -324,12 +326,23 @@ inline bool rpc_send_exact(int sock, const void *buffer, size_t total_bytes,
 /// returning "" would root every derived path (socket, config, per-PID dirs) at
 /// the filesystem root and make the reapers iterate/delete from "/" or CWD, so we
 /// never return an empty string.
-inline std::string rpc_default_runtime_dir() {
-  if (const char *rj = getenv("ROCJITSU_RUNTIME_DIR"); rj && *rj)
-    return rj;
-  if (const char *xdg = getenv("XDG_RUNTIME_DIR"); xdg && *xdg)
-    return std::string(xdg) + "/rocjitsu";
+inline std::string rpc_default_runtime_dir(std::optional<std::string_view> rocjitsu_runtime_dir,
+                                           std::optional<std::string_view> xdg_runtime_dir) {
+  if (rocjitsu_runtime_dir && !rocjitsu_runtime_dir->empty())
+    return std::string(*rocjitsu_runtime_dir);
+  if (xdg_runtime_dir && !xdg_runtime_dir->empty())
+    return std::string(*xdg_runtime_dir) + "/rocjitsu";
   return "/tmp/rocjitsu-" + std::to_string(getuid());
+}
+
+inline std::optional<std::string_view> rpc_environment_value(const char *name) {
+  const char *value = getenv(name);
+  return value == nullptr ? std::nullopt : std::optional<std::string_view>(value);
+}
+
+inline std::string rpc_default_runtime_dir() {
+  return rpc_default_runtime_dir(rpc_environment_value("ROCJITSU_RUNTIME_DIR"),
+                                 rpc_environment_value("XDG_RUNTIME_DIR"));
 }
 
 /// @brief Default daemon socket path for the current user.
@@ -340,13 +353,12 @@ inline std::string rpc_default_config_file_path() {
   return rpc_default_runtime_dir() + "/config_path";
 }
 
-/// @brief Environment variable carrying the resolved per-invocation runtime dir.
+/// @brief Environment variable carrying the resolved runtime directory.
 /// @details The CLI exports this before execvp, so every descendant process
 /// (direct children and grandchildren spawned through wrappers like ctest)
 /// inherits the exact directory holding config_path/daemon.sock without
-/// re-deriving it from its own PID. Absent in attach mode, where the interposer
-/// falls back to its own PID-scoped runtime dir (which does not exist, so
-/// connect_to_daemon then uses the well-known socket).
+/// re-deriving it from its own PID. For attach launches, this names the
+/// validated daemon runtime directory instead of a new per-PID directory.
 inline constexpr char kRpcInvocationDirEnv[] = "ROCJITSU_INVOCATION_DIR";
 
 /// @brief Environment variable carrying the PID of the daemon the CLI forked.
