@@ -43,7 +43,7 @@ add_subdirectory(common)
 # Samples that use counters, SPM, thread trace or PC sampling program GPU-wide hardware
 # state, so concurrent instances on one GPU (ctest --parallel) can fault. They share this
 # lock, which is the same one the unit tests and device-profiling samples already use.
-set(ROCPROFILER_SAMPLES_GPU_PROFILING_LOCK "rocprofiler_device_counting_pmc")
+set(ROCPROFILER_SAMPLES_GPU_PROFILING_LOCK "rocprofiler_gpu_profiling")
 
 # actual samples
 add_subdirectory(api_callback_tracing)
