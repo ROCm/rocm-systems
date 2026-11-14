@@ -2716,7 +2716,8 @@ void BlitSdma<useGCR, scopeFields>::BuildFillCommand(char* cmd_addr, uint32_t nu
 }
 
 template <bool useGCR, bool scopeFields>
-void BlitSdma<useGCR, scopeFields>::BuildPollCommand(char* cmd_addr, void* addr, uint32_t reference) {
+void BlitSdma<useGCR, scopeFields>::BuildPollCommand(char* cmd_addr, void* addr, uint32_t reference,
+                                                     uint32_t mask, uint32_t func) {
   SDMA_PKT_POLL_REGMEM* packet_addr =
       reinterpret_cast<SDMA_PKT_POLL_REGMEM*>(cmd_addr);
 
@@ -2724,7 +2725,7 @@ void BlitSdma<useGCR, scopeFields>::BuildPollCommand(char* cmd_addr, void* addr,
 
   packet_addr->HEADER_UNION.op = SDMA_OP_POLL_REGMEM;
   packet_addr->HEADER_UNION.mem_poll = 1;
-  packet_addr->HEADER_UNION.func = 0x3;  // IsEqual.
+  packet_addr->HEADER_UNION.func = func;
   if (is_dxg_) {
     // On Windows/DXG, set the HDP flush bit if enabled and supported.
     // while on other platforms this bit keep as default (0).
@@ -2735,7 +2736,7 @@ void BlitSdma<useGCR, scopeFields>::BuildPollCommand(char* cmd_addr, void* addr,
 
   packet_addr->VALUE_UNION.value = reference;
 
-  packet_addr->MASK_UNION.mask = 0xffffffff;  // Compare the whole content.
+  packet_addr->MASK_UNION.mask = mask;
 
   packet_addr->DW5_UNION.interval = 0x04;
   packet_addr->DW5_UNION.retry_count = 0xfff;  // Retry forever.
@@ -2743,7 +2744,9 @@ void BlitSdma<useGCR, scopeFields>::BuildPollCommand(char* cmd_addr, void* addr,
 }
 
 template <bool useGCR, bool scopeFields>
-void BlitSdma<useGCR, scopeFields>::BuildPoll64bCommand(char* cmd_addr, void* addr, uint64_t reference) {
+void BlitSdma<useGCR, scopeFields>::BuildPoll64bCommand(char* cmd_addr, void* addr,
+                                                        uint64_t reference, uint64_t mask,
+                                                        uint32_t func) {
   SDMA_PKT_POLL_MEM_64B_GFX1250* pkt =
       reinterpret_cast<SDMA_PKT_POLL_MEM_64B_GFX1250*>(cmd_addr);
 
@@ -2751,7 +2754,7 @@ void BlitSdma<useGCR, scopeFields>::BuildPoll64bCommand(char* cmd_addr, void* ad
 
   pkt->HEADER_UNION.op = SDMA_OP_POLL_REGMEM;
   pkt->HEADER_UNION.sub_op = SDMA_SUBOP_POLL_MEM_64B;
-  pkt->HEADER_UNION.func = 0x3;  // Equal
+  pkt->HEADER_UNION.func = func;
 
   pkt->ADDR_LO_UNION.addr_31_3 = ptrlow32(addr) >> 3;
   pkt->ADDR_HI_UNION.addr_63_32 = ptrhigh32(addr);
@@ -2759,8 +2762,8 @@ void BlitSdma<useGCR, scopeFields>::BuildPoll64bCommand(char* cmd_addr, void* ad
   pkt->REFERENCE_LO_UNION.reference_31_0 = static_cast<uint32_t>(reference);
   pkt->REFERENCE_HI_UNION.reference_63_32 = static_cast<uint32_t>(reference >> 32);
 
-  pkt->MASK_LO_UNION.mask_31_0 = 0xffffffff;
-  pkt->MASK_HI_UNION.mask_63_32 = 0xffffffff;
+  pkt->MASK_LO_UNION.mask_31_0 = static_cast<uint32_t>(mask);
+  pkt->MASK_HI_UNION.mask_63_32 = static_cast<uint32_t>(mask >> 32);
 
   pkt->HEADER_UNION.sys = 1;  // Address is in system memory.
   pkt->DW7_UNION.retry_count = 0;  // Infinite retry
@@ -3028,19 +3031,148 @@ void BlitSdma<useGCR, scopeFields>::BuildWaitSignalSwapCommand(
 
 template <bool useGCR, bool scopeFields>
 void BlitSdma<useGCR, scopeFields>::BuildAtomicDecrementCommand(char* cmd_addr, void* addr) {
+  BuildAtomicCommand(cmd_addr, addr, SDMA_ATOMIC_ADD64, UINT64_MAX);
+}
+
+template <bool useGCR, bool scopeFields>
+void BlitSdma<useGCR, scopeFields>::BuildAtomicCommand(char* cmd_addr, void* addr,
+                                                       uint32_t operation, uint64_t data) {
   SDMA_PKT_ATOMIC* packet_addr = reinterpret_cast<SDMA_PKT_ATOMIC*>(cmd_addr);
 
   memset(packet_addr, 0, sizeof(SDMA_PKT_ATOMIC));
 
   packet_addr->HEADER_UNION.op = SDMA_OP_ATOMIC;
-  packet_addr->HEADER_UNION.operation = SDMA_ATOMIC_ADD64;
+  packet_addr->HEADER_UNION.operation = operation;
   if (scopeFields) packet_addr->HEADER_UNION.scope = SDMA_MEMORY_SCOPE_SYS;
 
   packet_addr->ADDR_LO_UNION.addr_31_0 = ptrlow32(addr);
   packet_addr->ADDR_HI_UNION.addr_63_32 = ptrhigh32(addr);
 
-  packet_addr->SRC_DATA_LO_UNION.src_data_31_0 = 0xffffffff;
-  packet_addr->SRC_DATA_HI_UNION.src_data_63_32 = 0xffffffff;
+  packet_addr->SRC_DATA_LO_UNION.src_data_31_0 = static_cast<uint32_t>(data);
+  packet_addr->SRC_DATA_HI_UNION.src_data_63_32 = static_cast<uint32_t>(data >> 32);
+}
+
+template <bool useGCR, bool scopeFields>
+hsa_status_t BlitSdma<useGCR, scopeFields>::BuildMemoryWaitCommand(char* cmd_addr, void* addr,
+                                                                   uint32_t function,
+                                                                   uint64_t value, uint64_t mask,
+                                                                   size_t* cmd_size) {
+  if (function == HSA_AMD_MEMORY_COPY_WAIT_ALWAYS) {
+    *cmd_size = 0;
+  } else if (is_gfx125plus_) {
+    BuildPoll64bCommand(cmd_addr, addr, value, mask, function);
+    *cmd_size = poll_64b_command_size_;
+  } else {
+    // POLL_REGMEM compares one dword: the masked compare must fit in one half.
+    uint32_t* dw = reinterpret_cast<uint32_t*>(addr);
+    if ((mask >> 32) == 0 && (value >> 32) == 0) {
+      BuildPollCommand(cmd_addr, &dw[0], static_cast<uint32_t>(value), static_cast<uint32_t>(mask),
+                       function);
+    } else if (static_cast<uint32_t>(mask) == 0 && static_cast<uint32_t>(value) == 0) {
+      BuildPollCommand(cmd_addr, &dw[1], static_cast<uint32_t>(value >> 32),
+                       static_cast<uint32_t>(mask >> 32), function);
+    } else {
+      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    }
+    *cmd_size = poll_command_size_;
+  }
+  return HSA_STATUS_SUCCESS;
+}
+
+template <bool useGCR, bool scopeFields>
+hsa_status_t BlitSdma<useGCR, scopeFields>::BuildMemorySignalCommand(char* cmd_addr, void* addr,
+                                                                     uint32_t operation,
+                                                                     uint64_t data,
+                                                                     size_t* cmd_size) {
+  *cmd_size = atomic_command_size_;
+  switch (operation) {
+    case HSA_AMD_MEMORY_COPY_SIGNAL_NONE:
+      *cmd_size = 0;
+      break;
+    case HSA_AMD_MEMORY_COPY_SIGNAL_WRITE:
+      BuildAtomicCommand(cmd_addr, addr, SDMA_ATOMIC_SWAP64, data);
+      break;
+    case HSA_AMD_MEMORY_COPY_SIGNAL_ADD:
+      BuildAtomicCommand(cmd_addr, addr, SDMA_ATOMIC_ADD64, data);
+      break;
+    case HSA_AMD_MEMORY_COPY_SIGNAL_SUB:
+      BuildAtomicCommand(cmd_addr, addr, SDMA_ATOMIC_ADD64, 0 - data);
+      break;
+    default:
+      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+  return HSA_STATUS_SUCCESS;
+}
+
+template <bool useGCR, bool scopeFields>
+hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitMemoryWait(
+    void* addr, uint32_t function, uint64_t value, uint64_t mask,
+    const std::vector<core::Signal*>& dep_signals, core::Signal& out_signal) {
+  char cmd[sizeof(SDMA_PKT_POLL_MEM_64B_GFX1250)];
+  size_t cmd_size;
+  hsa_status_t status = BuildMemoryWaitCommand(cmd, addr, function, value, mask, &cmd_size);
+  if (status != HSA_STATUS_SUCCESS) return status;
+  std::vector<core::Signal*> gang_signals;
+  return SubmitCommand(cmd, cmd_size, 0, dep_signals, out_signal, gang_signals);
+}
+
+template <bool useGCR, bool scopeFields>
+hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitMemorySignal(
+    void* addr, uint32_t operation, uint64_t data, const std::vector<core::Signal*>& dep_signals,
+    core::Signal& out_signal, core::Signal* ts_src) {
+  char cmd[sizeof(SDMA_PKT_COPY_LINEAR) + sizeof(SDMA_PKT_ATOMIC)];
+  size_t ts_size = 0;
+  if (ts_src != nullptr && agent_->profiling_enabled()) {
+    // Overwrites the start timestamp SubmitCommand writes ahead of the body.
+    uint64_t *src_start, *src_end, *dst_start, *dst_end;
+    ts_src->GetSdmaTsAddresses(src_start, src_end);
+    out_signal.GetSdmaTsAddresses(dst_start, dst_end);
+    BuildCopyCommand(cmd, 1, dst_start, src_start, sizeof(uint64_t));
+    ts_size = linear_copy_command_size_;
+  }
+  size_t cmd_size;
+  hsa_status_t status = BuildMemorySignalCommand(cmd + ts_size, addr, operation, data, &cmd_size);
+  if (status != HSA_STATUS_SUCCESS) return status;
+  std::vector<core::Signal*> gang_signals;
+  return SubmitCommand(cmd, ts_size + cmd_size, 0, dep_signals, out_signal, gang_signals);
+}
+
+template <bool useGCR, bool scopeFields>
+hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitLinearCopyWaitSignal(
+    void* dst, const void* src, size_t size, void* wait_addr, uint32_t wait_function,
+    uint64_t wait_value, uint64_t wait_mask, void* signal_addr, uint32_t signal_operation,
+    uint64_t signal_data, std::vector<core::Signal*>& dep_signals, core::Signal& out_signal) {
+  const size_t max_copy_size =
+      max_single_linear_copy_size_ ? max_single_linear_copy_size_ : kMaxSingleCopySize;
+  const uint32_t num_copy_command = (size + max_copy_size - 1) / max_copy_size;
+
+  // Poll, copies and atomic share one SubmitCommand: no internal signals between them.
+  const size_t gcr_size = useGCR ? gcr_command_size() : 0;
+  std::vector<char> cmd(sizeof(SDMA_PKT_POLL_MEM_64B_GFX1250) + 2 * gcr_size +
+                        num_copy_command * sizeof(SDMA_PKT_COPY_LINEAR) + sizeof(SDMA_PKT_ATOMIC));
+  size_t wait_size, signal_size;
+  hsa_status_t status = BuildMemoryWaitCommand(cmd.data(), wait_addr, wait_function, wait_value,
+                                               wait_mask, &wait_size);
+  if (status != HSA_STATUS_SUCCESS) return status;
+  size_t cmd_size = wait_size;
+  // SubmitCommand's GCRs bracket the whole body; repeat them around the user poll/atomic.
+  if (useGCR && wait_size != 0) {
+    BuildGCRCommand(cmd.data() + cmd_size, true);
+    cmd_size += gcr_size;
+  }
+  BuildCopyCommand(cmd.data() + cmd_size, num_copy_command, dst, src, size);
+  cmd_size += num_copy_command * sizeof(SDMA_PKT_COPY_LINEAR);
+  if (useGCR && signal_operation != HSA_AMD_MEMORY_COPY_SIGNAL_NONE) {
+    BuildGCRCommand(cmd.data() + cmd_size, false);
+    cmd_size += gcr_size;
+  }
+  status = BuildMemorySignalCommand(cmd.data() + cmd_size, signal_addr, signal_operation,
+                                    signal_data, &signal_size);
+  if (status != HSA_STATUS_SUCCESS) return status;
+  cmd_size += signal_size;
+
+  std::vector<core::Signal*> gang_signals;
+  return SubmitCommand(cmd.data(), cmd_size, size, dep_signals, out_signal, gang_signals);
 }
 
 template <bool useGCR, bool scopeFields>

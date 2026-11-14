@@ -45,11 +45,13 @@
 #ifndef HSA_RUNTIME_CORE_INC_AMD_GPU_AGENT_H_
 #define HSA_RUNTIME_CORE_INC_AMD_GPU_AGENT_H_
 
+#include <array>
 #include <atomic>
 #include <condition_variable>
 #include <mutex>
 #include <thread>
 #include <vector>
+#include <deque>
 #include <list>
 #include <map>
 
@@ -736,6 +738,10 @@ class GpuAgent : public GpuAgentInt {
   // @brief Mutex to protect sdma gang submissions.
   std::mutex sdma_gang_lock_;
 
+  // @brief Internal batch wait/signal chain signals, last one is the SDMA retire fence.
+  std::mutex ws_retire_lock_;
+  std::deque<std::array<core::Signal*, 3>> ws_retire_;
+
   // @brief GPU tick on initialization.
   HsaClockCounters t0_;
 
@@ -849,6 +855,13 @@ class GpuAgent : public GpuAgentInt {
   hsa_status_t DmaCopyMulti(
       const hsa_amd_memory_copy_op_t& op,
       std::vector<core::Signal*>& dep_signals);
+
+  // Frees batch wait/signal chains whose retire fence has fired, or all of them.
+  void RetireWaitSignalChains(bool all);
+
+  // Validates engine_offset for this copy and redirects same-GPU copies to the shader blit.
+  hsa_status_t ResolveDmaEngine(core::Agent& dst_agent, core::Agent& src_agent,
+                                bool force_copy_on_sdma, int* engine_offset);
 
   // SDMA-disabled shader-blit fallback for a single DmaCopyBatch op.  Selects
   // the blit shader based on op type: plain LINEAR uses the BlitDevToDev linear

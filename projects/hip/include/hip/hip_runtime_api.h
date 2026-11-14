@@ -6452,8 +6452,10 @@ hipError_t hipMemcpyBatchAsync(void** dsts, void** srcs, size_t* sizes, size_t c
  * @param [in] sizesDst    - Swap entries: bytes copied from dsts[i] to srcs[i],
  *                            0 < sizesDst[i] <= sizes[i]. Must be 0 for non-swap entries.
  *                            NULL = symmetric.
- * @param [in] waits       - Reserved for future use. Must be NULL.
- * @param [in] signals     - Reserved for future use. Must be NULL.
+ * @param [in] waits       - Optional array of count waits; copy i starts once waits[i] is
+ *                            satisfied. NULL = no waits.
+ * @param [in] signals     - Optional array of count signals; signals[i] is applied after
+ *                            copy i completes. NULL = no signals.
  * @param [in] count       - Number of copy operations.
  * @param [in] attrs       - Array of hipExtMemcpyAttributes.
  * @param [in] attrsIdxs   - Array mapping attributes to copy index ranges.

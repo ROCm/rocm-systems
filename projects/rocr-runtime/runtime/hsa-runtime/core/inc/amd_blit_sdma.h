@@ -198,6 +198,32 @@ class BlitSdmaBase : public core::Blit {
       core::Signal* body_signal = nullptr,
       const size_t* dst_size_list = nullptr) = 0;
 
+  /// @brief Poll user memory until (*addr & mask) <function> value holds, after
+  /// @p dep_signals; decrements @p out_signal when satisfied.
+  virtual hsa_status_t SubmitMemoryWait(void* addr, uint32_t function, uint64_t value,
+                                        uint64_t mask,
+                                        const std::vector<core::Signal*>& dep_signals,
+                                        core::Signal& out_signal) = 0;
+
+  /// @brief 64-bit write/add/sub of @p data to user memory after @p dep_signals;
+  /// decrements @p out_signal when done. SIGNAL_NONE skips the memory update.
+  /// When profiling, @p ts_src's start timestamp becomes @p out_signal's.
+  virtual hsa_status_t SubmitMemorySignal(void* addr, uint32_t operation, uint64_t data,
+                                          const std::vector<core::Signal*>& dep_signals,
+                                          core::Signal& out_signal,
+                                          core::Signal* ts_src = nullptr) = 0;
+
+  /// @brief Wait, linear copy and signal in one submission after @p dep_signals;
+  /// decrements @p out_signal when done. Function/operation 0 skips that step.
+  virtual hsa_status_t SubmitLinearCopyWaitSignal(
+      void* dst, const void* src, size_t size, void* wait_addr, uint32_t wait_function,
+      uint64_t wait_value, uint64_t wait_mask, void* signal_addr, uint32_t signal_operation,
+      uint64_t signal_data, std::vector<core::Signal*>& dep_signals, core::Signal& out_signal) = 0;
+
+  /// @brief False where SDMA polls are emulated on the host, or for signals
+  /// without 64-bit platform atomics.
+  virtual bool MemoryWaitSignalSupported(bool has_signal) const = 0;
+
   virtual bool SwapSupported() const = 0;
   virtual bool NativeAsymmetricSwapSupported() const = 0;
   virtual bool IndirectCopySupported() const = 0;
@@ -340,6 +366,26 @@ template <bool useGCR, bool scopeFields> class BlitSdma : public BlitSdmaBase {
       core::Signal* body_signal = nullptr,
       const size_t* dst_size_list = nullptr) override;
 
+  hsa_status_t SubmitMemoryWait(void* addr, uint32_t function, uint64_t value, uint64_t mask,
+                                const std::vector<core::Signal*>& dep_signals,
+                                core::Signal& out_signal) override;
+
+  hsa_status_t SubmitMemorySignal(void* addr, uint32_t operation, uint64_t data,
+                                  const std::vector<core::Signal*>& dep_signals,
+                                  core::Signal& out_signal,
+                                  core::Signal* ts_src = nullptr) override;
+
+  hsa_status_t SubmitLinearCopyWaitSignal(void* dst, const void* src, size_t size, void* wait_addr,
+                                          uint32_t wait_function, uint64_t wait_value,
+                                          uint64_t wait_mask, void* signal_addr,
+                                          uint32_t signal_operation, uint64_t signal_data,
+                                          std::vector<core::Signal*>& dep_signals,
+                                          core::Signal& out_signal) override;
+
+  bool MemoryWaitSignalSupported(bool has_signal) const override {
+    return !sw_poll_workaround_ && (!has_signal || platform_atomic_support_);
+  }
+
   bool SwapSupported() const override { return swap_supported_; }
   bool NativeAsymmetricSwapSupported() const override { return false; }
   bool IndirectCopySupported() const override { return indirect_copy_supported_; }
@@ -418,9 +464,11 @@ template <bool useGCR, bool scopeFields> class BlitSdma : public BlitSdmaBase {
   void BuildFillCommand(char* cmd_addr, uint32_t num_fill_command, void* ptr, uint32_t value,
                         size_t count);
 
-  void BuildPollCommand(char* cmd_addr, void* addr, uint32_t reference);
+  void BuildPollCommand(char* cmd_addr, void* addr, uint32_t reference, uint32_t mask = 0xffffffff,
+                        uint32_t func = 0x3);
 
-  void BuildPoll64bCommand(char* cmd_addr, void* addr, uint64_t reference);
+  void BuildPoll64bCommand(char* cmd_addr, void* addr, uint64_t reference,
+                           uint64_t mask = UINT64_MAX, uint32_t func = 0x3);
 
   void BuildFence64bCommand(char* cmd_addr, void* fence_addr, uint64_t fence_value);
 
@@ -444,6 +492,14 @@ template <bool useGCR, bool scopeFields> class BlitSdma : public BlitSdmaBase {
       core::Signal* signal_signal);
 
   void BuildAtomicDecrementCommand(char* cmd_addr, void* addr);
+
+  void BuildAtomicCommand(char* cmd_addr, void* addr, uint32_t operation, uint64_t data);
+
+  // User-memory wait/signal packets; *cmd_size is 0 for ALWAYS/NONE.
+  hsa_status_t BuildMemoryWaitCommand(char* cmd_addr, void* addr, uint32_t function, uint64_t value,
+                                      uint64_t mask, size_t* cmd_size);
+  hsa_status_t BuildMemorySignalCommand(char* cmd_addr, void* addr, uint32_t operation,
+                                        uint64_t data, size_t* cmd_size);
 
   void BuildGetGlobalTimestampCommand(char* cmd_addr, void* write_address);
 

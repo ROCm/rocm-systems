@@ -3049,6 +3049,36 @@ static inline unsigned int getBatchCopyFlags(hipExtMemcpyAttributes* attrs, size
 }
 
 // ================================================================================================
+// Returns true if the per-entry wait and signal are well formed.
+static bool validateBatchWaitSignal(const hipExtMemcpyWait* wait,
+                                    const hipExtMemcpySignal* signal) {
+  auto aligned8 = [](const void* p) { return (reinterpret_cast<uintptr_t>(p) & 7) == 0; };
+  if (wait != nullptr) {
+    if (wait->compareOp > hipExtMemcpyWaitGt || wait->reserved0 != 0) return false;
+    for (uint64_t r : wait->reserved) {
+      if (r != 0) return false;
+    }
+    if (wait->compareOp == hipExtMemcpyWaitNone) {
+      if (wait->addr != nullptr || wait->value != 0 || wait->mask != 0) return false;
+    } else if (wait->addr == nullptr || !aligned8(wait->addr)) {
+      return false;
+    }
+  }
+  if (signal != nullptr) {
+    if (signal->signalOp > hipExtMemcpySignalSub || signal->reserved0 != 0) return false;
+    for (uint64_t r : signal->reserved) {
+      if (r != 0) return false;
+    }
+    if (signal->signalOp == hipExtMemcpySignalNone) {
+      if (signal->addr != nullptr || signal->data != 0) return false;
+    } else if (signal->addr == nullptr || !aligned8(signal->addr)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+// ================================================================================================
 hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t* sizesDst,
                            hipExtMemcpyWait* waits, hipExtMemcpySignal* signals,
                            size_t count,
@@ -3138,9 +3168,13 @@ hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t* size
     }
   }
 
-  // Per-entry waits/signals are reserved.
   if (waits != nullptr || signals != nullptr) {
-    return hipErrorNotSupported;
+    for (size_t i = 0; i < count; ++i) {
+      if (!validateBatchWaitSignal(waits != nullptr ? &waits[i] : nullptr,
+                                   signals != nullptr ? &signals[i] : nullptr)) {
+        return fail(i, hipErrorInvalidValue);
+      }
+    }
   }
 
   // Pre-compute memory objects once per copy to avoid repeated expensive
@@ -3245,6 +3279,30 @@ hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t* size
     }
 
     const unsigned int copyFlags = getBatchCopyFlags(attrs, attrsIdxs, numAttrs, i, attrIdx);
+
+    // Waits/signals run on SDMA and need memory objects on both sides.
+    amd::BatchCopyWait wait;
+    amd::BatchCopySignal signal;
+    if (waits != nullptr && waits[i].compareOp != hipExtMemcpyWaitNone) {
+      wait.addr = waits[i].addr;
+      wait.value = waits[i].value;
+      wait.mask = (waits[i].mask == 0) ? UINT64_MAX : waits[i].mask;
+      wait.function = waits[i].compareOp;
+    }
+    if (signals != nullptr && signals[i].signalOp != hipExtMemcpySignalNone) {
+      signal.addr = signals[i].addr;
+      signal.data = signals[i].data;
+      signal.operation = signals[i].signalOp;
+    }
+    const bool hasWaitSignal = wait.function != 0 || signal.operation != 0;
+    if (hasWaitSignal &&
+        ((type != hipCopyBuffer && type != hipCopyBufferSDMA && type != hipCopyBufferP2P) ||
+         (copyFlags & hipMemcpyFlagExtPreferComputeEngine) ||
+         (getMemoryType(srcMemories[i]) == hipMemoryTypeHost &&
+          getMemoryType(dstMemories[i]) == hipMemoryTypeHost))) {
+      return fail(i, hipErrorNotSupported);
+    }
+
     if (copyFlags & kExtOpFlagMask) {
       switch (type) {
         case hipCopyBuffer:
@@ -3302,20 +3360,43 @@ hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t* size
                   ? srcMemories[i]->getUserData().deviceId
                   : dstMemories[i]->getUserData().deviceId;
         }
+        if (hasWaitSignal) {
+          // ROCr on the executing device would reject these asynchronously, too late to report.
+          const amd::Device& sdmaDev = *g_devices[device_id]->devices()[0];
+          if (!sdmaDev.settings().sdma_wait_signal_supported_ ||
+              (signal.operation != 0 && !sdmaDev.info().pcie_atomics_)) {
+            return fail(i, hipErrorNotSupported);
+          }
+          if (wait.function != 0 && !sdmaDev.settings().sdma_poll64_supported_) {
+            // The masked compare must fit in one dword.
+            const bool lo = (wait.mask >> 32) == 0 && (wait.value >> 32) == 0;
+            const bool hi =
+                static_cast<uint32_t>(wait.mask) == 0 && static_cast<uint32_t>(wait.value) == 0;
+            if (!lo && !hi) return fail(i, hipErrorNotSupported);
+          }
+        }
+        auto& ops = copy_ops_by_device[device_id];
         if (sizeB > 0 && sizeB != sizes[i]
             && !stream.device().settings().sdma_asymmetric_swap_supported_) {
+          // A single signal can't cover the two decomposed ops.
+          if (signal.operation != 0) {
+            return fail(i, hipErrorNotSupported);
+          }
           // Decompose: symmetric swap of [0, sizeB) plus a linear copy of the src tail
           // [sizeB, sizes[i]). The ranges are disjoint, so the two ops are order-independent.
-          copy_ops_by_device[device_id].emplace_back(srcMemories[i], dstMemories[i], srcOffsets[i],
-                                                     dstOffsets[i], sizeB, metadata);
+          ops.emplace_back(srcMemories[i], dstMemories[i], srcOffsets[i], dstOffsets[i], sizeB,
+                           metadata);
+          ops.back().wait = wait;
           amd::CopyMetadata tailMeta = metadata;
           tailMeta.copyOpType_ = amd::CopyMetadata::kCopyOpLinear;
-          copy_ops_by_device[device_id].emplace_back(srcMemories[i], dstMemories[i],
-                                                     srcOffsets[i] + sizeB, dstOffsets[i] + sizeB,
-                                                     sizes[i] - sizeB, tailMeta);
+          ops.emplace_back(srcMemories[i], dstMemories[i], srcOffsets[i] + sizeB,
+                           dstOffsets[i] + sizeB, sizes[i] - sizeB, tailMeta);
+          ops.back().wait = wait;
         } else {
-          copy_ops_by_device[device_id].emplace_back(srcMemories[i], dstMemories[i], srcOffsets[i],
-                                                     dstOffsets[i], sizes[i], metadata, sizeB);
+          ops.emplace_back(srcMemories[i], dstMemories[i], srcOffsets[i], dstOffsets[i], sizes[i],
+                           metadata, sizeB);
+          ops.back().wait = wait;
+          ops.back().signal = signal;
         }
         break;
       }

@@ -73,6 +73,7 @@ const unsigned int SDMA_SUBOP_FENCE_64B = 2;
 const unsigned int SDMA_SUBOP_POLL_MEM_64B = 5;
 const unsigned int SDMA_SUBOP_TIMESTAMP_GET_GLOBAL = 2;
 const unsigned int SDMA_SUBOP_USER_GCR = 1;
+const unsigned int SDMA_ATOMIC_SWAP64 = 39;
 const unsigned int SDMA_ATOMIC_ADD64 = 47;
 
 const unsigned int SDMA_MEMORY_SCOPE_CU = 0;  /* workgroup scope */

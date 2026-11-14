@@ -1238,6 +1238,21 @@ class CopyMemoryCommand : public TwoMemoryArgsCommand {
   bool isEntireMemory() const;
 };
 
+//! Poll before a batch copy op: (*addr & mask) <function> value (function 0 = none)
+struct BatchCopyWait {
+  void* addr{nullptr};
+  uint64_t value{0};
+  uint64_t mask{0};
+  uint32_t function{0};
+};
+
+//! Write/add/sub to memory after a batch copy op (operation 0 = none)
+struct BatchCopySignal {
+  void* addr{nullptr};
+  uint64_t data{0};
+  uint32_t operation{0};
+};
+
 //! Structure to hold individual copy operation info for batch copies
 struct BatchCopyOp {
   Memory* srcMemory;       //!< Source memory object
@@ -1247,6 +1262,10 @@ struct BatchCopyOp {
   size_t size;             //!< Size of the copy in bytes
   size_t sizeB{0};         //!< Swap dst-side size (0 = symmetric)
   CopyMetadata metadata;   //!< Copy metadata for this operation
+  BatchCopyWait wait;      //!< Optional wait before the copy
+  BatchCopySignal signal;  //!< Optional signal after the copy
+
+  bool hasWaitSignal() const { return wait.function != 0 || signal.operation != 0; }
 
   BatchCopyOp(Memory* src, Memory* dst, size_t srcOff, size_t dstOff,
               size_t sz, CopyMetadata meta = CopyMetadata(), size_t szB = 0)

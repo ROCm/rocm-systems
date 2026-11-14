@@ -652,6 +652,8 @@ inline constexpr char const kConcurrentManagedAccessUnsupported[] =
     "device does not support concurrent managed access.";
 inline constexpr char const kSdmaIndirectUnsupported[] =
     "SDMA indirect copy is not supported on this device.";
+inline constexpr char const kSdmaWaitSignalUnsupported[] =
+    "SDMA copy wait/signal is not supported on this device.";
 }  // namespace SkipReason
 
 /**

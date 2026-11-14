@@ -810,6 +810,20 @@ bool DmaBlitManager::hsaCopyBatch(const std::vector<amd::BatchCopyOp>& copyOps,
       break;
     }
 
+    if (op.wait.function != 0) {
+      hsaOp.wait.function = static_cast<uint16_t>(op.wait.function);
+      hsaOp.wait.scope = HSA_FENCE_SCOPE_SYSTEM;
+      hsaOp.wait.addr = op.wait.addr;
+      hsaOp.wait.value = op.wait.value;
+      hsaOp.wait.mask = op.wait.mask;
+    }
+    if (op.signal.operation != 0) {
+      hsaOp.signal.operation = static_cast<uint16_t>(op.signal.operation);
+      hsaOp.signal.scope = HSA_FENCE_SCOPE_SYSTEM;
+      hsaOp.signal.addr = op.signal.addr;
+      hsaOp.signal.data = op.signal.data;
+    }
+
     hsaCopyOps.push_back(hsaOp);
   }
 
@@ -905,6 +919,9 @@ bool DmaBlitManager::rocrCopyBufferBatch(const std::vector<hsa_amd_memory_copy_o
     };
     std::map<hsa_amd_memory_copy_op_type_t, IndirectBucket> indirectPending;
 
+    // Ops with a wait or signal are submitted as-is; merging would change their scope.
+    std::vector<hsa_amd_memory_copy_op_t> waitSignalOps;
+
     auto isIndirectType = [](hsa_amd_memory_copy_op_type_t type) -> bool {
       switch (type) {
         case HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRC:
@@ -917,6 +934,11 @@ bool DmaBlitManager::rocrCopyBufferBatch(const std::vector<hsa_amd_memory_copy_o
     };
 
     for (const auto& op : ops) {
+      if (op.wait.function != HSA_AMD_MEMORY_COPY_WAIT_ALWAYS ||
+          op.signal.operation != HSA_AMD_MEMORY_COPY_SIGNAL_NONE) {
+        waitSignalOps.push_back(op);
+        continue;
+      }
       if (op.type == HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP) {
         if (swapPending.srcs.empty()) swapSrcAgent = op.src_agent;
         swapPending.srcs.push_back(op.src);
@@ -1069,6 +1091,8 @@ bool DmaBlitManager::rocrCopyBufferBatch(const std::vector<hsa_amd_memory_copy_o
       indirect.num_entries = static_cast<uint16_t>(stored.srcs.size());
       finalOps.push_back(indirect);
     }
+
+    finalOps.insert(finalOps.end(), waitSignalOps.begin(), waitSignalOps.end());
 
     // Assign one completion signal per op in a single place.
     for (auto& op : finalOps) {
@@ -3361,9 +3385,9 @@ bool KernelBlitManager::copyBufferBatch(const std::vector<amd::BatchCopyOp>& cop
     const Memory& srcMem = gpuMem(*srcDevMem);
     const Memory& dstMem = gpuMem(*dstDevMem);
     bool isLinearCopyOp = op.metadata.copyOpType_ == amd::CopyMetadata::kCopyOpLinear;
-    // ShaderCopyBufferBatch only describes linear copies; route swap/other ops through DMA.
-    bool useShaderCopyPath =
-        isLinearCopyOp && useShaderCopyBufferPath(srcMem, dstMem, op.size, op.metadata);
+    // ShaderCopyBufferBatch only describes linear copies without wait/signal.
+    bool useShaderCopyPath = isLinearCopyOp && !op.hasWaitSignal() &&
+                             useShaderCopyBufferPath(srcMem, dstMem, op.size, op.metadata);
 
     if (useShaderCopyPath) {
       d2dCopyOps.push_back(op);
@@ -3379,16 +3403,18 @@ bool KernelBlitManager::copyBufferBatch(const std::vector<amd::BatchCopyOp>& cop
   if (!p2pCopyOps.empty()) {
     // Always pass prior wait events to maintain stream ordering for the batch.
     if (!hsaCopyBatch(p2pCopyOps, &priorWaitEvents, &batchSignals)) {
-      // Shader copy is linear only; fail the batch if it has swap/indirect ops.
+      // Shader copy is linear only and can't wait/signal; fail the batch otherwise.
       bool hasNonLinear = false;
       for (const auto& op : p2pCopyOps) {
-        if (op.metadata.copyOpType_ != amd::CopyMetadata::kCopyOpLinear) {
+        if (op.metadata.copyOpType_ != amd::CopyMetadata::kCopyOpLinear || op.hasWaitSignal()) {
           hasNonLinear = true;
           break;
         }
       }
       if (hasNonLinear) {
-        LogError("KernelBlitManager::copyBufferBatch: SDMA batch with swap/indirect ops failed");
+        LogError(
+            "KernelBlitManager::copyBufferBatch: SDMA batch with swap/indirect or "
+            "wait/signal ops failed");
         return false;
       }
       LogWarning(

@@ -216,6 +216,11 @@ bool Settings::create(bool fullProfile, const amd::Isa& isa, bool enableXNACK, b
     sdma_indirect_max_size_ = 0x3fffffff;  // ROCr MaxSingleLinearCopySize
   }
 
+  // ROCr emulates SDMA polls on the host for gfx90x other than gfx90a.
+  sdma_wait_signal_supported_ = !(gfxipMajor == 9 && gfxipMinor == 0 && gfxStepping != 10);
+  // Older SDMA polls compare one dword.
+  sdma_poll64_supported_ = (gfxipMajor == 12 && gfxipMinor >= 5);
+
   sdma_asymmetric_swap_supported_ = false;
 
 #if defined(_WIN32)
