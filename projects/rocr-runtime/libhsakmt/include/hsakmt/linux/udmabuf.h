@@ -1,7 +1,11 @@
 /* SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note
- * This file was copied from Linux Kernel Source code
- * This header provides interface to linux kernel udmabuf driver
- * Minor modifications may have been made.
+ *
+ * Derived from Linux kernel:
+ * include/uapi/linux/udmabuf.h
+ * Upstream version/commit: <fbb0de795078190a9834b3409e4b009cfb18a6d4>
+ *
+ * Modified by Advanced Micro Devices, Inc. on < 2025-July-18>
+ * - Changed the include guard for thunk integration.
  */
 #ifndef _THUNK_UDMABUF_H
 #define _THUNK_UDMABUF_H
