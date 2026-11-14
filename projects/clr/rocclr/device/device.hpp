@@ -2613,6 +2613,8 @@ class Device : public RuntimeObject {
 
   static std::vector<Device*>* devices_;  //!< All known devices
   static std::recursive_mutex lockP2P_;
+  //! Set in tearDown so removeVACache does not lock a device already destroyed.
+  static std::atomic<bool> deviceTearDown_;
   std::recursive_mutex* vaCacheAccess_;               //!< Lock to serialize VA caching access
   std::map<uintptr_t, device::Memory*>* vaCacheMap_;  //!< VA cache map
   uint32_t index_;                                    //!< Unique device index
