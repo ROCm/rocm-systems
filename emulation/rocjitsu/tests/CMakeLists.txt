@@ -78,8 +78,24 @@ target_link_libraries(
 rj_configure_target(rccl_tcp_bootstrap_test TEST)
 rj_add_gtest_tests(rccl_tcp_bootstrap_test)
 
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
 set(_rj_cli_failure_script
     "${CMAKE_CURRENT_SOURCE_DIR}/check_cli_failure.cmake"
+)
+set(_rj_process_grid_script
+    "${CMAKE_CURRENT_SOURCE_DIR}/process_grid_test.cmake"
+)
+set(_rj_process_grid_failure_script
+    "${CMAKE_CURRENT_SOURCE_DIR}/process_grid_failure_test.cmake"
+)
+set(_rj_process_grid_signal_script
+    "${CMAKE_CURRENT_SOURCE_DIR}/process_grid_signal_test.cmake"
+)
+set(_rj_process_grid_pid1_script
+    "${CMAKE_CURRENT_SOURCE_DIR}/process_grid_pid1_test.cmake"
+)
+set(_rj_process_grid_rccl_script
+    "${CMAKE_CURRENT_SOURCE_DIR}/process_grid_rccl_test.cmake"
 )
 add_test(NAME RocjitsuVersion COMMAND $<TARGET_FILE:rocjitsu_bin> --version)
 set_tests_properties(
@@ -212,6 +228,139 @@ set_tests_properties(
     PROPERTIES
         PASS_REGULAR_EXPRESSION
             "--cpu-thread-budget cannot be combined with --attach"
+)
+
+add_test(
+    NAME RocjitsuProcessGrid
+    COMMAND
+        ${CMAKE_COMMAND} "-DTEST_EXECUTABLE=$<TARGET_FILE:rocjitsu_bin>"
+        "-DTEST_RUNTIME_DIR=${CMAKE_CURRENT_BINARY_DIR}/runtime/RocjitsuProcessGrid"
+        "-DTEST_OUTPUT_DIR=${CMAKE_CURRENT_BINARY_DIR}/process-grid/RocjitsuProcessGrid"
+        "-DTEST_NPROC_FLAG=--nproc-per-node" -P ${_rj_process_grid_script}
+)
+add_test(
+    NAME RocjitsuProcessGridUnderscoreAlias
+    COMMAND
+        ${CMAKE_COMMAND} "-DTEST_EXECUTABLE=$<TARGET_FILE:rocjitsu_bin>"
+        "-DTEST_RUNTIME_DIR=${CMAKE_CURRENT_BINARY_DIR}/runtime/RocjitsuProcessGridUnderscoreAlias"
+        "-DTEST_OUTPUT_DIR=${CMAKE_CURRENT_BINARY_DIR}/process-grid/RocjitsuProcessGridUnderscoreAlias"
+        "-DTEST_NPROC_FLAG=--nproc_per_node" -P ${_rj_process_grid_script}
+)
+add_test(
+    NAME RocjitsuProcessGridTerminatesPeersOnFailure
+    COMMAND
+        ${CMAKE_COMMAND} "-DTEST_EXECUTABLE=$<TARGET_FILE:rocjitsu_bin>"
+        "-DTEST_RUNTIME_DIR=${CMAKE_CURRENT_BINARY_DIR}/runtime/RocjitsuProcessGridTerminatesPeersOnFailure"
+        "-DTEST_OUTPUT_DIR=${CMAKE_CURRENT_BINARY_DIR}/process-grid/RocjitsuProcessGridTerminatesPeersOnFailure"
+        "-DPYTHON_EXECUTABLE=${Python3_EXECUTABLE}" -P
+        ${_rj_process_grid_failure_script}
+)
+add_test(
+    NAME RocjitsuProcessGridTerminatesRanksOnSignal
+    COMMAND
+        ${CMAKE_COMMAND} "-DTEST_EXECUTABLE=$<TARGET_FILE:rocjitsu_bin>"
+        "-DTEST_RUNTIME_DIR=${CMAKE_CURRENT_BINARY_DIR}/runtime/RocjitsuProcessGridTerminatesRanksOnSignal"
+        "-DTEST_OUTPUT_DIR=${CMAKE_CURRENT_BINARY_DIR}/process-grid/RocjitsuProcessGridTerminatesRanksOnSignal"
+        "-DPYTHON_EXECUTABLE=${Python3_EXECUTABLE}" -P
+        ${_rj_process_grid_signal_script}
+)
+add_test(
+    NAME RocjitsuProcessGridRunsAsPidOne
+    COMMAND
+        ${CMAKE_COMMAND} "-DTEST_EXECUTABLE=$<TARGET_FILE:rocjitsu_bin>"
+        "-DTEST_RUNTIME_DIR=${CMAKE_CURRENT_BINARY_DIR}/runtime/RocjitsuProcessGridRunsAsPidOne"
+        -P ${_rj_process_grid_pid1_script}
+)
+set_tests_properties(
+    RocjitsuProcessGridRunsAsPidOne
+    PROPERTIES SKIP_REGULAR_EXPRESSION "ROCJITSU_PROCESS_GRID_PID1_SKIP"
+)
+add_test(
+    NAME RocjitsuNumNodesRejectsZero
+    COMMAND
+        ${CMAKE_COMMAND} "-DTEST_EXECUTABLE=$<TARGET_FILE:rocjitsu_bin>"
+        "-DTEST_ARGS=--num-nodes;0;--;/usr/bin/true"
+        "-DTEST_REGEX=--num-nodes requires a positive integer" -P
+        ${_rj_cli_failure_script}
+)
+add_test(
+    NAME RocjitsuNprocPerNodeRejectsNonNumeric
+    COMMAND
+        ${CMAKE_COMMAND} "-DTEST_EXECUTABLE=$<TARGET_FILE:rocjitsu_bin>"
+        "-DTEST_ARGS=--nproc_per_node;two;--;/usr/bin/true"
+        "-DTEST_REGEX=--nproc-per-node requires a positive integer" -P
+        ${_rj_cli_failure_script}
+)
+add_test(
+    NAME RocjitsuProcessGridRejectsTooLarge
+    COMMAND
+        ${CMAKE_COMMAND} "-DTEST_EXECUTABLE=$<TARGET_FILE:rocjitsu_bin>"
+        "-DTEST_ARGS=--num-nodes;4097;--nproc-per-node;1;--;/usr/bin/true"
+        "-DTEST_REGEX=would launch 4097 processes; maximum is 4096" -P
+        ${_rj_cli_failure_script}
+)
+add_test(
+    NAME RocjitsuProcessGridRejectsAttach
+    COMMAND
+        ${CMAKE_COMMAND} "-DTEST_EXECUTABLE=$<TARGET_FILE:rocjitsu_bin>"
+        "-DTEST_ARGS=--num-nodes;2;--attach;--;/usr/bin/true"
+        "-DTEST_REGEX=process grid options require local in-process mode" -P
+        ${_rj_cli_failure_script}
+)
+add_test(
+    NAME RocjitsuProcessGridRejectsGdb
+    COMMAND
+        ${CMAKE_COMMAND} "-DTEST_EXECUTABLE=$<TARGET_FILE:rocjitsu_bin>"
+        "-DTEST_ARGS=--nproc-per-node;1;--gdb;--;/usr/bin/true"
+        "-DTEST_REGEX=process grid options cannot be combined with --gdb or --gdb-ex"
+        -P ${_rj_cli_failure_script}
+)
+add_test(
+    NAME RocjitsuProcessGridRejectsGdbEx
+    COMMAND
+        ${CMAKE_COMMAND} "-DTEST_EXECUTABLE=$<TARGET_FILE:rocjitsu_bin>"
+        "-DTEST_ARGS=--nproc-per-node;1;--gdb-ex;run;--;/usr/bin/true"
+        "-DTEST_REGEX=process grid options cannot be combined with --gdb or --gdb-ex"
+        -P ${_rj_cli_failure_script}
+)
+add_test(
+    NAME RocjitsuProcessGridRejectsEnvRank
+    COMMAND
+        ${CMAKE_COMMAND} "-DTEST_EXECUTABLE=$<TARGET_FILE:rocjitsu_bin>"
+        "-DTEST_ARGS=--nproc-per-node;2;--env;RANK=caller;--;/usr/bin/true"
+        "-DTEST_REGEX=process grid owns environment variable RANK" -P
+        ${_rj_cli_failure_script}
+)
+add_test(
+    NAME RocjitsuProcessGridRejectsFileSink
+    COMMAND
+        ${CMAKE_COMMAND} "-DTEST_EXECUTABLE=$<TARGET_FILE:rocjitsu_bin>"
+        "-DTEST_ARGS=--config;${CMAKE_CURRENT_SOURCE_DIR}/fixtures/process_grid_file_sink_config.json;--nproc-per-node;2;--;/usr/bin/true"
+        "-DTEST_REGEX=process grid does not support config file sinks" -P
+        ${_rj_cli_failure_script}
+)
+add_test(
+    NAME RocjitsuProcessGridSingleFileSinkSkipsGridGuard
+    COMMAND
+        ${CMAKE_COMMAND} "-DTEST_EXECUTABLE=$<TARGET_FILE:rocjitsu_bin>"
+        "-DTEST_ARGS=--config;${CMAKE_CURRENT_SOURCE_DIR}/fixtures/process_grid_file_sink_config.json;--nproc-per-node;1;--;/usr/bin/true"
+        "-DTEST_REGEX=unknown field: sinks" -P ${_rj_cli_failure_script}
+)
+add_test(
+    NAME RocjitsuProcessGridRejectsDbtSimulatorFileSink
+    COMMAND
+        ${CMAKE_COMMAND} "-DTEST_EXECUTABLE=$<TARGET_FILE:rocjitsu_bin>"
+        "-DTEST_ARGS=--config;${CMAKE_CURRENT_SOURCE_DIR}/fixtures/process_grid_dbt_file_sink_guest.json;--nproc-per-node;2;--;/usr/bin/true"
+        "-DTEST_REGEX=process grid does not support config file sinks" -P
+        ${_rj_cli_failure_script}
+)
+add_test(
+    NAME RocjitsuProcessGridRejectsThreadBudgetTable
+    COMMAND
+        ${CMAKE_COMMAND} "-DTEST_EXECUTABLE=$<TARGET_FILE:rocjitsu_bin>"
+        "-DTEST_ARGS=--num-nodes;2;--thread-budget-table"
+        "-DTEST_REGEX=--thread-budget-table cannot be combined with launch-only options"
+        -P ${_rj_cli_failure_script}
 )
 
 add_test(
@@ -5714,6 +5863,31 @@ if(RJ_ENABLE_HIP_TESTS)
                         ${RJ_HIP_TSAN_INSTALL_ENV}
                 )
             endforeach()
+            add_test(
+                NAME RocjitsuProcessGridRcclAllReduce
+                COMMAND
+                    ${CMAKE_COMMAND}
+                    "-DTEST_EXECUTABLE=$<TARGET_FILE:rocjitsu_bin>"
+                    "-DTEST_RCCL_EXECUTABLE=${CMAKE_CURRENT_BINARY_DIR}/hip_rccl_test"
+                    "-DTEST_RUNTIME_DIR=${CMAKE_CURRENT_BINARY_DIR}/runtime/RocjitsuProcessGridRcclAllReduce"
+                    "-DTEST_SHARED_DIR=${CMAKE_CURRENT_BINARY_DIR}/process-grid/RocjitsuProcessGridRcclAllReduce"
+                    -P ${_rj_process_grid_rccl_script}
+            )
+            set_tests_properties(
+                RocjitsuProcessGridRcclAllReduce
+                PROPERTIES TIMEOUT 180 LABELS "rccl;process-grid"
+            )
+            set(_rj_process_grid_rccl_environment
+                ${RJ_RCCL_ASAN_ENV}
+                ${RJ_HIP_TSAN_ENV}
+            )
+            if(_rj_process_grid_rccl_environment)
+                set_tests_properties(
+                    RocjitsuProcessGridRcclAllReduce
+                    PROPERTIES
+                        ENVIRONMENT "${_rj_process_grid_rccl_environment}"
+                )
+            endif()
             message(STATUS "RCCL collective test enabled (found ${RCCL_LIB})")
         elseif(RCCL_LIB)
             message(
