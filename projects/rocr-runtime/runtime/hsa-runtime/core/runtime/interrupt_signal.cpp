@@ -101,6 +101,7 @@ InterruptSignal::InterruptSignal(hsa_signal_value_t initial_value, SignalBatch* 
     : LocalSignal(initial_value, batch, slot), Signal(signal()) {
   host_access_via_hdp_ = batch->host_access_via_hdp();
   host_can_monitor_ = !batch->host_access_across_link();
+  evict_after_host_load_ = batch->host_caches_arena();
   AttachEvent(nullptr);
 }
 
@@ -128,13 +129,11 @@ InterruptSignal::~InterruptSignal() {
 }
 
 hsa_signal_value_t InterruptSignal::LoadRelaxed() {
-  return hsa_signal_value_t(
-      atomic::Load(&signal_.value, std::memory_order_relaxed));
+  return hsa_signal_value_t(LoadValue(std::memory_order_relaxed));
 }
 
 hsa_signal_value_t InterruptSignal::LoadAcquire() {
-  return hsa_signal_value_t(
-      atomic::Load(&signal_.value, std::memory_order_acquire));
+  return hsa_signal_value_t(LoadValue(std::memory_order_acquire));
 }
 
 void InterruptSignal::StoreRelaxed(hsa_signal_value_t value) {
