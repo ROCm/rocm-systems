@@ -6,6 +6,8 @@
 
 #include <gtest/gtest.h>
 
+#include <string>
+
 #include "amd_smi/amdsmi.h"
 
 namespace {
@@ -18,6 +20,14 @@ TEST(SystemUnit, StatusCodeToStringValidOutPtr) {
   const char* msg = nullptr;
   EXPECT_EQ(amdsmi_status_code_to_string(AMDSMI_STATUS_SUCCESS, &msg), AMDSMI_STATUS_SUCCESS);
   EXPECT_NE(msg, nullptr);
+}
+
+// MORE_DATA once had no case and fell through to "An unknown error occurred".
+TEST(SystemUnit, StatusCodeToStringMoreData) {
+  const char* msg = nullptr;
+  ASSERT_EQ(amdsmi_status_code_to_string(AMDSMI_STATUS_MORE_DATA, &msg), AMDSMI_STATUS_SUCCESS);
+  ASSERT_NE(msg, nullptr);
+  EXPECT_EQ(std::string(msg).rfind("AMDSMI_STATUS_MORE_DATA:", 0), 0u) << msg;
 }
 
 #if ENABLE_ESMI_LIB
