@@ -13,8 +13,8 @@ namespace rocprofsys::pmc::collectors::cpu
 /**
  * @brief Bitfield union for selecting which CPU metrics to collect.
  *
- * Required by base::collector (Traits::enabled_metrics_t) and stored in the
- * serialized cpu_pmc_sample. Configurable via ROCPROFSYS_CPU_METRICS env var.
+ * Selects the metrics the CPU poller builds columns for.
+ * Configurable via ROCPROFSYS_CPU_METRICS env var.
  *
  * Bit positions (for value access):
  *   - frequency     = 0   (per-CPU, from sysfs scaling_cur_freq, MHz)
@@ -42,12 +42,6 @@ union enabled_metrics
         std::uint32_t kernel_time  : 1;
     } bits;
     std::uint32_t value = 0;
-
-    template <typename Archive>
-    void serialize(Archive& archive)
-    {
-        archive(value);
-    }
 };
 
 /// All 9 CPU metrics enabled (bits 0-8).
@@ -77,13 +71,6 @@ struct process_metrics
     std::int64_t page_faults      = 0;  // count (major + minor)
     std::int64_t user_mode_time   = 0;  // microseconds
     std::int64_t kernel_mode_time = 0;  // microseconds
-
-    template <typename Archive>
-    void serialize(Archive& archive)
-    {
-        archive(page_rss, virt_mem, peak_rss, context_switches, page_faults,
-                user_mode_time, kernel_mode_time);
-    }
 };
 
 /**

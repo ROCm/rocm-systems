@@ -60,13 +60,6 @@ public:
         return m_support_reading;
     }
 
-    [[nodiscard]] const std::string& get_name() const noexcept { return m_device_name; }
-
-    [[nodiscard]] const std::string& get_product_name() const noexcept
-    {
-        return m_product_name;
-    }
-
     [[nodiscard]] const std::string& get_vendor_name() const noexcept
     {
         return m_vendor_name;
@@ -228,18 +221,14 @@ public:
 private:
     void initialize_device_info()
     {
-        m_device_name = "GPU" + std::to_string(m_index);
-
         try
         {
             auto const info = m_backend->get_gpu_asic_info();
-            m_product_name  = info.product_name;
             m_vendor_name   = info.vendor_name;
         } catch(const std::runtime_error& e)
         {
             LOG_DEBUG("GPU device [{}]: {}", m_index, e.what());
-            m_product_name = "Unknown GPU";
-            m_vendor_name  = "AMD";
+            m_vendor_name = "AMD";
         }
     }
 
@@ -408,8 +397,6 @@ private:
     std::shared_ptr<Backend>           m_backend;
     enabled_metrics                    m_supported_metrics;
     size_t                             m_index;
-    std::string                        m_device_name;
-    std::string                        m_product_name;
     std::string                        m_vendor_name;
     mutable std::optional<std::string> m_bdf;
     bool                               m_is_supported = false;

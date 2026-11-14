@@ -9,10 +9,8 @@ add_subdirectory(device_providers)
 add_subdirectory(collectors)
 add_subdirectory(pollers)
 
-# Sampler API sources
+# Source factory
 set(pmc_sampler_sources
-    ${CMAKE_CURRENT_LIST_DIR}/sampler.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/sampler.cpp
     ${CMAKE_CURRENT_LIST_DIR}/sources.hpp
     ${CMAKE_CURRENT_LIST_DIR}/sources.cpp
 )

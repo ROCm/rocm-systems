@@ -11,7 +11,6 @@
 
 #include <atomic>
 #include <cstddef>
-#include <cstdint>
 #include <memory>
 #include <optional>
 #include <set>
@@ -44,10 +43,7 @@ is_runtime_visible(const std::string& bdf, const std::set<std::string>& visible_
 }
 
 /**
- * @brief Traits type for GPU collector configuration.
- *
- * Defines types, constants, and customization points for the base collector template
- * to work with GPU devices via AMD SMI.
+ * @brief Traits type for GPU (AMD SMI) device enumeration and settings.
  *
  * @tparam BackendProvider Device provider type.
  * @tparam DeviceType      Concrete device type; exposes @c backend_type so traits
@@ -56,17 +52,11 @@ is_runtime_visible(const std::string& bdf, const std::set<std::string>& visible_
 template <typename BackendProvider, typename DeviceType>
 struct gpu_traits
 {
-    // Required type aliases for base::collector
-    using metrics_t         = pmc::collectors::gpu::metrics;
     using enabled_metrics_t = pmc::collectors::gpu::enabled_metrics;
-    using backend_t         = DeviceType::backend_type;
     using device_t          = DeviceType;
     using device_ptr_t      = std::shared_ptr<device_t>;
-    using container_t       = std::vector<device_ptr_t>;
 
-    // Required constants
     static constexpr const char* device_name = "GPU";
-    // Settings customization points
 
     /**
      * @brief Get the device filter from settings.
@@ -100,33 +90,8 @@ struct gpu_traits
         return Settings::get_enabled_metrics();
     }
 
-    // Cache API customization points
-
-    /**
-     * @brief Initialize PMC metadata for a specific device.
-     */
-    template <typename Cache>
-    static void init_pmc_metadata(const device_ptr_t& device)
-    {
-        Cache::initialize_pmc_metadata(device->get_index());
-    }
-
-    /**
-     * @brief Get metrics from a device.
-     */
-    [[nodiscard]] static metrics_t get_metrics(const device_ptr_t&      device,
-                                               const enabled_metrics_t& enabled,
-                                               std::uint64_t            timestamp)
-    {
-        return device->get_metrics(enabled, timestamp);
-    }
-
-    // Device enumeration
-
     /**
      * @brief Entry holding a device and its cached supported metrics.
-     *
-     * This type is returned by enumerate_devices for the base collector to store.
      */
     struct device_entry
     {

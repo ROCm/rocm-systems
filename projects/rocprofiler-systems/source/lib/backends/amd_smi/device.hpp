@@ -112,7 +112,7 @@ concept backend_session_contract = session_types<T> && session_gpu_queries<T> &&
  * raw AMD SMI structs to domain types.
  *
  * Lives in the PMC layer; the concrete @c Backend type is named only at the
- * integration point (sampler.cpp).
+ * integration point (pmc/sources.cpp).
  *
  * @tparam Backend  Session type satisfying @c backend_session_contract
  *                  (e.g. @c backends::amd_smi::backend<wrapper>).

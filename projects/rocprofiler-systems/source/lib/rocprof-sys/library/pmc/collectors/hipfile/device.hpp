@@ -10,7 +10,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
-#include <string>
 #include <utility>
 
 namespace rocprofsys::pmc::collectors::hipfile
@@ -52,7 +51,6 @@ public:
     : m_backend{ std::move(backend) }
     , m_hipfile_slot{ hipfile_slot }
     , m_index{ device_index }
-    , m_name{ "GPU " + std::to_string(device_index) }
     {}
 
     /// Identity mapping: hipFile slot and profiler index are the same ordinal.
@@ -66,8 +64,6 @@ public:
 
     /// @brief HIP ordinal / hipFile @c per_gpu_stats slot.
     [[nodiscard]] std::size_t get_hipfile_slot() const noexcept { return m_hipfile_slot; }
-
-    [[nodiscard]] const std::string& get_name() const noexcept { return m_name; }
 
     /// @brief Whether this HIP ordinal addresses a real slot in the hipFile snapshot.
     [[nodiscard]] bool is_supported() const noexcept { return m_hipfile_slot < MAX_GPUS; }
@@ -177,7 +173,6 @@ private:
     std::shared_ptr<Backend> m_backend;
     const std::size_t        m_hipfile_slot;
     const std::size_t        m_index;
-    const std::string        m_name;
 
     std::uint64_t m_previous_read_bytes  = 0;
     std::uint64_t m_previous_write_bytes = 0;

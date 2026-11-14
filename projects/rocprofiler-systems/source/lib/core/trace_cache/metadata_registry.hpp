@@ -5,7 +5,6 @@
 
 #include "common/synchronized.hpp"
 #include "core/agent.hpp"
-#include "core/categories.hpp"
 #include "core/collection/schema.hpp"
 #include "core/state.hpp"
 
@@ -13,7 +12,6 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
-#include <fmt/format.h>
 #include <functional>
 #include <map>
 #include <memory>
@@ -106,49 +104,6 @@ struct thread
     }
 };
 
-template <typename Category>
-inline std::string
-format_track_name(std::optional<int> first_section  = std::nullopt,
-                  std::optional<int> second_section = std::nullopt)
-{
-    return fmt::format("{}{}{}", tim::trait::name<Category>::value,
-                       first_section ? fmt::format("_{}", *first_section) : "",
-                       second_section ? fmt::format("_{}", *second_section) : "");
-}
-
-/// PMC and track names for per-link metrics must be identical in the metadata
-/// registration and in the sample insertion paths, otherwise the rocpd writer rejects
-/// the event because no matching PMC info was registered.
-inline std::string
-format_link_pmc_name(std::string_view base_name, size_t link)
-{
-    return fmt::format("{}_link{}", base_name, link);
-}
-
-inline std::string
-format_link_track_name(std::string_view base_name, size_t link)
-{
-    return fmt::format("{} [Link {}]", base_name, link);
-}
-
-template <typename Category>
-inline std::string
-annotate_with_nic(const std::string& nic, std::optional<int> first_section = std::nullopt,
-                  std::optional<int> second_section = std::nullopt)
-{
-    std::stringstream ss;
-    ss << std::string(tim::trait::name<Category>::value) + " [" + nic + "]";
-    if(first_section)
-    {
-        ss << "_" << std::to_string(*first_section);
-    }
-    if(second_section)
-    {
-        ss << "_" << std::to_string(*second_section);
-    }
-    return ss.str();
-}
-
 struct track
 {
     std::string           track_name;  // < Unique
@@ -224,19 +179,6 @@ struct kernel_symbol_less
     {
         return lhs.kernel_id < rhs.kernel_id;
     }
-};
-
-/**
- * @brief Maps a sample value index to its pmc_info and track names.
- *
- * Stored in metadata_registry per device. Processors use these to
- * emit pmc_events and samples from batched gpu_perf_counter_sample values.
- */
-struct gpu_perf_counter_name_entry
-{
-    std::uint64_t counter_id;     ///< SDK counter instance ID (counter_id_t)
-    std::string   pmc_info_name;  ///< Qualified counter name, e.g. "SQ_WAVES[WGP=0,SA=0]"
-    std::string   track_name;     ///< Perfetto track name, e.g. "GPU [0] SQ_WAVES (S)"
 };
 
 }  // namespace info
@@ -328,12 +270,6 @@ struct metadata_registry
     std::optional<rocprofiler_callback_tracing_code_object_kernel_symbol_register_data_t>
     get_kernel_symbol(std::uint64_t kernel_id) const;
 
-    void set_gpu_perf_counter_counter_names(
-        std::uint32_t device_id, std::vector<info::gpu_perf_counter_name_entry> entries);
-
-    std::optional<std::reference_wrapper<const info::gpu_perf_counter_name_entry>>
-    find_gpu_perf_counter_by_id(std::uint32_t device_id, std::uint64_t counter_id) const;
-
     /**
      * Stores a counter schema and returns its registry-assigned id. An equal schema
      * returns its existing id, so ids survive a sampler re-setup and re-attach.
@@ -369,12 +305,6 @@ private:
                  info::kernel_symbol_less>,
         state::thread>
         m_kernel_symbols{};
-    // SDK PMC counter name ordering: device_id -> ordered name entries
-    std::map<std::uint32_t, std::vector<info::gpu_perf_counter_name_entry>>
-        m_gpu_perf_counter_counter_names;
-    // O(1) lookup index: device_id -> counter_id -> index into the vector above
-    std::map<std::uint32_t, std::unordered_map<std::uint64_t, std::size_t>>
-        m_gpu_perf_counter_index{};
     common::synchronized<std::vector<collection::schema>, state::thread>
         m_counter_schemas;
 };

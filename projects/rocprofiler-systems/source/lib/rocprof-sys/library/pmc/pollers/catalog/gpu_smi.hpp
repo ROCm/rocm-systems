@@ -8,7 +8,6 @@
 #include "core/collection/metric_row.hpp"
 #include "core/collection/sample_batch.hpp"
 #include "core/collection/schema.hpp"
-#include "core/trace_cache/metadata_registry.hpp"
 #include "library/pmc/collectors/gpu/types.hpp"
 #include "rocprofiler-systems/categories.h"
 
@@ -392,10 +391,10 @@ element_names(const row_t& row, std::uint32_t device, std::size_t outer,
                      .rocpd = pmc };
         }
         case collection::element_naming::link:
-            return { .pmc = trace_cache::info::format_link_pmc_name(base, inner),
+            return { .pmc = fmt::format("{}_link{}", base, inner),
                      .perfetto =
                          fmt::format("GPU [{}] {} [{:02}] (S)", device, row.label, inner),
-                     .rocpd = trace_cache::info::format_link_track_name(base, inner) };
+                     .rocpd = fmt::format("{} [Link {}]", base, inner) };
         default:
             throw std::logic_error(fmt::format("element_naming {} not handled",
                                                static_cast<int>(row.naming)));

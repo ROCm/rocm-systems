@@ -105,13 +105,12 @@ protected:
 
 // ── Identity and metric set ─────────────────────────────────────────────────
 
-TEST_F(HipFileDeviceTest, index_and_name_track_the_profiler_device_index)
+TEST_F(HipFileDeviceTest, index_tracks_the_profiler_device_index)
 {
     const device_t remapped{ m_backend, 0, 4 };
 
     EXPECT_EQ(remapped.get_hipfile_slot(), 0U);
     EXPECT_EQ(remapped.get_index(), 4U);
-    EXPECT_EQ(remapped.get_name(), "GPU 4");
 }
 
 TEST_F(HipFileDeviceTest, is_supported_bounds_the_hipfile_slot_not_the_profiler_index)
@@ -367,9 +366,8 @@ TEST_F(HipFileDeviceTest, available_backend_does_not_mark_query_failed)
 
 TEST_F(HipFileDeviceTest, default_constructed_metrics_are_not_a_failed_query)
 {
-    // The paused collector emits a value-initialized metrics to drop tracks to zero.
-    // If that looked like a failed query it would be suppressed and the tracks would
-    // flatline at their last value instead.
+    // A value-initialized metrics must not look like a failed query, or the poller
+    // would suppress it.
     const metrics paused{};
 
     EXPECT_FALSE(paused.query_failed);

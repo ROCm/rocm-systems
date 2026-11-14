@@ -51,13 +51,6 @@ public:
 
     [[nodiscard]] size_t get_index() const noexcept { return m_agent->device_type_index; }
 
-    [[nodiscard]] const std::string& get_name() const noexcept { return m_agent->name; }
-
-    [[nodiscard]] const std::string& get_product_name() const noexcept
-    {
-        return m_agent->product_name;
-    }
-
     [[nodiscard]] const std::string& get_vendor_name() const noexcept
     {
         return m_agent->vendor_name;

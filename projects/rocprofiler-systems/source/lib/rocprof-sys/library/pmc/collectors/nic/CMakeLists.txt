@@ -9,11 +9,8 @@ endif()
 # PMC NIC Collector Sources
 set(pmc_nic_sources
     ${CMAKE_CURRENT_LIST_DIR}/types.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/sample.hpp
     ${CMAKE_CURRENT_LIST_DIR}/device.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/collector.hpp
     ${CMAKE_CURRENT_LIST_DIR}/nic_traits.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/cache_policy.hpp
 )
 
 # Add to parent variable (will be used by collectors CMakeLists.txt)

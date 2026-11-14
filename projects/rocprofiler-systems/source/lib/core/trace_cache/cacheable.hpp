@@ -28,8 +28,7 @@ constexpr size_t k_buffer_size              = static_cast<size_t>((100_mib).to_b
 constexpr size_t k_flush_threshold          = static_cast<size_t>((80_mib).to_bytes());
 constexpr auto   k_cache_file_flush_timeout = 10ms;
 
-constexpr auto k_absolute   = "ABS";
-constexpr auto k_percentage = "%";
+constexpr auto k_absolute = "ABS";
 
 using buffer_array_t = std::array<std::uint8_t, k_buffer_size>;
 
