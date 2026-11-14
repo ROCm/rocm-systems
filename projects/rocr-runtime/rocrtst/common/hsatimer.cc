@@ -48,6 +48,13 @@
 #include <x86intrin.h>
 #elif defined(__powerpc64__) || defined(__PPC64__)
 #include <sys/platform/ppc.h>
+#elif defined(__loongarch64)
+#include <larchintrin.h>
+static inline unsigned long __rdtscp(unsigned int* unused)
+{
+  (void)unused;
+  return __rdtime_d().dvalue;
+}
 #endif
 namespace rocrtst {
 
@@ -170,7 +177,7 @@ uint64_t PerfTimer::CoarseTimestampUs() {
 }
 
 uint64_t PerfTimer::MeasureTSCFreqHz() {
-#if defined(__x86_64__) || defined(__i386__)
+#if defined(__x86_64__) || defined(__i386__) || defined(__loongarch64)
   // Make a coarse interval measurement of TSC ticks for 1 gigacycles.
   unsigned int unused;
   uint64_t tscTicksEnd;
