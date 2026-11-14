@@ -321,7 +321,7 @@ class TestCliBase(unittest.TestCase):
 
         Returns:
             list: one dict per GPU, keyed by the CLI's clock names; a value is None
-            when the device does not expose that clock.
+            when the device does not expose that clock. Also records is_apu for cleanup.
         """
         clk_types = {
             "SCLK": amdsmi.AmdSmiClkType.SYS,
@@ -335,6 +335,11 @@ class TestCliBase(unittest.TestCase):
         try:
             for processor in amdsmi.amdsmi_get_processor_handles():
                 entry = {}
+                try:
+                    metrics = amdsmi.amdsmi_get_gpu_metrics_info(processor)
+                    entry["is_apu"] = bool(metrics.get("is_apu", False))
+                except amdsmi.AmdSmiLibraryException:
+                    entry["is_apu"] = False
                 for name, clk_type in clk_types.items():
                     try:
                         freq = amdsmi.amdsmi_get_clk_freq(processor, clk_type)

@@ -4,6 +4,8 @@
 
 """CLI leaf test: set command."""
 
+from copy import deepcopy
+
 from common.common import amdsmi
 
 from cli.base import TestCliBase
@@ -24,18 +26,40 @@ class TestSet(TestCliBase):
         msg = f"{self.tab}### amd-smi set"
         self.common.print(msg)
 
+        restore_cmds = self._restore_commands()
         cmds = self.CreateCmds(
             "set", "Set Arguments:", "Device Arguments:", "Command Modifiers:", ""
         )
-        # Registered before the sweep: RunCmds raises on the first failure, and a
-        # sweep that aborts partway is exactly when the GPU is left mid-change.
-        self.addCleanup(self._restore_starting_values)
+        self.addCleanup(self.RunCmds, restore_cmds)
         self.RunCmds(cmds)
 
         return
 
-    def _restore_starting_values(self):
-        """Put the values the sweep changed back to what setUpClass recorded."""
+    def _section(self, data: dict, key: str, *, index: int, default: object) -> object:
+        is_apu = self.clk_freq[index]["is_apu"]
+        value = data.get(key, default) if is_apu else data[key]
+        if is_apu and value == "N/A":
+            value = default
+        if not isinstance(value, type(default)):
+            raise TypeError(f"GPU {index}: invalid {key} section")
+        return {**default, **value} if is_apu and isinstance(default, dict) else value
+
+    def _restore_commands(self) -> list:
+        """Validate the recorded data and prepare cleanup before the sweep writes."""
+        metric_data = deepcopy(self.metric_data)
+        static_data = deepcopy(self.static_data)
+        for index in range(len(self.common.processors)):
+            metric = metric_data["gpu_data"][index]
+            for key, default in (
+                ("fan", {"max": "N/A", "speed": "N/A"}),
+                ("clock", {}),
+                ("perf_level", "N/A"),
+            ):
+                metric[key] = self._section(metric, key, index=index, default=default)
+            static = static_data["gpu_data"][index]
+            static["clock"] = self._section(static, "clock", index=index, default={"sys": "N/A"})
+        self.metric_data = metric_data
+        self.static_data = static_data
         cmds = []
         for index, gpu in enumerate(self.common.processors):
             # max fan speed is the hwmon pwm1_max ceiling on every interface
@@ -66,7 +90,7 @@ class TestSet(TestCliBase):
 
             # set --perf-determinism defaults
             clock_sys = self.static_data["gpu_data"][index]["clock"]["sys"]
-            if clock_sys != "N/A":
+            if clock_sys != "N/A" and clock_sys["frequency_levels"]:
                 num = len(clock_sys["frequency_levels"])
                 level = f"Level {num - 1}"
                 clock_freq = int(clock_sys["frequency_levels"][level]["value"])
@@ -114,7 +138,24 @@ class TestSet(TestCliBase):
             # Writes each supported sensor's default_power_cap. Replaying the recorded
             # value did not restore it: min and max were written after it, so the cap
             # was left at max.
-            cmds.append((f"amd-smi reset --power-cap --gpu {index}", self.PASS))
+            power_limits = self.static_data["gpu_data"][index]["limit"]
+            has_power_cap = False
+            for power_type in self.power_types:
+                sensor = power_limits[power_type]
+                if sensor == "N/A":
+                    continue
+                if sensor["min_power_limit"] == "N/A" or sensor["max_power_limit"] == "N/A":
+                    continue
+                current = sensor["socket_power_limit"]
+                if isinstance(current, dict) and current["value"] == 0:
+                    continue
+                has_power_cap = True
+            cmds.append(
+                (
+                    f"amd-smi reset --power-cap --gpu {index}",
+                    self.PASS if has_power_cap else [self.PASS, amdsmi.AmdSmiStatus.NOT_SUPPORTED],
+                )
+            )
 
             # set --soc-pstate defaults
             soc_pstate = self.static_data["gpu_data"][index]["soc_pstate"]
@@ -191,7 +232,4 @@ class TestSet(TestCliBase):
                     )
                 )
 
-        self.common.print("Restore Starting Values")
-        self.RunCmds(cmds)
-
-        return
+        return cmds
