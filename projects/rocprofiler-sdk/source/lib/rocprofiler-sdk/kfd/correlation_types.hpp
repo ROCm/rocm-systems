@@ -22,10 +22,11 @@
 
 #pragma once
 
+#include <absl/hash/hash.h>
+
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
-#include <functional>
 
 // Identity types bridging an SDK dispatch to a firmware dispatch-log record.
 // Firmware identifies a dispatch as (doorbell_off, dispatch_idx_low32); the SDK
@@ -95,13 +96,7 @@ struct correlation_key_hash
 {
     size_t operator()(const correlation_key& key) const
     {
-        auto mix = [](size_t seed, uint32_t value) {
-            return seed ^ (std::hash<uint32_t>{}(value) + 0x9e3779b9UL + (seed << 6) + (seed >> 2));
-        };
-        size_t seed = std::hash<uint32_t>{}(key.doorbell_slot);
-        seed        = mix(seed, key.dispatch_idx_low32);
-        seed        = mix(seed, key.gpu_id);
-        return seed;
+        return absl::HashOf(key.doorbell_slot, key.dispatch_idx_low32, key.gpu_id);
     }
 };
 }  // namespace kfd

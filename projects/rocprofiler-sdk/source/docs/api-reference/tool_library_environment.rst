@@ -135,14 +135,16 @@ Kernel dispatch timestamp source
       - Default
       - Description
     * - ``ROCPROFILER_KFD_DISPATCH_LOG_SIZE_KB``
-      - ``2560``
+      - ``10240``
       - Size in KiB of the firmware dispatch-log ring, as an integer from ``1`` to
-        ``4194303``. Defaults to 2.5 MiB. A non-integer, empty, zero, or
-        out-of-range value is ignored with a warning and the default is used. If
-        the firmware laps the reader, records are silently overwritten before the
-        reader copies them (a lap is undetectable by design), so the affected
-        signal-less dispatches emit no record; raising this value gives the reader
-        more headroom.
+        ``4194303``. Defaults to 10 MiB, the largest size the driver accepts. A
+        non-integer, empty, zero, or out-of-range value is ignored with a warning
+        and the default is used. If the firmware laps the reader, records are
+        silently overwritten before the reader copies them (a lap is undetectable
+        by design), so the affected signal-less dispatches emit no record; a
+        larger ring gives the reader more headroom. The reader warns once if any
+        region is found more than half full, and reports its peak fill and
+        longest drain interval at exit.
 
         The driver only accepts ring sizes of ``80 * 2^k`` bytes (80 KiB, 160 KiB,
         320 KiB, ... up to the 10 MiB maximum), so the requested size is rounded

@@ -29,9 +29,11 @@
 #include <gtest/gtest.h>
 
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <stdexcept>
 #include <utility>
+#include <vector>
 
 namespace
 {
@@ -78,6 +80,53 @@ struct converter
     }
 };
 }  // namespace
+
+TEST(complete_signal_less_dispatch, batch_moves_every_payload_once)
+{
+    auto batch     = std::vector<std::unique_ptr<unsigned>>{};
+    auto completed = std::vector<unsigned>{};
+    for(unsigned index = 0; index < 4; ++index)
+        batch.emplace_back(std::make_unique<unsigned>(index));
+    run_complete_signal_less_batch(
+        batch, [&](std::unique_ptr<unsigned> value) { completed.push_back(*value); });
+    EXPECT_EQ(completed, (std::vector<unsigned>{0, 1, 2, 3}));
+    for(const auto& value : batch)
+        EXPECT_EQ(value, nullptr);
+    batch.clear();
+    run_complete_signal_less_batch(batch, [](std::unique_ptr<unsigned>) { FAIL(); });
+}
+
+TEST(complete_signal_less_dispatch, batch_callback_errors_do_not_strand_other_records)
+{
+    auto batch     = std::vector<size_t>{0, 1, 2};
+    auto observers = std::vector<observer>(batch.size());
+    auto conv      = converter{};
+    EXPECT_THROW(
+        run_complete_signal_less_batch(batch,
+                                       [&](size_t index) {
+                                           auto& current = observers[index];
+                                           run_complete_signal_less_dispatch(
+                                               std::optional<uint64_t>{500},
+                                               900,
+                                               0,
+                                               10'000'000,
+                                               conv.fn(),
+                                               [&](uint64_t, uint64_t) {
+                                                   ++current.emits;
+                                                   if(index == 0)
+                                                       throw std::runtime_error("first callback");
+                                                   if(index == 1)
+                                                       throw std::logic_error("second callback");
+                                               },
+                                               current.retire_fn());
+                                       }),
+        std::runtime_error);
+    for(const auto& current : observers)
+    {
+        EXPECT_EQ(current.emits, 1);
+        EXPECT_EQ(current.retires, 1);
+    }
+}
 
 // start known + conversion + sanity OK -> one record with converted KFD
 // timestamps, correlation id retired exactly once.
