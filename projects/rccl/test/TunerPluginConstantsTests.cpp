@@ -17,6 +17,7 @@
 #include <cstring>
 #include <string>
 
+#include "comm.h"
 #include "common/ProcessIsolatedTestRunner.hpp"
 #include "plugin/nccl_tuner.h"
 
@@ -26,16 +27,17 @@ namespace {
 constexpr double kOverride = 42.5;
 
 int initCalls = 0;
+bool initGotConstants = false;
+// init()'s argument is a narrowed copy that is gone once init() returns, so keep the values.
 ncclTunerConstants_v6_t seenAtInit = {};
-ncclTunerConstants_v6_t* coreConstants = nullptr; // the core's own copy; valid until ncclCommDestroy()
 
 ncclResult_t tunerInit(void** context, uint64_t, size_t, size_t, ncclDebugLogger_t, ncclNvlDomainInfo_v6_t*,
                        ncclTunerConstants_v6_t* constants) {
   *context = nullptr;
   ++initCalls;
   if (constants == nullptr) return ncclSuccess;
+  initGotConstants = true;
   seenAtInit = *constants;
-  coreConstants = constants;
   constants->baseLatencies[NCCL_ALGO_RING][NCCL_PROTO_SIMPLE] = kOverride;
   return ncclSuccess;
 }
@@ -52,7 +54,7 @@ std::string gpuSkipReason() {
   return "";
 }
 
-// Runs `check` while a one-rank communicator that loaded the test tuner is alive.
+// Runs `check(comm)` while a one-rank communicator that loaded the test tuner is alive.
 // Callers must be isolated, since the tuner load outcome is latched in a process global,
 // and must skip on gpuSkipReason() first.
 template <typename Check>
@@ -64,8 +66,8 @@ void withTestTunerComm(Check check) {
   ncclComm_t comm = nullptr;
   ASSERT_EQ(ncclCommInitRank(&comm, 1, id, 0), ncclSuccess);
   ASSERT_EQ(initCalls, 1) << "the test tuner was not loaded, or its init() did not run exactly once";
-  ASSERT_NE(coreConstants, nullptr) << "init() was given no constants";
-  check();
+  ASSERT_TRUE(initGotConstants) << "init() was given no constants";
+  check(comm);
   ASSERT_EQ(ncclCommDestroy(comm), ncclSuccess);
 }
 
@@ -86,17 +88,19 @@ namespace RcclUnitTesting {
 TEST(TunerPluginConstants, TestTunerIsLoaded) {
   RUN_ISOLATED_TEST("TunerPluginConstants.TestTunerIsLoaded", []() {
     if (auto reason = gpuSkipReason(); !reason.empty()) GTEST_SKIP() << reason;
-    withTestTunerComm([] {});
+    withTestTunerComm([](ncclComm_t) {});
   });
 }
 
 TEST(TunerPluginConstants, InitSeesCoreConstantsAndKeepsItsWrites) {
   RUN_ISOLATED_TEST("TunerPluginConstants.InitSeesCoreConstantsAndKeepsItsWrites", []() {
     if (auto reason = gpuSkipReason(); !reason.empty()) GTEST_SKIP() << reason;
-    withTestTunerComm([] {
+    withTestTunerComm([](ncclComm_t comm) {
       // The comparison below would also hold if the constants were never populated at all.
       EXPECT_GT(seenAtInit.baseLatencies[NCCL_ALGO_TREE][NCCL_PROTO_LL], 0.0) << "init() saw unpopulated constants";
-      ncclTunerConstants_v6_t core = *coreConstants;
+      // The core's constants, in the layout init() sees.
+      ncclTunerConstants_v6_t core = {};
+      ncclTunerConstantsToV5(&core, &comm->tuningContext.tuningConstants);
       double& written = core.baseLatencies[NCCL_ALGO_RING][NCCL_PROTO_SIMPLE];
       EXPECT_EQ(written, kOverride) << "the cost model overwrote the constants init() set";
       written = seenAtInit.baseLatencies[NCCL_ALGO_RING][NCCL_PROTO_SIMPLE];

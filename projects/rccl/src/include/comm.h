@@ -30,6 +30,7 @@
 #include "argcheck.h"
 #include "latency_profiler/CollTrace.h"
 #include "rccl_common.h"
+#include "archinfo.h"
 #include "recorder.h"
 #include "algorithms/dda/dda_init_detail.h"
 #include "mem_manager.h"
@@ -660,6 +661,10 @@ struct ncclPeerInfo {
   // none. Every rank of the comm adopts them (computeBuffSizes). Append later fields after these.
   int sharedLl128BuffSize;
   int sharedP2pLl128BuffSize;
+  // [RCCL] That proxy's NaN buffer size, adopted with the LL128 sizes. It may be 0.
+  int sharedNanBuffSize;
+  // [RCCL] This rank shares its parent's proxy, so the sizes above are its. Any of them may be 0.
+  bool sharesParentProxy;
 };
 
 typedef enum ncclGroupTaskType {
@@ -783,6 +788,9 @@ struct ncclComm {
 #endif
 #if ENABLE_TDM_PRIM_LL128
   int tdmLl128Enable; // RCCL: route LL128 user-buffer legs through the async-to-LDS engine
+#endif
+#if ENABLE_TDM_NAN
+  int nanTdmMinBytes; // RCCL: smallest NaN-flag op, in bytes, moved by TDM; -1 = never
 #endif
   int localRank;
   int localRanks;
@@ -1313,6 +1321,110 @@ static inline hipEvent_t rcclTakeAddonStopEvent(struct ncclComm* comm) {
   hipEvent_t stopEvent = comm->addonStopEvent;
   comm->addonStopEvent = nullptr;
   return stopEvent;
+}
+
+// RCCL_NAN_PROTO_AUTO=1 turns the NaN-flag protocol on only where it measured faster than the
+// default selection: gfx950 with 8 GPUs per node, 1 to 16 nodes. NCCL_PROTO, when set, wins.
+static inline bool rcclNanProtoAutoTuned(const struct ncclComm* comm) {
+  static const bool on = [] {
+    const char* env = ncclGetEnv("RCCL_NAN_PROTO_AUTO");
+    return env != nullptr && strtol(env, nullptr, 0) != 0 && ncclGetEnv("NCCL_PROTO") == nullptr;
+  }();
+  return on && comm->nRanks == comm->nNodes * 8 && IsArchMatch(comm->archName, "gfx950");
+}
+
+// Windows are half-open in total bytes. Node counts between the measured ones use the next
+// smaller one's, and anything past 16 nodes uses the 16-node windows.
+static inline bool rcclNanProtoAutoWins(const struct ncclComm* comm, ncclFunc_t func, size_t bytes) {
+  constexpr size_t KiB = 1ULL << 10, MiB = 1ULL << 20, GiB = 1ULL << 30;
+  const int nNodes = comm->nNodes;
+  switch (func) {
+  case ncclFuncAllReduce:
+    if (nNodes < 2) return false;
+    if (bytes >= 512 * KiB && bytes < 2176 * KiB) return true;
+    if (bytes < 16 * MiB) return false;
+    if (nNodes < 8) return bytes < 512 * MiB;
+    if (nNodes < 16) return bytes < 1 * GiB;
+    return bytes < 256 * MiB || (bytes >= 512 * MiB && bytes < 4 * GiB);
+  case ncclFuncAllGather:
+  case ncclFuncReduceScatter: {
+    if (func == ncclFuncReduceScatter) {
+      if (nNodes == 1) return bytes >= 6 * MiB && bytes < 9 * MiB;
+      if (nNodes < 4 && bytes >= 384 * KiB && bytes < 1152 * KiB) return true;
+    }
+    // The large window follows the per-rank share at every measured node count.
+    const size_t perRank = bytes / comm->nRanks;
+    return nNodes >= 2 && perRank >= 4 * MiB && perRank < 32 * MiB;
+  }
+  case ncclFuncAlltoAll:
+    return nNodes == 1 && ((bytes >= 64 * KiB && bytes < 512 * KiB) || bytes >= 2 * MiB);
+  default:
+    return false;
+  }
+}
+
+// Whether this collective runs the NaN-flag protocol where it has a NaN path: under NCCL_PROTO=NaN
+// always, under RCCL_NAN_PROTO_AUTO=1 only inside rcclNanProtoAutoWins. bytes is the collective's
+// total size: count * element size, times nRanks for AllGather, ReduceScatter and AlltoAll.
+// A comm whose NaN FIFO is empty (NCCL_NAN_BUFFSIZE=0, or a parent's proxy that sized none) never picks it.
+static inline bool rcclNanProtoFor(const struct ncclComm* comm, ncclFunc_t func, ncclDataType_t datatype,
+                                   size_t bytes) {
+  if (comm->nRanks <= 1 || comm->buffSizes[NCCL_PROTO_NAN] <= 0 || !rcclNanProtoDtype(datatype)) return false;
+  return rcclNanProtoForced() || (rcclNanProtoAutoTuned(comm) && rcclNanProtoAutoWins(comm, func, bytes));
+}
+
+// rcclNanProtoFor without the RCCL_NAN_PROTO_AUTO windows: only NCCL_PROTO=NaN.
+static inline bool rcclNanProtoForcedFor(const struct ncclComm* comm, ncclDataType_t datatype) {
+  return comm->nRanks > 1 && comm->buffSizes[NCCL_PROTO_NAN] > 0 && rcclNanProtoForced() &&
+         rcclNanProtoDtype(datatype);
+}
+
+// rcclNanProtoFor for one call with per-call algSelection algMask (0: none). Naming rows per call is as
+// explicit as NCCL_PROTO, so RCCL_NAN_PROTO_AUTO stands down for a call that names no NaN row.
+// NCCL_PROTO=NaN sets tuningContext.forced[], which overrides algMask.
+static inline bool rcclNanProtoForCall(const struct ncclComm* comm, ncclFunc_t func, ncclDataType_t datatype,
+                                       size_t bytes, uint64_t algMask) {
+  constexpr uint64_t nanRows = (1ULL << (NCCL_ALGO_RING * NCCL_NUM_PROTOCOLS + NCCL_PROTO_NAN)) |
+                               (1ULL << (NCCL_ALGO_TREE * NCCL_NUM_PROTOCOLS + NCCL_PROTO_NAN));
+  if (!rcclNanProtoFor(comm, func, datatype, bytes)) return false;
+  return rcclNanProtoForced() || algMask == 0 || (algMask & nanRows) != 0;
+}
+
+// AllGather's LL, LL128 and Simple kernels are int8, and only Ring has a typed NaN kernel. So an AllGather keeps its
+// dtype only where it will run Ring/NaN: NaN serves the call, and NCCL_ALGO left Ring on (a disabled algorithm has
+// zero bandwidth). Every other AllGather is collapsed to bytes at task append.
+static inline bool rcclNanAllGatherKeepsDtype(const struct ncclComm* comm, ncclDataType_t datatype, size_t bytes,
+                                              uint64_t algMask) {
+  return rcclNanProtoForCall(comm, ncclFuncAllGather, datatype, bytes, algMask) &&
+         comm->bandwidths[ncclFuncAllGather][NCCL_ALGO_RING][NCCL_PROTO_NAN] > 0;
+}
+
+// Whether a planned task must run on a NaN kernel. An AllGather keeps its float dtype past task
+// append only when NaN was chosen for it there, and no other protocol has a float AllGather kernel,
+// so its dtype is the decision; aggregation can grow it past the window it was chosen in.
+static inline bool rcclNanProtoOnly(const struct ncclComm* comm, ncclFunc_t func, ncclDataType_t datatype, size_t bytes,
+                                    uint64_t algMask) {
+  if (!rcclNanProtoFunc(func)) return false;
+  if (func == ncclFuncAllGather) {
+    return comm->nRanks > 1 && comm->buffSizes[NCCL_PROTO_NAN] > 0 && rcclNanProtoDtype(datatype) &&
+           (rcclNanProtoForced() || rcclNanProtoAutoTuned(comm));
+  }
+  return rcclNanProtoForCall(comm, func, datatype, bytes, algMask);
+}
+
+// Whether a cost table drops the (algo, proto) cell. Under nanOnly only the NaN cells of the algorithms with a NaN
+// kernel stay; otherwise NaN is never on offer.
+static inline bool rcclNanCellOff(bool nanOnly, ncclFunc_t func, int algo, int proto) {
+  return proto == NCCL_PROTO_NAN ? !(nanOnly && rcclNanProtoKernel(func, algo)) : nanOnly;
+}
+
+// Whether the protocol is decided for this collective: the user named a protocol
+// list, or the NaN protocol serves it. Heuristics that hardcode a protocol must
+// stand down when it is.
+static inline bool rcclProtoPinned(const struct ncclComm* comm, ncclFunc_t func, ncclDataType_t datatype, size_t bytes,
+                                   uint64_t algMask) {
+  static const bool named = rcclTunerProtoEnv() != nullptr;
+  return named || rcclNanProtoOnly(comm, func, datatype, bytes, algMask);
 }
 
 ncclResult_t ncclCommEnsureReady(ncclComm_t comm);

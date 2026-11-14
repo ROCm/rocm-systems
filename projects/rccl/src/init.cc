@@ -74,6 +74,7 @@
 #include "rocm_smi_wrap.h"
 #endif
 #include "rccl_common.h"
+#include "scheduler.h"
 // [/RCCL]
 
 #ifdef ENABLE_ROCSHMEM
@@ -116,7 +117,7 @@ const char* ncclFuncStr[NCCL_NUM_FUNCTIONS + 4] = {"Broadcast", "Reduce", "AllGa
                                                    "SendRecv"}; // Increased numFunc by 1 for AlltollvGda
 const char* ncclAlgoStr[NCCL_NUM_ALGORITHMS] = {"Tree",     "Ring", "CollNetDirect", "CollNetChain", "NVLS",
                                                 "NVLSTree", "PAT"};
-const char* ncclProtoStr[NCCL_NUM_PROTOCOLS] = {"LL", "LL128", "Simple"};
+const char* ncclProtoStr[NCCL_NUM_PROTOCOLS] = {"LL", "LL128", "Simple", "NaN"};
 const char* ncclDevRedOpStr[ncclNumDevRedOps] = {"Sum", "Prod", "MinMax", "PreMulSum", "SumPostDiv"};
 const char* ncclTypeStr[ncclNumTypes] = {"_i8", "_u8", "_i32", "_u32", "_i64", "_u64", "_f16", "_f32", "_f64", "_b16"};
 
@@ -265,6 +266,13 @@ RCCL_PARAM(TdmSimpleReduceEnable, "TDM_SIMPLE_REDUCE_ENABLE", 0);
 #if ENABLE_TDM_PRIM_LL128
 // Off by default; opt in with RCCL_TDM_LL128_ENABLE=1 on gfx1250.
 RCCL_PARAM(TdmLl128Enable, "TDM_LL128_ENABLE", 0);
+#endif
+
+#if ENABLE_TDM_NAN
+// On whenever the build includes it. RCCL_TDM_NAN_MIN_BYTES is the smallest NaN-flag primitive
+// op (one channel's chunk) that moves through TDM; smaller ones keep the register path.
+RCCL_PARAM(TdmNanEnable, "TDM_NAN_ENABLE", 1);
+RCCL_PARAM(TdmNanMinBytes, "TDM_NAN_MIN_BYTES", 1 << 16);
 #endif
 
 /**
@@ -1130,6 +1138,9 @@ static ncclResult_t devCommSetup(ncclComm_t comm) {
 #if ENABLE_TDM_PRIM_LL128
   tmpCommAndChans.comm.tdmLl128Enable = comm->tdmLl128Enable;
 #endif
+#if ENABLE_TDM_NAN
+  tmpCommAndChans.comm.nanTdmMinBytes = comm->nanTdmMinBytes;
+#endif
   tmpCommAndChans.comm.patSharedQps = comm->patSharedQps ? 1 : 0;
   for (int p = 0; p < NCCL_NUM_PROTOCOLS; p++) {
     tmpCommAndChans.comm.buffSizes[p] = comm->buffSizes[p];
@@ -1380,6 +1391,8 @@ static void rcclFillSharedParentInfo(struct ncclPeerInfo* info, struct ncclComm*
   info->ibGdrFlushFlag = info->ibGdrFlushFlag && parent->ibGdrFlushFlag;
   info->sharedLl128BuffSize = parent->buffSizes[NCCL_PROTO_LL128];
   info->sharedP2pLl128BuffSize = parent->p2pLl128BuffSize;
+  info->sharedNanBuffSize = parent->buffSizes[NCCL_PROTO_NAN];
+  info->sharesParentProxy = true;
 }
 
 // Every rank sets up its net receives and picks algorithms on its own, so RCCL_IB_GDR_FLUSH_FLAG is on
@@ -1625,38 +1638,60 @@ static ncclResult_t setupChannel(struct ncclComm* comm, int channelId, int rank,
 NCCL_PARAM(BuffSize, "BUFFSIZE", -2);
 NCCL_PARAM(LlBuffSize, "LL_BUFFSIZE", -2);
 NCCL_PARAM(Ll128BuffSize, "LL128_BUFFSIZE", -2);
+NCCL_PARAM(NanBuffSize, "NAN_BUFFSIZE", -2);
 // Default value of P2P_NET_CHUNKSIZE may be overwritten by changes in src/rccl_wrap.cc
 NCCL_PARAM(P2pNetChunkSize, "P2P_NET_CHUNKSIZE", (1 << 17)); /* 128 kB */
 NCCL_PARAM(P2pPciChunkSize, "P2P_PCI_CHUNKSIZE", (1 << 17)); /* 128 kB */
 NCCL_PARAM(P2pNvlChunkSize, "P2P_NVL_CHUNKSIZE", (1 << 19)); /* 512 kB */
 
 static ncclResult_t computeBuffSizes(struct ncclComm* comm) {
-  int64_t envs[NCCL_NUM_PROTOCOLS] = {ncclParamLlBuffSize(), ncclParamLl128BuffSize(), ncclParamBuffSize()};
+  int64_t envs[NCCL_NUM_PROTOCOLS] = {ncclParamLlBuffSize(), ncclParamLl128BuffSize(), ncclParamBuffSize(),
+                                      ncclParamNanBuffSize()};
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
   int defaults[NCCL_NUM_PROTOCOLS];
   rcclSetDefaultBuffSizes(comm, defaults);
 #else
-  int defaults[NCCL_NUM_PROTOCOLS] = {DEFAULT_LL_BUFFSIZE, DEFAULT_LL128_BUFFSIZE, DEFAULT_BUFFSIZE};
+  int defaults[NCCL_NUM_PROTOCOLS] = {DEFAULT_LL_BUFFSIZE, DEFAULT_LL128_BUFFSIZE, DEFAULT_BUFFSIZE,
+                                      DEFAULT_LL128_BUFFSIZE};
 #endif
   for (int p = 0; p < NCCL_NUM_PROTOCOLS; p++) {
     comm->buffSizes[p] = envs[p] != -2 ? envs[p] : defaults[p];
+  }
+  // Each NaN FIFO slot must hold whole grains: a slot under one grain rounds every chunk to 0, and a partial
+  // grain misaligns the next slot's 16-byte loads. A FIFO too small for one grain per slot turns NaN off.
+  {
+    const int64_t nanQuantum = (int64_t)NCCL_STEPS * rcclProtoGrainSize(NCCL_PROTO_NAN, comm);
+    const int64_t nanSize = comm->buffSizes[NCCL_PROTO_NAN];
+    if (nanQuantum > 0 && nanSize > 0 && nanSize % nanQuantum != 0) {
+      const int64_t rounded = nanSize / nanQuantum * nanQuantum;
+      if (rounded == 0) {
+        WARN("NCCL_NAN_BUFFSIZE=%ld is below the %ld-byte minimum (one %d-byte grain per step); disabling the NaN "
+             "protocol",
+             nanSize, nanQuantum, rcclProtoGrainSize(NCCL_PROTO_NAN, comm));
+      } else {
+        INFO(NCCL_INIT, "Rounded NaN buffer %ld -> %ld so every FIFO slot holds whole %d-byte grains", nanSize, rounded,
+             rcclProtoGrainSize(NCCL_PROTO_NAN, comm));
+      }
+      comm->buffSizes[NCCL_PROTO_NAN] = (int)rounded;
+    }
   }
   comm->p2pLl128BuffSize = comm->buffSizes[NCCL_PROTO_LL128];
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
   if (envs[NCCL_PROTO_LL128] == -2) rcclScaleCollLl128BuffSize(comm);
 #endif
-  // A rank sharing its parent's proxy must use the LL128 sizes that proxy sized and strides its net buffers with,
-  // and every other rank must match them: the sizes set connection strides and algorithm choices (an ncclCommGrow
-  // mixes such ranks with new ranks that have no parent). Take this rank's own, else the lowest rank's.
+  // A rank sharing its parent's proxy must use the LL128 and NaN sizes that proxy sized and strides its net buffers
+  // with, and every other rank must match them: the sizes set connection strides and algorithm choices (an
+  // ncclCommGrow mixes such ranks with new ranks that have no parent). Take this rank's own, else the lowest rank's.
   if (comm->peerInfo) {
     const ncclPeerInfo* self = comm->peerInfo + comm->rank;
-    const ncclPeerInfo* shared = self->sharedLl128BuffSize > 0 ? self : nullptr;
+    const ncclPeerInfo* shared = self->sharesParentProxy ? self : nullptr;
     for (int r = 0; shared == nullptr && r < comm->nRanks; r++) {
-      if (comm->peerInfo[r].sharedLl128BuffSize > 0) shared = comm->peerInfo + r;
+      if (comm->peerInfo[r].sharesParentProxy) shared = comm->peerInfo + r;
     }
     if (shared) {
       comm->buffSizes[NCCL_PROTO_LL128] = shared->sharedLl128BuffSize;
       comm->p2pLl128BuffSize = shared->sharedP2pLl128BuffSize;
+      comm->buffSizes[NCCL_PROTO_NAN] = shared->sharedNanBuffSize;
     }
   }
 
@@ -2394,6 +2429,12 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   comm->tdmLl128Enable =
     rcclParamTdmLl128Enable() && IsArchMatch(comm->topo->nodes[GPU].nodes[idx].gpu.gcn, "gfx1250");
   if (comm->tdmLl128Enable) INFO(NCCL_INIT, "TDM LL128 path enabled");
+#endif
+#if ENABLE_TDM_NAN
+  comm->nanTdmMinBytes = rcclParamTdmNanEnable() && IsArchMatch(comm->topo->nodes[GPU].nodes[idx].gpu.gcn, "gfx1250")
+                           ? (int)std::min<int64_t>(std::max<int64_t>(rcclParamTdmNanMinBytes(), 0), INT_MAX)
+                           : -1;
+  if (comm->nanTdmMinBytes >= 0) INFO(NCCL_INIT, "TDM NaN-flag path enabled from %d bytes", comm->nanTdmMinBytes);
 #endif
   // RCCL: Only use one slice per primitive on some single node gfx9xx systems, only currently enabled for AllReduce, ReduceScatter, and AllGather
   if (IsArchMatch(comm->topo->nodes[GPU].nodes[idx].gpu.gcn, "gfx942") ||

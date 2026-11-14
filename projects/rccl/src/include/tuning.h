@@ -76,6 +76,7 @@ struct ncclTuningInput_t {
   int minCTAs;  // resolved lower CTA bound (env > per-call > comm)
   int maxCTAs;  // resolved upper CTA bound (env > per-call > comm)
   int CTAPolicy;   // resolved effective CTAPolicy (per-call)
+  uint64_t algMask; // [RCCL] per-call algSelection mask, 0 for none (ncclCollConfigGetAlgMask)
 };
 
 struct ncclTuningContext_t {

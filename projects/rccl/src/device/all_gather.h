@@ -68,7 +68,9 @@ __device__ __attribute__((noinline)) void runRing(int tid, int nthreads, struct 
       rankDest = ringRanks[0];
       offset = dataOffset + rankDest * count;
 
-      if ((inputBuf + dataOffset == outputBuf + offset) || isNetOffload) { // In place or onePPN
+      // NaN escapes what it sends, so in place the owner's slice must still take the escaped copy.
+      const bool inPlace = inputBuf + dataOffset == outputBuf + offset && Proto::Id != NCCL_PROTO_NAN;
+      if (inPlace || isNetOffload) { // In place or onePPN
         prims.directSend(dataOffset, offset, nelem);
       } else {
         prims.directCopySend(dataOffset, offset, nelem);
@@ -163,6 +165,15 @@ struct RunWorkColl<ncclFuncAllGather, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_LL128
     // LL128 is generated as separate registered/non-registered kernels; the
     // compile-time UserRegMode is forwarded by cmake/scripts/add_unroll.sh.
     runAGRingLL128<T, RedOp>(tid, nthreads, work);
+  }
+};
+
+// NaN-flag protocol. direct* falls through to send/recv. Host keeps the float
+// dtype (no int8 collapse) only when NCCL_PROTO is exactly "NaN".
+template <typename T, typename RedOp>
+struct RunWorkColl<ncclFuncAllGather, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_NAN> {
+  __device__ __forceinline__ void run(int tid, int nthreads, struct ncclDevWorkColl* work) {
+    runRing<T, RedOp, ProtoNaN>(tid, nthreads, work);
   }
 };
 

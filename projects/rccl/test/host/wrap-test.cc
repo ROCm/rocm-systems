@@ -683,6 +683,289 @@ TEST(WrapMicrotest, HierarchicalTempBufferSize_ReduceScatterThresholds) {
   EXPECT_EQ(HIERARCHICAL_TEMP_BUFFER_SIZE, rcclHierarchicalTempBufferSize(16, false, true));
 }
 
+// ===========================================================================
+// rcclNanProtoAutoWins -- comm.h. Windows in total bytes, 8 GPUs per node.
+// ===========================================================================
+
+namespace {
+constexpr size_t kNanKiB = 1ULL << 10, kNanMiB = 1ULL << 20, kNanGiB = 1ULL << 30;
+
+bool NanAutoWins(int nNodes, ncclFunc_t func, size_t bytes) {
+  ncclComm* comm = MakeZeroedComm();
+  comm->nNodes = nNodes;
+  comm->nRanks = nNodes * 8;
+  const bool wins = rcclNanProtoAutoWins(comm, func, bytes);
+  DeleteCommWithArch(comm);
+  return wins;
+}
+} // namespace
+
+TEST(WrapMicrotest, NanProtoAutoWins_AllReduceMultiNodeOnly) {
+  for (size_t bytes : {64 * kNanKiB, 16 * kNanMiB, 128 * kNanMiB, 1 * kNanGiB})
+    EXPECT_FALSE(NanAutoWins(1, ncclFuncAllReduce, bytes));
+  for (int nNodes : {2, 4, 7}) {
+    EXPECT_FALSE(NanAutoWins(nNodes, ncclFuncAllReduce, 16 * kNanMiB - 1));
+    EXPECT_TRUE(NanAutoWins(nNodes, ncclFuncAllReduce, 16 * kNanMiB));
+    EXPECT_TRUE(NanAutoWins(nNodes, ncclFuncAllReduce, 256 * kNanMiB));
+    EXPECT_FALSE(NanAutoWins(nNodes, ncclFuncAllReduce, 512 * kNanMiB));
+  }
+  EXPECT_TRUE(NanAutoWins(8, ncclFuncAllReduce, 512 * kNanMiB));
+  EXPECT_FALSE(NanAutoWins(8, ncclFuncAllReduce, 1 * kNanGiB));
+}
+
+TEST(WrapMicrotest, NanProtoAutoWins_AllReduceMultiNodeMidSizes) {
+  for (int nNodes : {2, 4, 8, 16, 32}) {
+    EXPECT_FALSE(NanAutoWins(nNodes, ncclFuncAllReduce, 384 * kNanKiB));
+    EXPECT_TRUE(NanAutoWins(nNodes, ncclFuncAllReduce, 512 * kNanKiB));
+    EXPECT_TRUE(NanAutoWins(nNodes, ncclFuncAllReduce, 2 * kNanMiB));
+    EXPECT_FALSE(NanAutoWins(nNodes, ncclFuncAllReduce, 2176 * kNanKiB));
+    EXPECT_FALSE(NanAutoWins(nNodes, ncclFuncAllReduce, 4 * kNanMiB));
+  }
+  EXPECT_FALSE(NanAutoWins(1, ncclFuncAllReduce, 1 * kNanMiB));
+}
+
+TEST(WrapMicrotest, NanProtoAutoWins_ReduceScatterSmallWindows) {
+  EXPECT_FALSE(NanAutoWins(1, ncclFuncReduceScatter, 4 * kNanMiB));
+  EXPECT_TRUE(NanAutoWins(1, ncclFuncReduceScatter, 6 * kNanMiB));
+  EXPECT_TRUE(NanAutoWins(1, ncclFuncReduceScatter, 8 * kNanMiB));
+  EXPECT_FALSE(NanAutoWins(1, ncclFuncReduceScatter, 9 * kNanMiB));
+  for (int nNodes : {2, 3}) {
+    EXPECT_FALSE(NanAutoWins(nNodes, ncclFuncReduceScatter, 256 * kNanKiB));
+    EXPECT_TRUE(NanAutoWins(nNodes, ncclFuncReduceScatter, 384 * kNanKiB));
+    EXPECT_TRUE(NanAutoWins(nNodes, ncclFuncReduceScatter, 1 * kNanMiB));
+    EXPECT_FALSE(NanAutoWins(nNodes, ncclFuncReduceScatter, 1152 * kNanKiB));
+  }
+  EXPECT_FALSE(NanAutoWins(4, ncclFuncReduceScatter, 1 * kNanMiB));
+  EXPECT_FALSE(NanAutoWins(1, ncclFuncAllGather, 8 * kNanMiB));
+  EXPECT_FALSE(NanAutoWins(2, ncclFuncAllGather, 1 * kNanMiB));
+}
+
+TEST(WrapMicrotest, NanProtoAutoWins_AllReduceSixteenNodesSkipsQuarterGiB) {
+  for (int nNodes : {16, 32}) {
+    EXPECT_FALSE(NanAutoWins(nNodes, ncclFuncAllReduce, 8 * kNanMiB));
+    EXPECT_TRUE(NanAutoWins(nNodes, ncclFuncAllReduce, 128 * kNanMiB));
+    EXPECT_FALSE(NanAutoWins(nNodes, ncclFuncAllReduce, 256 * kNanMiB));
+    EXPECT_TRUE(NanAutoWins(nNodes, ncclFuncAllReduce, 512 * kNanMiB));
+    EXPECT_TRUE(NanAutoWins(nNodes, ncclFuncAllReduce, 2 * kNanGiB));
+    EXPECT_FALSE(NanAutoWins(nNodes, ncclFuncAllReduce, 4 * kNanGiB));
+  }
+}
+
+TEST(WrapMicrotest, NanProtoAutoWins_AllGatherReduceScatterFollowPerRankShare) {
+  for (ncclFunc_t func : {ncclFuncAllGather, ncclFuncReduceScatter}) {
+    EXPECT_FALSE(NanAutoWins(1, func, 64 * kNanMiB));
+    for (int nNodes : {2, 4, 8, 16}) {
+      const size_t nRanks = nNodes * 8;
+      EXPECT_FALSE(NanAutoWins(nNodes, func, nRanks * 2 * kNanMiB));
+      EXPECT_TRUE(NanAutoWins(nNodes, func, nRanks * 4 * kNanMiB));
+      EXPECT_TRUE(NanAutoWins(nNodes, func, nRanks * 16 * kNanMiB));
+      EXPECT_FALSE(NanAutoWins(nNodes, func, nRanks * 32 * kNanMiB));
+    }
+  }
+}
+
+TEST(WrapMicrotest, NanProtoAutoWins_AlltoAllSingleNodeOnly) {
+  EXPECT_FALSE(NanAutoWins(1, ncclFuncAlltoAll, 32 * kNanKiB));
+  EXPECT_TRUE(NanAutoWins(1, ncclFuncAlltoAll, 64 * kNanKiB));
+  EXPECT_TRUE(NanAutoWins(1, ncclFuncAlltoAll, 256 * kNanKiB));
+  EXPECT_FALSE(NanAutoWins(1, ncclFuncAlltoAll, 512 * kNanKiB));
+  EXPECT_FALSE(NanAutoWins(1, ncclFuncAlltoAll, 1 * kNanMiB));
+  EXPECT_TRUE(NanAutoWins(1, ncclFuncAlltoAll, 2 * kNanMiB));
+  EXPECT_TRUE(NanAutoWins(1, ncclFuncAlltoAll, 4 * kNanGiB));
+  EXPECT_FALSE(NanAutoWins(2, ncclFuncAlltoAll, 4 * kNanMiB));
+}
+
+TEST(WrapMicrotest, NanProtoAutoWins_OtherCollectivesNever) {
+  for (ncclFunc_t func : {ncclFuncBroadcast, ncclFuncReduce, ncclFuncSendRecv})
+    for (int nNodes : {1, 2, 16}) EXPECT_FALSE(NanAutoWins(nNodes, func, 64 * kNanMiB));
+}
+
+TEST(WrapMicrotest, NanProtoFor_OffWithoutNcclProtoOrAuto) {
+  ncclComm* comm = MakeCommWithArch("gfx950");
+  comm->nNodes = 2;
+  comm->nRanks = 16;
+  comm->buffSizes[NCCL_PROTO_NAN] = 4 << 20;
+  EXPECT_FALSE(rcclNanProtoFor(comm, ncclFuncAllReduce, ncclFloat32, 64 * kNanMiB));
+  EXPECT_FALSE(rcclProtoPinned(comm, ncclFuncAllReduce, ncclFloat32, 64 * kNanMiB, 0));
+  DeleteCommWithArch(comm);
+}
+
+// RCCL_NAN_PROTO_AUTO=1 picks NaN inside its windows on gfx950 with 8 GPUs per node and nowhere else. A planned
+// float AllGather is NaN-only at any size: its dtype survives task append only when NaN was chosen there.
+TEST(WrapMicrotestIsolated, NanProtoFor_AutoOnUsesWindowsOnGfx950EightPerNode) {
+  RUN_ISOLATED_TEST(
+      "Wrap_NanProtoFor_AutoOnUsesWindowsOnGfx950EightPerNode",
+      []() {
+        SetMicroEnv("RCCL_NAN_PROTO_AUTO", "1");
+        SetMicroEnvAbsent("NCCL_PROTO");
+        ncclComm* comm = MakeCommWithArch("gfx950");
+        comm->nNodes = 2;
+        comm->nRanks = 16;
+#if ENABLE_TDM_NAN
+        comm->nanTdmMinBytes = -1;
+#endif
+        int sizes[NCCL_NUM_PROTOCOLS] = {0};
+        rcclSetDefaultBuffSizes(comm, sizes);
+        EXPECT_EQ(4 << 20, sizes[NCCL_PROTO_NAN]);
+        comm->buffSizes[NCCL_PROTO_NAN] = sizes[NCCL_PROTO_NAN];
+        EXPECT_TRUE(rcclNanProtoFor(comm, ncclFuncAllReduce, ncclFloat32, 1 * kNanMiB));
+        EXPECT_TRUE(rcclProtoPinned(comm, ncclFuncAllReduce, ncclFloat32, 1 * kNanMiB, 0));
+        EXPECT_FALSE(rcclNanProtoFor(comm, ncclFuncAllReduce, ncclFloat32, 4 * kNanMiB));
+        EXPECT_FALSE(rcclProtoPinned(comm, ncclFuncAllReduce, ncclFloat32, 4 * kNanMiB, 0));
+        EXPECT_FALSE(rcclNanProtoFor(comm, ncclFuncAllReduce, ncclInt32, 1 * kNanMiB));
+        EXPECT_FALSE(rcclNanProtoForcedFor(comm, ncclFloat32));
+        EXPECT_FALSE(rcclNanProtoFor(comm, ncclFuncAllGather, ncclFloat32, 1 * kNanMiB));
+        EXPECT_TRUE(rcclNanProtoOnly(comm, ncclFuncAllGather, ncclFloat32, 1 * kNanMiB, 0));
+        EXPECT_FALSE(rcclNanProtoOnly(comm, ncclFuncAllGather, ncclInt8, 1 * kNanMiB, 0));
+
+        comm->nRanks = 12;
+        EXPECT_FALSE(rcclNanProtoFor(comm, ncclFuncAllReduce, ncclFloat32, 1 * kNanMiB));
+        rcclSetDefaultBuffSizes(comm, sizes);
+        EXPECT_EQ(0, sizes[NCCL_PROTO_NAN]);
+        ClearMicroEnv();
+        DeleteCommWithArch(comm);
+      });
+}
+
+// A query prices the AllGather task append will plan: outside AUTO's window a float AllGather is collapsed to bytes
+// there, so getAlgoInfo() must see bytes too, or it prices only the NaN cells and reports Ring/NaN.
+TEST(WrapMicrotestIsolated, SelectAllGather_QueryUnderNanAuto_PricesTheTaskAppendPlans) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllGather_QueryUnderNanAuto_PricesTheTaskAppendPlans",
+      []() {
+        SetMicroEnv("RCCL_NAN_PROTO_AUTO", "1");
+        SetMicroEnvAbsent("NCCL_PROTO");
+        static ncclDataType_t seenType;
+        static size_t seenCount;
+        ScopedHook getAlgo(g_getAlgoInfo, [](struct ncclComm*, struct ncclTaskColl* task, int, int, int,
+                                              ncclSimInfo_t*) {
+          seenType = task->datatype;
+          seenCount = task->count;
+          task->algorithm = NCCL_ALGO_RING;
+          task->protocol = NCCL_PROTO_SIMPLE;
+          task->nMaxChannels = 1;
+          return ncclSuccess;
+        });
+        ncclComm* comm = MakeCommWithArch("gfx950");
+        comm->nNodes = 2;
+        comm->nRanks = 16;
+#if ENABLE_TDM_NAN
+        comm->nanTdmMinBytes = -1;
+#endif
+        comm->buffSizes[NCCL_PROTO_NAN] = 4 << 20;
+        comm->bandwidths[ncclFuncAllGather][NCCL_ALGO_RING][NCCL_PROTO_NAN] = 1.0f;
+        struct Case {
+          size_t perRankBytes;
+          bool keepsDtype;
+        };
+        for (const Case& c : {Case{16 * kNanMiB, true}, Case{1 * kNanMiB, false}}) {
+          const size_t sendcount = c.perRankBytes / sizeof(float);
+          seenType = ncclNumTypes;
+          seenCount = 0;
+          rcclCollDecision decision{};
+          EXPECT_EQ(ncclSuccess, rcclSelectAllGather(comm, nullptr, nullptr, sendcount, ncclFloat32,
+                                                     /*stream=*/nullptr, /*query=*/true,
+                                                     /*graphCapturingHint=*/false, &decision));
+          ASSERT_EQ(1, getAlgo.calls) << c.perRankBytes;
+          getAlgo.calls = 0;
+          EXPECT_EQ(c.keepsDtype ? ncclFloat32 : ncclInt8, seenType) << c.perRankBytes;
+          EXPECT_EQ(c.keepsDtype ? sendcount : c.perRankBytes, seenCount) << c.perRankBytes;
+        }
+        ClearMicroEnv();
+        DeleteCommWithArch(comm);
+      });
+}
+
+// NCCL_PROTO, whatever it names, turns RCCL_NAN_PROTO_AUTO off and pins the protocol.
+TEST(WrapMicrotestIsolated, NanProtoFor_NcclProtoTurnsAutoOff) {
+  RUN_ISOLATED_TEST(
+      "Wrap_NanProtoFor_NcclProtoTurnsAutoOff",
+      []() {
+        SetMicroEnv("RCCL_NAN_PROTO_AUTO", "1");
+        SetMicroEnv("NCCL_PROTO", "Simple");
+        ncclComm* comm = MakeCommWithArch("gfx950");
+        comm->nNodes = 2;
+        comm->nRanks = 16;
+        comm->buffSizes[NCCL_PROTO_NAN] = 4 << 20;
+        EXPECT_FALSE(rcclNanProtoAutoTuned(comm));
+        EXPECT_FALSE(rcclNanProtoFor(comm, ncclFuncAllReduce, ncclFloat32, 1 * kNanMiB));
+        EXPECT_TRUE(rcclProtoPinned(comm, ncclFuncAllReduce, ncclFloat32, 1 * kNanMiB, 0));
+        ClearMicroEnv();
+        DeleteCommWithArch(comm);
+      });
+}
+
+constexpr uint64_t RowBit(int algo, int proto) { return 1ULL << (algo * NCCL_NUM_PROTOCOLS + proto); }
+
+// A per-call algSelection that names no NaN row turns RCCL_NAN_PROTO_AUTO off for that call; one naming a NaN row,
+// or none at all, leaves AUTO's choice standing.
+TEST(WrapMicrotestIsolated, NanProtoForCall_AutoStandsDownForSelectionWithoutNan) {
+  RUN_ISOLATED_TEST(
+      "Wrap_NanProtoForCall_AutoStandsDownForSelectionWithoutNan",
+      []() {
+        SetMicroEnv("RCCL_NAN_PROTO_AUTO", "1");
+        SetMicroEnvAbsent("NCCL_PROTO");
+        ncclComm* comm = MakeCommWithArch("gfx950");
+        comm->nNodes = 2;
+        comm->nRanks = 16;
+#if ENABLE_TDM_NAN
+        comm->nanTdmMinBytes = -1;
+#endif
+        comm->buffSizes[NCCL_PROTO_NAN] = 4 << 20;
+        const size_t bytes = 1 * kNanMiB;
+        ASSERT_TRUE(rcclNanProtoFor(comm, ncclFuncAllReduce, ncclFloat32, bytes));
+
+        const uint64_t ringLl128 = RowBit(NCCL_ALGO_RING, NCCL_PROTO_LL128);
+        EXPECT_TRUE(rcclNanProtoForCall(comm, ncclFuncAllReduce, ncclFloat32, bytes, 0));
+        EXPECT_FALSE(rcclNanProtoForCall(comm, ncclFuncAllReduce, ncclFloat32, bytes, ringLl128));
+        EXPECT_FALSE(rcclNanProtoOnly(comm, ncclFuncAllReduce, ncclFloat32, bytes, ringLl128));
+        EXPECT_FALSE(rcclProtoPinned(comm, ncclFuncAllReduce, ncclFloat32, bytes, ringLl128));
+        EXPECT_TRUE(rcclNanProtoForCall(comm, ncclFuncAllReduce, ncclFloat32, bytes,
+                                        ringLl128 | RowBit(NCCL_ALGO_RING, NCCL_PROTO_NAN)));
+        EXPECT_TRUE(rcclNanProtoForCall(comm, ncclFuncAllReduce, ncclFloat32, bytes,
+                                        RowBit(NCCL_ALGO_TREE, NCCL_PROTO_NAN)));
+        ClearMicroEnv();
+        DeleteCommWithArch(comm);
+      });
+}
+
+// NCCL_PROTO=NaN overrides a per-call algSelection, so a selection without NaN rows still runs NaN.
+TEST(WrapMicrotestIsolated, NanProtoForCall_ForcedIgnoresSelection) {
+  RUN_ISOLATED_TEST(
+      "Wrap_NanProtoForCall_ForcedIgnoresSelection",
+      []() {
+        SetMicroEnv("NCCL_PROTO", "NaN");
+        ncclComm* comm = MakeCommWithArch("gfx950");
+        comm->nNodes = 1;
+        comm->nRanks = 8;
+        comm->buffSizes[NCCL_PROTO_NAN] = 4 << 20;
+        EXPECT_TRUE(rcclNanProtoForCall(comm, ncclFuncAllReduce, ncclFloat32, 1 * kNanMiB,
+                                        RowBit(NCCL_ALGO_RING, NCCL_PROTO_LL128)));
+        ClearMicroEnv();
+        DeleteCommWithArch(comm);
+      });
+}
+
+// A comm with no NaN FIFO (NCCL_NAN_BUFFSIZE=0, or a parent's proxy that sized none) never picks NaN.
+TEST(WrapMicrotestIsolated, NanProtoFor_NeedsNanFifo) {
+  RUN_ISOLATED_TEST(
+      "Wrap_NanProtoFor_NeedsNanFifo",
+      []() {
+        SetMicroEnv("NCCL_PROTO", "NaN");
+        ncclComm* comm = MakeCommWithArch("gfx950");
+        comm->nNodes = 1;
+        comm->nRanks = 8;
+        comm->buffSizes[NCCL_PROTO_NAN] = 0;
+        EXPECT_FALSE(rcclNanProtoFor(comm, ncclFuncAllReduce, ncclFloat32, 1 * kNanMiB));
+        EXPECT_FALSE(rcclNanProtoForcedFor(comm, ncclFloat32));
+        comm->buffSizes[NCCL_PROTO_NAN] = 4 << 20;
+        EXPECT_TRUE(rcclNanProtoFor(comm, ncclFuncAllReduce, ncclFloat32, 1 * kNanMiB));
+        EXPECT_TRUE(rcclNanProtoForcedFor(comm, ncclFloat32));
+        ClearMicroEnv();
+        DeleteCommWithArch(comm);
+      });
+}
+
 // nNodes=9: the allGather arm alone gives 32MB (>=8,<16); the reduceScatter arm
 // alone gives 64MB (>=8). Only if BOTH arms actually ran and std::max compared
 // them does the result come out as reduceScatter's 64MB -- a test that only
@@ -974,6 +1257,76 @@ TEST(WrapMicrotestIsolated, SetDefaultBuffSizes_Gfx1250UsesWiderLL128Line) {
       });
 }
 
+// A comm gets no NaN FIFO unless NCCL_PROTO is exactly NaN; then 4 MiB, and 8 MiB when the gfx1250 TDM path is
+// on. Sizes are literals so a change to the elems-per-thread macros is caught rather than mirrored. The NCCL_PROTO
+// read is cached, so each value runs in its own process.
+TEST(WrapMicrotestIsolated, SetDefaultBuffSizes_NoNanFifoWithoutNcclProto) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SetDefaultBuffSizes_NoNanFifoWithoutNcclProto",
+      []() {
+        ncclComm* comm = MakeCommWithArch("gfx1250");
+        int sizes[NCCL_NUM_PROTOCOLS] = {0};
+        SetMicroEnvAbsent("NCCL_PROTO");
+        rcclSetDefaultBuffSizes(comm, sizes);
+        EXPECT_EQ(0, sizes[NCCL_PROTO_NAN]);
+        ClearMicroEnv();
+        DeleteCommWithArch(comm);
+      });
+}
+
+// A list naming NaN among others never runs it, so it sizes no NaN FIFO either.
+TEST(WrapMicrotestIsolated, SetDefaultBuffSizes_NoNanFifoForProtoList) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SetDefaultBuffSizes_NoNanFifoForProtoList",
+      []() {
+        ncclComm* comm = MakeCommWithArch("gfx1250");
+        int sizes[NCCL_NUM_PROTOCOLS] = {0};
+        SetMicroEnv("NCCL_PROTO", "Simple,NaN");
+        rcclSetDefaultBuffSizes(comm, sizes);
+        EXPECT_EQ(0, sizes[NCCL_PROTO_NAN]);
+        ClearMicroEnv();
+        DeleteCommWithArch(comm);
+      });
+}
+
+// NCCL_PROTO is matched without case, as its parser does.
+TEST(WrapMicrotestIsolated, SetDefaultBuffSizes_NanFifoDepth) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SetDefaultBuffSizes_NanFifoDepth",
+      []() {
+        ncclComm* comm = MakeCommWithArch("gfx1250");
+        int sizes[NCCL_NUM_PROTOCOLS] = {0};
+        SetMicroEnv("NCCL_PROTO", "nan");
+#if ENABLE_TDM_NAN
+        comm->nanTdmMinBytes = -1;
+#endif
+        rcclSetDefaultBuffSizes(comm, sizes);
+        EXPECT_EQ(4 << 20, sizes[NCCL_PROTO_NAN]);
+#if ENABLE_TDM_NAN
+        comm->nanTdmMinBytes = 0;
+        rcclSetDefaultBuffSizes(comm, sizes);
+        EXPECT_EQ(8 << 20, sizes[NCCL_PROTO_NAN]);
+#endif
+        ClearMicroEnv();
+        DeleteCommWithArch(comm);
+      });
+}
+
+// A config that builds with --enable-tdm-nan sets RCCL_TEST_EXPECT_TDM_NAN=1. Without the flag every TDM NaN suite
+// runs the register path and passes, covering nothing.
+TEST(WrapMicrotest, NanTdmBuildFlagMatchesExpectation) {
+  const char* want = std::getenv("RCCL_TEST_EXPECT_TDM_NAN");
+  if (want == nullptr) GTEST_SKIP() << "set RCCL_TEST_EXPECT_TDM_NAN=1 to assert the TDM NaN build flag";
+#if ENABLE_TDM_NAN
+  constexpr int built = 1;
+#else
+  constexpr int built = 0;
+#endif
+  EXPECT_EQ(std::atoi(want), built) << "ENABLE_TDM_NAN is " << built << " but RCCL_TEST_EXPECT_TDM_NAN asks for "
+                                    << want << ". Either the build is missing --enable-tdm-nan or the config sets the "
+                                    << "wrong expectation.";
+}
+
 // ===========================================================================
 // rcclFuncMaxSendRecvCount -- rccl_wrap.cc:1656-1660. Thin wrapper delegating
 // to the header-inline ncclFuncMaxSendRecvCount (enqueue.h); RCCL_EXPOSE_STATIC
@@ -1032,7 +1385,7 @@ TEST(WrapMicrotest, FakeTableDrift_StringTableCountsMatchProduction) {
   EXPECT_EQ(7, NCCL_NUM_ALGORITHMS)
       << "NCCL_NUM_ALGORITHMS changed -- update ncclAlgoToString's switch in "
          "fakes/collectives_fakes.cc to match collectives.cc:116, then update this count";
-  EXPECT_EQ(3, NCCL_NUM_PROTOCOLS)
+  EXPECT_EQ(4, NCCL_NUM_PROTOCOLS)
       << "NCCL_NUM_PROTOCOLS changed -- update ncclProtoToString's switch in "
          "fakes/collectives_fakes.cc to match collectives.cc:137, then update this count";
   EXPECT_EQ(19, ncclNumFuncs)
@@ -8128,6 +8481,38 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_Gfx1250VmmFirstYieldsToLLThresholdEn
       });
 }
 
+// NCCL_PROTO=NaN must not take the fabric LL/LL128/VMM DDA tiers, which have no
+// NaN variant.
+TEST(WrapMicrotestIsolated, SelectAllReduce_NanForcedSkipsNonNanFabricTiers) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllReduce_NanForcedSkipsNonNanFabricTiers",
+      []() {
+        SetMicroEnv("NCCL_PROTO", "NaN");
+        g_loadParam = [](const char* env, int64_t def) -> int64_t {
+          if (std::strcmp(env, "RCCL_DDA_LL") == 0 || std::strcmp(env, "RCCL_DDA_LL128") == 0) return 1;
+          if (std::strcmp(env, "RCCL_DDA_LL_THRESHOLD") == 0 || std::strcmp(env, "RCCL_DDA_LL128_THRESHOLD") == 0)
+            return INT64_MAX;
+          return def;
+        };
+        ScopedHook shouldTakeDda(g_allReduceShouldTakeDdaPath,
+                                 [](const struct ncclComm*, size_t, ncclDataType_t, bool, bool) { return true; });
+        auto eligible = [](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) { return true; };
+        ScopedHook llEligible(g_allReduceDdaFabricLLEligible, eligible);
+        ScopedHook ll128Eligible(g_allReduceDdaFabricLL128Eligible, eligible);
+        ScopedHook vmmEligible(g_allReduceDdaFabricEligible, eligible);
+        ncclComm* comm = MakeCommWithArch("gfx1250");
+        comm->buffSizes[NCCL_PROTO_NAN] = 4 << 20;
+        comm->nRanks = 2;
+        comm->nNodes = 1;
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess, rcclSelectAllReduce(comm, nullptr, nullptr, /*count=*/8, ncclFloat32, ncclSum,
+                                                    /*stream=*/nullptr, /*query=*/false,
+                                                    /*graphCapturingHint=*/false, &decision));
+        EXPECT_EQ(NCCL_ALGO_RING, decision.algo);
+        DeleteCommWithArch(comm);
+      });
+}
+
 // ... or RCCL_DDA_THRESHOLD.
 TEST(WrapMicrotestIsolated, SelectAllReduce_Gfx1250VmmFirstYieldsToVmmThresholdEnv) {
   RUN_ISOLATED_TEST(
@@ -8405,6 +8790,66 @@ TEST(WrapMicrotestIsolated, UpdateCollectiveChannels_UserChannelCountTurnsItOff)
         EXPECT_EQ(192, CappedChannels(comm, ncclFuncReduceScatter, NCCL_PROTO_SIMPLE, 16 * kMiB));
         g_paramMinNchannels = -2;
         EXPECT_EQ(128, CappedChannels(comm, ncclFuncReduceScatter, NCCL_PROTO_SIMPLE, 16 * kMiB)) << "control";
+        DeleteCommWithArch(comm);
+      });
+}
+
+// NCCL_PROTO=NaN must not take the fabric LL/LL128/VMM DDA tiers, which have no
+// NaN variant.
+TEST(WrapMicrotestIsolated, SelectAllGather_NanForcedSkipsNonNanFabricTiers) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllGather_NanForcedSkipsNonNanFabricTiers",
+      []() {
+        SetMicroEnv("NCCL_PROTO", "NaN");
+        g_loadParam = [](const char* env, int64_t def) -> int64_t {
+          if (std::strcmp(env, "RCCL_DDA_LL") == 0 || std::strcmp(env, "RCCL_DDA_LL128") == 0) return 1;
+          if (std::strcmp(env, "RCCL_DDA_LL_THRESHOLD") == 0 || std::strcmp(env, "RCCL_DDA_LL128_THRESHOLD") == 0)
+            return INT64_MAX;
+          return def;
+        };
+        auto eligible = [](ncclComm*, const void*, void*, size_t, ncclDataType_t) { return true; };
+        ScopedHook llEligible(g_allGatherDdaFabricLLEligible, eligible);
+        ScopedHook ll128Eligible(g_allGatherDdaFabricLL128Eligible, eligible);
+        ScopedHook vmmEligible(g_allGatherDdaFabricEligible, eligible);
+        ncclComm* comm = MakeCommWithArch("gfx1250");
+        comm->buffSizes[NCCL_PROTO_NAN] = 4 << 20;
+        comm->nRanks = 2;
+        comm->nNodes = 1;
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess, rcclSelectAllGather(comm, nullptr, nullptr, /*sendcount=*/8, ncclFloat32,
+                                                   /*stream=*/nullptr, /*query=*/false, /*graphCapturingHint=*/false,
+                                                   &decision));
+        EXPECT_EQ(NCCL_ALGO_RING, decision.algo);
+        DeleteCommWithArch(comm);
+      });
+}
+
+TEST(WrapMicrotestIsolated, SelectAlltoAll_NanForcedSkipsNonNanFabricTiers) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAlltoAll_NanForcedSkipsNonNanFabricTiers",
+      []() {
+        SetMicroEnv("NCCL_PROTO", "NaN");
+        g_loadParam = [](const char* env, int64_t def) -> int64_t {
+          if (std::strcmp(env, "RCCL_DDA_LL") == 0 || std::strcmp(env, "RCCL_DDA_LL128") == 0) return 1;
+          if (std::strcmp(env, "RCCL_DDA_LL_THRESHOLD") == 0 || std::strcmp(env, "RCCL_DDA_LL128_THRESHOLD") == 0)
+            return INT64_MAX;
+          return def;
+        };
+        auto eligible = [](ncclComm*, const void*, void*, size_t, ncclDataType_t) { return true; };
+        ScopedHook llEligible(g_allToAllDdaFabricLLEligible, eligible);
+        ScopedHook ll128Eligible(g_allToAllDdaFabricLL128Eligible, eligible);
+        ScopedHook vmmEligible(g_allToAllDdaFabricEligible, eligible);
+        ncclComm* comm = MakeCommWithArch("gfx1250");
+        comm->buffSizes[NCCL_PROTO_NAN] = 4 << 20;
+        comm->nRanks = 2;
+        comm->nNodes = 1;
+        comm->p2pnChannels = 17;
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess, rcclSelectAlltoAll(comm, nullptr, nullptr, /*count=*/8, ncclFloat32,
+                                                  /*stream=*/nullptr, /*query=*/false, /*graphCapturingHint=*/false,
+                                                  &decision));
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DIRECT_ALLTOALL, decision.algo);
+        EXPECT_EQ(NCCL_PROTO_NAN, decision.protocol);
         DeleteCommWithArch(comm);
       });
 }
@@ -9697,6 +10142,35 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_CeNotChosenWithUnsupportedOp) {
                                                        ncclAvg, /*query=*/false, &decision));
         EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_2SHOT, decision.algo);
         EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, decision.algo);
+        EXPECT_EQ(NCCL_ALGO_RING, decision.algo);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// NCCL_PROTO=NaN must not take the fabric LL/LL128/VMM DDA tiers, which have no
+// NaN variant.
+TEST(WrapMicrotestIsolated, SelectReduceScatter_NanForcedSkipsNonNanFabricTiers) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectReduceScatter_NanForcedSkipsNonNanFabricTiers",
+      []() {
+        SetMicroEnv("NCCL_PROTO", "NaN");
+        g_loadParam = [](const char* env, int64_t def) -> int64_t {
+          if (std::strcmp(env, "RCCL_DDA_LL") == 0 || std::strcmp(env, "RCCL_DDA_LL128") == 0) return 1;
+          if (std::strcmp(env, "RCCL_DDA_LL_THRESHOLD") == 0 || std::strcmp(env, "RCCL_DDA_LL128_THRESHOLD") == 0)
+            return INT64_MAX;
+          return def;
+        };
+        auto eligible = [](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) { return true; };
+        ScopedHook llEligible(g_reduceScatterDdaFabricLLEligible, eligible);
+        ScopedHook ll128Eligible(g_reduceScatterDdaFabricLL128Eligible, eligible);
+        ScopedHook vmmEligible(g_reduceScatterDdaFabricEligible, eligible);
+        ncclComm* comm = MakeCommWithArch("gfx1250");
+        comm->buffSizes[NCCL_PROTO_NAN] = 4 << 20;
+        comm->nRanks = 2;
+        comm->nNodes = 1;
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr, /*recvcount=*/8, ncclFloat32,
+                                                        ncclSum, /*query=*/false, &decision));
         EXPECT_EQ(NCCL_ALGO_RING, decision.algo);
         DeleteCommWithArch(comm);
       });

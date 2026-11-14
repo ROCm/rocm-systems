@@ -201,6 +201,7 @@
         {"name": "GinBackendMaskDispatchTest", "description": "GIN backend-mask put dispatch tests", "test_filter": "GinBackendMaskDispatchTest.*"},
         {"name": "DdaVecElementAdd", "description": "DDA vecElementAdd float/half/bf16 lane arithmetic on device", "test_filter": "DdaVecElementAdd.*"},
         {"name": "DdaLL128PollWire", "description": "DDA LL128 wire round trip and flag/payload visibility under a same-GPU and a peer-GPU writer", "test_filter": "DdaLL128PollWire.*", "timeout": 180},
+        {"name": "PrimsNanSentinelEscape", "description": "NaN-flag protocol (NCCL_PROTO=NaN) escapes all-ones payload dwords on every collective with a NaN kernel", "test_filter": "PrimsNanSentinelEscape.*", "timeout": 1800},
         {"name": "DdaIpcGpuBarrierOrdering", "description": "DDA IPC barrier release/acquire cross-GPU message passing (8 GPUs)", "test_filter": "DdaIpcGpuBarrierOrdering.*", "timeout": 600},
         {"name": "NcclUtility", "description": "nccl::utility host tests: integer/pointer align, rcp division, rolling compares, order maps, Optional", "test_filter": "NcclUtility*-NcclUtilityDeviceTest.*"},
         {"name": "NcclUtilityDeviceTest", "description": "nccl::utility device tests: loadConstLdg branches, testAbort, atomics, fences, lanes, rcp tables", "test_filter": "NcclUtilityDeviceTest.*"},

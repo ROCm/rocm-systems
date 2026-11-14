@@ -48,9 +48,14 @@ ncclResult_t ncclTuningInit(struct ncclComm* comm) {
 
   NCCLCHECKGOTO(ncclTunerPluginLoad(comm), ret, fail);
   if (comm->tuner) {
+    // The plugin ABI is frozen at NCCL_NUM_PROTOCOLS_V5 columns, so hand it a v5
+    // view rather than the wider internal struct.
+    ncclTunerConstants_v5_t v5Constants;
+    ncclTunerConstantsToV5(&v5Constants, &comm->tuningContext.tuningConstants);
     NCCLCHECKGOTO(comm->tuner->init(&comm->tunerContext, comm->commHash, comm->nRanks, comm->nNodes, ncclDebugLog,
-                                    &comm->nvlDomainInfo, &comm->tuningContext.tuningConstants),
+                                    &comm->nvlDomainInfo, &v5Constants),
                   ret, fail);
+    ncclTunerConstantsFromV5(&comm->tuningContext.tuningConstants, &v5Constants);
   }
 
   NCCLCHECKGOTO(ncclTuningCostModelInit(comm), ret, fail);
@@ -201,9 +206,10 @@ ncclResult_t ncclTuningCompute(struct ncclTuningInput_t* const input, struct ncc
   } else {
     NCCLCHECKGOTO(ncclTuningComputeAllTunings(input, &tunings), ret, exit);
     if (input->comm->tuner != NULL) {
-      float generalTable[NCCL_NUM_ALGORITHMS][NCCL_NUM_PROTOCOLS];
+      // Plugins see NCCL_NUM_PROTOCOLS_V5 columns; protocols past them keep the core's time.
+      float generalTable[NCCL_NUM_ALGORITHMS][NCCL_NUM_PROTOCOLS_V5];
       for (int i = 0; i < NCCL_NUM_ALGORITHMS; i++) {
-        for (int j = 0; j < NCCL_NUM_PROTOCOLS; j++) {
+        for (int j = 0; j < NCCL_NUM_PROTOCOLS_V5; j++) {
           generalTable[i][j] = NCCL_TUNING_IGNORE;
         }
       }
@@ -212,19 +218,21 @@ ncclResult_t ncclTuningCompute(struct ncclTuningInput_t* const input, struct ncc
         const struct ncclTuningResult_t& tuning = node->result;
         node = node->next;
         if (tuning.algo == NCCL_ALGO_UNDEF || tuning.proto == NCCL_PROTO_UNDEF) continue;
+        if (tuning.proto >= NCCL_NUM_PROTOCOLS_V5) continue;
         generalTable[tuning.algo][tuning.proto] = tuning.timeUs;
       }
       node = tunings.head;
       int nMaxChannels = 0;
       NCCLCHECKGOTO(input->comm->tuner->getCollInfo(input->comm->tunerContext, input->func, input->nBytes,
                                                     input->numPipeOps, (float**)generalTable, NCCL_NUM_ALGORITHMS,
-                                                    NCCL_NUM_PROTOCOLS, input->regBuff, &nMaxChannels),
+                                                    NCCL_NUM_PROTOCOLS_V5, input->regBuff, &nMaxChannels),
                     ret, exit);
       while (node != nullptr) {
         struct ncclTuningResult_t& tuning = node->result;
         node = node->next;
         if (tuning.algo == NCCL_ALGO_UNDEF || tuning.proto == NCCL_PROTO_UNDEF) continue;
         tuning.maxChannels = nMaxChannels;
+        if (tuning.proto >= NCCL_NUM_PROTOCOLS_V5) continue;
         tuning.timeUs = generalTable[tuning.algo][tuning.proto];
       }
     }

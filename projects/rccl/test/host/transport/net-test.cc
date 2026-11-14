@@ -1972,7 +1972,7 @@ class NetConnectMicrotest : public NetClientMicrotestBase {
 
   // The proxy's map: send/recv control words in host memory and the SIMPLE buffer in device
   // memory, either a dedicated bank or the per-local-rank shared one.
-  void BuildMap(int sameProcess, int cudaDev, int shared, bool sharedDevBank = false) {
+  void BuildMap(int sameProcess, int cudaDev, int shared, bool sharedDevBank = false, size_t nanBytes = 0) {
     map_ = {};
     map_.sameProcess = sameProcess;
     map_.cudaDev = cudaDev;
@@ -1980,6 +1980,7 @@ class NetConnectMicrotest : public NetClientMicrotestBase {
     NCCL_NET_MAP_ADD_POINTER(&map_, 0, 0, sizeof(ncclSendMem), sendMem);
     NCCL_NET_MAP_ADD_POINTER(&map_, 0, 0, sizeof(ncclRecvMem), recvMem);
     NCCL_NET_MAP_ADD_POINTER(&map_, sharedDevBank ? 1 : 0, 1, kSimpleBytes, buffs[NCCL_PROTO_SIMPLE]);
+    if (nanBytes > 0) NCCL_NET_MAP_ADD_POINTER(&map_, 0, 1, nanBytes, buffs[NCCL_PROTO_NAN]);
     if (sharedDevBank) map_.mems[NCCL_NET_MAP_SHARED_DEVMEM].size = kSimpleBytes;
     hostMem_.assign(map_.mems[NCCL_NET_MAP_HOSTMEM].size, 0);
     devMem_.assign(map_.mems[NCCL_NET_MAP_DEVMEM].size, 0);
@@ -2354,6 +2355,44 @@ TEST_F(NetConnectMicrotest, RecvConnect_GdrFlushFlag_WiredToConnector) {
   EXPECT_EQ(conn_.conn.gdrFlushSeq, seq);
 }
 
+// A free NaN slot reads back as the all-ones sentinel, so connect fills the whole NaN buffer with 0xFF. A map
+// with no NaN buffer (the shared p2p bank) gets no fill even though the comm sizes one.
+TEST_F(NetConnectMicrotest, RecvConnect_SeedsNanBufferWithSentinel) {
+  constexpr size_t kNanBytes = 1 << 16;
+  comm_.buffSizes[NCCL_PROTO_NAN] = kNanBytes;
+  struct Fill {
+    void* ptr;
+    int value;
+    size_t bytes;
+  };
+  std::vector<Fill> fills;
+  ScopedHook memsetAsync(g_hipMemsetAsync, [&fills](void* p, int v, size_t n, hipStream_t) {
+    fills.push_back({p, v, n});
+    return hipSuccess;
+  });
+
+  for (bool withNanBuffer : {true, false}) {
+    SCOPED_TRACE(withNanBuffer ? "map has a NaN buffer" : "map has no NaN buffer");
+    fills.clear();
+    free(conn_.transportResources);
+    conn_.transportResources = nullptr;
+    BuildMap(1, comm_.cudaDev, /*shared=*/0, /*sharedDevBank=*/false, withNanBuffer ? kNanBytes : 0);
+
+    ASSERT_EQ(RecvConnect(), ncclSuccess);
+
+    if (withNanBuffer) {
+      ASSERT_NE(conn_.conn.buffs[NCCL_PROTO_NAN], nullptr);
+      ASSERT_EQ(fills.size(), 1u);
+      EXPECT_EQ(fills[0].ptr, conn_.conn.buffs[NCCL_PROTO_NAN]);
+      EXPECT_EQ(fills[0].value, 0xFF);
+      EXPECT_EQ(fills[0].bytes, kNanBytes);
+    } else {
+      EXPECT_EQ(conn_.conn.buffs[NCCL_PROTO_NAN], nullptr);
+      EXPECT_TRUE(fills.empty());
+    }
+  }
+}
+
 TEST_F(NetConnectMicrotest, Free_NoMap_ReturnsSuccess) {
   EXPECT_EQ(sendFree(&comm_, &conn_), ncclSuccess);
   EXPECT_EQ(recvFree(&comm_, &conn_), ncclSuccess);
@@ -2447,7 +2486,7 @@ TEST_F(NetConnectMicrotest, RecvFree_ReleasesMap) {
 template <typename Res>
 class NetProxyConnectMicrotest : public NetAllocMicrotestBase {
  protected:
-  static constexpr int kSizes[NCCL_NUM_PROTOCOLS] = {1 << 12, 1 << 13, 1 << 14};  // LL, LL128, SIMPLE
+  static constexpr int kSizes[NCCL_NUM_PROTOCOLS] = {1 << 12, 1 << 13, 1 << 14, 1 << 16};  // LL, LL128, SIMPLE, NaN
   static constexpr int kP2pLl128Size = 1 << 15;  // send/recv connections' own LL128 size
   std::deque<ncclProxyConnection> conns_;
   connectMap resp_{};
@@ -2666,6 +2705,18 @@ TEST_F(NetSendProxyConnectMicrotest, IbPlugins_ApplyP2pPolicy) {
   EXPECT_EQ(ib.calls, 1);
 }
 
+TEST_F(NetSendProxyConnectMicrotest, EmptyNanBuffer_IsNeitherMappedNorRegistered) {
+  sendNetResources* r = AddConn();
+  proxyState_.buffSizes[NCCL_PROTO_NAN] = 0;
+
+  ASSERT_EQ(Connect(), ncclSuccess);
+
+  EXPECT_EQ(net_.regMrs.size(), (size_t)NCCL_NUM_PROTOCOLS - 1);
+  EXPECT_EQ(r->buffSizes[NCCL_PROTO_NAN], 0);
+  EXPECT_EQ(Buffer(r, NCCL_PROTO_NAN), nullptr);
+  EXPECT_EQ(r->mhandles[NCCL_PROTO_NAN], nullptr);
+}
+
 TEST_F(NetSendProxyConnectMicrotest, DedicatedHostBuffers_RegistersEveryProtocol) {
   sendNetResources* r = AddConn();
   ScopedHook dev(g_hipGetDevice, [](int* d) {
@@ -2803,7 +2854,7 @@ TEST_F(NetSendProxyConnectMicrotest, SharedGdrWithLlBuffers_StagesLlAndLl128) {
   EXPECT_EQ(r->buffSizes[NCCL_PROTO_LL], kSizes[NCCL_PROTO_LL]);
   EXPECT_EQ(r->buffSizes[NCCL_PROTO_LL128], kP2pLl128Size);
   EXPECT_EQ(devAllocs_, 2);  // the pool and the LL128 staging bank
-  EXPECT_EQ(net_.regMrs.size(), (size_t)NCCL_NUM_PROTOCOLS);
+  EXPECT_EQ(net_.regMrs.size(), 3u);  // LL, LL128 and SIMPLE; a shared p2p connection has no NaN buffer
 }
 
 TEST_F(NetSendProxyConnectMicrotest, SharedComms_OneLocalRankConnectsOthersReuse) {
@@ -2905,7 +2956,7 @@ TEST_F(NetSendProxyConnectMicrotest, HsaDmaBuf_RegistersDeviceBuffersByFd) {
 
   ASSERT_EQ(Connect(), ncclSuccess);
 
-  ASSERT_EQ(net_.regMrDmaBufs.size(), 2u);  // LL128 and SIMPLE; LL stays in host memory
+  ASSERT_EQ(net_.regMrDmaBufs.size(), (size_t)NCCL_NUM_PROTOCOLS - 1);  // all but LL, which stays in host memory
   EXPECT_EQ(RegMrType(Buffer(r, NCCL_PROTO_LL)), NCCL_PTR_HOST);
   for (const auto& m : net_.regMrDmaBufs) {
     EXPECT_EQ(m.type, NCCL_PTR_CUDA);
@@ -2962,7 +3013,7 @@ TEST_F(NetSendProxyConnectMicrotest, CuMemDmaBuf_RegistersDeviceBuffersAgainstBa
   EXPECT_EQ(exports_[0].ptr, bank.gpuPtr);
   EXPECT_EQ(exports_[0].size, (size_t)bank.size);
   EXPECT_EQ(exports_[0].flags, (unsigned long long)hipMemRangeFlagDmaBufMappingTypePcie);
-  ASSERT_EQ(net_.regMrDmaBufs.size(), 2u);  // LL128 and SIMPLE
+  ASSERT_EQ(net_.regMrDmaBufs.size(), (size_t)NCCL_NUM_PROTOCOLS - 1);  // all but LL
   for (const auto& m : net_.regMrDmaBufs) {
     EXPECT_EQ(m.fd, bank.dmaBufFd);
     EXPECT_EQ(m.offset, (uint64_t)(static_cast<char*>(m.data) - bank.gpuPtr));
@@ -3121,6 +3172,18 @@ TEST_F(NetRecvProxyConnectMicrotest, RemoteProxy_Rejected) {
 
   EXPECT_EQ(Connect(), ncclInternalError);
   EXPECT_EQ(hostAllocs_, 0);
+}
+
+TEST_F(NetRecvProxyConnectMicrotest, EmptyNanBuffer_IsNeitherMappedNorRegistered) {
+  recvNetResources* r = AddRecvConn();
+  proxyState_.buffSizes[NCCL_PROTO_NAN] = 0;
+
+  ASSERT_EQ(Connect(), ncclSuccess);
+
+  EXPECT_EQ(net_.regMrs.size(), (size_t)NCCL_NUM_PROTOCOLS - 1);
+  EXPECT_EQ(r->buffSizes[NCCL_PROTO_NAN], 0);
+  EXPECT_EQ(Buffer(r, NCCL_PROTO_NAN), nullptr);
+  EXPECT_EQ(r->mhandles[NCCL_PROTO_NAN], nullptr);
 }
 
 TEST_F(NetRecvProxyConnectMicrotest, DedicatedHostBuffers_RegistersEveryProtocol) {
@@ -3289,7 +3352,7 @@ TEST_F(NetRecvProxyConnectMicrotest, DedicatedGdrCuMem_AllocatesShareableBank) {
 
   ASSERT_EQ(Connect(), ncclSuccess);
 
-  EXPECT_EQ(allocated, (size_t)kSizes[0] + kSizes[1] + kSizes[2]);
+  EXPECT_EQ(allocated, (size_t)kSizes[0] + kSizes[1] + kSizes[2] + kSizes[3]);
   EXPECT_EQ(devAllocs_, 0);
 #if CUDA_VERSION >= 11070 || NCCL_CUMEM_DMABUF_EXPORT_GATE
   ASSERT_EQ(exports_.size(), 1u);  // cuMem banks are always exported for DMA-BUF registration
@@ -3327,7 +3390,7 @@ TEST_F(NetRecvProxyConnectMicrotest, SharedGdrWithLlBuffers_StagesLlAndLl128) {
   EXPECT_EQ(r->buffSizes[NCCL_PROTO_LL], kSizes[NCCL_PROTO_LL]);
   EXPECT_EQ(r->buffSizes[NCCL_PROTO_LL128], kP2pLl128Size);
   EXPECT_EQ(devAllocs_, 2);
-  EXPECT_EQ(net_.regMrs.size(), (size_t)NCCL_NUM_PROTOCOLS);
+  EXPECT_EQ(net_.regMrs.size(), 3u);  // LL, LL128 and SIMPLE; a shared p2p connection has no NaN buffer
 }
 
 TEST_F(NetRecvProxyConnectMicrotest, DedicatedWithLlBuffersFlag_AddsNoStaging) {
@@ -3336,7 +3399,7 @@ TEST_F(NetRecvProxyConnectMicrotest, DedicatedWithLlBuffersFlag_AddsNoStaging) {
 
   ASSERT_EQ(Connect(), ncclSuccess);
 
-  EXPECT_EQ(r->map.mems[NCCL_NET_MAP_DEVMEM].size, (ssize_t)(kSizes[0] + kSizes[1] + kSizes[2]));
+  EXPECT_EQ(r->map.mems[NCCL_NET_MAP_DEVMEM].size, (ssize_t)(kSizes[0] + kSizes[1] + kSizes[2] + kSizes[3]));
 }
 
 TEST_F(NetRecvProxyConnectMicrotest, SharedComms_KeyedByProxyRankAndReused) {

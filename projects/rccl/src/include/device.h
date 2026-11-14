@@ -74,6 +74,25 @@ extern const char* ncclProtoStr[NCCL_NUM_PROTOCOLS];
 #define RCCL_TDM_STAGE_BYTES_PER_WARP 0
 #endif
 
+// Build gate for the TDM path of the NaN-flag protocol (-DENABLE_TDM_NAN=ON), defined like
+// ENABLE_TDM_SIMPLE above.
+#ifndef ENABLE_TDM_NAN
+#define ENABLE_TDM_NAN 0
+#endif
+
+// NaN-flag TDM staging, shared with the SIMPLE stage above (one protocol runs at a time). Each
+// warp gets a receive window and a source window of RCCL_TDM_NAN_WINDOW_BYTES, and the block
+// one all-ones window that the sentinel restore stores from. With the generic kernel's 83.5 KiB
+// of other LDS, 8 warps of 12 KiB windows come to 290 KiB of the 320 KiB per workgroup.
+#if ENABLE_TDM_NAN && (defined(__gfx1250__) || defined(__gfx1250_strict__))
+#ifndef RCCL_TDM_NAN_WINDOW_BYTES
+#define RCCL_TDM_NAN_WINDOW_BYTES 12288
+#endif
+#else
+#undef RCCL_TDM_NAN_WINDOW_BYTES
+#define RCCL_TDM_NAN_WINDOW_BYTES 0
+#endif
+
 #ifdef __CUDA_ARCH__
 #define NCCL_CUDA_ARCH __CUDA_ARCH__
 #else
@@ -243,6 +262,29 @@ static_assert(NCCL_LL_CLEAN_MASK % NCCL_STEPS == 0, "Invalid NCCL_LL_CLEAN_MASK 
 #define NCCL_LL128_SHMEM_ELEMS_PER_THREAD 8
 #endif
 #define NCCL_LL128_SHMEM_SIZE (NCCL_LL128_SHMEM_ELEMS_PER_THREAD * NCCL_LL128_MAX_NTHREADS)
+
+/* NaN-flag protocol (src/device/prims_nan.h). There is no flag lane: a slice has
+ * arrived once none of its elements read back as NaN. The receive FIFO therefore
+ * has to sit at a NaN sentinel whenever it is free, and the receiver restores that
+ * sentinel over every slice it consumes before releasing the slot's credit.
+ *
+ * The sentinel is all-ones bytes for every supported dtype rather than a per-dtype
+ * NaN, because one buffer is shared by collectives of different dtypes: a slot left
+ * holding two bf16 NaNs (0x7FC07FC0) reads back as a finite float. All-ones is NaN
+ * under f16, bf16, f32 and f64 alike, so the invariant survives a dtype change. */
+#define NCCL_NAN_ELEMS_PER_THREAD 8
+/* Wire words per thread the step slot is sized for. Deliberately decoupled from
+ * the register count above, the same way LL128's buffer is: a step holds many
+ * register-slices, so one credit round-trip covers many inner iterations rather
+ * than one.
+ *
+ * 256 puts the FIFO at 4 MiB (512 KiB per step). calcCollChunking() caps only the
+ * tree chunk, so a ring round moves up to one full step. */
+#define NCCL_NAN_STEP_ELEMS_PER_THREAD 256
+/* The gfx1250 TDM path pays a fixed sync per op (poll, sentinel restore, tensorcnt
+ * wait), so it wants a deeper step: 8 MiB FIFO, 1 MiB per step. Only used while
+ * the TDM path is enabled. */
+#define NCCL_NAN_TDM_STEP_ELEMS_PER_THREAD 512
 
 #define NCCL_P2P_WRITE 0x01
 #define NCCL_P2P_READ 0x02
@@ -427,12 +469,17 @@ struct alignas(16) ncclDevWorkP2p {
 
   // Set when the send/recv is latency-bound and should use the LL-family latency
   // protocol instead of SIMPLE. Which one (legacy LL or LL128) is fixed by the kernel
-  // variant selected on the host via ncclDevFuncId_P2p(useLL128).
+  // variant selected on the host via ncclDevFuncId_P2p(useLL128, useNaN).
   uint8_t sendProtoLL:1, recvProtoLL:1;
   uint8_t sendNetReg:1, recvNetReg:1;
   uint8_t sendIpcReg:1, recvIpcReg:1;
 
   uint8_t profilerEnabled:1;
+  // NaN kernel variant only. With ProtoLL set, Nan picks the NaN-flag protocol
+  // over legacy LL; NanF64 says the payload is f64, so only each element's high
+  // dword marks arrival.
+  uint8_t sendNan:1, recvNan:1;
+  uint8_t sendNanF64:1, recvNanF64:1;
 
   uint8_t sendConnIndex:2, recvConnIndex:2;
 };
@@ -562,7 +609,9 @@ __device__ constexpr int ncclProtoGrainSize(int proto) {
          proto == NCCL_PROTO_LL128  ? WARP_SIZE * NCCL_LL128_SHMEM_ELEMS_PER_THREAD / NCCL_LL128_LINEELEMS *
                                         NCCL_LL128_DATAELEMS * sizeof(uint64_t) :
          proto == NCCL_PROTO_SIMPLE ? 512 :
-                                      -1;
+         // Every wire word is payload, so a warp's slice is its whole register set.
+         proto == NCCL_PROTO_NAN ? WARP_SIZE * NCCL_NAN_ELEMS_PER_THREAD * sizeof(uint64_t) :
+                                   -1;
 }
 
 template <typename Int>
@@ -734,6 +783,9 @@ struct ncclKernelComm {
 #endif
 #if ENABLE_TDM_PRIM_LL128
   int tdmLl128Enable; // RCCL: route LL128 user-buffer legs through the async-to-LDS engine
+#endif
+#if ENABLE_TDM_NAN
+  int nanTdmMinBytes; // RCCL: smallest NaN-flag op, in bytes, moved by TDM; -1 = never
 #endif
   int patSharedQps; // true if PAT ReduceScatter and AllGather share one connection set
   int p2pChannelShiftSize; // [RCCL] Modifies how parts are mapped to p2p channels
@@ -1018,8 +1070,8 @@ inline int ncclDevFuncId(int coll, int devRedOp, int type, int algo, int proto, 
           ((uint64_t)(proto & RCCL_FUNC_ID_MASK) << RCCL_PROTO_SHIFT) |
           ((uint64_t)(reg & RCCL_FUNC_ID_MASK) << RCCL_REG_SHIFT);
   } else if (coll == ncclFuncSendRecv) {
-    // SendRecv has two latency-protocol kernel variants distinguished by reg
-    // (0 = legacy LL, 1 = LL128). reg=0 preserves the historical coll-only key.
+    // SendRecv has three latency-protocol kernel variants distinguished by reg
+    // (0 = legacy LL, 1 = LL128, 2 = NaN). reg=0 preserves the historical coll-only key.
     key = ((uint64_t)(coll & RCCL_FUNC_ID_MASK) << RCCL_COLL_SHIFT) |
           ((uint64_t)(reg & RCCL_FUNC_ID_MASK) << RCCL_REG_SHIFT);
   } else if (coll == ncclFuncAlltoAllPivot || coll == ncclFuncAlltoAllGda || coll == ncclFuncAlltoAllvGda) {
@@ -1047,16 +1099,21 @@ inline int ncclDevFuncId(int coll, int devRedOp, int type, int algo, int proto, 
   return row;
 }
 
-// Selects the SendRecv kernel variant: useLL128 -> the LL128 latency kernel (reg=1,
-// gfx942/gfx950 via NCCL_ALLOC_P2P_NET_LL_BUFFERS, gfx1250 via NCCL_P2P_LL128_ENABLE=1),
-// otherwise the legacy LL kernel (reg=0). Keep in sync with reg_values_of("SendRecv")
-// otherwise the legacy LL kernel (reg=0). Keep in sync with reg_values_of("SendRecv")
-// in the device codegen.
-inline int ncclDevFuncId_P2p(bool useLL128 = false) {
+// Selects the SendRecv kernel variant: useNaN -> the NaN-flag kernel (reg=2,
+// NCCL_PROTO=NaN intra-node float payloads); useLL128 -> the LL128 latency kernel
+// (reg=1, gfx942/gfx950 via NCCL_ALLOC_P2P_NET_LL_BUFFERS, gfx1250 via
+// NCCL_P2P_LL128_ENABLE=1); otherwise the legacy LL kernel (reg=0). Keep in sync
+// with reg_values_of("SendRecv") in the device codegen.
+inline int ncclDevFuncId_P2p(bool useLL128 = false, bool useNaN = false) {
   static int ncclDevFuncIdP2pLL =
     ncclDevFuncId(ncclFuncSendRecv, -1, -1, NCCL_ALGO_UNDEF, NCCL_PROTO_UNDEF, 0, 0, /*reg=*/0);
   static int ncclDevFuncIdP2pLL128 =
     ncclDevFuncId(ncclFuncSendRecv, -1, -1, NCCL_ALGO_UNDEF, NCCL_PROTO_UNDEF, 0, 0, /*reg=*/1);
+  if (useNaN) {
+    static int ncclDevFuncIdP2pNaN =
+      ncclDevFuncId(ncclFuncSendRecv, -1, -1, NCCL_ALGO_UNDEF, NCCL_PROTO_UNDEF, 0, 0, /*reg=*/2);
+    return ncclDevFuncIdP2pNaN;
+  }
   return useLL128 ? ncclDevFuncIdP2pLL128 : ncclDevFuncIdP2pLL;
 }
 

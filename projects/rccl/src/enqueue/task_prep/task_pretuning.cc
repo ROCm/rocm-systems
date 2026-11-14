@@ -8,6 +8,7 @@
 #include "enqueue.h"
 #include "ce_coll.h"
 #include "checks.h"
+#include "config/collconfig.h"
 #include "debug.h"
 #include "dev_runtime.h"
 #include "enqueue/task_pretuning.h"
@@ -45,11 +46,15 @@ static ncclResult_t fillCollTuningInput(struct ncclComm* comm, struct ncclRawTas
   in->countMax = raw->count;
   in->nWorks = 1;
   in->numPipeOps = 1;
+  NCCLCHECK(ncclCollConfigGetAlgMask(&raw->collConfig, raw->func, &in->algMask));
   elementSize = ncclTypeSize(in->datatype);
   // Treat an AllGather as in-place when each rank sends from its own receive slice.
   in->inPlace = in->func == ncclFuncAllGather &&
                 ncclAllGatherIsInPlace(raw->sendbuff, raw->recvbuff, comm->rank, raw->count * elementSize);
-  if (in->func == ncclFuncAllGather || in->func == ncclFuncBroadcast) {
+  // Broadcast stays int8.
+  if ((in->func == ncclFuncAllGather &&
+       !rcclNanAllGatherKeepsDtype(comm, in->datatype, in->count * elementSize * comm->nRanks, in->algMask)) ||
+      in->func == ncclFuncBroadcast) {
     in->count *= elementSize;
     in->datatype = ncclInt8;
     in->countMax = in->count;

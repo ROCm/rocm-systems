@@ -394,8 +394,36 @@ collected in the following table.
 
     * - | ``NCCL_PROTO``
         | Forces specific protocol selection for communication.
+        | ``NaN`` alone, in any case, selects the NaN-flag protocol wherever it
+          has a kernel: float (f16, bf16, f32, f64) ``ncclAllReduce`` on ring and
+          tree, ring ``ncclAllGather`` and ``ncclReduceScatter``, and the
+          intra-node send/recv halves of ``ncclAlltoAll``, single-node Direct
+          AllGather and Direct ReduceScatter. Everything else keeps the default
+          protocols, and a list such as ``LL,NaN`` does not select it. A
+          receiver reads an all-ones dword as not yet written, so the sender
+          lowers every all-ones dword of the data (for f64, every all-ones high
+          dword) to ``0xFFFFFFFE``, which is still a NaN.
       - | Protocol name string
         | Used to override automatic protocol selection
+
+    * - | ``RCCL_NAN_PROTO_AUTO``
+        | Uses the NaN-flag protocol (see ``NCCL_PROTO``) only in the message-size
+          windows where it measured faster than the default selection, per
+          collective and node count, on gfx950 with 8 GPUs per node. Off when
+          ``NCCL_PROTO`` is set, and for a call whose per-call ``algSelection``
+          names no ``NAN`` row.
+      - | ``0``: Disabled (default).
+        | ``1``: Enabled.
+
+    * - | ``NCCL_NAN_BUFFSIZE``
+        | Size in bytes of the NaN-flag protocol's FIFO on each connection. A
+          communicator with no NaN FIFO never selects the protocol. A
+          communicator sharing its parent's resources uses the parent's size.
+          The size is rounded down to a multiple of 32 KiB (16 KiB on wave32
+          GPUs), one 4 KiB (2 KiB) grain per FIFO step. A smaller size turns
+          the protocol off.
+      - | Default: 4 MiB where ``NCCL_PROTO=NaN`` or ``RCCL_NAN_PROTO_AUTO``
+          applies (8 MiB with the gfx1250 TDM path), else ``0``.
 
     * - | ``RCCL_P2P_BATCH_THRESHOLD``
         | Per-peer byte size above which point-to-point sends and receives are
@@ -1659,6 +1687,21 @@ threshold table introduced for gfx1250.
           effect.
       - | ``0``: Disabled (default). The LL128 store uses the per-lane vector path.
         | ``1``: Enabled, where the build and architecture support it.
+
+    * - | ``RCCL_TDM_NAN_ENABLE``
+        | Moves the NaN-flag protocol's data through the gfx1250 tensor data mover.
+          The library must be built with ``--enable-tdm-nan``
+          (``-DENABLE_TDM_NAN=ON``); on any other architecture, or without the
+          build flag, this variable has no effect.
+      - | ``1``: Enabled, where the build and architecture support it (default).
+        | ``0``: Disabled. The NaN-flag protocol uses the register path.
+
+    * - | ``RCCL_TDM_NAN_MIN_BYTES``
+        | Smallest NaN-flag primitive operation (one channel's chunk) that moves
+          through the tensor data mover when ``RCCL_TDM_NAN_ENABLE`` applies.
+          Smaller operations keep the register path.
+      - | Default: ``65536``.
+        | ``N`` (bytes): Use ``N`` as the minimum.
     * - | ``RCCL_CE_AR_2SHOT_MIN_BYTES``
         | Overrides the minimum message size for the CE 2-shot AllReduce path.
           When ``-1`` (default), the value is resolved from ``ceNonRegMin[AllReduce]``

@@ -2332,6 +2332,7 @@ TEST_F(InitMicrotest, FillSharedParentInfo_SharingRankVotesTheParentsDecision) {
   FillInfoComm parent;
   parent.get()->buffSizes[NCCL_PROTO_LL128] = 4 << 20;
   parent.get()->p2pLl128BuffSize = 1 << 20;
+  parent.get()->buffSizes[NCCL_PROTO_NAN] = 2 << 20;
   for (bool share : {false, true}) {
     for (bool parentOn : {false, true}) {
       parent.get()->shareResources = share;
@@ -2342,6 +2343,8 @@ TEST_F(InitMicrotest, FillSharedParentInfo_SharingRankVotesTheParentsDecision) {
       EXPECT_EQ(!share || parentOn, info.ibGdrFlushFlag) << "share " << share << " parent " << parentOn;
       EXPECT_EQ(share ? 4 << 20 : 0, info.sharedLl128BuffSize) << "share " << share;
       EXPECT_EQ(share ? 1 << 20 : 0, info.sharedP2pLl128BuffSize) << "share " << share;
+      EXPECT_EQ(share ? 2 << 20 : 0, info.sharedNanBuffSize) << "share " << share;
+      EXPECT_EQ(share, info.sharesParentProxy) << "share " << share;
     }
   }
   {
@@ -6040,6 +6043,7 @@ std::vector<ncclPeerInfo> SharedLl128Peers(const std::vector<int>& shared) {
   for (size_t r = 0; r < shared.size(); r++) {
     peers[r].sharedLl128BuffSize = shared[r];
     peers[r].sharedP2pLl128BuffSize = shared[r] > 0 ? 448 << 10 : 0;
+    peers[r].sharesParentProxy = shared[r] > 0;
   }
   return peers;
 }
@@ -6061,6 +6065,68 @@ TEST_F(InitMicrotest, ComputeBuffSizes_RankSharingAProxy_TakesItsLl128Sizes) {
           << "shared x" << sharedFactor << ", own x" << ownFactor;
       EXPECT_EQ(448 << 10, s.comm()->p2pLl128BuffSize) << "shared x" << sharedFactor << ", own x" << ownFactor;
     }
+  }
+}
+TEST_F(InitMicrotest, ComputeBuffSizes_RankSharingAProxy_TakesItsNanSize) {
+  // A child sharing its parent's connectors (splitShare) uses the parent's NaN FIFO on every transport, whether the
+  // parent sized none (NaN off there, on in the child) or one this child would not have.
+  for (int own : {0, 4 << 20}) {
+    for (int sharedSize : {0, 4 << 20}) {
+      ScopedLl128ScaleFake scale(1);
+      BuffSizes_Scene s;
+      s.comm()->nNodes = 2;
+      s.comm()->nRanks = 2;
+      s.comm()->rank = 0;
+      SetParams({{"NAN_BUFFSIZE", own}});
+      auto peers = SharedLl128Peers({448 << 10, 448 << 10});
+      for (int r = 0; r < 2; r++) peers[r].sharedNanBuffSize = sharedSize;
+      s.comm()->peerInfo = peers.data();
+      EXPECT_EQ(ncclSuccess, computeBuffSizes(s.comm()));
+      EXPECT_EQ(sharedSize, s.comm()->buffSizes[NCCL_PROTO_NAN]) << "own " << own << ", shared " << sharedSize;
+    }
+  }
+}
+TEST_F(InitMicrotest, ComputeBuffSizes_RankSharingAProxyWithNoLl128Buffer_StillTakesItsNanSize) {
+  // A parent run with NCCL_LL128_BUFFSIZE=0 sized no LL128 buffer, but its NaN size is shape-dependent and can
+  // differ from the child's, so sharing is recognised without an LL128 size.
+  ScopedLl128ScaleFake scale(1);
+  BuffSizes_Scene s;
+  s.comm()->nNodes = 2;
+  s.comm()->nRanks = 2;
+  s.comm()->rank = 0;
+  SetParams({{"LL128_BUFFSIZE", 0}, {"NAN_BUFFSIZE", 4 << 20}});
+  std::vector<ncclPeerInfo> peers(3);
+  for (int r = 0; r < 2; r++) {
+    peers[r].sharesParentProxy = true;
+    peers[r].sharedNanBuffSize = 128 << 10;
+  }
+  s.comm()->peerInfo = peers.data();
+  EXPECT_EQ(ncclSuccess, computeBuffSizes(s.comm()));
+  EXPECT_EQ(128 << 10, s.comm()->buffSizes[NCCL_PROTO_NAN]);
+  EXPECT_EQ(0, s.comm()->buffSizes[NCCL_PROTO_LL128]);
+}
+TEST_F(InitMicrotest, ComputeBuffSizes_NanBuffSizeBelowOneGrainPerStep_TurnsNanOff) {
+  // A wave64 NaN grain is 4 KiB, so a FIFO under 32 KiB rounds every chunk to 0 (calcCollChunking divides by it).
+  for (int size : {1, 1 << 10, 8 << 10, (32 << 10) - 1}) {
+    BuffSizes_Scene s;
+    s.comm()->WarpSize = 64;
+    SetParams({{"NAN_BUFFSIZE", size}});
+    EXPECT_EQ(ncclSuccess, computeBuffSizes(s.comm()));
+    EXPECT_EQ(0, s.comm()->buffSizes[NCCL_PROTO_NAN]) << size;
+  }
+}
+TEST_F(InitMicrotest, ComputeBuffSizes_NanBuffSize_RoundsDownToWholeGrainsPerStep) {
+  struct Case {
+    int warpSize, size, expected;
+  };
+  for (const Case& c : {Case{64, 32 << 10, 32 << 10}, Case{64, (96 << 10) + 100, 96 << 10},
+                        Case{64, (48 << 10), 32 << 10}, Case{32, 16 << 10, 16 << 10}, Case{32, (24 << 10), 16 << 10},
+                        Case{64, 0, 0}}) {
+    BuffSizes_Scene s;
+    s.comm()->WarpSize = c.warpSize;
+    SetParams({{"NAN_BUFFSIZE", c.size}});
+    EXPECT_EQ(ncclSuccess, computeBuffSizes(s.comm()));
+    EXPECT_EQ(c.expected, s.comm()->buffSizes[NCCL_PROTO_NAN]) << "wave" << c.warpSize << ", " << c.size;
   }
 }
 TEST_F(InitMicrotest, ComputeBuffSizes_GrowNewRank_AdoptsTheExistingRanksLl128Sizes) {

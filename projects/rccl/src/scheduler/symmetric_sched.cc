@@ -234,6 +234,7 @@ ncclResult_t ncclMakeSymmetricTaskList(struct ncclComm* comm, struct ncclTaskCol
       input.minCTAs = headTask->minCTAs;
       input.maxCTAs = headTask->maxCTAs;
       input.CTAPolicy = headTask->CTAPolicy;
+      input.algMask = effAlgMask;
       // Symmetric kernels use comm->symkState.hasLsaMultimem for multicast capability.
       // input.nvlsSupport only gates NVLS/NVLS_TREE during general-kernel fallback tuning.
       input.nvlsSupport =

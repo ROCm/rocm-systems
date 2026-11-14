@@ -2068,7 +2068,8 @@ TEST_F(EnqueueMicrotest, UpdateCollCostTable_AlgSelectionKeepsOnlyTheNamedGenera
 }
 
 TEST_F(EnqueueMicrotest, UpdateCollCostTable_AlgSelectionAcceptsAFamilyOfRows) {
-  // Prefix matching yields several bits ("RING" -> all three protocols); all must survive.
+  // Prefix matching yields several bits ("RING" -> every Ring protocol); all must survive. The NaN
+  // cell is only filled under NCCL_PROTO=NaN, so the family here is the other three.
   CostComm cc;
   CostTable tbl;
   auto task = CostTask(ncclFuncAllReduce);
@@ -2077,8 +2078,10 @@ TEST_F(EnqueueMicrotest, UpdateCollCostTable_AlgSelectionAcceptsAFamilyOfRows) {
   ScriptAllTimes(1.0f);
 
   ASSERT_EQ(ncclSuccess, updateCollCostTable(cc.get(), &task, 1 << 20, 1, 1, 1, 0, tbl.ptr()));
-  for (int p = 0; p < NCCL_NUM_PROTOCOLS; ++p) EXPECT_TRUE(tbl.written(NCCL_ALGO_RING, p)) << "p=" << p;
-  EXPECT_EQ(NCCL_NUM_PROTOCOLS, tbl.countWritten());
+  for (int p : {NCCL_PROTO_LL, NCCL_PROTO_LL128, NCCL_PROTO_SIMPLE}) {
+    EXPECT_TRUE(tbl.written(NCCL_ALGO_RING, p)) << "p=" << p;
+  }
+  EXPECT_EQ(3, tbl.countWritten());
 }
 
 TEST_F(EnqueueMicrotest, UpdateCollCostTable_NoAlgSelection_LeavesEveryEligibleCell) {
@@ -5329,6 +5332,7 @@ void InstallSendRecvDevFuncIds() {
   };
   ncclDevFuncNameToId[key(0)] = 100;  // legacy LL kernel
   ncclDevFuncNameToId[key(1)] = 101;  // LL128 kernel
+  ncclDevFuncNameToId[key(2)] = 102;  // NaN kernel
 }
 
 struct Gfx1250AddP2pScene {
@@ -5339,6 +5343,7 @@ struct Gfx1250AddP2pScene {
   std::array<ncclPeerInfo, 4> peerInfo{};
   char llBuf[8]{};
   char ll128Buf[8]{};
+  char nanBuf[8]{};
   char sendMem[8]{};
   char recvMem[8]{};
   ncclTaskP2p recvTask{};
@@ -5384,6 +5389,8 @@ struct Gfx1250AddP2pScene {
           peers[slot].send[ci].conn.buffs[NCCL_PROTO_LL128] = ll128Buf;
           peers[slot].recv[ci].conn.buffs[NCCL_PROTO_LL] = llBuf;
           peers[slot].recv[ci].conn.buffs[NCCL_PROTO_LL128] = ll128Buf;
+          peers[slot].send[ci].conn.buffs[NCCL_PROTO_NAN] = nanBuf;
+          peers[slot].recv[ci].conn.buffs[NCCL_PROTO_NAN] = nanBuf;
         }
       }
       c->channels[ch].peers = &peerSlots[ch * c->nRanks];
@@ -5397,18 +5404,28 @@ struct Gfx1250AddP2pScene {
     sendTask.root = 1;
   }
 
-  ncclResult_t add(ssize_t sendBytes, ssize_t recvBytes) {
+  ncclResult_t add(ssize_t sendBytes, ssize_t recvBytes, int peer = 1) {
     struct ncclTaskP2p* tasks[2] = {&recvTask, &sendTask};
     int channelsPerPeer = bp.c()->p2pnChannelsPerPeer;
     return addP2pToPlan(bp.c(), bp.p(), /*nChannelsMin=*/channelsPerPeer, /*nChannelsMax=*/channelsPerPeer,
                         /*p2pRound=*/0,
-                        /*sendRank=*/1, sendMem, sendBytes, /*recvRank=*/1, recvMem, recvBytes,
+                        /*sendRank=*/peer, sendMem, sendBytes, /*recvRank=*/peer, recvMem, recvBytes,
                         /*sendOpCount=*/0, /*recvOpCount=*/0, planTotalTasks, tasks);
   }
 
   ncclConnector* Conn(int channel, bool send, int connIndex = 1) {
     int slot = channel * bp.c()->nRanks + 1;
     return send ? &peers[slot].send[connIndex] : &peers[slot].recv[connIndex];
+  }
+
+  // Both halves of `collAPI` on `datatype`, with a NaN FIFO on every link.
+  void asCollective(ncclFunc_t collAPI, ncclDataType_t datatype, size_t bytes) {
+    bp.c()->buffSizes[NCCL_PROTO_NAN] = 1 << 20;
+    for (ncclTaskP2p* t : {&recvTask, &sendTask}) {
+      t->collAPI = collAPI;
+      t->datatype = datatype;
+      t->bytes = bytes;
+    }
   }
 
   int p2pWorkCount() {
@@ -5505,6 +5522,221 @@ TEST_F(EnqueueMicrotest, AddP2pToPlan_Gfx1250Enable1AboveCap_UsesSimple) {
   auto* batch = sc.bp.tailBatch();
   ASSERT_NE(nullptr, batch);
   EXPECT_EQ(ncclDevFuncId_P2p(false), batch->funcId);
+}
+
+namespace {
+// NCCL_PROTO is read once per process, so the NaN cases run in a re-executed child.
+template <typename Body>
+void UnderNanProto(Body body) {
+  const std::string style = ::testing::GTEST_FLAG(death_test_style);
+  ::testing::GTEST_FLAG(death_test_style) = "threadsafe";
+  EXPECT_EXIT(
+      {
+        SetMicroEnv("NCCL_PROTO", "NaN");
+        body();
+        std::exit(::testing::Test::HasFailure() ? 1 : 0);
+      },
+      ::testing::ExitedWithCode(0), "");
+  ::testing::GTEST_FLAG(death_test_style) = style;
+}
+
+template <typename Body>
+void UnderNanAuto(Body body) {
+  const std::string style = ::testing::GTEST_FLAG(death_test_style);
+  ::testing::GTEST_FLAG(death_test_style) = "threadsafe";
+  EXPECT_EXIT(
+      {
+        SetMicroEnv("RCCL_NAN_PROTO_AUTO", "1");
+        SetMicroEnvAbsent("NCCL_PROTO");
+        body();
+        std::exit(::testing::Test::HasFailure() ? 1 : 0);
+      },
+      ::testing::ExitedWithCode(0), "");
+  ::testing::GTEST_FLAG(death_test_style) = style;
+}
+
+// Two gfx950 nodes of 8, where RCCL_NAN_PROTO_AUTO picks NaN for a 1 MiB float AllReduce.
+struct NanAutoCostComm : CostComm {
+  char arch[8] = "gfx950";
+  NanAutoCostComm() : CostComm(/*nRanks=*/16, /*nNodes=*/2) {
+    get()->archName = arch;
+    get()->buffSizes[NCCL_PROTO_NAN] = 1 << 20;
+#if ENABLE_TDM_NAN
+    get()->nanTdmMinBytes = -1;
+#endif
+  }
+};
+}  // namespace
+
+TEST_F(EnqueueMicrotest, AddP2pToPlan_NanAlltoAll_UsesNanKernelAndMarksF64) {
+  for (ncclDataType_t dt : {ncclFloat32, ncclFloat64}) {
+    UnderNanProto([dt] {
+      Gfx1250AddP2pScene sc;
+      sc.asCollective(ncclFuncAlltoAll, dt, 2048);
+      ASSERT_EQ(ncclSuccess, sc.add(/*sendBytes=*/2048, /*recvBytes=*/2048));
+      auto* work = sc.p2pWork();
+      ASSERT_NE(nullptr, work);
+      EXPECT_EQ(1, work->sendNan);
+      EXPECT_EQ(1, work->recvNan);
+      EXPECT_EQ(dt == ncclFloat64, work->sendNanF64);
+      EXPECT_EQ(dt == ncclFloat64, work->recvNanF64);
+      auto* batch = sc.bp.tailBatch();
+      ASSERT_NE(nullptr, batch);
+      EXPECT_EQ(ncclDevFuncId_P2p(false, true), batch->funcId);
+    });
+  }
+}
+
+// Network links do not carry the NaN-flag protocol.
+TEST_F(EnqueueMicrotest, AddP2pToPlan_NanAlltoAllNetworkPeer_StaysOffNan) {
+  UnderNanProto([] {
+    Gfx1250AddP2pScene sc;
+    sc.asCollective(ncclFuncAlltoAll, ncclFloat32, 2048);
+    for (int ci = 0; ci < NCCL_MAX_CONNS; ++ci) {
+      sc.peers[1].send[ci].transportComm = &netTransport.send;
+      sc.peers[1].recv[ci].transportComm = &netTransport.recv;
+    }
+    ASSERT_EQ(ncclSuccess, sc.add(/*sendBytes=*/2048, /*recvBytes=*/2048));
+    auto* work = sc.p2pWork();
+    ASSERT_NE(nullptr, work);
+    EXPECT_EQ(0, work->sendNan);
+    EXPECT_EQ(0, work->recvNan);
+    auto* batch = sc.bp.tailBatch();
+    ASSERT_NE(nullptr, batch);
+    EXPECT_EQ(ncclDevFuncId_P2p(false), batch->funcId);
+  });
+}
+
+// A Direct AllGather's self copy escapes like the wire (sendrecv.h runCopyNaN), so the owner's slice matches its
+// peers'. AlltoAll's does not: each block of its output has one source.
+TEST_F(EnqueueMicrotest, AddP2pToPlan_NanSelfCopy_OnlyAllGatherEscapes) {
+  for (ncclFunc_t collAPI : {ncclFuncAllGather, ncclFuncAlltoAll}) {
+    UnderNanProto([collAPI] {
+      Gfx1250AddP2pScene sc;
+      sc.asCollective(collAPI, ncclFloat32, 2048);
+      ASSERT_EQ(ncclSuccess, sc.add(/*sendBytes=*/2048, /*recvBytes=*/2048, /*peer=*/0));
+      auto* work = sc.p2pWork();
+      ASSERT_NE(nullptr, work);
+      EXPECT_EQ(collAPI == ncclFuncAllGather, work->sendNan);
+    });
+  }
+}
+
+// Across nodes a Direct AllGather slice reaches some ranks over the network, which does not escape it, so none of
+// its links, nor its self copy, take NaN.
+TEST_F(EnqueueMicrotest, AddP2pToPlan_NanAllGatherMultiNode_StaysOffNan) {
+  for (int peer : {1, 0}) {
+    UnderNanProto([peer] {
+      ScopedHook pxnDisable(g_pxnDisable, [](struct ncclComm*) { return 1; });
+      Gfx1250AddP2pScene sc;
+      sc.bp.c()->nNodes = 2;
+      sc.bp.c()->localRanks = sc.bp.c()->maxLocalRanks = 2;
+      sc.asCollective(ncclFuncAllGather, ncclFloat32, 2048);
+      ASSERT_EQ(ncclSuccess, sc.add(/*sendBytes=*/2048, /*recvBytes=*/2048, peer));
+      auto* work = sc.p2pWork();
+      ASSERT_NE(nullptr, work);
+      EXPECT_EQ(0, work->sendNan);
+      EXPECT_EQ(0, work->recvNan);
+    });
+  }
+}
+
+// Under NCCL_PROTO=NaN a float collective with a NaN kernel is priced on its NaN cells alone, and one without
+// keeps the default set.
+TEST_F(EnqueueMicrotest, UpdateCollCostTable_NanForced_KeepsOnlyNanCells) {
+  struct Case {
+    ncclFunc_t func;
+    ncclDataType_t datatype;
+    bool ringNan, treeNan;
+  };
+  for (const Case& c : {Case{ncclFuncAllReduce, ncclFloat32, true, true}, Case{ncclFuncAllGather, ncclFloat32, true, false},
+                        Case{ncclFuncReduceScatter, ncclFloat32, true, false},
+                        Case{ncclFuncAllReduce, ncclInt32, false, false}}) {
+    UnderNanProto([c] {
+      CostComm cc;
+      cc.get()->buffSizes[NCCL_PROTO_NAN] = 1 << 20;
+      CostTable tbl;
+      auto task = CostTask(c.func, c.datatype);
+      ScriptAllTimes(1.0f);
+
+      ASSERT_EQ(ncclSuccess, updateCollCostTable(cc.get(), &task, 1 << 20, /*collNet=*/0, /*nvls=*/0, 1, 0, tbl.ptr()));
+      EXPECT_EQ(c.ringNan, tbl.written(NCCL_ALGO_RING, NCCL_PROTO_NAN));
+      EXPECT_EQ(c.treeNan, tbl.written(NCCL_ALGO_TREE, NCCL_PROTO_NAN));
+      if (c.ringNan) {
+        EXPECT_EQ(c.treeNan ? 2 : 1, tbl.countWritten());
+      } else {
+        EXPECT_TRUE(tbl.written(NCCL_ALGO_RING, NCCL_PROTO_SIMPLE));
+      }
+    });
+  }
+}
+
+// Under RCCL_NAN_PROTO_AUTO a per-call selection naming no NaN row is priced on exactly the rows it names, and
+// with no selection AUTO still prices NaN alone.
+TEST_F(EnqueueMicrotest, UpdateCollCostTable_NanAuto_PerCallSelectionWithoutNanKeepsItsRows) {
+  UnderNanAuto([] {
+    NanAutoCostComm cc;
+    CostTable tbl;
+    auto task = CostTask(ncclFuncAllReduce, ncclFloat32);
+    task.algMask = GeneralBit(NCCL_ALGO_RING, NCCL_PROTO_LL128);
+    task.forceAlgSelection = 1;
+    ScriptAllTimes(1.0f);
+
+    ASSERT_EQ(ncclSuccess, updateCollCostTable(cc.get(), &task, 1 << 20, /*collNet=*/0, /*nvls=*/0, 1, 0, tbl.ptr()));
+    EXPECT_TRUE(tbl.written(NCCL_ALGO_RING, NCCL_PROTO_LL128));
+    EXPECT_EQ(1, tbl.countWritten());
+  });
+  UnderNanAuto([] {
+    NanAutoCostComm cc;
+    CostTable tbl;
+    auto task = CostTask(ncclFuncAllReduce, ncclFloat32);
+    task.algMask = 0;
+    ScriptAllTimes(1.0f);
+
+    ASSERT_EQ(ncclSuccess, updateCollCostTable(cc.get(), &task, 1 << 20, /*collNet=*/0, /*nvls=*/0, 1, 0, tbl.ptr()));
+    EXPECT_TRUE(tbl.written(NCCL_ALGO_RING, NCCL_PROTO_NAN));
+    EXPECT_FALSE(tbl.written(NCCL_ALGO_RING, NCCL_PROTO_LL128));
+  });
+}
+
+// AllGather's default kernels are int8, so a task collapses to bytes unless NaN, a typed float kernel, will run.
+// Ring is AllGather's only NaN algorithm, so NCCL_ALGO without Ring (zero Ring/NaN bandwidth) collapses it too.
+void AppendFloatAllGather(ncclTaskColl* out, float ringNanBw = 1.0f) {
+  CollTaskComm cc;
+  cc.get()->buffSizes[NCCL_PROTO_NAN] = 1 << 20;
+  cc.get()->bandwidths[ncclFuncAllGather][NCCL_ALGO_RING][NCCL_PROTO_NAN] = ringNanBw;
+  ncclInfo info = MakeCollInfo(cc.get(), /*decisionValid=*/false, NCCL_ALGO_RING);
+  info.coll = ncclFuncAllGather;
+  ncclDevRedOpFull opDev{};
+  ASSERT_EQ(ncclSuccess, collTaskAppend(cc.get(), &info, opDev));
+  const ncclTaskColl* t = ncclTaskCollSorterDequeueAll(&cc.get()->planner.collSorter);
+  ASSERT_NE(nullptr, t);
+  *out = *t;
+}
+
+TEST_F(EnqueueMicrotest, CollTaskAppend_AllGather_CollapsesToBytes) {
+  ncclTaskColl t{};
+  AppendFloatAllGather(&t);
+  EXPECT_EQ(ncclInt8, t.datatype);
+  EXPECT_EQ(4u * 4, t.count);
+}
+
+TEST_F(EnqueueMicrotest, CollTaskAppend_NanAllGather_KeepsFloatDtype) {
+  UnderNanProto([] {
+    ncclTaskColl t{};
+    AppendFloatAllGather(&t);
+    EXPECT_EQ(ncclFloat32, t.datatype);
+    EXPECT_EQ(4u, t.count);
+  });
+}
+
+TEST_F(EnqueueMicrotest, CollTaskAppend_NanAllGatherWithoutRing_CollapsesToBytes) {
+  UnderNanProto([] {
+    ncclTaskColl t{};
+    AppendFloatAllGather(&t, /*ringNanBw=*/0.0f);
+    EXPECT_EQ(ncclInt8, t.datatype);
+    EXPECT_EQ(4u * 4, t.count);
+  });
 }
 
 TEST_F(EnqueueMicrotest, AddP2pToPlan_DirectCeUsesExplicitConnectorAndMinimumStepAcrossParts) {
@@ -6608,6 +6840,23 @@ TEST_F(EnqueueMicrotest, GetAlgoInfo_NoTunerGfx950SingleNodeAllReduce_UsesTreeLl
     EXPECT_EQ(c.overridden ? NCCL_ALGO_TREE : NCCL_ALGO_RING, task.algorithm) << c.bytes;
     EXPECT_EQ(c.overridden ? NCCL_PROTO_LL : NCCL_PROTO_SIMPLE, task.protocol) << c.bytes;
   }
+}
+
+// The override names Tree/LL, so where the table left Tree/LL out (NCCL_PROTO without LL, or NaN) it stands down.
+TEST_F(EnqueueMicrotest, GetAlgoInfo_NoTunerGfx950SingleNodeAllReduce_StandsDownWithoutTreeLl) {
+  AlgoInfoComm cc;
+  cc.get()->nNodes = 1;
+  SetSingleGpuArch(&cc.base.topo(), "gfx950");
+  g_topoGetAlgoTime = [](ncclComm*, int, int a, int p, size_t, int, float* time) {
+    *time = a == NCCL_ALGO_TREE && p == NCCL_PROTO_LL ? NCCL_ALGO_PROTO_IGNORE
+            : a == NCCL_ALGO_RING && p == NCCL_PROTO_SIMPLE ? 1.0f
+                                                            : 5.0f;
+    return ncclSuccess;
+  };
+  ncclTaskColl task = NoTunerTask(1024 / sizeof(float));
+  ASSERT_EQ(ncclSuccess, getAlgoInfo(cc.get(), &task, 0, 0, 1, nullptr));
+  EXPECT_EQ(NCCL_ALGO_RING, task.algorithm);
+  EXPECT_EQ(NCCL_PROTO_SIMPLE, task.protocol);
 }
 
 TEST_F(EnqueueMicrotest, GetAlgoInfo_NoTunerNaviSingleNodeAllReduce_UsesRing) {
