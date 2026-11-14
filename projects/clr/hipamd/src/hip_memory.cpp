@@ -522,9 +522,9 @@ bool IsHtoHMemcpyValid(void* dst, const void* src, hipMemcpyKind kind) {
 // ================================================================================================
 hipError_t ihipMemcpy_validate_memory(amd::Device& device, amd::Memory* memObj, size_t sizeBytes,
                                       size_t offset, bool read_write) {
-  // Validate Mem Access in case of VMM Memory
+  // Reject inaccessible VMM mappings before submitting the copy.
   if (!memObj->ValidateMemAccess(device, read_write)) {
-    return hipErrorUnknown;
+    return hipErrorInvalidValue;
   }
 
   // If the mem object is a VMM sub buffer (subbuffer has parent set),

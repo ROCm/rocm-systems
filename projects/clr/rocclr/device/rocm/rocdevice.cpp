@@ -2972,6 +2972,18 @@ bool Device::GetMemAccess(void* va_addr, VmmAccess* access_flags_ptr) const {
 }
 
 // ================================================================================================
+bool Device::ValidateMemAccess(amd::Memory& mem, bool read_write) const {
+  VmmAccess access = VmmAccess::kNone;
+  if (!GetMemAccess(mem.getSvmPtr(), &access)) {
+    return false;
+  }
+  if (read_write) {
+    return access == VmmAccess::kReadWrite;
+  }
+  return access == VmmAccess::kReadWrite || access == VmmAccess::kReadOnly;
+}
+
+// ================================================================================================
 amd::Device::VmmExportStatus Device::ExportShareableVMMHandle(amd::Memory& amd_mem_obj, int flags,
                                                 void* shareableHandle,
                                                 amd::Memory::HandleType handle_type) {
