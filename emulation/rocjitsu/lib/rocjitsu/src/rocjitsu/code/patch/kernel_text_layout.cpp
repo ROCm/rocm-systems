@@ -1135,6 +1135,9 @@ TextRelocationResult patch_recovered_builder_fixups(std::vector<uint8_t> &text,
   std::unordered_map<uint64_t, std::tuple<uint64_t, uint64_t, bool, uint16_t>> rewritten_regions;
   std::vector<uint64_t> compact_builder_fallbacks;
   for (const IndirectCallFixup &fixup : layout.recovered_builder_fixups) {
+    if (!fixup.source_recovery_contiguous)
+      return relocation_error(fixup.source_call_offset,
+                              "cannot replace a PC builder containing unrelated instructions");
     auto target_target = target_for_source_offset(layout, fixup.source_target_offset);
     if (!target_target) {
       return relocation_error(

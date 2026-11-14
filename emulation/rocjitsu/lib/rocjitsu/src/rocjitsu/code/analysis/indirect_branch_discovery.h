@@ -65,6 +65,9 @@ struct IndirectCallFixup {
   /// be replaced with a direct transfer window — an unconstrained path would be
   /// redirected to a concrete target it never dynamically reaches.
   bool source_incomplete = false;
+  /// The CFG can use a known PC even when its arithmetic spans other instructions.
+  /// In that case the complete interval cannot be replaced during relocation.
+  bool source_recovery_contiguous = true;
   /// @brief True when the recovery range contains an `s_wait_xcnt` the replacement
   /// must reproduce. The canonical builder overwrites the whole range and writes
   /// the same SGPR pair the drain was ordering, so dropping the wait would let the

@@ -52,6 +52,7 @@ rj_add_object_library(rocjitsu_analysis
     kernel_scope.cpp
     relocation_function_table.cpp
     scoped_cfg_edges.cpp
+    text_padding.cpp
     analysis/def_use_chain.cpp
     analysis/exec_state.cpp
     analysis/free_registers.cpp

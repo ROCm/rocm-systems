@@ -153,29 +153,8 @@ protected:
     probe_body_words_ = callable->body_words;
     ASSERT_FALSE(probe_body_words_.empty());
 
-    // Decode .text and collect relocatable anchors. Decode-and-search so the
-    // test stays stable across compiler revisions.
-    auto decoder = Decoder::create(params_.arch);
-    ASSERT_NE(decoder, nullptr);
-    auto block_result = BasicBlock::build(*co, *decoder, params_.arch);
-    ASSERT_TRUE(block_result.succeeded());
-    auto blocks = std::move(block_result).value();
-    ASSERT_FALSE(co->text_sections().empty());
-    const auto *text = co->text_sections().front();
-    const std::span<const uint8_t> text_bytes(reinterpret_cast<const uint8_t *>(text->data()),
-                                              text->size());
-
     std::vector<uint64_t> candidates;
-    for (const auto &block : blocks) {
-      uint64_t cur = block->start_offset();
-      for (const Instruction &inst : block->instructions()) {
-        if (is_relocatable_anchor(inst, cur, text_bytes, params_.arch))
-          candidates.push_back(cur);
-        cur += static_cast<uint64_t>(inst.size());
-      }
-    }
-    ASSERT_FALSE(candidates.empty()) << "No relocatable anchor in " << params_.kernel_fixture
-                                     << ".o; did the compiler change the lowering?";
+    ASSERT_NO_FATAL_FAILURE(find_vector_add_anchors(*co, params_.arch, candidates));
 
     // Pick the first anchor whose probe-call patch the resource/spill policy
     // accepts. A live fixed link pair s[30:31] or an exhausted dead-pair pool
