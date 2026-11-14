@@ -793,6 +793,7 @@ bool VirtualGPU::HwQueueTracker::CreateSignal(ProfilingSignal* signal, bool inte
     return false;
   }
   signal->flags_.interrupt_ = interrupt;
+  signal->owner_ = this;
   return true;
 }
 
@@ -814,6 +815,7 @@ bool VirtualGPU::HwQueueTracker::CreateSignals(uint32_t count, bool interrupt,
     signal->signal_ = handle;
     signal->flags_.interrupt_ = interrupt;
     signal->in_device_memory_ = in_device_memory;
+    signal->owner_ = this;
     signals.push_back(signal);
   }
   return true;
@@ -1463,6 +1465,9 @@ void VirtualGPU::LegacySignalTracker::AcquireSlot() {
     WaitNext();
   }
 
+  // A waiter further away than the next signal keeps its hold until it completes
+  ReleaseHolds();
+
   if (signal_list_[current_id_]->referenceCount() > 1) {
     // The signal was assigned to the global marker's event, hence runtime can't reuse it
     // and needs a new signal
@@ -1493,6 +1498,18 @@ void VirtualGPU::LegacySignalTracker::ArmForUse(ProfilingSignal* signal,
                                                 bool /*barrier_bit*/, bool /*blocking_callback*/) {
   // Reset the signal and return
   Hsa::signal_silent_store_relaxed(signal->signal_, init_val);
+  // The ring keeps the prior signal only until the first use after it completes
+  if (prior_wait_ != nullptr && open_waits_used_) {
+    prior_wait_->retain();
+    open_holds_.signals.push_back(prior_wait_);
+    prior_wait_ = nullptr;
+  }
+  open_waits_used_ = open_waits_used_ || prior_wait_ != nullptr || !open_holds_.signals.empty();
+  // Any use started before the next WaitingSignal call may consume the open waits
+  if (!open_holds_.signals.empty()) {
+    signal->retain();
+    open_holds_.consumers.push_back(signal);
+  }
 }
 
 // ================================================================================================
@@ -1516,6 +1533,66 @@ void VirtualGPU::LegacySignalTracker::WaitNext() {
   // It will be saved when the signal is actually used
   WaitForSignal(signal->signal_, gpu_.ActiveWait(), /*yield=*/false, signal->in_device_memory_);
 }
+
+// ================================================================================================
+void VirtualGPU::LegacySignalTracker::NoteWaitsSubmitted() {
+  // Waits no use consumed yet stay open for the next one
+  if (!open_waits_used_) {
+    return;
+  }
+  if (!open_holds_.consumers.empty()) {
+    closed_holds_.push_back(std::move(open_holds_));
+    open_holds_ = HeldWaits{};
+  }
+  prior_wait_ = nullptr;
+  open_waits_used_ = false;
+}
+
+// ================================================================================================
+void VirtualGPU::LegacySignalTracker::NoteGpuWait(ProfilingSignal* signal) {
+  // AcquireSlot rearms the prior signal only after the next use completes
+  if (signal == signal_list_[current_id_] && signal_list_.size() > 2) {
+    prior_wait_ = signal;
+    return;
+  }
+  // Signals of other queues keep their existing ordering
+  if (signal->owner_ != this) {
+    return;
+  }
+  // Keep AcquireSlot from rearming the signal before the GPU waiter reads it
+  signal->retain();
+  open_holds_.signals.push_back(signal);
+}
+
+// ================================================================================================
+void VirtualGPU::LegacySignalTracker::ReleaseHolds(bool release_all) {
+  while (!closed_holds_.empty()) {
+    auto& consumers = closed_holds_.front().consumers;
+    while (!consumers.empty() && (release_all || !IsBusy(consumers.back()))) {
+      consumers.back()->release();
+      consumers.pop_back();
+    }
+    if (!consumers.empty()) {
+      return;
+    }
+    for (ProfilingSignal* signal : closed_holds_.front().signals) {
+      signal->release();
+    }
+    closed_holds_.pop_front();
+  }
+  if (release_all) {
+    for (ProfilingSignal* signal : open_holds_.signals) {
+      signal->release();
+    }
+    for (ProfilingSignal* signal : open_holds_.consumers) {
+      signal->release();
+    }
+    open_holds_ = HeldWaits{};
+  }
+}
+
+// ================================================================================================
+VirtualGPU::LegacySignalTracker::~LegacySignalTracker() { ReleaseHolds(true); }
 
 // ================================================================================================
 void VirtualGPU::LegacySignalTracker::ResetCurrentSignal() {

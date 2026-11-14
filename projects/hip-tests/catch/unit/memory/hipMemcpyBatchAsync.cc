@@ -747,6 +747,70 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_Stream) {
 /**
  * Test Description
  * ------------------------
+ * - Queues many batches on one stream without synchronizing in between, so each batch
+ * completes on several copy engines, or copy engines and a copy kernel, and joins them before
+ * the next one starts. Verifies the stream drains and the data of the last copies.
+ * Test source
+ * ------------------------
+ * - catch/unit/memory/hipMemcpyBatchAsync.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.1
+ */
+HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_BackToBack) {
+  constexpr size_t kBatches = 1000;
+  constexpr size_t kSlots = 8;
+  constexpr size_t kCopySize = 64 * kOneKiB;
+  constexpr size_t kCopyElements = kCopySize / sizeof(int);
+  BatchConfig config{kSlots, kCopySize};
+
+  bool with_d2d = false;
+  SECTION("H2D + D2H") {}
+  SECTION("H2D + D2H + D2D") { with_d2d = true; }
+
+  StreamGuard stream_guard(Streams::created);
+  std::vector<LinearAllocGuard<int>> h2d_src =
+      AllocateBatchBuffers(LinearAllocs::hipHostMalloc, config);
+  std::vector<LinearAllocGuard<int>> h2d_dst = AllocateBatchBuffers(LinearAllocs::hipMalloc, config);
+  std::vector<LinearAllocGuard<int>> d2h_src = AllocateBatchBuffers(LinearAllocs::hipMalloc, config);
+  std::vector<LinearAllocGuard<int>> d2h_dst =
+      AllocateBatchBuffers(LinearAllocs::hipHostMalloc, config);
+  std::vector<LinearAllocGuard<int>> d2d_dst = AllocateBatchBuffers(LinearAllocs::hipMalloc, config);
+  std::vector<void*> h2d_dst_ptrs = MakeBatchPtrs(h2d_dst);
+  std::vector<void*> d2h_src_ptrs = MakeBatchPtrs(d2h_src);
+  std::vector<void*> d2d_dst_ptrs = MakeBatchPtrs(d2d_dst);
+
+  FillHostBuffers(h2d_src, kCopySize);
+  FillDeviceBuffers(d2h_src_ptrs, kCopySize, kPatternValue);
+  FillDeviceBuffers(d2d_dst_ptrs, kCopySize, 0);
+  for (auto& dst : d2h_dst) {
+    std::fill_n(dst.host_ptr(), kCopyElements, 0);
+  }
+
+  for (size_t i = 0; i < kBatches; ++i) {
+    const size_t slot = i % kSlots;
+    std::vector<void*> src_ptrs{h2d_src[slot].ptr(), d2h_src[slot].ptr()};
+    std::vector<void*> dst_ptrs{h2d_dst[slot].ptr(), d2h_dst[slot].ptr()};
+    if (with_d2d) {
+      src_ptrs.push_back(d2h_src[slot].ptr());
+      dst_ptrs.push_back(d2d_dst[slot].ptr());
+    }
+    std::vector<size_t> sizes(src_ptrs.size(), kCopySize);
+    HIP_CHECK(hipMemcpyBatchAsync(dst_ptrs.data(), src_ptrs.data(), sizes.data(), sizes.size(),
+                                  nullptr, nullptr, 0, nullptr, stream_guard.stream()));
+  }
+  HIP_CHECK(hipStreamSynchronize(stream_guard.stream()));
+
+  VerifyDeviceBuffers(h2d_dst_ptrs, kCopySize);
+  VerifyHostBuffers(d2h_dst, kCopySize);
+  if (with_d2d) {
+    VerifyDeviceBuffers(d2d_dst_ptrs, kCopySize);
+  }
+}
+
+/**
+ * Test Description
+ * ------------------------
  * - Verifies peer-to-peer batches across peer-accessible device pairs.
  * Test source
  * ------------------------

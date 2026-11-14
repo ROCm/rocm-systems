@@ -929,6 +929,9 @@ memory:
   Unit_hipMemcpyBatchAsync_Stream:
     <<: *level_default
     tags: [transfer, stream]
+  Unit_hipMemcpyBatchAsync_BackToBack:
+    <<: *level_default
+    tags: [transfer, stream]
   Unit_hipMemcpyBatchAsync_P2P_Functional:
     <<: *level_default
     tags: [transfer, multigpu]
