@@ -291,6 +291,24 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Fixed GPU metrics returning no data on integrated GPUs**.  
   - `amdsmi_get_gpu_metrics_info()` and `amdsmi_get_gpu_activity()` failed on APUs such as gfx1103, leaving PLX temperature, GPU utilization and `amd-smi metric` empty. Those devices now report the values they provide with the rest marked N/A, and any GPU without a PLX sensor now reports N/A there instead of a placeholder reading.
 
+- **Fixed crashes and mixed-up memory usage in GPU process lists**.  
+  - Listing GPU processes from several threads at once could crash or leave processes out, and a process that uses several GPUs could show another GPU's memory and engine usage.
+
+- **Fixed GPU process lists coming back empty or incomplete while GPU processes start or exit**.  
+  - On a busy system, `amd-smi process` and the process-list APIs could briefly return no processes, miss a running one, fail, or, in Python, return entries with process ID 0. A list that cannot be read is now reported as an error (`AMDSMI_STATUS_RETRY` while processes keep starting). A process whose statistics cannot be read is listed with them not available, and so is one whose GPUs cannot be read, on each GPU its fdinfo shows.
+
+- **Fixed per-process memory and engine usage in `amd-smi process`**.  
+  - VRAM, GTT and CPU memory read 2.3% low and could be counted several times for one process. A process that opened the same GPU more than once showed the engine usage of only one of those opens.
+
+- **Fixed `amdsmi_get_gpu_compute_process_gpus()` failing when it counts a process's GPUs**.  
+  - The documented count call, with a NULL index list, returned an invalid-argument error, so the Python and Rust APIs always failed.
+
+- **Fixed the Rust `amdsmi_get_gpu_compute_process_info()` returning invalid entries**.  
+  - When processes exited between its count and its read, the list ended with entries of undefined content; when processes started, the call failed.
+
+- **Fixed process information in containers showing other processes' data**.  
+  - In a container with its own PID namespace, `amd-smi process` and the process APIs could show host PIDs or another process's name, memory or GPUs. They now show only the container's processes (other users' only with `CAP_SYS_PTRACE`) by their container PIDs, and the driver's per-process statistics, such as CU occupancy and SDMA usage, are N/A unless the container shares the host's PID namespace (`docker run --pid=host`).
+
 - **Fixed the `amdsmi` Python module from TheRock's `rocm-sdk-core` wheel failing outside `share/amd_smi`**.  
   - Copied into site-packages, the module could not load `libamd_smi.so.27` unless `torch` was imported first. It now loads the library from the `_rocm_sdk_core` package on `sys.path` when no usable system library is found, and reuses the copy PyTorch already loaded instead of mapping a second one.
   - The copy TheRock ships in `rocm-sdk-core` loads only that wheel's library, never a system `libamd_smi.so` from another ROCm release.
