@@ -33,7 +33,8 @@ tests/python/
 ├── cli_unit_test.py        # runner: discovers cli/         (drives amd-smi CLI)
 ├── common/                 # shared runner + helpers (common.py, runcmd.py)
 ├── unit/                   # pure-logic tests
-│   ├── system/             #   test_bdf.py, test_check_res.py, NIC tests (test_*nic*.py)
+│   ├── system/             #   test_bdf.py, test_check_res.py
+│   ├── cpu/                #   cli_metric_cpu_flags
 │   └── gpu/                #   apu_metrics, ...
 ├── functional/             # hardware tests (require a live device + root)
 │   ├── gpu/  cpu/  ifoe/  system/
