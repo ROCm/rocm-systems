@@ -344,6 +344,23 @@ def generate_summary_query(
     return (full_view_name, summary_query)
 
 
+def _summary_sql_with_guid(summary_sql: str) -> str:
+    """Add the aggregated guid to a per-rank summary select so domain queries can join on it.
+
+    The guid column is for the domain-summary subquery only. The summary query that is exported
+    stays unchanged, so guid is not written to the summary CSV.
+    """
+
+    needle = "AD.name AS Name,"
+    if summary_sql.count(needle) != 1:
+        raise ValueError(
+            "Per-rank summary query does not expose a single name column to attach guid"
+        )
+    return summary_sql.replace(
+        needle, "AD.guid AS guid,\n            AD.name AS Name,", 1
+    )
+
+
 def generate_domain_query(
     connection: RocpdImportData, summary_queries, by_rank=False
 ) -> Tuple[str, str]:
@@ -368,26 +385,32 @@ def generate_domain_query(
         view_suffix = "_summary_by_rank"
         view_name = "domain_summary_by_rank"
         by_rank_env_var = get_rank_env_variable_name(connection)
+        # guid stays inside the subqueries. The final select lists Process_Id and Hostname only.
+        additional_group_columns = "guid, Process_Id, Hostname,"
+        grouped_domains_group_by = "domain, guid, Process_Id, Hostname"
+        total_duration_group_by = "GROUP BY guid, Process_Id"
+        order_by = "ORDER BY GD.Process_Id, GD.guid"
         if by_rank_env_var is not None:
             rank_column_name = by_rank_env_var
             rank_alias = "Rank"
             additional_select_columns = "json_extract(PI.environment, '$.{rank_column_name}') AS {rank_alias}, GD.Process_Id, GD.Hostname,".format(
                 rank_column_name=rank_column_name, rank_alias=rank_alias
             )
-            join_condition = "JOIN total_duration TD ON GD.Process_Id = TD.Process_Id JOIN rocpd_info_process PI ON GD.Process_Id = PI.pid"
+            join_condition = (
+                "JOIN total_duration TD ON GD.guid = TD.guid AND GD.Process_Id = TD.Process_Id "
+                "JOIN rocpd_info_process PI ON GD.Process_Id = PI.pid AND GD.guid = PI.guid"
+            )
         else:
             rank_column_name = ""
             rank_alias = ""
             additional_select_columns = "GD.Process_Id, GD.Hostname,"
-            join_condition = "JOIN total_duration TD ON GD.Process_Id = TD.Process_Id"
-        additional_group_columns = "Process_Id, Hostname,"
-        total_duration_group_by = "GROUP BY Process_Id"
-        order_by = "ORDER BY GD.Process_Id"
+            join_condition = "JOIN total_duration TD ON GD.guid = TD.guid AND GD.Process_Id = TD.Process_Id"
     else:
         view_suffix = "_summary"
         view_name = "domain_summary"
         additional_group_columns = ""
         additional_select_columns = ""
+        grouped_domains_group_by = "domain"
         total_duration_group_by = ""
         join_condition = "CROSS JOIN total_duration TD"
         order_by = 'ORDER BY GD."DURATION (nsec)" DESC'
@@ -401,8 +424,17 @@ def generate_domain_query(
     if len(summary_dictionary) < 1:
         return ()
 
+    # Per-rank summaries group by guid internally but do not export it. Reattach it
+    # here so processes that reuse an OS pid stay separate in the domain summary.
+    if by_rank:
+        nested_items = [
+            (query_name, _summary_sql_with_guid(query))
+            for query_name, query in summary_dictionary.items()
+        ]
+    else:
+        nested_items = list(summary_dictionary.items())
     summary_selects = [
-        f"{query_name} AS ({query}) ," for query_name, query in summary_dictionary.items()
+        f"{query_name} AS ({query}) ," for query_name, query in nested_items
     ]
 
     union_selects = [
@@ -427,7 +459,7 @@ def generate_domain_query(
                     MAX("MAX (nsec)") AS "MAX (nsec)",
                     SUM("STD_DEV") AS "STD_DEV"
                 FROM all_domains
-                GROUP BY domain{", Process_Id" if by_rank else ""}
+                GROUP BY {grouped_domains_group_by}
             ),
             total_duration AS (
                 SELECT
@@ -591,6 +623,11 @@ def create_summary_region_queries(
 
     if region_categories is not None:
         region_categories = [cat.lower() for cat in region_categories]
+        if (
+            "markers" in region_categories
+        ):  # this is a common mistake, so we convert it to the singular marker
+            region_categories.remove("markers")
+            region_categories.append("marker")
     else:
         # Automatically retrieve region categories from the database
         region_categories = set()
@@ -640,12 +677,12 @@ def create_summary_region_queries(
                 )
                 queries[per_rank_query_name] = summary_by_rank_query
 
-    # Markers
+    # Marker
     if "marker" not in region_categories:
         return queries
 
-    markers_query_name = "markers"
-    markers_query = """
+    marker_query_name = "marker"
+    marker_query = """
         SELECT JSON_EXTRACT(extdata, '$.message') AS marker_name, *
         FROM regions_and_samples
         WHERE category LIKE 'MARKER_%'
@@ -654,14 +691,14 @@ def create_summary_region_queries(
     # Create regular summary query
     if not by_rank:
         summary_query_name, summary_query = generate_summary_query(
-            markers_query_name, markers_query, name_column="marker_name"
+            marker_query_name, marker_query, name_column="marker_name"
         )
         queries[summary_query_name] = summary_query
     else:
         # Create per-rank summary query
         per_rank_query_name, summary_by_rank_query = generate_summary_query(
-            markers_query_name,
-            markers_query,
+            marker_query_name,
+            marker_query,
             name_column="marker_name",
             by_rank=True,
             by_rank_env_var=get_rank_env_variable_name(connection),
