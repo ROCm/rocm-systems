@@ -536,6 +536,9 @@ hipError_t hipStreamDestroy(hipStream_t stream) {
   if (stream == hipStreamPerThread || stream == hipStreamLegacy) {
     HIP_RETURN(hipErrorInvalidResourceHandle);
   }
+  if (!hip::isValid(stream)) {
+    HIP_RETURN(hipErrorInvalidHandle);
+  }
   hip::Stream* s = reinterpret_cast<hip::Stream*>(stream);
   if (s->GetCaptureStatus() != hipStreamCaptureStatusNone) {
     if (s->IsOriginStream()) {

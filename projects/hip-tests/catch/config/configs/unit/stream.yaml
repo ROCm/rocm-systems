@@ -157,6 +157,9 @@ stream:
   Unit_hipStreamDestroy_Negative_NullStream:
     <<: *level_default
     tags: [lifecycle, P1]
+  Unit_hipStreamDestroy_Negative_StaleAfterDeviceReset:
+    <<: *level_default
+    tags: [lifecycle, P1]
   Unit_hipStreamDestroy_WithFinishedWork:
     <<: *level_default
     tags: [lifecycle, P0]
