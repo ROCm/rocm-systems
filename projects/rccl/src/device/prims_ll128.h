@@ -210,8 +210,7 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
         if (checkAbort(abort, 1, spins)) break;
       }
       if (sendConnFifo) {
-        // == sendStep[wid]; indexing by wid would keep Primitives in scratch.
-        sendConnFifo[sendConnHead % NCCL_STEPS].size = nbytes;
+        sendConnFifo[sendStep[wid] % NCCL_STEPS].size = nbytes;
       }
       sendConnHead += 1;
     }
