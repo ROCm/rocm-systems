@@ -71,6 +71,10 @@ def resolve(
             }
             for source in (SOURCE, TIP, WORKFLOW_SHA)
         },
+        **{
+            f'repos/{REPO}/commits/{source}': {'parents': [{'sha': 'd' * 40}]}
+            for source in (SOURCE, TIP, WORKFLOW_SHA)
+        },
         **(responses or {}),
     }
     result = subprocess.run(
@@ -110,14 +114,19 @@ def test_manual_source_is_independent_of_workflow_revision(tmp_path):
     assert result.returncode == 0, result.stdout + result.stderr
     assert values['source_branch'] == 'develop'
     assert values['source_sha'] == SOURCE != WORKFLOW_SHA
-    assert calls[:-1] == [
+    assert calls[:-2] == [
         f'repos/{REPO}/git/ref/heads/develop',
         f'repos/{REPO}/compare/{SOURCE}...{TIP}',
     ]
     minimum_source = yaml.safe_load(WORKFLOW.read_text())['env'][
         'MIN_BENCHMARK_SOURCE_COMMIT'
     ]
-    assert calls[-1] == f'repos/{REPO}/compare/{minimum_source}...{SOURCE}'
+    assert calls[-2:] == [
+        f'repos/{REPO}/compare/{minimum_source}...{SOURCE}',
+        f'repos/{REPO}/commits/{SOURCE}',
+    ]
+    assert values['base_branch'] == 'develop'
+    assert values['base_sha'] == 'd' * 40
 
 
 def test_manual_source_below_compatibility_floor_rejects(tmp_path):
@@ -275,11 +284,19 @@ def test_push_uses_event_sha_without_resolving_a_later_branch_tip(tmp_path):
         tmp_path, event='push', commit='invalid-unused-manual-input'
     )
     assert result.returncode == 0, result.stdout + result.stderr
-    assert values == {'source_branch': 'develop', 'source_sha': WORKFLOW_SHA}
+    assert values == {
+        'source_branch': 'develop',
+        'source_sha': WORKFLOW_SHA,
+        'base_branch': 'develop',
+        'base_sha': 'd' * 40,
+    }
     minimum_source = yaml.safe_load(WORKFLOW.read_text())['env'][
         'MIN_BENCHMARK_SOURCE_COMMIT'
     ]
-    assert calls == [f'repos/{REPO}/compare/{minimum_source}...{WORKFLOW_SHA}']
+    assert calls == [
+        f'repos/{REPO}/compare/{minimum_source}...{WORKFLOW_SHA}',
+        f'repos/{REPO}/commits/{WORKFLOW_SHA}',
+    ]
 
 
 def test_blank_commit_freezes_selected_tip_once(tmp_path):
@@ -445,3 +462,12 @@ def test_tag_workflow_rejects_before_api(tmp_path):
     )
     assert result.returncode != 0
     assert values == {} and calls == []
+
+
+@pytest.mark.parametrize('parents', [[], [{'sha': 'bad'}]])
+def test_develop_source_requires_valid_first_parent(tmp_path, parents):
+    result, _, _ = resolve(
+        tmp_path, responses={f'repos/{REPO}/commits/{SOURCE}': {'parents': parents}}
+    )
+    assert result.returncode != 0
+    assert 'first parent' in result.stderr

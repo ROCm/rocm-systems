@@ -161,6 +161,15 @@ jobs:
               if [[ -n "${REQUESTED_PULL_REQUEST}" ]]; then
                 fail "A pull request number is only valid for a side-branch run."
               fi
+              # Post-merge comparisons prefer the revision before this change.
+              BASE_SHA="$(gh api \
+                "repos/${GITHUB_REPOSITORY}/commits/${BENCHMARK_SHA}" \
+                --jq '.parents[0].sha')"
+              if [[ ! "${BASE_SHA}" =~ ^[0-9a-f]{40}$ ]]; then
+                fail "Could not resolve the measured develop commit's first parent."
+              fi
+              printf 'base_branch=develop\nbase_sha=%s\n' \
+                "${BASE_SHA}" >> "${GITHUB_OUTPUT}"
               return
             fi
 
@@ -487,6 +496,7 @@ jobs:
     timeout-minutes: 30
     outputs:
       run_id: ${{ steps.publication.outputs.run_id }}
+      summary_artifact: ${{ steps.publication.outputs.summary_artifact }}
     permissions:
       contents: write
     env:
@@ -673,7 +683,24 @@ jobs:
 
       - name: Export published run ID
         id: publication
-        run: printf 'run_id=%s\n' "${RUN_ID}" >> "${GITHUB_OUTPUT}"
+        run: |
+          printf 'run_id=%s\nsummary_artifact=rocjitsu-publication-%s-%s\n' \
+            "${RUN_ID}" "${GITHUB_RUN_ID}" "${GITHUB_RUN_ATTEMPT}" >> "${GITHUB_OUTPUT}"
+
+      - name: Set up summary Node.js
+        continue-on-error: true
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22.13.0"
+
+      - name: Summarize benchmark changes
+        # A summary failure must not discard otherwise publishable measurements.
+        continue-on-error: true
+        run: |
+          node "${GITHUB_WORKSPACE}/rocm-systems/.github/scripts/rocjitsu_benchmark_report.js" \
+            --data-dir "${DATA_DIR}" --run-id "${RUN_ID}" \
+            --head-sha "${BENCHMARK_SHA}" \
+            --output "${DIAGNOSTICS_DIR}/summary.json"
 
       - name: Upload publication diagnostics
         if: always()
@@ -691,7 +718,8 @@ jobs:
     # Report job-level cancellation too; a blanket !cancelled() would suppress it.
     if: >-
       always() &&
-      github.event_name == 'pull_request' &&
+      (github.event_name == 'pull_request' ||
+       (github.event_name == 'push' && github.ref == 'refs/heads/develop')) &&
       needs.source-metadata.result == 'success' &&
       needs.benchmark.result != 'skipped'
     runs-on: ubuntu-24.04
@@ -701,7 +729,7 @@ jobs:
       pull-requests: write
     # Serialize comment lookup/create/update so concurrent attempts cannot create duplicates.
     concurrency:
-      group: rocjitsu-benchmark-report-${{ github.event.pull_request.number }}
+      group: rocjitsu-benchmark-report-${{ github.event.pull_request.number || github.sha }}
       cancel-in-progress: false
       queue: max
     steps:
@@ -713,13 +741,20 @@ jobs:
           persist-credentials: false
           sparse-checkout: .github/scripts
 
+      - name: Download benchmark summary
+        if: needs.publish.result == 'success'
+        continue-on-error: true
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ needs.publish.outputs.summary_artifact }}
+          path: benchmark-summary
+
       - name: Comment on the pull request
         uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
         env:
           BENCHMARK_RESULT: ${{ needs.benchmark.result }}
           PUBLICATION_RESULT: ${{ needs.publish.result }}
           PUBLISHED_RUN_ID: ${{ needs.publish.outputs.run_id }}
-          BENCHMARK_RUN_ATTEMPT: ${{ needs.benchmark.outputs.run_attempt }}
           SOURCE_SHA: ${{ needs.source-metadata.outputs.source_sha }}
         with:
           script: |
@@ -729,11 +764,13 @@ jobs:
             await reportBenchmark({
               github,
               context,
+              core,
               benchmarkResult: process.env.BENCHMARK_RESULT,
               publishResult: process.env.PUBLICATION_RESULT,
               runNumber: process.env.GITHUB_RUN_NUMBER,
               runAttempt: process.env.GITHUB_RUN_ATTEMPT,
               publishedRunId: process.env.PUBLISHED_RUN_ID,
-              benchmarkAttempt: process.env.BENCHMARK_RUN_ATTEMPT,
               headSha: process.env.SOURCE_SHA,
+              summaryPath: process.env.PUBLICATION_RESULT === 'success'
+                ? `${process.env.GITHUB_WORKSPACE}/benchmark-summary/summary.json` : undefined,
             });

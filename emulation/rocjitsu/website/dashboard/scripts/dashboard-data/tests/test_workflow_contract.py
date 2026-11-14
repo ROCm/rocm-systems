@@ -115,19 +115,25 @@ def test_benchmark_opt_in_gate(event, action, label, labels, head_repo, repo, al
 
 
 @pytest.mark.parametrize(
-    'event,source,benchmark,expected',
+    'event,ref,source,benchmark,expected',
     [
-        ('pull_request', 'success', 'success', True),
-        ('pull_request', 'success', 'failure', True),
-        ('pull_request', 'success', 'skipped', False),
-        ('pull_request', 'success', 'cancelled', True),
-        ('pull_request', 'failure', 'skipped', False),
-        ('pull_request', 'failure', 'cancelled', False),
-        ('push', 'success', 'success', False),
-        ('workflow_dispatch', 'success', 'success', False),
+        ('pull_request', 'refs/heads/develop', 'success', 'success', True),
+        ('pull_request', 'refs/heads/develop', 'success', 'failure', True),
+        ('pull_request', 'refs/heads/develop', 'success', 'skipped', False),
+        ('pull_request', 'refs/heads/develop', 'success', 'cancelled', True),
+        ('pull_request', 'refs/heads/develop', 'failure', 'skipped', False),
+        ('pull_request', 'refs/heads/develop', 'failure', 'cancelled', False),
+        ('push', 'refs/heads/develop', 'success', 'success', True),
+        ('push', 'refs/heads/develop', 'success', 'failure', True),
+        ('push', 'refs/heads/develop', 'success', 'cancelled', True),
+        ('push', 'refs/heads/develop', 'success', 'skipped', False),
+        ('push', 'refs/heads/other', 'success', 'success', False),
+        ('workflow_dispatch', 'refs/heads/develop', 'success', 'success', False),
     ],
 )
-def test_report_includes_cancelled_pr_benchmarks(event, source, benchmark, expected):
+def test_report_includes_cancelled_pr_and_post_merge_benchmarks(
+    event, ref, source, benchmark, expected
+):
     workflow = yaml.safe_load((WORKFLOWS / 'rocjitsu-benchmarks.yml').read_text())
     job = workflow['jobs']['report']
     assert job['needs'] == ['source-metadata', 'benchmark', 'publish']
@@ -136,14 +142,15 @@ def test_report_includes_cancelled_pr_benchmarks(event, source, benchmark, expec
         'pull-requests': 'write',
     }
     assert job['concurrency'] == {
-        'group': 'rocjitsu-benchmark-report-${{ github.event.pull_request.number }}',
+        'group': 'rocjitsu-benchmark-report-${{ github.event.pull_request.number || github.sha }}',
         'cancel-in-progress': False,
         'queue': 'max',
     }
-    condition = job['if']
+    condition = ' '.join(job['if'].split())
     assert 'always()' in condition
     for key, value in {
         'always()': 'True',
+        'github.ref': repr(ref),
         # Catch an accidentally reintroduced !cancelled() guard.
         '!cancelled()': 'False',
         'github.event_name': repr(event),
@@ -162,16 +169,11 @@ def test_report_includes_cancelled_pr_benchmarks(event, source, benchmark, expec
         'BENCHMARK_RESULT': '${{ needs.benchmark.result }}',
         'PUBLICATION_RESULT': '${{ needs.publish.result }}',
         'PUBLISHED_RUN_ID': '${{ needs.publish.outputs.run_id }}',
-        'BENCHMARK_RUN_ATTEMPT': '${{ needs.benchmark.outputs.run_attempt }}',
         'SOURCE_SHA': '${{ needs.source-metadata.outputs.source_sha }}',
     }
     assert 'runNumber: process.env.GITHUB_RUN_NUMBER' in report['with']['script']
     assert 'runAttempt: process.env.GITHUB_RUN_ATTEMPT' in report['with']['script']
     assert 'publishedRunId: process.env.PUBLISHED_RUN_ID' in report['with']['script']
-    assert (
-        'benchmarkAttempt: process.env.BENCHMARK_RUN_ATTEMPT'
-        in report['with']['script']
-    )
     assert 'headSha: process.env.SOURCE_SHA' in report['with']['script']
     assert 'reportBenchmark' in report['with']['script']
 
@@ -181,6 +183,7 @@ def test_report_helper_changes_trigger_their_node_ci_tests():
     helper_paths = [
         '.github/scripts/rocjitsu_benchmark_report.js',
         '.github/scripts/tests/test_rocjitsu_benchmark_report.js',
+        '.github/scripts/tests/test_rocjitsu_benchmark_summary.mjs',
     ]
     for event in ('push', 'pull_request'):
         for path in helper_paths:
@@ -193,7 +196,7 @@ def test_report_helper_changes_trigger_their_node_ci_tests():
     assert step['working-directory'] == '.'
     assert (
         step['run']
-        == 'node --test .github/scripts/tests/test_rocjitsu_benchmark_report.js'
+        == 'node --test .github/scripts/tests/test_rocjitsu_benchmark_report.js .github/scripts/tests/test_rocjitsu_benchmark_summary.mjs'
     )
 
 
@@ -307,6 +310,8 @@ def test_publication_steps_follow_responsibility_order():
         'Update run index',
         'Commit and push publication',
         'Export published run ID',
+        'Set up summary Node.js',
+        'Summarize benchmark changes',
         'Upload publication diagnostics',
     ]
 
@@ -471,10 +476,17 @@ def test_publisher_exports_its_run_id_after_publication(tmp_path):
     output = tmp_path / 'output'
     subprocess.run(
         ['bash', '-euo', 'pipefail', '-c', export['run']],
-        env={'RUN_ID': 'publisher-owned-id', 'GITHUB_OUTPUT': str(output)},
+        env={
+            'RUN_ID': 'publisher-owned-id',
+            'GITHUB_OUTPUT': str(output),
+            'GITHUB_RUN_ID': '123',
+            'GITHUB_RUN_ATTEMPT': '3',
+        },
         check=True,
     )
-    assert output.read_text() == 'run_id=publisher-owned-id\n'
+    assert output.read_text() == (
+        'run_id=publisher-owned-id\nsummary_artifact=rocjitsu-publication-123-3\n'
+    )
 
 
 def test_publication_identity_uses_the_recorded_benchmark_attempt():
@@ -568,7 +580,9 @@ def test_publication_gate_allows_enabled_side_workflow(workflow_ref, event, publ
     job = yaml.safe_load((WORKFLOWS / 'rocjitsu-benchmarks.yml').read_text())['jobs'][
         'publish'
     ]
-    condition = job['if'].removeprefix('${{').removesuffix('}}').strip()
+    condition = (
+        ' '.join(job['if'].split()).removeprefix('${{').removesuffix('}}').strip()
+    )
     for key, value in {
         '!cancelled()': 'True',
         'needs.benchmark.outputs.ran': repr('true'),
@@ -677,3 +691,30 @@ def test_workflow_yaml_and_bash_syntax(name):
             assert result.returncode == 0, f"{name}: {step['name']}: {result.stderr}"
             count += 1
     assert count > 0
+
+
+def test_comparison_summary_is_optional_and_preserves_publication_attempt_identity():
+    workflow = yaml.safe_load((WORKFLOWS / 'rocjitsu-benchmarks.yml').read_text())
+    publish = workflow['jobs']['publish']
+    assert (
+        publish['outputs']['summary_artifact']
+        == '${{ steps.publication.outputs.summary_artifact }}'
+    )
+    steps = {step['name']: step for step in publish['steps']}
+    assert steps['Set up summary Node.js']['with']['node-version'] == '22.13.0'
+    assert steps['Set up summary Node.js']['continue-on-error'] is True
+    summary = steps['Summarize benchmark changes']
+    assert summary['continue-on-error'] is True
+    assert '--run-id "${RUN_ID}"' in summary['run']
+    assert '--head-sha "${BENCHMARK_SHA}"' in summary['run']
+    assert '--data-dir "${DATA_DIR}"' in summary['run']
+    report_steps = {step['name']: step for step in workflow['jobs']['report']['steps']}
+    download = report_steps['Download benchmark summary']
+    assert download['if'] == "needs.publish.result == 'success'"
+    assert download['continue-on-error'] is True
+    assert download['with']['name'] == '${{ needs.publish.outputs.summary_artifact }}'
+    assert download['with']['path'] == 'benchmark-summary'
+    assert (
+        'benchmark-summary/summary.json'
+        in report_steps['Comment on the pull request']['with']['script']
+    )
