@@ -20,6 +20,7 @@
 #include <vector>
 
 #include "../common/LogCapture.hpp"
+#include "DevcommTest.h"
 #include "ScopedHook.h"
 #include "fakes/devcomm_fakes.h"
 
@@ -41,6 +42,10 @@
 #include DEVCOMM_V22907_CC_PATH
 
 namespace {
+
+using devcomm_test::AllBytesAre;
+using devcomm_test::FirstDiff;
+using devcomm_test::PoisonedArena;
 
 // Shared base: heap-allocates the comm (ncclComm has inline channel storage, so
 // a stack instance overflows) and restores every devcomm seam after each test.
@@ -64,31 +69,6 @@ class DevcommMicrotest : public ::testing::Test {
 // Every block below reasons about the units at byte granularity, so these are the whole suite's
 // assertion vocabulary. One copy, not one per block: a weakened oracle then weakens every block at
 // once and mutation testing sees it, instead of rotting quietly in the block nobody re-derived.
-
-// True when every byte of [p, p+n) equals v.
-bool AllBytesAre(void const* p, std::size_t n, unsigned char v) {
-  unsigned char const* b = static_cast<unsigned char const*>(p);
-  for (std::size_t i = 0; i < n; ++i) {
-    if (b[i] != v) {
-      return false;
-    }
-  }
-  return true;
-}
-
-// -1 when equal, else the index of the first differing byte (a bare memcmp says only "no").
-// ptrdiff_t, not long: it states the "byte index or -1" contract without depending on the
-// platform's long width.
-std::ptrdiff_t FirstDiff(void const* a, void const* b, std::size_t n) {
-  uint8_t const* x = static_cast<uint8_t const*>(a);
-  uint8_t const* y = static_cast<uint8_t const*>(b);
-  for (std::size_t i = 0; i < n; ++i) {
-    if (x[i] != y[i]) {
-      return static_cast<std::ptrdiff_t>(i);
-    }
-  }
-  return -1;
-}
 
 // Half-open [off, off+len) window of bytes a unit is allowed to write.
 struct ByteRange {
@@ -114,48 +94,6 @@ void ExpectBytesUnchangedExcept(void const* got, void const* want, std::size_t n
     EXPECT_EQ(w[i], g[i]) << "byte " << i << " was modified";
   }
 }
-
-// Over-sized byte arena holding exactly one T, flanked by guard bands. Three blocks below used to
-// hand-roll this; the shape is load-bearing in three ways, all of which must survive any edit here:
-//  * The object region is poisoned BEFORE T's lifetime starts, so "the unit stored 0" stays
-//    distinguishable from "the unit stored nothing" -- most of the values under test are 0.
-//  * placement-new starts that lifetime, so obj() is not a strict-aliasing violation under -O3.
-//    T must be trivially default-constructible or the new would erase the poison; static_asserted.
-//  * The guards use kGuardByte, deliberately distinct from any poison callers pass and from every
-//    byte the units write, so a memset/memcpy running past sizeof(T) at EITHER end is caught by
-//    GuardsIntact() alone. Do not flatten the leading guard away: it is what makes an underrun
-//    (a copy handed &obj minus an offset) fail rather than corrupt an unrelated local.
-template <class T, std::size_t kGuardLen = 64>
-class PoisonedArena {
- public:
-  static constexpr unsigned char kGuardByte = 0x5A;
-
-  explicit PoisonedArena(unsigned char poison = 0xA5) { Reset(poison); }
-
-  // Re-poisons the object region and restarts T's lifetime, for fixtures that re-arm per test.
-  void Reset(unsigned char poison) {
-    static_assert(std::is_trivially_default_constructible_v<T>,
-                  "placement-new below would overwrite the poison the oracles depend on");
-    std::memset(bytes_, kGuardByte, sizeof(bytes_));
-    std::memset(bytes_ + kGuardLen, poison, sizeof(T));
-    new (bytes_ + kGuardLen) T;
-  }
-
-  unsigned char* raw() { return bytes_ + kGuardLen; }
-  unsigned char const* raw() const { return bytes_ + kGuardLen; }
-  T* obj() { return reinterpret_cast<T*>(raw()); }
-  unsigned char byteAt(std::size_t i) const { return bytes_[kGuardLen + i]; }
-
-  bool GuardsIntact() const {
-    return AllBytesAre(bytes_, kGuardLen, kGuardByte) &&
-           AllBytesAre(bytes_ + kGuardLen + sizeof(T), kGuardLen, kGuardByte);
-  }
-
- private:
-  static constexpr std::size_t kAlign = alignof(T) > 16 ? alignof(T) : 16;
-  static_assert(kGuardLen % kAlign == 0, "guard band would misalign the object it flanks");
-  alignas(kAlign) unsigned char bytes_[kGuardLen + sizeof(T) + kGuardLen];
-};
 
 }  // namespace
 

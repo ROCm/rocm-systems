@@ -15,6 +15,7 @@
 /// a visibly wrong result. No SIMD is involved (these ops are not on the SIMD
 /// fast path); this exercises the plain decode+execute scalar path.
 
+#include "compute_unit_test_util.h"
 #include "decode_test_util.h"
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/decoder.h"
@@ -58,7 +59,9 @@ struct Fixture {
     cfg.sgprs_per_wf = SGPRS_PER_WF;
     cfg.vgprs_per_wf = VGPRS_PER_WF;
     cfg.lds_size_kb = 64;
-    cu = amdgpu::ComputeUnitCore::create("cu_vop1_cvt_f64_scalar", cfg, &gpu_mem, &l2);
+    rocjitsu::test::initialize_compute_unit(cu, "cu_vop1_cvt_f64_scalar", cfg, &gpu_mem, &l2);
+    if (!cu)
+      return;
     decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
     wf = cu->dispatch_wf(0, 0, SGPRS_PER_WF, VGPRS_PER_WF);
   }
@@ -107,6 +110,7 @@ TEST(Vop1CvtF64Scalar, F32FromF64_FullDoubleRead) {
 
 TEST(Vop1CvtF64Scalar, I32FromF64_FullDoubleRead) {
   Fixture fx;
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   for (double d : {3.7, -3.7, 100.9, -100.9, 1e12, -1e12}) {
     uint64_t bits = std::bit_cast<uint64_t>(d);
     uint64_t got =
@@ -121,6 +125,7 @@ TEST(Vop1CvtF64Scalar, I32FromF64_FullDoubleRead) {
 
 TEST(Vop1CvtF64Scalar, U32FromF64_FullDoubleRead) {
   Fixture fx;
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   for (double d : {3.7, 100.9, 4.0e9, 1e12, -1.0}) {
     uint64_t bits = std::bit_cast<uint64_t>(d);
     uint64_t got = fx.run(/*v_cvt_u32_f64=*/21, static_cast<uint32_t>(bits),
@@ -136,6 +141,7 @@ TEST(Vop1CvtF64Scalar, U32FromF64_FullDoubleRead) {
 
 TEST(Vop1CvtF64Scalar, F64FromF32_HighWordWritten) {
   Fixture fx;
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   for (float f : {3.7f, -3.7f, 123456.78f, -9.876e8f, 1e-10f, 2.5f}) {
     uint64_t got = fx.run(/*v_cvt_f64_f32=*/16, std::bit_cast<uint32_t>(f), 0u);
     uint64_t want = std::bit_cast<uint64_t>(static_cast<double>(f));
@@ -145,6 +151,7 @@ TEST(Vop1CvtF64Scalar, F64FromF32_HighWordWritten) {
 
 TEST(Vop1CvtF64Scalar, F64FromI32_HighWordWritten) {
   Fixture fx;
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   for (int32_t i : {3, -3, 123456789, -987654321, INT32_MAX, INT32_MIN}) {
     uint64_t got = fx.run(/*v_cvt_f64_i32=*/4, static_cast<uint32_t>(i), 0u);
     uint64_t want = std::bit_cast<uint64_t>(static_cast<double>(i));
@@ -154,6 +161,7 @@ TEST(Vop1CvtF64Scalar, F64FromI32_HighWordWritten) {
 
 TEST(Vop1CvtF64Scalar, F64FromU32_HighWordWritten) {
   Fixture fx;
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   for (uint32_t u : {3u, 123456789u, 0xFFFFFFFFu, 0x80000000u, 1u}) {
     uint64_t got = fx.run(/*v_cvt_f64_u32=*/22, u, 0u);
     uint64_t want = std::bit_cast<uint64_t>(static_cast<double>(u));

@@ -5784,7 +5784,7 @@ finally:
 
 ### amdsmi_topo_get_link_type
 
-Description: Retrieve the hops and the connection type between 2 GPUs
+Description: Retrieve the hops and the connection type between 2 processors (GPUs or NICs)
 
 Input parameters:
 
@@ -5795,8 +5795,8 @@ Output:  Dictionary with fields:
 
 Field | Description
 ---|---
-`hops` | Number of hops
-`type` | The connection type as an int. This should be translated according to the enum amdsmi_link_type_t. Refer to the example below for more details.
+`hops` | Number of hops. Not meaningful when either processor is a NIC; it reads `UINT64_MAX` then
+`type` | The connection type as an int. This should be translated according to the enum amdsmi_link_type_t. For a NIC pair it is `AMDSMI_LINK_TYPE_PCIE` (same PCIe switch), `AMDSMI_LINK_TYPE_NUMA` (same NUMA node, different switch), `AMDSMI_LINK_TYPE_XNUMA` (different NUMA nodes) or `AMDSMI_LINK_TYPE_UNKNOWN`. Refer to the example below for more details.
 
 Exceptions that can be thrown by `amdsmi_topo_get_link_type` function:
 
@@ -5835,6 +5835,10 @@ try:
             print('xgmi')
         if link_type['type'] == amdsmi.AmdSmiLinkType.AMDSMI_LINK_TYPE_NOT_APPLICABLE:
             print('not applicable')
+        if link_type['type'] == amdsmi.AmdSmiLinkType.AMDSMI_LINK_TYPE_NUMA:
+            print('same NUMA node, different PCIe switch (NIC pairs)')
+        if link_type['type'] == amdsmi.AmdSmiLinkType.AMDSMI_LINK_TYPE_XNUMA:
+            print('different NUMA nodes (NIC pairs)')
         if link_type['type'] == amdsmi.AmdSmiLinkType.AMDSMI_LINK_TYPE_UNKNOWN:
             print('unknown')
 except amdsmi.AmdSmiException as e:

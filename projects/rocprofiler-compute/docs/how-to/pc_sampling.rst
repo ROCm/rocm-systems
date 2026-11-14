@@ -30,11 +30,13 @@ For using profiling options for PC sampling the configuration needed are:
 * ``--pc-sampling-method``: Should be either ``stochastic`` or ``host_trap``, (DEFAULT: stochastic)
 * ``--pc-sampling-interval``: The accepted range is read from the device; see ``rocprofv3-avail info --pc-sampling``. When the device cannot be queried, 1 to 1048576 is accepted. For ``stochastic`` sampling, the interval is in cycles and must be a power of 2 (DEFAULT: 1048576). For ``host_trap`` sampling, the interval is in microseconds (DEFAULT: 512). When omitted, the method-appropriate default is used.
 
+``--set`` can't be used with ``--pc-sampling``.
+
 **Sample command:**
 
 .. code-block:: shell
 
-   $ rocprof-compute profile -n pc_test --no-roof --experimental --pc-sampling --pc-sampling-method stochastic -VVV -- target_app
+   $ rocprof-compute profile -n pc_test --experimental --pc-sampling --pc-sampling-method stochastic -VVV -- target_app
 
 Profile multi-process workloads
 -------------------------------
@@ -190,7 +192,7 @@ Each file holds one row per instruction line, ordered by code object offset:
        ``MATRIX``. Empty when the instruction is not classified.
    * - ``Total count``
      - Samples that landed on this instruction.
-   * - ``Active count``
+   * - ``Issue count``
      - Samples where the wave issued. Empty for ``host_trap``.
    * - ``Stall count``
      - Samples where the wave was stalled. Empty for ``host_trap``.
@@ -239,7 +241,7 @@ that line:
      - Source line number in the source file.
    * - ``Source line``
      - Text of the line.
-   * - ``Total count``, ``Active count``, ``Stall count``, ``Stall <REASON>``
+   * - ``Total count``, ``Issue count``, ``Stall count``, ``Stall <REASON>``
      - Sums over the instructions compiled from this line.
    * - ``Wave occupancy percent``, ``Active thread percent``
      - Averages over the samples of those instructions.

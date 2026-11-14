@@ -12,9 +12,9 @@ from typing import Any, Optional, Set, TextIO
 
 import pandas as pd
 
+import config
 from rocprof_compute_soc.soc_base import OmniSoC_Base
 from utils import file_io, parser, schema
-from utils.inject_roctx.constants import KNOWN_ML_API_BACKENDS
 from utils.logger import (
     console_debug,
     console_error,
@@ -23,10 +23,7 @@ from utils.logger import (
     demarcate,
 )
 from utils.metrics.expression import build_metric_value_string
-from utils.utils_analysis import (
-    impute_counters_iteration_multiplex,
-    validate_workload,
-)
+from utils.utils_analysis import validate_workload
 from utils.utils_common import (
     PC_SAMPLING_BLOCK_IDS,
     ROOFLINE_PANEL_ID,
@@ -90,9 +87,8 @@ class OmniAnalyze_Base:
         self, arch: str, sys_info: pd.Series, workload_dir: str
     ) -> Set[str]:
         """Return the ids of the blocks analyze shows for this workload."""
-        args = self.get_args()
         arch_configs = self.generate_configs(
-            arch, args.config_dir, False, None, sys_info, self.get_profiling_config()
+            arch, False, None, sys_info, self.get_profiling_config()
         )
         # Metric tables that define no metrics have empty frames even in blocks
         # the workload didn't profile, so only tables with rows count.
@@ -156,36 +152,22 @@ class OmniAnalyze_Base:
         return self.__socs
 
     @demarcate
-    def iteration_multiplex_impute_counters(
-        self, df: pd.DataFrame, workload_dir: Path
-    ) -> pd.DataFrame:
-        return impute_counters_iteration_multiplex(df, workload_dir)
-
-    @demarcate
     def generate_configs(
         self,
         arch: str,
-        config_dir: str,
         list_stats: bool,
         filter_metrics: Optional[list[str]],
         sys_info: pd.Series,
         profiling_config: dict[str, Any],
     ) -> dict[str, schema.ArchConfig]:
-        single_panel_config = file_io.is_single_panel_config(
-            config_dir, self.__supported_archs
-        )
-
         ac = schema.ArchConfig()
         if list_stats:
             ac.panel_configs = TOP_STATS_BUILD_IN_CONFIG
         else:
             config_arch = canonical_config_arch(arch) or arch
-            arch_panel_config = [
-                config_dir
-                if single_panel_config
-                else str(Path(config_dir) / config_arch)
-            ]
-            ac.panel_configs = load_panel_configs(arch_panel_config)
+            ac.panel_configs = load_panel_configs([
+                str(config.analysis_configs_dir / config_arch)
+            ])
 
         parser.build_dfs(
             arch_configs=ac,
@@ -229,7 +211,6 @@ class OmniAnalyze_Base:
                 arch = sys_info.iloc[0]["gpu_arch"]
                 self.generate_configs(
                     arch,
-                    args.config_dir,
                     args.list_stats,
                     args.filter_metrics,
                     sys_info.iloc[0],
@@ -335,23 +316,6 @@ class OmniAnalyze_Base:
                 "which is no longer supported. Profile it again with "
                 '"--iteration-multiplexing".',
             )
-
-        # --ml-api-trace enables every backend.
-        ml_api_trace = profiling_config.get("ml_api_trace", False)
-        for backend in KNOWN_ML_API_BACKENDS:
-            needs_trace = getattr(
-                args, f"{backend}_operator", None
-            ) is not None or getattr(args, f"list_{backend}_operators", False)
-            if needs_trace and not (
-                profiling_config.get(f"{backend}_trace", False) or ml_api_trace
-            ):
-                console_error(
-                    "ml api trace",
-                    f'Workload was not profiled with "--{backend}-trace" or '
-                    '"--ml-api-trace". '
-                    f"Cannot use --{backend}-operator or "
-                    f"--list-{backend}-operators.",
-                )
 
         for dir_info in args.path:
             if not any([

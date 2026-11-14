@@ -293,7 +293,15 @@ def _reconstruct_specs_from_sysinfo(sysinfo: dict[str, Any]) -> MachineSpecs:
                 "You need to reprofile to update data."
             )
 
-        spec_cls = spec_family_for_arch(sysinfo.get("gpu_arch"))
+        gpu_arch = sysinfo.get("gpu_arch")
+        supported_gpu_arch = mi_gpu_specs.get_gpu_series_dict()
+        if gpu_arch not in supported_gpu_arch:
+            console_error(
+                f"The workload was profiled on {gpu_arch}, which is not supported. "
+                f"Supported architectures: {list(supported_gpu_arch)}"
+            )
+
+        spec_cls = spec_family_for_arch(gpu_arch)
         return spec_cls(**sysinfo)
 
     except KeyError:

@@ -2145,7 +2145,7 @@ def test_pc_sampling_dispatch_filter_selects_one_process(
 def test_load_table_data_forwards_pc_sampling_tool_data() -> None:
     """load_table_data forwards tool data to load_non_mertrics_table."""
     sentinel = [{"sentinel": True}]
-    args = argparse.Namespace(debug=False)
+    args = argparse.Namespace(debug_metric_expression=False)
     workload = schema.Workload()
     workload.sys_info = pd.DataFrame([{"gpu_arch": "gfx942"}])
     with patch("utils.parser.load_non_mertrics_table") as mock_load_non_metrics:

@@ -18,6 +18,7 @@
 // seams without redeclaring them. comm.h/enqueue.h provide the remaining
 // ncclComm, task, datatype, and algorithm types used below.
 #include "ce_fakes.h"
+#include "collectives_fakes.h"  // g_collectiveMustUseEnqueuePath
 #include "comm.h"
 #include "comm_fakes.h"  // g_commCount
 #include "dda_fakes.h"

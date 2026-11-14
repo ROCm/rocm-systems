@@ -133,7 +133,7 @@ instead, so the syntax a module uses is the syntax it supports.
 
 ### Rules
 
-- Never add `from __future__ import annotations`, or any other `__future__` import.
+- Never use `from __future__ import annotations`, or any other `__future__` import. When you change a module that has one, remove it and write its annotations in the 3.8 form.
 - Use `typing.List`, `typing.Dict`, `typing.Tuple`, and `typing.Set` for annotations, not the builtin generics `list[...]`, `dict[...]`, `tuple[...]`, `set[...]`.
 - Use `typing.Optional[X]` and `typing.Union[X, Y]`, not `X | None` or `X | Y`.
 - Do not use 3.9+ library additions such as `dict` merge with `|`, `str.removeprefix`, or `str.removesuffix`.

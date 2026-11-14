@@ -120,7 +120,7 @@ Mi100Factory::Mi100Factory(const AgentInfo* agent_info, bool is_base)
                 block_info->event_id_max   = 295;
                 break;
             case TcaCounterBlockId:
-                block_info->instance_count = 32;
+                block_info->instance_count = 4;
                 block_info->event_id_max   = 58;
                 break;
             case GceaCounterBlockId:

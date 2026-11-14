@@ -73,27 +73,6 @@ def test_list_kernels(binary_handler_analyze_rocprof_compute):
 
 
 @pytest.mark.list_metrics
-def test_list_metrics_gfx_id_is_rejected(
-    binary_handler_analyze_rocprof_compute, capsys
-):
-    """analyze lists the -p workload's GPU, so it rejects --list-metrics-gfx-id."""
-    workload_dir = integration_common.setup_workload_dir(indirs[1])
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-        "--list-metrics",
-        "--list-metrics-gfx-id",
-        "gfx908",
-    ])
-    assert code == 1
-    assert "--list-metrics-gfx-id can't be used in analyze mode" in (
-        capsys.readouterr().out
-    )
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-@pytest.mark.list_metrics
 def test_list_available_metrics(binary_handler_analyze_rocprof_compute, capsys):
     code = binary_handler_analyze_rocprof_compute([
         "analyze",
@@ -636,14 +615,14 @@ def test_decimal_3(binary_handler_analyze_rocprof_compute):
 
 
 @pytest.mark.misc
-def test_g(binary_handler_analyze_rocprof_compute):
+def test_debug_metric_expression(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
         workload_dir = integration_common.setup_workload_dir(dir)
         code = binary_handler_analyze_rocprof_compute([
             "analyze",
             "--path",
             workload_dir,
-            "-g",
+            "--debug-metric-expression",
         ])
         assert code == 0
 
@@ -747,11 +726,12 @@ def test_missing_files_scenarios(binary_handler_analyze_rocprof_compute):
 
 
 def test_list_torch_operators_no_path(binary_handler_analyze_rocprof_compute, capsys):
-    """Test --list-torch-operators fails gracefully without --path"""
+    """Test --list-operators torch fails gracefully without --path"""
     code = binary_handler_analyze_rocprof_compute([
         "--experimental",
         "analyze",
-        "--list-torch-operators",
+        "--list-operators",
+        "torch",
     ])
     assert code == 1
 
@@ -763,22 +743,23 @@ def test_list_torch_operators_no_path(binary_handler_analyze_rocprof_compute, ca
 def test_list_torch_operators_no_trace_data(
     binary_handler_analyze_rocprof_compute, capsys
 ):
-    """Test graceful handling when workload was profiled with --torch-trace but
+    """Test graceful handling when workload was profiled with --trace-ml-api torch but
     contains no torch operator data (e.g. a non-PyTorch workload like vcopy).
     """
     workload_dir = integration_common.setup_workload_dir(indirs[0])
 
-    # Simulate a workload profiled with --torch-trace so the sanitize guard
+    # Simulate a workload profiled with --trace-ml-api torch so the sanitize guard
     # passes, but no torch marker/counter files exist (non-torch workload).
     config_path = Path(workload_dir) / "profiling_config.yaml"
-    config_path.write_text("torch_trace: true\n")
+    config_path.write_text("trace_ml_api:\n- torch\n")
 
     code = binary_handler_analyze_rocprof_compute([
         "--experimental",
         "analyze",
         "--path",
         workload_dir,
-        "--list-torch-operators",
+        "--list-operators",
+        "torch",
     ])
     # Should show warning but exit successfully
     assert code == 0

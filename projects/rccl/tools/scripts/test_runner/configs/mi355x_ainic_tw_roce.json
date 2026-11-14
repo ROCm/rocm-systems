@@ -441,6 +441,19 @@
           "name": "A23_Gin_GetFlush_ConcurrentBlocks",
           "description": "8 CTAs get + flush concurrently on one GIN context.",
           "test_filter": "GinMPIDeviceTests.GetFlush_ConcurrentBlocks"
+        },
+        {
+          "name": "A24_Gin_PutBurst_LocalCounter",
+          "description": "256-put burst through the GIN proxy.",
+          "test_filter": "GinMPIDeviceTests.PutBurst_LocalCounter"
+        },
+        {
+          "name": "A25_Gin_PutBurst_LocalCounter_PollBatch1",
+          "description": "256-put burst through the GIN proxy, one GFD per peer per progress iteration.",
+          "test_filter": "GinMPIDeviceTests.PutBurst_LocalCounter",
+          "env_variables": {
+            "NCCL_GIN_PROXY_POLL_BATCH": "1"
+          }
         }
       ]
     },
@@ -1122,6 +1135,29 @@
         { "name": "C1_alltoall_counters_ROCMIB", "binary": "alltoall_perf", "command_args": "-b 1M -e 128M -f 2 -g 1", "env_variables": { "NCCL_NET": "ROCM-IB" }, "description": "IONIC counters (tx_rdma_ucast_bytes) non-zero and BW > 10 GB/s on the ROCM-IB backend. Capped at 128M to keep the counter run fast; large-size coverage lives in alltoall_fullrange_guard." },
         { "name": "C1_allreduce_counters_ROCMIB", "binary": "all_reduce_perf", "command_args": "-b 1G -e 8G -f 2 -g 1", "env_variables": { "NCCL_NET": "ROCM-IB" }, "description": "IONIC counter validation on allreduce over the ROCM-IB backend." }
       ]
+    },
+
+    "gin_proxy_max_msg": {
+      "extends": "gin_proxy",
+      "description": "Same GIN proxy tests with RCCL_IB_MAX_MSG_SIZE at 256 MiB. Filters name RmaMPITest; the parent suite's GinMPITest filters match nothing.",
+      "env_variables": {
+        "RCCL_IB_MAX_MSG_SIZE": "268435456"
+      },
+      "tests": [
+        { "name": "A9_Gin_IPutBasic", "test_filter": "*RmaMPITest.IPutBasic*" },
+        { "name": "A10_Gin_IGetBasic", "test_filter": "*RmaMPITest.IGetBasic*" },
+        { "name": "A11_Gin_IPutSignal", "test_filter": "*RmaMPITest.IPutSignalInc*:*RmaMPITest.IPutSignalAdd*" },
+        { "name": "A12_Gin_MultipleInflight", "test_filter": "*RmaMPITest.MultipleInflightIPuts*:*RmaMPITest.MultipleInflightIGets*" },
+        { "name": "A13_Gin_IPutSignalStress10k", "test_filter": "*RmaMPIStressTest.IPutSignalStress10k*" }
+      ]
+    },
+
+    "cast_alltoall_full_max_msg": {
+      "extends": "cast_alltoall_full",
+      "description": "Same full-range CAST alltoall with RCCL_IB_MAX_MSG_SIZE at 256 MiB, so messages above the cap are posted as several work requests.",
+      "env_variables": {
+        "RCCL_IB_MAX_MSG_SIZE": "268435456"
+      }
     }
   },
 
@@ -1178,6 +1214,9 @@
     { "config": "qpshare_stress_churn",   "enabled": true },
     { "config": "qpshare_heap_poison",    "enabled": true },
 
-    { "config": "ionic_counters",        "enabled": true }
+    { "config": "ionic_counters",        "enabled": true },
+
+    { "config": "gin_proxy_max_msg",          "enabled": true },
+    { "config": "cast_alltoall_full_max_msg", "enabled": true }
   ]
 }

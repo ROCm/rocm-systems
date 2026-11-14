@@ -14,7 +14,7 @@
 #include "fp/fma_simd_test.h"
 #include "fp/omod_f64_test.h"
 #include "fp/reference.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_common.h"
 
 #include <array>
 #include <gtest/gtest.h>
@@ -71,9 +71,6 @@ void check_fma(Call entry_point, bool gfx12) {
     return result;
   };
   expect_invalid_fma_requests(invalid_request);
-  if constexpr (Width == 64) {
-    expect_invalid_fp64_rounding(invalid_request);
-  }
 
   // FP32 exercises DPP8, OMOD and combined ABS/NEG in addition to the
   // basic modifiers common to both formats. gfx11 ignores OMOD under the

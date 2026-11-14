@@ -34,6 +34,7 @@ THE SOFTWARE.
 #include <iomanip>
 #include <memory>
 #include <sstream>
+#include <thread>
 #include <utility>
 
 namespace {
@@ -99,6 +100,73 @@ const std::vector<uint8_t> &GraySeedJpeg() {
     };
     return kSeed;
 }
+
+/**
+ * @brief A 64x64 4:2:0 baseline JPEG with a color gradient, decoded by
+ *        TestCrossDeviceDecode.
+ *
+ * 64x64 is the smallest image rocJPEG decodes, and the gradient keeps a correct
+ * decode from matching an output buffer that was never written.
+ */
+const std::vector<uint8_t> &CrossDeviceJpeg() {
+    static const std::vector<uint8_t> kJpeg = {
+        0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46, 0x49, 0x46, 0x00, 0x01,
+        0x01, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0xFF, 0xDB, 0x00, 0x43,
+        0x00, 0x08, 0x06, 0x06, 0x07, 0x06, 0x05, 0x08, 0x07, 0x07, 0x07, 0x09,
+        0x09, 0x08, 0x0A, 0x0C, 0x14, 0x0D, 0x0C, 0x0B, 0x0B, 0x0C, 0x19, 0x12,
+        0x13, 0x0F, 0x14, 0x1D, 0x1A, 0x1F, 0x1E, 0x1D, 0x1A, 0x1C, 0x1C, 0x20,
+        0x24, 0x2E, 0x27, 0x20, 0x22, 0x2C, 0x23, 0x1C, 0x1C, 0x28, 0x37, 0x29,
+        0x2C, 0x30, 0x31, 0x34, 0x34, 0x34, 0x1F, 0x27, 0x39, 0x3D, 0x38, 0x32,
+        0x3C, 0x2E, 0x33, 0x34, 0x32, 0xFF, 0xDB, 0x00, 0x43, 0x01, 0x09, 0x09,
+        0x09, 0x0C, 0x0B, 0x0C, 0x18, 0x0D, 0x0D, 0x18, 0x32, 0x21, 0x1C, 0x21,
+        0x32, 0x32, 0x32, 0x32, 0x32, 0x32, 0x32, 0x32, 0x32, 0x32, 0x32, 0x32,
+        0x32, 0x32, 0x32, 0x32, 0x32, 0x32, 0x32, 0x32, 0x32, 0x32, 0x32, 0x32,
+        0x32, 0x32, 0x32, 0x32, 0x32, 0x32, 0x32, 0x32, 0x32, 0x32, 0x32, 0x32,
+        0x32, 0x32, 0x32, 0x32, 0x32, 0x32, 0x32, 0x32, 0x32, 0x32, 0x32, 0x32,
+        0x32, 0x32, 0xFF, 0xC0, 0x00, 0x11, 0x08, 0x00, 0x40, 0x00, 0x40, 0x03,
+        0x01, 0x22, 0x00, 0x02, 0x11, 0x01, 0x03, 0x11, 0x01, 0xFF, 0xC4, 0x00,
+        0x17, 0x00, 0x01, 0x01, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x04, 0x03, 0x06, 0x07, 0xFF, 0xC4,
+        0x00, 0x17, 0x10, 0x00, 0x03, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0x03, 0x61, 0xFF,
+        0xC4, 0x00, 0x17, 0x01, 0x01, 0x01, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x05, 0x07, 0x06, 0x04,
+        0xFF, 0xC4, 0x00, 0x16, 0x11, 0x00, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03, 0x04,
+        0xFF, 0xDA, 0x00, 0x0C, 0x03, 0x01, 0x00, 0x02, 0x11, 0x03, 0x11, 0x00,
+        0x3F, 0x00, 0xE4, 0xE9, 0x0C, 0x10, 0x91, 0xC1, 0x29, 0x0C, 0x10, 0x91,
+        0xC2, 0xAE, 0xFA, 0x4E, 0x19, 0x9C, 0x15, 0x23, 0x82, 0x12, 0x18, 0x25,
+        0x23, 0x82, 0x12, 0x00, 0xEF, 0xA4, 0x7E, 0x67, 0x06, 0x48, 0x60, 0x84,
+        0x8E, 0x09, 0x48, 0x60, 0x84, 0x8E, 0x03, 0xBE, 0x91, 0xE9, 0x9C, 0x15,
+        0x23, 0x82, 0x12, 0x02, 0x52, 0x38, 0x21, 0x20, 0x0E, 0xFA, 0x47, 0xE6,
+        0x71, 0x9A, 0x48, 0x60, 0x84, 0x8E, 0x09, 0x48, 0xE0, 0x84, 0x8E, 0x1A,
+        0x77, 0xD2, 0x43, 0x66, 0x70, 0x54, 0x8E, 0x08, 0x48, 0x09, 0x48, 0xE0,
+        0x84, 0x80, 0x3B, 0xE9, 0x1F, 0x99, 0xC1, 0x92, 0x18, 0x21, 0x23, 0x82,
+        0x52, 0x38, 0x5D, 0x23, 0x80, 0xEF, 0xA4, 0x7E, 0x67, 0x06, 0x48, 0xE0,
+        0x84, 0x80, 0x94, 0x86, 0x08, 0x48, 0x03, 0xBE, 0x91, 0xF9, 0x9C, 0x66,
+        0x92, 0x38, 0x5D, 0x23, 0x82, 0x92, 0x38, 0x5D, 0x23, 0x86, 0x99, 0xF4,
+        0x90, 0xD9, 0x9C, 0x19, 0x21, 0x82, 0x12, 0x02, 0x52, 0x18, 0x21, 0x20,
+        0x10, 0xFA, 0x47, 0xE6, 0x70, 0x64, 0x8E, 0x17, 0x48, 0xE0, 0xA4, 0x8E,
+        0x17, 0x48, 0xE0, 0x3B, 0xE9, 0x1E, 0x99, 0xC1, 0x92, 0x18, 0x21, 0x20,
+        0x25, 0x21, 0x82, 0x12, 0x18, 0x0E, 0xFA, 0x47, 0xE6, 0x71, 0x9A, 0x48,
+        0xE1, 0x74, 0x8E, 0x0A, 0x48, 0xE1, 0x74, 0x8E, 0x1A, 0x67, 0xD2, 0x43,
+        0x66, 0x70, 0x64, 0x86, 0x08, 0x48, 0x60, 0x94, 0x80, 0x84, 0x86, 0x04,
+        0x3E, 0x91, 0xF9, 0x9C, 0x19, 0x23, 0x85, 0xD2, 0x38, 0x29, 0x23, 0x85,
+        0xD2, 0x38, 0x0E, 0xFA, 0x47, 0xE6, 0x70, 0x64, 0x80, 0x84, 0x86, 0x09,
+        0x48, 0x08, 0x48, 0x60, 0x3B, 0xE9, 0x1F, 0x99, 0xC7, 0xFF, 0xD9
+    };
+    return kJpeg;
+}
+
+/** @brief Frees a HIP device buffer owned by a std::unique_ptr. */
+struct HipBufferDeleter {
+    void operator()(void *buffer) const { (void)hipFree(buffer); }
+};
+
+/** @brief Destroys a rocJPEG decoder handle owned by a std::unique_ptr. */
+struct RocJpegHandleDeleter {
+    void operator()(void *handle) const { (void)rocJpegDestroy(handle); }
+};
 
 /**
  * @brief A reproducible pseudo random number generator (xorshift32).
@@ -1805,10 +1873,171 @@ int RocJpegApiNegativeTests::TestStreamParseFuzz() {
     return EXIT_SUCCESS;
 }
 
+int RocJpegApiNegativeTests::CheckCrossDeviceDecode(int handle_device, int caller_device) {
+    std::cout << "info: Decoding with a handle on device " << handle_device << " from threads on device " << caller_device << std::endl;
+    // Everything up to and including the reference decode is done with handle_device current and only checks that
+    // rocJPEG can decode on handle_device at all. A failure there skips this direction instead of failing the test,
+    // because on a GPU that rocJPEG cannot use, such as an integrated GPU it has no kernels for, the comparisons below
+    // would test nothing.
+    if (hipSetDevice(caller_device) != hipSuccess || hipSetDevice(handle_device) != hipSuccess) {
+        std::cout << "info: Skipping, devices " << caller_device << " and " << handle_device << " cannot both be made current" << std::endl;
+        return EXIT_SUCCESS;
+    }
+    RocJpegStreamHandle stream_handle = nullptr;
+    RocJpegStatus rocjpeg_status = rocJpegStreamCreate(&stream_handle);
+    if (rocjpeg_status != ROCJPEG_STATUS_SUCCESS) {
+        std::cerr << "rocJpegStreamCreate: Expected ROCJPEG_STATUS_SUCCESS but got " << rocJpegGetErrorName(rocjpeg_status) << std::endl;
+        return EXIT_FAILURE;
+    }
+    std::unique_ptr<void, decltype(&rocJpegStreamDestroy)> stream_owner(stream_handle, rocJpegStreamDestroy);
+    const std::vector<uint8_t> &jpeg = CrossDeviceJpeg();
+    rocjpeg_status = rocJpegStreamParse(jpeg.data(), jpeg.size(), stream_handle);
+    if (rocjpeg_status != ROCJPEG_STATUS_SUCCESS) {
+        std::cerr << "Expected ROCJPEG_STATUS_SUCCESS when parsing the 64x64 JPEG but got " << rocJpegGetErrorName(rocjpeg_status) << std::endl;
+        return EXIT_FAILURE;
+    }
+
+    // A handle imports each decode surface into HIP and allocates its kernel parameter buffers on the current device
+    // of the thread that finishes its first decode, and reuses them for later decodes. Every output therefore gets a
+    // handle of its own, so that the reference decode cannot set these up on handle_device for the decodes under test.
+    // RGB output is used because its conversion kernel also has to run on the handle's device. outputs[0] receives the
+    // reference, and every buffer starts out with a fill that no correct decode produces.
+    RocJpegDecodeParams decode_params = {};
+    decode_params.output_format = ROCJPEG_OUTPUT_RGB;
+    const uint32_t pitch = 64 * 3;
+    const size_t output_size = static_cast<size_t>(pitch) * 64;
+    constexpr int kNumOutputs = 5;
+    const char *const output_names[kNumOutputs] = {"The reference rocJpegDecode", "rocJpegDecode", "rocJpegDecodeBatched",
+                                                   "rocJpegDecodeAsync followed by rocJpegDecodeSync",
+                                                   "rocJpegDecodeBatchedAsync followed by rocJpegDecodeBatchedSync"};
+    std::unique_ptr<void, RocJpegHandleDeleter> handles[kNumOutputs];
+    std::unique_ptr<void, HipBufferDeleter> buffers[kNumOutputs];
+    RocJpegImage outputs[kNumOutputs] = {};
+    for (int k = 0; k < kNumOutputs; k++) {
+        RocJpegHandle handle = nullptr;
+        rocjpeg_status = rocJpegCreate(ROCJPEG_BACKEND_HARDWARE, handle_device, &handle);
+        // rocJpegCreate returns the handle even if initializing it fails, so it is owned before the status is checked.
+        handles[k].reset(handle);
+        if (rocjpeg_status != ROCJPEG_STATUS_SUCCESS) {
+            std::cout << "info: Skipping, rocJpegCreate on device " << handle_device << " returned " << rocJpegGetErrorName(rocjpeg_status) << std::endl;
+            return EXIT_SUCCESS;
+        }
+        void *buffer = nullptr;
+        if (hipMalloc(&buffer, output_size) != hipSuccess) {
+            std::cout << "info: Skipping, an output buffer cannot be allocated on device " << handle_device << std::endl;
+            return EXIT_SUCCESS;
+        }
+        buffers[k].reset(buffer);
+        if (hipMemset(buffer, 0xA5, output_size) != hipSuccess) {
+            std::cout << "info: Skipping, an output buffer cannot be filled on device " << handle_device << std::endl;
+            return EXIT_SUCCESS;
+        }
+        outputs[k].channel[0] = static_cast<uint8_t *>(buffer);
+        outputs[k].pitch[0] = pitch;
+    }
+    std::vector<uint8_t> reference(output_size);
+    rocjpeg_status = rocJpegDecode(handles[0].get(), stream_handle, &decode_params, &outputs[0]);
+    if (rocjpeg_status != ROCJPEG_STATUS_SUCCESS ||
+        hipMemcpy(reference.data(), outputs[0].channel[0], output_size, hipMemcpyDeviceToHost) != hipSuccess) {
+        std::cout << "info: Skipping, the reference decode on device " << handle_device << " failed" << std::endl;
+        return EXIT_SUCCESS;
+    }
+    // The gradient never decodes to a single value, so a blank reference means handle_device did not decode the image.
+    if (reference == std::vector<uint8_t>(output_size, reference[0])) {
+        std::cout << "info: Skipping, the reference decode on device " << handle_device << " produced a blank image" << std::endl;
+        return EXIT_SUCCESS;
+    }
+
+    // Runs work on a new thread whose current device is caller_device, and records whether it ran, its status and the
+    // thread's current device once it returns. A new thread starts on device 0, so with caller_device 0 the thread
+    // never calls hipSetDevice, like an application thread that never selects a device.
+    struct CallerResult {
+        bool ran = false;
+        RocJpegStatus status = ROCJPEG_STATUS_EXECUTION_FAILED;
+        int device_after = -1;
+    };
+    auto run_on_caller_thread = [caller_device](auto work) {
+        CallerResult result;
+        std::thread caller([&]() {
+            if (caller_device != 0 && hipSetDevice(caller_device) != hipSuccess) {
+                return;
+            }
+            result.ran = true;
+            result.status = work();
+            if (hipGetDevice(&result.device_after) != hipSuccess) {
+                result.device_after = -1;
+            }
+        });
+        caller.join();
+        return result;
+    };
+    CallerResult results[kNumOutputs];
+    results[1] = run_on_caller_thread([&]() { return rocJpegDecode(handles[1].get(), stream_handle, &decode_params, &outputs[1]); });
+    results[2] = run_on_caller_thread([&]() { return rocJpegDecodeBatched(handles[2].get(), &stream_handle, 1, &decode_params, &outputs[2]); });
+    // The async decodes are submitted from this thread and synchronized from another, as in a pipeline with a separate
+    // sync thread.
+    rocjpeg_status = rocJpegDecodeAsync(handles[3].get(), stream_handle, &decode_params, &outputs[3]);
+    if (rocjpeg_status != ROCJPEG_STATUS_SUCCESS) {
+        std::cerr << "rocJpegDecodeAsync with device " << handle_device << " current: Expected ROCJPEG_STATUS_SUCCESS but got "
+                  << rocJpegGetErrorName(rocjpeg_status) << std::endl;
+        return EXIT_FAILURE;
+    }
+    rocjpeg_status = rocJpegDecodeBatchedAsync(handles[4].get(), &stream_handle, 1, &decode_params, &outputs[4]);
+    if (rocjpeg_status != ROCJPEG_STATUS_SUCCESS) {
+        std::cerr << "rocJpegDecodeBatchedAsync with device " << handle_device << " current: Expected ROCJPEG_STATUS_SUCCESS but got "
+                  << rocJpegGetErrorName(rocjpeg_status) << std::endl;
+        return EXIT_FAILURE;
+    }
+    results[3] = run_on_caller_thread([&]() { return rocJpegDecodeSync(handles[3].get(), &outputs[3]); });
+    results[4] = run_on_caller_thread([&]() { return rocJpegDecodeBatchedSync(handles[4].get(), &outputs[4], 1); });
+
+    std::vector<uint8_t> output(output_size);
+    for (int k = 1; k < kNumOutputs; k++) {
+        if (!results[k].ran) {
+            std::cerr << "Failed to make device " << caller_device << " current on a new thread for " << output_names[k] << std::endl;
+            return EXIT_FAILURE;
+        }
+        if (results[k].status != ROCJPEG_STATUS_SUCCESS) {
+            std::cerr << output_names[k] << " from a thread on device " << caller_device << ": Expected ROCJPEG_STATUS_SUCCESS but got "
+                      << rocJpegGetErrorName(results[k].status) << std::endl;
+            return EXIT_FAILURE;
+        }
+        if (results[k].device_after != caller_device) {
+            std::cerr << output_names[k] << " left the calling thread on device " << results[k].device_after << " instead of device "
+                      << caller_device << std::endl;
+            return EXIT_FAILURE;
+        }
+        if (hipMemcpy(output.data(), outputs[k].channel[0], output_size, hipMemcpyDeviceToHost) != hipSuccess) {
+            std::cerr << "Failed to copy the output of " << output_names[k] << " to the host" << std::endl;
+            return EXIT_FAILURE;
+        }
+        if (output != reference) {
+            std::cerr << output_names[k] << " from a thread on device " << caller_device << " does not match the reference decoded with device "
+                      << handle_device << " current" << std::endl;
+            return EXIT_FAILURE;
+        }
+    }
+    return EXIT_SUCCESS;
+}
+
+int RocJpegApiNegativeTests::TestCrossDeviceDecode() {
+    std::cout << "info: Executing cross-device decode tests" << std::endl;
+    int num_devices = 0;
+    if (hipGetDeviceCount(&num_devices) != hipSuccess || num_devices < 2) {
+        std::cout << "info: Skipping the cross-device decode tests, which need at least two GPUs" << std::endl;
+        return EXIT_SUCCESS;
+    }
+    const int last_device = num_devices - 1;
+    if (CheckCrossDeviceDecode(last_device, 0) || CheckCrossDeviceDecode(0, last_device)) {
+        return EXIT_FAILURE;
+    }
+    return EXIT_SUCCESS;
+}
+
 int RocJpegApiNegativeTests::RunTests() {
     if (TestInvalidStreamCreate() || TestInvalidStreamParse () || TestInvalidStreamDestroy() || TestInvalidCreate() || TestInvalidDestroy() ||
         TestInvalidGetImageInfo() || TestInvalidDecode() || TestInvalidDecodeBatched() || TestInvalidGetErrorName() ||
-        TestInvalidGetDecoderCaps() || TestStreamParseFuzz()) {
+        TestInvalidGetDecoderCaps() || TestStreamParseFuzz() || TestCrossDeviceDecode()) {
         std::cerr << "One or more negative tests failed." << std::endl;
         return EXIT_FAILURE;
     } else {

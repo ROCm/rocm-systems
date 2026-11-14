@@ -5,8 +5,9 @@
 // both wave sizes and FP32 or packed BF16 results. Guards operand ranges and
 // denormals, declining inputs that require the general arithmetic path.
 
+#include "common/compiler.h"
 #include "common/simd.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_wmma.h"
 #include "wmma/layout.h"
 
 #include <immintrin.h>
@@ -143,15 +144,15 @@ static void wmma_bf16(uint32_t instruction_flags, uint32_t *const *d, const uint
           bits, _mm512_set1_epi32(instruction_flags & RJ_ARITH_WMMA_NEG_C ? INT32_MIN : 0));
     }
     auto acc = _mm512_castsi512_ps(bits);
-// Keep pair addresses constant and the decoded B vectors in registers.
-#pragma GCC unroll 8
+    // Keep pair addresses constant and the decoded B vectors in registers.
+    RJ_ARITH_UNROLL(8)
     for (int step = 0; step < 8; ++step) {
       int pair =
           Packed && !Rdna3 && Lanes == 32 ? rocjitsu::arith::wmma_gfx12_w32_k(2 * step) / 2 : step;
       int ar = Rdna3 ? pair : pair % (Registers / 2);
       int al = row + 16 * (Rdna3 ? group : pair / (Registers / 2));
       uint32_t aw = a[ar][al] ^ a_sign;
-      auto left = _mm512_set1_epi32(int((aw << 16) | (aw >> 16)));
+      auto left = _mm512_rol_epi32(_mm512_set1_epi32(int(aw)), 16);
       acc = _mm512_dpbf16_ps(acc, (__m512bh)left, (__m512bh)right[group][pair]);
       // Packed GPU WMMA truncates BF16 after each DOT2 (gfx11) or DOT4
       // (gfx12). VCVTNEPS2BF16 rounds instead and is not interchangeable.

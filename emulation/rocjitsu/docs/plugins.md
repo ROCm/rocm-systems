@@ -421,17 +421,17 @@ group divides hooks by frequency and synchronization cost:
   the default hot-hook policy, an infrequent callback can still overlap a
   high-frequency callback. Recursive acquisition lets a callback synchronously
   read registers and fire register-observation hooks without deadlocking.
-- Instruction before/after, memory-routing, tensor-DMA memory, and
-  register-access callbacks are high-frequency and run concurrently with both
-  other high-frequency callbacks and infrequent callbacks by default. Each
-  callback is scoped to a wavefront below the simulation's shader-engine
+- Instruction before/after, memory-routing, tensor-DMA issue, tensor-DMA
+  memory, and register-access callbacks are high-frequency and run concurrently
+  with both other high-frequency callbacks and infrequent callbacks by default.
+  Each callback is scoped to a wavefront below the simulation's shader-engine
   partition granularity. During the before-instruction callback, a memory
   instruction exposes its decoded wait-counter obligations and completion-order
   metadata through `amdgpu_memory_issue_info()`, before address or store-data
-  operands are read. This metadata describes operations
-  routed through the scalar, vector, and local memory pipelines; it is not a
-  complete inventory of non-memory events, such as messages and timestamp
-  queries, that hardware wait counters may also track.
+  operands are read. This metadata describes operations routed through the
+  scalar, vector, and local memory pipelines; it is not a complete inventory of
+  non-memory events, such as messages and timestamp queries, that hardware wait
+  counters may also track.
 
 A plugin whose high-frequency callbacks reach shared mutable state may override
 `requires_serial_hot_hooks()` to return `true`. The group samples that stable
@@ -446,10 +446,10 @@ Plugins can opt out of individual high-frequency hooks by overriding
 `observes_async_instruction_issued()`,
 `observes_memory_instruction_routing()`, `observes_vgpr_reads()`,
 `observes_vgpr_writes()`, `observes_sgpr_reads()`,
-`observes_scalar_register_writes()`, `observes_memory_routing()`, or
-`observes_tensor_dma_memory_access()`. The group samples these stable flags
-when the plugin is added and avoids both fanout and upstream observation work
-when no contained plugin consumes a hook.
+`observes_scalar_register_writes()`, `observes_memory_routing()`,
+`observes_tensor_dma_memory_access()`, or `observes_tensor_dma_issue()`. The
+group samples these stable flags when the plugin is added and avoids both
+fanout and upstream observation work when no contained plugin consumes a hook.
 
 For finer-grained selection, `observes_hot_hooks_for_wavefront(wf)` controls
 all high-frequency callbacks for one wavefront. After every plugin's
@@ -551,13 +551,41 @@ routing path. `onAmdgpuTensorDmaMemoryAccess` reports them separately after the
 instruction and any descriptor-requested atomic-barrier arrival return normally.
 Its `addresses` member is a callback-lifetime `TensorDmaAddressView` over the
 in-bounds global element bases whose requests were attempted, in execution order
-with duplicates preserved. Empty and fully masked transfers produce no callback.
-Consumers must opt in through `observes_tensor_dma_memory_access()`. A consumer
-that retains addresses must use `size()` to budget and allocate the event, then
-call `copy_to()` during the callback; a failed copy means the observation is
-malformed and must be rejected. Tensor-DMA observers that need wave-local state
-may override `onAmdgpuTensorDmaMemoryAccess(access, wf)`; its default forwards to
-the observation-only overload.
+with duplicates preserved. Empty and fully masked transfers produce no callback,
+so a callback's transfer fields always come from a validated descriptor. `pc` is
+the tensor instruction's PC, also when a deferred transfer completes after the
+wavefront has moved past the instruction. Consumers must opt in through
+`observes_tensor_dma_memory_access()`. A consumer that retains addresses must
+use `size()` to budget and allocate the event, then call `copy_to()` during the
+callback; a failed copy means the observation is malformed and must be rejected.
+Tensor-DMA observers that need wave-local state may override
+`onAmdgpuTensorDmaMemoryAccess(access, wf)`; its default forwards to the
+observation-only overload.
+
+`onAmdgpuTensorDmaIssued(issue, wf)` is the tensor DMA counterpart of
+`onAmdgpuMemoryAccessRouted`. It fires once for every tensor DMA instruction, in
+the issuing wavefront's instruction step, after the descriptor is read and,
+unless it is NULL, validated. That includes an instruction that moves no data:
+a NOP tile (`tile_dim0 = 0`), a gather with no valid indices or a store whose
+tile lies wholly outside the tensor still completes on TENSORcnt, and the
+emulator also counts a NULL descriptor (`count = 0`) on TENSORcnt, an assumption
+since hardware behavior for that encoding is not established. A transfer that
+waits for memory is reported when it issues and not again when it resumes. When
+the hook fires, a store has already sampled its LDS source bytes, so changing
+LDS in the callback does not change what the store writes to global memory; no
+global request has been made and a load has written no LDS. Its `lds_ranges`
+member is a callback-lifetime span of the LDS byte runs the transfer will write
+(loads) or read (stores), with adjacent elements merged and padding bytes
+excluded. Bytes outside the wave's LDS allocation are not transferred and are
+omitted, so a range can end mid-element when an element straddles the end of
+the allocation; consumers must treat ranges as byte ranges, not as whole
+elements. A load covers every element of its tile, zero-filling those outside
+the tensor; a store covers only in-bounds elements. Empty `lds_ranges` mean
+only that the transfer touches no LDS payload bytes, not that it makes no global
+accesses: for a tile wholly past the allocation, a load still reads its
+in-bounds tensor elements from global memory and can fault there, and a store
+still writes zeros to its global destination. Consumers must opt in through
+`observes_tensor_dma_issue()`.
 
 SGPR owner resolution is skipped when no contained plugin observes scalar
 register reads. Plugins that consume neither `onAmdgpuReadScalarRegister` nor
@@ -587,15 +615,17 @@ instead copy the instruction's PC and encoding as it executes, and disassemble
 the copy when the report is written. Validate the encoding before copying it:
 `raw_encoding()` is null when the instruction has no encoding, and the copy
 needs `size()` to be a positive multiple of four bytes that fits the buffer.
-An encoding is at most four words (the CU's 16-byte fetch window). The example
-rejects anything else at capture, as the race detector does, so every stored
-copy can be disassembled.
+The CU normally fetches four words starting at the PC. GFX10 MIMG with
+NSA=3 uses a fifth word. The fetch-aware hook receives all five for that
+instruction. The example stores up to five words, as the race detector does,
+and rejects invalid sizes at capture. Perfsim's FFM event format has its own
+four-word encoding limit.
 
 ```cpp
 // Set for each wave in onAmdgpuWavefrontDispatched() with wf.set_plugin_state().
 struct LastInstruction : WavefrontState {
   uint64_t pc = 0;
-  std::array<uint32_t, 4> words{};
+  std::array<uint32_t, 5> words{};
   size_t word_count = 0; // Zero until the wave executes an instruction.
 };
 
@@ -604,8 +634,12 @@ void onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Instruction &inst,
   auto &last = *static_cast<LastInstruction *>(wf.plugin_state(slot_index()));
   const int bytes = inst.size();
   if (!inst.raw_encoding() || bytes <= 0 || bytes % sizeof(uint32_t) != 0 ||
-      static_cast<size_t>(bytes) > sizeof(last.words))
-    throw std::logic_error(std::format("instruction at PC {:#x} has no valid encoding", pc));
+      static_cast<size_t>(bytes) > sizeof(last.words)) {
+    if (!wf.instruction_execution_failed())
+      wf.report_instruction_execution_error(
+          amdgpu::InstructionExecutionError::PluginFailure, "instruction has no valid encoding");
+    return;
+  }
   last.pc = pc;
   last.word_count = bytes / sizeof(uint32_t);
   std::copy_n(inst.raw_encoding(), last.word_count, last.words.begin());
@@ -613,25 +647,50 @@ void onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Instruction &inst,
 
 // Later, when a report about this wave needs text:
 if (last.word_count != 0) {
-  std::string text = wf.disassemble_instruction(
+  util::FailureOr<std::string> text = wf.disassemble_instruction(
       std::span(last.words).first(last.word_count), last.pc);
-  // ...
+  if (text.failed()) {
+    if (!wf.instruction_execution_failed())
+      wf.report_instruction_execution_error(
+          amdgpu::InstructionExecutionError::PluginFailure, "cannot disassemble instruction");
+    return;
+  }
+  // Use text.value().
 }
 ```
 
 `Wavefront::disassemble_instruction` decodes the copy with the wave's CU target
 decoder, so a standalone plugin module can use it without linking the
 simulator. Call it on the CU execution thread, for example from one of that
-wave's synchronous hooks. It throws `std::logic_error` if the encoding is empty,
-truncated, or cannot be decoded. Because the text comes from the copied bytes,
+wave's synchronous hooks. It returns `FailureOr<std::string>` and emits a diagnostic
+through the optional `DiagnosticEmitter` if the encoding is empty, truncated, or
+cannot be decoded. Because the text comes from the copied bytes,
 it describes the instruction that executed even if the code was later
 overwritten or unmapped. The race detector formats its instruction traces this
 way.
 
+Plugin callbacks, policy queries, constructors, destructors, and output sinks must
+not throw. This is a semantic contract; callback signatures do not require
+`noexcept`. From synchronous instruction hooks, report expected instruction or
+reporting failures through
+`Wavefront::report_instruction_execution_error()` and preserve any error already
+recorded on the wave. Every accepted asynchronous instruction must still receive
+its normal completion accounting before cancellation or shutdown.
+
+`onAmdgpuWavefrontHalted` is a terminal notification. The wave's instruction-error
+state is discarded when this hook returns. Use `sink().write()` to report problems
+from this hook.
+
 ## Adding a new plugin
 
-1. Implement `ExecutionPlugin` in a new subdirectory. The plugin class
-   must be constructible from `const char *config_json`.
+1. Implement `ExecutionPlugin` in a new subdirectory. The plugin class can
+   provide a `const char *config_json` constructor, or a default constructor and
+   `util::Result initialize(const char *, util::DiagnosticEmitter)`.
+   The export macro uses the `const char *` constructor when available; it uses
+   the checked initializer only when that constructor is absent. A constructor
+   taking `const char * = nullptr` still takes precedence, so remove it when
+   migrating to the checked form. If initialization fails, the factory logs
+   `create failed: <diagnostic>`, destroys the candidate, and returns a null handle.
 2. Add a `plugin_export.cpp` that calls
    `ROCJITSU_DEFINE_PLUGIN(MyPlugin, "myname", schema)`.
 3. In `CMakeLists.txt`, add the object library and a
@@ -646,9 +705,9 @@ way.
    plugin consumes. Use `observes_hot_hooks_for_wavefront()` when subscription
    also depends on the dispatched wavefront; keep that predicate lock-free,
    thread-safe, and stable after dispatch. A consumer of
-   `onAmdgpuMemoryAccessRouted` or `onAmdgpuTensorDmaMemoryAccess` must explicitly
-   return `true` from the corresponding interest method because those two
-   conservative defaults are `false`.
+   `onAmdgpuMemoryAccessRouted`, `onAmdgpuTensorDmaMemoryAccess`, or
+   `onAmdgpuTensorDmaIssued` must explicitly return `true` from the corresponding
+   interest method because those conservative defaults are `false`.
 7. Enable it by adding `"myname": { ... }` to the `plugins` section of
    the config file.
 8. Return `true` from `supports_async_instructions()` only when the plugin accepts
@@ -673,8 +732,27 @@ Callbacks must not retain instruction or wave references. There is no completion
 notification. Holding the callback mutex does not provide a complete
 architectural snapshot.
 
+Plugins that need to report instruction failures from register hooks must keep
+`supports_async_instructions()` false. Helper register hooks can run while the
+issuer clears the same wave's instruction error field for its next instruction;
+neither reading nor writing that field from a helper is safe. Issuer-thread issue
+callbacks may report failures. The CU checks the retained error after the full
+issue callback fanout and drains accepted jobs before cancelling the wave.
+
 Throughput, instruction mix, and kernel logging support this contract. The
 [simulator race detector](race-detector.md) keeps synchronous execution until
 its dependency-event access and diagnostic context support concurrent register
 hooks within one wave. Plugins and the host
 must be rebuilt together, as for other execution-plugin interface changes.
+
+Sampler instructions, regardless of filter mode, report one `onAmdgpuMemoryAccessRouted` callback per
+instruction. Samples with a prepared footprint use `image_sample_footprints`
+and leave `addresses` empty. A null resource or unbacked sampler completes as
+an empty request: the callback carries the ordinary per-lane `addresses` span,
+an empty footprint span and a zero `request_lane_mask`. Its counter obligation
+still identifies the sampled request on targets with SAMPLECNT. Each footprint has
+`wavefront_size` entries and its lane mask is a subset of `request_lane_mask`.
+Border-only and zero-weight taps remain present with those lanes cleared.
+`bytes_per_lane()` is the size of one texel per footprint, including gather
+instructions that return four selected components. Consumers must visit every
+footprint without counting another issued instruction or wait-counter event.

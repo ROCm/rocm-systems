@@ -4,10 +4,10 @@
 // ISA-local sparse operand preparation and result layout helpers.
 #pragma once
 
-#include "common/float_formats.h"
-#include "common/internal.h"
+#include "common/float_encoding.h"
 #include "common/isa.h"
-#include "rj_arith/rj_arith.h"
+#include "common/validation.h"
+#include "rj_arith/detail/rj_arith_wmma.h"
 #include "wmma/sparse_layout.h"
 #include "wmma/swmmac_float.h"
 

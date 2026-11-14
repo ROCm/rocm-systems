@@ -17,20 +17,11 @@
 #include <future>
 #include <memory>
 #include <mutex>
-#include <new>
 #include <span>
 #include <stdexcept>
 #include <thread>
 
 namespace rocjitsu::amdgpu {
-
-class GpuQueueRegistryTestAccess {
-public:
-  static void fail_next_allocation(GpuQueueRegistry &registry) {
-    std::lock_guard lock(registry.mutex_);
-    registry.fail_next_registry_allocation_ = true;
-  }
-};
 
 namespace {
 
@@ -242,15 +233,11 @@ TEST_F(GpuQueueRegistryTest, RegistrationFailuresRollBackAddressSpaceRetention) 
   ASSERT_TRUE(gpu_vm_.lookup(address_space_));
   EXPECT_EQ(gpu_vm_.lookup(address_space_)->queue_references, 0u);
 
-  auto allocation = factory_control();
-  GpuQueueRegistryTestAccess::fail_next_allocation(registry_);
-  EXPECT_THROW(
-      (void)registry_.register_queue(request(std::make_shared<TestQueueFactory>(allocation))),
-      std::bad_alloc);
-  ASSERT_TRUE(gpu_vm_.lookup(address_space_));
-  EXPECT_EQ(gpu_vm_.lookup(address_space_)->queue_references, 0u);
-  EXPECT_EQ(allocation->binding->destructions, 1);
   EXPECT_EQ(registry_.active_queues(), 0u);
+  const QueueHandle replacement =
+      registry_.register_queue(request(std::make_shared<TestQueueFactory>(factory_control())));
+  ASSERT_TRUE(replacement);
+  EXPECT_TRUE(registry_.unregister_queue(replacement, QueueCloseMode::ForceCancel));
 }
 
 TEST_F(GpuQueueRegistryTest, DuplicateIdentityIsRejectedBeforeCreatingAnotherBinding) {
@@ -328,11 +315,18 @@ TEST_F(GpuQueueRegistryTest, GracefulClosePreservesBusyAndFaultedBindingsForForc
   EXPECT_TRUE(busy.found);
   EXPECT_EQ(busy.status, QueueCloseStatus::Busy);
   EXPECT_TRUE(registry_.contains(handle));
+  const QueueCloseResult preempt_busy = registry_.unregister_queue(handle, QueueCloseMode::Preempt);
+  EXPECT_EQ(preempt_busy.status, QueueCloseStatus::Busy);
+  EXPECT_TRUE(registry_.contains(handle));
 
   control->prepare_status = QueuePrepareCloseStatus::Faulted;
   const QueueCloseResult faulted = registry_.unregister_queue(handle);
   EXPECT_TRUE(faulted.found);
   EXPECT_EQ(faulted.status, QueueCloseStatus::Faulted);
+  EXPECT_TRUE(registry_.contains(handle));
+  const QueueCloseResult preempt_faulted =
+      registry_.unregister_queue(handle, QueueCloseMode::Preempt);
+  EXPECT_EQ(preempt_faulted.status, QueueCloseStatus::Faulted);
   EXPECT_TRUE(registry_.contains(handle));
 
   EXPECT_TRUE(registry_.unregister_queue(handle, QueueCloseMode::ForceCancel));

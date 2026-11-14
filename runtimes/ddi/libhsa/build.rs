@@ -511,6 +511,7 @@ fn generate_dispatch(exports: &[String], tables: &[(&str, Vec<String>)]) -> Stri
         "/* SPDX-License-Identifier: MIT */".to_owned(),
         "/* Generated from the Linux HSA exports. */".to_owned(),
         ".text".to_owned(),
+        ".hidden hsa_process_witness".to_owned(),
         ".hidden hsa_dispatch_slots".to_owned(),
         ".hidden hsa_profiler_slots".to_owned(),
         ".hidden hsa_profiler_default_slots".to_owned(),
@@ -527,10 +528,21 @@ fn generate_dispatch(exports: &[String], tables: &[(&str, Vec<String>)]) -> Stri
             format!(".globl {name}"),
             format!(".type {name}, @function"),
             format!("{name}:"),
+            // A fork child must bypass copied tool callbacks before Rust can
+            // check its inherited lifecycle. r11 is caller-saved and leaves
+            // every ABI argument, including varargs metadata, untouched.
+            "    mov r11, qword ptr [rip + hsa_process_witness]".to_owned(),
+            "    test r11, r11".to_owned(),
+            format!("    jz .Lhsa_export_dispatch_{index}"),
+            "    cmp dword ptr [r11], 0".to_owned(),
+            format!("    jz .Lhsa_export_forked_{index}"),
+            format!(".Lhsa_export_dispatch_{index}:"),
             format!(
                 "    jmp qword ptr [rip + hsa_dispatch_slots + {}]",
                 index * 8
             ),
+            format!(".Lhsa_export_forked_{index}:"),
+            format!("    jmp __hsa_impl_{name}"),
             format!(".size {name}, .-{name}"),
         ]);
     }
@@ -540,6 +552,12 @@ fn generate_dispatch(exports: &[String], tables: &[(&str, Vec<String>)]) -> Stri
             format!(".globl __hsa_bridge_{name}"),
             format!(".type __hsa_bridge_{name}, @function"),
             format!("__hsa_bridge_{name}:"),
+            "    mov r11, qword ptr [rip + hsa_process_witness]".to_owned(),
+            "    test r11, r11".to_owned(),
+            format!("    jz .Lhsa_bridge_dispatch_{index}"),
+            "    cmp dword ptr [r11], 0".to_owned(),
+            format!("    jz .Lhsa_bridge_forked_{index}"),
+            format!(".Lhsa_bridge_dispatch_{index}:"),
             format!(
                 "    mov r11, qword ptr [rip + hsa_profiler_slots + {}]",
                 index * 8
@@ -556,6 +574,15 @@ fn generate_dispatch(exports: &[String], tables: &[(&str, Vec<String>)]) -> Stri
             format!(".Lhsa_bridge_call_{index}:"),
             "    jmp r11".to_owned(),
         ]);
+        lines.push(format!(".Lhsa_bridge_forked_{index}:"));
+        if exports.iter().any(|export| export == name) || PRIVATE_TABLE_FUNCTIONS.contains(name) {
+            lines.push(format!("    jmp __hsa_impl_{name}"));
+        } else {
+            lines.push(format!(
+                "    jmp qword ptr [rip + hsa_profiler_default_slots + {}]",
+                index * 8
+            ));
+        }
         lines.push(format!(".size __hsa_bridge_{name}, .-__hsa_bridge_{name}"));
     }
     lines.push(String::new());

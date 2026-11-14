@@ -115,7 +115,8 @@ std::vector<RegisterClaim> MesBlockModel::claims() const {
 bool MesBlockModel::attach_engine(
     amdgpu::MesEngine &engine,
     std::shared_ptr<amdgpu::SdmaQueueBindingFactory> sdma_queue_binding_factory,
-    amdgpu::InterruptSink interrupt_sink) {
+    amdgpu::InterruptSink interrupt_sink,
+    std::function<amdgpu::InterruptSubscription()> make_vm_fault_subscription) {
   if (engine_ != nullptr)
     return engine_ == &engine;
   amdgpu::MesFrontendCallbacks callbacks(
@@ -128,7 +129,8 @@ bool MesBlockModel::attach_engine(
       [](uint32_t offset, amdgpu::QueuePacketFormat) {
         return amdgpu::QueueDoorbellBinding{.mode = amdgpu::QueueDoorbellMode::Explicit,
                                             .offset = offset};
-      });
+      },
+      std::move(make_vm_fault_subscription));
   if (!engine.attach_frontend(registers_.owner(), std::move(sdma_queue_binding_factory),
                               std::move(interrupt_sink), std::move(callbacks))) {
     return false;

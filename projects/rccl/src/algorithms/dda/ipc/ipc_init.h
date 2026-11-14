@@ -14,4 +14,5 @@
 struct ncclComm;
 
 ncclResult_t ncclDdaIpcCommInit(struct ncclComm* comm);
+ncclResult_t ncclDdaIpcCommClosePeerMappings(struct ncclComm* comm);
 ncclResult_t ncclDdaIpcCommFini(struct ncclComm* comm);

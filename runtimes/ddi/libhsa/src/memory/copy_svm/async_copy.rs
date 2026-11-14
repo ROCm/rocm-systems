@@ -64,15 +64,6 @@ pub(crate) fn enqueue_copy_job(
         pending.memory.async_copy_profiling,
         AsyncCopyProfiling::Enabled
     );
-    let host_clock = if profile_enabled
-        && tasks
-            .iter()
-            .any(|task| matches!(&task.route, AsyncCopyRoute::Host { .. }))
-    {
-        runtime.gpus.first().map(|gpu| gpu.device.clone())
-    } else {
-        None
-    };
     let worker_handles = pending.handles.clone();
     let health = pending.memory.health.clone();
     let stop = runtime.stop_workers.clone();
@@ -87,13 +78,7 @@ pub(crate) fn enqueue_copy_job(
             for task in tasks {
                 let result = if execute {
                     std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                        execute_copy_route(
-                            task.route,
-                            task.sdma_engine,
-                            profile_enabled,
-                            host_clock.as_ref(),
-                            &stop,
-                        )
+                        execute_copy_route(task.route, task.sdma_engine, profile_enabled, &stop)
                     }))
                     .unwrap_or(Err(CopyRouteFailure {
                         status: ERROR,

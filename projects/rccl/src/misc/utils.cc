@@ -284,7 +284,8 @@ void* ncclMemoryStack::allocateSpilled(struct ncclMemoryStack* me, size_t size, 
     struct Hunk* top1 = (struct Hunk*)malloc(mallocSize);
     if (top1 == nullptr) goto malloc_exhausted;
     top1->size = nextSize;
-    top1->above = nullptr;
+    // Keep any empty hunk that was too small above the new one so Destruct still frees it.
+    top1->above = top ? top->above : nullptr;
     if (top) top->above = top1;
     top = top1;
     me->topFrame.hunk = top;

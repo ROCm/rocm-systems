@@ -13,6 +13,15 @@
 //! encodings into runtime-owned objects; the individual modules document the
 //! lifetime and synchronization rules for those objects.
 
+#![cfg_attr(
+    windows,
+    allow(
+        clippy::drop_non_drop,
+        clippy::forget_non_drop,
+        clippy::zero_sized_map_values,
+        reason = "native resource owners are uninhabited without a Windows provider"
+    )
+)]
 // HSA attribute tables and generated dispatch have long functions; modules also
 // import the shared FFI catalog. Keep those two structural exceptions explicit.
 #![allow(
