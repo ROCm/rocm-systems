@@ -226,6 +226,29 @@ TEST(thread_trace_per_agent, overlapping_agent_contexts_still_conflict)
     ASSERT_EQ(rocprofiler_stop_context(ctx_a), ROCPROFILER_STATUS_SUCCESS);
 }
 
+// Device and dispatch ATT program the same per-agent SQTT hardware, so they conflict too. The
+// device context is started second, so it is rejected before it touches the hardware.
+TEST(thread_trace_per_agent, device_and_dispatch_contexts_conflict_on_shared_agent)
+{
+    ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
+    test_init();
+
+    auto agents = get_two_agents();
+    if(!agents.first) GTEST_SKIP() << "no GPU agent available";
+
+    auto agent_a      = agents.first->get_rocp_agent()->id;
+    auto dispatch_ctx = make_att_context(agent_a);
+    auto device_ctx   = rocprofiler_context_id_t{0};
+    ASSERT_EQ(rocprofiler_create_context(&device_ctx), ROCPROFILER_STATUS_SUCCESS);
+    ASSERT_EQ(rocprofiler_configure_device_thread_trace_service(
+                  device_ctx, agent_a, nullptr, 0, noop_shader_cb, rocprofiler_user_data_t{}),
+              ROCPROFILER_STATUS_SUCCESS);
+
+    ASSERT_EQ(rocprofiler_start_context(dispatch_ctx), ROCPROFILER_STATUS_SUCCESS);
+    EXPECT_EQ(rocprofiler_start_context(device_ctx), ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT);
+    ASSERT_EQ(rocprofiler_stop_context(dispatch_ctx), ROCPROFILER_STATUS_SUCCESS);
+}
+
 TEST(thread_trace_per_agent, serialization_is_scoped_to_the_contexts_agents)
 {
     ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);

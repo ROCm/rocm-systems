@@ -51,6 +51,12 @@ namespace att_no_intercept
 {
 namespace
 {
+// TODO: chunk ordering and cross-chunk stitching (chunk_completed, chunk_requested, chunk_data)
+// assume a single shader engine per agent. Multi-SE triple buffering
+// (users/gbaraldi/multiplese) numbers chunks per SE and drops the SDK's single-SE check, so
+// chunks from different SEs would be counted as one sequence and stitched together. Reject
+// multi-bit --att-shader-engine-mask for --att-no-intercept, or key this state by SE, before
+// that lands.
 void
 wait_for_prior_chunks(agent_state_t& state, uint64_t chunk_index)
 {
@@ -436,9 +442,7 @@ send_overlapping_requests(scan_context_t&             context,
         for(auto& range : ranges)
             if(range.offset_begin < offset) offset = std::max(offset, range.offset_end);
 
-        std::vector<uint8_t> ret_data{};
-        ret_data.resize(offset);
-        std::memcpy(ret_data.data(), scan_data, offset);
+        auto ret_data = std::vector<uint8_t>(scan_data, scan_data + offset);
 
         ROCP_INFO << "Request send: " << chunk_index << " with size " << ret_data.size();
 
@@ -491,6 +495,14 @@ backend_shader_data(agent_state_t&                         state,
             shader_data.chunk_index,
             shader_data.read_offset,
             shader_data.data_size);
+
+        // Still count the chunk and answer a pending request from the previous one, otherwise
+        // later chunks stall in wait_for_prior_chunks and the previous chunk never wakes up.
+        auto context        = scan_context_t{};
+        context.state       = &state;
+        context.chunk_index = shader_data.chunk_index;
+        auto no_ranges      = std::vector<trace_range_t>{};
+        send_overlapping_requests(context, nullptr, 0, no_ranges, true);
         return;
     }
 
