@@ -30,6 +30,7 @@
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/register_set.h"
 
+#include "../amdgpu_elf_test_support.h"
 #include "../amdhsa_metadata_test_util.h"
 #include "../dbi_test_util.h"
 #include "../instrumentor_test_access.h"
@@ -664,6 +665,61 @@ TEST(Instrumentor, RejectsAlignedOffsetPastLastInstruction) {
   ASSERT_FALSE(result.errors.empty());
   EXPECT_NE(result.errors.front().find("no decoded instruction"), std::string::npos)
       << "error was: " << result.errors.front();
+}
+
+TEST(Instrumentor, OnlySkipsUnreachableRdna4FunctionAlignment) {
+  constexpr auto arch = ROCJITSU_CODE_ARCH_RDNA4;
+  constexpr uint32_t end = build_s_endpgm(arch).value();
+  constexpr uint32_t nop = build_s_nop(0, arch).value();
+  constexpr uint32_t branch_into_gap = build_s_branch(0, arch).value();
+  auto decode = [&](uint32_t first, uint32_t middle, size_t first_size) {
+    auto image = test_support::make_minimal_amdgpu_elf_with_two_kernels_and_function_pointers(
+        {first, middle, nop, end}, 2, {{0, first_size}, {2, 2}});
+    const uint32_t mach = EF_AMDGPU_MACH_AMDGCN_GFX1201;
+    std::memcpy(image.data() + offsetof(Elf64_Ehdr, e_flags), &mach, sizeof(mach));
+    AmdGpuCodeObject object(image.data(), image.size());
+    auto decoder = Decoder::create(arch);
+    return BasicBlock::build(object, *decoder, arch).succeeded();
+  };
+  EXPECT_TRUE(decode(end, 0, 1));
+  EXPECT_FALSE(decode(end, 0, 2)); // v_illegal inside the first function.
+  EXPECT_FALSE(decode(nop, 0, 1)); // The first function falls through to v_illegal.
+  EXPECT_FALSE(decode(branch_into_gap, 0, 1));
+  EXPECT_FALSE(decode(end, 0xffffffffu, 1)); // Nonzero undecodable inter-function data.
+}
+
+TEST(Instrumentor, CallBeforeRdna4AlignmentRequiresANonReturningCallee) {
+  constexpr auto arch = ROCJITSU_CODE_ARCH_RDNA4;
+  constexpr uint32_t end = build_s_endpgm(arch).value();
+  constexpr uint32_t ret = build_s_setpc_b64(30, arch).value();
+  auto decode = [&](const std::vector<uint32_t> &words, size_t gap) {
+    auto image = test_support::make_minimal_amdgpu_elf_with_two_kernels_and_function_pointers(
+        words, gap + 1, {{0, gap}, {gap + 1, 1}});
+    const uint32_t mach = EF_AMDGPU_MACH_AMDGCN_GFX1201;
+    std::memcpy(image.data() + offsetof(Elf64_Ehdr, e_flags), &mach, sizeof(mach));
+    AmdGpuCodeObject object(image.data(), image.size());
+    auto decoder = Decoder::create(arch);
+    return BasicBlock::build(object, *decoder, arch).succeeded();
+  };
+  constexpr uint32_t call = build_s_call_b64(30, 1, arch).value();
+  EXPECT_TRUE(decode({call, 0, end}, 1));
+  EXPECT_FALSE(decode({call, 0, ret}, 1));
+  constexpr uint32_t swap = build_s_swappc_b64(30, 8, arch).value();
+  EXPECT_FALSE(decode({swap, 0, end}, 1)); // Unknown target.
+  for (uint32_t callee : {end, ret}) {
+    const std::vector<uint32_t> words = {build_s_getpc_b64(8, arch).value(),
+                                         0xBF88FF9Eu, // s_wait_alu
+                                         0xBE890F09u, // s_sext_i32_i16 s9, s9
+                                         build_s_add_u32(8, 8, 255, arch).value(),
+                                         36,
+                                         0xBF88FF9Eu, // s_wait_alu
+                                         0x8209FF09u,
+                                         0, // s_add_co_ci_u32 s9, s9, lit(0)
+                                         swap,
+                                         0,
+                                         callee};
+    EXPECT_EQ(decode(words, 9), callee == end);
+  }
 }
 
 TEST(Instrumentor, RejectsCodeObjectsUsingTheBranchStack) {

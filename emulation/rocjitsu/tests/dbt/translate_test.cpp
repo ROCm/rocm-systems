@@ -4278,6 +4278,38 @@ TEST(BinaryTranslatorE2E, IncompleteIndirectConsumerTranslatesWhenScopeHasNoStal
       << "an incomplete consumer must keep its dynamic transfer, not become a direct window";
 }
 
+TEST(BinaryTranslatorE2E, PreservesInstructionsBetweenRdna4PcBuilderHalves) {
+  // LLVM sign-extends GETPC before adding the displacement on RDNA4. The
+  // unrelated write between its low and high adds must survive translation.
+  const std::vector<uint32_t> words = {
+      pack_sop1(0x47, 8, 0), // s_getpc_b64 s[8:9]
+      pack_sop1(0x0f, 9, 9), // s_sext_i32_i16 s9, s9
+      pack_sop2(0, 8, 8, 255),
+      28,         // s_add_co_u32 s8, s8, 28
+      0x7e040283, // v_mov_b32 v2, 3
+      pack_sop2(4, 9, 9, 255),
+      0,                     // s_add_co_ci_u32 s9, s9, lit(0)
+      pack_sop1(0x48, 0, 8), // s_setpc_b64 s[8:9]
+      build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4).value(),
+  };
+  auto image = make_minimal_amdgpu_elf_with_descriptor_after_text(words);
+  auto header = read_elf_struct_for_test<Elf64_Ehdr>(image, 0);
+  header.e_flags = EF_AMDGPU_MACH_AMDGCN_GFX1201;
+  write_elf_struct_for_test(image, 0, header);
+  AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  BinaryTranslator translator(ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_RDNA4,
+                              EF_AMDGPU_MACH_AMDGCN_GFX1201);
+  const auto result = translator.translate(source);
+  EXPECT_FALSE(result.ok());
+  EXPECT_TRUE(std::ranges::any_of(result.diagnostics, [](const auto &diagnostic) {
+    return diagnostic.message.find("PC builder containing unrelated instructions") !=
+           std::string::npos;
+  }));
+  EXPECT_EQ(result.elf_bytes, image);
+}
+
 TEST(BinaryTranslatorE2E, IncompleteIndirectConsumerFailsClosedOnNonContiguousBuilderRange) {
   constexpr uint16_t kPcSreg = 8;
   constexpr uint16_t kBypassSreg = 10;
