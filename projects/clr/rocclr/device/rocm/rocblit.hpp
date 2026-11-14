@@ -230,7 +230,8 @@ class DmaBlitManager : public device::HostBlitManager {
   //! Pins host memory for GPU access
   amd::Memory* pinHostMemory(const void* hostMem,  //!< Host memory pointer
                              size_t pinSize,       //!< Host memory size
-                             size_t& partial       //!< Extra offset for memory alignment
+                             size_t& partial,      //!< Extra offset for memory alignment
+                             bool readOnly = false //!< GPU only reads the host memory
   ) const;
 
   //! Assits in transferring data from Host to Local or vice versa
@@ -259,7 +260,8 @@ class DmaBlitManager : public device::HostBlitManager {
                  size_t size,            //!< Transfer Size
                  bool enablePin,         //!< True when Pinning is enabled
                  bool first_tx,          //!< True for first copy
-                 BufferState& buffer     //!< State of Buffer
+                 BufferState& buffer,    //!< State of Buffer
+                 bool readOnly = false   //!< GPU only reads the host memory
   ) const;
 
   // Release Pinned host memory

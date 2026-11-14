@@ -2044,8 +2044,8 @@ typedef enum {
 } hsa_amd_memory_pool_info_t;
 
 /**
- * @brief Memory pool flag used to specify allocation directives
- *
+ * @brief Memory pool flags used to specify allocation and host-locking
+ * directives.
  */
 typedef enum hsa_amd_memory_pool_flag_s {
   /**
@@ -2074,6 +2074,12 @@ typedef enum hsa_amd_memory_pool_flag_s {
    *  ::hsa_amd_vmem_handle_create.
    */
   HSA_AMD_MEMORY_POOL_UNCACHED_FLAG = (1 << 3),
+  /**
+   *  Host-locking directive: pins the host memory
+   *  for read-only agent access. Honored only by
+   *  ::hsa_amd_memory_lock_to_pool; ignored by the allocation APIs.
+   */
+  HSA_AMD_MEMORY_POOL_LOCK_READ_ONLY_FLAG = (1 << 4),
 } hsa_amd_memory_pool_flag_t;
 
 /**
@@ -3084,8 +3090,9 @@ hsa_status_t HSA_API hsa_amd_memory_lock(void* host_ptr, size_t size,
  *
  * @param[in] pool Global memory pool owned by a CPU agent.
  *
- * @param[in] flags A bit-field that is used to specify allocation
- * directives. Reserved parameter, must be 0.
+ * @param[in] flags A bit-field of ::hsa_amd_memory_pool_flag_t directives.
+ * ::HSA_AMD_MEMORY_POOL_UNCACHED_FLAG and ::HSA_AMD_MEMORY_POOL_LOCK_READ_ONLY_FLAG
+ * are honored.
  *
  * @param[out] agent_ptr Pointer to the location where to store the new address.
  *
@@ -3105,7 +3112,7 @@ hsa_status_t HSA_API hsa_amd_memory_lock(void* host_ptr, size_t size,
  *
  * @retval ::HSA_STATUS_ERROR_INVALID_ARGUMENT @p size is 0 or @p host_ptr or
  * @p agent_ptr is NULL or @p agents not NULL but @p num_agent is 0 or @p agents
- * is NULL but @p num_agent is not 0 or flags is not 0.
+ * is NULL but @p num_agent is not 0.
  */
 hsa_status_t HSA_API hsa_amd_memory_lock_to_pool(void* host_ptr, size_t size, hsa_agent_t* agents,
                                                  int num_agent, hsa_amd_memory_pool_t pool,

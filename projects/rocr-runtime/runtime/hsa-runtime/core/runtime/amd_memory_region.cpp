@@ -622,6 +622,9 @@ hsa_status_t MemoryRegion::Lock(uint32_t num_agents, const hsa_agent_t* agents,
     local_mem_flag.ui32.CoarseGrain = 0;
     local_mem_flag.ui32.ExtendedCoherent = 0;
   }
+  if (flags & HSA_AMD_MEMORY_POOL_LOCK_READ_ONLY_FLAG) {
+    local_mem_flag.ui32.ReadOnly = 1;
+  }
 
   // Call kernel driver to register and pin the memory.
   if (owner()->driver().RegisterMemory(host_ptr, size, local_mem_flag) ==
