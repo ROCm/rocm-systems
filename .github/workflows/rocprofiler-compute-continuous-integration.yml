@@ -264,11 +264,12 @@ jobs:
 
           # rocprof-compute is tested against PyTorch 2.14. The torch wheel pins
           # the ROCm build it was made against, which pins ROCm here too.
+          # TheRock builds PyTorch for Python 3.11+ only, so Python 3.10 gets ROCm alone.
           "${ROCM_VENV}/bin/pip" install \
             --index-url "${WHEEL_INDEX_URL}" \
             --timeout 600 \
-            "torch[device-${GFX_TARGET}]==2.14.*" \
-            "rocm[libraries,profiler,devel]"
+            "torch[device-${GFX_TARGET}]==2.14.*; python_version >= '3.11'" \
+            "rocm[libraries,profiler,devel,device-${GFX_TARGET}]"
 
           "${ROCM_VENV}/bin/rocm-sdk" init
 
