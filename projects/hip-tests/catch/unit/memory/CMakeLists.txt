@@ -85,7 +85,8 @@ set(TEST_SRC
     hipMemPoolExportPointer.cc
     hipMemPoolExportToShareableHandle.cc
     hipMemPoolImportFromShareableHandle.cc
-    hipMemPoolImportPointer.cc)
+    hipMemPoolImportPointer.cc
+    hipGetSymbolSizeAddress.cc)
 
 if(HIP_PLATFORM MATCHES "amd")
   set(TEST_SRC
@@ -107,8 +108,6 @@ if(HIP_PLATFORM MATCHES "amd")
     # For windows build error occurs undefined symbol: hipPointerSetAttribute
     set(TEST_SRC ${TEST_SRC} hipPointerSetAttribute.cc)
   endif()
-else()
-  set(TEST_SRC ${TEST_SRC} hipGetSymbolSizeAddress.cc)
 endif()
 
 hip_add_exe_to_target(NAME MemoryTest1
