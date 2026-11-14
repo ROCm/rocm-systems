@@ -40,6 +40,7 @@ jobs:
             shared/amdgpu-windows-interop/wkmi
             .dvc
           sparse-checkout-cone-mode: true
+          persist-credentials: false
 
       - name: Configure MSVC and Windows SDK
         uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
