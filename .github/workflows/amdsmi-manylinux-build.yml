@@ -66,7 +66,7 @@ jobs:
           - id: rpm
             name: Build RPM Wheels (AlmaLinux 8 / manylinux_2_28)
             runs-on: ubuntu-22.04
-            container: quay.io/pypa/manylinux_2_28_x86_64
+            container: quay.io/pypa/manylinux_2_28_x86_64:latest@sha256:9555ba6c479fa69a2aa80ad1dc57154a60d562b19df159361d9379a02beb1e36
             python-bin: /opt/python/cp310-cp310/bin/python3
             os-variant: AlmaLinux8
             repair-flag: '--repair'
