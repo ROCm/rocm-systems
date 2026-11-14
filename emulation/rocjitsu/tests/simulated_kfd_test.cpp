@@ -518,6 +518,7 @@ TEST_F(SimulatedKfdTest, UserptrUsesCpuAddressIndependentOfGpuVa) {
   EXPECT_EQ(driver->close(), 0);
 }
 
+#if !defined(RJ_DISABLE_HOST_FAULT_RECOVERY)
 TEST_F(SimulatedKfdTest, PartialUserptrUnmapAndFixedReuseRetireOnlyAffectedGpuPages) {
   util::StringDiagnostic diagnostic;
   auto result = create_test_vm(diagnostic.emitter());
@@ -611,6 +612,7 @@ TEST_F(SimulatedKfdTest, PartialUserptrUnmapAndFixedReuseRetireOnlyAffectedGpuPa
   EXPECT_EQ(::mincore(cpu + 2 * kPage, kPage, &residency), 0);
   EXPECT_EQ(::munmap(cpu, 3 * kPage), 0);
 }
+#endif
 
 TEST_F(SimulatedKfdTest, AsanHeaderReplacementAndReturnPreserveSurvivingViews) {
   constexpr size_t kPage = rocjitsu::KfdProcess::kPageSize;
@@ -664,6 +666,7 @@ TEST_F(SimulatedKfdTest, AsanHeaderReplacementAndReturnPreserveSurvivingViews) {
   }
 }
 
+#if !defined(RJ_DISABLE_HOST_FAULT_RECOVERY)
 TEST_F(SimulatedKfdTest, ShortHeaderReturnRetiresTailGpuBackingAfterAddressReuse) {
   constexpr size_t kPage = rocjitsu::KfdProcess::kPageSize;
   for (uint32_t flags : {uint32_t{KFD_IOC_ALLOC_MEM_FLAGS_GTT},
@@ -852,6 +855,7 @@ TEST_F(SimulatedKfdTest, PartialFixedReplacementOfCallerVramAndGttRetiresGpuPage
     EXPECT_EQ(::munmap(cpu, 3 * kPage), 0);
   }
 }
+#endif
 
 TEST_F(SimulatedKfdTest, IpcImportRetainsBackingAcrossViewAndReleasesItOnFree) {
   util::StringDiagnostic diagnostic;
@@ -3030,6 +3034,7 @@ TEST_F(SimulatedKfdTest, TopologyDirectoryExists) {
   EXPECT_TRUE(std::filesystem::exists(path + "/nodes/1/properties"));
 }
 
+#if !defined(RJ_DISABLE_HOST_FAULT_RECOVERY)
 // begin_local_shutdown() releases parked waiters so their callers drop the driver
 // snapshot that keeps the object alive. It must do ONLY that: an earlier version
 // also marked the driver closing and poisoned every event-page slot with
@@ -3155,6 +3160,8 @@ TEST_F(SimulatedKfdTest, MemoryExceptionNamesTheFaultingGpu) {
   rj_vm_destroy(vm);
 }
 
+#endif
+
 // A page that is readable but refuses the write is a protection fault, and the
 // KFD ABI reports it in a different field than a missing page. The runtime
 // reads the two separately, so collapsing them misstates the cause.
@@ -3212,6 +3219,7 @@ TEST_F(SimulatedKfdTest, ReadOnlyPageReportsReadOnlyRatherThanNotPresent) {
   EXPECT_EQ(drv->close(), 0);
 }
 
+#if !defined(RJ_DISABLE_HOST_FAULT_RECOVERY)
 // An atomic against a mapped page that is not writable must name the cause the
 // mapping actually has. A PROT_NONE reservation -- the shape the runtime leaves
 // around an aperture -- is absent to the GPU, so reporting it as a protection
@@ -3276,6 +3284,8 @@ TEST_F(SimulatedKfdTest, MappedReservationReportsNotPresentRatherThanReadOnly) {
   munmap(raw, rocjitsu::KfdProcess::kPageSize);
   EXPECT_EQ(drv->close(), 0);
 }
+
+#endif
 
 // The reporting path must stay quiet for addresses that do resolve, or every
 // local-mode workload would raise faults for its ordinary pageable pointers.

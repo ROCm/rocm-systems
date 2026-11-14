@@ -8,6 +8,7 @@
 #include "rocjitsu/kmd/linux/host_mapping_lock.h"
 #include "rocjitsu/kmd/linux/memory_backing.h"
 #include "rocjitsu/kmd/linux/simulated_kfd.h"
+#include "rocjitsu/vm/amdgpu/legacy_address_space.h"
 #include "rocjitsu/vm/amdgpu/partitioning.h"
 #include "rocjitsu/vm/gpu_info.h"
 #include "rocjitsu/vm/plugins/plugin_loader.h"
@@ -341,6 +342,8 @@ rj_status_t rj_vm_step(rj_vm_t *vm, int *active) {
   if (vm->engine_config.num_threads != 1)
     return ROCJITSU_STATUS_UNSUPPORTED;
 
+  const amdgpu::LegacyAddressSpace::ScopedPteCache translation_cache;
+  const amdgpu::GpuVmAccessBatchGuard::ScopedCache execution_cache;
   bool any_active = vm->engine->step();
   if (vm->engine->exit_code() != 0)
     return ROCJITSU_STATUS_ERROR;
@@ -355,6 +358,8 @@ rj_status_t rj_vm_run(rj_vm_t *vm, uint64_t *ticks_executed) {
   if (!vm->soc)
     return ROCJITSU_STATUS_ERROR;
 
+  const amdgpu::LegacyAddressSpace::ScopedPteCache translation_cache;
+  const amdgpu::GpuVmAccessBatchGuard::ScopedCache execution_cache;
   auto exit = vm->engine->run();
 
   if (ticks_executed)
@@ -463,6 +468,9 @@ rj_status_t execute_impl(SimulatedKfd *driver, uint32_t process_id, rj_vm_cmd_t 
     }
   }
 
+  // Queue creation may translate GPU memory on the embedding thread. A
+  // persistent TLS cache would retain this DSO until that host thread exits.
+  const amdgpu::LegacyAddressSpace::ScopedPteCache translation_cache;
   cmd->result =
       driver->ioctl(process_id, cmd->cmd, cmd->buf, &cmd->in_mem_handle, cmd->in_proc_handle);
   cmd->shared_handle = -1;
@@ -594,18 +602,14 @@ rj_status_t rj_vm_gpu_id(rj_vm_t *vm, uint32_t *gpu_id) {
 rj_status_t rj_vm_topology_path(rj_vm_t *vm, const char **path) {
   if (!vm || !path || !vm->vm || !vm->vm->driver())
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
-  static thread_local std::string cached_path;
-  cached_path = vm->vm->driver()->topology_path();
-  *path = cached_path.c_str();
+  *path = vm->vm->driver()->topology().path().c_str();
   return ROCJITSU_STATUS_SUCCESS;
 }
 
 rj_status_t rj_vm_drm_path(rj_vm_t *vm, const char **path) {
   if (!vm || !path || !vm->vm || !vm->vm->driver())
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
-  static thread_local std::string cached_drm;
-  cached_drm = vm->vm->driver()->topology().drm_path();
-  *path = cached_drm.c_str();
+  *path = vm->vm->driver()->topology().drm_path().c_str();
   return ROCJITSU_STATUS_SUCCESS;
 }
 

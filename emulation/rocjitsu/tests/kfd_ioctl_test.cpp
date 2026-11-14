@@ -13557,6 +13557,7 @@ TEST_F(KfdIoctlTest, DriverScratchGrantRevokesBeforeFreeUnmapsBacking) {
   EXPECT_EQ(free_result, 0);
 }
 
+#if !defined(RJ_DISABLE_HOST_FAULT_RECOVERY)
 TEST_F(KfdIoctlTest, FreedFixedBoViewPermitsLaterHostIdentityReuse) {
   using rocjitsu::amdgpu::VmAccessOutcome;
   constexpr size_t kPage = 4096;
@@ -13663,6 +13664,7 @@ TEST_F(KfdIoctlTest, FreedFixedBoViewPermitsLaterHostIdentityReuse) {
   std::byte value{};
   EXPECT_EQ(access->read(userptr.va_addr, std::span(&value, 1)), VmAccessOutcome::Faulted);
 }
+#endif
 
 TEST_F(KfdIoctlTest, NewSvmHostGrantClaimsOnlyItsFreedUserptrSpan) {
   using rocjitsu::amdgpu::VmAccessOutcome;
@@ -21457,8 +21459,10 @@ TEST_P(KfdRuntimeSaveTest, PreservesQueueOwnershipAndRuntimeHeaders) {
   EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_GET_QUEUE_WAVE_STATE, &state), -EFAULT);
   state.ctl_stack_address = save_address;
   // A failed image query must not undo the caller's explicit suspension.
+#if !defined(RJ_DISABLE_HOST_FAULT_RECOVERY)
   process->unmap_pages(save_address, save.size());
   EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_GET_QUEUE_WAVE_STATE, &state), -EIO);
+#endif
   for (uint32_t xcc = 0; xcc < soc_->num_xcds(); ++xcc)
     EXPECT_TRUE(soc_->xcd(xcc)->command_processor()->queue_runtime_suspended_for_test(
         create.queue_id, driver_->local_process_id()));
@@ -21473,6 +21477,7 @@ INSTANTIATE_TEST_SUITE_P(QueueOwnership, KfdRuntimeSaveTest,
                                                               QueueSaveMode::Debugger),
                                             ::testing::Bool()));
 
+#if !defined(RJ_DISABLE_HOST_FAULT_RECOVERY)
 TEST_F(KfdIoctlTest, FailedResumeThenRuntimeSaveUsesCurrentWave) {
   constexpr uint64_t save_address = 0x600100000ULL;
   constexpr uint32_t area_size = 0x10000;
@@ -21547,6 +21552,7 @@ TEST_F(KfdIoctlTest, FailedResumeThenRuntimeSaveUsesCurrentWave) {
   EXPECT_EQ(vm_read32(save_address + end - 64 - 128 + 4, pid), wave->pc);
   EXPECT_FALSE(process->queue_snapshot_map_.at(create.queue_id).debugger_owns_cwsr);
 }
+#endif
 
 class KfdFatalTrapSaveTest : public KfdIoctlTest, public ::testing::WithParamInterface<bool> {
 protected:
@@ -28363,6 +28369,7 @@ TEST_P(KfdPendingMemorySaveTest, SnapshotDrainsRetainedLoadsBeforeCapturingRegis
   }
 }
 
+#if !defined(RJ_DISABLE_HOST_FAULT_RECOVERY)
 TEST_F(KfdIoctlTest, RuntimeSnapshotSettlesTheWaveAfterARetainedFault) {
   constexpr uint64_t kernel = 0x600000000ULL, context = 0x600100000ULL;
   constexpr uint32_t area_size = 0x10000, expected = 0x12345678;
@@ -28445,6 +28452,7 @@ TEST_F(KfdIoctlTest, RuntimeSnapshotSettlesTheWaveAfterARetainedFault) {
   EXPECT_TRUE(std::ranges::any_of(
       waves, [&](const auto &wave) { return !wave.sgprs.empty() && wave.sgprs[0] == expected; }));
 }
+#endif
 
 INSTANTIATE_TEST_SUITE_P(QueueOwners, KfdPendingMemorySaveTest,
                          ::testing::Values(PendingMemorySaveMode::Runtime,

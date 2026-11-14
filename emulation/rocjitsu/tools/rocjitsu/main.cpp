@@ -709,6 +709,13 @@ int main(int argc, char *argv[]) {
     return 1;
   }
 
+#if defined(RJ_DISABLE_INTERPOSER)
+  std::cerr << "rocjitsu: application launches require the interposer; reconfigure with "
+               "-DROCJITSU_ENABLE_INTERPOSER=ON\n";
+  cleanup_runtime_files(my_pid);
+  return 1;
+#endif
+
   std::vector<char *> application_arguments;
   for (auto &argument : parsed.value().positional)
     application_arguments.push_back(argument.data());

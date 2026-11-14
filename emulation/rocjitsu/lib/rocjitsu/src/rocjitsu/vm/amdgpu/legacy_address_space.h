@@ -239,10 +239,31 @@ struct LegacyTransferStep {
 /// real hardware where the VMID travels with each request through the memory
 /// hierarchy.
 class LegacyAddressSpace {
+  class PteCacheSet;
+  // Borrowed command-local owner; trivial TLS does not retain the library.
+  inline static thread_local std::unique_ptr<PteCacheSet> *scoped_pte_caches_ = nullptr;
+
 public:
   static constexpr uint64_t PAGE_SHIFT = simdojo::SparseMemory::PAGE_SHIFT;
   static constexpr uint64_t PAGE_SIZE = simdojo::SparseMemory::PAGE_SIZE;
   static constexpr uint64_t PAGE_MASK = PAGE_SIZE - 1;
+
+  /// @brief Bound host-command translations to the call instead of the host thread.
+  /// @details Worker threads keep their persistent cache outside this scope.
+  /// Nested commands restore the previous owner, including during unwinding.
+  class ScopedPteCache {
+  public:
+    ScopedPteCache() : previous_(std::exchange(scoped_pte_caches_, &caches_)) {}
+    ~ScopedPteCache() { scoped_pte_caches_ = previous_; }
+    ScopedPteCache(const ScopedPteCache &) = delete;
+    ScopedPteCache &operator=(const ScopedPteCache &) = delete;
+
+  private:
+    // Allocated only when this command translates mapped GPU memory.
+    std::unique_ptr<PteCacheSet> caches_;
+    // Borrowed enclosing command owner, or null for ordinary worker caching.
+    std::unique_ptr<PteCacheSet> *previous_;
+  };
 
   class PageTableRequestGuard {
   public:
@@ -2410,8 +2431,9 @@ private:
   /// access that caused it, which is the whole problem: this class turns other
   /// components' bugs into host crashes.
   ///
-  /// Probe through the guarded host-access path rather than trusting the
-  /// address. This reports failure for a hole, for a PROT_NONE reservation --
+  /// Recovery-enabled builds probe through the guarded host-access path;
+  /// otherwise consult host mapping metadata. This reports failure for a hole,
+  /// for a PROT_NONE reservation --
   /// the shape the ROCm runtime leaves behind when it reserves a VA aperture,
   /// and the shape an unresolved GPU VA most often lands in -- and for an
   /// address never mapped at all. It also works when a container security
@@ -2428,11 +2450,11 @@ private:
   static bool identity_page_is_accessible(const uint8_t *page) {
     if (page == nullptr)
       return false;
-#if defined(RJ_GPU_MEMORY_WITH_TSAN)
-    // A probe is metadata-only. Touching an application byte merely to ask
-    // whether its VMA is readable creates an unsynchronized read in TSan when
-    // the host is still initializing that allocation. Consult the kernel's
-    // mapping metadata instead; the actual GPU access remains guarded.
+#if defined(RJ_GPU_MEMORY_WITH_TSAN) || defined(RJ_DISABLE_HOST_FAULT_RECOVERY)
+    // Without recovery, an availability probe must not dereference an unknown
+    // page. TSan also requires a metadata-only probe: touching an application
+    // byte races host initialization. Actual transfers use the configured
+    // host-access policy.
     const PageWritability writability = host_page_writability(page);
     return writability == PageWritability::Writable || writability == PageWritability::ReadOnly;
 #else
@@ -2749,12 +2771,17 @@ private:
     std::array<PteCache, kEntryCount> entries;
   };
 
-  /// @brief This thread's PTE cache, shared by every with_page_mapping caller.
+  /// @brief The command's PTE cache, or this worker thread's persistent cache.
   /// @details glibc carves static TLS out of every thread's stack, including
   /// application threads that never touch emulated memory, so the cache lives
   /// on the heap. A thread_local block per template instantiation once made
   /// glibc refuse a 64 KiB thread stack in any process that preloads rocJITsu.
   static PteCacheSet &thread_pte_caches() {
+    if (scoped_pte_caches_) {
+      if (!*scoped_pte_caches_)
+        *scoped_pte_caches_ = std::make_unique<PteCacheSet>();
+      return **scoped_pte_caches_;
+    }
     thread_local std::unique_ptr<PteCacheSet> caches;
     if (!caches)
       caches = std::make_unique<PteCacheSet>();
