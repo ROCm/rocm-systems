@@ -7,7 +7,6 @@
 #include <cstring>
 #include <numeric>
 #include <vector>
-
 #include <hip_test_common.hh>
 #include <hip_test_checkers.hh>
 #include <hip/hip_ext.h>
