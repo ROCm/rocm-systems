@@ -185,6 +185,7 @@ set(TEST_SRC
     hipMemPrefetchAsync.cc
     hipMemPrefetchBatchAsync.cc
     hipMemGetInfo.cc
+    hipMallocFailure_test.cc
     hipFree.cc
     hipFreeArray.cc
     hipHostFree.cc
