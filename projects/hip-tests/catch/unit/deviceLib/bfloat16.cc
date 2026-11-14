@@ -11,6 +11,9 @@
 #include <memory>
 #include <limits>
 #include <algorithm>
+#include <climits>
+#include <cstdint>
+#include <type_traits>
 
 // Struct used to generate floats from combination of various componenets
 union float_holder {
@@ -1543,4 +1546,331 @@ HIP_TEST_CASE(Unit_bf162_floor_ceil) {
 
   HIP_CHECK(hipFree(d_in));
   HIP_CHECK(hipFree(d_out));
+}
+// Integer to bfloat16 conversions must round once; exact bits catch double rounding.
+struct BF16LLVector {
+  long long val;
+  unsigned short bits;
+};
+struct BF16ULLVector {
+  unsigned long long val;
+  unsigned short bits;
+};
+struct BF16UintVector {
+  unsigned int val;
+  unsigned short bits;
+};
+struct BF16IntVector {
+  int val;
+  unsigned short bits;
+};
+struct BF16ShortVector {
+  short val;
+  unsigned short bits;
+};
+struct BF16UshortVector {
+  unsigned short val;
+  unsigned short bits;
+};
+
+const BF16LLVector kBF16LLVectors[] = {
+    {16973823LL, 0x4b81},  // one below a tie
+    {16973824LL, 0x4b82},  // exact tie, rounds to even mantissa
+    {16973825LL, 0x4b82},  // one above a tie
+    {16842752LL, 0x4b80},  // exact tie, rounds down to even mantissa
+    {-16973823LL, 0xcb81},
+    {INT64_MIN, 0xdf00},
+    {INT64_MAX, 0x5f00},
+    {(1LL << 60) + (1LL << 52) + 1, 0x5d81},  // +1 survives only without
+                                              // a float round-trip (double rounding trap)
+    {(1LL << 24) + 1, 0x4b80},                // dropped bit below the float range
+    {1LL, 0x3f80},
+    {0LL, 0x0000},
+};
+
+const BF16ULLVector kBF16ULLVectors[] = {
+    {16973823ULL, 0x4b81},  {16973824ULL, 0x4b82},      {16973825ULL, 0x4b82}, {UINT64_MAX, 0x5f80},
+    {(1ULL << 63), 0x5f00}, {(1ULL << 24) + 1, 0x4b80}, {1ULL, 0x3f80},        {0ULL, 0x0000},
+};
+
+const BF16UintVector kBF16UintVectors[] = {
+    {16842753U, 0x4b81},
+    {UINT32_MAX, 0x4f80},
+    {(1U << 24) + 1U, 0x4b80},
+};
+
+const BF16IntVector kBF16IntVectors[] = {
+    {16842753, 0x4b81},  {-16842753, 0xcb81},     {INT32_MIN, 0xcf00},
+    {INT32_MAX, 0x4f00}, {(1 << 24) + 1, 0x4b80},
+};
+
+const BF16ShortVector kBF16ShortVectors[] = {
+    {32767, 0x4700},  // one below a binade boundary
+    {32704, 0x4700},  // exact tie, rounds to even mantissa
+    {-32768, 0xc700}, {1, 0x3f80}, {0, 0x0000},
+};
+
+const BF16UshortVector kBF16UshortVectors[] = {
+    {65535, 0x4780}, {65408, 0x4780},  // exact tie, rounds to even mantissa
+    {33408, 0x4702},                   // exact tie, rounds down to even mantissa
+    {1, 0x3f80},     {0, 0x0000},
+};
+
+__global__ void bf16_ll_conv_bits(const BF16LLVector* in, unsigned short* res, size_t size) {
+  const auto i = blockIdx.x * blockDim.x + threadIdx.x;
+  if (i < size) {
+    __hip_bfloat16 constructed(in[i].val);
+    __hip_bfloat16 assigned;
+    assigned = in[i].val;
+    res[3 * i + 0] = __bfloat16_as_ushort(constructed);
+    res[3 * i + 1] = __bfloat16_as_ushort(__ll2bfloat16_rn(in[i].val));
+    res[3 * i + 2] = __bfloat16_as_ushort(assigned);
+  }
+}
+
+__global__ void bf16_ull_conv_bits(const BF16ULLVector* in, unsigned short* res, size_t size) {
+  const auto i = blockIdx.x * blockDim.x + threadIdx.x;
+  if (i < size) {
+    __hip_bfloat16 constructed(in[i].val);
+    __hip_bfloat16 assigned;
+    assigned = in[i].val;
+    res[3 * i + 0] = __bfloat16_as_ushort(constructed);
+    res[3 * i + 1] = __bfloat16_as_ushort(__ull2bfloat16_rn(in[i].val));
+    res[3 * i + 2] = __bfloat16_as_ushort(assigned);
+  }
+}
+
+__global__ void bf16_uint_conv_bits(const BF16UintVector* in, unsigned short* res, size_t size) {
+  const auto i = blockIdx.x * blockDim.x + threadIdx.x;
+  if (i < size) {
+    __hip_bfloat16 constructed(in[i].val);
+    __hip_bfloat16 assigned;
+    assigned = in[i].val;
+    res[3 * i + 0] = __bfloat16_as_ushort(constructed);
+    res[3 * i + 1] = __bfloat16_as_ushort(__uint2bfloat16_rn(in[i].val));
+    res[3 * i + 2] = __bfloat16_as_ushort(assigned);
+  }
+}
+
+__global__ void bf16_int_conv_bits(const BF16IntVector* in, unsigned short* res, size_t size) {
+  const auto i = blockIdx.x * blockDim.x + threadIdx.x;
+  if (i < size) {
+    __hip_bfloat16 constructed(in[i].val);
+    __hip_bfloat16 assigned;
+    assigned = in[i].val;
+    res[3 * i + 0] = __bfloat16_as_ushort(constructed);
+    res[3 * i + 1] = __bfloat16_as_ushort(__int2bfloat16_rn(in[i].val));
+    res[3 * i + 2] = __bfloat16_as_ushort(assigned);
+  }
+}
+
+__global__ void bf16_long_conv_bits(const long long* in, unsigned short* res, size_t size) {
+  const auto i = blockIdx.x * blockDim.x + threadIdx.x;
+  if (i < size) {
+    const long v = static_cast<long>(in[i]);
+    __hip_bfloat16 assigned;
+    assigned = v;
+    res[2 * i + 0] = __bfloat16_as_ushort(__hip_bfloat16(v));
+    res[2 * i + 1] = __bfloat16_as_ushort(assigned);
+  }
+}
+
+__global__ void bf16_ulong_conv_bits(const unsigned long long* in, unsigned short* res,
+                                     size_t size) {
+  const auto i = blockIdx.x * blockDim.x + threadIdx.x;
+  if (i < size) {
+    const unsigned long v = static_cast<unsigned long>(in[i]);
+    __hip_bfloat16 assigned;
+    assigned = v;
+    res[2 * i + 0] = __bfloat16_as_ushort(__hip_bfloat16(v));
+    res[2 * i + 1] = __bfloat16_as_ushort(assigned);
+  }
+}
+
+__global__ void bf16_short_conv_bits(const BF16ShortVector* in, unsigned short* res, size_t size) {
+  const auto i = blockIdx.x * blockDim.x + threadIdx.x;
+  if (i < size) {
+    __hip_bfloat16 constructed(in[i].val);
+    __hip_bfloat16 assigned;
+    assigned = in[i].val;
+    res[3 * i + 0] = __bfloat16_as_ushort(constructed);
+    res[3 * i + 1] = __bfloat16_as_ushort(__short2bfloat16_rn(in[i].val));
+    res[3 * i + 2] = __bfloat16_as_ushort(assigned);
+  }
+}
+
+__global__ void bf16_ushort_conv_bits(const BF16UshortVector* in, unsigned short* res,
+                                      size_t size) {
+  const auto i = blockIdx.x * blockDim.x + threadIdx.x;
+  if (i < size) {
+    __hip_bfloat16 constructed(in[i].val);
+    __hip_bfloat16 assigned;
+    assigned = in[i].val;
+    res[3 * i + 0] = __bfloat16_as_ushort(constructed);
+    res[3 * i + 1] = __bfloat16_as_ushort(__ushort2bfloat16_rn(in[i].val));
+    res[3 * i + 2] = __bfloat16_as_ushort(assigned);
+  }
+}
+
+template <typename VectorT>
+static void checkConversionBits(const std::vector<VectorT>& in,
+                                const std::vector<unsigned short>& res) {
+  for (size_t i = 0; i < in.size(); i++) {
+    INFO("Input: " << in[i].val);
+    REQUIRE(res[3 * i + 0] == in[i].bits);  // constructor
+    REQUIRE(res[3 * i + 1] == in[i].bits);  // intrinsic
+    REQUIRE(res[3 * i + 2] == in[i].bits);  // operator=
+  }
+}
+
+template <typename VectorT> static void runConversionBitsTest(const VectorT* table, size_t size) {
+  const size_t out_size = 3 * size;
+  std::vector<unsigned short> h_res(out_size, 0xAAAA);
+
+  for (size_t i = 0; i < size; i++) {
+    __hip_bfloat16 constructed(table[i].val);
+    __hip_bfloat16 assigned;
+    assigned = table[i].val;
+    unsigned short intr;
+    if constexpr (std::is_same_v<VectorT, BF16LLVector>) {
+      intr = __bfloat16_as_ushort(__ll2bfloat16_rn(table[i].val));
+    } else if constexpr (std::is_same_v<VectorT, BF16ULLVector>) {
+      intr = __bfloat16_as_ushort(__ull2bfloat16_rn(table[i].val));
+    } else if constexpr (std::is_same_v<VectorT, BF16IntVector>) {
+      intr = __bfloat16_as_ushort(__int2bfloat16_rn(table[i].val));
+    } else if constexpr (std::is_same_v<VectorT, BF16ShortVector>) {
+      intr = __bfloat16_as_ushort(__short2bfloat16_rn(table[i].val));
+    } else if constexpr (std::is_same_v<VectorT, BF16UshortVector>) {
+      intr = __bfloat16_as_ushort(__ushort2bfloat16_rn(table[i].val));
+    } else {
+      intr = __bfloat16_as_ushort(__uint2bfloat16_rn(table[i].val));
+    }
+    h_res[3 * i + 0] = __bfloat16_as_ushort(constructed);
+    h_res[3 * i + 1] = intr;
+    h_res[3 * i + 2] = __bfloat16_as_ushort(assigned);
+  }
+  checkConversionBits(std::vector<VectorT>(table, table + size), h_res);
+
+  VectorT* d_in;
+  unsigned short* d_res;
+  HIP_CHECK(hipMalloc(&d_in, sizeof(VectorT) * size));
+  HIP_CHECK(hipMalloc(&d_res, sizeof(unsigned short) * out_size));
+  HIP_CHECK(hipMemcpy(d_in, table, sizeof(VectorT) * size, hipMemcpyHostToDevice));
+
+  if constexpr (std::is_same_v<VectorT, BF16LLVector>) {
+    bf16_ll_conv_bits<<<1, size>>>(d_in, d_res, size);
+  } else if constexpr (std::is_same_v<VectorT, BF16ULLVector>) {
+    bf16_ull_conv_bits<<<1, size>>>(d_in, d_res, size);
+  } else if constexpr (std::is_same_v<VectorT, BF16IntVector>) {
+    bf16_int_conv_bits<<<1, size>>>(d_in, d_res, size);
+  } else if constexpr (std::is_same_v<VectorT, BF16ShortVector>) {
+    bf16_short_conv_bits<<<1, size>>>(d_in, d_res, size);
+  } else if constexpr (std::is_same_v<VectorT, BF16UshortVector>) {
+    bf16_ushort_conv_bits<<<1, size>>>(d_in, d_res, size);
+  } else {
+    bf16_uint_conv_bits<<<1, size>>>(d_in, d_res, size);
+  }
+  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(
+      hipMemcpy(h_res.data(), d_res, sizeof(unsigned short) * out_size, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipFree(d_in));
+  HIP_CHECK(hipFree(d_res));
+  checkConversionBits(std::vector<VectorT>(table, table + size), h_res);
+}
+
+HIP_TEST_CASE(Unit_bf16_integer_conversion_bits) {
+  SECTION("long long") {
+    runConversionBitsTest(kBF16LLVectors, sizeof(kBF16LLVectors) / sizeof(kBF16LLVectors[0]));
+  }
+  SECTION("unsigned long long") {
+    runConversionBitsTest(kBF16ULLVectors, sizeof(kBF16ULLVectors) / sizeof(kBF16ULLVectors[0]));
+  }
+  SECTION("unsigned int") {
+    runConversionBitsTest(kBF16UintVectors, sizeof(kBF16UintVectors) / sizeof(kBF16UintVectors[0]));
+  }
+  SECTION("int") {
+    runConversionBitsTest(kBF16IntVectors, sizeof(kBF16IntVectors) / sizeof(kBF16IntVectors[0]));
+  }
+  SECTION("long and unsigned long") {
+    std::vector<long long> s_in{16973823LL, (1LL << 24) + 1};
+    std::vector<unsigned short> s_exp{0x4b81, 0x4b80};
+    std::vector<unsigned long long> u_in{16973823ULL, (1ULL << 24) + 1};
+    std::vector<unsigned short> u_exp{0x4b81, 0x4b80};
+#if ULONG_MAX > 0xFFFFFFFFUL  // LP64
+    s_in.insert(s_in.end(), {-16973823LL, -1LL, INT64_MIN, INT64_MAX});
+    s_exp.insert(s_exp.end(), {0xcb81, 0xbf80, 0xdf00, 0x5f00});
+    u_in.insert(u_in.end(), {(1ULL << 63), UINT64_MAX});
+    u_exp.insert(u_exp.end(), {0x5f00, 0x5f80});
+#endif
+    const size_t s_n = s_in.size();
+    const size_t u_n = u_in.size();
+
+    std::vector<unsigned short> h_s(2 * s_n, 0xAAAA);
+    for (size_t i = 0; i < s_n; i++) {
+      const long v = static_cast<long>(s_in[i]);
+      __hip_bfloat16 assigned;
+      assigned = v;
+      h_s[2 * i + 0] = __bfloat16_as_ushort(__hip_bfloat16(v));
+      h_s[2 * i + 1] = __bfloat16_as_ushort(assigned);
+    }
+    for (size_t i = 0; i < s_n; i++) {
+      INFO("long Input: " << s_in[i]);
+      REQUIRE(h_s[2 * i + 0] == s_exp[i]);
+      REQUIRE(h_s[2 * i + 1] == s_exp[i]);
+    }
+
+    std::vector<unsigned short> h_u(2 * u_n, 0xAAAA);
+    for (size_t i = 0; i < u_n; i++) {
+      const unsigned long v = static_cast<unsigned long>(u_in[i]);
+      __hip_bfloat16 assigned;
+      assigned = v;
+      h_u[2 * i + 0] = __bfloat16_as_ushort(__hip_bfloat16(v));
+      h_u[2 * i + 1] = __bfloat16_as_ushort(assigned);
+    }
+    for (size_t i = 0; i < u_n; i++) {
+      INFO("unsigned long Input: " << u_in[i]);
+      REQUIRE(h_u[2 * i + 0] == u_exp[i]);
+      REQUIRE(h_u[2 * i + 1] == u_exp[i]);
+    }
+
+    long long* d_s;
+    unsigned short* d_rs;
+    HIP_CHECK(hipMalloc(&d_s, sizeof(long long) * s_n));
+    HIP_CHECK(hipMalloc(&d_rs, sizeof(unsigned short) * 2 * s_n));
+    HIP_CHECK(hipMemcpy(d_s, s_in.data(), sizeof(long long) * s_n, hipMemcpyHostToDevice));
+    bf16_long_conv_bits<<<1, s_n>>>(d_s, d_rs, s_n);
+    HIP_CHECK(hipGetLastError());
+    HIP_CHECK(hipMemcpy(h_s.data(), d_rs, sizeof(unsigned short) * 2 * s_n, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipFree(d_s));
+    HIP_CHECK(hipFree(d_rs));
+    for (size_t i = 0; i < s_n; i++) {
+      INFO("long Input: " << s_in[i]);
+      REQUIRE(h_s[2 * i + 0] == s_exp[i]);
+      REQUIRE(h_s[2 * i + 1] == s_exp[i]);
+    }
+
+    unsigned long long* d_u;
+    unsigned short* d_ru;
+    HIP_CHECK(hipMalloc(&d_u, sizeof(unsigned long long) * u_n));
+    HIP_CHECK(hipMalloc(&d_ru, sizeof(unsigned short) * 2 * u_n));
+    HIP_CHECK(hipMemcpy(d_u, u_in.data(), sizeof(unsigned long long) * u_n, hipMemcpyHostToDevice));
+    bf16_ulong_conv_bits<<<1, u_n>>>(d_u, d_ru, u_n);
+    HIP_CHECK(hipGetLastError());
+    HIP_CHECK(hipMemcpy(h_u.data(), d_ru, sizeof(unsigned short) * 2 * u_n, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipFree(d_u));
+    HIP_CHECK(hipFree(d_ru));
+    for (size_t i = 0; i < u_n; i++) {
+      INFO("unsigned long Input: " << u_in[i]);
+      REQUIRE(h_u[2 * i + 0] == u_exp[i]);
+      REQUIRE(h_u[2 * i + 1] == u_exp[i]);
+    }
+  }
+  SECTION("short") {
+    runConversionBitsTest(kBF16ShortVectors,
+                          sizeof(kBF16ShortVectors) / sizeof(kBF16ShortVectors[0]));
+  }
+  SECTION("unsigned short") {
+    runConversionBitsTest(kBF16UshortVectors,
+                          sizeof(kBF16UshortVectors) / sizeof(kBF16UshortVectors[0]));
+  }
 }
