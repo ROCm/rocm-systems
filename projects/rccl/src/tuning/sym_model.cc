@@ -96,9 +96,12 @@ static int rcclSymkCalculateWarps(struct ncclTuningInput_t* const inputs, enum n
   bool isLsa = ncclSymkLsaKernelMask() >> kernelId & 1;
   // GIN RS carves its pipeline roles out of blockDim.x and symCheckTmaLaunch() requires the full launch
   // for Tma, so both keep it. The GIN+LSA AG kernel sizes itself from ncclSymkMaxThreads.
-  bool fullWidth = ((ncclSymkGinKernelMask() & ~ncclSymkAGKernelMask()) | ncclSymkTmaKernelMask()) >> kernelId & 1;
+  bool ginRs = (ncclSymkGinKernelMask() & ~ncclSymkAGKernelMask()) >> kernelId & 1;
+  bool tma = ncclSymkTmaKernelMask() >> kernelId & 1;
   int nThreads = ncclSymkMaxThreads;
-  if (fullWidth) {
+  if (ginRs) {
+    nThreads = ncclSymkGinRsThreads(comm->WarpSize);
+  } else if (tma) {
     nThreads = ncclSymkWarpsPerBlock * comm->WarpSize;
   } else if (ncclSymkIsGfx950(comm) && isLsa) {
     // The width tuning is fitted to the gfx950 LSA kernels.

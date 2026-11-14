@@ -52,6 +52,20 @@ constexpr __host__ __device__ int ncclSymkAgHierGroupBlocks(int nBlocks, int nGr
 // selects an appropriate value for the architecture and method of transfer (TDM or non-TDM).
 constexpr int ncclSymkWarpsPerBlock = 16;
 
+// [RCCL] GIN ReduceScatter launch width. Debug builds compile it at -O1, where the f16 kernel needs more VGPRs
+// than a 1024-thread wave64 block allows, so they launch it at ncclSymkMaxThreads and bound it to that.
+constexpr __host__ __device__ int ncclSymkGinRsThreads(int warpSize) {
+#ifdef RCCL_SYMK_GIN_RS_DEBUG_THREADS
+  if (warpSize == 64) return ncclSymkMaxThreads;
+#endif
+  return ncclSymkWarpsPerBlock * warpSize;
+}
+#ifdef RCCL_SYMK_GIN_RS_DEBUG_THREADS
+#define RCCL_SYMK_GIN_RS_LAUNCH_BOUNDS __launch_bounds__(ncclSymkGinRsThreads(WARP_SIZE))
+#else
+#define RCCL_SYMK_GIN_RS_LAUNCH_BOUNDS
+#endif
+
 // Widest LL block the gfx950 symmetric kernels launch, worth 5 to 10% at the sizes where it removes an
 // epoch, since an LL epoch carries one element per thread. This bounds the shared slot buffer the
 // host allocates; the kernels take their slot stride from blockDim.

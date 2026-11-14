@@ -193,7 +193,7 @@ def kernel_cname_profile(k):
 
 def instantiate(k, profile):
   form_red_ty = (
-    "__global__ void {cname}(ncclSymkDevWorkArgs4K NCCL_GRID_CONSTANT const args4K) {{\n"
+    "__global__ void {bounds}{cname}(ncclSymkDevWorkArgs4K NCCL_GRID_CONSTANT const args4K) {{\n"
     "{start}"
     "  ncclSymkRun_{id}<{prof}, {red}, {ty}>(&args4K.args);\n"
     "{stop}"
@@ -212,9 +212,10 @@ def instantiate(k, profile):
   prof = 'true' if profile else 'false'
   start = '  ncclSymkProfilerStart(&args4K.args);\n' if profile else ''
   stop  = '  ncclSymkProfilerStop(&args4K.args);\n' if profile else ''
+  bounds = 'RCCL_SYMK_GIN_RS_LAUNCH_BOUNDS ' if k.coll == 'ReduceScatter' and k.algo in gin_algos else ''
   if k.coll in reductions:
     inst = form_red_ty.format(cname=cname, id=id, prof=prof, red=red_to_Func[k.red], ty=ty_to_cxxtype[k.ty],
-                              start=start, stop=stop)
+                              start=start, stop=stop, bounds=bounds)
   else:
     inst = form.format(cname=cname, id=id, prof=prof, start=start, stop=stop)
   return inst
