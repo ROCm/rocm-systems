@@ -125,8 +125,7 @@ __host__ void SdmaImpl::sdmaHostInit(int pe, int pod_sz, int prank,
   const int remotePeers = shm_size - local_size;
 
   uint32_t queuesBefore = 0;
-  int status = kSdmaDisabledByEnv;
-  if (sdmaEnabled) {
+  if (status == kSdmaReady) {
     LOG_INFO("SDMA init with threshold=%zu, channels=%d, pod_size=%d (%d on this host)",
              sdmaThreshold, numChannels, shm_size, local_size);
 
@@ -180,7 +179,7 @@ __host__ void SdmaImpl::sdmaHostInit(int pe, int pod_sz, int prank,
 
   switch (agreed.decision) {
     case SdmaDecision::kAbortBadChannels:
-      LOG_ERROR_ABORT("SDMA: ROCSHMEM_SDMA_NUM_CHANNELS is out of range [1, 8] on local rank(s) "
+      LOG_ERROR_ABORT("SDMA: ROCSHMEM_SDMA_NUM_CHANNELS is out of range [1, 8] on pod rank(s) "
                       "%s of %d", agreed.ranks.c_str(), shm_size);
       return;
     case SdmaDecision::kCommit:
