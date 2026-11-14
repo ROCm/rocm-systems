@@ -175,10 +175,10 @@ class AMDSMICommands(
 
             if len(self.cpu_handles) == 0 and len(self.core_handles) == 0:
                 # No CPU's found post amd_hsmp driver initialization
-                logging.error(
+                logging.warning(
                     "Unable to detect any CPU devices, check amd_hsmp (or) hsmp_acpi version and module status (sudo modprobe amd_hsmp (or) sudo modprobe hsmp_acpi)"
                 )
-                exit_flag = True
+                exit_flag = exit_flag or not self.device_handles_gpus
 
         if exit_flag:
             version_args = argparse.Namespace()

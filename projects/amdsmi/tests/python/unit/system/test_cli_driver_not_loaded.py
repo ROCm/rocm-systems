@@ -181,6 +181,56 @@ def _parse(argv, **state):
         return parser.parse_args(list(argv))
 
 
+class TestPartialCpuDiscovery(unittest.TestCase):
+    def _construct(self, gpu_count, cpu_handles=(), core_handles=()):
+        import amdsmi_commands
+
+        helpers = mock.Mock()
+        helpers.is_amdgpu_initialized.return_value = True
+        helpers.is_amd_hsmp_initialized.return_value = True
+        helpers.is_ainic_initialized.return_value = False
+        helpers.is_brcm_nic_initialized.return_value = False
+        helpers.is_brcm_switch_initialized.return_value = False
+        gpu_handles = list(range(gpu_count))
+        helpers.get_gpu_handles.return_value = gpu_handles
+        with contextlib.ExitStack() as patches:
+            patches.enter_context(mock.patch.object(amdsmi_commands, "AMDSMILogger"))
+            patches.enter_context(mock.patch.object(amdsmi_commands.AMDSMICommands, "version"))
+            patches.enter_context(
+                mock.patch.multiple(
+                    amdsmi_commands.amdsmi_interface,
+                    amdsmi_get_processor_handles=mock.Mock(return_value=gpu_handles),
+                    amdsmi_get_node_handle=mock.Mock(return_value=None),
+                    amdsmi_get_cpu_handles=mock.Mock(
+                        return_value={"processor_handles": list(cpu_handles)}
+                    ),
+                    amdsmi_get_cpucore_handles=mock.Mock(return_value=list(core_handles)),
+                )
+            )
+            return amdsmi_commands.AMDSMICommands(helpers=helpers)
+
+    def test_missing_cpus_do_not_hide_eight_available_gpus(self):
+        with self.assertLogs(level="WARNING") as logs:
+            commands = self._construct(8)
+        self.assertEqual(len(commands.device_handles_gpus), 8)
+        self.assertEqual(commands.cpu_handles, [])
+        self.assertEqual(commands.core_handles, [])
+        self.assertTrue(any("CPU devices" in line for line in logs.output))
+        self.assertFalse(any("ERROR" in line for line in logs.output))
+
+    def test_cpu_socket_or_core_handles_are_kept(self):
+        for cpus, cores in ((["socket0"], []), ([], ["core0"])):
+            with self.subTest(cpus=cpus, cores=cores):
+                commands = self._construct(8, cpus, cores)
+                self.assertEqual(commands.cpu_handles, cpus)
+                self.assertEqual(commands.core_handles, cores)
+
+    def test_no_gpu_or_cpu_handles_still_fails(self):
+        with self.assertLogs(level="WARNING"), self.assertRaises(SystemExit) as caught:
+            self._construct(0)
+        self.assertEqual(caught.exception.code, int(cli_exc.AmdSmiExitCode.DEVICE_NOT_FOUND))
+
+
 class TestMissingDriverErrors(unittest.TestCase):
     def _error(self, *argv, **state):
         with self.assertRaises(cli_exc.AmdSmiException) as ctx:
