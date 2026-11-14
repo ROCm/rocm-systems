@@ -1,0 +1,16 @@
+# Copyright Advanced Micro Devices, Inc. SPDX-License-Identifier: MIT
+#
+# CMake package for the ROCm trace contract headers.
+#
+# Usage:
+#     find_package(rocm-trace CONFIG REQUIRED)
+#     target_link_libraries(mytool PRIVATE rocm::trace_values)  # names, GUIDs, keywords, levels
+#     target_link_libraries(myruntime PRIVATE rocm::trace)      # adds the enable check
+#
+# rocm::trace needs a TraceLogging implementation, which the consumer links.
+
+@PACKAGE_INIT@
+
+include("${CMAKE_CURRENT_LIST_DIR}/rocm-trace-targets.cmake")
+
+check_required_components(rocm-trace)
