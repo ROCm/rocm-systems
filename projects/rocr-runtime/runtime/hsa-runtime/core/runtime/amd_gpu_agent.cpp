@@ -3496,8 +3496,19 @@ hsa_status_t GpuAgent::UpdateTrapHandlerWithPCS(pcs_sampling_data_t* pcs_hosttra
 
   assert(core::Runtime::runtime_singleton_->KfdVersion().supports_exception_debugging);
 
-  AssembleShader("TrapHandlerKfdExceptions", AssembleTarget::ISA, trap_code_buf_,
-                 trap_code_buf_size_);
+  // AssembleShader() always allocates a new buffer. The trap handler blob does not depend on
+  // the PC sampling buffers, so reuse the one BindTrapHandler() already assembled rather than
+  // leaking an executable allocation on every PC sampling create/destroy.
+  if (trap_code_buf_ == nullptr)
+    AssembleShader("TrapHandlerKfdExceptions", AssembleTarget::ISA, trap_code_buf_,
+                   trap_code_buf_size_);
+
+  // Set when this call allocates the region, so a failure below does not release a region that
+  // KFD is still advertising as the second-level TMA.
+  bool region_allocated_here = false;
+
+  // Region to release once KFD has been told to stop using it.
+  void* stale_tma_region = nullptr;
 
   /* pcs_hosttrap_buffers and pcs_stochastic_buffers are NULL until PC sampling is enabled */
   if (pcs_hosttrap_buffers || pcs_stochastic_buffers) {
@@ -3517,6 +3528,7 @@ hsa_status_t GpuAgent::UpdateTrapHandlerWithPCS(pcs_sampling_data_t* pcs_hosttra
     if (!trap_handler_tma_region_) {
       trap_handler_tma_region_ = (uint64_t*)finegrain_allocator()(sizeof(pcs_tma2_t), 0);
       if (trap_handler_tma_region_ == nullptr) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+      region_allocated_here = true;
 
       // NearestCpuAgent owns pool returned system_allocator()
       auto cpuAgent = GetNearestCpuAgent()->public_handle();
@@ -3529,21 +3541,32 @@ hsa_status_t GpuAgent::UpdateTrapHandlerWithPCS(pcs_sampling_data_t* pcs_hosttra
     /* On non-large BAR systems, we may not be able to access device memory, so do a DmaCopy */
     if (DmaCopy(trap_handler_tma_region_, tma_region_host, sizeof(pcs_tma2_t)) !=
         HSA_STATUS_SUCCESS) {
-      finegrain_deallocator()(trap_handler_tma_region_);
-      trap_handler_tma_region_ = nullptr;
+      // A region carried over from an earlier call is still recorded in the first-level TMA, so
+      // it may only be released once KFD has been told to stop using it.
+      if (region_allocated_here) {
+        finegrain_deallocator()(trap_handler_tma_region_);
+        trap_handler_tma_region_ = nullptr;
+      }
       return HSA_STATUS_ERROR;
     }
 
     tma_size = sizeof(pcs_tma2_t);
     tma_addr = trap_handler_tma_region_;
   } else if (trap_handler_tma_region_) {
-    finegrain_deallocator()(trap_handler_tma_region_);
+    stale_tma_region = trap_handler_tma_region_;
     trap_handler_tma_region_ = NULL;
   }
 
   // Bind the trap handler to this node.
-  return driver().SetTrapHandler(node_id(), trap_code_buf_, trap_code_buf_size_, tma_addr,
-                                 tma_size);
+  hsa_status_t trap_err =
+      driver().SetTrapHandler(node_id(), trap_code_buf_, trap_code_buf_size_, tma_addr, tma_size);
+
+  // KFD records this pointer as the second-level TMA, which the first-level trap handler
+  // dereferences. Release it only after the bind above has cleared that record, otherwise a wave
+  // trapping in between reads freed memory.
+  if (stale_tma_region) finegrain_deallocator()(stale_tma_region);
+
+  return trap_err;
 }
 
 void GpuAgent::BindTrapHandler() {

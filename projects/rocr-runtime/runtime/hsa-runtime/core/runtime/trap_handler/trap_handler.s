@@ -98,6 +98,12 @@
 // TTMP_REG2 means ttmp11 register if gfx>=942 and means ttmp6 register if gfx<942
 
 .if .amdgcn.gfx_generation_number == 9
+  // NOTE: on gfx94x and newer, ttmp11 is also TTMP_REG2, and the PC sampling path stores
+  // buf_to_use in bit 31 of TTMP_REG2 (see .profile_trap_handlers_gfx9). Bit 31 is the only bit
+  // of ttmp11 the gfx94x ABI leaves free, so the two uses overlap: a wave that takes a PC sample
+  // and later reaches .halt_wave can read buf_to_use as the TTMPS_SETUP flag. Resolving this
+  // needs a bit reassignment agreed with the first-level handler, so it is documented rather
+  // than changed here.
   .set TTMP11_TTMPS_SETUP_SHIFT              , 31
 
 .if (.amdgcn.gfx_generation_minor >= 4)
@@ -569,14 +575,14 @@ trap_entry:
   s_addc_u32                            ttmp3, ttmp3, ttmp5             // ttmp[2:3]=&buffer[local_entry]
   s_memrealtime                         ttmp[4:5]
   s_waitcnt                             lgkmcnt(0)                      // Wait for timestamp
-  s_store_dwordx2                       ttmp[4:5], ttmp[2:3] 0x30       // Store timestamp
+  s_store_dwordx2                       ttmp[4:5], ttmp[2:3], 0x30      // Store timestamp
 
   s_getreg_b32                          ttmp4, hwreg(HW_REG_SQ_PERF_SNAPSHOT_PC_LO)
   s_getreg_b32                          ttmp5, hwreg(HW_REG_SQ_PERF_SNAPSHOT_PC_HI)
-  s_store_dwordx2                       ttmp[4:5], ttmp[2:3] 0x00       // store snapshot data
+  s_store_dwordx2                       ttmp[4:5], ttmp[2:3], 0x00      // store snapshot PC
   s_getreg_b32                          ttmp5, hwreg(HW_REG_SQ_PERF_SNAPSHOT_DATA1)
   s_getreg_b32                          ttmp4, hwreg(HW_REG_SQ_PERF_SNAPSHOT_DATA)
-  s_store_dwordx2                       ttmp[4:5], ttmp[2:3], 0x24            // store snapshot PC
+  s_store_dwordx2                       ttmp[4:5], ttmp[2:3], 0x24      // store snapshot data and data1
 
   s_mov_b32                             ttmp6, exec_lo
   s_store_dword                         ttmp6, ttmp[2:3], 0x8           // store EXEC_LO
