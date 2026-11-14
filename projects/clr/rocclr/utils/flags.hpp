@@ -265,6 +265,10 @@ release(uint, DEBUG_HIP_BLOCK_SYNC, 50,                                       \
         "Blocks synchronization on CPU until the callback processing is done")\
 release(uint, DEBUG_CLR_MAX_BATCH_SIZE, 1000,                                 \
         "Forces the callback to clean-up CPU submission queue")               \
+release(int, DEBUG_HIP_GRAPH_IDLE_FLUSH_US, 20,                               \
+        "Without direct dispatch: microseconds the submission thread waits "  \
+        "for more commands before flushing a batch that contains a graph "    \
+        "launch once its queue runs empty. -1 = don't flush on idle")         \
 release(bool, DEBUG_CLR_SYSMEM_POOL, false,                                   \
         "Use sysmem pool implementation in runtime for amd commands")         \
 release(uint, DEBUG_HIP_DYNAMIC_QUEUES, 1,                                    \

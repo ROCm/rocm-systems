@@ -1252,6 +1252,9 @@ graph:
       targets: [amd_wsl, amd_linux, amd_windows, nvidia_windows, nvidia_linux]
       reason: "ROCM-30708 - child process; spawned by name from Unit_hipGraphLaunch_SdmaMemcpyOrderedAfterProducer, never run standalone."
     tags: [exec]
+  Unit_hipGraphLaunch_CompletesWithoutSync:
+    <<: *level_default
+    tags: [exec]
   Unit_hipGraphMemcpyNodeSetParams1D_Positive_Basic:
     <<: *level_default
     tags: [node]

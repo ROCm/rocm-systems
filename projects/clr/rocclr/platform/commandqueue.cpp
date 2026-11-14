@@ -252,9 +252,26 @@ void HostQueue::loop(device::VirtualDevice* virtualDevice) {
   // Create a command batch with all the commands present in the queue.
   Command* head = NULL;
   Command* tail = NULL;
+  // The current batch contains a command marked flushOnIdle (e.g. the end of a HIP graph
+  // launch) and has not been flushed yet.
+  bool idleFlushPending = false;
   while (true) {
     // Get one command from the queue
     Command* command = queue_.dequeue();
+    // The queue ran empty while the batch holds work that must not wait for the app's next
+    // synchronize or query. Give the app a short grace period to enqueue more (back-to-back
+    // launches then stay in one batch), and flush if nothing arrives.
+    if (command == NULL && idleFlushPending && head != NULL && DEBUG_HIP_GRAPH_IDLE_FLUSH_US >= 0) {
+      const uint64_t deadline = Os::timeNanos() + uint64_t(DEBUG_HIP_GRAPH_IDLE_FLUSH_US) * 1000;
+      while ((command = queue_.dequeue()) == NULL && Os::timeNanos() < deadline) {
+        Os::yield();
+      }
+      if (command == NULL) {
+        virtualDevice->flush(head);
+        tail = head = NULL;
+        idleFlushPending = false;
+      }
+    }
     if (command == NULL) {
       ScopedLock sl(queueLock_);
       while ((command = queue_.dequeue()) == NULL) {
@@ -281,6 +298,7 @@ void HostQueue::loop(device::VirtualDevice* virtualDevice) {
                   amd::activity_prof::getOclCommandKindString(command->type()), command, it);
           virtualDevice->flush(head, true);
           tail = head = NULL;
+          idleFlushPending = false;
           dependencyFailed |= !it->awaitCompletion();
         }
       }
@@ -306,11 +324,13 @@ void HostQueue::loop(device::VirtualDevice* virtualDevice) {
 
     // Submit to the device queue.
     command->submit(*virtualDevice);
+    idleFlushPending |= command->flushOnIdle();
 
     // if this is a user invisible marker with a waiting event, then flush
     if (0 == command->type()) {
       virtualDevice->flush(head);
       tail = head = NULL;
+      idleFlushPending = false;
     }
   }  // while (true) {
 }

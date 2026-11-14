@@ -355,6 +355,7 @@ class Command : public Event {
   const Event* waitingEvent_;  //!< Waiting event associated with the marker
 
   bool packetCapturing_ = false;       //!< Flag to enable/disable graph gpu packet capture
+  bool flushOnIdle_ = false;           //!< Submit this command's batch once the queue goes idle
   GraphPacketCaptureContext* graphCapture_ = nullptr;  //!< Capture context, owned by the graph node
  protected:
   bool cpu_wait_ = false;  //!< If true, then the command was issued for CPU/GPU sync
@@ -399,6 +400,12 @@ class Command : public Event {
     }
   }
   bool getPktCapturingState() const { return packetCapturing_; }
+
+  //! Without direct dispatch, commands are batched until something flushes the batch.
+  //! A batch containing a command marked flushOnIdle is flushed once the submission
+  //! thread runs out of commands, instead of waiting for a later flush.
+  void setFlushOnIdle(bool flushOnIdle) { flushOnIdle_ = flushOnIdle; }
+  bool flushOnIdle() const { return flushOnIdle_; }
 
   //! Sets AQL capture state and context; a non-null ctx->gpuMetadataPackets also captures metadata packets.
   void setPktCapturingState(bool state, GraphPacketCaptureContext* ctx) {

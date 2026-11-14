@@ -1958,9 +1958,12 @@ hipError_t GraphExecClassic::Run(hip::Stream* launch_stream) {
     }
   }
 
-  // Enqueue a lightweight marker to carry the launch-complete callback.
+  // Enqueue a lightweight marker to carry the launch-complete callback. Without direct
+  // dispatch, also have its batch submitted once the queue goes idle, so the launch's last
+  // nodes don't wait for the next synchronize or query.
   auto* marker = new amd::Marker(*launch_stream, kMarkerDisableFlush, {});
   marker->setCommandEntryScope(amd::Device::kCacheStateIgnore);
+  marker->setFlushOnIdle(!AMD_DIRECT_DISPATCH);
   amd::Event& event = marker->event();
   constexpr bool kBlocking = false;
   auto* cleanup = new GraphLaunchCleanup();
@@ -3443,12 +3446,31 @@ hipError_t Graph::RunNodes(int32_t base_stream, const std::vector<hip::Stream*>*
     last_command->release();
   }
 
+  // Without direct dispatch (PAL), commands are submitted to the GPU in batches cut only
+  // by flushing markers, and a batch's commands are retired together once it completes.
+  // Flush periodically so a large graph is split into several batches: the GPU starts
+  // earlier, and a synchronize can retire finished batches while later ones still run,
+  // instead of retiring every node's command after the GPU is done. Each batch costs a
+  // submission, so don't flush when fewer than half an interval of nodes would be left:
+  // a small final batch adds more submission overhead than it saves.
+  constexpr size_t kNodesPerFlush = 256;
+  size_t nodes_since_flush = 0;
+  size_t nodes_left = GetTopoOrder().size();
+
   // Run all commands in the graph
   for (auto node : GetTopoOrder()) {
     node->launch_id_ = -1;
     auto status = RunOneNode(node);
     if (status != hipSuccess) {
       return status;
+    }
+    --nodes_left;
+    if (!AMD_DIRECT_DISPATCH && ++nodes_since_flush >= kNodesPerFlush &&
+        nodes_left >= kNodesPerFlush / 2) {
+      nodes_since_flush = 0;
+      auto flush_marker = new amd::Marker(*streams_[node->stream_id_], !kMarkerDisableFlush);
+      flush_marker->enqueue();
+      flush_marker->release();
     }
   }
   wait_list.clear();
