@@ -121,6 +121,8 @@ ROCPROFILER_STATUS_STRING(ROCPROFILER_STATUS_ERROR_PERMISSION_DENIED,
 ROCPROFILER_STATUS_STRING(ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_REGISTER_VERSION,
                           "rocprofiler-register version is incompatible. "
                           "Late-start profiling requires ROCm 7.0+")
+ROCPROFILER_STATUS_STRING(ROCPROFILER_STATUS_ERROR_TIMEOUT,
+                          "A timeout was hit and requested operation failed to complete")
 
 template <size_t Idx, size_t... Tail>
 const char*

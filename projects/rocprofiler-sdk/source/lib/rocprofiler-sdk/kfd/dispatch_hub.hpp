@@ -432,8 +432,9 @@ public:
         ledger_locked(correlation_id);
     }
 
-    // Total live PENDING entries. Introspection for the state-bound tests;
-    // production reasons per-window, never per-slot, so no slot-scoped count exists.
+    // Total live PENDING entries. Counts entries, not keys -- one key legitimately holds several
+    // entries across recycled doorbell windows. Production reasons per-window, never per-slot, so
+    // no slot-scoped count exists.
     size_t pending_count() const
     {
         if(m_abandoned.load(std::memory_order_acquire)) return 0;

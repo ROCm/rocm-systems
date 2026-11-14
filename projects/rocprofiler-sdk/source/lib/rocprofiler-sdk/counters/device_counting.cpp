@@ -180,6 +180,7 @@ bool
 agent_async_handler(hsa_signal_value_t /*signal_v*/, void* data)
 {
     if(!data) return false;
+
     auto& callback_data = *static_cast<rocprofiler::counters::agent_callback_data*>(data);
 
     const auto& prof_config = callback_data.profile;
@@ -193,7 +194,11 @@ agent_async_handler(hsa_signal_value_t /*signal_v*/, void* data)
     auto* buf = buffer::get_buffer(callback_data.buffer.handle);
     if(!buf && callback_data.buffer != rocprofiler_buffer_id_t{.handle = 0})
     {
-        // Buffer may be destroyed before callbacks complete during abnormal teardown.
+        // Buffer may be destroyed before callbacks complete during abnormal teardown. The sample
+        // is still finished, so release it on the way out as the other exits do: this return
+        // un-arms the handler, and a waiter would otherwise never be woken.
+        hsa::get_core_table()->hsa_signal_store_relaxed_fn(callback_data.completion, 1);
+        callback_data.sample_in_flight.store(false, std::memory_order_release);
         ROCP_CI_LOG(WARNING) << fmt::format(
             "Buffer {} destroyed before record was written (skipping)",
             callback_data.buffer.handle);
@@ -234,13 +239,21 @@ agent_async_handler(hsa_signal_value_t /*signal_v*/, void* data)
     return true;
 }
 
-void
-wait_for_sample_handler(rocprofiler::counters::agent_callback_data& callback_data)
+bool
+wait_for_sample_handler(rocprofiler::counters::agent_callback_data& callback_data,
+                        const uint64_t                              timeout_ns = 0)
 {
+    const auto timeout_enabled = timeout_ns > 0;
+    const auto timeout = std::chrono::steady_clock::now() + std::chrono::nanoseconds{timeout_ns};
     while(callback_data.sample_in_flight.load(std::memory_order_acquire))
     {
+        if(timeout_enabled && std::chrono::steady_clock::now() > timeout)
+        {
+            return false;
+        }
         std::this_thread::yield();
     }
+    return true;
 }
 
 /**
@@ -415,6 +428,35 @@ read_agent_ctx(const context::context*                    ctx,
  * Special Case: if constants are the only counters being collected, we skip
  * packet injection.
  */
+uint64_t
+drain_device_counting_samples(const context::context* ctx, const uint64_t timeout_ns)
+{
+    // Before HSA is up no sample can be in flight and the agent data is not constructed.
+    if(hsa_inited().load() == false) return 0;
+    if(ctx == nullptr || !ctx->device_counter_collection) return 0;
+
+    // sample_in_flight is the only field read, and it is atomic. Anything else here would race
+    // with start() rewriting it, and taking the latch instead would let a lost acquisition
+    // silently skip a context this call must still drain.
+    auto remaining_samples = uint64_t{0};
+    for(auto& _cb_data : ctx->device_counter_collection->agent_data)
+        remaining_samples += wait_for_sample_handler(_cb_data, timeout_ns) ? 0 : 1;
+    return remaining_samples;
+}
+
+uint64_t
+peek_device_counting_samples(const context::context* ctx)
+{
+    // Before HSA is up no sample can be in flight and the agent data is not constructed.
+    if(hsa_inited().load() == false) return 0;
+    if(ctx == nullptr || !ctx->device_counter_collection) return 0;
+
+    auto num_samples = uint64_t{0};
+    for(auto& _cb_data : ctx->device_counter_collection->agent_data)
+        if(_cb_data.sample_in_flight.load(std::memory_order_relaxed)) ++num_samples;
+    return num_samples;
+}
+
 rocprofiler_status_t
 start_agent_ctx(const context::context* ctx)
 {

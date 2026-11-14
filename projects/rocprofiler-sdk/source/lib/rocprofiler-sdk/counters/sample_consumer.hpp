@@ -66,6 +66,8 @@ public:
 
         valid.store(false);
         cv.notify_all();
+        // A drain waiting on a consumer that is shutting down would otherwise never be woken.
+        drain_cv.notify_all();
 
         if(!exited) cv.wait(lk, [&] { return exited.load(); });
         if(consumer.joinable()) consumer.join();
@@ -88,6 +90,39 @@ public:
             cv.notify_all();
     }
 
+    // Blocks until samples enqueued before this call have been consumed, or the timeout expires.
+    // Stops nothing: samples arriving during the wait are post-call work and are not waited for.
+    uint64_t drain(const uint64_t timeout_ns)
+    {
+        auto         lk              = std::unique_lock{mut};
+        const size_t target          = write_ptr.load(std::memory_order_acquire);
+        const auto   timeout_enabled = timeout_ns > 0;
+        const auto   timeout =
+            std::chrono::steady_clock::now() + std::chrono::nanoseconds{timeout_ns};
+        const auto predicate = [&] {
+            return consumed_ptr.load(std::memory_order_acquire) >= target ||
+                   !valid.load(std::memory_order_acquire);
+        };
+
+        if(!timeout_enabled)
+            drain_cv.wait(lk, predicate);
+        else
+            drain_cv.wait_until(lk, timeout, predicate);
+
+        // Outstanding is what the consumer has NOT reached, so target minus consumed -- the other
+        // order returns zero on exactly the timeout this exists to report. Computed on both arms:
+        // the untimed wait also returns early on shutdown, leaving samples never consumed.
+        const auto consumed = consumed_ptr.load(std::memory_order_relaxed);
+        return target > consumed ? target - consumed : 0;
+    }
+
+    uint64_t peek_pending_records()
+    {
+        const auto target   = write_ptr.load(std::memory_order_relaxed);
+        const auto consumed = consumed_ptr.load(std::memory_order_relaxed);
+        return target > consumed ? target - consumed : 0;
+    }
+
 protected:
     void consumer_loop()
     {
@@ -100,6 +135,7 @@ protected:
                 {
                     exited.store(true);
                     cv.notify_all();
+                    drain_cv.notify_all();
                     return;
                 }
             }
@@ -107,18 +143,31 @@ protected:
             auto retrieved = std::move(buffer.at(read_ptr % buffer.size()));
             read_ptr.fetch_add(1);
             consume_fn(std::move(retrieved));
+
+            // Counted under mut, after consume_fn: a drain holds mut while evaluating its
+            // predicate, so incrementing outside the lock could land between that check and the
+            // wait, losing the wakeup.
+            {
+                auto lk = std::unique_lock{mut};
+                consumed_ptr.fetch_add(1, std::memory_order_release);
+            }
+            drain_cv.notify_all();
         }
     }
 
-    consume_func_t             consume_fn;
-    std::atomic<bool>          valid{false};
-    std::atomic<bool>          exited{true};
-    std::mutex                 mut;
-    std::atomic<size_t>        write_ptr{0};
-    std::atomic<size_t>        read_ptr{0};
+    consume_func_t      consume_fn;
+    std::atomic<bool>   valid{false};
+    std::atomic<bool>   exited{true};
+    std::mutex          mut;
+    std::atomic<size_t> write_ptr{0};
+    std::atomic<size_t> read_ptr{0};
+    // Pairs with write_ptr: advanced after consume_fn returns, where read_ptr advances before
+    // it. A self-consumed sample enters no ring and is counted by neither.
+    std::atomic<size_t>        consumed_ptr{0};
     std::array<DataType, SIZE> buffer;
     std::thread                consumer{};
     std::condition_variable    cv;
+    std::condition_variable    drain_cv;
 };
 
 }  // namespace counters

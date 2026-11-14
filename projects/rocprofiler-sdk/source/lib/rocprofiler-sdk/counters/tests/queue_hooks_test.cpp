@@ -402,7 +402,8 @@ TEST(counters_queue_hooks, stop_context_in_flight_completion_routes_via_hook_pat
 // registered queue -- async_started() with no matching async_complete() -- so the signal wait
 // cannot be satisfied and can only end by elapsing. Two independent things are asserted:
 //
-//  1. queue_controller_sync() reports false instead of returning as though it had drained.
+//  1. queue_controller_sync() reports a non-zero outstanding count instead of returning as though
+//     it had drained.
 //  2. stop_context still finishes: serialization is released and the context leaves the active
 //     list. This is the more important half. Refusing to complete the stop would be worse than a
 //     late completion, because the context would stay in the stopping set and block every other
@@ -440,7 +441,9 @@ TEST(counters_queue_hooks, stop_context_completes_when_queue_drain_times_out)
     fq_raw->async_started();
     ASSERT_EQ(fq_raw->active_async_packets(), 1);
 
-    EXPECT_FALSE(hsa::queue_controller_sync())
+    // Non-zero, not "false": queue_controller_sync() returns the count still outstanding, so the
+    // drained answer is zero and a truth test would read this backwards.
+    EXPECT_NE(hsa::queue_controller_sync(), 0u)
         << "a queue with an outstanding async packet must report an incomplete drain";
 
     ROCPROFILER_CALL(rocprofiler_create_context(&get_client_ctx()), "context creation failed");

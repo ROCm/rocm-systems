@@ -505,14 +505,48 @@ signal_less_teardown()
         _leaked);
 }
 
+namespace
+{
+// True when this process holds signal-less state worth acting on. The order is deliberate:
+// kfd_profiler_state_constructed() is tested before signal_less_feature_enabled(), whose first
+// call registers the fork handler and logs. A forked child owns none of this state.
+bool
+signal_less_state_present()
+{
+    if(g_child_stale.load(std::memory_order_acquire)) return false;
+    if(!kfd_profiler_state_constructed()) return false;
+    return signal_less_feature_enabled();
+}
+}  // namespace
+
+uint64_t
+drain_signal_less_completions(const uint64_t timeout_ns)
+{
+    if(!signal_less_state_present()) return 0;
+
+    // Mirrors signal_less_fence_completions without its teardown: the reader keeps running. The
+    // quiesce is retried once, since the first pass can return with the ring still draining.
+    drain_signal_less_interceptor();
+    const auto timeout = (timeout_ns > 0) ? timeout_ns : quiesce_budget_ns();
+
+    bool _drained = wait_for_reader_quiesce(timeout);
+    if(!_drained && !reader_unavailable()) _drained = wait_for_reader_quiesce(timeout);
+    auto pending_dispatches = uint64_t{0};
+    if(!_drained)
+    {
+        pending_dispatches = signal_less_hub().pending_count();
+    }
+    const auto in_flight = join_signal_less_tasks(timeout_ns);
+
+    // Advisory by construction: on a live session the hub is a moving target, and an entry whose
+    // kernel is still executing has no EOP yet. Nothing is discarded and the caller may retry.
+    return pending_dispatches + in_flight;
+}
+
 void
 signal_less_fence_completions()
 {
-    if(g_child_stale.load(std::memory_order_acquire)) return;
-    // No dispatch-log state in this process means nothing to fence. Ordered before
-    // signal_less_feature_enabled(), whose first call registers the fork handler and logs.
-    if(!kfd_profiler_state_constructed()) return;
-    if(!signal_less_feature_enabled()) return;
+    if(!signal_less_state_present()) return;
     // Finalization already ran: our atexit finalize()+destroy_static_objects() has
     // nulled the queue-registry static_object, so a second F24 call (from another
     // DSO's __cxa_finalize teardown) must not rlock it -> NULL deref. finalize() sets
@@ -579,6 +613,16 @@ signal_less_fence_completions()
     // is the only one that can still touch a deferred completion.
     flush_deferred_completions();
     join_signal_less_tasks();
+}
+
+uint64_t
+peek_active_signal_less_packets()
+{
+    // signal_less_hub() constructs the hub on first touch, so an unguarded peek would stand one
+    // up in a process that never enabled the feature, or in a forked child owning none of it.
+    if(!signal_less_state_present()) return 0;
+
+    return signal_less_hub().pending_count();
 }
 }  // namespace kfd
 }  // namespace rocprofiler

@@ -37,6 +37,10 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
   - HIP API tracing for `hipKernelSetAttributeForDevice`, `hipLibraryGetModule`, `hipModuleEnumerateFunctions`, and `hipDeviceFlushGPUDirectRDMAWrites`.
   - HSA API tracing for `hsa_amd_enable_high_precision_timestamps`, `hsa_amd_agent_set_attribute`, `hsa_amd_vmem_get_vmem_info`, and `hsa_amd_svm_discard_and_prefetch_batch_async`.
   - New `rocprofiler::sdk::pc_sampling::verify_sample` in the header-only `rocprofiler-sdk/cxx/pc_sampling.hpp`. It checks that a stochastic PC sample is consistent with the instruction at its PC.
+  - `rocprofiler_synchronize_contexts` (experimental) waits until records have been written for
+  already-submitted GPU operations, so a following `rocprofiler_flush_buffer` returns them.
+  Expensive: call it once before reading a buffer, not per dispatch.
+  - New status code `ROCPROFILER_STATUS_ERROR_TIMEOUT`.
 
 **Hardware and platform support:**
 
