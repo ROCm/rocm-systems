@@ -729,6 +729,17 @@ set_tests_properties(intercept_queue_logic_test PROPERTIES
   LABELS "quick;standard;pr;pre-commit"
   TIMEOUT 60)
 
+# Re-run the existing async copy test with SDMA disabled. That routes every copy
+# through the blit kernels, so this covers the blit code objects selected by
+# BlitKernel::GetPatchedBlitObject() and GpuAgent::AssembleShader() on whichever
+# GPU the suite runs on.
+add_test(NAME rocrtst_async_copy_blit_kernel
+  COMMAND ${ROCRTST} --gtest_filter=rocrtstPerf.Memory_Async_Copy)
+set_tests_properties(rocrtst_async_copy_blit_kernel PROPERTIES
+  ENVIRONMENT "HSA_ENABLE_SDMA=0"
+  LABELS "standard;pr"
+  TIMEOUT 600)
+
 #Build kernels
 add_custom_target(rocrtst_kernels ALL DEPENDS ${HSACO_TARG_LIST})
 
@@ -801,6 +812,8 @@ if(EXISTS "${TEST_CATEGORIES_CMAKE}" AND EXISTS "${TEST_CATEGORIES_YAML}")
         "\n"
         "add_test(intercept_queue_logic_test \"../intercept_queue_logic_test\")\n"
         "set_tests_properties(intercept_queue_logic_test PROPERTIES LABELS \"quick;standard;pr;pre-commit\" TIMEOUT 60)\n\n"
+        "add_test(rocrtst_async_copy_blit_kernel \"../${ROCRTST}\" \"--gtest_filter=rocrtstPerf.Memory_Async_Copy\")\n"
+        "set_tests_properties(rocrtst_async_copy_blit_kernel PROPERTIES ENVIRONMENT \"HSA_ENABLE_SDMA=0\" LABELS \"standard;pr\" TIMEOUT 600)\n\n"
     )
 
     install(

@@ -7,6 +7,12 @@
 ################################################################################
 import sys
 
+def ToIdentifier(name):
+    # Match the mangling xxd -i performs on the Linux path: every character
+    # that is not valid in a C identifier becomes an underscore. Generic
+    # targets such as gfx9-generic would otherwise emit a name with a hyphen.
+    return ''.join(c if c.isalnum() or c == '_' else '_' for c in name)
+
 def GetSize(fileobject):
     fileobject.seek(0,2) # move the cursor to the end of the file
     size = fileobject.tell()
@@ -22,7 +28,7 @@ def DumpFile(header, input_name):
         # Reset file pointer
         binary_file.seek(0)
         parts = input_name.split('.')
-        file_name = parts[0]
+        file_name = ToIdentifier(parts[0])
         content = f"unsigned char {file_name}""[] = {\n  "
 
         header.write(content)

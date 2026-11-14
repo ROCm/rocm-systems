@@ -48,8 +48,13 @@ cmake_minimum_required ( VERSION 3.7 )
 find_package(Clang REQUIRED HINTS ${CMAKE_PREFIX_PATH}/llvm PATHS /opt/rocm/llvm )
 find_package(LLVM REQUIRED HINTS ${CMAKE_PREFIX_PATH}/llvm PATHS /opt/rocm/llvm )
 
-# Set the target devices
-set (TARGET_DEVS "gfx900;gfx1010;gfx1030;gfx1100;gfx1200;gfx1250")
+# Set the target devices. One entry per blob in the shader table of
+# GpuAgent::AssembleShader(); the POSTFIX below names the generated symbols.
+# Generic targets require COV 6. gfx1250 stays a specific target because it is
+# not in the gfx12-generic family and the shader table gives it its own entry.
+# Unlike the image blit objects these blobs are not loaded through the
+# executable loader, so they are not subject to the ISA compatibility check.
+set (TARGET_DEVS "gfx9-generic;gfx10-1-generic;gfx10-3-generic;gfx11-generic;gfx12-generic;gfx1250")
 
 # Set the postfix for each target device
 set (POSTFIX "9;1010;10;11;12;1250")
@@ -68,7 +73,8 @@ function(gen_kernel_bc TARGET_ID INPUT_FILE OUTPUT_FILE)
 	set(CODE_OBJECT "${OUTPUT_FILE}.hsaco")
 
 	# Separate clang arguments
-	separate_arguments(CLANG_ARG_LIST UNIX_COMMAND "-x assembler -target amdgcn-amd-amdhsa -mcode-object-version=5 -fPIC -mcpu=${TARGET_ID} -o ${CODE_OBJECT} ${CMAKE_CURRENT_SOURCE_DIR}/${INPUT_FILE}")
+	# Use COV 6 for generic target support
+	separate_arguments(CLANG_ARG_LIST UNIX_COMMAND "-x assembler -target amdgcn-amd-amdhsa -mcode-object-version=6 -fPIC -mcpu=${TARGET_ID} -o ${CODE_OBJECT} ${CMAKE_CURRENT_SOURCE_DIR}/${INPUT_FILE}")
 
 	# Add custom command to generate the kernel bitcode
 	add_custom_command(OUTPUT ${CODE_OBJECT} COMMAND clang ${CLANG_ARG_LIST}
