@@ -956,4 +956,49 @@ INSTANTIATE_TEST_SUITE_P(LaunchPaths, CeAlltoAllvSyncMicrotest,
                                            LaunchPath::kLegacyNullStream, LaunchPath::kGraphCapture),
                          LaunchPathName);
 
+// Hierarchical CE AllGather rail algorithm selection (ncclHierCeAllGatherUseRing). Sizes are per rank; the
+// rccl-tests size is that times nRanks, so 2 MiB per rank is 64/128/256 MiB total on 4/8/16 nodes of 8 GPUs.
+class HierCeAgRailSelectMicrotest : public ::testing::Test {
+ protected:
+  int64_t enable_ = -1;
+  int64_t threshold_ = -1;
+  ScopedHook<int64_t(const char*, int64_t)> loadParam_{g_loadParam, [this](const char* env, int64_t deftVal) {
+    if (std::strcmp(env, "HIER_CE_COLL_AG_RAIL_RING_ENABLE") == 0) return enable_;
+    if (std::strcmp(env, "HIER_CE_COLL_AG_RAIL_RING_THRESHOLD") == 0) return threshold_;
+    return deftVal;
+  }};
+};
+
+TEST_F(HierCeAgRailSelectMicrotest, Auto_TwoNodes_IsDirectAtEverySize) {
+  for (size_t bytes : {size_t(1024), 2 * kMiB, 128 * kMiB, 1024 * kMiB}) {
+    EXPECT_FALSE(ncclHierCeAllGatherUseRing(/*nNodes=*/2, bytes)) << bytes;
+  }
+}
+
+TEST_F(HierCeAgRailSelectMicrotest, Auto_ThreeOrMoreNodes_SwitchesToRingAtTwoMiBPerRank) {
+  for (int nNodes : {3, 4, 8, 16, 32}) {
+    EXPECT_FALSE(ncclHierCeAllGatherUseRing(nNodes, 1 * kMiB)) << nNodes;
+    EXPECT_FALSE(ncclHierCeAllGatherUseRing(nNodes, 2 * kMiB - 1)) << nNodes;
+    EXPECT_TRUE(ncclHierCeAllGatherUseRing(nNodes, 2 * kMiB)) << nNodes;
+    EXPECT_TRUE(ncclHierCeAllGatherUseRing(nNodes, 128 * kMiB)) << nNodes;
+  }
+}
+
+TEST_F(HierCeAgRailSelectMicrotest, Auto_ThresholdOverride_MovesTheCrossover) {
+  threshold_ = 8 * kMiB;
+  EXPECT_FALSE(ncclHierCeAllGatherUseRing(/*nNodes=*/8, 4 * kMiB));
+  EXPECT_TRUE(ncclHierCeAllGatherUseRing(/*nNodes=*/8, 8 * kMiB));
+  threshold_ = 0;
+  EXPECT_TRUE(ncclHierCeAllGatherUseRing(/*nNodes=*/8, 1024));
+  EXPECT_FALSE(ncclHierCeAllGatherUseRing(/*nNodes=*/2, 1024)) << "the threshold does not apply on two nodes";
+}
+
+TEST_F(HierCeAgRailSelectMicrotest, Forced_IgnoresNodesAndSize) {
+  enable_ = 1;
+  EXPECT_TRUE(ncclHierCeAllGatherUseRing(/*nNodes=*/2, 1024));
+  EXPECT_TRUE(ncclHierCeAllGatherUseRing(/*nNodes=*/16, 1024));
+  enable_ = 0;
+  EXPECT_FALSE(ncclHierCeAllGatherUseRing(/*nNodes=*/16, 1024 * kMiB));
+}
+
 }  // namespace

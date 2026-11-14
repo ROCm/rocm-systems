@@ -937,11 +937,28 @@ NCCL_HIER_CE_COLL_AG_RAIL_RING_ENABLE
 -------------------------------------
 (since 2.32)
 
-Selects the inter-node rail algorithm of the hierarchical copy-engine AllGather.
+Selects the inter-node rail algorithm of the hierarchical copy-engine AllGather. The direct algorithm has the lower
+latency, and the ring algorithm the higher bandwidth for large messages on three or more nodes.
 
 Values accepted
 ^^^^^^^^^^^^^^^
-A positive value selects the ring algorithm. 0 or a negative value keeps the direct algorithm. Default is -1 (direct).
+A positive value forces the ring algorithm and 0 forces the direct algorithm. Default is -1 (automatic): direct on two
+nodes, and on three or more nodes ring once each rank contributes at least ``NCCL_HIER_CE_COLL_AG_RAIL_RING_THRESHOLD``
+bytes. All ranks must use the same value.
+
+NCCL_HIER_CE_COLL_AG_RAIL_RING_THRESHOLD
+----------------------------------------
+(since 2.32)
+
+Per-rank message size, in bytes, at and above which the automatic selection of
+``NCCL_HIER_CE_COLL_AG_RAIL_RING_ENABLE`` uses the ring algorithm on three or more nodes. The total AllGather size is
+this value times the number of ranks, so the default crosses over at 64 MiB on 4 nodes, 128 MiB on 8 nodes and 256 MiB
+on 16 nodes with eight GPUs per node.
+
+Values accepted
+^^^^^^^^^^^^^^^
+Default is -1, which selects 2097152 (2 MiB). Has no effect when ``NCCL_HIER_CE_COLL_AG_RAIL_RING_ENABLE`` is not -1.
+All ranks must use the same value.
 
 NCCL_NETDEVS_POLICY
 -------------------
