@@ -25,6 +25,7 @@
 #include "lib/common/defines.hpp"
 #include "lib/common/logging.hpp"
 
+#include <pthread.h>
 #include <sys/syscall.h>
 #include <sys/utsname.h>
 #include <unistd.h>
@@ -56,11 +57,36 @@ consume_args(Tp&&...)
 uint64_t
 get_clock_period_ns_impl(clockid_t _clk_id);
 
+inline uint64_t&
+get_tid_cache()
+{
+    // Constant initialization keeps this safe to update from a pthread_atfork child handler,
+    // including when the forking thread had not previously called get_tid() in this DSO.
+    static thread_local uint64_t _v = 0;
+    return _v;
+}
+
+inline void
+reset_tid_after_fork()
+{
+    get_tid_cache() = ::syscall(__NR_gettid);
+}
+
+inline bool
+register_tid_atfork_handler()
+{
+    // utility.hpp is linked into multiple DSOs. Each copy registers a handler for its own
+    // thread-local cache. If registration fails, get_tid() falls back to an uncached syscall.
+    static const bool _registered = (::pthread_atfork(nullptr, nullptr, reset_tid_after_fork) == 0);
+    return _registered;
+}
+
 inline uint64_t
 get_tid()
 {
-    // system calls are expensive so store this in a thread-local
-    static thread_local uint64_t _v = ::syscall(__NR_gettid);
+    auto&      _v         = get_tid_cache();
+    const bool registered = register_tid_atfork_handler();
+    if(_v == 0 || !registered) _v = ::syscall(__NR_gettid);
     return _v;
 }
 

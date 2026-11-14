@@ -144,6 +144,15 @@ roctx_api_impl<TableIdx, OpIdx>::functor(Args... args)
     constexpr auto external_corr_id_domain_idx =
         roctx_domain_info<TableIdx>::external_correlation_id_domain_idx;
 
+    if(registration::fork_child_abandoned())
+    {
+        [[maybe_unused]] auto ret = exec(info_type::get_table_func(), std::forward<Args>(args)...);
+        if constexpr(!std::is_void<RetT>::value)
+            return ret;
+        else
+            return;
+    }
+
     ROCP_INFO_IF(registration::get_fini_status() != 0) << "Executing " << info_type::name;
 
     auto thr_id            = common::get_tid();

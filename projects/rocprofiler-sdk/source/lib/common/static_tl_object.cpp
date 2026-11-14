@@ -48,6 +48,8 @@ thread_local auto _static_tl_object_dtor = std::optional<scope_destructor>{};
 void
 destroy_static_tl_objects()
 {
+    if(static_objects_abandoned()) return;
+
     if(auto*& _stack = get_static_tl_object_stack(); _stack)
     {
         while(!_stack->empty())

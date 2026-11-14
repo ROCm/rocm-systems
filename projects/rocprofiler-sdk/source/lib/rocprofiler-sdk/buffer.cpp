@@ -80,6 +80,7 @@ is_valid_buffer_id(rocprofiler_buffer_id_t id)
 unique_buffer_vec_t*
 get_buffers()
 {
+    if(registration::fork_child_abandoned()) return nullptr;
     static auto*& _v = common::static_object<unique_buffer_vec_t>::construct(
         reserve_size_t{unique_buffer_vec_t::chunk_size});
     return _v;
@@ -141,6 +142,7 @@ allocate_buffer()
 rocprofiler_status_t
 flush(rocprofiler_buffer_id_t buffer_id, bool wait)
 {
+    if(registration::fork_child_abandoned()) return ROCPROFILER_STATUS_ERROR_FINALIZED;
     if(registration::get_fini_status() > 0)
     {
         ROCP_ERROR << "ignoring rocprofiler buffer flush (handle=" << buffer_id.handle
@@ -324,6 +326,8 @@ rocprofiler_create_buffer(rocprofiler_context_id_t        context,
 rocprofiler_status_t
 rocprofiler_flush_buffer(rocprofiler_buffer_id_t buffer_id)
 {
+    if(rocprofiler::registration::fork_child_abandoned()) return ROCPROFILER_STATUS_ERROR_FINALIZED;
+
 #if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
     // Drain internal PC sampling buffers, if needed.
     auto status = rocprofiler::pc_sampling::flush_internal_agent_buffers(buffer_id);
@@ -336,6 +340,8 @@ rocprofiler_flush_buffer(rocprofiler_buffer_id_t buffer_id)
 rocprofiler_status_t
 rocprofiler_destroy_buffer(rocprofiler_buffer_id_t buffer_id)
 {
+    if(rocprofiler::registration::fork_child_abandoned()) return ROCPROFILER_STATUS_ERROR_FINALIZED;
+
     if(!rocprofiler::buffer::is_valid_buffer_id(buffer_id))
         return ROCPROFILER_STATUS_ERROR_BUFFER_NOT_FOUND;
 

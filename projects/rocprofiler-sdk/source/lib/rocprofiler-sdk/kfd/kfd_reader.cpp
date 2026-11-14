@@ -61,7 +61,6 @@
 
 #include <fcntl.h>
 #include <poll.h>
-#include <pthread.h>
 #include <sys/eventfd.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
@@ -1416,20 +1415,22 @@ start_kfd_reader()
 
     // Registered before the thread exists: a fork in between would inherit a reader
     // thread with no handler to abandon it. Registered exactly once per process:
-    // pthread_atfork stacks handlers, so a stop/restart cycle would otherwise pile up
-    // a duplicate child handler on every restart. call_once leaves the flag unset if
+    // The central dispatcher retains hooks, so stop/restart must not publish duplicate hooks.
+    // call_once leaves the flag unset if
     // the lambda throws, so a transient registration failure can still be retried on a
     // later start rather than being latched.
     static std::once_flag _atfork_once;
     try
     {
         std::call_once(_atfork_once, []() {
-            if(int _rc = pthread_atfork(nullptr, nullptr, disable_reader_in_child); _rc != 0)
-                throw std::system_error{_rc, std::generic_category(), "pthread_atfork"};
+            if(!internal_threading::register_fork_child_hooks(
+                   []() noexcept { disable_reader_in_child(); }, nullptr))
+                throw std::bad_alloc{};
         });
     } catch(const std::exception&)
     {
-        ROCP_WARNING << "KFD dispatch-log reader: pthread_atfork failed, reader not started";
+        ROCP_WARNING
+            << "KFD dispatch-log reader: child policy registration failed, reader not started";
         return false;
     }
 
