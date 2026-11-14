@@ -119,6 +119,7 @@ amdcuid_status_t amdcuid_get_all_handles(amdcuid_id_t* handles, uint32_t* count)
   if (mgr.devices().empty()) {
     status = mgr.discover_devices();
     if (status != AMDCUID_STATUS_SUCCESS) {
+      *count = 0;
       return status;
     }
   }
@@ -173,9 +174,10 @@ int cpu_package_of(const std::string& path) {
 }
 
 // helper function to discover device given dev_path
-DevicePtr discover_device_by_path(const char* dev_path, amdcuid_device_type_t device_type) {
+DevicePtr discover_device_by_path(const char* dev_path, amdcuid_device_type_t device_type,
+                                  amdcuid_status_t& status) {
   DevicePtr device = nullptr;
-  amdcuid_status_t status;
+  status = AMDCUID_STATUS_DEVICE_NOT_FOUND;
 
   // CPU sysfs paths (e.g., /sys/devices/system/cpu/cpu0) are directories,
   // not character/block devices, so real_dev_path_from_fd() cannot resolve
@@ -224,12 +226,14 @@ DevicePtr discover_device_by_path(const char* dev_path, amdcuid_device_type_t de
   std::string real_dev_path;
   struct stat path_stat = {};
   if (stat(dev_path, &path_stat) != 0) {
+    status = AMDCUID_STATUS_DEVICE_NOT_FOUND;
     return nullptr;
   }
   if (S_ISCHR(path_stat.st_mode) || S_ISBLK(path_stat.st_mode)) {
     int fd = open(dev_path, O_RDONLY);
     if (fd < 0) {
       // unable to open device path
+      status = AMDCUID_STATUS_DEVICE_NOT_FOUND;
       return nullptr;
     }
     real_dev_path = CuidUtilities::real_dev_path_from_fd(fd);
@@ -246,6 +250,7 @@ DevicePtr discover_device_by_path(const char* dev_path, amdcuid_device_type_t de
     }
   }
   if (real_dev_path.empty()) {
+    status = AMDCUID_STATUS_DEVICE_NOT_FOUND;
     return nullptr;
   }
   switch (device_type) {
@@ -277,6 +282,7 @@ DevicePtr discover_device_by_path(const char* dev_path, amdcuid_device_type_t de
       break;
     }
     default:
+      status = AMDCUID_STATUS_DEVICE_NOT_FOUND;
       return nullptr;
   }
   return device;
@@ -379,14 +385,11 @@ amdcuid_status_t amdcuid_get_handle_by_dev_path(const char* dev_path,
     if (status != AMDCUID_STATUS_SUCCESS) return status;
     device = std::make_shared<CuidGpu>(info);
   } else {
-    device = discover_device_by_path(real_dev_path.c_str(), device_type);
+    device = discover_device_by_path(real_dev_path.c_str(), device_type, status);
   }
 
-  if (!device) {
-    return AMDCUID_STATUS_DEVICE_NOT_FOUND;
-  } else {
-    return current_handle(device, handle);
-  }
+  if (!device) return status;
+  return current_handle(device, handle);
 }
 
 amdcuid_status_t amdcuid_get_handle_by_bdf(const char* bdf, amdcuid_device_type_t device_type,
@@ -434,23 +437,24 @@ amdcuid_status_t amdcuid_get_handle_by_bdf(const char* bdf, amdcuid_device_type_
   DevicePtr device = nullptr;
   if (device_type == AMDCUID_DEVICE_TYPE_GPU) {
     CuidGpuRoute route;
-    if (CuidGpu::resolve_path(std::string("/sys/bus/pci/devices/") + bdf, route) ==
-            AMDCUID_STATUS_SUCCESS &&
-        !route.partition)
+    const amdcuid_status_t routed =
+        CuidGpu::resolve_path(std::string("/sys/bus/pci/devices/") + bdf, route);
+    if (routed == AMDCUID_STATUS_SUCCESS && !route.partition)
       return amdcuid_get_handle_by_dev_path(route.node.c_str(), device_type, handle);
+    if (routed != AMDCUID_STATUS_SUCCESS && routed != AMDCUID_STATUS_UNSUPPORTED &&
+        routed != AMDCUID_STATUS_FILE_NOT_FOUND)
+      return routed;
   }
   std::string device_path = CuidUtilities::bdf_to_device_path(bdf, device_type);
   if (device_path.empty()) {
     return AMDCUID_STATUS_DEVICE_NOT_FOUND;
   }
   // bdf_to_device_path() already returns a sysfs path, not a device node.
-  device = discover_device_by_path(device_path.c_str(), device_type);
+  amdcuid_status_t status = AMDCUID_STATUS_DEVICE_NOT_FOUND;
+  device = discover_device_by_path(device_path.c_str(), device_type, status);
 
-  if (!device) {
-    return AMDCUID_STATUS_DEVICE_NOT_FOUND;
-  } else {
-    return current_handle(device, handle);
-  }
+  if (!device) return status;
+  return current_handle(device, handle);
 }
 
 amdcuid_status_t amdcuid_get_handle_by_fd(int fd, amdcuid_device_type_t device_type,
@@ -500,18 +504,19 @@ amdcuid_status_t amdcuid_query_device_property(amdcuid_id_t handle, amdcuid_quer
   amdcuid_status_t status = AMDCUID_STATUS_SUCCESS;
   switch (query) {
     case AMDCUID_QUERY_PRIMARY_CUID: {
-      if (geteuid() != 0) {
-        return AMDCUID_STATUS_PERMISSION_DENIED;
-      }
-      if (*length < sizeof(amdcuid_id_t)) {
-        return AMDCUID_STATUS_INSUFFICIENT_SIZE;
-      }
       // A temporary CUID has no primary to report, whether or not the
       // component has a serial: the handle is not derived from one.
       bool temporary = false;
       status = device->is_temporary_cuid(&temporary);
       if (status != AMDCUID_STATUS_SUCCESS) return status;
       if (temporary) return AMDCUID_STATUS_UNSUPPORTED;
+      if (geteuid() != 0) {
+        return AMDCUID_STATUS_PERMISSION_DENIED;
+      }
+      if (*length < sizeof(amdcuid_id_t)) {
+        *length = sizeof(amdcuid_id_t);
+        return AMDCUID_STATUS_INSUFFICIENT_SIZE;
+      }
       amdcuid_primary_id id = {};
       status = device->get_primary_cuid(id);
       if (status != AMDCUID_STATUS_SUCCESS) return status;
@@ -522,6 +527,7 @@ amdcuid_status_t amdcuid_query_device_property(amdcuid_id_t handle, amdcuid_quer
     } break;
     case AMDCUID_QUERY_DERIVED_CUID: {
       if (*length < sizeof(amdcuid_id_t)) {
+        *length = sizeof(amdcuid_id_t);
         return AMDCUID_STATUS_INSUFFICIENT_SIZE;
       }
       if (data != nullptr) {
@@ -530,16 +536,22 @@ amdcuid_status_t amdcuid_query_device_property(amdcuid_id_t handle, amdcuid_quer
       *length = sizeof(amdcuid_id_t);
     } break;
     case AMDCUID_QUERY_HARDWARE_FINGERPRINT: {
+      // A component with only a temporary CUID discloses no serial, to anyone.
+      bool temporary = false;
+      status = device->is_temporary_cuid(&temporary);
+      if (status != AMDCUID_STATUS_SUCCESS) return status;
+      if (temporary) return AMDCUID_STATUS_UNSUPPORTED;
       if (geteuid() != 0) {
         return AMDCUID_STATUS_PERMISSION_DENIED;
       }
+      uint64_t fingerprint = 0;
+      status = device->get_hardware_fingerprint(fingerprint);
+      if (status != AMDCUID_STATUS_SUCCESS) return status;
       if (*length < sizeof(uint64_t)) {
+        *length = sizeof(uint64_t);
         return AMDCUID_STATUS_INSUFFICIENT_SIZE;
       }
-      if (data != nullptr) {
-        std::memset(data, 0, sizeof(uint64_t));
-        status = device->get_hardware_fingerprint(*(uint64_t*)data);
-      }
+      if (data != nullptr) std::memcpy(data, &fingerprint, sizeof(uint64_t));
       *length = sizeof(uint64_t);
     } break;
     case AMDCUID_QUERY_DEVICE_PATH: {
@@ -560,6 +572,7 @@ amdcuid_status_t amdcuid_query_device_property(amdcuid_id_t handle, amdcuid_quer
     } break;
     case AMDCUID_QUERY_SOURCE: {
       if (*length < sizeof(amdcuid_source_t)) {
+        *length = sizeof(amdcuid_source_t);
         return AMDCUID_STATUS_INSUFFICIENT_SIZE;
       }
       if (data != nullptr) {
@@ -571,6 +584,7 @@ amdcuid_status_t amdcuid_query_device_property(amdcuid_id_t handle, amdcuid_quer
     }
     case AMDCUID_QUERY_DEVICE_TYPE: {
       if (*length < sizeof(amdcuid_device_type_t)) {
+        *length = sizeof(amdcuid_device_type_t);
         return AMDCUID_STATUS_INSUFFICIENT_SIZE;
       }
       if (data != nullptr) {
@@ -581,107 +595,107 @@ amdcuid_status_t amdcuid_query_device_property(amdcuid_id_t handle, amdcuid_quer
       status = AMDCUID_STATUS_SUCCESS;
     } break;
     case AMDCUID_QUERY_VENDOR_ID: {
+      uint16_t vendor_id = 0;
+      status = device->get_vendor_id(vendor_id);
+      if (status != AMDCUID_STATUS_SUCCESS) return status;
       if (*length < sizeof(uint16_t)) {
+        *length = sizeof(uint16_t);
         return AMDCUID_STATUS_INSUFFICIENT_SIZE;
       }
-      if (data != nullptr) {
-        uint16_t vendor_id = 0;
-        status = device->get_vendor_id(vendor_id);
-        std::memcpy(data, &vendor_id, sizeof(uint16_t));
-      }
+      if (data != nullptr) std::memcpy(data, &vendor_id, sizeof(uint16_t));
       *length = sizeof(uint16_t);
     } break;
     case AMDCUID_QUERY_DEVICE_ID: {
+      uint16_t device_id = 0;
+      status = device->get_device_id(device_id);
+      if (status != AMDCUID_STATUS_SUCCESS) return status;
       if (*length < sizeof(uint16_t)) {
+        *length = sizeof(uint16_t);
         return AMDCUID_STATUS_INSUFFICIENT_SIZE;
       }
-      if (data != nullptr) {
-        uint16_t device_id = 0;
-        status = device->get_device_id(device_id);
-        std::memcpy(data, &device_id, sizeof(uint16_t));
-      }
+      if (data != nullptr) std::memcpy(data, &device_id, sizeof(uint16_t));
       *length = sizeof(uint16_t);
     } break;
     case AMDCUID_QUERY_REVISION_ID: {
+      uint8_t revision_id = 0;
+      status = device->get_revision_id(revision_id);
+      if (status != AMDCUID_STATUS_SUCCESS) return status;
       if (*length < sizeof(uint8_t)) {
+        *length = sizeof(uint8_t);
         return AMDCUID_STATUS_INSUFFICIENT_SIZE;
       }
-      if (data != nullptr) {
-        uint8_t revision_id = 0;
-        status = device->get_revision_id(revision_id);
-        std::memcpy(data, &revision_id, sizeof(uint8_t));
-      }
+      if (data != nullptr) std::memcpy(data, &revision_id, sizeof(uint8_t));
       *length = sizeof(uint8_t);
     } break;
     case AMDCUID_QUERY_UNIT_ID: {
+      uint16_t unit_id = 0;
+      status = device->get_unit_id(unit_id);
+      if (status != AMDCUID_STATUS_SUCCESS) return status;
       if (*length < sizeof(uint16_t)) {
+        *length = sizeof(uint16_t);
         return AMDCUID_STATUS_INSUFFICIENT_SIZE;
       }
-      if (data != nullptr) {
-        uint16_t unit_id = 0;
-        status = device->get_unit_id(unit_id);
-        std::memcpy(data, &unit_id, sizeof(uint16_t));
-      }
+      if (data != nullptr) std::memcpy(data, &unit_id, sizeof(uint16_t));
       *length = sizeof(uint16_t);
     } break;
     case AMDCUID_QUERY_FAMILY: {
       // only CPU devices will return a valid family
+      uint16_t family = 0;
+      status = device->get_family(family);
+      if (status != AMDCUID_STATUS_SUCCESS) return status;
       if (*length < sizeof(uint16_t)) {
+        *length = sizeof(uint16_t);
         return AMDCUID_STATUS_INSUFFICIENT_SIZE;
       }
-      if (data != nullptr) {
-        uint16_t family = 0;
-        status = device->get_family(family);
-        std::memcpy(data, &family, sizeof(uint16_t));
-      }
+      if (data != nullptr) std::memcpy(data, &family, sizeof(uint16_t));
       *length = sizeof(uint16_t);
     } break;
     case AMDCUID_QUERY_MODEL: {
       // only CPU devices will return a valid model
+      uint16_t model = 0;
+      status = device->get_model(model);
+      if (status != AMDCUID_STATUS_SUCCESS) return status;
       if (*length < sizeof(uint16_t)) {
+        *length = sizeof(uint16_t);
         return AMDCUID_STATUS_INSUFFICIENT_SIZE;
       }
-      if (data != nullptr) {
-        uint16_t model = 0;
-        status = device->get_model(model);
-        std::memcpy(data, &model, sizeof(uint16_t));
-      }
+      if (data != nullptr) std::memcpy(data, &model, sizeof(uint16_t));
       *length = sizeof(uint16_t);
     } break;
     case AMDCUID_QUERY_CORE_ID: {
       // only CPU devices will return a valid core ID
+      uint16_t core = 0;
+      status = device->get_core(core);
+      if (status != AMDCUID_STATUS_SUCCESS) return status;
       if (*length < sizeof(uint16_t)) {
+        *length = sizeof(uint16_t);
         return AMDCUID_STATUS_INSUFFICIENT_SIZE;
       }
-      if (data != nullptr) {
-        uint16_t core = 0;
-        status = device->get_core(core);
-        std::memcpy(data, &core, sizeof(uint16_t));
-      }
+      if (data != nullptr) std::memcpy(data, &core, sizeof(uint16_t));
       *length = sizeof(uint16_t);
     } break;
     case AMDCUID_QUERY_PHYSICAL_ID: {
       // only CPU devices will return a valid physical package ID
+      uint16_t physical_id = 0;
+      status = device->get_physical_id(physical_id);
+      if (status != AMDCUID_STATUS_SUCCESS) return status;
       if (*length < sizeof(uint16_t)) {
+        *length = sizeof(uint16_t);
         return AMDCUID_STATUS_INSUFFICIENT_SIZE;
       }
-      if (data != nullptr) {
-        uint16_t physical_id = 0;
-        status = device->get_physical_id(physical_id);
-        std::memcpy(data, &physical_id, sizeof(uint16_t));
-      }
+      if (data != nullptr) std::memcpy(data, &physical_id, sizeof(uint16_t));
       *length = sizeof(uint16_t);
     } break;
     case AMDCUID_QUERY_PCI_CLASS: {
       // only PCI devices (GPU, NIC) will return a valid PCI class
+      uint16_t pci_class = 0;
+      status = device->get_pci_class(pci_class);
+      if (status != AMDCUID_STATUS_SUCCESS) return status;
       if (*length < sizeof(uint16_t)) {
+        *length = sizeof(uint16_t);
         return AMDCUID_STATUS_INSUFFICIENT_SIZE;
       }
-      if (data != nullptr) {
-        uint16_t pci_class = 0;
-        status = device->get_pci_class(pci_class);
-        std::memcpy(data, &pci_class, sizeof(uint16_t));
-      }
+      if (data != nullptr) std::memcpy(data, &pci_class, sizeof(uint16_t));
       *length = sizeof(uint16_t);
     } break;
     case AMDCUID_QUERY_BDF: {
@@ -702,14 +716,14 @@ amdcuid_status_t amdcuid_query_device_property(amdcuid_id_t handle, amdcuid_quer
       *length = required_length;
     } break;
     case AMDCUID_QUERY_TEMPORARY_CUID: {
+      bool is_temporary = false;
+      status = device->is_temporary_cuid(&is_temporary);
+      if (status != AMDCUID_STATUS_SUCCESS) return status;
       if (*length < sizeof(bool)) {
+        *length = sizeof(bool);
         return AMDCUID_STATUS_INSUFFICIENT_SIZE;
       }
-      if (data != nullptr) {
-        bool is_temporary = false;
-        status = device->is_temporary_cuid(&is_temporary);
-        *(bool*)data = is_temporary;
-      }
+      if (data != nullptr) std::memcpy(data, &is_temporary, sizeof(bool));
       *length = sizeof(bool);
     } break;
     default:

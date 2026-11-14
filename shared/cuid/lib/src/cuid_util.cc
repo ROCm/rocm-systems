@@ -22,6 +22,7 @@
 #include <vector>
 
 #include "cuid_device.h"
+#include "pci_util.h"
 #include "rocm/sha2/sha256.h"
 #include "smbios_util.h"
 
@@ -191,6 +192,11 @@ std::string CuidUtilities::bdf_to_device_path(const std::string& bdf,
     }
   }
 
+  // A NIC or NPU is classified by its PCI function, with or without an
+  // interface or accel node.
+  if ((device_type == AMDCUID_DEVICE_TYPE_NIC || device_type == AMDCUID_DEVICE_TYPE_NPU) &&
+      access(pci_device_path.c_str(), F_OK) == 0)
+    return pci_device_path;
   return "";
 }
 
@@ -298,58 +304,41 @@ bool is_gpu_vf_mode(int fd) {
   return mode == kAmdgpuIdsFlagsModeVf;
 }
 
-uint16_t get_vf_index_from_sysfs(const std::string& device_path) {
-  // device_path is the VF's PCI function directory, or a link to it.
-  std::string physfn_path = device_path + "/physfn";
-
-  char own_real[PATH_MAX];
-  if (realpath(device_path.c_str(), own_real) == nullptr) return 0;
-  const char* our_bdf_ptr = strrchr(own_real, '/');
-  if (our_bdf_ptr == nullptr) return 0;
-  std::string our_bdf(our_bdf_ptr + 1);
-
-  // Resolve PF sysfs path via physfn symlink
-  char pf_real[PATH_MAX];
-  if (realpath(physfn_path.c_str(), pf_real) == nullptr) return 0;
-  std::string pf_path(pf_real);
-
-  // Enumerate virtfnX symlinks on the PF to find our VF index
-  for (int idx = 0; idx < 256; ++idx) {
-    std::string virtfn_symlink = pf_path + "/virtfn" + std::to_string(idx);
-    char vfn_link[PATH_MAX];
-    const ssize_t len = readlink(virtfn_symlink.c_str(), vfn_link, sizeof(vfn_link) - 1);
-    if (len <= 0) break;  // no more VFs
-    vfn_link[len] = '\0';
-
-    const char* vfn_bdf_ptr = strrchr(vfn_link, '/');
-    if (vfn_bdf_ptr == nullptr) continue;
-    if (our_bdf == (vfn_bdf_ptr + 1)) {
-      return static_cast<uint16_t>(idx + 1);
-    }
-  }
-  return 0;
-}
-
 }  // anonymous namespace
 
-CuidUtilities::VfIdentity CuidUtilities::get_gpu_vf_identity(const std::string& device_path) {
-  VfIdentity id;
-  // Only world-readable evidence counts, so every caller sees the same
-  // component: the physfn link a host shows on its VFs. A guest's VF has none
-  // and is named by its own BDF like any other function.
-  // The link itself decides: a container may show it without the PF it names,
-  // and such a VF has no index rather than none of a VF's limits.
-  struct stat link = {};
-  if (lstat((device_path + "/physfn").c_str(), &link) != 0 || !S_ISLNK(link.st_mode)) return id;
-  id.is_vf = true;
-
-  // The index is 1-based, leaving 0 to mean the card as a whole.
-  const uint16_t vf_index = get_vf_index_from_sysfs(device_path);
-  if (vf_index > 0) {
-    id.index_known = true;
-    id.unit_id = vf_index;
+amdcuid_status_t CuidUtilities::read_pci_class(const std::string& function_path,
+                                               const std::string& bdf, uint16_t& pci_class) {
+  const std::string text = read_sysfs_file(function_path + "/class");
+  if (text.empty()) {
+    if (bdf.empty()) return AMDCUID_STATUS_FILE_ERROR;
+    uint8_t bytes[2] = {0};
+    const amdcuid_status_t status = PciUtil::read_pci_config_space(bdf, bytes, 2, 0xa);
+    if (status != AMDCUID_STATUS_SUCCESS) return status;
+    pci_class = PciUtil::load_le16(bytes);
+    return AMDCUID_STATUS_SUCCESS;
   }
-  return id;
+  if (text.size() != 8 || text[0] != '0' || (text[1] != 'x' && text[1] != 'X'))
+    return AMDCUID_STATUS_INVALID_FORMAT;
+  uint32_t value = 0;
+  for (size_t i = 2; i < text.size(); ++i) {
+    const char c = text[i];
+    const int digit = (c >= '0' && c <= '9')   ? c - '0'
+                      : (c >= 'a' && c <= 'f') ? c - 'a' + 10
+                      : (c >= 'A' && c <= 'F') ? c - 'A' + 10
+                                               : -1;
+    if (digit < 0) return AMDCUID_STATUS_INVALID_FORMAT;
+    value = (value << 4) | static_cast<uint32_t>(digit);
+  }
+  pci_class = static_cast<uint16_t>(value >> 8);
+  return AMDCUID_STATUS_SUCCESS;
+}
+
+bool CuidUtilities::is_host_vf(const std::string& device_path) {
+  // Only world-readable evidence counts, so every caller sees the same
+  // component: the physfn link a host shows on its VFs. A guest's VF has none.
+  // The link itself decides: a container may show it without the PF it names.
+  struct stat link = {};
+  return lstat((device_path + "/physfn").c_str(), &link) == 0 && S_ISLNK(link.st_mode);
 }
 
 bool CuidUtilities::gpu_reports_vf_mode(const std::string& device_path) {
@@ -373,9 +362,11 @@ uint16_t CuidUtilities::segment_high_from_bdf(const std::string& bdf) {
   return static_cast<uint16_t>(segment >> 16);
 }
 
-void CuidUtilities::set_pcie_routing(AuxiliaryInput& input, const std::string& bdf) {
+amdcuid_status_t CuidUtilities::set_pcie_routing(AuxiliaryInput& input, const std::string& bdf) {
+  if (!is_valid_bdf(bdf)) return AMDCUID_STATUS_INVALID_FORMAT;
   input.routing_id = routing_id_from_bdf(bdf);
   input.segment_high = segment_high_from_bdf(bdf);
+  return AMDCUID_STATUS_SUCCESS;
 }
 
 uint32_t CuidUtilities::routing_id_from_bdf(const std::string& bdf) {
@@ -804,6 +795,6 @@ bool CuidUtilities::is_valid_bdf(const std::string& bdf) {
     if (!is_hex(bdf[i])) return false;
   }
   const char* t = bdf.c_str() + colon;
-  return t[0] == ':' && is_hex(t[1]) && is_hex(t[2]) && t[3] == ':' && is_hex(t[4]) &&
-         is_hex(t[5]) && t[6] == '.' && is_hex(t[7]);
+  return t[0] == ':' && is_hex(t[1]) && is_hex(t[2]) && t[3] == ':' && t[4] >= '0' && t[4] <= '1' &&
+         is_hex(t[5]) && t[6] == '.' && t[7] >= '0' && t[7] <= '7';
 }

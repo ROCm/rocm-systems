@@ -14,6 +14,7 @@ import importlib.util
 import io
 import json
 import os
+import re
 import sys
 import types
 import unittest
@@ -175,8 +176,8 @@ class _FakeHelpers:
     def run_device_subcommand(self, subcommand, args, **device_kwarg):
         return self._real.run_device_subcommand(self, subcommand, args, **device_kwarg)
 
-    def get_gpu_cuid_info(self, device_handle, include_primary=False):
-        return self._real.get_gpu_cuid_info(self, device_handle, include_primary)
+    def get_gpu_cuid_info(self, device_handle):
+        return self._real.get_gpu_cuid_info(self, device_handle)
 
     def get_gpu_id_from_device_handle(self, device_handle):
         return device_handle
@@ -287,7 +288,6 @@ class TestStaticCuidOutputShape(unittest.TestCase):
                 "fb_info",
                 "num_vf",
                 "cuid",
-                "cuid_primary",
             ),
             False,
         )
@@ -306,35 +306,24 @@ class TestStaticCuidOutputShape(unittest.TestCase):
         self.assertEqual(len(document["gpu_data"]), len(self.GPU_HANDLES))
         for gpu_block in document["gpu_data"]:
             self.assertEqual(
-                sorted(gpu_block["cuid"]),
-                [
-                    "auxiliary",
-                    "component_type",
-                    "cuid_metadata_status",
-                    "derived_cuid",
-                    "identifier_kind",
-                    "primary_cuid",
-                    "source",
-                ],
+                list(gpu_block["cuid"]),
+                ["cuid", "component_type", "source", "temporary", "cuid_metadata_status"],
             )
 
     def test_human_readable_prints_one_block_per_gpu(self):
         printed = self._run("human_readable", cuid=True)
 
-        self.assertEqual(printed.count("DERIVED_CUID"), len(self.GPU_HANDLES))
+        self.assertEqual(
+            len(re.findall(r"^\s+CUID: deadbeef-", printed, re.MULTILINE)), len(self.GPU_HANDLES)
+        )
+        self.assertNotIn("PRIMARY", printed)
         self.assertNotIn("SEED", printed)
 
     def test_csv_keeps_the_per_device_names(self):
         printed = self._run("csv", cuid=True)
 
-        self.assertIn("gpu,derived_cuid,primary_cuid,component_type,auxiliary,source", printed)
+        self.assertIn("gpu,cuid,component_type,source,temporary,cuid_metadata_status", printed)
         self.assertNotIn("seed", printed)
-
-    def test_cuid_primary_alone_selects_the_block(self):
-        document = json.loads(self._run("json", cuid_primary=True))
-
-        for gpu_block in document["gpu_data"]:
-            self.assertIn("cuid", gpu_block)
 
     def test_no_cuid_block_unless_asked(self):
         document = json.loads(self._run("json", asic=True))

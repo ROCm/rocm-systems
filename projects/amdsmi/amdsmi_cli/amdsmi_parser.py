@@ -1518,7 +1518,7 @@ class AMDSMIParser(argparse.ArgumentParser):
     ):
         # Device arguments help text
         gpu_help = (
-            f"Select a GPU ID, BDF, or UUID from the possible choices:\n{self.gpu_choices_str}"
+            f"Select a GPU ID, BDF, UUID or CUID from the possible choices:\n{self.gpu_choices_str}"
         )
         vf_help = "Gets general information about the specified VF (timeslice, fb info, …).\
                     \nAvailable only on virtualization OSs"
@@ -1680,7 +1680,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         list_help = "List GPU information"
         list_optionals_title = "List Arguments"
         list_subcommand_help = f"{self.description}\n\nLists all detected devices on the system.\
-                            \nLists the BDF, UUID, KFD_ID, NODE_ID, and Partition ID for each GPU and/or CPUs.\
+                            \nLists the BDF, UUID, KFD_ID, NODE_ID, Partition ID and CUID for each GPU and/or CPUs.\
                             \nIn virtualization environments, it can also list VFs associated to each\
                             \nGPU with some basic information for each VF."
         enumeration_help = "Enumeration mapping to other features.\
@@ -1721,16 +1721,9 @@ class AMDSMIParser(argparse.ArgumentParser):
         xgmi_plpd_help = "The available XGMI per-link power down policy"
         process_isolation_help = "The process isolation status"
         cuid_help = (
-            "Component Unified ID: the derived CUID, its component type, whether it is a\n"
-            "temporary (auxiliary) identifier, and which layer answered.\n"
-            "Not part of the default `amd-smi static` output; ask for it.\n"
-            "The primary CUID is not shown by default either: its payload embeds the raw\n"
-            "serial number. Add --cuid-primary, as root, to include it."
-        )
-        cuid_primary_help = (
-            "Include the primary CUID in the CUID output, implying --cuid. Requires\n"
-            "privilege, and prints a value that embeds the device serial number. Do not\n"
-            "paste it into a bug report."
+            "Component Unified ID: the CUID, its component type, which layer answered,\n"
+            "and whether it is temporary.\n"
+            "Not part of the default `amd-smi static` output; ask for it."
         )
         profile_help = "Display current and available power profiles"
         clk_options = self.helpers.get_clock_types()[0]
@@ -1814,9 +1807,6 @@ class AMDSMIParser(argparse.ArgumentParser):
             )
             static_parser.add_argument(
                 "-Y", "--cuid", action="store_true", required=False, help=cuid_help
-            )
-            static_parser.add_argument(
-                "-y", "--cuid-primary", action="store_true", required=False, help=cuid_primary_help
             )
             static_parser.add_argument(
                 "-C",
@@ -3620,9 +3610,6 @@ class AMDSMIParser(argparse.ArgumentParser):
             "Lists the CUID of every component on the node: the platform, CPU\n"
             "packages, GPUs, NPUs and NICs. Every CUID is temporary."
         )
-        node_cuid_primary_help = (
-            "Include each component's primary CUID, implying --cuid. Requires root."
-        )
 
         node_parser = subparsers.add_parser(
             "node", help=node_help, description=node_subcommand_help
@@ -3652,9 +3639,6 @@ class AMDSMIParser(argparse.ArgumentParser):
         )
         node_parser.add_argument(
             "-Y", "--cuid", action="store_true", required=False, help=node_cuid_help
-        )
-        node_parser.add_argument(
-            "-y", "--cuid-primary", action="store_true", required=False, help=node_cuid_primary_help
         )
 
         # Add Universal Arguments

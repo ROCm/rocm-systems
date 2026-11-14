@@ -33,6 +33,10 @@ class CuidPlatform : public CuidDevice {
 
   // Virtual accessor overrides
   amdcuid_status_t get_vendor_id(uint16_t& vendor_id) const override;
+  amdcuid_status_t get_unit_id(uint16_t& unit_id) const override {
+    unit_id = 0;
+    return AMDCUID_STATUS_SUCCESS;
+  }
 
   const amdcuid_platform_info& get_info() const;
 
