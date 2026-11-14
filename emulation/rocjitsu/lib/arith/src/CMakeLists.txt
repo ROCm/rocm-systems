@@ -74,6 +74,8 @@ add_library(
     integer/bitfield.cpp
     integer/boolean.cpp
     integer/carry.cpp
+    integer/integer64.cpp
+    integer/byte_shift.cpp
     integer/integer16.cpp
     integer/integer16_ternary.cpp
     integer/integer_add.cpp

@@ -271,6 +271,8 @@ foreach(
     IN
     ITEMS
         half_binary
+        integer64
+        byte_shift
         half_ternary
         add
         multiply
@@ -281,7 +283,7 @@ foreach(
         boolean
         mad
         packed_binary
-        packed_mad
+        packed_ternary
         shift
         sad
         carry

@@ -63,4 +63,15 @@ gfx1250 half-input WMMA forms plus sixteen FP8/BF8 K64/K128 forms.
 gfx942 FP8/BF8 uses FNUZ; gfx950 and gfx1250 use OCP.
 All have scalar, AVX2 and AVX-512-v4 implementations. Loose, allow-Loose and
 Compatibility are supported; strict bit-exact modes are not advertised.
-Other CDNA instruction families retain their existing handlers.
+
+## CDNA integer operations
+
+CDNA vector 32-bit integer arithmetic, carry/borrow, 64-bit shifts and widening
+MAD/QSAD use the same library kernels on gfx942, gfx950 and gfx1250. Their
+architecture-specific spellings are resolved in the simulator binding. These
+integer operations support all semantics and reuse the existing scalar and SIMD
+backends. Dedicated AVX-512 coverage varies by operation.
+Halfword and packed-integer operations also reuse the library, preserving CDNA
+low-half destination zero-extension. DOT2/4/8 use [integer_dot.cpp](src/dot/integer_dot.cpp); CDNA-specific
+PRNG, BITOP3, rotate, funnel-shift and bit-count forms also route through
+the library.

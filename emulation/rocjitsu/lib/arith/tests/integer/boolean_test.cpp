@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-// Tests for two- and three-input bitwise boolean operations.
+// Tests for wordwise boolean operations and the stochastic-rounding LFSR step.
 
 #include "integer/boolean_test.h"
 #include "rj_arith/detail/rj_arith_integer.h"
@@ -115,3 +115,55 @@ TEST(IntegerXnorB32W64, Arithmetic) {
   rocjitsu::arith::test::check_boolean<64, 2>(rj_arith_v_xnor_b32_w64,
                                               rocjitsu::arith::test::Boolean::Xnor);
 }
+
+// Reference polynomial division over GF(2), independent of the SIMD feedback selection.
+template <int Lanes, typename Call> void check_prng(Call call) {
+  rocjitsu::arith::test::check_integer_word<Lanes, 1, true>(
+      call,
+      [](uint32_t a, uint32_t, uint32_t, uint32_t, uint32_t, int) {
+        uint64_t polynomial = uint64_t(a) * 2;
+        if (polynomial >> 32) {
+          polynomial ^= 0x1000000c5ULL;
+        }
+        return uint32_t(polynomial);
+      },
+      RJ_ARITH_ALU_CLAMP, false);
+}
+
+TEST(IntegerPrngB32W32, Arithmetic) { check_prng<32>(rj_arith_v_prng_b32_w32); }
+TEST(IntegerPrngB32W64, Arithmetic) { check_prng<64>(rj_arith_v_prng_b32_w64); }
+
+// Check truth-table basis bits and a combined parity table with selectors, masks and aliases.
+template <int Lanes, bool Half, typename Call> void check_bitop3(Call call) {
+  using namespace rocjitsu::arith::test;
+  const uint64_t controls =
+      RJ_ARITH_BITOP3_TABLE_MASK | RJ_ARITH_ALU_CLAMP |
+      (Half ? RJ_ARITH_ALU_HIGH_A | RJ_ARITH_ALU_HIGH_B | RJ_ARITH_ALU_HIGH_C | RJ_ARITH_ALU_HIGH_D
+            : 0);
+  for (uint32_t table : {0U, 0x96U}) {
+    check_integer_word<Lanes, 3, true>(
+        [=](uint64_t flags, auto exec_mask, uint64_t mode, uint32_t *const *d,
+            const uint32_t *const *a, const uint32_t *const *b,
+            const uint32_t *const *c) { return call(flags, exec_mask, mode | table, d, a, b, c); },
+        [=](uint32_t a, uint32_t b, uint32_t c, uint32_t d, uint32_t mode, int) {
+          mode |= table;
+          int sa = Half && (mode & RJ_ARITH_ALU_HIGH_A) ? 16 : 0;
+          int sb = Half && (mode & RJ_ARITH_ALU_HIGH_B) ? 16 : 0;
+          int sc = Half && (mode & RJ_ARITH_ALU_HIGH_C) ? 16 : 0;
+          int sd = Half && (mode & RJ_ARITH_ALU_HIGH_D) ? 16 : 0;
+          uint32_t result = 0;
+          for (int bit = 0; bit < (Half ? 16 : 32); ++bit) {
+            int index = (((a >> (sa + bit)) & 1) << 2) | (((b >> (sb + bit)) & 1) << 1) |
+                        ((c >> (sc + bit)) & 1);
+            result |= ((mode >> index) & 1) << bit;
+          }
+          return Half ? (d & ~(0xffffU << sd)) | (result << sd) : result;
+        },
+        controls);
+  }
+}
+
+TEST(IntegerBitop3B32W32, Arithmetic) { check_bitop3<32, false>(rj_arith_v_bitop3_b32_w32); }
+TEST(IntegerBitop3B32W64, Arithmetic) { check_bitop3<64, false>(rj_arith_v_bitop3_b32_w64); }
+TEST(IntegerBitop3B16W32, Arithmetic) { check_bitop3<32, true>(rj_arith_v_bitop3_b16_w32); }
+TEST(IntegerBitop3B16W64, Arithmetic) { check_bitop3<64, true>(rj_arith_v_bitop3_b16_w64); }

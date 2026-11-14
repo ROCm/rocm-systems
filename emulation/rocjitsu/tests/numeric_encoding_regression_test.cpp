@@ -3,6 +3,7 @@
 
 #include "compute_unit_test_util.h"
 #include "decode_test_util.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/machine_insts.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/machine_insts.h"
@@ -377,6 +378,47 @@ TEST_P(LegacyMathRegression, LegacyMathDecodesAndExecutesBothForms) {
     put(0, zero);
     check(vop1(cdna4::kVLogLegacyF32Vop1), 0xff800000);
     check(vop3(cdna4::kVLogLegacyF32Vop3), 0xff800000);
+  }
+}
+
+// The same truth table uses a full-word destination on gfx950, but a half write on gfx1250.
+TEST_P(NumericEncodingRegression, Bitop3TruthTableAndHalfPublication) {
+  const bool is_cdna5 = std::get<0>(GetParam()) == ROCJITSU_CODE_ARCH_CDNA5;
+  constexpr uint32_t a = 0x1234abcdU, b = 0xff00aa55U, c = 0x55558888U;
+  put(0, a);
+  put(1, b);
+  put(2, c);
+  wave_->set_exec(0x3333333333333333ULL);
+  for (bool half : {false, true}) {
+    for (uint32_t table : {0x96U, 0xcaU}) {
+      uint32_t result = table == 0x96 ? a ^ b ^ c : (a & b) | (~a & c);
+      if (half) {
+        result = (result & 0xffffU) | (is_cdna5 ? 0xdead0000U : 0U);
+      }
+      // Populate only encoding fields: ABS/NEG/OMOD encode the table, not source modifiers.
+      auto encode = [&](auto inst, uint16_t op, uint32_t encoding) {
+        inst.encoding = encoding;
+        inst.op = op;
+        inst.vdst = 4;
+        inst.src0 = 256;
+        inst.src1 = 257;
+        inst.src2 = 258;
+        inst.omod = table >> 6;
+        inst.abs = (table >> 3) & 7;
+        inst.neg = table & 7;
+        inst.clamp = 1;
+        return std::bit_cast<std::array<uint32_t, 2>>(inst);
+      };
+      if (is_cdna5) {
+        check(encode(cdna5::Vop3MachineInst{},
+                     half ? cdna5::kVBitop3B16Vop3 : cdna5::kVBitop3B32Vop3, 0x35),
+              result);
+      } else {
+        check(encode(cdna4::Vop3MachineInst{},
+                     half ? cdna4::kVBitop3B16Vop3 : cdna4::kVBitop3B32Vop3, 0x34),
+              result);
+      }
+    }
   }
 }
 
