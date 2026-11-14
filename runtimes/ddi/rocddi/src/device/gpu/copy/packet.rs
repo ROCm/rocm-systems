@@ -1,292 +1,100 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-//! SDMA packet encoders for the qualified GPU target dialects.
+//! Qualified copy recipes composed with the shared native ABCE encoders.
 
-use super::{
-    COMMAND_BYTES, COPY_PACKET_BYTES, FILL_COMMAND_BYTES, FILL_PACKET_BYTES, GCR_INVALIDATE,
-    GCR_PACKET_BYTES, GCR_WRITEBACK, GFX1250_GCR_PACKET_BYTES, GpuCopyOptions,
-    GpuCopySignalOperation, SDMA_CONST_FILL_DWORD, SDMA_COPY_LINEAR, SDMA_COPY_SWAP,
-    SDMA_SIGNAL_ADD64, SDMA_SIGNAL_SUB64, SDMA_SIGNAL_WRITE64, SDMA_TIMESTAMP_GET_GLOBAL_GFX9,
-    SDMA_TIMESTAMP_GET_GLOBAL_SYS, SDMA_USER_GCR, SWAP_PACKET_BYTES, SdmaProtocol,
-    TIMESTAMP_PACKET_BYTES,
+use super::{GpuCopyOptions, GpuCopySignalOperation, SdmaProtocol};
+use crate::device::gpu::abce::{
+    self,
+    abi::{abce_builder_t, abce_isa_version_t, abce_wait_signal_params_t},
 };
-
-fn encode_cache_envelope(command: &mut [u32], trailing_gcr: usize) {
-    command.fill(0);
-    command[0] = SDMA_USER_GCR;
-    command[2] = GCR_WRITEBACK | GCR_INVALIDATE;
-    command[trailing_gcr] = SDMA_USER_GCR;
-    command[trailing_gcr + 2] = GCR_WRITEBACK;
-}
-
-fn encode_copy(command: &mut [u32], destination: u64, source: u64, size: u32) {
-    // The command allocation is reused only after native retirement. Every
-    // word is written, including reserved fields, before the release fence.
-    encode_cache_envelope(command, 12);
-    encode_copy_packet(command, 5, destination, source, size);
-}
-
-#[allow(
-    clippy::cast_possible_truncation,
-    reason = "packet addresses are deliberately split into their low and high dwords"
-)]
-fn encode_copy_packet(
-    command: &mut [u32],
-    offset: usize,
-    destination: u64,
-    source: u64,
-    size: u32,
-) {
-    command[offset] = SDMA_COPY_LINEAR;
-    command[offset + 1] = size - 1;
-    command[offset + 3] = source as u32;
-    command[offset + 4] = (source >> 32) as u32;
-    command[offset + 5] = destination as u32;
-    command[offset + 6] = (destination >> 32) as u32;
-}
-
-#[allow(
-    clippy::cast_possible_truncation,
-    reason = "the packet address is deliberately split into low and high dwords"
-)]
-fn encode_fill(command: &mut [u32], destination: u64, value: u32, count: u32) {
-    encode_cache_envelope(command, 10);
-    command[5] = SDMA_CONST_FILL_DWORD;
-    command[6] = destination as u32;
-    command[7] = (destination >> 32) as u32;
-    command[8] = value;
-    command[9] = (count - 1) * 4;
-}
-
-fn encode_gfx1250_cache_envelope(command: &mut [u32], trailing_gcr: usize) {
-    command.fill(0);
-    command[0] = SDMA_USER_GCR;
-    command[3] = (1 << 4) | (1 << 14);
-    command[trailing_gcr] = SDMA_USER_GCR;
-    command[trailing_gcr + 3] = (1 << 4) | (1 << 15);
-}
-
-#[allow(
-    clippy::cast_possible_truncation,
-    reason = "packet addresses are deliberately split into low and high dwords"
-)]
-fn encode_gfx1250_copy_packet(
-    command: &mut [u32],
-    offset: usize,
-    destination: u64,
-    source: u64,
-    size: u32,
-) {
-    command[offset] = SDMA_COPY_LINEAR | (1 << 28);
-    command[offset + 1] = size - 1;
-    command[offset + 2] = (3 << 18) | (3 << 26);
-    command[offset + 3] = source as u32;
-    command[offset + 4] = (source >> 32) as u32;
-    command[offset + 5] = destination as u32;
-    command[offset + 6] = (destination >> 32) as u32;
-}
-
-fn encode_gfx1250_copy(
-    command: &mut [u32],
-    destination: u64,
-    source: u64,
-    size: u32,
-    timing: Option<TimingAddresses>,
-) -> u64 {
-    let copy_offset = 6 + usize::from(timing.is_some_and(|timing| timing.start.is_some())) * 3;
-    let end_offset = copy_offset + COPY_PACKET_BYTES / 4;
-    let trailing_gcr = end_offset + usize::from(timing.is_some()) * 3;
-    encode_gfx1250_cache_envelope(command, trailing_gcr);
-    if let Some(start) = timing.and_then(|timing| timing.start) {
-        encode_timestamp(command, 6, start);
-    }
-    encode_gfx1250_copy_packet(command, copy_offset, destination, source, size);
-    if let Some(timing) = timing {
-        encode_timestamp(command, end_offset, timing.end);
-    }
-    ((trailing_gcr + GFX1250_GCR_PACKET_BYTES / 4) * 4) as u64
-}
-
-#[allow(
-    clippy::cast_possible_truncation,
-    reason = "packet address is deliberately split into low and high dwords"
-)]
-fn encode_gfx1250_fill(command: &mut [u32], destination: u64, value: u32, count: u32) -> u64 {
-    let trailing_gcr = 6 + FILL_PACKET_BYTES / 4;
-    encode_gfx1250_cache_envelope(command, trailing_gcr);
-    command[6] = SDMA_CONST_FILL_DWORD | (3 << 24) | (1 << 29);
-    command[7] = destination as u32;
-    command[8] = (destination >> 32) as u32;
-    command[9] = value;
-    command[10] = (count - 1) * 4;
-    ((trailing_gcr + GFX1250_GCR_PACKET_BYTES / 4) * 4) as u64
-}
-
-#[allow(
-    clippy::cast_possible_truncation,
-    reason = "packet addresses are deliberately split into low and high dwords"
-)]
-fn encode_gfx1250_swap(
-    command: &mut [u32],
-    address_a: u64,
-    address_b: u64,
-    size: u32,
-    timing: Option<TimingAddresses>,
-) -> u64 {
-    let swap_offset = 6 + usize::from(timing.is_some_and(|timing| timing.start.is_some())) * 3;
-    let end_offset = swap_offset + SWAP_PACKET_BYTES / 4;
-    let trailing_gcr = end_offset + usize::from(timing.is_some()) * 3;
-    encode_gfx1250_cache_envelope(command, trailing_gcr);
-    if let Some(start) = timing.and_then(|timing| timing.start) {
-        encode_timestamp(command, 6, start);
-    }
-    command[swap_offset] = SDMA_COPY_SWAP;
-    command[swap_offset + 1] = size - 1;
-    command[swap_offset + 2] = (3 << 18) | (3 << 26);
-    command[swap_offset + 3] = address_a as u32;
-    command[swap_offset + 4] = (address_a >> 32) as u32;
-    command[swap_offset + 5] = address_b as u32;
-    command[swap_offset + 6] = (address_b >> 32) as u32;
-    if let Some(timing) = timing {
-        encode_timestamp(command, end_offset, timing.end);
-    }
-    ((trailing_gcr + GFX1250_GCR_PACKET_BYTES / 4) * 4) as u64
-}
-
-#[allow(
-    clippy::cast_possible_truncation,
-    reason = "packet addresses and operands are deliberately split into dwords"
-)]
-fn encode_gfx1250_controlled(
-    command: &mut [u32],
-    destination: u64,
-    source: u64,
-    size: u32,
-    swap: bool,
-    options: GpuCopyOptions,
-    timing: Option<TimingAddresses>,
-) -> u64 {
-    let packet_offset = 6 + usize::from(timing.is_some_and(|timing| timing.start.is_some())) * 3;
-    let copy_offset = packet_offset + 1 + usize::from(options.wait.is_some()) * 7;
-    let signal_offset = copy_offset + 6;
-    let end_offset = signal_offset + usize::from(options.signal.is_some()) * 5;
-    let trailing_gcr = end_offset + usize::from(timing.is_some()) * 3;
-    encode_gfx1250_cache_envelope(command, trailing_gcr);
-    if let Some(start) = timing.and_then(|timing| timing.start) {
-        encode_timestamp(command, 6, start);
-    }
-
-    command[packet_offset] = (if swap {
-        SDMA_COPY_SWAP
-    } else {
-        SDMA_COPY_LINEAR
-    }) | u32::from(options.indirect_source) << 20
-        | u32::from(options.indirect_destination) << 21
-        | u32::from(options.wait.is_some()) << 30
-        | u32::from(options.signal.is_some()) << 31;
-    if let Some(wait) = options.wait {
-        let offset = packet_offset + 1;
-        command[offset] = u32::from(wait.function) | (3 << 18);
-        command[offset + 1] = wait.address as u32;
-        command[offset + 2] = (wait.address >> 32) as u32;
-        command[offset + 3] = wait.reference as u32;
-        command[offset + 4] = (wait.reference >> 32) as u32;
-        command[offset + 5] = wait.mask as u32;
-        command[offset + 6] = (wait.mask >> 32) as u32;
-    }
-    command[copy_offset] = size - 1;
-    command[copy_offset + 1] = if options.indirect_source || options.indirect_destination {
-        (3 << 10) | (3 << 18) | (3 << 26)
-    } else {
-        (3 << 18) | (3 << 26)
-    };
-    command[copy_offset + 2] = source as u32;
-    command[copy_offset + 3] = (source >> 32) as u32;
-    command[copy_offset + 4] = destination as u32;
-    command[copy_offset + 5] = (destination >> 32) as u32;
-    if let Some(signal) = options.signal {
-        command[signal_offset] = (match signal.operation {
-            GpuCopySignalOperation::Write => SDMA_SIGNAL_WRITE64,
-            GpuCopySignalOperation::Add => SDMA_SIGNAL_ADD64,
-            GpuCopySignalOperation::Subtract => SDMA_SIGNAL_SUB64,
-        }) | (3 << 18);
-        command[signal_offset + 1] = signal.address as u32;
-        command[signal_offset + 2] = (signal.address >> 32) as u32;
-        command[signal_offset + 3] = signal.data as u32;
-        command[signal_offset + 4] = (signal.data >> 32) as u32;
-    }
-    if let Some(timing) = timing {
-        encode_timestamp(command, end_offset, timing.end);
-    }
-    ((trailing_gcr + GFX1250_GCR_PACKET_BYTES / 4) * 4) as u64
-}
 
 /// Optional GPU timestamp destinations for one encoded command.
 #[derive(Clone, Copy)]
 pub(super) struct TimingAddresses {
-    /// First-packet timestamp address, when start timing is requested.
     pub(super) start: Option<u64>,
-    /// Address written after the last packet.
     pub(super) end: u64,
 }
 
-#[allow(
-    clippy::cast_possible_truncation,
-    reason = "packet addresses are deliberately split into their low and high dwords"
-)]
-fn encode_timestamp(command: &mut [u32], offset: usize, address: u64) {
-    command[offset] = SDMA_TIMESTAMP_GET_GLOBAL_SYS;
-    command[offset + 1] = address as u32;
-    command[offset + 2] = (address >> 32) as u32;
-}
-
-#[allow(
-    clippy::cast_possible_truncation,
-    reason = "the timestamp address is deliberately split into low and high dwords"
-)]
-pub(super) fn encode_gfx9_timestamp(command: &mut [u32], offset: usize, address: u64) {
-    command[offset] = SDMA_TIMESTAMP_GET_GLOBAL_GFX9;
-    command[offset + 1] = address as u32;
-    command[offset + 2] = (address >> 32) as u32;
-}
-
-fn encode_timed_copy(
-    command: &mut [u32],
-    destination: u64,
-    source: u64,
-    size: u32,
-    timing: TimingAddresses,
-) -> u64 {
-    let copy_offset = 5 + usize::from(timing.start.is_some()) * TIMESTAMP_PACKET_BYTES / 4;
-    let end_offset = copy_offset + COPY_PACKET_BYTES / 4;
-    let trailing_gcr = end_offset + TIMESTAMP_PACKET_BYTES / 4;
-    encode_cache_envelope(command, trailing_gcr);
-    if let Some(start) = timing.start {
-        encode_timestamp(command, 5, start);
+fn builder(protocol: SdmaProtocol) -> abce_builder_t {
+    let isa = match protocol {
+        SdmaProtocol::Gfx9 => abce_isa_version_t {
+            major: 9,
+            minor: 0,
+            stepping: 0,
+        },
+        SdmaProtocol::Gfx12_0 => abce_isa_version_t {
+            major: 12,
+            minor: 0,
+            stepping: 0,
+        },
+        SdmaProtocol::Gfx12_5 => abce_isa_version_t {
+            major: 12,
+            minor: 5,
+            stepping: 0,
+        },
+    };
+    #[allow(unsafe_code)]
+    // SAFETY: Defaults are valid for every qualified dialect and initialize
+    // every field before the value is read.
+    unsafe {
+        let mut builder = std::mem::MaybeUninit::uninit();
+        abce::abce_builder_initialize(isa, std::ptr::null(), builder.as_mut_ptr());
+        builder.assume_init()
     }
-    encode_copy_packet(command, copy_offset, destination, source, size);
-    encode_timestamp(command, end_offset, timing.end);
-    ((trailing_gcr + GCR_PACKET_BYTES / 4) * 4) as u64
+}
+
+fn controls(options: GpuCopyOptions) -> abce_wait_signal_params_t {
+    #[allow(unsafe_code)]
+    // SAFETY: The initializer has no pointer inputs.
+    let mut params = unsafe { abce::abce_wait_signal_none() };
+    if let Some(wait) = options.wait {
+        params.wait_addr = wait.address as *mut _;
+        params.wait_function = u32::from(wait.function);
+        params.wait_reference = wait.reference;
+        params.wait_mask = wait.mask;
+    }
+    if let Some(signal) = options.signal {
+        params.signal_addr = signal.address as *mut _;
+        params.signal_operation = match signal.operation {
+            GpuCopySignalOperation::Write => 0x67,
+            GpuCopySignalOperation::Add => 0x6f,
+            GpuCopySignalOperation::Subtract => 0x70,
+        };
+        params.signal_value = signal.data;
+    }
+    params
+}
+
+#[allow(unsafe_code)]
+pub(super) fn encode_gfx9_timestamp(words: &mut [u32], offset: usize, address: u64) {
+    let output = &mut words[offset..offset + 3];
+    output.fill(0);
+    // SAFETY: A timestamp occupies exactly the three checked dwords. The GPU
+    // address is encoded, not dereferenced by the host.
+    unsafe {
+        abce::abce_builder_build_get_global_timestamp(
+            &builder(SdmaProtocol::Gfx9),
+            output.as_mut_ptr().cast(),
+            address as *mut _,
+        );
+    }
 }
 
 /// Native SDMA operation encoded into the shared indirect buffer.
 #[derive(Clone, Copy)]
 pub(super) enum SdmaCommand {
-    /// Copies bytes from source to destination.
     Copy {
         destination: u64,
         source: u64,
         size: u32,
         options: GpuCopyOptions,
     },
-    /// Writes a dword value to a consecutive destination range.
     Fill {
         destination: u64,
         value: u32,
         count: u32,
     },
-    /// Exchanges equal-sized source and destination ranges.
     Swap {
         address_a: u64,
         address_b: u64,
@@ -297,8 +105,9 @@ pub(super) enum SdmaCommand {
 
 impl SdmaCommand {
     #[allow(
-        clippy::cast_possible_truncation,
-        reason = "SDMA packet addresses are split deliberately into low and high dwords"
+        unsafe_code,
+        clippy::too_many_lines,
+        reason = "the complete bounded packet recipe is kept together"
     )]
     pub(super) fn encode(
         &self,
@@ -306,100 +115,225 @@ impl SdmaCommand {
         timing: Option<TimingAddresses>,
         protocol: SdmaProtocol,
     ) -> u64 {
+        let builder = builder(protocol);
+        // These safe entry points must bound the raw emitter even if a future
+        // caller forgets CopyResources' chunking contract.
         match *self {
-            Self::Copy {
-                destination,
-                source,
-                size,
-                options,
-            } => match protocol {
-                SdmaProtocol::Gfx9 => {
-                    debug_assert!(options.is_plain());
-                    words.fill(0);
-                    let mut offset = 0;
-                    if let Some(start) = timing.and_then(|timing| timing.start) {
-                        encode_gfx9_timestamp(words, offset, start);
-                        offset += TIMESTAMP_PACKET_BYTES / 4;
-                    }
-                    encode_copy_packet(words, offset, destination, source, size);
-                    offset += COPY_PACKET_BYTES / 4;
-                    if let Some(timing) = timing {
-                        encode_gfx9_timestamp(words, offset, timing.end);
-                        offset += TIMESTAMP_PACKET_BYTES / 4;
-                    }
-                    (offset * 4) as u64
-                }
-                SdmaProtocol::Gfx12_0 => {
-                    debug_assert!(options.is_plain());
-                    if let Some(timing) = timing {
-                        encode_timed_copy(words, destination, source, size, timing)
+            Self::Copy { size, .. } => assert!(size > 0 && size as usize <= builder.max_copy_size),
+            Self::Fill { count, .. } => assert!(count > 0 && count <= builder.max_fill_dwords),
+            Self::Swap { size, .. } => assert!(size > 0 && size <= 0x3f_ffff),
+        }
+        let gcr = match protocol {
+            SdmaProtocol::Gfx9 => 0,
+            SdmaProtocol::Gfx12_0 => 5,
+            SdmaProtocol::Gfx12_5 => 6,
+        };
+        let options = match self {
+            Self::Copy { options, .. } | Self::Swap { options, .. } => *options,
+            Self::Fill { .. } => GpuCopyOptions::default(),
+        };
+        let body = if matches!(self, Self::Fill { .. }) {
+            5
+        } else {
+            7 + usize::from(options.wait.is_some()) * 7 + usize::from(options.signal.is_some()) * 5
+        };
+        let start_words = usize::from(timing.is_some_and(|t| t.start.is_some())) * 3;
+        let end_words = usize::from(timing.is_some()) * 3;
+        let length = gcr * 2 + start_words + body + end_words;
+        words.fill(0);
+        let output = &mut words[..length];
+        let mut timestamp_builder = builder;
+        // Preserve the qualified GFX12 timestamp recipe's system scope, even
+        // on the OSS5 copy dialect whose COPY packet has no scope fields.
+        timestamp_builder.scope_fields = !matches!(protocol, SdmaProtocol::Gfx9);
+        let body_offset = gcr + start_words;
+        let end_offset = body_offset + body;
+        // SAFETY: Each checked slice has the exact packet size. Copy/fill
+        // chunks are bounded by CopyResources before reaching this encoder;
+        // foreign GPU addresses are only encoded into words here.
+        unsafe {
+            if gcr != 0 {
+                abce::abce_builder_build_gcr(&raw const builder, output.as_mut_ptr().cast(), true);
+                abce::abce_builder_build_gcr(
+                    &raw const builder,
+                    output.as_mut_ptr().add(end_offset + end_words).cast(),
+                    false,
+                );
+            }
+            if let Some(start) = timing.and_then(|t| t.start) {
+                abce::abce_builder_build_get_global_timestamp(
+                    &raw const timestamp_builder,
+                    output.as_mut_ptr().add(gcr).cast(),
+                    start as *mut _,
+                );
+            }
+            let target = output.as_mut_ptr().add(body_offset).cast();
+            match *self {
+                Self::Copy {
+                    destination,
+                    source,
+                    size,
+                    options,
+                } => {
+                    if options.indirect_source || options.indirect_destination {
+                        // The public ABCE indirect helper fixes EQ/SUB(1).
+                        // Native options support arbitrary comparisons and
+                        // atomic operands. Reuse the configurable copy block
+                        // and add the indirect flags/scope to this one packet.
+                        abce::abce_builder_build_wait_signal_copy(
+                            &raw const builder,
+                            target,
+                            destination as *mut _,
+                            source as *const _,
+                            size as usize,
+                            &controls(options),
+                        );
+                        output[body_offset] |= u32::from(options.indirect_source) << 20
+                            | u32::from(options.indirect_destination) << 21;
+                        output[body_offset + 2 + usize::from(options.wait.is_some()) * 7] |=
+                            3 << 10;
+                    } else if !options.is_plain() {
+                        abce::abce_builder_build_wait_signal_copy(
+                            &raw const builder,
+                            target,
+                            destination as *mut _,
+                            source as *const _,
+                            size as usize,
+                            &controls(options),
+                        );
                     } else {
-                        encode_copy(words, destination, source, size);
-                        COMMAND_BYTES as u64
+                        abce::abce_builder_build_copy(
+                            &raw const builder,
+                            target,
+                            destination as *mut _,
+                            source as *const _,
+                            size as usize,
+                        );
                     }
                 }
-                SdmaProtocol::Gfx12_5 => {
+                Self::Fill {
+                    destination,
+                    value,
+                    count,
+                } => {
+                    abce::abce_builder_build_fill(
+                        &raw const builder,
+                        target,
+                        destination as *mut _,
+                        value,
+                        count as usize,
+                    );
+                    if matches!(protocol, SdmaProtocol::Gfx12_5) {
+                        // Keep this service's existing single-command NPD
+                        // recipe. ABCE batch frames use their own ordered fill.
+                        output[body_offset] |= 1 << 29;
+                    }
+                }
+                Self::Swap {
+                    address_a,
+                    address_b,
+                    size,
+                    options,
+                } => {
                     if options.is_plain() {
-                        encode_gfx1250_copy(words, destination, source, size, timing)
+                        abce::abce_builder_build_swap_copy(
+                            &raw const builder,
+                            target,
+                            address_a as *mut _,
+                            address_b as *mut _,
+                            size as usize,
+                        );
                     } else {
-                        encode_gfx1250_controlled(
-                            words,
-                            destination,
-                            source,
-                            size,
-                            false,
-                            options,
-                            timing,
-                        )
+                        abce::abce_builder_build_wait_signal_swap(
+                            &raw const builder,
+                            target,
+                            address_a as *mut _,
+                            address_b as *mut _,
+                            size as usize,
+                            size as usize,
+                            &controls(options),
+                        );
                     }
-                }
-            },
-            Self::Fill {
-                destination,
-                value,
-                count,
-            } => {
-                debug_assert!(timing.is_none());
-                match protocol {
-                    SdmaProtocol::Gfx9 => {
-                        words.fill(0);
-                        words[0] = SDMA_CONST_FILL_DWORD;
-                        words[1] = destination as u32;
-                        words[2] = (destination >> 32) as u32;
-                        words[3] = value;
-                        words[4] = (count - 1) * 4;
-                        FILL_PACKET_BYTES as u64
-                    }
-                    SdmaProtocol::Gfx12_0 => {
-                        encode_fill(words, destination, value, count);
-                        FILL_COMMAND_BYTES as u64
-                    }
-                    SdmaProtocol::Gfx12_5 => encode_gfx1250_fill(words, destination, value, count),
                 }
             }
-            Self::Swap {
-                address_a,
-                address_b,
-                size,
-                options,
-            } => {
-                debug_assert!(!matches!(protocol, SdmaProtocol::Gfx9));
-                if options.is_plain() {
-                    encode_gfx1250_swap(words, address_a, address_b, size, timing)
-                } else {
-                    encode_gfx1250_controlled(
-                        words, address_b, address_a, size, true, options, timing,
-                    )
-                }
+            if let Some(timing) = timing {
+                abce::abce_builder_build_get_global_timestamp(
+                    &raw const timestamp_builder,
+                    output.as_mut_ptr().add(end_offset).cast(),
+                    timing.end as *mut _,
+                );
             }
         }
+        (length * 4) as u64
     }
 }
 
 #[cfg(test)]
+fn encode_copy(words: &mut [u32], destination: u64, source: u64, size: u32) {
+    SdmaCommand::Copy {
+        destination,
+        source,
+        size,
+        options: GpuCopyOptions::default(),
+    }
+    .encode(words, None, SdmaProtocol::Gfx12_0);
+}
+
+#[cfg(test)]
+fn encode_fill(words: &mut [u32], destination: u64, value: u32, count: u32) {
+    SdmaCommand::Fill {
+        destination,
+        value,
+        count,
+    }
+    .encode(words, None, SdmaProtocol::Gfx12_0);
+}
+
+#[cfg(test)]
 mod tests {
-    use super::super::TIMED_COMMAND_BYTES;
+    use super::super::{
+        COMMAND_BYTES, COPY_PACKET_BYTES, GCR_INVALIDATE, GCR_WRITEBACK, SDMA_CONST_FILL_DWORD,
+        SDMA_COPY_LINEAR, SDMA_TIMESTAMP_GET_GLOBAL_SYS, SDMA_USER_GCR, TIMED_COMMAND_BYTES,
+        TIMESTAMP_PACKET_BYTES,
+    };
     use super::*;
+
+    #[test]
+    fn indirect_copy_preserves_native_comparison_and_atomic_operands() {
+        use super::super::{GpuCopySignal, GpuCopyWait};
+        for (operation, opcode) in [
+            (GpuCopySignalOperation::Write, 0x67),
+            (GpuCopySignalOperation::Add, 0x6f),
+            (GpuCopySignalOperation::Subtract, 0x70),
+        ] {
+            let copy = SdmaCommand::Copy {
+                destination: 0x2000,
+                source: 0x1000,
+                size: 64,
+                options: GpuCopyOptions {
+                    indirect_source: true,
+                    wait: Some(GpuCopyWait {
+                        address: 0x3000,
+                        function: 6,
+                        reference: 7,
+                        mask: u64::MAX,
+                    }),
+                    signal: Some(GpuCopySignal {
+                        address: 0x4000,
+                        operation,
+                        data: 0x1_0000_002a,
+                    }),
+                    ..GpuCopyOptions::default()
+                },
+            };
+            let mut words = [0; 64];
+            assert_eq!(copy.encode(&mut words, None, SdmaProtocol::Gfx12_5), 124);
+            assert_eq!(words[6], 1 | (1 << 20) | (1 << 30) | (1 << 31));
+            assert_eq!(words[7], 6 | (3 << 18));
+            assert_eq!(words[15], (3 << 10) | (3 << 18) | (3 << 26));
+            assert_eq!(&words[20..25], &[opcode | (3 << 18), 0x4000, 0, 42, 1]);
+        }
+    }
 
     #[test]
     fn gfx9_indirect_timing_retains_both_timestamp_destinations() {

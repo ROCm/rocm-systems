@@ -31,6 +31,7 @@ typedef struct abce_decoded_packet_t {
 
 // Zero-initializing this struct is NOT the unknown-packet state: name is
 // "UNKNOWN" and dwords is 1. Always build one through here.
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline abce_decoded_packet_t abce_decoded_packet_make(const char* name, uint32_t dwords,
                                                              uint32_t op, uint32_t sub_op) {
   abce_decoded_packet_t packet;
@@ -40,11 +41,16 @@ static inline abce_decoded_packet_t abce_decoded_packet_make(const char* name, u
   packet.sub_op = sub_op;
   return packet;
 }
+#else
+extern abce_decoded_packet_t abce_decoded_packet_make(const char* name, uint32_t dwords,
+                                                             uint32_t op, uint32_t sub_op);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 //===----------------------------------------------------------------------===//
 // Packet decoding
 //===----------------------------------------------------------------------===//
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline abce_decoded_packet_t abce_decode_sdma_packet(const uint32_t* words,
                                                             uint32_t remaining_dwords,
                                                             abce_isa_version_t isa) {
@@ -133,6 +139,11 @@ static inline abce_decoded_packet_t abce_decode_sdma_packet(const uint32_t* word
   }
   return packet;
 }
+#else
+extern abce_decoded_packet_t abce_decode_sdma_packet(const uint32_t* words,
+                                                            uint32_t remaining_dwords,
+                                                            abce_isa_version_t isa);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 #ifdef __cplusplus
 }  // extern "C"

@@ -25,10 +25,11 @@
 #ifndef ABCE_CXX_H_
 #define ABCE_CXX_H_
 
+#include "abce_config.h"
+
 #include <string>
 
 #include "abce_builder.h"
-#include "abce_config.h"
 #include "abce_frame.h"
 #include "abce_host.h"
 #include "abce_ring_host.h"

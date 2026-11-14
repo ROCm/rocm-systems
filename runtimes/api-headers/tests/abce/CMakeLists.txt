@@ -97,3 +97,29 @@ set_target_properties(abce_header_self_containment PROPERTIES
 target_include_directories(abce_header_self_containment PRIVATE ${ABCE_INCLUDE_DIRS})
 target_compile_options(abce_header_self_containment PRIVATE -Wall -Wextra -Werror)
 add_dependencies(abce_unit_tests abce_header_self_containment)
+
+# The identical host contracts run against the linkable Rust provider. The
+# device suite uses kernel-only inline entry points and remains above.
+if(PROJECT_NAME STREQUAL "ROCmRuntimes" OR TARGET rocm_runtime::abce_shared)
+  add_executable(abce_unit_tests_external
+    unit/external_abi_test.cpp
+    unit/hsa_test.cpp unit/orchestrator_test.cpp unit/packet_fields_test.cpp
+    unit/profiling_test.cpp unit/ring_test.cpp unit/validation_test.cpp)
+  set_target_properties(abce_unit_tests_external PROPERTIES
+    CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
+  target_include_directories(abce_unit_tests_external PRIVATE harness ${ABCE_INCLUDE_DIRS})
+  target_compile_options(abce_unit_tests_external PRIVATE -Wall -Wextra ${ABCE_SANITIZER_FLAGS})
+  target_link_options(abce_unit_tests_external PRIVATE ${ABCE_SANITIZER_FLAGS})
+  target_link_libraries(abce_unit_tests_external PRIVATE
+    rocm_runtime::abce_shared GTest::gtest_main Threads::Threads)
+  gtest_discover_tests(abce_unit_tests_external TEST_PREFIX "external." DISCOVERY_MODE PRE_TEST)
+
+  add_library(abce_header_declarations OBJECT ${ABCE_SELF_CONTAINED_SOURCES})
+  set_target_properties(abce_header_declarations PROPERTIES
+    C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF
+    CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
+  target_include_directories(abce_header_declarations PRIVATE ${ABCE_INCLUDE_DIRS})
+  target_compile_options(abce_header_declarations PRIVATE -Wall -Wextra -Werror)
+  target_link_libraries(abce_header_declarations PRIVATE rocm_runtime::abce_shared)
+  add_dependencies(abce_unit_tests_external abce_header_declarations)
+endif()

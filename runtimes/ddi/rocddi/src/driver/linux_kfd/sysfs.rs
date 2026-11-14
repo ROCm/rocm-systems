@@ -1261,6 +1261,9 @@ fn read_node(
                                 | (Some(GpuSdmaDialect::Gfx1250), Some((7, 1, 0)))
                         ),
                     sdma_engine_count: if sdma_qualified { sdma.unwrap_or(0) } else { 0 },
+                    // Enable only after native cross-engine atomic/publication
+                    // qualification, independently of packet and queue support.
+                    sdma_multi_engine_copy: false,
                 },
             },
         },

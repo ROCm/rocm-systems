@@ -75,6 +75,9 @@ pub struct GpuQueueCapabilities {
     pub sdma_system_cache_control: bool,
     /// General-purpose SDMA engines; a count does not imply independence.
     pub sdma_engine_count: u32,
+    /// Cross-engine ABCE start/fan-in atomics and publication are qualified.
+    /// Counts or targeted queue support alone do not establish this contract.
+    pub sdma_multi_engine_copy: bool,
 }
 
 /// Qualified packet and scratch dialect selected from the discovered target.

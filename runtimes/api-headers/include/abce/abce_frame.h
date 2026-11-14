@@ -9,12 +9,13 @@
 #ifndef ABCE_FRAME_H_
 #define ABCE_FRAME_H_
 
+#include "abce_config.h"
+
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
 #include "abce_builder.h"
-#include "abce_config.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -75,6 +76,7 @@ typedef struct abce_signal_ref_t {
   bool host_store_readback;
 } abce_signal_ref_t;
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline abce_signal_ref_t abce_signal_ref_make(void* value, uint64_t completion_value,
                                                      void* event_mailbox, uint32_t event_id,
                                                      void* coordination_scratch) {
@@ -88,6 +90,11 @@ static inline abce_signal_ref_t abce_signal_ref_make(void* value, uint64_t compl
   ref.host_store_readback = false;
   return ref;
 }
+#else
+extern abce_signal_ref_t abce_signal_ref_make(void* value, uint64_t completion_value,
+                                                     void* event_mailbox, uint32_t event_id,
+                                                     void* coordination_scratch);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 //===----------------------------------------------------------------------===//
 // abce_timestamp_surface_t
@@ -104,9 +111,13 @@ typedef struct abce_timestamp_surface_t {
   void* end_value;
 } abce_timestamp_surface_t;
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline bool abce_timestamp_surface_enabled(const abce_timestamp_surface_t* surface) {
   return surface->start_value != NULL && surface->end_value != NULL;
 }
+#else
+extern bool abce_timestamp_surface_enabled(const abce_timestamp_surface_t* surface);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 //===----------------------------------------------------------------------===//
 // abce_dep_signal_t
@@ -121,6 +132,7 @@ typedef struct abce_dep_signal_t {
   uint64_t reference_value;  // value the signal must reach before proceeding.
 } abce_dep_signal_t;
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline abce_dep_signal_t abce_dep_signal_make(void* value, uint64_t observed,
                                                      uint64_t reference) {
   abce_dep_signal_t dep;
@@ -129,6 +141,10 @@ static inline abce_dep_signal_t abce_dep_signal_make(void* value, uint64_t obser
   dep.reference_value = reference;
   return dep;
 }
+#else
+extern abce_dep_signal_t abce_dep_signal_make(void* value, uint64_t observed,
+                                                     uint64_t reference);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 //===----------------------------------------------------------------------===//
 // abce_op_kind_t
@@ -182,6 +198,7 @@ typedef union abce_coherency_control_t {
 
 // Both triggers default on; zero-initializing the union does NOT give the
 // default.
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline abce_coherency_control_t abce_coherency_control_default(void) {
   abce_coherency_control_t coherency;
   coherency.value = 0;
@@ -189,6 +206,9 @@ static inline abce_coherency_control_t abce_coherency_control_default(void) {
   coherency.flags.emit_gcr = 1;
   return coherency;
 }
+#else
+extern abce_coherency_control_t abce_coherency_control_default(void);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 //===----------------------------------------------------------------------===//
 // abce_copy_metadata_t
@@ -248,6 +268,7 @@ typedef struct abce_copy_metadata_t {
 // Zero-initializing this struct is NOT the default configuration: both
 // coherency triggers and prefer_fused default on. Always initialize through
 // here.
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline void abce_copy_metadata_initialize(abce_copy_metadata_t* out_metadata) {
   memset(out_metadata, 0, sizeof(*out_metadata));
   out_metadata->coherency = abce_coherency_control_default();
@@ -255,6 +276,9 @@ static inline void abce_copy_metadata_initialize(abce_copy_metadata_t* out_metad
   out_metadata->multicast_mode = ABCE_MULTICAST_MODE_AUTOMATIC;
   out_metadata->prefer_fused = true;
 }
+#else
+extern void abce_copy_metadata_initialize(abce_copy_metadata_t* out_metadata);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 //===----------------------------------------------------------------------===//
 // abce_engine_op_t
@@ -348,6 +372,7 @@ typedef struct abce_frame_composer_t {
   bool is_gfx125plus;
 } abce_frame_composer_t;
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline void abce_frame_composer_initialize(const abce_builder_t* builder,
                                                   abce_platform_caps_t caps,
                                                   abce_frame_composer_t* out_composer) {
@@ -355,6 +380,11 @@ static inline void abce_frame_composer_initialize(const abce_builder_t* builder,
   out_composer->caps = caps;
   out_composer->is_gfx125plus = abce_builder_is_gfx125plus(builder);
 }
+#else
+extern void abce_frame_composer_initialize(const abce_builder_t* builder,
+                                                  abce_platform_caps_t caps,
+                                                  abce_frame_composer_t* out_composer);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 //===----------------------------------------------------------------------===//
 // Per-command sizes (bytes)
@@ -392,15 +422,19 @@ typedef struct abce_body_sync_t {
   void* signal_addr;
 } abce_body_sync_t;
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline bool abce_frame_should_emit_gcr(const abce_frame_composer_t* composer) {
   return abce_builder_requires_gcr(composer->builder) && !composer->caps.driver_manages_gcr;
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline uint32_t abce_frame_gcr_bytes(const abce_frame_composer_t* composer) {
   if (!abce_frame_should_emit_gcr(composer)) return 0;
   return composer->is_gfx125plus ? (uint32_t)sizeof(SDMA_PKT_GCR_GFX125PLUS)
                                  : (uint32_t)sizeof(SDMA_PKT_GCR);
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 // gfx125+ fused packets carry a WAIT block, so a single-frame batch whose
 // prologue would only wait on dependencies hands the first pending one to its
@@ -408,6 +442,7 @@ static inline uint32_t abce_frame_gcr_bytes(const abce_frame_composer_t* compose
 // Timestamps, HDP flushes and GCRs must follow the dependency, so a prologue with
 // any of them keeps every wait. Returns the folded dependency's index, or
 // UINT32_MAX when none is folded.
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline uint32_t abce_frame_folded_dep(const abce_frame_composer_t* composer,
                                              const abce_frame_job_t* job) {
   const abce_copy_metadata_t* metadata = job->metadata;
@@ -424,11 +459,13 @@ static inline uint32_t abce_frame_folded_dep(const abce_frame_composer_t* compos
   }
   return UINT32_MAX;
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 // gfx125+ engines overlap copies, and a fused signal covers only its own packet,
 // so an all-fused frame signals on every chunk of every body. Any other frame
 // signals once, with a standalone atomic after its last body, which waits for
 // everything before it.
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline abce_body_sync_t abce_body_sync_for(const abce_frame_composer_t* composer,
                                                   const abce_frame_job_t* job, uint32_t body_idx) {
   const bool wait_for_start = job->multi && job->start_gate_required && !job->coordinator;
@@ -461,27 +498,35 @@ static inline abce_body_sync_t abce_body_sync_for(const abce_frame_composer_t* c
   }
   return sync;
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline uint32_t abce_frame_poll_bytes(const abce_frame_composer_t* composer) {
   return composer->is_gfx125plus ? ABCE_FRAME_POLL64_BYTES : ABCE_FRAME_POLL32_BYTES;
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline uint32_t abce_frame_multicast_pkt_bytes(uint32_t num_dsts) {
   return (5u + 2u * num_dsts) * (uint32_t)sizeof(uint32_t);
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 // Effective secondary size for a two-region op: the caller's size2 when
 // available, otherwise size (symmetric). Only SWAP's fused wait/signal path
 // consumes a distinct value; the single-COUNT plain swap packet is
 // symmetric-only.
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline size_t abce_engine_op_size2(const abce_engine_op_t* op) {
   return op->size2 ? op->size2 : op->size;
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 //===----------------------------------------------------------------------===//
 // Sizing
 //===----------------------------------------------------------------------===//
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline size_t abce_frame_dep_waits_bytes(const abce_frame_composer_t* composer,
                                                 const abce_dep_signal_t* deps, uint32_t num_deps,
                                                 uint32_t folded_dep) {
@@ -496,9 +541,11 @@ static inline size_t abce_frame_dep_waits_bytes(const abce_frame_composer_t* com
   }
   return bytes;
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 // Rect tiling can fail the same way emission does; a failure is reported as a
 // zero payload and surfaces when the orchestrator re-runs the emit.
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline size_t abce_frame_payload_bytes(const abce_frame_composer_t* composer,
                                               const abce_engine_op_t* op) {
   const abce_builder_t* builder = composer->builder;
@@ -531,8 +578,10 @@ static inline size_t abce_frame_payload_bytes(const abce_frame_composer_t* compo
   }
   return 0;
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 // Fused packets (chunks) a fused op emits, each carrying its own signal.
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline uint64_t abce_frame_fused_packets(const abce_frame_composer_t* composer,
                                                 const abce_engine_op_t* op) {
   const abce_builder_t* builder = composer->builder;
@@ -547,9 +596,11 @@ static inline uint64_t abce_frame_fused_packets(const abce_frame_composer_t* com
       return 1;
   }
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 // Compacted fused packets: header + body per chunk, the wait on the first
 // chunk, and when |signal| a signal on every chunk.
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline size_t abce_frame_fused_bytes(const abce_frame_composer_t* composer,
                                             const abce_engine_op_t* op, bool wait, bool signal) {
   const uint64_t num_packets = abce_frame_fused_packets(composer, op);
@@ -567,7 +618,9 @@ static inline size_t abce_frame_fused_bytes(const abce_frame_composer_t* compose
   return (size_t)((num_packets * (1u + body_dwords) + wait_dwords + signal_dwords) *
                   sizeof(uint32_t));
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline size_t abce_frame_body_bytes(const abce_frame_composer_t* composer,
                                            const abce_engine_op_t* op,
                                            const abce_body_sync_t* sync) {
@@ -581,7 +634,9 @@ static inline size_t abce_frame_body_bytes(const abce_frame_composer_t* composer
   if (sync->signal) bytes += ABCE_FRAME_ATOMIC_BYTES;
   return bytes;
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline size_t abce_frame_prologue_bytes(const abce_frame_composer_t* composer,
                                                const abce_copy_metadata_t* metadata, bool multi,
                                                bool start_gate_required, uint32_t folded_dep) {
@@ -594,15 +649,19 @@ static inline size_t abce_frame_prologue_bytes(const abce_frame_composer_t* comp
   if (multi && start_gate_required) bytes += ABCE_FRAME_ATOMIC_BYTES;
   return bytes;
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 // The final completion update is a decrement only when other updates may land
 // on the same signal and the platform can do one; otherwise a FENCE writes the
 // done value.
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline bool abce_frame_completion_decrements(const abce_frame_composer_t* composer,
                                                     const abce_signal_ref_t* target) {
   return composer->caps.device_atomic_support && !target->sole_update;
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline uint32_t abce_frame_completion_bytes(const abce_frame_composer_t* composer,
                                                    const abce_signal_ref_t* target) {
   if (abce_frame_completion_decrements(composer, target)) return ABCE_FRAME_ATOMIC_BYTES;
@@ -610,7 +669,9 @@ static inline uint32_t abce_frame_completion_bytes(const abce_frame_composer_t* 
   return (target->completion_value > UINT32_MAX) ? 2 * ABCE_FRAME_FENCE32_BYTES
                                                  : ABCE_FRAME_FENCE32_BYTES;
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline size_t abce_frame_epilogue_bytes(const abce_frame_composer_t* composer,
                                                const abce_copy_metadata_t* metadata, bool multi) {
   size_t bytes = 0;
@@ -621,8 +682,10 @@ static inline size_t abce_frame_epilogue_bytes(const abce_frame_composer_t* comp
   if (metadata->out.event_mailbox) bytes += ABCE_FRAME_FENCE32_BYTES + ABCE_FRAME_TRAP_BYTES;
   return bytes;
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 // Total packet bytes this frame will occupy.
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline size_t abce_frame_composer_frame_bytes(const abce_frame_composer_t* composer,
                                                      const abce_frame_job_t* job) {
   const abce_copy_metadata_t* metadata = job->metadata;
@@ -641,8 +704,13 @@ static inline size_t abce_frame_composer_frame_bytes(const abce_frame_composer_t
     bytes += abce_frame_epilogue_bytes(composer, metadata, job->multi);
   return bytes;
 }
+#else
+extern size_t abce_frame_composer_frame_bytes(const abce_frame_composer_t* composer,
+                                                     const abce_frame_job_t* job);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 // Signal updates this frame makes to its coordination word.
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline uint64_t abce_frame_composer_signal_count(const abce_frame_composer_t* composer,
                                                         const abce_frame_job_t* job) {
   uint64_t num_signals = 0;
@@ -656,11 +724,16 @@ static inline uint64_t abce_frame_composer_signal_count(const abce_frame_compose
   }
   return num_signals;
 }
+#else
+extern uint64_t abce_frame_composer_signal_count(const abce_frame_composer_t* composer,
+                                                        const abce_frame_job_t* job);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 //===----------------------------------------------------------------------===//
 // Emission
 //===----------------------------------------------------------------------===//
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline size_t abce_frame_emit_dep_waits(const abce_frame_composer_t* composer, char* out,
                                                const abce_dep_signal_t* deps, uint32_t num_deps,
                                                uint32_t folded_dep) {
@@ -686,7 +759,9 @@ static inline size_t abce_frame_emit_dep_waits(const abce_frame_composer_t* comp
   }
   return (size_t)(cursor - out);
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline size_t abce_frame_emit_prologue(const abce_frame_composer_t* composer, char* out,
                                               const abce_copy_metadata_t* metadata, bool multi,
                                               bool start_gate_required, void* coordination_word,
@@ -714,7 +789,9 @@ static inline size_t abce_frame_emit_prologue(const abce_frame_composer_t* compo
   }
   return (size_t)(cursor - out);
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline size_t abce_frame_write_start_gate_poll(const abce_frame_composer_t* composer,
                                                       char* out, void* coordination_word) {
   if (composer->is_gfx125plus) {
@@ -729,19 +806,23 @@ static inline size_t abce_frame_write_start_gate_poll(const abce_frame_composer_
                           start_gate_high_word);
   return ABCE_FRAME_POLL32_BYTES;
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 // Rect emission appends tiles sequentially into the frame cursor.
 typedef struct abce_frame_rect_cursor_t {
   char* cursor;
 } abce_frame_rect_cursor_t;
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline void* abce_frame_rect_append(void* user_data, size_t packet_bytes) {
   abce_frame_rect_cursor_t* state = (abce_frame_rect_cursor_t*)user_data;
   char* slot = state->cursor;
   state->cursor += packet_bytes;
   return slot;
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline size_t abce_frame_emit_body(const abce_frame_composer_t* composer, char* out,
                                           const abce_engine_op_t* op,
                                           const abce_body_sync_t* sync) {
@@ -814,10 +895,12 @@ static inline size_t abce_frame_emit_body(const abce_frame_composer_t* composer,
   }
   return (size_t)(cursor - out);
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 // Wait for every participating frame to have decremented the fan-in counter.
 // The counter is the low 32 bits of a word ABCE owns outright, so it drains to
 // zero rather than to a value biased by the caller's completion value.
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline size_t abce_frame_write_fan_in_poll(const abce_frame_composer_t* composer, char* out,
                                                   void* coordination_word) {
   if (composer->is_gfx125plus) {
@@ -828,7 +911,9 @@ static inline size_t abce_frame_write_fan_in_poll(const abce_frame_composer_t* c
   abce_builder_build_poll(composer->builder, out, coordination_word, /*reference=*/0, UINT32_MAX);
   return ABCE_FRAME_POLL32_BYTES;
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline size_t abce_frame_write_completion(const abce_frame_composer_t* composer, char* out,
                                                  const abce_signal_ref_t* target) {
   if (abce_frame_completion_decrements(composer, target)) {
@@ -851,7 +936,9 @@ static inline size_t abce_frame_write_completion(const abce_frame_composer_t* co
   cursor += ABCE_FRAME_FENCE32_BYTES;
   return (size_t)(cursor - out);
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline size_t abce_frame_write_mailbox(const abce_frame_composer_t* composer, char* out,
                                               const abce_signal_ref_t* target) {
   if (!target->event_mailbox) return 0;
@@ -863,7 +950,9 @@ static inline size_t abce_frame_write_mailbox(const abce_frame_composer_t* compo
   cursor += ABCE_FRAME_TRAP_BYTES;
   return (size_t)(cursor - out);
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline size_t abce_frame_emit_epilogue(const abce_frame_composer_t* composer, char* out,
                                               const abce_copy_metadata_t* metadata, bool multi,
                                               void* coordination_word) {
@@ -882,9 +971,11 @@ static inline size_t abce_frame_emit_epilogue(const abce_frame_composer_t* compo
   cursor += abce_frame_write_mailbox(composer, cursor, &metadata->out);
   return (size_t)(cursor - out);
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 // Emits the whole frame into |buffer|, returning the bytes written. The buffer
 // must be at least abce_frame_composer_frame_bytes() long and zeroed.
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline size_t abce_frame_composer_emit_frame(const abce_frame_composer_t* composer,
                                                     char* buffer, const abce_frame_job_t* job) {
   const abce_copy_metadata_t* metadata = job->metadata;
@@ -908,6 +999,10 @@ static inline size_t abce_frame_composer_emit_frame(const abce_frame_composer_t*
                                        job->coordination_word);
   return (size_t)(cursor - buffer);
 }
+#else
+extern size_t abce_frame_composer_emit_frame(const abce_frame_composer_t* composer,
+                                                    char* buffer, const abce_frame_job_t* job);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 #ifdef __cplusplus
 }  // extern "C"

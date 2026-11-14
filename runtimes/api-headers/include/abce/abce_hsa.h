@@ -10,6 +10,8 @@
 #ifndef ABCE_HSA_H_
 #define ABCE_HSA_H_
 
+#include "abce_config.h"
+
 #if __has_include(<hsa/hsa.h>)
 #include <hsa/hsa.h>
 #include <hsa/hsa_ext_amd.h>
@@ -27,8 +29,8 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <string.h>
 
-#include "abce_config.h"
 #include "abce_host.h"
 
 #ifdef __cplusplus

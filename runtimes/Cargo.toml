@@ -3,7 +3,7 @@
 
 [package]
 name = "rocddi-frontends"
-description = "Single AMDF and HSA shared runtime over one rocddi core"
+description = "Single AMDF, HSA and ABCE shared runtime over one rocddi core"
 publish = false
 version.workspace = true
 edition.workspace = true
@@ -20,6 +20,7 @@ doctest = false
 [dependencies]
 libamdf = { path = "ddi/libamdf" }
 libhsa = { path = "ddi/libhsa" }
+libabce = { path = "ddi/libabce" }
 
 [lints.rust]
 missing_docs = "deny"
@@ -38,6 +39,7 @@ members = [
     "ddi/rocddi",
     "ddi/libamdf",
     "ddi/libhsa",
+    "ddi/libabce",
     "loader/rocelf",
     "image/rocaddr3",
     "loader/rocloader",
@@ -72,6 +74,17 @@ unwrap_used = "deny"
 codegen-units = 1
 
 [profile.release.package.libhsa]
+codegen-units = 1
+
+# ABCE's function and data symbol aliases must share an object with their
+# definitions, just like the existing HSA versioned exports.
+[profile.dev.package.libabce]
+codegen-units = 1
+[profile.release.package.libabce]
+codegen-units = 1
+[profile.dev.package.rocddi]
+codegen-units = 1
+[profile.release.package.rocddi]
 codegen-units = 1
 
 [profile.relwithdebinfo]
