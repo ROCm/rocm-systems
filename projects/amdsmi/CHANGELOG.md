@@ -8,6 +8,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Resolved Issues
 
+- **Fixed `amd-smi` reporting the WSL power cap and power limit in watts instead of microwatts**.
+  - On WSL2, a 330 W power cap was shown as 0.00033 W by `amd-smi static --limit` and `amd-smi metric --power`; it is now shown as 330 W.
+
 - **Fixed `amd-smi ras --cper` crashing with `TypeError` when no GPU devices are available**.
   - When the `amdgpu` driver is not loaded, the command now exits with a clear driver-not-loaded message and exit code 206 instead of an unhandled exception.
 

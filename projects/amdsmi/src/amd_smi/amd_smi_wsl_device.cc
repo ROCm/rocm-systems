@@ -436,7 +436,11 @@ amdsmi_status_t WSLGPUBackend::GetPowerInfo(amdsmi_power_info_t* info) {
   info->gfx_voltage = power.gfx_voltage;
   info->soc_voltage = power.soc_voltage;
   info->mem_voltage = power.mem_voltage;
-  info->power_limit = power.power_limit;
+  // rocdxg reports the limit in W; amdsmi_power_info_t.power_limit is in uW.
+  // Keep the N/A sentinel when the limit is unknown or does not fit in uW.
+  constexpr uint32_t kMicroWattsPerWatt = 1000000;
+  if (power.power_limit <= std::numeric_limits<uint32_t>::max() / kMicroWattsPerWatt)
+    info->power_limit = power.power_limit * kMicroWattsPerWatt;
   return AMDSMI_STATUS_SUCCESS;
 }
 
