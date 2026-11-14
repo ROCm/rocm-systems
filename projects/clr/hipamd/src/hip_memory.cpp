@@ -5139,6 +5139,52 @@ hipError_t ihipMipmappedArrayGetMemoryRequirements(hipArrayMemoryRequirements* m
   return hipSuccess;
 }
 
+hipError_t ihipArrayGetMemoryRequirements(hipArrayMemoryRequirements* memoryRequirements,
+                                          hipArray_t array, hipDevice_t device) {
+  if (memoryRequirements == nullptr) {
+    return hipErrorInvalidValue;
+  }
+  if (array == nullptr) {
+    return hipErrorInvalidHandle;
+  }
+  {
+    amd::ScopedLock lock(hipArraySetLock);
+    if (hip::hipArraySet.find(array) == hip::hipArraySet.end()) {
+      return hipErrorInvalidHandle;
+    }
+  }
+  if (device < 0 || static_cast<size_t>(device) >= g_devices.size()) {
+    return hipErrorInvalidDevice;
+  }
+
+  cl_mem cl_mem_obj = reinterpret_cast<cl_mem>(array->data);
+  if (is_valid(cl_mem_obj) == false) {
+    return hipErrorInvalidValue;
+  }
+
+  amd::Image* image = as_amd(cl_mem_obj)->asImage();
+  if (image == nullptr) {
+    return hipErrorInvalidValue;
+  }
+  // A view, such as a mipmap level array, owns no memory of its own. As in CUDA, its requirements
+  // must be queried on the mipmapped array it belongs to.
+  if (image->parent() != nullptr) {
+    return hipErrorInvalidValue;
+  }
+
+  amd::Device* amd_device = g_devices[image->getUserData().deviceId]->devices()[0];
+  device::Memory* device_memory = image->getDeviceMemory(*amd_device);
+  size_t size = 0;
+  size_t alignment = 0;
+  if (device_memory == nullptr || !device_memory->getImageMemoryRequirements(&size, &alignment)) {
+    return hipErrorNotSupported;
+  }
+
+  memoryRequirements->size = size;
+  memoryRequirements->alignment = alignment;
+  return hipSuccess;
+}
+
 hipError_t hipMipmappedArrayCreate(hipMipmappedArray_t* mipmapped_array_pptr,
                                    HIP_ARRAY3D_DESCRIPTOR* mipmapped_array_desc_ptr,
                                    unsigned int num_mipmap_levels) {
@@ -5168,6 +5214,12 @@ hipError_t hipMipmappedArrayGetMemoryRequirements(hipArrayMemoryRequirements* me
                                                   hipDevice_t device) {
   HIP_INIT_API(hipMipmappedArrayGetMemoryRequirements, memoryRequirements, mipmap, device);
   HIP_RETURN(ihipMipmappedArrayGetMemoryRequirements(memoryRequirements, mipmap, device));
+}
+
+hipError_t hipArrayGetMemoryRequirements(hipArrayMemoryRequirements* memoryRequirements,
+                                         hipArray_t array, hipDevice_t device) {
+  HIP_INIT_API(hipArrayGetMemoryRequirements, memoryRequirements, array, device);
+  HIP_RETURN(ihipArrayGetMemoryRequirements(memoryRequirements, array, device));
 }
 
 hipError_t hipMallocMipmappedArray(hipMipmappedArray_t* mipmappedArray,

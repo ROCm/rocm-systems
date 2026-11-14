@@ -266,6 +266,9 @@ class Image : public roc::Memory {
   size_t getDeviceDataSize() { return deviceImageInfo_.size; }
   size_t getDeviceDataAlignment() { return deviceImageInfo_.alignment; }
 
+  //! Gets the size and alignment HSA requires for the memory backing this image.
+  bool getImageMemoryRequirements(size_t* size, size_t* alignment) const final;
+
   hsa_ext_image_t getHsaImageObject() const { return hsaImageObject_; }
   const hsa_ext_image_descriptor_v2_t& getHsaImageDescriptor() const { return imageDescriptor_; }
 
