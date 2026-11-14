@@ -1,0 +1,319 @@
+/*************************************************************************
+ * Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
+ *
+ * See LICENSE.txt for license information
+ ************************************************************************/
+
+// Host-only unit tests for the GIN Anvil-SDMA ReduceScatter policy helpers
+// (gin_sdma_reducescatter_policy.h). No GPU required: GIN_SDMA_HOST_ONLY drops
+// the HIP attributes so the header compiles as plain C++. These validate the
+// exact per-rank slice sizing, size-adaptive CTA schedule, devComm requirement
+// shape, threshold precedence and bandwidth math the -D 3 kernel is required to
+// use. Companion to gin_sdma_allgather_policy_test.
+
+#include <gtest/gtest.h>
+
+#include <cstddef>
+#include <cstdint>
+#include <cstdlib>
+#include <limits>
+
+#define GIN_SDMA_HOST_ONLY 1
+#include "gin_sdma_reducescatter_policy.h"
+
+using namespace gin_sdma_reducescatter;
+
+namespace {
+
+// ---- sliceBaseCount: floor(count/nranks) aligned down to 16 bytes ------------
+
+TEST(ReduceScatterPolicySliceBase, AlignsDownTo16Bytes) {
+  // eltSize=4 (int/float): 16 B == 4 elements, so base is a multiple of 4.
+  EXPECT_EQ(sliceBaseCount(4096, 4, 8), 512u);      // 4096/8=512, already 4-aligned
+  EXPECT_EQ(sliceBaseCount(4095, 4, 8), 508u);      // 4095/8=511 -> down to 508
+  EXPECT_EQ(sliceBaseCount(100, 4, 8), 12u);        // 100/8=12 (mult of 4)
+  EXPECT_EQ(sliceBaseCount(104, 4, 8), 12u);        // 104/8=13 -> down to 12
+}
+
+TEST(ReduceScatterPolicySliceBase, EltSizeControlsAlignment) {
+  // eltSize=1 (int8): 16 B == 16 elements, so base is a multiple of 16.
+  EXPECT_EQ(sliceBaseCount(1024, 1, 8), 128u);      // 1024/8=128 (mult of 16)
+  EXPECT_EQ(sliceBaseCount(1000, 1, 8), 112u);      // 1000/8=125 -> down to 112
+  // eltSize=8 (double/int64): 16 B == 2 elements.
+  EXPECT_EQ(sliceBaseCount(1000, 8, 8), 124u);      // 1000/8=125 -> down to 124
+  // eltSize=16: 16 B == 1 element, no alignment loss.
+  EXPECT_EQ(sliceBaseCount(1000, 16, 8), 125u);
+}
+
+TEST(ReduceScatterPolicySliceBase, DegenerateInputsReturnZero) {
+  EXPECT_EQ(sliceBaseCount(4096, 4, 0), 0u);        // nranks == 0
+  EXPECT_EQ(sliceBaseCount(4096, 4, -1), 0u);       // nranks < 0
+  EXPECT_EQ(sliceBaseCount(4096, 0, 8), 0u);        // eltSize == 0
+  EXPECT_EQ(sliceBaseCount(4096, 32, 8), 0u);       // eltSize > 16 (unsupported)
+}
+
+// ---- sliceBytes --------------------------------------------------------------
+
+TEST(ReduceScatterPolicySliceBytes, ElementsTimesSize) {
+  EXPECT_EQ(sliceBytes(512, 4), 2048u);
+  EXPECT_EQ(sliceBytes(0, 4), 0u);
+  EXPECT_EQ(sliceBytes(128, 1), 128u);
+}
+
+// ---- reduceScatterSliceOffset -----------------------------------------------
+
+TEST(ReduceScatterPolicySliceOffset, SelectsOwnedSlice) {
+  EXPECT_EQ(reduceScatterSliceOffset(0, 512), 0u);
+  EXPECT_EQ(reduceScatterSliceOffset(3, 512), 1536u);
+  EXPECT_EQ(reduceScatterSliceOffset(7, 17), 119u);
+}
+
+// ---- reduceScatterKernelTier: slice <= threshold is LSA (reserved) -----------
+
+TEST(ReduceScatterPolicyTier, BelowOrEqualThresholdIsLsa) {
+  EXPECT_EQ(reduceScatterKernelTier(0, 262144), RSTier::LSA);
+  EXPECT_EQ(reduceScatterKernelTier(262144, 262144), RSTier::LSA);   // boundary
+}
+
+TEST(ReduceScatterPolicyTier, AboveThresholdIsGin) {
+  EXPECT_EQ(reduceScatterKernelTier(262145, 262144), RSTier::Gin);
+  EXPECT_EQ(reduceScatterKernelTier(1, 0), RSTier::Gin);             // threshold 0
+  EXPECT_EQ(reduceScatterKernelTier(0, 0), RSTier::LSA);             // empty stays LSA
+}
+
+// ---- pickSdmaThreshold: per-collective > global env > compiled default -------
+
+TEST(ReduceScatterPolicyThreshold, PerCollectiveWins) {
+  EXPECT_EQ(pickSdmaThreshold(/*perCollSet=*/true, /*perCollVal=*/4096,
+                              /*globalSet=*/true, /*globalVal=*/65536,
+                              /*compiledDefault=*/kReduceScatterSdmaThresholdDefault),
+            4096u);
+}
+
+TEST(ReduceScatterPolicyThreshold, GlobalUsedWhenNoPerCollective) {
+  EXPECT_EQ(pickSdmaThreshold(false, 0, true, 65536, kReduceScatterSdmaThresholdDefault), 65536u);
+}
+
+TEST(ReduceScatterPolicyThreshold, CompiledDefaultWhenNothingSet) {
+  EXPECT_EQ(pickSdmaThreshold(false, 0, false, 0, kReduceScatterSdmaThresholdDefault),
+            kReduceScatterSdmaThresholdDefault);
+  EXPECT_EQ(kReduceScatterSdmaThresholdDefault, 262144u);  // 256 KiB/rank slice
+}
+
+TEST(ReduceScatterPolicyThreshold, ExplicitZeroIsHonored) {
+  EXPECT_EQ(pickSdmaThreshold(true, 0, true, 65536, kReduceScatterSdmaThresholdDefault), 0u);
+  EXPECT_EQ(pickSdmaThreshold(false, 0, true, 0, kReduceScatterSdmaThresholdDefault), 0u);
+}
+
+TEST(ReduceScatterPolicyThreshold, LargeValueDoesNotWrap) {
+  const unsigned long long big = 4ull * 1024 * 1024 * 1024;  // 4 GiB
+  EXPECT_EQ(pickSdmaThreshold(true, big, false, 0, kReduceScatterSdmaThresholdDefault),
+            (size_t)big);
+}
+
+// ---- reduceScatterCtas: size-adaptive ladder + env override ------------------
+
+TEST(ReduceScatterPolicyCtas, MidBandUses48) {
+  // [8 MiB, 48 MiB) -> the grid-stride mid band (48 CTAs).
+  EXPECT_EQ(reduceScatterCtas(8ull * 1024 * 1024, kThresholdUnset), 48);
+  EXPECT_EQ(reduceScatterCtas(33ull * 1024 * 1024, kThresholdUnset), 48);
+  EXPECT_EQ(reduceScatterCtas(48ull * 1024 * 1024 - 1, kThresholdUnset), 48);
+}
+
+TEST(ReduceScatterPolicyCtas, SmallAndLargeUse32) {
+  EXPECT_EQ(reduceScatterCtas(0, kThresholdUnset), 32);
+  EXPECT_EQ(reduceScatterCtas(1ull * 1024 * 1024, kThresholdUnset), 32);      // < 8 MiB
+  EXPECT_EQ(reduceScatterCtas(8ull * 1024 * 1024 - 1, kThresholdUnset), 32);  // just below mid
+  EXPECT_EQ(reduceScatterCtas(48ull * 1024 * 1024, kThresholdUnset), 32);     // >= mid hi (large)
+  EXPECT_EQ(reduceScatterCtas(2ull * 1024 * 1024 * 1024, kThresholdUnset), 32);
+}
+
+TEST(ReduceScatterPolicyCtas, EnvOverridePinsAllSizesClampedTo128) {
+  EXPECT_EQ(reduceScatterCtas(33ull * 1024 * 1024, 16), 16);   // pin below the ladder
+  EXPECT_EQ(reduceScatterCtas(1024, 64), 64);
+  EXPECT_EQ(reduceScatterCtas(1024, 256), 128);                // clamp to 128
+  // unset/zero env falls back to the size-adaptive ladder.
+  EXPECT_EQ(reduceScatterCtas(33ull * 1024 * 1024, 0), 48);
+}
+
+TEST(ReduceScatterPolicyCtas, MaxCtasIsTheMidBandValue) {
+  EXPECT_EQ(reduceScatterMaxCtas(), 48);
+}
+
+TEST(ReduceScatterPolicySdmaTier, GridBelowCeilIsSdma) {
+  EXPECT_FALSE(usesSdmaTier(0));
+  EXPECT_TRUE(usesSdmaTier(1));
+  EXPECT_TRUE(usesSdmaTier(4));
+  EXPECT_TRUE(usesSdmaTier(15));
+  EXPECT_FALSE(usesSdmaTier(16));
+  EXPECT_FALSE(usesSdmaTier(32));
+  EXPECT_FALSE(usesSdmaTier(48));
+}
+
+TEST(ReduceScatterPolicySdmaTier, SdmaCtasCapsAtFourOrNRanks) {
+  EXPECT_EQ(reduceScatterSdmaCtas(8), 4);
+  EXPECT_EQ(reduceScatterSdmaCtas(2), 2);
+  EXPECT_EQ(reduceScatterSdmaCtas(1), 1);
+}
+
+TEST(ReduceScatterPolicySdmaTier, SmallEnvPinSelectsSdmaGrid) {
+  const int pool = 128;
+  EXPECT_EQ(reduceScatterGridCtas(33ull * 1024 * 1024, 4, pool), 4);
+  EXPECT_TRUE(usesSdmaTier(reduceScatterGridCtas(33ull * 1024 * 1024, 4, pool)));
+  EXPECT_EQ(reduceScatterGridCtas(33ull * 1024 * 1024, 8, pool), 8);
+  EXPECT_TRUE(usesSdmaTier(reduceScatterGridCtas(1, 8, pool)));
+  EXPECT_EQ(reduceScatterGridCtas(33ull * 1024 * 1024, kThresholdUnset, pool), 48);
+  EXPECT_FALSE(usesSdmaTier(reduceScatterGridCtas(33ull * 1024 * 1024, kThresholdUnset, pool)));
+  EXPECT_EQ(reduceScatterGridCtas(64ull * 1024 * 1024, kThresholdUnset, pool), 32);
+}
+
+TEST(ReduceScatterPolicyScratchFits, NeedsNSlotsAndRejectsOverflow) {
+  EXPECT_FALSE(sdmaScratchFits(0, 8, 1024));
+  EXPECT_FALSE(sdmaScratchFits(1024, 0, 1024));
+  EXPECT_FALSE(sdmaScratchFits(1024, 8, 1024 * 7));
+  EXPECT_TRUE(sdmaScratchFits(1024, 8, 1024 * 8));
+  EXPECT_FALSE(sdmaScratchFits((size_t)-1, 8, (size_t)-1));
+}
+
+TEST(ReduceScatterPolicySdmaScratch, RoundsTheWholeWindowNotEachSlot) {
+  EXPECT_EQ(reduceScatterSdmaScratchBytes(8, kReduceScatterSdmaSlotMaxDefault),
+            512ull * 1024 * 1024);
+  // 3 * 40 = 120 rounds once to 128. Per-slot rounding would give 3 * 128.
+  EXPECT_EQ(reduceScatterSdmaScratchBytes(3, 40), 128u);
+  EXPECT_TRUE(sdmaScratchFits(40, 3, reduceScatterSdmaScratchBytes(3, 40)));
+  EXPECT_FALSE(sdmaScratchFits(41, 3, 120));
+}
+
+TEST(ReduceScatterPolicySdmaScratch, DegenerateAndWrappingInputsReturnZero) {
+  EXPECT_EQ(reduceScatterSdmaScratchBytes(0, kReduceScatterSdmaSlotMaxDefault), 0u);
+  EXPECT_EQ(reduceScatterSdmaScratchBytes(-1, kReduceScatterSdmaSlotMaxDefault), 0u);
+  EXPECT_EQ(reduceScatterSdmaScratchBytes(8, 0), 0u);
+  EXPECT_EQ(reduceScatterSdmaScratchBytes(2, (size_t)-1 / 2 + 1), 0u);
+}
+
+// ---- grid <= pool ------------------------------------------------------------
+// The kernel indexes devComm.lsaBarrier/barrier/signal by blockIdx.x, and the
+// pools are sized by reduceScatterPoolCtas through reduceScatterDevReqs.
+// These lock the invariant that makes that safe rather than restating the ladder.
+
+TEST(ReduceScatterPolicyPool, PoolCoversTheSelfSelectedLadderAtEveryBandEdge) {
+  // With no env pin, whatever the ladder picks must fit the pool for any -V.
+  const size_t edges[] = {0,
+                          1ull * 1024 * 1024,
+                          8ull * 1024 * 1024 - 1,
+                          8ull * 1024 * 1024,
+                          33ull * 1024 * 1024,
+                          48ull * 1024 * 1024 - 1,
+                          48ull * 1024 * 1024,
+                          2ull * 1024 * 1024 * 1024};
+  for (int v : {1, 8, 16, 48, 96}) {
+    const int pool = reduceScatterPoolCtas(v);
+    for (size_t b : edges) {
+      EXPECT_LE(reduceScatterCtas(b, kThresholdUnset), pool)
+          << "-V " << v << " bytes " << b;
+    }
+  }
+}
+
+TEST(ReduceScatterPolicyPool, EnvPinIsClampedToThePool) {
+  // Regression: -V 8 with NCCL_GIN_ANVIL_RS_CTAS=64 registered max(8,48)=48 slots
+  // but launched 64 CTAs, so blockIdx.x 48..63 indexed past the barrier pools.
+  const int pool = reduceScatterPoolCtas(8);
+  EXPECT_EQ(pool, 48);
+  EXPECT_EQ(reduceScatterGridCtas(16ull * 1024 * 1024, 64, pool), 48);
+  EXPECT_EQ(reduceScatterGridCtas(1024, 256, pool), 48);  // past the 128 cap too
+  // A pin that already fits is honored untouched.
+  EXPECT_EQ(reduceScatterGridCtas(1024, 16, pool), 16);
+}
+
+TEST(ReduceScatterPolicyPool, LargeMinusVRaisesBothPoolAndCeiling) {
+  const int pool = reduceScatterPoolCtas(96);  // -V above the ladder peak
+  EXPECT_EQ(pool, 96);
+  EXPECT_EQ(reduceScatterGridCtas(16ull * 1024 * 1024, 64, pool), 64);
+  EXPECT_EQ(reduceScatterGridCtas(1024, 256, pool), 96);  // 128 cap, then pool
+}
+
+TEST(ReduceScatterPolicyPool, DegeneratePoolNeverYieldsZeroCtas) {
+  EXPECT_EQ(reduceScatterGridCtas(1024, kThresholdUnset, 0), 1);
+  EXPECT_EQ(reduceScatterGridCtas(1024, 64, -1), 1);
+}
+
+// ---- reduceScatterDevReqs: one barrier/lsaBarrier/signal per pool slot -------
+
+TEST(ReduceScatterPolicyDevReqs, SmallMinusVRegistersTheLadderPeak) {
+  // -V 8 must register 48 slots, not 8: the ladder launches up to 48 CTAs.
+  DevReqs r = reduceScatterDevReqs(8);
+  EXPECT_EQ(r.barrierCount, 48);
+  EXPECT_EQ(r.lsaBarrierCount, 48);
+  EXPECT_EQ(r.ginSignalCount, 48);
+  EXPECT_TRUE(r.needsGin);
+  EXPECT_TRUE(r.supported);
+  EXPECT_EQ(reduceScatterDevReqs(96).lsaBarrierCount, 96);
+}
+
+TEST(ReduceScatterPolicyDevReqs, PassingThePoolIsIdempotent) {
+  for (int v : {1, 8, 48, 96})
+    EXPECT_EQ(reduceScatterDevReqs(reduceScatterPoolCtas(v)).lsaBarrierCount,
+              reduceScatterDevReqs(v).lsaBarrierCount) << "-V " << v;
+}
+
+TEST(ReduceScatterPolicyDevReqs, RegisteredPoolCoversEveryLaunchedGrid) {
+  const size_t sizes[] = {0, 8ull * 1024 * 1024, 33ull * 1024 * 1024, 2ull * 1024 * 1024 * 1024};
+  const size_t pins[] = {kThresholdUnset, 4, 16, 64, 256};
+  for (int v : {1, 8, 16, 48, 96}) {
+    const DevReqs r = reduceScatterDevReqs(v);
+    for (size_t b : sizes)
+      for (size_t pin : pins)
+        EXPECT_LE(reduceScatterGridCtas(b, pin, reduceScatterPoolCtas(v)), r.lsaBarrierCount)
+            << "-V " << v << " bytes " << b << " pin " << pin;
+  }
+}
+
+// ---- reduceScatterScratchBytes: round one byte count up to 128 B -------------
+
+TEST(ReduceScatterPolicyScratch, RoundsUpTo128AndZeroStaysZero) {
+  EXPECT_EQ(reduceScatterScratchBytes(0), 0u);
+  EXPECT_EQ(reduceScatterScratchBytes(1), 128u);
+  EXPECT_EQ(reduceScatterScratchBytes(128), 128u);
+  EXPECT_EQ(reduceScatterScratchBytes(129), 256u);
+}
+
+// ---- bandwidthGBps: algBw counts all ranks, busBw applies (n-1)/n ------------
+
+TEST(ReduceScatterPolicyBandwidth, AlgAndBusBandwidth) {
+  double alg = -1.0, bus = -1.0;
+  // perRankCount=1e9 elts, 1 B each, 8 ranks, 1 s -> base = 8 GB/s.
+  bandwidthGBps(1000000000ull, 1, 1.0, 8, &alg, &bus);
+  EXPECT_DOUBLE_EQ(alg, 8.0);
+  EXPECT_DOUBLE_EQ(bus, 8.0 * 7.0 / 8.0);
+}
+
+TEST(ReduceScatterPolicyBandwidth, NullPointersAreSafe) {
+  bandwidthGBps(1000, 4, 0.5, 4, nullptr, nullptr);
+  double bus = -1.0;
+  bandwidthGBps(1000, 4, 0.5, 4, nullptr, &bus);
+  EXPECT_GT(bus, 0.0);
+  double alg = -1.0;
+  bandwidthGBps(1000, 4, 0.5, 4, &alg, nullptr);
+  EXPECT_GT(alg, 0.0);
+}
+
+TEST(ReduceScatterPolicyEnv, ParseCtasEnvRejectsGarbage) {
+  EXPECT_EQ(parseReduceScatterCtasEnvString(nullptr), kThresholdUnset);
+  EXPECT_EQ(parseReduceScatterCtasEnvString(""), kThresholdUnset);
+  EXPECT_EQ(parseReduceScatterCtasEnvString("-2"), kThresholdUnset);
+  EXPECT_EQ(parseReduceScatterCtasEnvString(" -2"), kThresholdUnset);
+  EXPECT_EQ(parseReduceScatterCtasEnvString("\t-2"), kThresholdUnset);
+  EXPECT_EQ(parseReduceScatterCtasEnvString("8foo"), kThresholdUnset);
+  EXPECT_EQ(parseReduceScatterCtasEnvString("8"), 8u);
+}
+
+TEST(ReduceScatterPolicyEnv, DefaultNameIsTheDocumentedKnob) {
+  EXPECT_STREQ(kReduceScatterCtasEnv, "NCCL_GIN_ANVIL_RS_CTAS");
+  setenv(kReduceScatterCtasEnv, "12", 1);
+  EXPECT_EQ(parseReduceScatterCtasEnv(), 12u);
+  unsetenv(kReduceScatterCtasEnv);
+  EXPECT_EQ(parseReduceScatterCtasEnv(), kThresholdUnset);
+}
+
+}  // namespace
