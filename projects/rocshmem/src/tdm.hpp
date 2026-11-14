@@ -84,8 +84,7 @@ __host__ __device__ constexpr size_t lds_bytes_for_tile(uint32_t tile_bytes) {
 // ==============================================================================
 
 using u32x4 = uint32_t __attribute__((ext_vector_type(4)));
-using i32x4 = int32_t __attribute__((ext_vector_type(4)));
-using i32x8 = int32_t __attribute__((ext_vector_type(8)));
+using u32x8 = uint32_t __attribute__((ext_vector_type(8)));
 
 // ==============================================================================
 // ELEMENT SIZE (GROUP1 data_size field)
@@ -146,7 +145,7 @@ constexpr int make_cache_policy(StoreTemporalHint th, Scope scope = Scope::Wgp) 
 // GROUP2/GROUP3 (3D/gather) aren't modeled; every call site here is 2D.
 struct Descriptor2D {
   u32x4 group0{};
-  i32x8 group1{};
+  u32x8 group1{};
 };
 
 // GROUP0 only (LDS address + 48-bit global VA), split out so callers can
@@ -166,7 +165,7 @@ __device__ __forceinline__ u32x4 make_group0(uintptr_t lds_addr, uintptr_t globa
 // GROUP1: element size, full-tensor/tile dims, and strides (in elements).
 // Strides are genuinely 48-bit here, unlike AMD's own amd_gfx1250_TDM.h
 // header, whose tensorDimNStride() setters truncate to 32 bits.
-__device__ __forceinline__ i32x8 make_group1(DataSize data_size, uint32_t tensor_dim0,
+__device__ __forceinline__ u32x8 make_group1(DataSize data_size, uint32_t tensor_dim0,
                                              uint32_t tensor_dim1, uint32_t tile_dim0,
                                              uint32_t tile_dim1, uint64_t tensor_dim0_stride,
                                              uint64_t tensor_dim1_stride,
@@ -182,8 +181,8 @@ __device__ __forceinline__ i32x8 make_group1(DataSize data_size, uint32_t tensor
          (static_cast<uint32_t>(tensor_dim1_stride & 0xFFFFull) << 16);
   s[7] = static_cast<uint32_t>((tensor_dim1_stride >> 16) & 0xFFFFFFFFull);
 
-  i32x8 g1{};
-  for (int i = 0; i < 8; ++i) g1[i] = static_cast<int32_t>(s[i]);
+  u32x8 g1{};
+  for (int i = 0; i < 8; ++i) g1[i] = s[i];
   return g1;
 }
 
@@ -211,18 +210,18 @@ __device__ __forceinline__ void tensor_wait() {
 }
 
 template <int CachePolicy>
-__device__ __forceinline__ void load_to_lds(u32x4 group0, i32x8 group1,
-                                            i32x4 group2 = i32x4{0, 0, 0, 0},
-                                            i32x4 group3 = i32x4{0, 0, 0, 0}) {
-  const i32x8 group4{0, 0, 0, 0, 0, 0, 0, 0};  // reserved; always zero
+__device__ __forceinline__ void load_to_lds(u32x4 group0, u32x8 group1,
+                                            u32x4 group2 = u32x4{0, 0, 0, 0},
+                                            u32x4 group3 = u32x4{0, 0, 0, 0}) {
+  const u32x8 group4{0, 0, 0, 0, 0, 0, 0, 0};  // reserved; always zero
   __builtin_amdgcn_tensor_load_to_lds(group0, group1, group2, group3, group4, CachePolicy);
 }
 
 template <int CachePolicy>
-__device__ __forceinline__ void store_from_lds(u32x4 group0, i32x8 group1,
-                                               i32x4 group2 = i32x4{0, 0, 0, 0},
-                                               i32x4 group3 = i32x4{0, 0, 0, 0}) {
-  const i32x8 group4{0, 0, 0, 0, 0, 0, 0, 0};  // reserved; always zero
+__device__ __forceinline__ void store_from_lds(u32x4 group0, u32x8 group1,
+                                               u32x4 group2 = u32x4{0, 0, 0, 0},
+                                               u32x4 group3 = u32x4{0, 0, 0, 0}) {
+  const u32x8 group4{0, 0, 0, 0, 0, 0, 0, 0};  // reserved; always zero
   __builtin_amdgcn_tensor_store_from_lds(group0, group1, group2, group3, group4, CachePolicy);
 }
 
