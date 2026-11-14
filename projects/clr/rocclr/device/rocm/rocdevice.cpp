@@ -4574,10 +4574,13 @@ uint8_t* Device::CreateBarrierPacket(int num_deps) const {
 
 // ================================================================================================
 void Device::ApplyHwEventPatches(const std::vector<HwEventPatch>& patches,
-                                 const std::vector<void*>& hw_events, bool profiled) const {
+                                 const std::vector<void*>& hw_events, bool profiled,
+                                 void* external_hw_event) const {
   // Starts no use: the set comes new from CreateHwEvents or re-armed by ResetHwEvents, which did
   for (const auto& patch : patches) {
-    auto* ps = reinterpret_cast<ProfilingSignal*>(hw_events[patch.hw_event_index]);
+    const bool external = (patch.hw_event_index == HwEventPatch::kExternalHwEvent);
+    auto* ps = reinterpret_cast<ProfilingSignal*>(external ? external_hw_event
+                                                           : hw_events[patch.hw_event_index]);
     hsa_signal_t sig = ps->signal_;
 
     // Patch the flat buffer copy (dispatched to GPU) directly.

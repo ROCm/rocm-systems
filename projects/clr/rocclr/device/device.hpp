@@ -2362,10 +2362,13 @@ class Device : public RuntimeObject {
   struct HwEventPatch {
     static constexpr int kCompletionSignal = -1;
     static constexpr int kExtDispatchDepSignal = -2;
+    //! hw_event_index of a signal passed separately to ApplyHwEventPatches, which is
+    //! owned elsewhere and only waited on by this launch
+    static constexpr int kExternalHwEvent = -2;
 
     uint8_t* packet;      // original dispatchPackets pointer (for UpdateAQLPacket matching)
     uint8_t* flat_packet; // pointer into flatPacketData (patched directly at launch)
-    int hw_event_index;
+    int hw_event_index;   // index into the launch's hw_events, or kExternalHwEvent
     int dep_slot;  // kCompletionSignal, kExtDispatchDepSignal, or 0-4 for barrier dep_signal[slot]
   };
 
@@ -2375,9 +2378,11 @@ class Device : public RuntimeObject {
   //! single-signal field share an offset, so callers patch slot 0 either way.
   //! num_deps == 0 is a completion-only barrier.
   virtual uint8_t* CreateBarrierPacket(int num_deps = 0) const { return nullptr; }
-  //! profiled means the launch reads the timing of its patched completion signals
+  //! profiled means the launch reads the timing of its patched completion signals.
+  //! external_hw_event resolves kExternalHwEvent patches.
   virtual void ApplyHwEventPatches(const std::vector<HwEventPatch>& patches,
-                                   const std::vector<void*>& hw_events, bool profiled) const {}
+                                   const std::vector<void*>& hw_events, bool profiled,
+                                   void* external_hw_event) const {}
 
   virtual const bool isFineGrainSupported() const {
     return (info().svmCapabilities_ & CL_DEVICE_SVM_ATOMICS) != 0 ? true : false;
