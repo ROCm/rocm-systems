@@ -4,6 +4,10 @@ Full documentation for rocDecode is available at [https://rocm.docs.amd.com/proj
 
 ## (Unreleased) rocDecode 1.12.1
 
+### Added
+
+* Reference MD5 digests of the planar YUV 4:2:0 decoded output for the AVC, HEVC, AV1 and VP9 test streams, installed to `share/rocdecode/md5`. The `video_decode-AVC`, `video_decode-HEVC`, `video_decode-AV1`, `video_decode-VP9` and `video_decodeMem-HEVC` CTests now pass them to the samples' `-md5_check` option, so a test fails when the decoded output doesn't match its reference.
+
 ### Resolved issues
 
 * The `videoDecodeRaw` and `videoDecode` samples now exit with code 77 instead of 1 when the GPU doesn't support the stream's codec, and the `video_decodeRaw-*` and `video_decode-*` CTests report it as skipped instead of failed.
