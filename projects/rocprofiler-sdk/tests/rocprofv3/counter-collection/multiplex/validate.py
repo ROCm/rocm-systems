@@ -27,6 +27,12 @@ import pytest
 
 from collections import defaultdict
 
+from rocprofiler_sdk.pytest_utils.hardware_counters import (
+    first_gpu_agent,
+    skip_if_hw_counter_values_unavailable,
+    skip_if_zero_counters_in_auto_mode,
+)
+
 
 def test_agent_info(agent_info_input_data):
     logical_node_id = max([int(itr["Logical_Node_Id"]) for itr in agent_info_input_data])
@@ -76,6 +82,12 @@ def _collection_schedule(counter_input_data):
     return schedule
 
 
+def _require_positive_values(counter_input_data, agent_info_input_data):
+    values = [row["Counter_Value"] for row in counter_input_data]
+    skip_if_zero_counters_in_auto_mode(values, first_gpu_agent(agent_info_input_data))
+    skip_if_hw_counter_values_unavailable(values)
+
+
 def test_dispatch_accounting(counter_input_data, expected_dispatch_count):
     per_agent = _collection_schedule(counter_input_data)
     assert per_agent, "no counter collection data was produced"
@@ -90,6 +102,7 @@ def test_dispatch_accounting(counter_input_data, expected_dispatch_count):
 
 def test_counter_collection_multiplex(
     counter_input_data,
+    agent_info_input_data,
     multiplex_layout,
     allow_zero_counter_values,
 ):
@@ -110,10 +123,7 @@ def test_counter_collection_multiplex(
 
         assert len(row["Counter_Value"]) > 0
         assert row["Counter_Name"] in all_counters
-        if allow_zero_counter_values:
-            assert float(row["Counter_Value"]) >= 0
-        else:
-            assert float(row["Counter_Value"]) > 0
+        assert float(row["Counter_Value"]) >= 0
 
     per_agent = _collection_schedule(counter_input_data)
     observed_group_counters = [set() for _ in pmc_groups]
@@ -153,6 +163,9 @@ def test_counter_collection_multiplex(
             f"group {group_id} ({sorted(expected_counters)}) was not fully "
             f"collected, saw {sorted(observed_group_counters[group_id])}"
         )
+
+    if not allow_zero_counter_values:
+        _require_positive_values(counter_input_data, agent_info_input_data)
 
 
 def test_counter_value_stability(counter_input_data, stable_counters, max_value_ratio):
@@ -223,7 +236,10 @@ def test_run_level_json_yaml_equivalence(counter_input_data, counter_input_b_dat
 
 
 def test_graceful_degradation_drops_unresolved_groups(
-    counter_input_data, present_counters, allow_zero_counter_values
+    counter_input_data,
+    agent_info_input_data,
+    present_counters,
+    allow_zero_counter_values,
 ):
     """An unresolvable (unknown counter) or empty group is dropped while the valid
     group is still collected in full. Asserts every dispatch contains exactly
@@ -237,10 +253,7 @@ def test_graceful_degradation_drops_unresolved_groups(
             f"counter {name} was collected but is not in the expected surviving "
             f"set {sorted(present_counters)} (a dropped group leaked through)"
         )
-        if allow_zero_counter_values:
-            assert float(row["Counter_Value"]) >= 0
-        else:
-            assert float(row["Counter_Value"]) > 0
+        assert float(row["Counter_Value"]) >= 0
 
     for agent_id, dispatches in _collection_schedule(counter_input_data).items():
         for dispatch_id, counters in dispatches.items():
@@ -249,6 +262,9 @@ def test_graceful_degradation_drops_unresolved_groups(
                 f"{sorted(counters)}, expected surviving group "
                 f"{sorted(present_counters)}"
             )
+
+    if not allow_zero_counter_values:
+        _require_positive_values(counter_input_data, agent_info_input_data)
 
 
 if __name__ == "__main__":

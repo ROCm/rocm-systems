@@ -34,7 +34,7 @@ namespace Single
 rocprofiler_client_id_t* client_id = nullptr;
 
 rocprofiler_thread_trace_control_flags_t
-dispatch_callback(rocprofiler_agent_id_t /* agent */,
+dispatch_callback(rocprofiler_agent_id_t agent,
                   rocprofiler_queue_id_t /* queue_id */,
                   rocprofiler_async_correlation_id_t /* correlation_id */,
                   rocprofiler_kernel_id_t kernel_id,
@@ -45,7 +45,11 @@ dispatch_callback(rocprofiler_agent_id_t /* agent */,
     dispatch_userdata->value =
         static_cast<const rocprofiler_agent_v0_t*>(userdata)->wave_front_size;
     static rocprofiler_kernel_id_t target_kernel_id = kernel_id;
-    if(target_kernel_id == kernel_id) return ROCPROFILER_THREAD_TRACE_CONTROL_START_AND_STOP;
+    if(target_kernel_id == kernel_id)
+    {
+        Callbacks::add_traced_agent(agent);
+        return ROCPROFILER_THREAD_TRACE_CONTROL_START_AND_STOP;
+    }
 
     return ROCPROFILER_THREAD_TRACE_CONTROL_NONE;
 }

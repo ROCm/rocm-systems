@@ -36,7 +36,8 @@ exactly the Phase 2 copies and no HIP API records; Tool A must capture HIP API r
 and no memory copies.
 
 Each iteration does, per stream, one kernel launch + one memcpy() call, where memcpy()
-performs an H2D copy followed by a D2H copy (2 copy records per call).
+performs an H2D copy followed by a D2H copy (2 copies per call; HIP may report each copy
+as several chunked copy records).
 """
 
 import ctypes
