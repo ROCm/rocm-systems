@@ -567,8 +567,9 @@ class VirtualGPU : public device::VirtualDevice {
 
       //! Write the metadata prefetch packet for the AQL slot at |index|.
       //! |use_movdir64b|: use atomic 64B writes (no sfence between body/header).
-      //! |device_mem_ring_buf|: ring buffer is WC over PCIe — when MOVDIR64B is
-      //!   unavailable, stages locally then NT-copies to avoid scattered WC stores.
+      //! |device_mem_ring_buf|: ring buffer is in device memory (WC on a PCIe host, WB on
+      //!   A+A) — stages locally then copies with MOVDIR64B or NT stores, so no scattered
+      //!   stores cross the bus or stay in the CPU cache.
       template <class AqlPacket>
       inline void SetMetadata(AqlPacket* packet, uint16_t header,
                               uint64_t index, bool use_movdir64b,
