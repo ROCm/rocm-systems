@@ -10489,9 +10489,11 @@ auto BroadcastDdaParams(int64_t llMax, int64_t ll128Max, int64_t ddaEnable = 1, 
   };
 }
 
+// gfx1250 comms get the fabric DDA handler, as after ncclDdaFabricCommInit.
 ncclComm* MakeBroadcastComm(const char* arch = "gfx1250") {
   ncclComm* comm = MakeCommWithArch(arch);
   comm->nRanks = 8;
+  if (std::strcmp(arch, "gfx1250") == 0) comm->ddaFabricMemHandler = reinterpret_cast<ncclFabricMemHandler*>(0x1);
   return comm;
 }
 
@@ -10639,6 +10641,36 @@ TEST(WrapMicrotestIsolated, SelectBroadcast_IpcAllowedNoIpcHandler_ReturnsRingPl
   });
 }
 
+// gfx1250 without the fabric handler is treated as IPC: no tier without the opt-in, never LL128.
+TEST(WrapMicrotestIsolated, SelectBroadcast_Gfx1250IpcScratch_NeedsOptInAndNeverChecksLL128) {
+  RUN_ISOLATED_TEST("Wrap_SelectBroadcast_Gfx1250IpcScratch_NeedsOptInAndNeverChecksLL128", []() {
+    int llCalls = 0, ll128Calls = 0;
+    ScopedHook ll(g_broadcastDdaFabricLLEligible, [&](ncclComm*, size_t, ncclDataType_t) { return ++llCalls > 0; });
+    ScopedHook ll128(g_broadcastDdaFabricLL128Eligible,
+                     [&](ncclComm*, size_t, ncclDataType_t) { return ++ll128Calls > 0; });
+    ncclComm* comm = MakeBroadcastComm();
+    comm->ddaFabricMemHandler = nullptr;
+    comm->ddaIpcMemHandler = reinterpret_cast<ncclIpcMemHandler*>(0x1);
+
+    g_loadParam = BroadcastDdaParams(INT64_MAX, INT64_MAX);
+    rcclCollDecision d = PoisonedDecision();
+    EXPECT_EQ(ncclSuccess, rcclSelectBroadcast(comm, 8, ncclFloat32, 0, false, &d));
+    EXPECT_EQ(NCCL_ALGO_RING, d.algo);
+    EXPECT_EQ(0, llCalls);
+
+    auto base = BroadcastDdaParams(INT64_MAX, INT64_MAX);
+    g_loadParam = [base](const char* env, int64_t def) -> int64_t {
+      return std::strcmp(env, "RCCL_DDA_BC_ALLOW_IPC") == 0 ? 1 : base(env, def);
+    };
+    d = PoisonedDecision();
+    EXPECT_EQ(ncclSuccess, rcclSelectBroadcast(comm, 8, ncclFloat32, 0, false, &d));
+    EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL, d.algo);
+    EXPECT_EQ(0, ll128Calls);
+    comm->ddaIpcMemHandler = nullptr;
+    DeleteCommWithArch(comm);
+  });
+}
+
 TEST(WrapMicrotestIsolated, SelectBroadcast_DdaDisabled_ReturnsRingPlaceholder) {
   RUN_ISOLATED_TEST("Wrap_SelectBroadcast_DdaDisabled_ReturnsRingPlaceholder", []() {
     g_loadParam = BroadcastDdaParams(INT64_MAX, INT64_MAX, /*ddaEnable=*/0);
@@ -10651,7 +10683,7 @@ TEST(WrapMicrotestIsolated, SelectBroadcast_DdaDisabled_ReturnsRingPlaceholder) 
   });
 }
 
-// A global DDA threshold alone must not turn Broadcast on: the gfx1250 table has no Broadcast tier.
+// A global DDA threshold alone must not turn Broadcast on when the table has no Broadcast tier.
 TEST(WrapMicrotestIsolated, SelectBroadcast_BcUnsetAndNoTableTier_ReturnsRingPlaceholder) {
   RUN_ISOLATED_TEST("Wrap_SelectBroadcast_BcUnsetAndNoTableTier_ReturnsRingPlaceholder", []() {
     g_loadParam = BroadcastDdaParams(INT64_MAX, INT64_MAX, /*ddaEnable=*/1, /*ddaBc=*/-1);
@@ -10659,11 +10691,14 @@ TEST(WrapMicrotestIsolated, SelectBroadcast_BcUnsetAndNoTableTier_ReturnsRingPla
     ScopedHook ll(g_broadcastDdaFabricLLEligible, [&](ncclComm*, size_t, ncclDataType_t) { return ++calls > 0; });
     ScopedHook ll128(g_broadcastDdaFabricLL128Eligible,
                      [&](ncclComm*, size_t, ncclDataType_t) { return ++calls > 0; });
+    const rcclArchThresholds* real =
+      real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_SPX);
+    ASSERT_NE(nullptr, real);
+    rcclArchThresholds table = *real;
+    table.ddaLLMax[ncclFuncBroadcast] = 0;
+    table.ddaLL128Max[ncclFuncBroadcast] = 0;
     ncclComm* comm = MakeBroadcastComm();
-    comm->archThresholds = real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_SPX);
-    ASSERT_NE(nullptr, comm->archThresholds);
-    ASSERT_EQ(0u, comm->archThresholds->ddaLLMax[ncclFuncBroadcast]);
-    ASSERT_EQ(0u, comm->archThresholds->ddaLL128Max[ncclFuncBroadcast]);
+    comm->archThresholds = &table;
     rcclCollDecision d = PoisonedDecision();
     EXPECT_EQ(ncclSuccess, rcclSelectBroadcast(comm, 8, ncclFloat32, 0, false, &d));
     EXPECT_EQ(NCCL_ALGO_RING, d.algo);
@@ -10680,9 +10715,14 @@ TEST(WrapMicrotestIsolated, SelectBroadcast_BcOnAndNoTableTier_ReturnsRingPlaceh
     ScopedHook ll(g_broadcastDdaFabricLLEligible, [&](ncclComm*, size_t, ncclDataType_t) { return ++calls > 0; });
     ScopedHook ll128(g_broadcastDdaFabricLL128Eligible,
                      [&](ncclComm*, size_t, ncclDataType_t) { return ++calls > 0; });
+    const rcclArchThresholds* real =
+      real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_SPX);
+    ASSERT_NE(nullptr, real);
+    rcclArchThresholds table = *real;
+    table.ddaLLMax[ncclFuncBroadcast] = 0;
+    table.ddaLL128Max[ncclFuncBroadcast] = 0;
     ncclComm* comm = MakeBroadcastComm();
-    comm->archThresholds = real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_SPX);
-    ASSERT_NE(nullptr, comm->archThresholds);
+    comm->archThresholds = &table;
     rcclCollDecision d = PoisonedDecision();
     EXPECT_EQ(ncclSuccess, rcclSelectBroadcast(comm, 8, ncclFloat32, 0, false, &d));
     EXPECT_EQ(NCCL_ALGO_RING, d.algo);
@@ -10728,6 +10768,60 @@ TEST(WrapMicrotestIsolated, SelectBroadcast_BcUnsetAndPerRankTableTier_PicksDdaL
     rcclCollDecision d = PoisonedDecision();
     EXPECT_EQ(ncclSuccess, rcclSelectBroadcast(comm, 8, ncclFloat32, 0, false, &d));
     EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL, d.algo);
+    DeleteCommWithArch(comm);
+  });
+}
+
+// Out of the box on DPX: the real table's Broadcast caps pick LL to 16 KiB, LL128 to 128 KiB, then Ring.
+TEST(WrapMicrotestIsolated, SelectBroadcast_BcUnsetDpxTable_PicksTierByCap) {
+  RUN_ISOLATED_TEST("Wrap_SelectBroadcast_BcUnsetDpxTable_PicksTierByCap", []() {
+    g_loadParam = BroadcastDdaParams(/*llMax=*/-1, /*ll128Max=*/-1, /*ddaEnable=*/1, /*ddaBc=*/-1);
+    ScopedHook ll(g_broadcastDdaFabricLLEligible, [](ncclComm*, size_t, ncclDataType_t) { return true; });
+    ScopedHook ll128(g_broadcastDdaFabricLL128Eligible, [](ncclComm*, size_t, ncclDataType_t) { return true; });
+    ncclComm* comm = MakeBroadcastComm();
+    comm->archThresholds = real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_DPX);
+    ASSERT_NE(nullptr, comm->archThresholds);
+    const struct {
+      size_t bytes;
+      int algo;
+    } cases[] = {
+      {16 * 1024, (int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL},
+      {16 * 1024 + 16, (int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL128},
+      {128 * 1024, (int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL128},
+      {128 * 1024 + 16, NCCL_ALGO_RING},
+    };
+    for (const auto& c : cases) {
+      rcclCollDecision d = PoisonedDecision();
+      EXPECT_EQ(ncclSuccess, rcclSelectBroadcast(comm, c.bytes / 4, ncclFloat32, 0, false, &d)) << c.bytes;
+      EXPECT_EQ(c.algo, d.algo) << c.bytes;
+    }
+    DeleteCommWithArch(comm);
+  });
+}
+
+// Out of the box on SPX: the real table's Broadcast caps pick LL to 16 KiB, LL128 to 128 KiB, then Ring.
+TEST(WrapMicrotestIsolated, SelectBroadcast_BcUnsetSpxTable_PicksTierByCap) {
+  RUN_ISOLATED_TEST("Wrap_SelectBroadcast_BcUnsetSpxTable_PicksTierByCap", []() {
+    g_loadParam = BroadcastDdaParams(/*llMax=*/-1, /*ll128Max=*/-1, /*ddaEnable=*/1, /*ddaBc=*/-1);
+    ScopedHook ll(g_broadcastDdaFabricLLEligible, [](ncclComm*, size_t, ncclDataType_t) { return true; });
+    ScopedHook ll128(g_broadcastDdaFabricLL128Eligible, [](ncclComm*, size_t, ncclDataType_t) { return true; });
+    ncclComm* comm = MakeBroadcastComm();
+    comm->archThresholds = real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_SPX);
+    ASSERT_NE(nullptr, comm->archThresholds);
+    const struct {
+      size_t bytes;
+      int algo;
+    } cases[] = {
+      {16 * 1024, (int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL},
+      {16 * 1024 + 16, (int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL128},
+      {128 * 1024, (int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL128},
+      {128 * 1024 + 16, NCCL_ALGO_RING},
+    };
+    for (const auto& c : cases) {
+      rcclCollDecision d = PoisonedDecision();
+      EXPECT_EQ(ncclSuccess, rcclSelectBroadcast(comm, c.bytes / 4, ncclFloat32, 0, false, &d)) << c.bytes;
+      EXPECT_EQ(c.algo, d.algo) << c.bytes;
+    }
     DeleteCommWithArch(comm);
   });
 }

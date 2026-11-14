@@ -547,15 +547,19 @@ test_categories:
       - "RCCL_DDA_A2A_PUSH=0"
   # Broadcast DDA is opt-in and its caps are cached per process; the suite sizes its cases against these values.
   standard_env_dda_bc:
-    description: "DDA fabric Broadcast one-shot data checks (LL)."
+    description: "DDA fabric Broadcast one-shot data checks (LL, LL128, and switches between them)."
     test_patterns:
       - "DdaMPI_BroadcastLL.*"
+      - "DdaMPI_BroadcastLL128.*"
+      - "DdaMPI_BroadcastTransition.*"
       - "AbortDdaMPITest.IncompleteCollective_DdaBroadcastLl"
+      - "AbortDdaMPITest.IncompleteCollective_DdaBroadcastLl128"
     exclude_windows: *mpi_exclude_windows
     labels: *mpi_standard_labels
     env_variables:
       - "RCCL_DDA_BC=1"
       - "RCCL_DDA_LL_THRESHOLD=262144"
+      - "RCCL_DDA_LL128_THRESHOLD=4194304"
   comprehensive:
     description: "MPI exhaustive — same suites as standard; env enables implicit launch, CE memcpy paths, and verbose rank logs."
     test_patterns: *mpi_all_patterns

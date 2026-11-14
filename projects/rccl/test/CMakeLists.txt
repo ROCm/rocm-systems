@@ -432,6 +432,7 @@ if(BUILD_TESTS)
       device/DdaAllReduceFabricLL128TwoShotTests.cpp
       device/DdaVecElementAddTests.cpp
       device/DdaLL128PollWireTests.cpp
+      device/DdaLL128ArchGeometryTests.cpp
       device/TestTDM.cpp
       device/TestTdmCopy.cpp
       device/TestTdmReduceCopy.cpp

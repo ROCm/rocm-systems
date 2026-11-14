@@ -668,6 +668,7 @@ function(rccl_define_micro_source_lists)
     algorithms/dda/alltoall/dda-alltoall-fabric-ll128-test.cc
     algorithms/dda/alltoall/dda-alltoall-ipc-test.cc
     algorithms/dda/broadcast/dda-broadcast-fabric-ll-test.cc
+    algorithms/dda/broadcast/dda-broadcast-fabric-ll128-test.cc
     algorithms/dda/reduce_scatter/dda-reduce-scatter-fabric-test.cc
     algorithms/dda/reduce_scatter/dda-reduce-scatter-fabric-ll-test.cc
     algorithms/dda/reduce_scatter/dda-reduce-scatter-fabric-ll128-test.cc
@@ -676,7 +677,6 @@ function(rccl_define_micro_source_lists)
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc
     fakes/hip_fakes.cc
     fakes/nccl_fakes.cc
-    ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 
@@ -2124,6 +2124,7 @@ rccl_add_micro_binary(rccl-UnitTestsMicroDdaColl
     DDA_ALLTOALL_FABRIC_LL128_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/algorithms/dda/alltoall/dda_alltoall_fabric_ll128.cu.cpp"
     DDA_ALLTOALL_IPC_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/algorithms/dda/alltoall/dda_alltoall_ipc.cu.cpp"
     DDA_BROADCAST_FABRIC_LL_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/algorithms/dda/broadcast/dda_broadcast_fabric_ll.cu.cpp"
+    DDA_BROADCAST_FABRIC_LL128_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/algorithms/dda/broadcast/dda_broadcast_fabric_ll128.cu.cpp"
     DDA_REDUCE_SCATTER_FABRIC_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/algorithms/dda/reduce_scatter/dda_reduce_scatter_fabric.cu.cpp"
     DDA_REDUCE_SCATTER_FABRIC_LL_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/algorithms/dda/reduce_scatter/dda_reduce_scatter_fabric_ll.cu.cpp"
     DDA_REDUCE_SCATTER_FABRIC_LL128_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/algorithms/dda/reduce_scatter/dda_reduce_scatter_fabric_ll128.cu.cpp"
