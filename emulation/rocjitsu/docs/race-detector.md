@@ -41,6 +41,7 @@ a barrier. The reads race with the writes.
 // race_example.hip
 #include <hip/hip_runtime.h>
 #include <cstdio>
+#include <cstdlib>
 
 __global__ void transpose_lds(const int *in, int *out) {
   __shared__ int tile[128];
@@ -51,15 +52,23 @@ __global__ void transpose_lds(const int *in, int *out) {
   out[tid] = tile[127 - tid];
 }
 
+void check_hip(hipError_t status) {
+  if (status != hipSuccess) {
+    std::fprintf(stderr, "HIP error: %s\n", hipGetErrorString(status));
+    std::exit(EXIT_FAILURE);
+  }
+}
+
 int main() {
   int *d_in, *d_out;
-  hipMalloc(&d_in, 128 * sizeof(int));
-  hipMalloc(&d_out, 128 * sizeof(int));
+  check_hip(hipMalloc(&d_in, 128 * sizeof(int)));
+  check_hip(hipMalloc(&d_out, 128 * sizeof(int)));
   transpose_lds<<<1, 128>>>(d_in, d_out);
-  hipDeviceSynchronize();
-  hipFree(d_in);
-  hipFree(d_out);
-  printf("done\n");
+  check_hip(hipGetLastError());
+  check_hip(hipDeviceSynchronize());
+  check_hip(hipFree(d_in));
+  check_hip(hipFree(d_out));
+  std::puts("done");
 }
 ```
 
@@ -74,12 +83,16 @@ hipcc -o /tmp/race_example race_example.hip --offload-arch=gfx950
 # or: amdclang++ -O2 -o /tmp/race_example race_example.hip --offload-arch=gfx950
 ```
 
-Enable the race detector by adding it to the `plugins` section of your
-rocjitsu config file (`my_config.json`):
+Copy `configs/gfx950_mi350x.json` to `my_config.json` and enable the race
+detector by adding these top-level settings to that configuration:
 
 ```json
-{ "plugins": { "race": {} } }
+{ "require_all_plugins": true, "plugins": { "race": {} } }
 ```
+
+`require_all_plugins` makes a missing or invalid plugin fail initialization.
+The example checks HIP errors and exits with a failure status in that case,
+so a skipped detector cannot look like a successful race check.
 
 Run it under the emulator:
 
@@ -87,51 +100,39 @@ Run it under the emulator:
 $BUILD_DIR/tools/rocjitsu/rocjitsu --config my_config.json -- /tmp/race_example
 ```
 
-You should see output:
+A report identifies the conflicting instructions and their owning waves. This
+report was captured from the gfx950 example above; PCs, register assignments,
+and dispatch IDs can vary between builds and runs:
 
 ```
-RACE kernel=transpose_lds symbol=_Z13transpose_ldsPKiPi dispatch=1 type=LDS access=read reg=508 wave=0 lane=0 wg=0,0,0 conflict=unknown
-Race on LDS byte 508 [workgroup (0, 0, 0), wave 0, lane 0]
-  ==>  0x7f6a1e801010  ds_write_b32 v0, v1  ; <-- wave 1
-       0x7f6a1e801018  v_sub_u32_e32 v1, 0, v0
-  ==>  0x7f6a1e80101c  ds_read_b32 v1, v1  ; <-- wave 0 lane 0
+RACE kernel=transpose_lds symbol=_Z13transpose_ldsPKiPi dispatch=2 type=LDS access=read reg=508 wave=0 lane=0 wg=0,0,0 conflict=unknown
+Race on LDS byte 508 [workgroup (0, 0, 0), wave 0, lane 0]: read-after-write (RAW).
+  Current access: read at PC 0x73aee4951728.
+  Conflict: transfer from VGPRs into LDS at PC 0x73aee495171c, wave 1.
+  Completion for wave 1 is not guaranteed; pending counters: lgkmcnt.
+  The detector observed no synchronization between waves 1 and 0 for this access.
+       PC              Instruction
+  ==>  0x73aee495171c  ds_write_b32 v0, v1  ; <-- wave 1
+       Execution trace below is for wave 0.
+       0x73aee495171c  ds_write_b32 v0, v1
+       0x73aee4951724  v_sub_u32_e32 v1, 0, v0
+  ==>  0x73aee4951728  ds_read_b32 v1, v1 offset:508  ; <-- wave 0 lane 0
 END_RACE
 ```
 
-This tells you that dispatch 1 of `transpose_lds` reported a race: wave 1 wrote
+This tells you that dispatch 2 of `transpose_lds` reported a race: wave 1 wrote
 to LDS (`ds_write_b32`) and wave 0 read from the same address (`ds_read_b32`)
 without a barrier in between. The `kernel` field is a compact display name, and
 `symbol` is the exact ELF symbol when rocjitsu can resolve it. If a name cannot
 be resolved, rocjitsu reports `?` for the unresolved field. The fix is to add
 `__syncthreads()` between the write and the read.
 
-Each trace line shows an instruction's GPU virtual address, which varies
-between runs, and its disassembly. The trace lists instructions that the
-reporting wave (here wave 0) executed, oldest first. `==>` marks entries matching
-the PC and captured encoding of either instruction involved in the race, and
-the `<--` annotation names the wave and lane that performed that access. When the
-conflicting instruction ran in another wave, as with wave 1's `ds_write_b32`
-above, the marker is placed where the reporting wave executed the same bytes
-at the same address, if such an entry is present. Repeated executions of identical
-bytes at the same address are not distinguished; the displayed span ends at the
-first matching racing access after its first marker.
-
-The race detector retains the last 256 instructions of each wave. If the
-reporting wave has no entry matching the conflicting PC and encoding, the report
-prints the retained producer instruction first with a `(before trace window)`
-note. This can mean the instruction has left the trace, but it can also mean that
-another wave executed an instruction the reporting wave never executed. The note
-does not establish that the conflict is more than 256 instructions old.
-
-For example, if another wave's producer is at `0x1000` and the reporting wave's
-trace contains only its racing access at `0x3000`, the producer appears with
-`(before trace window)` and `0 instructions not recorded`. That count is the
-number of retained reporting-wave entries skipped before the first displayed
-marker, not the number of instructions since the producer ran.
-
-Traces longer than 32 instructions show only their first and last 16. Each trace
-row is disassembled from its own captured bytes, so it remains accurate if the
-kernel's code is later overwritten or unmapped.
+The completion line refers to the conflicting memory operation. Here, wave 1
+has not satisfied its `lgkmcnt` wait requirement. Even if that requirement
+were satisfied by an `s_waitcnt`, wave 0's read would still need to be ordered
+after wave 1's write. The synchronization line describes that separate
+requirement. The unmarked `ds_write_b32` is wave 0's own execution of the
+store; the marked write above it belongs to wave 1.
 
 ### Running your own application
 
@@ -145,10 +146,12 @@ $BUILD_DIR/tools/rocjitsu/rocjitsu --config my_config.json -- python my_script.p
 ```
 
 To capture reports to a file instead of stderr (useful for CI or
-scripted workflows), add a `sinks` section to your config:
+scripted workflows), create the output directory with `mkdir -p /tmp/output`
+and add a `sinks` section to your config:
 
 ```json
 {
+  "require_all_plugins": true,
   "plugins": { "race": {} },
   "sinks": { "types": ["file"], "dir": "/tmp/output" }
 }
@@ -158,6 +161,84 @@ scripted workflows), add a `sinks` section to your config:
 $BUILD_DIR/tools/rocjitsu/rocjitsu --config my_config.json -- ./my_app
 # Reports are written to /tmp/output/race.log
 ```
+
+## Reading a report
+
+The human-readable heading names the affected register or LDS byte and identifies
+read-after-write (RAW), write-after-read (WAR), or write-after-write (WAW). The
+next lines identify the current access and the conflicting memory event by
+where its data moves, such as from VGPRs into LDS. Register-load conflicts name
+the destination (VGPRs, SGPRs, or TTMPs) without guessing the source memory space.
+Direct-to-LDS loads likewise say “load into LDS” because they can read global
+memory or scratch. A FLAT instruction can load from different spaces in
+different lanes, and scalar memory loads can read scratch. These events do
+not retain that source. For LDS conflicts, atomic operations are described as
+updates of LDS, with returned VGPR values mentioned when applicable.
+
+For a pending event, the report lists the completion counters that remain unsatisfied, using
+the architectural wait names for the target. Internal GFX11 subsets are
+displayed as their covering `vmcnt`, `vscnt`, or `lgkmcnt` domains. When the
+event belongs to another wave, the report also states that the detector observed
+no synchronization between the waves for this access. This can be a false
+positive when the kernel uses a synchronization mechanism the detector does not
+observe, such as an LDS barrier phase wait; see [Limitations](#limitations).
+Completion and inter-wave synchronization are separate conditions; one wait
+instruction is not a universal fix for every reported hazard.
+
+Each trace row is disassembled from its own captured bytes, so code rewrites or
+unmapping do not change the reported instructions. Within the reporting wave,
+the displayed span starts at the first matching producer PC and encoding and
+ends at the last matching current access. Repeated producer executions with
+identical PCs and encodings are not distinguished.
+
+When the conflict belongs to another wave, the reporting wave's trace starts at
+its own latest execution of the same instruction. Waves usually run the same
+code, so this shows the path from that instruction to the reported access,
+including any intervening waits or barriers. If the reporting wave never ran
+that instruction, the report shows up to its last 16 instructions, limited by
+`trace_context`.
+
+The instruction table follows the reporting wave's execution order. An event
+from another wave, or one older than the trace window, is shown separately.
+
+Each wave retains 256 instruction records. The `trace_context` plugin option
+controls how much of an excerpt is selected before eliding its middle. It
+defaults to 128 records, split equally between the start and end. It accepts
+integers from 2 to 256; an odd value gives the extra record to the end. Setting
+it to 256 disables middle elision. For example:
+
+```json
+{ "require_all_plugins": true, "plugins": { "race": { "trace_context": 256 } } }
+```
+
+Keep `require_all_plugins` enabled when changing this option. An invalid value,
+such as 257, otherwise warns and skips the detector instead of failing the run.
+
+Synchronization and control-flow instructions remain visible in the middle,
+even when they exceed the configured context. A gap of one instruction is
+shown in full. The number of elided instructions is shown at each larger gap.
+The fallback for a conflict never executed by the reporting wave remains the
+last 16 instructions, or `trace_context` if smaller. Older unrecorded history
+is identified separately; this option does not increase history storage.
+
+Consecutive identical `s_nop` instructions in the selected context share a row
+showing their execution count and final PC. Runs stop at a changed encoding,
+nonsequential PC, elision gap, or marked instruction. This is display compaction:
+context and gap counts still count individual executed instructions. Waits,
+barriers (including split-barrier signals and LDS barrier arrivals), and
+control-flow instructions are always shown individually.
+
+The plugin writes a summary when it is destroyed during VM teardown. It counts
+emitted reports and observations suppressed by the existing PC-based
+deduplication, not affected lanes or independent bugs. A successful application
+exit can occur without that teardown, so complete race reports can appear
+without a summary. Its absence does not mean zero races or zero suppressed
+observations. The structured `RACE` header and `END_RACE` delimiter remain
+available for tools that consume individual reports.
+
+The separate memory-wait warning states the threshold required immediately
+before its reported access. That threshold need not be sufficient at an earlier
+wait instruction, because more operations may have been issued in between.
 
 ## What is a race?
 

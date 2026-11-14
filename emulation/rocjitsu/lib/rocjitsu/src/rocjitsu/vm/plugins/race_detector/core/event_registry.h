@@ -105,6 +105,11 @@ public:
   // -- Typed accessors (all inline) --
 
   MemoryEventType type(EventId id) const { return entries_[index(id)].type; }
+  /// Completion obligations recorded at issue, including those already satisfied.
+  std::span<const amdgpu::MemoryCounterObligation> counterObligations(EventId id) const {
+    const auto &event = entries_[index(id)];
+    return {event.counterObligations.data(), event.numCounterObligations};
+  }
   bool hasPendingWaitCounter(EventId id, amdgpu::WaitCounterType waitType) const {
     const auto &event = entries_[index(id)];
     for (uint8_t i = 0; i < event.numCounterObligations; ++i) {

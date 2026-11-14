@@ -18,6 +18,7 @@ rj_add_object_library(
 )
 target_link_libraries(
     rocjitsu_plugin_race_detector
+    PRIVATE flatbuffers
     INTERFACE $<TARGET_OBJECTS:rocjitsu_wait_counter_policy>
 )
 

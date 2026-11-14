@@ -19,10 +19,10 @@ enum class MemoryEventType {
   LDS_TO_VGPR,        ///< Load from LDS to VGPR.
   VGPR_TO_LDS,        ///< Store from VGPR to LDS.
 
-  /// Direct-to-LDS (DTL): `buffer_load ... lds` bypasses VGPRs and writes
-  /// global memory data directly to LDS. Unlike VGPR_TO_LDS (which has VGPR
-  /// registers), GLOBAL_TO_LDS events have no VGPR registers -- only LDS
-  /// intervals.
+  /// Direct-to-LDS (DTL) loads, including `buffer_load ... lds` and
+  /// `scratch_load_lds_dword`, bypass VGPRs and write directly to LDS.
+  /// The source memory space is not recorded. Unlike VGPR_TO_LDS (which has
+  /// VGPR registers), GLOBAL_TO_LDS events have only LDS intervals.
   ///
   /// The event records the target-specific VMEM/async counter family separately.
   /// The corresponding zero wait must complete before the owning wave can read

@@ -11,13 +11,18 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna3/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna3/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/mma_exec.h"
+#include "rocjitsu/isa/decode_result.h"
+#include "rocjitsu/isa/decoder.h"
+#include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory_access.h"
 #include "rocjitsu/vm/amdgpu/lds.h"
 #include "rocjitsu/vm/amdgpu/matrix_coexecution.h"
 #include "rocjitsu/vm/amdgpu/memory_wait_scoreboard.h"
+#include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/plugins/execution_plugin.h"
 #include "rocjitsu/vm/plugins/race_detector/core/interval_set.h"
 #include "rocjitsu/vm/plugins/race_detector/plugin.h"
+#include "util/result.h"
 #include "util/simd.h"
 #include "util/simd_test_hooks.h"
 
@@ -27,6 +32,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/operand_types.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna1/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna1/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna2/builders.h"
@@ -39,6 +45,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <format>
 #include <functional>
@@ -48,6 +55,9 @@
 #include <memory>
 #include <span>
 #include <string>
+#include <string_view>
+#include <thread>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -1975,7 +1985,9 @@ TEST(RaceDetectorPluginTest, SchedulerReleasesDetectorsAcrossWaveSlotReuse) {
       previous_output = output;
 
       const std::string summary = race->getSummary();
-      EXPECT_NE(summary.find(" race(s) detected"), std::string::npos) << summary;
+      EXPECT_NE(summary.find(std::to_string(dispatch) + " race report(s) emitted"),
+                std::string::npos)
+          << summary;
       EXPECT_NE(summary, previous_summary);
       previous_summary = summary;
     }
@@ -3483,6 +3495,118 @@ TEST(RaceDetectorPluginTest, ScalarLoadToTtmpReportsReadBeforeWait) {
 
   static_cast<void>(RegisterAccess(*wf).read_scalar(*load->dst_operand(0)));
   EXPECT_NE(sink.str().find("type=TTMP"), std::string::npos);
+  EXPECT_NE(sink.str().find("  Conflict: load into TTMPs at PC 0x0, wave 0.\n"), std::string::npos)
+      << sink.str();
+}
+
+TEST(RaceDetectorPluginTest, DirectToLdsLoadsDoNotInferTheirSourceMemorySpace) {
+  for (bool scratch : {false, true}) {
+    for (bool wait : {false, true}) {
+      SCOPED_TRACE(testing::Message() << "scratch=" << scratch << " wait=" << wait);
+      PluginFixture fixture;
+      ASSERT_NO_FATAL_FAILURE(fixture.initialize(1));
+      PluginSinkConfig sink_config;
+      StringSink &sink = sink_config.emplace<StringSink>();
+      fixture.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
+      ASSERT_TRUE(fixture.plugin_group_->add(std::make_unique<RaceDetectorPlugin>()));
+      fixture.soc->set_plugin_group(fixture.plugin_group_);
+      fixture.plugin_group_->onInit();
+      ComputeUnitCore *cu = fixture.cu();
+      Wavefront *wave = cu->dispatch_wf(0, 0x100, 104, 256);
+      ASSERT_NE(wave, nullptr);
+      wave->set_exec(1);
+      wave->set_lds_base(cu->allocate_lds(256));
+      wave->set_lds_size(256);
+      wave->set_m0(16);
+      wave->set_scratch_base(0x8000);
+      wave->set_scratch_lane_size(256);
+      std::array waves{wave};
+      fixture.plugin_group_->onAmdgpuWorkgroupDispatched(1, 0, 256, 104, waves);
+      const uint32_t input = 0x12345678;
+      fixture.mem->load_image(reinterpret_cast<const uint8_t *>(&input), sizeof(input),
+                              scratch ? 0x8000 : 0x4000);
+      cu->write_vgpr(wave->vgpr_alloc().base, 0, scratch ? 0 : 0x4000);
+      cu->write_vgpr(wave->vgpr_alloc().base + 1, 0, 0);
+      cu->write_vgpr(wave->vgpr_alloc().base + 2, 0, 16);
+      std::unique_ptr<Decoder> decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+      ASSERT_NE(decoder, nullptr);
+      const std::array<uint32_t, 2> words = cdna4::build_flat(
+          scratch ? cdna4::kScratchLoadLdsDwordFlat : cdna4::kGlobalLoadLdsDwordFlat,
+          {.seg = uint8_t(scratch ? 1 : 2), .addr = 0, .saddr = 0x7f});
+      DecodeResult load = decoder->decode_window(words);
+      ASSERT_TRUE(load.succeeded());
+      EXPECT_EQ(load.value()->mnemonic(),
+                scratch ? "scratch_load_lds_dword" : "global_load_lds_dword");
+      fixture.plugin_group_->onAmdgpuBeforeExecuteInstruction(wave->pc, *load.value(), *wave);
+      ASSERT_TRUE(cu->execute_instruction(load.value().get(), *wave).succeeded());
+      test::ComputeUnitTestAccess::route_memory_inst(*cu, std::move(load.value()), *wave);
+      EXPECT_EQ(cu->lds().read32(wave->lds_base() + 16), input);
+      if (wait)
+        execute_wait(*fixture.plugin_group_, *wave, legacy_wait_word(cu->arch(), 0, 15));
+
+      wave->pc = 0x200;
+      DecodeResult read =
+          decoder->decode_window(cdna4::build_ds(cdna4::kDsReadB32Ds, {.addr = 2, .vdst = 8}));
+      ASSERT_TRUE(read.succeeded());
+      fixture.plugin_group_->onAmdgpuBeforeExecuteInstruction(wave->pc, *read.value(), *wave);
+      ASSERT_TRUE(cu->execute_instruction(read.value().get(), *wave).succeeded());
+      test::ComputeUnitTestAccess::route_memory_inst(*cu, std::move(read.value()), *wave);
+      if (wait) {
+        EXPECT_EQ(sink.str().find("RACE "), std::string::npos) << sink.str();
+      } else {
+        EXPECT_NE(sink.str().find("type=LDS"), std::string::npos) << sink.str();
+        EXPECT_NE(sink.str().find("  Conflict: load into LDS at PC 0x100, wave 0.\n"),
+                  std::string::npos)
+            << sink.str();
+        EXPECT_NE(sink.str().find("pending counters: vmcnt."), std::string::npos) << sink.str();
+      }
+    }
+  }
+}
+
+TEST(RaceDetectorPluginTest, ScalarLoadsDoNotInferTheirSourceMemorySpace) {
+  for (uint16_t opcode : {cdna4::kSLoadDwordSmem, cdna4::kSScratchLoadDwordSmem}) {
+    SCOPED_TRACE(opcode);
+    PluginFixture fixture;
+    ASSERT_NO_FATAL_FAILURE(fixture.initialize(1));
+    PluginSinkConfig sink_config;
+    StringSink &sink = sink_config.emplace<StringSink>();
+    fixture.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
+    ASSERT_TRUE(fixture.plugin_group_->add(std::make_unique<RaceDetectorPlugin>()));
+    fixture.soc->set_plugin_group(fixture.plugin_group_);
+    fixture.plugin_group_->onInit();
+    Wavefront *wave = fixture.cu()->dispatch_wf(0, 0x100, 104, 256);
+    ASSERT_NE(wave, nullptr);
+    wave->set_exec(1);
+    std::array waves{wave};
+    fixture.plugin_group_->onAmdgpuWorkgroupDispatched(1, 0, 256, 104, waves);
+    fixture.cu()->write_sgpr(wave->sgpr_alloc().base, 0x1000);
+    fixture.cu()->write_sgpr(wave->sgpr_alloc().base + 1, 0);
+    std::unique_ptr<Decoder> decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+    ASSERT_NE(decoder, nullptr);
+    const std::array<uint32_t, 2> words =
+        cdna4::build_smem(opcode, {.sbase = 0, .sdata = 8, .imm = 1});
+    DecodeResult load = decoder->decode_window(words);
+    ASSERT_TRUE(load.succeeded());
+    fixture.plugin_group_->onAmdgpuBeforeExecuteInstruction(wave->pc, *load.value(), *wave);
+    ASSERT_TRUE(fixture.cu()->execute_instruction(load.value().get(), *wave).succeeded());
+    fixture.plugin_group_->onAmdgpuMemoryAccessRouted({}, *load.value(), *wave);
+    wave->pc = 0x200;
+    record_register_probe(*fixture.plugin_group_, *wave);
+    static_cast<void>(RegisterAccess(*wave).read_sgpr(wave->sgpr_alloc().base + 8));
+    EXPECT_NE(sink.str().find("type=SGPR"), std::string::npos) << sink.str();
+    EXPECT_NE(sink.str().find("  Conflict: load into SGPRs at PC 0x100, wave 0.\n"),
+              std::string::npos)
+        << sink.str();
+    EXPECT_NE(sink.str().find("pending counters: lgkmcnt."), std::string::npos) << sink.str();
+    EXPECT_NE(sink.str().find(load.value()->disassemble()), std::string::npos) << sink.str();
+    execute_wait(*fixture.plugin_group_, *wave, legacy_wait_word(wave->cu().arch(), 63, 0));
+    wave->pc = 0x204;
+    record_register_probe(*fixture.plugin_group_, *wave);
+    const std::string completed = sink.str();
+    static_cast<void>(RegisterAccess(*wave).read_sgpr(wave->sgpr_alloc().base + 8));
+    EXPECT_EQ(sink.str(), completed);
+  }
 }
 
 TEST(RaceDetectorPluginTest, DebuggerReadsIgnorePendingLoads) {
@@ -3861,6 +3985,11 @@ TEST(RaceDetectorPluginTest, FlatLoadReadyLanesKnownFalsePositives) {
               waited == Wait::Result && shared_lanes != 0 && shared_lanes != 3;
           EXPECT_EQ(sink.str().find("RACE ") != std::string::npos,
                     missing_wait || known_false_positive);
+          if (missing_wait || known_false_positive) {
+            EXPECT_NE(sink.str().find("  Conflict: load into VGPRs at PC 0x100, wave 0.\n"),
+                      std::string::npos)
+                << sink.str();
+          }
         }
       }
     }
@@ -4016,6 +4145,11 @@ TEST(RaceDetectorPluginTest, FlatResultsFollowTheirResolvedCounter) {
             const bool missing = exec && (space == Space::Lds ? lgkmcnt != 0 : vmcnt != 0);
             EXPECT_EQ(sink.str().find("RACE ") != std::string::npos, missing);
             EXPECT_EQ(!hazards.empty(), missing);
+            if (missing) {
+              EXPECT_NE(sink.str().find("  Conflict: load into VGPRs at PC 0x100, wave 0.\n"),
+                        std::string::npos)
+                  << sink.str();
+            }
           }
         }
       }
@@ -4180,6 +4314,11 @@ TEST(RaceDetectorPluginTest, Gfx10LdsDirectSourceChecksTheBroadcastBytesWithoutI
         const auto write_report = sink.str().substr(output);
         EXPECT_EQ(write_report.find("type=LDS access=write") != std::string::npos, hazard)
             << write_report;
+        if (hazard && read != Read::Ds) {
+          EXPECT_NE(write_report.find("  Conflict: read from LDS at PC "), std::string::npos)
+              << write_report;
+          EXPECT_EQ(write_report.find("pending counters"), std::string::npos) << write_report;
+        }
       }
       for (auto *wave : waves)
         wave->halt();
@@ -4810,8 +4949,8 @@ TEST(RaceDetectorPluginOutputTest, KeepsProducerBytesAfterWaitAndTraceOverwrite)
   EXPECT_NE(sink.str().find("0x3000  ds_read_b32 v8, v0"), std::string::npos) << sink.str();
   EXPECT_NE(sink.str().find("; <-- wave 0"), std::string::npos);
   EXPECT_NE(sink.str().find("; <-- wave 1 lane 0"), std::string::npos);
-  EXPECT_NE(sink.str().find("(before trace window)  ; <-- wave 0\n"
-                            "       ... 0 instructions not recorded ...\n"),
+  EXPECT_NE(sink.str().find(expected_store + "  ; <-- wave 0\n"
+                                             "       Execution trace below is for wave 1.\n"),
             std::string::npos);
   state->race_state->flushBarrierPendingEvents();
   EXPECT_TRUE(state->race_state->getDetector()->events().isTrimmable(event));
@@ -4884,7 +5023,10 @@ TEST(FormatTraceTest, WaveLaneAnnotations) {
   ASSERT_TRUE(result.succeeded());
   EXPECT_NE(result.value().find("; <-- wave 3"), std::string::npos);
   EXPECT_NE(result.value().find("; <-- wave 0 lane 5"), std::string::npos);
-  EXPECT_EQ(result.value(), "  ==>  0x100  ds_write_b32 v9, v12  ; <-- wave 3\n"
+  EXPECT_EQ(result.value(), "       PC     Instruction\n"
+                            "  ==>  0x100  ds_write_b32 v9, v12  ; <-- wave 3\n"
+                            "       Execution trace below is for wave 0.\n"
+                            "       0x100  ds_write_b32 v9, v12\n"
                             "       0x108  s_nop 0\n"
                             "  ==>  0x10c  ds_read_b32 v8, v9  ; <-- wave 0 lane 5\n");
   EXPECT_NE(result.value().find("0x108  s_nop 0"), std::string::npos);
@@ -4905,7 +5047,7 @@ TEST(FormatTraceTest, NoLineBeforeFirstMarker) {
       trace, [&](const InstructionSnapshot &instruction) { return disasm.at(instruction.pc()); },
       conflict, read);
   ASSERT_TRUE(result.succeeded());
-  EXPECT_EQ(result.value().substr(0, 5), "  ==>");
+  EXPECT_NE(result.value().find("  ==>  0x108"), std::string::npos);
   EXPECT_EQ(result.value().find("0x100"), std::string::npos);
   EXPECT_EQ(result.value().find("0x104"), std::string::npos);
 }
@@ -4927,14 +5069,14 @@ TEST(FormatTraceTest, ConflictBeforeTraceWindow) {
   EXPECT_NE(result.value().find("before trace window"), std::string::npos);
   EXPECT_NE(result.value().find("buffer_load_dwordx4"), std::string::npos);
   EXPECT_NE(result.value().find("; <-- wave 0"), std::string::npos);
-  EXPECT_EQ(result.value().find("0x200  s_nop 0"), std::string::npos);
+  EXPECT_NE(result.value().find("0x200  s_nop 0"), std::string::npos);
   EXPECT_NE(result.value().find("not recorded"), std::string::npos);
   EXPECT_NE(result.value().find("; <-- wave 0 lane 5"), std::string::npos);
 }
 
 TEST(FormatTraceTest, ResolvesOnlyPrintedInstructions) {
   RingBuffer<InstructionSnapshot, 256> trace;
-  for (uint64_t pc = 0x100; pc <= 0x300; pc += 4)
+  for (uint64_t pc = 0x100; pc < 0x500; pc += 4)
     trace.push(testInstruction(pc));
   std::vector<uint64_t> requested;
   auto resolve = [&](const InstructionSnapshot &instruction) {
@@ -4942,21 +5084,25 @@ TEST(FormatTraceTest, ResolvesOnlyPrintedInstructions) {
     return std::string("s_nop 0");
   };
   const auto report =
-      formatTrace(trace, resolve, MarkedInstruction{trace[2], 0, -1}, {trace[128], 0, 0});
+      formatTrace(trace, resolve, MarkedInstruction{trace[2], 0, -1}, {trace[255], 0, 0});
   ASSERT_TRUE(report.succeeded());
-  ASSERT_EQ(requested.size(), 32u);
+  ASSERT_EQ(requested.size(), kDefaultTraceContext);
   EXPECT_EQ(requested.front(), 0x108u);
-  EXPECT_EQ(requested.back(), 0x300u);
+  EXPECT_EQ(requested.back(), 0x4fcu);
   EXPECT_NE(report.value().find("instructions elided"), std::string::npos);
 }
 
-TEST(FormatTraceTest, IdenticalEncodingsKeepPcBasedSelection) {
+TEST(FormatTraceTest, IdenticalEncodingsKeepTheFirstProducerAndLastAccess) {
   auto trace = make_trace({0x100, 0x104, 0x108, 0x100, 0x104});
   auto resolve = [](const InstructionSnapshot &) { return std::string("s_nop 0"); };
   const auto report =
       formatTrace(trace, resolve, MarkedInstruction{trace[3], 0, -1}, {trace[4], 0, 0});
   ASSERT_TRUE(report.succeeded());
-  EXPECT_EQ(report.value(), "  ==>  0x100  s_nop 0  ; <-- wave 0\n"
+  EXPECT_EQ(report.value(), "       PC     Instruction\n"
+                            "  ==>  0x100  s_nop 0  ; <-- wave 0\n"
+                            "       0x104  s_nop 0\n"
+                            "       0x108  s_nop 0\n"
+                            "       0x100  s_nop 0\n"
                             "  ==>  0x104  s_nop 0  ; <-- wave 0 lane 0\n");
 }
 
@@ -4977,7 +5123,8 @@ TEST(FormatTraceTest, RepeatedPcKeepsEachCapturedEncoding) {
                   },
                   MarkedInstruction{load, 0, -1}, {trace[3], 0, 0});
   ASSERT_TRUE(report.succeeded());
-  EXPECT_EQ(report.value(), "  ==>  0x100  ds_read_b32 v8, v0  ; <-- wave 0\n"
+  EXPECT_EQ(report.value(), "       PC     Instruction\n"
+                            "  ==>  0x100  ds_read_b32 v8, v0  ; <-- wave 0\n"
                             "       0x104  s_nop 0\n"
                             "       0x100  s_nop 0\n"
                             "  ==>  0x108  s_nop 0  ; <-- wave 0 lane 0\n");
@@ -4996,7 +5143,8 @@ TEST(FormatTraceTest, RewrittenReadPcDoesNotTrimAtAnEarlierEncoding) {
                   },
                   MarkedInstruction{producer, 0, -1}, {read, 0, 0});
   ASSERT_TRUE(report.succeeded());
-  EXPECT_EQ(report.value(), "  ==>  0x100  s_nop 0  ; <-- wave 0\n"
+  EXPECT_EQ(report.value(), "       PC     Instruction\n"
+                            "  ==>  0x100  s_nop 0  ; <-- wave 0\n"
                             "       0x104  s_nop 0\n"
                             "  ==>  0x100  s_nop 7  ; <-- wave 0 lane 0\n");
 }
@@ -5013,8 +5161,10 @@ TEST(FormatTraceTest, DifferentEncodingAtConflictPcIsNotTheProducer) {
                   },
                   MarkedInstruction{producer, 1, -1}, {trace[1], 0, 0});
   ASSERT_TRUE(report.succeeded());
-  EXPECT_EQ(report.value(), "  ==>  0x100  s_nop 7  (before trace window)  ; <-- wave 1\n"
-                            "       ... 1 instructions not recorded ...\n"
+  EXPECT_EQ(report.value(), "       PC     Instruction\n"
+                            "  ==>  0x100  s_nop 7  ; <-- wave 1\n"
+                            "       Execution trace below is for wave 0.\n"
+                            "       0x100  s_nop 0\n"
                             "  ==>  0x104  s_nop 0  ; <-- wave 0 lane 0\n");
 }
 
@@ -5025,6 +5175,9 @@ TEST(FormatTraceTest, PropagatesDisassemblyFailures) {
   };
   EXPECT_TRUE(
       formatTrace(trace, fail, MarkedInstruction{trace[0], 1, -1}, {trace[1], 0, 0}).failed());
+  EXPECT_TRUE(
+      formatTrace(trace, fail, MarkedInstruction{trace[0], 0, -1}, {trace[1], 0, 0}).failed());
+  EXPECT_TRUE(formatTrace({}, fail, std::nullopt, {trace[1], 0, 0}).failed());
 }
 
 TEST(RaceDisassemblyTest, SnapshotsOwnShortLiteralAndMaximumWidthEncodings) {
@@ -5142,6 +5295,397 @@ TEST(RaceDetectorPluginOutputTest, DispatchLineUsesQuestionMarksForUnresolvedKer
   plugin_group.onAmdgpuDispatchPacketProcessed(info);
 
   EXPECT_NE(sink.str().find("[rocjitsu] Kernel dispatch: \"?\" symbol=\"?\"\n"), std::string::npos);
+}
+
+TEST(RaceDetectorPluginOutputTest, TraceRowsFollowExecutedBranches) {
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(1));
+  PluginSinkConfig sink_config;
+  StringSink &sink = sink_config.emplace<StringSink>();
+  f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
+  ASSERT_TRUE(f.plugin_group_->add(std::make_unique<RaceDetectorPlugin>()));
+  f.soc->set_plugin_group(f.plugin_group_);
+  f.plugin_group_->onInit();
+  const auto load = cdna4::build_ds(cdna4::kDsReadB32Ds, {.addr = 0, .vdst = 8});
+  const auto read = cdna4::build_vop1(cdna4::kVMovB32Vop1, {.src0 = vgpr_src(8), .vdst = 9});
+  const auto forward = cdna4::build_sopp(cdna4::kSBranchSopp, {.simm16 = 2});
+  const auto backward =
+      cdna4::build_sopp(cdna4::kSBranchSopp, {.simm16 = static_cast<uint16_t>(-3)});
+  const std::array code{S_NOP, load[0], load[1], forward[0], read[0], S_ENDPGM, backward[0]};
+  f.run_kernel(code.data(), code.size());
+  const std::string report = sink.str();
+  EXPECT_NE(report.find("  ==>  0x1044  ds_read_b32 v8, v0"), std::string::npos) << report;
+  EXPECT_NE(report.find("       0x104c  s_branch 2\n"
+                        "       0x1058  s_branch 65533\n"
+                        "  ==>  0x1050  v_mov_b32_e32 v9, v8"),
+            std::string::npos)
+      << report;
+  EXPECT_EQ(report.find("instructions elided"), std::string::npos);
+}
+
+TEST(RaceDetectorPluginOutputTest, ConfiguredContextAndNopCompactionReachRealReports) {
+  for (const auto &[config, omitted, nops] :
+       {std::tuple{"{}", 24, 63}, std::tuple{R"({"trace_context":2})", 150, 0},
+        std::tuple{R"({"trace_context":8})", 144, 3},
+        std::tuple{R"({"trace_context":256})", 0, 150}}) {
+    SCOPED_TRACE(config);
+    PluginFixture f;
+    ASSERT_NO_FATAL_FAILURE(f.initialize(1));
+    PluginSinkConfig sinks;
+    StringSink &sink = sinks.emplace<StringSink>();
+    f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sinks));
+    ASSERT_TRUE(f.plugin_group_->add(std::make_unique<RaceDetectorPlugin>(config)));
+    f.soc->set_plugin_group(f.plugin_group_);
+    f.plugin_group_->onInit();
+    const auto load = cdna4::build_ds(cdna4::kDsReadB32Ds, {.addr = 0, .vdst = 8});
+    const auto read = cdna4::build_vop1(cdna4::kVMovB32Vop1, {.src0 = vgpr_src(8), .vdst = 9});
+    std::vector<uint32_t> code{S_NOP, load[0], load[1]};
+    code.insert(code.end(), 150, S_NOP);
+    code.push_back(read[0]);
+    code.push_back(S_ENDPGM);
+    f.run_kernel(code.data(), code.size());
+    const std::string report = sink.str();
+    EXPECT_NE(report.find("  ==>  0x1044  ds_read_b32 v8, v0"), std::string::npos) << report;
+    EXPECT_NE(report.find("  ==>  0x12a4  v_mov_b32_e32 v9, v8"), std::string::npos) << report;
+    if (nops) {
+      EXPECT_NE(report.find(std::format("s_nop 0  ; {} executions, through PC", nops)),
+                std::string::npos)
+          << report;
+    } else {
+      EXPECT_EQ(report.find("s_nop"), std::string::npos) << report;
+    }
+    if (omitted) {
+      EXPECT_NE(report.find(std::format("... {} instructions elided ...", omitted)),
+                std::string::npos)
+          << report;
+    } else {
+      EXPECT_EQ(report.find("instructions elided"), std::string::npos) << report;
+    }
+  }
+}
+
+TEST(RaceDetectorPluginOutputTest, LdsWriteExplainsPendingAndCompletedOtherWaveReads) {
+  for (bool complete : {false, true}) {
+    SCOPED_TRACE(complete);
+    PluginFixture f;
+    ASSERT_NO_FATAL_FAILURE(f.initialize(2));
+    PluginSinkConfig config;
+    StringSink &sink = config.emplace<StringSink>();
+    f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(config));
+    auto race = std::make_unique<RaceDetectorPlugin>();
+    RaceDetectorPlugin *plugin = race.get();
+    ASSERT_TRUE(f.plugin_group_->add(std::move(race)));
+    f.soc->set_plugin_group(f.plugin_group_);
+    f.plugin_group_->onInit();
+    Wavefront *reader = f.cu()->dispatch_wf(0, 0x1000, 104, 256);
+    Wavefront *writer = f.cu()->dispatch_wf(0, 0x1000, 104, 256);
+    ASSERT_NE(reader, nullptr);
+    ASSERT_NE(writer, nullptr);
+    reader->set_exec(1);
+    writer->set_exec(1);
+    std::array waves{reader, writer};
+    const uint32_t lds_base = f.cu()->allocate_lds(256);
+    for (Wavefront *wave : waves) {
+      wave->set_lds_base(lds_base);
+      wave->set_lds_size(256);
+    }
+    f.plugin_group_->onAmdgpuWorkgroupDispatched(1, 0, 512, 208, waves);
+    auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+    const auto read_words = cdna4::build_ds(cdna4::kDsReadB32Ds, {.addr = 0, .vdst = 8});
+    auto read = decoder->decode_window(read_words);
+    ASSERT_TRUE(read.succeeded());
+    f.plugin_group_->onAmdgpuBeforeExecuteInstruction(reader->pc, *read.value(), *reader);
+    ASSERT_TRUE(f.cu()->execute_instruction(read.value().get(), *reader).succeeded());
+    f.plugin_group_->onAmdgpuMemoryAccessRouted({}, *read.value(), *reader);
+    if (complete)
+      execute_wait(*f.plugin_group_, *reader, legacy_wait_word(ROCJITSU_CODE_ARCH_CDNA4, 63, 0));
+    const auto write_words = cdna4::build_ds(cdna4::kDsWriteB32Ds, {.addr = 0, .data0 = 1});
+    auto write = decoder->decode_window(write_words);
+    ASSERT_TRUE(write.succeeded());
+    f.plugin_group_->onAmdgpuBeforeExecuteInstruction(writer->pc, *write.value(), *writer);
+    ASSERT_TRUE(f.cu()->execute_instruction(write.value().get(), *writer).succeeded());
+    f.plugin_group_->onAmdgpuMemoryAccessRouted({}, *write.value(), *writer);
+    const std::string report = sink.str();
+    EXPECT_NE(report.find("type=LDS access=write reg=0 wave=1 lane=0"), std::string::npos)
+        << report;
+    EXPECT_NE(report.find("write-after-read (WAR)"), std::string::npos) << report;
+    EXPECT_NE(report.find("Conflict: transfer from LDS into VGPRs at PC 0x1000, wave 0."),
+              std::string::npos)
+        << report;
+    EXPECT_NE(report.find("  ==>  0x1000  ds_read_b32 v8, v0  ; <-- wave 0"), std::string::npos)
+        << report;
+    EXPECT_NE(report.find("  ==>  0x1000  ds_write_b32 v0, v1"), std::string::npos) << report;
+    if (complete) {
+      EXPECT_NE(report.find("Wait requirements satisfied for this operation in wave 0.\n  "
+                            "The detector observed no synchronization between waves 0 and 1 "
+                            "for this access."),
+                std::string::npos)
+          << report;
+      EXPECT_EQ(report.find("pending counters"), std::string::npos);
+    } else {
+      EXPECT_NE(report.find("pending counters: lgkmcnt."), std::string::npos) << report;
+      EXPECT_NE(
+          report.find(
+              "The detector observed no synchronization between waves 0 and 1 for this access."),
+          std::string::npos)
+          << report;
+    }
+    auto *state = static_cast<RaceWavefrontState *>(reader->plugin_state(plugin->slot_index()));
+    state->race_state->flushBarrierPendingEvents();
+  }
+}
+
+TEST(RaceDetectorPluginOutputTest, LdsAtomicsDescribeRecordedReadAndWriteRoles) {
+  for (bool returning : {false, true}) {
+    for (bool write : {false, true}) {
+      SCOPED_TRACE(std::format("returning={}, write={}", returning, write));
+      PluginFixture fixture;
+      ASSERT_NO_FATAL_FAILURE(fixture.initialize(2));
+      PluginSinkConfig config;
+      StringSink &sink = config.emplace<StringSink>();
+      fixture.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(config));
+      ASSERT_TRUE(fixture.plugin_group_->add(std::make_unique<RaceDetectorPlugin>()));
+      fixture.soc->set_plugin_group(fixture.plugin_group_);
+      fixture.plugin_group_->onInit();
+      ComputeUnitCore &cu = *fixture.cu();
+      Wavefront *producer = cu.dispatch_wf(0, 0x1000, 104, 256);
+      Wavefront *consumer = cu.dispatch_wf(0, 0x2000, 104, 256);
+      ASSERT_NE(producer, nullptr);
+      ASSERT_NE(consumer, nullptr);
+      std::array waves{producer, consumer};
+      const uint32_t lds_base = cu.allocate_lds(256);
+      for (Wavefront *wave : waves) {
+        wave->set_lds_base(lds_base);
+        wave->set_lds_size(256);
+        wave->set_exec(1);
+        cu.write_vgpr(wave->vgpr_alloc().base, 0, 16);
+        cu.write_vgpr(wave->vgpr_alloc().base + 1, 0, 7);
+      }
+      fixture.plugin_group_->onAmdgpuWorkgroupDispatched(1, 0, 512, 208, waves);
+      std::unique_ptr<Decoder> decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+      ASSERT_NE(decoder, nullptr);
+      auto issue = [&](Wavefront &wave, const std::array<uint32_t, 2> &words) {
+        std::unique_ptr<Instruction> instruction(decode_valid(*decoder, words.data()));
+        ASSERT_NE(instruction, nullptr);
+        fixture.plugin_group_->onAmdgpuBeforeExecuteInstruction(wave.pc, *instruction, wave);
+        ASSERT_TRUE(cu.execute_instruction(instruction.get(), wave).succeeded());
+        ASSERT_EQ(test::ComputeUnitTestAccess::route_memory_inst(cu, std::move(instruction), wave),
+                  VmAccessOutcome::Complete);
+      };
+      const std::array<uint32_t, 2> atomic =
+          cdna4::build_ds(returning ? cdna4::kDsAddRtnU32Ds : cdna4::kDsAddU32Ds,
+                          {.addr = 0, .data0 = 1, .vdst = 8});
+      ASSERT_NO_FATAL_FAILURE(issue(*producer, atomic));
+      ASSERT_EQ(sink.str().find("RACE "), std::string::npos) << sink.str();
+      const std::array<uint32_t, 2> access =
+          write ? cdna4::build_ds(cdna4::kDsWriteB32Ds, {.addr = 0, .data0 = 1})
+                : cdna4::build_ds(cdna4::kDsReadB32Ds, {.addr = 0, .vdst = 8});
+      ASSERT_NO_FATAL_FAILURE(issue(*consumer, access));
+      const std::string &report = sink.str();
+      EXPECT_NE(report.find(std::format("type=LDS access={} reg=16 wave=1 lane=0",
+                                        write ? "write" : "read")),
+                std::string::npos)
+          << report;
+      EXPECT_NE(report.find(write ? "write-after-read (WAR)" : "read-after-write (RAW)"),
+                std::string::npos)
+          << report;
+      EXPECT_NE(report.find(returning ? "Conflict: atomic update of LDS returning values to VGPRs "
+                                        "at PC 0x1000, wave 0."
+                                      : "Conflict: atomic update of LDS at PC 0x1000, wave 0."),
+                std::string::npos)
+          << report;
+      EXPECT_NE(report.find(returning ? "ds_add_rtn_u32" : "ds_add_u32"), std::string::npos)
+          << report;
+    }
+  }
+}
+
+TEST(RaceDetectorPluginOutputTest, CountsReportsInsteadOfTheirTwoPcsAndCountsSuppression) {
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(1));
+  PluginSinkConfig sink_config;
+  StringSink &sink = sink_config.emplace<StringSink>();
+  f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
+  auto plugin = std::make_unique<RaceDetectorPlugin>();
+  RaceDetectorPlugin *reporter = plugin.get();
+  ASSERT_TRUE(f.plugin_group_->add(std::move(plugin)));
+  f.soc->set_plugin_group(f.plugin_group_);
+  f.plugin_group_->onInit();
+  Wavefront *wave = f.cu()->dispatch_wf(0, 0x200, 104, 256);
+  ASSERT_NE(wave, nullptr);
+  wave->set_exec(1);
+  std::array waves{wave};
+  f.plugin_group_->onAmdgpuWorkgroupDispatched(1, 0, 256, 104, waves);
+  auto *state = static_cast<RaceWavefrontState *>(wave->plugin_state(reporter->slot_index()));
+  ASSERT_NE(state, nullptr);
+  register_pending_event(*state->race_state, 0x100, MemoryEventType::GLOBAL_TO_VGPR, {2},
+                         WaitCounterType::VMCNT, MemoryOrderClass::VMEM);
+  record_register_probe(*f.plugin_group_, *wave);
+  for (unsigned i = 0; i < 3; ++i)
+    state->race_state->checkVgprReadLanes(2, 1, 0xf);
+  EXPECT_NE(reporter->getSummary().find("1 race report(s) emitted; 2 observation(s) suppressed"),
+            std::string::npos);
+  wave->pc += 4;
+  record_register_probe(*f.plugin_group_, *wave);
+  for (unsigned i = 0; i < 2; ++i)
+    state->race_state->checkVgprReadLanes(2, 1, 0xf);
+  EXPECT_NE(reporter->getSummary().find("1 race report(s) emitted; 4 observation(s) suppressed"),
+            std::string::npos);
+  const std::string report = sink.str();
+  EXPECT_NE(report.find("read-after-write (RAW)"), std::string::npos);
+  EXPECT_NE(report.find("pending counters: vmcnt."), std::string::npos);
+  EXPECT_NE(report.find("RACE kernel=? symbol=? dispatch=1 type=VGPR access=read reg=2"),
+            std::string::npos);
+  const size_t first = report.find("END_RACE\n");
+  ASSERT_NE(first, std::string::npos);
+  EXPECT_EQ(report.find("END_RACE\n", first + 1), std::string::npos);
+}
+
+TEST(RaceDetectorPluginOutputTest, CapturesWaitBarrierControlFlowAndNopMetadata) {
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(1, "cdna5", 32, 104));
+  f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+  auto plugin = std::make_unique<RaceDetectorPlugin>();
+  RaceDetectorPlugin *reporter = plugin.get();
+  ASSERT_TRUE(f.plugin_group_->add(std::move(plugin)));
+  f.soc->set_plugin_group(f.plugin_group_);
+  f.plugin_group_->onInit();
+  Wavefront *wave = f.cu()->dispatch_wf(0, 0x100, 104, 256, 32);
+  ASSERT_NE(wave, nullptr);
+  std::array waves{wave};
+  f.plugin_group_->onAmdgpuWorkgroupDispatched(1, 0, 256, 104, waves);
+  auto *state = static_cast<RaceWavefrontState *>(wave->plugin_state(reporter->slot_index()));
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  ASSERT_NE(decoder, nullptr);
+  for (uint16_t opcode : {cdna5::kSWaitDscntSopp, cdna5::kSWaitAsynccntSopp,
+                          cdna5::kSWaitTensorcntSopp, cdna5::kSBarrierWaitSopp, cdna5::kSBranchSopp,
+                          cdna5::kSCbranchScc1Sopp, cdna5::kSTrapSopp, cdna5::kSEndpgmSopp}) {
+    const auto words = cdna5::build_sopp(opcode);
+    auto decoded = decoder->decode_window(words);
+    ASSERT_TRUE(decoded.succeeded());
+    f.plugin_group_->onAmdgpuBeforeExecuteInstruction(wave->pc, *decoded.value(), *wave);
+    EXPECT_TRUE(state->trace[state->trace.size() - 1].preserve_in_trace());
+    EXPECT_FALSE(state->trace[state->trace.size() - 1].is_nop());
+    wave->pc += 4;
+  }
+  const auto nop_words = cdna5::build_sopp(cdna5::kSNopSopp);
+  auto nop = decoder->decode_window(nop_words);
+  ASSERT_TRUE(nop.succeeded());
+  f.plugin_group_->onAmdgpuBeforeExecuteInstruction(wave->pc, *nop.value(), *wave);
+  EXPECT_FALSE(state->trace[state->trace.size() - 1].preserve_in_trace());
+  EXPECT_TRUE(state->trace[state->trace.size() - 1].is_nop());
+}
+
+TEST(RaceDetectorPluginOutputTest, KeepsDecodedBarrierOperationsInsideElidedSpan) {
+  PluginFixture fixture;
+  ASSERT_NO_FATAL_FAILURE(fixture.initialize(1, "cdna5", 32, 104));
+  fixture.plugin_group_ = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+  auto plugin = std::make_unique<RaceDetectorPlugin>();
+  RaceDetectorPlugin *reporter = plugin.get();
+  ASSERT_TRUE(fixture.plugin_group_->add(std::move(plugin)));
+  fixture.soc->set_plugin_group(fixture.plugin_group_);
+  fixture.plugin_group_->onInit();
+  Wavefront *wave = fixture.cu()->dispatch_wf(0, 0x100, 104, 256, 32);
+  ASSERT_NE(wave, nullptr);
+  std::array waves{wave};
+  fixture.plugin_group_->onAmdgpuWorkgroupDispatched(1, 0, 256, 104, waves);
+  auto *state = static_cast<RaceWavefrontState *>(wave->plugin_state(reporter->slot_index()));
+  ASSERT_NE(state, nullptr);
+  std::unique_ptr<Decoder> decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  ASSERT_NE(decoder, nullptr);
+  const std::array<uint32_t, 1> signal_words = cdna5::build_sop1(
+      cdna5::kSBarrierSignalSop1, {.ssrc0 = cdna5::OPR_SSRC_BARRIER_ID_NEG_INT_MIN});
+  const std::array<uint32_t, 1> isfirst_words = cdna5::build_sop1(
+      cdna5::kSBarrierSignalIsfirstSop1, {.ssrc0 = cdna5::OPR_SSRC_BARRIER_ID_NEG_INT_MIN});
+  const std::array<uint32_t, 2> async_arrive_words =
+      cdna5::build_vds(cdna5::kDsAtomicAsyncBarrierArriveB64Vds);
+  const std::array<uint32_t, 2> returning_arrive_words =
+      cdna5::build_vds(cdna5::kDsAtomicBarrierArriveRtnB64Vds);
+  const std::array<std::span<const uint32_t>, 4> barriers{
+      signal_words, isfirst_words, async_arrive_words, returning_arrive_words};
+  for (std::span<const uint32_t> barrier_words : barriers) {
+    DecodeResult barrier = decoder->decode_window(barrier_words);
+    ASSERT_TRUE(barrier.succeeded());
+    SCOPED_TRACE(barrier.value()->mnemonic());
+    state->trace = {};
+    const std::array<uint32_t, 1> nop_words = cdna5::build_sopp(cdna5::kSNopSopp);
+    uint64_t pc = 0x100;
+    for (size_t index = 0; index < 135; ++index) {
+      const std::span<const uint32_t> words = index == 67 ? barrier_words : nop_words;
+      DecodeResult decoded = decoder->decode_window(words);
+      ASSERT_TRUE(decoded.succeeded());
+      fixture.plugin_group_->onAmdgpuBeforeExecuteInstruction(pc, *decoded.value(), *wave);
+      pc += decoded.value()->size();
+    }
+    const auto disassemble = [&decoder](const InstructionSnapshot &instruction) {
+      DecodeResult decoded = decoder->decode_window(instruction.encoding());
+      return decoded.value()->disassemble();
+    };
+    const MarkedInstruction producer{state->trace[0], 0, 0};
+    const MarkedInstruction access{state->trace[134], 0, 0};
+    for (size_t context : {size_t{2}, kDefaultTraceContext, kTraceHistorySize}) {
+      SCOPED_TRACE(context);
+      const util::FailureOr<std::string> report_result =
+          formatTrace(state->trace, disassemble, producer, access, context);
+      ASSERT_TRUE(report_result.succeeded());
+      const std::string &report = report_result.value();
+      EXPECT_EQ(report.find("instructions elided") != std::string::npos,
+                context < state->trace.size())
+          << report;
+      EXPECT_NE(report.find(disassemble(state->trace[67])), std::string::npos) << report;
+    }
+    EXPECT_TRUE(state->trace[67].preserve_in_trace());
+  }
+}
+
+TEST(RaceDetectorPluginOutputTest, ConcurrentReportsStayWholeAndSummaryCountsStayConsistent) {
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(1, "cdna4", 64, 104, 256, 4));
+  PluginSinkConfig sink_config;
+  StringSink &sink = sink_config.emplace<StringSink>();
+  f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
+  auto plugin = std::make_unique<RaceDetectorPlugin>();
+  RaceDetectorPlugin *reporter = plugin.get();
+  ASSERT_TRUE(f.plugin_group_->add(std::move(plugin)));
+  f.soc->set_plugin_group(f.plugin_group_);
+  f.plugin_group_->onInit();
+  std::array<RaceWavefrontState *, 4> states{};
+  for (unsigned i = 0; i < states.size(); ++i) {
+    Wavefront *wave = f.cu(i)->dispatch_wf(i, 0x2000 + 0x100 * i, 104, 256);
+    ASSERT_NE(wave, nullptr);
+    wave->set_exec(1);
+    std::array waves{wave};
+    f.plugin_group_->onAmdgpuWorkgroupDispatched(1, i, 256, 104, waves);
+    states[i] = static_cast<RaceWavefrontState *>(wave->plugin_state(reporter->slot_index()));
+    register_pending_event(*states[i]->race_state, 0x1000 + 0x100 * i,
+                           MemoryEventType::GLOBAL_TO_VGPR, {2}, WaitCounterType::VMCNT,
+                           MemoryOrderClass::VMEM);
+    record_register_probe(*f.plugin_group_, *wave);
+  }
+  std::vector<std::thread> workers;
+  for (auto *state : states)
+    workers.emplace_back([state, reporter] {
+      for (unsigned i = 0; i < 50; ++i) {
+        state->race_state->checkVgprReadLanes(2, 1, 0xf);
+        static_cast<void>(reporter->getSummary());
+      }
+    });
+  for (auto &worker : workers)
+    worker.join();
+  EXPECT_NE(reporter->getSummary().find("4 race report(s) emitted; 196 observation(s) suppressed"),
+            std::string::npos);
+  const std::string report = sink.str();
+  size_t begin = 0;
+  unsigned count = 0;
+  while ((begin = report.find("RACE kernel=", begin)) != std::string::npos) {
+    const size_t end = report.find("END_RACE\n", begin);
+    ASSERT_NE(end, std::string::npos);
+    const size_t next = report.find("RACE kernel=", begin + 1);
+    EXPECT_TRUE(next == std::string::npos || next > end);
+    begin = end + 9;
+    ++count;
+  }
+  EXPECT_EQ(count, 4u);
 }
 
 TEST(RaceDetectorPluginOutputTest, DispatchLineUsesReadableNameAndExactSymbol) {

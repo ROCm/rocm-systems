@@ -10,4 +10,6 @@
 #include "rocjitsu/vm/plugins/plugin_exports.h"
 #include "rocjitsu/vm/plugins/race_detector/plugin.h"
 
-ROCJITSU_DEFINE_PLUGIN(rocjitsu::plugins::race_detector::RaceDetectorPlugin, "race", "{}")
+ROCJITSU_DEFINE_PLUGIN(rocjitsu::plugins::race_detector::RaceDetectorPlugin, "race",
+                       R"({"trace_context":{"type":"number","default":128,
+                       "description":"Instruction context before elision (2-256); waits, barriers and control flow are retained."}})")

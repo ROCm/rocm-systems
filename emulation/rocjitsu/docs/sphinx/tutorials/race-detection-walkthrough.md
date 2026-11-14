@@ -17,7 +17,7 @@ emulator runs the kernel entirely on the CPU.
 
 ```{note}
 This tutorial uses the built-in race detector, an execution plugin that
-runs inside the rocJITsu emulator (`RJ_RACE=1`).
+runs inside the rocJITsu emulator.
 ```
 
 ## Write the kernel
@@ -31,6 +31,7 @@ has not yet written.
 // race_example.hip
 #include <hip/hip_runtime.h>
 #include <cstdio>
+#include <cstdlib>
 
 __global__ void transpose_lds(const int *in, int *out) {
   __shared__ int tile[128];
@@ -41,15 +42,23 @@ __global__ void transpose_lds(const int *in, int *out) {
   out[tid] = tile[127 - tid];
 }
 
+void check_hip(hipError_t status) {
+  if (status != hipSuccess) {
+    std::fprintf(stderr, "HIP error: %s\n", hipGetErrorString(status));
+    std::exit(EXIT_FAILURE);
+  }
+}
+
 int main() {
   int *d_in, *d_out;
-  hipMalloc(&d_in, 128 * sizeof(int));
-  hipMalloc(&d_out, 128 * sizeof(int));
+  check_hip(hipMalloc(&d_in, 128 * sizeof(int)));
+  check_hip(hipMalloc(&d_out, 128 * sizeof(int)));
   transpose_lds<<<1, 128>>>(d_in, d_out);
-  hipDeviceSynchronize();
-  hipFree(d_in);
-  hipFree(d_out);
-  printf("done\n");
+  check_hip(hipGetLastError());
+  check_hip(hipDeviceSynchronize());
+  check_hip(hipFree(d_in));
+  check_hip(hipFree(d_out));
+  std::puts("done");
 }
 ```
 
@@ -68,23 +77,43 @@ hipcc -o /tmp/race_example race_example.hip --offload-arch=gfx950
 
 ## Run under the race detector
 
-Set `RJ_RACE=1` to activate the race detection plugin, then launch the
-binary under rocJITsu:
+From `emulation/rocjitsu`, copy `configs/gfx950_mi350x.json` to
+`my_config.json` and add these top-level settings to activate the race detector:
+
+``` json
+{ "require_all_plugins": true, "plugins": { "race": {} } }
+```
+
+`require_all_plugins` makes initialization fail if the race detector cannot
+load, including when its configuration is invalid. The example checks HIP
+errors and exits with a failure status, so a skipped detector cannot be
+mistaken for a successful race check.
+
+Launch the binary with that configuration, where `BUILD_DIR` is your
+rocJITsu build directory:
 
 ``` bash
-RJ_RACE=1 build/tools/rocjitsu/rocjitsu -- /tmp/race_example
+$BUILD_DIR/tools/rocjitsu/rocjitsu --config my_config.json -- /tmp/race_example
 ```
 
 ## Interpret the race report
 
-The race detector prints a report to stderr that looks like this:
+The following report was captured from the gfx950 example above. PCs,
+register assignments, and dispatch IDs can vary between builds and runs.
 
 ``` text
-RACE type=LDS reg=508 wave=0 lane=0 wg=0,0,0 conflict=unknown
-Race on LDS byte 508 [workgroup (0, 0, 0), wave 0, lane 0]
-  ==>  ds_write_b32 v0, v1  ; <-- wave 1
-       v_sub_u32_e32 v1, 0, v0
-  ==>  ds_read_b32 v1, v1  ; <-- wave 0 lane 0
+RACE kernel=transpose_lds symbol=_Z13transpose_ldsPKiPi dispatch=2 type=LDS access=read reg=508 wave=0 lane=0 wg=0,0,0 conflict=unknown
+Race on LDS byte 508 [workgroup (0, 0, 0), wave 0, lane 0]: read-after-write (RAW).
+  Current access: read at PC 0x73aee4951728.
+  Conflict: transfer from VGPRs into LDS at PC 0x73aee495171c, wave 1.
+  Completion for wave 1 is not guaranteed; pending counters: lgkmcnt.
+  The detector observed no synchronization between waves 1 and 0 for this access.
+       PC              Instruction
+  ==>  0x73aee495171c  ds_write_b32 v0, v1  ; <-- wave 1
+       Execution trace below is for wave 0.
+       0x73aee495171c  ds_write_b32 v0, v1
+       0x73aee4951724  v_sub_u32_e32 v1, 0, v0
+  ==>  0x73aee4951728  ds_read_b32 v1, v1 offset:508  ; <-- wave 0 lane 0
 END_RACE
 ```
 
@@ -96,17 +125,19 @@ Each field tells you something specific:
 -   **wave=0, lane=0** --- the wave and lane that performed the
     conflicting read.
 -   **wg=0,0,0** --- the workgroup coordinates.
--   **ds_write_b32** --- the store instruction from wave 1 that wrote to
-    LDS byte 508.
+-   **Marked ds_write_b32** --- the store instruction from wave 1 that
+    wrote to LDS byte 508. The unmarked row is wave 0's own execution of
+    that store, at the beginning of its trace.
 -   **ds_read_b32** --- the load instruction from wave 0 that read the
     same address without an intervening barrier.
 
-The detector tracks three lifecycle states for each in-flight memory
-operation: *active* (in flight --- accessing the destination is a race),
-*wave-complete* (retired by `s_waitcnt` for the owning wave, but still a
-race for other waves), and *retired* (synchronized by `s_barrier` ---
-safe for all waves). Because no barrier separates the write and the
-read, the write event is still active when the read executes.
+The completion line says that wave 1's store still has an unsatisfied
+`lgkmcnt` wait requirement. The synchronization line says that the detector
+observed no synchronization between waves 1 and 0 for this access. These are
+separate conditions: satisfying the store's wait requirement in wave 1 would
+not order wave 0's read after the store. A missing barrier alone does not tell us whether the store's
+wait requirements have been satisfied. The kernel needs `__syncthreads()`
+between the write and the cross-wave read either way.
 
 ## Fix the kernel
 
@@ -126,26 +157,26 @@ Recompile and rerun:
 
 ``` bash
 hipcc -o /tmp/race_example race_example.hip --offload-arch=gfx950
-RJ_RACE=1 build/tools/rocjitsu/rocjitsu -- /tmp/race_example
+$BUILD_DIR/tools/rocjitsu/rocjitsu --config my_config.json -- /tmp/race_example
 ```
 
-The output should complete with `done` and no `RACE` reports.
+The run should exit successfully with `done` and no `RACE` reports. A HIP
+error or a failed process exit does not establish that the kernel is race-free.
 
 ## Save reports to a file
 
-For CI pipelines or scripted workflows, redirect race reports to a file
-using the sink system:
+For CI pipelines or scripted workflows, create the output directory with
+`mkdir -p /tmp/output` and add a `sinks` section to `my_config.json`:
 
-``` bash
-RJ_RACE=1 RJ_SINKS=file RJ_SINK_DIR=/tmp/output \
-  build/tools/rocjitsu/rocjitsu -- /tmp/race_example
+``` json
+{ "sinks": { "types": ["file"], "dir": "/tmp/output" } }
 ```
 
-Reports are written to `/tmp/output/race.log`.
+Rerun with the same command. Reports are written to `/tmp/output/race.log`.
 
 ## Next steps
 
--   Learn how the execution plugin system and sink configuration work in
-    [Execution plugin system](../conceptual/execution-plugins.md).
+-   See the JSON plugin and sink settings in the
+    [plugin output examples](https://rocm.github.io/rocm-systems/rocjitsu/plugins/#examples).
 -   Analyze final GPU code objects for missing wait instructions with
     [waitcheck hazard analyzer reference](../reference/waitcheck.md).
