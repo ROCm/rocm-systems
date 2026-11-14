@@ -76,6 +76,11 @@ is an optional override:
 | `HSA_NO_SCRATCH_RECLAIM=1` | Required by the kernels' scratch usage. |
 | `RCCL_EP_LIB` | Optional. Overrides the co-located `librccl_ep.so`; unnecessary after `cmake --install`, and unused when RCCL was built with `ENABLE_RCCL_EP_IN_LIBRCCL`. |
 
+`NCCL_WIN_ENABLE` must not be 0: the EP window is a symmetric window, and with
+symmetric windows disabled `ep_configure` fails at window registration. RCCL
+reads it once per process, at the first single-node communicator, which is
+usually torch's.
+
 `NCCL_DMABUF_ENABLE` is deliberately **not** set: torch's older RCCL is live in
 the same process and segfaults on it.
 
@@ -85,3 +90,18 @@ needs a cuMem-capable HIP that no published wheel provides, so all three must
 resolve to the system ROCm, with `/opt/rocm/llvm/lib` on the search path.
 Point all three at the system copies before importing torch and this package
 together; the process must end up with exactly one HIP runtime loaded.
+
+## Calling contract
+
+- Every C entry point checks its own arguments and returns -1 (or a null handle) with one
+  `[rccl_ep] <fn>: <reason>` line before it launches anything or changes any state; the
+  Python layer checks token, routing and bias inputs before it launches anything, raising
+  `ValueError` (`TypeError` for a bias that is not bf16).
+- Tokens are 2-D: dispatch takes `x` as `[num_tokens, hidden]`, bf16 or fp8 e4m3 with
+  scales `[num_tokens, ceil(hidden / 128)]` of any floating dtype, which the kernels take as
+  float32.
+- A top-k id of -1 or outside `[0, num_experts)` is ignored; an int64 id is clamped to
+  `[-1, num_experts]` before it is narrowed to int32, so none truncates onto a valid expert. An expert repeated within
+  one token's top-k is delivered in each of its slots by the plain and expanded layouts.
+- The kernels are wave64: the CMake build compiles gfx9 targets only, and `ep_create`
+  fails on every rank of a group in which any rank's device is not wave64.

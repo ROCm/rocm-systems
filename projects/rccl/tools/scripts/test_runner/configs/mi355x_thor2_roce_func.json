@@ -66,6 +66,95 @@
         }
       ]
     },
+    "rccl_ep_mpi": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 8,
+      "num_nodes": 1,
+      "num_gpus": 8,
+      "timeout": 180,
+      "env_variables": {
+        "NCCL_CUMEM_ENABLE": "1"
+      },
+      "tests": [
+        {
+          "name": "RcclEp_DispatchCombineRoundTrip",
+          "description": "Dispatch and identity-expert combine at the full MoE shape, checked exactly",
+          "test_filter": "RcclEpDispatchCombineTest.DispatchCombineRoundTrip"
+        },
+        {
+          "name": "RcclEp_ReconfigureBetweenShapes",
+          "description": "Round trips across an ep_configure to another shape and back",
+          "test_filter": "RcclEpDispatchCombineTest.ReconfigureBetweenShapes"
+        },
+        {
+          "name": "RcclEp_DispatchBf16AndFp8Bandwidth",
+          "description": "bf16 and fp8 dispatch and combine timing, with correctness checks",
+          "test_filter": "RcclEpDispatchCombineTest.DispatchBf16AndFp8Bandwidth"
+        },
+        {
+          "name": "RcclEp_RanksThatReceiveNothing",
+          "description": "Ranks that receive no tokens take part in dispatch and combine",
+          "test_filter": "RcclEpDispatchCombineTest.RanksThatReceiveNothing"
+        },
+        {
+          "name": "RcclEp_RanksThatSendNothing",
+          "description": "Ranks with zero tokens take part in dispatch and combine",
+          "test_filter": "RcclEpDispatchCombineTest.RanksThatSendNothing"
+        },
+        {
+          "name": "RcclEp_MalformedRoutingIsIgnored",
+          "description": "Top-k ids outside [0, num_experts) are skipped on every path",
+          "test_filter": "RcclEpDispatchCombineTest.MalformedRoutingIsIgnored"
+        },
+        {
+          "name": "RcclEp_MixedArchitectureFailsConfigure",
+          "description": "A rank reporting another architecture fails ep_configure on every rank",
+          "test_filter": "RcclEpDispatchCombineTest.MixedArchitectureFailsConfigure"
+        },
+        {
+          "name": "RcclEp_DeclinedWindowFailsConfigure",
+          "description": "A declined window registration fails ep_configure and leaves the handle sound",
+          "test_filter": "RcclEpDispatchCombineTest.DeclinedWindowFailsConfigure"
+        },
+        {
+          "name": "RcclEp_NonWave64RankFailsCreateOnEveryRank",
+          "description": "One rank without a wave64 device fails ep_create on every rank",
+          "test_filter": "RcclEpDispatchCombineTest.NonWave64RankFailsCreateOnEveryRank"
+        },
+        {
+          "name": "RcclEp_ConfigureAndDestroyKeepTheCallersDevice",
+          "description": "ep_configure and ep_destroy from another current device",
+          "test_filter": "RcclEpDispatchCombineTest.ConfigureAndDestroyKeepTheCallersDevice"
+        },
+        {
+          "name": "RcclEp_CreateAndNullHandleRejectBadArguments",
+          "description": "ep_create argument checks and every entry point's null-handle check",
+          "test_filter": "RcclEpDispatchCombineTest.CreateAndNullHandleRejectBadArguments"
+        },
+        {
+          "name": "RcclEp_DataPathRejectsBadArguments",
+          "description": "Data-path entry points reject bad arguments alike on every rank",
+          "test_filter": "RcclEpDispatchCombineTest.DataPathRejectsBadArguments"
+        },
+        {
+          "name": "RcclEp_Fp8DispatchIsExact",
+          "description": "fp8 payloads and scales arrive bit-exact",
+          "test_filter": "RcclEpDispatchCombineTest.Fp8DispatchIsExact"
+        },
+        {
+          "name": "RcclEp_ExpandedLayoutGroupsByExpert",
+          "description": "Expanded layout grouped by expert, and the combines that read it",
+          "test_filter": "RcclEpDispatchCombineTest.ExpandedLayoutGroupsByExpert"
+        },
+        {
+          "name": "RcclEp_TopkAboveEightReducesInOrder",
+          "description": "num_topk 12: combines sum more than 8 rows of a token in ascending k",
+          "test_filter": "RcclEpDispatchCombineTest.TopkAboveEightReducesInOrder"
+        }
+      ]
+    },
     "shm_comprehensive": {
       "extends": "default",
       "is_gtest": true,
@@ -3950,6 +4039,12 @@
       "name": "RCCL EP Create Argument Checks",
       "description": "Eight-rank single-node rccl_ep argument validation with bounded initialization",
       "config": "rccl_ep_argument_checks",
+      "enabled": true
+    },
+    {
+      "name": "RCCL EP MPI Tests",
+      "description": "Eight-rank single-node rccl_ep dispatch and combine tests, one test per process",
+      "config": "rccl_ep_mpi",
       "enabled": true
     },
     {

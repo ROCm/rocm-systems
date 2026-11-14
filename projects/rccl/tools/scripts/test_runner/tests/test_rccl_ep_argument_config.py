@@ -1,3 +1,4 @@
+import re
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -70,6 +71,23 @@ class RcclEpArgumentConfigTest(unittest.TestCase):
         self.assertEqual(len(enabled), 1)
         source = (_RCCL / "test/RcclEpDispatchCombineMPITests.cpp").read_text(encoding="utf-8")
         self.assertIn("TEST_F(RcclEpDispatchCombineTest, CreateRejectsOutOfRangeArguments)", source)
+
+    def test_every_rccl_ep_mpi_test_has_its_own_ci_entry(self):
+        # One test per process (the file's header explains why), and none left out of CI.
+        processor = TestConfigProcessor(str(_CONFIG_DIR / "mi355x_thor2_roce_func.json"))
+        source = (_RCCL / "test/RcclEpDispatchCombineMPITests.cpp").read_text(encoding="utf-8")
+        defined = re.findall(r"^TEST_F\(RcclEpDispatchCombineTest, (\w+)\)", source, re.M)
+        filters = []
+        for config in ("rccl_ep_argument_checks", "rccl_ep_mpi"):
+            suite = processor.combine_configs(config)
+            self.assertEqual(suite["binary"], "rccl-UnitTestsMPI")
+            self.assertEqual(suite["num_ranks"], 8)
+            self.assertEqual(suite["env_variables"]["NCCL_CUMEM_ENABLE"], "1")
+            filters += [test["test_filter"] for test in suite["tests"]]
+            enabled = [entry for entry in processor.config["test_suites"]
+                       if entry["config"] == config and entry.get("enabled", True)]
+            self.assertEqual(len(enabled), 1, config)
+        self.assertEqual(sorted(filters), sorted(f"RcclEpDispatchCombineTest.{name}" for name in defined))
 
 
 if __name__ == "__main__":
