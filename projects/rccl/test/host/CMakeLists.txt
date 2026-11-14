@@ -1951,6 +1951,7 @@ rccl_add_micro_binary(rccl-UnitTestsMicro
     DV_PROVIDER_FAKE_IONIC_NAME="$<TARGET_FILE_NAME:rccl-micro-dv-provider-fake-ionic>"
     DV_PROVIDER_FAKE_IONIC_NO_GDA_NAME="$<TARGET_FILE_NAME:rccl-micro-dv-provider-fake-ionic-no-gda>"
     DV_PROVIDER_FAKE_MLX5_NAME="$<TARGET_FILE_NAME:rccl-micro-dv-provider-fake-mlx5>"
+    RCCL_TEST_INSTALL_LIBDIR="${CMAKE_INSTALL_LIBDIR}"
     RCCL_GRAPH_GEN_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/graph/rccl_graph_gen.cc"
     PARAM_REGISTRY_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/param/param_registry.cc"
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro.yaml")
@@ -1959,7 +1960,11 @@ rccl_add_micro_binary(rccl-UnitTestsMicro
 set_source_files_properties(wrap-test.cc PROPERTIES COMPILE_DEFINITIONS ENABLE_LL128)
 
 # Fake ibverbs provider dv libraries for dv_symbols_test.cc; the SONAME is what the builders' dlopen matches.
-# The test finds them beside its own executable, in the build tree and in an install.
+# In the build tree the fakes sit beside the test binary; in an install they go in a
+# private test directory under the library directory. FakeProviderPath() checks both.
+# They must not land in the main library directory: their SONAMEs are the real provider
+# names (libionic.so, libmlx5.so), so ldconfig would link those names to the fakes and
+# a runtime lookup of ncclDvDlopen("libionic.so") could resolve to one.
 foreach(_fake ionic ionic-no-gda mlx5)
   string(REGEX REPLACE "-.*" "" _dv "${_fake}")
   add_library(rccl-micro-dv-provider-fake-${_fake} SHARED fakes/dv_provider_fake.cc)
@@ -1968,7 +1973,9 @@ foreach(_fake ionic ionic-no-gda mlx5)
   target_link_options(rccl-micro-dv-provider-fake-${_fake} PRIVATE -no-hip-rt -Wl,-soname,lib${_dv}.so)
   add_dependencies(rccl-UnitTestsMicro rccl-micro-dv-provider-fake-${_fake})
   if(BUILD_TESTS)
-    install(TARGETS rccl-micro-dv-provider-fake-${_fake} LIBRARY DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT tests)
+    install(TARGETS rccl-micro-dv-provider-fake-${_fake}
+      LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/rccl/test
+      COMPONENT tests)
   endif()
 endforeach()
 target_compile_definitions(rccl-micro-dv-provider-fake-ionic-no-gda PRIVATE DV_PROVIDER_FAKE_IONIC_NO_GDA)
