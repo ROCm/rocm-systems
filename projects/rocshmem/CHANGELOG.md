@@ -9,6 +9,10 @@
 * Extended the tile API to support **3D and 4D tensors** (in addition to the existing 1D and 2D support) for both the IPC and GDA backends. The `TileView` internal structure now uses fixed-size arrays of `MAX_NDIM=4`, `tile_make_view` uses a generic loop over all dimensions, and `tile_memcpy_rma` includes an N-dimensional strided copy path. The `ndim > 2` guards in the IPC and GDA RMA and reduction operations have been relaxed to `ndim > TileView::MAX_NDIM`. The GDA lane-level `tile_put`/`tile_get` and the `tile_put_gda_workers`/`tile_get_gda_workers` helpers include N-dimensional element-by-element and contiguous paths for ranks 3 and 4.
 * Added standalone signal APIs:
     * `rocshmem_signal_add_on_stream` and `rocshmem_signal_set_on_stream`
+* Added Anvil SDMA queues for a peer on another host, reached through its fabric-mapped memory
+  (`AnvilLib::connectRemotePeer`, `getRemotePeerQueue`, `disconnectRemotePeer`). They are keyed
+  by a caller-supplied peer key, so they never share a queue with a peer on the same host, and
+  each goes on the usable engine carrying the fewest of this process's queues.
 
 ### Resolved issues
 * Fixed `rocshmem_fence` on the RO backend taking a host proxy round trip from every calling thread.
@@ -30,6 +34,10 @@
 * `ROCSHMEM_SDMA_THRESHOLD` default changed from 256 to 1024 bytes.
   Wave and workgroup operations automatically scale the threshold by the wavefront size,
   avoiding SDMA for small-to-medium transfers where parallel IPC copy is faster.
+* Anvil SDMA queues for a peer on the same host now go on the least loaded usable engine
+  within HSA's preferred copy-engine mask, chosen per channel, instead of the lowest one.
+  MI450 reports every engine as preferred, so all such queues went on engine 0 and could
+  exceed its KFD queue limit. A single-engine mask selects the same engine as before.
 
 ## rocSHMEM 3.8.0 for ROCm 10.2
 
