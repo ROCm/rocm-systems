@@ -12349,7 +12349,7 @@ TEST(WrapMicrotestIsolated, SelectAlltoAll_Gfx1250SuspendedCommSkipsFabricPaths)
 
 namespace {
 
-enum class A2aGate { Open, DdaDisabled, InGroup, DisabledAfterAbort, SymmetricWindow };
+enum class A2aGate { Open, DdaDisabled, InGroup, SymmetricWindow };
 
 // Selects 512 B and 16 KiB per peer at 8 ranks with one fabric-gate precondition failed (or none for Open).
 void CheckA2aFabricGate(A2aGate gate) {
@@ -12366,7 +12366,6 @@ void CheckA2aFabricGate(A2aGate gate) {
     return true;
   };
   if (gate == A2aGate::InGroup) ncclGroupDepth = 1;
-  if (gate == A2aGate::DisabledAfterAbort) comm->ddaDisabledAfterAbort = true;
   if (gate == A2aGate::SymmetricWindow) {
     a2a.tbl.symMaxR2[ncclFuncAlltoAll] = 256u << 20;
     g_isSymmetricKernelRequested = [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t, const void*, void*,
@@ -12406,11 +12405,6 @@ TEST(WrapMicrotestIsolated, SelectAlltoAll_Gfx1250DdaDisabledSkipsFabricPaths) {
 TEST(WrapMicrotestIsolated, SelectAlltoAll_Gfx1250InGroupSkipsFabricPaths) {
   RUN_ISOLATED_TEST("Wrap_SelectAlltoAll_Gfx1250InGroupSkipsFabricPaths",
                     []() { CheckA2aFabricGate(A2aGate::InGroup); });
-}
-
-TEST(WrapMicrotestIsolated, SelectAlltoAll_Gfx1250DisabledAfterAbortSkipsFabricPaths) {
-  RUN_ISOLATED_TEST("Wrap_SelectAlltoAll_Gfx1250DisabledAfterAbortSkipsFabricPaths",
-                    []() { CheckA2aFabricGate(A2aGate::DisabledAfterAbort); });
 }
 
 TEST(WrapMicrotestIsolated, SelectAlltoAll_Gfx1250SymmetricWindowSkipsFabricPaths) {

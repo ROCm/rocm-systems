@@ -28,7 +28,7 @@ namespace dda::common {
 // per warp at a time. The self copy uses the whole grid; per-peer slots share one scratch bank.
 
 constexpr size_t ddaLL128A2ASlotWords(size_t bankSize, int nRanks) {
-  return ddaLL128SlotWords(bankSize, nRanks, 1);
+  return ddaLLSlotPkts(bankSize, sizeof(uint64_t) * (size_t)nRanks, (size_t)kDdaLL128WireWordsPerSlice);
 }
 
 template <typename T>
