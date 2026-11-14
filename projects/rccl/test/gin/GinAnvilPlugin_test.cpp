@@ -16,6 +16,7 @@
 #include "comm.h"
 #include "nccl_device/gin/anvil_sdma/gin_anvil_ipc_table.h"
 #include "nccl_device/gin/anvil_sdma/gin_anvil_sdma_device_host_common.h"
+#include "nccl_device/impl/comm__types.h"
 #include "nccl_device/net_device.h"
 #include "plugin/nccl_gin.h"
 
@@ -97,6 +98,12 @@ class GinAnvilPluginTest : public ::testing::Test {
     std::vector<void*> handles(static_cast<size_t>(nranks), handle);
     ASSERT_EQ(plugin_.connect(ictx, handles.data(), nranks, ginRank, listen, coll), ncclSuccess);
     ASSERT_EQ(plugin_.closeListen(listen), ncclSuccess);
+  }
+
+  void setupFabricComm(int nRanks) {
+    mockComm_.comm.nRanks = nRanks;
+    mockComm_.comm.rank = 0;
+    GinAnvilPluginStubs::SetBootstrapNranks(nRanks);
   }
 
   void startTwoRankGin(void** ictx, void** coll, void** ginCtx) {
@@ -785,6 +792,173 @@ TEST_F(GinAnvilPluginTest, CloseColl_AfterSignalBind) {
 
   EXPECT_EQ(plugin_.destroyContext(ginCtx), ncclSuccess);
   EXPECT_EQ(plugin_.closeColl(coll), ncclSuccess);
+  plugin_.finalize(ictx);
+}
+
+// Fabric registration is collective, so when a peer did not opt in
+// (RCCL_GIN_ANVIL_FABRIC_MEM) this rank registers through LSA with it.
+TEST_F(GinAnvilPluginTest, Connect_FabricMemNeedsEveryRank) {
+  GinAnvilPluginStubs::SetUseFabricMem(true);
+  setupFabricComm(2);
+  const int votes[2] = {1, 0};
+  GinAnvilPluginStubs::SetBootstrapIntResult(votes, 2);
+  void* ictx = nullptr;
+  initCtx(&ictx);
+  void* coll = nullptr;
+  connectColl(ictx, &coll, 2);
+
+  // The LSA path is the one that resolves an LSA address, so failing that
+  // resolution proves the fabric path was not taken.
+  GinAnvilPluginStubs::SetLsaAddrFail(true);
+  void* data = reinterpret_cast<void*>(0x80001000ULL);
+  void* mh = nullptr;
+  void* gh = nullptr;
+  EXPECT_EQ(plugin_.regMrSym(coll, data, 4096, 0, 0, &mh, &gh), ncclSystemError);
+  ncclGinAnvilFabricTestState st{};
+  ncclGinAnvilPluginTestFabricState(coll, data, &st);
+  EXPECT_EQ(st.entries, 0u);
+  EXPECT_EQ(GinAnvilPluginStubs::LiveFabricHandlers(), 0);
+
+  plugin_.closeColl(coll);
+  plugin_.finalize(ictx);
+}
+
+// The vote runs wherever topology allows fabric memory, including on a rank
+// that did not opt in, so ranks that did are not left waiting in it. Elsewhere
+// (MI300, MI350, no MNNVL) connect adds no collective.
+TEST_F(GinAnvilPluginTest, Connect_FabricMemVoteOnlyWhereCapable) {
+  setupFabricComm(2);
+  void* ictx = nullptr;
+  initCtx(&ictx);
+  int calls[2] = {};
+  for (int capable = 0; capable < 2; ++capable) {
+    GinAnvilPluginStubs::SetFabricMemCapable(capable != 0);
+    const int before = GinAnvilPluginStubs::GetBootstrapAllGatherCalls();
+    void* coll = nullptr;
+    connectColl(ictx, &coll, 2);
+    calls[capable] = GinAnvilPluginStubs::GetBootstrapAllGatherCalls() - before;
+    EXPECT_EQ(plugin_.closeColl(coll), ncclSuccess);
+  }
+  EXPECT_EQ(calls[1], calls[0] + 1);
+  plugin_.finalize(ictx);
+}
+
+TEST_F(GinAnvilPluginTest, RegMrSym_FabricRefcountAndExchangeFail) {
+  GinAnvilPluginStubs::SetUseFabricMem(true);
+  GinAnvilPluginStubs::SetFabricVmmQueryOk(true);
+  GinAnvilPluginStubs::SetFabricRetainOk(true);
+  // Peer 0 is the VMM base plus the byte offset of `data` inside it. Peer 1
+  // adds the stride, so dropping `+ offset` or ignoring the stride fails.
+  const uintptr_t peerBase = 0x80000000ULL;
+  const size_t peerStride = 0x2000;
+  GinAnvilPluginStubs::SetFabricPeerBase(reinterpret_cast<void*>(peerBase));
+  GinAnvilPluginStubs::SetFabricPeerStride(peerStride);
+  // Fabric registration runs only when the GIN team spans the whole communicator.
+  setupFabricComm(2);
+  void* ictx = nullptr;
+  initCtx(&ictx);
+  void* coll = nullptr;
+  connectColl(ictx, &coll, 2);
+
+  void* data = reinterpret_cast<void*>(0x80001000ULL);
+  const uintptr_t offset = reinterpret_cast<uintptr_t>(data) - peerBase;
+
+  // Expects `entries` published buffers, `refcount` references on `data`, and
+  // `live` stub handlers.
+  auto expectFabric = [&](size_t entries, int refcount, int live) {
+    ncclGinAnvilFabricTestState st{};
+    ncclGinAnvilPluginTestFabricState(coll, data, &st);
+    EXPECT_EQ(st.entries, entries);
+    EXPECT_EQ(st.refcount, refcount);
+    EXPECT_EQ(GinAnvilPluginStubs::LiveFabricHandlers(), live);
+  };
+
+  // A failed exchange publishes nothing, and FabricSetupGuard deletes the
+  // handler it allocated.
+  GinAnvilPluginStubs::SetFabricExchangeFail(true);
+  void* mhFail = nullptr;
+  void* ghFail = nullptr;
+  EXPECT_NE(plugin_.regMrSym(coll, data, 4096, 0, 0, &mhFail, &ghFail), ncclSuccess);
+  GinAnvilPluginStubs::SetFabricExchangeFail(false);
+  {
+    SCOPED_TRACE("after failed exchange");
+    expectFabric(0, 0, 0);
+  }
+
+  void* mh1 = nullptr;
+  void* gh1 = nullptr;
+  void* mh2 = nullptr;
+  void* gh2 = nullptr;
+  ASSERT_EQ(plugin_.regMrSym(coll, data, 4096, 0, 0, &mh1, &gh1), ncclSuccess);
+  {
+    SCOPED_TRACE("after first registration");
+    expectFabric(1, 1, 1);
+    ncclGinAnvilSdmaMemHandle devMh{};
+    ASSERT_EQ(hipMemcpy(&devMh, gh1, sizeof(devMh), hipMemcpyDeviceToHost), hipSuccess);
+    ASSERT_NE(devMh.remote_vas, nullptr);
+    uintptr_t peers[2] = {};
+    ASSERT_EQ(hipMemcpy(peers, reinterpret_cast<void*>(devMh.remote_vas), sizeof(peers), hipMemcpyDeviceToHost),
+              hipSuccess);
+    EXPECT_EQ(peers[0], peerBase + offset);
+    EXPECT_EQ(peers[0], reinterpret_cast<uintptr_t>(data));
+    EXPECT_EQ(peers[1], peerBase + peerStride + offset);
+  }
+  // The second registration of the same buffer reuses the published handler.
+  ASSERT_EQ(plugin_.regMrSym(coll, data, 4096, 0, 0, &mh2, &gh2), ncclSuccess);
+  EXPECT_NE(mh1, mh2);
+  {
+    SCOPED_TRACE("after second registration");
+    expectFabric(1, 2, 1);
+  }
+  EXPECT_EQ(plugin_.deregMrSym(coll, mh1), ncclSuccess);
+  {
+    SCOPED_TRACE("after first deregistration");
+    expectFabric(1, 1, 1);
+  }
+  // Dropping the last reference erases the buffer and deletes the handler.
+  EXPECT_EQ(plugin_.deregMrSym(coll, mh2), ncclSuccess);
+  {
+    SCOPED_TRACE("after last deregistration");
+    expectFabric(0, 0, 0);
+  }
+  plugin_.closeColl(coll);
+  plugin_.finalize(ictx);
+}
+
+// A local VMM-query, retain, or addSelf failure is carried into the collective
+// vote. Returning before that vote would leave peers blocked in the allgather.
+TEST_F(GinAnvilPluginTest, RegMrSym_FabricLocalFailureStillVotes) {
+  GinAnvilPluginStubs::SetUseFabricMem(true);
+  mockComm_.comm.nRanks = 1;
+  void* ictx = nullptr;
+  initCtx(&ictx);
+  void* coll = nullptr;
+  connectColl(ictx, &coll);
+
+  void* data = reinterpret_cast<void*>(0x80001000ULL);
+  auto expectVoteThenFail = [&](const char* label, int allgathers) {
+    const int before = GinAnvilPluginStubs::GetBootstrapAllGatherCalls();
+    void* mh = nullptr;
+    void* gh = nullptr;
+    EXPECT_NE(plugin_.regMrSym(coll, data, 4096, 0, 0, &mh, &gh), ncclSuccess) << label;
+    EXPECT_EQ(GinAnvilPluginStubs::GetBootstrapAllGatherCalls() - before, allgathers) << label;
+    EXPECT_EQ(GinAnvilPluginStubs::LiveFabricHandlers(), 0) << label;
+  };
+
+  // Query failure is the fabric vote itself: one allgather, then return.
+  GinAnvilPluginStubs::SetFabricVmmQueryOk(false);
+  expectVoteThenFail("vmm query", 1);
+  GinAnvilPluginStubs::SetFabricVmmQueryOk(true);
+
+  // Retain and addSelf fail after that vote, so the setup vote is a second allgather.
+  GinAnvilPluginStubs::SetFabricRetainOk(false);
+  expectVoteThenFail("retain", 2);
+  GinAnvilPluginStubs::SetFabricRetainOk(true);
+
+  GinAnvilPluginStubs::SetFabricAddSelfFail(true);
+  expectVoteThenFail("addSelf", 2);
+
+  plugin_.closeColl(coll);
   plugin_.finalize(ictx);
 }
 
