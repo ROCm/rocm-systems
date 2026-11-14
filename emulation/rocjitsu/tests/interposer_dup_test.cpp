@@ -296,6 +296,49 @@ TEST(InterposerDupTest, TrackedMunmapFailureUsesLibcErrno) {
   EXPECT_EQ(close(kfd), 0);
 }
 
+TEST(InterposerDupTest, ClientMunmapClearsOnlyReplacedSvmPolicy) {
+  const int kfd = open_kfd();
+  ASSERT_GE(kfd, 0);
+  uint32_t gpu_id = 0;
+  ASSERT_TRUE(read_gpu_id(gpu_id));
+  const long page_size = sysconf(_SC_PAGESIZE);
+  ASSERT_GT(page_size, 0);
+  const auto page = static_cast<size_t>(page_size);
+  auto *base = static_cast<std::byte *>(
+      mmap(nullptr, 2 * page, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0));
+  ASSERT_NE(base, MAP_FAILED);
+
+  alignas(kfd_ioctl_svm_args)
+      std::array<std::byte, sizeof(kfd_ioctl_svm_args) + sizeof(kfd_ioctl_svm_attribute)>
+          buffer{};
+  auto *svm = reinterpret_cast<kfd_ioctl_svm_args *>(buffer.data());
+  const unsigned long request =
+      (AMDKFD_IOC_SVM & ~(_IOC_SIZEMASK << _IOC_SIZESHIFT)) | (buffer.size() << _IOC_SIZESHIFT);
+  svm->start_addr = reinterpret_cast<uintptr_t>(base);
+  svm->size = 2 * page;
+  svm->op = KFD_IOCTL_SVM_OP_SET_ATTR;
+  svm->nattr = 1;
+  svm->attrs[0] = {KFD_IOCTL_SVM_ATTR_NO_ACCESS, gpu_id};
+  ASSERT_EQ(ioctl(kfd, request, svm), 0);
+  const auto expect_access = [&](std::byte *address, uint32_t expected) {
+    svm->start_addr = reinterpret_cast<uintptr_t>(address);
+    svm->size = page;
+    svm->op = KFD_IOCTL_SVM_OP_GET_ATTR;
+    svm->attrs[0] = {KFD_IOCTL_SVM_ATTR_ACCESS, gpu_id};
+    ASSERT_EQ(ioctl(kfd, request, svm), 0);
+    EXPECT_EQ(svm->attrs[0].type, expected);
+  };
+  expect_access(base, KFD_IOCTL_SVM_ATTR_NO_ACCESS);
+  ASSERT_EQ(munmap(base, 1), 0);
+  ASSERT_EQ(mmap(base, page, PROT_READ | PROT_WRITE,
+                 MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0),
+            base);
+  expect_access(base, KFD_IOCTL_SVM_ATTR_ACCESS);
+  expect_access(base + page, KFD_IOCTL_SVM_ATTR_NO_ACCESS);
+  EXPECT_EQ(munmap(base, 2 * page), 0);
+  EXPECT_EQ(close(kfd), 0);
+}
+
 TEST(InterposerDupTest, LiveSvmDenialEndsOnHostVmaReplacement) {
   using GpuAccess = int (*)(uint32_t, uint64_t, size_t);
   auto gpu_access =

@@ -666,6 +666,12 @@ TEST_F(DaemonTest, InterposerProcMapsNamesRemoteKfdMarker) {
   EXPECT_EQ(r.exit_code, 0) << r.output;
 }
 
+TEST_F(DaemonTest, ClientMunmapClearsOnlyReplacedSvmPolicy) {
+  auto r = run_hip_test(interposer_dup_bin(),
+                        "InterposerDupTest.ClientMunmapClearsOnlyReplacedSvmPolicy");
+  EXPECT_EQ(r.exit_code, 0) << r.output;
+}
+
 TEST_F(DaemonTest, RemotePrimeImportRetainsExportedBacking) {
   auto r = run_hip_test(interposer_dup_bin(),
                         "InterposerDupTest.RemotePrimeImportRetainsExportedBacking");

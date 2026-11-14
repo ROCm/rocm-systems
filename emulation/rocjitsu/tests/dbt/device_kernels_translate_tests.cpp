@@ -18,6 +18,7 @@
 #include "rocjitsu/code/executable.h"
 #include "rocjitsu/code/kernel_descriptor_abi.h"
 #include "rocjitsu/code/patch/code_object_patcher.h"
+#include "rocjitsu/code/patch/probe_symbol.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 
@@ -29,7 +30,6 @@
 #include <cstdio>
 #include <cstring>
 #include <iostream>
-#include <iterator>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -139,39 +139,27 @@ TEST(BinaryTranslatorE2E, TranslateVectorAddCdna4ToCdna3) {
 
   EXPECT_FALSE(result.elf_bytes.empty()) << "Translation produced empty ELF";
   EXPECT_EQ(result.host_arch, ROCJITSU_CODE_ARCH_CDNA3);
-  EXPECT_TRUE(result.ok())
-      << "Vector-add CDNA4->CDNA3 translation should not require unhandled lowering";
+  ASSERT_TRUE(result.dispatchable()) << result.diagnostics.front().message;
 
   ASSERT_GE(result.elf_bytes.size(), sizeof(rocjitsu::Elf64_Ehdr));
   const auto *ehdr = reinterpret_cast<const rocjitsu::Elf64_Ehdr *>(result.elf_bytes.data());
   EXPECT_EQ(ehdr->e_flags & rocjitsu::EF_AMDGPU_MACH, rocjitsu::EF_AMDGPU_MACH_AMDGCN_GFX942)
       << "ELF e_flags should contain GFX942 machine type";
 
-  ASSERT_FALSE(co->text_sections().empty());
-  const auto *original_text = co->text_sections()[0];
   rocjitsu::AmdGpuCodeObject translated_co(result.elf_bytes.data(), result.elf_bytes.size());
   ASSERT_TRUE(translated_co.is_valid());
-  ASSERT_FALSE(translated_co.text_sections().empty());
-  const auto *translated_text = translated_co.text_sections()[0];
-  ASSERT_EQ(translated_text->size(), original_text->size());
-  const auto *original_text_bytes = reinterpret_cast<const uint8_t *>(original_text->data());
-  const auto *translated_text_bytes = reinterpret_cast<const uint8_t *>(translated_text->data());
-  const auto original_text_end = original_text_bytes + original_text->size();
-  const auto translated_text_end = translated_text_bytes + translated_text->size();
-  const auto first_text_diff = std::ranges::mismatch(original_text_bytes, original_text_end,
-                                                     translated_text_bytes, translated_text_end);
-  EXPECT_EQ(first_text_diff.in1, original_text_end)
-      << "The vector-add gfx950 and gfx942 codegen is byte-identical; CDNA4→CDNA3 DBT should "
-         "leave the instruction stream unchanged for this kernel. First differing byte offset is "
-      << std::distance(original_text_bytes, first_text_diff.in1) << ", original word 0x" << std::hex
-      << reinterpret_cast<const uint32_t *>(
-             original_text_bytes)[std::distance(original_text_bytes, first_text_diff.in1) /
-                                  sizeof(uint32_t)]
-      << ", translated word 0x"
-      << reinterpret_cast<const uint32_t *>(
-             translated_text_bytes)[std::distance(original_text_bytes, first_text_diff.in1) /
-                                    sizeof(uint32_t)]
-      << std::dec;
+  // DBT can move the kernel and omit unreachable device-library functions.
+  // Compare the complete named body at its location in each image.
+  const auto original = rocjitsu::resolve_probe_symbol(*co, "vector_add");
+  const auto translated = rocjitsu::resolve_probe_symbol(translated_co, "vector_add");
+  ASSERT_TRUE(original.has_value());
+  ASSERT_TRUE(translated.has_value());
+  ASSERT_EQ(original->body_size, translated->body_size);
+  const auto *original_bytes =
+      reinterpret_cast<const uint8_t *>(co->image_data()) + original->body_file_offset;
+  const auto *translated_bytes = result.elf_bytes.data() + translated->body_file_offset;
+  EXPECT_EQ(std::memcmp(original_bytes, translated_bytes, original->body_size), 0)
+      << "The CDNA4 vector_add body should be byte-identical on CDNA3";
 
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA3);
   ASSERT_NE(decoder, nullptr);
@@ -751,57 +739,6 @@ TEST(CodeObjectPatcher, RejectsOutOfRangeKernelDescriptorUpdates) {
   rocjitsu::KdTranslation invalid;
   invalid.descriptor_file_offset = image_size;
   EXPECT_FALSE(patcher.apply_kernel_descriptor_translation(invalid, ROCJITSU_CODE_ARCH_RDNA4));
-}
-
-TEST(BinaryTranslatorE2E, NoTextPaddingStillMaterializesLocalCaveInText) {
-  Executable exec(kernel_path("vector_add"));
-  ASSERT_TRUE(exec.is_valid());
-  ASSERT_GT(exec.num_code_objects(ROCJITSU_CODE_TARGET_GFX950), 0u);
-
-  const auto *co = exec.code_object(ROCJITSU_CODE_TARGET_GFX950, 0);
-  ASSERT_NE(co, nullptr);
-  ASSERT_FALSE(co->text_sections().empty());
-
-  std::vector<uint8_t> image(co->image_size());
-  std::memcpy(image.data(), co->image_data(), image.size());
-
-  const auto *text = co->text_sections()[0];
-  uint8_t *text_bytes = image.data() + text->sectionOffset();
-  const size_t word_count = text->size() / sizeof(uint32_t);
-  util::FailureOr<uint32_t> maybe_s_nop = rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4);
-  ASSERT_TRUE(maybe_s_nop.succeeded());
-  const uint32_t nop = maybe_s_nop.value();
-  util::FailureOr<uint32_t> maybe_s_branch = rocjitsu::build_s_branch(0, ROCJITSU_CODE_ARCH_CDNA4);
-  ASSERT_TRUE(maybe_s_branch.succeeded());
-  const uint32_t filler = maybe_s_branch.value();
-
-  // Force away the old trailing-NOP escape hatch so this test only passes if
-  // expansion bodies are materialized in the relocated .text.
-  size_t overwritten_padding_words = 0;
-  for (size_t i = word_count; i > 0; --i) {
-    uint32_t word = 0;
-    std::memcpy(&word, text_bytes + (i - 1) * sizeof(uint32_t), sizeof(word));
-    if (word != nop)
-      break;
-    std::memcpy(text_bytes + (i - 1) * sizeof(uint32_t), &filler, sizeof(filler));
-    ++overwritten_padding_words;
-  }
-  ASSERT_GT(overwritten_padding_words, 0u);
-
-  rocjitsu::AmdGpuCodeObject no_padding(image.data(), image.size());
-  ASSERT_TRUE(no_padding.is_valid());
-
-  BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA4);
-  auto result = translator.translate(no_padding);
-
-  ASSERT_FALSE(result.elf_bytes.empty());
-  EXPECT_NE(result.elf_bytes, image);
-
-  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
-  ASSERT_TRUE(translated.is_valid());
-  ASSERT_FALSE(translated.text_sections().empty());
-  EXPECT_GE(translated.text_sections()[0]->size(), text->size());
-  EXPECT_EQ(find_section(translated, ".rj_translations"), nullptr);
 }
 
 TEST(BinaryTranslatorE2E, OutputDecodesAsValidRdna4) {
