@@ -127,6 +127,10 @@ class KfdVirtioDriver final : public core::Driver {
     return HSA_STATUS_ERROR_INVALID_AGENT;
   }
 
+  hsa_status_t GetPersistingCacheSize(uint32_t node_id, uint64_t* cache_size) const override {
+    return HSA_STATUS_ERROR_INVALID_AGENT;
+  }
+
   hsa_status_t CheckAcceleratorReadiness(core::Agent& agent, bool* ready) const override;
 };
 
