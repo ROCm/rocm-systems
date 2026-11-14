@@ -352,7 +352,7 @@ hipError_t hipFuncSetSharedMemConfig(const void* func, hipSharedMemConfig config
 
 hipError_t ihipLaunchKernel_validate(hipFunction_t f, const amd::LaunchParams& launch_params,
                                      void** kernelParams, void** extra, int deviceId,
-                                     uint32_t params = 0) {
+                                     uint32_t params, uint32_t* coopMaxGridBlocks) {
   if (f == nullptr) {
     LogPrintfError("%s", "Function passed is null");
     return hipErrorInvalidImage;
@@ -433,6 +433,9 @@ hipError_t ihipLaunchKernel_validate(hipFunction_t f, const amd::LaunchParams& l
     }
     if (((launch_params.global_.product()) / block_size) > unsigned(max_blocks_per_grid)) {
       return hipErrorCooperativeLaunchTooLarge;
+    }
+    if (coopMaxGridBlocks != nullptr) {
+      *coopMaxGridBlocks = static_cast<uint32_t>(max_blocks_per_grid);
     }
   }
   if (params & amd::NDRangeKernelCommand::CooperativeMultiDeviceGroups) {
@@ -723,8 +726,9 @@ hipError_t ihipModuleLaunchKernel(hipFunction_t f, amd::LaunchParams& launch_par
   }
   amd::Kernel* kernel = hip::asKernel(f);
 
-  hipError_t status =
-      ihipLaunchKernel_validate(f, launch_params, kernelParams, extra, deviceId, params);
+  uint32_t coopMaxGridBlocks = 0;
+  hipError_t status = ihipLaunchKernel_validate(f, launch_params, kernelParams, extra, deviceId,
+                                                params, &coopMaxGridBlocks);
   if (status != hipSuccess) {
     return status;
   }
@@ -756,6 +760,9 @@ hipError_t ihipModuleLaunchKernel(hipFunction_t f, amd::LaunchParams& launch_par
       params, gridId, numGrids, prevGridSum, allGridSum, firstDevice);
   if (status != hipSuccess) {
     return status;
+  }
+  if (coopMaxGridBlocks != 0) {
+    static_cast<amd::NDRangeKernelCommand*>(command)->setCoopMaxGridBlocks(coopMaxGridBlocks);
   }
 
   if (dynDataPrefetchConfig != nullptr && dynDataPrefetchConfig->isEnabled()) {
