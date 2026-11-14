@@ -7,8 +7,7 @@ from utils.counters.allocator import allocate_single_pass_metrics, metric_counte
 from utils.counters.counter_file import flat_counters_in_perfmon_file
 
 THREE_SQ_SLOTS = {"SQ": 3}
-# An arch where any counters may share a pass
-ARCH = "gfx942"
+ARCH_WITHOUT_GFX1250_SPLIT = "gfx942"
 
 
 def layout(files):
@@ -40,7 +39,9 @@ def test_allocate_copies_a_counter_so_each_metric_has_one_pass():
         frozenset({"SQ_B", "SQ_D"}),
     ]
 
-    files = allocate_single_pass_metrics(counters, metric_sets, THREE_SQ_SLOTS, ARCH)
+    files = allocate_single_pass_metrics(
+        counters, metric_sets, THREE_SQ_SLOTS, ARCH_WITHOUT_GFX1250_SPLIT
+    )
 
     assert layout(files) == [
         ["SQ_A", "SQ_B", "SQ_F"],
@@ -55,7 +56,7 @@ def test_allocate_puts_other_counters_in_the_first_pass_with_room():
     counters = {"SQ_A", "SQ_B", "SQ_C", "SQ_D"}
 
     files = allocate_single_pass_metrics(
-        counters, [frozenset(counters)], THREE_SQ_SLOTS, ARCH
+        counters, [frozenset(counters)], THREE_SQ_SLOTS, ARCH_WITHOUT_GFX1250_SPLIT
     )
 
     assert layout(files) == [["SQ_A", "SQ_B", "SQ_C"], ["SQ_D"]]
@@ -71,7 +72,7 @@ def test_allocate_extends_the_pass_holding_most_of_a_metric():
     ]
 
     files = allocate_single_pass_metrics(
-        counters, metric_sets, {"SQ": 2, "TA": 2}, ARCH
+        counters, metric_sets, {"SQ": 2, "TA": 2}, ARCH_WITHOUT_GFX1250_SPLIT
     )
 
     assert layout(files) == [["SQ_A", "SQ_B"], ["SQ_C", "TA_X", "TA_Y"]]
@@ -87,7 +88,7 @@ def test_allocate_keeps_sp_valu_and_sq_vmem_apart_only_on_gfx1250():
         counters, metric_sets, THREE_SQ_SLOTS, "gfx1250"
     )
     other_files = allocate_single_pass_metrics(
-        counters, metric_sets, THREE_SQ_SLOTS, ARCH
+        counters, metric_sets, THREE_SQ_SLOTS, ARCH_WITHOUT_GFX1250_SPLIT
     )
 
     assert layout(gfx1250_files) == [["SP_VALU_A", "SQ_C"], ["SQ_VMEM_B"]]
