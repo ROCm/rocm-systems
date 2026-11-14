@@ -296,6 +296,7 @@ if(BUILD_TESTS)
     NonBlockingTests.cpp
     RasDiagnosticsTests.cpp
     RasJsonTests.cpp
+    RasProgressCountersTests.cpp
     ReduceScatterTests.cpp
     ReduceTests.cpp
     RegisterTests.cpp
