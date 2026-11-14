@@ -43,23 +43,71 @@ namespace {
 int mockAllgatherFail(void*, void*, size_t) { return -1; }
 
 // Mock allgather callbacks receive nRanks via the context pointer (cast to
-// intptr_t). bytes_per_rank is the per-rank element size (sizeof(int)),
-// not the total buffer size — nRanks cannot be derived from it.
+// intptr_t). bytes_per_rank is the per-rank element size
+// (sizeof(gin_anvil_sdma_peer_t)), not the total buffer size — nRanks cannot be
+// derived from it.
+
+constexpr uint64_t kHostA = 0xA0A0;
+
+// The record the factory filled in before calling allgather.
+const gin_anvil_sdma_peer_t* ownRecord(const gin_anvil_sdma_peer_t* peers, int nRanks) {
+  for (int i = 0; i < nRanks; ++i) {
+    if (peers[i].device_id >= 0) return &peers[i];
+  }
+  return nullptr;
+}
 
 int mockAllgatherLeaveInvalidPeer(void* ctx, void* buf, size_t) {
   const int nRanks = static_cast<int>(reinterpret_cast<intptr_t>(ctx));
-  auto* devs = static_cast<int*>(buf);
+  auto* peers = static_cast<gin_anvil_sdma_peer_t*>(buf);
   for (int i = 0; i < nRanks; ++i) {
-    if (i == 1) devs[i] = -1;
+    if (i == 1) peers[i].device_id = -1;
   }
   return 0;
 }
 
 int mockAllgatherFillDevices(void* ctx, void* buf, size_t) {
   const int nRanks = static_cast<int>(reinterpret_cast<intptr_t>(ctx));
-  auto* devs = static_cast<int*>(buf);
+  auto* peers = static_cast<gin_anvil_sdma_peer_t*>(buf);
+  const gin_anvil_sdma_peer_t* self = ownRecord(peers, nRanks);
+  const uint64_t host = self ? self->host_id : 0;
   for (int i = 0; i < nRanks; ++i) {
-    if (devs[i] < 0) devs[i] = i;
+    if (peers[i].device_id < 0) peers[i] = gin_anvil_sdma_peer_t{i, 0, host};
+  }
+  return 0;
+}
+
+// Every other rank sits on another host and reports g_remoteDevice, an ordinal on
+// its own host that need not exist here.
+int g_remoteDevice = 0;
+int mockAllgatherRemoteHost(void* ctx, void* buf, size_t) {
+  const int nRanks = static_cast<int>(reinterpret_cast<intptr_t>(ctx));
+  auto* peers = static_cast<gin_anvil_sdma_peer_t*>(buf);
+  const gin_anvil_sdma_peer_t* self = ownRecord(peers, nRanks);
+  const uint64_t host = self ? self->host_id : 0;
+  for (int i = 0; i < nRanks; ++i) {
+    if (peers[i].device_id < 0) peers[i] = gin_anvil_sdma_peer_t{g_remoteDevice, 0, host + 1};
+  }
+  return 0;
+}
+
+// Rank i (other than the caller) reports g_peerTable[i]: an ordinal and an offset added to the
+// caller's host id, so an offset of 0 is a peer on this host.
+struct PeerSpec {
+  int device;
+  uint64_t hostOffset;
+};
+std::vector<PeerSpec> g_peerTable;
+int mockAllgatherPeerTable(void* ctx, void* buf, size_t) {
+  const int nRanks = static_cast<int>(reinterpret_cast<intptr_t>(ctx));
+  auto* peers = static_cast<gin_anvil_sdma_peer_t*>(buf);
+  const gin_anvil_sdma_peer_t* self = ownRecord(peers, nRanks);
+  const uint64_t host = self ? self->host_id : 0;
+  for (int i = 0; i < nRanks; ++i) {
+    if (peers[i].device_id < 0) {
+      const PeerSpec& s = g_peerTable[static_cast<size_t>(i)];
+      peers[i] = gin_anvil_sdma_peer_t{s.device, 0, host + s.hostOffset};
+    }
   }
   return 0;
 }
@@ -73,9 +121,9 @@ struct CreateOut {
 void* mockCtx(int nRanks) { return reinterpret_cast<void*>(static_cast<intptr_t>(nRanks)); }
 
 int tryCreate(int nRanks, int myRank, int deviceId, int (*allgather)(void*, void*, size_t),
-              int num_channels, CreateOut* out) {
-  return gin_anvil_sdma_create(nRanks, myRank, deviceId, allgather, mockCtx(nRanks), num_channels,
-                               &out->handle, &out->gpu_handles, &out->sdma_dirty);
+              int num_channels, CreateOut* out, int remoteHostsOk = 0) {
+  return gin_anvil_sdma_create(nRanks, myRank, deviceId, kHostA, remoteHostsOk, allgather, mockCtx(nRanks),
+                               num_channels, &out->handle, &out->gpu_handles, &out->sdma_dirty);
 }
 
 void destroyOut(CreateOut* out) {
@@ -111,16 +159,16 @@ TEST_F(GinAnvilSdmaFactoryTest, Probe_ReturnsZeroOrOne) {
 // F2: null / invalid output and rank arguments.
 TEST_F(GinAnvilSdmaFactoryTest, Create_NullOutParams) {
   CreateOut out{};
-  EXPECT_EQ(gin_anvil_sdma_create(1, 0, 0, mockAllgatherFillDevices, mockCtx(1), 1,
+  EXPECT_EQ(gin_anvil_sdma_create(1, 0, 0, kHostA, 0, mockAllgatherFillDevices, mockCtx(1), 1,
                                   nullptr, &out.gpu_handles, &out.sdma_dirty),
             -1);
-  EXPECT_EQ(gin_anvil_sdma_create(1, 0, 0, mockAllgatherFillDevices, mockCtx(1), 1, &out.handle,
+  EXPECT_EQ(gin_anvil_sdma_create(1, 0, 0, kHostA, 0, mockAllgatherFillDevices, mockCtx(1), 1, &out.handle,
                                   nullptr, &out.sdma_dirty),
             -1);
-  EXPECT_EQ(gin_anvil_sdma_create(1, 0, 0, mockAllgatherFillDevices, mockCtx(1), 1, &out.handle,
+  EXPECT_EQ(gin_anvil_sdma_create(1, 0, 0, kHostA, 0, mockAllgatherFillDevices, mockCtx(1), 1, &out.handle,
                                   &out.gpu_handles, nullptr),
             -1);
-  EXPECT_EQ(gin_anvil_sdma_create(1, 0, 0, nullptr, mockCtx(1), 1, &out.handle, &out.gpu_handles,
+  EXPECT_EQ(gin_anvil_sdma_create(1, 0, 0, kHostA, 0, nullptr, mockCtx(1), 1, &out.handle, &out.gpu_handles,
                                   &out.sdma_dirty),
             -1);
 }
@@ -246,6 +294,175 @@ TEST_F(GinAnvilSdmaFactoryTest, Create_MultiChannel) {
   EXPECT_GE(gin_anvil_sdma_get_channel_stride(out.handle), 0);
   EXPECT_LE(gin_anvil_sdma_get_channel_stride(out.handle), 1);
   destroyOut(&out);
+}
+
+namespace {
+std::vector<void*> queueHandles(const CreateOut& out, int nRanks) {
+  std::vector<void*> handles(static_cast<size_t>(nRanks), nullptr);
+  EXPECT_EQ(hipMemcpy(handles.data(), out.gpu_handles, handles.size() * sizeof(void*), hipMemcpyDeviceToHost),
+            hipSuccess);
+  return handles;
+}
+}  // namespace
+
+// In an MI450 fabric pod, a peer on another host reports an ordinal from its own
+// host, which may not exist here or may equal this rank's own. Either way it gets
+// a queue of its own: a queue is an in-order ring, and sharing this rank's would
+// serialize its copies behind the self copies.
+TEST_F(GinAnvilSdmaFactoryTest, Create_RemoteHostPeerGetsItsOwnQueue) {
+  if (gin_anvil_sdma_probe() <= 0) {
+    GTEST_SKIP() << "Anvil SDMA probe failed";
+  }
+  int ndev = 0;
+  ASSERT_EQ(hipGetDeviceCount(&ndev), hipSuccess);
+  for (int ordinal : {0, ndev + 1}) {
+    SCOPED_TRACE("remote ordinal " + std::to_string(ordinal));
+    g_remoteDevice = ordinal;
+    CreateOut out{};
+    ASSERT_EQ(tryCreate(2, 0, 0, mockAllgatherRemoteHost, 1, &out, /*remoteHostsOk=*/1), 0);
+    EXPECT_EQ(gin_anvil_sdma_get_n_ranks(out.handle), 2);
+    const std::vector<void*> h = queueHandles(out, 2);
+    EXPECT_NE(h[0], nullptr);
+    EXPECT_NE(h[1], nullptr);
+    EXPECT_NE(h[1], h[0]);
+    destroyOut(&out);
+  }
+}
+
+// The 2P8G case: a peer on this host and a peer on another host with the same
+// ordinal must not share a queue.
+TEST_F(GinAnvilSdmaFactoryTest, Create_LocalAndRemotePeerWithTheSameOrdinalGetSeparateQueues) {
+  if (gin_anvil_sdma_probe() <= 0) {
+    GTEST_SKIP() << "Anvil SDMA probe failed";
+  }
+  int ndev = 0;
+  ASSERT_EQ(hipGetDeviceCount(&ndev), hipSuccess);
+  if (ndev < 2) GTEST_SKIP() << "needs a second local GPU for the same-host peer";
+  g_peerTable = {{0, 0}, {1, 0}, {1, 0x10}};
+
+  CreateOut out{};
+  ASSERT_EQ(tryCreate(3, 0, 0, mockAllgatherPeerTable, 1, &out, /*remoteHostsOk=*/1), 0);
+  const std::vector<void*> h = queueHandles(out, 3);
+  EXPECT_NE(h[1], nullptr);
+  EXPECT_NE(h[2], nullptr);
+  EXPECT_NE(h[2], h[1]);
+  EXPECT_NE(h[2], h[0]);
+  destroyOut(&out);
+}
+
+TEST_F(GinAnvilSdmaFactoryTest, Create_RemotePeersOnDifferentHostsWithTheSameOrdinalGetSeparateQueues) {
+  if (gin_anvil_sdma_probe() <= 0) {
+    GTEST_SKIP() << "Anvil SDMA probe failed";
+  }
+  g_peerTable = {{0, 0}, {1, 0x20}, {1, 0x21}};
+
+  CreateOut out{};
+  ASSERT_EQ(tryCreate(3, 0, 0, mockAllgatherPeerTable, 1, &out, /*remoteHostsOk=*/1), 0);
+  const std::vector<void*> h = queueHandles(out, 3);
+  EXPECT_NE(h[1], nullptr);
+  EXPECT_NE(h[2], nullptr);
+  EXPECT_NE(h[2], h[1]);
+  destroyOut(&out);
+}
+
+// Two GPUs on the same remote host: the key must name the GPU as well as the host.
+TEST_F(GinAnvilSdmaFactoryTest, Create_RemotePeersOnTheSameHostWithDifferentOrdinalsGetSeparateQueues) {
+  if (gin_anvil_sdma_probe() <= 0) {
+    GTEST_SKIP() << "Anvil SDMA probe failed";
+  }
+  g_peerTable = {{0, 0}, {0, 0x40}, {1, 0x40}};
+
+  CreateOut out{};
+  ASSERT_EQ(tryCreate(3, 0, 0, mockAllgatherPeerTable, 1, &out, /*remoteHostsOk=*/1), 0);
+  const std::vector<void*> h = queueHandles(out, 3);
+  EXPECT_NE(h[1], nullptr);
+  EXPECT_NE(h[2], nullptr);
+  EXPECT_NE(h[2], h[1]);
+  destroyOut(&out);
+}
+
+// Queues live in the process-global Anvil singleton and a later communicator
+// reuses them, so a second create must not take more queues for the same peer.
+TEST_F(GinAnvilSdmaFactoryTest, Create_RemotePeerQueueReusedByLaterCreate) {
+  if (gin_anvil_sdma_probe() <= 0) {
+    GTEST_SKIP() << "Anvil SDMA probe failed";
+  }
+  g_peerTable = {{0, 0}, {3, 0x30}};
+
+  const uint32_t before = sdma_anvil::anvil.queuesUsed();
+  CreateOut first{};
+  ASSERT_EQ(tryCreate(2, 0, 0, mockAllgatherPeerTable, 1, &first, /*remoteHostsOk=*/1), 0);
+  const uint32_t afterFirst = sdma_anvil::anvil.queuesUsed();
+  EXPECT_GT(afterFirst, before);
+  CreateOut second{};
+  ASSERT_EQ(tryCreate(2, 0, 0, mockAllgatherPeerTable, 1, &second, /*remoteHostsOk=*/1), 0);
+  EXPECT_EQ(sdma_anvil::anvil.queuesUsed(), afterFirst);
+  EXPECT_EQ(queueHandles(second, 2)[1], queueHandles(first, 2)[1]);
+  destroyOut(&first);
+  destroyOut(&second);
+}
+
+// rocSHMEM's anvil_engine_map_gtest pins the engine-choice helpers; these pin
+// that connect and connectRemotePeer feed them this process's live queue load. Earlier cases leave
+// queues on the singleton, so the expected engine is computed from the load seen
+// just before each connect rather than assumed.
+TEST(AnvilEngineChoice, RemotePeerQueueGoesOnTheLeastLoadedUsableEngine) {
+  if (gin_anvil_sdma_probe() <= 0) {
+    GTEST_SKIP() << "Anvil SDMA probe failed";
+  }
+  auto& anvil = sdma_anvil::anvil;
+  const uint64_t keys[] = {0xE5C0000000000001ull, 0xE5C0000000000002ull};
+  // The second connect's expected engine includes the first's queue in its load.
+  for (uint64_t key : keys) {
+    ASSERT_EQ(anvil.getRemotePeerQueue(key, 0), nullptr);
+    const int expected = sdma_anvil::leastLoadedUsableEngine(anvil.queuesPerEngine());
+    ASSERT_TRUE(anvil.connectRemotePeer(/*srcDeviceId=*/0, key, /*numChannels=*/1));
+    const sdma_anvil::SdmaQueue* q = anvil.getRemotePeerQueue(key, 0);
+    ASSERT_NE(q, nullptr);
+    EXPECT_EQ(q->engineId() % 2, 0u);
+    EXPECT_EQ(static_cast<int>(q->engineId()), expected);
+  }
+  for (uint64_t key : keys) anvil.disconnectRemotePeer(key);
+}
+
+TEST(AnvilEngineChoice, LocalPeerQueuesGoOnTheLeastLoadedPreferredEngine) {
+  if (gin_anvil_sdma_probe() <= 0) {
+    GTEST_SKIP() << "Anvil SDMA probe failed";
+  }
+  int ndev = 0;
+  ASSERT_EQ(hipGetDeviceCount(&ndev), hipSuccess);
+  auto& anvil = sdma_anvil::anvil;
+  std::vector<int> dsts;
+  for (int d = 1; d < ndev && dsts.size() < 2; ++d) {
+    if (anvil.getSdmaQueue(0, d, 0) == nullptr) dsts.push_back(d);
+  }
+  if (dsts.size() < 2) GTEST_SKIP() << "needs two local GPUs that device 0 has no queue to yet";
+
+  int checked = 0;
+  for (int d : dsts) {
+    SCOPED_TRACE("0 -> " + std::to_string(d));
+    const std::vector<uint32_t> load = anvil.queuesPerEngine();
+    sdma_anvil::EnablePeerAccess(0, d);
+    ASSERT_TRUE(anvil.connect(0, d, /*numChannels=*/1));
+    const sdma_anvil::SdmaQueue* q = anvil.getSdmaQueue(0, d, 0);
+    ASSERT_NE(q, nullptr);
+    const sdma_anvil::EngineSelection& sel = q->selection();
+    if (!sel.usedPreferred) continue;  // HSA gave no mask; the OAM map chose
+    EXPECT_EQ(static_cast<int>(q->engineId()), sdma_anvil::leastLoadedPreferredEngine(sel.preferredMask, load))
+        << "mask=0x" << std::hex << sel.preferredMask;
+    ++checked;
+  }
+  for (int d : dsts) anvil.disconnectDevice(d);
+  if (checked == 0) GTEST_SKIP() << "HSA reported no preferred engine for these pairs";
+}
+
+// Outside a fabric pod (MI300, MI350, or MI450 without one) SDMA cannot reach
+// another host, so a remote peer fails creation rather than aliasing a local GPU.
+TEST_F(GinAnvilSdmaFactoryTest, Create_RemoteHostPeerRejectedOutsidePod) {
+  g_remoteDevice = 0;
+  CreateOut out{};
+  EXPECT_EQ(tryCreate(2, 0, 0, mockAllgatherRemoteHost, 1, &out, /*remoteHostsOk=*/0), -1);
+  EXPECT_EQ(out.handle, nullptr);
 }
 
 // The CPX fold is not visible on a queue handle, and getSdmaEngineIdFromOamMap is

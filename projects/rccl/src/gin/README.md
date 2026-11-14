@@ -126,8 +126,21 @@ rocSHMEM GDA (`NCCL_GIN_TYPE=6`) requires a supported GDA NIC provider (mlx5, bn
 or ionic) with the corresponding user-space RDMA driver and firmware.
 See the [rocSHMEM GDA NIC dependencies](https://rocm.docs.amd.com/projects/rocSHMEM/en/latest/install.html#gda-nic-dependencies).
 
-Anvil SDMA (`NCCL_GIN_TYPE=7`) requires an Anvil-capable GPU (MI300/MI350 class)
-and `NCCL_CUMEM_ENABLE=1`.
+Anvil SDMA (`NCCL_GIN_TYPE=7`) requires an Anvil-capable GPU (MI300, MI350 or MI450
+class) and `NCCL_CUMEM_ENABLE=1`. An SDMA engine can only copy into memory its GPU
+can address, so how far the backend reaches depends on the system:
+
+| System | Single-host communicator | Multi-host communicator |
+|--------|--------------------------|-------------------------|
+| MI300X (gfx942), MI350 (gfx950) | Anvil SDMA over xGMI or PCIe | Not available: no scale-up fabric between hosts, so PROXY or rocSHMEM GDA serves the communicator |
+| MI450 (gfx1250) | Anvil SDMA | Anvil SDMA when every rank is in one fabric pod (MNNVL, one clique covering the communicator, cuMem), the communicator has at most 16 ranks, and every rank sets `RCCL_GIN_ANVIL_FABRIC_POD=1` and `RCCL_GIN_ANVIL_FABRIC_MEM=1`; otherwise PROXY or rocSHMEM GDA |
+
+In an MI450 pod, peers on other hosts are written through their fabric-mapped
+memory using this host's SDMA engines. Each such peer has its own SDMA queue: a
+queue is an in-order ring, so a peer sharing one with a same-host peer would
+serialize their copies. When Anvil SDMA cannot reach every rank,
+RCCL removes it from the communicator's active backends and logs the reason at
+`NCCL_DEBUG=INFO` (subsystem `INIT`). The policy is in `src/include/gin/gin_anvil_reach.h`.
 
 ### `NCCL_GIN_TYPE` remap (2.30.7 → 2.31)
 

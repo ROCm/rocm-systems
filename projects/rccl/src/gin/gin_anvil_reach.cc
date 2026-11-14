@@ -9,6 +9,7 @@
 #include "archinfo.h"
 #include "comm.h"
 #include "cudawrap.h"
+#include "graph/topo.h"
 #include "nccl_device/gin/anvil_sdma/gin_fabric_lsa_policy.h"
 #include "p2p.h"
 #include "param.h"
@@ -17,10 +18,20 @@
 RCCL_PARAM(GinAnvilFabricMem, "GIN_ANVIL_FABRIC_MEM", 0);
 RCCL_PARAM_NCCL_ALIAS(GinAnvilFabricLsaA2A, "GIN_ANVIL_FABRIC_LSA_A2A", 0);
 RCCL_PARAM_NCCL_ALIAS(GinAnvilFabricLsaThresholdAlltoAll, "GIN_ANVIL_FABRIC_LSA_THRESHOLD_ALLTOALL", -1);
+// Off by default until cross-host SDMA is measured in an MI455 pod.
+RCCL_PARAM(GinAnvilFabricPod, "GIN_ANVIL_FABRIC_POD", 0);
+
+GinAnvilArch ginAnvilArch(struct ncclComm* comm) {
+  if (comm == nullptr) return GinAnvilArch::Other;
+  if (IsArchMatch(comm->archName, "gfx942")) return GinAnvilArch::Mi300;
+  if (IsArchMatch(comm->archName, "gfx950")) return GinAnvilArch::Mi350;
+  if (IsArchMatch(comm->archName, "gfx1250")) return GinAnvilArch::Mi450;
+  return GinAnvilArch::Other;
+}
 
 static bool ginAnvilFabricMemPredicate(struct ncclComm* comm, bool optIn) {
   if (comm == nullptr) return false;
-  const bool mnnvlMi450 = comm->MNNVL == 1 && IsArchMatch(comm->archName, "gfx1250");
+  const bool mnnvlMi450 = comm->MNNVL == 1 && ginAnvilArch(comm) == GinAnvilArch::Mi450;
   return optIn && mnnvlMi450 && comm->clique.size == comm->nRanks && ncclCuMemEnable();
 }
 
@@ -28,6 +39,17 @@ bool ginAnvilFabricMemCapable(struct ncclComm* comm) { return ginAnvilFabricMemP
 
 bool ginAnvilUseFabricMem(struct ncclComm* comm) {
   return ginAnvilFabricMemPredicate(comm, rcclParamGinAnvilFabricMem() != 0);
+}
+
+GinAnvilSdmaReach ginAnvilSdmaReachCapable(struct ncclComm* comm) {
+  if (comm == nullptr || comm->topo == nullptr) return GinAnvilSdmaReach::None;
+  return ginAnvilSdmaReachPredicate(ginAnvilArch(comm), comm->topo->nHosts, comm->nRanks,
+                                    ginAnvilFabricMemCapable(comm));
+}
+
+bool ginAnvilUseFabricPod(struct ncclComm* comm) {
+  return ginAnvilSdmaReachCapable(comm) == GinAnvilSdmaReach::FabricPod && rcclParamGinAnvilFabricPod() != 0 &&
+         ginAnvilUseFabricMem(comm);
 }
 
 bool ginFabricLsaA2ACapable(struct ncclComm* comm, int ginNranks) {

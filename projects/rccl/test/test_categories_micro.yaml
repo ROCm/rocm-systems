@@ -129,6 +129,8 @@ test_categories:
       - "DeepCopy*"
       - "Dev*"
       - "Gin*"
+      # host/gin-plugin-init-test.cc
+      - "PerSystem/GinAnvilReachTest.*"
       - "Nccl*"
       - "Sym*"
       - "Win*"

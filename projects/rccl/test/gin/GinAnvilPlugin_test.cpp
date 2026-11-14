@@ -12,6 +12,7 @@
 
 #include "../common/ScopedEnv.hpp"
 
+#include "gin/gin_anvil_reach.h"
 #include "gin/gin_host_anvil_sdma.h"
 #include "comm.h"
 #include "nccl_device/gin/anvil_sdma/gin_anvil_ipc_table.h"
@@ -266,6 +267,107 @@ TEST_F(GinAnvilPluginTest, Connect_Success) {
   void* coll = nullptr;
   connectColl(ictx, &coll);
   ASSERT_NE(coll, nullptr);
+  EXPECT_EQ(plugin_.closeColl(coll), ncclSuccess);
+  EXPECT_EQ(plugin_.finalize(ictx), ncclSuccess);
+}
+
+// The factory tells cross-host peers apart by host, so connect must pass this
+// rank's own entry, and 0 (every peer local) when peerInfo is not set up. The
+// entry is hostHash less commHash: remote-peer queues outlive a communicator,
+// and a key that changed with commHash would never be reused.
+TEST_F(GinAnvilPluginTest, Connect_PassesOwnHostHash) {
+  constexpr uint64_t kHost = 0x2222;
+  ncclPeerInfo peers[2] = {};
+  peers[0].hostHash = 0x1111 + mockComm_.comm.commHash;
+  peers[1].hostHash = kHost + mockComm_.comm.commHash;
+  mockComm_.comm.rank = 1;
+  mockComm_.comm.peerInfo = peers;
+  void* ictx = nullptr;
+  initCtx(&ictx);
+  void* coll = nullptr;
+  connectColl(ictx, &coll);
+  ASSERT_NE(coll, nullptr);
+  EXPECT_EQ(GinAnvilPluginStubs::GetFactoryHostId(), kHost);
+  EXPECT_EQ(GinAnvilPluginStubs::GetFactoryRemoteHostsOk(), 0);
+  EXPECT_EQ(plugin_.closeColl(coll), ncclSuccess);
+
+  // A second communicator on the same host has another commHash.
+  mockComm_.comm.commHash = 0xB0BUL;
+  peers[1].hostHash = kHost + mockComm_.comm.commHash;
+  connectColl(ictx, &coll);
+  ASSERT_NE(coll, nullptr);
+  EXPECT_EQ(GinAnvilPluginStubs::GetFactoryHostId(), kHost);
+  EXPECT_EQ(plugin_.closeColl(coll), ncclSuccess);
+
+  mockComm_.comm.peerInfo = nullptr;
+  connectColl(ictx, &coll);
+  ASSERT_NE(coll, nullptr);
+  EXPECT_EQ(GinAnvilPluginStubs::GetFactoryHostId(), 0u);
+  EXPECT_EQ(plugin_.closeColl(coll), ncclSuccess);
+  EXPECT_EQ(plugin_.finalize(ictx), ncclSuccess);
+}
+
+// Under NCCL_GIN_CONNECTION_RAIL the GIN team is smaller than the communicator,
+// but bootstrapAllGather writes one record per communicator rank, so the
+// factory's team-sized gather has to go through a world-sized buffer. World
+// rank 3 is team rank 1 of the rail {1, 3}, so team ranks 0 and 1 must read
+// world slots 1 and 3.
+TEST_F(GinAnvilPluginTest, Connect_RailTeamGathersIntoWorldBuffer) {
+  constexpr uint64_t kHost = 0x3333;
+  constexpr int kTagBase = 100;
+  setupFabricComm(4);
+  mockComm_.comm.globalGinSupport = NCCL_GIN_CONNECTION_RAIL;
+  mockComm_.comm.contiguousRanksPerHost = 2;
+  mockComm_.comm.rank = 3;
+  ncclPeerInfo peers[4] = {};
+  for (ncclPeerInfo& p : peers) p.hostHash = kHost + mockComm_.comm.commHash;
+  mockComm_.comm.peerInfo = peers;
+  GinAnvilPluginStubs::SetWideAllGatherSlotTagBase(kTagBase);
+  void* ictx = nullptr;
+  initCtx(&ictx);
+  void* coll = nullptr;
+  connectColl(ictx, &coll, /*nranks=*/2, /*ginRank=*/1);
+  ASSERT_NE(coll, nullptr);
+  EXPECT_EQ(GinAnvilPluginStubs::GetWideAllGatherOverruns(), 0);
+  const std::vector<int>& devs = GinAnvilPluginStubs::GetFactoryGatheredDeviceIds();
+  const std::vector<uint64_t>& hosts = GinAnvilPluginStubs::GetFactoryGatheredHostIds();
+  ASSERT_EQ(devs.size(), 2u);
+  ASSERT_EQ(hosts.size(), 2u);
+  EXPECT_EQ(devs[0], kTagBase + 1);
+  EXPECT_EQ(hosts[0], 0u);
+  EXPECT_EQ(hosts[1], kHost);
+  EXPECT_NE(devs[1], kTagBase + 3);
+  EXPECT_EQ(plugin_.closeColl(coll), ncclSuccess);
+  mockComm_.comm.peerInfo = nullptr;
+  EXPECT_EQ(plugin_.finalize(ictx), ncclSuccess);
+}
+
+// Only an MI450 fabric pod whose ranks agreed on fabric registration lets the
+// factory build queues for peers on other hosts; elsewhere it must refuse them.
+TEST_F(GinAnvilPluginTest, Connect_AllowsRemoteHostsOnlyInFabricPod) {
+  setupFabricComm(2);
+  void* ictx = nullptr;
+  initCtx(&ictx);
+  void* coll = nullptr;
+
+  GinAnvilPluginStubs::SetUseFabricMem(true);
+  GinAnvilPluginStubs::SetAnvilReach(static_cast<int>(GinAnvilSdmaReach::FabricPod));
+  connectColl(ictx, &coll, 2);
+  ASSERT_NE(coll, nullptr);
+  EXPECT_EQ(GinAnvilPluginStubs::GetFactoryRemoteHostsOk(), 1);
+  EXPECT_EQ(plugin_.closeColl(coll), ncclSuccess);
+
+  GinAnvilPluginStubs::SetUseFabricMem(false);
+  connectColl(ictx, &coll, 2);
+  ASSERT_NE(coll, nullptr);
+  EXPECT_EQ(GinAnvilPluginStubs::GetFactoryRemoteHostsOk(), 0);
+  EXPECT_EQ(plugin_.closeColl(coll), ncclSuccess);
+
+  GinAnvilPluginStubs::SetUseFabricMem(true);
+  GinAnvilPluginStubs::SetAnvilReach(static_cast<int>(GinAnvilSdmaReach::Host));
+  connectColl(ictx, &coll, 2);
+  ASSERT_NE(coll, nullptr);
+  EXPECT_EQ(GinAnvilPluginStubs::GetFactoryRemoteHostsOk(), 0);
   EXPECT_EQ(plugin_.closeColl(coll), ncclSuccess);
   EXPECT_EQ(plugin_.finalize(ictx), ncclSuccess);
 }

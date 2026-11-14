@@ -1086,7 +1086,7 @@ function(rccl_define_micro_source_lists)
     PARENT_SCOPE)
 
   # rccl-UnitTestsMicroGinHost -- src/gin/gin_host.cc (GIN_PROXY_NTHREADS, proxy affinity) and
-  # src/gin/gin_anvil_reach.cc (Anvil SDMA fabric memory). Own binary:
+  # src/gin/gin_anvil_reach.cc (Anvil SDMA reach per GPU generation). Own binary:
   # gin-plugin-init-test.cc already defines ncclParamGinEnable in rccl-UnitTestsMicro, and
   # gin_fakes.cc supplies ncclGinQueryLastError to Init.
   set(TEST_MICRO_GIN_HOST_SOURCE_FILES

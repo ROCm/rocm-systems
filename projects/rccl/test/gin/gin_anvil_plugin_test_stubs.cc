@@ -47,6 +47,9 @@ struct State {
   IntraNodeBootstrapCall lastIntraNodeBarrier;
   bool factoryCreateFail = false;
   bool factoryNullHandles = false;
+  uint64_t factoryHostId = 0;
+  int factoryRemoteHostsOk = -1;
+  GinAnvilSdmaReach anvilReach = GinAnvilSdmaReach::Host;
   bool lsaAddrFail = false;
   int connCheckMissingCalls = 0;
   int connCheckWriteCalls = 0;
@@ -55,6 +58,9 @@ struct State {
   int bootstrapAllGatherCalls = 0;
   int lastWideAllGatherSize = 0;
   int wideAllGatherOverruns = 0;
+  int wideAllGatherSlotTagBase = -1;
+  std::vector<int> factoryGatheredDeviceIds;
+  std::vector<uint64_t> factoryGatheredHostIds;
   int intraNodeAllGatherCalls = 0;
   void* lsaSelfAddr = reinterpret_cast<void*>(0x70001000ULL);
   bool useFabricMem = false;
@@ -105,6 +111,9 @@ void SetBootstrapIntResult(const int* values, int count) {
 }
 void SetFactoryCreateFail(bool fail) { g.factoryCreateFail = fail; }
 void SetFactoryNullHandles(bool nullHandles) { g.factoryNullHandles = nullHandles; }
+uint64_t GetFactoryHostId() { return g.factoryHostId; }
+int GetFactoryRemoteHostsOk() { return g.factoryRemoteHostsOk; }
+void SetAnvilReach(int reach) { g.anvilReach = static_cast<GinAnvilSdmaReach>(reach); }
 void SetLsaAddrFail(bool fail) { g.lsaAddrFail = fail; }
 void SetUseFabricMem(bool use) { g.useFabricMem = use; }
 void SetFabricMemCapable(bool capable) { g.fabricMemCapable = capable; }
@@ -139,6 +148,9 @@ int GetLastIntraNodeAllGatherNranks() { return g.lastIntraNodeAllGather.nranks; 
 int GetBootstrapAllGatherCalls() { return g.bootstrapAllGatherCalls; }
 int GetLastWideAllGatherSize() { return g.lastWideAllGatherSize; }
 int GetWideAllGatherOverruns() { return g.wideAllGatherOverruns; }
+void SetWideAllGatherSlotTagBase(int base) { g.wideAllGatherSlotTagBase = base; }
+const std::vector<int>& GetFactoryGatheredDeviceIds() { return g.factoryGatheredDeviceIds; }
+const std::vector<uint64_t>& GetFactoryGatheredHostIds() { return g.factoryGatheredHostIds; }
 int GetIntraNodeAllGatherCalls() { return g.intraNodeAllGatherCalls; }
 const std::vector<int>& GetLastIntraNodeBarrierRanks() { return g.lastIntraNodeBarrier.ranks; }
 int GetLastIntraNodeBarrierRank() { return g.lastIntraNodeBarrier.rank; }
@@ -265,6 +277,17 @@ static ncclResult_t stubWideAllGather(void* allData, int nranks, int size) {
   // that into a nonzero "yes" vote.
   unsigned char* bytes = static_cast<unsigned char*>(allData);
   std::vector<unsigned char> zero(slot, 0);
+  // Tag mode: each peer reports its world rank, so a caller that reads the
+  // wrong slot sees the wrong tag. Only the caller's slot is nonzero on entry.
+  if (GinAnvilPluginStubs::g.wideAllGatherSlotTagBase >= 0 && slot >= sizeof(int32_t)) {
+    for (int i = 0; i < nranks; ++i) {
+      unsigned char* p = bytes + static_cast<size_t>(i) * slot;
+      if (memcmp(p, zero.data(), slot) != 0) continue;
+      const int32_t tag = GinAnvilPluginStubs::g.wideAllGatherSlotTagBase + i;
+      memcpy(p, &tag, sizeof(tag));
+    }
+    return ncclSuccess;
+  }
   const unsigned char* src = nullptr;
   for (int i = 0; i < nranks && src == nullptr; ++i) {
     const unsigned char* p = bytes + static_cast<size_t>(i) * slot;
@@ -343,8 +366,8 @@ ncclResult_t ncclDevrGetLsaSelfAddr(struct ncclDevrState* devr, void* addr, void
 
 extern "C" int gin_anvil_sdma_probe(void) { return GinAnvilPluginStubs::g.probeResult; }
 
-extern "C" int gin_anvil_sdma_create(int nRanks, int myRank, int my_device_id,
-                                     int (*allgather)(void*, void*, size_t), void* allgather_ctx,
+extern "C" int gin_anvil_sdma_create(int nRanks, int myRank, int my_device_id, uint64_t my_host_id,
+                                     int remote_hosts_ok, int (*allgather)(void*, void*, size_t), void* allgather_ctx,
                                      int num_channels, gin_anvil_sdma_handle_t* out_handle,
                                      void** out_gpu_handles, uint64_t** out_sdma_dirty) {
   if (!out_handle || !out_gpu_handles || !out_sdma_dirty || !allgather || nRanks < 1 || myRank < 0 ||
@@ -352,11 +375,20 @@ extern "C" int gin_anvil_sdma_create(int nRanks, int myRank, int my_device_id,
     return -1;
   if (GinAnvilPluginStubs::g.factoryCreateFail) return -1;
 
-  std::vector<int> devs(static_cast<size_t>(nRanks), -1);
-  devs[static_cast<size_t>(myRank)] = my_device_id;
-  if (allgather(allgather_ctx, devs.data(), sizeof(int)) != 0) return -1;
+  GinAnvilPluginStubs::g.factoryHostId = my_host_id;
+  GinAnvilPluginStubs::g.factoryRemoteHostsOk = remote_hosts_ok;
+  // Zeroed peer slots: the wide allgather stub only replicates into empty slots.
+  std::vector<gin_anvil_sdma_peer_t> peers(static_cast<size_t>(nRanks), gin_anvil_sdma_peer_t{0, 0, 0});
+  peers[static_cast<size_t>(myRank)] = gin_anvil_sdma_peer_t{my_device_id, 0, my_host_id};
+  if (allgather(allgather_ctx, peers.data(), sizeof(gin_anvil_sdma_peer_t)) != 0) return -1;
+  GinAnvilPluginStubs::g.factoryGatheredDeviceIds.clear();
+  GinAnvilPluginStubs::g.factoryGatheredHostIds.clear();
+  for (const gin_anvil_sdma_peer_t& p : peers) {
+    GinAnvilPluginStubs::g.factoryGatheredDeviceIds.push_back(p.device_id);
+    GinAnvilPluginStubs::g.factoryGatheredHostIds.push_back(p.host_id);
+  }
   for (int i = 0; i < nRanks; ++i) {
-    if (devs[static_cast<size_t>(i)] < 0) return -1;
+    if (peers[static_cast<size_t>(i)].device_id < 0) return -1;
   }
 
   const int numChannels = num_channels < 1 ? 1 : (num_channels > 8 ? 8 : num_channels);
@@ -432,6 +464,11 @@ bool ginAnvilFabricMemCapable(struct ncclComm* comm) {
 bool ginAnvilUseFabricMem(struct ncclComm* comm) {
   (void)comm;
   return GinAnvilPluginStubs::g.useFabricMem;
+}
+
+GinAnvilSdmaReach ginAnvilSdmaReachCapable(struct ncclComm* comm) {
+  (void)comm;
+  return GinAnvilPluginStubs::g.anvilReach;
 }
 
 bool ginFabricLsaA2ACapable(struct ncclComm* comm, int ginNranks) {
