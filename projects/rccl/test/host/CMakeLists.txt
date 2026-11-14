@@ -1494,6 +1494,14 @@ function(rccl_standalone_setup)
                      "${CMAKE_BINARY_DIR}/external/fmt")
   endif()
 
+  # --- __hip_atomic_* poison (in-tree builds get it from test/CMakeLists.txt) ---
+  # After GTest and fmt so a fetched googletest is not built with it, and before
+  # any test target below.
+  option(RCCL_POISON_HIP_ATOMICS "Reject __hip_atomic_* builtins in RCCL sources" ON)
+  if(RCCL_POISON_HIP_ATOMICS)
+    add_compile_options(--include=${CMAKE_CURRENT_SOURCE_DIR}/../../src/include/poison_hip_atomics.h)
+  endif()
+
   # --- Resolve RCCL build directory ---
   set(RCCL_BUILD_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../build" CACHE PATH
       "RCCL build directory (auto-detects release/debug subdirs)")
@@ -1641,6 +1649,11 @@ function(rccl_standalone_setup)
         $<TARGET_PROPERTY:${_hip_tgt},INTERFACE_COMPILE_DEFINITIONS>)
     endif()
   endforeach()
+  # wrapper_link_stubs.cpp defines int-returning HIP stubs, so it must not see
+  # the hip_runtime.h that the force-included poison_hip_atomics.h pulls in.
+  set_source_files_properties(wrapper_link_stubs.cpp PROPERTIES
+    COMPILE_DEFINITIONS RCCL_POISON_HIP_ATOMICS_NO_HIP_INCLUDES
+  )
   # accl_profiler_wrapper.cc needs the non-hipified profiler headers;
   # scope the extra include to just that file to avoid os.h/rocmwrap.h
   # conflicts with the hipified sources used by other wrappers.

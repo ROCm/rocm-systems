@@ -810,10 +810,10 @@ __global__ void kernelFlushRacingCoop(TemplateHarness* h, uint64_t* dirty, int* 
     return;
   }
   secondSawDirty[0] =
-      (__hip_atomic_load(dirty, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT) & 1ULL) != 0 ? 1 : 0;
+      (__scoped_atomic_load_n(dirty, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE) & 1ULL) != 0 ? 1 : 0;
   ncclGinApi_Flush<NCCL_NET_DEVICE_GIN_ANVIL_SDMA>::call(ginCtx, ncclCoopThread{}, false, nullptr,
                                                          cuda::memory_order_seq_cst, nullptr);
-  __hip_atomic_store(&sdma_anvil::g_sdmaStubReleaseQuiet, 1, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+  __scoped_atomic_store_n(&sdma_anvil::g_sdmaStubReleaseQuiet, 1, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
 }
 
 static unsigned long long readInQuiet() {
