@@ -1,0 +1,325 @@
+# HRR GPU suite: build an amdhip64 with HRR capture compiled in, then run the
+# HRR capture/replay integration suite on the rocJitsu GPU simulator for each
+# requested family. No job uses a real GPU.
+#
+# Called by hrr-ci.yml, which decides when this runs and on which simulator families.
+#
+# Interim: the build job and projects/hrr/tests/scripts/hrr_capture_build.py
+# rebuild CLR with capture enabled on top of TheRock release artifacts. They
+# stay until TheRock can build and run the HRR integration suite. Defining the
+# hrr-capture variant is not enough: nothing selects it, and it does not
+# install the test binaries.
+
+name: HRR GPU
+
+on:
+  workflow_call:
+    inputs:
+      simulator_families:
+        description: JSON list of {family, runner, backend, arch, config} rows from hrr_ci_configure.py for the rocJitsu jobs. [] skips them.
+        type: string
+        default: "[]"
+      ignore_test_config:
+        description: Run the cases the suite config skips
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build capture-enabled HIP and HRR
+    runs-on: ubuntu-26.04
+    timeout-minutes: 90
+    container:
+      image: ghcr.io/rocm/therock_build_manylinux_x86_64@sha256:cf4f6d9909056906e4a1c0bc4c245658a0af4c6a6174082a86adfa2d518b7aeb # 2026-08-18
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            projects/clr
+            projects/hip
+            projects/hrr
+
+      - name: Checkout TheRock artifact tools
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+          repository: ROCm/TheRock
+          # Keep in sync with the TheRock ref in therock-multi-arch-ci.yml.
+          ref: 647a8c52a206f2e7d0e9c63cbf0af0ded084f08b # 2026-11-09
+          path: therock
+          sparse-checkout: |
+            build_tools
+            cmake/therock_amdgpu_targets.cmake
+            requirements.txt
+          sparse-checkout-cone-mode: false
+
+      - name: Install TheRock Python requirements
+        run: python3 -m pip install --no-cache-dir -r therock/requirements.txt
+
+      - name: Install base ROCm artifacts
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python3 projects/hrr/tests/scripts/hrr_capture_build.py fetch-base
+
+      # No cache restore: a cache hit left librocm_kpack.so.0 out of the tree and
+      # Verify failed. Off until that failure is understood, so the build always
+      # runs.
+      - name: Build
+        run: python3 projects/hrr/tests/scripts/hrr_capture_build.py build
+
+      - name: Verify
+        run: python3 projects/hrr/tests/scripts/hrr_capture_build.py verify
+
+      - name: Upload base build record
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: hrr-base-${{ github.run_id }}
+          path: build/base.json
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload build
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: hrr-capture-${{ github.run_id }}
+          path: |
+            build/base.json
+            build/capture-lib/
+            build/hrr/playback/hrr-playback
+            build/hrr/tests/integration/hrr-integration-tests
+            build/hrr/tests/integration/*.so
+          if-no-files-found: error
+          retention-days: 7
+
+  # rocJitsu has no family or architecture argument: every simulator job would
+  # build the same binary, so build it once here. The simulator jobs download
+  # it from the artifact. The launcher is tools/rocjitsu/rocjitsu and finds
+  # librocjitsu.so at ../../ from its own path, so the tarball keeps the build/rocjitsu layout, and tar keeps the
+  # exec bit that upload-artifact would drop.
+  rocjitsu-build:
+    name: Build rocJitsu
+    if: inputs.simulator_families != '[]'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            emulation/rocjitsu
+            runtimes/api-headers
+            shared/machine-readable-isa
+
+      - name: Install rocJitsu build packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo -n apt-get update
+          sudo -n DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            build-essential ca-certificates ccache clang libdrm-dev ninja-build
+
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+
+      - name: Install Python requirements
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m venv "${RUNNER_TEMP}/hrr-venv"
+          "${RUNNER_TEMP}/hrr-venv/bin/python" -m pip install --no-cache-dir 'cmake==3.31.10'
+          echo "${RUNNER_TEMP}/hrr-venv/bin" >> "${GITHUB_PATH}"
+
+      # ccache holds only the rocJitsu compile objects, in its own directory
+      # under RUNNER_TEMP. It never covers the ROCm install in the build job,
+      # which stays uncached (see the note above that job's Build step).
+      # ccache keys each object on the preprocessed source and the compiler,
+      # so a stale hit is not possible; the key below only decides when a new
+      # cache is saved. Pull requests restore the cache that develop pushes and
+      # the schedule saved, and save their own, which only that PR reads.
+      - name: Configure ccache
+        id: ccache
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "CCACHE_DIR=${RUNNER_TEMP}/ccache-rocjitsu"
+            echo "CCACHE_BASEDIR=${GITHUB_WORKSPACE}"
+            echo "CCACHE_COMPILERCHECK=content"
+            echo "CCACHE_MAXSIZE=500M"
+          } >> "${GITHUB_ENV}"
+          echo "compiler=$( (c++ --version | head -n1; cc --version | head -n1) | sha256sum | cut -c1-12)" >> "${GITHUB_OUTPUT}"
+
+      - name: Restore ccache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ${{ runner.temp }}/ccache-rocjitsu
+          key: ccache-rocjitsu-${{ runner.os }}-${{ runner.arch }}-${{ steps.ccache.outputs.compiler }}-${{ hashFiles('emulation/rocjitsu/**', 'runtimes/api-headers/**', 'shared/machine-readable-isa/**') }}
+          restore-keys: |
+            ccache-rocjitsu-${{ runner.os }}-${{ runner.arch }}-${{ steps.ccache.outputs.compiler }}-
+
+      - name: Build rocJitsu
+        shell: bash
+        run: |
+          set -euo pipefail
+          ccache --zero-stats
+          cmake -S emulation/rocjitsu -B build/rocjitsu -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+          cmake --build build/rocjitsu --target rocjitsu_bin rocjitsu_shared rocjitsu_memory -j
+
+      - name: ccache stats
+        if: ${{ !cancelled() }}
+        shell: bash
+        run: ccache --show-stats --verbose || true
+
+      - name: Package rocJitsu
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The glob must expand inside build/rocjitsu, so cd there. tar keeps
+          # symlinks, so a versioned librocjitsu.so chain survives.
+          #
+          # librocjitsu.so execs the private rocjitsu-memory keeper. The path
+          # baked in for a build tree is this runner's, which the simulator
+          # containers do not have, so the keeper goes where the installed
+          # layout looks for it: ../libexec/rocjitsu/ beside the library's
+          # directory (build/libexec/rocjitsu/ next to build/rocjitsu/).
+          ls -l build/rocjitsu/tools/rocjitsu/rocjitsu build/rocjitsu/librocjitsu.so* \
+            build/rocjitsu/tools/rocjitsu-memory
+          mkdir -p build/libexec/rocjitsu
+          cp build/rocjitsu/tools/rocjitsu-memory build/libexec/rocjitsu/rocjitsu-memory
+          (cd build && tar -cf "${GITHUB_WORKSPACE}/rocjitsu.tar" \
+            rocjitsu/tools/rocjitsu/rocjitsu rocjitsu/librocjitsu.so* \
+            libexec/rocjitsu/rocjitsu-memory)
+          tar -tvf rocjitsu.tar
+
+      - name: Upload rocJitsu
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: rocjitsu-${{ github.run_id }}
+          path: rocjitsu.tar
+          if-no-files-found: error
+          retention-days: 7
+
+  simulator:
+    name: rocJitsu (${{ matrix.family }})
+    needs: [build, rocjitsu-build]
+    if: inputs.simulator_families != '[]'
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(inputs.simulator_families) }}
+    # No devices: rocJitsu supplies the GPU. The build job's
+    # workspace path is this container's workspace, so the paths compiled into
+    # the test binaries resolve without a symlink on the runner.
+    container:
+      # Digest pinned 2026-10-13.
+      image: ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98
+      options: --user 0:0
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            emulation/rocjitsu/configs
+            projects/hrr/tests
+
+      - name: Checkout TheRock artifact tools
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+          repository: ROCm/TheRock
+          ref: 647a8c52a206f2e7d0e9c63cbf0af0ded084f08b # 2026-11-09
+          path: therock
+          sparse-checkout: |
+            build_tools
+            cmake/therock_amdgpu_targets.cmake
+            requirements.txt
+          sparse-checkout-cone-mode: false
+
+      # The prebuilt rocJitsu and the capture-enabled amdhip64 load libdrm at run
+      # time. The container runs as root, so this does not use sudo.
+      - name: Install libdrm
+        shell: bash
+        run: |
+          set -euo pipefail
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            libdrm2 libdrm-amdgpu1
+
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+
+      - name: Install Python requirements
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m venv "${RUNNER_TEMP}/hrr-venv"
+          "${RUNNER_TEMP}/hrr-venv/bin/python" -m pip install --no-cache-dir -r therock/requirements.txt
+          echo "${RUNNER_TEMP}/hrr-venv/bin" >> "${GITHUB_PATH}"
+
+      - name: Download rocJitsu
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: rocjitsu-${{ github.run_id }}
+          path: rocjitsu-artifact
+
+      - name: Unpack rocJitsu
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build
+          tar -C build -xf rocjitsu-artifact/rocjitsu.tar
+          ls -l build/rocjitsu/tools/rocjitsu build/rocjitsu/librocjitsu.so* \
+            build/libexec/rocjitsu/rocjitsu-memory
+          echo "${GITHUB_WORKSPACE}/build/rocjitsu/tools/rocjitsu" >> "${GITHUB_PATH}"
+
+      - name: Download build
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: hrr-capture-${{ github.run_id }}
+          path: build
+
+      - name: Install base ROCm artifacts and the capture-enabled amdhip64
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python projects/hrr/tests/scripts/hrr_capture_build.py install-base
+
+      - name: Run integration suite
+        env:
+          FAMILY: ${{ matrix.family }}
+          ARCH: ${{ matrix.arch }}
+          # The config path stays data. The shell does not assemble the command.
+          # Local mode: the simulator runs inside each process. Daemon mode
+          # (rocjitsu --daemon) fails hipMemCreate and hangs gfx90a replay.
+          LAUNCHER: ${{ format('rocjitsu --config {0} --', matrix.config) }}
+          HRR_TEST_IGNORE_CONFIG: ${{ inputs.ignore_test_config && '1' || '' }}
+        shell: bash
+        run: >-
+          python projects/hrr/tests/scripts/run_catch2.py
+          --xml "integration-${FAMILY}.xml"
+          --timeout 1200
+          --config projects/hrr/tests/config/integration.yaml
+          --os linux --arch "${ARCH}"
+          --launcher "${LAUNCHER}"
+          -- build/hrr/tests/integration/hrr-integration-tests
+
+      - name: Upload results
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: results-integration-${{ matrix.family }}
+          path: integration-${{ matrix.family }}.xml
+          if-no-files-found: ignore
+          retention-days: 7

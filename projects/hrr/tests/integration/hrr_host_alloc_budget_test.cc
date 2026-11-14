@@ -13,8 +13,8 @@
  * refuses a record that would pass the cap, and gives the charge back on hipFree
  * and hipMemRelease. Each workload allocates 2 MiB three times in a row,
  * freeing the buffer in between, so a replay whose cap holds one buffer (3 MiB)
- * only gets through if the free returns the charge, and a cap below one buffer
- * (1 MiB) refuses the first.
+ * only gets through if the free returns the charge, and a cap with less than one
+ * buffer (1 MiB) to spare refuses the first. Caps are relative to the archive's cached blobs.
  */
 
 #include "hrr_test_common.hh"
@@ -22,17 +22,41 @@
 #include <string>
 
 namespace {
+// Replay charges every blob and code object it loads to --max-host-bytes and
+// never evicts them. The registered fat binary is among them, and its size
+// follows the arch list the test binary was built for (over 1 MiB for the CI
+// build of every arch), so a cap is the archive's cached bytes plus the budget
+// the test means to give the allocations.
+uint64_t hrr_archive_cache_bytes(const fs::path& capture_root) {
+  // The capture root holds one pid-<n>/ archive; the blobs sit inside it.
+  const fs::path archive = hrr_single_process_archive(capture_root);
+  uint64_t total = 0;
+  for (const char* sub : {"blobs", "code_objects"}) {
+    std::error_code ec;
+    if (!fs::is_directory(archive / sub, ec)) continue;
+    for (fs::recursive_directory_iterator it(archive / sub, ec), end; !ec && it != end;
+         it.increment(ec)) {
+      std::error_code fec;
+      if (it->is_regular_file(fec)) total += fs::file_size(it->path(), fec);
+    }
+  }
+  return total;
+}
+std::string hrr_host_cap(const fs::path& archive, uint64_t alloc_bytes) {
+  return std::to_string(hrr_archive_cache_bytes(archive) + alloc_bytes);
+}
+
 constexpr size_t kBudgetBuf = 2u << 20;
 constexpr int kBudgetRounds = 3;
 
 // Capture is not capped; only replay is.
-void hrr_budget_replay(const char* direct_case, const char* dir, const char* cap_bytes,
-                       const char* api) {
+void hrr_budget_replay(const char* direct_case, const char* dir, const char* api) {
   ScopedDir cap{hrr_temp_dir(dir)};
   hrr_capture_direct(direct_case, cap.path, 5);
   for (const bool over : {false, true}) {
     const std::string cap_arg =
-        std::string("--max-host-bytes ") + (over ? "1048576" : cap_bytes);
+        std::string("--max-host-bytes ") +
+        hrr_host_cap(cap.path, over ? (1u << 20) : (3u << 20));
     auto [ret, out] = hrr_playback_merged(cap.path, cap_arg);
     INFO(cap_arg << ": playback exit " << ret << ", output:\n" << out);
     if (over) {
@@ -85,12 +109,12 @@ TEST_CASE("Unit_HRR_HostBudgetMemCreate_Direct", "[.][hrr-direct]") {
 // Within a one-buffer cap the free returns the charge; under the buffer, the
 // first allocation is refused.
 HRR_TEST_CASE(Unit_HRR_HostBudgetManagedRoundtrip) {
-  hrr_budget_replay("Unit_HRR_HostBudgetManaged_Direct", "hrr_budget_managed", "3145728",
+  hrr_budget_replay("Unit_HRR_HostBudgetManaged_Direct", "hrr_budget_managed",
                     "hipMallocManaged");
 }
 
 HRR_TEST_CASE(Unit_HRR_HostBudgetMemCreateRoundtrip) {
-  hrr_budget_replay("Unit_HRR_HostBudgetMemCreate_Direct", "hrr_budget_memcreate", "3145728",
+  hrr_budget_replay("Unit_HRR_HostBudgetMemCreate_Direct", "hrr_budget_memcreate",
                     "hipMemCreate (host location)");
 }
 
@@ -98,7 +122,7 @@ HRR_TEST_CASE(Unit_HRR_HostBudgetMemCreateRoundtrip) {
 // hipMemUnmap. The workload maps h1, releases it, then creates h2 before the
 // unmap: with the hold the 3 MiB replay is refused at h2 (h1's 2 MiB is still
 // charged); without it the release would have returned the charge and h2 fits.
-// A 5 MiB cap takes h1 + h2 plus the replay's cached blobs, so the replay
+// A cap of 5 MiB over the replay's cached blobs takes h1 + h2, so the replay
 // completes.
 TEST_CASE("Unit_HRR_HostBudgetMemMapHold_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipSetDevice(0));
@@ -138,7 +162,8 @@ HRR_TEST_CASE(Unit_HRR_HostBudgetMemMapHoldRoundtrip) {
   hrr_capture_direct("Unit_HRR_HostBudgetMemMapHold_Direct", cap.path, 5);
   for (const bool refuse : {false, true}) {
     const std::string cap_arg =
-        std::string("--max-host-bytes ") + (refuse ? "3145728" : "5242880");
+        std::string("--max-host-bytes ") +
+        hrr_host_cap(cap.path, refuse ? (3u << 20) : (5u << 20));
     auto [ret, out] = hrr_playback_merged(cap.path, cap_arg);
     INFO(cap_arg << ": playback exit " << ret << ", output:\n" << out);
     if (refuse) {
@@ -165,7 +190,8 @@ HRR_TEST_CASE(Unit_HRR_HostBudgetManagedLeakRoundtrip) {
   ScopedDir cap{hrr_temp_dir("hrr_budget_managed_leak")};
   hrr_capture_direct("Unit_HRR_HostBudgetManagedLeak_Direct", cap.path, 5);
   auto [ret, out] = hrr_playback_merged(
-      cap.path, "--kernel-filter hrr_no_such_kernel --max-host-bytes 3145728");
+      cap.path, "--kernel-filter hrr_no_such_kernel --max-host-bytes " +
+                    hrr_host_cap(cap.path, 3u << 20));
   INFO("playback exit " << ret << ", output:\n" << out);
   CHECK(ret == 0);
   CHECK(out.find("[HRR] Fatal") == std::string::npos);

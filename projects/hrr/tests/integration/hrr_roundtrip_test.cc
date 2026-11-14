@@ -594,19 +594,42 @@ HRR_TEST_CASE(Unit_HRR_AllApisRoundtrip) {
     REQUIRE(arc.events.size() >= 40);  // ~55 distinct APIs exercised
   }
 
-  // The workload's array copies (block 19) need image support, which gfx950
-  // (MI350X) reports as absent. Where it has them, a capture without the copies
-  // would replay perfectly well, so ask for them.
-  int images = 0;
-  HRR_HIP_CHECK(hipDeviceGetAttribute(&images, hipDeviceAttributeImageSupport, 0));
-  if (images)
-    hrr_require_recorded_apis(cap.path, {HRR_API_HIPARRAY3DCREATE, HRR_API_HIPARRAYCREATE,
-                                         HRR_API_HIPMEMCPY3D, HRR_API_HIPMEMCPY3DASYNC});
-
   // -------------------------------------------------------------------------
   // Step 3: playback + D2H validation (d2[i] == 94)
   // -------------------------------------------------------------------------
   hrr_run_playback(cap.path);
+}
+
+/**
+ * Test Description
+ * ----------------
+ *   - Spawns HrrTest Unit_HRR_AllApisArrays_Direct as a subprocess with
+ *     HIP_HRR_CAPTURE_OUTPUT set to a temp directory: hipArrayCreate,
+ *     hipArray3DCreate and hipMemcpy3D/hipMemcpy3DAsync with an array on either
+ *     end.
+ *   - Requires the array creation and copy calls in the archive, then replays it
+ *     and validates the D2H blobs of the copied-out buffers.
+ *   - Skips where the device reports no image support (gfx950 / MI350X), since
+ *     the workload then records no array calls.
+ */
+HRR_TEST_CASE(Unit_HRR_AllApisArraysRoundtrip) {
+  int images = 0;
+  HRR_HIP_CHECK(hipDeviceGetAttribute(&images, hipDeviceAttributeImageSupport, 0));
+  if (!images) HRR_SKIP("device reports no image support");
+
+  ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_allapis_arrays"};
+  {
+    hrr::test::SpawnProc proc(hrr_self_exe());
+    proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
+    set_proc_search_path(proc);
+    int ret = proc.run("\"Unit_HRR_AllApisArrays_Direct\"");
+    INFO("AllApisArrays capture subprocess exit code: " << ret);
+    REQUIRE(ret == 0);
+  }
+
+  hrr_require_recorded_apis(cap.path, {HRR_API_HIPARRAY3DCREATE, HRR_API_HIPARRAYCREATE,
+                                       HRR_API_HIPMEMCPY3D, HRR_API_HIPMEMCPY3DASYNC});
+  hrr_run_playback(cap.path, "", /*require_d2h=*/true);
 }
 
 /**

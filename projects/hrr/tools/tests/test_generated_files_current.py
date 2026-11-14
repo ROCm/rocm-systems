@@ -11,7 +11,10 @@ regenerate them leaves a tree that builds and passes the default suite while the
 API matrix and the dispatch tables disagree about what an API does at replay.
 
 This regenerates each into a scratch directory and compares it with the
-checked-in copy. Nothing is written into the tree. The matrix half needs PyYAML,
+checked-in copy, with the generator's --check-hrr-coverage on: every API outside
+MANUAL_CAPTURE_APIS must have a parseable dispatch slot and every manual one its
+hand-written shim in hip_capture.cpp. The CLR build runs that check only with
+CLR_HRR_CODEGEN_CHECK, which is off by default. Nothing is written into the tree. The matrix half needs PyYAML,
 as the matrix tools do, and is skipped without it.
 
 Run: python3 -m unittest discover -s projects/hrr/tools/tests
@@ -58,7 +61,7 @@ class GeneratedFilesCurrent(unittest.TestCase):
     def test_generator_outputs_match_the_checked_in_files(self):
         with tempfile.TemporaryDirectory() as tmp:
             out = Path(tmp)
-            _run([TOOLS / "gen_hrr_api_args.py", "--silent",
+            _run([TOOLS / "gen_hrr_api_args.py", "--silent", "--check-hrr-coverage",
                   "--output-header", out / "hrr_api_args.h",
                   "--output-capture", out / "capture.cpp",
                   "--output-playback", out / "playback.cpp"])
@@ -72,6 +75,19 @@ class GeneratedFilesCurrent(unittest.TestCase):
                       out / "capture.cpp", hint),
             ) if d]
             self.assertEqual(stale, [], "\n\n".join(stale))
+
+    def test_coverage_check_rejects_a_missing_manual_capture_shim(self):
+        # The check above only means something if --check-hrr-coverage can fail.
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp)
+            empty = out / "hip_capture.cpp"
+            empty.write_text("")
+            with self.assertRaises(RuntimeError):
+                _run([TOOLS / "gen_hrr_api_args.py", "--silent", "--check-hrr-coverage",
+                      "--manual-capture-source", empty,
+                      "--output-header", out / "hrr_api_args.h",
+                      "--output-capture", out / "capture.cpp",
+                      "--output-playback", out / "playback.cpp"])
 
     @unittest.skipUnless(HAVE_YAML, "PyYAML is required for the matrix tools")
     def test_api_matrix_header_matches_the_derived_manifest(self):

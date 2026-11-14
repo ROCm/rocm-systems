@@ -11,11 +11,13 @@ per suite lists every case, and a case with no rule runs on every OS and GPU.
 A rule matches when every key it sets matches. Keys in one ``when`` are ANDed;
 a list under a key is ORed; a missing key matches anything. Glob patterns
 (``gfx11*``) are allowed. Several visible GPUs match when any of them does.
+``emulator: true`` matches only a run under a GPU emulator (run_catch2.py
+``--launcher``), ``emulator: false`` only a run on a real device.
 ``kind: disabled`` is a temporary regression and needs a public issue URL.
 ``kind: unsupported`` is permanent and needs only a reason.
 
 Usage:
-    hrr_test_config.py lint CONFIG [CONFIG ...] [--workflow hrr-ci.yml]
+    hrr_test_config.py lint CONFIG [CONFIG ...]   (their targets.arch must agree)
     hrr_test_config.py check --binary EXE --config CONFIG [--update]
 """
 
@@ -37,7 +39,7 @@ CASE_NAME = re.compile(r"^[A-Za-z0-9_]+$")
 ARCH_TOKEN = re.compile(r"gfx[0-9][0-9a-z]*")
 WORKLOAD_TAGS = {"hrr-direct", "direct"}
 KINDS = {"disabled", "unsupported"}
-WHEN_KEYS = {"os", "arch"}
+WHEN_KEYS = {"os", "arch", "emulator"}
 RULE_KEYS = {"when", "kind", "reason", "issue"}
 CASE_KEYS = {"skip"}
 TOP_KEYS = {"version", "suite", "binary", "select", "targets", "skip", "cases"}
@@ -47,6 +49,8 @@ HEADER = """\
 #
 # A skip rule matches when every key under "when" matches (a list is OR, a
 # missing key matches anything, and a value may be a glob such as gfx11*).
+# "emulator: true" matches only a run under a GPU emulator (run_catch2.py
+# --launcher), "emulator: false" only a run on a real device.
 # kind: disabled is a temporary regression and requires a public issue URL.
 # kind: unsupported is permanent and needs only a reason.
 #
@@ -96,15 +100,20 @@ def value_matches(pattern, value: str) -> bool:
     return any(fnmatch.fnmatchcase(value, str(item)) for item in _as_list(pattern))
 
 
-def rule_matches(rule: dict, os_name: str, archs: list[str]) -> list[str] | None:
+def rule_matches(
+    rule: dict, os_name: str, archs: list[str], emulated: bool = False
+) -> list[str] | None:
     """The architectures that made the rule match, or None.
 
     An ``arch`` key matches when any visible architecture matches, and does
-    not match when no architecture was supplied. An empty ``when`` matches
-    every machine.
+    not match when no architecture was supplied. An ``emulator`` key matches
+    a run under a GPU emulator (true) or on a real device (false). An empty
+    ``when`` matches every machine.
     """
     when = rule.get("when") or {}
     if "os" in when and not value_matches(when["os"], os_name):
+        return None
+    if "emulator" in when and when["emulator"] != emulated:
         return None
     matched = list(archs)
     if "arch" in when:
@@ -120,7 +129,7 @@ def _rules_for(config: dict, name: str) -> list[dict]:
 
 
 def resolve(config: dict, names: list[str], os_name: str, archs: list[str],
-            ignore: bool = False) -> tuple[list[str], list[dict]]:
+            ignore: bool = False, emulated: bool = False) -> tuple[list[str], list[dict]]:
     """Split ``names`` into cases to run and cases a rule skips.
 
     The first matching rule wins, suite rules before the case's own. Each
@@ -135,7 +144,7 @@ def resolve(config: dict, names: list[str], os_name: str, archs: list[str],
         hit = None
         matched: list[str] = []
         for rule in _rules_for(config, name):
-            matched = rule_matches(rule, os_name, archs)
+            matched = rule_matches(rule, os_name, archs, emulated)
             if matched is not None:
                 hit = rule
                 break
@@ -195,6 +204,8 @@ def _check_rule(errors: list[str], where: str, rule, targets: dict) -> None:
         for key in ("os", "arch"):
             if key in when:
                 _check_pattern(errors, where, key, when[key], targets.get(key, []))
+        if "emulator" in when and not isinstance(when["emulator"], bool):
+            _error(errors, where, "'emulator' must be true or false")
     kind = rule.get("kind")
     if kind not in KINDS:
         _error(errors, where, "'kind' must be disabled or unsupported")
@@ -208,12 +219,8 @@ def _check_rule(errors: list[str], where: str, rule, targets: dict) -> None:
         _error(errors, where, "'issue' must be an https:// URL")
 
 
-def lint(config: dict, cases: list[dict] | None = None,
-         workflow_archs: list[str] | None = None) -> list[str]:
-    """Schema and vocabulary errors. ``cases`` enables the workload-rule check.
-
-    ``workflow_archs``, when given, must be the same set as ``targets.arch``.
-    """
+def lint(config: dict, cases: list[dict] | None = None) -> list[str]:
+    """Schema and vocabulary errors. ``cases`` enables the workload-rule check."""
     errors: list[str] = []
     unknown = set(config) - TOP_KEYS
     if unknown:
@@ -234,14 +241,6 @@ def lint(config: dict, cases: list[dict] | None = None,
                     isinstance(item, str) and item for item in values):
                 _error(errors, "targets", f"'{key}' must be a non-empty list of strings")
                 targets[key] = []
-    if workflow_archs is not None and targets.get("arch") is not None:
-        got = set(targets["arch"])
-        want = set(workflow_archs)
-        if got != want:
-            missing = ", ".join(sorted(want - got)) or "-"
-            extra = ", ".join(sorted(got - want)) or "-"
-            _error(errors, "targets.arch",
-                   f"does not match HRR_ARCHS (missing: {missing}; extra: {extra})")
     suite_skip = config.get("skip", [])
     if not isinstance(suite_skip, list):
         _error(errors, "skip", "must be a list")
@@ -273,6 +272,29 @@ def lint(config: dict, cases: list[dict] | None = None,
             _check_rule(errors, f"{where}.skip[{index}]", rule, targets)
         if rules and is_workload(tags_by_name.get(name, [])):
             _error(errors, where, "a direct workload cannot carry skip rules")
+    return errors
+
+
+def arch_mismatches(configs: dict[str, dict]) -> list[str]:
+    """The suites share one architecture vocabulary, so every ``targets.arch``
+    must name the same set as the first config's."""
+    archs = {
+        path: set(config["targets"]["arch"])
+        for path, config in configs.items()
+        if isinstance(config.get("targets"), dict)
+        and isinstance(config["targets"].get("arch"), list)
+    }
+    if len(archs) < 2:
+        return []
+    first, *rest = archs
+    errors = []
+    for path in rest:
+        if archs[path] != archs[first]:
+            missing = ", ".join(sorted(archs[first] - archs[path])) or "-"
+            extra = ", ".join(sorted(archs[path] - archs[first])) or "-"
+            errors.append(
+                f"targets.arch of {path} differs from {first} (missing: {missing}; extra: {extra})"
+            )
     return errors
 
 
@@ -334,6 +356,8 @@ def _yaml_pattern(value) -> str:
 def _emit_rule(lines: list[str], rule: dict, indent: str) -> None:
     when = rule.get("when") or {}
     parts = [f"{key}: {_yaml_pattern(when[key])}" for key in ("os", "arch") if key in when]
+    if "emulator" in when:
+        parts.append(f"emulator: {'true' if when['emulator'] else 'false'}")
     lines.append(f"{indent}- when: {{{', '.join(parts)}}}")
     lines.append(f"{indent}  kind: {rule['kind']}")
     lines.append(f"{indent}  reason: {_yaml_str(rule['reason'])}")
@@ -382,20 +406,21 @@ def apply_listing(config: dict, names: list[str]) -> tuple[list[str], list[str]]
     return added, removed
 
 
-def workflow_archs(path: str | Path) -> list[str]:
-    """The ``HRR_ARCHS`` list from the HRR CI workflow."""
-    try:
-        text = Path(path).read_text(encoding="utf-8")
-    except OSError as exc:
-        raise ConfigError(f"cannot read {path}: {exc}") from exc
-    match = re.search(r'^ {2}HRR_ARCHS:\s*"([^"]+)"\s*$', text, re.MULTILINE)
-    if not match:
-        raise ConfigError(f"no HRR_ARCHS list in {path}")
-    return [arch for arch in match.group(1).split(";") if arch]
-
-
 def detect_os() -> str:
     return "windows" if os.name == "nt" else "linux"
+
+
+def compiled_out_here(config: dict, name: str, os_name: str) -> bool:
+    """True when an OS-wide ``unsupported`` rule covers the case on ``os_name``.
+
+    Such a case may be compiled out of the binary there (an ``#ifndef _WIN32``
+    around the whole file), so ``check`` does not call its absence MISSING.
+    A rule that names an architecture is not OS-wide and does not count.
+    """
+    return any(
+        rule.get("kind") == "unsupported" and rule_matches(rule, os_name, []) is not None
+        for rule in _rules_for(config, name)
+    )
 
 
 def _archs_in(text: str) -> list[str]:
@@ -447,8 +472,8 @@ def _print_errors(path: str, errors: list[str]) -> None:
 
 
 def _cmd_lint(args: argparse.Namespace) -> int:
-    archs = workflow_archs(args.workflow) if args.workflow else None
     failed = False
+    loaded = {}
     for path in args.configs:
         try:
             config = load(path)
@@ -456,12 +481,16 @@ def _cmd_lint(args: argparse.Namespace) -> int:
             print(f"FAIL: {exc}", file=sys.stderr)
             failed = True
             continue
-        errors = lint(config, workflow_archs=archs)
+        loaded[path] = config
+        errors = lint(config)
         if errors:
             _print_errors(path, errors)
             failed = True
         else:
             print(f"OK: {path}")
+    for error in arch_mismatches(loaded):
+        print(f"FAIL: {error}", file=sys.stderr)
+        failed = True
     return 1 if failed else 0
 
 
@@ -484,10 +513,17 @@ def _cmd_check(args: argparse.Namespace) -> int:
               f"({len(added)} added, {len(removed)} removed)")
         for name in removed:
             print(f"  removed {name}")
-    expected = set(config["cases"])
+    os_name = detect_os()
+    # MISSING is measured against the cases an OS-wide unsupported rule may
+    # have compiled out here; UNEXPECTED against every case the config
+    # knows. Subtracting the relaxed set from the binary's list would blame
+    # a case that is legitimately still compiled into the binary.
+    unsupported = {name for name in config["cases"]
+                   if compiled_out_here(config, name, os_name)}
+    expected = {name for name in config["cases"] if name not in unsupported}
     actual = set(names)
     missing = sorted(expected - actual)
-    unexpected = sorted(actual - expected)
+    unexpected = sorted(actual - set(config["cases"]))
     errors = lint(config, cases=found)
     if not missing and not unexpected and not errors:
         print(f"OK: {len(actual)} test cases present, matching {args.config}")
@@ -514,7 +550,6 @@ def main(argv: list[str] | None = None) -> int:
 
     lint_cmd = commands.add_parser("lint", help="validate config files")
     lint_cmd.add_argument("configs", nargs="+")
-    lint_cmd.add_argument("--workflow", help="HRR workflow whose HRR_ARCHS must match targets.arch")
     lint_cmd.set_defaults(func=_cmd_lint)
 
     check_cmd = commands.add_parser("check", help="compare a binary's cases to a config")
