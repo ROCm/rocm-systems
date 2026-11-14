@@ -13,6 +13,7 @@ RESET='\033[0m'
 DISTROS=(
     "ubuntu:22.04"
     "ubuntu:24.04"
+    "ubuntu:26.04"
     "debian:12"
     "rhel:8.10"
     "rhel:9"
