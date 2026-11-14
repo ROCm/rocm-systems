@@ -39,24 +39,15 @@
       {"metric_id": "3.9.3", "title": "Memory Write BW", "category": "write", "bar": false}
     ]},
 
-    {"id": "infinity_cache", "title": "Infinity Cache", "column": 4, "row": 0, "order": 0, "style": "panel", "content": [
-      {"metric_id": "3.11.0", "title": "Hit Rate", "category": "hit", "bar": true}
-    ]},
+    {"id": "infinity_cache", "title": "Infinity Cache", "column": 4, "row": 0, "order": 0, "style": "panel"},
 
-    {"id": "vram", "title": "VRAM", "column": 5, "row": 0, "order": 0, "style": "panel", "content": [
-      {"metric_id": "3.11.1", "title": "Read BW", "category": "read", "bar": false},
-      {"metric_id": "3.11.2", "title": "Write BW", "category": "write", "bar": false}
-    ]}
+    {"id": "vram", "title": "VRAM", "column": 5, "row": 0, "order": 0, "style": "panel"}
   ],
   "arrows": [
     {"from": "cu", "to": "lds", "direction": "both", "metric_id": "3.4.0", "title": "LDS", "category": "neutral", "style": "inline", "group": "Request"},
 
     {"from": "cu", "to": "icache", "direction": "backward", "metric_id": "3.1.0", "title": "ICACHE", "category": "read", "style": "inline"},
 
-    {"from": "cu", "to": "dcache", "direction": "backward", "metric_id": "3.2.0", "title": "SMEM", "category": "read", "style": "inline"},
-
-    {"from": "icache", "to": "gl1", "direction": "backward", "metric_id": "3.1.2", "title": "ICache Read BW", "category": "read", "style": "stacked"},
-
-    {"from": "dcache", "to": "gl1", "direction": "backward", "metric_id": "3.2.3", "title": "DCache Read BW", "category": "read", "style": "stacked"}
+    {"from": "cu", "to": "dcache", "direction": "backward", "metric_id": "3.2.0", "title": "SMEM", "category": "read", "style": "inline"}
   ]
 }
