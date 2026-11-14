@@ -816,7 +816,7 @@ TEST_F(GinAnvilPluginTest, Connect_FabricMemNeedsEveryRank) {
   EXPECT_EQ(plugin_.regMrSym(coll, data, 4096, 0, 0, &mh, &gh), ncclSystemError);
   ncclGinAnvilFabricTestState st{};
   ncclGinAnvilPluginTestFabricState(coll, data, &st);
-  EXPECT_EQ(st.handlers, 0u);
+  EXPECT_EQ(st.entries, 0u);
   EXPECT_EQ(GinAnvilPluginStubs::LiveFabricHandlers(), 0);
 
   plugin_.closeColl(coll);
@@ -863,14 +863,12 @@ TEST_F(GinAnvilPluginTest, RegMrSym_FabricRefcountAndExchangeFail) {
   void* data = reinterpret_cast<void*>(0x80001000ULL);
   const uintptr_t offset = reinterpret_cast<uintptr_t>(data) - peerBase;
 
-  // Expects every fabric map to hold `entries` keys, `data` to hold `refcount`
-  // references, and `live` stub handlers to exist.
+  // Expects `entries` published buffers, `refcount` references on `data`, and
+  // `live` stub handlers.
   auto expectFabric = [&](size_t entries, int refcount, int live) {
     ncclGinAnvilFabricTestState st{};
     ncclGinAnvilPluginTestFabricState(coll, data, &st);
-    EXPECT_EQ(st.handlers, entries);
-    EXPECT_EQ(st.handles, entries);
-    EXPECT_EQ(st.refcounts, entries);
+    EXPECT_EQ(st.entries, entries);
     EXPECT_EQ(st.refcount, refcount);
     EXPECT_EQ(GinAnvilPluginStubs::LiveFabricHandlers(), live);
   };
@@ -917,7 +915,7 @@ TEST_F(GinAnvilPluginTest, RegMrSym_FabricRefcountAndExchangeFail) {
     SCOPED_TRACE("after first deregistration");
     expectFabric(1, 1, 1);
   }
-  // Dropping the last reference erases all three entries and deletes the handler.
+  // Dropping the last reference erases the buffer and deletes the handler.
   EXPECT_EQ(plugin_.deregMrSym(coll, mh2), ncclSuccess);
   {
     SCOPED_TRACE("after last deregistration");
