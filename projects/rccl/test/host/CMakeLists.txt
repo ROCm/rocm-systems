@@ -389,7 +389,7 @@ function(rccl_define_micro_source_lists)
     ras-peers-test.cc                    # src/ras/peers.cc
     ras-diagnostics-env-test.cc          # src/ras/diagnostics_env.cc
     ras-param-test.cc                    # src/ras/ras_param.cc
-    tuning-test.cc                       # src/tuning/tuning.cc
+    tuning-test.cc                       # src/tuning/tuning.cc, sym_model.cc, sym_model/lsa*.cc
     tuning-general-test.cc
     cost-model-test.cc                   # src/tuning/cost_model.cc modelMap + dispatch
     csv-tuner-test.cc                    # src/plugin/tuner/csv_tuner.cc
@@ -1913,6 +1913,10 @@ rccl_add_micro_binary(rccl-UnitTestsMicro
     COMM_DUMP_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/commDump.cc"
     # graph/tuning.cc keeps the basename, so add_file_unique() renames this one.
     TUNING_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/tuning/tuning_tmp.cc"
+    SYM_MODEL_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/tuning/sym_model.cc"
+    SYM_MODEL_LSA_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/tuning/sym_model/lsa.cc"
+    SYM_MODEL_LSA_A2A_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/tuning/sym_model/lsa_a2a.cc"
+    SYM_MODEL_LSA_BASE_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/tuning/sym_model/lsa_base.cc"
     TUNING_GENERAL_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/tuning/tuning_general.cc"
     COST_MODEL_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/tuning/cost_model.cc"
     ALGORITHM_REGISTRY_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/config/algorithm_registry.cc"
