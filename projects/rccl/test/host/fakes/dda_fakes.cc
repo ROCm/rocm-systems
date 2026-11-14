@@ -58,6 +58,8 @@ DEFINE_DDA_REDUCTION_ELIGIBLE(allReduceDdaIpcEligible, ncclAllReduceDdaIpcEligib
 DEFINE_DDA_REDUCTION_ELIGIBLE(allReduceDdaFabricEligible, ncclAllReduceDdaFabricEligible)
 DEFINE_DDA_REDUCTION_ELIGIBLE(allReduceDdaFabricLLEligible, ncclAllReduceDdaFabricLLEligible)
 DEFINE_DDA_REDUCTION_ELIGIBLE(allReduceDdaFabricLL128Eligible, ncclAllReduceDdaFabricLL128Eligible)
+DEFINE_DDA_REDUCTION_ELIGIBLE(allReduceDdaFabricLL128SplitReplacesNonDda,
+                              ncclAllReduceDdaFabricLL128SplitReplacesNonDda)
 std::function<bool(ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t, rcclDdaLaunchCap, bool,
                    rcclDdaLaunchCap*)>
     g_allReduceDdaFabricLL128SplitEligible = [](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t,

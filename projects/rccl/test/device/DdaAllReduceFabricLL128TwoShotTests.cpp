@@ -8,7 +8,9 @@
 
 #include <chrono>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
+#include <iterator>
 #include <memory>
 #include <vector>
 
@@ -165,48 +167,56 @@ __global__ void CountResident(int* live, int* most, long long ticks) {
   __syncthreads();
 }
 
-// The split kernel of T with kFlagBytes for c: my own slot, or the hand-off with c.b's B; DMA B either way.
-template <typename T, int kFlagBytes>
+// The split kernel of T with kFlagBytes for c: my own slot, or the hand-off with c.b's B; DMA B either way. Uneven =
+// size_t picks the uneven-shard instance.
+template <typename T, int kFlagBytes, typename... Uneven>
 auto splitKernel(const Case& c) {
+  namespace dc = dda::common;
   if constexpr (kFlagBytes == kDdaLL128FlagBytesWide) {
     if (c.b == kDdaArSplitBDma) {
-      return c.handoff ? &dda::common::ddaAllReduceTwoShotLL128Split<T, kFlagBytes, true, kDdaArSplitBDma>
-                       : &dda::common::ddaAllReduceTwoShotLL128Split<T, kFlagBytes, false, kDdaArSplitBDma>;
+      return c.handoff ? &dc::ddaAllReduceTwoShotLL128Split<T, kFlagBytes, true, kDdaArSplitBDma, Uneven...>
+                       : &dc::ddaAllReduceTwoShotLL128Split<T, kFlagBytes, false, kDdaArSplitBDma, Uneven...>;
     }
   }
   if (!c.handoff) {
-    return &dda::common::ddaAllReduceTwoShotLL128Split<T, kFlagBytes>;
+    return &dc::ddaAllReduceTwoShotLL128Split<T, kFlagBytes, false, kDdaArSplitBPairwise, Uneven...>;
   }
   switch (c.b) {
     case kDdaArSplitBWide:
-      return &dda::common::ddaAllReduceTwoShotLL128Split<T, kFlagBytes, true, kDdaArSplitBWide>;
+      return &dc::ddaAllReduceTwoShotLL128Split<T, kFlagBytes, true, kDdaArSplitBWide, Uneven...>;
     case kDdaArSplitBWideChunked:
-      return &dda::common::ddaAllReduceTwoShotLL128Split<T, kFlagBytes, true, kDdaArSplitBWideChunked>;
+      return &dc::ddaAllReduceTwoShotLL128Split<T, kFlagBytes, true, kDdaArSplitBWideChunked, Uneven...>;
     default:
-      return &dda::common::ddaAllReduceTwoShotLL128Split<T, kFlagBytes, true>;
+      return &dc::ddaAllReduceTwoShotLL128Split<T, kFlagBytes, true, kDdaArSplitBPairwise, Uneven...>;
   }
 }
 
-// The split with kFlagBytes, handing B -> C off through LDS (its LDS limit raised first) where c.handoff.
-template <typename T, int kFlagBytes>
-void launchSplit(const Case& c, T** scratch, T* recv, const T* send, uint32_t* epoch, const DdaKernelParams& params,
-                 hipStream_t stream) {
-  size_t lds = dda::common::ddaLL128ArSplitSharedBytes(c.block, c.nRanks, c.handoff, c.b);
-  if (c.b == kDdaArSplitBDma) {
-    // The group the kernel derives from a block's most slices, as the launcher sizes it.
-    const size_t group = dda::common::ddaArSplitDmaGroupSlices(
-      c.block, c.nRanks, c.handoff, (slicesOf(c.kind, c.shardBytes) + c.grid - 1) / c.grid);
-    ASSERT_NE(group, 0u) << "no DMA B group fits the LDS budget";
-    lds = dda::common::ddaLL128ArSplitDmaSharedBytes(c.block, c.nRanks, c.handoff, group);
+// Dynamic LDS of c's split launch: DMA B's group is the one the kernel derives from a block's most slices, as the
+// launcher sizes it (0 where none fits the budget).
+size_t splitLds(const Case& c) {
+  if (c.b != kDdaArSplitBDma) {
+    return dda::common::ddaLL128ArSplitSharedBytes(c.block, c.nRanks, c.handoff, c.b);
   }
-  auto* kernel = splitKernel<T, kFlagBytes>(c);
+  const size_t group = dda::common::ddaArSplitDmaGroupSlices(c.block, c.nRanks, c.handoff,
+                                                             (slicesOf(c.kind, c.shardBytes) + c.grid - 1) / c.grid);
+  return group == 0 ? 0 : dda::common::ddaLL128ArSplitDmaSharedBytes(c.block, c.nRanks, c.handoff, group);
+}
+
+// The split with kFlagBytes, handing B -> C off through LDS (its LDS limit raised first) where c.handoff. On uneven
+// shards c.shardBytes is the stride and totalBytes the message's bytes.
+template <typename T, int kFlagBytes, typename... Uneven>
+void launchSplit(const Case& c, T** scratch, T* recv, const T* send, uint32_t* epoch, const DdaKernelParams& params,
+                 hipStream_t stream, Uneven... totalBytes) {
+  const size_t lds = splitLds(c);
+  ASSERT_NE(lds, 0u) << "no DMA B group fits the LDS budget (the only form with no LDS size)";
+  auto* kernel = splitKernel<T, kFlagBytes, Uneven...>(c);
   if (c.handoff || c.b == kDdaArSplitBDma) {
     HIP_CHECK(
       hipFuncSetAttribute(reinterpret_cast<const void*>(kernel), hipFuncAttributeMaxDynamicSharedMemorySize, (int)lds));
   }
   hipLaunchKernelGGL(kernel, dim3(c.grid), dim3(c.block), lds, stream, scratch, recv, send, c.shardBytes, c.self,
                      c.nRanks, epoch, epochLen(c), slicesOf(c.kind, c.shardBytes), bankBytes(c.nRanks, c.shardBytes),
-                     params);
+                     params, totalBytes...);
 }
 
 // Whether c's blocks own at most the hand-off area's slices.
@@ -1298,6 +1308,175 @@ TEST_F(DdaAllReduceFabricLL128TwoShot, SplitDmaReloadsStaleCopies) {
         }
       }
     }
+  }
+}
+
+// ---- Uneven shards ----
+
+// A message of `total` bytes (16 B chunks that do not split into n equal ones) over n ranks, every rank on this GPU at
+// once on one shared scratch table: stride ceil(total / n) up to 16 B, the last shards shorter or empty.
+struct UnevenCase {
+  int nRanks;
+  size_t total;
+  unsigned grid;
+  unsigned block;
+  Kind kind;  // kSplit (8 B flag) or kSplitNarrow
+  bool handoff;
+  DdaArSplitB b;
+  bool inPlace;
+};
+
+size_t unevenStride(const UnevenCase& c) {
+  return ((c.total + (size_t)c.nRanks - 1) / (size_t)c.nRanks + 15) / 16 * 16;
+}
+
+// Element i belongs to shard i / stride, folded by its owner: the owner's value, then ranks owner + 1, owner + 2, ...
+std::vector<uint8_t> UnevenFold(const std::vector<std::vector<uint8_t>>& send, int nRanks, size_t total,
+                                size_t stride) {
+  std::vector<uint8_t> out(total);
+  float* acc = reinterpret_cast<float*>(out.data());
+  for (size_t i = 0; i < total / sizeof(float); ++i) {
+    const int owner = (int)(i * sizeof(float) / stride);
+    acc[i] = reinterpret_cast<const float*>(send[(size_t)owner].data())[i];
+    for (int r = 1; r < nRanks; ++r) {
+      acc[i] = acc[i] + reinterpret_cast<const float*>(send[(size_t)((owner + r) % nRanks)].data())[i];
+    }
+  }
+  return out;
+}
+
+// Rank r's split launch for c on uneven shards.
+Case unevenRank(const UnevenCase& c, int r) {
+  Case rank{c.nRanks, r, 0, c.kind, c.grid, c.block, unevenStride(c)};
+  rank.inPlace = c.inPlace;
+  rank.handoff = c.handoff;
+  rank.b = c.b;
+  return rank;
+}
+
+// Whether every rank's grid of c can be resident at once: a rank's blocks wait on the other ranks' blocks, so a GPU
+// that cannot hold them all hangs the run. Unknown counts as resident.
+bool unevenResident(const UnevenCase& c) {
+  const Case rank = unevenRank(c, 0);
+  const void* kernel =
+    c.kind == Kind::kSplitNarrow
+      ? reinterpret_cast<const void*>(splitKernel<float, kDdaLL128FlagBytesNarrow, size_t>(rank))
+      : reinterpret_cast<const void*>(splitKernel<float, kDdaLL128FlagBytesWide, size_t>(rank));
+  const size_t lds = splitLds(rank);
+  int perCu = 0;
+  int cus = 0;
+  if (hipFuncSetAttribute(kernel, hipFuncAttributeMaxDynamicSharedMemorySize, (int)lds) != hipSuccess ||
+      hipOccupancyMaxActiveBlocksPerMultiprocessor(&perCu, kernel, (int)c.block, lds) != hipSuccess ||
+      hipDeviceGetAttribute(&cus, hipDeviceAttributeMultiprocessorCount, 0) != hipSuccess) {
+    return true;
+  }
+  return (size_t)perCu * (size_t)cus >= (size_t)c.nRanks * c.grid;
+}
+
+// Bytes past each rank's message that no launch may touch.
+constexpr size_t kUnevenGuardBytes = 256;
+
+// Uneven rows: 3, 5, 6, 9, 12 and 18 ranks; the last shard shorter, empty (12 ranks of one 16 B chunk each, 18 ranks),
+// or a partial slice; each flag, own slot and hand-off, in place; wide, chunked and DMA B on uneven shards.
+const UnevenCase kUnevenCases[] = {
+  {3, 750016, 4, 512, Kind::kSplit, false, kDdaArSplitBPairwise, false},          // last shard 249984 B
+  {5, 1000016, 4, 512, Kind::kSplitNarrow, true, kDdaArSplitBPairwise, false},    // stride 200016
+  {6, 3 * 1920 * 6 + 160, 2, 512, Kind::kSplitNarrow, true, kDdaArSplitBPairwise, false},  // stride 5792, 3 slices
+  {12, 500000, 4, 512, Kind::kSplit, true, kDdaArSplitBPairwise, false},          // stride 41680
+  {12, 12 * 4096 + 48, 2, 256, Kind::kSplitNarrow, false, kDdaArSplitBPairwise, true},  // last shard 3968 B
+  {12, 11 * 16, 1, 128, Kind::kSplit, false, kDdaArSplitBPairwise, false},        // one chunk a shard, the 12th empty
+  {6, 1125008, 4, 512, Kind::kSplit, false, kDdaArSplitBPairwise, true},          // stride 187504
+  {9, 750016, 4, 512, Kind::kSplitNarrow, true, kDdaArSplitBWide, false},         // stride 83344
+  {9, 64 * 16, 1, 512, Kind::kSplitNarrow, true, kDdaArSplitBWide, true},        // eight 128 B shards, the 9th empty
+  {18, 1000000, 4, 512, Kind::kSplitNarrow, true, kDdaArSplitBWideChunked, false},
+  {18, 17 * 160, 1, 512, Kind::kSplit, true, kDdaArSplitBWideChunked, false},     // the 18th shard empty
+  {9, 750016, 4, 512, Kind::kSplit, true, kDdaArSplitBDma, false},
+  {5, 1000016, 8, 512, Kind::kSplit, false, kDdaArSplitBDma, true},
+  {12, 500000, 8, 512, Kind::kSplit, true, kDdaArSplitBDma, false},
+  // The last shard one slice short of the stride's: a dead slice on that rank only.
+  {9, 743168, 4, 512, Kind::kSplit, true, kDdaArSplitBDma, false},                // stride 82576: 44 slices, last 43
+  {9, 1227008, 9, 512, Kind::kSplit, true, kDdaArSplitBDma, false},               // 72 slices, last 71; 8 a block
+  {9, 1024, 1, 512, Kind::kSplit, true, kDdaArSplitBDma, true},                   // eight 128 B shards, the 9th empty
+  {5, 992064, 4, 512, Kind::kSplitNarrow, true, kDdaArSplitBPairwise, false},     // 101 narrow slices, last 100
+  {6, 35792, 2, 512, Kind::kSplitNarrow, true, kDdaArSplitBPairwise, false},      // stride 5968: 4 slices, last 3
+};
+
+// Every rank's recvbuff is the host fold of the whole message, and no rank writes past it.
+TEST_F(DdaAllReduceFabricLL128TwoShot, SplitUnevenShardsMatchTheHostFold) {
+  int notRun = 0;
+  for (const UnevenCase& c : kUnevenCases) {
+    const size_t stride = unevenStride(c);
+    SCOPED_TRACE(testing::Message() << c.nRanks << "r total " << c.total << " stride " << stride << " " << c.grid
+                                    << "x" << c.block << " flag " << flagBytes(c.kind) << " handoff " << c.handoff
+                                    << " b " << c.b << " inPlace " << c.inPlace);
+    ASSERT_NE(c.total % (16 * (size_t)c.nRanks), 0u) << "an uneven message";
+    ASSERT_TRUE(!c.handoff || handoffFits(unevenRank(c, 0)));
+    if (!unevenResident(c)) {
+      // Not a pass: the row did not run; logged so a gate report shows which rows this GPU could not hold.
+      std::printf("[ NOT RUN  ] uneven %dr total %zu %ux%u: the ranks' grids cannot all be resident\n", c.nRanks,
+                  c.total, c.grid, c.block);
+      ++notRun;
+      continue;
+    }
+    std::vector<std::vector<uint8_t>> send((size_t)c.nRanks, std::vector<uint8_t>(c.total + kUnevenGuardBytes,
+                                                                                  kUntouched));
+    for (int r = 0; r < c.nRanks; ++r) {
+      float* f = reinterpret_cast<float*>(send[(size_t)r].data());
+      for (size_t i = 0; i < c.total / sizeof(float); ++i) {
+        f[i] = 1.0f / (float)(3 + r) + (float)((r * 131 + (int)i * 17) % 1000) * 1.0e-3f;
+      }
+    }
+    std::vector<uint8_t> expected = UnevenFold(send, c.nRanks, c.total, stride);
+    expected.resize(c.total + kUnevenGuardBytes, kUntouched);
+    const size_t bank = bankBytes(c.nRanks, stride);
+    std::vector<DeviceBuffer<uint8_t>> scratch;
+    std::vector<uint8_t*> table;
+    std::vector<DeviceBuffer<uint8_t>> sendBufs;
+    std::vector<DeviceBuffer<uint8_t>> recvBufs;
+    std::vector<DeviceBuffer<uint32_t>> epochs;
+    std::vector<hipStream_t> streams((size_t)c.nRanks, nullptr);
+    for (int r = 0; r < c.nRanks; ++r) {
+      scratch.emplace_back(bank);
+      scratch.back().zero();
+      table.push_back(scratch.back().ptr);
+      sendBufs.emplace_back(send[(size_t)r].size());
+      sendBufs.back().copyFrom(send[(size_t)r]);
+      recvBufs.emplace_back(send[(size_t)r].size());
+      HIP_CHECK(hipMemset(recvBufs.back().ptr, kUntouched, recvBufs.back().count));
+      epochs.emplace_back(kEpochCells);
+      epochs.back().copyFrom(std::vector<uint32_t>(kEpochCells, kFlag - 1));
+      HIP_CHECK(hipStreamCreateWithFlags(&streams[(size_t)r], hipStreamNonBlocking));
+    }
+    DeviceBuffer<uint8_t*> dTable(table.size());
+    dTable.copyFrom(table);
+    // Host and null-stream work above, before any launch: between two launches it would hold rank r + 1 behind rank r.
+    *abortHost_ = 0;
+    float** tab = reinterpret_cast<float**>(dTable.ptr);
+    for (int r = 0; r < c.nRanks; ++r) {
+      const Case rank = unevenRank(c, r);
+      float* recv = reinterpret_cast<float*>((c.inPlace ? sendBufs : recvBufs)[(size_t)r].ptr);
+      const float* snd = reinterpret_cast<const float*>(sendBufs[(size_t)r].ptr);
+      if (c.kind == Kind::kSplitNarrow) {
+        launchSplit<float, kDdaLL128FlagBytesNarrow>(rank, tab, recv, snd, epochs[(size_t)r].ptr,
+                                                     DdaKernelParams{abortDev_}, streams[(size_t)r], c.total);
+      } else {
+        launchSplit<float, kDdaLL128FlagBytesWide>(rank, tab, recv, snd, epochs[(size_t)r].ptr,
+                                                   DdaKernelParams{abortDev_}, streams[(size_t)r], c.total);
+      }
+      HIP_CHECK(hipGetLastError());
+    }
+    const bool drained = drain(streams);
+    EXPECT_TRUE(drained) << "the uneven split did not finish within " << kDrainTimeout.count() << " s";
+    for (int r = 0; drained && r < c.nRanks; ++r) {
+      EXPECT_TRUE((c.inPlace ? sendBufs : recvBufs)[(size_t)r].copyTo() == expected)
+        << "rank " << r << ": not the host fold, or bytes past the message touched";
+    }
+    for (hipStream_t st : streams) {
+      HIP_EXPECT(hipStreamDestroy(st));
+    }
+  }
+  if (notRun == (int)std::size(kUnevenCases)) {
+    GTEST_SKIP() << "no uneven row fits this GPU's resident blocks";
   }
 }
 

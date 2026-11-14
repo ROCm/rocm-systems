@@ -122,6 +122,10 @@ class DdaAllReduceFabricLLMicrotest : public ::testing::Test {
     ddaArSplitHandoffLdsDevs<T, kDdaArSplitBWide> = 0;
     ddaArSplitHandoffLdsDevs<T, kDdaArSplitBWideChunked> = 0;
     ddaArSplitHandoffLdsDevs<T, kDdaArSplitBDma> = 0;
+    ddaArSplitHandoffLdsDevs<T, kDdaArSplitBPairwise, size_t> = 0;
+    ddaArSplitHandoffLdsDevs<T, kDdaArSplitBWide, size_t> = 0;
+    ddaArSplitHandoffLdsDevs<T, kDdaArSplitBWideChunked, size_t> = 0;
+    ddaArSplitHandoffLdsDevs<T, kDdaArSplitBDma, size_t> = 0;
   }
 
   ncclComm& comm() { return mock_.comm; }
@@ -968,18 +972,19 @@ TEST_F(DdaAllReduceFabricLLMicrotest, RunLL128_StagedKernelsPerRankCountAndDatat
 constexpr int kWide = dda::common::kDdaLL128FlagBytesWide;
 constexpr int kNarrow = dda::common::kDdaLL128FlagBytesNarrow;
 
-template <typename T, int kFlagBytes = kWide, bool kHandoff = false, DdaArSplitB kB = kDdaArSplitBPairwise>
+template <typename T, int kFlagBytes = kWide, bool kHandoff = false, DdaArSplitB kB = kDdaArSplitBPairwise,
+          typename... Uneven>
 const void* LL128Split() {
-  return KernelPtr(&dda::common::ddaAllReduceTwoShotLL128Split<T, kFlagBytes, kHandoff, kB>);
+  return KernelPtr(&dda::common::ddaAllReduceTwoShotLL128Split<T, kFlagBytes, kHandoff, kB, Uneven...>);
 }
 
 // The hand-off kernel of T with B form b: the 4 B flag's, DMA B's on the 8 B flag.
-template <typename T>
+template <typename T, typename... Uneven>
 const void* LL128SplitHandoff(DdaArSplitB b) {
-  return b == kDdaArSplitBWide          ? LL128Split<T, kNarrow, true, kDdaArSplitBWide>()
-         : b == kDdaArSplitBWideChunked ? LL128Split<T, kNarrow, true, kDdaArSplitBWideChunked>()
-         : b == kDdaArSplitBDma         ? LL128Split<T, kWide, true, kDdaArSplitBDma>()
-                                        : LL128Split<T, kNarrow, true>();
+  return b == kDdaArSplitBWide          ? LL128Split<T, kNarrow, true, kDdaArSplitBWide, Uneven...>()
+         : b == kDdaArSplitBWideChunked ? LL128Split<T, kNarrow, true, kDdaArSplitBWideChunked, Uneven...>()
+         : b == kDdaArSplitBDma         ? LL128Split<T, kWide, true, kDdaArSplitBDma, Uneven...>()
+                                        : LL128Split<T, kNarrow, true, kDdaArSplitBPairwise, Uneven...>();
 }
 
 // Slices of one shard of a `bytes` message on nRanks, for a flag of flagBytes.
@@ -1478,6 +1483,186 @@ TEST(DdaArSplitHandoff, RuleEdges) {
   EXPECT_FALSE(ddaArSplitTakesHandoff(4, 529, 137, 384));
   EXPECT_FALSE(ddaArSplitTakesHandoff(4, 547, 137, 384));
   EXPECT_TRUE(ddaArSplitTakesHandoff(4, 548, 137, 384));
+}
+
+// ---- Uneven shards ----
+
+// The stride: bytes / n where that is a whole number of 16 B chunks, else ceil(bytes / n) up to 16 B.
+TEST(DdaArSplitUneven, ShardStride) {
+  EXPECT_EQ(ddaArLL128SplitStride(2 * kMiB, 8), 256u * 1024) << "even";
+  EXPECT_EQ(ddaArLL128SplitStride(2 * kMiB, 12), 174768u) << "12 ranks: 174762.7 up to 16 B";
+  EXPECT_EQ(ddaArLL128SplitStride(12 * 16 * 1000, 12), 16000u) << "a 16 B multiple each";
+  EXPECT_EQ(ddaArLL128SplitStride(12 * 16 * 1000 + 16, 12), 16016u) << "one chunk more: the last shard short";
+  EXPECT_EQ(ddaArLL128SplitStride(3 * 8, 3), 16u) << "8 B shards round up to a chunk; the last shard is empty";
+  EXPECT_EQ(ddaArLL128SplitStride(24 * 16000 + 16, 24), 16016u) << "floor(bytes / n) would drop the 16 B";
+}
+
+// The measured uneven cells on gfx1250 SPX tiers (6, 12 and 24 ranks, 2-128 MiB): the bound (the LL128 one-shot, else the Ring
+// launch the selector passes), the grid, the hand-off and B's form; 64 MiB and up at 12 ranks stay on Ring.
+TEST_F(DdaAllReduceFabricLLMicrotest, Split_UnevenOnProductionTiers) {
+  const struct {
+    int nRanks;
+    size_t mib;
+    rcclDdaLaunchCap ring;  // Ring's launch where no DDA tier takes the message, else {0, 0}
+    unsigned grid;          // 0: no split
+    unsigned block;
+    bool handoff;
+    DdaArSplitB b = kDdaArSplitBPairwise;
+  } cells[] = {
+    {12, 2, {}, 69, 512, false},           {12, 4, {}, 137, 512, false},           {12, 8, {171, 256}, 171, 256, true},
+    {12, 16, {187, 256}, 187, 256, true},  {12, 32, {187, 256}, 187, 256, true},  {12, 64, {191, 256}, 0, 0, false},
+    {24, 2, {}, 45, 512, true, kDdaArSplitBWideChunked},
+    {24, 4, {}, 89, 512, true, kDdaArSplitBWideChunked},
+    {24, 8, {171, 256}, 171, 256, true},   {24, 16, {187, 256}, 187, 256, true},  {24, 32, {187, 256}, 187, 256, true},
+    {24, 64, {191, 256}, 191, 256, true},  {24, 128, {191, 256}, 0, 0, false},    {12, 128, {191, 256}, 0, 0, false},
+    {6, 2, {}, 69, 480, false},            {6, 4, {}, 137, 480, false},            {6, 8, {171, 256}, 171, 256, true}};
+  for (const auto& c : cells) {
+    SCOPED_TRACE(testing::Message() << c.nRanks << "r " << c.mib << " MiB");
+    ProductionTiersOn(comm(), params_, c.nRanks);
+    const size_t count = c.mib * kMiB / 4;
+    ASSERT_NE(c.mib * kMiB % (16 * (size_t)c.nRanks), 0u) << "an uneven message";
+    EXPECT_EQ(ncclAllReduceDdaFabricLL128SplitReplacesNonDda(mock_.get(), kSendbuff, kRecvbuff, count, ncclFloat32,
+                                                             ncclSum),
+              c.ring.blocks != 0 && c.grid != 0);
+    rcclDdaLaunchCap bound = {};
+    ASSERT_EQ(TakesSplit(count, ncclFloat32, c.ring, /*vmmFirst=*/false, &bound), c.grid != 0);
+    if (c.grid == 0) {
+      continue;
+    }
+    if (c.ring.blocks != 0) {
+      EXPECT_EQ(bound.blocks, c.ring.blocks) << "Ring's launch";
+      EXPECT_EQ(bound.threads, c.ring.threads);
+    }
+    const DdaLaunch& l = RunSelectedLL128(count, ncclFloat32, c.ring);
+    EXPECT_EQ(l.grid.x, c.grid);
+    EXPECT_EQ(l.block.x, c.block);
+    const void* ownSlot = LL128Split<float, kNarrow, false, kDdaArSplitBPairwise, size_t>();
+    EXPECT_EQ(l.kernel, c.handoff ? (LL128SplitHandoff<float, size_t>(c.b)) : ownSlot);
+    ASSERT_EQ(l.args.size(), 12u) << "the message bytes";
+    EXPECT_EQ(l.Arg<size_t>(11), c.mib * kMiB);
+    EXPECT_EQ(l.Arg<size_t>(3), ddaArLL128SplitStride(c.mib * kMiB, c.nRanks)) << "the stride";
+    EXPECT_EQ(l.Arg<size_t>(8), dda::common::ddaLL128SlicesOf<kNarrow>(l.Arg<size_t>(3))) << "the stride's slices";
+    EXPECT_EQ(ncclAllReduceDdaFabricLL128Blocks(mock_.get(), count, ncclFloat32, bound, /*split=*/true), l.grid.x);
+    EXPECT_TRUE(ncclAllReduceDdaFabricLL128Eligible(mock_.get(), kSendbuff, kRecvbuff, count, ncclFloat32, ncclSum))
+        << "the LL128 tier takes it";
+  }
+  // 24 ranks of a 2142736 B message: the 89296 B stride has 46 slices of 1984 B, bytes / n 45; a block a slice.
+  ProductionTiersOn(comm(), params_, 24);
+  EXPECT_EQ(RunSelectedLL128(2142736 / 4).grid.x, 46u);
+}
+
+// Uneven messages take the split where the LL128 two-shot's shape checks hold but the even split: 16 B chunks and
+// buffers, a Sum of a supported type, the stride's slices within a slot, within the LL128 two-shot threshold.
+TEST_F(DdaAllReduceFabricLLMicrotest, Split_UnevenShardsTakeTheSplit) {
+  ProductionTiersOn(comm(), params_, 12);
+  const size_t count = 2 * kMiB / 4;  // 12 ranks: 174762.7 B a rank
+  EXPECT_TRUE(TakesSplit(count));
+  EXPECT_TRUE(TakesSplit(count * 2, ncclBfloat16));
+  EXPECT_TRUE(TakesSplit(count * 4 + 16, ncclFloat8e4m3)) << "one more 16 B chunk";
+  EXPECT_FALSE(TakesSplit(count * 4 + 8, ncclFloat8e4m3)) << "not a whole 16 B chunk";
+  rcclDdaLaunchCap bound = {};
+  EXPECT_FALSE(ncclAllReduceDdaFabricLL128SplitEligible(mock_.get(), kSendbuff, kRecvbuff, count, ncclFloat32, ncclMax,
+                                                        {}, false, &bound))
+      << "Sum only";
+  const void* odd = reinterpret_cast<const void*>(0x1008);
+  EXPECT_FALSE(ncclAllReduceDdaFabricLL128SplitEligible(mock_.get(), odd, kRecvbuff, count, ncclFloat32, ncclSum, {},
+                                                        false, &bound))
+      << "16 B aligned sendbuff";
+  EXPECT_FALSE(ncclAllReduceDdaFabricLL128SplitEligible(mock_.get(), kSendbuff, reinterpret_cast<void*>(0x2008), count,
+                                                        ncclFloat32, ncclSum, {}, false, &bound))
+      << "16 B aligned recvbuff";
+  g_rcclDdaLL128TwoShotThreshold = [](const ncclComm*) { return 2 * kMiB; };
+  EXPECT_FALSE(TakesSplit(count + 4)) << "past the LL128 two-shot threshold";
+  EXPECT_TRUE(TakesSplit(count)) << "at it";
+  g_rcclDdaLL128TwoShotThreshold = [](const ncclComm*) { return 256 * kMiB; };
+  comm().ddaScratchBytes = 2 * 12 * 2 * 92 * kSliceWire;  // two banks of two areas of 12 slots of 92 slices
+  EXPECT_TRUE(TakesSplit(count)) << "the stride's 92 slices fill a slot";
+  EXPECT_FALSE(TakesSplit(count + 12 * 1920 / 4)) << "93 slices";
+}
+
+// Where the uneven split would replace Ring it stops past 8 MiB shards and past 21846 B of shard a comm channel; where
+// a DDA tier would run the message instead, neither cap applies.
+TEST_F(DdaAllReduceFabricLLMicrotest, Split_UnevenReplacingRingCaps) {
+  ProductionTiersOn(comm(), params_, 12);
+  comm().ddaScratchBytes = (size_t)1 << 32;
+  const rcclDdaLaunchCap ring = {187, 256};
+  auto takes = [&](size_t shard) { return TakesSplit(12 * shard / 4 - 4, ncclFloat32, ring); };
+  comm().nChannels = 1024;  // the 8 MiB cap binds
+  EXPECT_TRUE(takes(8 * kMiB));
+  rcclDdaLaunchCap uncapped = {};
+  ASSERT_TRUE(TakesSplit(12 * 8 * kMiB / 4 - 4, ncclFloat32, {}, /*vmmFirst=*/false, &uncapped));
+  EXPECT_EQ(uncapped.blocks, 192u) << "no cap given: the LL128 two-shot's grid bounds it";
+  EXPECT_EQ(uncapped.threads, 512u);
+  EXPECT_FALSE(takes(8 * kMiB + 16));
+  comm().nChannels = 96;  // 21846 B a channel: 2097216 B
+  EXPECT_TRUE(takes(2097216));
+  EXPECT_FALSE(takes(2097216 + 16));
+  comm().nChannels = 1024;  // clear of the channel cap: only the even shards reject it
+  EXPECT_FALSE(ncclAllReduceDdaFabricLL128SplitReplacesNonDda(mock_.get(), kSendbuff, kRecvbuff, 24 * kMiB / 4,
+                                                              ncclFloat32, ncclSum))
+      << "even 2 MiB shards: the LL128 two-shot's own";
+  comm().nChannels = 96;  // back to the 21846 B a channel cap
+  g_rcclDdaLLThreshold = [](const ncclComm*, ncclFunc_t) { return 512 * kMiB; };
+  params_["RCCL_DDA_LL_ONESHOT_THRESHOLD"] = 512 * kMiB;
+  EXPECT_TRUE(takes(2097216 + 16)) << "the LL one-shot would run it: no Ring cap";
+  g_rcclDdaLLThreshold = [](const ncclComm*, ncclFunc_t) { return 0; };
+  params_["RCCL_DDA_LL128_ONESHOT_THRESHOLD"] = 0;
+  EXPECT_FALSE(ncclAllReduceDdaFabricLL128SplitReplacesNonDda(mock_.get(), kSendbuff, kRecvbuff,
+                                                              (2 * kMiB - 12 * 16) / 4 - 4, ncclFloat32, ncclSum))
+      << "below the split's 2 MiB";
+  params_["RCCL_DDA_LL128_ONESHOT_THRESHOLD"] = 512 * kMiB;
+  EXPECT_TRUE(takes(2097216 + 16)) << "replacing the LL128 one-shot: no Ring cap";
+  EXPECT_FALSE(ncclAllReduceDdaFabricLL128SplitReplacesNonDda(mock_.get(), kSendbuff, kRecvbuff,
+                                                              12 * (2097216 + 16) / 4 - 4, ncclFloat32, ncclSum));
+}
+
+// The uneven instances raise their own LDS limits (the even kernels' grants do not cover them); refused, the uneven
+// split runs my own slot, or pairwise B for chunked.
+TEST_F(DdaAllReduceFabricLLMicrotest, Split_UnevenRaisesItsOwnLdsLimits) {
+  std::vector<const void*> raised;
+  hipError_t answer = hipErrorInvalidValue;
+  g_hipFuncSetAttribute = [&](const void* kernel, hipFuncAttribute, int) {
+    raised.push_back(kernel);
+    return answer;
+  };
+  ddaArSplitHandoffLdsDevs<float, kDdaArSplitBPairwise> = 1;
+  ddaArSplitHandoffLdsDevs<float, kDdaArSplitBWideChunked> = 1;
+  ProductionTiersOn(comm(), params_, 12);
+  const rcclDdaLaunchCap ring = {171, 256};
+  EXPECT_EQ(RunSelectedLL128(8 * kMiB / 4, ncclFloat32, ring).kernel,
+            (LL128Split<float, kNarrow, false, kDdaArSplitBPairwise, size_t>()))
+      << "refused: my own slot";
+  answer = hipSuccess;
+  EXPECT_EQ(RunSelectedLL128(8 * kMiB / 4, ncclFloat32, ring).kernel,
+            (LL128SplitHandoff<float, size_t>(kDdaArSplitBPairwise)));
+  ProductionTiersOn(comm(), params_, 24);
+  EXPECT_EQ(RunSelectedLL128(2 * kMiB / 4).kernel, (LL128SplitHandoff<float, size_t>(kDdaArSplitBWideChunked)));
+  // No measured cell launches uneven wide or DMA B; a caller's cap (9 ranks, 18 and 21 blocks of 512) does.
+  ProductionTiersOn(comm(), params_, 9);
+  EXPECT_EQ(RunSelectedLL128((2 * kMiB + 16) / 4, ncclFloat32, {18, 512}).kernel,
+            (LL128SplitHandoff<float, size_t>(kDdaArSplitBWide)));
+  EXPECT_EQ(RunSelectedLL128(3 * kMiB / 4, ncclFloat32, {21, 512}).kernel,
+            (LL128SplitHandoff<float, size_t>(kDdaArSplitBDma)));
+  const std::vector<const void*> want = {LL128SplitHandoff<float, size_t>(kDdaArSplitBPairwise),
+                                         LL128SplitHandoff<float, size_t>(kDdaArSplitBPairwise),
+                                         LL128SplitHandoff<float, size_t>(kDdaArSplitBWideChunked),
+                                         LL128SplitHandoff<float, size_t>(kDdaArSplitBWide),
+                                         LL128SplitHandoff<float, size_t>(kDdaArSplitBDma)};
+  EXPECT_EQ(raised, want) << "refused then raised, each uneven instance its own";
+}
+
+// An even message under a caller's cap (a registered path replacing Ring or CE) past the LL tier and the LL128
+// one-shot keeps the LL128 two-shot's grid within the cap, not the cap itself.
+TEST_F(DdaAllReduceFabricLLMicrotest, Split_EvenUnderACapKeepsTheTwoShotGrid) {
+  ProductionTiersOn(comm(), params_, 16);
+  g_rcclDdaLLThreshold = [](const ncclComm*, ncclFunc_t) { return kMiB; };
+  params_["RCCL_DDA_LL128_ONESHOT_THRESHOLD"] = kMiB;
+  for (const unsigned capBlocks : {4u, 64u, 171u, 4096u}) {
+    rcclDdaLaunchCap bound = {};
+    ASSERT_TRUE(TakesSplit(2 * kMiB / 4, ncclFloat32, {capBlocks, 256}, /*vmmFirst=*/false, &bound));
+    EXPECT_EQ(bound.blocks, std::min(capBlocks, 9u)) << "cap " << capBlocks;
+    EXPECT_EQ(bound.threads, 256u);
+  }
 }
 
 // DMA B's edges on 512-thread blocks: the 512 KiB shard, 128 KiB of copies a block, 9 and 10 slices a block, a group
