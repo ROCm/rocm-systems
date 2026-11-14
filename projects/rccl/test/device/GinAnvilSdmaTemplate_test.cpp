@@ -21,9 +21,12 @@ __device__ unsigned long long g_sdmaStubThreadfenceCount = 0;
 #undef NCCL_GIN_THREADFENCE_SYSTEM
 #define NCCL_GIN_THREADFENCE_SYSTEM() atomicAdd(&g_sdmaStubThreadfenceCount, 1ULL)
 #include "nccl_device/gin/anvil_sdma/gin_anvil_sdma.h"
+#include "nccl_device/impl/core__funcs.h"
+#include "nccl_device/impl/gin__funcs.h"
 #endif
 
 #include <algorithm>
+#include <cstddef>
 #include <cstring>
 #include <string>
 #include <vector>
@@ -2160,6 +2163,114 @@ TEST_F(GinAnvilSdmaTemplateTest, Put_CtaModeIgnoredDataLands) {
 
 TEST_F(GinAnvilSdmaTemplateTest, Put_ThreadModeIgnoredDataLands) {
   expectSdmaModeDataLands(NCCL_GIN_RESOURCE_SHARING_THREAD);
+}
+
+// H39: legacy C bindings take ginStrongLegacySignals as their strength. A strong signal drains the peer queue
+// before the IPC signal; a weak one on a clean queue does not. signalPeer's release is the only system fence.
+enum class LegacyCBinding { Put, PutV2, PutValue, PutValueV2, Signal, SignalV2 };
+
+struct LegacyCBindingCase {
+  LegacyCBinding binding;
+  const char* name;
+};
+
+constexpr LegacyCBindingCase kLegacyCBindings[] = {
+    {LegacyCBinding::Put, "ncclGinPut"},
+    {LegacyCBinding::PutV2, "ncclGinPut_v2"},
+    {LegacyCBinding::PutValue, "ncclGinPutValue"},
+    {LegacyCBinding::PutValueV2, "ncclGinPutValue_v2"},
+    {LegacyCBinding::Signal, "ncclGinSignal"},
+    {LegacyCBinding::SignalV2, "ncclGinSignal_v2"},
+};
+
+// Below StrongSignalFixture(128)'s threshold, so the put goes over IPC and posts no SDMA of its own.
+constexpr size_t kLegacyPutBytes = 64;
+constexpr uint64_t kLegacyPutValue = 0x0123456789ABCDEFULL;
+
+__global__ void kernelLegacyCBinding(ncclDevComm comm, ncclWindow_t dstWin, ncclWindow_t srcWin,
+                                     LegacyCBinding binding) {
+  if (threadIdx.x != 0) return;
+  ncclGin_C net(comm, 1u << NCCL_NET_DEVICE_GIN_ANVIL_SDMA, /*contextIndex=*/0);
+  const ncclTeam world = ncclTeamWorld(comm);
+  const cuda::thread_scope sys = cuda::thread_scope_system;
+  switch (binding) {
+  case LegacyCBinding::Put:
+    ncclGinPut(&net, world, 1, dstWin, 0, srcWin, 0, kLegacyPutBytes, /*isSignal=*/true, 0, ncclGinSignalInc, 0,
+               /*isCounter=*/false, 0, ncclCoopThread{}, false, nullptr, sys, sys);
+    break;
+  case LegacyCBinding::PutV2:
+    ncclGinPut_v2(&net, world, 1, dstWin, 0, srcWin, 0, kLegacyPutBytes, /*isSignal=*/true, 0, ncclGinSignalInc, 0,
+                  /*isCounter=*/false, 0, ncclCoopThread{}, false, nullptr, sys, sys, ncclGinOptFlagsDefault);
+    break;
+  case LegacyCBinding::PutValue:
+    ncclGinPutValue(&net, world, 1, dstWin, 0, kLegacyPutValue, sizeof(uint64_t), /*isSignal=*/true, 0,
+                    ncclGinSignalInc, 0, ncclCoopThread{}, false, nullptr, sys, sys);
+    break;
+  case LegacyCBinding::PutValueV2:
+    ncclGinPutValue_v2(&net, world, 1, dstWin, 0, kLegacyPutValue, sizeof(uint64_t), /*isSignal=*/true, 0,
+                       ncclGinSignalInc, 0, ncclCoopThread{}, false, nullptr, sys, sys, ncclGinOptFlagsDefault);
+    break;
+  case LegacyCBinding::Signal:
+    ncclGinSignal(&net, world, 1, /*isSignal=*/true, 0, ncclGinSignalInc, 0, ncclCoopThread{}, false, nullptr, sys,
+                  sys);
+    break;
+  case LegacyCBinding::SignalV2:
+    ncclGinSignal_v2(&net, world, 1, /*isSignal=*/true, 0, ncclGinSignalInc, 0, ncclCoopThread{}, false, nullptr,
+                     sys, sys, ncclGinOptFlagsDefault);
+    break;
+  }
+}
+
+// Device address of a member of the device-resident harness; offsetof avoids dereferencing d_h on the host.
+static void* harnessMemberAddr(TemplateHarness* d_h, size_t offset) {
+  return reinterpret_cast<char*>(d_h) + offset;
+}
+
+static ncclWindow_vidmem harnessWindow(TemplateHarness* d_h, size_t memHandleOffset) {
+  ncclWindow_vidmem win{};
+  win.ginWinsDefaultBackend[0] = harnessMemberAddr(d_h, memHandleOffset);
+  win.numSegments = 1;
+  return win;
+}
+
+TEST_F(GinAnvilSdmaTemplateTest, LegacyCBindings_SignalStrengthFollowsGinStrongLegacySignals) {
+  std::vector<uint8_t> pattern(StrongSignalFixture::kBytes);
+  for (size_t i = 0; i < pattern.size(); ++i) pattern[i] = static_cast<uint8_t>(0x40 + i);
+  for (const LegacyCBindingCase& c : kLegacyCBindings) {
+    for (const bool strong : {false, true}) {
+      SCOPED_TRACE(::testing::Message() << c.name << " ginStrongLegacySignals=" << strong);
+      StrongSignalFixture f(128);
+      f.d_src.copyFrom(pattern);
+      DeviceBuffer<ncclWindow_vidmem> d_dstWin(1);
+      DeviceBuffer<ncclWindow_vidmem> d_srcWin(1);
+      DeviceBuffer<uint64_t> d_signalShadows(2);
+      d_dstWin.upload(harnessWindow(f.d_h.ptr, offsetof(TemplateHarness, dstMh)));
+      d_srcWin.upload(harnessWindow(f.d_h.ptr, offsetof(TemplateHarness, srcMh)));
+
+      ncclDevComm comm{};
+      comm.rank = 0;
+      comm.nRanks = 2;
+      comm.ginConnectionCount = 1;
+      comm.ginConnectionStride = 1;
+      comm.ginNetDeviceTypes[0] = NCCL_NET_DEVICE_GIN_ANVIL_SDMA;
+      comm.ginHandles[0] = harnessMemberAddr(f.d_h.ptr, offsetof(TemplateHarness, ctx));
+      comm.ginSignalCount = 2;
+      comm.ginSignalShadows = d_signalShadows.ptr;
+      comm.ginStrongLegacySignals = strong;
+
+      kernelLegacyCBinding<<<1, 1>>>(comm, d_dstWin.ptr, d_srcWin.ptr, c.binding);
+      syncAndCheck();
+      EXPECT_EQ(f.d_signals.copyTo(), (std::vector<uint64_t>{1, 0}));
+      EXPECT_EQ(readQuietCount(), strong ? 1ULL : 0ULL);
+      EXPECT_EQ(readThreadfenceCount(), 1ULL);
+      if (c.binding == LegacyCBinding::Put || c.binding == LegacyCBinding::PutV2) {
+        const std::vector<uint8_t> got = f.d_dst.copyTo();
+        EXPECT_EQ(std::memcmp(got.data(), pattern.data(), kLegacyPutBytes), 0);
+      } else if (c.binding == LegacyCBinding::PutValue || c.binding == LegacyCBinding::PutValueV2) {
+        EXPECT_EQ(downloadU64(f.d_dst), kLegacyPutValue);
+      }
+    }
+  }
 }
 
 #endif  // NCCL_GIN_ANVIL_SDMA_ENABLE
