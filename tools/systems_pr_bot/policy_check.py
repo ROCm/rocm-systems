@@ -484,6 +484,35 @@ def pr_has_code_files(policy: Policy, pr_files: Iterable[Dict[str, Any]]) -> boo
     return False
 
 
+def aggregate_check_conclusions(
+    check_runs: List[Dict[str, Any]],
+) -> Dict[str, str]:
+    """Preserve failures and pending work from every same-name producer."""
+    by_name: Dict[str, List[str]] = {}
+    for run in check_runs:
+        name = run.get("name")
+        if not isinstance(name, str):
+            continue
+        conclusion = run.get("conclusion")
+        if conclusion is None or run.get("status") not in (None, "completed"):
+            conclusion = "null"
+        by_name.setdefault(name, []).append(str(conclusion))
+
+    accepted = {"success", "neutral", "skipped"}
+    conclusions: Dict[str, str] = {}
+    for name, observed in by_name.items():
+        failures = sorted(set(observed) - accepted - {"null"})
+        if failures:
+            conclusions[name] = failures[0]
+        elif "null" in observed:
+            conclusions[name] = "null"
+        elif "success" in observed:
+            conclusions[name] = "success"
+        else:
+            conclusions[name] = min(observed)
+    return conclusions
+
+
 def summarize_required_checks(
     policy: Policy,
     check_runs: List[Dict[str, Any]],
@@ -495,29 +524,16 @@ def summarize_required_checks(
       - failing: required checks that concluded not-success
       - conc_by_name: name -> conclusion (string; 'null' if none)
     """
-    by_name: Dict[str, Dict[str, Any]] = {}
-    for r in check_runs:
-        name = r.get("name")
-        if isinstance(name, str):
-            by_name[name] = r
-
-    conc_by_name: Dict[str, str] = {}
-    for name, r in by_name.items():
-        conc = r.get("conclusion")
-        conc_by_name[name] = str(conc) if conc is not None else "null"
-
-    missing = [n for n in policy.required_checks if n not in by_name]
+    conc_by_name = aggregate_check_conclusions(check_runs)
+    missing = [n for n in policy.required_checks if n not in conc_by_name]
 
     ok = {"success", "neutral", "skipped"}
     failing: List[str] = []
     for n in policy.required_checks:
-        r = by_name.get(n)
-        if not r:
-            continue
-        conc = r.get("conclusion")
-        if conc is None:
+        conc = conc_by_name.get(n)
+        if conc is None or conc == "null":
             continue  # still running
-        if str(conc) not in ok:
+        if conc not in ok:
             failing.append(f"{n}={conc}")
 
     return missing, failing, conc_by_name
@@ -602,6 +618,7 @@ def build_policy_table_comment(
     appended. `ready` switches the heading to "Ready for Review"; `note` adds an
     optional banner (used for the bump-PR special case).
     """
+
     def _format_details(details: List[str]) -> str:
         """Join a check's detail parts into one table-cell-safe string.
 
@@ -682,7 +699,9 @@ def build_policy_table_comment(
     else:
         footer = "\n\n> 🎉 All policy checks passed!"
 
-    faq_url = "https://github.com/ROCm/rocm-systems/blob/develop/docs/SYSTEMS_PR_BOT_FAQ.md"
+    faq_url = (
+        "https://github.com/ROCm/rocm-systems/blob/develop/docs/SYSTEMS_PR_BOT_FAQ.md"
+    )
 
     faq_link = (
         "\n\n📖 **Need help?** See the "
@@ -716,19 +735,12 @@ def build_check_results(
     to `checks.required_check_runs` in policy.yml.
     """
     ok = {"success", "neutral", "skipped"}
-    by_name = {
-        r.get("name"): r
-        for r in check_runs
-        if isinstance(r, dict) and isinstance(r.get("name"), str)
-    }
+    conclusions = aggregate_check_conclusions(check_runs)
 
     def status_of(name: str) -> Tuple[bool, bool, Optional[str]]:
         """Return (passed, pending, conclusion) for one check-run."""
-        r = by_name.get(name)
-        if not r:
-            return False, True, None
-        conc = r.get("conclusion")
-        if conc is None:
+        conc = conclusions.get(name)
+        if conc is None or conc == "null":
             return False, True, None
         return str(conc) in ok, False, str(conc)
 
@@ -764,15 +776,7 @@ def maybe_comment_precommit_failure(
     if not policy.precommit_failure_comment:
         return
 
-    precommit_run = None
-    for r in check_runs:
-        if r.get("name") == "pre-commit":
-            precommit_run = r
-            break
-    if not precommit_run:
-        return
-
-    conc = precommit_run.get("conclusion")
+    conc = aggregate_check_conclusions(check_runs).get("pre-commit")
     if conc not in ("failure", "cancelled", "timed_out", "action_required"):
         return
 
@@ -1119,14 +1123,10 @@ def main(argv: Optional[List[str]] = None) -> int:
         ok_set = {"success", "neutral", "skipped"}
         while True:
             poll_runs = get_check_runs(owner=owner, repo=repo, sha=sha, token=token)  # type: ignore[arg-type]
-            by_name = {
-                r.get("name"): r
-                for r in poll_runs
-                if isinstance(r, dict) and isinstance(r.get("name"), str)
-            }
+            conclusions = aggregate_check_conclusions(poll_runs)
             # Check whether every required CI check has a conclusion yet.
             all_concluded = all(
-                by_name.get(n) is not None and by_name[n].get("conclusion") is not None
+                n in conclusions and conclusions[n] != "null"
                 for n in policy.required_checks
             )
             if all_concluded:
@@ -1189,23 +1189,8 @@ def main(argv: Optional[List[str]] = None) -> int:
 
         # If any required checks are missing or still running, keep waiting.
         all_present = not missing
-        all_ok = True
         ok = {"success", "neutral", "skipped"}
-        by_name = {
-            r.get("name"): r
-            for r in runs
-            if isinstance(r, dict) and isinstance(r.get("name"), str)
-        }
-        for name in policy.required_checks:
-            r = by_name.get(name)
-            if not r:
-                all_ok = False
-                continue
-            conc = r.get("conclusion")
-            if conc is None:
-                all_ok = False
-            elif str(conc) not in ok:
-                all_ok = False
+        all_ok = all(conc_by_name.get(name) in ok for name in policy.required_checks)
 
         if all_present and all_ok:
             final_results = results + build_check_results(
