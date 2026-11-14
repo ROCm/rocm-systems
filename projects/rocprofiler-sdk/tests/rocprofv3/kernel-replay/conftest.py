@@ -52,7 +52,9 @@ def pytest_addoption(parser):
         action="store",
         nargs="+",
         default=["SQ_WAVES", "SQ_INSTS_VALU"],
-        help="counters shared by every --pmc group; must be constant across a kernel's passes",
+        help="counters shared by every --pmc group; each one the agent implements must be "
+        "constant across a kernel's passes. A counter that is zero for every dispatch is "
+        "skipped only when every replayed agent is gfx1201",
     )
     parser.addoption(
         "--expected-dispatch-count",

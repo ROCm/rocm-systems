@@ -15,7 +15,8 @@ set(rocprofv3-generate-env
     "PYTHONPATH=${rocprofiler-sdk_LIB_DIR}/python${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}/site-packages"
     )
 
-rocprofiler_configure_pytest_files(COPY test_kernel_replay_cli.py)
+rocprofiler_configure_pytest_files(COPY test_kernel_replay_cli.py
+                                        test_kernel_replay_validate.py validate.py)
 
 # Unit test for the rocprofv3 kernel-replay CLI logic. Imports rocprofv3.py directly, so
 # it needs no GPU, no application run and no fixtures -- it guards which services replay
@@ -29,6 +30,17 @@ add_test(
 
 set_tests_properties(
     rocprofv3-test-kernel-replay-cli-unit
+    PROPERTIES TIMEOUT 60 LABELS "unit-tests;kernel-replay" FAIL_REGULAR_EXPRESSION
+               "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+
+# Unit test for validate.py: feeds it synthetic replay JSON for gfx1201, gfx1250, gfx942
+# and mixed agents, and checks which common sanity counters it skips. Needs no GPU.
+add_test(NAME rocprofv3-test-kernel-replay-validate-unit
+         COMMAND ${Python3_EXECUTABLE}
+                 ${CMAKE_CURRENT_BINARY_DIR}/test_kernel_replay_validate.py)
+
+set_tests_properties(
+    rocprofv3-test-kernel-replay-validate-unit
     PROPERTIES TIMEOUT 60 LABELS "unit-tests;kernel-replay" FAIL_REGULAR_EXPRESSION
                "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
 
@@ -59,7 +71,10 @@ rocprofiler_add_integration_execute_test(
 # Validate replay structure: each dispatch replayed REPLAY_PASSES times, the shared sanity
 # counters (SQ_WAVES, SQ_INSTS_VALU) are constant across a dispatch's passes, the kernels
 # are present, and rocpd's counters_collection averages the shared counters over the
-# passes rather than summing them.
+# passes rather than summing them. A sanity counter the agent does not report is skipped.
+# A counter that reads zero for every dispatch is skipped only on gfx1201 (SQ_INSTS_VALU);
+# on other targets, including gfx1250, that is a failure. No -x, so one skipped or failing
+# counter does not hide the remaining checks.
 rocprofiler_add_integration_validate_test(
     rocprofv3-test-kernel-replay-validate BUNDLE_TESTS
     TEST_PATHS validate.py
@@ -73,7 +88,6 @@ rocprofiler_add_integration_validate_test(
          SQ_INSTS_VALU
          --rocpd-input
          ${CMAKE_CURRENT_BINARY_DIR}/kernel-replay/out_results.db
-         -x
     TIMEOUT 120
     LABELS "kernel-replay"
     PYTHON_PATH
@@ -113,7 +127,6 @@ rocprofiler_add_integration_validate_test(
          SQ_INSTS_VALU
          --rocpd-input
          ${CMAKE_CURRENT_BINARY_DIR}/kernel-replay-interval/out_results.db
-         -x
     TIMEOUT 120
     LABELS "kernel-replay"
     PYTHON_PATH

@@ -56,8 +56,6 @@ except ImportError:
 
 import pytest
 
-from rocprofiler_sdk.pytest_utils import gpu_uses_auto_perf_level
-
 # Tolerate the in-flight rename of the per-pass index field (replay_pass <-> n).
 _PASS_KEYS = ("replay_pass", "n")
 
@@ -375,20 +373,122 @@ def test_dispatch_id_nonzero_every_pass(json_data):
     ), f"{len(zero)} pass record(s) carry dispatch_id==0 (replay_pass indices {zero})"
 
 
+def _agent_counter_names(sdk):
+    """agent handle -> names of the counters that agent reports in the counters section."""
+    names = collections.defaultdict(set)
+    counters = sdk.get("counters") or []
+    entries = counters.values() if isinstance(counters, dict) else counters
+    for counter in entries:
+        agent = counter.get("agent_id", {})
+        handle = agent.get("handle") if isinstance(agent, dict) else agent
+        if handle is not None and counter.get("name"):
+            names[int(handle)].add(counter["name"])
+    return names
+
+
+def _agent_names(sdk):
+    """agent handle -> name from the agents section (gfx942, gfx1201, a CPU model, ...)."""
+    names = {}
+    agents = sdk.get("agents") or []
+    entries = agents.values() if isinstance(agents, dict) else agents
+    for agent in entries:
+        aid = agent.get("id", {})
+        handle = aid.get("handle") if isinstance(aid, dict) else aid
+        name = agent.get("name")
+        if handle is not None and name:
+            names[int(handle)] = name
+    return names
+
+
+def _agents_are_gfx1201(sdk, agent_handles):
+    """True only when every replayed agent is named gfx1201.
+
+    An agent missing from the agents section is not treated as gfx1201, so the
+    zero-everywhere skip below cannot hide a regression when the architecture is unknown.
+    """
+    if not agent_handles:
+        return False
+    names = _agent_names(sdk)
+    archs = [names.get(handle) for handle in agent_handles]
+    if any(name is None for name in archs):
+        return False
+    return all(name == "gfx1201" for name in archs)
+
+
+def _counter_is_zero_everywhere(table, counter):
+    # A batch missing the counter is not a zero reading: it must reach the per-pass
+    # presence check instead of being skipped.
+    return all(
+        counter in batch and batch[counter] == 0
+        for entry in table.values()
+        for batch in entry["passes"].values()
+    )
+
+
+def _replayed_agents(sdk):
+    return {
+        int(_dispatch_info(rec)["agent_id"]["handle"]) for rec in _counter_records(sdk)
+    }
+
+
+def _agents_not_reporting(sdk, counter):
+    reported = _agent_counter_names(sdk)
+    return sorted(
+        a for a in _replayed_agents(sdk) if counter not in reported.get(a, set())
+    )
+
+
+def _unusable_common_counter_reason(sdk, table, counter):
+    """Why a requested common counter cannot serve as a replay sanity check, or None.
+
+    A counter qualifies only if every replayed agent reports it and it reads nonzero for at
+    least one dispatch. gfx1201 lists counters that never increment (SQ_INSTS_VALU in
+    every performance level), so on that target a counter that is explicitly zero for
+    every pass of every dispatch is treated as unimplemented rather than as a replay
+    defect. On every other target, including gfx942 and gfx1250, that same shape is a
+    regression and still fails. A counter zero or absent in only some passes or
+    dispatches always fails.
+    """
+    missing = _agents_not_reporting(sdk, counter)
+    if missing:
+        return f"{counter} is not reported by replayed agent(s) {missing}"
+    if _agents_are_gfx1201(sdk, _replayed_agents(sdk)) and _counter_is_zero_everywhere(
+        table, counter
+    ):
+        return (
+            f"{counter} reads zero for every dispatch; not implemented on this "
+            "gfx1201 agent"
+        )
+    return None
+
+
+def _usable_common_counters(sdk, table, common_counters):
+    return [
+        c
+        for c in common_counters
+        if _unusable_common_counter_reason(sdk, table, c) is None
+    ]
+
+
+def test_some_common_counter_usable(json_data, common_counters):
+    # Skipping unimplemented counters must not leave the replay sanity check with nothing
+    # to compare.
+    sdk = _sdk(json_data)
+    table = _records_by_dispatch(sdk)
+    usable = _usable_common_counters(sdk, table, common_counters)
+    reasons = {c: _unusable_common_counter_reason(sdk, table, c) for c in common_counters}
+    assert usable, f"no requested common counter is usable on this agent: {reasons}"
+
+
 def test_common_counters_constant_across_passes(json_data, common_counter):
-    # Check each shared counter separately so unavailable instruction counters do not
-    # skip the wave-count check or replay-structure validation.
+    # Check each shared counter separately so an unimplemented counter does not skip the
+    # wave-count check or replay-structure validation.
     sdk = _sdk(json_data)
     table = _records_by_dispatch(sdk)
     counter = common_counter
-    if counter.startswith("SQ_INSTS_") and all(
-        batch.get(counter) == 0
-        for entry in table.values()
-        for batch in entry["passes"].values()
-    ):
-        first_gpu = next((agent for agent in sdk["agents"] if agent["type"] == 2), None)
-        if first_gpu is not None and gpu_uses_auto_perf_level(first_gpu):
-            pytest.skip(f"{counter} is zero on gfx11/gfx12 with AUTO performance level")
+    reason = _unusable_common_counter_reason(sdk, table, counter)
+    if reason is not None:
+        pytest.skip(reason)
 
     for dispatch_id, entry in table.items():
         passes = entry["passes"]
@@ -513,17 +613,21 @@ def test_each_pass_collects_distinct_batch(json_data, expected_passes, common_co
 
 
 def test_counters_differ_between_kernels(json_data, common_counters):
-    # Metric 4: each kernel has a distinct signature over the shared counters.
-    table = _records_by_dispatch(_sdk(json_data))
+    # Metric 4: each kernel has a distinct signature over the usable shared counters.
+    sdk = _sdk(json_data)
+    table = _records_by_dispatch(sdk)
+    usable = _usable_common_counters(sdk, table, common_counters)
+    if not usable:
+        pytest.skip("no usable common counter; see test_some_common_counter_usable")
     signatures = {}
     for entry in table.values():
         first_pass = entry["passes"][min(entry["passes"])]
-        sig = tuple(round(first_pass.get(c, float("nan")), 3) for c in common_counters)
+        sig = tuple(round(first_pass.get(c, float("nan")), 3) for c in usable)
         signatures[entry["kernel"]] = sig
     values = list(signatures.values())
     assert len(set(values)) == len(
         values
-    ), f"kernels are not distinguishable by common counters {common_counters}: {signatures}"
+    ), f"kernels are not distinguishable by common counters {usable}: {signatures}"
 
 
 def test_replayed_kernels_present(json_data):
@@ -532,7 +636,7 @@ def test_replayed_kernels_present(json_data):
         assert any(kernel in (n or "") for n in names), f"{kernel} not found in {names}"
 
 
-def test_expected_counters_present(json_data):
+def test_expected_counters_present(json_data, common_counters):
     sdk = _sdk(json_data)
     id_to_name = _counter_id_to_name(sdk)
     seen = set()
@@ -541,7 +645,12 @@ def test_expected_counters_present(json_data):
             name = id_to_name.get(int(sub["counter_id"]["handle"]))
             if name:
                 seen.add(name)
+    # A common candidate a replayed agent does not report cannot be collected there;
+    # test_common_counters_constant_across_passes already skips it with the reason.
+    unreported = {c for c in common_counters if _agents_not_reporting(sdk, c)}
     for counter in EXPECTED_COUNTERS:
+        if counter in unreported and counter not in seen:
+            continue
         assert counter in seen, f"counter {counter} not collected; seen={sorted(seen)}"
 
 
@@ -570,4 +679,4 @@ def test_launch_dimensions(json_data):
 
 
 if __name__ == "__main__":
-    sys.exit(pytest.main(["-x", __file__] + sys.argv[1:]))
+    sys.exit(pytest.main([__file__] + sys.argv[1:]))
