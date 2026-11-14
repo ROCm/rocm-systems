@@ -34,7 +34,9 @@
 
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <optional>
+#include <shared_mutex>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -101,7 +103,12 @@ public:
     const Queue* get_queue(const hsa_queue_t&) const;
 
     void iterate_queues(const queue_iterator_cb_t&) const;
-    void set_queue_state(queue_state state, hsa_queue_t* hsa_queue);
+    // Keeps SDK and runtime queues alive through callbacks without holding the queue-map lock.
+    void iterate_queues_with_lifetime(const queue_iterator_cb_t&) const;
+    // Live queues plus queues whose destroy has started but whose completion handlers have not
+    // finished. Replay drain uses this so a retiring queue is still accounted for.
+    int64_t in_flight_async_packets(hsa_agent_t agent) const;
+    void    set_queue_state(queue_state state, hsa_queue_t* hsa_queue);
 
     void add_dispatch_ready(const Queue* queue);
 
@@ -142,15 +149,19 @@ public:
 #endif
 
 private:
+    mutable std::shared_mutex _queue_lifetime_mutex;
     using client_id_map_t  = std::unordered_map<ClientID, agent_callback_tuple_t>;
     using resource_alloc_t = void(const AgentCache&, const CoreApiTable&, const AmdExtTable&);
 
-    CoreApiTable                          _core_table         = {};
-    AmdExtTable                           _ext_table          = {};
-    common::Synchronized<queue_map_t>     _queues             = {};
-    common::Synchronized<client_id_map_t> _callback_cache     = {};
-    agent_cache_map_t                     _supported_agents   = {};
-    std::atomic<bool>                     _serialized_enabled = {false};
+    CoreApiTable                      _core_table = {};
+    AmdExtTable                       _ext_table  = {};
+    common::Synchronized<queue_map_t> _queues     = {};
+    // Erased from _queues before Queue::sync, still visible to in_flight_async_packets until the
+    // wait finishes. Not a live queue: lookup, callbacks, and fence iteration do not see it.
+    common::Synchronized<std::vector<std::shared_ptr<Queue>>> _retiring           = {};
+    common::Synchronized<client_id_map_t>                     _callback_cache     = {};
+    agent_cache_map_t                                         _supported_agents   = {};
+    std::atomic<bool>                                         _serialized_enabled = {false};
     common::Synchronized<
         std::unordered_map<rocprofiler_agent_id_t,
                            std::shared_ptr<common::Synchronized<hsa::profiler_serializer>>>>

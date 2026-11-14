@@ -99,6 +99,8 @@ add_subdirectory(kernel-replay-concurrency)
 add_subdirectory(kernel-replay-local-context)
 add_subdirectory(perf-common)
 add_subdirectory(kernel-replay-perf)
+# Packet re-submit tests are not part of this line. Host replay is range-replay-host.
+add_subdirectory(range-replay-host)
 add_subdirectory(queue-hooks-perf)
 add_subdirectory(openmp-tools)
 add_subdirectory(openmp-tools-coexist)

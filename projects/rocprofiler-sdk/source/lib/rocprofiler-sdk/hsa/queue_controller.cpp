@@ -44,6 +44,7 @@
 #include <atomic>
 #include <cstdint>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 
@@ -436,6 +437,9 @@ QueueController::add_queue(hsa_queue_t*           id,
                            bool                   is_attach)
 {
     CHECK(queue);
+    const auto lifetime_lock = std::unique_lock<std::shared_mutex>{_queue_lifetime_mutex};
+    queue->_engine_type =
+        is_compute ? Queue::engine_type::compute : Queue::engine_type::non_compute;
     const auto agent_id = queue->get_agent().get_rocp_agent()->id;
 
     _callback_cache.wlock([&](auto& callbacks) {
@@ -550,7 +554,8 @@ QueueController::destroy_queue(hsa_queue_t* id)
 {
     if(!id) return;
 
-    const auto* queue = get_queue(*id);
+    auto        lifetime_lock = std::unique_lock<std::shared_mutex>{_queue_lifetime_mutex};
+    const auto* queue         = get_queue(*id);
 
     // return if queue does not exist
     if(!queue) return;
@@ -618,9 +623,38 @@ QueueController::destroy_queue(hsa_queue_t* id)
     }
 
     queue_interposition::destroy_queue_state(id);
-    queue->sync();
-    if(queue->block_signal.handle != 0) get_core_table().hsa_signal_destroy_fn(queue->block_signal);
-    _queues.wlock([&](auto& map) { map.erase(id); });
+
+    // Drop the wrapper out of the live map before waiting. sync waits for completion handlers,
+    // and those handlers can create or destroy another queue, which needs the lifetime lock.
+    // Holding that lock across the wait deadlocks the callback. The queue stays in _retiring
+    // until the wait finishes, so replay drain still counts its in-flight handlers. Both moves
+    // happen under the map write lock, which drain takes first, so drain cannot observe a gap
+    // where the queue is in neither set.
+    std::shared_ptr<Queue> retiring;
+    _queues.wlock([&](auto& map) {
+        for(auto itr = map.begin(); itr != map.end(); ++itr)
+        {
+            if(itr->second.get() == queue)
+            {
+                retiring = std::shared_ptr<Queue>(std::move(itr->second));
+                map.erase(itr);
+                break;
+            }
+        }
+        if(retiring) _retiring.wlock([&](auto& pending) { pending.emplace_back(retiring); });
+    });
+    lifetime_lock.unlock();
+
+    if(!retiring) return;
+    // One bounded wait. A timeout is reported and destruction still finishes: the runtime queue
+    // is going away, so the wrapper cannot stay behind.
+    ROCP_WARNING_IF(!retiring->sync()) << "queue destroy proceeding after sync timed out; a "
+                                          "completion callback may still be in flight";
+    if(retiring->block_signal.handle != 0)
+        get_core_table().hsa_signal_destroy_fn(retiring->block_signal);
+    _retiring.wlock([&](auto& pending) {
+        pending.erase(std::remove(pending.begin(), pending.end(), retiring), pending.end());
+    });
 }
 
 ClientID
@@ -927,6 +961,36 @@ QueueController::iterate_queues(const queue_iterator_cb_t& cb) const
 }
 
 void
+QueueController::iterate_queues_with_lifetime(const queue_iterator_cb_t& cb) const
+{
+    const auto lifetime_lock = std::shared_lock<std::shared_mutex>{_queue_lifetime_mutex};
+    auto       queues        = std::vector<const Queue*>{};
+    iterate_queues([&](const Queue* queue) { queues.emplace_back(queue); });
+    for(const auto* queue : queues)
+        cb(queue);
+}
+
+int64_t
+QueueController::in_flight_async_packets(hsa_agent_t agent) const
+{
+    int64_t    in_flight = 0;
+    const auto count     = [&](const Queue* queue) {
+        if(queue != nullptr && queue->get_agent().get_hsa_agent().handle == agent.handle)
+            in_flight += queue->active_async_packets();
+    };
+    // Map lock first, then the retiring set. destroy_queue uses that same order.
+    _queues.rlock([&](const queue_map_t& queues) {
+        for(const auto& itr : queues)
+            count(itr.second.get());
+        _retiring.rlock([&](const auto& pending) {
+            for(const auto& queue : pending)
+                count(queue.get());
+        });
+    });
+    return in_flight;
+}
+
+void
 QueueController::iterate_callbacks(const callback_iterator_cb_t& cb) const
 {
     _callback_cache.rlock([&cb](const auto& map) {
@@ -1107,12 +1171,16 @@ enable_queue_intercept()
         bool has_hip_event_tracing = itr->is_tracing(ROCPROFILER_CALLBACK_TRACING_HIP_EVENT) ||
                                      itr->is_tracing(ROCPROFILER_BUFFER_TRACING_HIP_EVENT);
 
+        // Range replay records the dispatches inside a range from WriteInterceptor and re-submits
+        // them through it, so it needs the interceptor for the same reason.
+        bool has_range_replay = itr->is_tracing(ROCPROFILER_CALLBACK_TRACING_RANGE_REPLAY);
+
         if(itr->dispatch_counter_collection || itr->pc_sampler || has_kernel_tracing ||
            itr->dispatch_spm || itr->device_spm || has_scratch_reporting ||
            itr->device_counter_collection ||
            (itr->device_thread_trace && itr->device_thread_trace->requires_queue_intercept()) ||
            itr->dispatch_thread_trace || has_hip_graph_tracing || has_kernel_replay ||
-           has_hip_event_tracing)
+           has_hip_event_tracing || has_range_replay)
             return true;
     }
     return false;
