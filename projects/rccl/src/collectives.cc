@@ -156,13 +156,45 @@ const char* ncclProtoToString(int proto) {
   }
 }
 
+// Steps must match the slice layout that device/{all_gather,all_reduce,reduce_scatter}.h pick from rcclUseOneSlice.
+static void rcclRingSimpleSteps(const ncclComm* comm, ncclFunc_t func, int* chunkSteps, int* sliceSteps) {
+  int singleNodeSliceSteps;
+  switch (func) {
+  case ncclFuncAllGather:
+    *chunkSteps = ALLGATHER_CHUNKSTEPS;
+    *sliceSteps = ALLGATHER_SLICESTEPS;
+    singleNodeSliceSteps = ALLGATHER_SLICESTEPS_SINGLE_NODE;
+    break;
+  case ncclFuncAllReduce:
+    *chunkSteps = ALLREDUCE_CHUNKSTEPS;
+    *sliceSteps = ALLREDUCE_SLICESTEPS;
+    singleNodeSliceSteps = ALLREDUCE_SLICESTEPS_SINGLE_NODE;
+    break;
+  default:
+    *chunkSteps = REDUCESCATTER_CHUNKSTEPS;
+    *sliceSteps = REDUCESCATTER_SLICESTEPS;
+    singleNodeSliceSteps = REDUCESCATTER_SLICESTEPS_SINGLE_NODE;
+    break;
+  }
+  // A null comm keeps the defaults so ncclEnqueueCheck can report it.
+  if (comm == nullptr || !comm->rcclUseOneSlice) return;
+  if (IsArchMatch(comm->archName, "gfx950")) {
+    *chunkSteps = 1;
+    *sliceSteps = 1;
+  } else {
+    *sliceSteps = singleNodeSliceSteps;
+  }
+}
+
 static inline ncclResult_t ncclAllGatherConfigImpl(const void* sendbuff, void* recvbuff, size_t sendcount,
                                                    ncclDataType_t datatype, ncclComm_t comm, cudaStream_t stream,
                                                    const ncclCollConfig_t* config) {
+  int chunkSteps, sliceSteps;
+  rcclRingSimpleSteps(comm, ncclFuncAllGather, &chunkSteps, &sliceSteps);
   // clang-format off
   struct ncclInfo info = {ncclFuncAllGather, "AllGather",
                           sendbuff, recvbuff, sendcount, datatype, ncclSum, 0, comm, stream, /* Args */
-                          ALLGATHER_CHUNKSTEPS, ALLGATHER_SLICESTEPS};
+                          chunkSteps, sliceSteps};
   // clang-format on
   NCCLCHECK(ncclParseCollConfig(config, &info.collConfig));
   return ncclEnqueueCheck(&info);
@@ -380,6 +412,8 @@ static ncclResult_t ncclHierarchicalAllGather_Impl(const void* sendbuff, void* r
     // Use direct allgather
     NCCLCHECK(rcclDirectAllGather(recvbuff, tempBuffer, intraSendCount, datatype, intraComm, stream));
   } else {
+    int intraChunkSteps, intraSliceSteps;
+    rcclRingSimpleSteps(intraComm, ncclFuncAllGather, &intraChunkSteps, &intraSliceSteps);
     struct ncclInfo infoIntraAG = {ncclFuncAllGather,
                                    "HierarchicalAllGather-Intra",
                                    recvbuff,
@@ -390,8 +424,8 @@ static ncclResult_t ncclHierarchicalAllGather_Impl(const void* sendbuff, void* r
                                    0,
                                    intraComm,
                                    stream,
-                                   ALLGATHER_CHUNKSTEPS,
-                                   intraComm->rcclUseOneSlice ? ALLGATHER_SLICESTEPS_SINGLE_NODE : ALLGATHER_SLICESTEPS,
+                                   intraChunkSteps,
+                                   intraSliceSteps,
                                    nullptr};
     NCCLCHECK(ncclEnqueueCheck(&infoIntraAG));
   }
@@ -412,11 +446,8 @@ ncclResult_t ncclAllGather_impl(const void* sendbuff, void* recvbuff, size_t sen
                                 ncclComm_t comm, cudaStream_t stream) {
   NVTX3_FUNC_WITH_PARAMS(AllGather, NcclNvtxParamsAllGather,
                          NVTX3_PAYLOAD(comm ? comm->commHash : 0, sendcount * ncclTypeSize(datatype), datatype));
-    // RCCL update slice steps for AllGather if single node
-  const bool isGfx950 = IsArchMatch(comm->archName, "gfx950");
-
-  int chunkSteps = (isGfx950 && comm->rcclUseOneSlice) ? 1 : ALLGATHER_CHUNKSTEPS;
-  int sliceSteps = comm->rcclUseOneSlice ? (isGfx950 ? 1 : ALLGATHER_SLICESTEPS_SINGLE_NODE) : ALLGATHER_SLICESTEPS;
+  int chunkSteps, sliceSteps;
+  rcclRingSimpleSteps(comm, ncclFuncAllGather, &chunkSteps, &sliceSteps);
   struct ncclInfo info = {ncclFuncAllGather, "AllGather", sendbuff, recvbuff, sendcount,
                           datatype,          ncclSum,     0,        comm,     stream, /* Args */
                           chunkSteps,        sliceSteps,  nullptr};
@@ -597,10 +628,12 @@ ncclResult_t ncclAlltoAllConfig(const void* sendbuff, void* recvbuff, size_t cou
 static inline ncclResult_t ncclAllReduceConfigImpl(const void* sendbuff, void* recvbuff, size_t count,
                                                    ncclDataType_t datatype, ncclRedOp_t op, ncclComm_t comm,
                                                    cudaStream_t stream, const ncclCollConfig_t* config) {
+  int chunkSteps, sliceSteps;
+  rcclRingSimpleSteps(comm, ncclFuncAllReduce, &chunkSteps, &sliceSteps);
   // clang-format off
   struct ncclInfo info = {ncclFuncAllReduce, "AllReduce",
                           sendbuff, recvbuff, count, datatype, op, 0, comm, stream, /* Args */
-                          ALLREDUCE_CHUNKSTEPS, ALLREDUCE_SLICESTEPS};
+                          chunkSteps, sliceSteps};
   // clang-format on
   NCCLCHECK(ncclParseCollConfig(config, &info.collConfig));
   return ncclEnqueueCheck(&info);
@@ -768,10 +801,8 @@ ncclResult_t ncclAllReduce_impl(const void* sendbuff, void* recvbuff, size_t cou
   NVTX3_FUNC_WITH_PARAMS(AllReduce, NcclNvtxParamsAllReduce,
                          NVTX3_PAYLOAD(comm ? comm->commHash : 0, count * ncclTypeSize(datatype), op, datatype));
 
-  // RCCL update slice steps for AllReduce if single node
-  const bool isGfx950 = IsArchMatch(comm->archName, "gfx950");
-  int chunkSteps = (isGfx950 && comm->rcclUseOneSlice) ? 1 : ALLREDUCE_CHUNKSTEPS;
-  int sliceSteps = comm->rcclUseOneSlice ? (isGfx950 ? 1 : ALLREDUCE_SLICESTEPS_SINGLE_NODE) : ALLREDUCE_SLICESTEPS;
+  int chunkSteps, sliceSteps;
+  rcclRingSimpleSteps(comm, ncclFuncAllReduce, &chunkSteps, &sliceSteps);
 
   struct ncclInfo info = {ncclFuncAllReduce, "AllReduce", sendbuff, recvbuff, count,
                           datatype,          op,          0,        comm,     stream, /* Args */
@@ -874,11 +905,8 @@ ncclResult_t ncclAllReduceWithBias_impl(const void* sendbuff, void* recvbuff, si
     return ncclInvalidArgument;
   }
 
-  // RCCL update slice steps for AllReduceBias if single node
-  // similar to changes made to AllReduce earlier
-  const bool isGfx950 = IsArchMatch(comm->archName, "gfx950");
-  int chunkSteps = (isGfx950 && comm->rcclUseOneSlice) ? 1 : ALLREDUCE_CHUNKSTEPS;
-  int sliceSteps = comm->rcclUseOneSlice ? (isGfx950 ? 1 : ALLREDUCE_SLICESTEPS_SINGLE_NODE) : ALLREDUCE_SLICESTEPS;
+  int chunkSteps, sliceSteps;
+  rcclRingSimpleSteps(comm, ncclFuncAllReduce, &chunkSteps, &sliceSteps);
 
   struct ncclInfo info = {ncclFuncAllReduce, "AllReduce", sendbuff, recvbuff, count,
                           datatype,          op,          0,        comm,     stream, /* Args */
@@ -1062,10 +1090,12 @@ ncclResult_t ncclReduceConfig(const void* sendbuff, void* recvbuff, size_t count
 static inline ncclResult_t ncclReduceScatterConfigImpl(const void* sendbuff, void* recvbuff, size_t recvcount,
                                                        ncclDataType_t datatype, ncclRedOp_t op, ncclComm_t comm,
                                                        cudaStream_t stream, const ncclCollConfig_t* config) {
+  int chunkSteps, sliceSteps;
+  rcclRingSimpleSteps(comm, ncclFuncReduceScatter, &chunkSteps, &sliceSteps);
   // clang-format off
   struct ncclInfo info = {ncclFuncReduceScatter, "ReduceScatter",
                           sendbuff, recvbuff, recvcount, datatype, op, 0, comm, stream, /* Args */
-                          REDUCESCATTER_CHUNKSTEPS, REDUCESCATTER_SLICESTEPS};
+                          chunkSteps, sliceSteps};
   // clang-format on
   NCCLCHECK(ncclParseCollConfig(config, &info.collConfig));
   return ncclEnqueueCheck(&info);
@@ -1148,6 +1178,8 @@ static ncclResult_t ncclHierarchicalReduceScatter_Impl(const void* sendbuff, voi
   CUDACHECK(hipGetLastError());
 
   // Step 2: Intra-node ReduceScatter, in-place inside tempBuf.
+  int intraChunkSteps, intraSliceSteps;
+  rcclRingSimpleSteps(intraComm, ncclFuncReduceScatter, &intraChunkSteps, &intraSliceSteps);
   struct ncclInfo infoIntraRS = {ncclFuncReduceScatter,
                                  "HierarchicalReduceScatter-Intra",
                                  tempBuf,
@@ -1158,9 +1190,8 @@ static ncclResult_t ncclHierarchicalReduceScatter_Impl(const void* sendbuff, voi
                                  0,
                                  intraComm,
                                  stream,
-                                 REDUCESCATTER_CHUNKSTEPS,
-                                 intraComm->rcclUseOneSlice ? REDUCESCATTER_SLICESTEPS_SINGLE_NODE :
-                                                              REDUCESCATTER_SLICESTEPS,
+                                 intraChunkSteps,
+                                 intraSliceSteps,
                                  nullptr};
   NCCLCHECK(ncclEnqueueCheck(&infoIntraRS));
 
@@ -1195,12 +1226,8 @@ ncclResult_t ncclReduceScatter_impl(const void* sendbuff, void* recvbuff, size_t
                                     ncclRedOp_t op, ncclComm* comm, cudaStream_t stream) {
   NVTX3_FUNC_WITH_PARAMS(ReduceScatter, NcclNvtxParamsReduceScatter,
                          NVTX3_PAYLOAD(comm ? comm->commHash : 0, recvcount * ncclTypeSize(datatype), op, datatype));
-  // RCCL update slice steps for ReduceScatter if single node
-  const bool isGfx950 = IsArchMatch(comm->archName, "gfx950");
-
-  int chunkSteps = (isGfx950 && comm->rcclUseOneSlice) ? 1 : REDUCESCATTER_CHUNKSTEPS;
-  int sliceSteps =
-    comm->rcclUseOneSlice ? (isGfx950 ? 1 : REDUCESCATTER_SLICESTEPS_SINGLE_NODE) : REDUCESCATTER_SLICESTEPS;
+  int chunkSteps, sliceSteps;
+  rcclRingSimpleSteps(comm, ncclFuncReduceScatter, &chunkSteps, &sliceSteps);
 
   struct ncclInfo info = {ncclFuncReduceScatter,
                           "ReduceScatter",
