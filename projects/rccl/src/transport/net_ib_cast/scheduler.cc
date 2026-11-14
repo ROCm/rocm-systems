@@ -73,7 +73,7 @@ ncclResult_t IbCastQpSchedInitParms(struct ncclIbQpSchedParms* parms) {
   ncclResult_t ret = ncclSuccess;
 
   parms->enable = QP_SCHED_ENABLE_DEF;
-  parms->wrrEnable = QP_SCHED_WRR_ENABLE_DEF;
+  parms->wrrEnable = rcclParamIbQpSchedWrrEnable() != 0;
   parms->resetInterval = QP_SCHED_RESET_DEF;
   parms->updateInterval = QP_SCHED_UPDATE_DEF;
   parms->weightNew = QP_SCHED_WEIGHT_DEF;
@@ -81,10 +81,7 @@ ncclResult_t IbCastQpSchedInitParms(struct ncclIbQpSchedParms* parms) {
   parms->splitDataMin = QP_SCHED_SPLIT_DATA_MIN_DEF;
   parms->logInterval = QP_SCHED_LOG_DEF;
   parms->logEnable = false;
-  if (!parms->enable) parms->doWrr = false;
-  else if (!parms->splitData) parms->doWrr = true;
-  else if (parms->wrrEnable) parms->doWrr = true;
-  else parms->doWrr = false;
+  parms->doWrr = !parms->splitData || parms->wrrEnable;
 
   if (rcclUseIbCastQpSched()) {
     parms->enable = true;
@@ -96,11 +93,9 @@ ncclResult_t IbCastQpSchedInitParms(struct ncclIbQpSchedParms* parms) {
   }
 
   if (parms->splitData) {
-    if (rcclParamIbQpSchedWrrEnable()) {
-      parms->doWrr = true;
-      INFO(NCCL_NET | NCCL_ENV, "(IB-CAST) RCCL_IB_QP_SCHED_WRR_ENABLE set to enabled");
-    }
-  } else parms->doWrr = true;
+    INFO(NCCL_NET | NCCL_ENV, "(IB-CAST) RCCL_IB_QP_SCHED_WRR_ENABLE set to %s",
+         parms->wrrEnable ? "enabled" : "disabled");
+  }
 
   val = (int)rcclParamIbQpSchedResetInterval();
   if (val >= 0) {
@@ -391,7 +386,9 @@ int IbCastQpSchedGetEffectiveTxNqps(struct ncclIbRequest* req, int* startQpIndex
 
 oneQp:
   nqps = 1;
-  if (parms->doWrr && req->base->qpTxSchedInit) {
+  if (!parms->doWrr) {
+    qpIndex = req->id % req->base->nqps;
+  } else if (req->base->qpTxSchedInit) {
     if (req->base->rrQpTxSched.activeTokens.totTokens == 0)
       req->base->rrQpTxSched.activeTokens = req->base->rrQpTxSched.initTokens;
     qpIndex = req->base->rrQpTxSched.qpIndex;
