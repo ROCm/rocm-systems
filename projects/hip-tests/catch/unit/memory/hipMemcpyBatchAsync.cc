@@ -1543,6 +1543,75 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_D2D_LargeBatch) {
                             kPatternValue + static_cast<int>(i), i);
   }
 }
+
+/**
+ * Test Description
+ * ------------------------
+ * - Verifies a batch that becomes more SDMA operations than the device-memory signal ring holds
+ *   (16 x ROC_SIGNAL_POOL_SIZE). Each source is copied to two destinations, so every source is
+ *   its own broadcast operation. Runs the child test case in a process with
+ *   DEBUG_CLR_DEV_SIGNALS=1, which is read at HIP init.
+ * Test source
+ * ------------------------
+ * - catch/unit/memory/hipMemcpyBatchAsync.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.1
+ */
+HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_D2D_ManyBroadcasts_DeviceSignals) {
+  hip::SpawnProc proc(getSelfExePath());
+  proc.setEnv("DEBUG_CLR_DEV_SIGNALS", "1");
+  REQUIRE(proc.run("Unit_hipMemcpyBatchAsync_D2D_ManyBroadcasts_DeviceSignals_Child") == 0);
+}
+
+/**
+ * Child of Unit_hipMemcpyBatchAsync_D2D_ManyBroadcasts_DeviceSignals, not meant to run on its own.
+ */
+HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_D2D_ManyBroadcasts_DeviceSignals_Child) {
+  const char* devSignals = std::getenv("DEBUG_CLR_DEV_SIGNALS");
+  if (devSignals == nullptr || std::string(devSignals) != "1") {
+    HIP_SKIP_TEST("Only run by Unit_hipMemcpyBatchAsync_D2D_ManyBroadcasts_DeviceSignals.");
+  }
+
+  // Twice the ring's 1024 signals at the default ROC_SIGNAL_POOL_SIZE.
+  constexpr size_t kSources = 2048;
+  constexpr size_t kDstsPerSource = 2;
+  constexpr size_t kCopyCount = kSources * kDstsPerSource;
+  constexpr size_t kCopySize = 64;
+
+  StreamGuard stream_guard(Streams::created);
+  std::vector<unsigned char> srcValues(kSources * kCopySize);
+  std::vector<unsigned char> dstValues(kCopyCount * kCopySize);
+  for (size_t i = 0; i < kSources; ++i) {
+    std::fill_n(srcValues.begin() + i * kCopySize, kCopySize,
+                static_cast<unsigned char>(i % 251 + 1));
+  }
+  for (size_t i = 0; i < kCopyCount; ++i) {
+    std::copy_n(srcValues.begin() + i / kDstsPerSource * kCopySize, kCopySize,
+                dstValues.begin() + i * kCopySize);
+  }
+  std::vector<LinearAllocGuard<unsigned char>> allocations;
+  char* src = static_cast<char*>(addBuffer(allocations, srcValues, LinearAllocs::hipMalloc));
+  char* dst = static_cast<char*>(addBuffer(
+      allocations, std::vector<unsigned char>(dstValues.size(), 0), LinearAllocs::hipMalloc));
+
+  std::vector<void*> srcPtrs(kCopyCount);
+  std::vector<void*> dstPtrs(kCopyCount);
+  std::vector<size_t> sizes(kCopyCount, kCopySize);
+  for (size_t i = 0; i < kCopyCount; ++i) {
+    srcPtrs[i] = src + i / kDstsPerSource * kCopySize;
+    dstPtrs[i] = dst + i * kCopySize;
+  }
+  // PreferCE keeps the same-device copies on SDMA, where equal sources become broadcasts.
+  hipMemcpyAttributes attr{hipMemcpySrcAccessOrderStream, {}, {}, hipMemcpyFlagExtPreferCE};
+  size_t attrsIdx = 0;
+
+  HIP_CHECK(hipMemcpyBatchAsync(dstPtrs.data(), srcPtrs.data(), sizes.data(), kCopyCount, &attr,
+                                &attrsIdx, 1, nullptr, stream_guard.stream()));
+  HIP_CHECK(hipStreamSynchronize(stream_guard.stream()));
+
+  requireBufferEquals(dst, dstValues, LinearAllocs::hipMalloc);
+}
 #endif
 /**
  * End doxygen group MemoryTest.

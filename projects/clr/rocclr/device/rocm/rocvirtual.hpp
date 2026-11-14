@@ -333,6 +333,12 @@ class VirtualGPU : public device::VirtualDevice {
     //! Adds a raw signal for dependency tracking
     void AddDynamicQueueWait(hsa_signal_t signal) { dynamic_queue_waits_.push_back(signal); }
 
+    //! Keeps a submitted signal from being rearmed until a later wait has read it
+    void PinUntilWait(ProfilingSignal* signal) { NoteGpuWait(signal); }
+
+    //! Most signals a caller may acquire before submitting the ops that use them
+    virtual size_t MaxUnsubmittedSignals() const { return std::numeric_limits<size_t>::max(); }
+
    protected:
     //! Returns the signal attributes for the requested scope and updates interrupt
     uint64_t SignalAttributes(bool& interrupt) const;
@@ -426,6 +432,7 @@ class VirtualGPU : public device::VirtualDevice {
     void NoteQueueDrained() override;
     bool WaitCurrent() override;
     void ResetCurrentSignal() override;
+    size_t MaxUnsubmittedSignals() const override { return ROC_SIGNAL_POOL_SIZE; }
 
    private:
     void PreparePooledSignals(const std::vector<ProfilingSignal*>& signals) override;
