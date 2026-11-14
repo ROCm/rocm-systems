@@ -108,6 +108,18 @@ graph:
   Unit_hipGraphClone_MultiThreaded:
     <<: *level_default
     tags: [lifecycle]
+  Unit_hipGraphInstantiate_NullStreamFenceUnchanged:
+    <<: *level_default
+    unsupported:
+      targets: [amd_windows, nvidia_linux, nvidia_windows]
+      reason: "ROCM-33637 - requires AMD AQL packet tracing and Linux fork/exec."
+    tags: [lifecycle]
+  Unit_hipGraphInstantiate_CapturedPacketSystemScopePreserved:
+    <<: *level_default
+    unsupported:
+      targets: [amd_windows, nvidia_linux, nvidia_windows]
+      reason: "ROCM-33637 - requires AMD AQL packet tracing and Linux fork/exec."
+    tags: [lifecycle]
   Unit_hipGraphInstantiateWithFlags_Negative:
     <<: *level_default
     tags: [lifecycle]

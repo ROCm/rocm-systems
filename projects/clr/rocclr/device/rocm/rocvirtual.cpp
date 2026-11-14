@@ -2261,26 +2261,37 @@ bool VirtualGPU::dispatchGenericAqlPacket(AqlPacket* packet, uint16_t header, ui
 }
 
 // ================================================================================================
-void VirtualGPU::adjustHeader(uint16_t& header) {
-  setFenceDirty(true);
-
+void VirtualGPU::applySystemScopeRequest(uint16_t& header) {
   if (TestAndClearStateFlag(kAddSystemScope)) {
     header &= ~(HSA_FENCE_SCOPE_AGENT << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE |
                 HSA_FENCE_SCOPE_AGENT << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
     header |= (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE |
                HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
   }
+}
+
+// ================================================================================================
+void VirtualGPU::adjustHeader(uint16_t& header) {
+  setFenceDirty(true);
+
+  applySystemScopeRequest(header);
 
   auto expected_fence_state = extractAqlBits(header, HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE,
                                              HSA_PACKET_HEADER_WIDTH_SCRELEASE_FENCE_SCOPE);
 
+  // A system-scope release publishes the dispatch's writes to all agents and satisfies the
+  // outstanding flush. Clear the dirty flag so later synchronization does not emit a redundant
+  // system-scope barrier.
   if (expected_fence_state == amd::Device::kCacheStateSystem) {
     setFenceDirty(false);
   }
 
+  // `fence_state_` tracks requested, not emitted, scope. Keep the first system-scope release in a
+  // run, then restore the default header on later packets. With an agent-scoped default, their
+  // writes remain dirty until one system-scope barrier publishes them at synchronization, avoiding
+  // a flush after every dispatch. Preserve an explicit any-order request when replacing the header.
   if (fence_state_ == amd::Device::kCacheStateSystem &&
       expected_fence_state == amd::Device::kCacheStateSystem) {
-    // honor an explicit any-order
     const bool any_order = (header & kBarrierBit) == 0;
     header = dispatchPacketHeader_;
     if (any_order) {
@@ -2324,7 +2335,7 @@ template <typename AqlPacket>
 bool VirtualGPU::dispatchAqlPacket(AqlPacket* packet, uint16_t header,
                                    uint16_t rest, bool blocking, bool attach_signal) {
   if (command_ != nullptr && command_->getPktCapturingState()) {
-    adjustHeader(header);
+    applySystemScopeRequest(header);
     packet->header = header;
     if constexpr (std::is_same_v<AqlPacket, hsa_amd_ext_kernel_dispatch_packet_t>) {
       // For ext dispatch packets the first 32 bits are {header(16), amd_format(8), setup(8)}.

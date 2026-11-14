@@ -86,6 +86,8 @@ if(HIP_PLATFORM MATCHES "amd")
     hipStreamUpdateCaptureDependencies.cc
     hipGraphAddNodeBeginCapture.cc
     hipGraphExternalSemaphoresNodes.cc
+    # Parses the AMD AQL trace; the source is Linux-gated.
+    hipGraphInstantiateNullStreamFence.cc
   )
   set(TEST_SRC ${TEST_SRC} ${AMD_SRC})
 endif()
@@ -93,6 +95,18 @@ endif()
 hip_add_exe_to_target(NAME GraphsTest1
                       TEST_SRC ${TEST_SRC}
                       TEST_TARGET_NAME build_tests)
+
+if(HIP_PLATFORM MATCHES "amd" AND UNIX)
+  add_executable(hipGraphInstantiateNullStreamFence_exe EXCLUDE_FROM_ALL
+                 hipGraphInstantiateNullStreamFence_exe.cc)
+  set_source_files_properties(hipGraphInstantiateNullStreamFence_exe.cc
+                              PROPERTIES LANGUAGE ${GPGPU_LANGUAGE})
+  target_link_libraries(hipGraphInstantiateNullStreamFence_exe
+                        ${GPGPU_LINKER_LIBRARIES})
+  add_dependencies(GraphsTest1 hipGraphInstantiateNullStreamFence_exe)
+  set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS
+               hipGraphInstantiateNullStreamFence_exe)
+endif()
 
 # Collapse tests need scheduling flags set before HIP init.  They live in
 # their own binary built directly (bypassing hip_add_exe_to_target) so that
