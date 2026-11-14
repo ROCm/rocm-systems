@@ -114,6 +114,12 @@ jobs:
     name: "Test Media Libs"
     needs: [therock-ci-linux]
     uses: ./.github/workflows/therock-media-test-packages.yml
+    secrets:
+      # The rocDecode conformance sweep reads its stream corpus from a private
+      # bucket. Pull requests from forks do not receive these, and the sweep
+      # skips itself there rather than failing.
+      ROCDECODE_AWS_ACCESS_KEY_ID: ${{ secrets.ROCDECODE_AWS_ACCESS_KEY_ID }}
+      ROCDECODE_AWS_SECRET_ACCESS_KEY: ${{ secrets.ROCDECODE_AWS_SECRET_ACCESS_KEY }}
     with:
       amdgpu_families: "gfx94X-dcgpu"
       test_runs_on: "linux-gfx942-1gpu-ccs-csp-ossci-rocm"
