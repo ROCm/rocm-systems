@@ -82,9 +82,9 @@ TEST_F(TestRocprofilerComputeTool, ProvidedNoRequestedCounters_Throws)
     EXPECT_NO_THROW(rocprofiler_configure(1, "", 1, &m_client_id));
 }
 
-TEST_F(TestRocprofilerComputeTool, ProvidedEmptyInterationMultiplexingMode_DoesntThrow)
+TEST_F(TestRocprofilerComputeTool, ProvidedEmptyIterationMultiplexing_DoesntThrow)
 {
-    m_input_parameters->set_iteration_multiplexing_mode("");
+    m_input_parameters->set_iteration_multiplexing("");
     EXPECT_NO_THROW(rocprofiler_configure(1, "", 1, &m_client_id));
 }
 
@@ -118,13 +118,12 @@ TEST_F(TestRocprofilerComputeTool, ProvidedUnsetRequestedCounters_UsesDefault)
     EXPECT_EQ(tool_data->requested_counters, EnvInputParameters::kDefaultRequestedCounters);
 }
 
-TEST_F(TestRocprofilerComputeTool, ProvidedUnsetIterationMultiplexingMode_UsesDefault)
+TEST_F(TestRocprofilerComputeTool, ProvidedUnsetIterationMultiplexing_UsesDefault)
 {
-    m_input_parameters->unset_iteration_multiplexing_mode();
+    m_input_parameters->unset_iteration_multiplexing();
     const auto cfg       = rocprofiler_configure(1, "", 1, &m_client_id);
     const auto tool_data = get_tool_data(cfg);
-    EXPECT_EQ(tool_data->iteration_multiplexing_mode,
-              iteration_multiplexing_mode(EnvInputParameters::kDefaultIterationMultiplexingMode));
+    EXPECT_FALSE(tool_data->iteration_multiplexing);
 }
 
 TEST_F(TestRocprofilerComputeTool, ProvidedUnsetKernelFilterIncludeRegex_UsesDefault)
@@ -160,28 +159,20 @@ TEST_F(TestRocprofilerComputeTool, ProvidedRequestedCounters_ReturnsIt)
     EXPECT_EQ(tool_data->requested_counters, m_input_parameters->get_requested_counters());
 }
 
-TEST_F(TestRocprofilerComputeTool, ProvidedIncorrectIterationMultiplexingMode_ReturnsDisabled)
+TEST_F(TestRocprofilerComputeTool, ProvidedIncorrectIterationMultiplexing_ReturnsDisabled)
 {
-    m_input_parameters->set_iteration_multiplexing_mode("incorrect");
+    m_input_parameters->set_iteration_multiplexing("incorrect");
     const auto cfg       = rocprofiler_configure(1, "", 1, &m_client_id);
     const auto tool_data = get_tool_data(cfg);
-    EXPECT_EQ(tool_data->iteration_multiplexing_mode, iteration_multiplexing_mode_t::DISABLED);
+    EXPECT_FALSE(tool_data->iteration_multiplexing);
 }
 
-TEST_F(TestRocprofilerComputeTool, ProvidedKernelIterationMultiplexingMode_ReturnsIt)
+TEST_F(TestRocprofilerComputeTool, ProvidedEnabledIterationMultiplexing_SetsIt)
 {
-    m_input_parameters->set_iteration_multiplexing_mode("kernel");
+    m_input_parameters->set_iteration_multiplexing("1");
     const auto cfg       = rocprofiler_configure(1, "", 1, &m_client_id);
     const auto tool_data = get_tool_data(cfg);
-    EXPECT_EQ(tool_data->iteration_multiplexing_mode, iteration_multiplexing_mode_t::KERNEL);
-}
-
-TEST_F(TestRocprofilerComputeTool, ProvidedKernelLauncParamsIterationMultiplexingMode_ReturnsIt)
-{
-    m_input_parameters->set_iteration_multiplexing_mode("kernel_launch_params");
-    const auto cfg       = rocprofiler_configure(1, "", 1, &m_client_id);
-    const auto tool_data = get_tool_data(cfg);
-    EXPECT_EQ(tool_data->iteration_multiplexing_mode, iteration_multiplexing_mode_t::LAUNCH);
+    EXPECT_TRUE(tool_data->iteration_multiplexing);
 }
 
 TEST_F(TestRocprofilerComputeTool, ProvidedKernelFilterIncludeRegex_ReturnsIt)

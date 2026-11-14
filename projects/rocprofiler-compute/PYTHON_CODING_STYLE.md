@@ -563,10 +563,9 @@ def pre_processing(self) -> None:
         # Each operation delegated to a focused helper
         workload.raw_pmc = file_io.create_df_pmc(...)
 
-        if self._profiling_config.get("iteration_multiplexing") is not None:
+        if self._profiling_config.get("iteration_multiplexing"):
             workload.raw_pmc = self.iteration_multiplex_impute_counters(
                 workload.raw_pmc,
-                policy=self._profiling_config["iteration_multiplexing"],
                 workload_dir=Path(path_info[0]),
             )
 
