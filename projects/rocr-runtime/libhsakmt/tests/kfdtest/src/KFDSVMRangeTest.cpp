@@ -23,6 +23,10 @@
 #include "KFDSVMRangeTest.hpp"
 #include <poll.h>
 #include <sys/mman.h>
+#include <atomic>
+#include <cstdio>
+#include <cstring>
+#include <malloc.h>
 #include <vector>
 #include "PM4Queue.hpp"
 #include "PM4Packet.hpp"
@@ -2331,4 +2335,606 @@ TEST_P(KFDSVMRangeTest, IntegerOverflowProtection) {
     TEST_END
 }
 
+/*
+ * Allocator VA recycling on the SVM-API registration path.
+ *
+ * jemalloc, ptmalloc, mimalloc and arena allocators reuse virtual addresses
+ * without a full release to the OS (MADV_DONTNEED, MADV_FREE, malloc_trim, or
+ * munmap+mmap). Deregister must revoke GPU access for that registration only,
+ * and must not clear COHERENT / EXT_COHERENT on a neighbor that is still live.
+ * A stale access attribute shows up as a queue-eviction per recycle.
+ *
+ * HSA_SVM_HOST_UNREGISTER_DEBUG is read when KFD is opened, so this fixture
+ * sets it before SetUp. Both XNACK modes come from the test parameter.
+ */
+enum SvmApiRecycleOp {
+    kRecycleMadvDontneed = 0,
+    kRecycleMadvFree,
+    kRecycleMallocTrim,
+    kRecycleMunmapRemap
+};
+
+class KFDSVMApiRecycleTest : public KFDSVMRangeTest {
+ public:
+    KFDSVMApiRecycleTest() : m_hadUnregister(false) {
+        m_prevUnregister[0] = '\0';
+    }
+    virtual void SetUp();
+    virtual void TearDown();
+    void AllocatorStress(int gpuNode, int op);
+
+ private:
+    bool m_hadUnregister;
+    char m_prevUnregister[32];
+
+    HSAKMT_STATUS RegisterAndMap(void *addr, HSAuint64 size,
+                                 bool coarse, bool extCoherent);
+    void Deregister(void *addr);
+    bool RangeHasCoherency(void *addr, HSAuint64 size);
+};
+
+void KFDSVMApiRecycleTest::SetUp() {
+    const char *cur = getenv("HSA_SVM_HOST_UNREGISTER_DEBUG");
+
+    m_hadUnregister = cur != NULL;
+    if (m_hadUnregister) {
+        strncpy(m_prevUnregister, cur, sizeof(m_prevUnregister) - 1);
+        m_prevUnregister[sizeof(m_prevUnregister) - 1] = '\0';
+    }
+
+    setenv("HSA_SVM_HOST_UNREGISTER_DEBUG", "1", 1);
+    KFDSVMRangeTest::SetUp();
+}
+
+void KFDSVMApiRecycleTest::TearDown() {
+    KFDSVMRangeTest::TearDown();
+    if (m_hadUnregister)
+        setenv("HSA_SVM_HOST_UNREGISTER_DEBUG", m_prevUnregister, 1);
+    else
+		unsetenv("HSA_SVM_HOST_UNREGISTER_DEBUG");
+}
+
+HSAKMT_STATUS KFDSVMApiRecycleTest::RegisterAndMap(void *addr, HSAuint64 size,
+                                                   bool coarse, bool extCoherent) {
+    HsaMemFlags flags;
+    HSAuint64 gpuva = 0;
+    HSAKMT_STATUS ret;
+
+    flags.Value = 0;
+    flags.ui32.HostAccess = 1;
+    flags.ui32.CoarseGrain = coarse ? 1 : 0;
+    flags.ui32.ExtendedCoherent = extCoherent ? 1 : 0;
+
+    ret = HSAKMT_CALL(hsaKmtRegisterMemoryWithFlags, m_hsakmt_current_ctx,
+                      addr, size, flags);
+    if (ret != HSAKMT_STATUS_SUCCESS)
+        return ret;
+
+    ret = HSAKMT_CALL(hsaKmtMapMemoryToGPU, m_hsakmt_current_ctx,
+                      addr, size, &gpuva);
+    if (ret != HSAKMT_STATUS_SUCCESS)
+        HSAKMT_CALL(hsaKmtDeregisterMemory, m_hsakmt_current_ctx, addr);
+    return ret;
+}
+
+void KFDSVMApiRecycleTest::Deregister(void *addr) {
+    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtDeregisterMemory, m_hsakmt_current_ctx, addr));
+}
+
+/* COHERENT and EXT_COHERENT are set on every page of the range. */
+bool KFDSVMApiRecycleTest::RangeHasCoherency(void *addr, HSAuint64 size) {
+    HSA_SVM_ATTRIBUTE attr;
+    const HSAuint32 need = HSA_SVM_FLAG_COHERENT | HSA_SVM_FLAG_EXT_COHERENT;
+
+    attr.type = HSA_SVM_ATTR_SET_FLAGS;
+    attr.value = 0;
+    if (HSAKMT_CALL(hsaKmtSVMGetAttr, m_hsakmt_current_ctx,
+                    addr, size, 1, &attr) != HSAKMT_STATUS_SUCCESS)
+        return false;
+    return (attr.value & need) == need;
+}
+
+static void FillDwords(void *addr, size_t size, HSAuint32 pattern) {
+    HSAuint32 *p = reinterpret_cast<HSAuint32 *>(addr);
+    size_t n = size / sizeof(HSAuint32);
+
+    for (size_t i = 0; i < n; i++)
+        p[i] = pattern;
+}
+
+/* Returns the byte offset of the first mismatch, or size if every dword matches. */
+static size_t FirstDwordMismatch(void *addr, size_t size, HSAuint32 pattern) {
+    HSAuint32 *p = reinterpret_cast<HSAuint32 *>(addr);
+    size_t n = size / sizeof(HSAuint32);
+
+    for (size_t i = 0; i < n; i++) {
+        if (p[i] != pattern)
+            return i * sizeof(HSAuint32);
+    }
+    return size;
+}
+
+static long long ReadEvictedMs(unsigned int gpuId) {
+    char path[256];
+    FILE *f;
+    unsigned long long ms = 0;
+
+    snprintf(path, sizeof(path),
+             "/sys/class/kfd/kfd/proc/%d/stats_%u/evicted_ms",
+             getpid(), gpuId);
+    f = fopen(path, "r");
+    if (!f)
+        return -1;
+    if (fscanf(f, "%llu", &ms) != 1)
+        ms = (unsigned long long)-1;
+
+    fclose(f);
+    return (long long)ms;
+}
+
+struct EvictWatch {
+    int fd;
+    std::atomic<bool> stop;
+    std::atomic<int> count;
+
+    EvictWatch() : fd(-1), stop(false), count(0) {}
+};
+
+static unsigned int WatchQueueEvictions(void *arg) {
+    EvictWatch *w = reinterpret_cast<EvictWatch *>(arg);
+
+    while (!w->stop.load()) {
+        struct pollfd pfd;
+        char msg[HSA_SMI_EVENT_MSG_SIZE];
+        int event_id = 0;
+        ssize_t n;
+
+        memset(&pfd, 0, sizeof(pfd));
+        pfd.fd = w->fd;
+        pfd.events = POLLIN;
+        if (poll(&pfd, 1, 50) <= 0)
+            continue;
+
+        memset(msg, 0, sizeof(msg));
+        n = read(w->fd, msg, sizeof(msg) - 1);
+        if (n <= 0)
+            continue;
+        if (sscanf(msg, "%x", &event_id) == 1 &&
+            event_id == HSA_SMI_EVENT_QUEUE_EVICTION)
+            w->count.fetch_add(1);
+    }
+    return 0;
+}
+
+void KFDSVMApiRecycleTest::AllocatorStress(int gpuNode, int op) {
+    const size_t kNeighborSize = 2 * 1024 * 1024;
+    const size_t kVictimSize = 256 * 1024;
+    const size_t kTrimSize = 32 * 1024;
+    const int kIters = 16;
+    /* A storm is about one queue eviction per recycle. A handful is noise. */
+    const int kEvictBound = 4;
+    const HSAuint32 kNeighborPat = 0x11111111;
+    const HSAuint32 kCoverPat = 0xA5A5A5A5;
+
+    if (!SVMAPISupported_GPU(gpuNode)) {
+        LOG() << "Skipping test: SVM not supported on gpuNode." << gpuNode << std::endl;
+        return;
+    }
+    if (!hsakmt_is_dgpu()) {
+        LOG() << "Skipping test: SVM-API register is a no-op on APU." << std::endl;
+        return;
+    }
+
+    unsigned int family = GetFamilyIdFromNodeId(gpuNode);
+    if (family < FAMILY_AI) {
+        LOG() << std::hex << "Skipping test: No svm range support for family ID 0x"
+              << family << "." << std::endl;
+        return;
+    }
+    if (!GetVramSize(gpuNode)) {
+        LOG() << "Skipping test: No VRAM found." << std::endl;
+        return;
+    }
+    if (Get_NodeInfo()->IsAppAPU(gpuNode) ||
+        Get_NodeInfo()->GetNodeProperties(gpuNode)->Integrated) {
+        LOG() << "Skipping test on APU." << std::endl;
+        return;
+    }
+
+#ifndef MADV_FREE
+    if (op == kRecycleMadvFree) {
+        LOG() << "Skipping test: MADV_FREE is not available." << std::endl;
+        return;
+    }
+#endif
+
+    SDMAQueue sdmaQueue;
+    EvictWatch watch;
+    uint64_t watchThread = 0;
+    bool watchRunning = false;
+    long long evictMsBefore = -1;
+    bool smiOk = false;
+    bool skipOp = false;
+
+    void *region = NULL;
+    size_t regionSize = 0;
+    void *neighbor = NULL;
+    void *victim = NULL;
+    void *neighborDst = NULL;
+    void *victimDst = NULL;
+    bool neighborReg = false;
+    bool neighborDstReg = false;
+    bool victimReg = false;
+    bool victimDstReg = false;
+    bool heapVictim = (op == kRecycleMallocTrim);
+    size_t victimSize = heapVictim ? kTrimSize : kVictimSize;
+    bool queueUp = false;
+
+    /*
+     * Overlapping registrations. Deregistering the inner pointer must not
+     * revoke GPU access or clear coherency on pages the outer registration
+     * still owns. An unaligned pointer in the same first page is the case
+     * the page-aligned tracking key got wrong.
+     */
+    {
+        const size_t coverSize = 8 * PAGE_SIZE;
+        void *cover = mmap(NULL, coverSize, PROT_READ | PROT_WRITE,
+                           MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+        void *coverDst = mmap(NULL, coverSize, PROT_READ | PROT_WRITE,
+                              MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+        void *inner = NULL;
+        void *unaligned = NULL;
+        size_t bad = 0;
+
+        EXPECT_NE(MAP_FAILED, cover);
+        EXPECT_NE(MAP_FAILED, coverDst);
+        if (cover == MAP_FAILED || coverDst == MAP_FAILED) {
+            if (cover != MAP_FAILED)
+                munmap(cover, coverSize);
+            if (coverDst != MAP_FAILED)
+                munmap(coverDst, coverSize);
+            goto cleanup;
+        }
+
+        inner = reinterpret_cast<char *>(cover) + 2 * PAGE_SIZE;
+        unaligned = reinterpret_cast<char *>(cover) + 64;
+
+        if (sdmaQueue.Create(gpuNode) != HSAKMT_STATUS_SUCCESS) {
+            EXPECT_TRUE(false) << "SDMA queue create failed";
+            munmap(cover, coverSize);
+            munmap(coverDst, coverSize);
+            goto cleanup;
+        }
+        queueUp = true;
+
+        if (RegisterAndMap(cover, coverSize, false, true) != HSAKMT_STATUS_SUCCESS ||
+            RegisterAndMap(coverDst, coverSize, false, true) != HSAKMT_STATUS_SUCCESS ||
+            RegisterAndMap(inner, 2 * PAGE_SIZE, false, true) != HSAKMT_STATUS_SUCCESS) {
+            EXPECT_TRUE(false) << "SVM register/map of the overlap range failed";
+            Deregister(cover);
+            Deregister(coverDst);
+            Deregister(inner);
+            munmap(cover, coverSize);
+            munmap(coverDst, coverSize);
+            goto cleanup;
+        }
+        EXPECT_TRUE(RangeHasCoherency(cover, coverSize));
+
+        FillDwords(cover, coverSize, kCoverPat);
+        sdmaQueue.PlaceAndSubmitPacket(SDMACopyDataPacket(sdmaQueue.GetFamilyId(),
+                                                          coverDst, cover, coverSize));
+        sdmaQueue.Wait4PacketConsumption();
+        bad = FirstDwordMismatch(coverDst, coverSize, kCoverPat);
+        EXPECT_EQ(bad, coverSize) << "overlap setup copy mismatch at offset " << bad;
+
+        /* Drop the inner registration only. */
+        Deregister(inner);
+        EXPECT_TRUE(RangeHasCoherency(cover, coverSize))
+            << "deregister of an overlapping range cleared coherency on the live range";
+
+        FillDwords(coverDst, coverSize, 0);
+        sdmaQueue.PlaceAndSubmitPacket(SDMACopyDataPacket(sdmaQueue.GetFamilyId(),
+                                                          coverDst, cover, coverSize));
+        sdmaQueue.Wait4PacketConsumption();
+        bad = FirstDwordMismatch(coverDst, coverSize, kCoverPat);
+        EXPECT_EQ(bad, coverSize)
+            << "deregister of an overlapping range revoked GPU access at offset " << bad;
+
+        EXPECT_SUCCESS(RegisterAndMap(unaligned, PAGE_SIZE, false, true));
+        Deregister(unaligned);
+        EXPECT_TRUE(RangeHasCoherency(cover, coverSize))
+            << "deregister of a same-page pointer cleared coherency on the live range";
+
+        FillDwords(coverDst, coverSize, 0);
+        sdmaQueue.PlaceAndSubmitPacket(SDMACopyDataPacket(sdmaQueue.GetFamilyId(),
+                                                          coverDst, cover, coverSize));
+        sdmaQueue.Wait4PacketConsumption();
+        bad = FirstDwordMismatch(coverDst, coverSize, kCoverPat);
+        EXPECT_EQ(bad, coverSize)
+            << "deregister of a same-page pointer revoked GPU access at offset " << bad;
+
+        Deregister(cover);
+        Deregister(coverDst);
+        munmap(cover, coverSize);
+        munmap(coverDst, coverSize);
+        EXPECT_SUCCESS(sdmaQueue.Destroy());
+        queueUp = false;
+    }
+
+    /* Neighbor stays registered for the whole recycle loop. Victim is reused. */
+    if (heapVictim) {
+        regionSize = kNeighborSize;
+        region = mmap(NULL, regionSize, PROT_READ | PROT_WRITE,
+                      MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+        neighbor = region;
+        victim = malloc(victimSize);
+        EXPECT_NOTNULL(victim);
+    } else {
+        regionSize = kNeighborSize + victimSize;
+        region = mmap(NULL, regionSize, PROT_READ | PROT_WRITE,
+                      MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+        neighbor = region;
+        victim = reinterpret_cast<char *>(region) + kNeighborSize;
+    }
+    neighborDst = mmap(NULL, kNeighborSize, PROT_READ | PROT_WRITE,
+                       MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    victimDst = mmap(NULL, victimSize, PROT_READ | PROT_WRITE,
+                     MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+
+    EXPECT_NE(MAP_FAILED, region);
+    EXPECT_NE(MAP_FAILED, neighborDst);
+    EXPECT_NE(MAP_FAILED, victimDst);
+    if (region == MAP_FAILED || neighborDst == MAP_FAILED || victimDst == MAP_FAILED ||
+        (heapVictim && !victim))
+        goto cleanup;
+
+    if (sdmaQueue.Create(gpuNode) != HSAKMT_STATUS_SUCCESS) {
+        EXPECT_TRUE(false) << "SDMA queue create failed";
+        goto cleanup;
+    }
+    queueUp = true;
+
+    neighborReg = RegisterAndMap(neighbor, kNeighborSize, false, true) == HSAKMT_STATUS_SUCCESS;
+    EXPECT_TRUE(neighborReg);
+    neighborDstReg = RegisterAndMap(neighborDst, kNeighborSize, false, true) == HSAKMT_STATUS_SUCCESS;
+    EXPECT_TRUE(neighborDstReg);
+    victimReg = RegisterAndMap(victim, victimSize, true, false) == HSAKMT_STATUS_SUCCESS;
+    EXPECT_TRUE(victimReg);
+    victimDstReg = RegisterAndMap(victimDst, victimSize, true, false) == HSAKMT_STATUS_SUCCESS;
+    EXPECT_TRUE(victimDstReg);
+    if (!neighborReg || !neighborDstReg || !victimReg || !victimDstReg)
+        goto cleanup;
+    EXPECT_TRUE(RangeHasCoherency(neighbor, kNeighborSize));
+    FillDwords(neighbor, kNeighborSize, kNeighborPat);
+
+    if (Get_Version()->KernelInterfaceMinorVersion >= 10) {
+        HSAuint64 events = HSA_SMI_EVENT_MASK_FROM_INDEX(HSA_SMI_EVENT_QUEUE_EVICTION);
+
+        if (HSAKMT_CALL(hsaKmtOpenSMI, m_hsakmt_current_ctx, gpuNode, &watch.fd) ==
+            HSAKMT_STATUS_SUCCESS &&
+            write(watch.fd, &events, sizeof(events)) == (ssize_t)sizeof(events)) {
+            watchRunning = StartThread(WatchQueueEvictions, &watch, watchThread);
+            smiOk = watchRunning;
+        }
+    }
+    evictMsBefore = ReadEvictedMs(Get_NodeInfo()->GetNodeProperties(gpuNode)->KFDGpuID);
+
+    for (int i = 0; i < kIters && !skipOp; i++) {
+        HSAuint32 beforePat = 0x22220000u | i;
+        HSAuint32 afterPat = 0x33330000u | i;
+        size_t bad;
+
+        FillDwords(victim, victimSize, beforePat);
+        FillDwords(neighborDst, kNeighborSize, 0);
+        FillDwords(victimDst, victimSize, 0);
+
+        /* Neighbor copy stays in flight across the recycle that follows. */
+        sdmaQueue.PlacePacket(SDMACopyDataPacket(sdmaQueue.GetFamilyId(),
+                                                 neighborDst, neighbor, kNeighborSize));
+        sdmaQueue.PlaceAndSubmitPacket(SDMACopyDataPacket(sdmaQueue.GetFamilyId(),
+                                                          victimDst, victim, victimSize));
+        sdmaQueue.Wait4PacketConsumption();
+
+        bad = FirstDwordMismatch(victimDst, victimSize, beforePat);
+        EXPECT_EQ(bad, victimSize)
+            << "GPU copy mismatch at offset " << bad << " before recycle " << i;
+        bad = FirstDwordMismatch(neighborDst, kNeighborSize, kNeighborPat);
+        EXPECT_EQ(bad, kNeighborSize)
+            << "neighbor GPU copy mismatch at offset " << bad << " iteration " << i;
+
+        FillDwords(neighborDst, kNeighborSize, 0);
+        sdmaQueue.PlaceAndSubmitPacket(SDMACopyDataPacket(sdmaQueue.GetFamilyId(),
+                                                          neighborDst, neighbor, kNeighborSize));
+        if (victimReg) {
+            Deregister(victim);
+            victimReg = false;
+        }
+
+        if (op == kRecycleMadvDontneed || op == kRecycleMadvFree) {
+            int advice = (op == kRecycleMadvDontneed) ? MADV_DONTNEED : MADV_FREE;
+
+            if (madvise(victim, victimSize, advice) != 0) {
+                if (errno == EINVAL) {
+                    LOG() << "Skipping recycle op " << op
+                          << ": madvise not supported on this kernel." << std::endl;
+                    skipOp = true;
+                } else {
+                    EXPECT_EQ(0, errno) << "madvise failed";
+                }
+            }
+        } else if (op == kRecycleMallocTrim) {
+            void *extra[8];
+
+            free(victim);
+            victim = NULL;
+            for (int e = 0; e < 8; e++) {
+                extra[e] = malloc(kTrimSize);
+                EXPECT_NOTNULL(extra[e]);
+                if (!extra[e])
+                    continue;
+                EXPECT_SUCCESS(RegisterAndMap(extra[e], kTrimSize, true, false));
+                Deregister(extra[e]);
+                free(extra[e]);
+            }
+            malloc_trim(0);
+            victim = malloc(victimSize);
+            EXPECT_NOTNULL(victim);
+            if (!victim) {
+                skipOp = true;
+                break;
+            }
+        } else {
+            void *again;
+
+            EXPECT_EQ(0, munmap(victim, victimSize));
+            again = mmap(victim, victimSize, PROT_READ | PROT_WRITE,
+                         MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED, -1, 0);
+            EXPECT_EQ(victim, again);
+            if (again != victim) {
+                victim = (again == MAP_FAILED) ? NULL : again;
+                skipOp = true;
+                break;
+            }
+        }
+
+        if (skipOp)
+            break;
+
+        memset(victim, 0, victimSize);
+        victimReg = RegisterAndMap(victim, victimSize, true, false) == HSAKMT_STATUS_SUCCESS;
+        EXPECT_TRUE(victimReg);
+        if (!victimReg)
+            break;
+
+        sdmaQueue.Wait4PacketConsumption();
+        bad = FirstDwordMismatch(neighborDst, kNeighborSize, kNeighborPat);
+        EXPECT_EQ(bad, kNeighborSize)
+            << "neighbor changed across recycle at offset " << bad << " iteration " << i;
+        EXPECT_TRUE(RangeHasCoherency(neighbor, kNeighborSize))
+            << "neighbor lost coherency during recycle " << i;
+
+        FillDwords(victim, victimSize, afterPat);
+        FillDwords(victimDst, victimSize, 0);
+        sdmaQueue.PlaceAndSubmitPacket(SDMACopyDataPacket(sdmaQueue.GetFamilyId(),
+                                                          victimDst, victim, victimSize));
+        sdmaQueue.Wait4PacketConsumption();
+        bad = FirstDwordMismatch(victimDst, victimSize, afterPat);
+        EXPECT_EQ(bad, victimSize)
+            << "GPU copy mismatch at offset " << bad << " after recycle " << i;
+    }
+
+    if (smiOk) {
+        int evictions;
+
+        watch.stop.store(true);
+        WaitForThread(watchThread);
+        watchRunning = false;
+        evictions = watch.count.load();
+        LOG() << "queue evictions over 0x" << kIters << " recycles: " << evictions << std::endl;
+
+        if (!skipOp) {
+            /* One CLEAR per recycle is expected for two ops, and is not the
+             * stale-registration storm (that is one eviction per recycle on
+             * top of these):
+             * munmap splits a THP that also covers the neighbor;
+             * malloc_trim MADV_DONTNEEDs free heap holes left by earlier
+             * tests in this process. */
+            bool perRecycle = (op == kRecycleMunmapRemap || op == kRecycleMallocTrim);
+            int bound = perRecycle ? kIters : kEvictBound;
+
+            EXPECT_LE(evictions, bound)
+                << "queue evictions " << evictions << " over " << kIters
+                << " recycles; a stale SVM access attribute evicts once per recycle";
+        }
+    } else if (!skipOp) {
+        long long evictMsAfter =
+            ReadEvictedMs(Get_NodeInfo()->GetNodeProperties(gpuNode)->KFDGpuID);
+
+        if (evictMsBefore >= 0 && evictMsAfter >= 0) {
+            LOG() << "evicted_ms delta " << (evictMsAfter - evictMsBefore) << std::endl;
+            /* munmap and malloc_trim can evict once per recycle; see above. */
+            if (op != kRecycleMunmapRemap && op != kRecycleMallocTrim) {
+                EXPECT_LT(evictMsAfter - evictMsBefore, (long long)500)
+                    << "evicted_ms grew with the recycle loop";
+            }
+        } else {
+            LOG() << "eviction counters unavailable; checked data and coherency only"
+                  << std::endl;
+        }
+    }
+
+cleanup:
+    if (watchRunning) {
+        watch.stop.store(true);
+        WaitForThread(watchThread);
+    }
+    if (watch.fd >= 0)
+        close(watch.fd);
+    if (queueUp)
+        sdmaQueue.Destroy();
+    if (neighborReg)
+        Deregister(neighbor);
+    if (victimReg && victim)
+        Deregister(victim);
+    if (neighborDst && neighborDst != MAP_FAILED) {
+        if (neighborDstReg)
+            Deregister(neighborDst);
+        munmap(neighborDst, kNeighborSize);
+    }
+    if (victimDst && victimDst != MAP_FAILED) {
+        if (victimDstReg)
+            Deregister(victimDst);
+        munmap(victimDst, victimSize);
+    }
+    if (heapVictim)
+        free(victim);
+    if (region && region != MAP_FAILED)
+        munmap(region, regionSize);
+}
+
+TEST_P(KFDSVMApiRecycleTest, SVMApiMadvDontneedStress) {
+    TEST_REQUIRE_ENV_CAPABILITIES(ENVCAPS_64BITLINUX);
+    TEST_START(TESTPROFILE_RUNALL);
+
+    int gpuNode = m_NodeInfo.HsaDefaultGPUNode();
+    ASSERT_GE(gpuNode, 0) << "failed to get default GPU Node";
+    AllocatorStress(gpuNode, kRecycleMadvDontneed);
+
+    TEST_END
+}
+
+TEST_P(KFDSVMApiRecycleTest, SVMApiMadvFreeStress) {
+    TEST_REQUIRE_ENV_CAPABILITIES(ENVCAPS_64BITLINUX);
+    TEST_START(TESTPROFILE_RUNALL);
+
+    int gpuNode = m_NodeInfo.HsaDefaultGPUNode();
+    ASSERT_GE(gpuNode, 0) << "failed to get default GPU Node";
+    AllocatorStress(gpuNode, kRecycleMadvFree);
+
+    TEST_END
+}
+
+TEST_P(KFDSVMApiRecycleTest, SVMApiMallocTrimStress) {
+    TEST_REQUIRE_ENV_CAPABILITIES(ENVCAPS_64BITLINUX);
+    TEST_START(TESTPROFILE_RUNALL);
+
+    int gpuNode = m_NodeInfo.HsaDefaultGPUNode();
+    ASSERT_GE(gpuNode, 0) << "failed to get default GPU Node";
+    AllocatorStress(gpuNode, kRecycleMallocTrim);
+
+    TEST_END
+}
+
+TEST_P(KFDSVMApiRecycleTest, SVMApiMunmapRemapStress) {
+    TEST_REQUIRE_ENV_CAPABILITIES(ENVCAPS_64BITLINUX);
+    TEST_START(TESTPROFILE_RUNALL);
+
+    int gpuNode = m_NodeInfo.HsaDefaultGPUNode();
+    ASSERT_GE(gpuNode, 0) << "failed to get default GPU Node";
+    AllocatorStress(gpuNode, kRecycleMunmapRemap);
+
+    TEST_END
+}
+
 INSTANTIATE_TEST_CASE_P(, KFDSVMRangeTest,::testing::Values(0, 1));
+INSTANTIATE_TEST_CASE_P(, KFDSVMApiRecycleTest, ::testing::Values(0, 1));
