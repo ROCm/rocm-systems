@@ -10,6 +10,10 @@
 #include "hip_internal.hpp"
 #include "platform/activity.hpp"
 
+#if defined(HIP_ROCM_TRACE) && HIP_ROCM_TRACE > 0
+#include "trace/hip_trace.hpp"
+#endif
+
 #include <atomic>
 #include <cstdint>
 
@@ -1613,6 +1617,10 @@ template <typename Tp> Tp* GetDispatchTableImpl(std::atomic<bool>& registered) {
   static auto dispatch_table = Tp{};
   static auto* table = [] {
     UpdateDispatchTable(&dispatch_table);
+#if defined(HIP_ROCM_TRACE) && HIP_ROCM_TRACE > 0
+    // Before ToolsInit, so tools wrap the probe and it stays innermost.
+    hip::trace::InstallProbes(&dispatch_table);
+#endif
     return &dispatch_table;
   }();
   if (!registered.load(std::memory_order_acquire)) {
