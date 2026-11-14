@@ -7878,6 +7878,21 @@ std::string intraNodeSymReason() {
   return "";
 }
 
+// RailRing_LsaST AllGather gates; the placement check is collective so every rank gets the same verdict.
+std::string railRingAllGatherSkipReason() {
+  if (requestedGinType() == NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA)
+    return "Skipping symmetric AllGather (RailRing_LsaST) for rocSHMEM-GDA";
+  // anvil-sdma is single-node. Symmetric AllGather is a multi-node test.
+  if (requestedGinType() == NCCL_NET_DEVICE_GIN_ANVIL_SDMA)
+    return "Symmetric AllGather not supported for anvil-sdma: single-node backend";
+  if (auto reason = ginProxyTestSkipReason(); !reason.empty()) return reason;
+  if (auto reason = crossNodeReason(); !reason.empty()) return reason;
+  int ranksPerNode = 0;
+  if (!uniformNodeLocalRanks(&ranksPerNode) || ranksPerNode < kMinLsaRanksPerNode)
+    return "Requires a uniform placement with >=" + std::to_string(kMinLsaRanksPerNode) + " ranks per node";
+  return "";
+}
+
 // End-to-end ReduceScatter through the public collective API on symmetric
 // (NCCL_WIN_COLL_SYMMETRIC) buffers. Registering the buffers makes the
 // symmetric-memory RS kernel (RailA2A_LsaLD) eligible, so this drives the
@@ -8221,6 +8236,105 @@ TEST_F(GinMPIDeviceTests, AllGather_Symmetric_InPlace) {
     for (size_t j = 0; j < recvElems; j++)
       ASSERT_EQ(static_cast<float>(j), hostRecv[j])
           << "rank=" << rank << " j=" << j << " (src=" << j / count << " i=" << j % count << ")";
+  }
+}
+
+// uint8 RailRing AllGather whose LSA broadcast ends in a ragged byte tail (nBytes % 4 == 1).
+TEST_F(GinMPIDeviceTests, AllGather_RailRing_ByteTail) {
+  if (auto reason = railRingAllGatherSkipReason(); !reason.empty())
+    GTEST_SKIP() << reason;
+
+  if (!validateTestPrerequisites(/*min_processes=*/2, /*max_processes=*/8))
+    GTEST_SKIP() << "Requires 2-8 ranks";
+
+  // Read at communicator init; a forced kernel that cannot run fails the call instead of falling back.
+  MPIHelpers::MpiEnvGuard symKernelGuard("NCCL_SYM_KERNEL", "AllGather_RailRing_LsaST");
+  ASSERT_EQ(ncclSuccess, createTestCommunicator());
+  ncclComm_t  comm   = getActiveCommunicator();
+  hipStream_t stream = getActiveStream();
+
+  int rank = -1, nRanks = -1;
+  ncclCommUserRank(comm, &rank);
+  ncclCommCount(comm, &nRanks);
+  ASSERT_GE(nRanks, 2);
+  ASSERT_LE(nRanks, 8);
+
+  // Odd byte counts misalign every peer's head and leave a 1-byte tail after the 16 B and 4 B tiers.
+  const std::vector<size_t> counts = {17, 1021, 4101, 12301};
+  // Never 0xFF, the prefill, so an unwritten byte cannot match.
+  auto pattern = [](size_t src, size_t i) { return static_cast<uint8_t>((i + 37 * src) % 251); };
+  // Trailing bytes past each buffer; catches a tail written or read one past the block.
+  constexpr size_t kGuard = 64;
+
+  for (size_t count : counts) {
+    for (bool inPlace : {false, true}) {
+      SCOPED_TRACE(::testing::Message() << "count=" << count << " inPlace=" << inPlace);
+
+      const size_t recvBytes = count * static_cast<size_t>(nRanks);
+      const size_t ownOffset = static_cast<size_t>(rank) * count;
+
+      void* dSendBuf = nullptr;
+      void* dRecv = nullptr;
+      if (!inPlace) ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&dSendBuf, count + kGuard));
+      ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&dRecv, recvBytes + kGuard));
+      auto memCleanup = makeScopeGuard([&]() {
+        if (dSendBuf) (void)ncclMemFree(dSendBuf);
+        if (dRecv) (void)ncclMemFree(dRecv);
+      });
+
+      ncclWindow_t sendWin = nullptr, recvWin = nullptr;
+      if (!inPlace) {
+        ASSERT_MPI_EQ(ncclSuccess,
+            ncclCommWindowRegister(comm, dSendBuf, count + kGuard, &sendWin, NCCL_WIN_COLL_SYMMETRIC));
+      }
+      ASSERT_MPI_EQ(ncclSuccess,
+          ncclCommWindowRegister(comm, dRecv, recvBytes + kGuard, &recvWin, NCCL_WIN_COLL_SYMMETRIC));
+      auto winCleanup = makeScopeGuard([&]() {
+        if (sendWin) (void)ncclCommWindowDeregister(comm, sendWin);
+        if (recvWin) (void)ncclCommWindowDeregister(comm, recvWin);
+      });
+      ASSERT_MPI_NE(recvWin, nullptr);
+
+      uint8_t* dSend = inPlace ? static_cast<uint8_t*>(dRecv) + ownOffset : static_cast<uint8_t*>(dSendBuf);
+
+      // Send padding is 0xFE (never a pattern byte), so an over-read tail shows up in the recv guard.
+      std::vector<uint8_t> hostSend(count + kGuard, 0xFE);
+      for (size_t i = 0; i < count; i++) hostSend[i] = pattern(static_cast<size_t>(rank), i);
+      std::vector<uint8_t> hostRecv(recvBytes + kGuard, 0xFF);
+      if (inPlace) std::copy(hostSend.begin(), hostSend.begin() + count, hostRecv.begin() + ownOffset);
+      ASSERT_MPI_EQ(hipSuccess, hipMemcpy(dRecv, hostRecv.data(), hostRecv.size(), hipMemcpyHostToDevice));
+      if (!inPlace)
+        ASSERT_MPI_EQ(hipSuccess, hipMemcpy(dSend, hostSend.data(), hostSend.size(), hipMemcpyHostToDevice));
+
+      int algo = -1, proto = -1, nChannels = 0;
+      ASSERT_MPI_EQ(ncclSuccess, rcclGetCollImplInfo(comm, ncclFuncAllGather, count, ncclUint8, ncclSum, dSend,
+                                                     dRecv, /*graphCapturing=*/0, &algo, &proto, &nChannels));
+      ASSERT_MPI_EQ(static_cast<int>(RCCL_SYMMETRIC), algo);
+
+      MPI_Barrier(MPI_COMM_WORLD);
+
+      ASSERT_MPI_EQ(ncclSuccess, ncclAllGather(dSend, dRecv, count, ncclUint8, comm, stream));
+      ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(stream));
+
+      MPI_Barrier(MPI_COMM_WORLD);
+
+      ASSERT_MPI_EQ(hipSuccess, hipMemcpy(hostRecv.data(), dRecv, hostRecv.size(), hipMemcpyDeviceToHost));
+      // Bytes past recvBytes are the guard band and must stay 0xFF.
+      auto expectedAt = [&](size_t j) { return j < recvBytes ? pattern(j / count, j % count) : uint8_t{0xFF}; };
+      size_t firstBad = hostRecv.size();
+      for (size_t j = 0; j < hostRecv.size(); j++) {
+        if (hostRecv[j] != expectedAt(j)) {
+          firstBad = j;
+          break;
+        }
+      }
+      if (firstBad != hostRecv.size()) {
+        ADD_FAILURE() << "rank=" << rank << " j=" << firstBad << " (src=" << firstBad / count
+                      << " i=" << firstBad % count << ") expected=" << static_cast<int>(expectedAt(firstBad))
+                      << " got=" << static_cast<int>(hostRecv[firstBad]);
+      }
+      ASSERT_MPI_EQ(hostRecv.size(), firstBad);
+    }
   }
 }
 
