@@ -14,7 +14,7 @@ from utils.utils_common import (
     PROFILE_OUTPUT_FORMAT,
     resolve_rocm_library_path,
 )
-from utils.utils_profile import pc_sampling_unit
+from utils.utils_profile import find_attach_tool_library, pc_sampling_unit
 
 
 def _resolve_sdk_roctx_library(rocprofiler_sdk_tool_path: str) -> Optional[str]:
@@ -90,7 +90,13 @@ class rocprofiler_sdk_profiler(RocProfCompute_Base):
             # In attach mode, tools are provided using ROCPROF_ATTACH_TOOL_LIBRARY
             # instead of LD_PRELOAD.
             # Build attach tool list (only our tools, not user's LD_PRELOAD)
-            attach_tools = [args.rocprofiler_sdk_tool_path]
+            sdk_attach_tool = find_attach_tool_library(args.attach_pid)
+            if sdk_attach_tool is None:
+                console_error(
+                    "Cannot find librocprofiler-sdk-tool.so in the ROCm "
+                    f"installation of process {args.attach_pid}."
+                )
+            attach_tools = [sdk_attach_tool]
             if native_tool_path:
                 attach_tools.append(native_tool_path)
             options.update({
@@ -188,9 +194,6 @@ class rocprofiler_sdk_profiler(RocProfCompute_Base):
     @demarcate
     def run_profiling(self, version: str, prog: str) -> None:
         """Run profiling."""
-        if self.get_args().roof_only:
-            console_log("roofline", "Profiling roofline counters only.")
-
         # Log profiling options and setup filtering
         super().run_profiling(version, prog)
 

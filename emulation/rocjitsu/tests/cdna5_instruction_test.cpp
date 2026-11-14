@@ -361,7 +361,7 @@ TEST(Gfx1250SimulationTest, SGetShaderCyclesU64ReadsSimulationTime) {
   EXPECT_LE(observed_time, sim.engine->global_time());
 }
 
-TEST(Gfx1250SimulationTest, SSendmsgRtnB64ReadsRealtimeAndB32UsesPlaceholder) {
+TEST(Gfx1250SimulationTest, SSendmsgRtnReadsRealtimeAndReportsUnmappedDoorbell) {
   const uint32_t code[] = {
       0xBE844D83u, // s_sendmsg_rtn_b64 s[4:5], sendmsg(MSG_RTN_GET_REALTIME)
       0xBE864C80u, // s_sendmsg_rtn_b32 s6, sendmsg(MSG_RTN_GET_DOORBELL)
@@ -370,16 +370,17 @@ TEST(Gfx1250SimulationTest, SSendmsgRtnB64ReadsRealtimeAndB32UsesPlaceholder) {
 
   Gfx1250Sim sim;
   ASSERT_NO_FATAL_FAILURE(sim.initialize());
-  sim.engine->schedule_event_async(sim.cp()->doorbell_event(), 23);
+  constexpr uint64_t ticks_per_ns = simdojo::TICKS_PER_SECOND / 1'000'000'000;
+  sim.engine->schedule_event_async(sim.cp()->doorbell_event(), 23 * ticks_per_ns);
   ASSERT_TRUE(sim.engine->step());
-  ASSERT_EQ(sim.engine->global_time(), 23u);
+  ASSERT_EQ(sim.engine->global_time(), 23u * ticks_per_ns);
 
   const auto *wf = dispatch_one_wave(sim, code, std::size(code));
   ASSERT_NE(wf, nullptr);
   const auto observed_time = wf->sgpr64(4);
   EXPECT_GE(observed_time, 23u);
-  EXPECT_LE(observed_time, sim.engine->global_time());
-  EXPECT_EQ(wf->sgpr(6), 0u);
+  EXPECT_LE(observed_time, sim.engine->global_time() / ticks_per_ns);
+  EXPECT_EQ(wf->sgpr(6), 0xbadu);
 }
 
 TEST(Gfx1250SimulationTest, SMovrelsReadsM0IndexedScalarSources) {
@@ -1509,6 +1510,7 @@ TEST(Gfx1250SimulationTest, DsStorexchg2addrB64ExchangesBothAddresses) {
 
   auto &cu = *sim.cu();
   wf->set_lds_base(cu.allocate_lds(256));
+  wf->set_lds_size(256);
   constexpr uint32_t kAddr = 1;
   constexpr uint32_t kData0 = 2;
   constexpr uint32_t kData1 = 4;
@@ -1567,6 +1569,7 @@ TEST(Gfx1250SimulationTest, NonReturningDsAddU32DoesNotWriteVgpr) {
 
   auto &cu = *sim.cu();
   wf->set_lds_base(cu.allocate_lds(64));
+  wf->set_lds_size(64);
   constexpr uint32_t kAddr = 1;
   constexpr uint32_t kData = 2;
   constexpr uint32_t kUnusedVdst = 4;
@@ -1608,6 +1611,7 @@ TEST(Gfx1250SimulationTest, NonReturningDsAddU64DoesNotWriteVgpr) {
 
   auto &cu = *sim.cu();
   wf->set_lds_base(cu.allocate_lds(64));
+  wf->set_lds_size(64);
   constexpr uint32_t kAddr = 1;
   constexpr uint32_t kData = 2;
   constexpr uint32_t kUnusedVdst = 4;
@@ -1653,6 +1657,7 @@ TEST(Gfx1250SimulationTest, DsStorexchg2addrStride64B32UsesScaledOffsetsForActiv
 
   auto &cu = *sim.cu();
   wf->set_lds_base(cu.allocate_lds(1024));
+  wf->set_lds_size(1024);
   constexpr uint32_t kAddr = 1;
   constexpr uint32_t kData0 = 2;
   constexpr uint32_t kData1 = 3;
@@ -1732,6 +1737,7 @@ TEST(Gfx1250SimulationTest, DsStorexchg2addrSameAddressAppliesBothExchangesInOrd
 
   auto &cu = *sim.cu();
   wf->set_lds_base(cu.allocate_lds(64));
+  wf->set_lds_size(64);
   constexpr uint32_t kAddr = 1;
   constexpr uint32_t kData0 = 2;
   constexpr uint32_t kData1 = 3;
@@ -2020,6 +2026,7 @@ TEST(Gfx1250SimulationTest, DsAddtidLoadAndStoreUseM0ByteBaseAddresses) {
 
   auto &cu = *sim.cu();
   wf->set_lds_base(cu.allocate_lds(0x4000));
+  wf->set_lds_size(0x4000);
   constexpr uint32_t kM0ByteBase = 0x1000;
   wf->set_m0(kM0ByteBase);
 

@@ -3,6 +3,7 @@
 
 // Tests for EXEC boolean operations, saved masks, and SCC results.
 
+#include "rj_arith/detail/rj_arith_scalar.h"
 #include "scalar/integer_helpers.h"
 
 namespace {

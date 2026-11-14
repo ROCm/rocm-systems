@@ -8,9 +8,9 @@
 // GFX1201 captures establish a 1184-bit table and pre-scaling OMOD flush.
 
 #include "math/trig_preop.h"
-#include "common/internal.h"
+#include "common/validation.h"
 #include "fp/float_output.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_math.h"
 
 #include <stdint.h>
 

@@ -51,24 +51,14 @@ NESTED = {
 ABOVE = {"id": "outer", "title": "Outer", "column": 4, "row": -1, "style": "panel"}
 
 
-def panel_metrics(arch):
-    """(name, id) of each user-facing memory chart metric, in config order.
-
-    ``_collect.*`` rows stay in the panel YAML for formula evaluation. They
-    are not chart metrics, matching the analysis database export.
-    """
-    return [
-        (name, metric_id)
-        for source in PanelConfigs.for_arch(arch)["data source"]
-        for table in source.values()
-        for name, metric_id in metric_ids_by_name(table).items()
-        if not str(name).startswith("_collect.")
-    ]
-
-
 def panel_metric_ids(arch):
     """Memory chart metric ids of an arch."""
-    return {metric_id for _name, metric_id in panel_metrics(arch)}
+    return {
+        metric_id
+        for source in PanelConfigs.for_arch(arch)["data source"]
+        for table in source.values()
+        for metric_id in metric_ids_by_name(table).values()
+    }
 
 
 def gfx950_data():
@@ -128,24 +118,6 @@ def test_layout_shows_every_panel_metric_and_no_other(path, arch):
         f"not in the {arch} memory chart panel: {sorted(shown - panel)}"
     )
     assert not panel - shown, f"missing from {path.name}: {sorted(panel - shown)}"
-
-
-@pytest.mark.parametrize(
-    ("arch", "vl1_hit_id"),
-    (
-        ("gfx908", "3.1.14"),
-        ("gfx90a", "3.1.14"),
-        ("gfx942", "3.1.14"),
-        ("gfx950", "3.1.17"),
-    ),
-)
-def test_panel_metric_names_keep_vl1_hit_and_omit_collect_rows(arch, vl1_hit_id):
-    # Collect rows sit after the chart metrics, so they leave chart ids alone
-    metrics = panel_metrics(arch)
-    names = [name for name, _metric_id in metrics]
-    assert ("VL1 Hit", vl1_hit_id) in metrics
-    assert "_collect.vl1d_hit_atom" not in names
-    assert "_collect.vl1d_hit_non_rw" not in names
 
 
 @pytest.mark.parametrize(("path", "arch"), LAYOUT_ARCHS, ids=LAYOUT_ARCH_IDS)

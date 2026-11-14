@@ -388,58 +388,6 @@ class TestBuildDfs:
         assert 301 in ac.dfs
         assert 3001 not in ac.dfs
 
-    def test_filter_keeps_collectables_a_parent_needs(self):
-        metrics = {
-            "AI HBM": {
-                "value": "COLLECT_RATIO(_collect.flops, _collect.bytes)",
-            },
-            "_collect.flops": {"value": "SUM(SQ_INSTS_VALU_ADD_F32)"},
-            "_collect.bytes": {"value": "SUM(TCC_EA0_RDREQ_sum)"},
-            "Other": {"value": "SUM(SQ_WAVES)"},
-        }
-        ac = _make_arch_config([
-            (400, _metric_panel(400, 402, metrics=metrics)),
-        ])
-        build_dfs(
-            ac, filter_metrics=["4.2.0"], sys_info=_sys_info(), profiling_config={}
-        )
-        names = list(ac.dfs[402]["Metric"])
-        assert "AI HBM" in names
-        assert "_collect.flops" in names
-        assert "_collect.bytes" in names
-        assert "Other" not in names
-
-    def test_composite_parent_min_with_counter_is_rejected(self):
-        metrics = {
-            "parent": {
-                "value": "COLLECT_SUM(_collect.a, _collect.b)",
-                "min": "SUM(SQ_WAVES)",
-            },
-            "_collect.a": {"value": "SUM(SQ_INSTS_VALU_ADD_F32)"},
-            "_collect.b": {"value": "SUM(SQ_WAVES)"},
-        }
-        ac = _make_arch_config([
-            (1700, _metric_panel(1700, 1701, metrics=metrics)),
-        ])
-        with pytest.raises(ValueError, match="SQ_WAVES"):
-            build_dfs(
-                ac, filter_metrics=None, sys_info=_sys_info(), profiling_config={}
-            )
-
-    def test_composite_parent_min_none_still_parses(self):
-        metrics = {
-            "parent": {
-                "value": "COLLECT_SUM(_collect.a)",
-                "min": None,
-            },
-            "_collect.a": {"value": "SUM(SQ_WAVES)"},
-        }
-        ac = _make_arch_config([
-            (1700, _metric_panel(1700, 1701, metrics=metrics)),
-        ])
-        build_dfs(ac, filter_metrics=None, sys_info=_sys_info(), profiling_config={})
-        assert list(ac.dfs[1701]["Metric"]) == ["parent", "_collect.a"]
-
 
 # =============================================================================
 # expand_placeholder_ranges
@@ -1126,16 +1074,16 @@ class TestCorrectSysInfo:
     def test_single_pair_overrides_spec(self, monkeypatch) -> None:
         """One name:value pair updates the spec object and the returned frame."""
         mspec = make_mi350_machine_specs(monkeypatch)
-        sys_info = correct_sys_info(mspec, "num_xcd:4")
+        sys_info = correct_sys_info(mspec, ["num_xcd:4"])
 
         assert mspec.num_xcd == "4"
         assert len(sys_info) == 1
         assert sys_info["num_xcd"].item() == "4"
 
     def test_multiple_pairs_override_every_spec(self, monkeypatch) -> None:
-        """Comma-separated pairs are all applied."""
+        """Every pair is applied."""
         mspec = make_mi350_machine_specs(monkeypatch)
-        sys_info = correct_sys_info(mspec, "num_xcd:4,cu_per_gpu:64")
+        sys_info = correct_sys_info(mspec, ["num_xcd:4", "cu_per_gpu:64"])
 
         assert sys_info["num_xcd"].item() == "4"
         assert sys_info["cu_per_gpu"].item() == "64"
@@ -1143,7 +1091,7 @@ class TestCorrectSysInfo:
     def test_surrounding_whitespace_is_stripped(self, monkeypatch) -> None:
         """Spaces around names and values do not break the override."""
         sys_info = correct_sys_info(
-            make_mi350_machine_specs(monkeypatch), " num_xcd : 4 , cu_per_gpu:64 "
+            make_mi350_machine_specs(monkeypatch), [" num_xcd : 4 ", "cu_per_gpu:64"]
         )
 
         assert sys_info["num_xcd"].item() == "4"
@@ -1156,31 +1104,21 @@ class TestCorrectSysInfo:
         analysis_base.initalize_runs() reads sys_info["ip_blocks"] straight
         after the correction, so dropping columns here would break analysis.
         """
-        sys_info = correct_sys_info(make_mi350_machine_specs(monkeypatch), "num_xcd:4")
+        mspec = make_mi350_machine_specs(monkeypatch)
+        sys_info = correct_sys_info(mspec, ["num_xcd:4"])
 
         assert sys_info["ip_blocks"].item().startswith("SQ|LDS|")
         assert sys_info["gpu_arch"].item() == "gfx950"
         assert sys_info["gpu_model"].item() == "MI350"
         assert sys_info["total_l2_chan"].item() == "128"
 
-    def test_fragment_without_separator_is_ignored(self, monkeypatch) -> None:
-        """A fragment with no ':' is skipped; valid pairs still apply."""
-        mspec = make_mi350_machine_specs(monkeypatch)
-        sys_info = correct_sys_info(mspec, "num_xcd:4,garbage")
-
-        assert sys_info["num_xcd"].item() == "4"
-        assert sys_info["cu_per_gpu"].item() == "256"
-
-    def test_value_keeps_everything_after_the_first_colon(self, monkeypatch) -> None:
-        """Only the first ':' separates name from value."""
-        sys_info = correct_sys_info(
-            make_mi350_machine_specs(monkeypatch), "command:./vcopy -n 1:2"
-        )
-
-        assert sys_info["command"].item() == "./vcopy -n 1:2"
-
-    def test_unknown_spec_name_errors_and_exits(self, monkeypatch) -> None:
-        """An unknown spec name reports the name and aborts."""
+    @pytest.mark.parametrize(
+        "pair",
+        ["not_a_spec:1", "num_xcd", "num_xcd:4,cu_per_gpu:64"],
+        ids=["unknown_name", "no_colon", "comma_separated_pairs"],
+    )
+    def test_invalid_pair_errors_and_exits(self, monkeypatch, pair) -> None:
+        """A pair without exactly one ':' or with an unknown name aborts."""
         error_calls = []
 
         def record_and_exit(*args, **_kwargs):
@@ -1192,7 +1130,7 @@ class TestCorrectSysInfo:
         )
 
         with pytest.raises(SystemExit):
-            correct_sys_info(make_mi350_machine_specs(monkeypatch), "not_a_spec:1")
+            correct_sys_info(make_mi350_machine_specs(monkeypatch), [pair])
 
-        assert "not_a_spec" in str(error_calls[0])
-        assert "--specs" in str(error_calls[0])
+        assert pair in str(error_calls[0])
+        assert "sysinfo.csv" in str(error_calls[0])

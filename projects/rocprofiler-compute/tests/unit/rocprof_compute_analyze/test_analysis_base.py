@@ -114,7 +114,7 @@ def test_pre_processing_stdout_creates_no_file(tmp_path, monkeypatch) -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("specs_correction", [None, "num_xcd:4"])
+@pytest.mark.parametrize("specs_correction", [None, ["num_xcd:4"]])
 def test_initalize_runs_corrects_specs_only_when_asked(
     tmp_path, monkeypatch, specs_correction
 ) -> None:
@@ -136,7 +136,6 @@ def test_initalize_runs_corrects_specs_only_when_asked(
             normal_unit="per_kernel",
             list_stats=False,
             filter_metrics=None,
-            config_dir=str(tmp_path),
             gpu_kernel=None,
         ),
         {},

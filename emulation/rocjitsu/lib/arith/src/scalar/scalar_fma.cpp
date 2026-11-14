@@ -7,11 +7,11 @@
 // Fused rounding and tininess detection follow rocjitsu shared/fp_mode.h.
 // FP16 uses the existing rocjitsu-derived half_fma_value model.
 
-#include "common/float_formats.h"
-#include "common/internal.h"
+#include "common/float_encoding.h"
+#include "common/validation.h"
 #include "fp/fma_scalar.h"
 #include "fp/half_fma_scalar.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_scalar.h"
 
 #include <stdint.h>
 

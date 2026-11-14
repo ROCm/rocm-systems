@@ -7,7 +7,7 @@
 """
 Sample PyTorch workload for rocprof-compute --trace-ml-api torch.
 
-    rocprof-compute profile --experimental --trace-ml-api torch --no-roof \
+    rocprof-compute profile --experimental --trace-ml-api torch --speed-of-light \
         -n simple_net -- python3 ./simple_net.py
 
     --user-range         Wrap the first Linear in a user ROCTX range.

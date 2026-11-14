@@ -145,5 +145,5 @@ To update the code in your PR (eg. in response to a code review discussion), you
 
 ### Doxygen Editing Guidelines ###
 
-* bugs should be marked with @bugs near the code where the bug might be fixed.  The @bug message will appear in the API description and also in the
+* bugs should be marked with \@bug near the code where the bug might be fixed.  The \@bug message will appear in the API description and also in the
 doxygen bug list.

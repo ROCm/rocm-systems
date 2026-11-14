@@ -1675,6 +1675,9 @@ graph:
   Unit_hipGraphKernelNodeSetAttribute_Positive_Cooperative:
     <<: *level_default
     tags: [node]
+  Unit_hipGraphKernelNodeSetAttribute_Priority:
+    <<: *level_2
+    tags: [node]
   Unit_hipGraphKernelNodeSetAttribute_Negative_Parameters:
     <<: *level_default
     tags: [node]
@@ -2015,5 +2018,14 @@ graph:
     <<: *level_default
     tags: [node]
   Unit_hipGraphExecExternalSemaphoresNodeSetParams_Negative_InvalidArgs:
+    <<: *level_default
+    tags: [node]
+  Unit_hipGraphExecChildGraphNodeSetParams_UpdateEmbeddedNodes:
+    <<: *level_default
+    tags: [node]
+  Unit_hipGraphExecChildGraphNodeSetParams_UpdateNestedChildGraphNodes:
+    <<: *level_default
+    tags: [node]
+  Unit_hipGraphExecChildGraphNodeSetParams_NodeFromUnrelatedGraphRejected:
     <<: *level_default
     tags: [node]

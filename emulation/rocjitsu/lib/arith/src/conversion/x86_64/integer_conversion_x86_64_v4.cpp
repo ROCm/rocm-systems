@@ -5,7 +5,7 @@
 // CPU-specific arithmetic stays here; public entry points select this backend.
 
 #include "conversion/integer_conversion.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_conversion.h"
 
 #include <immintrin.h>
 #include <stdint.h>

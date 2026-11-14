@@ -42,16 +42,11 @@ from utils.utils_analysis import (
 from utils.utils_common import (
     convert_filter_blocks_to_panel_ids,
     format_table_id,
+    selects_roofline,
     strip_ansi,
 )
 
 _GUIDANCE_PANEL_MIN_WIDTH = 100
-
-
-def _tty_view_is_table(args: argparse.Namespace) -> bool:
-    """True when ``--view table`` was given (plain tables; ignore cli_style)."""
-    return getattr(args, "view", None) == "table"
-
 
 KERNEL_NAME_WRAP_WIDTH = 40
 
@@ -216,11 +211,7 @@ def is_roofline_shown(
         for table_type in data_source
     )
 
-    if not has_roofline_style or (
-        args.filter_metrics
-        and "4" not in args.filter_metrics
-        and "roof" not in args.filter_metrics
-    ):
+    if not has_roofline_style or not selects_roofline(args.filter_metrics):
         return False
 
     # Check if any run has valid roofline data (already validated in analysis_base.py)
@@ -283,14 +274,13 @@ def is_roofline_shown(
                 }
 
                 for table_id, (table_name, df) in tables.items():
-                    visible = _visible_cli_table_rows(df, "metric_table")
-                    if visible.empty:
+                    if df.empty:
                         continue
 
                     print(f"{base_indent}├─ {table_name}", file=output)
 
                     table_string = get_table_string(
-                        visible, transpose=False, decimal=args.decimal
+                        df, transpose=False, decimal=args.decimal
                     )
                     indented_table = textwrap.indent(table_string, table_indent_prefix)
                     print(indented_table, file=output)
@@ -677,24 +667,6 @@ def _safe_round_value(
         return "N/A"
 
 
-def _is_hidden_collectable_metric(name: object) -> bool:
-    """True for internal ``_collect.*`` rows.
-
-    Same visibility rule as the analysis-db export.
-    """
-    return isinstance(name, str) and name.startswith("_collect.")
-
-
-def _visible_cli_table_rows(frame: pd.DataFrame, table_type: str) -> pd.DataFrame:
-    """Drop ``_collect.*`` rows from a CLI metric table."""
-    if table_type != "metric_table" or "Metric" not in frame.columns:
-        return frame
-    visible = [
-        not _is_hidden_collectable_metric(name) for name in frame["Metric"].tolist()
-    ]
-    return frame.loc[visible]
-
-
 def process_table_data(
     args: argparse.Namespace,
     runs: dict[str, Any],
@@ -704,7 +676,7 @@ def process_table_data(
 ) -> pd.DataFrame:
     # take the 1st run as baseline
     base_run, base_data = next(iter(runs.items()))
-    base_df = _visible_cli_table_rows(base_data.dfs[table_config["id"]], table_type)
+    base_df = base_data.dfs[table_config["id"]]
 
     if args.time_unit and has_time_data(base_df):
         base_df = convert_time_columns(base_df, args.time_unit)
@@ -730,9 +702,7 @@ def process_table_data(
         else:
             # Process columns that can be compared across runs.
             for run_name, run_data in runs.items():
-                cur_df = _visible_cli_table_rows(
-                    run_data.dfs[table_config["id"]], table_type
-                )
+                cur_df = run_data.dfs[table_config["id"]]
 
                 if args.time_unit and has_time_data(base_df):
                     cur_df = convert_time_columns(cur_df, args.time_unit)
@@ -957,15 +927,15 @@ def show_all(
     # True if roofline (block 4) is in the active filter
     # or no filter is applied
     roofline_in_filter = (
-        any(str(m).split(".")[0] == "4" for m in args.filter_metrics)
+        selects_roofline(args.filter_metrics)
         if args.filter_metrics
         else (not filter_panel_ids or 400 in filter_panel_ids)
     )
 
     for panel_id, panel in arch_configs.panel_configs.items():
         # Handle roofline panel (400) with custom display logic
-        # Skip if --view table is set; tables 401/402 will be rendered as normal tables
-        if panel_id == 400 and not _tty_view_is_table(args):
+        # With --debug-table-view, tables 401/402 render as normal tables.
+        if panel_id == 400 and not args.debug_table_view:
             _ = is_roofline_shown(args, runs, output, panel)
 
         panel_content = ""  # store content of all data_source from one panel
@@ -992,7 +962,7 @@ def show_all(
                         roofline_warning_shown = True
 
                 # Block-filter logic:
-                # - If analysis used --filter-metrics, ignore profiling block filters
+                # - If analysis used -b/--block, ignore profiling block filters
                 # - If profiling had block filters, only show selected tables/panels
                 # - Always show panels with id <= 100
                 if (
@@ -1056,7 +1026,7 @@ def show_all(
                 # normal table output.
                 is_mem_chart = (
                     table_config.get("cli_style") == "mem_chart"
-                    and not _tty_view_is_table(args)
+                    and not args.debug_table_view
                     and Layouts.for_arch(gpu_arch) is not None
                 )
 
@@ -1099,9 +1069,9 @@ def show_all(
                 )
 
         # Roofline printing is handled separately above in is_roofline_shown.
-        # With --view table, roofline tables (401/402) render as normal tables.
+        # With --debug-table-view, roofline tables (401/402) render as normal tables.
         if panel_content and (
-            table_config["id"] not in [401, 402] or _tty_view_is_table(args)
+            table_config["id"] not in [401, 402] or args.debug_table_view
         ):
             if not hasattr(output, "isatty") or not output.isatty():
                 panel_content = strip_ansi(panel_content)

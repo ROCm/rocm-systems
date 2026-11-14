@@ -4,10 +4,7 @@
 from collections import OrderedDict
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Optional
-
-if TYPE_CHECKING:
-    from utils.metrics.pass_layout import PassLayout
+from typing import Any, Optional
 
 import pandas as pd
 
@@ -50,8 +47,8 @@ class MlApiTracePair:
 class Workload:
     sys_info: pd.DataFrame = field(default_factory=pd.DataFrame)
     raw_pmc: pd.DataFrame = field(default_factory=pd.DataFrame)
-    # PassLayout for same-pass metric binding; None when unavailable.
-    pmc_pass_layout: Optional["PassLayout"] = None
+    # One counter table per pass, on raw_pmc's rows, keyed by pass name.
+    pass_tables: dict[str, pd.DataFrame] = field(default_factory=dict)
     dfs: dict[int, pd.DataFrame] = field(default_factory=dict)
     dfs_type: dict[int, str] = field(default_factory=dict)
     filter_kernel_ids: list[int] = field(default_factory=list)

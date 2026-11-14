@@ -2,13 +2,10 @@
 # SPDX-License-Identifier:  MIT
 
 from pathlib import Path
-from typing import Any, List, Union
+from typing import Any, Union
 
 from ruamel.yaml import YAML
 from ruamel.yaml.comments import CommentedMap
-
-# Per-arch collectable formulas, not a panel config
-COLLECTABLES_FILENAME = "collectables.yaml"
 
 # --- Round-trip YAML (for writing) ---
 RT_YAML = YAML(typ="rt")
@@ -36,13 +33,6 @@ def load_yaml(
 
     with open(path, "r", encoding="utf-8") as f:
         return yaml.load(f) or CommentedMap()
-
-
-def panel_yaml_paths(directory: Path) -> List[Path]:
-    """Panel YAML files of directory, without the collectables file."""
-    return sorted(
-        path for path in directory.glob("*.yaml") if path.name != COLLECTABLES_FILENAME
-    )
 
 
 def save_yaml(data: Any, filepath: Union[str, Path]) -> None:

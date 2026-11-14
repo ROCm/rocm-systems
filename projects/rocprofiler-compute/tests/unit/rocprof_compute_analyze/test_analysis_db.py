@@ -29,8 +29,6 @@ from pc_sampling.code_object_analysis import CodeObjectInstruction, CodeObjectSy
 from pc_sampling.pc_sampling_analysis import SOURCE_LINE_MISSING, InstructionLineRecord
 from rocprof_compute_analyze.analysis_db import (
     SourceFrameCollector,
-    _roofline_point_values,
-    _visible_metric_rows,
     db_analysis,
     filter_dispatch_frame,
     report_evaluation_diagnostics,
@@ -38,11 +36,6 @@ from rocprof_compute_analyze.analysis_db import (
 from utils import analysis_orm as orm
 from utils import schema
 from utils.file_io import create_df_kernel_top_stats
-from utils.metrics.noise_clamper import (
-    clear_noise_clamp_warnings,
-    get_noise_clamp_warnings,
-)
-from utils.metrics.pass_provenance import UNSET_EXPRESSION, PassLayout
 
 ISA_WORKLOAD_NAME = "vector_copy"
 ISA_WORKLOAD_SUB_NAME = "run"
@@ -87,9 +80,8 @@ def make_roofline_calc_analyzer(workload_path, pmc_df, roofline_df):
     return SimpleNamespace(
         _runs={workload_path: SimpleNamespace(sys_info=sys_info_df)},
         _pmc_df_per_workload={workload_path: pmc_df},
+        _pass_tables_per_workload={workload_path: {}},
         _arch_configs={"gfx90a": arch_config},
-        _pass_layout_per_workload={},
-        _roofline_ceilings_per_workload={},
         get_args=lambda: SimpleNamespace(),
     )
 
@@ -642,16 +634,12 @@ def test_calc_builtin_vars_processes_per_xcd_first():
         return_value="MI300",
     ):
         with patch(
-            "rocprof_compute_analyze.analysis_db.get_build_in_vars",
+            "utils.utils_counter_defs.Collectables.of_arch",
             return_value=mock_builtin_vars,
         ):
-            with patch(
-                "utils.utils_counter_defs.get_build_in_vars",
-                return_value=mock_builtin_vars,
-            ):
-                db_analysis.calc_builtin_vars(
-                    pmc_df, sys_info, ["$PER_XCD_VAR", "$DERIVED_VAR"]
-                )
+            db_analysis.calc_builtin_vars(
+                pmc_df, sys_info, ["$PER_XCD_VAR", "$DERIVED_VAR"]
+            )
 
     # Verify PER_XCD var was computed
     assert sys_info["PER_XCD_VAR"] == 20
@@ -678,16 +666,12 @@ def test_calc_builtin_vars_with_dataframe_expressions():
         return_value="MI300",
     ):
         with patch(
-            "rocprof_compute_analyze.analysis_db.get_build_in_vars",
+            "utils.utils_counter_defs.Collectables.of_arch",
             return_value=mock_builtin_vars,
         ):
-            with patch(
-                "utils.utils_counter_defs.get_build_in_vars",
-                return_value=mock_builtin_vars,
-            ):
-                db_analysis.calc_builtin_vars(
-                    pmc_df, sys_info, ["$TOTAL_COUNT", "$SCALED_TOTAL"]
-                )
+            db_analysis.calc_builtin_vars(
+                pmc_df, sys_info, ["$TOTAL_COUNT", "$SCALED_TOTAL"]
+            )
 
     assert sys_info["TOTAL_COUNT"] == 60
     assert sys_info["SCALED_TOTAL"] == 120
@@ -733,9 +717,7 @@ def test_calc_dataframe_expressions_applies_evaluate_to_rows():
         ],
     })
 
-    with patch(
-        "rocprof_compute_analyze.analysis_db.get_build_in_vars", return_value={}
-    ):
+    with patch("utils.utils_counter_defs.Collectables.of_arch", return_value={}):
         result = db_analysis.calc_dataframe_expressions(pmc_df, sys_info, expression_df)
 
     assert isinstance(result, pd.Series)
@@ -768,99 +750,77 @@ def test_calc_dataframe_expressions_with_builtin_vars():
         return_value="MI300",
     ):
         with patch(
-            "rocprof_compute_analyze.analysis_db.get_build_in_vars",
+            "utils.utils_counter_defs.Collectables.of_arch",
             return_value=mock_builtin_vars,
         ):
-            with patch(
-                "utils.utils_counter_defs.get_build_in_vars",
-                return_value=mock_builtin_vars,
-            ):
-                result = db_analysis.calc_dataframe_expressions(
-                    pmc_df, sys_info, expression_df
-                )
+            result = db_analysis.calc_dataframe_expressions(
+                pmc_df, sys_info, expression_df
+            )
 
     assert result.iloc[0] == 51
     # None from evaluate becomes NaN in pandas Series
     assert pd.isna(result.iloc[1])
 
 
-def test_calc_dataframe_expressions_leaves_an_unbound_metric_unset():
-    """The same-pass unset marker evaluates to None without a failure record."""
+def test_calc_dataframe_expressions_reads_each_row_from_its_pass():
+    """A row whose counters share a pass reads that pass; others read pmc_df."""
+    pmc_df = pd.DataFrame({"SQ_WAVES": [1, 1], "SQ_BUSY_CYCLES": [1, 1]})
+    pass_tables = [
+        pd.DataFrame({"SQ_WAVES": [2, 2]}),
+        pd.DataFrame({"SQ_WAVES": [3, 3], "SQ_BUSY_CYCLES": [6, 6]}),
+    ]
     expression_df = pd.DataFrame({
-        "metric_id": ["1.1"],
-        "value_name": ["avg"],
-        "value": [UNSET_EXPRESSION],
+        "metric_id": ["1.1", "1.2", "1.3"],
+        "value_name": ["Value", "Value", "Value"],
+        "value": [
+            "to_sum(raw_pmc_df['SQ_WAVES'])",
+            "to_sum(raw_pmc_df['SQ_BUSY_CYCLES']) / to_sum(raw_pmc_df['SQ_WAVES'])",
+            "to_sum(raw_pmc_df['SQ_WAVES']) + to_sum(raw_pmc_df['TA_BUSY'])",
+        ],
     })
 
-    with patch(
-        "rocprof_compute_analyze.analysis_db.get_build_in_vars", return_value={}
-    ), patch(
-        "rocprof_compute_analyze.analysis_db.record_failed_expression"
-    ) as record_failed:
+    with patch("utils.utils_counter_defs.Collectables.of_arch", return_value={}):
         result = db_analysis.calc_dataframe_expressions(
-            pd.DataFrame({"Counter1": [1]}),
-            {"gpu_arch": "gfx942"},
-            expression_df,
+            pmc_df, {"gpu_arch": "gfx942"}, expression_df, pass_tables=pass_tables
         )
 
-    assert pd.isna(result.iloc[0])
-    record_failed.assert_not_called()
+    assert result.iloc[0] == 4
+    assert result.iloc[1] == 2
+    assert pd.isna(result.iloc[2])
 
 
-def test_roofline_points_read_each_metric_from_one_pass():
-    """A roofline point is bound to one pass; an unfilled composite stays unset."""
-    layout = PassLayout(
-        pass_keys=("pmc_perf_0", "pmc_perf_1"),
-        counters_by_pass={
-            "pmc_perf_0": frozenset({"TD_BUSY", "GRBM_GUI_ACTIVE"}),
-            "pmc_perf_1": frozenset({"TA_BUSY", "GRBM_GUI_ACTIVE"}),
-        },
-        duplicated=frozenset({"GRBM_GUI_ACTIVE"}),
-    )
-    pmc_df = pd.DataFrame({
-        "TA_BUSY": [50.0],
-        "TD_BUSY": [30.0],
-        "GRBM_GUI_ACTIVE": [100.0],
-        "GRBM_GUI_ACTIVE@pass:pmc_perf_0": [100.0],
-        "GRBM_GUI_ACTIVE@pass:pmc_perf_1": [200.0],
-    })
-    roofline_df = pd.DataFrame(
-        {
-            "Metric": ["AI L1", "AI L2", "AI LDS"],
-            "Value": [
-                "to_avg(raw_pmc_df['TA_BUSY'] / raw_pmc_df['GRBM_GUI_ACTIVE'])",
-                "COLLECT_RATIO(_collect.a, _collect.b)",
-                "to_avg(raw_pmc_df['TA_BUSY'] / raw_pmc_df['TD_BUSY'])",
-            ],
-        },
-        index=["4.0.0", "4.0.1", "4.0.2"],
-    )
-    roofline_df.attrs["collect_ratio_specs"] = {
-        "4.0.1": {"numerator": ["_collect.a"], "denominator": ["_collect.b"]},
+def test_calc_dataframe_expressions_reads_each_collectable_from_its_own_pass():
+    """A row that reads only collectables takes each one from the pass that
+    holds its counters, not from pmc_df."""
+    pmc_df = pd.DataFrame({"SQ_WAVES": [100, 200], "SQ_BUSY_CYCLES": [100, 200]})
+    pass_tables = [
+        pd.DataFrame({"SQ_WAVES": [1, 2]}),
+        pd.DataFrame({"SQ_BUSY_CYCLES": [10, 20]}),
+    ]
+    collectables = {
+        "a": "SUM(SQ_WAVES)",
+        "b": "SUM(SQ_BUSY_CYCLES)",
+        "a_per_dispatch": "SQ_WAVES",
+        "b_per_dispatch": "SQ_BUSY_CYCLES",
     }
-    names = {"l1_cache_data": "AI L1", "l2_cache_data": "AI L2", "lds": "AI LDS"}
-    expressions = dict(zip(roofline_df["Metric"], roofline_df["Value"]))
+    expression_df = pd.DataFrame({
+        "metric_id": ["1.1", "1.1"],
+        "value_name": ["Value", "Min"],
+        "value": [
+            "ammolite__a + ammolite__b",
+            "to_min(ammolite__a_per_dispatch + ammolite__b_per_dispatch)",
+        ],
+    })
 
     with patch(
-        "rocprof_compute_analyze.analysis_db.mi_gpu_specs.get_gpu_series",
-        return_value="MI300",
-    ), patch(
-        "rocprof_compute_analyze.analysis_db.get_build_in_vars", return_value={}
-    ), patch("utils.metrics.pass_provenance.get_build_in_vars", return_value={}):
-        points = _roofline_point_values(
-            roofline_df,
-            names,
-            expressions,
-            {("4.0.1", "Value"): "N/A"},
-            pmc_df,
-            {"gpu_arch": "gfx942", "num_xcd": 1},
-            layout,
+        "utils.utils_counter_defs.Collectables.of_arch", return_value=collectables
+    ):
+        result = db_analysis.calc_dataframe_expressions(
+            pmc_df, {"gpu_arch": "gfx942"}, expression_df, pass_tables=pass_tables
         )
 
-    # TA_BUSY is on pmc_perf_1, so GRBM_GUI_ACTIVE comes from that pass too.
-    assert points["l1_cache_data"] == pytest.approx(50.0 / 200.0)
-    assert "l2_cache_data" not in points
-    assert pd.isna(points["lds"])
+    assert result.iloc[0] == 3 + 30
+    assert result.iloc[1] == 1 + 10
 
 
 def test_calc_dataframe_expressions_empty_returns_assignable_series():
@@ -878,192 +838,6 @@ def test_calc_dataframe_expressions_empty_returns_assignable_series():
     # Reproduces the call site: assigning the result as a single column must
     # not raise "Columns must be same length as key".
     expression_df["value"] = result
-
-
-def test_calc_dataframe_expressions_same_pass_bind_uses_shadow_denominator():
-    """DB path must evaluate TA_BUSY with co-located GRBM (200), not base (100)."""
-    from utils.metrics.pass_provenance import (
-        PassLayout,
-        bind_expression_dataframe,
-    )
-
-    layout = PassLayout(
-        pass_keys=("pmc_perf_0", "pmc_perf_1"),
-        counters_by_pass={
-            "pmc_perf_0": frozenset({"GRBM_GUI_ACTIVE", "SQ_WAVES"}),
-            "pmc_perf_1": frozenset({"GRBM_GUI_ACTIVE", "TA_BUSY"}),
-        },
-        duplicated=frozenset({"GRBM_GUI_ACTIVE"}),
-    )
-    pmc_df = pd.DataFrame({
-        "GRBM_GUI_ACTIVE": [100.0],
-        "GRBM_GUI_ACTIVE@pass:pmc_perf_0": [100.0],
-        "GRBM_GUI_ACTIVE@pass:pmc_perf_1": [200.0],
-        "TA_BUSY": [50.0],
-        "SQ_WAVES": [4.0],
-    })
-    util_expr = "to_avg(100 * raw_pmc_df['TA_BUSY'] / raw_pmc_df['GRBM_GUI_ACTIVE'])"
-    expression_df = pd.DataFrame({
-        "metric_id": ["9.9.9"],
-        "value_name": ["Avg"],
-        "value": [util_expr],
-    })
-    used = bind_expression_dataframe(expression_df, layout, "MI300")
-    assert used == {"pmc_perf_1"}
-    assert "GRBM_GUI_ACTIVE@pass:pmc_perf_1" in expression_df.at[0, "value"]
-
-    with patch(
-        "rocprof_compute_analyze.analysis_db.get_build_in_vars", return_value={}
-    ):
-        unbound = db_analysis.calc_dataframe_expressions(
-            pmc_df,
-            {"gpu_arch": "gfx942"},
-            pd.DataFrame({
-                "metric_id": ["9.9.9"],
-                "value_name": ["Avg"],
-                "value": [util_expr],
-            }),
-        )
-        bound = db_analysis.calc_dataframe_expressions(
-            pmc_df,
-            {"gpu_arch": "gfx942"},
-            expression_df,
-            pass_layout=layout,
-            used_passes=used,
-        )
-
-    assert unbound.iloc[0] == 50.0  # cross-pass base GRBM=100
-    assert bound.iloc[0] == 25.0  # same-pass GRBM=200
-
-
-def test_calc_dataframe_expressions_computes_pass_scoped_builtins():
-    """Bound ammolite__GRBM_*__passN must resolve via pass-scoped sys_info."""
-    from utils.metrics.pass_provenance import (
-        PassLayout,
-        bind_expression_dataframe,
-    )
-
-    layout = PassLayout(
-        pass_keys=("pmc_perf_0", "pmc_perf_1"),
-        counters_by_pass={
-            "pmc_perf_0": frozenset({"GRBM_GUI_ACTIVE", "SQ_WAVES"}),
-            "pmc_perf_1": frozenset({"GRBM_GUI_ACTIVE", "TA_BUSY"}),
-        },
-        duplicated=frozenset({"GRBM_GUI_ACTIVE"}),
-    )
-    pmc_df = pd.DataFrame({
-        "GRBM_GUI_ACTIVE": [100.0],
-        "GRBM_GUI_ACTIVE@pass:pmc_perf_0": [100.0],
-        "GRBM_GUI_ACTIVE@pass:pmc_perf_1": [200.0],
-        "TA_BUSY": [50.0],
-    })
-    expression_df = pd.DataFrame({
-        "metric_id": ["9.9.9"],
-        "value_name": ["Avg"],
-        "value": [
-            "to_avg(raw_pmc_df['TA_BUSY'] / ammolite__GRBM_GUI_ACTIVE_PER_XCD)",
-        ],
-    })
-    used = bind_expression_dataframe(expression_df, layout, "MI300")
-    assert "ammolite__GRBM_GUI_ACTIVE_PER_XCD__pass1" in expression_df.at[0, "value"]
-
-    sys_info = {"gpu_arch": "gfx942", "num_xcd": 1}
-    result = db_analysis.calc_dataframe_expressions(
-        pmc_df,
-        sys_info,
-        expression_df,
-        pass_layout=layout,
-        used_passes=used,
-    )
-
-    # Pass-1 PER_XCD = 200 / 1; 50 / 200 = 0.25. Base GRBM would give 0.5.
-    assert float(result.iloc[0]) == 0.25
-    per_xcd = sys_info["GRBM_GUI_ACTIVE_PER_XCD__pass1"]
-    per_xcd_value = (
-        float(per_xcd.iloc[0]) if isinstance(per_xcd, pd.Series) else float(per_xcd)
-    )
-    assert per_xcd_value == 200.0
-
-
-def test_pass_scoped_builtins_follow_transitive_formulas():
-    """numActiveCUs depends on GRBM_GUI_ACTIVE_PER_XCD even when unnamed."""
-    from utils.metrics.pass_provenance import PassLayout
-
-    layout = PassLayout(
-        pass_keys=("pmc_perf_0", "pmc_perf_1"),
-        counters_by_pass={
-            "pmc_perf_0": frozenset({"GRBM_GUI_ACTIVE", "SQ_BUSY_CU_CYCLES"}),
-            "pmc_perf_1": frozenset({"GRBM_GUI_ACTIVE"}),
-        },
-        duplicated=frozenset({"GRBM_GUI_ACTIVE"}),
-    )
-    pmc_df = pd.DataFrame({
-        "SQ_BUSY_CU_CYCLES": [100.0],
-        "GRBM_GUI_ACTIVE": [100.0],
-        "GRBM_GUI_ACTIVE@pass:pmc_perf_0": [80.0],
-        "GRBM_GUI_ACTIVE@pass:pmc_perf_1": [200.0],
-    })
-    sys_info = {
-        "gpu_arch": "gfx942",
-        "num_xcd": 1,
-        "max_waves_per_cu": 32,
-        "cu_per_gpu": 304,
-    }
-    results = db_analysis.calc_pass_scoped_builtin_sys_info(
-        pmc_df,
-        sys_info,
-        layout,
-        {"pmc_perf_0"},
-        ["ammolite__numActiveCUs__pass0"],
-    )
-    assert "GRBM_GUI_ACTIVE_PER_XCD__pass0" in results
-    assert "numActiveCUs__pass0" in results
-
-
-def test_calc_expressions_uses_same_pass_counters():
-    """The workload value comes from the pass that holds the whole PMC set."""
-    from utils.metrics.pass_provenance import PassLayout
-
-    workload_path = "/fake/workload"
-    pmc_df = pd.DataFrame({
-        "Kernel_Name": ["kernel_a"],
-        "TA_BUSY": [50.0],
-        "GRBM_GUI_ACTIVE": [100.0],
-        "GRBM_GUI_ACTIVE@pass:pmc_perf_0": [100.0],
-        "GRBM_GUI_ACTIVE@pass:pmc_perf_1": [200.0],
-    })
-    expression_template = pd.DataFrame({
-        "metric_id": ["9.9.9"],
-        "value_name": ["Avg"],
-        "value": [
-            "to_avg(100 * raw_pmc_df['TA_BUSY'] / raw_pmc_df['GRBM_GUI_ACTIVE'])"
-        ],
-    })
-    layout = PassLayout(
-        pass_keys=("pmc_perf_0", "pmc_perf_1"),
-        counters_by_pass={
-            "pmc_perf_0": frozenset({"GRBM_GUI_ACTIVE"}),
-            "pmc_perf_1": frozenset({"GRBM_GUI_ACTIVE", "TA_BUSY"}),
-        },
-        duplicated=frozenset({"GRBM_GUI_ACTIVE"}),
-    )
-    analyzer = db_analysis(MagicMock(), {})
-    analyzer._pmc_df_per_workload = {workload_path: pmc_df}
-    analyzer._metric_expression_data_per_workload = {workload_path: expression_template}
-    analyzer._metrics_info_data_per_workload = {}
-    analyzer._roofline_ceilings_per_workload = {workload_path: {}}
-    analyzer._pass_layout_per_workload = {workload_path: layout}
-    analyzer._runs = {
-        workload_path: MagicMock(
-            sys_info=pd.DataFrame([{"gpu_arch": "gfx942", "num_xcd": 1}])
-        )
-    }
-    analyzer._arch_configs = {"gfx942": MagicMock()}
-
-    with patch.object(db_analysis, "validate_dual_issue_metrics"):
-        _kernel_values, workload_values = analyzer.calc_expressions()
-
-    assert float(workload_values[workload_path].at[0, "value"]) == 25.0
 
 
 # =============================================================================
@@ -1130,49 +904,6 @@ def test_calc_metrics_data_builds_rows_and_preserves_schema():
     assert set(exprs["metric_id"]) == {"7.1.0"}
 
 
-def test_calc_metrics_data_ingests_null_min_max():
-    """YAML null min/max is an empty expression cell, not an AttributeError."""
-    workload_path = "/fake/workload"
-    metric_df = pd.DataFrame(
-        {
-            "Metric": ["VALU FLOPs"],
-            "Avg": [" 1 "],
-            "Min": ["x"],
-            "Max": ["y"],
-            "Unit": ["Gflop"],
-        },
-        index=pd.Index(["2.1.0"], name="Metric_ID"),
-    )
-    metric_df.at["2.1.0", "Min"] = None
-    metric_df.at["2.1.0", "Max"] = None
-    assert metric_df.loc["2.1.0", "Min"] is None
-    assert metric_df.loc["2.1.0", "Max"] is None
-    arch_config = schema.ArchConfig()
-    arch_config.dfs = {201: metric_df}
-    arch_config.panel_configs = {
-        200: {
-            "id": 200,
-            "title": "Workgroup",
-            "data source": [{"metric_table": {"id": 201, "title": "VALU"}}],
-        }
-    }
-
-    analyzer = db_analysis(MagicMock(verbose=0), {})
-    analyzer._pmc_df_per_workload = {workload_path: pd.DataFrame({"Counter1": [1]})}
-    analyzer._runs = {
-        workload_path: MagicMock(sys_info=pd.DataFrame([{"gpu_arch": "gfx942"}]))
-    }
-    analyzer._arch_configs = {"gfx942": arch_config}
-
-    _metrics_info, expressions = analyzer.calc_metrics_data()
-
-    exprs = expressions[workload_path]
-    by_name = dict(zip(exprs["value_name"], exprs["value"]))
-    assert by_name["Avg"] == "1"
-    assert by_name["Min"] == ""
-    assert by_name["Max"] == ""
-
-
 LONG_FORM_PMC_PERF = (
     "GPU_ID,Dispatch_ID,Grid_Size,Workgroup_Size,LDS_Per_Workgroup,"
     "Scratch_Per_Workitem,Arch_VGPR,Accum_VGPR,SGPR,Kernel_Name,"
@@ -1189,9 +920,10 @@ def test_calc_pmc_df_data_reads_compressed_results(tmp_path):
     analyzer._runs = {str(tmp_path): MagicMock()}
     analyzer._profiling_config = {}
 
-    pmc_df_per_workload = analyzer.calc_pmc_df_data()
+    pmc_df_per_workload, pass_tables_per_workload = analyzer.calc_pmc_df_data()
 
     assert pmc_df_per_workload[str(tmp_path)]["SQ_WAVES"].tolist() == [4]
+    assert list(pass_tables_per_workload[str(tmp_path)]) == ["pmc_perf_0"]
 
 
 def test_calc_pmc_df_data_skips_workload_without_results(tmp_path):
@@ -1200,7 +932,7 @@ def test_calc_pmc_df_data_skips_workload_without_results(tmp_path):
     analyzer._runs = {str(tmp_path): MagicMock()}
     analyzer._profiling_config = {}
 
-    assert analyzer.calc_pmc_df_data() == {}
+    assert analyzer.calc_pmc_df_data() == ({}, {})
 
 
 def test_calc_metrics_data_exports_qualified_per_channel_names():
@@ -1310,111 +1042,6 @@ def test_filter_dispatch_frame_bounds_kernel_ids_by_the_filtered_frame():
 
     with pytest.raises(SystemExit):
         filter_dispatch_frame(make_repeated_dispatch_frame(), None, [1], ["1"])
-
-
-# =============================================================================
-# Noise-clamp warning + summary tests
-# =============================================================================
-
-
-def test_calc_expressions_noise_clamp():
-    """Variance warnings fire only at workload level, summary once per workload.
-
-    - evaluate(emit_variance_warnings=True) emits the per-metric warning when
-      to_noise_clamp advances the global counter; the False kwarg stays silent.
-    - calc_expressions emits exactly one variance warning per workload
-      (kernel-level pass is silent) and calls print_noise_clamp_summary once.
-    """
-    workload_path = "/fake/workload"
-    noise_clamp_expression = (
-        "to_noise_clamp(to_min(raw_pmc_df['DIFF']), to_max(raw_pmc_df['REF']))"
-    )
-    # Two distinct kernels so groupby yields two kernel-level evaluate calls
-    # in addition to one workload-level call. Without the kwarg gate the
-    # unguarded code would emit three warnings; with the gate, exactly one.
-    pmc_df = pd.DataFrame({
-        "Kernel_Name": ["kernel_a", "kernel_b"],
-        "DIFF": [-100.0, -100.0],
-        "REF": [1000.0, 1000.0],
-    })
-    expression_template = pd.DataFrame({
-        "metric_id": ["1.1"],
-        "value_name": ["clamped"],
-        "value": [noise_clamp_expression],
-    })
-    sys_info_df = pd.DataFrame([{"placeholder": 1, "gpu_arch": "gfx942"}])
-
-    analyzer = db_analysis(MagicMock(), {})
-    analyzer._pmc_df_per_workload = {workload_path: pmc_df}
-    analyzer._metric_expression_data_per_workload = {workload_path: expression_template}
-    analyzer._metrics_info_data_per_workload = {}
-    analyzer._roofline_ceilings_per_workload = {workload_path: {}}
-    analyzer._pass_layout_per_workload = {}
-    analyzer._runs = {workload_path: MagicMock(sys_info=sys_info_df)}
-    analyzer._arch_configs = MagicMock()
-
-    # Direct evaluate kwarg behavior.
-    clear_noise_clamp_warnings()
-    with patch(
-        "rocprof_compute_analyze.analysis_db.console_warning"
-    ) as console_warning_mock:
-        db_analysis.evaluate(
-            "direct_test",
-            noise_clamp_expression,
-            pmc_df,
-            {},
-            emit_variance_warnings=True,
-        )
-        variance_warning_calls = [
-            warning_call
-            for warning_call in console_warning_mock.call_args_list
-            if "Variance corrected for metric: direct_test" in warning_call.args[0]
-        ]
-        assert len(variance_warning_calls) == 1
-        assert get_noise_clamp_warnings()["count"] >= 1
-
-    clear_noise_clamp_warnings()
-    with patch(
-        "rocprof_compute_analyze.analysis_db.console_warning"
-    ) as console_warning_mock:
-        db_analysis.evaluate(
-            "direct_test_off",
-            noise_clamp_expression,
-            pmc_df,
-            {},
-            emit_variance_warnings=False,
-        )
-        assert get_noise_clamp_warnings()["count"] >= 1
-        variance_warning_calls = [
-            warning_call
-            for warning_call in console_warning_mock.call_args_list
-            if "Variance corrected for metric:" in warning_call.args[0]
-        ]
-        assert variance_warning_calls == []
-
-    # calc_expressions per-workload bracket.
-    clear_noise_clamp_warnings()
-    with patch(
-        "rocprof_compute_analyze.analysis_db.get_build_in_vars", return_value={}
-    ):
-        with patch(
-            "rocprof_compute_analyze.analysis_db.console_warning"
-        ) as console_warning_mock:
-            with patch(
-                "rocprof_compute_analyze.analysis_db.print_noise_clamp_summary"
-            ) as print_noise_clamp_summary_mock:
-                with patch.object(db_analysis, "validate_dual_issue_metrics"):
-                    analyzer.calc_expressions()
-
-    variance_warning_calls = [
-        warning_call
-        for warning_call in console_warning_mock.call_args_list
-        if "Variance corrected for metric:" in warning_call.args[0]
-    ]
-    assert len(variance_warning_calls) == 1
-    assert "1.1 - clamped" in variance_warning_calls[0].args[0]
-    print_noise_clamp_summary_mock.assert_called_once()
-    assert get_noise_clamp_warnings()["count"] >= 1
 
 
 # =============================================================================
@@ -3977,11 +3604,8 @@ def test_calc_roofline_data_includes_all_kernels(monkeypatch):
     analyzer = make_roofline_calc_analyzer(workload_path, pmc_df, roofline_df)
     evaluated_row_counts = []
 
-    def evaluate_roofline_metric(
-        name, value, kernel_pmc_df, sys_info, parse=False, **_kwargs
-    ):
-        if not parse:
-            evaluated_row_counts.append(len(kernel_pmc_df))
+    def evaluate_roofline_metric(name, value, kernel_pmc_df, sys_info, **_options):
+        evaluated_row_counts.append(len(kernel_pmc_df))
         return 42.0
 
     monkeypatch.setattr(
@@ -4038,12 +3662,3 @@ def test_run_analysis_stores_null_for_an_arch_without_a_layout(db_session, tmp_p
     # Also covers a layout file skipped as broken
     workload = run_memory_chart_workload(tmp_path, "gfx1030")
     assert workload.memory_chart_layout_extdata is None
-
-
-def test_visible_metric_rows_drop_collectable_names():
-    frame = pd.DataFrame({
-        "Metric": ["AI HBM", "_collect.flops", "VALU FLOPs"],
-        "Value": ["", "to_sum(raw_pmc_df['SQ_A'])", "1"],
-    })
-    names = [row["Metric"] for _metric_id, row in _visible_metric_rows(frame)]
-    assert names == ["AI HBM", "VALU FLOPs"]

@@ -5632,6 +5632,20 @@
           "test_filter": "SymmetricKernelCorruptionTest.GroupedAllGather_VaryingSizes"
         }
       ]
+    },
+    "net_ib_transfer_max_msg": {
+      "extends": "net_ib_transfer",
+      "description": "Same InfiniBand transfer tests with RCCL_IB_MAX_MSG_SIZE at 1 MiB, so the 16 MiB transfer is posted as several work requests.",
+      "env_variables": {
+        "RCCL_IB_MAX_MSG_SIZE": "1048576"
+      }
+    },
+    "gin_device_mpi_max_msg": {
+      "extends": "gin_device_mpi",
+      "description": "Same GIN proxy device tests with RCCL_IB_MAX_MSG_SIZE at 256 MiB.",
+      "env_variables": {
+        "RCCL_IB_MAX_MSG_SIZE": "268435456"
+      }
     }
   },
   "test_suites": [
@@ -6485,6 +6499,18 @@
       "name": "Symmetric Kernels (8-rank)",
       "description": "Symmetric ReduceScatter, AllReduce and AllGather partitioning and buffer-alignment correctness on 8 co-located ranks (NCCL_CUMEM_ENABLE=1)",
       "config": "symmetric_kernel_mpi_8rank",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - Data Transfer (1 MiB post cap)",
+      "description": "InfiniBand transfer tests with RCCL_IB_MAX_MSG_SIZE=1 MiB",
+      "config": "net_ib_transfer_max_msg",
+      "enabled": true
+    },
+    {
+      "name": "GIN Device MPI - Proxy Tests (256 MiB post cap)",
+      "description": "GIN proxy device tests with RCCL_IB_MAX_MSG_SIZE=256 MiB",
+      "config": "gin_device_mpi_max_msg",
       "enabled": true
     }
   ]

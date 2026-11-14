@@ -23,9 +23,7 @@ from utils.tty import (
     format_node_stats,
     format_table_output,
     has_time_data,
-    is_roofline_shown,
     print_operator_node,
-    process_table_data,
     show_all,
     show_call_tree,
     show_operator_summary,
@@ -56,7 +54,7 @@ _OPERATOR_SUMMARY_COLUMNS = [
 
 def make_args(**overrides) -> argparse.Namespace:
     """Minimal args for the plain-table render path, plus any overrides."""
-    defaults = {"decimal": 2, "view": None, "normal_unit": "per_wave"}
+    defaults = {"decimal": 2, "debug_table_view": False, "normal_unit": "per_wave"}
     return argparse.Namespace(**{**defaults, **overrides})
 
 
@@ -126,7 +124,7 @@ def make_roofline_panel(*, html_path: Optional[str] = None) -> SimpleNamespace:
     )
 
 
-def render_roofline_panel(panel: SimpleNamespace, view: Optional[str]) -> str:
+def render_roofline_panel(panel: SimpleNamespace, debug_table_view: bool) -> str:
     """Run show_all over a make_roofline_panel fixture and return its output."""
     rendered_output = StringIO()
     show_all(
@@ -135,7 +133,7 @@ def render_roofline_panel(panel: SimpleNamespace, view: Optional[str]) -> str:
             membw_analysis=False,
             path=[["fixture"]],
             time_unit="ns",
-            view=view,
+            debug_table_view=debug_table_view,
         ),
         panel.runs,
         panel.arch_configs,
@@ -416,7 +414,7 @@ def test_show_all_membw_analysis_panel_gate(
         normal_unit="per_wave",
         path=[["fixture"]],
         time_unit="ns",
-        view=None,
+        debug_table_view=False,
     )
     metric_dataframe = pd.DataFrame({
         "Metric": ["EA read request fraction - HBM"],
@@ -489,7 +487,7 @@ def test_show_all_draws_the_memory_chart_from_raw_values_and_config_units(
         normal_unit="per_wave",
         path=[["fixture"]],
         time_unit="ns",
-        view=None,
+        debug_table_view=False,
     )
     metric_dataframe = pd.DataFrame({
         "Metric_ID": ["3.1.0"],
@@ -917,26 +915,26 @@ def test_show_operator_summary_empty_prints_no_dispatches_message(capsys):
 
 
 # ---------------------------------------------------------------------------
-# --view table
+# --debug-table-view
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize(
-    "view,gpu_arch,expect_chart",
+    "debug_table_view,gpu_arch,expect_chart",
     [
-        pytest.param(None, "gfx950", True, id="default"),
-        pytest.param("table", "gfx950", False, id="view_table"),
-        pytest.param(None, "gfx1030", False, id="arch_without_layout"),
+        pytest.param(False, "gfx950", True, id="default"),
+        pytest.param(True, "gfx950", False, id="debug_table_view"),
+        pytest.param(False, "gfx1030", False, id="arch_without_layout"),
     ],
 )
-def test_show_all_view_table_replaces_memory_chart_panel(
+def test_show_all_debug_table_view_replaces_memory_chart_panel(
     monkeypatch: pytest.MonkeyPatch,
-    view,
+    debug_table_view: bool,
     gpu_arch: str,
     expect_chart: bool,
 ) -> None:
-    """A mem-chart-only panel emits the merged chart, or tables under --view table
-    or on an architecture without a chart layout."""
+    """A mem-chart-only panel emits the merged chart, or tables under
+    --debug-table-view or on an architecture without a chart layout."""
     mem_chart_marker = "rendered memory chart"
     df = pd.DataFrame({"Metric_ID": ["3.1.0"], "Metric": ["Metric A"], "Value": [1]})
     df = df.set_index("Metric_ID")
@@ -978,7 +976,7 @@ def test_show_all_view_table_replaces_memory_chart_panel(
             membw_analysis=False,
             path=[["fixture"]],
             time_unit="ns",
-            view=view,
+            debug_table_view=debug_table_view,
         ),
         runs,
         arch_configs,
@@ -992,18 +990,18 @@ def test_show_all_view_table_replaces_memory_chart_panel(
 
 
 @pytest.mark.parametrize(
-    "view,expect_roofline_called",
+    "debug_table_view,expect_roofline_called",
     [
-        pytest.param(None, True, id="default"),
-        pytest.param("table", False, id="view_table"),
+        pytest.param(False, True, id="default"),
+        pytest.param(True, False, id="debug_table_view"),
     ],
 )
-def test_show_all_view_table_skips_per_kernel_roofline_layout(
+def test_show_all_debug_table_view_skips_per_kernel_roofline_layout(
     monkeypatch: pytest.MonkeyPatch,
-    view,
+    debug_table_view: bool,
     expect_roofline_called: bool,
 ) -> None:
-    """--view table prints the roofline tables as plain tables instead of the
+    """--debug-table-view prints the roofline tables as plain tables instead of the
     per-kernel layout."""
     roofline_called = False
 
@@ -1018,19 +1016,21 @@ def test_show_all_view_table_skips_per_kernel_roofline_layout(
         "utils.tty.process_table_data", lambda *_a, **_k: panel.metric_dataframe
     )
 
-    output = render_roofline_panel(panel, view)
+    output = render_roofline_panel(panel, debug_table_view)
 
     assert roofline_called is expect_roofline_called
-    if view == "table":
+    if debug_table_view:
         assert "4.1 Roofline Performance Rates" in output
         assert "Metric A" in output
 
 
-@pytest.mark.parametrize("view", [None, "table"], ids=["default", "view_table"])
+@pytest.mark.parametrize(
+    "debug_table_view", [False, True], ids=["default", "debug_table_view"]
+)
 @pytest.mark.parametrize("html_path", [None, "wl/empirRoof_gpu-0.html"])
 def test_show_all_prints_roofline_html_path_under_heading(
     monkeypatch: pytest.MonkeyPatch,
-    view: Optional[str],
+    debug_table_view: bool,
     html_path: Optional[str],
 ) -> None:
     """Both views name the saved roofline HTML right under the block heading."""
@@ -1039,7 +1039,7 @@ def test_show_all_prints_roofline_html_path_under_heading(
         "utils.tty.process_table_data", lambda *_a, **_k: panel.metric_dataframe
     )
 
-    output = render_roofline_panel(panel, view)
+    output = render_roofline_panel(panel, debug_table_view)
 
     if html_path:
         assert (
@@ -1178,52 +1178,3 @@ def test_show_call_tree_prints_file_line_sort_and_kernel_id(capsys):
     assert "nn.Module.Linear.forward simple_torch_code.py:19" in output
     assert "aten::relu simple_torch_code.py" not in output
     assert "(id 4)" in output
-
-
-def test_per_kernel_roofline_omits_collectable_rows(capsys):
-    """Per-kernel roofline tables hide ``_collect.*`` and keep the parent."""
-    rates = pd.DataFrame({
-        "Metric": ["HBM Bandwidth", "_collect.hbm_rd_bw"],
-        "Value": [2268.0, 1034.81],
-    })
-    points = pd.DataFrame({
-        "Metric": ["AI HBM", "_collect.ai_flops_f16"],
-        "Value": [1.5, 0.0],
-    })
-    workload = SimpleNamespace(
-        roofline_peaks=pd.DataFrame([{"peak": 1.0}]),
-        roofline_html_path=None,
-        roofline_metrics={
-            0: {"name": "vcopy", "ai_table": rates, "calc_table": points},
-        },
-        dfs={1: pd.DataFrame()},
-    )
-    panel = {"data source": [{"metric_table": {"cli_style": "Roofline"}}]}
-    args = SimpleNamespace(filter_metrics=None, decimal=2)
-
-    shown = is_roofline_shown(args, {"run": workload}, None, panel)
-
-    output = capsys.readouterr().out
-    assert shown
-    assert "HBM Bandwidth" in output
-    assert "AI HBM" in output
-    assert "_collect.hbm_rd_bw" not in output
-    assert "_collect.ai_flops_f16" not in output
-
-
-def test_process_table_data_omits_collectable_rows():
-    """CLI table rows hide ``_collect.*`` and keep a normal metric."""
-    frame = pd.DataFrame({
-        "Metric": ["VALU FLOPs", "_collect.flops"],
-        "Value": ["1.0", "2.0"],
-    })
-    runs = {"run": SimpleNamespace(dfs={201: frame})}
-    args = SimpleNamespace(time_unit=None, cols=None, decimal=2, verbose=0)
-    result = process_table_data(
-        args,
-        runs,
-        {"id": 201},
-        "metric_table",
-        ["Value"],
-    )
-    assert list(result["Metric"]) == ["VALU FLOPs"]

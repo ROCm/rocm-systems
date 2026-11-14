@@ -3,7 +3,6 @@
 
 import argparse
 import csv
-import ctypes
 import errno
 import io
 import os
@@ -15,15 +14,11 @@ import sys
 import tempfile
 import textwrap
 import threading
-import time
 import uuid
-from contextlib import contextmanager
 from pathlib import Path
 from typing import (
     Any,
     Dict,
-    Generator,
-    Iterable,
     Iterator,
     List,
     Mapping,
@@ -47,6 +42,8 @@ from vendored import yaml
 # Global constants
 METRIC_ID_RE = re.compile(pattern=r"^\d{1,2}(?:\.\d{1,2}){0,2}$")
 PC_SAMPLING_BLOCK_IDS = ("21", "pc_sampling")
+# Block 4 and its alias; ids such as 4.1 are roofline metrics
+ROOFLINE_BLOCK_IDS = ("4", "roof")
 PROFILE_OUTPUT_FORMAT = "rocpd"
 # Profile names the native tool's per-pid CSVs <prefix>_<fbase>_<pid>.csv.gz
 # in the workload directory, and analyze reads them back by these prefixes.
@@ -67,9 +64,6 @@ DESCRIPTION_WIDTH_MIN = 40
 INVALID_BLOCK_HINT = (
     "\n\tRun rocprof-compute --list-metrics to see all block ids/aliases."
 )
-# Per-arch file of collectable formulas, read alongside the panel YAMLs
-COLLECTABLES_FILENAME = "collectables.yaml"
-COLLECTABLE_REF_RE = re.compile(r"_collect\.([A-Za-z0-9_]+)")
 
 
 def is_gfx9(gpu_arch: Optional[str]) -> bool:
@@ -391,108 +385,6 @@ def detect_rocprof(args: argparse.Namespace) -> str:
     return get_rocprof_cmd()
 
 
-def perform_attach_detach(new_env: Dict[str, str], options: Dict[str, Any]) -> None:
-    @contextmanager
-    def temporary_env(env_vars: Dict[str, str]) -> Generator[None, None, None]:
-        """
-        Temporarily change the environment variable of this application.
-        """
-        original_env = os.environ.copy()
-        os.environ.update({k: str(v) for k, v in env_vars.items()})
-        try:
-            yield
-        finally:
-            os.environ.clear()
-            os.environ.update(original_env)
-
-    with temporary_env(new_env):
-        libname = options["ROCPROF_ATTACH_LIBRARY"]
-
-        try:
-            c_lib = ctypes.CDLL(libname)
-            if c_lib is None:
-                console_error(f"Error opening {libname}")
-        except Exception as e:
-            console_error(f"Error loading {libname}: {e}")
-
-        # Set argument and return types for live attach functions
-        try:
-            # new live attach API
-            c_lib.rocattach_attach.restype = ctypes.c_int
-            c_lib.rocattach_attach.argtypes = [ctypes.c_int]
-            c_lib.rocattach_detach.restype = ctypes.c_int
-            c_lib.rocattach_detach.argtypes = [ctypes.c_int]
-        except Exception as e:
-            console_debug(
-                "Error setting new live attach API argument "
-                f"types: {e}, trying legacy live attach API"
-            )
-            try:
-                # old live attach API
-                c_lib.attach.restype = ctypes.c_int
-                c_lib.attach.argtypes = [ctypes.c_uint]
-                c_lib.detach.restype = ctypes.c_int
-                c_lib.detach.argtypes = [ctypes.c_uint]
-            except Exception as e:
-                console_error(f"Error setting live attach function argument types: {e}")
-
-        pid = options["ROCPROF_ATTACH_PID"]
-        if pid is None:
-            console_error("Live attach mode requires a process ID (ROCPROF_ATTACH_PID)")
-
-        try:
-            # new live attach API
-            attach_status = c_lib.rocattach_attach(int(pid))
-            if attach_status != 0:
-                console_error(
-                    f"Error attaching to process {pid}, "
-                    f"rocattach_attach returned {attach_status}"
-                )
-        except Exception as e:
-            console_debug(
-                "Error attaching with latest live attach "
-                f"API: {e}, trying legacy live attach API"
-            )
-            try:
-                # old live attach API
-                c_lib.attach(int(pid))
-            except Exception as e:
-                console_error(f"Error attaching to process {pid}: {e}")
-
-        duration = os.environ.get("ROCPROF_ATTACH_DURATION", None)
-        if duration is None:
-            console_log(
-                f"\033[93mAttach to process with ID {pid} is successful, "
-                "Press Enter to detach...\033[0m"
-            )
-            input()
-        else:
-            console_log(
-                f"\033[93mAttach to process with ID {pid} is successful, "
-                f"detach will happen in {duration} milliseconds...\033[0m"
-            )
-            time.sleep(int(duration) / 1000)
-
-        try:
-            # new live attach API
-            detach_status = c_lib.rocattach_detach(int(pid))
-            if detach_status != 0:
-                console_error(
-                    f"Error detaching from process {pid}, "
-                    f"rocattach_detach returned {detach_status}"
-                )
-        except Exception as e:
-            console_debug(
-                f"Error detaching with latest live attach API: {e}, "
-                "trying detach with legacy live attach API"
-            )
-            try:
-                # old live attach API
-                c_lib.detach(int(pid))
-            except Exception as e:
-                console_error(f"Error detaching from process {pid}: {e}")
-
-
 def capture_subprocess_output(
     subprocess_args: List[str],
     new_env: Optional[Dict[str, str]] = None,
@@ -628,6 +520,14 @@ def parse_pmc_perf(pmc_perf_file: str) -> List[str]:
     return jobs[0].get("pmc") or []
 
 
+def selects_roofline(filter_blocks: Optional[List[str]]) -> bool:
+    """Return True if nothing is selected (everything) or a block is 4, 4.x or roof."""
+    return not filter_blocks or any(
+        str(block) in ROOFLINE_BLOCK_IDS or str(block).startswith("4.")
+        for block in filter_blocks
+    )
+
+
 def is_only_pc_sampling(filter_blocks: List[str]) -> bool:
     """Return True if all requested blocks are PC sampling (block 21 or the
     ``pc_sampling`` alias)."""
@@ -691,107 +591,22 @@ def load_panel_configs(
     """
     configs: dict[int, dict[str, Any]] = {}
     for dir_path in dirs:
-        collectable_formulas = load_collectable_formulas(Path(dir_path))
-        for yaml_file in panel_config_paths(Path(dir_path)):
-            config_yml = load_panel_file(yaml_file, collectable_formulas)
-            # metric key can be None due to some metric-
-            # tables not having any metrics
-            # metric key should be empty dict instead of None
-            panel_config = config_yml["Panel Config"]
-            for data_source in panel_config["data source"]:
-                metric_table = data_source.get("metric_table")
-                if metric_table and metric_table.get("metric") is None:
-                    metric_table["metric"] = {}
-            configs[panel_config["id"]] = panel_config
+        for yaml_file in Path(dir_path).glob("*.yaml"):
+            with open(yaml_file, encoding="utf-8") as file:
+                config_yml = yaml.safe_load(file)
+                # metric key can be None due to some metric-
+                # tables not having any metrics
+                # metric key should be empty dict instead of None
+                panel_config = config_yml["Panel Config"]
+                for data_source in panel_config["data source"]:
+                    metric_table = data_source.get("metric_table")
+                    if metric_table and metric_table.get("metric") is None:
+                        metric_table["metric"] = {}
+                configs[panel_config["id"]] = panel_config
 
     # TODO: sort metrics as the header order in case they-
     # are not defined in the same order
     return OrderedDict(sorted(configs.items()))
-
-
-def panel_config_paths(config_dir: Path) -> List[Path]:
-    """Panel YAML files of one arch config directory, without the collectables
-    file."""
-    return sorted(
-        path for path in config_dir.glob("*.yaml") if path.name != COLLECTABLES_FILENAME
-    )
-
-
-def load_collectable_formulas(config_dir: Path) -> Dict[str, str]:
-    """Formula of each collectable id in config_dir's collectables file.
-
-    Empty when the directory has no collectables file.
-    """
-    collectables_path = config_dir / COLLECTABLES_FILENAME
-    if not collectables_path.is_file():
-        return {}
-    with open(collectables_path, encoding="utf-8") as stream:
-        document = yaml.safe_load(stream) or {}
-    return _formulas_by_collectable_id(document)
-
-
-def load_panel_file(
-    panel_path: Path, collectable_formulas: Mapping[str, str]
-) -> Dict[str, Any]:
-    """Read one panel YAML with the collectable rows its tables reference."""
-    with open(panel_path, encoding="utf-8") as stream:
-        document = yaml.safe_load(stream)
-    attach_collectables(document["Panel Config"], collectable_formulas)
-    return document
-
-
-def attach_collectables(
-    panel_config: Dict[str, Any], collectable_formulas: Mapping[str, str]
-) -> None:
-    """Append to each metric_table the _collect rows its metrics reference.
-
-    Rows follow the order of first reference, after the table's own metrics.
-    Each row stores its formula under the table header's value or avg key,
-    and keeps its _collectable_id. A row already in the table, or a reference
-    with no formula, is left as it is.
-    """
-    for data_source in panel_config["data source"]:
-        table = data_source.get("metric_table")
-        if table and table.get("metric"):
-            _append_collectable_rows(table, collectable_formulas)
-
-
-def _formulas_by_collectable_id(document: Dict[str, Any]) -> Dict[str, str]:
-    """Map each collectable id in a collectables document to its formula."""
-    return {
-        definition["id"]: definition["formula"]
-        for definition in (document.get("collectables") or {}).values()
-    }
-
-
-def _append_collectable_rows(
-    table: Dict[str, Any], collectable_formulas: Mapping[str, str]
-) -> None:
-    """Append the _collect rows that table's metrics reference."""
-    header = table.get("header") or {}
-    expression_key = next((key for key in ("value", "avg") if key in header), "value")
-    metrics = table["metric"]
-    for name in _referenced_collectable_names(metrics.values()):
-        row_name = f"_collect.{name}"
-        collectable_id = f"collect.{name}"
-        if row_name in metrics or collectable_id not in collectable_formulas:
-            continue
-        metrics[row_name] = {
-            expression_key: collectable_formulas[collectable_id],
-            "_collectable_id": collectable_id,
-        }
-
-
-def _referenced_collectable_names(metrics: Iterable[Any]) -> List[str]:
-    """Collectable names that metrics reference, in first-reference order."""
-    names: List[str] = []
-    for metric in metrics:
-        if not isinstance(metric, dict):
-            continue
-        for text in metric.values():
-            if isinstance(text, str):
-                names.extend(COLLECTABLE_REF_RE.findall(text))
-    return list(dict.fromkeys(names))
 
 
 def expand_placeholder_ranges(
@@ -1168,22 +983,17 @@ def print_status(msg: str) -> None:
     console_log("")
 
 
-def create_temp_rocprofiler_metrics_path(sdk_config: Dict[str, Any]) -> str:
-    """
-    Create temporary directory with rocprofiler metrics config files.
+def create_temp_rocprofiler_metrics_path(
+    sdk_config: Dict[str, Any], parent_dir: Path = Path("/tmp")
+) -> str:
+    """Create a temporary directory with the rocprofiler-sdk counter definitions.
 
-    Writes two config files:
-    - counter_defs.yaml: For backward compatibility (excludes firmware restrictions)
-    - config.yaml: Current version with full config
-
-    Args:
-        sdk_config: The rocprofiler-sdk configuration dictionary.
-
-    Returns:
-        Path to the temporary directory (for ROCPROFILER_METRICS_PATH env var).
+    The directory is created in parent_dir. It holds config.yaml with the full
+    config, and counter_defs.yaml without firmware restrictions for older
+    rocprofiler-sdk versions. Return the path of the directory.
     """
     tmpfile_parent = Path(
-        tempfile.mkdtemp(prefix="rocprof_compute_sdk_config_", dir="/tmp")
+        tempfile.mkdtemp(prefix="rocprof_compute_sdk_config_", dir=parent_dir)
     )
 
     # counter_defs.yaml is for backward compatibility with previous versions of sdk
@@ -1443,8 +1253,6 @@ def _iter_metric_table_rows(
     descriptions = panel.get("metrics_description") or {}
     metric_ids = metric_ids_by_name(data_config)
     for name, entries in data_config["metric"].items():
-        if isinstance(name, str) and name.startswith("_collect."):
-            continue
         if not _metric_has_valid_expr(entries, data_config):
             continue
         unit = entries.get("unit")

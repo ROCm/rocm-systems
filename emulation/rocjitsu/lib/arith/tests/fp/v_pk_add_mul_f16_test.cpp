@@ -4,7 +4,7 @@
 // Tests for packed FP16 addition and multiplication.
 
 #include "fp/binary_arithmetic_test.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_fp.h"
 
 #include <gtest/gtest.h>
 
@@ -74,6 +74,33 @@ TEST(FpPackedBinaryF16, GuestControls) {
                      r.v + 1, nullptr),
                 RJ_ARITH_SUCCESS);
       EXPECT_EQ(r.v[2][0], 0x7bff7bffU);
+    }
+  }
+}
+
+// Packed products judge tininess after rounding like V_MUL_F16: the low half's
+// (1 - 2^-11) * 2^-14 flushes although subnormal rounding gives the smallest normal. Expected
+// results are a gfx1201 capture in nearest, up, down and zero rounding.
+TEST(FpPackedBinaryF16, TinyAfterRounding) {
+  using namespace rocjitsu::arith::test;
+  const uint32_t flushed[] = {0x43ff0000U, 0x43ff0000U, 0x43ff0000U, 0x43ff0000U};
+  const uint32_t kept[] = {0x43ff0400U, 0x43ff0400U, 0x43ff03ffU, 0x43ff03ffU};
+  for (uint64_t cpu : supported_cpu_levels()) {
+    for (uint64_t semantics : {RJ_ARITH_SEMANTICS_LOOSE, RJ_ARITH_SEMANTICS_COMPATIBILITY}) {
+      for (unsigned rounding = 0; rounding < 4; ++rounding) {
+        for (bool flush : {true, false}) {
+          Registers<3, 32> r;
+          r.v[0][0] = 0x84003bffU;
+          r.v[1][0] = 0xfbff0400U;
+          ASSERT_EQ(
+              rj_arith_v_pk_mul_f16_w32_gfx12(cpu | semantics | (uint64_t(rounding) << 24) |
+                                                  (flush ? RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS : 0),
+                                              1, 0, r.v + 2, r.v, r.v + 1, nullptr),
+              RJ_ARITH_SUCCESS);
+          EXPECT_EQ(r.v[2][0], flush ? flushed[rounding] : kept[rounding])
+              << "rounding " << rounding << " flush " << flush;
+        }
+      }
     }
   }
 }

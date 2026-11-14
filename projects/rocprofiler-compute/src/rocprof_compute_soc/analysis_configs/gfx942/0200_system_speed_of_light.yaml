@@ -14,7 +14,7 @@ Panel Config:
         pct_of_peak: Percent of Peak
       metric:
         VALU FLOPs:
-          value: COLLECT_SUM(_collect.valu_flops_f16, _collect.valu_flops_f32, _collect.valu_flops_f64)
+          value: $valu_f16_flop_rate + $valu_f32_flop_rate + $valu_f64_flop_rate
           unit: GFLOP/s
           peak: $max_sclk * $cu_per_gpu * 64 * 2 / 1000
           pct_of_peak: true
@@ -98,12 +98,8 @@ Panel Config:
           unit: Conflicts per Access
           peak: 32
           pct_of_peak: true
-        # Sum of two ratios that share TCP_TOTAL_CACHE_ACCESSES_sum. Each ratio comes
-        # from its own replay, so the sum equals the combined ratio only when both
-        # replays see the same total (or each replay scales numerator and denominator
-        # by the same factor). It does not when only the total varies.
         vL1D Cache Hit Rate:
-          value: COLLECT_SUM(_collect.vl1d_hit_non_rw, _collect.vl1d_hit_atom)
+          value: 100 - $vl1d_read_write_miss_rate - $vl1d_atomic_miss_rate
           unit: Percent
           peak: 100
           pct_of_peak: false

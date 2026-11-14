@@ -44,23 +44,6 @@ detect_architecture(const char* arch, char* out_name, size_t out_name_sz, int* o
     }
 }
 
-/**
- * Whether a failed host memory check is the known gfx90a counter-collection
- * artifact. Under rocprofiler-sdk counter collection on gfx90a the host copy
- * of the output buffer can hold stale values while the ISA path tests pass.
- * @param arch_name GCN arch name, such as "gfx90a:sramecc+:xnack-".
- * @param counter_collection ROCPROF_COUNTER_COLLECTION value, or nullptr.
- * @return true only for gfx90a with counter collection on ("1").
- */
-inline bool
-memory_verify_failure_is_counter_artifact(const char* arch_name,
-                                          const char* counter_collection)
-{
-    return arch_name != nullptr && counter_collection != nullptr &&
-           std::strstr(arch_name, "gfx90a") != nullptr &&
-           std::strcmp(counter_collection, "1") == 0;
-}
-
 inline const char*
 arch_description(int arch_type)
 {

@@ -8,9 +8,12 @@ Imported by both the main runtime code and lightweight tooling such as
 """
 
 import re
-from typing import Any, Collection, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Set, Tuple
 
+import config
 from utils.logger import console_error
+from utils.utils_common import canonical_config_arch
+from vendored import yaml
 
 # ---------------------------------------------------------------------------
 # Regex patterns for HW counter and variable extraction
@@ -33,8 +36,11 @@ VARIABLE_RE = re.compile(r"\$([0-9A-Za-z_]*[0-9A-Za-z])")
 AMMOLITE_VAR_RE = re.compile(r"ammolite__([0-9A-Za-z_]+)")
 
 # ---------------------------------------------------------------------------
-# Built-in variable and denominator definitions
+# Collectables and denominator definitions
 # ---------------------------------------------------------------------------
+
+# Per-arch files of named formulas, written $name in metric formulas
+COLLECTABLES_DIR = config.analysis_configs_dir / "collectables"
 
 # per_kernel denom column, injected at pmc load with 1 per dispatch so
 # SUM($denom) == N and Avg is the mean per dispatch.
@@ -47,75 +53,6 @@ SUPPORTED_DENOM: Dict[str, str] = {
     # A vector, not a scalar, so SUM($denom) == N.
     "per_kernel": UNIT_COUNTER,
 }
-
-# Hardware counters packed with every formula that contains $denom.
-# Profile time does not know --normal-unit, so list every counter a later
-# unit might need. A name the profile does not collect is dropped.
-# Empty this tuple to stop adding them.
-DENOM_COLOCATED_COUNTERS: Tuple[str, ...] = (
-    "SQ_WAVES",
-    "GRBM_GUI_ACTIVE",
-    "GRBM_GUI_ACTIVE_sum",
-)
-
-
-def get_build_in_vars(gpu_series: str) -> Dict[str, str]:
-    """Return the architecture-specific built-in variables for *gpu_series*.
-
-    Args:
-        gpu_series: GPU series string from mi_gpu_specs.get_gpu_series()
-
-    Returns:
-        Dictionary mapping built-in variable names to their formulas.
-
-    Exits via console_error if *gpu_series* is falsy or not recognized.
-    """
-    if not gpu_series:
-        console_error(
-            "Cannot resolve built-in variables: no GPU series provided "
-            "(unknown GPU arch?)."
-        )
-
-    build_in_vars: Dict[str, Dict[str, str]] = {
-        "cdna": {
-            "GRBM_GUI_ACTIVE_PER_XCD": "(GRBM_GUI_ACTIVE / $num_xcd)",
-            "GRBM_COUNT_PER_XCD": "(GRBM_COUNT / $num_xcd)",
-            "GRBM_SPI_BUSY_PER_XCD": "(GRBM_SPI_BUSY / $num_xcd)",
-            "numActiveCUs": (
-                "TO_INT(MIN(ROUND(SUM(4 * SQ_BUSY_CU_CYCLES) / "
-                "SUM($GRBM_GUI_ACTIVE_PER_XCD), 0) / $max_waves_per_cu * 8 + "
-                "MIN(MOD(ROUND(SUM(4 * SQ_BUSY_CU_CYCLES) / "
-                "SUM($GRBM_GUI_ACTIVE_PER_XCD), 0), "
-                "$max_waves_per_cu), 8), $cu_per_gpu))"
-            ),
-            "kernelBusyCycles": (
-                "ROUND(AVG((((End_Timestamp - Start_Timestamp) / 1000) * "
-                "$max_sclk)), 0)"
-            ),
-            "hbmBandwidth": "($max_mclk / 1000 * 32 * $num_memory_channels)",
-        },
-        "rdna35": {
-            "GRBM_GUI_ACTIVE_PER_XCD": "(GRBM_GUI_ACTIVE / $num_xcd)",
-            "GRBM_COUNT_PER_XCD": "(GRBM_COUNT / $num_xcd)",
-            "GRBM_SPI_BUSY_PER_XCD": "(GRBM_SPI_BUSY / $num_xcd)",
-        },
-    }
-    if gpu_series == "GFX1250_SERIES":
-        # gfx1250 exposes GUI-active cycles summed across XCD dimensions. Divide
-        # the explicit sum by the visible num_xcd to preserve per-XCD semantics.
-        build_in_vars["cdna"]["GRBM_GUI_ACTIVE_PER_XCD"] = (
-            "GRBM_GUI_ACTIVE_sum / $num_xcd"
-        )
-
-    if gpu_series == "GFX1250_SERIES" or gpu_series.startswith("MI"):
-        return build_in_vars["cdna"]
-    elif gpu_series.startswith("RDNA"):
-        return build_in_vars["rdna35"]
-    else:
-        console_error(
-            f"Unknown GPU series '{gpu_series}': cannot determine built-in variables."
-        )
-        return {}
 
 
 # ---------------------------------------------------------------------------
@@ -167,24 +104,12 @@ def parse_counters_text(text: str) -> Tuple[Set[str], Set[str]]:
     return hw_counter_matches, variable_matches
 
 
-def denom_colocated_counters(text: str) -> Set[str]:
-    """Hardware counters packed with a formula that uses $denom.
-
-    Returns an empty set when the formula does not name $denom, or when
-    DENOM_COLOCATED_COUNTERS is empty. The caller drops names the profile
-    does not collect.
-    """
-    _hw, variables = parse_counters_text(text)
-    if "denom" not in variables:
-        return set()
-    return set(DENOM_COLOCATED_COUNTERS)
-
-
 def extract_counters_and_variables(
-    text: str, gpu_series: str, include_supported_denom: bool = True
+    text: str, collectables: Dict[str, str], include_supported_denom: bool = True
 ) -> Tuple[Set[str], Set[str]]:
-    """Return (hw_counters, builtin_vars) referenced by text, with transitive
-    resolution. Recognizes both $var and ammolite__var forms.
+    """Return (hw_counters, collectable names) referenced by text, with the
+    counters of the collectables it names. Recognizes both $var and
+    ammolite__var forms.
 
     Profiling must collect the SUPPORTED_DENOM counters too, because every
     metric is implicitly divided by its unit denominator. Pass
@@ -200,21 +125,20 @@ def extract_counters_and_variables(
             hw.update(hw_d)
             variables.update(var_d)
 
-    build_in_vars = get_build_in_vars(gpu_series)
-    builtin_vars: Set[str] = set()
-    seen: Set[str] = set()
+    collectable_names: set[str] = set()
+    seen: set[str] = set()
     while variables - seen:
-        new_vars: Set[str] = set()
+        new_vars: set[str] = set()
         for var in variables - seen:
             seen.add(var)
-            if var in build_in_vars:
-                builtin_vars.add(var)
-                hw_v, var_v = parse_counters_text(build_in_vars[var])
+            if var in collectables:
+                collectable_names.add(var)
+                hw_v, var_v = parse_counters_text(collectables[var])
                 hw.update(hw_v)
                 new_vars.update(var_v)
         variables.update(new_vars)
 
-    return hw, builtin_vars
+    return hw, collectable_names
 
 
 def counter_to_block(counter: str) -> str:
@@ -229,49 +153,39 @@ def counter_to_block(counter: str) -> str:
     return BLOCK_REMAP.get(block, block)
 
 
-_ACCUM_SUFFIX = "_ACCUM"
+def _dependency_order(formulas: Dict[str, str]) -> Dict[str, str]:
+    """Return formulas ordered so each collectable comes after those it uses."""
+    ordered: Dict[str, str] = {}
+    pending = dict(formulas)
+    while pending:
+        ready = {
+            name: formula
+            for name, formula in pending.items()
+            if not parse_counters_text(formula)[1] & pending.keys()
+        }
+        if not ready:
+            console_error(f"Collectables use each other in a loop: {sorted(pending)}")
+        ordered.update(ready)
+        pending = {name: pending[name] for name in pending.keys() - ready.keys()}
+    return ordered
 
 
-def _pmc_bare_name(counter: str) -> str:
-    """Strip TCC channel suffix ``[N]`` if present."""
-    return counter.split("[", 1)[0]
+class Collectables:
+    """The collectables of each arch: named formulas that metric formulas use
+    as $name. Each arch's file is read once, and its collectables are kept so
+    that each one comes after the collectables it uses."""
 
+    _formulas_by_arch: Dict[str, Dict[str, str]] = {}
 
-def accum_base_counter(counter: str) -> Optional[str]:
-    """Return the base PMC for a named ``*_ACCUM`` counter, else None."""
-    name = _pmc_bare_name(counter)
-    if not name.endswith(_ACCUM_SUFFIX):
-        return None
-    return name[: -len(_ACCUM_SUFFIX)]
-
-
-def pmc_slot_cost(counter: str, present: Optional[Collection[str]] = None) -> int:
-    """Perfmon register slots charged when adding ``counter`` to a bucket.
-
-    Named ``*_ACCUM`` counters are ``accumulate(BASE, HIGH_RES)`` metrics.
-    aqlprofile programs an extra register for HIGH_RES, so an ACCUM always
-    costs 2. A named BASE next to its ACCUM costs 1, so the pair costs 3 and
-    cannot fill an 8-deep SQ bucket with six other SQ counters. That headroom
-    is required on ROCm 10.1.0; packing BASE+ACCUM into a full SQ bucket
-    returns AQLProfile 4096. All other PMCs cost 1.
-
-    For an order-independent total over a finished set, use
-    ``pmc_bucket_slot_cost``. ``present`` is kept for call-site
-    compatibility; ACCUM cost no longer depends on it.
-    """
-    _ = present
-    name = _pmc_bare_name(counter)
-    if accum_base_counter(name) is not None:
-        return 2
-    return 1
-
-
-def pmc_bucket_slot_cost(counters: Collection[str]) -> int:
-    """Order-independent slot total for a set of PMC names in one block bucket.
-
-    Equivalent to ``len(names) +`` number of ``*_ACCUM`` names (each needs the
-    extra HIGH_RES register beyond the named PMC).
-    """
-    names = {_pmc_bare_name(c) for c in counters}
-    accum_extra = sum(1 for name in names if accum_base_counter(name) is not None)
-    return len(names) + accum_extra
+    @classmethod
+    def of_arch(cls, gpu_arch: str) -> Dict[str, str]:
+        """Return the formula of each collectable of gpu_arch, by name."""
+        config_arch = canonical_config_arch(gpu_arch)
+        if config_arch not in cls._formulas_by_arch:
+            path = COLLECTABLES_DIR / f"{config_arch}_collectables.yaml"
+            if not path.is_file():
+                console_error(f"No collectables file for {gpu_arch}: {path}")
+            cls._formulas_by_arch[config_arch] = _dependency_order(
+                yaml.safe_load(path.read_text(encoding="utf-8"))
+            )
+        return cls._formulas_by_arch[config_arch]

@@ -32,6 +32,34 @@ inline std::optional<uint32_t> relative_vgpr_index(std::optional<uint32_t> base,
   return *base + offset;
 }
 
+/// GFX11.5 VALU can broadcast at most two different scalar values. Inline
+/// constants and VGPRs use no scalar port. A repeated literal of another
+/// width is a different broadcast; SGPR tuples at the same base share one.
+constexpr bool gfx115_scalar_sources_fit(uint32_t src0_selector, unsigned src0_bits,
+                                         uint32_t src1_selector, unsigned src1_bits,
+                                         uint32_t src2_selector, unsigned src2_bits,
+                                         bool implicit_vcc = false) {
+  auto bus_key = [implicit_vcc](uint32_t selector, unsigned bits) -> int {
+    // FMAS already broadcasts the full VCC pair. VCC_LO alone is a distinct value.
+    if (implicit_vcc && selector == 106 && bits == 64)
+      return -1;
+    if (selector == 255)
+      return static_cast<int>(selector + bits);
+    if ((selector < 128 && selector != 124) || selector == 253)
+      return static_cast<int>(selector);
+    return -1;
+  };
+  const int src0_key = bus_key(src0_selector, src0_bits),
+            src1_key = bus_key(src1_selector, src1_bits),
+            src2_key = bus_key(src2_selector, src2_bits);
+  if (implicit_vcc)
+    return (src0_key < 0 || src1_key < 0 || src0_key == src1_key) &&
+           (src0_key < 0 || src2_key < 0 || src0_key == src2_key) &&
+           (src1_key < 0 || src2_key < 0 || src1_key == src2_key);
+  return src0_key < 0 || src1_key < 0 || src2_key < 0 || src0_key == src1_key ||
+         src0_key == src2_key || src1_key == src2_key;
+}
+
 /// M0 carries the barrier ID in its low five bits; other operands carry the ID itself.
 constexpr int32_t barrier_operand_id(uint32_t source, bool source_is_m0) {
   return static_cast<int32_t>(source_is_m0 ? source & 0x1fu : source);
@@ -56,9 +84,10 @@ constexpr bool valid_lds_direct_operand(uint32_t m0) {
 enum class DsPermutation : uint8_t { None, Permute, Bpermute, BpermuteFi, Swizzle };
 
 constexpr unsigned ds_permute_group_width(rj_code_arch_t arch, unsigned wave_size) {
-  return wave_size == 64 && (arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5)
-             ? 32
-             : wave_size;
+  if (arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2 ||
+      arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5)
+    return 32;
+  return wave_size;
 }
 
 constexpr unsigned ds_permute_lane(unsigned lane, uint32_t address, unsigned offset,
@@ -164,6 +193,30 @@ constexpr uint64_t valu_swap_write_lanes(uint64_t exec, unsigned wave_size, unsi
   return exec & wave & (upper ? lower << stride : lower);
 }
 
+template <typename Encoding>
+constexpr std::array<uint8_t, 4> shader_export_sources(const Encoding &inst) {
+  return {static_cast<uint8_t>(inst.vsrc0), static_cast<uint8_t>(inst.vsrc1),
+          static_cast<uint8_t>(inst.vsrc2), static_cast<uint8_t>(inst.vsrc3)};
+}
+
+class ShaderExportOperands {
+public:
+  static constexpr uint8_t kLastMrt = 7, kDepth = 8, kFirstPosition = 12, kLastPosition = 16,
+                           kPrimitive = 20, kDualSource0 = 21, kDualSource1 = 22;
+  uint8_t target;
+  uint8_t components;
+  bool row_from_m0;
+  std::array<uint8_t, 4> sources;
+
+  /// Decode the shared GFX11 EXP and GFX12 VEXPORT operand layout.
+  template <typename Encoding> static ShaderExportOperands decode(const Encoding &inst) {
+    return {static_cast<uint8_t>(inst.tgt), static_cast<uint8_t>(inst.en), bool(inst.row_en),
+            shader_export_sources(inst)};
+  }
+
+  bool channel_enabled(unsigned channel) const { return components & (1u << channel); }
+};
+
 /// @brief Decoded register-access modifiers.
 /// @details This view contains no wave state or values.
 struct RegisterModifiers {
@@ -172,6 +225,8 @@ struct RegisterModifiers {
   uint16_t ds_offset = 0;
   uint8_t memory_result_bytes = 0xf;
   uint8_t memory_result_last_bytes = 0xf; // Last data word, excluding optional image status.
+  /// A nonzero count bounds the payload masks. An appended status word owns all four bytes.
+  uint8_t memory_result_payload_words = 0;
   bool memory_result_has_status = false;
   void set_packed_image_result(unsigned components, unsigned result_words) {
     if (components & 1u) {
@@ -185,6 +240,7 @@ struct RegisterModifiers {
 
   /// VADDR operand enabling coordinate tracking.
   const Operand *image_address = nullptr;
+  std::optional<ShaderExportOperands> shader_export;
   /// Coordinate VGPR selectors, including NSA selectors.
   ImageAddressRegisters image_coordinates{};
   /// Number of tracked coordinate components.
@@ -219,6 +275,7 @@ struct RegisterModifiers {
   const Operand *flat_scalar_address = nullptr;
   int32_t flat_offset = 0;
   uint16_t flat_scale = 1;
+  uint16_t flat_access_bytes = 0;
   bool dpp = false;
   bool dpp8 = false;
   bool sdwa = false;
@@ -229,11 +286,15 @@ struct RegisterModifiers {
   uint8_t bound_ctrl = 0;
   uint8_t fi = 1;
   const Operand *src0 = nullptr;
+  const Operand *dpp_masked_compare_rhs = nullptr;
   const Operand *src1 = nullptr;
   uint8_t src0_selection = 6;
   uint8_t src1_selection = 6;
   uint8_t dst_selection = 6;
   uint8_t dst_unused = 0;
+  uint8_t encoded_buffer_format = 0;   // Explicit FORMAT on typed buffer instructions.
+  bool buffer_tfe = false;             // VBUFFER reserves an additional status VGPR.
+  bool constant_float_compare = false; // Only reads inputs when checking for FP exceptions.
 };
 
 /// @brief VOP1/VOP2 src0 encoding values that indicate DPP or SDWA modifiers.

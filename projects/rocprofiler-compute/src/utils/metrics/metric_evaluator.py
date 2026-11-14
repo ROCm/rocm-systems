@@ -5,9 +5,7 @@
 
 from __future__ import annotations
 
-import re
 import warnings
-from collections.abc import Callable
 from typing import Any
 
 import numpy as np
@@ -28,38 +26,32 @@ from utils.metrics.aggregation import (
     to_sum,
 )
 from utils.metrics.common import EVAL_BUILTINS
-from utils.metrics.noise_clamper import to_noise_clamp
-
-# Columns an expression reads, whether the frame is named raw_pmc_df or pmc_df.
-_FRAME_COLUMN_RE = re.compile(r"(?:raw_pmc_df|pmc_df)\[['\"]([^'\"]+)['\"]\]")
-_TO_SUM_RE = re.compile(r"\bto_sum\s*\(")
+from utils.metrics.expression import columns_read
 
 
-def rows_for_expression(frame: pd.DataFrame, expression: str) -> pd.DataFrame:
-    """Keep dispatches that have every counter a summed expression reads.
+def counter_table_index(
+    eval_string: object,
+    tables: list[pd.DataFrame],
+    build_in_vars: dict[str, str],
+) -> int:
+    """Return the index of the table an eval string should read.
 
-    Numerator and denominator sums then use one set of rows.
+    Callers list the pass tables first and the merged table last. The first
+    pass table that has every column the eval string reads wins. Otherwise
+    the merged table wins.
     """
-    if (
-        not isinstance(frame, pd.DataFrame)
-        or frame.empty
-        or not expression
-        or _TO_SUM_RE.search(expression) is None
-    ):
-        return frame
-    columns: list[str] = []
-    seen: set[str] = set()
-    for column in _FRAME_COLUMN_RE.findall(expression):
-        if column in seen or column not in frame.columns:
-            continue
-        seen.add(column)
-        columns.append(column)
-    if not columns:
-        return frame
-    complete = frame[columns].notna().all(axis=1)
-    if bool(complete.all()):
-        return frame
-    return frame.loc[complete]
+    if isinstance(eval_string, str):
+        for index, table in enumerate(tables[:-1]):
+            if table_holds(eval_string, table, build_in_vars):
+                return index
+    return len(tables) - 1
+
+
+def table_holds(
+    eval_string: str, table: pd.DataFrame, build_in_vars: dict[str, str]
+) -> bool:
+    """Return whether table has every column the eval string reads."""
+    return columns_read(eval_string, build_in_vars) <= set(table.columns)
 
 
 class MetricEvaluator:
@@ -74,17 +66,13 @@ class MetricEvaluator:
         self.raw_pmc_df = raw_pmc_df
         self.sys_vars = sys_vars
         self.empirical_peaks = empirical_peaks
-        # Bound per metric table. Resolves collect_piece("_collect.<piece>").
-        self.collect_piece: Callable[[str], pd.Series] | None = None
 
     def eval_expression(self, expr: str) -> str | float | int:
         """Evaluate a single expression with proper local context."""
         try:
             # Create comprehensive local context
             local_expr_context: dict[str, Any] = {}
-            local_expr_context.update({
-                "raw_pmc_df": rows_for_expression(self.raw_pmc_df, expr),
-            })
+            local_expr_context.update({"raw_pmc_df": self.raw_pmc_df})
             local_expr_context.update(self.sys_vars)
             local_expr_context.update(self.empirical_peaks)
 
@@ -101,10 +89,7 @@ class MetricEvaluator:
                 "to_quantile": to_quantile,
                 "to_mod": to_mod,
                 "to_concat": to_concat,
-                "to_noise_clamp": to_noise_clamp,
             })
-            if self.collect_piece is not None:
-                local_expr_context["collect_piece"] = self.collect_piece
 
             with warnings.catch_warnings(record=True) as caught:
                 warnings.simplefilter("always", RuntimeWarning)

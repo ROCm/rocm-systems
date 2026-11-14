@@ -67,8 +67,7 @@ HOST_SRC = main.cpp
 # Output
 DEFAULT_TARGET = mega_kernel_test
 
-# Cluster launch API (hipLaunchAttributeClusterDimension) is opt-in for gfx1250
-# only; many HIP 7.2 installs lack the enumerator (breaks gfx90a host compile).
+# Cluster launch is opt-in: some HIP 7.2 installs lack its launch attribute.
 CLUSTER_LAUNCH_FLAGS_gfx1250 := -DMEGA_KERNEL_ENABLE_CLUSTER_LAUNCH=1
 
 # Build rules

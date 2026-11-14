@@ -223,6 +223,18 @@ testResult_t  BroadcastGetAlgoProtoChannels(ncclComm_t comm, size_t count, ncclD
   return testSuccess;
 }
 
+extern int nGpus;
+extern int agg_iters;
+
+testResult_t  BroadcastGetCollImplInfo(ncclComm_t comm, size_t count, ncclDataType_t type, ncclRedOp_t op,
+    const void* sendbuff, void* recvbuff, int graphCapturing, int* algo, int* proto, int* nchannels) {
+  if(rcclTestsGetCollImplInfo == NULL) return testInternalError;
+  // Grouped broadcasts (AllGatherV mode, -g > 1, -m > 1) always enqueue; let the caller fall back to the enqueue reporter.
+  if (broadcast_grouped || nGpus > 1 || agg_iters > 1) return testNotImplemented;
+  NCCLCHECK(rcclTestsGetCollImplInfo(comm, ncclFuncBroadcast, count, type, op, sendbuff, recvbuff, graphCapturing, algo, proto, nchannels));
+  return testSuccess;
+}
+
 void BroadcastGetBw(size_t count, size_t typesize, double sec, double* algBw, double* busBw, int nranks) {
   if (broadcast_grouped) {
     double baseBw = (double)(count * nranks * typesize) / 1.0E9 / sec;
@@ -1348,7 +1360,7 @@ testResult_t BroadcastDeviceTime(struct threadArgs* args, ncclDataType_t type, n
   double devUs = 0.0;
   TESTCHECK(gin_devtime::measure(args, gridCtas, loop,
       [&](int i, long long* d_start, long long* d_end) {
-        ncclDevComm* devComm = args->devComms + i;
+        ncclDevComm* devComm = testDevComms(args, i);
         ncclWindow_t sendwin = (ncclWindow_t)(in_place ? args->recvRegHandles[i] : args->sendRegHandles[i]);
         ncclWindow_t recvwin = (ncclWindow_t)args->recvRegHandles[i];
         kernel<<<gridCtas, 512, 0, args->streams[i]>>>(sendwin, 0, recvwin, 0, count, root, *devComm,
@@ -1384,7 +1396,7 @@ struct testColl broadcastTest = {
   BroadcastRunColl,
   BroadcastGetAlgoProtoChannels,
   NULL,
-  NULL,
+  BroadcastGetCollImplInfo,
   BroadcastDeviceTime
 };
 

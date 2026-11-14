@@ -9,12 +9,12 @@
 // util/data_types.h, with GFX1201-verified denormal and NaN handling.
 
 #include "common/bits.h"
-#include "common/float_formats.h"
+#include "common/float_encoding.h"
 #include "common/half_conversion.h"
-#include "common/internal.h"
+#include "common/validation.h"
 #include "conversion/conversion32.h"
 #include "conversion/float_conversion.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_scalar.h"
 
 #include <stdint.h>
 

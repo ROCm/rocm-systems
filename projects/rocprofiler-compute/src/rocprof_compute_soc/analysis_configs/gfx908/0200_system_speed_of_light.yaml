@@ -94,7 +94,7 @@ Panel Config:
           peak: 32
           pct_of_peak: true
         vL1D Cache Hit Rate:
-          value: COLLECT_SUM(_collect.vl1d_hit_non_rw, _collect.vl1d_hit_atom)
+          value: 100 - $vl1d_read_write_miss_rate - $vl1d_atomic_miss_rate
           unit: Percent
           peak: 100
           pct_of_peak: false

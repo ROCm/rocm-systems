@@ -30,6 +30,7 @@ from utils.utils_common import (
     get_job_rank_and_size,
     is_only_pc_sampling,
     print_status,
+    selects_roofline,
 )
 from utils.utils_exceptions import (
     ExecutableNotFoundError,
@@ -214,6 +215,10 @@ class RocProfCompute_Base:
                         "--experimental --pc-sampling"
                     )
 
+        # --set replaces filter_blocks, which would drop the PC sampling block
+        if getattr(args, "pc_sampling", False) and args.set_selected:
+            console_error("--pc-sampling cannot be used with --set.")
+
         # When --pc-sampling is set, inject "21" into filter_blocks so the
         # profiling config yaml records it and downstream code is unchanged.
         if getattr(args, "pc_sampling", False):
@@ -238,19 +243,6 @@ class RocProfCompute_Base:
                 "--trace-ml-api cannot be used with PC-sampling-only profiling, "
                 "which does not collect counters. Remove --trace-ml-api or add "
                 "a counter block."
-            )
-
-        if (
-            sum((
-                bool(args.filter_blocks),
-                bool(args.set_selected),
-                bool(args.roof_only),
-            ))
-            > 1
-        ):
-            console_error(
-                "--block, --set, and --roof-only are mutually exclusive options. "
-                "Please use only one of them."
             )
 
         if args.no_native_tool and args.iteration_multiplexing is not None:
@@ -357,7 +349,7 @@ class RocProfCompute_Base:
             args.remaining = ""
 
         self._filter_blocks = self._soc.profiling_setup()
-        # --set and --roof-only resolve to block ids here, so store them back on
+        # --set resolves to block ids here, so store them back on
         # the args every later stage reads.
         self.__args.filter_blocks = self._filter_blocks
 
@@ -368,7 +360,6 @@ class RocProfCompute_Base:
             encoding="utf-8",
         ) as f:
             args_dict = dict(vars(self.__args))
-            args_dict["config_dir"] = str(args_dict["config_dir"])
             args_dict["format_rocprof_output"] = PROFILE_OUTPUT_FORMAT
             args_dict["trace_ml_api"] = _frameworks_to_trace(args_dict["trace_ml_api"])
             yaml.dump(args_dict, f)
@@ -376,7 +367,7 @@ class RocProfCompute_Base:
         gen_sysinfo(
             workload_dir=args.output_directory,
             app_cmd=args.remaining,
-            skip_roof=args.no_roof,
+            skip_roof=args.no_roof or not selects_roofline(args.filter_blocks),
             mspec=self._soc._mspec,
         )
 
@@ -475,9 +466,7 @@ class RocProfCompute_Base:
                 "No performance counters to collect -- PC sampling only mode",
             )
 
-        msg = "Collecting Performance Counters"
-        status_msg = f"{msg} (Roofline Only)" if self.__args.roof_only else msg
-        print_status(status_msg)
+        print_status("Collecting Performance Counters")
 
         if total_runs:
             # Warn once per profile run, not once per counter collection pass.

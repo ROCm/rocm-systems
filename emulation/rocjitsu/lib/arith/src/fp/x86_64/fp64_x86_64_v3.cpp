@@ -7,8 +7,9 @@
 
 #include "common/x86_64/alu_x86_64_v3.h"
 #include "fp/fp64_impl.h"
+#include "fp/fp64_round.h"
 #include "fp/x86_64/minmax_x86_64_v3.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_fp.h"
 
 #include <immintrin.h>
 #include <stdint.h>
@@ -23,6 +24,31 @@ __m256d load(const uint32_t *const *v, int lane, __m256i keep, __m256i flip) {
       _mm256_cvtepu32_epi64(_mm_loadu_si128(reinterpret_cast<const __m128i *>(v[1] + lane)));
   auto bits = _mm256_or_si256(low, _mm256_slli_epi64(high, 32));
   return _mm256_castsi256_pd(_mm256_xor_si256(_mm256_and_si256(bits, keep), flip));
+}
+
+// Re-evaluate the selected lanes with the integer model. Kept out of line so that the
+// common case carries no stack frame for it.
+[[gnu::cold, gnu::noinline]] __m256d flush_tiny_lanes(__m256d value, __m256d x, __m256d y,
+                                                      __m256d z, unsigned lanes) {
+  uint64_t result[4], a[4], b[4], c[4];
+  _mm256_storeu_pd(reinterpret_cast<double *>(result), value);
+  _mm256_storeu_pd(reinterpret_cast<double *>(a), x);
+  _mm256_storeu_pd(reinterpret_cast<double *>(b), y);
+  _mm256_storeu_pd(reinterpret_cast<double *>(c), z);
+  for (; lanes; lanes &= lanes - 1) {
+    int i = __builtin_ctz(lanes);
+    result[i] = fma_flush_tiny_f64(result[i], a[i], b[i], c[i], 0);
+  }
+  return _mm256_loadu_pd(reinterpret_cast<const double *>(result));
+}
+
+// A product rounded to the smallest normal may still be tiny after rounding. Such lanes are
+// rare, so only they leave the SIMD path. This path rounds to nearest even.
+inline __m256d flush_tiny_products(__m256d value, __m256d x, __m256d y, __m256d z) {
+  auto magnitude = _mm256_and_si256(_mm256_castpd_si256(value), _mm256_set1_epi64x(INT64_MAX));
+  unsigned boundary = unsigned(_mm256_movemask_pd(_mm256_castsi256_pd(
+      _mm256_cmpeq_epi64(magnitude, _mm256_set1_epi64x(INT64_C(0x0010000000000000))))));
+  return __builtin_expect(boundary != 0, 0) ? flush_tiny_lanes(value, x, y, z, boundary) : value;
 }
 
 // Apply fp64_nan_priority to four lanes.
@@ -54,6 +80,10 @@ constexpr bool is_arithmetic(Fp64 op) {
 template <Fp64 Op, bool NanPriority>
 bool evaluate(uint64_t flags, uint32_t mode, const uint32_t *const *a, const uint32_t *const *b,
               const uint32_t *const *c, uint32_t (&result)[2][32]) {
+  // MUL/FMA results at the smallest normal need rechecking only when output flushing or OMOD
+  // would act on a tiny result.
+  const bool flush_tiny =
+      (flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS) || (mode & RJ_ARITH_ALU_OMOD_MASK);
   auto ka = _mm256_set1_epi64x(mode & RJ_ARITH_ALU_ABS_A ? INT64_MAX : -1);
   auto kb = _mm256_set1_epi64x(mode & RJ_ARITH_ALU_ABS_B ? INT64_MAX : -1);
   auto kc = _mm256_set1_epi64x(mode & RJ_ARITH_ALU_ABS_C ? INT64_MAX : -1);
@@ -85,6 +115,11 @@ bool evaluate(uint64_t flags, uint32_t mode, const uint32_t *const *a, const uin
         z = flush_denorm_f64(z);
       }
       value = _mm256_fmadd_pd(x, y, z);
+    }
+    if constexpr (Op == Fp64::Mul || Op == Fp64::Fma) {
+      if (flush_tiny) {
+        value = flush_tiny_products(value, x, y, z);
+      }
     }
     if constexpr (is_arithmetic(Op) && NanPriority) {
       value = nan_priority<Op == Fp64::Fma>(value, x, y, z);

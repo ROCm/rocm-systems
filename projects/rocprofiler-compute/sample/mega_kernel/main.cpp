@@ -36,11 +36,8 @@
 #endif
 #include <vector>
 
-// Cluster launch needs hipLaunchAttributeClusterDimension / clusterDim. That
-// attribute is not in every HIP 7.2 install (some ROCm 7.2.0 installs have
-// hipLaunchKernelEx but no ClusterDimension enumerator). HIP_VERSION alone is
-// not a valid probe, and host/device ifdefs still fail the host pass on gfx90a.
-// Opt in only via -DMEGA_KERNEL_ENABLE_CLUSTER_LAUNCH (Makefile: gfx1250).
+// Opt-in (the Makefile sets it for gfx1250): some HIP 7.2 installs lack
+// hipLaunchAttributeClusterDimension.
 #if defined(MEGA_KERNEL_ENABLE_CLUSTER_LAUNCH)
 #    define MEGA_KERNEL_HAS_CLUSTER_LAUNCH 1
 #endif
@@ -446,15 +443,8 @@ main(int argc, char** argv)
     TestResults h_results;
     memset(&h_results, 0, sizeof(TestResults));
 
-    // Allocate pinned host staging buffers (H2D/D2H). Device buffers below are
-    // allocated once and reused for all -n iterations (no hipMalloc/hipFree in
-    // the iteration loop; per-iter work is hipMemcpy/hipMemset only).
-    float* h_input  = nullptr;
-    float* h_output = nullptr;
-    HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&h_input),
-                            BUFFER_SIZE * sizeof(float)));
-    HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&h_output),
-                            BUFFER_SIZE * sizeof(float)));
+    float* h_input  = (float*) malloc(BUFFER_SIZE * sizeof(float));
+    float* h_output = (float*) malloc(BUFFER_SIZE * sizeof(float));
 
     // Initialize input buffer
     for(int i = 0; i < BUFFER_SIZE; i++)
@@ -512,70 +502,35 @@ main(int argc, char** argv)
 
     // Create texture and surface objects for gfx115x to exercise
     // INSTS_TEX_LOAD (tex1Dfetch) and INSTS_TEX_STORE (surf1Dwrite).
-    // Texture uses a dedicated linear buffer (not d_input): VMEM flat/global
-    // tests mutate d_input, and the texture cache is not coherent with those
-    // stores in the same kernel. Surfaces require hipArray + SurfaceLoadStore.
-    hipTextureObject_t tex_obj       = 0;
-    hipSurfaceObject_t surf_obj      = 0;
-    float*             d_tex_buffer  = nullptr;
-    hipArray_t         surf_array    = nullptr;
-    bool               surf_enabled  = false;
+    hipTextureObject_t tex_obj    = 0;
+    hipSurfaceObject_t surf_obj   = 0;
+    hipArray_t         surf_array = nullptr;
     if(g_arch_type == 6)
     {
-        hipChannelFormatDesc channel_desc =
+        hipResourceDesc resDesc;
+        memset(&resDesc, 0, sizeof(resDesc));
+        resDesc.resType                = hipResourceTypeLinear;
+        resDesc.res.linear.sizeInBytes = BUFFER_SIZE * sizeof(float);
+        resDesc.res.linear.desc =
             hipCreateChannelDesc(32, 0, 0, 0, hipChannelFormatKindFloat);
 
-        HIP_CHECK(hipMalloc(&d_tex_buffer, BUFFER_SIZE * sizeof(float)));
-        HIP_CHECK(hipMemcpy(d_tex_buffer, h_input, BUFFER_SIZE * sizeof(float),
-                            hipMemcpyHostToDevice));
-
-        hipResourceDesc tex_res;
-        memset(&tex_res, 0, sizeof(tex_res));
-        tex_res.resType                = hipResourceTypeLinear;
-        tex_res.res.linear.devPtr      = d_tex_buffer;
-        tex_res.res.linear.desc        = channel_desc;
-        tex_res.res.linear.sizeInBytes = BUFFER_SIZE * sizeof(float);
-
+        resDesc.res.linear.devPtr = d_input;
         hipTextureDesc texDesc;
         memset(&texDesc, 0, sizeof(texDesc));
         texDesc.normalizedCoords = 0;
         texDesc.filterMode       = hipFilterModePoint;
         texDesc.addressMode[0]   = hipAddressModeClamp;
-        HIP_CHECK(hipCreateTextureObject(&tex_obj, &tex_res, &texDesc, nullptr));
+        HIP_CHECK(hipCreateTextureObject(&tex_obj, &resDesc, &texDesc, nullptr));
 
-        // Surface path: array-backed resource (HIP rejects hipResourceTypeLinear).
-        hipError_t surf_err =
-            hipMallocArray(&surf_array, &channel_desc, static_cast<size_t>(BUFFER_SIZE),
-                           0, hipArraySurfaceLoadStore);
-        if(surf_err == hipSuccess)
-        {
-            hipResourceDesc surf_res;
-            memset(&surf_res, 0, sizeof(surf_res));
-            surf_res.resType         = hipResourceTypeArray;
-            surf_res.res.array.array = surf_array;
-            surf_err                 = hipCreateSurfaceObject(&surf_obj, &surf_res);
-        }
-        if(surf_err == hipSuccess && surf_obj != 0)
-        {
-            surf_enabled = true;
-        }
-        else
-        {
-            fprintf(stderr,
-                    "WARN: surface object unavailable on this platform (%s); "
-                    "skipping INSTS_TEX_STORE path, continuing with other ops\n",
-                    hipGetErrorString(surf_err));
-            if(surf_obj != 0)
-            {
-                (void) hipDestroySurfaceObject(surf_obj);
-                surf_obj = 0;
-            }
-            if(surf_array != nullptr)
-            {
-                (void) hipFreeArray(surf_array);
-                surf_array = nullptr;
-            }
-        }
+        // HIP creates surface objects only on arrays, not on linear memory.
+        HIP_CHECK(hipMallocArray(&surf_array, &resDesc.res.linear.desc,
+                                 static_cast<size_t>(BUFFER_SIZE), 0,
+                                 hipArraySurfaceLoadStore));
+        hipResourceDesc surfDesc;
+        memset(&surfDesc, 0, sizeof(surfDesc));
+        surfDesc.resType         = hipResourceTypeArray;
+        surfDesc.res.array.array = surf_array;
+        HIP_CHECK(hipCreateSurfaceObject(&surf_obj, &surfDesc));
     }
 
     printf("Running GPU Mega Kernel for %s...\n",
@@ -610,8 +565,7 @@ main(int argc, char** argv)
     for(int iter = 0; iter < config.num_iterations; iter++)
     {
         // Reset device memory for each iteration (except first)
-        // NOTE: d_output is VMEM scratch and is cleared each iter; d_input is
-        // refreshed for host-side memory verification.
+        // NOTE: d_input must also be reset because the gfx1250 buffer test writes it
         if(iter > 0)
         {
             HIP_CHECK(hipMemset(d_results, 0, sizeof(TestResults)));
@@ -624,8 +578,6 @@ main(int argc, char** argv)
             HIP_CHECK(hipMemcpy(d_global_double, h_global_double.data(),
                                 h_global_double.size() * sizeof(double),
                                 hipMemcpyHostToDevice));
-            // d_input is not mutated by the kernel (VMEM uses d_output as scratch);
-            // still refresh it so host-side verification stays deterministic.
             HIP_CHECK(hipMemcpy(d_input, h_input, BUFFER_SIZE * sizeof(float),
                                 hipMemcpyHostToDevice));
             HIP_CHECK(hipMemset(d_output, 0, BUFFER_SIZE * sizeof(float)));
@@ -674,10 +626,6 @@ main(int argc, char** argv)
     {
         HIP_CHECK(hipFreeArray(surf_array));
     }
-    if(d_tex_buffer != nullptr)
-    {
-        HIP_CHECK(hipFree(d_tex_buffer));
-    }
 
     // Copy results back
     HIP_CHECK(
@@ -685,15 +633,7 @@ main(int argc, char** argv)
     HIP_CHECK(hipMemcpy(h_output, d_output, BUFFER_SIZE * sizeof(float),
                         hipMemcpyDeviceToHost));
 
-    // Soft-gated surface path: mark TEX store as bypassed rather than a false PASS.
-    if(g_arch_type == 6 && !surf_enabled)
-    {
-        h_results.vmem_tex_store_passed = -1;
-    }
-
-    // Verify memory operations output. Only the gfx90a counter-collection
-    // artifact (stale values such as output[512]==199 while ISA path tests
-    // still PASS) is soft-bypassed; every other mismatch is a failure.
+    // Verify memory operations output
     bool memory_verified = true;
     for(int i = 0; i < BUFFER_SIZE && memory_verified; i++)
     {
@@ -704,14 +644,6 @@ main(int argc, char** argv)
             printf("Memory verification failed at index %d: expected %.3f, got %.3f\n", i,
                    expected, h_output[i]);
         }
-    }
-    int memory_verify_result = memory_verified ? 1 : 0;
-    if(!memory_verified && mega_kernel_host::memory_verify_failure_is_counter_artifact(
-                               g_arch_name, std::getenv("ROCPROF_COUNTER_COLLECTION")))
-    {
-        printf("WARN: host memory verify soft-bypassed on gfx90a under "
-               "ROCPROF_COUNTER_COLLECTION=1 (ISA path tests still counted)\n");
-        memory_verify_result = -1;
     }
 
     // Print results
@@ -774,7 +706,7 @@ main(int argc, char** argv)
     print_test_result("Global Memory Store", h_results.global_store_passed);
     print_test_result("LDS Load", h_results.lds_load_passed);
     print_test_result("LDS Store", h_results.lds_store_passed);
-    print_test_result("Memory Output Verification", memory_verify_result);
+    print_test_result("Memory Output Verification", memory_verified ? 1 : 0);
 
     printf("\n[Category: DOT Product Operations]\n");
     print_test_result("DOT4 (4-element INT8 dot)", h_results.dot4_passed);
@@ -960,7 +892,10 @@ main(int argc, char** argv)
     COUNT_TEST(h_results.buffer_load_passed);
     COUNT_TEST(h_results.buffer_store_passed);
     COUNT_TEST(h_results.multicast_load_passed);
-    COUNT_TEST(memory_verify_result);
+    if(memory_verified)
+        passed_categories++;
+    else
+        failed_categories++;
 
 #undef COUNT_TEST
 
@@ -1086,8 +1021,8 @@ main(int argc, char** argv)
     HIP_CHECK(hipFree(d_async_lds_dst));
     HIP_CHECK(hipFree(d_tdm_src));
     HIP_CHECK(hipFree(d_tdm_dst));
-    HIP_CHECK(hipHostFree(h_input));
-    HIP_CHECK(hipHostFree(h_output));
+    free(h_input);
+    free(h_output);
 
     return (failed_categories == 0) ? 0 : 1;
 }

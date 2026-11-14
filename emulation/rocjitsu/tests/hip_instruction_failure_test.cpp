@@ -68,7 +68,10 @@ private:
 } // namespace
 
 __global__ void unsupported_instruction() {
-  asm volatile(".long %0" : : "n"(rocjitsu::test::kUnimplementedInstruction));
+  asm volatile(".long %0, %1"
+               :
+               : "n"(rocjitsu::test::kUnimplementedInstruction[0]),
+                 "n"(rocjitsu::test::kUnimplementedInstruction[1]));
 }
 
 __global__ void undecodable_instruction() {

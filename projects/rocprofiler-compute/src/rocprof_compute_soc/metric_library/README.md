@@ -17,7 +17,7 @@ metric_library/
     compute.yaml    the compute.* metrics
     l2.yaml         the l2.* metrics
     ...
-    variables.yaml  the built-in variables, such as GRBM_GUI_ACTIVE_PER_XCD
+    collectables.yaml  the named formulas used as $name, such as GRBM_GUI_ACTIVE_PER_XCD
     sets.yaml       the profiling sets (--set)
   gfx90a/           a child arch: only the files that change
     compute.yaml    merged onto gfx908/compute.yaml
@@ -80,6 +80,26 @@ compute_thruput_util:
   - compute.valu_util
 ```
 
+## Collectables
+
+`collectables.yaml` names formulas that metric formulas use as `$name`. Production reads
+the same collectables from `analysis_configs/collectables/<arch>_collectables.yaml`.
+Analyze computes a collectable on the first pass that holds all of its counters, so a
+metric whose counters do not fit one pass is written with collectables:
+
+- Split the metric into parts whose counters each fit one pass. Make each part a
+  collectable and combine them with ordinary operators, such as
+  `$hbm_read_bandwidth + $hbm_write_bandwidth`.
+- Write a count without SUM; the metric sums it.
+- Keep a ratio's numerator and denominator in one collectable with SUM, such as
+  `100 * SUM(A) / SUM(B)`, so both come from one pass. For a min or max, add the same
+  ratio without SUM as `<name>_per_dispatch`.
+- A collectable may use other collectables, but not `$denom`.
+
+`tools/counter_grouping_inspector.py --arch <arch>` lists the metrics that no pass holds.
+`test_every_metric_reads_one_pass` in `tests/unit/rocprof_compute_soc/test_soc_base.py`
+fails until each of them is split.
+
 ## Inheritance
 
 A child arch lists only what differs from its parent. `METRIC_LIBRARY_PARENT_ARCH` in
@@ -111,5 +131,5 @@ duplicate keys.
 While production reads `analysis_configs/`,
 `tests/unit/rocprof_compute_soc/metric_library/test_metric_library_sync.py` checks that
 the library matches `analysis_configs/` and `profile_configs/sets/`: every equation of a
-panel row is a library formula, and the units, peaks, counters, built-in variables and
+panel row is a library formula, and the units, peaks, counters, collectables and
 sets match. CI runs it.

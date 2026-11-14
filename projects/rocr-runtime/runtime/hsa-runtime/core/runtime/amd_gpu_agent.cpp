@@ -695,16 +695,29 @@ void GpuAgent::ReserveScratch()
   assert(mem_err == HSA_STATUS_SUCCESS && "AvailableMemory failed");
   std::lock_guard<std::mutex> lock(scratch_lock_);
   if (!scratch_cache_.reserved_bytes() && reserved_sz && available > 8 * reserved_sz) {
+    // The reservation is an optimization: it pre-binds a block that
+    // AcquireQueueMainScratch can fall back on as one of its retry tiers. Queue
+    // creation does not depend on it, so a failure here continues without one.
     HSAuint64 alt_va;
     void* reserved_base = scratch_pool_.alloc(reserved_sz);
-    if (reserved_base == nullptr)
-      throw AMD::hsa_exception(HSA_STATUS_ERROR_OUT_OF_RESOURCES, "Reserve scratch memory failed.");
+    if (reserved_base == nullptr) {
+      if (core::Runtime::runtime_singleton_->flag().enable_queue_fault_message())
+        fprintf(stderr,
+                "Scratch reserve of %zu bytes failed, continuing without a reserved block.\n",
+                reserved_sz);
+      return;
+    }
 
     if (driver().MakeMemoryResident(reserved_base, reserved_sz, &alt_va) == HSA_STATUS_SUCCESS)
       scratch_cache_.reserve(reserved_sz, reserved_base);
     else {
       scratch_pool_.free(reserved_base);
-      throw AMD::hsa_exception(HSA_STATUS_ERROR_OUT_OF_RESOURCES, "Reserve scratch memory failed.");
+      if (core::Runtime::runtime_singleton_->flag().enable_queue_fault_message())
+        fprintf(stderr,
+                "Scratch reserve of %zu bytes could not be mapped, continuing without a "
+                "reserved block.\n",
+                reserved_sz);
+      return;
     }
   }
 }
@@ -2366,7 +2379,7 @@ void GpuAgent::GetAqlInfoProperties(uint8_t value[8]) const {
   };
 
   // Fill the HSA_AMD_AQL_PROPERTY_EXT_DISPATCH
-  if (extended_aql_dispatch_supported_)
+  if (ExtendedAqlDispatchSupported())
       setFlag(HSA_AMD_AQL_PROPERTY_EXT_DISPATCH);
 }
 
@@ -2816,9 +2829,9 @@ hsa_status_t GpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) const {
 }
 
 // CP FW writes amd_queue_t::caps only once it has processed a packet on the queue, so the first
-// query runs an empty barrier-AND on the utility queue and reads the bit there.
-bool GpuAgent::SignalHintsSupported() const {
-  std::call_once(signal_hints_once_, [this]() {
+// query runs an empty barrier-AND on the utility queue and reads the bits there.
+uint32_t GpuAgent::CpFirmwareCaps() const {
+  std::call_once(cp_caps_once_, [this]() {
     core::unique_signal_ptr completion(new core::DefaultSignal(1));
     if (!completion->IsValid()) return;
     core::Queue* queue = (*queues_[QueueUtility]).get();
@@ -2837,9 +2850,20 @@ bool GpuAgent::SignalHintsSupported() const {
                   std::memory_order_release);
     core::Signal::Convert(hsa_queue.doorbell_signal)->StoreRelease(index);
     completion->WaitAcquire(HSA_SIGNAL_CONDITION_LT, 1, UINT64_MAX, HSA_WAIT_STATE_ACTIVE);
-    signal_hints_supported_ = (queue->amd_queue_.caps & AMD_QUEUE_CAPS_CP_SIGNAL_HINTS) != 0;
+    cp_caps_ = queue->amd_queue_.caps;
   });
-  return signal_hints_supported_;
+  return cp_caps_;
+}
+
+bool GpuAgent::SignalHintsSupported() const {
+  return (CpFirmwareCaps() & AMD_QUEUE_CAPS_CP_SIGNAL_HINTS) != 0;
+}
+
+// gfx12.5 supports the packet natively, without asking the firmware. The firmware's packet has
+// clusters of 1: cluster_max_dim_ stays {1, 1, 1}.
+bool GpuAgent::ExtendedAqlDispatchSupported() const {
+  return extended_aql_dispatch_supported_ ||
+         ((CpFirmwareCaps() & AMD_QUEUE_CAPS_CP_EXT_KERNEL_DISPATCH) != 0);
 }
 
 hsa_status_t GpuAgent::SetAgentAttribute(hsa_agent_info_t attribute, void* value) {
@@ -3097,7 +3121,9 @@ void GpuAgent::AcquireQueueMainScratch(ScratchInfo& scratch) {
       else
         scratch.main_queue_base = scratch_pool_.alloc(scratch.main_size);
 
-      scratch.large = large | (scratch.main_queue_base > scratch_pool_.high_split());
+      scratch.large = large |
+          (scratch.main_queue_base != nullptr &&
+           (scratch.main_queue_base > scratch_pool_.high_split()));
       assert(((!scratch.large) | use_reclaim) && "Large scratch used with reclaim disabled.");
 
       if (scratch.main_queue_base != nullptr) {
@@ -3538,6 +3564,17 @@ void GpuAgent::BindTrapHandler() {
         supported_isas()[0]->GetStepping() == 6)) {
       // No trap handler support without exception handling, soft error.
       // gfx1036 (Granite Ridge iGPU): KMD does not support the trap handler escape.
+      //
+      // Nothing is bound on this path, and the queue is also created without an event or
+      // an ErrorReason, so there is no way left to deliver a queue exception. Say so once
+      // per agent rather than failing silently - a device-side abort then parks its wave
+      // forever and presents as an unexplained hang rather than as an error.
+      log_warning_n(0,
+                    "No trap handler bound for GPU node %u (%s): the kernel driver does not "
+                    "report support for exception debugging. Queue exceptions such as a "
+                    "device-side abort will not be reported, and a kernel that aborts will "
+                    "leave its dispatch unretired, so the host may wait indefinitely.\n",
+                    node_id(), supported_isas()[0]->GetIsaName().c_str());
       return;
     }
 

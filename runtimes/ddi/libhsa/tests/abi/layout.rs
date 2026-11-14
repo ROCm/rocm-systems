@@ -44,6 +44,8 @@ macro_rules! member {
 }
 
 fn main() {
+    record!(HsaFile);
+    record!(HsaHandle);
     record!(HsaSignal);
     member!(HsaSignal, handle);
     record!(HsaDim3);
