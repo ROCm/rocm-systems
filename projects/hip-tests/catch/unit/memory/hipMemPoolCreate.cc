@@ -191,6 +191,42 @@ HIP_TEST_CASE(Unit_hipMemPoolCreate_DeviceTest) {
 }
 
 /**
+ * Test Description
+ * ------------------------
+ *    - Test hipMemPoolCreate while a stream is capturing. The API is allowed in
+ * relaxed capture mode and must return hipErrorStreamCaptureUnsupported in the
+ * global and thread-local capture modes.
+ * ------------------------
+ *    - catch\unit\memory\hipMemPoolCreate.cc
+ * Test requirements
+ * ------------------------
+ *    - HIP_VERSION >= 6.2
+ */
+HIP_TEST_CASE(Unit_hipMemPoolCreate_Capture) {
+  checkMempoolSupported(0)
+
+      hipMemPoolProps pool_props;
+  memset(&pool_props, 0, sizeof(pool_props));
+  pool_props.allocType = hipMemAllocationTypePinned;
+  pool_props.handleTypes = hipMemHandleTypeNone;
+  pool_props.location.type = hipMemLocationTypeDevice;
+  pool_props.location.id = 0;
+  pool_props.win32SecurityAttributes = nullptr;
+
+  hipMemPool_t mem_pool = nullptr;
+  hipError_t capture_err = hipSuccess;
+  constexpr bool kRelaxedModeAllowed = true;
+  BEGIN_CAPTURE_SYNC(capture_err, kRelaxedModeAllowed);
+  HIP_CHECK_ERROR(hipMemPoolCreate(&mem_pool, &pool_props), capture_err);
+  END_CAPTURE_SYNC(capture_err);
+
+  // The pool is only created when the capture check allows the API to run.
+  if (mem_pool != nullptr) {
+    HIP_CHECK(hipMemPoolDestroy(mem_pool));
+  }
+}
+
+/**
  * End doxygen group StreamOTest.
  * @}
  */
