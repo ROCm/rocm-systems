@@ -128,6 +128,14 @@ the device and the host, using the HIP runtime API.
   HIP_CHECK(hipFree(device_input));
   delete[] host_pointer;
 
+Copying between devices
+--------------------------------------------------------------------------------
+
+To copy memory from one device to another, use :cpp:func:`hipMemcpyPeer` or
+:cpp:func:`hipMemcpyPeerAsync`. These functions are part of the
+:ref:`peer-to-peer device memory access API <peer_to_peer_device_memory_access_reference>`.
+For details and an example, see :ref:`multi_device_peer_copy`.
+
 Constant memory
 ================================================================================
 
