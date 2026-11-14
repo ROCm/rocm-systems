@@ -1952,8 +1952,8 @@ hsa_status_t ExecutableImpl::LoadAieCodeObject(hsa_agent_t agent, const void* da
 
         // The NPU reaches the variable at its agent address, so all of it must lie in one
         // allocation the driver knows. The extent is measured from the allocation base
-        // FindDriverMemoryHandle returns: for a VMM mapping, PtrInfo reports the queried pointer
-        // as the base but the whole mapping as the size.
+        // FindDriverMemoryHandle returns. PtrInfo reports that mapping base, and the
+        // variable's agent address is agentBaseAddress + (va - hostBaseAddress).
         auto* runtime = core::Runtime::runtime_singleton_;
         hsa_amd_pointer_info_t info = {};
         info.size = sizeof(info);
