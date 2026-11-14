@@ -2038,6 +2038,53 @@ TEST_F(CollectivesMicrotest, ReduceScatter_EmptyDirectCallIsANoOp) {
   EXPECT_FALSE(comm_->enableDirectReduceScatter);
 }
 
+// DDA under a loaded profiler plugin
+
+// DDA returns before ncclEnqueueCheck, so each DDA arm raises the group and collective API events collTaskAppend
+// raises on the native path, around its launch. Without them a profiler plugin sees nothing.
+TEST_F(CollectivesMicrotest, DdaArms_RunInsideTheGroupAndCollApiProfilerEvents) {
+  ScopedHook pluginLoaded(g_profilerPluginLoaded, [] { return true; });
+  ScopedHook groupApiStart(g_profilerStartGroupApiEvent, [](ncclInfo*, bool) {
+    fake.trace.push_back("groupApiStart");
+    return ncclSuccess;
+  });
+  ScopedHook collApiStart(g_profilerStartCollApiEvent, [](ncclInfo* info, bool) {
+    fake.trace.push_back(std::string("collApiStart ") + ncclFuncToString(info->coll));
+    return ncclSuccess;
+  });
+  ScopedHook collApiStop(g_profilerStopCollApiEvent, [] {
+    fake.trace.push_back("collApiStop");
+    return ncclSuccess;
+  });
+  ScopedHook groupApiStop(g_profilerStopGroupApiEvent, [] {
+    fake.trace.push_back("groupApiStop");
+    return ncclSuccess;
+  });
+  const std::vector<std::pair<int, std::string>> arms = {
+      {RCCL_DDA_FABRIC_LL, "FabricLL"}, {RCCL_DDA_FABRIC_LL128, "FabricLL128"}, {RCCL_DDA_FABRIC_VMM, "Fabric"},
+      {RCCL_DDA_IPC, "Ipc"}};
+  auto expectArms = [&](const std::string& func, const std::string& launcher,
+                        const std::function<ncclResult_t()>& call) {
+    for (const auto& [algo, arm] : arms) {
+      const std::string fn = "nccl" + launcher + "Dda" + arm;
+      SCOPED_TRACE(fn);
+      Decide(algo);
+      fake.trace.clear();
+      EXPECT_EQ(ncclSuccess, call());
+      std::vector<std::string> seen;  // the API events and the launch, in issue order
+      for (const std::string& t : fake.trace) {
+        if (t.find("Api") != std::string::npos || t == fn) seen.push_back(t);
+      }
+      EXPECT_EQ((std::vector<std::string>{"groupApiStart", "collApiStart " + func, fn, "collApiStop", "groupApiStop"}),
+                seen);
+    }
+  };
+  expectArms("AllGather", "AllGather", [&] { return AllGather(); });
+  expectArms("AlltoAll", "AllToAll", [&] { return AlltoAll(); });
+  expectArms("AllReduce", "AllReduce", [&] { return AllReduce(); });
+  expectArms("ReduceScatter", "ReduceScatter", [&] { return ReduceScatter(); });
+}
+
 // AlltoAllv: per-peer Send/Recv, or a size-metadata exchange that feeds the CE planners.
 
 class CollectivesAlltoAllvMicrotest : public CollectivesMicrotest {
