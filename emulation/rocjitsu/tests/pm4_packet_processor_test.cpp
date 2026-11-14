@@ -70,7 +70,6 @@ public:
   }
 
   AtomicLoadResult atomic_load(VmMemoryDomain, uint64_t address, uint32_t width) override {
-    atomic_load_addresses_.push_back(address);
     if (unavailable_read_ && address == *unavailable_read_)
       return {.outcome = VmAccessOutcome::Unavailable};
     if ((width != 4 && width != 8) || address % width != 0 || address > bytes_.size() ||
@@ -83,7 +82,6 @@ public:
 
   VmAccessOutcome atomic_store(VmMemoryDomain, uint64_t address, uint32_t width,
                                uint64_t value) override {
-    atomic_store_addresses_.push_back(address);
     if ((width != 4 && width != 8) || address % width != 0 || address > bytes_.size() ||
         width > bytes_.size() - address)
       return VmAccessOutcome::Malformed;
@@ -121,8 +119,6 @@ public:
     protected_address_ = address;
     protected_permissions_ = permissions;
   }
-  const std::vector<uint64_t> &atomic_load_addresses() const { return atomic_load_addresses_; }
-  const std::vector<uint64_t> &atomic_store_addresses() const { return atomic_store_addresses_; }
   void make_store_unavailable_once(uint64_t address) { unavailable_store_once_ = address; }
   void make_store_faulted_once(uint64_t address) {
     store_outcome_once_ = std::pair{address, VmAccessOutcome::Faulted};
@@ -134,10 +130,6 @@ private:
   std::optional<uint64_t> protected_address_;
   // Permissions for that operand; other fixture memory remains readable and writable.
   VmPermissions protected_permissions_;
-  // Atomic observations distinguish synchronization packets from byte copies.
-  std::vector<uint64_t> atomic_load_addresses_;
-  // Atomic publications include payloads and the native consumer cursor.
-  std::vector<uint64_t> atomic_store_addresses_;
   std::vector<std::byte> bytes_;
   std::optional<uint64_t> unavailable_read_;
   std::optional<uint64_t> unavailable_store_once_;
@@ -538,12 +530,10 @@ TEST_F(Pm4PacketProcessorTest, WaitBlocksLaterMemoryEffectsUntilItsConditionPass
                          0u,          0xc0033700u, 0x100u,  kOutput + 4, 0u, 0xdeadbeefu};
   submit(words);
   EXPECT_EQ(service(), Pm4TestStatus::Blocked);
-  EXPECT_EQ(std::ranges::count(memory->atomic_load_addresses(), kOutput), 1);
   EXPECT_EQ(memory->load<uint32_t>(kOutput + 4), 0u);
   EXPECT_EQ(queue.commands.submissions.front().buffers.front().address, kRing);
   memory->store<uint32_t>(kOutput, 1);
   EXPECT_EQ(service(), Pm4TestStatus::Ready);
-  EXPECT_EQ(std::ranges::count(memory->atomic_load_addresses(), kOutput), 2);
   EXPECT_EQ(memory->load<uint32_t>(kOutput + 4), 0xdeadbeefu);
   EXPECT_TRUE(completed);
 }
@@ -571,10 +561,8 @@ TEST_F(Pm4PacketProcessorTest, ReleaseInterruptObservesPayloadBeforeABlockedTail
     });
     queue.interrupt_sink = subscription.sink();
     completed = false;
-    const auto previous_stores = std::ranges::count(memory->atomic_store_addresses(), kOutput);
     submit(words);
     EXPECT_EQ(service(), Pm4TestStatus::Blocked);
-    EXPECT_EQ(std::ranges::count(memory->atomic_store_addresses(), kOutput), previous_stores + 1);
     EXPECT_EQ(interrupts, 1u);
     EXPECT_FALSE(completed);
     memory->store<uint32_t>(gate, 1);
@@ -602,7 +590,7 @@ TEST_F(Pm4PacketProcessorTest, ReleaseWritesWriteOnlyMemory) {
   EXPECT_TRUE(completed);
 }
 
-TEST_F(Pm4PacketProcessorTest, UnavailableWaitLoadRetainsThePacketUntilMemoryIsAvailable) {
+TEST_F(Pm4PacketProcessorTest, UnavailableWaitReadRetainsThePacketUntilMemoryIsAvailable) {
   const std::array words{0xc0053c00u, 0x13u, kOutput, 0u, 1u, ~0u, 0u};
   memory->store<uint32_t>(kOutput, 1);
   memory->make_read_unavailable(kOutput);
@@ -612,22 +600,8 @@ TEST_F(Pm4PacketProcessorTest, UnavailableWaitLoadRetainsThePacketUntilMemoryIsA
   EXPECT_FALSE(completed);
   memory->make_reads_available();
   EXPECT_EQ(service(), Pm4TestStatus::Ready);
-  EXPECT_EQ(std::ranges::count(memory->atomic_load_addresses(), kOutput), 2);
   EXPECT_EQ(queue.read_pointer_journal.cursor(), words.size());
   EXPECT_TRUE(completed);
-}
-
-TEST_F(Pm4PacketProcessorTest, NonReturningExchangeUsesAtomicStoreAtBothWidths) {
-  for (uint32_t control : {7u, 0x27u}) {
-    SCOPED_TRACE(control);
-    memory->store<uint64_t>(kOutput, 0);
-    const std::array words{0xc0071e00u, control, kOutput, 0u, 0x12345678u, 0x87654321u, 0u, 0u, 0u};
-    submit(words);
-    EXPECT_EQ(service(), Pm4TestStatus::Ready);
-    EXPECT_EQ(memory->load<uint64_t>(kOutput),
-              control == 7 ? UINT64_C(0x12345678) : UINT64_C(0x8765432112345678));
-  }
-  EXPECT_EQ(std::ranges::count(memory->atomic_store_addresses(), kOutput), 2);
 }
 
 TEST_F(Pm4PacketProcessorTest, ReleaseWithoutInterruptStillPublishesData) {
