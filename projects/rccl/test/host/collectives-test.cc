@@ -56,6 +56,7 @@ struct Enqueued {
   ncclInfo info;
   bool directReduceScatter;
   std::vector<size_t> sizes;  // info.sizes points at the caller's stack, so snapshot it
+  hipEvent_t doneEvent;       // info.comm->doneEvent at enqueue time
 };
 
 struct Recorded {
@@ -419,7 +420,8 @@ struct SharedHooks {
       const size_t n = info->comm->nRanks;
       sizes.assign(info->sizes, info->sizes + 4 * n * n);
     }
-    fake.enqueued.push_back({*info, info->comm != nullptr && info->comm->enableDirectReduceScatter, sizes});
+    fake.enqueued.push_back({*info, info->comm != nullptr && info->comm->enableDirectReduceScatter, sizes,
+                             info->comm != nullptr ? info->comm->doneEvent : nullptr});
     if (fake.enqueueResults.empty()) return ncclSuccess;
     ncclResult_t res = fake.enqueueResults.front();
     fake.enqueueResults.pop_front();
@@ -1449,6 +1451,8 @@ class CollectivesHierarchicalMicrotest : public CollectivesMicrotest {
     comm_->hierarchicalInterComm = inter_.get();
     comm_->hierarchicalTempBuffer = temp_.data();
     comm_->addonStopEvent = stopEvent_;
+    inter_->doneEvent = interDone_;
+    inter_->config.blocking = 1;  // production default; 0 keeps the inter done event (see below)
     send_.assign(kCount * kLocal * kNodes, 1.0f);
     recv_.assign(kCount * kLocal * kNodes, 0.0f);
     fake.useAgDirect = [this](ncclComm* comm, size_t msgSize) {
@@ -1456,11 +1460,20 @@ class CollectivesHierarchicalMicrotest : public CollectivesMicrotest {
       return comm == directComm_ || directComm_ == &any_;
     };
     fake.useRsDirect = fake.useAgDirect;
+    g_hipEventRecord = [this](hipEvent_t event, hipStream_t stream) {
+      eventRecords_.push_back({event, stream});
+      return eventRecordResult_;
+    };
   }
 
   struct DirectAsk {
     ncclComm* comm;
     size_t msgSize;
+  };
+  struct EventRecord {
+    hipEvent_t event;
+    hipStream_t stream;
+    bool operator==(const EventRecord& o) const { return event == o.event && stream == o.stream; }
   };
   std::unique_ptr<ncclComm> intra_;
   std::unique_ptr<ncclComm> inter_;
@@ -1468,9 +1481,12 @@ class CollectivesHierarchicalMicrotest : public CollectivesMicrotest {
   int intraTemp_ = 0;
   int interTemp_ = 0;
   hipEvent_t stopEvent_ = reinterpret_cast<hipEvent_t>(0xe7);
+  hipEvent_t interDone_ = reinterpret_cast<hipEvent_t>(0xd1);
   ncclComm any_{};
   ncclComm* directComm_ = nullptr;
   std::vector<DirectAsk> directAsks_;
+  std::vector<EventRecord> eventRecords_;
+  hipError_t eventRecordResult_ = hipSuccess;
 };
 
 TEST_F(CollectivesHierarchicalMicrotest, AllGather_InterThenIntraThenShuffle) {
@@ -1667,6 +1683,84 @@ TEST_F(CollectivesHierarchicalMicrotest, ReduceScatter_ShuffleThenIntraThenInter
   ASSERT_EQ(1u, directAsks_.size());
   EXPECT_EQ(inter_.get(), directAsks_[0].comm);
   EXPECT_EQ(kCount * sizeof(float) * kNodes, directAsks_[0].msgSize);
+
+  // The shuffle cannot carry the parent stop event; the last inter-node launch fuses it instead.
+  EXPECT_EQ(nullptr, k.stopEvent);
+  EXPECT_EQ(stopEvent_, fake.enqueued[1].doneEvent);
+  EXPECT_EQ(interDone_, inter_->doneEvent);
+  EXPECT_EQ(nullptr, comm_->addonStopEvent);  // taken, so the epilogue does not record it again
+  // The redirected launch never records the inter event, so its first use primes it once.
+  EXPECT_EQ((std::vector<EventRecord>{{interDone_, stream_}}), eventRecords_);
+}
+
+TEST_F(CollectivesHierarchicalMicrotest, ReduceScatter_InterDoneIsPrimedOnlyBeforeItsFirstLaunch) {
+  Decide(RCCL_HIERARCHICAL_REDUCESCATTER);
+  inter_->lastStreamTag = 1;
+  EXPECT_EQ(ncclSuccess, ReduceScatter());
+  EXPECT_EQ(stopEvent_, fake.enqueued[1].doneEvent);
+  EXPECT_EQ(interDone_, inter_->doneEvent);
+  EXPECT_EQ(nullptr, comm_->addonStopEvent);
+  EXPECT_TRUE(eventRecords_.empty());
+}
+
+TEST_F(CollectivesHierarchicalMicrotest, ReduceScatter_NoParentStopEventKeepsTheInterDoneEvent) {
+  Decide(RCCL_HIERARCHICAL_REDUCESCATTER);
+  comm_->addonStopEvent = nullptr;
+  EXPECT_EQ(ncclSuccess, ReduceScatter());
+  EXPECT_EQ(interDone_, fake.enqueued[1].doneEvent);
+  EXPECT_EQ(interDone_, inter_->doneEvent);
+  EXPECT_TRUE(eventRecords_.empty());
+}
+
+TEST_F(CollectivesHierarchicalMicrotest, ReduceScatter_NonBlockingInterCommIsNotRedirected) {
+  Decide(RCCL_HIERARCHICAL_REDUCESCATTER);
+  inter_->config.blocking = 0;
+  EXPECT_EQ(ncclSuccess, ReduceScatter());
+  EXPECT_EQ(interDone_, fake.enqueued[1].doneEvent);
+  EXPECT_EQ(interDone_, inter_->doneEvent);
+  EXPECT_EQ(stopEvent_, comm_->addonStopEvent);
+  EXPECT_TRUE(eventRecords_.empty());
+}
+
+TEST_F(CollectivesHierarchicalMicrotest, ReduceScatter_InProgressReturnsSuccessWithoutRedirect) {
+  Decide(RCCL_HIERARCHICAL_REDUCESCATTER);
+  // ncclInProgress only comes from a non-blocking inter comm, which is not redirected. The call
+  // still returns success, as NCCLCHECK does, so the epilogue records the parent stop event.
+  inter_->config.blocking = 0;
+  fake.enqueueResults = {ncclSuccess, ncclInProgress};
+  EXPECT_EQ(ncclSuccess, ReduceScatter());
+  EXPECT_EQ(interDone_, fake.enqueued[1].doneEvent);
+  EXPECT_EQ(interDone_, inter_->doneEvent);
+  EXPECT_EQ(stopEvent_, comm_->addonStopEvent);
+  EXPECT_TRUE(eventRecords_.empty());
+}
+
+TEST_F(CollectivesHierarchicalMicrotest, ReduceScatter_InterFailureRestoresTheInterEventAndKeepsTheStopEvent) {
+  Decide(RCCL_HIERARCHICAL_REDUCESCATTER);
+  fake.enqueueResults = {ncclSuccess, ncclRemoteError};
+  EXPECT_EQ(ncclRemoteError, ReduceScatter());
+  EXPECT_EQ(stopEvent_, fake.enqueued[1].doneEvent);
+  EXPECT_EQ(interDone_, inter_->doneEvent);
+  EXPECT_EQ(stopEvent_, comm_->addonStopEvent);  // the epilogue still records the parent event
+  EXPECT_EQ((std::vector<EventRecord>{{interDone_, stream_}}), eventRecords_);
+
+  // A failed prime record does not mask the inter-node error.
+  comm_->addonStopEvent = stopEvent_;
+  eventRecords_.clear();
+  eventRecordResult_ = hipErrorInvalidValue;
+  fake.enqueued.clear();
+  fake.enqueueResults = {ncclSuccess, ncclRemoteError};
+  EXPECT_EQ(ncclRemoteError, ReduceScatter());
+  EXPECT_EQ(1u, eventRecords_.size());
+}
+
+TEST_F(CollectivesHierarchicalMicrotest, ReduceScatter_FailedInterDonePrimeIsReported) {
+  Decide(RCCL_HIERARCHICAL_REDUCESCATTER);
+  eventRecordResult_ = hipErrorInvalidValue;
+  EXPECT_EQ(ncclUnhandledCudaError, ReduceScatter());
+  EXPECT_EQ(2u, fake.enqueued.size());
+  EXPECT_EQ(interDone_, inter_->doneEvent);
+  EXPECT_EQ(stopEvent_, comm_->addonStopEvent);
 }
 
 TEST_F(CollectivesHierarchicalMicrotest, ReduceScatter_SingleSliceIntraComm) {
@@ -1674,6 +1768,7 @@ TEST_F(CollectivesHierarchicalMicrotest, ReduceScatter_SingleSliceIntraComm) {
   intra_->rcclUseOneSlice = 1;
   EXPECT_EQ(ncclSuccess, ReduceScatter());
   EXPECT_EQ(REDUCESCATTER_SLICESTEPS_SINGLE_NODE, Info(0).sliceSteps);
+  EXPECT_EQ(REDUCESCATTER_SLICESTEPS, Info(1).sliceSteps);
 }
 
 TEST_F(CollectivesHierarchicalMicrotest, ReduceScatter_DirectInterStep) {
@@ -1694,6 +1789,12 @@ TEST_F(CollectivesHierarchicalMicrotest, ReduceScatter_DirectInterStep) {
   EXPECT_TRUE(fake.enqueued[1].directReduceScatter);
   EXPECT_TRUE(fake.enqueued[2].directReduceScatter);
   EXPECT_FALSE(inter_->enableDirectReduceScatter);
+  // Both direct inter-node enqueues launch with the parent stop event; the last one is the fence.
+  EXPECT_EQ(stopEvent_, fake.enqueued[1].doneEvent);
+  EXPECT_EQ(stopEvent_, fake.enqueued[2].doneEvent);
+  EXPECT_EQ(interDone_, inter_->doneEvent);
+  EXPECT_EQ(nullptr, comm_->addonStopEvent);
+  EXPECT_EQ((std::vector<EventRecord>{{interDone_, stream_}}), eventRecords_);
 }
 
 TEST_F(CollectivesHierarchicalMicrotest, ReduceScatter_EachStepFailureStopsTheRest) {

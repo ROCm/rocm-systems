@@ -1164,11 +1164,21 @@ static ncclResult_t ncclHierarchicalReduceScatter_Impl(const void* sendbuff, voi
                                  nullptr};
   NCCLCHECK(ncclEnqueueCheck(&infoIntraRS));
 
-  // Step 3: Inter-node ReduceScatter  intraOut -> recvbuff.
+  // Step 3: Inter-node ReduceScatter intraOut -> recvbuff, the last GPU work. Its kernel carries the parent's
+  // doneEvent as stop event. The parent's stream-change wait covers interComm, which only runs inside hierarchical
+  // collectives, so interComm->doneEvent is recorded once, on first use, not per call. A non-blocking inter comm
+  // keeps its own doneEvent: NCCL_COMM_BLOCKING=0 is reapplied to the split child, so its first launch can run on
+  // the group thread and race a swap, and that launch can return ncclInProgress.
   size_t interMsgSize = recvcount * typeSize * (size_t)nNodes;
+  const hipEvent_t parentStop = interComm->config.blocking ? comm->addonStopEvent : nullptr;
+  const hipEvent_t interDone = interComm->doneEvent;
+  const bool primeInterDone = parentStop != nullptr && interComm->lastStreamTag == 0;
+  if (parentStop != nullptr) interComm->doneEvent = parentStop;
+
+  ncclResult_t interRes;
   if (rcclUseReduceScatterDirect(interComm, interMsgSize)) {
-    NCCLCHECK(rcclDirectReduceScatter(intraOut, recvbuff, recvcount, datatype, op, interComm, stream,
-                                      REDUCESCATTER_CHUNKSTEPS, REDUCESCATTER_SLICESTEPS));
+    interRes = rcclDirectReduceScatter(intraOut, recvbuff, recvcount, datatype, op, interComm, stream,
+                                       REDUCESCATTER_CHUNKSTEPS, REDUCESCATTER_SLICESTEPS);
   } else {
     struct ncclInfo infoInterRS = {ncclFuncReduceScatter,
                                    "HierarchicalReduceScatter-Inter",
@@ -1183,8 +1193,24 @@ static ncclResult_t ncclHierarchicalReduceScatter_Impl(const void* sendbuff, voi
                                    REDUCESCATTER_CHUNKSTEPS,
                                    REDUCESCATTER_SLICESTEPS,
                                    nullptr};
-    NCCLCHECK(ncclEnqueueCheck(&infoInterRS));
+    interRes = ncclEnqueueCheck(&infoInterRS);
   }
+
+  if (parentStop != nullptr) interComm->doneEvent = interDone;
+  // ncclInProgress is the non-blocking group's "launched" result, not a failure. NCCLCHECK ignores
+  // it, and the AllGather path then returns success so the epilogue records the parent doneEvent.
+  // A non-blocking inter comm never takes that event, so returning ncclInProgress here would make
+  // the epilogue skip the record.
+  if (interRes != ncclSuccess && interRes != ncclInProgress) {
+    // The launch may already have published lastStreamTag. Leave a recorded
+    // inter event behind so a later stream change does not wait on one that
+    // was never recorded. The parent stop event stays offered; the epilogue
+    // records it only when this call returns success.
+    if (primeInterDone) (void)hipEventRecord(interDone, stream);
+    return interRes;
+  }
+  if (primeInterDone) CUDACHECK(hipEventRecord(interDone, stream));
+  if (parentStop != nullptr) (void)rcclTakeAddonStopEvent(comm);
 
   return ncclSuccess;
 }
