@@ -69,6 +69,67 @@ class TopoMicrotest : public ::testing::Test {
   }
 };
 
+TEST_F(TopoMicrotest, IdToIndex_UsesNodeTypeAndFullIdAndClearsMisses) {
+  auto system = std::make_unique<ncclTopoSystem>();
+  system->nodes[GPU].count = 2;
+  system->nodes[GPU].nodes[0].id = NCCL_TOPO_ID(3, 17);
+  system->nodes[GPU].nodes[1].id = NCCL_TOPO_ID(4, 17);
+  system->nodes[NET].count = 1;
+  system->nodes[NET].nodes[0].id = NCCL_TOPO_ID(4, 17);
+  int index = 99;
+
+  ASSERT_EQ(ncclSuccess, ncclTopoIdToIndex(system.get(), GPU, NCCL_TOPO_ID(4, 17), &index));
+  EXPECT_EQ(1, index);
+  ASSERT_EQ(ncclSuccess, ncclTopoIdToIndex(system.get(), NET, NCCL_TOPO_ID(4, 17), &index));
+  EXPECT_EQ(0, index);
+  EXPECT_EQ(ncclInternalError, ncclTopoIdToIndex(system.get(), GPU, NCCL_TOPO_ID(4, 18), &index));
+  EXPECT_EQ(-1, index);
+}
+
+TEST_F(TopoMicrotest, RankToIndex_FindsLastPopulatedGpuAndIgnoresUnusedSlots) {
+  auto system = std::make_unique<ncclTopoSystem>();
+  system->nodes[GPU].count = 2;
+  system->nodes[GPU].nodes[0].gpu.rank = 8;
+  system->nodes[GPU].nodes[1].gpu.rank = 3;
+  system->nodes[GPU].nodes[2].gpu.rank = 5;
+  int index = 99;
+
+  ASSERT_EQ(ncclSuccess, ncclTopoRankToIndex(system.get(), 3, &index, false));
+  EXPECT_EQ(1, index);
+  index = 99;
+  EXPECT_EQ(ncclInternalError, ncclTopoRankToIndex(system.get(), 5, &index, false));
+  EXPECT_EQ(-1, index);
+}
+
+TEST_F(TopoMicrotest, NVLinkBw_GenerationBoundariesAndRubinExceptions) {
+  struct Sample { int capability; float bandwidth; };
+  const Sample samples[] = {
+    {50, SM80_NVLINK_BW}, {59, SM80_NVLINK_BW}, {60, SM60_NVLINK_BW}, {69, SM60_NVLINK_BW},
+    {70, SM70_NVLINK_BW}, {79, SM70_NVLINK_BW}, {80, SM80_NVLINK_BW},
+    {85, SM80_NVLINK_BW}, {86, SM86_NVLINK_BW}, {87, SM80_NVLINK_BW},
+    {89, SM80_NVLINK_BW}, {90, SM90_NVLINK_BW}, {99, SM90_NVLINK_BW},
+    {100, SM100_NVLINK_BW}, {106, SM100_NVLINK_BW}, {107, RUBIN_NVLINK_BW},
+    {109, RUBIN_NVLINK_BW}, {110, SM100_NVLINK_BW}, {111, RUBIN_NVLINK_BW},
+    {119, RUBIN_NVLINK_BW}, {120, SM100_NVLINK_BW}, {121, SM100_NVLINK_BW},
+    {122, RUBIN_NVLINK_BW}};
+  for (const auto& sample : samples) {
+    SCOPED_TRACE(sample.capability);
+    EXPECT_FLOAT_EQ(sample.bandwidth, ncclTopoNVLinkBw(sample.capability));
+  }
+}
+
+TEST_F(TopoMicrotest, MirrorBits_ReversesEveryThreeBitRailIndex) {
+  const int expected[] = {0, 4, 2, 6, 1, 5, 3, 7};
+  for (int rank = 0; rank < 8; rank++) {
+    SCOPED_TRACE(rank);
+    EXPECT_EQ(expected[rank], mirrorBits(rank, 8));
+  }
+  EXPECT_TRUE(isPow2(1));
+  EXPECT_TRUE(isPow2(8));
+  EXPECT_FALSE(isPow2(7));
+  EXPECT_FALSE(isPow2(9));
+}
+
 // --- Building the system from XML
 
 TEST_F(TopoMicrotest, GetSystemFromXml_XgmiGpusHangOffTheirDevNodes) {
@@ -1893,23 +1954,36 @@ TEST_F(TopoMicrotest, GetXmlCpuArch_TakesTheFirstCpuThatHasOne) {
 }
 
 TEST_F(TopoMicrotest, Lookups_StayOnTheirSystemAndWarnOnlyWhenAsked) {
-  SystemPtr system = BuildSystem(System(Cpu(0, GpuPci(GpuBus(0), 0, 0) + NicPci(NicBus(0), Net("a", 3))) +
-                                        Cpu(1, GpuPci(GpuBus(1), 1, 1), "host_hash=\"0x5\"")));
-  int g = GpuIndexOfRank(system.get(), 0);
-  int systemId = NCCL_TOPO_ID_SYSTEM_ID(system->nodes[GPU].nodes[g].id);
-  int rank = 7, netDev = 7;
+  auto system = std::make_unique<ncclTopoSystem>();
+  system->nodes[GPU].count = 3;
+  for (int index = 0; index < 3; index++) {
+    system->nodes[GPU].nodes[index].id = NCCL_TOPO_ID((index + 2), 0x1000);
+    system->nodes[GPU].nodes[index].gpu.dev = 7;
+    system->nodes[GPU].nodes[index].gpu.rank = 13 - index;
+  }
+  int rank = 99;
 
-  ASSERT_EQ(ncclSuccess, ncclTopoDevToRank(system.get(), systemId, 0, true, &rank));
-  EXPECT_EQ(0, rank);
-  EXPECT_EQ(ncclInternalError,
-            ncclTopoDevToRank(system.get(), systemId, 1, false, &rank));  // dev 1 is on the other host
+  ASSERT_EQ(ncclSuccess, ncclTopoDevToRank(system.get(), 4, 7, true, &rank));
+  EXPECT_EQ(11, rank);
+  EXPECT_EQ(ncclInternalError, ncclTopoDevToRank(system.get(), 4, 8, true, &rank));
   EXPECT_EQ(-1, rank);
-  EXPECT_FALSE(Logged("could not find rank for nvml dev 1"));
-  EXPECT_EQ(ncclInternalError, ncclTopoIdToNetDev(system.get(), 0x99, &netDev));
-  EXPECT_EQ(-1, netDev);
-  EXPECT_TRUE(Logged("Could not find NET with id 99"));
-  ASSERT_EQ(ncclSuccess, ncclTopoIdToNetDev(system.get(), system->nodes[NET].nodes[0].id, &netDev));
-  EXPECT_EQ(3, netDev);  // the plugin's dev, not the node index
+  rank = 99;
+  EXPECT_EQ(ncclInternalError, ncclTopoDevToRank(system.get(), 5, 7, false, &rank));
+  EXPECT_EQ(-1, rank);
+  EXPECT_FALSE(Logged("could not find rank for nvml dev 7"));
+  EXPECT_EQ(ncclInternalError, ncclTopoDevToRank(system.get(), 5, 7, true, &rank));
+  EXPECT_TRUE(Logged("could not find rank for nvml dev 7"));
+  system->nodes[NET].count = 2;
+  system->nodes[NET].nodes[0].id = NCCL_TOPO_ID(1, 0x23);
+  system->nodes[NET].nodes[0].net.dev = 9;
+  system->nodes[NET].nodes[1].id = NCCL_TOPO_ID(2, 0x23);
+  system->nodes[NET].nodes[1].net.dev = 6;
+  int device = 99;
+
+  ASSERT_EQ(ncclSuccess, ncclTopoIdToNetDev(system.get(), NCCL_TOPO_ID(2, 0x23), &device));
+  EXPECT_EQ(6, device);
+  EXPECT_EQ(ncclInternalError, ncclTopoIdToNetDev(system.get(), NCCL_TOPO_ID(3, 0x23), &device));
+  EXPECT_EQ(-1, device);
 
   int index = 7;
   EXPECT_EQ(ncclInternalError, ncclTopoRankToIndex(system.get(), 9, &index, false));
@@ -2074,17 +2148,6 @@ TEST_F(TopoLocalMicrotest, GetLocalNet_SameRailAndPlaneKeepsDiscoveryOrder) {
 
   EXPECT_EQ(0, LocalNetDev(system.get(), 0, 0));
   EXPECT_EQ(1, LocalNetDev(system.get(), 0, 1));
-}
-
-TEST_F(TopoMicrotest, NvLinkBw_ByComputeCapability) {
-  EXPECT_FLOAT_EQ(RUBIN_NVLINK_BW, ncclTopoNVLinkBw(107));
-  EXPECT_FLOAT_EQ(SM100_NVLINK_BW, ncclTopoNVLinkBw(110));
-  EXPECT_FLOAT_EQ(SM90_NVLINK_BW, ncclTopoNVLinkBw(90));
-  EXPECT_FLOAT_EQ(SM86_NVLINK_BW, ncclTopoNVLinkBw(86));
-  EXPECT_FLOAT_EQ(SM80_NVLINK_BW, ncclTopoNVLinkBw(80));
-  EXPECT_FLOAT_EQ(SM70_NVLINK_BW, ncclTopoNVLinkBw(70));
-  EXPECT_FLOAT_EQ(SM60_NVLINK_BW, ncclTopoNVLinkBw(60));
-  EXPECT_FLOAT_EQ(SM80_NVLINK_BW, ncclTopoNVLinkBw(50));
 }
 
 // --- Network property snapshots

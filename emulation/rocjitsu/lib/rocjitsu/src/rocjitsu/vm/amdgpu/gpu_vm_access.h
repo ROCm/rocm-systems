@@ -192,6 +192,43 @@ public:
   explicit operator bool() const { return outcome == VmAccessOutcome::Complete; }
 };
 
+/// One ordinary local grant. All access kinds and subspans share its policy.
+struct VmLocalGrant {
+  uint64_t begin = 0;
+  uint64_t end = 0;
+  uint64_t generation = 0;
+};
+
+/// Copied local policy. The snapshot identified by identity() owns the counters
+/// and must be live whenever covers() is called on a populated view.
+class VmLocalGrantView {
+public:
+  VmLocalGrantView() = default;
+  explicit operator bool() const { return grant_.end != 0; }
+  uint64_t generation() const { return grant_.generation; }
+  uint64_t identity() const { return identity_; }
+
+  bool covers(uint64_t address, size_t size) const {
+    return address >= grant_.begin && address < grant_.end && size &&
+           size <= grant_.end - address &&
+           publication_->load(std::memory_order_acquire) == epoch_ &&
+           valid_->load(std::memory_order_acquire);
+  }
+
+private:
+  friend class GpuVmAccess;
+  VmLocalGrantView(VmLocalGrant grant, const std::atomic<uint64_t> &publication,
+                   const std::atomic<bool> &valid, uint64_t epoch, uint64_t identity)
+      : grant_(grant), publication_(&publication), valid_(&valid), epoch_(epoch),
+        identity_(identity) {}
+
+  VmLocalGrant grant_;
+  const std::atomic<uint64_t> *publication_ = nullptr;
+  const std::atomic<bool> *valid_ = nullptr;
+  uint64_t epoch_ = 0;
+  uint64_t identity_ = 0;
+};
+
 /// @brief Memory domain selected by a translation.
 enum class VmMemoryDomain : uint8_t {
   System,
@@ -782,6 +819,19 @@ public:
   /// @brief Whether this binding's execute policy permits resident I$ hits
   /// without consulting live frontend grants.
   [[nodiscard]] bool execute_admission_is_fixed() const;
+  /// Whether this snapshot belongs to the frontend that published the local grants.
+  [[nodiscard]] bool uses_local_grants(const std::atomic<uint64_t> &publication) const;
+  [[nodiscard]] bool local_ingress_mapped(std::span<const MemoryIngressSpan> spans, uint64_t begin,
+                                          uint64_t end) const;
+  /// Generation of a uniform local grant covering the entire span, including generation zero.
+  [[nodiscard]] std::optional<uint64_t> local_grant_generation(uint64_t address, size_t size) const;
+  [[nodiscard]] std::optional<VmAccessAdmission> local_admission(uint64_t address,
+                                                                 size_t size) const {
+    if (const auto generation = local_grant_generation(address, size))
+      return VmAccessAdmission{.generation = *generation};
+    return std::nullopt;
+  }
+  [[nodiscard]] VmLocalGrantView local_grant_view(uint64_t address, size_t size) const;
   [[nodiscard]] bool supports_translated_local_cache() const;
   /// Saturating count of admitted cache writes and atomics under this root.
   /// Invalidation and pinned snapshots share the count; explicit root

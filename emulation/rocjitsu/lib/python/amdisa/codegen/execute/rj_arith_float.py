@@ -813,8 +813,12 @@ def gen_float16_conversion(ctx: ExecuteContext) -> str | None:
     lines = prefix + [
         '  uint64_t flags = wf.cu().arithmetic_flags();',
         '  if (wf.fp16_ovfl()) flags |= RJ_ARITH_FP16_OVFL;',
-        f'  const uint64_t modifiers = {mode};',
     ]
+    if arch == 'cdna5' and name == 'V_CVT_PK_F16_F32':
+        lines.append(
+            '  if (!(wf.fp_denorm_mode_f16_f64() & 2)) flags |= RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS;'
+        )
+    lines.append(f'  const uint64_t modifiers = {mode};')
     if widen and not ctx.is_vop3 and arch == 'cdna4':
         lines += [
             '  if (inst_.src0 == amdgpu::SRC_SDWA) {',

@@ -969,6 +969,41 @@ class TestRocprofilerSystemsAvail(RocprofsysTest):
         self.assert_regex(result, pass_regex=pass_regex)
 
     @pytest.mark.timeout(45)
+    def test_settings_description_no_newlines(self):
+        """Test that no setting description contains an embedded newline.
+
+        ``rocprof-sys-avail -bd`` prints one table row per setting. A ``\\n`` in a
+        description is emitted verbatim, so it breaks the table: the text after the
+        newline lands on a line that is not a table row. Every non-empty line of the
+        output must therefore be a table row (``|...``), a separator (``-...``), or
+        a log message: either ``[...`` or a glog line such as
+        ``W20261110 20:02:13.387989 123 agent.cpp:608] ...``. The glog form shows up
+        on machines without GPU access (for example, a missing KFD sysfs path).
+        """
+        result = self.run_test(
+            "baseline",
+            target=self.target,
+            run_args=["-bd"],
+            fail_on_not_found=True,
+        )
+        self.assert_regex(result, pass_regex=[r"ROCPROFSYS_TRACE_PERIOD_CLOCK_ID"])
+
+        glog_line = re.compile(r"^[IWEF]\d{8} \d{2}:\d{2}:\d{2}\.\d+ ")
+        stray_lines = [
+            line
+            for line in result.test_output.splitlines()
+            if line.strip()
+            and not line.startswith(("|", "-", "["))
+            and not glog_line.match(line)
+        ]
+        if stray_lines:
+            pytest.fail(
+                f"{len(stray_lines)} line(s) of 'rocprof-sys-avail -bd' are not "
+                "table rows; a setting description likely contains '\\n':\n"
+                + "\n".join(f"  {line}" for line in stray_lines)
+            )
+
+    @pytest.mark.timeout(45)
     @pytest.mark.gpu
     def test_settings_rocm_available(self, rocprof_config):
         """Test that ROCm-specific settings are present.

@@ -381,6 +381,7 @@ function(rccl_define_micro_source_lists)
     rma-ce-test.cc
     ras-test.cc
     ras-diagnostics-common-test.cc       # src/ras/diagnostics_checks_common.cc
+    ras-diagnostics-paths-test.cc       # src/ras/diagnostics_paths.cc
     ras-collectives-test.cc              # src/ras/collectives.cc
     ras-diagnostics-test.cc              # src/ras/diagnostics.cc
     rasnet-test.cc                       # src/ras/rasnet.cc
@@ -1364,6 +1365,10 @@ function(rccl_define_micro_source_lists)
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
+  set(TEST_MICRO_DEVCOMM_V23000_SOURCE_FILES
+    devcomm-v23000-test.cc
+    ../common/main_altrsmi.cpp
+    PARENT_SCOPE)
 endfunction()
 
 # Create one host-only micro-test binary and apply all the boilerplate that
@@ -1895,6 +1900,7 @@ rccl_add_micro_binary(rccl-UnitTestsMicro
     ${_MICRO_MODE_DEFS}
     RAS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/ras.cc"
     RAS_DIAGNOSTICS_COMMON_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/diagnostics_checks_common.cc"
+    RAS_DIAGNOSTICS_PATHS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/diagnostics_paths.cc"
     # collectives_tmp.cc, not collectives.cc: src/CMakeLists.txt lists src/collectives.cc first,
     # so add_file_unique() renames this one. Re-check after any source-list reorder.
     COLLECTIVES_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/collectives_tmp.cc"
@@ -3495,6 +3501,16 @@ rccl_add_micro_binary(rccl-UnitTestsMicroDdaIpcLifecycle
     DDA_IPC_MEM_HANDLER_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/algorithms/dda/ipc/ipc_mem_handler.cc"
     DDA_IPC_GPU_BARRIER_CU_PATH="${RCCL_HOST_HIPIFY_DIR}/src/algorithms/dda/ipc/ipc_gpu_barrier.cu.cpp"
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_dda_ipc_lifecycle.yaml")
+
+# ---------------------------------------------------------------------------
+# rccl-UnitTestsMicroDevcommV23000
+# ---------------------------------------------------------------------------
+rccl_add_micro_binary(rccl-UnitTestsMicroDevcommV23000
+  SOURCES ${TEST_MICRO_DEVCOMM_V23000_SOURCE_FILES}
+  EXTRA_DEFS
+    ${_MICRO_MODE_DEFS}
+    DEVCOMM_V23000_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/devcomm/devcomm_v23000.cc"
+  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_devcomm_v23000.yaml")
 
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsHostAll

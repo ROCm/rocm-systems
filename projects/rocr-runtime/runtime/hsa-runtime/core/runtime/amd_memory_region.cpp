@@ -316,12 +316,14 @@ bool MemoryRegion::SignalCapable() const {
       if (!IsPublic()) return false;
       // The uncached (extended-scope fine-grained) pool on gfx94x/gfx95x, where the other pools
       // are MTYPE RW and a binary completion store is not seen by another queue's CP; the
-      // coarse-grained pool on gfx125x.
+      // coarse-grained pool on gfx120x and gfx125x, whose CP writes completions at system scope.
       const core::Isa* isa = owner()->supported_isas()[0];
       const int32_t major = isa->GetMajorVersion();
       const int32_t minor = isa->GetMinorVersion();
       if ((major == 9) && ((minor == 4) || (minor == 5))) return extended_scope_fine_grain();
-      if ((major == 12) && (minor >= 5)) return !fine_grain() && !extended_scope_fine_grain();
+      if ((major == 12) && ((minor == 0) || (minor >= 5))) {
+        return !fine_grain() && !extended_scope_fine_grain();
+      }
       return false;
     }
     default:

@@ -2220,9 +2220,9 @@ typedef struct hsa_amd_signal_batch_s {
  *
  * @param[in] pool Memory pool providing the signal memory: one that reports
  * ::HSA_AMD_MEMORY_POOL_INFO_SIGNAL_CAPABLE. That is a fine-grained system
- * memory pool, or a pool of a GPU whose memory is host visible (large BAR):
- * the extended-scope fine-grained (uncached) pool on gfx94x and gfx95x, or the
- * coarse-grained pool on gfx125x. Device memory is made accessible to the host
+ * memory pool, or the pool of a GPU whose memory is host visible (large BAR)
+ * in which every queue's command processor sees each signal completion. Device
+ * memory is made accessible to the host
  * and to @p consumers, or to every GPU if @p num_consumers is 0. When the GPU
  * reports ::HSA_AMD_AGENT_INFO_PCIE_STORES_NEED_FLUSH, the hsa_signal_* APIs
  * flush every host store they make, and a caller writing a member's value

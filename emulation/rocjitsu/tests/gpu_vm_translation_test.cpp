@@ -1263,6 +1263,30 @@ TEST(GpuVmTranslation, RootReplacementRotatesCacheWriteProofAndLineage) {
   EXPECT_EQ(invalidated->cache_write_sequence(), 0u);
 }
 
+TEST(GpuVmTranslation, ConcurrentWritesAreCountedAcrossSnapshotsAndWorkerReuse) {
+  GpuVm vm;
+  const auto handle = vm.register_translated(7, std::make_shared<ByteTranslator>(),
+                                             std::make_shared<TestPhysicalMemory>());
+  ASSERT_TRUE(handle);
+  auto pinned = vm.snapshot_pinned(handle);
+  ASSERT_TRUE(pinned);
+  for (unsigned wave = 0; wave < 4; ++wave) {
+    std::array<std::future<bool>, 18> workers;
+    for (auto &worker : workers)
+      worker = std::async(std::launch::async, [&] {
+        for (unsigned i = 0; i < 64; ++i)
+          if (!pinned->admit_access(0x100, 4, VmAccessKind::Write))
+            return false;
+        return true;
+      });
+    for (auto &worker : workers)
+      ASSERT_TRUE(worker.get());
+    auto current = vm.snapshot(handle);
+    ASSERT_TRUE(current);
+    EXPECT_EQ(current->cache_write_sequence(), (wave + 1) * workers.size() * 64);
+  }
+}
+
 TEST(GpuVmTranslation, InvalidationDrainsAnInFlightAccessAndRevokesOldSnapshots) {
   GpuVm gpu_vm;
   auto physical = std::make_shared<BlockingPhysicalMemory>();
@@ -1752,6 +1776,22 @@ TEST(GpuVmTranslation, RawWriteGateTracksMovedAndOutOfOrderTokens) {
   EXPECT_FALSE(gate.try_acquire(0x4000, 4));
   closed_second.reset();
   EXPECT_TRUE(gate.try_acquire(0x4000, 4));
+}
+
+TEST(GpuVmTranslation, RawWriteGateChecksAllWorkersAndReleasesOnAnotherThread) {
+  VmRawBackingWriteGate gate;
+  auto first = gate.try_acquire(0x1000, 8);
+  auto second = std::async(std::launch::async, [&] { return gate.try_acquire(0x2000, 8); }).get();
+  ASSERT_TRUE(first);
+  ASSERT_TRUE(second);
+  EXPECT_FALSE(gate.try_close(0x1004, 4));
+  EXPECT_FALSE(gate.try_close(0x2004, 4));
+  auto unrelated = gate.try_close(0x3000, 4);
+  ASSERT_TRUE(unrelated);
+  second.reset();
+  EXPECT_TRUE(gate.try_close(0x2004, 4));
+  EXPECT_FALSE(gate.try_close(0x1004, 4));
+  EXPECT_FALSE(std::async(std::launch::async, [&] { return gate.try_acquire(0x3000, 4); }).get());
 }
 
 TEST(GpuVmTranslation, LegacyRawWritePermitSpansAdmissionAndBackingEffect) {

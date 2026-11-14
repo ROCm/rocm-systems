@@ -1792,8 +1792,13 @@ def gen_vector_cvt_pk(
             L.extend(vop3_src_mod('s1', 1, has_abs))
         L.append(f'    uint32_t lo = util::f32_to_f16_mode(s0, wf.fp16_ovfl());')
         L.append(f'    uint32_t hi = util::f32_to_f16_mode(s1, wf.fp16_ovfl());')
+        packed = (
+            'amdgpu::fp_mode::pack_f16_results(lo, hi, wf.fp_denorm_mode_f16_f64())'
+            if arch_name == 'cdna5'
+            else 'lo | (hi << 16)'
+        )
         L.append(
-            f'    amdgpu::RegisterAccess(wf).write_lane({dst[0]}, lane, lo | (hi << 16));'
+            f'    amdgpu::RegisterAccess(wf).write_lane({dst[0]}, lane, {packed});'
         )
     elif cls == 'vector_cvt_pk_bf16_f32':
         L.append(
@@ -1984,6 +1989,11 @@ def _scale_lowp_bits(fmt: str) -> int:
     raise ValueError(f'unsupported scaled low-precision format: {fmt}')
 
 
+def cvt_scale_layout(source_format: str) -> str:
+    """CDNA5 ISA 7.6.3 selects the E8M0 layout by the packed source format."""
+    return 'f8' if _scale_lowp_bits(source_format) == 8 else 'f4_f6'
+
+
 def _scale_read_vgpr_base(L: list[str], var: str, operand: str) -> None:
     L.append(
         f'    uint32_t {var} = wf.vgpr_alloc().base + '
@@ -2047,14 +2057,6 @@ def _scale_source_reader(src_fmt: str) -> list[str]:
     raise ValueError(f'unsupported scaled conversion source format: {src_fmt}')
 
 
-def _scale_e8m0_unpack_scale(scale_src: str) -> list[str]:
-    return [
-        f'    uint32_t scale_payload = amdgpu::RegisterAccess(wf).read_lane({scale_src}, lane);',
-        '    uint32_t scale_byte = (scale_payload >> ((inst_.opsel & 0x3u) * 8u)) & 0xffu;',
-        '    float scale = util::e8m0_to_f32(static_cast<uint8_t>(scale_byte));',
-    ]
-
-
 def gen_vector_cvt_scale(
     dst: list[str],
     src: list[str],
@@ -2095,7 +2097,55 @@ def gen_vector_cvt_scale(
         raise ValueError(f'unsupported vector_cvt_scale direction: {direction}')
 
     L: list[str] = []
+    if direction == 'unpack':
+        layout = cvt_scale_layout(in_fmt)
+        L.append(
+            f'  const auto selection = amdgpu::CvtScaleSelection::{layout}(inst_.opsel);'
+        )
     L.append('  uint64_t exec = wf.exec();')
+    if (
+        direction == 'unpack'
+        and count == 8
+        and in_fmt in ('fp8', 'bf8')
+        and out_fmt == 'f32'
+    ):
+        lut = 'fp8_e4m3_ocp_lut' if in_fmt == 'fp8' else 'bf8_e5m2_ocp_lut'
+        L += [
+            f'  if (const auto scale = {src[1]}.const_value(); scale &&',
+            '      uint8_t(*scale >> ((inst_.opsel & 3u) * 8u)) == 127u && exec &&',
+            '      !wf.cu().observes_register_access()) {',
+        ]
+        _scale_read_vgpr_base(L, 'dst_base', dst[0])
+        _scale_read_vgpr_base(L, 'src_base', src[0])
+        L += [
+            f'    if (amdgpu::try_unpack_unit_scale_pk8(wf, src_base, dst_base, util::detail::{lut}())) return;',
+            '  }',
+        ]
+    if (
+        direction == 'pack'
+        and not stochastic
+        and count == 8
+        and in_fmt == 'f32'
+        and out_fmt in ('fp8', 'bf8')
+    ):
+        encoder = _fp8_mode_rne_helper_name(
+            arch_name,
+            (
+                'util::f32_to_fp8_e4m3_rne'
+                if out_fmt == 'fp8'
+                else 'util::f32_to_bf8_e5m2_rne'
+            ),
+        )
+        L += [
+            f'  if (const auto scale = {src[1]}.const_value(); scale == 0x3f800000u && exec &&',
+            '      !wf.cu().observes_register_access()) {',
+        ]
+        _scale_read_vgpr_base(L, 'dst_base', dst[0])
+        _scale_read_vgpr_base(L, 'src_base', src[0])
+        L += [
+            f'    if (amdgpu::try_pack_unit_scale_pk8(wf, src_base, dst_base, {encoder})) return;',
+            '  }',
+        ]
     L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
     L.append('    if (!(exec & (1ULL << lane))) continue;')
     _scale_read_vgpr_base(L, 'dst_base', dst[0])
@@ -2111,7 +2161,14 @@ def gen_vector_cvt_scale(
     L.append('      continue;')
     scale_src = src[2] if stochastic else src[1]
     if direction == 'unpack':
-        L.extend(_scale_e8m0_unpack_scale(scale_src))
+        L.extend(
+            [
+                '    const unsigned scale_lane = selection.lane(lane);',
+                '    const unsigned scale_byte = selection.byte(lane);',
+                f'    const amdgpu::RegisterAccess::OperandReadView scales = regs.read_operand({scale_src}, uint64_t{{1}} << scale_lane, 1u << scale_byte);',
+                '    const float scale = util::e8m0_to_f32(static_cast<uint8_t>(scales.lane(scale_lane) >> (8 * scale_byte)));',
+            ]
+        )
     else:
         L.append(
             f'    float scale = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane({scale_src}, lane));'
@@ -2599,6 +2656,22 @@ def _gen_narrow_scalef32(ctx, mode: str, dst_fmt: str, src_fmt: str) -> str:
     nan_val = _nan_for_fmt(dst_fmt)
 
     L = []
+    if (
+        ctx.arch_name == 'cdna4'
+        and mode == 'pk'
+        and src_fmt == 'f32'
+        and dst_fmt in ('fp8', 'bf8')
+    ):
+        api = f'rj_arith_v_cvt_pk_{dst_fmt}_f32'
+        L += [
+            f'  if (const auto scale = {src[2]}.const_value(); scale && ((*scale >> 23) & 0xffu) == 127u && !wf.cu().observes_register_access()) {{',
+            '    const bool high = (inst_.op_sel & 8) != 0;',
+            '    const uint64_t flags = wf.cu().arithmetic_flags() | (wf.fp16_ovfl() ? RJ_ARITH_FP16_OVFL : 0u);',
+            f'    amdgpu::arith::execute_binary32(wf, {api}_w32_gfx950, {api}_w64_gfx950, flags,',
+            f'        high ? RJ_ARITH_ALU_HIGH_D : 0u, {dst[0]}, {src[0]}, {src[1]}, high ? 0xC : 0x3);',
+            '    return;',
+            '  }',
+        ]
     L.append('  uint64_t exec = wf.exec();')
     L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
     L.append('    if (!(exec & (1ULL << lane))) continue;')
@@ -2884,6 +2957,22 @@ def _gen_widen_scalef32(ctx, mode: str, dst_fmt: str, src_fmt: str) -> str:
     nan_val = _nan_for_fmt(dst_fmt)
 
     L = []
+    if (
+        ctx.arch_name == 'cdna4'
+        and mode == 'pk'
+        and dst_fmt == 'f32'
+        and src_fmt in ('fp8', 'bf8')
+    ):
+        # A statically unit E8M0 scale is exactly the ordinary gfx950 packed widen.
+        api = f'rj_arith_v_cvt_pk_f32_{src_fmt}'
+        L += [
+            f'  if (const auto scale = {src[1]}.const_value(); scale && ((*scale >> 23) & 0xFFu) == 127u) {{',
+            '    const bool high = (inst_.op_sel & 1) != 0;',
+            f'    amdgpu::arith::execute_widen32_to_pair(wf, {api}_w32_gfx950, {api}_w64_gfx950,',
+            f'        wf.cu().arithmetic_flags(), high ? RJ_ARITH_ALU_HIGH_A : 0u, {dst[0]}, {src[0]}, high ? 0xC : 0x3);',
+            '    return;',
+            '  }',
+        ]
     L.append('  uint64_t exec = wf.exec();')
     L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
     L.append('    if (!(exec & (1ULL << lane))) continue;')
