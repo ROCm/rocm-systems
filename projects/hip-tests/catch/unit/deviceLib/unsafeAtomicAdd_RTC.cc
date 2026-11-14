@@ -17,7 +17,6 @@ unsafeAtomicAdd Scenarios with hipRTC:
 #include <hip_test_checkers.hh>
 #include <string>
 #include <hip_test_common.hh>
-#include <hip_test_features.hh>
 #include <hip/hiprtc.h>
 #define INCREMENT_VAL 10
 #define INITIAL_VAL 5
@@ -52,7 +51,9 @@ HIP_TEMPLATE_TEST_CASE(Unit_unsafeAtomicAdd_CoherentRTCnounsafeatomicflag, float
   HIP_CHECK(hipGetDeviceProperties(&props, device));
   std::string gfxName(props.gcnArchName);
 
-  if (CheckIfFeatSupported(CTFeatures::CT_FEATURE_FINEGRAIN_HWSUPPORT, gfxName)) {
+  int fineGrainSupport = 0;
+  HIP_CHECK(hipDeviceGetAttribute(&fineGrainSupport, hipDeviceAttributeFineGrainSupport, device));
+  if (fineGrainSupport) {
     hiprtcProgram prog;
     if (std::is_same<TestType, float>::value) {
       hiprtcCreateProgram(&prog,        // prog
@@ -140,7 +141,9 @@ HIP_TEMPLATE_TEST_CASE(Unit_unsafeAtomicAdd_CoherentRTCunsafeatomicflag, float, 
   HIP_CHECK(hipGetDeviceProperties(&props, device));
   std::string gfxName(props.gcnArchName);
 
-  if (CheckIfFeatSupported(CTFeatures::CT_FEATURE_FINEGRAIN_HWSUPPORT, gfxName)) {
+  int fineGrainSupport = 0;
+  HIP_CHECK(hipDeviceGetAttribute(&fineGrainSupport, hipDeviceAttributeFineGrainSupport, device));
+  if (fineGrainSupport) {
     hiprtcProgram prog;
     if (std::is_same<TestType, float>::value) {
       hiprtcCreateProgram(&prog,        // prog
@@ -227,7 +230,9 @@ HIP_TEMPLATE_TEST_CASE(Unit_unsafeAtomicAdd_CoherentRTCwithoutflag, float, doubl
   HIP_CHECK(hipGetDeviceProperties(&props, device));
   std::string gfxName(props.gcnArchName);
 
-  if (CheckIfFeatSupported(CTFeatures::CT_FEATURE_FINEGRAIN_HWSUPPORT, gfxName)) {
+  int fineGrainSupport = 0;
+  HIP_CHECK(hipDeviceGetAttribute(&fineGrainSupport, hipDeviceAttributeFineGrainSupport, device));
+  if (fineGrainSupport) {
     hiprtcProgram prog;
     if (std::is_same<TestType, float>::value) {
       hiprtcCreateProgram(&prog,        // prog
@@ -311,9 +316,10 @@ HIP_TEMPLATE_TEST_CASE(Unit_unsafeAtomicAdd_NonCoherentRTCnounsafeatomicflag, fl
   int device = 0;
   hipDeviceProp_t props;
   HIP_CHECK(hipGetDeviceProperties(&props, device));
-  std::string gfxName(props.gcnArchName);
 
-  if (CheckIfFeatSupported(CTFeatures::CT_FEATURE_FINEGRAIN_HWSUPPORT, gfxName)) {
+  int fineGrainSupport = 0;
+  HIP_CHECK(hipDeviceGetAttribute(&fineGrainSupport, hipDeviceAttributeFineGrainSupport, device));
+  if (fineGrainSupport) {
     hiprtcProgram prog;
     if (std::is_same<TestType, float>::value) {
       hiprtcCreateProgram(&prog,        // prog
@@ -391,9 +397,10 @@ HIP_TEMPLATE_TEST_CASE(Unit_unsafeAtomicAdd_NonCoherentRTCunsafeatomicflag, floa
   int device = 0;
   hipDeviceProp_t props;
   HIP_CHECK(hipGetDeviceProperties(&props, device));
-  std::string gfxName(props.gcnArchName);
 
-  if (CheckIfFeatSupported(CTFeatures::CT_FEATURE_FINEGRAIN_HWSUPPORT, gfxName)) {
+  int fineGrainSupport = 0;
+  HIP_CHECK(hipDeviceGetAttribute(&fineGrainSupport, hipDeviceAttributeFineGrainSupport, device));
+  if (fineGrainSupport) {
     hiprtcProgram prog;
     if (std::is_same<TestType, float>::value) {
       hiprtcCreateProgram(&prog,        // prog
@@ -472,9 +479,10 @@ HIP_TEMPLATE_TEST_CASE(Unit_unsafeAtomicAdd_NonCoherentRTC, float, double) {
   int device = 0;
   hipDeviceProp_t props;
   HIP_CHECK(hipGetDeviceProperties(&props, device));
-  std::string gfxName(props.gcnArchName);
 
-  if (CheckIfFeatSupported(CTFeatures::CT_FEATURE_FINEGRAIN_HWSUPPORT, gfxName)) {
+  int fineGrainSupport = 0;
+  HIP_CHECK(hipDeviceGetAttribute(&fineGrainSupport, hipDeviceAttributeFineGrainSupport, device));
+  if (fineGrainSupport) {
     hiprtcProgram prog;
     if (std::is_same<TestType, float>::value) {
       hiprtcCreateProgram(&prog,        // prog
