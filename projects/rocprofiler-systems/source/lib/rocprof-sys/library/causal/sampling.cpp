@@ -31,6 +31,7 @@
 #include "logger/debug.hpp"
 
 #include <csignal>
+#include <cstdlib>
 #include <cstring>
 #include <ctime>
 #include <memory>
@@ -38,6 +39,7 @@
 #include <sstream>
 #include <string>
 #include <type_traits>
+#include <unistd.h>
 
 namespace rocprofsys::causal::sampling
 {
@@ -198,6 +200,26 @@ causal_offload_buffer(std::int64_t, causal_sampler_buffer_t&& _buf)
     }
 }
 
+// std::exit before the process is Active runs static destructors while
+// exit_gotcha is already installed. Teardown destroys a causal thread_data
+// whose deleter calls pthread_create_gotcha::shutdown(), and that copies a
+// shared_ptr to a timemory hash map exit has already destroyed. The copy
+// NULL-derefs (fault address 0). The same crash happens on a CPU-only
+// workload, so it is not specific to HIP registration. _exit skips that
+// teardown.
+[[noreturn]] void
+exit_failed_backend()
+{
+    logger_t::instance().flush();
+    if(state::process::get() == state::process::Active)
+    {
+        // Statics are still alive once the process is Active.
+        std::exit(EXIT_FAILURE);
+    }
+    // Before Active, exit destroys a timemory hash map and then uses it.
+    ::_exit(EXIT_FAILURE);
+}
+
 std::set<int>
 configure(bool _setup, std::int64_t _tid)
 {
@@ -330,7 +352,7 @@ configure(bool _setup, std::int64_t _tid)
             {
                 LOG_ERROR("Perf backend for causal profiling failed to activate: {}",
                           *_perf_error);
-                std::exit(1);
+                exit_failed_backend();
             }
         }
         else if(get_causal_backend() == state::process::CausalBackend::timer)
@@ -338,7 +360,7 @@ configure(bool _setup, std::int64_t _tid)
             if(!_activate_timer_backend())
             {
                 LOG_ERROR("Timer backend for causal profiling failed to activate");
-                std::exit(1);
+                exit_failed_backend();
             }
         }
         else if(get_causal_backend() == state::process::CausalBackend::automatic)
@@ -357,7 +379,7 @@ configure(bool _setup, std::int64_t _tid)
                 if(!_activate_timer_backend())
                 {
                     LOG_ERROR("Timer backend for causal profiling failed to activate");
-                    std::exit(1);
+                    exit_failed_backend();
                 }
 
                 config::set_setting_value(std::string{ env_vars::CAUSAL_BACKEND },
