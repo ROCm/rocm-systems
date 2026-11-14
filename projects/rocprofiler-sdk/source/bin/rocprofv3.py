@@ -1827,11 +1827,6 @@ def run(app_args, args, **kwargs):
             f"{ROCPROF_TOOL_LIBRARY}",
             append=True,
         )
-    update_env(
-        "LD_LIBRARY_PATH",
-        f"{ROCM_DIR}/lib",
-        append=True,
-    )
 
     # -o/-d stay None so a typed option stays distinguishable from an inherited
     # ROCPROF_OUTPUT_*, which the listing subprocess always inherits from below;
