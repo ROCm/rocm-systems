@@ -400,6 +400,8 @@ static ncclResult_t p2pImportShareableBuffer(struct ncclComm* comm, int peer, si
     TRACE(NCCL_P2P, "Set Access for %p size %zu on dev %d", (void*)dptr, size, accessDesc.location.id);
 
     *devMemPtr = (void*)dptr;
+    // Freed through ncclCudaFree / ncclCuMemFree, which subtract the mapped size.
+    ncclAllocTrack(comm->cudaDev, size, "ncclP2pImportShareableBuffer");
 
     // Track imported buffer
     NCCLCHECK(ncclMemTrackImportFromPeer(comm->memManager, (void*)dptr, size, handle, type, memType, peer,
@@ -1676,6 +1678,9 @@ exit:
     ipcInfo->numSegments = numSegments;
     memHandle->handle = (void*)ipcInfo;
     ncclIntruQueueEnqueue(&connection->proxyMemHandleQueue, memHandle);
+    // Counted once the record is queued: p2pDeregisterMemHandle frees a cuMem import through
+    // ncclCuMemFreeAddr / ncclCudaFree, which subtract the mapped size. Legacy IPC is not counted.
+    if (!ipcExpInfo->legacyIpcCap) ncclAllocTrack(proxyState->cudaDev, totalSize, "p2pProxyRegister");
   }
   memcpy(respBuff, (void*)&regAddr, sizeof(void*));
   *done = 1;

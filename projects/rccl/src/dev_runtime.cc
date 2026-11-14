@@ -1234,6 +1234,10 @@ static void symMemoryDestroy(struct ncclComm* comm, struct ncclDevrMemory* mem) 
   symMemoryUnmapLsaTeam(comm, mem);
 
   ncclSpaceFree(&devr->bigSpace, mem->bigOffset, mem->lsaMaxSize);
+  if (mem->allocTrackedBytes != 0) {
+    ncclAllocUntrack(comm->cudaDev, mem->allocTrackedBytes, "symMemoryDestroy");
+    mem->allocTrackedBytes = 0;
+  }
   for (int segment = 0; segment < mem->numSegments; segment++) {
     CUCHECKIGNORE(cuMemRelease(mem->memHandles[segment]));
   }
@@ -2380,9 +2384,13 @@ ncclResult_t ncclDevrCommCreateInternal(struct ncclComm* comm, struct ncclDevCom
     memProp.location.id = comm->cudaDev;
 
     CUCHECKGOTO(cuMemCreate(&memHandle, bufSizeTotal, &memProp, 0), ret, fail_stream);
+    ncclAllocTrack(comm->cudaDev, bufSizeTotal, "ncclDevrCommCreateInternal");
 
     NCCLCHECKGOTO(symMemoryObtain(comm, &memHandle, 1, NULL, bufSizeTotal, /*winFlags=*/0, &mem), ret, fail_stream_mem);
     memHandle = 0x0; // Reference given to symMemoryObtain
+    // Reuse requires identical handles, so a freshly created handle always yields a new
+    // registration, and symMemoryDestroy releases it.
+    mem->allocTrackedBytes = bufSizeTotal;
 
     NCCLCHECKGOTO(symWindowCreate( // Requires world barrier afterward.
                     comm, mem, /*memOffset=*/0, nullptr, bufSizeTotal, /*winFlags=*/0,
@@ -2430,6 +2438,7 @@ fail_stream_mem_win:
 fail_stream_mem:
   if (memHandle != 0x0) {
     CUCHECKIGNORE(cuMemRelease(memHandle));
+    ncclAllocUntrack(comm->cudaDev, bufSizeTotal, "ncclDevrCommCreateInternal");
   }
   symMemoryDropRef(comm, mem);
 fail_stream:

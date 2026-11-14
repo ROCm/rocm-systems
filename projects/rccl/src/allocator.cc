@@ -18,13 +18,15 @@ ncclResult_t ncclMemAlloc_impl(void** ptr, size_t size) {
   NCCL_NVTX3_FUNC_RANGE;
   ncclResult_t ret = ncclSuccess;
 
+  // allocTracker counts what ncclMemFree / ncclCudaFree subtract: the mapped size. Not counted
+  // below ROCm 7, where ncclMemFree cannot query it.
 #if ROCM_VERSION >= 70000
   size_t memGran = 0;
   CUdevice currentDev;
   CUmemAllocationProp memprop = {};
   CUmemAccessDesc accessDesc = {};
   CUmemGenericAllocationHandle handle = (CUmemGenericAllocationHandle)-1;
-  int cudaDev;
+  int cudaDev = -1;
   int flag;
   int dcnt;
   bool handleCreated = false;
@@ -94,6 +96,7 @@ ncclResult_t ncclMemAlloc_impl(void** ptr, size_t size) {
       }
       if (0 == p2p && i != cudaDev) INFO(NCCL_ALLOC, "P2P not supported between GPU%d and GPU%d", cudaDev, i);
     }
+    ncclAllocTrack(cudaDev, handleSize, "ncclMemAlloc");
     goto exit;
 
 vmm_fail:
@@ -110,6 +113,19 @@ fallback:
   // we want CUDA to return an error to the caller.
   // coverity[var_deref_model]
   CUDACHECKGOTO(cudaMalloc(ptr, size), ret, fail);
+#if ROCM_VERSION >= 70000
+  if (ptr != nullptr && *ptr != nullptr) {
+    // Count only what ncclMemFree's identical query will subtract.
+    CUdeviceptr mappedBase = nullptr;
+    size_t mappedBytes = 0;
+    CUresult rangeStatus = cuMemGetAddressRange(&mappedBase, &mappedBytes, (CUdeviceptr)*ptr);
+    if (rangeStatus == CUDA_SUCCESS && mappedBase == (CUdeviceptr)*ptr && mappedBytes > 0) {
+      ncclAllocTrack(cudaDev, mappedBytes, "ncclMemAlloc");
+    } else if (rangeStatus != CUDA_SUCCESS) {
+      (void)cudaGetLastError(); // HIP range queries leave a sticky error
+    }
+  }
+#endif
 
 exit:
   return ret;
@@ -137,6 +153,18 @@ ncclResult_t ncclMemFree_impl(void* ptr) {
     // User facing API, memManager does not need to track user memory. Same as ncclMemAlloc
     NCCLCHECKGOTO(ncclCuMemFree(ptr, nullptr), ret, fail);
     goto exit;
+  }
+
+  {
+    // ncclMemAlloc recorded this queried size. A failed query still frees the pointer.
+    CUdeviceptr base = nullptr;
+    size_t bytes = 0;
+    CUresult rangeStatus = cuMemGetAddressRange(&base, &bytes, (CUdeviceptr)ptr);
+    if (rangeStatus == CUDA_SUCCESS && base == (CUdeviceptr)ptr && bytes > 0) {
+      ncclAllocUntrack((int)ptrDev, bytes, "ncclMemFree");
+    } else if (rangeStatus != CUDA_SUCCESS) {
+      (void)cudaGetLastError(); // HIP range queries leave a sticky error
+    }
   }
 
 fallback:
