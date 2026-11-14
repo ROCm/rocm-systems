@@ -80,7 +80,11 @@ TERNARY32 = {
     'V_MSAD_U8',
 }
 WIDEN16_NAMES = {'V_CVT_I32_I16', 'V_CVT_U32_U16'}
-SATURATE_NAMES = {'V_SAT_PK_U8_I16'}
+SATURATE_NAMES = {'V_SAT_PK_U8_I16', 'V_SAT_PK4_I4_I8', 'V_SAT_PK4_U4_U8'}
+# Accumulator operands resolve their register bank before reaching the API.
+ACCUMULATOR_MOVES = {'V_ACCVGPR_MOV_B32', 'V_ACCVGPR_READ', 'V_ACCVGPR_WRITE'}
+UNARY32 |= ACCUMULATOR_MOVES | {'V_SCREEN_PARTITION_4SE_B32'}
+
 CONDITIONAL_NAMES = {'V_CNDMASK_B32', 'V_CNDMASK_B16'}
 VECTOR32_NAMES = (
     UNARY32 | BINARY32 | TERNARY32 | WIDEN16_NAMES | SATURATE_NAMES | CONDITIONAL_NAMES
@@ -103,7 +107,34 @@ def gen_vector32(ctx: ExecuteContext) -> str | None:
     dst = ctx.dst_ops
     src = ctx.src_ops
     is_vop3 = ctx.is_vop3
-    if arch not in ('rdna3', 'rdna4') or mnemonic not in VECTOR32_NAMES:
+    if (
+        arch not in ('rdna3', 'rdna4', 'cdna3', 'cdna4', 'cdna5')
+        or mnemonic not in VECTOR32_NAMES
+    ):
+        return None
+    # Other CDNA integer arithmetic migrates in its own instruction family.
+    if arch.startswith('cdna') and mnemonic not in (
+        ACCUMULATOR_MOVES
+        | CONDITIONAL_NAMES
+        | {'V_MOV_B32', 'V_SCREEN_PARTITION_4SE_B32'}
+        | SATURATE_NAMES
+        | (WIDEN16_NAMES if arch == 'cdna5' else set())
+    ):
+        return None
+    if mnemonic in ACCUMULATOR_MOVES:
+        if arch not in ('cdna3', 'cdna4') or len(dst) != 1 or len(src) != 1:
+            return None
+        return f'  amdgpu::arith::execute_move32(*this, wf, {dst[0]}, {src[0]});'
+    if mnemonic == 'V_MOV_B32' and not is_vop3 and len(dst) == len(src) == 1:
+        return f'  amdgpu::arith::execute_move32(*this, wf, {dst[0]}, {src[0]});'
+    if mnemonic == 'V_SCREEN_PARTITION_4SE_B32':
+        if arch not in ('cdna3', 'cdna4') or len(dst) != 1 or len(src) != 1:
+            return None
+        # These CDNA targets only execute Wave64. Decoder operands retain DPP/SDWA routing.
+        return (
+            f'  amdgpu::arith::execute_screen_partition(*this, wf, {dst[0]}, {src[0]});'
+        )
+    if mnemonic.startswith('V_SAT_PK4_') and arch != 'cdna5':
         return None
     if mnemonic in CONDITIONAL_NAMES:
         return gen_conditional(ctx)
@@ -117,6 +148,28 @@ def gen_vector32(ctx: ExecuteContext) -> str | None:
         return None
     api = 'rj_arith_' + mnemonic.lower()
     if mnemonic in SATURATE_NAMES:
+        if arch in ('cdna3', 'cdna4'):
+            api += '_gfx942'
+            sdwa = (
+                ''
+                if is_vop3
+                else (
+                    '  if (inst_.src0 == amdgpu::SRC_SDWA) {\n'
+                    f'    amdgpu::arith::execute_saturating_pack_sdwa(*this, wf, {wave_api(api, 32)}, {wave_api(api, 64)}, {dst[0]}, {src[0]});\n'
+                    '    return;\n'
+                    '  }\n'
+                )
+            )
+            modifiers = (
+                '(amdgpu::vop3_opsel(inst_) & 8) ? RJ_ARITH_ALU_HIGH_D : 0u'
+                if is_vop3
+                else '0u'
+            )
+            return sdwa + (
+                f'  const uint64_t modifiers = {modifiers};\n'
+                f'  amdgpu::arith::execute_unary32(wf, {wave_api(api, 32)}, {wave_api(api, 64)},\n'
+                f'      wf.cu().arithmetic_flags(), modifiers, {dst[0]}, {src[0]}, 0xF, modifiers & RJ_ARITH_ALU_HIGH_D ? 0xC : 0xF);'
+            )
         modifiers = (
             '(amdgpu::vop3_opsel(inst_) & 8) ? RJ_ARITH_ALU_HIGH_D : 0u'
             if is_vop3
@@ -158,7 +211,7 @@ def gen_vector32(ctx: ExecuteContext) -> str | None:
         if is_vop3 and mnemonic not in UNMODIFIED_MULTIPLIES and mnemonic != 'V_MOV_B32'
         else '0u'
     )
-    if mnemonic == 'V_MOV_B32' and is_vop3:
+    if mnemonic == 'V_MOV_B32' and is_vop3 and arch in ('rdna3', 'rdna4', 'cdna5'):
         modifiers = '((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u)'
     if mnemonic in ('V_ALIGNBIT_B32', 'V_ALIGNBYTE_B32'):
         modifiers = (
@@ -201,7 +254,7 @@ def gen_conditional(ctx: ExecuteContext) -> str | None:
     )
     api = 'rj_arith_' + mnemonic.lower()
     lines += [
-        f'  amdgpu::arith::execute_conditional<{str(half).lower()}>(wf, {wave_api(api, 32)}, {wave_api(api, 64)},',
+        f'  amdgpu::arith::execute_conditional<{str(half).lower()}>(*this, wf, {wave_api(api, 32)}, {wave_api(api, 64)},',
         '      wf.cu().arithmetic_flags(),',
         f'      {modifiers}, {dst[0]}, {src[0]}, {src[1]}, {condition});',
     ]
@@ -240,9 +293,10 @@ def gen_carry32(ctx: ExecuteContext) -> str | None:
         carry = f'wf.exec() ? {carry} : 0u'
     modifiers = 'inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u' if is_vop3 else '0u'
     api = 'rj_arith_' + mnemonic.lower()
+    carry_policy = ', false' if arch.startswith('cdna') else ''
     return (
         f'  const uint64_t input_carry = {carry};\n'
-        f'  amdgpu::arith::execute_carry32<{str(with_carry).lower()}>(wf, {wave_api(api, 32)}, {wave_api(api, 64)},\n'
+        f'  amdgpu::arith::execute_carry32<{str(with_carry).lower()}{carry_policy}>(wf, {wave_api(api, 32)}, {wave_api(api, 64)},\n'
         '      wf.cu().arithmetic_flags(),\n'
         f'      {modifiers}, {dst[0]}, {src[0]}, {src[1]}, input_carry, {result_writer});'
     )
@@ -327,7 +381,10 @@ def gen_integer16(ctx: ExecuteContext) -> str | None:
     dst = ctx.dst_ops
     src = ctx.src_ops
     is_vop3 = ctx.is_vop3
-    if arch not in ('rdna3', 'rdna4') or mnemonic not in INTEGER16_NAMES:
+    if arch not in ('rdna3', 'rdna4', 'cdna5') or mnemonic not in INTEGER16_NAMES:
+        return None
+    # Only register moves belong to this migration; CDNA integer ALU is separate.
+    if arch == 'cdna5' and mnemonic != 'V_MOV_B16':
         return None
     count = 1 if mnemonic in UNARY16 else 2 if mnemonic in BINARY16 else 3
     if len(dst) != 1 or len(src) != count:
@@ -373,7 +430,10 @@ def gen_widening_integer(ctx: ExecuteContext) -> str | None:
     dst = ctx.dst_ops
     src = ctx.src_ops
     is_vop3 = ctx.is_vop3
-    if arch not in ('rdna3', 'rdna4') or mnemonic not in WIDENING_INTEGER_NAMES:
+    if arch in ('cdna3', 'cdna4', 'cdna5'):
+        if mnemonic not in INTEGER_PACK_NAMES:
+            return None
+    elif arch not in ('rdna3', 'rdna4') or mnemonic not in WIDENING_INTEGER_NAMES:
         return None
     mad = mnemonic in WIDENING_MAD_NAMES
     if not is_vop3 or len(dst) != 1 or len(src) != (3 if mad else 2):

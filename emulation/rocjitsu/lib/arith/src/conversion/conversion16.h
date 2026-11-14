@@ -23,12 +23,12 @@ enum class Conversion16 {
 // Requires the named CPU features and validated instruction controls.
 template <Conversion16 Op>
 void conversion16_x86_64_v3(uint64_t flags, uint32_t exec_mask, uint32_t mode, uint32_t *d,
-                            const uint32_t *a, bool quiet_nan);
+                            const uint32_t *a, bool quiet_nan, bool preserve_half);
 
 // Convert FP16, FP32, or 16-bit integers. Preserve destination lanes outside exec_mask.
 // Requires the named CPU features and validated instruction controls.
 template <Conversion16 Op>
 void conversion16_x86_64_v4(uint64_t flags, uint32_t exec_mask, uint32_t mode, uint32_t *d,
-                            const uint32_t *a, bool quiet_nan);
+                            const uint32_t *a, bool quiet_nan, bool preserve_half);
 
 } // namespace rocjitsu::arith

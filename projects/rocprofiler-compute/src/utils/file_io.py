@@ -366,37 +366,40 @@ def process_pc_sampling_kernel_trace(
 def create_df_pmc(
     raw_data_dir: str,
     verbose: int,
-) -> pd.DataFrame:
+) -> tuple[pd.DataFrame, dict[str, pd.DataFrame]]:
     """
-    Read all raw pmc counters into one analysis df.
+    Read all raw pmc counters. Return the merged table and one table per pass,
+    keyed by pass name.
 
     Counter data comes from the native tool's per-pid artifacts when there are
     any, and from the rocpd result artifacts otherwise. Bad profiling output
     stops the run instead of producing a partial frame.
     """
-    df, _slot_to_id = create_df_pmc_with_slot_ids(raw_data_dir, verbose)
-    return df
+    df, _slot_to_id, pass_tables = create_df_pmc_with_slot_ids(raw_data_dir, verbose)
+    return df, pass_tables
 
 
 @demarcate
 def create_df_pmc_with_slot_ids(
     raw_data_dir: str,
     verbose: int,
-) -> tuple[pd.DataFrame, dict[tuple, int]]:
-    """Read pmc counters and the map from process_rocpd_csv group keys to 1..N ids."""
+) -> tuple[pd.DataFrame, dict[tuple, int], dict[str, pd.DataFrame]]:
+    """Read pmc counters like create_df_pmc. Also return the map from
+    process_rocpd_csv group keys to the 1..N dispatch ids."""
     counter_rows = _read_counter_rows(Path(raw_data_dir))
     if counter_rows.empty:
-        return pd.DataFrame(), {}
+        return pd.DataFrame(), {}, {}
 
     df, slot_to_id = utils_analysis.process_rocpd_csv(counter_rows)
 
     utils_analysis.add_unit_counter(df)
+    pass_tables = utils_analysis.split_counters_by_pass(counter_rows, df)
 
     if verbose >= 2:
         frame_info = io.StringIO()
         df.info(buf=frame_info)
         console_debug(f"pmc_raw_data final_single_df\n{frame_info.getvalue()}")
-    return df, slot_to_id
+    return df, slot_to_id, pass_tables
 
 
 def _read_counter_rows(workload_dir: Path) -> pd.DataFrame:
@@ -409,12 +412,19 @@ def _read_counter_rows(workload_dir: Path) -> pd.DataFrame:
     if artifacts:
         return _read_native_counter_rows(workload_dir, artifacts)
 
+    result_suffix = f".csv{csv_compression.GZIP_SUFFIX}"
     result_files = sorted(
-        workload_dir.glob(f"results_*.csv{csv_compression.GZIP_SUFFIX}")
+        workload_dir.glob(f"results_*{result_suffix}"),
+        key=lambda path: _natural_sort_key(path.name),
     )
     if not result_files:
         return pd.DataFrame()
-    frames = [_read_counter_results(result_file) for result_file in result_files]
+    frames = [
+        _read_counter_results(result_file).assign(
+            Pass_Key=result_file.name[len("results_") : -len(result_suffix)]
+        )
+        for result_file in result_files
+    ]
     counter_rows = pd.concat(frames, ignore_index=True)
     # rocpd lists no agents, so number the GPUs that ran dispatches from 0.
     counter_rows["GPU_ID"] = counter_rows["GPU_ID"].rank(method="dense").astype(int) - 1
@@ -428,7 +438,9 @@ def _read_native_counter_rows(
     """Join each process's native CSVs, numbering ids per counter set and GPUs
     from the agents CSVs."""
     counter_sets = []
-    for fbase in sorted({artifact.fbase for artifact in artifacts}):
+    for fbase in sorted(
+        {artifact.fbase for artifact in artifacts}, key=_natural_sort_key
+    ):
         processes = [
             utils_analysis.join_native_counters(
                 _read_profiling_csv(
@@ -444,7 +456,9 @@ def _read_native_counter_rows(
             if artifact.fbase == fbase
         ]
         counter_sets.append(
-            utils_analysis.assign_native_ids(pd.concat(processes, ignore_index=True))
+            utils_analysis.assign_native_ids(
+                pd.concat(processes, ignore_index=True)
+            ).assign(Pass_Key=fbase)
         )
 
     counter_rows = pd.concat(counter_sets, ignore_index=True)
@@ -477,6 +491,11 @@ def _read_counter_results(result_file: Path) -> pd.DataFrame:
         )
 
     return df
+
+
+def _natural_sort_key(name: str) -> list[Any]:
+    """Sort key that puts pmc_perf_2 before pmc_perf_10."""
+    return [int(part) if part.isdigit() else part for part in re.split(r"(\d+)", name)]
 
 
 def _read_profiling_csv(

@@ -4,6 +4,8 @@
 #include "compute_unit_test_util.h"
 #include "decode_test_util.h"
 #include "legacy_gpu_memory_fixture.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3/opcodes.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
@@ -28,12 +30,13 @@ using namespace rocjitsu;
 
 class ScalarCachePolicyTest : public ::testing::Test {
 protected:
+  virtual rj_code_arch_t arch() const { return ROCJITSU_CODE_ARCH_CDNA4; }
   void SetUp() override { initialize(1); }
 
   void initialize(uint32_t num_wf_slots) {
     l2.set_backing_memory(&memory);
     amdgpu::ComputeUnitCore::Config cfg{};
-    cfg.arch = ROCJITSU_CODE_ARCH_CDNA4;
+    cfg.arch = arch();
     cfg.num_wf_slots = num_wf_slots;
     cfg.sgprs_per_wf = 102;
     cfg.vgprs_per_wf = 16;
@@ -79,6 +82,43 @@ protected:
   amdgpu::Wavefront *wave = nullptr;
   std::unique_ptr<Decoder> decoder;
 };
+
+class Gfx11ScalarCachePolicyTest : public ScalarCachePolicyTest,
+                                   public testing::WithParamInterface<rj_code_arch_t> {
+protected:
+  rj_code_arch_t arch() const override { return GetParam(); }
+};
+
+INSTANTIATE_TEST_SUITE_P(Gfx11, Gfx11ScalarCachePolicyTest,
+                         testing::Values(ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5));
+
+TEST_P(Gfx11ScalarCachePolicyTest, GlcBypassesAWarmScalarCacheLine) {
+  constexpr uint32_t address = 0x4000;
+  const auto sgpr_base = wave->sgpr_alloc().base;
+  cu->write_sgpr(sgpr_base, address);
+  cu->write_sgpr(sgpr_base + 1, 0);
+  cu->write_sgpr(sgpr_base + 2, 0);
+
+  const auto load = [&](bool glc, uint32_t expected) {
+    const auto words =
+        rdna3::build_smem(rdna3::kSLoadB32Smem, {.sdata = 32, .glc = glc, .soffset = 2});
+    auto decoded = decoder->decode_window(words);
+    ASSERT_TRUE(decoded.succeeded());
+    auto inst = std::move(decoded).value();
+    ASSERT_TRUE(cu->execute_instruction(inst.get(), *wave).succeeded());
+    ASSERT_EQ(pipeline.issue(inst.release(), *wave), amdgpu::VmAccessOutcome::Complete);
+    EXPECT_EQ(result(0), expected);
+  };
+
+  memory.write32(address, 11);
+  ASSERT_NO_FATAL_FAILURE(load(false, 11));
+  const uint32_t fresh = 22;
+  ASSERT_EQ(l2.write(address, reinterpret_cast<const uint8_t *>(&fresh), sizeof(fresh),
+                     amdgpu::Mtype::RW),
+            amdgpu::VmAccessOutcome::Complete);
+  ASSERT_NO_FATAL_FAILURE(load(false, 11));
+  ASSERT_NO_FATAL_FAILURE(load(true, fresh));
+}
 
 TEST(ScalarCachePolicyTestSetup, RejectedComputeUnitAllowsTearDown) {
   class RejectedFixture : public ScalarCachePolicyTest {

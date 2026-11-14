@@ -21,11 +21,11 @@ std::string_view MockInputParameters::get_requested_counters()
     return std::string_view{m_requested_counters};
 }
 
-std::string_view MockInputParameters::get_iteration_multiplexing_mode()
+std::string_view MockInputParameters::get_iteration_multiplexing()
 {
-    if (!m_iteration_multiplexing_mode_set || m_iteration_multiplexing_mode.empty())
-        return rocprofiler_compute_tool::EnvInputParameters::kDefaultIterationMultiplexingMode;
-    return std::string_view{m_iteration_multiplexing_mode};
+    if (!m_iteration_multiplexing_set || m_iteration_multiplexing.empty())
+        return rocprofiler_compute_tool::EnvInputParameters::kDefaultIterationMultiplexing;
+    return std::string_view{m_iteration_multiplexing};
 }
 
 std::string_view MockInputParameters::get_kernel_filter_include_regex()
@@ -64,10 +64,10 @@ void MockInputParameters::set_requested_counters(const std::string& counters)
     m_requested_counters_set = true;
 }
 
-void MockInputParameters::set_iteration_multiplexing_mode(const std::string& mode)
+void MockInputParameters::set_iteration_multiplexing(const std::string& value)
 {
-    m_iteration_multiplexing_mode     = mode;
-    m_iteration_multiplexing_mode_set = true;
+    m_iteration_multiplexing     = value;
+    m_iteration_multiplexing_set = true;
 }
 
 void MockInputParameters::set_kernel_filter_include_regex(const std::string& regex)
@@ -92,9 +92,9 @@ void MockInputParameters::unset_requested_counters()
     m_requested_counters_set = false;
 }
 
-void MockInputParameters::unset_iteration_multiplexing_mode()
+void MockInputParameters::unset_iteration_multiplexing()
 {
-    m_iteration_multiplexing_mode_set = false;
+    m_iteration_multiplexing_set = false;
 }
 
 void MockInputParameters::unset_kernel_filter_include_regex()

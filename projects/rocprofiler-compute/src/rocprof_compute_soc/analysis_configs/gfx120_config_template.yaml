@@ -52,9 +52,6 @@ panels:
   - type: metric_table
     id: 10
     title: Workgroup Processors (WGPs)
-  - type: metric_table
-    id: 11
-    title: Infinity Cache and VRAM
 - file: roofline.yaml
   panel_id: 4
   panel_title: Roofline
@@ -107,9 +104,6 @@ panels:
     id: 10
     title: WMMA Instruction FLOPs and IOPs Counting
   - type: metric_table
-    id: 11
-    title: Instruction Issue Stalls
-  - type: metric_table
     id: 16
     title: Instruction Cache
   - type: metric_table
@@ -134,9 +128,6 @@ panels:
   panel_title: GL1 Cache (L1)
   panel_alias: gl1
   data_sources:
-  - type: metric_table
-    id: 1
-    title: GL1A Processing
   - type: metric_table
     id: 3
     title: GL1 Cache Request Statistics

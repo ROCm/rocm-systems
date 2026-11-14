@@ -23,10 +23,7 @@ from utils.logger import (
     demarcate,
 )
 from utils.metrics.expression import build_metric_value_string
-from utils.utils_analysis import (
-    impute_counters_iteration_multiplex,
-    validate_workload,
-)
+from utils.utils_analysis import validate_workload
 from utils.utils_common import (
     PC_SAMPLING_BLOCK_IDS,
     ROOFLINE_PANEL_ID,
@@ -153,12 +150,6 @@ class OmniAnalyze_Base:
 
     def get_socs(self) -> Optional[dict[str, OmniSoC_Base]]:
         return self.__socs
-
-    @demarcate
-    def iteration_multiplex_impute_counters(
-        self, df: pd.DataFrame, policy: str, workload_dir: Path
-    ) -> pd.DataFrame:
-        return impute_counters_iteration_multiplex(df, policy, workload_dir)
 
     @demarcate
     def generate_configs(
@@ -318,6 +309,14 @@ class OmniAnalyze_Base:
             args.path[0][0]
         )
         profiling_config = self.get_profiling_config()
+        if profiling_config.get("iteration_multiplexing") == "kernel":
+            console_error(
+                "analysis",
+                'This workload was profiled with "--iteration-multiplexing kernel", '
+                "which is no longer supported. Profile it again with "
+                '"--iteration-multiplexing".',
+            )
+
         for dir_info in args.path:
             if not any([
                 profiling_config.get("iteration_multiplexing"),
@@ -345,7 +344,7 @@ class OmniAnalyze_Base:
                     "Please choose a different name."
                 )
 
-        if profiling_config.get("iteration_multiplexing") is not None:
+        if profiling_config.get("iteration_multiplexing"):
             console_log(
                 "analysis",
                 (

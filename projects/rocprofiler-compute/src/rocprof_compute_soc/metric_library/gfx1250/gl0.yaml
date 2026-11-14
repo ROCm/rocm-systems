@@ -1,6 +1,6 @@
 gl0.ai:
   name: GL0 Arithmetic Intensity
-  formula: SUM(SP_VALU_FLOPS_FP16_sum + SP_VALU_FLOPS_FP32_sum + SP_VALU_FLOPS_FP64_sum + SP_VALU_FLOPS_FP16_TRANS_sum + SP_VALU_FLOPS_FP32_TRANS_sum + SP_VALU_FLOPS_FP64_TRANS_sum + SQ_VALU_WMMA_FLOP_FP16_sum * 2048 + SQ_VALU_WMMA_FLOP_BF16_sum * 2048 + SQ_VALU_WMMA_FLOP_FP32_sum * 128 + SQ_VALU_WMMA_FLOP_FP64_sum * 64 + SQ_VALU_WMMA_FLOP_FP8_sum * 4096 + SQ_VALU_WMMA_FLOP_FP6_sum * 8192 + SQ_VALU_WMMA_FLOP_FP4_sum * 8192 + SQ_VALU_WMMA_FLOP_F6F4_sum * 8192) / SUM(TX_VCA_CACHE_LOAD_BANDWIDTH_BYTES_sum + TX_VCA_CACHE_STORE_BANDWIDTH_BYTES_sum + TX_VCA_CACHE_ATOMIC_BANDWIDTH_BYTES_sum)
+  formula: SUM($sp_flops + $wmma_flops) / SUM($gl0_bytes)
   unit: FLOPs/Byte
   description: Arithmetic intensity relative to GL0 data bandwidth.
 gl0.atomic_req:
@@ -117,11 +117,6 @@ gl0.lat_fifo_stall_rate:
   unit: Percent
   description: >-
     Percentage of VMW-busy cycles stalled because the GL0 latency FIFO is full.
-gl0.lookup_hit_rate:
-  name: GL0 Cache Lookup Hit Rate
-  formula: 100 * SUM(1 - TX_VMW_REQ_MISS_sum) / SUM(TX_VMW_REQ_sum)
-  unit: Percent
-  description: GL0 cache lookup hit rate.
 gl0.ram_bank_conflict_stall_rate_rd:
   name: GL0 Cache RAM Bank Conflict Stall Rate - Read
   formula: 100 * SUM(TX_VMW_READ_DATACONFLICT_STALL_sum) / SUM(TX_VMW_VMW_BUSY_sum)
@@ -164,7 +159,7 @@ gl0.return_queue_pending_stall_rate:
     Percentage of VMW-busy cycles stalled on a pending GL1 return.
 gl0.sector_lookup_hit_rate:
   name: GL0 Cache Sector Lookup Hit Rate
-  formula: 100 * SUM(1 - TX_VMW_SECTOR_MISS_sum) / SUM(TX_VMW_SECTORS_sum)
+  formula: 100 * SUM(TX_VMW_SECTORS_sum - TX_VMW_SECTOR_MISS_sum) / SUM(TX_VMW_SECTORS_sum)
   unit: Percent
   description: GL0 cache sector-level lookup hit rate.
 gl0.segment_conflict_stall_rate_cache:

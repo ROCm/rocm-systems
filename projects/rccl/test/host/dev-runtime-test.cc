@@ -15,6 +15,7 @@
 
 #include "fakes/dev_runtime_micro_fakes.h"
 #include "fakes/hip_fakes.h"      // the shared g_hip* seams this suite drives
+#include "fakes/mgmt_task_enq_fakes.h"  // g_ncclMgmtTaskEnqueue
 #include "fakes/nccl_fakes.h"     // g_ncclProxyClientGetFdBlocking
 #include "fakes/devcomm_fakes.h"  // g_ncclTeamLsa
 #include "fakes/nccl_device_core_fakes.h"  // g_ncclTeamWorld and the rest of the ncclTeam* family
@@ -550,7 +551,7 @@ protected:
   std::vector<int> localRankToRank;
 
   // The only fixture here that installs hooks without a reset otherwise:
-  // ProxyOnlyDrainFails_StillEmptiesWindowList leaves a non-freeing
+  // ProxyOnlyDrainFails_StillReleasesRegistrationAndEmptiesWindowList leaves a non-freeing
   // g_devrShadowPoolFree behind, which is exactly the case the shadow-pool
   // liveness reset exists to clean up.
   void TearDown() override { ResetDevRuntimeMicroFakes(); }
@@ -692,9 +693,12 @@ TEST_F(DevrFinalizeTest, ProxyOnly_DrainsNonSymWindows) {
   EXPECT_EQ(comm->devrState.winSortedCount, 0);
 }
 
-// The drain must make progress even when the deregister fails: it only removes
-// the entry on success, so finalize drops it regardless to avoid spinning.
-TEST_F(DevrFinalizeTest, ProxyOnlyDrainFails_StillEmptiesWindowList) {
+// The drain must make progress even when a deregister stage fails. Finalize
+// passes forceCleanup, so after the failed shadow-pool free the remaining
+// stages still run: the local registration is released and the entry removed.
+// Without forceCleanup, finalize's own guard would still empty the list, but
+// ncclCommDeregister would never be reached.
+TEST_F(DevrFinalizeTest, ProxyOnlyDrainFails_StillReleasesRegistrationAndEmptiesWindowList) {
   comm->symmetricSupport = 0;
   ASSERT_EQ(ncclDevrInitOnce(comm), ncclSuccess);
 
@@ -702,8 +706,11 @@ TEST_F(DevrFinalizeTest, ProxyOnlyDrainFails_StillEmptiesWindowList) {
   ASSERT_EQ(windowRegisterNonSym(comm, reinterpret_cast<void*>(0x100000), 4096, 0, nullptr, &out), ncclSuccess);
   ScopedHook poolFree(g_devrShadowPoolFree,
                       [](ncclShadowPool*, void*, hipStream_t) { return ncclSystemError; });
+  ScopedHook dereg(g_devrNcclCommDeregister, [](const ncclComm_t, void*) { return ncclSuccess; });
 
   ASSERT_EQ(ncclDevrFinalize(comm), ncclSuccess);
+  EXPECT_EQ(poolFree.calls, 1);
+  EXPECT_EQ(dereg.calls, 1);
   EXPECT_EQ(comm->devrState.winSortedCount, 0);
 }
 
@@ -3174,6 +3181,36 @@ TEST_F(SymWindowCreateTest, FullTable_ChainsAnotherTable) {
   EXPECT_EQ(first->next->entries[0].window, winDev);
 }
 
+// The table copies are asynchronous, so their sources must outlive the call:
+// both the entry and the chain link are copied out of the host shadow, never
+// out of a local. dev == host under the shadow-pool fake, so the host shadow
+// slot is the copy's own destination.
+TEST_F(SymWindowCreateTest, TableCopiesReadFromTheHostShadow) {
+  for (int i = 0; i < 32; i++) {
+    ASSERT_EQ(Create(reinterpret_cast<void*>(0x100000 + i * 0x1000), 4096), ncclSuccess);
+  }
+  ncclDevCommWindowTable* first = comm->devrState.windowTable;
+  ASSERT_NE(first, nullptr);
+
+  std::vector<std::pair<void*, const void*>> copies;
+  ScopedHook copy(g_hipMemcpyAsync, [&](void* dst, const void* src, size_t size, hipMemcpyKind, hipStream_t) {
+    copies.emplace_back(dst, src);
+    if (dst != nullptr && src != nullptr && dst != src) memcpy(dst, src, size);
+    return hipSuccess;
+  });
+
+  ASSERT_EQ(Create(reinterpret_cast<void*>(0x200000), 4096), ncclSuccess);
+  ASSERT_NE(first->next, nullptr);
+  const void* linkSrc = nullptr;
+  const void* entrySrc = nullptr;
+  for (auto& c : copies) {
+    if (c.first == &first->next) linkSrc = c.second;
+    if (c.first == &first->next->entries[0]) entrySrc = c.second;
+  }
+  EXPECT_EQ(linkSrc, &first->next);
+  EXPECT_EQ(entrySrc, &first->next->entries[0]);
+}
+
 // The sorted list is keyed on user address, so windows created out of order are
 // still stored in address order.
 TEST_F(SymWindowCreateTest, InsertsIntoSortedListByAddress) {
@@ -3206,21 +3243,34 @@ TEST_F(SymWindowCreateTest, SegmentWindowsFail_ReturnsErrorWithoutPublishing) {
 TEST_F(SymWindowCreateTest, DescriptorAllocFails_ReturnsError) {
   ScopedHook alloc(g_devrShadowPoolAlloc,
                    [](ncclShadowPool*, size_t, void**, void**, hipStream_t) { return ncclSystemError; });
+  ScopedHook poolFree(g_devrShadowPoolFree, [](ncclShadowPool*, void*, hipStream_t) { return ncclSuccess; });
 
   EXPECT_NE(Create(reinterpret_cast<void*>(0x100000), 4096), ncclSuccess);
   EXPECT_EQ(comm->devrState.winSortedCount, 0);
+  EXPECT_EQ(poolFree.calls, 0);  // no descriptor was handed out, so fail: has nothing to return
 }
 
 // Branch: the descriptor copy to the device fails. It is the first copy the
 // function makes, so the window table is never reached and the sorted list
-// never grows.
+// never grows. fail: hands the descriptor back to the shadow pool.
 TEST_F(SymWindowCreateTest, DescriptorCopyFails_ReturnsErrorWithoutPublishing) {
-  ScopedHook copy(g_hipMemcpyAsync,
-                  [](void*, const void*, size_t, hipMemcpyKind, hipStream_t) { return hipErrorInvalidValue; });
+  void* winDev = nullptr;
+  ScopedHook copy(g_hipMemcpyAsync, [&](void* dst, const void*, size_t, hipMemcpyKind, hipStream_t) {
+    winDev = dst;
+    return hipErrorInvalidValue;
+  });
+  // Records only: the fake's reset reclaims whatever the pool still holds.
+  std::vector<void*> freed;
+  ScopedHook poolFree(g_devrShadowPoolFree, [&](ncclShadowPool*, void* obj, hipStream_t) {
+    freed.push_back(obj);
+    return ncclSuccess;
+  });
 
   EXPECT_NE(Create(reinterpret_cast<void*>(0x100000), 4096), ncclSuccess);
   EXPECT_EQ(copy.calls, 1);  // failed on the descriptor, before the table copy
   EXPECT_EQ(comm->devrState.winSortedCount, 0);
+  ASSERT_NE(winDev, nullptr);
+  EXPECT_EQ(freed, std::vector<void*>({winDev}));
 }
 
 // Branch: the descriptor copy lands but publishing the entry into the window
@@ -3229,18 +3279,70 @@ TEST_F(SymWindowCreateTest, DescriptorCopyFails_ReturnsErrorWithoutPublishing) {
 // DescriptorCopyFails above.
 TEST_F(SymWindowCreateTest, TablePublishCopyFails_ReturnsErrorWithoutPublishing) {
   int n = 0;
+  void* winDev = nullptr;
   ScopedHook copy(g_hipMemcpyAsync,
-                  [&n](void* dst, const void* src, size_t size, hipMemcpyKind, hipStream_t) {
-                    if (++n == 2) return hipErrorInvalidValue;
+                  [&](void* dst, const void* src, size_t size, hipMemcpyKind, hipStream_t) {
+                    if (++n == 1) winDev = dst;
+                    if (n == 2) return hipErrorInvalidValue;
                     // Mirrors the fake's default: the earlier copies must still
                     // land, or the table walk reads uninitialised entries.
                     if (dst != nullptr && src != nullptr && dst != src) memcpy(dst, src, size);
                     return hipSuccess;
                   });
+  std::vector<void*> freed;
+  ScopedHook poolFree(g_devrShadowPoolFree, [&](ncclShadowPool*, void* obj, hipStream_t) {
+    freed.push_back(obj);
+    return ncclSuccess;
+  });
 
   EXPECT_NE(Create(reinterpret_cast<void*>(0x100000), 4096), ncclSuccess);
   EXPECT_EQ(n, 2);
   EXPECT_EQ(comm->devrState.winSortedCount, 0);
+  ASSERT_NE(winDev, nullptr);
+  EXPECT_EQ(freed, std::vector<void*>({winDev}));
+  // The host shadow is written only after its device copy lands.
+  ASSERT_NE(comm->devrState.windowTable, nullptr);
+  EXPECT_EQ(comm->devrState.windowTable->entries[0].window, nullptr);
+}
+
+// Branch: the first table is full, so a new table is allocated, but linking it
+// into the chain fails. Both the unlinked table and the descriptor go back to
+// the pool, and the chain is left as it was.
+TEST_F(SymWindowCreateTest, ChainLinkCopyFails_FreesUnpublishedTableAndDescriptor) {
+  for (int i = 0; i < 32; i++) {
+    ASSERT_EQ(Create(reinterpret_cast<void*>(0x100000 + i * 0x1000), 4096), ncclSuccess);
+  }
+  ncclDevCommWindowTable* first = comm->devrState.windowTable;
+  ASSERT_NE(first, nullptr);
+
+  // Copy 1 is the descriptor; with the first table full, copy 2 is the
+  // next-pointer link, whose source holds the freshly allocated table.
+  int n = 0;
+  void* winDev = nullptr;
+  void* unpublished = nullptr;
+  ScopedHook copy(g_hipMemcpyAsync,
+                  [&](void* dst, const void* src, size_t size, hipMemcpyKind, hipStream_t) {
+                    if (++n == 1) winDev = dst;
+                    if (n == 2) {
+                      if (size == sizeof(void*)) unpublished = *static_cast<void* const*>(src);
+                      return hipErrorInvalidValue;
+                    }
+                    if (dst != nullptr && src != nullptr && dst != src) memcpy(dst, src, size);
+                    return hipSuccess;
+                  });
+  std::vector<void*> freed;
+  ScopedHook poolFree(g_devrShadowPoolFree, [&](ncclShadowPool*, void* obj, hipStream_t) {
+    freed.push_back(obj);
+    return ncclSuccess;
+  });
+
+  EXPECT_NE(Create(reinterpret_cast<void*>(0x200000), 4096), ncclSuccess);
+  EXPECT_EQ(n, 2);
+  EXPECT_EQ(comm->devrState.winSortedCount, 32);
+  EXPECT_EQ(first->next, nullptr);
+  ASSERT_NE(winDev, nullptr);
+  ASSERT_NE(unpublished, nullptr);
+  EXPECT_EQ(freed, std::vector<void*>({unpublished, winDev}));
 }
 
 
@@ -4995,22 +5097,28 @@ TEST_F(DevrWindowRegisterInGroupSymTest, AddressRangeFails_ReleasesLocalRegistra
 // allocation is rejected. The base is reported one byte below the user pointer,
 // which is the smallest offset that cannot satisfy the requirement.
 //
-// Unlike every other rejection in this function, this one is *not* asserted to
-// deregister: windowRegisterInGroup's NCCL_WIN_REQUIRED_ALIGNMENT check jumps
-// to fail, not fail_locReg, so
-// ncclCommDeregister never runs and the local registration taken at :1284 leaks
-// (as does the memHandles array allocated at :1304). EXPECT_EQ(dereg.calls, 1)
-// belongs here and fails today; see AICOMRCCL-2180 finding 13. Asserting
-// the current count instead would pin the leak.
-TEST_F(DevrWindowRegisterInGroupSymTest, MisalignedWindow_ReturnsInvalidArgument) {
+// The check runs before any segment handle is retained, so the unwind
+// deregisters the local registration and frees the still-empty memHandles array
+// (LSan reports it otherwise) without releasing anything beyond the
+// address-range walk's own probe.
+TEST_F(DevrWindowRegisterInGroupSymTest, MisalignedWindow_ReturnsInvalidArgumentAndUnwindsLocalRegistration) {
   ScopedHook range(g_hipMemGetAddressRange, [](hipDeviceptr_t* pbase, size_t* psize, hipDeviceptr_t dptr) {
     if (pbase) *pbase = reinterpret_cast<hipDeviceptr_t>(static_cast<char*>(dptr) - 1);
     if (psize) *psize = 8192;
     return hipSuccess;
   });
+  ScopedHook retain(g_hipMemRetainAllocationHandle, [](hipMemGenericAllocationHandle_t* h, void*) {
+    if (h) *h = reinterpret_cast<hipMemGenericAllocationHandle_t>(0x77);
+    return hipSuccess;
+  });
+  ScopedHook release(g_hipMemRelease, [](hipMemGenericAllocationHandle_t) { return hipSuccess; });
+  ScopedHook dereg(g_devrNcclCommDeregister, [](const ncclComm_t, void*) { return ncclSuccess; });
 
   ncclWindow_t out = nullptr;
   EXPECT_EQ(ncclDevrWindowRegisterInGroup(comm, kUserPtr, 4096, 0, &out), ncclInvalidArgument);
+  EXPECT_EQ(out, nullptr);
+  EXPECT_EQ(dereg.calls, 1);
+  EXPECT_EQ(release.calls, retain.calls) << "every retained handle is released exactly once";
   EXPECT_EQ(comm->devrState.winSortedCount, 0);
 }
 
@@ -5028,7 +5136,7 @@ TEST_F(DevrWindowRegisterInGroupSymTest, SysmemSegmentWithoutElasticParam_Return
 
   ncclWindow_t out = nullptr;
   EXPECT_EQ(ncclDevrWindowRegisterInGroup(comm, kUserPtr, 4096, 0, &out), ncclInvalidArgument);
-  EXPECT_EQ(dereg.calls, 1);  // this arm does unwind, unlike the misaligned one above
+  EXPECT_EQ(dereg.calls, 1);
   EXPECT_EQ(comm->devrState.winSortedCount, 0);
 }
 
@@ -5083,28 +5191,30 @@ TEST_F(DevrWindowRegisterInGroupSymTest, UnsupportedSegmentType_ReturnsInvalidAr
 // retain 3 lands in
 // memHandles[0], and retain 4 is the one made to fail.
 //
-// Deliberately NOT asserting that memHandles[0] is released: it is not.
-// that loop's cuMemRetainAllocationHandle check jumps to fail_locReg, which is *below*
-// fail_locReg_memHandle's release loop and free(memHandles), so both are
-// skipped -- the retained handle and the array leak. Same for the two other
-// exits in this loop (:1346, :1354). Asserting the release count here would
-// pin that leak in place; see AICOMRCCL-2180 finding 12. What is asserted
-// is the part that does work: the error propagates and the local registration
-// is unwound.
-TEST_F(DevrWindowRegisterInGroupSymTest, RetainFails_PropagatesErrorAndUnwindsLocalRegistration) {
+// Each retain hands out a distinct handle, so the release log shows that the
+// unwind releases memHandles[0] (retain 3) once, on top of the walk's own two,
+// and does not touch the unfilled memHandles[1].
+TEST_F(DevrWindowRegisterInGroupSymTest, RetainFails_ReleasesRetainedHandlesAndUnwindsLocalRegistration) {
   ScopedHook range(g_hipMemGetAddressRange, AddressRangeOf(4096));
-  int retained = 0;
-  ScopedHook retain(g_hipMemRetainAllocationHandle, [&](hipMemGenericAllocationHandle_t* h, void*) {
+  static int retained;
+  static std::vector<uintptr_t> released;
+  retained = 0;
+  released.clear();
+  ScopedHook retain(g_hipMemRetainAllocationHandle, [](hipMemGenericAllocationHandle_t* h, void*) {
     if (++retained > 3) return hipErrorInvalidValue;
-    if (h) *h = reinterpret_cast<hipMemGenericAllocationHandle_t>(0x77);
+    if (h) *h = reinterpret_cast<hipMemGenericAllocationHandle_t>(static_cast<uintptr_t>(0x70 + retained));
     return hipSuccess;
   });
-  ScopedHook release(g_hipMemRelease, [](hipMemGenericAllocationHandle_t) { return hipSuccess; });
+  ScopedHook release(g_hipMemRelease, [](hipMemGenericAllocationHandle_t h) {
+    released.push_back(reinterpret_cast<uintptr_t>(h));
+    return hipSuccess;
+  });
   ScopedHook dereg(g_devrNcclCommDeregister, [](const ncclComm_t, void*) { return ncclSuccess; });
 
   ncclWindow_t out = nullptr;
   EXPECT_NE(ncclDevrWindowRegisterInGroup(comm, kUserPtr, 8192, 0, &out), ncclSuccess);
   EXPECT_EQ(retained, 4);  // proves the failure landed in the validation loop, not the walk
+  EXPECT_EQ(released, (std::vector<uintptr_t>{0x71, 0x72, 0x73}));
   EXPECT_EQ(dereg.calls, 1);
   EXPECT_EQ(comm->devrState.winSortedCount, 0);
 }
@@ -5188,6 +5298,43 @@ TEST_F(WindowDeregisterNonSymTest, ShadowFreeFails_LeavesWindowRegistered) {
 
   EXPECT_NE(windowDeregisterNonSym(comm, winDev), ncclSuccess);
   EXPECT_EQ(comm->devrState.winSortedCount, 1);
+}
+
+// Branch: the stream create fails without forceCleanup, so nothing is torn
+// down and the caller can retry.
+TEST_F(WindowDeregisterNonSymTest, StreamCreateFails_LeavesWindowRegistered) {
+  ncclWindow_t winDev = RegisterOne(kUserPtr);
+  ScopedHook create(g_hipStreamCreateWithFlags, [](hipStream_t*, unsigned int) { return hipErrorInvalidValue; });
+  ScopedHook poolFree(g_devrShadowPoolFree, [](ncclShadowPool*, void*, hipStream_t) { return ncclSuccess; });
+
+  EXPECT_NE(windowDeregisterNonSym(comm, winDev), ncclSuccess);
+  EXPECT_EQ(poolFree.calls, 0);
+  EXPECT_EQ(comm->devrState.winSortedCount, 1);
+}
+
+// Branch: under forceCleanup a failed stream create still releases the shadow
+// entry, on the default stream, and waits for that stream before going on; the
+// failure is still reported.
+TEST_F(WindowDeregisterNonSymTest, ForceCleanupStreamCreateFails_FreesOnTheDefaultStreamAndSyncsIt) {
+  ncclWindow_t winDev = RegisterOne(kUserPtr);
+  ScopedHook create(g_hipStreamCreateWithFlags, [](hipStream_t*, unsigned int) { return hipErrorInvalidValue; });
+  std::vector<std::string> order;
+  ScopedHook poolFree(g_devrShadowPoolFree, [&](ncclShadowPool*, void*, hipStream_t s) {
+    order.push_back(s == nullptr ? "free(default)" : "free(other)");
+    return ncclSuccess;
+  });
+  ScopedHook sync(g_hipStreamSynchronize, [&](hipStream_t s) {
+    order.push_back(s == nullptr ? "sync(default)" : "sync(other)");
+    return hipSuccess;
+  });
+  ScopedHook destroy(g_hipStreamDestroy, [](hipStream_t) { return hipSuccess; });
+  ScopedHook dereg(g_devrNcclCommDeregister, [](const ncclComm_t, void*) { return ncclSuccess; });
+
+  EXPECT_NE(windowDeregisterNonSym(comm, winDev, /*forceCleanup=*/true), ncclSuccess);
+  EXPECT_EQ(order, (std::vector<std::string>{"free(default)", "sync(default)"}));
+  EXPECT_EQ(destroy.calls, 0);
+  EXPECT_EQ(dereg.calls, 1);
+  EXPECT_EQ(comm->devrState.winSortedCount, 0);
 }
 
 
@@ -5939,6 +6086,47 @@ TEST_F(CommWindowRegisterImplTest, NoWindowSupport_SucceedsWithoutQueueing) {
   EXPECT_EQ(out, nullptr);
 }
 
+// The rearch path hands a job to ncclMgmtTaskEnqueue instead of queueing a task.
+TEST_F(CommWindowRegisterImplTest, Rearch_HandsTheJobToTheManagementQueue) {
+  ScopedHook rearch(g_loadParam, ParamOverride({{"ENQUEUE_REARCH_ENABLE", 1}}));
+  ncclAsyncJob* job = nullptr;
+  void (*jobFree)(void*) = nullptr;
+  ncclComm* jobComm = nullptr;
+  g_ncclMgmtTaskEnqueue = [&](ncclAsyncJob* j, ncclResult_t (*)(ncclAsyncJob*), void (*d)(void*), ncclComm* c) {
+    job = j;
+    jobFree = d;
+    jobComm = c;
+    return ncclSuccess;
+  };
+
+  ASSERT_EQ(ncclCommWindowRegister_impl(comm, kUserPtr, 8192, &out, NCCL_WIN_COLL_SYMMETRIC), ncclSuccess);
+  ASSERT_NE(job, nullptr);
+  ASSERT_NE(jobFree, nullptr);
+  EXPECT_EQ(jobComm, comm);
+  auto* regJob = reinterpret_cast<ncclDevrRegAsyncJob*>(job);
+  EXPECT_EQ(regJob->userPtr, kUserPtr);
+  EXPECT_EQ(regJob->userSize, 8192u);
+  EXPECT_EQ(regJob->outWinDev, &out);
+  EXPECT_TRUE(ncclIntruQueueEmpty(&comm->devrState.regTaskQueue));
+  jobFree(job);
+}
+
+// ncclMgmtTaskEnqueue owns the job once called: when it rejects (a blocking and a nonblocking comm in one
+// group) it runs the destructor itself, so fail: must not free the job again.
+TEST_F(CommWindowRegisterImplTest, RearchEnqueueRejects_JobIsDestroyedOnlyByTheEnqueue) {
+  ScopedHook rearch(g_loadParam, ParamOverride({{"ENQUEUE_REARCH_ENABLE", 1}}));
+  int destroyed = 0;
+  g_ncclMgmtTaskEnqueue = [&](ncclAsyncJob* j, ncclResult_t (*)(ncclAsyncJob*), void (*d)(void*), ncclComm*) {
+    d(j);
+    ++destroyed;
+    return ncclInvalidArgument;
+  };
+
+  EXPECT_EQ(ncclCommWindowRegister_impl(comm, kUserPtr, 8192, &out, NCCL_WIN_COLL_SYMMETRIC), ncclInvalidArgument);
+  EXPECT_EQ(destroyed, 1);
+  EXPECT_TRUE(ncclIntruQueueEmpty(&comm->devrState.regTaskQueue));
+}
+
 // Host-RMA alone is enough to accept the window, even without symmetric support.
 TEST_F(CommWindowRegisterImplTest, HostRmaOnly_QueuesTask) {
   comm->symmetricSupport = 0;
@@ -6402,6 +6590,26 @@ TEST_F(CommQueryPropertiesTest, UninitialisedProps_ReturnsInvalidUsage) {
   EXPECT_EQ(ncclCommQueryProperties(comm, &raw), ncclInvalidUsage);
 }
 
+// A caller that JIT-compiles its device code must allocate the devComm in the
+// runtime layout, so it is told the runtime's size, not its own headers'.
+TEST_F(CommQueryPropertiesTest, Caller231_ReportsRuntimeDevCommSize) {
+  props.version = NCCL_VERSION(2, 31, 0);
+  props.devCommRuntimeVersionSize = 0;
+
+  ASSERT_EQ(ncclCommQueryProperties(comm, &props), ncclSuccess);
+  EXPECT_EQ(props.devCommRuntimeVersionSize, sizeof(ncclDevComm_t));
+}
+
+// Branch: a pre-2.31 caller's struct ends before devCommRuntimeVersionSize, so
+// writing it would scribble past the caller's object.
+TEST_F(CommQueryPropertiesTest, Pre231Caller_LeavesDevCommRuntimeVersionSizeAlone) {
+  props.version = NCCL_VERSION(2, 30, 7);
+  props.devCommRuntimeVersionSize = 0xC0FFEE;  // stands in for the caller's neighbouring memory
+
+  ASSERT_EQ(ncclCommQueryProperties(comm, &props), ncclSuccess);
+  EXPECT_EQ(props.devCommRuntimeVersionSize, 0xC0FFEEu);
+}
+
 
 // ---------------------------------------------------------------------------
 // ncclDevrGetLsaTeamPtrMC resolves an offset to its multicast address for a
@@ -6685,6 +6893,7 @@ protected:
       free(t);
     }
     free(comm->devrState.lsaRankList);
+    FreeMallocdDevrTeams(comm);
     NcclVersionCompatTest::TearDown();
   }
 };
@@ -6752,6 +6961,142 @@ TEST_F(DevCommCreateTest, RequirementsFilterFails_ReturnsErrorWithoutQueueing) {
   };
 
   EXPECT_NE(ncclDevCommCreate(comm, &reqs, &outDevComm), ncclSuccess);
+  EXPECT_TRUE(ncclIntruQueueEmpty(&comm->devrState.commCreateTaskQueue));
+}
+
+
+// JIT: useRuntimeVersion or NCCL_DEV_API_JIT=1 queues the runtime version; reqs keep the caller's layout.
+
+// Oldest caller that has useRuntimeVersion, so the oldest one it is read from.
+constexpr uint32_t kJitFieldVersion = NCCL_VERSION(2, 31, 0);
+// A caller compiled before the field existed: the byte is past its struct.
+constexpr uint32_t kPreJitFieldVersion = NCCL_VERSION(2, 30, 7);
+static_assert(kJitFieldVersion < NCCL_VERSION_CODE,
+              "the JIT tests need a compile-time version that differs from the runtime version");
+
+class DevCommCreateJitTest : public DevCommCreateTest {
+protected:
+  uint32_t QueuedDeviceCodeVersion() {
+    ncclDevrCommCreateTask* task = ncclIntruQueueHead(&comm->devrState.commCreateTaskQueue);
+    return task != nullptr ? task->deviceCodeVersion : 0;
+  }
+
+  // Splits the compat table at kJitFieldVersion so that the caller's
+  // compile-time version and the runtime version resolve to different records.
+  static void SplitCompatAtJitFieldVersion() {
+    ncclDevCommCompat_v22902 = ncclDevCommCompat{};
+    ncclDevCommCompat_v22902.minVersion = 0;
+    ncclDevCommCompat_v22902.maxVersion = kJitFieldVersion;
+    ncclDevCommCompat_v22907 = ncclDevCommCompat{};
+    ncclDevCommCompat_v22907.minVersion = kJitFieldVersion + 1;
+    ncclDevCommCompat_v22907.maxVersion = NCCL_VERSION_CODE;
+  }
+};
+
+// Branch: an AOT caller older than the runtime keeps its own version, so its
+// devComm is later down-converted to the layout its kernels were built with.
+TEST_F(DevCommCreateJitTest, AotCaller_QueuesCompileTimeVersion) {
+  reqs.version = kJitFieldVersion;
+  reqs.useRuntimeVersion = false;
+
+  ASSERT_EQ(ncclDevCommCreate(comm, &reqs, &outDevComm), ncclSuccess);
+  EXPECT_EQ(QueuedDeviceCodeVersion(), kJitFieldVersion);
+}
+
+// Branch: useRuntimeVersion from a caller that has the field selects the
+// runtime version, whatever the caller was compiled against.
+TEST_F(DevCommCreateJitTest, UseRuntimeVersion_QueuesRuntimeVersion) {
+  reqs.version = kJitFieldVersion;
+  reqs.useRuntimeVersion = true;
+
+  ASSERT_EQ(ncclDevCommCreate(comm, &reqs, &outDevComm), ncclSuccess);
+  EXPECT_EQ(QueuedDeviceCodeVersion(), static_cast<uint32_t>(NCCL_VERSION_CODE));
+}
+
+// Branch: a pre-2.31 caller has no useRuntimeVersion, so whatever byte sits at
+// its offset is not trusted and the caller's own version is kept.
+TEST_F(DevCommCreateJitTest, UseRuntimeVersionFromPre231Caller_IsIgnored) {
+  reqs.version = kPreJitFieldVersion;
+  reqs.useRuntimeVersion = true;  // stands in for whatever lies past the old struct
+
+  ASSERT_EQ(ncclDevCommCreate(comm, &reqs, &outDevComm), ncclSuccess);
+  EXPECT_EQ(QueuedDeviceCodeVersion(), kPreJitFieldVersion);
+}
+
+// Branch: NCCL_DEV_API_JIT=1 selects the runtime version for a caller that
+// cannot set useRuntimeVersion, including one compiled before it existed.
+TEST_F(DevCommCreateJitTest, DevApiJitParam_QueuesRuntimeVersionForAnyCaller) {
+  ScopedHook loadParam(g_loadParam, [](const char* env, int64_t deftVal) -> int64_t {
+    return std::string(env) == "DEV_API_JIT" ? 1 : deftVal;
+  });
+  reqs.version = kPreJitFieldVersion;
+  reqs.useRuntimeVersion = false;
+
+  ASSERT_EQ(ncclDevCommCreate(comm, &reqs, &outDevComm), ncclSuccess);
+  EXPECT_EQ(QueuedDeviceCodeVersion(), static_cast<uint32_t>(NCCL_VERSION_CODE));
+}
+
+// NVIDIA/nccl@678911ee: the requirements filter must come from the record for
+// the caller's compile-time version, because reqs has that version's layout
+// even when the device code is the runtime version's.
+TEST_F(DevCommCreateJitTest, UseRuntimeVersion_FiltersRequirementsWithCompileTimeRecord) {
+  SplitCompatAtJitFieldVersion();
+  static int compileTimeFilterCalls;
+  compileTimeFilterCalls = 0;
+  ncclDevCommCompat_v22902.devCommRequirementsFilter = [](ncclComm_t, ncclDevCommRequirements_t*) {
+    compileTimeFilterCalls++;
+    return ncclSuccess;
+  };
+  ncclDevCommCompat_v22907.devCommRequirementsFilter = [](ncclComm_t, ncclDevCommRequirements_t*) {
+    ADD_FAILURE() << "the runtime version's requirements filter ran on a compile-time-version struct";
+    return ncclInternalError;
+  };
+  reqs.version = kJitFieldVersion;
+  reqs.useRuntimeVersion = true;
+
+  ASSERT_EQ(ncclDevCommCreate(comm, &reqs, &outDevComm), ncclSuccess);
+  EXPECT_EQ(compileTimeFilterCalls, 1);
+  EXPECT_EQ(QueuedDeviceCodeVersion(), static_cast<uint32_t>(NCCL_VERSION_CODE));
+}
+
+// Branch: useRuntimeVersion does not bypass the compatibility check on the
+// caller's own version; a compile-time version no record serves is refused.
+TEST_F(DevCommCreateJitTest, UseRuntimeVersion_UnservedCompileTimeVersion_ReturnsErrorWithoutQueueing) {
+  // Only the runtime version has a record; nothing serves the caller's compile-time version.
+  ncclDevCommCompat_v22902 = ncclDevCommCompat{};
+  ncclDevCommCompat_v22907 = ncclDevCommCompat{};
+  ncclDevCommCompat_v22907.minVersion = kJitFieldVersion + 1;
+  ncclDevCommCompat_v22907.maxVersion = NCCL_VERSION_CODE;
+  reqs.version = kJitFieldVersion;
+  reqs.useRuntimeVersion = true;
+
+  EXPECT_NE(ncclDevCommCreate(comm, &reqs, &outDevComm), ncclSuccess);
+  EXPECT_TRUE(ncclIntruQueueEmpty(&comm->devrState.commCreateTaskQueue));
+}
+
+// The enqueue-rearch path carries the version in its job, not the task queue,
+// and the job builds the devComm for that version. The hook runs the job and
+// then destroys it, as the management-task queue does: the job releases its
+// requirements copy on every exit, so the destructor only deletes the job.
+TEST_F(DevCommCreateJitTest, RearchJobPath_UseRuntimeVersion_BuildsForRuntimeVersion) {
+  ScopedHook rearch(g_loadParam, [](const char* env, int64_t deftVal) -> int64_t {
+    return std::string(env) == "ENQUEUE_REARCH_ENABLE" ? 1 : deftVal;
+  });
+  uint32_t jobVersion = 0;
+  ScopedHook enqueue(g_ncclMgmtTaskEnqueue, [&](ncclAsyncJob* job, ncclResult_t (*func)(ncclAsyncJob*),
+                                                void (*destructor)(void*), ncclComm_t) {
+    jobVersion = reinterpret_cast<ncclDevrCommCreateAsyncJob*>(job)->deviceCodeVersion;
+    ncclResult_t ret = func(job);
+    destructor(job);
+    return ret;
+  });
+  reqs.version = kJitFieldVersion;
+  reqs.useRuntimeVersion = true;
+
+  ASSERT_EQ(ncclDevCommCreate(comm, &reqs, &outDevComm), ncclSuccess);
+  EXPECT_EQ(enqueue.calls, 1);
+  EXPECT_EQ(jobVersion, static_cast<uint32_t>(NCCL_VERSION_CODE));
+  EXPECT_EQ(outDevComm.version, static_cast<uint32_t>(NCCL_VERSION_CODE));
   EXPECT_TRUE(ncclIntruQueueEmpty(&comm->devrState.commCreateTaskQueue));
 }
 
@@ -7211,6 +7556,102 @@ TEST_F(DevrCommCreateInternalTest, NoGinRequestedOnGinEnabledComm_SkipsGinDevCom
 
   EXPECT_EQ(Create(), ncclSuccess);
   EXPECT_EQ(setup.calls, 0);
+}
+
+
+// ---------------------------------------------------------------------------
+// JIT-compiled device code, devComm side: ncclDevrCommCreateInternal picks the
+// compat record from deviceCodeVersion, so a devComm for runtime-version
+// device code is written in the runtime layout and not down-converted, while
+// one for older AOT device code still is.
+
+class DevrCommCreateInternalJitTest : public DevrCommCreateInternalTest {
+protected:
+  struct NewToOldCall {
+    void* dst;
+    uint32_t srcVersion;
+  };
+  static std::vector<NewToOldCall>& NewToOldCalls() {
+    static std::vector<NewToOldCall> calls;
+    return calls;
+  }
+
+  void SetUp() override {
+    DevrCommCreateInternalTest::SetUp();
+    NewToOldCalls().clear();
+    // As under JIT: reqs carry the caller's compile-time version, so any use of
+    // reqs.version in place of deviceCodeVersion shows up below.
+    reqs.version = kJitFieldVersion;
+    // The compile-time version gets a record with a down-converter; the runtime
+    // version gets one without, as the current version's record has in production.
+    ncclDevCommCompat_v22902 = ncclDevCommCompat{};
+    ncclDevCommCompat_v22902.minVersion = 0;
+    ncclDevCommCompat_v22902.maxVersion = kJitFieldVersion;
+    ncclDevCommCompat_v22902.devCommCopyNewToOld = [](ncclComm_t, void* oldDevComm, ncclDevComm const* newDevComm) {
+      NewToOldCalls().push_back({oldDevComm, newDevComm->version});
+      return ncclSuccess;
+    };
+    ncclDevCommCompat_v22907 = ncclDevCommCompat{};
+    ncclDevCommCompat_v22907.minVersion = kJitFieldVersion + 1;
+    ncclDevCommCompat_v22907.maxVersion = NCCL_VERSION_CODE;
+  }
+
+  ncclResult_t CreateFor(uint32_t deviceCodeVersion) {
+    return ncclDevrCommCreateInternal(comm, &reqs, &outDevComm, /*isInternal=*/false, deviceCodeVersion);
+  }
+};
+
+// Runtime-version device code reads the runtime layout, so the devComm is
+// written straight into the caller's (runtime-sized) buffer and stamped with
+// the runtime version.
+TEST_F(DevrCommCreateInternalJitTest, RuntimeDeviceCodeVersion_WritesRuntimeLayoutWithoutDownConversion) {
+  ASSERT_EQ(CreateFor(NCCL_VERSION_CODE), ncclSuccess);
+
+  EXPECT_TRUE(NewToOldCalls().empty());
+  EXPECT_EQ(outDevComm.magic, static_cast<uint32_t>(NCCL_API_MAGIC));
+  EXPECT_EQ(outDevComm.version, static_cast<uint32_t>(NCCL_VERSION_CODE));
+}
+
+// Contrast: older AOT device code is down-converted through its own record,
+// and the caller's buffer is only ever written by that converter.
+TEST_F(DevrCommCreateInternalJitTest, CompileTimeDeviceCodeVersion_DownConvertsThroughItsRecord) {
+  ASSERT_EQ(CreateFor(kJitFieldVersion), ncclSuccess);
+
+  ASSERT_EQ(NewToOldCalls().size(), 1u);
+  EXPECT_EQ(NewToOldCalls()[0].dst, static_cast<void*>(&outDevComm));
+  EXPECT_EQ(NewToOldCalls()[0].srcVersion, kJitFieldVersion);
+  EXPECT_EQ(outDevComm.magic, 0u);  // the runtime layout never landed in the caller's buffer
+}
+
+// Branch: a deviceCodeVersion no record serves is refused before the caller's
+// devComm is touched.
+TEST_F(DevrCommCreateInternalJitTest, UnservedDeviceCodeVersion_ReturnsErrorBeforeWritingDevComm) {
+  ncclDevCommCompat_v22907 = ncclDevCommCompat{};  // nothing serves the runtime version
+  memset(&outDevComm, 0xAB, sizeof(outDevComm));
+  ncclDevComm untouched;
+  memcpy(&untouched, &outDevComm, sizeof(untouched));
+
+  EXPECT_NE(CreateFor(NCCL_VERSION_CODE), ncclSuccess);
+  EXPECT_EQ(memcmp(&outDevComm, &untouched, sizeof(untouched)), 0);
+}
+
+// GIN picks the device-side ABI of its backend from the device code's version,
+// so that version, not the caller's compile-time one, has to reach it.
+TEST_F(DevrCommCreateInternalJitTest, DeviceCodeVersion_ReachesGinDevCommSetup) {
+  reqs.ginConnectionType = NCCL_GIN_CONNECTION_FULL;
+  comm->globalGinSupport = NCCL_GIN_CONNECTION_FULL;
+  comm->devrState.ginEnabled = true;  // already connected: go straight to setup
+  std::vector<uint32_t> seen;
+  ScopedHook setup(g_devrGinDevCommSetup,
+                   [&](ncclComm*, ncclDevCommRequirements const*, ncclDevComm*, uint32_t deviceCodeVersion) {
+                     seen.push_back(deviceCodeVersion);
+                     return ncclInternalError;  // stop here; nothing below depends on the version
+                   });
+
+  EXPECT_EQ(CreateFor(NCCL_VERSION_CODE), ncclInternalError);
+  EXPECT_EQ(CreateFor(kJitFieldVersion), ncclInternalError);
+
+  EXPECT_EQ(seen, (std::vector<uint32_t>{static_cast<uint32_t>(NCCL_VERSION_CODE), kJitFieldVersion}));
 }
 
 

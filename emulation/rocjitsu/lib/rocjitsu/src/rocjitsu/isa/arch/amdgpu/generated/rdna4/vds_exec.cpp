@@ -364,9 +364,10 @@ void DsStore2addrB32Vds::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t base = addresses[lane];
-    d->per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset0) * 4U + wf.lds_base();
-    d->ds2_per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset1) * 4U + wf.lds_base();
+    const uint32_t lane_address = addresses[lane];
+    d->per_lane_addr[lane] = amdgpu::ds_address(wf.lds_base(), lane_address, inst_.offset0 * 4U);
+    d->ds2_per_lane_addr[lane] =
+        amdgpu::ds_address(wf.lds_base(), lane_address, inst_.offset1 * 4U);
     uint32_t v0_0 = data0_0[lane];
     std::memcpy(&d->store_data[lane * 4 + 0], &v0_0, 4);
     uint32_t v1_0 = data1_0[lane];
@@ -406,9 +407,10 @@ void DsStore2addrStride64B32Vds::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t base = addresses[lane];
-    d->per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset0) * 256U + wf.lds_base();
-    d->ds2_per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset1) * 256U + wf.lds_base();
+    const uint32_t lane_address = addresses[lane];
+    d->per_lane_addr[lane] = amdgpu::ds_address(wf.lds_base(), lane_address, inst_.offset0 * 256U);
+    d->ds2_per_lane_addr[lane] =
+        amdgpu::ds_address(wf.lds_base(), lane_address, inst_.offset1 * 256U);
     uint32_t v0_0 = data0_0[lane];
     std::memcpy(&d->store_data[lane * 4 + 0], &v0_0, 4);
     uint32_t v1_0 = data1_0[lane];
@@ -890,8 +892,8 @@ void DsStorexchg2addrRtnB32Vds::execute_impl(amdgpu::Wavefront &wf) {
     if (!(exec & (1ULL << lane)))
       continue;
     uint32_t base = amdgpu::RegisterAccess(cu).read_vgpr(addr_base, lane);
-    d->per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset0) * 4U + wf.lds_base();
-    d->ds2_per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset1) * 4U + wf.lds_base();
+    d->per_lane_addr[lane] = amdgpu::ds_address(wf.lds_base(), base, inst_.offset0 * 4U);
+    d->ds2_per_lane_addr[lane] = amdgpu::ds_address(wf.lds_base(), base, inst_.offset1 * 4U);
     uint32_t val0_0 = amdgpu::RegisterAccess(cu).read_vgpr(data0_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0_0, 4);
     uint32_t val1_0 = amdgpu::RegisterAccess(cu).read_vgpr(data1_base + 0, lane);
@@ -924,8 +926,8 @@ void DsStorexchg2addrStride64RtnB32Vds::execute_impl(amdgpu::Wavefront &wf) {
     if (!(exec & (1ULL << lane)))
       continue;
     uint32_t base = amdgpu::RegisterAccess(cu).read_vgpr(addr_base, lane);
-    d->per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset0) * 256U + wf.lds_base();
-    d->ds2_per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset1) * 256U + wf.lds_base();
+    d->per_lane_addr[lane] = amdgpu::ds_address(wf.lds_base(), base, inst_.offset0 * 256U);
+    d->ds2_per_lane_addr[lane] = amdgpu::ds_address(wf.lds_base(), base, inst_.offset1 * 256U);
     uint32_t val0_0 = amdgpu::RegisterAccess(cu).read_vgpr(data0_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0_0, 4);
     uint32_t val1_0 = amdgpu::RegisterAccess(cu).read_vgpr(data1_base + 0, lane);
@@ -1043,9 +1045,10 @@ void DsLoad2addrB32Vds::execute_impl(amdgpu::Wavefront &wf) {
     for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
       if (!(exec & (1ULL << lane)))
         continue;
-      uint32_t base = read_address(lane);
-      d->per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset0) * 4U + wf.lds_base();
-      d->ds2_per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset1) * 4U + wf.lds_base();
+      const uint32_t lane_address = read_address(lane);
+      d->per_lane_addr[lane] = amdgpu::ds_address(wf.lds_base(), lane_address, inst_.offset0 * 4U);
+      d->ds2_per_lane_addr[lane] =
+          amdgpu::ds_address(wf.lds_base(), lane_address, inst_.offset1 * 4U);
     }
   };
   if (cu.observes_register_access()) {
@@ -1079,10 +1082,11 @@ void DsLoad2addrStride64B32Vds::execute_impl(amdgpu::Wavefront &wf) {
     for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
       if (!(exec & (1ULL << lane)))
         continue;
-      uint32_t base = read_address(lane);
-      d->per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset0) * 256U + wf.lds_base();
+      const uint32_t lane_address = read_address(lane);
+      d->per_lane_addr[lane] =
+          amdgpu::ds_address(wf.lds_base(), lane_address, inst_.offset0 * 256U);
       d->ds2_per_lane_addr[lane] =
-          base + static_cast<uint32_t>(inst_.offset1) * 256U + wf.lds_base();
+          amdgpu::ds_address(wf.lds_base(), lane_address, inst_.offset1 * 256U);
     }
   };
   if (cu.observes_register_access()) {
@@ -1158,7 +1162,7 @@ void DsConsumeVds::execute_impl(amdgpu::Wavefront &wf) {
   d->wg_id = wf.wg_id();
   d->wf_id = wf.wf_id();
   uint32_t offset = inst_.offset0 | (inst_.offset1 << 8);
-  uint32_t addr = wf.lds_base() + wf.m0() + offset;
+  uint64_t addr = uint64_t{wf.lds_base()} + wf.m0() + offset;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (exec & (1ULL << lane))
       d->per_lane_addr[lane] = addr;
@@ -1180,7 +1184,7 @@ void DsAppendVds::execute_impl(amdgpu::Wavefront &wf) {
   d->wg_id = wf.wg_id();
   d->wf_id = wf.wf_id();
   uint32_t offset = inst_.offset0 | (inst_.offset1 << 8);
-  uint32_t addr = wf.lds_base() + wf.m0() + offset;
+  uint64_t addr = uint64_t{wf.lds_base()} + wf.m0() + offset;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (exec & (1ULL << lane))
       d->per_lane_addr[lane] = addr;
@@ -1562,9 +1566,10 @@ void DsStore2addrB64Vds::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t base = addresses[lane];
-    d->per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset0) * 8U + wf.lds_base();
-    d->ds2_per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset1) * 8U + wf.lds_base();
+    const uint32_t lane_address = addresses[lane];
+    d->per_lane_addr[lane] = amdgpu::ds_address(wf.lds_base(), lane_address, inst_.offset0 * 8U);
+    d->ds2_per_lane_addr[lane] =
+        amdgpu::ds_address(wf.lds_base(), lane_address, inst_.offset1 * 8U);
     uint32_t v0_0 = data0_0[lane];
     std::memcpy(&d->store_data[lane * 8 + 0], &v0_0, 4);
     uint32_t v0_1 = data0_1[lane];
@@ -1616,9 +1621,10 @@ void DsStore2addrStride64B64Vds::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t base = addresses[lane];
-    d->per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset0) * 512U + wf.lds_base();
-    d->ds2_per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset1) * 512U + wf.lds_base();
+    const uint32_t lane_address = addresses[lane];
+    d->per_lane_addr[lane] = amdgpu::ds_address(wf.lds_base(), lane_address, inst_.offset0 * 512U);
+    d->ds2_per_lane_addr[lane] =
+        amdgpu::ds_address(wf.lds_base(), lane_address, inst_.offset1 * 512U);
     uint32_t v0_0 = data0_0[lane];
     std::memcpy(&d->store_data[lane * 8 + 0], &v0_0, 4);
     uint32_t v0_1 = data0_1[lane];
@@ -2076,8 +2082,8 @@ void DsStorexchg2addrRtnB64Vds::execute_impl(amdgpu::Wavefront &wf) {
     if (!(exec & (1ULL << lane)))
       continue;
     uint32_t base = amdgpu::RegisterAccess(cu).read_vgpr(addr_base, lane);
-    d->per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset0) * 8U + wf.lds_base();
-    d->ds2_per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset1) * 8U + wf.lds_base();
+    d->per_lane_addr[lane] = amdgpu::ds_address(wf.lds_base(), base, inst_.offset0 * 8U);
+    d->ds2_per_lane_addr[lane] = amdgpu::ds_address(wf.lds_base(), base, inst_.offset1 * 8U);
     uint32_t val0_0 = amdgpu::RegisterAccess(cu).read_vgpr(data0_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0_0, 4);
     uint32_t val1_0 = amdgpu::RegisterAccess(cu).read_vgpr(data1_base + 0, lane);
@@ -2114,8 +2120,8 @@ void DsStorexchg2addrStride64RtnB64Vds::execute_impl(amdgpu::Wavefront &wf) {
     if (!(exec & (1ULL << lane)))
       continue;
     uint32_t base = amdgpu::RegisterAccess(cu).read_vgpr(addr_base, lane);
-    d->per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset0) * 512U + wf.lds_base();
-    d->ds2_per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset1) * 512U + wf.lds_base();
+    d->per_lane_addr[lane] = amdgpu::ds_address(wf.lds_base(), base, inst_.offset0 * 512U);
+    d->ds2_per_lane_addr[lane] = amdgpu::ds_address(wf.lds_base(), base, inst_.offset1 * 512U);
     uint32_t val0_0 = amdgpu::RegisterAccess(cu).read_vgpr(data0_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0_0, 4);
     uint32_t val1_0 = amdgpu::RegisterAccess(cu).read_vgpr(data1_base + 0, lane);
@@ -2240,9 +2246,10 @@ void DsLoad2addrB64Vds::execute_impl(amdgpu::Wavefront &wf) {
     for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
       if (!(exec & (1ULL << lane)))
         continue;
-      uint32_t base = read_address(lane);
-      d->per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset0) * 8U + wf.lds_base();
-      d->ds2_per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset1) * 8U + wf.lds_base();
+      const uint32_t lane_address = read_address(lane);
+      d->per_lane_addr[lane] = amdgpu::ds_address(wf.lds_base(), lane_address, inst_.offset0 * 8U);
+      d->ds2_per_lane_addr[lane] =
+          amdgpu::ds_address(wf.lds_base(), lane_address, inst_.offset1 * 8U);
     }
   };
   if (cu.observes_register_access()) {
@@ -2276,10 +2283,11 @@ void DsLoad2addrStride64B64Vds::execute_impl(amdgpu::Wavefront &wf) {
     for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
       if (!(exec & (1ULL << lane)))
         continue;
-      uint32_t base = read_address(lane);
-      d->per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset0) * 512U + wf.lds_base();
+      const uint32_t lane_address = read_address(lane);
+      d->per_lane_addr[lane] =
+          amdgpu::ds_address(wf.lds_base(), lane_address, inst_.offset0 * 512U);
       d->ds2_per_lane_addr[lane] =
-          base + static_cast<uint32_t>(inst_.offset1) * 512U + wf.lds_base();
+          amdgpu::ds_address(wf.lds_base(), lane_address, inst_.offset1 * 512U);
     }
   };
   if (cu.observes_register_access()) {

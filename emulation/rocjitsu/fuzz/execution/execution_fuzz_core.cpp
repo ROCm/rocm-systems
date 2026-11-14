@@ -564,12 +564,13 @@ std::vector<uint8_t> random_input(uint64_t seed, size_t size, std::optional<Fuzz
   const uint64_t mode_seed = seed;
   const FuzzTarget resolved_target =
       target.value_or(static_cast<FuzzTarget>(static_cast<uint8_t>(seed) % kTargets.size()));
-  constexpr std::array first_wmma =
-      cdna5::build_vop3p(cdna5::kVWmmaF3216x16x128Fp8Fp8Vop3p,
-                         {.vdst = 64, .src0 = 256, .src1 = 288, .src2 = 320, .opsel_hi = 3});
-  constexpr std::array second_wmma =
-      cdna5::build_vop3p(cdna5::kVWmmaF3216x16x128Fp8Fp8Vop3p,
-                         {.vdst = 96, .src0 = 256, .src1 = 288, .src2 = 352, .opsel_hi = 3});
+  // Alternate migrated issuer-only FP8 and still helper-eligible FP4 pairs.
+  const auto opcode =
+      (seed & 16) ? cdna5::kVWmmaF3232x16x128F4Vop3p : cdna5::kVWmmaF3216x16x128Fp8Fp8Vop3p;
+  const std::array first_wmma = cdna5::build_vop3p(
+      opcode, {.vdst = 64, .src0 = 256, .src1 = 288, .src2 = 320, .opsel_hi = 3});
+  const std::array second_wmma = cdna5::build_vop3p(
+      opcode, {.vdst = 96, .src0 = 256, .src1 = 288, .src2 = 352, .opsel_hi = 3});
   constexpr size_t wmma_prefix_size = (first_wmma.size() + second_wmma.size()) * sizeof(uint32_t);
   const bool async_wmma_bias = target_info(resolved_target).arch == ROCJITSU_CODE_ARCH_CDNA5 &&
                                (seed & 15) == 1 && size - cursor >= wmma_prefix_size;

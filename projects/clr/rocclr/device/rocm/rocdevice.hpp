@@ -451,7 +451,7 @@ class Device : public NullDevice {
 
   //! Get the CPU agent that is in a 'index' NUMA node
   const hsa_agent_t getCpuAgent(int index) const {
-    if ((index < 0) || (index >= cpu_agents_.size())) {
+    if ((index < 0) || (static_cast<size_t>(index) >= cpu_agents_.size())) {
       // Return default CPU agent
       return cpu_agent_info_->agent;
     }
@@ -614,6 +614,12 @@ class Device : public NullDevice {
   bool CreateSignals(uint32_t count, hsa_signal_value_t initial_value, uint64_t attributes,
                      bool batched, bool device_memory, hsa_signal_t* signals,
                      bool& in_device_memory) const;
+  //! True if pooled graph signals are batched in device memory
+  bool GraphDeviceSignals() const { return graph_device_signals_; }
+  //! A gate signal for a graph end marker (DEBUG_CLR_GRAPH_FAST_LAUNCH), armed; nullptr if none.
+  //! The gate comes with a reference of its own, the checkout, which the caller releases once
+  //! the command that uses the gate holds it (or at once if the gate goes unused)
+  ProfilingSignal* AcquireGateSignal();
   //! True if queue completion signals are batched in device memory
   bool QueueDeviceSignals() const { return queue_device_signals_; }
   //! A batched command keeps its completion signal until the batch completes, and replacing a
@@ -677,7 +683,7 @@ class Device : public NullDevice {
   bool addMapTarget(amd::Memory* memory) const;
 
   //! Returns a ROC memory object from AMD memory object
-  roc::Memory* getRocMemory(amd::Memory* mem  //!< Pointer to AMD memory object
+  [[nodiscard]] roc::Memory* getRocMemory(amd::Memory* mem  //!< Pointer to AMD memory object
   ) const;
 
   //! Create internal blit program
@@ -866,6 +872,10 @@ class Device : public NullDevice {
   hsa_amd_memory_pool_t gpu_ext_fine_grained_segment_;
   hsa_amd_memory_pool_t device_signal_pool_{0};  //!< Pool for signals in device memory, if any
   bool graph_device_signals_ = false;  //!< Graph signals live in device_signal_pool_
+  std::mutex gate_lock_;                        //!< Guards the gate pool
+  std::vector<ProfilingSignal*> gate_signals_;  //!< AcquireGateSignal()'s pool
+  size_t gate_next_ = 0;                        //!< Where AcquireGateSignal() starts its search
+  bool gate_short_ = false;                     //!< The pool ran out: grow when it is not
   bool queue_device_signals_ = false;  //!< Queue signals live in device_signal_pool_
   //! Armed HW events that graphs take their signal sets from and give back when destroyed
   mutable std::vector<void*> graph_hw_events_;

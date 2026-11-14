@@ -3,7 +3,7 @@
 
 /// Compare decoded MIX instructions with SIMD enabled and forced scalar,
 /// including source selectors, modifiers, sparse EXEC and destination aliasing.
-/// RDNA uses fused arithmetic; CDNA1-4 retains the legacy MAD implementation.
+/// RDNA uses fused arithmetic. CDNA1 fuses to F32 before narrowing to F16.
 
 #include "compute_unit_test_util.h"
 #include "decode_test_util.h"

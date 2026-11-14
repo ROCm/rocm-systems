@@ -5,8 +5,8 @@
 // Owns public entry points and their validation/dispatch policy.
 
 #include "integer/mad64.h"
-#include "common/internal.h"
-#include "rj_arith/rj_arith.h"
+#include "common/validation.h"
+#include "rj_arith/detail/rj_arith_integer.h"
 
 #include <stdint.h>
 

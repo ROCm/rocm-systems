@@ -183,7 +183,7 @@ compute.tdm_issue_stall_rate:
     Percentage of WGP-busy cycles the TDM pipeline cannot accept a new instruction.
 compute.total_flops:
   name: Performance (GFLOPs)
-  formula: SUM(SP_VALU_FLOPS_FP16_sum + SP_VALU_FLOPS_FP32_sum + SP_VALU_FLOPS_FP64_sum + SP_VALU_FLOPS_FP16_TRANS_sum + SP_VALU_FLOPS_FP32_TRANS_sum + SP_VALU_FLOPS_FP64_TRANS_sum + SQ_VALU_WMMA_FLOP_FP16_sum * 2048 + SQ_VALU_WMMA_FLOP_BF16_sum * 2048 + SQ_VALU_WMMA_FLOP_FP32_sum * 128 + SQ_VALU_WMMA_FLOP_FP64_sum * 64 + SQ_VALU_WMMA_FLOP_FP8_sum * 4096 + SQ_VALU_WMMA_FLOP_FP6_sum * 8192 + SQ_VALU_WMMA_FLOP_FP4_sum * 8192 + SQ_VALU_WMMA_FLOP_F6F4_sum * 8192) / (SUM(End_Timestamp - Start_Timestamp) / 1e9) / 1e9
+  formula: $sp_flop_rate + $wmma_flop_rate
   unit: GFLOP/s
   description: >-
     Total achieved compute throughput combining all VALU and WMMA FLOPs.

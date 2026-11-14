@@ -7,6 +7,8 @@ test_categories:
       - test_expression
       - test_evaluation_pipeline
       - test_metric_evaluator
+      - test_allocator
+      - test_counter_file
       - test_utils_counter_defs
       - test_metric_library_loader
       - test_metric_library_sync
@@ -17,7 +19,6 @@ test_categories:
       - test_utils_profile
       - test_common
       - test_amdsmi_interface
-      - test_noise_clamper
       - test_benchmark_base
       - test_analysis_cli
       - test_pattern_matching
@@ -61,7 +62,6 @@ test_categories:
       - test_tty
       - test-rocprofiler-compute-tool
       - test_soc_base
-      - test_sdk_config
       - test-pc-sampling-collector
       - test-compression
       - test-csv
@@ -91,6 +91,8 @@ test_categories:
       - test_expression
       - test_evaluation_pipeline
       - test_metric_evaluator
+      - test_allocator
+      - test_counter_file
       - test_utils_counter_defs
       - test_metric_library_loader
       - test_metric_library_sync
@@ -107,7 +109,6 @@ test_categories:
       - test_utils_profile
       - test_common
       - test_amdsmi_interface
-      - test_noise_clamper
       - test_benchmark_base
       - test_analysis_cli
       - test_pattern_matching
@@ -155,7 +156,6 @@ test_categories:
       - test_tty
       - test-rocprofiler-compute-tool
       - test_soc_base
-      - test_sdk_config
       - test-pc-sampling-collector
       - test-compression
       - test-csv
@@ -199,6 +199,8 @@ test_categories:
       - test_expression
       - test_evaluation_pipeline
       - test_metric_evaluator
+      - test_allocator
+      - test_counter_file
       - test_utils_counter_defs
       - test_metric_library_loader
       - test_metric_library_sync
@@ -215,7 +217,6 @@ test_categories:
       - test_utils_profile
       - test_common
       - test_amdsmi_interface
-      - test_noise_clamper
       - test_benchmark_base
       - test_analysis_cli
       - test_pattern_matching
@@ -263,7 +264,6 @@ test_categories:
       - test_tty
       - test-rocprofiler-compute-tool
       - test_soc_base
-      - test_sdk_config
       - test-pc-sampling-collector
       - test-compression
       - test-csv
@@ -307,6 +307,8 @@ test_categories:
       - test_expression
       - test_evaluation_pipeline
       - test_metric_evaluator
+      - test_allocator
+      - test_counter_file
       - test_utils_counter_defs
       - test_metric_library_loader
       - test_metric_library_sync
@@ -323,7 +325,6 @@ test_categories:
       - test_utils_profile
       - test_common
       - test_amdsmi_interface
-      - test_noise_clamper
       - test_benchmark_base
       - test_analysis_cli
       - test_pattern_matching
@@ -371,7 +372,6 @@ test_categories:
       - test_tty
       - test-rocprofiler-compute-tool
       - test_soc_base
-      - test_sdk_config
       - test-pc-sampling-collector
       - test-compression
       - test-csv

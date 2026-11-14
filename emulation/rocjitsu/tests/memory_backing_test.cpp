@@ -37,6 +37,7 @@
 #include <sys/socket.h>
 #include <sys/syscall.h>
 #include <sys/wait.h>
+#include <sys/xattr.h>
 #include <thread>
 #include <unistd.h>
 #include <vector>
@@ -125,6 +126,173 @@ TEST_F(MemoryBackingDeathTest, DeviceIdentitySurvivesReopenAndCreationKeysAreRel
       ::testing::ExitedWithCode(0), "");
 }
 
+TEST_F(MemoryBackingDeathTest, ExportPolicySurvivesDescriptorAliases) {
+  ASSERT_EXIT(
+      {
+        constexpr uint32_t kFlags = 0x12345678;
+        const int probe = memfd_create("export_xattr_probe", MFD_CLOEXEC);
+        const char marker = 1;
+        const bool native_policy =
+            probe >= 0 && ftruncate(probe, 4096) == 0 &&
+            fsetxattr(probe, "user.rocjitsu.probe", &marker, sizeof(marker), XATTR_CREATE) == 0 &&
+            fgetxattr(probe, "user.rocjitsu.probe", nullptr, 0) == sizeof(marker);
+        if (probe >= 0)
+          close(probe);
+        for (const bool token : {false, true}) {
+          ASSERT_EQ(setenv("RJ_TEST_FORCE_TOKEN_BACKING", token ? "1" : "0", 1), 0);
+          int backing = rocjitsu::create_memory_backing(4096);
+          ASSERT_GE(backing, 0);
+          if (token) {
+            ASSERT_TRUE(rocjitsu::is_memory_backing_token(backing));
+          } else if (native_policy) {
+            ASSERT_FALSE(rocjitsu::is_memory_backing_token(backing));
+          }
+          uint32_t observed = 0;
+          EXPECT_EQ(rocjitsu::get_memory_backing_alloc_flags(backing, &observed), 0);
+          ASSERT_EQ(rocjitsu::retain_memory_backing_export_policy(backing, kFlags), 0);
+          const int alias = rocjitsu::reopen_memory_backing(backing, O_RDONLY);
+          ASSERT_GE(alias, 0);
+          ASSERT_EQ(close(backing), 0);
+          EXPECT_EQ(rocjitsu::get_memory_backing_alloc_flags(alias, &observed), 1);
+          EXPECT_EQ(observed, kFlags);
+          EXPECT_EQ(rocjitsu::set_memory_backing_alloc_flags(alias, kFlags), 0);
+          EXPECT_EQ(rocjitsu::set_memory_backing_alloc_flags(alias, kFlags ^ 1), -1);
+          EXPECT_EQ(errno, EEXIST);
+          EXPECT_EQ(close(alias), 0);
+        }
+        ASSERT_EQ(setenv("RJ_TEST_FORCE_TOKEN_BACKING", "0", 1), 0);
+        const int malformed = rocjitsu::create_memory_backing(4096);
+        ASSERT_GE(malformed, 0);
+        if (!rocjitsu::is_memory_backing_token(malformed)) {
+          const uint32_t bad_version = 0;
+          ASSERT_EQ(fsetxattr(malformed, "user.rocjitsu.kfd_export_flags", &bad_version,
+                              sizeof(bad_version), XATTR_CREATE),
+                    0);
+          uint32_t observed = 0;
+          EXPECT_EQ(rocjitsu::get_memory_backing_alloc_flags(malformed, &observed), -1);
+          EXPECT_EQ(errno, EPROTO);
+        }
+        EXPECT_EQ(close(malformed), 0);
+        _exit(::testing::Test::HasFailure() ? 1 : 0);
+      },
+      ::testing::ExitedWithCode(0), "");
+}
+
+void block_memfd_xattrs() {
+  // The execed keeper inherits this filter, modeling shmem on Linux 5.15.
+  sock_filter filter[] = {
+      BPF_STMT(BPF_LD | BPF_W | BPF_ABS, offsetof(seccomp_data, nr)),
+      BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_fgetxattr, 0, 1),
+      BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ERRNO | EOPNOTSUPP),
+      BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_fsetxattr, 0, 1),
+      BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ERRNO | EOPNOTSUPP),
+      BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ALLOW),
+  };
+  sock_fprog program{static_cast<unsigned short>(std::size(filter)), filter};
+  ASSERT_EQ(prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0), 0);
+  ASSERT_EQ(prctl(PR_SET_SECCOMP, SECCOMP_MODE_FILTER, &program), 0);
+}
+
+void check_export_policy_without_memfd_xattrs() {
+  block_memfd_xattrs();
+  ASSERT_EQ(setenv("RJ_TEST_FORCE_TOKEN_BACKING", "0", 1), 0);
+
+  const int backing = rocjitsu::create_memory_backing(4096);
+  ASSERT_GE(backing, 0);
+  ASSERT_FALSE(rocjitsu::is_memory_backing_token(backing));
+  rlimit descriptors{};
+  ASSERT_EQ(getrlimit(RLIMIT_NOFILE, &descriptors), 0);
+  if (descriptors.rlim_cur >= 4300) {
+    std::vector<int> ordinary;
+    ordinary.reserve(4200);
+    for (unsigned index = 0; index < 4200; ++index) {
+      const int fd = rocjitsu::create_memory_backing(4096);
+      ASSERT_GE(fd, 0) << index;
+      ASSERT_FALSE(rocjitsu::is_memory_backing_token(fd)) << index;
+      ordinary.push_back(fd);
+    }
+    for (int fd : ordinary)
+      ASSERT_EQ(close(fd), 0);
+  }
+  constexpr uint32_t kFlags = 0x12345678;
+  auto *written = static_cast<unsigned char *>(
+      rocjitsu::map_memory_backing(nullptr, 4096, PROT_READ | PROT_WRITE, MAP_SHARED, backing, 0));
+  ASSERT_NE(written, MAP_FAILED);
+  written[17] = 0x5a;
+  ASSERT_EQ(munmap(written, 4096), 0);
+  int alias = rocjitsu::reopen_memory_backing(backing, O_RDONLY);
+  ASSERT_GE(alias, 0);
+  ASSERT_EQ(rocjitsu::retain_memory_backing_export_policy(alias, kFlags), 0);
+  ASSERT_TRUE(rocjitsu::is_memory_backing_token(alias));
+  int conflicting = rocjitsu::reopen_memory_backing(backing, O_RDONLY);
+  ASSERT_GE(conflicting, 0);
+  EXPECT_EQ(rocjitsu::retain_memory_backing_export_policy(conflicting, kFlags ^ 1), -1);
+  EXPECT_EQ(errno, EEXIST);
+  EXPECT_EQ(close(conflicting), 0);
+  struct stat native_info {
+  }, export_info{};
+  ASSERT_EQ(rocjitsu::stat_memory_backing(backing, &native_info), 0);
+  ASSERT_EQ(rocjitsu::stat_memory_backing(alias, &export_info), 0);
+  EXPECT_EQ(native_info.st_dev, export_info.st_dev);
+  EXPECT_EQ(native_info.st_ino, export_info.st_ino);
+  uint32_t observed = 0;
+  EXPECT_EQ(rocjitsu::get_memory_backing_alloc_flags(alias, &observed), 1);
+  EXPECT_EQ(observed, kFlags);
+  auto *view = static_cast<unsigned char *>(
+      rocjitsu::map_memory_backing(nullptr, 4096, PROT_READ, MAP_SHARED, alias, 0));
+  ASSERT_NE(view, MAP_FAILED);
+  EXPECT_EQ(view[17], 0x5a);
+  EXPECT_EQ(munmap(view, 4096), 0);
+  EXPECT_EQ(rocjitsu::map_memory_backing(nullptr, 4096, PROT_WRITE, MAP_SHARED, alias, 0),
+            MAP_FAILED);
+  EXPECT_EQ(errno, EACCES);
+  ASSERT_EQ(fchmod(backing, 0), 0);
+  view = static_cast<unsigned char *>(
+      rocjitsu::map_memory_backing(nullptr, 4096, PROT_READ, MAP_SHARED, alias, 0));
+  ASSERT_NE(view, MAP_FAILED);
+  EXPECT_EQ(view[17], 0x5a);
+  EXPECT_EQ(munmap(view, 4096), 0);
+  EXPECT_EQ(rocjitsu::reopen_memory_backing(alias, O_RDWR), -1);
+  EXPECT_EQ(errno, EACCES);
+  ASSERT_EQ(fchmod(backing, 0600), 0);
+  const int upgraded = rocjitsu::reopen_memory_backing(alias, O_RDWR);
+  ASSERT_GE(upgraded, 0);
+  EXPECT_EQ(rocjitsu::fcntl_memory_backing(upgraded, F_GETFL) & O_ACCMODE, O_RDWR);
+  auto *writable =
+      rocjitsu::map_memory_backing(nullptr, 4096, PROT_READ | PROT_WRITE, MAP_SHARED, upgraded, 0);
+  ASSERT_NE(writable, MAP_FAILED);
+  EXPECT_EQ(static_cast<unsigned char *>(writable)[17], 0x5a);
+  EXPECT_EQ(munmap(writable, 4096), 0);
+  EXPECT_EQ(close(upgraded), 0);
+  EXPECT_EQ(close(backing), 0);
+  EXPECT_EQ(close(alias), 0);
+
+  int unsealed = memfd_create("unsealed_export", MFD_CLOEXEC | MFD_ALLOW_SEALING);
+  ASSERT_GE(unsealed, 0);
+  ASSERT_EQ(ftruncate(unsealed, 4096), 0);
+  ASSERT_EQ(rocjitsu::fcntl_memory_backing(unsealed, F_GET_SEALS), 0);
+  ASSERT_EQ(rocjitsu::retain_memory_backing_export_policy(unsealed, kFlags), 0);
+  ASSERT_TRUE(rocjitsu::is_memory_backing_token(unsealed));
+  EXPECT_EQ(rocjitsu::fcntl_memory_backing(unsealed, F_GET_SEALS), 0);
+  EXPECT_EQ(rocjitsu::fcntl_memory_backing(unsealed, F_ADD_SEALS, F_SEAL_SHRINK), 0);
+  EXPECT_EQ(rocjitsu::fcntl_memory_backing(unsealed, F_GET_SEALS), F_SEAL_SHRINK);
+  EXPECT_EQ(close(unsealed), 0);
+}
+
+TEST_F(MemoryBackingDeathTest, ExportPolicyFallsBackWhenMemfdXattrsAreUnsupported) {
+  rlimit file_limit{};
+  ASSERT_EQ(getrlimit(RLIMIT_FSIZE, &file_limit), 0);
+  if (file_limit.rlim_max < static_cast<rlim_t>(4096)) {
+    GTEST_SKIP() << "inherited hard RLIMIT_FSIZE prevents a native memfd";
+  }
+  ASSERT_EXIT(
+      {
+        check_export_policy_without_memfd_xattrs();
+        _exit(::testing::Test::HasFailure() ? 1 : 0);
+      },
+      ::testing::ExitedWithCode(0), "");
+}
+
 TEST_F(MemoryBackingDeathTest, NativePreallocationAndForcedTokensPreserveMetadata) {
   ASSERT_EXIT(
       {
@@ -132,9 +300,15 @@ TEST_F(MemoryBackingDeathTest, NativePreallocationAndForcedTokensPreserveMetadat
         const int committed = rocjitsu::create_memory_backing(kSize, true);
         struct stat sparse_info {};
         struct stat committed_info {};
-        bool okay = sparse >= 0 && committed >= 0 && fstat(sparse, &sparse_info) == 0 &&
-                    fstat(committed, &committed_info) == 0 && sparse_info.st_blocks == 0 &&
-                    committed_info.st_blocks >= static_cast<blkcnt_t>(kSize / 512);
+        bool okay = sparse >= 0 && committed >= 0 &&
+                    rocjitsu::stat_memory_backing(sparse, &sparse_info) == 0 &&
+                    rocjitsu::stat_memory_backing(committed, &committed_info) == 0 &&
+                    sparse_info.st_size == static_cast<off_t>(kSize) &&
+                    committed_info.st_size == static_cast<off_t>(kSize);
+        if (okay && !rocjitsu::is_memory_backing_token(sparse))
+          okay = sparse_info.st_blocks == 0;
+        if (okay && !rocjitsu::is_memory_backing_token(committed))
+          okay = committed_info.st_blocks >= static_cast<blkcnt_t>(kSize / 512);
         setenv("RJ_TEST_FORCE_TOKEN_BACKING", "1", 1);
         const int token = rocjitsu::create_memory_backing(kSize, true);
         char path[] = "/tmp/rocjitsu-metadata-XXXXXX";
@@ -160,7 +334,13 @@ void check_full_mapping_address_space(bool token) {
   constexpr size_t size = 64ULL << 20;
   const int backing = rocjitsu::create_memory_backing(size);
   ASSERT_GE(backing, 0);
-  ASSERT_EQ(rocjitsu::is_memory_backing_token(backing), token);
+  if (!token && rocjitsu::is_memory_backing_token(backing)) {
+    ASSERT_EQ(close(backing), 0);
+    GTEST_SKIP() << "native memfd unavailable for the constrained address-space experiment";
+  }
+  if (token) {
+    ASSERT_TRUE(rocjitsu::is_memory_backing_token(backing));
+  }
   uint64_t pages = 0;
   {
     std::ifstream statm("/proc/self/statm");
@@ -218,7 +398,8 @@ void check_full_mapping_address_space_in_child(bool token) {
   if (skipped)
     GTEST_SKIP() << (token ? "inherited RLIMIT_AS lacks headroom for the 96 MiB experiment or "
                              "128 MiB token retry"
-                           : "inherited RLIMIT_AS needs 96 MiB of headroom for the experiment");
+                           : "native memfd unavailable or inherited RLIMIT_AS needs 96 MiB "
+                             "of headroom for the experiment");
 }
 
 TEST_F(MemoryBackingDeathTest, NativeFullMappingFitsConstrainedAddressSpace) {
@@ -2206,6 +2387,69 @@ int enter_test_namespace(int flags) {
   if (!error)
     error = write_namespace_map("/proc/self/gid_map", "0 " + std::to_string(gid) + " 1\n");
   return error;
+}
+
+void check_file_export_across_ipc_namespaces() {
+  block_memfd_xattrs();
+  const int backing = rocjitsu::create_memory_backing(4096);
+  ASSERT_GE(backing, 0);
+  ASSERT_FALSE(rocjitsu::is_memory_backing_token(backing));
+  auto *writer = static_cast<unsigned char *>(
+      rocjitsu::map_memory_backing(nullptr, 4096, PROT_READ | PROT_WRITE, MAP_SHARED, backing, 0));
+  ASSERT_NE(writer, MAP_FAILED);
+  writer[17] = 0x5a;
+  ASSERT_EQ(munmap(writer, 4096), 0);
+  int exported = rocjitsu::reopen_memory_backing(backing, O_RDONLY);
+  ASSERT_GE(exported, 0);
+  constexpr uint32_t kFlags = 0x12345678;
+  ASSERT_EQ(rocjitsu::retain_memory_backing_export_policy(exported, kFlags), 0);
+  ASSERT_TRUE(rocjitsu::is_memory_backing_token(exported));
+  const pid_t child = fork();
+  ASSERT_GE(child, 0);
+  if (child == 0) {
+    const int error = enter_test_namespace(CLONE_NEWIPC);
+    if (error)
+      _exit(error == EPERM || error == EACCES || error == EINVAL || error == ENOSPC
+                ? kPrerequisiteSkipExitCode
+                : 1);
+    uint32_t observed = 0;
+    auto *view = static_cast<unsigned char *>(
+        rocjitsu::map_memory_backing(nullptr, 4096, PROT_READ, MAP_SHARED, exported, 0));
+    EXPECT_NE(view, MAP_FAILED) << strerror(errno);
+    if (view != MAP_FAILED) {
+      EXPECT_EQ(view[17], 0x5a);
+      EXPECT_EQ(munmap(view, 4096), 0);
+    }
+    EXPECT_EQ(rocjitsu::get_memory_backing_alloc_flags(exported, &observed), 1);
+    EXPECT_EQ(observed, kFlags);
+    _exit(::testing::Test::HasFailure() ? 1 : 0);
+  }
+  int status = 0;
+  ASSERT_EQ(waitpid(child, &status, 0), child);
+  ASSERT_TRUE(WIFEXITED(status));
+  if (WEXITSTATUS(status) == kPrerequisiteSkipExitCode)
+    GTEST_SKIP() << "IPC namespace creation is unavailable";
+  EXPECT_EQ(WEXITSTATUS(status), 0);
+  EXPECT_EQ(close(exported), 0);
+  EXPECT_EQ(close(backing), 0);
+}
+
+TEST_F(MemoryBackingDeathTest, FileExportMapsAcrossIpcNamespaces) {
+  bool skipped = false;
+  const auto completed_or_skipped = [&skipped](int status) {
+    skipped = ::testing::ExitedWithCode(kPrerequisiteSkipExitCode)(status);
+    return skipped || ::testing::ExitedWithCode(0)(status);
+  };
+  ASSERT_EXIT(
+      {
+        check_file_export_across_ipc_namespaces();
+        _exit(::testing::Test::HasFailure()  ? 1
+              : ::testing::Test::IsSkipped() ? kPrerequisiteSkipExitCode
+                                             : 0);
+      },
+      completed_or_skipped, "");
+  if (skipped)
+    GTEST_SKIP() << "IPC namespace creation is unavailable";
 }
 
 void check_device_token_private_fallback() {

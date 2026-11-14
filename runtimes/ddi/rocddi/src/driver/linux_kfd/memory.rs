@@ -1362,7 +1362,14 @@ impl KfdAllocation {
                 "scratch address exceeds the host address width",
             ));
         };
-        let reservation = os_memory::Reservation::view_with_poison(address_usize, size, poison);
+        let reservation =
+            match os_memory::Reservation::view_with_poison(address_usize, size, poison) {
+                Ok(reservation) => reservation,
+                Err(source) => {
+                    vm.release_scratch(address, desc.size)?;
+                    return Err(native_error("scratch reservation process identity", source));
+                }
+            };
         let mut allocation = owner.write(Self {
             vm: vm.clone(),
             peers,

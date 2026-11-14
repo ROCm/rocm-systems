@@ -8,9 +8,9 @@
 // checked against RX 9070 captures; RDNA3's masked-rotate examples disagree
 // with its own pseudocode. Rotations wrap within each 32-lane row.
 
-#include "common/internal.h"
 #include "common/simd.h"
-#include "rj_arith/rj_arith.h"
+#include "common/validation.h"
+#include "rj_arith/detail/rj_arith_register.h"
 
 #include <stdint.h>
 
@@ -29,6 +29,12 @@ int swizzle(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags, uint
   if (!exec_mask) {
     return RJ_ARITH_SUCCESS;
   }
+#if defined(RJ_ARITH_HAVE_X86_64_V4)
+  if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
+    rocjitsu::arith::ds_swizzle_x86_64_v4(Lanes, exec_mask, d[0], a[0], offset);
+    return RJ_ARITH_SUCCESS;
+  }
+#endif
 #if defined(RJ_ARITH_HAVE_X86_64_V3)
   if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
     rocjitsu::arith::ds_swizzle_x86_64_v3(Lanes, exec_mask, d[0], a[0], offset);

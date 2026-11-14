@@ -45,6 +45,8 @@ int prepare_memory_keeper();
 /// @details Preallocation is best effort for native memfds; token storage stays
 /// sparse. RJ_TEST_FORCE_TOKEN_BACKING=1 selects tokens for integration testing
 /// without affecting ordinary metadata files or changing application limits.
+/// An export of a native memfd whose user xattrs are unsupported receives a
+/// separate token retaining the same file and its export policy.
 /// The name controls classification: names beginning with kmd::kDeviceBackingNamePrefix
 /// select device backing for both memfds and tokens. All names without that prefix
 /// select ordinary host backing, including kMemoryBackingDefaultName and custom
@@ -80,7 +82,7 @@ bool is_memory_backing_token(int fd);
 /// @brief Map shared RAM, or pass a non-backing descriptor to the host mmap.
 /// @details The caller must hold the host mapping lock when replacing mappings
 /// visible to the simulator. Ordinary munmap/mprotect/mremap work on the result.
-/// Token attachments enforce current System V IPC permissions; retaining a token
+/// System V token attachments enforce current IPC permissions; retaining one
 /// across an effective UID change does not grant new mapping authority (EACCES).
 /// A token whose keeper has exited fails with ESTALE.
 /// Tokens accept only kMemoryBackingMappingFlags; other flags fail with EINVAL.
@@ -97,12 +99,29 @@ bool stat_memory_backing_token(int fd, struct stat *result);
 bool seek_memory_backing_token(int fd, off_t offset, int whence, off_t &result);
 
 /// @brief Query backing metadata or forward a descriptor command to the host.
-/// @details Tokens synthesize F_GETFL and F_GET_SEALS, reject F_ADD_SEALS with
-/// EPERM, and forward other commands to their underlying socket descriptor.
+/// @details Tokens synthesize F_GETFL. System V tokens synthesize F_GET_SEALS
+/// and reject F_ADD_SEALS with EPERM. File tokens apply both seal operations
+/// to their retained file. Other commands use the socket descriptor.
 int fcntl_memory_backing(int fd, int command, uintptr_t argument = 0);
 
 /// @brief Reopen a backing with an independently retained access mode.
 int reopen_memory_backing(int fd, int access_mode);
+
+/// @brief Retain a KFD export's effective GPU allocation flags with its backing.
+/// @details The policy follows native memfds and keeper tokens across descriptor
+/// transfers and outlives the original KFD allocation. A second, different
+/// policy for the same backing fails instead of replacing the first export's.
+int set_memory_backing_alloc_flags(int fd, uint32_t flags);
+
+/// @brief Retain export flags and replace a native descriptor when xattrs are unsupported.
+/// @details On success, a replacement closes the old descriptor and preserves
+/// its access mode and close-on-exec setting. The caller owns the resulting fd.
+int retain_memory_backing_export_policy(int &fd, uint32_t flags);
+
+/// @brief Read retained export flags; return 1 if present, 0 if absent, or -1 on error.
+/// @details An absent policy is valid for ordinary imported files. Malformed
+/// rocjitsu metadata fails rather than silently choosing a default PTE policy.
+int get_memory_backing_alloc_flags(int fd, uint32_t *flags);
 
 /// @brief Verify that existing backing covers a requested mapping, without growing a file.
 int check_memory_backing_size(int fd, size_t size);

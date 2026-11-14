@@ -131,9 +131,9 @@ numActiveCUs:
 
 Phase A has no collectables: the metric library has no collectable file, field or
 reference. Collectables are designed in the single-pass metrics plan
-([Terms](../../single-pass_and_multi-pass_metrics/hld-plan.md#terms) and
-[splitting multi-pass metrics](../../single-pass_and_multi-pass_metrics/hld-plan.md#phase-2--splitting-multi-pass-metrics-into-single-pass-parts))
-and its [grouping algorithm](../../single-pass_and_multi-pass_metrics/lld-metrics-grouping-algorithm.md).
+([Terms](../single-pass-and-multi-pass-metrics/hld-plan.md#terms) and
+[splitting multi-pass metrics](../single-pass-and-multi-pass-metrics/hld-plan.md#phase-2--splitting-multi-pass-metrics-into-single-pass-parts))
+and its [grouping algorithm](../single-pass-and-multi-pass-metrics/lld-metrics-grouping-algorithm.md).
 
 ### Inheritance loader
 

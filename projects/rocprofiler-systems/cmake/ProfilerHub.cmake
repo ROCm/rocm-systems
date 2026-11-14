@@ -209,6 +209,30 @@ if(NOT _PROFILER_HUB_IS_EXTERNAL)
     )
 endif()
 
+# Version consumed by defines.h.in. An installed package exposes it through
+# find_package; a source build sets it as the VERSION property of the target
+# (the project() variables stay local to profiler-hub's directory scope).
+if(_PROFILER_HUB_IS_EXTERNAL)
+    set(ROCPROFSYS_PROFILER_HUB_VERSION "${profiler-hub_VERSION}")
+else()
+    get_target_property(ROCPROFSYS_PROFILER_HUB_VERSION profiler-hub VERSION)
+endif()
+
+if(NOT ROCPROFSYS_PROFILER_HUB_VERSION MATCHES "^([0-9]+)\\.([0-9]+)\\.([0-9]+)")
+    message(
+        FATAL_ERROR
+        "[profiler-hub] Cannot determine MAJOR.MINOR.PATCH version "
+        "(found '${ROCPROFSYS_PROFILER_HUB_VERSION}')"
+    )
+endif()
+set(ROCPROFSYS_PROFILER_HUB_VERSION_MAJOR ${CMAKE_MATCH_1})
+set(ROCPROFSYS_PROFILER_HUB_VERSION_MINOR ${CMAKE_MATCH_2})
+set(ROCPROFSYS_PROFILER_HUB_VERSION_PATCH ${CMAKE_MATCH_3})
+message(
+    STATUS
+    "[profiler-hub] Building against version ${ROCPROFSYS_PROFILER_HUB_VERSION}"
+)
+
 if(ROCPROFSYS_PROFILER_HUB_LINK_STATIC)
     set(_PROFILER_HUB_SUFFIX "-static")
     message(STATUS "[profiler-hub] Linking statically")

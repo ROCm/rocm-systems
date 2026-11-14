@@ -4,21 +4,6 @@ Panel Config:
   title: GL1 Cache (L1)
   data source:
   - metric_table:
-      id: 1101
-      title: GL1A Processing
-      header:
-        metric: Metric
-        avg: Avg
-        min: Min
-        max: Max
-        unit: Unit
-      metric:
-        Hit Rate:
-          avg: None
-          min: None
-          max: None
-          unit: Percent
-  - metric_table:
       id: 1103
       title: GL1 Cache Request Statistics
       header:
@@ -33,15 +18,8 @@ Panel Config:
           min: MIN(GL1C_REQ_sum / $denom)
           max: MAX(GL1C_REQ_sum / $denom)
           unit: (Count + $normUnit)
-        Miss Requests:
-          avg: None
-          min: None
-          max: None
-          unit: (Count + $normUnit)
   metrics_description:
-    Hit Rate: >-
-      Not available
-    Miss Requests: >-
-      Not available
     Total Requests: >-
-      Total GL1 requests, normalized by the chosen unit.
+      Total number of requests received by GL1 from all GL0 caches (TCP instances)
+      within the shader engine. This represents aggregated memory traffic from multiple
+      Workgroup Processors.
