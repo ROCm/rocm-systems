@@ -433,7 +433,7 @@ def main() -> None:
     total_arches = 0
 
     for arch_dir in sorted(configs_dir.iterdir()):
-        if not arch_dir.is_dir():
+        if not arch_dir.is_dir() or not arch_dir.name.startswith("gfx"):
             continue
         total_arches += 1
         print(f"{'=' * 80}\nValidating architecture: {arch_dir.name}\n{'=' * 80}")

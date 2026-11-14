@@ -1,6 +1,6 @@
 l2.ai:
   name: L2 Arithmetic Intensity
-  formula: SUM($wave_size * SQ_INSTS_VALU_sum) / SUM(GL1C_GL2_REQ_READ_32B_sum * 32 + GL1C_GL2_REQ_READ_64B_sum * 64 + GL1C_GL2_REQ_READ_128B_sum * 128 + GL1C_GL2_REQ_WRITE_32B_sum * 32 + GL1C_GL2_REQ_WRITE_64B_sum * 64)
+  formula: SUM($valu_flops) / SUM($gl2_read_bytes + $gl2_write_bytes)
   unit: FLOPs/Byte
   description: >-
     Arithmetic Intensity relative to the L2 cache. This metric shows compute density

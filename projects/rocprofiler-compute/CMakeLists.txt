@@ -565,13 +565,6 @@ add_test(
 )
 
 add_test(
-    NAME test_noise_clamper
-    COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_noise_clamper.xml
-        ${COV_OPTION} tests/unit/utils/metrics/test_noise_clamper.py ${WORKING_DIR_OPTION}
-)
-
-add_test(
     NAME test_benchmark_base
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_benchmark_base.xml
@@ -1181,7 +1174,6 @@ if(${ENABLE_COVERAGE})
         test_utils_profile
         test_common
         test_amdsmi_interface
-        test_noise_clamper
         test_benchmark_base
         test_analysis_cli
         test_pattern_matching

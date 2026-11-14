@@ -9,7 +9,7 @@ Until the cutover, the library copies the analysis configs:
 - every row has the unit of its metric;
 - every row peak is a peak of its metric, and every library peak has a row;
 - the library reads the same counters as detect_counters();
-- the library variables equal get_build_in_vars();
+- the library collectables equal the analysis config collectables;
 - each library set lists the metrics of its old set in profile_configs/sets.
 
 The check skips the roofline panel of an arch without a roofline benchmark (gfx908).
@@ -38,7 +38,7 @@ from utils.utils_common import (
     canonical_config_arch,
     parse_sets_yaml,
 )
-from utils.utils_counter_defs import get_build_in_vars, metric_value_keys
+from utils.utils_counter_defs import Collectables, metric_value_keys
 
 
 class Row(NamedTuple):
@@ -57,6 +57,8 @@ MAIN_FORMS = ("avg", "value", "expr")
 ROW_FIELDS = ("unit", "peak")
 # Kernel time divisors in seconds (Bytes/s rows) and in nanoseconds (GB/s rows).
 SECONDS_SCALE = "/(SUM(End_Timestamp-Start_Timestamp)/1e9)"
+# A Bytes/s row can also scale a GB/s equation: 1e9*(<GB/s equation>)
+BYTES_SCALE_PREFIX = "1e9*("
 NANOSECONDS = "/SUM(End_Timestamp-Start_Timestamp)"
 # Metric unit -> row unit when the row divides by seconds.
 SECONDS_SCALE_UNITS = {"GB/s": "Bytes/s"}
@@ -100,14 +102,6 @@ DISPLAY_VARIANTS = {
         "4.1.10": ROOFLINE_L2_BW_128B,
         "4.1.12": ROOFLINE_LDS_BW,
         "11.2.7": PIPELINE_MFMA_UTIL,
-        "16.3.5": (
-            "Cache Hit Rate",
-            "vl1d.hit_rate",
-            "100 * SUM(NOISE_CLAMP(TCP_TOTAL_CACHE_ACCESSES_sum - (TCP_TCC_READ_REQ_sum"
-            " + TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum "
-            "+ TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum), TCP_TOTAL_CACHE_ACCESSES_sum)) "
-            "/ SUM(TCP_TOTAL_CACHE_ACCESSES_sum)",
-        ),
     },
     "gfx950": {
         "2.1.23": (
@@ -233,14 +227,20 @@ def read_rows(arch: str) -> List[Row]:
 
 
 def in_seconds(row: Row) -> bool:
-    """Return True if row divides by the kernel time in seconds (a Bytes/s row)."""
-    return row.equation is not None and row.equation.endswith(SECONDS_SCALE)
+    """Return True if row is a Bytes/s row: it divides by the kernel time in
+    seconds, or multiplies a GB/s equation by 1e9."""
+    return row.equation is not None and (
+        row.equation.endswith(SECONDS_SCALE)
+        or row.equation.startswith(BYTES_SCALE_PREFIX)
+    )
 
 
 def gb_per_second(row: Row) -> Optional[str]:
     """Return the equation of row in GB/s, with the kernel time in nanoseconds."""
-    if in_seconds(row):
+    if row.equation is not None and row.equation.endswith(SECONDS_SCALE):
         return row.equation[: -len(SECONDS_SCALE)] + NANOSECONDS
+    if row.equation is not None and row.equation.startswith(BYTES_SCALE_PREFIX):
+        return row.equation[len(BYTES_SCALE_PREFIX) : -1]
     return row.equation
 
 
@@ -440,22 +440,21 @@ def test_counters_match_detect_counters(arch_view):
     soc = make_soc(member_arch(arch), has_membw_panel, shown_blocks(arch))
     expected, _ = soc.detect_counters()
     library_counters = arch_view.library.get_counters_for_metrics(
-        list(arch_view.library.metrics), mi_gpu_specs.get_gpu_series(member_arch(arch))
+        list(arch_view.library.metrics)
     )
     assert soc._expand_tcc_template_counters(library_counters) == expected
 
 
-def test_variables_match_get_build_in_vars(arch_view):
-    library_variables = {
-        name: canonical_formula(variable["formula"])
-        for name, variable in arch_view.library.variables.items()
+def test_collectables_match_analysis_configs(arch_view):
+    library_collectables = {
+        name: canonical_formula(collectable["formula"])
+        for name, collectable in arch_view.library.collectables.items()
     }
-    gpu_series = mi_gpu_specs.get_gpu_series(member_arch(arch_view.arch))
     expected = {
         name: canonical_formula(formula)
-        for name, formula in get_build_in_vars(gpu_series).items()
+        for name, formula in Collectables.of_arch(arch_view.arch).items()
     }
-    assert library_variables == expected
+    assert library_collectables == expected
 
 
 def test_sets_match_profile_configs(arch_view):
