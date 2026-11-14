@@ -306,8 +306,10 @@ GpuAgent::GpuAgent(HSAuint32 node, const HsaNodeProperties& node_props, bool xna
     }
   }
 
-  auto& first_cpu = core::Runtime::runtime_singleton_->cpu_agents()[0];
-  auto link_info = core::Runtime::runtime_singleton_->GetLinkInfo(first_cpu->node_id(), node_id());
+  // Nearest CPU, not the first: with several CPU nodes the first may reach this GPU only over
+  // the fabric. The same link sets the xGMI host check and large BAR.
+  const auto link_info =
+      core::Runtime::runtime_singleton_->GetLinkInfo(GetNearestCpuAgent()->node_id(), node_id());
   xgmi_cpu_gpu_ = (link_info.info.link_type == HSA_AMD_LINK_INFO_TYPE_XGMI);
 
   if (link_info.num_hop >= 1 && !properties_.Integrated) {
