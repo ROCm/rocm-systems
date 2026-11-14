@@ -236,6 +236,67 @@ HIP_TEST_CASE(Unit_hipMemcpy3D_Negative_Parameters) {
   }
 }
 
+HIP_TEST_CASE(Unit_hipMemcpy3D_Negative_OffsetPointerOutOfBounds) {
+  constexpr size_t kAllocSize = 4096;
+  constexpr size_t kOffset = 2048;
+  constexpr size_t kOobWidth = 3072;
+  constexpr size_t kFitWidth = kAllocSize - kOffset;
+
+  const auto Copy = [](char* dst, char* src, size_t width, hipMemcpyKind kind) {
+    return Memcpy3DWrapper(make_hipPitchedPtr(dst, width, width, 1), make_hipPos(0, 0, 0),
+                           make_hipPitchedPtr(src, width, width, 1), make_hipPos(0, 0, 0),
+                           make_hipExtent(width, 1, 1), kind);
+  };
+
+  const auto CheckDestination = [&Copy](char* dst, char* src, hipMemcpyKind kind) {
+    SECTION("base pointer, extent fits") { HIP_CHECK(Copy(dst, src, kOobWidth, kind)); }
+
+    SECTION("offset pointer, extent fits") { HIP_CHECK(Copy(dst + kOffset, src, kFitWidth, kind)); }
+
+    SECTION("offset pointer, extent past the end of the allocation") {
+      HIP_CHECK_ERROR(Copy(dst + kOffset, src, kOobWidth, kind), hipErrorInvalidValue);
+    }
+  };
+
+  const auto CheckSource = [&Copy](char* dst, char* src, hipMemcpyKind kind) {
+    SECTION("offset pointer, extent fits") { HIP_CHECK(Copy(dst, src + kOffset, kFitWidth, kind)); }
+
+    SECTION("offset pointer, extent past the end of the allocation") {
+      HIP_CHECK_ERROR(Copy(dst, src + kOffset, kOobWidth, kind), hipErrorInvalidValue);
+    }
+  };
+
+  SECTION("Host to Host") {
+    LinearAllocGuard<char> alloc(LinearAllocs::hipHostMalloc, kAllocSize);
+    LinearAllocGuard<char> other_alloc(LinearAllocs::hipHostMalloc, kOobWidth);
+    SECTION("destination") {
+      CheckDestination(alloc.ptr(), other_alloc.ptr(), hipMemcpyHostToHost);
+    }
+    SECTION("source") { CheckSource(other_alloc.ptr(), alloc.ptr(), hipMemcpyHostToHost); }
+  }
+
+  SECTION("Device to Device") {
+    LinearAllocGuard<char> alloc(LinearAllocs::hipMalloc, kAllocSize);
+    LinearAllocGuard<char> other_alloc(LinearAllocs::hipMalloc, kOobWidth);
+    SECTION("destination") {
+      CheckDestination(alloc.ptr(), other_alloc.ptr(), hipMemcpyDeviceToDevice);
+    }
+    SECTION("source") { CheckSource(other_alloc.ptr(), alloc.ptr(), hipMemcpyDeviceToDevice); }
+  }
+
+  SECTION("Host to Device") {
+    LinearAllocGuard<char> device_alloc(LinearAllocs::hipMalloc, kAllocSize);
+    LinearAllocGuard<char> host_alloc(LinearAllocs::hipHostMalloc, kOobWidth);
+    CheckDestination(device_alloc.ptr(), host_alloc.ptr(), hipMemcpyHostToDevice);
+  }
+
+  SECTION("Device to Host") {
+    LinearAllocGuard<char> device_alloc(LinearAllocs::hipMalloc, kAllocSize);
+    LinearAllocGuard<char> host_alloc(LinearAllocs::hipHostMalloc, kOobWidth);
+    CheckSource(host_alloc.ptr(), device_alloc.ptr(), hipMemcpyDeviceToHost);
+  }
+}
+
 HIP_TEST_CASE(Unit_hipMemcpy3D_Capture) {
   constexpr hipExtent extent{16 * sizeof(int), 16, 16};
   LinearAllocGuard3D<int> dev_alloc(extent);
