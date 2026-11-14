@@ -368,12 +368,19 @@ std::string LocateKernelFile(std::string filename, hsa_agent_t agent) {
       close(fh);
       return path;
     }
-    // Try <exe_dir>/../share/rocrtst/<dev_name>/<filename>
     if (!exe_dir_valid) {
       exe_dir = GetExecutableDir();
       exe_dir_valid = true;
     }
+    // Try <exe_dir>/../share/rocrtst/<dev_name>/<filename> (exe in bin/)
     path = exe_dir + "/../share/rocrtst/" + dev_name + "/" + filename;
+    fh = open(path.c_str(), O_RDONLY);
+    if (fh >= 0) {
+      close(fh);
+      return path;
+    }
+    // Try <exe_dir>/../../share/rocrtst/<dev_name>/<filename> (exe in lib/rocrtst/)
+    path = exe_dir + "/../../share/rocrtst/" + dev_name + "/" + filename;
     fh = open(path.c_str(), O_RDONLY);
     if (fh >= 0) {
       close(fh);
@@ -439,8 +446,14 @@ std::string LocateConfigFile() {
       exeDir = exeDir.substr(0, last_slash);
     }
 
+    // Try <exe_dir>/../share/rocrtst/ (exe in bin/)
     std::string installPath =
         exeDir + "/../share/rocrtst/platform_config.yaml";
+    if (access(installPath.c_str(), F_OK) == 0) {
+      return installPath;
+    }
+    // Try <exe_dir>/../../share/rocrtst/ (exe in lib/rocrtst/)
+    installPath = exeDir + "/../../share/rocrtst/platform_config.yaml";
     if (access(installPath.c_str(), F_OK) == 0) {
       return installPath;
     }
