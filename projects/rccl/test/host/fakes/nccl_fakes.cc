@@ -255,6 +255,13 @@ ncclResult_t ncclRegLocalIsValid(struct ncclReg* reg, bool* isValid)
     return g_regLocalIsValid(reg, isValid);
 }
 
+// ncclRegFind calls this for RCCL-owned records; the fake treats every one as current.
+ncclResult_t rcclRegCheckOwned(struct ncclComm*, const void*, struct ncclReg*, bool* stale)
+{
+    *stale = false;
+    return ncclSuccess;
+}
+
 static ncclResult_t DefaultShmImportShareableBuffer(struct ncclComm*, int, ncclShmIpcDesc_t*, void**, void**,
                                                     ncclShmIpcDesc_t*)
 {

@@ -159,6 +159,9 @@ ncclResult_t ncclRasCommFini(const struct ncclComm* comm) { return ncclSuccess; 
 ncclResult_t ncclRunRasDiagnostics(struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclRunDiagnostics(struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclRegCleanup(struct ncclComm* comm) { return ncclSuccess; }
+static ncclResult_t DefaultRcclRegAutoRelease(struct ncclComm*) { return ncclSuccess; }
+std::function<ncclResult_t(struct ncclComm*)> g_rcclRegAutoRelease = DefaultRcclRegAutoRelease;
+ncclResult_t rcclRegAutoRelease(struct ncclComm* comm) { return g_rcclRegAutoRelease(comm); }
 ncclResult_t ncclRmaInit(struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclRmaInitFromParent(struct ncclComm* comm, struct ncclComm* parent) { return ncclSuccess; }
 ncclResult_t ncclRmaFinalize(struct ncclComm* comm) { return ncclSuccess; }
@@ -287,6 +290,7 @@ void ResetNcclStubs() {
   g_ncclCommSplit = DefaultNcclCommSplit;
   g_collTraceDestroy = DefaultCollTraceDestroy;
   g_ncclDdaIpcCommClosePeerMappings = DefaultNcclDdaIpcCommClosePeerMappings;
+  g_rcclRegAutoRelease = DefaultRcclRegAutoRelease;
   g_ncclProfilerThreadDestroy = DefaultNcclProfilerThreadDestroy;
   g_ncclProfilerPluginFinalize = DefaultNcclProfilerPluginFinalize;
   g_ncclTunerPluginUnload = DefaultNcclTunerPluginUnload;

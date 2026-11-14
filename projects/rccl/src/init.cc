@@ -4481,6 +4481,10 @@ static ncclResult_t commDestroySync(struct ncclAsyncJob* job_) {
     // any rank's exported allocations. Revoked comms close in commReclaim.
     ncclResult_t ddaCloseRet = ncclSuccess;
     NCCLCHECKIGNORE(ncclDdaIpcCommClosePeerMappings(comm), ddaCloseRet);
+    // Same window for the buffers RCCL registered itself: commFree runs ncclRegCleanup after the proxies stop, and on
+    // abort or an earlier failure it drops them without unmapping the peers' imports.
+    ncclResult_t autoRegRet = ncclSuccess;
+    if (!aborting) NCCLCHECKIGNORE(rcclRegAutoRelease(comm), autoRegRet);
     if (COMPILER_ATOMIC_LOAD(comm->abortFlag, std::memory_order_acquire) == 0) {
       int* hostRanks;
       int hostRank = 0;
@@ -4505,6 +4509,11 @@ static ncclResult_t commDestroySync(struct ncclAsyncJob* job_) {
         if (ret == ncclSuccess) ret = barrierRet;
       }
       free(hostRanks);
+    }
+    if (autoRegRet != ncclSuccess) {
+      INFO(NCCL_DESTROY | NCCL_REG, "comm 0x%" PRIx64 " rank %d RCCL registration release error %d", comm->commHash,
+           comm->rank, autoRegRet);
+      if (ret == ncclSuccess) ret = autoRegRet;
     }
   }
 

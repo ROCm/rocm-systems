@@ -20,6 +20,17 @@ static inline ncclResult_t ncclRegFind(struct ncclComm* comm, const void* data, 
     struct ncclReg* reg = cache->slots[slot];
     if ((uintptr_t)data < reg->begAddr) return ncclSuccess;
     if ((uintptr_t)data + size <= reg->endAddr) {
+      if (rcclRegHidden(cache, reg)) continue;
+      if (reg->rcclAuto.owned) {
+        int population = cache->population;
+        bool stale = false;
+        NCCLCHECK(rcclRegCheckOwned(comm, data, reg, &stale));
+        if (stale) {
+          // A later record, such as a user registration of the new allocation, may still cover data.
+          if (cache->population < population) slot--;
+          continue;
+        }
+      }
       *outReg = reg;
       return ncclSuccess;
     }

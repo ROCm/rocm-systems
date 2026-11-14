@@ -2976,6 +2976,45 @@
         }
       ]
     },
+    "ring_auto_register_mpi_8rank": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 8,
+      "num_nodes": 1,
+      "num_gpus": 8,
+      "timeout": 600,
+      "description": "gfx1250 RCCL_RING_AUTO_REGISTER (opt-in, enabled here): RCCL registers unregistered Ring Simple AllReduce/AllGather buffers itself. A buffer freed and reallocated at the same address, via ncclMemAlloc or a VMM remap, must get fresh peer mappings and exact results, and send/recv from an auto-registered buffer to an unregistered peer must not take the one-sided direct path. RCCL_RING_AUTO_REGISTER, NCCL_ALGO and NCCL_PROTO are set here because RCCL reads them once per process; ranks skip off gfx1250.",
+      "env_variables": {
+        "NCCL_DEBUG": "WARN",
+        "RCCL_RING_AUTO_REGISTER": "1",
+        "NCCL_ALGO": "Ring",
+        "NCCL_PROTO": "Simple",
+        "NCCL_CUMEM_ENABLE": "1"
+      },
+      "tests": [
+        {
+          "name": "RingAutoRegister_AllReduce_FreedAndReusedAddress_8rank",
+          "description": "AllReduce into a buffer freed and reallocated at the same address gets exact results and an RCCL-owned registration (8 ranks)",
+          "test_filter": "RingAutoRegister.AllReduce_FreedAndReusedAddress"
+        },
+        {
+          "name": "RingAutoRegister_AllGather_FreedAndReusedAddress_8rank",
+          "description": "AllGather into a buffer freed and reallocated at the same address gets exact results and an RCCL-owned registration (8 ranks)",
+          "test_filter": "RingAutoRegister.AllGather_FreedAndReusedAddress"
+        },
+        {
+          "name": "RingAutoRegister_SendRecv_ToUnregisteredPeer_8rank",
+          "description": "Send/recv from an auto-registered buffer into an unregistered peer buffer completes with exact data (8 ranks)",
+          "test_filter": "RingAutoRegister.SendRecv_FromAutoRegisteredBufferToUnregisteredPeer"
+        },
+        {
+          "name": "RingAutoRegister_Abort_WithLiveAndRetiredRecords_8rank",
+          "description": "ncclCommAbort after RCCL registered a buffer, freed it and registered its replacement completes on every rank (8 ranks)",
+          "test_filter": "RingAutoRegister.AbortWithLiveAndRetiredRecords_Completes"
+        }
+      ]
+    },
     "ubr_multi_node": {
       "extends": "default",
       "is_gtest": true,
@@ -7522,6 +7561,12 @@
       "name": "DDA AlltoAll In-Place - 8-Rank (gfx1250 buffer offsets)",
       "description": "gfx1250 AlltoAll at any buffer offset, in place and out of place, stays on DDA LL or LL128 with exact data, also with several peers per LL128 column, single node",
       "config": "dda_alltoall_inplace_mpi_8rank",
+      "enabled": true
+    },
+    {
+      "name": "Ring Auto-Register - 8-Rank (gfx1250)",
+      "description": "gfx1250 RCCL-owned Ring AllReduce/AllGather registration: freed and reused addresses and send/recv to an unregistered peer, single node",
+      "config": "ring_auto_register_mpi_8rank",
       "enabled": true
     },
     {

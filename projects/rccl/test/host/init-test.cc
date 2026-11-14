@@ -6557,6 +6557,52 @@ TEST_F(InitMicrotest, CommDestroySync_AbortedCommStillClosesDdaIpcPeerMappingsLo
   EXPECT_EQ(1, closeMappings.calls);
 }
 
+TEST_F(InitMicrotest, CommDestroySync_ReleasesRcclRegistrationsBeforeProxyStop) {
+  Teardown_LifecycleComm c;
+  Teardown_AllowStreamCaptureExchange();
+  std::vector<std::string> callOrder;
+  ScopedHook collTrace(g_collTraceDestroy, [](ncclComm*) { return ncclSuccess; });
+  ScopedHook release(g_rcclRegAutoRelease, [&](ncclComm*) {
+    callOrder.push_back("autoRegRelease");
+    return ncclSuccess;
+  });
+  ScopedHook barrier(g_bootstrapIntraNodeBarrier, [&](void*, int*, int, int, int) {
+    callOrder.push_back("intraNodeBarrier");
+    return ncclSuccess;
+  });
+  ScopedHook proxyStop(g_ncclProxyStop, [&](ncclComm*) {
+    callOrder.push_back("proxyStop");
+    return ncclSuccess;
+  });
+
+  EXPECT_EQ(ncclSuccess, Teardown_RunDestroySync(c.get()));
+  EXPECT_EQ((std::vector<std::string>{"autoRegRelease", "intraNodeBarrier", "proxyStop"}), callOrder);
+}
+
+TEST_F(InitMicrotest, CommDestroySync_AbortedComm_SkipsRcclRegistrationRelease) {
+  Teardown_LifecycleComm c;
+  *c.get()->abortFlag = 1;
+  Teardown_AllowStreamCaptureExchange();
+  ScopedHook collTrace(g_collTraceDestroy, [](ncclComm*) { return ncclSuccess; });
+  ScopedHook proxyStop(g_ncclProxyStop, [](ncclComm*) { return ncclSuccess; });
+  ScopedHook release(g_rcclRegAutoRelease, [](ncclComm*) { return ncclSuccess; });
+
+  EXPECT_EQ(ncclSuccess, Teardown_RunDestroySync(c.get()));
+  EXPECT_EQ(0, release.calls);
+}
+
+TEST_F(InitMicrotest, CommDestroySync_RcclRegistrationReleaseFails_ReturnsErrorAndStillStopsProxy) {
+  Teardown_LifecycleComm c;
+  Teardown_AllowStreamCaptureExchange();
+  ScopedHook collTrace(g_collTraceDestroy, [](ncclComm*) { return ncclSuccess; });
+  ScopedHook release(g_rcclRegAutoRelease, [](ncclComm*) { return ncclSystemError; });
+  ScopedHook proxyStop(g_ncclProxyStop, [](ncclComm*) { return ncclSuccess; });
+
+  EXPECT_EQ(ncclSystemError, Teardown_RunDestroySync(c.get()));
+  EXPECT_EQ(1, release.calls);
+  EXPECT_EQ(1, proxyStop.calls);
+}
+
 TEST_F(InitMicrotest, CommDestroySync_SetDeviceFails_ReturnsErrorWithoutDestroyingCollTrace) {
   Teardown_LifecycleComm c;
   ScopedHook setDevice(g_hipSetDevice, [](int) { return hipErrorInvalidDevice; });

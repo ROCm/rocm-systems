@@ -16,6 +16,18 @@
 NCCL_PARAM(MloPartRdmaEnable, "MLOPART_RDMA_ENABLE", 0);
 #endif
 
+RCCL_PARAM(RingAutoRegister, "RING_AUTO_REGISTER", 0);
+
+// gfx1250 Ring Simple: RCCL registers unregistered AllReduce/AllGather buffers so peers store straight into them
+// instead of copying through the P2P FIFO. Graph capture keeps its own registration path. Single node only (an MNNVL
+// domain is one node): a NET registration would leave the freed allocation's MR in the IB MR cache, which every
+// communicator on the device shares and matches by address.
+static bool rcclRingAutoRegister(struct ncclComm* comm, struct ncclTaskColl* info) {
+  return rcclParamRingAutoRegister() && ncclParamLocalRegister() && !comm->planner.persistent && comm->nNodes == 1 &&
+         (info->func == ncclFuncAllReduce || info->func == ncclFuncAllGather) &&
+         IsArchMatch(comm->archName, "gfx1250");
+}
+
 static ncclResult_t isMloPartBufRdmaCapable(struct ncclComm* comm, const void* ptr, bool* isRdmaCapable) {
   if (!comm->hasMloPart) {
     *isRdmaCapable = true;
@@ -364,7 +376,14 @@ ncclResult_t ncclRegisterCollBuffers(
       bool hasRecvNetPeer = false;
       bool hasSendNetPeer = false;
 
-      NCCLCHECK(ncclRegFind(comm, info->recvbuff, recvbuffSize, &recvRegRecord));
+      const bool autoRegister = rcclRingAutoRegister(comm, info);
+      // The IPC registration below looks the record up again.
+      rcclRegAutoScope autoVisible(&comm->regCache, autoRegister);
+      if (autoRegister) {
+        NCCLCHECK(rcclRegAutoLocal(comm, (void*)info->recvbuff, recvbuffSize, &recvRegRecord));
+      } else {
+        NCCLCHECK(ncclRegFind(comm, info->recvbuff, recvbuffSize, &recvRegRecord));
+      }
       if (recvRegRecord == NULL && !(comm->planner.persistent && ncclParamGraphRegister())) goto exit;
       NCCLCHECK(ncclRegFind(comm, info->sendbuff, sendbuffSize, &sendRegRecord));
       if (comm->nNodes > 1 && sendRegRecord == NULL && !(comm->planner.persistent && ncclParamGraphRegister()))

@@ -100,6 +100,25 @@ test_categories:
       - "NCCL_CUMEM_ENABLE=1"
       - "NCCL_LOCAL_REGISTER=0"
       - "RCCL_DDA_ENABLE=0"
+  quick_env_ring_auto_register:
+    description: "RCCL_RING_AUTO_REGISTER on gfx1250: Ring Simple AllReduce/AllGather stay correct when the receive
+      buffer is freed and reallocated at the same address. The feature is opt-in and, like NCCL_ALGO, read once per
+      process, so it and Ring/Simple are set before launch; other architectures skip."
+    test_patterns:
+      - "RingAutoRegister.*"
+    exclude_windows: *mpi_exclude_windows
+    labels:
+      - "rccl"
+      - "quick"
+      - "smoke"
+      - "precheck"
+      - "mpi"
+    env_variables:
+      - "NCCL_DEBUG=WARN"
+      - "RCCL_RING_AUTO_REGISTER=1"
+      - "NCCL_ALGO=Ring"
+      - "NCCL_PROTO=Simple"
+      - "NCCL_CUMEM_ENABLE=1"
   quick_env_shm_ce_memcpy_send:
     description: "Shared-memory CE memcpy on send side (mode 1, locality 1)."
     test_patterns:
@@ -775,6 +794,7 @@ execution_settings:
     quick: 1200
     quick_env_ce_allreduce: 1200
     quick_env_ce_alltoall: 1200
+    quick_env_ring_auto_register: 1200
     quick_env_shm_ce_memcpy_send: 1200
     quick_env_shm_ce_memcpy_recv: 1200
     quick_env_shm_ce_memcpy_both_simple: 1200
