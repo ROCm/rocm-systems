@@ -349,6 +349,10 @@ class MonitorCommands:
                     temperature = gpu_metrics_info.get("apu_metrics.temperature_gfx", "N/A")
                     if temperature != "N/A":
                         temperature = round(temperature)
+                if temperature == "N/A":
+                    temperature = self._hwmon_temperature(
+                        args.gpu, amdsmi_interface.AmdSmiTemperatureType.HOTSPOT
+                    )
                 monitor_values["hotspot_temperature"] = temperature
             except (KeyError, amdsmi_exception.AmdSmiLibraryException) as e:
                 monitor_values["hotspot_temperature"] = "N/A"
@@ -356,6 +360,10 @@ class MonitorCommands:
 
             try:
                 temperature = gpu_metrics_info["temperature_mem"]
+                if temperature == "N/A":
+                    temperature = self._hwmon_temperature(
+                        args.gpu, amdsmi_interface.AmdSmiTemperatureType.VRAM
+                    )
                 monitor_values["memory_temperature"] = temperature
             except (KeyError, amdsmi_exception.AmdSmiLibraryException) as e:
                 monitor_values["memory_temperature"] = "N/A"
@@ -435,6 +443,8 @@ class MonitorCommands:
                     gfx_clk = gpu_metrics_info.get("apu_metrics.current_gfxclk", "N/A")
                 if gfx_clk == "N/A":
                     gfx_clk = gpu_metrics_info.get("apu_metrics.average_gfxclk_frequency", "N/A")
+                if gfx_clk == "N/A":
+                    gfx_clk = self._dpm_current_clock(args.gpu, amdsmi_interface.AmdSmiClkType.GFX)
                 monitor_values["gfx_clk"] = gfx_clk
                 freq_unit = "MHz"
                 if gfx_clk != "N/A":
@@ -455,12 +465,12 @@ class MonitorCommands:
             try:
                 gfx_util = gpu_metrics_info["average_gfx_activity"]
                 activity_unit = "%"
+                monitor_values["gfx"] = gfx_util
                 if gfx_util != "N/A":
-                    monitor_values["gfx"] = gfx_util
-                if self.logger.is_human_readable_format():
-                    monitor_values["gfx"] = f"{monitor_values['gfx']} {activity_unit}"
-                if self.logger.is_json_format():
-                    monitor_values["gfx"] = {"value": monitor_values["gfx"], "unit": activity_unit}
+                    if self.logger.is_human_readable_format():
+                        monitor_values["gfx"] = f"{gfx_util} {activity_unit}"
+                    if self.logger.is_json_format():
+                        monitor_values["gfx"] = {"value": gfx_util, "unit": activity_unit}
             except (KeyError, amdsmi_exception.AmdSmiLibraryException) as e:
                 monitor_values["gfx"] = "N/A"
                 logging.debug("Failed to get gfx utilization on gpu %s | %s", gpu_id, e)
@@ -471,12 +481,12 @@ class MonitorCommands:
             try:
                 mem_util = gpu_metrics_info["average_umc_activity"]
                 activity_unit = "%"
+                monitor_values["mem"] = mem_util
                 if mem_util != "N/A":
-                    monitor_values["mem"] = mem_util
-                if self.logger.is_human_readable_format():
-                    monitor_values["mem"] = f"{monitor_values['mem']} {activity_unit}"
-                if self.logger.is_json_format():
-                    monitor_values["mem"] = {"value": monitor_values["mem"], "unit": activity_unit}
+                    if self.logger.is_human_readable_format():
+                        monitor_values["mem"] = f"{mem_util} {activity_unit}"
+                    if self.logger.is_json_format():
+                        monitor_values["mem"] = {"value": mem_util, "unit": activity_unit}
             except (KeyError, amdsmi_exception.AmdSmiLibraryException) as e:
                 monitor_values["mem"] = "N/A"
                 logging.debug("Failed to get mem utilization on gpu %s | %s", gpu_id, e)
@@ -493,6 +503,10 @@ class MonitorCommands:
                     if mem_clock == "N/A":
                         mem_clock = gpu_metrics_info.get(
                             "apu_metrics.average_uclk_frequency", "N/A"
+                        )
+                    if mem_clock == "N/A":
+                        mem_clock = self._dpm_current_clock(
+                            args.gpu, amdsmi_interface.AmdSmiClkType.MEM
                         )
                     monitor_values["mem_clock"] = mem_clock
                     freq_unit = "MHz"
@@ -1138,6 +1152,34 @@ class MonitorCommands:
                 tabular=True,
                 dual_csv_output=dual_csv_output,
             )
+
+    def _dpm_current_clock(self, gpu, clk_type):
+        """Current DPM level of *clk_type* in MHz, or "N/A".
+
+        Fallback for firmware whose gpu_metrics leaves the current clock unset
+        while pp_dpm_* still marks the active level.
+        """
+        try:
+            freq = amdsmi_interface.amdsmi_get_clk_freq(gpu, clk_type)
+        except amdsmi_exception.AmdSmiLibraryException as e:
+            logging.debug("Failed to get %s clock levels | %s", clk_type.name, e.get_error_info())
+            return "N/A"
+        # The library reports UINT32_MAX when no level carries the '*' marker.
+        if freq["current"] >= len(freq["frequency"]):
+            return "N/A"
+        return self.helpers.convert_SI_unit(
+            freq["frequency"][freq["current"]], AMDSMIHelpers.SI_Unit.MICRO
+        )
+
+    def _hwmon_temperature(self, gpu, sensor):
+        """Current hwmon reading of *sensor* in degrees C, or "N/A"."""
+        try:
+            return amdsmi_interface.amdsmi_get_temp_metric(
+                gpu, sensor, amdsmi_interface.AmdSmiTemperatureMetric.CURRENT
+            )
+        except amdsmi_exception.AmdSmiLibraryException as e:
+            logging.debug("Failed to get %s temperature | %s", sensor.name, e.get_error_info())
+            return "N/A"
 
     def _write_via_logger_destination(self, text):
         """Write text to the logger's destination (stdout or output file).

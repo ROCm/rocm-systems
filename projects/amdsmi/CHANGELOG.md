@@ -14,6 +14,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Fixed `amd-smi` failures on non-x86 systems where the library is built without ESMI (EPYC CPU) support**.  
   - `amd-smi` no longer tries to initialize CPU monitoring on such builds, and the Python CPU APIs now raise `AmdSmiLibraryException` with `AMDSMI_STATUS_NOT_SUPPORTED` instead of `AttributeError`. CPU affinity is reported again instead of N/A, and the Go shim builds without ESMI.
 
+- **Fixed `amd-smi monitor` showing N/A for clocks and temperatures the GPU still reports**.  
+  - When the GPU metrics table omits a value, `monitor` now reads the GFX and memory clocks from the active DPM level and the hotspot and memory temperatures from hwmon. The `gfx` and `mem` CSV columns no longer disappear on GPUs that do not report utilization.
+
 ## amd_smi_lib for ROCm 10.2.0
 
 ### Added
