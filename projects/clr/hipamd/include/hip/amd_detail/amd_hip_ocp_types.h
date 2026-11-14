@@ -19,15 +19,14 @@
 #define __OCP_FP_DEVICE__ __device__
 #define __OCP_FP_HOST_DEVICE__ __OCP_FP_HOST__ __OCP_FP_DEVICE__
 #define __OCP_FP_DEVICE_STATIC__ __OCP_FP_DEVICE__ static __inline__ __attribute__((always_inline))
-#define __OCP_FP_HOST_DEVICE_STATIC__ __OCP_FP_HOST_DEVICE__ static
+#define __OCP_FP_HOST_DEVICE_STATIC__ __OCP_FP_HOST_DEVICE__ static inline
 #endif
 
 static_assert(sizeof(unsigned int) == 4, "");
 static_assert(sizeof(float) == 4, "");
 static_assert(sizeof(unsigned short) == 2, "");
 
-#if (defined(__clang__) && (__clang_major__ > 17) && defined(__HIP__)) ||                          \
-    (defined(__GNUC__) && (__GNUC__ > 13))
+#if (defined(__clang__) && (__clang_major__ > 17)) || (defined(__GNUC__) && (__GNUC__ >= 13))
 static_assert(sizeof(__bf16) == 2, "");
 static_assert(sizeof(_Float16) == 2, "");
 #endif
@@ -44,7 +43,7 @@ typedef __bf16 __amd_bf16_storage_t;
 typedef _Float16 __amd_fp16_storage_t;
 typedef __hip_int8_t __amd_scale_t;
 
-#if defined(__clang__) && (__clang_major__ > 17) && defined(__HIP__)
+#if defined(__clang__) && (__clang_major__ > 17)
 typedef unsigned int __attribute__((ext_vector_type(2))) __amd_uintx2_storage_t;
 typedef __hip_uint8_t __attribute__((ext_vector_type(8))) __amd_fp8x8_storage_t;
 typedef __bf16 __attribute__((ext_vector_type(2))) __amd_bf16x2_storage_t;
@@ -62,10 +61,10 @@ typedef _Float16 __attribute__((ext_vector_type(32))) __amd_fp16x32_storage_t;
 typedef __hip_uint32_t __attribute__((ext_vector_type(3))) __amd_fp6x16_storage_t;
 typedef __hip_uint32_t __attribute__((ext_vector_type(6))) __amd_fp6x32_storage_t;
 typedef short __attribute__((ext_vector_type(2))) __amd_shortx2_storage_t;
-#elif defined(__GNUC__) && (__GNUC__ > 13)
+#elif defined(__GNUC__) && (__GNUC__ >= 13)
 /* GCC expects vector size in bytes */
 typedef unsigned int __attribute__((vector_size(8))) __amd_uintx2_storage_t;
-typedef uint8_t __attribute__((vector_size(8))) __amd_fp8x8_storage_t;
+typedef __hip_uint8_t __attribute__((vector_size(8))) __amd_fp8x8_storage_t;
 typedef __bf16 __attribute__((vector_size(4))) __amd_bf16x2_storage_t;
 typedef __bf16 __attribute__((vector_size(16))) __amd_bf16x8_storage_t;
 typedef __bf16 __attribute__((vector_size(32))) __amd_bf16x16_storage_t;
@@ -78,12 +77,13 @@ typedef _Float16 __attribute__((vector_size(4))) __amd_fp16x2_storage_t;
 typedef _Float16 __attribute__((vector_size(16))) __amd_fp16x8_storage_t;
 typedef _Float16 __attribute__((vector_size(32))) __amd_fp16x16_storage_t;
 typedef _Float16 __attribute__((vector_size(64))) __amd_fp16x32_storage_t;
-typedef uint32_t __attribute__((vector_size(12))) __amd_fp6x16_storage_t;
-typedef uint32_t __attribute__((vector_size(24))) __amd_fp6x32_storage_t;
+typedef __hip_uint32_t __attribute__((vector_size(16))) __amd_fp6x16_storage_t;
+typedef __hip_uint32_t __attribute__((vector_size(32))) __amd_fp6x32_storage_t;
 typedef short __attribute__((vector_size(4))) __amd_shortx2_storage_t;
 #endif
 
-#if (defined(__clang__) && (__clang_major__ > 17) && defined(__HIP__)) ||                          \
-    (defined(__GNUC__) && (__GNUC__ > 13))
+#if (defined(__clang__) && (__clang_major__ > 17)) || (defined(__GNUC__) && (__GNUC__ >= 13))
 static_assert(sizeof(__amd_uintx2_storage_t) == sizeof(__amd_fp8x8_storage_t), "");
+static_assert(sizeof(__amd_fp6x16_storage_t) == 16, "");
+static_assert(sizeof(__amd_fp6x32_storage_t) == 32, "");
 #endif
