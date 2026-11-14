@@ -1011,7 +1011,12 @@ HIP_TEST_CASE(Unit_hipMemImportFromShareableHandle_MulProc_GrndChldUseHdl) {
         REQUIRE(close(fdSig[0]) == 0);
         // Wait for parent process to create the socket.
         size_t size_mem = 0;
-        REQUIRE(read(fd[0], &size_mem, sizeof(size_t)) >= 0);
+        const ssize_t bytes_read = read(fd[0], &size_mem, sizeof(size_t));
+        REQUIRE(bytes_read >= 0);
+        // EOF: the parent skipped or failed before signalling.
+        if (bytes_read == 0) {
+          _exit(0);
+        }
         CTX_CREATE();
 
         // Open Socket as client
@@ -1067,6 +1072,11 @@ HIP_TEST_CASE(Unit_hipMemImportFromShareableHandle_MulProc_GrndChldUseHdl) {
         exit(0);
       } else {
         int status;
+        // Drop the grandchild's pipe ends so it sees EOF if the parent leaves early.
+        REQUIRE(close(fd[0]) == 0);
+        REQUIRE(close(fd[1]) == 0);
+        REQUIRE(close(fdSig[0]) == 0);
+        REQUIRE(close(fdSig[1]) == 0);
         REQUIRE(close(fdpid[0]) == 0);
         REQUIRE(write(fdpid[1], &pid2, sizeof(pid2)) >= 0);
         REQUIRE(wait(&status) >= 0);
