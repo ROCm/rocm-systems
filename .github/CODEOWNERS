@@ -110,6 +110,7 @@
 /emulation/                                                           @atgutier
 /emulation/mirage/                                                    @amd-arosa @ROCm/rocjitsu-core-team
 /emulation/rocjitsu/                                                  @atgutier @ROCm/rocjitsu-core-team
+/emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/vm/plugins/             @atgutier @ROCm/rocjitsu-core-team @newling
 
 # Profilers
 /profilers/profiler-hub                                               @ROCm/rocm-profiler-hub
