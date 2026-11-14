@@ -56,6 +56,7 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 * Resolved a segmentation fault in `hipStreamEndCapture` during multi-stream capture caused by a bookkeeping cycle among capture participants. The fix tracks capture participants in a single origin-stream-owned set, eliminating recursive traversal of forked streams during capture finalization and improving stream capture stability.
 * Resolved a potential deadlock between `hipMallocAsync` and `hipEventSynchronize` during concurrent multi-threaded execution.
 * Fixed incorrect calculations when using the type `bool` for `cooperative_groups::exclusive_scan`. The implementation now correctly handles the identity value for the first active lane and prevents unintended type conversions from `bool` to `int`.
+* Fixed the host implementations of the OCP FP8 conversions (`__hipext_ocp_fp8_e4m3`, `__hipext_ocp_fp8_e5m2` and the `__amd_cvt_*` FP8 wrappers) so they no longer return wrong values (#13525, #13526, #13527). E4M3 overflow and infinity inputs now saturate to ±448 (`0x7e`/`0xfe`) instead of producing NaN; E5M2 `0x7b`/`0xfb` now decode to ±57344 instead of ±Infinity; fp16 subnormal inputs are no longer encoded to E5M2 about 2^-14 too large; and E5M2 subnormals now decode correctly to fp16. Code that relied on the previous host results may see different values.
 
 ### Optimized
 
