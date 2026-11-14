@@ -43,7 +43,8 @@ THE SOFTWARE.
 #endif
 
 // Macro for collecting HW_REG_HW_ID
-#if defined(__gfx1100__) || defined(__gfx1101__) || defined(__gfx1102__) || defined(__gfx1151__) || defined(__NVCC__)
+#if defined(__gfx1100__) || defined(__gfx1101__) || defined(__gfx1102__) || defined(__gfx1151__) || \
+    defined(__gfx1170__) || defined(__gfx1171__) || defined(__NVCC__)
 #define GetHwId(val) \
   val = 0
 #else

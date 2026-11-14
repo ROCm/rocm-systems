@@ -277,6 +277,13 @@ int run_test_suite(const std::set<int>& include_models,
             printf("[%3d/%3d] Testing model %2d with %2d nodes...", 
                    test_num, total_tests, m, num_nodes);
             fflush(stdout);
+
+            int gpusPerNode = 0;
+            extractArchAndGpus(model_descs[m].description, &gpusPerNode);
+            if (gpusPerNode * num_nodes == 1) {
+                printf(" SKIPPED (single rank)\n");
+                continue;
+            }
             
             bool success = run_single_test(m, num_nodes);
             
