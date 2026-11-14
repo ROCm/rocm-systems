@@ -132,13 +132,13 @@ TEST(GinAnvilSdmaReach, Mi300AndMi350StopAtTheHost) {
 
 TEST(GinAnvilSdmaReach, Mi450CrossesHostsOnlyInFabricPod) {
   EXPECT_EQ(ginAnvilSdmaReachPredicate(GinAnvilArch::Mi450, 2, 8, true), GinAnvilSdmaReach::FabricPod);
-  EXPECT_EQ(ginAnvilSdmaReachPredicate(GinAnvilArch::Mi450, 4, NCCL_GIN_ANVIL_IPC_MAX_RANKS, true),
+  EXPECT_EQ(ginAnvilSdmaReachPredicate(GinAnvilArch::Mi450, 4, kGinAnvilPodMaxRanks, true),
             GinAnvilSdmaReach::FabricPod);
   EXPECT_EQ(ginAnvilSdmaReachPredicate(GinAnvilArch::Mi450, 2, 8, false), GinAnvilSdmaReach::None);
-  EXPECT_EQ(ginAnvilSdmaReachPredicate(GinAnvilArch::Mi450, 4, NCCL_GIN_ANVIL_IPC_MAX_RANKS + 1, true),
+  EXPECT_EQ(ginAnvilSdmaReachPredicate(GinAnvilArch::Mi450, 4, kGinAnvilPodMaxRanks + 1, true),
             GinAnvilSdmaReach::None);
   EXPECT_STRNE(ginAnvilSdmaNoReachReason(GinAnvilArch::Mi450, 8, false),
-               ginAnvilSdmaNoReachReason(GinAnvilArch::Mi450, NCCL_GIN_ANVIL_IPC_MAX_RANKS + 1, false));
+               ginAnvilSdmaNoReachReason(GinAnvilArch::Mi450, kGinAnvilPodMaxRanks + 1, false));
 }
 
 // A pod the topology allows but a rank did not opt in to names the variables to set.

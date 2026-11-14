@@ -8,7 +8,11 @@
 #define _GIN_ANVIL_REACH_H_
 
 #include <cstdint>
-#include "nccl_device/gin/anvil_sdma/gin_anvil_ipc_table.h"
+
+// Anvil's peer table size, NCCL_GIN_ANVIL_IPC_MAX_RANKS. Restated because this
+// header is in every build and gin_anvil_ipc_table.h only in an
+// ENABLE_ROCSHMEM_GIN one; gin_plugin_anvil_sdma.cc checks the two agree.
+constexpr int kGinAnvilPodMaxRanks = 16;
 
 // Which peers the Anvil SDMA GIN backend can serve, per GPU generation: see src/gin/README.md.
 enum class GinAnvilArch : int { Other = 0, Mi300 = 1, Mi350 = 2, Mi450 = 3 };
@@ -25,8 +29,7 @@ inline GinAnvilSdmaReach ginAnvilSdmaReachPredicate(GinAnvilArch arch, int nHost
   if (nHosts <= 1) return GinAnvilSdmaReach::Host;
   switch (arch) {
   case GinAnvilArch::Mi450:
-    return fabricPod && nRanks <= NCCL_GIN_ANVIL_IPC_MAX_RANKS ? GinAnvilSdmaReach::FabricPod
-                                                               : GinAnvilSdmaReach::None;
+    return fabricPod && nRanks <= kGinAnvilPodMaxRanks ? GinAnvilSdmaReach::FabricPod : GinAnvilSdmaReach::None;
   case GinAnvilArch::Mi300:
   case GinAnvilArch::Mi350:
   case GinAnvilArch::Other:
@@ -48,7 +51,7 @@ inline const char* ginAnvilArchName(GinAnvilArch arch) {
 // topology alone would have allowed a pod (ginAnvilSdmaReachCapable).
 inline const char* ginAnvilSdmaNoReachReason(GinAnvilArch arch, int nRanks, bool podCapable) {
   if (arch != GinAnvilArch::Mi450) return "SDMA reaches only GPUs on the same host";
-  if (nRanks > NCCL_GIN_ANVIL_IPC_MAX_RANKS) return "the communicator exceeds Anvil's peer table size";
+  if (nRanks > kGinAnvilPodMaxRanks) return "the communicator exceeds Anvil's peer table size";
   if (podCapable) return "crossing hosts in a fabric pod needs RCCL_GIN_ANVIL_FABRIC_POD=1 and "
                          "RCCL_GIN_ANVIL_FABRIC_MEM=1 on every rank";
   return "SDMA crosses hosts only inside one fabric pod (MNNVL, a single clique, cuMem)";

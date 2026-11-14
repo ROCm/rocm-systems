@@ -491,9 +491,9 @@ INSTANTIATE_TEST_SUITE_P(
         AnvilReachCase{"Mi450FabricPod", GinAnvilArch::Mi450, 2, 8, true, true, true, true, 1},
         AnvilReachCase{"Mi450FabricPodOnlyPeersOptIn", GinAnvilArch::Mi450, 2, 8, true, false, true, false, 1},
         AnvilReachCase{"Mi450FabricPodOnlyThisRankOptIn", GinAnvilArch::Mi450, 2, 8, true, true, false, false, 1},
-        AnvilReachCase{"Mi450FabricPodAtRankCap", GinAnvilArch::Mi450, 4, NCCL_GIN_ANVIL_IPC_MAX_RANKS, true, true,
+        AnvilReachCase{"Mi450FabricPodAtRankCap", GinAnvilArch::Mi450, 4, kGinAnvilPodMaxRanks, true, true,
                        true, true, 1},
-        AnvilReachCase{"Mi450FabricPodAboveRankCap", GinAnvilArch::Mi450, 4, NCCL_GIN_ANVIL_IPC_MAX_RANKS + 1, true,
+        AnvilReachCase{"Mi450FabricPodAboveRankCap", GinAnvilArch::Mi450, 4, kGinAnvilPodMaxRanks + 1, true,
                        true, true, false, 0},
         AnvilReachCase{"OtherArchMultiHost", GinAnvilArch::Other, 2, 4, true, true, true, false, 0}),
     [](const ::testing::TestParamInfo<AnvilReachCase>& info) { return std::string(info.param.name); });

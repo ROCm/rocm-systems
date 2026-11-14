@@ -42,6 +42,9 @@
 #include <unordered_map>
 #include <vector>
 
+static_assert(kGinAnvilPodMaxRanks == NCCL_GIN_ANVIL_IPC_MAX_RANKS,
+              "the fabric pod rank cap must match Anvil's IPC peer table");
+
 #if defined(GIN_ANVIL_PLUGIN_UNIT_TEST)
 namespace GinAnvilPluginTestHooks {
 ncclResult_t queryVmmRange(void* data, size_t size, CUdeviceptr* base, size_t* memSize, int* numSegments);

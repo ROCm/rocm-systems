@@ -165,8 +165,8 @@ INSTANTIATE_TEST_SUITE_P(
         AnvilReachCase{"Mi450TwoCliques", "gfx1250", 1, 2, 8, 4, 1, GinAnvilArch::Mi450, GinAnvilSdmaReach::None},
         AnvilReachCase{"Mi450NoCuMem", "gfx1250", 1, 2, 8, 8, 0, GinAnvilArch::Mi450, GinAnvilSdmaReach::None},
         AnvilReachCase{"Mi450NoMnnvl", "gfx1250", 0, 2, 8, 8, 1, GinAnvilArch::Mi450, GinAnvilSdmaReach::None},
-        AnvilReachCase{"Mi450PodAboveRankCap", "gfx1250", 1, 4, NCCL_GIN_ANVIL_IPC_MAX_RANKS + 1,
-                       NCCL_GIN_ANVIL_IPC_MAX_RANKS + 1, 1, GinAnvilArch::Mi450, GinAnvilSdmaReach::None},
+        AnvilReachCase{"Mi450PodAboveRankCap", "gfx1250", 1, 4, kGinAnvilPodMaxRanks + 1,
+                       kGinAnvilPodMaxRanks + 1, 1, GinAnvilArch::Mi450, GinAnvilSdmaReach::None},
         AnvilReachCase{"OtherArchMultiHost", "gfx90a", 1, 2, 8, 8, 1, GinAnvilArch::Other,
                        GinAnvilSdmaReach::None}),
     [](const ::testing::TestParamInfo<AnvilReachCase>& info) { return std::string(info.param.name); });
