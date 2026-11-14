@@ -17,6 +17,7 @@
 #include <filesystem>
 #include <fstream>
 #include <optional>
+#include <sstream>
 #include <string>
 #include <unistd.h>
 #include <utility>
@@ -300,17 +301,22 @@ load_dbt_guest_config_from_runtime_config(util::DiagnosticEmitter emit_error) {
   candidates.push_back(rocjitsu::rpc_default_config_file_path());
 
   std::ifstream file;
+  std::string selected_path;
   for (const auto &candidate : candidates) {
     file.open(candidate);
-    if (file.is_open())
+    if (file.is_open()) {
+      selected_path = candidate;
       break;
+    }
   }
   if (!file.is_open())
     return std::nullopt;
 
-  const std::string contents((std::istreambuf_iterator<char>(file)),
-                             std::istreambuf_iterator<char>());
-  std::optional<DbtRuntimeConfigHandoff> handoff = parse_dbt_runtime_config_handoff(contents);
+  std::ostringstream contents;
+  file >> std::noskipws >> contents.rdbuf();
+  if (file.bad() || !file.eof())
+    return emit_error.emit() << "Cannot read runtime config handoff: " << selected_path;
+  std::optional<DbtRuntimeConfigHandoff> handoff = parse_dbt_runtime_config_handoff(contents.str());
   if (!handoff)
     return std::nullopt;
   auto loaded = load_dbt_guest_config_from_handoff(*handoff, emit_error);
