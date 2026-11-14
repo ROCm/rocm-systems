@@ -323,6 +323,7 @@ if(BUILD_TESTS)
     TeardownStressTests.cpp
     _RecorderTests.cpp
     IbvSymbolsEnvTests.cpp
+    DiagnosticsNetBwTests.cpp
     common/main.cpp
     common/CallCollectiveForked.cpp
     common/CollectiveArgs.cpp
