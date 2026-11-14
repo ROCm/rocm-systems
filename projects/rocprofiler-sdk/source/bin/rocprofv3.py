@@ -981,14 +981,14 @@ For attachment profiling of running processes:
     )
     filter_options.add_argument(
         "--kernel-include-regex",
-        help="Include the kernels matching this filter from counter-collection and thread-trace data (non-matching kernels will be excluded)",
+        help="Include the kernels matching this filter from counter-collection, thread-trace data and kernel replay (non-matching kernels will be excluded)",
         default=None,
         type=str,
         metavar="REGULAR_EXPRESSION",
     )
     filter_options.add_argument(
         "--kernel-exclude-regex",
-        help="Exclude the kernels matching this filter from counter-collection and thread-trace data (applied after --kernel-include-regex option)",
+        help="Exclude the kernels matching this filter from counter-collection, thread-trace data and kernel replay (applied after --kernel-include-regex option)",
         default=None,
         type=str,
         metavar="REGULAR_EXPRESSION",
