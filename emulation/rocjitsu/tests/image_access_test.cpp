@@ -205,6 +205,17 @@ std::array<uint32_t, 8> rdna_image_descriptor(rj_code_arch_t arch,
   return words;
 }
 
+class ImageInputBytes final : public ExecutionPlugin {
+public:
+  ImageInputBytes() : ExecutionPlugin("image_coordinate_inputs") {}
+  void onAmdgpuReadVgprLanes(const amdgpu::Wavefront *wave, uint32_t reg, uint64_t lanes,
+                             uint8_t bytes) override {
+    if (lanes & 1)
+      read.at(reg - wave->vgpr_alloc().base) |= bytes;
+  }
+  std::array<uint8_t, 32> read{};
+};
+
 class ImageAccessFixture : public testing::Test {
 protected:
   amdgpu::GpuMemory memory_{"image_memory"};
@@ -3616,7 +3627,7 @@ protected:
 
 class ImageQueryFootprintTest : public AllImageAccessTest {
 protected:
-  void check_resource_query_inputs() {
+  void check_query_inputs(bool lod_query, bool warning = false) {
     class QueryReads final : public ExecutionPlugin {
     public:
       QueryReads() : ExecutionPlugin("query_reads") {}
@@ -3642,10 +3653,11 @@ protected:
     cu_->set_plugin_group(group);
     wf_->set_exec(1);
     auto decoder = Decoder::create(arch());
-    for (unsigned mask : {0u, 1u, 3u, 8u}) {
+    for (unsigned mask : {0u, 1u, 2u, 3u, 8u}) {
+      SCOPED_TRACE(mask);
       // One channel fits at the final VGPR. A second channel suppresses the whole query.
-      const uint8_t dst = mask == 1 || mask == 3 ? wf_->num_vgprs() - 1 : 8;
-      const bool reads_inputs = mask && mask != 3;
+      const uint8_t dst = !lod_query && (mask == 1 || mask == 3) ? wf_->num_vgprs() - 1 : 8;
+      const bool reads_inputs = (mask || warning) && (lod_query || mask != 3);
       auto decode = [&] {
         if (arch() == ROCJITSU_CODE_ARCH_RDNA4) {
           rdna4::VimageBuilderFields fields{};
@@ -3659,21 +3671,26 @@ protected:
           fields.dim = 1;
           fields.dmask = mask;
           fields.vdata = dst;
-          return decoder->decode_window(rdna3::build_mimg(rdna3::kImageGetResinfoMimg, fields));
+          fields.ssamp = 2;
+          fields.lwe = warning;
+          return decoder->decode_window(rdna3::build_mimg(
+              lod_query ? rdna3::kImageGetLodMimg : rdna3::kImageGetResinfoMimg, fields));
         }
         rdna1::MimgBuilderFields fields{};
         fields.dim = 1;
         fields.dmask = mask;
         fields.vdata = dst;
-        return decoder->decode_window(rdna1::build_mimg(rdna1::kImageGetResinfoMimg, fields));
+        fields.ssamp = 2;
+        return decoder->decode_window(rdna1::build_mimg(
+            lod_query ? rdna1::kImageGetLodMimg : rdna1::kImageGetResinfoMimg, fields));
       };
       auto inst = decode();
       ASSERT_TRUE(inst.succeeded());
       const InstDefUse def_use(*inst.value(), wf_->wf_size());
-      const bool inputs = mask != 0;
+      const bool inputs = mask || warning;
       EXPECT_EQ(def_use.uses.contains(RegisterRef{RegClass::VGPR, 0, 1}), inputs);
       EXPECT_EQ(def_use.uses.contains(RegisterRef{RegClass::SGPR, 0, 8}), inputs);
-      EXPECT_EQ(def_use.uses.contains(RegisterRef{RegClass::SGPR, 8, 4}), false);
+      EXPECT_EQ(def_use.uses.contains(RegisterRef{RegClass::SGPR, 8, 4}), inputs && lod_query);
       auto &score = wf_->ensure_memory_wait_scoreboard();
       auto pending = [&](RegisterRef reg, unsigned lane) {
         unsigned hazards = 0;
@@ -3693,19 +3710,31 @@ protected:
       cu_->write_vgpr(vb_ + 8, 0, 0xfeedbeef);
       cu_->write_vgpr(vb_ + 8, 1, 0xfeedbeef);
       cu_->write_vgpr(vb_ + 9, 0, 0xfeedbeef);
-      ASSERT_TRUE(cu_->execute_instruction(inst.value().get(), *wf_).succeeded());
+      const auto issued = cu_->execute_instruction(inst.value().get(), *wf_);
+      if (lod_query && mask == 8 && arch() != ROCJITSU_CODE_ARCH_RDNA3) {
+        ASSERT_TRUE(issued.failed());
+        EXPECT_EQ(wf_->instruction_execution_error(),
+                  amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+        EXPECT_EQ(cu_->read_vgpr(vb_ + 8, 0), 0xfeedbeefu);
+        EXPECT_EQ(reads->scalars, 0u);
+        EXPECT_EQ(reads->coords, (std::array<uint64_t, 2>{}));
+        continue;
+      }
+      ASSERT_TRUE(issued.succeeded());
       if (mask == 0) {
         EXPECT_EQ(cu_->read_vgpr(vb_ + 8, 0), 0u);
         EXPECT_EQ(cu_->read_vgpr(vb_ + 8, 1), 0xfeedbeefu);
-        EXPECT_EQ(cu_->read_vgpr(vb_ + 9, 0), 0xfeedbeefu);
+        if (!warning) {
+          EXPECT_EQ(cu_->read_vgpr(vb_ + 9, 0), 0xfeedbeefu);
+        }
       }
       for (unsigned reg = 0; reg < 2; ++reg)
         for (unsigned lane : {0u, 1u, 2u, 3u}) {
           const bool actual = (reads->coords[reg] >> lane) & 1u;
-          EXPECT_EQ(actual, bool(reads_inputs && reg == 0 && lane == 0));
+          EXPECT_EQ(actual, bool(reads_inputs && (lod_query ? lane < 3 : reg == 0 && lane == 0)));
           EXPECT_EQ(pending({RegClass::VGPR, static_cast<uint16_t>(reg), 1}, lane), actual);
         }
-      const uint16_t expected_scalars = reads_inputs ? 0xffu : 0u;
+      const uint16_t expected_scalars = reads_inputs ? (lod_query ? 0xfffu : 0xffu) : 0u;
       EXPECT_EQ(reads->scalars, expected_scalars);
       for (uint16_t s : {0u, 7u, 8u, 11u})
         EXPECT_EQ(pending({RegClass::SGPR, s, 1}, 0), bool(expected_scalars & (1u << s)));
@@ -3718,7 +3747,16 @@ INSTANTIATE_TEST_SUITE_P(RdnaTargets, ImageQueryFootprintTest,
                                          ROCJITSU_CODE_ARCH_RDNA4));
 
 TEST_P(ImageQueryFootprintTest, ResourceQueryWaitsFollowTheChannelMask) {
-  check_resource_query_inputs();
+  check_query_inputs(false);
+}
+
+TEST_P(ImageQueryFootprintTest, LodQueryWaitsFollowTheChannelMask) {
+  if (arch() == ROCJITSU_CODE_ARCH_RDNA4) {
+    GTEST_SKIP() << "GFX12 GET_LOD has no execution handler";
+  }
+  check_query_inputs(true);
+  if (arch() == ROCJITSU_CODE_ARCH_RDNA3 || arch() == ROCJITSU_CODE_ARCH_RDNA3_5)
+    check_query_inputs(true, true);
 }
 
 class Gfx10PixelTransferTest : public AllImageAccessTest {
@@ -5192,6 +5230,108 @@ TEST_F(Rdna4ImageMemoryTest, ImplicitSampleWaitsOnContributingLanes) {
   }
 }
 
+TEST_P(Gfx10PixelTransferTest, DepthComparisonSharesVmcntWithOrdinaryImageLoad) {
+  Image image;
+  image.width = 2;
+  image.rdna_format = 22; // R32_FLOAT.
+  bind_image(image);
+  cu_->write_sgpr(sb_ + 8, 2 | (2 << 3) | (2 << 6) | (1u << 12) | (1u << 15));
+  cu_->write_sgpr(sb_ + 9, 0xfffu << 12);
+  cu_->write_sgpr(sb_ + 10, (1u << 20) | (1u << 22));
+  const auto bits = [](float value) { return std::bit_cast<uint32_t>(value); };
+  memory_.write32(kBase, bits(0.f));
+  memory_.write32(kBase + 4, bits(1.f));
+  const auto sample = rdna1::build_mimg(rdna1::kImageSampleCLzMimg,
+                                        {.dim = 1, .dmask = 1, .vaddr = 0, .vdata = 8, .ssamp = 2});
+  const auto load = rdna1::build_mimg(rdna1::kImageLoadMimg,
+                                      {.dim = 1, .dmask = 1, .unorm = 1, .vaddr = 4, .vdata = 12});
+  const auto move = rdna1::build_vop1(rdna1::kVMovB32Vop1, {.src0 = 256 + 8, .vdst = 13});
+  uint64_t pc = 0x8000;
+  for (const int threshold : {-1, 0, 1}) {
+    SCOPED_TRACE(threshold);
+    wf_->ensure_memory_wait_scoreboard().clear();
+    wf_->set_exec(1);
+    write_coordinates(0, {bits(0.75f), bits(1.0f), bits(0.5f)});
+    cu_->write_vgpr(vb_ + 4, 0, 1);
+    cu_->write_vgpr(vb_ + 5, 0, 0);
+    cu_->write_vgpr(vb_ + 8, 0, 0xdeadbeef);
+    uint64_t next = pc;
+    const auto emit = [&](auto words) {
+      for (uint32_t word : words) {
+        memory_.write32(next, word);
+        next += 4;
+      }
+    };
+    emit(sample);
+    emit(load);
+    if (threshold >= 0)
+      emit(rdna1::build_sopp(rdna1::kSWaitcnt, {.simm16 = uint16_t(0x3f70 | threshold)}));
+    const uint64_t move_pc = next;
+    emit(move);
+    wf_->pc = pc;
+    const auto before = cu_->memory_wait_diagnostic_count();
+    for (unsigned i = 0; i < 12 && wf_->pc != move_pc; ++i)
+      cu_->step();
+    ASSERT_EQ(wf_->pc, move_pc);
+    EXPECT_EQ(cu_->read_vgpr(vb_ + 8, 0), bits(0.5f));
+    EXPECT_EQ(cu_->read_vgpr(vb_ + 12, 0), bits(1.f));
+    cu_->step();
+    EXPECT_EQ(cu_->read_vgpr(vb_ + 13, 0), bits(0.5f));
+    EXPECT_EQ(cu_->memory_wait_diagnostic_count() - before, unsigned(threshold < 0));
+    pc += 128;
+  }
+}
+
+TEST_P(Gfx10PixelTransferTest, GetLodChecksHelperCoordinatesOnlyForBoundAllocatedResults) {
+  const auto bits = [](float value) { return std::bit_cast<uint32_t>(value); };
+  Image image;
+  image.width = image.height = 64;
+  image.mip_levels = 4;
+  image.last_level = 3;
+  cu_->write_sgpr(sb_ + 8, 2 | (2 << 3) | (2 << 6));
+  cu_->write_sgpr(sb_ + 9, 0xfffu << 12);
+  cu_->write_sgpr(sb_ + 10, 1u << 26);
+  wf_->set_lds_size(64);
+  wf_->lds().write32(0, bits(4.f / 64));
+  const auto load = rdna1::build_ds(rdna1::kDsReadB32Ds, {.addr = 20, .vdst = 0});
+  uint64_t pc = 0x8400;
+  for (const auto &[bound, dst] : {std::pair{true, uint8_t{30}}, std::pair{true, uint8_t{31}},
+                                   std::pair{false, uint8_t{30}}}) {
+    SCOPED_TRACE(testing::Message() << "bound=" << bound << " dst=" << +dst);
+    const auto query = rdna1::build_mimg(
+        rdna1::kImageGetLodMimg, {.dim = 1, .dmask = 3, .vaddr = 0, .vdata = dst, .ssamp = 2});
+    image.rdna_format = bound ? 22 : 0;
+    bind_image(image);
+    wf_->ensure_memory_wait_scoreboard().clear();
+    for (unsigned lane = 0; lane < 4; ++lane) {
+      write_coordinates(lane, {0, 0, 0});
+      cu_->write_vgpr(vb_ + 20, lane, 0);
+    }
+    cu_->write_vgpr(vb_ + 30, 0, 0xdeadbeef);
+    cu_->write_vgpr(vb_ + 31, 0, 0xdeadbeef);
+    wf_->set_exec(2);
+    memory_.write32(pc, load[0]);
+    memory_.write32(pc + 4, load[1]);
+    memory_.write32(pc + 8, query[0]);
+    memory_.write32(pc + 12, query[1]);
+    wf_->pc = pc;
+    for (unsigned i = 0; i < 8 && wf_->pc != pc + 8; ++i)
+      cu_->step();
+    ASSERT_EQ(wf_->pc, pc + 8);
+    EXPECT_EQ(cu_->read_vgpr(vb_, 1), bits(4.f / 64));
+    wf_->set_exec(1);
+    const auto before = cu_->memory_wait_diagnostic_count();
+    cu_->step();
+    EXPECT_EQ(wf_->pc, pc + 16);
+    const bool fits = dst == 30;
+    const uint32_t expected = fits ? bits(bound ? 2.f : 0.f) : 0xdeadbeef;
+    EXPECT_EQ(cu_->read_vgpr(vb_ + 30, 0), expected);
+    EXPECT_EQ(cu_->read_vgpr(vb_ + 31, 0), expected);
+    EXPECT_EQ(cu_->memory_wait_diagnostic_count() - before, unsigned(bound && fits));
+    pc += 128;
+  }
+}
+
 TEST_F(Rdna4ImageMemoryTest, ResourceQueryTracksOnlyTheEncodedLodRegister) {
   Image image;
   image.width = 8;
@@ -5309,6 +5449,7 @@ TEST_P(Gfx11ImageFeedbackTest, ImplicitDerivativesCheckOnlyContributingHelperCoo
     memory_.write32(kBase + layout->byte_offset(0, 0, 0), 100 + mip);
   }
   const auto query = rdna3_5::kImageGetLodMimg;
+  const auto offset = rdna3_5::kImageSampleOMimg;
   const auto gradients = rdna3_5::kImageSampleDMimg;
   const auto sample = rdna3_5::kImageSampleMimg;
   struct Case {
@@ -5317,8 +5458,18 @@ TEST_P(Gfx11ImageFeedbackTest, ImplicitDerivativesCheckOnlyContributingHelperCoo
     bool hazard, a16 = false, nsa = false, mip_filter = true;
   };
   const Case cases[]{
-      {gradients, 2, 1, 0, 0, false}, // Explicit dX/dx at helper lane.
-      {gradients, 6, 1, 0, 0, false}, // Explicit-gradient sample's X.
+      {query, 2, 3, 3, 0, true},
+      {query, 2, 1, 0, 2, true},
+      {query, 2, 2, 0, 2, true},
+      {query, 2, 3, 0, 0, false},
+      {query, 2, 5, 4, 2, true},
+      {query, 2, 1, 4, 0, false},
+      {query, 12, 2, 0, 2, true, false, true}, // NSA takes Y from v12.
+      {query, 2, 1, 0, 2, true, true},         // A16 takes Y from v2.hi.
+      {offset, 12, 2, 0, 2, true, true, true}, // [v2(offset), v12(packed XY)]
+      {offset, 2, 1, 0, 0, false, true, true}, // Per-lane offset needs no helpers.
+      {gradients, 2, 1, 0, 0, false},          // Explicit dX/dx at helper lane.
+      {gradients, 6, 1, 0, 0, false},          // Explicit-gradient sample's X.
       {gradients, 2, 0, 0, 2, true},
       {sample, 2, 1, 0, 2, true},                       // Ordinary descriptor, implicit mip.
       {sample, 2, 1, 0, 0, false, false, false, false}, // Mip filtering disabled.
@@ -5407,7 +5558,7 @@ TEST_P(Gfx11ImageFeedbackTest, PackedArrayCoordinateWaitsSeparateLayerAndGradien
     const auto resource = rdna_descriptor(image, arch());
     for (unsigned i = 0; i < resource.size(); ++i)
       cu_->write_sgpr(sb_ + i, resource[i]);
-    for (bool query : {false}) {
+    for (bool query : {false, true}) {
       const auto words =
           rdna3_5::build_mimg(query ? rdna3_5::kImageGetLodMimg : rdna3_5::kImageSampleMimg,
                               {.dim = 4, .dmask = 1, .a16 = 1, .vaddr = 2, .vdata = 8, .ssamp = 2});
@@ -5673,8 +5824,8 @@ TEST_P(Gfx11ImageFeedbackTest, R128ControlsScalarResourceReadsAcrossMimgForms) {
   auto &state = wf_->ensure_memory_wait_scoreboard();
   for (uint16_t opcode :
        {rdna3_5::kImageLoadMimg, rdna3_5::kImageStoreMimg, rdna3_5::kImageAtomicAddMimg,
-        rdna3_5::kImageGetResinfoMimg, rdna3_5::kImageBvhIntersectRayMimg,
-        rdna3_5::kImageBvh64IntersectRayMimg}) {
+        rdna3_5::kImageSampleLzOMimg, rdna3_5::kImageGetLodMimg, rdna3_5::kImageGetResinfoMimg,
+        rdna3_5::kImageBvhIntersectRayMimg, rdna3_5::kImageBvh64IntersectRayMimg}) {
     const bool bvh = opcode == rdna3_5::kImageBvhIntersectRayMimg ||
                      opcode == rdna3_5::kImageBvh64IntersectRayMimg;
     const bool sampler =
@@ -5728,7 +5879,7 @@ TEST_P(Gfx11ImageFeedbackTest, QueriesSuppressTheEntireOutOfRangeRegisterTuple) 
     cu_->write_sgpr(sb_ + i, 0);
   auto decoder = Decoder::create(arch());
   constexpr uint32_t sentinel = 0xdeadbeef;
-  for (auto opcode : {rdna3_5::kImageGetResinfoMimg}) {
+  for (auto opcode : {rdna3_5::kImageGetLodMimg, rdna3_5::kImageGetResinfoMimg}) {
     for (uint8_t dst : {30, 31}) {
       SCOPED_TRACE(testing::Message() << opcode << " v" << unsigned(dst));
       rdna3_5::MimgBuilderFields fields{};
@@ -5849,7 +6000,8 @@ TEST_P(Gfx11ImageFeedbackTest, DroppedFetchReservesTfeAndResourceQueryReturnsZer
 
 TEST_P(Gfx11ImageFeedbackTest, GatherAndMsaaRequireOneSelectedComponent) {
   auto decoder = Decoder::create(arch());
-  for (const auto opcode : {rdna3_5::kImageGather4LzMimg, rdna3_5::kImageMsaaLoadMimg}) {
+  for (const auto opcode :
+       {rdna3_5::kImageGather4Mimg, rdna3_5::kImageGather4LzMimg, rdna3_5::kImageMsaaLoadMimg}) {
     for (uint8_t mask : {0u, 3u}) {
       for (const bool tfe : {false, true}) {
         const auto words = rdna3_5::build_mimg(
@@ -5863,6 +6015,48 @@ TEST_P(Gfx11ImageFeedbackTest, GatherAndMsaaRequireOneSelectedComponent) {
         EXPECT_TRUE(cu_->execute_instruction(decoded.value().get(), *wf_).failed());
         EXPECT_EQ(wf_->instruction_execution_error(),
                   amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+      }
+    }
+  }
+}
+
+TEST_P(Gfx11ImageFeedbackTest, GetLodChecksFeedbackAllocationAndKeepsSuccessfulLanes) {
+  auto decoder = Decoder::create(arch());
+  auto image = rdna_descriptor(Image{}, arch());
+  image[5] |= 256u << 8; // Warn for a requested LOD below one.
+  for (unsigned i = 0; i < image.size(); ++i)
+    cu_->write_sgpr(sb_ + i, image[i]);
+  for (unsigned i = 8; i < 12; ++i)
+    cu_->write_sgpr(sb_ + i, 0);
+  cu_->write_sgpr(sb_ + 10, 1u << 26); // Mipmapped sampling can warn, GET_LOD cannot.
+  for (unsigned lane = 0; lane < 4; ++lane)
+    write_coordinates(lane, {0, 0, 0});
+  constexpr uint32_t sentinel = 0xdeadbeef;
+  for (uint8_t mask : {0u, 3u}) {
+    for (unsigned flags = 0; flags < 4; ++flags) {
+      const bool tfe = flags & 1, lwe = flags & 2;
+      const unsigned data_words = mask == 0 ? 1 : 2;
+      for (const bool allocate_status : {false, true}) {
+        const uint8_t dst = 32 - data_words - allocate_status;
+        SCOPED_TRACE(testing::Message()
+                     << "mask=" << +mask << " flags=" << flags << " dst=" << +dst);
+        for (unsigned reg = dst; reg < 32; ++reg)
+          for (unsigned lane : {0u, 1u, 2u})
+            cu_->write_vgpr(vb_ + reg, lane, sentinel);
+        const auto words = rdna3_5::build_mimg(
+            rdna3_5::kImageGetLodMimg,
+            {.dim = 1, .dmask = mask, .vdata = dst, .tfe = tfe, .lwe = lwe, .ssamp = 2});
+        auto decoded = decoder->decode_window(words);
+        ASSERT_TRUE(decoded.succeeded());
+        ASSERT_TRUE(cu_->execute_instruction(decoded.value().get(), *wf_).succeeded());
+        const bool suppressed = (tfe || lwe) && !allocate_status;
+        for (unsigned lane : {0u, 1u, 2u}) {
+          for (unsigned reg = dst; reg < dst + data_words; ++reg)
+            EXPECT_EQ(cu_->read_vgpr(vb_ + reg, lane), suppressed || lane == 1 ? sentinel : 0u);
+          if (allocate_status) {
+            EXPECT_EQ(cu_->read_vgpr(vb_ + dst + data_words, lane), sentinel);
+          }
+        }
       }
     }
   }
@@ -6004,7 +6198,7 @@ TEST_P(Gfx11ImageFeedbackTest, GatherFloatPayloadAcrossLayoutsAndFeedback) {
         l2_.invalidate_all();
         write_coordinates(0, {0x3f800000u, 0x3f800000u, 0});
         for (bool lwe : {false, true}) {
-          for (uint16_t opcode : {rdna3_5::kImageGather4LzMimg}) {
+          for (uint16_t opcode : {rdna3_5::kImageGather4LzMimg, rdna3_5::kImageGather4LMimg}) {
             SCOPED_TRACE(testing::Message()
                          << "swizzle=" << swizzle << " threshold=" << threshold << " lwe=" << lwe
                          << " opcode=" << opcode << " payload=" << std::hex << payload);
@@ -6020,6 +6214,427 @@ TEST_P(Gfx11ImageFeedbackTest, GatherFloatPayloadAcrossLayoutsAndFeedback) {
         }
       }
     }
+  }
+}
+
+TEST_P(Gfx11ImageFeedbackTest, VolumeShaderClampSelectsTheFilterAndRoundsBeforeWarning) {
+  const auto bits = [](float value) { return std::bit_cast<uint32_t>(value); };
+  Image image{.width = 8,
+              .height = 8,
+              .depth = 4,
+              .pitch = 1,
+              .type = amdgpu::kImage3d,
+              .mip_levels = 4,
+              .last_level = 3,
+              .rdna_format = 22};
+  auto resource = rdna_descriptor(image, arch());
+  resource[5] |= 129u << 8; // LWE threshold of 129/256.
+  for (unsigned i = 0; i < resource.size(); ++i)
+    cu_->write_sgpr(sb_ + i, resource[i]);
+  cu_->write_sgpr(sb_ + 8, 2u | 2u << 3 | 2u << 6);
+  cu_->write_sgpr(sb_ + 9, 0xfffu << 12);
+  for (unsigned i = 0; i < 4096; ++i)
+    memory_.write32(kBase + 4 * i, bits(float(i)));
+  wf_->set_exec(1);
+  for (unsigned lane = 0; lane < 4; ++lane)
+    write_coordinates(lane, {bits(0.25f), bits(0.25f), 0});
+  rdna3_5::MimgBuilderFields fields{};
+  fields.dim = 2;
+  fields.dmask = fields.lwe = 1;
+  fields.vdata = 8;
+  fields.ssamp = 2;
+  for (bool linear_mag : {false, true}) {
+    cu_->write_sgpr(sb_ + 10, (1u << 26) | (1u << 22) | (uint32_t(linear_mag) << 20));
+    for (float clamp : {0.0f, 128.25f / 256, 128.5f / 256, 128.75f / 256, 1.0f}) {
+      SCOPED_TRACE(testing::Message() << "linear_mag=" << linear_mag << " clamp=" << clamp);
+      cu_->write_vgpr(vb_ + 3, 0, bits(clamp));
+      wf_->set_mode_raw(wf_->mode_raw() & ~(1u << 10));
+      fill_destination(0xdeadbeef);
+      ASSERT_NO_FATAL_FAILURE(issue_image(rdna3_5::kImageSampleClMimg, fields));
+      const bool warning = clamp <= 128.5f / 256;
+      const uint32_t status = warning ? (clamp == 0 ? 2u : 0x10002u) : 0xdeadbeefu;
+      EXPECT_EQ(cu_->read_vgpr(vb_ + 9, 0), status);
+      EXPECT_EQ(bool(wf_->mode_raw() & (1u << 10)), warning);
+      if (clamp == 0 || clamp == 1) {
+        const float expected = clamp == 1 ? 224.5f : linear_mag ? 545.5f : 578.0f;
+        EXPECT_EQ(cu_->read_vgpr(vb_ + 8, 0), bits(expected));
+      }
+    }
+  }
+}
+
+TEST_P(Gfx11ImageFeedbackTest, VolumeQueriesAndSamplesReadAllThreeAxes) {
+  const auto bits = [](float value) { return std::bit_cast<uint32_t>(value); };
+  const Image image{.width = 4,
+                    .height = 4,
+                    .depth = 4,
+                    .pitch = 1,
+                    .type = amdgpu::kImage3d,
+                    .mip_levels = 3,
+                    .last_level = 2,
+                    .rdna_format = 22};
+  const auto resource = rdna_descriptor(image, arch());
+  for (unsigned i = 0; i < resource.size(); ++i)
+    cu_->write_sgpr(sb_ + i, resource[i]);
+  cu_->write_sgpr(sb_ + 8, 2 | (2 << 3) | (2 << 6));
+  cu_->write_sgpr(sb_ + 9, 0xfffu << 12);
+  cu_->write_sgpr(sb_ + 10, 1u << 26);
+  const amdgpu::ImageLayout layout{
+      .width = 4, .height = 4, .depth = 4, .element_bytes = 4, .dimensions = 3, .mip_levels = 3};
+  for (unsigned mip = 0; mip < 3; ++mip) {
+    const auto addresses =
+        amdgpu::ImageAddressing::prepare(cu_->image_address_config(), layout, mip);
+    ASSERT_TRUE(addresses);
+    memory_.write32(kBase + addresses->byte_offset(0, 0, 0), bits(float(mip + 1)));
+    if (addresses->contains(1, 0, 1))
+      memory_.write32(kBase + addresses->byte_offset(1, 0, 1), bits(8.0f + mip));
+  }
+  wf_->set_exec(1);
+  for (unsigned lane = 0; lane < 4; ++lane)
+    write_coordinates(lane, {0, 0, bits(lane == 1 ? 0.5f : 0.0f)});
+  ASSERT_NO_FATAL_FAILURE(
+      issue_image(rdna3_5::kImageGetLodMimg, {.dim = 2, .dmask = 3, .vdata = 8, .ssamp = 2}));
+  EXPECT_EQ(cu_->read_vgpr(vb_ + 8, 0), bits(1));
+  EXPECT_EQ(cu_->read_vgpr(vb_ + 9, 0), bits(1));
+
+  // Two DWORDs per direction: XY share a word, and Z occupies the next low half.
+  for (unsigned axis = 0; axis < 3; ++axis) {
+    for (unsigned direction = 0; direction < 2; ++direction) {
+      for (unsigned reg = 0; reg < 7; ++reg)
+        cu_->write_vgpr(vb_ + reg, 0, reg == 1 || reg == 3 ? 0x7e000000 : 0);
+      const unsigned reg = direction * 2 + axis / 2;
+      cu_->write_vgpr(vb_ + reg, 0,
+                      (axis == 2 ? 0x7e000000u : 0u) | (uint32_t{0x3800} << (16 * (axis % 2))));
+      ASSERT_NO_FATAL_FAILURE(issue_image(rdna3_5::kImageSampleDG16Mimg,
+                                          {.dim = 2, .dmask = 1, .vdata = 8, .ssamp = 2}));
+      EXPECT_EQ(cu_->read_vgpr(vb_ + 8, 0), bits(2));
+    }
+  }
+  auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+  auto observer = std::make_unique<ImageInputBytes>();
+  auto *inputs = observer.get();
+  ASSERT_TRUE(group->add(std::move(observer)));
+  cu_->set_plugin_group(group);
+  auto &scoreboard = wf_->ensure_memory_wait_scoreboard();
+  for (const bool offset : {false, true}) {
+    const auto opcode = offset ? rdna3_5::kImageSampleDOG16Mimg : rdna3_5::kImageSampleDG16Mimg;
+    const rdna3_5::MimgBuilderFields fields{.dim = 2, .dmask = 1, .vdata = 8, .ssamp = 2};
+    for (unsigned reg = 0; reg < 7 + unsigned(offset); ++reg)
+      cu_->write_vgpr(vb_ + reg, 0, 0);
+    cu_->write_vgpr(vb_ + offset + 1, 0, 0x7e003800);
+    inputs->read.fill(0);
+    ASSERT_NO_FATAL_FAILURE(issue_image(opcode, fields));
+    EXPECT_EQ(cu_->read_vgpr(vb_ + 8, 0), bits(2));
+    auto decoded = Decoder::create(arch())->decode_window(rdna3_5::build_mimg(opcode, fields));
+    ASSERT_TRUE(decoded.succeeded());
+    for (uint16_t word = 0; word < 4; ++word) {
+      const uint16_t reg = word + offset;
+      const uint8_t live = word % 2 ? 0x3 : 0xf;
+      EXPECT_EQ(inputs->read[reg], live);
+      for (const uint8_t bytes : {0x3, 0xc}) {
+        SCOPED_TRACE(testing::Message() << "offset=" << offset << " vgpr=" << reg
+                                        << " pending bytes=" << unsigned(bytes));
+        unsigned warnings = 0;
+        const auto kind = amdgpu::WaitCounterKind::Load;
+        scoreboard.clear();
+        scoreboard.bind(0x200, &warnings,
+                        [](void *ptr, const auto &) { ++*static_cast<unsigned *>(ptr); });
+        scoreboard.add({scoreboard.issue(kind), 0x100, 1, {RegClass::VGPR, reg, 1}, kind, bytes});
+        scoreboard.check_instruction(*decoded.value(), *wf_);
+        EXPECT_EQ(warnings, unsigned(bool(inputs->read[reg] & bytes)));
+      }
+    }
+    scoreboard.clear();
+  }
+  cu_->write_sgpr(sb_ + 10, 0);           // SAMPLE_O uses the base level.
+  cu_->write_vgpr(vb_, 0, 1 | (1 << 16)); // X and Z offsets of +1.
+  for (unsigned reg = 1; reg <= 3; ++reg)
+    cu_->write_vgpr(vb_ + reg, 0, bits(0.125f));
+  ASSERT_NO_FATAL_FAILURE(
+      issue_image(rdna3_5::kImageSampleOMimg, {.dim = 2, .dmask = 1, .vdata = 8, .ssamp = 2}));
+  EXPECT_EQ(cu_->read_vgpr(vb_ + 8, 0), bits(8));
+
+  cu_->write_sgpr(sb_ + 10, 1u << 26); // Restore point mip selection.
+  auto &clamp_scoreboard = wf_->ensure_memory_wait_scoreboard();
+  for (bool packed : {false, true}) {
+    const rdna3_5::MimgBuilderFields fields{
+        .dim = 2, .dmask = 1, .a16 = uint8_t(packed), .vdata = 8, .ssamp = 2};
+    auto decoded = Decoder::create(arch())->decode_window(
+        rdna3_5::build_mimg(rdna3_5::kImageSampleClMimg, fields));
+    ASSERT_TRUE(decoded.succeeded());
+    for (bool gradient : {false, true}) {
+      for (bool clamp : {false, true}) {
+        SCOPED_TRACE(testing::Message()
+                     << "A16=" << packed << " gradient=" << gradient << " minimum=" << clamp);
+        for (unsigned lane = 0; lane < 4; ++lane) {
+          if (packed) {
+            cu_->write_vgpr(vb_, lane, 0);
+            cu_->write_vgpr(vb_ + 1, lane,
+                            (gradient && lane == 1 ? 0x3c00u : 0u) |
+                                (clamp && lane == 0 ? 0x3c000000u : 0u));
+          } else {
+            write_coordinates(lane, {0, 0, gradient && lane == 1 ? bits(1.0f) : 0});
+            cu_->write_vgpr(vb_ + 3, lane, clamp && lane == 0 ? bits(1.0f) : 0);
+          }
+        }
+        ASSERT_NO_FATAL_FAILURE(issue_image(rdna3_5::kImageSampleClMimg, fields));
+        EXPECT_EQ(cu_->read_vgpr(vb_ + 8, 0), bits(gradient ? 3.0f : clamp ? 2.0f : 1.0f));
+      }
+    }
+    const uint16_t clamp_register = packed ? 1 : 3;
+    for (unsigned lane : {0u, 1u}) {
+      for (uint8_t bytes : {0x3, 0xc}) {
+        unsigned warnings = 0;
+        const auto kind = amdgpu::WaitCounterKind::Load;
+        clamp_scoreboard.clear();
+        clamp_scoreboard.bind(0x200, &warnings,
+                              [](void *ptr, const auto &) { ++*static_cast<unsigned *>(ptr); });
+        clamp_scoreboard.add({clamp_scoreboard.issue(kind),
+                              0x100,
+                              uint64_t{1} << lane,
+                              {RegClass::VGPR, clamp_register, 1},
+                              kind,
+                              bytes});
+        clamp_scoreboard.check_instruction(*decoded.value(), *wf_);
+        // With A16, the helper reads only Z in the low half. The clamp is active-lane only.
+        EXPECT_EQ(warnings, unsigned(lane == 0 || (packed && bytes == 0x3)));
+      }
+    }
+    clamp_scoreboard.clear();
+  }
+}
+
+TEST_P(Gfx11ImageFeedbackTest, OneDimensionalViewPreservesFixedLodPrefixReadsAcrossFeedback) {
+  const auto resource =
+      rdna_descriptor({.width = 4, .height = 1, .pitch = 64, .rdna_format = 22}, arch());
+  for (unsigned i = 0; i < resource.size(); ++i)
+    cu_->write_sgpr(sb_ + i, resource[i]);
+  cu_->write_sgpr(sb_ + 8, 2 | (2 << 3) | (2 << 6)); // Edge, point, no mip selection.
+  constexpr uint32_t texel = std::bit_cast<uint32_t>(3.f), sentinel = 0xdeadbeef;
+  memory_.write32(kBase + 4, texel);
+  wf_->set_exec(1);
+  auto decoder = Decoder::create(arch());
+  auto &waits = wf_->ensure_memory_wait_scoreboard();
+  unsigned reports = 0;
+  for (const auto opcode : {rdna3_5::kImageSampleBMimg, rdna3_5::kImageSampleDG16Mimg}) {
+    const unsigned x = opcode == rdna3_5::kImageSampleBMimg ? 1u : 2u;
+    cu_->write_vgpr(vb_ + x, 0, std::bit_cast<uint32_t>(.375f));
+    for (bool tfe : {false, true}) {
+      SCOPED_TRACE(testing::Message() << "opcode=" << opcode << " tfe=" << tfe);
+      const rdna3_5::MimgBuilderFields fields{
+          .dim = amdgpu::kImageDim1d, .dmask = 1, .vdata = 8, .tfe = tfe, .ssamp = 2};
+      auto inst = decoder->decode_window(rdna3_5::build_mimg(opcode, fields));
+      ASSERT_TRUE(inst.succeeded());
+      for (uint16_t reg = 0; reg <= x; ++reg) {
+        waits.clear();
+        reports = 0;
+        waits.bind(0x200, &reports, [](void *p, const auto &) { ++*static_cast<unsigned *>(p); });
+        constexpr auto kind = amdgpu::WaitCounterKind::Load;
+        waits.add({waits.issue(kind), 0x100, 1, {RegClass::VGPR, reg, 1}, kind, 0x3});
+        waits.check_instruction(*inst.value(), *wf_);
+        EXPECT_EQ(reports, unsigned(reg == x));
+      }
+      waits.clear();
+      fill_destination(sentinel);
+      ASSERT_NO_FATAL_FAILURE(issue_image(opcode, fields));
+      EXPECT_EQ(cu_->read_vgpr(vb_ + 8, 0), texel);
+      EXPECT_EQ(cu_->read_vgpr(vb_ + 9, 0), sentinel);
+    }
+  }
+}
+
+TEST_P(Gfx11ImageFeedbackTest, SingleLevelFilteredFeedbackReadsShaderBiasAndGradient) {
+  auto resource =
+      rdna_descriptor({.width = 64, .height = 64, .pitch = 1, .rdna_format = 2}, arch());
+  for (unsigned i = 0; i < resource.size(); ++i)
+    cu_->write_sgpr(sb_ + i, resource[i]);
+  cu_->write_sgpr(sb_ + 9, 0xfffu << 12);
+  cu_->write_sgpr(sb_ + 10, (1u << 26) | (1u << 22) | (1u << 20)); // Point mip, linear XY.
+  auto decoder = Decoder::create(arch());
+  auto &scoreboard = wf_->ensure_memory_wait_scoreboard();
+  wf_->set_exec(15);
+  for (const uint16_t opcode : {rdna3_5::kImageSampleBMimg, rdna3_5::kImageSampleDG16Mimg}) {
+    const bool bias = opcode == rdna3_5::kImageSampleBMimg;
+    struct Feedback {
+      bool lwe, tfe;
+      unsigned threshold;
+    };
+    for (const auto &[lwe, tfe, threshold] : {Feedback{true, false, 129},
+                                              {true, false, 0},
+                                              {false, true, 0},
+                                              {false, false, 129},
+                                              {false, false, 0}}) {
+      SCOPED_TRACE(testing::Message() << "opcode=" << opcode << " lwe=" << lwe << " tfe=" << tfe
+                                      << " min_lod_warn=" << threshold);
+      cu_->write_sgpr(sb_ + 5, resource[5] | (threshold << 8));
+      const rdna3_5::MimgBuilderFields fields{
+          .dim = 1, .dmask = 1, .vdata = 8, .tfe = tfe, .lwe = lwe, .ssamp = 2};
+      auto decoded = decoder->decode_window(rdna3_5::build_mimg(opcode, fields));
+      ASSERT_TRUE(decoded.succeeded());
+      unsigned hazards = 0;
+      const auto counter = amdgpu::WaitCounterKind::Load;
+      scoreboard.clear();
+      scoreboard.bind(0x200, &hazards,
+                      [](void *ctx, const auto &) { ++*static_cast<unsigned *>(ctx); });
+      scoreboard.add({scoreboard.issue(counter), 0x100, 1, {RegClass::VGPR, 0, 1}, counter, 0x3});
+      scoreboard.check_instruction(*decoded.value(), *wf_);
+      EXPECT_EQ(hazards, unsigned(lwe || tfe || threshold));
+      scoreboard.clear();
+      if (!lwe || !threshold)
+        continue;
+      for (bool large_footprint : {false, true}) {
+        for (unsigned lane = 0; lane < 4; ++lane) {
+          cu_->write_vgpr(vb_, lane, large_footprint ? (bias ? 0x40000000u : 0x3400u) : 0u);
+          if (!bias)
+            cu_->write_vgpr(vb_ + 1, lane, 0u);
+          const unsigned first_coord = bias ? 1u : 2u;
+          cu_->write_vgpr(vb_ + first_coord, lane, std::bit_cast<uint32_t>(float(lane & 1) / 64.f));
+          cu_->write_vgpr(vb_ + first_coord + 1, lane,
+                          std::bit_cast<uint32_t>(float(lane >> 1) / 64.f));
+          cu_->write_vgpr(vb_ + 9, lane, 0xdeadbeef);
+        }
+        ASSERT_NO_FATAL_FAILURE(issue_image(opcode, fields));
+        for (unsigned lane = 0; lane < 4; ++lane)
+          EXPECT_EQ(cu_->read_vgpr(vb_ + 9, lane), large_footprint ? 0xdeadbeefu : 2u);
+      }
+    }
+  }
+}
+
+TEST_P(Gfx11ImageFeedbackTest, PackedBiasReadMatchesTheWaitMask) {
+  class Observer final : public ExecutionPlugin {
+  public:
+    Observer() : ExecutionPlugin("packed_bias_probe") {}
+    uint8_t bias_bytes = 0;
+    void onAmdgpuReadVgprLanes(const amdgpu::Wavefront *wave, uint32_t reg, uint64_t lanes,
+                               uint8_t bytes) override {
+      if (reg == wave->vgpr_alloc().base && (lanes & 1))
+        bias_bytes |= bytes;
+    }
+  };
+  auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+  auto plugin = std::make_unique<Observer>();
+  auto *observer = plugin.get();
+  ASSERT_TRUE(group->add(std::move(plugin)));
+  cu_->set_plugin_group(group);
+  const auto words = rdna_descriptor(
+      Image{
+          .width = 4, .height = 4, .pitch = 1, .mip_levels = 3, .last_level = 2, .rdna_format = 22},
+      arch());
+  for (unsigned i = 0; i < words.size(); ++i)
+    cu_->write_sgpr(sb_ + i, words[i]);
+  cu_->write_sgpr(sb_ + 9, 0xfffu << 12);
+  cu_->write_sgpr(sb_ + 10, 1u << 26);
+  for (unsigned i = 0; i < 4096; i += 4)
+    memory_.write32(kBase + i, 0x3f800000);
+  wf_->set_exec(15);
+  for (unsigned lane = 0; lane < 4; ++lane) {
+    write_coordinates(lane,
+                      {0x7e003c00, (lane & 1 ? 0x3800u : 0u) | (lane & 2 ? 0x38000000u : 0u), 0});
+  }
+  const auto fields =
+      rdna3_5::MimgBuilderFields{.dim = 1, .dmask = 1, .a16 = 1, .vdata = 8, .ssamp = 2};
+  const auto instruction = rdna3_5::build_mimg(rdna3_5::kImageSampleBMimg, fields);
+  auto decoded = Decoder::create(arch())->decode_window(instruction);
+  ASSERT_TRUE(decoded.succeeded());
+  auto &state = wf_->ensure_memory_wait_scoreboard();
+  for (const auto bytes : {0xcu, 0x3u}) {
+    unsigned hazards = 0;
+    const auto counter = amdgpu::WaitCounterKind::Load;
+    state.clear();
+    state.bind(0x200, &hazards, [](void *ctx, const auto &) { ++*static_cast<unsigned *>(ctx); });
+    state.add({state.issue(counter),
+               0x100,
+               1,
+               {RegClass::VGPR, 0, 1},
+               counter,
+               static_cast<uint8_t>(bytes)});
+    state.check_instruction(*decoded.value(), *wf_);
+    EXPECT_EQ(hazards, unsigned(bytes == 3));
+  }
+  state.clear();
+  ASSERT_NO_FATAL_FAILURE(issue_image(rdna3_5::kImageSampleBMimg, fields));
+  EXPECT_EQ(observer->bias_bytes, 0x3u);
+}
+
+TEST_P(Gfx11ImageFeedbackTest, QuantizesShaderLodInputsBeforeWarningComparison) {
+  Image image;
+  image.width = image.height = 64;
+  image.pitch = 1;
+  image.mip_levels = 4;
+  image.last_level = 3;
+  image.rdna_format = 22;
+  auto resource = rdna_descriptor(image, arch());
+  for (unsigned i = 0; i < resource.size(); ++i)
+    cu_->write_sgpr(sb_ + i, resource[i]);
+  cu_->write_sgpr(sb_ + 8, 2 | (2 << 3));
+  cu_->write_sgpr(sb_ + 9, 640u << 12);
+  cu_->write_sgpr(sb_ + 10, 1u << 26);
+  wf_->set_exec(15);
+  for (const auto op : {rdna3_5::kImageSampleBMimg, rdna3_5::kImageSampleClMimg}) {
+    const bool bias = op == rdna3_5::kImageSampleBMimg;
+    for (const bool odd_gradient : {false, true}) {
+      const unsigned threshold = 128 + unsigned(odd_gradient);
+      cu_->write_sgpr(sb_ + 5, resource[5] | (threshold << 8));
+      for (const float input : {127.25f / 256, 127.5f / 256}) {
+        SCOPED_TRACE(testing::Message() << op << " odd=" << odd_gradient << " input=" << input);
+        for (unsigned lane = 0; lane < 4; ++lane) {
+          const float u = (lane & 1) * (odd_gradient ? 1.0f + 1.0f / 256 : 1.0f) / 64;
+          const float v = (lane >> 1) / 64.0f;
+          const auto bits = [](float x) { return std::bit_cast<uint32_t>(x); };
+          write_coordinates(lane, bias ? std::array{bits(input), bits(u), bits(v)}
+                                       : std::array{bits(u), bits(v), bits(input)});
+        }
+        wf_->set_mode_raw(wf_->mode_raw() & ~(1u << 10));
+        cu_->write_vgpr(vb_ + 9, 0, 0xdeadbeef);
+        ASSERT_NO_FATAL_FAILURE(
+            issue_image(op, {.dim = 1, .dmask = 1, .vdata = 8, .lwe = 1, .ssamp = 2}));
+        // GET_LOD measures 1/256 for the odd gradient. The W7900 rounds 127.5
+        // to 128 before adding the bias, so the sum is 129 rather than 128.
+        const bool warns = input < 127.5f / 256 || (!bias && odd_gradient);
+        const uint32_t feedback_level = odd_gradient && (bias || input == 127.5f / 256) ? 1 : 0;
+        EXPECT_EQ(cu_->read_vgpr(vb_ + 9, 0), warns ? (feedback_level << 16) | 2u : 0xdeadbeefu);
+        EXPECT_EQ(bool(wf_->mode_raw() & (1u << 10)), warns);
+      }
+    }
+  }
+}
+
+TEST_P(Gfx11ImageFeedbackTest, QuantizesVolumeAndSnormShaderBiasBeforeAddingTheFootprint) {
+  wf_->set_exec(15);
+  for (const bool volume : {false, true}) {
+    Image image{.width = 64,
+                .height = 64,
+                .depth = volume ? 64u : 1u,
+                .pitch = 1,
+                .type = volume ? amdgpu::kImage3d : amdgpu::kImage2d,
+                .mip_levels = 4,
+                .last_level = 3,
+                .rdna_format = volume ? 22u : 2u};
+    auto descriptor = rdna_descriptor(image, arch());
+    descriptor[5] |= 129u << 8;
+    for (uint32_t word = 0; word < descriptor.size(); ++word)
+      cu_->write_sgpr(sb_ + word, descriptor[word]);
+    cu_->write_sgpr(sb_ + 8, 2 | (2 << 3) | (2 << 6));
+    cu_->write_sgpr(sb_ + 9, 640u << 12);
+    cu_->write_sgpr(sb_ + 10, (1u << 26) | (1u << 22) | (1u << 20));
+    for (uint32_t lane = 0; lane < 4; ++lane) {
+      const float u = (lane & 1) * (1.0f + 1.0f / 256) / 64;
+      const float v = (lane >> 1) / 64.0f;
+      write_coordinates(lane, {std::bit_cast<uint32_t>(127.5f / 256), std::bit_cast<uint32_t>(u),
+                               std::bit_cast<uint32_t>(v)});
+      cu_->write_vgpr(vb_ + 3, lane, 0);
+    }
+    wf_->set_mode_raw(wf_->mode_raw() & ~(1u << 10));
+    cu_->write_vgpr(vb_ + 9, 0, 0xdeadbeef);
+    rdna3_5::MimgBuilderFields fields{};
+    fields.dim = volume ? 2 : 1;
+    fields.dmask = fields.lwe = 1;
+    fields.vdata = 8;
+    fields.ssamp = 2;
+    ASSERT_NO_FATAL_FAILURE(issue_image(rdna3_5::kImageSampleBMimg, fields));
+    EXPECT_EQ(cu_->read_vgpr(vb_ + 9, 0), 0xdeadbeefu);
+    EXPECT_EQ(wf_->mode_raw() & (1u << 10), 0u);
   }
 }
 
@@ -6057,6 +6672,7 @@ TEST_P(Gfx11ImageFeedbackTest, LodWarningsMatchTheSampleAndSetStickyMode) {
            Case{rdna3_5::kImageSampleLMimg, 1, 0.5f, 0, true, true, 0x10002, true, true},
            Case{rdna3_5::kImageSampleLMimg, 2, 0.5f, 0, true, true, 2, true, true},
            Case{rdna3_5::kImageSampleLMimg, 1, 2.0f, 0, true, true, initial, false, true},
+           Case{rdna3_5::kImageGetLodMimg, 1, 0.0f, 0, true, true, initial, true, false},
            Case{rdna3_5::kImageGather4LzMimg, 1, 0.0f, 320, true, true, 2, true, true},
        }) {
     SCOPED_TRACE(testing::Message()
@@ -6104,7 +6720,8 @@ TEST_P(Gfx11ImageFeedbackTest, UnfilteredSamplesAndQueriesHonorTheFirstResidentM
     for (uint32_t minimum : {0u, 384u, 512u, 1023u}) {
       cu_->write_sgpr(sb_ + 5, resource[5] | (warning << 8) | ((minimum & 31u) << 27));
       cu_->write_sgpr(sb_ + 6, minimum >> 5);
-      for (auto op : {rdna3_5::kImageSampleLMimg, rdna3_5::kImageGather4LzMimg}) {
+      for (auto op : {rdna3_5::kImageSampleLMimg, rdna3_5::kImageGather4LMimg,
+                      rdna3_5::kImageGather4LzMimg, rdna3_5::kImageGetLodMimg}) {
         for (uint8_t flags : {0u, 1u, 2u}) {
           SCOPED_TRACE(testing::Message() << "op=" << op << " min=" << minimum << " warning="
                                           << warning << " flags=" << unsigned(flags));
@@ -6404,18 +7021,8 @@ TEST_P(AllImageAccessTest, LivenessUsesScatteredCoordinatesAndScaledDescriptor) 
 TEST_P(AllImageAccessTest, WaitsAndRegisterReadsUseTheBoundTransferShape) {
   if (arch_is_cdna_4_or_lower(arch()))
     GTEST_SKIP() << "RDNA DIM can supply more coordinates than the resource requires";
-  class Inputs final : public ExecutionPlugin {
-  public:
-    Inputs() : ExecutionPlugin("image_coordinate_inputs") {}
-    void onAmdgpuReadVgprLanes(const amdgpu::Wavefront *wave, uint32_t reg, uint64_t lanes,
-                               uint8_t bytes) override {
-      if (lanes & 1)
-        read.at(reg - wave->vgpr_alloc().base) |= bytes;
-    }
-    std::array<uint8_t, 32> read{};
-  };
   auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
-  auto observer = std::make_unique<Inputs>();
+  auto observer = std::make_unique<ImageInputBytes>();
   auto *inputs = observer.get();
   ASSERT_TRUE(group->add(std::move(observer)));
   cu_->set_plugin_group(group);
@@ -7378,7 +7985,8 @@ TEST_P(ImageSamplerControlTest, Gfx10PackedPrefixesSelectTexelsAndConsumeTheirEn
 
   // All four horizontal taps are adjacent X texels. The comparison reference
   // remains FP32 even when the bias and coordinate pair use FP16.
-  bind_sample_image(Image{.width = 8, .height = 8});
+  const Image gather_image{.width = 8, .height = 8};
+  bind_sample_image(gather_image);
   bind_sampler({.normalized = false});
   cu_->write_sgpr(sb_ + 8, cu_->read_sgpr(sb_ + 8) | (1u << 12)); // LESS
   cu_->write_vgpr(vb_, 0, 1);
@@ -7404,7 +8012,8 @@ TEST_P(ImageSamplerControlTest, Gfx10PackedPrefixesSelectTexelsAndConsumeTheirEn
   ASSERT_EQ(gather.image_sample->taps.size(), 4u);
   for (unsigned tap = 0; tap < 4; ++tap) {
     auto &sample = gather.image_sample->taps[tap];
-    EXPECT_EQ(sample.addresses[0], kBase + 4 * (2 + tap));
+    // GATHER4H starts at floor(X - 1.5) + offset on row floor(Y).
+    EXPECT_EQ(sample.addresses[0], kBase + 4 * (gather_image.pitch + 1 + tap));
     sample.response.resize(wf_->wf_size() * sizeof(float));
     const float depth = float(2 + tap);
     std::memcpy(sample.response.data(), &depth, sizeof(depth));
@@ -8477,6 +9086,110 @@ TEST_P(ImageSamplerControlTest, SparseFeedbackUsesPublishedPagesAndReportsTheReq
   cu_->set_gpu_vm(nullptr);
 }
 
+TEST_P(ImageSamplerControlTest, Gfx12GatherPreservesMirroredTapsWithFeedback) {
+  if (arch() != ROCJITSU_CODE_ARCH_RDNA4)
+    GTEST_SKIP();
+  bind_image(Image{.width = 8, .height = 8, .pitch = 32, .rdna_format = kR32Uint});
+  for (uint32_t y = 0; y < 8; ++y)
+    for (uint32_t x = 0; x < 8; ++x)
+      memory_.write32(kBase + 4 * (y * 32 + x), 10 * y + x);
+  wf_->set_exec(15);
+  auto decoder = Decoder::create(arch());
+  struct Case {
+    float x, y;
+    std::array<uint32_t, 4> taps;
+  };
+  // Captured on gfx1201 with both TFE settings for all three opcodes.
+  constexpr Case cases[] = {{-0.2f, 0.3f, {22, 21, 11, 12}}, {-0.0625f, 0.5f, {40, 40, 30, 30}}};
+  for (const auto opcode :
+       {rdna4::kImageGather4Vsample, rdna4::kImageGather4LVsample, rdna4::kImageGather4LzVsample}) {
+    for (const bool normalized : {false, true}) {
+      const auto clamp = normalized ? Clamp::MirrorOnce : Clamp::Mirror;
+      bind_sampler({.clamp_x = clamp, .clamp_y = clamp, .normalized = normalized});
+      const float scale = normalized ? 1.0f : 8.0f;
+      for (const auto &test : cases) {
+        for (unsigned lane = 0; lane < 4; ++lane)
+          write_coordinates(lane, {std::bit_cast<uint32_t>(test.x * scale),
+                                   std::bit_cast<uint32_t>(test.y * scale), 0});
+        for (const bool tfe : {false, true}) {
+          SCOPED_TRACE(testing::Message() << opcode << " normalized=" << normalized
+                                          << " x=" << test.x << " tfe=" << tfe);
+          auto fields = this->fields<rdna4::VsampleBuilderFields>(2);
+          fields.unorm = false;
+          fields.samp = 8;
+          fields.tfe = tfe;
+          auto decoded = decoder->decode_window(rdna4::build_vsample(opcode, fields));
+          ASSERT_TRUE(decoded.succeeded());
+          ASSERT_TRUE(cu_->execute_instruction(decoded.value().get(), *wf_).succeeded());
+          // Resident gfx1201 gathers preserve the trailing word for both TFE settings.
+          constexpr uint32_t resident_status = 0xdeadbeef;
+          for (unsigned lane = 0; lane < 4; ++lane) {
+            for (unsigned tap = 0; tap < test.taps.size(); ++tap)
+              cu_->write_vgpr(vb_ + 8 + tap, lane, 0xa5a5a5a5);
+            cu_->write_vgpr(vb_ + 12, lane, resident_status);
+          }
+          amdgpu::GlobalMemPipeline pipeline(&cu_->l1_vector(), &l2_);
+          ASSERT_EQ(pipeline.issue(decoded.value().release(), *wf_),
+                    amdgpu::VmAccessOutcome::Complete);
+          for (unsigned lane = 0; lane < 4; ++lane) {
+            SCOPED_TRACE(lane);
+            for (unsigned tap = 0; tap < test.taps.size(); ++tap)
+              EXPECT_EQ(cu_->read_vgpr(vb_ + 8 + tap, lane), test.taps[tap]);
+            EXPECT_EQ(cu_->read_vgpr(vb_ + 12, lane), resident_status);
+          }
+        }
+      }
+    }
+  }
+}
+
+TEST_P(ImageSamplerControlTest, GetLodTinyAnisotropicGradientsUseTheSamplerFloorBeforeBias) {
+  const bool gfx10 = arch() == ROCJITSU_CODE_ARCH_RDNA1 || arch() == ROCJITSU_CODE_ARCH_RDNA2;
+  if (!gfx10 && arch() != ROCJITSU_CODE_ARCH_RDNA3 && arch() != ROCJITSU_CODE_ARCH_RDNA3_5)
+    GTEST_SKIP();
+  bind_sample_image({.width = 64, .height = 64});
+  wf_->set_exec(15);
+  unnormalized_ = false;
+  component_mask_ = 3;
+  auto decoder = Decoder::create(arch());
+  const auto words = [&]() -> std::array<uint32_t, 3> {
+    if (gfx10) {
+      auto encoding = fields<rdna1::MimgBuilderFields>(2);
+      encoding.ssamp = 2;
+      return image_instruction_words(rdna1::build_mimg, rdna1::kImageGetLodMimg, encoding);
+    }
+    auto encoding = fields<rdna3::MimgBuilderFields>(2);
+    encoding.ssamp = 2;
+    return image_instruction_words(rdna3::build_mimg, rdna3::kImageGetLodMimg, encoding);
+  }();
+  // gfx1100 and gfx1201 raw LOD captures at 4:1 anisotropy. A zero minor axis
+  // and a nonzero minor axis narrower than the ratio limit give the same result.
+  struct Case {
+    float dx, dy, raw;
+  };
+  constexpr Case cases[] = {{1e-20f, 0, -62.4375f},
+                            {1e-20f, 1.25e-21f, -62.4375f},
+                            {1e-25f, 0, -64},
+                            {1e-25f, 2.5e-26f, -64},
+                            {0, 0, -64}};
+  for (const int32_t bias : {0, 64}) {
+    bind_sampler({.bias_fixed8 = bias});
+    cu_->write_sgpr(sb_ + 8, cu_->read_sgpr(sb_ + 8) | (2u << 9));
+    cu_->write_sgpr(sb_ + 10, cu_->read_sgpr(sb_ + 10) | (2u << 20) | (2u << 22));
+    for (const auto &test : cases) {
+      SCOPED_TRACE(testing::Message() << test.dx << ", " << test.dy << " bias=" << bias);
+      for (unsigned lane = 0; lane < 4; ++lane)
+        write_coordinates(lane, {std::bit_cast<uint32_t>((lane & 1) ? test.dx : 0.0f),
+                                 std::bit_cast<uint32_t>((lane & 2) ? test.dy : 0.0f), 0});
+      auto decoded = decoder->decode_window(words);
+      ASSERT_TRUE(decoded.succeeded());
+      ASSERT_TRUE(cu_->execute_instruction(decoded.value().get(), *wf_).succeeded());
+      EXPECT_EQ(cu_->read_vgpr(vb_ + 8, 0), 0u);
+      EXPECT_EQ(std::bit_cast<float>(cu_->read_vgpr(vb_ + 9, 0)), test.raw + bias / 256.0f);
+    }
+  }
+}
+
 TEST_P(ImageSamplerControlTest, Gfx12SampleFeedbackUsesTheResourceWarningThreshold) {
   if (arch() != ROCJITSU_CODE_ARCH_RDNA4)
     GTEST_SKIP();
@@ -8492,7 +9205,8 @@ TEST_P(ImageSamplerControlTest, Gfx12SampleFeedbackUsesTheResourceWarningThresho
   auto read_flags = Decoder::create(arch())->decode_window(
       rdna4::build_sopk(rdna4::kSGetregB32Sopk, {.simm16 = 18 | (31 << 6), .sdst = 16}));
   ASSERT_TRUE(read_flags.succeeded());
-  for (const auto op : {rdna4::kImageSampleLVsample}) {
+  for (const auto op :
+       {rdna4::kImageSampleLVsample, rdna4::kImageGather4Vsample, rdna4::kImageGather4LVsample}) {
     const unsigned words = op == rdna4::kImageSampleLVsample ? 1 : 4;
     for (unsigned flags : {0u, 1u, 2u, 3u}) {
       wf_->set_gfx12_excp_flag_user_extra_raw(1u << 30);
@@ -9886,6 +10600,19 @@ TEST_P(ImageSamplerControlTest, Gfx10SelectsTheXyFilterAfterLodClamping) {
   check(sample, 0.25f, 0, 3 * 256, 237.44921875f);
   check(sample, 0.125f, 256, 3 * 256, 237.44921875f);
   check(sample, 0.25f, 0, 0, 578.0f);
+  // Neither a sample nor a gather may consume a GFX10 shader clamp until
+  // its direction is established independently of compiler lowering.
+  for (const auto opcode : {rdna1::kImageSampleDClMimg, rdna1::kImageGather4ClMimg}) {
+    auto instruction = decoder->decode_window(
+        rdna1::build_mimg(opcode, {.dim = 1, .dmask = 1, .vdata = 8, .ssamp = 2}));
+    ASSERT_TRUE(instruction.succeeded());
+    wf_->clear_instruction_execution_error();
+    cu_->write_vgpr(vb_ + 8, 0, 0xfeed1234);
+    EXPECT_TRUE(cu_->execute_instruction(instruction.value().get(), *wf_).failed());
+    EXPECT_EQ(wf_->instruction_execution_error(),
+              amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    EXPECT_EQ(cu_->read_vgpr(vb_ + 8, 0), 0xfeed1234u);
+  }
 }
 
 TEST_P(ImageSamplerControlTest, ExplicitLodRoundsBeforeBiasAndSaturatesInfiniteInputs) {
@@ -10101,6 +10828,29 @@ TEST_P(ImageSamplerControlTest, ClampedLinearTapsPreserveNegativeZero) {
   }
 }
 
+TEST_P(ImageSamplerControlTest, SignedTexelOffsetUsesItsOwnAddressRegister) {
+  if (arch() == ROCJITSU_CODE_ARCH_CDNA2)
+    GTEST_SKIP() << "The public CDNA2 ISA exposes only the base sample form";
+  wf_->clear_instruction_execution_error();
+  if (arch() == ROCJITSU_CODE_ARCH_RDNA1 || arch() == ROCJITSU_CODE_ARCH_RDNA2 ||
+      (arch() == ROCJITSU_CODE_ARCH_RDNA3 || arch() == ROCJITSU_CODE_ARCH_RDNA3_5)) {
+    Image image;
+    image.width = 4;
+    bind_sample_image(image);
+    bind_sampler({.normalized = false});
+    wf_->set_exec(1);
+    // Fetch x=2 with signed six-bit offset -1.
+    write_coordinates(0, {63, std::bit_cast<uint32_t>(2.5f), std::bit_cast<uint32_t>(0.5f)});
+    memory_.write32(kBase + 4, 0x40700000);
+    ASSERT_TRUE(sample(SampleTestOperation::Offset));
+    EXPECT_EQ(cu_->read_vgpr(vb_ + 8, 0), 0x40700000u);
+    return;
+  }
+  EXPECT_FALSE(sample(SampleTestOperation::Offset));
+  EXPECT_EQ(wf_->instruction_execution_error(),
+            amdgpu::InstructionExecutionError::UnimplementedInstruction);
+}
+
 TEST_P(ImageSamplerControlTest, Gfx10CompressedSeamlessCubeMatchesUncompressedCornersAndEdges) {
   if (arch() != ROCJITSU_CODE_ARCH_RDNA1 && arch() != ROCJITSU_CODE_ARCH_RDNA2)
     GTEST_SKIP() << "GFX10 BC cube sampler";
@@ -10184,6 +10934,684 @@ TEST_P(ImageSamplerControlTest, Gfx10PredefinedWhiteBorderReturnsOne) {
   EXPECT_EQ(cu_->read_vgpr(vb_ + 8, 0), std::bit_cast<uint32_t>(1.0f));
 }
 
+TEST_P(ImageSamplerControlTest, Gfx10GetLodReportsSelectedMipAndAnisotropicFootprint) {
+  if (arch() != ROCJITSU_CODE_ARCH_RDNA1 && arch() != ROCJITSU_CODE_ARCH_RDNA2)
+    GTEST_SKIP();
+  Image image;
+  image.width = image.height = 64;
+  image.mip_levels = 5;
+  image.last_level = 4;
+  bind_sample_image(image);
+  wf_->set_exec(15);
+  for (uint32_t lane = 0; lane < 4; ++lane)
+    write_coordinates(lane, {std::bit_cast<uint32_t>(float(lane % 2) / 8),
+                             std::bit_cast<uint32_t>(float(lane / 2) / 32), 0});
+  auto decoder = Decoder::create(arch());
+  auto encoding = fields<rdna1::MimgBuilderFields>(2);
+  encoding.unorm = false;
+  encoding.dmask = 3;
+  encoding.ssamp = 2;
+  const auto words = rdna1::build_mimg(rdna1::kImageGetLodMimg, encoding);
+  for (bool anisotropic : {false, true}) {
+    for (auto filter : {MipFilter::None, MipFilter::Point, MipFilter::Linear}) {
+      bind_sampler({.mip = filter, .max_lod_fixed8 = 4 * 256, .bias_fixed8 = 96});
+      cu_->write_sgpr(sb_ + 8, cu_->read_sgpr(sb_ + 8) | (2u << 9)); // 4:1 maximum ratio.
+      if (anisotropic)
+        cu_->write_sgpr(sb_ + 10, cu_->read_sgpr(sb_ + 10) | (2u << 20) | (2u << 22));
+      auto decoded = decoder->decode_window(words);
+      ASSERT_TRUE(decoded.succeeded());
+      ASSERT_TRUE(cu_->execute_instruction(decoded.value().get(), *wf_).succeeded());
+      EXPECT_FALSE(decoded.value()->data());
+      const float raw = (anisotropic ? 1.0f : 3.0f) + 0.375f;
+      const float selected = filter == MipFilter::None    ? 0
+                             : filter == MipFilter::Point ? std::floor(raw)
+                                                          : raw;
+      EXPECT_FLOAT_EQ(std::bit_cast<float>(cu_->read_vgpr(vb_ + 8, 0)), selected);
+      EXPECT_FLOAT_EQ(std::bit_cast<float>(cu_->read_vgpr(vb_ + 9, 0)), raw);
+    }
+  }
+}
+
+TEST_P(ImageSamplerControlTest, Gfx10GetLodAppliesPerfMipOnlyToTheTrilinearResult) {
+  if (arch() != ROCJITSU_CODE_ARCH_RDNA1 && arch() != ROCJITSU_CODE_ARCH_RDNA2)
+    GTEST_SKIP();
+  Image image;
+  image.width = image.height = 64;
+  image.mip_levels = 5;
+  image.last_level = 4;
+  wf_->set_exec(15);
+  for (uint32_t lane = 0; lane < 4; ++lane)
+    write_coordinates(lane, {std::bit_cast<uint32_t>(float(lane % 2) / 8),
+                             std::bit_cast<uint32_t>(float(lane / 2) / 32), 0});
+  auto encoding = fields<rdna1::MimgBuilderFields>(2);
+  encoding.unorm = false;
+  encoding.dmask = 3;
+  encoding.ssamp = 2;
+  auto decoder = Decoder::create(arch());
+  const auto words = rdna1::build_mimg(rdna1::kImageGetLodMimg, encoding);
+  for (bool anisotropic : {false, true}) {
+    for (unsigned modulation : {0u, 4u}) {
+      image.perf_mod = modulation;
+      bind_sample_image(image);
+      for (unsigned perf_mip : {0u, 8u}) {
+        bind_sampler({.linear_xy = true,
+                      .mip = MipFilter::Linear,
+                      .max_lod_fixed8 = 4 * 256,
+                      .bias_fixed8 = 96,
+                      .perf_mip = perf_mip});
+        cu_->write_sgpr(sb_ + 8, cu_->read_sgpr(sb_ + 8) | (2u << 9));
+        if (anisotropic)
+          cu_->write_sgpr(sb_ + 10, cu_->read_sgpr(sb_ + 10) | (2u << 20) | (2u << 22));
+        auto inst = decoder->decode_window(words);
+        ASSERT_TRUE(inst.succeeded());
+        ASSERT_TRUE(cu_->execute_instruction(inst.value().get(), *wf_).succeeded());
+        const float level = anisotropic ? 1.0f : 3.0f;
+        EXPECT_FLOAT_EQ(std::bit_cast<float>(cu_->read_vgpr(vb_ + 8, 0)),
+                        level + (modulation && perf_mip ? 0.3125f : 0.375f));
+        EXPECT_FLOAT_EQ(std::bit_cast<float>(cu_->read_vgpr(vb_ + 9, 0)), level + 0.375f);
+      }
+    }
+  }
+}
+
+TEST_P(ImageSamplerControlTest, Gfx10CoarseDerivativesRequireOneLodPerLiveQuad) {
+  if (arch() != ROCJITSU_CODE_ARCH_RDNA1 && arch() != ROCJITSU_CODE_ARCH_RDNA2)
+    GTEST_SKIP();
+  Image image;
+  image.width = image.height = 16;
+  image.mip_levels = 4;
+  image.last_level = 3;
+  bind_sample_image(image);
+  bind_sampler({.mip = MipFilter::Point});
+  wf_->set_exec(0x33);
+  auto decoder = Decoder::create(arch());
+  for (bool unequal : {false, true}) {
+    for (unsigned lane : {0u, 1u, 4u, 5u}) {
+      const float dx = lane >= 4 || (unequal && lane == 1) ? 0.25f : 0.0625f;
+      cu_->write_vgpr(vb_, lane, std::bit_cast<uint32_t>(dx));
+      for (unsigned word = 1; word < 6; ++word)
+        cu_->write_vgpr(vb_ + word, lane, 0);
+    }
+    for (bool coarse : {false, true}) {
+      const auto words = sample_mimg_words<rdna1::MimgBuilderFields>(
+          rdna1::build_mimg, coarse ? rdna1::kImageSampleCdMimg : rdna1::kImageSampleDMimg, false,
+          8);
+      auto decoded = decoder->decode_window(words);
+      ASSERT_TRUE(decoded.succeeded());
+      auto inst = std::move(decoded).value();
+      if (coarse && unequal) {
+        EXPECT_TRUE(cu_->execute_instruction(inst.get(), *wf_).failed());
+        EXPECT_EQ(wf_->instruction_execution_error(),
+                  amdgpu::InstructionExecutionError::UnimplementedInstruction);
+        EXPECT_FALSE(inst->data());
+        wf_->clear_instruction_execution_error();
+      } else {
+        ASSERT_TRUE(cu_->execute_instruction(inst.get(), *wf_).succeeded());
+        amdgpu::GlobalMemPipeline pipeline(&cu_->l1_vector(), &l2_);
+        ASSERT_EQ(pipeline.issue(inst.release(), *wf_), amdgpu::VmAccessOutcome::Complete);
+      }
+    }
+  }
+}
+
+TEST_P(ImageSamplerControlTest, GatherSelectsTheNearestMipWithLinearFiltering) {
+  const bool gfx12 = arch() == ROCJITSU_CODE_ARCH_RDNA4;
+  if (!gfx12 && arch() != ROCJITSU_CODE_ARCH_RDNA1 && arch() != ROCJITSU_CODE_ARCH_RDNA2)
+    GTEST_SKIP();
+  for (uint32_t offset = 0; offset < (1u << 16); offset += 4)
+    memory_.write32(kBase + offset, offset / 4);
+  wf_->set_exec(1);
+  unnormalized_ = false;
+  auto decoder = Decoder::create(arch());
+  for (bool array : {false, true}) {
+    bind_sample_image({.width = 8,
+                       .height = 8,
+                       .depth = 1,
+                       .pitch = 1,
+                       .type = array ? amdgpu::kImage2dArray : amdgpu::kImage2d,
+                       .mip_levels = 4,
+                       .last_level = 3,
+                       .perf_mod = 4});
+    const uint8_t dim = array ? 5 : 1;
+    std::array<uint32_t, 3> words{};
+    if (gfx12) {
+      auto encoding = fields<rdna4::VsampleBuilderFields>(2);
+      encoding.dim = dim;
+      encoding.samp = 8;
+      encoding.vaddr3 = 3;
+      words = rdna4::build_vsample(rdna4::kImageGather4LVsample, encoding);
+    } else {
+      auto encoding = fields<rdna1::MimgBuilderFields>(2);
+      encoding.dim = dim;
+      encoding.ssamp = 2;
+      words = image_instruction_words(rdna1::build_mimg, rdna1::kImageGather4LMimg, encoding);
+    }
+    auto gather = [&](float lod, MipFilter filter, std::array<uint32_t, 4> &out) {
+      bind_sampler({.mip = filter, .perf_mip = 8});
+      write_coordinates(0, {std::bit_cast<uint32_t>(0.5f), std::bit_cast<uint32_t>(0.5f), 0});
+      cu_->write_vgpr(vb_ + (array ? 3 : 2), 0, std::bit_cast<uint32_t>(lod));
+      auto decoded = decoder->decode_window(words);
+      ASSERT_TRUE(decoded.succeeded());
+      auto inst = std::move(decoded).value();
+      ASSERT_TRUE(cu_->execute_instruction(inst.get(), *wf_).succeeded());
+      amdgpu::GlobalMemPipeline pipeline(&cu_->l1_vector(), &l2_);
+      ASSERT_EQ(pipeline.issue(inst.release(), *wf_), amdgpu::VmAccessOutcome::Complete);
+      for (unsigned tap = 0; tap < out.size(); ++tap)
+        out[tap] = cu_->read_vgpr(vb_ + 8 + tap, 0);
+    };
+    std::array<uint32_t, 4> level0, level1, actual;
+    ASSERT_NO_FATAL_FAILURE(gather(0, MipFilter::Point, level0));
+    ASSERT_NO_FATAL_FAILURE(gather(1, MipFilter::Point, level1));
+    ASSERT_NE(level0, level1);
+    for (float lod : {0.25f, 0.5f, 0.75f}) {
+      ASSERT_NO_FATAL_FAILURE(gather(lod, MipFilter::Linear, actual));
+      EXPECT_EQ(actual, lod < 0.5f ? level0 : level1);
+    }
+  }
+}
+
+TEST_P(ImageSamplerControlTest, Gfx10GatherUsesQuadDerivativesOnlyForMipSelection) {
+  if (arch() != ROCJITSU_CODE_ARCH_RDNA1 && arch() != ROCJITSU_CODE_ARCH_RDNA2)
+    GTEST_SKIP();
+  wf_->set_exec(1);
+  unnormalized_ = false;
+  const auto bits = [](float value) { return std::bit_cast<uint32_t>(value); };
+  for (unsigned lane = 0; lane < 4; ++lane)
+    write_coordinates(lane, {bits(lane & 1 ? 0.5f : 0.25f), bits(0.5f), 0});
+  Image image{.width = 8, .height = 4, .mip_levels = 2};
+  const amdgpu::ImageLayout layout{.width = image.width,
+                                   .height = image.height,
+                                   .pitch = image.pitch,
+                                   .element_bytes = 4,
+                                   .dimensions = 2,
+                                   .mip_levels = image.mip_levels};
+  for (unsigned level = 0; level < image.mip_levels; ++level) {
+    const auto addressing =
+        amdgpu::ImageAddressing::prepare(cu_->image_address_config(), layout, level);
+    ASSERT_TRUE(addressing);
+    for (unsigned y = 0; y < image.height >> level; ++y)
+      for (unsigned x = 0; x < image.width >> level; ++x)
+        memory_.write32(kBase + addressing->byte_offset(x, y, 0), bits(100 * level + 10 * y + x));
+  }
+  auto encoding = fields<rdna1::MimgBuilderFields>(2);
+  encoding.ssamp = 2;
+  auto decoder = Decoder::create(arch());
+  auto &score = wf_->ensure_memory_wait_scoreboard();
+  bool hazard = false;
+  score.bind(0x200, &hazard, [](void *ctx, const auto &) { *static_cast<bool *>(ctx) = true; });
+  for (bool mip : {false, true}) {
+    image.last_level = mip ? 1 : 0;
+    bind_sample_image(image);
+    for (bool min_linear : {false, true}) {
+      bind_sampler({.mip = mip ? MipFilter::Point : MipFilter::None});
+      if (min_linear)
+        cu_->write_sgpr(sb_ + 10, cu_->read_sgpr(sb_ + 10) | (1u << 22));
+      for (auto opcode : {rdna1::kImageGather4Mimg, rdna1::kImageGather4hMimg}) {
+        SCOPED_TRACE(testing::Message()
+                     << "mip=" << mip << " min_linear=" << min_linear << " opcode=" << opcode);
+        auto decoded = decoder->decode_window(rdna1::build_mimg(opcode, encoding));
+        ASSERT_TRUE(decoded.succeeded());
+        auto inst = std::move(decoded).value();
+        for (unsigned lane : {0u, 1u}) {
+          hazard = false;
+          constexpr auto counter = amdgpu::WaitCounterKind::Ds;
+          score.add({score.issue(counter),
+                     0x100,
+                     uint64_t{1} << lane,
+                     {RegClass::VGPR, 0, 1},
+                     counter,
+                     0xf});
+          score.check_instruction(*inst, *wf_);
+          EXPECT_EQ(hazard, lane == 0 || mip);
+          score.clear();
+        }
+        if (mip) {
+          EXPECT_TRUE(cu_->execute_instruction(inst.get(), *wf_).failed());
+          EXPECT_EQ(wf_->instruction_execution_error(),
+                    amdgpu::InstructionExecutionError::UnimplementedInstruction);
+          wf_->clear_instruction_execution_error();
+          wf_->set_exec(15);
+          ASSERT_TRUE(cu_->execute_instruction(inst.get(), *wf_).succeeded());
+        } else if (cu_->execute_instruction(inst.get(), *wf_).failed()) {
+          ADD_FAILURE() << inst->disassemble();
+          wf_->clear_instruction_execution_error();
+          continue;
+        }
+        amdgpu::GlobalMemPipeline pipeline(&cu_->l1_vector(), &l2_);
+        ASSERT_EQ(pipeline.issue(inst.release(), *wf_), amdgpu::VmAccessOutcome::Complete);
+        wf_->set_exec(1);
+        if (mip) {
+          if (opcode == rdna1::kImageGather4Mimg) {
+            std::array<uint32_t, 4> implicit;
+            for (unsigned tap = 0; tap < implicit.size(); ++tap)
+              implicit[tap] = cu_->read_vgpr(vb_ + 8 + tap, 0);
+            cu_->write_vgpr(vb_ + 2, 0, bits(1.f));
+            auto reference =
+                decoder->decode_window(rdna1::build_mimg(rdna1::kImageGather4LMimg, encoding));
+            ASSERT_TRUE(reference.succeeded());
+            ASSERT_TRUE(cu_->execute_instruction(reference.value().get(), *wf_).succeeded());
+            ASSERT_EQ(pipeline.issue(reference.value().release(), *wf_),
+                      amdgpu::VmAccessOutcome::Complete);
+            for (unsigned tap = 0; tap < implicit.size(); ++tap) {
+              EXPECT_GE(std::bit_cast<float>(implicit[tap]), 100.f);
+              EXPECT_EQ(implicit[tap], cu_->read_vgpr(vb_ + 8 + tap, 0));
+            }
+          }
+          continue;
+        }
+        const auto expected = opcode == rdna1::kImageGather4Mimg ? std::array{21, 22, 12, 11}
+                                                                 : std::array{20, 21, 22, 23};
+        for (unsigned tap = 0; tap < expected.size(); ++tap)
+          EXPECT_EQ(cu_->read_vgpr(vb_ + 8 + tap, 0), bits(expected[tap]));
+      }
+    }
+  }
+}
+
+TEST_P(ImageSamplerControlTest, Gfx10HorizontalGatherPreservesBorderAndClampsOtherWrapModes) {
+  if (arch() != ROCJITSU_CODE_ARCH_RDNA1 && arch() != ROCJITSU_CODE_ARCH_RDNA2)
+    GTEST_SKIP();
+  Image image{.width = 8, .height = 4};
+  bind_sample_image(image);
+  for (uint32_t y = 0; y < image.height; ++y)
+    for (uint32_t x = 0; x < image.width; ++x)
+      memory_.write32(kBase + 4 * (image.pitch * y + x),
+                      std::bit_cast<uint32_t>(float(10 * y + x)));
+  wf_->set_exec(1);
+  unnormalized_ = false;
+  auto fields10 = fields<rdna1::MimgBuilderFields>(2);
+  fields10.ssamp = 2;
+  auto decoder = Decoder::create(arch());
+  for (Clamp wrap : {Clamp::Repeat, Clamp::Mirror, Clamp::Edge, Clamp::Border}) {
+    bind_sampler({.clamp_x = wrap, .clamp_y = wrap});
+    write_coordinates(0, {std::bit_cast<uint32_t>(0.875f), std::bit_cast<uint32_t>(0.125f), 0});
+    auto inst = decoder->decode_window(rdna1::build_mimg(rdna1::kImageGather4hMimg, fields10));
+    ASSERT_TRUE(inst.succeeded());
+    ASSERT_TRUE(cu_->execute_instruction(inst.value().get(), *wf_).succeeded());
+    amdgpu::GlobalMemPipeline pipeline(&cu_->l1_vector(), &l2_);
+    ASSERT_EQ(pipeline.issue(inst.value().release(), *wf_), amdgpu::VmAccessOutcome::Complete);
+    const std::array<float, 4> expected{5, 6, 7, wrap == Clamp::Border ? 0.0f : 7.0f};
+    for (unsigned tap = 0; tap < expected.size(); ++tap)
+      EXPECT_EQ(cu_->read_vgpr(vb_ + 8 + tap, 0), std::bit_cast<uint32_t>(expected[tap]));
+  }
+}
+
+TEST_P(ImageSamplerControlTest, Gfx10Gather4hCentersFourTexelsOnOneRow) {
+  if (arch() != ROCJITSU_CODE_ARCH_RDNA1 && arch() != ROCJITSU_CODE_ARCH_RDNA2)
+    GTEST_SKIP();
+  Image image;
+  image.width = 8;
+  image.height = 4;
+  bind_sample_image(image);
+  bind_sampler({.normalized = false});
+  wf_->set_exec(1);
+  for (uint32_t y = 0; y < image.height; ++y)
+    for (uint32_t x = 0; x < image.width; ++x)
+      memory_.write32(kBase + 4 * (image.pitch * y + x),
+                      std::bit_cast<uint32_t>(float(10 * y + x)));
+  auto decoder = Decoder::create(arch());
+  auto encoding = fields<rdna1::MimgBuilderFields>(2);
+  encoding.ssamp = 2;
+  for (const float u : {2.0f, 2.5f, 3.0f}) {
+    write_coordinates(0, {std::bit_cast<uint32_t>(u), std::bit_cast<uint32_t>(2.0f), 0});
+    auto decoded = decoder->decode_window(rdna1::build_mimg(rdna1::kImageGather4hMimg, encoding));
+    ASSERT_TRUE(decoded.succeeded());
+    auto inst = std::move(decoded).value();
+    ASSERT_TRUE(cu_->execute_instruction(inst.get(), *wf_).succeeded());
+    amdgpu::GlobalMemPipeline pipeline(&cu_->l1_vector(), &l2_);
+    ASSERT_EQ(pipeline.issue(inst.release(), *wf_), amdgpu::VmAccessOutcome::Complete);
+    for (uint32_t tap = 0; tap < 4; ++tap)
+      EXPECT_FLOAT_EQ(std::bit_cast<float>(cu_->read_vgpr(vb_ + 8 + tap, 0)),
+                      20.0f + (u >= 2.5f) + tap);
+  }
+}
+
+TEST_P(ImageSamplerControlTest, GetLodWaitsForWrittenDataAndSkipsSuppressedQueryInputs) {
+  const bool gfx10 = arch() == ROCJITSU_CODE_ARCH_RDNA1 || arch() == ROCJITSU_CODE_ARCH_RDNA2;
+  if (!gfx10 && arch() != ROCJITSU_CODE_ARCH_RDNA3 && arch() != ROCJITSU_CODE_ARCH_RDNA3_5)
+    GTEST_SKIP();
+  bind_sample_image({.width = 64, .height = 64, .pitch = 1, .mip_levels = 4, .last_level = 3},
+                    true);
+  bind_sampler({.mip = MipFilter::Linear});
+  for (unsigned lane = 0; lane < 4; ++lane)
+    write_coordinates(lane, {std::bit_cast<uint32_t>(float(lane & 1u) / 64),
+                             std::bit_cast<uint32_t>(float(lane >> 1) / 64), 0});
+  auto decoder = Decoder::create(arch());
+  wf_->set_exec(15);
+  auto &wait = wf_->ensure_memory_wait_scoreboard();
+  for (uint8_t mask : {0u, 1u, 3u})
+    for (uint8_t flags = 0; flags < 4; ++flags)
+      for (uint8_t dst : {8u, 31u}) {
+        const bool tfe = flags & 1, lwe = flags & 2;
+        const unsigned words = std::max(1, std::popcount(mask));
+        rdna1::MimgBuilderFields gfx10_fields{};
+        gfx10_fields.dim = 1;
+        gfx10_fields.dmask = mask;
+        gfx10_fields.tfe = tfe;
+        gfx10_fields.lwe = lwe;
+        gfx10_fields.vdata = dst;
+        gfx10_fields.ssamp = 2;
+        rdna3_5::MimgBuilderFields gfx11_fields{};
+        gfx11_fields.dim = 1;
+        gfx11_fields.dmask = mask;
+        gfx11_fields.tfe = tfe;
+        gfx11_fields.lwe = lwe;
+        gfx11_fields.vdata = dst;
+        gfx11_fields.ssamp = 2;
+        const auto enc = gfx10 ? rdna1::build_mimg(rdna1::kImageGetLodMimg, gfx10_fields)
+                               : rdna3_5::build_mimg(rdna3_5::kImageGetLodMimg, gfx11_fields);
+        auto decoded = decoder->decode_window(enc);
+        ASSERT_TRUE(decoded.succeeded());
+        const auto &inst = *decoded.value();
+        SCOPED_TRACE(inst.disassemble());
+        const bool encoded = (mask && tfe) || lwe;
+        const bool allocated =
+            dst + words + unsigned(gfx10 ? encoded : tfe || lwe) <= wf_->num_vgprs();
+        EXPECT_EQ(inst.dst_operand(0)->size_bits(), 32 * (words + unsigned(encoded)));
+        const RegisterRef status{RegClass::VGPR, static_cast<uint16_t>(dst + words), 1};
+        const InstDefUse du(inst, 32);
+        EXPECT_FALSE(du.defs.contains(status));
+        unsigned reads = 0;
+        wait.clear();
+        wait.bind(0x1004, &reads, [](void *p, const auto &) { ++*static_cast<unsigned *>(p); });
+        const auto counter = amdgpu::WaitCounterKind::Ds;
+        wait.add({wait.issue(counter), 0x1000, ~uint64_t{0}, {RegClass::SGPR, 0, 1}, counter, 0xf});
+        wait.check_instruction(inst, *wf_);
+        EXPECT_EQ(reads != 0, allocated && (mask || (!gfx10 && lwe)));
+        for (unsigned reg = 0; reg <= words; ++reg) {
+          wait.clear();
+          if (dst + words < wf_->num_vgprs())
+            cu_->write_vgpr(vb_ + dst + words, 0, 0xdeadbeef);
+          cu_->write_vgpr(vb_ + dst, 0, 0xdeadbeef);
+          cu_->track_memory_wait(*decoded.value(), *wf_);
+          ASSERT_TRUE(cu_->execute_instruction(decoded.value().get(), *wf_).succeeded());
+          EXPECT_EQ(cu_->read_vgpr(vb_ + dst, 0) != 0xdeadbeef, allocated);
+          unsigned hazards = 0;
+          wait.bind(0x1008, &hazards,
+                    [](void *ctx, const auto &) { ++*static_cast<unsigned *>(ctx); });
+          wait.access({RegClass::VGPR, static_cast<uint16_t>(dst + reg), 1}, 1, 0xf, false);
+          EXPECT_EQ(hazards, allocated && reg < words ? 1u : 0u);
+          if (dst + words < wf_->num_vgprs()) {
+            EXPECT_EQ(cu_->read_vgpr(vb_ + dst + words, 0), 0xdeadbeefu);
+          }
+        }
+      }
+  wait.clear();
+}
+
+TEST_P(ImageSamplerControlTest, GetLodPacksSelectedChannelsAndDropsToOneZero) {
+  const bool gfx10 = arch() == ROCJITSU_CODE_ARCH_RDNA1 || arch() == ROCJITSU_CODE_ARCH_RDNA2;
+  if (!gfx10 && arch() != ROCJITSU_CODE_ARCH_RDNA3 && arch() != ROCJITSU_CODE_ARCH_RDNA3_5)
+    GTEST_SKIP();
+  Image image;
+  image.width = image.height = 64;
+  image.mip_levels = 4;
+  image.last_level = 3;
+  bind_sample_image(image);
+  bind_sampler({.mip = MipFilter::Point, .max_lod_fixed8 = 256});
+  wf_->set_exec(15);
+  for (uint32_t lane = 0; lane < 4; ++lane)
+    write_coordinates(lane, {std::bit_cast<uint32_t>(float(lane % 2) / 16),
+                             std::bit_cast<uint32_t>(float(lane / 2) / 16), 0});
+  constexpr uint32_t sentinel = 0xdeadbeef;
+  auto decoder = Decoder::create(arch());
+  for (uint32_t mask = 0; mask < 16; ++mask) {
+    SCOPED_TRACE(mask);
+    for (unsigned reg = 8; reg < 13; ++reg)
+      cu_->write_vgpr(vb_ + reg, 0, sentinel);
+    auto gfx10_fields = fields<rdna1::MimgBuilderFields>(2);
+    auto gfx11_fields = fields<rdna3::MimgBuilderFields>(2);
+    gfx10_fields.dmask = gfx11_fields.dmask = mask;
+    gfx10_fields.ssamp = gfx11_fields.ssamp = 2;
+    gfx10_fields.unorm = gfx11_fields.unorm = 0;
+    const auto words = gfx10 ? rdna1::build_mimg(rdna1::kImageGetLodMimg, gfx10_fields)
+                             : rdna3::build_mimg(rdna3::kImageGetLodMimg, gfx11_fields);
+    auto decoded = decoder->decode_window(words);
+    ASSERT_TRUE(decoded.succeeded());
+    const auto result = cu_->execute_instruction(decoded.value().get(), *wf_);
+    if ((mask & 0xcu) && arch() != ROCJITSU_CODE_ARCH_RDNA3) {
+      EXPECT_TRUE(result.failed());
+      EXPECT_EQ(wf_->instruction_execution_error(),
+                amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+      for (unsigned reg = 8; reg < 13; ++reg)
+        EXPECT_EQ(cu_->read_vgpr(vb_ + reg, 0), sentinel);
+      wf_->clear_instruction_execution_error();
+      continue;
+    }
+    ASSERT_TRUE(result.succeeded());
+    // W7900 GET_LOD packed X=1, Y=2, Z=0 and W=0 for all 16 masks.
+    const std::array<float, 4> expected{1, 2, 0, 0};
+    unsigned out = 8;
+    if (!mask) {
+      EXPECT_EQ(cu_->read_vgpr(vb_ + out++, 0), 0u);
+    }
+    for (unsigned channel = 0; channel < expected.size(); ++channel)
+      if (mask & (1u << channel)) {
+        EXPECT_FLOAT_EQ(std::bit_cast<float>(cu_->read_vgpr(vb_ + out++, 0)), expected[channel]);
+      }
+    EXPECT_EQ(cu_->read_vgpr(vb_ + out, 0), sentinel);
+  }
+}
+
+TEST_P(ImageSamplerControlTest, Gfx10GetLodReturnsClampedAndRawWithoutTextureAccess) {
+  if (arch() != ROCJITSU_CODE_ARCH_RDNA1 && arch() != ROCJITSU_CODE_ARCH_RDNA2)
+    GTEST_SKIP() << "GFX10 MIMG";
+  Image image;
+  image.width = 64;
+  image.height = 64;
+  image.mip_levels = 4;
+  image.last_level = 3;
+  bind_sample_image(image);
+  bind_sampler({.mip = MipFilter::Point, .max_lod_fixed8 = 256});
+  wf_->set_exec(15);
+  for (uint32_t lane = 0; lane < 4; ++lane)
+    write_coordinates(lane, {std::bit_cast<uint32_t>(float(lane % 2) / 16),
+                             std::bit_cast<uint32_t>(float(lane / 2) / 16), 0});
+  // VDATA aliases VADDR. All four lanes must use the same original quad.
+  auto fields = rdna1::MimgBuilderFields{};
+  fields.dim = 1;
+  fields.dmask = 3;
+  fields.ssamp = 2;
+  auto decoder = Decoder::create(arch());
+  auto inst = decoder->decode_window(rdna1::build_mimg(rdna1::kImageGetLodMimg, fields));
+  ASSERT_TRUE(inst.succeeded());
+  ASSERT_TRUE(cu_->execute_instruction(inst.value().get(), *wf_).succeeded());
+  EXPECT_FALSE(inst.value()->data());
+  for (uint32_t lane = 0; lane < 4; ++lane) {
+    EXPECT_EQ(cu_->read_vgpr(vb_, lane), std::bit_cast<uint32_t>(1.0f));
+    EXPECT_EQ(cu_->read_vgpr(vb_ + 1, lane), std::bit_cast<uint32_t>(2.0f));
+  }
+}
+
+TEST_P(ImageSamplerControlTest, Gfx10GetLodValidatesDataWidthAndSurfaceDimension) {
+  if (arch() != ROCJITSU_CODE_ARCH_RDNA1 && arch() != ROCJITSU_CODE_ARCH_RDNA2)
+    GTEST_SKIP() << "GFX10 GET_LOD";
+  bind_sample_image({.width = 64, .height = 64, .pitch = 1, .mip_levels = 4, .last_level = 3});
+  bind_sampler({.mip = MipFilter::Point});
+  wf_->set_exec(15);
+  auto decoder = Decoder::create(arch());
+  for (const uint8_t dim : {amdgpu::kImageDim1d, amdgpu::kImageDim2d, amdgpu::kImageDim3d}) {
+    for (const bool d16 : {false, true}) {
+      SCOPED_TRACE(testing::Message() << "dim=" << +dim << " d16=" << d16);
+      auto encoding = fields<rdna1::MimgBuilderFields>(2);
+      encoding.dim = dim;
+      encoding.dmask = 3;
+      encoding.d16 = d16;
+      encoding.unorm = 0;
+      encoding.ssamp = 2;
+      auto decoded = decoder->decode_window(rdna1::build_mimg(rdna1::kImageGetLodMimg, encoding));
+      ASSERT_TRUE(decoded.succeeded());
+      for (unsigned lane = 0; lane < 4; ++lane) {
+        write_coordinates(lane, {std::bit_cast<uint32_t>(float(lane & 1) / 32.f),
+                                 std::bit_cast<uint32_t>(float(lane >> 1) / 32.f), 0});
+        cu_->write_vgpr(vb_ + 8, lane, 0x12345678);
+        cu_->write_vgpr(vb_ + 9, lane, 0xdeadbeef);
+      }
+      wf_->clear_instruction_execution_error();
+      const bool accepted = !d16 && dim != amdgpu::kImageDim3d;
+      EXPECT_EQ(cu_->execute_instruction(decoded.value().get(), *wf_).succeeded(), accepted);
+      if (!accepted) {
+        EXPECT_EQ(wf_->instruction_execution_error(),
+                  d16 ? amdgpu::InstructionExecutionError::UnsupportedOperandValue
+                      : amdgpu::InstructionExecutionError::UnimplementedInstruction);
+      }
+      for (unsigned lane = 0; lane < 4; ++lane) {
+        EXPECT_EQ(cu_->read_vgpr(vb_ + 8, lane), accepted ? 0x3f800000u : 0x12345678u);
+        EXPECT_EQ(cu_->read_vgpr(vb_ + 9, lane), accepted ? 0x3f800000u : 0xdeadbeefu);
+      }
+    }
+  }
+}
+
+TEST_P(ImageSamplerControlTest, Gfx10GetLodRejectsUnsupportedDescriptorTypesBeforeWriting) {
+  if (arch() != ROCJITSU_CODE_ARCH_RDNA1 && arch() != ROCJITSU_CODE_ARCH_RDNA2)
+    GTEST_SKIP();
+  auto decoder = Decoder::create(arch());
+  bind_sampler({.mip = MipFilter::Point});
+  wf_->set_exec(15);
+  for (const auto dim : {amdgpu::kImageDim2dMsaa, amdgpu::kImageDim3d}) {
+    const bool r128 = dim == amdgpu::kImageDim3d;
+    bind_sample_image({.width = 64,
+                       .height = 64,
+                       .depth = r128 ? 64u : 1u,
+                       .type = dim + amdgpu::kImage1d,
+                       .mip_levels = 3,
+                       .last_level = 2});
+    auto encoding = fields<rdna1::MimgBuilderFields>(3);
+    encoding.dim = dim;
+    encoding.dmask = 3;
+    encoding.ssamp = 2;
+    encoding.r128 = r128;
+    encoding.unorm = 0;
+    for (unsigned lane = 0; lane < 4; ++lane) {
+      const auto step = std::bit_cast<uint32_t>((lane & 1) ? 0.125f : 0.f);
+      write_coordinates(lane, {step, 0, step});
+      cu_->write_vgpr(vb_ + 8, lane, 0xdeadbeef);
+      cu_->write_vgpr(vb_ + 9, lane, 0xbad0c0de);
+    }
+    auto query = decoder->decode_window(rdna1::build_mimg(rdna1::kImageGetLodMimg, encoding));
+    ASSERT_TRUE(query.succeeded());
+    wf_->clear_instruction_execution_error();
+    EXPECT_TRUE(cu_->execute_instruction(query.value().get(), *wf_).failed());
+    EXPECT_EQ(wf_->instruction_execution_error(),
+              amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    for (unsigned lane = 0; lane < 4; ++lane) {
+      EXPECT_EQ(cu_->read_vgpr(vb_ + 8, lane), 0xdeadbeefu);
+      EXPECT_EQ(cu_->read_vgpr(vb_ + 9, lane), 0xbad0c0deu);
+    }
+  }
+}
+
+TEST_P(ImageSamplerControlTest, Gfx10CubeDerivativesRequireOneFacePerSourceQuad) {
+  if (arch() != ROCJITSU_CODE_ARCH_RDNA1 && arch() != ROCJITSU_CODE_ARCH_RDNA2)
+    GTEST_SKIP();
+  const auto bits = [](float value) { return std::bit_cast<uint32_t>(value); };
+  bind_sample_image({.width = 64,
+                     .height = 64,
+                     .depth = 6,
+                     .type = amdgpu::kImageCube,
+                     .mip_levels = 7,
+                     .last_level = 6});
+  bind_sampler({.mip = MipFilter::Point});
+  auto decoder = Decoder::create(arch());
+  auto encoding = fields<rdna1::MimgBuilderFields>(3);
+  encoding.dim = amdgpu::kImageDimCube;
+  encoding.unorm = 0;
+  encoding.ssamp = 2;
+  auto &score = wf_->ensure_memory_wait_scoreboard();
+  bool hazard = false;
+  score.bind(0x200, &hazard, [](void *ctx, const auto &) { *static_cast<bool *>(ctx) = true; });
+  for (auto opcode : {rdna1::kImageGetLodMimg, rdna1::kImageSampleMimg}) {
+    const bool query = opcode == rdna1::kImageGetLodMimg;
+    encoding.dmask = query ? 3 : 1;
+    for (bool mixed : {false, true}) {
+      auto decoded = decoder->decode_window(rdna1::build_mimg(opcode, encoding));
+      ASSERT_TRUE(decoded.succeeded());
+      auto *inst = decoded.value().get();
+      wf_->set_exec(1);
+      // The right neighbor supplies the third coordinate even outside EXEC.
+      constexpr auto counter = amdgpu::WaitCounterKind::Ds;
+      score.add({score.issue(counter), 0x100, 2, {RegClass::VGPR, 2, 1}, counter, 0xf});
+      hazard = false;
+      score.check_instruction(*inst, *wf_);
+      EXPECT_TRUE(hazard) << inst->disassemble();
+      score.clear();
+      // The second quad crosses from +Z to +X. The first stays on +Z and
+      // must also retain VDATA if the instruction is rejected.
+      wf_->set_exec(255);
+      for (unsigned lane = 0; lane < 8; ++lane) {
+        const bool right = lane & 1;
+        const bool boundary = mixed && lane >= 4;
+        const float left_u = 2.f - (boundary ? 1.f : 3.f) / 128;
+        const float right_u = boundary ? 1.f + 1.f / 128 : 2.f - 1.f / 128;
+        const float face = boundary && right ? 0.f : 4.f;
+        write_coordinates(lane, {bits(right ? right_u : left_u),
+                                 bits(1.5f + ((lane & 2) ? 1.f / 64 : 0.f)), bits(face)});
+        cu_->write_vgpr(vb_ + 8, lane, 0xdeadbeef);
+        cu_->write_vgpr(vb_ + 9, lane, 0xbad0c0de);
+      }
+      wf_->clear_instruction_execution_error();
+      EXPECT_EQ(cu_->execute_instruction(inst, *wf_).succeeded(), !mixed);
+      if (mixed) {
+        EXPECT_EQ(wf_->instruction_execution_error(),
+                  amdgpu::InstructionExecutionError::UnimplementedInstruction);
+        EXPECT_FALSE(inst->data());
+      }
+      for (unsigned lane = 0; lane < 8; ++lane) {
+        if (mixed || query) {
+          EXPECT_EQ(cu_->read_vgpr(vb_ + 8, lane), mixed ? 0xdeadbeefu : bits(0));
+          EXPECT_EQ(cu_->read_vgpr(vb_ + 9, lane), mixed ? 0xbad0c0deu : bits(0));
+        }
+      }
+    }
+  }
+}
+
+TEST_P(ImageSamplerControlTest, Gfx10GetLodRejectsUnsupportedSamplerControlsWithoutWritingResults) {
+  if (arch() != ROCJITSU_CODE_ARCH_RDNA1 && arch() != ROCJITSU_CODE_ARCH_RDNA2)
+    GTEST_SKIP() << "GFX10 sampler layout";
+  wf_->set_exec(1);
+  auto encoding = fields<rdna1::MimgBuilderFields>(2);
+  encoding.dmask = 3;
+  encoding.ssamp = 2;
+  auto decoder = Decoder::create(arch());
+  auto decoded = decoder->decode_window(rdna1::build_mimg(rdna1::kImageGetLodMimg, encoding));
+  ASSERT_TRUE(decoded.succeeded());
+  constexpr uint32_t derivative_adjust_enable = 1u << 31;
+  constexpr uint32_t derivative_adjust_payload = 1u << 8;
+  constexpr uint32_t secondary_lod_bias = 0x10u << 14;
+  constexpr uint32_t mip_point_preclamp = 1u << 28;
+  constexpr uint32_t aniso_override = 1u << 29;
+  constexpr uint32_t invalid_anisotropy = 5u << 9;
+  constexpr uint32_t invalid_mip_filter = 3u << 26;
+  struct Controls {
+    uint32_t word0, word2, base_level;
+  };
+  for (const Controls control : {Controls{0, derivative_adjust_enable, 0},
+                                 {0, derivative_adjust_enable | derivative_adjust_payload, 0},
+                                 {0, secondary_lod_bias, 0},
+                                 {0, mip_point_preclamp, 0},
+                                 {0, aniso_override, 0},
+                                 {invalid_anisotropy, 0, 0},
+                                 {0, invalid_mip_filter, 0},
+                                 {0, 0, 1}}) {
+    bind_sample_image({.mip_levels = 2, .base_level = control.base_level, .last_level = 0});
+    bind_sampler({.mip = MipFilter::Point});
+    cu_->write_sgpr(sb_ + 8, cu_->read_sgpr(sb_ + 8) | control.word0);
+    cu_->write_sgpr(sb_ + 10, cu_->read_sgpr(sb_ + 10) | control.word2);
+    // DERIV_ADJUST_EN repurposes the ordinary LOD-bias bits as a border color pointer.
+    cu_->write_sgpr(sb_ + 11, 0x01234567);
+    cu_->write_vgpr(vb_ + 8, 0, 0x12345678);
+    cu_->write_vgpr(vb_ + 9, 0, 0xdeadbeef);
+    wf_->clear_instruction_execution_error();
+    EXPECT_TRUE(cu_->execute_instruction(decoded.value().get(), *wf_).failed());
+    EXPECT_EQ(wf_->instruction_execution_error(),
+              amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    EXPECT_EQ(cu_->read_vgpr(vb_ + 8, 0), 0x12345678u);
+    EXPECT_EQ(cu_->read_vgpr(vb_ + 9, 0), 0xdeadbeefu);
+  }
+}
+
 TEST_P(ImageSamplerControlTest, Gfx10RejectsWholeImageResultsThatCrossTheWaveAllocation) {
   if (arch() != ROCJITSU_CODE_ARCH_RDNA1 && arch() != ROCJITSU_CODE_ARCH_RDNA2)
     GTEST_SKIP() << "GFX10 VGPR allocation rule";
@@ -10204,7 +11632,8 @@ TEST_P(ImageSamplerControlTest, Gfx10RejectsWholeImageResultsThatCrossTheWaveAll
   encoding.dmask = 3;
   memory_.write32(kBase, 12345u);
   auto decoder = Decoder::create(arch());
-  const std::array<std::pair<uint16_t, bool>, 3> cases{{{rdna1::kImageGetResinfoMimg, false},
+  const std::array<std::pair<uint16_t, bool>, 4> cases{{{rdna1::kImageGetLodMimg, false},
+                                                        {rdna1::kImageGetResinfoMimg, false},
                                                         {rdna1::kImageLoadMimg, false},
                                                         {rdna1::kImageLoadMimg, true}}};
   for (const auto &[op, tfe] : cases) {
@@ -10223,6 +11652,92 @@ TEST_P(ImageSamplerControlTest, Gfx10RejectsWholeImageResultsThatCrossTheWaveAll
     }
     EXPECT_EQ(cu_->read_vgpr(vb_ + last, 0), 0xdeadbeefu);
   }
+}
+
+TEST_P(ImageSamplerControlTest, Gfx10PackedHorizontalGatherConcatenatesRawTexels) {
+  if (arch() != ROCJITSU_CODE_ARCH_RDNA1 && arch() != ROCJITSU_CODE_ARCH_RDNA2)
+    GTEST_SKIP() << "GFX10 MIMG";
+  Image image;
+  image.width = 8;
+  image.rdna_format = 5; // 8_UINT
+  image.pitch = 256;
+  bind_image(image);
+  bind_sampler({.normalized = false});
+  wf_->set_exec(1);
+  write_coordinates(0, {std::bit_cast<uint32_t>(0.5f), std::bit_cast<uint32_t>(0.5f), 0});
+  memory_.write32(kBase, 0x44332211);
+  memory_.write32(kBase + 4, 0x88776655);
+  auto decoder = Decoder::create(arch());
+  for (const bool eight : {false, true}) {
+    auto encoding = fields<rdna1::MimgBuilderFields>(2);
+    encoding.dmask = eight ? 3 : 1;
+    encoding.ssamp = 2;
+    const auto words = rdna1::build_mimg(
+        eight ? rdna1::kImageGather8hPckMimg : rdna1::kImageGather4hPckMimg, encoding);
+    auto decoded = decoder->decode_window(words);
+    ASSERT_TRUE(decoded.succeeded());
+    auto inst = std::move(decoded).value();
+    cu_->write_vgpr(vb_ + 9, 0, 0xdeadbeef);
+    ASSERT_TRUE(cu_->execute_instruction(inst.get(), *wf_).succeeded());
+    amdgpu::GlobalMemPipeline pipeline(&cu_->l1_vector(), &l2_);
+    ASSERT_EQ(pipeline.issue(inst.release(), *wf_), amdgpu::VmAccessOutcome::Complete);
+    EXPECT_EQ(cu_->read_vgpr(vb_ + 8, 0), 0x44332211u);
+    EXPECT_EQ(cu_->read_vgpr(vb_ + 9, 0), eight ? 0x88776655u : 0xdeadbeefu);
+  }
+}
+
+TEST_P(ImageSamplerControlTest, Gfx10G16UsesTwoPackedGradientWordsBeforeFullCoordinates) {
+  if (arch() != ROCJITSU_CODE_ARCH_RDNA1 && arch() != ROCJITSU_CODE_ARCH_RDNA2)
+    GTEST_SKIP() << "GFX10 G16 MIMG";
+  Image image;
+  image.width = 2;
+  bind_sample_image(image);
+  bind_sampler({.normalized = false});
+  wf_->set_exec(1);
+  cu_->write_vgpr(vb_, 0, 0x00003c00);     // dx = (1, 0)
+  cu_->write_vgpr(vb_ + 1, 0, 0x3c000000); // dy = (0, 1)
+  cu_->write_vgpr(vb_ + 2, 0, std::bit_cast<uint32_t>(1.5f));
+  cu_->write_vgpr(vb_ + 3, 0, std::bit_cast<uint32_t>(0.5f));
+  memory_.write32(kBase + 4, std::bit_cast<uint32_t>(7.0f));
+  const auto words = sample_mimg_words<rdna1::MimgBuilderFields>(
+      rdna1::build_mimg, rdna1::kImageSampleDG16Mimg, false, 8);
+  auto decoder = Decoder::create(arch());
+  auto decoded = decoder->decode_window(words);
+  ASSERT_TRUE(decoded.succeeded());
+  auto inst = std::move(decoded).value();
+  amdgpu::RegisterModifiers modifiers{};
+  inst->amdgpu_register_modifiers(modifiers);
+  EXPECT_EQ(modifiers.image_coordinate_count, 2u);
+  EXPECT_EQ(modifiers.image_prefix_words, 2u);
+  ASSERT_TRUE(cu_->execute_instruction(inst.get(), *wf_).succeeded());
+  amdgpu::GlobalMemPipeline pipeline(&cu_->l1_vector(), &l2_);
+  ASSERT_EQ(pipeline.issue(inst.release(), *wf_), amdgpu::VmAccessOutcome::Complete);
+  EXPECT_EQ(cu_->read_vgpr(vb_ + 8, 0), std::bit_cast<uint32_t>(7.0f));
+}
+
+TEST_P(ImageSamplerControlTest, Gfx10DepthComparisonFiltersPerTexel) {
+  if (arch() != ROCJITSU_CODE_ARCH_RDNA1 && arch() != ROCJITSU_CODE_ARCH_RDNA2)
+    GTEST_SKIP() << "GFX10 MIMG";
+  Image image;
+  image.width = 2;
+  bind_sample_image(image);
+  bind_sampler({.linear_xy = true, .normalized = false});
+  cu_->write_sgpr(sb_ + 8, cu_->read_sgpr(sb_ + 8) | (1u << 12)); // LESS
+  wf_->set_exec(1);
+  write_coordinates(0, {std::bit_cast<uint32_t>(0.75f), std::bit_cast<uint32_t>(1.0f),
+                        std::bit_cast<uint32_t>(0.5f)});
+  memory_.write32(kBase, std::bit_cast<uint32_t>(0.0f));
+  memory_.write32(kBase + 4, std::bit_cast<uint32_t>(1.0f));
+  auto words = sample_mimg_words<rdna1::MimgBuilderFields>(rdna1::build_mimg,
+                                                           rdna1::kImageSampleCLzMimg, false, 8);
+  auto decoder = Decoder::create(arch());
+  auto decoded = decoder->decode_window(words);
+  ASSERT_TRUE(decoded.succeeded());
+  auto inst = std::move(decoded).value();
+  ASSERT_TRUE(cu_->execute_instruction(inst.get(), *wf_).succeeded());
+  amdgpu::GlobalMemPipeline pipeline(&cu_->l1_vector(), &l2_);
+  ASSERT_EQ(pipeline.issue(inst.release(), *wf_), amdgpu::VmAccessOutcome::Complete);
+  EXPECT_EQ(cu_->read_vgpr(vb_ + 8, 0), std::bit_cast<uint32_t>(0.5f));
 }
 
 TEST_P(ImageSamplerControlTest, DerivativeMetadataUsesTwoCubeComponents) {

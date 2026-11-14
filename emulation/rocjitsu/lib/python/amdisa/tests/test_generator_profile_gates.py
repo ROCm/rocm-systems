@@ -5778,14 +5778,52 @@ def test_extended_image_controls_emit_execution_and_source_footprints(
     if arch == 'rdna3':
         ordinary = generator._ordinary_image_encoding()
         assert f'.linear_candidate = bool({ordinary})' in derivative
-        assert '.filtered_feedback_candidate = bool(' in derivative
+        sample = _generated_class_body(header, 'ImageSampleMimg')
+        assert '.query = false' in sample
+        assert (
+            '.filtered_feedback_candidate = bool(inst_.dmask && !inst_.r128)' in sample
+        )
+        assert '.texel_fault = bool(inst_.tfe)' in sample
+        query = _generated_class_body(header, 'ImageGetLodMimg')
+        assert '.query = true' in query
+        assert (
+            '.filtered_feedback_candidate' not in query and '.texel_fault' not in query
+        )
         assert f'if ({ordinary} &&' in body
     else:
         assert '.linear_candidate = false' in derivative
-    assert '.filtered_feedback_candidate' not in gather
+    for excluded in (derivative, gather):
+        assert '.filtered_feedback_candidate' not in excluded
+        assert '.texel_fault' not in excluded
     assert 'modifiers.image_prefix_words = 3;' in gather
     assert 'amdgpu::image_prefix_low16_words(3, 0, inst_.a16, true, true)' in gather
     assert 'amdgpu::image_coordinate_count(inst_.dim) + 0' in gather
+
+
+def test_sampler_suffix_controls_are_shared_across_targets():
+    generator = CodeGenerator(SimpleNamespace(arch_name='rdna1'), '')
+    coarse = generator._image_sample_form('IMAGE_SAMPLE_CD_CL_O_G16')
+    assert coarse.coarse_derivatives and coarse.derivatives and coarse.gradient16
+    assert coarse.offset and coarse.lod_clamp and coarse.sample_mode == 'Derivatives16'
+    assert '.coarse_derivatives = true' in coarse.sample_control_initializers
+    assert generator._graphics_image_form('IMAGE_SAMPLE_CD_CL_O_G16') is None
+    gfx12 = CodeGenerator(SimpleNamespace(arch_name='rdna4'), '')
+    for name in ('IMAGE_GATHER4', 'IMAGE_GATHER4_L'):
+        assert gfx12._image_instruction_form(name) == generator._image_instruction_form(
+            name
+        )
+    bias = generator._graphics_image_form('IMAGE_SAMPLE_B_CL')
+    assert bias.lod_bias and bias.lod_clamp and bias.sample_mode == 'Bias'
+    for pixels in (4, 8):
+        name = f'IMAGE_GATHER{pixels}H_PCK'
+        form = generator._image_sample_form(name)
+        assert (
+            form.sampled
+            and form.gather
+            and form.horizontal
+            and form.packed_texels == pixels
+        )
+        assert generator._graphics_image_form(name) is None
 
 
 def test_supported_image_opcodes_have_explicit_operand_forms():

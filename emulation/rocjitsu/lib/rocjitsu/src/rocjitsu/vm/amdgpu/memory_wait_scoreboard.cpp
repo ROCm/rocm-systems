@@ -391,9 +391,7 @@ std::array<ImageSourceBytes, 12> image_sample_source_bytes(const RegisterModifie
           read_image_sampler_controls(arch, sample.sampler, read)))
     return result;
   const bool volume = (word3 >> 28) == kImage3d;
-  if (gfx11 && volume &&
-      (sample.query || sample.compare || sample.offset || sample.clamp || sample.gather ||
-       sample.mode == ImageSampleMode::Bias || sample.mode == ImageSampleMode::Derivatives16))
+  if (gfx11 && volume && sample.gather)
     return result;
   const bool native_texture =
       !sample.query && uses_native_2d_sampler(arch, resource, sample.sampler, sample.dim,
@@ -402,9 +400,12 @@ std::array<ImageSourceBytes, 12> image_sample_source_bytes(const RegisterModifie
   const uint32_t filter = read(sample.sampler + 2);
   const uint32_t word1 = read(resource + 1);
   const bool compute_feedback =
-      (sample.linear_candidate || sample.filtered_feedback_candidate) && !sample.clamp &&
+      sample.filtered_feedback_candidate &&
+      (sample.texel_fault || sample.lod_warning ||
+       rdna_image_lod_warning_threshold(arch, read(resource + 5))) &&
       use_linear_image_path(arch, resource, sample.sampler, sample.dim, true, read, backed, true) &&
-      compute_filtered_image_feedback(arch, sample.dim, word3, word1, filter);
+      compute_filtered_image_feedback(arch, sample.dim, word3, word1, filter, sample.mode,
+                                      sample.offset, sample.compare);
   const bool linear =
       !native_filter &&
       (compute_feedback || (volume && !sample.query) ||
@@ -416,8 +417,7 @@ std::array<ImageSourceBytes, 12> image_sample_source_bytes(const RegisterModifie
   const auto mip = rdna_image_mip_range(arch, word1, word3);
   const bool needs_gradients =
       linear
-          ? gradients || linear_image_needs_implicit_lod((filter >> 26) & 3, mip.first, mip.last) ||
-                ((filter >> 20) & 3) != ((filter >> 22) & 3)
+          ? gradients || linear_image_needs_implicit_lod(filter, mip.first, mip.last, sample.gather)
           : graphics_image_needs_gradients(sample.query,
                                            graphics_sample_has_fixed_lod(sample.query,
                                                                          sample.lod_warning, filter,
@@ -432,9 +432,14 @@ std::array<ImageSourceBytes, 12> image_sample_source_bytes(const RegisterModifie
   const bool bias = sample.mode == ImageSampleMode::Bias;
   const unsigned gradient_start =
       unsigned(sample.offset) + unsigned(bias) + unsigned(sample.compare);
+  const uint32_t gradient_components = sample.mode == ImageSampleMode::Derivatives16
+                                           ? image_derivative_component_count(sample.dim)
+                                           : 0;
+  const uint16_t low16_words =
+      image_prefix_low16_words(gradient_start, gradient_components, a16, bias, sample.offset);
   const unsigned prefix = modifiers.image_prefix_words;
   for (unsigned word = 0; word < prefix; ++word) {
-    uint8_t bytes = image_prefix_word_bytes(word, modifiers.image_prefix_low16_words);
+    uint8_t bytes = image_prefix_word_bytes(word, low16_words);
     if (!linear && sample.offset && word == 0 && sample.dim == kImageDimCube)
       bytes = 0;
     if (bias && word == unsigned(sample.offset))
@@ -448,9 +453,11 @@ std::array<ImageSourceBytes, 12> image_sample_source_bytes(const RegisterModifie
     }
     result[word].active = bytes;
   }
-  // Cube unfolding also reads the face selector from each derivative source lane.
-  const unsigned spatial =
-      !linear && sample.dim == kImageDimCube ? 3u : image_derivative_component_count(sample.dim);
+  // Cube unfolding and GFX10's same-face check read the derivative lanes' face selectors.
+  const bool gfx10 = arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2;
+  const unsigned spatial = sample.dim == kImageDimCube && (!linear || gfx10)
+                               ? 3u
+                               : image_derivative_component_count(sample.dim);
   const bool array = sample.dim == kImageDim1dArray || sample.dim == kImageDim2dArray;
   const unsigned count = sample.query && array ? spatial : modifiers.image_coordinate_count;
   for (unsigned component = 0; component < count; ++component) {
@@ -475,8 +482,9 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
   // VOPD only executes its two operations in a wave32.
   if (wf.wf_size() != 32 && name.starts_with("v_dual_"))
     return;
-  const bool gfx10_valu = (inst.flags() & VALU) && (wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA1 ||
-                                                    wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA2);
+  const bool gfx10 =
+      wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA1 || wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA2;
+  const bool gfx10_valu = gfx10 && (inst.flags() & VALU);
   const bool vector = name.starts_with("v_") || name.starts_with("ds_") ||
                       name.starts_with("lds_") || (inst.is_memory_op() && !name.starts_with("s_"));
   const bool scalar_lane_read = name.starts_with("v_readlane_b32");
@@ -501,7 +509,8 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
   const bool gfx11_or_gfx12_sample = (gfx11 || wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA4) &&
                                      modifiers.image_sample_sources &&
                                      !modifiers.image_sample_sources->query;
-  const bool check_image_result = (gfx11 && modifiers.image_address) || gfx12_image_atomic ||
+  const bool check_image_result = modifiers.gfx10_lod_query_quad ||
+                                  (gfx11 && modifiers.image_address) || gfx12_image_atomic ||
                                   gfx11_or_gfx12_sample || modifiers.image_resource_info;
   if (check_image_result) {
     for (int i = 0; i < inst.num_dst_operands(); ++i) {
@@ -622,7 +631,9 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
       check_coordinate(reg, image_prefix_word_bytes(word, modifiers.image_prefix_low16_words),
                        lanes);
     }
-    uint64_t ray_lanes = lanes;
+    const uint64_t coordinate_lanes =
+        modifiers.gfx10_lod_query_quad ? ImageDerivativeQuad::source_lanes(lanes) : lanes;
+    uint64_t ray_lanes = coordinate_lanes;
     if (const auto resource = modifiers.bvh_resource) {
       const auto word2 = registers.scalar_control_value(*resource + 2);
       const auto word3 = registers.scalar_control_value(*resource + 3);
@@ -631,7 +642,7 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
         ray_lanes = 0;
       else {
         const bool pointer_flags = gfx11_bvh_pointer_flags_enabled(*word3);
-        for (uint64_t pending = lanes; pending; pending &= pending - 1) {
+        for (uint64_t pending = coordinate_lanes; pending; pending &= pending - 1) {
           const uint32_t lane = std::countr_zero(pending);
           const auto pointer_word = [&](unsigned i) {
             const auto index = gfx115_source_vgpr(modifiers.image_coordinates[i], wf.num_vgprs());
@@ -647,9 +658,11 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
     }
     for (uint32_t component = 0; component < components; ++component) {
       const uint32_t word = prefix + (modifiers.image_a16 ? component / 2 : component);
-      const uint16_t reg = modifiers.image_coordinates[word];
+      uint16_t reg = modifiers.image_coordinates[word];
+      if (modifiers.gfx10_lod_query_quad && reg >= wf.num_vgprs())
+        reg = 0;
       check_coordinate(reg, modifiers.image_a16 ? (component % 2 ? 0xc : 0x3) : 0xf,
-                       component < modifiers.bvh_pointer_words ? lanes : ray_lanes);
+                       component < modifiers.bvh_pointer_words ? coordinate_lanes : ray_lanes);
     }
   }
   if (modifiers.exec_all_if_nonzero)

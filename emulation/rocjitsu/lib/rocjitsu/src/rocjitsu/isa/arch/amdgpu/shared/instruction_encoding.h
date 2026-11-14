@@ -306,6 +306,8 @@ struct RegisterModifiers {
   uint8_t image_coordinate_count = 0;
   /// Coordinates occupy packed 16-bit halves.
   bool image_a16 = false;
+  /// GFX10 GET_LOD reads quad lanes 0, 1, and 2 for each active quad.
+  bool gfx10_lod_query_quad = false;
   /// VGPR words before coordinates, including offset, bias, compare, and explicit gradients.
   uint8_t image_prefix_words = 0;
   /// Prefix words in which only the low half carries an input.

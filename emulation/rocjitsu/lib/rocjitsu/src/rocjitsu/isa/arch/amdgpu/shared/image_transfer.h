@@ -100,7 +100,8 @@ prepare_image_transfer(Wavefront &wf, VectorMemState &state, uint32_t resource, 
              : 0;
   if ((!gfx12 && arch != ROCJITSU_CODE_ARCH_RDNA3 && arch != ROCJITSU_CODE_ARCH_RDNA3_5) ||
       (atomic && (!controls.unorm || d16 || !atomic_bytes)) || (packed && d16) || (mask & ~15u) ||
-      (query && (d16 || (mask & ~3u))) || (gather && std::popcount(mask) != 1))
+      (query && (d16 || !image_lod_mask_supported(arch, mask))) ||
+      (gather && std::popcount(mask) != 1))
     return unsupported();
   const uint32_t words = controls.r128 ? 4 : 8;
   const bool dropped = mask == 0;
@@ -207,13 +208,13 @@ prepare_image_transfer(Wavefront &wf, VectorMemState &state, uint32_t resource, 
           true) &&
       compute_filtered_image_feedback(
           arch, dim, resource_words[3], resource_words[1],
-          RegisterAccess(wf).scalar_control_value(sampler + 2).value_or(0));
+          RegisterAccess(wf).scalar_control_value(sampler + 2).value_or(0), sample_mode,
+          controls.offset, controls.compare);
   if ((volume || compute_feedback) && sampler != ~0u && !query) {
-    if (controls.compare || controls.offset || controls.lod_clamp || controls.gather ||
-        sample_mode == ImageSampleMode::Bias || sample_mode == ImageSampleMode::Derivatives16)
+    if (controls.gather)
       return unsupported();
-    // The transfer owns feedback allocation and status. The ordinary sampler
-    // prepares resident texels without requesting a second status word.
+    // Feedback was already allocated in the vector memory state.
+    // The compute sampler prepares the texels without allocating it again.
     ImageFields fields = controls;
     fields.da = true;
     fields.tfe = fields.lwe = false;
@@ -231,8 +232,8 @@ prepare_image_transfer(Wavefront &wf, VectorMemState &state, uint32_t resource, 
   // Non-sampling 2D-array instructions also address 3D resources: their third
   // coordinate is Z, with the resource's volume layout and depth bounds.
   if ((dim == kImageDim3d && !volume) ||
-      (volume && ((dim != kImageDim3d && dim != kImageDim2dArray) || sampler != ~0u ||
-                  (resource_words[5] & 16))))
+      (volume && ((dim != kImageDim3d && dim != kImageDim2dArray) ||
+                  (!query && (sampler != ~0u || (resource_words[5] & 16))))))
     return unsupported();
   const uint32_t swizzle = descriptor.swizzle_mode;
   uint32_t width = descriptor.width;
@@ -671,7 +672,7 @@ prepare_image_transfer(Wavefront &wf, VectorMemState &state, uint32_t resource, 
         layer += static_cast<uint32_t>(std::clamp(rounded, 0.0, double(last_layer - first_layer)));
       }
       double lod = 0;
-      bool zero_footprint = false;
+      bool zero_isotropic_footprint = false;
       uint32_t filter_count = 1;
       double sample_step_u = 0, sample_step_v = 0;
       if (sample_mode == ImageSampleMode::Explicit) {
@@ -679,6 +680,22 @@ prepare_image_transfer(Wavefront &wf, VectorMemState &state, uint32_t resource, 
         lod = image_sample_round_even8(std::isnan(input) ? 0 : input) + lod_bias;
       } else if (sample_mode == ImageSampleMode::Zero) {
         lod = lod_bias;
+      } else if (query && volume) {
+        const ImageDerivativeQuad quad(lane);
+        std::array<double, 3> dx{}, dy{};
+        zero_isotropic_footprint = true;
+        for (unsigned axis = 0; axis < dx.size(); ++axis) {
+          const double origin = read(coordinate_offset + axis, quad.origin);
+          dx[axis] = read(coordinate_offset + axis, quad.right()) - origin;
+          dy[axis] = read(coordinate_offset + axis, quad.bottom()) - origin;
+          zero_isotropic_footprint &=
+              (dx[axis] == 0 || std::isnan(dx[axis])) && (dy[axis] == 0 || std::isnan(dy[axis]));
+        }
+        const std::array<uint32_t, 3> extents{width, height,
+                                              std::max(1u, resource_depth >> first_level)};
+        lod =
+            image_gradient_lod(dx, dy, normalized ? extents : std::array<uint32_t, 3>{1, 1, 1}, 3);
+        lod += lod_bias;
       } else if (needs_gradients) {
         double dxu, dxv, dyu, dyv;
         std::array<int, 4> gradient_rounding{};
@@ -780,9 +797,11 @@ prepare_image_transfer(Wavefront &wf, VectorMemState &state, uint32_t resource, 
         const auto footprint_axes = image_footprint(dxu, dxv, dyu, dyv, normalized ? width : 1,
                                                     normalized ? height : 1, gradient_rounding);
         const auto [major_lod, minor_lod] = footprint_axes.lods;
-        zero_footprint = footprint_axes.norms[0] == 0 && footprint_axes.norms[1] == 0;
+        const bool zero_footprint = footprint_axes.norms[0] == 0 && footprint_axes.norms[1] == 0;
         if ((min_filter & 2) || (mag_filter & 2)) {
-          lod = std::max(minor_lod, major_lod - std::countr_zero(max_anisotropy) * 256) / 256.0;
+          lod = (zero_footprint ? kMinimumAnisotropicLodFixed
+                                : image_anisotropic_lod(major_lod, minor_lod, max_anisotropy)) /
+                double(kImageLodFractionScale);
           filter_count = image_anisotropic_filter_count(footprint_axes, max_anisotropy,
                                                         aniso_threshold, aniso_bias, perf_mod);
           if (filter_count > 1 && !query) {
@@ -796,6 +815,7 @@ prepare_image_transfer(Wavefront &wf, VectorMemState &state, uint32_t resource, 
             sample_step_v = image_filter_step_truncate(direction_v * spacing);
           }
         } else {
+          zero_isotropic_footprint = zero_footprint;
           lod = major_lod / 256.0;
         }
         lod += lod_bias;
@@ -823,7 +843,7 @@ prepare_image_transfer(Wavefront &wf, VectorMemState &state, uint32_t resource, 
           return unsupported();
         lod = *clamped;
       }
-      const double raw_lod = zero_footprint ? 0 : lod;
+      const double raw_lod = zero_isotropic_footprint ? 0 : lod;
       lod = std::clamp(lod, min_lod, max_lod);
       const double requested_lod = first_level + lod;
       // LZ gather stays at its fixed mip. Other samples clamp to the resource's
@@ -881,16 +901,18 @@ prepare_image_transfer(Wavefront &wf, VectorMemState &state, uint32_t resource, 
       };
       u = address_input(u, width, wrap_x);
       v = address_input(v, height, wrap_y);
-      // Linear filtering reflects the footprint center. Point filtering reflects the
-      // quantized texel index, so an exact negative texel boundary selects -1-index.
-      if (linear && wrap_x == uint32_t(ImageClamp::MirrorOnce))
+      // Linear samples reflect the footprint center. Gathers and point samples reflect
+      // each integer texel index, preserving the hardware gather order across zero.
+      const bool reflect_center = linear && !controls.gather;
+      if (reflect_center && wrap_x == uint32_t(ImageClamp::MirrorOnce))
         u = std::abs(u);
-      if (linear && wrap_y == uint32_t(ImageClamp::MirrorOnce))
+      if (reflect_center && wrap_y == uint32_t(ImageClamp::MirrorOnce))
         v = std::abs(v);
-      const auto address_coordinate = [linear](double value, uint32_t size, uint32_t wrap) {
+      const auto address_coordinate = [reflect_center](double value, uint32_t size, uint32_t wrap) {
         const auto mode = static_cast<ImageClamp>(wrap);
         return image_sample_coordinate(
-            value, size, linear && mode == ImageClamp::MirrorOnce ? ImageClamp::Edge : mode);
+            value, size,
+            reflect_center && mode == ImageClamp::MirrorOnce ? ImageClamp::Edge : mode);
       };
       const auto &lane_mip = get_mip_layout(level);
       if (!lane_mip)
@@ -1112,6 +1134,26 @@ prepare_image_transfer(Wavefront &wf, VectorMemState &state, uint32_t resource, 
   } else if (!state.is_load)
     capture_buffer_format_store(wf, state, state.dst_reg_base, packed);
   return util::Result::success();
+}
+
+/// Compute LODs before writing any lane: VDATA may alias quad coordinates,
+/// including coordinates supplied by lanes outside EXEC.
+inline void execute_image_lod(Wavefront &wf, uint32_t resource, uint32_t sampler, uint32_t data,
+                              ImageAddressRegisters coords, ImageFields controls) {
+  VectorMemState state(GLOBAL_MEM);
+  state.is_load = true;
+  ImageLodResults results{};
+  if (prepare_image_transfer(wf, state, resource, data, coords, controls, sampler,
+                             ImageSampleMode::Implicit, &results)
+          .failed())
+    return;
+  RegisterAccess regs(wf);
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(state.exec_mask & (uint64_t{1} << lane)))
+      continue;
+    write_image_lod(regs, wf.vgpr_alloc().base + data, lane, controls.dmask, results[lane][0],
+                    results[lane][1]);
+  }
 }
 
 } // namespace rocjitsu::amdgpu
