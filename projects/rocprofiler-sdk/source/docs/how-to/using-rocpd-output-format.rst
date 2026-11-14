@@ -1868,8 +1868,6 @@ PC sampling data (schema 3.1.0)
 PC sampling support was introduced in schema version **3.1.0**. When
 ``rocprofv3`` is run with ``--pc-sampling-beta-enabled`` and
 ``--output-format rocpd``, the following tables are populated.
-Schema 3.0.6 remains frozen under ``versions/3.0.6``; the top-level SQL files
-describe 3.1.0. Older schema snapshots are not changed by PC-sampling support.
 
 rocpd_gpu_pc_sample
 ++++++++++++++++++++
