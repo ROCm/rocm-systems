@@ -79,6 +79,39 @@ HIP_TEST_CASE(Unit_hipEventQuery_DifferentDevice) {
   HIP_CHECK(hipStreamDestroy(stream));
 }
 
+static hipEvent_t RecordOnDestroyedStream() {
+  hipEvent_t event{};
+  HIP_CHECK(hipEventCreateWithFlags(&event, hipEventDisableTiming));
+  hipStream_t stream{};
+  HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
+  HIP_CHECK(hipEventRecord(event, stream));
+  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipStreamDestroy(stream));
+  return event;
+}
+
+HIP_TEST_CASE(Unit_hipEventQuery_RecordingStreamDestroyed) {
+  hipEvent_t event = RecordOnDestroyedStream();
+  HIP_CHECK(hipEventQuery(event));
+  HIP_CHECK(hipEventSynchronize(event));
+  HIP_CHECK(hipEventDestroy(event));
+}
+
+HIP_TEST_CASE(Unit_hipEventQuery_RecordingStreamDestroyed_GlobalCapture) {
+  hipStream_t capture_stream{};
+  HIP_CHECK(hipStreamCreate(&capture_stream));
+  hipEvent_t event = RecordOnDestroyedStream();
+  HIP_CHECK(hipStreamBeginCapture(capture_stream, hipStreamCaptureModeGlobal));
+  HIP_CHECK_ERROR(hipEventQuery(event), hipErrorStreamCaptureUnsupported);
+  HIP_CHECK_ERROR(hipEventSynchronize(event), hipErrorStreamCaptureUnsupported);
+  hipGraph_t graph{};
+  HIP_CHECK_ERROR(hipStreamEndCapture(capture_stream, &graph), hipErrorStreamCaptureInvalidated);
+  REQUIRE(graph == nullptr);
+  HIP_CHECK(hipStreamDestroy(capture_stream));
+  HIP_CHECK(hipEventDestroy(event));
+  (void)hipGetLastError();
+}
+
 /**
  * End doxygen group EventTest.
  * @}

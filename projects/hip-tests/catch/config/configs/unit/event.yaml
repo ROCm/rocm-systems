@@ -141,6 +141,12 @@ event:
   Unit_hipEventQuery_DifferentDevice:
     <<: *level_default
     tags: [synchronization, P0]
+  Unit_hipEventQuery_RecordingStreamDestroyed:
+    <<: *level_default
+    tags: [synchronization, P1]
+  Unit_hipEventQuery_RecordingStreamDestroyed_GlobalCapture:
+    <<: *level_default
+    tags: [synchronization, P1]
   Unit_hipEventIpc_shm_cleanup:
     <<: *level_default
     tags: [ipc]
