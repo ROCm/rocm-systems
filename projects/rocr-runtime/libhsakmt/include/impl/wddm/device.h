@@ -270,7 +270,7 @@ public:
 
   // Debugger support
   bool GetKmdDbgVersion(struct Wkmi::KmdDbgVersion *version) const;
-  bool RegisterRuntimeState(uint32_t runtime_state, const void* r_debug, bool ttmp_setup_hint) const;
+  bool RegisterRuntimeState(uint32_t runtime_state, const void* r_debug, bool ttmp_setup_hint);
   bool SetTrapHandler(uint64_t tba, uint64_t tma) const;
 
 private:
