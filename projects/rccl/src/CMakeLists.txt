@@ -1469,7 +1469,7 @@ endif()
 
 ## Set RCCL compile options
 if (HAVE_PARALLEL_JOBS)
-  target_compile_options(rccl PRIVATE -parallel-jobs=12)
+  target_compile_options(rccl PRIVATE ${RCCL_OFFLOAD_JOBS_FLAG}=12)
 endif()
 
 if (ROCM_VERSION VERSION_GREATER_EQUAL "60200")
@@ -1839,7 +1839,7 @@ if (HAVE_PARALLEL_JOBS)
     set(num_linker_jobs "1")
   endif()
   message(STATUS "Use ${num_linker_jobs} jobs for linking")
-  target_link_options(rccl PRIVATE -parallel-jobs=${num_linker_jobs})       # Use multiple threads to link
+  target_link_options(rccl PRIVATE ${RCCL_OFFLOAD_JOBS_FLAG}=${num_linker_jobs})       # Use multiple threads to link
 endif()
 if(BUILD_ADDRESS_SANITIZER)
   target_link_options(rccl PRIVATE -fuse-ld=lld)
