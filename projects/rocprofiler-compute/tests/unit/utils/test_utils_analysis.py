@@ -850,21 +850,8 @@ def test_impute_counters_iteration_multiplex(tmp_path: Path) -> None:
 
     df = pd.DataFrame(data)
 
-    # For "kernel" policy
     result, _pass_tables = utils_analysis.impute_counters_iteration_multiplex(
-        df, "kernel", tmp_path
-    )
-    # Sort by Dispatch_ID to ensure consistent order
-    result = result.sort_values(by="Dispatch_ID")
-    assert isinstance(result, pd.DataFrame)
-    assert len(result) == 3  # Ensure same number of rows
-    # Assert Counter1 and Counter2 imputed for first two dispatches
-    assert result["Counter2"].iloc[0] == 500
-    assert result["Counter1"].iloc[1] == 100
-
-    # For "kernel_launch_params" policy
-    result, _pass_tables = utils_analysis.impute_counters_iteration_multiplex(
-        df, "kernel_launch_params", tmp_path
+        df, tmp_path
     )
     # Sort by Dispatch_ID to ensure consistent order
     result = result.sort_values(by="Dispatch_ID")
@@ -896,75 +883,7 @@ def test_impute_counters_iteration_multiplex(tmp_path: Path) -> None:
     df = pd.DataFrame(data)
 
     result, _pass_tables = utils_analysis.impute_counters_iteration_multiplex(
-        df, "kernel_launch_params", tmp_path
-    )
-    # Sort by Dispatch_ID to ensure consistent order
-    result = result.sort_values(by="Dispatch_ID")
-
-    assert isinstance(result, pd.DataFrame)
-    assert len(result) == 3  # Ensure same number of rows
-    # No imputation possible
-    assert pd.isna(result["Counter2"].iloc[0])
-    assert pd.isna(result["Counter1"].iloc[1])
-    assert pd.isna(result["Counter2"].iloc[2])
-
-    # Test multi_kernel
-    data = {
-        "Dispatch_ID": [1, 2, 3],
-        "GPU_ID": [0, 0, 0],
-        "Grid_Size": [1024, 1024, 512],
-        "Workgroup_Size": [64, 64, 64],
-        "LDS_Per_Workgroup": [32, 32, 32],
-        "Scratch_Per_Workitem": [0, 0, 0],
-        "Arch_VGPR": [16, 16, 16],
-        "Accum_VGPR": [0, 0, 0],
-        "SGPR": [32, 32, 32],
-        "Kernel_Name": ["kernel_a", "kernel_b", "kernel_a"],
-        "Start_Timestamp": [1000, 1200, 1400],
-        "End_Timestamp": [1500, 1700, 1900],
-        "Kernel_ID": [1, 1, 1],
-        "Counter1": [100, None, None],
-        "Counter2": [None, 500, 300],
-    }
-
-    df = pd.DataFrame(data)
-
-    # For "kernel" policy
-    result, _pass_tables = utils_analysis.impute_counters_iteration_multiplex(
-        df, "kernel", tmp_path
-    )
-    # Sort by Dispatch_ID to ensure consistent order
-    result = result.sort_values(by="Dispatch_ID")
-    # Assert Counter1 and Counter2 imputed for first and last dispatches
-    assert result["Counter2"].iloc[0] == 300
-    assert result["Counter1"].iloc[2] == 100
-
-    assert isinstance(result, pd.DataFrame)
-    assert len(result) == 3  # Ensure same number of rows
-
-    # For "kernel_launch_params" policy
-    data = {
-        "Dispatch_ID": [1, 2, 3],
-        "GPU_ID": [0, 0, 0],
-        "Grid_Size": [1024, 1024, 1024],
-        "Workgroup_Size": [64, 64, 32],
-        "LDS_Per_Workgroup": [32, 24, 32],
-        "Scratch_Per_Workitem": [0, 0, 0],
-        "Arch_VGPR": [16, 16, 16],
-        "Accum_VGPR": [0, 0, 0],
-        "SGPR": [32, 32, 32],
-        "Kernel_Name": ["kernel_a", "kernel_a", "kernel_a"],
-        "Start_Timestamp": [1000, 1200, 1400],
-        "End_Timestamp": [1500, 1700, 1900],
-        "Kernel_ID": [1, 1, 1],
-        "Counter1": [100, None, 300],
-        "Counter2": [None, 500, None],
-    }
-
-    df = pd.DataFrame(data)
-
-    result, _pass_tables = utils_analysis.impute_counters_iteration_multiplex(
-        df, "kernel_launch_params", tmp_path
+        df, tmp_path
     )
     # Sort by Dispatch_ID to ensure consistent order
     result = result.sort_values(by="Dispatch_ID")
@@ -1001,7 +920,7 @@ def test_impute_counters_iteration_multiplex(tmp_path: Path) -> None:
 
     df = pd.DataFrame(data)
     result, _pass_tables = utils_analysis.impute_counters_iteration_multiplex(
-        df, "kernel_launch_params", tmp_path
+        df, tmp_path
     )
     result = result.sort_values(by="Dispatch_ID")
 
@@ -1528,8 +1447,8 @@ def seed_perfmon_files(tmp_path: Path, count: int) -> None:
         (perfmon / f"pmc_perf_{i}.yaml").touch()
 
 
-def test_impute_multiplex_kernel_policy(tmp_path: Path) -> None:
-    """Test imputation with kernel policy on a single kernel."""
+def test_impute_multiplex_single_kernel(tmp_path: Path) -> None:
+    """Test imputation on a single kernel."""
 
     data = {
         "Dispatch_ID": [1, 2, 3],
@@ -1552,44 +1471,7 @@ def test_impute_multiplex_kernel_policy(tmp_path: Path) -> None:
     df = pd.DataFrame(data)
 
     result, _pass_tables = utils_analysis.impute_counters_iteration_multiplex(
-        df, "kernel", tmp_path
-    )
-
-    # Sort by Dispatch_ID to ensure consistent order
-    result = result.sort_values(by="Dispatch_ID")
-    assert isinstance(result, pd.DataFrame)
-    assert len(result) == 3  # Ensure same number of rows
-
-    # Assert Counter2 imputed for first dispatch, Counter1 imputed for second dispatch
-    assert result["Counter2"].iloc[0] == 500
-    assert result["Counter1"].iloc[1] == 100
-
-
-def test_impute_multiplex_kernel_launch_params_policy(tmp_path: Path) -> None:
-    """Test imputation with kernel_launch_params policy on a single kernel."""
-
-    data = {
-        "Dispatch_ID": [1, 2, 3],
-        "GPU_ID": [0, 0, 0],
-        "Grid_Size": [1024, 512, 1024],
-        "Workgroup_Size": [64, 64, 64],
-        "LDS_Per_Workgroup": [32, 32, 32],
-        "Scratch_Per_Workitem": [0, 0, 0],
-        "Arch_VGPR": [16, 16, 16],
-        "Accum_VGPR": [0, 0, 0],
-        "SGPR": [32, 32, 32],
-        "Kernel_Name": ["kernel_a", "kernel_a", "kernel_a"],
-        "Start_Timestamp": [1000, 1200, 1400],
-        "End_Timestamp": [1500, 1700, 1900],
-        "Kernel_ID": [1, 1, 1],
-        "Counter1": [100, None, None],
-        "Counter2": [None, 500, 300],
-    }
-
-    df = pd.DataFrame(data)
-
-    result, _pass_tables = utils_analysis.impute_counters_iteration_multiplex(
-        df, "kernel_launch_params", tmp_path
+        df, tmp_path
     )
 
     # Sort by Dispatch_ID to ensure consistent order
@@ -1603,8 +1485,8 @@ def test_impute_multiplex_kernel_launch_params_policy(tmp_path: Path) -> None:
     assert len(result) == 3
 
 
-def test_impute_multiplex_kernel_launch_params_no_imputation(tmp_path: Path) -> None:
-    """Test imputation with kernel_launch_params when no imputation is possible."""
+def test_impute_multiplex_no_imputation(tmp_path: Path) -> None:
+    """Test imputation when no imputation is possible."""
 
     data = {
         "Dispatch_ID": [1, 2, 3],
@@ -1630,7 +1512,7 @@ def test_impute_multiplex_kernel_launch_params_no_imputation(tmp_path: Path) -> 
     seed_perfmon_files(tmp_path, count=num_counter_bucket)
 
     result, _pass_tables = utils_analysis.impute_counters_iteration_multiplex(
-        df, "kernel_launch_params", tmp_path
+        df, tmp_path
     )
 
     # Sort by Dispatch_ID to ensure consistent order
@@ -1649,48 +1531,10 @@ def test_impute_multiplex_kernel_launch_params_no_imputation(tmp_path: Path) -> 
     assert pd.isna(result["Counter2"].iloc[2])
 
 
-def test_impute_multiplex_multi_kernel_kernel_policy(tmp_path: Path) -> None:
-    """Test imputation with kernel policy on multiple kernels."""
-
-    data = {
-        "Dispatch_ID": [1, 2, 3],
-        "GPU_ID": [0, 0, 0],
-        "Grid_Size": [1024, 1024, 512],
-        "Workgroup_Size": [64, 64, 64],
-        "LDS_Per_Workgroup": [32, 32, 32],
-        "Scratch_Per_Workitem": [0, 0, 0],
-        "Arch_VGPR": [16, 16, 16],
-        "Accum_VGPR": [0, 0, 0],
-        "SGPR": [32, 32, 32],
-        "Kernel_Name": ["kernel_a", "kernel_b", "kernel_a"],
-        "Start_Timestamp": [1000, 1200, 1400],
-        "End_Timestamp": [1500, 1700, 1900],
-        "Kernel_ID": [1, 1, 1],
-        "Counter1": [100, None, None],
-        "Counter2": [None, 500, 300],
-    }
-
-    df = pd.DataFrame(data)
-
-    result, _pass_tables = utils_analysis.impute_counters_iteration_multiplex(
-        df, "kernel", tmp_path
-    )
-
-    # Sort by Dispatch_ID to ensure consistent order
-    result = result.sort_values(by="Dispatch_ID")
-
-    # Assert Counter1 and Counter2 imputed for first and last dispatches
-    assert result["Counter2"].iloc[0] == 300
-    assert result["Counter1"].iloc[2] == 100
-
-    assert isinstance(result, pd.DataFrame)
-    assert len(result) == 3  # Ensure same number of rows
-
-
-def test_impute_multiplex_multi_kernel_kernel_launch_params_no_imputation(
+def test_impute_multiplex_multi_kernel_no_imputation(
     tmp_path: Path,
 ) -> None:
-    """Test imputation with kernel_launch_params when no imputation is possible."""
+    """Test imputation when no imputation is possible."""
 
     data = {
         "Dispatch_ID": [1, 2, 3],
@@ -1716,7 +1560,7 @@ def test_impute_multiplex_multi_kernel_kernel_launch_params_no_imputation(
     seed_perfmon_files(tmp_path, count=num_counter_bucket)
 
     result, _pass_tables = utils_analysis.impute_counters_iteration_multiplex(
-        df, "kernel_launch_params", tmp_path
+        df, tmp_path
     )
 
     # Sort by Dispatch_ID to ensure consistent order
@@ -1737,7 +1581,7 @@ def test_impute_multiplex_multi_kernel_kernel_launch_params_no_imputation(
 
 def test_fewer_dispatches_single_kernel(tmp_path: Path) -> None:
     """
-    Test imputation with kernel policy on a single kernel with
+    Test imputation on a single kernel with
     fewer dispatches than buckets.
 
     1 kernel, 3 counters, only 2 dispatches (missing C3 bucket).
@@ -1768,7 +1612,7 @@ def test_fewer_dispatches_single_kernel(tmp_path: Path) -> None:
     num_counter_bucket = 3
     seed_perfmon_files(tmp_path, count=num_counter_bucket)
     result, _pass_tables = utils_analysis.impute_counters_iteration_multiplex(
-        df, "kernel", tmp_path
+        df, tmp_path
     )
     result = result.sort_values(by="Dispatch_ID")
 
@@ -1787,7 +1631,7 @@ def test_fewer_dispatches_single_kernel(tmp_path: Path) -> None:
 
 def test_fewer_dispatches_multiple_kernels_both_incomplete(tmp_path: Path) -> None:
     """
-    Test imputation with kernel policy on multiple kernels, both incomplete.
+    Test imputation on multiple kernels, both incomplete.
 
     kernel_a: buckets {C1}, {C2} (missing C3)
     kernel_b: buckets {C1}, {C2} (missing C3)
@@ -1817,7 +1661,7 @@ def test_fewer_dispatches_multiple_kernels_both_incomplete(tmp_path: Path) -> No
     num_counter_bucket = 3
     seed_perfmon_files(tmp_path, count=num_counter_bucket)
     result, _pass_tables = utils_analysis.impute_counters_iteration_multiplex(
-        df, "kernel", tmp_path
+        df, tmp_path
     )
     result = result.sort_values(by="Dispatch_ID")
 
@@ -1843,7 +1687,7 @@ def test_fewer_dispatches_multiple_kernels_both_incomplete(tmp_path: Path) -> No
 
 def test_fewer_dispatches_one_incomplete_one_complete(tmp_path: Path) -> None:
     """
-    Test imputation with kernel policy on one kernel incomplete, second complete.
+    Test imputation on one kernel incomplete, second complete.
 
     kernel_a: 2 dispatches (missing C3 bucket)
     kernel_b: 3 dispatches covering all 3 buckets
@@ -1879,7 +1723,7 @@ def test_fewer_dispatches_one_incomplete_one_complete(tmp_path: Path) -> None:
     num_counter_bucket = 3
     seed_perfmon_files(tmp_path, count=num_counter_bucket)
     result, _pass_tables = utils_analysis.impute_counters_iteration_multiplex(
-        df, "kernel", tmp_path
+        df, tmp_path
     )
     result = result.sort_values(by="Dispatch_ID")
 
@@ -1908,10 +1752,9 @@ def test_fewer_dispatches_one_incomplete_one_complete(tmp_path: Path) -> None:
 
 def test_fewer_dispatches_same_kernel_different_launch_params(tmp_path: Path) -> None:
     """
-    Test imputation with kernel_launch_params on the same kernel
-    with different launch params.
+    Test imputation on the same kernel with different launch params.
 
-    kernel_launch_params policy splits into 2 groups, each incomplete.
+    Launch params split the kernel into 2 groups, each incomplete.
     Config 1 (Grid=1024, WG=64, LDS=32): buckets {C1}, {C2}
     Config 2 (Grid=512,  WG=32, LDS=16): buckets {C1}, {C2}
     """
@@ -1945,7 +1788,7 @@ def test_fewer_dispatches_same_kernel_different_launch_params(tmp_path: Path) ->
     num_counter_bucket = 3
     seed_perfmon_files(tmp_path, count=num_counter_bucket)
     result, _pass_tables = utils_analysis.impute_counters_iteration_multiplex(
-        df, "kernel_launch_params", tmp_path
+        df, tmp_path
     )
     result = result.sort_values(by="Dispatch_ID")
 
@@ -1973,9 +1816,8 @@ def test_fewer_dispatches_same_kernel_one_incomplete_one_complete(
     tmp_path: Path,
 ) -> None:
     """
-    Test imputation with kernel_launch_params on one config incomplete, other complete.
+    Test imputation on one config incomplete, other complete.
 
-    kernel_launch_params policy:
     Config 1 (Grid=1024, WG=64, LDS=32): 2 dispatches (missing C3 bucket)
     Config 2 (Grid=512,  WG=32, LDS=16): 3 dispatches (all 3 buckets)
     """
@@ -2010,7 +1852,7 @@ def test_fewer_dispatches_same_kernel_one_incomplete_one_complete(
     num_counter_bucket = 3
     seed_perfmon_files(tmp_path, count=num_counter_bucket)
     result, _pass_tables = utils_analysis.impute_counters_iteration_multiplex(
-        df, "kernel_launch_params", tmp_path
+        df, tmp_path
     )
     result = result.sort_values(by="Dispatch_ID")
 
@@ -2039,7 +1881,7 @@ def test_fewer_dispatches_same_kernel_one_incomplete_one_complete(
 
 def test_incomplete_last_group_single_kernel(tmp_path: Path) -> None:
     """
-    Test imputation with kernel policy on a single kernel with incomplete last group.
+    Test imputation on a single kernel with incomplete last group.
 
     1 kernel, 2 counters, 3 dispatches (2 buckets, 1 full round + 1 trailing).
     The trailing subgroup uses previous_fill_values to fill its gaps.
@@ -2065,7 +1907,7 @@ def test_incomplete_last_group_single_kernel(tmp_path: Path) -> None:
 
     df = pd.DataFrame(data)
     result, _pass_tables = utils_analysis.impute_counters_iteration_multiplex(
-        df, "kernel", tmp_path
+        df, tmp_path
     )
     result = result.sort_values(by="Dispatch_ID")
 
@@ -2086,7 +1928,7 @@ def test_incomplete_last_group_single_kernel(tmp_path: Path) -> None:
 
 def test_incomplete_last_group_multiple_kernels_both_incomplete(tmp_path: Path) -> None:
     """
-    Test imputation with kernel policy on multiple kernels,
+    Test imputation on multiple kernels,
     both with incomplete last groups.
 
     kernel_a: 4 dispatches, 3 buckets {C1},{C2},{C3} (incomplete last)
@@ -2144,7 +1986,7 @@ def test_incomplete_last_group_multiple_kernels_both_incomplete(tmp_path: Path) 
 
     df = pd.DataFrame(data)
     result, _pass_tables = utils_analysis.impute_counters_iteration_multiplex(
-        df, "kernel", tmp_path
+        df, tmp_path
     )
     result = result.sort_values(by="Dispatch_ID")
 
@@ -2189,7 +2031,7 @@ def test_incomplete_last_group_multiple_kernels_both_incomplete(tmp_path: Path) 
 
 def test_incomplete_last_group_one_incomplete_other_complete(tmp_path: Path) -> None:
     """
-    Test imputation with kernel policy on one kernel incomplete, second kernel complete.
+    Test imputation on one kernel incomplete, second kernel complete.
 
     kernel_a: 4 dispatches, 3 buckets {C1},{C2},{C3} (incomplete last)
     kernel_b: 6 dispatches, 3 buckets {C1},{C2},{C3} (2 complete rounds)
@@ -2260,7 +2102,7 @@ def test_incomplete_last_group_one_incomplete_other_complete(tmp_path: Path) -> 
 
     df = pd.DataFrame(data)
     result, _pass_tables = utils_analysis.impute_counters_iteration_multiplex(
-        df, "kernel", tmp_path
+        df, tmp_path
     )
     result = result.sort_values(by="Dispatch_ID")
 
@@ -2310,10 +2152,9 @@ def test_incomplete_last_group_same_kernel_different_launch_params(
     tmp_path: Path,
 ) -> None:
     """
-    Test imputation with kernel_launch_params on the same kernel
-    with different launch params.
+    Test imputation on the same kernel with different launch params.
 
-    kernel_launch_params policy, both configs have incomplete last subgroups.
+    Both configs have incomplete last subgroups.
     Config 1 (Grid=1024, WG=64, LDS=32): 3 dispatches, 2 buckets
     Config 2 (Grid=512,  WG=32, LDS=16): 3 dispatches, 2 buckets
     """
@@ -2345,7 +2186,7 @@ def test_incomplete_last_group_same_kernel_different_launch_params(
 
     df = pd.DataFrame(data)
     result, _pass_tables = utils_analysis.impute_counters_iteration_multiplex(
-        df, "kernel_launch_params", tmp_path
+        df, tmp_path
     )
     result = result.sort_values(by="Dispatch_ID")
 
@@ -2374,10 +2215,8 @@ def test_incomplete_last_group_same_kernel_one_incomplete_one_complete(
     tmp_path: Path,
 ) -> None:
     """
-    Test imputation with kernel_launch_params on the same kernel
-    with one config incomplete, other complete.
+    Test imputation on the same kernel with one config incomplete, other complete.
 
-    kernel_launch_params policy:
     Config 1 (Grid=1024, WG=64, LDS=32): 3 dispatches, incomplete last
     Config 2 (Grid=512,  WG=32, LDS=16): 4 dispatches, 2 complete rounds
     """
@@ -2410,7 +2249,7 @@ def test_incomplete_last_group_same_kernel_one_incomplete_one_complete(
 
     df = pd.DataFrame(data)
     result, _pass_tables = utils_analysis.impute_counters_iteration_multiplex(
-        df, "kernel_launch_params", tmp_path
+        df, tmp_path
     )
     result = result.sort_values(by="Dispatch_ID")
 
@@ -2439,7 +2278,7 @@ def test_incomplete_last_group_same_kernel_one_incomplete_one_complete(
 
 def test_complete_last_group_single_kernel(tmp_path: Path) -> None:
     """
-    Test imputation with kernel policy on a single kernel with complete last group.
+    Test imputation on a single kernel with complete last group.
 
     1 kernel, 2 counters, 4 dispatches (2 complete rounds of 2 buckets).
     All imputation happens within subgroups; previous_fill_values fallback
@@ -2466,7 +2305,7 @@ def test_complete_last_group_single_kernel(tmp_path: Path) -> None:
 
     df = pd.DataFrame(data)
     result, _pass_tables = utils_analysis.impute_counters_iteration_multiplex(
-        df, "kernel", tmp_path
+        df, tmp_path
     )
     result = result.sort_values(by="Dispatch_ID")
 
@@ -2488,7 +2327,7 @@ def test_complete_last_group_single_kernel(tmp_path: Path) -> None:
 
 def test_complete_last_group_multiple_kernels_both_complete(tmp_path: Path) -> None:
     """
-    Test imputation with kernel policy on multiple kernels, both complete.
+    Test imputation on multiple kernels, both complete.
 
     kernel_a: 6 dispatches, 3 buckets {C1},{C2},{C3}, 2 complete rounds
     kernel_b: 6 dispatches, 3 buckets {C1},{C2},{C3}, 2 complete rounds
@@ -2619,7 +2458,7 @@ def test_complete_last_group_multiple_kernels_both_complete(tmp_path: Path) -> N
 
     df = pd.DataFrame(data)
     result, _pass_tables = utils_analysis.impute_counters_iteration_multiplex(
-        df, "kernel", tmp_path
+        df, tmp_path
     )
     result = result.sort_values(by="Dispatch_ID")
 
@@ -2675,10 +2514,9 @@ def test_complete_last_group_same_kernel_different_launch_params(
     tmp_path: Path,
 ) -> None:
     """
-    Test imputation with kernel_launch_params on the same kernel
-    with different launch params.
+    Test imputation on the same kernel with different launch params.
 
-    kernel_launch_params policy, both configs have 2 complete rounds.
+    Both configs have 2 complete rounds.
     Config 1 (Grid=1024, WG=64, LDS=32): 4 dispatches
     Config 2 (Grid=512,  WG=32, LDS=16): 4 dispatches
     """
@@ -2712,7 +2550,7 @@ def test_complete_last_group_same_kernel_different_launch_params(
 
     df = pd.DataFrame(data)
     result, _pass_tables = utils_analysis.impute_counters_iteration_multiplex(
-        df, "kernel_launch_params", tmp_path
+        df, tmp_path
     )
     result = result.sort_values(by="Dispatch_ID")
 
@@ -2770,7 +2608,7 @@ def test_impute_counters_iteration_multiplex_missing_kernel_name(
     }
     df_no_kn = pd.DataFrame(data_no_kernel_name)
     with pytest.raises(KeyError):
-        utils_analysis.impute_counters_iteration_multiplex(df_no_kn, "kernel", tmp_path)
+        utils_analysis.impute_counters_iteration_multiplex(df_no_kn, tmp_path)
 
 
 def test_impute_counters_iteration_multiplex_empty_dataframe(tmp_path: Path) -> None:
@@ -2795,7 +2633,7 @@ def test_impute_counters_iteration_multiplex_empty_dataframe(tmp_path: Path) -> 
     }
     df_empty = pd.DataFrame(data_empty)
     result, _pass_tables = utils_analysis.impute_counters_iteration_multiplex(
-        df_empty, "kernel", tmp_path
+        df_empty, tmp_path
     )
 
     # Empty-group fallback preserves the input schema with zero rows.
@@ -2831,7 +2669,7 @@ def test_impute_counters_iteration_multiplex_all_counters_nan(tmp_path: Path) ->
     }
     df_all_nan = pd.DataFrame(data_all_nan)
     result, _pass_tables = utils_analysis.impute_counters_iteration_multiplex(
-        df_all_nan, "kernel", tmp_path
+        df_all_nan, tmp_path
     )
 
     # Group was dropped (no valid counters) -- empty schema-aligned frame.
@@ -2865,53 +2703,13 @@ def test_impute_counters_iteration_multiplex_no_counter_columns(tmp_path: Path) 
     }
     df_no_counters = pd.DataFrame(data_no_counters)
     result, _pass_tables = utils_analysis.impute_counters_iteration_multiplex(
-        df_no_counters, "kernel", tmp_path
+        df_no_counters, tmp_path
     )
 
     # Group was dropped (no counter columns exist) -- empty schema-aligned frame.
     assert isinstance(result, pd.DataFrame)
     assert list(result.columns) == list(df_no_counters.columns)
     assert len(result) == 0
-
-
-def test_impute_counters_iteration_multiplex_unrecognized_policy(
-    tmp_path: Path,
-) -> None:
-    """
-    Test imputation when the policy is unrecognized.
-    Any policy other than "kernel" falls through to the else branch
-    (same as "kernel_launch_params"). The output must match exactly.
-    """
-
-    data_policy = {
-        "Dispatch_ID": [1, 2, 3],
-        "GPU_ID": [0, 0, 0],
-        "Grid_Size": [1024, 1024, 1024],
-        "Workgroup_Size": [64, 64, 64],
-        "LDS_Per_Workgroup": [32, 32, 32],
-        "Scratch_Per_Workitem": [0, 0, 0],
-        "Arch_VGPR": [16, 16, 16],
-        "Accum_VGPR": [0, 0, 0],
-        "SGPR": [32, 32, 32],
-        "Kernel_Name": ["kernel_a", "kernel_a", "kernel_a"],
-        "Start_Timestamp": [1000, 1200, 1400],
-        "End_Timestamp": [1500, 1700, 1900],
-        "Kernel_ID": [1, 1, 1],
-        "C1": [100, None, None],
-        "C2": [None, 500, 300],
-    }
-    df_policy = pd.DataFrame(data_policy)
-    result_invalid, _pass_tables = utils_analysis.impute_counters_iteration_multiplex(
-        df_policy, "invalid_policy", tmp_path
-    )
-    result_klp, _pass_tables = utils_analysis.impute_counters_iteration_multiplex(
-        df_policy, "kernel_launch_params", tmp_path
-    )
-    assert isinstance(result_invalid, pd.DataFrame)
-    pd.testing.assert_frame_equal(
-        result_invalid.sort_values(by="Dispatch_ID").reset_index(drop=True),
-        result_klp.sort_values(by="Dispatch_ID").reset_index(drop=True),
-    )
 
 
 def test_incomplete_dispatches_nullify_counter_values(tmp_path: Path) -> None:
@@ -2956,7 +2754,7 @@ def test_incomplete_dispatches_nullify_counter_values(tmp_path: Path) -> None:
     num_counter_bucket = 3
     seed_perfmon_files(tmp_path, count=num_counter_bucket)
     result, _pass_tables = utils_analysis.impute_counters_iteration_multiplex(
-        df, "kernel", tmp_path
+        df, tmp_path
     )
     result = result.sort_values(by="Dispatch_ID").reset_index(drop=True)
 
@@ -3015,7 +2813,7 @@ def test_undersampled_kernel_nullified_against_perfmon_file_count(
     }
     df = pd.DataFrame(data)
     result, _pass_tables = utils_analysis.impute_counters_iteration_multiplex(
-        df, "kernel", tmp_path
+        df, tmp_path
     )
     result = result.sort_values(by="Dispatch_ID").reset_index(drop=True)
 
@@ -3829,13 +3627,16 @@ def test_impute_by_pass_copies_one_launch_per_round(tmp_path: Path) -> None:
     launches = pd.DataFrame({
         "Dispatch_ID": [1, 2, 3, 4],
         "Kernel_Name": ["kernel_a"] * 4,
+        "Grid_Size": [1024] * 4,
+        "Workgroup_Size": [64] * 4,
+        "LDS_Per_Workgroup": [0] * 4,
         "SQ_WAVES": [1, 2, 3, 4],
         "SQ_BUSY_CYCLES": [10, None, 30, None],
         "TA_BUSY": [None, 20, None, 40],
     })
 
     imputed, pass_tables = utils_analysis.impute_counters_iteration_multiplex(
-        launches, "kernel", tmp_path
+        launches, tmp_path
     )
 
     assert len(imputed) == 4
