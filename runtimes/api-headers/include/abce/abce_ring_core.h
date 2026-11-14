@@ -34,13 +34,16 @@
 #ifndef ABCE_RING_CORE_H_
 #define ABCE_RING_CORE_H_
 
+#include "abce_config.h"
+
 #include <stdbool.h>
 #include <stdint.h>
 
-#include "abce_config.h"
 
 #if !defined(__HIP_DEVICE_COMPILE__) && !defined(__CUDA_ARCH__) && !defined(_WIN32)
-#include <sched.h>  // sched_yield() for host spin-waits
+#if ABCE_ENABLE_IMPLEMENTATION
+#include <sched.h>
+#endif  // sched_yield() for host spin-waits
 #endif
 
 #ifdef __cplusplus
@@ -61,6 +64,7 @@ __declspec(dllimport) int __stdcall SwitchToThread(void);
 // s_sleep. Host: the abce_host_* atomics / a thread yield.
 //===----------------------------------------------------------------------===//
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline uint64_t abce_ring_atomic_load_acquire(const uint64_t* ptr) {
 #if defined(__HIP_DEVICE_COMPILE__)
   return __hip_atomic_load(ptr, __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_SYSTEM);
@@ -68,9 +72,11 @@ static inline uint64_t abce_ring_atomic_load_acquire(const uint64_t* ptr) {
   return abce_host_load_acquire_u64(ptr);
 #endif  // __HIP_DEVICE_COMPILE__
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 // Loads a hardware-updated word (the engine read pointer): the same relaxed,
 // system-scope read, but the pointer is volatile because the engine writes it.
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline uint64_t abce_ring_atomic_load_hw(const volatile uint64_t* ptr) {
   const uint64_t* stable_ptr = (const uint64_t*)(uintptr_t)ptr;
 #if defined(__HIP_DEVICE_COMPILE__)
@@ -79,9 +85,11 @@ static inline uint64_t abce_ring_atomic_load_hw(const volatile uint64_t* ptr) {
   return abce_host_load_relaxed_u64(stable_ptr);
 #endif  // __HIP_DEVICE_COMPILE__
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 // Stores a word the engine reads (the write pointer, the doorbell): relaxed and
 // system-scope, so it is written through.
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline void abce_ring_atomic_store_hw(volatile uint64_t* ptr, uint64_t value) {
   uint64_t* stable_ptr = (uint64_t*)(uintptr_t)ptr;
 #if defined(__HIP_DEVICE_COMPILE__)
@@ -90,11 +98,13 @@ static inline void abce_ring_atomic_store_hw(volatile uint64_t* ptr, uint64_t va
   abce_host_store_relaxed_u64(stable_ptr, value);
 #endif  // __HIP_DEVICE_COMPILE__
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 // Orders prior writes ahead of every store that follows, rather than ahead of
 // one chosen store. For a publisher that has to order its payload against more
 // than one store, where a release store would only cover the one it is attached
 // to.
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline void abce_ring_atomic_fence_release(void) {
 #if defined(__HIP_DEVICE_COMPILE__)
   __builtin_amdgcn_fence(__ATOMIC_RELEASE, "");  // "" is system scope
@@ -102,6 +112,7 @@ static inline void abce_ring_atomic_fence_release(void) {
   abce_host_fence_release();
 #endif  // __HIP_DEVICE_COMPILE__
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 //===----------------------------------------------------------------------===//
 // Cursor atomics
@@ -112,6 +123,7 @@ static inline void abce_ring_atomic_fence_release(void) {
 // device they need only agent scope, which keeps the CAS traffic in L2.
 //===----------------------------------------------------------------------===//
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline uint64_t abce_ring_cursor_load(const uint64_t* ptr) {
 #if defined(__HIP_DEVICE_COMPILE__)
   return __hip_atomic_load(ptr, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
@@ -119,7 +131,9 @@ static inline uint64_t abce_ring_cursor_load(const uint64_t* ptr) {
   return abce_host_load_relaxed_u64(ptr);
 #endif  // __HIP_DEVICE_COMPILE__
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline uint64_t abce_ring_cursor_load_acquire(const uint64_t* ptr) {
 #if defined(__HIP_DEVICE_COMPILE__)
   return __hip_atomic_load(ptr, __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_AGENT);
@@ -127,7 +141,9 @@ static inline uint64_t abce_ring_cursor_load_acquire(const uint64_t* ptr) {
   return abce_host_load_acquire_u64(ptr);
 #endif  // __HIP_DEVICE_COMPILE__
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline bool abce_ring_cursor_cas(uint64_t* ptr, uint64_t* expected, uint64_t desired) {
 #if defined(__HIP_DEVICE_COMPILE__)
   return __hip_atomic_compare_exchange_strong(ptr, expected, desired, __ATOMIC_RELAXED,
@@ -136,7 +152,9 @@ static inline bool abce_ring_cursor_cas(uint64_t* ptr, uint64_t* expected, uint6
   return abce_host_cas_relaxed_u64(ptr, expected, desired);
 #endif  // __HIP_DEVICE_COMPILE__
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline void abce_ring_cursor_store(uint64_t* ptr, uint64_t value) {
 #if defined(__HIP_DEVICE_COMPILE__)
   __hip_atomic_store(ptr, value, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
@@ -144,7 +162,9 @@ static inline void abce_ring_cursor_store(uint64_t* ptr, uint64_t value) {
   abce_host_store_relaxed_u64(ptr, value);
 #endif  // __HIP_DEVICE_COMPILE__
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline void abce_ring_cursor_store_release(uint64_t* ptr, uint64_t value) {
 #if defined(__HIP_DEVICE_COMPILE__)
   __hip_atomic_store(ptr, value, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_AGENT);
@@ -152,9 +172,11 @@ static inline void abce_ring_cursor_store_release(uint64_t* ptr, uint64_t value)
   abce_host_store_release_u64(ptr, value);
 #endif  // __HIP_DEVICE_COMPILE__
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 // Waits for the calling thread's stores to land, with no cache maintenance.
 // gfx10/gfx11 never run a device producer, so they keep a full release.
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline void abce_ring_wait_stores(void) {
 #if defined(__HIP_DEVICE_COMPILE__) && defined(__GFX9__)
   __atomic_signal_fence(__ATOMIC_SEQ_CST);
@@ -166,10 +188,12 @@ static inline void abce_ring_wait_stores(void) {
   abce_ring_atomic_fence_release();
 #endif
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 // The commit hand-off orders only the producers' write-through queue-word
 // stores, so on device a store wait replaces release/acquire and no L2 is
 // written back or invalidated.
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline uint64_t abce_ring_commit_load(const uint64_t* commit_cursor) {
 #if defined(__HIP_DEVICE_COMPILE__)
   return abce_ring_cursor_load(commit_cursor);
@@ -177,7 +201,9 @@ static inline uint64_t abce_ring_commit_load(const uint64_t* commit_cursor) {
   return abce_ring_cursor_load_acquire(commit_cursor);
 #endif  // __HIP_DEVICE_COMPILE__
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline void abce_ring_commit_store(uint64_t* commit_cursor, uint64_t value) {
 #if defined(__HIP_DEVICE_COMPILE__)
   abce_ring_wait_stores();
@@ -186,10 +212,12 @@ static inline void abce_ring_commit_store(uint64_t* commit_cursor, uint64_t valu
   abce_ring_cursor_store_release(commit_cursor, value);
 #endif  // __HIP_DEVICE_COMPILE__
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 // A host producer that finds room through another producer's cached read index
 // reuses ring bytes on the strength of that producer's load of the engine's
 // word, so the cache passes that load's ordering on.
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline uint64_t abce_ring_cached_read_load(const uint64_t* cached_read_index) {
 #if defined(__HIP_DEVICE_COMPILE__)
   return abce_ring_cursor_load(cached_read_index);
@@ -197,7 +225,9 @@ static inline uint64_t abce_ring_cached_read_load(const uint64_t* cached_read_in
   return abce_ring_cursor_load_acquire(cached_read_index);
 #endif  // __HIP_DEVICE_COMPILE__
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline void abce_ring_cached_read_store(uint64_t* cached_read_index, uint64_t read_index) {
 #if defined(__HIP_DEVICE_COMPILE__)
   abce_ring_cursor_store(cached_read_index, read_index);
@@ -205,8 +235,10 @@ static inline void abce_ring_cached_read_store(uint64_t* cached_read_index, uint
   abce_ring_cursor_store_release(cached_read_index, read_index);
 #endif  // __HIP_DEVICE_COMPILE__
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 // Backs off inside a spin-wait: sleeps a wave on device, yields the CPU on host.
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline void abce_ring_pause(void) {
 #if defined(__HIP_DEVICE_COMPILE__)
   __builtin_amdgcn_s_sleep(1);
@@ -216,6 +248,7 @@ static inline void abce_ring_pause(void) {
   sched_yield();
 #endif  // __HIP_DEVICE_COMPILE__
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 //===----------------------------------------------------------------------===//
 // abce_ring_reservation_t / abce_ring_control_t
@@ -226,13 +259,21 @@ typedef struct abce_ring_reservation_t {
   uint64_t end;
 } abce_ring_reservation_t;
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline bool abce_ring_reservation_is_valid(const abce_ring_reservation_t* reservation) {
   return reservation->end > reservation->start;
 }
+#else
+extern bool abce_ring_reservation_is_valid(const abce_ring_reservation_t* reservation);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline uint64_t abce_ring_reservation_bytes(const abce_ring_reservation_t* reservation) {
   return reservation->end - reservation->start;
 }
+#else
+extern uint64_t abce_ring_reservation_bytes(const abce_ring_reservation_t* reservation);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 // Coordination state shared by every producer of one ring, all on one side
 // (see the cursor atomics above): a host ring's lives with the host ring, a
@@ -307,24 +348,36 @@ typedef struct abce_ring_publisher_t {
 //===----------------------------------------------------------------------===//
 
 // Wraps a monotonic byte index into a ring offset. |size| MUST be a power of 2.
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline uint64_t abce_ring_wrap(uint64_t index, uint64_t size) {
   return index & (size - 1);
 }
+#else
+extern uint64_t abce_ring_wrap(uint64_t index, uint64_t size);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 // True if writing up to |upto| (exclusive, monotonic) will not clobber packets
 // the engine has not drained yet.
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline bool abce_ring_can_write_upto(uint64_t read_index, uint64_t size, uint64_t upto) {
   return (upto - read_index) < size;
 }
+#else
+extern bool abce_ring_can_write_upto(uint64_t read_index, uint64_t size, uint64_t upto);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 // Wrap padding (bytes to the ring end) a reservation of |bytes| needs if it
 // would otherwise straddle the physical end starting at monotonic |start|. A
 // pure function of (start, bytes, size) so producer and publisher agree without
 // sharing state.
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline uint64_t abce_ring_pad_bytes(uint64_t start, uint64_t bytes, uint64_t size) {
   const uint64_t offset = abce_ring_wrap(start, size);
   return (offset + bytes > size) ? (size - offset) : 0;
 }
+#else
+extern uint64_t abce_ring_pad_bytes(uint64_t start, uint64_t bytes, uint64_t size);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 // Reserves |bytes| of contiguous ring space.
 //
@@ -341,6 +394,7 @@ static inline uint64_t abce_ring_pad_bytes(uint64_t start, uint64_t bytes, uint6
 //
 // Blocks until the engine has freed enough space. Fails only when the request
 // can never fit.
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline abce_status_t abce_ring_reserve_(const abce_ring_producer_t* producer,
                                                uint64_t bytes, bool block,
                                                abce_ring_reservation_t* out_reservation) {
@@ -384,20 +438,32 @@ static inline abce_status_t abce_ring_reserve_(const abce_ring_producer_t* produ
     abce_ring_pause();
   }
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline abce_status_t abce_ring_reserve(const abce_ring_producer_t* producer, uint64_t bytes,
                                               abce_ring_reservation_t* out_reservation) {
   return abce_ring_reserve_(producer, bytes, true, out_reservation);
 }
+#else
+extern abce_status_t abce_ring_reserve(const abce_ring_producer_t* producer, uint64_t bytes,
+                                              abce_ring_reservation_t* out_reservation);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 // abce_ring_reserve() that returns NOT_READY, reserving nothing, instead of
 // waiting for the engine to free space. It still retries a CAS lost to another
 // producer.
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline abce_status_t abce_ring_try_reserve(const abce_ring_producer_t* producer,
                                                   uint64_t bytes,
                                                   abce_ring_reservation_t* out_reservation) {
   return abce_ring_reserve_(producer, bytes, false, out_reservation);
 }
+#else
+extern abce_status_t abce_ring_try_reserve(const abce_ring_producer_t* producer,
+                                                  uint64_t bytes,
+                                                  abce_ring_reservation_t* out_reservation);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 // Publishes [start, end) in reservation order: waits indefinitely until it is
 // this producer's turn (the commit cursor reached |reservation->start|),
@@ -407,6 +473,7 @@ static inline abce_status_t abce_ring_try_reserve(const abce_ring_producer_t* pr
 //
 // A commit cannot safely time out after reservation because that would strand a
 // permanent unpublished hole in the ring.
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline abce_status_t abce_ring_publish(const abce_ring_publisher_t* publisher,
                                               const abce_ring_reservation_t* reservation) {
   if (!publisher || !publisher->commit_cursor || !publisher->publish || !reservation ||
@@ -426,6 +493,10 @@ static inline abce_status_t abce_ring_publish(const abce_ring_publisher_t* publi
   abce_ring_commit_store(publisher->commit_cursor, reservation->end);
   return ABCE_STATUS_OK;
 }
+#else
+extern abce_status_t abce_ring_publish(const abce_ring_publisher_t* publisher,
+                                              const abce_ring_reservation_t* reservation);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 #ifdef __cplusplus
 }  // extern "C"

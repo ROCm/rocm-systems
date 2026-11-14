@@ -9,18 +9,25 @@
 #ifndef ABCE_HOST_H_
 #define ABCE_HOST_H_
 
+#include "abce_config.h"
+
 #include <assert.h>
 #if !defined(_WIN32)
+#if ABCE_ENABLE_IMPLEMENTATION
 #include <pthread.h>
+#endif
 #endif
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#if ABCE_ENABLE_IMPLEMENTATION
 #include <stdlib.h>
+#endif
+#if ABCE_ENABLE_IMPLEMENTATION
 #include <string.h>
+#endif
 
 #include "abce_builder.h"
-#include "abce_config.h"
 #include "abce_frame.h"
 #include "abce_ring_host.h"
 #include "abce_topology.h"
@@ -54,6 +61,7 @@ typedef struct abce_copy_endpoint_t {
   uint32_t device_id;
 } abce_copy_endpoint_t;
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline abce_copy_endpoint_t abce_copy_endpoint_make(abce_endpoint_kind_t kind,
                                                            uint32_t device_id) {
   abce_copy_endpoint_t endpoint;
@@ -61,6 +69,10 @@ static inline abce_copy_endpoint_t abce_copy_endpoint_make(abce_endpoint_kind_t 
   endpoint.device_id = device_id;
   return endpoint;
 }
+#else
+extern abce_copy_endpoint_t abce_copy_endpoint_make(abce_endpoint_kind_t kind,
+                                                           uint32_t device_id);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 // How a transfer crosses the memory topology.
 //
@@ -79,6 +91,7 @@ typedef enum abce_transfer_kind_t {
 // Classifies a transfer from its endpoints. Single source of truth: both engine
 // ranking and the reported plan label go through here, so they cannot disagree
 // about what kind of copy something is.
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline abce_transfer_kind_t abce_classify_transfer(const abce_copy_endpoint_t* src,
                                                           const abce_copy_endpoint_t* dst) {
   if (src->kind == ABCE_ENDPOINT_KIND_DEVICE && dst->kind == ABCE_ENDPOINT_KIND_DEVICE) {
@@ -96,11 +109,19 @@ static inline abce_transfer_kind_t abce_classify_transfer(const abce_copy_endpoi
     return ABCE_TRANSFER_KIND_DEVICE_TO_HOST;
   return ABCE_TRANSFER_KIND_UNKNOWN;
 }
+#else
+extern abce_transfer_kind_t abce_classify_transfer(const abce_copy_endpoint_t* src,
+                                                          const abce_copy_endpoint_t* dst);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 // Bit for |kind| inside abce_plan_t::transfer_kinds.
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline uint32_t abce_transfer_kind_bit(abce_transfer_kind_t kind) {
   return ((uint32_t)1) << (uint32_t)kind;
 }
+#else
+extern uint32_t abce_transfer_kind_bit(abce_transfer_kind_t kind);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 //===----------------------------------------------------------------------===//
 // Engines
@@ -124,14 +145,20 @@ typedef struct abce_engine_affinity_t {
   uint32_t hw_engine_id;
 } abce_engine_affinity_t;
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline void abce_engine_affinity_initialize(abce_engine_affinity_t* out_affinity) {
   out_affinity->hw_engine_id = ABCE_ANY_ENGINE;
 }
+#else
+extern void abce_engine_affinity_initialize(abce_engine_affinity_t* out_affinity);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 // Lowest set bit index of |mask|, or ABCE_MAX_ENGINES if empty.
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline uint32_t abce_first_engine(uint64_t mask) {
   return mask ? (uint32_t)abce_count_trailing_zeros_u64(mask) : ABCE_MAX_ENGINES;
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 //===----------------------------------------------------------------------===//
 // abce_copy_op_t
@@ -175,12 +202,16 @@ typedef struct abce_copy_op_t {
 
 // Zero-initializing this struct is NOT the default: both endpoints default to
 // ABCE_ANY_DEVICE rather than device 0. Always initialize through here.
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline void abce_copy_op_initialize(abce_copy_op_t* out_copy) {
   memset(out_copy, 0, sizeof(*out_copy));
   out_copy->kind = ABCE_OP_KIND_LINEAR;
   out_copy->src_end = abce_copy_endpoint_make(ABCE_ENDPOINT_KIND_HOST, ABCE_ANY_DEVICE);
   out_copy->dst_end = abce_copy_endpoint_make(ABCE_ENDPOINT_KIND_HOST, ABCE_ANY_DEVICE);
 }
+#else
+extern void abce_copy_op_initialize(abce_copy_op_t* out_copy);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 //===----------------------------------------------------------------------===//
 // abce_execution_descriptor_t
@@ -264,6 +295,7 @@ typedef enum abce_execution_engine_kind_t {
 
 ABCE_STATIC_ASSERT(ABCE_MAX_ENGINES <= 16, "instance mask field is 16 bits wide");
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline uint32_t abce_execution_descriptor_encode(abce_execution_engine_kind_t engine_kind,
                                                         uint32_t instance_mask,
                                                         abce_transfer_kind_t transfer_kind,
@@ -276,29 +308,55 @@ static inline uint32_t abce_execution_descriptor_encode(abce_execution_engine_ki
          (((uint32_t)engine_kind & ABCE_EXECUTION_DESCRIPTOR_ENGINE_KIND_MASK)
           << ABCE_EXECUTION_DESCRIPTOR_ENGINE_KIND_SHIFT);
 }
+#else
+extern uint32_t abce_execution_descriptor_encode(abce_execution_engine_kind_t engine_kind,
+                                                        uint32_t instance_mask,
+                                                        abce_transfer_kind_t transfer_kind,
+                                                        bool mixed_kinds);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline abce_execution_engine_kind_t abce_execution_descriptor_engine_kind(uint32_t word) {
   return (abce_execution_engine_kind_t)((word >> ABCE_EXECUTION_DESCRIPTOR_ENGINE_KIND_SHIFT) &
                                         ABCE_EXECUTION_DESCRIPTOR_ENGINE_KIND_MASK);
 }
+#else
+extern abce_execution_engine_kind_t abce_execution_descriptor_engine_kind(uint32_t word);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline bool abce_execution_descriptor_valid(uint32_t word) {
   return abce_execution_descriptor_engine_kind(word) != ABCE_EXECUTION_ENGINE_KIND_NONE;
 }
+#else
+extern bool abce_execution_descriptor_valid(uint32_t word);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline uint32_t abce_execution_descriptor_instance_mask(uint32_t word) {
   return (word >> ABCE_EXECUTION_DESCRIPTOR_INSTANCE_MASK_SHIFT) &
          ABCE_EXECUTION_DESCRIPTOR_INSTANCE_MASK_MASK;
 }
+#else
+extern uint32_t abce_execution_descriptor_instance_mask(uint32_t word);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline abce_transfer_kind_t abce_execution_descriptor_transfer_kind(uint32_t word) {
   return (abce_transfer_kind_t)((word >> ABCE_EXECUTION_DESCRIPTOR_TRANSFER_KIND_SHIFT) &
                                 ABCE_EXECUTION_DESCRIPTOR_TRANSFER_KIND_MASK);
 }
+#else
+extern abce_transfer_kind_t abce_execution_descriptor_transfer_kind(uint32_t word);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline bool abce_execution_descriptor_mixed_kinds(uint32_t word) {
   return (word & ABCE_EXECUTION_DESCRIPTOR_MIXED_KINDS_BIT) != 0;
 }
+#else
+extern bool abce_execution_descriptor_mixed_kinds(uint32_t word);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 //===----------------------------------------------------------------------===//
 // Engine selection policy
@@ -357,6 +415,7 @@ typedef struct abce_heatmap_profile_t {
 
 // Selects the heatmap profile for |minor| / |total_sdma|, or null when the part
 // is unrecognized (ranking then degrades to ascending order).
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline const abce_heatmap_profile_t* abce_select_heatmap(uint8_t minor,
                                                                 uint8_t total_sdma) {
   // clang-format off
@@ -386,6 +445,10 @@ static inline const abce_heatmap_profile_t* abce_select_heatmap(uint8_t minor,
   }
   return NULL;
 }
+#else
+extern const abce_heatmap_profile_t* abce_select_heatmap(uint8_t minor,
+                                                                uint8_t total_sdma);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 typedef struct abce_sdma_engine_policy_t abce_sdma_engine_policy_t;
 
@@ -440,17 +503,23 @@ struct abce_sdma_engine_policy_t {
 //===----------------------------------------------------------------------===//
 
 // Appends every mapped hw engine id, in registration order, to |out_hwids|.
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline uint32_t abce_sdma_policy_emit_all(const abce_sdma_engine_policy_t* policy,
                                                  uint8_t* out_hwids, uint32_t max) {
   const uint32_t count = policy->num_mapped < max ? policy->num_mapped : max;
   for (uint32_t idx = 0; idx < count; ++idx) out_hwids[idx] = policy->mapped_hwids[idx];
   return count;
 }
+#else
+extern uint32_t abce_sdma_policy_emit_all(const abce_sdma_engine_policy_t* policy,
+                                                 uint8_t* out_hwids, uint32_t max);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 // Appends the mapped hw engine ids in the driver's xGMI band. Falls back to
 // every engine when the split is unknown or when the band came out empty (a
 // client may have registered only non-xGMI engines), because offering a slower
 // engine beats reporting that a P2P copy cannot be mapped at all.
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline uint32_t abce_sdma_policy_emit_xgmi(const abce_sdma_engine_policy_t* policy,
                                                   uint8_t* out_hwids, uint32_t max) {
   uint32_t count = 0;
@@ -461,28 +530,48 @@ static inline uint32_t abce_sdma_policy_emit_xgmi(const abce_sdma_engine_policy_
   }
   return count ? count : abce_sdma_policy_emit_all(policy, out_hwids, max);
 }
+#else
+extern uint32_t abce_sdma_policy_emit_xgmi(const abce_sdma_engine_policy_t* policy,
+                                                  uint8_t* out_hwids, uint32_t max);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline int abce_sdma_policy_xgmi_physical_id(const abce_sdma_engine_policy_t* policy,
                                                     uint32_t device_id) {
   return abce_topology_data_xgmi_physical_id(&policy->topology, device_id);
 }
+#else
+extern int abce_sdma_policy_xgmi_physical_id(const abce_sdma_engine_policy_t* policy,
+                                                    uint32_t device_id);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline uint64_t abce_sdma_policy_hive_id(const abce_sdma_engine_policy_t* policy,
                                                 uint32_t device_id) {
   return abce_topology_data_hive_id(&policy->topology, device_id);
 }
+#else
+extern uint64_t abce_sdma_policy_hive_id(const abce_sdma_engine_policy_t* policy,
+                                                uint32_t device_id);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline uint32_t abce_sdma_policy_copy_hwids(const uint8_t* src, uint32_t src_count,
                                                    uint8_t* out_hwids, uint32_t max) {
   const uint32_t count = src_count < max ? src_count : max;
   for (uint32_t idx = 0; idx < count; ++idx) out_hwids[idx] = src[idx];
   return count;
 }
+#else
+extern uint32_t abce_sdma_policy_copy_hwids(const uint8_t* src, uint32_t src_count,
+                                                   uint8_t* out_hwids, uint32_t max);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 //===----------------------------------------------------------------------===//
 // Base policy vtable
 //===----------------------------------------------------------------------===//
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline uint32_t abce_sdma_policy_base_rank_all(const abce_sdma_engine_policy_t* policy,
                                                       const abce_copy_endpoint_t* src,
                                                       const abce_copy_endpoint_t* dst,
@@ -491,7 +580,14 @@ static inline uint32_t abce_sdma_policy_base_rank_all(const abce_sdma_engine_pol
   (void)dst;
   return abce_sdma_policy_emit_all(policy, out_hwids, max);
 }
+#else
+extern uint32_t abce_sdma_policy_base_rank_all(const abce_sdma_engine_policy_t* policy,
+                                                      const abce_copy_endpoint_t* src,
+                                                      const abce_copy_endpoint_t* dst,
+                                                      uint8_t* out_hwids, uint32_t max);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline uint32_t abce_sdma_policy_base_rank_p2p(const abce_sdma_engine_policy_t* policy,
                                                       const abce_copy_endpoint_t* src,
                                                       const abce_copy_endpoint_t* dst,
@@ -500,13 +596,23 @@ static inline uint32_t abce_sdma_policy_base_rank_p2p(const abce_sdma_engine_pol
   (void)dst;
   return abce_sdma_policy_emit_xgmi(policy, out_hwids, max);
 }
+#else
+extern uint32_t abce_sdma_policy_base_rank_p2p(const abce_sdma_engine_policy_t* policy,
+                                                      const abce_copy_endpoint_t* src,
+                                                      const abce_copy_endpoint_t* dst,
+                                                      uint8_t* out_hwids, uint32_t max);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static const abce_sdma_engine_policy_vtable_t abce_sdma_policy_base_vtable = {
     abce_sdma_policy_base_rank_all,
     abce_sdma_policy_base_rank_all,
     abce_sdma_policy_base_rank_p2p,
     abce_sdma_policy_base_rank_all,
 };
+#else
+extern const abce_sdma_engine_policy_vtable_t abce_sdma_policy_base_vtable;
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 //===----------------------------------------------------------------------===//
 // gfx94x policy (gfx9, minor 4 or 5)
@@ -520,10 +626,12 @@ static const abce_sdma_engine_policy_vtable_t abce_sdma_policy_base_vtable = {
 
 // SDMA-affinity map keyed by xGMI physical id (src row, dst col) -> logical xGMI
 // engine.
+#if ABCE_ENABLE_IMPLEMENTATION
 static const int abce_gfx94x_sdma_affinity_map[8][8] = {
     {0, 7, 6, 1, 2, 4, 5, 3}, {7, 0, 1, 5, 4, 2, 3, 6}, {5, 1, 0, 6, 7, 3, 2, 4},
     {1, 6, 5, 0, 3, 7, 4, 2}, {2, 4, 7, 3, 0, 5, 6, 1}, {4, 2, 3, 7, 6, 0, 1, 5},
     {5, 3, 2, 4, 6, 1, 0, 7}, {3, 6, 4, 2, 1, 5, 7, 0}};
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 // The heatmap is a performance ranking, not a reservation, so both host bands
 // append every remaining engine behind it: the measured order is preserved
@@ -531,6 +639,7 @@ static const int abce_gfx94x_sdma_affinity_map[8][8] = {
 // engines the profile does not mention -- or that the profile deliberately ranks
 // last, like the gfx950 tail -- still gets a legal engine instead of a failed
 // map.
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline uint32_t abce_gfx94x_rank_h2d(const abce_sdma_engine_policy_t* policy,
                                             const abce_copy_endpoint_t* src,
                                             const abce_copy_endpoint_t* dst, uint8_t* out_hwids,
@@ -545,7 +654,9 @@ static inline uint32_t abce_gfx94x_rank_h2d(const abce_sdma_engine_policy_t* pol
   return count < max ? count + abce_sdma_policy_emit_all(policy, out_hwids + count, max - count)
                      : count;
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline uint32_t abce_gfx94x_rank_d2h(const abce_sdma_engine_policy_t* policy,
                                             const abce_copy_endpoint_t* src,
                                             const abce_copy_endpoint_t* dst, uint8_t* out_hwids,
@@ -560,7 +671,9 @@ static inline uint32_t abce_gfx94x_rank_d2h(const abce_sdma_engine_policy_t* pol
   return count < max ? count + abce_sdma_policy_emit_all(policy, out_hwids + count, max - count)
                      : count;
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline uint32_t abce_gfx94x_rank_p2p(const abce_sdma_engine_policy_t* policy,
                                             const abce_copy_endpoint_t* src,
                                             const abce_copy_endpoint_t* dst, uint8_t* out_hwids,
@@ -583,13 +696,18 @@ static inline uint32_t abce_gfx94x_rank_p2p(const abce_sdma_engine_policy_t* pol
   if (count < max) count += abce_sdma_policy_emit_xgmi(policy, out_hwids + count, max - count);
   return count;
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static const abce_sdma_engine_policy_vtable_t abce_sdma_policy_gfx94x_vtable = {
     abce_gfx94x_rank_h2d,
     abce_gfx94x_rank_d2h,
     abce_gfx94x_rank_p2p,
     abce_sdma_policy_base_rank_all,
 };
+#else
+extern const abce_sdma_engine_policy_vtable_t abce_sdma_policy_gfx94x_vtable;
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 //===----------------------------------------------------------------------===//
 // gfx90a policy (gfx9, minor 0, stepping 10)
@@ -600,6 +718,7 @@ static const abce_sdma_engine_policy_vtable_t abce_sdma_policy_gfx94x_vtable = {
 // successive P2P ops across it.
 //===----------------------------------------------------------------------===//
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline uint32_t abce_gfx90a_rank_h2d(const abce_sdma_engine_policy_t* policy,
                                             const abce_copy_endpoint_t* src,
                                             const abce_copy_endpoint_t* dst, uint8_t* out_hwids,
@@ -611,7 +730,9 @@ static inline uint32_t abce_gfx90a_rank_h2d(const abce_sdma_engine_policy_t* pol
   out_hwids[0] = 0;  // SDMA0 only (hard RAS reservation).
   return 1;
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline uint32_t abce_gfx90a_rank_d2h(const abce_sdma_engine_policy_t* policy,
                                             const abce_copy_endpoint_t* src,
                                             const abce_copy_endpoint_t* dst, uint8_t* out_hwids,
@@ -623,7 +744,9 @@ static inline uint32_t abce_gfx90a_rank_d2h(const abce_sdma_engine_policy_t* pol
   out_hwids[0] = 1;  // SDMA1 only; SDMA0 is reserved for H2D and never listed here.
   return 1;
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline uint32_t abce_gfx90a_rank_p2p(const abce_sdma_engine_policy_t* policy,
                                             const abce_copy_endpoint_t* src,
                                             const abce_copy_endpoint_t* dst, uint8_t* out_hwids,
@@ -633,18 +756,24 @@ static inline uint32_t abce_gfx90a_rank_p2p(const abce_sdma_engine_policy_t* pol
   if (src_hive && dst_hive && src_hive != dst_hive) return 0;
   return abce_sdma_policy_emit_xgmi(policy, out_hwids, max);
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static const abce_sdma_engine_policy_vtable_t abce_sdma_policy_gfx90a_vtable = {
     abce_gfx90a_rank_h2d,
     abce_gfx90a_rank_d2h,
     abce_gfx90a_rank_p2p,
     abce_sdma_policy_base_rank_all,
 };
+#else
+extern const abce_sdma_engine_policy_vtable_t abce_sdma_policy_gfx90a_vtable;
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 //===----------------------------------------------------------------------===//
 // Policy configuration
 //===----------------------------------------------------------------------===//
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline void abce_sdma_policy_initialize(const abce_sdma_engine_policy_vtable_t* vtable,
                                                abce_sdma_engine_policy_t* out_policy) {
   memset(out_policy, 0, sizeof(*out_policy));
@@ -652,12 +781,17 @@ static inline void abce_sdma_policy_initialize(const abce_sdma_engine_policy_vta
   for (uint32_t idx = 0; idx < ABCE_MAX_ENGINES; ++idx) out_policy->hwid_to_reg[idx] = -1;
   abce_topology_data_initialize(&out_policy->topology);
 }
+#else
+extern void abce_sdma_policy_initialize(const abce_sdma_engine_policy_vtable_t* vtable,
+                                               abce_sdma_engine_policy_t* out_policy);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 // Configures |out_policy| for a gfx version. Returns false for parts with no
 // specialized policy (engine selection then degrades to ascending /
 // round-robin), leaving |out_policy| untouched. The policy is otherwise
 // unconfigured: the caller still maps its engines and loads topology / heatmap
 // before use.
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline bool abce_sdma_policy_initialize_for_isa(abce_isa_version_t isa,
                                                        abce_sdma_engine_policy_t* out_policy) {
   if (isa.major == 9) {
@@ -674,9 +808,14 @@ static inline bool abce_sdma_policy_initialize_for_isa(abce_isa_version_t isa,
   }
   return false;
 }
+#else
+extern bool abce_sdma_policy_initialize_for_isa(abce_isa_version_t isa,
+                                                       abce_sdma_engine_policy_t* out_policy);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 // Associates a hardware SDMA engine id with a registered engine index. Call once
 // per registered engine.
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline void abce_sdma_policy_map_engine(abce_sdma_engine_policy_t* policy,
                                                uint32_t hw_engine_id, uint32_t reg_index) {
   if (hw_engine_id >= ABCE_MAX_ENGINES || reg_index >= ABCE_MAX_ENGINES ||
@@ -686,6 +825,10 @@ static inline void abce_sdma_policy_map_engine(abce_sdma_engine_policy_t* policy
   if (policy->num_mapped < ABCE_MAX_ENGINES)
     policy->mapped_hwids[policy->num_mapped++] = (uint8_t)hw_engine_id;
 }
+#else
+extern void abce_sdma_policy_map_engine(abce_sdma_engine_policy_t* policy,
+                                               uint32_t hw_engine_id, uint32_t reg_index);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 // Records the driver's SDMA engine split: |num_non_xgmi| engines are not xGMI,
 // and KFD numbers those first, so hardware ids at or above it form the xGMI band
@@ -695,37 +838,58 @@ static inline void abce_sdma_policy_map_engine(abce_sdma_engine_policy_t* policy
 // This replaces a per-engine class declaration. The distinction is only ever
 // used to *prefer* engines for P2P, never to exclude them from host copies: on
 // MI300X the fastest measured H2D engines are xGMI engines.
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline void abce_sdma_policy_set_engine_split(abce_sdma_engine_policy_t* policy,
                                                      uint32_t num_non_xgmi) {
   policy->num_non_xgmi = num_non_xgmi < ABCE_MAX_ENGINES ? num_non_xgmi : 0;
 }
+#else
+extern void abce_sdma_policy_set_engine_split(abce_sdma_engine_policy_t* policy,
+                                                     uint32_t num_non_xgmi);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline uint32_t abce_sdma_policy_registered_engine(const abce_sdma_engine_policy_t* policy,
                                                           uint32_t hw_engine_id) {
   return hw_engine_id < ABCE_MAX_ENGINES && policy->hwid_to_reg[hw_engine_id] >= 0
              ? (uint32_t)policy->hwid_to_reg[hw_engine_id]
              : ABCE_MAX_ENGINES;
 }
+#else
+extern uint32_t abce_sdma_policy_registered_engine(const abce_sdma_engine_policy_t* policy,
+                                                          uint32_t hw_engine_id);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 // Selects the host-copy heatmap profile for this part.
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline void abce_sdma_policy_select_heatmap_profile(abce_sdma_engine_policy_t* policy,
                                                            uint8_t minor, uint8_t total_sdma) {
   policy->heatmap = abce_select_heatmap(minor, total_sdma);
 }
+#else
+extern void abce_sdma_policy_select_heatmap_profile(abce_sdma_engine_policy_t* policy,
+                                                           uint8_t minor, uint8_t total_sdma);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 // Installs caller-supplied topology. The route for platforms with no KFD sysfs:
 // fill an abce_topology_data_t from whatever the OS exposes, then pair this with
 // abce_sdma_policy_select_heatmap_profile() or
 // abce_copy_orchestrator_init_device_profile().
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline void abce_sdma_policy_set_topology(abce_sdma_engine_policy_t* policy,
                                                  const abce_topology_data_t* topology) {
   policy->topology = *topology;
 }
+#else
+extern void abce_sdma_policy_set_topology(abce_sdma_engine_policy_t* policy,
+                                                 const abce_topology_data_t* topology);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 // Loads KFD topology into a temporary snapshot and replaces active state only
 // after a GPU is found. Returns false where KFD sysfs does not exist
 // (ABCE_HAS_KFD_TOPOLOGY == 0), leaving topology untouched. |base_path| may be
 // null for the default.
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline bool abce_sdma_policy_load_topology_from_kfd(abce_sdma_engine_policy_t* policy,
                                                            const char* base_path) {
 #if ABCE_HAS_KFD_TOPOLOGY
@@ -742,10 +906,15 @@ static inline bool abce_sdma_policy_load_topology_from_kfd(abce_sdma_engine_poli
   return false;
 #endif  // ABCE_HAS_KFD_TOPOLOGY
 }
+#else
+extern bool abce_sdma_policy_load_topology_from_kfd(abce_sdma_engine_policy_t* policy,
+                                                           const char* base_path);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 // Classifies the transfer, asks the matching band hook for an ordered hw-id
 // list, then resolves each id to its registered index, keeps only candidates,
 // dedups, and caps at |max|.
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline abce_policy_result_t abce_sdma_policy_rank_engines(
     const abce_sdma_engine_policy_t* policy, const abce_copy_endpoint_t* src,
     const abce_copy_endpoint_t* dst, uint64_t candidate_mask, uint32_t* out_engines,
@@ -794,9 +963,16 @@ static inline abce_policy_result_t abce_sdma_policy_rank_engines(
   result.count = count;
   return result;
 }
+#else
+extern abce_policy_result_t abce_sdma_policy_rank_engines(
+    const abce_sdma_engine_policy_t* policy, const abce_copy_endpoint_t* src,
+    const abce_copy_endpoint_t* dst, uint64_t candidate_mask, uint32_t* out_engines,
+    uint32_t max);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 // Adapter matching abce_engine_policy_fn_t, so the built-in policy plugs into
 // the same slot a caller-supplied one does.
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline abce_policy_result_t abce_sdma_policy_trampoline(void* user_data,
                                                                const abce_copy_endpoint_t* src,
                                                                const abce_copy_endpoint_t* dst,
@@ -806,6 +982,7 @@ static inline abce_policy_result_t abce_sdma_policy_trampoline(void* user_data,
   return abce_sdma_policy_rank_engines((const abce_sdma_engine_policy_t*)user_data, src, dst,
                                        candidate_mask, out_engines, max);
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 //===----------------------------------------------------------------------===//
 // abce_plan_t (output of the map phase)
@@ -889,25 +1066,37 @@ typedef struct abce_plan_t {
   bool submitted;
 } abce_plan_t;
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline void abce_plan_initialize(abce_plan_t* out_plan) {
   memset(out_plan, 0, sizeof(*out_plan));
   out_plan->epilogue_required = true;
   out_plan->failed_op = UINT32_MAX;
 }
+#else
+extern void abce_plan_initialize(abce_plan_t* out_plan);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 // Whether the batch spans more than one transfer kind.
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline bool abce_plan_mixed_transfer_kinds(const abce_plan_t* plan) {
   return (plan->transfer_kinds & (plan->transfer_kinds - 1)) != 0;
 }
+#else
+extern bool abce_plan_mixed_transfer_kinds(const abce_plan_t* plan);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 // The batch's single transfer kind, or UNKNOWN if it mixes kinds. A profiler
 // attributing one completion signal to one kind of copy can only do so when this
 // is not UNKNOWN.
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline abce_transfer_kind_t abce_plan_uniform_transfer_kind(const abce_plan_t* plan) {
   if (plan->transfer_kinds == 0 || abce_plan_mixed_transfer_kinds(plan))
     return ABCE_TRANSFER_KIND_UNKNOWN;
   return (abce_transfer_kind_t)abce_count_trailing_zeros_u64(plan->transfer_kinds);
 }
+#else
+extern abce_transfer_kind_t abce_plan_uniform_transfer_kind(const abce_plan_t* plan);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 //===----------------------------------------------------------------------===//
 // Map-level limits and retuning knobs
@@ -944,6 +1133,7 @@ static inline abce_transfer_kind_t abce_plan_uniform_transfer_kind(const abce_pl
 // broadcast-packet cutoff can be overridden at process start via environment so
 // they can be swept without recompiling. Accepts decimal or 0x-hex.
 // Unset/empty falls back to the compiled default.
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline size_t abce_env_size_or(const char* name, size_t fallback) {
   const char* raw = getenv(name);
   if (raw == NULL || *raw == '\0') return fallback;
@@ -952,10 +1142,12 @@ static inline size_t abce_env_size_or(const char* name, size_t fallback) {
   if (end == raw) return fallback;
   return (size_t)parsed;
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 // Cached on first use. The race between two threads computing this is benign:
 // parsing the same environment string is idempotent, so both store the same
 // value. UINT64_MAX is the "not yet parsed" sentinel, which no real size reaches.
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline size_t abce_cached_env_size(uint64_t* cache, const char* name, size_t fallback) {
   uint64_t value = abce_host_load_relaxed_u64(cache);
   if (value == UINT64_MAX) {
@@ -964,17 +1156,22 @@ static inline size_t abce_cached_env_size(uint64_t* cache, const char* name, siz
   }
   return (size_t)value;
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline size_t abce_linear_b2b_max_total(void) {
   static uint64_t cache = UINT64_MAX;
   return abce_cached_env_size(&cache, "ABCE_LINEAR_B2B_MAX_TOTAL",
                               ABCE_LINEAR_B2B_MAX_TOTAL_DEFAULT);
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline size_t abce_broadcast_max_size(void) {
   static uint64_t cache = UINT64_MAX;
   return abce_cached_env_size(&cache, "ABCE_BROADCAST_MAX", ABCE_BROADCAST_MAX_SIZE_DEFAULT);
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 //===----------------------------------------------------------------------===//
 // Per-thread packet scratch
@@ -985,6 +1182,7 @@ static inline size_t abce_broadcast_max_size(void) {
 // allocation on the hot map->submit path; it grows once to the batch high-water
 // mark. The buffer is released at thread exit: by a pthread key destructor on
 // POSIX, and by a C++ thread_local owner on Windows, which has no pthread keys.
+#if ABCE_ENABLE_IMPLEMENTATION
 typedef struct abce_packet_scratch_t {
   char* buffer;
   size_t capacity;
@@ -1000,26 +1198,33 @@ struct abce_packet_scratch_owner_t {
 };
 
 // Returns this thread's scratch state.
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline abce_packet_scratch_t* abce_packet_scratch_state(void) {
   static thread_local abce_packet_scratch_owner_t owner;
   return &owner.state;
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 #else
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline void abce_packet_scratch_destroy(void* scratch) {
   abce_packet_scratch_t* state = (abce_packet_scratch_t*)scratch;
   if (!state) return;
   free(state->buffer);
   free(state);
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 static pthread_key_t abce_packet_scratch_key;
 static pthread_once_t abce_packet_scratch_key_once = PTHREAD_ONCE_INIT;
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline void abce_packet_scratch_key_create(void) {
   (void)pthread_key_create(&abce_packet_scratch_key, abce_packet_scratch_destroy);
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 // Returns this thread's scratch state, or null only on allocation failure.
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline abce_packet_scratch_t* abce_packet_scratch_state(void) {
   (void)pthread_once(&abce_packet_scratch_key_once, abce_packet_scratch_key_create);
   abce_packet_scratch_t* state =
@@ -1034,12 +1239,14 @@ static inline abce_packet_scratch_t* abce_packet_scratch_state(void) {
   }
   return state;
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 #endif  // _WIN32
 
 // Returns a per-thread packet scratch buffer of at least |bytes|, growing it to
 // the high-water mark. The buffer is reused across map calls on the same thread,
 // so a plan's packet views are valid only until that thread maps another plan.
 // Returns null only on allocation failure.
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline char* abce_acquire_packet_scratch(size_t bytes) {
   abce_packet_scratch_t* state = abce_packet_scratch_state();
   if (!state) return NULL;
@@ -1052,6 +1259,9 @@ static inline char* abce_acquire_packet_scratch(size_t bytes) {
   }
   return state->buffer;
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
+
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 //===----------------------------------------------------------------------===//
 // abce_copy_orchestrator_t — the ABCE front door
@@ -1087,6 +1297,7 @@ typedef struct abce_copy_orchestrator_t {
   void* policy_user_data;
 } abce_copy_orchestrator_t;
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline void abce_copy_orchestrator_initialize_with_caps(
     const abce_builder_t* builder, abce_platform_caps_t caps,
     abce_copy_orchestrator_t* out_orchestrator) {
@@ -1102,12 +1313,22 @@ static inline void abce_copy_orchestrator_initialize_with_caps(
     out_orchestrator->policy_user_data = &out_orchestrator->owned_policy;
   }
 }
+#else
+extern void abce_copy_orchestrator_initialize_with_caps(
+    const abce_builder_t* builder, abce_platform_caps_t caps,
+    abce_copy_orchestrator_t* out_orchestrator);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline void abce_copy_orchestrator_initialize(
     const abce_builder_t* builder, abce_copy_orchestrator_t* out_orchestrator) {
   abce_copy_orchestrator_initialize_with_caps(
       builder, abce_detect_default_platform_caps(builder->isa), out_orchestrator);
 }
+#else
+extern void abce_copy_orchestrator_initialize(
+    const abce_builder_t* builder, abce_copy_orchestrator_t* out_orchestrator);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 // The SDMA engine policy auto-selected for this part, or null if the part has
 // none. Engines are mapped automatically by registration (via
@@ -1115,18 +1336,28 @@ static inline void abce_copy_orchestrator_initialize(
 // device-wide heatmap profile is selected by
 // abce_sdma_policy_load_topology_from_kfd() or
 // abce_copy_orchestrator_init_device_profile().
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline abce_sdma_engine_policy_t* abce_copy_orchestrator_sdma_policy(
     abce_copy_orchestrator_t* orchestrator) {
   return orchestrator->has_policy ? &orchestrator->owned_policy : NULL;
 }
+#else
+extern abce_sdma_engine_policy_t* abce_copy_orchestrator_sdma_policy(
+    abce_copy_orchestrator_t* orchestrator);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 // Replaces the auto-selected policy with a caller-supplied ranking callback.
 // Passing null restores no-preference fallback behavior.
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline void abce_copy_orchestrator_set_engine_policy(
     abce_copy_orchestrator_t* orchestrator, abce_engine_policy_fn_t policy, void* user_data) {
   orchestrator->policy = policy;
   orchestrator->policy_user_data = policy ? user_data : NULL;
 }
+#else
+extern void abce_copy_orchestrator_set_engine_policy(
+    abce_copy_orchestrator_t* orchestrator, abce_engine_policy_fn_t policy, void* user_data);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 // Establishes device-wide selection state that does not depend on which
 // individual engines are registered. Selects the host-copy heatmap profile for
@@ -1141,6 +1372,7 @@ static inline void abce_copy_orchestrator_set_engine_policy(
 // not xGMI, the driver numbering them first. It establishes the P2P band the way
 // the KFD path does. Zero leaves the band unknown, which widens P2P to every
 // registered engine rather than emptying it.
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline void abce_copy_orchestrator_init_device_profile(
     abce_copy_orchestrator_t* orchestrator, uint32_t total_sdma_engines,
     uint32_t num_non_xgmi_sdma_engines) {
@@ -1151,10 +1383,16 @@ static inline void abce_copy_orchestrator_init_device_profile(
                                             (uint8_t)total_sdma_engines);
   abce_sdma_policy_set_engine_split(&orchestrator->owned_policy, num_non_xgmi_sdma_engines);
 }
+#else
+extern void abce_copy_orchestrator_init_device_profile(
+    abce_copy_orchestrator_t* orchestrator, uint32_t total_sdma_engines,
+    uint32_t num_non_xgmi_sdma_engines);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 // Registers an engine's ring and maps its hardware id into the auto-selected
 // SDMA policy, so the policy is populated without a separate map-engine call.
 // |affinity| may be null for the default (registered index as hardware id).
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline bool abce_copy_orchestrator_register_engine(
     abce_copy_orchestrator_t* orchestrator, uint32_t index, abce_ring_t* ring,
     const abce_engine_affinity_t* affinity) {
@@ -1177,19 +1415,30 @@ static inline bool abce_copy_orchestrator_register_engine(
                                 index);
   return true;
 }
+#else
+extern bool abce_copy_orchestrator_register_engine(
+    abce_copy_orchestrator_t* orchestrator, uint32_t index, abce_ring_t* ring,
+    const abce_engine_affinity_t* affinity);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 // Affinity a registered engine was registered with, resolved (so hw_engine_id is
 // never ABCE_ANY_ENGINE for a registered index). Reporting a copy to anything
 // outside ABCE wants the hardware id from here, not the registered index, which
 // is a client-local numbering.
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline const abce_engine_affinity_t* abce_copy_orchestrator_engine_affinity(
     const abce_copy_orchestrator_t* orchestrator, uint32_t index) {
   return &orchestrator->affinity[index];
 }
+#else
+extern const abce_engine_affinity_t* abce_copy_orchestrator_engine_affinity(
+    const abce_copy_orchestrator_t* orchestrator, uint32_t index);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 // Summarizes a plan's final engine assignment for a reader of its completion
 // signal. Public so a client that keeps this metadata somewhere other than
 // abce_copy_metadata_t::execution_descriptor can encode the same word itself.
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline uint32_t abce_copy_orchestrator_describe_execution(
     const abce_copy_orchestrator_t* orchestrator, const abce_plan_t* plan) {
   uint32_t hw_engine_mask = 0;
@@ -1200,17 +1449,24 @@ static inline uint32_t abce_copy_orchestrator_describe_execution(
                                           abce_plan_uniform_transfer_kind(plan),
                                           abce_plan_mixed_transfer_kinds(plan));
 }
+#else
+extern uint32_t abce_copy_orchestrator_describe_execution(
+    const abce_copy_orchestrator_t* orchestrator, const abce_plan_t* plan);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 //===----------------------------------------------------------------------===//
 // Candidate resolution and policy invocation
 //===----------------------------------------------------------------------===//
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline uint64_t abce_copy_orchestrator_candidates(
     const abce_copy_orchestrator_t* orchestrator, const abce_copy_metadata_t* metadata) {
   return metadata->engine_mask ? (metadata->engine_mask & orchestrator->registered_mask)
                                : orchestrator->registered_mask;
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline uint32_t abce_engine_at(uint64_t mask, uint32_t nth) {
   for (uint32_t engine = 0; engine < ABCE_MAX_ENGINES; ++engine) {
     if (mask & (1ull << engine)) {
@@ -1220,11 +1476,15 @@ static inline uint32_t abce_engine_at(uint64_t mask, uint32_t nth) {
   }
   return ABCE_MAX_ENGINES;
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline uint32_t abce_popcount_engines(uint64_t mask) {
   return (uint32_t)abce_popcount_u64(mask);
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline abce_policy_result_t abce_copy_orchestrator_invoke_policy(
     const abce_copy_orchestrator_t* orchestrator, const abce_copy_op_t* op, uint64_t candidates,
     uint32_t* ranked) {
@@ -1257,7 +1517,9 @@ static inline abce_policy_result_t abce_copy_orchestrator_invoke_policy(
   result.count = valid_count;
   return result;
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline uint32_t abce_copy_orchestrator_best_engine(
     const abce_copy_orchestrator_t* orchestrator, const abce_copy_op_t* op, uint64_t candidates) {
   uint32_t ranked[ABCE_MAX_ENGINES] = {0};
@@ -1267,7 +1529,9 @@ static inline uint32_t abce_copy_orchestrator_best_engine(
   if (result.disposition == ABCE_POLICY_DISPOSITION_RANKED) return ranked[0];
   return abce_first_engine(candidates);
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline uint32_t abce_copy_orchestrator_back_to_back_engine(
     const abce_copy_orchestrator_t* orchestrator, const abce_copy_op_t* first_copy,
     uint64_t candidates) {
@@ -1281,7 +1545,9 @@ static inline uint32_t abce_copy_orchestrator_back_to_back_engine(
   }
   return abce_copy_orchestrator_best_engine(orchestrator, first_copy, candidates);
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline uint8_t abce_copy_orchestrator_rank_engine_choices(
     const abce_copy_orchestrator_t* orchestrator, const abce_copy_op_t* op, uint64_t candidates,
     uint32_t* out_choices, bool* out_has_engine_preference) {
@@ -1304,12 +1570,20 @@ static inline uint8_t abce_copy_orchestrator_rank_engine_choices(
   }
   return (uint8_t)num_choices;
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 // Up to |capacity| legal engines for |copy|, ranked best-first.
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline uint32_t abce_copy_orchestrator_rank_legal_engines(
     const abce_copy_orchestrator_t* orchestrator, const abce_copy_op_t* copy, uint32_t* out_engines,
     uint32_t capacity);
+#else
+extern uint32_t abce_copy_orchestrator_rank_legal_engines(
+    const abce_copy_orchestrator_t* orchestrator, const abce_copy_op_t* copy, uint32_t* out_engines,
+    uint32_t capacity);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline uint32_t abce_copy_orchestrator_select_engine(
     const abce_copy_orchestrator_t* orchestrator, const abce_copy_op_t* op, uint64_t candidates,
     bool can_fanout, uint32_t max_participants, uint32_t* round_robin, uint64_t* selected_mask,
@@ -1339,6 +1613,7 @@ static inline uint32_t abce_copy_orchestrator_select_engine(
   if (engine < ABCE_MAX_ENGINES) *selected_mask |= ((uint64_t)1) << engine;
   return engine;
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 //===----------------------------------------------------------------------===//
 // Fan-out engine assignment
@@ -1362,6 +1637,7 @@ static inline uint32_t abce_copy_orchestrator_select_engine(
 // Least-loaded legal ring, preferring |recommended| on a tie so a copy stays on
 // its affinity ring until that ring is as busy as the alternatives. Returns
 // ABCE_MAX_ENGINES when |legal_mask| is empty.
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline uint32_t abce_pick_balanced_engine(uint64_t legal_mask, uint32_t recommended,
                                                  const uint32_t* load) {
   uint32_t min_load = UINT32_MAX;
@@ -1376,11 +1652,13 @@ static inline uint32_t abce_pick_balanced_engine(uint64_t legal_mask, uint32_t r
     if ((legal_mask & (((uint64_t)1) << engine)) && load[engine] == min_load) return engine;
   return ABCE_MAX_ENGINES;
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 // Legal ring set for |op|. On gfx1250 every candidate ring is legal and no ring
 // is preferred; elsewhere the policy ranks the class-legal rings, with the
 // recommended (affinity) ring first. Also fills |out_ranked_engines| for the
 // engine op so downstream ring substitution still has the ordered choices.
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline uint64_t abce_copy_orchestrator_legal_engine_set(
     const abce_copy_orchestrator_t* orchestrator, const abce_copy_op_t* op, uint64_t candidates,
     uint32_t* out_recommended, uint32_t* out_ranked_engines, uint8_t* out_num_ranked_engines,
@@ -1403,7 +1681,9 @@ static inline uint64_t abce_copy_orchestrator_legal_engine_set(
   *out_recommended = *out_num_ranked_engines ? out_ranked_engines[0] : ABCE_MAX_ENGINES;
   return legal_mask;
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline uint32_t abce_copy_orchestrator_rank_legal_engines(
     const abce_copy_orchestrator_t* orchestrator, const abce_copy_op_t* copy, uint32_t* out_engines,
     uint32_t capacity) {
@@ -1419,6 +1699,11 @@ static inline uint32_t abce_copy_orchestrator_rank_legal_engines(
   for (uint32_t rank = 0; rank < count; ++rank) out_engines[rank] = ranked[rank];
   return count;
 }
+#else
+extern uint32_t abce_copy_orchestrator_rank_legal_engines(
+    const abce_copy_orchestrator_t* orchestrator, const abce_copy_op_t* copy, uint32_t* out_engines,
+    uint32_t capacity);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 //===----------------------------------------------------------------------===//
 // Validation
@@ -1428,6 +1713,7 @@ static inline uint32_t abce_copy_orchestrator_rank_legal_engines(
 // go out plain or fused, and a multicast decomposed into per-destination linear
 // copies takes the same count as the fused packet. Rect tiling is counted by its
 // own check, and an indirect copy is one packet.
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline uint64_t abce_copy_op_max_packets(const abce_builder_t* builder,
                                                 const abce_copy_op_t* copy) {
   switch (copy->kind) {
@@ -1447,7 +1733,9 @@ static inline uint64_t abce_copy_op_max_packets(const abce_builder_t* builder,
   }
   return 1;
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline abce_status_t abce_copy_orchestrator_validate_request(
     const abce_copy_orchestrator_t* orchestrator, const abce_copy_op_t* copies,
     uint32_t num_copies, const abce_copy_metadata_t* metadata, uint32_t* out_failed_op) {
@@ -1517,6 +1805,7 @@ static inline abce_status_t abce_copy_orchestrator_validate_request(
   *out_failed_op = UINT32_MAX;
   return ABCE_STATUS_OK;
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 //===----------------------------------------------------------------------===//
 // Decomposition
@@ -1525,6 +1814,7 @@ static inline abce_status_t abce_copy_orchestrator_validate_request(
 // Bytes the back-to-back path would push through a single ring. A multicast op
 // decomposed on non-gfx125plus writes its payload once per destination, so its
 // share scales with the destination count rather than being one copy.
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline size_t abce_back_to_back_bytes(const abce_copy_op_t* copies, uint32_t num_copies) {
   size_t total = 0;
   for (uint32_t copy_idx = 0; copy_idx < num_copies; ++copy_idx) {
@@ -1534,7 +1824,9 @@ static inline size_t abce_back_to_back_bytes(const abce_copy_op_t* copies, uint3
   }
   return total;
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline bool abce_copy_orchestrator_is_back_to_back_batch(
     const abce_copy_orchestrator_t* orchestrator, const abce_copy_op_t* copies,
     uint32_t num_copies, const abce_copy_metadata_t* metadata) {
@@ -1558,19 +1850,25 @@ static inline bool abce_copy_orchestrator_is_back_to_back_batch(
   if (orchestrator->is_gfx125plus) return false;
   return abce_back_to_back_bytes(copies, num_copies) <= abce_linear_b2b_max_total();
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline bool abce_push_engine_op(abce_engine_op_t* ops, uint32_t* num_ops, uint32_t capacity,
                                        const abce_engine_op_t* op) {
   if (*num_ops >= capacity) return false;
   ops[(*num_ops)++] = *op;
   return true;
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline void abce_engine_op_initialize(abce_engine_op_t* out_op) {
   memset(out_op, 0, sizeof(*out_op));
   out_op->kind = ABCE_OP_KIND_LINEAR;
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline void abce_set_engine_choices(abce_engine_op_t* op, const uint32_t* ranked_engines,
                                            uint8_t num_ranked_engines,
                                            bool has_engine_preference) {
@@ -1579,7 +1877,9 @@ static inline void abce_set_engine_choices(abce_engine_op_t* op, const uint32_t*
   for (uint32_t choice_idx = 0; choice_idx < num_ranked_engines; ++choice_idx)
     op->ranked_engines[choice_idx] = ranked_engines[choice_idx];
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline void abce_copy_orchestrator_set_fixed_engine(
     const abce_copy_orchestrator_t* orchestrator, abce_engine_op_t* op,
     const abce_copy_op_t* copy, uint64_t candidates, uint32_t engine) {
@@ -1593,7 +1893,9 @@ static inline void abce_copy_orchestrator_set_fixed_engine(
     op->num_ranked_engines = 1;
   }
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline bool abce_copy_orchestrator_decompose_multi_dst(
     const abce_copy_orchestrator_t* orchestrator, const abce_copy_op_t* op,
     const abce_copy_metadata_t* metadata, uint64_t candidates, bool can_fanout,
@@ -1720,7 +2022,9 @@ static inline bool abce_copy_orchestrator_decompose_multi_dst(
   }
   return true;
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline bool abce_copy_orchestrator_decompose(
     const abce_copy_orchestrator_t* orchestrator, const abce_copy_op_t* copies,
     uint32_t num_copies, const abce_copy_metadata_t* metadata, uint64_t candidates,
@@ -1827,11 +2131,13 @@ static inline bool abce_copy_orchestrator_decompose(
   *out_failed_op = UINT32_MAX;
   return true;
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 //===----------------------------------------------------------------------===//
 // Frame assembly
 //===----------------------------------------------------------------------===//
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline void abce_initialize_frame_choices(abce_plan_frame_t* frame,
                                                  const abce_engine_op_t* op) {
   frame->num_ranked_engines = op->num_ranked_engines;
@@ -1839,7 +2145,9 @@ static inline void abce_initialize_frame_choices(abce_plan_frame_t* frame,
   for (uint32_t choice_idx = 0; choice_idx < op->num_ranked_engines; ++choice_idx)
     frame->ranked_engines[choice_idx] = op->ranked_engines[choice_idx];
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline void abce_intersect_frame_choices(abce_plan_frame_t* frame,
                                                 const abce_engine_op_t* op) {
   frame->has_engine_preference = frame->has_engine_preference && op->has_engine_preference;
@@ -1860,7 +2168,9 @@ static inline void abce_intersect_frame_choices(abce_plan_frame_t* frame,
   for (uint32_t choice_idx = 0; choice_idx < num_common; ++choice_idx)
     frame->ranked_engines[choice_idx] = common[choice_idx];
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline void abce_build_frames(const abce_engine_op_t* ops, uint32_t num_ops,
                                      abce_plan_t* plan) {
   uint64_t seen = 0;
@@ -1883,9 +2193,11 @@ static inline void abce_build_frames(const abce_engine_op_t* ops, uint32_t num_o
     plan->frames[engine_to_frame[engine]].num_ops++;
   }
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 // Bundles the current mapping state for one frame into the descriptor the frame
 // composer sizes / emits from.
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline abce_frame_job_t abce_make_frame_job(const abce_engine_op_t* ops, uint32_t num_ops,
                                                    const abce_copy_metadata_t* metadata,
                                                    const abce_plan_t* plan,
@@ -1906,6 +2218,7 @@ static inline abce_frame_job_t abce_make_frame_job(const abce_engine_op_t* ops, 
   job.coordination_word = plan->coordination_signal;
   return job;
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 //===----------------------------------------------------------------------===//
 // Phase 1: map
@@ -1915,6 +2228,7 @@ static inline abce_frame_job_t abce_make_frame_job(const abce_engine_op_t* ops, 
 // plan is left invalid and out_plan->failed_op names the offending operation
 // where one is identifiable. The plan's packet views live in per-thread scratch
 // and are valid only until the same thread maps another plan.
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline abce_status_t abce_copy_orchestrator_map_copy(
     abce_copy_orchestrator_t* orchestrator, const abce_copy_op_t* copies, uint32_t num_copies,
     const abce_copy_metadata_t* metadata, abce_plan_t* out_plan) {
@@ -2107,6 +2421,11 @@ static inline abce_status_t abce_copy_orchestrator_map_copy(
   out_plan->valid = true;
   return ABCE_STATUS_OK;
 }
+#else
+extern abce_status_t abce_copy_orchestrator_map_copy(
+    abce_copy_orchestrator_t* orchestrator, const abce_copy_op_t* copies, uint32_t num_copies,
+    const abce_copy_metadata_t* metadata, abce_plan_t* out_plan);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 //===----------------------------------------------------------------------===//
 // Phase 2: submit
@@ -2121,6 +2440,7 @@ typedef struct abce_submit_pending_t {
 
 // Reserves every ring, arms the output signal for fan-out, copies the frames
 // into their reservations, and publishes them.
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline abce_status_t abce_copy_orchestrator_submit(abce_copy_orchestrator_t* orchestrator,
                                                           abce_plan_t* plan) {
   if (!plan->valid || plan->submitted) return ABCE_STATUS_INVALID_PLAN;
@@ -2235,8 +2555,13 @@ static inline abce_status_t abce_copy_orchestrator_submit(abce_copy_orchestrator
   plan->submitted = true;
   return ABCE_STATUS_OK;
 }
+#else
+extern abce_status_t abce_copy_orchestrator_submit(abce_copy_orchestrator_t* orchestrator,
+                                                          abce_plan_t* plan);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 // Convenience: map and submit.
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline abce_status_t abce_copy_orchestrator_dispatch(
     abce_copy_orchestrator_t* orchestrator, const abce_copy_op_t* copies, uint32_t num_copies,
     const abce_copy_metadata_t* metadata) {
@@ -2246,6 +2571,11 @@ static inline abce_status_t abce_copy_orchestrator_dispatch(
   if (!abce_status_is_ok(status)) return status;
   return abce_copy_orchestrator_submit(orchestrator, &plan);
 }
+#else
+extern abce_status_t abce_copy_orchestrator_dispatch(
+    abce_copy_orchestrator_t* orchestrator, const abce_copy_op_t* copies, uint32_t num_copies,
+    const abce_copy_metadata_t* metadata);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 #ifdef __cplusplus
 }  // extern "C"

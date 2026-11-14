@@ -14,13 +14,14 @@
 #ifndef ABCE_RING_HOST_H_
 #define ABCE_RING_HOST_H_
 
+#include "abce_config.h"
+
 #include <assert.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
 
-#include "abce_config.h"
 #include "abce_ring_core.h"
 
 #ifdef __cplusplus
@@ -50,15 +51,23 @@ typedef struct abce_ring_queue_ops_t {
   void* user_data;
 } abce_ring_queue_ops_t;
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline bool abce_ring_queue_ops_empty(const abce_ring_queue_ops_t* ops) {
   return ops->load_read_index == NULL && ops->load_write_index == NULL &&
          ops->publish_write_index == NULL && ops->user_data == NULL;
 }
+#else
+extern bool abce_ring_queue_ops_empty(const abce_ring_queue_ops_t* ops);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline bool abce_ring_queue_ops_complete(const abce_ring_queue_ops_t* ops) {
   return ops->load_read_index != NULL && ops->load_write_index != NULL &&
          ops->publish_write_index != NULL;
 }
+#else
+extern bool abce_ring_queue_ops_complete(const abce_ring_queue_ops_t* ops);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 //===----------------------------------------------------------------------===//
 // abce_ring_config_t
@@ -174,6 +183,7 @@ typedef struct abce_ring_t {
 // compiler barrier, and packet stores into a VRAM ring reached through the BAR
 // are write-combined: without this they can still sit in the CPU's WC buffers
 // when the doorbell lands, and the engine fetches the old ring contents.
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline void abce_ring_host_store_fence(void) {
 #if ABCE_COMPILER_MSVC
   _mm_sfence();
@@ -183,24 +193,38 @@ static inline void abce_ring_host_store_fence(void) {
   abce_host_fence_release();
 #endif  // __x86_64__ || __i386__
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 // Wraps a monotonic index into a ring offset.
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline uint32_t abce_ring_wrap_index(const abce_ring_t* ring, uint64_t index) {
   return (uint32_t)abce_ring_wrap(index, ring->config.size);
 }
+#else
+extern uint32_t abce_ring_wrap_index(const abce_ring_t* ring, uint64_t index);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline uint64_t abce_ring_load_read_index(const abce_ring_t* ring) {
   if (abce_ring_queue_ops_complete(&ring->config.queue_ops))
     return ring->config.queue_ops.load_read_index(ring->config.queue_ops.user_data);
   return abce_ring_atomic_load_hw(ring->config.read_ptr);
 }
+#else
+extern uint64_t abce_ring_load_read_index(const abce_ring_t* ring);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline uint64_t abce_ring_load_write_index(const abce_ring_t* ring) {
   if (abce_ring_queue_ops_complete(&ring->config.queue_ops))
     return ring->config.queue_ops.load_write_index(ring->config.queue_ops.user_data);
   return abce_ring_atomic_load_hw(ring->config.write_ptr);
 }
+#else
+extern uint64_t abce_ring_load_write_index(const abce_ring_t* ring);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline void abce_ring_publish_write_index(const abce_ring_t* ring,
                                                  uint64_t new_write_index) {
   if (abce_ring_queue_ops_complete(&ring->config.queue_ops)) {
@@ -216,8 +240,13 @@ static inline void abce_ring_publish_write_index(const abce_ring_t* ring,
     *ring->config.doorbell = new_write_index;
   }
 }
+#else
+extern void abce_ring_publish_write_index(const abce_ring_t* ring,
+                                                 uint64_t new_write_index);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 // Initializes |out_ring| against |config|. |notify| is optional.
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline void abce_ring_initialize(const abce_ring_config_t* config,
                                         abce_doorbell_notify_fn_t notify, void* notify_user_data,
                                         abce_ring_t* out_ring) {
@@ -249,10 +278,16 @@ static inline void abce_ring_initialize(const abce_ring_config_t* config,
   abce_ring_cursor_store(&out_ring->control.commit_cursor, initial_write_index);
   abce_ring_cursor_store(&out_ring->control.max_write_index, initial_write_index);
 }
+#else
+extern void abce_ring_initialize(const abce_ring_config_t* config,
+                                        abce_doorbell_notify_fn_t notify, void* notify_user_data,
+                                        abce_ring_t* out_ring);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 // Total reservation size for a payload of |payload_bytes|, after applying the
 // configured minimum submission size and optional 64B rounding. Pass the result
 // to both acquire and release.
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline abce_status_t abce_ring_padded_size(const abce_ring_t* ring, uint32_t payload_bytes,
                                                   uint32_t* out_reserve_bytes) {
   if (payload_bytes == 0) return ABCE_STATUS_INVALID_ARGUMENT;
@@ -263,20 +298,32 @@ static inline abce_status_t abce_ring_padded_size(const abce_ring_t* ring, uint3
   *out_reserve_bytes = (uint32_t)padded;
   return ABCE_STATUS_OK;
 }
+#else
+extern abce_status_t abce_ring_padded_size(const abce_ring_t* ring, uint32_t payload_bytes,
+                                                  uint32_t* out_reserve_bytes);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline abce_status_t abce_ring_release_ordered(abce_ring_t* ring,
                                                       const abce_ring_reservation_t* reservation);
+#else
+extern abce_status_t abce_ring_release_ordered(abce_ring_t* ring,
+                                                      const abce_ring_reservation_t* reservation);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 //===----------------------------------------------------------------------===//
 // Core callbacks (the C++ version passed these as lambdas)
 //===----------------------------------------------------------------------===//
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline uint64_t abce_ring_load_read_index_callback(void* user_data) {
   return abce_ring_load_read_index((const abce_ring_t*)user_data);
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 // Fills an acquired region with |src_bytes| from |src| and zeros after it. A
 // region from abce_ring_acquire is already zero unless the ring has a writer.
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline void abce_ring_fill(const abce_ring_t* ring, char* buffer, const void* src,
                                   size_t src_bytes, size_t reserve_bytes) {
   if (ring->config.write) {
@@ -285,24 +332,33 @@ static inline void abce_ring_fill(const abce_ring_t* ring, char* buffer, const v
     memcpy(buffer, src, src_bytes);
   }
 }
+#else
+extern void abce_ring_fill(const abce_ring_t* ring, char* buffer, const void* src,
+                                  size_t src_bytes, size_t reserve_bytes);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 // Waits for every earlier store to reach |byte|'s device by reading it back
 // (see abce_ring_config_t::readback_before_doorbell). A read of any width
 // cannot pass the stores before it, and one byte stays inside the smallest
 // region at any alignment: a reservation can be a single 4-byte NOP.
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline void abce_ring_read_back(const void* byte) {
   abce_host_fence_seq_cst();
   (void)*(const volatile uint8_t*)byte;
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 // The last byte of a filled region, the one abce_ring_read_back reads.
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline const char* abce_ring_region_last_byte(const char* buffer, size_t bytes) {
   return buffer + bytes - 1;
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 // Orders the stores that filled |region| ahead of its doorbell: a readback
 // where the ring sets readback_before_doorbell, otherwise a store fence unless
 // a ring writer, which orders its own stores, filled it.
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline void abce_ring_order_region(const abce_ring_t* ring,
                                           const abce_ring_reservation_t* region,
                                           bool filled_by_writer) {
@@ -314,7 +370,9 @@ static inline void abce_ring_order_region(const abce_ring_t* ring,
     abce_ring_host_store_fence();
   }
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline abce_status_t abce_ring_publish_padding_callback(
     void* user_data, const abce_ring_reservation_t* padding) {
   abce_ring_t* ring = (abce_ring_t*)user_data;
@@ -330,14 +388,18 @@ static inline abce_status_t abce_ring_publish_padding_callback(
   abce_ring_order_region(ring, padding, ring->config.write != NULL);
   return abce_ring_release_ordered(ring, padding);
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline void abce_ring_publish_callback(void* user_data, uint64_t new_write_index) {
   abce_ring_t* ring = (abce_ring_t*)user_data;
   abce_ring_publish_write_index(ring, new_write_index);
   abce_ring_cursor_store_release(&ring->control.max_write_index, new_write_index);
   if (ring->notify) ring->notify(ring->notify_user_data, new_write_index);
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline void abce_ring_commit_wait_callback(void* user_data, const uint64_t* commit_cursor,
                                                   uint64_t observed_commit_index) {
   abce_ring_t* ring = (abce_ring_t*)user_data;
@@ -348,6 +410,7 @@ static inline void abce_ring_commit_wait_callback(void* user_data, const uint64_
     abce_ring_pause();
   }
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 //===----------------------------------------------------------------------===//
 // Acquire / release / drain
@@ -359,6 +422,7 @@ static inline void abce_ring_commit_wait_callback(void* user_data, const uint64_
 // |out_reservation|, which must be passed verbatim to abce_ring_release, and
 // |out_buffer|, a zeroed pointer into the ring. Fails only if |reserve_bytes|
 // is at or above the ring size (the request can never fit).
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline abce_status_t abce_ring_acquire(abce_ring_t* ring, uint32_t reserve_bytes,
                                               abce_ring_reservation_t* out_reservation,
                                               char** out_buffer) {
@@ -384,10 +448,16 @@ static inline abce_status_t abce_ring_acquire(abce_ring_t* ring, uint32_t reserv
   *out_buffer = buffer;
   return ABCE_STATUS_OK;
 }
+#else
+extern abce_status_t abce_ring_acquire(abce_ring_t* ring, uint32_t reserve_bytes,
+                                              abce_ring_reservation_t* out_reservation,
+                                              char** out_buffer);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 // abce_ring_release for a caller that has already ordered every store the
 // engine reads ahead of the doorbell: submit, which fences once for a whole
 // batch, and padding and cancel, which order their own fill.
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline abce_status_t abce_ring_release_ordered(abce_ring_t* ring,
                                                       const abce_ring_reservation_t* reservation) {
   abce_ring_publisher_t publisher;
@@ -397,6 +467,10 @@ static inline abce_status_t abce_ring_release_ordered(abce_ring_t* ring,
   publisher.user_data = ring;
   return abce_ring_publish(&publisher, reservation);
 }
+#else
+extern abce_status_t abce_ring_release_ordered(abce_ring_t* ring,
+                                                      const abce_ring_reservation_t* reservation);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 // Publishes a previously acquired region and rings the doorbell. Blocks until
 // all earlier reservations have been published so the write index advances
@@ -404,14 +478,20 @@ static inline abce_status_t abce_ring_release_ordered(abce_ring_t* ring,
 //
 // Orders the caller's writes to the region ahead of the doorbell first,
 // including the non-temporal stores a large memcpy can issue on x86.
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline abce_status_t abce_ring_release(abce_ring_t* ring,
                                               const abce_ring_reservation_t* reservation) {
   abce_ring_order_region(ring, reservation, /*filled_by_writer=*/false);
   return abce_ring_release_ordered(ring, reservation);
 }
+#else
+extern abce_status_t abce_ring_release(abce_ring_t* ring,
+                                              const abce_ring_reservation_t* reservation);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 // Publishes an acquired reservation as NOPs. Without a writer the NOPs are
 // abce_ring_acquire's zeroing.
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline abce_status_t abce_ring_cancel(abce_ring_t* ring,
                                              const abce_ring_reservation_t* reservation) {
   if (ring->config.write) {
@@ -421,9 +501,14 @@ static inline abce_status_t abce_ring_cancel(abce_ring_t* ring,
   abce_ring_order_region(ring, reservation, ring->config.write != NULL);
   return abce_ring_release_ordered(ring, reservation);
 }
+#else
+extern abce_status_t abce_ring_cancel(abce_ring_t* ring,
+                                             const abce_ring_reservation_t* reservation);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 // Waits until the engine has consumed everything published when this call
 // snapshots the high-water mark.
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline abce_status_t abce_ring_drain(const abce_ring_t* ring) {
   const uint64_t target = abce_ring_cursor_load_acquire(&ring->control.max_write_index);
   while (abce_ring_load_read_index(ring) < target) {
@@ -431,6 +516,9 @@ static inline abce_status_t abce_ring_drain(const abce_ring_t* ring) {
   }
   return ABCE_STATUS_OK;
 }
+#else
+extern abce_status_t abce_ring_drain(const abce_ring_t* ring);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 #ifdef __cplusplus
 }  // extern "C"

@@ -7,10 +7,11 @@
  #ifndef ABCE_SDMA_PACKETS_H_
 #define ABCE_SDMA_PACKETS_H_
 
+#include "abce_config.h"
+
 #include <stddef.h>
 #include <stdint.h>
 
-#include "abce_config.h"
 
 // These names mirror ROCr's sdma_registers.h, which declares the same packet
 // layouts inside rocr::AMD. They are hardware ABI structures, so they keep the
@@ -1033,8 +1034,12 @@ extern "C" {
  } SDMA_PKT_HDP_FLUSH;
 
 // The packet is a constant: abce_builder_hdp_flush() memcpy's it verbatim.
+#if ABCE_ENABLE_IMPLEMENTATION
 static const SDMA_PKT_HDP_FLUSH abce_sdma_hdp_flush_cmd = {0x8, 0x0,  0x80000000,
                                                           0x0, 0x0,  0x0};
+#else
+extern const SDMA_PKT_HDP_FLUSH abce_sdma_hdp_flush_cmd;
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
  typedef struct SDMA_PKT_GCR_TAG {
    union {
