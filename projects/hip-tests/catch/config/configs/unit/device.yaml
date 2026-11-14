@@ -501,6 +501,19 @@ device:
   Unit_hipIpcGetMemHandle_Negative_Out_Of_Bound_Pointer:
     <<: *level_default
     tags: [P0]
+  Unit_hipIpcGetMemHandle_Negative_Vmm_Allocation:
+    <<: *level_default
+    tags: [P0, vmm]
+  Unit_hipIpcOpenMemHandle_Multiproc_CoherentAlloc_Handshake:
+    <<: *level_default
+    tags: [P0, multigpu]
+  # Self-skips unless launched by Unit_hipIpcOpenMemHandle_Multiproc_CoherentAlloc_Handshake.
+  Unit_hipIpcOpenMemHandle_Multiproc_CoherentAlloc_Child:
+    <<: *level_default
+    tags: [P0, multigpu]
+  Unit_hipDeviceEnablePeerAccess_AlreadyEnabled_ErrorIsClearable:
+    <<: *level_default
+    tags: [P0, multigpu]
   Unit_hipIpcCloseMemHandle_Positive_Reference_Counting:
     <<: *level_default
     disabled:

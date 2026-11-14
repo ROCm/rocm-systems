@@ -42,6 +42,7 @@ behaviour
 }
 
 #include <hip_test_common.hh>
+#include <resource_guards.hh>
 #include <string>
 static constexpr auto NUM_W{16};
 static constexpr auto NUM_H{16};
@@ -373,6 +374,33 @@ HIP_TEST_CASE(Unit_hipPointerGetAttribute_ipc_capable) {
     REQUIRE(datatype == 1);
     HIP_CHECK(hipFree(A_d));
   }
+
+#if HT_AMD
+  /* Communication libraries export fine-grained and uncached buffers over legacy IPC rather than
+     plain hipMalloc buffers, and gate that decision on this attribute. Querying it must succeed
+     (not report hipErrorNotSupported) and must report these allocators as IPC-capable. */
+  SECTION("ExtMallocWithFlags Fine-grained Allocation") {
+    ExtMallocGuard<int> alloc(Nbytes, hipDeviceMallocFinegrained);
+    if (alloc.ptr() == nullptr) {
+      WARN("Skipping section: fine-grained allocation is not supported on this device.");
+      return;
+    }
+    HIP_CHECK(hipPointerGetAttribute(&datatype, HIP_POINTER_ATTRIBUTE_IS_LEGACY_HIP_IPC_CAPABLE,
+                                     reinterpret_cast<hipDeviceptr_t>(alloc.ptr())));
+    REQUIRE(datatype == 1);
+  }
+
+  SECTION("ExtMallocWithFlags Uncached Allocation") {
+    ExtMallocGuard<int> alloc(Nbytes, hipDeviceMallocUncached);
+    if (alloc.ptr() == nullptr) {
+      WARN("Skipping section: uncached allocation is not supported on this device.");
+      return;
+    }
+    HIP_CHECK(hipPointerGetAttribute(&datatype, HIP_POINTER_ATTRIBUTE_IS_LEGACY_HIP_IPC_CAPABLE,
+                                     reinterpret_cast<hipDeviceptr_t>(alloc.ptr())));
+    REQUIRE(datatype == 1);
+  }
+#endif
 
   SECTION("VMM Memory Allocation") {
     size_t granularity = 0;

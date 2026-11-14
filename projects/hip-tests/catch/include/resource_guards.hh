@@ -135,6 +135,38 @@ template <typename T> class LinearAllocGuard {
   }
 };
 
+#if HT_AMD
+/* Owns a device allocation made with hipExtMallocWithFlags. Unlike LinearAllocGuard, a failed
+   allocation is not a test failure -- not every device supports every flag combination -- and is
+   reported through a null ptr() so the caller can skip instead. */
+template <typename T> class ExtMallocGuard {
+ public:
+  ExtMallocGuard(const size_t size, const unsigned int flags) : size_{size} {
+    if (hipExtMallocWithFlags(reinterpret_cast<void**>(&ptr_), size, flags) != hipSuccess) {
+      static_cast<void>(hipGetLastError());
+      ptr_ = nullptr;
+    }
+  }
+
+  ExtMallocGuard(const ExtMallocGuard&) = delete;
+  ExtMallocGuard(ExtMallocGuard&&) = delete;
+
+  ~ExtMallocGuard() {
+    // No Catch macros, don't want to possibly throw in the destructor
+    if (ptr_ != nullptr) {
+      static_cast<void>(hipFree(ptr_));
+    }
+  }
+
+  T* ptr() const { return ptr_; }
+  size_t size_bytes() const { return size_; }
+
+ private:
+  T* ptr_ = nullptr;
+  const size_t size_;
+};
+#endif
+
 template <typename T> class LinearAllocGuardMultiDim {
  protected:
   LinearAllocGuardMultiDim(hipExtent extent) : extent_{extent} {}
