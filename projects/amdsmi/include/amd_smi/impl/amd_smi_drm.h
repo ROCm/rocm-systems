@@ -20,13 +20,14 @@ namespace amd::smi {
 
 class AMDSmiDrm {
  public:
-  amdsmi_status_t init();
+  amdsmi_status_t init(const std::vector<const char*>& libdrm_names = libdrm_amdgpu_sonames());
   amdsmi_status_t cleanup();
   amdsmi_status_t get_bdf_by_index(uint32_t gpu_index, amdsmi_bdf_t* bdf_info) const;
   amdsmi_status_t get_drm_path_by_index(uint32_t gpu_index, std::string* drm_path) const;
   std::vector<amdsmi_bdf_t> get_bdfs();
   std::vector<std::string>& get_drm_paths();
   bool check_if_drm_is_supported();
+  bool has_libdrm() const { return has_libdrm_; }
 
   amdsmi_status_t amdgpu_query_cpu_affinity(const std::string& device_path,
                                             std::string& cpu_affinity);
@@ -39,6 +40,7 @@ class AMDSmiDrm {
   std::vector<std::string> drm_paths_;  // drm path (renderD128 for example)
   std::vector<amdsmi_bdf_t> drm_bdfs_;  // bdf
   uint32_t vendor_id = 0;
+  bool has_libdrm_ = false;
 
   AMDSmiLibraryLoader lib_loader_;  // lazy load libdrm
 
