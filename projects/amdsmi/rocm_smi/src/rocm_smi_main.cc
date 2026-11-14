@@ -19,6 +19,7 @@
 #include <sstream>
 #include <string>
 
+#include "amd_smi/impl/amd_smi_test_overrides.h"
 #include "rocm_smi/rocm_smi.h"
 #include "rocm_smi/rocm_smi_device.h"
 #include "rocm_smi/rocm_smi_exception.h"
@@ -27,7 +28,6 @@
 #include "rocm_smi/rocm_smi_logger.h"
 #include "rocm_smi/rocm_smi_utils.h"
 
-static const char* kPathDRMRoot = "/sys/class/drm";
 static const char* kPathHWMonRoot = "/sys/class/hwmon";
 static const char* kPathPowerRoot = "/sys/kernel/debug/dri";
 static const char* kPathDeviceMon = "/device/hwmon";
@@ -385,6 +385,10 @@ void RocmSMI::Initialize(uint64_t flags) {
 }
 
 void RocmSMI::Cleanup() {
+  euid_ = 0;
+  kfd_node_map_.clear();
+  io_link_map_.clear();
+  dev_ind_to_node_ind_map_.clear();
   devices_.clear();
   monitors_.clear();
 
@@ -631,7 +635,7 @@ void RocmSMI::AddToDeviceList(const std::string& dev_name, uint64_t bdfid) {
   ss << __PRETTY_FUNCTION__ << " | ======= start =======";
   LOG_TRACE(ss);
 
-  auto dev_path = std::string(kPathDRMRoot);
+  auto dev_path = test_hooks::SysfsDrmRoot();
   dev_path += "/";
   dev_path += dev_name;
 
@@ -695,7 +699,7 @@ rsmi_status_t RocmSMI::AddToDeviceList2(RocmSMI::rsmi_device_enumeration_t devic
      << std::setw(1) << +(device.bdfid & static_cast<uint64_t>(0x7)) << "]\n";
   // std::cout << ss.str() << std::endl;
   LOG_TRACE(ss);
-  auto dev_path = std::string(kPathDRMRoot);
+  auto dev_path = test_hooks::SysfsDrmRoot();
 
   if (device.dev_name.empty()) {
     ss << __PRETTY_FUNCTION__ << " | dev_name is empty";
@@ -707,7 +711,7 @@ rsmi_status_t RocmSMI::AddToDeviceList2(RocmSMI::rsmi_device_enumeration_t devic
     uint32_t card_num = GetCard(dev_path);
     device.dev_name = "card" + std::to_string(card_num);
     device.drm_render_path = dev_path;
-    device.drm_card_path = std::string(kPathDRMRoot) + "/card" + std::to_string(card_num);
+    device.drm_card_path = test_hooks::SysfsDrmRoot() + "/card" + std::to_string(card_num);
     device.card_index = card_num;
   }
 
@@ -795,7 +799,7 @@ static const uint32_t kAmdGpuId = 0x1002;
   return isAmdGpu;
 }
 
-uint32_t GetLargestNodeNumber(const std::string& path = "/sys/class/kfd/kfd/topology/nodes/") {
+uint32_t GetLargestNodeNumber(const std::string& path = KFDNodesPathRoot()) {
   std::ostringstream ss;
   uint32_t largest_node_number = 0;
 

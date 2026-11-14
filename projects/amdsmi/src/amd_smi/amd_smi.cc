@@ -46,6 +46,7 @@
 #include "amd_smi/impl/amd_smi_socket.h"
 #include "amd_smi/impl/amd_smi_system.h"
 #include "amd_smi/impl/amd_smi_test_internal.h"
+#include "amd_smi/impl/amd_smi_test_overrides.h"
 #include "amd_smi/impl/amd_smi_ualoe.h"
 #include "amd_smi/impl/amd_smi_utils.h"
 #include "amd_smi/impl/amd_smi_uuid.h"
@@ -640,7 +641,7 @@ amdsmi_status_t amdsmi_get_node_handle(amdsmi_processor_handle processor_handle,
   namespace fs = std::filesystem;
 
   // Construct the path from /sys/class/drm/renderD* device
-  fs::path drm_device_path = fs::path("/sys/class/drm") /
+  fs::path drm_device_path = fs::path(amd::smi::test_hooks::SysfsDrmRoot()) /
                              ("renderD" + std::to_string(enumeration_info.drm_render)) / "device";
   fs::path found_board;
 
@@ -6489,8 +6490,8 @@ amdsmi_status_t amdsmi_get_pcie_info(amdsmi_processor_handle processor_handle,
 
   memset((void*)info, 0, sizeof(*info));
 
-  std::string path_max_link_width =
-      "/sys/class/drm/" + gpu_device->get_gpu_path() + "/device/max_link_width";
+  std::string path_max_link_width = amd::smi::test_hooks::SysfsDrmRoot() + "/" +
+                                    gpu_device->get_gpu_path() + "/device/max_link_width";
   fp = fopen(path_max_link_width.c_str(), "r");
   if (fp) {
     if (fscanf(fp, "%d", &pcie_width) != 1) {
@@ -6508,8 +6509,8 @@ amdsmi_status_t amdsmi_get_pcie_info(amdsmi_processor_handle processor_handle,
   }
   info->pcie_static.max_pcie_width = (uint16_t)pcie_width;
 
-  std::string path_max_link_speed =
-      "/sys/class/drm/" + gpu_device->get_gpu_path() + "/device/max_link_speed";
+  std::string path_max_link_speed = amd::smi::test_hooks::SysfsDrmRoot() + "/" +
+                                    gpu_device->get_gpu_path() + "/device/max_link_speed";
   fp = fopen(path_max_link_speed.c_str(), "r");
   if (fp) {
     if (fscanf(fp, "%lf %*s", &pcie_speed) != 1) {
@@ -9139,8 +9140,10 @@ static amdsmi_status_t get_gpu_uma_carveout_info_internal(amd::smi::AMDSmiGPUDev
   std::string gpu_path = gpu_device->get_gpu_path();
 
   // Construct sysfs paths for UMA carveout
-  std::string carveout_path = "/sys/class/drm/" + gpu_path + "/device/uma/carveout";
-  std::string options_path = "/sys/class/drm/" + gpu_path + "/device/uma/carveout_options";
+  std::string carveout_path =
+      amd::smi::test_hooks::SysfsDrmRoot() + "/" + gpu_path + "/device/uma/carveout";
+  std::string options_path =
+      amd::smi::test_hooks::SysfsDrmRoot() + "/" + gpu_path + "/device/uma/carveout_options";
 
   // Check if UMA carveout is available
   std::ifstream carveout_file(carveout_path);
@@ -9294,7 +9297,8 @@ amdsmi_status_t amdsmi_set_gpu_uma_carveout(amdsmi_processor_handle processor_ha
   std::string gpu_path = gpu_device->get_gpu_path();
 
   // Construct sysfs path for UMA carveout
-  std::string carveout_path = "/sys/class/drm/" + gpu_path + "/device/uma/carveout";
+  std::string carveout_path =
+      amd::smi::test_hooks::SysfsDrmRoot() + "/" + gpu_path + "/device/uma/carveout";
 
   // Check if UMA carveout is available
   std::ifstream check_file(carveout_path);

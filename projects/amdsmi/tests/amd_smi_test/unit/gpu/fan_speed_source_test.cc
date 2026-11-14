@@ -14,18 +14,18 @@
 // on a GPU that exposes gpu_od.
 
 #include <gtest/gtest.h>
-#include <unistd.h>
 
 #include <cstdint>
-#include <filesystem>
-#include <fstream>
 #include <memory>
 #include <string>
 
-#include "rocm_smi/rocm_smi.h"
+#include "amd_smi/amdsmi.h"
+#include "amd_smi/impl/amd_smi_drm.h"
+#include "amd_smi/impl/amd_smi_gpu_device.h"
 #include "rocm_smi/rocm_smi_device.h"
 #include "rocm_smi/rocm_smi_main.h"
 #include "rocm_smi/rocm_smi_monitor.h"
+#include "test_fixture_utils.h"
 
 namespace {
 
@@ -42,52 +42,32 @@ constexpr char kFanMinimumPwm[] =
     "OD_RANGE:\n"
     "MINIMUM_PWM: 15 100\n";
 
-void WriteFile(const std::filesystem::path& path, const std::string& contents) {
-  std::filesystem::create_directories(path.parent_path());
-  std::ofstream out(path);
-  ASSERT_TRUE(out.is_open()) << "cannot write " << path;
-  out << contents;
-}
-
-// Builds a fake OverDrive-enabled GPU under a temp dir, registers it with the
-// RocmSMI device list and removes it again on destruction.
+// A fake OverDrive-enabled GPU: the gpu_od fan node plus the hwmon pwm files, registered with
+// RocmSMI and AMDSmiSystem for the life of the object so the public API can reach it.
 class FakeOverDriveDevice {
  public:
-  FakeOverDriveDevice() {
-    root_ = std::filesystem::temp_directory_path() / ("amdsmi_fan_od_" + std::to_string(getpid()));
-    std::filesystem::remove_all(root_);
+  FakeOverDriveDevice()
+      : device_(tree_.root() + "/card0"),
+        gpu_device_(device_.index(), "card0", amdsmi_bdf_t{}, drm_),
+        registration_(&gpu_device_) {
+    tree_.WriteFile("card0/device/gpu_od/fan_ctrl/fan_minimum_pwm", kFanMinimumPwm);
+    tree_.WriteFile("card0/device/hwmon/hwmon0/pwm1", std::to_string(kLivePwm) + "\n");
+    tree_.WriteFile("card0/device/hwmon/hwmon0/pwm1_max", std::to_string(kLivePwmMax) + "\n");
 
-    const std::filesystem::path card = root_ / "card0";
-    const std::filesystem::path hwmon = card / "device" / "hwmon" / "hwmon0";
-
-    WriteFile(card / "device" / "gpu_od" / "fan_ctrl" / "fan_minimum_pwm", kFanMinimumPwm);
-    WriteFile(hwmon / "pwm1", std::to_string(kLivePwm) + "\n");
-    WriteFile(hwmon / "pwm1_max", std::to_string(kLivePwmMax) + "\n");
-
-    auto dev = std::make_shared<amd::smi::Device>(card.string(), nullptr);
-    dev->set_monitor(std::make_shared<amd::smi::Monitor>(hwmon.string(), nullptr));
-
-    auto& devices = amd::smi::RocmSMI::getInstance().devices();
-    index_ = static_cast<uint32_t>(devices.size());
-    devices.push_back(dev);
+    const std::string hwmon = tree_.root() + "/card0/device/hwmon/hwmon0";
+    amd::smi::RocmSMI::getInstance().devices()[device_.index()]->set_monitor(
+        std::make_shared<amd::smi::Monitor>(hwmon, nullptr));
   }
 
-  ~FakeOverDriveDevice() {
-    auto& devices = amd::smi::RocmSMI::getInstance().devices();
-    if (index_ < devices.size()) {
-      devices.erase(devices.begin() + index_);
-    }
-    std::filesystem::remove_all(root_);
-  }
-
-  FakeOverDriveDevice(const FakeOverDriveDevice&) = delete;
-  FakeOverDriveDevice& operator=(const FakeOverDriveDevice&) = delete;
-
-  uint32_t index() const { return index_; }
+  amdsmi_processor_handle handle() const { return registration_.handle(); }
 
  private:
-  std::filesystem::path root_;
-  uint32_t index_ = 0;
+  ScopedAmdsmiInit init_;
+  FakeSysfsTree tree_;
+  ScopedRocmSmiDevice device_;
+  amd::smi::AMDSmiDrm drm_;
+  amd::smi::AMDSmiGPUDevice gpu_device_;
+  amd::smi::testing::ScopedProcessorRegistration registration_;
 };
 
 }  // namespace
@@ -97,7 +77,7 @@ TEST(GpuUnit, FanSpeedComesFromHwmonNotOverDriveFloor) {
   FakeOverDriveDevice fake;
 
   int64_t speed = -1;
-  ASSERT_EQ(rsmi_dev_fan_speed_get(fake.index(), 0, &speed), RSMI_STATUS_SUCCESS);
+  ASSERT_EQ(amdsmi_get_gpu_fan_speed(fake.handle(), 0, &speed), AMDSMI_STATUS_SUCCESS);
   EXPECT_NE(speed, 0) << "fan_minimum_pwm floor reported as live speed (issue #8684)";
   EXPECT_EQ(speed, kLivePwm);
 }
@@ -109,6 +89,6 @@ TEST(GpuUnit, FanSpeedMaxComesFromHwmonNotOverDriveRange) {
   FakeOverDriveDevice fake;
 
   uint64_t max_speed = 0;
-  ASSERT_EQ(rsmi_dev_fan_speed_max_get(fake.index(), 0, &max_speed), RSMI_STATUS_SUCCESS);
+  ASSERT_EQ(amdsmi_get_gpu_fan_speed_max(fake.handle(), 0, &max_speed), AMDSMI_STATUS_SUCCESS);
   EXPECT_EQ(max_speed, kLivePwmMax);
 }

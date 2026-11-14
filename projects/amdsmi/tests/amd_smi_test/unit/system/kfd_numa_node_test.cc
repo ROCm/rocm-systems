@@ -2,140 +2,135 @@
 // SPDX-License-Identifier: MIT
 
 // kInvalidNumaNode/kInvalidNumaNodeWeight are the sentinels KFDNode::Initialize()
-// assigns when no CPU io_link is found. Tests KFDNode::Initialize() against
-// a mock KFD topology (via SetKFDNodesPathRootForTesting()) to prove getters are
-// actually sentinel-valued when no CPU link exists, and hold real discovered values
-// when one does. No GPU required.
+// assigns when no CPU io_link is found. Runs the real rsmi_init() discovery over a fake KFD
+// topology and DRM tree (via the KfdNodesPathRoot and SysfsDrmRoot test hooks) and reads the result
+// back through the public API, to prove the getters report no NUMA node when no CPU link exists,
+// and the discovered values when one does. No GPU required.
 
 #include <gtest/gtest.h>
 
 #include <cstdint>
-#include <cstdlib>
-#include <filesystem>
-#include <fstream>
-#include <sstream>
 #include <string>
 
+#include "amd_smi/amdsmi.h"
 #include "rocm_smi/rocm_smi_kfd.h"
+#include "test_common.h"
+#include "test_fixture_utils.h"
 
 namespace {
 
-// Creates a unique directory on construction, recursively removes it on destruction.
-class ScopedTempDir {
- public:
-  ScopedTempDir() {
-    std::string tmpl = (std::filesystem::temp_directory_path() / "kfd_numa_test_XXXXXX").string();
-    std::vector<char> buf(tmpl.begin(), tmpl.end());
-    buf.push_back('\0');
-    if (char* result = mkdtemp(buf.data())) {
-      path_ = result;
-    }
-  }
-  ~ScopedTempDir() {
-    if (!path_.empty()) {
-      std::error_code ec;
-      std::filesystem::remove_all(path_, ec);
-    }
-  }
-  const std::filesystem::path& path() const { return path_; }
-
- private:
-  std::filesystem::path path_;
-};
-
-// Points KFDNodesPathRoot() at a mock topology on construction, restores the real
-// path on destruction.
-class ScopedKfdRootOverride {
- public:
-  explicit ScopedKfdRootOverride(const std::string& path) : path_(path) {
-    amd::smi::SetKFDNodesPathRootForTesting(path_.c_str());
-  }
-  ~ScopedKfdRootOverride() { amd::smi::SetKFDNodesPathRootForTesting(nullptr); }
-
- private:
-  std::string path_;
-};
-
-void WriteFile(const std::filesystem::path& path, const std::string& content) {
-  std::filesystem::create_directories(path.parent_path());
-  std::ofstream(path) << content;
+amdsmi_status_t CallNumaNodeNumber(const FakeKfdTopology& topology, uint32_t node,
+                                   uint32_t* numa_node, amdsmi_status_t expected) {
+  const bool verbose = GetTestVerbosity() >= TestBase::VERBOSE_STANDARD;
+  DISPLAY_AMDSMI_API("amdsmi_topo_get_numa_node_number", "node=" + std::to_string(node), verbose);
+  amdsmi_status_t status = amdsmi_topo_get_numa_node_number(topology.handle(node), numa_node);
+  DISPLAY_AMDSMI_STATUS(verbose, __FILE__, __LINE__, status, expected);
+  return status;
 }
 
-// /sys/class/kfd/kfd/topology/nodes/<node_idx>/gpu_id ; 0 means a CPU node.
-void WriteGpuId(const std::filesystem::path& root, uint32_t node_idx, uint64_t gpu_id) {
-  WriteFile(root / std::to_string(node_idx) / "gpu_id", std::to_string(gpu_id) + "\n");
+amdsmi_status_t CallLinkWeight(const FakeKfdTopology& topology, uint32_t src_node,
+                               uint32_t dst_node, uint64_t* weight, amdsmi_status_t expected) {
+  const bool verbose = GetTestVerbosity() >= TestBase::VERBOSE_STANDARD;
+  DISPLAY_AMDSMI_API(
+      "amdsmi_topo_get_link_weight",
+      "src_node=" + std::to_string(src_node) + ", dst_node=" + std::to_string(dst_node), verbose);
+  amdsmi_status_t status =
+      amdsmi_topo_get_link_weight(topology.handle(src_node), topology.handle(dst_node), weight);
+  DISPLAY_AMDSMI_STATUS(verbose, __FILE__, __LINE__, status, expected);
+  return status;
 }
 
-// Minimal properties KFDNode::Initialize() requires beyond gpu_id: hive_id plus
-// three CU-count inputs read after io_link loop.
-void WriteNodeProperties(const std::filesystem::path& root, uint32_t node_idx) {
-  WriteFile(root / std::to_string(node_idx) / "properties",
-            "hive_id 0\nsimd_arrays_per_engine 1\narray_count 1\ncu_per_simd_array 1\n");
+amdsmi_status_t CallKfdInfo(const FakeKfdTopology& topology, uint32_t node,
+                            amdsmi_kfd_info_t* info) {
+  const bool verbose = GetTestVerbosity() >= TestBase::VERBOSE_STANDARD;
+  DISPLAY_AMDSMI_API("amdsmi_get_gpu_kfd_info", "node=" + std::to_string(node), verbose);
+  amdsmi_status_t status = amdsmi_get_gpu_kfd_info(topology.handle(node), info);
+  DISPLAY_AMDSMI_STATUS(verbose, __FILE__, __LINE__, status, AMDSMI_STATUS_SUCCESS);
+  return status;
 }
 
-// /sys/class/kfd/kfd/topology/nodes/<node_idx>/io_links/<link_idx>/properties
-void WriteIoLink(const std::filesystem::path& root, uint32_t node_idx, uint32_t link_idx,
-                 uint32_t node_to, amd::smi::IO_LINK_TYPE type, uint64_t weight) {
-  std::ostringstream props;
-  props << "type " << static_cast<uint64_t>(type) << "\n"
-        << "node_from " << node_idx << "\n"
-        << "node_to " << node_to << "\n"
-        << "weight " << weight << "\n"
-        << "flags 1\n"
-        << "min_bandwidth 100\n"
-        << "max_bandwidth 200\n";
-  WriteFile(root / std::to_string(node_idx) / "io_links" / std::to_string(link_idx) / "properties",
-            props.str());
-}
-
-TEST(SystemUnit, InvalidNumaNodeSentinelIsUint32Max) {
+TEST(SystemUnit, KFD_TOPOLOGY__InvalidNumaNodeSentinelIsUint32Max) {
   EXPECT_EQ(amd::smi::kInvalidNumaNode, UINT32_MAX);
 }
 
-TEST(SystemUnit, InvalidNumaNodeWeightSentinelIsUint64Max) {
+TEST(SystemUnit, KFD_TOPOLOGY__InvalidNumaNodeWeightSentinelIsUint64Max) {
   EXPECT_EQ(amd::smi::kInvalidNumaNodeWeight, UINT64_MAX);
 }
 
-// Node 0 has a single XGMI io_link to node 1, another GPU (gpu_id != 0); No
-// CPU node in topology
-TEST(SystemUnit, KfdNodeInitializeSentinelsWhenNoCpuIoLink) {
-  ScopedTempDir root;
-  ASSERT_FALSE(root.path().empty());
-  ScopedKfdRootOverride kfd_root_override(root.path().string());
+// Node A has an XGMI io_link to node B and no link to a CPU node; node B has no links at all.
+TEST(SystemUnit, KFD_TOPOLOGY__KfdNodeInitializeSentinelsWhenNoCpuIoLink) {
+  constexpr uint32_t kNodeA = 0;
+  constexpr uint32_t kNodeB = 1;
+  constexpr uint32_t kCardA = 1;
+  constexpr uint32_t kCardB = 0;
+  constexpr uint32_t kLinkIndex = 0;
+  constexpr uint64_t kGpuIdA = 12345;
+  constexpr uint64_t kGpuIdB = 999;
+  constexpr uint64_t kXgmiWeight = 15;
 
-  WriteGpuId(root.path(), 0, 12345);
-  WriteNodeProperties(root.path(), 0);
-  WriteIoLink(root.path(), 0, 0, /*node_to=*/1, amd::smi::IOLINK_TYPE_XGMI, /*weight=*/15);
-  WriteGpuId(root.path(), 1, 999);  // peer GPU, not a CPU node
+  FakeSysfsTree tree;
+  WriteGpuNode(tree, kNodeA, kCardA, kGpuIdA);
+  WriteIoLink(tree, kNodeA, kLinkIndex, kNodeB, amd::smi::IOLINK_TYPE_XGMI, kXgmiWeight);
+  WriteGpuNode(tree, kNodeB, kCardB, kGpuIdB);
+  FakeKfdTopology topology(tree);
 
-  amd::smi::KFDNode node(0);
-  ASSERT_EQ(node.Initialize(), 0);
+  uint32_t numa_node = 0;
+  EXPECT_EQ(CallNumaNodeNumber(topology, kNodeA, &numa_node, AMDSMI_STATUS_NOT_SUPPORTED),
+            AMDSMI_STATUS_NOT_SUPPORTED);
 
-  EXPECT_EQ(node.numa_node_number(), amd::smi::kInvalidNumaNode);
-  EXPECT_EQ(node.numa_node_weight(), amd::smi::kInvalidNumaNodeWeight);
-  EXPECT_EQ(node.numa_node_type(), amd::smi::IOLINK_TYPE_UNDEFINED);
+  // B has no direct link to A and no CPU link to route through, so there is no weight to report.
+  uint64_t weight = 0;
+  EXPECT_EQ(CallLinkWeight(topology, kNodeB, kNodeA, &weight, AMDSMI_STATUS_NOT_SUPPORTED),
+            AMDSMI_STATUS_NOT_SUPPORTED);
 }
 
-// Node 2 has XGMI link to GPU node 3 and PCIe link to CPU node 4 (gpu_id == 0).
-// Getters must reflect the discovered CPU node, not the sentinels.
-TEST(SystemUnit, KfdNodeInitializeFindsCpuIoLink) {
-  ScopedTempDir root;
-  ASSERT_FALSE(root.path().empty());
-  ScopedKfdRootOverride kfd_root_override(root.path().string());
+// Nodes A and B each have a PCIe io_link to the same CPU node and no link to each other.
+// The NUMA node must be the CPU node, and a weight between the GPUs is the sum of their CPU links.
+TEST(SystemUnit, KFD_TOPOLOGY__KfdNodeInitializeFindsCpuIoLink) {
+  constexpr uint32_t kNodeA = 2;
+  constexpr uint32_t kNodeB = 3;
+  constexpr uint32_t kCardA = 0;
+  constexpr uint32_t kCardB = 1;
+  constexpr uint32_t kCpuNode = 4;
+  constexpr uint32_t kLinkIndex = 0;
+  constexpr uint64_t kGpuIdA = 23456;
+  constexpr uint64_t kGpuIdB = 34567;
+  constexpr uint64_t kPcieWeightA = 20;
+  constexpr uint64_t kPcieWeightB = 30;
 
-  WriteGpuId(root.path(), 2, 23456);
-  WriteNodeProperties(root.path(), 2);
-  WriteIoLink(root.path(), 2, 0, /*node_to=*/3, amd::smi::IOLINK_TYPE_XGMI, /*weight=*/15);
-  WriteIoLink(root.path(), 2, 1, /*node_to=*/4, amd::smi::IOLINK_TYPE_PCIEXPRESS, /*weight=*/20);
-  WriteGpuId(root.path(), 3, 34567);  // peer GPU
-  WriteGpuId(root.path(), 4, 0);      // CPU node
+  FakeSysfsTree tree;
+  WriteGpuNode(tree, kNodeA, kCardA, kGpuIdA);
+  WriteIoLink(tree, kNodeA, kLinkIndex, kCpuNode, amd::smi::IOLINK_TYPE_PCIEXPRESS, kPcieWeightA);
+  WriteGpuNode(tree, kNodeB, kCardB, kGpuIdB);
+  WriteIoLink(tree, kNodeB, kLinkIndex, kCpuNode, amd::smi::IOLINK_TYPE_PCIEXPRESS, kPcieWeightB);
+  WriteCpuNode(tree, kCpuNode);
+  FakeKfdTopology topology(tree);
 
-  amd::smi::KFDNode node(2);
-  ASSERT_EQ(node.Initialize(), 0);
+  uint32_t numa_node = 0;
+  EXPECT_EQ(CallNumaNodeNumber(topology, kNodeA, &numa_node, AMDSMI_STATUS_SUCCESS),
+            AMDSMI_STATUS_SUCCESS);
+  EXPECT_EQ(numa_node, kCpuNode);
 
-  EXPECT_EQ(node.numa_node_number(), 4u);
-  EXPECT_EQ(node.numa_node_weight(), 20u);
-  EXPECT_EQ(node.numa_node_type(), amd::smi::IOLINK_TYPE_PCIEXPRESS);
+  uint64_t weight = 0;
+  EXPECT_EQ(CallLinkWeight(topology, kNodeA, kNodeB, &weight, AMDSMI_STATUS_SUCCESS),
+            AMDSMI_STATUS_SUCCESS);
+  EXPECT_EQ(weight, kPcieWeightA + kPcieWeightB);
+}
+
+// The KFD gpu_id and node index come from the overridden topology root.
+TEST(SystemUnit, KFD_TOPOLOGY__KfdInfoUsesOverride) {
+  constexpr uint32_t kNodeIndex = 5;
+  constexpr uint32_t kCardIndex = 2;
+  constexpr uint64_t kGpuId = 4242;
+
+  FakeSysfsTree tree;
+  WriteGpuNode(tree, kNodeIndex, kCardIndex, kGpuId);
+  FakeKfdTopology topology(tree);
+
+  amdsmi_kfd_info_t info{};
+  ASSERT_EQ(CallKfdInfo(topology, kNodeIndex, &info), AMDSMI_STATUS_SUCCESS);
+  EXPECT_EQ(info.kfd_id, kGpuId);
+  EXPECT_EQ(info.node_id, kNodeIndex);
 }
 
 }  // namespace

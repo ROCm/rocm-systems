@@ -28,6 +28,7 @@
 #include <string>
 #include <vector>
 
+#include "amd_smi/impl/amd_smi_test_overrides.h"
 #include "rocm_smi/rocm_smi.h"
 #include "rocm_smi/rocm_smi_device.h"
 #include "rocm_smi/rocm_smi_exception.h"
@@ -577,7 +578,7 @@ rsmi_status_t storeTmpFile(uint32_t dv_ind, std::string parameterName, std::stri
     return RSMI_STATUS_SUCCESS;
   }
   // template for our file
-  std::string fullTempFilePath = "/tmp/" + fullFileName + ".XXXXXX";
+  std::string fullTempFilePath = test_hooks::AppTmpDir() + "/" + fullFileName + ".XXXXXX";
   char* fileName = fullTempFilePath.data();
   int fd = mkstemp(fileName);
   if (fd == -1) {
@@ -594,7 +595,7 @@ rsmi_status_t storeTmpFile(uint32_t dv_ind, std::string parameterName, std::stri
 }
 
 std::vector<std::string> getListOfAppTmpFiles() {
-  std::string path = "/tmp";
+  std::string path = test_hooks::AppTmpDir();
   DIR* dir;
   struct dirent* ent;
   std::vector<std::string> tmpFiles;
