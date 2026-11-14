@@ -106,6 +106,87 @@ rocprofiler_add_unit_test(
         "LD_LIBRARY_PATH=${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}:${CMAKE_LIBRARY_OUTPUT_DIRECTORY}:${CMAKE_INSTALL_PREFIX}/lib:${ROCM_PATH}/lib:$ENV{LD_LIBRARY_PATH}"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
 
+# The tile arithmetic the blit kernels share with the host, checked without a GPU.
+add_executable(kernel-replay-blit-copy-test)
+target_sources(kernel-replay-blit-copy-test PRIVATE blit_copy.cpp)
+
+target_link_libraries(
+    kernel-replay-blit-copy-test
+    PRIVATE rocprofiler-sdk::rocprofiler-sdk-common-library
+            rocprofiler-sdk::rocprofiler-sdk-static-library GTest::gtest
+            GTest::gtest_main)
+
+rocprofiler_add_unit_test(
+    TARGET kernel-replay-blit-copy-test
+    SOURCES blit_copy.cpp
+    TIMEOUT 60
+    ENVIRONMENT
+        "LD_LIBRARY_PATH=${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}:${CMAKE_LIBRARY_OUTPUT_DIRECTORY}:${CMAKE_INSTALL_PREFIX}/lib:${ROCM_PATH}/lib:$ENV{LD_LIBRARY_PATH}"
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+
+# How replays choose between full and hashed restores, checked without a GPU.
+add_executable(kernel-replay-restore-policy-test)
+target_sources(kernel-replay-restore-policy-test PRIVATE restore_policy.cpp)
+
+target_link_libraries(
+    kernel-replay-restore-policy-test
+    PRIVATE rocprofiler-sdk::rocprofiler-sdk-common-library
+            rocprofiler-sdk::rocprofiler-sdk-static-library GTest::gtest
+            GTest::gtest_main)
+
+rocprofiler_add_unit_test(
+    TARGET kernel-replay-restore-policy-test
+    SOURCES restore_policy.cpp
+    TIMEOUT 60
+    ENVIRONMENT
+        "LD_LIBRARY_PATH=${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}:${CMAKE_LIBRARY_OUTPUT_DIRECTORY}:${CMAKE_INSTALL_PREFIX}/lib:${ROCM_PATH}/lib:$ENV{LD_LIBRARY_PATH}"
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+
+# Runs the blit's code object on the first GPU through raw AQL dispatches, as the SDK
+# does, and checks every layout byte for byte, and the digests and changed tiles the
+# restore kernels find. It only needs HSA, and skips without a GPU or a code object for
+# it. It does not link the SDK, so the SDK cannot intercept its queue.
+add_executable(kernel-replay-blit-kernels-test)
+target_sources(kernel-replay-blit-kernels-test PRIVATE blit_kernels.cpp)
+target_include_directories(kernel-replay-blit-kernels-test
+                           PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../../../..)
+target_compile_definitions(
+    kernel-replay-blit-kernels-test
+    PRIVATE KERNEL_REPLAY_BLIT_CODE_OBJECT_DIR="${CMAKE_CURRENT_BINARY_DIR}/..")
+target_link_libraries(
+    kernel-replay-blit-kernels-test PRIVATE rocprofiler-sdk::rocprofiler-sdk-hsa-runtime
+                                            GTest::gtest GTest::gtest_main)
+add_dependencies(kernel-replay-blit-kernels-test kernel-replay-blit-code-objects)
+
+rocprofiler_add_unit_test(
+    TARGET kernel-replay-blit-kernels-test
+    SOURCES blit_kernels.cpp
+    TIMEOUT 120
+    ENVIRONMENT
+        "LD_LIBRARY_PATH=${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}:${CMAKE_LIBRARY_OUTPUT_DIRECTORY}:${CMAKE_INSTALL_PREFIX}/lib:${ROCM_PATH}/lib:$ENV{LD_LIBRARY_PATH}"
+        RESOURCE_LOCK
+        "rocprofiler_kernel_replay"
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+
+# Planning, variadic fallback, commit/rollback, and backing allocator composition are
+# deliberately GPU-independent.
+add_executable(kernel-replay-snapshot-storage-test)
+target_sources(kernel-replay-snapshot-storage-test PRIVATE snapshot_storage.cpp)
+
+target_link_libraries(
+    kernel-replay-snapshot-storage-test
+    PRIVATE rocprofiler-sdk::rocprofiler-sdk-common-library
+            rocprofiler-sdk::rocprofiler-sdk-static-library GTest::gtest
+            GTest::gtest_main)
+
+rocprofiler_add_unit_test(
+    TARGET kernel-replay-snapshot-storage-test
+    SOURCES snapshot_storage.cpp
+    TIMEOUT 60
+    ENVIRONMENT
+        "LD_LIBRARY_PATH=${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}:${CMAKE_LIBRARY_OUTPUT_DIRECTORY}:${CMAKE_INSTALL_PREFIX}/lib:${ROCM_PATH}/lib:$ENV{LD_LIBRARY_PATH}"
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+
 # Layout and C/C++ agreement checks for the public kernel-replay header. These are
 # properties of the header alone: no GPU, no HSA, and no link against the SDK, so the test
 # runs anywhere.

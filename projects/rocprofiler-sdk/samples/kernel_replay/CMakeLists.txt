@@ -131,3 +131,15 @@ add_kernel_replay_sample(kernel-replay-services-last service_sequence_client.cpp
                          PC_SAMPLING SPM ATT ENVIRONMENT "KR_SERVICE_ORDER=services-last")
 add_kernel_replay_sample(kernel-replay-opt-out opt_out_client.cpp)
 add_kernel_replay_sample(kernel-replay-early-exit early_exit_client.cpp)
+
+# The same samples with hashed restores forced: their snapshots are far too small for the
+# automatic choice to hash.
+add_kernel_replay_sample(kernel-replay-basic-hash-once basic_client.cpp ENVIRONMENT
+                         "ROCPROFILER_INTERNAL_REPLAY_RESTORE_FORCE_MODE=hash-once")
+add_kernel_replay_sample(kernel-replay-basic-hash-every-pass basic_client.cpp ENVIRONMENT
+                         "ROCPROFILER_INTERNAL_REPLAY_RESTORE_FORCE_MODE=hash-every-pass")
+add_kernel_replay_sample(kernel-replay-counters-hash-once counters_client.cpp ENVIRONMENT
+                         "ROCPROFILER_INTERNAL_REPLAY_RESTORE_FORCE_MODE=hash-once")
+add_kernel_replay_sample(
+    kernel-replay-early-exit-hash-once early_exit_client.cpp ENVIRONMENT
+    "ROCPROFILER_INTERNAL_REPLAY_RESTORE_FORCE_MODE=hash-once")

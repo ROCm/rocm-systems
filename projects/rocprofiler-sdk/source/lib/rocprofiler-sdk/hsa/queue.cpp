@@ -40,9 +40,11 @@
 #include "lib/rocprofiler-sdk/hsa/signal_pool.hpp"
 #include "lib/rocprofiler-sdk/kernel_dispatch/profiling_time.hpp"
 #include "lib/rocprofiler-sdk/kernel_dispatch/tracing.hpp"
+#include "lib/rocprofiler-sdk/kernel_replay/blit-copy.hpp"
 #include "lib/rocprofiler-sdk/kernel_replay/local_context.hpp"
 #include "lib/rocprofiler-sdk/kernel_replay/memory_snapshot.hpp"
 #include "lib/rocprofiler-sdk/kernel_replay/replay_callbacks.hpp"
+#include "lib/rocprofiler-sdk/kernel_replay/restore_policy.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/hsa_adapter.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/queue_hooks.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/service.hpp"
@@ -1184,17 +1186,62 @@ WriteInterceptor(const void* packets,
             // amd-vkale).
             replay_drain_agent_or_fatal(replay_agent);
 
+            const auto gpu_backend_available =
+                kernel_replay::blit::prepare(queue) == HSA_STATUS_SUCCESS;
+            if(!gpu_backend_available)
+                LOG_FIRST_N(WARNING, 1) << "kernel replay: internal blit kernel unavailable; "
+                                           "trying pinned-host snapshot backing";
+
+            // Whether to hash between passes is decided before the capture, which keeps the
+            // digests for it, and settled once the snapshot's size is known.
+            namespace restore_policy = kernel_replay::restore_policy;
+            const auto restore_key   = restore_policy::kernel_key_t{
+                replay_agent.handle, dispatch_pkt.kernel_dispatch.kernel_object};
+            auto restore_inputs =
+                restore_policy::inputs_t{restore_policy::requested_mode(),
+                                         replay_plan.indefinite ? 0 : replay_plan.total_passes,
+                                         restore_policy::history_of(restore_key)};
+            const auto want_digests =
+                gpu_backend_available && restore_policy::may_hash(restore_inputs);
+
+            // snap() holds the inventory read lock while this runs, so the blit must complete
+            // before it returns.
+            const auto capture_copy = [&](const auto& regions) {
+                auto pending = std::vector<kernel_replay::blit::packet_info>{};
+                auto status =
+                    kernel_replay::blit::capture(queue, writer, regions, want_digests, pending);
+                if(status != HSA_STATUS_SUCCESS || pending.empty()) return status;
+                return pending.back().wait();
+            };
+
+            // The capture keeps its tile list for the restores, and copies nothing when there is
+            // nothing to capture. Forget an older capture's list first, so this replay never
+            // restores from it.
+            if(gpu_backend_available) kernel_replay::blit::forget_kept_list(queue);
+
             // Save this agent's tracked device allocations so every pass runs against identical
-            // inputs. snap() returns ok=false if it could not capture the complete set (host memory
-            // pressure, a failed copy, or module-scope variables it could not enumerate). It logs
-            // which of those it hit.
-            const auto snapshot = kernel_replay::memory_snapshot::snap(replay_agent);
+            // inputs. Place them against the GPU budget, then pinned host for what does not fit,
+            // cutting the region at the boundary, and materialize at most one arena per tier before
+            // capture starts. The blit copies both tiers; without it, the pinned tier is copied
+            // synchronously.
+            const auto snapshot = kernel_replay::memory_snapshot::snap(
+                kernel_replay::memory_snapshot::capture_context_t{
+                    replay_agent,
+                    queue.get_agent().near_cpu(),
+                    queue.get_agent().gpu_pool(),
+                    queue.get_agent().cpu_pool(),
+                    kernel_replay::memory_snapshot::capture_mode::automatic,
+                    gpu_backend_available,
+                },
+                gpu_backend_available
+                    ? kernel_replay::memory_snapshot::batch_copy_fn_t{capture_copy}
+                    : kernel_replay::memory_snapshot::batch_copy_fn_t{});
 
             // Snapshot incomplete: restoring a partial snapshot between passes would corrupt
             // application data, so decline replay. Close the CONFIG sequence, free our drain
             // signal, and run this dispatch once still under the writer lock with its original
             // completion signal, then return.
-            if(!snapshot.ok)
+            if(!snapshot.complete())
             {
                 LOG_FIRST_N(WARNING, 1) << "kernel replay: snapshot capture incomplete; running "
                                            "this dispatch once without replay";
@@ -1221,8 +1268,52 @@ WriteInterceptor(const void* packets,
             auto local_ctx_tls_guard =
                 kernel_replay::scoped_local_context_control{context::get_active_contexts()};
 
-            // Per-pass loop: PASS enter -> submit -> drain the async handler -> PASS exit -> ask
-            // the tool whether to continue -> restore device memory before the next pass.
+            restore_inputs.gpu_bytes =
+                snapshot.stored_bytes(kernel_replay::memory_snapshot::storage_kind::gpu_local);
+            restore_inputs.pinned_bytes =
+                snapshot.stored_bytes(kernel_replay::memory_snapshot::storage_kind::pinned_host);
+            const auto has_digests =
+                gpu_backend_available && kernel_replay::blit::has_digests(queue);
+            auto restore_mode    = has_digests ? restore_policy::choose(restore_inputs)
+                                               : restore_policy::restore_mode::full;
+            auto hashed_restores = uint32_t{0};
+            auto listed_restores = uint32_t{0};
+            ROCP_INFO << fmt::format(
+                "kernel replay: {} restores for {}B in GPU memory and {}B in pinned memory",
+                restore_policy::name_of(restore_mode),
+                restore_inputs.gpu_bytes,
+                restore_inputs.pinned_bytes);
+
+            auto restore_packets = std::vector<kernel_replay::blit::packet_info>{};
+
+            auto submit_and_drain_pass = [&]() {
+                process_packet_batch(packets_arr,
+                                     1,
+                                     forward_to_writer,
+                                     /*is_replay_pass=*/true,
+                                     replay_dispatch_id);
+
+                // Drain this pass's async handler (separate HSA thread: reads counters, emits
+                // records, releases signals/corr-id refs) before PASS EXIT / continue-decision /
+                // next submit, else we race its record delivery and reuse buffers and signals it
+                // still holds. This also implies GPU drain. Exactly one handler is in flight per
+                // pass (we drain before each submit, under the agent writer lock).
+                ROCP_FATAL_IF(queue.active_async_packets() > 1)
+                    << fmt::format("kernel replay: more than one async handler in flight during "
+                                   "a replay pass");
+                replay_drain_or_fatal(queue);
+
+                // The target kernel was queued behind the restore dependency barrier. Its
+                // completion proves the blit also completed, so the packet can be retired without
+                // another wait.
+                for(auto& restore : restore_packets)
+                    ROCP_FATAL_IF(restore.retire() != HSA_STATUS_SUCCESS)
+                        << "kernel replay: asynchronous restore blit failed";
+                restore_packets.clear();
+            };
+
+            // Per-pass loop: PASS enter -> optional restore -> submit -> drain the async handler ->
+            // PASS exit -> ask the tool whether to continue.
             for(uint64_t pass = 0;; ++pass)
             {
                 const bool is_final =
@@ -1232,20 +1323,77 @@ WriteInterceptor(const void* packets,
                 kernel_replay::execute_pass_phase_enter(
                     replay_plan, pass, thr_id, internal_corr_id, ancestor_corr_id, pass_state);
 
-                process_packet_batch(packets_arr,
-                                     1,
-                                     forward_to_writer,
-                                     /*is_replay_pass=*/true,
-                                     replay_dispatch_id);
+                if(pass == 0)
+                {
+                    submit_and_drain_pass();
+                }
+                else
+                {
+                    // Both restores run their callback under the inventory read lock. Submit the
+                    // target directly behind the blit and drain it before returning, so the lock
+                    // remains held until both packets complete. While every captured region is
+                    // still allocated, a restore works from the capture's tile list.
+                    auto restored = false;
+                    if(gpu_backend_available && kernel_replay::blit::has_kept_list(queue))
+                    {
+                        const auto status =
+                            kernel_replay::memory_snapshot::with_captured_regions(snapshot, [&]() {
+                                auto blit_status = HSA_STATUS_SUCCESS;
+                                if(restore_mode == restore_policy::restore_mode::full)
+                                {
+                                    blit_status = kernel_replay::blit::restore_all(
+                                        queue, writer, restore_packets);
+                                }
+                                else if(restore_mode ==
+                                            restore_policy::restore_mode::hash_every_pass ||
+                                        hashed_restores == 0)
+                                {
+                                    blit_status = kernel_replay::blit::restore_changed(
+                                        queue, writer, restore_packets);
+                                    ++hashed_restores;
+                                }
+                                else
+                                {
+                                    blit_status = kernel_replay::blit::restore_listed(
+                                        queue, writer, restore_packets);
+                                    ++listed_restores;
+                                }
+                                if(blit_status != HSA_STATUS_SUCCESS) return blit_status;
 
-                // Drain this pass's async handler (separate HSA thread: reads counters, emits
-                // records, releases signals/corr-id refs) before PASS EXIT / continue-decision /
-                // restore() / next submit, else we race its record delivery and reuse buffers and
-                // signals it still holds. This also implies GPU drain. Exactly one handler is in
-                // flight per pass (we drain before each submit, under the agent writer lock).
-                ROCP_FATAL_IF(queue.active_async_packets() > 1) << fmt::format(
-                    "kernel replay: more than one async handler in flight during a replay pass");
-                replay_drain_or_fatal(queue);
+                                submit_and_drain_pass();
+                                return HSA_STATUS_SUCCESS;
+                            });
+                        restored = status.has_value();
+                        ROCP_FATAL_IF(restored && *status != HSA_STATUS_SUCCESS)
+                            << "kernel replay: restore failed between passes. Aborting rather "
+                               "than continuing with corrupted device memory";
+                        // After a region is freed, the capture's tile list still points into it,
+                        // so the rest of this replay rebuilds the list from the live regions.
+                        if(!restored)
+                        {
+                            kernel_replay::blit::forget_kept_list(queue);
+                            restore_mode = restore_policy::restore_mode::full;
+                        }
+                    }
+
+                    if(!restored)
+                    {
+                        const auto batch_copy = [&](const auto& regions) {
+                            auto status =
+                                kernel_replay::blit::copy(queue, writer, regions, restore_packets);
+                            if(status != HSA_STATUS_SUCCESS) return status;
+
+                            submit_and_drain_pass();
+                            return HSA_STATUS_SUCCESS;
+                        };
+                        ROCP_FATAL_IF(
+                            !kernel_replay::memory_snapshot::restore(snapshot, batch_copy))
+                            << fmt::format(
+                                   "kernel replay: restore failed between passes (partial "
+                                   "host->device copy). Aborting rather than continuing with "
+                                   "corrupted device memory");
+                    }
+                }
 
                 kernel_replay::execute_pass_phase_exit(replay_plan, pass, pass_state);
 
@@ -1253,14 +1401,49 @@ WriteInterceptor(const void* packets,
                 // pass leaves device memory as the app expects, so no restore follows the break.
                 if(!kernel_replay::should_continue_replay(replay_plan, pass_state, pass, is_final))
                     break;
+            }
 
-                // Restore device memory between passes so the next pass sees identical inputs.
-                // A failed host->device copy leaves the snapshot only partially applied; continuing
-                // would submit the next pass over corrupted memory and (because the final pass
-                // skips restore) would also leave that corruption visible to the application.
-                ROCP_FATAL_IF(!kernel_replay::memory_snapshot::restore(snapshot)) << fmt::format(
-                    "kernel replay: restore failed between passes (partial host->device copy); "
-                    "aborting rather than continuing with corrupted device memory");
+            // Reusing a list assumed the kernel writes the same tiles every pass, so check the
+            // tiles off it once. What the restores found decides how this kernel's next dispatch
+            // restores.
+            if(restore_mode != restore_policy::restore_mode::full && hashed_restores > 0)
+            {
+                auto checked = (listed_restores == 0);
+                if(!checked)
+                {
+                    const auto status =
+                        kernel_replay::memory_snapshot::with_captured_regions(snapshot, [&]() {
+                            auto pending = std::vector<kernel_replay::blit::packet_info>{};
+                            auto check_status =
+                                kernel_replay::blit::check_unlisted(queue, writer, pending);
+                            if(check_status != HSA_STATUS_SUCCESS || pending.empty())
+                                return check_status;
+                            return pending.back().wait();
+                        });
+                    checked = status && *status == HSA_STATUS_SUCCESS;
+                }
+
+                auto counts = std::optional<kernel_replay::blit::digest_counts_t>{};
+                if(checked) counts = kernel_replay::blit::read_digest_counts(queue);
+                if(counts)
+                {
+                    restore_policy::record(
+                        restore_key, counts->tiles, counts->changed, counts->unlisted_changed);
+                    ROCP_INFO << fmt::format("kernel replay: {} of {} tiles changed by a pass",
+                                             counts->changed,
+                                             counts->tiles);
+                    if(counts->unlisted_changed > 0)
+                        ROCP_WARNING << fmt::format(
+                            "kernel replay: {} of {} tiles changed outside the list restored "
+                            "before each pass of kernel object {:#x}, so a pass may have started "
+                            "from modified memory{}",
+                            counts->unlisted_changed,
+                            counts->tiles,
+                            restore_key.kernel_object,
+                            restore_inputs.requested == restore_policy::restore_mode::automatic
+                                ? ". Its later dispatches restore everything."
+                                : "");
+                }
             }
 
             kernel_replay::execute_config_phase_exit(
