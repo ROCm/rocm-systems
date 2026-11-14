@@ -7,7 +7,7 @@
 
 #ifndef _NCCL_DEVICE_CORE_H_
 #define _NCCL_DEVICE_CORE_H_
-#include <cstddef>
+#include <stddef.h>
 #include <nccl.h>
 #include "coop.h"
 #include "utility.h"
