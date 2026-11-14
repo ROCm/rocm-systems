@@ -1,0 +1,39 @@
+name: RCCL gfx1250 guard lint
+
+# Fails if an RCCL preprocessor guard tests __gfx1250__ without also testing
+# __gfx1250_strict__, which would make gfx1250 and gfx1250 strict builds compile
+# different code paths. Stdlib-only Python; no dependencies to install.
+
+on:
+  pull_request:
+    branches:
+      - develop
+    paths:
+      - 'projects/rccl/src/**'
+      - 'projects/rccl/test/**'
+      - 'projects/rccl/tools/scripts/check_gfx1250_guards.py'
+      - '.github/workflows/rccl-gfx1250-guard-lint.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.number || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  gfx1250-guard-lint:
+    name: gfx1250 guard lint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Checkout RCCL sources
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: |
+            projects/rccl/src
+            projects/rccl/test
+            projects/rccl/tools/scripts
+
+      - name: Check gfx1250 guards
+        run: python3 projects/rccl/tools/scripts/check_gfx1250_guards.py
