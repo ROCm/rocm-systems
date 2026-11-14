@@ -1,0 +1,21 @@
+# Copyright Advanced Micro Devices, Inc. SPDX-License-Identifier: MIT
+
+# The smallest configuration the in-tree HIP tables generate with: none of
+# their parameters needs an annotation. The runtime's real configuration lives
+# with CLR.
+
+version: 1
+provider: rocm_hip
+output_name: hip_trace_probes
+includes:
+  - hip/hip_runtime.h
+  - hip/hip_deprecated.h
+  - hip/amd_detail/amd_hip_gl_interop.h
+  - hip/amd_detail/hip_api_trace.hpp
+tables:
+  - name: HipDispatchTable
+    size_member: size
+  - name: HipCompilerDispatchTable
+    size_member: size
+success:
+  hipError_t: hipSuccess
