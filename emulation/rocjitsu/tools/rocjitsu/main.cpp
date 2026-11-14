@@ -4,10 +4,13 @@
 /// @file main.cpp
 /// @brief rocjitsu CLI — launcher for GPU simulation via LD_PRELOAD interposition.
 ///
-/// @details Supports three usage patterns:
-///   rocjitsu --config foo.json -- ./app           (local mode: in-process simulation)
+/// @details Common usage patterns:
+///   rocjitsu [--profile mi350x] -- ./app          (local mode with bundled profile)
+///   rocjitsu --config foo.json -- ./app           (local mode with explicit config)
 ///   rocjitsu --daemon --config foo.json -- ./app  (daemon mode: fork daemon + launch app)
 ///   rocjitsu --daemon --config foo.json           (daemon-only: run daemon server)
+///   rocjitsu --attach -- ./app                    (attach to a running daemon)
+///   rocjitsu paths [--json]                       (show config/runtime paths)
 ///
 /// Builds configured with ROCJITSU_ENABLE_VFIO additionally support
 ///   rocjitsu --config foo.json --vfio-socket <path> [--vfio-socket <path> ...]
@@ -29,11 +32,13 @@
 #include "util/diagnostic.h"
 
 #include "embedded_schema.h"
+#include "json_output.h"
 #include "launch_flags.h"
 #include "launch_preload.h"
 #include "rocm_visibility.h"
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <cerrno>
 #include <charconv>
@@ -47,6 +52,7 @@
 #include <fstream>
 #include <iostream>
 #include <iterator>
+#include <memory>
 #include <optional>
 #include <poll.h>
 #include <stdexcept>
@@ -57,6 +63,18 @@
 #include <unistd.h>
 #include <utility>
 #include <vector>
+
+#ifndef RJ_SOURCE_CONFIG_DIR
+#define RJ_SOURCE_CONFIG_DIR ""
+#endif
+
+#ifndef RJ_INSTALL_CONFIG_DIR
+#define RJ_INSTALL_CONFIG_DIR ""
+#endif
+
+#ifndef RJ_INSTALL_CONFIG_RELDIR
+#define RJ_INSTALL_CONFIG_RELDIR ""
+#endif
 
 using namespace rocjitsu;
 namespace ucli = rocjitsu::cli;
@@ -197,6 +215,154 @@ std::string find_runtime_lib(std::string_view lib_name) {
 std::string find_interposer_lib() { return find_runtime_lib(RJ_INTERPOSER_LIB_NAME); }
 
 std::string find_hooks_lib() { return find_runtime_lib("librocjitsu_hooks.so"); }
+
+std::string ascii_lower(std::string_view text) {
+  std::string out;
+  out.reserve(text.size());
+  for (unsigned char c : text)
+    out.push_back(static_cast<char>(std::tolower(c)));
+  return out;
+}
+
+struct BuiltinProfile {
+  std::string_view name;
+  std::string_view config_stem;
+};
+
+constexpr std::string_view kDefaultProfile = "mi350x";
+
+constexpr std::array<BuiltinProfile, 8> kBuiltinProfiles = {{
+    {.name = "gfx1100_w7900", .config_stem = "gfx1100_w7900"},
+    {.name = "gfx1151", .config_stem = "gfx1151"},
+    {.name = "gfx1201_r9700", .config_stem = "gfx1201_r9700"},
+    {.name = "gfx1251_synthetic", .config_stem = "gfx1251_synthetic"},
+    {.name = "gfx90a_mi210_kmd", .config_stem = "gfx90a_mi210_kmd"},
+    {.name = "mi300x", .config_stem = "gfx942_cdna3"},
+    {.name = "mi350x", .config_stem = "gfx950_mi350x"},
+    {.name = "mi450x", .config_stem = "gfx1250_mi455x"},
+}};
+
+std::optional<std::string_view> builtin_profile_config_stem(std::string_view profile) {
+  const std::string normalized = ascii_lower(profile);
+  auto found = std::ranges::find_if(
+      kBuiltinProfiles, [&](const BuiltinProfile &entry) { return entry.name == normalized; });
+  if (found == kBuiltinProfiles.end())
+    return std::nullopt;
+  return found->config_stem;
+}
+
+std::string known_profile_names() {
+  std::string names;
+  for (const BuiltinProfile &profile : kBuiltinProfiles) {
+    if (!names.empty())
+      names += ", ";
+    names += profile.name;
+  }
+  return names;
+}
+
+void append_unique_path(std::vector<std::filesystem::path> &paths, std::filesystem::path path) {
+  if (path.empty())
+    return;
+  std::error_code error;
+  std::filesystem::path normalized = std::filesystem::weakly_canonical(path, error);
+  if (!error)
+    path = std::move(normalized);
+  if (std::ranges::none_of(paths, [&](const auto &existing) { return existing == path; }))
+    paths.push_back(std::move(path));
+}
+
+std::vector<std::filesystem::path> profile_config_search_dirs() {
+  std::vector<std::filesystem::path> dirs;
+  if (auto self = current_executable_path()) {
+    const std::filesystem::path bin_dir = self->parent_path();
+    constexpr std::string_view install_reldir = RJ_INSTALL_CONFIG_RELDIR;
+
+    if (!install_reldir.empty())
+      append_unique_path(dirs, bin_dir / ".." / std::string(install_reldir));
+    append_unique_path(dirs, bin_dir / ".." / "share" / "rocjitsu" / "configs");
+    append_unique_path(dirs, bin_dir / ".." / ".." / "configs");
+  }
+
+  append_unique_path(dirs, RJ_INSTALL_CONFIG_DIR);
+  append_unique_path(dirs, RJ_SOURCE_CONFIG_DIR);
+  std::error_code cwd_error;
+  if (std::filesystem::path cwd = std::filesystem::current_path(cwd_error); !cwd_error) {
+    append_unique_path(dirs, cwd / "emulation" / "rocjitsu" / "configs");
+    append_unique_path(dirs, cwd / "configs");
+  }
+  return dirs;
+}
+
+std::string path_list_for_error(const std::vector<std::filesystem::path> &paths) {
+  std::string out;
+  for (const auto &path : paths) {
+    if (!out.empty())
+      out += ", ";
+    out += path.string();
+  }
+  return out;
+}
+
+std::optional<std::filesystem::path> resolve_profile_config(std::string_view profile,
+                                                            std::string &error) {
+  const std::optional<std::string_view> stem = builtin_profile_config_stem(profile);
+  if (!stem) {
+    error = std::format("unknown profile '{}'; known profiles: {}", profile, known_profile_names());
+    return std::nullopt;
+  }
+
+  const std::filesystem::path filename = std::string(*stem) + ".json";
+  const std::vector<std::filesystem::path> dirs = profile_config_search_dirs();
+  for (const auto &dir : dirs) {
+    const std::filesystem::path candidate = dir / filename;
+    std::error_code exists_error;
+    if (!std::filesystem::exists(candidate, exists_error) || exists_error)
+      continue;
+    if (std::string canonical = canonical_existing_path(candidate); !canonical.empty())
+      return std::filesystem::path(std::move(canonical));
+    return candidate;
+  }
+
+  error = std::format("profile '{}' maps to {}, but that config was not found", profile,
+                      filename.string());
+  if (!dirs.empty())
+    error += std::format("; searched: {}", path_list_for_error(dirs));
+  return std::nullopt;
+}
+
+void print_paths(bool json) {
+  const std::vector<std::filesystem::path> config_dirs = profile_config_search_dirs();
+  const std::string runtime_dir = rpc_default_runtime_dir();
+  const std::string daemon_socket = rpc_default_socket_path();
+  const std::string config_handoff_path = rpc_default_config_file_path();
+
+  if (json) {
+    std::cout << "{\n";
+    std::cout << "  \"config_search_dirs\": [\n";
+    for (size_t i = 0; i < config_dirs.size(); ++i) {
+      std::cout << "    ";
+      rocjitsu::cli::write_json_string(std::cout, config_dirs[i].string());
+      if (i + 1 != config_dirs.size())
+        std::cout << ",";
+      std::cout << "\n";
+    }
+    std::cout << "  ],\n";
+    rocjitsu::cli::write_json_string_field(std::cout, "runtime_dir", runtime_dir);
+    rocjitsu::cli::write_json_string_field(std::cout, "daemon_socket", daemon_socket);
+    rocjitsu::cli::write_json_string_field(std::cout, "config_handoff_path", config_handoff_path,
+                                           false);
+    std::cout << "}\n";
+    return;
+  }
+
+  std::cout << "config_search_dirs:\n";
+  for (const auto &dir : config_dirs)
+    std::cout << "  " << dir.string() << "\n";
+  std::cout << "runtime_dir: " << runtime_dir << "\n";
+  std::cout << "daemon_socket: " << daemon_socket << "\n";
+  std::cout << "config_handoff_path: " << config_handoff_path << "\n";
+}
 
 void cleanup_runtime_files(pid_t pid) {
   std::error_code error;
@@ -394,10 +560,12 @@ dbt_execution_gpu_ordinals(const std::string &dbt_config_path,
 void print_usage(const ucli::Command &command) {
   std::cerr << ucli::format_help(command)
             << "\nApplication arguments must follow --. Examples:\n"
+               "  rocjitsu --profile mi350x -- ./app\n"
                "  rocjitsu --config foo.json -- ./app\n"
                "  rocjitsu --daemon --config foo.json -- ./app\n"
                "  rocjitsu --daemon --config foo.json\n"
-               "  rocjitsu --attach --config foo.json -- ./app\n"
+               "  rocjitsu --attach -- ./app\n"
+               "  rocjitsu paths --json\n"
                "  rocjitsu --config foo.json --vfio-socket /tmp/gpu.sock\n"
                "  rocjitsu --config foo.json --vfio-socket /tmp/gpu0.sock --vfio-socket "
                "/tmp/gpu1.sock\n"
@@ -413,14 +581,46 @@ void print_usage(const ucli::Command &command) {
 int main(int argc, char *argv[]) {
   std::signal(SIGPIPE, SIG_IGN);
 
+  auto report = [](std::string_view message) { std::cerr << message << '\n'; };
+  util::DiagnosticEmitter diagnostic(report);
+  std::vector<std::string_view> arguments(argv + 1, argv + argc);
+
+  if (!arguments.empty() && arguments.front() == "paths") {
+    ucli::Command paths_root{"rocjitsu"};
+    paths_root.set_positional_usage("");
+    auto maybe_paths_command = paths_root.add_command("paths", diagnostic);
+    if (maybe_paths_command.failed())
+      return 1;
+    ucli::Command *paths_command = maybe_paths_command.value();
+    paths_command->set_positional_usage("");
+    auto paths_json = std::make_shared<ucli::BoolFlag>(
+        ucli::FlagInfo{"--json", {}, "Print paths as JSON", ucli::ValueMode::Switch});
+    auto paths_help = std::make_shared<ucli::BoolFlag>(
+        ucli::FlagInfo{"--help", {"-h"}, "Show help", ucli::ValueMode::Switch});
+    if (paths_command->add_flags("Options", {paths_json, paths_help}, diagnostic).failed())
+      return 1;
+
+    auto parsed_paths = ucli::parse(paths_root, arguments, diagnostic);
+    if (parsed_paths.failed())
+      return 1;
+    if (paths_help->value()) {
+      std::cerr << ucli::format_help(*paths_command);
+      return 0;
+    }
+    if (!parsed_paths.value().positional.empty()) {
+      std::cerr << std::format("rocjitsu paths: unexpected argument '{}'\n",
+                               parsed_paths.value().positional.front());
+      return 1;
+    }
+    print_paths(paths_json->value());
+    return 0;
+  }
+
   ucli::Command command{"rocjitsu"};
   command.set_positional_usage("-- APP [ARGS...]");
   launcher::LaunchFlags flags;
-  auto report = [](std::string_view message) { std::cerr << message << '\n'; };
-  util::DiagnosticEmitter diagnostic(report);
   if (flags.register_flags(command, diagnostic).failed())
     return 1;
-  std::vector<std::string_view> arguments(argv + 1, argv + argc);
   auto parsed = ucli::parse(command, arguments, diagnostic);
   if (parsed.failed())
     return 1;
@@ -444,7 +644,18 @@ int main(int argc, char *argv[]) {
   }
 
   const char *config_path = flags.config->value().empty() ? nullptr : flags.config->value().c_str();
+  const std::string profile_name = flags.profile->value();
   const std::string local_node = flags.node->value();
+  auto rejects_known_flag_value = [&](std::string_view option, std::string_view value) -> bool {
+    if (value.empty() || !command.find_flag(value))
+      return false;
+    std::cerr << std::format("rocjitsu: {}: requires a value\n", option);
+    return true;
+  };
+  if (config_path && rejects_known_flag_value("--config", config_path))
+    return 1;
+  if (rejects_known_flag_value("--profile", profile_name))
+    return 1;
   std::vector<std::string> vfio_sockets = flags.vfio_socket->values();
   const bool thread_budget_table = flags.thread_budget_table->value();
   config::LaunchOverrides overrides;
@@ -469,15 +680,31 @@ int main(int argc, char *argv[]) {
     std::cerr << "rocjitsu: --fabric-effect-trace requires daemon or VFIO server mode\n";
     return 1;
   }
-
-  if (!config_path) {
-    std::cerr << "rocjitsu: --config is required\n";
-    print_usage(command);
+  if (config_path && !profile_name.empty()) {
+    std::cerr << "rocjitsu: --config and --profile cannot be combined\n";
+    return 1;
+  }
+  if (attach_mode && !profile_name.empty()) {
+    std::cerr << "rocjitsu: --profile cannot be combined with --attach\n";
     return 1;
   }
 
-  auto abs_config = std::filesystem::absolute(config_path).string();
-  if (!std::filesystem::exists(abs_config)) {
+  std::string abs_config;
+  if (config_path) {
+    abs_config = std::filesystem::absolute(config_path).string();
+  } else if (!attach_mode) {
+    const std::string_view selected_profile =
+        profile_name.empty() ? kDefaultProfile : std::string_view(profile_name);
+    std::string profile_error;
+    std::optional<std::filesystem::path> profile_config =
+        resolve_profile_config(selected_profile, profile_error);
+    if (!profile_config) {
+      std::cerr << std::format("rocjitsu: {}\n", profile_error);
+      return 1;
+    }
+    abs_config = std::filesystem::absolute(*profile_config).string();
+  }
+  if (!abs_config.empty() && !std::filesystem::exists(abs_config)) {
     std::cerr << std::format("rocjitsu: config file not found: {}\n", abs_config);
     return 1;
   }
@@ -627,20 +854,23 @@ int main(int argc, char *argv[]) {
   }
 
   rocjitsu::config::DbtGuestConfig dbt_guest_config;
-  try {
-    auto maybe_dbt_guest = rocjitsu::config::load_dbt_guest_config_from_file(
-        abs_config, launch_config_diagnostic.emitter());
-    if (maybe_dbt_guest.failed()) {
-      std::cerr << std::format("rocjitsu: failed to parse config: {}\n",
-                               launch_config_diagnostic.message());
+  bool dbt_guest_mode = false;
+  if (!abs_config.empty()) {
+    try {
+      auto maybe_dbt_guest = rocjitsu::config::load_dbt_guest_config_from_file(
+          abs_config, launch_config_diagnostic.emitter());
+      if (maybe_dbt_guest.failed()) {
+        std::cerr << std::format("rocjitsu: failed to parse config: {}\n",
+                                 launch_config_diagnostic.message());
+        return 1;
+      }
+      dbt_guest_config = std::move(maybe_dbt_guest.value());
+      dbt_guest_mode = dbt_guest_config.enabled;
+    } catch (const std::exception &e) {
+      std::cerr << std::format("rocjitsu: failed to parse config: {}\n", e.what());
       return 1;
     }
-    dbt_guest_config = std::move(maybe_dbt_guest.value());
-  } catch (const std::exception &e) {
-    std::cerr << std::format("rocjitsu: failed to parse config: {}\n", e.what());
-    return 1;
   }
-  const bool dbt_guest_mode = dbt_guest_config.enabled;
   if (dbt_guest_mode && (daemon_mode || attach_mode)) {
     std::cerr << "rocjitsu: dbt_guest mode currently supports local launch only\n";
     return 1;
@@ -670,7 +900,7 @@ int main(int argc, char *argv[]) {
   if (!write_config_for_this_launch())
     return 1;
 
-  if (!dbt_guest_mode) {
+  if (!dbt_guest_mode && !abs_config.empty()) {
     try {
       if (attach_mode) {
         auto graph = rocjitsu::config::load_system_graph(abs_config, rocjitsu::kEmbeddedSchema,
@@ -715,6 +945,14 @@ int main(int argc, char *argv[]) {
   application_arguments.push_back(nullptr);
   char **app_argv = application_arguments.data();
 
+  if (attach_mode) {
+    auto sock_path = rpc_default_socket_path();
+    if (!std::filesystem::exists(sock_path)) {
+      std::cerr << std::format("rocjitsu: no daemon socket at {}\n", sock_path);
+      return 1;
+    }
+  }
+
   auto lib_path = find_interposer_lib();
   if (lib_path.empty()) {
     std::cerr << "rocjitsu: could not find " << RJ_INTERPOSER_LIB_NAME << '\n';
@@ -756,13 +994,7 @@ int main(int argc, char *argv[]) {
   // is the last point that still knows.
   std::optional<pid_t> launched_daemon_pid;
 
-  if (attach_mode) {
-    auto sock_path = rpc_default_socket_path();
-    if (!std::filesystem::exists(sock_path)) {
-      std::cerr << std::format("rocjitsu: no daemon socket at {}\n", sock_path);
-      return 1;
-    }
-  } else if (daemon_mode) {
+  if (daemon_mode) {
     auto socket_path = rpc_invocation_socket_path(my_pid);
     std::error_code directory_error;
     std::filesystem::create_directories(rpc_invocation_runtime_dir(my_pid), directory_error);
