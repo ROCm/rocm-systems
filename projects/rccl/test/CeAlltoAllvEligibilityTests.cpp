@@ -572,6 +572,33 @@ TEST_F(CeHierAlltoAllvEligibilityTest, RequiresZeroCtaPolicy)
     EXPECT_TRUE(hierEligible());
 }
 
+// With NCCL_CROSS_NIC=0 init.cc sets rmaBaseStride to the ranks per host, so host
+// RMA reaches only same-rail peers. AlltoAll and AlltoAllv put to every remote rank
+// and must fall back; AllGather's rail puts stay eligible.
+TEST_F(CeHierAlltoAllvEligibilityTest, RailOnlyRmaRejectsAlltoAllvAndAlltoAll)
+{
+    if (!isCeRuntimeDriverSupported())
+        GTEST_SKIP() << "CE driver not in supported range";
+
+    mockComm_.comm.rmaBaseStride = mockComm_.comm.localRanks;
+    EXPECT_FALSE(hierEligible());
+    EXPECT_FALSE(ncclHierCeAvailable(mockComm_.get(),
+                                     ncclFuncAlltoAllv,
+                                     ncclDevSum,
+                                     ncclFloat32,
+                                     ncclSymSendRegRecvReg, nullptr, nullptr));
+    EXPECT_FALSE(ncclHierCeAvailable(mockComm_.get(),
+                                     ncclFuncAlltoAll,
+                                     ncclDevSum,
+                                     ncclFloat32,
+                                     ncclSymSendRegRecvReg, nullptr, nullptr));
+    EXPECT_TRUE(ncclHierCeAvailable(mockComm_.get(),
+                                    ncclFuncAllGather,
+                                    ncclDevSum,
+                                    ncclFloat32,
+                                    ncclSymSendRegRecvReg, nullptr, nullptr));
+}
+
 TEST_F(CeHierAlltoAllvEligibilityTest, RejectsSysmemSegmentOrCapture)
 {
     if (!isCeRuntimeDriverSupported())

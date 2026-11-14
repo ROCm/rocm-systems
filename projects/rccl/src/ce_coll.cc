@@ -1477,10 +1477,11 @@ bool ncclHierCeAvailable(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRe
     TRACE(NCCL_TUNING, "Skipping hierarchical CE collective: RMA proxy not available");
     return false;
   }
-  // Hierarchical CE AlltoAll talks to every rank, so it needs world connectivity.
-  if (coll == ncclFuncAlltoAll && comm->rmaBaseStride != 1) {
-    TRACE(NCCL_TUNING, "Skipping hierarchical CE AlltoAll: requires world connectivity (RMA base stride %d)",
-          comm->rmaBaseStride);
+  // Hierarchical CE AlltoAll and AlltoAllv put to every remote rank, so they need world connectivity.
+  // On a rail-only comm ncclRmaProxyPutBuildOp would reject the off-rail peers at launch.
+  if ((coll == ncclFuncAlltoAll || coll == ncclFuncAlltoAllv) && comm->rmaBaseStride != 1) {
+    TRACE(NCCL_TUNING, "Skipping hierarchical CE %s: requires world connectivity (RMA base stride %d)",
+          ncclFuncToString(coll), comm->rmaBaseStride);
     return false;
   }
   // Need registered windows for both send and recv buffers
