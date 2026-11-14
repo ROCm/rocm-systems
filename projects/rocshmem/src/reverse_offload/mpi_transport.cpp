@@ -337,6 +337,12 @@ static MPI_Datatype convertType(ro_net_types type) {
       return MPI_LONG_LONG;
     case RO_NET_SHORT:
       return MPI_SHORT;
+    case RO_NET_UNSIGNED_SHORT:
+      return MPI_UNSIGNED_SHORT;
+    case RO_NET_UNSIGNED_INT:
+      return MPI_UNSIGNED;
+    case RO_NET_UNSIGNED_LONG_LONG:
+      return MPI_UNSIGNED_LONG_LONG;
     case RO_NET_LONG_DOUBLE:
       return MPI_LONG_DOUBLE;
     case RO_NET_CHAR:
@@ -345,6 +351,9 @@ static MPI_Datatype convertType(ro_net_types type) {
       return MPI_SIGNED_CHAR;
     case RO_NET_UNSIGNED_CHAR:
       return MPI_UNSIGNED_CHAR;
+    case RO_NET_HALF:
+    case RO_NET_BFLOAT16:
+      LOG_ERROR_EXIT("proxy::mpi (half, bfloat) Type not supported with RO backend");
     default:
       LOG_ERROR_ABORT("proxy::mpi\tUnknown rocSHMEM type MPI conversion %d", type);
   }
