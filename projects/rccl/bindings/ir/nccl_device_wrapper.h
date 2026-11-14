@@ -60,10 +60,21 @@
 #include "nccl_device/utility.h"
 #undef NCCL_DEVICE_INLINE
 #undef NCCL_HOST_DEVICE_INLINE
+
+/* __NCCL_DEVICE_LTOIR_LIB__ modifies the bitcode-library build; coop.h LDS and NCCL_IR_EXPORT need __clang_llvm_bitcode_lib__. */
+#if defined(__NCCL_DEVICE_LTOIR_LIB__) && !defined(__clang_llvm_bitcode_lib__)
+#error "__NCCL_DEVICE_LTOIR_LIB__ must be defined together with __clang_llvm_bitcode_lib__, not instead of it. \
+Without __clang_llvm_bitcode_lib__: (1) coop.h falls back to a function-local LDS barrier array that the AMDGPU \
+group-segment sizing cannot see (lld 'local memory global used by non-kernel function', or HSA exception 0x1016 \
+at runtime), and (2) NCCL_IR_EXPORT drops `used, retain`, so opt's internalize pass has no @llvm.used root set \
+and internalizes the entire public API. Add -D__clang_llvm_bitcode_lib__ to the LTO IR compile line."
+#endif
+
 #if defined(__CUDACC__) || defined(__HIPCC__)
 #if defined(__NCCL_DEVICE_LTOIR_LIB__)
-#define NCCL_DEVICE_INLINE __device__ __inline_hint__
-#define NCCL_HOST_DEVICE_INLINE __host__ __device__ __inline_hint__
+/* No __inline_hint__ on AMDGPU; deferral comes from -disable-llvm-passes (see bindings/ir/Makefile). */
+#define NCCL_DEVICE_INLINE __device__
+#define NCCL_HOST_DEVICE_INLINE __host__ __device__
 #elif defined(__clang_llvm_bitcode_lib__)
 #define NCCL_DEVICE_INLINE __device__ __attribute__((always_inline))
 #define NCCL_HOST_DEVICE_INLINE __host__ __device__ __attribute__((always_inline))

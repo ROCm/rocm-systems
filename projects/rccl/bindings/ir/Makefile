@@ -16,6 +16,7 @@
 # Usage (standalone, from projects/rccl/bindings/ir):
 #     make EMIT_LLVM_IR=1 BITCODE_LIB_ARCH=gfx942
 #     make EMIT_LLVM_IR=1 RCCL_ROOT=/path/to/projects/rccl BUILDDIR=/path/to/build
+#     make EMIT_LLVM_IR=0 NCCL_EMIT_LTO_IR=1 LTO_IR_ARCH=gfx942 ltoir
 #
 # Prerequisites:
 #   - ROCm LLVM toolchain (clang++, opt, llvm-dis, llvm-as) under
@@ -25,7 +26,11 @@
 #     Example: cmake --build $(BUILDDIR) --target hipify_all
 #
 
-ifneq ($(EMIT_LLVM_IR), 0)
+# Shared by llvm_ir and ltoir; kept outside the EMIT_LLVM_IR guard.
+
+##### Knob defaults #####
+# EMIT_LLVM_IR has no default (standalone `make llvm_ir` works unset); LTO IR is opt-in.
+NCCL_EMIT_LTO_IR ?= 0
 
 ##### Source #####
 LLVM_SRC := nccl_device_wrapper__impl.h
@@ -58,11 +63,11 @@ BITCODE_LIB_ARCH ?= gfx950
 # RCCL device APIs are C++17.
 BITCODE_CXX_STD  ?= gnu++17
 
-##### Output files #####
-UNOPTIMIZED_BC := $(OBJDIR)/librccl_device.bc.unoptimized
-OPTIMIZED_BC   := $(OBJDIR)/librccl_device.bc.optimized
-LLVM_IR_FILE   := $(OBJDIR)/librccl_device.ll
+##### Final artifacts #####
+# Defined unconditionally so `clean` removes them whatever the knobs are
+# set to. The intermediates live under OBJDIR, which clean removes wholesale.
 FINAL_BC       := $(LIBDIR)/librccl_device.bc
+FINAL_LTO_IR   := $(LIBDIR)/librccl_device.ltoir
 
 WRAPPER_HEADER := $(INCDIR)/nccl_device_wrapper.h
 
@@ -81,6 +86,34 @@ RCCL_INCLUDES := \
 
 ROCM_INCLUDES := \
 	-I$(ROCM_PATH)/include
+
+##### Preflight #####
+.PHONY: check_hipify
+check_hipify:
+	@if [ ! -d "$(HIPIFY_INC)" ]; then \
+		echo "ERROR: hipify staging directory not found: $(HIPIFY_INC)" >&2; \
+		echo "Run the RCCL CMake build first to populate it, e.g.:" >&2; \
+		echo "  cmake -B $(BUILDDIR) -DEMIT_LLVM_IR=ON $(RCCL_ROOT)" >&2; \
+		echo "  cmake --build $(BUILDDIR) --target hipify_all" >&2; \
+		exit 1; \
+	fi
+
+##### Public wrapper header (shared by both artifacts) #####
+$(WRAPPER_HEADER): nccl_device_wrapper.h
+	@mkdir -p $(INCDIR)
+	@echo "Copying nccl_device_wrapper.h -> $@"
+	cp -f $< $@
+
+##########################################################################
+# llvm_ir: librccl_device.bc
+##########################################################################
+
+ifneq ($(EMIT_LLVM_IR), 0)
+
+##### Output files #####
+UNOPTIMIZED_BC := $(OBJDIR)/librccl_device.bc.unoptimized
+OPTIMIZED_BC   := $(OBJDIR)/librccl_device.bc.optimized
+LLVM_IR_FILE   := $(OBJDIR)/librccl_device.ll
 
 ##### Compiler flags #####
 # HIP device-only compilation. --offload-device-only is the modern
@@ -120,23 +153,7 @@ RCCL_DEVICE_BC_PUBLIC_API := ncclGetPeerPointerTeam,ncclCoopAnyInitThread,ncclCo
 OPT_PASSES := --passes=internalize,inline,globaldce \
 	-internalize-public-api-list=$(RCCL_DEVICE_BC_PUBLIC_API)
 
-##### Preflight #####
-.PHONY: check_hipify
-check_hipify:
-	@if [ ! -d "$(HIPIFY_INC)" ]; then \
-		echo "ERROR: hipify staging directory not found: $(HIPIFY_INC)" >&2; \
-		echo "Run the RCCL CMake build first to populate it, e.g.:" >&2; \
-		echo "  cmake -B $(BUILDDIR) -DEMIT_LLVM_IR=ON $(RCCL_ROOT)" >&2; \
-		echo "  cmake --build $(BUILDDIR) --target hipify_all" >&2; \
-		exit 1; \
-	fi
-
 ##### Rules #####
-$(WRAPPER_HEADER): nccl_device_wrapper.h
-	@mkdir -p $(INCDIR)
-	@echo "Copying nccl_device_wrapper.h -> $@"
-	cp -f $< $@
-
 $(UNOPTIMIZED_BC): $(LLVM_SRC) $(WRAPPER_HEADER) util.h check_hipify
 	@mkdir -p $(OBJDIR)
 	@echo "Generating unoptimized LLVM bitcode for $(BITCODE_LIB_ARCH)..."
@@ -175,9 +192,81 @@ llvm_ir:
 
 endif
 
-build: llvm_ir
+# ltoir: librccl_device.ltoir, RCCL's analogue of NCCL's deferred-inlining libnccl_device.ltoir.
+
+ifneq ($(NCCL_EMIT_LTO_IR), 0)
+
+# Mirror NCCL's variable names. NCCL defaults LTO_IR_ARCH to
+# BITCODE_LIB_ARCH; it uses a different C++ std for the two artifacts
+# (gnu++17 for the .bc, c++17 for the .ltoir), but RCCL has no reason to
+# diverge the two, so this defaults to the same std as the .bc.
+LTO_IR_ARCH    ?= $(BITCODE_LIB_ARCH)
+LTO_IR_CXX_STD ?= $(BITCODE_CXX_STD)
+
+LTO_IR_RAW := $(OBJDIR)/librccl_device.ltoir.raw
+
+##### Compiler flags #####
+# AMDGPU analogue of --ltoir: -disable-llvm-passes defers inlining. -O3, not -O1: -O0 stamps
+# optnone and -O1 stamps llvm.loop.unroll.disable, both of which bind the consumer's link.
+LTO_IR_CLANG_FLAGS := -c -emit-llvm -O3 -Xclang -disable-llvm-passes \
+	-std=$(LTO_IR_CXX_STD) \
+	-x hip \
+	--rocm-path=$(ROCM_PATH) \
+	--offload-device-only \
+	--offload-arch=$(LTO_IR_ARCH) \
+	$(RCCL_INCLUDES) $(ROCM_INCLUDES) \
+	-D__clang_llvm_bitcode_lib__ \
+	-D__NCCL_DEVICE_LTOIR_LIB__ \
+	-D__CUDACC_EXTENDED_LAMBDA__ \
+	$(NCCL_DEVICE_DEFINES) \
+	-D__HIP_PLATFORM_AMD__=1
+
+##### opt passes #####
+# internalize only (roots = @llvm.used); inline/globaldce would turn this back into the .bc.
+LTO_IR_OPT_PASSES := --passes=internalize
+
+##### Rules #####
+# Rebuild until all transitive headers and compiler configuration are tracked.
+# The order-only preflight cannot invalidate LTO IR when staged headers or
+# LTO_IR_ARCH change, so use the normal phony prerequisite as on llvm_ir.
+$(LTO_IR_RAW): $(LLVM_SRC) $(WRAPPER_HEADER) util.h check_hipify
+	@mkdir -p $(OBJDIR)
+	@echo "Generating LTO IR (deferred inlining) for $(LTO_IR_ARCH)..."
+	$(CLANG) $(LTO_IR_CLANG_FLAGS) $(LLVM_SRC) -o $@
+
+# No llvm-dis/llvm-as round-trip and no ftz/align scrubbing on this path:
+# NCCL strips nvvm-reflect-ftz metadata and align attributes because libNVVM
+# rejects them. Both are NVVM-specific; AMDGPU has no analogue and needs none.
+$(FINAL_LTO_IR): $(LTO_IR_RAW)
+	@mkdir -p $(LIBDIR)
+	@echo "Internalizing LTO IR -> $@"
+	$(OPT) $(LTO_IR_OPT_PASSES) $< -o $@
+
+ltoir: $(FINAL_LTO_IR) $(WRAPPER_HEADER)
+	@echo "RCCL LTO IR generated successfully:"
+	@echo "  C++ Standard:      $(LTO_IR_CXX_STD)"
+	@echo "  GPU Architecture:  $(LTO_IR_ARCH)"
+	@echo "  Raw LTO IR:        $(LTO_IR_RAW)"
+	@echo "  Final LTO IR:      $(FINAL_LTO_IR)"
+	@echo "  Wrapper Header:    $(WRAPPER_HEADER)"
+
+else  # NCCL_EMIT_LTO_IR == 0
+
+ltoir:
+	@echo "RCCL LTO IR generation disabled (NCCL_EMIT_LTO_IR=0)"
+
+endif
+
+build: llvm_ir ltoir
 
 clean:
-	rm -rf $(OBJDIR) $(FINAL_BC) $(WRAPPER_HEADER)
+	rm -rf $(OBJDIR) $(FINAL_BC) $(FINAL_LTO_IR) $(WRAPPER_HEADER)
 
-.PHONY: llvm_ir build clean check_hipify
+.PHONY: llvm_ir ltoir build clean
+
+# Serialize the two IR compiles under -j (order-only, as in NCCL's bindings/ir/Makefile).
+ifneq ($(EMIT_LLVM_IR), 0)
+ifneq ($(NCCL_EMIT_LTO_IR), 0)
+$(LTO_IR_RAW): | $(FINAL_BC)
+endif
+endif
