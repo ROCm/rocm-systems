@@ -2303,4 +2303,81 @@ TEST_F(GinDeviceTest, PutValue_SmemDescriptorNoOverflow) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// CBindingGet_*: ncclGinGet honors isDescriptor, so the proxy backend builds the GET GFD in the caller's descriptor.
+// ---------------------------------------------------------------------------
+
+constexpr uint8_t kDescriptorPoison = 0xA5;
+constexpr size_t kCBindingGetRemoteOffset = 64;
+constexpr size_t kCBindingGetLocalOffset = 128;
+constexpr size_t kCBindingGetBytes = 256;
+constexpr uintptr_t kCBindingGetWindowToken = 0x12345000;
+
+__global__ void kernelCBindingGet(ncclDevComm comm, ncclWindow_t win, bool isDescriptor,
+                                  ncclGinDescriptorSmem* descriptor) {
+  ncclGin_C net(comm, 1u << NCCL_NET_DEVICE_GIN_PROXY, /*contextIndex=*/0);
+  ncclGinGet(&net, ncclTeamWorld(comm), /*peer=*/1, win, kCBindingGetRemoteOffset, win, kCBindingGetLocalOffset,
+             kCBindingGetBytes, ncclCoopThread(), isDescriptor, descriptor, ncclGinOptFlagsDefault);
+}
+
+// Rank 0 of a 2-rank proxy devComm runs the get on one context; no proxy thread drains the queues. Checks the one
+// GET GFD queued for peer 1 and returns it with the poisoned descriptor buffer.
+static void runCBindingGet(bool isDescriptor, ncclGinProxyGfd_t* queued, ncclGinProxyGfd_t* descriptor) {
+  constexpr int kNranks = 2;
+  constexpr uint32_t kQueueSize = 4;
+  DeviceBuffer<ncclGinProxyGfd_t> d_queues(kNranks * kQueueSize), d_descriptor(1);
+  DeviceBuffer<uint32_t> d_pis(kNranks), d_cis(kNranks), d_lastIssuedGet(kNranks);
+  DeviceBuffer<ncclGinProxyGpuCtx_t> d_proxyCtx(1);
+  DeviceBuffer<ncclWindow_vidmem> d_win(1);
+  d_queues.zero();
+  d_pis.zero();
+  d_cis.zero();
+  d_lastIssuedGet.zero();
+  EXPECT_EQ(hipMemset(d_descriptor.ptr, kDescriptorPoison, sizeof(ncclGinProxyGfd_t)), hipSuccess);
+  uploadProxyGpuCtxs(d_proxyCtx, kNranks, kQueueSize, d_queues.ptr, d_pis.ptr, d_cis.ptr, d_lastIssuedGet.ptr,
+                     /*lastVisibleGet=*/nullptr);
+  ncclWindow_vidmem win{};
+  win.ginWinsDefaultBackend[0] = reinterpret_cast<ncclGinWindow_t>(kCBindingGetWindowToken);
+  win.numSegments = 1;
+  d_win.upload(win);
+
+  ncclDevComm comm{};
+  comm.nRanks = kNranks;
+  comm.ginConnectionCount = 1;
+  comm.ginNetDeviceTypes[0] = NCCL_NET_DEVICE_GIN_PROXY;
+  comm.ginHandles[0] = d_proxyCtx.ptr;
+  comm.ginConnectionStride = 1;
+
+  kernelCBindingGet<<<1, 1>>>(comm, d_win.ptr, isDescriptor,
+                              reinterpret_cast<ncclGinDescriptorSmem*>(d_descriptor.ptr));
+  EXPECT_EQ(hipGetLastError(), hipSuccess);
+  EXPECT_EQ(hipDeviceSynchronize(), hipSuccess);
+  EXPECT_EQ(d_pis.copyTo(), (std::vector<uint32_t>{0u, 1u})) << "one GFD, posted to peer 1";
+  EXPECT_EQ(d_lastIssuedGet.copyTo(), (std::vector<uint32_t>{0u, 1u})) << "posted as a get";
+  *queued = d_queues.copyTo()[kQueueSize];
+  *descriptor = d_descriptor.download();
+  const ncclGinProxyQword_t* q = queued->qword;
+  EXPECT_EQ(static_cast<uint64_t>(q[ncclGinProxyGfdHeaderExt].headerExt.op), static_cast<uint64_t>(ncclGinProxyOpGet));
+  EXPECT_EQ(static_cast<uint64_t>(q[ncclGinProxyGfdHeader].header.size), kCBindingGetBytes);
+  EXPECT_EQ(static_cast<uint64_t>(q[ncclGinProxyGfdSrcOff].srcOff.srcOff), kCBindingGetRemoteOffset) << "remote offset";
+  EXPECT_EQ(static_cast<uint64_t>(q[ncclGinProxyGfdDstOff].dstOff.dstOff), kCBindingGetLocalOffset) << "local offset";
+  EXPECT_EQ(static_cast<uint64_t>(q[ncclGinProxyGfdSrcHandle].srcHandle.srcHandle), kCBindingGetWindowToken);
+  EXPECT_EQ(static_cast<uint64_t>(q[ncclGinProxyGfdDstHandle].dstHandle.dstHandle), kCBindingGetWindowToken);
+}
+
+TEST_F(GinDeviceTest, CBindingGet_BuildsGfdInDescriptor) {
+  ncclGinProxyGfd_t queued, descriptor;
+  runCBindingGet(/*isDescriptor=*/true, &queued, &descriptor);
+  EXPECT_EQ(std::memcmp(&descriptor, &queued, sizeof(queued)), 0)
+    << "isDescriptor=true: ncclGinGet must build the queued GET GFD in the caller's descriptor";
+}
+
+TEST_F(GinDeviceTest, CBindingGet_NoDescriptorLeavesItUntouched) {
+  ncclGinProxyGfd_t queued, descriptor;
+  runCBindingGet(/*isDescriptor=*/false, &queued, &descriptor);
+  const uint8_t* bytes = reinterpret_cast<const uint8_t*>(&descriptor);
+  EXPECT_EQ(std::count(bytes, bytes + sizeof(descriptor), kDescriptorPoison), std::ptrdiff_t(sizeof(descriptor)))
+    << "isDescriptor=false: ncclGinGet must not write the descriptor";
+}
+
 } // namespace RcclUnitTesting
