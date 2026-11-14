@@ -1,0 +1,80 @@
+gl2.atomic_req:
+  name: GL2 Atomic Requests
+  formula: SUM(GL2C_ATOMIC_sum) / SUM($denom)
+  unit: (Count + $normUnit)
+  description: >-
+    Number of atomic memory operations processed by the GL2 cache. Atomics provide
+    thread-safe memory access but may serialize at contended addresses. High counts
+    may impact performance.
+gl2.ea_rd_req_dram:
+  name: EA Read Requests (DRAM)
+  formula: SUM(GL2C_EA_RDREQ_DRAM_sum) / SUM($denom)
+  unit: (Count + $normUnit)
+  description: >-
+    L2 read requests over EA destined for memory. Infinity Cache can serve these
+    requests before they reach VRAM.
+gl2.ea_wr_req_dram:
+  name: EA Write Requests (DRAM)
+  formula: SUM(GL2C_EA_WRREQ_DRAM_sum) / SUM($denom)
+  unit: (Count + $normUnit)
+  description: >-
+    L2 write requests over EA destined for memory. Infinity Cache can absorb these
+    requests before they reach VRAM.
+gl2.hit_rate:
+  name: GL2 Cache Hit Rate
+  formula: 100 * SUM(GL2C_HIT_sum) / SUM(GL2C_HIT_sum + GL2C_MISS_sum)
+  unit: Percent
+  description: >-
+    Percentage of L2 lookups that hit.
+  peak: 100
+gl2.hits:
+  name: GL2 Cache Hits
+  formula: SUM(GL2C_HIT_sum) / SUM($denom)
+  unit: (Count + $normUnit)
+  description: >-
+    Number of GL2 cache requests that were serviced from cache. High hit counts
+    relative to total requests indicate effective caching. Low hit counts suggest
+    memory-bound workloads or poor data locality.
+gl2.memory_rd_bw:
+  name: Memory Read Bandwidth
+  formula: 32 * SUM(GL2C_EA_RDREQ_DRAM_32B_sum) / SUM(End_Timestamp - Start_Timestamp)
+  unit: GB/s
+  description: >-
+    Bytes L2 read over EA for requests destined for VRAM, in 32-byte units. Infinity
+    Cache hits are included, so this can exceed the VRAM bandwidth peak.
+gl2.memory_wr_bw:
+  name: Memory Write Bandwidth
+  formula: 32 * SUM(GL2C_EA_WRREQ_DRAM_32B_sum) / SUM(End_Timestamp - Start_Timestamp)
+  unit: GB/s
+  description: >-
+    Bytes L2 wrote over EA for requests destined for VRAM, in 32-byte units.
+    Infinity Cache hits are included.
+gl2.misses:
+  name: GL2 Cache Misses
+  formula: SUM(GL2C_MISS_sum) / SUM($denom)
+  unit: (Count + $normUnit)
+  description: >-
+    Number of GL2 cache requests that missed and required fetching through GCEA
+    (Graphics Core Efficiency Arbiter). High miss counts indicate heavy memory
+    traffic. Consider improving data locality or reducing working set size.
+gl2.rd_req:
+  name: GL2 Read Requests
+  formula: SUM(GL2C_READ_sum) / SUM($denom)
+  unit: (Count + $normUnit)
+  description: >-
+    Number of read requests to the GL2 cache. High read counts indicate
+    memory-intensive load operations. Compare with hit rate to assess GL2 cache
+    effectiveness for reads.
+gl2.total_req:
+  name: GL2 Total Requests
+  formula: SUM(GL2C_REQ_sum) / SUM($denom)
+  unit: (Count + $normUnit)
+  description: >-
+    L2 requests, normalized by the chosen unit.
+gl2.wr_req:
+  name: GL2 Write Requests
+  formula: SUM(GL2C_WRITE_sum) / SUM($denom)
+  unit: (Count + $normUnit)
+  description: >-
+    Number of write requests to the GL2 cache. Write traffic includes stores and
+    cache writebacks from GL1. High write counts indicate write-intensive workloads.
