@@ -167,8 +167,9 @@ Stated plainly, because each one has a concrete cause in the mechanism above.
 - **HIP graph launches are not replayed** (warn once, run once), as described above.
 - **Only single-packet, single-dispatch submissions are replayed.** The replay gate requires exactly
   one packet in the batch and exactly one dispatch packet in it; anything else takes the normal path.
-- **The tracked device footprint is duplicated in host RAM** for the lifetime of the replay, and
-  every region is copied on every restore. Snapshot and restore cost scales linearly with the tracked
+- **The tracked device footprint is duplicated in host RAM**, and every region is copied on every
+  restore. The host copies are kept between replayed dispatches for reuse, bounded by the most
+  recent snapshot's footprint. Snapshot and restore cost scales linearly with the tracked
   footprint, so for large footprints `N` passes of snap plus restore can cost more than re-running
   the application `N` times.
 - **Single process.** There is no cross-process or multi-process coordination, so replaying a kernel

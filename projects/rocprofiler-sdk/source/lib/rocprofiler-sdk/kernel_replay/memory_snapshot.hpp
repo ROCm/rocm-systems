@@ -25,6 +25,8 @@
 #include <hsa/hsa.h>
 
 #include <cstddef>
+#include <cstdint>
+#include <memory>
 #include <vector>
 
 namespace rocprofiler
@@ -39,11 +41,51 @@ namespace kernel_replay
 // a full copy of each region (no dirty-page diffing) of directly-allocated device memory.
 namespace memory_snapshot
 {
+// Host memory holding one region's saved contents. The storage comes from a per-agent pool and
+// goes back to it when the buffer is destroyed, so consecutive replayed dispatches reuse the same
+// host memory instead of allocating, first-touch faulting, zero-filling and freeing the whole
+// tracked footprint every time. Contents are uninitialized until the snapshot copies into them.
+//
+// The pool keeps what the most recent snapshot of the agent used: snap() frees any retained
+// storage it did not take, so host memory held between dispatches is bounded by the last
+// snapshot's footprint.
+class staging_buffer_t
+{
+public:
+    staging_buffer_t() = default;
+    ~staging_buffer_t();
+
+    staging_buffer_t(const staging_buffer_t&) = delete;
+    staging_buffer_t& operator=(const staging_buffer_t&) = delete;
+    staging_buffer_t(staging_buffer_t&& rhs) noexcept;
+    staging_buffer_t& operator=(staging_buffer_t&& rhs) noexcept;
+
+    // Take storage for `size` bytes from `agent`'s pool, allocating when nothing retained fits.
+    // Returns false when the host allocation fails.
+    bool acquire(hsa_agent_t agent, size_t size);
+
+    char*       data() { return m_storage.get(); }
+    const char* data() const { return m_storage.get(); }
+    size_t      size() const { return m_size; }
+
+private:
+    void release();
+
+    uint64_t                m_agent    = 0;
+    std::unique_ptr<char[]> m_storage  = {};
+    size_t                  m_capacity = 0;
+    size_t                  m_size     = 0;
+};
+
+// Bytes of staging storage `agent`'s pool currently retains for reuse (not held by any snapshot).
+size_t
+retained_staging_bytes(hsa_agent_t agent);
+
 // Saved copy of a single device allocation.
 struct mem_block_t
 {
-    void*             gpu_addr = nullptr;  // live device allocation base pointer
-    std::vector<char> host_copy;           // pre-kernel contents held in host memory
+    void*            gpu_addr = nullptr;  // live device allocation base pointer
+    staging_buffer_t host_copy;           // pre-kernel contents held in host memory
     // true  = from the allocation tracker; re-check liveness before restoring (it can be freed).
     // false = module-scope variable in a loaded executable; always live, so restore
     // unconditionally.
