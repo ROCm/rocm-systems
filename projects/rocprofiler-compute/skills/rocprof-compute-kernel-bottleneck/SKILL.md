@@ -27,27 +27,46 @@ cheaply. Go straight to `rocprof-compute-pc-sampling` when the user asks about i
 source lines, or stall reasons, and use both when an architectural limit needs
 to be traced back to the code that causes it.
 
-## 1. Check the environment
+## Before you start
 
-In this order, because each command depends on the one before it:
+If `command -v rocprof-compute` finds the tool, skip this section.
+
+Otherwise, check that ROCm and a GPU are present:
 
 ```bash
-amd-smi static
-amd-smi list
 rocminfo
+amd-smi list
+```
+
+If either command fails, ROCm is not installed or no GPU is visible. Stop and
+point the user to "Install the ROCm Core SDK" in the
+[install guide](../../docs/install/core-install.rst). Installing rocprof-compute
+alone does not help.
+
+Check the GPU against
+[compatible accelerators](../../docs/reference/compatible-accelerators.rst).
+The table lists product families, so match the `Marketing Name` that `rocminfo`
+prints, and use the `gfx` name to confirm. If the GPU is not supported, stop and
+tell the user.
+
+Then follow "Install the analyze mode dependencies" in the
+[install guide](../../docs/install/core-install.rst), which installs
+rocprof-compute in a virtual environment of its own. Use the nightly index so the
+version matches these skills, and confirm with
+`rocprof-compute analyze --verify-deps`. Call that environment's
+`rocprof-compute` by its full path, so the application keeps running with its own
+Python.
+
+## 1. Check the environment
+
+```bash
 rocprof-compute --specs
 ```
 
-`amd-smi` and `rocminfo` report the GPU and ROCm install.
-`rocprof-compute --specs` reports what the profiler itself detected, including
-`ROCm Version`, `GPU Model`, and `GPU Arch`. It is built on the first two, so
-it cannot succeed when they fail.
-
-Supported accelerators are listed in
-[compatible-accelerators.rst](../../docs/reference/compatible-accelerators.rst).
-Not every feature works on every architecture. Check there before promising a
-result, and let the tool's own error message stand when a feature is
-unavailable.
+It reports what the profiler detected, including `ROCm Version`, `GPU Model`,
+and `GPU Arch`. Not every feature works on every GPU. The docs for each feature
+say which GPUs support it. When rocprof-compute reports that a feature is not
+supported, tell the user, and do not work around it.
 
 ## 2. Collect what you need before profiling
 
