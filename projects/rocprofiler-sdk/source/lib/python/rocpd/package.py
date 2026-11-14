@@ -413,7 +413,9 @@ def add_args(parser):
 
     package_options.add_argument(
         "-d",
-        "--output-path",
+        "--output-directory",
+        metavar="OUTPUT_DIRECTORY",
+        dest="output_path",
         help="Sets the name of output folder (default : current directory)",
         # default=os.environ.get("ROCPD_OUTPUT_PATH", "./rocpd-output-data"),
         type=str,

@@ -63,8 +63,8 @@ Example usage:
     Convert 6 databases, output CSV and perfetto trace formats
     $ rocpd convert -i db{0..5}.db --output-format csv pftrace -d "~/output_folder/" -o "sixFileTraces"
 
-    Convert 2 databases, output CSV, OTF2, and perfetto trace formats
-    $ rocpd convert -i db{3,4}.db --output-format csv otf2 pftrace
+    Convert 2 databases, output CSV, OTF2, and perfetto trace formats, raise limit to 5 (do not automerge since 2 < limit of 5)
+    $ rocpd convert -i db{3,4}.db --output-format csv otf2 pftrace --automerge-limit 5
 
 """
 
@@ -105,6 +105,9 @@ Example usage:
 
     Combine 4 databases and query the first 10 rows of the 'top_kernels' view and output to CSV file
     $ rocpd query -i db{0..3}.db --query "SELECT * FROM top_kernels LIMIT 10" --format csv
+
+    Do not automerge the databases (4 < limit of 5) and query the first 10 rows of the 'busy' view and output to console
+    $ rocpd query -i db{0..3}.db --query "SELECT * FROM busy LIMIT 10" --automerge-limit 5
 """
 
     summary_examples = """
@@ -121,7 +124,10 @@ Example usage:
     $ rocpd summary -i db0.db --region-categories NONE
 
     Aggregate 2 databases and output all summary files to HTML, only include HIP and MARKER regions, include domain summary
-    $ rocpd summary -i db{0,1}.db --region-categories HIP MARKERS --domain-summary --format html
+    $ rocpd summary -i db{0,1}.db --region-categories HIP MARKER --domain-summary --format html
+
+    Do not automerge the databases (4 < limit of 8) and output summary tables organized by rank/process ID, to console
+    $ rocpd summary -i db{0..3}.db --summary-by-rank --automerge-limit 8
 
 """
     input_help_string = "Input path and filename to one or more database(s). Wildcards accepted, as well as .rpdb folders"

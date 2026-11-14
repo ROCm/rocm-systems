@@ -111,6 +111,22 @@ def pytest_addoption(parser):
         action="store",
         help="Path to mangled kernels summary CSV file.",
     )
+    parser.addoption(
+        "--summary-markers-csv",
+        action="store",
+        help="Path to markers summary CSV file from a default summary run.",
+    )
+    parser.addoption(
+        "--summary-files-csv",
+        action="store",
+        help="Path to files CSV file from a --summary-by-rank run.",
+    )
+    parser.addoption(
+        "--summary-files-expected",
+        action="store",
+        nargs="+",
+        help="Expected database base filenames listed in the files CSV.",
+    )
 
     pd.set_option("display.width", 2000)
     # increase debug display of pandas dataframes
@@ -278,6 +294,36 @@ def csv_kernels_full(request):
         raise FileExistsError(f"{filename} does not exist")
 
     return pd.read_csv(filename)
+
+
+def _read_required_csv(request, option):
+    filename = request.config.getoption(option)
+    if not filename:
+        pytest.skip(f"{option} not provided")
+    if not os.path.exists(filename):
+        pytest.fail(f"{filename} does not exist")
+    return pd.read_csv(filename)
+
+
+@pytest.fixture
+def summary_markers_csv(request):
+    """Load markers summary CSV file"""
+    return _read_required_csv(request, "--summary-markers-csv")
+
+
+@pytest.fixture
+def summary_files_csv(request):
+    """Load files CSV file generated with --summary-by-rank"""
+    return _read_required_csv(request, "--summary-files-csv")
+
+
+@pytest.fixture
+def summary_files_expected(request):
+    """Expected database base filenames in the files CSV"""
+    expected = request.config.getoption("--summary-files-expected")
+    if not expected:
+        pytest.skip("--summary-files-expected not provided")
+    return expected
 
 
 @pytest.fixture

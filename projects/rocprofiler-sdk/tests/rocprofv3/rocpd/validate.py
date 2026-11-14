@@ -499,6 +499,36 @@ def test_summary_mangled_kernels(csv_kernels_mangled, csv_kernels_full, json_dat
     _verify_names_match_json(csv_kernels_mangled, json_data, "mangled")
 
 
+def test_summary_markers_default(summary_markers_csv):
+    """Test that a default summary run includes the MARKERS summary."""
+    df = summary_markers_csv
+    assert len(df) > 0, "MARKERS summary is empty"
+    assert "Name" in df.columns, f"Missing 'Name' column: {list(df.columns)}"
+    assert (df["Calls"] > 0).all(), f"Marker with zero calls:\n{df}"
+    assert df["Name"].notna().all(), f"Marker with empty name:\n{df}"
+
+
+def test_summary_by_rank_files(summary_files_csv, summary_files_expected):
+    """Test that --summary-by-rank outputs the files table with original DB filenames."""
+    df = summary_files_csv
+    for column in ("Process_Id", "Hostname", "Filename"):
+        assert column in df.columns, f"Missing '{column}' column: {list(df.columns)}"
+
+    assert sorted(df["Filename"].tolist()) == sorted(
+        summary_files_expected
+    ), f"Filenames {df['Filename'].tolist()} != expected {summary_files_expected}"
+    assert df["Hostname"].notna().all(), f"Missing hostname:\n{df}"
+
+
+def test_summary_by_rank_files_rank_order(summary_files_csv):
+    """Test that multi-process --summary-by-rank lists Rank first, sorted 0, 1, 2, ..."""
+    df = summary_files_csv
+    assert df.columns[0] == "Rank", f"First column is not 'Rank': {list(df.columns)}"
+
+    ranks = df["Rank"].astype(int).tolist()
+    assert ranks == list(range(len(df))), f"Ranks not sorted as 0..N-1: {ranks}"
+
+
 if __name__ == "__main__":
     exit_code = pytest.main(["-x", __file__] + sys.argv[1:])
     sys.exit(exit_code)

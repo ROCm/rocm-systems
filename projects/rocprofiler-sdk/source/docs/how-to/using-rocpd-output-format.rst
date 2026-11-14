@@ -164,7 +164,7 @@ The following table provides a detailed listing of the ``rocpd convert`` command
           <td>Configures the base filename for generated output files (default: out).</td>
         </tr>
         <tr>
-          <td>-d OUTPUT_​PATH, --output-path OUTPUT_​PATH</td>
+          <td>-d OUTPUT_DIRECTORY, --output-directory OUTPUT_DIRECTORY</td>
           <td>Specifies the target directory for output file generation (default: ./rocpd-output-data).</td>
         </tr>
         <tr>
@@ -518,6 +518,8 @@ rocpd2summary - statistical analysis tool
 
 - Rank-based analysis: Per-process and per-rank performance breakdowns for MPI applications.
 
+- List of files provided to help map the file to rank number, hostname, and process ID
+
 - Configurable scope: Selective inclusion or exclusion of analysis categories.
 
 **Output format options:**
@@ -583,6 +585,8 @@ The following commands demonstrate the usage of advanced analysis options such a
 
 **Output files:**
 
+- ``files.{format}`` - List of files provided to help map the file to hostname, process ID, and rank number (when by rank is generated).
+
 - ``kernels_summary.{format}`` - GPU kernel execution summary.
 
 - ``hip_summary.{format}`` - HIP API call statistics.
@@ -591,7 +595,7 @@ The following commands demonstrate the usage of advanced analysis options such a
 
 - ``memory_summary.{format}`` - Memory operation statistics.
 
-- ``markers_summary.{format}`` - Marker event analysis.
+- ``marker_summary.{format}`` - Marker event analysis.
 
 Generating performance summary using rocpd
 -------------------------------------------
@@ -921,11 +925,11 @@ The following table provides a detailed listing of the ``rocpd merge`` command-l
                 </tr>
                 <tr>
                   <td rowspan="2">Output configuration</td>
-                  <td>-o OUTPUT_FILE``, --output-file OUTPUT_FILE</td>
+                  <td>-o OUTPUT_FILE, --output-file OUTPUT_FILE</td>
                   <td>Sets the base output filename. Default value: merged. The .db extension is added automatically if not provided.</td>
                 </tr>
                 <tr>
-                  <td>-d OUTPUT_PATH``, --output-path OUTPUT_PATH</td>
+                  <td>-d OUTPUT_DIRECTORY, --output-directory OUTPUT_DIRECTORY</td>
                   <td>Specifies the output directory path. Default value: ./rocpd-output-data.</td>
                 </tr>
                 <tr>
@@ -1076,7 +1080,7 @@ The following table provides a detailed listing of the ``rocpd package`` command
                   <td>When used with --consolidate, copies database files instead of moving them.</td>
                 </tr>
                 <tr>
-                  <td>-d OUTPUT_PATH, --output-path OUTPUT_PATH</td>
+                  <td>-d OUTPUT_DIRECTORY, --output-directory OUTPUT_DIRECTORY</td>
                   <td>Specifies the output folder name. Without --consolidate, creates metadata in current directory. With --consolidate, creates a .rpdb folder with the specified name.
                 </tr>
                 <tr>
@@ -1758,7 +1762,7 @@ The following table provides a detailed listing of the ``rocpd query`` command-l
             <td>Base filename for exported files.</td>
           </tr>
           <tr>
-            <td>-d OUTPUT_PATH, --output-path OUTPUT_PATH</td>
+            <td>-d OUTPUT_DIRECTORY, --output-directory OUTPUT_DIRECTORY</td>
             <td>Output directory path.</td>
           </tr>
           <tr>
