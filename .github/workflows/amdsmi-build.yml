@@ -82,15 +82,19 @@ jobs:
           - { os: AlmaLinux8,  package_format: rpm, arch_suffix: .rpm }
           - { os: AzureLinux3, package_format: rpm, arch_suffix: .rpm }
     container:
-      image: ${{ matrix.image || vars[format('{0}_DOCKER_IMAGE', matrix.os)] }}
+      # Matrix images are digest-pinned; other rows use the <os>_DOCKER_IMAGE
+      # repository variable.
+      image: ${{ matrix.image || vars[format('{0}_DOCKER_IMAGE', matrix.os)] }} # zizmor: ignore[unpinned-images]
       options: --rm --privileged --device=/dev/kfd --device=/dev/dri --group-add video --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --shm-size=64G --cap-add=SYS_MODULE -v /lib/modules:/lib/modules -u root
 
     steps:
       # An empty container image does not fail the job: it runs on the bare
       # self-hosted runner instead, unsandboxed.
       - name: Verify container image is configured
+        env:
+          CONTAINER_IMAGE: ${{ matrix.image || vars[format('{0}_DOCKER_IMAGE', matrix.os)] }}
         run: |
-          if [ -z "${{ matrix.image || vars[format('{0}_DOCKER_IMAGE', matrix.os)] }}" ]; then
+          if [ -z "${CONTAINER_IMAGE}" ]; then
             echo "::error::No image for ${{ matrix.os }}: set the ${{ matrix.os }}_DOCKER_IMAGE repository variable"
             exit 1
           fi
@@ -113,6 +117,7 @@ jobs:
             shared/cuid
             shared/sha256
             .github/workflows
+          persist-credentials: false
 
       - name: Mark workspace safe for git
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
@@ -139,8 +144,8 @@ jobs:
           # The script autodetects package manager, format, and distro
           # quirks (RHEL10/AlmaLinux8 QA_RPATHS, AzureLinux3
           # more_itertools, etc.) from /etc/os-release.
-          python3 "${{ env.PROJECT_DIR }}/tests/amdsmi_build/run_amdsmi_build.py" \
-            --project-dir "${{ env.PROJECT_DIR }}" \
+          python3 "${PROJECT_DIR}/tests/amdsmi_build/run_amdsmi_build.py" \
+            --project-dir "${PROJECT_DIR}" \
             --os-label "${{ matrix.os }}" \
             --test-results-dir "/tmp/test-results-${{ matrix.os }}"
 
@@ -270,7 +275,7 @@ jobs:
           run "$RESULTS_DIR/cli_test_output.txt" ./cli_unit_test.py -v
           run "$RESULTS_DIR/abi_compat_output.txt" python3 test_abi_compat.py -v
 
-          cd ${{ env.PROJECT_DIR }}/example
+          cd ${PROJECT_DIR}/example
           rm -rf build
           cmake -B build -DENABLE_ESMI_LIB=OFF
           make -C build -j $(nproc)
@@ -316,7 +321,7 @@ jobs:
         if: always()
         run: |
           set -euo pipefail
-          python3 "${{ env.PROJECT_DIR }}/tests/amdsmi_build/run_amdsmi_build.py" summarize \
+          python3 "${PROJECT_DIR}/tests/amdsmi_build/run_amdsmi_build.py" summarize \
             --results-dir "/tmp/test-results-${{ matrix.os }}" \
             --os-label "${{ matrix.os }}" \
             --summary-file "$GITHUB_STEP_SUMMARY"
