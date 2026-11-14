@@ -18,7 +18,9 @@ dependencies = [
     "pyyaml>=6.0",
     "jsonschema>=4.0",
     "httpx>=0.25",
-    "mcp>=1.0",
+    # mcp 2.x removed the low-level Server.list_tools() / call_tool()
+    # decorators that mcp_server/server.py registers its tools with.
+    "mcp>=1.0,<2",
     # numpy is used by perfxpert.runtime.gate_cascade for the regression
     # aggregation math; loaded eagerly during `perfxpert doctor` and any
     # `perfxpert analyze` invocation. Required (not optional).

@@ -117,6 +117,14 @@ is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   immediately because retry is futile. See
   `docs/guides/agentic-mode.md` §"Fallback chain".
 
+### Fixed
+- **`perfxpert-mcp` starts on a fresh install again.** `mcp>=1.0` had no
+  upper bound, so a new install resolves `mcp` 2.x, which removed the
+  low-level `Server.list_tools()` / `call_tool()` decorators that
+  `mcp_server/server.py` uses; the server failed at start with
+  `AttributeError: 'Server' object has no attribute 'list_tools'`.
+  `mcp` is now capped below 2.
+
 ### Docs
 - `README.md` — MCP count 34→43, 5-provider list restored, pip
   upgrade hint, fast-install wrapper surfaced.
