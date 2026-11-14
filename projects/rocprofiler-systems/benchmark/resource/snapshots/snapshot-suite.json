@@ -1,0 +1,11 @@
+{
+    "scenarios": [
+        "../scenarios/all_off/threads_all_off.json",
+        "../scenarios/only_sampling_on/cpu_compute_only_sampling_on.json",
+        "../scenarios/only_sampling_on/gpu_kernels_only_sampling_on.json",
+        "../scenarios/only_sampling_on/gpu_long_kernel_only_sampling_on.json",
+        "../scenarios/only_sampling_on/io_files_only_sampling_on.json",
+        "../scenarios/only_sampling_on/mem_alloc_only_sampling_on.json",
+        "../scenarios/only_sampling_on/threads_only_sampling_on.json"
+    ]
+}
