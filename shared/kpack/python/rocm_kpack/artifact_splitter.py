@@ -393,21 +393,18 @@ class ArtifactSplitter:
             # Create a BundledBinary instance with our toolchain
             binary = BundledBinary(binary_path, toolchain=self.toolchain)
 
-            # Track code object index per (binary, arch) for multi-TU support
-            # Each TU in a -fgpu-rdc binary gets a unique index
-            code_object_index: Dict[str, int] = defaultdict(int)
-
             # Extract kernels using context manager
             with binary.unbundle() as unbundled:
                 # Process each unbundled target
-                for target_name, file_name in unbundled.target_list:
+                for (target_name, file_name), index in zip(
+                    unbundled.target_list, unbundled.bundle_indices
+                ):
                     # Extract architecture from target name (e.g., "hip-amdgcn-amd-amdhsa-gfx1100")
                     arch = extract_architecture_from_target(target_name)
                     if arch:
                         if self.gpu_targets is not None:
                             bare_arch = strip_target_features(arch)
                             if bare_arch not in self.gpu_targets:
-                                code_object_index[arch] += 1
                                 if self.verbose:
                                     print(
                                         f"    Skipping kernel for {arch}: "
@@ -421,10 +418,10 @@ class ArtifactSplitter:
 
                         # Build source_binary_relpath with index suffix
                         # TOC always uses indexed format: "lib/foo.so#0", "lib/foo.so#1"
-                        # This matches the co_index in wrapper's reserved1 field
+                        # The index is the source bundle index, which matches the
+                        # co_index in wrapper's reserved1 field even when earlier
+                        # bundles have no code object for this arch.
                         base_relpath = binary_path.relative_to(prefix_path).as_posix()
-                        index = code_object_index[arch]
-                        code_object_index[arch] += 1
                         indexed_relpath = f"{base_relpath}#{index}"
 
                         # Create ExtractedKernel object
