@@ -438,6 +438,8 @@ save(ArchiveT& ar, rocprofiler_kernel_dispatch_info_t data)
     ROCP_SDK_SAVE_DATA_FIELD(group_segment_size);
     ROCP_SDK_SAVE_DATA_FIELD(workgroup_size);
     ROCP_SDK_SAVE_DATA_FIELD(grid_size);
+    ROCP_SDK_SAVE_DATA_FIELD(graph_exec_id);
+    ROCP_SDK_SAVE_DATA_FIELD(graph_node_id);
 }
 
 template <typename ArchiveT>
