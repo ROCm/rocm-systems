@@ -20,10 +20,20 @@ ENV ROCM_PATH=${ROCM_HOME}
 ENV LLVM_PATH=${ROCM_HOME}/llvm
 ENV CMAKE_PREFIX_PATH=${ROCM_HOME}:${ROCM_HOME}/lib/rocm_sysdeps
 ENV PATH=/opt/rh/gcc-toolset-11/root/usr/bin:/usr/lib64/openmpi/bin:${ROCM_HOME}/bin:${ROCM_HOME}/llvm/bin:/usr/local/bin:~/.local/bin:${PATH}
-ENV LD_LIBRARY_PATH=${ROCM_HOME}/lib:${ROCM_HOME}/llvm/lib:${LD_LIBRARY_PATH:-}
+# LD_LIBRARY_PATH and PKG_CONFIG_PATH keep a value that the base image may already set:
+# - ARG without a default only declares the variable, so that
+#   BuildKit does not print an UndefinedVar warning and accepts its use in the ENV below.
+#   If value for that variable is set in the base image, then that value is used.
+# - ${VAR:+:${VAR}} adds ":" and the old value only when VAR is set and not empty. If it is
+#   unset, nothing is added, so the result has no trailing ":".
+#   For example, with VAR=/usr/lib the result is /opt/lib:/usr/lib and with VAR unset result is /opt/lib
+ARG LD_LIBRARY_PATH
+ENV LD_LIBRARY_PATH=${ROCM_HOME}/lib:${ROCM_HOME}/llvm/lib${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}
 # GitHub Actions runs steps with "bash --noprofile --norc", so /etc/profile.d is not read there.
 # Set PKG_CONFIG_PATH with ENV so that non-login shells also find the TheRock pkg-config files.
-ENV PKG_CONFIG_PATH=${ROCM_HOME}/lib/pkgconfig:${ROCM_HOME}/lib/llvm/lib/pkgconfig:${ROCM_HOME}/lib/rocprofiler-systems/pkgconfig:${ROCM_HOME}/lib/rdc/grpc/lib/pkgconfig:${ROCM_HOME}/lib/rdc/grpc/lib/rocm_sysdeps/lib/pkgconfig:${ROCM_HOME}/lib/rocm_sysdeps/lib/pkgconfig:${ROCM_HOME}/lib/host-math/lib/pkgconfig:${ROCM_HOME}/share/pkgconfig:${PKG_CONFIG_PATH:-}
+# The ARG and the ${PKG_CONFIG_PATH:+...} suffix work as explained for LD_LIBRARY_PATH above.
+ARG PKG_CONFIG_PATH
+ENV PKG_CONFIG_PATH=${ROCM_HOME}/lib/pkgconfig:${ROCM_HOME}/lib/llvm/lib/pkgconfig:${ROCM_HOME}/lib/rocprofiler-systems/pkgconfig:${ROCM_HOME}/lib/rdc/grpc/lib/pkgconfig:${ROCM_HOME}/lib/rdc/grpc/lib/rocm_sysdeps/lib/pkgconfig:${ROCM_HOME}/lib/rocm_sysdeps/lib/pkgconfig:${ROCM_HOME}/lib/host-math/lib/pkgconfig:${ROCM_HOME}/share/pkgconfig${PKG_CONFIG_PATH:+:${PKG_CONFIG_PATH}}
 
 # Debian/Ubuntu
 RUN set -euo pipefail; \
