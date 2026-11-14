@@ -21,6 +21,9 @@ int64_t IbCastArThreshold = 8192;
 // Default -2: BY_INDEX. 0=BY_INDEX, 1=BY_ID, 2=BY_ORDER (software CTS; CTS offload forces BY_ORDER).
 NCCL_PARAM(IbCastReceiverSideMatchingScheme, "IB_RECEIVER_SIDE_MATCHING_SCHEME", -2);
 RCCL_PARAM(IbCastGdrFlushGpuMemNoRelaxedOrdering, "GDR_FLUSH_GPU_MEM_NO_RELAXED_ORDERING", 1);
+// Sends below this size are not split across QPs. Only consulted while the CAST
+// scheduler is disabled; the scheduler has its own threshold in splitDataMin.
+RCCL_PARAM(IbCastSplitDataThreshold, "IB_SPLIT_DATA_THRESHOLD", 128);
 
 const char* IbCastReqTypeStr[] = {"Unused", "Send", "Recv", "Flush", "IPut", "IGet", "Failed"};
 
@@ -283,6 +286,7 @@ ncclResult_t IbCastMultiSend(struct ncclIbSendComm* comm, int slot, int nqps, in
   int qpIndex = -1;
   ncclIbQp* qp = NULL;
   const int align = 128;
+  const int64_t splitDataThreshold = rcclParamIbCastSplitDataThreshold();
   for (int i = 0; i < nqps; i++) {
     NCCLCHECK(IbCastCommBaseGetQpForRequest(&comm->base, startQpIndex, i, &qp, &qpIndex));
 
@@ -323,6 +327,10 @@ ncclResult_t IbCastMultiSend(struct ncclIbSendComm* comm, int slot, int nqps, in
         chunkSize = (weightedSendSize / align) * align;
         if (i == (nqps - 1)) length = std::max((int)(reqs[r]->send.size - sendOffsets[r]), chunkSize);
         else length = chunkSize;
+      } else if (!reqs[r]->desc.parms.enable && reqs[r]->send.size < splitDataThreshold) {
+        // Use the active QP only for send below the threshold.
+        chunkSize = (i == 0) ? reqs[r]->send.size : 0;
+        length = std::min((int)(reqs[r]->send.size - sendOffsets[r]), chunkSize);
       } else {
         chunkSize = DIVUP(DIVUP(reqs[r]->send.size, nqps), align) * align;
         length = std::min((int)(reqs[r]->send.size - sendOffsets[r]), chunkSize);
@@ -732,6 +740,18 @@ ncclResult_t IbCastPostFifo(struct ncclIbRecvComm* comm, struct ncclIbRequest* r
   return ncclSuccess;
 }
 
+// Number of QPs to arm for a receive request.
+// By default, receiver preposts work requests for one QP per device.
+// With the scheduler on, receiver preposts work requests for all QPs,
+// because it doesn't know what mode the sender picked (weighted split or weighted RR).
+static inline int IbCastRecvCommGetNqps(struct ncclIbRecvComm* comm) {
+  if (comm->useCtsOffload) return 1;
+  // BY_ORDER senders never initialize schedParms (see IbCastUpdateSchedParmsTry), so they take the
+  // scheduler-off path even when the scheduler is globally enabled. Mirror that here.
+  if (castGlobalQpSchedParms.enable && comm->base.recvMatchingScheme != BY_ORDER) return comm->base.nqps;
+  return IbCastCommBaseGetDefaultNqpsPerRequest(&comm->base);
+}
+
 ncclResult_t IbCastIrecv(void* recvComm, int n, void** data, size_t* sizes, int* tags, void** mhandles, void** phandles,
                          void** request) {
   // See IbCastIsend above.
@@ -781,7 +801,7 @@ ncclResult_t IbCastIrecv(void* recvComm, int n, void** data, size_t* sizes, int*
 
   if (!netOptRecvCompletionEnabled) {
     TIME_START(1);
-    const int nqps = (comm->useCtsOffload) ? 1 : comm->base.nqps;
+    int nqps = IbCastRecvCommGetNqps(comm);
     int qpIndex = -1;
     ncclIbQp* qp = NULL;
     for (int i = 0; i < nqps; i++) {
