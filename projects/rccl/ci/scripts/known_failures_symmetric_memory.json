@@ -1,0 +1,5 @@
+{
+  "_comment": "Known failures for the PyTorch symmetric_memory suite (SUITES in test_pytorch_c10d.py). Keys are \"Class.test\" as reported in the JUnit XML. Same rules as known_failures.json: an entry is excluded from the verdict so a new failure stays visible, it is not a statement that the test is expected to fail forever, and each entry should name a ticket or cause. Remove an entry once its cause is resolved; the harness logs entries that now pass.",
+  "tests": {},
+  "categories": {}
+}
