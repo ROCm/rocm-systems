@@ -56,6 +56,7 @@
 #define CU_MEM_LOCATION_TYPE_HOST_NUMA hipMemLocationTypeHostNuma
 #else
 #define CU_MEM_LOCATION_TYPE_HOST_NUMA 3
+#define NCCL_HOST_NUMA_IS_SENTINEL 1
 #endif
 #endif
 
@@ -76,6 +77,26 @@
 #define NCCL_DEVICE_INLINE
 #define NCCL_HOST_DEVICE_INLINE inline __attribute__((always_inline))
 #endif
+
+////////////////////////////////////////////////////////////////////////////////
+// Host-NUMA memory-location predicate
+//
+// Tests whether a memory location is host-NUMA backed. Where the shim above
+// falls back to the sentinel, hipMemLocationType cannot represent it, so a
+// location can never be host-NUMA backed and the answer is statically false.
+// Stating that here keeps callers from comparing a location enum against a
+// value its type cannot represent.
+////////////////////////////////////////////////////////////////////////////////
+
+template <typename MemLocationType>
+NCCL_HOST_DEVICE_INLINE constexpr bool ncclMemLocationIsHostNuma(MemLocationType type) {
+#if defined(NCCL_HOST_NUMA_IS_SENTINEL)
+  (void)type;
+  return false;
+#else
+  return type == CU_MEM_LOCATION_TYPE_HOST_NUMA;
+#endif
+}
 
 ////////////////////////////////////////////////////////////////////////////////
 // Architecture detection
