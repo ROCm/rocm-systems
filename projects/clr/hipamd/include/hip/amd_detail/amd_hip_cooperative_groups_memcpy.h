@@ -15,7 +15,97 @@ template <> struct can_group_do_async_copy<cooperative_groups::coalesced_group>
 template <> struct can_group_do_async_copy<cooperative_groups::thread_block>
     : public std::true_type {};
 
-#if __has_builtin(__builtin_amdgcn_global_store_async_from_lds_b128) and                           \
+#if defined(__HIP_DEVICE_COMPILE__) && __has_builtin(__builtin_amdgcn_tensor_load_to_lds) &&       \
+    __has_builtin(__builtin_amdgcn_tensor_store_from_lds)
+
+#include "amd_gfx1250_TDM.h"
+
+template <typename TyGroup> struct can_group_do_tdm_copy : public std::false_type {};
+template <typename TyPar>
+struct can_group_do_tdm_copy<cooperative_groups::thread_block_tile<32, TyPar>>
+    : public std::true_type {};
+template <> struct can_group_do_tdm_copy<cooperative_groups::thread_block> : public std::true_type {
+};
+
+__CG_STATIC_QUALIFIER__ unsigned long long tdm_uniform_address(unsigned long long value) {
+  const unsigned int lo = __builtin_amdgcn_readfirstlane(static_cast<unsigned int>(value));
+  const unsigned int hi = __builtin_amdgcn_readfirstlane(static_cast<unsigned int>(value >> 32));
+  return (static_cast<unsigned long long>(hi) << 32) | lo;
+}
+
+template <typename TyGroup, typename TyElem>
+__CG_STATIC_QUALIFIER__ bool dispatch_tdm_memcpy(const TyGroup& group, TyElem* __restrict__ dst,
+                                                 const TyElem* __restrict__ src, size_t count) {
+  constexpr unsigned int alignment_bytes = 16;
+  const unsigned int group_size = group.size();
+  if (!can_group_do_tdm_copy<TyGroup>::value || warpSize != 32 || group_size < 32 ||
+      !__builtin_amdgcn_is_invocable(__builtin_amdgcn_tensor_load_to_lds) ||
+      !__builtin_amdgcn_is_invocable(__builtin_amdgcn_tensor_store_from_lds)) {
+    return false;
+  }
+  if (count <= static_cast<size_t>(group_size) * alignment_bytes) {
+    return false;
+  }
+  const bool src_is_shared = __builtin_amdgcn_is_shared(src);
+  const bool dst_is_shared = __builtin_amdgcn_is_shared(dst);
+  if (src_is_shared == dst_is_shared || __builtin_amdgcn_is_private(src) ||
+      __builtin_amdgcn_is_private(dst)) {
+    return false;
+  }
+  if (count > UINT32_MAX ||
+      ((reinterpret_cast<unsigned long long>(src) | reinterpret_cast<unsigned long long>(dst)) &
+       (alignment_bytes - 1))) {
+    return false;
+  }
+  const unsigned int total_bytes = __builtin_amdgcn_readfirstlane(static_cast<unsigned int>(count));
+  const unsigned int waves_in_flight = group_size / 32;
+  const unsigned int bytes_per_wave = (total_bytes / waves_in_flight) & ~(alignment_bytes - 1);
+  const unsigned int last_wave_bytes = total_bytes - bytes_per_wave * (waves_in_flight - 1);
+  if (last_wave_bytes > 65535) {
+    return false;
+  }
+  const unsigned int wave_rank = __builtin_amdgcn_readfirstlane(group.thread_rank() / 32);
+  if (wave_rank >= waves_in_flight) {
+    return true;
+  }
+  const unsigned int offset = bytes_per_wave * wave_rank;
+  const unsigned int bytes = wave_rank == waves_in_flight - 1 ? last_wave_bytes : bytes_per_wave;
+
+  typedef int __attribute__((ext_vector_type(4))) vint4;
+  typedef int __attribute__((ext_vector_type(8))) vint8;
+  const TyElem* global_ptr = src_is_shared ? dst : src;
+  const TyElem* local_ptr = src_is_shared ? src : dst;
+  const unsigned long long global_address =
+      tdm_uniform_address(reinterpret_cast<unsigned long long>(
+          (const __attribute__((address_space(1))) TyElem*)global_ptr)) +
+      offset;
+  const unsigned long long local_address =
+      tdm_uniform_address(reinterpret_cast<unsigned long long>(
+          (const __attribute__((address_space(3))) TyElem*)local_ptr)) +
+      offset;
+  gfx1250_TDM_GROUP0 group0;
+  group0.ldsAddr(static_cast<uint32_t>(local_address));
+  group0.globalAddr(static_cast<uintptr_t>(global_address));
+  gfx1250_TDM_GROUP1 group1;
+  group1.dataSize(0);
+  group1.tileDim0(bytes);
+  group1.tileDim1(1);
+  group1.tensorDim0(bytes);
+  group1.tensorDim1(1);
+  group1.tensorDim0Stride(bytes);
+  const vint8 encoded_group1 = __builtin_convertvector(group1.m_bitfield, vint8);
+  if (src_is_shared) {
+    __builtin_amdgcn_tensor_store_from_lds(group0.m_bitfield, encoded_group1, vint4{}, vint4{},
+                                           vint8{}, 0);
+  } else {
+    __builtin_amdgcn_tensor_load_to_lds(group0.m_bitfield, encoded_group1, vint4{}, vint4{},
+                                        vint8{}, 0);
+  }
+  return true;
+}
+#endif
+
+#if __has_builtin(__builtin_amdgcn_global_store_async_from_lds_b128) &&                            \
     __has_builtin(__builtin_amdgcn_global_load_async_to_lds_b128)
 template <typename TyElem>
 __CG_STATIC_QUALIFIER__ void accelerated_memcpy_global_to_lds(TyElem* __restrict__ dst,
@@ -54,17 +144,17 @@ __CG_STATIC_QUALIFIER__ void accelerated_memcpy_global_to_lds(TyElem* __restrict
       c_dst += 8;
     } else if (bytes_left >= 4) {
       if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_global_load_async_to_lds_b32))
-        __builtin_amdgcn_global_load_async_to_lds_b32(
-            (__attribute__((address_space(1))) int*)c_src,
-            (__attribute__((address_space(3))) int*)c_dst, 0 /* offset */, 0 /* cache policy */);
+        __builtin_amdgcn_global_load_async_to_lds_b32((__attribute__((address_space(1))) int*)c_src,
+                                                      (__attribute__((address_space(3))) int*)c_dst,
+                                                      0 /* offset */, 0 /* cache policy */);
       bytes_left -= 4;
       c_src += 4;
       c_dst += 4;
     } else {
       if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_global_load_async_to_lds_b8))
-        __builtin_amdgcn_global_load_async_to_lds_b8(
-            (__attribute__((address_space(1))) char*)c_src,
-            (__attribute__((address_space(3))) char*)c_dst, 0 /* offset */, 0 /* cache policy */);
+        __builtin_amdgcn_global_load_async_to_lds_b8((__attribute__((address_space(1))) char*)c_src,
+                                                     (__attribute__((address_space(3))) char*)c_dst,
+                                                     0 /* offset */, 0 /* cache policy */);
       bytes_left--;
       c_src++;
       c_dst++;
@@ -194,6 +284,12 @@ template <class TyGroup, typename TyElem, typename TySize, size_t Hint = alignof
 __CG_STATIC_QUALIFIER__ void memcpy_async_bytes(const TyGroup& group, TyElem* __restrict__ dst,
                                                 const TyElem* __restrict__ src,
                                                 const TySize& count) {
+#if defined(__HIP_DEVICE_COMPILE__) && __has_builtin(__builtin_amdgcn_tensor_load_to_lds) &&       \
+    __has_builtin(__builtin_amdgcn_tensor_store_from_lds)
+  if (details::dispatch_tdm_memcpy(group, dst, src, count)) {
+    return;
+  }
+#endif
 #if __has_builtin(__builtin_amdgcn_global_store_async_from_lds_b128) and                           \
     __has_builtin(__builtin_amdgcn_global_load_async_to_lds_b128)
   // Use the async path only when the builtins are actually invocable on the target, otherwise the
@@ -220,6 +316,8 @@ __CG_STATIC_QUALIFIER__ void memcpy_async_bytes(const TyGroup& group, TyElem* __
 /*
  * Enqueue memcpy async of `count` bytes.
  *
+ * All group members must call with identical pointers and count. Keep the source unchanged
+ * until `group.sync()` completes.
  * The copy is not complete when this returns. Call `group.sync()` before reading `dst`; the sync
  * both waits for the copy and makes it visible to the rest of the group.
  */
@@ -232,6 +330,8 @@ __CG_STATIC_QUALIFIER__ void memcpy_async(const TyGroup& group, TyElem* __restri
 /*
  * Enqueue memcpy async of min(dstLayout, srcLayout) elements.
  *
+ * All group members must call with identical pointers and layouts. Keep the source unchanged
+ * until `group.sync()` completes.
  * As above, the caller must `group.sync()` before reading `dst`.
  */
 template <class TyGroup, class TyElem, typename DstLayout, typename SrcLayout>
