@@ -276,6 +276,9 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   entries are omitted for this target via `RCCL_STUBS_OMIT_<symbol>` macros
   because `enqueue.cc` defines them itself. See
   `test_categories_micro_enqueue.yaml`.
+- **`rccl-UnitTestsMicroCe`**: `ce_coll.cc` (via `CE_COLL_CC_PATH`); suites
+  `CeCollMicrotest.*`, `LaunchPaths/CeAlltoAllvSyncMicrotest.*` and
+  `CeBatchOpsMicrotest.*`, all in `ce-coll-test.cc`. Its own binary because every other target links
 - **`rccl-UnitTestsMicroCollectives`** — `collectives.cc` (via `COLLECTIVES_CC_PATH`, from
   `collectives-test.cc`), with the `include/collectives.h` ring/PAT generators and
   `include/alltoallv_meta.h`; suite `Collectives*`. Its externals are hooks in their owners' fakes
