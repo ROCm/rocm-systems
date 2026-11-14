@@ -287,6 +287,12 @@ struct RegisterModifiers {
   /// VADDR operand enabling coordinate tracking.
   const Operand *image_address = nullptr;
   std::optional<ShaderExportOperands> shader_export;
+  /// Base SGPR selector of the four-DWORD BVH resource (encoded SRSRC multiplied by four).
+  std::optional<uint16_t> bvh_resource;
+  /// Leading VADDR words read for every active lane. The remaining ray words are
+  /// read only for lanes whose pointer can fetch a complete node from that resource.
+  uint8_t bvh_pointer_words = 0;
+  const Operand *image_atomic_data = nullptr;
   const Operand *image_resource = nullptr;
   bool image_resource_info = false;
   std::optional<uint8_t> image_transfer_dim;

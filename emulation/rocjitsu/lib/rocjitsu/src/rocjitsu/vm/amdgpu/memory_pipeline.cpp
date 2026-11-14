@@ -24,6 +24,7 @@
 #include "rocjitsu/vm/amdgpu/mem_state.h"
 #include "rocjitsu/vm/amdgpu/texel_byte_range.h"
 #include "rocjitsu/vm/amdgpu/translated_local_cache_policy.h"
+#include "rocjitsu/vm/graphics/bvh_intersection.h"
 #include "rocjitsu/vm/plugins/execution_plugin_group.h"
 #include "rocjitsu/vm/plugins/memory_access_observation.h"
 #include "util/log.h"
@@ -500,7 +501,9 @@ MemoryAccessCompletion vector_complete(VectorMemState &d, Wavefront &wf, Compute
     return MemoryAccessCompletion::Complete;
 
   // Resident fetches preserve the shader-initialized status VGPR. A PRT NACK
-  // writes a nonzero status only for the failing lanes.
+  // writes a nonzero status only for the failing lanes. The RDNA3 and RDNA4
+  // image TFE field (ISA section 10.1) places status after the returned texel.
+  // For a returning compare-swap this overlaps the first comparison word.
   if (d.texel_status) {
     const auto &status = *d.texel_status;
     const uint64_t warnings = status.lod_warnings & ~status.failures;
@@ -521,6 +524,28 @@ MemoryAccessCompletion vector_complete(VectorMemState &d, Wavefront &wf, Compute
     for (uint64_t lanes = d.buffer_missing_lanes; lanes; lanes &= lanes - 1)
       cu.write_vgpr(status, std::countr_zero(lanes), 1);
   }
+  if (d.image_status) {
+    const auto &status = *d.image_status;
+    const uint64_t misses = status.written_misses();
+    const uint64_t warnings = status.written_warnings();
+    if (warnings && (wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA3 ||
+                     wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA3_5))
+      wf.set_mode_raw(wf.mode_raw() | (1u << 10)); // MODE.LOD_CLAMPED is sticky.
+    if (warnings && wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA4)
+      wf.set_gfx12_excp_flag_user_extra_raw(wf.gfx12_excp_flag_user_extra_raw() | (1u << 31));
+    const uint32_t data_words = d.destination_vgpr_count();
+    for (uint64_t lanes = misses | warnings; lanes; lanes &= lanes - 1) {
+      const uint32_t lane = std::countr_zero(lanes);
+      const uint32_t cause = (misses & (uint64_t{1} << lane)) ? 1u : 2u;
+      cu.write_vgpr(d.dst_reg_base + data_words, lane,
+                    (uint32_t{status.levels[lane]} << 16) | cause);
+    }
+  }
+  if (d.bvh) {
+    complete_bvh_intersection(wf, cu, d);
+    return MemoryAccessCompletion::Complete;
+  }
+
   if (d.buffer_components) {
     complete_buffer_format_load(wf, cu, d);
     return MemoryAccessCompletion::Complete;

@@ -1,11 +1,20 @@
 # Copyright (c) 2025-2026 Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
+# BVH result registers expose intermediate rounding directly.
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    set_source_files_properties(
+        ../graphics/bvh_intersection.cpp
+        PROPERTIES COMPILE_OPTIONS "-ffp-contract=off;-frounding-math"
+    )
+endif()
+
 rj_add_object_library(rocjitsu_vm_amdgpu
     arithmetic_policy.cpp
     aql/aql_packet_processor.cpp
     compute_queue_binding_factory.cpp
     circular_ring_reader.cpp
+    ../graphics/bvh_intersection.cpp
     ../graphics/image_completion.cpp
     ../graphics/image_memory.cpp
     ../graphics/image_msaa.cpp

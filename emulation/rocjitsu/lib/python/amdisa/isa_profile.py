@@ -38,6 +38,12 @@ _FLOAT_NAME_MAP: dict[float, str] = {
 }
 
 
+# MIMG ray-intersection opcodes use the shared C++ BVH register layout.
+MIMG_BVH_INSTRUCTIONS = frozenset(
+    {'IMAGE_BVH_INTERSECT_RAY', 'IMAGE_BVH64_INTERSECT_RAY'}
+)
+
+
 class MemoryCoherencyModel(Enum):
     """Identifies the memory coherency encoding model for an ISA family.
 
@@ -702,23 +708,6 @@ class IsaProfile(ABC):
     def gfx11_mimg_gather_style_instructions(self) -> frozenset[str]:
         """GFX11 MIMG instructions with gather-style VDATA sizing."""
         return frozenset()
-
-    @property
-    def gfx11_mimg_fixed_vdata_words(self) -> dict[str, int]:
-        """GFX11 MIMG instructions with a fixed VDATA width in DWORDs."""
-        return {}
-
-    @property
-    def gfx11_mimg_fixed_vaddr_words(self) -> dict[str, tuple[int, int]]:
-        """GFX11 MIMG VADDR widths as ``(default, a16)`` DWORD counts."""
-        return {}
-
-    @property
-    def gfx11_mimg_nsa_group_words(
-        self,
-    ) -> dict[str, tuple[tuple[int, ...], tuple[int, ...]]]:
-        """GFX11 partial-NSA group widths as ``(default, a16)`` tuples."""
-        return {}
 
     @property
     def sendmsg_return_symbolic(self) -> bool:
@@ -2383,7 +2372,7 @@ class Rdna1Profile(_AmdgpuProfileBase):
     models_nop_issue_delay = True
 
     def mimg_r128_resource(self, name: str) -> bool:
-        return not name.startswith('IMAGE_BVH')
+        return name not in MIMG_BVH_INSTRUCTIONS
 
     @property
     def mimg_max_nsa_words(self) -> int:
@@ -2551,6 +2540,8 @@ class Rdna3Profile(_AmdgpuProfileBase):
     - DPP support expanded to VOP3/VOP3P/VOPC/VOP3_SDST_ENC.
     - SDWA removed (no ``_VOP_SDWA`` variants).
     - ``ENC_LDSDIR`` and ``ENC_VINTERP`` replace CDNA's ``ENC_VINTRP``.
+    - BVH MIMG instructions have a four-DWORD resource regardless of R128.
+      Their VADDR widths and NSA groups come from the C++ BVH layout helpers.
 
     XML bugs worked around:
 
@@ -2595,38 +2586,15 @@ class Rdna3Profile(_AmdgpuProfileBase):
         return True
 
     def mimg_r128_resource(self, name: str) -> bool:
-        return name not in self.gfx11_mimg_fixed_vaddr_words
+        return name not in MIMG_BVH_INSTRUCTIONS
 
     @property
     def mimg_max_nsa_words(self) -> int:
         return 1
 
     @property
-    def gfx11_mimg_nsa_group_words(
-        self,
-    ) -> dict[str, tuple[tuple[int, ...], tuple[int, ...]]]:
-        return {
-            'IMAGE_BVH_INTERSECT_RAY': ((1, 1, 3, 3, 3), (1, 1, 3, 3)),
-            'IMAGE_BVH64_INTERSECT_RAY': ((2, 1, 3, 3, 3), (2, 1, 3, 3)),
-        }
-
-    @property
     def gfx11_mimg_gather_style_instructions(self) -> frozenset[str]:
         return frozenset({'IMAGE_MSAA_LOAD'})
-
-    @property
-    def gfx11_mimg_fixed_vdata_words(self) -> dict[str, int]:
-        return {
-            'IMAGE_BVH_INTERSECT_RAY': 4,
-            'IMAGE_BVH64_INTERSECT_RAY': 4,
-        }
-
-    @property
-    def gfx11_mimg_fixed_vaddr_words(self) -> dict[str, tuple[int, int]]:
-        return {
-            'IMAGE_BVH_INTERSECT_RAY': (11, 8),
-            'IMAGE_BVH64_INTERSECT_RAY': (12, 9),
-        }
 
     @property
     def gds_uses_expcnt(self) -> bool:
