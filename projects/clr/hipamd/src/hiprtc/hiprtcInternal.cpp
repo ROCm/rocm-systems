@@ -96,6 +96,13 @@ bool RTCCompileProgram::addSource(const std::string& source, const std::string& 
 // addSource_impl is a different function because we need to add source when we track mangled
 // objects
 bool RTCCompileProgram::addSource_impl() {
+  // Compiling the program again must not add its source a second time.
+  amd_comgr_status_t status =
+      amd::Comgr::data_set_remove(compile_input_.get(), AMD_COMGR_DATA_KIND_SOURCE);
+  if (status != AMD_COMGR_STATUS_SUCCESS) {
+    LogPrintfError("Error in hiprtc: unable to remove the previous source, status: %d", status);
+    return false;
+  }
   std::string_view vsource(source_code_.data(), source_code_.size());
   if (!hip::helpers::addCodeObjData(compile_input_, vsource, source_name_,
                                     AMD_COMGR_DATA_KIND_SOURCE)) {

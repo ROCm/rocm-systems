@@ -8,6 +8,7 @@
  * hipRTC program should be created even if the name passed is empty or null
  * hipRTC program compilation should succeed even if gpu arch is not specified in the options
  * hipRTC should be able to compile kernels using  __forceinline__ keyword
+ * hipRTC program compilation should succeed when the same program is compiled again
  */
 #include <hip_test_common.hh>
 
@@ -26,6 +27,29 @@ __global__ void testinline()
  f();
 }
 )"};
+
+static void LaunchCode(const std::vector<char>& codec) {
+#if HT_NVIDIA
+  int device = 0;
+  HIPCHECK(hipInit(0));
+  hipCtx_t ctx;
+  HIPCHECK(hipCtxCreate(&ctx, 0, device));
+#endif
+
+  hipModule_t module;
+  hipFunction_t function;
+  HIP_CHECK(hipModuleLoadData(&module, codec.data()));
+  HIP_CHECK(hipModuleGetFunction(&function, module, funname));
+
+  HIP_CHECK(hipModuleLaunchKernel(function, 1, 1, 1, 64, 1, 1, 0, 0, nullptr, 0));
+  HIP_CHECK(hipDeviceSynchronize());
+
+  HIP_CHECK(hipModuleUnload(module));
+
+#if HT_NVIDIA
+  HIPCHECK(hipCtxDestroy(ctx));
+#endif
+}
 
 HIP_TEST_CASE(Unit_hiprtc_functional) {
   using namespace std;
@@ -48,24 +72,21 @@ HIP_TEST_CASE(Unit_hiprtc_functional) {
   HIPRTC_CHECK(hiprtcGetCode(prog, codec.data()));
   HIPRTC_CHECK(hiprtcDestroyProgram(&prog));
 
-#if HT_NVIDIA
-  int device = 0;
-  HIPCHECK(hipInit(0));
-  hipCtx_t ctx;
-  HIPCHECK(hipCtxCreate(&ctx, 0, device));
-#endif
+  LaunchCode(codec);
+}
 
-  hipModule_t module;
-  hipFunction_t function;
-  HIP_CHECK(hipModuleLoadData(&module, codec.data()));
-  HIP_CHECK(hipModuleGetFunction(&function, module, funname));
+HIP_TEST_CASE(Unit_hiprtc_compile_twice) {
+  hiprtcProgram prog;
+  HIPRTC_CHECK(hiprtcCreateProgram(&prog, code, nullptr, 0, nullptr, nullptr));
+  HIPRTC_CHECK(hiprtcCompileProgram(prog, 0, 0));
+  HIPRTC_CHECK(hiprtcCompileProgram(prog, 0, 0));
 
-  HIP_CHECK(hipModuleLaunchKernel(function, 1, 1, 1, 64, 1, 1, 0, 0, nullptr, 0));
-  HIP_CHECK(hipDeviceSynchronize());
+  size_t codeSize;
+  HIPRTC_CHECK(hiprtcGetCodeSize(prog, &codeSize));
+  REQUIRE(codeSize > 0);
+  std::vector<char> codec(codeSize);
+  HIPRTC_CHECK(hiprtcGetCode(prog, codec.data()));
+  HIPRTC_CHECK(hiprtcDestroyProgram(&prog));
 
-  HIP_CHECK(hipModuleUnload(module));
-
-#if HT_NVIDIA
-  HIPCHECK(hipCtxDestroy(ctx));
-#endif
+  LaunchCode(codec);
 }
