@@ -11,11 +11,13 @@
 #include "common/defines.h"
 #include "common/env_vars.hpp"
 #include "common/path.hpp"
+#include "core/agent.hpp"
 #include "core/agent_manager.hpp"
 #include "core/components/fwd.hpp"
 #include "core/config.hpp"
 #include "core/node_info.hpp"
 #include "core/trace_cache/cache_manager.hpp"
+#include "core/trace_cache/cacheable.hpp"
 #include "core/trace_cache/sample_type.hpp"
 #include "library/components/category_region.hpp"
 #include "library/runtime.hpp"
@@ -158,6 +160,9 @@ violates_name_rules(Arg&& _arg, Args&&... _args)
 
 namespace
 {
+// Kokkos events are host-side; they are attributed to the first CPU agent.
+constexpr std::uint32_t k_kokkos_cpu_index = 0;
+
 void
 metadata_initialize_kokkos_category()
 {
@@ -168,8 +173,28 @@ metadata_initialize_kokkos_category()
 void
 metadata_initialize_kokkos_track()
 {
-    rocprofsys::trace_cache::get_metadata_registry().ensure_track(
-        rocprofsys::trait::name<category::kokkos>::value, std::nullopt);
+    constexpr const char* k_name = rocprofsys::trait::name<category::kokkos>::value;
+
+    auto& registry = rocprofsys::trace_cache::get_metadata_registry();
+    registry.ensure_track(k_name, std::nullopt);
+    registry.add_pmc_info(
+        { .type             = rocprofsys::agent_type::cpu,
+          .agent_type_index = k_kokkos_cpu_index,
+          .target_arch      = "CPU",
+          .event_code       = 0,
+          .instance_id      = 0,
+          .name             = k_name,
+          .symbol           = k_name,
+          .description      = "Kokkos event",
+          .long_description = "",
+          .component        = "",
+          .units            = "",
+          .value_type       = std::string{ rocprofsys::trace_cache::k_absolute },
+          .block            = "",
+          .expression       = "",
+          .is_constant      = 0,
+          .is_derived       = 0,
+          .extdata          = "{}" });
 }
 
 void
@@ -193,7 +218,7 @@ cache_kokkos_event(const char* name, const char* event_type, const char* target,
             static_cast<size_t>(rocprofsys::category_enum_id<category::kokkos>::value),
             rocprofsys::trait::name<category::kokkos>::value, timestamp_ns,
             event_metadata.dump(), stack_id, parent_stack_id, correlation_id, call_stack,
-            line_info });
+            line_info, k_kokkos_cpu_index });
 }
 
 }  // namespace

@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import shutil
 import signal
+from pathlib import Path
 from typing import ClassVar
 
 import pytest
@@ -901,6 +902,8 @@ class TestCpuMetrics(RocprofsysTest):
                 "CPU agent unavailable; CLI settings checked, host Frequency/Load "
                 "counters not sampled on this host"
             )
+        if not Path("/sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq").exists():
+            pytest.skip("host exposes no cpufreq sysfs; Frequency counter not sampled")
         self.assert_perfetto(
             result,
             subtest_name="host frequency and load counters",
