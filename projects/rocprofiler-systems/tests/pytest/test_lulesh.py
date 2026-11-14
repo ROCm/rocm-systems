@@ -182,3 +182,53 @@ class TestLulesh(RocprofsysTest):
             mode,
             binary_rewrite_fail_regex=["0 instrumented loops in procedure"],
         )
+
+
+# =============================================================================
+# Kokkos deep-copy tracking
+# =============================================================================
+
+
+@pytest.mark.sampling
+@pytest.mark.timeout(300)
+@pytest.mark.class_name("lulesh-kokkosp-deep-copy")
+@pytest.mark.rocpd("lulesh_base_env")
+class TestLuleshKokkospDeepCopy(RocprofsysTest):
+    """--kokkosp-deep-copy records a region per Kokkos::deep_copy.
+
+    Tests:  the flag turns Kokkos deep copies into their own trace regions.
+    Input:  --kokkosp-deep-copy on lulesh -i 5 -s 20 -p, with KOKKOS_TOOLS_LIBS
+            pointing at librocprof-sys-dl.so.
+    Expect: ROCPROFSYS_KOKKOSP_DEEP_COPY=true and regions ending in
+            "[deep_copy]" in both the Perfetto trace and ROCpd.
+
+    Matches the " [deep_copy]" suffix, not the bare substring: Kokkos also
+    labels its own fences "Kokkos::deep_copy: ... [fence]" with the flag off.
+    """
+
+    DEEP_COPY_FLAGS = ["--kokkosp-deep-copy"]
+    RUN_ARGS = ["-i", "5", "-s", "20", "-p"]
+
+    def test_regions(self, lulesh_base_env, validation_rules_dir):
+        env = lulesh_base_env.copy()
+        env["KOKKOS_TOOLS_LIBS"] = "librocprof-sys-dl.so"
+        result = self.run_test(
+            "sampling",
+            "lulesh",
+            env=env,
+            run_args=self.RUN_ARGS,
+            sampling_args=self.DEEP_COPY_FLAGS,
+        )
+        self.assert_regex(result)
+        self.assert_perfetto(
+            result,
+            subtest_name="Kokkos deep copies recorded in the Perfetto trace",
+            label_substrings=["[deep_copy]"],
+        )
+        self.assert_rocpd(
+            result,
+            subtest_name="Kokkos deep copies recorded in ROCpd",
+            rules_files=[
+                validation_rules_dir / "lulesh" / "kokkosp-deep-copy-rules.json"
+            ],
+        )
