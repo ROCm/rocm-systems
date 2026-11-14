@@ -31,11 +31,11 @@ from format_yaml import normalize_equation
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 # Make src/ importable.
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
-from rocprof_compute_soc.metric_library import loader  # noqa: E402
-from utils.metrics.expression import build_eval_string  # noqa: E402
-from utils.mi_gpu_spec import mi_gpu_specs  # noqa: E402
-from utils.utils_common import config_arch_members  # noqa: E402
-from utils.utils_counter_defs import counter_to_block  # noqa: E402
+from rocprof_compute_soc.metric_library import loader
+from utils.metrics.expression import build_eval_string
+from utils.mi_gpu_spec import mi_gpu_specs
+from utils.utils_common import config_arch_members
+from utils.utils_counter_defs import counter_to_block
 
 # Categories named after panels, not hardware.
 VIEW_CATEGORIES = ("system", "memchart", "roofline", "wavefront")
