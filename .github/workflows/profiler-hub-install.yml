@@ -42,11 +42,12 @@ jobs:
       INSTALL_PREFIX: ${{ github.workspace }}/profiler-hub-install
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           sparse-checkout: |
             profilers/profiler-hub
             .github/workflows
+          persist-credentials: false
 
       - name: Install dependencies
         run: |
