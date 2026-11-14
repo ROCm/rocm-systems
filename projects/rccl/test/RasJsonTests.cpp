@@ -10,12 +10,15 @@
 #include <arpa/inet.h>
 #include <netdb.h>
 #include <sys/socket.h>
+#include <sys/time.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cstring>
 #include <string>
 #include <thread>
+#include <vector>
 
 #include "common/ErrCode.hpp"
 #include "common/ProcessIsolatedTestRunner.hpp"
@@ -47,11 +50,12 @@ static int pickFreePort() {
   return port;
 }
 
-// Connects to the local RAS server and runs one STATUS query in the requested
-// format ("text" or "json"). Returns the entire response body, or an empty
+// Connects to the local RAS server and runs one query (STATUS by default) in the
+// requested format ("text" or "json"). Returns the entire response body, or an empty
 // string on connection/protocol failure. Uses 127.0.0.1 (IPv4 loopback) to
 // match the address family used by pickFreePort() and NCCL_RAS_ADDR.
-static std::string queryRas(const std::string& format, const std::string& portStrIn) {
+static std::string queryRas(const std::string& format, const std::string& portStrIn,
+                            const std::string& command = "STATUS") {
   int sock = -1;
   addrinfo hints{};
   hints.ai_family   = AF_INET;
@@ -75,6 +79,9 @@ static std::string queryRas(const std::string& format, const std::string& portSt
     if (sock < 0) std::this_thread::sleep_for(std::chrono::milliseconds(100));
   }
   if (sock < 0) return {};
+  // Bound each receive: a stuck server then fails the test with the reply so far.
+  timeval recvTimeout{60, 0};
+  ::setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &recvTimeout, sizeof(recvTimeout));
 
   if (format != "text") {
     std::string setFmt = "SET FORMAT " + format + "\n";
@@ -87,8 +94,8 @@ static std::string queryRas(const std::string& format, const std::string& portSt
     }
   }
 
-  const char* status = "STATUS\n";
-  ::send(sock, status, ::strlen(status), 0);
+  const std::string request = command + "\n";
+  ::send(sock, request.c_str(), request.size(), 0);
 
   std::string body;
   char buf[4096];
@@ -159,6 +166,67 @@ TEST(RasJson, JsonFormatIsSupportedAndDistinctFromText) {
             << "JSON output must not contain the human-readable text banner";
 
         ASSERT_EQ(ncclCommDestroy(comm), ncclSuccess);
+      },
+      {{"NCCL_RAS_ENABLE", "1"}});
+}
+
+// Up to two GPUs, so that each rank has a peer to classify where possible.
+static int diagnosticsGpus() {
+  int devCount = 0;
+  if (hipGetDeviceCount(&devCount) != hipSuccess) return 0;
+  return std::min(devCount, 2);
+}
+
+// Creates one communicator over the first nGpus GPUs of this process, with its
+// RAS server on a free port (picked in the isolated child, for the reason given
+// above), and returns the server's reply to the DIAGNOSTICS command.
+static std::string queryRasDiagnostics(int nGpus) {
+  int port = pickFreePort();
+  std::string portStr = std::to_string(port);
+  std::string rasAddr = "127.0.0.1:" + portStr;
+  std::vector<ncclComm_t> comms(nGpus, nullptr);
+  if (port <= 0 || setenv("NCCL_RAS_ADDR", rasAddr.c_str(), /*overwrite=*/1) != 0 ||
+      ncclCommInitAll(comms.data(), nGpus, /*devlist=*/nullptr) != ncclSuccess) {
+    ADD_FAILURE() << "Could not create a " << nGpus << "-rank communicator with a RAS server";
+    return {};
+  }
+  std::this_thread::sleep_for(std::chrono::milliseconds(250));
+  std::string reply = queryRas("text", portStr, "DIAGNOSTICS");
+  for (ncclComm_t comm : comms) EXPECT_EQ(ncclCommDestroy(comm), ncclSuccess);
+  return reply;
+}
+
+// NCCL 2.32 adds a Paths check to the RAS diagnostics. Each rank classifies how
+// it reaches every peer in the communicator's topology, and the report lists the
+// union of those path types, "self" for the rank itself (e.g. "self+XGMI").
+TEST(RasDiagnostics, ReportsCommunicatorPathTypes) {
+  RUN_ISOLATED_TEST_WITH_ENV(
+      "RasDiagnostics_ReportsCommunicatorPathTypes",
+      []() {
+        int nGpus = diagnosticsGpus();
+        if (nGpus < 1) GTEST_SKIP() << "No HIP-visible GPU; skipping";
+        std::string reply = queryRasDiagnostics(nGpus);
+        size_t pos = reply.find(nGpus > 1 ? "Paths: self+" : "Paths: self across");
+        ASSERT_NE(pos, std::string::npos) << "RAS diagnostics reported no path types:\n" << reply;
+        std::string line = reply.substr(pos, reply.find('\n', pos) - pos);
+        std::string scope = " across " + std::to_string(nGpus) + " ranks in comm 0x";
+        EXPECT_NE(line.find(scope), std::string::npos) << line;
+      },
+      {{"NCCL_RAS_ENABLE", "1"}});
+}
+
+// Control: the same DIAGNOSTICS request completes without a failed summary and
+// reports the NCCL environment check, which predates the Paths check.
+TEST(RasDiagnostics, ReportsNcclEnvironment) {
+  RUN_ISOLATED_TEST_WITH_ENV(
+      "RasDiagnostics_ReportsNcclEnvironment",
+      []() {
+        int nGpus = diagnosticsGpus();
+        if (nGpus < 1) GTEST_SKIP() << "No HIP-visible GPU; skipping";
+        std::string reply = queryRasDiagnostics(nGpus);
+        EXPECT_NE(reply.find("NCCL environment: "), std::string::npos) << reply;
+        EXPECT_NE(reply.find("RAS diagnostics completed"), std::string::npos) << reply;
+        EXPECT_EQ(reply.find("ERROR: diagnostics summary failed"), std::string::npos) << reply;
       },
       {{"NCCL_RAS_ENABLE", "1"}});
 }
