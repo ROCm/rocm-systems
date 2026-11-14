@@ -413,7 +413,7 @@ amdsmi_status_t smi_amdgpu_get_ranges(amd::smi::AMDSmiGPUDevice* device, amdsmi_
                                       int* max_freq, int* min_freq, int* num_dpm,
                                       int* sleep_state_freq) {
   SMIGPUDEVICE_MUTEX(device->get_mutex())
-  std::string fullpath = "/sys/class/drm/" + device->get_gpu_path() + "/device";
+  std::string fullpath = smi_amdgpu_sysfs_drm_root() + device->get_gpu_path() + "/device";
 
   std::string smclk_min_max_fullpath = "";
 

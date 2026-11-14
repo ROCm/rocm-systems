@@ -5,8 +5,8 @@
 
 #include <string>
 
-// Library-local test seam for the sysfs root smi_amdgpu_get_enabled_blocks()
-// (src/amd_smi/amd_smi_utils.cc) reads .../ras/features from. Defaults to the
+// Library-local sysfs-root seam for clock ranges and RAS enabled blocks
+// (src/amd_smi/amd_smi_utils.cc). Defaults to the
 // real "/sys/class/drm/" prefix -- e.g. production reads
 // "/sys/class/drm/card0/device/ras/features". A test that overrides this to
 // "/tmp/amdsmi_fake_sysfs_XXXXXX/" (see FakeSysfsTree in
