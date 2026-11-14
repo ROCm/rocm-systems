@@ -183,9 +183,10 @@ Limitations (CLI)
 * **HIP graph launches are not replayed.** A graph seen while replay is active warns once and
   runs un-replayed (not a hard error).
 * **Only single-packet, single-dispatch submissions** are replayed.
-* **Single process.** There is no MPI or cross-process coordination, and there is no multi-GPU
-  end-to-end CLI test. Replaying a kernel that participates in an inter-process collective is
-  unsafe. The SDK already selects groups per agent; what is missing is a multi-GPU / MPI test.
+* **Per process, no cross-process coordination.** Each MPI rank replays on its own, and the SDK
+  never synchronizes ranks. Replaying a kernel that participates in an inter-process collective
+  (RCCL, GPU-aware MPI) is unsafe, so keep those kernels out of replay with
+  ``--kernel-exclude-regex`` or ``--kernel-include-regex``. See :ref:`kernel-replay-with-mpi`.
 * **Async copies are not fenced** (SDK). An ``hsa_amd_memory_async_copy`` on another thread can
   mutate device memory during the replay window.
 * **Stuck drains abort the process** (SDK, roughly 60 s).
@@ -216,3 +217,43 @@ See also
 * :ref:`using-kernel-replay` — SDK callback how-to
 * :ref:`kernel-replay-sdk-api` — payload and operations
 * :ref:`kernel-replay-callback-api` — API contract
+
+.. _kernel-replay-with-mpi:
+
+Kernel replay with MPI
+======================
+
+``--replay-mode kernel`` works under ``mpirun``: place ``rocprofv3`` inside the launcher so every
+rank gets its own tool instance, and give each rank its own output directory with ``%rank%``.
+
+.. code-block:: bash
+
+   mpirun -n 4 rocprofv3 --pmc SQ_WAVES SQ_INSTS_VALU --pmc SQ_WAVES GRBM_COUNT \
+       --replay-mode kernel --kernel-replay-beta-enabled \
+       --kernel-exclude-regex "^(nccl|rccl)" \
+       -d out/rank.%rank% -o out -- <application_path>
+
+A replay is a purely local operation: the rank snapshots its own device memory, runs one dispatch
+once per counter group, and restores memory between the runs. The application sees one execution,
+and the completion signal fires only after the last pass, so stream ordering across ranks is
+unchanged. That is safe for any kernel whose effects stay inside the rank. It is not safe for a
+kernel with effects outside the rank, because the peers do not re-execute their side:
+
+* a collective communication kernel would run once per counter group on this rank while the peers
+  run it once, which deadlocks or corrupts the exchange;
+* device memory mapped into another process, such as an IPC handle or an xGMI peer buffer, would be
+  rewound under the peer's feet by the restore.
+
+Kernels that the kernel filters do not select are therefore never replayed. They run once, collect no
+counters, and cost no snapshot. That covers a kernel excluded by ``--kernel-exclude-regex``, one
+left out by ``--kernel-include-regex``, and a launch outside ``--kernel-iteration-range``. The
+iteration range counts the launches of each kernel in the rank that makes them, so choose a range
+that is the same on every rank when the ranks run the same program. To profile one rank only, add
+``--profile-mpi-ranks``; the remaining ranks run the application unprofiled and still take part in
+its collectives.
+
+.. note::
+
+   Releases before this change replayed every dispatch regardless of the kernel filters: an
+   excluded kernel was snapshotted and re-run once per counter group and simply collected nothing.
+   On those releases do not use kernel replay on a job whose collectives run as GPU kernels.

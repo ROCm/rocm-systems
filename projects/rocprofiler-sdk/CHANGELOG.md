@@ -15,6 +15,8 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 
 - Fixed rocpd reporting a counter at N times its value under `rocprofv3 --replay-mode kernel` when N `--pmc` groups list it, for example a sanity counter such as `SQ_WAVES` in every group. Every pass of a replayed dispatch shares the dispatch's record, so the `counters_collection` view, and the counter CSV and Perfetto output that `rocpd convert` builds from it, summed the passes. Passes after the first are now tagged with `replay_pass` in `rocpd_pmc_event.extdata`, the view averages a counter over the passes that collected it, and the `pmc_events` view reports each row's pass in a new `replay_pass` column. This behavior is identified by rocpd schema version 3.0.6.
 
+- Fixed `rocprofv3 --replay-mode kernel` replaying kernels that the kernel filters do not select. `--kernel-exclude-regex`, `--kernel-include-regex`, and `--kernel-iteration-range` only stopped counters being collected; an excluded kernel, or a launch outside the iteration range, was still snapshotted and re-run once per counter group. Such dispatches now run once with no replay. This makes kernel replay usable under `mpirun`, where collective communication kernels must be excluded from replay. See `using-kernel-replay-rocprofv3` for the MPI usage.
+
 ### Known issues
 
 ### Removed

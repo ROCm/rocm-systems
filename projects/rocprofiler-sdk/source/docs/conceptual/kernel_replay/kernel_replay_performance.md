@@ -221,8 +221,10 @@ they are worth knowing before interpreting any benchmark:
 - **Stream-ordered / caching allocators.** `hipMallocAsync` and pool allocators are not hooked by
   the memory tracker, so that memory is neither snapshotted nor restored. PyTorch's caching
   allocator is exactly this shape.
-- **Multi-GPU.** There is no multi-GPU test, and no cross-process coordination. A kernel that takes
-  part in a collective must not be replayed.
+- **Multi-GPU and MPI.** Replay does no cross-process coordination, so a kernel that takes part in a
+  collective must not be replayed. `rocprofv3` leaves a kernel that its kernel filters do not select
+  out of replay, so excluding the collective kernels with `--kernel-exclude-regex` makes an MPI job
+  safe to replay rank by rank.
 
 None of these are defects in the sense of a wrong answer inside the supported envelope; they are the
 boundary of that envelope. They are listed here because a benchmark run against a real framework

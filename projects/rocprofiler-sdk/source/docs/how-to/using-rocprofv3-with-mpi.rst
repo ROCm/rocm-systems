@@ -254,3 +254,11 @@ When ``--mpi-world-rank-variable`` and ``--mpi-world-size-variable`` are specifi
 The ``--mpi-world-size-variable`` option is particularly useful when using ``--profile-mpi-ranks`` to ensure that the specified rank ranges are validated against the actual MPI world size, preventing out-of-range errors.
 
 The two options must be specified together. When set, the named variables must hold integers, with a world size of 1 or greater and a rank of 0 or greater. When both variables are set, the rank must also be less than the world size. Invalid values cause ``rocprofv3`` to exit with an error before launching the application. If a named variable is not present in the environment, that variable is treated as undetected rather than causing an error: an undetected rank causes every rank to provide output, and an undetected world size skips rank range validation.
+
+Kernel replay with MPI
+----------------------
+
+``--replay-mode kernel`` can collect several counter groups on one run of an MPI job. Each rank
+replays its own dispatches independently, and kernels that the kernel filters do not select (for
+example the RCCL or GPU-aware MPI kernels, excluded with ``--kernel-exclude-regex``) are never
+replayed. See :ref:`kernel-replay-with-mpi` for the requirements and limits.
