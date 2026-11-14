@@ -8,6 +8,8 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 
 ### Changed
 
+- **HIP event trace:** `hipEventRecord` and `hipStreamWaitEvent` barrier records are timed on the GPU, from the barrier's completion signal, as kernel dispatches are. Before, they ran from the CPU enqueue to the CPU completion handler. The CPU times remain the fallback when the GPU times cannot be read.
+
 ### Resolved issues
 
 - Fixed rocpd reporting a counter at N times its value under `rocprofv3 --replay-mode kernel` when N `--pmc` groups list it, for example a sanity counter such as `SQ_WAVES` in every group. Every pass of a replayed dispatch shares the dispatch's record, so the `counters_collection` view, and the counter CSV and Perfetto output that `rocpd convert` builds from it, summed the passes. Passes after the first are now tagged with `replay_pass` in `rocpd_pmc_event.extdata`, the view averages a counter over the passes that collected it, and the `pmc_events` view reports each row's pass in a new `replay_pass` column. This behavior is identified by rocpd schema version 3.0.6.
