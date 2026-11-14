@@ -22,6 +22,8 @@ namespace rocjitsu {
 
 namespace {
 
+constexpr uint64_t kUnsignaledEventSlot = UINT64_MAX;
+
 void write_event_slot(void *page, size_t page_size, uint32_t event_id, uint64_t value) {
   if (!page || event_id >= page_size / sizeof(uint64_t))
     return;
@@ -44,10 +46,6 @@ void EventState::adopt_page(void *ptr, size_t size) {
     return;
   page_ = ptr;
   page_size_ = size;
-  for (const auto &[id, ev] : events_) {
-    if (ev.signaled)
-      write_event_slot(page_, page_size_, id, ev.event_age);
-  }
 }
 
 bool EventState::release_page(void *ptr) {
@@ -90,39 +88,40 @@ bool EventState::has_signal_waiters(const GpuEvent &event) {
                      [](const EventWaiter *waiter) { return waiter->listen_for_signals; });
 }
 
-/// @brief Signal event(s) from the CP's interrupt callback.
-/// @details When event_id is non-zero, signals that specific event. When
-///          event_id is zero, broadcasts to all type-0 events — matching real
-///          KFD's kfd_signal_event_interrupt(pasid, partial_id=0, valid_id_bits=0).
+void EventState::signal_event(GpuEvent &event) {
+  event.signaled = !event.auto_reset || !has_signal_waiters(event);
+  if (!(++event.event_age))
+    event.event_age = 2;
+  activate_waiters(event);
+}
+
 void EventState::signal_interrupt(uint32_t event_id) {
   std::lock_guard<std::mutex> lock(mutex_);
-  if (event_id == 0) {
-    for (auto &[id, ev] : events_) {
-      if (ev.event_type == 0) {
-        ev.signaled = !ev.auto_reset || !has_signal_waiters(ev);
-        if (!(++ev.event_age))
-          ev.event_age = 2;
-        write_event_slot(page_, page_size_, id, ev.event_age);
-        util::Logger::cp("SIGNAL_BROADCAST: event_id=", id, " age=", ev.event_age,
-                         " waiters=", ev.waiters.size());
-        activate_waiters(ev);
-      }
-    }
+  auto event = events_.find(event_id);
+  if (event != events_.end() && event->second.event_type == KFD_IOC_EVENT_SIGNAL) {
+    write_event_slot(page_, page_size_, event_id, kUnsignaledEventSlot);
+    signal_event(event->second);
     return;
   }
-  auto it = events_.find(event_id);
-  if (it != events_.end() && it->second.event_type == 0) {
-    it->second.signaled = !it->second.auto_reset || !has_signal_waiters(it->second);
-    if (!(++it->second.event_age))
-      it->second.event_age = 2;
-    write_event_slot(page_, page_size_, event_id, it->second.event_age);
-    util::Logger::cp("SIGNAL_INTERRUPT: event_id=", event_id, " age=", it->second.event_age,
-                     " waiters=", it->second.waiters.size(), " page=", page_ ? "valid" : "null");
-    activate_waiters(it->second);
-  } else {
-    util::Logger::cp("SIGNAL_INTERRUPT_MISS: event_id=", event_id,
-                     " NOT FOUND or wrong type, events_.size()=", events_.size());
+  // Invalid or absent interrupt context identifies no event. As in KFD,
+  // recover the intended signals from GPU-written mailboxes, not event ages.
+  if (!page_)
+    return;
+  auto *slots = static_cast<uint64_t *>(page_);
+  for (auto &[id, pending] : events_) {
+    if (pending.event_type != KFD_IOC_EVENT_SIGNAL || id >= page_size_ / sizeof(uint64_t))
+      continue;
+    if (std::atomic_ref<uint64_t>(slots[id]).exchange(
+            kUnsignaledEventSlot, std::memory_order_acq_rel) != kUnsignaledEventSlot)
+      signal_event(pending);
   }
+}
+
+void EventState::notify_idle() {
+  std::lock_guard<std::mutex> lock(mutex_);
+  for (auto &[id, event] : events_)
+    if (event.event_type == KFD_IOC_EVENT_SIGNAL)
+      signal_event(event);
 }
 
 bool EventState::signal_memory_fault(const MemoryFault &fault) {
@@ -131,9 +130,8 @@ bool EventState::signal_memory_fault(const MemoryFault &fault) {
   for (auto &[id, ev] : events_) {
     if (ev.event_type != KFD_IOC_EVENT_MEMORY)
       continue;
-    // A memory-exception event is not a signal event: it carries no age slot in
-    // the shared page and the runtime does not poll it, it parks a thread in
-    // WAIT_EVENTS. Record the payload for that thread to collect and wake it.
+    // Memory-exception events have no GPU signal mailbox. WAIT_EVENTS carries
+    // their fault payload to the runtime's parked handler thread.
     ev.fault = fault;
     ev.signaled = !ev.auto_reset || !has_signal_waiters(ev);
     activate_waiters(ev);
@@ -227,6 +225,7 @@ int EventState::create_event(void *arg, uint32_t gpu_id) {
   ev.event_age = 1;
 
   events_[ev.event_id] = ev;
+  write_event_slot(page_, page_size_, ev.event_id, kUnsignaledEventSlot);
 
   args->event_id = ev.event_id;
   args->event_trigger_data = ev.event_id;
@@ -256,7 +255,7 @@ int EventState::destroy_event(void *arg) {
       waiter->cv->notify_one();
     events_.erase(it);
   }
-  write_event_slot(page_, page_size_, args->event_id, KFD_SIGNAL_EVENT_LIMIT);
+  write_event_slot(page_, page_size_, args->event_id, kUnsignaledEventSlot);
   return 0;
 }
 
@@ -271,13 +270,9 @@ int EventState::set_event(void *arg) {
                        " events_.size()=", events_.size());
     return -EINVAL;
   }
-  it->second.signaled = !it->second.auto_reset || !has_signal_waiters(it->second);
-  if (!(++it->second.event_age))
-    it->second.event_age = 2;
-  write_event_slot(page_, page_size_, args->event_id, it->second.event_age);
+  signal_event(it->second);
   util::Logger::cp("SET_EVENT: event_id=", args->event_id, " age=", it->second.event_age,
                    " waiters=", it->second.waiters.size());
-  activate_waiters(it->second);
   return 0;
 }
 
@@ -290,7 +285,6 @@ int EventState::reset_event(void *arg) {
   if (it == events_.end())
     return -EINVAL;
   it->second.signaled = false;
-  write_event_slot(page_, page_size_, args->event_id, KFD_SIGNAL_EVENT_LIMIT);
   return 0;
 }
 
@@ -447,8 +441,6 @@ int EventState::wait_events(void *arg, uint32_t process_id) {
         exception.failure.NotPresent = ev.fault.not_present ? 1u : 0u;
         exception.failure.ReadOnly = ev.fault.read_only ? 1u : 0u;
       }
-      if (ev.auto_reset && !ev.signaled && ev.event_type == KFD_IOC_EVENT_SIGNAL)
-        write_event_slot(page_, page_size_, ev.event_id, KFD_SIGNAL_EVENT_LIMIT);
     }
   }
 

@@ -70,8 +70,8 @@ public:
 
   /// @brief Handle KFD SET_EVENT ioctl.
   /// @param arg Pointer to kfd_ioctl_set_event_args.
-  /// @details Increments event_age, writes to the event page slot, and activates
-  ///          all registered waiters.
+  /// @details Increments event_age and activates all registered waiters.
+  ///          CPU event state does not alter the GPU-written mailbox.
   /// @returns 0 on success, -EINVAL if event_id not found.
   int set_event(void *arg);
 
@@ -107,11 +107,14 @@ public:
   /// by signal_interrupt() and release_page().
   [[nodiscard]] bool overlaps_page(const void *ptr, size_t size) const;
 
-  /// @brief Signal event(s) from the CP's interrupt callback.
-  /// @details When event_id is non-zero, signals that specific event. When
-  ///          event_id is zero, broadcasts to all type-0 events — matching
-  ///          real KFD's kfd_signal_event_interrupt(pasid, 0, 0) broadcast.
+  /// @brief Deliver a packet interrupt, acknowledging its GPU-written mailbox.
+  /// @details A valid nonzero ID targets one signal event. An absent or invalid
+  /// ID scans marked slots; unmarked slots never activate an event.
   void signal_interrupt(uint32_t event_id);
+
+  /// @brief Preserve the simulator's synthetic wake of signal waiters on queue idle.
+  /// @details This notification is not a hardware interrupt with event context zero.
+  void notify_idle();
 
   /// @brief Deliver a memory violation to this process's memory-exception event.
   /// @details Finds the process's KFD_IOC_EVENT_MEMORY event -- the runtime
@@ -127,10 +130,9 @@ public:
   void notify_closing();
 
   /// @brief Write sentinel values to all event page slots for shutdown.
-  /// @details Writes KFD_SIGNAL_EVENT_LIMIT to every slot, allowing ROCR's
-  ///          userspace polling to detect that events will no longer fire. Takes
-  ///          mutex_ so it cannot race a concurrent release_page()/munmap tearing
-  ///          the mapping down.
+  /// @details Writes KFD_SIGNAL_EVENT_LIMIT to every slot during shutdown.
+  ///          Takes mutex_ so it cannot race a concurrent release_page()/munmap
+  ///          tearing the mapping down.
   void signal_page_shutdown();
 
   /// @brief Non-destructively release parked waiters so their caller can unwind.
@@ -153,7 +155,7 @@ public:
   /// @brief Return the stable event-page backing fd, creating it exactly once.
   /// @details The check-and-create runs under mutex_, so concurrent event-page
   /// mmaps cannot each build a backing and hand different fds to different callers
-  /// — which would leave one polling an object that never receives event updates.
+  /// — which would separate client mailbox writes from the driver acknowledgement.
   /// @param length Size to pass to @p create_backing.
   /// @param create_backing Builds the backing and returns its fd, or -1 on failure.
   ///        Called at most once per EventState, with mutex_ held.
@@ -175,7 +177,7 @@ public:
 
 private:
   int backing_fd_ = -1;  ///< Backing descriptor for the KFD signal event page.
-  void *page_ = nullptr; ///< Mapped signal page (libhsakmt polls slots here).
+  void *page_ = nullptr; ///< GPU-written event mailboxes, acknowledged by interrupts.
   size_t page_size_ = 0; ///< Size of the mapped event page in bytes.
 
   /// One WAIT_EVENTS entry. All fields are protected by mutex_; storage belongs
@@ -203,6 +205,7 @@ private:
 
   /// Latch activation before notification, with mutex_ held by the caller.
   static void activate_waiters(GpuEvent &event);
+  static void signal_event(GpuEvent &event);
   static bool has_signal_waiters(const GpuEvent &event);
 
   mutable std::mutex mutex_;                      ///< Protects all mutable event state.

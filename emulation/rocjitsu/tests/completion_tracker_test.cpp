@@ -173,10 +173,16 @@ public:
     memory->store(kSignal + kValueOffset, uint64_t{1});
     memory->store(kSignal + kMailboxOffset, kMailbox);
     memory->store(kSignal + kEventOffset, kEventId);
-    subscription = InterruptSubscription([this](uint32_t process_id, uint32_t) {
-      EXPECT_EQ(process_id, kProcessId);
-      ++interrupts;
-    });
+    subscription = InterruptSubscription(
+        [this](uint32_t process_id, uint32_t) {
+          EXPECT_EQ(process_id, kProcessId);
+          ++interrupts;
+        },
+        {},
+        [this](uint32_t process_id) {
+          EXPECT_EQ(process_id, kProcessId);
+          ++idle_notifications;
+        });
 
     auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
     auto plugin = std::make_unique<CompletionEndCounter>();
@@ -219,6 +225,8 @@ public:
   std::vector<ComputeQueueRecord> queues;
   uint32_t retired = 0;
   uint32_t interrupts = 0;
+  // Synthetic queue-idle deliveries, counted separately from packet interrupts.
+  uint32_t idle_notifications = 0;
 };
 
 void expect_retry_then_exactly_once(CompletionRetryMemory::Operation operation, uint64_t address) {
@@ -819,11 +827,17 @@ TEST(CompletionTrackerTest, QueueIdlePublicationSurvivesUnavailableMailboxStore)
   fixture.memory->store(kIdleSignal + CompletionFixture::kMailboxOffset, kIdleMailbox);
   fixture.memory->store(kIdleSignal + CompletionFixture::kEventOffset, kIdleEvent);
   fixture.subscription.reset();
-  fixture.subscription = InterruptSubscription([&fixture](uint32_t process_id, uint32_t event_id) {
-    EXPECT_EQ(process_id, CompletionFixture::kProcessId);
-    if (event_id == kIdleEvent || event_id == 0)
-      ++fixture.interrupts;
-  });
+  fixture.subscription = InterruptSubscription(
+      [&fixture, kIdleEvent](uint32_t process_id, uint32_t event_id) {
+        EXPECT_EQ(process_id, CompletionFixture::kProcessId);
+        EXPECT_EQ(event_id, kIdleEvent);
+        ++fixture.interrupts;
+      },
+      {},
+      [&](uint32_t process_id) {
+        EXPECT_EQ(process_id, CompletionFixture::kProcessId);
+        ++fixture.idle_notifications;
+      });
   fixture.queues.front().interrupt_sink = fixture.subscription.sink();
   fixture.memory->fail_next(CompletionRetryMemory::Operation::AtomicStore, kIdleMailbox);
 
@@ -834,6 +848,7 @@ TEST(CompletionTrackerTest, QueueIdlePublicationSurvivesUnavailableMailboxStore)
   EXPECT_FALSE(fixture.tracker.all_complete(fixture.queues));
   EXPECT_EQ(fixture.memory->load<uint64_t>(kIdleSignal + CompletionFixture::kValueOffset), 0u);
   EXPECT_EQ(fixture.interrupts, 0u);
+  EXPECT_EQ(fixture.idle_notifications, 0u);
 
   // Queue teardown can start after the dispatch completion becomes visible.
   constexpr uint64_t kTerminateQueue = uint64_t{1} << 63;
@@ -847,7 +862,8 @@ TEST(CompletionTrackerTest, QueueIdlePublicationSurvivesUnavailableMailboxStore)
             kTerminateQueue);
   EXPECT_EQ(fixture.memory->load<uint64_t>(kIdleMailbox), kIdleEvent);
   EXPECT_EQ(fixture.memory->successful_stores(kIdleMailbox), 1u);
-  EXPECT_EQ(fixture.interrupts, 2u);
+  EXPECT_EQ(fixture.interrupts, 1u);
+  EXPECT_EQ(fixture.idle_notifications, 1u);
 }
 
 TEST(CompletionTrackerTest, NewQueueGenerationCancelsUncommittedIdleRetry) {
@@ -895,6 +911,7 @@ TEST(CompletionTrackerTest, NewQueueGenerationCancelsUncommittedIdleRetry) {
   EXPECT_EQ(fixture.memory->load<uint64_t>(kIdleSignal + CompletionFixture::kValueOffset), 0u);
   EXPECT_EQ(fixture.memory->successful_stores(kIdleMailbox), 0u);
   EXPECT_EQ(fixture.interrupts, 0u);
+  EXPECT_EQ(fixture.idle_notifications, 0u);
 
   queue.entries.front().completed_wgs = 1;
   const CompletionDrainResult final = fixture.tracker.drain_completions(fixture.queues);
@@ -905,7 +922,8 @@ TEST(CompletionTrackerTest, NewQueueGenerationCancelsUncommittedIdleRetry) {
   EXPECT_EQ(fixture.memory->load<uint64_t>(kIdleSignal + CompletionFixture::kValueOffset), 0u);
   EXPECT_EQ(fixture.memory->successful_compare_exchanges(), 0u);
   EXPECT_EQ(fixture.memory->successful_stores(kIdleMailbox), 1u);
-  EXPECT_EQ(fixture.interrupts, 2u);
+  EXPECT_EQ(fixture.interrupts, 1u);
+  EXPECT_EQ(fixture.idle_notifications, 1u);
 }
 
 } // namespace

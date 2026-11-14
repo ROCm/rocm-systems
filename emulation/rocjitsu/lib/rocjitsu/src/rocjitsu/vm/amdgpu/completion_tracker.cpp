@@ -260,7 +260,7 @@ CompletionTracker::advance_queue_idle_publication(QueueIdlePublicationState &sta
 
     case QueueIdlePublicationPhase::CaptureAccess:
       if (state.queue_desc_va == 0) {
-        state.phase = QueueIdlePublicationPhase::DeliverGenericInterrupt;
+        state.phase = QueueIdlePublicationPhase::NotifyIdle;
         continue;
       }
       if (!state.address_space)
@@ -279,7 +279,7 @@ CompletionTracker::advance_queue_idle_publication(QueueIdlePublicationState &sta
       if (outcome != VmAccessOutcome::Complete)
         return outcome;
       if (state.signal_address == 0) {
-        state.phase = QueueIdlePublicationPhase::DeliverGenericInterrupt;
+        state.phase = QueueIdlePublicationPhase::NotifyIdle;
         continue;
       }
       if ((state.signal_address & 0x3f) != 0)
@@ -323,11 +323,11 @@ CompletionTracker::advance_queue_idle_publication(QueueIdlePublicationState &sta
     case QueueIdlePublicationPhase::DeliverEventInterrupt:
       if (state.event_id != 0)
         state.interrupt_sink.deliver(state.process_id, state.event_id);
-      state.phase = QueueIdlePublicationPhase::DeliverGenericInterrupt;
+      state.phase = QueueIdlePublicationPhase::NotifyIdle;
       continue;
 
-    case QueueIdlePublicationPhase::DeliverGenericInterrupt:
-      state.interrupt_sink.deliver(state.process_id, 0);
+    case QueueIdlePublicationPhase::NotifyIdle:
+      state.interrupt_sink.notify_idle(state.process_id);
       state.phase = QueueIdlePublicationPhase::Complete;
       return VmAccessOutcome::Complete;
     }

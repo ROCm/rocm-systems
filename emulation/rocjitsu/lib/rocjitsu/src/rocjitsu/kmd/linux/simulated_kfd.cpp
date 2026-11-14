@@ -3068,8 +3068,8 @@ void SimulatedKfd::init_command_processors_locked() {
     // SH_MEM_BASES bank through Wavefront::set_process_id.
     const kfd_process_device_apertures ap = gpu_apertures(static_cast<uint32_t>(i));
     g.soc->set_apertures(ap.lds_base, ap.lds_limit, ap.scratch_base, ap.scratch_limit);
-    g.interrupt_subscription =
-        amdgpu::InterruptSubscription([this](uint32_t process_id, uint32_t event_id) {
+    g.interrupt_subscription = amdgpu::InterruptSubscription(
+        [this](uint32_t process_id, uint32_t event_id) {
           if (const auto override = interrupt_override_for_testing_.sink()) {
             override.deliver(process_id, event_id);
             return;
@@ -3085,6 +3085,17 @@ void SimulatedKfd::init_command_processors_locked() {
             util::Logger::cp("INTERRUPT_ROUTE: pid=", process_id, " event_id=", event_id,
                              " found=false");
           }
+        },
+        {},
+        [this](uint32_t process_id) {
+          if (const auto override = interrupt_override_for_testing_.sink()) {
+            override.notify_idle(process_id);
+            return;
+          }
+          std::lock_guard<std::mutex> lock(interrupt_mutex_);
+          const auto event = event_dispatch_.find(process_id);
+          if (event != event_dispatch_.end())
+            event->second->notify_idle();
         });
     g.soc->for_each_cp([this, i](amdgpu::CommandProcessor *cp) {
       // Tests register synthetic queues directly with these CPs without the
@@ -8070,9 +8081,9 @@ int SimulatedKfd::destroy_queue_ioctl(KfdProcess &proc, void *arg) {
     (void)gpus_[queue->gpu_ordinal].soc->queue_registry().unregister_queue(
         queue->queue_handle, amdgpu::QueueCloseMode::ForceCancel);
   }
-  // Real CP sends EOP interrupt when queue is deactivated; KFD broadcasts to
-  // all type-0 events. This wakes ROCR's signal threads blocked on queue events.
-  proc.event_state_.signal_interrupt(0);
+  // Preserve the simulator's queue-deactivation wake without treating a
+  // hardware event context of zero as a broadcast.
+  proc.event_state_.notify_idle();
   return 0;
 }
 

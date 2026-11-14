@@ -2042,7 +2042,7 @@ void CommandProcessor::doorbell_poll_loop(std::stop_token stop) {
         }
       }
       for (const auto &[interrupt_sink, process_id] : idle_queues)
-        interrupt_sink.deliver(process_id, 0);
+        interrupt_sink.notify_idle(process_id);
     }
 
     if (poll_count % 5000 == 1) {

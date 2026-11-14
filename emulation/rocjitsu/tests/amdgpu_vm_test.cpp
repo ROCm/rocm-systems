@@ -2200,7 +2200,7 @@ TEST(AqlDispatchTest, RevokedWaveSetupRecoversOnlyOnTheSameRoot) {
       uint32_t exception_count = 0;
       amdgpu::InterruptSubscription owner([&](uint32_t process_id, uint32_t event_id) {
         EXPECT_EQ(process_id, kProcessId);
-        if (event_id == 0)
+        if (event_id == 0) // Polling kernel completion has no KFD event ID.
           return;
         EXPECT_EQ(event_id, kExceptionEvent);
         ++exception_count;
@@ -2324,7 +2324,7 @@ TEST(AqlDispatchTest, RevokedInFlightLoadPublishesQueueMemoryException) {
     uint64_t exception_status = 0;
     amdgpu::InterruptSubscription owner([&](uint32_t process_id, uint32_t event_id) {
       EXPECT_EQ(process_id, kProcessId);
-      if (event_id == 0) // Ordinary queue-idle notification.
+      if (event_id == 0) // Polling kernel completion has no KFD event ID.
         return;
       EXPECT_EQ(event_id, kExceptionEvent);
       ++exception_count;
