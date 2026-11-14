@@ -2307,7 +2307,8 @@ hipError_t GraphExecSegmented::CaptureAndFormPacketsForGraph(bool reuseKernargSl
       currentSegBatch.packet_batches.emplace_back();
     }
 
-    for (size_t i = 0; i < segment.nodes.size(); ++i) {
+    size_t i = 0;
+    while (i < segment.nodes.size()) {
       auto& node = segment.nodes[i];
 
       // Check if kernel node requires hidden heap and set it for the entire graph
@@ -2323,45 +2324,55 @@ hipError_t GraphExecSegmented::CaptureAndFormPacketsForGraph(bool reuseKernargSl
         // Start of a new batch
         PacketBatch newBatch;
 
+        // Size the batch once from the nodes it will hold. A node count is only a
+        // floor on the packet count: a node's packets are known only after
+        // CaptureAndFormPacket has run, and BuildSyncPlan may splice in barriers
+        // later, so the appends can grow past it.
+        size_t batchNodeCount = 0;
+        for (size_t j = i; j < segment.nodes.size() && segment.nodes[j]->GraphCaptureEnabled();
+             ++j) {
+          ++batchNodeCount;
+        }
+        newBatch.dispatchPackets.reserve(batchNodeCount);
+        newBatch.dispatchKernelNames.reserve(batchNodeCount);
+        newBatch.dispatchMetadataPackets.reserve(batchNodeCount);
+        newBatch.nodeRanges.reserve(batchNodeCount);
+        newBatch.nodeToRangeIndex.reserve(batchNodeCount);
+
         // Collect packets from consecutive captured nodes
-        size_t j = i;
-        while (j < segment.nodes.size() && segment.nodes[j]->GraphCaptureEnabled()) {
+        const size_t batchEnd = i + batchNodeCount;
+        for (size_t j = i; j < batchEnd; ++j) {
           auto& currentNode = segment.nodes[j];
-          std::vector<uint8_t*> nodePackets;
-          std::vector<const std::string*> nodeKernelNames;
-          std::vector<uint8_t*> nodeMetadataPackets;
+          const size_t rangeIndex = newBatch.nodeRanges.size();
+          const size_t startIndex = newBatch.dispatchPackets.size();
           const bool nodeEnabled = currentNode->GetEnabled() != 0;
           if (!nodeEnabled) {
             currentNode->SetEnabled(1);
           }
-          status = currentNode->CaptureAndFormPacket(GetKernelArgManager(), &nodePackets,
-                                                     &nodeKernelNames, &nodeMetadataPackets,
-                                                     reuseKernargSlots);
+
+          status = currentNode->CaptureAndFormPacket(
+              GetKernelArgManager(), &newBatch.dispatchPackets, &newBatch.dispatchKernelNames,
+              &newBatch.dispatchMetadataPackets, reuseKernargSlots);
           currentNode->SetEnabled(nodeEnabled);
 
-          if (status != hipSuccess || nodePackets.empty()) {
-            LogError("Packet capture failed");
+          if (status != hipSuccess) {
+            ClPrint(amd::LOG_ERROR, amd::LOG_CODE,
+                    "[hipGraph] Packet capture failed for node (type=%d), status=%d",
+                    currentNode->GetType(), status);
             return status;
           }
 
-          // Create NodeRange for this node
-          const size_t rangeIndex = newBatch.nodeRanges.size();
-          const size_t startIndex = newBatch.dispatchPackets.size();
-          const size_t packetCount = nodePackets.size();
+          // CaptureAndFormPacket should only append to the batch. Existing packets must remain
+          // intact, and the parallel name and metadata vectors must grow by the same amount.
+          const size_t packetEnd = newBatch.dispatchPackets.size();
+          assert(packetEnd >= startIndex && "CaptureAndFormPacket removed existing packets");
+          assert(newBatch.dispatchKernelNames.size() == packetEnd &&
+                 newBatch.dispatchMetadataPackets.size() == packetEnd &&
+                 "CaptureAndFormPacket produced misaligned batch vectors");
 
-          // Reserve space to avoid reallocations during insertion
-          newBatch.dispatchPackets.reserve(startIndex + packetCount);
-          newBatch.dispatchKernelNames.reserve(startIndex + packetCount);
-          newBatch.dispatchMetadataPackets.reserve(startIndex + packetCount);
-
-          // Add to dispatch lists (initially all enabled)
-          newBatch.dispatchPackets.insert(newBatch.dispatchPackets.end(), nodePackets.begin(),
-                                          nodePackets.end());
-          newBatch.dispatchKernelNames.insert(newBatch.dispatchKernelNames.end(),
-                                              nodeKernelNames.begin(), nodeKernelNames.end());
-          newBatch.dispatchMetadataPackets.insert(newBatch.dispatchMetadataPackets.end(),
-                                                  nodeMetadataPackets.begin(),
-                                                  nodeMetadataPackets.end());
+          const size_t packetCount = packetEnd - startIndex;
+          // CaptureAndFormPacket should return an error when capture produces no packets.
+          assert(packetCount != 0 && "Successful capture must produce packets");
 
           // Store node mapping with range info
           newBatch.nodeRanges.push_back({startIndex, packetCount, nodeEnabled});
@@ -2372,18 +2383,15 @@ hipError_t GraphExecSegmented::CaptureAndFormPacketsForGraph(bool reuseKernargSl
 
           // Mark this node as successfully captured
           currentSegBatch.node_capture_status[j] = true;
-          ++j;
         }
 
-        // Add the batch if it contains packets or captured zero-packet nodes (e.g. EMPTY).
-        if (!newBatch.dispatchPackets.empty() || !newBatch.nodeRanges.empty()) {
-          currentSegBatch.packet_batches.push_back(std::move(newBatch));
-        }
-        i = j - 1;  // for-loop will ++i to j
+        currentSegBatch.packet_batches.push_back(std::move(newBatch));
+        i = batchEnd;
       } else {
         // Non-capturable node
         currentSegBatch.has_uncaptured_nodes = true;
         currentSegBatch.node_capture_status[i] = false;
+        ++i;
       }
     }
 

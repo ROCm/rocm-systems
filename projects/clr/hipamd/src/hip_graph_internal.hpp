@@ -298,11 +298,11 @@ class GraphNode : public hipGraphNodeDOTAttribute {
   size_t GetKernargSegmentByteSize() const { return kernargSegmentByteSize_; }
   size_t GetKernargSegmentAlignment() const { return kernargSegmentAlignment_; }
 
-  //! Capture packets and accumulate them into a batch if provided.
-  //! |batchMetadataPackets|, when provided, receives the captured metadata-prefetch
-  //! packet for each AQL packet (pointer-parallel to |batchPackets|). Entries are
-  //! nullptr for packets that produced no metadata (e.g. device has no metadata
-  //! ring buffer), so the batch's flat metadata buffer stays index-aligned.
+  //! Capture packets and append them to the provided batch vectors without modifying existing
+  //! entries. Each AQL packet appends one kernel-name entry and, when |batchMetadataPackets| is
+  //! provided, one metadata entry. Metadata entries are nullptr when a packet produced no metadata
+  //! (e.g. the device has no metadata ring buffer), keeping the vectors index-aligned. A successful
+  //! return guarantees that at least one packet was captured.
   virtual hipError_t CaptureAndFormPacket(GraphKernelArgManager* kernArgMgr,
                                   std::vector<uint8_t*>* batchPackets = nullptr,
                                   std::vector<const std::string*>* batchKernelNames = nullptr,
@@ -367,7 +367,7 @@ class GraphNode : public hipGraphNodeDOTAttribute {
     // Commands are captured and released. Clear them from the object.
     commands_.clear();
 
-    return status;
+    return gpuPackets_.empty() ? hipErrorUnknown : status;
   }
   hip::Stream* GetQueue() const { return stream_; }
 
