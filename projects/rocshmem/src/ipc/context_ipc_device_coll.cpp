@@ -315,7 +315,7 @@ __device__ void IPCContext::alltoallmem_linear_thread_puts_wg(rocshmem_team_t te
     team_obj->alltoall_sequence_number++;
   }
 
-  __syncthreads();
+  sync_wg(team);
 }
 
 __device__ void IPCContext::internal_put_broadcastmem_wave(
@@ -763,7 +763,7 @@ __device__ void IPCContext::fcollectmem_linear_thread_puts_wg(rocshmem_team_t te
     team_obj->alltoall_sequence_number++;
   }
 
-  __syncthreads();
+  sync_wg(team);
 }
 
 __device__ void IPCContext::fcollectmem_linear_wg(rocshmem_team_t team, void *dst,
