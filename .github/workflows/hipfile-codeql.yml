@@ -41,7 +41,8 @@ jobs:
     runs-on: [ubuntu-24.04]
     timeout-minutes: 45
     container:
-      image: ${{ inputs.ci_image }}
+      # hipFile CI images are published to GHCR by hipfile-image-build.yml.
+      image: ${{ inputs.ci_image }} # zizmor: ignore[unpinned-images]
       credentials:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
@@ -52,6 +53,7 @@ jobs:
           fetch-depth: 0
           sparse-checkout: |
             projects/hipfile
+          persist-credentials: false
 
       - name: Configure Git safe directory
         shell: bash
