@@ -14,7 +14,7 @@
 //      low bits were zero despite the buffer not being 8-byte aligned, the
 //      kernel took an optimized 8-byte path on misaligned data.
 //
-//   2. The work-range splitting logic in primitives.cuh used a single dw for
+//   2. The work-range splitting logic (now in work.cuh) used a single dw for
 //      both workLo and workHi bounds, and fracLo didn't check whether the
 //      previous channel's workHi matched the current work item, producing
 //      incorrect element ranges for fused (grouped) operations.

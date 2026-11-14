@@ -25,6 +25,7 @@ struct FakeGinVtable {
   int getPropertiesCalls = 0;
   int listenCalls = 0;
   int connectCalls = 0;
+  volatile uint32_t* connectAbortFlag = nullptr;  // last abortFlag connect() was given
   int createContextCalls = 0;
   int regMrSymCalls = 0;
   int regMrSymDmaBufCalls = 0;
@@ -126,8 +127,9 @@ struct FakeGinVtable {
   }
 
   static ncclResult_t Connect(void* /*ctx*/, void* /*handles*/[], int /*nranks*/, int /*rank*/,
-                              void* /*listenComm*/, void** collComm) {
+                              void* /*listenComm*/, void** collComm, volatile uint32_t* abortFlag) {
     FakeGinVtable& self = current();
+    self.connectAbortFlag = abortFlag;
     if (++self.connectCalls == self.connectFailOnCall) return ncclSystemError;
     if (self.connectResult != ncclSuccess) return self.connectResult;
     if (collComm) *collComm = reinterpret_cast<void*>(self.nextCollComm++);

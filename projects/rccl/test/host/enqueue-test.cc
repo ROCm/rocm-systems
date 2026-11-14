@@ -126,8 +126,9 @@ class EnqueueMicrotest : public ::testing::Test {
 // ---------------------------------------------------------------------------
 
 // ===========================================================================
-// ncclFuncTrafficPerByte (enqueue.cc:158) -- traffic multiplier per collective.
-// Pure: no externals. The three nRanks-returning arms are indistinguishable
+// ncclFuncTrafficPerByte -- traffic multiplier per collective. NCCL 2.32.6 moved it from enqueue.cc to
+// src/channel.cc; fakes/channel_fakes.cc compiles that real body. Pure: no externals. The nRanks-returning arms
+// are indistinguishable
 // unless each is asserted separately, so a swapped case label would survive a
 // test that only checked "some arm returns nRanks".
 // ===========================================================================
@@ -157,11 +158,17 @@ TEST_F(EnqueueMicrotest, FuncTrafficPerByte_EveryFuncOutsideTheNamedArmsIsOne) {
   const int kRanks = 8;
   for (int i = 0; i < int(ncclNumFuncs); ++i) {
     const auto f = static_cast<ncclFunc_t>(i);
-    const bool namedArm = (f == ncclFuncAllReduce) || (f == ncclFuncAllGather) ||
+    const bool namedArm = (f == ncclFuncAllReduce) || (f == ncclFuncAllGather) || (f == ncclFuncAlltoAll) ||
                           (f == ncclFuncReduceScatter) || (f == ncclFuncAlltoAllvGda);
     if (namedArm) continue;
     EXPECT_EQ(1, ncclFuncTrafficPerByte(f, kRanks)) << "func=" << i;
   }
+}
+
+// NCCL 2.32.6 added AlltoAll to the nRanks arm.
+TEST_F(EnqueueMicrotest, FuncTrafficPerByte_AlltoAll_IsNRanks) {
+  EXPECT_EQ(8, ncclFuncTrafficPerByte(ncclFuncAlltoAll, 8));
+  EXPECT_EQ(3, ncclFuncTrafficPerByte(ncclFuncAlltoAll, 3));
 }
 
 TEST_F(EnqueueMicrotest, FuncTrafficPerByte_AlltoAllvGda_IsNRanks) {
@@ -502,13 +509,21 @@ struct ActivationOp {
   explicit ActivationOp(ncclFunc_t f) {
     p2p.eActivationMask = kP2pMask;
     coll.eActivationMask = kCollMask;
-    p2p.eventHandle = &p2p;    // self-address: unique, non-null, comparable
-    coll.eventHandle = &coll;
+    // NCCL 2.32.6: the handle is a per-plugin ncclProfilerEventRef. Self-address the first slot: unique,
+    // non-null, comparable.
+    p2p.eventHandle.h[0] = &p2p;
+    coll.eventHandle.h[0] = &coll;
     op.coll = f;
     op.task.p2p = &p2p;        // union: set p2p last for p2p funcs
   }
   void UseColl() { op.task.coll = &coll; }
 };
+
+bool IsNullEventRef(const ncclProfilerEventRef& ref) {
+  for (void* h : ref.h)
+    if (h != nullptr) return false;
+  return true;
+}
 }  // namespace
 
 TEST_F(EnqueueMicrotest, GeteActivationMask_P2pRange_ReadsP2pTask) {
@@ -516,7 +531,7 @@ TEST_F(EnqueueMicrotest, GeteActivationMask_P2pRange_ReadsP2pTask) {
   for (ncclFunc_t f : {ncclFuncSendRecv, ncclFuncSend, ncclFuncRecv}) {
     ActivationOp a(f);
     EXPECT_EQ(kP2pMask, geteActivationMask(&a.op)) << "func=" << int(f);
-    EXPECT_EQ(&a.p2p, gettaskEventHandle(&a.op)) << "func=" << int(f);
+    EXPECT_EQ(&a.p2p, gettaskEventHandle(&a.op).h[0]) << "func=" << int(f);
   }
 }
 
@@ -524,7 +539,7 @@ TEST_F(EnqueueMicrotest, GeteActivationMask_AllGatherV_IsZeroAndNullHandle) {
   ActivationOp a(ncclFuncAllGatherV);
   a.UseColl();  // the coll member is populated, yet this arm must ignore it
   EXPECT_EQ(0, geteActivationMask(&a.op));
-  EXPECT_EQ(nullptr, gettaskEventHandle(&a.op));
+  EXPECT_TRUE(IsNullEventRef(gettaskEventHandle(&a.op)));
 }
 
 TEST_F(EnqueueMicrotest, GeteActivationMask_CollFunc_ReadsCollTask) {
@@ -533,7 +548,7 @@ TEST_F(EnqueueMicrotest, GeteActivationMask_CollFunc_ReadsCollTask) {
     ActivationOp a(f);
     a.UseColl();
     EXPECT_EQ(kCollMask, geteActivationMask(&a.op)) << "func=" << int(f);
-    EXPECT_EQ(&a.coll, gettaskEventHandle(&a.op)) << "func=" << int(f);
+    EXPECT_EQ(&a.coll, gettaskEventHandle(&a.op).h[0]) << "func=" << int(f);
   }
 }
 
@@ -3680,6 +3695,8 @@ struct WarpSpeedScheduleScene {
     recvTask.collAPI = ncclFuncRecv;
     recvTask.buff = recvBuffer;
     recvTask.bytes = sizeof(recvBuffer);
+    // p2pTaskAppend's default for a plain send/recv (NCCL 2.32.6 bounds each P2P pair by its tasks' maxCTAs).
+    sendTask.maxCTAs = recvTask.maxCTAs = MAXCHANNELS;
     ncclIntruQueueEnqueue(&peers[1].sendQueue, &sendTask);
     ncclIntruQueueEnqueue(&peers[1].recvQueue, &recvTask);
     comm->planner.nTasksP2p = 2;
@@ -5343,7 +5360,6 @@ struct Gfx1250AddP2pScene {
   char recvMem[8]{};
   ncclTaskP2p recvTask{};
   ncclTaskP2p sendTask{};
-  int planTotalTasks[2]{1, 1};
 
   Gfx1250AddP2pScene(int nChannels = 4, int channelsPerPeer = 1) {
     InstallSendRecvDevFuncIds();
@@ -5403,7 +5419,7 @@ struct Gfx1250AddP2pScene {
     return addP2pToPlan(bp.c(), bp.p(), /*nChannelsMin=*/channelsPerPeer, /*nChannelsMax=*/channelsPerPeer,
                         /*p2pRound=*/0,
                         /*sendRank=*/1, sendMem, sendBytes, /*recvRank=*/1, recvMem, recvBytes,
-                        /*sendOpCount=*/0, /*recvOpCount=*/0, planTotalTasks, tasks);
+                        /*sendOpCount=*/0, /*recvOpCount=*/0, tasks);
   }
 
   ncclConnector* Conn(int channel, bool send, int connIndex = 1) {
@@ -6466,6 +6482,7 @@ struct SelfPairBudgetScene {
     task->collAPI = func;
     task->buff = buf;
     task->bytes = kBytes;
+    task->maxCTAs = MAXCHANNELS;  // p2pTaskAppend's default for a plain send/recv
   }
   ncclResult_t Schedule(std::string* log) {
     int epoch = 0;

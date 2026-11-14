@@ -1,8 +1,14 @@
-# Modification Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
-# SPDX-License-Identifier: MIT 
-
 #!/usr/bin/env python3
+
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# See LICENSE.txt for more license information
+# Modification Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
 import os
+import platform
 import sys
 import shutil
 
@@ -26,6 +32,9 @@ if os.path.exists(gensrc):
       shutil.rmtree(path)
 else:
   os.mkdir(gensrc)
+
+# On Windows, GIN device code is excluded; do not generate or build any GIN kernels.
+exclude_gin = platform.system() == "Windows"
 
 def paste(sep, *args):
   return sep.join(args)
@@ -58,6 +67,10 @@ reductions = ["AllReduce","ReduceScatter"]
 all_reds = ["sum", "avg"]
 all_tys = ["f32","f16","bf16","f8e4m3","f8e5m2"]
 gin_algos = ["RailA2A_LsaLD", "RailA2A_LsaLDMC", "RailRing_LsaST", "RailRing_LsaSTMC"]
+alltoall_gin_algos = ["LL"]
+
+def is_gin_kernel(k):
+  return k.algo in gin_algos or (k.coll == "AlltoAll" and k.algo in alltoall_gin_algos)
 
 nvls_algos_by_coll = {
   "AllReduce": ["AGxLLMC_R","RSxLDMC_AGxSTMC"],
@@ -68,6 +81,7 @@ ldmc_algos = ["RSxLDMC_AGxSTMC", "LDMC", "RailA2A_LsaLDMC"]
 coll_to_lower = {
   "AllGather": "all_gather",
   "AllReduce": "all_reduce",
+  "AlltoAll": "alltoall",
   "ReduceScatter": "reduce_scatter"
 }
 
@@ -96,7 +110,7 @@ ty_to_cxxtype = {
 }
 
 # The Tma* algos stage their tiles through a DMA engine rather than per-lane vector
-# loads (see NCCL_SYMK_ASYNC_TILE in src/device/symmetric/primitives.cuh). On ROCm
+# loads (see NCCL_SYMK_ASYNC_TILE in src/device/symmetric/symk.cuh). On ROCm
 # that engine is the gfx1250 Tensor Data Mover, so on any other target these kernels
 # would compile down to a duplicate of their vector counterpart -- emit them only
 # when a capable arch is in GPU_TARGETS.
@@ -111,6 +125,8 @@ def enumerate_kernels():
   rs_algos = ["LL","LD","RailA2A_LsaLD"] + (["TmaLD"] if have_tdm else [])
   for algo in ag_algos:
     yield Rec(coll="AllGather", algo=algo)
+  for algo in ["LL"]:
+    yield Rec(coll="AlltoAll", algo=algo)
   for red in all_reds:
     for ty in all_tys:
       for algo in ar_algos:
@@ -142,12 +158,20 @@ def required_cuda(k):
 
 ################################################################################
 
+def alltoall_gin_fbase(k):
+  if k.coll == "AlltoAll" and k.algo == "LL": return "alltoall_LL"
+  return None
+
 def kernel_fbase(k):
-  return coll_to_lower[k.coll] + ("_gin" if k.algo in gin_algos else "")
+  fbase = alltoall_gin_fbase(k)
+  if fbase is not None: return fbase
+  return coll_to_lower[k.coll] + ("_gin" if is_gin_kernel(k) else "")
 
 def kernel_fname(k):
+  fbase = alltoall_gin_fbase(k)
+  if fbase is not None: return fbase + '.cu'
   parts = [coll_to_lower[k.coll]]
-  if k.algo in gin_algos: parts += ['gin']
+  if is_gin_kernel(k): parts += ['gin']
   if k.coll in reductions:
     if k.algo in ldmc_algos and k.ty.startswith('f8'):
       parts += [k.red, k.ty, k.algo]
@@ -234,7 +258,10 @@ def partition(vals, keyfn):
     ans[k].append(x)
   return ans
 
-kernels_to_build = list(enumerate_kernels())
+# When exclude_gin (Windows), do not generate or reference any GIN kernels.
+# The opt-in AlltoAll_LL kernel (symmetric/alltoall_LL.cuh) is written in inline PTX with
+# no ROCm port yet, so it is not built; ncclSymkGetKernelIndex() returns -1 for it.
+kernels_to_build = [k for k in enumerate_kernels() if not (exclude_gin and is_gin_kernel(k)) and k.coll != "AlltoAll"]
 kernels_by_file = partition(kernels_to_build, lambda k: (kernel_fname(k), kernel_fbase(k)))
 
 # Add dependency only files (e.g. allreduce.cpp)
@@ -306,6 +333,7 @@ with open(os.path.join(gensrc, "sym_kernels_host.cc"), "w") as f:
   emitln(f, '')
 
   emitln(f, 'int ncclSymkKernelMaxDynamicSmem[%d];' % len(kernel_list))
+  emitln(f, 'int ncclSymkKernelMaxThreads[%d];' % len(kernel_list))
   emitln(f, '')
 
   emitln(f, 'int ncclSymkGetKernelIndex(ncclSymkKernelId id, int red, ncclDataType_t ty) {')

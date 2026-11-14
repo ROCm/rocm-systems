@@ -33,6 +33,8 @@ ncclResult_t ncclRegLocalIsValid(struct ncclReg* reg, bool* isValid) {
 ncclResult_t ncclRegister(struct ncclComm* comm, void* data, size_t size, bool isGraph, void** handle) {
   NCCLCHECK(CommCheck(comm, "ncclCommRegister", "comm"));
 
+  *handle = NULL;
+
   struct ncclRegCache* cache = &comm->regCache;
   uintptr_t pageSize = cache->pageSize;
   uintptr_t begAddr = (uintptr_t)data & -pageSize;
@@ -169,6 +171,8 @@ NCCL_API(ncclResult_t, ncclCommRegister, const ncclComm_t comm, void* buff, size
 
 ncclResult_t ncclCommRegister_impl(const ncclComm_t comm, void* buff, size_t size, void** handle) {
   ncclResult_t ret = ncclSuccess;
+  // Validate before anything else: the recorder at `end` dereferences *handle.
+  NCCLCHECK(PtrCheck(handle, "ncclCommRegister", "handle"));
 
   if (!ncclParamLocalRegister()) *handle = NULL;
   else {
@@ -187,6 +191,8 @@ end:
 }
 
 ncclResult_t ncclCommGraphRegister(const ncclComm_t comm, void* buff, size_t size, void** handle) {
+  NCCLCHECK(PtrCheck(handle, "ncclCommGraphRegister", "handle"));
+
   if (ncclP2pUsesMemcpy()) {
     *handle = NULL;
     INFO(NCCL_REG, "Skipping graph registration for buffer %p size %zi (P2pUsesMemcpy=%d)", buff, size,

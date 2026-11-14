@@ -712,8 +712,12 @@ __device__ __forceinline__ void ncclKernelMain(struct ncclDevKernelArgs const* a
     loadWorkBatchToShmem(tid % WARP_SIZE, tn, args, batchIx);
     __syncthreads();
   }
-  // Publish progress-counter completion for the last batch only after every thread has left the work body.
-  if (progressOn) __syncthreads();
+  // profiler(FINI) runs on thread 0 only: wait for every thread to leave the work body before
+  // timestamping the last batch's completion and publishing its progress counters.
+  // Kernel-arg flags gate the shmem profilerEnabled() read so disabled runs skip it.
+  if (progressOn ||
+      ((args->devFlags & RCCL_DEV_FLAG_PROFILER) && ncclShmem.nWorks > 0 && profilerEnabled(0)))
+    __syncthreads();
   profiler(FINI);
 }
 

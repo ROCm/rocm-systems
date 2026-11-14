@@ -114,13 +114,13 @@ struct Gfx1250EligibleStandIn
         comm.globalGinSupport      = NCCL_GIN_CONNECTION_FULL;
         comm.symkState.initialized = true;
         comm.devrState.bigSize     = 1;
-        comm.devrState.lsaSize     = comm.nRanks;
-        comm.devrState.lsaSelf     = 0;
+        comm.devrState.lsaTeamSize     = comm.nRanks;
+        comm.devrState.lsaTeamSelf     = 0;
         comm.sharedRes             = &shared;
 
-        shared.ginState.finalized           = false;
-        shared.ginState.numActiveBackends   = 1;
-        shared.ginState.backends[0].ginType = static_cast<ncclGinType_t>(NCCL_NET_DEVICE_GIN_ANVIL_SDMA);
+        comm.ginState.finalized           = false;
+        comm.ginState.numActiveBackends   = 1;
+        comm.ginState.backends[0].ginType = static_cast<ncclGinType_t>(NCCL_NET_DEVICE_GIN_ANVIL_SDMA);
 
         win.winFlags    = NCCL_WIN_COLL_SYMMETRIC;
         win.size        = kSpan;

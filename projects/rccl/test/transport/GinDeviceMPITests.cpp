@@ -363,7 +363,7 @@ int countOccurrences(const std::string& text, const std::string& needle) {
 
 // Active backend of `type` on `comm`, or nullptr if that type is not active.
 const ncclGinBackendState* activeGinBackend(ncclComm_t comm, ncclGinType_t type) {
-  const ncclGinState& ginState = comm->sharedRes->ginState;
+  const ncclGinState& ginState = comm->ginState;
   for (int i = 0; i < ginState.numActiveBackends; i++) {
     if (ginState.backends[i].ginType == type) return &ginState.backends[i];
   }
@@ -609,7 +609,7 @@ class GinMPIDeviceTests : public MPITestBase {
     // reaches. Reading it before a GIN DevComm exists observes the calloc zero
     // whenever the internal sym-kernel DevComm did not already connect.
     if (checkProxyNthreads_) {
-      ASSERT_MPI_EQ(expectedProxyNthreads(), comm->sharedRes->ginState.proxyNthreads);
+      ASSERT_MPI_EQ(expectedProxyNthreads(), comm->ginState.proxyNthreads);
     }
 
     // Stage a deterministic byte pattern in the source buffer; dst stays zero.
@@ -1174,7 +1174,7 @@ TEST_F(GinMPIDeviceTests, MixedBackends_GdaAlongside) {
   }
   const ncclGinType_t expectedDefault = types.front();
 
-  const ncclGinState& ginState = comm->sharedRes->ginState;
+  const ncclGinState& ginState = comm->ginState;
   for (ncclGinType_t type : types) {
     SCOPED_TRACE("listed GIN type " + std::to_string(type));
     ASSERT_MPI_TRUE(activeGinBackend(comm, type) != nullptr);
@@ -3479,7 +3479,7 @@ TEST_F(GinMPIDeviceTests, CommDestroy_FreesAnvilInitContext) {
   ASSERT_MPI_EQ(ncclSuccess, ncclDevCommCreate(comm, &reqs, &devComm));
   // EXPECT_ before the collective ASSERT_MPI_EQ: a fatal ASSERT_ return leaves
   // the peer blocked in MPI_Allreduce.
-  EXPECT_TRUE(comm->sharedRes->ginState.connected);
+  EXPECT_TRUE(comm->ginState.connected);
   EXPECT_GT(ncclGinAnvilPluginTestLiveInitCtxCount(), liveBefore);
 
   ASSERT_MPI_EQ(ncclSuccess, ncclDevCommDestroy(comm, &devComm));
@@ -8591,35 +8591,39 @@ __global__ void timeoutFlushAsyncWaitKernel(ncclWindow_t srcWin, ncclWindow_t ds
   if (t == 0) results[3 * n] = peerDone;
 }
 
+// The ncclGin_C C entry points these kernels covered left nccl_device in NCCL 2.32.6 (upstream 0c0b366be6d). Their
+// successor, the ncclIr* ABI (bindings/ir/nccl_device_ir.h), is declaration-only and resolved from the optional
+// libnccl_device.bc / LTO-IR (NCCL_EMIT_LLVM_IR), exercised by bindings/ir/tests, so these in-tree kernels drive the
+// same operations through the ALL-mask C++ ncclGin, which the old C entry points forwarded to. Each call keeps the old
+// arguments: no signal/counter unless named, CTA/thread coops, no descriptor, and the same timeouts and orders.
 __global__ void timeoutCApiBeforeKernel(ncclWindow_t srcWin, ncclWindow_t dstWin, ncclWindow_t sigWin, int peer,
                                         uint64_t shortCycles, uint64_t longCycles, int* results,
                                         struct ncclDevComm devComm) {
-  ncclGin_C net(devComm, NCCL_GIN_BACKEND_MASK_ALL, /*contextIndex=*/0);
+  ncclGin net{devComm, /*contextIndex=*/0};
   ncclTeam team = ncclTeamWorld(devComm);
   const auto ord = cuda::memory_order_acquire;
   const auto given = cuda::thread_scope_thread;
   const auto required = cuda::thread_scope_device;
   const int t = threadIdx.x;
-  ncclResult_t sigUnmet = ncclGinWaitSignalTimeout(&net, ncclCoopCta(), kTimeoutSigIdx, 1, 64, ord, shortCycles);
-  ncclResult_t vaUnmet =
-    ncclGinWaitSignalTimeoutVA(&net, ncclCoopCta(), sigWin, kTimeoutVaSigOff, 1, 64, ord, shortCycles);
-  ncclResult_t cntUnmet = ncclGinWaitCounterTimeout(&net, ncclCoopCta(), kTimeoutCntIdx, 1, 56, ord, shortCycles);
+  ncclResult_t sigUnmet = net.waitSignal(ncclCoopCta(), kTimeoutSigIdx, 1, 64, ord, shortCycles);
+  ncclResult_t vaUnmet = net.waitSignal(ncclCoopCta(), sigWin, kTimeoutVaSigOff, 1, 64, ord, shortCycles);
+  ncclResult_t cntUnmet = net.waitCounter(ncclCoopCta(), kTimeoutCntIdx, 1, 56, ord, shortCycles);
   if (t == 0) {
-    ncclGinPut(&net, team, peer, dstWin, 0, srcWin, 0, kTimeoutBulkBytes, false, 0, ncclGinSignalInc, 0, false, 0,
-               ncclCoopThread(), false, nullptr, given, required);
+    net.put(team, peer, dstWin, 0, srcWin, 0, kTimeoutBulkBytes, ncclGin_None{}, ncclGin_None{}, ncclCoopThread(),
+            ncclGin_None{}, given, required);
   }
-  ncclResult_t flushUnmet = ncclGinFlushTimeout(&net, ncclCoopCta(), ord, false, nullptr, 0);
+  ncclResult_t flushUnmet = net.flush(ncclCoopCta(), ord, ncclGin_None{}, 0);
   ncclGinRequest_t request;
-  ncclGinFlushAsync(&net, team, peer, &request, ncclCoopThread(), ncclGinOptFlagsDefault, false, nullptr);
-  ncclResult_t waitUnmet = ncclGinWaitTimeout(&net, &request, ncclCoopThread(), false, nullptr, ord, 0);
-  ncclResult_t waitMet = ncclGinWaitTimeout(&net, &request, ncclCoopThread(), false, nullptr, ord, longCycles);
-  ncclResult_t flushMet = ncclGinFlushTimeout(&net, ncclCoopCta(), ord, false, nullptr, longCycles);
+  net.flushAsync(team, peer, &request, ncclCoopThread(), ncclGinOptFlagsDefault, ncclGin_None{});
+  ncclResult_t waitUnmet = net.wait(request, ncclCoopThread(), ncclGin_None{}, ord, 0);
+  ncclResult_t waitMet = net.wait(request, ncclCoopThread(), ncclGin_None{}, ord, longCycles);
+  ncclResult_t flushMet = net.flush(ncclCoopCta(), ord, ncclGin_None{}, longCycles);
   if (t == 0) {
-    ncclGinPut(&net, team, peer, dstWin, 0, srcWin, 0, kTimeoutSmallBytes, false, 0, ncclGinSignalInc, 0, true,
-               kTimeoutCntIdx, ncclCoopThread(), false, nullptr, given, required);
+    net.put(team, peer, dstWin, 0, srcWin, 0, kTimeoutSmallBytes, ncclGin_None{}, ncclGin_CounterInc{kTimeoutCntIdx},
+            ncclCoopThread(), ncclGin_None{}, given, required);
   }
-  ncclResult_t cntMet = ncclGinWaitCounterTimeout(&net, ncclCoopCta(), kTimeoutCntIdx, 1, 56, ord, longCycles);
-  ncclGinFlush(&net, ncclCoopCta(), ord);
+  ncclResult_t cntMet = net.waitCounter(ncclCoopCta(), kTimeoutCntIdx, 1, 56, ord, longCycles);
+  net.flush(ncclCoopCta(), ord);
   if (t == 0) {
     results[0] = sigUnmet;
     results[1] = vaUnmet;
@@ -8636,14 +8640,14 @@ __global__ void timeoutCApiBeforeKernel(ncclWindow_t srcWin, ncclWindow_t dstWin
 }
 
 __global__ void timeoutCApiAfterKernel(int peer, uint64_t longCycles, int* results, struct ncclDevComm devComm) {
-  ncclGin_C net(devComm, NCCL_GIN_BACKEND_MASK_ALL, /*contextIndex=*/0);
+  ncclGin net{devComm, /*contextIndex=*/0};
   const auto ord = cuda::memory_order_acquire;
   if (threadIdx.x == 0) {
-    ncclGinSignal(&net, ncclTeamWorld(devComm), peer, true, kTimeoutSigIdx, ncclGinSignalInc, 0, ncclCoopThread(),
-                  false, nullptr, cuda::thread_scope_thread, cuda::thread_scope_device);
+    net.signal(ncclTeamWorld(devComm), peer, ncclGin_SignalInc{kTimeoutSigIdx}, ncclCoopThread(), ncclGin_None{},
+               cuda::thread_scope_thread, cuda::thread_scope_device);
   }
-  ncclResult_t sigMet = ncclGinWaitSignalTimeout(&net, ncclCoopCta(), kTimeoutSigIdx, 1, 64, ord, longCycles);
-  ncclGinFlush(&net, ncclCoopCta(), ord);
+  ncclResult_t sigMet = net.waitSignal(ncclCoopCta(), kTimeoutSigIdx, 1, 64, ord, longCycles);
+  net.flush(ncclCoopCta(), ord);
   if (threadIdx.x == 0) results[8] = sigMet;
 }
 

@@ -45,7 +45,7 @@ ncclResult_t ncclGetRailedGinType(struct ncclComm* comm, ncclGinType_t* ginType)
 
 namespace {
 
-bool KernelBitSet(uint32_t mask, ncclSymkKernelId id) { return (mask >> static_cast<int>(id)) & 1u; }
+bool KernelBitSet(ncclSymkKernelMask mask, ncclSymkKernelId id) { return (mask >> static_cast<int>(id)) & 1u; }
 
 class SymKernelMicrotest : public ::testing::Test {
  protected:
@@ -53,6 +53,9 @@ class SymKernelMicrotest : public ::testing::Test {
     comm_ = std::make_unique<ncclComm>();
     comm_->nRanks = 4;
     comm_->symkState.hasLsaMultimem = false;
+    // Since v2.32.6 ncclSymkMask itself drops every non-Genk kernel without direct NVLink (xGMI on AMD), so a
+    // fully connected comm is the baseline here, as ncclTopoPathAllDirectNVLink reports for one.
+    comm_->isAllDirectNvlink = true;
     for (int i = 0; i < ncclSymkKernelCount; ++i) {
       ncclSymkKernelMaxDynamicSmem[i] = 0;
     }
@@ -149,20 +152,20 @@ class SymKernelMaskTest : public SymKernelMicrotest {
 
 TEST_F(SymKernelMaskTest, JustBelow2GB_LLKernelSurvives) {
   size_t nElts = NEltsForBytes((size_t(2) << 30) - NCCL_SYM_KERNEL_CELL_SIZE);
-  uint32_t kmask = ncclSymkMask(comm_.get(), ncclFuncAllReduce, ncclDevSum, kTy, nElts);
+  ncclSymkKernelMask kmask = ncclSymkMask(comm_.get(), ncclFuncAllReduce, ncclDevSum, kTy, nElts);
   EXPECT_TRUE(KernelBitSet(kmask, ncclSymkKernelId_AllReduce_AGxLL_R));
 }
 
 TEST_F(SymKernelMaskTest, At2GB_LLKernelCleared) {
   size_t nElts = NEltsForBytes(size_t(2) << 30);
-  uint32_t kmask = ncclSymkMask(comm_.get(), ncclFuncAllReduce, ncclDevSum, kTy, nElts);
+  ncclSymkKernelMask kmask = ncclSymkMask(comm_.get(), ncclFuncAllReduce, ncclDevSum, kTy, nElts);
   EXPECT_FALSE(KernelBitSet(kmask, ncclSymkKernelId_AllReduce_AGxLL_R));
 }
 
 TEST_F(SymKernelMaskTest, JustBelow2GBUnaligned_AlignUpRoundsUpToLLKernelCleared) {
   // ncclTypeSize(f32) short of 2GB, not 1024-aligned like the case above; only clears if alignUp rounds up.
   size_t nElts = NEltsForBytes((size_t(2) << 30) - ncclTypeSize(kTy));
-  uint32_t kmask = ncclSymkMask(comm_.get(), ncclFuncAllReduce, ncclDevSum, kTy, nElts);
+  ncclSymkKernelMask kmask = ncclSymkMask(comm_.get(), ncclFuncAllReduce, ncclDevSum, kTy, nElts);
   EXPECT_FALSE(KernelBitSet(kmask, ncclSymkKernelId_AllReduce_AGxLL_R));
 }
 
@@ -171,7 +174,7 @@ TEST_F(SymKernelMaskTest, JustBelow64GB_NonLLKernelSurvives) {
   MakeTmaCapableComm();
   ScopedHook loadParam(g_loadParam, SymTmaEnable(1));
   size_t nElts = NEltsForBytes(32 * (size_t(2) << 30) - NCCL_SYM_KERNEL_CELL_SIZE);
-  uint32_t kmask = ncclSymkMask(comm_.get(), ncclFuncAllReduce, ncclDevSum, kTy, nElts, /*symAligned16B=*/true);
+  ncclSymkKernelMask kmask = ncclSymkMask(comm_.get(), ncclFuncAllReduce, ncclDevSum, kTy, nElts, /*symAligned16B=*/true);
   EXPECT_TRUE(KernelBitSet(kmask, ncclSymkKernelId_AllReduce_RSxTmaLD_AGxTmaST));
 }
 
@@ -179,7 +182,7 @@ TEST_F(SymKernelMaskTest, At64GB_EntireMaskZeroed) {
   MakeTmaCapableComm();
   ScopedHook loadParam(g_loadParam, SymTmaEnable(1));
   size_t nElts = NEltsForBytes(32 * (size_t(2) << 30));
-  uint32_t kmask = ncclSymkMask(comm_.get(), ncclFuncAllReduce, ncclDevSum, kTy, nElts, /*symAligned16B=*/true);
+  ncclSymkKernelMask kmask = ncclSymkMask(comm_.get(), ncclFuncAllReduce, ncclDevSum, kTy, nElts, /*symAligned16B=*/true);
   EXPECT_EQ(kmask, 0u);
 }
 
@@ -187,7 +190,7 @@ TEST_F(SymKernelMaskTest, TmaAvailable_ArchCapableAndAligned_TmaKernelSurvives) 
   if (!TmaReachableOnThisBuild()) GTEST_SKIP() << "SDK ships no TDM descriptor header";
   MakeTmaCapableComm();
   ScopedHook loadParam(g_loadParam, SymTmaEnable(1));
-  uint32_t kmask =
+  ncclSymkKernelMask kmask =
       ncclSymkMask(comm_.get(), ncclFuncAllReduce, ncclDevSum, kTy, /*nElts=*/1024, /*symAligned16B=*/true);
   EXPECT_TRUE(KernelBitSet(kmask, ncclSymkKernelId_AllReduce_RSxTmaLD_AGxTmaST));
 }
@@ -195,7 +198,7 @@ TEST_F(SymKernelMaskTest, TmaAvailable_ArchCapableAndAligned_TmaKernelSurvives) 
 TEST_F(SymKernelMaskTest, ArchNotTmaCapable_TmaKernelCleared) {
   MakeTmaIncapableComm();
   ScopedHook loadParam(g_loadParam, SymTmaEnable(1));
-  uint32_t kmask =
+  ncclSymkKernelMask kmask =
       ncclSymkMask(comm_.get(), ncclFuncAllReduce, ncclDevSum, kTy, /*nElts=*/1024, /*symAligned16B=*/true);
   EXPECT_FALSE(KernelBitSet(kmask, ncclSymkKernelId_AllReduce_RSxTmaLD_AGxTmaST));
 }
@@ -203,7 +206,7 @@ TEST_F(SymKernelMaskTest, ArchNotTmaCapable_TmaKernelCleared) {
 TEST_F(SymKernelMaskTest, TmaParamDisabled_TmaKernelCleared) {
   MakeTmaCapableComm();
   ScopedHook loadParam(g_loadParam, SymTmaEnable(0));
-  uint32_t kmask =
+  ncclSymkKernelMask kmask =
       ncclSymkMask(comm_.get(), ncclFuncAllReduce, ncclDevSum, kTy, /*nElts=*/1024, /*symAligned16B=*/true);
   EXPECT_FALSE(KernelBitSet(kmask, ncclSymkKernelId_AllReduce_RSxTmaLD_AGxTmaST));
 }
@@ -211,7 +214,7 @@ TEST_F(SymKernelMaskTest, TmaParamDisabled_TmaKernelCleared) {
 TEST_F(SymKernelMaskTest, NotSymAligned16B_TmaKernelCleared) {
   MakeTmaCapableComm();
   ScopedHook loadParam(g_loadParam, SymTmaEnable(1));
-  uint32_t kmask =
+  ncclSymkKernelMask kmask =
       ncclSymkMask(comm_.get(), ncclFuncAllReduce, ncclDevSum, kTy, /*nElts=*/1024, /*symAligned16B=*/false);
   EXPECT_FALSE(KernelBitSet(kmask, ncclSymkKernelId_AllReduce_RSxTmaLD_AGxTmaST));
 }
@@ -221,7 +224,7 @@ TEST_F(SymKernelMaskTest, NotSymAligned16B_TmaKernelCleared) {
 TEST_F(SymKernelMaskTest, DefaultParam_ArchCapableAndAligned_TmaKernelOfferedAlongsideOthers) {
   if (!TmaReachableOnThisBuild()) GTEST_SKIP() << "SDK ships no TDM descriptor header";
   MakeTmaCapableComm();
-  uint32_t kmask =
+  ncclSymkKernelMask kmask =
       ncclSymkMask(comm_.get(), ncclFuncAllReduce, ncclDevSum, kTy, /*nElts=*/1024, /*symAligned16B=*/true);
   EXPECT_TRUE(KernelBitSet(kmask, ncclSymkKernelId_AllReduce_RSxTmaLD_AGxTmaST));
   for (ncclSymkKernelId id : {ncclSymkKernelId_AllReduce_AGxLL_R, ncclSymkKernelId_AllReduce_RSxLD_AGxST}) {
@@ -263,7 +266,7 @@ TEST_F(SymKernelMaskTest, TmaForced_NonTmaKernelsCleared) {
   if (!TmaReachableOnThisBuild()) GTEST_SKIP() << "SDK ships no TDM descriptor header";
   MakeTmaCapableComm();
   ScopedHook loadParam(g_loadParam, SymTmaEnable(2));
-  uint32_t kmask =
+  ncclSymkKernelMask kmask =
       ncclSymkMask(comm_.get(), ncclFuncAllReduce, ncclDevSum, kTy, /*nElts=*/1024, /*symAligned16B=*/true);
   EXPECT_TRUE(KernelBitSet(kmask, ncclSymkKernelId_AllReduce_RSxTmaLD_AGxTmaST));
   for (ncclSymkKernelId id : kNonTmaAllReduceKernels) {
@@ -276,7 +279,7 @@ TEST_F(SymKernelMaskTest, TmaEnabledNotForced_NonTmaKernelsStillOffered) {
   if (!TmaReachableOnThisBuild()) GTEST_SKIP() << "SDK ships no TDM descriptor header";
   MakeTmaCapableComm();
   ScopedHook loadParam(g_loadParam, SymTmaEnable(1));
-  uint32_t kmask =
+  ncclSymkKernelMask kmask =
       ncclSymkMask(comm_.get(), ncclFuncAllReduce, ncclDevSum, kTy, /*nElts=*/1024, /*symAligned16B=*/true);
   EXPECT_TRUE(KernelBitSet(kmask, ncclSymkKernelId_AllReduce_RSxTmaLD_AGxTmaST));
   for (ncclSymkKernelId id : kNonTmaAllReduceKernels) {
@@ -288,7 +291,7 @@ TEST_F(SymKernelMaskTest, TmaEnabledNotForced_NonTmaKernelsStillOffered) {
 TEST_F(SymKernelMaskTest, TmaForced_ArchNotCapable_NonTmaKernelsSurvive) {
   MakeTmaIncapableComm();
   ScopedHook loadParam(g_loadParam, SymTmaEnable(2));
-  uint32_t kmask =
+  ncclSymkKernelMask kmask =
       ncclSymkMask(comm_.get(), ncclFuncAllReduce, ncclDevSum, kTy, /*nElts=*/1024, /*symAligned16B=*/true);
   EXPECT_FALSE(KernelBitSet(kmask, ncclSymkKernelId_AllReduce_RSxTmaLD_AGxTmaST));
   for (ncclSymkKernelId id : kNonTmaAllReduceKernels) {
@@ -301,7 +304,7 @@ TEST_F(SymKernelMaskTest, TmaForced_ArchNotCapable_NonTmaKernelsSurvive) {
 TEST_F(SymKernelMaskTest, TmaForced_NotSymAligned16B_NonTmaKernelsSurvive) {
   MakeTmaCapableComm();
   ScopedHook loadParam(g_loadParam, SymTmaEnable(2));
-  uint32_t kmask =
+  ncclSymkKernelMask kmask =
       ncclSymkMask(comm_.get(), ncclFuncAllReduce, ncclDevSum, kTy, /*nElts=*/1024, /*symAligned16B=*/false);
   EXPECT_NE(kmask, 0u);
   EXPECT_FALSE(KernelBitSet(kmask, ncclSymkKernelId_AllReduce_RSxTmaLD_AGxTmaST));
@@ -316,13 +319,13 @@ TEST_F(SymKernelMaskTest, TmaForced_AppliesToEachCollectivesOwnTmaKernel) {
   MakeTmaCapableComm();
   ScopedHook loadParam(g_loadParam, SymTmaEnable(2));
 
-  uint32_t agMask =
+  ncclSymkKernelMask agMask =
       ncclSymkMask(comm_.get(), ncclFuncAllGather, ncclDevSum, kTy, /*nElts=*/1024, /*symAligned16B=*/true);
   EXPECT_TRUE(KernelBitSet(agMask, ncclSymkKernelId_AllGather_TmaST));
   EXPECT_FALSE(KernelBitSet(agMask, ncclSymkKernelId_AllGather_ST));
   EXPECT_FALSE(KernelBitSet(agMask, ncclSymkKernelId_AllGather_LL));
 
-  uint32_t rsMask =
+  ncclSymkKernelMask rsMask =
       ncclSymkMask(comm_.get(), ncclFuncReduceScatter, ncclDevSum, kTy, /*nElts=*/1024, /*symAligned16B=*/true);
   EXPECT_TRUE(KernelBitSet(rsMask, ncclSymkKernelId_ReduceScatter_TmaLD));
   EXPECT_FALSE(KernelBitSet(rsMask, ncclSymkKernelId_ReduceScatter_LD));
@@ -336,7 +339,7 @@ TEST_F(SymKernelMaskTest, NeedGinFalse_HasGinTrue_GinKernelClearedNonGinKernelSu
     return t;
   });
   ScopedHook loadParam(g_loadParam, SymGinKernelsEnable(1));
-  uint32_t kmask = ncclSymkMask(comm_.get(), ncclFuncReduceScatter, ncclDevSum, kTy, /*nElts=*/1024);
+  ncclSymkKernelMask kmask = ncclSymkMask(comm_.get(), ncclFuncReduceScatter, ncclDevSum, kTy, /*nElts=*/1024);
   EXPECT_FALSE(KernelBitSet(kmask, ncclSymkKernelId_ReduceScatter_RailA2A_LsaLD));
   EXPECT_TRUE(KernelBitSet(kmask, ncclSymkKernelId_ReduceScatter_LL));
 }
@@ -348,7 +351,7 @@ TEST_F(SymKernelMaskTest, NeedGinFalse_HasGinFalse_GinKernelClearedNonGinKernelS
     return t;
   });
   ScopedHook loadParam(g_loadParam, SymGinKernelsEnable(0));
-  uint32_t kmask = ncclSymkMask(comm_.get(), ncclFuncReduceScatter, ncclDevSum, kTy, /*nElts=*/1024);
+  ncclSymkKernelMask kmask = ncclSymkMask(comm_.get(), ncclFuncReduceScatter, ncclDevSum, kTy, /*nElts=*/1024);
   EXPECT_FALSE(KernelBitSet(kmask, ncclSymkKernelId_ReduceScatter_RailA2A_LsaLD));
   EXPECT_TRUE(KernelBitSet(kmask, ncclSymkKernelId_ReduceScatter_LL));
 }
@@ -360,7 +363,7 @@ TEST_F(SymKernelMaskTest, NeedGinTrue_HasGinTrue_GinKernelSurvivesNonGinKernelCl
     return t;
   });
   ScopedHook loadParam(g_loadParam, SymGinKernelsEnable(1));
-  uint32_t kmask = ncclSymkMask(comm_.get(), ncclFuncReduceScatter, ncclDevSum, kTy, /*nElts=*/1024);
+  ncclSymkKernelMask kmask = ncclSymkMask(comm_.get(), ncclFuncReduceScatter, ncclDevSum, kTy, /*nElts=*/1024);
   EXPECT_TRUE(KernelBitSet(kmask, ncclSymkKernelId_ReduceScatter_RailA2A_LsaLD));
   EXPECT_FALSE(KernelBitSet(kmask, ncclSymkKernelId_ReduceScatter_LL));
 }
@@ -372,7 +375,7 @@ TEST_F(SymKernelMaskTest, NeedGinTrue_HasGinFalse_EverythingCleared) {
     return t;
   });
   ScopedHook loadParam(g_loadParam, SymGinKernelsEnable(0));
-  uint32_t kmask = ncclSymkMask(comm_.get(), ncclFuncReduceScatter, ncclDevSum, kTy, /*nElts=*/1024);
+  ncclSymkKernelMask kmask = ncclSymkMask(comm_.get(), ncclFuncReduceScatter, ncclDevSum, kTy, /*nElts=*/1024);
   EXPECT_EQ(kmask, 0u);
 }
 
@@ -385,7 +388,7 @@ TEST_F(SymKernelMaskTest, NeedGinTrue_GinBackendUnsupported_EverythingCleared) {
   });
   ScopedHook loadParam(g_loadParam, SymGinKernelsEnable(1));
   comm_->symkState.ginBackendUnsupported = true;
-  uint32_t kmask = ncclSymkMask(comm_.get(), ncclFuncReduceScatter, ncclDevSum, kTy, /*nElts=*/1024);
+  ncclSymkKernelMask kmask = ncclSymkMask(comm_.get(), ncclFuncReduceScatter, ncclDevSum, kTy, /*nElts=*/1024);
   EXPECT_EQ(kmask, 0u);
 }
 
@@ -399,62 +402,68 @@ TEST_F(SymKernelMicrotest, GinBackendUnsupported_OnlyForAnvilSdma) {
 
 TEST_F(SymKernelMaskTest, HasLsaMultimemTrue_STMCKernelSurvives) {
   comm_->symkState.hasLsaMultimem = true;
-  uint32_t kmask = ncclSymkMask(comm_.get(), ncclFuncAllReduce, ncclDevSum, kTy, /*nElts=*/1024);
+  ncclSymkKernelMask kmask = ncclSymkMask(comm_.get(), ncclFuncAllReduce, ncclDevSum, kTy, /*nElts=*/1024);
   EXPECT_TRUE(KernelBitSet(kmask, ncclSymkKernelId_AllReduce_AGxLLMC_R));
 }
 
 TEST_F(SymKernelMaskTest, HasLsaMultimemFalse_STMCKernelCleared) {
-  uint32_t kmask = ncclSymkMask(comm_.get(), ncclFuncAllReduce, ncclDevSum, kTy, /*nElts=*/1024);
+  ncclSymkKernelMask kmask = ncclSymkMask(comm_.get(), ncclFuncAllReduce, ncclDevSum, kTy, /*nElts=*/1024);
   EXPECT_FALSE(KernelBitSet(kmask, ncclSymkKernelId_AllReduce_AGxLLMC_R));
 }
 
 TEST_F(SymKernelMaskTest, HasLDMC_ValidRedAndType_Survives) {
   comm_->symkState.hasLsaMultimem = true;
-  uint32_t kmask = ncclSymkMask(comm_.get(), ncclFuncAllReduce, ncclDevSum, ncclFloat16, /*nElts=*/1024);
+  ncclSymkKernelMask kmask = ncclSymkMask(comm_.get(), ncclFuncAllReduce, ncclDevSum, ncclFloat16, /*nElts=*/1024);
   EXPECT_TRUE(KernelBitSet(kmask, ncclSymkKernelId_AllReduce_RSxLDMC_AGxSTMC));
 }
 
-TEST_F(SymKernelMaskTest, HasLDMC_F16Type_MinMaxRed_Survives) {
+// hasLDMC accepts MinMax for f16, but since v2.32.6 ncclSymkMask also applies the reduction support set: the
+// non-Genk kernels implement only Sum (and PostDiv for ReduceScatter), and the Genk kernels that take MinMax
+// are not built on AMD, so the whole mask goes.
+TEST_F(SymKernelMaskTest, HasLDMC_F16Type_MinMaxRed_ClearedByReduceSupport) {
   comm_->symkState.hasLsaMultimem = true;
-  uint32_t kmask = ncclSymkMask(comm_.get(), ncclFuncAllReduce, ncclDevMinMax, ncclFloat16, /*nElts=*/1024);
-  EXPECT_TRUE(KernelBitSet(kmask, ncclSymkKernelId_AllReduce_RSxLDMC_AGxSTMC));
+  ncclSymkKernelMask kmask = ncclSymkMask(comm_.get(), ncclFuncAllReduce, ncclDevMinMax, ncclFloat16, /*nElts=*/1024);
+  EXPECT_FALSE(KernelBitSet(kmask, ncclSymkKernelId_AllReduce_RSxLDMC_AGxSTMC));
+  EXPECT_EQ(kmask & ~ncclGenkKernelMask(), 0u);
 }
 
 TEST_F(SymKernelMaskTest, HasLDMC_UnsupportedRed_Cleared) {
   comm_->symkState.hasLsaMultimem = true;
-  uint32_t kmask = ncclSymkMask(comm_.get(), ncclFuncAllReduce, ncclDevProd, ncclFloat16, /*nElts=*/1024);
+  ncclSymkKernelMask kmask = ncclSymkMask(comm_.get(), ncclFuncAllReduce, ncclDevProd, ncclFloat16, /*nElts=*/1024);
   EXPECT_FALSE(KernelBitSet(kmask, ncclSymkKernelId_AllReduce_RSxLDMC_AGxSTMC));
 }
 
 TEST_F(SymKernelMaskTest, HasLDMC_F8Type_CompCapBelowBoundary_Cleared) {
   comm_->symkState.hasLsaMultimem = true;
   comm_->compCap = 99;
-  uint32_t kmask = ncclSymkMask(comm_.get(), ncclFuncAllReduce, ncclDevSum, ncclFloat8e4m3, /*nElts=*/1024);
+  ncclSymkKernelMask kmask = ncclSymkMask(comm_.get(), ncclFuncAllReduce, ncclDevSum, ncclFloat8e4m3, /*nElts=*/1024);
   EXPECT_FALSE(KernelBitSet(kmask, ncclSymkKernelId_AllReduce_RSxLDMC_AGxSTMC));
 }
 
 TEST_F(SymKernelMaskTest, HasLDMC_F8Type_CompCapAtBoundary_Survives) {
   comm_->symkState.hasLsaMultimem = true;
   comm_->compCap = 100;
-  uint32_t kmask = ncclSymkMask(comm_.get(), ncclFuncAllReduce, ncclDevSum, ncclFloat8e4m3, /*nElts=*/1024);
+  ncclSymkKernelMask kmask = ncclSymkMask(comm_.get(), ncclFuncAllReduce, ncclDevSum, ncclFloat8e4m3, /*nElts=*/1024);
   EXPECT_TRUE(KernelBitSet(kmask, ncclSymkKernelId_AllReduce_RSxLDMC_AGxSTMC));
 }
 
 TEST_F(SymKernelMaskTest, HasLDMC_F32Type_ValidRed_Survives) {
   comm_->symkState.hasLsaMultimem = true;
-  uint32_t kmask = ncclSymkMask(comm_.get(), ncclFuncAllReduce, ncclDevSum, ncclFloat32, /*nElts=*/1024);
+  ncclSymkKernelMask kmask = ncclSymkMask(comm_.get(), ncclFuncAllReduce, ncclDevSum, ncclFloat32, /*nElts=*/1024);
   EXPECT_TRUE(KernelBitSet(kmask, ncclSymkKernelId_AllReduce_RSxLDMC_AGxSTMC));
 }
 
 // f32/f64 do not accept ncclDevMinMax, unlike the int/f16/bf16 and f8 cases above.
 TEST_F(SymKernelMaskTest, HasLDMC_F32Type_MinMaxRed_Cleared) {
   comm_->symkState.hasLsaMultimem = true;
-  uint32_t kmask = ncclSymkMask(comm_.get(), ncclFuncAllReduce, ncclDevMinMax, ncclFloat32, /*nElts=*/1024);
+  ncclSymkKernelMask kmask = ncclSymkMask(comm_.get(), ncclFuncAllReduce, ncclDevMinMax, ncclFloat32, /*nElts=*/1024);
   EXPECT_FALSE(KernelBitSet(kmask, ncclSymkKernelId_AllReduce_RSxLDMC_AGxSTMC));
 }
 
 // ncclDevSumPostDiv (avg) is a real shipping combination (generate.py emits ReduceScatter-avg kernels)
 // but was otherwise untested through hasLDMC; one case per type group, reusing the f8 compCap gate.
+// Probed on ReduceScatter: since v2.32.6 the mask drops AllReduce kernels for PostDiv, which only
+// ReduceScatter implements.
 struct HasLDMCPostDivCase {
   std::string name;
   ncclDataType_t ty;
@@ -471,8 +480,9 @@ TEST_P(SymKernelHasLDMCPostDivTest, MatchesExpectedLDMCBit) {
   const HasLDMCPostDivCase& c = GetParam();
   comm_->symkState.hasLsaMultimem = true;
   comm_->compCap = c.compCap;
-  uint32_t kmask = ncclSymkMask(comm_.get(), ncclFuncAllReduce, ncclDevSumPostDiv, c.ty, /*nElts=*/1024);
-  EXPECT_EQ(KernelBitSet(kmask, ncclSymkKernelId_AllReduce_RSxLDMC_AGxSTMC), c.expectLDMC);
+  ncclSymkKernelMask kmask =
+      ncclSymkMask(comm_.get(), ncclFuncReduceScatter, ncclDevSumPostDiv, c.ty, /*nElts=*/1024);
+  EXPECT_EQ(KernelBitSet(kmask, ncclSymkKernelId_ReduceScatter_LDMC), c.expectLDMC);
 }
 
 const std::vector<HasLDMCPostDivCase>& HasLDMCPostDivCases() {
@@ -490,7 +500,7 @@ INSTANTIATE_TEST_SUITE_P(SymHasLDMCPostDivCases, SymKernelHasLDMCPostDivTest,
                          [](const ::testing::TestParamInfo<HasLDMCPostDivCase>& info) { return info.param.name; });
 
 TEST_F(SymKernelMaskTest, AllGather_AGKernelSurvives) {
-  uint32_t kmask = ncclSymkMask(comm_.get(), ncclFuncAllGather, ncclDevSum, kTy, /*nElts=*/1024);
+  ncclSymkKernelMask kmask = ncclSymkMask(comm_.get(), ncclFuncAllGather, ncclDevSum, kTy, /*nElts=*/1024);
   EXPECT_TRUE(KernelBitSet(kmask, ncclSymkKernelId_AllGather_ST));
 }
 
@@ -542,7 +552,7 @@ TEST_F(SymKernelMaskTest, HierLsaST_OnlyOnGfx1250PartitionModeWithTwoOrMorePacka
     }
     comm_->hasMloPart = c.hasMloPart;
     comm_->symkState.kcomm.hierScaleInSize = c.scaleIn;
-    uint32_t kmask = ncclSymkMask(comm_.get(), ncclFuncAllGather, ncclDevSum, kTy, /*nElts=*/1024);
+    ncclSymkKernelMask kmask = ncclSymkMask(comm_.get(), ncclFuncAllGather, ncclDevSum, kTy, /*nElts=*/1024);
     EXPECT_EQ(KernelBitSet(kmask, ncclSymkKernelId_AllGather_HierLsaST), c.offered) << c.name;
     EXPECT_EQ(KernelBitSet(kmask, ncclSymkKernelId_AllGather_HierLsaTmaST), c.offered && TmaReachableOnThisBuild())
         << c.name;
@@ -551,19 +561,37 @@ TEST_F(SymKernelMaskTest, HierLsaST_OnlyOnGfx1250PartitionModeWithTwoOrMorePacka
 }
 
 TEST_F(SymKernelMaskTest, UnsupportedCollective_EntireMaskZeroed) {
-  uint32_t kmask = ncclSymkMask(comm_.get(), ncclFuncBroadcast, ncclDevSum, kTy, /*nElts=*/1024);
+  ncclSymkKernelMask kmask = ncclSymkMask(comm_.get(), ncclFuncGather, ncclDevSum, kTy, /*nElts=*/1024);
   EXPECT_EQ(kmask, 0u);
+}
+
+// Broadcast and Reduce have only Genk kernels (v2.32.6), which NCCL_SYM_GENK_ENABLE leaves off and AMD never builds.
+TEST_F(SymKernelMaskTest, GenkOnlyCollectives_GenkDisabled_EntireMaskZeroed) {
+  EXPECT_EQ(ncclParamSymGenkEnable(), 0);
+  EXPECT_EQ(ncclSymkMask(comm_.get(), ncclFuncBroadcast, ncclDevSum, kTy, /*nElts=*/1024), 0u);
+  EXPECT_EQ(ncclSymkMask(comm_.get(), ncclFuncReduce, ncclDevSum, kTy, /*nElts=*/1024), 0u);
+}
+
+// The direct-NVLink (xGMI) gate moved from ncclSymkAvailable into the mask in v2.32.6; only Genk may survive it.
+TEST_F(SymKernelMaskTest, NotAllDirectNvlink_EveryNonGenkKernelCleared) {
+  comm_->symmetricSupport = true;
+  ASSERT_TRUE(ncclSymkAvailable(comm_.get(), ncclFuncAllReduce, ncclDevSum, kTy, /*nElts=*/1024));
+  comm_->isAllDirectNvlink = false;
+  for (ncclFunc_t coll : {ncclFuncAllReduce, ncclFuncAllGather, ncclFuncReduceScatter}) {
+    EXPECT_EQ(ncclSymkMask(comm_.get(), coll, ncclDevSum, kTy, /*nElts=*/1024) & ~ncclGenkKernelMask(), 0u) << coll;
+  }
+  EXPECT_FALSE(ncclSymkAvailable(comm_.get(), ncclFuncAllReduce, ncclDevSum, kTy, /*nElts=*/1024));
 }
 
 TEST_F(SymKernelMaskTest, ReduceScatterNRanksMultiplier_JustBelowPerRank2GB_LLKernelSurvives) {
   size_t nElts = NEltsForBytes((size_t(2) << 30) / comm_->nRanks - NCCL_SYM_KERNEL_CELL_SIZE);
-  uint32_t kmask = ncclSymkMask(comm_.get(), ncclFuncReduceScatter, ncclDevSum, kTy, nElts);
+  ncclSymkKernelMask kmask = ncclSymkMask(comm_.get(), ncclFuncReduceScatter, ncclDevSum, kTy, nElts);
   EXPECT_TRUE(KernelBitSet(kmask, ncclSymkKernelId_ReduceScatter_LL));
 }
 
 TEST_F(SymKernelMaskTest, ReduceScatterNRanksMultiplier_AtPerRank2GB_LLKernelCleared) {
   size_t nElts = NEltsForBytes((size_t(2) << 30) / comm_->nRanks);
-  uint32_t kmask = ncclSymkMask(comm_.get(), ncclFuncReduceScatter, ncclDevSum, kTy, nElts);
+  ncclSymkKernelMask kmask = ncclSymkMask(comm_.get(), ncclFuncReduceScatter, ncclDevSum, kTy, nElts);
   EXPECT_FALSE(KernelBitSet(kmask, ncclSymkKernelId_ReduceScatter_LL));
 }
 
@@ -588,14 +616,44 @@ TEST_F(SymKernelMicrotest, KernelIdIsLL_OnlyTheLLKernels) {
 
 // ---- ncclSymkAvailable/ncclSymkImplemented: the (coll,red,ty) support set independent of the generated switch ----
 
-// Dropping "&& ty != ncclFloat64" here would wrongly implement this pair; nothing else here would catch it.
-TEST_F(SymKernelMicrotest, SymkImplemented_AllReduceFloat64_NotImplemented) {
-  EXPECT_FALSE(ncclSymkImplemented(ncclFuncAllReduce, ncclDevSum, ncclFloat64));
+// Dropping "&& ty != ncclFloat64" here would wrongly implement this pair for the non-Genk kernels.
+// Since v2.32.6 ncclSymkImplemented is the union with the Genk kernels, which take any type for Sum, so the f64
+// gate lives in ncclSymkOtherReduceImplemented and is enforced by ncclSymkMask.
+TEST_F(SymKernelMicrotest, SymkOtherReduceImplemented_AllReduceFloat64_NotImplemented) {
+  EXPECT_FALSE(ncclSymkOtherReduceImplemented(ncclDevSum, ncclFloat64, ncclFuncAllReduce));
+  EXPECT_TRUE(ncclSymkOtherReduceImplemented(ncclDevSum, ncclFloat32, ncclFuncAllReduce));
+  EXPECT_TRUE(ncclSymkImplemented(ncclFuncAllReduce, ncclDevSum, ncclFloat64)) << "Genk covers Sum on any type";
+  EXPECT_EQ(ncclSymkMask(comm_.get(), ncclFuncAllReduce, ncclDevSum, ncclFloat64, /*nElts=*/1024) &
+                ~ncclGenkKernelMask(),
+            0u);
 }
 
 TEST_F(SymKernelMicrotest, SymkAvailable_AllReduceFloat64_NotAvailable) {
-  comm_->isAllDirectNvlink = true;
+  comm_->symmetricSupport = true;  // otherwise the first guard answers before f64 is considered
+  ASSERT_TRUE(ncclSymkAvailable(comm_.get(), ncclFuncAllReduce, ncclDevSum, ncclFloat32, /*nElts=*/1024));
   EXPECT_FALSE(ncclSymkAvailable(comm_.get(), ncclFuncAllReduce, ncclDevSum, ncclFloat64, /*nElts=*/1024));
+}
+
+// HIP builds no AlltoAll_LL kernel (it is inline PTX), so the symmetric path must never be offered for AlltoAll, even
+// once init has provisioned scratch and the mask would keep the kernel.
+TEST_F(SymKernelMicrotest, SymkImplemented_AlltoAll_NotImplementedOnHip) {
+  comm_->symmetricSupport = true;
+  comm_->symkState.initialized = true;
+  comm_->symkState.alltoAllLLProvisionBytes = 1 << 20;
+  ASSERT_TRUE(KernelBitSet(ncclSymkMask(comm_.get(), ncclFuncAlltoAll, /*red=*/0, ncclUint8, /*nElts=*/1024),
+                           ncclSymkKernelId_AlltoAll_LL));
+  EXPECT_FALSE(ncclSymkImplemented(ncclFuncAlltoAll, /*red=*/0, ncclUint8));
+  EXPECT_FALSE(ncclSymkAvailable(comm_.get(), ncclFuncAlltoAll, /*red=*/0, ncclUint8, /*nElts=*/1024));
+}
+
+// Forcing AlltoAll_LL (NCCL_SYM_KERNEL or a tuner) must not make init provision scratch or GIN for a kernel HIP
+// never builds, but the force must still be reported so enqueue rejects the AlltoAll instead of silently falling back.
+TEST_F(SymKernelMicrotest, AlltoAllLLForced_ForcedOnHip_ProvisionsNothing) {
+  const int tuningFunc = ncclTuningFuncIndex(ncclFuncAlltoAll);
+  comm_->tuningContext.forced[tuningFunc] = 1;
+  comm_->tuningContext.enabled[NCCL_TUNING_SYM_KERNEL_ID_OFFSET + ncclSymkKernelId_AlltoAll_LL][tuningFunc] = 1;
+  EXPECT_TRUE(ncclSymkAlltoAllLLForced(comm_.get()));
+  EXPECT_EQ(ncclSymkAlltoAllLLProvisionBytes(comm_.get()), 0u);
 }
 
 }  // namespace

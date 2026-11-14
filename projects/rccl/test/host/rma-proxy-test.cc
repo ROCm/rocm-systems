@@ -273,6 +273,10 @@ protected:
         comm_ = std::make_unique<ncclComm>();
         comm_->rank              = 0;
         comm_->nRanks            = kNRanks;
+        // CreateContext builds its peerArray over the rail; a base stride of 1
+        // (one rail spanning every rank) is what init.cc picks for a flat comm.
+        comm_->rmaBaseStride       = 1;
+        comm_->rmaBaseStride_rcp32 = idivRcp32(1u);
         comm_->config.numRmaSig  = kNumRmaSig;
         comm_->memManager        = nullptr;
         ncclMemoryStackConstruct(&comm_->memPermanent);
@@ -308,7 +312,7 @@ protected:
         void* out = nullptr;
         const int destroysBefore = rmaNet_.destroyCtxCalls;
         ncclResult_t res =
-            ncclRmaProxyCreateContext(comm_.get(), &rmaNet_.collH, props_, 0, &out);
+            ncclRmaProxyCreateContext(comm_.get(), &rmaNet_.collH, /*rankStride=*/1, props_, 0, &out);
         if (res == ncclSuccess) {
             ctx_ = static_cast<ncclRmaProxyCtx*>(out);
             // A successful create must not have torn the context back down.

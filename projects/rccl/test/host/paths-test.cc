@@ -406,6 +406,8 @@ class PathsCommMicrotest : public PathsMicrotest {
     comm_->pxnDisable = RCCL_VALUE_UNSET;
     comm_->config.nChannelsPerNetPeer = NCCL_CONFIG_UNDEF_INT;
     comm_->config.maxP2pPeers = NCCL_CONFIG_UNDEF_INT;
+    // ncclParseCommConfig's default. NCCL 2.32.6 caps p2pnChannels at pow2Down(config.maxCTAs).
+    comm_->config.maxCTAs = MAXCHANNELS;
     AllowP2pBetweenEveryGpu();
   }
 
@@ -713,22 +715,6 @@ TEST_F(PathsGdrMicrotest, CheckGdr_UnknownNetOrRankFails) {
 
   EXPECT_EQ(ncclInternalError, ncclTopoCheckGdr(system_.get(), 0, 0x77, 0, &mode));
   EXPECT_EQ(ncclInternalError, ncclTopoCheckGdr(system_.get(), 5, system_->nodes[NET].nodes[0].id, 0, &mode));
-}
-
-TEST_F(PathsGdrMicrotest, IsGdrAvail_AnyNicWithGdrInEitherDirection) {
-  Use(BuildWithPaths(XgmiSystem(2, 2, true)));
-  bool avail = false;
-
-  ASSERT_EQ(ncclSuccess, ncclTopoIsGdrAvail(system_.get(), 1, &avail));
-  EXPECT_TRUE(avail);
-
-  g_params["NET_GDR_READ"] = 0;
-  ASSERT_EQ(ncclSuccess, ncclTopoIsGdrAvail(system_.get(), 1, &avail));
-  EXPECT_TRUE(avail);
-
-  for (int n = 0; n < 2; n++) system_->nodes[NET].nodes[n].net.gdrSupport = 0;
-  ASSERT_EQ(ncclSuccess, ncclTopoIsGdrAvail(system_.get(), 1, &avail));
-  EXPECT_FALSE(avail);
 }
 
 // --- Network flush and intra-node net
@@ -1154,6 +1140,16 @@ TEST_F(PathsP2pChannelsMicrotest, P2pChannels_AinicRestoresTwoChannelsPerPeerBel
   Setup(BuildWithPaths(XgmiSystem(1, 1, true)), 16, 16, 8);
   Compute();
   EXPECT_EQ(1, comm_->p2pnChannelsPerPeer);  // at scale: one per peer
+}
+
+// NCCL 2.32.6: rounding p2pnChannels up to a power of two may exceed maxCTAs, so it is rounded down to honor it.
+TEST_F(PathsP2pChannelsMicrotest, P2pChannels_MaxCtasCapsTheRoundedCount) {
+  Setup(BuildWithPaths(XgmiSystem(4, 1, false, "gfx1250")), 4, 1, MAXCHANNELS);
+  comm_->config.maxCTAs = 100;
+
+  Compute();
+
+  EXPECT_EQ(64, comm_->p2pnChannels);  // the uncapped CU-bound pool is 256; pow2Down(100) = 64
 }
 
 TEST_F(PathsP2pChannelsMicrotest, P2pChannels_InitChannelFailureIsReturned) {

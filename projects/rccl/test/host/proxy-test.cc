@@ -1181,11 +1181,12 @@ TEST_F(ProxyAppendMicrotest, OpToArgs_FirstSubCopiesTheOpAndLaterSubsMustMatch) 
   ncclProxyOp op = Op(1, 7);
   op.nChannels = 4;
   op.nPeers = 3;
+  op.minPeers = 5;
   op.prevRank = 5;
   op.nextRank = 6;
   op.commHash = 99;
   op.channelId = 2;
-  ASSERT_EQ(ncclProxyOpToArgs(&op, &a, 0), ncclSuccess);
+  ASSERT_EQ(ncclProxyOpToArgs(&op, &a, 0, ps_.profilerContext), ncclSuccess);
   EXPECT_EQ(a.nsubs, 1);
   EXPECT_EQ(a.opCount, 7u);
   EXPECT_EQ(a.state, ncclProxyOpReady);
@@ -1194,6 +1195,7 @@ TEST_F(ProxyAppendMicrotest, OpToArgs_FirstSubCopiesTheOpAndLaterSubsMustMatch) 
   EXPECT_EQ(a.send, 1);
   EXPECT_EQ(a.prevRank, 5);
   EXPECT_EQ(a.nextRank, 6);
+  EXPECT_EQ(a.minPeers, 5);
   EXPECT_EQ(a.subs[0].channelId, 2);
   EXPECT_EQ(a.subs[0].nsteps, 4);
   EXPECT_EQ(a.subs[0].commHash, 0u);
@@ -1201,32 +1203,51 @@ TEST_F(ProxyAppendMicrotest, OpToArgs_FirstSubCopiesTheOpAndLaterSubsMustMatch) 
   g_proxyDiagEnabled = true;
   op.nChannels = 2;
   op.nPeers = 9;
+  op.minPeers = 2;
   op.totalBytes = 1234;
-  ASSERT_EQ(ncclProxyOpToArgs(&op, &a, 1), ncclSuccess);
+  ASSERT_EQ(ncclProxyOpToArgs(&op, &a, 1, ps_.profilerContext), ncclSuccess);
   EXPECT_EQ(a.nsubs, 2);
   EXPECT_EQ(a.nChannels, 2);
   EXPECT_EQ(a.nPeers, 3);
+  EXPECT_EQ(a.minPeers, 2);  // NCCL 2.32.6: the smallest minPeers of the merged subs
   EXPECT_EQ(a.subs[1].commHash, 99u);
   EXPECT_EQ(a.subs[1].profExtras.totalBytes, 1234u);
   for (int field = 0; field < 6; field++) {
     ncclProxyOp bad = op;
     uint8_t* f[] = {&bad.sliceSteps, &bad.chunkSteps, &bad.protocol, &bad.dtype, &bad.redOp, &bad.coll};
     (*f[field])++;
-    EXPECT_EQ(ncclProxyOpToArgs(&bad, &a, 2), ncclInternalError) << field;
+    EXPECT_EQ(ncclProxyOpToArgs(&bad, &a, 2, ps_.profilerContext), ncclInternalError) << field;
   }
   EXPECT_TRUE(ProxyLogged(NCCL_LOG_WARN, "Proxy append mismatch"));
   a.state = ncclProxyOpProgress;
-  EXPECT_EQ(ncclProxyOpToArgs(&op, &a, 2), ncclInternalError);
+  EXPECT_EQ(ncclProxyOpToArgs(&op, &a, 2, ps_.profilerContext), ncclInternalError);
   EXPECT_TRUE(ProxyLogged(NCCL_LOG_WARN, "Proxy append on running operation"));
-  EXPECT_EQ(ncclProxyOpToArgs(&op, &a, NCCL_PROXY_MAX_SUBS), ncclInternalError);
+  EXPECT_EQ(ncclProxyOpToArgs(&op, &a, NCCL_PROXY_MAX_SUBS, ps_.profilerContext), ncclInternalError);
   EXPECT_TRUE(ProxyLogged(NCCL_LOG_WARN, "Proxy append out of bounds"));
+}
+
+// NCCL 2.32.6: a sub keeps the op's profiler context only when its connection is in the same process; a foreign
+// context is replaced by the proxy's own, which ProxyAppend passes in.
+TEST_F(ProxyAppendMicrotest, OpToArgs_ForeignProcessProfilerContextIsReplacedByTheLocalOne) {
+  int opCtx = 0, localCtx = 0;
+  ps_.profilerContext = &localCtx;
+  ncclProxyOp same = Op(0, 1), foreign = Op(1, 1);
+  same.profilerContext = foreign.profilerContext = &opCtx;
+  conns_[0].sameProcess = 1;
+  conns_[1].sameProcess = 0;
+
+  ASSERT_EQ(ProxyAppend(&ps_, &same), ncclSuccess);
+  ASSERT_EQ(ProxyAppend(&ps_, &foreign), ncclSuccess);
+
+  EXPECT_EQ(args_[0].subs[0].profilerContext, &opCtx);
+  EXPECT_EQ(args_[1].subs[0].profilerContext, &localCtx);
 }
 
 TEST_F(ProxyAppendMicrotest, Append_NewPeersJoinTheActiveListInOrder) {
   ncclProxyOp op0 = Op(0, 1), op1 = Op(1, 1), op2 = Op(2, 1);
-  ASSERT_EQ(ProxyAppend(&st(), &op0), ncclSuccess);
-  ASSERT_EQ(ProxyAppend(&st(), &op1), ncclSuccess);
-  ASSERT_EQ(ProxyAppend(&st(), &op2), ncclSuccess);
+  ASSERT_EQ(ProxyAppend(&ps_, &op0), ncclSuccess);
+  ASSERT_EQ(ProxyAppend(&ps_, &op1), ncclSuccess);
+  ASSERT_EQ(ProxyAppend(&ps_, &op2), ncclSuccess);
   EXPECT_EQ(Active(), (std::vector<ncclProxyArgs*>{&args_[0], &args_[1], &args_[2]}));
   EXPECT_EQ(conns_[1].proxyAppend, &args_[1]);
 }
@@ -1234,15 +1255,15 @@ TEST_F(ProxyAppendMicrotest, Append_NewPeersJoinTheActiveListInOrder) {
 TEST_F(ProxyAppendMicrotest, Append_SharedSameOpCountBecomesASubElseANextPeer) {
   conns_[0].shared = 1;
   ncclProxyOp op = Op(0, 3);
-  ASSERT_EQ(ProxyAppend(&st(), &op), ncclSuccess);
-  ASSERT_EQ(ProxyAppend(&st(), &op), ncclSuccess);
+  ASSERT_EQ(ProxyAppend(&ps_, &op), ncclSuccess);
+  ASSERT_EQ(ProxyAppend(&ps_, &op), ncclSuccess);
   EXPECT_EQ(args_[0].nsubs, 2);
   op.opCount = 4;
-  ASSERT_EQ(ProxyAppend(&st(), &op), ncclSuccess);
+  ASSERT_EQ(ProxyAppend(&ps_, &op), ncclSuccess);
   EXPECT_EQ(args_[0].nextPeer, &args_[1]);
   EXPECT_EQ(conns_[0].proxyAppend, &args_[1]);
   conns_[0].shared = 0;  // unshared connections never merge, even on equal opCount
-  ASSERT_EQ(ProxyAppend(&st(), &op), ncclSuccess);
+  ASSERT_EQ(ProxyAppend(&ps_, &op), ncclSuccess);
   EXPECT_EQ(args_[1].nextPeer, &args_[2]);
   EXPECT_EQ(Active(), (std::vector<ncclProxyArgs*>{&args_[0]}));
 }
@@ -1250,17 +1271,17 @@ TEST_F(ProxyAppendMicrotest, Append_SharedSameOpCountBecomesASubElseANextPeer) {
 TEST_F(ProxyAppendMicrotest, Append_ErrorsPropagate) {
   conns_[0].shared = 1;
   ncclProxyOp op = Op(0, 3);
-  ASSERT_EQ(ProxyAppend(&st(), &op), ncclSuccess);
+  ASSERT_EQ(ProxyAppend(&ps_, &op), ncclSuccess);
   op.coll++;
-  EXPECT_EQ(ProxyAppend(&st(), &op), ncclInternalError);  // mismatched sub
+  EXPECT_EQ(ProxyAppend(&ps_, &op), ncclInternalError);  // mismatched sub
   st().pool = nullptr;
   g_callocFailAt = g_callocCalls;
   op.opCount = 5;
-  EXPECT_EQ(ProxyAppend(&st(), &op), ncclSystemError);  // nextPeer allocation
+  EXPECT_EQ(ProxyAppend(&ps_, &op), ncclSystemError);  // nextPeer allocation
   EXPECT_EQ(args_[0].nextPeer, nullptr);
   g_callocFailAt = g_callocCalls;
   ncclProxyOp other = Op(1, 1);
-  EXPECT_EQ(ProxyAppend(&st(), &other), ncclSystemError);  // new list entry allocation
+  EXPECT_EQ(ProxyAppend(&ps_, &other), ncclSystemError);  // new list entry allocation
   EXPECT_EQ(Active(), (std::vector<ncclProxyArgs*>{&args_[0]}));
 }
 
@@ -1268,9 +1289,9 @@ TEST_F(ProxyAppendMicrotest, Append_ErrorsPropagate) {
 TEST_F(ProxyAppendMicrotest, Append_CountsAMismatchedSubBeforeRejectingIt) {
   conns_[0].shared = 1;
   ncclProxyOp op = Op(0, 3);
-  ASSERT_EQ(ProxyAppend(&st(), &op), ncclSuccess);
+  ASSERT_EQ(ProxyAppend(&ps_, &op), ncclSuccess);
   op.coll++;
-  EXPECT_EQ(ProxyAppend(&st(), &op), ncclInternalError);
+  EXPECT_EQ(ProxyAppend(&ps_, &op), ncclInternalError);
   EXPECT_EQ(args_[0].nsubs, 2);
 }
 
@@ -1278,7 +1299,7 @@ class ProxyProgressOpsMicrotest : public ProxyProgressFixture {};
 
 TEST_F(ProxyProgressOpsMicrotest, RemoveOp_PromotesNextPeerOrUnlinksAndRecycles) {
   ncclProxyOp a = Op(0, 1), b = Op(1, 1), b2 = Op(1, 2), c = Op(2, 1);
-  for (ncclProxyOp* op : {&a, &b, &b2, &c}) ASSERT_EQ(ProxyAppend(&st(), op), ncclSuccess);
+  for (ncclProxyOp* op : {&a, &b, &b2, &c}) ASSERT_EQ(ProxyAppend(&ps_, op), ncclSuccess);
   // active: A0 -> B1(nextPeer B2) -> C3
   ncclProxyArgs *prev = &args_[0], *op = &args_[1];
   ASSERT_EQ(removeOp(&st(), &op, &prev), ncclSuccess);
@@ -1298,7 +1319,7 @@ TEST_F(ProxyProgressOpsMicrotest, RemoveOp_PromotesNextPeerOrUnlinksAndRecycles)
   ASSERT_EQ(removeOp(&st(), &op, &prev), ncclSuccess);  // middle without nextPeer
   EXPECT_EQ(Active(), (std::vector<ncclProxyArgs*>{&args_[2]}));
   ncclProxyOp b3 = Op(1, 3);
-  ASSERT_EQ(ProxyAppend(&st(), &b3), ncclSuccess);
+  ASSERT_EQ(ProxyAppend(&ps_, &b3), ncclSuccess);
   prev = nullptr;
   op = &args_[2];
   ASSERT_EQ(removeOp(&st(), &op, &prev), ncclSuccess);  // head with nextPeer
@@ -1309,7 +1330,7 @@ TEST_F(ProxyProgressOpsMicrotest, RemoveOp_PromotesNextPeerOrUnlinksAndRecycles)
 TEST_F(ProxyProgressOpsMicrotest, ProgressOps_RemovesFinishedOrFailedOpsAndReportsTheFirstError) {
   for (int c = 0; c < 4; c++) {
     ncclProxyOp op = Op(c, 1);
-    ASSERT_EQ(ProxyAppend(&st(), &op), ncclSuccess);
+    ASSERT_EQ(ProxyAppend(&ps_, &op), ncclSuccess);
   }
   ScopedHook progress(g_progressFn, [&](ncclProxyArgs* a) {
     int i = a - args_;
@@ -1386,7 +1407,7 @@ TEST_F(ProxyGetPostedOpsMicrotest, GetPostedOps_StopsAtTheBatchSizeAndResumesWit
 TEST_F(ProxyGetPostedOpsMicrotest, GetPostedOps_WithActiveOpsNeverWaitsForNewPostsOrTheLock) {
   MakeOpsPool();
   ncclProxyOp op = Op(0, 1);
-  ASSERT_EQ(ProxyAppend(&st(), &op), ncclSuccess);
+  ASSERT_EQ(ProxyAppend(&ps_, &op), ncclSuccess);
   int added = 0;
   ASSERT_EQ(ncclProxyGetPostedOps(&ps_, &added), ncclSuccess);
   auto [first, last] = Chain({{0, 1, 1}});
@@ -2596,7 +2617,8 @@ TEST_F(ProxyServiceLoopMicrotest, Service_RecvErrorsCloseThePeerAndAreQuietOnceA
 
 TEST_F(ProxyServiceLoopMicrotest, Service_AbortWithCuMemHostClosesPeersWhenStopped) {
   int a = Connect();
-  g_cuMemEnabled = g_cuMemHostEnabled = 1;
+  // NCCL 2.32.6 reads the comm-wide cuMem host consensus init.cc stores in the proxy state.
+  ps_.cuMemHostEnabled = true;
   ps_.stop = 1;
   abort_ = 1;
   ncclProxyService(&ps_);
@@ -2918,7 +2940,6 @@ TEST_F(ProxyLifecycleMicrotest, Create_CopiesCommSettingsAndStartsBothServiceThr
   EXPECT_EQ(ps->ll128LineElems, 9);
   EXPECT_EQ(ps->p2pCeStream, nullptr);
   EXPECT_EQ(ps->p2pCeStreamRefs, 0);
-  EXPECT_EQ(ps->ginState, &res_.ginState);
   EXPECT_EQ(g_threadNames, 2);
   EXPECT_EQ(g_hipSetDevices, (std::vector<int>{5, 5}));
 }

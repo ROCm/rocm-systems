@@ -3197,7 +3197,7 @@ protected:
             comm->symmetricSupport && comm->isAllDirectNvlink;
 
         bool expectSymmetric = symmetricRuntimeAvailable;
-        if(comm->devrState.lsaSize < comm->nRanks)
+        if(comm->devrState.lsaTeamSize < comm->nRanks)
         {
             switch(collective)
             {
@@ -3222,7 +3222,7 @@ protected:
         const bool sawLegacy = checker.usedLegacyCollective(collectiveName(collective));
         TEST_INFO("%s path: nNodes=%d lsaSize=%d nRanks=%d symmetricSupport=%d isAllDirectNvlink=%d "
                   "hasLsaMultimem=%d expected=%s observedSymmetric=%d observedLegacy=%d",
-                  collectiveName(collective), comm->nNodes, comm->devrState.lsaSize, comm->nRanks,
+                  collectiveName(collective), comm->nNodes, comm->devrState.lsaTeamSize, comm->nRanks,
                   comm->symmetricSupport, static_cast<int>(comm->isAllDirectNvlink),
                   static_cast<int>(comm->symkState.hasLsaMultimem),
                   expectSymmetric ? "symmetric" : "legacy", static_cast<int>(sawSymmetric),

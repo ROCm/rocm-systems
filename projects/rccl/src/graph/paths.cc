@@ -667,26 +667,6 @@ ncclResult_t ncclTopoCheckGdr(struct ncclTopoSystem* system, int rank, int64_t n
   return ncclSuccess;
 }
 
-ncclResult_t ncclTopoIsGdrAvail(struct ncclTopoSystem* system, int rank, bool* avail) {
-  int netNum = system->nodes[NET].count;
-  enum ncclTopoGdrMode useGdr = ncclTopoGdrModeDisable;
-  *avail = false;
-  for (int n = 0; n < netNum; n++) {
-    int64_t netId = system->nodes[NET].nodes[n].id;
-    NCCLCHECK(ncclTopoCheckGdr(system, rank, netId, 1, &useGdr));
-    if (useGdr) {
-      *avail = true;
-      break;
-    }
-    NCCLCHECK(ncclTopoCheckGdr(system, rank, netId, 0, &useGdr));
-    if (useGdr) {
-      *avail = true;
-      break;
-    }
-  }
-  return ncclSuccess;
-}
-
 // Set to 0 to disable the flush on Hopper when using GDR
 NCCL_PARAM(NetForceFlush, "NET_FORCE_FLUSH", 0);
 
@@ -1238,7 +1218,7 @@ ncclResult_t ncclTopoTrimSystem(struct ncclTopoSystem* system, struct ncclComm* 
   system->inter = system->nodes[GPU].count == comm->nRanks ? 0 : 1;
 exit:
   free(domains);
-  if (ids) free(ids);
+  free(ids);
   return ret;
 fail:
   goto exit;
@@ -1390,7 +1370,6 @@ ncclResult_t ncclTopoComputeP2pChannelsPerPeer(struct ncclComm* comm) {
 }
 
 ncclResult_t ncclTopoComputeP2pChannels(struct ncclComm* comm) {
-  /* here we already honor comm->max/minCTAs for p2pnChannels. */
   if (comm->sharedRes->owner != comm) {
     comm->p2pnChannels = std::min(comm->nChannels, ncclMaxP2pNchannels());
     comm->p2pnChannels =
@@ -1475,6 +1454,8 @@ ncclResult_t ncclTopoComputeP2pChannels(struct ncclComm* comm) {
     }
     comm->p2pnChannelsPerPeer = std::min(comm->p2pnChannelsPerPeer, MAXCHANNELS);
   }
+  // Rounding up may exceed maxCTAs, which bounds the grid of every kernel; round down to honor it.
+  comm->p2pnChannels = std::min(comm->p2pnChannels, pow2Down(comm->config.maxCTAs));
 
   // Pick p2pnChannelsPerPeer so a P2P plan tiles the channel pool without wrapping.
   // Saturates gridDim.x for alltoall-style workloads. On by default for gfx1250,
@@ -1711,7 +1692,7 @@ ncclResult_t ncclTopoSplitNvLink(struct ncclTopoSystem* system, int* splitNvLink
   *splitNvLink = nvlDomains == 2 ? 1 : 0;
 
 exit:
-  if (nvlDomain) free(nvlDomain);
-  if (nvlDomainCount) free(nvlDomainCount);
+  free(nvlDomain);
+  free(nvlDomainCount);
   return res;
 }
