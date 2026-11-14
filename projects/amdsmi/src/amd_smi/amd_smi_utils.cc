@@ -101,6 +101,9 @@ std::string removeString(const std::string origStr, const std::string& removeMe)
 
 amdsmi_status_t smi_clear_char_and_reinitialize(char buffer[], uint32_t len,
                                                 std::string newString) {
+  if (buffer == nullptr || len == 0) {
+    return AMDSMI_STATUS_INVAL;
+  }
   char* begin = &buffer[0];
   char* end = &buffer[len];
   std::fill(begin, end, 0);

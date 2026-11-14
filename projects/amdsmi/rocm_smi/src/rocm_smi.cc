@@ -21,6 +21,7 @@
 #include <cstring>
 #include <fstream>
 #include <limits>
+#include <new>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -2321,6 +2322,7 @@ rsmi_status_t rsmi_dev_xgmi_plpd_get(uint32_t dv_ind, rsmi_dpm_policy_t* policy)
     }
     strncpy(policy->policies[policy->num_supported].policy_description, description.c_str(),
             RSMI_MAX_POLICY_NAME - 1);
+    policy->policies[policy->num_supported].policy_description[RSMI_MAX_POLICY_NAME - 1] = '\0';
     policy->num_supported++;
   }  //  end for
 
@@ -2426,6 +2428,7 @@ rsmi_status_t rsmi_dev_soc_pstate_get(uint32_t dv_ind, rsmi_dpm_policy_t* policy
     }
     strncpy(policy->policies[policy->num_supported].policy_description, description.c_str(),
             RSMI_MAX_POLICY_NAME - 1);
+    policy->policies[policy->num_supported].policy_description[RSMI_MAX_POLICY_NAME - 1] = '\0';
     policy->num_supported++;
   }  //  end for
 
@@ -2783,6 +2786,7 @@ rsmi_status_t rsmi_dev_pcie_vendor_name_get(uint32_t dv_ind, char* name, size_t 
   }
   memset(name, 0, len);
   strncpy(name, vendor_name.c_str(), len - 1);
+  name[len - 1] = '\0';
   return ret;
   CATCH
 }
@@ -7110,7 +7114,7 @@ rsmi_status_t rsmi_dev_supported_func_iterator_open(uint32_t dv_ind,
 
   dev->fillSupportedFuncs();
 
-  *handle = new rsmi_func_id_iter_handle;
+  *handle = new (std::nothrow) rsmi_func_id_iter_handle;
 
   if (*handle == nullptr) {
     return RSMI_STATUS_OUT_OF_RESOURCES;
@@ -7120,12 +7124,15 @@ rsmi_status_t rsmi_dev_supported_func_iterator_open(uint32_t dv_ind,
 
   if (dev->supported_funcs()->begin() == dev->supported_funcs()->end()) {
     delete *handle;
+    *handle = nullptr;
     return RSMI_STATUS_NO_DATA;
   }
 
-  SupportedFuncMapIt* supp_func_iter = new SupportedFuncMapIt;
+  SupportedFuncMapIt* supp_func_iter = new (std::nothrow) SupportedFuncMapIt;
 
   if (supp_func_iter == nullptr) {
+    delete *handle;
+    *handle = nullptr;
     return RSMI_STATUS_OUT_OF_RESOURCES;
   }
   *supp_func_iter = dev->supported_funcs()->begin();

@@ -1,0 +1,223 @@
+name: AMDSMI C/C++ Static Analysis
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - 'projects/amdsmi/**'
+      - '.github/workflows/amdsmi-codeql.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'projects/amdsmi/**'
+      - '.github/workflows/amdsmi-codeql.yml'
+  schedule:
+    - cron: '0 0 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  DEBIAN_FRONTEND: noninteractive
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  codeql:
+    name: CodeQL C/C++
+    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork }}
+    runs-on:
+      - self-hosted
+      - ${{ vars.RUNNER_TYPE }}
+    timeout-minutes: 60
+    container:
+      image: ${{ vars.Ubuntu22_DOCKER_IMAGE }}
+      options: --user root
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    steps:
+      - name: Verify container image is configured
+        run: |
+          if [[ -z "${{ vars.Ubuntu22_DOCKER_IMAGE }}" ]]; then
+            echo "::error::Set the Ubuntu22_DOCKER_IMAGE repository variable"
+            exit 1
+          fi
+
+      - name: Install build dependencies
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            build-essential ca-certificates cmake curl git pkg-config python3 \
+            libdrm-dev libudev-dev libnl-3-dev libnl-genl-3-dev libmnl-dev
+
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: |
+            projects/amdsmi
+            .github/workflows
+
+      - name: Set Project Directory
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          echo "PROJECT_DIR=$GITHUB_WORKSPACE/projects/amdsmi" >> "$GITHUB_ENV"
+
+      - name: Download and extract CodeQL bundle
+        run: |
+          curl --fail --show-error --location -o codeql-bundle-linux64.tar.gz \
+            "https://mkmartifactory.amd.com:8443/artifactory/system-provisioning/CodeQL/bundles/latest/codeql-bundle-linux64.tar.gz"
+          tar -xzf codeql-bundle-linux64.tar.gz
+          chmod +x ./codeql/codeql
+          ./codeql/codeql --version
+
+      - name: Locate AMD custom query suite
+        run: |
+          AMD_SUITE=$(find ./codeql/qlpacks/codeql/cpp-queries \
+            -path '*/amd-sit-sast-scv/cpp-queries/*/codeql-suites/amd-cpp-windows-driver.qls' \
+            -print -quit)
+          if [[ -z "$AMD_SUITE" ]]; then
+            echo "::error::Could not locate the AMD C/C++ query suite"
+            exit 1
+          fi
+          echo "AMD_SUITE=$AMD_SUITE" >> "$GITHUB_ENV"
+
+      - name: Create CodeQL database
+        run: |
+          ./codeql/codeql database create codeqldb --language=cpp --source-root="$PROJECT_DIR" \
+            --command="cmake -S \"$PROJECT_DIR\" -B \"$PROJECT_DIR/build\" -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DBUILD_TESTS=OFF -DBUILD_EXAMPLES=OFF -DBUILD_WRAPPER=OFF" \
+            --command="cmake --build \"$PROJECT_DIR/build\" --parallel 2"
+
+      - name: Perform CodeQL Analysis
+        run: |
+          mkdir -p sarif-results
+          ./codeql/codeql database analyze codeqldb \
+            codeql/cpp-queries:codeql-suites/cpp-security-extended.qls "$AMD_SUITE" \
+            --format=sarifv2.1.0 \
+            --sarif-category '/workflow:amdsmi-codeql/language:cpp' \
+            --output=sarif-results/cpp.sarif
+
+      - name: Filter E-SMI findings
+        uses: advanced-security/filter-sarif@2da736ff05ef065cb2894ac6892e47b5eac2c3c0 # v1.1
+        with:
+          patterns: |
+            -**/esmi_ib_library/**
+          input: sarif-results/cpp.sarif
+          output: sarif-results/cpp-filtered.sarif
+
+      - name: Upload SARIF
+        uses: github/codeql-action/upload-sarif@ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd # v4
+        with:
+          sarif_file: sarif-results/cpp-filtered.sarif
+          checkout_path: ${{ env.PROJECT_DIR }}
+          category: '/workflow:amdsmi-codeql/language:cpp'
+
+      - name: Fail on CodeQL findings
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import sys
+          from pathlib import Path
+          from urllib.parse import urlencode
+
+          report = json.loads(Path("sarif-results/cpp-filtered.sarif").read_text())
+          findings = sum(len(run.get("results", [])) for run in report["runs"])
+          if findings:
+              ref = os.environ["GITHUB_REF"]
+              scope = f"pr:{ref.split('/')[2]}" if ref.startswith("refs/pull/") else f"branch:{ref}"
+              query = urlencode({"query": f"tool:CodeQL {scope}"})
+              alerts_url = (
+                f"{os.environ['GITHUB_SERVER_URL']}/{os.environ['GITHUB_REPOSITORY']}"
+                f"/security/code-scanning?{query}"
+              )
+              print(f"::error::CodeQL detected {findings} finding(s). View code scanning alerts: {alerts_url}")
+              with Path(os.environ["GITHUB_STEP_SUMMARY"]).open("a", encoding="utf-8") as summary:
+                summary.write(
+                  f"## CodeQL Findings\n\n"
+                  f"CodeQL detected **{findings} finding(s)**.\n\n"
+                  f"[View code scanning alerts]({alerts_url})\n\n"
+                  "The `amdsmi-codeql-report` artifact also contains the SARIF report.\n"
+                )
+              sys.exit(1)
+          print("CodeQL detected no findings")
+          PY
+
+      - name: Publish CodeQL report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: amdsmi-codeql-report
+          path: sarif-results/cpp.sarif
+          if-no-files-found: warn
+          retention-days: 14
+
+  clang-tidy:
+    name: clang-tidy C/C++ (report-only)
+    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork }}
+    runs-on:
+      - self-hosted
+      - ${{ vars.RUNNER_TYPE }}
+    timeout-minutes: 60
+    container:
+      image: ${{ vars.Ubuntu22_DOCKER_IMAGE }}
+      options: --user root
+    steps:
+      - name: Verify container image is configured
+        run: |
+          if [[ -z "${{ vars.Ubuntu22_DOCKER_IMAGE }}" ]]; then
+            echo "::error::Set the Ubuntu22_DOCKER_IMAGE repository variable"
+            exit 1
+          fi
+
+      - name: Install build and analysis dependencies
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            build-essential ca-certificates clang-tidy-14 cmake git pkg-config python3 \
+            libdrm-dev libudev-dev libnl-3-dev libnl-genl-3-dev libmnl-dev
+
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: |
+            projects/amdsmi
+            .github/workflows
+
+      - name: Set Project Directory
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          echo "PROJECT_DIR=$GITHUB_WORKSPACE/projects/amdsmi" >> "$GITHUB_ENV"
+
+      - name: Configure and build
+        run: |
+          cmake -S "$PROJECT_DIR" -B "$PROJECT_DIR/build" \
+            -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+            -DBUILD_TESTS=OFF -DBUILD_EXAMPLES=OFF -DBUILD_WRAPPER=OFF
+          cmake --build "$PROJECT_DIR/build" --parallel 2
+
+      - name: Run clang-tidy (report-only)
+        run: |
+          set -euo pipefail
+          run-clang-tidy-14 -clang-tidy-binary clang-tidy-14 \
+            -p "$PROJECT_DIR/build" -j 2 -extra-arg=-Wno-error \
+            -header-filter "^$PROJECT_DIR/(include/amd_smi/|rocm_smi/include/rocm_smi/|src/(amd_smi|nic)/)" \
+            "^$PROJECT_DIR/(src/(amd_smi/|nic/|rocm_smi_properties[.]cc$)|rocm_smi/src/|goamdsmi_shim/smiwrapper/)" \
+            2>&1 | tee "$PROJECT_DIR/clang-tidy-report.txt"
+
+      - name: Publish clang-tidy report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: amdsmi-clang-tidy-report
+          path: ${{ env.PROJECT_DIR }}/clang-tidy-report.txt
+          if-no-files-found: warn
+          retention-days: 14

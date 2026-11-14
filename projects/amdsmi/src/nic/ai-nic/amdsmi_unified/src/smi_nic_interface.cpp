@@ -588,7 +588,7 @@ static smi_nic_status_t get_nic_rdma_dev_info(smi_nic_ctx_t ctx, uint64_t device
 
   uint8_t rdma_count = 0;
   bool driver_not_loaded = false;
-  for (uint32_t i = 0; i < ports.size() && rdma_count < SMI_NIC_MAX_RDMA_DEV; i++) {
+  for (std::size_t i = 0; i < ports.size() && rdma_count < SMI_NIC_MAX_RDMA_DEV; i++) {
     const auto& port = ports[i];
     if (!nic_system->driver_loaded(port.bdf(), DriverType::Rdma)) {
       driver_not_loaded = true;
@@ -596,7 +596,7 @@ static smi_nic_status_t get_nic_rdma_dev_info(smi_nic_ctx_t ctx, uint64_t device
     }
 
     const auto& ibs = port.infiniband();
-    for (uint8_t j = 0; j < ibs.size() && rdma_count < SMI_NIC_MAX_RDMA_DEV; j++) {
+    for (std::size_t j = 0; j < ibs.size() && rdma_count < SMI_NIC_MAX_RDMA_DEV; j++) {
       const auto& ib = ibs[j];
       smi_nic_rdma_dev_info_t* rdma_dev = &info->rdma_dev_info[rdma_count];
 

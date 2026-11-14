@@ -1012,10 +1012,14 @@ std::string getMyLibPath(void) {
 }
 
 std::string getFileCreationDate(std::string path) {
-  struct stat t_stat;
-  stat(path.c_str(), &t_stat);
-  struct tm* timeinfo = localtime(&t_stat.st_ctime);      // NOLINT
-  return removeNewLines(std::string(asctime(timeinfo)));  // NOLINT
+  struct stat t_stat{};
+  struct tm timeinfo{};
+  char time_buffer[26]{};
+  if (stat(path.c_str(), &t_stat) != 0 || !localtime_r(&t_stat.st_ctime, &timeinfo) ||
+      !asctime_r(&timeinfo, time_buffer)) {
+    return "";
+  }
+  return removeNewLines(std::string(time_buffer));
 }
 
 rsmi_status_t getBDFString(uint64_t bdf_id, std::string& bfd_str) {
