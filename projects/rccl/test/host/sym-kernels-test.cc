@@ -497,6 +497,25 @@ TEST_F(SymKernelMaskTest, AllGather_AGKernelSurvives) {
 // ---- Hierarchical AllGather: packages found in peerInfo, and the mask gate ----
 
 // A package is a run of consecutive ranks on one physical device, and every package must be the same size.
+TEST_F(SymKernelMicrotest, AgHierLimits_UnsetEnvKeepsTheDefaults) {
+  EXPECT_EQ(ncclSymkAgHierMaxBlocksLimit(), ncclSymkAgHierMaxBlocks);
+  EXPECT_EQ(ncclSymkAgHierMaxChunkBytesLimit(), ncclSymkAgHierMaxChunkBytes);
+}
+
+TEST_F(SymKernelMicrotest, AgHierLimits_EnvOverridesAndClamps) {
+  g_loadParam = ParamOverride({{"SYM_AG_HIER_CTAS", 96}, {"SYM_AG_HIER_CHUNK_BYTES", 64 << 10}});
+  EXPECT_EQ(ncclSymkAgHierMaxBlocksLimit(), 96);
+  EXPECT_EQ(ncclSymkAgHierMaxChunkBytesLimit(), size_t(64 << 10));
+
+  g_loadParam = ParamOverride({{"SYM_AG_HIER_CTAS", 10000}, {"SYM_AG_HIER_CHUNK_BYTES", int64_t(1) << 40}});
+  EXPECT_EQ(ncclSymkAgHierMaxBlocksLimit(), MAXCHANNELS);
+  EXPECT_EQ(ncclSymkAgHierMaxChunkBytesLimit(), size_t(1) << 30);
+
+  g_loadParam = ParamOverride({{"SYM_AG_HIER_CTAS", 0}, {"SYM_AG_HIER_CHUNK_BYTES", -1}});
+  EXPECT_EQ(ncclSymkAgHierMaxBlocksLimit(), ncclSymkAgHierMaxBlocks);
+  EXPECT_EQ(ncclSymkAgHierMaxChunkBytesLimit(), ncclSymkAgHierMaxChunkBytes);
+}
+
 TEST_F(SymKernelMicrotest, HierScaleInSize_EqualRunsOfConsecutiveRanksPerDevice) {
   struct {
     const char* layout;

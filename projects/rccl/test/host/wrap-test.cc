@@ -7098,6 +7098,29 @@ TEST(WrapMicrotestIsolated, SelectAllGather_TdmWindowAdmitsSymkOnlyForTdmKernel)
       });
 }
 
+// The hierarchical AllGather window applies only where the hierarchical kernel can run.
+TEST(WrapMicrotestIsolated, SelectAllGather_HierWindowOnlyWhereHierRuns) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllGather_HierWindowOnlyWhereHierRuns",
+      []() {
+        SymkRequestedHooks symk;
+        rcclArchThresholds table{};
+        table.symMinR2[ncclFuncAllGather] = 128 * kKiB;
+        table.symMaxR2[ncclFuncAllGather] = 2 * kMiB;
+        table.symMaxR2Graph[ncclFuncAllGather] = 2 * kMiB;
+        table.agHierSymMinR2 = 16 * kMiB;
+        table.agHierSymMaxR2 = kThreshUnlimited;
+        auto picksSymk = [&table](size_t totalBytes) {
+          return Gfx1250AllGatherPicksSymk(&table, totalBytes, ncclSymkKernelId_AllGather_HierLsaST,
+                                           /*spansTrays=*/false, /*graph=*/false);
+        };
+        EXPECT_FALSE(picksSymk(64 * kMiB)) << "no hierarchical kernel: the regular window";
+
+        ScopedHook hier(g_symkAgHierGroups, [](struct ncclComm*) { return 8; });
+        EXPECT_TRUE(picksSymk(64 * kMiB)) << "hierarchical kernel: the hierarchical window";
+      });
+}
+
 // RCCL_SYM_K_MIN_BYTES / RCCL_SYM_K_MAX_BYTES narrow the TDM window (64 MiB..1 GiB here). The comm spans
 // trays, so only the window can admit symk. Returns whether each size goes to symk with param set to value.
 namespace {

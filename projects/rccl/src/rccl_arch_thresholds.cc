@@ -424,6 +424,8 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250_dpx = {
     kThreshUnlimited,     // [7] Recv            -- not used on gfx1250
     kThreshUnlimited,     // [8] AlltoAll        -- not used on gfx1250
   },
+  .agHierSymMinR2 = 16ULL*1024*1024,
+  .agHierSymMaxR2 = kThreshUnlimited,
   // Rank-scaled caps from the 8-64 rank H13 sweep, AICOMRCCL-1756. The
   // crossovers move with the per-rank share, so on 8+ rank comms these replace the
   // totals above (which stay in force for smaller comms).

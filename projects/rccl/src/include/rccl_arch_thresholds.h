@@ -98,6 +98,10 @@ struct rcclArchThresholds {
   size_t symTdmMaxR2Graph[RCCL_DDA_FUNC_COUNT];
   // Upper edge across UALink trays; it only lowers the window. 0 = no cap.
   size_t symTdmCrossTrayMaxR2[RCCL_DDA_FUNC_COUNT];
+  // AllGather only, R2 total bytes. On a comm where the hierarchical LSA AllGather kernel can run,
+  // these replace symMinR2 / symMaxR2 / symMaxR2Graph for AllGather. 0 = no hierarchical window.
+  size_t agHierSymMinR2;
+  size_t agHierSymMaxR2;
 
   // Rank-scaled tier caps, bytes per rank. On a comm of at least
   // rankScaledMinRanks ranks, a non-zero entry replaces the matching

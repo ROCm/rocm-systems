@@ -31,6 +31,14 @@ constexpr int ncclSymkLLMaxEltSize = 8;
 
 // Max blocks for the hierarchical LSA AllGather kernel.
 constexpr int ncclSymkAgHierMaxBlocks = 72;
+// Largest chunk a block of the hierarchical LSA AllGather pushes.
+constexpr size_t ncclSymkAgHierMaxChunkBytes = 256 << 10;
+
+// AllGather_HierLsaST block count. nBytes is per rank.
+constexpr int ncclSymkAgHierBlocksForSize(int nRanks, size_t nBytes) {
+  if (size_t(nRanks) * nBytes >= (size_t(1) << 30)) return ncclSymkAgHierMaxBlocks;
+  return 64;
+}
 
 // Max blocks for the hierarchical TDM AllGather kernel.
 constexpr int ncclSymkAgHierTmaMaxBlocks = 48;
@@ -45,6 +53,23 @@ constexpr __host__ __device__ int ncclSymkAgHierG0Blocks(int nBlocks, int nGroup
 constexpr __host__ __device__ int ncclSymkAgHierGroupBlocks(int nBlocks, int nGroups) {
   int n = (nBlocks - ncclSymkAgHierG0Blocks(nBlocks, nGroups)) / (nGroups - 1);
   return n > 1 ? n : 1;
+}
+
+// One block's row of hierPushFlags. Words [0, nGroups) are the push flags; group 0 raises none, so its
+// word keeps the block's chunk count across launches. The rest count launches: the close word those
+// whose local copy and forwards this block has finished, the arrive word those this rank has entered,
+// and target word g those entered by the rank this block pushes to for group g.
+constexpr __host__ __device__ int ncclSymkAgHierCloseWord(int nGroups) {
+  return nGroups;
+}
+constexpr __host__ __device__ int ncclSymkAgHierArriveWord(int nGroups) {
+  return nGroups + 1;
+}
+constexpr __host__ __device__ int ncclSymkAgHierTargetWord(int nGroups, int group) {
+  return nGroups + 2 + group;
+}
+constexpr __host__ __device__ int ncclSymkAgHierFlagStride(int nGroups) {
+  return 2 * nGroups + 2;
 }
 
 // [RCCL] Launch width for the GIN and Tma symmetric kernels. The rest default to ncclSymkMaxThreads.
@@ -128,6 +153,8 @@ struct ncclSymkDevComm {
   // Per block of the hierarchical AllGather, a row of flags, one per package group, that the pushing
   // block on another rank raises after each chunk.
   ncclDevResourceHandle hierPushFlags;
+  // 0 selects ncclSymkAgHierMaxChunkBytes.
+  uint32_t hierMaxChunkBytes;
   // Profiler counters (host-pinned), indexed by channel id and per-channel slot.
   // workPhases holds per-phase timestamps published behind a fence.
   struct ncclDevProfiler* workStarted;
@@ -217,8 +244,12 @@ bool ncclSymkAvailable(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRedO
                        size_t nElts);
 uint32_t ncclSymkMask(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRedOp_t*/ red, ncclDataType_t ty,
                       size_t nElts, bool symAligned16B = true);
+// Packages the hierarchical LSA AllGather kernel spans on this comm, or 0 where it can't run.
+int ncclSymkAgHierGroups(struct ncclComm* comm);
 // How many of nBlocks the hierarchical LSA AllGather kernel puts to work; the rest would sit out.
 int ncclSymkAgHierLaunchBlocks(struct ncclComm* comm, int nBlocks);
+int ncclSymkAgHierMaxBlocksLimit();
+size_t ncclSymkAgHierMaxChunkBytesLimit();
 
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
 bool ncclSymkIsGfx950(struct ncclComm* comm);

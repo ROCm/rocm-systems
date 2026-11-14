@@ -1094,6 +1094,20 @@ inline size_t rcclSymMinR2CapTab(const rcclArchThresholds* table, ncclFunc_t fun
   return funcThresholdFromTable(table->symMinR2, func);
 }
 
+// Where the hierarchical LSA AllGather kernel runs, the table's hierarchical window replaces the
+// AllGather symk bounds in both eager and graph mode. RCCL_SYM_K_MIN_BYTES / RCCL_SYM_K_MAX_BYTES still win.
+inline bool rcclAgHierSymWindow(struct ncclComm* comm, const rcclArchThresholds* table) {
+  return table != nullptr && table->agHierSymMinR2 != 0 && ncclSymkAgHierGroups(comm) > 0;
+}
+inline size_t rcclAgSymMaxR2Cap(struct ncclComm* comm, const rcclArchThresholds* table, bool graphMode) {
+  if (rcclParamSymKMaxBytes() < 0 && rcclAgHierSymWindow(comm, table)) return table->agHierSymMaxR2;
+  return rcclSymMaxR2CapTab(table, ncclFuncAllGather, graphMode);
+}
+inline size_t rcclAgSymMinR2Cap(struct ncclComm* comm, const rcclArchThresholds* table) {
+  if (rcclParamSymKMinBytes() < 0 && rcclAgHierSymWindow(comm, table)) return table->agHierSymMinR2;
+  return rcclSymMinR2CapTab(table, ncclFuncAllGather);
+}
+
 // True when totalBytes is in the TDM window. RCCL_SYM_K_MIN_BYTES / RCCL_SYM_K_MAX_BYTES narrow it.
 inline bool rcclSymTdmWindowContains(const rcclArchThresholds* table, ncclFunc_t func, size_t totalBytes,
                                      bool spansTrays, bool graphMode) {
@@ -2299,8 +2313,8 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
     // for R2 buffers, mirroring the AllReduce and ReduceScatter treatment.
     // agRecvRegistered dropped: isSymmetricKernelRequestedWin requires both windows
     // to carry NCCL_WIN_COLL_SYMMETRIC, so agSymkRequested=true implies recv registered.
-    const size_t agSymMaxR2  = rcclSymMaxR2CapTab(archTable, ncclFuncAllGather, ceCapturing);
-    const size_t agSymMinR2  = rcclSymMinR2CapTab(archTable, ncclFuncAllGather);
+    const size_t agSymMaxR2  = rcclAgSymMaxR2Cap(comm, archTable, ceCapturing);
+    const size_t agSymMinR2  = rcclAgSymMinR2Cap(comm, archTable);
     // The TDM window admits symk when the model picks a TDM kernel. Across trays it is the only way in.
     bool agTdmWindowAdmitsSymk = false;
     if (agSymkRequested &&
