@@ -135,6 +135,16 @@ struct rcclArchThresholds {
   int ddaNarrowThreads;
   int ddaNarrowMaxRanks;
 
+  // On comms of ddaLargeCommMinRanks to ddaLargeCommMaxRanks ranks (at least rankScaledMinRanks), a non-zero entry
+  // replaces ddaLLMaxPerRank / ddaLL128MaxPerRank (still clipped to rankScaledMaxBytes), and the DDA LL AllReduce
+  // one-shot tier runs to ddaLargeCommArLLOneShotMax when set; RCCL_DDA_LL_ONESHOT_THRESHOLD, when set, wins.
+  // 0 ranks = off.
+  int ddaLargeCommMinRanks;
+  int ddaLargeCommMaxRanks;
+  size_t ddaLargeCommLLMaxPerRank[RCCL_DDA_FUNC_COUNT];
+  size_t ddaLargeCommLL128MaxPerRank[RCCL_DDA_FUNC_COUNT];
+  size_t ddaLargeCommArLLOneShotMax;
+
   // DDA VMM (AllReduce / ReduceScatter) launches min(init block cap,
   // clamp(ddaVmmBlockBudget / nRanks, ddaVmmMinBlocks, ddaVmmMaxBlocks)) blocks
   // on comms of at least rankScaledMinRanks ranks. Budget 0 = the init block cap.
@@ -210,6 +220,12 @@ enum rcclTuningPartition {
 inline bool rcclRsSmallComm(const rcclArchThresholds* t, int nRanks) {
   return t != nullptr && t->rsSmallCommMaxRanks > 0 && t->rankScaledMinRanks > 0 &&
          nRanks >= t->rankScaledMinRanks && nRanks <= t->rsSmallCommMaxRanks;
+}
+
+// True when the ddaLargeComm* entries apply to an nRanks comm.
+inline bool rcclDdaLargeComm(const rcclArchThresholds* t, int nRanks) {
+  return t != nullptr && t->ddaLargeCommMinRanks > 0 && t->rankScaledMinRanks > 0 &&
+         nRanks >= t->rankScaledMinRanks && nRanks >= t->ddaLargeCommMinRanks && nRanks <= t->ddaLargeCommMaxRanks;
 }
 
 const rcclArchThresholds* rcclGetArchThresholds(const char* gcn,

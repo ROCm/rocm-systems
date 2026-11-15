@@ -40,7 +40,6 @@
 #include <utility>
 
 RCCL_PARAM_DECLARE(DdaLL);
-RCCL_PARAM_DECLARE(DdaLLOneShotThreshold);
 RCCL_PARAM_DECLARE(DdaLL128OneShotThreshold);
 RCCL_PARAM_DECLARE(DdaLL128AsyncWire);
 
@@ -442,7 +441,7 @@ bool ddaLLArOneShotEligible(ncclComm* comm, const void* sendbuff, void* recvbuff
                             ncclDataType_t datatype, ncclRedOp_t op) {
   (void)sendbuff;
   (void)recvbuff;
-  if (count * ncclTypeSize(datatype) > (size_t)rcclParamDdaLLOneShotThreshold()) {
+  if (count * ncclTypeSize(datatype) > rcclDdaLLOneShotThreshold(comm)) {
       return false;
   }
 

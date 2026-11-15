@@ -61,6 +61,7 @@ std::function<bool(const ncclComm*, ncclDataType_t)> g_rcclDdaDatatypeSupported 
 size_t rcclDdaLLThreshold(const ncclComm* comm, ncclFunc_t func) { return g_rcclDdaLLThreshold(comm, func); }
 size_t rcclDdaLL128Threshold(const ncclComm* comm, ncclFunc_t func) { return g_rcclDdaLL128Threshold(comm, func); }
 size_t rcclDdaLLTwoShotThreshold(const ncclComm* comm) { return g_rcclDdaLLTwoShotThreshold(comm); }
+size_t rcclDdaLLOneShotThreshold(const ncclComm*) { return (size_t)rcclParamDdaLLOneShotThreshold(); }
 size_t rcclDdaLL128TwoShotThreshold(const ncclComm* comm) { return g_rcclDdaLL128TwoShotThreshold(comm); }
 int rcclDdaFabricVmmBlocks(const ncclComm* comm) { return g_rcclDdaFabricVmmBlocks(comm); }
 int rcclDdaFabricAgLL128Threads(const ncclComm* comm, size_t totalBytes) {
