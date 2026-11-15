@@ -246,8 +246,10 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
   // Below 8 ranks: LL two-shot beats DDA LL128 1.2x at 4M on 4 ranks and loses 1.2x from 8M; on 2 ranks it
   // loses 1.2x at 4M, so 2M stays.
   .ddaArLLTwoShotMaxPerRank = 1ULL*1024*1024,
-  // 4-32 ranks (1-8 SPX nodes): 256-thread DDA LL blocks beat 512/1024 by up to 1.9x at 4K-8M, and 256-thread
-  // LL128 blocks beat 512 by 1.2-1.7x where one pass covers the shard (8M-64M). Not measured above 32 ranks.
+  // 4, 8, 16 and 32 ranks (1-8 SPX nodes): 256-thread DDA LL blocks beat 512/1024 by up to 1.9x at 4K-8M, and
+  // 256-thread LL128 blocks beat 512 by 1.2-1.7x where one pass covers the shard (8M-64M). Every count up to 32
+  // takes them, so the others are extrapolated; on 13-15 ranks that also moves about 4K-170K from the spread to the
+  // one-shot, as 4K-128K does on 16.
   .ddaNarrowThreads = 256,
   .ddaNarrowMaxRanks = 32,
   // 32 ranks (8 SPX nodes). AllReduce: the LL spread beats VMM and LL two-shot 1.7-3.1x at 2M/4M, LL two-shot beats
