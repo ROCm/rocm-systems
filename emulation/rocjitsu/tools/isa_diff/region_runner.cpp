@@ -1,0 +1,302 @@
+// Copyright (c) 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
+#include "region_runner.h"
+
+#include "rocjitsu/isa/decoder.h"
+#include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/vm/amdgpu/compute_unit.h"
+#include "rocjitsu/vm/amdgpu/gpu_memory.h"
+#include "rocjitsu/vm/amdgpu/l2_cache.h"
+#include "rocjitsu/vm/amdgpu/wavefront.h"
+#include "util/diagnostic.h"
+
+#include <exception>
+
+namespace rocjitsu::isa_diff {
+namespace {
+
+constexpr uint32_t kSgprsPerWave = 104;
+constexpr uint32_t kVgprsPerWave = 32;
+constexpr uint32_t kWaveSize = 64;
+
+std::array<uint8_t, 9> pack_counters(const amdgpu::WaitCounters &c) {
+  return {c.vmcnt, c.lgkmcnt,   c.expcnt,   c.vscnt,    c.dscnt,
+          c.kmcnt, c.tensorcnt, c.asynccnt, c.samplecnt};
+}
+
+void unpack_counters(const std::array<uint8_t, 9> &p, amdgpu::WaitCounters &c) {
+  c.vmcnt = p[0];
+  c.lgkmcnt = p[1];
+  c.expcnt = p[2];
+  c.vscnt = p[3];
+  c.dscnt = p[4];
+  c.kmcnt = p[5];
+  c.tensorcnt = p[6];
+  c.asynccnt = p[7];
+  c.samplecnt = p[8];
+}
+
+RunStatus map_error(amdgpu::InstructionExecutionError e) {
+  using E = amdgpu::InstructionExecutionError;
+  switch (e) {
+  case E::None:
+    return RunStatus::ExecutionError;
+  case E::InvalidInstructionEncoding:
+  case E::DecodeFailure:
+    return RunStatus::DecodeFailure;
+  case E::UnsupportedOperandValue:
+    return RunStatus::UnsupportedOperand;
+  case E::MissingExecutionBackend:
+    return RunStatus::MissingExecutionBackend;
+  case E::InvalidRegisterAccess:
+    return RunStatus::InvalidRegisterAccess;
+  case E::UnimplementedInstruction:
+    return RunStatus::Unimplemented;
+  case E::IllegalInstruction:
+    return RunStatus::IllegalInstruction;
+  case E::PluginFailure:
+    return RunStatus::ExecutionError;
+  }
+  return RunStatus::ExecutionError;
+}
+
+} // namespace
+
+const char *run_status_name(RunStatus s) {
+  switch (s) {
+  case RunStatus::Ok:
+    return "OK";
+  case RunStatus::DecodeFailure:
+    return "DECODE_FAILURE";
+  case RunStatus::MissingExecutionBackend:
+    return "MISSING_EXECUTION_BACKEND";
+  case RunStatus::Unimplemented:
+    return "UNIMPLEMENTED";
+  case RunStatus::UnsupportedOperand:
+    return "UNSUPPORTED_OPERAND";
+  case RunStatus::InvalidRegisterAccess:
+    return "INVALID_REGISTER_ACCESS";
+  case RunStatus::IllegalInstruction:
+    return "ILLEGAL_INSTRUCTION";
+  case RunStatus::ExecutionError:
+    return "EXECUTION_ERROR";
+  case RunStatus::HostException:
+    return "HOST_EXCEPTION";
+  case RunStatus::UndefinedBehavior:
+    return "UNDEFINED_BEHAVIOR";
+  case RunStatus::PcWritten:
+    return "PC_WRITTEN";
+  case RunStatus::WaveStateChanged:
+    return "WAVE_STATE_CHANGED";
+  case RunStatus::BudgetExceeded:
+    return "BUDGET_EXCEEDED";
+  }
+  return "?";
+}
+
+RegionRunner::RegionRunner() = default;
+
+RegionRunner::~RegionRunner() {
+  // Release the wave's register blocks before the CU goes away.
+  if (wave_ && !wave_->is_halted())
+    wave_->halt(amdgpu::Wavefront::CpCompletionNotice::Suppress);
+  insts_.clear();
+}
+
+std::unique_ptr<RegionRunner> RegionRunner::create(const std::vector<RegionInst> &insts,
+                                                   const std::string &label, std::string &error) {
+  std::unique_ptr<RegionRunner> r(new RegionRunner());
+  r->memory_ = std::make_unique<amdgpu::GpuMemory>(label + "_mem");
+  r->l2_ = std::make_unique<amdgpu::L2Cache>(label + "_l2");
+  amdgpu::ComputeUnitCore::Config config{};
+  config.arch = ROCJITSU_CODE_ARCH_CDNA4;
+  config.num_wf_slots = 1;
+  config.sgprs_per_wf = kSgprsPerWave;
+  config.vgprs_per_wf = kVgprsPerWave;
+  config.lds_size_kb = 64;
+  util::StringDiagnostic diag;
+  r->cu_ = amdgpu::ComputeUnitCore::create(label, config, r->memory_.get(), r->l2_.get(),
+                                           simdojo::ExecMode::FUNCTIONAL, diag.emitter());
+  if (!r->cu_) {
+    error = "cannot create a gfx950 compute unit: " + diag.message();
+    return nullptr;
+  }
+  const uint64_t entry = insts.empty() ? 0 : insts.front().pc;
+  r->wave_ = r->cu_->dispatch_wf(0, entry, kSgprsPerWave, kVgprsPerWave, kWaveSize);
+  if (!r->wave_) {
+    error = "cannot dispatch a wave64";
+    return nullptr;
+  }
+  r->decoder_ = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  if (!r->decoder_) {
+    error = "no gfx950 decoder";
+    return nullptr;
+  }
+  for (size_t i = 0; i < insts.size(); ++i) {
+    const RegionInst &ri = insts[i];
+    r->pcs_.push_back(ri.pc);
+    r->texts_.push_back(ri.text);
+    util::StringDiagnostic ddiag;
+    std::vector<uint32_t> window = ri.words;
+    window.resize(window.size() + 3, 0); // decoder may look ahead for literals
+    auto decoded = r->decoder_->decode_window(window, ri.pc, ddiag.emitter());
+    if (decoded.failed() || static_cast<size_t>(decoded.value()->size()) != ri.words.size() * 4) {
+      if (!r->decode_failed_) {
+        r->decode_failed_ = true;
+        r->decode_failed_index_ = i;
+        r->decode_error_ = decoded.failed()
+                               ? "decode failed: " + ddiag.message()
+                               : "decoded size does not match the recorded instruction words";
+      }
+      r->insts_.push_back(nullptr);
+      r->model_only_.push_back(false);
+      continue;
+    }
+    r->insts_.push_back(std::move(decoded).value());
+    r->model_only_.push_back(false);
+  }
+  // Fix the frame to the post-dispatch values.
+  r->baseline_ = r->capture().frame;
+  return r;
+}
+
+void RegionRunner::simulate_model_only_for_test(size_t index) {
+  if (index < model_only_.size())
+    model_only_[index] = true;
+}
+
+void RegionRunner::load(const MachineState &s) {
+  amdgpu::Wavefront &wf = *wave_;
+  const uint32_t base = wf.sgpr_alloc().base;
+  for (unsigned i = 0; i < kNumSgprs; ++i)
+    cu_->write_sgpr(base + i, s.loc[i]);
+  cu_->write_sgpr(base + 102, s.frame.s102);
+  cu_->write_sgpr(base + 103, s.frame.s103);
+  wf.set_vcc_raw(uint64_t{s.loc[kLocVccLo]} | (uint64_t{s.loc[kLocVccHi]} << 32));
+  wf.set_exec_raw(uint64_t{s.loc[kLocExecLo]} | (uint64_t{s.loc[kLocExecHi]} << 32));
+  wf.set_m0(s.loc[kLocM0]);
+  wf.set_status_raw((s.frame.status_except_scc & ~1u) | (s.loc[kLocScc] & 1u));
+  wf.set_mode_raw(s.frame.mode);
+  wf.set_trapsts(s.frame.trapsts);
+  for (uint32_t i = 0; i < 16; ++i)
+    wf.set_ttmp(i, s.frame.ttmp[i]);
+  wf.set_scratch_base(s.frame.scratch_base);
+  unpack_counters(s.frame.wait_counters, wf.wait_counters());
+  wf.set_in_trap_handler(s.frame.in_trap_handler);
+  wf.begin_instruction_execution();
+  wf.pc = pcs_.empty() ? 0 : pcs_.front();
+}
+
+MachineState RegionRunner::capture() const {
+  const amdgpu::Wavefront &wf = *wave_;
+  MachineState s;
+  const uint32_t base = wf.sgpr_alloc().base;
+  for (unsigned i = 0; i < kNumSgprs; ++i)
+    s.loc[i] = cu_->read_sgpr_storage(base + i);
+  s.frame.s102 = cu_->read_sgpr_storage(base + 102);
+  s.frame.s103 = cu_->read_sgpr_storage(base + 103);
+  const uint64_t vcc = wf.vcc();
+  const uint64_t exec = wf.exec_raw();
+  s.loc[kLocVccLo] = static_cast<uint32_t>(vcc);
+  s.loc[kLocVccHi] = static_cast<uint32_t>(vcc >> 32);
+  s.loc[kLocExecLo] = static_cast<uint32_t>(exec);
+  s.loc[kLocExecHi] = static_cast<uint32_t>(exec >> 32);
+  s.loc[kLocM0] = wf.m0();
+  s.loc[kLocScc] = wf.read_scc() ? 1u : 0u;
+  s.frame.status_except_scc = wf.status_raw() & ~1u;
+  s.frame.mode = wf.mode_raw();
+  s.frame.trapsts = wf.trapsts();
+  for (uint32_t i = 0; i < 16; ++i)
+    s.frame.ttmp[i] = wf.ttmp(i);
+  s.frame.scratch_base = wf.scratch_base();
+  s.frame.wait_counters = pack_counters(wf.wait_counters());
+  s.frame.in_trap_handler = wf.in_trap_handler();
+  s.frame.wave_state = static_cast<uint8_t>(wf.state());
+  s.frame.sleep_cycles = wf.sleep_cycles();
+  return s;
+}
+
+RunOutcome RegionRunner::run(size_t budget, std::vector<TraceStep> *trace) {
+  RunOutcome out;
+  amdgpu::Wavefront &wf = *wave_;
+  MachineState prev;
+  if (trace)
+    prev = capture();
+  for (size_t i = 0; i < insts_.size(); ++i) {
+    if (out.executed >= budget) {
+      out.status = RunStatus::BudgetExceeded;
+      out.failed_index = i;
+      return out;
+    }
+    if (decode_failed_ && i >= decode_failed_index_) {
+      out.status = RunStatus::DecodeFailure;
+      out.failed_index = decode_failed_index_;
+      out.detail = decode_error_;
+      return out;
+    }
+    Instruction *inst = insts_[i].get();
+    if (!inst->execute || model_only_[i]) {
+      out.status = RunStatus::MissingExecutionBackend;
+      out.failed_index = i;
+      out.detail = "instruction has no execution callback";
+      return out;
+    }
+    wf.pc = pcs_[i];
+    const uint64_t ub_before = cu_->isa_diagnostic_count();
+    std::string detail;
+    util::Result result = util::Result::failure();
+    try {
+      result = cu_->execute_instruction(inst, wf, &detail);
+    } catch (const std::exception &e) {
+      out.status = RunStatus::HostException;
+      out.failed_index = i;
+      out.detail = e.what();
+      return out;
+    } catch (...) {
+      out.status = RunStatus::HostException;
+      out.failed_index = i;
+      out.detail = "unknown exception";
+      return out;
+    }
+    ++out.executed;
+    ++total_executed_;
+    if (result.failed()) {
+      out.status = map_error(wf.instruction_execution_error());
+      out.failed_index = i;
+      out.detail = detail;
+      return out;
+    }
+    if (cu_->isa_diagnostic_count() != ub_before) {
+      out.status = RunStatus::UndefinedBehavior;
+      out.failed_index = i;
+      out.detail = "RocJITsu reported ISA undefined behaviour (see isa-undefined log)";
+      return out;
+    }
+    if (wf.pc != pcs_[i]) {
+      out.status = RunStatus::PcWritten;
+      out.failed_index = i;
+      return out;
+    }
+    if (wf.state() != amdgpu::WfState::RUNNING) {
+      out.status = RunStatus::WaveStateChanged;
+      out.failed_index = i;
+      return out;
+    }
+    if (trace) {
+      MachineState now = capture();
+      TraceStep step;
+      step.index = i;
+      step.pc = pcs_[i];
+      step.text = texts_[i];
+      step.changed = differing_locs(prev, now);
+      step.frame_changed = differing_frame_fields(prev.frame, now.frame);
+      step.after = now;
+      trace->push_back(std::move(step));
+      prev = std::move(now);
+    }
+  }
+  return out;
+}
+
+} // namespace rocjitsu::isa_diff

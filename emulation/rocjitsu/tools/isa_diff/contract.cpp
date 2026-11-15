@@ -1,0 +1,169 @@
+// Copyright (c) 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
+#include "contract.h"
+
+namespace rocjitsu::isa_diff {
+
+const char *contract_status_name(ContractStatus s) {
+  switch (s) {
+  case ContractStatus::Established:
+    return "ESTABLISHED";
+  case ContractStatus::Assumed:
+    return "ASSUMED";
+  case ContractStatus::Unresolved:
+    return "UNRESOLVED";
+  }
+  return "?";
+}
+
+std::optional<ContractStatus> parse_contract_status(std::string_view s) {
+  for (auto v : {ContractStatus::Established, ContractStatus::Assumed, ContractStatus::Unresolved})
+    if (s == contract_status_name(v))
+      return v;
+  return std::nullopt;
+}
+
+const std::vector<std::string> &frame_field_names() {
+  static const std::vector<std::string> names = {
+      "status_except_scc", "mode",       "trapsts",     "ttmp[0:15]",
+      "scratch_base",      "s102",       "s103",        "wait_counters",
+      "in_trap_handler",   "wave_state", "sleep_cycles"};
+  return names;
+}
+
+Json RegionContract::to_json() const {
+  Json j = Json::object();
+  j.set("target", target);
+  j.set("wave", wave);
+  j.set("arithmetic", arithmetic);
+  j.set("mapping", mapping);
+  j.set("entry_equal", format_locs(entry_equal));
+  j.set("canary", format_locs(canary));
+  j.set("observable", format_locs(observable));
+  j.set("declared_writes_old", format_locs(declared_writes_old));
+  j.set("declared_writes_new", format_locs(declared_writes_new));
+  j.set("wide_reads", format_locs(wide_reads));
+  Json cs = Json::array();
+  for (const auto &c : constraints) {
+    Json cj = Json::object();
+    cj.set("loc", loc_name(c.loc));
+    if (c.known_zero)
+      cj.set("known_zero", hex32(c.known_zero));
+    if (c.known_one)
+      cj.set("known_one", hex32(c.known_one));
+    if (c.umin)
+      cj.set("umin", hex32(*c.umin));
+    if (c.umax)
+      cj.set("umax", hex32(*c.umax));
+    if (c.equal_to)
+      cj.set("equal_to", loc_name(*c.equal_to));
+    cj.set("source", c.source);
+    cs.push(std::move(cj));
+  }
+  j.set("constraints", std::move(cs));
+  j.set("exit_mapping", exit_mapping);
+  Json frame = Json::array();
+  for (const auto &f : frame_field_names())
+    frame.push(f);
+  j.set("frame_preserved", std::move(frame));
+  j.set("status", contract_status_name(status));
+  Json deps = Json::array();
+  for (const auto &d : depends_on)
+    deps.push(d);
+  j.set("depends_on", std::move(deps));
+  Json src = Json::array();
+  for (const auto &s : sources) {
+    Json sj = Json::object();
+    sj.set("what", s.what);
+    sj.set("source", s.source);
+    src.push(std::move(sj));
+  }
+  j.set("sources", std::move(src));
+  return j;
+}
+
+std::optional<RegionContract> RegionContract::from_json(const Json &j, std::string &error) {
+  if (!j.is_object()) {
+    error = "contract is not an object";
+    return std::nullopt;
+  }
+  RegionContract c;
+  c.target = j["target"].as_string();
+  c.wave = j["wave"].as_string();
+  c.arithmetic = j["arithmetic"].as_string();
+  c.mapping = j["mapping"].as_string();
+  if (c.target != "gfx950" || c.wave != "wave64") {
+    error = "contract target/wave is not gfx950/wave64";
+    return std::nullopt;
+  }
+  auto locs = [&](const char *key, LocSet &out) {
+    auto parsed = parse_locs(j[key].as_string());
+    if (!parsed) {
+      error = std::string("bad location list in '") + key + "'";
+      return false;
+    }
+    out = *parsed;
+    return true;
+  };
+  if (!locs("entry_equal", c.entry_equal) || !locs("canary", c.canary) ||
+      !locs("observable", c.observable) || !locs("declared_writes_old", c.declared_writes_old) ||
+      !locs("declared_writes_new", c.declared_writes_new) || !locs("wide_reads", c.wide_reads))
+    return std::nullopt;
+  if ((c.entry_equal & c.canary).any()) {
+    error = "a location is both entry_equal and canary";
+    return std::nullopt;
+  }
+  if ((c.entry_equal | c.canary) != all_locs()) {
+    error = "every location must be initialised: entry_equal | canary must cover all locations";
+    return std::nullopt;
+  }
+  for (const Json &cj : j["constraints"].items()) {
+    Constraint k;
+    auto loc = parse_loc(cj["loc"].as_string());
+    if (!loc) {
+      error = "constraint on unknown location '" + cj["loc"].as_string() + "'";
+      return std::nullopt;
+    }
+    k.loc = *loc;
+    auto u32 = [&](const char *key) -> std::optional<uint32_t> {
+      if (!cj.has(key))
+        return std::nullopt;
+      auto v = json_u64(cj[key]);
+      return v ? std::optional<uint32_t>(static_cast<uint32_t>(*v)) : std::nullopt;
+    };
+    k.known_zero = u32("known_zero").value_or(0);
+    k.known_one = u32("known_one").value_or(0);
+    k.umin = u32("umin");
+    k.umax = u32("umax");
+    if (cj.has("equal_to")) {
+      auto other = parse_loc(cj["equal_to"].as_string());
+      if (!other) {
+        error = "constraint equal_to names an unknown location";
+        return std::nullopt;
+      }
+      k.equal_to = *other;
+    }
+    k.source = cj.has("source") ? cj["source"].as_string() : "user_assumption";
+    if (!c.entry_equal.test(k.loc) || (k.equal_to && !c.entry_equal.test(*k.equal_to))) {
+      error = "constraint on " + loc_name(k.loc) +
+              " requires the location to be entry_equal (a canary is never constrained)";
+      return std::nullopt;
+    }
+    c.constraints.push_back(k);
+  }
+  c.exit_mapping = j["exit_mapping"].as_string();
+  auto status = parse_contract_status(j["status"].as_string());
+  if (!status) {
+    error = "bad contract status";
+    return std::nullopt;
+  }
+  c.status = *status;
+  for (const Json &d : j["depends_on"].items())
+    c.depends_on.push_back(d.as_string());
+  for (const Json &s : j["sources"].items())
+    c.sources.push_back({s["what"].as_string(), s["source"].as_string()});
+  return c;
+}
+
+} // namespace rocjitsu::isa_diff

@@ -34,6 +34,9 @@ target_link_libraries(
 )
 rj_configure_target(rocjitsu_translate_cli TOOL)
 
+# Incremental ISA-to-ISA differential testing (rj_isa_diff).
+add_subdirectory(isa_diff)
+
 add_executable(rj_dbt_translate rj_dbt_translate_main.cpp)
 target_link_libraries(rj_dbt_translate PRIVATE rocjitsu_translate_cli)
 rj_configure_target(rj_dbt_translate TOOL)

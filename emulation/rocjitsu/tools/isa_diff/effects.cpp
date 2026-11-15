@@ -1,0 +1,435 @@
+// Copyright (c) 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
+#include "effects.h"
+
+#include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/isa/operand.h"
+#include "rocjitsu/isa/register_set.h"
+
+#include <algorithm>
+#include <array>
+
+namespace rocjitsu::isa_diff {
+namespace {
+
+// Integer SALU instructions whose execution RocJITsu implements on gfx950 and whose
+// entire effect is on SGPRs, VCC, EXEC, M0 and SCC. Every operand is still checked;
+// membership here is necessary, not sufficient. Branches, PC access, hwreg access,
+// indirect SGPR access, waits, messages and traps are deliberately absent.
+constexpr std::array kP0Mnemonics = std::to_array<std::string_view>({
+    // SOP2
+    "s_add_u32",
+    "s_sub_u32",
+    "s_add_i32",
+    "s_sub_i32",
+    "s_addc_u32",
+    "s_subb_u32",
+    "s_min_i32",
+    "s_min_u32",
+    "s_max_i32",
+    "s_max_u32",
+    "s_cselect_b32",
+    "s_cselect_b64",
+    "s_and_b32",
+    "s_and_b64",
+    "s_or_b32",
+    "s_or_b64",
+    "s_xor_b32",
+    "s_xor_b64",
+    "s_andn2_b32",
+    "s_andn2_b64",
+    "s_orn2_b32",
+    "s_orn2_b64",
+    "s_nand_b32",
+    "s_nand_b64",
+    "s_nor_b32",
+    "s_nor_b64",
+    "s_xnor_b32",
+    "s_xnor_b64",
+    "s_lshl_b32",
+    "s_lshl_b64",
+    "s_lshr_b32",
+    "s_lshr_b64",
+    "s_ashr_i32",
+    "s_ashr_i64",
+    "s_bfm_b32",
+    "s_bfm_b64",
+    "s_mul_i32",
+    "s_bfe_u32",
+    "s_bfe_i32",
+    "s_bfe_u64",
+    "s_bfe_i64",
+    "s_absdiff_i32",
+    "s_mul_hi_u32",
+    "s_mul_hi_i32",
+    "s_lshl1_add_u32",
+    "s_lshl2_add_u32",
+    "s_lshl3_add_u32",
+    "s_lshl4_add_u32",
+    "s_pack_ll_b32_b16",
+    "s_pack_lh_b32_b16",
+    "s_pack_hh_b32_b16",
+    // SOP1
+    "s_mov_b32",
+    "s_mov_b64",
+    "s_cmov_b32",
+    "s_cmov_b64",
+    "s_not_b32",
+    "s_not_b64",
+    "s_wqm_b32",
+    "s_wqm_b64",
+    "s_brev_b32",
+    "s_brev_b64",
+    "s_bcnt0_i32_b32",
+    "s_bcnt0_i32_b64",
+    "s_bcnt1_i32_b32",
+    "s_bcnt1_i32_b64",
+    "s_ff0_i32_b32",
+    "s_ff0_i32_b64",
+    "s_ff1_i32_b32",
+    "s_ff1_i32_b64",
+    "s_flbit_i32_b32",
+    "s_flbit_i32_b64",
+    "s_flbit_i32",
+    "s_flbit_i32_i64",
+    "s_sext_i32_i8",
+    "s_sext_i32_i16",
+    "s_bitset0_b32",
+    "s_bitset0_b64",
+    "s_bitset1_b32",
+    "s_bitset1_b64",
+    "s_and_saveexec_b64",
+    "s_or_saveexec_b64",
+    "s_xor_saveexec_b64",
+    "s_andn2_saveexec_b64",
+    "s_orn2_saveexec_b64",
+    "s_nand_saveexec_b64",
+    "s_nor_saveexec_b64",
+    "s_xnor_saveexec_b64",
+    "s_quadmask_b32",
+    "s_quadmask_b64",
+    "s_abs_i32",
+    "s_andn1_saveexec_b64",
+    "s_orn1_saveexec_b64",
+    "s_andn1_wrexec_b64",
+    "s_andn2_wrexec_b64",
+    "s_bitreplicate_b64_b32",
+    // SOPC
+    "s_cmp_eq_i32",
+    "s_cmp_lg_i32",
+    "s_cmp_gt_i32",
+    "s_cmp_ge_i32",
+    "s_cmp_lt_i32",
+    "s_cmp_le_i32",
+    "s_cmp_eq_u32",
+    "s_cmp_lg_u32",
+    "s_cmp_gt_u32",
+    "s_cmp_ge_u32",
+    "s_cmp_lt_u32",
+    "s_cmp_le_u32",
+    "s_bitcmp0_b32",
+    "s_bitcmp1_b32",
+    "s_bitcmp0_b64",
+    "s_bitcmp1_b64",
+    "s_cmp_eq_u64",
+    "s_cmp_lg_u64",
+    // SOPK
+    "s_movk_i32",
+    "s_cmovk_i32",
+    "s_cmpk_eq_i32",
+    "s_cmpk_lg_i32",
+    "s_cmpk_gt_i32",
+    "s_cmpk_ge_i32",
+    "s_cmpk_lt_i32",
+    "s_cmpk_le_i32",
+    "s_cmpk_eq_u32",
+    "s_cmpk_lg_u32",
+    "s_cmpk_gt_u32",
+    "s_cmpk_ge_u32",
+    "s_cmpk_lt_u32",
+    "s_cmpk_le_u32",
+    "s_addk_i32",
+    "s_mulk_i32",
+    // SOPP with no architectural effect.
+    "s_nop",
+});
+
+// SALU instructions outside P0 that read no tracked state beyond their classified
+// operands (the branch conditions SCC/VCC/EXEC are fieldless operands; see tests).
+constexpr std::array kNoImplicitReads = std::to_array<std::string_view>({
+    "s_endpgm",
+    "s_waitcnt",
+    "s_barrier",
+    "s_branch",
+    "s_cbranch_scc0",
+    "s_cbranch_scc1",
+    "s_cbranch_vccz",
+    "s_cbranch_vccnz",
+    "s_cbranch_execz",
+    "s_cbranch_execnz",
+    "s_sleep",
+    "s_setprio",
+});
+
+// Generic scalar operand selector values (gfx9 encoding of SSRC/SDST fields).
+constexpr int kSelFlatScratchLo = 102;
+constexpr int kSelXnackMaskHi = 105;
+constexpr int kSelVccLo = 106;
+constexpr int kSelVccHi = 107;
+constexpr int kSelM0 = 124;
+constexpr int kSelVccz = 251;
+constexpr int kSelExecz = 252;
+constexpr int kSelScc = 253;
+
+enum class Space {
+  Tracked,  ///< Names tracked locations (added to the LocSet).
+  Outside,  ///< Names state outside the tracked universe (VGPR, TTMP, memory, ...).
+  Constant, ///< Inline constant or literal.
+  Pc,       ///< The program counter.
+  Unknown,  ///< Cannot be named; may alias tracked state.
+};
+
+struct OperandClass {
+  Space space = Space::Unknown;
+  LocSet locs;
+  std::string what;
+};
+
+void add_pair(LocSet &locs, unsigned lo, unsigned hi, int bits) {
+  locs.set(lo);
+  if (bits > 32)
+    locs.set(hi);
+}
+
+OperandClass classify_special(RegClass cls, int bits) {
+  OperandClass out;
+  out.space = Space::Tracked;
+  switch (cls) {
+  case RegClass::SCC:
+    out.locs.set(kLocScc);
+    return out;
+  case RegClass::VCC:
+    // A fieldless VCC operand is the wave-sized mask; on wave64 that is the pair.
+    add_pair(out.locs, kLocVccLo, kLocVccHi, std::max(bits, 64));
+    return out;
+  case RegClass::EXEC:
+    add_pair(out.locs, kLocExecLo, kLocExecHi, std::max(bits, 64));
+    return out;
+  case RegClass::M0:
+    out.locs.set(kLocM0);
+    return out;
+  case RegClass::PC:
+    out.space = Space::Pc;
+    out.what = "pc";
+    return out;
+  default:
+    out.space = Space::Outside;
+    out.what = "special register outside the tracked universe";
+    return out;
+  }
+}
+
+OperandClass classify_operand(const Operand &op) {
+  OperandClass out;
+  if (op.is_fieldless()) {
+    if (auto cls = op.to_special_reg_class())
+      return classify_special(*cls, op.size_bits());
+    out.space = Space::Outside;
+    out.what = "fieldless operand '" + op.name() + "'";
+    return out;
+  }
+  if (auto ref = op.to_register_ref()) {
+    switch (ref->cls) {
+    case RegClass::SGPR:
+      if (ref->index + ref->width > kNumSgprs) {
+        out.space = Space::Unknown;
+        out.what = "SGPR beyond s101";
+        return out;
+      }
+      out.space = Space::Tracked;
+      for (unsigned i = 0; i < ref->width; ++i)
+        out.locs.set(ref->index + i);
+      return out;
+    case RegClass::EXEC:
+      out.space = Space::Tracked;
+      for (unsigned i = 0; i < ref->width; ++i)
+        out.locs.set(kLocExecLo + ((ref->index + i) & 1u));
+      return out;
+    case RegClass::VCC:
+      out.space = Space::Tracked;
+      for (unsigned i = 0; i < ref->width; ++i)
+        out.locs.set(kLocVccLo + ((ref->index + i) & 1u));
+      return out;
+    case RegClass::M0:
+    case RegClass::SCC:
+      return classify_special(ref->cls, op.size_bits());
+    case RegClass::PC:
+      out.space = Space::Pc;
+      out.what = "pc";
+      return out;
+    case RegClass::VGPR:
+    case RegClass::ACC_VGPR:
+      out.space = Space::Outside;
+      out.what = "vector register";
+      return out;
+    case RegClass::TTMP:
+      out.space = Space::Outside;
+      out.what = "trap temporary";
+      return out;
+    case RegClass::FLAT_SCRATCH:
+      out.space = Space::Outside;
+      out.what = "flat_scratch";
+      return out;
+    }
+  }
+  if (op.has_register_selector()) {
+    const int sel = op.encoding_value();
+    const int bits = op.size_bits();
+    out.space = Space::Tracked;
+    switch (sel) {
+    case kSelVccLo:
+      add_pair(out.locs, kLocVccLo, kLocVccHi, bits);
+      return out;
+    case kSelVccHi:
+      out.locs.set(kLocVccHi);
+      return out;
+    case kSelM0:
+      out.locs.set(kLocM0);
+      return out;
+    case kSelScc:
+      out.locs.set(kLocScc);
+      return out;
+    case kSelVccz:
+      out.locs.set(kLocVccLo);
+      out.locs.set(kLocVccHi);
+      return out;
+    case kSelExecz:
+      out.locs.set(kLocExecLo);
+      out.locs.set(kLocExecHi);
+      return out;
+    default:
+      break;
+    }
+    if (sel >= kSelFlatScratchLo && sel <= kSelXnackMaskHi) {
+      out.space = Space::Outside;
+      out.what = "flat_scratch/xnack_mask selector";
+      return out;
+    }
+    if (op.const_value()) {
+      out.space = Space::Constant;
+      return out;
+    }
+    out.space = Space::Unknown;
+    out.what = "scalar selector " + std::to_string(sel) + " ('" + op.name() + "')";
+    return out;
+  }
+  if (op.const_value()) {
+    out.space = Space::Constant;
+    return out;
+  }
+  out.space = Space::Outside;
+  out.what = "operand '" + op.name() + "' without a register";
+  return out;
+}
+
+bool has_mnemonic_prefix(std::string_view mnemonic, std::string_view prefix) {
+  return mnemonic.substr(0, prefix.size()) == prefix;
+}
+
+} // namespace
+
+bool is_p0_mnemonic(std::string_view mnemonic) {
+  return std::ranges::find(kP0Mnemonics, mnemonic) != kP0Mnemonics.end();
+}
+
+Effects classify(const Instruction &inst) {
+  Effects fx;
+  const uint64_t flags = inst.flags();
+  const std::string_view mnemonic = inst.mnemonic();
+  fx.salu = (flags & SALU) != 0;
+  fx.control_flow = (flags & (BRANCH | COND_BRANCH | INDIRECT_BRANCH | INDIRECT_CALL |
+                              PROGRAM_TERMINATOR | WRITES_PC | SOFTWARE_TRAP)) != 0;
+
+  std::string first_outside;
+  bool unknown = false;
+  std::string unknown_what;
+  auto absorb = [&](const Operand &op, bool is_dst) {
+    OperandClass cls = classify_operand(op);
+    switch (cls.space) {
+    case Space::Tracked:
+      (is_dst ? fx.writes : fx.reads) |= cls.locs;
+      if (!is_dst && cls.locs.count() == 2)
+        for (unsigned loc = 0; loc < kNumLocs; ++loc)
+          if (cls.locs.test(loc)) {
+            fx.wide_reads.set(loc);
+            break;
+          }
+      break;
+    case Space::Pc:
+      if (!is_dst)
+        fx.reads_pc = true;
+      if (first_outside.empty())
+        first_outside = "accesses the program counter";
+      break;
+    case Space::Outside:
+      if (first_outside.empty())
+        first_outside = "operand outside the P0 state: " + cls.what;
+      break;
+    case Space::Constant:
+      break;
+    case Space::Unknown:
+      unknown = true;
+      if (unknown_what.empty())
+        unknown_what = cls.what;
+      break;
+    }
+  };
+  for (int i = 0; i < inst.num_src_operands(); ++i)
+    absorb(*inst.src_operand(i), /*is_dst=*/false);
+  for (int i = 0; i < inst.num_dst_operands(); ++i)
+    absorb(*inst.dst_operand(i), /*is_dst=*/true);
+
+  // A conditional definition preserves the old value on some paths.
+  if (flags & PREDICATED_DEF)
+    fx.reads |= fx.writes;
+
+  // Hidden effects that the operand list does not show.
+  RegisterSet implicit_uses;
+  RegisterSet implicit_defs;
+  inst.implicit_uses(implicit_uses);
+  inst.implicit_defs(implicit_defs);
+  const bool has_implicit = !implicit_uses.none() || !implicit_defs.none();
+  const bool indirect_sgpr = has_mnemonic_prefix(mnemonic, "s_movrel") ||
+                             has_mnemonic_prefix(mnemonic, "s_set_gpr_idx") ||
+                             (flags & BRANCH_STACK) != 0;
+  if (has_implicit || indirect_sgpr || unknown) {
+    fx.unknown_effect = true;
+    if (unknown_what.empty())
+      unknown_what = indirect_sgpr ? "indirect SGPR access" : "implicit register effects";
+  }
+
+  // P0 executability.
+  if (!is_p0_mnemonic(mnemonic)) {
+    fx.reject_reason = "opcode not in the P0 SALU allowlist: " + std::string(mnemonic);
+  } else if (fx.unknown_effect) {
+    fx.reject_reason = "unmodelled effect: " + unknown_what;
+  } else if (!first_outside.empty()) {
+    fx.reject_reason = first_outside;
+  } else if (fx.control_flow || (flags & (MEMORY_OP | WAITCNT | BARRIER | SUSPENDS_WAVE | VALU |
+                                          SMEM | VMEM | LDS | MFMA)) != 0) {
+    fx.reject_reason = "instruction class outside P0";
+  } else if (inst.data() != nullptr) {
+    fx.reject_reason = "instruction carries dynamic state";
+  } else if (inst.execute == nullptr) {
+    fx.reject_reason = "no execution callback (model-only provider)";
+  } else {
+    fx.p0 = true;
+  }
+  fx.implicit_special_reads =
+      !fx.p0 && (fx.unknown_effect || !fx.salu ||
+                 std::ranges::find(kNoImplicitReads, mnemonic) == kNoImplicitReads.end());
+  return fx;
+}
+
+} // namespace rocjitsu::isa_diff

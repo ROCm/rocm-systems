@@ -1,0 +1,157 @@
+{
+  "schema_version": "rj_isa_diff.v1",
+  "identity": {
+    "tool": "rj_isa_diff",
+    "tool_version": "0.1.0-p0",
+    "schema_version": "rj_isa_diff.v1",
+    "rocjitsu_revision": "90ddc8aae52bd58adaff8bab6498a140bcb77747",
+    "rocjitsu_version": "0.3.0",
+    "semantics": "RocJITsu ComputeUnitCore::execute_instruction, gfx950 (CDNA4) wave64, default arithmetic semantics",
+    "compiler": "13.4.0"
+  },
+  "command": {
+    "argv": "rj_isa_diff inject --case case_co --region r0 --side new --inst 1 --xor 0x01000000 --label wrong-opcode --out case_syn",
+    "synthetic": true
+  },
+  "artifacts": {
+    "old": {
+      "label": "co_old.hsaco",
+      "kind": "code_object",
+      "sha256": "8d2ffd670e2cb06b5117084d311debb1717b5a7cd1fd40a825648426d45c2c8b",
+      "target": "gfx950",
+      "kernel": "k",
+      "text_vaddr": "0x1300",
+      "kernel_begin": "0x0",
+      "kernel_end": "0x24",
+      "kernel_bytes": 36,
+      "reachable_insts": 8,
+      "metadata_sha256": "5df6e0e2761359d30a8275058e299fcc0381534545f55cf43e41983f5d4c9456"
+    },
+    "new": {
+      "label": "co_new.hsaco",
+      "kind": "code_object",
+      "sha256": "2449f9b36663e02770e04cf3dd4f7779c7e3b7105fb6929f89761d9f680e9d63",
+      "target": "gfx950",
+      "kernel": "k",
+      "text_vaddr": "0x1300",
+      "kernel_begin": "0x0",
+      "kernel_end": "0x28",
+      "kernel_bytes": 40,
+      "reachable_insts": 9,
+      "metadata_sha256": "5df6e0e2761359d30a8275058e299fcc0381534545f55cf43e41983f5d4c9456"
+    }
+  },
+  "changes": [
+    {
+      "hunk": 0,
+      "kind": "instruction",
+      "old_insts": 1,
+      "new_insts": 2,
+      "old": ["0x1314  s_lshl_b64 s[8:9], s[4:5], 2"],
+      "new": ["0x1314  s_lshl_b64 s[8:9], s[4:5], 1", "0x1318  s_lshl_b64 s[8:9], s[8:9], 1"]
+    }
+  ],
+  "unresolved": [],
+  "notes": [
+    {
+      "kind": "layout",
+      "what": "instruction layout shifted (no PC reads in either kernel)",
+      "semantic": false
+    }
+  ],
+  "regions": [
+    {
+      "id": "r0-syn-wrong-opcode",
+      "status": "READY",
+      "reason": "",
+      "synthetic": true,
+      "hunks": [0],
+      "old": {
+        "begin_index": 4,
+        "end_index": 5,
+        "insts": [
+          {
+            "pc": "0x1314",
+            "words": ["0x8e888204"],
+            "asm": "s_lshl_b64 s[8:9], s[4:5], 2"
+          }
+        ]
+      },
+      "new": {
+        "begin_index": 4,
+        "end_index": 6,
+        "insts": [
+          {
+            "pc": "0x1314",
+            "words": ["0x8e888104"],
+            "asm": "s_lshl_b64 s[8:9], s[4:5], 1"
+          },
+          {
+            "pc": "0x1318",
+            "words": ["0x8f888108"],
+            "asm": "s_lshr_b64 s[8:9], s[8:9], 1"
+          }
+        ]
+      },
+      "contract": {
+        "target": "gfx950",
+        "wave": "wave64",
+        "arithmetic": "default",
+        "mapping": "identity_at_common_cutpoint",
+        "entry_equal": "s4,s5",
+        "canary": "s0,s1,s2,s3,s6,s7,s8,s9,s10,s11,s12,s13,s14,s15,s16,s17,s18,s19,s20,s21,s22,s23,s24,s25,s26,s27,s28,s29,s30,s31,s32,s33,s34,s35,s36,s37,s38,s39,s40,s41,s42,s43,s44,s45,s46,s47,s48,s49,s50,s51,s52,s53,s54,s55,s56,s57,s58,s59,s60,s61,s62,s63,s64,s65,s66,s67,s68,s69,s70,s71,s72,s73,s74,s75,s76,s77,s78,s79,s80,s81,s82,s83,s84,s85,s86,s87,s88,s89,s90,s91,s92,s93,s94,s95,s96,s97,s98,s99,s100,s101,vcc_lo,vcc_hi,exec_lo,exec_hi,m0,scc",
+        "observable": "s4,s8,s9",
+        "declared_writes_old": "s8,s9,scc",
+        "declared_writes_new": "s8,s9,scc",
+        "wide_reads": "s4,s8",
+        "constraints": [],
+        "exit_mapping": "single fall-through exit after the last region instruction",
+        "frame_preserved": ["status_except_scc", "mode", "trapsts", "ttmp[0:15]", "scratch_base", "s102", "s103", "wait_counters", "in_trap_handler", "wave_state", "sleep_cycles"],
+        "status": "ESTABLISHED",
+        "depends_on": [],
+        "sources": [
+          {
+            "what": "entry_equal = live-in(old) | live-in(new) at the region entry",
+            "source": "KernelModel backward LocSet liveness over BasicBlock::build_reachable CFG"
+          },
+          {
+            "what": "observable = live-out(old) | live-out(new) at the region exit",
+            "source": "KernelModel backward LocSet liveness"
+          },
+          {
+            "what": "mapping = same physical location on both sides",
+            "source": "identity at a common cutpoint; matched anchors from LCS alignment"
+          },
+          {
+            "what": "canary = locations dead at entry on both sides",
+            "source": "complement of entry_equal; independent per-side values"
+          },
+          {
+            "what": "every path to the region entry runs byte-identical code from identical kernel metadata, so all state is equal at the cutpoint",
+            "source": "common_prefix_analysis"
+          },
+          {
+            "what": "synthetic mutation on new inst 1 word 0 xor 0x01000000 -> 's_lshr_b64 s[8:9], s[8:9], 1'",
+            "source": "synthetic_injection"
+          }
+        ]
+      },
+      "prepared_key": "de915d915594446895b9cdb150058ca9dc4433678e259861c2d556075bcae21e"
+    }
+  ],
+  "analysis": {
+    "plan_options": {
+      "max_region_insts": 256,
+      "max_expansions": 64,
+      "context_insts": 0,
+      "merge_same_block": true
+    },
+    "alignment_complete": true,
+    "layout_shift": true,
+    "timing": {
+      "decode_cfg_liveness_ns": 136835,
+      "align_classify_ns": 3786,
+      "plan_ns": 68794
+    }
+  }
+}

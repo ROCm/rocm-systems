@@ -1,0 +1,94 @@
+{
+  "schema_version": "rj_isa_diff.v1",
+  "identity": {
+    "tool": "rj_isa_diff",
+    "tool_version": "0.1.0-p0",
+    "schema_version": "rj_isa_diff.v1",
+    "rocjitsu_revision": "90ddc8aae52bd58adaff8bab6498a140bcb77747",
+    "rocjitsu_version": "0.3.0",
+    "semantics": "RocJITsu ComputeUnitCore::execute_instruction, gfx950 (CDNA4) wave64, default arithmetic semantics",
+    "compiler": "13.4.0"
+  },
+  "artifacts": {
+    "old": {
+      "label": "co_old.hsaco",
+      "kind": "code_object",
+      "sha256": "8d2ffd670e2cb06b5117084d311debb1717b5a7cd1fd40a825648426d45c2c8b",
+      "target": "gfx950",
+      "kernel": "k",
+      "text_vaddr": "0x1300",
+      "kernel_begin": "0x0",
+      "kernel_end": "0x24",
+      "kernel_bytes": 36,
+      "reachable_insts": 8,
+      "metadata_sha256": "5df6e0e2761359d30a8275058e299fcc0381534545f55cf43e41983f5d4c9456"
+    },
+    "new": {
+      "label": "co_new.hsaco",
+      "kind": "code_object",
+      "sha256": "2449f9b36663e02770e04cf3dd4f7779c7e3b7105fb6929f89761d9f680e9d63",
+      "target": "gfx950",
+      "kernel": "k",
+      "text_vaddr": "0x1300",
+      "kernel_begin": "0x0",
+      "kernel_end": "0x28",
+      "kernel_bytes": 40,
+      "reachable_insts": 9,
+      "metadata_sha256": "5df6e0e2761359d30a8275058e299fcc0381534545f55cf43e41983f5d4c9456"
+    }
+  },
+  "overall": {
+    "test_status": "NO_MISMATCH_FOUND",
+    "contract_status": "ESTABLISHED",
+    "witness_scope": "NONE",
+    "coverage_scope": "COMPLETE_FOR_DECLARED_SCOPE",
+    "proof_status": "NOT_RUN",
+    "note": "NO_MISMATCH_FOUND means no counterexample under the given seed, budget and contract; it is not proven equivalence"
+  },
+  "options": {
+    "seed": 1,
+    "cases": 5000,
+    "policy": "baseline-v1"
+  },
+  "unresolved": [],
+  "regions": [
+    {
+      "region": "r0",
+      "synthetic": false,
+      "test_status": "NO_MISMATCH_FOUND",
+      "contract_status": "ESTABLISHED",
+      "witness_scope": "NONE",
+      "coverage_scope": "COMPLETE_FOR_DECLARED_SCOPE",
+      "proof_status": "NOT_RUN",
+      "prepared_key": "b752e44c69733da43d0815d737802cff0c489d05e856c6570b8fb0d7d9b7f0ab",
+      "policy": "baseline-v1",
+      "seed": 1,
+      "counts": {
+        "attempted": 5000,
+        "accepted": 5000,
+        "executed_pairs": 5000,
+        "valid_pairs": 5000,
+        "mismatches": 0,
+        "harness_errors": 0,
+        "rejections": {},
+        "mismatch_kinds": {}
+      },
+      "execution": {
+        "old_region_insts": 1,
+        "new_region_insts": 2,
+        "old_insts_executed": 5000,
+        "new_insts_executed": 10000
+      },
+      "timing": {
+        "setup_ns": 506782,
+        "propose_ns": 775985,
+        "state_load_ns": 3720262,
+        "old_execute_ns": 325846,
+        "new_execute_ns": 438998,
+        "compare_ns": 2002392,
+        "triage_ns": 0
+      },
+      "counterexamples": []
+    }
+  ]
+}
