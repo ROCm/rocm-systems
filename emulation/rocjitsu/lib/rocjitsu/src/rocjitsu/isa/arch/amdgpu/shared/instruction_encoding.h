@@ -528,12 +528,13 @@ inline void append_bit_array(std::string &out, std::string_view name, uint32_t b
 /// @brief Add packed VOP3 source-selection and arithmetic attributes.
 inline void append_vop3p_disassembly(std::string &out, uint32_t op_sel, uint32_t op_sel_hi,
                                      uint32_t neg_lo, uint32_t neg_hi, uint32_t clamp,
-                                     uint32_t source_count, bool packed_defaults) {
+                                     uint32_t source_count, bool packed_defaults,
+                                     bool display_op_sel_hi = true) {
   const uint32_t mask = (uint32_t{1} << source_count) - 1;
   if ((op_sel & mask) != 0)
     append_bit_array(out, "op_sel", op_sel, source_count);
   const uint32_t default_op_sel_hi = packed_defaults ? mask : 0;
-  if ((op_sel_hi & mask) != default_op_sel_hi)
+  if (display_op_sel_hi && (op_sel_hi & mask) != default_op_sel_hi)
     append_bit_array(out, "op_sel_hi", op_sel_hi, source_count);
   if ((neg_lo & mask) != 0)
     append_bit_array(out, "neg_lo", neg_lo, source_count);
