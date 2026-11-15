@@ -157,7 +157,8 @@ gl2.gl2a_gl2c0_req:
   formula: SUM(GL2A_REQ_GL2C0_sum) / SUM($denom)
   unit: (Requests + $normUnit)
   description: >-
-    Number of requests forwarded by GL2 Arbiter to GL2 Cache partition 0.
+    Number of requests forwarded by GL2 Arbiter to GL2 Cache partition 0, per
+    normalization unit.
 gl2.gl2a_gl2c0_req_stall_rate:
   name: GL2A-GL2C0 Request Stall Rate
   formula: 100 * SUM(GL2A_REQ_STALL_GL2C0_sum) / SUM(GL2A_BUSY_sum)
@@ -170,7 +171,8 @@ gl2.gl2a_gl2c1_req:
   formula: SUM(GL2A_REQ_GL2C1_sum) / SUM($denom)
   unit: (Requests + $normUnit)
   description: >-
-    Number of requests forwarded by GL2 Arbiter to GL2 Cache partition 1.
+    Number of requests forwarded by GL2 Arbiter to GL2 Cache partition 1, per
+    normalization unit.
 gl2.gl2a_gl2c1_req_stall_rate:
   name: GL2A-GL2C1 Request Stall Rate
   formula: 100 * SUM(GL2A_REQ_STALL_GL2C1_sum) / SUM(GL2A_BUSY_sum)
@@ -183,7 +185,8 @@ gl2.gl2a_gl2c2_req:
   formula: SUM(GL2A_REQ_GL2C2_sum) / SUM($denom)
   unit: (Requests + $normUnit)
   description: >-
-    Number of requests forwarded by GL2 Arbiter to GL2 Cache partition 2.
+    Number of requests forwarded by GL2 Arbiter to GL2 Cache partition 2, per
+    normalization unit.
 gl2.gl2a_gl2c2_req_stall_rate:
   name: GL2A-GL2C2 Request Stall Rate
   formula: 100 * SUM(GL2A_REQ_STALL_GL2C2_sum) / SUM(GL2A_BUSY_sum)
@@ -196,7 +199,8 @@ gl2.gl2a_gl2c3_req:
   formula: SUM(GL2A_REQ_GL2C3_sum) / SUM($denom)
   unit: (Requests + $normUnit)
   description: >-
-    Number of requests forwarded by GL2 Arbiter to GL2 Cache partition 3.
+    Number of requests forwarded by GL2 Arbiter to GL2 Cache partition 3, per
+    normalization unit.
 gl2.gl2a_gl2c3_req_stall_rate:
   name: GL2A-GL2C3 Request Stall Rate
   formula: 100 * SUM(GL2A_REQ_STALL_GL2C3_sum) / SUM(GL2A_BUSY_sum)
@@ -239,7 +243,7 @@ gl2.hit_rate:
   name: GL2 Cache Hit Rate
   formula: 100 * SUM(GL2C_HIT_sum) / SUM(GL2C_HIT_sum + GL2C_MISS_sum)
   unit: Percent
-  description: GL2 cache hit rate.
+  description: Percentage of GL2 cache requests that hit in the cache.
   peak: 100
 gl2.lat_fifo_full_stall:
   name: GL2 Latency FIFO Full Stall

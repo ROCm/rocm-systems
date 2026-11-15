@@ -29,24 +29,23 @@ compute.insts_lds:
   unit: (Count + $normUnit)
   description: >-
     Number of LDS instructions issued by the shader, including FLAT instructions that
-    resolve to LDS. This counts instructions rather than data movement, so it does
-    not distinguish reads from writes.
+    resolve to LDS, per normalization unit. This counts instructions rather than data
+    movement, so it does not distinguish reads from writes.
 compute.insts_salu:
   name: Instructions - SALU
   formula: SUM(SQ_INSTS_SALU_sum) / SUM($denom)
   unit: (Count + $normUnit)
   description: >-
-    Number of Scalar ALU instructions executed. SALU handles operations with uniform
-    values across the wavefront. Efficient kernels often have a balance of VALU and
-    SALU operations.
+    Number of Scalar ALU instructions executed, per normalization unit. SALU handles
+    operations with uniform values across the wavefront.
 compute.insts_smem:
   name: Instructions - SMEM
   formula: SUM(SQ_INSTS_SMEM_sum) / SUM($denom)
   unit: (Count + $normUnit)
   description: >-
-    Number of scalar memory instructions executed. SMEM loads constant and uniform
-    data through the scalar cache. High counts may indicate heavy use of constant
-    buffers or kernel arguments.
+    Number of scalar memory instructions executed, per normalization unit. SMEM loads
+    constant and uniform data, such as constant buffers and kernel arguments, through
+    the scalar cache.
 compute.insts_tex_load:
   name: Instructions - TEX Load
   formula: SUM(SQ_INSTS_TEX_LOAD_sum) / SUM($denom)
@@ -69,16 +68,16 @@ compute.insts_valu:
   formula: SUM(SQ_INSTS_VALU_sum) / SUM($denom)
   unit: (Count + $normUnit)
   description: >-
-    Number of Vector ALU instructions executed. VALU handles arithmetic and logic
-    operations across all work-items in a wavefront. High VALU counts indicate compute-intensive
-    kernels.
+    Number of Vector ALU instructions executed, per normalization unit. VALU handles
+    arithmetic and logic operations across all work-items in a wavefront.
 compute.insts_vmem:
   name: Instructions - VMEM
   formula: SUM(SQ_INSTS_TEX_sum) / SUM($denom)
   unit: (Count + $normUnit)
   description: >-
     Number of vector memory instructions executed, including global, buffer, and texture
-    operations. High VMEM counts relative to VALU may indicate memory-bound workloads.
+    operations, per normalization unit. High VMEM counts relative to VALU may indicate
+    memory-bound workloads.
 compute.insts_vmem_flat:
   name: Instructions - VMEM Flat
   formula: SUM(SQ_INSTS_FLAT_sum) / SUM($denom)
@@ -89,25 +88,25 @@ compute.ipc:
   formula: SUM(SQ_INSTS_ALL_sum - SQ_INSTS_INTERNAL_sum) / SUM(SQ_BUSY_CYCLES_sum)
   unit: Instructions per Cycle
   description: >-
-    Instructions executed per cycle, measuring overall instruction throughput efficiency.
-    Higher IPC indicates better utilization of the shader pipeline. Low IPC may indicate
-    stalls due to memory latency, register dependencies, or insufficient wavefront
-    occupancy to hide latencies.
+    Instructions executed per cycle, a measure of overall instruction throughput
+    efficiency. Low IPC may indicate stalls due to memory latency, register
+    dependencies, or insufficient wavefront occupancy to hide latencies.
   peak: 5
 compute.lds_direct_load_insts:
   name: LDS Direct Load Instructions
   formula: SUM(SQ_INSTS_LDS_DIRECT_LOAD_sum) / SUM($denom)
   unit: (Count + $normUnit)
   description: >-
-    Number of direct LDS load instructions. Direct loads fetch data from LDS without
-    address indirection. These are typically faster than indexed LDS operations.
+    Number of direct LDS load instructions, which fetch data from LDS without address
+    indirection, per normalization unit. These are typically faster than indexed LDS
+    operations.
 compute.lds_parameter_load_insts:
   name: LDS Parameter Load Instructions
   formula: SUM(SQ_INSTS_LDS_PARAM_LOAD_sum) / SUM($denom)
   unit: (Count + $normUnit)
   description: >-
-    Number of LDS parameter load instructions. These load shader input parameters
-    that have been staged in LDS for efficient access by the wavefront.
+    Number of LDS parameter load instructions, per normalization unit. These load shader
+    input parameters that have been staged in LDS for efficient access by the wavefront.
 compute.total_flops:
   name: Performance (GFLOPs)
   formula: SUM($wave_size * SQ_INSTS_VALU_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1e9) / 1e9
@@ -121,17 +120,16 @@ compute.total_insts:
   formula: SUM(SQ_INSTS_ALL_sum) / SUM($denom)
   unit: (Count + $normUnit)
   description: >-
-    Total number of instructions executed across all wavefronts. This provides an
-    overall measure of computational work. Compare with specific instruction types
-    to understand the workload characteristics.
+    Total number of instructions executed across all wavefronts, per normalization unit.
 compute.valu_flops:
   name: VALU FLOPs
   formula: SUM(SQ_INSTS_VALU_sum * $wave_size) / SUM(End_Timestamp - Start_Timestamp)
   unit: GFLOP/s
   description: >-
-    Floating-point operations per second on the VALU. Peak is based on FP32 FMA single-issue
-    (128 FLOPs/CU/cycle). VOPD dual-issue doubles throughput: FP32 to 256, FP16 packed
-    to 512 FLOPs/CU/cycle. Uses aggregate instruction counter.
+    VALU floating-point operations per second, counted as all VALU instructions times
+    the wavefront size. The peak assumes single-issue FP32 FMA (128 FLOPs/CU/cycle);
+    VOPD dual-issue doubles throughput to 256 FLOPs/CU/cycle for FP32 and 512 for packed
+    FP16.
   peak: $max_sclk * $cu_per_gpu * 128 / 1000
   peak_empirical: $FP32Flops_empirical_peak
 compute.valu_flops_f64:
@@ -139,9 +137,9 @@ compute.valu_flops_f64:
   formula: SUM(SQ_INSTS_VALU_DP_sum * $wave_size) / SUM(End_Timestamp - Start_Timestamp)
   unit: GFLOP/s
   description: >-
-    64-bit floating-point operations per second on the VALU. Peak is 4 FLOPs/CU/cycle
-    (FP32 FMA rate / 32). Uses dedicated FP64 instruction counter (SQ_INSTS_VALU_DP_sum).
-    FP64 is 1/32 rate of FP32 on RDNA.
+    64-bit floating-point operations per second on the VALU, counted from the FP64
+    instruction counter (SQ_INSTS_VALU_DP_sum). The peak is 4 FLOPs/CU/cycle, since FP64
+    runs at 1/32 of the FP32 FMA rate on RDNA.
   peak: $max_sclk * $cu_per_gpu * 4 / 1000
   peak_empirical: $FP64Flops_empirical_peak
 compute.wave32_lds_parameter_load_insts:
@@ -149,6 +147,6 @@ compute.wave32_lds_parameter_load_insts:
   formula: SUM(SQ_INSTS_WAVE32_LDS_PARAM_LOAD_sum) / SUM($denom)
   unit: (Count + $normUnit)
   description: >-
-    Number of LDS parameter loads executed in wave32 mode. RDNA 3.5 supports both
-    wave32 and wave64 execution modes, with wave32 providing lower latency for some
-    operations.
+    Number of LDS parameter loads executed in wave32 mode, per normalization unit. RDNA
+    3.5 supports both wave32 and wave64 execution modes, with wave32 providing lower
+    latency for some operations.

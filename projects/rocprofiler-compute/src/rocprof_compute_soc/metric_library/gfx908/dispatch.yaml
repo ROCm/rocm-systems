@@ -3,9 +3,9 @@ dispatch.agprs:
   formula: AVG(Accum_VGPR)
   unit: Registers
   description: >-
-    The number of accumulation vector general-purpose registers allocated for the
-    kernel, see AGPRs. Note: this may not exactly match the number of AGPRs requested
-    by the compiler due to allocation granularity.
+    The number of accumulation vector general-purpose registers (AGPRs) allocated for
+    the kernel. Note: this may not exactly match the number of AGPRs requested by the
+    compiler due to allocation granularity.
 dispatch.grid_size:
   name: Grid Size
   formula: AVG(Grid_Size)

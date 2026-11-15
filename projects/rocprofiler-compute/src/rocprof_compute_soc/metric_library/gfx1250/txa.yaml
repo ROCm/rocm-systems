@@ -2,12 +2,14 @@ txa.async_barrier_inst:
   name: TXA Async Barrier Instruction
   formula: SUM(TX_VCA_ASYNC_BARRIER_WAVEFRONT_sum) / SUM($denom)
   unit: (Count + $normUnit)
-  description: Number of async barrier instructions processed by TXA.
+  description: >-
+    Number of async barrier instructions processed by TXA, per normalization unit.
 txa.async_cluster_load_inst:
   name: TXA Async Cluster Load Instruction
   formula: SUM(TX_VCA_ASYNC_CLUSTER_LOAD_WAVEFRONT_sum) / SUM($denom)
   unit: (Count + $normUnit)
-  description: Number of async cluster load instructions processed by TXA.
+  description: >-
+    Number of async cluster load instructions processed by TXA, per normalization unit.
 txa.async_load_bw:
   name: TXA Async Load Bandwidth
   formula: SUM(TX_VCA_ASYNC_LOAD_BANDWIDTH_BYTES_sum) / SUM(End_Timestamp - Start_Timestamp)
@@ -17,7 +19,8 @@ txa.async_load_inst:
   name: TXA Async Load Instruction
   formula: SUM(TX_VCA_ASYNC_LOAD_WAVEFRONT_sum) / SUM($denom)
   unit: (Count + $normUnit)
-  description: Number of async load instructions processed by TXA.
+  description: >-
+    Number of async load instructions processed by TXA, per normalization unit.
 txa.async_store_bw:
   name: TXA Async Store Bandwidth
   formula: SUM(TX_VCA_ASYNC_STORE_BANDWIDTH_BYTES_sum) / SUM(End_Timestamp - Start_Timestamp)
@@ -27,37 +30,43 @@ txa.async_store_inst:
   name: TXA Async Store Instruction
   formula: SUM(TX_VCA_ASYNC_STORE_WAVEFRONT_sum) / SUM($denom)
   unit: (Count + $normUnit)
-  description: Number of async store instructions processed by TXA.
+  description: >-
+    Number of async store instructions processed by TXA, per normalization unit.
 txa.block_load_inst:
   name: TXA Block Load Instruction
   formula: SUM(TX_VCA_BLOCK_LOAD_WAVEFRONTS_sum) / SUM($denom)
   unit: (Count + $normUnit)
-  description: Number of block load instructions processed by TXA.
+  description: >-
+    Number of block load instructions processed by TXA, per normalization unit.
 txa.block_store_inst:
   name: TXA Block Store Instruction
   formula: SUM(TX_VCA_BLOCK_STORE_WAVEFRONTS_sum) / SUM($denom)
   unit: (Count + $normUnit)
-  description: Number of block store instructions processed by TXA.
+  description: >-
+    Number of block store instructions processed by TXA, per normalization unit.
 txa.buffer_atomics_insts:
   name: TXA Buffer Atomics Instructions
   formula: SUM(TX_VCA_BUFFER_ATOMIC_WAVEFRONTS_sum) / SUM($denom)
   unit: (Count + $normUnit)
-  description: Number of buffer atomic instructions processed by TXA.
+  description: >-
+    Number of buffer atomic instructions processed by TXA, per normalization unit.
 txa.buffer_insts:
   name: TXA Buffer Instructions
   formula: SUM(TX_VCA_BUFFER_WAVEFRONTS_sum) / SUM($denom)
   unit: (Count + $normUnit)
-  description: Total buffer VMEM instructions processed by TXA.
+  description: Total buffer VMEM instructions processed by TXA, per normalization unit.
 txa.buffer_load_insts:
   name: TXA Buffer Load Instructions
   formula: SUM(TX_VCA_BUFFER_LOAD_WAVEFRONTS_sum) / SUM($denom)
   unit: (Count + $normUnit)
-  description: Number of buffer load instructions processed by TXA.
+  description: >-
+    Number of buffer load instructions processed by TXA, per normalization unit.
 txa.buffer_store_insts:
   name: TXA Buffer Store Instructions
   formula: SUM(TX_VCA_BUFFER_STORE_WAVEFRONTS_sum) / SUM($denom)
   unit: (Count + $normUnit)
-  description: Number of buffer store instructions processed by TXA.
+  description: >-
+    Number of buffer store instructions processed by TXA, per normalization unit.
 txa.bus_util_buffer_req:
   name: TXA Bus Utilization - Buffer Requests
   formula: 100 * SUM(TX_VCA_BUFFER_TOTAL_CYCLES_sum) / (2 * SUM(TX_VMW_GATE_EN1_sum))
@@ -81,7 +90,8 @@ txa.cluster_load_inst:
   name: TXA Cluster Load Instruction
   formula: SUM(TX_VCA_CLUSTER_LOAD_WAVEFRONT_sum) / SUM($denom)
   unit: (Count + $normUnit)
-  description: Number of cluster load instructions processed by TXA.
+  description: >-
+    Number of cluster load instructions processed by TXA, per normalization unit.
 txa.command_bus_stall_rate:
   name: TXA Command Bus Stall Rate
   formula: 100 * SUM(TX_VMW_VMW_VCA_REQ_STALL_sum) / (2 * SUM(TX_VMW_GATE_EN1_sum))
@@ -98,23 +108,27 @@ txa.flat_atomics_insts:
   formula: SUM(TX_VCA_FLAT_ATOMIC_WAVEFRONTS_sum) / SUM($denom)
   unit: (Count + $normUnit)
   description: >-
-    Number of flat-addressed atomic instructions processed by TXA.
+    Number of flat-addressed atomic instructions processed by TXA, per normalization
+    unit.
 txa.flat_insts:
   name: TXA Flat Instructions
   formula: SUM(TX_VCA_FLAT_WAVEFRONTS_sum) / SUM($denom)
   unit: (Count + $normUnit)
-  description: Total flat-addressed VMEM instructions processed by TXA.
+  description: >-
+    Total flat-addressed VMEM instructions processed by TXA, per normalization unit.
 txa.flat_load_insts:
   name: TXA Flat Load Instructions
   formula: SUM(TX_VCA_FLAT_LOAD_WAVEFRONTS_sum) / SUM($denom)
   unit: (Count + $normUnit)
-  description: Number of flat-addressed load instructions processed by TXA.
+  description: >-
+    Number of flat-addressed load instructions processed by TXA, per normalization unit.
 txa.flat_store_insts:
   name: TXA Flat Store Instructions
   formula: SUM(TX_VCA_FLAT_STORE_WAVEFRONTS_sum) / SUM($denom)
   unit: (Count + $normUnit)
   description: >-
-    Number of flat-addressed store instructions processed by TXA.
+    Number of flat-addressed store instructions processed by TXA, per normalization
+    unit.
 txa.gl0_atomics_bw:
   name: GL0 Atomics Bandwidth
   formula: SUM(TX_VCA_CACHE_ATOMIC_BANDWIDTH_BYTES_sum) / SUM(End_Timestamp - Start_Timestamp)
@@ -134,7 +148,8 @@ txa.lds_atomics_insts:
   name: LDS Atomics Instructions
   formula: SUM(TX_VCA_LDS_ATOMIC_WAVEFRONTS_sum) / SUM($denom)
   unit: (Count + $normUnit)
-  description: Number of LDS atomic instructions processed by TXA.
+  description: >-
+    Number of LDS atomic instructions processed by TXA, per normalization unit.
 txa.lds_bw_atomics:
   name: LDS Bandwidth - Atomics
   formula: SUM(TX_VCA_LDS_ATOMIC_BANDWIDTH_BYTES_sum) / SUM(End_Timestamp - Start_Timestamp)
@@ -157,17 +172,18 @@ txa.lds_insts:
   name: LDS Instructions
   formula: SUM(TX_VCA_LDS_TOTAL_WAVEFRONTS_sum) / SUM($denom)
   unit: (Count + $normUnit)
-  description: Total LDS instructions processed by TXA.
+  description: Total LDS instructions processed by TXA, per normalization unit.
 txa.lds_load_insts:
   name: LDS Load Instructions
   formula: SUM(TX_VCA_LDS_LOAD_WAVEFRONTS_sum) / SUM($denom)
   unit: (Count + $normUnit)
-  description: Number of LDS load instructions processed by TXA.
+  description: Number of LDS load instructions processed by TXA, per normalization unit.
 txa.lds_store_insts:
   name: LDS Store Instructions
   formula: SUM(TX_VCA_LDS_STORE_WAVEFRONTS_sum) / SUM($denom)
   unit: (Count + $normUnit)
-  description: Number of LDS store instructions processed by TXA.
+  description: >-
+    Number of LDS store instructions processed by TXA, per normalization unit.
 txa.req_bus_stall_rate:
   name: TXA Request Bus Stall Rate
   formula: 100 * SUM(TX_VMW_DATA_FIFO_STALL_sum) / (2 * SUM(TX_VMW_GATE_EN1_sum))
@@ -195,28 +211,32 @@ txa.tdm_async_barrier_inst:
   name: TDM Async Barrier Instruction
   formula: SUM(TX_VCA_TENSOR_ASYNC_BARRIER_DMA_REQUEST_sum) / SUM($denom)
   unit: (Count + $normUnit)
-  description: Number of TDM async barrier instructions processed by TXA.
+  description: >-
+    Number of TDM async barrier instructions processed by TXA, per normalization unit.
 txa.tdm_async_cluster_load_insts:
   name: TDM Async Cluster Load Instructions
   formula: SUM(TX_VCA_TENSOR_ASYNC_CLUSTER_LOAD_DMA_REQUEST_sum) / SUM($denom)
   unit: (Count + $normUnit)
   description: >-
-    Number of TDM async cluster load instructions processed by TXA.
+    Number of TDM async cluster load instructions processed by TXA, per normalization
+    unit.
 txa.tdm_async_load_insts:
   name: TDM Async Load Instructions
   formula: SUM(TX_VCA_TENSOR_ASYNC_LOAD_DMA_REQUEST_sum) / SUM($denom)
   unit: (Count + $normUnit)
-  description: Number of TDM async load instructions processed by TXA.
+  description: >-
+    Number of TDM async load instructions processed by TXA, per normalization unit.
 txa.tdm_async_store_insts:
   name: TDM Async Store Instructions
   formula: SUM(TX_VCA_TENSOR_ASYNC_STORE_DMA_REQUEST_sum) / SUM($denom)
   unit: (Count + $normUnit)
-  description: Number of TDM async store instructions processed by TXA.
+  description: >-
+    Number of TDM async store instructions processed by TXA, per normalization unit.
 txa.tdm_insts:
   name: TDM Instructions
   formula: SUM(TX_VCA_TENSOR_DMA_WAVEFRONT_sum) / SUM($denom)
   unit: (Count + $normUnit)
-  description: Total TDM instructions processed by TXA.
+  description: Total TDM instructions processed by TXA, per normalization unit.
 txa.tdm_load_bw:
   name: TDM Load Bandwidth
   formula: SUM(TX_VCA_TDM_LOAD_BANDWIDTH_BYTES_sum) / SUM(End_Timestamp - Start_Timestamp)

@@ -3,7 +3,7 @@ compute.dual_issue_valu_util:
   formula: 100 * SUM(SQ_ACTIVE_INST_VALU2) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
   unit: Percent
   description: >-
-    Indicates what percent of the kernel's duration the VALU was busy executing dual-issued
+    Percentage of the kernel's duration the VALU was busy executing dual-issued
     instructions. Computed as the ratio of the total number of cycles spent by the
     scheduler co-issuing VALU instructions over the total CU cycles.
 compute.f6f4_ops:
@@ -33,8 +33,9 @@ compute.l1_cache_vmem_stalled_by_l1_cache:
   formula: 100 * SUM(SQ_VMEM_TA_CMD_FIFO_FULL) / SUM(SQ_BUSY_CYCLES)
   unit: Percent
   description: >-
-    Measures backpressure from TCP to SQ. A high stall rate (>= 10%) indicates that
-    TCP stall is backpressured to SQ.
+    Percentage of SQ busy cycles the VMEM command FIFO to TA was full, which measures
+    backpressure from TCP to SQ. A high stall rate (>= 10%) indicates that TCP stalls
+    are backpressured to SQ.
 compute.mfma_flops_bf16:
   peak: $max_sclk * $cu_per_gpu * 4096 / 1000
 compute.mfma_flops_f16:
@@ -46,10 +47,9 @@ compute.mfma_flops_f6f4:
   formula: 512 * SUM(SQ_INSTS_VALU_MFMA_MOPS_F6F4) / SUM(End_Timestamp - Start_Timestamp)
   unit: GFLOP/s
   description: >-
-    The total number of 4-bit and 6-bit floating-point operations executed on MFMA units,
-    per second. Note: this does not include any floating-point operations from VALU
-    instructions. F6/F4 formats are supported in AMD Instinct MI350 series (gfx950) and
-    later only.
+    The total number of 4-bit and 6-bit floating-point operations executed on MFMA
+    units, per second, not including floating-point operations from VALU instructions.
+    F6/F4 formats are supported in AMD Instinct MI350 series (gfx950) and later only.
   peak: $max_sclk * $cu_per_gpu * 16834 / 1000
   peak_empirical: $MFMAF6F4Flops_empirical_peak
 compute.mfma_flops_f8:
@@ -74,12 +74,11 @@ compute.valu_co_issue_efficiency:
   formula: 100 * SUM(SQ_ACTIVE_INST_VALU2) / SUM(SQ_ACTIVE_INST_VALU - SQ_ACTIVE_INST_VALU2)
   unit: Percent
   description: >-
-    The ratio of quad-cycles where two VALU instructions were co-issued (executed
-    simultaneously) to quad-cycles where only a single VALU instruction was issued.
-    Measures how efficiently the kernel leverages the MI350's ability to co-issue
-    VALU instructions. Unlike Dual-issue VALU Utilization which measures percentage
-    of total time, this metric can exceed 100% when dual-issue cycles outnumber single-issue
-    cycles.
+    Percentage of quad-cycles with two co-issued VALU instructions relative to
+    quad-cycles with a single VALU instruction, which shows how well the kernel uses the
+    MI350's ability to co-issue VALU instructions. Unlike Dual-issue VALU Utilization,
+    which is a percentage of total time, this metric can exceed 100% when dual-issue
+    cycles outnumber single-issue cycles.
 compute.vmem_ta_addr_stall:
   description: ''
 compute.vmem_ta_cmd_stall:

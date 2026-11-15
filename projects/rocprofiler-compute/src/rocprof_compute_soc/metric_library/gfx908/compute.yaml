@@ -3,9 +3,9 @@ compute.cu_util:
   formula: 100 * SUM(SQ_BUSY_CU_CYCLES) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
   unit: Percent
   description: >-
-    The percent of total SIMD cycles in the kernel where any SIMD on a CU was actively
-    doing any work, summed over all CUs. Low values (less than 100%) indicate that
-    the accelerator was not fully saturated by the kernel, or a potential load-imbalance
+    Percentage of total SIMD cycles in the kernel where any SIMD on a CU was actively
+    doing any work, summed over all CUs. Low values (less than 100%) indicate that the
+    accelerator was not fully saturated by the kernel, or a potential load-imbalance
     issue.
   peak: 100
 compute.inst_mix_branch:
@@ -13,25 +13,26 @@ compute.inst_mix_branch:
   formula: SUM(SQ_INSTS_BRANCH) / SUM($denom)
   unit: (Instructions + $normUnit)
   description: >-
-    The total number of branch operations issued. These typically consist of jump
-    or branch operations and are used to implement control flow.
+    The total number of branch operations issued, per normalization unit. These
+    typically consist of jump or branch operations and are used to implement control
+    flow.
 compute.inst_mix_salu:
   name: SALU Instructions
   formula: SUM(SQ_INSTS_SALU) / SUM($denom)
   unit: (Instructions + $normUnit)
   description: >-
-    The total number of scalar arithmetic logic unit (SALU) operations issued. Typically
-    these are used for address calculations, literal constants, and other operations
-    that are provably uniform across a wavefront. Although scalar memory (SMEM) operations
-    are issued by the SALU, they are counted separately in this section.
+    The total number of scalar arithmetic logic unit (SALU) operations issued, per
+    normalization unit, not counting the scalar memory (SMEM) operations the SALU also
+    issues. Typically these are used for address calculations, literal constants, and
+    other operations that are provably uniform across a wavefront.
 compute.inst_mix_smem:
   name: SMEM Instructions
   formula: SUM(SQ_INSTS_SMEM) / SUM($denom)
   unit: (Instructions + $normUnit)
   description: >-
-    The total number of scalar memory (SMEM) operations issued. These are typically
-    used for loading kernel arguments, base-pointers and loads from HIP's __constant__
-    memory.
+    The total number of scalar memory (SMEM) operations issued, per normalization unit.
+    These are typically used for loading kernel arguments, base-pointers and loads from
+    HIP's __constant__ memory.
 compute.insts_per_wave:
   name: Instructions per Wavefront
   formula: SUM(SQ_INSTS) / SUM(SQ_WAVES)
@@ -59,7 +60,7 @@ compute.salu_util:
   formula: 100 * SUM(SQ_ACTIVE_INST_SCA) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
   unit: Percent
   description: >-
-    Indicates what percent of the kernel's duration the SALU was busy executing instructions.
+    Percentage of the kernel's duration the SALU was busy executing instructions.
     Computed as the ratio of the total number of cycles spent by the scheduler issuing
     SALU or SMEM instructions over the total CU cycles.
   peak: 100
@@ -68,10 +69,10 @@ compute.se_util:
   formula: 100 * SUM(SQ_BUSY_CYCLES) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $se_per_gpu)
   unit: Percent
   description: >-
-    The percent of total shader engine cycles in the kernel where any CU in a shader-engine
-    was actively doing any work, normalized over all shader-engines. Low values (e.g.,
-    << 100%) indicate that the accelerator was not fully saturated by the kernel,
-    or a potential load-imbalance issue.
+    Percentage of total shader engine cycles in the kernel where any CU in a
+    shader-engine was actively doing any work, normalized over all shader-engines. Low
+    values (for example, << 100%) indicate that the accelerator was not fully saturated
+    by the kernel, or a potential load-imbalance issue.
 compute.valu_active_threads:
   name: VALU Active Threads
   formula: SUM(SQ_THREAD_CYCLES_VALU) / SUM(SQ_ACTIVE_INST_VALU)
@@ -87,7 +88,7 @@ compute.valu_util:
   formula: 100 * SUM(SQ_ACTIVE_INST_VALU) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
   unit: Percent
   description: >-
-    Indicates what percent of the kernel's duration the VALU was busy executing instructions.
-    Does not include VMEM operations. Computed as the ratio of the total number of
-    cycles spent by the scheduler issuing VALU instructions over the total CU cycles.
+    Percentage of the kernel's duration the VALU was busy executing instructions, not
+    including VMEM operations. Computed as the ratio of the total number of cycles spent
+    by the scheduler issuing VALU instructions over the total CU cycles.
   peak: 100

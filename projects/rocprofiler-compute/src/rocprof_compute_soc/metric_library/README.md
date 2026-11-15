@@ -43,8 +43,7 @@ compute.salu_util:
   formula: 100 * SUM(SQ_ACTIVE_INST_SCA) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
   unit: Percent
   description: >-
-    Indicates what percent of the kernel's duration the SALU was busy executing
-    instructions. ...
+    Percentage of the kernel's duration the SALU was busy executing instructions. ...
   peak: 100
 ```
 
@@ -53,19 +52,23 @@ compute.salu_util:
 | `name` | A name specific to the hardware, in title case, unique on the arch. An id has one name and one unit on every arch. |
 | `formula` | The one equation of the metric on this arch. |
 | `unit` | One spelling per unit, such as `GB/s` or `Percent`. |
-| `description` | The text of one panel with the metric, word for word. May be empty. |
+| `description` | What the metric counts, in the style below. May be empty. |
 | `peak` | Optional. The theoretical peak. |
 | `peak_empirical` | Optional. The roofline benchmark's ceiling, as `$<ceiling>_empirical_peak`. |
 
-A description keeps the panel's words, with only these edits:
+A description says what the metric counts and must match its formula and unit:
 
-- plain ASCII (`->` for an arrow, no trademark mark);
+- at most two sentences: what is counted, and optionally how;
+- byte rates say "divided by total duration"; FLOP and IOP rates say "per second";
+- normalized metrics say "per normalization unit";
+- percentages start with "Percentage of";
+- "wavefront", not "wave";
+- "for example", not "e.g." or "for instance";
+- "Graphics Level Arbiter", not "Graphic Level Arbiter";
 - no sentence about how a panel shows the metric ("also presented as a percent of the
-  peak");
-- no panel 3000 `Equation:` sentence, since `formula` holds the equation;
-- no TODO note.
-
-Better wording goes to the metric owners in a separate change.
+  peak"), no see-reference, no `Equation:` sentence (`formula` holds the equation) and no
+  TODO note;
+- plain ASCII (`->` for an arrow, no trademark mark), ending with a period.
 
 ## Sets
 
