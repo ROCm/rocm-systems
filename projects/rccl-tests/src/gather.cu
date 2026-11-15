@@ -66,10 +66,11 @@ static int GatherPoolCtas() {
   return gin_sdma_allgather::gatherPoolCtas(deviceCtaCount, GatherLsaCtaLadder());
 }
 
-static void GatherRaisePools(ncclDevCommRequirements* reqs) {
+static void GatherRaisePools(ncclDevCommRequirements* reqs, bool gin) {
   const int pool = GatherPoolCtas();
-  if (reqs->barrierCount < pool) reqs->barrierCount = pool;
   if (reqs->lsaBarrierCount < pool) reqs->lsaBarrierCount = pool;
+  if (!gin) return;
+  if (reqs->barrierCount < pool) reqs->barrierCount = pool;
   if (reqs->ginSignalCount < pool) reqs->ginSignalCount = pool;
 }
 #endif
@@ -82,11 +83,14 @@ thread_local ncclLLA2AHandle g_gatherLLHandle = {};
 thread_local ncclDevResourceRequirements g_gatherLLReq = {};
 thread_local ncclLLA2AHandle g_gatherFlagHandle = {};
 thread_local ncclDevResourceRequirements g_gatherFlagReq = {};
+// False when the communicator has no GIN, e.g. ANVIL SDMA on a scale-up domain that
+// spans hosts: the LL and LSA tiers then cover every size.
+thread_local bool g_gatherGin = true;
 
 testResult_t GatherGetDevCommRequirements(int deviceImpl, ncclDevCommRequirements* reqs, ncclComm_t comm) {
-  testResult_t res = ginSdmaAllGatherDevCommRequirements(deviceImpl, reqs, comm, "GinHybridGatherKernel");
+  testResult_t res = ginSdmaAllGatherDevCommRequirements(deviceImpl, reqs, comm, "GinHybridGatherKernel", &g_gatherGin);
   if (res != testSuccess) return res;
-  GatherRaisePools(reqs);
+  GatherRaisePools(reqs, g_gatherGin);
   int nRanks = 0;
   NCCLCHECK(ncclCommCount(comm, &nRanks));
   g_gatherLLHandle = {};
@@ -111,7 +115,7 @@ testResult_t GatherGetDevCommRequirements(int deviceImpl, ncclDevCommRequirement
 bool GatherGetDevCommRequirements(int deviceImpl, ncclDevCommRequirements* reqs) {
   if (!ginSdmaAllGatherDevCommRequirements(deviceImpl, reqs)) return false;
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,28,7)
-  GatherRaisePools(reqs);
+  GatherRaisePools(reqs, /*gin=*/true);
 #endif
   return true;
 }
@@ -136,6 +140,13 @@ struct GatherSdmaColl {
   }
   static int poolCtas() { return GatherPoolCtas(); }
 };
+
+static size_t GatherSdmaThreshold() {
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,29,0)
+  if (!g_gatherGin) return gin_sdma_allgather::kGatherSdmaNever;
+#endif
+  return ginSdmaResolveSdmaThreshold<GatherSdmaColl>();
+}
 
 // Per-launch -D 3 options resolved on the host. A zero nSlots handle turns its feature off.
 struct GatherD3Opts {
@@ -289,7 +300,8 @@ __device__ void GatherDoneFlags(ncclLLA2ASession<ncclCoopCta>& done, const struc
   }
 }
 
-// Single-node hybrid Gather body (-D 3), the AllGather body with one destination:
+// Hybrid Gather body (-D 3) for a world that one LSA team covers (one node, or a
+// scale-up domain spanning nodes), the AllGather body with one destination:
 //   chunkBytes <= sdmaThreshold: direct LSA store into root (all CTAs).
 //   chunkBytes >  sdmaThreshold: one GIN put to root from the thread the AllGather
 //     peer stripe assigns to root. Only CTA (root % gridDim.x) on root waits, for
@@ -434,7 +446,7 @@ testResult_t GatherRunColl(void* sendbuff, size_t sendoffset, void* recvbuff, si
         if (count == 0) return testSuccess;
         const ncclDevComm* devComm = (const ncclDevComm*)comm;
         const GatherD3Opts opts = GatherResolveOpts();
-        const size_t sdmaThreshold = ginSdmaResolveSdmaThreshold<GatherSdmaColl>();
+        const size_t sdmaThreshold = GatherSdmaThreshold();
         const size_t chunkBytes = gin_sdma_allgather::chunkBytes(count, (size_t)wordSize(type));
         const int gridCtas =
             gin_sdma_allgather::gatherUsesLLTier(chunkBytes, opts.llMaxBytes, opts.ll.nSlots, devComm->nRanks)
@@ -460,7 +472,7 @@ testResult_t GatherGetDeviceImplInfo(int /*deviceImpl*/, size_t count, ncclDataT
     int nRanks, int /*lsaSize*/, char* algoOut, char* protoOut) {
   snprintf(algoOut, 16, "%s", "T-DIRECT");
   const GatherD3Opts opts = GatherResolveOpts();
-  const size_t sdmaThreshold = ginSdmaResolveSdmaThreshold<GatherSdmaColl>();
+  const size_t sdmaThreshold = GatherSdmaThreshold();
   const size_t chunkBytes = gin_sdma_allgather::chunkBytes(count, (size_t)wordSize(type));
   const char* tier = gin_sdma_allgather::gatherUsesLLTier(chunkBytes, opts.llMaxBytes, opts.ll.nSlots, nRanks) ? "LL"
                      : gin_sdma_allgather::chunkUsesLsaTier(chunkBytes, sdmaThreshold)                       ? "LSA"

@@ -14,9 +14,13 @@
 #include "gin_sdma_allgather_policy.h"
 
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,29,0)
+// With ginEnabled, a communicator without GIN is accepted: *ginEnabled is set to false
+// and only the LSA barriers are requested, so the caller must not use its GIN tier.
 static inline testResult_t ginSdmaAllGatherDevCommRequirements(int deviceImpl, ncclDevCommRequirements* reqs,
-                                                               ncclComm_t comm, const char* kernelName) {
+                                                               ncclComm_t comm, const char* kernelName,
+                                                               bool* ginEnabled = nullptr) {
   if (!reqs || !comm) return testInternalError;
+  if (ginEnabled) *ginEnabled = false;
 
   ncclCommProperties_t commProperties = NCCL_COMM_PROPERTIES_INITIALIZER;
   if (ncclCommQueryProperties(comm, &commProperties) != ncclSuccess) {
@@ -32,6 +36,10 @@ static inline testResult_t ginSdmaAllGatherDevCommRequirements(int deviceImpl, n
   switch(deviceImpl) {
     case 3: {
       if (commProperties.ginType == NCCL_GIN_TYPE_NONE) {
+        if (ginEnabled) {
+          reqs->lsaBarrierCount = gin_sdma_allgather::allGatherPoolCtas(deviceCtaCount);
+          return testSuccess;
+        }
         fprintf(stderr, "This test requires GIN support, but GIN support is not enabled for this communicator.\n");
         return testInvalidUsage;
       }
@@ -51,6 +59,7 @@ static inline testResult_t ginSdmaAllGatherDevCommRequirements(int deviceImpl, n
 #else
       reqs->ginForceEnable = true;
 #endif
+      if (ginEnabled) *ginEnabled = true;
       return testSuccess;
     }
     default:
