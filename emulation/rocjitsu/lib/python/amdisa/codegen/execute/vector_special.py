@@ -2112,7 +2112,8 @@ def gen_vector_cvt_scale(
         lut = 'fp8_e4m3_ocp_lut' if in_fmt == 'fp8' else 'bf8_e5m2_ocp_lut'
         L += [
             f'  if (const auto scale = {src[1]}.const_value(); scale &&',
-            '      uint8_t(*scale >> ((inst_.opsel & 3u) * 8u)) == 127u && exec &&',
+            '      uint8_t(*scale >> (selection.byte(0) * 8u)) == 127u &&',
+            '      uint8_t(*scale >> (selection.byte(16) * 8u)) == 127u && exec &&',
             '      !wf.cu().observes_register_access()) {',
         ]
         _scale_read_vgpr_base(L, 'dst_base', dst[0])
