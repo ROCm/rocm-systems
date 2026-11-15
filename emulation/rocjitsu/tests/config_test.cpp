@@ -8586,6 +8586,9 @@ TEST(CApiTest, ClockedDispatchStaysEventDriven) {
   EXPECT_EQ(handle->soc->dispatch_threads(), 1u);
   EXPECT_EQ(cp->dispatch_threads(), 1u);
 
+  for (const auto &link : handle->engine->topology().links())
+    EXPECT_EQ(link->exec_mode(), simdojo::ExecMode::CLOCKED) << link->src()->name();
+
   using namespace rocjitsu::amdhsa;
   kernel_descriptor_t kd{};
   kd.kernel_code_entry_byte_offset = sizeof(kernel_descriptor_t);
