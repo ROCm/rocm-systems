@@ -6,6 +6,7 @@ import argparse
 import os
 import shutil
 from abc import abstractmethod
+from collections import OrderedDict
 from pathlib import Path
 from typing import (
     Any,
@@ -46,6 +47,8 @@ from utils.utils_common import (
     get_arch_alias_to_panel_id,
     is_only_pc_sampling,
     is_tcc_channel_counter,
+    load_panel_configs,
+    metric_tables_by_id,
     parse_sets_yaml,
     selects_roofline,
     validate_roofline_csv,
@@ -58,10 +61,10 @@ from utils.utils_counter_defs import (
 from vendored import yaml
 
 
-class AnalysisConfigMetric(NamedTuple):
-    """One metric of an analysis config metric_table."""
+class PanelConfigMetric(NamedTuple):
+    """One metric of a panel config metric_table."""
 
-    stem_id: str  # file id, e.g. "0200" from "0200_system_speed_of_light.yaml"
+    panel_id: int  # e.g. 200 for System Speed-of-Light
     table_id: int
     metric_idx: int  # zero-based position of the metric in its table
     metric_name: str
@@ -76,6 +79,8 @@ class OmniSoC_Base:
         console_debug("[omnisoc init]")
         self.__args = args
         self.__arch: Optional[str] = None
+        # The panel configs profile collects counters for, read on first use
+        self.__panel_configs: Optional[Dict[int, Dict[str, Any]]] = None
         self._mspec = mspec
         # Per IP block, max number of simultaneous counters. GFX IP Blocks.
         self.__perfmon_config: Dict[str, int] = {}
@@ -94,6 +99,7 @@ class OmniSoC_Base:
 
     def set_arch(self, arch: str) -> None:
         self.__arch = arch
+        self.__panel_configs = None
 
     def get_arch(self) -> Optional[str]:
         return self.__arch
@@ -231,8 +237,7 @@ class OmniSoC_Base:
     def _append_expressions_for_filter_token(
         self,
         raw_token: str,
-        config_filename_dict: Dict[str, str],
-        config_root_dir: str,
+        panel_configs: "OrderedDict[int, Dict[str, Any]]",
         expressions: List[str],
     ) -> None:
         block_id = raw_token
@@ -248,29 +253,21 @@ class OmniSoC_Base:
 
         file_id, panel_id, metric_id = convert_metric_id_to_panel_info(block_id)
 
-        if file_id not in config_filename_dict:
-            console_warning(
-                f"Skipping {block_id}: file id {file_id} not found in {config_root_dir}"
-            )
+        if int(file_id) not in panel_configs:
+            console_warning(f"Skipping {block_id}: panel {file_id} not found")
             return
 
-        with open(config_filename_dict[file_id], encoding="utf-8") as stream:
-            file_config = yaml.safe_load(stream)
         if panel_id is None:
-            for section in file_config["Panel Config"]["data source"]:
+            for section in panel_configs[int(file_id)]["data source"]:
                 if "metric_table" in section:
                     expressions.extend(_table_expressions(section["metric_table"]))
             return
 
-        panel_dict = {
-            section["metric_table"]["id"]: section["metric_table"]
-            for section in file_config["Panel Config"]["data source"]
-            if "metric_table" in section
-        }
+        panel_dict = metric_tables_by_id(panel_configs)
         if panel_id not in panel_dict:
             console_warning(
                 f"Skipping {block_id}: metric table {panel_id} not found in "
-                f"{config_filename_dict[file_id]}"
+                f"panel {file_id}"
             )
             return
         if metric_id is None:
@@ -298,14 +295,7 @@ class OmniSoC_Base:
         from the metric expressions of those sections.
         """
         args = self.get_args()
-
-        # File id dict
-        config_arch = canonical_config_arch(self.__arch) or self.__arch
-        config_root_dir = str(config.analysis_configs_dir / config_arch)
-        config_filename_dict = {
-            filename.name.split("_")[0]: str(filename)
-            for filename in Path(config_root_dir).glob("*.yaml")
-        }
+        panel_configs = self._profile_panel_configs()
 
         filter_blocks = args.filter_blocks
         if args.set_selected and self.__arch:
@@ -323,12 +313,12 @@ class OmniSoC_Base:
         expressions: List[str] = []
         if not filter_blocks:
             # Select all sections by default; block 30 only with --membw-analysis
-            for metric in self._iter_arch_analysis_yaml_metrics():
+            for metric in self._iter_profile_metrics():
                 expressions.extend(metric.expressions)
 
         for block_id in filter_blocks:
             self._append_expressions_for_filter_token(
-                block_id, config_filename_dict, config_root_dir, expressions
+                block_id, panel_configs, expressions
             )
 
         counters, _ = extract_counters_and_variables(
@@ -380,10 +370,7 @@ class OmniSoC_Base:
             counters,
             metric_counter_sets(
                 [
-                    *(
-                        metric.expressions
-                        for metric in self._iter_arch_analysis_yaml_metrics()
-                    ),
+                    *(metric.expressions for metric in self._iter_profile_metrics()),
                     # Each collectable gets a pass that holds all its counters
                     *([formula] for formula in collectables.values()),
                 ],
@@ -394,22 +381,28 @@ class OmniSoC_Base:
             gpu_arch,
         )
 
-    def _iter_arch_analysis_yaml_metrics(self) -> Iterator[AnalysisConfigMetric]:
-        """Iterate the metrics of this arch's analysis configs.
-
-        Block 30 is skipped unless --membw-analysis is set. See
-        iter_analysis_config_metrics for what each item holds.
-        """
-        args = self.get_args()
+    def _profile_panel_configs(self) -> "OrderedDict[int, Dict[str, Any]]":
+        """Return the panel configs whose metrics profile collects counters for."""
         arch = self.__arch
         if not arch:
-            return
-        exclude: Set[str] = set()
-        if not args.membw_analysis:
-            exclude.add(str(MEMBW_ANALYSIS_PANEL_ID))
-        yield from iter_analysis_config_metrics(
-            config.analysis_configs_dir / (canonical_config_arch(arch) or arch), exclude
-        )
+            return OrderedDict()
+        if self.__panel_configs is None:
+            self.__panel_configs = load_panel_configs([
+                str(config.analysis_configs_dir / (canonical_config_arch(arch) or arch))
+            ])
+        return self.__panel_configs
+
+    def _iter_profile_metrics(self) -> Iterator[PanelConfigMetric]:
+        """Iterate the metrics of the profile panel configs that profile collects by
+        default.
+
+        Block 30 is skipped unless --membw-analysis is set. See
+        iter_panel_config_metrics for what each item holds.
+        """
+        exclude: Set[int] = set()
+        if not self.get_args().membw_analysis:
+            exclude.add(MEMBW_ANALYSIS_PANEL_ID)
+        yield from iter_panel_config_metrics(self._profile_panel_configs(), exclude)
 
     def get_rocprof_supported_counters(self) -> Set[str]:
         args = self.get_args()
@@ -602,23 +595,31 @@ def _table_expressions(table: Dict[str, Any]) -> List[str]:
 
 def iter_analysis_config_metrics(
     config_root: Path, exclude_file_ids: Set[str]
-) -> Iterator[AnalysisConfigMetric]:
+) -> Iterator[PanelConfigMetric]:
     """Iterate the metrics of the analysis config files in config_root, skipping files
-    whose id is in exclude_file_ids."""
-    for config_path in sorted(config_root.glob("*.yaml")):
-        stem_id = config_path.name.split("_")[0]
-        if stem_id in exclude_file_ids:
+    whose id (e.g. "3000") is in exclude_file_ids."""
+    yield from iter_panel_config_metrics(
+        load_panel_configs([str(config_root)]),
+        {int(file_id) for file_id in exclude_file_ids},
+    )
+
+
+def iter_panel_config_metrics(
+    panel_configs: "OrderedDict[int, Dict[str, Any]]", exclude_panel_ids: Set[int]
+) -> Iterator[PanelConfigMetric]:
+    """Iterate the metrics of panel_configs, skipping the panels in
+    exclude_panel_ids."""
+    for panel_id, panel_config in panel_configs.items():
+        if panel_id in exclude_panel_ids:
             continue
-        with open(config_path, encoding="utf-8") as stream:
-            panel_config = yaml.safe_load(stream)["Panel Config"]
         for section in panel_config["data source"]:
             table = section.get("metric_table")
             if table is None:
                 continue
             metrics = table["metric"] or {}
             for idx, (metric_name, metric) in enumerate(metrics.items()):
-                yield AnalysisConfigMetric(
-                    stem_id,
+                yield PanelConfigMetric(
+                    panel_id,
                     table["id"],
                     idx,
                     metric_name,

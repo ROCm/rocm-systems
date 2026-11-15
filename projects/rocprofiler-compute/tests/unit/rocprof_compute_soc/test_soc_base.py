@@ -18,8 +18,8 @@ import pytest
 
 import config
 from rocprof_compute_soc.soc_base import (
-    AnalysisConfigMetric,
     OmniSoC_Base,
+    PanelConfigMetric,
 )
 from utils.counters.allocator import reads_one_pass
 from utils.counters.counter_file import flat_counters_in_perfmon_file
@@ -217,10 +217,10 @@ def patch_cp_util_metric(soc: OmniSoC_Base) -> Any:
     """Make CP Utilization the only metric in soc's analysis configs."""
     return patch.object(
         soc,
-        "_iter_arch_analysis_yaml_metrics",
+        "_iter_profile_metrics",
         return_value=iter([
-            AnalysisConfigMetric(
-                "1700",
+            PanelConfigMetric(
+                1700,
                 1701,
                 1,
                 "CP Utilization",
@@ -395,7 +395,7 @@ def test_filter_token_unknown_alias_exits_instead_of_keyerror(monkeypatch):
     )
     with pytest.raises(SystemExit):
         OmniSoC_Base._append_expressions_for_filter_token(
-            _fake_soc_for_filter_token(), "SQ", {}, "/cfg", []
+            _fake_soc_for_filter_token(), "SQ", {}, []
         )
 
 
@@ -405,10 +405,10 @@ def test_filter_token_known_alias_resolves_without_crash(monkeypatch):
         lambda arch: {"lds": "10"},
     )
     expressions: list[str] = []
-    # Alias resolves to block id 10 -> file id "1000", absent from the
-    # empty config dict, so the token is skipped with a warning, not a crash.
+    # Alias resolves to block id 10 -> panel 1000, absent from the empty
+    # panel configs, so the token is skipped with a warning, not a crash.
     OmniSoC_Base._append_expressions_for_filter_token(
-        _fake_soc_for_filter_token(), "lds", {}, "/cfg", expressions
+        _fake_soc_for_filter_token(), "lds", {}, expressions
     )
     assert expressions == []
 
@@ -567,7 +567,7 @@ def test_every_metric_reads_one_pass(gpu_arch: str) -> None:
     collectables = Collectables.of_arch(gpu_arch)
     spanning = [
         f"{metric.table_id}.{metric.metric_idx} {metric.metric_name}"
-        for metric in soc._iter_arch_analysis_yaml_metrics()
+        for metric in soc._iter_profile_metrics()
         if not reads_one_pass(metric.expressions, collectables, passes)
     ]
     assert spanning == [], (
