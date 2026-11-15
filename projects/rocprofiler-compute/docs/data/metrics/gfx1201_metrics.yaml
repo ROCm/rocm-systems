@@ -1,12 +1,36 @@
 System Speed-of-Light:
-  VALU Issue Rate:
-    plain: Billions of VALU instruction issues per second. The counter includes floating-point and integer instructions and does not count FLOPs or active lanes.
-    rst: Billions of VALU instruction issues per second. The counter includes floating-point and integer instructions and does not count FLOPs or active lanes.
-    unit: GInstructions/s
+  Theoretical LDS Bandwidth:
+    plain: Indicates the maximum amount of bytes that could have been loaded from, stored to, or atomically updated in the LDS divided by total duration. Does not take into account the execution mask of the wavefront when the instruction was executed.
+    rst: Indicates the maximum amount of bytes that could have been loaded from, stored to, or atomically updated in the LDS divided by total duration. Does not take into account the execution mask of the wavefront when the instruction was executed.
+    unit: GB/s
+  GL0 Cache Bandwidth:
+    plain: The number of bytes requested from the GL0 vector cache (TCP Cache), divided by total duration. Each TCP_REQ cache-line request counts as 128 bytes, so this is an upper bound.
+    rst: The number of bytes requested from the GL0 vector cache (TCP Cache), divided by total duration. Each TCP_REQ cache-line request counts as 128 bytes, so this is an upper bound.
+    unit: GB/s
+  Memory Read Bandwidth:
+    plain: The number of bytes the L2 cache (GL2C) reads over the EA for requests destined for VRAM, divided by total duration. The counter counts 32-byte granules. Infinity Cache hits are included, so this can exceed the VRAM bandwidth peak.
+    rst: The number of bytes the L2 cache (GL2C) reads over the EA for requests destined for VRAM, divided by total duration. The counter counts 32-byte granules. Infinity Cache hits are included, so this can exceed the VRAM bandwidth peak.
+    unit: GB/s
+  Memory Write Bandwidth:
+    plain: The number of bytes the L2 cache (GL2C) writes over the EA for requests destined for VRAM, divided by total duration. The counter counts 32-byte granules. Infinity Cache hits are included.
+    rst: The number of bytes the L2 cache (GL2C) writes over the EA for requests destined for VRAM, divided by total duration. The counter counts 32-byte granules. Infinity Cache hits are included.
+    unit: GB/s
+  WGP Utilization:
+    plain: Percentage of WGP clock cycles at least one wavefront is active.
+    rst: Percentage of WGP clock cycles at least one wavefront is active.
+    unit: Percent
+  VALU FLOPs:
+    plain: VALU issues per second, excluding WMMA, at one FLOP per lane. gfx120x compute is wave32 by default, so that is 32 per instruction. SQ_INSTS_VALU counts every VALU issue, including integer, move, and convert, and an FMA counts as one issue while the FP32 roof counts it as two FLOPs. A pure FMA kernel therefore reads low. A tiled FP32 GEMM also issues address arithmetic, so this metric can read about twice the true FLOP count. SQ_WMMA_VALU_INSTS is per vec32, the same unit as SQ_INSTS_VALU for gfx120x compute.
+    rst: VALU issues per second, excluding WMMA, at one FLOP per lane. gfx120x compute is wave32 by default, so that is 32 per instruction. SQ_INSTS_VALU counts every VALU issue, including integer, move, and convert, and an FMA counts as one issue while the FP32 roof counts it as two FLOPs. A pure FMA kernel therefore reads low. A tiled FP32 GEMM also issues address arithmetic, so this metric can read about twice the true FLOP count. SQ_WMMA_VALU_INSTS is per vec32, the same unit as SQ_INSTS_VALU for gfx120x compute.
+    unit: GFLOP/s
   WMMA FLOPs (F16->F32 16x16x16):
     plain: Achieved FP16 WMMA throughput.
     rst: Achieved FP16 WMMA throughput.
     unit: GFLOP/s
+  VALU Issue Rate:
+    plain: Billions of VALU instruction issues per second. The counter includes floating-point and integer instructions and does not count FLOPs or active lanes.
+    rst: Billions of VALU instruction issues per second. The counter includes floating-point and integer instructions and does not count FLOPs or active lanes.
+    unit: GInstructions/s
   FP64 VALU Issue Rate:
     plain: Billions of double-precision VALU instruction issues per second. This is an instruction rate, without accounting for FLOPs per instruction or active lanes.
     rst: Billions of double-precision VALU instruction issues per second. This is an instruction rate, without accounting for FLOPs per instruction or active lanes.
@@ -15,33 +39,37 @@ System Speed-of-Light:
     plain: Instructions executed per cycle, measuring overall instruction throughput efficiency. Higher IPC indicates better utilization of the shader pipeline. Low IPC may indicate stalls due to memory latency, register dependencies, or insufficient wavefront occupancy to hide latencies.
     rst: Instructions executed per cycle, measuring overall instruction throughput efficiency. Higher IPC indicates better utilization of the shader pipeline. Low IPC may indicate stalls due to memory latency, register dependencies, or insufficient wavefront occupancy to hide latencies.
     unit: Instructions per Cycle
-  Wavefront Occupancy:
-    plain: Average number of wavefronts resident on the GPU during kernel execution. Higher occupancy provides more opportunities to hide memory latency through wavefront switching. However, maximum occupancy is not always optimal. Excessive register or LDS usage per wavefront may limit occupancy.
-    rst: Average number of wavefronts resident on the GPU during kernel execution. Higher occupancy provides more opportunities to hide memory latency through wavefront switching. However, maximum occupancy is not always optimal. Excessive register or LDS usage per wavefront may limit occupancy.
-    unit: Wavefronts
-  GL2 Cache Hit Rate:
-    plain: Percentage of L2 lookups that hit.
-    rst: Percentage of L2 lookups that hit.
+  LDS Utilization:
+    plain: Percentage of the LDS cycle budget across all CUs spent servicing indexed (non-direct, non-interpolation) accesses, measured over GPU-active cycles. Because two CUs share a workgroup processor's LDS, a saturated LDS reads well below 100% on this architecture.
+    rst: Percentage of the LDS cycle budget across all CUs spent servicing indexed (non-direct, non-interpolation) accesses, measured over GPU-active cycles. Because two CUs share a workgroup processor's LDS, a saturated LDS reads well below 100% on this architecture.
     unit: Percent
   LDS Bank Conflicts:
     plain: Cycles LDS stalled on conflicting bank addresses, averaged per dispatch.
     rst: Cycles LDS stalled on conflicting bank addresses, averaged per dispatch.
     unit: Conflicts
-  GL0 Hit Rate:
-    plain: Percentage of GL0 cache requests serviced from cache without accessing GL1. Higher hit rates indicate better data locality and lower memory access latency. Low hit rates may indicate working sets exceeding GL0 capacity or poor access patterns.
-    rst: Percentage of GL0 cache requests serviced from cache without accessing GL1. Higher hit rates indicate better data locality and lower memory access latency. Low hit rates may indicate working sets exceeding GL0 capacity or poor access patterns.
-    unit: Percent
-  sL1D Hit Rate:
-    plain: Percentage of scalar data cache accesses that hit. High hit rates indicate efficient reuse of constant and uniform data. Low rates may suggest excessive unique constant data or poor temporal locality.
-    rst: Percentage of scalar data cache accesses that hit. High hit rates indicate efficient reuse of constant and uniform data. Low rates may suggest excessive unique constant data or poor temporal locality.
+  GL2 Cache Hit Rate:
+    plain: Percentage of L2 lookups that hit.
+    rst: Percentage of L2 lookups that hit.
     unit: Percent
   sL1D Load Bandwidth:
     plain: The number of bytes loaded by scalar memory instructions, divided by total duration. The number of bytes is the number of dwords each instruction loads multiplied by four; bounds-check reductions are ignored.
     rst: The number of bytes loaded by scalar memory instructions, divided by total duration. The number of bytes is the number of dwords each instruction loads multiplied by four; bounds-check reductions are ignored.
     unit: GB/s
+  sL1D Hit Rate:
+    plain: Percentage of scalar data cache accesses that hit. High hit rates indicate efficient reuse of constant and uniform data. Low rates may suggest excessive unique constant data or poor temporal locality.
+    rst: Percentage of scalar data cache accesses that hit. High hit rates indicate efficient reuse of constant and uniform data. Low rates may suggest excessive unique constant data or poor temporal locality.
+    unit: Percent
   L1I Hit Rate:
     plain: Percentage of instruction cache accesses that hit. High hit rates are essential for sustained instruction throughput. Low rates may indicate large kernels or divergent branches causing instruction cache thrashing.
     rst: Percentage of instruction cache accesses that hit. High hit rates are essential for sustained instruction throughput. Low rates may indicate large kernels or divergent branches causing instruction cache thrashing.
+    unit: Percent
+  Wavefront Occupancy:
+    plain: Average number of wavefronts resident on the GPU during kernel execution. Higher occupancy provides more opportunities to hide memory latency through wavefront switching. However, maximum occupancy is not always optimal. Excessive register or LDS usage per wavefront may limit occupancy.
+    rst: Average number of wavefronts resident on the GPU during kernel execution. Higher occupancy provides more opportunities to hide memory latency through wavefront switching. However, maximum occupancy is not always optimal. Excessive register or LDS usage per wavefront may limit occupancy.
+    unit: Wavefronts
+  GL0 Hit Rate:
+    plain: Percentage of GL0 cache requests serviced from cache without accessing GL1. Higher hit rates indicate better data locality and lower memory access latency. Low hit rates may indicate working sets exceeding GL0 capacity or poor access patterns.
+    rst: Percentage of GL0 cache requests serviced from cache without accessing GL1. Higher hit rates indicate better data locality and lower memory access latency. Low hit rates may indicate working sets exceeding GL0 capacity or poor access patterns.
     unit: Percent
 Memory chart - Instruction Cache:
   L1I Requests:
