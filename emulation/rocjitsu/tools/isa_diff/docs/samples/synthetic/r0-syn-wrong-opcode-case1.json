@@ -921,9 +921,103 @@
     "tool": "rj_isa_diff",
     "tool_version": "0.1.0-p0",
     "schema_version": "rj_isa_diff.v1",
-    "rocjitsu_revision": "03c6dd8633b6ac5eff7be87adcd0559cc34bb212",
+    "rocjitsu_revision": "0cd52dcbdb47b2670f2bf8024c819e986d285fff",
     "rocjitsu_version": "0.3.0",
     "semantics": "RocJITsu ComputeUnitCore::execute_instruction, gfx950 (CDNA4) wave64, default arithmetic semantics",
     "compiler": "13.4.0"
+  },
+  "artifacts": {
+    "old": {
+      "label": "co/artifacts/old.hsaco",
+      "kind": "code_object",
+      "sha256": "04151ddf40afa0a4763b7e2bdfdf3ce5faa1e92c7a176bf1b93a16e8c40be6a5",
+      "target": "gfx950",
+      "kernel": "k",
+      "text_vaddr": "0x1300",
+      "kernel_begin": "0x0",
+      "kernel_end": "0x24",
+      "kernel_bytes": 36,
+      "reachable_insts": 8,
+      "metadata_sha256": "5df6e0e2761359d30a8275058e299fcc0381534545f55cf43e41983f5d4c9456",
+      "text_relocations": 0,
+      "metadata_parsed": false
+    },
+    "new": {
+      "label": "co/artifacts/new.hsaco",
+      "kind": "code_object",
+      "sha256": "dcfae85d077887c0d0863121895d134f827b64150299ad1464a6eec58e80655e",
+      "target": "gfx950",
+      "kernel": "k",
+      "text_vaddr": "0x1300",
+      "kernel_begin": "0x0",
+      "kernel_end": "0x28",
+      "kernel_bytes": 40,
+      "reachable_insts": 9,
+      "metadata_sha256": "5df6e0e2761359d30a8275058e299fcc0381534545f55cf43e41983f5d4c9456",
+      "text_relocations": 0,
+      "metadata_parsed": false
+    }
+  },
+  "provenance": {
+    "old": {
+      "input": "co_old.s",
+      "input_sha256": "39cfc4389f8e36483c7b368d6cd64d256d9125ff2a554813ed65c8bbfecc447c",
+      "input_kind": "s",
+      "triple": "amdgcn-amd-amdhsa",
+      "mcpu": "gfx950",
+      "common_args": [],
+      "side_args": [],
+      "commands": [
+        {
+          "argv": ["/opt/rocm/llvm/bin/llvm-mc", "-triple=amdgcn-amd-amdhsa", "-mcpu=gfx950", "-filetype=obj", "-o", "co/artifacts/old.o", "co_old.s"],
+          "exit_code": 0,
+          "elapsed_ns": 2470620
+        },
+        {
+          "argv": ["/opt/rocm/llvm/bin/ld.lld", "-shared", "--emit-relocs", "-o", "co/artifacts/old.hsaco", "co/artifacts/old.o"],
+          "exit_code": 0,
+          "elapsed_ns": 6643547
+        }
+      ],
+      "compile_ns": 9114167,
+      "executed_object": "linked_code_object",
+      "note": "executed bytes are the code object linked from the re-assembled source, decoded by RocJITsu; they are not necessarily an original binary emission",
+      "toolchain": {
+        "bin_dir": "/opt/rocm/llvm/bin",
+        "version": "AMD LLVM version 22.0.0git",
+        "revision": "AMD clang version 22.0.0git (https://github.com/RadeonOpenCompute/llvm-project roc-7.2.3 26084 f58b06dce1f9c15707c5f808fd002e18c2accf7e)"
+      }
+    },
+    "new": {
+      "input": "co_new.s",
+      "input_sha256": "9c9774a3f1e74aefa014495ccfba6b0fcb891d2f3852161e18328282d65ad4f4",
+      "input_kind": "s",
+      "triple": "amdgcn-amd-amdhsa",
+      "mcpu": "gfx950",
+      "common_args": [],
+      "side_args": [],
+      "commands": [
+        {
+          "argv": ["/opt/rocm/llvm/bin/llvm-mc", "-triple=amdgcn-amd-amdhsa", "-mcpu=gfx950", "-filetype=obj", "-o", "co/artifacts/new.o", "co_new.s"],
+          "exit_code": 0,
+          "elapsed_ns": 2783230
+        },
+        {
+          "argv": ["/opt/rocm/llvm/bin/ld.lld", "-shared", "--emit-relocs", "-o", "co/artifacts/new.hsaco", "co/artifacts/new.o"],
+          "exit_code": 0,
+          "elapsed_ns": 5831357
+        }
+      ],
+      "compile_ns": 8614587,
+      "executed_object": "linked_code_object",
+      "note": "executed bytes are the code object linked from the re-assembled source, decoded by RocJITsu; they are not necessarily an original binary emission",
+      "toolchain": {
+        "bin_dir": "/opt/rocm/llvm/bin",
+        "version": "AMD LLVM version 22.0.0git",
+        "revision": "AMD clang version 22.0.0git (https://github.com/RadeonOpenCompute/llvm-project roc-7.2.3 26084 f58b06dce1f9c15707c5f808fd002e18c2accf7e)"
+      }
+    },
+    "same_input": false,
+    "same_toolchain": true
   }
 }

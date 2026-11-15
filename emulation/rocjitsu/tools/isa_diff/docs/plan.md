@@ -19,8 +19,9 @@ inputs. Each case runs *only* the region, through RocJITsu's existing `execute_i
 
 **Scope split (user decision, 2026-11-15):** the LLVM side is a **separate task/plugin**. That
 covers ingesting `.s` through LLVM MC and producing real old/new LLVM pairs from controlled
-compiler switches. Here, artifacts are AMDGPU code objects or raw instruction words, and the
-frontend interface (`ArtifactLoader`) is the plugin seam.
+compiler switches. In phases A-C, artifacts are AMDGPU code objects or raw instruction words.
+The plugin was built afterwards as its own library (`llvm/`, Phase D1); the core still does
+not link or run LLVM.
 
 **Tech stack:** C++20, CMake/Ninja, GoogleTest, RocJITsu object libraries (`RJ_TOOL_OBJECT_LIBS`).
 Builds and tests run on a remote build host, not on the authoring workstation.
@@ -236,7 +237,23 @@ Builds and tests run on a remote build host, not on the authoring workstation.
   cost, the executed instruction count against the kernel size, and cases per second.
 - `findings.md` and a sample `results.json` go under `tools/isa_diff/docs/`.
 
-## Deferred (separate tasks)
-- **LLVM plugin:** a `.s` frontend through LLVM MC (an `ArtifactLoader` implementation), and producing
-  real old/new pairs from controlled optimisation switches, plus the end-to-end report on them.
-- P1: scalar branches, multi-exit regions, loops, SemaAST/SMT proof. P2: VALU, memory, pending effects, reachability.
+## Phase D: the rest of the handoff (2026-11-15, second goal)
+
+Each task kept the earlier conventions: build and test on the remote host, every claim backed
+by a test, nothing upgraded beyond what is checked.
+
+| task | content | tests |
+|---|---|---|
+| D1 LLVM plugin (`llvm/`) | `.s` via `llvm-mc` + `ld.lld -shared --emit-relocs`; `.ll` via `llc`; provenance (commands, input hash, toolchain); `llvm-pair` | `rj_isa_diff_llvm_tests`: toolchain checks, assembly, the real pairs (`-combiner-disabled` pass, `-enable-misched=false` SMEM rejection), target-changing side args rejected |
+| D2 derived constraints | known bits from the common prefix (`common_prefix_analysis`); unrestricted re-run reported next to the verdict | `ConstraintDependentRewrite...`, `DerivedConstraintsComeOnlyFromCommonCode` |
+| D3 manual region and register map | `--manual-region`, `--map`; contract `register_map`, permutation completion, ASSUMED only | `IsaDiffManual.*` (4 tests) |
+| D4 relocations and metadata | `.text` relocations per instruction, relocated instructions rejected, relocation diffs at matched instructions; per-kernel metadata fields via `amdhsa::MetadataDocument` | `RelocationsAreKeptComparedAndNeverExecuted`, `KernelMetadataIsComparedFieldByField`, `MetadataFieldsAreComparedPerKernel` |
+| D5 caches | analysis and result layers, build fingerprint, replayable cached bundles | `IsaDiffCache.*` |
+| D6 cost split and stop rules | compile/parse/decode-CFG/dataflow/align/plan timing; `--max-analysis-ms` | `AnalysisTimeLimitLeavesContractsUnresolved` |
+| D7 explicit diagnostic path | `--diagnostic-entry-prefix` regions, reported apart from the verdict | `EntryPrefixRegionsRunOnlyWhenRequestedAndStayOutOfTheVerdict` |
+| D8 schemas and samples | `docs/schema/rj_isa_diff.v1.schema.json`, `validate_outputs.py` (ctest `isa_diff.schema_and_cli`), `docs/samples/regen.sh` | the ctest drives the CLI and validates every output |
+
+## Not in P0 (design retained)
+P1 (scalar branches, multi-exit regions, loops, reachability witnesses, SemaAST/SMT proof) and
+P2 (VALU, memory, pending-effect execution, learned input policies) are designed in
+`p1_p2_design.md`. Nothing there is implemented.

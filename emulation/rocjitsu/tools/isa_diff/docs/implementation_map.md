@@ -15,7 +15,8 @@ real gfx950 encodings, not inferred from comments.
 | build host | Ubuntu 22.04, 32 cores (remote build host) |
 | compiler | g++-13 (gcc-11 lacks `<format>`) |
 | configure | `CC=gcc-13 CXX=g++-13 cmake -G Ninja -B build -DCMAKE_BUILD_TYPE=Release -DROCJITSU_ENABLE_VFIO=OFF -DROCJITSU_ENABLE_PERFSIM_PLUGIN=OFF -DROCJITSU_HOST_CPU_BASELINE=x86-64-v3 ` plus an include-path shim when the system libdrm headers predate the bundled ones |
-| LLVM used only to author fixtures | ROCm 7.2.3 `llvm-mc`/`clang`/`ld.lld`, AMD LLVM 22.0.0git |
+| LLVM for fixtures, the plugin and the real pairs | ROCm 7.2.3 `/opt/rocm/llvm/bin`: `AMD LLVM version 22.0.0git`, `roc-7.2.3 26084 f58b06dce1f9c15707c5f808fd002e18c2accf7e` |
+| other LLVM checked | upstream `llc` (LLVM 24, `684dade7d978`) on the build host: no diff against ROCm `llc` for the candidate kernels, so it was not used for the recorded pairs |
 
 Two targets on develop do not build in this environment, and neither has anything to do
 with this work. `hsa_init_test` fails to link because the installed ROCm HSA runtime lacks
@@ -57,6 +58,17 @@ and `ScalarSccTest.*:*Sop*:*Scalar*` passes 1162/1162 on the base.
 - `InstDefUse` (`code/analysis/def_use_chain.h`) reported **no special effects
   at all** on gfx950, not even SCC, for every SALU instruction probed. It is not used for
   specials. The tool builds its own effect summary (`effects.cpp`).
+- `Instruction::implicit_uses/implicit_defs` (`RegisterSet`, iterated with `for_each` as
+  `RegisterRef{cls, index, width}`) is *measured* as follows.
+  - `v_mov_b32`, `v_add_co_u32`, `s_mul_hi_u32`, `s_load_dword`, `s_store_dword` and
+    `s_waitcnt` report nothing.
+  - `global_store_dwordx2` reports its SGPR base pair (`s6`, `s7`) as implicit uses.
+  - Outside P0, the tool translates SGPR/EXEC/VCC/SCC/M0 entries into tracked locations
+    and ignores VGPR/AGPR. TTMP, FLAT_SCRATCH and PC remain unknown effects.
+  - Before this translation, every global store made all locations live, and the
+    renamed dead SALU temporaries of the real `-enable-misched=false` pair showed up as
+    observable mismatches.
+  - P0 instructions keep the strict rule: any hidden effect rejects them.
 - The `SALU` flag is also set on `s_nop`, `s_waitcnt`, `s_cbranch_*`, `s_getpc_b64`,
   and `s_endpgm`. P0 therefore uses an explicit mnemonic allowlist, *and* every operand
   must classify into a modelled location.
@@ -75,7 +87,10 @@ and `ScalarSccTest.*:*Sop*:*Scalar*` passes 1162/1162 on the base.
 | JSON | none in-tree (config uses schema-driven FlatBuffers) | Small tool-local reader/writer (`json.cpp`). Case files are hand-editable. |
 | SHA-256 | `util/sha256.h` | reused for artifact and contract hashes |
 | existing differential, snapshot or symbolic work | none: no region runner, no per-wave snapshot, no SMT. SemaAST is Python codegen only, and the VM checkpoint is whole-VM. `fuzz/execution` is a crash fuzzer. | new code |
-| assembler / LLVM MC | none in-tree | **Deferred to the separate LLVM plugin task** (see README) |
+| assembler / LLVM MC | none in-tree | The separate plugin library `llvm/` (`rj_isa_diff_llvm`) runs the external `llc`/`llvm-mc`/`ld.lld`/`llvm-objcopy` with `posix_spawn` and records provenance. The core does not link LLVM. |
+| relocations | none in the code-object reader (`AmdGpuCodeObject` exposes sections, not relocations) | `artifact.cpp` reads `SHT_REL`/`SHT_RELA` entries targeting `.text`: static `.rela.text` (`sh_info` = .text, kept by `ld.lld --emit-relocs`, `r_offset` a vaddr) and dynamic entries whose `r_offset` falls in `.text`. *Measured*: plain `ld.lld -shared` resolves `R_AMDGPU_GOTPCREL32_LO/HI` and leaves no trace in `.text`, while `--emit-relocs` keeps both entries at the literal offsets of `s_add_u32`/`s_addc_u32` after `s_getpc_b64`. |
+| AMDHSA metadata | `amdhsa::MetadataDocument::parse(image)` (`code/amdhsa_metadata.h`), `MetadataValue::{kind,map,array,field,text_field_is}` | Reused. The kernel entry is selected by `.name` or `.symbol == name + ".kd"` and flattened to key/value pairs; `.args[i]` records are grouped. String views borrow the image, so values are copied out before the image goes away. |
+| build fingerprint | none | `result_cache.cpp`: SHA-256 over `/proc/self/exe` and every executable file mapping in `/proc/self/maps`, via `util/sha256.h` |
 
 ## P0 supported subset
 
@@ -92,3 +107,25 @@ and `ScalarSccTest.*:*Sop*:*Scalar*` passes 1162/1162 on the base.
 - Frame state that P0 neither reads nor writes is fixed and recorded in the contract:
   MODE, STATUS except SCC, TRAPSTS, TTMP, scratch base, wait counters, trap state.
   Each one is checked for preservation after every case.
+- Instructions whose bytes are patched by a relocation are rejected in a region.
+
+## Handoff section to code
+
+| handoff | code |
+|---|---|
+| 3 contract, 3.1 mapping | `contract.{h,cpp}` (`RegionContract`, `register_map`, `map_forward/inverse`, `parse_register_map`) |
+| 3.2 observable union, preservation | `region_planner.cpp` `build_region` (live-in/live-out unions), `differential.cpp` `compare_pair` (effect model, frame, R_out) |
+| 3.3 constraints and sources | `contract.h` `Constraint::source`; `region_planner.cpp` known-bits (`analyse_known_bits`, `derive_constraints`); `case_io.cpp` unrestricted run |
+| 4 artifacts, relocations, metadata | `artifact.{h,cpp}`, `diff.cpp` (descriptor fields, metadata fields, relocations at matched instructions) |
+| 4.1 LLVM (plugin) | `llvm/llvm_frontend.{h,cpp}`, `rj_isa_diff_main.cpp` `load_side` / `llvm-pair` |
+| 5 alignment and classification | `diff.{h,cpp}` |
+| 5.1/5.2 regions, merge, context, composition | `region_planner.{h,cpp}` (steps 1-8), `case_io.cpp` (variants after a mismatch) |
+| 5.3 stop rules, diagnostic path | `PlanOptions::{max_region_insts,max_expansions,max_analysis_us,diagnostic_entry_prefix}` |
+| 6 state model, 6.1 pending effects | `location.*`, `effects.*`, `machine_state.*`, `kernel_model.cpp` `compute_pending` |
+| 7 execution | `region_runner.{h,cpp}` |
+| 8 inputs and learning hooks | `boundary.*`, `roles.*`, `input_policy.*`, `differential.cpp` (log, novelty) |
+| 9 result model | `differential.h`, `case_io.cpp` `aggregate_results` |
+| 10 counterexamples, replay, reduction | `differential.cpp` (`counterexample_json`, `reduce_mismatch`, `replay_counterexample`), `mutation.*` |
+| 11 caches and cost | `result_cache.{h,cpp}`, `region.cpp` `compute_prepared_key`, timing fields in `case_io.cpp` / `differential.cpp` |
+| 12 CLI and schemas | `rj_isa_diff_main.cpp`, `docs/schema/` |
+| 13 tests | `tests/isa_diff/isa_diff_test.cpp`, `tests/isa_diff/llvm_plugin_test.cpp`, `docs/schema/validate_outputs.py` |

@@ -456,3 +456,21 @@ s_lshl_b32 s4, s2, 2
 s_and_b32 s4, s4, 1
 s_store_dword s4, s[0:1], 0x0
 s_endpgm
+
+=== valutemp_old
+s_add_u32 s4, s2, s3
+s_mov_b32 s8, s4
+s_add_u32 s5, s8, 1
+v_mov_b32 v2, s5
+v_mov_b32 v0, 0
+global_store_dword v0, v2, s[6:7]
+s_endpgm
+
+=== valutemp_new
+s_add_u32 s4, s2, s3
+s_mov_b32 s10, s4
+s_add_u32 s5, s10, 1
+v_mov_b32 v2, s5
+v_mov_b32 v0, 0
+global_store_dword v0, v2, s[6:7]
+s_endpgm

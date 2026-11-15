@@ -21,6 +21,7 @@
 #include "json.h"
 #include "location.h"
 
+#include <array>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -62,6 +63,18 @@ struct RegionContract {
   LocSet wide_reads; ///< Input-generation feature: low halves of 64-bit operands.
   std::vector<Constraint> constraints;
   std::string exit_mapping = "single fall-through exit after the last region instruction";
+  /// Hand-written register correspondence (handoff 3.1), old location -> new location,
+  /// at the region entry and at its exit: after a register-allocation change the two can
+  /// differ (an input in s[4:5] vs s[8:9], the result in s4 on both sides). Empty means
+  /// identity. entry_equal/canary/observable use old naming; the new side receives inputs
+  /// at entry_map(l) and is compared at exit_map(l). Never upgraded beyond ASSUMED.
+  std::vector<std::pair<unsigned, unsigned>> entry_map, exit_map;
+  [[nodiscard]] bool mapped() const { return !entry_map.empty() || !exit_map.empty(); }
+  /// Permutations (forward old->new, inverse new->old) completed from the maps.
+  [[nodiscard]] std::array<unsigned, kNumLocs> entry_forward() const;
+  [[nodiscard]] std::array<unsigned, kNumLocs> entry_inverse() const;
+  [[nodiscard]] std::array<unsigned, kNumLocs> exit_forward() const;
+  [[nodiscard]] std::array<unsigned, kNumLocs> exit_inverse() const;
   /// Memory operations outstanding at the cutpoint (handoff 6.1): "NONE"; "DISJOINT"
   /// (outstanding, but their destinations are not read or written by the region);
   /// "CONFLICT" (an outstanding write targets a location the region reads or writes);
@@ -80,6 +93,18 @@ struct RegionContract {
   [[nodiscard]] Json to_json() const;
   static std::optional<RegionContract> from_json(const Json &j, std::string &error);
 };
+
+/// @brief Parse "s4=s8,s5=s9" into a register map; nullopt (and @p error) when invalid
+/// (unknown names, a location mapped twice, or two locations mapped to one).
+[[nodiscard]] std::optional<std::vector<std::pair<unsigned, unsigned>>>
+parse_register_map(std::string_view text, std::string &error);
+[[nodiscard]] std::string format_register_map(const std::vector<std::pair<unsigned, unsigned>> &m);
+/// @brief Complete a partial injective map to a permutation (forward old->new): a target
+/// that is not itself mapped takes the start of its chain (s4=s8,s8=s9 gives s9 -> s4).
+[[nodiscard]] std::array<unsigned, kNumLocs>
+complete_register_map(const std::vector<std::pair<unsigned, unsigned>> &m);
+[[nodiscard]] std::array<unsigned, kNumLocs>
+invert_permutation(const std::array<unsigned, kNumLocs> &forward);
 
 /// Fixed frame fields checked for preservation (names match MachineState::Frame).
 [[nodiscard]] const std::vector<std::string> &frame_field_names();

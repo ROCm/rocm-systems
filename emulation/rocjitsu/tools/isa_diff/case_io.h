@@ -22,13 +22,16 @@ namespace rocjitsu::isa_diff {
 struct CaseData {
   Json identity;
   Json command;
-  Json artifacts; ///< old/new: label, kind, sha256, kernel, ranges.
-  Json changes;   ///< Hunks with classification.
+  Json artifacts;  ///< old/new: label, kind, sha256, kernel, ranges.
+  Json provenance; ///< old/new LLVM commands, input hash, toolchain (LLVM plugin), or null.
+  Json changes;    ///< Hunks with classification.
   std::vector<UnresolvedItem> unresolved;
   std::vector<ArtifactNote> notes;
   std::vector<RegionPair> regions;
   /// Precomputed expansion variants, tried by `test` after a base-region mismatch.
   std::vector<RegionPair> variants;
+  /// Explicitly requested diagnostic regions (entry prefix); never part of the verdict.
+  std::vector<RegionPair> diagnostics;
   Json analysis; ///< Kernel sizes, timings, plan options.
 
   [[nodiscard]] Json to_json() const;
@@ -47,6 +50,13 @@ struct Aggregate {
   WitnessScope witness_scope = WitnessScope::None;
   CoverageScope coverage_scope = CoverageScope::NotEstablished;
 };
+
+/// @brief analyze_artifacts through the analysis cache in @p cache_dir (empty: no cache).
+[[nodiscard]] std::optional<CaseData> analyze_cached(const Artifact &old_artifact,
+                                                     const Artifact &new_artifact,
+                                                     const PlanOptions &options,
+                                                     const std::string &cache_dir, bool &hit,
+                                                     std::string &error);
 
 [[nodiscard]] Aggregate aggregate_results(const CaseData &data,
                                           const std::vector<RegionResult> &results);

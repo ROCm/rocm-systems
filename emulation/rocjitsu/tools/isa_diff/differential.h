@@ -63,6 +63,10 @@ struct TestOptions {
   size_t reduction_budget = 4096; ///< Paired executions per counterexample.
   /// Per-case JSONL log directory (handoff 8 learning data). Empty: no log.
   std::string case_log_dir;
+  /// Artifacts and provenance copied into every counterexample bundle (handoff 10).
+  Json artifact_info;
+  /// Result cache directory (handoff 11); empty disables the cache.
+  std::string cache_dir;
 };
 
 struct PhaseCounts {
@@ -136,11 +140,16 @@ struct RegionResult {
   ContractStatus resolved_contract = ContractStatus::Unresolved;
   CoverageScope resolved_coverage = CoverageScope::NotEstablished;
   Json expansion_tried = Json::array(); ///< Summary of each variant tested.
-  uint64_t novelty_buckets = 0;         ///< Distinct bounded outcome classes seen.
+  /// Handoff 13: a region whose contract carries derived prefix constraints is also run
+  /// unrestricted; this summarises that run (null when not applicable).
+  Json unrestricted;
+  uint64_t novelty_buckets = 0; ///< Distinct bounded outcome classes seen.
   uint64_t novel_boundary = 0, novel_random = 0;
   std::string case_log;        ///< Path of the per-case JSONL log, if written.
   std::string pending_effects; ///< From the contract (handoff 6.1).
   std::string composition;     ///< From the contract (handoff 5.2).
+  /// Set when the result came from the cache: to_json() returns it verbatim.
+  Json cached;
 
   [[nodiscard]] Json to_json() const;
 };

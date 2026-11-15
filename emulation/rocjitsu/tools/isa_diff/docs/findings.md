@@ -1,23 +1,122 @@
-# rj_isa_diff P0: findings and measured results
+# rj_isa_diff: findings and final report (handoff section 15)
 
 Base: `ROCm/rocm-systems` `origin/develop` @ `90ddc8aae5`, branch
 `users/lialan/rj/incremental-isa-diff`. Built with g++-13, Release, on Ubuntu 22.04
-(32 cores). Every number here comes from that build.
+(32 cores). LLVM: ROCm 7.2.3 `/opt/rocm/llvm/bin` (AMD LLVM 22.0.0git, `roc-7.2.3 26084
+f58b06dce1f9`). Every number here comes from that build and toolchain.
 
 ## Summary by evidence level
 
 | label | what |
 |---|---|
-| **implemented** | Code-object and raw-word ingestion. Decode and CFG via `BasicBlock::build_reachable`. Precise SALU effect model. LocSet liveness (including SCC and VCC/EXEC halves). PC taint. LCS alignment with branch-target validation. Change classification. Conservative single-block region planner (merge, context, stop rules). Contracts with sources. Isolated old/new runners on `ComputeUnitCore::execute_instruction`. Mandatory boundary/NaN/corner-case sweep, run on every test (integer limits, f32/f16/bf16/f64 special encodings, EXEC lane patterns, operand-role values for shift amounts, S_BFE fields, sign-extension inputs and literal neighbours, carry/overflow/borrow pairs, constraint edges). Deterministic random policy drawing from the same catalogs, with a constraint checker. Analysis of memory operations outstanding at each region entry (contract `pending_effects`). Composition check by forward must-equality (contract `composition`). Automatic context-expansion variants, tried after a local mismatch. Counterexample reduction (input values and seed independence). Learning hooks (`History`, rich `Feedback`, `ConstraintChecker`, bounded novelty buckets) and a per-case JSONL log. Observable/frame/effect-model comparison. Separate evidence-level results. Counterexample bundles, replay, synthetic injection. CLI `analyze/test/replay/inject`. Prepared-region key. Per-phase cost counters. |
-| **tested** | 38 gtest validator cases (`rj_isa_diff_tests`, ctest prefix `isa_diff.`) covering every row of handoff section 13, plus effect, liveness, alignment, JSON and replay-tamper tests. They pass in Release and under ASan+UBSan+LSan with zero reports. The CLI end-to-end flow was run on clang/lld-built gfx950 code objects and on raw word streams. |
-| **not run** | No real LLVM old/new pair produced by an optimisation switch: this is deferred to the separate LLVM plugin task, by user decision. No result-cache store: keys are computed and recorded, but nothing reuses results across runs. No kernel/context reproducer: reachability is not established in P0. No SMT. No program reduction of counterexamples. No learned input policy. |
-| **unsupported** | Regions containing VALU, memory, MFMA, waits, barriers, branches, hwreg access, indirect SGPR access, TTMP/FLAT_SCRATCH/XNACK operands, or PC-derived inputs. Multi-block regions. Code objects with several `.text` sections or with zero-size kernel symbols. |
-| **inconclusive** | Regions whose two continuations read different locations (`INCONCLUSIVE_MAPPING`, e.g. register renaming across blocks). Mismatches under an `UNRESOLVED` contract. Zero-valid-case runs. |
+| **implemented** | See the next section for the full list. |
+| **tested** | 58 isa_diff tests pass in Release and under ASan+UBSan+LSan with zero reports. They are 49 validator cases (`rj_isa_diff_tests`) covering every row of handoff section 13 and every feature below; 8 LLVM plugin cases (`rj_isa_diff_llvm_tests`) on real ROCm-LLVM output; and the schema/CLI test. Three real LLVM old/new pairs were run end to end. The full tree was built and its full ctest run. |
+| **not run** | SMT/SemaAST proofs (`proof_status` is always `NOT_RUN`). Reachability witnesses: the entry-prefix diagnostic path runs a prefix with arbitrary entry values, but no dispatch-ABI model exists. Learned input policies. Program (instruction) reduction of counterexamples. Multi-block, branching and loop regions (P1, designed in `p1_p2_design.md`). |
+| **unsupported** | Regions containing VALU, memory, MFMA, waits, barriers, branches, hwreg access, indirect SGPR access, TTMP/FLAT_SCRATCH/XNACK operands, PC-derived inputs, or relocated bytes. Multi-block regions. Code objects with several `.text` sections or zero-size kernel symbols. The real `-enable-misched=false` pairs, whose changes are reordered `s_load`s. |
+| **inconclusive** | Regions whose continuations read different locations (`INCONCLUSIVE_MAPPING`). Mismatches under an `UNRESOLVED` contract: the renamed SALU tail of the real `k` misched pair. Relocation-only differences. Zero-valid-case runs. |
 | **synthetic mismatch** | Injected wrong opcode, immediate and operand: all detected, all replayed (`REPRODUCED`), all labelled `synthetic`. Sample: `samples/synthetic/`. |
-| **real finding** | None. No LLVM pair was tested, so no LLVM bug is claimed. |
-| **proven** | Nothing. `proof_status` is `NOT_RUN` everywhere. |
+| **real finding** | **None.** Three real LLVM pairs were tested. One passed under an `ESTABLISHED` contract with complete scope, one is unsupported, and one is inconclusive. No LLVM bug is claimed. |
+| **proven** | **Nothing.** |
 
-## Validator results (handoff section 13)
+The implemented items:
+
+- Ingestion of code objects, raw words, and `.s`/`.ll` sources through the LLVM plugin,
+  with full provenance.
+- Decode and CFG via `BasicBlock::build_reachable`.
+- A precise SALU effect model. Implicit effects of non-P0 instructions are translated.
+- LocSet liveness, including SCC and the VCC/EXEC halves.
+- PC taint.
+- `.text` relocations.
+- Per-kernel AMDHSA metadata fields and descriptor fields.
+- LCS alignment with branch-target validation, and change classification.
+- A conservative single-block region planner: merge, context, and stop rules on length,
+  expansion and analysis time.
+- Contracts with sources:
+  - known-bits constraints derived from the common prefix;
+  - a pending-effects analysis;
+  - a composition check;
+  - manual regions with entry/exit register maps, never more than `ASSUMED`.
+- Isolated old/new runners on `ComputeUnitCore::execute_instruction`.
+- The mandatory boundary/NaN/corner sweep, followed by the deterministic random policy.
+- An unrestricted re-run next to constrained verdicts.
+- Automatic context-expansion variants.
+- Counterexample reduction, self-contained bundles, replay, and synthetic injection.
+- Learning hooks and the per-case JSONL log.
+- Analysis and result caches with a build fingerprint.
+- Explicit entry-prefix diagnostic regions.
+- JSON Schema for every output, with a CLI-driving validator.
+- CLI commands `analyze`, `llvm-pair`, `test`, `replay`, `inject`.
+
+## What was built, and the design trade-offs
+
+Files, all under `emulation/rocjitsu/`:
+
+| area | files |
+|---|---|
+| state, effects, liveness | `tools/isa_diff/{location,effects,kernel_model,machine_state}.{h,cpp}` |
+| artifacts, alignment | `tools/isa_diff/{artifact,diff}.{h,cpp}` |
+| regions and contracts | `tools/isa_diff/{region,contract,region_planner}.{h,cpp}` |
+| execution and inputs | `tools/isa_diff/{region_runner,boundary,roles,input_policy}.{h,cpp}` |
+| results, bundles, cache | `tools/isa_diff/{differential,mutation,case_io,result_cache,json}.{h,cpp}` |
+| CLI and build | `tools/isa_diff/rj_isa_diff_main.cpp`, `tools/isa_diff/CMakeLists.txt`, one line in `tools/CMakeLists.txt` |
+| LLVM plugin | `tools/isa_diff/llvm/{llvm_frontend.h,llvm_frontend.cpp,CMakeLists.txt}` |
+| tests | `tests/isa_diff/{isa_diff_test.cpp,llvm_plugin_test.cpp,fixtures/}` |
+| docs, schema, samples, bench | `tools/isa_diff/{README.md,docs/,bench/bench.py}` |
+
+No RocJITsu library code was changed.
+
+Design choices:
+
+- **Own effect model and liveness.** RocJITsu's `InstDefUse` reports no SCC/VCC/M0
+  effects on gfx950, and `LivenessAnalysis` tracks ordinary registers only. SCC-precise
+  liveness is required (live and dead SCC must be told apart), so the tool classifies
+  operands itself. Hidden effects are handled as follows:
+  - Of non-P0 instructions: translated into tracked locations where possible.
+  - Of P0 instructions: they reject the region.
+- **Identity mapping at common cutpoints by default.** Nothing is inferred from outputs.
+  Hand-written entry/exit maps exist for experiments and stay at most `ASSUMED`.
+- **Conservative by construction.** Unknown effects make everything live. An untested
+  upstream change keeps a contract `ASSUMED` or `UNRESOLVED`. Uncovered hunks, metadata
+  or relocations keep the scope `PARTIAL`.
+- **LLVM is an external process, run by a separate library.** The core never links LLVM.
+  Executed bytes are always the linked object decoded by RocJITsu, and the provenance
+  says so.
+- **Cache invalidation is deliberately coarse.** The build fingerprint hashes the whole
+  executable and its mapped objects, which handoff 11 explicitly allows.
+
+## Commands
+
+```sh
+# build and test (remote build host)
+CC=gcc-13 CXX=g++-13 cmake -G Ninja -B build -DCMAKE_BUILD_TYPE=Release ...   # see implementation_map.md
+cmake --build build --target rj_isa_diff rj_isa_diff_tests rj_isa_diff_llvm_tests
+ctest --test-dir build -R isa_diff          # 58 tests: 49 core, 8 LLVM, 1 schema/CLI
+tools/isa_diff/docs/samples/regen.sh build/tools/isa_diff/rj_isa_diff
+
+# the real LLVM pair (samples/llvm_pair)
+rj_isa_diff llvm-pair --input k3.ll --common-args -O3 --old-args "" \
+    --new-args -combiner-disabled --out case/
+rj_isa_diff test --case case/ --cases 2000
+
+# the replayable synthetic error (samples/synthetic)
+rj_isa_diff inject --case co/ --region r0 --side new --inst 1 --xor 0x01000000 \
+    --label wrong-opcode --out syn/
+rj_isa_diff test --case syn/ --cases 1000                     # exit 1
+rj_isa_diff replay --counterexample syn/counterexamples/r0-syn-wrong-opcode-case1.json
+```
+
+## Test results
+
+| suite | result |
+|---|---|
+| `rj_isa_diff_tests` (Release) | 49/49 pass |
+| `rj_isa_diff_llvm_tests` (Release, ROCm 7.2.3 LLVM) | 8/8 pass |
+| `isa_diff.schema_and_cli` | pass: 10 CLI scenarios plus the committed samples. Every `case.json`, `results.json`, counterexample bundle and case-log line validates against `docs/schema/rj_isa_diff.v1.schema.json` |
+| the same three under ASan+UBSan+LSan (`build-asan`) | 49/49, 8/8, CLI validator pass; zero sanitizer reports |
+| full tree build | every target builds except the two pre-existing, environment-related ones (`hsa_init_test` link, `interposer_dup_test` `-Wstringop-overflow`) |
+| full ctest (14,850 tests) | 97% pass. The 486 failed or not-run tests are all outside this tool. Most are interposer tests (`rocjitsu: execvp failed`), DRM topology generation in HIP runtime tests, HSA/DBT guest runtime tests, a ccache probe (`cmake.build_path_cache`), and an f16 host-rounding helper (`ValuFpModeTest.Shard4`). None of them builds or links isa_diff code. They were not re-run on the base revision. |
+
+## Validator results (handoff section 13, P0 rows)
 
 | row | test | observed |
 |---|---|---|
@@ -42,6 +141,171 @@ Additional checks:
 - The effect model was measured against RocJITsu's decoder. `InstDefUse` reports no SCC/VCC/M0 effects on gfx950, so the tool derives effects from operands.
 - `ReplayRejectsAnEditedBundle`: editing one region word breaks the prepared key and replay refuses.
 - Every case also checks that execution wrote nothing outside the declared write set; that would be a `HARNESS_ERROR`. It never fired.
+
+## Tests added for the rest of the handoff
+
+| test | observed |
+|---|---|
+| `DerivedConstraintsComeOnlyFromCommonCode` | `s9 = 7` from a common `s_mov` becomes known bits on `s9`. `s4`, written by a changed region, gets no constraint. A kernel input gets none |
+| `ConstraintDependentRewriteSeparatesUnrestrictedFromConstrained` (extended) | constrained: NO_MISMATCH_FOUND. `unrestricted`: LOCAL_MISMATCH, `constraint_dependent: true` |
+| `IsaDiffManual.RegisterMapParsingAndPermutation` | `s4=s8,s8=s9` completes to the 3-cycle `s9 -> s4`. Duplicates, specials and malformed entries are rejected. JSON round trip |
+| `IsaDiffManual.ManualRegionStaysAssumedAndLeavesOtherHunksUnresolved` | region `m0` is ASSUMED with composition NOT_CHECKED; 2 uncovered hunks stay unresolved; identity mapping gives LOCAL_MISMATCH; scope is not complete |
+| `IsaDiffManual.RegisterMapReconcilesRenameButStaysAssumed` | with `s4=s8`: new `s8` receives old `s4`'s value; NO_MISMATCH_FOUND, ASSUMED. A wrong map (`s4=s9`) is caught |
+| `IsaDiffManual.ManualRegionRejectsBadSpecsAndBlockCrossing` | 6 malformed specs are errors. A map without a manual region is an error. A range across a block is INCONCLUSIVE_MAPPING |
+| `IsaDiffArtifact.MetadataFieldsAreComparedPerKernel` | `.sgpr_count 18 -> 20` is one named field. A note differing only outside this kernel is informational. An unparsed note falls back to the hash, semantic |
+| `IsaDiffArtifact.AnalysisTimeLimitLeavesContractsUnresolved` | with a 1 µs limit: no variants; every contract UNRESOLVED with composition NOT_CHECKED; `skipped_for_time` recorded; the timing split is present |
+| `IsaDiffCache.ResultCacheHitsOnlyForTheSamePreparedRegionAndBudget` | second run: hit, same verdict and counts; the cached counterexample replays. Another seed misses. The same bytes with one more observable location miss |
+| `IsaDiffCache.AnalysisCacheIsKeyedByArtifactsAndPlanOptions` | hit on identical input; miss with another plan option or other artifact bytes |
+| `IsaDiffDiagnostics.EntryPrefixRegionsRunOnlyWhenRequestedAndStayOutOfTheVerdict` | `r0.diag-entry` runs from instruction 0 and is reported under `diagnostics`; the verdict covers `r0` only. A region behind a branch: UNSUPPORTED, "not in the kernel's entry block" |
+| `IsaDiffKernelModel.ImplicitStoreBaseReadsKeepLivenessPrecise` | `global_store_dword` reports its SGPR base as implicit uses, now translated into reads. The renamed dead temporary `s8`/`s10` is not observable: NO_MISMATCH_FOUND, ESTABLISHED |
+| `IsaDiffLlvm.AssemblesKernelSourceAndBareListings` | `.s` with a descriptor goes through llvm-mc and ld.lld to a code object. A bare listing falls back to raw `.text`. Invalid assembly is a reported failure |
+| `IsaDiffLlvm.RealPairCombinerSwitchIsVerifiedEndToEnd` | see the real pairs below |
+| `IsaDiffLlvm.RealPairTouchingSmemIsReportedNotPassed` | see the real pairs below |
+| `IsaDiffLlvm.RelocationsAreKeptComparedAndNeverExecuted` | `@g` vs `@h`: identical `.text` bytes. Two GOTPCREL relocations differ, so the change is a semantic layout change and never NO_SEMANTIC_DIFF. A manual region over the relocated literal: UNSUPPORTED |
+| `IsaDiffLlvm.KernelMetadataIsComparedFieldByField` | one inserted kernel argument is exactly one metadata item: `.args differs (old 21 args, new 22 args); first difference at .args[2]` |
+| `IsaDiffLlvm.RealRegisterRenamingNeedsAnEntryMapAndIsNeverEstablished` | see the real pairs below |
+| `IsaDiffLlvm.SideArgumentsThatChangeTheTargetAreRejected` | `-mcpu`, `-mattr` etc. in side arguments are rejected |
+
+## Real LLVM pairs (handoff 13)
+
+All pairs compile one LLVM IR file twice with ROCm 7.2.3 `llc -O3`; only the new side gets
+the switch. Each switch was tried with this `llc`, not assumed from memory. Upstream `llc`
+(LLVM 24) gave no difference for the candidate kernels.
+
+| pair | kernel old/new insts | hunks | result |
+|---|---|---|---|
+| uniform i16 `k3`, `-combiner-disabled` (`samples/llvm_pair/`) | 21 / 22 | 3, merged into one region of 7 / 8 insts | **NO_MISMATCH_FOUND**, contract ESTABLISHED (composition HOLDS, pending NONE), coverage COMPLETE_FOR_DECLARED_SCOPE. 3,169 valid pairs (1,169 boundary + 2,000 random); executed 7 / 8 instructions per case |
+| `k2`, `-enable-misched=false` | 26 / 26 | 2 | **UNSUPPORTED**: both changes are reordered `s_load_dwordx4`. Coverage NOT_ESTABLISHED. The case was kept, as the handoff requires, instead of being hidden |
+| `k`, `-enable-misched=false` | 31 / 31 | 5 | **INCONCLUSIVE** (detailed below) |
+
+The `k`, `-enable-misched=false` pair in detail:
+
+- Three regions are UNSUPPORTED: reordered `s_load`s.
+- The SALU tail `r3` (6 / 6 insts) is READY, but its contract is UNRESOLVED:
+  - composition FAILS, because the loaded i64 sits in `s[4:5]` on the old side and
+    `s[8:9]` on the new side;
+  - the descriptor `compute_pgm_rsrc1` and the metadata `.sgpr_count` (15 → 17) also
+    differ.
+- `r3` shows LOCAL_MISMATCH on `s4` under that UNRESOLVED relation, so the witness is
+  LOCAL_ONLY and the overall result is INCONCLUSIVE with coverage PARTIAL. The tool does
+  not call it a bug.
+- The same tail as a manual region `old:12-18,new:12-18`:
+
+| mapping | result |
+|---|---|
+| identity | LOCAL_MISMATCH on `s4` (5,588 valid pairs) |
+| `--entry-map s4=s8,s5=s9` | **NO_MISMATCH_FOUND** (3,991 valid pairs) |
+| `--map s4=s8,s5=s9` | `INCONCLUSIVE_MAPPING`, because the result is in `s4` on both sides |
+
+  Even the reconciled run stays UNRESOLVED (metadata differs) and PARTIAL (uncovered
+  hunks).
+
+Region size against kernel size:
+
+| pair | kernel insts | instructions executed per case |
+|---|---|---|
+| k3 | 21 / 22 | 7 / 8 |
+| `samples/codeobject` | 8 / 9 | 1 / 2 |
+| bench r16 | 2,048 | 16 / 16 |
+
+## Cost
+
+**Analysis** (from `case.json` `analysis.timing`, both sides together):
+
+| pair | compile (LLVM, 3 tool runs per side) | parse | decode + CFG | dataflow | align | plan |
+|---|---|---|---|---|---|---|
+| k3 llvm_pair | 51.0 ms | 0.24 ms | 0.19 ms | 0.005 ms | 0.04 ms | 0.47 ms |
+| codeobject (`.s` via llvm-mc/ld.lld) | 17.7 ms | 0.08 ms | 0.13 ms | 0.004 ms | 0.01 ms | 0.25 ms |
+| bench, 2,048-instruction kernels | n/a | 0.12 ms | 3.2 ms | 0.29 ms | — | — |
+
+**Per case.** `bench/bench.py --cases 20000` on 2,048-instruction straight-line SALU
+kernels (`bench.json`, final build). The per-case column is propose + state load + old +
+new + compare, from the `--no-case-log` run. It includes every executed case; none are
+excluded.
+
+| variant | region | executed cases (boundary accepted + 20,000 random) | insts/case | runner setup (ms) | per case (µs) | old exec | new exec | load | propose | compare | cases/s wall, log on / off |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| r1 | 1/1 | 20,263 | 2 | 0.45 | 2.93 | 0.08 | 0.06 | 0.65 | 1.75 | 0.40 | 84,026 / 117,534 |
+| r4 | 4/4 | 21,151 | 8 | 0.47 | 3.03 | 0.16 | 0.13 | 0.63 | 1.72 | 0.39 | 81,046 / 112,575 |
+| r16 | 16/16 | 24,767 | 32 | 0.40 | 3.85 | 0.50 | 0.45 | 0.63 | 1.87 | 0.40 | 68,230 / 91,239 |
+| r64 | 64/64 | 25,376 | 128 | 0.22 | 6.36 | 1.77 | 1.67 | 0.65 | 1.87 | 0.40 | 45,373 / 55,165 |
+| r256 | 256/256 | 37,282 | 512 | 0.17 | 16.35 | 6.85 | 6.54 | 0.64 | 1.91 | 0.42 | 20,758 / 22,253 |
+| whole-kernel control (r16 + entire prefix) | 1984/1984 | 114,875 | 3,968 | 0.79 | 124.21 | 61.23 | 60.79 | 0.68 | 0.95 | 0.56 | 7,755 / 7,923 |
+
+Reading:
+
+- **Execution** costs about 0.027 µs per SALU instruction per side.
+- **Small regions are dominated by fixed per-case cost**: input proposal (about 1.8 µs,
+  mostly sweep-event strings), state load (0.65 µs) and comparison (0.4 µs).
+- **Region against whole kernel.** At R=16 a case costs 3.85 µs, against 124 µs for the
+  whole-kernel control on the same kernel: about 32× less. That ratio grows with kernel
+  size and shrinks with region size (about 7.6× at R=256). It is not a general speed-up
+  claim.
+- **Why the boundary sweep is smaller than generated.** The bench kernels' common
+  prefix gives 16-18 derived known-bits constraints per region. Out-of-contract boundary
+  values are rejected and counted, never changed: for r256, 38,080 boundary cases, of
+  which 17,282 were accepted.
+- **Why wall cases/s is lower than the per-case numbers suggest.** Because those
+  constraints are derived, `test` also runs every region unrestricted (handoff 3.3).
+  The wall time includes that second run, while the cases/s columns count verdict cases
+  only. The unrestricted runs found nothing: `constraint_dependent: false`.
+- **The per-case log** costs about 1-4 µs per case in wall time (the log-on vs log-off
+  columns).
+- **The cache** adds about 0.2 s per process, for the build fingerprint, and only with
+  `--cache-dir`. A hit then skips the region's whole test.
+
+## Replayable synthetic error (`samples/synthetic/`)
+
+Steps:
+
+1. `inject --inst 1 --xor 0x01000000` on the code-object region turns new instruction 1
+   into `s_lshr_b64`.
+2. `test` reports LOCAL_MISMATCH at boundary case 1, with `s9` old `0x00000004` and new
+   `0x00000001`. The result is labelled `synthetic` and the contract is ESTABLISHED.
+3. Reduction took 6 runs and 2 accepted steps. The case is seed-independent, and the only
+   non-zero input is `s5 = 1`.
+4. `replay` re-executes the bundle from its recorded words: REPRODUCED.
+
+## Unresolved context and mapping issues, and limitations
+
+- **Mapping**:
+  - Identity at common cutpoints only. No renaming is ever inferred.
+  - Hand-written entry/exit maps are experiments that stay at most ASSUMED.
+  - Asymmetric continuation liveness is `INCONCLUSIVE_MAPPING`.
+  - The real misched pair is the open example: its tail is consistent only under a
+    hand-written entry map, and its context stays UNRESOLVED.
+- **Composition**:
+  - The must-equality analysis runs over the old CFG.
+  - It assumes untested upstream changes write only their decoded destinations, which
+    keeps those contracts ASSUMED.
+  - Any control-flow change reaching a region makes its contract UNRESOLVED.
+- **Derived constraints** come from a forward must-analysis with a small transfer set:
+  constants, masks, shifts, `s_bfe` and min/max. Anything else is unknown, so they are
+  sound but incomplete.
+- **Reduction** shrinks input values and seed dependence only. The program is not
+  reduced.
+- **Learning**: data and hooks only. No learned policy exists.
+- **Liveness of SCC/VCC/EXEC/M0** is this tool's own analysis.
+  - Outside P0, instructions never kill.
+  - They are assumed to read EXEC/VCC/M0, except on a short list whose operands name
+    everything they read.
+  - Implicit uses are translated where possible; TTMP/FLAT_SCRATCH/PC stay unknown, so
+    everything is live there.
+- **VCC aliasing**: RocJITsu's CDNA4 model keeps VCC wave-local, and that is the trusted
+  semantics (see `implementation_map.md`).
+- **Reachability**: every mismatch is `LOCAL_ONLY`. The entry-prefix diagnostic needs a
+  P0-only prefix; real kernels start with `s_load`, so it is UNSUPPORTED there.
+- **Metadata**: compared field by field per kernel. Register-count fields such as
+  `.sgpr_count` count as semantic, which is conservative.
+- **Pending effects** follow the gfx9 counter rules (SMEM may return out of order). Only
+  a counter field of 0 clears destinations.
+- **Cache**: whole-build fingerprint. There is no finer dependency tracking.
+- **Build environment**: `hsa_init_test` and `interposer_dup_test` do not build on this
+  host, and the full-ctest failures listed above are environmental. All are unrelated to
+  this tool.
+- **Correction kept from the earlier report**: an earlier version said the contract
+  recorded the "nothing pending" assumption before any analysis existed. That was wrong.
+  It is fixed by the pending-effects analysis.
 
 ## Mandatory boundary sweep
 
@@ -164,119 +428,3 @@ non-zero input `s5=1`, seed-independent, REPRODUCED by replay.
 | test | observed |
 |---|---|
 | `PolicyGetsHistoryRichFeedbackAndEveryCaseIsLogged` | `observe()` sees every case of both phases. `propose()` sees the history grow from the sweep size and the window stays <= 32. Feedback carries exits, instruction counts, buckets and mismatching locations. Buckets: more than 1 and fewer than 64 for hundreds of cases. The log has a header, one line per case and a summary, all valid JSON |
-
-## End-to-end runs
-
-The code-object pair is `samples/codeobject/co_{old,new}.s`, built with clang/ld.lld for
-gfx950. Both kernels contain `s_load_dwordx2` and `s_waitcnt` outside the region.
-```
-analyze: kernel k, old 8 insts / new 9 insts; 1 hunk; r0 READY old 1 / new 2, ESTABLISHED
-         layout shift noted as non-semantic (no PC reads)
-test --cases 5000: NO_MISMATCH_FOUND, 5000/5000 valid, executed old 5000 / new 10000 insts
-```
-With only `.amdhsa_next_free_sgpr` changed in the new descriptor:
-```
-unresolved [metadata] kernel descriptor field differs: compute_pgm_rsrc1
-r0 NO_MISMATCH_FOUND, contract UNRESOLVED -> overall INCONCLUSIVE, coverage PARTIAL (exit 2)
-```
-Synthetic error injection (`samples/synthetic/`):
-```
-inject --inst 1 --xor 0x01000000: new inst 1 is now 's_lshr_b64 s[8:9], s[8:9], 1'
-test: LOCAL_MISMATCH at case 0, s8 old 0x00000084 new 0x00000021 (synthetic)
-replay: REPRODUCED: kind=observable locations=s8,s9
-```
-
-## Cost
-
-`bench/bench.py --cases 20000` on 2048-instruction straight-line SALU kernels; `bench.json`
-holds the raw numbers. The sweep does not change the per-case cost; it adds cases.
-Measured with the sweep (boundary cases run in addition to the 20000 random ones):
-
-| variant | boundary cases | per case (µs) | cases/s (wall, per-case log on) | cases/s (wall, `--no-case-log`) |
-|---|---|---|---|---|
-| r1 | 842 | 2.70 | 132,199 | 338,948 |
-| r4 | 3,131 | 2.86 | 133,035 | 325,673 |
-| r16 | 9,879 | 3.33 | 130,269 | 287,350 |
-| r64 | 16,270 | 5.71 | 102,944 | 159,563 |
-| r256 | 38,599 | 15.41 | 51,672 | 62,079 |
-| whole-kernel control | 94,875 | 128.65 | 7,475 | 7,772 |
-
-The per-case log is on by default. It costs about 3-4 µs per case in JSON building and
-writing, and about 0.5 KB per case (16 MB for the 29,879 cases of r16). At R=16 one `test`
-run took 0.247 s with the log and 0.145 s with `--no-case-log`, including process start.
-The "per case" column (propose, load, execute, compare) does not include log writing. The
-`--no-case-log` column was measured before the log existed.
-
-The sweep grows with the number of registers the region reads (about 150-400 cases per
-register, plus pair cases), not with kernel size.
-
-The detailed per-phase breakdown below was measured before the sweep existed; the
-per-case figures still apply. Columns:
-- **analyze**: one-time decode, CFG, liveness, alignment and planning, measured by wall
-  clock around the process.
-- **per case**: propose, state load, old execute, new execute and compare, measured by
-  the tool's own counters. All accepted cases are included and none are excluded.
-- **insts/case**: counted executed instructions (old + new), which shows that only the
-  region ran.
-
-| variant | region old/new | insts/case | analyze (ms) | runner setup (ms) | per case (µs) | old exec (µs) | new exec (µs) | load (µs) | propose (µs) | compare (µs) | cases/s (wall) |
-|---|---|---|---|---|---|---|---|---|---|---|---|
-| r1 | 1/1 | 2 | 8.2 | 0.55 | 2.02 | 0.065 | 0.051 | 0.58 | 0.93 | 0.40 | 404,607 |
-| r4 | 4/4 | 8 | 7.7 | 0.52 | 2.24 | 0.155 | 0.129 | 0.60 | 0.96 | 0.41 | 373,119 |
-| r16 | 16/16 | 32 | 7.7 | 0.50 | 2.86 | 0.488 | 0.449 | 0.56 | 0.98 | 0.39 | 304,312 |
-| r64 | 64/64 | 128 | 7.9 | 0.48 | 5.45 | 1.823 | 1.721 | 0.58 | 0.93 | 0.40 | 169,559 |
-| r256 | 256/256 | 512 | 9.2 | 0.26 | 16.03 | 7.155 | 6.881 | 0.57 | 1.02 | 0.40 | 60,437 |
-| whole-kernel control (r16 + all prefix) | 1984/1984 | 3968 | 15.0 | 0.49 | 126.82 | 62.742 | 61.712 | 0.63 | 1.20 | 0.53 | 7,818 |
-
-Reading:
-- Execution cost is about 0.03 µs per SALU instruction per side.
-- For small regions the fixed per-case cost dominates: state load of every location
-  (~0.58 µs), input proposal (~0.95 µs, mostly logging boundary events), and comparison
-  (~0.40 µs).
-- At R=16 a case costs 2.86 µs against 126.8 µs for the whole-kernel control on the
-  same 2048-instruction kernel, about 44× less.
-- This ratio is not a general speed-up claim. It grows with kernel size and shrinks
-  with region size; at R=256 it is about 8×.
-- Analysis (~8 ms here) is paid once per pair. Runner creation (~0.5 ms) is paid once per region.
-- The proposal cost was halved by replacing a per-case `std::mt19937_64` seed with a
-  SplitMix64 stream. The remaining proposal cost is mostly string building for the
-  event log, which could be made lazy if throughput matters.
-
-## Unresolved and limitations
-
-- **Mapping**: identity at common cutpoints only. There is no renaming inference, and
-  hand-written register mappings are not supported. Asymmetric continuation liveness is
-  reported `INCONCLUSIVE_MAPPING`.
-- **Composition**: the must-equality analysis runs over the old CFG. It assumes that
-  untested (unsupported) upstream changes write only their decoded destinations, which keeps
-  such contracts at ASSUMED. Any control-flow change reaching a region makes its contract
-  UNRESOLVED.
-- **Reduction**: input values and seed dependence only. The program is not reduced, because
-  that would need re-planning the region and contract for every candidate.
-- **Learning data**: per-case logs and feedback are written; no learned policy exists.
-- **Liveness of SCC/VCC/EXEC/M0** comes from this tool's own analysis, because RocJITsu's
-  `LivenessAnalysis` tracks ordinary registers only. Outside P0, instructions are assumed to
-  read EXEC/VCC/M0. The exceptions are a short list (`s_endpgm`, `s_waitcnt`, `s_barrier`,
-  direct branches, `s_sleep`, `s_setprio`) whose condition registers are classified
-  operands; the validator checks this for `s_cbranch_scc0/execz/vccnz`.
-- **VCC aliasing**: RocJITsu's CDNA4 model keeps VCC wave-local, and that is the trusted
-  semantics (see `implementation_map.md`).
-- **Reachability and kernel context**: every mismatch is `LOCAL_ONLY`. The kernel/context
-  reproducer is pending.
-- **Metadata**: the AMDHSA note is compared by hash, so any note change makes scope partial.
-  Descriptor fields are compared individually, and the entry offset alone is layout only.
-- **Pending effects**: *Correction.* An earlier version of this document said the contract
-  "records that assumption" about nothing being pending at the cutpoint. It did not: no
-  analysis existed and nothing was recorded. A region placed between an `s_load` and its
-  `s_waitcnt` could get an ESTABLISHED contract. This is now fixed (see "Memory operations
-  outstanding at the cutpoint" above). The analysis follows the gfx9 counter rules
-  (vmcnt/lgkmcnt/expcnt; SMEM may return out of order) and is conservative: only a counter
-  field of 0 clears destinations. Only tracked scalar state is considered: outstanding
-  writes to VGPRs or memory cannot affect a P0 region.
-- **Cache**: `prepared_key` binds the words, PCs, full contract and mode. `results.json`
-  records the RocJITsu revision. No result store reuses them yet.
-- **Build environment**: two develop targets do not build in this environment, unrelated to
-  this work: `hsa_init_test` (old system HSA) and `interposer_dup_test` (gcc-13
-  `-Wstringop-overflow` under `-Werror`). Every other target builds.
-- **LLVM** (separate task): the `.s` frontend via LLVM MC as an `ArtifactLoader`, and real
-  old/new pairs from a controlled LLVM switch with an end-to-end report.

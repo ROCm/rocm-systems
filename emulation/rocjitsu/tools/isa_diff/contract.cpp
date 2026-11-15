@@ -3,6 +3,8 @@
 
 #include "contract.h"
 
+#include <algorithm>
+
 namespace rocjitsu::isa_diff {
 
 const char *contract_status_name(ContractStatus s) {
@@ -22,6 +24,100 @@ std::optional<ContractStatus> parse_contract_status(std::string_view s) {
     if (s == contract_status_name(v))
       return v;
   return std::nullopt;
+}
+
+std::array<unsigned, kNumLocs>
+complete_register_map(const std::vector<std::pair<unsigned, unsigned>> &register_map) {
+  std::array<unsigned, kNumLocs> f{};
+  for (unsigned l = 0; l < kNumLocs; ++l)
+    f[l] = l;
+  std::array<bool, kNumLocs> in_domain{}, in_image{};
+  std::array<unsigned, kNumLocs> pre{};
+  for (const auto &[a, b] : register_map) {
+    f[a] = b;
+    in_domain[a] = true;
+    in_image[b] = true;
+    pre[b] = a;
+  }
+  // The map is a partial injection. Complete it to a permutation: a target that is not
+  // itself mapped takes the start of its chain (s4=s8,s8=s9 gives s9 -> s4). The backward
+  // walk ends because the chain cannot return to a location outside the domain.
+  for (const auto &[a, b] : register_map) {
+    if (in_domain[b])
+      continue;
+    unsigned x = a;
+    while (in_image[x])
+      x = pre[x];
+    f[b] = x;
+  }
+  return f;
+}
+
+std::array<unsigned, kNumLocs> invert_permutation(const std::array<unsigned, kNumLocs> &f) {
+  std::array<unsigned, kNumLocs> inv{};
+  for (unsigned l = 0; l < kNumLocs; ++l)
+    inv[f[l]] = l;
+  return inv;
+}
+
+std::array<unsigned, kNumLocs> RegionContract::entry_forward() const {
+  return complete_register_map(entry_map);
+}
+std::array<unsigned, kNumLocs> RegionContract::entry_inverse() const {
+  return invert_permutation(entry_forward());
+}
+std::array<unsigned, kNumLocs> RegionContract::exit_forward() const {
+  return complete_register_map(exit_map);
+}
+std::array<unsigned, kNumLocs> RegionContract::exit_inverse() const {
+  return invert_permutation(exit_forward());
+}
+
+std::optional<std::vector<std::pair<unsigned, unsigned>>> parse_register_map(std::string_view text,
+                                                                             std::string &error) {
+  std::vector<std::pair<unsigned, unsigned>> out;
+  while (!text.empty()) {
+    const size_t comma = text.find(',');
+    const std::string_view item = text.substr(0, comma);
+    const size_t eq = item.find('=');
+    if (eq == std::string_view::npos) {
+      error = "register map entry '" + std::string(item) + "' is not old=new";
+      return std::nullopt;
+    }
+    auto a = parse_loc(item.substr(0, eq));
+    auto b = parse_loc(item.substr(eq + 1));
+    if (!a || !b) {
+      error = "register map entry '" + std::string(item) + "' names an unknown location";
+      return std::nullopt;
+    }
+    // EXEC/VCC/M0/SCC have aliases and derived views that must stay consistent (handoff 6),
+    // so only plain SGPRs can be renamed.
+    if (*a >= kNumSgprs || *b >= kNumSgprs) {
+      error = "register map entry '" + std::string(item) + "': only s0..s101 can be mapped";
+      return std::nullopt;
+    }
+    for (const auto &[x, y] : out)
+      if (x == *a || y == *b) {
+        error = "register map maps a location twice: '" + std::string(item) + "'";
+        return std::nullopt;
+      }
+    if (*a != *b)
+      out.emplace_back(*a, *b);
+    if (comma == std::string_view::npos)
+      break;
+    text.remove_prefix(comma + 1);
+  }
+  return out;
+}
+
+std::string format_register_map(const std::vector<std::pair<unsigned, unsigned>> &m) {
+  std::string s;
+  for (const auto &[a, b] : m) {
+    if (!s.empty())
+      s += ',';
+    s += loc_name(a) + "=" + loc_name(b);
+  }
+  return s;
 }
 
 const std::vector<std::string> &frame_field_names() {
@@ -63,6 +159,10 @@ Json RegionContract::to_json() const {
   }
   j.set("constraints", std::move(cs));
   j.set("exit_mapping", exit_mapping);
+  if (!entry_map.empty())
+    j.set("entry_map", format_register_map(entry_map));
+  if (!exit_map.empty())
+    j.set("exit_map", format_register_map(exit_map));
   j.set("pending_effects", pending_effects);
   j.set("composition", composition);
   Json frame = Json::array();
@@ -155,6 +255,14 @@ std::optional<RegionContract> RegionContract::from_json(const Json &j, std::stri
     c.constraints.push_back(k);
   }
   c.exit_mapping = j["exit_mapping"].as_string();
+  for (const char *key : {"entry_map", "exit_map"}) {
+    if (!j.has(key))
+      continue;
+    auto m = parse_register_map(j[key].as_string(), error);
+    if (!m)
+      return std::nullopt;
+    (std::string_view(key) == "entry_map" ? c.entry_map : c.exit_map) = std::move(*m);
+  }
   c.pending_effects = j.has("pending_effects") ? j["pending_effects"].as_string() : "NONE";
   c.composition = j.has("composition") ? j["composition"].as_string() : "NOT_CHECKED";
   auto status = parse_contract_status(j["status"].as_string());

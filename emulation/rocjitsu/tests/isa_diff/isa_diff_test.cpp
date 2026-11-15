@@ -14,6 +14,7 @@
 #include "kernel_model.h"
 #include "mutation.h"
 #include "region_runner.h"
+#include "result_cache.h"
 
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
@@ -204,6 +205,34 @@ TEST(IsaDiffKernelModel, PcTaintFollowsTheAddressChain) {
 // ---------------------------------------------------------------------------
 // Alignment and classification
 
+TEST(IsaDiffKernelModel, ImplicitStoreBaseReadsKeepLivenessPrecise) {
+  // global_store_* reports its SGPR base pair as implicit uses. Those are now translated
+  // into tracked reads instead of an unknown effect, so a store after the region no
+  // longer makes every location live, and a renamed dead SALU temporary (s8 vs s10) is
+  // not reported as a mismatch.
+  auto insts = decode_all(k_valutemp_old);
+  ASSERT_EQ(insts.size(), 7u);
+  RegisterSet implicit;
+  insts[5]->implicit_uses(implicit);
+  EXPECT_FALSE(implicit.none()); // the decoder does report hidden uses here
+  const Effects fx = classify(*insts[5]);
+  EXPECT_FALSE(fx.unknown_effect);
+  EXPECT_TRUE(fx.reads.test(6));
+  EXPECT_TRUE(fx.reads.test(7));
+  EXPECT_FALSE(fx.reject_reason.empty()); // still outside P0
+  CaseData d = analyze(k_valutemp_old, k_valutemp_new);
+  ASSERT_EQ(d.regions.size(), 1u);
+  const RegionContract &k = d.regions[0].contract;
+  EXPECT_EQ(k.status, ContractStatus::Established);
+  EXPECT_TRUE(k.observable.test(5));
+  EXPECT_FALSE(k.observable.test(8));
+  EXPECT_FALSE(k.observable.test(10));
+  TestRun t = run(d, 500);
+  ASSERT_EQ(t.results.size(), 1u);
+  EXPECT_EQ(t.results[0].test_status, TestStatus::NoMismatchFound);
+  EXPECT_EQ(t.overall(), "NO_MISMATCH_FOUND");
+}
+
 TEST(IsaDiffAlign, IdenticalKernelsHaveNoSemanticDiff) {
   CaseData d = analyze(k_shift_old, k_shift_old);
   EXPECT_EQ(d.changes.size(), 0u);
@@ -360,9 +389,29 @@ TEST(IsaDiffValidator, SameSeedIsDeterministicAcrossRunsAndRunners) {
 
 TEST(IsaDiffValidator, ConstraintDependentRewriteSeparatesUnrestrictedFromConstrained) {
   // Unrestricted entry: s_lshr vs s_bfe differ once s4 >= 256.
-  CaseData bare = analyze(k_constraint_old, k_constraint_new);
+  PlanOptions no_derive;
+  no_derive.derive_constraints = false;
+  CaseData bare = analyze(k_constraint_old, k_constraint_new, no_derive);
   ASSERT_EQ(bare.regions.size(), 1u);
   EXPECT_EQ(run(bare).results[0].test_status, TestStatus::LocalMismatch);
+
+  // The common prefix (s_and_b32 s4, s4, 0xff) proves s4 < 256: a derived, established
+  // constraint. The verdict is the constrained one; the unrestricted run is reported
+  // separately and flags the rewrite as constraint-dependent.
+  CaseData derived = analyze(k_constraint_old, k_constraint_new);
+  ASSERT_EQ(derived.regions.size(), 1u);
+  const RegionContract &k = derived.regions[0].contract;
+  ASSERT_EQ(k.constraints.size(), 1u);
+  EXPECT_EQ(k.constraints[0].loc, 4u);
+  EXPECT_EQ(k.constraints[0].known_zero, 0xffffff00u);
+  EXPECT_EQ(k.constraints[0].source, "common_prefix_analysis");
+  EXPECT_EQ(k.status, ContractStatus::Established);
+  TestRun d = run(derived, 1000);
+  EXPECT_EQ(d.results[0].test_status, TestStatus::NoMismatchFound);
+  ASSERT_FALSE(d.results[0].unrestricted.is_null());
+  EXPECT_EQ(d.results[0].unrestricted["test_status"].as_string(), "LOCAL_MISMATCH");
+  EXPECT_TRUE(d.results[0].unrestricted["constraint_dependent"].as_bool());
+  EXPECT_EQ(d.overall(), "NO_MISMATCH_FOUND");
 
   // Executing the common prefix that establishes the range: ESTABLISHED, no mismatch.
   PlanOptions ctx;
@@ -392,6 +441,25 @@ TEST(IsaDiffValidator, ConstraintDependentRewriteSeparatesUnrestrictedFromConstr
   EXPECT_EQ(constrained.results[0].test_status, TestStatus::NoMismatchFound);
   EXPECT_EQ(constrained.results[0].contract_status, ContractStatus::Assumed);
   EXPECT_GT(constrained.results[0].valid_pairs, 0u);
+}
+
+TEST(IsaDiffValidator, DerivedConstraintsComeOnlyFromCommonCode) {
+  PlanOptions no_merge;
+  no_merge.merge_same_block = false;
+  CaseData split = analyze(k_twohunk_old, k_twohunk_new, no_merge);
+  ASSERT_EQ(split.regions.size(), 2u);
+  const RegionContract &k = split.regions[1].contract;
+  bool s9_exact = false, s4_constrained = false;
+  for (const auto &c : k.constraints) {
+    EXPECT_EQ(c.source, "common_prefix_analysis");
+    s9_exact |= c.loc == 9 && c.known_one == 7u && c.known_zero == ~7u; // common s_mov_b32 s9, 7
+    s4_constrained |= c.loc == 4; // written by the changed region r0: nothing may be derived
+  }
+  EXPECT_TRUE(s9_exact);
+  EXPECT_FALSE(s4_constrained);
+  // Kernel inputs are never constrained: the first region's inputs are unknown.
+  for (const auto &c : split.regions[0].contract.constraints)
+    EXPECT_NE(c.loc, 2u);
 }
 
 TEST(IsaDiffValidator, ContradictoryConstraintsNeverPass) {
@@ -810,7 +878,9 @@ TEST(IsaDiffBoundary, OffByOneAgainstALiteralIsAlwaysCaught) {
 }
 
 TEST(IsaDiffBoundary, ConstraintEdgesRunAndOutOfContractValuesAreRejectedNotChanged) {
-  CaseData d = analyze(k_constraint_old, k_constraint_new);
+  PlanOptions manual_only; // this test is about a hand-written range constraint
+  manual_only.derive_constraints = false;
+  CaseData d = analyze(k_constraint_old, k_constraint_new, manual_only);
   ASSERT_EQ(d.regions.size(), 1u);
   Constraint c;
   c.loc = 4;
@@ -957,7 +1027,9 @@ TEST(IsaDiffExpansion, RealDifferencePersistsAndPrerequisiteContextResolves) {
   EXPECT_EQ(live.overall(), "LOCAL_MISMATCH");
 
   // s_lshr vs s_bfe is only equal after the common s_and_b32 s4, s4, 0xff.
-  TestRun constraint = run(analyze(k_constraint_old, k_constraint_new));
+  PlanOptions no_derive; // exercise expansion, not the derived prefix constraint
+  no_derive.derive_constraints = false;
+  TestRun constraint = run(analyze(k_constraint_old, k_constraint_new, no_derive));
   EXPECT_EQ(constraint.results[0].test_status, TestStatus::LocalMismatch);
   EXPECT_EQ(constraint.results[0].resolution, "RESOLVED_BY_CONTEXT");
   EXPECT_NE(constraint.results[0].resolved_by.find("b1"), std::string::npos);
@@ -1124,6 +1196,281 @@ TEST(IsaDiffLearning, PolicyGetsHistoryRichFeedbackAndEveryCaseIsLogged) {
   EXPECT_EQ(lines.back()["type"].as_string(), "summary");
   EXPECT_EQ(lines.back()["novelty_buckets"].as_uint(), r.novelty_buckets);
   std::filesystem::remove_all(opt.case_log_dir);
+}
+
+// ---------------------------------------------------------------------------
+// Manual region and register map (handoff 3.1, 12)
+
+TEST(IsaDiffManual, RegisterMapParsingAndPermutation) {
+  std::string error;
+  auto m = parse_register_map("s4=s8,s8=s9", error);
+  ASSERT_TRUE(m) << error;
+  RegionContract k;
+  k.entry_map = *m;
+  const auto f = k.entry_forward();
+  const auto inv = k.entry_inverse();
+  EXPECT_EQ(k.exit_forward()[4], 4u); // the exit map is independent
+  EXPECT_EQ(f[4], 8u);
+  EXPECT_EQ(f[8], 9u);
+  EXPECT_EQ(f[9], 4u); // chain completed back to its start: still a permutation
+  EXPECT_EQ(f[5], 5u);
+  for (unsigned l = 0; l < kNumLocs; ++l)
+    EXPECT_EQ(inv[f[l]], l);
+  EXPECT_EQ(format_register_map(*m), "s4=s8,s8=s9");
+  EXPECT_FALSE(parse_register_map("s4=s8,s5=s8", error)); // two sources, one target
+  EXPECT_FALSE(parse_register_map("s4=s8,s4=s9", error)); // one source twice
+  EXPECT_FALSE(parse_register_map("exec_lo=s8", error));  // specials keep identity
+  EXPECT_FALSE(parse_register_map("s4", error));
+  // Round trip through the contract JSON.
+  k.entry_equal = all_locs();
+  k.canary = LocSet{};
+  k.status = ContractStatus::Assumed;
+  auto back = RegionContract::from_json(k.to_json(), error);
+  ASSERT_TRUE(back) << error;
+  EXPECT_EQ(back->entry_map, k.entry_map);
+  EXPECT_TRUE(back->exit_map.empty());
+}
+
+TEST(IsaDiffManual, ManualRegionStaysAssumedAndLeavesOtherHunksUnresolved) {
+  PlanOptions opt;
+  opt.manual_region = "old:5-6,new:0x14-0x18"; // s_add_u32 s6, s4/s8, s5
+  CaseData d = analyze(k_rename_old, k_rename_new, opt);
+  ASSERT_EQ(d.regions.size(), 1u);
+  const RegionPair &r = d.regions[0];
+  EXPECT_EQ(r.id, "m0");
+  EXPECT_EQ(r.status, RegionStatus::Ready) << r.reason;
+  EXPECT_EQ(r.contract.status, ContractStatus::Assumed);
+  EXPECT_EQ(r.contract.composition, "NOT_CHECKED");
+  // Without a map the planner uses identity: s4 and s8 are separate entry values.
+  EXPECT_TRUE(r.contract.entry_equal.test(4));
+  EXPECT_TRUE(r.contract.entry_equal.test(8));
+  EXPECT_TRUE(d.variants.empty());
+  // The two upstream hunks are not covered: they stay unresolved.
+  size_t uncovered = 0;
+  for (const auto &u : d.unresolved)
+    uncovered += u.what.find("not covered by the manual region") != std::string::npos;
+  EXPECT_EQ(uncovered, 2u);
+  // Identity is the wrong correspondence here: old s4+s5 vs new s8+s5.
+  TestRun t = run(d, 200);
+  ASSERT_EQ(t.results.size(), 1u);
+  EXPECT_EQ(t.results[0].test_status, TestStatus::LocalMismatch);
+  EXPECT_NE(t.coverage(), "COMPLETE_FOR_DECLARED_SCOPE");
+}
+
+TEST(IsaDiffManual, RegisterMapReconcilesRenameButStaysAssumed) {
+  PlanOptions opt;
+  opt.manual_region = "old:5-6,new:5-6";
+  opt.register_map = "s4=s8";
+  CaseData d = analyze(k_rename_old, k_rename_new, opt);
+  ASSERT_EQ(d.regions.size(), 1u);
+  const RegionPair &r = d.regions[0];
+  ASSERT_EQ(r.status, RegionStatus::Ready) << r.reason;
+  EXPECT_EQ(r.contract.mapping, "user_register_map");
+  EXPECT_EQ(r.contract.status, ContractStatus::Assumed);
+  EXPECT_TRUE(r.contract.entry_equal.test(4));
+  EXPECT_FALSE(r.contract.entry_equal.test(8)); // new s8 is old s4 under the map
+  bool user_source = false;
+  for (const auto &s : r.contract.sources)
+    user_source |= s.source == "user_assumption" && s.what.find("s4=s8") != std::string::npos;
+  EXPECT_TRUE(user_source);
+  // The initial new state receives old s4's value at s8.
+  MachineState so, sn;
+  Sample sample;
+  sample.value[4] = 0x1234;
+  build_initial_states(r.contract, sample, Frame{}, 1, 0, so, sn);
+  EXPECT_EQ(so.get(4), 0x1234u);
+  EXPECT_EQ(sn.get(8), 0x1234u);
+  TestRun t = run(d, 400);
+  ASSERT_EQ(t.results.size(), 1u);
+  EXPECT_EQ(t.results[0].test_status, TestStatus::NoMismatchFound) << t.results[0].reason;
+  EXPECT_EQ(t.results[0].contract_status, ContractStatus::Assumed);
+  EXPECT_GT(t.results[0].valid_pairs, 0u);
+
+  // A wrong map is caught, not trusted.
+  opt.register_map = "s4=s9";
+  CaseData wrong = analyze(k_rename_old, k_rename_new, opt);
+  ASSERT_EQ(wrong.regions.size(), 1u);
+  TestRun tw = run(wrong, 200);
+  EXPECT_EQ(tw.results[0].test_status, TestStatus::LocalMismatch);
+}
+
+TEST(IsaDiffManual, ManualRegionRejectsBadSpecsAndBlockCrossing) {
+  std::string error;
+  PlanOptions opt;
+  opt.register_map = "s4=s8";
+  EXPECT_FALSE(analyze_artifacts(artifact_from_words(k_rename_old, "old"),
+                                 artifact_from_words(k_rename_new, "new"), opt, error));
+  EXPECT_NE(error.find("--manual-region"), std::string::npos);
+  for (const char *bad : {"old:5-6", "old:6-5,new:5-6", "old:5-6,new:0x15-0x18", "mid:5-6,new:5-6",
+                          "old:5-6,new:5-99", "old:8-8,new:8-8"}) {
+    PlanOptions o;
+    o.manual_region = bad;
+    EXPECT_FALSE(analyze_artifacts(artifact_from_words(k_rename_old, "old"),
+                                   artifact_from_words(k_rename_new, "new"), o, error))
+        << bad;
+  }
+  // A hand-picked range across a block boundary is not mapped by guesswork.
+  PlanOptions cross;
+  cross.manual_region = "old:3-6,new:3-6";
+  CaseData d = analyze(k_rename_old, k_rename_new, cross);
+  ASSERT_EQ(d.regions.size(), 1u);
+  EXPECT_EQ(d.regions[0].status, RegionStatus::Inconclusive);
+  EXPECT_NE(d.regions[0].reason.find("INCONCLUSIVE_MAPPING"), std::string::npos);
+}
+
+TEST(IsaDiffArtifact, MetadataFieldsAreComparedPerKernel) {
+  Artifact a = artifact_from_words(k_rename_old, "old");
+  Artifact b = artifact_from_words(k_rename_old, "new");
+  a.metadata_parsed = b.metadata_parsed = true;
+  a.metadata_sha256 = "1";
+  b.metadata_sha256 = "2";
+  a.kernel_metadata = {{".name", "\"k\""}, {".sgpr_count", "18"}, {".args[0].size", "8"}};
+  b.kernel_metadata = {{".name", "\"k\""}, {".sgpr_count", "20"}, {".args[0].size", "8"}};
+  std::string error;
+  auto d = analyze_artifacts(a, b, {}, error);
+  ASSERT_TRUE(d) << error;
+  ASSERT_EQ(d->unresolved.size(), 1u);
+  EXPECT_EQ(d->unresolved[0].kind, "metadata");
+  EXPECT_EQ(d->unresolved[0].what, "kernel metadata field differs: .sgpr_count (old 18, new 20)");
+  // The note differs only in another kernel's entry: informational, not a semantic change.
+  b.kernel_metadata = a.kernel_metadata;
+  auto e = analyze_artifacts(a, b, {}, error);
+  ASSERT_TRUE(e) << error;
+  EXPECT_TRUE(e->unresolved.empty());
+  ASSERT_EQ(e->notes.size(), 1u);
+  EXPECT_FALSE(e->notes[0].semantic);
+  // Unparsed metadata falls back to the whole-note hash, conservatively semantic.
+  b.metadata_parsed = false;
+  auto f = analyze_artifacts(a, b, {}, error);
+  ASSERT_TRUE(f) << error;
+  ASSERT_EQ(f->unresolved.size(), 1u);
+  EXPECT_NE(f->unresolved[0].what.find("not parsed field by field"), std::string::npos);
+}
+
+TEST(IsaDiffArtifact, AnalysisTimeLimitLeavesContractsUnresolved) {
+  PlanOptions opt;
+  opt.max_analysis_us = 1; // reached before the optional steps
+  CaseData d = analyze(k_rename_old, k_rename_new, opt);
+  ASSERT_FALSE(d.regions.empty());
+  EXPECT_TRUE(d.variants.empty());
+  for (const auto &r : d.regions) {
+    EXPECT_EQ(r.contract.status, ContractStatus::Unresolved);
+    EXPECT_EQ(r.contract.composition, "NOT_CHECKED");
+  }
+  ASSERT_TRUE(d.analysis.has("skipped_for_time"));
+  EXPECT_EQ(d.analysis["skipped_for_time"].items().back().as_string(), "composition check");
+  const Json &timing = d.analysis["timing"];
+  for (const char *k : {"parse_ns", "decode_cfg_ns", "dataflow_ns", "align_classify_ns", "plan_ns"})
+    EXPECT_TRUE(timing.has(k)) << k;
+}
+
+TEST(IsaDiffCache, ResultCacheHitsOnlyForTheSamePreparedRegionAndBudget) {
+  const std::string cache = temp_dir("result_cache");
+  const std::string cex = temp_dir("result_cache_cex");
+  PlanOptions manual;
+  manual.manual_region = "old:5-6,new:5-6"; // identity mapping is wrong here: mismatch
+  CaseData d = analyze(k_rename_old, k_rename_new, manual);
+  TestOptions opt;
+  opt.cases = 100;
+  opt.cache_dir = cache;
+  opt.counterexample_dir = cex;
+  std::vector<RegionResult> first, second;
+  Json r1 = test_case(d, opt, "", &first);
+  ASSERT_EQ(first.size(), 1u);
+  EXPECT_TRUE(first[0].cached.is_null());
+  EXPECT_EQ(r1["cache"]["misses"].as_uint(), 1u);
+  ASSERT_EQ(first[0].test_status, TestStatus::LocalMismatch);
+  Json r2 = test_case(d, opt, "", &second);
+  ASSERT_EQ(second.size(), 1u);
+  ASSERT_FALSE(second[0].cached.is_null());
+  EXPECT_EQ(r2["cache"]["hits"].as_uint(), 1u);
+  EXPECT_TRUE(second[0].cached["cache"]["hit"].as_bool());
+  EXPECT_EQ(second[0].test_status, first[0].test_status);
+  EXPECT_EQ(second[0].valid_pairs, first[0].valid_pairs);
+  EXPECT_EQ(r2["overall"]["test_status"].as_string(), r1["overall"]["test_status"].as_string());
+  // The cached counterexample is a self-contained copy that still replays.
+  ASSERT_FALSE(second[0].counterexample_files.empty());
+  EXPECT_EQ(second[0].counterexample_files[0].rfind(cache, 0), 0u);
+  auto text = read_text_file(second[0].counterexample_files[0]);
+  ASSERT_TRUE(text);
+  std::string error;
+  auto bundle = Json::parse(*text, &error);
+  ASSERT_TRUE(bundle) << error;
+  EXPECT_TRUE(replay_counterexample(*bundle, error).reproduced) << error;
+  // Another seed, or the same bytes under a different contract, is a miss.
+  TestOptions other_seed = opt;
+  other_seed.seed = 2;
+  std::vector<RegionResult> third;
+  (void)test_case(d, other_seed, "", &third);
+  EXPECT_TRUE(third[0].cached.is_null());
+  CaseData changed = d;
+  changed.regions[0].contract.observable.set(9);
+  changed.regions[0].prepared_key = compute_prepared_key(changed.regions[0]);
+  std::vector<RegionResult> fourth;
+  (void)test_case(changed, opt, "", &fourth);
+  EXPECT_TRUE(fourth[0].cached.is_null());
+  EXPECT_FALSE(build_fingerprint().empty());
+  EXPECT_NE(build_fingerprint(), "unavailable");
+  std::filesystem::remove_all(cache);
+  std::filesystem::remove_all(cex);
+}
+
+TEST(IsaDiffCache, AnalysisCacheIsKeyedByArtifactsAndPlanOptions) {
+  const std::string cache = temp_dir("analysis_cache");
+  const Artifact a = artifact_from_words(k_shift_old, "old");
+  const Artifact b = artifact_from_words(k_shift_new, "new");
+  std::string error;
+  bool hit = true;
+  auto d1 = analyze_cached(a, b, {}, cache, hit, error);
+  ASSERT_TRUE(d1) << error;
+  EXPECT_FALSE(hit);
+  auto d2 = analyze_cached(a, b, {}, cache, hit, error);
+  ASSERT_TRUE(d2) << error;
+  EXPECT_TRUE(hit);
+  EXPECT_EQ(d2->to_json()["regions"].dump(-1), d1->to_json()["regions"].dump(-1));
+  PlanOptions other;
+  other.context_insts = 1;
+  auto d3 = analyze_cached(a, b, other, cache, hit, error);
+  ASSERT_TRUE(d3) << error;
+  EXPECT_FALSE(hit);
+  const Artifact c = artifact_from_words(k_shift_old, "new"); // identical sides
+  auto d4 = analyze_cached(a, c, {}, cache, hit, error);
+  ASSERT_TRUE(d4) << error;
+  EXPECT_FALSE(hit);
+  std::filesystem::remove_all(cache);
+}
+
+TEST(IsaDiffDiagnostics, EntryPrefixRegionsRunOnlyWhenRequestedAndStayOutOfTheVerdict) {
+  CaseData plain = analyze(k_shift_old, k_shift_new);
+  EXPECT_TRUE(plain.diagnostics.empty());
+  PlanOptions opt;
+  opt.diagnostic_entry_prefix = true;
+  CaseData d = analyze(k_shift_old, k_shift_new, opt);
+  ASSERT_EQ(d.diagnostics.size(), 1u);
+  const RegionPair &diag = d.diagnostics[0];
+  EXPECT_EQ(diag.id, "r0.diag-entry");
+  EXPECT_EQ(diag.parent, "r0");
+  ASSERT_EQ(diag.status, RegionStatus::Ready) << diag.reason;
+  EXPECT_EQ(diag.old_side.begin, 0u);
+  EXPECT_EQ(diag.contract.status, ContractStatus::Assumed);
+  TestRun t = run(d, 200);
+  ASSERT_EQ(t.results.size(), 1u); // the verdict covers r0 only
+  ASSERT_EQ(t.report["diagnostics"].items().size(), 1u);
+  const Json &dj = t.report["diagnostics"].items()[0];
+  EXPECT_EQ(dj["test_status"].as_string(), "NO_MISMATCH_FOUND");
+  EXPECT_GT(dj["counts"]["valid_pairs"].as_uint(), 0u);
+  // Round trip through case.json keeps the diagnostic regions.
+  std::string error;
+  auto back = CaseData::from_json(d.to_json(), error);
+  ASSERT_TRUE(back) << error;
+  EXPECT_EQ(back->diagnostics.size(), 1u);
+  // A region behind control flow, or with SMEM in the prefix, is reported, not run.
+  CaseData rename = analyze(k_rename_old, k_rename_new, opt);
+  bool not_entry = false;
+  for (const auto &r : rename.diagnostics)
+    not_entry |= r.status == RegionStatus::Unsupported &&
+                 r.reason.find("not in the kernel's entry block") != std::string::npos;
+  EXPECT_TRUE(not_entry);
 }
 
 } // namespace

@@ -47,13 +47,14 @@ uint32_t canary_value(uint64_t seed, uint64_t case_index, unsigned loc, bool new
 }
 
 RegionFeatures make_region_features(const std::vector<RegionInst> &old_insts,
-                                    const std::vector<RegionInst> &new_insts) {
+                                    const std::vector<RegionInst> &new_insts,
+                                    const std::array<unsigned, kNumLocs> *new_to_old) {
   RegionFeatures f;
   for (const auto &i : old_insts)
     f.old_text.push_back(i.text);
   for (const auto &i : new_insts)
     f.new_text.push_back(i.text);
-  f.roles = infer_roles(old_insts, new_insts);
+  f.roles = infer_roles(old_insts, new_insts, new_to_old);
   for (unsigned l = 0; l < kNumLocs; ++l) {
     for (const auto &v : role_catalog(f.roles.roles[l]))
       f.role_values[l].push_back(v.value);

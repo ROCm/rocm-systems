@@ -13,11 +13,23 @@
 #pragma once
 
 #include <cstdint>
+#include <map>
 #include <span>
 #include <string>
 #include <vector>
 
 namespace rocjitsu::isa_diff {
+
+/// One relocation that patches bytes of .text (static .rela.text kept by --emit-relocs or
+/// a relocatable object, or a dynamic relocation whose target lies in .text).
+struct TextRelocation {
+  uint64_t offset = 0; ///< Section-relative byte offset into .text.
+  uint32_t type = 0;   ///< R_AMDGPU_* type number.
+  std::string symbol;  ///< Target symbol name, empty when none.
+  int64_t addend = 0;
+  bool operator==(const TextRelocation &) const = default;
+};
+[[nodiscard]] std::string describe_relocation(const TextRelocation &r);
 
 struct Artifact {
   std::string label;  ///< Path or synthetic label.
@@ -33,6 +45,15 @@ struct Artifact {
   std::vector<uint8_t> descriptor;
   /// SHA-256 of the code object's note (AMDHSA metadata) sections; empty for raw words.
   std::string metadata_sha256;
+  /// Relocations patching .text, sorted by offset (handoff 4: kept, never normalised away).
+  std::vector<TextRelocation> text_relocations;
+  /// True when the AMDHSA metadata note parsed and this kernel's entry was found.
+  bool metadata_parsed = false;
+  /// This kernel's metadata map flattened to key -> value (".args[0].size" -> "8").
+  std::map<std::string, std::string> kernel_metadata;
+  /// Top-level metadata fields other than amdhsa.kernels ("amdhsa.target", ...).
+  std::map<std::string, std::string> global_metadata;
+  uint64_t load_ns = 0; ///< Time spent reading and parsing the input (handoff 11).
 };
 
 /// @brief Load a code object (ELF magic) or a raw word stream.

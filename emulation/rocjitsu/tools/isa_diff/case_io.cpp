@@ -3,6 +3,9 @@
 
 #include "case_io.h"
 
+#include "result_cache.h"
+
+#include <algorithm>
 #include <chrono>
 #include <filesystem>
 
@@ -30,6 +33,10 @@ Json artifact_json(const Artifact &a, size_t num_insts) {
   j.set("reachable_insts", static_cast<uint64_t>(num_insts));
   if (!a.metadata_sha256.empty())
     j.set("metadata_sha256", a.metadata_sha256);
+  if (a.kind == "code_object") {
+    j.set("text_relocations", static_cast<uint64_t>(a.text_relocations.size()));
+    j.set("metadata_parsed", a.metadata_parsed);
+  }
   return j;
 }
 
@@ -53,6 +60,8 @@ Json CaseData::to_json() const {
   j.set("identity", identity);
   j.set("command", command);
   j.set("artifacts", artifacts);
+  if (!provenance.is_null())
+    j.set("provenance", provenance);
   j.set("changes", changes);
   Json un = Json::array();
   for (const auto &u : unresolved) {
@@ -81,6 +90,12 @@ Json CaseData::to_json() const {
   for (const auto &v : variants)
     vj.push(v.to_json());
   j.set("expansion_variants", std::move(vj));
+  if (!diagnostics.empty()) {
+    Json dj = Json::array();
+    for (const auto &d : diagnostics)
+      dj.push(d.to_json());
+    j.set("diagnostic_regions", std::move(dj));
+  }
   j.set("analysis", analysis);
   return j;
 }
@@ -94,11 +109,18 @@ std::optional<CaseData> CaseData::from_json(const Json &j, std::string &error) {
   d.identity = j["identity"];
   d.command = j["command"];
   d.artifacts = j["artifacts"];
+  d.provenance = j["provenance"];
   d.changes = j["changes"];
   for (const Json &u : j["unresolved"].items())
     d.unresolved.push_back({u["kind"].as_string(), u["what"].as_string(), u["region"].as_string()});
-  for (const Json &n : j["notes"].items())
-    d.notes.push_back({ChangeKind::Layout, n["what"].as_string(), n["semantic"].as_bool()});
+  for (const Json &n : j["notes"].items()) {
+    ChangeKind kind = ChangeKind::Unexplained;
+    for (auto k : {ChangeKind::Instruction, ChangeKind::ControlFlow, ChangeKind::Layout,
+                   ChangeKind::Metadata, ChangeKind::Unexplained})
+      if (n["kind"].as_string() == change_kind_name(k))
+        kind = k;
+    d.notes.push_back({kind, n["what"].as_string(), n["semantic"].as_bool()});
+  }
   auto read_regions = [&](const Json &list, std::vector<RegionPair> &out) {
     for (const Json &r : list.items()) {
       auto region = RegionPair::from_json(r, error);
@@ -116,7 +138,9 @@ std::optional<CaseData> CaseData::from_json(const Json &j, std::string &error) {
     }
     return true;
   };
-  if (!read_regions(j["regions"], d.regions) || !read_regions(j["expansion_variants"], d.variants))
+  if (!read_regions(j["regions"], d.regions) ||
+      !read_regions(j["expansion_variants"], d.variants) ||
+      !read_regions(j["diagnostic_regions"], d.diagnostics))
     return std::nullopt;
   d.analysis = j["analysis"];
   return d;
@@ -141,7 +165,34 @@ std::optional<CaseData> analyze_artifacts(const Artifact &old_artifact,
   const DiffResult diff = diff_kernels(*old_model, *new_model);
   const uint64_t diff_ns = ns_since(t1);
   auto t2 = Clock::now();
-  PlanResult plan = plan_regions(*old_model, *new_model, diff, options);
+  PlanResult plan;
+  if (!options.manual_region.empty()) {
+    auto manual = parse_manual_region(options.manual_region, *old_model, *new_model, error);
+    if (!manual)
+      return std::nullopt;
+    if (!options.register_map.empty() &&
+        (!options.entry_map.empty() || !options.exit_map.empty())) {
+      error = "--map sets both maps; use either --map or --entry-map/--exit-map";
+      return std::nullopt;
+    }
+    for (auto [text, out] : {std::pair{&options.entry_map, &manual->entry_map},
+                             std::pair{&options.exit_map, &manual->exit_map}}) {
+      const std::string &spec = text->empty() ? options.register_map : *text;
+      if (spec.empty())
+        continue;
+      auto map = parse_register_map(spec, error);
+      if (!map)
+        return std::nullopt;
+      *out = std::move(*map);
+    }
+    plan = plan_manual_region(*old_model, *new_model, diff, *manual, options);
+  } else if (!options.register_map.empty() || !options.entry_map.empty() ||
+             !options.exit_map.empty()) {
+    error = "a register map applies only to a manual region (--manual-region)";
+    return std::nullopt;
+  } else {
+    plan = plan_regions(*old_model, *new_model, diff, options);
+  }
   const uint64_t plan_ns = ns_since(t2);
 
   CaseData d;
@@ -173,21 +224,78 @@ std::optional<CaseData> analyze_artifacts(const Artifact &old_artifact,
   d.notes = std::move(plan.notes);
   d.regions = std::move(plan.regions);
   d.variants = std::move(plan.variants);
+  d.diagnostics = std::move(plan.diagnostics);
   d.analysis = Json::object();
   Json opts = Json::object();
   opts.set("max_region_insts", static_cast<uint64_t>(options.max_region_insts));
   opts.set("max_expansions", static_cast<uint64_t>(options.max_expansions));
   opts.set("context_insts", static_cast<uint64_t>(options.context_insts));
   opts.set("merge_same_block", options.merge_same_block);
+  opts.set("derive_constraints", options.derive_constraints);
+  opts.set("max_analysis_us", options.max_analysis_us);
+  opts.set("diagnostic_entry_prefix", options.diagnostic_entry_prefix);
+  if (!options.manual_region.empty())
+    opts.set("manual_region", options.manual_region);
+  if (!options.register_map.empty())
+    opts.set("register_map", options.register_map);
+  if (!options.entry_map.empty())
+    opts.set("entry_map", options.entry_map);
+  if (!options.exit_map.empty())
+    opts.set("exit_map", options.exit_map);
   d.analysis.set("plan_options", std::move(opts));
+  if (!plan.skipped_for_time.empty()) {
+    Json skipped = Json::array();
+    for (const auto &s : plan.skipped_for_time)
+      skipped.push(s);
+    d.analysis.set("skipped_for_time", std::move(skipped));
+  }
   d.analysis.set("alignment_complete", diff.alignment_complete);
   d.analysis.set("layout_shift", diff.layout_shift);
+  // Handoff 11 cost split. compile_ns is added by the CLI when the LLVM plugin ran.
   Json timing = Json::object();
-  timing.set("decode_cfg_liveness_ns", decode_ns);
+  timing.set("parse_ns", old_artifact.load_ns + new_artifact.load_ns);
+  timing.set("decode_cfg_ns", old_model->decode_cfg_ns() + new_model->decode_cfg_ns());
+  timing.set("dataflow_ns", old_model->dataflow_ns() + new_model->dataflow_ns());
+  timing.set("model_total_ns", decode_ns);
   timing.set("align_classify_ns", diff_ns);
   timing.set("plan_ns", plan_ns);
   d.analysis.set("timing", std::move(timing));
   return d;
+}
+
+std::optional<CaseData> analyze_cached(const Artifact &old_artifact, const Artifact &new_artifact,
+                                       const PlanOptions &options, const std::string &cache_dir,
+                                       bool &hit, std::string &error) {
+  hit = false;
+  if (cache_dir.empty() || build_fingerprint() == "unavailable")
+    return analyze_artifacts(old_artifact, new_artifact, options, error);
+  const std::string key = analysis_cache_key(old_artifact, new_artifact, options);
+  const std::string dir = cache_dir + "/analysis/" + key;
+  std::string ignored;
+  if (auto cached = read_case_dir(dir, ignored)) {
+    hit = true;
+    // Same bytes, possibly another path: keep this run's labels.
+    for (const auto *a : {&old_artifact, &new_artifact}) {
+      const char *side = a == &old_artifact ? "old" : "new";
+      Json aj = cached->artifacts[side];
+      aj.set("label", a->label);
+      cached->artifacts.set(side, std::move(aj));
+    }
+    Json c = Json::object();
+    c.set("hit", true);
+    c.set("key", key);
+    c.set("build_fingerprint", build_fingerprint());
+    cached->analysis.set("cache", std::move(c));
+    return cached;
+  }
+  auto data = analyze_artifacts(old_artifact, new_artifact, options, error);
+  // A time-limited plan depends on machine load: never cached.
+  if (data && !data->analysis.has("skipped_for_time")) {
+    std::string werr;
+    if (!write_case_dir(dir, *data, werr))
+      data->analysis.set("cache_store_error", werr);
+  }
+  return data;
 }
 
 Aggregate aggregate_results(const CaseData &data, const std::vector<RegionResult> &results) {
@@ -251,16 +359,62 @@ Aggregate aggregate_results(const CaseData &data, const std::vector<RegionResult
 Json test_case(const CaseData &data, const TestOptions &options, const std::string &region_filter,
                std::vector<RegionResult> *results_out) {
   std::vector<RegionResult> results;
+  // Counterexample bundles carry the artifacts and their provenance (handoff 10).
+  TestOptions with_info = options;
+  with_info.artifact_info = Json::object();
+  with_info.artifact_info.set("artifacts", data.artifacts);
+  if (!data.provenance.is_null())
+    with_info.artifact_info.set("provenance", data.provenance);
+  const TestOptions &topt = with_info;
+  uint64_t cache_hits = 0, cache_misses = 0;
   for (const auto &region : data.regions) {
     if (!region_filter.empty() && region.id != region_filter)
       continue;
-    BaselinePolicy policy(options.seed);
-    RegionResult r = test_region(region, options, policy);
+    std::string cache_key;
+    if (!topt.cache_dir.empty()) {
+      cache_key = result_cache_key(region, data.variants, topt, "baseline-v1");
+      if (auto cached = load_cached_result(topt.cache_dir, cache_key)) {
+        ++cache_hits;
+        results.push_back(std::move(*cached));
+        continue;
+      }
+      ++cache_misses;
+    }
+    BaselinePolicy policy(topt.seed);
+    RegionResult r = test_region(region, topt, policy);
+    // Handoff 3.3/13: with constraints derived from the common prefix, also report the
+    // unrestricted verdict so that a constraint-dependent rewrite is visible as such.
+    const bool derived = std::ranges::any_of(region.contract.constraints, [](const Constraint &c) {
+      return c.source == "common_prefix_analysis";
+    });
+    if (derived && region.status == RegionStatus::Ready) {
+      RegionPair open = region;
+      std::erase_if(open.contract.constraints,
+                    [](const Constraint &c) { return c.source == "common_prefix_analysis"; });
+      open.id = region.id + ".unrestricted";
+      open.prepared_key = compute_prepared_key(open);
+      TestOptions uopt = topt;
+      uopt.max_counterexamples = 1;
+      uopt.case_log_dir.clear();
+      BaselinePolicy upolicy(topt.seed);
+      const RegionResult ur = test_region(open, uopt, upolicy);
+      Json u = Json::object();
+      u.set("test_status", test_status_name(ur.test_status));
+      u.set("valid_pairs", ur.valid_pairs);
+      u.set("mismatches", ur.mismatches);
+      if (!ur.examples.empty())
+        u.set("first_mismatch", ur.examples.front().detail);
+      u.set("constraint_dependent", ur.test_status == TestStatus::LocalMismatch &&
+                                        r.test_status == TestStatus::NoMismatchFound);
+      u.set("note", "same region without the constraints derived from the common prefix; the "
+                    "constrained result above is the verdict");
+      r.unrestricted = std::move(u);
+    }
     if (r.test_status == TestStatus::LocalMismatch) {
       // Handoff 5.2: a local mismatch may be compensated by common code around the
       // change. Try the precomputed larger regions, smallest first.
-      TestOptions vopt = options;
-      vopt.max_counterexamples = std::min<size_t>(options.max_counterexamples, 1);
+      TestOptions vopt = topt;
+      vopt.max_counterexamples = std::min<size_t>(topt.max_counterexamples, 1);
       bool tried = false;
       for (const auto &variant : data.variants) {
         if (variant.parent != region.id || variant.status != RegionStatus::Ready)
@@ -290,7 +444,25 @@ Json test_case(const CaseData &data, const TestOptions &options, const std::stri
                      : tried                ? "PERSISTS_WITH_CONTEXT"
                                             : "NO_EXPANSION_AVAILABLE";
     }
+    if (!cache_key.empty())
+      (void)store_cached_result(topt.cache_dir, cache_key, r);
     results.push_back(std::move(r));
+  }
+  // Handoff 5.3: diagnostic regions were requested explicitly at analysis time. They run
+  // after the verdict regions and are reported apart from them.
+  Json diagnostics = Json::array();
+  for (const auto &dr : data.diagnostics) {
+    if (!region_filter.empty() && dr.parent != region_filter)
+      continue;
+    TestOptions dopt = topt;
+    dopt.max_counterexamples = std::min<size_t>(topt.max_counterexamples, 1);
+    dopt.case_log_dir.clear();
+    BaselinePolicy dpolicy(topt.seed);
+    const RegionResult dres = test_region(dr, dopt, dpolicy);
+    Json dj = dres.to_json();
+    dj.set("diagnostic", "entry_prefix");
+    dj.set("parent", dr.parent);
+    diagnostics.push(std::move(dj));
   }
   // A filtered run cannot speak for the whole change set.
   CaseData scoped = data;
@@ -301,6 +473,8 @@ Json test_case(const CaseData &data, const TestOptions &options, const std::stri
   j.set("schema_version", kSchemaVersion);
   j.set("identity", build_identity());
   j.set("artifacts", data.artifacts);
+  if (!data.provenance.is_null())
+    j.set("provenance", data.provenance);
   Json overall = Json::object();
   overall.set("test_status", test_status_name(agg.test_status));
   overall.set("contract_status", agg.contract_status);
@@ -329,6 +503,19 @@ Json test_case(const CaseData &data, const TestOptions &options, const std::stri
   for (const auto &r : results)
     rj.push(r.to_json());
   j.set("regions", std::move(rj));
+  if (!data.diagnostics.empty()) {
+    j.set("diagnostics", std::move(diagnostics));
+    j.set("diagnostics_note", "explicitly enabled diagnostic path (entry prefix executed with "
+                              "arbitrary entry values); not part of the overall verdict");
+  }
+  if (!topt.cache_dir.empty()) {
+    Json c = Json::object();
+    c.set("dir", topt.cache_dir);
+    c.set("hits", cache_hits);
+    c.set("misses", cache_misses);
+    c.set("build_fingerprint", build_fingerprint());
+    j.set("cache", std::move(c));
+  }
   if (results_out)
     *results_out = std::move(results);
   return j;

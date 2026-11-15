@@ -48,6 +48,8 @@ struct InstRef {
   bool branch_target = false; ///< Target of some direct branch in the kernel.
   /// For a direct branch: index of the target instruction, or -1.
   int64_t branch_target_index = -1;
+  /// Relocations patching this instruction's bytes ("type 1 sym+4; ..."), empty if none.
+  std::string relocations;
 };
 
 /// Memory operations that may still be outstanding at a program point (gfx9 counters).
@@ -105,6 +107,10 @@ public:
   /// True if block @p from can reach block @p to (reflexive).
   [[nodiscard]] bool reaches(uint32_t from, uint32_t to) const;
 
+  /// Handoff 11 cost split: decode + CFG construction, and the dataflow passes.
+  [[nodiscard]] uint64_t decode_cfg_ns() const { return decode_cfg_ns_; }
+  [[nodiscard]] uint64_t dataflow_ns() const { return dataflow_ns_; }
+
   /// Transfer function used by the liveness pass, exposed for tests.
   [[nodiscard]] static LocSet live_transfer(const Effects &fx, const LocSet &live_after);
 
@@ -128,6 +134,8 @@ private:
   std::vector<uint8_t> uncovered_;
   bool cfg_complete_ = true;
   bool reads_pc_ = false;
+  uint64_t decode_cfg_ns_ = 0;
+  uint64_t dataflow_ns_ = 0;
 };
 
 } // namespace rocjitsu::isa_diff

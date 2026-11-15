@@ -45,8 +45,10 @@ struct RegionFeatures {
 };
 
 /// @brief Decode the region once and derive its features (roles, role values).
-[[nodiscard]] RegionFeatures make_region_features(const std::vector<RegionInst> &old_insts,
-                                                  const std::vector<RegionInst> &new_insts);
+[[nodiscard]] RegionFeatures
+make_region_features(const std::vector<RegionInst> &old_insts,
+                     const std::vector<RegionInst> &new_insts,
+                     const std::array<unsigned, kNumLocs> *new_to_old = nullptr);
 
 /// Raw feedback for one case (handoff 8: InputPolicy.observe(raw_feedback)).
 struct Feedback {

@@ -133,9 +133,25 @@ def main():
         )
         if p.returncode not in (0, 1, 2):
             raise SystemExit(f"test failed for {name}: {p.stderr}")
+        res_log = json.loads((d / "case" / "results.json").read_text())
+        # The same run without the per-case JSONL log: the log's own cost.
+        t_nolog, p = run(
+            [
+                args.tool,
+                "test",
+                "--case",
+                str(d / "case"),
+                "--cases",
+                str(args.cases),
+                "--seed",
+                "1",
+                "--no-case-log",
+            ]
+        )
+        if p.returncode not in (0, 1, 2):
+            raise SystemExit(f"test --no-case-log failed for {name}: {p.stderr}")
         case = json.loads((d / "case" / "case.json").read_text())
-        res = json.loads((d / "case" / "results.json").read_text())
-        reg = res["regions"][0]
+        reg = res_log["regions"][0]
         t = reg["timing"]
         n = max(reg["counts"]["executed_pairs"], 1)
         per_case_ns = (
@@ -163,10 +179,9 @@ def main():
                 )
                 / n,
                 "analyze_wall_ms": t_an * 1e3,
-                "decode_cfg_liveness_ms": case["analysis"]["timing"][
-                    "decode_cfg_liveness_ns"
-                ]
-                / 1e6,
+                "parse_ms": case["analysis"]["timing"]["parse_ns"] / 1e6,
+                "decode_cfg_ms": case["analysis"]["timing"]["decode_cfg_ns"] / 1e6,
+                "dataflow_ms": case["analysis"]["timing"]["dataflow_ns"] / 1e6,
                 "align_ms": case["analysis"]["timing"]["align_classify_ns"] / 1e6,
                 "plan_ms": case["analysis"]["timing"]["plan_ns"] / 1e6,
                 "runner_setup_ms": t["setup_ns"] / 1e6,
@@ -178,6 +193,8 @@ def main():
                 "compare_us": t["compare_ns"] / n / 1e3,
                 "test_wall_s": t_te,
                 "cases_per_s_wall": n / t_te,
+                "test_wall_s_no_case_log": t_nolog,
+                "cases_per_s_wall_no_case_log": n / t_nolog,
             }
         )
     (out / "bench.json").write_text(json.dumps(rows, indent=2) + "\n")
@@ -190,7 +207,7 @@ def main():
         "status",
         "insts_per_case",
         "analyze_wall_ms",
-        "decode_cfg_liveness_ms",
+        "decode_cfg_ms",
         "runner_setup_ms",
         "per_case_us",
         "old_exec_us",

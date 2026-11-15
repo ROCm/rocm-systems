@@ -10,9 +10,9 @@ whole kernel is decoded and analysed once.
 P0 scope: gfx950 (CDNA4), wave64, straight-line integer SALU regions inside one basic
 block. The kernel around a region may contain anything; the region may not.
 
-The P0 inputs are AMDGPU code objects and raw instruction words. Reading `.s` through
-LLVM MC, and producing old/new pairs from LLVM switches, are a separate plugin task
-(see `docs/plan.md`).
+Inputs are AMDGPU code objects, raw instruction words, and, through the LLVM plugin
+(`llvm/`), `.s` and `.ll` sources. The core never runs LLVM; the plugin is a separate
+library that turns sources into code objects and records how.
 
 ## Commands
 
@@ -21,8 +21,20 @@ LLVM MC, and producing old/new pairs from LLVM switches, are a separate plugin t
 rj_isa_diff analyze --old old.hsaco --new new.hsaco --kernel my_kernel --out case/
 #   [--context N]       execute N common-prefix instructions before the change
 #   [--max-region N]    region length limit (default 256)
+#   [--max-expansions N]  common instructions added per direction by variants (64)
 #   [--no-merge]        do not merge hunks that share a basic block
+#   [--no-derive-constraints]  no known-bits constraints from the common prefix
+#   [--max-analysis-ms N]  planning time limit (stop rule); hitting it => UNRESOLVED
+#   [--manual-region old:B-E,new:B-E]  hand-written region (at most ASSUMED)
+#     [--map s4=s8,...] | [--entry-map ...] [--exit-map ...]  register correspondence
+#   [--diagnostic-entry-prefix]  also build entry-prefix diagnostic regions
+#   [--cache-dir DIR]   reuse an identical earlier analysis
 #   [--old-kernel/--new-kernel NAME] when the symbol name differs
+#   .s/.ll inputs: [--llvm-bin DIR] [--llc-args S] [--old-llc-args S] [--new-llc-args S]
+
+# 1b. LLVM plugin: compile one .ll twice, with different llc options per side.
+rj_isa_diff llvm-pair --input k.ll --common-args "-O3" --old-args "" \
+    --new-args "-combiner-disabled" --out case/   # + any analyze option
 
 # 2. Paired-input differential test of every READY region.
 rj_isa_diff test --case case/ --seed 1 --cases 10000 [--region r0]
@@ -30,6 +42,7 @@ rj_isa_diff test --case case/ --seed 1 --cases 10000 [--region r0]
 #   [--max-boundary-cases N]  safety cap (default 250000); hitting it => PARTIAL
 #   [--reduction-budget N | --no-reduce]  counterexample reduction (default 4096 runs)
 #   [--no-case-log]  skip the per-case JSONL learning log (case/logs/<region>.jsonl)
+#   [--cache-dir DIR]  reuse results of identical prepared regions and budgets
 #   after a local mismatch, precomputed larger regions (common context) are tried
 #   automatically
 
@@ -40,8 +53,9 @@ rj_isa_diff replay --counterexample case/counterexamples/r0-case17.json [--case 
 rj_isa_diff inject --case case/ --region r0 --side new --inst 1 --xor 0x01000000 --out syn/
 ```
 
-An input file is either an ELF code object (detected by its magic) or a raw
-little-endian instruction stream that is treated as one kernel starting at offset 0.
+An input file is an ELF code object (detected by its magic), a `.s` or `.ll` source
+(LLVM plugin), or a raw little-endian instruction stream treated as one kernel starting
+at offset 0.
 
 Exit codes:
 
@@ -72,6 +86,10 @@ Each evidence level is reported in its own field (`results.json`, `overall` and 
 - A mismatch found under an `UNRESOLVED` contract does not make the overall result
   `LOCAL_MISMATCH`, because the relation itself may be what is wrong.
 - Zero valid cases never count as a pass.
+- When a contract carries constraints derived from the common prefix, the region is also
+  run without them, and the result's `unrestricted` field reports that run. The
+  constrained result is the verdict; `constraint_dependent: true` says the rewrite is
+  only correct under the derived facts.
 
 ## The contract
 
@@ -83,7 +101,10 @@ For each region pair (`case.json` → `regions[].contract`):
   dependency that liveness missed shows up as a mismatch.
 - **C**: `constraints` (known bits, unsigned range, equality), each with its source. A
   constraint written by hand is `user_assumption`, and editing a case after analysis
-  downgrades `ESTABLISHED` to `ASSUMED`.
+  downgrades `ESTABLISHED` to `ASSUMED`. The planner derives known bits for entry
+  locations from the common prefix (`common_prefix_analysis`): a forward must-analysis
+  over constants, masks, shifts, `s_bfe` and min/max, in which every write by changed
+  code is unknown. These constraints never come from the changed code itself.
 - **R_out**: equality on `observable`, the union of both continuations' live-ins. If
   the two continuations read different locations, the region is
   `INCONCLUSIVE_MAPPING` instead of guessing a mapping.
@@ -127,6 +148,126 @@ base result keeps its local mismatch, and `expansion.resolution` records the out
 
 `--context N` still adds manual backward context to every base region.
 
+## Manual regions and register maps
+
+`--manual-region old:B-E,new:B-E` replaces automatic planning with one hand-picked
+region `m0` (handoff 12). B and E are instruction indices or `0x` PCs, and E is
+exclusive. The region goes through the same admissibility checks as an automatic one:
+single block, P0 opcodes, no PC-derived input, no relocated bytes. Its contract:
+
+- is `ASSUMED` (`UNRESOLVED` if metadata differs or pending effects conflict), never
+  `ESTABLISHED`;
+- records the boundaries as a `user_assumption` source;
+- has composition `NOT_CHECKED`.
+
+Every diff hunk outside the range stays in `unresolved`, so the overall result is never
+a pass for the whole change.
+
+Hand-written register correspondences, old=new (handoff 3.1), are allowed only with
+`--manual-region`:
+
+| flag | sets |
+|---|---|
+| `--entry-map s4=s8,...` | where the new side receives each input: old `s4`'s value goes to new `s8` |
+| `--exit-map ...` | where the new side's R_out is read |
+| `--map ...` | both maps |
+
+The two ends need separate maps after a register-allocation change. In the real
+`-enable-misched=false` pair, an input sits in `s[4:5]` vs `s[8:9]`, but the result is in
+`s4` on both sides. That pair needs `--entry-map s4=s8,s5=s9`; `--map` is wrong there.
+
+- The contract keeps old naming. Live-ins are translated through the entry map and
+  live-outs through the exit map.
+- Each map is completed to a permutation (`s4=s8` also sends old `s8` to new `s4`), so
+  every location is still initialised exactly once.
+- Only `s0`..`s101` can be mapped, because EXEC/VCC/M0/SCC aliases must stay consistent.
+- `mapping` becomes `user_register_map`, with a `user_assumption` source. The status is
+  at most `ASSUMED`.
+
+A wrong map shows up as a mismatch, or as `INCONCLUSIVE_MAPPING` when the translated exit
+liveness disagrees. It is never inferred from outputs.
+
+## LLVM plugin
+
+`llvm/` (`rj_isa_diff_llvm`) finds `llc`, `llvm-mc`, `ld.lld` and `llvm-objcopy` in
+`--llvm-bin`, `$RJ_ISA_DIFF_LLVM_BIN`, or `/opt/rocm/llvm/bin`, and runs them with
+`posix_spawn` (no shell).
+
+- `.ll` goes through `llc -mtriple=amdgcn-amd-amdhsa -mcpu=gfx950 <common> <side>`.
+  Side arguments may not change the target (`-mcpu`, `-mattr`, `-mtriple`, `-march`,
+  `-o` and `-filetype` are rejected).
+- `.s` goes through `llvm-mc`, then `ld.lld -shared --emit-relocs`. `--emit-relocs`
+  keeps `.rela.text`, so instructions patched by the linker stay identifiable; the
+  executed bytes are unchanged.
+- A listing without a kernel descriptor falls back to its raw `.text`
+  (`executed_object: raw_text`).
+
+`case.json` gets `provenance.{old,new}` with:
+
+- every command line, its exit code and time;
+- the input SHA-256;
+- the toolchain version and revision;
+- whether both sides came from the same input and toolchain.
+
+Counterexample bundles carry the same provenance. Executed bytes are always the linked
+object, decoded by RocJITsu; re-assembled code is not presented as an original emission.
+
+## Relocations and metadata
+
+- **Relocations**: `REL`/`RELA` entries that patch `.text` are kept per instruction.
+  These are static `.rela.text` entries (relocatable objects, or `--emit-relocs`) and
+  dynamic entries whose target lies in `.text`.
+  - A region containing a relocated instruction is `UNSUPPORTED`.
+  - Matched instructions whose relocations differ (same bytes, other symbol or addend)
+    are a semantic `layout` change.
+- **Metadata**: the AMDHSA note is parsed with `amdhsa::MetadataDocument`. This
+  kernel's map and the global fields are compared field by field.
+  - Argument records are compared as units: one inserted argument is one change.
+  - A note that differs only in other kernels' entries is informational.
+  - An unparsable note falls back to the whole-note hash, conservatively semantic.
+
+## Caches
+
+`--cache-dir DIR` enables two layers (handoff 11):
+
+| layer | key binds |
+|---|---|
+| analysis (`analyze`) | both artifacts' SHA-256, kernel names, every planning option |
+| result (`test`) | the prepared region (instructions, PCs, complete contract), the prepared keys of its expansion variants, policy, seed and every budget |
+
+Both keys also bind the tool and schema versions and a build fingerprint: a SHA-256 of
+the running executable and every executable file it maps. Any rebuild therefore
+invalidates everything.
+
+- Identical region bytes under a different contract miss: a downstream liveness change
+  alters `observable`, and with it the key.
+- A hit carries `cache.hit` and points its counterexamples at copies kept in the cache
+  entry, so it stays replayable.
+- Harness errors and time-limited analyses are never stored.
+- Computing the fingerprint costs roughly 0.2 s per process. It is computed only when
+  `--cache-dir` is given.
+
+## Explicit diagnostic path
+
+The default never falls back to whole-kernel simulation (handoff 5.3).
+`--diagnostic-entry-prefix` additionally builds, for each READY region, the region
+extended back to the kernel entry (`rN.diag-entry`). There the region's inputs are
+produced by executing the common prefix instead of being sampled at the cut, and the
+entry values stand in for the dispatch ABI, which is not modelled.
+
+- Diagnostic regions are run by `test` and reported under `diagnostics`, never in the
+  verdict.
+- A prefix with control flow or non-P0 instructions (`s_load`, ...) makes the
+  diagnostic `UNSUPPORTED` with that reason.
+
+## Stop rules
+
+- `--max-region N`: region length limit.
+- `--max-expansions N`: expansion limit.
+- `--max-analysis-ms N`: planning time limit. Once reached, expansion variants, derived
+  constraints and diagnostics are skipped. If the composition check has not run, every
+  contract is `UNRESOLVED` and the scope is partial (`analysis.skipped_for_time`).
+
 ## Counterexample reduction
 
 Saved counterexamples are shrunk before they are traced and written:
@@ -165,18 +306,21 @@ A region is `UNSUPPORTED`, with a reason, if it contains any of:
 - non-allowlisted opcodes: VALU, memory, MFMA, `s_waitcnt`, barriers, branches,
   `s_getreg`/`s_setreg`, `s_movrel*`, messages/traps;
 - operands outside the modelled state: TTMP, FLAT_SCRATCH, XNACK_MASK, apertures;
-- PC-derived inputs, tracked by forward taint from `s_getpc_b64`.
+- PC-derived inputs, tracked by forward taint from `s_getpc_b64`;
+- instructions whose bytes are patched by a relocation.
 
 A region is `INCONCLUSIVE` if it spans basic blocks or if R_out cannot be established.
 
 Kernel-level items keep coverage `PARTIAL`:
 
 - control-flow hunks;
-- descriptor or metadata differences (a change in `kernel_code_entry_byte_offset` alone
-  is layout only);
+- descriptor fields or this kernel's metadata fields that differ (a change in
+  `kernel_code_entry_byte_offset` alone is layout only);
+- relocations that differ at matched instructions;
 - changed unreachable bytes;
 - unknown CFG successors;
-- a layout shift in a kernel that reads the PC.
+- a layout shift in a kernel that reads the PC;
+- diff hunks outside a manual region.
 
 Execution failures are classified and never treated as no-ops: decode failure,
 missing execution callback (model-only provider), unimplemented, illegal, host
@@ -184,16 +328,32 @@ exception, ISA undefined behaviour (RocJITsu's isa-undefined counter), and PC wr
 
 ## Files
 
-- `case.json`: artifacts with hashes, change hunks, unresolved items, regions
-  (original words, PCs, disassembly), contracts, `prepared_key`, analysis timing.
-- `results.json`: overall and per-region statuses, counts, rejection reasons,
-  executed-instruction counters (proving region-only execution), per-phase timing,
-  and counterexample paths.
-- `counterexamples/<region>-case<k>.json`: a self-contained bundle with the region,
-  contract, both complete initial and final states (reduced), seed, case index,
-  per-instruction traces, first differences, the reduction record, and tool/RocJITsu
-  identity.
+- `case.json`:
+  - artifacts with hashes, relocation counts, and whether metadata was parsed;
+  - LLVM provenance;
+  - change hunks, unresolved items, and regions (original words, PCs, disassembly);
+  - contracts and `prepared_key`;
+  - expansion variants and diagnostic regions;
+  - the analysis cost split: `compile_ns`, `parse_ns`, `decode_cfg_ns`, `dataflow_ns`,
+    `align_classify_ns`, `plan_ns`.
+- `results.json`:
+  - overall and per-region statuses, counts, and rejection reasons;
+  - executed-instruction counters, which show that only the region ran;
+  - per-phase timing (setup, propose, state load, old, new, compare, triage);
+  - unrestricted runs, diagnostics, cache statistics, and counterexample paths.
+- `counterexamples/<region>-case<k>.json`: a self-contained bundle with:
+  - the region and contract;
+  - both complete initial and final states (reduced);
+  - seed and case index;
+  - per-instruction traces and the first differences;
+  - the reduction record;
+  - artifacts and provenance;
+  - tool/RocJITsu identity.
 - `logs/<region>.jsonl`: the per-case learning log (see "Learning hooks").
+
+`docs/schema/rj_isa_diff.v1.schema.json` (JSON Schema 2020-12) defines all four.
+`docs/schema/validate_outputs.py` validates existing files, or drives the CLI over
+built-in fixtures and validates everything it writes.
 
 `prepared_key` hashes the region words, the PCs, the full contract and the execution
 mode. A change in downstream liveness therefore yields a new key even when the region
@@ -256,8 +416,16 @@ case parity. Learned policies are future work, and may only propose inputs.
 ## Tests and measurements
 
 - `rj_isa_diff_tests` (ctest prefix `isa_diff.`) holds the validator suite: positive,
-  negative and rejection cases from handoff section 13.
+  negative and rejection cases from handoff section 13, plus the manual region,
+  register map, metadata, time limit, cache and diagnostic tests.
 - Fixtures come from `tests/isa_diff/fixtures/fixtures.asm`, assembled once by
-  `regen_fixtures.sh`; the tests never run LLVM.
+  `regen_fixtures.sh`; these tests never run LLVM.
+- `rj_isa_diff_llvm_tests` (prefix `isa_diff_llvm.`) is built only when `llc` is found
+  at configure time. It covers the plugin, the real LLVM pairs, relocations and
+  per-kernel metadata.
+- `isa_diff.schema_and_cli` runs `validate_outputs.py` against the CLI and the committed
+  samples. It is skipped when python3-jsonschema is missing.
+- `docs/samples/regen.sh` regenerates the samples (`codeobject`, `synthetic`,
+  `llvm_pair`).
 - `bench/bench.py` measures cost against region size, with a whole-kernel control.
-- Results are in `docs/findings.md`.
+- Results are in `docs/findings.md`. Planned P1/P2 work is in `docs/p1_p2_design.md`.

@@ -5,10 +5,12 @@
 /// @brief CLI: rj_isa_diff analyze | test | replay. See tools/isa_diff/README.md.
 
 #include "case_io.h"
+#include "llvm_frontend.h"
 #include "mutation.h"
 
 #include <charconv>
 #include <cstdio>
+#include <filesystem>
 #include <iostream>
 #include <map>
 #include <optional>
@@ -28,16 +30,27 @@ constexpr int kExitError = 3;
 const char *kUsage =
     "usage:\n"
     "  rj_isa_diff analyze --old FILE --new FILE --out DIR [--kernel NAME]\n"
+    "                      [--llvm-bin DIR] [--llc-args S] [--old-llc-args S] [--new-llc-args S]\n"
     "                      [--old-kernel NAME] [--new-kernel NAME] [--context N]\n"
     "                      [--max-region N] [--max-expansions N] [--no-merge]\n"
+    "                      [--no-derive-constraints] [--max-analysis-ms N]\n"
+    "                      [--manual-region old:B-E,new:B-E [--map s4=s8,...]\n"
+    "                       [--entry-map s4=s8,...] [--exit-map s4=s8,...]]\n"
+    "                      [--diagnostic-entry-prefix] [--cache-dir DIR]\n"
+    "      --manual-region: one hand-written region (instruction indices or 0x PCs, E\n"
+    "      exclusive); --map: old=new register correspondence. Both stay ASSUMED.\n"
     "  rj_isa_diff test    --case DIR [--seed N] [--cases N] [--region ID]\n"
     "                      [--max-counterexamples N] [--max-boundary-cases N]\n"
     "                      [--reduction-budget N] [--no-reduce] [--no-case-log]\n"
+    "                      [--cache-dir DIR]\n"
     "      --cases counts random cases; the boundary/NaN/corner sweep always runs first.\n"
     "  rj_isa_diff replay  --counterexample FILE [--case DIR]\n"
     "  rj_isa_diff inject  --case DIR --region ID --xor MASK --out DIR [--side old|new]\n"
     "                      [--inst N] [--word N] [--label NAME]   (synthetic self-test)\n"
-    "FILE is a gfx950 AMDGPU code object or a raw little-endian instruction stream.\n"
+    "  rj_isa_diff llvm-pair --input K.ll --old-args S --new-args S --out DIR\n"
+    "                      [--common-args S] [--kernel NAME] [--llvm-bin DIR]  (LLVM plugin)\n"
+    "FILE is a gfx950 code object, a raw instruction stream, or .s/.ll (LLVM plugin:\n"
+    "llc -> llvm-mc -> ld.lld from --llvm-bin, $RJ_ISA_DIFF_LLVM_BIN or /opt/rocm/llvm/bin).\n"
     "exit: 0 no mismatch found with complete declared scope, 1 local mismatch,\n"
     "      2 inconclusive/unsupported/partial scope, 3 error.\n";
 
@@ -132,46 +145,110 @@ int exit_code_for(const Json &overall) {
   return kExitInconclusive;
 }
 
-int cmd_analyze(int argc, char **argv) {
-  Args a = parse(argc, argv, 2,
-                 {"--old", "--new", "--out", "--kernel", "--old-kernel", "--new-kernel",
-                  "--context", "--max-region", "--max-expansions"},
-                 {"--no-merge"});
-  if (!a.error.empty() || !a.has("--old") || !a.has("--new") || !a.has("--out")) {
-    std::cerr << (a.error.empty() ? "analyze needs --old, --new and --out" : a.error) << "\n"
-              << kUsage;
-    return kExitError;
-  }
+const std::vector<std::string> kPlanFlags = {
+    "--context",   "--max-region", "--max-expansions",  "--manual-region", "--map",
+    "--entry-map", "--exit-map",   "--max-analysis-ms", "--cache-dir"};
+const std::vector<std::string> kPlanSwitches = {"--no-merge", "--no-derive-constraints",
+                                                "--diagnostic-entry-prefix"};
+
+std::optional<PlanOptions> parse_plan(const Args &a) {
   PlanOptions plan;
   auto context = a.number("--context", 0);
   auto max_region = a.number("--max-region", plan.max_region_insts);
   auto max_exp = a.number("--max-expansions", plan.max_expansions);
-  if (!context || !max_region || !max_exp) {
-    std::cerr << "bad numeric option\n";
-    return kExitError;
-  }
+  auto max_ms = a.number("--max-analysis-ms", 0);
+  if (!context || !max_region || !max_exp || !max_ms)
+    return std::nullopt;
+  plan.max_analysis_us = *max_ms * 1000;
   plan.context_insts = *context;
   plan.max_region_insts = *max_region;
   plan.max_expansions = *max_exp;
   plan.merge_same_block = !a.is_switch("--no-merge");
+  plan.derive_constraints = !a.is_switch("--no-derive-constraints");
+  plan.manual_region = a.get("--manual-region");
+  plan.register_map = a.get("--map");
+  plan.entry_map = a.get("--entry-map");
+  plan.exit_map = a.get("--exit-map");
+  plan.diagnostic_entry_prefix = a.is_switch("--diagnostic-entry-prefix");
+  return plan;
+}
+
+bool has_suffix(const std::string &s, const std::string &suffix) {
+  return s.size() >= suffix.size() &&
+         s.compare(s.size() - suffix.size(), suffix.size(), suffix) == 0;
+}
+
+/// Load one side: a code object or raw words directly, `.s`/`.ll` through the LLVM plugin.
+bool load_side(const std::string &path, const std::string &kernel, const std::string &side,
+               const std::string &out_dir, const std::string &llvm_bin,
+               const std::vector<std::string> &common_args,
+               const std::vector<std::string> &side_args, Artifact &out, Json &provenance,
+               std::string &error) {
+  const bool is_ll = has_suffix(path, ".ll");
+  const bool is_s = has_suffix(path, ".s");
+  if (!is_ll && !is_s)
+    return load_artifact(path, kernel, out, error);
+  auto tc = llvm::Toolchain::discover(llvm_bin, error);
+  if (!tc)
+    return false;
+  std::error_code ec;
+  std::filesystem::create_directories(out_dir + "/artifacts", ec);
+  const std::string prefix = out_dir + "/artifacts/" + side;
+  llvm::Provenance prov;
+  const bool ok =
+      is_ll ? llvm::compile(*tc, path, common_args, side_args, prefix, kernel, out, prov, error)
+            : llvm::assemble(*tc, path, prefix, kernel, out, prov, error);
+  provenance = prov.to_json();
+  if (!write_text_file(prefix + ".provenance.json", provenance.dump()))
+    std::cerr << "warning: cannot write " << prefix << ".provenance.json\n";
+  return ok;
+}
+
+int run_analyze(const std::string &old_path, const std::string &new_path, const Args &a,
+                const std::vector<std::string> &common_args,
+                const std::vector<std::string> &old_args, const std::vector<std::string> &new_args,
+                int argc, char **argv) {
+  auto plan = parse_plan(a);
+  if (!plan) {
+    std::cerr << "bad numeric option\n";
+    return kExitError;
+  }
+  const std::string out_dir = a.get("--out");
+  const std::string kernel = a.get("--kernel");
   std::string error;
   Artifact old_a, new_a;
-  const std::string kernel = a.get("--kernel");
-  if (!load_artifact(a.get("--old"), a.get("--old-kernel", kernel), old_a, error)) {
+  Json old_prov, new_prov;
+  if (!load_side(old_path, a.get("--old-kernel", kernel), "old", out_dir, a.get("--llvm-bin"),
+                 common_args, old_args, old_a, old_prov, error)) {
     std::cerr << "old: " << error << "\n";
     return kExitError;
   }
-  if (!load_artifact(a.get("--new"), a.get("--new-kernel", kernel), new_a, error)) {
+  if (!load_side(new_path, a.get("--new-kernel", kernel), "new", out_dir, a.get("--llvm-bin"),
+                 common_args, new_args, new_a, new_prov, error)) {
     std::cerr << "new: " << error << "\n";
     return kExitError;
   }
-  auto data = analyze_artifacts(old_a, new_a, plan, error);
+  bool cache_hit = false;
+  auto data = analyze_cached(old_a, new_a, *plan, a.get("--cache-dir"), cache_hit, error);
   if (!data) {
     std::cerr << error << "\n";
     return kExitError;
   }
   data->command.set("argv", command_line(argc, argv));
-  if (!write_case_dir(a.get("--out"), *data, error)) {
+  if (!old_prov.is_null() || !new_prov.is_null()) {
+    data->provenance = Json::object();
+    data->provenance.set("old", old_prov);
+    data->provenance.set("new", new_prov);
+    const bool same_input =
+        old_prov["input_sha256"].as_string() == new_prov["input_sha256"].as_string();
+    data->provenance.set("same_input", same_input);
+    data->provenance.set("same_toolchain",
+                         old_prov["toolchain"].dump(-1) == new_prov["toolchain"].dump(-1));
+    Json timing = data->analysis["timing"];
+    timing.set("compile_ns", old_prov["compile_ns"].as_uint() + new_prov["compile_ns"].as_uint());
+    data->analysis.set("timing", std::move(timing));
+  }
+  if (!write_case_dir(out_dir, *data, error)) {
     std::cerr << error << "\n";
     return kExitError;
   }
@@ -179,6 +256,11 @@ int cmd_analyze(int argc, char **argv) {
             << data->artifacts["old"]["reachable_insts"].as_uint() << " insts), new "
             << new_a.kernel_name << " (" << data->artifacts["new"]["reachable_insts"].as_uint()
             << " insts)\n";
+  if (!data->provenance.is_null())
+    std::cout << "provenance: " << data->provenance["old"]["input_kind"].as_string() << " via "
+              << data->provenance["old"]["toolchain"]["version"].as_string()
+              << (data->provenance["same_input"].as_bool() ? ", same input" : ", different inputs")
+              << "\n";
   std::cout << "changes: " << data->changes.size() << " hunk(s), " << data->regions.size()
             << " region(s), " << data->unresolved.size() << " unresolved item(s)\n";
   for (const auto &r : data->regions)
@@ -190,16 +272,63 @@ int cmd_analyze(int argc, char **argv) {
   if (!data->variants.empty())
     std::cout << "  " << data->variants.size()
               << " expansion variant(s) precomputed (tried automatically after a local mismatch)\n";
+  for (const auto &d : data->diagnostics)
+    std::cout << "  diagnostic " << d.id << " " << region_status_name(d.status) << " old "
+              << d.old_side.insts.size() << " / new " << d.new_side.insts.size() << " insts"
+              << (d.reason.empty() ? "" : " : " + d.reason) << "\n";
+  if (cache_hit)
+    std::cout << "analysis cache hit\n";
   for (const auto &u : data->unresolved)
     std::cout << "  unresolved [" << u.kind << "] " << u.what << "\n";
-  std::cout << "wrote " << a.get("--out") << "/case.json\n";
+  std::cout << "wrote " << out_dir << "/case.json\n";
   return kExitPass;
+}
+
+int cmd_analyze(int argc, char **argv) {
+  std::vector<std::string> flags = {"--old",          "--new",         "--out",      "--kernel",
+                                    "--old-kernel",   "--new-kernel",  "--llvm-bin", "--llc-args",
+                                    "--old-llc-args", "--new-llc-args"};
+  flags.insert(flags.end(), kPlanFlags.begin(), kPlanFlags.end());
+  Args a = parse(argc, argv, 2, flags, kPlanSwitches);
+  if (!a.error.empty() || !a.has("--old") || !a.has("--new") || !a.has("--out")) {
+    std::cerr << (a.error.empty() ? "analyze needs --old, --new and --out" : a.error) << "\n"
+              << kUsage;
+    return kExitError;
+  }
+  return run_analyze(a.get("--old"), a.get("--new"), a, llvm::split_args(a.get("--llc-args")),
+                     llvm::split_args(a.get("--old-llc-args")),
+                     llvm::split_args(a.get("--new-llc-args")), argc, argv);
+}
+
+int cmd_llvm_pair(int argc, char **argv) {
+  std::vector<std::string> flags = {"--input",       "--out",      "--kernel",  "--llvm-bin",
+                                    "--common-args", "--old-args", "--new-args"};
+  flags.insert(flags.end(), kPlanFlags.begin(), kPlanFlags.end());
+  Args a = parse(argc, argv, 2, flags, kPlanSwitches);
+  if (!a.error.empty() || !a.has("--input") || !a.has("--out")) {
+    std::cerr << (a.error.empty() ? "llvm-pair needs --input and --out" : a.error) << "\n"
+              << kUsage;
+    return kExitError;
+  }
+  const std::string input = a.get("--input");
+  if (!has_suffix(input, ".ll")) {
+    std::cerr << "llvm-pair compiles one LLVM IR (.ll) input twice\n";
+    return kExitError;
+  }
+  const auto old_args = llvm::split_args(a.get("--old-args"));
+  const auto new_args = llvm::split_args(a.get("--new-args"));
+  if (old_args == new_args) {
+    std::cerr << "--old-args and --new-args are identical: nothing differs between the sides\n";
+    return kExitError;
+  }
+  return run_analyze(input, input, a, llvm::split_args(a.get("--common-args")), old_args, new_args,
+                     argc, argv);
 }
 
 int cmd_test(int argc, char **argv) {
   Args a = parse(argc, argv, 2,
                  {"--case", "--seed", "--cases", "--region", "--max-counterexamples",
-                  "--max-boundary-cases", "--reduction-budget"},
+                  "--max-boundary-cases", "--reduction-budget", "--cache-dir"},
                  {"--no-reduce", "--no-case-log"});
   if (!a.error.empty() || !a.has("--case")) {
     std::cerr << (a.error.empty() ? "test needs --case" : a.error) << "\n" << kUsage;
@@ -225,6 +354,7 @@ int cmd_test(int argc, char **argv) {
   opt.counterexample_dir = dir + "/counterexamples";
   if (!a.is_switch("--no-case-log"))
     opt.case_log_dir = dir + "/logs";
+  opt.cache_dir = a.get("--cache-dir");
   std::string error;
   auto data = read_case_dir(dir, error);
   if (!data) {
@@ -245,6 +375,9 @@ int cmd_test(int argc, char **argv) {
     if (!r.reason.empty())
       std::cout << " : " << r.reason;
     std::cout << "\n";
+    if (!r.cached.is_null())
+      std::cout << "  reused from the result cache (key " << r.cached["cache"]["key"].as_string()
+                << ")\n";
     if (r.boundary.cases || r.random.cases) {
       std::cout << "  boundary sweep: " << r.boundary.valid << "/" << r.boundary.cases << " valid, "
                 << r.boundary.mismatches << " mismatching"
@@ -283,6 +416,15 @@ int cmd_test(int argc, char **argv) {
       std::cout << ", " << r.expansion_tried.size() << " variant(s) tried\n";
     }
   }
+  for (const Json &d : report["diagnostics"].items())
+    std::cout << "diagnostic " << d["region"].as_string() << " (for " << d["parent"].as_string()
+              << "): " << d["test_status"].as_string() << ", valid "
+              << d["counts"]["valid_pairs"].as_uint()
+              << (d["reason"].as_string().empty() ? "" : " : " + d["reason"].as_string())
+              << " [not part of the verdict]\n";
+  if (report.has("cache"))
+    std::cout << "result cache: " << report["cache"]["hits"].as_uint() << " hit(s), "
+              << report["cache"]["misses"].as_uint() << " miss(es)\n";
   const Json &overall = report["overall"];
   std::cout << "overall: " << overall["test_status"].as_string() << ", contract "
             << overall["contract_status"].as_string() << ", witness "
@@ -338,6 +480,7 @@ int cmd_inject(int argc, char **argv) {
   CaseData out = *data;
   out.regions = {*mutated};
   out.variants.clear(); // variants belong to the unmutated base region
+  out.diagnostics.clear();
   out.command.set("argv", command_line(argc, argv));
   out.command.set("synthetic", true);
   if (!write_case_dir(a.get("--out"), out, error)) {
@@ -408,6 +551,8 @@ int main(int argc, char **argv) {
     return cmd_replay(argc, argv);
   if (cmd == "inject")
     return cmd_inject(argc, argv);
+  if (cmd == "llvm-pair")
+    return cmd_llvm_pair(argc, argv);
   if (cmd == "--help" || cmd == "-h" || cmd == "help") {
     std::cout << kUsage;
     return kExitPass;

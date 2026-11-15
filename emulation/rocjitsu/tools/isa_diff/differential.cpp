@@ -79,6 +79,7 @@ std::string compare_pair(const RegionPair &region, const MachineState &init_old,
                          const MachineState &init_new, const MachineState &final_old,
                          const MachineState &final_new, Mismatch &m) {
   const RegionContract &k = region.contract;
+  const auto fwd = k.exit_forward();
   // Effect model: execution must not write anything the model did not declare.
   const LocSet extra_old = differing_locs(init_old, final_old) & ~k.declared_writes_old;
   const LocSet extra_new = differing_locs(init_new, final_new) & ~k.declared_writes_new;
@@ -97,14 +98,19 @@ std::string compare_pair(const RegionPair &region, const MachineState &init_old,
     m.detail = "frame state changed by the region";
     return "frame_preservation";
   }
-  // R_out: equality on the observable set.
-  const LocSet diff = differing_locs(final_old, final_new) & k.observable;
+  // R_out: equality on the observable set (old naming; the new side is read at map(l)).
+  LocSet diff;
+  for (unsigned l = 0; l < kNumLocs; ++l)
+    if (k.observable.test(l) && final_old.get(l) != final_new.get(fwd[l]))
+      diff.set(l);
   if (diff.any()) {
     m.locs = diff;
     for (unsigned l = 0; l < kNumLocs; ++l)
       if (diff.test(l)) {
         m.detail = "first observable difference " + loc_name(l) + ": old " +
-                   hex32(final_old.get(l)) + " new " + hex32(final_new.get(l));
+                   hex32(final_old.get(l)) + " new " +
+                   (fwd[l] == l ? "" : "(" + loc_name(fwd[l]) + ") ") +
+                   hex32(final_new.get(fwd[l]));
         break;
       }
     return "observable";
@@ -136,12 +142,17 @@ uint64_t novelty_bucket(const RegionContract &k, const std::string &category,
     h = splitmix64(h ^ static_cast<uint8_t>(c));
   if (!final_old || !final_new)
     return h;
-  LocSet watched = k.declared_writes_old | k.declared_writes_new;
+  const auto fwd = k.exit_forward();
+  const auto inv = k.exit_inverse();
+  LocSet watched = k.declared_writes_old;
+  for (unsigned l = 0; l < kNumLocs; ++l)
+    if (k.declared_writes_new.test(l))
+      watched.set(inv[l]);
   watched.set(kLocScc);
   for (unsigned l = 0; l < kNumLocs; ++l) {
     if (!watched.test(l))
       continue;
-    const unsigned eq = final_old->get(l) == final_new->get(l) ? 1u : 0u;
+    const unsigned eq = final_old->get(l) == final_new->get(fwd[l]) ? 1u : 0u;
     h = splitmix64(h ^ (uint64_t{l} << 8) ^ (value_class(final_old->get(l)) << 1) ^ eq);
   }
   return h;
@@ -160,6 +171,7 @@ bool simpler(uint32_t candidate, uint32_t current) {
 Json reduce_mismatch(const RegionPair &region, RegionRunner &old_runner, RegionRunner &new_runner,
                      Mismatch &m, size_t budget) {
   const RegionContract &k = region.contract;
+  const auto fwd = k.entry_forward();
   const MachineState original_old = m.init_old, original_new = m.init_new;
   const LocSet original_locs = m.locs;
   MachineState cur_o = m.init_old, cur_n = m.init_new;
@@ -202,7 +214,7 @@ Json reduce_mismatch(const RegionPair &region, RegionRunner &old_runner, RegionR
     for (unsigned l = 0; l < kNumLocs; ++l)
       if (k.canary.test(l)) {
         a.set(l, 0);
-        b.set(l, l == kLocScc ? 1u : 0xffffffffu);
+        b.set(fwd[l], l == kLocScc ? 1u : 0xffffffffu);
       }
     if (!(a == cur_o && b == cur_n) && attempt(a, b)) {
       cur_o = a;
@@ -234,7 +246,7 @@ Json reduce_mismatch(const RegionPair &region, RegionRunner &old_runner, RegionR
           continue;
         MachineState a = cur_o, b = cur_n;
         a.set(l, c);
-        b.set(l, c);
+        b.set(fwd[l], c);
         if (attempt(a, b)) {
           cur_o = a;
           cur_n = b;
@@ -427,18 +439,24 @@ void build_initial_states(const RegionContract &contract, const Sample &sample, 
   new_state = {};
   old_state.frame = frame;
   new_state.frame = frame;
+  // Sample and contract sets use old naming; the new side receives each value at map(l)
+  // (identity without a register map). entry_forward() is a permutation, so every new
+  // location is initialised exactly once.
+  const auto fwd = contract.entry_forward();
   for (unsigned l = 0; l < kNumLocs; ++l) {
     if (contract.entry_equal.test(l)) {
       old_state.set(l, sample.value[l]);
-      new_state.set(l, sample.value[l]);
+      new_state.set(fwd[l], sample.value[l]);
     } else {
       old_state.set(l, canary_value(seed, case_index, l, /*new_side=*/false));
-      new_state.set(l, canary_value(seed, case_index, l, /*new_side=*/true));
+      new_state.set(fwd[l], canary_value(seed, case_index, l, /*new_side=*/true));
     }
   }
 }
 
 Json RegionResult::to_json() const {
+  if (!cached.is_null())
+    return cached;
   Json j = Json::object();
   j.set("region", region_id);
   j.set("synthetic", synthetic);
@@ -460,6 +478,7 @@ Json RegionResult::to_json() const {
     if (!resolved_by.empty()) {
       e.set("resolved_by", resolved_by);
       e.set("resolved_contract_status", contract_status_name(resolved_contract));
+      e.set("resolved_coverage_scope", coverage_scope_name(resolved_coverage));
     }
     e.set("tried", expansion_tried);
     j.set("expansion", std::move(e));
@@ -508,6 +527,8 @@ Json RegionResult::to_json() const {
   j.set("novelty", std::move(nov));
   if (!case_log.empty())
     j.set("case_log", case_log);
+  if (!unrestricted.is_null())
+    j.set("unrestricted", unrestricted);
   Json exec = Json::object();
   exec.set("old_region_insts", static_cast<uint64_t>(old_len));
   exec.set("new_region_insts", static_cast<uint64_t>(new_len));
@@ -560,14 +581,21 @@ Json counterexample_json(const RegionPair &region, const Mismatch &m, uint64_t s
   j.set("kind", m.kind);
   j.set("locations", format_locs(m.locs));
   j.set("detail", m.detail);
+  // Observable locations use old naming (the new side is read at map(l)); effect-model
+  // locations are physical on their own side.
+  const auto fwd = region.contract.exit_forward();
+  const bool observable = m.kind == "observable";
   Json firsts = Json::array();
   for (unsigned l = 0; l < kNumLocs; ++l) {
     if (!m.locs.test(l))
       continue;
+    const unsigned nl = observable ? fwd[l] : l;
     Json d = Json::object();
     d.set("loc", loc_name(l));
+    if (nl != l)
+      d.set("new_loc", loc_name(nl));
     d.set("old", hex32(m.final_old.get(l)));
-    d.set("new", hex32(m.final_new.get(l)));
+    d.set("new", hex32(m.final_new.get(nl)));
     firsts.push(std::move(d));
   }
   j.set("differences", std::move(firsts));
@@ -636,8 +664,10 @@ RegionResult test_region(const RegionPair &region, const TestOptions &options,
   }
   const Frame frame = old_runner->baseline_frame();
 
+  const auto new_to_old = region.contract.entry_inverse();
   const RegionFeatures features =
-      make_region_features(region.old_side.insts, region.new_side.insts);
+      make_region_features(region.old_side.insts, region.new_side.insts,
+                           region.contract.entry_map.empty() ? nullptr : &new_to_old);
   auto sweep_start = Clock::now();
   const BoundarySweep sweep = build_boundary_sweep(features.roles, region.contract,
                                                    {options.seed, options.max_boundary_cases});
@@ -778,8 +808,12 @@ RegionResult test_region(const RegionPair &region, const TestOptions &options,
         old_runner->run(region.old_side.insts.size(), &trace_old);
         new_runner->load(m.init_new);
         new_runner->run(region.new_side.insts.size(), &trace_new);
-        const Json bundle =
+        Json bundle =
             counterexample_json(region, m, options.seed, policy.name(), trace_old, trace_new);
+        if (options.artifact_info.has("artifacts"))
+          bundle.set("artifacts", options.artifact_info["artifacts"]);
+        if (options.artifact_info.has("provenance"))
+          bundle.set("provenance", options.artifact_info["provenance"]);
         std::filesystem::create_directories(options.counterexample_dir);
         const std::string path = options.counterexample_dir + "/" + region.id + "-case" +
                                  std::to_string(case_index) + ".json";

@@ -1,0 +1,683 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/ROCm/rocm-systems/emulation/rocjitsu/tools/isa_diff/rj_isa_diff.v1.schema.json",
+  "title": "rj_isa_diff v1 documents",
+  "description": "Schemas for case.json (analyze), results.json (test), counterexample bundles and per-case JSONL log lines. Validate a document against #/$defs/<kind>; tools/isa_diff/docs/schema/validate_outputs.py does this for every file the CLI writes.",
+  "$defs": {
+    "hex32": {"type": "string", "pattern": "^0x[0-9a-f]{8}$"},
+    "hex": {"type": "string", "pattern": "^0x[0-9a-f]+$"},
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "count": {"type": "integer", "minimum": 0},
+    "loc": {"type": "string", "pattern": "^(s([0-9]|[1-9][0-9]|10[01])|vcc_lo|vcc_hi|exec_lo|exec_hi|m0|scc)$"},
+    "locs": {
+      "description": "Comma-separated location list in canonical order; empty for none.",
+      "type": "string",
+      "pattern": "^((s([0-9]|[1-9][0-9]|10[01])|vcc_lo|vcc_hi|exec_lo|exec_hi|m0|scc)(,(s([0-9]|[1-9][0-9]|10[01])|vcc_lo|vcc_hi|exec_lo|exec_hi|m0|scc))*)?$"
+    },
+    "register_map": {
+      "type": "string",
+      "pattern": "^s[0-9]{1,3}=s[0-9]{1,3}(,s[0-9]{1,3}=s[0-9]{1,3})*$"
+    },
+    "test_status": {"enum": ["NO_MISMATCH_FOUND", "LOCAL_MISMATCH", "INCONCLUSIVE", "UNSUPPORTED", "HARNESS_ERROR", "NO_SEMANTIC_DIFF"]},
+    "contract_status": {"enum": ["ESTABLISHED", "ASSUMED", "UNRESOLVED"]},
+    "witness_scope": {"enum": ["NONE", "LOCAL_ONLY", "REACHABLE_AT_CUT", "OBSERVABLE_KERNEL_DIVERGENCE"]},
+    "coverage_scope": {"enum": ["COMPLETE_FOR_DECLARED_SCOPE", "PARTIAL", "NOT_ESTABLISHED"]},
+    "region_status": {"enum": ["READY", "UNSUPPORTED", "INCONCLUSIVE"]},
+    "change_kind": {"enum": ["instruction", "control_flow", "layout", "metadata", "unexplained"]},
+    "mismatch_kind": {"enum": ["observable", "effect_model", "frame_preservation", "exit_status_divergence"]},
+    "run_status": {"enum": ["OK", "DECODE_FAILURE", "MISSING_EXECUTION_BACKEND", "UNIMPLEMENTED", "UNSUPPORTED_OPERAND", "INVALID_REGISTER_ACCESS", "ILLEGAL_INSTRUCTION", "EXECUTION_ERROR", "HOST_EXCEPTION", "UNDEFINED_BEHAVIOR", "PC_WRITTEN", "WAVE_STATE_CHANGED", "BUDGET_EXCEEDED"]},
+    "phase": {"enum": ["boundary", "random"]},
+
+    "identity": {
+      "type": "object",
+      "required": ["tool", "tool_version", "schema_version", "rocjitsu_version", "rocjitsu_revision", "semantics"],
+      "properties": {
+        "tool": {"const": "rj_isa_diff"},
+        "tool_version": {"type": "string"},
+        "schema_version": {"const": "rj_isa_diff.v1"},
+        "rocjitsu_version": {"type": "string"},
+        "rocjitsu_revision": {"type": "string"},
+        "semantics": {"type": "string"},
+        "compiler": {"type": "string"}
+      },
+      "additionalProperties": false
+    },
+    "artifact": {
+      "type": "object",
+      "required": ["label", "kind", "sha256", "target", "kernel", "text_vaddr", "kernel_begin", "kernel_end", "kernel_bytes", "reachable_insts"],
+      "properties": {
+        "label": {"type": "string"},
+        "kind": {"enum": ["code_object", "raw_words"]},
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "target": {"const": "gfx950"},
+        "kernel": {"type": "string"},
+        "text_vaddr": {"$ref": "#/$defs/hex"},
+        "kernel_begin": {"$ref": "#/$defs/hex"},
+        "kernel_end": {"$ref": "#/$defs/hex"},
+        "kernel_bytes": {"$ref": "#/$defs/count"},
+        "reachable_insts": {"$ref": "#/$defs/count"},
+        "metadata_sha256": {"$ref": "#/$defs/sha256"},
+        "text_relocations": {"$ref": "#/$defs/count"},
+        "metadata_parsed": {"type": "boolean"}
+      },
+      "additionalProperties": false
+    },
+    "artifacts": {
+      "type": "object",
+      "required": ["old", "new"],
+      "properties": {"old": {"$ref": "#/$defs/artifact"}, "new": {"$ref": "#/$defs/artifact"}},
+      "additionalProperties": false
+    },
+    "llvm_side_provenance": {
+      "type": "object",
+      "required": ["input", "input_sha256", "input_kind", "triple", "mcpu", "common_args", "side_args", "commands", "executed_object", "note", "toolchain", "compile_ns"],
+      "properties": {
+        "input": {"type": "string"},
+        "input_sha256": {"$ref": "#/$defs/sha256"},
+        "input_kind": {"enum": ["ll", "s"]},
+        "triple": {"const": "amdgcn-amd-amdhsa"},
+        "mcpu": {"const": "gfx950"},
+        "common_args": {"type": "array", "items": {"type": "string"}},
+        "side_args": {"type": "array", "items": {"type": "string"}},
+        "commands": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["argv", "exit_code", "elapsed_ns"],
+            "properties": {
+              "argv": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+              "exit_code": {"type": "integer"},
+              "elapsed_ns": {"$ref": "#/$defs/count"},
+              "stderr_tail": {"type": "string"}
+            },
+            "additionalProperties": false
+          }
+        },
+        "executed_object": {"enum": ["", "linked_code_object", "raw_text"]},
+        "note": {"type": "string"},
+        "toolchain": {
+          "type": "object",
+          "required": ["bin_dir", "version", "revision"],
+          "properties": {"bin_dir": {"type": "string"}, "version": {"type": "string"}, "revision": {"type": "string"}}
+        },
+        "compile_ns": {"$ref": "#/$defs/count"}
+      },
+      "additionalProperties": false
+    },
+    "provenance": {
+      "description": "Present only when a side came through the LLVM plugin (.ll/.s input).",
+      "type": "object",
+      "required": ["old", "new", "same_input", "same_toolchain"],
+      "properties": {
+        "old": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/llvm_side_provenance"}]},
+        "new": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/llvm_side_provenance"}]},
+        "same_input": {"type": "boolean"},
+        "same_toolchain": {"type": "boolean"}
+      },
+      "additionalProperties": false
+    },
+    "region_inst": {
+      "type": "object",
+      "required": ["pc", "words", "asm"],
+      "properties": {
+        "pc": {"$ref": "#/$defs/hex"},
+        "words": {"type": "array", "items": {"$ref": "#/$defs/hex32"}, "minItems": 1, "maxItems": 4},
+        "asm": {"type": "string"}
+      },
+      "additionalProperties": false
+    },
+    "region_side": {
+      "type": "object",
+      "required": ["begin_index", "end_index", "insts"],
+      "properties": {
+        "begin_index": {"$ref": "#/$defs/count"},
+        "end_index": {"$ref": "#/$defs/count"},
+        "cut_index": {"$ref": "#/$defs/count"},
+        "insts": {"type": "array", "items": {"$ref": "#/$defs/region_inst"}}
+      },
+      "additionalProperties": false
+    },
+    "constraint": {
+      "type": "object",
+      "required": ["loc", "source"],
+      "properties": {
+        "loc": {"$ref": "#/$defs/loc"},
+        "known_zero": {"$ref": "#/$defs/hex32"},
+        "known_one": {"$ref": "#/$defs/hex32"},
+        "umin": {"$ref": "#/$defs/hex32"},
+        "umax": {"$ref": "#/$defs/hex32"},
+        "equal_to": {"$ref": "#/$defs/loc"},
+        "source": {"enum": ["common_prefix_analysis", "relation_summary", "reachability_witness", "user_assumption"]}
+      },
+      "additionalProperties": false
+    },
+    "contract": {
+      "description": "C(s_old,s_new) AND R_in => corresponding exits AND R_out AND frame preserved. Location sets use old naming; with entry_map/exit_map the new side receives inputs at entry_map(l) and is compared at exit_map(l).",
+      "type": "object",
+      "required": ["target", "wave", "arithmetic", "mapping", "entry_equal", "canary", "observable", "declared_writes_old", "declared_writes_new", "wide_reads", "constraints", "exit_mapping", "pending_effects", "composition", "frame_preserved", "status", "depends_on", "sources"],
+      "properties": {
+        "target": {"const": "gfx950"},
+        "wave": {"const": "wave64"},
+        "arithmetic": {"const": "default"},
+        "mapping": {"enum": ["identity_at_common_cutpoint", "user_register_map"]},
+        "entry_equal": {"$ref": "#/$defs/locs"},
+        "canary": {"$ref": "#/$defs/locs"},
+        "observable": {"$ref": "#/$defs/locs"},
+        "declared_writes_old": {"$ref": "#/$defs/locs"},
+        "declared_writes_new": {"$ref": "#/$defs/locs"},
+        "wide_reads": {"$ref": "#/$defs/locs"},
+        "constraints": {"type": "array", "items": {"$ref": "#/$defs/constraint"}},
+        "exit_mapping": {"type": "string"},
+        "entry_map": {"$ref": "#/$defs/register_map"},
+        "exit_map": {"$ref": "#/$defs/register_map"},
+        "pending_effects": {"enum": ["NONE", "DISJOINT", "CONFLICT", "UNKNOWN"]},
+        "composition": {"enum": ["HOLDS", "FAILS", "NOT_CHECKED"]},
+        "frame_preserved": {"type": "array", "items": {"type": "string"}},
+        "status": {"$ref": "#/$defs/contract_status"},
+        "depends_on": {"type": "array", "items": {"type": "string"}},
+        "sources": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["what", "source"],
+            "properties": {"what": {"type": "string"}, "source": {"type": "string"}},
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "region": {
+      "type": "object",
+      "required": ["id", "status", "reason", "synthetic", "hunks", "old", "new", "contract", "prepared_key"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "status": {"$ref": "#/$defs/region_status"},
+        "reason": {"type": "string"},
+        "synthetic": {"type": "boolean"},
+        "parent": {"type": "string"},
+        "context_before": {"$ref": "#/$defs/count"},
+        "context_after": {"$ref": "#/$defs/count"},
+        "mutation": {"type": "object"},
+        "hunks": {"type": "array", "items": {"$ref": "#/$defs/count"}},
+        "old": {"$ref": "#/$defs/region_side"},
+        "new": {"$ref": "#/$defs/region_side"},
+        "contract": {"$ref": "#/$defs/contract"},
+        "prepared_key": {"$ref": "#/$defs/sha256"}
+      },
+      "additionalProperties": false
+    },
+    "unresolved_item": {
+      "type": "object",
+      "required": ["kind", "what"],
+      "properties": {
+        "kind": {"enum": ["instruction", "control_flow", "layout", "metadata", "unexplained", "region", "context", "scope"]},
+        "what": {"type": "string"},
+        "region": {"type": "string"}
+      },
+      "additionalProperties": false
+    },
+
+    "case": {
+      "description": "case.json written by `analyze` / `llvm-pair` / `inject`.",
+      "type": "object",
+      "required": ["schema_version", "identity", "command", "artifacts", "changes", "unresolved", "notes", "regions", "expansion_variants", "analysis"],
+      "properties": {
+        "schema_version": {"const": "rj_isa_diff.v1"},
+        "identity": {"$ref": "#/$defs/identity"},
+        "command": {
+          "type": "object",
+          "properties": {"argv": {"type": "string"}, "synthetic": {"type": "boolean"}},
+          "additionalProperties": false
+        },
+        "artifacts": {"$ref": "#/$defs/artifacts"},
+        "provenance": {"$ref": "#/$defs/provenance"},
+        "changes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["hunk", "kind", "old_insts", "new_insts", "old", "new"],
+            "properties": {
+              "hunk": {"$ref": "#/$defs/count"},
+              "kind": {"$ref": "#/$defs/change_kind"},
+              "old_insts": {"$ref": "#/$defs/count"},
+              "new_insts": {"$ref": "#/$defs/count"},
+              "old": {"type": "array", "items": {"type": "string"}},
+              "new": {"type": "array", "items": {"type": "string"}},
+              "note": {"type": "string"}
+            },
+            "additionalProperties": false
+          }
+        },
+        "unresolved": {"type": "array", "items": {"$ref": "#/$defs/unresolved_item"}},
+        "notes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["kind", "what", "semantic"],
+            "properties": {"kind": {"$ref": "#/$defs/change_kind"}, "what": {"type": "string"}, "semantic": {"type": "boolean"}},
+            "additionalProperties": false
+          }
+        },
+        "regions": {"type": "array", "items": {"$ref": "#/$defs/region"}},
+        "expansion_variants": {"type": "array", "items": {"allOf": [{"$ref": "#/$defs/region"}, {"required": ["parent"]}]}},
+        "diagnostic_regions": {"type": "array", "items": {"allOf": [{"$ref": "#/$defs/region"}, {"required": ["parent"]}]}},
+        "analysis": {
+          "type": "object",
+          "required": ["plan_options", "alignment_complete", "layout_shift", "timing"],
+          "properties": {
+            "plan_options": {
+              "type": "object",
+              "required": ["max_region_insts", "max_expansions", "context_insts", "merge_same_block", "derive_constraints", "max_analysis_us", "diagnostic_entry_prefix"],
+              "properties": {
+                "max_region_insts": {"$ref": "#/$defs/count"},
+                "max_expansions": {"$ref": "#/$defs/count"},
+                "context_insts": {"$ref": "#/$defs/count"},
+                "merge_same_block": {"type": "boolean"},
+                "derive_constraints": {"type": "boolean"},
+                "max_analysis_us": {"$ref": "#/$defs/count"},
+                "diagnostic_entry_prefix": {"type": "boolean"},
+                "manual_region": {"type": "string"},
+                "register_map": {"$ref": "#/$defs/register_map"},
+                "entry_map": {"$ref": "#/$defs/register_map"},
+                "exit_map": {"$ref": "#/$defs/register_map"}
+              },
+              "additionalProperties": false
+            },
+            "alignment_complete": {"type": "boolean"},
+            "layout_shift": {"type": "boolean"},
+            "skipped_for_time": {"type": "array", "items": {"type": "string"}},
+            "timing": {
+              "type": "object",
+              "required": ["parse_ns", "decode_cfg_ns", "dataflow_ns", "model_total_ns", "align_classify_ns", "plan_ns"],
+              "properties": {
+                "compile_ns": {"$ref": "#/$defs/count"},
+                "parse_ns": {"$ref": "#/$defs/count"},
+                "decode_cfg_ns": {"$ref": "#/$defs/count"},
+                "dataflow_ns": {"$ref": "#/$defs/count"},
+                "model_total_ns": {"$ref": "#/$defs/count"},
+                "align_classify_ns": {"$ref": "#/$defs/count"},
+                "plan_ns": {"$ref": "#/$defs/count"}
+              },
+              "additionalProperties": false
+            },
+            "cache": {
+              "type": "object",
+              "required": ["hit", "key", "build_fingerprint"],
+              "properties": {"hit": {"type": "boolean"}, "key": {"$ref": "#/$defs/sha256"}, "build_fingerprint": {"type": "string"}},
+              "additionalProperties": false
+            },
+            "cache_store_error": {"type": "string"}
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "phase_counts": {
+      "type": "object",
+      "required": ["cases", "accepted", "valid", "mismatches"],
+      "properties": {
+        "cases": {"$ref": "#/$defs/count"},
+        "accepted": {"$ref": "#/$defs/count"},
+        "valid": {"$ref": "#/$defs/count"},
+        "mismatches": {"$ref": "#/$defs/count"},
+        "mandatory": {"const": true},
+        "generated": {"$ref": "#/$defs/count"},
+        "duplicates_dropped": {"$ref": "#/$defs/count"},
+        "truncated": {"type": "boolean"},
+        "valid_by_family": {"type": "object", "additionalProperties": {"$ref": "#/$defs/count"}}
+      },
+      "additionalProperties": false
+    },
+    "region_result": {
+      "type": "object",
+      "required": ["region", "synthetic", "test_status", "contract_status", "witness_scope", "coverage_scope", "proof_status", "prepared_key", "policy", "seed", "counts", "boundary_sweep", "random_phase", "novelty", "execution", "timing", "counterexamples"],
+      "properties": {
+        "region": {"type": "string"},
+        "synthetic": {"type": "boolean"},
+        "test_status": {"$ref": "#/$defs/test_status"},
+        "contract_status": {"$ref": "#/$defs/contract_status"},
+        "witness_scope": {"$ref": "#/$defs/witness_scope"},
+        "coverage_scope": {"$ref": "#/$defs/coverage_scope"},
+        "proof_status": {"const": "NOT_RUN"},
+        "reason": {"type": "string"},
+        "prepared_key": {"type": "string"},
+        "pending_effects": {"enum": ["NONE", "DISJOINT", "CONFLICT", "UNKNOWN"]},
+        "composition": {"enum": ["HOLDS", "FAILS", "NOT_CHECKED"]},
+        "expansion": {
+          "type": "object",
+          "required": ["resolution", "tried"],
+          "properties": {
+            "resolution": {"enum": ["RESOLVED_BY_CONTEXT", "PERSISTS_WITH_CONTEXT", "NO_EXPANSION_AVAILABLE"]},
+            "resolved_by": {"type": "string"},
+            "resolved_contract_status": {"$ref": "#/$defs/contract_status"},
+            "resolved_coverage_scope": {"$ref": "#/$defs/coverage_scope"},
+            "tried": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["variant", "context_before", "context_after", "test_status", "contract_status", "valid_pairs", "mismatches"],
+                "properties": {
+                  "variant": {"type": "string"},
+                  "context_before": {"$ref": "#/$defs/count"},
+                  "context_after": {"$ref": "#/$defs/count"},
+                  "test_status": {"$ref": "#/$defs/test_status"},
+                  "contract_status": {"$ref": "#/$defs/contract_status"},
+                  "valid_pairs": {"$ref": "#/$defs/count"},
+                  "mismatches": {"$ref": "#/$defs/count"},
+                  "first_mismatch": {"type": "string"}
+                },
+                "additionalProperties": false
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        "policy": {"type": "string"},
+        "seed": {"$ref": "#/$defs/count"},
+        "counts": {
+          "type": "object",
+          "required": ["attempted", "accepted", "executed_pairs", "valid_pairs", "mismatches", "harness_errors", "rejections", "mismatch_kinds"],
+          "properties": {
+            "attempted": {"$ref": "#/$defs/count"},
+            "accepted": {"$ref": "#/$defs/count"},
+            "executed_pairs": {"$ref": "#/$defs/count"},
+            "valid_pairs": {"$ref": "#/$defs/count"},
+            "mismatches": {"$ref": "#/$defs/count"},
+            "harness_errors": {"$ref": "#/$defs/count"},
+            "rejections": {"type": "object", "additionalProperties": {"$ref": "#/$defs/count"}},
+            "mismatch_kinds": {"type": "object", "propertyNames": {"$ref": "#/$defs/mismatch_kind"}, "additionalProperties": {"$ref": "#/$defs/count"}}
+          },
+          "additionalProperties": false
+        },
+        "boundary_sweep": {"allOf": [{"$ref": "#/$defs/phase_counts"}, {"required": ["mandatory", "generated", "duplicates_dropped", "truncated", "valid_by_family"]}]},
+        "random_phase": {"$ref": "#/$defs/phase_counts"},
+        "novelty": {
+          "type": "object",
+          "required": ["distinct_buckets", "first_seen_in_boundary", "first_seen_in_random"],
+          "properties": {
+            "distinct_buckets": {"$ref": "#/$defs/count"},
+            "first_seen_in_boundary": {"$ref": "#/$defs/count"},
+            "first_seen_in_random": {"$ref": "#/$defs/count"}
+          },
+          "additionalProperties": false
+        },
+        "case_log": {"type": "string"},
+        "unrestricted": {
+          "type": "object",
+          "required": ["test_status", "valid_pairs", "mismatches", "constraint_dependent", "note"],
+          "properties": {
+            "test_status": {"$ref": "#/$defs/test_status"},
+            "valid_pairs": {"$ref": "#/$defs/count"},
+            "mismatches": {"$ref": "#/$defs/count"},
+            "first_mismatch": {"type": "string"},
+            "constraint_dependent": {"type": "boolean"},
+            "note": {"type": "string"}
+          },
+          "additionalProperties": false
+        },
+        "execution": {
+          "type": "object",
+          "required": ["old_region_insts", "new_region_insts", "old_insts_executed", "new_insts_executed"],
+          "properties": {
+            "old_region_insts": {"$ref": "#/$defs/count"},
+            "new_region_insts": {"$ref": "#/$defs/count"},
+            "old_insts_executed": {"$ref": "#/$defs/count"},
+            "new_insts_executed": {"$ref": "#/$defs/count"}
+          },
+          "additionalProperties": false
+        },
+        "timing": {
+          "type": "object",
+          "required": ["setup_ns", "propose_ns", "state_load_ns", "old_execute_ns", "new_execute_ns", "compare_ns", "triage_ns"],
+          "additionalProperties": {"$ref": "#/$defs/count"}
+        },
+        "first_mismatch": {
+          "type": "object",
+          "required": ["case_index", "phase", "kind", "locations", "detail"],
+          "properties": {
+            "case_index": {"$ref": "#/$defs/count"},
+            "phase": {"$ref": "#/$defs/phase"},
+            "kind": {"$ref": "#/$defs/mismatch_kind"},
+            "locations": {"$ref": "#/$defs/locs"},
+            "frame_fields": {"type": "array", "items": {"type": "string"}},
+            "detail": {"type": "string"}
+          },
+          "additionalProperties": false
+        },
+        "counterexamples": {"type": "array", "items": {"type": "string"}},
+        "cache": {
+          "type": "object",
+          "required": ["hit", "key", "build_fingerprint", "note"],
+          "properties": {"hit": {"const": true}, "key": {"$ref": "#/$defs/sha256"}, "build_fingerprint": {"type": "string"}, "note": {"type": "string"}},
+          "additionalProperties": false
+        },
+        "diagnostic": {"const": "entry_prefix"},
+        "parent": {"type": "string"}
+      },
+      "additionalProperties": false
+    },
+    "results": {
+      "description": "results.json written by `test`.",
+      "type": "object",
+      "required": ["schema_version", "identity", "artifacts", "overall", "options", "unresolved", "regions"],
+      "properties": {
+        "schema_version": {"const": "rj_isa_diff.v1"},
+        "identity": {"$ref": "#/$defs/identity"},
+        "artifacts": {"$ref": "#/$defs/artifacts"},
+        "provenance": {"$ref": "#/$defs/provenance"},
+        "overall": {
+          "type": "object",
+          "required": ["test_status", "contract_status", "witness_scope", "coverage_scope", "proof_status", "note"],
+          "properties": {
+            "test_status": {"$ref": "#/$defs/test_status"},
+            "contract_status": {"enum": ["ESTABLISHED", "ASSUMED", "UNRESOLVED", "NOT_APPLICABLE"]},
+            "witness_scope": {"$ref": "#/$defs/witness_scope"},
+            "coverage_scope": {"$ref": "#/$defs/coverage_scope"},
+            "proof_status": {"const": "NOT_RUN"},
+            "note": {"type": "string"}
+          },
+          "additionalProperties": false
+        },
+        "options": {
+          "type": "object",
+          "required": ["seed", "cases", "boundary_sweep", "max_boundary_cases", "policy"],
+          "properties": {
+            "seed": {"$ref": "#/$defs/count"},
+            "cases": {"$ref": "#/$defs/count"},
+            "boundary_sweep": {"const": "mandatory"},
+            "max_boundary_cases": {"$ref": "#/$defs/count"},
+            "policy": {"type": "string"}
+          },
+          "additionalProperties": false
+        },
+        "unresolved": {"type": "array", "items": {"$ref": "#/$defs/unresolved_item"}},
+        "regions": {"type": "array", "items": {"$ref": "#/$defs/region_result"}},
+        "diagnostics": {"type": "array", "items": {"allOf": [{"$ref": "#/$defs/region_result"}, {"required": ["diagnostic", "parent"]}]}},
+        "diagnostics_note": {"type": "string"},
+        "cache": {
+          "type": "object",
+          "required": ["dir", "hits", "misses", "build_fingerprint"],
+          "properties": {"dir": {"type": "string"}, "hits": {"$ref": "#/$defs/count"}, "misses": {"$ref": "#/$defs/count"}, "build_fingerprint": {"type": "string"}},
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "machine_state": {
+      "type": "object",
+      "required": ["locations", "frame"],
+      "properties": {
+        "locations": {"type": "object", "propertyNames": {"$ref": "#/$defs/loc"}, "additionalProperties": {"$ref": "#/$defs/hex32"}, "minProperties": 108, "maxProperties": 108},
+        "frame": {
+          "type": "object",
+          "required": ["status_except_scc", "mode", "trapsts", "ttmp", "scratch_base", "s102", "s103", "wait_counters", "in_trap_handler", "wave_state", "sleep_cycles"],
+          "properties": {
+            "status_except_scc": {"$ref": "#/$defs/hex32"},
+            "mode": {"$ref": "#/$defs/hex32"},
+            "trapsts": {"$ref": "#/$defs/hex32"},
+            "ttmp": {"type": "array", "items": {"$ref": "#/$defs/hex32"}, "minItems": 16, "maxItems": 16},
+            "scratch_base": {"$ref": "#/$defs/hex"},
+            "s102": {"$ref": "#/$defs/hex32"},
+            "s103": {"$ref": "#/$defs/hex32"},
+            "wait_counters": {"type": "array", "items": {"$ref": "#/$defs/count"}},
+            "in_trap_handler": {"type": "boolean"},
+            "wave_state": {"$ref": "#/$defs/count"},
+            "sleep_cycles": {"$ref": "#/$defs/count"}
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "run_outcome": {
+      "type": "object",
+      "required": ["status", "executed"],
+      "properties": {
+        "status": {"$ref": "#/$defs/run_status"},
+        "executed": {"$ref": "#/$defs/count"},
+        "failed_index": {"$ref": "#/$defs/count"},
+        "detail": {"type": "string"}
+      },
+      "additionalProperties": false
+    },
+    "trace": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["index", "pc", "asm", "changed"],
+        "properties": {
+          "index": {"$ref": "#/$defs/count"},
+          "pc": {"$ref": "#/$defs/hex"},
+          "asm": {"type": "string"},
+          "changed": {"type": "object", "propertyNames": {"$ref": "#/$defs/loc"}, "additionalProperties": {"$ref": "#/$defs/hex32"}},
+          "frame_changed": {"type": "array", "items": {"type": "string"}}
+        },
+        "additionalProperties": false
+      }
+    },
+    "counterexample": {
+      "description": "Self-contained bundle written by `test` (counterexamples/*.json); `replay` re-executes it.",
+      "type": "object",
+      "required": ["schema_version", "synthetic", "evidence", "witness_scope", "region_id", "prepared_key", "seed", "policy", "case_index", "phase", "kind", "locations", "detail", "differences", "input_events", "region", "initial_state", "final_state", "exit", "trace", "identity"],
+      "properties": {
+        "schema_version": {"const": "rj_isa_diff.counterexample.v1"},
+        "synthetic": {"type": "boolean"},
+        "evidence": {"type": "string"},
+        "witness_scope": {"const": "LOCAL_ONLY"},
+        "region_id": {"type": "string"},
+        "prepared_key": {"$ref": "#/$defs/sha256"},
+        "seed": {"$ref": "#/$defs/count"},
+        "policy": {"type": "string"},
+        "case_index": {"$ref": "#/$defs/count"},
+        "phase": {"$ref": "#/$defs/phase"},
+        "kind": {"$ref": "#/$defs/mismatch_kind"},
+        "locations": {"$ref": "#/$defs/locs"},
+        "frame_fields": {"type": "array", "items": {"type": "string"}},
+        "detail": {"type": "string"},
+        "differences": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["loc", "old", "new"],
+            "properties": {"loc": {"$ref": "#/$defs/loc"}, "new_loc": {"$ref": "#/$defs/loc"}, "old": {"$ref": "#/$defs/hex32"}, "new": {"$ref": "#/$defs/hex32"}},
+            "additionalProperties": false
+          }
+        },
+        "input_events": {"type": "array", "items": {"type": "string"}},
+        "region": {"$ref": "#/$defs/region"},
+        "initial_state": {"type": "object", "required": ["old", "new"], "properties": {"old": {"$ref": "#/$defs/machine_state"}, "new": {"$ref": "#/$defs/machine_state"}}, "additionalProperties": false},
+        "final_state": {"type": "object", "required": ["old", "new"], "properties": {"old": {"$ref": "#/$defs/machine_state"}, "new": {"$ref": "#/$defs/machine_state"}}, "additionalProperties": false},
+        "exit": {"type": "object", "required": ["old", "new"], "properties": {"old": {"$ref": "#/$defs/run_outcome"}, "new": {"$ref": "#/$defs/run_outcome"}}, "additionalProperties": false},
+        "trace": {"type": "object", "required": ["old", "new"], "properties": {"old": {"$ref": "#/$defs/trace"}, "new": {"$ref": "#/$defs/trace"}}, "additionalProperties": false},
+        "reduction": {
+          "type": "object",
+          "required": ["runs", "accepted_steps", "budget_exhausted", "seed_independent", "program_reduced", "original_locations", "original_initial_state", "reduced_entry_values"],
+          "properties": {
+            "runs": {"$ref": "#/$defs/count"},
+            "accepted_steps": {"$ref": "#/$defs/count"},
+            "budget_exhausted": {"type": "boolean"},
+            "seed_independent": {"type": "boolean"},
+            "program_reduced": {"const": false},
+            "original_locations": {"$ref": "#/$defs/locs"},
+            "original_initial_state": {"type": "object", "required": ["old", "new"], "properties": {"old": {"$ref": "#/$defs/machine_state"}, "new": {"$ref": "#/$defs/machine_state"}}, "additionalProperties": false},
+            "reduced_entry_values": {"type": "object", "propertyNames": {"$ref": "#/$defs/loc"}, "additionalProperties": {"$ref": "#/$defs/hex32"}}
+          },
+          "additionalProperties": false
+        },
+        "artifacts": {"$ref": "#/$defs/artifacts"},
+        "provenance": {"$ref": "#/$defs/provenance"},
+        "identity": {"$ref": "#/$defs/identity"}
+      },
+      "additionalProperties": false
+    },
+
+    "inst_summary": {
+      "type": "object",
+      "required": ["pc", "mnemonic", "asm", "reads", "writes"],
+      "properties": {"pc": {"$ref": "#/$defs/hex"}, "mnemonic": {"type": "string"}, "asm": {"type": "string"}, "reads": {"$ref": "#/$defs/locs"}, "writes": {"$ref": "#/$defs/locs"}},
+      "additionalProperties": false
+    },
+    "case_log_header": {
+      "type": "object",
+      "required": ["type", "schema", "region", "synthetic", "prepared_key", "seed", "policy", "contract", "old", "new", "roles", "pairs", "const_relations", "boundary_cases"],
+      "properties": {
+        "type": {"const": "header"},
+        "schema": {"const": "rj_isa_diff.case_log.v1"},
+        "region": {"type": "string"},
+        "parent": {"type": "string"},
+        "synthetic": {"type": "boolean"},
+        "prepared_key": {"type": "string"},
+        "seed": {"$ref": "#/$defs/count"},
+        "policy": {"type": "string"},
+        "contract": {"type": "object"},
+        "old": {"type": "array", "items": {"$ref": "#/$defs/inst_summary"}},
+        "new": {"type": "array", "items": {"$ref": "#/$defs/inst_summary"}},
+        "roles": {"type": "object", "propertyNames": {"$ref": "#/$defs/loc"}, "additionalProperties": {"type": "string"}},
+        "pairs": {"type": "array", "items": {"type": "string"}},
+        "const_relations": {"type": "array", "items": {"type": "string"}},
+        "boundary_cases": {"$ref": "#/$defs/count"}
+      },
+      "additionalProperties": false
+    },
+    "case_log_case": {
+      "type": "object",
+      "required": ["type", "case", "phase", "accepted", "events"],
+      "properties": {
+        "type": {"const": "case"},
+        "case": {"$ref": "#/$defs/count"},
+        "phase": {"$ref": "#/$defs/phase"},
+        "accepted": {"type": "boolean"},
+        "rejection": {"type": "string"},
+        "events": {"type": "array", "items": {"type": "string"}},
+        "exit": {"type": "array", "items": {"type": "string"}, "minItems": 2, "maxItems": 2},
+        "category": {"type": "string"},
+        "locs": {"$ref": "#/$defs/locs"},
+        "bucket": {"$ref": "#/$defs/hex"},
+        "novel": {"type": "boolean"},
+        "cost_ns": {"type": "array", "items": {"$ref": "#/$defs/count"}, "minItems": 5, "maxItems": 5},
+        "insts": {"type": "array", "items": {"$ref": "#/$defs/count"}, "minItems": 2, "maxItems": 2}
+      },
+      "if": {"properties": {"accepted": {"const": true}}},
+      "then": {"required": ["exit", "category", "bucket", "novel", "cost_ns", "insts"]},
+      "additionalProperties": false
+    },
+    "case_log_summary": {
+      "type": "object",
+      "required": ["type", "cases", "accepted", "valid", "mismatches", "novelty_buckets", "categories"],
+      "properties": {
+        "type": {"const": "summary"},
+        "cases": {"$ref": "#/$defs/count"},
+        "accepted": {"$ref": "#/$defs/count"},
+        "valid": {"$ref": "#/$defs/count"},
+        "mismatches": {"$ref": "#/$defs/count"},
+        "novelty_buckets": {"$ref": "#/$defs/count"},
+        "categories": {"type": "object", "additionalProperties": {"$ref": "#/$defs/count"}}
+      },
+      "additionalProperties": false
+    }
+  }
+}

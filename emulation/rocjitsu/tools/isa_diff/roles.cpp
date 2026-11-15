@@ -101,8 +101,11 @@ void add_instruction(RegionRoles &r, const Instruction &inst) {
 } // namespace
 
 RegionRoles infer_roles(const std::vector<RegionInst> &old_insts,
-                        const std::vector<RegionInst> &new_insts) {
+                        const std::vector<RegionInst> &new_insts,
+                        const std::array<unsigned, kNumLocs> *new_to_old) {
   RegionRoles r;
+  // New-side roles are collected separately and translated when a register map is given.
+  RegionRoles mapped;
   r.decoded = true;
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
   if (!decoder) {
@@ -123,7 +126,25 @@ RegionRoles infer_roles(const std::vector<RegionInst> &old_insts,
       const Effects fx = classify(*decoded.value());
       summary.push_back(
           {ri.pc, std::string(decoded.value()->mnemonic()), ri.text, fx.reads, fx.writes});
-      add_instruction(r, *decoded.value());
+      add_instruction(side == &old_insts || !new_to_old ? r : mapped, *decoded.value());
+    }
+  }
+  if (new_to_old) {
+    const auto &inv = *new_to_old;
+    for (unsigned l = 0; l < kNumLocs; ++l) {
+      r.roles[inv[l]] |= mapped.roles[l];
+      if (mapped.read.test(l))
+        r.read.set(inv[l]);
+    }
+    for (OperandPair p : mapped.pairs) {
+      p.a = inv[p.a];
+      p.b = inv[p.b];
+      if (std::ranges::find(r.pairs, p) == r.pairs.end())
+        r.pairs.push_back(p);
+    }
+    for (ConstRelation c : mapped.const_relations) {
+      c.loc = inv[c.loc];
+      r.const_relations.push_back(c);
     }
   }
   // Same constant relation from both sides counts once.

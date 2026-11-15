@@ -457,3 +457,21 @@ inline const std::vector<uint32_t> k_expand_masked_old = {0x8e048102, 0x86048104
 // s_store_dword s4, s[0:1], 0x0
 // s_endpgm
 inline const std::vector<uint32_t> k_expand_masked_new = {0x8e048202, 0x86048104, 0xc0420100, 0x00000000, 0xbf810000};
+
+// s_add_u32 s4, s2, s3
+// s_mov_b32 s8, s4
+// s_add_u32 s5, s8, 1
+// v_mov_b32 v2, s5
+// v_mov_b32 v0, 0
+// global_store_dword v0, v2, s[6:7]
+// s_endpgm
+inline const std::vector<uint32_t> k_valutemp_old = {0x80040302, 0xbe880004, 0x80058108, 0x7e040205, 0x7e000280, 0xdc708000, 0x00060200, 0xbf810000};
+
+// s_add_u32 s4, s2, s3
+// s_mov_b32 s10, s4
+// s_add_u32 s5, s10, 1
+// v_mov_b32 v2, s5
+// v_mov_b32 v0, 0
+// global_store_dword v0, v2, s[6:7]
+// s_endpgm
+inline const std::vector<uint32_t> k_valutemp_new = {0x80040302, 0xbe8a0004, 0x8005810a, 0x7e040205, 0x7e000280, 0xdc708000, 0x00060200, 0xbf810000};

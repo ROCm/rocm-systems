@@ -11,6 +11,7 @@
 #include "util/diagnostic.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cstring>
 #include <deque>
 #include <map>
@@ -82,6 +83,7 @@ LocSet KernelModel::live_transfer(const Effects &fx, const LocSet &live_after) {
 }
 
 std::unique_ptr<KernelModel> KernelModel::build(const Artifact &artifact, std::string &error) {
+  const auto t_decode = std::chrono::steady_clock::now();
   std::unique_ptr<KernelModel> model(new KernelModel());
   model->artifact_ = artifact;
   model->code_object_ = std::make_unique<TextCodeObject>(artifact.text, artifact.text_vaddr);
@@ -133,6 +135,9 @@ std::unique_ptr<KernelModel> KernelModel::build(const Artifact &artifact, std::s
     ref.mnemonic = std::string(inst->mnemonic());
     ref.text = inst->disassemble();
     ref.fx = classify(*inst);
+    for (const TextRelocation &rel : artifact.text_relocations)
+      if (rel.offset >= offset && rel.offset < offset + nwords * 4)
+        ref.relocations += (ref.relocations.empty() ? "" : "; ") + describe_relocation(rel);
     auto [it, inserted] = block_index.try_emplace(block, static_cast<uint32_t>(block_index.size()));
     ref.block = it->second;
     index_of_offset[offset] = insts.size();
@@ -209,10 +214,16 @@ std::unique_ptr<KernelModel> KernelModel::build(const Artifact &artifact, std::s
         model->uncovered_.end(), artifact.text.begin() + static_cast<std::ptrdiff_t>(cursor),
         artifact.text.begin() + static_cast<std::ptrdiff_t>(artifact.kernel_end));
 
+  const auto t_dataflow = std::chrono::steady_clock::now();
+  model->decode_cfg_ns_ = static_cast<uint64_t>(
+      std::chrono::duration_cast<std::chrono::nanoseconds>(t_dataflow - t_decode).count());
   model->compute_liveness();
   model->compute_taint();
   model->compute_pending();
   model->compute_reachability();
+  model->dataflow_ns_ = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                                  std::chrono::steady_clock::now() - t_dataflow)
+                                                  .count());
   return model;
 }
 

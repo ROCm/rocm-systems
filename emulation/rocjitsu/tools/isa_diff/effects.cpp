@@ -411,16 +411,65 @@ Effects classify(const Instruction &inst) {
   if (flags & PREDICATED_DEF)
     fx.reads |= fx.writes;
 
-  // Hidden effects that the operand list does not show.
+  // Hidden effects that the operand list does not show. Outside P0 they are translated
+  // into tracked locations where possible (a VALU's implicit EXEC read, a carry-out VCC
+  // write); VGPR/AGPR effects are not tracked state. Without this, every VALU instruction
+  // would make every location live before it, and renamed dead SALU temporaries would
+  // look observable. Classes that cannot be translated (TTMP, FLAT_SCRATCH, PC) stay an
+  // unknown effect. P0 instructions keep the strict rule: any hidden effect rejects them.
   RegisterSet implicit_uses;
   RegisterSet implicit_defs;
   inst.implicit_uses(implicit_uses);
   inst.implicit_defs(implicit_defs);
   const bool has_implicit = !implicit_uses.none() || !implicit_defs.none();
+  bool implicit_unmapped = false;
+  auto translate = [&](const RegisterSet &set, LocSet &into) {
+    set.for_each([&](const RegisterRef &r) {
+      switch (r.cls) {
+      case RegClass::SGPR:
+        for (unsigned w = 0; w < std::max<unsigned>(r.width, 1); ++w) {
+          const unsigned n = r.index + w;
+          if (n < kNumSgprs)
+            into.set(n);
+          else
+            implicit_unmapped = true;
+        }
+        break;
+      case RegClass::VGPR:
+      case RegClass::ACC_VGPR:
+        break;
+      case RegClass::EXEC:
+        into.set(kLocExecLo);
+        into.set(kLocExecHi);
+        break;
+      case RegClass::VCC:
+        into.set(kLocVccLo);
+        into.set(kLocVccHi);
+        break;
+      case RegClass::SCC:
+        into.set(kLocScc);
+        break;
+      case RegClass::M0:
+        into.set(kLocM0);
+        break;
+      default:
+        implicit_unmapped = true;
+        break;
+      }
+    });
+  };
+  LocSet hidden_reads, hidden_writes;
+  translate(implicit_uses, hidden_reads);
+  translate(implicit_defs, hidden_writes);
+  const bool hidden_unknown = has_implicit && (is_p0_mnemonic(mnemonic) || implicit_unmapped);
+  if (has_implicit && !hidden_unknown) {
+    fx.reads |= hidden_reads;
+    fx.writes |= hidden_writes;
+  }
   const bool indirect_sgpr = has_mnemonic_prefix(mnemonic, "s_movrel") ||
                              has_mnemonic_prefix(mnemonic, "s_set_gpr_idx") ||
                              (flags & BRANCH_STACK) != 0;
-  if (has_implicit || indirect_sgpr || unknown) {
+  if (hidden_unknown || indirect_sgpr || unknown) {
     fx.unknown_effect = true;
     if (unknown_what.empty())
       unknown_what = indirect_sgpr ? "indirect SGPR access" : "implicit register effects";

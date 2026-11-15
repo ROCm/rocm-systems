@@ -6,6 +6,10 @@
 #include "rocjitsu/isa/instruction.h"
 
 #include <algorithm>
+#include <array>
+#include <bit>
+#include <charconv>
+#include <chrono>
 #include <optional>
 #include <set>
 
@@ -65,6 +69,17 @@ std::optional<std::string> pc_tainted_read(const KernelModel &m, size_t begin, s
       return std::string(side) + " " + hex64(ref.pc) + " '" + ref.text +
              "' reads a PC-derived value (" + format_locs(hit) + ")";
   }
+  return std::nullopt;
+}
+
+/// Handoff 4: relocated bytes depend on the linker/loader; P0 does not model them.
+std::optional<std::string> first_relocated(const KernelModel &m, size_t begin, size_t end,
+                                           const char *side) {
+  for (size_t i = begin; i < end; ++i)
+    if (!m.insts()[i].relocations.empty())
+      return std::string("relocated instruction (") + side + " " + hex64(m.insts()[i].pc) + " " +
+             m.insts()[i].text + ": " + m.insts()[i].relocations +
+             "): its executed bytes depend on relocation processing, not modelled in P0";
   return std::nullopt;
 }
 
@@ -172,7 +187,9 @@ void check_pending(const KernelModel &om, const KernelModel &nm, const Candidate
 // Region construction (shared by base regions and expansion variants).
 
 RegionPair build_region(const KernelModel &om, const KernelModel &nm, const Candidate &c,
-                        const PlanOptions &options, const std::string &id) {
+                        const PlanOptions &options, const std::string &id,
+                        const std::vector<std::pair<unsigned, unsigned>> &entry_map = {},
+                        const std::vector<std::pair<unsigned, unsigned>> &exit_map = {}) {
   RegionPair region;
   region.id = id;
   region.hunks = c.hunks;
@@ -196,6 +213,10 @@ RegionPair build_region(const KernelModel &om, const KernelModel &nm, const Cand
     reject = *bad;
   } else if (auto bad2 = first_non_p0(nm, c.n.begin, c.n.end, "new")) {
     reject = *bad2;
+  } else if (auto rel = first_relocated(om, c.o.begin, c.o.end, "old")) {
+    reject = *rel;
+  } else if (auto rel2 = first_relocated(nm, c.n.begin, c.n.end, "new")) {
+    reject = *rel2;
   } else if (auto pc = pc_tainted_read(om, c.o.begin, c.o.end, "old")) {
     reject = *pc;
   } else if (auto pc2 = pc_tainted_read(nm, c.n.begin, c.n.end, "new")) {
@@ -208,10 +229,24 @@ RegionPair build_region(const KernelModel &om, const KernelModel &nm, const Cand
   }
 
   RegionContract &k = region.contract;
-  k.entry_equal = entry_live(om, c.o) | entry_live(nm, c.n);
+  // Contract sets use old naming; with register maps the new side's sets are translated,
+  // live-ins through the entry map and live-outs through the exit map.
+  k.entry_map = entry_map;
+  k.exit_map = exit_map;
+  const bool mapped = k.mapped();
+  const auto inv_in = k.entry_inverse();
+  const auto inv_out = k.exit_inverse();
+  auto to_old = [](const LocSet &s, const std::array<unsigned, kNumLocs> &inv) {
+    LocSet o;
+    for (unsigned l = 0; l < kNumLocs; ++l)
+      if (s.test(l))
+        o.set(inv[l]);
+    return o;
+  };
+  k.entry_equal = entry_live(om, c.o) | to_old(entry_live(nm, c.n), inv_in);
   k.canary = ~k.entry_equal;
   const LocSet out_old = exit_live(om, c.o);
-  const LocSet out_new = exit_live(nm, c.n);
+  const LocSet out_new = to_old(exit_live(nm, c.n), inv_out);
   k.observable = out_old | out_new;
   // The two continuations read different locations: they differ downstream (typically
   // a register renaming that crosses blocks), so equality on the same physical
@@ -221,19 +256,32 @@ RegionPair build_region(const KernelModel &om, const KernelModel &nm, const Cand
     region.reason = "INCONCLUSIVE_MAPPING: continuation liveness differs at the region exit "
                     "(old-only: " +
                     format_locs(out_old & ~out_new) +
-                    "; new-only: " + format_locs(out_new & ~out_old) +
-                    "); identity R_out is not justified and no checked value mapping exists";
+                    "; new-only: " + format_locs(out_new & ~out_old) + "); " +
+                    (mapped ? std::string("the user register map does not reconcile them")
+                            : std::string("identity R_out is not justified and no checked value "
+                                          "mapping exists"));
   }
   k.declared_writes_old = union_writes(om, c.o);
-  k.declared_writes_new = union_writes(nm, c.n);
-  k.wide_reads = union_wide_reads(om, c.o) | union_wide_reads(nm, c.n);
+  k.declared_writes_new = union_writes(nm, c.n); // physical new naming (effect model)
+  k.wide_reads = union_wide_reads(om, c.o) | to_old(union_wide_reads(nm, c.n), inv_in);
   k.sources.push_back({"entry_equal = live-in(old) | live-in(new) at the region entry",
                        "KernelModel backward LocSet liveness over BasicBlock::build_reachable "
                        "CFG"});
   k.sources.push_back({"observable = live-out(old) | live-out(new) at the region exit",
                        "KernelModel backward LocSet liveness"});
-  k.sources.push_back({"mapping = same physical location on both sides",
-                       "identity at a common cutpoint; matched anchors from LCS alignment"});
+  if (mapped) {
+    k.mapping = "user_register_map";
+    auto show = [](const std::vector<std::pair<unsigned, unsigned>> &m) {
+      return m.empty() ? std::string("identity") : format_register_map(m);
+    };
+    k.sources.push_back({"mapping = entry map " + show(entry_map) + ", exit map " + show(exit_map) +
+                             " (old=new; other locations identity), asserted by hand and not "
+                             "checked",
+                         "user_assumption"});
+  } else {
+    k.sources.push_back({"mapping = same physical location on both sides",
+                         "identity at a common cutpoint; matched anchors from LCS alignment"});
+  }
   k.sources.push_back({"canary = locations dead at entry on both sides",
                        "complement of entry_equal; independent per-side values"});
   if (c.before)
@@ -343,20 +391,23 @@ struct Atom {
   bool unknown = false, mem = false, vgpr = false;
 };
 
-struct CompositionResult {
-  std::vector<EqState> anchor_state; ///< Per region index: state at its entry.
-  std::vector<EqState> before;       ///< Per old instruction: state before it.
+struct AtomMap {
+  std::vector<Atom> atoms;
+  std::vector<std::vector<size_t>> atoms_at; ///< Atoms applied before each old instruction.
+  std::vector<int64_t> owner;                ///< Atom consuming each old instruction, or -1.
 };
 
-CompositionResult analyse_composition(const KernelModel &om, const KernelModel &nm,
-                                      const DiffResult &diff, const PlanResult &plan,
-                                      bool metadata_differs) {
+/// Changed code on the old instruction stream: READY regions, untested regions, and
+/// changes outside any region, each applied atomically at its anchor.
+AtomMap build_atoms(const KernelModel &om, const KernelModel &nm, const DiffResult &diff,
+                    const PlanResult &plan) {
   const auto &oi = om.insts();
-  const auto &ni = nm.insts();
-  const auto &blocks = om.blocks();
-  std::vector<Atom> atoms;
-  std::vector<std::vector<size_t>> atoms_at(oi.size() + 1);
-  std::vector<int64_t> owner(oi.size(), -1);
+  AtomMap map;
+  auto &atoms = map.atoms;
+  auto &atoms_at = map.atoms_at;
+  auto &owner = map.owner;
+  atoms_at.assign(oi.size() + 1, {});
+  owner.assign(oi.size(), -1);
   auto add_atom = [&](Atom a) {
     const size_t id = atoms.size();
     for (size_t i = a.begin; i < a.end && i < oi.size(); ++i)
@@ -410,6 +461,24 @@ CompositionResult analyse_composition(const KernelModel &om, const KernelModel &
     a.anchor = hunk.old_begin < hunk.old_end ? hunk.old_begin : hunk.old_end;
     add_atom(std::move(a));
   }
+  return map;
+}
+
+struct CompositionResult {
+  std::vector<EqState> anchor_state; ///< Per region index: state at its entry.
+  std::vector<EqState> before;       ///< Per old instruction: state before it.
+};
+
+CompositionResult analyse_composition(const KernelModel &om, const KernelModel &nm,
+                                      const DiffResult &diff, const PlanResult &plan,
+                                      bool metadata_differs) {
+  const auto &oi = om.insts();
+  const auto &ni = nm.insts();
+  const auto &blocks = om.blocks();
+  const AtomMap map = build_atoms(om, nm, diff, plan);
+  const auto &atoms = map.atoms;
+  const auto &atoms_at = map.atoms_at;
+  const auto &owner = map.owner;
   (void)ni;
 
   const LocSet specials = special_reads();
@@ -529,6 +598,228 @@ CompositionResult analyse_composition(const KernelModel &om, const KernelModel &
   return {std::move(anchor_state), std::move(before)};
 }
 
+// ---------------------------------------------------------------------------
+// Known bits from the common prefix (handoff 3.3): a forward must-analysis over the old
+// CFG. Common code is identical on both sides, so a fact proven here holds in both
+// kernels at the cutpoint. Changed code (regions, untested changes) makes its writes
+// unknown, and a control-flow change makes everything unknown. Path conditions are not
+// used. Only a few exact transfer functions are modelled; every other write is unknown.
+
+struct Bits {
+  uint32_t kz = 0, ko = 0; ///< Known-zero and known-one masks.
+  bool operator==(const Bits &) const = default;
+};
+
+struct BitsState {
+  std::array<Bits, kNumLocs> v{};
+  bool top = true;
+  bool operator==(const BitsState &) const = default;
+};
+
+BitsState bits_unknown() {
+  BitsState s;
+  s.top = false;
+  return s;
+}
+
+BitsState bits_meet(const BitsState &a, const BitsState &b) {
+  if (a.top)
+    return b;
+  if (b.top)
+    return a;
+  BitsState r;
+  r.top = false;
+  for (unsigned l = 0; l < kNumLocs; ++l)
+    r.v[l] = {a.v[l].kz & b.v[l].kz, a.v[l].ko & b.v[l].ko};
+  return r;
+}
+
+Bits exact(uint32_t c) { return {~c, c}; }
+
+uint32_t leading_known_zero(const Bits &b) { return static_cast<uint32_t>(std::countl_one(b.kz)); }
+
+uint32_t top_mask(uint32_t n) { return n == 0 ? 0u : n >= 32 ? ~0u : ~0u << (32 - n); }
+
+std::optional<Bits> transfer_bits(const InstRef &ref, const BitsState &s) {
+  const Effects &fx = ref.fx;
+  if (!fx.p0 || (ref.inst->flags() & PREDICATED_DEF))
+    return std::nullopt;
+  LocSet dst = fx.writes;
+  dst.reset(kLocScc);
+  if (dst.count() != 1)
+    return std::nullopt;
+  std::vector<SourceOperand> src = source_operands(*ref.inst);
+  std::erase_if(src, [](const SourceOperand &o) { return o.fieldless; });
+  auto bits_of = [&](size_t i) -> std::optional<Bits> {
+    if (i >= src.size())
+      return std::nullopt;
+    if (src[i].constant)
+      return exact(*src[i].constant);
+    if (src[i].locs.count() == 1)
+      for (unsigned l = 0; l < kNumLocs; ++l)
+        if (src[i].locs.test(l))
+          return s.v[l];
+    return std::nullopt;
+  };
+  const std::string &m = ref.mnemonic;
+  auto a = bits_of(0), b = bits_of(1);
+  if ((m == "s_mov_b32" || m == "s_movk_i32") && a)
+    return a;
+  if (m == "s_not_b32" && a)
+    return Bits{a->ko, a->kz};
+  if (!a || !b)
+    return std::nullopt;
+  if (m == "s_and_b32")
+    return Bits{a->kz | b->kz, a->ko & b->ko};
+  if (m == "s_andn2_b32")
+    return Bits{a->kz | b->ko, a->ko & b->kz};
+  if (m == "s_or_b32")
+    return Bits{a->kz & b->kz, a->ko | b->ko};
+  if (m == "s_xor_b32")
+    return Bits{(a->kz & b->kz) | (a->ko & b->ko), (a->kz & b->ko) | (a->ko & b->kz)};
+  if (m == "s_cselect_b32")
+    return Bits{a->kz & b->kz, a->ko & b->ko};
+  const bool b_exact = (b->kz | b->ko) == ~0u;
+  if (m == "s_lshl_b32" && b_exact) {
+    const uint32_t c = b->ko & 31u;
+    return Bits{(a->kz << c) | ((c ? (1u << c) : 1u) - 1u), a->ko << c};
+  }
+  if (m == "s_lshr_b32" && b_exact) {
+    const uint32_t c = b->ko & 31u;
+    return Bits{(a->kz >> c) | top_mask(c), a->ko >> c};
+  }
+  if (m == "s_bfe_u32" && b_exact) {
+    const uint32_t off = b->ko & 31u, width = (b->ko >> 16) & 0x7fu;
+    if (width == 0)
+      return exact(0);
+    if (width >= 32)
+      return Bits{(a->kz >> off) | top_mask(off), a->ko >> off};
+    const uint32_t mask = (1u << width) - 1u;
+    return Bits{((a->kz >> off) & mask) | ~mask, (a->ko >> off) & mask};
+  }
+  if (m == "s_min_u32")
+    return Bits{top_mask(std::max(leading_known_zero(*a), leading_known_zero(*b))), 0};
+  if (m == "s_max_u32")
+    return Bits{top_mask(std::min(leading_known_zero(*a), leading_known_zero(*b))), 0};
+  return std::nullopt;
+}
+
+struct KnownBitsResult {
+  std::vector<BitsState> anchor_state; ///< Per region index.
+  std::vector<BitsState> before;       ///< Per old instruction.
+};
+
+KnownBitsResult analyse_known_bits(const KernelModel &om, const KernelModel &nm,
+                                   const DiffResult &diff, const PlanResult &plan) {
+  const auto &oi = om.insts();
+  const auto &blocks = om.blocks();
+  const AtomMap map = build_atoms(om, nm, diff, plan);
+  std::vector<BitsState> anchor_state(plan.regions.size());
+  auto forget = [](BitsState &s, const LocSet &w) {
+    for (unsigned l = 0; l < kNumLocs; ++l)
+      if (w.test(l))
+        s.v[l] = {};
+  };
+  auto apply_atom = [&](const Atom &a, BitsState &s) {
+    if (a.region != SIZE_MAX)
+      anchor_state[a.region] = s;
+    if (s.top)
+      return;
+    if (a.kind == Atom::Diverge || a.unknown)
+      s = bits_unknown();
+    else
+      forget(s, a.writes);
+  };
+  std::vector<BitsState> before(oi.size());
+  auto run_block = [&](uint32_t b, BitsState s, bool record) {
+    for (size_t i = blocks[b].first; i < blocks[b].end; ++i) {
+      for (size_t id : map.atoms_at[i])
+        apply_atom(map.atoms[id], s);
+      if (map.owner[i] >= 0) {
+        const Atom &a = map.atoms[static_cast<size_t>(map.owner[i])];
+        if (a.anchor < oi.size() && oi[a.anchor].block != b && !s.top)
+          s = bits_unknown();
+        continue;
+      }
+      if (record)
+        before[i] = s;
+      if (s.top)
+        continue;
+      const InstRef &ref = oi[i];
+      if (ref.fx.unknown_effect) {
+        s = bits_unknown();
+        continue;
+      }
+      const auto computed = transfer_bits(ref, s);
+      forget(s, ref.fx.writes);
+      if (computed) {
+        LocSet dst = ref.fx.writes;
+        dst.reset(kLocScc);
+        for (unsigned l = 0; l < kNumLocs; ++l)
+          if (dst.test(l))
+            s.v[l] = *computed;
+      }
+    }
+    return s;
+  };
+  const BitsState initial = bits_unknown();
+  const size_t nb = blocks.size();
+  std::vector<BitsState> out(nb);
+  bool changed = true;
+  for (unsigned round = 0; changed && round < 4096; ++round) {
+    changed = false;
+    for (uint32_t b = 0; b < nb; ++b) {
+      BitsState in = b == 0 ? initial : BitsState{};
+      for (uint32_t p : blocks[b].predecessors)
+        in = bits_meet(in, out[p]);
+      if (!om.cfg_complete() && b != 0)
+        in = bits_meet(in, bits_unknown());
+      const BitsState o = run_block(b, in, false);
+      if (!(o == out[b])) {
+        out[b] = o;
+        changed = true;
+      }
+    }
+  }
+  for (uint32_t b = 0; b < nb; ++b) {
+    BitsState in = b == 0 ? initial : BitsState{};
+    for (uint32_t p : blocks[b].predecessors)
+      in = bits_meet(in, out[p]);
+    if (!om.cfg_complete() && b != 0)
+      in = bits_meet(in, bits_unknown());
+    run_block(b, in, true);
+  }
+  return {std::move(anchor_state), std::move(before)};
+}
+
+/// Turn known bits at a region entry into constraints on its entry_equal locations.
+void derive_constraints(RegionPair &region, const BitsState &s) {
+  if (s.top)
+    return;
+  RegionContract &k = region.contract;
+  size_t added = 0;
+  for (unsigned l = 0; l < kNumLocs; ++l) {
+    if (l == kLocScc || !k.entry_equal.test(l))
+      continue;
+    const Bits &b = s.v[l];
+    if ((b.kz | b.ko) == 0)
+      continue;
+    Constraint c;
+    c.loc = l;
+    c.known_zero = b.kz;
+    c.known_one = b.ko;
+    c.source = "common_prefix_analysis";
+    k.constraints.push_back(c);
+    ++added;
+  }
+  if (added)
+    k.sources.push_back({std::to_string(added) +
+                             " known-bits constraint(s) on entry locations proven by the common "
+                             "prefix (forward must-analysis; changed code makes its writes "
+                             "unknown)",
+                         "common_prefix_analysis"});
+}
+
 void record_composition(RegionPair &region, const EqState &s, const std::string &how) {
   RegionContract &k = region.contract;
   const LocSet missing = s.top ? LocSet{} : (k.entry_equal & ~s.eq);
@@ -555,6 +846,11 @@ PlanResult plan_regions(const KernelModel &old_model, const KernelModel &new_mod
   PlanResult result;
   const auto &oi = old_model.insts();
   const auto &ni = new_model.insts();
+  const auto plan_start = std::chrono::steady_clock::now();
+  auto out_of_time = [&] {
+    return options.max_analysis_us != 0 && std::chrono::steady_clock::now() - plan_start >=
+                                               std::chrono::microseconds(options.max_analysis_us);
+  };
 
   bool metadata_differs = false;
   for (const auto &note : diff.notes) {
@@ -638,7 +934,10 @@ PlanResult plan_regions(const KernelModel &old_model, const KernelModel &new_mod
 
   // 5. Expansion variants (smallest first): backward, forward and both-sided common context.
   std::vector<size_t> variant_base;
-  if (options.auto_expand) {
+  const bool skip_variants = options.auto_expand && out_of_time();
+  if (skip_variants)
+    result.skipped_for_time.push_back("expansion variants");
+  if (options.auto_expand && !skip_variants) {
     for (size_t r = 0; r < merged.size(); ++r) {
       if (result.regions[r].status != RegionStatus::Ready)
         continue;
@@ -679,7 +978,53 @@ PlanResult plan_regions(const KernelModel &old_model, const KernelModel &new_mod
     }
   }
 
-  // 6. Composition check and contract status.
+  // 6. Known bits from the common prefix become derived entry constraints.
+  if (options.derive_constraints && out_of_time())
+    result.skipped_for_time.push_back("derived constraints");
+  else if (options.derive_constraints) {
+    const KnownBitsResult kb = analyse_known_bits(old_model, new_model, diff, result);
+    for (size_t r = 0; r < result.regions.size(); ++r)
+      if (result.regions[r].status == RegionStatus::Ready)
+        derive_constraints(result.regions[r], kb.anchor_state[r]);
+    for (size_t v = 0; v < result.variants.size(); ++v) {
+      RegionPair &variant = result.variants[v];
+      const size_t r = variant_base[v];
+      const RegionPair &base = result.regions[r];
+      const size_t va = variant.old_side.begin < variant.old_side.end ? variant.old_side.begin
+                                                                      : variant.old_side.cut;
+      const size_t ba =
+          base.old_side.begin < base.old_side.end ? base.old_side.begin : base.old_side.cut;
+      if (variant.status == RegionStatus::Ready)
+        derive_constraints(variant,
+                           va == ba || va >= kb.before.size() ? kb.anchor_state[r] : kb.before[va]);
+    }
+  }
+
+  // 7. Composition check and contract status. Without it no entry relation is established.
+  if (out_of_time()) {
+    result.skipped_for_time.push_back("composition check");
+    auto unresolve = [](RegionPair &region) {
+      region.contract.status = ContractStatus::Unresolved;
+      region.contract.composition = "NOT_CHECKED";
+      region.contract.sources.push_back({"entry relation not established: the analysis time limit "
+                                         "was reached before the composition "
+                                         "check",
+                                         "planner"});
+      region.prepared_key = compute_prepared_key(region);
+    };
+    for (auto &region : result.regions) {
+      unresolve(region);
+      if (region.status == RegionStatus::Ready)
+        result.unresolved.push_back(
+            {"context", "analysis time limit: composition not checked for " + region.id,
+             region.id});
+    }
+    for (auto &variant : result.variants)
+      unresolve(variant);
+    if (options.diagnostic_entry_prefix)
+      result.skipped_for_time.push_back("diagnostic entry-prefix regions");
+    return result;
+  }
   const CompositionResult comp =
       analyse_composition(old_model, new_model, diff, result, metadata_differs);
   auto decide = [&](RegionPair &region, size_t base_index, const EqState &entry_state,
@@ -777,6 +1122,173 @@ PlanResult plan_regions(const KernelModel &old_model, const KernelModel &new_mod
         va == ba || va >= comp.before.size() ? comp.anchor_state[r] : comp.before[va];
     decide(variant, r, s, false);
   }
+
+  // 8. Explicit diagnostic path: the region preceded by everything from the kernel entry,
+  // so the region's inputs are produced by executing the common prefix instead of being
+  // sampled at the cut. Arbitrary entry values stand in for the dispatch ABI.
+  if (options.diagnostic_entry_prefix) {
+    for (const RegionPair &base : result.regions) {
+      if (base.status != RegionStatus::Ready)
+        continue;
+      Candidate c;
+      c.o = {0, base.old_side.end, base.old_side.cut};
+      c.n = {0, base.new_side.end, base.new_side.cut};
+      c.hunks = base.hunks;
+      c.before = static_cast<uint32_t>(base.old_side.begin);
+      RegionPair d = build_region(old_model, new_model, c, options, base.id + ".diag-entry");
+      d.parent = base.id;
+      const auto entry_block = [](const KernelModel &m, const RegionSide &s) {
+        const size_t a = s.begin < s.end ? s.begin : s.cut;
+        return a < m.insts().size() && m.insts()[a].block == m.insts()[0].block;
+      };
+      if (!entry_block(old_model, base.old_side) || !entry_block(new_model, base.new_side)) {
+        d.status = RegionStatus::Unsupported;
+        d.reason = "entry-prefix diagnostic: the region is not in the kernel's entry block, so "
+                   "the prefix has control flow P0 does not execute";
+      }
+      RegionContract &k = d.contract;
+      k.composition = "NOT_CHECKED";
+      k.status = metadata_differs ? ContractStatus::Unresolved : ContractStatus::Assumed;
+      k.sources.push_back({"diagnostic: execution starts at the kernel entry with arbitrary values "
+                           "in every entry-live location; the dispatch ABI (kernarg pointer, "
+                           "workgroup ids, ...) is not modelled",
+                           "user_assumption"});
+      d.prepared_key = compute_prepared_key(d);
+      result.diagnostics.push_back(std::move(d));
+    }
+  }
+  return result;
+}
+
+namespace {
+
+/// Instruction index for a manual-region bound: a decimal index or a 0x-prefixed PC.
+/// The kernel end (one past the last instruction) is accepted as an exclusive bound.
+std::optional<size_t> manual_bound(const KernelModel &m, std::string_view tok) {
+  const auto &insts = m.insts();
+  if (tok.empty())
+    return std::nullopt;
+  const bool hex = tok.size() > 2 && tok[0] == '0' && (tok[1] == 'x' || tok[1] == 'X');
+  uint64_t v = 0;
+  const char *first = tok.data() + (hex ? 2 : 0);
+  const char *last = tok.data() + tok.size();
+  auto [ptr, ec] = std::from_chars(first, last, v, hex ? 16 : 10);
+  if (ec != std::errc{} || ptr != last)
+    return std::nullopt;
+  if (!hex)
+    return v <= insts.size() ? std::optional<size_t>(v) : std::nullopt;
+  for (size_t i = 0; i < insts.size(); ++i)
+    if (insts[i].pc == v)
+      return i;
+  if (!insts.empty() && v == insts.back().pc + 4 * insts.back().words.size())
+    return insts.size();
+  return std::nullopt;
+}
+
+} // namespace
+
+std::optional<ManualRegion> parse_manual_region(std::string_view spec, const KernelModel &om,
+                                                const KernelModel &nm, std::string &error) {
+  ManualRegion mr;
+  bool have_old = false, have_new = false;
+  while (!spec.empty()) {
+    const size_t comma = spec.find(',');
+    const std::string_view item = spec.substr(0, comma);
+    const size_t colon = item.find(':');
+    const size_t dash = colon == std::string_view::npos ? colon : item.find('-', colon);
+    if (colon == std::string_view::npos || dash == std::string_view::npos) {
+      error = "manual region item '" + std::string(item) + "' is not side:B-E";
+      return std::nullopt;
+    }
+    const std::string_view side = item.substr(0, colon);
+    const bool is_old = side == "old";
+    if (!is_old && side != "new") {
+      error = "manual region side must be 'old' or 'new', got '" + std::string(side) + "'";
+      return std::nullopt;
+    }
+    const KernelModel &m = is_old ? om : nm;
+    auto b = manual_bound(m, item.substr(colon + 1, dash - colon - 1));
+    auto e = manual_bound(m, item.substr(dash + 1));
+    if (!b || !e || *b > *e) {
+      error = "manual region '" + std::string(item) +
+              "': bounds are not instruction indices/PCs of the kernel, or B > E";
+      return std::nullopt;
+    }
+    if (*b == *e && *e >= m.insts().size()) {
+      error = "manual region '" + std::string(item) +
+              "': an empty side needs a following instruction as its cut point";
+      return std::nullopt;
+    }
+    (is_old ? mr.old_begin : mr.new_begin) = *b;
+    (is_old ? mr.old_end : mr.new_end) = *e;
+    (is_old ? have_old : have_new) = true;
+    if (comma == std::string_view::npos)
+      break;
+    spec.remove_prefix(comma + 1);
+  }
+  if (!have_old || !have_new) {
+    error = "manual region needs both old:B-E and new:B-E";
+    return std::nullopt;
+  }
+  if (mr.old_begin == mr.old_end && mr.new_begin == mr.new_end) {
+    error = "manual region is empty on both sides";
+    return std::nullopt;
+  }
+  return mr;
+}
+
+PlanResult plan_manual_region(const KernelModel &old_model, const KernelModel &new_model,
+                              const DiffResult &diff, const ManualRegion &manual,
+                              const PlanOptions &options) {
+  PlanResult result;
+  bool metadata_differs = false;
+  for (const auto &note : diff.notes) {
+    if (note.semantic)
+      result.unresolved.push_back({change_kind_name(note.kind), note.what, ""});
+    else
+      result.notes.push_back(note);
+    if (note.semantic && note.kind == ChangeKind::Metadata)
+      metadata_differs = true;
+  }
+  Candidate c;
+  c.o = {manual.old_begin, manual.old_end, manual.old_end};
+  c.n = {manual.new_begin, manual.new_end, manual.new_end};
+  for (size_t h = 0; h < diff.hunks.size(); ++h) {
+    const Hunk &hunk = diff.hunks[h];
+    const bool covered = manual.old_begin <= hunk.old_begin && hunk.old_end <= manual.old_end &&
+                         manual.new_begin <= hunk.new_begin && hunk.new_end <= manual.new_end;
+    if (covered) {
+      c.hunks.push_back(h);
+      continue;
+    }
+    result.unresolved.push_back(
+        {change_kind_name(hunk.kind),
+         "hunk " + std::to_string(h) + " is not covered by the manual region (old [" +
+             std::to_string(hunk.old_begin) + "," + std::to_string(hunk.old_end) + "), new [" +
+             std::to_string(hunk.new_begin) + "," + std::to_string(hunk.new_end) + "))",
+         ""});
+  }
+  RegionPair region =
+      build_region(old_model, new_model, c, options, "m0", manual.entry_map, manual.exit_map);
+  RegionContract &k = region.contract;
+  k.composition = "NOT_CHECKED";
+  k.sources.push_back(
+      {"region boundaries chosen by hand: old [" + std::to_string(manual.old_begin) + "," +
+           std::to_string(manual.old_end) + "), new [" + std::to_string(manual.new_begin) + "," +
+           std::to_string(manual.new_end) + "); entry relation not checked by composition",
+       "user_assumption"});
+  if (metadata_differs) {
+    k.status = ContractStatus::Unresolved;
+    k.sources.push_back({"entry relation not established: kernel metadata differs", "planner"});
+  } else if (k.pending_effects == "CONFLICT" || k.pending_effects == "UNKNOWN") {
+    k.status = ContractStatus::Unresolved;
+  } else {
+    k.status = ContractStatus::Assumed;
+  }
+  if (region.status != RegionStatus::Ready)
+    result.unresolved.push_back({"region", region.reason, region.id});
+  region.prepared_key = compute_prepared_key(region);
+  result.regions.push_back(std::move(region));
   return result;
 }
 

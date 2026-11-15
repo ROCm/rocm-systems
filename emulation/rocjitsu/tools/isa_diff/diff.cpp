@@ -2,11 +2,13 @@
 // SPDX-License-Identifier: MIT
 
 #include "diff.h"
+#include "json.h"
 
 #include "rocjitsu/isa/instruction.h"
 
 #include <algorithm>
 #include <cstring>
+#include <set>
 
 namespace rocjitsu::isa_diff {
 namespace {
@@ -192,8 +194,115 @@ DiffResult diff_kernels(const KernelModel &old_model, const KernelModel &new_mod
   if (layout_only)
     r.notes.push_back({ChangeKind::Layout,
                        "kernel descriptor differs only in kernel_code_entry_byte_offset", false});
-  if (oa.metadata_sha256 != na.metadata_sha256)
-    r.notes.push_back({ChangeKind::Metadata, "code-object note (AMDHSA metadata) differs", true});
+  if (oa.metadata_parsed && na.metadata_parsed) {
+    // Field-level comparison of this kernel's metadata and the global fields; a note that
+    // differs only in other kernels' entries does not concern this kernel.
+    // Argument records are compared as units: one inserted argument shifts every later
+    // index, which is one change, not dozens.
+    auto split_args = [](const std::map<std::string, std::string> &m,
+                         std::map<std::string, std::string> &rest) {
+      std::map<size_t, std::string> args;
+      for (const auto &[k, v] : m) {
+        const size_t close = k.find(']');
+        if (k.rfind(".args[", 0) != 0 || close == std::string::npos) {
+          rest[k] = v;
+          continue;
+        }
+        size_t idx = 0;
+        for (size_t i = 6; i < close; ++i)
+          idx = idx * 10 + static_cast<size_t>(k[i] - '0');
+        std::string &rec = args[idx];
+        rec += (rec.empty() ? "" : " ") +
+               (close + 2 <= k.size() ? k.substr(close + 2) : std::string()) + "=" + v;
+      }
+      return args;
+    };
+    auto compare_args = [&](const std::map<std::string, std::string> &a,
+                            const std::map<std::string, std::string> &b,
+                            std::map<std::string, std::string> &rest_a,
+                            std::map<std::string, std::string> &rest_b) {
+      const auto aa = split_args(a, rest_a), ab = split_args(b, rest_b);
+      if (aa == ab)
+        return size_t{0};
+      size_t first = 0;
+      while (aa.count(first) && ab.count(first) && aa.at(first) == ab.at(first))
+        ++first;
+      auto rec = [&](const std::map<size_t, std::string> &m) {
+        return m.count(first) ? "{" + m.at(first) + "}" : std::string("<absent>");
+      };
+      r.notes.push_back({ChangeKind::Metadata,
+                         "kernel metadata .args differs (old " + std::to_string(aa.size()) +
+                             " args, new " + std::to_string(ab.size()) +
+                             " args); first difference at .args[" + std::to_string(first) +
+                             "]: old " + rec(aa) + ", new " + rec(ab),
+                         true});
+      return size_t{1};
+    };
+    auto compare = [&](const std::map<std::string, std::string> &a,
+                       const std::map<std::string, std::string> &b, const char *what) {
+      std::set<std::string> keys;
+      for (const auto &[k, v] : a)
+        keys.insert(k);
+      for (const auto &[k, v] : b)
+        keys.insert(k);
+      size_t n = 0;
+      for (const auto &k : keys) {
+        auto ia = a.find(k), ib = b.find(k);
+        const std::string va = ia == a.end() ? "<absent>" : ia->second;
+        const std::string vb = ib == b.end() ? "<absent>" : ib->second;
+        if (va == vb)
+          continue;
+        if (++n <= 32)
+          r.notes.push_back(
+              {ChangeKind::Metadata,
+               std::string(what) + " field differs: " + k + " (old " + va + ", new " + vb + ")",
+               true});
+      }
+      if (n > 32)
+        r.notes.push_back({ChangeKind::Metadata,
+                           std::string(what) + ": " + std::to_string(n - 32) +
+                               " further differing field(s) not listed",
+                           true});
+      return n;
+    };
+    std::map<std::string, std::string> rest_old, rest_new;
+    const size_t nk = compare_args(oa.kernel_metadata, na.kernel_metadata, rest_old, rest_new) +
+                      compare(rest_old, rest_new, "kernel metadata");
+    const size_t ng = compare(oa.global_metadata, na.global_metadata, "code-object metadata");
+    if (nk == 0 && ng == 0 && oa.metadata_sha256 != na.metadata_sha256)
+      r.notes.push_back({ChangeKind::Metadata,
+                         "AMDHSA note differs only outside this kernel's metadata entry", false});
+  } else if (oa.metadata_sha256 != na.metadata_sha256) {
+    r.notes.push_back({ChangeKind::Metadata,
+                       "code-object note (AMDHSA metadata) differs and was not parsed field by "
+                       "field",
+                       true});
+  }
+  // Relocations (handoff 4/5.1): matched instructions must carry the same relocations,
+  // otherwise identical bytes can resolve to different values.
+  {
+    size_t listed = 0, total = 0;
+    for (size_t i = 0; i < r.old_to_new.size(); ++i) {
+      const int64_t j = r.old_to_new[i];
+      if (j < 0)
+        continue;
+      const InstRef &a = old_model.insts()[i];
+      const InstRef &b = new_model.insts()[static_cast<size_t>(j)];
+      if (a.relocations == b.relocations)
+        continue;
+      ++total;
+      if (++listed <= 16)
+        r.notes.push_back({ChangeKind::Layout,
+                           "relocation differs at matched instruction old " + hex64(a.pc) + " (" +
+                               (a.relocations.empty() ? "none" : a.relocations) + ") / new " +
+                               hex64(b.pc) + " (" +
+                               (b.relocations.empty() ? "none" : b.relocations) + ")",
+                           true});
+    }
+    if (total > 16)
+      r.notes.push_back({ChangeKind::Layout,
+                         std::to_string(total - 16) + " further relocation difference(s)", true});
+  }
   if (old_model.uncovered_bytes() != new_model.uncovered_bytes())
     r.notes.push_back({ChangeKind::Unexplained,
                        "bytes not covered by reachable instructions differ (unreachable code or "
