@@ -332,43 +332,53 @@ ruff format .
 Metric equations in YAML config files follow a canonical format. The canonical
 implementation is [`tools/format_yaml.py`](tools/format_yaml.py).
 
-**Scope.** Equation formatting applies to YAML files under:
+**Scope.** Equation formatting applies to YAML files under
+`src/rocprof_compute_soc/`:
 
-- `src/rocprof_compute_soc/analysis_configs/gfx*/*.yaml`
+- `analysis_configs/gfx*/*.yaml` (panel configs)
+- `metric_library/<arch>/*.yaml`, including `collectables.yaml`
+- `analysis_configs/collectables/<arch>_collectables.yaml`
 
-Template files (`*_template.yaml`) and build artifacts are excluded. Only values
-under these keys are treated as equations: `value`, `avg`, `min`, `max`, `peak`.
+Template files (`*_template.yaml`) and build artifacts are excluded. In the panel
+and metric library files, only values under these keys are equations: `value`,
+`avg`, `min`, `max`, `peak`, `formula`, `peak_empirical`. In the panel
+collectables files, every top-level value is an equation.
 
 **Rules.**
 
 - **Operator spacing** — all binary operators (`+`, `-`, `*`, `/`) have exactly
   one space on each side: `SUM(x) / SUM(y)`.
-- **Constant factoring** — when an aggregation (`SUM`, `AVG`, `MIN`, `MAX`)
-  multiplies by a numeric constant, factor it out:
-  `128 * SUM(x)`, not `SUM(x * 128)`. Addition inside aggregations is left as-is.
+- **Constant factoring** — when the single argument of an aggregation (`SUM`,
+  `AVG`, `MIN`, `MAX`) is multiplied by a number, factor it out:
+  `128 * SUM(x)`, not `SUM(x * 128)`. Addition and division inside aggregations
+  are left as-is.
 - **Minimal parentheses** — remove parentheses made redundant by operator
-  precedence (`a + b + c`, not `(a + b) + c`), but preserve those that set the
-  evaluation order (`a - (b - c)`, `a + (b + c)`, `(a + b) * c`).
+  precedence (`a + b + c`, not `(a + b) + c`), but keep them around a right
+  operand of equal precedence and wherever they set the evaluation order
+  (`a - (b - c)`, `a + (b + c)`, `(a + b) * c`).
 - **Unary negation** — negation of a compound expression keeps its parentheses:
   `-(a + b)`, not `-a + b`.
-- **Literal values** — `N/A`, `None`, `null`, `true`, `false`, and
-  `Peak (Empirical)` are never parsed as equations and must be written exactly
-  as shown (the space before `(` in `Peak (Empirical)` is required).
+- **Left as written** — the `Peak (Empirical)` header text and per-channel
+  templates such as `TCC_HIT[::_1]` are not parsed. A cell with no value is
+  written `None`.
 
 The formatter reports an equation it cannot parse (unknown characters, unmatched
-parentheses, a missing operand) with its key and leaves it unchanged; fix it by
-hand.
+parentheses, a missing operand) with its key and the parser message, and leaves
+it unchanged; fix it by hand.
 
 **Enforcement.** The `yaml-format-fix` pre-commit hook runs
 `tools/format_yaml.py --fix` on staged config files and auto-corrects equations
 in place. Re-stage the modified files and commit again.
 
 ```bash
+# Report equations that need formatting
+python tools/format_yaml.py --check src/rocprof_compute_soc/analysis_configs/gfx950/*.yaml
+
 # Show proposed changes
-python tools/format_yaml.py --diff src/rocprof_compute_soc/analysis_configs/gfx950/*.yaml
+python tools/format_yaml.py --diff src/rocprof_compute_soc/metric_library/gfx950/*.yaml
 
 # Auto-fix in place
-python tools/format_yaml.py --fix src/rocprof_compute_soc/analysis_configs/gfx950/*.yaml
+python tools/format_yaml.py --fix src/rocprof_compute_soc/analysis_configs/collectables/*.yaml
 ```
 
 ## Documentation Changes
