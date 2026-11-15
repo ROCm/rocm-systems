@@ -42,7 +42,65 @@ using namespace std::chrono_literals;
 namespace
 {
 constexpr uint64_t agent_handle = 0x2001;
+constexpr auto     short_budget = hsa::replay_wait_budget_t{1ms, 3};
 }  // namespace
+
+TEST(replay_window, replay_wait_gives_up_after_its_budget)
+{
+    auto tries = 0;
+    EXPECT_FALSE(hsa::replay_wait(
+        [&tries]() {
+            ++tries;
+            return false;
+        },
+        "a wait that never drains",
+        short_budget));
+    EXPECT_EQ(tries, short_budget.slices);
+}
+
+TEST(replay_window, replay_wait_returns_at_the_first_try_that_drains)
+{
+    auto tries = 0;
+    EXPECT_TRUE(hsa::replay_wait(
+        [&tries]() { return ++tries == 2; }, "a wait that drains on its second try", short_budget));
+    EXPECT_EQ(tries, 2);
+}
+
+TEST(replay_window, agent_drain_gives_up_while_a_handler_is_in_flight)
+{
+    auto  agent      = rrt::test_agent_t{agent_handle};
+    auto& controller = *hsa::get_queue_controller();
+    auto  hsa_queue  = hsa_queue_t{};
+    hsa_queue.id     = 3;
+    auto& queue      = rrt::add_test_queue(controller, hsa_queue, agent);
+
+    const auto hsa_agent = hsa_agent_t{.handle = agent_handle};
+    EXPECT_TRUE(hsa::replay_drain_agent(hsa_agent, short_budget));
+    queue.async_started();
+    EXPECT_FALSE(hsa::replay_drain_agent(hsa_agent, short_budget));
+    queue.async_complete();
+    EXPECT_TRUE(hsa::replay_drain_agent(hsa_agent, short_budget));
+
+    controller.destroy_queue(&hsa_queue);
+}
+
+TEST(replay_window, agent_drain_counts_a_retiring_queue_against_its_budget)
+{
+    auto  agent      = rrt::test_agent_t{agent_handle};
+    auto& controller = *hsa::get_queue_controller();
+    auto  hsa_queue  = hsa_queue_t{};
+    hsa_queue.id     = 4;
+    auto& queue      = rrt::add_test_queue(controller, hsa_queue, agent);
+
+    auto destroy = rrt::in_flight_destroy_t{controller, hsa_queue, queue};
+    ASSERT_TRUE(rrt::wait_until_unmapped(controller));
+
+    const auto hsa_agent = hsa_agent_t{.handle = agent_handle};
+    EXPECT_FALSE(hsa::replay_drain_agent(hsa_agent, short_budget));
+
+    destroy.finish();
+    EXPECT_TRUE(hsa::replay_drain_agent(hsa_agent, short_budget));
+}
 
 // destroy_queue erases a queue from the map before it waits for the queue's completion handlers,
 // so the retiring set is the only place a drain can still see them.

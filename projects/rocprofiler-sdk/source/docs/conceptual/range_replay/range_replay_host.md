@@ -110,6 +110,7 @@ Any difference is reported as `divergence_count` on CLOSE.
 |---|---|
 | Tool asked for host replay, application did not arm the jump | `HOST_JMP_NOT_SET` |
 | Another thread dispatches to any GPU while the range is open | `CONCURRENT_DISPATCH` |
+| A fence at `begin` or at the end of a pass still has GPU work running on some GPU after about 60 seconds | `CONCURRENT_DISPATCH` |
 | Another thread copies into device memory while the range is open | `MEMORY_COPY_IN_RANGE` |
 | Tracked device allocation addresses, sizes, or lifetimes differ at the end of a pass (a leak, or freeing/replacing pre-existing memory) | `ALLOCATION_CHANGED_IN_RANGE` |
 | A code object is unloaded while the range is open | `CODE_OBJECT_CHANGED_IN_RANGE` |
@@ -150,8 +151,9 @@ locals. The code between the macro and `end` must follow these rules:
    asynchronous copies and non-compute queues on every participating device. Use their supported
    completion mechanisms (for example, `hipDeviceSynchronize` on each participating device).
    The SDK additionally fences compute queues and drains dispatch handlers, but these do not wait
-   for untracked asynchronous copies or non-compute work. No other thread may submit GPU work or
-   copy into device memory while the range is open.
+   for untracked asynchronous copies or non-compute work. Each of those waits gives up after about
+   60 seconds, and the range then declines with `CONCURRENT_DISPATCH` while the application keeps
+   running. No other thread may submit GPU work or copy into device memory while the range is open.
 6. **Keep once-only side effects out of re-executed passes.** `rocprofiler_range_replay_get_host_pass`
    returns 0 on the application's own run and 1..N-1 after that.
 7. **Balanced allocations only.** `hipMalloc` / `hipFree` pairs inside the range are fine. So is
