@@ -70,49 +70,15 @@ repos:
         pass_filenames: false
         stages: [pre-commit]
 
-  # Local hook: metric library schema validation
+  # Local hook: metric library and view checks, and the files generated from them
   - repo: local
     hooks:
-      - id: metric-library-check
-        name: Metric library validation
-        entry: bash -lc 'cd projects/rocprofiler-compute && python3 tools/validate_metric_library.py'
-        language: system
-        files: (metric_library/.*\.(yaml|py)|mi_gpu_spec\.yaml|tools/validate_metric_library\.py|utils/metrics/expression\.py)$
-        pass_filenames: false
-        stages: [pre-commit]
-
-  # Local hook: analysis view validation
-  - repo: local
-    hooks:
-      - id: analysis-views-check
-        name: Analysis view validation
-        entry: bash -lc 'cd projects/rocprofiler-compute && python tools/validate_views.py'
-        # Standard library and the vendored PyYAML only.
+      - id: metric-config-check
+        name: Metric library, views and metric lock
+        entry: bash -lc 'cd projects/rocprofiler-compute && python tools/config_management/check_metric_config.py --fix'
         language: python
-        files: (rocprof_compute_soc/views/.*\.yaml|metric_library/.*\.(yaml|py)|utils/(analysis_views|metrics/expression|utils_common|utils_counter_defs)\.py|tools/validate_views\.py)$
-        pass_filenames: false
-        stages: [pre-commit]
-
-  # Local hook: membw tree spec metric drift validation
-  - repo: local
-    hooks:
-      - id: membw-tree-spec-check
-        name: Membw tree spec metric validation
-        entry: bash -lc 'cd projects/rocprofiler-compute && python3 tools/validate_membw_tree_spec.py'
-        language: system
-        files: (_membw_tree_spec\.yaml|_membw_guidance\.yaml|3000_mem_bw.*\.yaml|membw_analysis/models\.py)$
-        pass_filenames: false
-        stages: [pre-commit]
-
-  # Local hook: hash consistency check
-  - repo: local
-    hooks:
-      - id: hash-check
-        name: Hash consistency check
-        entry: python projects/rocprofiler-compute/tools/config_management/hash_checker.py
-        language: python
-        additional_dependencies: [pyyaml==6.0.3]
-        files: ^projects/rocprofiler-compute/
+        additional_dependencies: [pyyaml==6.0.3, ruamel.yaml==0.19.1]
+        files: (metric_library/.*\.(yaml|py)|rocprof_compute_soc/views/.*\.yaml|mi_gpu_spec\.yaml|_membw_tree_spec\.yaml|_membw_guidance\.yaml|3000_mem_bw.*\.yaml|membw_analysis/models\.py|utils/(analysis_views|metrics/expression|utils_common|utils_counter_defs)\.py|tools/(validate_metric_library|validate_views|validate_membw_tree_spec)\.py|tools/config_management/.*|docs/data/metrics/.*)$
         pass_filenames: false
         stages: [pre-commit]
 

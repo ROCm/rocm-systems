@@ -19,6 +19,7 @@ test_categories:
       - test_instruction_pipeline_generator
       - test_memory_chart_layout_format
       - test_memory_chart_preview
+      - test_metric_lock
       - test_schema_visualizer
       - test_validate_metric_library
       - test_validate_views
@@ -105,6 +106,7 @@ test_categories:
       - test_memory_chart_preview
       - test_metric_description_manager
       - test_metric_library_sync
+      - test_metric_lock
       - test_schema_visualizer
       - test_validate_metric_library
       - test_validate_views
@@ -118,6 +120,7 @@ test_categories:
       - test_memory_chart_preview
       - test_metric_description_manager
       - test_metric_library_sync
+      - test_metric_lock
       - test_schema_visualizer
       - test_validate_metric_library
       - test_validate_views
@@ -152,6 +155,7 @@ test_categories:
       - test_instruction_pipeline_generator
       - test_memory_chart_layout_format
       - test_memory_chart_preview
+      - test_metric_lock
       - test_schema_visualizer
       - test_validate_metric_library
       - test_validate_views
@@ -254,6 +258,7 @@ test_categories:
       - test_memory_chart_preview
       - test_metric_description_manager
       - test_metric_library_sync
+      - test_metric_lock
       - test_schema_visualizer
       - test_validate_metric_library
       - test_validate_views
@@ -267,6 +272,7 @@ test_categories:
       - test_memory_chart_preview
       - test_metric_description_manager
       - test_metric_library_sync
+      - test_metric_lock
       - test_schema_visualizer
       - test_validate_metric_library
       - test_validate_views
@@ -309,6 +315,7 @@ test_categories:
       - test_instruction_pipeline_generator
       - test_memory_chart_layout_format
       - test_memory_chart_preview
+      - test_metric_lock
       - test_schema_visualizer
       - test_validate_metric_library
       - test_validate_views
@@ -411,6 +418,7 @@ test_categories:
       - test_memory_chart_preview
       - test_metric_description_manager
       - test_metric_library_sync
+      - test_metric_lock
       - test_schema_visualizer
       - test_validate_metric_library
       - test_validate_views
@@ -424,6 +432,7 @@ test_categories:
       - test_memory_chart_preview
       - test_metric_description_manager
       - test_metric_library_sync
+      - test_metric_lock
       - test_schema_visualizer
       - test_validate_metric_library
       - test_validate_views
@@ -466,6 +475,7 @@ test_categories:
       - test_instruction_pipeline_generator
       - test_memory_chart_layout_format
       - test_memory_chart_preview
+      - test_metric_lock
       - test_schema_visualizer
       - test_validate_metric_library
       - test_validate_views
@@ -568,6 +578,7 @@ test_categories:
       - test_memory_chart_preview
       - test_metric_description_manager
       - test_metric_library_sync
+      - test_metric_lock
       - test_schema_visualizer
       - test_validate_metric_library
       - test_validate_views
@@ -581,6 +592,7 @@ test_categories:
       - test_memory_chart_preview
       - test_metric_description_manager
       - test_metric_library_sync
+      - test_metric_lock
       - test_schema_visualizer
       - test_validate_metric_library
       - test_validate_views
