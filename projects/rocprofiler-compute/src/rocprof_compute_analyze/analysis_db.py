@@ -1189,7 +1189,7 @@ class db_analysis(OmniAnalyze_Base):
                 continue
             for metric_id, row in df.iterrows():
                 metric_name = row.get("Metric", "")
-                if detector.is_candidate(metric_name):
+                if metric_name in ValuDualIssueDetector.candidate_metrics:
                     candidates.append((metric_id, metric_name, peak_col))
         if not candidates:
             return
@@ -1563,11 +1563,6 @@ class db_analysis(OmniAnalyze_Base):
             roofline_data_expressions = dict(
                 zip(roofline_data_df["Metric"], roofline_data_df["Value"])
             )
-            # The database column stays hbm_cache_data. gfx1201 names the
-            # device-memory point AI VRAM; MI and the other archs keep AI HBM.
-            device_memory_ai = roofline_data_expressions.get(
-                "AI HBM", ""
-            ) or roofline_data_expressions.get("AI VRAM", "")
             roofline_data_expressions = {
                 "total_flops": roofline_data_expressions.get(
                     "Performance (GFLOPs)", ""
@@ -1575,7 +1570,8 @@ class db_analysis(OmniAnalyze_Base):
                 "l0_cache_data": roofline_data_expressions.get("AI L0", ""),
                 "l1_cache_data": roofline_data_expressions.get("AI L1", ""),
                 "l2_cache_data": roofline_data_expressions.get("AI L2", ""),
-                "hbm_cache_data": device_memory_ai,
+                "hbm_cache_data": roofline_data_expressions.get("AI HBM", "")
+                or roofline_data_expressions.get("AI VRAM", ""),
                 "lds_cache_data": roofline_data_expressions.get("AI LDS", ""),
             }
 

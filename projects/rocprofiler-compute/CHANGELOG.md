@@ -37,10 +37,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
   * `analyze --debug-table-view`: print every block as plain tables.
   * `analyze --debug-verify-deps`: check that the Python dependencies of analyze mode are installed, then exit.
 
-* Added GPU metrics and the Memory Chart for gfx1201.
+* Added GPU metrics, the Memory Chart and the roofline for gfx1201.
   * Set the GPU performance level to `STABLE_STD` before profiling, as described in [Setting GPU performance level for PMC profiling](https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofv3.html#setting-gpu-performance-level-for-pmc-profiling).
-
-* Added roofline and benchmark support for Navi48 (gfx1201).
 
 ### Changed
 

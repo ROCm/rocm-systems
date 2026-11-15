@@ -292,7 +292,7 @@ def validate_dual_issue_metrics(
 
         for _, row in df.iterrows():
             metric_name = row.get("Metric", "")
-            if not detector.is_candidate(metric_name):
+            if metric_name not in ValuDualIssueDetector.candidate_metrics:
                 continue
             try:
                 value = float(row.get("Value", 0))

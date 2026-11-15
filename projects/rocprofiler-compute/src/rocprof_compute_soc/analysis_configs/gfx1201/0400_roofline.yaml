@@ -20,7 +20,7 @@ Panel Config:
           value: 8192 * SUM(SQ_WMMA_VALU_INSTS_sum) / SUM(End_Timestamp - Start_Timestamp)
           unit: GFLOP/s
           peak: $WMMAF16Flops_empirical_peak
-        VALU FLOPs (FP64):
+        VALU FLOPs (F64):
           value: SUM($wave_size * SQ_INSTS_VALU_DP_sum) / SUM(End_Timestamp - Start_Timestamp)
           unit: GFLOP/s
           peak: $FP64Flops_empirical_peak
@@ -74,8 +74,7 @@ Panel Config:
       The formula is 8192 * SQ_WMMA_VALU_INSTS. SQ_WMMA_VALU_INSTS counts
       every WMMA issue, and the counter does not separate FP16, BF16, FP8,
       and BF8, so the achieved rate is not FP16-only.
-      V_WMMA_F32_16X16X16_BF8_BF8 is a separate roof.
-    VALU FLOPs (FP64): >-
+    VALU FLOPs (F64): >-
       64-bit floating-point operations per second on the VALU.
     GL0 Cache BW (TCP Cache): >-
       Achieved bandwidth at the GL0 vector cache (TCP Cache). Counts 128 bytes
@@ -104,12 +103,11 @@ Panel Config:
       counted in SQ_INSTS_VALU, plus the WMMA FLOPs at 8192 per instruction.
     AI VRAM: >-
       Arithmetic intensity relative to GL2C/EA requests destined for VRAM. The
-      plot marks the point at the VRAM level. Compare it with both the VRAM roof
-      and the Infinity Cache (MALL) roof. The requests include those the Infinity
-      Cache serves, and the counters cannot separate them, so this intensity can
-      be lower than the true VRAM intensity. The FLOP numerator is the VALU
-      FLOPs excluding the WMMA instructions already counted in SQ_INSTS_VALU,
-      plus the WMMA FLOPs at 8192 per instruction.
+      plot marks the point at the VRAM level. The requests include those the
+      Infinity Cache serves, and the counters cannot separate them, so this
+      intensity can be lower than the true VRAM intensity. The FLOP numerator
+      is the VALU FLOPs excluding the WMMA instructions already counted in
+      SQ_INSTS_VALU, plus the WMMA FLOPs at 8192 per instruction.
     Performance (GFLOPs): >-
       Achieved VALU plus WMMA throughput of floating-point
       operations per second. The FLOP count is the VALU FLOPs excluding the

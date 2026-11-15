@@ -140,10 +140,10 @@ Roofline Performance Rates:
     rst: VALU issues per second, excluding WMMA, at one FLOP per lane. gfx120x compute is wave32 by default, so that is 32 per instruction. SQ_INSTS_VALU counts every VALU issue, including integer, move, and convert, and an FMA counts as one issue while the FP32 roof counts it as two FLOPs. A pure FMA kernel therefore reads low. A tiled FP32 GEMM also issues address arithmetic, so this row can read about twice the true FLOP count. SQ_WMMA_VALU_INSTS is per vec32, the same unit as SQ_INSTS_VALU for gfx120x compute.
     unit: GFLOP/s
   WMMA FLOPs (FP16):
-    plain: Matrix operations per second scored against the measured FP16 roof. The formula is 8192 * SQ_WMMA_VALU_INSTS. SQ_WMMA_VALU_INSTS counts every WMMA issue, and the counter does not separate FP16, BF16, FP8, and BF8, so the achieved rate is not FP16-only. V_WMMA_F32_16X16X16_BF8_BF8 is a separate roof.
-    rst: Matrix operations per second scored against the measured FP16 roof. The formula is 8192 * SQ_WMMA_VALU_INSTS. SQ_WMMA_VALU_INSTS counts every WMMA issue, and the counter does not separate FP16, BF16, FP8, and BF8, so the achieved rate is not FP16-only. V_WMMA_F32_16X16X16_BF8_BF8 is a separate roof.
+    plain: Matrix operations per second scored against the measured FP16 roof. The formula is 8192 * SQ_WMMA_VALU_INSTS. SQ_WMMA_VALU_INSTS counts every WMMA issue, and the counter does not separate FP16, BF16, FP8, and BF8, so the achieved rate is not FP16-only.
+    rst: Matrix operations per second scored against the measured FP16 roof. The formula is 8192 * SQ_WMMA_VALU_INSTS. SQ_WMMA_VALU_INSTS counts every WMMA issue, and the counter does not separate FP16, BF16, FP8, and BF8, so the achieved rate is not FP16-only.
     unit: GFLOP/s
-  VALU FLOPs (FP64):
+  VALU FLOPs (F64):
     plain: 64-bit floating-point operations per second on the VALU.
     rst: 64-bit floating-point operations per second on the VALU.
     unit: GFLOP/s
@@ -169,8 +169,8 @@ Roofline Plot Points:
     rst: Arithmetic intensity relative to Local Data Share traffic. The FLOP numerator is the VALU FLOPs excluding the WMMA instructions already counted in SQ_INSTS_VALU, plus the WMMA FLOPs at 8192 per instruction.
     unit: FLOPs/Byte
   AI VRAM:
-    plain: Arithmetic intensity relative to GL2C/EA requests destined for VRAM. The plot marks the point at the VRAM level. Compare it with both the VRAM roof and the Infinity Cache (MALL) roof. The requests include those the Infinity Cache serves, and the counters cannot separate them, so this intensity can be lower than the true VRAM intensity. The FLOP numerator is the VALU FLOPs excluding the WMMA instructions already counted in SQ_INSTS_VALU, plus the WMMA FLOPs at 8192 per instruction.
-    rst: Arithmetic intensity relative to GL2C/EA requests destined for VRAM. The plot marks the point at the VRAM level. Compare it with both the VRAM roof and the Infinity Cache (MALL) roof. The requests include those the Infinity Cache serves, and the counters cannot separate them, so this intensity can be lower than the true VRAM intensity. The FLOP numerator is the VALU FLOPs excluding the WMMA instructions already counted in SQ_INSTS_VALU, plus the WMMA FLOPs at 8192 per instruction.
+    plain: Arithmetic intensity relative to GL2C/EA requests destined for VRAM. The plot marks the point at the VRAM level. The requests include those the Infinity Cache serves, and the counters cannot separate them, so this intensity can be lower than the true VRAM intensity. The FLOP numerator is the VALU FLOPs excluding the WMMA instructions already counted in SQ_INSTS_VALU, plus the WMMA FLOPs at 8192 per instruction.
+    rst: Arithmetic intensity relative to GL2C/EA requests destined for VRAM. The plot marks the point at the VRAM level. The requests include those the Infinity Cache serves, and the counters cannot separate them, so this intensity can be lower than the true VRAM intensity. The FLOP numerator is the VALU FLOPs excluding the WMMA instructions already counted in SQ_INSTS_VALU, plus the WMMA FLOPs at 8192 per instruction.
     unit: FLOPs/Byte
   Performance (GFLOPs):
     plain: Achieved VALU plus WMMA throughput of floating-point operations per second. The FLOP count is the VALU FLOPs excluding the WMMA instructions already counted in SQ_INSTS_VALU, plus the WMMA FLOPs at 8192 per instruction.
