@@ -3,6 +3,7 @@
 
 """Unit tests for utils/specs.py."""
 
+import argparse
 import sys
 from subprocess import CompletedProcess
 from unittest.mock import patch
@@ -279,6 +280,20 @@ def test_reconstruct_specs_from_sysinfo_unsupported_arch_exits(monkeypatch):
     monkeypatch.setattr(specs, "get_version", lambda _home: {"version": "3.0.0"})
     with pytest.raises(SystemExit, match="profiled on gfx1030, which is not supported"):
         generate_machine_specs(None, {"version": "3", "gpu_arch": "gfx1030"})
+
+
+@pytest.mark.misc
+@pytest.mark.parametrize(
+    "gpu_arch", sorted(specs.mi_gpu_specs.get_experimental_archs())
+)
+def test_experimental_arch_without_flag_exits(monkeypatch, gpu_arch):
+    """A workload from an experimental arch stops unless --experimental is given."""
+    monkeypatch.setattr(specs, "console_error", sys.exit)
+    with pytest.raises(SystemExit, match=f"{gpu_arch} is an experimental GPU"):
+        generate_machine_specs(
+            argparse.Namespace(experimental=False),
+            {"version": "3", "gpu_arch": gpu_arch},
+        )
 
 
 @pytest.mark.misc
