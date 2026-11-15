@@ -76,7 +76,7 @@ def _factor_constant(call: "FunctionCallNode") -> "ASTNode":
         return call
     for factor, rest in ((product.left, product.right), (product.right, product.left)):
         if isinstance(factor, NumberNode):
-            inner_call = FunctionCallNode(call.name, [rest])
+            inner_call = _factor_constant(FunctionCallNode(call.name, [rest]))
             return BinaryOpNode("*", factor, inner_call)
     return call
 

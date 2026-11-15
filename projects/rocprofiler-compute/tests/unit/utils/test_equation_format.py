@@ -37,6 +37,8 @@ FACTORING_CASES = [
         "AVG(64 * x) / MIN(2 * y) + MAX(z * 4)",
         "64 * AVG(x) / (2 * MIN(y)) + 4 * MAX(z)",
     ),
+    # two constants come out one at a time
+    ("SUM(x * 4 * 2)", "2 * (4 * SUM(x))"),
     # left as written: a second argument, a function that is not an aggregation,
     # a sum, and a negative constant, which would swap MIN and MAX
     ("MAX(2 * x, 1)", "MAX(2 * x, 1)"),
