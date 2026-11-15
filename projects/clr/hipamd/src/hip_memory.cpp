@@ -4713,6 +4713,23 @@ hipError_t hipArray3DGetDescriptor(HIP_ARRAY3D_DESCRIPTOR* pArrayDescriptor, hip
 
 hipError_t hipArrayGetPlane(hipArray_t* pPlaneArray, hipArray_t hArray, unsigned int planeIdx) {
   HIP_INIT_API(hipArrayGetPlane, pPlaneArray, hArray, planeIdx);
+  CHECK_STREAM_CAPTURE_SUPPORTED();
+
+  if (pPlaneArray == nullptr) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+
+  {
+    amd::ScopedLock lock(hipArraySetLock);
+    if (hip::hipArraySet.find(hArray) == hip::hipArraySet.end()) {
+      HIP_RETURN(hipErrorInvalidHandle);
+    }
+  }
+
+  *pPlaneArray = nullptr;
+
+  amd::Device* device = hip::getCurrentDevice()->devices()[0];
+  LogPrintfError("Multiplanar arrays are not supported on the device %s", device->info().name_);
   HIP_RETURN(hipErrorNotSupported);
 }
 
