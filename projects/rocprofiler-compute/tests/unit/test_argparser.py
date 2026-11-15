@@ -136,6 +136,19 @@ def test_quiet_success_sets_flag(flag):
     assert build_args([flag]).quiet is True
 
 
+@pytest.mark.parametrize(
+    ("argv", "expected"),
+    [
+        (["analyze", "-p", "/tmp/workload"], False),
+        (["--experimental", "analyze", "-p", "/tmp/workload"], True),
+        (["analyze", "-p", "/tmp/workload", "--experimental"], True),
+    ],
+    ids=["absent", "before_mode", "after_mode"],
+)
+def test_experimental_flag_any_position(argv, expected):
+    assert build_args(argv).experimental is expected
+
+
 @pytest.mark.parametrize("flag", ["-q", "--quiet"])
 def test_quiet_rejects_explicit_value(flag, capsys):
     with pytest.raises(SystemExit) as exc:
