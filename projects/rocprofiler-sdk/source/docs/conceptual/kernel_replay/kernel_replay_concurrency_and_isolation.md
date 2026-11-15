@@ -83,11 +83,15 @@ The agent-wide drain deliberately does not hold the queue-map lock across its wa
 `QueueController::iterate_queues` holds that lock for the duration of its callback, so a blocking
 per-sibling drain inside the callback would stall stream creation and destruction for the whole
 wait. Instead the drain polls each queue's in-flight async count under a brief read lock and sleeps
-between polls, so the map lock is held only for the duration of the poll itself. This is also safe
-against concurrent queue destruction: a `Queue` is only dereferenced while the read lock is held
-(`destroy_queue` erases under the write lock), and the live set is re-read on every poll. Because
-the writer lock blocks new dispatches on the agent, in-flight work only decreases and the poll
-converges.
+between polls, so the map lock is held only for the duration of the poll itself.
+
+The poll also counts queues that `destroy_queue` has already erased from the map but is still
+syncing, because their completion handlers can still be running. `destroy_queue` moves a queue from
+the map into a retiring set under the map's write lock and removes it when the wait ends. The drain
+reads both under the map's read lock, so it never misses a queue that is between the two, and the
+retiring set shares ownership of each `Queue`, so none is freed while the drain reads it. Both are
+re-read on every poll. Because the writer lock blocks new dispatches on the agent, in-flight work
+only decreases and the poll converges.
 
 ### 3. Agent-scoped snapshots
 
