@@ -72,10 +72,12 @@ memory and registered host memory, then ``siglongjmp``\ s back for each extra pa
 .. code-block:: cpp
 
     rocprofiler_range_replay_host_track_memory(&host_state, sizeof(host_state));
+    hipDeviceSynchronize();  // every device that will participate; copies included
     ROCPROFILER_REPLAY_RANGE_BEGIN(iteration_index)  // drain + entry snapshot; CONFIG once
 
         // ... time steps: kernels, copies, memsets, graphs, host computation ...
 
+        hipDeviceSynchronize();  // again on every pass, before end
     ROCPROFILER_REPLAY_RANGE_END()  // drain, PASS exit; restore and jump, or CLOSE and return
 
 ``rocprofiler_range_replay_get_host_pass()`` tells host code which pass it is on, so once-only side

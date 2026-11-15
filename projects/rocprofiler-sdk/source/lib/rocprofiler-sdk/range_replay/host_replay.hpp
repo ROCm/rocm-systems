@@ -53,8 +53,11 @@
 
 #include <rocprofiler-sdk/experimental/range_replay.h>
 
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
+#include <string>
 #include <vector>
 
 namespace rocprofiler
@@ -97,6 +100,14 @@ capture_region(void* ptr, size_t size);
 
 void
 restore_regions(const std::vector<host_region_t>& regions);
+
+// fence_timeout()'s reading of ROCPROFILER_RANGE_REPLAY_HOST_FENCE_TIMEOUT_MS: a whole number of
+// milliseconds from 1 to max_fence_timeout. Unset, or anything else with a warning, is the drain
+// budget.
+inline constexpr auto max_fence_timeout = std::chrono::milliseconds{std::chrono::hours{1}};
+
+std::chrono::milliseconds
+parse_fence_timeout(const std::optional<std::string>& value);
 }  // namespace host
 }  // namespace range_replay
 }  // namespace rocprofiler

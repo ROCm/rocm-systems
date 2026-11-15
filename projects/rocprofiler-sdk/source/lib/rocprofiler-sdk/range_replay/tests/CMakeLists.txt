@@ -8,8 +8,10 @@ include(GoogleTest)
 
 # Range eligibility bookkeeping, divergence checking, the queue hook's early-return paths
 # and the kernarg block retention policy are pure host logic with no GPU or HSA runtime
-# dependency, so these are plain CXX unit tests that run unconditionally.
-foreach(_TEST range-state digest queue-hooks retained-kernarg host-replay)
+# dependency, so these are plain CXX unit tests that run unconditionally. The replay
+# window's drain accounting runs against queues whose signals are plain counters
+# (fake_queue.hpp), so it needs no runtime either.
+foreach(_TEST range-state digest queue-hooks retained-kernarg host-replay replay-window)
     string(REPLACE "-" "_" _SOURCE_STEM "${_TEST}")
     set(_SOURCE "${_SOURCE_STEM}.cpp")
 
