@@ -7,6 +7,10 @@
 
 #pragma once
 
+#include "rocjitsu/isa/decoder.h"
+#include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/vm/amdgpu/compute_unit.h"
+#include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/simd.h"
 
 #include <gtest/gtest.h>
@@ -14,8 +18,19 @@
 #include <array>
 #include <cstdint>
 #include <random>
+#include <utility>
 
 namespace mma_test {
+
+// Execute a decoded matrix instruction against the fixture's existing register state.
+inline void execute(rocjitsu::amdgpu::ComputeUnitCore &cu, rocjitsu::amdgpu::Wavefront &wave,
+                    std::array<uint32_t, 2> words) {
+  const std::array<uint32_t, 4> code{words[0], words[1], 0, 0};
+  auto decoded = rocjitsu::Decoder::create(cu.arch())->decode(code.data());
+  ASSERT_TRUE(decoded.succeeded());
+  auto instruction = std::move(decoded).value();
+  ASSERT_TRUE(cu.execute_instruction(instruction.get(), wave).succeeded());
+}
 
 // Wavefront sizes for the two MMA families (differ by design, so they are named
 // rather than a single shared WF_SIZE).

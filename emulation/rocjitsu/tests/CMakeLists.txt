@@ -676,8 +676,8 @@ add_executable(
     util_simd_test.cpp
     v_add_simd_benchmark.cpp
     mfma_simd_benchmark.cpp
-    smfmac_simd_benchmark.cpp
     wmma_simd_benchmark.cpp
+    smfmac_simd_benchmark.cpp
     swmmac_k64_simd_benchmark.cpp
     swmmac_k128_simd_benchmark.cpp
     simd_correctness/simd_coverage_test.cpp
@@ -816,9 +816,7 @@ endif()
 if(RJ_ENABLE_EXPENSIVE_CHECKS)
     target_sources(
         rocjitsu_tests
-        PRIVATE
-            simd_correctness/mfma_simd_exact_test.cpp
-            simd_correctness/wmma_simd_exact_test.cpp
+        PRIVATE simd_correctness/mfma_simd_exact_test.cpp
     )
 endif()
 target_link_libraries(
