@@ -9070,6 +9070,16 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_DdaFabricLLChosenOnGfx1250) {
                               [](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) {
                                 return true;
                               });
+        ncclComm* blocksComm = nullptr;
+        size_t blocksCount = 0;
+        ncclDataType_t blocksType = ncclInt8;
+        ScopedHook llBlocks(g_reduceScatterDdaFabricLLBlocks,
+                            [&](ncclComm* c, size_t count, ncclDataType_t type) -> uint32_t {
+                              blocksComm = c;
+                              blocksCount = count;
+                              blocksType = type;
+                              return 133;
+                            });
         ncclComm* comm = MakeCommWithArch("gfx1250");
         comm->nRanks = 1;
         comm->nNodes = 1;
@@ -9079,6 +9089,10 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_DdaFabricLLChosenOnGfx1250) {
         EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL, decision.algo);
 
         EXPECT_EQ(NCCL_PROTO_LL, decision.protocol);
+        EXPECT_EQ(133u, decision.nMaxChannels);  // proves ncclReduceScatterDdaFabricLLBlocks ran, not a sibling
+        EXPECT_EQ(comm, blocksComm);
+        EXPECT_EQ(8u, blocksCount);
+        EXPECT_EQ(ncclFloat32, blocksType);
         DeleteCommWithArch(comm);
       });
 }
