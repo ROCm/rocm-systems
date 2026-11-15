@@ -303,7 +303,7 @@ def generate_bucket_metrics(
             metric.expressions, collectables, list(bucket_counters.values())
         ):
             single_rows.append((
-                metric.stem_id,
+                f"{metric.panel_id:04d}",
                 panel_label,
                 metric.metric_idx,
                 metric.metric_name,
@@ -316,7 +316,7 @@ def generate_bucket_metrics(
             if metric_set & counters
         ]
         multi_rows.append((
-            metric.stem_id,
+            f"{metric.panel_id:04d}",
             panel_label,
             metric.metric_idx,
             metric.metric_name,

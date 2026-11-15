@@ -66,7 +66,7 @@ repos:
         name: Sets metric ID validation
         entry: bash -lc 'cd projects/rocprofiler-compute && python3 tools/validate_sets_metric_ids.py'
         language: system
-        files: (sets/gfx.*_sets\.yaml|analysis_configs/gfx.*/\d{4}_.*\.yaml|mi_gpu_spec\.yaml)$
+        files: (sets/gfx.*_sets\.yaml|rocprof_compute_soc/views/.*\.yaml|metric_library/.*\.yaml|mi_gpu_spec\.yaml|utils/(analysis_views|utils_common)\.py)$
         pass_filenames: false
         stages: [pre-commit]
 

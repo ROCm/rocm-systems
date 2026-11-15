@@ -654,6 +654,18 @@ def load_panel_configs(
     return OrderedDict(sorted(configs.items()))
 
 
+def metric_tables_by_id(
+    panel_configs: Dict[int, Dict[str, Any]],
+) -> Dict[int, Dict[str, Any]]:
+    """Return each metric table of an arch's panel configs, by table id."""
+    return {
+        source[METRIC_TABLE]["id"]: source[METRIC_TABLE]
+        for panel_config in panel_configs.values()
+        for source in panel_config["data source"]
+        if METRIC_TABLE in source
+    }
+
+
 def expand_placeholder_ranges(
     panel_configs: OrderedDict[int, Dict[str, Any]],
     sys_info: Optional[Dict[str, Any]],

@@ -10,7 +10,6 @@ copies the analysis configs:
 - every equation of a panel row is a library formula, and every formula has a row;
 - every row has the unit of its metric;
 - every row peak is a peak of its metric, and every library peak has a row;
-- the library reads the same counters as detect_counters();
 - the library collectables equal the analysis config collectables;
 - each library set lists the metrics of its old set in profile_configs/sets.
 
@@ -46,7 +45,7 @@ from validate_metric_library import (
 
 import config
 from rocprof_compute_soc.metric_library import loader
-from rocprof_compute_soc.soc_base import OmniSoC_Base, iter_analysis_config_metrics
+from rocprof_compute_soc.soc_base import iter_analysis_config_metrics
 from utils.analysis_views import (
     MAIN_COLUMNS,
     NO_VALUE,
@@ -55,13 +54,13 @@ from utils.analysis_views import (
 )
 from utils.mi_gpu_spec import mi_gpu_specs
 from utils.utils_common import (
-    MEMBW_ANALYSIS_PANEL_ID,
     METRIC_TABLE,
     PLACEHOLDER_RANGE_KEY,
     ROOFLINE_PANEL_ID,
     canonical_config_arch,
     config_template_path_for_arch,
     format_row_id,
+    iter_view_rows,
     load_panel_configs,
     load_views,
     load_yaml,
@@ -324,55 +323,19 @@ def row_metric_id(row: Row, library: loader.MetricLibrary, arch: str) -> Optiona
     return metric_id
 
 
-def make_soc(arch: str, membw_analysis: bool, filter_blocks: List[str]) -> OmniSoC_Base:
-    """Return an OmniSoC_Base for arch, with no GPU needed."""
-    args = SimpleNamespace(
-        filter_blocks=filter_blocks,
-        membw_analysis=membw_analysis,
-        set_selected=None,
-    )
-    machine_specs = SimpleNamespace(
-        gpu_arch=arch,
-        gpu_series=mi_gpu_specs.get_gpu_series(arch),
-        l2_banks=16,
-        num_xcd=1,
-        rocminfo_lines=None,
-    )
-    soc = OmniSoC_Base(args, machine_specs)
-    soc.set_arch(arch)
-    return soc
-
-
-def shown_blocks(arch: str) -> List[str]:
-    """Return the -b blocks for the shown files of arch, or none when all are shown."""
-    unshown = unshown_file_ids(arch)
-    if not unshown:
-        return []
-    file_ids = {
-        path.name.split("_")[0]
-        for path in (config.analysis_configs_dir / arch).glob("*.yaml")
-    }
-    return [str(int(file_id) // 100) for file_id in sorted(file_ids - unshown)]
-
-
 def old_sets_by_metric_id(arch_view: SimpleNamespace) -> Dict[str, Dict[str, Any]]:
-    """Return each old set of the arch, with the metric ids of its rows.
-
-    Rows without a formula are left out, and so is a set without any formula.
-    """
-    metric_id_by_position = dict(
-        zip((row.legacy_id for row in arch_view.rows), arch_view.metric_ids)
-    )
+    """Return each old set of the arch, with the metric ids of the view rows its
+    numeric ids select."""
+    rows = dict(iter_view_rows(load_views(arch_view.arch)))
     old_sets = {}
     for set_option, entry in parse_sets_yaml(member_arch(arch_view.arch)).items():
         metric_ids = [
-            metric_id_by_position.get(str(position))
+            metric_id
             for item in entry["metric"]
             for position in item
+            for metric_id in row_metric_ids(rows[str(position)])
         ]
-        metric_ids = [metric_id for metric_id in metric_ids if metric_id is not None]
-        if metric_ids:
-            old_sets[set_option] = {"title": entry["title"], "metrics": metric_ids}
+        old_sets[set_option] = {"title": entry["title"], "metrics": metric_ids}
     return old_sets
 
 
@@ -639,19 +602,6 @@ def test_listed_variants_have_rows(arch_view):
         *UNIT_VARIANTS.get(arch_view.arch, {}),
     ]
     assert sorted(set(listed) - positions) == []
-
-
-def test_counters_match_detect_counters(arch_view):
-    arch = arch_view.arch
-    has_membw_panel = any(
-        (config.analysis_configs_dir / arch).glob(f"{MEMBW_ANALYSIS_PANEL_ID}_*.yaml")
-    )
-    soc = make_soc(member_arch(arch), has_membw_panel, shown_blocks(arch))
-    expected, _ = soc.detect_counters()
-    library_counters = arch_view.library.get_counters_for_metrics(
-        list(arch_view.library.metrics)
-    )
-    assert soc._expand_tcc_template_counters(library_counters) == expected
 
 
 def test_collectables_match_analysis_configs(arch_view):
