@@ -35,6 +35,7 @@
 #include <hsa/hsa.h>
 #include <hsa/hsa_ext_amd.h>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cstring>
@@ -106,32 +107,37 @@ replay_drain_or_fatal(const Queue& queue)
                          "this queue's async completion handler(s)");
 }
 
+bool
+replay_drain_agent(hsa_agent_t agent, replay_wait_budget_t budget)
+{
+    auto* queue_controller = get_queue_controller();
+    if(queue_controller == nullptr) return true;
+
+    constexpr auto poll_interval = std::chrono::milliseconds{2};
+    const auto     poll_slice    = [&]() {
+        const auto slice_end = std::chrono::steady_clock::now() + budget.slice;
+        for(;;)
+        {
+            // Includes queues destroy has already removed from the live map. Their completion
+            // handlers are still running until Queue::sync returns, and a snapshot taken in that
+            // window would race those handlers.
+            if(queue_controller->in_flight_async_packets(agent) == 0) return true;
+            const auto now = std::chrono::steady_clock::now();
+            if(now >= slice_end) return false;
+            std::this_thread::sleep_for(
+                std::min<std::chrono::steady_clock::duration>(poll_interval, slice_end - now));
+        }
+    };
+    return replay_wait(poll_slice, "this agent's async completion handler(s)", budget);
+}
+
 void
 replay_drain_agent_or_fatal(hsa_agent_t agent)
 {
-    auto* queue_controller = get_queue_controller();
-    if(queue_controller == nullptr) return;
-
-    constexpr auto poll_interval = std::chrono::milliseconds{2};
-    constexpr auto max_wait      = std::chrono::seconds{drain_budget_secs};
-    const auto     deadline      = std::chrono::steady_clock::now() + max_wait;
-
-    for(;;)
-    {
-        // Includes queues destroy has already removed from the live map. Their completion
-        // handlers are still running until Queue::sync returns, and a snapshot taken in that
-        // window would race those handlers.
-        const auto in_flight = queue_controller->in_flight_async_packets(agent);
-
-        if(in_flight == 0) return;
-
-        ROCP_FATAL_IF(std::chrono::steady_clock::now() >= deadline) << fmt::format(
-            "replay: agent-wide drain stuck ({} async handler(s) still active after ~{}s)",
-            in_flight,
-            drain_budget_secs);
-
-        std::this_thread::sleep_for(poll_interval);
-    }
+    if(replay_drain_agent(agent)) return;
+    ROCP_FATAL << fmt::format(
+        "replay: agent-wide drain stuck (async handler(s) still active after ~{}s)",
+        drain_budget_secs);
 }
 
 bool
@@ -176,11 +182,9 @@ replay_ring_submit(const Queue& queue, const rocprofiler_packet* packets, size_t
     return true;
 }
 
-bool
-replay_barrier_and_wait(const Queue& queue, hsa_signal_t completion)
+barrier_wait_result_t
+replay_barrier_and_wait(const Queue& queue, hsa_signal_t completion, replay_wait_budget_t budget)
 {
-    using namespace std::chrono_literals;
-
     auto barrier   = hsa_barrier_and_packet_t{};
     barrier.header = HSA_PACKET_TYPE_BARRIER_AND << HSA_PACKET_HEADER_TYPE;
     barrier.header |= 1 << HSA_PACKET_HEADER_BARRIER;
@@ -191,19 +195,20 @@ replay_barrier_and_wait(const Queue& queue, hsa_signal_t completion)
     const auto& core = queue.core_api();
     core.hsa_signal_store_screlease_fn(completion, 1);
 
-    if(!replay_ring_submit(queue, &packet, 1)) return false;
+    if(!replay_ring_submit(queue, &packet, 1)) return barrier_wait_result_t::not_submitted;
 
-    replay_wait_or_fatal(
+    const auto completed = replay_wait(
         [&]() {
             return core.hsa_signal_wait_scacquire_fn(completion,
                                                      HSA_SIGNAL_CONDITION_EQ,
                                                      0,
-                                                     std::chrono::nanoseconds{5s}.count(),
+                                                     std::chrono::nanoseconds{budget.slice}.count(),
                                                      HSA_WAIT_STATE_BLOCKED) == 0;
         },
-        "this queue's prior GPU work");
+        "this queue's prior GPU work",
+        budget);
 
-    return true;
+    return completed ? barrier_wait_result_t::completed : barrier_wait_result_t::timed_out;
 }
 
 void

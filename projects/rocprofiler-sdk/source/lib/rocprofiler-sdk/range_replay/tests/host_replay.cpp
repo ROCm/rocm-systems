@@ -26,13 +26,18 @@
 
 #include "lib/rocprofiler-sdk/range_replay/host_replay.hpp"
 #include "lib/rocprofiler-sdk/code_object/code_object.hpp"
+#include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
+#include "lib/rocprofiler-sdk/hsa/replay_window.hpp"
 #include "lib/rocprofiler-sdk/range_replay/range_state.hpp"
+
+#include "fake_queue.hpp"
 
 #include <rocprofiler-sdk/experimental/range_replay.h>
 
 #include <gtest/gtest.h>
 
 #include <array>
+#include <chrono>
 #include <csetjmp>
 #include <cstdint>
 #include <future>
@@ -636,4 +641,100 @@ TEST(range_replay_host, continuation_unload_is_folded_after_reacquiring_executab
     EXPECT_EQ(result.next_pass, 0U);
     EXPECT_EQ(result.status, ROCPROFILER_RANGE_REPLAY_STATUS_CODE_OBJECT_CHANGED_IN_RANGE);
     EXPECT_EQ(value, 8);
+}
+
+namespace
+{
+namespace hsa = ::rocprofiler::hsa;
+namespace rrt = ::rocprofiler::range_replay::test;
+
+// Production fences wait about a minute before they give up.
+constexpr auto fence_timeout_budget = hsa::replay_wait_budget_t{std::chrono::milliseconds{1}, 2};
+
+range_replay::host_agent_state_t
+host_agent(uint64_t handle)
+{
+    auto state             = range_replay::host_agent_state_t{};
+    state.hsa_agent.handle = handle;
+    state.agent_id.handle  = handle;
+    return state;
+}
+}  // namespace
+
+TEST(range_replay_host, gpu_work_that_outlasts_the_pass_fence_declines_instead_of_aborting)
+{
+    auto  agent      = rrt::test_agent_t{agent_a};
+    auto& controller = *hsa::get_queue_controller();
+    auto  hsa_queue  = hsa_queue_t{};
+    hsa_queue.id     = 1;
+    auto& queue      = rrt::add_test_queue(controller, hsa_queue, agent);
+    // A completion handler that is still running when the pass ends.
+    queue.async_started();
+
+    auto value                = 7;
+    auto ctx                  = range_replay::range_context_t{};
+    ctx.plan.replay_requested = true;
+    ctx.record.count_dispatches(1);
+    ctx.host.snapshot_taken = true;
+    ctx.host.fence_budget   = fence_timeout_budget;
+    ctx.host.agents.emplace_back(host_agent(agent_a));
+    ctx.host.regions.emplace_back(range_replay::host::capture_region(&value, sizeof(value)));
+    ++value;
+
+    const auto result = range_replay::host::finish_pass(ctx);
+    EXPECT_EQ(result.next_pass, 0U);
+    EXPECT_EQ(result.status, ROCPROFILER_RANGE_REPLAY_STATUS_CONCURRENT_DISPATCH);
+    EXPECT_EQ(value, 8) << "a range whose fence timed out must not restore its entry state";
+
+    queue.async_complete();
+    controller.destroy_queue(&hsa_queue);
+}
+
+TEST(range_replay_host, gpu_work_a_continuation_callback_leaves_running_declines_at_the_refence)
+{
+    struct callback_state_t
+    {
+        rrt::test_queue_t* queue           = nullptr;
+        int                continue_replay = 0;
+    };
+
+    // Stopping and continuing both re-fence the work the callback submitted.
+    for(const auto continue_replay : {0, 1})
+    {
+        auto  agent      = rrt::test_agent_t{agent_a};
+        auto& controller = *hsa::get_queue_controller();
+        auto  hsa_queue  = hsa_queue_t{};
+        hsa_queue.id     = 2;
+        auto& queue      = rrt::add_test_queue(controller, hsa_queue, agent);
+        auto  state      = callback_state_t{&queue, continue_replay};
+
+        auto value                = 7;
+        auto ctx                  = range_replay::range_context_t{};
+        ctx.plan.replay_requested = true;
+        ctx.plan.indefinite       = true;
+        ctx.plan.user_data.ptr    = &state;
+        ctx.plan.replay_continue_cb =
+            [](uint64_t, uint64_t, uint64_t, rocprofiler_user_data_t data) {
+                // Dispatches on agent_a and returns before that dispatch completes.
+                auto& callback = *static_cast<callback_state_t*>(data.ptr);
+                hsa::agent_submit_epoch(rocprofiler_agent_id_t{.handle = agent_a}).fetch_add(1);
+                callback.queue->async_started();
+                return callback.continue_replay;
+            };
+        ctx.host.pass           = 1;
+        ctx.host.snapshot_taken = true;
+        ctx.host.fence_budget   = fence_timeout_budget;
+        ctx.host.agents.emplace_back(host_agent(agent_a));
+        ctx.host.regions.emplace_back(range_replay::host::capture_region(&value, sizeof(value)));
+        ++value;
+
+        const auto result = range_replay::host::finish_pass(ctx);
+        EXPECT_EQ(result.next_pass, 0U) << "continue_replay=" << continue_replay;
+        EXPECT_EQ(result.status, ROCPROFILER_RANGE_REPLAY_STATUS_CONCURRENT_DISPATCH)
+            << "continue_replay=" << continue_replay;
+        EXPECT_EQ(value, 8) << "continue_replay=" << continue_replay;
+
+        queue.async_complete();
+        controller.destroy_queue(&hsa_queue);
+    }
 }

@@ -91,44 +91,81 @@ gpu_agents()
     return out;
 }
 
-void
-fence_queue(const hsa::Queue& queue)
+// Whether the work submitted to `queue` before the fence finished within `budget`. A queue the
+// barrier cannot be written to is not waited on.
+bool
+fence_queue(const hsa::Queue& queue, hsa::replay_wait_budget_t budget)
 {
-    if(queue.get_engine_type() != hsa::Queue::engine_type::compute) return;
+    if(queue.get_engine_type() != hsa::Queue::engine_type::compute) return true;
     auto       signal        = hsa_signal_t{.handle = 0};
     auto*      pooled_signal = hsa::Queue::create_signal(0, &signal, /*use_pool=*/true);
+    auto       leak_signal   = false;
     const auto _release      = common::scope_destructor{[&]() {
+        if(leak_signal) return;
         if(pooled_signal != nullptr)
             hsa::Queue::release_signal(pooled_signal);
         else if(signal.handle != 0)
             queue.core_api().hsa_signal_destroy_fn(signal);
     }};
 
-    if(signal.handle == 0 || !hsa::replay_barrier_and_wait(queue, signal))
-        ROCP_WARNING << "range replay: host replay could not fence a queue with a barrier; "
-                        "relying on the application having synchronized the device";
+    if(signal.handle != 0)
+    {
+        switch(hsa::replay_barrier_and_wait(queue, signal, budget))
+        {
+            case hsa::barrier_wait_result_t::completed: return true;
+            case hsa::barrier_wait_result_t::timed_out:
+                // The barrier is still in the ring and the packet processor decrements this signal
+                // when it retires. Released, the signal could be handed to another dispatch or
+                // destroyed before that write, so it is leaked.
+                leak_signal = true;
+                return false;
+            case hsa::barrier_wait_result_t::not_submitted: break;
+        }
+    }
+    ROCP_WARNING << "range replay: host replay could not fence a queue with a barrier; "
+                    "relying on the application having synchronized the device";
+    return true;
 }
 
 // Fence compute queues while excluding destruction, but without holding the queue-map lock.
-// Copies and non-compute work must already have been synchronized by the application.
-void
-fence_agent(hsa_agent_t agent)
+// Copies and non-compute work must already have been synchronized by the application. Returns
+// false at the first queue or handler drain that does not finish within `budget`.
+bool
+fence_agent(hsa_agent_t agent, hsa::replay_wait_budget_t budget)
 {
+    auto fenced = true;
     if(auto* controller = hsa::get_queue_controller(); controller != nullptr)
     {
         controller->iterate_queues_with_lifetime([&](const hsa::Queue* queue) {
-            if(queue != nullptr && queue->get_agent().get_hsa_agent().handle == agent.handle)
-                fence_queue(*queue);
+            if(fenced && queue != nullptr &&
+               queue->get_agent().get_hsa_agent().handle == agent.handle)
+                fenced = fence_queue(*queue, budget);
         });
     }
-    hsa::replay_drain_agent_or_fatal(agent);
+    return fenced && hsa::replay_drain_agent(agent, budget);
 }
 
-void
-fence_all(const std::vector<host_agent_state_t>& agents)
+// Fences every agent the range snapshots. GPU work that does not finish within the fence budget
+// declines the range rather than aborting the application: a snapshot or restore taken while that
+// work runs would race it.
+bool
+fence_all(range_context_t& ctx)
 {
-    for(const auto& agent : agents)
-        fence_agent(agent.hsa_agent);
+    for(const auto& agent : ctx.host.agents)
+    {
+        if(fence_agent(agent.hsa_agent, ctx.host.fence_budget)) continue;
+        ROCP_WARNING << fmt::format(
+            "range replay: GPU work on agent {} did not finish within ~{}s of host range {}'s "
+            "fence; the range will not be replayed",
+            agent.agent_id.handle,
+            std::chrono::duration_cast<std::chrono::seconds>(ctx.host.fence_budget.slice *
+                                                             ctx.host.fence_budget.slices)
+                .count(),
+            ctx.record.range_id());
+        ctx.record.decline(ROCPROFILER_RANGE_REPLAY_STATUS_CONCURRENT_DISPATCH);
+        return false;
+    }
+    return true;
 }
 
 // Device digests of every agent followed by the host regions', so two points in time compare
@@ -215,6 +252,7 @@ constexpr int max_refences = 8;
 // fence. A dispatch whose epoch advance is visible under the writer locks wrote its packets after
 // the read, so the fence may not cover it: release, fence again, and re-check. Every submit
 // advances the epoch under the reader lock, so with the writer locks held nothing is mid-submit.
+// A range that declines here still gets the locks; the caller sees the decline in its record.
 std::vector<std::unique_lock<std::shared_mutex>>
 lock_after_fence(range_context_t& ctx, std::vector<uint64_t> fenced_epochs)
 {
@@ -233,7 +271,7 @@ lock_after_fence(range_context_t& ctx, std::vector<uint64_t> fenced_epochs)
         }
         guards.clear();
         fenced_epochs = submit_epochs(ctx.host);
-        fence_all(ctx.host.agents);
+        if(!fence_all(ctx)) return lock_agents(ctx.host);
     }
 }
 
@@ -306,7 +344,11 @@ try
     // needs that queue's ROCr intercept lock. Another thread can hold that lock while it waits in
     // WriteInterceptor for this agent's reader lock.
     const auto epochs = submit_epochs(host);
-    fence_all(host.agents);
+    if(!fence_all(ctx))
+    {
+        host.agents.clear();
+        return;
+    }
     const auto fenced_at = phase_clock::now();
 
     // A foreign dispatch publishes its decline before it takes the reader lock, so after the
@@ -401,9 +443,11 @@ finish_pass(range_context_t& ctx)
     const auto dispatch_count = static_cast<uint64_t>(ctx.record.observed_dispatch_count());
 
     // The pass's GPU tail belongs to the pass: its records are emitted before PASS exit, and the
-    // checks below see settled memory. The writer locks are taken just before the restore.
+    // checks below see settled memory. The writer locks are taken just before the restore. A tail
+    // that outlasts the fence budget declines the range, and the eligibility check below finishes
+    // it after PASS exit.
     const auto epochs = submit_epochs(host);
-    if(host.snapshot_taken) fence_all(host.agents);
+    if(host.snapshot_taken) fence_all(ctx);
     // Writes the application made during the pass are already in this count. A tool callback that
     // copies afterwards moves it, and that copy is not waited on by the compute-queue fence.
     const auto writes_at_fence =
