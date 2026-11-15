@@ -57,7 +57,7 @@ def test_rocjpeg(json_data):
 
     _, bf_op_names = get_operation(data, "ROCJPEG_API")
 
-    assert len(bf_op_names) == 9
+    assert len(bf_op_names) == 14
 
     # check buffering data
     for node in rocjpeg_data:
