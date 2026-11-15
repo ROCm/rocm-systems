@@ -13683,8 +13683,9 @@ TEST_F(KfdIoctlTest, FreedFixedBoViewsRetireWithHostChanges) {
               ASSERT_EQ(replaced, part);
             }
           };
-          if (split_before_free)
+          if (split_before_free) {
             ASSERT_NO_FATAL_FAILURE(release_part(static_cast<std::byte *>(view) + kPage, kPage));
+          }
           kfd_ioctl_free_memory_of_gpu_args free{};
           free.handle = allocation.handle;
           if (canonical) {
@@ -13695,8 +13696,9 @@ TEST_F(KfdIoctlTest, FreedFixedBoViewsRetireWithHostChanges) {
           }
           ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free), 0);
           EXPECT_FALSE(process->gpu_access_grant(kGpuId, address, 1).allowed);
-          if (view_size > kPage)
+          if (view_size > kPage) {
             EXPECT_FALSE(process->gpu_access_grant(kGpuId, address + 2 * kPage, 1).allowed);
+          }
           driver_->run_host_vma_replacement(containing, [&] {
             replaced =
                 ::mmap(reservation, reserved_size, PROT_NONE, MAP_PRIVATE | MAP_FIXED, -1, 0);
