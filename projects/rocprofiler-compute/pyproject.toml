@@ -95,7 +95,6 @@ markers = [
     "roofline_extra_options",
     "roofline_bench",
     "roofline_plot",
-    "iteration_multiplexing",
     "iteration_multiplexing_1",
     "iteration_multiplexing_2",
     "iteration_multiplexing_stochastic",

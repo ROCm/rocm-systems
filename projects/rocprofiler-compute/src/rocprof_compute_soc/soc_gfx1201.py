@@ -16,7 +16,6 @@ class gfx1201_soc(OmniSoC_Base):
         self.set_arch("gfx1201")
         self.set_perfmon_config(mi_gpu_specs.get_perfmon_config("gfx1201"))
 
-        # Ported topology values remain subject to Navi48 SKU qualification.
         self._mspec.l2_banks = 32
         self._mspec.lds_banks_per_cu = 32
         self._mspec.pipes_per_gpu = 2

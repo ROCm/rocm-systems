@@ -284,8 +284,8 @@ def test_merge_errors_are_reported(tree):
         ("X:\n  formula: ' '\n", "'formula' must be a non-empty string"),
     ],
 )
-def test_variables_need_a_formula(tree, text, message):
-    write_file(tree / "gfx_base" / "variables.yaml", text)
+def test_collectables_need_a_formula(tree, text, message):
+    write_file(tree / "gfx_base" / "collectables.yaml", text)
     assert any(message in error for error in validate(tree))
 
 

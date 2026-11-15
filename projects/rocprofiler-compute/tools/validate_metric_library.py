@@ -58,7 +58,7 @@ METRIC_REQUIRED_FIELDS = ("name", "formula", "unit", "description")
 METRIC_OPTIONAL_FIELDS = ("peak", "peak_empirical")
 # Metric fields with an expression.
 EXPRESSION_FIELDS = ("formula", *METRIC_OPTIONAL_FIELDS)
-VARIABLE_FIELDS = ("formula",)
+COLLECTABLE_FIELDS = ("formula",)
 SET_FIELDS = ("title", "metrics")
 SET_OPTION_RE = re.compile(r"^[a-z][a-z0-9]*(_[a-z0-9]+)*$")
 # The measured ceiling in a peak_empirical value.
@@ -69,6 +69,7 @@ CEILINGS_WITHOUT_METRIC = ("I8Ops", "I32Ops", "I64Ops", "MALLBw")
 ARCH_CEILINGS_WITHOUT_METRIC = {
     "gfx950": ("MFMAF4Flops", "MFMAF6Flops"),
     "gfx115x": ("FP16Flops", "BF16Flops"),
+    "gfx1201": ("FP16Flops", "WMMABF16Flops", "WMMAF8Flops"),
     "gfx1250": ("FP16Flops", "FP32Flops", "FP64Flops"),
 }
 # Ids that may share the formula of another id (id -> that id).
@@ -107,10 +108,12 @@ def validate_arch(metric_dir: Path, arch: str) -> List[str]:
     documents = {
         file_name: loader.load_file(paths) for file_name, paths in files.items()
     }
-    variables = documents.pop(loader.VARIABLES_FILENAME, {})
+    collectables = documents.pop(loader.COLLECTABLES_FILENAME, {})
     sets = documents.pop(loader.SETS_FILENAME, {})
     errors.extend(_key_order_errors(arch, files))
-    errors.extend(_variables_errors(variables, f"{arch}/{loader.VARIABLES_FILENAME}"))
+    errors.extend(
+        _collectables_errors(collectables, f"{arch}/{loader.COLLECTABLES_FILENAME}")
+    )
     errors.extend(_sets_errors(sets, f"{arch}/{loader.SETS_FILENAME}"))
     for file_name, document in documents.items():
         errors.extend(_metrics_errors(document, f"{arch}/{file_name}"))
@@ -197,13 +200,13 @@ def _keys_sorted(document: Dict[str, Any]) -> bool:
     return keys == sorted(keys)
 
 
-def _variables_errors(document: Dict[str, Any], source: str) -> List[str]:
-    """Report variables without a non-empty formula."""
+def _collectables_errors(document: Dict[str, Any], source: str) -> List[str]:
+    """Report collectables without a non-empty formula."""
     errors = []
     for name, entry in document.items():
-        errors.extend(_field_errors(entry, VARIABLE_FIELDS, (), source, str(name)))
+        errors.extend(_field_errors(entry, COLLECTABLE_FIELDS, (), source, str(name)))
         if isinstance(entry, dict):
-            errors.extend(_text_errors(entry, VARIABLE_FIELDS, source, str(name)))
+            errors.extend(_text_errors(entry, COLLECTABLE_FIELDS, source, str(name)))
     return errors
 
 
@@ -365,9 +368,7 @@ def _one_pass_errors(
 ) -> List[str]:
     """Report each block where the counters of a set exceed one pass on gpu_arch."""
     limits = mi_gpu_specs.get_perfmon_config(gpu_arch)
-    counters = library.get_counters_for_metrics(
-        entry["metrics"], mi_gpu_specs.get_gpu_series(gpu_arch)
-    )
+    counters = library.get_counters_for_metrics(entry["metrics"])
     return [
         f"[{gpu_arch}] set {set_option}: block {block} needs {len(block_counters)} "
         f"counters but one pass holds {limits[block]}"

@@ -47,6 +47,7 @@ SCHEDULED_CATALOGUE = [
     ("weekly", "oci-rccl-perf-weekly", "oci", "perf", 2880),
     ("weekly", "tensorwave-rccl-perf-weekly", "tw", "perf", 2880),
     ("weekly", "crusoe-rccl-perf-weekly", "crusoe", "perf", 2880),
+    ("weekly", "ruby64-rccl-tls-weekly", "ruby", "unit", 360),
     ("monthly", "ruby64-rccl-perf-monthly", "ruby", "perf", 2880),
     ("monthly", "oci-rccl-perf-monthly", "oci", "perf", 2880),
     ("monthly", "tensorwave-rccl-perf-monthly", "tw", "perf", 2880),

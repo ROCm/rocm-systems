@@ -9,7 +9,6 @@
 #include "rocjitsu/refcount.h"
 
 #include <memory>
-#include <new>
 
 using namespace rocjitsu;
 
@@ -20,21 +19,15 @@ struct rj_code_decoder_t : RefCounted {
 namespace {
 
 template <typename Factory>
-rj_status_t create_decoder_handle(Factory &&factory, rj_code_decoder_t **decoder) {
-  try {
-    auto implementation = factory();
-    if (!implementation)
-      return ROCJITSU_STATUS_ERROR;
-
-    auto handle = std::make_unique<rj_code_decoder_t>();
-    handle->decoder = std::move(implementation);
-    *decoder = handle.release();
-    return ROCJITSU_STATUS_SUCCESS;
-  } catch (const std::bad_alloc &) {
-    return ROCJITSU_STATUS_OUT_OF_RESOURCES;
-  } catch (...) {
+rj_status_t create_decoder_handle(Factory &&factory, rj_code_decoder_t **decoder) noexcept {
+  auto implementation = factory();
+  if (!implementation)
     return ROCJITSU_STATUS_ERROR;
-  }
+
+  auto handle = std::make_unique<rj_code_decoder_t>();
+  handle->decoder = std::move(implementation);
+  *decoder = handle.release();
+  return ROCJITSU_STATUS_SUCCESS;
 }
 
 } // namespace
@@ -88,7 +81,7 @@ rj_status_t rj_code_decoder_decode(rj_code_decoder_t *decoder,
   if (!decoder || !decoder->decoder || !binary_inst)
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
 
-  try {
+  return [&]() noexcept -> rj_status_t {
     Instruction::ScopedHeapAllocation heap_allocation;
     DecodeResult decoded = decoder->decoder->decode(binary_inst);
     if (decoded.failed())
@@ -96,11 +89,7 @@ rj_status_t rj_code_decoder_decode(rj_code_decoder_t *decoder,
 
     *inst = reinterpret_cast<rj_code_inst_t *>(decoded.value().release());
     return ROCJITSU_STATUS_SUCCESS;
-  } catch (const std::bad_alloc &) {
-    return ROCJITSU_STATUS_OUT_OF_RESOURCES;
-  } catch (...) {
-    return ROCJITSU_STATUS_ERROR;
-  }
+  }();
 }
 
 void rj_code_inst_destroy(rj_code_inst_t *inst) {

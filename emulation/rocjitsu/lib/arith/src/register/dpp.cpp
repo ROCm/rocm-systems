@@ -7,8 +7,8 @@
 // Inactive-source behavior follows rocjitsu's shared DPP execution plans.
 
 #include "register/dpp.h"
-#include "common/internal.h"
-#include "rj_arith/rj_arith.h"
+#include "common/validation.h"
+#include "rj_arith/detail/rj_arith_register.h"
 
 #include <stdint.h>
 

@@ -7,7 +7,7 @@
 #include "math/x86_64/unary_x86_64_v3.h"
 #include "common/x86_64/alu_x86_64_v3.h"
 #include "math/unary_impl.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_math.h"
 
 #include <immintrin.h>
 #include <stdint.h>

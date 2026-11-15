@@ -29,28 +29,16 @@ public:
   void unlock_shared() { shards_[reader_shard()].mutex.unlock_shared(); }
 
   void lock() {
-    size_t acquired = 0;
-    try {
-      for (; acquired < kShards; ++acquired)
-        shards_[acquired].mutex.lock();
-    } catch (...) {
-      unlock_prefix(acquired);
-      throw;
-    }
+    for (size_t acquired = 0; acquired < kShards; ++acquired)
+      shards_[acquired].mutex.lock();
   }
 
   bool try_lock() {
-    size_t acquired = 0;
-    try {
-      for (; acquired < kShards; ++acquired) {
-        if (!shards_[acquired].mutex.try_lock()) {
-          unlock_prefix(acquired);
-          return false;
-        }
+    for (size_t acquired = 0; acquired < kShards; ++acquired) {
+      if (!shards_[acquired].mutex.try_lock()) {
+        unlock_prefix(acquired);
+        return false;
       }
-    } catch (...) {
-      unlock_prefix(acquired);
-      throw;
     }
     return true;
   }

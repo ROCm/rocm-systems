@@ -4,13 +4,14 @@
 // AVX2 exact FP16 FMA and packed FMA using wider arithmetic with scalar repair.
 // CPU-specific arithmetic stays here; public entry points select this backend.
 
-#include "common/internal.h"
+#include "common/compiler.h"
 #include "common/simd.h"
+#include "common/validation.h"
 #include "common/x86_64/half_x86_64_v3.h"
 #include "fp/packed_fma.h"
 #include "fp/scalar_repair.h"
 #include "fp/x86_64/mixed_half_x86_64_v3.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_fp.h"
 
 #include <immintrin.h>
 #include <stdint.h>
@@ -28,6 +29,7 @@ void half_fma_exact_x86_64_v3(uint64_t flags, uint32_t exec_mask, uint32_t instr
     const uint32_t *sources[] = {a, b, c};
     __m256 values[3];
     auto bad = _mm256_setzero_si256();
+    RJ_ARITH_UNROLL(3)
     for (int src = 0; src < 3; ++src) {
       auto x = half_input(
           _mm256_loadu_si256(reinterpret_cast<const __m256i *>(sources[src] + lane)),
@@ -43,11 +45,13 @@ void half_fma_exact_x86_64_v3(uint64_t flags, uint32_t exec_mask, uint32_t instr
       // it harmless finite values; ordinary-FMA repair below owns these lanes.
       values[src] = x;
     }
+    RJ_ARITH_UNROLL(3)
     for (auto &value : values) {
       value = _mm256_andnot_ps(_mm256_castsi256_ps(bad), value);
     }
     unsigned omod = (instruction_flags >> 6) & 3;
     __m128i halves[2];
+    RJ_ARITH_UNROLL(2)
     for (int part = 0; part < 2; ++part) {
       auto x = part ? _mm256_extractf128_ps(values[0], 1) : _mm256_castps256_ps128(values[0]);
       auto y = part ? _mm256_extractf128_ps(values[1], 1) : _mm256_castps256_ps128(values[1]);

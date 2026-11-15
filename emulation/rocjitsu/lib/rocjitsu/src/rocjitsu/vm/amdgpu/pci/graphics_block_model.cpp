@@ -16,6 +16,16 @@ constexpr uint32_t kGcSegment = 0;
 constexpr uint32_t kGcControlSegment = 1;
 constexpr uint32_t kGbAddrConfigRead = 0x13e2;
 constexpr uint32_t kScratchRegister0 = 0x2040;
+constexpr uint32_t kGrbmGfxCntl = 0x0900;
+constexpr uint32_t kShMemBases = 0x09e3;
+constexpr uint32_t kShMemConfig = 0x09e4;
+constexpr uint32_t kGrbmVmidShift = 4;
+constexpr uint32_t kGrbmVmidMask = 0xf;
+constexpr uint32_t kPrivateBaseShift = 10;
+constexpr uint32_t kPrivateBaseMask = 0x3f;
+constexpr uint32_t kSharedBaseShift = 16;
+constexpr uint64_t kSharedApertureBytes = uint64_t{1} << 32;
+constexpr uint64_t kPrivateApertureBytes = uint64_t{1} << 57;
 constexpr uint32_t kComputeDataCacheOperation = 0x290c;
 constexpr uint32_t kComputeInstructionCacheOperation = 0x297a;
 constexpr uint32_t kCacheInvalidationComplete = 0x2;
@@ -68,6 +78,8 @@ GraphicsBlockModel::create(const IpBlock &block, const GraphicsDiscoveryInfo &gr
 std::vector<RegisterClaim> GraphicsBlockModel::claims() const {
   return {
       {.segment_index = kGcSegment, .first_dword = kGbAddrConfigRead, .count = 1},
+      {.segment_index = kGcControlSegment, .first_dword = kGrbmGfxCntl, .count = 1},
+      {.segment_index = kGcControlSegment, .first_dword = kShMemBases, .count = 2},
       {.segment_index = kGcControlSegment, .first_dword = kScratchRegister0, .count = 1},
       {.segment_index = kGcControlSegment, .first_dword = kComputeDataCacheOperation, .count = 1},
       {.segment_index = kGcControlSegment,
@@ -77,7 +89,13 @@ std::vector<RegisterClaim> GraphicsBlockModel::claims() const {
 }
 
 bool GraphicsBlockModel::reset() {
+  selected_vmid_ = 0;
+  sh_mem_bases_.fill(0);
+  sh_mem_config_.fill(0);
   bool defined = registers_.define_read_only(kGcSegment, kGbAddrConfigRead, gb_addr_config_);
+  defined = registers_.define(kGcControlSegment, kGrbmGfxCntl, 0) && defined;
+  defined = registers_.define(kGcControlSegment, kShMemBases, 0) && defined;
+  defined = registers_.define(kGcControlSegment, kShMemConfig, 0) && defined;
   defined = registers_.define(kGcControlSegment, kScratchRegister0, 0) && defined;
   // No firmware processor or instruction/data cache executes in this device.
   // The driver's startup invalidations are therefore complete before it asks;
@@ -90,6 +108,44 @@ bool GraphicsBlockModel::reset() {
                                         kCacheInvalidationComplete) &&
             defined;
   return defined;
+}
+
+void GraphicsBlockModel::observe_register_write(uint64_t byte_offset, PciMemoryAccess &memory) {
+  if (registers_.resolve(kGcControlSegment, kGrbmGfxCntl) == byte_offset) {
+    selected_vmid_ =
+        (registers_.read(kGcControlSegment, kGrbmGfxCntl) >> kGrbmVmidShift) & kGrbmVmidMask;
+    (void)registers_.write(kGcControlSegment, kShMemBases, sh_mem_bases_[selected_vmid_]);
+    (void)registers_.write(kGcControlSegment, kShMemConfig, sh_mem_config_[selected_vmid_]);
+    return;
+  }
+  if (registers_.resolve(kGcControlSegment, kShMemConfig) == byte_offset) {
+    sh_mem_config_[selected_vmid_] = registers_.read(kGcControlSegment, kShMemConfig);
+    publish_selected_apertures(memory);
+    return;
+  }
+  if (registers_.resolve(kGcControlSegment, kShMemBases) != byte_offset)
+    return;
+
+  sh_mem_bases_[selected_vmid_] = registers_.read(kGcControlSegment, kShMemBases);
+  publish_selected_apertures(memory);
+}
+
+void GraphicsBlockModel::publish_selected_apertures(PciMemoryAccess &memory) {
+  if (selected_vmid_ == 0)
+    return;
+  if ((sh_mem_config_[selected_vmid_] & 1u) != 0) {
+    (void)memory.program_shader_apertures(selected_vmid_, 0, 0, 0, 0);
+    return;
+  }
+  // GC 12.1 encodes the private base in units of 2^58 and the shared base
+  // in units of 2^48. The aperture sizes are fixed by this shader generation.
+  const uint32_t bases = sh_mem_bases_[selected_vmid_];
+  const uint64_t private_base = uint64_t{(bases >> kPrivateBaseShift) & kPrivateBaseMask} << 58;
+  const uint64_t shared_base = uint64_t{bases >> kSharedBaseShift} << 48;
+  if (!memory.program_shader_apertures(selected_vmid_, shared_base,
+                                       shared_base + kSharedApertureBytes - 1, private_base,
+                                       private_base + kPrivateApertureBytes - 1))
+    util::Logger::warn("graphics core: shader aperture register write could not reach its SoC");
 }
 
 } // namespace rocjitsu

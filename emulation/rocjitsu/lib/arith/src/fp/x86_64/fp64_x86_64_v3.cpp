@@ -7,8 +7,9 @@
 
 #include "common/x86_64/alu_x86_64_v3.h"
 #include "fp/fp64_impl.h"
+#include "fp/fp64_round.h"
 #include "fp/x86_64/minmax_x86_64_v3.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_fp.h"
 
 #include <immintrin.h>
 #include <stdint.h>
@@ -25,9 +26,36 @@ __m256d load(const uint32_t *const *v, int lane, __m256i keep, __m256i flip) {
   return _mm256_castsi256_pd(_mm256_xor_si256(_mm256_and_si256(bits, keep), flip));
 }
 
+// Re-evaluate the selected lanes with the integer model. Kept out of line so that the
+// common case carries no stack frame for it.
+[[gnu::cold, gnu::noinline]] __m256d flush_tiny_lanes(__m256d value, __m256d x, __m256d y,
+                                                      __m256d z, unsigned lanes) {
+  uint64_t result[4], a[4], b[4], c[4];
+  _mm256_storeu_pd(reinterpret_cast<double *>(result), value);
+  _mm256_storeu_pd(reinterpret_cast<double *>(a), x);
+  _mm256_storeu_pd(reinterpret_cast<double *>(b), y);
+  _mm256_storeu_pd(reinterpret_cast<double *>(c), z);
+  for (; lanes; lanes &= lanes - 1) {
+    int i = __builtin_ctz(lanes);
+    result[i] = fma_flush_tiny_f64(result[i], a[i], b[i], c[i], 0);
+  }
+  return _mm256_loadu_pd(reinterpret_cast<const double *>(result));
+}
+
+// A product rounded to the smallest normal may still be tiny after rounding. Such lanes are
+// rare, so only they leave the SIMD path. This path rounds to nearest even.
+inline __m256d flush_tiny_products(__m256d value, __m256d x, __m256d y, __m256d z) {
+  auto magnitude = _mm256_and_si256(_mm256_castpd_si256(value), _mm256_set1_epi64x(INT64_MAX));
+  unsigned boundary = unsigned(_mm256_movemask_pd(_mm256_castsi256_pd(
+      _mm256_cmpeq_epi64(magnitude, _mm256_set1_epi64x(INT64_C(0x0010000000000000))))));
+  return __builtin_expect(boundary != 0, 0) ? flush_tiny_lanes(value, x, y, z, boundary) : value;
+}
+
 // Apply fp64_nan_priority to four lanes.
-template <bool Fma> __m256d nan_priority(__m256d value, __m256d x, __m256d y, __m256d z) {
-  auto quiet = _mm256_castsi256_pd(_mm256_set1_epi64x(INT64_C(0x0008000000000000)));
+template <bool Fma>
+__m256d nan_priority(__m256d value, __m256d x, __m256d y, __m256d z, bool quiet_snan) {
+  auto quiet =
+      _mm256_castsi256_pd(_mm256_set1_epi64x(quiet_snan ? INT64_C(0x0008000000000000) : 0));
   if constexpr (Fma) {
     value = _mm256_blendv_pd(value, _mm256_or_pd(z, quiet), _mm256_cmp_pd(z, z, _CMP_UNORD_Q));
     auto magnitude = _mm256_castsi256_pd(_mm256_set1_epi64x(INT64_MAX));
@@ -53,7 +81,11 @@ constexpr bool is_arithmetic(Fp64 op) {
 // that no ADD/MUL/FMA lane produced one.
 template <Fp64 Op, bool NanPriority>
 bool evaluate(uint64_t flags, uint32_t mode, const uint32_t *const *a, const uint32_t *const *b,
-              const uint32_t *const *c, uint32_t (&result)[2][32]) {
+              const uint32_t *const *c, uint32_t (&result)[2][32], bool quiet_snan) {
+  // MUL/FMA results at the smallest normal need rechecking only when output flushing or OMOD
+  // would act on a tiny result.
+  const bool flush_tiny =
+      (flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS) || (mode & RJ_ARITH_ALU_OMOD_MASK);
   auto ka = _mm256_set1_epi64x(mode & RJ_ARITH_ALU_ABS_A ? INT64_MAX : -1);
   auto kb = _mm256_set1_epi64x(mode & RJ_ARITH_ALU_ABS_B ? INT64_MAX : -1);
   auto kc = _mm256_set1_epi64x(mode & RJ_ARITH_ALU_ABS_C ? INT64_MAX : -1);
@@ -86,8 +118,13 @@ bool evaluate(uint64_t flags, uint32_t mode, const uint32_t *const *a, const uin
       }
       value = _mm256_fmadd_pd(x, y, z);
     }
+    if constexpr (Op == Fp64::Mul || Op == Fp64::Fma) {
+      if (flush_tiny) {
+        value = flush_tiny_products(value, x, y, z);
+      }
+    }
     if constexpr (is_arithmetic(Op) && NanPriority) {
-      value = nan_priority<Op == Fp64::Fma>(value, x, y, z);
+      value = nan_priority<Op == Fp64::Fma>(value, x, y, z, quiet_snan);
     } else if constexpr (is_arithmetic(Op)) {
       // A running sum keeps any NaN at one add per group; opposite infinities only add a pass.
       sum = _mm256_add_pd(sum, value);
@@ -123,8 +160,9 @@ bool evaluate(uint64_t flags, uint32_t mode, const uint32_t *const *a, const uin
           _mm256_cmpgt_epi64(magnitude, _mm256_set1_epi64x(INT64_C(0x7ff0000000000000) - 1)));
       // Quiet NaNs while preserving their sign and payload, as the scalar path does.
       auto nan = _mm256_cmpgt_epi64(magnitude, _mm256_set1_epi64x(0x7ff0000000000000LL));
-      original = _mm256_or_si256(original,
-                                 _mm256_and_si256(nan, _mm256_set1_epi64x(0x0008000000000000LL)));
+      original = _mm256_or_si256(
+          original,
+          _mm256_and_si256(nan, _mm256_set1_epi64x(quiet_snan ? 0x0008000000000000LL : 0)));
       value = _mm256_castsi256_pd(_mm256_blendv_epi8(mantissa, original, special));
     }
     if constexpr (Op == Fp64::Trunc) {
@@ -155,6 +193,13 @@ bool evaluate(uint64_t flags, uint32_t mode, const uint32_t *const *a, const uin
       auto limit = _mm256_castsi256_pd(_mm256_set1_epi64x(INT64_C(0x3fefffffffffffff)));
       value = _mm256_blendv_pd(value, limit, _mm256_cmp_pd(value, limit, _CMP_GT_OQ));
     }
+    if constexpr (Op == Fp64::Trunc || Op == Fp64::Ceil || Op == Fp64::Rndne || Op == Fp64::Floor ||
+                  Op == Fp64::Fract) {
+      // Host rounding quiets a NaN source; keep it signaling when quiet_snan is clear.
+      if (!quiet_snan) {
+        value = _mm256_blendv_pd(value, x, _mm256_cmp_pd(x, x, _CMP_UNORD_Q));
+      }
+    }
     if (mode & RJ_ARITH_ALU_OMOD_MASK) {
       value = prepare_omod_f64(value, mode);
       if constexpr (rocjitsu::arith::is_selection(Op) || Op == Fp64::Trunc || Op == Fp64::Ceil ||
@@ -163,7 +208,11 @@ bool evaluate(uint64_t flags, uint32_t mode, const uint32_t *const *a, const uin
                     Op == Fp64::Sqrt) {
         value = selection_omod_round(value, _mm256_mul_pd(value, scale), flags);
       } else {
-        value = _mm256_mul_pd(value, scale);
+        auto scaled = _mm256_mul_pd(value, scale);
+        // Scaling keeps the selected NaN encoding, as in the scalar path.
+        value = NanPriority
+                    ? _mm256_blendv_pd(scaled, value, _mm256_cmp_pd(value, value, _CMP_UNORD_Q))
+                    : scaled;
       }
     }
     if (mode & RJ_ARITH_ALU_CLAMP) {
@@ -192,13 +241,14 @@ bool evaluate(uint64_t flags, uint32_t mode, const uint32_t *const *a, const uin
 // Execute with already-validated controls, preserving inactive destination lanes.
 template <Fp64 Op>
 void run(uint64_t flags, uint32_t exec_mask, uint32_t mode, uint32_t *const *d,
-         const uint32_t *const *a, const uint32_t *const *b, const uint32_t *const *c, bool rdna3) {
+         const uint32_t *const *a, const uint32_t *const *b, const uint32_t *const *c,
+         bool quiet_snan) {
   uint32_t result[2][32];
-  // A NaN source or an invalid operation always yields a NaN. Such results are rare, so gfx12
+  // A NaN source or an invalid operation always yields a NaN. Such results are rare, so
   // ADD/MUL/FMA re-evaluate with NaN priority only when the host produced one.
-  if (evaluate<Op, false>(flags, mode, a, b, c, result) && !rdna3) {
+  if (evaluate<Op, false>(flags, mode, a, b, c, result, quiet_snan)) {
     if constexpr (is_arithmetic(Op)) {
-      evaluate<Op, true>(flags, mode, a, b, c, result);
+      evaluate<Op, true>(flags, mode, a, b, c, result, quiet_snan);
     }
   }
   // Source halves can alias either output half, so delay all masked writes.
@@ -219,44 +269,44 @@ void run(uint64_t flags, uint32_t exec_mask, uint32_t mode, uint32_t *const *d,
 // Requires the named CPU features and validated instruction controls.
 void fp64_x86_64_v3(Fp64 op, uint64_t flags, uint32_t exec_mask, uint32_t mode, uint32_t *const *d,
                     const uint32_t *const *a, const uint32_t *const *b, const uint32_t *const *c,
-                    bool rdna3) {
+                    bool quiet_snan) {
   switch (op) {
   case Fp64::FrexpMant:
-    return run<Fp64::FrexpMant>(flags, exec_mask, mode, d, a, b, c, rdna3);
+    return run<Fp64::FrexpMant>(flags, exec_mask, mode, d, a, b, c, quiet_snan);
   case Fp64::Trunc:
-    return run<Fp64::Trunc>(flags, exec_mask, mode, d, a, b, c, rdna3);
+    return run<Fp64::Trunc>(flags, exec_mask, mode, d, a, b, c, quiet_snan);
   case Fp64::Ceil:
-    return run<Fp64::Ceil>(flags, exec_mask, mode, d, a, b, c, rdna3);
+    return run<Fp64::Ceil>(flags, exec_mask, mode, d, a, b, c, quiet_snan);
   case Fp64::Rndne:
-    return run<Fp64::Rndne>(flags, exec_mask, mode, d, a, b, c, rdna3);
+    return run<Fp64::Rndne>(flags, exec_mask, mode, d, a, b, c, quiet_snan);
   case Fp64::Floor:
-    return run<Fp64::Floor>(flags, exec_mask, mode, d, a, b, c, rdna3);
+    return run<Fp64::Floor>(flags, exec_mask, mode, d, a, b, c, quiet_snan);
   case Fp64::Fract:
-    return run<Fp64::Fract>(flags, exec_mask, mode, d, a, b, c, rdna3);
+    return run<Fp64::Fract>(flags, exec_mask, mode, d, a, b, c, quiet_snan);
   case Fp64::Sqrt:
-    return run<Fp64::Sqrt>(flags, exec_mask, mode, d, a, b, c, rdna3);
+    return run<Fp64::Sqrt>(flags, exec_mask, mode, d, a, b, c, quiet_snan);
   case Fp64::Rcp:
-    return run<Fp64::Rcp>(flags, exec_mask, mode, d, a, b, c, rdna3);
+    return run<Fp64::Rcp>(flags, exec_mask, mode, d, a, b, c, quiet_snan);
   case Fp64::Rsq:
-    return run<Fp64::Rsq>(flags, exec_mask, mode, d, a, b, c, rdna3);
+    return run<Fp64::Rsq>(flags, exec_mask, mode, d, a, b, c, quiet_snan);
   case Fp64::MinLegacy:
-    return run<Fp64::MinLegacy>(flags, exec_mask, mode, d, a, b, c, rdna3);
+    return run<Fp64::MinLegacy>(flags, exec_mask, mode, d, a, b, c, quiet_snan);
   case Fp64::MaxLegacy:
-    return run<Fp64::MaxLegacy>(flags, exec_mask, mode, d, a, b, c, rdna3);
+    return run<Fp64::MaxLegacy>(flags, exec_mask, mode, d, a, b, c, quiet_snan);
   case Fp64::MinNum:
-    return run<Fp64::MinNum>(flags, exec_mask, mode, d, a, b, c, rdna3);
+    return run<Fp64::MinNum>(flags, exec_mask, mode, d, a, b, c, quiet_snan);
   case Fp64::MaxNum:
-    return run<Fp64::MaxNum>(flags, exec_mask, mode, d, a, b, c, rdna3);
+    return run<Fp64::MaxNum>(flags, exec_mask, mode, d, a, b, c, quiet_snan);
   case Fp64::Minimum:
-    return run<Fp64::Minimum>(flags, exec_mask, mode, d, a, b, c, rdna3);
+    return run<Fp64::Minimum>(flags, exec_mask, mode, d, a, b, c, quiet_snan);
   case Fp64::Maximum:
-    return run<Fp64::Maximum>(flags, exec_mask, mode, d, a, b, c, rdna3);
+    return run<Fp64::Maximum>(flags, exec_mask, mode, d, a, b, c, quiet_snan);
   case Fp64::Add:
-    return run<Fp64::Add>(flags, exec_mask, mode, d, a, b, c, rdna3);
+    return run<Fp64::Add>(flags, exec_mask, mode, d, a, b, c, quiet_snan);
   case Fp64::Mul:
-    return run<Fp64::Mul>(flags, exec_mask, mode, d, a, b, c, rdna3);
+    return run<Fp64::Mul>(flags, exec_mask, mode, d, a, b, c, quiet_snan);
   case Fp64::Fma:
-    return run<Fp64::Fma>(flags, exec_mask, mode, d, a, b, c, rdna3);
+    return run<Fp64::Fma>(flags, exec_mask, mode, d, a, b, c, quiet_snan);
   }
 }
 

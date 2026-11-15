@@ -4,15 +4,14 @@
 #pragma once
 #include "rocjitsu/vm/plugins/race_detector/core/common_register.h"
 #include "rocjitsu/vm/plugins/race_detector/core/event_registry.h"
+#include "rocjitsu/vm/plugins/race_detector/core/interval_set.h"
 #include "rocjitsu/vm/plugins/race_detector/core/types.h"
 #include "rocjitsu/vm/plugins/race_detector/core/wave_race_state.h"
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
-#include <optional>
-#include <string>
-#include <string_view>
+#include <span>
 #include <utility>
 #include <vector>
 
@@ -39,8 +38,6 @@ namespace rocjitsu::plugins::race_detector {
 ///   - Slow path: when a chunk may contain a conflict, scans live event intervals
 ///     with binary search (IntervalSet::overlapsRange).
 class RaceDetector {
-  friend class Workgroup;
-
 public:
   /// ldsSizeBytes is the CU backing capacity, independent of workgroup
   /// allocation metadata and the lazily materialized byte count.
@@ -52,21 +49,16 @@ public:
   EventId allocateEventId(WaveId wave, InstructionSnapshot instruction, MemoryEventType type,
                           std::vector<uint32_t> registers, uint64_t execMask) {
     return allocateEventId(wave, instruction, type, std::move(registers), execMask, 0xF, {},
-                           defaultWaitCounterType(type), defaultMemoryOrder(type));
+                           CounterObligations(type), defaultMemoryOrder(type));
   }
 
   /// Allocate a workgroup-global event ID and record its metadata.
-  EventId
-  allocateEventId(WaveId, InstructionSnapshot instruction, MemoryEventType,
-                  std::vector<uint32_t> registers, uint64_t execMask, uint8_t byteMask,
-                  IntervalSet ldsIntervals, amdgpu::WaitCounterType waitCounterType,
-                  MemoryOrderClass memoryOrder,
-                  std::optional<amdgpu::WaitCounterType> additionalWaitCounterType = std::nullopt);
   EventId allocateEventId(WaveId, InstructionSnapshot instruction, MemoryEventType,
                           std::vector<uint32_t> registers, uint64_t execMask, uint8_t byteMask,
                           IntervalSet ldsIntervals,
                           std::span<const amdgpu::MemoryCounterObligation> counterObligations,
-                          MemoryOrderClass memoryOrder, uint8_t lastRegisterByteMask = 0);
+                          MemoryOrderClass memoryOrder, uint8_t lastRegisterByteMask = 0,
+                          LdsAccess ldsAccess = {});
 
   /// Transition an event from ACTIVE to WAVE_COMPLETE.
   void markEventWaveComplete(EventId);
@@ -84,7 +76,8 @@ public:
   /// Same-wave operations are ordered only when both belong to the same
   /// non-UNORDERED completion class.
   void validateRead(int addr, WaveId, int lane, int nBytes,
-                    MemoryOrderClass currentMemoryOrder = MemoryOrderClass::LDS) const;
+                    MemoryOrderClass currentMemoryOrder = MemoryOrderClass::LDS,
+                    uint8_t atomicBytes = 0) const;
 
   /// Check for WAR hazards: no outstanding LDS reads overlap the range.
   /// Same-wave operations are ordered only when both belong to the same
@@ -92,7 +85,17 @@ public:
   /// TODO(newling): WAW detection (write vs outstanding writes) is not
   /// implemented.
   void validateWrite(int addr, WaveId, int lane, int nBytes,
-                     MemoryOrderClass currentMemoryOrder = MemoryOrderClass::LDS) const;
+                     MemoryOrderClass currentMemoryOrder = MemoryOrderClass::LDS,
+                     uint8_t atomicBytes = 0) const;
+
+  /// @brief Conservatively check an instruction's LDS intervals for conflicts.
+  /// @details The intervals must describe valid LDS byte ranges. False proves
+  /// that validateRead (or validateWrite, when isWrite) would report nothing
+  /// for any access by `wave` within `accessed`, so per-lane validation can be
+  /// skipped. Visits the 16-byte chunks of each interval, without scanning gaps
+  /// between intervals. Separate intervals can visit the same chunk.
+  bool mayConflict(const IntervalSet &accessed, WaveId wave, bool isWrite,
+                   MemoryOrderClass currentMemoryOrder) const;
 
   /// True only when the complete access lies in the CU's logical LDS backing.
   bool validLdsRange(uint64_t address, uint64_t bytes) const {
@@ -115,11 +118,6 @@ public:
   Dim3d getWorkgroupId() const { return workgroupId; }
   const std::function<void(RaceViolation)> &getRaceHandler() const { return raceHandler; }
 
-  /// Format a RaceViolation with assembly context for diagnostics.
-  /// getSourceLine(i) returns the original source text for line index i.
-  std::string decorateException(const RaceViolation &, uint64_t wavePc, int numSourceLines,
-                                std::function<std::string_view(int)> getSourceLine) const;
-
   WaveRaceState &getWaveRaceState(int waveIndex);
 
   /// Whether the workgroup has a single wave, so that no other wave can race
@@ -134,8 +132,6 @@ public:
   }
 
 private:
-  void setProfiler(ProfilerInterface &);
-
   struct LdsChunkCounts {
     int bytes = 0;
     /// When bytes > 0, a nonnegative owner proves that every counted event

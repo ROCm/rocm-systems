@@ -116,6 +116,8 @@ extern int64_t g_rcclParamHierarchicalReduceScatter;
 extern int64_t g_rcclParamCeAllReduce;
 extern int64_t g_rcclParamCeReduceScatter;
 extern int64_t g_rcclParamCeArStagingBytes;
+// rcclCeArNonRegCap, which ncclCeInit and taskAppend call. Fails loud until a test installs it.
+extern std::function<size_t(const struct ncclComm*)> g_rcclCeArNonRegCap;
 
 // checkHsaEnvSetting's HSA_* scratch validation (rccl_wrap.cc). g_lastHsaScratchEnv records the
 // hsaScratchEnv argument, which is the only proof the check read the environment at all.
@@ -136,6 +138,8 @@ extern std::function<ncclResult_t(struct ncclComm*, const void*, void*, size_t, 
 extern std::function<ncclResult_t(struct ncclComm*, const void*, void*, size_t, ncclDataType_t, hipStream_t, bool,
                                   bool, struct rcclCollDecision*)>
     g_rcclSelectAlltoAll;
+extern std::function<ncclResult_t(struct ncclComm*, size_t, ncclDataType_t, int, bool, struct rcclCollDecision*)>
+    g_rcclSelectBroadcast;
 extern std::function<bool(const struct ncclComm*, size_t, size_t, bool, const char*)> g_rcclDdaEnabled;
 extern std::function<size_t(const struct ncclComm*, ncclFunc_t)> g_rcclDdaEntryThreshold;
 extern std::function<ncclResult_t(int, const char**)> g_rcclGetAlgoName;

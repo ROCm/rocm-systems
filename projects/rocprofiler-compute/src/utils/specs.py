@@ -1070,7 +1070,10 @@ class MachineSpecsCDNA(MachineSpecs):
 @_kw_only
 @dataclass(repr=False)
 class MachineSpecsRDNA(MachineSpecs):
-    """RDNA 3.5 and RDNA 4 specs with GL1 count and GDDR channel fields."""
+    """Specs of RDNA 3.5 and RDNA 4 GPUs.
+
+    They also hold the number of GL1 caches and of GDDR channels.
+    """
 
     num_gl1c: Optional[str] = field(
         default=None,

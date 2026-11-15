@@ -1,23 +1,23 @@
 System Speed-of-Light:
   VALU Issue Rate:
-    plain: Billions of VALU instruction issues per second. The counter includes floating-point and integer instructions and does not count FLOPs or active lanes. No percentage of FP32 peak is reported.
-    rst: Billions of VALU instruction issues per second. The counter includes floating-point and integer instructions and does not count FLOPs or active lanes. No percentage of FP32 peak is reported.
+    plain: Billions of VALU instruction issues per second. The counter includes floating-point and integer instructions and does not count FLOPs or active lanes.
+    rst: Billions of VALU instruction issues per second. The counter includes floating-point and integer instructions and does not count FLOPs or active lanes.
     unit: GInstructions/s
   WMMA FLOPs (F16->F32 16x16x16):
     plain: Achieved FP16 WMMA throughput.
     rst: Achieved FP16 WMMA throughput.
     unit: GFLOP/s
   FP64 VALU Issue Rate:
-    plain: Billions of double-precision VALU instruction issues per second. This is an instruction rate, without accounting for FLOPs per instruction or active lanes. No percentage of FP64 peak is reported.
-    rst: Billions of double-precision VALU instruction issues per second. This is an instruction rate, without accounting for FLOPs per instruction or active lanes. No percentage of FP64 peak is reported.
+    plain: Billions of double-precision VALU instruction issues per second. This is an instruction rate, without accounting for FLOPs per instruction or active lanes.
+    rst: Billions of double-precision VALU instruction issues per second. This is an instruction rate, without accounting for FLOPs per instruction or active lanes.
     unit: GInstructions/s
   IPC:
-    plain: Instructions issued per busy SQ cycle, excluding internal instructions.
-    rst: Instructions issued per busy SQ cycle, excluding internal instructions.
+    plain: Instructions executed per cycle, measuring overall instruction throughput efficiency. Higher IPC indicates better utilization of the shader pipeline. Low IPC may indicate stalls due to memory latency, register dependencies, or insufficient wavefront occupancy to hide latencies.
+    rst: Instructions executed per cycle, measuring overall instruction throughput efficiency. Higher IPC indicates better utilization of the shader pipeline. Low IPC may indicate stalls due to memory latency, register dependencies, or insufficient wavefront occupancy to hide latencies.
     unit: Instructions per Cycle
   Wavefront Occupancy:
-    plain: Average number of wavefronts in flight on GPU.
-    rst: Average number of wavefronts in flight on GPU.
+    plain: Average number of wavefronts resident on the GPU during kernel execution. Higher occupancy provides more opportunities to hide memory latency through wavefront switching. However, maximum occupancy is not always optimal. Excessive register or LDS usage per wavefront may limit occupancy.
+    rst: Average number of wavefronts resident on the GPU during kernel execution. Higher occupancy provides more opportunities to hide memory latency through wavefront switching. However, maximum occupancy is not always optimal. Excessive register or LDS usage per wavefront may limit occupancy.
     unit: Wavefronts
   GL2 Cache Hit Rate:
     plain: Percentage of L2 lookups that hit.
@@ -28,80 +28,60 @@ System Speed-of-Light:
     rst: Cycles LDS stalled on conflicting bank addresses, averaged per dispatch.
     unit: Cycles
   GL0 Cache Hit Rate (TCP Cache):
-    plain: Percentage of vector L0 cache line accesses that hit.
-    rst: Percentage of vector L0 cache line accesses that hit.
-    unit: Percent
-  GL0 Cache BW (TCP Cache):
-    plain: Not available
-    rst: Not available
-    unit: Bytes/s
-  GL1 Cache Hit Rate:
-    plain: Not available
-    rst: Not available
+    plain: Percentage of GL0 vector cache (TCP Cache) requests that hit in cache. The TCP cache is the first-level cache for vector memory operations. High hit rates reduce traffic to GL1 and improve memory access latency.
+    rst: Percentage of GL0 vector cache (TCP Cache) requests that hit in cache. The TCP cache is the first-level cache for vector memory operations. High hit rates reduce traffic to GL1 and improve memory access latency.
     unit: Percent
   Scalar Data Cache Hit Rate:
-    plain: Percentage of scalar data cache requests that hit.
-    rst: Percentage of scalar data cache requests that hit.
+    plain: Percentage of scalar data cache accesses that hit in cache. The scalar cache stores uniform data accessed by scalar instructions. High hit rates indicate efficient reuse of constant and uniform data across wavefronts.
+    rst: Percentage of scalar data cache accesses that hit in cache. The scalar cache stores uniform data accessed by scalar instructions. High hit rates indicate efficient reuse of constant and uniform data across wavefronts.
     unit: Percent
   Scalar Data Cache BW:
     plain: Bytes loaded by scalar memory instructions, from the dwords each instruction loads.
     rst: Bytes loaded by scalar memory instructions, from the dwords each instruction loads.
     unit: Bytes/s
   Instruction Cache Hit Rate:
-    plain: Percentage of instruction cache requests that hit.
-    rst: Percentage of instruction cache requests that hit.
+    plain: Percentage of instruction fetch requests that hit in the instruction cache. High hit rates are essential for sustained instruction throughput. Low hit rates may indicate large kernel code size or divergent control flow.
+    rst: Percentage of instruction fetch requests that hit in the instruction cache. High hit rates are essential for sustained instruction throughput. Low hit rates may indicate large kernel code size or divergent control flow.
     unit: Percent
-  Instruction Cache BW:
-    plain: Not available
-    rst: Not available
-    unit: Bytes/s
 Memory chart - Instruction Cache:
   ICache Requests:
     plain: Instruction cache requests from the SQ, normalized by the chosen unit.
     rst: Instruction cache requests from the SQ, normalized by the chosen unit.
     unit: Requests per Normalization Unit
   ICache Hit Rate:
-    plain: Percentage of instruction cache requests that hit. The instruction cache is read-only and shared by the WGPs it serves.
-    rst: Percentage of instruction cache requests that hit. The instruction cache is read-only and shared by the WGPs it serves.
+    plain: Percentage of instruction cache accesses that are serviced from cache without fetching from GL1. High hit rates indicate good instruction locality. Low hit rates may indicate large kernels exceeding instruction cache capacity or divergent branches.
+    rst: Percentage of instruction cache accesses that are serviced from cache without fetching from GL1. High hit rates indicate good instruction locality. Low hit rates may indicate large kernels exceeding instruction cache capacity or divergent branches.
     unit: Percent
-  ICache-GL1 Read Bandwidth:
-    plain: Not available
-    rst: Not available
-    unit: Bytes/s
 Memory chart - Scalar Data Cache:
   DCache Requests:
     plain: Scalar data cache requests after bank serialization, normalized by the chosen unit.
     rst: Scalar data cache requests after bank serialization, normalized by the chosen unit.
     unit: Requests per Normalization Unit
   DCache Hit Rate:
-    plain: Percentage of scalar data cache requests that hit. The scalar data cache is read-only.
-    rst: Percentage of scalar data cache requests that hit. The scalar data cache is read-only.
+    plain: Percentage of scalar data cache accesses that hit in cache. High hit rates indicate efficient reuse of constant and uniform data. Low hit rates may indicate excessive unique constant data or poor temporal locality.
+    rst: Percentage of scalar data cache accesses that hit in cache. High hit rates indicate efficient reuse of constant and uniform data. Low hit rates may indicate excessive unique constant data or poor temporal locality.
     unit: Percent
   DCache Load Bandwidth:
     plain: Bytes loaded by scalar memory instructions, from the dwords each instruction loads. Bounds-check reductions are ignored.
     rst: Bytes loaded by scalar memory instructions, from the dwords each instruction loads. Bounds-check reductions are ignored.
     unit: Bytes/s
-  DCache-GL1 Read Bandwidth:
-    plain: Not available
-    rst: Not available
-    unit: Bytes/s
 Memory chart - GL0 Cache (Vector L0):
   GL0 Hit Rate:
-    plain: Percentage of vector L0 cache line accesses that hit.
-    rst: Percentage of vector L0 cache line accesses that hit.
+    plain: Percentage of GL0 cache requests serviced from cache without accessing GL1.
+    rst: Percentage of GL0 cache requests serviced from cache without accessing GL1.
     unit: Percent
 Memory chart - LDS (Local Data Share):
   LDS Req:
-    plain: LDS instructions issued, including FLAT instructions that resolve to LDS. This counts instructions, not data, so it does not separate reads from writes.
-    rst: LDS instructions issued, including FLAT instructions that resolve to LDS. This counts instructions, not data, so it does not separate reads from writes.
+    plain: Number of LDS instructions issued by the shader, including FLAT instructions that resolve to LDS. This counts instructions rather than data movement, so it does not distinguish reads from writes.
+    rst: Number of LDS instructions issued by the shader, including FLAT instructions that resolve to LDS. This counts instructions rather than data movement, so it does not distinguish reads from writes.
     unit: Requests per Normalization Unit
   LDS Utilization:
-    plain: Percentage of the LDS cycle budget across all CUs spent on indexed (non-direct, non-interpolation) accesses, over GPU-active cycles. Two CUs share a WGP's LDS, so a saturated LDS reads well below 100%.
-    rst: Percentage of the LDS cycle budget across all CUs spent on indexed (non-direct, non-interpolation) accesses, over GPU-active cycles. Two CUs share a WGP's LDS, so a saturated LDS reads well below 100%.
+    plain: Percentage of the LDS cycle budget across all CUs spent servicing indexed (non-direct, non-interpolation) accesses, measured over GPU-active cycles. Because two CUs share a workgroup processor's LDS, a saturated LDS reads well below 100% on this architecture.
+    rst: Percentage of the LDS cycle budget across all CUs spent servicing indexed (non-direct, non-interpolation) accesses, measured over GPU-active cycles. Because two CUs share a workgroup processor's LDS, a saturated LDS reads well below 100% on this architecture.
     unit: Percent
   LDS Bank Conflict Rate:
-    plain: LDS cycles stalled by bank conflicts, as a percentage of cycles LDS spent on indexed accesses.
-    rst: LDS cycles stalled by bank conflicts, as a percentage of cycles LDS spent on indexed accesses.
+    plain: Percentage of LDS accesses that experienced bank conflicts. Conflicts occur when multiple work-items in a wavefront access different addresses in the same LDS bank. High conflict rates reduce effective LDS bandwidth. Restructuring data layouts can help.
+    rst: Percentage of LDS accesses that experienced bank conflicts. Conflicts occur when multiple work-items in a wavefront access different addresses in the same LDS bank. High conflict rates reduce effective LDS bandwidth. Restructuring data layouts can help.
     unit: Percent
   LDS Bandwidth:
     plain: LDS byte-access rate from load, store, and atomic dword counters, using four bytes per dword.
@@ -129,23 +109,10 @@ Memory chart - L2 to Memory:
     plain: Bytes L2 wrote over EA for requests destined for VRAM, in 32-byte units. Infinity Cache hits are included.
     rst: Bytes L2 wrote over EA for requests destined for VRAM, in 32-byte units. Infinity Cache hits are included.
     unit: Bytes/s
-Memory chart - Infinity Cache and VRAM:
-  Infinity Cache Hit Rate:
-    plain: Not available
-    rst: Not available
-    unit: Percent
-  VRAM Read Bandwidth:
-    plain: Not available
-    rst: Not available
-    unit: Bytes/s
-  VRAM Write Bandwidth:
-    plain: Not available
-    rst: Not available
-    unit: Bytes/s
 Memory chart - Workgroup Processors (WGPs):
   Wavefront Occupancy:
     plain: Resident wavefronts per WGP, averaged over GPU-active cycles, as a percent of the maximum wavefronts per WGP.
-    rst: Resident wavefronts per WGP, averaged over GPU-active cycles, as a percent of the maximum wavefronts per WGP.
+    rst: Resident :ref:`wavefronts <desc-wavefront>` per WGP, averaged over GPU-active cycles, as a percent of the maximum wavefronts per WGP.
     unit: Percent
   VGPR:
     plain: 'The number of architected vector general-purpose registers allocated for the kernel. Note: this may not exactly match the number of VGPRs requested by the compiler due to allocation granularity.'
@@ -157,26 +124,26 @@ Memory chart - Workgroup Processors (WGPs):
     unit: Registers
   LDS Allocation:
     plain: 'The number of bytes of LDS memory (or, shared memory) allocated per workgroup. Note: This may also be larger than what was requested at compile time due to both allocation granularity and dynamic per-dispatch LDS allocations.'
-    rst: 'The number of bytes of LDS memory (or, shared memory) allocated per workgroup. Note: This may also be larger than what was requested at compile time due to both allocation granularity and dynamic per-dispatch LDS allocations.'
+    rst: 'The number of bytes of LDS memory (or, shared memory) allocated per :ref:`workgroup <desc-workgroup>`. Note: This may also be larger than what was requested at compile time due to both allocation granularity and dynamic per-dispatch LDS allocations.'
     unit: Bytes per Workgroup
   Scratch Allocation:
     plain: 'The amount of scratch memory requested per wavefront, in KB: the scratch bytes requested per work-item multiplied by the wavefront size. Scratch memory is used for stack memory on the accelerator, as well as for register spills and restores.'
-    rst: 'The amount of scratch memory requested per wavefront, in KB: the scratch bytes requested per work-item multiplied by the wavefront size. Scratch memory is used for stack memory on the accelerator, as well as for register spills and restores.'
+    rst: 'The amount of scratch memory requested per :ref:`wavefront <desc-wavefront>`, in KB: the scratch bytes requested per :ref:`work-item <desc-work-item>` multiplied by the wavefront size. Scratch memory is used for stack memory on the accelerator, as well as for register spills and restores.'
     unit: KB per Wave
   Workgroups:
     plain: The number of workgroups in the launch divided by the number of WGPs.
-    rst: The number of workgroups in the launch divided by the number of WGPs.
+    rst: The number of :ref:`workgroups <desc-workgroup>` in the launch divided by the number of WGPs.
     unit: Workgroups per WGP
 Roofline Performance Rates:
-  VALU FLOPs (FP32):
-    plain: Floating-point operations per second on the VALU, excluding WMMA instructions. Uses the aggregate VALU instruction counter at one FLOP per lane, 32 lanes per wave32 instruction, so it is an estimate rather than a precision-specific FLOP count.
-    rst: Floating-point operations per second on the VALU, excluding WMMA instructions. Uses the aggregate VALU instruction counter at one FLOP per lane, 32 lanes per wave32 instruction, so it is an estimate rather than a precision-specific FLOP count.
+  VALU FLOPs:
+    plain: VALU issues per second, excluding WMMA, at one FLOP per lane. gfx120x compute is wave32 by default, so that is 32 per instruction. SQ_INSTS_VALU counts every VALU issue, including integer, move, and convert, and an FMA counts as one issue while the FP32 roof counts it as two FLOPs. A pure FMA kernel therefore reads low. A tiled FP32 GEMM also issues address arithmetic, so this metric can read about twice the true FLOP count. SQ_WMMA_VALU_INSTS is per vec32, the same unit as SQ_INSTS_VALU for gfx120x compute.
+    rst: VALU issues per second, excluding WMMA, at one FLOP per lane. gfx120x compute is wave32 by default, so that is 32 per instruction. SQ_INSTS_VALU counts every VALU issue, including integer, move, and convert, and an FMA counts as one issue while the FP32 roof counts it as two FLOPs. A pure FMA kernel therefore reads low. A tiled FP32 GEMM also issues address arithmetic, so this metric can read about twice the true FLOP count. SQ_WMMA_VALU_INSTS is per vec32, the same unit as SQ_INSTS_VALU for gfx120x compute.
     unit: GFLOP/s
-  WMMA FLOPs (F16->F32):
-    plain: Matrix operations per second scored against the measured FP16 roof. The formula is 8192 * SQ_WMMA_VALU_INSTS. SQ_WMMA_VALU_INSTS counts every WMMA issue, and the counter does not separate FP16, BF16, FP8, and BF8, so the achieved rate is not FP16-only. V_WMMA_F32_16X16X16_BF8_BF8 is a separate roof.
-    rst: Matrix operations per second scored against the measured FP16 roof. The formula is 8192 * SQ_WMMA_VALU_INSTS. SQ_WMMA_VALU_INSTS counts every WMMA issue, and the counter does not separate FP16, BF16, FP8, and BF8, so the achieved rate is not FP16-only. V_WMMA_F32_16X16X16_BF8_BF8 is a separate roof.
+  WMMA FLOPs (FP16):
+    plain: Matrix operations per second scored against the measured FP16 roof. The formula is 8192 * SQ_WMMA_VALU_INSTS. SQ_WMMA_VALU_INSTS counts every WMMA issue, and the counter does not separate FP16, BF16, FP8, and BF8, so the achieved rate is not FP16-only.
+    rst: Matrix operations per second scored against the measured FP16 roof. The formula is 8192 * SQ_WMMA_VALU_INSTS. SQ_WMMA_VALU_INSTS counts every WMMA issue, and the counter does not separate FP16, BF16, FP8, and BF8, so the achieved rate is not FP16-only.
     unit: GFLOP/s
-  VALU FLOPs (FP64):
+  VALU FLOPs (F64):
     plain: 64-bit floating-point operations per second on the VALU.
     rst: 64-bit floating-point operations per second on the VALU.
     unit: GFLOP/s
@@ -188,13 +155,9 @@ Roofline Performance Rates:
     plain: Achieved bandwidth for Local Data Share memory operations.
     rst: Achieved bandwidth for Local Data Share memory operations.
     unit: Bytes/s
-  VRAM BW:
-    plain: Bandwidth of GL2C/EA read and write requests destined for VRAM, compared with the measured VRAM bandwidth (VRAMBw column of roofline.csv). Counts 32-byte granules from GL2C_EA_RDREQ_DRAM_32B (PERF_SEL 0xa7) and GL2C_EA_WRREQ_DRAM_32B (PERF_SEL 0xa8). The unsized EA_RDREQ_DRAM and EA_WRREQ_DRAM counters (0xa5 and 0xa6) mix 32-byte through 128-byte requests, so a fixed 256 bytes per request would overstate them. It includes requests the Infinity Cache serves. The counters cannot separate them, so this can be higher than true VRAM traffic and can exceed the measured VRAM peak.
-    rst: Bandwidth of GL2C/EA read and write requests destined for VRAM, compared with the measured VRAM bandwidth (VRAMBw column of roofline.csv). Counts 32-byte granules from GL2C_EA_RDREQ_DRAM_32B (PERF_SEL 0xa7) and GL2C_EA_WRREQ_DRAM_32B (PERF_SEL 0xa8). The unsized EA_RDREQ_DRAM and EA_WRREQ_DRAM counters (0xa5 and 0xa6) mix 32-byte through 128-byte requests, so a fixed 256 bytes per request would overstate them. It includes requests the Infinity Cache serves. The counters cannot separate them, so this can be higher than true VRAM traffic and can exceed the measured VRAM peak.
-    unit: Bytes/s
-  L2 to Memory BW (Infinity Cache Peak):
-    plain: Bandwidth of GL2C/EA read and write requests destined for VRAM, compared with the measured Infinity Cache bandwidth (MALL column of roofline.csv). Uses the same 32-byte request counters as VRAM BW. Requests pass through GL0 (TCP), GL1, the GL2, and the Infinity Cache before VRAM. The measured peak uses the device's reported Infinity Cache size. No counter separates Infinity Cache hits from VRAM traffic.
-    rst: Bandwidth of GL2C/EA read and write requests destined for VRAM, compared with the measured Infinity Cache bandwidth (MALL column of roofline.csv). Uses the same 32-byte request counters as VRAM BW. Requests pass through GL0 (TCP), GL1, the GL2, and the Infinity Cache before VRAM. The measured peak uses the device's reported Infinity Cache size. No counter separates Infinity Cache hits from VRAM traffic.
+  L2 to Memory BW:
+    plain: Bandwidth of GL2C/EA read and write requests leaving L2 toward memory, compared with the measured VRAM bandwidth (VRAMBw column of roofline.csv). Counts 32-byte granules from GL2C_EA_RDREQ_DRAM_32B (PERF_SEL 0xa7) and GL2C_EA_WRREQ_DRAM_32B (PERF_SEL 0xa8). The unsized EA_RDREQ_DRAM and EA_WRREQ_DRAM counters (0xa5 and 0xa6) mix 32-byte through 128-byte requests, so a fixed 256 bytes per request would overstate them. It includes requests the Infinity Cache serves. The counters cannot separate them, so this can be higher than true VRAM traffic and can exceed the measured VRAM peak.
+    rst: Bandwidth of GL2C/EA read and write requests leaving L2 toward memory, compared with the measured VRAM bandwidth (VRAMBw column of roofline.csv). Counts 32-byte granules from GL2C_EA_RDREQ_DRAM_32B (PERF_SEL 0xa7) and GL2C_EA_WRREQ_DRAM_32B (PERF_SEL 0xa8). The unsized EA_RDREQ_DRAM and EA_WRREQ_DRAM counters (0xa5 and 0xa6) mix 32-byte through 128-byte requests, so a fixed 256 bytes per request would overstate them. It includes requests the Infinity Cache serves. The counters cannot separate them, so this can be higher than true VRAM traffic and can exceed the measured VRAM peak.
     unit: Bytes/s
 Roofline Plot Points:
   AI L0:
@@ -206,8 +169,8 @@ Roofline Plot Points:
     rst: Arithmetic intensity relative to Local Data Share traffic. The FLOP numerator is the VALU FLOPs excluding the WMMA instructions already counted in SQ_INSTS_VALU, plus the WMMA FLOPs at 8192 per instruction.
     unit: FLOPs/Byte
   AI VRAM:
-    plain: Arithmetic intensity relative to GL2C/EA requests destined for VRAM. The plot marks the point at the VRAM level. Compare it with both the VRAM roof and the Infinity Cache (MALL) roof. The requests include those the Infinity Cache serves, and the counters cannot separate them, so this intensity can be lower than the true VRAM intensity. The FLOP numerator is the VALU FLOPs excluding the WMMA instructions already counted in SQ_INSTS_VALU, plus the WMMA FLOPs at 8192 per instruction.
-    rst: Arithmetic intensity relative to GL2C/EA requests destined for VRAM. The plot marks the point at the VRAM level. Compare it with both the VRAM roof and the Infinity Cache (MALL) roof. The requests include those the Infinity Cache serves, and the counters cannot separate them, so this intensity can be lower than the true VRAM intensity. The FLOP numerator is the VALU FLOPs excluding the WMMA instructions already counted in SQ_INSTS_VALU, plus the WMMA FLOPs at 8192 per instruction.
+    plain: Arithmetic intensity relative to GL2C/EA requests destined for VRAM. The plot marks the point at the VRAM level. The requests include those the Infinity Cache serves, and the counters cannot separate them, so this intensity can be lower than the true VRAM intensity. The FLOP numerator is the VALU FLOPs excluding the WMMA instructions already counted in SQ_INSTS_VALU, plus the WMMA FLOPs at 8192 per instruction.
+    rst: Arithmetic intensity relative to GL2C/EA requests destined for VRAM. The plot marks the point at the VRAM level. The requests include those the Infinity Cache serves, and the counters cannot separate them, so this intensity can be lower than the true VRAM intensity. The FLOP numerator is the VALU FLOPs excluding the WMMA instructions already counted in SQ_INSTS_VALU, plus the WMMA FLOPs at 8192 per instruction.
     unit: FLOPs/Byte
   Performance (GFLOPs):
     plain: Achieved VALU plus WMMA throughput of floating-point operations per second. The FLOP count is the VALU FLOPs excluding the WMMA instructions already counted in SQ_INSTS_VALU, plus the WMMA FLOPs at 8192 per instruction.
@@ -224,8 +187,8 @@ Wave Dispatch Statistics:
     unit: Wavefronts per Cycle
 WGP Scalar Data Cache:
   Dcache Hit Rate:
-    plain: Percentage of scalar data-cache requests that hit.
-    rst: Percentage of scalar data-cache requests that hit.
+    plain: Percentage of scalar data cache accesses that hit. High hit rates indicate efficient reuse of constant and uniform data. Low rates may suggest excessive unique constant data or poor temporal locality.
+    rst: Percentage of scalar data cache accesses that hit. High hit rates indicate efficient reuse of constant and uniform data. Low rates may suggest excessive unique constant data or poor temporal locality.
     unit: Percent
 WGP Wavefront Dispatch:
   Dispatched Threads:
@@ -263,8 +226,8 @@ WGP Wavefront Launch Stats:
     unit: Work-items
 WGP Instruction Cache:
   Icache Hit Rate:
-    plain: Percentage of instruction-cache requests that hit.
-    rst: Percentage of instruction-cache requests that hit.
+    plain: Percentage of instruction cache accesses that hit. High hit rates are essential for sustained instruction throughput. Low rates may indicate large kernels or divergent branches causing instruction cache thrashing.
+    rst: Percentage of instruction cache accesses that hit. High hit rates are essential for sustained instruction throughput. Low rates may indicate large kernels or divergent branches causing instruction cache thrashing.
     unit: Percent
 WGP VMEM Instruction Mix:
   Instructions - Flat Load:
@@ -289,49 +252,45 @@ WGP VMEM Instruction Mix:
     unit: Count per Normalization Unit
 WGP Wavefront Instruction Mix:
   Instructions - Internal:
-    plain: Issued internal instructions, normalized by the chosen unit.
-    rst: Issued internal instructions, normalized by the chosen unit.
+    plain: Internal SQ instructions (SQ_INSTS_INTERNAL) per normalization unit. These represent bookkeeping or non-user-visible work issued by the SQ.
+    rst: Internal SQ instructions (SQ_INSTS_INTERNAL) per normalization unit. These represent bookkeeping or non-user-visible work issued by the SQ.
     unit: Count per Normalization Unit
   Instructions - LDS:
-    plain: Issued LDS instructions, normalized by the chosen unit.
-    rst: Issued LDS instructions, normalized by the chosen unit.
+    plain: Number of Local Data Share instructions executed. LDS provides fast shared memory within a workgroup. High counts indicate active use of shared memory for inter-work-item communication.
+    rst: Number of Local Data Share instructions executed. LDS provides fast shared memory within a workgroup. High counts indicate active use of shared memory for inter-work-item communication.
     unit: Count per Normalization Unit
   Instructions - SALU:
-    plain: Issued scalar arithmetic instructions, normalized by the chosen unit.
-    rst: Issued scalar arithmetic instructions, normalized by the chosen unit.
+    plain: Number of Scalar ALU instructions executed. SALU handles operations with uniform values across the wavefront. Efficient kernels often have a balance of VALU and SALU operations.
+    rst: Number of Scalar ALU instructions executed. SALU handles operations with uniform values across the wavefront. Efficient kernels often have a balance of VALU and SALU operations.
     unit: Count per Normalization Unit
   Instructions - SMEM:
-    plain: Issued scalar memory instructions, normalized by the chosen unit.
-    rst: Issued scalar memory instructions, normalized by the chosen unit.
+    plain: Number of scalar memory instructions executed. SMEM loads constant and uniform data through the scalar cache. High counts may indicate heavy use of constant buffers or kernel arguments.
+    rst: Number of scalar memory instructions executed. SMEM loads constant and uniform data through the scalar cache. High counts may indicate heavy use of constant buffers or kernel arguments.
     unit: Count per Normalization Unit
   Instructions - Transcendental:
-    plain: Issued transcendental vector arithmetic instructions, normalized by the chosen unit.
-    rst: Issued transcendental vector arithmetic instructions, normalized by the chosen unit.
+    plain: Transcendental VALU instructions (SQ_INSTS_VALU_TRANS) per normalization unit. These cover hardware approximations such as sin, cos, and log on the vector ALU.
+    rst: Transcendental VALU instructions (SQ_INSTS_VALU_TRANS) per normalization unit. These cover hardware approximations such as sin, cos, and log on the vector ALU.
     unit: Count per Normalization Unit
   Instructions - VALU:
-    plain: Issued vector arithmetic instructions, normalized by the chosen unit. The counter includes integer and floating-point instructions.
-    rst: Issued vector arithmetic instructions, normalized by the chosen unit. The counter includes integer and floating-point instructions.
+    plain: Number of Vector ALU instructions executed. VALU handles arithmetic and logic operations across all work-items in a wavefront. High VALU counts indicate compute-intensive kernels.
+    rst: Number of Vector ALU instructions executed. VALU handles arithmetic and logic operations across all work-items in a wavefront. High VALU counts indicate compute-intensive kernels.
     unit: Count per Normalization Unit
   Instructions - VMEM:
-    plain: Issued vector memory instructions, normalized by the chosen unit.
-    rst: Issued vector memory instructions, normalized by the chosen unit.
+    plain: Number of vector memory instructions executed, including global, buffer, and texture operations. High VMEM counts relative to VALU may indicate memory-bound workloads.
+    rst: Number of vector memory instructions executed, including global, buffer, and texture operations. High VMEM counts relative to VALU may indicate memory-bound workloads.
     unit: Count per Normalization Unit
   Total Instructions:
-    plain: Total issued instructions, normalized by the chosen unit.
-    rst: Total issued instructions, normalized by the chosen unit.
+    plain: Total number of instructions executed across all wavefronts. This provides an overall measure of computational work. Compare with specific instruction types to understand the workload characteristics.
+    rst: Total number of instructions executed across all wavefronts. This provides an overall measure of computational work. Compare with specific instruction types to understand the workload characteristics.
     unit: Count per Normalization Unit
 WGP LDS Instruction Mix:
   LDS Direct Load Instructions:
-    plain: Issued LDS direct-load instructions reported by the counter, normalized by the chosen unit.
-    rst: Issued LDS direct-load instructions reported by the counter, normalized by the chosen unit.
+    plain: Number of direct LDS load instructions. Direct loads fetch data from LDS without address indirection. These are typically faster than indexed LDS operations.
+    rst: Number of direct LDS load instructions. Direct loads fetch data from LDS without address indirection. These are typically faster than indexed LDS operations.
     unit: Count per Normalization Unit
   LDS Parameter Load Instructions:
-    plain: Issued LDS parameter-load instructions reported by the counter, normalized by the chosen unit.
-    rst: Issued LDS parameter-load instructions reported by the counter, normalized by the chosen unit.
-    unit: Count per Normalization Unit
-  WAVE32 LDS Parameter Load Instructions:
-    plain: Not available
-    rst: Not available
+    plain: Number of LDS parameter load instructions. These load shader input parameters that have been staged in LDS for efficient access by the wavefront.
+    rst: Number of LDS parameter load instructions. These load shader input parameters that have been staged in LDS for efficient access by the wavefront.
     unit: Count per Normalization Unit
 WGP VALU Instruction Mix:
   SQ_INSTS_VALU:
@@ -356,60 +315,34 @@ WGP Utilization:
     plain: Percentage of WGP clock cycles at least one wavefront is active.
     rst: Percentage of WGP clock cycles at least one wavefront is active.
     unit: Percent
-WGP Instruction Issue Stalls:
-  Wait for Barrier:
-    plain: Not available
-    rst: Not available
-    unit: Percent
-  Wait for Counter:
-    plain: Not available
-    rst: Not available
-    unit: Percent
-  Wait for Instruction Fetch:
-    plain: Not available
-    rst: Not available
-    unit: Percent
-  Wait for Any:
-    plain: Not available
-    rst: Not available
-    unit: Percent
 WGP Wavefront Life:
   Wave Life:
-    plain: Average wavefront lifetime in cycles.
-    rst: Average wavefront lifetime in cycles.
+    plain: Average number of cycles from wavefront creation to completion. Longer wave life indicates more execution time per wavefront, which may be due to complex kernels, memory latency, or synchronization waits.
+    rst: Average number of cycles from wavefront creation to completion. Longer wave life indicates more execution time per wavefront, which may be due to complex kernels, memory latency, or synchronization waits.
     unit: Cycles
 GL0 Cache Performance:
   Hit Rate:
-    plain: Percentage of TCP requests that do not miss in the vector GL0 cache.
-    rst: Percentage of TCP requests that do not miss in the vector GL0 cache.
+    plain: Percentage of GL0 cache requests serviced from cache without accessing GL1. Higher hit rates indicate better data locality and lower memory access latency. Low hit rates may indicate working sets exceeding GL0 capacity or poor access patterns.
+    rst: Percentage of GL0 cache requests serviced from cache without accessing GL1. Higher hit rates indicate better data locality and lower memory access latency. Low hit rates may indicate working sets exceeding GL0 capacity or poor access patterns.
     unit: Percent
 GL0 Request Statistics:
   Miss Requests:
-    plain: Vector GL0 cache requests reported as misses, normalized by the chosen unit.
-    rst: Vector GL0 cache requests reported as misses, normalized by the chosen unit.
+    plain: Number of GL0 cache requests that missed and required fetching from GL1. High miss counts increase memory access latency. Consider improving data locality or access patterns to reduce misses.
+    rst: Number of GL0 cache requests that missed and required fetching from GL1. High miss counts increase memory access latency. Consider improving data locality or access patterns to reduce misses.
     unit: Count per Normalization Unit
   Total Requests:
-    plain: Total vector GL0 cache requests, normalized by the chosen unit.
-    rst: Total vector GL0 cache requests, normalized by the chosen unit.
+    plain: Total number of requests to the GL0 vector cache, including reads, writes, and atomics. This represents the overall memory traffic generated by vector memory instructions from the shader cores.
+    rst: Total number of requests to the GL0 vector cache, including reads, writes, and atomics. This represents the overall memory traffic generated by vector memory instructions from the shader cores.
     unit: Count per Normalization Unit
 GL0 Stalls:
   TA Req Stall:
-    plain: TCP request-stall counter toward the texture addresser, normalized by the chosen unit.
-    rst: TCP request-stall counter toward the texture addresser, normalized by the chosen unit.
+    plain: Cycles the Texture Addresser was stalled waiting for the GL0 cache to accept requests. High stall counts indicate GL0 cache backpressure limiting memory request throughput.
+    rst: Cycles the Texture Addresser was stalled waiting for the GL0 cache to accept requests. High stall counts indicate GL0 cache backpressure limiting memory request throughput.
     unit: Cycles per Normalization Unit
-GL1A Processing:
-  Hit Rate:
-    plain: Not available
-    rst: Not available
-    unit: Percent
 GL1 Cache Request Statistics:
-  Miss Requests:
-    plain: Not available
-    rst: Not available
-    unit: Count per Normalization Unit
   Total Requests:
-    plain: Total GL1 requests, normalized by the chosen unit.
-    rst: Total GL1 requests, normalized by the chosen unit.
+    plain: Total number of requests received by GL1 from all GL0 caches (TCP instances) within the shader engine. This represents aggregated memory traffic from multiple Workgroup Processors.
+    rst: Total number of requests received by GL1 from all GL0 caches (TCP instances) within the shader engine. This represents aggregated memory traffic from multiple Workgroup Processors.
     unit: Count per Normalization Unit
 GL2 Cache Request Statistics:
   Total Requests:
@@ -417,16 +350,16 @@ GL2 Cache Request Statistics:
     rst: L2 requests, normalized by the chosen unit.
     unit: Count per Normalization Unit
   Read Requests:
-    plain: L2 read requests, normalized by the chosen unit.
-    rst: L2 read requests, normalized by the chosen unit.
+    plain: Number of read requests to the GL2 cache. High read counts indicate memory-intensive load operations. Compare with hit rate to assess GL2 cache effectiveness for reads.
+    rst: Number of read requests to the GL2 cache. High read counts indicate memory-intensive load operations. Compare with hit rate to assess GL2 cache effectiveness for reads.
     unit: Count per Normalization Unit
   Write Requests:
-    plain: L2 write requests, normalized by the chosen unit.
-    rst: L2 write requests, normalized by the chosen unit.
+    plain: Number of write requests to the GL2 cache. Write traffic includes stores and cache writebacks from GL1. High write counts indicate write-intensive workloads.
+    rst: Number of write requests to the GL2 cache. Write traffic includes stores and cache writebacks from GL1. High write counts indicate write-intensive workloads.
     unit: Count per Normalization Unit
   Atomic Requests:
-    plain: L2 atomic requests, normalized by the chosen unit.
-    rst: L2 atomic requests, normalized by the chosen unit.
+    plain: Number of atomic memory operations processed by the GL2 cache. Atomics provide thread-safe memory access but may serialize at contended addresses. High counts may impact performance.
+    rst: Number of atomic memory operations processed by the GL2 cache. Atomics provide thread-safe memory access but may serialize at contended addresses. High counts may impact performance.
     unit: Count per Normalization Unit
   EA Read Requests (Memory):
     plain: L2 read requests over EA destined for memory. Infinity Cache can serve these requests before they reach VRAM.
@@ -442,15 +375,15 @@ GL2 Cache Performance:
     rst: Percentage of L2 lookups that hit.
     unit: Percent
   GL2 Cache Hits:
-    plain: L2 lookups that hit, normalized by the chosen unit.
-    rst: L2 lookups that hit, normalized by the chosen unit.
+    plain: Number of GL2 cache requests that were serviced from cache. High hit counts relative to total requests indicate effective caching. Low hit counts suggest memory-bound workloads or poor data locality.
+    rst: Number of GL2 cache requests that were serviced from cache. High hit counts relative to total requests indicate effective caching. Low hit counts suggest memory-bound workloads or poor data locality.
     unit: Count per Normalization Unit
   GL2 Cache Misses:
-    plain: L2 lookups that miss, normalized by the chosen unit.
-    rst: L2 lookups that miss, normalized by the chosen unit.
+    plain: Number of GL2 cache requests that missed and required fetching through GCEA (Graphics Core Efficiency Arbiter). High miss counts indicate heavy memory traffic. Consider improving data locality or reducing working set size.
+    rst: Number of GL2 cache requests that missed and required fetching through GCEA (Graphics Core Efficiency Arbiter). High miss counts indicate heavy memory traffic. Consider improving data locality or reducing working set size.
     unit: Count per Normalization Unit
 GRBM Metrics:
   GPU Busy:
-    plain: Percentage of GRBM counted cycles with the GPU active.
-    rst: Percentage of GRBM counted cycles with the GPU active.
+    plain: Percentage of time the GPU was actively processing work. This is the primary utilization metric showing overall GPU activity. Low GPU busy indicates underutilization, possibly due to insufficient workload or host-side bottlenecks.
+    rst: Percentage of time the GPU was actively processing work. This is the primary utilization metric showing overall GPU activity. Low GPU busy indicates underutilization, possibly due to insufficient workload or host-side bottlenecks.
     unit: Percent

@@ -23,6 +23,7 @@ inline constexpr int kKeeperStartupFd = 4;
 inline constexpr int kKeeperFirstUnreservedFd = kKeeperStartupFd + 1;
 
 inline constexpr uint64_t kKeeperTokenMagic = 0x314d41525553544a;
+inline constexpr char kAllocationFlagsXattr[] = "user.rocjitsu.kfd_export_flags";
 /// @brief Abstract socket address payload identifying a shared-RAM token across processes.
 struct KeeperTokenIdentity {
   uint64_t magic = kKeeperTokenMagic;
@@ -52,12 +53,22 @@ enum class KeeperOperation : uint32_t {
   TokenBacking,
   BatchFile,
   FlushFiles,
-  Identify
+  Identify,
+  SetAllocationFlags,
+  GetAllocationFlags,
+  WrapFile,
+  OpenFile,
 };
 
 // Keep inline metadata in one small seqpacket. Map larger files instead.
 inline constexpr size_t kKeeperInlineFileSize = 4096;
 inline constexpr size_t kKeeperMaxBatchFiles = 8;
+
+struct KeeperAllocationFlagsReply {
+  int32_t error;
+  uint32_t flags;
+  uint32_t present;
+};
 
 /// @brief Fixed-width header for a single sequenced-packet request.
 struct KeeperRequest {
@@ -89,7 +100,7 @@ static_assert(sizeof(KeeperFileResults) == 36);
 
 // The original helper sent only its PID. A distinct ready packet rejects a
 // mismatched private protocol before either side waits for an allocation reply.
-inline constexpr uint32_t kKeeperProtocolVersion = 3;
+inline constexpr uint32_t kKeeperProtocolVersion = 5;
 using KeeperCookie = std::array<uint64_t, 2>;
 /// @brief Private startup result and identity for subsequent owner connections.
 struct KeeperStartupReply {
