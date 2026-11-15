@@ -28,7 +28,7 @@ namespace dda::common {
 // per warp at a time. The self copy uses the whole grid; per-peer slots share one scratch bank.
 
 constexpr size_t ddaLL128A2ASlotWords(size_t bankSize, int nRanks) {
-  return ddaLL128SlotWords(bankSize, nRanks, 1);
+  return ddaLLSlotPkts(bankSize, sizeof(uint64_t) * (size_t)nRanks, (size_t)kDdaLL128WireWordsPerSlice);
 }
 
 template <typename T>
@@ -40,7 +40,7 @@ __launch_bounds__(1024)
                                          size_t perChunkBytes, // per-peer payload; multiple of 16
                                          int selfRank, int nRanks, uint32_t* __restrict__ epochDev, int epochLen,
                                          size_t slicesTotal, // slices per peer chunk
-                                         size_t bankSize, DdaKernelParams params) {
+                                         size_t bankSize) {
   const DdaPeerColumns peerCols{nRanks - 1};
   const auto peerOf = [=](int x) { return (selfRank + x + 1) % nRanks; };
   const int tid = threadIdx.x;
@@ -79,7 +79,6 @@ __launch_bounds__(1024)
                  reinterpret_cast<int8_t*>(recvbuff) + (size_t)selfRank * perChunkBytes, perChunkBytes,
                  (size_t)flatBlockId * (size_t)nthreads + (size_t)tid, (size_t)total * (size_t)nthreads);
 
-  bool aborted = false;
   for (const int x : peerCols) {
     const int peer = peerOf(x);
     const uint64_t* gatherSlot =
@@ -92,19 +91,12 @@ __launch_bounds__(1024)
       uint64_t vr[kDdaLL128WordsPerThread];
       const uint64_t* wire = gatherSlot + s * (size_t)kDdaLL128WireWordsPerSlice + 2 * lane;
 #if RCCL_HAVE_COOPERATIVE_ATOMIC_BUILTINS
-      const bool landed = ddaLL128PollWireBatched(wire, vr, flag, lane, params);
+      ddaLL128PollWireBatched(wire, vr, flag, lane);
 #else
       // Plain 16B loads can see a line's flag before its payload; only this poll reads it again.
-      const bool landed = ddaLL128PollWire(wire, vr, flag, lane, params);
+      ddaLL128PollWire(wire, vr, flag, lane);
 #endif
-      if (!landed) {
-        aborted = true; // the epoch update below still runs
-        break;
-      }
       ddaLL128StoreRegs<int8_t>(dstBytes + dataByte, vr, eltInSlice, lane, flagLane);
-    }
-    if (aborted) {
-      break;
     }
   }
 #if defined(__gfx1250__) || defined(__gfx1250_strict__)

@@ -97,11 +97,10 @@ static ncclResult_t ddaAllToAllFabricLL128Launch(const void* sendbuff, void* rec
        perChunkBytes, slices, gb.first.x, gb.first.y, gb.second.x);
   int8_t** peers = reinterpret_cast<int8_t**>(comm->ddaPeerPtrsDev);
   const hipEvent_t stopEvent = rcclTakeAddonStopEvent(comm);
-  const dda::common::DdaKernelParams params{comm->abortFlagDev};
   hipExtLaunchKernelGGL((dda::common::ddaAllToAllFabricLL128<int8_t>), gb.first, gb.second, 0, stream,
                         /*startEvent=*/nullptr, stopEvent, /*flags=*/0, peers, static_cast<int8_t*>(recvbuff),
                         static_cast<const int8_t*>(sendbuff), perChunkBytes, comm->rank, comm->nRanks,
-                        comm->ddaLLEpochDev, comm->ddaLLEpochLen, slices, bankSize, params);
+                        comm->ddaLLEpochDev, comm->ddaLLEpochLen, slices, bankSize);
   CUDACHECK(cudaGetLastError());
   return ncclSuccess;
 }

@@ -53,8 +53,7 @@ ncclResult_t ncclIpcMemHandler::getPeerDeviceMemPtr(int, void** outPeerPtr) cons
 }
 
 namespace dda::common {
-std::pair<std::unique_ptr<IpcGpuBarrierResources>, IpcGpuBarrier> IpcGpuBarrier::mallocAndInit(int, int, int, void*,
-                                                                                              DdaKernelParams) {
+std::pair<std::unique_ptr<IpcGpuBarrierResources>, IpcGpuBarrier> IpcGpuBarrier::mallocAndInit(int, int, int, void*) {
   if (g_ipcBarrierFails) return {nullptr, IpcGpuBarrier{}};
   return {std::make_unique<IpcGpuBarrierResources>(), IpcGpuBarrier{}};
 }

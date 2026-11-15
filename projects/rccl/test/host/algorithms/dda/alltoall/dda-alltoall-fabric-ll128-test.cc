@@ -210,7 +210,7 @@ TEST_F(DdaAlltoallFabricLL128Microtest, Launch_PassesBuffersSlicesBankAndAbortFl
   EXPECT_EQ(comm().addonStopEvent, nullptr);
   EXPECT_EQ(launch.sharedMemBytes, 0u);
   EXPECT_EQ(launch.flags, 0u);
-  ASSERT_EQ(launch.args.size(), 11u);
+  ASSERT_EQ(launch.args.size(), 10u);
   EXPECT_EQ(launch.Arg<int8_t**>(0), comm().ddaPeerPtrsDev);
   EXPECT_EQ(launch.Arg<int8_t*>(1), kRecvbuff);
   EXPECT_EQ(launch.Arg<const int8_t*>(2), kSendbuff);
@@ -220,7 +220,6 @@ TEST_F(DdaAlltoallFabricLL128Microtest, Launch_PassesBuffersSlicesBankAndAbortFl
   EXPECT_EQ(launch.Arg<int>(7), comm().ddaLLEpochLen);
   EXPECT_EQ(launch.Arg<size_t>(8), 1u);
   EXPECT_EQ(launch.Arg<size_t>(9), dda::common::ddaBankSize(comm().ddaScratchBytes));
-  EXPECT_EQ(launch.Arg<dda::common::DdaKernelParams>(10).flag, comm().abortFlagDev);
 }
 
 // One warp per slice: blocks per column = ceil(slices / 8), within the column's share of the CU budget.

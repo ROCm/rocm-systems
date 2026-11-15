@@ -13,7 +13,6 @@
 #include <array>
 #include <memory>
 
-#include "algorithms/dda/device/dda_kernel_params.h"
 #include "algorithms/dda/device/device_buffer.h"
 #include "algorithms/dda/ipc/ipc_mem_handler.h"
 
@@ -34,21 +33,13 @@ __device__ __forceinline__ uint32_t cas(uint32_t* addr, uint32_t compare, uint32
 }
 
 template <std::memory_order Sem>
-__device__ __forceinline__ bool putFlag(uint32_t* addr, DdaKernelParams params) {
-  int spins = 0;
-  while (cas<Sem>(addr, 0, 1) != 0) {
-    if (params.abortSpinTick(spins)) return false;
-  }
-  return true;
+__device__ __forceinline__ void putFlag(uint32_t* addr) {
+  while (cas<Sem>(addr, 0, 1) != 0);
 }
 
 template <std::memory_order Sem>
-__device__ __forceinline__ bool waitFlag(uint32_t* addr, DdaKernelParams params) {
-  int spins = 0;
-  while (cas<Sem>(addr, 1, 0) != 1) {
-    if (params.abortSpinTick(spins)) return false;
-  }
-  return true;
+__device__ __forceinline__ void waitFlag(uint32_t* addr) {
+  while (cas<Sem>(addr, 1, 0) != 1);
 }
 
 constexpr int NRANKS = 8;
@@ -64,20 +55,20 @@ public:
 
   __host__ DeviceMailbox(int nRanks, int nBlocks, void* flagsBuf);
 
-  __device__ inline bool setFlagNoMemFence(int senderRank, int senderBlock, DdaKernelParams params) {
-    return putFlag<std::memory_order_relaxed>(flags_ + getFlagIdx(senderRank, senderBlock), params);
+  __device__ inline void setFlagNoMemFence(int senderRank, int senderBlock) {
+    putFlag<std::memory_order_relaxed>(flags_ + getFlagIdx(senderRank, senderBlock));
   }
 
-  __device__ inline bool waitFlagNoMemFence(int senderRank, int senderBlock, DdaKernelParams params) {
-    return waitFlag<std::memory_order_relaxed>(flags_ + getFlagIdx(senderRank, senderBlock), params);
+  __device__ inline void waitFlagNoMemFence(int senderRank, int senderBlock) {
+    waitFlag<std::memory_order_relaxed>(flags_ + getFlagIdx(senderRank, senderBlock));
   }
 
-  __device__ inline bool setFlagWithMemFence(int senderRank, int senderBlock, DdaKernelParams params) {
-    return putFlag<std::memory_order_release>(flags_ + getFlagIdx(senderRank, senderBlock), params);
+  __device__ inline void setFlagWithMemFence(int senderRank, int senderBlock) {
+    putFlag<std::memory_order_release>(flags_ + getFlagIdx(senderRank, senderBlock));
   }
 
-  __device__ inline bool waitFlagWithMemFence(int senderRank, int senderBlock, DdaKernelParams params) {
-    return waitFlag<std::memory_order_acquire>(flags_ + getFlagIdx(senderRank, senderBlock), params);
+  __device__ inline void waitFlagWithMemFence(int senderRank, int senderBlock) {
+    waitFlag<std::memory_order_acquire>(flags_ + getFlagIdx(senderRank, senderBlock));
   }
 
 private:
@@ -102,7 +93,7 @@ public:
   __host__ IpcGpuBarrier() = default;
 
   static __host__ std::pair<std::unique_ptr<IpcGpuBarrierResources>, IpcGpuBarrier> mallocAndInit(
-    int nRanks, int nBlocks, int selfRank, void* bootstrap, DdaKernelParams params);
+    int nRanks, int nBlocks, int selfRank, void* bootstrap);
 
   template <bool hasPreviousMemAccess, bool hasSubsequentMemAccess>
   __device__ __forceinline__ void syncOnSameBlockIdx() {
@@ -122,24 +113,19 @@ public:
     if constexpr (hasPreviousMemAccess) {
       __syncthreads();
     }
-    if (threadIdx.x < NRANKS && !aborted_) {
+    if (threadIdx.x < NRANKS) {
       auto peerRank = threadIdx.x;
-      bool signaled = false;
       if constexpr (fenceType == MemFenceType::ACQUIRE_ONLY) {
-        signaled = allMailboxes_[peerRank].setFlagNoMemFence(selfRank_, blockIdx.x, params_);
+        allMailboxes_[peerRank].setFlagNoMemFence(selfRank_, blockIdx.x);
       } else {
-        signaled = allMailboxes_[peerRank].setFlagWithMemFence(selfRank_, blockIdx.x, params_);
+        allMailboxes_[peerRank].setFlagWithMemFence(selfRank_, blockIdx.x);
       }
 
-      bool arrived = false;
-      if (signaled) {
-        if constexpr (fenceType == MemFenceType::RELEASE_ONLY) {
-          arrived = allMailboxes_[selfRank_].waitFlagNoMemFence(peerRank, blockIdx.x, params_);
-        } else {
-          arrived = allMailboxes_[selfRank_].waitFlagWithMemFence(peerRank, blockIdx.x, params_);
-        }
+      if constexpr (fenceType == MemFenceType::RELEASE_ONLY) {
+        allMailboxes_[selfRank_].waitFlagNoMemFence(peerRank, blockIdx.x);
+      } else {
+        allMailboxes_[selfRank_].waitFlagWithMemFence(peerRank, blockIdx.x);
       }
-      aborted_ = __any(!arrived);
     }
     if constexpr (hasSubsequentMemAccess) {
       __syncthreads();
@@ -150,15 +136,8 @@ private:
   int nBlocks_{-1};
   int selfRank_{-1};
   std::array<DeviceMailbox, NRANKS> allMailboxes_;
-  DdaKernelParams params_{};
-  // Sticky for the rest of the kernel and uniform across the signaling lanes,
-  // which all sit in wave 0: once any of them gives up a barrier on abort, the
-  // block signals no later barrier, so a late peer cannot pair its earlier flag
-  // with this block's next one and read data this rank never finished producing.
-  bool aborted_{false};
 
-  __host__ IpcGpuBarrier(int nRanks, int nBlocks, int selfRank, const std::array<DeviceMailbox, NRANKS>& allMailboxes,
-                         DdaKernelParams params);
+  __host__ IpcGpuBarrier(int nRanks, int nBlocks, int selfRank, const std::array<DeviceMailbox, NRANKS>& allMailboxes);
 };
 
 } // namespace dda::common

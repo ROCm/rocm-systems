@@ -461,7 +461,6 @@ TEST_F(FabricInitCommInitMicrotest, CommInit_AllSucceed_ZeroesScratchAndEpochCel
 }
 
 TEST_F(FabricInitCommInitMicrotest, CommInit_AllSucceed_BarrierUsesCommGeometry) {
-  comm_->abortFlagDev = reinterpret_cast<uint32_t*>(0xAB047);
   ASSERT_EQ(ncclDdaFabricCommInit(comm_.get()), ncclSuccess);
   const auto* state = comm_->ddaFabricBarrierState;
 
@@ -470,7 +469,6 @@ TEST_F(FabricInitCommInitMicrotest, CommInit_AllSucceed_BarrierUsesCommGeometry)
   EXPECT_EQ(barrier.selfRank, kRank);
   EXPECT_EQ(barrier.nRanks, kNRanks);
   EXPECT_EQ(barrier.peerFlags, state->resources->peerFlagsDev->get());
-  EXPECT_EQ(barrier.params.flag, comm_->abortFlagDev);
   EXPECT_TRUE(barrier.useEpoch);
 }
 

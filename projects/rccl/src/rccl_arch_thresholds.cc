@@ -31,7 +31,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
     0,                   // [0] Broadcast      -- not used
     0,                   // [1] Reduce          -- not used
     64ULL*1024,          // [2] AllGather         // [2] AllGather
-    4ULL*1024*1024,      // [3] ReduceScatter   -- LL beats LL128 to 4M at 4 ranks; nRanks x 1M below 4 ranks
+    16ULL*1024*1024,     // [3] ReduceScatter
     32ULL*1024*1024,     // [4] AllReduce
     0,                   // [5] SendRecv        -- not used
     0,                   // [6] Send            -- not used
@@ -44,7 +44,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
     0,                   // [0] Broadcast      -- not used
     0,                   // [1] Reduce          -- not used
     128ULL*1024*1024,    // [2] AllGather       -- beats Ring at 128M on 8-64 ranks (AICOMRCCL-2876)
-    224ULL*1024*1024,    // [3] ReduceScatter   -- LL128 through 224M total below 8 ranks
+    2ULL*1024*1024,      // [3] ReduceScatter
     256ULL*1024*1024,    // [4] AllReduce       -- two-shot beats Ring to 256M (AICOMRCCL-2875); its scratch
                          //                        slot reaches 256M from 32 ranks, ~128M at 2-8, 240M at 16
     0,                   // [5] SendRecv        -- not used
@@ -200,7 +200,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
     0,                   // [0] Broadcast      -- not used
     0,                   // [1] Reduce          -- not used
     16ULL*1024,          // [2] AllGather       -- LL beats LL128 to 128K/256K/512K/1M at 8/16/32/64
-    1ULL*1024*1024,      // [3] ReduceScatter   -- nRanks x 1M from 8 ranks; LL beats LL128 to 8M/16M at 8/16
+    256ULL*1024,         // [3] ReduceScatter   -- LL past 2M/4M/8M/16M at 8/16/32/64 trails LL128 up to 2x
     1ULL*1024*1024,      // [4] AllReduce       -- LL two-shot beats LL128 1.4-1.9x to 8M/16M/32M/64M
     0,                   // [5] SendRecv        -- not used
     0,                   // [6] Send            -- not used
@@ -211,7 +211,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
     0,                   // [0] Broadcast      -- not used
     0,                   // [1] Reduce          -- not used
     16ULL*1024*1024,     // [2] AllGather       -- 128M at 8 ranks, 256M (clipped) from 16
-    15ULL*512*1024,      // [3] ReduceScatter   -- nRanks x 7.5M from 8 ranks: one 1920B slice per warp at 256 blocks
+    512ULL*1024,         // [3] ReduceScatter   -- the LL128 slot reaches nRanks x 512K
     0,                   // [4] AllReduce       -- ddaLL128Max total
     0,                   // [5] SendRecv        -- not used
     0,                   // [6] Send            -- not used

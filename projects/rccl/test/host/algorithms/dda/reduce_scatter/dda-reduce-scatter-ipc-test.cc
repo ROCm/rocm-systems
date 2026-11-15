@@ -5,7 +5,7 @@
  ************************************************************************/
 
 // Host-only microtests for src/algorithms/dda/reduce_scatter/dda_reduce_scatter_ipc.cu: eligibility, the scratch
-// check, in-kernel versus host staging, the datatype dispatch, the 24-block grid, and the launch.
+// check, the host staging, the datatype dispatch, the 24-block grid, and the launch.
 
 #include <gtest/gtest.h>
 
@@ -31,12 +31,9 @@ void* const kRecvbuff = reinterpret_cast<void*>(0x2000);
 const hipStream_t kStream = reinterpret_cast<hipStream_t>(0x88);
 const hipEvent_t kStopEvent = reinterpret_cast<hipEvent_t>(0x77);
 
-// Shards up to 1 MiB are copied in the kernel; larger ones are staged by the host first.
-constexpr size_t kInKernelMaxFloats = (1u << 20) / sizeof(float);
-
-template <typename T, bool kCopyInKernel = true>
+template <typename T>
 const void* Kernel() {
-  return KernelPtr(&dda::common::ddaReduceScatterIpc<T, 8, false, kCopyInKernel>);
+  return KernelPtr(&dda::common::ddaReduceScatterIpc<T, 8, false>);
 }
 
 class DdaReduceScatterIpcMicrotest : public ::testing::Test {
@@ -136,12 +133,6 @@ TEST_F(DdaReduceScatterIpcMicrotest, Eligible_PerRankBytesMustBeMultipleOf16) {
   EXPECT_TRUE(Eligible(16, ncclBfloat16));
 }
 
-TEST_F(DdaReduceScatterIpcMicrotest, Eligible_BuffersMustBe16ByteAligned) {
-  void* const misaligned = reinterpret_cast<void*>(0x1008);
-  EXPECT_FALSE(ncclReduceScatterDdaIpcEligible(mock_.get(), misaligned, kRecvbuff, 4, ncclFloat32, ncclSum));
-  EXPECT_FALSE(ncclReduceScatterDdaIpcEligible(mock_.get(), kSendbuff, misaligned, 4, ncclFloat32, ncclSum));
-}
-
 TEST_F(DdaReduceScatterIpcMicrotest, Eligible_WholeSendBufferMustFitScratch) {
   comm().ddaScratchBytes = 8 * 64;
   EXPECT_TRUE(Eligible(16));
@@ -188,25 +179,18 @@ TEST_F(DdaReduceScatterIpcMicrotest, Launch_EachDatatypeLaunchesItsOwnKernel) {
   ExpectLaunchOf<bf16>(g_ddaLaunches[2], 16);
 }
 
-TEST_F(DdaReduceScatterIpcMicrotest, Launch_ShardUpTo1MiBIsCopiedInTheKernel) {
-  ASSERT_EQ(Run(kInKernelMaxFloats), ncclSuccess);
-  EXPECT_TRUE(copies_.empty());
-  ASSERT_EQ(g_ddaLaunches.size(), 1u);
-  EXPECT_EQ(g_ddaLaunches[0].kernel, (Kernel<float, true>()));
-}
-
-TEST_F(DdaReduceScatterIpcMicrotest, Launch_LargerShardIsStagedIntoScratchBeforeTheKernel) {
-  ASSERT_EQ(Run(kInKernelMaxFloats + 4), ncclSuccess);
+TEST_F(DdaReduceScatterIpcMicrotest, Launch_SendBufferIsStagedIntoScratchBeforeTheKernel) {
+  ASSERT_EQ(Run(16), ncclSuccess);
   ASSERT_EQ(copies_.size(), 1u);
   EXPECT_EQ(copies_[0].dst, comm().ddaScratch);
   EXPECT_EQ(copies_[0].src, kSendbuff);
-  EXPECT_EQ(copies_[0].bytes, 8u * (kInKernelMaxFloats + 4) * sizeof(float));
+  EXPECT_EQ(copies_[0].bytes, 8u * 16 * sizeof(float));
   EXPECT_EQ(copies_[0].kind, hipMemcpyDeviceToDevice);
   EXPECT_EQ(copies_[0].stream, kStream);
   EXPECT_EQ(copies_[0].launchesBefore, 0u);
   ASSERT_EQ(g_ddaLaunches.size(), 1u);
   const DdaLaunch& launch = g_ddaLaunches[0];
-  EXPECT_EQ(launch.kernel, (Kernel<float, false>()));
+  EXPECT_EQ(launch.kernel, Kernel<float>());
   EXPECT_EQ(launch.stream, kStream);
   EXPECT_EQ(launch.startEvent, nullptr);
   EXPECT_EQ(launch.stopEvent, kStopEvent);
@@ -215,12 +199,12 @@ TEST_F(DdaReduceScatterIpcMicrotest, Launch_LargerShardIsStagedIntoScratchBefore
   EXPECT_EQ(launch.flags, 0u);
 }
 
-// The stop event is taken before the staging copy, so a failed copy still consumes it.
+// The stop event is taken after the staging copy, so a failed copy leaves it for the next launch.
 TEST_F(DdaReduceScatterIpcMicrotest, Launch_StagingCopyErrorIsReportedWithoutLaunching) {
   g_hipMemcpyAsync = [](void*, const void*, size_t, hipMemcpyKind, hipStream_t) { return hipErrorInvalidValue; };
-  EXPECT_EQ(Run(kInKernelMaxFloats + 4), ncclUnhandledCudaError);
+  EXPECT_EQ(Run(16), ncclUnhandledCudaError);
   EXPECT_TRUE(g_ddaLaunches.empty());
-  EXPECT_EQ(comm().addonStopEvent, nullptr);
+  EXPECT_EQ(comm().addonStopEvent, kStopEvent);
 }
 
 // Sized on this rank's shard in elements; the 24-block cap is spelled out rather than read from DDA_IPC_MAXBLOCKS.
