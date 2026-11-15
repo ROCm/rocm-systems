@@ -272,6 +272,42 @@ GIN_SDMA_AG_HD inline uint64_t gatherRootExpectedSignals(int nRanks, bool rootSk
   return (uint64_t)nRanks - (rootSkipsSelfPut ? 1 : 0);
 }
 
+// Gather -D 3 LL tier: each rank sends its chunk as 8-byte LL elements into the
+// root's scratch, which holds nRanks chunks per epoch. kGatherLLMaxBytes is the
+// largest per-rank chunk the scratch is ever sized for.
+static constexpr const char* kGatherLLMaxBytesEnv = "NCCL_GIN_ANVIL_SDMA_GATHER_LL_MAX_BYTES";
+static constexpr size_t kGatherLLMaxBytes = 64u << 10;
+static constexpr size_t kGatherLLDefaultMaxBytes = 2u << 10;
+
+// LL scratch slots (one 8-byte element each) for nRanks chunks of llMaxBytes.
+GIN_SDMA_AG_HD inline uint32_t gatherLLSlots(int nRanks, size_t llMaxBytes) {
+  if (nRanks <= 0) return 0;
+  return (uint32_t)((size_t)nRanks * (llMaxBytes / 8));
+}
+
+// True when a chunk takes the LL tier: LL is provisioned, the chunk is a whole
+// number of 8-byte elements within the cap, and nRanks chunks fit the scratch.
+GIN_SDMA_AG_HD inline bool gatherUsesLLTier(size_t chunkBytes_, size_t llMaxBytes, uint32_t llSlots,
+                                           int nRanks) {
+  return llSlots > 0 && chunkBytes_ > 0 && chunkBytes_ <= llMaxBytes && (chunkBytes_ % 8) == 0 &&
+         (uint64_t)nRanks * (chunkBytes_ / 8) <= llSlots;
+}
+
+// Gather -D 3 LL-tier cap in bytes per rank, per architecture: the largest chunk for
+// which one LL CTA beats the LSA tier. Architectures not in the table use
+// kGatherLLDefaultMaxBytes. On 8x MI300X (gfx942) and 8x MI350X (gfx950) LL wins up
+// to 2 KiB per rank.
+static constexpr ArchSdmaThreshold kGatherLLMaxBytesByArch[] = {
+  {"gfx942", 2u << 10},
+  {"gfx950", 2u << 10},
+};
+
+inline size_t gatherArchLLMaxBytes(const char* gcnArchName) {
+  return archSdmaThreshold(gcnArchName, kGatherLLMaxBytesByArch,
+                           sizeof(kGatherLLMaxBytesByArch) / sizeof(kGatherLLMaxBytesByArch[0]),
+                           kGatherLLDefaultMaxBytes);
+}
+
 // AllGather algorithm / bus bandwidth (GB/s) given the per-rank element count,
 // element size, elapsed seconds and rank count. algBw counts every rank's
 // contribution; busBw applies the AllGather (nranks-1)/nranks correction.
@@ -311,6 +347,12 @@ inline size_t resolveSdmaThresholdFromEnv(const char* perCollName = kAllGatherSd
                                           size_t compiledDefault = kAllGatherSdmaThresholdDefault) {
   return gin_sdma::resolveThreshold(gin_sdma::parseSize(getenv(perCollName)),
                                     gin_sdma::parseSize(getenv(kSdmaThresholdEnv)), compiledDefault);
+}
+
+// Gather LL cap in bytes per rank from kGatherLLMaxBytesEnv (K/M/G suffixes; 0 disables
+// the tier), else archDefault, clamped to kGatherLLMaxBytes.
+inline size_t resolveGatherLLMaxBytesFromEnv(size_t archDefault = kGatherLLDefaultMaxBytes) {
+  return gin_sdma::resolveLLCap(gin_sdma::parseSize(getenv(kGatherLLMaxBytesEnv)), archDefault, kGatherLLMaxBytes);
 }
 
 #endif  // host env helpers

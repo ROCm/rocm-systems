@@ -430,6 +430,43 @@ TEST(GatherPolicyInPlace, RootWaitsForOneSignalPerPut) {
   EXPECT_EQ(gatherRootExpectedSignals(1, true), 0u);
 }
 
+// ---- Gather -D 3 LL tier: scratch sizing and tier choice ----------------------
+
+TEST(GatherPolicyLL, SlotsHoldNRanksChunksOfTheCap) {
+  EXPECT_EQ(gatherLLSlots(8, 8u << 10), 8u * 1024u);
+  EXPECT_EQ(gatherLLSlots(8, kGatherLLMaxBytes), 8u * (kGatherLLMaxBytes / 8));
+  EXPECT_EQ(gatherLLSlots(1, 64), 8u);
+  EXPECT_EQ(gatherLLSlots(0, 8u << 10), 0u);
+  EXPECT_EQ(gatherLLSlots(-1, 8u << 10), 0u);
+  EXPECT_EQ(gatherLLSlots(8, 0), 0u);
+}
+
+TEST(GatherPolicyLL, ChunksUpToTheCapTakeTheLLTier) {
+  const size_t cap = 8u << 10;
+  const uint32_t slots = gatherLLSlots(8, cap);
+  EXPECT_TRUE(gatherUsesLLTier(8, cap, slots, 8));
+  EXPECT_TRUE(gatherUsesLLTier(cap, cap, slots, 8));
+  EXPECT_FALSE(gatherUsesLLTier(cap + 8, cap, slots, 8));
+  EXPECT_FALSE(gatherUsesLLTier(0, cap, slots, 8));
+}
+
+TEST(GatherPolicyLL, ChunksNotWholeEightByteElementsSkipTheLLTier) {
+  const size_t cap = 8u << 10;
+  const uint32_t slots = gatherLLSlots(8, cap);
+  EXPECT_FALSE(gatherUsesLLTier(4, cap, slots, 8));
+  EXPECT_FALSE(gatherUsesLLTier(1212, cap, slots, 8));
+  EXPECT_TRUE(gatherUsesLLTier(1216, cap, slots, 8));
+}
+
+TEST(GatherPolicyLL, UnprovisionedOrUndersizedScratchSkipsTheLLTier) {
+  const size_t cap = 8u << 10;
+  EXPECT_FALSE(gatherUsesLLTier(64, cap, 0, 8));
+  EXPECT_FALSE(gatherUsesLLTier(64, 0, gatherLLSlots(8, cap), 8));
+  // Scratch sized for 8 ranks cannot hold the chunks of 16.
+  EXPECT_TRUE(gatherUsesLLTier(cap / 2, cap, gatherLLSlots(8, cap), 16));
+  EXPECT_FALSE(gatherUsesLLTier(cap, cap, gatherLLSlots(8, cap), 16));
+}
+
 // ---- bandwidthGBps: algBw counts all ranks, busBw applies (n-1)/n ------------
 
 TEST(AllGatherPolicyBandwidth, AlgAndBusBandwidth) {
@@ -527,6 +564,46 @@ TEST(GatherPolicyEnv, ParseGatherCtasEnvHasNoAlias) {
   setenv(kName, "2x", 1);
   EXPECT_EQ(parseCtasEnv(kName), kAllGatherCtasUnset);
   unsetenv(kName);
+}
+
+TEST(GatherPolicyEnv, ResolveLLMaxBytes) {
+  EXPECT_STREQ(kGatherLLMaxBytesEnv, "NCCL_GIN_ANVIL_SDMA_GATHER_LL_MAX_BYTES");
+  unsetenv(kGatherLLMaxBytesEnv);
+  EXPECT_EQ(resolveGatherLLMaxBytesFromEnv(), kGatherLLDefaultMaxBytes);
+
+  setenv(kGatherLLMaxBytesEnv, "0", 1);
+  EXPECT_EQ(resolveGatherLLMaxBytesFromEnv(), 0u);
+  setenv(kGatherLLMaxBytesEnv, "4K", 1);
+  EXPECT_EQ(resolveGatherLLMaxBytesFromEnv(), 4096u);
+  // Rounded down to whole 8-byte elements, clamped to the largest scratch.
+  setenv(kGatherLLMaxBytesEnv, "1001", 1);
+  EXPECT_EQ(resolveGatherLLMaxBytesFromEnv(), 1000u);
+  setenv(kGatherLLMaxBytesEnv, "1G", 1);
+  EXPECT_EQ(resolveGatherLLMaxBytesFromEnv(), kGatherLLMaxBytes);
+  // Unparsable values fall back to the default.
+  setenv(kGatherLLMaxBytesEnv, "-4K", 1);
+  EXPECT_EQ(resolveGatherLLMaxBytesFromEnv(), kGatherLLDefaultMaxBytes);
+  unsetenv(kGatherLLMaxBytesEnv);
+}
+
+TEST(GatherPolicyEnv, ResolveLLMaxBytesUsesTheArchDefault) {
+  unsetenv(kGatherLLMaxBytesEnv);
+  EXPECT_EQ(resolveGatherLLMaxBytesFromEnv(gatherArchLLMaxBytes("gfx942:sramecc+:xnack-")), 2048u);
+  EXPECT_EQ(resolveGatherLLMaxBytesFromEnv(gatherArchLLMaxBytes("gfx9999")), kGatherLLDefaultMaxBytes);
+  EXPECT_EQ(resolveGatherLLMaxBytesFromEnv(gatherArchLLMaxBytes(nullptr)), kGatherLLDefaultMaxBytes);
+  // The env value wins over the arch default.
+  setenv(kGatherLLMaxBytesEnv, "0", 1);
+  EXPECT_EQ(resolveGatherLLMaxBytesFromEnv(gatherArchLLMaxBytes("gfx942")), 0u);
+  unsetenv(kGatherLLMaxBytesEnv);
+}
+
+TEST(GatherPolicyArchTable, EveryLLCapFitsTheScratch) {
+  for (const auto& row : kGatherLLMaxBytesByArch) {
+    EXPECT_EQ(gatherArchLLMaxBytes(row.arch), row.threshold) << row.arch;
+    EXPECT_GT(row.threshold, 0u) << row.arch;
+    EXPECT_LE(row.threshold, kGatherLLMaxBytes) << row.arch;
+    EXPECT_EQ(row.threshold % 8, 0u) << row.arch;
+  }
 }
 
 }  // namespace

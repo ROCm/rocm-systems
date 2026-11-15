@@ -11,6 +11,7 @@
 #include "gin_sdma_allgather_reqs.h"
 #if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
 #include "nccl_device.h"
+#include "nccl_device/rccl_ptr.h"
 #endif
 
 void GatherGetCollByteCount(size_t *sendcount, size_t *recvcount, size_t *paramcount, size_t *sendInplaceOffset, size_t *recvInplaceOffset, size_t count, size_t eltSize, int nranks) {
@@ -49,11 +50,41 @@ void GatherGetBw(size_t count, size_t typesize, double sec, double* algBw, doubl
   *busBw = baseBw * factor;
 }
 
-// -D 3 is GinHybridGatherKernel: LSA direct (small) + one GIN put to root (large),
-// on the same pool as GinHybridAllGatherKernel.
+// -D 3 is GinHybridGatherKernel: LL (tiny), LSA direct (small) and one GIN put to root
+// (large), on the same pool as GinHybridAllGatherKernel plus two LL resources: the LL
+// tier's scratch (one block) and one done flag per rank for each LSA-tier CTA.
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,29,0)
+// thread_local for -t N, like Broadcast's LL requirement: each host thread links its own
+// nodes into its own requirements list.
+thread_local size_t g_gatherLLMaxBytes = 0;
+thread_local ncclLLA2AHandle g_gatherLLHandle = {};
+thread_local ncclDevResourceRequirements g_gatherLLReq = {};
+thread_local ncclLLA2AHandle g_gatherFlagHandle = {};
+thread_local ncclDevResourceRequirements g_gatherFlagReq = {};
+
 testResult_t GatherGetDevCommRequirements(int deviceImpl, ncclDevCommRequirements* reqs, ncclComm_t comm) {
-  return ginSdmaAllGatherDevCommRequirements(deviceImpl, reqs, comm, "GinHybridGatherKernel");
+  testResult_t res = ginSdmaAllGatherDevCommRequirements(deviceImpl, reqs, comm, "GinHybridGatherKernel");
+  if (res != testSuccess) return res;
+  int nRanks = 0;
+  NCCLCHECK(ncclCommCount(comm, &nRanks));
+  g_gatherLLHandle = {};
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
+  g_gatherLLMaxBytes = 0;
+#else
+  g_gatherLLMaxBytes = gin_sdma_allgather::resolveGatherLLMaxBytesFromEnv(
+      gin_sdma_allgather::gatherArchLLMaxBytes(ginSdmaGcnArchName()));
+#endif
+  if (g_gatherLLMaxBytes > 0) {
+    NCCLCHECK(ncclLLA2ACreateRequirement(/*nBlocks=*/1, (int)gin_sdma_allgather::gatherLLSlots(nRanks, g_gatherLLMaxBytes),
+                                         &g_gatherLLHandle, &g_gatherLLReq));
+    g_gatherLLReq.next = reqs->resourceRequirementsList;
+    reqs->resourceRequirementsList = &g_gatherLLReq;
+  }
+  NCCLCHECK(ncclLLA2ACreateRequirement(gin_sdma_allgather::allGatherPoolCtas(deviceCtaCount), nRanks,
+                                       &g_gatherFlagHandle, &g_gatherFlagReq));
+  g_gatherFlagReq.next = reqs->resourceRequirementsList;
+  reqs->resourceRequirementsList = &g_gatherFlagReq;
+  return testSuccess;
 }
 #elif defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
 bool GatherGetDevCommRequirements(int deviceImpl, ncclDevCommRequirements* reqs) {
@@ -82,11 +113,33 @@ struct GatherSdmaColl {
   }
 };
 
+// Per-launch -D 3 options resolved on the host. A zero nSlots handle turns its feature off.
+struct GatherD3Opts {
+  ncclLLA2AHandle ll;     // LL tier scratch
+  size_t llMaxBytes;      // LL tier cap per rank
+  ncclLLA2AHandle flags;  // LSA-tier done flags; off keeps the LSA exit barrier
+  int exitBarrier;        // keep the exit barrier in both tiers
+  int streamStores;       // system-scope 16-byte stores to the root
+};
+
+// 16-byte store into the root's recv buffer.
+__device__ __forceinline__ void GatherStore16(uint4* dst, uint4 v, int streamStores) {
+#if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
+  if (streamStores) {
+    union { uint4 u; v4u v; } cv;
+    cv.u = v;
+    __builtin_amdgcn_global_store_b128((v4u_gptr)dst, cv.v, RCCL_SYSTEM_SYNCSCOPE);
+    return;
+  }
+#endif
+  *dst = v;
+}
+
 // Each rank stores its chunk into root's recv slice. `root` is a world rank;
 // ncclGetPeerPointer maps it into the LSA window. Non-root recv buffers stay untouched.
 // Gather only moves bytes, so the copy is 16 bytes per thread whatever the element
 // type; a chunk or window offset that is not 16-byte aligned falls back to a byte copy.
-__device__ void GatherLsaDirect(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset, size_t chunkBytes, int rank, int root, int tid, int nthreads) {
+__device__ void GatherLsaDirect(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset, size_t chunkBytes, int rank, int root, int tid, int nthreads, int streamStores) {
   const char* src = (const char*)ncclGetLocalPointer(sendwin, sendoffset);
   const size_t dstOff = gin_sdma_allgather::allGatherRecvSliceOffset(rank, chunkBytes);
   char* dst = (char*)ncclGetPeerPointer(recvwin, recvoffset, root) + dstOff;
@@ -114,7 +167,7 @@ __device__ void GatherLsaDirect(ncclWindow_t sendwin, size_t sendoffset, ncclWin
       }
 #pragma unroll
       for (int k = 0; k < kUnroll; k++) {
-        if (i + k * stride < n) d[i + k * stride] = v[k];
+        if (i + k * stride < n) GatherStore16(&d[i + k * stride], v[k], streamStores);
       }
     }
   } else {
@@ -122,21 +175,84 @@ __device__ void GatherLsaDirect(ncclWindow_t sendwin, size_t sendoffset, ncclWin
   }
 }
 
+// LL tier, one CTA: each non-root sends its chunk as 8-byte LL elements (data and epoch
+// tag in one 16-byte store) into the root's scratch, and the root copies them into its
+// recv buffer, so no rank writes another rank's recv buffer. Only non-roots write, so,
+// as in Broadcast's LL tier, the entry barrier keeps a writer from running two epochs
+// ahead of the root and overwriting scratch the root has not read yet.
+__device__ void GatherLL(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset,
+                         size_t chunkBytes, int root, const struct ncclDevComm& devComm, ncclLLA2AHandle llHandle) {
+  ncclTeam lsa = ncclTeamLsa(devComm);
+  const int rank = devComm.rank;
+  const int nRanks = devComm.nRanks;
+  const size_t chunkU64 = chunkBytes / 8;
+
+  ncclLLA2ASession<ncclCoopCta> ll { ncclCoopCta(), devComm, lsa, llHandle, /*block=*/0,
+                                     /*maxElts=*/(int)((size_t)nRanks * chunkU64) };
+  ncclLsaBarrierSession<ncclCoopCta> lsaBar { ncclCoopCta(), devComm, lsa, devComm.lsaBarrier, /*block=*/0 };
+  lsaBar.sync(ncclCoopCta(), cuda::memory_order_relaxed);
+
+  const uint64_t* src = (const uint64_t*)ncclGetLocalPointer(sendwin, sendoffset);
+  if (rank != root) {
+    const int rootLsa = lsa.rank + (root - rank);
+    const size_t base = (size_t)rank * chunkU64;
+    for (size_t j = threadIdx.x; j < chunkU64; j += blockDim.x) ll.send(rootLsa, (int)(base + j), src[j]);
+  } else {
+    uint64_t* dst = (uint64_t*)ncclGetLocalPointer(recvwin, recvoffset);
+    uint64_t* own = dst + (size_t)rank * chunkU64;
+    if (own != src) {
+      for (size_t j = threadIdx.x; j < chunkU64; j += blockDim.x) own[j] = src[j];
+    }
+    const size_t peerElts = (size_t)(nRanks - 1) * chunkU64;
+    for (size_t e = threadIdx.x; e < peerElts; e += blockDim.x) {
+      const size_t p = e / chunkU64;
+      const size_t slot = (p < (size_t)rank ? e : e + chunkU64);
+      dst[slot] = ll.recv<uint64_t>((int)slot);
+    }
+  }
+  ll.endEpoch(ncclCoopCta());
+}
+
 // Single-node hybrid Gather body (-D 3), the AllGather body with one destination:
 //   chunkBytes <= sdmaThreshold: direct LSA store into root (all CTAs).
 //   chunkBytes >  sdmaThreshold: one GIN put to root from the thread the AllGather
 //     peer stripe assigns to root. Only CTA (root % gridDim.x) on root waits, for
-//     one signal per put; the exit barrier keeps back-to-back launches safe.
-__device__ void ginGatherBody(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset, size_t chunkBytes, int root, size_t sdmaThreshold, const struct ncclDevComm& devComm) {
+//     one signal per put.
+// Only the root needs to know the data landed, and the next launch's entry barrier
+// cannot complete before the root has finished this one, so without opts.exitBarrier
+// neither tier ends with a barrier: LSA-tier CTAs instead send the root's same-index
+// CTA a done flag after publishing their stores.
+__device__ void ginGatherBody(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset, size_t chunkBytes, int root, size_t sdmaThreshold, const struct ncclDevComm& devComm, const GatherD3Opts& opts) {
   if (gin_sdma_allgather::chunkUsesLsaTier(chunkBytes, sdmaThreshold)) {
     ncclTeam lsa = ncclTeamLsa(devComm);
     const int tid = threadIdx.x + blockIdx.x * blockDim.x;
     const int nthreads = blockDim.x * gridDim.x;
 
     ncclLsaBarrierSession<ncclCoopCta> lsaBar { ncclCoopCta(), devComm, lsa, devComm.lsaBarrier, blockIdx.x };
+    if (opts.exitBarrier || opts.flags.nSlots == 0) {
+      lsaBar.sync(ncclCoopCta(), cuda::memory_order_relaxed);
+      GatherLsaDirect(sendwin, sendoffset, recvwin, recvoffset, chunkBytes, devComm.rank, root, tid, nthreads,
+                      opts.streamStores);
+      lsaBar.sync(ncclCoopCta(), cuda::memory_order_release);
+      return;
+    }
+    // Built before the copy so its epoch load overlaps the barrier and the copy.
+    ncclLLA2ASession<ncclCoopCta> done { ncclCoopCta(), devComm, lsa, opts.flags, blockIdx.x, devComm.nRanks };
     lsaBar.sync(ncclCoopCta(), cuda::memory_order_relaxed);
-    GatherLsaDirect(sendwin, sendoffset, recvwin, recvoffset, chunkBytes, devComm.rank, root, tid, nthreads);
-    lsaBar.sync(ncclCoopCta(), cuda::memory_order_release);
+    GatherLsaDirect(sendwin, sendoffset, recvwin, recvoffset, chunkBytes, devComm.rank, root, tid, nthreads,
+                    opts.streamStores);
+    if (devComm.rank != root) {
+      // The LSA barrier's release arrive: every thread fences its own stores before the flag.
+      __syncthreads();
+      cuda::atomic_thread_fence(cuda::memory_order_release);
+      __syncthreads();
+      if (threadIdx.x == 0) done.send(lsa.rank + (root - devComm.rank), devComm.rank, (uint64_t)1);
+    } else {
+      for (int p = threadIdx.x; p < devComm.nRanks; p += blockDim.x) {
+        if (p != root) (void)done.recv<uint64_t>(p);
+      }
+    }
+    done.endEpoch(ncclCoopCta());
     return;
   }
 
@@ -168,11 +284,36 @@ __device__ void ginGatherBody(ncclWindow_t sendwin, size_t sendoffset, ncclWindo
   }
   gin.flush(ncclCoopCta());
 
-  bar.sync(ncclCoopCta(), cuda::memory_order_release, ncclGinFenceLevel::Relaxed);
+  if (opts.exitBarrier) bar.sync(ncclCoopCta(), cuda::memory_order_release, ncclGinFenceLevel::Relaxed);
 }
 
-__global__ void GinHybridGatherKernel(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset, size_t chunkBytes, int root, size_t sdmaThreshold, struct ncclDevComm devComm) {
-  ginGatherBody(sendwin, sendoffset, recvwin, recvoffset, chunkBytes, root, sdmaThreshold, devComm);
+__global__ void GinHybridGatherKernel(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset, size_t chunkBytes, int root, size_t sdmaThreshold, struct ncclDevComm devComm, GatherD3Opts opts) {
+  if (gin_sdma_allgather::gatherUsesLLTier(chunkBytes, opts.llMaxBytes, opts.ll.nSlots, devComm.nRanks)) {
+    if (blockIdx.x == 0) GatherLL(sendwin, sendoffset, recvwin, recvoffset, chunkBytes, root, devComm, opts.ll);
+    return;
+  }
+  ginGatherBody(sendwin, sendoffset, recvwin, recvoffset, chunkBytes, root, sdmaThreshold, devComm, opts);
+}
+
+// Host-resolved -D 3 options; the env knobs are read once per process.
+static GatherD3Opts GatherResolveOpts() {
+  static const int exitBarrier = [] {
+    const char* e = getenv("NCCL_GIN_ANVIL_SDMA_GATHER_EXIT_BARRIER");
+    return (e && e[0] == '1') ? 1 : 0;
+  }();
+  static const int streamStores = [] {
+    const char* e = getenv("NCCL_GIN_ANVIL_SDMA_GATHER_STREAM");
+    return (e && e[0] == '0') ? 0 : 1;
+  }();
+  GatherD3Opts opts = {};
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,29,0)
+  opts.ll = g_gatherLLHandle;
+  opts.llMaxBytes = g_gatherLLMaxBytes;
+  opts.flags = g_gatherFlagHandle;
+#endif
+  opts.exitBarrier = exitBarrier;
+  opts.streamStores = streamStores;
+  return opts;
 }
 
 #endif
@@ -220,10 +361,16 @@ testResult_t GatherRunColl(void* sendbuff, size_t sendoffset, void* recvbuff, si
         }
 #endif
         if (count == 0) return testSuccess;
+        const ncclDevComm* devComm = (const ncclDevComm*)comm;
+        const GatherD3Opts opts = GatherResolveOpts();
         const size_t sdmaThreshold = ginSdmaResolveSdmaThreshold<GatherSdmaColl>();
         const size_t chunkBytes = gin_sdma_allgather::chunkBytes(count, (size_t)wordSize(type));
-        const int gridCtas = ginSdmaResolveLaunchCtas<GatherSdmaColl>(chunkBytes, sdmaThreshold);
-        TESTCHECK(ginSdmaLaunchDeviceKernel(GinHybridGatherKernel, sendbuff, sendoffset, recvbuff, recvoffset, chunkBytes, root, comm, stream, sdmaThreshold, gridCtas));
+        const int gridCtas =
+            gin_sdma_allgather::gatherUsesLLTier(chunkBytes, opts.llMaxBytes, opts.ll.nSlots, devComm->nRanks)
+                ? 1
+                : ginSdmaResolveLaunchCtas<GatherSdmaColl>(chunkBytes, sdmaThreshold);
+        GinHybridGatherKernel<<<gridCtas, 512, 0, stream>>>((ncclWindow_t)sendbuff, sendoffset, (ncclWindow_t)recvbuff,
+                                                           recvoffset, chunkBytes, root, sdmaThreshold, *devComm, opts);
         return testSuccess;
       }
 #endif
@@ -234,15 +381,20 @@ testResult_t GatherRunColl(void* sendbuff, size_t sendoffset, void* recvbuff, si
   return testSuccess;
 }
 
-// Tier report for -D 3: every rank stores directly into root, over LSA up to the
-// crossover and with one GIN put above it. `count` is the per-rank element count.
+// Tier report for -D 3: LL into the root's scratch for tiny chunks, then direct stores
+// into root over LSA up to the crossover and one GIN put above it. `count` is the
+// per-rank element count.
 #if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,7)
 testResult_t GatherGetDeviceImplInfo(int /*deviceImpl*/, size_t count, ncclDataType_t type,
-    int /*nRanks*/, int /*lsaSize*/, char* algoOut, char* protoOut) {
+    int nRanks, int /*lsaSize*/, char* algoOut, char* protoOut) {
   snprintf(algoOut, 16, "%s", "T-DIRECT");
+  const GatherD3Opts opts = GatherResolveOpts();
   const size_t sdmaThreshold = ginSdmaResolveSdmaThreshold<GatherSdmaColl>();
   const size_t chunkBytes = gin_sdma_allgather::chunkBytes(count, (size_t)wordSize(type));
-  snprintf(protoOut, 16, "%s", gin_sdma_allgather::chunkUsesLsaTier(chunkBytes, sdmaThreshold) ? "LSA" : "GIN");
+  const char* tier = gin_sdma_allgather::gatherUsesLLTier(chunkBytes, opts.llMaxBytes, opts.ll.nSlots, nRanks) ? "LL"
+                     : gin_sdma_allgather::chunkUsesLsaTier(chunkBytes, sdmaThreshold)                       ? "LSA"
+                                                                                                             : "GIN";
+  snprintf(protoOut, 16, "%s", tier);
   return testSuccess;
 }
 #else
