@@ -283,10 +283,10 @@ uses_peer_sync(const range_plan_t& plan)
 }
 
 uint32_t
-execute_peer_sync(const range_plan_t&                       plan,
-                  uint64_t                                  pass,
+execute_peer_sync(const range_plan_t&                        plan,
+                  uint64_t                                   pass,
                   rocprofiler_range_replay_peer_sync_phase_t phase,
-                  uint32_t                                  local_flags)
+                  uint32_t                                   local_flags)
 {
     if(!uses_peer_sync(plan)) return local_flags;
 

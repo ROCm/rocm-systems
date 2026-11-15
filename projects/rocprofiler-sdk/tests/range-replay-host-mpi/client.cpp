@@ -83,8 +83,7 @@ std::atomic<int> g_sync_restored{0};
 std::atomic<int> g_pass_mismatches{0};
 std::atomic<int> g_order_errors{0};
 
-uint64_t
-pass_count(uint64_t, rocprofiler_user_data_t)
+uint64_t pass_count(uint64_t, rocprofiler_user_data_t)
 {
     const int special_rank = env_int("RR_MPI_SPECIAL_RANK", 1);
     const int passes       = env_int("RR_MPI_PASSES", 4);

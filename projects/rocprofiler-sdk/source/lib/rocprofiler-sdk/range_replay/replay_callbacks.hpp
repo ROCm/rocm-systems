@@ -159,10 +159,10 @@ uses_peer_sync(const range_plan_t& plan);
 // the tool's return value carries no meaning and 0 is returned. Must be called with no SDK lock
 // held: it blocks until every process of the job arrived.
 uint32_t
-execute_peer_sync(const range_plan_t&                       plan,
-                  uint64_t                                  pass,
+execute_peer_sync(const range_plan_t&                        plan,
+                  uint64_t                                   pass,
                   rocprofiler_range_replay_peer_sync_phase_t phase,
-                  uint32_t                                  local_flags);
+                  uint32_t                                   local_flags);
 
 // Whether another pass should run after `current_pass`.
 bool

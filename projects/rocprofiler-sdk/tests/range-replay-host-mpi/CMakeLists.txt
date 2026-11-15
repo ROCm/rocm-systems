@@ -30,7 +30,9 @@ project(rocprofiler-sdk-tests-range-replay-host-mpi LANGUAGES CXX HIP)
 
 find_package(MPI COMPONENTS CXX)
 if(NOT MPI_CXX_FOUND OR NOT MPIEXEC_EXECUTABLE)
-    message(STATUS "range-replay-host-mpi: MPI not found, skipping the MPI range replay tests")
+    message(
+        STATUS "range-replay-host-mpi: MPI not found, skipping the MPI range replay tests"
+        )
     return()
 endif()
 
@@ -52,17 +54,19 @@ find_package(Threads REQUIRED)
 
 add_library(range-replay-host-mpi-client SHARED)
 target_sources(range-replay-host-mpi-client PRIVATE client.cpp common.hpp)
-target_include_directories(range-replay-host-mpi-client PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_include_directories(range-replay-host-mpi-client
+                           PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(
     range-replay-host-mpi-client PRIVATE rocprofiler-sdk::rocprofiler-sdk
                                          rocprofiler-sdk::tests-build-flags MPI::MPI_CXX)
 
-# The application resolves the range replay entry points with dlsym instead of linking the SDK,
-# like the single-process host replay test.
+# The application resolves the range replay entry points with dlsym instead of linking the
+# SDK, like the single-process host replay test.
 set_source_files_properties(main.cpp PROPERTIES LANGUAGE HIP)
 add_executable(range-replay-host-mpi-testapp)
 target_sources(range-replay-host-mpi-testapp PRIVATE main.cpp common.hpp)
-target_include_directories(range-replay-host-mpi-testapp PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_include_directories(range-replay-host-mpi-testapp
+                           PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(
     range-replay-host-mpi-testapp
     PRIVATE rocprofiler-sdk::rocprofiler-sdk-headers rocprofiler-sdk::tests-build-flags
@@ -93,10 +97,8 @@ function(add_rr_host_mpi_test NAME)
         LABELS "integration-tests;range-replay;mpi-tests"
         ENVIRONMENT
             "ROCPROF_RANGE_REPLAY_VERIFY=1"
-            "RR_MPI_OUT=${CMAKE_CURRENT_BINARY_DIR}/${NAME}"
-            OMPI_ALLOW_RUN_AS_ROOT=1
-            OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1
-            ${arg_ENVIRONMENT}
+            "RR_MPI_OUT=${CMAKE_CURRENT_BINARY_DIR}/${NAME}" OMPI_ALLOW_RUN_AS_ROOT=1
+            OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1 ${arg_ENVIRONMENT}
         PASS_REGULAR_EXPRESSION "\\[rr-mpi\\] rank 1 PASS"
         FAIL_REGULAR_EXPRESSION
             "\\[rr-mpi\\] FAIL|\\[app\\] FAIL|\\[app\\] rank [0-9]+ .* FAIL|${ROCPROFILER_DEFAULT_FAIL_REGEX}"
@@ -108,20 +110,19 @@ add_rr_host_mpi_test(test-range-replay-host-mpi-replay ENVIRONMENT
                      "RR_MPI_PASSES=4;RR_MPI_EXPECT_PASSES=4")
 
 # Rank 1 asks for two passes, rank 0 for four: both run two.
-add_rr_host_mpi_test(
-    test-range-replay-host-mpi-uneven-passes ENVIRONMENT
-    "RR_MPI_PASSES=4;RR_MPI_PASSES_SPECIAL=2;RR_MPI_EXPECT_PASSES=2")
+add_rr_host_mpi_test(test-range-replay-host-mpi-uneven-passes ENVIRONMENT
+                     "RR_MPI_PASSES=4;RR_MPI_PASSES_SPECIAL=2;RR_MPI_EXPECT_PASSES=2")
 
-# Rank 1 leaks a device allocation inside the range (declines ALLOCATION_CHANGED_IN_RANGE = 12):
-# rank 0 declines with PEER_DECLINED = 16, and both run the range once.
+# Rank 1 leaks a device allocation inside the range (declines ALLOCATION_CHANGED_IN_RANGE
+# = 12): rank 0 declines with PEER_DECLINED = 16, and both run the range once.
 add_rr_host_mpi_test(
     test-range-replay-host-mpi-peer-declines
     ENVIRONMENT
     "RR_MPI_MODE=leak;RR_MPI_PASSES=4;RR_MPI_EXPECT_PASSES=1;RR_MPI_EXPECT_STATUS=16;RR_MPI_SPECIAL_STATUS=12"
     )
 
-# Rank 1 does not arm the jump buffer (HOST_JMP_NOT_SET = 15): rank 0 declines with PEER_DECLINED
-# = 16, and both run the range once.
+# Rank 1 does not arm the jump buffer (HOST_JMP_NOT_SET = 15): rank 0 declines with
+# PEER_DECLINED = 16, and both run the range once.
 add_rr_host_mpi_test(
     test-range-replay-host-mpi-peer-unarmed
     ENVIRONMENT

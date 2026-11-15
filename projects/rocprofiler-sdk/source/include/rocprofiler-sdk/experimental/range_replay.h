@@ -72,9 +72,9 @@ typedef enum rocprofiler_range_replay_status_t  // NOLINT(performance-enum-size)
     ROCPROFILER_RANGE_REPLAY_STATUS_HOST_JMP_NOT_SET,  ///< Tool asked for host replay, but the
                                                        ///< application did not arm a sigsetjmp in
                                                        ///< the caller's frame
-    ROCPROFILER_RANGE_REPLAY_STATUS_PEER_DECLINED,  ///< Another process of the job, coordinated
-                                                    ///< through @c peer_sync_cb, declined or
-                                                    ///< could not take part in the next pass
+    ROCPROFILER_RANGE_REPLAY_STATUS_PEER_DECLINED,     ///< Another process of the job, coordinated
+                                                       ///< through @c peer_sync_cb, declined or
+                                                       ///< could not take part in the next pass
     ROCPROFILER_RANGE_REPLAY_STATUS_LAST,
 } rocprofiler_range_replay_status_t;
 
@@ -256,12 +256,12 @@ typedef struct rocprofiler_callback_tracing_range_replay_data_t
     ///
     /// The callback runs while the range's device memory is quiescent, so it must not submit GPU
     /// work, allocate or free device memory, or copy into device memory. Host-side MPI on host
-    /// buffers is fine. When the processes disagree (one has declined, or one wants to stop), all of
-    /// them stop at the same pass boundary. A process that was still eligible reports
-    /// @ref ROCPROFILER_RANGE_REPLAY_STATUS_PEER_DECLINED, or REPLAYED when the disagreement is only
-    /// about whether to run more passes, and continues with the state of the pass that just ended.
-    /// Once every process has agreed to restore, a process that then fails to restore aborts the
-    /// job, because its peers cannot be brought back.
+    /// buffers is fine. When the processes disagree (one has declined, or one wants to stop), all
+    /// of them stop at the same pass boundary. A process that was still eligible reports
+    /// @ref ROCPROFILER_RANGE_REPLAY_STATUS_PEER_DECLINED, or REPLAYED when the disagreement is
+    /// only about whether to run more passes, and continues with the state of the pass that just
+    /// ended. Once every process has agreed to restore, a process that then fails to restore aborts
+    /// the job, because its peers cannot be brought back.
 } rocprofiler_callback_tracing_range_replay_data_t;
 
 /**
