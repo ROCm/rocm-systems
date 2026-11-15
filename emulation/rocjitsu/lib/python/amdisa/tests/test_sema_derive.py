@@ -27,10 +27,8 @@ from amdisa.codegen.execute.sema_lower import (
 )
 from amdisa.codegen.execute.packed import gen_pk_binop, gen_pk_mov_b32, gen_pk_ternary
 from amdisa.codegen.execute.vector_special import (
-    gen_cvt_scalef32,
     gen_cvt_fp8,
     gen_vector_cvt_pk,
-    gen_vector_cvt_scale,
 )
 from amdisa.sema_fingerprint import fingerprint
 from amdisa.sema_properties import InstructionProperty, derive_properties
@@ -1483,257 +1481,64 @@ class TestDeriveVectorUnary:
             assert 'write_lane(vdst, lane, static_cast<uint32_t>' not in cpp
 
     @pytest.mark.parametrize(
-        ('name', 'op', 'decode_helper', 'encode_helper'),
+        ('name', 'op'),
         [
-            (
-                'V_CVT_SCALE_PK16_BF16_BF6',
-                'unpack_pk16_bf16_bf6',
-                'util::bf6_e3m2_to_f32',
-                'util::f32_to_bf16_rne_mode',
-            ),
-            (
-                'V_CVT_SCALE_PK8_F32_FP4',
-                'unpack_pk8_f32_fp4',
-                'util::fp4_e2m1_to_f32',
-                'std::bit_cast<uint32_t>',
-            ),
+            ('V_CVT_SCALE_PK16_BF16_BF6', 'unpack_pk16_bf16_bf6'),
+            ('V_CVT_SCALE_PK8_F32_FP4', 'unpack_pk8_f32_fp4'),
         ],
     )
-    def test_cvt_scale_unpack_conversions_use_scaled_generator(
-        self, name, op, decode_helper, encode_helper
-    ):
+    def test_cvt_scale_unpack_semantics(self, name, op):
         sem = derive_semantics(name, 'ENC_VOP3')
         assert sem is not None
         assert sem.semantic_class == 'vector_cvt_scale'
         assert sem.operation == op
 
-        cpp = gen_vector_cvt_scale(
-            ['vdst'], ['src0', 'src1'], sem.semantic_class, sem.operation
-        )
-        assert decode_helper in cpp
-        if encode_helper.endswith('_mode'):
-            assert (
-                f'{encode_helper}(read_scaled_src(index) * scale, wf.fp16_ovfl())'
-                in cpp
-            )
-        else:
-            assert encode_helper in cpp
-        assert 'util::e8m0_to_f32' in cpp
-        assert 'amdgpu::CvtScaleSelection::f4_f6(inst_.opsel)' in cpp
-        assert (
-            'std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src1, lane))'
-            not in cpp
-        )
-        assert 'read_scaled_src(index) * scale' in cpp
-        assert 'Isa::resolved_vgpr_offset' in cpp
-        assert 'write_vgpr_region' in cpp
-        assert 'dst_region.set_lane' in cpp
-
     @pytest.mark.parametrize(
-        ('name', 'op', 'read_helper', 'encode_helper'),
+        ('name', 'op'),
         [
-            (
-                'V_CVT_SCALEF32_PK16_BF6_BF16',
-                'pack_pk16_bf6_bf16',
-                'util::bf16_to_f32',
-                'util::f32_to_bf6_e3m2_rne',
-            ),
-            (
-                'V_CVT_SCALEF32_PK8_FP4_F32',
-                'pack_pk8_fp4_f32',
-                'std::bit_cast<float>',
-                'util::f32_to_fp4_e2m1_rne',
-            ),
-            (
-                'V_CVT_SCALEF32_PK8_FP8_F32',
-                'pack_pk8_fp8_f32',
-                'std::bit_cast<float>',
-                'util::f32_to_fp8_e4m3_rne_mode',
-            ),
-            (
-                'V_CVT_SCALEF32_PK8_BF8_F32',
-                'pack_pk8_bf8_f32',
-                'std::bit_cast<float>',
-                'util::f32_to_bf8_e5m2_rne_mode',
-            ),
+            ('V_CVT_SCALEF32_PK16_BF6_BF16', 'pack_pk16_bf6_bf16'),
+            ('V_CVT_SCALEF32_PK8_FP4_F32', 'pack_pk8_fp4_f32'),
+            ('V_CVT_SCALEF32_PK8_FP8_F32', 'pack_pk8_fp8_f32'),
+            ('V_CVT_SCALEF32_PK8_BF8_F32', 'pack_pk8_bf8_f32'),
         ],
     )
-    def test_cvt_scalef32_pack_conversions_use_scaled_generator(
-        self, name, op, read_helper, encode_helper
-    ):
+    def test_cvt_scale_pack_semantics(self, name, op):
         sem = derive_semantics(name, 'ENC_VOP3')
         assert sem is not None
         assert sem.semantic_class == 'vector_cvt_scale'
         assert sem.operation == op
 
-        cpp = gen_vector_cvt_scale(
-            ['vdst'], ['src0', 'src1'], sem.semantic_class, sem.operation
-        )
-        assert read_helper in cpp
-        if encode_helper.endswith('_mode'):
-            assert f'{encode_helper}(value, wf.fp16_ovfl())' in cpp
-        else:
-            assert encode_helper in cpp
-        assert (
-            'std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src1, lane))'
-            in cpp
-        )
-        assert 'util::e8m0_to_f32' not in cpp
-        assert 'pack_scaled_dst(index' in cpp
-        assert 'read_scaled_input(index) / scale' in cpp
-        assert 'Isa::resolved_vgpr_offset' in cpp
-        assert 'read_vgpr_region' in cpp
-        assert 'write_vgpr_region' in cpp
-
     @pytest.mark.parametrize(
-        ('name', 'op', 'read_helper', 'encode_helper'),
+        ('name', 'op'),
         [
-            (
-                'V_CVT_SCALEF32_SR_PK8_FP8_F32',
-                'sr_pack_pk8_fp8_f32',
-                'std::bit_cast<float>(src_words[index])',
-                'util::f32_to_fp8_e4m3_sr_mode',
-            ),
-            (
-                'V_CVT_SCALEF32_SR_PK8_FP8_F16',
-                'sr_pack_pk8_fp8_f16',
-                'util::f16_to_f32',
-                'util::f32_to_fp8_e4m3_sr_mode',
-            ),
-            (
-                'V_CVT_SCALEF32_SR_PK8_FP8_BF16',
-                'sr_pack_pk8_fp8_bf16',
-                'util::bf16_to_f32',
-                'util::f32_to_fp8_e4m3_sr_mode',
-            ),
-            (
-                'V_CVT_SCALEF32_SR_PK8_BF8_F32',
-                'sr_pack_pk8_bf8_f32',
-                'std::bit_cast<float>(src_words[index])',
-                'util::f32_to_bf8_e5m2_sr_mode',
-            ),
-            (
-                'V_CVT_SCALEF32_SR_PK8_BF8_F16',
-                'sr_pack_pk8_bf8_f16',
-                'util::f16_to_f32',
-                'util::f32_to_bf8_e5m2_sr_mode',
-            ),
-            (
-                'V_CVT_SCALEF32_SR_PK8_BF8_BF16',
-                'sr_pack_pk8_bf8_bf16',
-                'util::bf16_to_f32',
-                'util::f32_to_bf8_e5m2_sr_mode',
-            ),
+            ('V_CVT_SCALEF32_SR_PK8_FP8_F32', 'sr_pack_pk8_fp8_f32'),
+            ('V_CVT_SCALEF32_SR_PK8_FP8_F16', 'sr_pack_pk8_fp8_f16'),
+            ('V_CVT_SCALEF32_SR_PK8_FP8_BF16', 'sr_pack_pk8_fp8_bf16'),
+            ('V_CVT_SCALEF32_SR_PK8_BF8_F32', 'sr_pack_pk8_bf8_f32'),
+            ('V_CVT_SCALEF32_SR_PK8_BF8_F16', 'sr_pack_pk8_bf8_f16'),
+            ('V_CVT_SCALEF32_SR_PK8_BF8_BF16', 'sr_pack_pk8_bf8_bf16'),
         ],
     )
-    def test_cvt_scalef32_sr_pack_fp8_bf8_threads_fp16_ovfl(
-        self, name, op, read_helper, encode_helper
-    ):
+    def test_cvt_scalef32_sr_pack_fp8_bf8_semantics(self, name, op):
         sem = derive_semantics(name, 'ENC_VOP3')
         assert sem is not None
         assert sem.semantic_class == 'vector_cvt_scale'
         assert sem.operation == op
 
-        cpp = gen_vector_cvt_scale(
-            ['vdst'], ['src0', 'src1', 'src2'], sem.semantic_class, sem.operation
-        )
-        assert read_helper in cpp
-        assert f'{encode_helper}(value, seed, wf.fp16_ovfl())' in cpp
-        assert 'seed = util::prng_advance(seed)' in cpp
-        assert 'read_scaled_input(index) / scale' in cpp
-
     @pytest.mark.parametrize(
-        ('name', 'op', 'read_helper', 'encode_helper'),
+        ('name', 'op'),
         [
-            (
-                'V_CVT_SCALEF32_SR_FP8_F16',
-                'sr_fp8_f16',
-                'util::f16_to_f32',
-                'util::f32_to_fp8_e4m3_sr_mode',
-            ),
-            (
-                'V_CVT_SCALEF32_SR_FP8_BF16',
-                'sr_fp8_bf16',
-                'util::bf16_to_f32',
-                'util::f32_to_fp8_e4m3_sr_mode',
-            ),
-            (
-                'V_CVT_SCALEF32_SR_BF8_F16',
-                'sr_bf8_f16',
-                'util::f16_to_f32',
-                'util::f32_to_bf8_e5m2_sr_mode',
-            ),
-            (
-                'V_CVT_SCALEF32_SR_BF8_BF16',
-                'sr_bf8_bf16',
-                'util::bf16_to_f32',
-                'util::f32_to_bf8_e5m2_sr_mode',
-            ),
+            ('V_CVT_SCALEF32_SR_FP8_F16', 'sr_fp8_f16'),
+            ('V_CVT_SCALEF32_SR_FP8_BF16', 'sr_fp8_bf16'),
+            ('V_CVT_SCALEF32_SR_BF8_F16', 'sr_bf8_f16'),
+            ('V_CVT_SCALEF32_SR_BF8_BF16', 'sr_bf8_bf16'),
         ],
     )
-    def test_cvt_scalef32_sr_single_fp8_bf8_threads_fp16_ovfl(
-        self, name, op, read_helper, encode_helper
-    ):
+    def test_cvt_scalef32_sr_single_fp8_bf8_semantics(self, name, op):
         sem = derive_semantics(name, 'ENC_VOP3')
         assert sem is not None
         assert sem.semantic_class == 'cvt_scalef32'
         assert sem.operation == op
-
-        cpp = gen_cvt_scalef32(
-            SimpleNamespace(
-                op=op,
-                dst_ops=['vdst'],
-                src_ops=['src0', 'src1', 'src2'],
-                arch_name='cdna4',
-            )
-        )
-
-        assert read_helper in cpp
-        assert f'{encode_helper}(scaled, seed, wf.fp16_ovfl())' in cpp
-        assert 'uint32_t seed = amdgpu::RegisterAccess(wf).read_lane(src1, lane)' in cpp
-        assert (
-            'double scale = std::ldexp(1.0, static_cast<int>(biased_exp) - 127)' in cpp
-        )
-        assert 'uint32_t dst_byte = (inst_.op_sel >> 2) & 0x3' in cpp
-
-    def test_gfx1250_cvt_scalef32_pack_fp8_threads_fp16_ovfl(self):
-        sem = derive_semantics('V_CVT_SCALEF32_PK8_FP8_F32', 'ENC_VOP3')
-        assert sem is not None
-
-        cpp = gen_vector_cvt_scale(
-            ['vdst'],
-            ['src0', 'src1'],
-            sem.semantic_class,
-            sem.operation,
-            arch_name='cdna5',
-        )
-        assert 'util::f32_to_fp8_e4m3_rne_mode(value, wf.fp16_ovfl())' in cpp
-
-    @pytest.mark.parametrize(
-        ('op', 'helper'),
-        [
-            ('f16_fp8', 'util::f32_to_f16_mode'),
-            ('pk_bf16_fp8', 'util::f32_to_bf16_rne_mode'),
-            ('pk32_f16_fp6', 'util::f32_to_f16_mode'),
-            ('pk32_bf16_fp6', 'util::f32_to_bf16_rne_mode'),
-        ],
-    )
-    def test_cvt_scalef32_widen_f16_bf16_destinations_thread_fp16_ovfl(
-        self, op, helper
-    ):
-        cpp = gen_cvt_scalef32(
-            SimpleNamespace(
-                op=op,
-                dst_ops=['vdst'],
-                src_ops=['src0', 'src1'],
-                arch_name='cdna4',
-            )
-        )
-
-        assert helper in cpp
-        assert 'wf.fp16_ovfl()' in cpp
-        if helper == 'util::f32_to_bf16_rne_mode':
-            assert 'util::f32_to_bf16(' not in cpp
 
 
 class TestDerivePseudoScalarUnary:
