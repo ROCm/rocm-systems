@@ -53,6 +53,13 @@ public:
 
     [[nodiscard]] size_t get_index() const noexcept { return m_index; }
 
+    /** The raw reading taken at init: an array element the device does not report holds
+     * the backend's not-supported value. All zero when that reading failed. */
+    [[nodiscard]] const metrics& support_reading() const noexcept
+    {
+        return m_support_reading;
+    }
+
     [[nodiscard]] const std::string& get_name() const noexcept { return m_device_name; }
 
     [[nodiscard]] const std::string& get_product_name() const noexcept
@@ -275,6 +282,7 @@ private:
         {
             return m_supported_metrics.value != 0;
         }
+        m_support_reading = raw;
 
         m_supported_metrics.bits.current_socket_power =
             is_metric_supported(raw.current_socket_power, METRIC_VALUE_NOT_SUPPORTED_16);
@@ -406,6 +414,8 @@ private:
     mutable std::optional<std::string> m_bdf;
     bool                               m_is_supported = false;
     sdma_state                         m_sdma_state;
+    /** See support_reading(). */
+    metrics m_support_reading{};
 };
 
 }  // namespace rocprofsys::pmc::collectors::gpu

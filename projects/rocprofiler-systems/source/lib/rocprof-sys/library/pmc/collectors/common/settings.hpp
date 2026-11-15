@@ -104,6 +104,14 @@ struct settings_policy
     }
 
     /**
+     * @brief Get the CPU socket filter from ROCPROFSYS_SAMPLING_CPUS.
+     */
+    static device_filter get_cpu_device_filter()
+    {
+        return get_device_filter(rocprofsys::get_sampling_cpus());
+    }
+
+    /**
      * @brief PCIe BDFs of the GPUs the ROCm runtime exposes.
      *
      * Honors ROCR_VISIBLE_DEVICES / HIP_VISIBLE_DEVICES. Returns std::nullopt when

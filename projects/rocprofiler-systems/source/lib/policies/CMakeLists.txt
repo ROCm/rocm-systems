@@ -21,6 +21,8 @@ target_sources(
     rocprofiler-systems-policies-library
     INTERFACE
         ${CMAKE_CURRENT_SOURCE_DIR}/thread_state_policy.hpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/pmc/device_policy.hpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/pmc/settings_policy.hpp
         ${CMAKE_CURRENT_SOURCE_DIR}/rocprofiler-sdk/backend.hpp
         ${CMAKE_CURRENT_SOURCE_DIR}/rocprofiler-sdk/externals.hpp
         ${CMAKE_CURRENT_SOURCE_DIR}/rocprofiler-sdk/domain_service/backend.hpp
