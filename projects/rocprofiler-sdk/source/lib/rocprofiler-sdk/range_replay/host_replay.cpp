@@ -21,6 +21,7 @@
 // THE SOFTWARE.
 
 #include "lib/rocprofiler-sdk/range_replay/host_replay.hpp"
+#include "lib/common/environment.hpp"
 #include "lib/common/logging.hpp"
 #include "lib/common/scope_destructor.hpp"
 #include "lib/rocprofiler-sdk/agent.hpp"
@@ -43,14 +44,19 @@
 #include <hsa/hsa.h>
 
 #include <algorithm>
+#include <cerrno>
 #include <chrono>
 #include <climits>
+#include <cstdlib>
 #include <cstring>
 #include <memory>
 #include <mutex>
 #include <new>
+#include <optional>
 #include <shared_mutex>
 #include <stdexcept>
+#include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -63,6 +69,9 @@ namespace host
 namespace
 {
 using phase_clock = std::chrono::steady_clock;
+
+constexpr auto fence_timeout_env =
+    std::string_view{"ROCPROFILER_RANGE_REPLAY_HOST_FENCE_TIMEOUT_MS"};
 
 double
 elapsed_ms(phase_clock::duration elapsed)
@@ -330,6 +339,41 @@ restore_regions(const std::vector<host_region_t>& regions)
 {
     for(auto itr = regions.rbegin(); itr != regions.rend(); ++itr)
         if(!itr->saved.empty()) std::memcpy(itr->ptr, itr->saved.data(), itr->saved.size());
+}
+
+std::chrono::milliseconds
+parse_fence_timeout(const std::optional<std::string>& value)
+{
+    const auto fallback = std::chrono::milliseconds{std::chrono::seconds{hsa::drain_budget_secs}};
+    if(!value) return fallback;
+
+    errno            = 0;
+    char*      end   = nullptr;
+    const auto count = std::strtoll(value->c_str(), &end, 10);
+    if(end == value->c_str() || *end != '\0' || errno == ERANGE || count < 1 ||
+       count > max_fence_timeout.count())
+    {
+        ROCP_WARNING << fmt::format("range replay: ignoring invalid {}='{}' (expected a whole "
+                                    "number of milliseconds from 1 to {}); using {} ms",
+                                    fence_timeout_env,
+                                    *value,
+                                    max_fence_timeout.count(),
+                                    fallback.count());
+        return fallback;
+    }
+    return std::chrono::milliseconds{count};
+}
+
+std::chrono::milliseconds
+fence_timeout()
+{
+    static const auto timeout = [] {
+        const auto value = common::get_env_optional(fence_timeout_env);
+        const auto ms    = parse_fence_timeout(value);
+        if(value) ROCP_INFO << fmt::format("range replay: host fence timeout is {} ms", ms.count());
+        return ms;
+    }();
+    return timeout;
 }
 
 void

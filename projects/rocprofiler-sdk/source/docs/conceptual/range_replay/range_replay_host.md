@@ -110,7 +110,7 @@ Any difference is reported as `divergence_count` on CLOSE.
 |---|---|
 | Tool asked for host replay, application did not arm the jump | `HOST_JMP_NOT_SET` |
 | Another thread dispatches to any GPU while the range is open | `CONCURRENT_DISPATCH` |
-| A fence at `begin` or at the end of a pass still has GPU work running on some GPU after about 60 seconds | `CONCURRENT_DISPATCH` |
+| A fence at `begin` or at the end of a pass still has GPU work running on some GPU when the fence timeout (below) runs out | `CONCURRENT_DISPATCH` |
 | Another thread copies into device memory while the range is open | `MEMORY_COPY_IN_RANGE` |
 | Tracked device allocation addresses, sizes, or lifetimes differ at the end of a pass (a leak, or freeing/replacing pre-existing memory) | `ALLOCATION_CHANGED_IN_RANGE` |
 | A code object is unloaded while the range is open | `CODE_OBJECT_CHANGED_IN_RANGE` |
@@ -125,6 +125,23 @@ thread.
 
 A decline detected at the end of a re-executed pass stops the range there. CLOSE reports the reason,
 and the PASS callbacks already delivered stand.
+
+### Fence timeout
+
+Host replay fences the compute queues of every GPU, not only the ones the range uses. A long kernel
+still running on another stream or another GPU at `begin` or at the end of a pass therefore holds
+the range in that fence until the kernel finishes or the fence times out. A fence waits at most
+`ROCPROFILER_RANGE_REPLAY_HOST_FENCE_TIMEOUT_MS` milliseconds in total, over all of its queues and
+GPUs and including any wait for room in a full queue, and then declines the range with
+`CONCURRENT_DISPATCH`. The default is 60000 (60 seconds). The application keeps running, and the
+range runs once.
+
+If other GPUs run kernels longer than the range can usefully wait, a lower value turns that stall
+into a quick decline, for example `ROCPROFILER_RANGE_REPLAY_HOST_FENCE_TIMEOUT_MS=1000`. A value
+that is not a whole number of milliseconds from 1 to 3600000 is ignored with a warning. A fence that
+times out leaves at most one barrier in a queue to retire later, and with it one HSA signal that the
+SDK does not reuse. Only host replay reads this setting. Kernel replay and packet range replay keep
+their 60-second wait and stop the application when it runs out.
 
 A code object loaded during the application's own run of the range does not decline. HIP loads a
 module on the first launch of one of its kernels, so declining would refuse ordinary applications.
@@ -151,9 +168,10 @@ locals. The code between the macro and `end` must follow these rules:
    asynchronous copies and non-compute queues on every participating device. Use their supported
    completion mechanisms (for example, `hipDeviceSynchronize` on each participating device).
    The SDK additionally fences compute queues and drains dispatch handlers, but these do not wait
-   for untracked asynchronous copies or non-compute work. Each of those waits gives up after about
-   60 seconds, and the range then declines with `CONCURRENT_DISPATCH` while the application keeps
-   running. No other thread may submit GPU work or copy into device memory while the range is open.
+   for untracked asynchronous copies or non-compute work. A fence gives up once its waits, over all
+   queues and GPUs together, reach the fence timeout described under "What still declines", and the
+   range then declines with `CONCURRENT_DISPATCH` while the application keeps running. No other
+   thread may submit GPU work or copy into device memory while the range is open.
 6. **Keep once-only side effects out of re-executed passes.** `rocprofiler_range_replay_get_host_pass`
    returns 0 on the application's own run and 1..N-1 after that.
 7. **Balanced allocations only.** `hipMalloc` / `hipFree` pairs inside the range are fine. So is
