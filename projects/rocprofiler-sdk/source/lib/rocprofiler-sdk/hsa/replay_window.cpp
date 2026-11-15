@@ -85,6 +85,21 @@ agent_replay_state(rocprofiler_agent_id_t agent_id)
     tl_state    = state;
     return *state;
 }
+
+// Async completion handlers still running on `agent`'s queues, including queues destroy_queue is
+// still syncing. The map is read before the retiring set; see iterate_retiring_queues for why.
+int64_t
+agent_async_in_flight(const QueueController& controller, hsa_agent_t agent)
+{
+    int64_t    in_flight = 0;
+    const auto count     = [&](const Queue* queue) {
+        if(queue != nullptr && queue->get_agent().get_hsa_agent() == agent)
+            in_flight += queue->active_async_packets();
+    };
+    controller.iterate_queues(count);
+    controller.iterate_retiring_queues(count);
+    return in_flight;
+}
 }  // namespace
 
 std::shared_mutex&
@@ -118,11 +133,7 @@ replay_drain_agent_or_fatal(hsa_agent_t agent)
 
     for(;;)
     {
-        int64_t in_flight = 0;
-        queue_controller->iterate_queues([&](const Queue* sibling) {
-            if(sibling != nullptr && sibling->get_agent().get_hsa_agent() == agent)
-                in_flight += sibling->active_async_packets();
-        });
+        const auto in_flight = agent_async_in_flight(*queue_controller, agent);
 
         if(in_flight == 0) return;
 
