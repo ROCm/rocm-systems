@@ -133,7 +133,7 @@ compute.valu_flops:
     wave32 by default, so that is 32 per instruction. SQ_INSTS_VALU counts every
     VALU issue, including integer, move, and convert, and an FMA counts as one issue
     while the FP32 roof counts it as two FLOPs. A pure FMA kernel therefore reads
-    low. A tiled FP32 GEMM also issues address arithmetic, so this row can read
+    low. A tiled FP32 GEMM also issues address arithmetic, so this metric can read
     about twice the true FLOP count. SQ_WMMA_VALU_INSTS is per vec32, the same unit
     as SQ_INSTS_VALU for gfx120x compute.
   peak_empirical: $FP32Flops_empirical_peak
