@@ -86,6 +86,7 @@ thread_local ncclDevResourceRequirements g_gatherFlagReq = {};
 // False when the communicator has no GIN, e.g. ANVIL SDMA on a scale-up domain that
 // spans hosts: the LL and LSA tiers then cover every size.
 thread_local bool g_gatherGin = true;
+thread_local size_t g_gatherGroupMinBytes = gin_sdma_allgather::kGatherGroupNever;
 
 testResult_t GatherGetDevCommRequirements(int deviceImpl, ncclDevCommRequirements* reqs, ncclComm_t comm) {
   testResult_t res = ginSdmaAllGatherDevCommRequirements(deviceImpl, reqs, comm, "GinHybridGatherKernel", &g_gatherGin);
@@ -99,6 +100,7 @@ testResult_t GatherGetDevCommRequirements(int deviceImpl, ncclDevCommRequirement
 #else
   g_gatherLLMaxBytes = gin_sdma_allgather::resolveGatherLLMaxBytesFromEnv(
       gin_sdma_allgather::gatherArchLLMaxBytes(ginSdmaGcnArchName()));
+  g_gatherGroupMinBytes = gin_sdma_allgather::gatherArchGroupMinBytes(ginSdmaGcnArchName());
 #endif
   if (g_gatherLLMaxBytes > 0) {
     NCCLCHECK(ncclLLA2ACreateRequirement(/*nBlocks=*/1, (int)gin_sdma_allgather::gatherLLSlots(nRanks, g_gatherLLMaxBytes),
@@ -156,6 +158,8 @@ struct GatherD3Opts {
   int exitBarrier;        // keep the exit barrier in both tiers
   int streamStores;       // system-scope 16-byte stores to the root
   int lightFence;         // publish streamed stores by waiting for them, not with a release fence
+  int groupRanks;         // LSA tier: root flags senders ready this many ranks at a time; 0 = all at once
+  int groupWindow;        // LSA tier: groups storing into the root at a time (NCCL_GIN_ANVIL_SDMA_GATHER_GROUP_WINDOW)
 };
 
 // 16-byte store into the root's recv buffer.
@@ -291,18 +295,33 @@ __device__ __forceinline__ bool GatherLightFence(const GatherD3Opts& opts) {
   return RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS && opts.lightFence && opts.streamStores;
 }
 
-// Each non-root CTA tells the root's same-index CTA that its stores are visible; the
-// root's CTAs wait for every non-root.
-__device__ void GatherDoneFlags(ncclLLA2ASession<ncclCoopCta>& done, const struct ncclDevComm& devComm,
-                                ncclTeam lsa, int root, bool light) {
-  if (devComm.rank != root) {
-    GatherPublishStores(light);
-    if (threadIdx.x == 0) done.send(lsa.rank + (root - devComm.rank), devComm.rank, (uint64_t)1);
-  } else {
-    for (int p = threadIdx.x; p < devComm.nRanks; p += blockDim.x) {
-      if (p != root) (void)done.recv<uint64_t>(p);
-    }
+// LSA-tier flags, all on the `done` session: a sender may write into the root's recv
+// buffer once the root has entered this launch, so the root's CTA flags its same-index
+// CTA on each sender as ready instead of all ranks meeting in an LSA barrier. The sender
+// answers with a done flag once its stores are visible. The ready flag also keeps a
+// sender within one epoch of the root.
+__device__ void GatherRootReady(ncclLLA2ASession<ncclCoopCta>& done, const struct ncclDevComm& devComm,
+                                ncclTeam lsa, int root, int first, int last) {
+  for (int p = first + threadIdx.x; p < last; p += blockDim.x) {
+    if (p != root) done.send(lsa.rank + (p - devComm.rank), root, (uint64_t)1);
   }
+}
+
+__device__ void GatherRootWaitDone(ncclLLA2ASession<ncclCoopCta>& done, int root, int first, int last) {
+  for (int p = first + threadIdx.x; p < last; p += blockDim.x) {
+    if (p != root) (void)done.recv<uint64_t>(p);
+  }
+}
+
+__device__ void GatherSenderWaitReady(ncclLLA2ASession<ncclCoopCta>& done, int root) {
+  if (threadIdx.x == 0) (void)done.recv<uint64_t>(root);
+  __syncthreads();
+}
+
+__device__ void GatherSenderDone(ncclLLA2ASession<ncclCoopCta>& done, const struct ncclDevComm& devComm,
+                                 ncclTeam lsa, int root, bool light) {
+  GatherPublishStores(light);
+  if (threadIdx.x == 0) done.send(lsa.rank + (root - devComm.rank), devComm.rank, (uint64_t)1);
 }
 
 // Hybrid Gather body (-D 3) for a world that one LSA team covers (one node, or a
@@ -311,30 +330,50 @@ __device__ void GatherDoneFlags(ncclLLA2ASession<ncclCoopCta>& done, const struc
 //   chunkBytes >  sdmaThreshold: one GIN put to root from the thread the AllGather
 //     peer stripe assigns to root. Only CTA (root % gridDim.x) on root waits, for
 //     one signal per put.
-// Only the root needs to know the data landed, and the next launch's entry barrier
-// cannot complete before the root has finished this one, so without opts.exitBarrier
-// neither tier ends with a barrier: LSA-tier CTAs instead send the root's same-index
-// CTA a done flag after publishing their stores.
+// Only the root needs to know the data landed, and the next launch cannot start writing
+// before the root has finished this one, so without opts.exitBarrier neither tier ends
+// with a barrier. LSA-tier CTAs instead wait for the root's ready flag, store, and send
+// the root's same-index CTA a done flag after publishing their stores.
 __device__ void ginGatherBody(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset, size_t chunkBytes, int root, size_t sdmaThreshold, const struct ncclDevComm& devComm, const GatherD3Opts& opts) {
   if (gin_sdma_allgather::chunkUsesLsaTier(chunkBytes, sdmaThreshold)) {
     ncclTeam lsa = ncclTeamLsa(devComm);
     const int tid = threadIdx.x + blockIdx.x * blockDim.x;
     const int nthreads = blockDim.x * gridDim.x;
 
-    ncclLsaBarrierSession<ncclCoopCta> lsaBar { ncclCoopCta(), devComm, lsa, devComm.lsaBarrier, blockIdx.x };
     if (opts.exitBarrier || opts.flags.nSlots == 0) {
+      ncclLsaBarrierSession<ncclCoopCta> lsaBar { ncclCoopCta(), devComm, lsa, devComm.lsaBarrier, blockIdx.x };
       lsaBar.sync(ncclCoopCta(), cuda::memory_order_relaxed);
       GatherLsaDirect(sendwin, sendoffset, recvwin, recvoffset, chunkBytes, devComm.rank, root, tid, nthreads,
                       opts.streamStores);
       lsaBar.sync(ncclCoopCta(), cuda::memory_order_release);
       return;
     }
-    // Built before the copy so its epoch load overlaps the barrier and the copy.
     ncclLLA2ASession<ncclCoopCta> done { ncclCoopCta(), devComm, lsa, opts.flags, blockIdx.x, devComm.nRanks };
-    lsaBar.sync(ncclCoopCta(), cuda::memory_order_relaxed);
-    const bool streamed = GatherLsaDirect(sendwin, sendoffset, recvwin, recvoffset, chunkBytes, devComm.rank, root,
-                                          tid, nthreads, opts.streamStores);
-    GatherDoneFlags(done, devComm, lsa, root, GatherLightFence(opts) && streamed);
+    if (devComm.rank != root) {
+      GatherSenderWaitReady(done, root);
+      const bool streamed = GatherLsaDirect(sendwin, sendoffset, recvwin, recvoffset, chunkBytes, devComm.rank,
+                                            root, tid, nthreads, opts.streamStores);
+      GatherSenderDone(done, devComm, lsa, root, GatherLightFence(opts) && streamed);
+    } else {
+      // Ranks [g * group, (g + 1) * group) form group g; at most `window` groups store
+      // into the root at a time.
+      const int nRanks = devComm.nRanks;
+      const int group = opts.groupRanks > 0 && opts.groupRanks < nRanks ? opts.groupRanks : nRanks;
+      const int nGroups = (nRanks + group - 1) / group;
+      const int window = opts.groupWindow > 1 ? opts.groupWindow : 1;
+      for (int g = 0; g < window && g < nGroups; g++) {
+        GatherRootReady(done, devComm, lsa, root, g * group, min(nRanks, (g + 1) * group));
+      }
+      GatherLsaDirect(sendwin, sendoffset, recvwin, recvoffset, chunkBytes, root, root, tid, nthreads,
+                      opts.streamStores);
+      for (int g = 0; g < nGroups; g++) {
+        GatherRootWaitDone(done, root, g * group, min(nRanks, (g + 1) * group));
+        if (g + window < nGroups) {
+          __syncthreads();
+          GatherRootReady(done, devComm, lsa, root, (g + window) * group, min(nRanks, (g + window + 1) * group));
+        }
+      }
+    }
     done.endEpoch(ncclCoopCta());
     return;
   }
@@ -401,7 +440,25 @@ static GatherD3Opts GatherResolveOpts() {
   opts.exitBarrier = exitBarrier;
   opts.streamStores = streamStores;
   opts.lightFence = lightFence;
+  static const int groupWindow = [] {
+    const char* e = getenv("NCCL_GIN_ANVIL_SDMA_GATHER_GROUP_WINDOW");
+    return e ? atoi(e) : 1;
+  }();
+  opts.groupWindow = groupWindow;
   return opts;
+}
+
+// LSA-tier ranks per group for one launch (gin_sdma_allgather::gatherGroupRanks).
+static int GatherGroupRanks(size_t chunkBytes, int nRanks) {
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,29,0)
+  static const int envRanks = [] {
+    const char* e = getenv(gin_sdma_allgather::kGatherGroupRanksEnv);
+    return e ? atoi(e) : -1;
+  }();
+  return gin_sdma_allgather::gatherGroupRanks(chunkBytes, nRanks, g_gatherGroupMinBytes, envRanks);
+#else
+  return 0;
+#endif
 }
 
 #endif
@@ -450,9 +507,10 @@ testResult_t GatherRunColl(void* sendbuff, size_t sendoffset, void* recvbuff, si
 #endif
         if (count == 0) return testSuccess;
         const ncclDevComm* devComm = (const ncclDevComm*)comm;
-        const GatherD3Opts opts = GatherResolveOpts();
+        GatherD3Opts opts = GatherResolveOpts();
         const size_t sdmaThreshold = GatherSdmaThreshold();
         const size_t chunkBytes = gin_sdma_allgather::chunkBytes(count, (size_t)wordSize(type));
+        opts.groupRanks = GatherGroupRanks(chunkBytes, devComm->nRanks);
         const int gridCtas =
             gin_sdma_allgather::gatherUsesLLTier(chunkBytes, opts.llMaxBytes, opts.ll.nSlots, devComm->nRanks)
                 ? 1

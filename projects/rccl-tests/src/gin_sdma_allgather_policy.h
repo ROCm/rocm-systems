@@ -329,6 +329,32 @@ inline size_t gatherArchLLMaxBytes(const char* gcnArchName) {
                            kGatherLLDefaultMaxBytes);
 }
 
+// Gather -D 3 LSA tier: once the gathered size (chunkBytes * nRanks) reaches the
+// architecture's threshold, the root flags senders ready kGatherGroupRanks at a time,
+// so fewer of them store into it at once. Each group adds a flag round trip to the
+// root. On 2 to 5 MI455X nodes (gfx1250, 8 to 20 ranks), groups of 4 are 2 to 9%
+// faster from 256 MiB gathered and slower below it. Architectures not in the table
+// never group.
+static constexpr const char* kGatherGroupRanksEnv = "NCCL_GIN_ANVIL_SDMA_GATHER_GROUP_RANKS";
+static constexpr int kGatherGroupRanks = 4;
+static constexpr size_t kGatherGroupNever = ~(size_t)0 >> 1;
+static constexpr ArchSdmaThreshold kGatherGroupMinBytesByArch[] = {
+  {"gfx1250", 256u << 20},
+};
+
+inline size_t gatherArchGroupMinBytes(const char* gcnArchName) {
+  return archSdmaThreshold(gcnArchName, kGatherGroupMinBytesByArch,
+                           sizeof(kGatherGroupMinBytesByArch) / sizeof(kGatherGroupMinBytesByArch[0]),
+                           kGatherGroupNever);
+}
+
+// Ranks per group for one launch, 0 for no groups: envRanks when the env sets it
+// (envRanks >= 0), else kGatherGroupRanks from minBytes gathered.
+inline int gatherGroupRanks(size_t chunkBytes_, int nRanks, size_t minBytes, int envRanks) {
+  if (envRanks >= 0) return envRanks;
+  return nRanks > 0 && chunkBytes_ >= minBytes / (size_t)nRanks ? kGatherGroupRanks : 0;
+}
+
 // AllGather algorithm / bus bandwidth (GB/s) given the per-rank element count,
 // element size, elapsed seconds and rank count. algBw counts every rank's
 // contribution; busBw applies the AllGather (nranks-1)/nranks correction.
