@@ -136,7 +136,54 @@ Sample BaselinePolicy::propose(const RegionFeatures &features, const RegionContr
     }
     assigned.push_back(l);
   }
+  // VALU regions: lanes of every VGPR, and a full EXEC on half the cases, so most
+  // cases compare all 64 results (inactive lanes are covered by the other half).
+  fill_vgpr_lanes(s, contract.vgpr_count, contract.vwide_reads, seed_, case_index);
+  if (contract.vgpr_count && contract.entry_equal.test(kLocExecLo) &&
+      contract.entry_equal.test(kLocExecHi) && pick(2) == 0) {
+    s.value[kLocExecLo] = s.value[kLocExecHi] = 0xffffffffu;
+    s.events.push_back("exec:full");
+  }
   return s;
+}
+
+void fill_vgpr_lanes(Sample &s, unsigned vgpr_count, const VSet &wide, uint64_t seed,
+                     uint64_t index) {
+  s.vvalue.assign(size_t{vgpr_count} * kWaveLanes, 0);
+  if (!vgpr_count)
+    return;
+  const auto &c32 = catalog32();
+  const auto &c64 = catalog64();
+  for (unsigned r = 0; r < vgpr_count; ++r) {
+    CaseRng reg(splitmix64(seed ^ splitmix64(index * 0x9e3779b97f4a7c15ull + r) ^ 0x7667707232ull));
+    const bool pair = wide.test(r) && r + 1 < vgpr_count;
+    const bool uniform = reg() % 10 == 0;
+    const uint64_t uniform_draw = reg();
+    for (unsigned lane = 0; lane < kWaveLanes; ++lane) {
+      CaseRng rng(uniform ? uniform_draw : splitmix64(reg() ^ lane));
+      uint32_t &lo = s.vvalue[size_t{r} * kWaveLanes + lane];
+      if (pair && rng() % 3 == 0) {
+        const uint64_t v = c64[rng() % c64.size()].value;
+        lo = static_cast<uint32_t>(v);
+        s.vvalue[size_t{r + 1} * kWaveLanes + lane] = static_cast<uint32_t>(v >> 32);
+        continue;
+      }
+      const uint64_t choice = rng() % 20;
+      if (choice < 9) {
+        lo = c32[rng() % c32.size()].value;
+      } else if (choice < 11) {
+        const uint32_t bit = 1u << (rng() % 32);
+        lo = rng() % 2 ? bit : ~bit;
+      } else if (choice < 13 && r > 0) {
+        const uint32_t other = s.vvalue[size_t{rng() % r} * kWaveLanes + lane];
+        lo = rng() % 2 ? other : ~other;
+      } else {
+        lo = static_cast<uint32_t>(rng());
+      }
+    }
+    if (pair)
+      ++r; // the high half was drawn with the low half when a 64-bit value was chosen
+  }
 }
 
 void project_onto_constraints(Sample &sample, const RegionContract &contract, uint64_t entropy) {

@@ -17,7 +17,8 @@ namespace rocjitsu::isa_diff {
 namespace {
 
 constexpr uint32_t kSgprsPerWave = 104;
-constexpr uint32_t kVgprsPerWave = 32;
+constexpr uint32_t kVgprFile = 256;   ///< Per-wave VGPR file the CU is configured with.
+constexpr uint32_t kMinVgprAlloc = 8; ///< Allocation for a region with no VGPR operand.
 constexpr uint32_t kWaveSize = 64;
 
 std::array<uint8_t, 9> pack_counters(const amdgpu::WaitCounters &c) {
@@ -105,15 +106,21 @@ RegionRunner::~RegionRunner() {
 }
 
 std::unique_ptr<RegionRunner> RegionRunner::create(const std::vector<RegionInst> &insts,
-                                                   const std::string &label, std::string &error) {
+                                                   const std::string &label, std::string &error,
+                                                   unsigned vgpr_count) {
   std::unique_ptr<RegionRunner> r(new RegionRunner());
+  if (vgpr_count > kVgprFile) {
+    error = "region needs more than 256 VGPRs";
+    return nullptr;
+  }
+  r->vgpr_count_ = vgpr_count;
   r->memory_ = std::make_unique<amdgpu::GpuMemory>(label + "_mem");
   r->l2_ = std::make_unique<amdgpu::L2Cache>(label + "_l2");
   amdgpu::ComputeUnitCore::Config config{};
   config.arch = ROCJITSU_CODE_ARCH_CDNA4;
   config.num_wf_slots = 1;
   config.sgprs_per_wf = kSgprsPerWave;
-  config.vgprs_per_wf = kVgprsPerWave;
+  config.vgprs_per_wf = kVgprFile;
   config.lds_size_kb = 64;
   util::StringDiagnostic diag;
   r->cu_ = amdgpu::ComputeUnitCore::create(label, config, r->memory_.get(), r->l2_.get(),
@@ -123,7 +130,8 @@ std::unique_ptr<RegionRunner> RegionRunner::create(const std::vector<RegionInst>
     return nullptr;
   }
   const uint64_t entry = insts.empty() ? 0 : insts.front().pc;
-  r->wave_ = r->cu_->dispatch_wf(0, entry, kSgprsPerWave, kVgprsPerWave, kWaveSize);
+  r->wave_ = r->cu_->dispatch_wf(0, entry, kSgprsPerWave, vgpr_count ? vgpr_count : kMinVgprAlloc,
+                                 kWaveSize);
   if (!r->wave_) {
     error = "cannot dispatch a wave64";
     return nullptr;
@@ -184,6 +192,10 @@ void RegionRunner::load(const MachineState &s) {
   wf.set_scratch_base(s.frame.scratch_base);
   unpack_counters(s.frame.wait_counters, wf.wait_counters());
   wf.set_in_trap_handler(s.frame.in_trap_handler);
+  const uint32_t vbase = wf.vgpr_alloc().base;
+  for (unsigned r = 0; r < vgpr_count_ && r < s.vgpr_count; ++r)
+    for (unsigned lane = 0; lane < kWaveLanes; ++lane)
+      cu_->write_vgpr(vbase + r, lane, s.vget(r, lane));
   wf.begin_instruction_execution();
   wf.pc = pcs_.empty() ? 0 : pcs_.front();
 }
@@ -214,6 +226,11 @@ MachineState RegionRunner::capture() const {
   s.frame.in_trap_handler = wf.in_trap_handler();
   s.frame.wave_state = static_cast<uint8_t>(wf.state());
   s.frame.sleep_cycles = wf.sleep_cycles();
+  s.resize_vgprs(vgpr_count_);
+  const uint32_t vbase = wf.vgpr_alloc().base;
+  for (unsigned r = 0; r < vgpr_count_; ++r)
+    for (unsigned lane = 0; lane < kWaveLanes; ++lane)
+      s.vset(r, lane, cu_->read_vgpr_storage(vbase + r, lane));
   return s;
 }
 
@@ -290,6 +307,7 @@ RunOutcome RegionRunner::run(size_t budget, std::vector<TraceStep> *trace) {
       step.pc = pcs_[i];
       step.text = texts_[i];
       step.changed = differing_locs(prev, now);
+      step.vchanged = differing_vgprs(prev, now);
       step.frame_changed = differing_frame_fields(prev.frame, now.frame);
       step.after = now;
       trace->push_back(std::move(step));

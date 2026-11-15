@@ -31,6 +31,10 @@ struct Effects {
   LocSet writes; ///< Tracked locations written.
   /// Low location of each 64-bit source operand (input generation draws pair values).
   LocSet wide_reads;
+  VSet vreads;       ///< VGPRs read (whole registers; any lane).
+  VSet vwrites;      ///< VGPRs written (lanes under EXEC, or all for lane writes).
+  VSet vwide_reads;  ///< First register of each 64-bit VGPR source.
+  bool valu = false; ///< VALU instruction (reads EXEC; region-executable when allowed).
   /// True when the instruction is in the P0 allowlist and every operand is a
   /// tracked location or a constant, so a region may execute it.
   bool p0 = false;
@@ -48,6 +52,10 @@ struct Effects {
   /// naming them as operands. False only for the short list of SALU control
   /// instructions whose condition register (if any) is a classified operand.
   bool implicit_special_reads = true;
+  /// The specials (EXEC/VCC/M0) an instruction outside the executable subset reads beyond
+  /// its operands: none for SMEM and the short SALU list, EXEC for vector memory (plus M0
+  /// for its LDS forms), EXEC and M0 for LDS, all three otherwise.
+  LocSet implicit_reads;
   /// Is a direct or indirect control-flow transfer or program terminator.
   bool control_flow = false;
 };
@@ -58,6 +66,7 @@ struct Effects {
 /// One explicit source operand: the tracked locations it reads, or its constant value.
 struct SourceOperand {
   LocSet locs;                      ///< Empty for constants and untracked state.
+  VSet vlocs;                       ///< VGPR source registers.
   std::optional<uint32_t> constant; ///< Inline constant or literal (low 32 bits).
   bool fieldless = false;           ///< Implicit operand such as SCC carry-in.
 };
@@ -67,5 +76,8 @@ struct SourceOperand {
 
 /// @brief True if the mnemonic is in the P0 allowlist (operands are checked separately).
 [[nodiscard]] bool is_p0_mnemonic(std::string_view mnemonic);
+/// A VALU instruction the region runner executes: not MFMA, memory, interpolation,
+/// indirect or exception-state access.
+[[nodiscard]] bool is_region_valu(std::string_view mnemonic, uint64_t flags);
 
 } // namespace rocjitsu::isa_diff

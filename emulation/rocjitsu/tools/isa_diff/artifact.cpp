@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "artifact.h"
+#include "location.h"
 
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdhsa_metadata.h"
@@ -338,6 +339,26 @@ bool artifact_from_code_object(std::span<const uint8_t> image, const std::string
   out.text_relocations = std::move(relocs);
   read_metadata(image, out.kernel_name, out);
   return true;
+}
+
+uint32_t initial_mode(const std::vector<uint8_t> &descriptor) {
+  if (descriptor.size() < sizeof(amdhsa::kernel_descriptor_t))
+    return kDefaultInitialMode;
+  amdhsa::kernel_descriptor_t kd{};
+  std::memcpy(&kd, descriptor.data(), sizeof(kd));
+  using namespace amdhsa;
+  const uint32_t rsrc1 = kd.compute_pgm_rsrc1;
+  uint32_t mode = 0;
+  mode |= RJ_AMDHSA_BITS_GET(rsrc1, COMPUTE_PGM_RSRC1_FLOAT_ROUND_MODE_32) << 0;
+  mode |= RJ_AMDHSA_BITS_GET(rsrc1, COMPUTE_PGM_RSRC1_FLOAT_ROUND_MODE_16_64) << 2;
+  mode |= RJ_AMDHSA_BITS_GET(rsrc1, COMPUTE_PGM_RSRC1_FLOAT_DENORM_MODE_32) << 4;
+  mode |= RJ_AMDHSA_BITS_GET(rsrc1, COMPUTE_PGM_RSRC1_FLOAT_DENORM_MODE_16_64) << 6;
+  mode |= RJ_AMDHSA_BITS_GET(rsrc1, COMPUTE_PGM_RSRC1_ENABLE_DX10_CLAMP) << 8;
+  mode |= RJ_AMDHSA_BITS_GET(rsrc1, COMPUTE_PGM_RSRC1_ENABLE_IEEE_MODE) << 9;
+  mode |= RJ_AMDHSA_BITS_GET(rsrc1, COMPUTE_PGM_RSRC1_DEBUG_MODE) << 11;
+  if (RJ_AMDHSA_BITS_GET(rsrc1, COMPUTE_PGM_RSRC1_FP16_OVFL))
+    mode |= 1u << 23;
+  return mode;
 }
 
 std::string describe_relocation(const TextRelocation &r) {

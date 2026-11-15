@@ -65,9 +65,11 @@ std::optional<std::string> pc_tainted_read(const KernelModel &m, size_t begin, s
   for (size_t i = begin; i < end; ++i) {
     const InstRef &ref = m.insts()[i];
     const LocSet hit = m.pc_tainted_before(i) & ref.fx.reads;
-    if (ref.fx.reads_pc || hit.any())
+    const VSet vhit = m.pc_vtainted_before(i) & ref.fx.vreads;
+    if (ref.fx.reads_pc || hit.any() || vhit.any())
       return std::string(side) + " " + hex64(ref.pc) + " '" + ref.text +
-             "' reads a PC-derived value (" + format_locs(hit) + ")";
+             "' reads a PC-derived value (" + format_locs(hit) +
+             (vhit.any() ? (hit.any() ? "," : "") + format_vgprs(vhit) : "") + ")";
   }
   return std::nullopt;
 }
@@ -93,6 +95,33 @@ std::vector<RegionInst> region_insts(const KernelModel &m, size_t begin, size_t 
 }
 
 LocSet entry_live(const KernelModel &m, const Span &s) { return m.live_before(anchor_index(s)); }
+
+VSet ventry_live(const KernelModel &m, const Span &s) { return m.vlive_before(anchor_index(s)); }
+
+VSet vexit_live(const KernelModel &m, const Span &s) {
+  return s.begin < s.end ? m.vlive_after(s.end - 1) : m.vlive_before(s.cut);
+}
+
+VSet union_vwrites(const KernelModel &m, const Span &s) {
+  VSet w;
+  for (size_t i = s.begin; i < s.end; ++i)
+    w |= m.insts()[i].fx.vwrites;
+  return w;
+}
+
+VSet union_vtouch(const KernelModel &m, const Span &s) {
+  VSet t;
+  for (size_t i = s.begin; i < s.end; ++i)
+    t |= m.insts()[i].fx.vreads | m.insts()[i].fx.vwrites;
+  return t;
+}
+
+VSet union_vwide_reads(const KernelModel &m, const Span &s) {
+  VSet w;
+  for (size_t i = s.begin; i < s.end; ++i)
+    w |= m.insts()[i].fx.vwide_reads;
+  return w;
+}
 
 LocSet exit_live(const KernelModel &m, const Span &s) {
   return s.begin < s.end ? m.live_after(s.end - 1) : m.live_before(s.cut);
@@ -126,13 +155,6 @@ bool in_cycle(const KernelModel &m, uint32_t block) {
   return !m.cfg_complete();
 }
 
-LocSet special_reads() {
-  LocSet s;
-  for (unsigned l : {kLocExecLo, kLocExecHi, kLocVccLo, kLocVccHi, kLocM0})
-    s.set(l);
-  return s;
-}
-
 // ---------------------------------------------------------------------------
 // Pending memory effects at the cutpoint (handoff 6.1).
 
@@ -153,6 +175,8 @@ void check_pending(const KernelModel &om, const KernelModel &nm, const Candidate
   const LocSet touch_old = union_reads(om, c.o) | union_writes(om, c.o);
   const LocSet touch_new = union_reads(nm, c.n) | union_writes(nm, c.n);
   const LocSet conflict = (po.all_dests() & touch_old) | (pn.all_dests() & touch_new);
+  const VSet vconflict =
+      (po.all_vdests() & union_vtouch(om, c.o)) | (pn.all_vdests() & union_vtouch(nm, c.n));
   const std::string state = describe_pending("old", po) + "; " + describe_pending("new", pn);
   if (po.any_unknown() || pn.any_unknown()) {
     k.pending_effects = "UNKNOWN";
@@ -160,14 +184,15 @@ void check_pending(const KernelModel &om, const KernelModel &nm, const Candidate
                          "outstanding at the region entry (" +
                              state + ")",
                          "pending_effects_analysis"});
-  } else if (conflict.any()) {
+  } else if (conflict.any() || vconflict.any()) {
     k.pending_effects = "CONFLICT";
-    k.sources.push_back({"context unresolved: outstanding memory writes to {" +
-                             format_locs(conflict) +
-                             "} may land during the region, which reads or writes them; the "
-                             "isolated run starts with every input ready (" +
-                             state + ")",
-                         "pending_effects_analysis"});
+    k.sources.push_back(
+        {"context unresolved: outstanding memory writes to {" + format_locs(conflict) +
+             (vconflict.any() ? (conflict.any() ? "," : "") + format_vgprs(vconflict) : "") +
+             "} may land during the region, which reads or writes them; the "
+             "isolated run starts with every input ready (" +
+             state + ")",
+         "pending_effects_analysis"});
   } else if (po.any() || pn.any()) {
     k.pending_effects = "DISJOINT";
     k.sources.push_back({"memory operations are outstanding at the region entry, but none "
@@ -261,6 +286,41 @@ RegionPair build_region(const KernelModel &om, const KernelModel &nm, const Cand
                             : std::string("identity R_out is not justified and no checked value "
                                           "mapping exists"));
   }
+  // VGPRs (VALU support): the tracked range covers every VGPR either side names, rounded
+  // up to the allocation granule; live-ins and live-outs are restricted to it (a VGPR
+  // beyond it is not allocated, so the region cannot touch it).
+  const unsigned vextent = vgpr_extent(union_vtouch(om, c.o) | union_vtouch(nm, c.n));
+  k.vgpr_count = vextent == 0 ? 0u : std::min(kNumVgprs, (vextent + 7u) & ~7u);
+  if (k.vgpr_count) {
+    VSet range;
+    for (unsigned r = 0; r < k.vgpr_count; ++r)
+      range.set(r);
+    k.ventry_equal = (ventry_live(om, c.o) | ventry_live(nm, c.n)) & range;
+    const VSet vout_old = vexit_live(om, c.o) & range;
+    const VSet vout_new = vexit_live(nm, c.n) & range;
+    k.vobservable = vout_old | vout_new;
+    k.vwrites_old = union_vwrites(om, c.o);
+    k.vwrites_new = union_vwrites(nm, c.n);
+    k.vwide_reads = (union_vwide_reads(om, c.o) | union_vwide_reads(nm, c.n)) & range;
+    if (region.status == RegionStatus::Ready && vout_old != vout_new) {
+      region.status = RegionStatus::Inconclusive;
+      region.reason = "INCONCLUSIVE_MAPPING: VGPR continuation liveness differs at the region "
+                      "exit (old-only: " +
+                      format_vgprs(vout_old & ~vout_new) +
+                      "; new-only: " + format_vgprs(vout_new & ~vout_old) +
+                      "); identity R_out is not justified";
+    }
+    k.sources.push_back({"VGPRs v0..v" + std::to_string(k.vgpr_count - 1) +
+                             " are tracked on all 64 lanes; vgpr_entry_equal/vgpr_observable "
+                             "come from VGPR liveness, in which a write never kills (lanes "
+                             "outside EXEC keep their value)",
+                         "KernelModel backward VSet liveness"});
+  }
+  k.mode_old = initial_mode(om.artifact().descriptor);
+  k.mode_new = initial_mode(nm.artifact().descriptor);
+  k.sources.push_back({"mode_old/mode_new = MODE at dispatch from each kernel descriptor's "
+                       "compute_pgm_rsrc1 (assembler defaults without a descriptor)",
+                       "kernel descriptor"});
   k.declared_writes_old = union_writes(om, c.o);
   k.declared_writes_new = union_writes(nm, c.n); // physical new naming (effect model)
   k.wide_reads = union_wide_reads(om, c.o) | to_old(union_wide_reads(nm, c.n), inv_in);
@@ -365,19 +425,25 @@ bool step_forward(const KernelModel &om, const KernelModel &nm, const DiffResult
 struct EqState {
   LocSet eq;
   bool mem = true;
-  bool vgpr = true;
+  VSet veq;        ///< VGPRs equal on every lane.
   bool top = true; ///< Not reached yet (identity of the meet).
   bool operator==(const EqState &) const = default;
 };
 
-EqState eq_bottom() { return {LocSet{}, false, false, false}; }
+EqState eq_bottom() { return {LocSet{}, false, VSet{}, false}; }
+
+EqState eq_all() {
+  EqState s{all_locs(), true, VSet{}, false};
+  s.veq.set();
+  return s;
+}
 
 EqState eq_meet(const EqState &a, const EqState &b) {
   if (a.top)
     return b;
   if (b.top)
     return a;
-  return {a.eq & b.eq, a.mem && b.mem, a.vgpr && b.vgpr, false};
+  return {a.eq & b.eq, a.mem && b.mem, a.veq & b.veq, false};
 }
 
 struct Atom {
@@ -388,7 +454,9 @@ struct Atom {
   bool boundary = false;     ///< Empty old side at a block boundary: no R_out claim.
   LocSet writes;
   LocSet observable;
-  bool unknown = false, mem = false, vgpr = false;
+  VSet vwrites;     ///< VGPRs the changed code may write.
+  VSet vobservable; ///< VGPRs a READY region establishes equal (its R_out).
+  bool unknown = false, mem = false;
 };
 
 struct AtomMap {
@@ -434,6 +502,8 @@ AtomMap build_atoms(const KernelModel &om, const KernelModel &nm, const DiffResu
       a.kind = Atom::ReadyRegion;
       a.writes = reg.contract.declared_writes_old | reg.contract.declared_writes_new;
       a.observable = reg.contract.observable;
+      a.vwrites = reg.contract.vwrites_old | reg.contract.vwrites_new;
+      a.vobservable = reg.contract.vobservable;
     } else {
       a.kind = Atom::OpaqueRegion;
       auto absorb = [&](const KernelModel &m, size_t b, size_t e) {
@@ -442,7 +512,7 @@ AtomMap build_atoms(const KernelModel &om, const KernelModel &nm, const DiffResu
           a.writes |= ref.fx.writes;
           a.unknown = a.unknown || ref.fx.unknown_effect;
           a.mem = a.mem || (ref.inst->flags() & MEMORY_OP);
-          a.vgpr = a.vgpr || !ref.fx.salu;
+          a.vwrites |= ref.fx.vwrites;
         }
       };
       absorb(om, reg.old_side.begin, reg.old_side.end);
@@ -481,7 +551,6 @@ CompositionResult analyse_composition(const KernelModel &om, const KernelModel &
   const auto &owner = map.owner;
   (void)ni;
 
-  const LocSet specials = special_reads();
   auto common = [&](size_t i, EqState &s) {
     const InstRef &ref = oi[i];
     if (ref.fx.unknown_effect) {
@@ -491,18 +560,20 @@ CompositionResult analyse_composition(const KernelModel &om, const KernelModel &
     const uint64_t flags = ref.inst->flags();
     const bool is_mem = (flags & MEMORY_OP) != 0;
     LocSet reads = ref.fx.reads;
-    if (ref.fx.implicit_special_reads)
-      reads |= specials;
+    reads |= ref.fx.implicit_reads;
+    // A VGPR write keeps lanes outside EXEC: the destination's old value is an input too.
+    const VSet vin = ref.fx.vreads | ref.fx.vwrites;
     const bool inputs_equal = (reads & ~s.eq).none() && (!is_mem || s.mem) &&
-                              (ref.fx.salu || s.vgpr) && !(ref.fx.reads_pc && diff.layout_shift);
-    if (inputs_equal)
+                              (vin & ~s.veq).none() && !(ref.fx.reads_pc && diff.layout_shift);
+    if (inputs_equal) {
       s.eq |= ref.fx.writes;
-    else
+      s.veq |= ref.fx.vwrites;
+    } else {
       s.eq &= ~ref.fx.writes;
+      s.veq &= ~ref.fx.vwrites;
+    }
     if (is_mem && !inputs_equal)
       s.mem = false;
-    if (!ref.fx.salu && !inputs_equal)
-      s.vgpr = false;
   };
   std::vector<EqState> anchor_state(plan.regions.size());
   auto apply_atom = [&](const Atom &a, EqState &s) {
@@ -521,12 +592,15 @@ CompositionResult analyse_composition(const KernelModel &om, const KernelModel &
       }
       s.eq &= ~a.writes;
       s.mem = s.mem && !a.mem;
-      s.vgpr = s.vgpr && !a.vgpr;
+      s.veq &= ~a.vwrites;
       break;
     case Atom::ReadyRegion:
       s.eq &= ~a.writes;
-      if (!a.boundary)
+      s.veq &= ~a.vwrites;
+      if (!a.boundary) {
         s.eq |= a.observable;
+        s.veq |= a.vobservable;
+      }
       break;
     }
   };
@@ -555,12 +629,11 @@ CompositionResult analyse_composition(const KernelModel &om, const KernelModel &
     if (owner[blocks[b].end - 1] >= 0)
       return true;
     LocSet reads = last.fx.reads;
-    if (last.fx.implicit_special_reads)
-      reads |= specials;
+    reads |= last.fx.implicit_reads;
     return (reads & ~s.eq).any();
   };
 
-  const EqState initial = metadata_differs ? eq_bottom() : EqState{all_locs(), true, true, false};
+  const EqState initial = metadata_differs ? eq_bottom() : eq_all();
   const size_t nb = blocks.size();
   std::vector<EqState> out(nb);
   bool changed = true;
@@ -823,7 +896,8 @@ void derive_constraints(RegionPair &region, const BitsState &s) {
 void record_composition(RegionPair &region, const EqState &s, const std::string &how) {
   RegionContract &k = region.contract;
   const LocSet missing = s.top ? LocSet{} : (k.entry_equal & ~s.eq);
-  if (missing.none()) {
+  const VSet vmissing = s.top ? VSet{} : (k.ventry_equal & ~s.veq);
+  if (missing.none() && vmissing.none()) {
     k.composition = "HOLDS";
     k.sources.push_back({"composition: every entry_equal location is established equal at the "
                          "entry by must-equality from the kernel entry through common code " +
@@ -831,7 +905,10 @@ void record_composition(RegionPair &region, const EqState &s, const std::string 
                          "composition_check"});
   } else {
     k.composition = "FAILS";
-    k.sources.push_back({"composition: {" + format_locs(missing) +
+    std::string what = format_locs(missing);
+    if (vmissing.any())
+      what += (what.empty() ? "" : ",") + format_vgprs(vmissing);
+    k.sources.push_back({"composition: {" + what +
                              "} at the entry are not established equal by the kernel entry, "
                              "common code and upstream regions' R_out " +
                              how,
@@ -1027,10 +1104,59 @@ PlanResult plan_regions(const KernelModel &old_model, const KernelModel &new_mod
   }
   const CompositionResult comp =
       analyse_composition(old_model, new_model, diff, result, metadata_differs);
+  // Changed code downstream of each base region's exit, and what it reads (either side).
+  struct Downstream {
+    std::vector<std::string> ids;
+    LocSet reads;
+    VSet vreads;
+  };
+  std::vector<Downstream> downstream(result.regions.size());
+  for (size_t r = 0; r < result.regions.size(); ++r) {
+    const RegionPair &a = result.regions[r];
+    const Span as{a.old_side.begin, a.old_side.end, a.old_side.cut};
+    const uint32_t ab = span_block(old_model, as);
+    const size_t aend = a.old_side.end;
+    Downstream &d = downstream[r];
+    auto absorb = [&](const KernelModel &m, size_t b, size_t e) {
+      for (size_t i = b; i < e; ++i) {
+        const Effects &fx = m.insts()[i].fx;
+        if (fx.unknown_effect) {
+          d.reads = all_locs();
+          d.vreads.set();
+        }
+        d.reads |= fx.reads | fx.implicit_reads;
+        d.vreads |= fx.vreads;
+      }
+    };
+    for (size_t q = 0; q < result.regions.size(); ++q) {
+      if (q == r)
+        continue;
+      const RegionPair &other = result.regions[q];
+      const Span qs{other.old_side.begin, other.old_side.end, other.old_side.cut};
+      const uint32_t qb = span_block(old_model, qs);
+      const bool after = qb == ab ? anchor_index(qs) >= aend || in_cycle(old_model, ab)
+                                  : old_model.reaches(ab, qb);
+      if (!after)
+        continue;
+      d.ids.push_back(other.id);
+      absorb(old_model, other.old_side.begin, other.old_side.end);
+      absorb(new_model, other.new_side.begin, other.new_side.end);
+    }
+    for (uint32_t ub : unresolved_blocks)
+      if (ub == ab || old_model.reaches(ab, ub)) {
+        d.ids.push_back("control-flow change");
+        d.reads = all_locs();
+        d.vreads.set();
+      }
+  }
+
   auto decide = [&](RegionPair &region, size_t base_index, const EqState &entry_state,
                     bool is_base) {
     RegionContract &k = region.contract;
     const RegionPair &base = result.regions[base_index];
+    k.downstream_changed = downstream[base_index].ids;
+    k.downstream_reads = downstream[base_index].reads;
+    k.vdownstream_reads = downstream[base_index].vreads;
     const uint32_t ob =
         span_block(old_model, {base.old_side.begin, base.old_side.end, base.old_side.cut});
     const size_t opos =

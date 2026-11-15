@@ -52,8 +52,10 @@ void mark(RegionRoles &r, const SourceOperand &s, uint32_t role) {
 void add_instruction(RegionRoles &r, const Instruction &inst) {
   const std::string m(inst.mnemonic());
   std::vector<SourceOperand> src = source_operands(inst);
-  for (const auto &s : src)
+  for (const auto &s : src) {
     r.read |= s.locs;
+    r.vread |= s.vlocs;
+  }
   // Drop fieldless operands (SCC carry-in etc.): they are not value sources here.
   std::erase_if(src, [](const SourceOperand &s) { return s.fieldless; });
   if (src.empty())
@@ -81,6 +83,34 @@ void add_instruction(RegionRoles &r, const Instruction &inst) {
       mark(r, *s, kRoleSignedEdge);
   }
 
+  // VALU sources: pairs involving a VGPR, and a VGPR combined with a literal.
+  if (src.size() >= 2) {
+    auto first_v = [](const VSet &v) {
+      for (unsigned i = 0; i < kNumVgprs; ++i)
+        if (v.test(i))
+          return i;
+      return kNumVgprs;
+    };
+    const SourceOperand &a = src[0];
+    const SourceOperand &b = src[1];
+    const bool av = a.vlocs.any(), bv = b.vlocs.any();
+    const size_t aw = av ? a.vlocs.count() : a.locs.count();
+    const size_t bw = bv ? b.vlocs.count() : b.locs.count();
+    if ((av || bv) && aw && bw && aw == bw && aw <= 2) {
+      VectorPair p{av ? first_v(a.vlocs) : low_loc(a.locs),
+                   bv ? first_v(b.vlocs) : low_loc(b.locs),
+                   av,
+                   bv,
+                   aw == 2,
+                   m};
+      if (std::ranges::find(r.vpairs, p) == r.vpairs.end())
+        r.vpairs.push_back(p);
+    } else if (av && a.vlocs.count() == 1 && b.constant) {
+      r.vconst_relations.emplace_back(first_v(a.vlocs), *b.constant);
+    } else if (bv && b.vlocs.count() == 1 && a.constant) {
+      r.vconst_relations.emplace_back(first_v(b.vlocs), *a.constant);
+    }
+  }
   if (!is_pair_instruction(m) || src.size() < 2)
     return;
   const SourceOperand &a = src[0];
@@ -120,12 +150,12 @@ RegionRoles infer_roles(const std::vector<RegionInst> &old_insts,
       auto decoded = decoder->decode_window(window, ri.pc);
       if (decoded.failed()) {
         r.decoded = false;
-        summary.push_back({ri.pc, "<undecodable>", ri.text, {}, {}});
+        summary.push_back({ri.pc, "<undecodable>", ri.text, {}, {}, {}, {}});
         continue;
       }
       const Effects fx = classify(*decoded.value());
-      summary.push_back(
-          {ri.pc, std::string(decoded.value()->mnemonic()), ri.text, fx.reads, fx.writes});
+      summary.push_back({ri.pc, std::string(decoded.value()->mnemonic()), ri.text, fx.reads,
+                         fx.writes, fx.vreads, fx.vwrites});
       add_instruction(side == &old_insts || !new_to_old ? r : mapped, *decoded.value());
     }
   }

@@ -72,6 +72,13 @@ struct Artifact {
                                              Artifact &out, std::string &error);
 
 /// @brief Lowercase hex SHA-256 of a byte span.
+/// MODE register at dispatch for this kernel, from its descriptor's compute_pgm_rsrc1
+/// (gfx9 layout: round [3:0], denorm [7:4], DX10_CLAMP 8, IEEE 9, DEBUG 11, FP16_OVFL 23),
+/// as RocJITsu's command processor sets it. Without a descriptor (raw words) the
+/// assembler defaults are used: round-to-nearest, f32 denormals flushed, f16/f64
+/// denormals kept, DX10_CLAMP and IEEE on.
+[[nodiscard]] uint32_t initial_mode(const std::vector<uint8_t> &descriptor);
+
 [[nodiscard]] std::string sha256_hex(std::span<const uint8_t> bytes);
 [[nodiscard]] std::string sha256_hex(std::string_view text);
 

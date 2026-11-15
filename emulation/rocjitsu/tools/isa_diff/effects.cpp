@@ -184,6 +184,7 @@ constexpr int kSelScc = 253;
 
 enum class Space {
   Tracked,  ///< Names tracked locations (added to the LocSet).
+  Vector,   ///< Names VGPRs (added to the VSet).
   Outside,  ///< Names state outside the tracked universe (VGPR, TTMP, memory, ...).
   Constant, ///< Inline constant or literal.
   Pc,       ///< The program counter.
@@ -193,6 +194,7 @@ enum class Space {
 struct OperandClass {
   Space space = Space::Unknown;
   LocSet locs;
+  VSet vlocs;
   std::string what;
 };
 
@@ -269,9 +271,18 @@ OperandClass classify_operand(const Operand &op) {
       out.what = "pc";
       return out;
     case RegClass::VGPR:
+      if (ref->index + std::max<unsigned>(ref->width, 1) > kNumVgprs) {
+        out.space = Space::Unknown;
+        out.what = "VGPR beyond v255";
+        return out;
+      }
+      out.space = Space::Vector;
+      for (unsigned i = 0; i < std::max<unsigned>(ref->width, 1); ++i)
+        out.vlocs.set(ref->index + i);
+      return out;
     case RegClass::ACC_VGPR:
       out.space = Space::Outside;
-      out.what = "vector register";
+      out.what = "accumulation register (AGPR)";
       return out;
     case RegClass::TTMP:
       out.space = Space::Outside;
@@ -333,6 +344,13 @@ OperandClass classify_operand(const Operand &op) {
   return out;
 }
 
+LocSet special_locs() {
+  LocSet s;
+  for (unsigned l : {kLocExecLo, kLocExecHi, kLocVccLo, kLocVccHi, kLocM0})
+    s.set(l);
+  return s;
+}
+
 bool has_mnemonic_prefix(std::string_view mnemonic, std::string_view prefix) {
   return mnemonic.substr(0, prefix.size()) == prefix;
 }
@@ -348,6 +366,8 @@ std::vector<SourceOperand> source_operands(const Instruction &inst) {
     const OperandClass cls = classify_operand(op);
     if (cls.space == Space::Tracked)
       s.locs = cls.locs;
+    else if (cls.space == Space::Vector)
+      s.vlocs = cls.vlocs;
     else if (cls.space == Space::Constant)
       if (auto v = op.const_value())
         s.constant = static_cast<uint32_t>(*v);
@@ -358,6 +378,19 @@ std::vector<SourceOperand> source_operands(const Instruction &inst) {
 
 bool is_p0_mnemonic(std::string_view mnemonic) {
   return std::ranges::find(kP0Mnemonics, mnemonic) != kP0Mnemonics.end();
+}
+
+bool is_region_valu(std::string_view mnemonic, uint64_t flags) {
+  if (!(flags & VALU) ||
+      (flags & (MFMA | MEMORY_OP | SMEM | VMEM | LDS | WAITCNT | BARRIER | SUSPENDS_WAVE)))
+    return false;
+  // Interpolation (LDS parameters via M0), indirect VGPR access, MFMA-family and
+  // exception-state instructions stay outside.
+  for (std::string_view p :
+       {"v_interp", "v_movrel", "v_mfma", "v_smfmac", "v_clrexcp", "v_accvgpr", "v_swaprel"})
+    if (mnemonic.substr(0, p.size()) == p)
+      return false;
+  return true;
 }
 
 Effects classify(const Instruction &inst) {
@@ -380,6 +413,15 @@ Effects classify(const Instruction &inst) {
         for (unsigned loc = 0; loc < kNumLocs; ++loc)
           if (cls.locs.test(loc)) {
             fx.wide_reads.set(loc);
+            break;
+          }
+      break;
+    case Space::Vector:
+      (is_dst ? fx.vwrites : fx.vreads) |= cls.vlocs;
+      if (!is_dst && cls.vlocs.count() == 2)
+        for (unsigned r = 0; r < kNumVgprs; ++r)
+          if (cls.vlocs.test(r)) {
+            fx.vwide_reads.set(r);
             break;
           }
       break;
@@ -423,7 +465,7 @@ Effects classify(const Instruction &inst) {
   inst.implicit_defs(implicit_defs);
   const bool has_implicit = !implicit_uses.none() || !implicit_defs.none();
   bool implicit_unmapped = false;
-  auto translate = [&](const RegisterSet &set, LocSet &into) {
+  auto translate = [&](const RegisterSet &set, LocSet &into, VSet &vinto) {
     set.for_each([&](const RegisterRef &r) {
       switch (r.cls) {
       case RegClass::SGPR:
@@ -436,6 +478,14 @@ Effects classify(const Instruction &inst) {
         }
         break;
       case RegClass::VGPR:
+        for (unsigned w = 0; w < std::max<unsigned>(r.width, 1); ++w) {
+          const unsigned n = r.index + w;
+          if (n < kNumVgprs)
+            vinto.set(n);
+          else
+            implicit_unmapped = true;
+        }
+        break;
       case RegClass::ACC_VGPR:
         break;
       case RegClass::EXEC:
@@ -459,12 +509,15 @@ Effects classify(const Instruction &inst) {
     });
   };
   LocSet hidden_reads, hidden_writes;
-  translate(implicit_uses, hidden_reads);
-  translate(implicit_defs, hidden_writes);
+  VSet hidden_vreads, hidden_vwrites;
+  translate(implicit_uses, hidden_reads, hidden_vreads);
+  translate(implicit_defs, hidden_writes, hidden_vwrites);
   const bool hidden_unknown = has_implicit && (is_p0_mnemonic(mnemonic) || implicit_unmapped);
   if (has_implicit && !hidden_unknown) {
     fx.reads |= hidden_reads;
     fx.writes |= hidden_writes;
+    fx.vreads |= hidden_vreads;
+    fx.vwrites |= hidden_vwrites;
   }
   const bool indirect_sgpr = has_mnemonic_prefix(mnemonic, "s_movrel") ||
                              has_mnemonic_prefix(mnemonic, "s_set_gpr_idx") ||
@@ -475,16 +528,29 @@ Effects classify(const Instruction &inst) {
       unknown_what = indirect_sgpr ? "indirect SGPR access" : "implicit register effects";
   }
 
-  // P0 executability.
-  if (!is_p0_mnemonic(mnemonic)) {
-    fx.reject_reason = "opcode not in the P0 SALU allowlist: " + std::string(mnemonic);
+  // A VALU instruction reads EXEC (the lanes it writes). v_readlane/v_writelane ignore
+  // it; counting it as read is conservative.
+  fx.valu = (flags & VALU) != 0;
+  if (fx.valu) {
+    fx.reads.set(kLocExecLo);
+    fx.reads.set(kLocExecHi);
+  }
+
+  // Region executability: the SALU allowlist, or a plain VALU instruction.
+  const bool salu_ok = is_p0_mnemonic(mnemonic);
+  const bool valu_ok = is_region_valu(mnemonic, flags);
+  if (!salu_ok && !valu_ok) {
+    fx.reject_reason = "opcode not in the region allowlist (SALU allowlist or plain VALU): " +
+                       std::string(mnemonic);
   } else if (fx.unknown_effect) {
     fx.reject_reason = "unmodelled effect: " + unknown_what;
   } else if (!first_outside.empty()) {
     fx.reject_reason = first_outside;
-  } else if (fx.control_flow || (flags & (MEMORY_OP | WAITCNT | BARRIER | SUSPENDS_WAVE | VALU |
-                                          SMEM | VMEM | LDS | MFMA)) != 0) {
-    fx.reject_reason = "instruction class outside P0";
+  } else if (fx.control_flow ||
+             (flags & (MEMORY_OP | WAITCNT | BARRIER | SUSPENDS_WAVE | SMEM | VMEM | LDS | MFMA)) !=
+                 0 ||
+             (salu_ok && fx.valu)) {
+    fx.reject_reason = "instruction class outside the executable region subset";
   } else if (inst.data() != nullptr) {
     fx.reject_reason = "instruction carries dynamic state";
   } else if (inst.execute == nullptr) {
@@ -492,9 +558,24 @@ Effects classify(const Instruction &inst) {
   } else {
     fx.p0 = true;
   }
-  fx.implicit_special_reads =
-      !fx.p0 && (fx.unknown_effect || !fx.salu ||
-                 std::ranges::find(kNoImplicitReads, mnemonic) == kNoImplicitReads.end());
+  if (!fx.p0) {
+    const bool lds = (flags & LDS) != 0 || mnemonic.find("lds") != std::string_view::npos;
+    if (fx.unknown_effect) {
+      fx.implicit_reads = special_locs();
+    } else if (fx.salu && std::ranges::find(kNoImplicitReads, mnemonic) != kNoImplicitReads.end()) {
+      // Operands name everything it reads.
+    } else if ((flags & SMEM) != 0) {
+      // Scalar memory: address and offset operands only.
+    } else if ((flags & VMEM) != 0 || (flags & LDS) != 0) {
+      fx.implicit_reads.set(kLocExecLo);
+      fx.implicit_reads.set(kLocExecHi);
+      if (lds)
+        fx.implicit_reads.set(kLocM0);
+    } else {
+      fx.implicit_reads = special_locs();
+    }
+  }
+  fx.implicit_special_reads = fx.implicit_reads.any();
   return fx;
 }
 

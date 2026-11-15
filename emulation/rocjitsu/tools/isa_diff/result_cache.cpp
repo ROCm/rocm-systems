@@ -189,6 +189,10 @@ std::optional<RegionResult> load_cached_result(const std::string &cache_dir,
   r.old_insts_executed = rj["execution"]["old_insts_executed"].as_uint();
   r.new_insts_executed = rj["execution"]["new_insts_executed"].as_uint();
   r.policy = rj["policy"].as_string();
+  if (auto ml = parse_locs(rj["mismatch_locations"].as_string()))
+    r.mismatch_locs = *ml;
+  if (auto mv = parse_vgprs(rj["vgpr_mismatch_locations"].as_string()))
+    r.mismatch_vlocs = *mv;
   r.seed = rj["seed"].as_uint();
   const Json &e = rj["expansion"];
   if (e.is_object()) {

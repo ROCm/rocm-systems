@@ -4,6 +4,7 @@
 #include "diff.h"
 #include "json.h"
 
+#include "rocjitsu/code/kernel_descriptor_abi.h"
 #include "rocjitsu/isa/instruction.h"
 
 #include <algorithm>
@@ -48,6 +49,29 @@ bool lcs(const std::vector<std::string> &a, const std::vector<std::string> &b, s
     }
   }
   return true;
+}
+
+} // namespace
+
+namespace {
+
+/// Highest VGPR any reachable instruction names, plus one.
+unsigned vgpr_usage(const KernelModel &m) {
+  VSet used;
+  for (const auto &ref : m.insts())
+    used |= ref.fx.vreads | ref.fx.vwrites;
+  return vgpr_extent(used);
+}
+
+/// Architectural VGPRs the descriptor allocates on gfx950 (unified file: ACCUM_OFFSET
+/// marks where AGPRs start), or 0 without a descriptor.
+unsigned vgpr_allocation(const std::vector<uint8_t> &descriptor) {
+  if (descriptor.size() < sizeof(amdhsa::kernel_descriptor_t))
+    return 0;
+  amdhsa::kernel_descriptor_t kd{};
+  std::memcpy(&kd, descriptor.data(), sizeof(kd));
+  using namespace amdhsa;
+  return (RJ_AMDHSA_BITS_GET(kd.compute_pgm_rsrc3, COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET) + 1) * 4;
 }
 
 } // namespace
@@ -191,6 +215,26 @@ DiffResult diff_kernels(const KernelModel &old_model, const KernelModel &new_mod
   const auto fields = descriptor_semantic_differences(oa.descriptor, na.descriptor, layout_only);
   for (const auto &f : fields)
     r.notes.push_back({ChangeKind::Metadata, "kernel descriptor field differs: " + f, true});
+  // Register-count metadata (.vgpr_count, .sgpr_count, .agpr_count) is informational
+  // when the descriptors agree on every semantic field and each kernel's VGPRs fit its
+  // allocation; a kernel naming VGPRs beyond its allocation is reported as semantic.
+  bool counts_informational = fields.empty();
+  for (const auto *m : {&old_model, &new_model}) {
+    const unsigned alloc = vgpr_allocation(m->artifact().descriptor);
+    const unsigned used = vgpr_usage(*m);
+    if (alloc == 0) {
+      counts_informational = false;
+      continue;
+    }
+    if (used > alloc) {
+      counts_informational = false;
+      r.notes.push_back({ChangeKind::Metadata,
+                         std::string(m == &old_model ? "old" : "new") + " kernel names v" +
+                             std::to_string(used - 1) + " beyond its descriptor allocation of " +
+                             std::to_string(alloc) + " VGPRs",
+                         true});
+    }
+  }
   if (layout_only)
     r.notes.push_back({ChangeKind::Layout,
                        "kernel descriptor differs only in kernel_code_entry_byte_offset", false});
@@ -252,6 +296,16 @@ DiffResult diff_kernels(const KernelModel &old_model, const KernelModel &new_mod
         const std::string vb = ib == b.end() ? "<absent>" : ib->second;
         if (va == vb)
           continue;
+        const bool count_field = k == ".vgpr_count" || k == ".sgpr_count" || k == ".agpr_count";
+        if (count_field && counts_informational && std::string_view(what) == "kernel metadata") {
+          r.notes.push_back({ChangeKind::Metadata,
+                             std::string(what) + " field differs: " + k + " (old " + va + ", new " +
+                                 vb +
+                                 "); informational: descriptors agree and both kernels' VGPRs "
+                                 "fit their allocation",
+                             false});
+          continue;
+        }
         if (++n <= 32)
           r.notes.push_back(
               {ChangeKind::Metadata,

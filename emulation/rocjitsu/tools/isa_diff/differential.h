@@ -81,6 +81,7 @@ struct Mismatch {
   std::string phase; ///< "boundary" or "random".
   std::string kind;  ///< observable | effect_model | frame_preservation | exit_status_divergence
   LocSet locs;
+  VSet vlocs; ///< VGPRs involved (VALU support).
   std::vector<std::string> frame_fields;
   std::string detail;
   MachineState init_old, init_new, final_old, final_new;
@@ -145,7 +146,13 @@ struct RegionResult {
   Json unrestricted;
   uint64_t novelty_buckets = 0; ///< Distinct bounded outcome classes seen.
   uint64_t novel_boundary = 0, novel_random = 0;
-  std::string case_log;        ///< Path of the per-case JSONL log, if written.
+  std::string case_log; ///< Path of the per-case JSONL log, if written.
+  /// Union of the locations of every observable mismatch.
+  LocSet mismatch_locs;
+  VSet mismatch_vlocs;
+  /// Set by test_case: every mismatching location is read by changed code downstream of
+  /// the region, which may compensate it; the mismatch is then a witness, not a verdict.
+  bool compensable = false;
   std::string pending_effects; ///< From the contract (handoff 6.1).
   std::string composition;     ///< From the contract (handoff 5.2).
   /// Set when the result came from the cache: to_json() returns it verbatim.

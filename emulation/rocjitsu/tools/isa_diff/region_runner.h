@@ -65,6 +65,7 @@ struct TraceStep {
   uint64_t pc = 0;
   std::string text;
   LocSet changed;
+  VSet vchanged;
   std::vector<std::string> frame_changed;
   MachineState after;
 };
@@ -72,8 +73,11 @@ struct TraceStep {
 class RegionRunner {
 public:
   /// @brief Build a runner. Decode failures do not fail creation; run() reports them.
+  /// @param vgpr_count VGPRs v0..v{n-1} the wave allocates, loads and captures; any
+  /// access beyond them is an invalid register access. 0: no VGPR state (SALU region).
   static std::unique_ptr<RegionRunner> create(const std::vector<RegionInst> &insts,
-                                              const std::string &label, std::string &error);
+                                              const std::string &label, std::string &error,
+                                              unsigned vgpr_count = 0);
   ~RegionRunner();
   RegionRunner(const RegionRunner &) = delete;
   RegionRunner &operator=(const RegionRunner &) = delete;
@@ -106,6 +110,7 @@ private:
   size_t decode_failed_index_ = 0;
   std::string decode_error_;
   Frame baseline_;
+  unsigned vgpr_count_ = 0;
   uint64_t total_executed_ = 0;
 };
 

@@ -4,7 +4,7 @@
   "evidence": "synthetic mismatch from injected mutation; not an LLVM finding",
   "witness_scope": "LOCAL_ONLY",
   "region_id": "r0-syn-wrong-opcode",
-  "prepared_key": "6f6a10c739d7780fc1f22393746e5a0b2a41c48451289e9885c159e0a93a3e29",
+  "prepared_key": "8cd5022c2fe8ee3d97186241062f46b9e5b4be70e37f5172cd55fb11f5257e3b",
   "seed": 1,
   "policy": "baseline-v1",
   "case_index": 1,
@@ -64,6 +64,8 @@
       "declared_writes_old": "s8,s9,scc",
       "declared_writes_new": "s8,s9,scc",
       "wide_reads": "s4,s8",
+      "mode_old": "0x000003c0",
+      "mode_new": "0x000003c0",
       "constraints": [],
       "exit_mapping": "single fall-through exit after the last region instruction",
       "pending_effects": "NONE",
@@ -72,6 +74,10 @@
       "status": "ESTABLISHED",
       "depends_on": [],
       "sources": [
+        {
+          "what": "mode_old/mode_new = MODE at dispatch from each kernel descriptor's compute_pgm_rsrc1 (assembler defaults without a descriptor)",
+          "source": "kernel descriptor"
+        },
         {
           "what": "entry_equal = live-in(old) | live-in(new) at the region entry",
           "source": "KernelModel backward LocSet liveness over BasicBlock::build_reachable CFG"
@@ -106,7 +112,7 @@
         }
       ]
     },
-    "prepared_key": "6f6a10c739d7780fc1f22393746e5a0b2a41c48451289e9885c159e0a93a3e29"
+    "prepared_key": "8cd5022c2fe8ee3d97186241062f46b9e5b4be70e37f5172cd55fb11f5257e3b"
   },
   "initial_state": {
     "old": {
@@ -222,7 +228,7 @@
       },
       "frame": {
         "status_except_scc": "0x00000000",
-        "mode": "0x00000000",
+        "mode": "0x000003c0",
         "trapsts": "0x00000000",
         "ttmp": ["0x00000000", "0x00000000", "0x00000000", "0x00000000", "0x00000000", "0x00000000", "0x00000000", "0x00000000", "0x00000000", "0x00000000", "0x00000000", "0x00000000", "0x00000000", "0x00000000", "0x00000000", "0x00000000"],
         "scratch_base": "0x0",
@@ -347,7 +353,7 @@
       },
       "frame": {
         "status_except_scc": "0x00000000",
-        "mode": "0x00000000",
+        "mode": "0x000003c0",
         "trapsts": "0x00000000",
         "ttmp": ["0x00000000", "0x00000000", "0x00000000", "0x00000000", "0x00000000", "0x00000000", "0x00000000", "0x00000000", "0x00000000", "0x00000000", "0x00000000", "0x00000000", "0x00000000", "0x00000000", "0x00000000", "0x00000000"],
         "scratch_base": "0x0",
@@ -474,7 +480,7 @@
       },
       "frame": {
         "status_except_scc": "0x00000000",
-        "mode": "0x00000000",
+        "mode": "0x000003c0",
         "trapsts": "0x00000000",
         "ttmp": ["0x00000000", "0x00000000", "0x00000000", "0x00000000", "0x00000000", "0x00000000", "0x00000000", "0x00000000", "0x00000000", "0x00000000", "0x00000000", "0x00000000", "0x00000000", "0x00000000", "0x00000000", "0x00000000"],
         "scratch_base": "0x0",
@@ -599,7 +605,7 @@
       },
       "frame": {
         "status_except_scc": "0x00000000",
-        "mode": "0x00000000",
+        "mode": "0x000003c0",
         "trapsts": "0x00000000",
         "ttmp": ["0x00000000", "0x00000000", "0x00000000", "0x00000000", "0x00000000", "0x00000000", "0x00000000", "0x00000000", "0x00000000", "0x00000000", "0x00000000", "0x00000000", "0x00000000", "0x00000000", "0x00000000", "0x00000000"],
         "scratch_base": "0x0",
@@ -775,7 +781,7 @@
         },
         "frame": {
           "status_except_scc": "0x00000000",
-          "mode": "0x00000000",
+          "mode": "0x000003c0",
           "trapsts": "0x00000000",
           "ttmp": ["0x00000000", "0x00000000", "0x00000000", "0x00000000", "0x00000000", "0x00000000", "0x00000000", "0x00000000", "0x00000000", "0x00000000", "0x00000000", "0x00000000", "0x00000000", "0x00000000", "0x00000000", "0x00000000"],
           "scratch_base": "0x0",
@@ -900,7 +906,7 @@
         },
         "frame": {
           "status_except_scc": "0x00000000",
-          "mode": "0x00000000",
+          "mode": "0x000003c0",
           "trapsts": "0x00000000",
           "ttmp": ["0x00000000", "0x00000000", "0x00000000", "0x00000000", "0x00000000", "0x00000000", "0x00000000", "0x00000000", "0x00000000", "0x00000000", "0x00000000", "0x00000000", "0x00000000", "0x00000000", "0x00000000", "0x00000000"],
           "scratch_base": "0x0",
@@ -921,7 +927,7 @@
     "tool": "rj_isa_diff",
     "tool_version": "0.1.0-p0",
     "schema_version": "rj_isa_diff.v1",
-    "rocjitsu_revision": "0cd52dcbdb47b2670f2bf8024c819e986d285fff",
+    "rocjitsu_revision": "d5b78f4fa542e119215503b081375738b94094f3",
     "rocjitsu_version": "0.3.0",
     "semantics": "RocJITsu ComputeUnitCore::execute_instruction, gfx950 (CDNA4) wave64, default arithmetic semantics",
     "compiler": "13.4.0"
@@ -971,15 +977,15 @@
         {
           "argv": ["/opt/rocm/llvm/bin/llvm-mc", "-triple=amdgcn-amd-amdhsa", "-mcpu=gfx950", "-filetype=obj", "-o", "co/artifacts/old.o", "co_old.s"],
           "exit_code": 0,
-          "elapsed_ns": 2470620
+          "elapsed_ns": 2578127
         },
         {
           "argv": ["/opt/rocm/llvm/bin/ld.lld", "-shared", "--emit-relocs", "-o", "co/artifacts/old.hsaco", "co/artifacts/old.o"],
           "exit_code": 0,
-          "elapsed_ns": 6643547
+          "elapsed_ns": 7607960
         }
       ],
-      "compile_ns": 9114167,
+      "compile_ns": 10186087,
       "executed_object": "linked_code_object",
       "note": "executed bytes are the code object linked from the re-assembled source, decoded by RocJITsu; they are not necessarily an original binary emission",
       "toolchain": {
@@ -1000,15 +1006,15 @@
         {
           "argv": ["/opt/rocm/llvm/bin/llvm-mc", "-triple=amdgcn-amd-amdhsa", "-mcpu=gfx950", "-filetype=obj", "-o", "co/artifacts/new.o", "co_new.s"],
           "exit_code": 0,
-          "elapsed_ns": 2783230
+          "elapsed_ns": 2535612
         },
         {
           "argv": ["/opt/rocm/llvm/bin/ld.lld", "-shared", "--emit-relocs", "-o", "co/artifacts/new.hsaco", "co/artifacts/new.o"],
           "exit_code": 0,
-          "elapsed_ns": 5831357
+          "elapsed_ns": 6653061
         }
       ],
-      "compile_ns": 8614587,
+      "compile_ns": 9188673,
       "executed_object": "linked_code_object",
       "note": "executed bytes are the code object linked from the re-assembled source, decoded by RocJITsu; they are not necessarily an original binary emission",
       "toolchain": {

@@ -7,8 +7,10 @@ the region on paired inputs through RocJITsu's own instruction execution
 (`ComputeUnitCore::execute_instruction`). Each case executes **only the region**; the
 whole kernel is decoded and analysed once.
 
-P0 scope: gfx950 (CDNA4), wave64, straight-line integer SALU regions inside one basic
-block. The kernel around a region may contain anything; the region may not.
+Scope: gfx950 (CDNA4), wave64, straight-line regions inside one basic block, made of
+integer SALU instructions (an explicit allowlist) and plain VALU instructions. VALU
+excludes memory, MFMA, interpolation, indirect VGPR access, and exception state. The
+kernel around a region may contain anything; the region may not.
 
 Inputs are AMDGPU code objects, raw instruction words, and, through the LLVM plugin
 (`llvm/`), `.s` and `.ll` sources. The core never runs LLVM; the plugin is a separate
@@ -147,6 +149,70 @@ base result keeps its local mismatch, and `expansion.resolution` records the out
 - `NO_EXPANSION_AVAILABLE`.
 
 `--context N` still adds manual backward context to every base region.
+
+## VALU support
+
+VGPRs are part of the state, with all 64 lanes of each one.
+
+- **Effects.** VGPR operands become `vreads`/`vwrites`. A VALU instruction also reads
+  EXEC, the lanes it writes.
+- **Implicit reads.** Instructions outside the executable subset read the specials
+  their class implies, beyond their operands:
+  - SMEM: none;
+  - vector memory: EXEC, plus M0 for LDS forms;
+  - LDS: EXEC and M0;
+  - anything else: EXEC/VCC/M0.
+
+  Implicit uses reported by the decoder are translated: `global_store` names its SGPR
+  base that way.
+- **Liveness.** VGPR liveness is a backward dataflow in which a write never kills,
+  because lanes outside EXEC keep their value.
+  - `vgpr_entry_equal` and `vgpr_observable` come from this liveness, restricted to
+    the tracked range.
+  - A renamed dead VGPR temporary is not observable.
+- **Tracked range.** The contract tracks `v0..v{vgpr_count-1}`: every VGPR either side
+  names, rounded up to the allocation granule of 8. The runner allocates exactly that
+  range, so an access beyond it is an invalid register access, never a silent write.
+- **Comparison.** Every lane of every observable VGPR is compared, active or not. A
+  rewrite that clobbers lanes outside EXEC is caught.
+  - The effect model also covers VGPRs: each side may change only its
+    `vgpr_writes_*`.
+  - Counterexamples list the differing lanes.
+- **MODE.** Each side starts in its own kernel's MODE: round and denorm modes,
+  DX10_CLAMP and IEEE, from the descriptor's `compute_pgm_rsrc1`. These are
+  `mode_old`/`mode_new` in the contract. Raw word streams use the assembler defaults.
+- **Composition.** Must-equality is tracked per VGPR. A VALU write is equal when all
+  its inputs and its destination's previous value are equal.
+- **Pending memory.** VGPR destinations of outstanding loads count: a region reading
+  one gets `pending_effects: CONFLICT`.
+- **Inputs are lane-parallel.**
+  - Every case fills each VGPR with 64 different values: catalog values (with
+    NaN/Inf/denormal encodings), 64-bit catalog values for 64-bit sources, single
+    bits, copies of other registers' lanes, and random values.
+  - The mandatory sweep adds vector phases:
+    - catalog chunks of 64 values per VGPR (`vector.lanes`);
+    - 64-bit chunks (`vector.lanes64`);
+    - the cross product of two VGPR sources (`vector.cross`);
+    - every scalar catalog value against every lane chunk for mixed SGPR/VGPR
+      sources (`vector.scalar_cross`);
+    - values around literals (`vector.constrel`);
+    - alternate-lane and lane-pattern EXEC (`vector.exec`).
+  - Vector phases run with all lanes active. The random phase uses a full EXEC on half
+    of its cases.
+- **Reduction.** After seed independence, lanes outside the mismatching ones are
+  zeroed, then each shared VGPR is shrunk at the first mismatching lane.
+
+A local mismatch whose locations are read by changed code downstream of the region
+(another region, or a control-flow change) may be compensated there. Context expansion
+cannot reach it, because the code in between is not common. Such a mismatch:
+
+- stays a `LOCAL_ONLY` witness;
+- is marked `compensable_downstream`;
+- is listed in `unresolved`;
+- leaves the overall result `INCONCLUSIVE`, never `LOCAL_MISMATCH`.
+
+The contract records the consumers in `downstream_changed`, `downstream_reads` and
+`vgpr_downstream_reads`.
 
 ## Manual regions and register maps
 
@@ -303,9 +369,10 @@ reduced inputs). `replay` runs the reduced case. The program is never reduced.
 
 A region is `UNSUPPORTED`, with a reason, if it contains any of:
 
-- non-allowlisted opcodes: VALU, memory, MFMA, `s_waitcnt`, barriers, branches,
-  `s_getreg`/`s_setreg`, `s_movrel*`, messages/traps;
-- operands outside the modelled state: TTMP, FLAT_SCRATCH, XNACK_MASK, apertures;
+- opcodes outside the executable subset: memory (SMEM, VMEM, LDS), MFMA, `v_interp*`,
+  `v_movrel*`, `v_clrexcp`, `s_waitcnt`, barriers, branches, `s_getreg`/`s_setreg`,
+  `s_movrel*`, messages/traps, and SALU instructions not on the allowlist;
+- operands outside the modelled state: TTMP, FLAT_SCRATCH, XNACK_MASK, apertures, AGPRs;
 - PC-derived inputs, tracked by forward taint from `s_getpc_b64`;
 - instructions whose bytes are patched by a relocation.
 

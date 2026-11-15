@@ -474,3 +474,66 @@ v_mov_b32 v2, s5
 v_mov_b32 v0, 0
 global_store_dword v0, v2, s[6:7]
 s_endpgm
+
+=== valu_old
+v_add_u32_e32 v2, v0, v1
+v_lshlrev_b32_e32 v3, 2, v2
+global_store_dword v4, v3, s[0:1]
+s_endpgm
+
+=== valu_new
+v_add_u32_e32 v2, v1, v0
+v_lshlrev_b32_e32 v3, 1, v2
+v_lshlrev_b32_e32 v3, 1, v3
+global_store_dword v4, v3, s[0:1]
+s_endpgm
+
+=== valuwrong_new
+v_add_u32_e32 v2, v1, v0
+v_lshlrev_b32_e32 v3, 3, v2
+global_store_dword v4, v3, s[0:1]
+s_endpgm
+
+=== valuclobber_old
+v_mov_b32_e32 v3, v2
+global_store_dword v4, v3, s[0:1]
+s_endpgm
+
+=== valuclobber_new
+s_mov_b64 s[10:11], exec
+s_mov_b64 exec, -1
+v_mov_b32_e32 v3, v2
+s_mov_b64 exec, s[10:11]
+global_store_dword v4, v3, s[0:1]
+s_endpgm
+
+=== valudead_old
+v_add_u32_e32 v5, v0, v1
+v_mov_b32_e32 v3, v5
+global_store_dword v4, v3, s[0:1]
+s_endpgm
+
+=== valudead_new
+v_add_u32_e32 v6, v0, v1
+v_mov_b32_e32 v3, v6
+global_store_dword v4, v3, s[0:1]
+s_endpgm
+
+=== valupending_old
+global_load_dword v0, v4, s[0:1]
+v_add_u32_e32 v2, v0, v1
+s_waitcnt vmcnt(0)
+global_store_dword v4, v2, s[0:1]
+s_endpgm
+
+=== valupending_new
+global_load_dword v0, v4, s[0:1]
+v_add_u32_e32 v2, v1, v0
+s_waitcnt vmcnt(0)
+global_store_dword v4, v2, s[0:1]
+s_endpgm
+
+=== valucvt
+v_cvt_f32_f16_e32 v1, v0
+global_store_dword v2, v1, s[0:1]
+s_endpgm

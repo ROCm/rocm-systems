@@ -140,6 +140,16 @@ Json RegionContract::to_json() const {
   j.set("declared_writes_old", format_locs(declared_writes_old));
   j.set("declared_writes_new", format_locs(declared_writes_new));
   j.set("wide_reads", format_locs(wide_reads));
+  if (vgpr_count) {
+    j.set("vgpr_count", vgpr_count);
+    j.set("vgpr_entry_equal", format_vgprs(ventry_equal));
+    j.set("vgpr_observable", format_vgprs(vobservable));
+    j.set("vgpr_writes_old", format_vgprs(vwrites_old));
+    j.set("vgpr_writes_new", format_vgprs(vwrites_new));
+    j.set("vgpr_wide_reads", format_vgprs(vwide_reads));
+  }
+  j.set("mode_old", hex32(mode_old));
+  j.set("mode_new", hex32(mode_new));
   Json cs = Json::array();
   for (const auto &c : constraints) {
     Json cj = Json::object();
@@ -169,6 +179,14 @@ Json RegionContract::to_json() const {
   for (const auto &f : frame_field_names())
     frame.push(f);
   j.set("frame_preserved", std::move(frame));
+  if (!downstream_changed.empty()) {
+    Json dc = Json::array();
+    for (const auto &d : downstream_changed)
+      dc.push(d);
+    j.set("downstream_changed", std::move(dc));
+    j.set("downstream_reads", format_locs(downstream_reads));
+    j.set("vgpr_downstream_reads", format_vgprs(vdownstream_reads));
+  }
   j.set("status", contract_status_name(status));
   Json deps = Json::array();
   for (const auto &d : depends_on)
@@ -212,6 +230,37 @@ std::optional<RegionContract> RegionContract::from_json(const Json &j, std::stri
       !locs("observable", c.observable) || !locs("declared_writes_old", c.declared_writes_old) ||
       !locs("declared_writes_new", c.declared_writes_new) || !locs("wide_reads", c.wide_reads))
     return std::nullopt;
+  if (j.has("vgpr_count")) {
+    auto n = json_u64(j["vgpr_count"]);
+    if (!n || *n > kNumVgprs) {
+      error = "bad vgpr_count";
+      return std::nullopt;
+    }
+    c.vgpr_count = static_cast<unsigned>(*n);
+    auto vlocs = [&](const char *key, VSet &out) {
+      auto parsed = parse_vgprs(j[key].as_string());
+      if (!parsed || vgpr_extent(*parsed) > c.vgpr_count) {
+        error = std::string("bad VGPR list in '") + key + "'";
+        return false;
+      }
+      out = *parsed;
+      return true;
+    };
+    if (!vlocs("vgpr_entry_equal", c.ventry_equal) || !vlocs("vgpr_observable", c.vobservable) ||
+        !vlocs("vgpr_writes_old", c.vwrites_old) || !vlocs("vgpr_writes_new", c.vwrites_new) ||
+        !vlocs("vgpr_wide_reads", c.vwide_reads))
+      return std::nullopt;
+  }
+  for (const char *key : {"mode_old", "mode_new"}) {
+    if (!j.has(key))
+      continue;
+    auto v = json_u64(j[key]);
+    if (!v) {
+      error = std::string("bad ") + key;
+      return std::nullopt;
+    }
+    (std::string_view(key) == "mode_old" ? c.mode_old : c.mode_new) = static_cast<uint32_t>(*v);
+  }
   if ((c.entry_equal & c.canary).any()) {
     error = "a location is both entry_equal and canary";
     return std::nullopt;
@@ -273,6 +322,18 @@ std::optional<RegionContract> RegionContract::from_json(const Json &j, std::stri
   c.status = *status;
   for (const Json &d : j["depends_on"].items())
     c.depends_on.push_back(d.as_string());
+  for (const Json &d : j["downstream_changed"].items())
+    c.downstream_changed.push_back(d.as_string());
+  if (j.has("downstream_reads")) {
+    auto dr = parse_locs(j["downstream_reads"].as_string());
+    auto vr = parse_vgprs(j["vgpr_downstream_reads"].as_string());
+    if (!dr || !vr) {
+      error = "bad downstream read sets";
+      return std::nullopt;
+    }
+    c.downstream_reads = *dr;
+    c.vdownstream_reads = *vr;
+  }
   for (const Json &s : j["sources"].items())
     c.sources.push_back({s["what"].as_string(), s["source"].as_string()});
   return c;

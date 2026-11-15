@@ -315,7 +315,8 @@ Aggregate aggregate_results(const CaseData &data, const std::vector<RegionResult
     any_witness |= status == TestStatus::LocalMismatch;
     // A mismatch under an unresolved entry relation may come from the relation itself
     // (wrong mapping, unreachable inputs); it stays a witness but not a verdict.
-    mismatch |= status == TestStatus::LocalMismatch && contract != ContractStatus::Unresolved;
+    mismatch |= status == TestStatus::LocalMismatch && contract != ContractStatus::Unresolved &&
+                !r.compensable;
     all_pass &= status == TestStatus::NoMismatchFound;
     any_tested |= r.valid_pairs > 0;
     if (r.valid_pairs > 0)
@@ -448,6 +449,35 @@ Json test_case(const CaseData &data, const TestOptions &options, const std::stri
       (void)store_cached_result(topt.cache_dir, cache_key, r);
     results.push_back(std::move(r));
   }
+  // A local mismatch that changed code downstream may compensate is a witness, not a
+  // verdict (handoff 5.2/13): every mismatching location is read by that code.
+  std::vector<UnresolvedItem> compensable;
+  for (auto &r : results) {
+    if (r.test_status != TestStatus::LocalMismatch || !r.resolved_by.empty())
+      continue;
+    for (const auto &region : data.regions) {
+      if (region.id != r.region_id)
+        continue;
+      const RegionContract &k = region.contract;
+      const bool any = r.mismatch_locs.any() || r.mismatch_vlocs.any();
+      if (any && (r.mismatch_locs & ~k.downstream_reads).none() &&
+          (r.mismatch_vlocs & ~k.vdownstream_reads).none() && !k.downstream_changed.empty()) {
+        r.compensable = true;
+        std::string ids;
+        for (const auto &d : k.downstream_changed)
+          ids += (ids.empty() ? "" : ", ") + d;
+        std::string locs = format_locs(r.mismatch_locs);
+        if (r.mismatch_vlocs.any())
+          locs += (locs.empty() ? "" : ",") + format_vgprs(r.mismatch_vlocs);
+        compensable.push_back({"context",
+                               "local mismatch of " + r.region_id + " on {" + locs +
+                                   "} may be compensated by changed code downstream (" + ids + ")",
+                               r.region_id});
+        if (!r.cached.is_null())
+          r.cached.set("compensable_downstream", true);
+      }
+    }
+  }
   // Handoff 5.3: diagnostic regions were requested explicitly at analysis time. They run
   // after the verdict regions and are reported apart from them.
   Json diagnostics = Json::array();
@@ -466,6 +496,7 @@ Json test_case(const CaseData &data, const TestOptions &options, const std::stri
   }
   // A filtered run cannot speak for the whole change set.
   CaseData scoped = data;
+  scoped.unresolved.insert(scoped.unresolved.end(), compensable.begin(), compensable.end());
   if (!region_filter.empty())
     scoped.unresolved.push_back({"scope", "region filter '" + region_filter + "' applied", ""});
   const Aggregate agg = aggregate_results(scoped, results);

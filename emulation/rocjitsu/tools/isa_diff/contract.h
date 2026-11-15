@@ -61,6 +61,17 @@ struct RegionContract {
   LocSet declared_writes_old; ///< Effect model; execution may change nothing else.
   LocSet declared_writes_new;
   LocSet wide_reads; ///< Input-generation feature: low halves of 64-bit operands.
+  /// VALU support. VGPRs are whole-register locations whose 64 lanes are all compared.
+  /// The tracked range is v0..v{vgpr_count-1}; it is exactly the wave's allocation in the
+  /// runner, so any access beyond it is an invalid register access, never silent.
+  unsigned vgpr_count = 0;
+  VSet ventry_equal;             ///< Live-in VGPRs (either side): equal on every lane.
+  VSet vobservable;              ///< Live-out VGPRs (either side): compared on every lane.
+  VSet vwrites_old, vwrites_new; ///< Effect model for VGPRs.
+  VSet vwide_reads;              ///< First register of 64-bit VGPR sources.
+  /// MODE at the region entry on each side (FP rounding/denormals, DX10_CLAMP, IEEE),
+  /// from each kernel's descriptor. VALU float results depend on it.
+  uint32_t mode_old = kDefaultInitialMode, mode_new = kDefaultInitialMode;
   std::vector<Constraint> constraints;
   std::string exit_mapping = "single fall-through exit after the last region instruction";
   /// Hand-written register correspondence (handoff 3.1), old location -> new location,
@@ -86,6 +97,13 @@ struct RegionContract {
   /// "FAILS" otherwise (then the contract is UNRESOLVED), "NOT_CHECKED" for synthetic or
   /// hand-built contracts.
   std::string composition = "NOT_CHECKED";
+  /// Changed code downstream of the region exit (other regions, control-flow changes)
+  /// and what it reads on either side. A local mismatch on one of these locations may be
+  /// compensated there, so it is a witness, not a verdict (handoff 5.2/13). A pass is not
+  /// affected: identity R_out is the strongest exit relation.
+  std::vector<std::string> downstream_changed;
+  LocSet downstream_reads;
+  VSet vdownstream_reads;
   ContractStatus status = ContractStatus::Unresolved;
   std::vector<std::string> depends_on;
   std::vector<Assumption> sources;

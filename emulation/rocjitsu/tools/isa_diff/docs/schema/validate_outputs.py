@@ -110,6 +110,19 @@ FIXTURES = {
         0xBF078006,
         0xBF810000,
     ],
+    "valu_old": [1745093376, 604374146, 3698360320, 772, 3212902400],
+    "valu_new": [1745092865, 604374145, 604374657, 3698360320, 772, 3212902400],
+    "valuwrong_new": [1745092865, 604374147, 3698360320, 772, 3212902400],
+    "valuclobber_old": [2114323202, 3698360320, 772, 3212902400],
+    "valuclobber_new": [
+        3196715390,
+        3204317633,
+        2114323202,
+        3204317450,
+        3698360320,
+        772,
+        3212902400,
+    ],
 }
 
 
@@ -274,6 +287,28 @@ def drive_cli(tool, work, v):
         "s4=s8",
     )
     test("rename_entry_map", {2})
+    # VALU regions: an equivalent rewrite, a wrong shift (lane counterexamples) and an
+    # inactive-lane clobber; per-lane VGPR state appears in every document.
+    analyze("valu", "valu_old", "valu_new")
+    test("valu", {0})
+    analyze("valu_wrong", "valu_old", "valuwrong_new")
+    test("valu_wrong", {1})
+    analyze("valu_clobber", "valuclobber_old", "valuclobber_new")
+    test("valu_clobber", {1})
+    vb = sorted(os.listdir(path("valu_wrong", "counterexamples")))
+    if vb:
+        run(
+            tool,
+            [
+                "replay",
+                "--counterexample",
+                path("valu_wrong", "counterexamples", vb[0]),
+            ],
+            {0},
+            f,
+        )
+    else:
+        f.append("VALU wrong-shift case produced no counterexample bundle")
     # Synthetic error injection, its counterexamples, and replay of one bundle.
     run(
         tool,
@@ -335,6 +370,9 @@ def drive_cli(tool, work, v):
         "rename_manual",
         "rename_map",
         "rename_entry_map",
+        "valu",
+        "valu_wrong",
+        "valu_clobber",
         "shift_injected",
     ]:
         v.check_tree(path(case))

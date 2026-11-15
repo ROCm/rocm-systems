@@ -61,6 +61,47 @@ std::string format_locs(const LocSet &locs) {
   return out;
 }
 
+std::string format_vgprs(const VSet &v) {
+  std::string out;
+  for (unsigned r = 0; r < kNumVgprs; ++r) {
+    if (!v.test(r))
+      continue;
+    if (!out.empty())
+      out += ',';
+    out += "v" + std::to_string(r);
+  }
+  return out;
+}
+
+std::optional<VSet> parse_vgprs(std::string_view text) {
+  VSet v;
+  while (!text.empty()) {
+    const size_t comma = text.find(',');
+    const std::string_view item = text.substr(0, comma);
+    if (!item.empty()) {
+      unsigned index = 0;
+      const auto *end = item.data() + item.size();
+      if (item.size() < 2 || item.front() != 'v')
+        return std::nullopt;
+      auto [ptr, ec] = std::from_chars(item.data() + 1, end, index);
+      if (ec != std::errc{} || ptr != end || index >= kNumVgprs)
+        return std::nullopt;
+      v.set(index);
+    }
+    if (comma == std::string_view::npos)
+      break;
+    text.remove_prefix(comma + 1);
+  }
+  return v;
+}
+
+unsigned vgpr_extent(const VSet &v) {
+  for (unsigned r = kNumVgprs; r-- > 0;)
+    if (v.test(r))
+      return r + 1;
+  return 0;
+}
+
 std::optional<LocSet> parse_locs(std::string_view text) {
   LocSet locs;
   while (!text.empty()) {

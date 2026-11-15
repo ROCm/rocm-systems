@@ -4,7 +4,7 @@
     "tool": "rj_isa_diff",
     "tool_version": "0.1.0-p0",
     "schema_version": "rj_isa_diff.v1",
-    "rocjitsu_revision": "0cd52dcbdb47b2670f2bf8024c819e986d285fff",
+    "rocjitsu_revision": "d5b78f4fa542e119215503b081375738b94094f3",
     "rocjitsu_version": "0.3.0",
     "semantics": "RocJITsu ComputeUnitCore::execute_instruction, gfx950 (CDNA4) wave64, default arithmetic semantics",
     "compiler": "13.4.0"
@@ -57,15 +57,15 @@
         {
           "argv": ["/opt/rocm/llvm/bin/llvm-mc", "-triple=amdgcn-amd-amdhsa", "-mcpu=gfx950", "-filetype=obj", "-o", "co/artifacts/old.o", "co_old.s"],
           "exit_code": 0,
-          "elapsed_ns": 2470620
+          "elapsed_ns": 2578127
         },
         {
           "argv": ["/opt/rocm/llvm/bin/ld.lld", "-shared", "--emit-relocs", "-o", "co/artifacts/old.hsaco", "co/artifacts/old.o"],
           "exit_code": 0,
-          "elapsed_ns": 6643547
+          "elapsed_ns": 7607960
         }
       ],
-      "compile_ns": 9114167,
+      "compile_ns": 10186087,
       "executed_object": "linked_code_object",
       "note": "executed bytes are the code object linked from the re-assembled source, decoded by RocJITsu; they are not necessarily an original binary emission",
       "toolchain": {
@@ -86,15 +86,15 @@
         {
           "argv": ["/opt/rocm/llvm/bin/llvm-mc", "-triple=amdgcn-amd-amdhsa", "-mcpu=gfx950", "-filetype=obj", "-o", "co/artifacts/new.o", "co_new.s"],
           "exit_code": 0,
-          "elapsed_ns": 2783230
+          "elapsed_ns": 2535612
         },
         {
           "argv": ["/opt/rocm/llvm/bin/ld.lld", "-shared", "--emit-relocs", "-o", "co/artifacts/new.hsaco", "co/artifacts/new.o"],
           "exit_code": 0,
-          "elapsed_ns": 5831357
+          "elapsed_ns": 6653061
         }
       ],
-      "compile_ns": 8614587,
+      "compile_ns": 9188673,
       "executed_object": "linked_code_object",
       "note": "executed bytes are the code object linked from the re-assembled source, decoded by RocJITsu; they are not necessarily an original binary emission",
       "toolchain": {
@@ -169,6 +169,8 @@
         "declared_writes_old": "s8,s9,scc",
         "declared_writes_new": "s8,s9,scc",
         "wide_reads": "s4,s8",
+        "mode_old": "0x000003c0",
+        "mode_new": "0x000003c0",
         "constraints": [],
         "exit_mapping": "single fall-through exit after the last region instruction",
         "pending_effects": "NONE",
@@ -177,6 +179,10 @@
         "status": "ESTABLISHED",
         "depends_on": [],
         "sources": [
+          {
+            "what": "mode_old/mode_new = MODE at dispatch from each kernel descriptor's compute_pgm_rsrc1 (assembler defaults without a descriptor)",
+            "source": "kernel descriptor"
+          },
           {
             "what": "entry_equal = live-in(old) | live-in(new) at the region entry",
             "source": "KernelModel backward LocSet liveness over BasicBlock::build_reachable CFG"
@@ -207,7 +213,7 @@
           }
         ]
       },
-      "prepared_key": "310245b83b9d7d2bdf6e2bf766865c07128431a354ae4804aa6c50d68be47cc2"
+      "prepared_key": "4ba112ac1e4b800419ea8134d0e1088e2a5293fda35c8c604e62756286bf5b04"
     }
   ],
   "expansion_variants": [
@@ -268,6 +274,8 @@
         "declared_writes_old": "s8,s9,scc",
         "declared_writes_new": "s8,s9,scc",
         "wide_reads": "s4,s8",
+        "mode_old": "0x000003c0",
+        "mode_new": "0x000003c0",
         "constraints": [],
         "exit_mapping": "single fall-through exit after the last region instruction",
         "pending_effects": "NONE",
@@ -276,6 +284,10 @@
         "status": "ESTABLISHED",
         "depends_on": [],
         "sources": [
+          {
+            "what": "mode_old/mode_new = MODE at dispatch from each kernel descriptor's compute_pgm_rsrc1 (assembler defaults without a descriptor)",
+            "source": "kernel descriptor"
+          },
           {
             "what": "entry_equal = live-in(old) | live-in(new) at the region entry",
             "source": "KernelModel backward LocSet liveness over BasicBlock::build_reachable CFG"
@@ -310,7 +322,7 @@
           }
         ]
       },
-      "prepared_key": "0d4c5756c2620e71836dd8683dc079b1784fb09553eeb882ec02c2be43fd34d7"
+      "prepared_key": "72849a8766d14633e576eb352bea2c3cf5f8df77abc36b9e0cbd6fcdff4cc39a"
     },
     {
       "id": "r0.ctx-b1f0",
@@ -369,6 +381,8 @@
         "declared_writes_old": "s5,s8,s9,scc",
         "declared_writes_new": "s5,s8,s9,scc",
         "wide_reads": "s4,s8",
+        "mode_old": "0x000003c0",
+        "mode_new": "0x000003c0",
         "constraints": [],
         "exit_mapping": "single fall-through exit after the last region instruction",
         "pending_effects": "NONE",
@@ -377,6 +391,10 @@
         "status": "ESTABLISHED",
         "depends_on": [],
         "sources": [
+          {
+            "what": "mode_old/mode_new = MODE at dispatch from each kernel descriptor's compute_pgm_rsrc1 (assembler defaults without a descriptor)",
+            "source": "kernel descriptor"
+          },
           {
             "what": "entry_equal = live-in(old) | live-in(new) at the region entry",
             "source": "KernelModel backward LocSet liveness over BasicBlock::build_reachable CFG"
@@ -411,7 +429,7 @@
           }
         ]
       },
-      "prepared_key": "0f913028a8cdef3aa5a6cc9327de6f914f18a2aa5b9710df03f745aac91b4bc1"
+      "prepared_key": "6651b5f587c124711ffc797bbf424281185fab43193aabf5858d023572880eb9"
     },
     {
       "id": "r0.ctx-b0f2",
@@ -480,6 +498,8 @@
         "declared_writes_old": "s7,s8,s9,scc",
         "declared_writes_new": "s7,s8,s9,scc",
         "wide_reads": "s4,s8",
+        "mode_old": "0x000003c0",
+        "mode_new": "0x000003c0",
         "constraints": [],
         "exit_mapping": "single fall-through exit after the last region instruction",
         "pending_effects": "NONE",
@@ -488,6 +508,10 @@
         "status": "ESTABLISHED",
         "depends_on": [],
         "sources": [
+          {
+            "what": "mode_old/mode_new = MODE at dispatch from each kernel descriptor's compute_pgm_rsrc1 (assembler defaults without a descriptor)",
+            "source": "kernel descriptor"
+          },
           {
             "what": "entry_equal = live-in(old) | live-in(new) at the region entry",
             "source": "KernelModel backward LocSet liveness over BasicBlock::build_reachable CFG"
@@ -522,7 +546,7 @@
           }
         ]
       },
-      "prepared_key": "1eb8ef64f1af75f18ddf20f1a5d6d32551f70d82b3d7e8511965b06495d542af"
+      "prepared_key": "7dbc3332662882a2b39344c9ef2301484c09bd977bfc27c38ff00efa55bedd2a"
     },
     {
       "id": "r0.ctx-b1f1",
@@ -591,6 +615,8 @@
         "declared_writes_old": "s5,s8,s9,scc",
         "declared_writes_new": "s5,s8,s9,scc",
         "wide_reads": "s4,s8",
+        "mode_old": "0x000003c0",
+        "mode_new": "0x000003c0",
         "constraints": [],
         "exit_mapping": "single fall-through exit after the last region instruction",
         "pending_effects": "NONE",
@@ -599,6 +625,10 @@
         "status": "ESTABLISHED",
         "depends_on": [],
         "sources": [
+          {
+            "what": "mode_old/mode_new = MODE at dispatch from each kernel descriptor's compute_pgm_rsrc1 (assembler defaults without a descriptor)",
+            "source": "kernel descriptor"
+          },
           {
             "what": "entry_equal = live-in(old) | live-in(new) at the region entry",
             "source": "KernelModel backward LocSet liveness over BasicBlock::build_reachable CFG"
@@ -637,7 +667,7 @@
           }
         ]
       },
-      "prepared_key": "6774e527b60cdb47c18c6bbffb81b566d61970de7fb09152eef129936d31ad7e"
+      "prepared_key": "bbcefc7a1ac8dff2fe56684b0589ce60b7c1891a5712d16c904d656e7976cfb1"
     },
     {
       "id": "r0.ctx-b2f0",
@@ -706,6 +736,8 @@
         "declared_writes_old": "s4,s5,s8,s9,scc",
         "declared_writes_new": "s4,s5,s8,s9,scc",
         "wide_reads": "s4,s8",
+        "mode_old": "0x000003c0",
+        "mode_new": "0x000003c0",
         "constraints": [],
         "exit_mapping": "single fall-through exit after the last region instruction",
         "pending_effects": "NONE",
@@ -714,6 +746,10 @@
         "status": "ESTABLISHED",
         "depends_on": [],
         "sources": [
+          {
+            "what": "mode_old/mode_new = MODE at dispatch from each kernel descriptor's compute_pgm_rsrc1 (assembler defaults without a descriptor)",
+            "source": "kernel descriptor"
+          },
           {
             "what": "entry_equal = live-in(old) | live-in(new) at the region entry",
             "source": "KernelModel backward LocSet liveness over BasicBlock::build_reachable CFG"
@@ -748,7 +784,7 @@
           }
         ]
       },
-      "prepared_key": "54f2206f6cfb9f7ca55bb933e24e72d3347151835ccd0bf4246396043d2f5af1"
+      "prepared_key": "dd388911ba785e064c6c59cd0ca9227244f00cd08a77dfcc72eb7b70c8fbcdc4"
     },
     {
       "id": "r0.ctx-b2f2",
@@ -837,6 +873,8 @@
         "declared_writes_old": "s4,s5,s7,s8,s9,scc",
         "declared_writes_new": "s4,s5,s7,s8,s9,scc",
         "wide_reads": "s4,s8",
+        "mode_old": "0x000003c0",
+        "mode_new": "0x000003c0",
         "constraints": [],
         "exit_mapping": "single fall-through exit after the last region instruction",
         "pending_effects": "NONE",
@@ -845,6 +883,10 @@
         "status": "ESTABLISHED",
         "depends_on": [],
         "sources": [
+          {
+            "what": "mode_old/mode_new = MODE at dispatch from each kernel descriptor's compute_pgm_rsrc1 (assembler defaults without a descriptor)",
+            "source": "kernel descriptor"
+          },
           {
             "what": "entry_equal = live-in(old) | live-in(new) at the region entry",
             "source": "KernelModel backward LocSet liveness over BasicBlock::build_reachable CFG"
@@ -883,7 +925,7 @@
           }
         ]
       },
-      "prepared_key": "324e8a73979bb5cb7735de71c17d2c2d8aad1d317b2651f0c4b2ec06f4288b3f"
+      "prepared_key": "b725df8fc9b7f4885392f4a049f85801085ac370ff2349025b0a8385ccb2f2f1"
     }
   ],
   "analysis": {
@@ -899,13 +941,13 @@
     "alignment_complete": true,
     "layout_shift": true,
     "timing": {
-      "parse_ns": 82103,
-      "decode_cfg_ns": 129645,
-      "dataflow_ns": 3756,
-      "model_total_ns": 138138,
-      "align_classify_ns": 12018,
-      "plan_ns": 249474,
-      "compile_ns": 17728754
+      "parse_ns": 78479,
+      "decode_cfg_ns": 121655,
+      "dataflow_ns": 5007,
+      "model_total_ns": 131298,
+      "align_classify_ns": 11367,
+      "plan_ns": 278299,
+      "compile_ns": 19374760
     }
   }
 }

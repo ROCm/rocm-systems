@@ -33,7 +33,18 @@ namespace rocjitsu::isa_diff {
 struct Sample {
   std::array<uint32_t, kNumLocs> value{}; ///< Only entry_equal locations are meaningful.
   std::vector<std::string> events;        ///< Boundary events used (logged for later learning).
+  /// VGPR lanes (VALU support): vgpr_count * kWaveLanes values, register-major. Only
+  /// vgpr entry_equal registers are meaningful.
+  std::vector<uint32_t> vvalue;
 };
+
+/// @brief Deterministic per-lane VGPR values for one case (VALU support). Each lane draws
+/// independently from the 32-bit catalog (NaN/Inf/denormal encodings included), the
+/// 64-bit catalog for 64-bit sources, single bits, copies of another register's lane,
+/// and uniform random values; some registers get one value on every lane. One case
+/// therefore exercises 64 different inputs per VGPR.
+void fill_vgpr_lanes(Sample &s, unsigned vgpr_count, const VSet &wide, uint64_t seed,
+                     uint64_t index);
 
 struct RegionFeatures {
   std::vector<std::string> old_text; ///< Disassembly of the old side.
@@ -61,6 +72,7 @@ struct Feedback {
   /// Bounded classification: "ok", a mismatch kind, "excluded" or "rejected".
   std::string category;
   LocSet locs; ///< Differing observable locations.
+  VSet vlocs;  ///< Differing observable VGPRs.
   /// Bounded novelty class: outcome plus, per written location, a coarse value class
   /// (zero/one/all-ones/sign/other) and old==new. Raw register values never form a class.
   uint64_t bucket = 0;

@@ -475,3 +475,66 @@ inline const std::vector<uint32_t> k_valutemp_old = {0x80040302, 0xbe880004, 0x8
 // global_store_dword v0, v2, s[6:7]
 // s_endpgm
 inline const std::vector<uint32_t> k_valutemp_new = {0x80040302, 0xbe8a0004, 0x8005810a, 0x7e040205, 0x7e000280, 0xdc708000, 0x00060200, 0xbf810000};
+
+// v_add_u32_e32 v2, v0, v1
+// v_lshlrev_b32_e32 v3, 2, v2
+// global_store_dword v4, v3, s[0:1]
+// s_endpgm
+inline const std::vector<uint32_t> k_valu_old = {0x68040300, 0x24060482, 0xdc708000, 0x00000304, 0xbf810000};
+
+// v_add_u32_e32 v2, v1, v0
+// v_lshlrev_b32_e32 v3, 1, v2
+// v_lshlrev_b32_e32 v3, 1, v3
+// global_store_dword v4, v3, s[0:1]
+// s_endpgm
+inline const std::vector<uint32_t> k_valu_new = {0x68040101, 0x24060481, 0x24060681, 0xdc708000, 0x00000304, 0xbf810000};
+
+// v_add_u32_e32 v2, v1, v0
+// v_lshlrev_b32_e32 v3, 3, v2
+// global_store_dword v4, v3, s[0:1]
+// s_endpgm
+inline const std::vector<uint32_t> k_valuwrong_new = {0x68040101, 0x24060483, 0xdc708000, 0x00000304, 0xbf810000};
+
+// v_mov_b32_e32 v3, v2
+// global_store_dword v4, v3, s[0:1]
+// s_endpgm
+inline const std::vector<uint32_t> k_valuclobber_old = {0x7e060302, 0xdc708000, 0x00000304, 0xbf810000};
+
+// s_mov_b64 s[10:11], exec
+// s_mov_b64 exec, -1
+// v_mov_b32_e32 v3, v2
+// s_mov_b64 exec, s[10:11]
+// global_store_dword v4, v3, s[0:1]
+// s_endpgm
+inline const std::vector<uint32_t> k_valuclobber_new = {0xbe8a017e, 0xbefe01c1, 0x7e060302, 0xbefe010a, 0xdc708000, 0x00000304, 0xbf810000};
+
+// v_add_u32_e32 v5, v0, v1
+// v_mov_b32_e32 v3, v5
+// global_store_dword v4, v3, s[0:1]
+// s_endpgm
+inline const std::vector<uint32_t> k_valudead_old = {0x680a0300, 0x7e060305, 0xdc708000, 0x00000304, 0xbf810000};
+
+// v_add_u32_e32 v6, v0, v1
+// v_mov_b32_e32 v3, v6
+// global_store_dword v4, v3, s[0:1]
+// s_endpgm
+inline const std::vector<uint32_t> k_valudead_new = {0x680c0300, 0x7e060306, 0xdc708000, 0x00000304, 0xbf810000};
+
+// global_load_dword v0, v4, s[0:1]
+// v_add_u32_e32 v2, v0, v1
+// s_waitcnt vmcnt(0)
+// global_store_dword v4, v2, s[0:1]
+// s_endpgm
+inline const std::vector<uint32_t> k_valupending_old = {0xdc508000, 0x00000004, 0x68040300, 0xbf8c0f70, 0xdc708000, 0x00000204, 0xbf810000};
+
+// global_load_dword v0, v4, s[0:1]
+// v_add_u32_e32 v2, v1, v0
+// s_waitcnt vmcnt(0)
+// global_store_dword v4, v2, s[0:1]
+// s_endpgm
+inline const std::vector<uint32_t> k_valupending_new = {0xdc508000, 0x00000004, 0x68040101, 0xbf8c0f70, 0xdc708000, 0x00000204, 0xbf810000};
+
+// v_cvt_f32_f16_e32 v1, v0
+// global_store_dword v2, v1, s[0:1]
+// s_endpgm
+inline const std::vector<uint32_t> k_valucvt = {0x7e021700, 0xdc708000, 0x00000102, 0xbf810000};

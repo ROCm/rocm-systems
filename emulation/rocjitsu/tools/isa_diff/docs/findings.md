@@ -10,12 +10,12 @@ f58b06dce1f9`). Every number here comes from that build and toolchain.
 | label | what |
 |---|---|
 | **implemented** | See the next section for the full list. |
-| **tested** | 58 isa_diff tests pass in Release and under ASan+UBSan+LSan with zero reports. They are 49 validator cases (`rj_isa_diff_tests`) covering every row of handoff section 13 and every feature below; 8 LLVM plugin cases (`rj_isa_diff_llvm_tests`) on real ROCm-LLVM output; and the schema/CLI test. Three real LLVM old/new pairs were run end to end. The full tree was built and its full ctest run. |
+| **tested** | 65 isa_diff tests pass in Release and under ASan+UBSan+LSan with zero reports. They are 56 validator cases (`rj_isa_diff_tests`) covering every row of handoff section 13, every feature below and VALU support; 8 LLVM plugin cases (`rj_isa_diff_llvm_tests`) on real ROCm-LLVM output; and the schema/CLI test. Three real LLVM old/new pairs were run end to end, and the 55 functions of LLVM PR 242731's changed tests were run with before/after `llc` (see "VALU support and LLVM PR 242731"). The full tree was built and its full ctest run. |
 | **not run** | SMT/SemaAST proofs (`proof_status` is always `NOT_RUN`). Reachability witnesses: the entry-prefix diagnostic path runs a prefix with arbitrary entry values, but no dispatch-ABI model exists. Learned input policies. Program (instruction) reduction of counterexamples. Multi-block, branching and loop regions (P1, designed in `p1_p2_design.md`). |
-| **unsupported** | Regions containing VALU, memory, MFMA, waits, barriers, branches, hwreg access, indirect SGPR access, TTMP/FLAT_SCRATCH/XNACK operands, PC-derived inputs, or relocated bytes. Multi-block regions. Code objects with several `.text` sections or zero-size kernel symbols. The real `-enable-misched=false` pairs, whose changes are reordered `s_load`s. |
-| **inconclusive** | Regions whose continuations read different locations (`INCONCLUSIVE_MAPPING`). Mismatches under an `UNRESOLVED` contract: the renamed SALU tail of the real `k` misched pair. Relocation-only differences. Zero-valid-case runs. |
+| **unsupported** | Regions containing memory (SMEM/VMEM/LDS), MFMA, interpolation, indirect VGPR access, waits, barriers, branches, hwreg access, indirect SGPR access, TTMP/FLAT_SCRATCH/XNACK operands, PC-derived inputs, or relocated bytes. Multi-block regions. Code objects with several `.text` sections or zero-size kernel symbols. The real `-enable-misched=false` pairs, whose changes are reordered `s_load`s. |
+| **inconclusive** | Regions whose continuations read different locations (`INCONCLUSIVE_MAPPING`). Local mismatches that changed code downstream may compensate (`compensable_downstream`): the v2/v4 kernels of PR 242731. Mismatches under an `UNRESOLVED` contract: the renamed SALU tail of the real `k` misched pair. Relocation-only differences. Zero-valid-case runs. |
 | **synthetic mismatch** | Injected wrong opcode, immediate and operand: all detected, all replayed (`REPRODUCED`), all labelled `synthetic`. Sample: `samples/synthetic/`. |
-| **real finding** | **None.** Three real LLVM pairs were tested. One passed under an `ESTABLISHED` contract with complete scope, one is unsupported, and one is inconclusive. No LLVM bug is claimed. |
+| **real finding** | **None.** Three real LLVM pairs were tested: one passed under an `ESTABLISHED` contract with complete scope, one is unsupported, and one is inconclusive. In LLVM PR 242731, 6 of the 12 changed gfx950 kernels pass under `ESTABLISHED` contracts with complete scope and none mismatches as a verdict. No LLVM bug is claimed. |
 | **proven** | **Nothing.** |
 
 The implemented items:
@@ -207,6 +207,79 @@ Region size against kernel size:
 | k3 | 21 / 22 | 7 / 8 |
 | `samples/codeobject` | 8 / 9 | 1 / 2 |
 | bench r16 | 2,048 | 16 / 16 |
+
+## VALU support and LLVM PR 242731
+
+LLVM PR 242731 ("[AMDGPU] Saturate i64 inputs before converting to half") changes the
+gfx950 lowering of i64→f16 conversions. That code is VALU (`v_cvt_f32_i32`,
+`v_ldexp_f32`, `v_cvt_f16_f32`, …), which the SALU-only P0 could only report as
+unsupported. VALU support was built for this (README "VALU support"), and the experiment
+was rerun.
+
+**Setup.**
+
+- Before: `llc` built at the PR's parent `7e87ece942`.
+- After: `llc` built at the PR head `57ec09d1ec`.
+- Both are upstream LLVM 24, Release with assertions, AMDGPU only, and identically
+  configured.
+- Every function of the four changed tests was compiled for `amdgpu9.50-amd-amdhsa`
+  (gfx950).
+- `slp-int-to-fp.ll` went through one `opt -passes=slp-vectorizer` run shared by both
+  sides. Its `void` functions became kernels; the float-returning one was skipped.
+- Each pair ran with the mandatory sweep plus 5,000 random cases.
+
+| stage | kernels | result |
+|---|---|---|
+| unchanged on gfx950 | 42 | `NO_SEMANTIC_DIFF` |
+| SALU-only tool (before VALU support) | 12 changed | none compared: 4 `INCONCLUSIVE` (the SALU part split from the VALU part, mismatched liveness), 8 `UNSUPPORTED` on VALU or memory opcodes |
+| with VALU support | `s_sint_to_fp_i64_to_f16`, `s_uint_to_fp_i64_to_f16`, `s_sint_to_fp_32_sign_bits_to_f16`, `s_uint_to_fp_31_zero_bits_to_f16` | **NO_MISMATCH_FOUND**, `ESTABLISHED`, complete scope; 6,108–6,420 valid cases each |
+| | `v_sint_to_fp_i64_to_f16`, `v_uint_to_fp_i64_to_f16` | **NO_MISMATCH_FOUND**, `ESTABLISHED`, complete scope; 5,603 and 5,302 valid cases, 64 lane inputs each |
+| | `s_{s,u}int_to_fp_v2i64_to_v2f16`, `v_sint_to_fp_v4i64_to_v4f16` | `INCONCLUSIVE`, `LOCAL_ONLY`: a store-address or lane-setup rename whose consumer is changed code holding a `global_store` (unsupported); `compensable_downstream` |
+| | `v_uint_to_fp_v4i64_to_v4f16`, `sitofp_i48_to_half`, `uitofp_i56_to_half` | `INCONCLUSIVE`: loads, `s_waitcnt` and register renames inside the changed code |
+
+**What the passing kernels show.**
+
+- For the scalar-input kernels, the base region (old 8–12 / new 3–6 instructions)
+  mismatches on its intermediate f32. On a lane with input 2³², the old code yields
+  `0x4f800000` (2³²) and the new code `0x4f000000` (2³¹, the saturated i32).
+- The automatic expansion adds the next common instruction (`v_cvt_f16_f32`). That
+  variant has no mismatch, so the result is `RESOLVED_BY_CONTEXT`.
+- This is the PR's own argument: the f32 intermediate differs, but both values
+  overflow to the same f16.
+- The vector-input kernels pass directly: the region spans the whole conversion,
+  14 / 9 and 10 / 6 instructions.
+
+**Tool defects the experiment exposed, fixed before the final run.**
+
+1. **Liveness made VCC observable before every global store.** Every instruction
+   outside the executable subset was assumed to read EXEC/VCC/M0, so the new code's
+   `v_cmp` into VCC showed up as a false mismatch. Implicit reads are now per class:
+   - vector memory reads EXEC, plus M0 for its LDS forms;
+   - SMEM reads none.
+2. **Split regions were judged in isolation.** A local mismatch on a location that
+   changed code downstream reads was counted as a verdict. It is now a witness only.
+   The downstream code may compensate, and context expansion cannot reach past changed
+   code. This is the `compensable_downstream` rule above.
+3. **Register-count metadata was treated as semantic.** `.vgpr_count 4 → 3` alone made
+   `v_uint_to_fp_i64_to_f16` UNRESOLVED. Register-count fields are now informational
+   when:
+   - the descriptors agree on every semantic field;
+   - each kernel's VGPRs fit its allocation (`ACCUM_OFFSET`).
+
+   A kernel naming a VGPR beyond its allocation is reported as semantic.
+
+**VALU tests** (all in `rj_isa_diff_tests`):
+
+| test | observed |
+|---|---|
+| `EquivalentVectorRewriteIsExecutedOnAllLanes` | `v_add`+`v_lshlrev 2` vs commuted add + two shifts by 1: ESTABLISHED via VGPR composition, `vgpr_count` 8, live-through `v4` observable, dead `v2` not; NO_MISMATCH_FOUND with `vector.lanes`/`vector.cross`/`vector.exec` phases; 2 / 3 instructions per case |
+| `WrongShiftIsCaughtOnLanesAndReplays` | shift by 3: LOCAL_MISMATCH on `v3` with lane detail; bundle has `vgpr_locations` and per-lane differences, and replays |
+| `InactiveLaneClobberIsDetected` | the new side writes `v3` under a forced full EXEC: mismatch only on lanes outside the original EXEC; with EXEC constrained to all lanes, NO_MISMATCH_FOUND |
+| `DeadVectorTemporaryIsNotObservable` | `v5`/`v6` renamed temporaries: not observable, NO_MISMATCH_FOUND |
+| `OutstandingLoadIntoAVectorInputLeavesTheContextUnresolved` | `global_load_dword v0` read before `s_waitcnt`: CONFLICT, UNRESOLVED |
+| `ModeIsPerSideAndMattersForFloatConversion` | identical `v_cvt_f32_f16`; the new side flushes f16 denormals: LOCAL_MISMATCH on `v1` |
+| `RegisterCountMetadataIsInformationalOnlyWithinTheAllocation` | `.vgpr_count` difference informational within `ACCUM_OFFSET`; naming `v4` with 4 allocated is semantic |
+| `DependentHunksMergeInsteadOfPassingIndependently` (extended) | with `--no-merge`, r0's mismatch on `s4` is read by r1: `compensable`, overall INCONCLUSIVE, LOCAL_ONLY |
 
 ## Cost
 

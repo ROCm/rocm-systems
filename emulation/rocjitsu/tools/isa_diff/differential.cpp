@@ -52,6 +52,8 @@ Json trace_json(const std::vector<TraceStep> &trace) {
       if (step.changed.test(l))
         changed.set(loc_name(l), hex32(step.after.get(l)));
     s.set("changed", std::move(changed));
+    if (step.vchanged.any())
+      s.set("vgprs_changed", format_vgprs(step.vchanged));
     if (!step.frame_changed.empty()) {
       Json f = Json::array();
       for (const auto &name : step.frame_changed)
@@ -83,10 +85,19 @@ std::string compare_pair(const RegionPair &region, const MachineState &init_old,
   // Effect model: execution must not write anything the model did not declare.
   const LocSet extra_old = differing_locs(init_old, final_old) & ~k.declared_writes_old;
   const LocSet extra_new = differing_locs(init_new, final_new) & ~k.declared_writes_new;
-  if (extra_old.any() || extra_new.any()) {
+  const VSet vextra_old = differing_vgprs(init_old, final_old) & ~k.vwrites_old;
+  const VSet vextra_new = differing_vgprs(init_new, final_new) & ~k.vwrites_new;
+  if (extra_old.any() || extra_new.any() || vextra_old.any() || vextra_new.any()) {
     m.locs = extra_old | extra_new;
-    m.detail = "execution wrote undeclared locations (old: " + format_locs(extra_old) +
-               "; new: " + format_locs(extra_new) + ")";
+    m.vlocs = vextra_old | vextra_new;
+    auto both = [](const LocSet &l, const VSet &v) {
+      std::string s = format_locs(l);
+      if (v.any())
+        s += (s.empty() ? "" : ",") + format_vgprs(v);
+      return s;
+    };
+    m.detail = "execution wrote undeclared locations (old: " + both(extra_old, vextra_old) +
+               "; new: " + both(extra_new, vextra_new) + ")";
     return "effect_model";
   }
   // Frame preservation on each side.
@@ -103,8 +114,25 @@ std::string compare_pair(const RegionPair &region, const MachineState &init_old,
   for (unsigned l = 0; l < kNumLocs; ++l)
     if (k.observable.test(l) && final_old.get(l) != final_new.get(fwd[l]))
       diff.set(l);
+  // VGPRs: every lane, active or not (an inactive lane must keep its value).
+  const VSet vdiff = differing_vgprs(final_old, final_new) & k.vobservable;
+  if (diff.none() && vdiff.any()) {
+    m.vlocs = vdiff;
+    for (unsigned r = 0; r < kNumVgprs; ++r)
+      if (vdiff.test(r)) {
+        const uint64_t lanes = differing_lanes(final_old, final_new, r);
+        const unsigned lane = static_cast<unsigned>(std::countr_zero(lanes));
+        m.detail = "first observable difference v" + std::to_string(r) + " lane " +
+                   std::to_string(lane) + ": old " + hex32(final_old.vget(r, lane)) + " new " +
+                   hex32(final_new.vget(r, lane)) + " (" + std::to_string(std::popcount(lanes)) +
+                   " of 64 lanes differ)";
+        break;
+      }
+    return "observable";
+  }
   if (diff.any()) {
     m.locs = diff;
+    m.vlocs = vdiff;
     for (unsigned l = 0; l < kNumLocs; ++l)
       if (diff.test(l)) {
         m.detail = "first observable difference " + loc_name(l) + ": old " +
@@ -155,6 +183,13 @@ uint64_t novelty_bucket(const RegionContract &k, const std::string &category,
     const unsigned eq = final_old->get(l) == final_new->get(fwd[l]) ? 1u : 0u;
     h = splitmix64(h ^ (uint64_t{l} << 8) ^ (value_class(final_old->get(l)) << 1) ^ eq);
   }
+  const VSet vwatched = (k.vwrites_old | k.vwrites_new) & k.vobservable;
+  for (unsigned r = 0; r < kNumVgprs; ++r)
+    if (vwatched.test(r)) {
+      const uint64_t lanes = differing_lanes(*final_old, *final_new, r);
+      h = splitmix64(h ^ (uint64_t{r + kNumLocs} << 8) ^ (lanes == 0 ? 1u : 0u) ^
+                     (lanes == ~uint64_t{0} ? 2u : 0u));
+    }
   return h;
 }
 
@@ -174,6 +209,7 @@ Json reduce_mismatch(const RegionPair &region, RegionRunner &old_runner, RegionR
   const auto fwd = k.entry_forward();
   const MachineState original_old = m.init_old, original_new = m.init_new;
   const LocSet original_locs = m.locs;
+  const VSet original_vlocs = m.vlocs;
   MachineState cur_o = m.init_old, cur_n = m.init_new;
   size_t runs = 0, steps = 0;
   bool seed_independent = false;
@@ -198,6 +234,7 @@ Json reduce_mismatch(const RegionPair &region, RegionRunner &old_runner, RegionR
     if (kind != m.kind)
       return false;
     m.locs = t.locs;
+    m.vlocs = t.vlocs;
     m.detail = t.detail;
     m.frame_fields = t.frame_fields;
     m.init_old = a;
@@ -216,6 +253,12 @@ Json reduce_mismatch(const RegionPair &region, RegionRunner &old_runner, RegionR
         a.set(l, 0);
         b.set(fwd[l], l == kLocScc ? 1u : 0xffffffffu);
       }
+    for (unsigned r = 0; r < k.vgpr_count; ++r)
+      if (!k.ventry_equal.test(r))
+        for (unsigned lane = 0; lane < kWaveLanes; ++lane) {
+          a.vset(r, lane, 0);
+          b.vset(r, lane, 0xffffffffu);
+        }
     if (!(a == cur_o && b == cur_n) && attempt(a, b)) {
       cur_o = a;
       cur_n = b;
@@ -223,6 +266,29 @@ Json reduce_mismatch(const RegionPair &region, RegionRunner &old_runner, RegionR
       ++steps;
     } else if (a == cur_o && b == cur_n) {
       seed_independent = true;
+    }
+  }
+  // 1b. VALU: keep only the mismatching lanes. Every other lane of every shared VGPR
+  // becomes 0, so the bundle shows the inputs of the lanes that differ.
+  uint64_t focus = 0;
+  if (k.vgpr_count && m.kind == "observable") {
+    for (unsigned r = 0; r < kNumVgprs; ++r)
+      if (m.vlocs.test(r))
+        focus |= differing_lanes(m.final_old, m.final_new, r);
+    if (focus && focus != ~uint64_t{0}) {
+      MachineState a = cur_o, b = cur_n;
+      for (unsigned r = 0; r < k.vgpr_count; ++r)
+        if (k.ventry_equal.test(r))
+          for (unsigned lane = 0; lane < kWaveLanes; ++lane)
+            if (!(focus >> lane & 1u)) {
+              a.vset(r, lane, 0);
+              b.vset(r, lane, 0);
+            }
+      if (!(a == cur_o && b == cur_n) && attempt(a, b)) {
+        cur_o = a;
+        cur_n = b;
+        ++steps;
+      }
     }
   }
   // 2. Shrink each shared entry value: 0, 1, halvings, then clearing single bits.
@@ -257,6 +323,42 @@ Json reduce_mismatch(const RegionPair &region, RegionRunner &old_runner, RegionR
       }
     }
   }
+  // 2b. VALU: shrink each shared VGPR at the first mismatching lane the same way.
+  if (focus) {
+    const unsigned lane = static_cast<unsigned>(std::countr_zero(focus));
+    for (int pass = 0; pass < 4 && runs < budget; ++pass) {
+      bool vprogress = false;
+      for (unsigned r = 0; r < k.vgpr_count && runs < budget; ++r) {
+        if (!k.ventry_equal.test(r))
+          continue;
+        const uint32_t v = cur_o.vget(r, lane);
+        if (v == 0)
+          continue;
+        std::vector<uint32_t> cands = {0u, 1u};
+        for (uint32_t h = v >> 1; h; h >>= 1)
+          cands.push_back(h);
+        for (int bit = 31; bit >= 0; --bit)
+          if (v & (1u << bit))
+            cands.push_back(v & ~(1u << bit));
+        for (uint32_t c : cands) {
+          if (c == v || !simpler(c, v))
+            continue;
+          MachineState a = cur_o, b = cur_n;
+          a.vset(r, lane, c);
+          b.vset(r, lane, c);
+          if (attempt(a, b)) {
+            cur_o = a;
+            cur_n = b;
+            ++steps;
+            vprogress = true;
+            break;
+          }
+        }
+      }
+      if (!vprogress)
+        break;
+    }
+  }
   // attempt() leaves m at the last accepted state; make sure that is the current one.
   if (steps == 0) {
     m.init_old = original_old;
@@ -269,6 +371,8 @@ Json reduce_mismatch(const RegionPair &region, RegionRunner &old_runner, RegionR
   red.set("seed_independent", seed_independent);
   red.set("program_reduced", false);
   red.set("original_locations", format_locs(original_locs));
+  if (original_vlocs.any())
+    red.set("original_vgpr_locations", format_vgprs(original_vlocs));
   Json orig = Json::object();
   orig.set("old", original_old.to_json());
   orig.set("new", original_new.to_json());
@@ -277,6 +381,15 @@ Json reduce_mismatch(const RegionPair &region, RegionRunner &old_runner, RegionR
   for (unsigned l = 0; l < kNumLocs; ++l)
     if (k.entry_equal.test(l) && cur_o.get(l) != 0)
       nonzero.set(loc_name(l), hex32(cur_o.get(l)));
+  size_t listed = 0;
+  for (unsigned r = 0; r < k.vgpr_count && listed < 64; ++r)
+    if (k.ventry_equal.test(r))
+      for (unsigned lane = 0; lane < kWaveLanes && listed < 64; ++lane)
+        if (cur_o.vget(r, lane) != 0) {
+          nonzero.set("v" + std::to_string(r) + "[" + std::to_string(lane) + "]",
+                      hex32(cur_o.vget(r, lane)));
+          ++listed;
+        }
   red.set("reduced_entry_values", std::move(nonzero));
   return red;
 }
@@ -293,6 +406,10 @@ Json summary_json(const std::vector<InstSummary> &insts) {
     o.set("asm", i.text);
     o.set("reads", format_locs(i.reads));
     o.set("writes", format_locs(i.writes));
+    if (i.vreads.any())
+      o.set("vreads", format_vgprs(i.vreads));
+    if (i.vwrites.any())
+      o.set("vwrites", format_vgprs(i.vwrites));
     arr.push(std::move(o));
   }
   return arr;
@@ -357,6 +474,8 @@ Json feedback_json(const Feedback &fb) {
     o.set("category", fb.category);
     if (fb.locs.any())
       o.set("locs", format_locs(fb.locs));
+    if (fb.vlocs.any())
+      o.set("vlocs", format_vgprs(fb.vlocs));
     o.set("bucket", hex64(fb.bucket));
     o.set("novel", fb.novel);
     Json cost = Json::array();
@@ -452,6 +571,25 @@ void build_initial_states(const RegionContract &contract, const Sample &sample, 
       new_state.set(fwd[l], canary_value(seed, case_index, l, /*new_side=*/true));
     }
   }
+  // VGPRs (VALU support): shared lanes for vgpr entry_equal, per-side canaries otherwise.
+  old_state.resize_vgprs(contract.vgpr_count);
+  new_state.resize_vgprs(contract.vgpr_count);
+  const bool have_lanes = sample.vvalue.size() == size_t{contract.vgpr_count} * kWaveLanes;
+  for (unsigned r = 0; r < contract.vgpr_count; ++r)
+    for (unsigned lane = 0; lane < kWaveLanes; ++lane) {
+      if (contract.ventry_equal.test(r)) {
+        const uint32_t v = have_lanes ? sample.vvalue[size_t{r} * kWaveLanes + lane] : 0u;
+        old_state.vset(r, lane, v);
+        new_state.vset(r, lane, v);
+      } else {
+        const unsigned id = kNumLocs + r * kWaveLanes + lane;
+        old_state.vset(r, lane, canary_value(seed, case_index, id, false));
+        new_state.vset(r, lane, canary_value(seed, case_index, id, true));
+      }
+    }
+  // Each side starts in its own kernel's MODE (FP rounding/denormals, DX10_CLAMP, IEEE).
+  old_state.frame.mode = contract.mode_old;
+  new_state.frame.mode = contract.mode_new;
 }
 
 Json RegionResult::to_json() const {
@@ -544,6 +682,12 @@ Json RegionResult::to_json() const {
   tj.set("compare_ns", t.compare_ns);
   tj.set("triage_ns", t.triage_ns);
   j.set("timing", std::move(tj));
+  if (mismatch_locs.any() || mismatch_vlocs.any()) {
+    j.set("mismatch_locations", format_locs(mismatch_locs));
+    j.set("vgpr_mismatch_locations", format_vgprs(mismatch_vlocs));
+  }
+  if (compensable)
+    j.set("compensable_downstream", true);
   if (!examples.empty()) {
     const Mismatch &m = examples.front();
     Json first = Json::object();
@@ -551,6 +695,8 @@ Json RegionResult::to_json() const {
     first.set("phase", m.phase);
     first.set("kind", m.kind);
     first.set("locations", format_locs(m.locs));
+    if (m.vlocs.any())
+      first.set("vgpr_locations", format_vgprs(m.vlocs));
     first.set("detail", m.detail);
     j.set("first_mismatch", std::move(first));
   }
@@ -580,6 +726,8 @@ Json counterexample_json(const RegionPair &region, const Mismatch &m, uint64_t s
   j.set("phase", m.phase);
   j.set("kind", m.kind);
   j.set("locations", format_locs(m.locs));
+  if (m.vlocs.any())
+    j.set("vgpr_locations", format_vgprs(m.vlocs));
   j.set("detail", m.detail);
   // Observable locations use old naming (the new side is read at map(l)); effect-model
   // locations are physical on their own side.
@@ -597,6 +745,21 @@ Json counterexample_json(const RegionPair &region, const Mismatch &m, uint64_t s
     d.set("old", hex32(m.final_old.get(l)));
     d.set("new", hex32(m.final_new.get(nl)));
     firsts.push(std::move(d));
+  }
+  for (unsigned r = 0; r < kNumVgprs; ++r) {
+    if (!m.vlocs.test(r))
+      continue;
+    uint64_t lanes = differing_lanes(m.final_old, m.final_new, r);
+    for (unsigned listed = 0; lanes && listed < 8; ++listed) {
+      const unsigned lane = static_cast<unsigned>(std::countr_zero(lanes));
+      lanes &= lanes - 1;
+      Json d = Json::object();
+      d.set("loc", "v" + std::to_string(r));
+      d.set("lane", lane);
+      d.set("old", hex32(m.final_old.vget(r, lane)));
+      d.set("new", hex32(m.final_new.vget(r, lane)));
+      firsts.push(std::move(d));
+    }
   }
   j.set("differences", std::move(firsts));
   Json events = Json::array();
@@ -648,9 +811,11 @@ RegionResult test_region(const RegionPair &region, const TestOptions &options,
 
   auto setup_start = Clock::now();
   std::string error;
-  auto old_runner = RegionRunner::create(region.old_side.insts, region.id + "_old", error);
+  const unsigned vgprs = region.contract.vgpr_count;
+  auto old_runner = RegionRunner::create(region.old_side.insts, region.id + "_old", error, vgprs);
   auto new_runner =
-      old_runner ? RegionRunner::create(region.new_side.insts, region.id + "_new", error) : nullptr;
+      old_runner ? RegionRunner::create(region.new_side.insts, region.id + "_new", error, vgprs)
+                 : nullptr;
   r.t.setup_ns = ns_since(setup_start);
   if (!old_runner || !new_runner) {
     r.test_status = TestStatus::HarnessError;
@@ -778,6 +943,7 @@ RegionResult test_region(const RegionPair &region, const TestOptions &options,
       fb.mismatch = !kind.empty();
       fb.category = kind.empty() ? "ok" : kind;
       fb.locs = m.locs;
+      fb.vlocs = m.vlocs;
       note_novelty(&final_old, &final_new);
       if (kind.empty())
         return;
@@ -789,6 +955,8 @@ RegionResult test_region(const RegionPair &region, const TestOptions &options,
       } else {
         ++r.mismatches;
         ++phase.mismatches;
+        r.mismatch_locs |= m.locs;
+        r.mismatch_vlocs |= m.vlocs;
       }
     }
     ++r.mismatch_kinds[kind];
@@ -938,10 +1106,12 @@ ReplayOutcome replay_counterexample(const Json &bundle, std::string &error) {
   auto init_new = MachineState::from_json(bundle["initial_state"]["new"], error);
   if (!init_old || !init_new)
     return out;
-  auto old_runner = RegionRunner::create(region->old_side.insts, region->id + "_replay_old", error);
-  auto new_runner =
-      old_runner ? RegionRunner::create(region->new_side.insts, region->id + "_replay_new", error)
-                 : nullptr;
+  auto old_runner = RegionRunner::create(region->old_side.insts, region->id + "_replay_old", error,
+                                         region->contract.vgpr_count);
+  auto new_runner = old_runner
+                        ? RegionRunner::create(region->new_side.insts, region->id + "_replay_new",
+                                               error, region->contract.vgpr_count)
+                        : nullptr;
   if (!old_runner || !new_runner)
     return out;
   std::vector<TraceStep> trace_old, trace_new;
@@ -961,7 +1131,8 @@ ReplayOutcome replay_counterexample(const Json &bundle, std::string &error) {
   }
   const std::string recorded_kind = bundle["kind"].as_string();
   const std::string recorded_locs = bundle["locations"].as_string();
-  out.reproduced = kind == recorded_kind && format_locs(m.locs) == recorded_locs;
+  out.reproduced = kind == recorded_kind && format_locs(m.locs) == recorded_locs &&
+                   format_vgprs(m.vlocs) == bundle["vgpr_locations"].as_string();
   if (kind != "harness_exit" && oo.status == RunStatus::Ok && on.status == RunStatus::Ok) {
     // Final values must match the bundle exactly, not just the kind.
     auto fo = MachineState::from_json(bundle["final_state"]["old"], error);

@@ -70,16 +70,9 @@ LocSet KernelModel::live_transfer(const Effects &fx, const LocSet &live_after) {
   if (fx.p0)
     return (live_after & ~fx.writes) | fx.reads;
   LocSet live = live_after | fx.reads;
-  // Outside P0: never a kill, and implicit EXEC/VCC/M0 consumers are assumed unless the
-  // instruction is on the short list whose operands name everything it reads.
-  if (fx.implicit_special_reads) {
-    live.set(kLocExecLo);
-    live.set(kLocExecHi);
-    live.set(kLocVccLo);
-    live.set(kLocVccHi);
-    live.set(kLocM0);
-  }
-  return live;
+  // Outside the executable subset: never a kill, plus the implicit special reads of the
+  // instruction class (see Effects::implicit_reads).
+  return live | fx.implicit_reads;
 }
 
 std::unique_ptr<KernelModel> KernelModel::build(const Artifact &artifact, std::string &error) {
@@ -231,6 +224,19 @@ LocSet KernelModel::live_before(size_t i) const {
   return live_transfer(insts_[i].fx, live_after_[i]);
 }
 
+VSet KernelModel::vlive_transfer(const Effects &fx, const VSet &live_after) {
+  if (fx.unknown_effect) {
+    VSet all;
+    all.set();
+    return all;
+  }
+  return live_after | fx.vreads;
+}
+
+VSet KernelModel::vlive_before(size_t i) const {
+  return vlive_transfer(insts_[i].fx, vlive_after_[i]);
+}
+
 void KernelModel::compute_liveness() {
   const size_t nb = blocks_.size();
   std::vector<LocSet> live_in(nb), live_out(nb);
@@ -274,6 +280,47 @@ void KernelModel::compute_liveness() {
       live = live_transfer(insts_[i].fx, live);
     }
   }
+
+  // VGPRs: the same backward dataflow; writes never kill (partial under EXEC).
+  std::vector<VSet> vin(nb), vout(nb);
+  VSet vall;
+  vall.set();
+  auto vblock_out = [&](uint32_t b) {
+    if (blocks_[b].unknown_successor)
+      return vall;
+    VSet out;
+    for (uint32_t s : blocks_[b].successors)
+      out |= vin[s];
+    return out;
+  };
+  for (uint32_t b = static_cast<uint32_t>(nb); b-- > 0;)
+    work.push_back(b);
+  std::fill(queued.begin(), queued.end(), true);
+  while (!work.empty()) {
+    const uint32_t b = work.front();
+    work.pop_front();
+    queued[b] = false;
+    vout[b] = vblock_out(b);
+    VSet in = vout[b];
+    for (size_t i = blocks_[b].end; i-- > blocks_[b].first;)
+      in = vlive_transfer(insts_[i].fx, in);
+    if (in == vin[b])
+      continue;
+    vin[b] = in;
+    for (uint32_t p : blocks_[b].predecessors)
+      if (!queued[p]) {
+        queued[p] = true;
+        work.push_back(p);
+      }
+  }
+  vlive_after_.assign(insts_.size(), VSet{});
+  for (uint32_t b = 0; b < nb; ++b) {
+    VSet live = vblock_out(b);
+    for (size_t i = blocks_[b].end; i-- > blocks_[b].first;) {
+      vlive_after_[i] = live;
+      live = vlive_transfer(insts_[i].fx, live);
+    }
+  }
 }
 
 void KernelModel::compute_taint() {
@@ -281,10 +328,21 @@ void KernelModel::compute_taint() {
   const size_t nb = blocks_.size();
   std::vector<LocSet> taint_out(nb);
   std::vector<LocSet> taint_in(nb);
+  // Scalar and vector taint travel together: a VGPR holding a PC-derived value can flow
+  // back into SGPRs (v_readfirstlane) and the reverse. VGPR writes never clear taint
+  // (inactive lanes keep their value).
+  std::vector<VSet> vtaint_out(nb);
+  VSet vall;
+  vall.set();
+  VSet vt_cur;
   auto transfer = [&](const Effects &fx, LocSet taint) {
-    if (fx.unknown_effect)
+    if (fx.unknown_effect) {
+      vt_cur = vall;
       return all_locs();
-    const bool derived = fx.reads_pc || (taint & fx.reads).any();
+    }
+    const bool derived = fx.reads_pc || (taint & fx.reads).any() || (vt_cur & fx.vreads).any();
+    if (derived)
+      vt_cur |= fx.vwrites;
     if (fx.p0)
       return derived ? (taint | fx.writes) : (taint & ~fx.writes);
     return derived ? (taint | fx.writes) : taint;
@@ -296,21 +354,31 @@ void KernelModel::compute_taint() {
       LocSet in;
       for (uint32_t p : blocks_[b].predecessors)
         in |= taint_out[p];
+      VSet vin;
+      for (uint32_t p : blocks_[b].predecessors)
+        vin |= vtaint_out[p];
+      vt_cur = vin;
       LocSet t = in;
       for (size_t i = blocks_[b].first; i < blocks_[b].end; ++i)
         t = transfer(insts_[i].fx, t);
-      if (in != taint_in[b] || t != taint_out[b]) {
+      if (in != taint_in[b] || t != taint_out[b] || vt_cur != vtaint_out[b]) {
         taint_in[b] = in;
         taint_out[b] = t;
+        vtaint_out[b] = vt_cur;
         changed = true;
       }
     }
   }
   taint_before_.assign(insts_.size(), LocSet{});
+  vtaint_before_.assign(insts_.size(), VSet{});
   for (uint32_t b = 0; b < nb; ++b) {
     LocSet t = taint_in[b];
+    vt_cur = VSet{};
+    for (uint32_t p : blocks_[b].predecessors)
+      vt_cur |= vtaint_out[p];
     for (size_t i = blocks_[b].first; i < blocks_[b].end; ++i) {
       taint_before_[i] = t;
+      vtaint_before_[i] = vt_cur;
       t = transfer(insts_[i].fx, t);
     }
   }
@@ -344,6 +412,7 @@ PendingState pending_transfer(const InstRef &ref, PendingState s) {
         s.count[c] = static_cast<uint8_t>(std::min<uint32_t>(s.count[c], limit[c]));
         if (s.count[c] == 0) {
           s.dests[c].reset();
+          s.vdests[c].reset();
           s.unknown[c] = false;
         }
       }
@@ -356,6 +425,7 @@ PendingState pending_transfer(const InstRef &ref, PendingState s) {
       continue;
     s.count[c] = static_cast<uint8_t>(std::min<unsigned>(s.count[c] + 1u, 63u));
     s.dests[c] |= ref.fx.writes;
+    s.vdests[c] |= ref.fx.vwrites;
     s.unknown[c] = s.unknown[c] || ref.fx.unknown_effect;
     s.example_pc = ref.pc;
   }
@@ -367,6 +437,7 @@ PendingState pending_join(const PendingState &a, const PendingState &b) {
   for (unsigned c = 0; c < PendingState::kNumCounters; ++c) {
     r.count[c] = std::max(a.count[c], b.count[c]);
     r.dests[c] = a.dests[c] | b.dests[c];
+    r.vdests[c] = a.vdests[c] | b.vdests[c];
     r.unknown[c] = a.unknown[c] || b.unknown[c];
   }
   r.example_pc = a.example_pc ? a.example_pc : b.example_pc;
@@ -413,6 +484,7 @@ void KernelModel::compute_pending() {
       for (unsigned c = 0; c < PendingState::kNumCounters; ++c) {
         t.count[c] = 63;
         t.dests[c] = all_locs();
+        t.vdests[c].set();
         t.unknown[c] = true;
       }
     }

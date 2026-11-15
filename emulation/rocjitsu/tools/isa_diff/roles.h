@@ -57,6 +57,20 @@ struct InstSummary {
   std::string mnemonic;
   std::string text;
   LocSet reads, writes;
+  VSet vreads, vwrites;
+};
+
+/// Two register sources of one instruction where at least one is a VGPR (VALU support):
+/// a and b are VGPR indexes when a_vector/b_vector, SGPR locations otherwise.
+struct VectorPair {
+  unsigned a = 0, b = 0;
+  bool a_vector = true, b_vector = true;
+  bool wide = false;
+  std::string mnemonic;
+  bool operator==(const VectorPair &o) const {
+    return a == o.a && b == o.b && a_vector == o.a_vector && b_vector == o.b_vector &&
+           wide == o.wide;
+  }
 };
 
 struct RegionRoles {
@@ -66,6 +80,9 @@ struct RegionRoles {
   std::vector<ConstRelation> const_relations;
   /// Locations read by any region instruction on either side (explicit and fieldless).
   LocSet read;
+  VSet vread;                     ///< VGPRs read by any region instruction.
+  std::vector<VectorPair> vpairs; ///< VGPR/VGPR and SGPR/VGPR source pairs.
+  std::vector<std::pair<unsigned, uint32_t>> vconst_relations; ///< VGPR combined with a literal.
   bool decoded = false; ///< False if some instruction did not decode (roles then partial).
 };
 

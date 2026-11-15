@@ -383,6 +383,48 @@ Sample BoundarySweep::materialize(const SweepCase &c) const {
     s.value[loc] = v & loc_value_mask(loc);
   if (c.scc >= 0)
     s.value[kLocScc] = static_cast<uint32_t>(c.scc);
+  if (exec_entry && c.exec >= 0)
+    s.value[kLocExecLo] = s.value[kLocExecHi] = c.exec == 0 ? 0xffffffffu : 0x55555555u;
+  fill_vgpr_lanes(s, vgpr_count, vwide, seed ^ 0x5357454550ull, c.fill);
+  const auto &c64 = catalog64();
+  for (const VOverride &o : c.voverrides) {
+    for (unsigned lane = 0; lane < kWaveLanes; ++lane) {
+      const uint64_t idx = uint64_t{o.chunk} * kWaveLanes + lane;
+      auto put = [&](unsigned r, uint32_t v) {
+        if (r < vgpr_count)
+          s.vvalue[size_t{r} * kWaveLanes + lane] = v;
+      };
+      switch (o.kind) {
+      case VOverride::Chunk32:
+        put(o.a, vcat[idx % vcat.size()]);
+        break;
+      case VOverride::Chunk64: {
+        const uint64_t v = c64[idx % c64.size()].value;
+        put(o.a, static_cast<uint32_t>(v));
+        put(o.a + 1u, static_cast<uint32_t>(v >> 32));
+        break;
+      }
+      case VOverride::Cross:
+        if (o.wide) {
+          const uint64_t x = c64[idx % c64.size()].value,
+                         y = c64[(idx / c64.size()) % c64.size()].value;
+          put(o.a, static_cast<uint32_t>(x));
+          put(o.a + 1u, static_cast<uint32_t>(x >> 32));
+          put(o.b, static_cast<uint32_t>(y));
+          put(o.b + 1u, static_cast<uint32_t>(y >> 32));
+        } else {
+          put(o.a, vcat[idx % vcat.size()]);
+          put(o.b, vcat[(idx / vcat.size()) % vcat.size()]);
+        }
+        break;
+      case VOverride::Values: {
+        const auto &list = value_lists[o.list];
+        put(o.a, list[idx % list.size()]);
+        break;
+      }
+      }
+    }
+  }
   s.events.push_back(c.label);
   return s;
 }
@@ -391,6 +433,13 @@ BoundarySweep build_boundary_sweep(const RegionRoles &roles, const RegionContrac
                                    const SweepOptions &options) {
   BoundarySweep sweep;
   const LocSet entry = contract.entry_equal;
+  sweep.vgpr_count = contract.vgpr_count;
+  sweep.vwide = contract.vwide_reads;
+  sweep.seed = options.seed;
+  sweep.exec_entry = entry.test(kLocExecLo) && entry.test(kLocExecHi);
+  for (const NamedValue &v : catalog32())
+    if (std::ranges::find(sweep.vcat, v.value) == sweep.vcat.end())
+      sweep.vcat.push_back(v.value);
   // Bases: all zeros (SCC 0), all ones (SCC 1), seeded random.
   for (unsigned l = 0; l < kNumLocs; ++l) {
     sweep.bases[0][l] = 0;
@@ -413,6 +462,8 @@ BoundarySweep build_boundary_sweep(const RegionRoles &roles, const RegionContrac
   };
 
   std::unordered_set<Hash128, Hash128Hasher> seen;
+  std::vector<VOverride> pending_v; // vector part of the next emitted case
+  int8_t pending_exec = -1;
   auto emit = [&](uint8_t base, int8_t scc, std::vector<std::pair<unsigned, uint32_t>> overrides,
                   std::string label, std::string family) {
     ++sweep.generated;
@@ -420,7 +471,12 @@ BoundarySweep build_boundary_sweep(const RegionRoles &roles, const RegionContrac
       sweep.truncated = true;
       return;
     }
-    SweepCase c{base, scc, std::move(overrides), std::move(label), std::move(family)};
+    SweepCase c{base, scc, std::move(overrides), {}, -1, 0, std::move(label), std::move(family)};
+    c.voverrides = std::move(pending_v);
+    c.exec = pending_exec;
+    c.fill = static_cast<uint32_t>(sweep.generated);
+    pending_v.clear();
+    pending_exec = -1;
     const Sample s = sweep.materialize(c);
     Hash128 h{0xcbf29ce484222325ull, 0x84222325cbf29ce4ull};
     for (unsigned l = 0; l < kNumLocs; ++l) {
@@ -428,6 +484,15 @@ BoundarySweep build_boundary_sweep(const RegionRoles &roles, const RegionContrac
         continue;
       h.a = (h.a ^ s.value[l]) * 0x100000001b3ull;
       h.b = splitmix64(h.b ^ (uint64_t{s.value[l]} << 8) ^ l);
+    }
+    for (unsigned r = 0; r < sweep.vgpr_count; ++r) {
+      if (!contract.ventry_equal.test(r))
+        continue;
+      for (unsigned lane = 0; lane < kWaveLanes; ++lane) {
+        const uint32_t v = s.vvalue[size_t{r} * kWaveLanes + lane];
+        h.a = (h.a ^ v) * 0x100000001b3ull;
+        h.b = splitmix64(h.b ^ (uint64_t{v} << 8) ^ (uint64_t{r} << 40) ^ lane);
+      }
     }
     if (!seen.insert(h).second) {
       ++sweep.duplicates;
@@ -511,6 +576,93 @@ BoundarySweep build_boundary_sweep(const RegionRoles &roles, const RegionContrac
                    {p.b + 1, static_cast<uint32_t>(v.b >> 32)}},
                   "pair64 " + p.mnemonic + " " + loc_name(p.a) + "," + loc_name(p.b) + "=" + v.name,
                   "pair64");
+    }
+  }
+  // 6. VALU regions: lane-parallel vector phases. Each case puts 64 catalog values into a
+  // VGPR at once, with every lane active; scalar bases stay as in the other phases.
+  if (sweep.vgpr_count) {
+    const VSet ventry = contract.ventry_equal;
+    const VSet vread = roles.decoded ? roles.vread : ventry;
+    const uint32_t n32 = static_cast<uint32_t>(sweep.vcat.size());
+    const uint32_t n64 = static_cast<uint32_t>(catalog64().size());
+    auto chunks = [](uint64_t n, uint64_t cap) {
+      return static_cast<uint32_t>(std::min<uint64_t>((n + kWaveLanes - 1) / kWaveLanes, cap));
+    };
+    auto vemit = [&](std::vector<VOverride> v, std::vector<std::pair<unsigned, uint32_t>> scalar,
+                     int8_t exec, uint8_t base, const std::string &label,
+                     const std::string &family) {
+      for (int8_t scc : scc_variants(base)) {
+        pending_v = v;
+        pending_exec = exec;
+        emit(base, scc, scalar, label + " base=" + kBaseName[base], family);
+      }
+    };
+    for (unsigned r = 0; r < sweep.vgpr_count; ++r) {
+      if (!ventry.test(r) || !vread.test(r))
+        continue;
+      const std::string name = "v" + std::to_string(r);
+      for (uint32_t k = 0; k < chunks(n32, 64); ++k)
+        for (uint8_t base : {uint8_t{0}, uint8_t{2}})
+          vemit({{VOverride::Chunk32, static_cast<uint16_t>(r), 0, false, k, 0}}, {}, 0, base,
+                "vlanes " + name + " chunk " + std::to_string(k), "vector.lanes");
+      if (sweep.vwide.test(r) && r + 1 < sweep.vgpr_count && ventry.test(r + 1))
+        for (uint32_t k = 0; k < chunks(n64, 64); ++k)
+          vemit({{VOverride::Chunk64, static_cast<uint16_t>(r), 0, true, k, 0}}, {}, 0, 2,
+                "vlanes64 " + name + ":v" + std::to_string(r + 1) + " chunk " + std::to_string(k),
+                "vector.lanes64");
+    }
+    for (const VectorPair &p : roles.vpairs) {
+      if (p.a_vector && p.b_vector) {
+        if (p.a == p.b || !ventry.test(p.a) || !ventry.test(p.b))
+          continue;
+        const uint64_t n = p.wide ? n64 : n32;
+        for (uint32_t k = 0; k < chunks(n * n, 1024); ++k)
+          vemit({{VOverride::Cross, static_cast<uint16_t>(p.a), static_cast<uint16_t>(p.b), p.wide,
+                  k, 0}},
+                {}, 0, 2,
+                "vcross " + p.mnemonic + " v" + std::to_string(p.a) + ",v" + std::to_string(p.b) +
+                    " chunk " + std::to_string(k),
+                "vector.cross");
+      } else if (!p.wide) {
+        // One scalar and one vector source: every scalar catalog value against every
+        // lane chunk of the vector source.
+        const unsigned s = p.a_vector ? p.b : p.a;
+        const unsigned v = p.a_vector ? p.a : p.b;
+        if (!entry.test(s) || !ventry.test(v))
+          continue;
+        for (const NamedValue &x : catalog32())
+          for (uint32_t k = 0; k < chunks(n32, 64); ++k)
+            vemit({{VOverride::Chunk32, static_cast<uint16_t>(v), 0, false, k, 0}}, {{s, x.value}},
+                  0, 2,
+                  "svcross " + p.mnemonic + " " + loc_name(s) + "=" + x.name + " v" +
+                      std::to_string(v) + " chunk " + std::to_string(k),
+                  "vector.scalar_cross");
+      }
+    }
+    for (const auto &[r, constant] : roles.vconst_relations) {
+      if (!ventry.test(r))
+        continue;
+      std::vector<uint32_t> list;
+      for (const NamedValue &v : const_relative_values(constant))
+        list.push_back(v.value);
+      if (list.empty())
+        continue;
+      sweep.value_lists.push_back(std::move(list));
+      const uint32_t id = static_cast<uint32_t>(sweep.value_lists.size() - 1);
+      for (uint32_t k = 0; k < chunks(sweep.value_lists[id].size(), 16); ++k)
+        vemit({{VOverride::Values, static_cast<uint16_t>(r), 0, false, k, id}}, {}, 0, 2,
+              "vconstrel v" + std::to_string(r) + " vs " + hex32(constant), "vector.constrel");
+    }
+    // EXEC: alternate lanes (inactive-lane preservation) and the 64-bit EXEC patterns.
+    if (sweep.exec_entry) {
+      for (uint8_t base : {uint8_t{0}, uint8_t{1}, uint8_t{2}})
+        vemit({}, {}, 1, base, "vexec alternate lanes", "vector.exec");
+      for (const NamedValue64 &v : catalog64())
+        if (value_family(v.name) == "exec")
+          vemit({},
+                {{kLocExecLo, static_cast<uint32_t>(v.value)},
+                 {kLocExecHi, static_cast<uint32_t>(v.value >> 32)}},
+                -1, 2, "vexec " + v.name, "vector.exec");
     }
   }
   // 5. constraint edges.

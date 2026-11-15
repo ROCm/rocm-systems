@@ -3,6 +3,8 @@
 
 #include "machine_state.h"
 
+#include <algorithm>
+
 namespace rocjitsu::isa_diff {
 
 Json MachineState::to_json() const {
@@ -30,6 +32,16 @@ Json MachineState::to_json() const {
   f.set("wave_state", static_cast<uint32_t>(frame.wave_state));
   f.set("sleep_cycles", frame.sleep_cycles);
   j.set("frame", std::move(f));
+  if (vgpr_count) {
+    Json v = Json::object();
+    for (unsigned r = 0; r < vgpr_count; ++r) {
+      Json lanes = Json::array();
+      for (unsigned lane = 0; lane < kWaveLanes; ++lane)
+        lanes.push(hex32(vget(r, lane)));
+      v.set("v" + std::to_string(r), std::move(lanes));
+    }
+    j.set("vgprs", std::move(v));
+  }
   return j;
 }
 
@@ -61,7 +73,52 @@ std::optional<MachineState> MachineState::from_json(const Json &j, std::string &
   s.frame.in_trap_handler = f["in_trap_handler"].as_bool();
   s.frame.wave_state = static_cast<uint8_t>(f["wave_state"].as_uint());
   s.frame.sleep_cycles = static_cast<uint32_t>(f["sleep_cycles"].as_uint());
+  const Json &v = j["vgprs"];
+  if (v.is_object()) {
+    s.resize_vgprs(static_cast<unsigned>(v.members().size()));
+    for (unsigned r = 0; r < s.vgpr_count; ++r) {
+      const auto &lanes = v["v" + std::to_string(r)].items();
+      if (lanes.size() != kWaveLanes) {
+        error = "state VGPR v" + std::to_string(r) + " does not have 64 lanes";
+        return std::nullopt;
+      }
+      for (unsigned lane = 0; lane < kWaveLanes; ++lane) {
+        auto x = json_u64(lanes[lane]);
+        if (!x) {
+          error = "bad VGPR lane value";
+          return std::nullopt;
+        }
+        s.vset(r, lane, static_cast<uint32_t>(*x));
+      }
+    }
+  }
   return s;
+}
+
+VSet differing_vgprs(const MachineState &a, const MachineState &b) {
+  VSet out;
+  const unsigned n = std::max(a.vgpr_count, b.vgpr_count);
+  for (unsigned r = 0; r < n; ++r) {
+    if (r >= a.vgpr_count || r >= b.vgpr_count) {
+      out.set(r);
+      continue;
+    }
+    const uint32_t *pa = a.vgpr.data() + size_t{r} * kWaveLanes;
+    const uint32_t *pb = b.vgpr.data() + size_t{r} * kWaveLanes;
+    if (!std::equal(pa, pa + kWaveLanes, pb))
+      out.set(r);
+  }
+  return out;
+}
+
+uint64_t differing_lanes(const MachineState &a, const MachineState &b, unsigned r) {
+  if (r >= a.vgpr_count || r >= b.vgpr_count)
+    return ~uint64_t{0};
+  uint64_t mask = 0;
+  for (unsigned lane = 0; lane < kWaveLanes; ++lane)
+    if (a.vget(r, lane) != b.vget(r, lane))
+      mask |= uint64_t{1} << lane;
+  return mask;
 }
 
 LocSet differing_locs(const MachineState &a, const MachineState &b) {

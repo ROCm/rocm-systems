@@ -16,6 +16,7 @@
 #include "region_runner.h"
 #include "result_cache.h"
 
+#include "rocjitsu/code/kernel_descriptor_abi.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 
@@ -23,6 +24,7 @@
 
 #include <bit>
 #include <cstdint>
+#include <cstring>
 #include <filesystem>
 #include <memory>
 #include <random>
@@ -161,10 +163,19 @@ TEST(IsaDiffEffects, ClassifiesSaluOperandsPrecisely) {
   EXPECT_FALSE(fx(14).implicit_special_reads);
   Effects load = fx(15);
   EXPECT_FALSE(load.p0);
-  EXPECT_TRUE(load.implicit_special_reads);
+  EXPECT_FALSE(load.implicit_special_reads); // SMEM: its operands name everything it reads
+  EXPECT_TRUE(load.implicit_reads.none());
   EXPECT_EQ(load.reads, locs("s0,s1"));
-  EXPECT_FALSE(fx(16).p0); // v_mov_b32
-  EXPECT_TRUE(fx(16).implicit_special_reads);
+  // v_mov_b32 v0, s1: a plain VALU instruction is region-executable. It reads s1 and
+  // EXEC (the lanes it writes) and writes v0.
+  Effects vmov = fx(16);
+  EXPECT_TRUE(vmov.p0) << vmov.reject_reason;
+  EXPECT_TRUE(vmov.valu);
+  EXPECT_EQ(vmov.reads, locs("s1,exec_lo,exec_hi"));
+  EXPECT_TRUE(vmov.writes.none());
+  EXPECT_EQ(format_vgprs(vmov.vwrites), "v0");
+  EXPECT_TRUE(vmov.vreads.none());
+  EXPECT_FALSE(vmov.implicit_special_reads);
   EXPECT_NE(fx(17).reject_reason.find("trap temporary"), std::string::npos) << fx(17).reject_reason;
   EXPECT_NE(fx(18).reject_reason.find("allowlist"), std::string::npos) << fx(18).reject_reason;
   EXPECT_TRUE(fx(19).unknown_effect); // s_movrels_b32: indirect SGPR
@@ -219,7 +230,8 @@ TEST(IsaDiffKernelModel, ImplicitStoreBaseReadsKeepLivenessPrecise) {
   EXPECT_FALSE(fx.unknown_effect);
   EXPECT_TRUE(fx.reads.test(6));
   EXPECT_TRUE(fx.reads.test(7));
-  EXPECT_FALSE(fx.reject_reason.empty()); // still outside P0
+  EXPECT_EQ(fx.implicit_reads, locs("exec_lo,exec_hi")); // a store never reads VCC or M0
+  EXPECT_FALSE(fx.reject_reason.empty());                // still outside the executable subset
   CaseData d = analyze(k_valutemp_old, k_valutemp_new);
   ASSERT_EQ(d.regions.size(), 1u);
   const RegionContract &k = d.regions[0].contract;
@@ -493,6 +505,18 @@ TEST(IsaDiffValidator, DependentHunksMergeInsteadOfPassingIndependently) {
   TestRun r = run(split);
   // The intermediate s4 differs: a local mismatch, never an independent false pass.
   EXPECT_EQ(r.results[0].test_status, TestStatus::LocalMismatch);
+  // r1 is changed code downstream that reads s4, so it may compensate the difference: the
+  // local mismatch is a witness, not a verdict, and the overall result says so.
+  EXPECT_EQ(split.regions[0].contract.downstream_changed, std::vector<std::string>{"r1"});
+  EXPECT_TRUE(split.regions[0].contract.downstream_reads.test(4));
+  EXPECT_TRUE(r.results[0].compensable);
+  EXPECT_EQ(r.overall(), "INCONCLUSIVE");
+  EXPECT_EQ(r.report["overall"]["witness_scope"].as_string(), "LOCAL_ONLY");
+  bool listed = false;
+  for (const Json &u : r.report["unresolved"].items())
+    listed |= u["what"].as_string().find("may be compensated by changed code downstream (r1)") !=
+              std::string::npos;
+  EXPECT_TRUE(listed);
 }
 
 TEST(IsaDiffValidator, RenamingWithoutValueMappingIsInconclusive) {
@@ -1471,6 +1495,165 @@ TEST(IsaDiffDiagnostics, EntryPrefixRegionsRunOnlyWhenRequestedAndStayOutOfTheVe
     not_entry |= r.status == RegionStatus::Unsupported &&
                  r.reason.find("not in the kernel's entry block") != std::string::npos;
   EXPECT_TRUE(not_entry);
+}
+
+// ---------------------------------------------------------------------------
+// VALU support: VGPRs are tracked per lane, inactive lanes are compared, MODE per side.
+
+TEST(IsaDiffValu, EquivalentVectorRewriteIsExecutedOnAllLanes) {
+  CaseData d = analyze(k_valu_old, k_valu_new);
+  ASSERT_EQ(d.regions.size(), 1u);
+  const RegionPair &r = d.regions[0];
+  ASSERT_EQ(r.status, RegionStatus::Ready) << r.reason;
+  const RegionContract &k = r.contract;
+  EXPECT_EQ(k.status, ContractStatus::Established); // VGPR composition from the kernel entry
+  EXPECT_EQ(k.vgpr_count, 8u);                      // v0..v4 named, allocation granule 8
+  EXPECT_TRUE(k.ventry_equal.test(0) && k.ventry_equal.test(1));
+  EXPECT_TRUE(k.vobservable.test(3));          // stored after the region
+  EXPECT_TRUE(k.vobservable.test(4));          // live through: must be preserved
+  EXPECT_FALSE(k.vobservable.test(2));         // dead temporary
+  EXPECT_TRUE(k.entry_equal.test(kLocExecLo)); // VALU reads EXEC
+  TestRun t = run(d, 500);
+  ASSERT_EQ(t.results.size(), 1u);
+  const RegionResult &res = t.results[0];
+  EXPECT_EQ(res.test_status, TestStatus::NoMismatchFound) << res.reason;
+  EXPECT_EQ(t.overall(), "NO_MISMATCH_FOUND");
+  EXPECT_EQ(res.harness_errors, 0u);
+  for (const char *family : {"vector.lanes", "vector.cross", "vector.exec"})
+    EXPECT_GT(res.boundary_families.count(family), 0u) << family;
+  EXPECT_EQ(res.old_insts_executed, 2 * res.executed_pairs); // only the region ran
+  EXPECT_EQ(res.new_insts_executed, 3 * res.executed_pairs);
+}
+
+TEST(IsaDiffValu, WrongShiftIsCaughtOnLanesAndReplays) {
+  const std::string cex = temp_dir("valu_cex");
+  CaseData d = analyze(k_valu_old, k_valuwrong_new);
+  TestRun t = run(d, 200, 1, cex);
+  ASSERT_EQ(t.results.size(), 1u);
+  const RegionResult &res = t.results[0];
+  ASSERT_EQ(res.test_status, TestStatus::LocalMismatch);
+  ASSERT_FALSE(res.examples.empty());
+  EXPECT_TRUE(res.examples[0].vlocs.test(3));
+  EXPECT_NE(res.examples[0].detail.find("v3 lane"), std::string::npos) << res.examples[0].detail;
+  ASSERT_FALSE(res.counterexample_files.empty());
+  auto text = read_text_file(res.counterexample_files[0]);
+  ASSERT_TRUE(text);
+  std::string error;
+  auto bundle = Json::parse(*text, &error);
+  ASSERT_TRUE(bundle) << error;
+  EXPECT_EQ((*bundle)["vgpr_locations"].as_string(), "v3");
+  bool lane_entry = false;
+  for (const Json &dj : (*bundle)["differences"].items())
+    lane_entry |= dj["loc"].as_string() == "v3" && dj.has("lane");
+  EXPECT_TRUE(lane_entry);
+  EXPECT_TRUE((*bundle)["initial_state"]["old"]["vgprs"].has("v0"));
+  const ReplayOutcome rep = replay_counterexample(*bundle, error);
+  EXPECT_TRUE(rep.reproduced) << rep.summary << error;
+  std::filesystem::remove_all(cex);
+}
+
+TEST(IsaDiffValu, InactiveLaneClobberIsDetected) {
+  // The new side writes v3 with EXEC forced to all lanes: identical results on active
+  // lanes, but lanes outside the original EXEC lose their value.
+  CaseData d = analyze(k_valuclobber_old, k_valuclobber_new);
+  ASSERT_EQ(d.regions.size(), 1u);
+  ASSERT_EQ(d.regions[0].status, RegionStatus::Ready) << d.regions[0].reason;
+  TestRun t = run(d, 300);
+  ASSERT_EQ(t.results[0].test_status, TestStatus::LocalMismatch);
+  const Mismatch &m = t.results[0].examples.at(0);
+  EXPECT_TRUE(m.vlocs.test(3));
+  const uint64_t exec =
+      uint64_t{m.init_old.get(kLocExecLo)} | (uint64_t{m.init_old.get(kLocExecHi)} << 32);
+  EXPECT_NE(exec, ~uint64_t{0});
+  for (unsigned lane = 0; lane < kWaveLanes; ++lane) {
+    if (m.final_old.vget(3, lane) != m.final_new.vget(3, lane)) {
+      EXPECT_FALSE(exec >> lane & 1u) << "lane " << lane << " was active";
+    }
+  }
+  // With EXEC constrained to all lanes the rewrite is equivalent.
+  CaseData full = d;
+  for (unsigned l : {unsigned{kLocExecLo}, unsigned{kLocExecHi}}) {
+    Constraint c;
+    c.loc = l;
+    c.known_one = 0xffffffffu;
+    full.regions[0].contract.constraints.push_back(c);
+  }
+  TestRun tf = run(full, 300);
+  EXPECT_EQ(tf.results[0].test_status, TestStatus::NoMismatchFound);
+}
+
+TEST(IsaDiffValu, DeadVectorTemporaryIsNotObservable) {
+  CaseData d = analyze(k_valudead_old, k_valudead_new);
+  ASSERT_EQ(d.regions.size(), 1u);
+  const RegionContract &k = d.regions[0].contract;
+  EXPECT_FALSE(k.vobservable.test(5));
+  EXPECT_FALSE(k.vobservable.test(6));
+  EXPECT_TRUE(k.vobservable.test(3));
+  TestRun t = run(d, 300);
+  EXPECT_EQ(t.results[0].test_status, TestStatus::NoMismatchFound) << t.results[0].reason;
+}
+
+TEST(IsaDiffValu, OutstandingLoadIntoAVectorInputLeavesTheContextUnresolved) {
+  CaseData d = analyze(k_valupending_old, k_valupending_new);
+  ASSERT_EQ(d.regions.size(), 1u);
+  EXPECT_EQ(d.regions[0].contract.pending_effects, "CONFLICT");
+  EXPECT_EQ(d.regions[0].contract.status, ContractStatus::Unresolved);
+  TestRun t = run(d, 100);
+  EXPECT_NE(t.overall(), "NO_MISMATCH_FOUND");
+}
+
+TEST(IsaDiffValu, ModeIsPerSideAndMattersForFloatConversion) {
+  PlanOptions opt;
+  opt.manual_region = "old:0-1,new:0-1"; // v_cvt_f32_f16 v1, v0 on both sides
+  CaseData d = analyze(k_valucvt, k_valucvt, opt);
+  ASSERT_EQ(d.regions.size(), 1u);
+  ASSERT_EQ(d.regions[0].status, RegionStatus::Ready) << d.regions[0].reason;
+  EXPECT_EQ(d.regions[0].contract.mode_old, kDefaultInitialMode);
+  TestRun same = run(d, 200);
+  EXPECT_EQ(same.results[0].test_status, TestStatus::NoMismatchFound);
+  // The new side flushes f16 denormals: an f16 denormal input converts to 0 there.
+  CaseData flush = d;
+  flush.regions[0].contract.mode_new = kDefaultInitialMode & ~(3u << 6);
+  TestRun t = run(flush, 200);
+  ASSERT_EQ(t.results[0].test_status, TestStatus::LocalMismatch);
+  const Mismatch &m = t.results[0].examples.at(0);
+  EXPECT_TRUE(m.vlocs.test(1));
+  EXPECT_EQ(m.init_new.frame.mode, kDefaultInitialMode & ~(3u << 6));
+}
+
+TEST(IsaDiffValu, RegisterCountMetadataIsInformationalOnlyWithinTheAllocation) {
+  // k_valu_old/new name v0..v4. A descriptor with ACCUM_OFFSET 1 allocates 8 VGPRs.
+  auto with_descriptor = [](std::span<const uint32_t> words, const char *label, uint32_t accum,
+                            const char *vgpr_count) {
+    Artifact a = artifact_from_words(words, label);
+    a.descriptor.assign(sizeof(amdhsa::kernel_descriptor_t), 0);
+    amdhsa::kernel_descriptor_t kd{};
+    kd.compute_pgm_rsrc3 = accum; // ACCUM_OFFSET field [5:0]
+    std::memcpy(a.descriptor.data(), &kd, sizeof(kd));
+    a.metadata_parsed = true;
+    a.metadata_sha256 = label;
+    a.kernel_metadata = {{".name", "\"k\""}, {".vgpr_count", vgpr_count}};
+    return a;
+  };
+  std::string error;
+  auto fits = analyze_artifacts(with_descriptor(k_valu_old, "old", 1, "5"),
+                                with_descriptor(k_valu_new, "new", 1, "4"), {}, error);
+  ASSERT_TRUE(fits) << error;
+  for (const auto &u : fits->unresolved)
+    EXPECT_EQ(u.what.find(".vgpr_count"), std::string::npos) << u.what;
+  bool informational = false;
+  for (const auto &n : fits->notes)
+    informational |= n.what.find(".vgpr_count") != std::string::npos && !n.semantic;
+  EXPECT_TRUE(informational);
+  EXPECT_EQ(fits->regions.at(0).contract.status, ContractStatus::Established);
+  // ACCUM_OFFSET 0 allocates 4 VGPRs, but the kernels name v4: semantic, never hidden.
+  auto beyond = analyze_artifacts(with_descriptor(k_valu_old, "old", 0, "5"),
+                                  with_descriptor(k_valu_new, "new", 0, "4"), {}, error);
+  ASSERT_TRUE(beyond) << error;
+  bool reported = false;
+  for (const auto &u : beyond->unresolved)
+    reported |= u.what.find("beyond its descriptor allocation of 4 VGPRs") != std::string::npos;
+  EXPECT_TRUE(reported);
 }
 
 } // namespace

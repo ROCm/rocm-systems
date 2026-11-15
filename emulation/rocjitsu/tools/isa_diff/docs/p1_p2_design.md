@@ -86,14 +86,17 @@ task. This document records the design and the seams in the P0 code that it reli
 
 ## P2: separate tasks
 
-### VALU and inactive lanes
+### VALU and inactive lanes (implemented after P0)
 
-- **State.** The state model adds VGPRs per lane, plus EXEC as an input. Inactive lanes
-  are part of the observable state (they must be preserved), not "don't care".
-- **Comparison.** Per-lane observable comparison. Boundary catalogs gain lane patterns,
-  which the EXEC patterns already started.
-- **Effect model.** Effects need VGPR locations, and P0's `LocSet` (108 bits) grows to a
-  sparse set.
+Plain VALU is now executed: per-lane VGPR state, inactive lanes compared, per-side MODE,
+lane-parallel inputs (see README "VALU support"). What remains for P2:
+
+- byte-granular VGPR liveness, so a 16-bit store does not make the upper half
+  observable;
+- VGPR register maps for manual regions (SGPR maps exist);
+- role-specific lane values for VGPR operands (shift amounts, BFE fields), beyond the
+  catalogs;
+- AGPRs, which come with MFMA.
 
 ### MFMA
 

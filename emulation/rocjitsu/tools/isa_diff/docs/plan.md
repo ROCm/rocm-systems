@@ -253,6 +253,19 @@ by a test, nothing upgraded beyond what is checked.
 | D7 explicit diagnostic path | `--diagnostic-entry-prefix` regions, reported apart from the verdict | `EntryPrefixRegionsRunOnlyWhenRequestedAndStayOutOfTheVerdict` |
 | D8 schemas and samples | `docs/schema/rj_isa_diff.v1.schema.json`, `validate_outputs.py` (ctest `isa_diff.schema_and_cli`), `docs/samples/regen.sh` | the ctest drives the CLI and validates every output |
 
+## Phase E: VALU support (2026-11-15, third goal)
+
+Driven by LLVM PR 242731, whose changes on gfx950 are VALU conversions that P0 could only
+report as unsupported.
+
+| task | content | tests |
+|---|---|---|
+| E1 effects and liveness | VGPR operands; VALU allowlist; VALU reads EXEC; per-class implicit reads; VGPR liveness (writes never kill), PC taint and pending destinations | `ClassifiesSaluOperandsPrecisely` (VALU row), `ImplicitStoreBaseReadsKeepLivenessPrecise` |
+| E2 contract and planner | VGPR sets, tracked range, per-side MODE, VGPR `INCONCLUSIVE_MAPPING`, per-VGPR composition, downstream changed consumers | `IsaDiffValu.*` |
+| E3 execution and comparison | per-lane state, runner allocation, all-lane compare, VGPR effect model, bundles, replay, reduction | `WrongShiftIsCaughtOnLanesAndReplays`, `InactiveLaneClobberIsDetected` |
+| E4 inputs | lane-parallel default fill; vector sweep phases; full EXEC on half the random cases | `EquivalentVectorRewriteIsExecutedOnAllLanes` |
+| E5 metadata | register-count fields informational when descriptors agree and VGPRs fit the allocation | `RegisterCountMetadataIsInformationalOnlyWithinTheAllocation` |
+
 ## Not in P0 (design retained)
 P1 (scalar branches, multi-exit regions, loops, reachability witnesses, SemaAST/SMT proof) and
 P2 (VALU, memory, pending-effect execution, learned input policies) are designed in

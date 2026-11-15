@@ -72,16 +72,40 @@ struct PairValue64 {
 [[nodiscard]] const std::vector<PairValue64> &pair_catalog64();
 
 /// One sweep case: a base state plus overrides.
+/// Lane-parallel VGPR inputs of one sweep case (VALU support), applied over the default
+/// lane fill. Lane i of a chunk k takes element k*64+i of the source list.
+struct VOverride {
+  enum Kind : uint8_t {
+    Chunk32, ///< VGPR a: the 32-bit catalog.
+    Chunk64, ///< VGPRs a, a+1: the 64-bit catalog.
+    Cross,   ///< VGPRs a and b: the 32-bit catalog cross product (64-bit when wide).
+    Values,  ///< VGPR a: value list `list` of the sweep (literal-relative values).
+  } kind = Chunk32;
+  uint16_t a = 0, b = 0;
+  bool wide = false;
+  uint32_t chunk = 0;
+  uint32_t list = 0;
+};
+
 struct SweepCase {
   uint8_t base = 0; ///< 0 zeros, 1 ones, 2 seeded random.
   int8_t scc = -1;  ///< -1 keeps the base's SCC.
   std::vector<std::pair<unsigned, uint32_t>> overrides;
+  std::vector<VOverride> voverrides;
+  int8_t exec = -1;   ///< -1 base EXEC, 0 all lanes, 1 alternate lanes.
+  uint32_t fill = 0;  ///< Index of the default VGPR lane fill.
   std::string label;  ///< e.g. "single s3=shift.32 base=random scc=1".
   std::string family; ///< Catalog family, e.g. "f32", "shift", "pair.carry".
 };
 
 struct BoundarySweep {
   std::array<std::array<uint32_t, kNumLocs>, 3> bases{};
+  unsigned vgpr_count = 0;
+  VSet vwide;
+  uint64_t seed = 0;
+  bool exec_entry = false;
+  std::vector<uint32_t> vcat;                     ///< 32-bit catalog values for lanes.
+  std::vector<std::vector<uint32_t>> value_lists; ///< VOverride::Values sources.
   std::vector<SweepCase> cases;
   size_t generated = 0;  ///< Before de-duplication and the cap.
   size_t duplicates = 0; ///< Identical input states dropped.
