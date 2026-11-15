@@ -146,9 +146,9 @@ run_job(const std::vector<rank_script_t>& scripts)
         for(size_t r = 0; r < scripts.size(); ++r)
         {
             if(!active[r]) continue;
-            const auto& script   = scripts[r];
-            const bool  eligible = script.total_passes > 1 &&
-                                  (script.decline_at < 0 || boundary < script.decline_at);
+            const auto& script = scripts[r];
+            const bool  eligible =
+                script.total_passes > 1 && (script.decline_at < 0 || boundary < script.decline_at);
             const bool wants_more = boundary + 1 < script.total_passes;
             offers[r]             = peer::local_flags(eligible, wants_more);
             global &= offers[r];
@@ -161,7 +161,7 @@ run_job(const std::vector<rank_script_t>& scripts)
             const auto act = peer::resolve(offers[r], global, static_cast<uint64_t>(boundary));
             if(act == action_t::restore_and_continue) continue;
 
-            active[r]                = false;
+            active[r]                 = false;
             outcomes[r].exit_boundary = boundary;
             outcomes[r].declined      = (act == action_t::stop_declined) || offers[r] == 0;
             outcomes[r].replayed      = !outcomes[r].declined;
@@ -191,9 +191,8 @@ TEST(range_replay_peer_sync, every_rank_leaves_at_the_same_boundary)
                             ASSERT_GE(at, 0);
                             for(const auto& rank : out)
                             {
-                                ASSERT_EQ(rank.exit_boundary, at)
-                                    << "declines " << d0 << d1 << d2 << " totals " << t0 << t1
-                                    << t2;
+                                ASSERT_EQ(rank.exit_boundary, at) << "declines " << d0 << d1 << d2
+                                                                  << " totals " << t0 << t1 << t2;
                                 ASSERT_EQ(rank.calls, static_cast<uint32_t>(at + 1))
                                     << "every rank makes exactly one call per boundary it reaches";
                             }

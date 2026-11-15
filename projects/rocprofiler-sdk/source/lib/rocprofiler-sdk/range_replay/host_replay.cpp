@@ -550,8 +550,8 @@ finish_pass(range_context_t& ctx)
         // must not return early, and why it comes before the restore.
         const auto local = peer::local_flags(true, true);
         executable_guard.unlock();
-        const auto global = execute_peer_sync(
-            ctx.plan, pass, ROCPROFILER_RANGE_REPLAY_PEER_SYNC_PASS_END, local);
+        const auto global =
+            execute_peer_sync(ctx.plan, pass, ROCPROFILER_RANGE_REPLAY_PEER_SYNC_PASS_END, local);
         exchanged = true;
         executable_guard.lock();
 
