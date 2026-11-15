@@ -44,15 +44,15 @@ EQUATION_KEYS = {"value", "avg", "min", "max", "peak", "formula", "peak_empirica
 
 def extract_metric_equations(
     data: Dict[str, Any], path: str = ""
-) -> List[Tuple[str, str, str]]:
-    """Extract (path, key, value) tuples for equation fields from YAML data."""
+) -> List[Tuple[str, str]]:
+    """Return (key path, equation) of each equation field in YAML data."""
     equations = []
 
     if isinstance(data, dict):
         for key, value in data.items():
             current_path = f"{path}.{key}" if path else key
             if key in EQUATION_KEYS and isinstance(value, str):
-                equations.append((current_path, key, value))
+                equations.append((current_path, value))
             elif isinstance(value, dict):
                 equations.extend(extract_metric_equations(value, current_path))
             elif isinstance(value, list):
@@ -115,7 +115,7 @@ def check_file(
     format_issues = []
     fixes = []
 
-    for eq_path, _, value in extract_metric_equations(data):
+    for eq_path, value in extract_metric_equations(data):
         try:
             normalized = normalize_equation(value)
         except ValueError as e:

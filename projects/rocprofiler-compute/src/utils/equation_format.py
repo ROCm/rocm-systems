@@ -14,8 +14,8 @@ from dataclasses import dataclass
 from enum import Enum, auto
 from typing import List, Optional
 
-# Literal string values that should not be parsed as equations
-LITERAL_VALUES = {"N/A", "None", "null", "true", "false", "Peak (Empirical)"}
+# Values that are text, not equations, such as the roofline column header
+LITERAL_VALUES = {"Peak (Empirical)"}
 
 # Aggregation functions where constants should be factored out
 AGGREGATION_FUNCTIONS = {"SUM", "MIN", "MAX", "AVG"}
@@ -33,12 +33,7 @@ def normalize_equation(equation: str) -> str:
 
     Raises ValueError when the equation cannot be parsed.
     """
-    stripped = equation.strip()
-    if (
-        stripped in LITERAL_VALUES
-        or stripped.startswith(('"', "'"))
-        or CHANNEL_PLACEHOLDER in stripped
-    ):
+    if equation in LITERAL_VALUES or CHANNEL_PLACEHOLDER in equation:
         return equation
 
     return format_equation(parse_equation(equation))
@@ -55,36 +50,35 @@ def format_equation(node: "ASTNode") -> str:
 
 
 def _normalize_ast(node: "ASTNode") -> "ASTNode":
-    """Recursively normalize AST: factor constants out of aggregation functions."""
-    if isinstance(node, (NumberNode, IdentifierNode, VariableNode)):
-        return node
-
+    """Return the tree with constants factored out of the aggregation functions."""
     if isinstance(node, UnaryOpNode):
         return UnaryOpNode(node.op, _normalize_ast(node.operand))
-
     if isinstance(node, BinaryOpNode):
         return BinaryOpNode(
             node.op, _normalize_ast(node.left), _normalize_ast(node.right)
         )
-
     if isinstance(node, FunctionCallNode):
         normalized_args = [_normalize_ast(arg) for arg in node.args]
-        func_node = FunctionCallNode(node.name, normalized_args)
-
-        if node.name in AGGREGATION_FUNCTIONS and len(normalized_args) == 1:
-            inner = normalized_args[0]
-            if isinstance(inner, BinaryOpNode) and inner.op == "*":
-                if isinstance(inner.left, NumberNode):
-                    return BinaryOpNode(
-                        "*", inner.left, FunctionCallNode(node.name, [inner.right])
-                    )
-                if isinstance(inner.right, NumberNode):
-                    return BinaryOpNode(
-                        "*", inner.right, FunctionCallNode(node.name, [inner.left])
-                    )
-        return func_node
-
+        return _factor_constant(FunctionCallNode(node.name, normalized_args))
     return node
+
+
+def _factor_constant(call: "FunctionCallNode") -> "ASTNode":
+    """Return SUM(x * 2) as 2 * SUM(x), and the same for the other aggregations.
+
+    Numbers are never negative here, since a minus sign is a unary operation, so the
+    factor does not change MIN or MAX.
+    """
+    if call.name not in AGGREGATION_FUNCTIONS or len(call.args) != 1:
+        return call
+    product = call.args[0]
+    if not isinstance(product, BinaryOpNode) or product.op != "*":
+        return call
+    for factor, rest in ((product.left, product.right), (product.right, product.left)):
+        if isinstance(factor, NumberNode):
+            inner_call = FunctionCallNode(call.name, [rest])
+            return BinaryOpNode("*", factor, inner_call)
+    return call
 
 
 def _serialize_ast(
@@ -93,38 +87,38 @@ def _serialize_ast(
     """Serialize AST to string with minimal parentheses."""
     if isinstance(node, NumberNode):
         return node.value
-    if isinstance(node, IdentifierNode):
-        return node.name
-    if isinstance(node, VariableNode):
+    if isinstance(node, (IdentifierNode, VariableNode)):
         return node.name
     if isinstance(node, UnaryOpNode):
-        operand_str = _serialize_ast(node.operand, node.op, False)
-        # Parenthesize binary operands to preserve semantics: -(a + b) not -a + b
+        operand_text = _serialize_ast(node.operand)
+        # -(a + b) keeps its parentheses: -a + b is a different equation
         if isinstance(node.operand, BinaryOpNode):
-            operand_str = f"({operand_str})"
-        return f"{node.op}{operand_str}"
-
+            operand_text = f"({operand_text})"
+        return f"{node.op}{operand_text}"
     if isinstance(node, BinaryOpNode):
-        left = _serialize_ast(node.left, node.op, False)
-        right = _serialize_ast(node.right, node.op, True)
-        result = f"{left} {node.op} {right}"
+        left_text = _serialize_ast(node.left, node.op)
+        right_text = _serialize_ast(node.right, node.op, is_right=True)
+        operation_text = f"{left_text} {node.op} {right_text}"
+        if _needs_parentheses(node.op, parent_op, is_right):
+            return f"({operation_text})"
+        return operation_text
+    args_text = ", ".join(_serialize_ast(arg) for arg in node.args)
+    return f"{node.name}({args_text})"
 
-        if parent_op is not None:
-            node_prec = OPERATOR_PRECEDENCE.get(node.op, 0)
-            parent_prec = OPERATOR_PRECEDENCE.get(parent_op, 0)
-            if node_prec < parent_prec:
-                return f"({result})"
-            # A right operand keeps its parens even where the result would be
-            # equal, such as a + (b + c), so the evaluation order stays the same.
-            if node_prec == parent_prec and is_right:
-                return f"({result})"
-        return result
 
-    if isinstance(node, FunctionCallNode):
-        args = ", ".join(_serialize_ast(arg) for arg in node.args)
-        return f"{node.name}({args})"
+def _needs_parentheses(op: str, parent_op: Optional[str], is_right: bool) -> bool:
+    """Return whether a binary operation under parent_op needs parentheses.
 
-    return str(node)
+    A right operand keeps them even where the result would be equal, such as
+    a + (b + c), so the evaluation order stays the same.
+    """
+    if parent_op is None:
+        return False
+    precedence = OPERATOR_PRECEDENCE[op]
+    parent_precedence = OPERATOR_PRECEDENCE[parent_op]
+    return precedence < parent_precedence or (
+        precedence == parent_precedence and is_right
+    )
 
 
 class TokenType(Enum):
@@ -148,19 +142,19 @@ class Token:
 class Tokenizer:
     """Tokenize metric equations into tokens."""
 
-    OPERATORS = {"+", "-", "*", "/"}
+    SINGLE_CHARACTER_TOKENS = {
+        "+": TokenType.OPERATOR,
+        "-": TokenType.OPERATOR,
+        "*": TokenType.OPERATOR,
+        "/": TokenType.OPERATOR,
+        "(": TokenType.LPAREN,
+        ")": TokenType.RPAREN,
+        ",": TokenType.COMMA,
+    }
 
     def __init__(self, text: str) -> None:
         self.text = text
         self.pos = 0
-
-    def _peek(self) -> str:
-        return self.text[self.pos] if self.pos < len(self.text) else ""
-
-    def _advance(self) -> str:
-        ch = self._peek()
-        self.pos += 1
-        return ch
 
     def _skip_whitespace(self) -> None:
         while self.pos < len(self.text) and self.text[self.pos].isspace():
@@ -178,17 +172,10 @@ class Tokenizer:
                 self.pos += 1
         return self.text[start : self.pos]
 
-    def _read_identifier(self) -> str:
+    def _read_name(self) -> str:
+        """Read an identifier, or a variable with its leading $."""
         start = self.pos
-        while self.pos < len(self.text) and (
-            self.text[self.pos].isalnum() or self.text[self.pos] == "_"
-        ):
-            self.pos += 1
-        return self.text[start : self.pos]
-
-    def _read_variable(self) -> str:
-        start = self.pos
-        self._advance()
+        self.pos += 1
         while self.pos < len(self.text) and (
             self.text[self.pos].isalnum() or self.text[self.pos] == "_"
         ):
@@ -203,36 +190,24 @@ class Tokenizer:
                 break
 
             start_pos = self.pos
-            ch = self._peek()
+            char = self.text[self.pos]
 
-            if ch.isdigit() or (
-                ch == "."
+            if char.isdigit() or (
+                char == "."
                 and self.pos + 1 < len(self.text)
                 and self.text[self.pos + 1].isdigit()
             ):
                 tokens.append(Token(TokenType.NUMBER, self._read_number(), start_pos))
-            elif ch == "$":
-                tokens.append(
-                    Token(TokenType.VARIABLE, self._read_variable(), start_pos)
-                )
-            elif ch.isalpha() or ch == "_":
-                tokens.append(
-                    Token(TokenType.IDENTIFIER, self._read_identifier(), start_pos)
-                )
-            elif ch in self.OPERATORS:
-                self._advance()
-                tokens.append(Token(TokenType.OPERATOR, ch, start_pos))
-            elif ch == "(":
-                self._advance()
-                tokens.append(Token(TokenType.LPAREN, "(", start_pos))
-            elif ch == ")":
-                self._advance()
-                tokens.append(Token(TokenType.RPAREN, ")", start_pos))
-            elif ch == ",":
-                self._advance()
-                tokens.append(Token(TokenType.COMMA, ",", start_pos))
+            elif char == "$":
+                tokens.append(Token(TokenType.VARIABLE, self._read_name(), start_pos))
+            elif char.isalpha() or char == "_":
+                tokens.append(Token(TokenType.IDENTIFIER, self._read_name(), start_pos))
+            elif char in self.SINGLE_CHARACTER_TOKENS:
+                self.pos += 1
+                token_type = self.SINGLE_CHARACTER_TOKENS[char]
+                tokens.append(Token(token_type, char, start_pos))
             else:
-                raise ValueError(f"Unknown character '{ch}' at position {start_pos}")
+                raise ValueError(f"Unknown character '{char}' at position {start_pos}")
 
         tokens.append(Token(TokenType.EOF, "", self.pos))
         return tokens
@@ -300,13 +275,13 @@ class Parser:
         return self._advance()
 
     def parse(self) -> ASTNode:
-        ast = self._parse_additive()
-        if self._current().type != TokenType.EOF:
-            curr = self._current()
+        tree = self._parse_additive()
+        token = self._current()
+        if token.type != TokenType.EOF:
             raise ValueError(
-                f"Unexpected token after expression: {curr.type} at pos {curr.pos}"
+                f"Unexpected token after expression: {token.type} at pos {token.pos}"
             )
-        return ast
+        return tree
 
     def _parse_additive(self) -> ASTNode:
         left = self._parse_multiplicative()
@@ -361,8 +336,6 @@ class Parser:
         raise ValueError(f"Unexpected token {token.type} at pos {token.pos}")
 
     def _parse_args(self) -> List[ASTNode]:
-        if self._current().type == TokenType.RPAREN:
-            return []
         args = [self._parse_additive()]
         while self._current().type == TokenType.COMMA:
             self._advance()

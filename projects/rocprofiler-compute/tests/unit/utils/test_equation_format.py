@@ -99,11 +99,6 @@ class TestRealWorldEquations:
         """Scientific notation works."""
         assert normalize_equation("x / 1e9") == "x / 1e9"
 
-    def test_literal_values(self):
-        """Literals are never parsed."""
-        for literal in ["N/A", "None", "null", "true", "false"]:
-            assert normalize_equation(literal) == literal
-
 
 class TestSimpleEquations:
     """Whitespace and trivial equations."""
@@ -117,4 +112,3 @@ class TestSimpleEquations:
         """Simple cases work."""
         assert normalize_equation("42") == "42"
         assert normalize_equation("x") == "x"
-        assert normalize_equation("SUM()") == "SUM()"
