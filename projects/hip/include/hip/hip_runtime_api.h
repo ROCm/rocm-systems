@@ -6145,6 +6145,19 @@ hipError_t hipArrayGetDescriptor(HIP_ARRAY_DESCRIPTOR* pArrayDescriptor, hipArra
  */
 hipError_t hipArray3DGetDescriptor(HIP_ARRAY3D_DESCRIPTOR* pArrayDescriptor, hipArray_t array);
 /**
+ * @brief Gets a HIP array plane from a multiplanar HIP array.
+ *
+ * @param[out] pPlaneArray - pointer to the returned HIP array that represents a single format
+ * plane of the input HIP array hArray
+ * @param[in] hArray - multiplanar HIP array
+ * @param[in] planeIdx - index of the array plane
+ *
+ * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorInvalidHandle, #hipErrorNotSupported
+ *
+ * @see hipArrayCreate, hipArray3DCreate, hipArrayDestroy
+ */
+hipError_t hipArrayGetPlane(hipArray_t* pPlaneArray, hipArray_t hArray, unsigned int planeIdx);
+/**
  *  @brief Copies data between host and device.
  *
  * hipMemcpy2D supports memory matrix copy from the pointed area src to the pointed area dst.

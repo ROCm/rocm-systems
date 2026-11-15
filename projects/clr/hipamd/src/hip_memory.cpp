@@ -4711,6 +4711,11 @@ hipError_t hipArray3DGetDescriptor(HIP_ARRAY3D_DESCRIPTOR* pArrayDescriptor, hip
   HIP_RETURN(ihipArray3DGetDescriptor(pArrayDescriptor, array));
 }
 
+hipError_t hipArrayGetPlane(hipArray_t* pPlaneArray, hipArray_t hArray, unsigned int planeIdx) {
+  HIP_INIT_API(hipArrayGetPlane, pPlaneArray, hArray, planeIdx);
+  HIP_RETURN(hipErrorNotSupported);
+}
+
 hipError_t hipMemcpyParam2DAsync(const hip_Memcpy2D* pCopy, hipStream_t stream) {
   HIP_INIT_API(hipMemcpyParam2DAsync, pCopy);
   STREAM_CAPTURE(hipMemcpyParam2DAsync, stream, pCopy);
