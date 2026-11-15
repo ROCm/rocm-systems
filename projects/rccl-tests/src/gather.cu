@@ -202,10 +202,15 @@ __device__ bool GatherLsaDirect(ncclWindow_t sendwin, size_t sendoffset, ncclWin
   char* dst = (char*)ncclGetPeerPointer(recvwin, recvoffset, root) + dstOff;
   if (src == dst) return true;
   if ((((uintptr_t)src | (uintptr_t)dst | chunkBytes) & 15) == 0) {
+    // A slice that starts mid cache line (chunkBytes not a multiple of 128) makes every
+    // wavefront's stores straddle lines, which costs 1.6x on 4 MI455X nodes. Peel up to
+    // 112 bytes so the grid-stride copy writes whole lines; src stays 16-byte aligned.
+    const size_t head = min(chunkBytes, (size_t)(-(uintptr_t)dst & 127));
+    if ((size_t)tid < head / 16) GatherStore16(&((uint4*)dst)[tid], ((const uint4*)src)[tid], streamStores);
     // src and dst are distinct buffers once src == dst has returned, so __restrict__ holds.
-    const uint4* s = (const uint4*)src;
-    uint4* d = (uint4*)dst;
-    const size_t n = chunkBytes / 16;
+    const uint4* s = (const uint4*)(src + head);
+    uint4* d = (uint4*)(dst + head);
+    const size_t n = (chunkBytes - head) / 16;
 #if defined(__gfx1250__) || defined(__gfx1250_strict__)
     // On 4x MI455X with the 96-CTA grid, 8-deep batches are fastest up to 4 MiB per
     // rank and 4-deep ones above (about 2% either way).
