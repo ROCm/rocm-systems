@@ -20,10 +20,12 @@
 
 #include <gtest/gtest.h>
 
+#include <bit>
 #include <cstdint>
 #include <filesystem>
 #include <memory>
 #include <random>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -477,7 +479,7 @@ TEST(IsaDiffValidator, ExecZeroIsExecutedNotFiltered) {
   BaselinePolicy policy(9);
   bool saw_zero_exec = false;
   for (uint64_t k = 0; k < 4000 && !saw_zero_exec; ++k) {
-    Sample s = policy.propose({}, d.regions[0].contract, k);
+    Sample s = policy.propose({}, d.regions[0].contract, History{}, k);
     saw_zero_exec = s.value[kLocExecLo] == 0 && s.value[kLocExecHi] == 0;
   }
   EXPECT_TRUE(saw_zero_exec);
@@ -847,6 +849,281 @@ TEST(IsaDiffBoundary, TruncatedSweepIsReportedAsPartialCoverage) {
   EXPECT_NE(results[0].reason.find("truncated"), std::string::npos);
   EXPECT_EQ(report["overall"]["coverage_scope"].as_string(), "PARTIAL");
   EXPECT_TRUE(report["regions"].items()[0]["boundary_sweep"]["truncated"].as_bool());
+}
+
+// ---------------------------------------------------------------------------
+// Memory operations outstanding at the cutpoint (handoff 6.1)
+
+TEST(IsaDiffPending, OutstandingLoadIntoARegionInputLeavesTheContextUnresolved) {
+  CaseData d = analyze(k_pending_conflict_old, k_pending_conflict_new);
+  ASSERT_EQ(d.regions.size(), 1u);
+  const RegionContract &k = d.regions[0].contract;
+  EXPECT_EQ(k.pending_effects, "CONFLICT");
+  EXPECT_EQ(k.status, ContractStatus::Unresolved);
+  TestRun r = run(d, 200);
+  // The commuted add shows no local mismatch, but the isolated run assumed s4 was ready:
+  // the result is never a pass.
+  EXPECT_EQ(r.results[0].test_status, TestStatus::NoMismatchFound);
+  EXPECT_EQ(r.results[0].pending_effects, "CONFLICT");
+  EXPECT_EQ(r.overall(), "INCONCLUSIVE");
+  EXPECT_EQ(r.coverage(), "PARTIAL");
+}
+
+TEST(IsaDiffPending, DisjointWaitedAndPartiallyWaitedLoads) {
+  CaseData disjoint = analyze(k_pending_disjoint_old, k_pending_disjoint_new);
+  ASSERT_EQ(disjoint.regions.size(), 1u);
+  EXPECT_EQ(disjoint.regions[0].contract.pending_effects, "DISJOINT");
+  EXPECT_EQ(disjoint.regions[0].contract.status, ContractStatus::Established);
+  EXPECT_EQ(run(disjoint, 200).overall(), "NO_MISMATCH_FOUND");
+
+  CaseData waited = analyze(k_pending_waited_old, k_pending_waited_new);
+  ASSERT_EQ(waited.regions.size(), 1u);
+  EXPECT_EQ(waited.regions[0].contract.pending_effects, "NONE");
+  EXPECT_EQ(waited.regions[0].contract.status, ContractStatus::Established);
+
+  // lgkmcnt(1) after two SMEM loads guarantees neither: SMEM returns out of order.
+  CaseData partial = analyze(k_pending_partial_old, k_pending_partial_new);
+  ASSERT_EQ(partial.regions.size(), 1u);
+  EXPECT_EQ(partial.regions[0].contract.pending_effects, "CONFLICT");
+  std::string error;
+  auto model = KernelModel::build(artifact_from_words(k_pending_partial_old, "p"), error);
+  ASSERT_TRUE(model) << error;
+  const PendingState &p = model->pending_before(3); // s_add_u32 s5, s4, 1
+  EXPECT_EQ(p.count[PendingState::kLgkm], 1u);
+  EXPECT_EQ(p.all_dests() & locs("s4,s10"), locs("s4,s10"));
+  EXPECT_FALSE(model->pending_before(5).any()); // after s_waitcnt lgkmcnt(0)
+}
+
+// ---------------------------------------------------------------------------
+// Composition (handoff 5.2)
+
+TEST(IsaDiffComposition, UntestedUpstreamChangeMattersOnlyIfItReachesTheEntryRelation) {
+  CaseData ok = analyze(k_comp_disjoint_old, k_comp_disjoint_new);
+  ASSERT_EQ(ok.regions.size(), 2u);
+  EXPECT_EQ(ok.regions[0].status, RegionStatus::Unsupported); // the s_getreg change
+  EXPECT_EQ(ok.regions[1].contract.composition, "HOLDS");
+  EXPECT_EQ(ok.regions[1].contract.status, ContractStatus::Assumed);
+  ASSERT_FALSE(ok.regions[1].contract.depends_on.empty());
+  EXPECT_EQ(ok.regions[1].contract.depends_on[0], "r0");
+
+  CaseData bad = analyze(k_comp_conflict_old, k_comp_conflict_new);
+  ASSERT_EQ(bad.regions.size(), 2u);
+  EXPECT_EQ(bad.regions[1].contract.composition, "FAILS");
+  EXPECT_EQ(bad.regions[1].contract.status, ContractStatus::Unresolved);
+  bool names_s4 = false;
+  for (const auto &s : bad.regions[1].contract.sources)
+    names_s4 |= s.source == "composition_check" && s.what.find("{s4}") != std::string::npos;
+  EXPECT_TRUE(names_s4);
+
+  // Renamed registers: the downstream region's inputs come from inconclusive regions.
+  CaseData rename = analyze(k_rename_old, k_rename_new);
+  ASSERT_EQ(rename.regions.size(), 3u);
+  EXPECT_EQ(rename.regions[2].contract.composition, "FAILS");
+  EXPECT_EQ(rename.regions[2].contract.status, ContractStatus::Unresolved);
+
+  // Two dependent hunks verified separately: r1's input s4 is part of r0's R_out.
+  PlanOptions no_merge;
+  no_merge.merge_same_block = false;
+  CaseData split = analyze(k_twohunk_old, k_twohunk_new, no_merge);
+  ASSERT_EQ(split.regions.size(), 2u);
+  EXPECT_EQ(split.regions[1].contract.composition, "HOLDS");
+  EXPECT_EQ(split.regions[0].contract.composition, "HOLDS");
+}
+
+// ---------------------------------------------------------------------------
+// Automatic context expansion (handoff 5.2)
+
+TEST(IsaDiffExpansion, CompensatedLocalMismatchIsResolvedByContext) {
+  // s4 = s2 << 1 vs s2 << 2 differs locally, but the common s_and_b32 s4, s4, 1 masks it.
+  CaseData d = analyze(k_expand_masked_old, k_expand_masked_new);
+  ASSERT_EQ(d.regions.size(), 1u);
+  ASSERT_FALSE(d.variants.empty());
+  TestRun r = run(d, 300);
+  const RegionResult &res = r.results[0];
+  EXPECT_EQ(res.test_status, TestStatus::LocalMismatch); // the local fact is kept
+  EXPECT_EQ(res.resolution, "RESOLVED_BY_CONTEXT");
+  EXPECT_EQ(res.resolved_by, "r0.ctx-b0f1");
+  EXPECT_EQ(res.resolved_contract, ContractStatus::Established);
+  EXPECT_EQ(r.overall(), "NO_MISMATCH_FOUND");
+  EXPECT_EQ(r.report["overall"]["witness_scope"].as_string(), "NONE");
+  EXPECT_EQ(r.report["regions"].items()[0]["expansion"]["resolution"].as_string(),
+            "RESOLVED_BY_CONTEXT");
+}
+
+TEST(IsaDiffExpansion, RealDifferencePersistsAndPrerequisiteContextResolves) {
+  TestRun live = run(analyze(k_scclive_old, k_scclive_new));
+  EXPECT_EQ(live.results[0].resolution, "PERSISTS_WITH_CONTEXT");
+  EXPECT_GE(live.results[0].expansion_tried.size(), 2u);
+  EXPECT_EQ(live.overall(), "LOCAL_MISMATCH");
+
+  // s_lshr vs s_bfe is only equal after the common s_and_b32 s4, s4, 0xff.
+  TestRun constraint = run(analyze(k_constraint_old, k_constraint_new));
+  EXPECT_EQ(constraint.results[0].test_status, TestStatus::LocalMismatch);
+  EXPECT_EQ(constraint.results[0].resolution, "RESOLVED_BY_CONTEXT");
+  EXPECT_NE(constraint.results[0].resolved_by.find("b1"), std::string::npos);
+  EXPECT_EQ(constraint.overall(), "NO_MISMATCH_FOUND");
+}
+
+// ---------------------------------------------------------------------------
+// Counterexample reduction (handoff 10)
+
+uint64_t entry_popcount(const MachineState &s, const LocSet &entry) {
+  uint64_t n = 0;
+  for (unsigned l = 0; l < kNumLocs; ++l)
+    if (entry.test(l))
+      n += static_cast<uint64_t>(std::popcount(s.get(l)));
+  return n;
+}
+
+TEST(IsaDiffReduction, CounterexamplesAreShrunkSeedIndependentAndStillReplay) {
+  CaseData d = analyze(k_scclive_old, k_scclive_new);
+  ASSERT_EQ(d.regions.size(), 1u);
+  const LocSet entry = d.regions[0].contract.entry_equal;
+  const std::string dir = temp_dir("reduce");
+  TestRun r = run(d, 300, 1, dir);
+  ASSERT_FALSE(r.results[0].examples.empty());
+  const Mismatch &m = r.results[0].examples[0];
+  ASSERT_FALSE(m.reduction.is_null());
+  EXPECT_GT(m.reduction["runs"].as_uint(), 0u);
+  EXPECT_TRUE(m.reduction["seed_independent"].as_bool());
+  EXPECT_TRUE(m.locs.test(kLocScc));
+  // Only the two add sources stay non-zero, and the inputs got no larger.
+  for (unsigned l = 0; l < kNumLocs; ++l) {
+    if (entry.test(l) && l != 2 && l != 3) {
+      EXPECT_EQ(m.init_old.get(l), 0u) << loc_name(l);
+    }
+  }
+  std::string error;
+  auto original = MachineState::from_json(m.reduction["original_initial_state"]["old"], error);
+  ASSERT_TRUE(original) << error;
+  EXPECT_LE(entry_popcount(m.init_old, entry), entry_popcount(*original, entry));
+  // The bundle holds the reduced state and replays it exactly.
+  ASSERT_FALSE(r.results[0].counterexample_files.empty());
+  auto text = read_text_file(r.results[0].counterexample_files[0]);
+  auto bundle = Json::parse(*text, &error);
+  ASSERT_TRUE(bundle) << error;
+  EXPECT_TRUE((*bundle)["reduction"]["seed_independent"].as_bool());
+  ReplayOutcome replay = replay_counterexample(*bundle, error);
+  EXPECT_TRUE(replay.reproduced) << replay.summary << error;
+
+  // The literal off-by-one cannot shrink its trigger value, only everything else.
+  TestRun obo = run(analyze(k_offbyone_old, k_offbyone_bug), 0);
+  const Mismatch &o = obo.results[0].examples[0];
+  EXPECT_EQ(o.init_old.get(2), 0x12345u);
+  EXPECT_EQ(o.reduction["reduced_entry_values"].size(), 1u);
+
+  // Reduction can be switched off.
+  TestOptions off;
+  off.cases = 100;
+  off.reduce = false;
+  BaselinePolicy policy(1);
+  RegionResult raw = test_region(d.regions[0], off, policy);
+  ASSERT_FALSE(raw.examples.empty());
+  EXPECT_TRUE(raw.examples[0].reduction.is_null());
+  std::filesystem::remove_all(dir);
+}
+
+TEST(IsaDiffReduction, ReductionNeverLeavesTheContract) {
+  CaseData d = analyze(k_scclive_old, k_scclive_new);
+  Constraint c;
+  c.loc = 3;
+  c.known_one = 0x10u; // s3 must keep bit 4
+  d.regions[0].contract.constraints.push_back(c);
+  TestRun r = run(d, 300);
+  ASSERT_EQ(r.results[0].test_status, TestStatus::LocalMismatch);
+  for (const Mismatch &m : r.results[0].examples) {
+    EXPECT_EQ(m.init_old.get(3) & 0x10u, 0x10u);
+    Sample s;
+    for (unsigned l = 0; l < kNumLocs; ++l)
+      s.value[l] = m.init_old.get(l);
+    EXPECT_FALSE(ConstraintChecker::validate(s, d.regions[0].contract).has_value());
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Learning hooks and per-case log (handoff 8)
+
+class RecordingPolicy final : public InputPolicy {
+public:
+  [[nodiscard]] std::string name() const override { return "recording"; }
+  Sample propose(const RegionFeatures &f, const RegionContract &k, const History &h,
+                 uint64_t case_index) override {
+    history_sizes.push_back(h.cases);
+    window_sizes.push_back(h.recent.size());
+    return inner.propose(f, k, h, case_index);
+  }
+  void observe(const Feedback &fb) override { seen.push_back(fb); }
+
+  BaselinePolicy inner{7};
+  std::vector<Feedback> seen;
+  std::vector<uint64_t> history_sizes;
+  std::vector<size_t> window_sizes;
+};
+
+TEST(IsaDiffLearning, PolicyGetsHistoryRichFeedbackAndEveryCaseIsLogged) {
+  CaseData d = analyze(k_scclive_old, k_scclive_new);
+  RecordingPolicy policy;
+  TestOptions opt;
+  opt.cases = 50;
+  opt.case_log_dir = temp_dir("caselog");
+  RegionResult r = test_region(d.regions[0], opt, policy);
+
+  // observe() saw every case of both phases; propose() saw the growing, bounded history.
+  EXPECT_EQ(policy.seen.size(), r.boundary.cases + r.random.cases);
+  ASSERT_EQ(policy.history_sizes.size(), 50u);
+  EXPECT_EQ(policy.history_sizes.front(), r.boundary.cases);
+  EXPECT_EQ(policy.history_sizes.back(), r.boundary.cases + 49u);
+  for (size_t w : policy.window_sizes)
+    EXPECT_LE(w, History::kWindow);
+
+  bool saw_mismatch = false, saw_ok = false;
+  for (const Feedback &fb : policy.seen) {
+    EXPECT_TRUE(fb.phase == "boundary" || fb.phase == "random");
+    if (!fb.accepted)
+      continue;
+    EXPECT_EQ(fb.exit_old, "OK");
+    EXPECT_EQ(fb.insts_old, 1u);
+    EXPECT_EQ(fb.insts_new, 1u);
+    EXPECT_NE(fb.bucket, 0u);
+    saw_mismatch = saw_mismatch || (fb.mismatch && fb.locs.test(kLocScc));
+    saw_ok = saw_ok || fb.category == "ok";
+  }
+  EXPECT_TRUE(saw_mismatch);
+  EXPECT_TRUE(saw_ok);
+  // Novelty is a bounded classification, not one class per random value.
+  EXPECT_GT(r.novelty_buckets, 1u);
+  EXPECT_LT(r.novelty_buckets, 64u);
+  EXPECT_EQ(r.novel_boundary + r.novel_random, r.novelty_buckets);
+
+  // The log: a header with the opcode/effect summary, one line per case, a summary.
+  ASSERT_FALSE(r.case_log.empty());
+  auto text = read_text_file(r.case_log);
+  ASSERT_TRUE(text);
+  std::vector<Json> lines;
+  std::istringstream in(*text);
+  std::string line;
+  std::string error;
+  while (std::getline(in, line)) {
+    auto j = Json::parse(line, &error);
+    ASSERT_TRUE(j) << error << ": " << line;
+    lines.push_back(std::move(*j));
+  }
+  ASSERT_EQ(lines.size(), policy.seen.size() + 2);
+  const Json &header = lines.front();
+  EXPECT_EQ(header["type"].as_string(), "header");
+  EXPECT_EQ(header["seed"].as_uint(), opt.seed);
+  EXPECT_EQ(header["old"].items()[0]["mnemonic"].as_string(), "s_add_u32");
+  EXPECT_EQ(header["old"].items()[0]["writes"].as_string(), "s4,scc");
+  EXPECT_EQ(header["new"].items()[0]["mnemonic"].as_string(), "s_add_i32");
+  EXPECT_FALSE(header["pairs"].items().empty());
+  const Json &first_case = lines[1];
+  EXPECT_EQ(first_case["type"].as_string(), "case");
+  EXPECT_EQ(first_case["phase"].as_string(), "boundary");
+  EXPECT_FALSE(first_case["events"].items().empty());
+  EXPECT_EQ(first_case["cost_ns"].size(), 5u);
+  EXPECT_EQ(lines.back()["type"].as_string(), "summary");
+  EXPECT_EQ(lines.back()["novelty_buckets"].as_uint(), r.novelty_buckets);
+  std::filesystem::remove_all(opt.case_log_dir);
 }
 
 } // namespace

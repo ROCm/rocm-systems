@@ -4,7 +4,7 @@
     "tool": "rj_isa_diff",
     "tool_version": "0.1.0-p0",
     "schema_version": "rj_isa_diff.v1",
-    "rocjitsu_revision": "5588fbf7ec0c5b3f0d92a4c83116ef5997915ac3",
+    "rocjitsu_revision": "03c6dd8633b6ac5eff7be87adcd0559cc34bb212",
     "rocjitsu_version": "0.3.0",
     "semantics": "RocJITsu ComputeUnitCore::execute_instruction, gfx950 (CDNA4) wave64, default arithmetic semantics",
     "compiler": "13.4.0"
@@ -62,7 +62,9 @@
       "witness_scope": "NONE",
       "coverage_scope": "COMPLETE_FOR_DECLARED_SCOPE",
       "proof_status": "NOT_RUN",
-      "prepared_key": "b752e44c69733da43d0815d737802cff0c489d05e856c6570b8fb0d7d9b7f0ab",
+      "prepared_key": "310245b83b9d7d2bdf6e2bf766865c07128431a354ae4804aa6c50d68be47cc2",
+      "pending_effects": "NONE",
+      "composition": "HOLDS",
       "policy": "baseline-v1",
       "seed": 1,
       "counts": {
@@ -106,6 +108,11 @@
         "valid": 5000,
         "mismatches": 0
       },
+      "novelty": {
+        "distinct_buckets": 14,
+        "first_seen_in_boundary": 14,
+        "first_seen_in_random": 0
+      },
       "execution": {
         "old_region_insts": 1,
         "new_region_insts": 2,
@@ -113,12 +120,12 @@
         "new_insts_executed": 11118
       },
       "timing": {
-        "setup_ns": 519482,
-        "propose_ns": 4284338,
-        "state_load_ns": 5291329,
-        "old_execute_ns": 389735,
-        "new_execute_ns": 496246,
-        "compare_ns": 8272625,
+        "setup_ns": 537819,
+        "propose_ns": 1340666,
+        "state_load_ns": 4159600,
+        "old_execute_ns": 460280,
+        "new_execute_ns": 509531,
+        "compare_ns": 2097514,
         "triage_ns": 0
       },
       "counterexamples": []

@@ -65,8 +65,25 @@ RegionFeatures make_region_features(const std::vector<RegionInst> &old_insts,
   return f;
 }
 
+void History::record(const Feedback &f) {
+  ++cases;
+  accepted += f.accepted ? 1 : 0;
+  valid += f.category == "ok" || f.mismatch ? 1 : 0;
+  mismatches += f.mismatch ? 1 : 0;
+  novel += f.novel ? 1 : 0;
+  ++categories[f.category];
+  if (recent.size() == kWindow)
+    recent.erase(recent.begin());
+  recent.push_back(f);
+}
+
+std::optional<std::string> ConstraintChecker::validate(const Sample &sample,
+                                                       const RegionContract &contract) {
+  return validate_sample(sample, contract);
+}
+
 Sample BaselinePolicy::propose(const RegionFeatures &features, const RegionContract &contract,
-                               uint64_t case_index) {
+                               const History & /*history: fixed policy*/, uint64_t case_index) {
   CaseRng rng(splitmix64(seed_ ^ splitmix64(case_index)));
   auto pick = [&](uint64_t n) { return static_cast<size_t>(rng() % n); };
   const auto &c32 = catalog32();

@@ -28,6 +28,10 @@ rj_isa_diff analyze --old old.hsaco --new new.hsaco --kernel my_kernel --out cas
 rj_isa_diff test --case case/ --seed 1 --cases 10000 [--region r0]
 #   the boundary/NaN/corner sweep always runs first; --cases adds random cases
 #   [--max-boundary-cases N]  safety cap (default 250000); hitting it => PARTIAL
+#   [--reduction-budget N | --no-reduce]  counterexample reduction (default 4096 runs)
+#   [--no-case-log]  skip the per-case JSONL learning log (case/logs/<region>.jsonl)
+#   after a local mismatch, precomputed larger regions (common context) are tried
+#   automatically
 
 # 3. Re-execute a counterexample from its recorded words (no artifact, no LLVM).
 rj_isa_diff replay --counterexample case/counterexamples/r0-case17.json [--case case/]
@@ -87,11 +91,72 @@ For each region pair (`case.json` → `regions[].contract`):
   and trap/wave state are fixed and must be preserved.
 - **Effect check**: each side may change only its `declared_writes_*`. Any other
   change is a `HARNESS_ERROR`, because it means the effect model is wrong.
-- **Status**: `ESTABLISHED` when every path to the region runs byte-identical code from
-  identical metadata. `ASSUMED` when R_in relies on upstream regions' R_out or on an
-  unchecked single-entry assumption (unknown CFG successors). `UNRESOLVED` when a
-  descriptor/metadata change, an unsupported or inconclusive upstream region, or a
-  control-flow change can reach the entry.
+- **Pending effects** (`pending_effects`): memory operations that may still be in flight at
+  the entry, from an `s_waitcnt` dataflow over the gfx9 counters.
+  - `NONE` and `DISJOINT` (in flight, but no destination is read or written by the region)
+    leave the contract unaffected.
+  - `CONFLICT` and `UNKNOWN` leave the context unresolved: the isolated run starts with
+    every input ready, and real hardware might not.
+- **Composition** (`composition`): a forward must-equality analysis from the kernel entry,
+  through common code and upstream regions' R_out, must establish every `entry_equal`
+  location (`HOLDS`). Otherwise it reports `FAILS`, naming the missing locations.
+- **Status**:
+  - `ESTABLISHED` when every path to the region runs byte-identical code from identical
+    metadata.
+  - `ASSUMED` when R_in relies on upstream regions' R_out, on untested upstream changes
+    writing only their decoded destinations, or on an unchecked single-entry assumption
+    (unknown CFG successors).
+  - `UNRESOLVED` when kernel metadata differs, a control-flow change can reach the entry,
+    composition fails, or pending effects conflict. An unresolved context is also listed
+    in `unresolved`, so the overall result is never a pass.
+
+## Context expansion
+
+A local mismatch may be compensated by common code around the change (handoff 5.2).
+`analyze` precomputes up to 12 larger variants of each READY region, stored in
+`case.json` under `expansion_variants`. Each variant adds matched common P0 instructions
+from the same block, before and/or after the change (`r0.ctx-b<before>f<after>`). Each
+has its own contract.
+
+After a base region shows `LOCAL_MISMATCH`, `test` runs these variants smallest first. The
+base result keeps its local mismatch, and `expansion.resolution` records the outcome:
+- `RESOLVED_BY_CONTEXT`: a variant has no mismatch, and the overall verdict uses that
+  variant's result and contract;
+- `PERSISTS_WITH_CONTEXT`;
+- `NO_EXPANSION_AVAILABLE`.
+
+`--context N` still adds manual backward context to every base region.
+
+## Counterexample reduction
+
+Saved counterexamples are shrunk before they are traced and written:
+1. The seed-derived canaries are replaced with fixed distinct values. If the mismatch
+   persists, the bundle is marked `seed_independent`.
+2. Every shared entry value is tried at 0, at 1, at successive halvings, and with single
+   bits cleared, keeping a candidate only if it is simpler, satisfies the constraints, and
+   reproduces the same mismatch kind.
+
+The bundle records `reduction` (runs, steps, the original initial state, and the non-zero
+reduced inputs). `replay` runs the reduced case. The program is never reduced.
+
+## Learning hooks
+
+- `InputPolicy::propose(features, contract, history, case)` receives a bounded `History`:
+  counts, categories, and the last 32 feedbacks.
+- `observe(Feedback)` receives:
+  - the phase and input events;
+  - the acceptance or rejection reason;
+  - both exit statuses and the outcome category;
+  - the differing locations;
+  - a bounded novelty bucket (outcome plus coarse value classes, never raw values) and
+    whether it is new;
+  - per-stage cost and instruction counts.
+- `ConstraintChecker::validate` gates every proposal.
+- `test` writes `logs/<region>.jsonl`:
+  - a header with the per-instruction opcode/effect summary, roles, operand pairs, literal
+    relations and the contract;
+  - one line per case;
+  - a summary.
 
 ## Rejections
 
@@ -125,8 +190,10 @@ exception, ISA undefined behaviour (RocJITsu's isa-undefined counter), and PC wr
   executed-instruction counters (proving region-only execution), per-phase timing,
   and counterexample paths.
 - `counterexamples/<region>-case<k>.json`: a self-contained bundle with the region,
-  contract, both complete initial and final states, seed, case index, per-instruction
-  traces, first differences, and tool/RocJITsu identity.
+  contract, both complete initial and final states (reduced), seed, case index,
+  per-instruction traces, first differences, the reduction record, and tool/RocJITsu
+  identity.
+- `logs/<region>.jsonl`: the per-case learning log (see "Learning hooks").
 
 `prepared_key` hashes the region words, the PCs, the full contract and the execution
 mode. A change in downstream liveness therefore yields a new key even when the region

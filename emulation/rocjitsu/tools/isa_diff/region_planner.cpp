@@ -3,8 +3,11 @@
 
 #include "region_planner.h"
 
+#include "rocjitsu/isa/instruction.h"
+
 #include <algorithm>
 #include <optional>
+#include <set>
 
 namespace rocjitsu::isa_diff {
 namespace {
@@ -17,6 +20,7 @@ struct Candidate {
   Span o, n;
   std::vector<size_t> hunks;
   size_t expansions = 0;
+  uint32_t before = 0, after = 0; ///< Common context added (variants).
 };
 
 /// The block a (possibly empty) side span executes in.
@@ -26,6 +30,8 @@ uint32_t span_block(const KernelModel &m, const Span &s) {
     return insts[s.begin].block;
   return insts[std::min(s.cut, insts.size() - 1)].block;
 }
+
+size_t anchor_index(const Span &s) { return s.begin < s.end ? s.begin : s.cut; }
 
 /// All instructions of [begin, end) lie in one block and only begin may be a leader.
 bool single_block(const KernelModel &m, size_t begin, size_t end) {
@@ -71,9 +77,7 @@ std::vector<RegionInst> region_insts(const KernelModel &m, size_t begin, size_t 
   return out;
 }
 
-LocSet entry_live(const KernelModel &m, const Span &s) {
-  return m.live_before(s.begin < s.end ? s.begin : s.cut);
-}
+LocSet entry_live(const KernelModel &m, const Span &s) { return m.live_before(anchor_index(s)); }
 
 LocSet exit_live(const KernelModel &m, const Span &s) {
   return s.begin < s.end ? m.live_after(s.end - 1) : m.live_before(s.cut);
@@ -84,6 +88,13 @@ LocSet union_writes(const KernelModel &m, const Span &s) {
   for (size_t i = s.begin; i < s.end; ++i)
     w |= m.insts()[i].fx.writes;
   return w;
+}
+
+LocSet union_reads(const KernelModel &m, const Span &s) {
+  LocSet r;
+  for (size_t i = s.begin; i < s.end; ++i)
+    r |= m.insts()[i].fx.reads;
+  return r;
 }
 
 LocSet union_wide_reads(const KernelModel &m, const Span &s) {
@@ -100,6 +111,443 @@ bool in_cycle(const KernelModel &m, uint32_t block) {
   return !m.cfg_complete();
 }
 
+LocSet special_reads() {
+  LocSet s;
+  for (unsigned l : {kLocExecLo, kLocExecHi, kLocVccLo, kLocVccHi, kLocM0})
+    s.set(l);
+  return s;
+}
+
+// ---------------------------------------------------------------------------
+// Pending memory effects at the cutpoint (handoff 6.1).
+
+std::string describe_pending(const char *side, const PendingState &p) {
+  std::string s = std::string(side) + ": vmcnt<=" + std::to_string(p.count[PendingState::kVm]) +
+                  " lgkmcnt<=" + std::to_string(p.count[PendingState::kLgkm]) +
+                  " expcnt<=" + std::to_string(p.count[PendingState::kExp]) + ", destinations {" +
+                  format_locs(p.all_dests()) + "}";
+  if (p.example_pc)
+    s += ", e.g. issued at " + hex64(p.example_pc);
+  return s;
+}
+
+void check_pending(const KernelModel &om, const KernelModel &nm, const Candidate &c,
+                   RegionContract &k) {
+  const PendingState &po = om.pending_before(anchor_index(c.o));
+  const PendingState &pn = nm.pending_before(anchor_index(c.n));
+  const LocSet touch_old = union_reads(om, c.o) | union_writes(om, c.o);
+  const LocSet touch_new = union_reads(nm, c.n) | union_writes(nm, c.n);
+  const LocSet conflict = (po.all_dests() & touch_old) | (pn.all_dests() & touch_new);
+  const std::string state = describe_pending("old", po) + "; " + describe_pending("new", pn);
+  if (po.any_unknown() || pn.any_unknown()) {
+    k.pending_effects = "UNKNOWN";
+    k.sources.push_back({"context unresolved: a memory operation with unknown effects may be "
+                         "outstanding at the region entry (" +
+                             state + ")",
+                         "pending_effects_analysis"});
+  } else if (conflict.any()) {
+    k.pending_effects = "CONFLICT";
+    k.sources.push_back({"context unresolved: outstanding memory writes to {" +
+                             format_locs(conflict) +
+                             "} may land during the region, which reads or writes them; the "
+                             "isolated run starts with every input ready (" +
+                             state + ")",
+                         "pending_effects_analysis"});
+  } else if (po.any() || pn.any()) {
+    k.pending_effects = "DISJOINT";
+    k.sources.push_back({"memory operations are outstanding at the region entry, but none "
+                         "writes a location the region reads or writes, so starting the "
+                         "isolated run with nothing pending matches the region's view (" +
+                             state + ")",
+                         "pending_effects_analysis"});
+  } else {
+    k.pending_effects = "NONE";
+    k.sources.push_back({"no memory operation outstanding at the region entry (s_waitcnt "
+                         "dataflow over the CFG)",
+                         "pending_effects_analysis"});
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Region construction (shared by base regions and expansion variants).
+
+RegionPair build_region(const KernelModel &om, const KernelModel &nm, const Candidate &c,
+                        const PlanOptions &options, const std::string &id) {
+  RegionPair region;
+  region.id = id;
+  region.hunks = c.hunks;
+  region.old_side = {c.o.begin, c.o.end, c.o.cut, region_insts(om, c.o.begin, c.o.end)};
+  region.new_side = {c.n.begin, c.n.end, c.n.cut, region_insts(nm, c.n.begin, c.n.end)};
+  region.status = RegionStatus::Ready;
+  region.context_before = c.before;
+  region.context_after = c.after;
+
+  std::optional<std::string> reject;
+  if (!single_block(om, c.o.begin, c.o.end) || !single_block(nm, c.n.begin, c.n.end)) {
+    // Renamed registers across blocks typically land here: no checked value mapping
+    // exists, so the result is a mapping inconclusive rather than a guess.
+    region.status = RegionStatus::Inconclusive;
+    reject = "INCONCLUSIVE_MAPPING: region spans basic blocks; P0 only maps state at a "
+             "common single-block cutpoint";
+  } else if (c.o.end - c.o.begin > options.max_region_insts ||
+             c.n.end - c.n.begin > options.max_region_insts) {
+    reject = "region exceeds max_region_insts";
+  } else if (auto bad = first_non_p0(om, c.o.begin, c.o.end, "old")) {
+    reject = *bad;
+  } else if (auto bad2 = first_non_p0(nm, c.n.begin, c.n.end, "new")) {
+    reject = *bad2;
+  } else if (auto pc = pc_tainted_read(om, c.o.begin, c.o.end, "old")) {
+    reject = *pc;
+  } else if (auto pc2 = pc_tainted_read(nm, c.n.begin, c.n.end, "new")) {
+    reject = *pc2;
+  }
+  if (reject) {
+    if (region.status == RegionStatus::Ready)
+      region.status = RegionStatus::Unsupported;
+    region.reason = *reject;
+  }
+
+  RegionContract &k = region.contract;
+  k.entry_equal = entry_live(om, c.o) | entry_live(nm, c.n);
+  k.canary = ~k.entry_equal;
+  const LocSet out_old = exit_live(om, c.o);
+  const LocSet out_new = exit_live(nm, c.n);
+  k.observable = out_old | out_new;
+  // The two continuations read different locations: they differ downstream (typically
+  // a register renaming that crosses blocks), so equality on the same physical
+  // locations at this exit is not a justified relation. Do not guess a mapping.
+  if (region.status == RegionStatus::Ready && out_old != out_new) {
+    region.status = RegionStatus::Inconclusive;
+    region.reason = "INCONCLUSIVE_MAPPING: continuation liveness differs at the region exit "
+                    "(old-only: " +
+                    format_locs(out_old & ~out_new) +
+                    "; new-only: " + format_locs(out_new & ~out_old) +
+                    "); identity R_out is not justified and no checked value mapping exists";
+  }
+  k.declared_writes_old = union_writes(om, c.o);
+  k.declared_writes_new = union_writes(nm, c.n);
+  k.wide_reads = union_wide_reads(om, c.o) | union_wide_reads(nm, c.n);
+  k.sources.push_back({"entry_equal = live-in(old) | live-in(new) at the region entry",
+                       "KernelModel backward LocSet liveness over BasicBlock::build_reachable "
+                       "CFG"});
+  k.sources.push_back({"observable = live-out(old) | live-out(new) at the region exit",
+                       "KernelModel backward LocSet liveness"});
+  k.sources.push_back({"mapping = same physical location on both sides",
+                       "identity at a common cutpoint; matched anchors from LCS alignment"});
+  k.sources.push_back({"canary = locations dead at entry on both sides",
+                       "complement of entry_equal; independent per-side values"});
+  if (c.before)
+    k.sources.push_back({"region includes " + std::to_string(c.before) +
+                             " common instruction(s) before the change as context",
+                         "common_prefix_analysis"});
+  if (c.after)
+    k.sources.push_back({"region includes " + std::to_string(c.after) +
+                             " common instruction(s) after the change as context",
+                         "common_suffix_context"});
+  if (!om.cfg_complete() || !nm.cfg_complete())
+    k.sources.push_back(
+        {"some CFG successors are unknown; liveness made them all-live", "conservative widening"});
+  check_pending(om, nm, c, k);
+  return region;
+}
+
+// ---------------------------------------------------------------------------
+// Context expansion steps over matched common P0 instructions in the same block.
+
+bool step_back(const KernelModel &om, const KernelModel &nm, const DiffResult &diff, Candidate &c) {
+  const auto &oi = om.insts();
+  const auto &ni = nm.insts();
+  const size_t ob = anchor_index(c.o), nb = anchor_index(c.n);
+  if (ob == 0 || nb == 0 || ob >= oi.size() || nb >= ni.size())
+    return false;
+  const size_t po = ob - 1, pn = nb - 1;
+  if (diff.old_to_new[po] != static_cast<int64_t>(pn))
+    return false;
+  if (oi[po].block != oi[ob].block || ni[pn].block != ni[nb].block)
+    return false;
+  if (oi[ob].leader || ni[nb].leader || oi[ob].branch_target || ni[nb].branch_target)
+    return false;
+  if (!oi[po].fx.p0 || !ni[pn].fx.p0)
+    return false;
+  if (c.o.begin == c.o.end)
+    c.o.end = ob;
+  if (c.n.begin == c.n.end)
+    c.n.end = nb;
+  c.o.begin = po;
+  c.n.begin = pn;
+  ++c.before;
+  return true;
+}
+
+bool step_forward(const KernelModel &om, const KernelModel &nm, const DiffResult &diff,
+                  Candidate &c) {
+  const auto &oi = om.insts();
+  const auto &ni = nm.insts();
+  const size_t oe = c.o.end, ne = c.n.end;
+  if (oe >= oi.size() || ne >= ni.size())
+    return false;
+  if (diff.old_to_new[oe] != static_cast<int64_t>(ne))
+    return false;
+  if (oi[oe].block != span_block(om, c.o) || ni[ne].block != span_block(nm, c.n))
+    return false;
+  if (oi[oe].leader || ni[ne].leader || oi[oe].branch_target || ni[ne].branch_target)
+    return false;
+  if (!oi[oe].fx.p0 || !ni[ne].fx.p0)
+    return false;
+  if (c.o.begin == c.o.end)
+    c.o.begin = oe;
+  if (c.n.begin == c.n.end)
+    c.n.begin = ne;
+  c.o.end = c.o.cut = oe + 1;
+  c.n.end = c.n.cut = ne + 1;
+  ++c.after;
+  return true;
+}
+
+// ---------------------------------------------------------------------------
+// Composition check (handoff 5.2): forward must-equality over the old CFG.
+//
+// State: locations known equal on both sides, plus whether memory and VGPR state are
+// known equal. Kernel entry: everything equal, unless kernel metadata differs.
+// Common instructions are identical on both sides: their writes are equal when all
+// their inputs are. A READY region contributes its R_out (equality on `observable`)
+// and preserves untouched locations. An unsupported region removes what it writes.
+// A control-flow change or divergent branch makes nothing known.
+
+struct EqState {
+  LocSet eq;
+  bool mem = true;
+  bool vgpr = true;
+  bool top = true; ///< Not reached yet (identity of the meet).
+  bool operator==(const EqState &) const = default;
+};
+
+EqState eq_bottom() { return {LocSet{}, false, false, false}; }
+
+EqState eq_meet(const EqState &a, const EqState &b) {
+  if (a.top)
+    return b;
+  if (b.top)
+    return a;
+  return {a.eq & b.eq, a.mem && b.mem, a.vgpr && b.vgpr, false};
+}
+
+struct Atom {
+  enum Kind { ReadyRegion, OpaqueRegion, Diverge } kind = Diverge;
+  size_t region = SIZE_MAX; ///< Index into regions for region atoms.
+  size_t anchor = 0;
+  size_t begin = 0, end = 0; ///< Consumed old instructions.
+  bool boundary = false;     ///< Empty old side at a block boundary: no R_out claim.
+  LocSet writes;
+  LocSet observable;
+  bool unknown = false, mem = false, vgpr = false;
+};
+
+struct CompositionResult {
+  std::vector<EqState> anchor_state; ///< Per region index: state at its entry.
+  std::vector<EqState> before;       ///< Per old instruction: state before it.
+};
+
+CompositionResult analyse_composition(const KernelModel &om, const KernelModel &nm,
+                                      const DiffResult &diff, const PlanResult &plan,
+                                      bool metadata_differs) {
+  const auto &oi = om.insts();
+  const auto &ni = nm.insts();
+  const auto &blocks = om.blocks();
+  std::vector<Atom> atoms;
+  std::vector<std::vector<size_t>> atoms_at(oi.size() + 1);
+  std::vector<int64_t> owner(oi.size(), -1);
+  auto add_atom = [&](Atom a) {
+    const size_t id = atoms.size();
+    for (size_t i = a.begin; i < a.end && i < oi.size(); ++i)
+      owner[i] = static_cast<int64_t>(id);
+    atoms_at[std::min(a.anchor, oi.size())].push_back(id);
+    atoms.push_back(std::move(a));
+  };
+  std::vector<bool> hunk_in_region(diff.hunks.size(), false);
+  for (size_t r = 0; r < plan.regions.size(); ++r) {
+    const RegionPair &reg = plan.regions[r];
+    for (size_t h : reg.hunks)
+      hunk_in_region[h] = true;
+    Atom a;
+    a.region = r;
+    a.begin = reg.old_side.begin;
+    a.end = reg.old_side.end;
+    a.anchor = reg.old_side.begin < reg.old_side.end ? reg.old_side.begin : reg.old_side.cut;
+    a.boundary = reg.old_side.begin == reg.old_side.end && a.anchor > 0 && a.anchor < oi.size() &&
+                 oi[a.anchor].leader && oi[a.anchor - 1].block != oi[a.anchor].block;
+    const bool one_block = single_block(om, reg.old_side.begin, reg.old_side.end);
+    if (!one_block) {
+      a.kind = Atom::Diverge;
+    } else if (reg.status == RegionStatus::Ready) {
+      a.kind = Atom::ReadyRegion;
+      a.writes = reg.contract.declared_writes_old | reg.contract.declared_writes_new;
+      a.observable = reg.contract.observable;
+    } else {
+      a.kind = Atom::OpaqueRegion;
+      auto absorb = [&](const KernelModel &m, size_t b, size_t e) {
+        for (size_t i = b; i < e; ++i) {
+          const InstRef &ref = m.insts()[i];
+          a.writes |= ref.fx.writes;
+          a.unknown = a.unknown || ref.fx.unknown_effect;
+          a.mem = a.mem || (ref.inst->flags() & MEMORY_OP);
+          a.vgpr = a.vgpr || !ref.fx.salu;
+        }
+      };
+      absorb(om, reg.old_side.begin, reg.old_side.end);
+      absorb(nm, reg.new_side.begin, reg.new_side.end);
+    }
+    add_atom(std::move(a));
+  }
+  for (size_t h = 0; h < diff.hunks.size(); ++h) {
+    if (hunk_in_region[h])
+      continue;
+    const Hunk &hunk = diff.hunks[h];
+    Atom a;
+    a.kind = Atom::Diverge;
+    a.begin = hunk.old_begin;
+    a.end = hunk.old_end;
+    a.anchor = hunk.old_begin < hunk.old_end ? hunk.old_begin : hunk.old_end;
+    add_atom(std::move(a));
+  }
+  (void)ni;
+
+  const LocSet specials = special_reads();
+  auto common = [&](size_t i, EqState &s) {
+    const InstRef &ref = oi[i];
+    if (ref.fx.unknown_effect) {
+      s = eq_bottom();
+      return;
+    }
+    const uint64_t flags = ref.inst->flags();
+    const bool is_mem = (flags & MEMORY_OP) != 0;
+    LocSet reads = ref.fx.reads;
+    if (ref.fx.implicit_special_reads)
+      reads |= specials;
+    const bool inputs_equal = (reads & ~s.eq).none() && (!is_mem || s.mem) &&
+                              (ref.fx.salu || s.vgpr) && !(ref.fx.reads_pc && diff.layout_shift);
+    if (inputs_equal)
+      s.eq |= ref.fx.writes;
+    else
+      s.eq &= ~ref.fx.writes;
+    if (is_mem && !inputs_equal)
+      s.mem = false;
+    if (!ref.fx.salu && !inputs_equal)
+      s.vgpr = false;
+  };
+  std::vector<EqState> anchor_state(plan.regions.size());
+  auto apply_atom = [&](const Atom &a, EqState &s) {
+    if (a.region != SIZE_MAX)
+      anchor_state[a.region] = s;
+    if (s.top)
+      return;
+    switch (a.kind) {
+    case Atom::Diverge:
+      s = eq_bottom();
+      break;
+    case Atom::OpaqueRegion:
+      if (a.unknown) {
+        s = eq_bottom();
+        break;
+      }
+      s.eq &= ~a.writes;
+      s.mem = s.mem && !a.mem;
+      s.vgpr = s.vgpr && !a.vgpr;
+      break;
+    case Atom::ReadyRegion:
+      s.eq &= ~a.writes;
+      if (!a.boundary)
+        s.eq |= a.observable;
+      break;
+    }
+  };
+  std::vector<EqState> before(oi.size());
+  auto run_block = [&](uint32_t b, EqState s, bool record) {
+    for (size_t i = blocks[b].first; i < blocks[b].end; ++i) {
+      for (size_t id : atoms_at[i])
+        apply_atom(atoms[id], s);
+      if (owner[i] >= 0) {
+        const Atom &a = atoms[static_cast<size_t>(owner[i])];
+        if (a.anchor < oi.size() && oi[a.anchor].block != b && !s.top)
+          s = eq_bottom(); // multi-block change: nothing known
+        continue;
+      }
+      if (record)
+        before[i] = s;
+      if (!s.top)
+        common(i, s);
+    }
+    return s;
+  };
+  auto diverges = [&](uint32_t b, const EqState &s) {
+    const InstRef &last = oi[blocks[b].end - 1];
+    if (!(last.inst->flags() & COND_BRANCH))
+      return false;
+    if (owner[blocks[b].end - 1] >= 0)
+      return true;
+    LocSet reads = last.fx.reads;
+    if (last.fx.implicit_special_reads)
+      reads |= specials;
+    return (reads & ~s.eq).any();
+  };
+
+  const EqState initial = metadata_differs ? eq_bottom() : EqState{all_locs(), true, true, false};
+  const size_t nb = blocks.size();
+  std::vector<EqState> out(nb);
+  bool changed = true;
+  for (unsigned round = 0; changed && round < 4096; ++round) {
+    changed = false;
+    for (uint32_t b = 0; b < nb; ++b) {
+      EqState in = b == 0 ? initial : EqState{};
+      for (uint32_t p : blocks[b].predecessors) {
+        EqState po = out[p];
+        if (!po.top && diverges(p, po))
+          po = eq_bottom();
+        in = eq_meet(in, po);
+      }
+      if (!om.cfg_complete() && b != 0)
+        in = eq_meet(in, eq_bottom()); // unknown edges may enter anywhere
+      const EqState o = run_block(b, in, false);
+      if (!(o == out[b])) {
+        out[b] = o;
+        changed = true;
+      }
+    }
+  }
+  for (uint32_t b = 0; b < nb; ++b) {
+    EqState in = b == 0 ? initial : EqState{};
+    for (uint32_t p : blocks[b].predecessors) {
+      EqState po = out[p];
+      if (!po.top && diverges(p, po))
+        po = eq_bottom();
+      in = eq_meet(in, po);
+    }
+    if (!om.cfg_complete() && b != 0)
+      in = eq_meet(in, eq_bottom());
+    run_block(b, in, true);
+  }
+  return {std::move(anchor_state), std::move(before)};
+}
+
+void record_composition(RegionPair &region, const EqState &s, const std::string &how) {
+  RegionContract &k = region.contract;
+  const LocSet missing = s.top ? LocSet{} : (k.entry_equal & ~s.eq);
+  if (missing.none()) {
+    k.composition = "HOLDS";
+    k.sources.push_back({"composition: every entry_equal location is established equal at the "
+                         "entry by must-equality from the kernel entry through common code " +
+                             how,
+                         "composition_check"});
+  } else {
+    k.composition = "FAILS";
+    k.sources.push_back({"composition: {" + format_locs(missing) +
+                             "} at the entry are not established equal by the kernel entry, "
+                             "common code and upstream regions' R_out " +
+                             how,
+                         "composition_check"});
+  }
+}
+
 } // namespace
 
 PlanResult plan_regions(const KernelModel &old_model, const KernelModel &new_model,
@@ -108,16 +556,19 @@ PlanResult plan_regions(const KernelModel &old_model, const KernelModel &new_mod
   const auto &oi = old_model.insts();
   const auto &ni = new_model.insts();
 
+  bool metadata_differs = false;
   for (const auto &note : diff.notes) {
     if (note.semantic)
       result.unresolved.push_back({change_kind_name(note.kind), note.what, ""});
     else
       result.notes.push_back(note);
+    if (note.semantic && note.kind == ChangeKind::Metadata)
+      metadata_differs = true;
   }
 
   // 1. Seed candidates from instruction hunks; control-flow hunks are unresolved in P0.
   std::vector<Candidate> candidates;
-  std::vector<std::pair<uint32_t, uint32_t>> unresolved_blocks; // (old block, new block)
+  std::vector<uint32_t> unresolved_blocks; // old blocks of control-flow changes
   for (size_t h = 0; h < diff.hunks.size(); ++h) {
     const Hunk &hunk = diff.hunks[h];
     if (hunk.old_end >= oi.size() || hunk.new_end >= ni.size()) {
@@ -125,8 +576,7 @@ PlanResult plan_regions(const KernelModel &old_model, const KernelModel &new_mod
           {change_kind_name(ChangeKind::ControlFlow),
            "hunk " + std::to_string(h) + " reaches the end of the kernel (no common exit anchor)",
            ""});
-      unresolved_blocks.emplace_back(oi.empty() ? 0 : oi.back().block,
-                                     ni.empty() ? 0 : ni.back().block);
+      unresolved_blocks.push_back(oi.empty() ? 0 : oi.back().block);
       continue;
     }
     if (hunk.kind != ChangeKind::Instruction) {
@@ -136,8 +586,7 @@ PlanResult plan_regions(const KernelModel &old_model, const KernelModel &new_mod
                hex64(oi[hunk.old_begin < hunk.old_end ? hunk.old_begin : hunk.old_end].pc) + ": " +
                hunk.note,
            ""});
-      unresolved_blocks.emplace_back(oi[std::min(hunk.old_begin, oi.size() - 1)].block,
-                                     ni[std::min(hunk.new_begin, ni.size() - 1)].block);
+      unresolved_blocks.push_back(oi[std::min(hunk.old_begin, oi.size() - 1)].block);
       continue;
     }
     Candidate c;
@@ -172,141 +621,125 @@ PlanResult plan_regions(const KernelModel &old_model, const KernelModel &new_mod
     merged.push_back(std::move(c));
   }
 
-  // 3. Backward context over matched common instructions in the same block.
-  for (auto &c : merged) {
-    for (size_t k = 0; k < options.context_insts && c.expansions < options.max_expansions; ++k) {
-      const size_t ob = c.o.begin < c.o.end ? c.o.begin : c.o.cut;
-      const size_t nb = c.n.begin < c.n.end ? c.n.begin : c.n.cut;
-      if (ob == 0 || nb == 0)
+  // 3. Manual backward context.
+  for (auto &c : merged)
+    for (size_t k = 0; k < options.context_insts && c.before < options.max_expansions; ++k)
+      if (!step_back(old_model, new_model, diff, c))
         break;
-      const size_t po = ob - 1, pn = nb - 1;
-      if (diff.old_to_new[po] != static_cast<int64_t>(pn))
-        break;
-      if (oi[po].block != oi[ob].block || ni[pn].block != ni[nb].block)
-        break;
-      if (oi[ob].leader || ni[nb].leader || oi[ob].branch_target || ni[nb].branch_target)
-        break;
-      if (!oi[po].fx.p0 || !ni[pn].fx.p0)
-        break;
-      if (c.o.begin == c.o.end)
-        c.o.end = ob;
-      if (c.n.begin == c.n.end)
-        c.n.end = nb;
-      c.o.begin = po;
-      c.n.begin = pn;
-      ++c.expansions;
+
+  // 4. Build base regions.
+  for (size_t r = 0; r < merged.size(); ++r) {
+    RegionPair region =
+        build_region(old_model, new_model, merged[r], options, "r" + std::to_string(r));
+    if (region.status != RegionStatus::Ready)
+      result.unresolved.push_back({"region", region.reason, region.id});
+    result.regions.push_back(std::move(region));
+  }
+
+  // 5. Expansion variants (smallest first): backward, forward and both-sided common context.
+  std::vector<size_t> variant_base;
+  if (options.auto_expand) {
+    for (size_t r = 0; r < merged.size(); ++r) {
+      if (result.regions[r].status != RegionStatus::Ready)
+        continue;
+      Candidate probe = merged[r];
+      size_t max_b = 0, max_f = 0;
+      while (max_b < options.max_expansions && step_back(old_model, new_model, diff, probe))
+        ++max_b;
+      probe = merged[r];
+      while (max_f < options.max_expansions && step_forward(old_model, new_model, diff, probe))
+        ++max_f;
+      std::set<std::pair<size_t, size_t>> shapes;
+      for (size_t k : {1u, 2u, 4u, 8u, 16u, 32u, 64u}) {
+        shapes.insert({std::min(k, max_b), 0});
+        shapes.insert({0, std::min(k, max_f)});
+        shapes.insert({std::min(k, max_b), std::min(k, max_f)});
+      }
+      shapes.insert({max_b, max_f});
+      shapes.erase({0, 0});
+      std::vector<std::pair<size_t, size_t>> ordered(shapes.begin(), shapes.end());
+      std::ranges::stable_sort(ordered, {}, [](const auto &s) { return s.first + s.second; });
+      if (ordered.size() > options.max_variants)
+        ordered.resize(options.max_variants);
+      for (const auto &[b, f] : ordered) {
+        Candidate v = merged[r];
+        v.before = 0;
+        for (size_t i = 0; i < b; ++i)
+          step_back(old_model, new_model, diff, v);
+        for (size_t i = 0; i < f; ++i)
+          step_forward(old_model, new_model, diff, v);
+        RegionPair variant =
+            build_region(old_model, new_model, v, options,
+                         result.regions[r].id + ".ctx-b" + std::to_string(v.before) + "f" +
+                             std::to_string(v.after));
+        variant.parent = result.regions[r].id;
+        result.variants.push_back(std::move(variant));
+        variant_base.push_back(r);
+      }
     }
   }
 
-  // 4. Validate and build contracts.
-  for (size_t r = 0; r < merged.size(); ++r) {
-    const Candidate &c = merged[r];
-    RegionPair region;
-    region.id = "r" + std::to_string(r);
-    region.hunks = c.hunks;
-    region.old_side = {c.o.begin, c.o.end, c.o.cut, region_insts(old_model, c.o.begin, c.o.end)};
-    region.new_side = {c.n.begin, c.n.end, c.n.cut, region_insts(new_model, c.n.begin, c.n.end)};
-    region.status = RegionStatus::Ready;
-
-    std::optional<std::string> reject;
-    if (!single_block(old_model, c.o.begin, c.o.end) ||
-        !single_block(new_model, c.n.begin, c.n.end)) {
-      // Renamed registers across blocks typically land here: no checked value mapping
-      // exists, so the result is a mapping inconclusive rather than a guess.
-      region.status = RegionStatus::Inconclusive;
-      reject = "INCONCLUSIVE_MAPPING: region spans basic blocks; P0 only maps state at a "
-               "common single-block cutpoint";
-    } else if (c.o.end - c.o.begin > options.max_region_insts ||
-               c.n.end - c.n.begin > options.max_region_insts) {
-      reject = "region exceeds max_region_insts";
-    } else if (auto bad = first_non_p0(old_model, c.o.begin, c.o.end, "old")) {
-      reject = *bad;
-    } else if (auto bad2 = first_non_p0(new_model, c.n.begin, c.n.end, "new")) {
-      reject = *bad2;
-    } else if (auto pc = pc_tainted_read(old_model, c.o.begin, c.o.end, "old")) {
-      reject = *pc;
-    } else if (auto pc2 = pc_tainted_read(new_model, c.n.begin, c.n.end, "new")) {
-      reject = *pc2;
-    }
-    if (reject) {
-      if (region.status == RegionStatus::Ready)
-        region.status = RegionStatus::Unsupported;
-      region.reason = *reject;
-      result.unresolved.push_back({"region", *reject, region.id});
-    }
-
+  // 6. Composition check and contract status.
+  const CompositionResult comp =
+      analyse_composition(old_model, new_model, diff, result, metadata_differs);
+  auto decide = [&](RegionPair &region, size_t base_index, const EqState &entry_state,
+                    bool is_base) {
     RegionContract &k = region.contract;
-    k.entry_equal = entry_live(old_model, c.o) | entry_live(new_model, c.n);
-    k.canary = ~k.entry_equal;
-    const LocSet out_old = exit_live(old_model, c.o);
-    const LocSet out_new = exit_live(new_model, c.n);
-    k.observable = out_old | out_new;
-    // The two continuations read different locations: they differ downstream (typically
-    // a register renaming that crosses blocks), so equality on the same physical
-    // locations at this exit is not a justified relation. Do not guess a mapping.
-    if (region.status == RegionStatus::Ready && out_old != out_new) {
-      region.status = RegionStatus::Inconclusive;
-      region.reason = "INCONCLUSIVE_MAPPING: continuation liveness differs at the region exit "
-                      "(old-only: " +
-                      format_locs(out_old & ~out_new) +
-                      "; new-only: " + format_locs(out_new & ~out_old) +
-                      "); identity R_out is not justified and no checked value mapping exists";
-      result.unresolved.push_back({"region", region.reason, region.id});
-    }
-    k.declared_writes_old = union_writes(old_model, c.o);
-    k.declared_writes_new = union_writes(new_model, c.n);
-    k.wide_reads = union_wide_reads(old_model, c.o) | union_wide_reads(new_model, c.n);
-    k.sources.push_back({"entry_equal = live-in(old) | live-in(new) at the region entry",
-                         "KernelModel backward LocSet liveness over BasicBlock::build_reachable "
-                         "CFG"});
-    k.sources.push_back({"observable = live-out(old) | live-out(new) at the region exit",
-                         "KernelModel backward LocSet liveness"});
-    k.sources.push_back({"mapping = same physical location on both sides",
-                         "identity at a common cutpoint; matched anchors from LCS alignment"});
-    k.sources.push_back({"canary = locations dead at entry on both sides",
-                         "complement of entry_equal; independent per-side values"});
-    if (c.expansions)
-      k.sources.push_back({"region includes " + std::to_string(c.expansions) +
-                               " common-prefix instruction(s) as context",
-                           "common_prefix_analysis"});
-    if (!old_model.cfg_complete() || !new_model.cfg_complete())
-      k.sources.push_back({"some CFG successors are unknown; liveness made them all-live",
-                           "conservative widening"});
-
-    // Contract status from upstream changes.
-    const uint32_t ob = span_block(old_model, c.o);
-    const size_t opos = c.o.begin < c.o.end ? c.o.begin : c.o.cut;
-    bool upstream_unresolved = false;
-    for (const auto &note : diff.notes)
-      if (note.semantic && note.kind == ChangeKind::Metadata)
-        upstream_unresolved = true;
-    for (const auto &[ub, nb2] : unresolved_blocks) {
-      (void)nb2;
-      if (ub != ob ? old_model.reaches(ub, ob) : true)
-        upstream_unresolved = true;
-    }
-    for (size_t q = 0; q < merged.size(); ++q) {
-      if (q == r)
+    const RegionPair &base = result.regions[base_index];
+    const uint32_t ob =
+        span_block(old_model, {base.old_side.begin, base.old_side.end, base.old_side.cut});
+    const size_t opos =
+        base.old_side.begin < base.old_side.end ? base.old_side.begin : base.old_side.cut;
+    bool cf_upstream = false;
+    for (uint32_t ub : unresolved_blocks)
+      if (ub == ob || old_model.reaches(ub, ob))
+        cf_upstream = true;
+    for (size_t q = 0; q < result.regions.size(); ++q) {
+      if (q == base_index)
         continue;
-      const uint32_t qb = span_block(old_model, merged[q].o);
-      const size_t qpos = merged[q].o.begin < merged[q].o.end ? merged[q].o.begin : merged[q].o.cut;
+      const RegionPair &other = result.regions[q];
+      const Span qs{other.old_side.begin, other.old_side.end, other.old_side.cut};
+      const uint32_t qb = span_block(old_model, qs);
+      const size_t qpos = anchor_index(qs);
       const bool upstream =
           qb == ob ? qpos < opos || in_cycle(old_model, ob) : old_model.reaches(qb, ob);
       if (upstream)
-        k.depends_on.push_back("r" + std::to_string(q));
+        k.depends_on.push_back(other.id);
     }
     if (in_cycle(old_model, ob))
-      k.depends_on.push_back(region.id + " (loop back-edge)");
-    if (upstream_unresolved) {
+      k.depends_on.push_back(base.id + " (loop back-edge)");
+    record_composition(
+        region, entry_state,
+        k.depends_on.empty() ? "(no upstream change)" : "(given the R_out of: " + [&] {
+          std::string s;
+          for (const auto &d : k.depends_on)
+            s += (s.empty() ? "" : ", ") + d;
+          return s;
+        }() + ")");
+    if (metadata_differs) {
       k.status = ContractStatus::Unresolved;
-      k.sources.push_back({"entry relation not established: an unresolved change (metadata, "
-                           "control flow or unsupported region) can reach the region entry",
+      k.sources.push_back({"entry relation not established: kernel metadata differs", "planner"});
+    } else if (cf_upstream) {
+      k.status = ContractStatus::Unresolved;
+      k.sources.push_back({"entry relation not established: a control-flow change can reach "
+                           "the region entry",
                            "planner"});
+    } else if (k.composition == "FAILS") {
+      k.status = ContractStatus::Unresolved;
+    } else if (k.pending_effects == "CONFLICT" || k.pending_effects == "UNKNOWN") {
+      k.status = ContractStatus::Unresolved;
     } else if (!k.depends_on.empty()) {
       k.status = ContractStatus::Assumed;
-      k.sources.push_back({"R_in relies on the R_out of upstream regions: " +
-                               std::to_string(k.depends_on.size()) + " dependency(ies)",
-                           "relation_summary (composition)"});
+      bool opaque_upstream = false;
+      for (const auto &d : k.depends_on)
+        for (const auto &other : result.regions)
+          opaque_upstream |= other.id == d && other.status != RegionStatus::Ready;
+      k.sources.push_back(
+          {"R_in relies on upstream regions' R_out" +
+               std::string(opaque_upstream ? " and on untested upstream changes writing "
+                                             "only their decoded destinations"
+                                           : ""),
+           "relation_summary (composition)"});
     } else if (!old_model.cfg_complete() || !new_model.cfg_complete()) {
       k.status = ContractStatus::Assumed;
       k.sources.push_back(
@@ -317,22 +750,32 @@ PlanResult plan_regions(const KernelModel &old_model, const KernelModel &new_mod
                            "identical kernel metadata, so all state is equal at the cutpoint",
                            "common_prefix_analysis"});
     }
-    result.regions.push_back(std::move(region));
-  }
-
-  // An upstream region that is not READY has no tested R_out to compose with.
-  for (auto &region : result.regions) {
-    for (const auto &dep : region.contract.depends_on)
-      for (const auto &other : result.regions)
-        if (other.id == dep && other.status != RegionStatus::Ready &&
-            region.contract.status != ContractStatus::Unresolved) {
-          region.contract.status = ContractStatus::Unresolved;
-          region.contract.sources.push_back(
-              {"upstream region " + dep + " is " + region_status_name(other.status) +
-                   ", so its R_out cannot establish this entry relation",
-               "planner"});
-        }
+    // A tested region whose entry context is not established keeps the scope partial.
+    if (is_base && region.status == RegionStatus::Ready) {
+      if (k.composition == "FAILS")
+        result.unresolved.push_back(
+            {"context", "composition fails at the entry of " + region.id, region.id});
+      if (k.pending_effects == "CONFLICT" || k.pending_effects == "UNKNOWN")
+        result.unresolved.push_back({"context",
+                                     "memory operations outstanding at the entry of " + region.id +
+                                         " (" + k.pending_effects + ")",
+                                     region.id});
+    }
     region.prepared_key = compute_prepared_key(region);
+  };
+  for (size_t r = 0; r < result.regions.size(); ++r)
+    decide(result.regions[r], r, comp.anchor_state[r], true);
+  for (size_t v = 0; v < result.variants.size(); ++v) {
+    RegionPair &variant = result.variants[v];
+    const size_t r = variant_base[v];
+    const size_t va = variant.old_side.begin < variant.old_side.end ? variant.old_side.begin
+                                                                    : variant.old_side.cut;
+    const RegionPair &base = result.regions[r];
+    const size_t ba =
+        base.old_side.begin < base.old_side.end ? base.old_side.begin : base.old_side.cut;
+    const EqState &s =
+        va == ba || va >= comp.before.size() ? comp.anchor_state[r] : comp.before[va];
+    decide(variant, r, s, false);
   }
   return result;
 }

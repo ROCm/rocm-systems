@@ -27,9 +27,13 @@ namespace rocjitsu::isa_diff {
 
 struct PlanOptions {
   size_t max_region_insts = 256;
-  size_t max_expansions = 64;
-  size_t context_insts = 0;
+  size_t max_expansions = 64; ///< Common instructions added per direction, at most.
+  size_t context_insts = 0;   ///< Manual backward context for every base region.
   bool merge_same_block = true;
+  /// Precompute expansion variants (backward and/or forward common context) that `test`
+  /// tries automatically when a base region shows a local mismatch.
+  bool auto_expand = true;
+  size_t max_variants = 12;
 };
 
 struct UnresolvedItem {
@@ -40,6 +44,8 @@ struct UnresolvedItem {
 
 struct PlanResult {
   std::vector<RegionPair> regions;
+  /// Expansion variants of READY base regions, smallest first per parent.
+  std::vector<RegionPair> variants;
   std::vector<UnresolvedItem> unresolved;
   std::vector<ArtifactNote> notes; ///< Non-semantic notes (layout etc.), informational.
 };

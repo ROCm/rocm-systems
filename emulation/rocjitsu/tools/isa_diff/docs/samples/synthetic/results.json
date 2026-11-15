@@ -4,7 +4,7 @@
     "tool": "rj_isa_diff",
     "tool_version": "0.1.0-p0",
     "schema_version": "rj_isa_diff.v1",
-    "rocjitsu_revision": "5588fbf7ec0c5b3f0d92a4c83116ef5997915ac3",
+    "rocjitsu_revision": "03c6dd8633b6ac5eff7be87adcd0559cc34bb212",
     "rocjitsu_version": "0.3.0",
     "semantics": "RocJITsu ComputeUnitCore::execute_instruction, gfx950 (CDNA4) wave64, default arithmetic semantics",
     "compiler": "13.4.0"
@@ -62,7 +62,13 @@
       "witness_scope": "LOCAL_ONLY",
       "coverage_scope": "COMPLETE_FOR_DECLARED_SCOPE",
       "proof_status": "NOT_RUN",
-      "prepared_key": "de915d915594446895b9cdb150058ca9dc4433678e259861c2d556075bcae21e",
+      "prepared_key": "6f6a10c739d7780fc1f22393746e5a0b2a41c48451289e9885c159e0a93a3e29",
+      "pending_effects": "NONE",
+      "composition": "HOLDS",
+      "expansion": {
+        "resolution": "NO_EXPANSION_AVAILABLE",
+        "tried": []
+      },
       "policy": "baseline-v1",
       "seed": 1,
       "counts": {
@@ -108,6 +114,11 @@
         "valid": 5000,
         "mismatches": 4883
       },
+      "novelty": {
+        "distinct_buckets": 21,
+        "first_seen_in_boundary": 18,
+        "first_seen_in_random": 3
+      },
       "execution": {
         "old_region_insts": 1,
         "new_region_insts": 2,
@@ -115,20 +126,20 @@
         "new_insts_executed": 11118
       },
       "timing": {
-        "setup_ns": 572502,
-        "propose_ns": 1343730,
-        "state_load_ns": 7183006,
-        "old_execute_ns": 3505284,
-        "new_execute_ns": 600526,
-        "compare_ns": 3433300,
-        "triage_ns": 337767
+        "setup_ns": 548546,
+        "propose_ns": 1379134,
+        "state_load_ns": 4188571,
+        "old_execute_ns": 590423,
+        "new_execute_ns": 616991,
+        "compare_ns": 3420251,
+        "triage_ns": 414665
       },
       "first_mismatch": {
         "case_index": 1,
         "phase": "boundary",
         "kind": "observable",
-        "locations": "s8,s9",
-        "detail": "first observable difference s8: old 0x00000004 new 0x00000001"
+        "locations": "s9",
+        "detail": "first observable difference s9: old 0x00000004 new 0x00000001"
       },
       "counterexamples": ["case_syn/counterexamples/r0-syn-wrong-opcode-case1.json"]
     }

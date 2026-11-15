@@ -38,14 +38,16 @@ inline const std::vector<uint32_t> k_deadtemp_new = {0xbe8a00a2, 0x80040302, 0xb
 // s_add_u32 s4, s2, s3
 // s_cselect_b32 s5, s4, 0
 // s_cmp_eq_u32 s5, 0
+// s_store_dword s5, s[0:1], 0x0
 // s_endpgm
-inline const std::vector<uint32_t> k_scclive_old = {0x80040302, 0x85058004, 0xbf068005, 0xbf810000};
+inline const std::vector<uint32_t> k_scclive_old = {0x80040302, 0x85058004, 0xbf068005, 0xc0420140, 0x00000000, 0xbf810000};
 
 // s_add_i32 s4, s2, s3
 // s_cselect_b32 s5, s4, 0
 // s_cmp_eq_u32 s5, 0
+// s_store_dword s5, s[0:1], 0x0
 // s_endpgm
-inline const std::vector<uint32_t> k_scclive_new = {0x81040302, 0x85058004, 0xbf068005, 0xbf810000};
+inline const std::vector<uint32_t> k_scclive_new = {0x81040302, 0x85058004, 0xbf068005, 0xc0420140, 0x00000000, 0xbf810000};
 
 // s_add_u32 s4, s2, s3
 // s_cmp_eq_u32 s4, 0
@@ -335,3 +337,123 @@ inline const std::vector<uint32_t> k_offbyone_bug = {0xbf09ff02, 0x00012345, 0x8
 // s_cmp_eq_u32 s4, 0
 // s_endpgm
 inline const std::vector<uint32_t> k_offbyone_fixed = {0xbf09ff02, 0x00012346, 0x85048081, 0xbf068004, 0xbf810000};
+
+// s_load_dword s4, s[0:1], 0x0
+// s_add_u32 s5, s4, 1
+// s_waitcnt lgkmcnt(0)
+// s_store_dword s5, s[0:1], 0x4
+// s_endpgm
+inline const std::vector<uint32_t> k_pending_conflict_old = {0xc0020100, 0x00000000, 0x80058104, 0xbf8cc07f, 0xc0420140, 0x00000004, 0xbf810000};
+
+// s_load_dword s4, s[0:1], 0x0
+// s_add_u32 s5, 1, s4
+// s_waitcnt lgkmcnt(0)
+// s_store_dword s5, s[0:1], 0x4
+// s_endpgm
+inline const std::vector<uint32_t> k_pending_conflict_new = {0xc0020100, 0x00000000, 0x80050481, 0xbf8cc07f, 0xc0420140, 0x00000004, 0xbf810000};
+
+// s_load_dword s10, s[0:1], 0x0
+// s_add_u32 s5, s4, 1
+// s_waitcnt lgkmcnt(0)
+// s_add_u32 s6, s10, s5
+// s_store_dword s6, s[0:1], 0x4
+// s_endpgm
+inline const std::vector<uint32_t> k_pending_disjoint_old = {0xc0020280, 0x00000000, 0x80058104, 0xbf8cc07f, 0x8006050a, 0xc0420180, 0x00000004, 0xbf810000};
+
+// s_load_dword s10, s[0:1], 0x0
+// s_add_u32 s5, 1, s4
+// s_waitcnt lgkmcnt(0)
+// s_add_u32 s6, s10, s5
+// s_store_dword s6, s[0:1], 0x4
+// s_endpgm
+inline const std::vector<uint32_t> k_pending_disjoint_new = {0xc0020280, 0x00000000, 0x80050481, 0xbf8cc07f, 0x8006050a, 0xc0420180, 0x00000004, 0xbf810000};
+
+// s_load_dword s4, s[0:1], 0x0
+// s_waitcnt lgkmcnt(0)
+// s_add_u32 s5, s4, 1
+// s_store_dword s5, s[0:1], 0x4
+// s_endpgm
+inline const std::vector<uint32_t> k_pending_waited_old = {0xc0020100, 0x00000000, 0xbf8cc07f, 0x80058104, 0xc0420140, 0x00000004, 0xbf810000};
+
+// s_load_dword s4, s[0:1], 0x0
+// s_waitcnt lgkmcnt(0)
+// s_add_u32 s5, 1, s4
+// s_store_dword s5, s[0:1], 0x4
+// s_endpgm
+inline const std::vector<uint32_t> k_pending_waited_new = {0xc0020100, 0x00000000, 0xbf8cc07f, 0x80050481, 0xc0420140, 0x00000004, 0xbf810000};
+
+// s_load_dword s4, s[0:1], 0x0
+// s_load_dword s10, s[0:1], 0x8
+// s_waitcnt lgkmcnt(1)
+// s_add_u32 s5, s4, 1
+// s_waitcnt lgkmcnt(0)
+// s_add_u32 s6, s10, s5
+// s_store_dword s6, s[0:1], 0x4
+// s_endpgm
+inline const std::vector<uint32_t> k_pending_partial_old = {0xc0020100, 0x00000000, 0xc0020280, 0x00000008, 0xbf8cc17f, 0x80058104, 0xbf8cc07f, 0x8006050a, 0xc0420180, 0x00000004, 0xbf810000};
+
+// s_load_dword s4, s[0:1], 0x0
+// s_load_dword s10, s[0:1], 0x8
+// s_waitcnt lgkmcnt(1)
+// s_add_u32 s5, 1, s4
+// s_waitcnt lgkmcnt(0)
+// s_add_u32 s6, s10, s5
+// s_store_dword s6, s[0:1], 0x4
+// s_endpgm
+inline const std::vector<uint32_t> k_pending_partial_new = {0xc0020100, 0x00000000, 0xc0020280, 0x00000008, 0xbf8cc17f, 0x80050481, 0xbf8cc07f, 0x8006050a, 0xc0420180, 0x00000004, 0xbf810000};
+
+// s_getreg_b32 s4, hwreg(HW_REG_MODE)
+// s_cmp_eq_u32 s6, 0
+// s_cbranch_scc1 BB0
+// s_nop 0
+// BB0:
+// s_nop 0
+// s_add_u32 s5, s2, s3
+// s_store_dword s5, s[0:1], 0x0
+// s_endpgm
+inline const std::vector<uint32_t> k_comp_disjoint_old = {0xb884f801, 0xbf068006, 0xbf850001, 0xbf800000, 0xbf800000, 0x80050302, 0xc0420140, 0x00000000, 0xbf810000};
+
+// s_getreg_b32 s4, hwreg(HW_REG_STATUS)
+// s_cmp_eq_u32 s6, 0
+// s_cbranch_scc1 BB0
+// s_nop 0
+// BB0:
+// s_nop 0
+// s_add_u32 s5, s3, s2
+// s_store_dword s5, s[0:1], 0x0
+// s_endpgm
+inline const std::vector<uint32_t> k_comp_disjoint_new = {0xb884f802, 0xbf068006, 0xbf850001, 0xbf800000, 0xbf800000, 0x80050203, 0xc0420140, 0x00000000, 0xbf810000};
+
+// s_getreg_b32 s4, hwreg(HW_REG_MODE)
+// s_cmp_eq_u32 s6, 0
+// s_cbranch_scc1 BB0
+// s_nop 0
+// BB0:
+// s_nop 0
+// s_add_u32 s5, s2, s4
+// s_store_dword s5, s[0:1], 0x0
+// s_endpgm
+inline const std::vector<uint32_t> k_comp_conflict_old = {0xb884f801, 0xbf068006, 0xbf850001, 0xbf800000, 0xbf800000, 0x80050402, 0xc0420140, 0x00000000, 0xbf810000};
+
+// s_getreg_b32 s4, hwreg(HW_REG_STATUS)
+// s_cmp_eq_u32 s6, 0
+// s_cbranch_scc1 BB0
+// s_nop 0
+// BB0:
+// s_nop 0
+// s_add_u32 s5, s4, s2
+// s_store_dword s5, s[0:1], 0x0
+// s_endpgm
+inline const std::vector<uint32_t> k_comp_conflict_new = {0xb884f802, 0xbf068006, 0xbf850001, 0xbf800000, 0xbf800000, 0x80050204, 0xc0420140, 0x00000000, 0xbf810000};
+
+// s_lshl_b32 s4, s2, 1
+// s_and_b32 s4, s4, 1
+// s_store_dword s4, s[0:1], 0x0
+// s_endpgm
+inline const std::vector<uint32_t> k_expand_masked_old = {0x8e048102, 0x86048104, 0xc0420100, 0x00000000, 0xbf810000};
+
+// s_lshl_b32 s4, s2, 2
+// s_and_b32 s4, s4, 1
+// s_store_dword s4, s[0:1], 0x0
+// s_endpgm
+inline const std::vector<uint32_t> k_expand_masked_new = {0x8e048202, 0x86048104, 0xc0420100, 0x00000000, 0xbf810000};

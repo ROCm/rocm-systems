@@ -77,6 +77,10 @@ Json CaseData::to_json() const {
   for (const auto &r : regions)
     rj.push(r.to_json());
   j.set("regions", std::move(rj));
+  Json vj = Json::array();
+  for (const auto &v : variants)
+    vj.push(v.to_json());
+  j.set("expansion_variants", std::move(vj));
   j.set("analysis", analysis);
   return j;
 }
@@ -95,20 +99,25 @@ std::optional<CaseData> CaseData::from_json(const Json &j, std::string &error) {
     d.unresolved.push_back({u["kind"].as_string(), u["what"].as_string(), u["region"].as_string()});
   for (const Json &n : j["notes"].items())
     d.notes.push_back({ChangeKind::Layout, n["what"].as_string(), n["semantic"].as_bool()});
-  for (const Json &r : j["regions"].items()) {
-    auto region = RegionPair::from_json(r, error);
-    if (!region)
-      return std::nullopt;
-    // A hand-edited contract is an assumption, never an established fact.
-    if (compute_prepared_key(*region) != region->prepared_key) {
-      if (region->contract.status == ContractStatus::Established)
-        region->contract.status = ContractStatus::Assumed;
-      region->contract.sources.push_back(
-          {"region or contract edited after analysis (prepared key changed)", "user_assumption"});
-      region->prepared_key = compute_prepared_key(*region);
+  auto read_regions = [&](const Json &list, std::vector<RegionPair> &out) {
+    for (const Json &r : list.items()) {
+      auto region = RegionPair::from_json(r, error);
+      if (!region)
+        return false;
+      // A hand-edited contract is an assumption, never an established fact.
+      if (compute_prepared_key(*region) != region->prepared_key) {
+        if (region->contract.status == ContractStatus::Established)
+          region->contract.status = ContractStatus::Assumed;
+        region->contract.sources.push_back(
+            {"region or contract edited after analysis (prepared key changed)", "user_assumption"});
+        region->prepared_key = compute_prepared_key(*region);
+      }
+      out.push_back(std::move(*region));
     }
-    d.regions.push_back(std::move(*region));
-  }
+    return true;
+  };
+  if (!read_regions(j["regions"], d.regions) || !read_regions(j["expansion_variants"], d.variants))
+    return std::nullopt;
   d.analysis = j["analysis"];
   return d;
 }
@@ -163,6 +172,7 @@ std::optional<CaseData> analyze_artifacts(const Artifact &old_artifact,
   d.unresolved = std::move(plan.unresolved);
   d.notes = std::move(plan.notes);
   d.regions = std::move(plan.regions);
+  d.variants = std::move(plan.variants);
   d.analysis = Json::object();
   Json opts = Json::object();
   opts.set("max_region_insts", static_cast<uint64_t>(options.max_region_insts));
@@ -187,17 +197,21 @@ Aggregate aggregate_results(const CaseData &data, const std::vector<RegionResult
   int worst = -1;
   bool any_witness = false;
   for (const auto &r : results) {
-    all_unsupported &= r.test_status == TestStatus::Unsupported;
-    harness |= r.test_status == TestStatus::HarnessError;
-    any_witness |= r.test_status == TestStatus::LocalMismatch;
+    // A local mismatch that a larger region (with common context) does not reproduce
+    // was compensated within the block: the larger region's verdict stands.
+    const bool resolved = r.test_status == TestStatus::LocalMismatch && !r.resolved_by.empty();
+    const TestStatus status = resolved ? TestStatus::NoMismatchFound : r.test_status;
+    const ContractStatus contract = resolved ? r.resolved_contract : r.contract_status;
+    all_unsupported &= status == TestStatus::Unsupported;
+    harness |= status == TestStatus::HarnessError;
+    any_witness |= status == TestStatus::LocalMismatch;
     // A mismatch under an unresolved entry relation may come from the relation itself
     // (wrong mapping, unreachable inputs); it stays a witness but not a verdict.
-    mismatch |= r.test_status == TestStatus::LocalMismatch &&
-                r.contract_status != ContractStatus::Unresolved;
-    all_pass &= r.test_status == TestStatus::NoMismatchFound;
+    mismatch |= status == TestStatus::LocalMismatch && contract != ContractStatus::Unresolved;
+    all_pass &= status == TestStatus::NoMismatchFound;
     any_tested |= r.valid_pairs > 0;
     if (r.valid_pairs > 0)
-      worst = std::max(worst, contract_rank(r.contract_status));
+      worst = std::max(worst, contract_rank(contract));
   }
   const bool no_changes =
       data.regions.empty() && data.unresolved.empty() && data.changes.size() == 0;
@@ -223,8 +237,11 @@ Aggregate aggregate_results(const CaseData &data, const std::vector<RegionResult
                                                        : worst == 1 ? ContractStatus::Assumed
                                                                     : ContractStatus::Unresolved);
   bool complete = data.unresolved.empty() && !results.empty();
-  for (const auto &r : results)
-    complete &= r.coverage_scope == CoverageScope::CompleteForDeclaredScope;
+  for (const auto &r : results) {
+    const bool resolved = r.test_status == TestStatus::LocalMismatch && !r.resolved_by.empty();
+    complete &= (resolved ? r.resolved_coverage : r.coverage_scope) ==
+                CoverageScope::CompleteForDeclaredScope;
+  }
   a.coverage_scope = complete     ? CoverageScope::CompleteForDeclaredScope
                      : any_tested ? CoverageScope::Partial
                                   : CoverageScope::NotEstablished;
@@ -238,7 +255,42 @@ Json test_case(const CaseData &data, const TestOptions &options, const std::stri
     if (!region_filter.empty() && region.id != region_filter)
       continue;
     BaselinePolicy policy(options.seed);
-    results.push_back(test_region(region, options, policy));
+    RegionResult r = test_region(region, options, policy);
+    if (r.test_status == TestStatus::LocalMismatch) {
+      // Handoff 5.2: a local mismatch may be compensated by common code around the
+      // change. Try the precomputed larger regions, smallest first.
+      TestOptions vopt = options;
+      vopt.max_counterexamples = std::min<size_t>(options.max_counterexamples, 1);
+      bool tried = false;
+      for (const auto &variant : data.variants) {
+        if (variant.parent != region.id || variant.status != RegionStatus::Ready)
+          continue;
+        tried = true;
+        BaselinePolicy vpolicy(options.seed);
+        const RegionResult vr = test_region(variant, vopt, vpolicy);
+        Json t = Json::object();
+        t.set("variant", variant.id);
+        t.set("context_before", variant.context_before);
+        t.set("context_after", variant.context_after);
+        t.set("test_status", test_status_name(vr.test_status));
+        t.set("contract_status", contract_status_name(vr.contract_status));
+        t.set("valid_pairs", vr.valid_pairs);
+        t.set("mismatches", vr.mismatches);
+        if (!vr.examples.empty())
+          t.set("first_mismatch", vr.examples.front().detail);
+        r.expansion_tried.push(std::move(t));
+        if (vr.test_status == TestStatus::NoMismatchFound) {
+          r.resolved_by = variant.id;
+          r.resolved_contract = vr.contract_status;
+          r.resolved_coverage = vr.coverage_scope;
+          break;
+        }
+      }
+      r.resolution = !r.resolved_by.empty() ? "RESOLVED_BY_CONTEXT"
+                     : tried                ? "PERSISTS_WITH_CONTEXT"
+                                            : "NO_EXPANSION_AVAILABLE";
+    }
+    results.push_back(std::move(r));
   }
   // A filtered run cannot speak for the whole change set.
   CaseData scoped = data;

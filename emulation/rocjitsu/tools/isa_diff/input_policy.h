@@ -48,19 +48,44 @@ struct RegionFeatures {
 [[nodiscard]] RegionFeatures make_region_features(const std::vector<RegionInst> &old_insts,
                                                   const std::vector<RegionInst> &new_insts);
 
+/// Raw feedback for one case (handoff 8: InputPolicy.observe(raw_feedback)).
 struct Feedback {
   uint64_t case_index = 0;
+  std::string phase; ///< "boundary" or "random".
   bool accepted = false;
+  std::string rejection; ///< Violated constraint when not accepted.
+  std::string exit_old, exit_new;
   bool mismatch = false;
-  std::string category; ///< Bounded classification (mismatch kind or rejection reason).
+  /// Bounded classification: "ok", a mismatch kind, "excluded" or "rejected".
+  std::string category;
+  LocSet locs; ///< Differing observable locations.
+  /// Bounded novelty class: outcome plus, per written location, a coarse value class
+  /// (zero/one/all-ones/sign/other) and old==new. Raw register values never form a class.
+  uint64_t bucket = 0;
+  bool novel = false; ///< First case of this region in its bucket.
+  uint64_t propose_ns = 0, load_ns = 0, old_ns = 0, new_ns = 0, compare_ns = 0;
+  uint64_t insts_old = 0, insts_new = 0;
+  std::vector<std::string> events; ///< Input events of the sample.
+};
+
+/// Bounded history passed to propose() (handoff 8: propose(features, contract, history)).
+struct History {
+  static constexpr size_t kWindow = 32;
+  uint64_t cases = 0, accepted = 0, valid = 0, mismatches = 0, novel = 0;
+  std::map<std::string, uint64_t> categories;
+  std::vector<Feedback> recent; ///< The last kWindow cases, oldest first.
+  void record(const Feedback &f);
 };
 
 class InputPolicy {
 public:
   virtual ~InputPolicy() = default;
   [[nodiscard]] virtual std::string name() const = 0;
+  /// Propose values for the contract's entry_equal locations. A policy cannot change the
+  /// programs, the mapping, the observable set or the constraints; every proposal is
+  /// validated by ConstraintChecker before it runs.
   virtual Sample propose(const RegionFeatures &features, const RegionContract &contract,
-                         uint64_t case_index) = 0;
+                         const History &history, uint64_t case_index) = 0;
   virtual void observe(const Feedback &) {}
 };
 
@@ -69,10 +94,18 @@ public:
   explicit BaselinePolicy(uint64_t seed) : seed_(seed) {}
   [[nodiscard]] std::string name() const override { return "baseline-v1"; }
   Sample propose(const RegionFeatures &features, const RegionContract &contract,
-                 uint64_t case_index) override;
+                 const History &history, uint64_t case_index) override;
 
 private:
   uint64_t seed_;
+};
+
+/// Handoff 8: ConstraintChecker.validate(sample, contract) -> accepted/rejected.
+class ConstraintChecker {
+public:
+  /// Returns the first violated constraint, or nullopt when the sample is accepted.
+  [[nodiscard]] static std::optional<std::string> validate(const Sample &sample,
+                                                           const RegionContract &contract);
 };
 
 /// @brief Validate a sample against the contract's constraints; returns the first violation.

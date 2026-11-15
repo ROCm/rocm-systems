@@ -76,6 +76,11 @@ Json RegionPair::to_json() const {
   j.set("status", region_status_name(status));
   j.set("reason", reason);
   j.set("synthetic", synthetic);
+  if (!parent.empty()) {
+    j.set("parent", parent);
+    j.set("context_before", context_before);
+    j.set("context_after", context_after);
+  }
   Json hj = Json::array();
   for (size_t h : hunks)
     hj.push(static_cast<uint64_t>(h));
@@ -99,6 +104,9 @@ std::optional<RegionPair> RegionPair::from_json(const Json &j, std::string &erro
     r.status = RegionStatus::Unsupported;
   r.reason = j["reason"].as_string();
   r.synthetic = j["synthetic"].as_bool();
+  r.parent = j["parent"].as_string();
+  r.context_before = static_cast<uint32_t>(j["context_before"].as_uint());
+  r.context_after = static_cast<uint32_t>(j["context_after"].as_uint());
   for (const Json &h : j["hunks"].items())
     r.hunks.push_back(h.as_uint());
   if (!side_from_json(j["old"], r.old_side, error) || !side_from_json(j["new"], r.new_side, error))

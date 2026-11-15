@@ -5,6 +5,7 @@
 
 #include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/code/code_object.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/wait_counter_policy.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "util/diagnostic.h"
@@ -210,6 +211,7 @@ std::unique_ptr<KernelModel> KernelModel::build(const Artifact &artifact, std::s
 
   model->compute_liveness();
   model->compute_taint();
+  model->compute_pending();
   model->compute_reachability();
   return model;
 }
@@ -299,6 +301,113 @@ void KernelModel::compute_taint() {
     for (size_t i = blocks_[b].first; i < blocks_[b].end; ++i) {
       taint_before_[i] = t;
       t = transfer(insts_[i].fx, t);
+    }
+  }
+}
+
+namespace {
+
+/// Counters an issued memory operation increments on gfx9 (CDNA): SMEM and LDS/GDS use
+/// lgkmcnt, VMEM uses vmcnt, FLAT uses both; an unclassified producer is assumed to use all.
+std::array<bool, PendingState::kNumCounters> producer_counters(const Instruction &inst) {
+  const uint64_t f = inst.flags();
+  std::array<bool, PendingState::kNumCounters> c{};
+  if (!(f & (MEMORY_OP | MEMORY_WAIT_PRODUCER | SMEM | VMEM | LDS)))
+    return c;
+  if (f & (SMEM | LDS))
+    c[PendingState::kLgkm] = true;
+  if (f & VMEM)
+    c[PendingState::kVm] = true;
+  if (!c[0] && !c[1] && !c[2])
+    c = {true, true, true};
+  return c;
+}
+
+PendingState pending_transfer(const InstRef &ref, PendingState s) {
+  const Instruction &inst = *ref.inst;
+  if (ref.mnemonic == "s_waitcnt" && inst.num_src_operands() >= 1) {
+    if (auto v = inst.src_operand(0)->const_value()) {
+      const auto f = amdgpu::decode_gfx9_waitcnt(static_cast<uint32_t>(*v));
+      const uint32_t limit[PendingState::kNumCounters] = {f.vmcnt, f.lgkmcnt, f.expcnt};
+      for (unsigned c = 0; c < PendingState::kNumCounters; ++c) {
+        s.count[c] = static_cast<uint8_t>(std::min<uint32_t>(s.count[c], limit[c]));
+        if (s.count[c] == 0) {
+          s.dests[c].reset();
+          s.unknown[c] = false;
+        }
+      }
+    }
+    return s;
+  }
+  const auto counters = producer_counters(inst);
+  for (unsigned c = 0; c < PendingState::kNumCounters; ++c) {
+    if (!counters[c])
+      continue;
+    s.count[c] = static_cast<uint8_t>(std::min<unsigned>(s.count[c] + 1u, 63u));
+    s.dests[c] |= ref.fx.writes;
+    s.unknown[c] = s.unknown[c] || ref.fx.unknown_effect;
+    s.example_pc = ref.pc;
+  }
+  return s;
+}
+
+PendingState pending_join(const PendingState &a, const PendingState &b) {
+  PendingState r;
+  for (unsigned c = 0; c < PendingState::kNumCounters; ++c) {
+    r.count[c] = std::max(a.count[c], b.count[c]);
+    r.dests[c] = a.dests[c] | b.dests[c];
+    r.unknown[c] = a.unknown[c] || b.unknown[c];
+  }
+  r.example_pc = a.example_pc ? a.example_pc : b.example_pc;
+  return r;
+}
+
+} // namespace
+
+void KernelModel::compute_pending() {
+  const size_t nb = blocks_.size();
+  std::vector<PendingState> in(nb), out(nb);
+  std::vector<bool> visited(nb, false);
+  // Forward may-analysis to a fixpoint; counts saturate, so the lattice is finite.
+  bool changed = true;
+  for (unsigned round = 0; changed && round < 4096; ++round) {
+    changed = false;
+    for (uint32_t b = 0; b < nb; ++b) {
+      PendingState s;
+      bool have = b == 0; // the kernel entry starts with nothing outstanding
+      for (uint32_t p : blocks_[b].predecessors) {
+        if (!visited[p])
+          continue;
+        s = have ? pending_join(s, out[p]) : out[p];
+        have = true;
+      }
+      if (!have)
+        continue;
+      PendingState t = s;
+      for (size_t i = blocks_[b].first; i < blocks_[b].end; ++i)
+        t = pending_transfer(insts_[i], t);
+      if (!visited[b] || !(s == in[b]) || !(t == out[b])) {
+        in[b] = s;
+        out[b] = t;
+        visited[b] = true;
+        changed = true;
+      }
+    }
+  }
+  pending_before_.assign(insts_.size(), PendingState{});
+  for (uint32_t b = 0; b < nb; ++b) {
+    PendingState t = in[b];
+    if (!visited[b]) {
+      // Reached only through edges the CFG could not resolve: assume the worst.
+      for (unsigned c = 0; c < PendingState::kNumCounters; ++c) {
+        t.count[c] = 63;
+        t.dests[c] = all_locs();
+        t.unknown[c] = true;
+      }
+    }
+    for (size_t i = blocks_[b].first; i < blocks_[b].end; ++i) {
+      pending_before_[i] = t;
+      t = pending_transfer(insts_[i], t);
     }
   }
 }

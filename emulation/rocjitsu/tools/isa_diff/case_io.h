@@ -27,6 +27,8 @@ struct CaseData {
   std::vector<UnresolvedItem> unresolved;
   std::vector<ArtifactNote> notes;
   std::vector<RegionPair> regions;
+  /// Precomputed expansion variants, tried by `test` after a base-region mismatch.
+  std::vector<RegionPair> variants;
   Json analysis; ///< Kernel sizes, timings, plan options.
 
   [[nodiscard]] Json to_json() const;

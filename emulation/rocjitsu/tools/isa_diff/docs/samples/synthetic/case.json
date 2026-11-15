@@ -4,7 +4,7 @@
     "tool": "rj_isa_diff",
     "tool_version": "0.1.0-p0",
     "schema_version": "rj_isa_diff.v1",
-    "rocjitsu_revision": "5588fbf7ec0c5b3f0d92a4c83116ef5997915ac3",
+    "rocjitsu_revision": "03c6dd8633b6ac5eff7be87adcd0559cc34bb212",
     "rocjitsu_version": "0.3.0",
     "semantics": "RocJITsu ComputeUnitCore::execute_instruction, gfx950 (CDNA4) wave64, default arithmetic semantics",
     "compiler": "13.4.0"
@@ -106,6 +106,8 @@
         "wide_reads": "s4,s8",
         "constraints": [],
         "exit_mapping": "single fall-through exit after the last region instruction",
+        "pending_effects": "NONE",
+        "composition": "HOLDS",
         "frame_preserved": ["status_except_scc", "mode", "trapsts", "ttmp[0:15]", "scratch_base", "s102", "s103", "wait_counters", "in_trap_handler", "wave_state", "sleep_cycles"],
         "status": "ESTABLISHED",
         "depends_on": [],
@@ -127,6 +129,14 @@
             "source": "complement of entry_equal; independent per-side values"
           },
           {
+            "what": "no memory operation outstanding at the region entry (s_waitcnt dataflow over the CFG)",
+            "source": "pending_effects_analysis"
+          },
+          {
+            "what": "composition: every entry_equal location is established equal at the entry by must-equality from the kernel entry through common code (no upstream change)",
+            "source": "composition_check"
+          },
+          {
             "what": "every path to the region entry runs byte-identical code from identical kernel metadata, so all state is equal at the cutpoint",
             "source": "common_prefix_analysis"
           },
@@ -136,9 +146,10 @@
           }
         ]
       },
-      "prepared_key": "de915d915594446895b9cdb150058ca9dc4433678e259861c2d556075bcae21e"
+      "prepared_key": "6f6a10c739d7780fc1f22393746e5a0b2a41c48451289e9885c159e0a93a3e29"
     }
   ],
+  "expansion_variants": [],
   "analysis": {
     "plan_options": {
       "max_region_insts": 256,
@@ -149,9 +160,9 @@
     "alignment_complete": true,
     "layout_shift": true,
     "timing": {
-      "decode_cfg_liveness_ns": 122714,
-      "align_classify_ns": 4026,
-      "plan_ns": 76666
+      "decode_cfg_liveness_ns": 151438,
+      "align_classify_ns": 8873,
+      "plan_ns": 238840
     }
   }
 }

@@ -32,6 +32,7 @@ const char *kUsage =
     "                      [--max-region N] [--max-expansions N] [--no-merge]\n"
     "  rj_isa_diff test    --case DIR [--seed N] [--cases N] [--region ID]\n"
     "                      [--max-counterexamples N] [--max-boundary-cases N]\n"
+    "                      [--reduction-budget N] [--no-reduce] [--no-case-log]\n"
     "      --cases counts random cases; the boundary/NaN/corner sweep always runs first.\n"
     "  rj_isa_diff replay  --counterexample FILE [--case DIR]\n"
     "  rj_isa_diff inject  --case DIR --region ID --xor MASK --out DIR [--side old|new]\n"
@@ -183,8 +184,12 @@ int cmd_analyze(int argc, char **argv) {
   for (const auto &r : data->regions)
     std::cout << "  " << r.id << " " << region_status_name(r.status) << " old "
               << r.old_side.insts.size() << " / new " << r.new_side.insts.size()
-              << " insts, contract " << contract_status_name(r.contract.status)
+              << " insts, contract " << contract_status_name(r.contract.status) << ", composition "
+              << r.contract.composition << ", pending " << r.contract.pending_effects
               << (r.reason.empty() ? "" : " : " + r.reason) << "\n";
+  if (!data->variants.empty())
+    std::cout << "  " << data->variants.size()
+              << " expansion variant(s) precomputed (tried automatically after a local mismatch)\n";
   for (const auto &u : data->unresolved)
     std::cout << "  unresolved [" << u.kind << "] " << u.what << "\n";
   std::cout << "wrote " << a.get("--out") << "/case.json\n";
@@ -192,10 +197,10 @@ int cmd_analyze(int argc, char **argv) {
 }
 
 int cmd_test(int argc, char **argv) {
-  Args a = parse(
-      argc, argv, 2,
-      {"--case", "--seed", "--cases", "--region", "--max-counterexamples", "--max-boundary-cases"},
-      {});
+  Args a = parse(argc, argv, 2,
+                 {"--case", "--seed", "--cases", "--region", "--max-counterexamples",
+                  "--max-boundary-cases", "--reduction-budget"},
+                 {"--no-reduce", "--no-case-log"});
   if (!a.error.empty() || !a.has("--case")) {
     std::cerr << (a.error.empty() ? "test needs --case" : a.error) << "\n" << kUsage;
     return kExitError;
@@ -205,7 +210,8 @@ int cmd_test(int argc, char **argv) {
   auto cases = a.number("--cases", 1000);
   auto maxcex = a.number("--max-counterexamples", 3);
   auto maxbound = a.number("--max-boundary-cases", opt.max_boundary_cases);
-  if (!seed || !cases || !maxcex || !maxbound || *maxbound == 0) {
+  auto redbudget = a.number("--reduction-budget", opt.reduction_budget);
+  if (!seed || !cases || !maxcex || !maxbound || *maxbound == 0 || !redbudget) {
     std::cerr << "bad numeric option\n";
     return kExitError;
   }
@@ -213,8 +219,12 @@ int cmd_test(int argc, char **argv) {
   opt.cases = *cases;
   opt.max_counterexamples = *maxcex;
   opt.max_boundary_cases = *maxbound;
+  opt.reduction_budget = *redbudget;
+  opt.reduce = !a.is_switch("--no-reduce");
   const std::string dir = a.get("--case");
   opt.counterexample_dir = dir + "/counterexamples";
+  if (!a.is_switch("--no-case-log"))
+    opt.case_log_dir = dir + "/logs";
   std::string error;
   auto data = read_case_dir(dir, error);
   if (!data) {
@@ -244,6 +254,20 @@ int cmd_test(int argc, char **argv) {
       for (const auto &[family, count] : r.boundary_families)
         std::cout << " " << family << "=" << count;
       std::cout << "\n";
+      std::cout << "  novelty: " << r.novelty_buckets << " outcome bucket(s) (" << r.novel_boundary
+                << " first seen in the sweep, " << r.novel_random << " in the random phase)\n";
+    }
+    if (!r.case_log.empty())
+      std::cout << "  case log " << r.case_log << "\n";
+    if (!r.examples.empty() && !r.examples.front().reduction.is_null()) {
+      const Json &red = r.examples.front().reduction;
+      std::cout << "  reduced first counterexample in " << red["runs"].as_uint() << " run(s), "
+                << red["accepted_steps"].as_uint() << " step(s)"
+                << (red["seed_independent"].as_bool() ? ", seed-independent" : "")
+                << "; non-zero inputs:";
+      for (const auto &[loc, value] : red["reduced_entry_values"].members())
+        std::cout << " " << loc << "=" << value.as_string();
+      std::cout << "\n";
     }
     if (!r.examples.empty())
       std::cout << "  first mismatch case " << r.examples.front().case_index << " ("
@@ -251,6 +275,13 @@ int cmd_test(int argc, char **argv) {
                 << r.examples.front().detail << "\n";
     for (const auto &f : r.counterexample_files)
       std::cout << "  counterexample " << f << "\n";
+    if (!r.resolution.empty()) {
+      std::cout << "  expansion: " << r.resolution;
+      if (!r.resolved_by.empty())
+        std::cout << " by " << r.resolved_by << " (contract "
+                  << contract_status_name(r.resolved_contract) << ")";
+      std::cout << ", " << r.expansion_tried.size() << " variant(s) tried\n";
+    }
   }
   const Json &overall = report["overall"];
   std::cout << "overall: " << overall["test_status"].as_string() << ", contract "
@@ -306,6 +337,7 @@ int cmd_inject(int argc, char **argv) {
   }
   CaseData out = *data;
   out.regions = {*mutated};
+  out.variants.clear(); // variants belong to the unmutated base region
   out.command.set("argv", command_line(argc, argv));
   out.command.set("synthetic", true);
   if (!write_case_dir(a.get("--out"), out, error)) {

@@ -19,6 +19,7 @@
 #include "effects.h"
 #include "location.h"
 
+#include <array>
 #include <cstdint>
 #include <memory>
 #include <span>
@@ -49,6 +50,22 @@ struct InstRef {
   int64_t branch_target_index = -1;
 };
 
+/// Memory operations that may still be outstanding at a program point (gfx9 counters).
+struct PendingState {
+  enum Counter : unsigned { kVm = 0, kLgkm = 1, kExp = 2, kNumCounters = 3 };
+  std::array<uint8_t, kNumCounters> count{}; ///< Upper bound of outstanding ops (saturating).
+  std::array<LocSet, kNumCounters> dests;    ///< Tracked locations outstanding ops will write.
+  std::array<bool, kNumCounters> unknown{};  ///< An outstanding op has unknown effects.
+  uint64_t example_pc = 0;                   ///< One outstanding producer (for messages).
+
+  [[nodiscard]] bool any() const { return count[0] || count[1] || count[2]; }
+  [[nodiscard]] LocSet all_dests() const { return dests[0] | dests[1] | dests[2]; }
+  [[nodiscard]] bool any_unknown() const {
+    return (count[0] && unknown[0]) || (count[1] && unknown[1]) || (count[2] && unknown[2]);
+  }
+  bool operator==(const PendingState &) const = default;
+};
+
 struct BlockInfo {
   size_t first = 0; ///< Index into insts().
   size_t end = 0;   ///< Exclusive.
@@ -74,6 +91,10 @@ public:
   [[nodiscard]] const LocSet &live_after(size_t i) const { return live_after_[i]; }
   /// Locations that may hold a PC-derived value immediately before instruction @p i.
   [[nodiscard]] const LocSet &pc_tainted_before(size_t i) const { return taint_before_[i]; }
+  /// Memory operations possibly outstanding immediately before instruction @p i: nothing
+  /// at the kernel entry; joins take the maximum count and the union of destinations; only
+  /// an s_waitcnt field of 0 clears that counter's destinations.
+  [[nodiscard]] const PendingState &pending_before(size_t i) const { return pending_before_[i]; }
 
   /// True when no block has an unknown successor (liveness is then exact w.r.t. the CFG).
   [[nodiscard]] bool cfg_complete() const { return cfg_complete_; }
@@ -91,6 +112,7 @@ private:
   KernelModel() = default;
   void compute_liveness();
   void compute_taint();
+  void compute_pending();
   void compute_reachability();
 
   Artifact artifact_;
@@ -101,6 +123,7 @@ private:
   std::vector<BlockInfo> blocks_;
   std::vector<LocSet> live_after_;
   std::vector<LocSet> taint_before_;
+  std::vector<PendingState> pending_before_;
   std::vector<std::vector<bool>> reach_;
   std::vector<uint8_t> uncovered_;
   bool cfg_complete_ = true;

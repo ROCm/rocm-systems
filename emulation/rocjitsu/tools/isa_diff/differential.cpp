@@ -5,8 +5,11 @@
 
 #include "boundary.h"
 
+#include <bit>
 #include <chrono>
 #include <filesystem>
+#include <fstream>
+#include <unordered_set>
 
 #ifndef RJ_ISA_DIFF_RJ_REVISION
 #define RJ_ISA_DIFF_RJ_REVISION "unknown"
@@ -109,6 +112,253 @@ std::string compare_pair(const RegionPair &region, const MachineState &init_old,
   return {};
 }
 
+// ---------------------------------------------------------------------------
+// Novelty (handoff 8): a bounded classification of an outcome. Raw register values never
+// form a class; only the outcome kind and, per written location, a coarse value class
+// and whether old and new agree.
+
+unsigned value_class(uint32_t v) {
+  if (v == 0)
+    return 0;
+  if (v == 1)
+    return 1;
+  if (v == 0xffffffffu)
+    return 2;
+  if (v & 0x80000000u)
+    return 3;
+  return 4;
+}
+
+uint64_t novelty_bucket(const RegionContract &k, const std::string &category,
+                        const MachineState *final_old, const MachineState *final_new) {
+  uint64_t h = splitmix64(0x6e6f76656c747900ull);
+  for (char c : category)
+    h = splitmix64(h ^ static_cast<uint8_t>(c));
+  if (!final_old || !final_new)
+    return h;
+  LocSet watched = k.declared_writes_old | k.declared_writes_new;
+  watched.set(kLocScc);
+  for (unsigned l = 0; l < kNumLocs; ++l) {
+    if (!watched.test(l))
+      continue;
+    const unsigned eq = final_old->get(l) == final_new->get(l) ? 1u : 0u;
+    h = splitmix64(h ^ (uint64_t{l} << 8) ^ (value_class(final_old->get(l)) << 1) ^ eq);
+  }
+  return h;
+}
+
+// ---------------------------------------------------------------------------
+// Counterexample reduction (handoff 10). Shrink the inputs while the same kind of
+// mismatch persists under the contract. The program is never reduced here: changing it
+// would require re-planning the region and contract.
+
+bool simpler(uint32_t candidate, uint32_t current) {
+  const int pc = std::popcount(candidate), pv = std::popcount(current);
+  return pc < pv || (pc == pv && candidate < current);
+}
+
+Json reduce_mismatch(const RegionPair &region, RegionRunner &old_runner, RegionRunner &new_runner,
+                     Mismatch &m, size_t budget) {
+  const RegionContract &k = region.contract;
+  const MachineState original_old = m.init_old, original_new = m.init_new;
+  const LocSet original_locs = m.locs;
+  MachineState cur_o = m.init_old, cur_n = m.init_new;
+  size_t runs = 0, steps = 0;
+  bool seed_independent = false;
+  auto attempt = [&](const MachineState &a, const MachineState &b) {
+    if (runs >= budget)
+      return false;
+    ++runs;
+    Sample s;
+    for (unsigned l = 0; l < kNumLocs; ++l)
+      s.value[l] = a.get(l);
+    if (ConstraintChecker::validate(s, k))
+      return false; // never leave the contract
+    old_runner.load(a);
+    const RunOutcome oo = old_runner.run(region.old_side.insts.size());
+    new_runner.load(b);
+    const RunOutcome on = new_runner.run(region.new_side.insts.size());
+    if (oo.status != RunStatus::Ok || on.status != RunStatus::Ok)
+      return false;
+    const MachineState fa = old_runner.capture(), fb = new_runner.capture();
+    Mismatch t;
+    const std::string kind = compare_pair(region, a, b, fa, fb, t);
+    if (kind != m.kind)
+      return false;
+    m.locs = t.locs;
+    m.detail = t.detail;
+    m.frame_fields = t.frame_fields;
+    m.init_old = a;
+    m.init_new = b;
+    m.final_old = fa;
+    m.final_new = fb;
+    m.out_old = oo;
+    m.out_new = on;
+    return true;
+  };
+  // 1. Seed independence: replace the seed-derived canaries with fixed distinct values.
+  {
+    MachineState a = cur_o, b = cur_n;
+    for (unsigned l = 0; l < kNumLocs; ++l)
+      if (k.canary.test(l)) {
+        a.set(l, 0);
+        b.set(l, l == kLocScc ? 1u : 0xffffffffu);
+      }
+    if (!(a == cur_o && b == cur_n) && attempt(a, b)) {
+      cur_o = a;
+      cur_n = b;
+      seed_independent = true;
+      ++steps;
+    } else if (a == cur_o && b == cur_n) {
+      seed_independent = true;
+    }
+  }
+  // 2. Shrink each shared entry value: 0, 1, halvings, then clearing single bits.
+  bool progress = true;
+  for (int pass = 0; progress && pass < 8 && runs < budget; ++pass) {
+    progress = false;
+    for (unsigned l = 0; l < kNumLocs; ++l) {
+      if (!k.entry_equal.test(l))
+        continue;
+      const uint32_t v = cur_o.get(l);
+      if (v == 0)
+        continue;
+      std::vector<uint32_t> cands = {0u, 1u};
+      for (uint32_t h = v >> 1; h; h >>= 1)
+        cands.push_back(h);
+      for (int bit = 31; bit >= 0; --bit)
+        if (v & (1u << bit))
+          cands.push_back(v & ~(1u << bit));
+      for (uint32_t c : cands) {
+        if (c == v || !simpler(c, v))
+          continue;
+        MachineState a = cur_o, b = cur_n;
+        a.set(l, c);
+        b.set(l, c);
+        if (attempt(a, b)) {
+          cur_o = a;
+          cur_n = b;
+          ++steps;
+          progress = true;
+          break;
+        }
+      }
+    }
+  }
+  // attempt() leaves m at the last accepted state; make sure that is the current one.
+  if (steps == 0) {
+    m.init_old = original_old;
+    m.init_new = original_new;
+  }
+  Json red = Json::object();
+  red.set("runs", static_cast<uint64_t>(runs));
+  red.set("accepted_steps", static_cast<uint64_t>(steps));
+  red.set("budget_exhausted", runs >= budget);
+  red.set("seed_independent", seed_independent);
+  red.set("program_reduced", false);
+  red.set("original_locations", format_locs(original_locs));
+  Json orig = Json::object();
+  orig.set("old", original_old.to_json());
+  orig.set("new", original_new.to_json());
+  red.set("original_initial_state", std::move(orig));
+  Json nonzero = Json::object();
+  for (unsigned l = 0; l < kNumLocs; ++l)
+    if (k.entry_equal.test(l) && cur_o.get(l) != 0)
+      nonzero.set(loc_name(l), hex32(cur_o.get(l)));
+  red.set("reduced_entry_values", std::move(nonzero));
+  return red;
+}
+
+// ---------------------------------------------------------------------------
+// Per-case learning log (handoff 8).
+
+Json summary_json(const std::vector<InstSummary> &insts) {
+  Json arr = Json::array();
+  for (const auto &i : insts) {
+    Json o = Json::object();
+    o.set("pc", hex64(i.pc));
+    o.set("mnemonic", i.mnemonic);
+    o.set("asm", i.text);
+    o.set("reads", format_locs(i.reads));
+    o.set("writes", format_locs(i.writes));
+    arr.push(std::move(o));
+  }
+  return arr;
+}
+
+Json log_header(const RegionPair &region, const RegionFeatures &f, const TestOptions &options,
+                const std::string &policy, size_t sweep_cases) {
+  Json h = Json::object();
+  h.set("type", "header");
+  h.set("schema", "rj_isa_diff.case_log.v1");
+  h.set("region", region.id);
+  if (!region.parent.empty())
+    h.set("parent", region.parent);
+  h.set("synthetic", region.synthetic);
+  h.set("prepared_key", region.prepared_key);
+  h.set("seed", options.seed);
+  h.set("policy", policy);
+  Json k = Json::object();
+  k.set("status", contract_status_name(region.contract.status));
+  k.set("entry_equal", format_locs(region.contract.entry_equal));
+  k.set("observable", format_locs(region.contract.observable));
+  k.set("pending_effects", region.contract.pending_effects);
+  k.set("composition", region.contract.composition);
+  h.set("contract", std::move(k));
+  h.set("old", summary_json(f.roles.old_summary));
+  h.set("new", summary_json(f.roles.new_summary));
+  Json roles = Json::object();
+  for (unsigned l = 0; l < kNumLocs; ++l)
+    if (f.roles.roles[l])
+      roles.set(loc_name(l), role_names(f.roles.roles[l]));
+  h.set("roles", std::move(roles));
+  Json pairs = Json::array();
+  for (const auto &p : f.roles.pairs)
+    pairs.push(p.mnemonic + " " + loc_name(p.a) + "," + loc_name(p.b) +
+               (p.wide ? " (64-bit)" : ""));
+  h.set("pairs", std::move(pairs));
+  Json rel = Json::array();
+  for (const auto &c : f.roles.const_relations)
+    rel.push(c.mnemonic + " " + loc_name(c.loc) + " vs " + hex32(c.constant));
+  h.set("const_relations", std::move(rel));
+  h.set("boundary_cases", static_cast<uint64_t>(sweep_cases));
+  return h;
+}
+
+Json feedback_json(const Feedback &fb) {
+  Json o = Json::object();
+  o.set("type", "case");
+  o.set("case", fb.case_index);
+  o.set("phase", fb.phase);
+  o.set("accepted", fb.accepted);
+  if (!fb.rejection.empty())
+    o.set("rejection", fb.rejection);
+  Json ev = Json::array();
+  for (const auto &e : fb.events)
+    ev.push(e);
+  o.set("events", std::move(ev));
+  if (fb.accepted) {
+    Json ex = Json::array();
+    ex.push(fb.exit_old);
+    ex.push(fb.exit_new);
+    o.set("exit", std::move(ex));
+    o.set("category", fb.category);
+    if (fb.locs.any())
+      o.set("locs", format_locs(fb.locs));
+    o.set("bucket", hex64(fb.bucket));
+    o.set("novel", fb.novel);
+    Json cost = Json::array();
+    for (uint64_t c : {fb.propose_ns, fb.load_ns, fb.old_ns, fb.new_ns, fb.compare_ns})
+      cost.push(c);
+    o.set("cost_ns", std::move(cost)); // propose, load, old, new, compare
+    Json insts = Json::array();
+    insts.push(fb.insts_old);
+    insts.push(fb.insts_new);
+    o.set("insts", std::move(insts));
+  }
+  return o;
+}
+
 } // namespace
 
 const char *test_status_name(TestStatus s) {
@@ -200,6 +450,20 @@ Json RegionResult::to_json() const {
   if (!reason.empty())
     j.set("reason", reason);
   j.set("prepared_key", prepared_key);
+  if (!pending_effects.empty())
+    j.set("pending_effects", pending_effects);
+  if (!composition.empty())
+    j.set("composition", composition);
+  if (!resolution.empty()) {
+    Json e = Json::object();
+    e.set("resolution", resolution);
+    if (!resolved_by.empty()) {
+      e.set("resolved_by", resolved_by);
+      e.set("resolved_contract_status", contract_status_name(resolved_contract));
+    }
+    e.set("tried", expansion_tried);
+    j.set("expansion", std::move(e));
+  }
   j.set("policy", policy);
   j.set("seed", seed);
   Json counts = Json::object();
@@ -237,6 +501,13 @@ Json RegionResult::to_json() const {
   bj.set("valid_by_family", std::move(fam));
   j.set("boundary_sweep", std::move(bj));
   j.set("random_phase", phase_json(random));
+  Json nov = Json::object();
+  nov.set("distinct_buckets", novelty_buckets);
+  nov.set("first_seen_in_boundary", novel_boundary);
+  nov.set("first_seen_in_random", novel_random);
+  j.set("novelty", std::move(nov));
+  if (!case_log.empty())
+    j.set("case_log", case_log);
   Json exec = Json::object();
   exec.set("old_region_insts", static_cast<uint64_t>(old_len));
   exec.set("new_region_insts", static_cast<uint64_t>(new_len));
@@ -321,6 +592,8 @@ Json counterexample_json(const RegionPair &region, const Mismatch &m, uint64_t s
   tr.set("old", trace_json(trace_old));
   tr.set("new", trace_json(trace_new));
   j.set("trace", std::move(tr));
+  if (!m.reduction.is_null())
+    j.set("reduction", m.reduction);
   j.set("identity", build_identity());
   return j;
 }
@@ -332,6 +605,8 @@ RegionResult test_region(const RegionPair &region, const TestOptions &options,
   r.synthetic = region.synthetic;
   r.contract_status = region.contract.status;
   r.prepared_key = region.prepared_key;
+  r.pending_effects = region.contract.pending_effects;
+  r.composition = region.contract.composition;
   r.policy = policy.name();
   r.seed = options.seed;
   r.old_len = region.old_side.insts.size();
@@ -374,28 +649,57 @@ RegionResult test_region(const RegionPair &region, const TestOptions &options,
   std::map<std::string, uint64_t> unsupported_exclusions;
   uint64_t undefined = 0;
   MachineState init_old, init_new;
+  History history;
+  std::unordered_set<uint64_t> buckets;
+
+  // Optional per-case learning log (handoff 8).
+  std::ofstream log;
+  if (!options.case_log_dir.empty()) {
+    std::filesystem::create_directories(options.case_log_dir);
+    r.case_log = options.case_log_dir + "/" + region.id + ".jsonl";
+    log.open(r.case_log, std::ios::trunc);
+    if (log)
+      log << log_header(region, features, options, policy.name(), sweep.cases.size()).dump(-1)
+          << '\n';
+    else
+      r.case_log.clear();
+  }
+  auto finish = [&](Feedback &fb) {
+    policy.observe(fb);
+    history.record(fb);
+    if (log)
+      log << feedback_json(fb).dump(-1) << '\n';
+  };
 
   // Execute one validated sample on both sides and classify the outcome.
   auto run_case = [&](const Sample &sample, uint64_t case_index, PhaseCounts &phase,
-                      const char *phase_name, const std::string &family) {
+                      const char *phase_name, const std::string &family, Feedback &fb) {
     ++r.accepted;
     ++phase.accepted;
+    fb.accepted = true;
     auto t1 = Clock::now();
     build_initial_states(region.contract, sample, frame, options.seed, case_index, init_old,
                          init_new);
     old_runner->load(init_old);
     new_runner->load(init_new);
-    r.t.load_ns += ns_since(t1);
+    fb.load_ns = ns_since(t1);
+    r.t.load_ns += fb.load_ns;
 
     auto t2 = Clock::now();
     const RunOutcome out_old = old_runner->run(region.old_side.insts.size());
-    r.t.old_exec_ns += ns_since(t2);
+    fb.old_ns = ns_since(t2);
+    r.t.old_exec_ns += fb.old_ns;
     auto t3 = Clock::now();
     const RunOutcome out_new = new_runner->run(region.new_side.insts.size());
-    r.t.new_exec_ns += ns_since(t3);
+    fb.new_ns = ns_since(t3);
+    r.t.new_exec_ns += fb.new_ns;
     ++r.executed_pairs;
     r.old_insts_executed += out_old.executed;
     r.new_insts_executed += out_new.executed;
+    fb.insts_old = out_old.executed;
+    fb.insts_new = out_new.executed;
+    fb.exit_old = run_status_name(out_old.status);
+    fb.exit_new = run_status_name(out_new.status);
 
     auto t4 = Clock::now();
     Mismatch m;
@@ -404,6 +708,12 @@ RegionResult test_region(const RegionPair &region, const TestOptions &options,
     m.out_old = out_old;
     m.out_new = out_new;
     std::string kind;
+    auto note_novelty = [&](const MachineState *fo, const MachineState *fn) {
+      fb.bucket = novelty_bucket(region.contract, fb.category, fo, fn);
+      fb.novel = buckets.insert(fb.bucket).second;
+      if (fb.novel)
+        ++(std::string_view(phase_name) == "boundary" ? r.novel_boundary : r.novel_random);
+    };
     if (out_old.status != RunStatus::Ok || out_new.status != RunStatus::Ok) {
       const std::string key = std::string("exit: old ") + run_status_name(out_old.status) +
                               " / new " + run_status_name(out_new.status);
@@ -417,8 +727,10 @@ RegionResult test_region(const RegionPair &region, const TestOptions &options,
                  out_new.status == RunStatus::UndefinedBehavior) {
         ++undefined;
       }
-      r.t.compare_ns += ns_since(t4);
-      policy.observe({case_index, true, false, "excluded"});
+      fb.compare_ns = ns_since(t4);
+      r.t.compare_ns += fb.compare_ns;
+      fb.category = kind.empty() ? "excluded" : kind;
+      note_novelty(nullptr, nullptr);
       if (kind.empty())
         return;
       m.kind = kind;
@@ -431,8 +743,12 @@ RegionResult test_region(const RegionPair &region, const TestOptions &options,
       const MachineState final_old = old_runner->capture();
       const MachineState final_new = new_runner->capture();
       kind = compare_pair(region, init_old, init_new, final_old, final_new, m);
-      r.t.compare_ns += ns_since(t4);
-      policy.observe({case_index, true, !kind.empty(), kind});
+      fb.compare_ns = ns_since(t4);
+      r.t.compare_ns += fb.compare_ns;
+      fb.mismatch = !kind.empty();
+      fb.category = kind.empty() ? "ok" : kind;
+      fb.locs = m.locs;
+      note_novelty(&final_old, &final_new);
       if (kind.empty())
         return;
       m.kind = kind;
@@ -451,12 +767,16 @@ RegionResult test_region(const RegionPair &region, const TestOptions &options,
     m.events = sample.events;
     if (r.examples.size() < options.max_counterexamples) {
       auto t5 = Clock::now();
+      // Shrink the inputs first (handoff 10), so bundles and traces show the reduced case.
+      if (options.reduce && kind == "observable")
+        m.reduction =
+            reduce_mismatch(region, *old_runner, *new_runner, m, options.reduction_budget);
       if (!options.counterexample_dir.empty()) {
         // Re-execute with tracing on the same runners; determinism makes this the same run.
         std::vector<TraceStep> trace_old, trace_new;
-        old_runner->load(init_old);
+        old_runner->load(m.init_old);
         old_runner->run(region.old_side.insts.size(), &trace_old);
-        new_runner->load(init_new);
+        new_runner->load(m.init_new);
         new_runner->run(region.new_side.insts.size(), &trace_new);
         const Json bundle =
             counterexample_json(region, m, options.seed, policy.name(), trace_old, trace_new);
@@ -478,14 +798,21 @@ RegionResult test_region(const RegionPair &region, const TestOptions &options,
     const Sample sample = sweep.materialize(c);
     ++r.attempted;
     ++r.boundary.cases;
-    auto rejection = validate_sample(sample, region.contract);
-    r.t.propose_ns += ns_since(t0);
+    Feedback fb;
+    fb.case_index = case_index;
+    fb.phase = "boundary";
+    fb.events = sample.events;
+    auto rejection = ConstraintChecker::validate(sample, region.contract);
+    fb.propose_ns = ns_since(t0);
+    r.t.propose_ns += fb.propose_ns;
     if (rejection) {
       ++r.rejections["boundary constraint: " + *rejection];
-      policy.observe({case_index, false, false, "rejected"});
+      fb.category = "rejected";
+      fb.rejection = *rejection;
     } else {
-      run_case(sample, case_index, r.boundary, "boundary", c.family);
+      run_case(sample, case_index, r.boundary, "boundary", c.family, fb);
     }
+    finish(fb);
     ++case_index;
   }
 
@@ -493,19 +820,41 @@ RegionResult test_region(const RegionPair &region, const TestOptions &options,
   const uint64_t max_attempts = options.max_attempts ? options.max_attempts : 4 * options.cases;
   while (r.random.accepted < options.cases && r.random.cases < max_attempts) {
     auto t0 = Clock::now();
-    Sample sample = policy.propose(features, region.contract, case_index);
+    Sample sample = policy.propose(features, region.contract, history, case_index);
     project_onto_constraints(sample, region.contract, options.seed ^ (case_index << 1));
     ++r.attempted;
     ++r.random.cases;
-    auto rejection = validate_sample(sample, region.contract);
-    r.t.propose_ns += ns_since(t0);
+    Feedback fb;
+    fb.case_index = case_index;
+    fb.phase = "random";
+    fb.events = sample.events;
+    auto rejection = ConstraintChecker::validate(sample, region.contract);
+    fb.propose_ns = ns_since(t0);
+    r.t.propose_ns += fb.propose_ns;
     if (rejection) {
       ++r.rejections["constraint: " + *rejection];
-      policy.observe({case_index, false, false, "rejected"});
+      fb.category = "rejected";
+      fb.rejection = *rejection;
     } else {
-      run_case(sample, case_index, r.random, "random", "");
+      run_case(sample, case_index, r.random, "random", "", fb);
     }
+    finish(fb);
     ++case_index;
+  }
+  r.novelty_buckets = buckets.size();
+  if (log) {
+    Json s = Json::object();
+    s.set("type", "summary");
+    s.set("cases", history.cases);
+    s.set("accepted", history.accepted);
+    s.set("valid", history.valid);
+    s.set("mismatches", history.mismatches);
+    s.set("novelty_buckets", static_cast<uint64_t>(buckets.size()));
+    Json cats = Json::object();
+    for (const auto &[k, v] : history.categories)
+      cats.set(k, v);
+    s.set("categories", std::move(cats));
+    log << s.dump(-1) << '\n';
   }
 
   // Status.

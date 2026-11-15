@@ -4,7 +4,7 @@
     "tool": "rj_isa_diff",
     "tool_version": "0.1.0-p0",
     "schema_version": "rj_isa_diff.v1",
-    "rocjitsu_revision": "5588fbf7ec0c5b3f0d92a4c83116ef5997915ac3",
+    "rocjitsu_revision": "03c6dd8633b6ac5eff7be87adcd0559cc34bb212",
     "rocjitsu_version": "0.3.0",
     "semantics": "RocJITsu ComputeUnitCore::execute_instruction, gfx950 (CDNA4) wave64, default arithmetic semantics",
     "compiler": "13.4.0"
@@ -105,6 +105,8 @@
         "wide_reads": "s4,s8",
         "constraints": [],
         "exit_mapping": "single fall-through exit after the last region instruction",
+        "pending_effects": "NONE",
+        "composition": "HOLDS",
         "frame_preserved": ["status_except_scc", "mode", "trapsts", "ttmp[0:15]", "scratch_base", "s102", "s103", "wait_counters", "in_trap_handler", "wave_state", "sleep_cycles"],
         "status": "ESTABLISHED",
         "depends_on": [],
@@ -126,12 +128,696 @@
             "source": "complement of entry_equal; independent per-side values"
           },
           {
+            "what": "no memory operation outstanding at the region entry (s_waitcnt dataflow over the CFG)",
+            "source": "pending_effects_analysis"
+          },
+          {
+            "what": "composition: every entry_equal location is established equal at the entry by must-equality from the kernel entry through common code (no upstream change)",
+            "source": "composition_check"
+          },
+          {
             "what": "every path to the region entry runs byte-identical code from identical kernel metadata, so all state is equal at the cutpoint",
             "source": "common_prefix_analysis"
           }
         ]
       },
-      "prepared_key": "b752e44c69733da43d0815d737802cff0c489d05e856c6570b8fb0d7d9b7f0ab"
+      "prepared_key": "310245b83b9d7d2bdf6e2bf766865c07128431a354ae4804aa6c50d68be47cc2"
+    }
+  ],
+  "expansion_variants": [
+    {
+      "id": "r0.ctx-b0f1",
+      "status": "READY",
+      "reason": "",
+      "synthetic": false,
+      "parent": "r0",
+      "context_before": 0,
+      "context_after": 1,
+      "hunks": [0],
+      "old": {
+        "begin_index": 4,
+        "end_index": 6,
+        "insts": [
+          {
+            "pc": "0x1314",
+            "words": ["0x8e888204"],
+            "asm": "s_lshl_b64 s[8:9], s[4:5], 2"
+          },
+          {
+            "pc": "0x1318",
+            "words": ["0xbf078004"],
+            "asm": "s_cmp_lg_u32 s4, 0"
+          }
+        ]
+      },
+      "new": {
+        "begin_index": 4,
+        "end_index": 7,
+        "insts": [
+          {
+            "pc": "0x1314",
+            "words": ["0x8e888104"],
+            "asm": "s_lshl_b64 s[8:9], s[4:5], 1"
+          },
+          {
+            "pc": "0x1318",
+            "words": ["0x8e888108"],
+            "asm": "s_lshl_b64 s[8:9], s[8:9], 1"
+          },
+          {
+            "pc": "0x131c",
+            "words": ["0xbf078004"],
+            "asm": "s_cmp_lg_u32 s4, 0"
+          }
+        ]
+      },
+      "contract": {
+        "target": "gfx950",
+        "wave": "wave64",
+        "arithmetic": "default",
+        "mapping": "identity_at_common_cutpoint",
+        "entry_equal": "s4,s5",
+        "canary": "s0,s1,s2,s3,s6,s7,s8,s9,s10,s11,s12,s13,s14,s15,s16,s17,s18,s19,s20,s21,s22,s23,s24,s25,s26,s27,s28,s29,s30,s31,s32,s33,s34,s35,s36,s37,s38,s39,s40,s41,s42,s43,s44,s45,s46,s47,s48,s49,s50,s51,s52,s53,s54,s55,s56,s57,s58,s59,s60,s61,s62,s63,s64,s65,s66,s67,s68,s69,s70,s71,s72,s73,s74,s75,s76,s77,s78,s79,s80,s81,s82,s83,s84,s85,s86,s87,s88,s89,s90,s91,s92,s93,s94,s95,s96,s97,s98,s99,s100,s101,vcc_lo,vcc_hi,exec_lo,exec_hi,m0,scc",
+        "observable": "s8,s9,scc",
+        "declared_writes_old": "s8,s9,scc",
+        "declared_writes_new": "s8,s9,scc",
+        "wide_reads": "s4,s8",
+        "constraints": [],
+        "exit_mapping": "single fall-through exit after the last region instruction",
+        "pending_effects": "NONE",
+        "composition": "HOLDS",
+        "frame_preserved": ["status_except_scc", "mode", "trapsts", "ttmp[0:15]", "scratch_base", "s102", "s103", "wait_counters", "in_trap_handler", "wave_state", "sleep_cycles"],
+        "status": "ESTABLISHED",
+        "depends_on": [],
+        "sources": [
+          {
+            "what": "entry_equal = live-in(old) | live-in(new) at the region entry",
+            "source": "KernelModel backward LocSet liveness over BasicBlock::build_reachable CFG"
+          },
+          {
+            "what": "observable = live-out(old) | live-out(new) at the region exit",
+            "source": "KernelModel backward LocSet liveness"
+          },
+          {
+            "what": "mapping = same physical location on both sides",
+            "source": "identity at a common cutpoint; matched anchors from LCS alignment"
+          },
+          {
+            "what": "canary = locations dead at entry on both sides",
+            "source": "complement of entry_equal; independent per-side values"
+          },
+          {
+            "what": "region includes 1 common instruction(s) after the change as context",
+            "source": "common_suffix_context"
+          },
+          {
+            "what": "no memory operation outstanding at the region entry (s_waitcnt dataflow over the CFG)",
+            "source": "pending_effects_analysis"
+          },
+          {
+            "what": "composition: every entry_equal location is established equal at the entry by must-equality from the kernel entry through common code (no upstream change)",
+            "source": "composition_check"
+          },
+          {
+            "what": "every path to the region entry runs byte-identical code from identical kernel metadata, so all state is equal at the cutpoint",
+            "source": "common_prefix_analysis"
+          }
+        ]
+      },
+      "prepared_key": "0d4c5756c2620e71836dd8683dc079b1784fb09553eeb882ec02c2be43fd34d7"
+    },
+    {
+      "id": "r0.ctx-b1f0",
+      "status": "READY",
+      "reason": "",
+      "synthetic": false,
+      "parent": "r0",
+      "context_before": 1,
+      "context_after": 0,
+      "hunks": [0],
+      "old": {
+        "begin_index": 3,
+        "end_index": 5,
+        "insts": [
+          {
+            "pc": "0x1310",
+            "words": ["0x82058080"],
+            "asm": "s_addc_u32 s5, 0, 0"
+          },
+          {
+            "pc": "0x1314",
+            "words": ["0x8e888204"],
+            "asm": "s_lshl_b64 s[8:9], s[4:5], 2"
+          }
+        ]
+      },
+      "new": {
+        "begin_index": 3,
+        "end_index": 6,
+        "insts": [
+          {
+            "pc": "0x1310",
+            "words": ["0x82058080"],
+            "asm": "s_addc_u32 s5, 0, 0"
+          },
+          {
+            "pc": "0x1314",
+            "words": ["0x8e888104"],
+            "asm": "s_lshl_b64 s[8:9], s[4:5], 1"
+          },
+          {
+            "pc": "0x1318",
+            "words": ["0x8e888108"],
+            "asm": "s_lshl_b64 s[8:9], s[8:9], 1"
+          }
+        ]
+      },
+      "contract": {
+        "target": "gfx950",
+        "wave": "wave64",
+        "arithmetic": "default",
+        "mapping": "identity_at_common_cutpoint",
+        "entry_equal": "s4,scc",
+        "canary": "s0,s1,s2,s3,s5,s6,s7,s8,s9,s10,s11,s12,s13,s14,s15,s16,s17,s18,s19,s20,s21,s22,s23,s24,s25,s26,s27,s28,s29,s30,s31,s32,s33,s34,s35,s36,s37,s38,s39,s40,s41,s42,s43,s44,s45,s46,s47,s48,s49,s50,s51,s52,s53,s54,s55,s56,s57,s58,s59,s60,s61,s62,s63,s64,s65,s66,s67,s68,s69,s70,s71,s72,s73,s74,s75,s76,s77,s78,s79,s80,s81,s82,s83,s84,s85,s86,s87,s88,s89,s90,s91,s92,s93,s94,s95,s96,s97,s98,s99,s100,s101,vcc_lo,vcc_hi,exec_lo,exec_hi,m0",
+        "observable": "s4,s8,s9",
+        "declared_writes_old": "s5,s8,s9,scc",
+        "declared_writes_new": "s5,s8,s9,scc",
+        "wide_reads": "s4,s8",
+        "constraints": [],
+        "exit_mapping": "single fall-through exit after the last region instruction",
+        "pending_effects": "NONE",
+        "composition": "HOLDS",
+        "frame_preserved": ["status_except_scc", "mode", "trapsts", "ttmp[0:15]", "scratch_base", "s102", "s103", "wait_counters", "in_trap_handler", "wave_state", "sleep_cycles"],
+        "status": "ESTABLISHED",
+        "depends_on": [],
+        "sources": [
+          {
+            "what": "entry_equal = live-in(old) | live-in(new) at the region entry",
+            "source": "KernelModel backward LocSet liveness over BasicBlock::build_reachable CFG"
+          },
+          {
+            "what": "observable = live-out(old) | live-out(new) at the region exit",
+            "source": "KernelModel backward LocSet liveness"
+          },
+          {
+            "what": "mapping = same physical location on both sides",
+            "source": "identity at a common cutpoint; matched anchors from LCS alignment"
+          },
+          {
+            "what": "canary = locations dead at entry on both sides",
+            "source": "complement of entry_equal; independent per-side values"
+          },
+          {
+            "what": "region includes 1 common instruction(s) before the change as context",
+            "source": "common_prefix_analysis"
+          },
+          {
+            "what": "no memory operation outstanding at the region entry (s_waitcnt dataflow over the CFG)",
+            "source": "pending_effects_analysis"
+          },
+          {
+            "what": "composition: every entry_equal location is established equal at the entry by must-equality from the kernel entry through common code (no upstream change)",
+            "source": "composition_check"
+          },
+          {
+            "what": "every path to the region entry runs byte-identical code from identical kernel metadata, so all state is equal at the cutpoint",
+            "source": "common_prefix_analysis"
+          }
+        ]
+      },
+      "prepared_key": "0f913028a8cdef3aa5a6cc9327de6f914f18a2aa5b9710df03f745aac91b4bc1"
+    },
+    {
+      "id": "r0.ctx-b0f2",
+      "status": "READY",
+      "reason": "",
+      "synthetic": false,
+      "parent": "r0",
+      "context_before": 0,
+      "context_after": 2,
+      "hunks": [0],
+      "old": {
+        "begin_index": 4,
+        "end_index": 7,
+        "insts": [
+          {
+            "pc": "0x1314",
+            "words": ["0x8e888204"],
+            "asm": "s_lshl_b64 s[8:9], s[4:5], 2"
+          },
+          {
+            "pc": "0x1318",
+            "words": ["0xbf078004"],
+            "asm": "s_cmp_lg_u32 s4, 0"
+          },
+          {
+            "pc": "0x131c",
+            "words": ["0x85070908"],
+            "asm": "s_cselect_b32 s7, s8, s9"
+          }
+        ]
+      },
+      "new": {
+        "begin_index": 4,
+        "end_index": 8,
+        "insts": [
+          {
+            "pc": "0x1314",
+            "words": ["0x8e888104"],
+            "asm": "s_lshl_b64 s[8:9], s[4:5], 1"
+          },
+          {
+            "pc": "0x1318",
+            "words": ["0x8e888108"],
+            "asm": "s_lshl_b64 s[8:9], s[8:9], 1"
+          },
+          {
+            "pc": "0x131c",
+            "words": ["0xbf078004"],
+            "asm": "s_cmp_lg_u32 s4, 0"
+          },
+          {
+            "pc": "0x1320",
+            "words": ["0x85070908"],
+            "asm": "s_cselect_b32 s7, s8, s9"
+          }
+        ]
+      },
+      "contract": {
+        "target": "gfx950",
+        "wave": "wave64",
+        "arithmetic": "default",
+        "mapping": "identity_at_common_cutpoint",
+        "entry_equal": "s4,s5",
+        "canary": "s0,s1,s2,s3,s6,s7,s8,s9,s10,s11,s12,s13,s14,s15,s16,s17,s18,s19,s20,s21,s22,s23,s24,s25,s26,s27,s28,s29,s30,s31,s32,s33,s34,s35,s36,s37,s38,s39,s40,s41,s42,s43,s44,s45,s46,s47,s48,s49,s50,s51,s52,s53,s54,s55,s56,s57,s58,s59,s60,s61,s62,s63,s64,s65,s66,s67,s68,s69,s70,s71,s72,s73,s74,s75,s76,s77,s78,s79,s80,s81,s82,s83,s84,s85,s86,s87,s88,s89,s90,s91,s92,s93,s94,s95,s96,s97,s98,s99,s100,s101,vcc_lo,vcc_hi,exec_lo,exec_hi,m0,scc",
+        "observable": "",
+        "declared_writes_old": "s7,s8,s9,scc",
+        "declared_writes_new": "s7,s8,s9,scc",
+        "wide_reads": "s4,s8",
+        "constraints": [],
+        "exit_mapping": "single fall-through exit after the last region instruction",
+        "pending_effects": "NONE",
+        "composition": "HOLDS",
+        "frame_preserved": ["status_except_scc", "mode", "trapsts", "ttmp[0:15]", "scratch_base", "s102", "s103", "wait_counters", "in_trap_handler", "wave_state", "sleep_cycles"],
+        "status": "ESTABLISHED",
+        "depends_on": [],
+        "sources": [
+          {
+            "what": "entry_equal = live-in(old) | live-in(new) at the region entry",
+            "source": "KernelModel backward LocSet liveness over BasicBlock::build_reachable CFG"
+          },
+          {
+            "what": "observable = live-out(old) | live-out(new) at the region exit",
+            "source": "KernelModel backward LocSet liveness"
+          },
+          {
+            "what": "mapping = same physical location on both sides",
+            "source": "identity at a common cutpoint; matched anchors from LCS alignment"
+          },
+          {
+            "what": "canary = locations dead at entry on both sides",
+            "source": "complement of entry_equal; independent per-side values"
+          },
+          {
+            "what": "region includes 2 common instruction(s) after the change as context",
+            "source": "common_suffix_context"
+          },
+          {
+            "what": "no memory operation outstanding at the region entry (s_waitcnt dataflow over the CFG)",
+            "source": "pending_effects_analysis"
+          },
+          {
+            "what": "composition: every entry_equal location is established equal at the entry by must-equality from the kernel entry through common code (no upstream change)",
+            "source": "composition_check"
+          },
+          {
+            "what": "every path to the region entry runs byte-identical code from identical kernel metadata, so all state is equal at the cutpoint",
+            "source": "common_prefix_analysis"
+          }
+        ]
+      },
+      "prepared_key": "1eb8ef64f1af75f18ddf20f1a5d6d32551f70d82b3d7e8511965b06495d542af"
+    },
+    {
+      "id": "r0.ctx-b1f1",
+      "status": "READY",
+      "reason": "",
+      "synthetic": false,
+      "parent": "r0",
+      "context_before": 1,
+      "context_after": 1,
+      "hunks": [0],
+      "old": {
+        "begin_index": 3,
+        "end_index": 6,
+        "insts": [
+          {
+            "pc": "0x1310",
+            "words": ["0x82058080"],
+            "asm": "s_addc_u32 s5, 0, 0"
+          },
+          {
+            "pc": "0x1314",
+            "words": ["0x8e888204"],
+            "asm": "s_lshl_b64 s[8:9], s[4:5], 2"
+          },
+          {
+            "pc": "0x1318",
+            "words": ["0xbf078004"],
+            "asm": "s_cmp_lg_u32 s4, 0"
+          }
+        ]
+      },
+      "new": {
+        "begin_index": 3,
+        "end_index": 7,
+        "insts": [
+          {
+            "pc": "0x1310",
+            "words": ["0x82058080"],
+            "asm": "s_addc_u32 s5, 0, 0"
+          },
+          {
+            "pc": "0x1314",
+            "words": ["0x8e888104"],
+            "asm": "s_lshl_b64 s[8:9], s[4:5], 1"
+          },
+          {
+            "pc": "0x1318",
+            "words": ["0x8e888108"],
+            "asm": "s_lshl_b64 s[8:9], s[8:9], 1"
+          },
+          {
+            "pc": "0x131c",
+            "words": ["0xbf078004"],
+            "asm": "s_cmp_lg_u32 s4, 0"
+          }
+        ]
+      },
+      "contract": {
+        "target": "gfx950",
+        "wave": "wave64",
+        "arithmetic": "default",
+        "mapping": "identity_at_common_cutpoint",
+        "entry_equal": "s4,scc",
+        "canary": "s0,s1,s2,s3,s5,s6,s7,s8,s9,s10,s11,s12,s13,s14,s15,s16,s17,s18,s19,s20,s21,s22,s23,s24,s25,s26,s27,s28,s29,s30,s31,s32,s33,s34,s35,s36,s37,s38,s39,s40,s41,s42,s43,s44,s45,s46,s47,s48,s49,s50,s51,s52,s53,s54,s55,s56,s57,s58,s59,s60,s61,s62,s63,s64,s65,s66,s67,s68,s69,s70,s71,s72,s73,s74,s75,s76,s77,s78,s79,s80,s81,s82,s83,s84,s85,s86,s87,s88,s89,s90,s91,s92,s93,s94,s95,s96,s97,s98,s99,s100,s101,vcc_lo,vcc_hi,exec_lo,exec_hi,m0",
+        "observable": "s8,s9,scc",
+        "declared_writes_old": "s5,s8,s9,scc",
+        "declared_writes_new": "s5,s8,s9,scc",
+        "wide_reads": "s4,s8",
+        "constraints": [],
+        "exit_mapping": "single fall-through exit after the last region instruction",
+        "pending_effects": "NONE",
+        "composition": "HOLDS",
+        "frame_preserved": ["status_except_scc", "mode", "trapsts", "ttmp[0:15]", "scratch_base", "s102", "s103", "wait_counters", "in_trap_handler", "wave_state", "sleep_cycles"],
+        "status": "ESTABLISHED",
+        "depends_on": [],
+        "sources": [
+          {
+            "what": "entry_equal = live-in(old) | live-in(new) at the region entry",
+            "source": "KernelModel backward LocSet liveness over BasicBlock::build_reachable CFG"
+          },
+          {
+            "what": "observable = live-out(old) | live-out(new) at the region exit",
+            "source": "KernelModel backward LocSet liveness"
+          },
+          {
+            "what": "mapping = same physical location on both sides",
+            "source": "identity at a common cutpoint; matched anchors from LCS alignment"
+          },
+          {
+            "what": "canary = locations dead at entry on both sides",
+            "source": "complement of entry_equal; independent per-side values"
+          },
+          {
+            "what": "region includes 1 common instruction(s) before the change as context",
+            "source": "common_prefix_analysis"
+          },
+          {
+            "what": "region includes 1 common instruction(s) after the change as context",
+            "source": "common_suffix_context"
+          },
+          {
+            "what": "no memory operation outstanding at the region entry (s_waitcnt dataflow over the CFG)",
+            "source": "pending_effects_analysis"
+          },
+          {
+            "what": "composition: every entry_equal location is established equal at the entry by must-equality from the kernel entry through common code (no upstream change)",
+            "source": "composition_check"
+          },
+          {
+            "what": "every path to the region entry runs byte-identical code from identical kernel metadata, so all state is equal at the cutpoint",
+            "source": "common_prefix_analysis"
+          }
+        ]
+      },
+      "prepared_key": "6774e527b60cdb47c18c6bbffb81b566d61970de7fb09152eef129936d31ad7e"
+    },
+    {
+      "id": "r0.ctx-b2f0",
+      "status": "READY",
+      "reason": "",
+      "synthetic": false,
+      "parent": "r0",
+      "context_before": 2,
+      "context_after": 0,
+      "hunks": [0],
+      "old": {
+        "begin_index": 2,
+        "end_index": 5,
+        "insts": [
+          {
+            "pc": "0x130c",
+            "words": ["0x80040302"],
+            "asm": "s_add_u32 s4, s2, s3"
+          },
+          {
+            "pc": "0x1310",
+            "words": ["0x82058080"],
+            "asm": "s_addc_u32 s5, 0, 0"
+          },
+          {
+            "pc": "0x1314",
+            "words": ["0x8e888204"],
+            "asm": "s_lshl_b64 s[8:9], s[4:5], 2"
+          }
+        ]
+      },
+      "new": {
+        "begin_index": 2,
+        "end_index": 6,
+        "insts": [
+          {
+            "pc": "0x130c",
+            "words": ["0x80040302"],
+            "asm": "s_add_u32 s4, s2, s3"
+          },
+          {
+            "pc": "0x1310",
+            "words": ["0x82058080"],
+            "asm": "s_addc_u32 s5, 0, 0"
+          },
+          {
+            "pc": "0x1314",
+            "words": ["0x8e888104"],
+            "asm": "s_lshl_b64 s[8:9], s[4:5], 1"
+          },
+          {
+            "pc": "0x1318",
+            "words": ["0x8e888108"],
+            "asm": "s_lshl_b64 s[8:9], s[8:9], 1"
+          }
+        ]
+      },
+      "contract": {
+        "target": "gfx950",
+        "wave": "wave64",
+        "arithmetic": "default",
+        "mapping": "identity_at_common_cutpoint",
+        "entry_equal": "s2,s3",
+        "canary": "s0,s1,s4,s5,s6,s7,s8,s9,s10,s11,s12,s13,s14,s15,s16,s17,s18,s19,s20,s21,s22,s23,s24,s25,s26,s27,s28,s29,s30,s31,s32,s33,s34,s35,s36,s37,s38,s39,s40,s41,s42,s43,s44,s45,s46,s47,s48,s49,s50,s51,s52,s53,s54,s55,s56,s57,s58,s59,s60,s61,s62,s63,s64,s65,s66,s67,s68,s69,s70,s71,s72,s73,s74,s75,s76,s77,s78,s79,s80,s81,s82,s83,s84,s85,s86,s87,s88,s89,s90,s91,s92,s93,s94,s95,s96,s97,s98,s99,s100,s101,vcc_lo,vcc_hi,exec_lo,exec_hi,m0,scc",
+        "observable": "s4,s8,s9",
+        "declared_writes_old": "s4,s5,s8,s9,scc",
+        "declared_writes_new": "s4,s5,s8,s9,scc",
+        "wide_reads": "s4,s8",
+        "constraints": [],
+        "exit_mapping": "single fall-through exit after the last region instruction",
+        "pending_effects": "NONE",
+        "composition": "HOLDS",
+        "frame_preserved": ["status_except_scc", "mode", "trapsts", "ttmp[0:15]", "scratch_base", "s102", "s103", "wait_counters", "in_trap_handler", "wave_state", "sleep_cycles"],
+        "status": "ESTABLISHED",
+        "depends_on": [],
+        "sources": [
+          {
+            "what": "entry_equal = live-in(old) | live-in(new) at the region entry",
+            "source": "KernelModel backward LocSet liveness over BasicBlock::build_reachable CFG"
+          },
+          {
+            "what": "observable = live-out(old) | live-out(new) at the region exit",
+            "source": "KernelModel backward LocSet liveness"
+          },
+          {
+            "what": "mapping = same physical location on both sides",
+            "source": "identity at a common cutpoint; matched anchors from LCS alignment"
+          },
+          {
+            "what": "canary = locations dead at entry on both sides",
+            "source": "complement of entry_equal; independent per-side values"
+          },
+          {
+            "what": "region includes 2 common instruction(s) before the change as context",
+            "source": "common_prefix_analysis"
+          },
+          {
+            "what": "no memory operation outstanding at the region entry (s_waitcnt dataflow over the CFG)",
+            "source": "pending_effects_analysis"
+          },
+          {
+            "what": "composition: every entry_equal location is established equal at the entry by must-equality from the kernel entry through common code (no upstream change)",
+            "source": "composition_check"
+          },
+          {
+            "what": "every path to the region entry runs byte-identical code from identical kernel metadata, so all state is equal at the cutpoint",
+            "source": "common_prefix_analysis"
+          }
+        ]
+      },
+      "prepared_key": "54f2206f6cfb9f7ca55bb933e24e72d3347151835ccd0bf4246396043d2f5af1"
+    },
+    {
+      "id": "r0.ctx-b2f2",
+      "status": "READY",
+      "reason": "",
+      "synthetic": false,
+      "parent": "r0",
+      "context_before": 2,
+      "context_after": 2,
+      "hunks": [0],
+      "old": {
+        "begin_index": 2,
+        "end_index": 7,
+        "insts": [
+          {
+            "pc": "0x130c",
+            "words": ["0x80040302"],
+            "asm": "s_add_u32 s4, s2, s3"
+          },
+          {
+            "pc": "0x1310",
+            "words": ["0x82058080"],
+            "asm": "s_addc_u32 s5, 0, 0"
+          },
+          {
+            "pc": "0x1314",
+            "words": ["0x8e888204"],
+            "asm": "s_lshl_b64 s[8:9], s[4:5], 2"
+          },
+          {
+            "pc": "0x1318",
+            "words": ["0xbf078004"],
+            "asm": "s_cmp_lg_u32 s4, 0"
+          },
+          {
+            "pc": "0x131c",
+            "words": ["0x85070908"],
+            "asm": "s_cselect_b32 s7, s8, s9"
+          }
+        ]
+      },
+      "new": {
+        "begin_index": 2,
+        "end_index": 8,
+        "insts": [
+          {
+            "pc": "0x130c",
+            "words": ["0x80040302"],
+            "asm": "s_add_u32 s4, s2, s3"
+          },
+          {
+            "pc": "0x1310",
+            "words": ["0x82058080"],
+            "asm": "s_addc_u32 s5, 0, 0"
+          },
+          {
+            "pc": "0x1314",
+            "words": ["0x8e888104"],
+            "asm": "s_lshl_b64 s[8:9], s[4:5], 1"
+          },
+          {
+            "pc": "0x1318",
+            "words": ["0x8e888108"],
+            "asm": "s_lshl_b64 s[8:9], s[8:9], 1"
+          },
+          {
+            "pc": "0x131c",
+            "words": ["0xbf078004"],
+            "asm": "s_cmp_lg_u32 s4, 0"
+          },
+          {
+            "pc": "0x1320",
+            "words": ["0x85070908"],
+            "asm": "s_cselect_b32 s7, s8, s9"
+          }
+        ]
+      },
+      "contract": {
+        "target": "gfx950",
+        "wave": "wave64",
+        "arithmetic": "default",
+        "mapping": "identity_at_common_cutpoint",
+        "entry_equal": "s2,s3",
+        "canary": "s0,s1,s4,s5,s6,s7,s8,s9,s10,s11,s12,s13,s14,s15,s16,s17,s18,s19,s20,s21,s22,s23,s24,s25,s26,s27,s28,s29,s30,s31,s32,s33,s34,s35,s36,s37,s38,s39,s40,s41,s42,s43,s44,s45,s46,s47,s48,s49,s50,s51,s52,s53,s54,s55,s56,s57,s58,s59,s60,s61,s62,s63,s64,s65,s66,s67,s68,s69,s70,s71,s72,s73,s74,s75,s76,s77,s78,s79,s80,s81,s82,s83,s84,s85,s86,s87,s88,s89,s90,s91,s92,s93,s94,s95,s96,s97,s98,s99,s100,s101,vcc_lo,vcc_hi,exec_lo,exec_hi,m0,scc",
+        "observable": "",
+        "declared_writes_old": "s4,s5,s7,s8,s9,scc",
+        "declared_writes_new": "s4,s5,s7,s8,s9,scc",
+        "wide_reads": "s4,s8",
+        "constraints": [],
+        "exit_mapping": "single fall-through exit after the last region instruction",
+        "pending_effects": "NONE",
+        "composition": "HOLDS",
+        "frame_preserved": ["status_except_scc", "mode", "trapsts", "ttmp[0:15]", "scratch_base", "s102", "s103", "wait_counters", "in_trap_handler", "wave_state", "sleep_cycles"],
+        "status": "ESTABLISHED",
+        "depends_on": [],
+        "sources": [
+          {
+            "what": "entry_equal = live-in(old) | live-in(new) at the region entry",
+            "source": "KernelModel backward LocSet liveness over BasicBlock::build_reachable CFG"
+          },
+          {
+            "what": "observable = live-out(old) | live-out(new) at the region exit",
+            "source": "KernelModel backward LocSet liveness"
+          },
+          {
+            "what": "mapping = same physical location on both sides",
+            "source": "identity at a common cutpoint; matched anchors from LCS alignment"
+          },
+          {
+            "what": "canary = locations dead at entry on both sides",
+            "source": "complement of entry_equal; independent per-side values"
+          },
+          {
+            "what": "region includes 2 common instruction(s) before the change as context",
+            "source": "common_prefix_analysis"
+          },
+          {
+            "what": "region includes 2 common instruction(s) after the change as context",
+            "source": "common_suffix_context"
+          },
+          {
+            "what": "no memory operation outstanding at the region entry (s_waitcnt dataflow over the CFG)",
+            "source": "pending_effects_analysis"
+          },
+          {
+            "what": "composition: every entry_equal location is established equal at the entry by must-equality from the kernel entry through common code (no upstream change)",
+            "source": "composition_check"
+          },
+          {
+            "what": "every path to the region entry runs byte-identical code from identical kernel metadata, so all state is equal at the cutpoint",
+            "source": "common_prefix_analysis"
+          }
+        ]
+      },
+      "prepared_key": "324e8a73979bb5cb7735de71c17d2c2d8aad1d317b2651f0c4b2ec06f4288b3f"
     }
   ],
   "analysis": {
@@ -144,9 +830,9 @@
     "alignment_complete": true,
     "layout_shift": true,
     "timing": {
-      "decode_cfg_liveness_ns": 122714,
-      "align_classify_ns": 4026,
-      "plan_ns": 76666
+      "decode_cfg_liveness_ns": 151438,
+      "align_classify_ns": 8873,
+      "plan_ns": 238840
     }
   }
 }

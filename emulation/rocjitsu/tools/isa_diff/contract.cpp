@@ -63,6 +63,8 @@ Json RegionContract::to_json() const {
   }
   j.set("constraints", std::move(cs));
   j.set("exit_mapping", exit_mapping);
+  j.set("pending_effects", pending_effects);
+  j.set("composition", composition);
   Json frame = Json::array();
   for (const auto &f : frame_field_names())
     frame.push(f);
@@ -153,6 +155,8 @@ std::optional<RegionContract> RegionContract::from_json(const Json &j, std::stri
     c.constraints.push_back(k);
   }
   c.exit_mapping = j["exit_mapping"].as_string();
+  c.pending_effects = j.has("pending_effects") ? j["pending_effects"].as_string() : "NONE";
+  c.composition = j.has("composition") ? j["composition"].as_string() : "NOT_CHECKED";
   auto status = parse_contract_status(j["status"].as_string());
   if (!status) {
     error = "bad contract status";

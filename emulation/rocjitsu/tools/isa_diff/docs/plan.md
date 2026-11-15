@@ -161,6 +161,23 @@ Builds and tests run on a remote build host, not on the authoring workstation.
 - Tests: catalog coverage per register, role targeting, an off-by-one against a literal
   caught with `--cases 0`, constraint edges and rejections, truncation reporting.
 
+### Task B2c: gap closure after review (items 1-4)
+1. **Memory operations outstanding at the cutpoint (6.1).** `KernelModel::compute_pending()`
+   is a forward dataflow over the gfx9 counters. The planner sets the contract's
+   `pending_effects` (NONE/DISJOINT/CONFLICT/UNKNOWN); CONFLICT and UNKNOWN make the
+   contract UNRESOLVED and add an unresolved context. Fixtures: `pending_*`.
+2. **Counterexample reduction (10).** `reduce_mismatch()` makes the case seed-independent
+   (fixed canaries), then shrinks the shared entry values (0, 1, halvings, bit clearing)
+   under the constraints and the same mismatch kind. The bundle records the original state.
+3. **Learning hooks (8).** `History` is passed to `propose()`; `observe()` gets rich
+   `Feedback`; `ConstraintChecker` is a separate class; novelty buckets are bounded; the
+   per-case JSONL log has an opcode/effect summary header.
+4. **Composition and expansion (5.2).** A forward must-equality analysis gives
+   `composition` HOLDS/FAILS, replacing the coarse "non-READY upstream" rule. Expansion
+   variants (backward/forward common context) are precomputed by `analyze` and tried by
+   `test` after a local mismatch; `expansion.resolution` is reported and the overall
+   verdict uses the resolving variant.
+
 ### Task B3: differential loop, results, counterexamples, replay
 - `TestOptions { seed; cases; budget; max_counterexamples; }` and
   `RegionResult test_region(const RegionPlan&, const TestOptions&, InputPolicy&)`.

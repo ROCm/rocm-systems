@@ -38,12 +38,14 @@ s_endpgm
 s_add_u32 s4, s2, s3
 s_cselect_b32 s5, s4, 0
 s_cmp_eq_u32 s5, 0
+s_store_dword s5, s[0:1], 0x0
 s_endpgm
 
 === scclive_new
 s_add_i32 s4, s2, s3
 s_cselect_b32 s5, s4, 0
 s_cmp_eq_u32 s5, 0
+s_store_dword s5, s[0:1], 0x0
 s_endpgm
 
 === sccdead_old
@@ -333,4 +335,124 @@ s_endpgm
 s_cmp_ge_u32 s2, 0x12346
 s_cselect_b32 s4, 1, 0
 s_cmp_eq_u32 s4, 0
+s_endpgm
+
+=== pending_conflict_old
+s_load_dword s4, s[0:1], 0x0
+s_add_u32 s5, s4, 1
+s_waitcnt lgkmcnt(0)
+s_store_dword s5, s[0:1], 0x4
+s_endpgm
+
+=== pending_conflict_new
+s_load_dword s4, s[0:1], 0x0
+s_add_u32 s5, 1, s4
+s_waitcnt lgkmcnt(0)
+s_store_dword s5, s[0:1], 0x4
+s_endpgm
+
+=== pending_disjoint_old
+s_load_dword s10, s[0:1], 0x0
+s_add_u32 s5, s4, 1
+s_waitcnt lgkmcnt(0)
+s_add_u32 s6, s10, s5
+s_store_dword s6, s[0:1], 0x4
+s_endpgm
+
+=== pending_disjoint_new
+s_load_dword s10, s[0:1], 0x0
+s_add_u32 s5, 1, s4
+s_waitcnt lgkmcnt(0)
+s_add_u32 s6, s10, s5
+s_store_dword s6, s[0:1], 0x4
+s_endpgm
+
+=== pending_waited_old
+s_load_dword s4, s[0:1], 0x0
+s_waitcnt lgkmcnt(0)
+s_add_u32 s5, s4, 1
+s_store_dword s5, s[0:1], 0x4
+s_endpgm
+
+=== pending_waited_new
+s_load_dword s4, s[0:1], 0x0
+s_waitcnt lgkmcnt(0)
+s_add_u32 s5, 1, s4
+s_store_dword s5, s[0:1], 0x4
+s_endpgm
+
+=== pending_partial_old
+s_load_dword s4, s[0:1], 0x0
+s_load_dword s10, s[0:1], 0x8
+s_waitcnt lgkmcnt(1)
+s_add_u32 s5, s4, 1
+s_waitcnt lgkmcnt(0)
+s_add_u32 s6, s10, s5
+s_store_dword s6, s[0:1], 0x4
+s_endpgm
+
+=== pending_partial_new
+s_load_dword s4, s[0:1], 0x0
+s_load_dword s10, s[0:1], 0x8
+s_waitcnt lgkmcnt(1)
+s_add_u32 s5, 1, s4
+s_waitcnt lgkmcnt(0)
+s_add_u32 s6, s10, s5
+s_store_dword s6, s[0:1], 0x4
+s_endpgm
+
+=== comp_disjoint_old
+s_getreg_b32 s4, hwreg(HW_REG_MODE)
+s_cmp_eq_u32 s6, 0
+s_cbranch_scc1 BB0
+s_nop 0
+BB0:
+s_nop 0
+s_add_u32 s5, s2, s3
+s_store_dword s5, s[0:1], 0x0
+s_endpgm
+
+=== comp_disjoint_new
+s_getreg_b32 s4, hwreg(HW_REG_STATUS)
+s_cmp_eq_u32 s6, 0
+s_cbranch_scc1 BB0
+s_nop 0
+BB0:
+s_nop 0
+s_add_u32 s5, s3, s2
+s_store_dword s5, s[0:1], 0x0
+s_endpgm
+
+=== comp_conflict_old
+s_getreg_b32 s4, hwreg(HW_REG_MODE)
+s_cmp_eq_u32 s6, 0
+s_cbranch_scc1 BB0
+s_nop 0
+BB0:
+s_nop 0
+s_add_u32 s5, s2, s4
+s_store_dword s5, s[0:1], 0x0
+s_endpgm
+
+=== comp_conflict_new
+s_getreg_b32 s4, hwreg(HW_REG_STATUS)
+s_cmp_eq_u32 s6, 0
+s_cbranch_scc1 BB0
+s_nop 0
+BB0:
+s_nop 0
+s_add_u32 s5, s4, s2
+s_store_dword s5, s[0:1], 0x0
+s_endpgm
+
+=== expand_masked_old
+s_lshl_b32 s4, s2, 1
+s_and_b32 s4, s4, 1
+s_store_dword s4, s[0:1], 0x0
+s_endpgm
+
+=== expand_masked_new
+s_lshl_b32 s4, s2, 2
+s_and_b32 s4, s4, 1
+s_store_dword s4, s[0:1], 0x0
 s_endpgm

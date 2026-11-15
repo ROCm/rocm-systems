@@ -62,6 +62,17 @@ struct RegionContract {
   LocSet wide_reads; ///< Input-generation feature: low halves of 64-bit operands.
   std::vector<Constraint> constraints;
   std::string exit_mapping = "single fall-through exit after the last region instruction";
+  /// Memory operations outstanding at the cutpoint (handoff 6.1): "NONE"; "DISJOINT"
+  /// (outstanding, but their destinations are not read or written by the region);
+  /// "CONFLICT" (an outstanding write targets a location the region reads or writes);
+  /// "UNKNOWN" (an outstanding op has unknown effects). CONFLICT and UNKNOWN leave the
+  /// context unresolved: the isolated run starts with every input ready, real hardware may not.
+  std::string pending_effects = "NONE";
+  /// Composition check (handoff 5.2): "HOLDS" when must-equality propagated from the
+  /// kernel entry through common code and upstream regions' R_out covers entry_equal,
+  /// "FAILS" otherwise (then the contract is UNRESOLVED), "NOT_CHECKED" for synthetic or
+  /// hand-built contracts.
+  std::string composition = "NOT_CHECKED";
   ContractStatus status = ContractStatus::Unresolved;
   std::vector<std::string> depends_on;
   std::vector<Assumption> sources;

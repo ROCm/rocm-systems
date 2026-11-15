@@ -58,6 +58,11 @@ struct TestOptions {
   size_t max_boundary_cases = 250000;
   size_t max_counterexamples = 3; ///< Bundles saved per region.
   std::string counterexample_dir; ///< Empty: keep in memory only.
+  /// Shrink saved counterexamples (handoff 10): input values first, then seed dependence.
+  bool reduce = true;
+  size_t reduction_budget = 4096; ///< Paired executions per counterexample.
+  /// Per-case JSONL log directory (handoff 8 learning data). Empty: no log.
+  std::string case_log_dir;
 };
 
 struct PhaseCounts {
@@ -77,6 +82,9 @@ struct Mismatch {
   MachineState init_old, init_new, final_old, final_new;
   RunOutcome out_old, out_new;
   std::vector<std::string> events;
+  /// Reduction record (null when not reduced): runs, accepted steps, whether the
+  /// mismatch no longer depends on the seed-derived canaries, and the original state.
+  Json reduction;
 };
 
 struct Timings {
@@ -121,6 +129,18 @@ struct RegionResult {
   std::vector<Mismatch> examples;
   std::vector<std::string> counterexample_files;
   std::string prepared_key;
+  /// Automatic context expansion after a local mismatch (handoff 5.2):
+  /// "" (not needed), "RESOLVED_BY_CONTEXT", "PERSISTS_WITH_CONTEXT", "NO_EXPANSION_AVAILABLE".
+  std::string resolution;
+  std::string resolved_by; ///< Variant id with no mismatch, if any.
+  ContractStatus resolved_contract = ContractStatus::Unresolved;
+  CoverageScope resolved_coverage = CoverageScope::NotEstablished;
+  Json expansion_tried = Json::array(); ///< Summary of each variant tested.
+  uint64_t novelty_buckets = 0;         ///< Distinct bounded outcome classes seen.
+  uint64_t novel_boundary = 0, novel_random = 0;
+  std::string case_log;        ///< Path of the per-case JSONL log, if written.
+  std::string pending_effects; ///< From the contract (handoff 6.1).
+  std::string composition;     ///< From the contract (handoff 5.2).
 
   [[nodiscard]] Json to_json() const;
 };

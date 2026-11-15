@@ -51,7 +51,16 @@ struct ConstRelation {
   std::string mnemonic;
 };
 
+/// Opcode/effect summary of one region instruction (logged for later policy learning).
+struct InstSummary {
+  uint64_t pc = 0;
+  std::string mnemonic;
+  std::string text;
+  LocSet reads, writes;
+};
+
 struct RegionRoles {
+  std::vector<InstSummary> old_summary, new_summary;
   std::array<uint32_t, kNumLocs> roles{};
   std::vector<OperandPair> pairs;
   std::vector<ConstRelation> const_relations;

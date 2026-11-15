@@ -44,6 +44,11 @@ struct RegionPair {
   /// Hash binding instructions, PCs, contract and execution mode (the prepared-region key).
   std::string prepared_key;
   bool synthetic = false; ///< Built by mutation (error injection), not by analysing a real pair.
+  /// Expansion variant of a base region (handoff 5.2): the base id, and how many common
+  /// instructions were added before and after it. Empty parent for base regions.
+  std::string parent;
+  uint32_t context_before = 0;
+  uint32_t context_after = 0;
 
   [[nodiscard]] Json to_json() const;
   static std::optional<RegionPair> from_json(const Json &j, std::string &error);

@@ -110,14 +110,19 @@ RegionRoles infer_roles(const std::vector<RegionInst> &old_insts,
     return r;
   }
   for (const auto *side : {&old_insts, &new_insts}) {
+    auto &summary = side == &old_insts ? r.old_summary : r.new_summary;
     for (const RegionInst &ri : *side) {
       std::vector<uint32_t> window = ri.words;
       window.resize(window.size() + 3, 0);
       auto decoded = decoder->decode_window(window, ri.pc);
       if (decoded.failed()) {
         r.decoded = false;
+        summary.push_back({ri.pc, "<undecodable>", ri.text, {}, {}});
         continue;
       }
+      const Effects fx = classify(*decoded.value());
+      summary.push_back(
+          {ri.pc, std::string(decoded.value()->mnemonic()), ri.text, fx.reads, fx.writes});
       add_instruction(r, *decoded.value());
     }
   }

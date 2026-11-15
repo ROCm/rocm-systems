@@ -8,9 +8,9 @@ Base: `ROCm/rocm-systems` `origin/develop` @ `90ddc8aae5`, branch
 
 | label | what |
 |---|---|
-| **implemented** | Code-object and raw-word ingestion. Decode and CFG via `BasicBlock::build_reachable`. Precise SALU effect model. LocSet liveness (including SCC and VCC/EXEC halves). PC taint. LCS alignment with branch-target validation. Change classification. Conservative single-block region planner (merge, context, stop rules). Contracts with sources. Isolated old/new runners on `ComputeUnitCore::execute_instruction`. Mandatory boundary/NaN/corner-case sweep, run on every test (integer limits, f32/f16/bf16/f64 special encodings, EXEC lane patterns, operand-role values for shift amounts, S_BFE fields, sign-extension inputs and literal neighbours, carry/overflow/borrow pairs, constraint edges). Deterministic random policy drawing from the same catalogs, with a constraint checker. Observable/frame/effect-model comparison. Separate evidence-level results. Counterexample bundles, replay, synthetic injection. CLI `analyze/test/replay/inject`. Prepared-region key. Per-phase cost counters. |
-| **tested** | 30 gtest validator cases (`rj_isa_diff_tests`, ctest prefix `isa_diff.`) covering every row of handoff section 13, plus effect, liveness, alignment, JSON and replay-tamper tests. They pass in Release and under ASan+UBSan+LSan with zero reports. The CLI end-to-end flow was run on clang/lld-built gfx950 code objects and on raw word streams. |
-| **not run** | No real LLVM old/new pair produced by an optimisation switch: this is deferred to the separate LLVM plugin task, by user decision. No result-cache store: keys are computed and recorded, but nothing reuses results across runs. No kernel/context reproducer: reachability is not established in P0. No SMT. |
+| **implemented** | Code-object and raw-word ingestion. Decode and CFG via `BasicBlock::build_reachable`. Precise SALU effect model. LocSet liveness (including SCC and VCC/EXEC halves). PC taint. LCS alignment with branch-target validation. Change classification. Conservative single-block region planner (merge, context, stop rules). Contracts with sources. Isolated old/new runners on `ComputeUnitCore::execute_instruction`. Mandatory boundary/NaN/corner-case sweep, run on every test (integer limits, f32/f16/bf16/f64 special encodings, EXEC lane patterns, operand-role values for shift amounts, S_BFE fields, sign-extension inputs and literal neighbours, carry/overflow/borrow pairs, constraint edges). Deterministic random policy drawing from the same catalogs, with a constraint checker. Analysis of memory operations outstanding at each region entry (contract `pending_effects`). Composition check by forward must-equality (contract `composition`). Automatic context-expansion variants, tried after a local mismatch. Counterexample reduction (input values and seed independence). Learning hooks (`History`, rich `Feedback`, `ConstraintChecker`, bounded novelty buckets) and a per-case JSONL log. Observable/frame/effect-model comparison. Separate evidence-level results. Counterexample bundles, replay, synthetic injection. CLI `analyze/test/replay/inject`. Prepared-region key. Per-phase cost counters. |
+| **tested** | 38 gtest validator cases (`rj_isa_diff_tests`, ctest prefix `isa_diff.`) covering every row of handoff section 13, plus effect, liveness, alignment, JSON and replay-tamper tests. They pass in Release and under ASan+UBSan+LSan with zero reports. The CLI end-to-end flow was run on clang/lld-built gfx950 code objects and on raw word streams. |
+| **not run** | No real LLVM old/new pair produced by an optimisation switch: this is deferred to the separate LLVM plugin task, by user decision. No result-cache store: keys are computed and recorded, but nothing reuses results across runs. No kernel/context reproducer: reachability is not established in P0. No SMT. No program reduction of counterexamples. No learned input policy. |
 | **unsupported** | Regions containing VALU, memory, MFMA, waits, barriers, branches, hwreg access, indirect SGPR access, TTMP/FLAT_SCRATCH/XNACK operands, or PC-derived inputs. Multi-block regions. Code objects with several `.text` sections or with zero-size kernel symbols. |
 | **inconclusive** | Regions whose two continuations read different locations (`INCONCLUSIVE_MAPPING`, e.g. register renaming across blocks). Mismatches under an `UNRESOLVED` contract. Zero-valid-case runs. |
 | **synthetic mismatch** | Injected wrong opcode, immediate and operand: all detected, all replayed (`REPRODUCED`), all labelled `synthetic`. Sample: `samples/synthetic/`. |
@@ -59,6 +59,112 @@ cases only). It was added after review, because random sampling alone hits a spe
 
 No rocjitsu undefined-behaviour diagnostic fired for any sweep value in the suite.
 
+## Memory operations outstanding at the cutpoint (handoff 6.1)
+
+`KernelModel::pending_before()` is a forward dataflow over the CFG. For each gfx9 counter
+(vmcnt, lgkmcnt, expcnt) it tracks an upper bound of outstanding operations and the tracked
+locations they will write:
+- SMEM and LDS raise lgkmcnt, VMEM raises vmcnt, and anything else that may wait raises all three;
+- `s_waitcnt` (fields decoded by rocjitsu's `decode_gfx9_waitcnt`) lowers a counter, and only
+  a field of 0 clears its destinations;
+- joins take the maximum count and the union of destinations.
+
+At each region entry the contract records `pending_effects`:
+
+| value | meaning | contract |
+|---|---|---|
+| `NONE` | nothing outstanding | unaffected |
+| `DISJOINT` | outstanding, but no destination is read or written by the region | unaffected; recorded as a source |
+| `CONFLICT` | an outstanding write targets a location the region reads or writes | UNRESOLVED; listed as an unresolved context |
+| `UNKNOWN` | an outstanding operation has unknown effects | UNRESOLVED |
+
+| test | observed |
+|---|---|
+| `OutstandingLoadIntoARegionInputLeavesTheContextUnresolved` | `s_load_dword s4` then the region reads `s4` before `s_waitcnt`: CONFLICT, UNRESOLVED. The commuted add has no local mismatch, but the overall result is INCONCLUSIVE with PARTIAL coverage, never a pass |
+| `DisjointWaitedAndPartiallyWaitedLoads` | load into `s10` with the region touching `s4/s5`: DISJOINT, ESTABLISHED, NO_MISMATCH_FOUND. After `s_waitcnt lgkmcnt(0)`: NONE. Two SMEM loads with `lgkmcnt(1)`: still CONFLICT (out-of-order SMEM), and the counter bound is 1 with both destinations pending |
+
+## Composition (handoff 5.2)
+
+The planner now runs a forward must-equality analysis over the old CFG:
+- **Kernel entry**: everything is equal at the entry, or nothing is if the kernel metadata
+  differs.
+- **Common code**: equality propagates through it. A write is equal only when all its inputs
+  are, including the implicit EXEC/VCC/M0 reads of non-SALU instructions and memory/VGPR state
+  for loads and VALU.
+- **Branches**: a branch on an unequal condition makes nothing known on both successors.
+- **Regions**: a READY region contributes its R_out. An unsupported region removes what it
+  writes. A control-flow change removes everything.
+
+Each region records `composition: HOLDS|FAILS`, and FAILS makes the contract UNRESOLVED.
+This replaces the old coarse rule ("any non-READY upstream region makes the contract
+UNRESOLVED") with a per-location check.
+
+| test | observed |
+|---|---|
+| `UntestedUpstreamChangeMattersOnlyIfItReachesTheEntryRelation` | An unsupported upstream `s_getreg` change writes `s4`. A downstream region not reading `s4`: HOLDS, ASSUMED. One reading `s4`: FAILS, UNRESOLVED, naming `{s4}`. Register renaming across blocks: FAILS. Two dependent hunks tested separately: HOLDS through r0's R_out |
+
+## Automatic context expansion (handoff 5.2)
+
+`analyze` precomputes up to 12 larger variants of each READY region. They extend over
+matched, common P0 instructions in the same block, backward and/or forward (1, 2, 4, ... up
+to the maximum). After a base region shows a local mismatch, `test` tries them smallest
+first. The base result keeps its local mismatch, and `expansion.resolution` records:
+- `RESOLVED_BY_CONTEXT`: the named variant has no mismatch, and the overall verdict uses its
+  result and contract;
+- `PERSISTS_WITH_CONTEXT`;
+- `NO_EXPANSION_AVAILABLE`.
+
+| test | observed |
+|---|---|
+| `CompensatedLocalMismatchIsResolvedByContext` | `s2<<1` vs `s2<<2` masked by a common `s_and_b32 s4, s4, 1`: resolved by `r0.ctx-b0f1` (ESTABLISHED), overall NO_MISMATCH_FOUND, witness NONE |
+| `RealDifferencePersistsAndPrerequisiteContextResolves` | the live-SCC change persists through all forward variants (overall LOCAL_MISMATCH). `s_lshr` vs `s_bfe`, equal only after the common `s_and 0xff`, is resolved by a one-instruction backward context |
+
+## Counterexample reduction (handoff 10)
+
+Each saved counterexample is shrunk before it is traced and written:
+1. The seed-derived canaries are replaced with fixed distinct values (old 0, new all-ones).
+   If the mismatch persists, the bundle is marked `seed_independent`.
+2. Each shared entry value is tried at 0, at 1, at successive halvings, and with single bits
+   cleared (highest first). A candidate is accepted only if it is simpler (fewer set bits),
+   satisfies the contract's constraints, and reproduces the same mismatch kind.
+
+The bundle keeps the original state under `reduction.original_initial_state`, and replay
+runs the reduced state. Budget: `--reduction-budget` (default 4096 paired runs).
+`--no-reduce` turns reduction off.
+
+| test | observed |
+|---|---|
+| `CounterexamplesAreShrunkSeedIndependentAndStillReplay` | live SCC: every input except the two add sources becomes 0, the set-bit count does not grow, the case is seed-independent, and the bundle replays. Off-by-one: `s2=0x12345` stays and is the only non-zero input |
+| `ReductionNeverLeavesTheContract` | with `s3` known-one bit 4, every reduced example keeps the bit and passes `ConstraintChecker` |
+
+CLI, synthetic wrong opcode on the code-object sample: reduced in 6 runs to the single
+non-zero input `s5=1`, seed-independent, REPRODUCED by replay.
+
+## Learning hooks and per-case log (handoff 8)
+
+- `InputPolicy::propose(features, contract, history, case)` now receives a bounded `History`:
+  counts, categories, and the last 32 feedbacks.
+- `observe(Feedback)` receives:
+  - the phase and events;
+  - the accepted/rejected status and rejection reason;
+  - both exit statuses and a bounded category;
+  - the differing locations;
+  - the novelty bucket and whether it is new;
+  - per-stage cost (propose, load, old, new, compare) and instruction counts.
+- `ConstraintChecker::validate` is a separate class. A policy can still only propose inputs.
+- **Novelty buckets** are bounded: the outcome category, plus, per written location, a coarse
+  value class (zero/one/all-ones/sign/other) and whether old and new agree. Raw values never
+  form a bucket.
+- `test` writes `<case>/logs/<region>.jsonl` (turn off with `--no-case-log`). It has:
+  - a header line: seed, policy, contract summary, per-instruction opcode/effect summary
+    (mnemonic, reads, writes), roles, operand pairs and literal relations;
+  - one line per case (boundary and random);
+  - a summary line.
+
+| test | observed |
+|---|---|
+| `PolicyGetsHistoryRichFeedbackAndEveryCaseIsLogged` | `observe()` sees every case of both phases. `propose()` sees the history grow from the sweep size and the window stays <= 32. Feedback carries exits, instruction counts, buckets and mismatching locations. Buckets: more than 1 and fewer than 64 for hundreds of cases. The log has a header, one line per case and a summary, all valid JSON |
+
 ## End-to-end runs
 
 The code-object pair is `samples/codeobject/co_{old,new}.s`, built with clang/ld.lld for
@@ -86,14 +192,20 @@ replay: REPRODUCED: kind=observable locations=s8,s9
 holds the raw numbers. The sweep does not change the per-case cost; it adds cases.
 Measured with the sweep (boundary cases run in addition to the 20000 random ones):
 
-| variant | boundary cases | per case (µs) | cases/s (wall) |
-|---|---|---|---|
-| r1 | 842 | 2.44 | 338,948 |
-| r4 | 3,131 | 2.59 | 325,673 |
-| r16 | 9,879 | 3.09 | 287,350 |
-| r64 | 16,270 | 5.88 | 159,563 |
-| r256 | 38,599 | 15.77 | 62,079 |
-| whole-kernel control | 94,875 | 128.23 | 7,772 |
+| variant | boundary cases | per case (µs) | cases/s (wall, per-case log on) | cases/s (wall, `--no-case-log`) |
+|---|---|---|---|---|
+| r1 | 842 | 2.70 | 132,199 | 338,948 |
+| r4 | 3,131 | 2.86 | 133,035 | 325,673 |
+| r16 | 9,879 | 3.33 | 130,269 | 287,350 |
+| r64 | 16,270 | 5.71 | 102,944 | 159,563 |
+| r256 | 38,599 | 15.41 | 51,672 | 62,079 |
+| whole-kernel control | 94,875 | 128.65 | 7,475 | 7,772 |
+
+The per-case log is on by default. It costs about 3-4 µs per case in JSON building and
+writing, and about 0.5 KB per case (16 MB for the 29,879 cases of r16). At R=16 one `test`
+run took 0.247 s with the log and 0.145 s with `--no-case-log`, including process start.
+The "per case" column (propose, load, execute, compare) does not include log writing. The
+`--no-case-log` column was measured before the log existed.
 
 The sweep grows with the number of registers the region reads (about 150-400 cases per
 register, plus pair cases), not with kernel size.
@@ -132,8 +244,16 @@ Reading:
 
 ## Unresolved and limitations
 
-- **Mapping**: identity at common cutpoints only. There is no renaming inference. Asymmetric
-  continuation liveness is reported `INCONCLUSIVE_MAPPING`.
+- **Mapping**: identity at common cutpoints only. There is no renaming inference, and
+  hand-written register mappings are not supported. Asymmetric continuation liveness is
+  reported `INCONCLUSIVE_MAPPING`.
+- **Composition**: the must-equality analysis runs over the old CFG. It assumes that
+  untested (unsupported) upstream changes write only their decoded destinations, which keeps
+  such contracts at ASSUMED. Any control-flow change reaching a region makes its contract
+  UNRESOLVED.
+- **Reduction**: input values and seed dependence only. The program is not reduced, because
+  that would need re-planning the region and contract for every candidate.
+- **Learning data**: per-case logs and feedback are written; no learned policy exists.
 - **Liveness of SCC/VCC/EXEC/M0** comes from this tool's own analysis, because RocJITsu's
   `LivenessAnalysis` tracks ordinary registers only. Outside P0, instructions are assumed to
   read EXEC/VCC/M0. The exceptions are a short list (`s_endpgm`, `s_waitcnt`, `s_barrier`,
@@ -145,9 +265,14 @@ Reading:
   reproducer is pending.
 - **Metadata**: the AMDHSA note is compared by hash, so any note change makes scope partial.
   Descriptor fields are compared individually, and the entry offset alone is layout only.
-- **Pending effects**: P0 regions contain no memory or wait instructions. The isolated state
-  contract assumes nothing is pending at the cutpoint and records that assumption. It does
-  not prove that the real kernel satisfies it.
+- **Pending effects**: *Correction.* An earlier version of this document said the contract
+  "records that assumption" about nothing being pending at the cutpoint. It did not: no
+  analysis existed and nothing was recorded. A region placed between an `s_load` and its
+  `s_waitcnt` could get an ESTABLISHED contract. This is now fixed (see "Memory operations
+  outstanding at the cutpoint" above). The analysis follows the gfx9 counter rules
+  (vmcnt/lgkmcnt/expcnt; SMEM may return out of order) and is conservative: only a counter
+  field of 0 clears destinations. Only tracked scalar state is considered: outstanding
+  writes to VGPRs or memory cannot affect a P0 region.
 - **Cache**: `prepared_key` binds the words, PCs, full contract and mode. `results.json`
   records the RocJITsu revision. No result store reuses them yet.
 - **Build environment**: two develop targets do not build in this environment, unrelated to
