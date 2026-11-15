@@ -10934,6 +10934,19 @@ class CodeGenerator:
         L.append(f"  uint32_t data_base = {self._vgpr_base_expr('vdata')};")
         stride = esz * ne
         L.append(f'  d->store_data.resize(wf.wf_size() * {stride});')
+        if esz == 4:
+            L.append(
+                f'  if (!cu.observes_register_access() && wf.vgpr_alloc().contains(data_base, {ne})) {{'
+            )
+            L.append(
+                f'    auto data = amdgpu::RegisterAccess(wf).read_vgpr_region(data_base, {ne}, exec);'
+            )
+            L.append(
+                '    if (data.copy_dwords_lane_major(d->store_data, exec).failed()) return;'
+            )
+            L.append('    set_data(std::move(d));')
+            L.append('    return;')
+            L.append('  }')
         L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
         L.append('    if (!(exec & (1ULL << lane))) continue;')
         for i in range(ne):

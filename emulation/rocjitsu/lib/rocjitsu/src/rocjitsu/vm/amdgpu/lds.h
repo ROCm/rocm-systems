@@ -5,6 +5,7 @@
 #define ROCJITSU_VM_AMDGPU_LDS_H_
 
 #include "rocjitsu/base/api.h"
+#include "rocjitsu/base/rj_compiler.h"
 #include "simdojo/components/memory_interface.h"
 #include "util/bit.h"
 
@@ -261,17 +262,29 @@ private:
     return static_cast<uint64_t>(addr) + size <= capacity_bytes_;
   }
 
+  static void copy_bytes(uint8_t *dst, const uint8_t *src, size_t size) {
+    switch (size) {
+    case 2:
+      std::memcpy(dst, src, 2);
+      break;
+    case 4:
+      std::memcpy(dst, src, 4);
+      break;
+    case 8:
+      std::memcpy(dst, src, 8);
+      break;
+    case 16:
+      std::memcpy(dst, src, 16);
+      break;
+    default:
+      std::memcpy(dst, src, size);
+    }
+  }
+
   void read_backing(uint32_t addr, uint8_t *dst, uint32_t size) const {
     const size_t begin = addr;
     if (begin < data_.size() && size <= data_.size() - begin) {
-      if (size == 4)
-        std::memcpy(dst, &data_[begin], 4);
-      else if (size == 8)
-        std::memcpy(dst, &data_[begin], 8);
-      else if (size == 2)
-        std::memcpy(dst, &data_[begin], 2);
-      else
-        std::memcpy(dst, &data_[begin], size);
+      copy_bytes(dst, data_.data() + begin, size);
       return;
     }
     for (uint32_t i = 0; i < size; ++i)
@@ -281,15 +294,16 @@ private:
   void write_backing(size_t offset, const uint8_t *src, size_t size) {
     assert(offset <= capacity_bytes_ && size <= capacity_bytes_ - offset);
     ensure_materialized(offset + size);
-    // Keep the checked loop explicit: GCC 15 can retain the vector's old object
-    // size across resize and report a false stringop-overflow for memcpy here.
-    for (size_t i = 0; i < size; ++i)
-      data_[offset + i] = src[i];
+    copy_bytes(data_.data() + offset, src, size);
   }
 
   void ensure_materialized(size_t required) {
-    if (required <= data_.size())
-      return;
+    if (required > data_.size())
+      grow_backing(required);
+  }
+
+  // Keep the resize out of line so GCC does not carry an old allocation's size into later stores.
+  RJ_NOINLINE void grow_backing(size_t required) {
     assert(required <= capacity_bytes_);
 
     // Grow in fixed 4 KiB backing granules so storage tracks the allocated LDS

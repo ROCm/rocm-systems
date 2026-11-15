@@ -19,6 +19,39 @@
 
 namespace rocjitsu::amdgpu::arith {
 
+// CDNA5 V_MOV_B16 e32 encodes each VGPR half in selector bit 7. Let rj-arith
+// select the halves directly so the two physical registers need resolving only
+// once. The ordinary operand path handles staged DPP sources and observation.
+inline bool try_move_packed_vgpr_half(Wavefront &wave, const Operand &destination,
+                                      const Operand &source) {
+  if (source.encoding_value() < 256 || source.encoding_value() > 511 || source.delegate() ||
+      wave.cu().observes_register_access() || wave.instruction_execution_failed() || !wave.exec())
+    return false;
+  RegisterAccess registers(wave);
+  const auto input = registers.read_operand_region(source, wave.exec());
+  const auto output = registers.destination_register(destination);
+  if (!input || !output)
+    return false;
+  auto lanes = input->lanes();
+  if (lanes.failed())
+    return false;
+  const uint32_t *values = lanes.value().data();
+  const uint64_t halves = ((source.encoding_value() & 128) ? RJ_ARITH_ALU_HIGH_A : 0u) |
+                          ((destination.encoding_value() & 128) ? RJ_ARITH_ALU_HIGH_D : 0u);
+  const auto flags = wave.cu().arithmetic_flags();
+  const uint32_t base = wave.vgpr_alloc().base + output->index;
+  auto status = registers.try_bulk_write_vgprs<1>(base, 1, [&](uint32_t *const *d) {
+    return wave.wf_size() == 32
+               ? rj_arith_v_mov_b16_w32(flags, uint32_t(wave.exec()), halves, d, &values)
+               : rj_arith_v_mov_b16_w64(flags, wave.exec(), halves, d, &values);
+  });
+  if (!status)
+    return false;
+  if (*status != RJ_ARITH_SUCCESS)
+    wave.report_instruction_execution_error(InstructionExecutionError::UnsupportedOperandValue);
+  return true;
+}
+
 // A normal VGPR uses observed storage directly. Uniform, subword or delegated
 // operands use scratch storage; their existing implementation owns routing.
 class VectorInput32 {
@@ -116,15 +149,20 @@ public:
       return;
     }
     if (packed_words) {
-      values_[0].fill(0);
-      values_[1].fill(0);
       // Packed inline constants replicate their FP32 bits, rather than widening
       // to a numeric 64-bit value. Delegated operands retain pair32 routing.
-      if (operand.const_value()) {
-        const auto value = registers.read_lane_pair32(operand, 0, scalar_mode);
+      // A physical SGPR has the same value for every active lane. Preserve
+      // individual reads for delegates and register observers.
+      const auto reg = operand.to_register_ref();
+      if (operand.const_value() || (!operand.delegate() && !wave.cu().observes_register_access() &&
+                                    reg && reg->cls == RegClass::SGPR)) {
+        const auto value =
+            registers.read_lane_pair32(operand, std::countr_zero(exec_mask), scalar_mode);
         values_[0].fill(value.lo);
         values_[1].fill(value.hi);
       } else {
+        values_[0].fill(0);
+        values_[1].fill(0);
         for (uint32_t lane = 0; lane < wave.wf_size(); ++lane) {
           if ((exec_mask >> lane) & 1) {
             const auto value = registers.read_lane_pair32(operand, lane, scalar_mode);
