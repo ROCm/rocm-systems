@@ -186,6 +186,14 @@ struct host_region_t
     uint64_t             exit_digest = 0;
 };
 
+namespace host
+{
+// How long a host replay fence waits, over all its queues and agents, before the range declines:
+// ROCPROFILER_RANGE_REPLAY_HOST_FENCE_TIMEOUT_MS, read once, or the drain budget.
+std::chrono::milliseconds
+fence_timeout();
+}  // namespace host
+
 struct host_range_state_t
 {
     bool     enabled = false;
@@ -198,9 +206,9 @@ struct host_range_state_t
     bool                            exit_digests_taken    = false;
 
     // How long one fence, over all its queues and agents, waits for GPU work before the range
-    // declines. Always the default drain budget in production; a field so that a test can reach the
+    // declines. Always host::fence_timeout() in production; a field so that a test can reach the
     // timeout in milliseconds.
-    std::chrono::milliseconds fence_budget = std::chrono::seconds{hsa::drain_budget_secs};
+    std::chrono::milliseconds fence_budget = host::fence_timeout();
 
     // Carries the PASS callback context from the PHASE_ENTER raised just before a siglongjmp to the
     // PHASE_EXIT raised when that pass reaches end() again.

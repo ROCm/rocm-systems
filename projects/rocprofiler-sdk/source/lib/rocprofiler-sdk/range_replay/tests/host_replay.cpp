@@ -42,8 +42,10 @@
 #include <cstdint>
 #include <future>
 #include <mutex>
+#include <optional>
 #include <random>
 #include <shared_mutex>
+#include <string>
 #include <thread>
 #include <vector>
 
@@ -843,4 +845,26 @@ TEST(range_replay_host, one_fence_waits_one_budget_however_many_queues_it_covers
 
     controller.destroy_queue(&ring_a.queue);
     controller.destroy_queue(&ring_b.queue);
+}
+
+TEST(range_replay_host, fence_timeout_takes_whole_milliseconds_and_ignores_anything_else)
+{
+    using std::chrono::milliseconds;
+    const auto parse = [](const char* value) {
+        return range_replay::host::parse_fence_timeout(std::string{value});
+    };
+    const auto drain_budget = milliseconds{std::chrono::seconds{hsa::drain_budget_secs}};
+
+    EXPECT_EQ(range_replay::host::parse_fence_timeout(std::nullopt), drain_budget);
+    EXPECT_EQ(parse("1000"), milliseconds{1000});
+    EXPECT_EQ(parse("1"), milliseconds{1});
+    EXPECT_EQ(parse("3600000"), range_replay::host::max_fence_timeout);
+    for(const auto* invalid :
+        {"", "0", "-5", "3600001", "1.5", "250ms", " 250 ", "abc", "99999999999999999999"})
+        EXPECT_EQ(parse(invalid), drain_budget) << "'" << invalid << "'";
+}
+
+TEST(range_replay_host, a_host_range_fences_with_the_configured_timeout)
+{
+    EXPECT_EQ(range_replay::host_range_state_t{}.fence_budget, range_replay::host::fence_timeout());
 }
