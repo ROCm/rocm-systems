@@ -4537,6 +4537,7 @@ class CodeGenerator:
                         )
                     )
                     packed_default_opcodes = []
+                    no_op_sel_hi_opcodes = []
                     omitted_source_modifier_opcodes = []
                     for inst in inst_enc.insts:
                         sem = (
@@ -4554,6 +4555,14 @@ class CodeGenerator:
                             and sem.semantic_class.startswith(('pk_', 'dot2_'))
                         ):
                             packed_default_opcodes.append(inst.opcode)
+                        # Packed 64-bit elements have no operand selection.
+                        # Older LLVM assemblers set the unused high bits.
+                        if any(
+                            op.data_format_name
+                            in {'FMT_NUM_PK2_F64', 'FMT_NUM_PK2_U64'}
+                            for op in inst.dst_operands
+                        ):
+                            no_op_sel_hi_opcodes.append(inst.opcode)
                         if inst.name in profile.vop3p_source_modifier_omissions:
                             omitted_source_modifier_opcodes.append(inst.opcode)
                     if omitted_source_modifier_opcodes:
@@ -4592,6 +4601,11 @@ class CodeGenerator:
                         packed_defaults = (
                             f'{absolute_syntax} ? false : ({packed_defaults})'
                         )
+                    display_op_sel_hi = (
+                        f', !({self._opcode_set_condition(no_op_sel_hi_opcodes)})'
+                        if no_op_sel_hi_opcodes
+                        else ''
+                    )
                     modifier_lines += (
                         'amdgpu::vop::append_vop3p_disassembly('
                         f'modifiers_, inst->{op_sel}, '
@@ -4599,7 +4613,7 @@ class CodeGenerator:
                         f'{absolute_syntax} ? 0 : inst->neg, '
                         f'{absolute_syntax} ? 0 : inst->neg_hi, inst->clamp, '
                         f'{source_count}, '
-                        f'{packed_defaults});'
+                        f'{packed_defaults}{display_op_sel_hi});'
                     )
             dpp_modifier_line = ''
             if dpp_opcodes:
@@ -12341,6 +12355,7 @@ class CodeGenerator:
                     cdna5_f8f6f4_shape = self._cdna5_f8f6f4_wmma_shape(inst)
                     cdna4_f8f6f4_shape = self._cdna4_f8f6f4_mfma_shape(inst)
                     cdna5_swmmac_has_modifiers = self._cdna5_swmmac_has_modifiers(inst)
+                    gfx1251_f64_wmma = inst.name == 'V_WMMA_F64_16X16X4_F64'
                     tied_destination_name = None
                     tied_destination_def_width = None
                     tied_destination_result_name = None
@@ -13361,7 +13376,11 @@ class CodeGenerator:
                                 'void implicit_uses(RegisterSet &uses) const override'
                             )
                         )
-                    if cdna5_f8f6f4_shape is not None or cdna5_swmmac_has_modifiers:
+                    if (
+                        cdna5_f8f6f4_shape is not None
+                        or cdna5_swmmac_has_modifiers
+                        or gfx1251_f64_wmma
+                    ):
                         public_members.append(
                             cgen.Statement(
                                 'void build_modifiers(std::string &out) const override'
@@ -13660,7 +13679,7 @@ class CodeGenerator:
                     # this profile; OPSEL[2]/OPSEL_HI_2 are the only matrix
                     # reuse hints. VISrc_512_f64 admits the standard integer
                     # and FP64 inline-selector ranges.
-                    if inst.name == 'V_WMMA_F64_16X16X4_F64':
+                    if gfx1251_f64_wmma:
                         raw_inst = (
                             f'reinterpret_cast<const {factory_op_encoding}*>(inst)'
                         )
@@ -13724,22 +13743,15 @@ class CodeGenerator:
                             'src2 register tuple alignment";'
                         )
 
-                    # LLVM's public gfx1251 profiles define the packed U64 and
-                    # F64 arithmetic operations without op_sel.  The profile and
-                    # corresponding MC vectors are permanently linked here:
-                    # https://github.com/llvm/llvm-project/blob/3bcd9a803184e2d3657b9d5cc2a1773e9ce0f116/llvm/lib/Target/AMDGPU/VOP3PInstructions.td#L130-L162
-                    # https://github.com/llvm/llvm-project/blob/3bcd9a803184e2d3657b9d5cc2a1773e9ce0f116/llvm/test/MC/AMDGPU/gfx1251_asm_vop3p.s#L1-L403
+                    # These gfx1251 operations act on whole 64-bit elements.
+                    # LLVM emits 000 for the unused op_sel_hi field. Before
+                    # llvm/llvm-project#230662 it emitted 111. Both encode the
+                    # same operation, including in existing code objects.
+                    # https://github.com/llvm/llvm-project/commit/de6737eae85d86aa9db88cacb6f0b165d6fc2878
                     # https://github.com/llvm/llvm-project/blob/551d5172dd3902efbce5f4720b75bfc4e6441dc8/llvm/lib/Target/AMDGPU/SIRegisterInfo.td#L875-L920
                     # https://github.com/llvm/llvm-project/blob/551d5172dd3902efbce5f4720b75bfc4e6441dc8/llvm/lib/Target/AMDGPU/Disassembler/AMDGPUDisassembler.cpp#L2133-L2143
-                    # These references establish the operand profile and
-                    # encoding, not execution ordering for combined modifiers.
-                    # The fixed whole-element VOP3P layout therefore lets us
-                    # fail closed instead of accepting field combinations for
-                    # which no operation is defined.  Also reject register
-                    # tuples with alignment or spans outside LLVM's register
-                    # classes; the generic Operand validator only validates the
-                    # tuple's first selector and its width-independent source
-                    # selector set.
+                    # Check tuple alignment and span here because the generic
+                    # Operand validator only checks the first source selector.
                     if inst_sem is not None and inst_sem.semantic_class in {
                         'pk_binop_f64',
                         'pk_ternary_f64',
@@ -13757,8 +13769,7 @@ class CodeGenerator:
                         )
                         factory_validation_parts.append(
                             f'if ({raw_inst}->opsel != 0u || '
-                            f'{raw_inst}->opsel_hi != 3u || '
-                            f'{raw_inst}->opsel_hi_2 != 1u) '
+                            f'{raw_inst}->opsel_hi != ({raw_inst}->opsel_hi_2 ? 3u : 0u)) '
                             f'[[unlikely]] return emit_error.emit() << "{inst.name} has an invalid '
                             f'{layout_name} element layout";'
                         )
@@ -16556,16 +16567,27 @@ class CodeGenerator:
                                 f'}}'
                             )
                         )
-                    elif cdna5_swmmac_has_modifiers:
+                    elif cdna5_swmmac_has_modifiers or gfx1251_f64_wmma:
+                        index_key = (
+                            '  if (inst_.opsel & 0x1)\n    out += " index_key:1";\n'
+                            if cdna5_swmmac_has_modifiers
+                            else ''
+                        )
+                        negation = (
+                            '  amdgpu::vop::append_vop3p_disassembly(out, 0, 0, '
+                            'inst_.neg, inst_.neg_hi, 0, 3, false);\n'
+                            if gfx1251_f64_wmma
+                            else ''
+                        )
                         inst_impls.append(
                             cgen.Line(
                                 f'void {inst.fmt_name}::build_modifiers(std::string &out) const {{\n'
-                                f'  if (inst_.opsel & 0x1)\n'
-                                f'    out += " index_key:1";\n'
+                                f'{index_key}'
                                 f'  if (inst_.opsel & 0x4)\n'
                                 f'    out += " matrix_a_reuse";\n'
                                 f'  if (inst_.{self._op_sel_hi_2_field("ENC_VOP3P")})\n'
                                 f'    out += " matrix_b_reuse";\n'
+                                f'{negation}'
                                 f'}}'
                             )
                         )
