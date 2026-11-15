@@ -117,7 +117,9 @@ ea.stalled_by_sdp:
   name: EA Stalled by SDP
   formula: 100 * SUM(GC_EA_SE_SARB_STALLED_sum) / SUM(GC_EA_SE_BUSY_CYCLE_sum)
   unit: Percent
-  description: Percentage of EA-busy cycles where the EA is stalled.
+  description: >-
+    Percentage of EA-busy cycles where the EA is stalled by the downstream memory pipeline
+    (SDP).
 ea.stalled_by_sdp_dram:
   name: EA Stalled by SDP - DRAM
   formula: 100 * SUM(GC_EA_SE_STALL_DRAM_sum) / SUM(GC_EA_SE_BUSY_CYCLE_sum)

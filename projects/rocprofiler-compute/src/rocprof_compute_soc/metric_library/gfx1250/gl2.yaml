@@ -42,17 +42,17 @@ gl2.ea_hbm_bw_atomic:
   name: GL2-EA HBM Bandwidth - Atomic
   formula: 32 * SUM(GL2C_EA_ATOMIC_DRAM_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
-  description: Total GL2 to Efficiency Arbiter atomic bandwidth.
+  description: Total HBM atomic bandwidth between GL2 and the Efficiency Arbiter.
 gl2.ea_hbm_bw_rd:
   name: GL2-EA HBM Bandwidth - Read
   formula: 32 * SUM(GL2C_EA_RDREQ_DRAM_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
-  description: Total GL2 to Efficiency Arbiter read bandwidth.
+  description: Total HBM read bandwidth between GL2 and the Efficiency Arbiter.
 gl2.ea_hbm_bw_wr:
   name: GL2-EA HBM Bandwidth - Write
   formula: 32 * SUM(GL2C_EA_WRREQ_DRAM_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
-  description: Total GL2 to Efficiency Arbiter write bandwidth.
+  description: Total HBM write bandwidth between GL2 and the Efficiency Arbiter.
 gl2.ea_host_cpu_bw_atomic:
   name: GL2-EA Host CPU Bandwidth - Atomic
   formula: 32 * SUM(GL2C_EA_ATOMIC_CPU_sum) / SUM(End_Timestamp - Start_Timestamp)

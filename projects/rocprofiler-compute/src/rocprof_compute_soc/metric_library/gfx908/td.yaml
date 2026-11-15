@@ -5,7 +5,7 @@ td.atomic_insts:
   description: >-
     The number of atomic instructions submitted to the data-return unit by the address
     processor summed over all compute units on the accelerator, per normalization
-    unit. This is expected to be the sum of global/generic and spill/stack atomics
+    unit. This is expected to be the sum of global/generic and buffer atomics
     in the address processor.
 td.busy:
   name: Data-Return Busy
@@ -28,7 +28,7 @@ td.rd_insts:
   description: >-
     The number of read instructions submitted to the data-return unit by the address
     processor summed over all compute units on the accelerator, per normalization
-    unit. This is expected to be the sum of global/generic and spill/stack reads in
+    unit. This is expected to be the sum of global/generic and buffer reads in
     the address processor.
 td.tc_stall:
   name: Cache RAM -> Data-Return Stall
@@ -44,5 +44,5 @@ td.wr_insts:
   description: >-
     The number of store instructions submitted to the data-return unit by the address
     processor summed over all compute units on the accelerator, per normalization
-    unit. This is expected to be the sum of global/generic and spill/stack stores
+    unit. This is expected to be the sum of global/generic and buffer stores
     in the address processor.
