@@ -120,7 +120,10 @@ DOCS_SECTIONS: Dict[str, Dict[str, Optional[Dict[str, Optional[str]]]]] = {
             "Scalar Data Cache": "WGP Scalar Data Cache",
         },
     },
-    "gfx1201": {"Workgroup Processor (WGP)": WGP_DOCS_SECTIONS},
+    "gfx1201": {
+        "System Speed-of-Light": SOL_DOCS_SECTIONS,
+        "Workgroup Processor (WGP)": WGP_DOCS_SECTIONS,
+    },
     "gfx1250": {
         "System Speed-of-Light": SOL_DOCS_SECTIONS,
         "Workgroup Manager (SPI)": {

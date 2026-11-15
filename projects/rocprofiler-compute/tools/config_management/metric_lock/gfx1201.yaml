@@ -297,11 +297,6 @@ wave.life:
   formula: SUM(SQ_WAVE_CYCLES_sum) / SUM(SQ_WAVES_sum)
   unit: Cycles
   counters: [GRBM_GUI_ACTIVE, SQ_WAVES, SQ_WAVES_sum, SQ_WAVE_CYCLES_sum]
-wave.occupancy:
-  formula: SUM(SQ_WAVE_CYCLES_sum) / SUM(GRBM_GUI_ACTIVE)
-  unit: Wavefronts
-  peak: $max_waves_per_cu * $cu_per_gpu
-  counters: [GRBM_GUI_ACTIVE, SQ_WAVES, SQ_WAVE_CYCLES_sum]
 wave.occupancy_pct:
   formula: 100 * SUM(SQ_WAVE_CYCLES_sum) / SUM(GRBM_GUI_ACTIVE * $cu_per_gpu * $max_waves_per_cu)
   unit: Percent
