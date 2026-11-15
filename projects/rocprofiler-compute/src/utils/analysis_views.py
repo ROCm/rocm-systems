@@ -87,7 +87,7 @@ def views_to_panel_configs(
     metrics: Dict[str, Dict[str, Any]],
     collectables: Dict[str, str],
 ) -> "OrderedDict[int, Dict[str, Any]]":
-    """Return the panel configs of an arch's views, as load_panel_configs() does.
+    """Return the panel configs of an arch's views.
 
     Args:
         views: The arch's views (load_views()).

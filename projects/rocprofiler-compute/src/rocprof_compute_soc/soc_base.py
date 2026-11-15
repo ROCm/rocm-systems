@@ -50,7 +50,6 @@ from utils.utils_common import (
     is_only_pc_sampling,
     is_tcc_channel_counter,
     iter_view_rows,
-    load_panel_configs,
     load_views,
     numbered_view_tables,
     parse_sets_yaml,
@@ -610,17 +609,6 @@ def _table_expressions(table: Dict[str, Any]) -> List[str]:
         for metric in (table["metric"] or {}).values()
         for expression in metric_expressions(table, metric)
     ]
-
-
-def iter_analysis_config_metrics(
-    config_root: Path, exclude_file_ids: Set[str]
-) -> Iterator[PanelConfigMetric]:
-    """Iterate the metrics of the analysis config files in config_root, skipping files
-    whose id (e.g. "3000") is in exclude_file_ids."""
-    yield from iter_panel_config_metrics(
-        load_panel_configs([str(config_root)]),
-        {int(file_id) for file_id in exclude_file_ids},
-    )
 
 
 def iter_panel_config_metrics(

@@ -8,6 +8,9 @@ Checks:
   1. Every metric ID maps to the correct metric name in the analysis views.
   2. Each set's counters fit within a single profiling pass (per-block limits
      from perfmon_config in mi_gpu_spec.yaml).
+  3. Each metric library set has the title of its set here and the metrics of
+     the view rows its metric IDs select, so the two copies of the sets agree
+     until --set reads the library's.
 
 Metric ID format X.Y.Z:
   X = panel_config_id // 100
@@ -18,7 +21,7 @@ Metric ID format X.Y.Z:
 import sys
 from collections import defaultdict
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 import yaml
 
@@ -28,9 +31,15 @@ GPU_SPEC_PATH = PROJECT_ROOT / "src" / "utils" / "mi_gpu_spec.yaml"
 
 # Make src/ importable so we can reuse the canonical counter definitions.
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
+from rocprof_compute_soc.metric_library import loader
 from rocprof_compute_soc.metric_library.loader import Collectables
 from utils.analysis_views import arch_panel_configs
-from utils.utils_common import metric_tables_by_id
+from utils.utils_common import (
+    iter_view_rows,
+    load_views,
+    metric_tables_by_id,
+    row_metric_ids,
+)
 from utils.utils_counter_defs import (
     counter_to_block,
     extract_counters_and_variables,
@@ -66,6 +75,31 @@ def load_view_tables(arch: str) -> Dict[int, Dict[str, Any]]:
         for table_id, table in metric_tables_by_id(arch_panel_configs(arch)).items()
         if table.get("metric")
     }
+
+
+def library_set_errors(arch: str, sets: List[Dict[str, Any]]) -> List[str]:
+    """Report each metric library set of arch that lacks the title of its set in
+    sets, or the metrics of the view rows its metric IDs select (check 3)."""
+    rows = dict(iter_view_rows(load_views(arch)))
+    numeric_sets = {
+        entry["set_option"]: {
+            "title": entry["title"],
+            "metrics": [
+                metric_id
+                for item in entry["metric"]
+                for position in item
+                if str(position) in rows
+                for metric_id in row_metric_ids(rows[str(position)])
+            ],
+        }
+        for entry in sets
+    }
+    library = loader.MetricLibrary.load(loader.default_metric_library_dir(), arch)
+    return [
+        f"[{arch}] metric library set '{set_option}' is not the set here"
+        for set_option in sorted(set(numeric_sets) | set(library.sets))
+        if numeric_sets.get(set_option) != library.sets.get(set_option)
+    ]
 
 
 def load_perfmon_configs() -> dict[str, dict[str, int]]:
@@ -119,6 +153,7 @@ def validate() -> list[str]:
         sets_data = yaml.safe_load(sets_path.read_text())
         analysis = load_view_tables(arch)
         target_arches = shared_arch_expansions.get(arch, [arch])
+        errors.extend(library_set_errors(arch, sets_data.get("sets", [])))
 
         for s in sets_data.get("sets", []):
             set_option = s.get("set_option", "<unknown>")
