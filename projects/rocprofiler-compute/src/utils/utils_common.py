@@ -859,17 +859,34 @@ def load_yaml(filepath: Union[str, os.PathLike]) -> Dict[str, Any]:
         return yaml.safe_load(f)
 
 
+def config_template_path_for_arch(
+    arch: str, configs_dir: Optional[Path] = None
+) -> Optional[Path]:
+    """Return the config template whose filename prefix matches arch.
+
+    Returns None when no template prefix matches.
+    """
+    directory = configs_dir if configs_dir is not None else config.analysis_configs_dir
+    for template_path in sorted(directory.glob("*_config_template.yaml")):
+        match = re.match(r"(gfx\d+)_config_template\.yaml$", template_path.name)
+        if match and arch.startswith(match.group(1)):
+            return template_path
+    return None
+
+
 def get_arch_panel_id_to_alias(arch: str) -> Dict[str, str]:
-    """Return panel_id_str -> alias from the *_config_template.yaml whose
-    filename prefix matches arch. Empty/None aliases stay as "".
-    Returns {} when no template matches the arch."""
-    for path in sorted(config.analysis_configs_dir.glob("*_config_template.yaml")):
-        m = re.match(r"(gfx\d+)_config_template\.yaml$", path.name)
-        if m and arch.startswith(m.group(1)):
-            panel_yaml = load_yaml(path) or {}
-            panels = panel_yaml.get("panels") or []
-            return {str(p["panel_id"]): (p.get("panel_alias") or "") for p in panels}
-    return {}
+    """Return panel_id_str -> alias from the config template for arch.
+
+    Empty or missing aliases stay as "". Returns {} when no template matches.
+    """
+    template_path = config_template_path_for_arch(arch)
+    if template_path is None:
+        return {}
+    panel_yaml = load_yaml(template_path) or {}
+    panels = panel_yaml.get("panels") or []
+    return {
+        str(panel["panel_id"]): (panel.get("panel_alias") or "") for panel in panels
+    }
 
 
 def get_arch_alias_to_panel_id(arch: str) -> Dict[str, str]:
