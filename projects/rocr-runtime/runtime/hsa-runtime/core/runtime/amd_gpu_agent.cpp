@@ -1851,6 +1851,12 @@ hsa_status_t GpuAgent::DmaCopyFanOutOp(
       }
     }
 
+    // Bodies wait on prologue_signal: submit the prologue first so no queue waits on a later one.
+    if (need_prologue) {
+      stat = coordinator->SubmitPrologue(dep_signals, out_signal, *prologue_signal, fused);
+      if (stat != HSA_STATUS_SUCCESS) return stat;
+    }
+
     // Submit non-coordinator engine bodies first (they start working while
     // the coordinator's epilogue poll waits for them).
     for (const auto& grp : engine_groups) {
@@ -1867,7 +1873,7 @@ hsa_status_t GpuAgent::DmaCopyFanOutOp(
       if (stat != HSA_STATUS_SUCCESS) return stat;
     }
 
-    // Coordinator: prologue + coord bodies + epilogue in one doorbell.
+    // Coordinator: coord bodies + epilogue in one doorbell.
     LogPrint(HSA_AMD_LOG_FLAG_SDMA,
              "SDMA FanOut(%s) Coordinator: engine %02u, coord_entries=%zu, "
              "other_groups=%zu, completion_signal=0x%zx, prologue_signal=%p",
@@ -1877,7 +1883,7 @@ hsa_status_t GpuAgent::DmaCopyFanOutOp(
              prologue_signal ? prologue_signal.get() : nullptr);
     stat = coordinator->SubmitFusedCoordinator(
         dep_signals, out_signal,
-        prologue_signal.get(),
+        nullptr,
         op, coord_dsts, coord_srcs, coord_sizes_a, coord_sizes_b,
         ind_src, ind_dst, body_deps);
     if (stat != HSA_STATUS_SUCCESS) return stat;
