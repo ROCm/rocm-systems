@@ -34,7 +34,7 @@ class Bench_gfx9(benchmark_base.Bench_base):
         }
 
         self.tests = {
-            "HBM": super().hbm_bw_benchmark,
+            "HBM": super().device_memory_bw_benchmark,
             "MALL": super().mall_bw_bench,
             "L2": super().l2_bw_bench,
             "L1": super().l1_bw_bench,
@@ -74,7 +74,7 @@ class Bench_gfx9(benchmark_base.Bench_base):
         # class set_kernel_source()
 
         # HBM Bandwidth benchmark — read-only with non-temporal loads
-        self.hbm_bw_src = """
+        self.device_memory_bw_src = """
         extern "C" __global__ void HBM_bw(__uint128_t *src, long numSteps)
         {
             unsigned long offset = (unsigned long)blockIdx.x * blockDim.x

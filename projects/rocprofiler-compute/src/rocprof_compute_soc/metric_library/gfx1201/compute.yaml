@@ -108,6 +108,14 @@ compute.lds_parameter_load_insts:
   description: >-
     Number of LDS parameter load instructions. These load shader input parameters
     that have been staged in LDS for efficient access by the wavefront.
+compute.total_flops:
+  name: Performance (GFLOPs)
+  formula: SUM($wave_size * (SQ_INSTS_VALU_sum - SQ_WMMA_VALU_INSTS_sum) + 8192 * SQ_WMMA_VALU_INSTS_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1e9) / 1e9
+  unit: GFLOP/s
+  description: >-
+    Achieved VALU plus WMMA throughput of floating-point operations per second. The
+    FLOP count is the VALU FLOPs excluding the WMMA instructions already counted in
+    SQ_INSTS_VALU, plus the WMMA FLOPs at 8192 per instruction.
 compute.total_insts:
   name: Total Instructions
   formula: SUM(SQ_INSTS_ALL_sum) / SUM($denom)
@@ -116,6 +124,26 @@ compute.total_insts:
     Total number of instructions executed across all wavefronts. This provides an
     overall measure of computational work. Compare with specific instruction types
     to understand the workload characteristics.
+compute.valu_flops:
+  name: VALU FLOPs
+  formula: SUM($wave_size * (SQ_INSTS_VALU_sum - SQ_WMMA_VALU_INSTS_sum)) / SUM(End_Timestamp - Start_Timestamp)
+  unit: GFLOP/s
+  description: >-
+    VALU issues per second, excluding WMMA, at one FLOP per lane. gfx120x compute is
+    wave32 by default, so that is 32 per instruction. SQ_INSTS_VALU counts every
+    VALU issue, including integer, move, and convert, and an FMA counts as one issue
+    while the FP32 roof counts it as two FLOPs. A pure FMA kernel therefore reads
+    low. A tiled FP32 GEMM also issues address arithmetic, so this metric can read
+    about twice the true FLOP count. SQ_WMMA_VALU_INSTS is per vec32, the same unit
+    as SQ_INSTS_VALU for gfx120x compute.
+  peak_empirical: $FP32Flops_empirical_peak
+compute.valu_flops_f64:
+  name: VALU FLOPs (F64)
+  formula: SUM($wave_size * SQ_INSTS_VALU_DP_sum) / SUM(End_Timestamp - Start_Timestamp)
+  unit: GFLOP/s
+  description: >-
+    64-bit floating-point operations per second on the VALU.
+  peak_empirical: $FP64Flops_empirical_peak
 compute.valu_inst_cycles:
   name: VALU Instruction Cycles
   formula: SUM(SQ_INST_CYCLES_VALU_sum)
@@ -151,6 +179,7 @@ compute.wmma_flops_f16_16x16x16:
   description: >-
     Achieved FP16 WMMA throughput.
   peak: '$max_sclk * $cu_per_gpu * 1024 / 1000'
+  peak_empirical: $WMMAF16Flops_empirical_peak
 compute.wmma_inst_cycles:
   name: WMMA Instruction Cycles
   formula: SUM(SQ_INST_CYCLES_VALU_WMMA_sum)

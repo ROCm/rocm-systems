@@ -1,3 +1,21 @@
+gl0.ai:
+  name: GL0 Arithmetic Intensity
+  formula: SUM($wave_size * (SQ_INSTS_VALU_sum - SQ_WMMA_VALU_INSTS_sum) + 8192 * SQ_WMMA_VALU_INSTS_sum) / (128 * SUM(TCP_REQ_sum))
+  unit: FLOPs/Byte
+  description: >-
+    Arithmetic intensity relative to GL0 (TCP) requests, at 128 bytes per TCP_REQ as
+    an upper bound on GL0 bytes. The FLOP numerator is the VALU FLOPs excluding the
+    WMMA instructions already counted in SQ_INSTS_VALU, plus the WMMA FLOPs at 8192
+    per instruction.
+gl0.bw:
+  name: GL0 Cache Bandwidth
+  formula: 128 * SUM(TCP_REQ_sum) / SUM(End_Timestamp - Start_Timestamp)
+  unit: GB/s
+  description: >-
+    Achieved bandwidth at the GL0 vector cache (TCP Cache). Counts 128 bytes per
+    TCP_REQ cache-line request, an interim upper bound until the TCP_SECTORS counter
+    is defined.
+  peak_empirical: $L0Bw_empirical_peak
 gl0.hit_rate:
   name: GL0 Hit Rate
   formula: 100 * SUM(TCP_REQ_sum - TCP_REQ_MISS_sum) / SUM(TCP_REQ_sum)

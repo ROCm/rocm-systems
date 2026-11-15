@@ -52,6 +52,17 @@ panels:
   - type: metric_table
     id: 10
     title: Workgroup Processors (WGPs)
+- file: roofline.yaml
+  panel_id: 4
+  panel_title: Roofline
+  panel_alias: roof
+  data_sources:
+  - type: metric_table
+    id: 1
+    title: Roofline Performance Rates
+  - type: metric_table
+    id: 2
+    title: Roofline Plot Points
 - file: workgroup_manager_spi.yaml
   panel_id: 6
   panel_title: Workgroup Manager (SPI)

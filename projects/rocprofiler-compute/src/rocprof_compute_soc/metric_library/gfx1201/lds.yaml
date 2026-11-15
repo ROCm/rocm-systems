@@ -1,3 +1,11 @@
+lds.ai:
+  name: LDS Arithmetic Intensity
+  formula: SUM($wave_size * (SQ_INSTS_VALU_sum - SQ_WMMA_VALU_INSTS_sum) + 8192 * SQ_WMMA_VALU_INSTS_sum) / SUM((SQC_LDS_IDX_ACTIVE_sum - SQC_LDS_BANK_CONFLICT_sum) * 4 * $lds_banks_per_cu)
+  unit: FLOPs/Byte
+  description: >-
+    Arithmetic intensity relative to Local Data Share traffic. The FLOP numerator is
+    the VALU FLOPs excluding the WMMA instructions already counted in SQ_INSTS_VALU,
+    plus the WMMA FLOPs at 8192 per instruction.
 lds.bank_conflict_rate:
   name: LDS Bank Conflict Rate
   formula: 100 * SUM(SQC_LDS_BANK_CONFLICT_sum) / SUM(SQC_LDS_IDX_ACTIVE_sum)
@@ -20,6 +28,13 @@ lds.bw:
   description: >-
     LDS byte-access rate from load, store, and atomic dword counters, using four
     bytes per dword.
+lds.theoretical_bw:
+  name: Theoretical LDS Bandwidth
+  formula: SUM((SQC_LDS_IDX_ACTIVE_sum - SQC_LDS_BANK_CONFLICT_sum) * 4 * $lds_banks_per_cu) / SUM(End_Timestamp - Start_Timestamp)
+  unit: GB/s
+  description: >-
+    Achieved bandwidth for Local Data Share memory operations.
+  peak_empirical: $LDSBw_empirical_peak
 lds.util:
   name: LDS Utilization
   formula: 100 * SUM(SQC_LDS_IDX_ACTIVE_sum) / (SUM(GRBM_GUI_ACTIVE) * $cu_per_gpu)
