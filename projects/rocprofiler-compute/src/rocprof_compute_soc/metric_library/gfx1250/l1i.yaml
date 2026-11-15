@@ -14,15 +14,15 @@ l1i.hit_rate_excl_dup:
   formula: 100 * SUM(SQC_ICACHE_HITS_sum) / SUM(SQC_ICACHE_HITS_sum + SQC_ICACHE_MISSES_sum)
   unit: Percent
   description: >-
-    The percent of L1I requests that hit on a previously loaded line in the cache.
-    Calculated as the ratio of the number of L1I requests that hit over the number of all
-    L1I requests.
+    Percentage of L1I requests that hit on a previously loaded line in the cache.
+    Calculated as the number of L1I hits over the number of hits and misses, excluding
+    duplicate misses.
   peak: 100
 l1i.hits_per_req:
   name: L1I Hits per Request
   formula: 100 * SUM(SQC_ICACHE_HITS_sum) / SUM(SQC_ICACHE_REQ_sum)
   unit: Percent
-  description: Instruction Cache hit rate.
+  description: Percentage of Instruction Cache requests that hit in the cache.
 l1i.icache_gl1_req_lat:
   name: ICache-GL1 Request Latency
   formula: SUM(SQC_ICACHE_TC_INFLIGHT_LEVEL_ACCUM) / SUM(SQC_TC_INST_REQ_sum)
@@ -49,4 +49,4 @@ l1i.req:
   name: L1I Requests
   formula: SUM(SQC_ICACHE_REQ_sum) / SUM($denom)
   unit: (Requests + $normUnit)
-  description: Total Instruction Cache fetch requests.
+  description: Total Instruction Cache fetch requests, per normalization unit.

@@ -11,9 +11,9 @@ l1i.hit_rate_excl_dup:
   formula: 100 * SUM(SQC_ICACHE_HITS_sum) / SUM(SQC_ICACHE_HITS_sum + SQC_ICACHE_MISSES_sum)
   unit: Percent
   description: >-
-    The percent of L1I requests that hit on a previously loaded line in the cache.
-    Calculated as the ratio of the number of L1I requests that hit over the number of all
-    L1I requests.
+    Percentage of L1I requests that hit on a previously loaded line in the cache.
+    Calculated as the number of L1I hits over the number of hits and misses, excluding
+    duplicate misses.
   peak: 100
 l1i.req:
   name: L1I Requests

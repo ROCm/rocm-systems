@@ -9,143 +9,159 @@ compute.insts_async_load:
   formula: SUM(SQ_INSTS_ASYNC_LOAD_sum) / SUM($denom)
   unit: (Count + $normUnit)
   description: >-
-    Number of asynchronous memory load instructions (TDM async loads) issued.
+    Number of asynchronous memory load instructions (TDM async loads) issued, per
+    normalization unit.
 compute.insts_async_store:
   name: Instructions - Async Store
   formula: SUM(SQ_INSTS_ASYNC_STORE_sum) / SUM($denom)
   unit: (Count + $normUnit)
   description: >-
-    Number of asynchronous memory store instructions (TDM async stores) issued.
+    Number of asynchronous memory store instructions (TDM async stores) issued, per
+    normalization unit.
 compute.insts_buffer_load:
   name: Instructions - Buffer Load
   formula: SUM(SQ_INSTS_BUFFER_LOAD_sum) / SUM($denom)
   unit: (Count + $normUnit)
-  description: Number of buffer load instructions issued.
+  description: Number of buffer load instructions issued, per normalization unit.
 compute.insts_buffer_store:
   name: Instructions - Buffer Store
   formula: SUM(SQ_INSTS_BUFFER_STORE_sum) / SUM($denom)
   unit: (Count + $normUnit)
-  description: Number of buffer store instructions issued.
+  description: Number of buffer store instructions issued, per normalization unit.
 compute.insts_double_precision:
   name: Instructions - Double Precision
   formula: SUM(SQ_INSTS_VALU_DP_sum) / SUM($denom)
   unit: (Count + $normUnit)
-  description: Number of double-precision VALU instructions issued.
+  description: >-
+    Number of double-precision VALU instructions issued, per normalization unit.
 compute.insts_flat_load:
   name: Instructions - Flat Load
   formula: SUM(SQ_INSTS_FLAT_LOAD_sum) / SUM($denom)
   unit: (Count + $normUnit)
-  description: Number of flat-addressed load instructions issued.
+  description: >-
+    Number of flat-addressed load instructions issued, per normalization unit.
 compute.insts_flat_store:
   name: Instructions - Flat Store
   formula: SUM(SQ_INSTS_FLAT_STORE_sum) / SUM($denom)
   unit: (Count + $normUnit)
-  description: Number of flat-addressed store instructions issued.
+  description: >-
+    Number of flat-addressed store instructions issued, per normalization unit.
 compute.insts_global_scratch:
   name: Instructions - Global Scratch
   formula: SUM(SQ_INSTS_VEC32_GLOBAL_SCRATCH_sum) / SUM($denom)
   unit: (Count + $normUnit)
-  description: Number of global/scratch VMEM instructions issued.
+  description: >-
+    Number of global/scratch VMEM instructions issued, per normalization unit.
 compute.insts_global_scratch_atomics:
   name: Instructions - Global Scratch Atomics
   formula: SUM(SQ_INSTS_VEC32_GLOBAL_SCRATCH_ATOMIC_sum) / SUM($denom)
   unit: (Count + $normUnit)
-  description: Number of global/scratch atomic instructions issued.
+  description: >-
+    Number of global/scratch atomic instructions issued, per normalization unit.
 compute.insts_global_scratch_load:
   name: Instructions - Global Scratch Load
   formula: SUM(SQ_INSTS_VEC32_GLOBAL_SCRATCH_LOAD_sum) / SUM($denom)
   unit: (Count + $normUnit)
-  description: Number of global/scratch load instructions issued.
+  description: >-
+    Number of global/scratch load instructions issued, per normalization unit.
 compute.insts_global_scratch_store:
   name: Instructions - Global Scratch Store
   formula: SUM(SQ_INSTS_VEC32_GLOBAL_SCRATCH_STORE_sum) / SUM($denom)
   unit: (Count + $normUnit)
-  description: Number of global/scratch store instructions issued.
+  description: >-
+    Number of global/scratch store instructions issued, per normalization unit.
 compute.insts_internal:
   name: Instructions - Internal
   formula: SUM(SQ_INSTS_INTERNAL_sum) / SUM($denom)
   unit: (Count + $normUnit)
-  description: Number of internal (non-user-visible) instructions issued.
+  description: >-
+    Number of internal (non-user-visible) instructions issued, per normalization unit.
 compute.insts_lds:
   name: Instructions - LDS
   formula: SUM(SQ_INSTS_LDS_sum) / SUM($denom)
   unit: (Count + $normUnit)
-  description: Number of LDS instructions issued.
+  description: Number of LDS instructions issued, per normalization unit.
 compute.insts_lds_atomic_non_return:
   name: Instructions - LDS Atomic Non-Return
   formula: SUM(SQ_INSTS_VEC32_LDS_ATOMIC_NORTN_sum) / SUM($denom)
   unit: (Count + $normUnit)
-  description: Number of non-returning LDS atomic instructions issued.
+  description: >-
+    Number of non-returning LDS atomic instructions issued, per normalization unit.
 compute.insts_lds_atomic_return:
   name: Instructions - LDS Atomic Return
   formula: SUM(SQ_INSTS_VEC32_LDS_ATOMIC_RTN_sum) / SUM($denom)
   unit: (Count + $normUnit)
-  description: Number of returning LDS atomic instructions issued.
+  description: >-
+    Number of returning LDS atomic instructions issued, per normalization unit.
 compute.insts_lds_load:
   name: Instructions - LDS Load
   formula: SUM(SQ_INSTS_VEC32_LDS_LOAD_sum) / SUM($denom)
   unit: (Count + $normUnit)
-  description: Number of LDS load instructions issued.
+  description: Number of LDS load instructions issued, per normalization unit.
 compute.insts_lds_other:
   name: Instructions - LDS Other
   formula: SUM(SQ_INSTS_VEC32_LDS_OTHER_sum) / SUM($denom)
   unit: (Count + $normUnit)
-  description: Number of miscellaneous LDS operations issued.
+  description: Number of miscellaneous LDS operations issued, per normalization unit.
 compute.insts_lds_store:
   name: Instructions - LDS Store
   formula: SUM(SQ_INSTS_VEC32_LDS_STORE_sum) / SUM($denom)
   unit: (Count + $normUnit)
-  description: Number of LDS store instructions issued.
+  description: Number of LDS store instructions issued, per normalization unit.
 compute.insts_multicast_load:
   name: Instructions - Multicast Load
   formula: SUM(SQ_INSTS_MULTICAST_LOAD_sum) / SUM($denom)
   unit: (Count + $normUnit)
-  description: Number of multicast load instructions issued.
+  description: Number of multicast load instructions issued, per normalization unit.
 compute.insts_salu:
   name: Instructions - SALU
   formula: SUM(SQ_INSTS_SALU_sum) / SUM($denom)
   unit: (Count + $normUnit)
-  description: Number of SALU instructions issued.
+  description: Number of SALU instructions issued, per normalization unit.
 compute.insts_smem:
   name: Instructions - SMEM
   formula: SUM(SQ_INSTS_SMEM_sum) / SUM($denom)
   unit: (Count + $normUnit)
-  description: Number of scalar memory instructions issued.
+  description: Number of scalar memory instructions issued, per normalization unit.
 compute.insts_tdm:
   name: Instructions - TDM
   formula: SUM(SQ_INSTS_TDM_sum) / SUM($denom)
   unit: (Count + $normUnit)
-  description: Number of Tensor Data Mover instructions issued.
+  description: Number of Tensor Data Mover instructions issued, per normalization unit.
 compute.insts_transcendental:
   name: Instructions - Transcendental
   formula: SUM(SQ_INSTS_VALU_TRANS_sum) / SUM($denom)
   unit: (Count + $normUnit)
-  description: Number of transcendental VALU instructions issued.
+  description: >-
+    Number of transcendental VALU instructions issued, per normalization unit.
 compute.insts_valu:
   name: Instructions - VALU
   formula: SUM(SQ_INSTS_VALU_sum) / SUM($denom)
   unit: (Count + $normUnit)
-  description: Number of VALU instructions issued.
+  description: Number of VALU instructions issued, per normalization unit.
 compute.insts_vmem:
   name: Instructions - VMEM
   formula: SUM(SQ_INSTS_TEX_sum) / SUM($denom)
   unit: (Count + $normUnit)
-  description: Number of VMEM instructions issued.
+  description: Number of VMEM instructions issued, per normalization unit.
 compute.insts_vmem_atomic_non_return:
   name: Instructions - VMEM Atomic Non-Return
   formula: SUM(SQ_INSTS_TEX_ATOMIC_NORTN_sum) / SUM($denom)
   unit: (Count + $normUnit)
-  description: Number of non-returning VMEM atomic instructions issued.
+  description: >-
+    Number of non-returning VMEM atomic instructions issued, per normalization unit.
 compute.insts_vmem_atomic_return:
   name: Instructions - VMEM Atomic Return
   formula: SUM(SQ_INSTS_TEX_ATOMIC_RTN_sum) / SUM($denom)
   unit: (Count + $normUnit)
-  description: Number of returning VMEM atomic instructions issued.
+  description: >-
+    Number of returning VMEM atomic instructions issued, per normalization unit.
 compute.insts_vmem_flat:
   name: Instructions - VMEM Flat
   formula: SUM(SQ_INSTS_FLAT_sum) / SUM($denom)
   unit: (Count + $normUnit)
-  description: Number of flat-addressed VMEM instructions issued.
+  description: >-
+    Number of flat-addressed VMEM instructions issued, per normalization unit.
 compute.ipc:
   name: IPC
   formula: SUM(SQ_INSTS_ALL_sum - SQ_INSTS_INTERNAL_sum) / SUM(SQ_BUSY_CYCLES_sum)
@@ -191,12 +207,12 @@ compute.total_insts:
   name: Total Instructions
   formula: SUM(SQ_INSTS_ALL_sum) / SUM($denom)
   unit: (Count + $normUnit)
-  description: Total instructions issued.
+  description: Total instructions issued, per normalization unit.
 compute.total_lds_insts:
   name: Total LDS Instructions
   formula: SUM(SQ_INSTS_VEC32_LDS_sum) / SUM($denom)
   unit: (Count + $normUnit)
-  description: Total LDS instructions issued.
+  description: Total LDS instructions issued, per normalization unit.
 compute.valu_flops_fp16:
   name: VALU FLOPs (FP16)
   formula: SUM(SP_VALU_FLOPS_FP16_sum) / SUM(End_Timestamp - Start_Timestamp)
@@ -219,63 +235,66 @@ compute.valu_fp_operations_fp16:
   name: VALU FP Operations - FP16
   formula: SUM(SP_VALU_FLOPS_FP16_sum) / SUM($denom)
   unit: (Count + $normUnit)
-  description: Total FP16 operations executed by VALU.
+  description: Total FP16 operations executed by VALU, per normalization unit.
 compute.valu_fp_operations_fp16_trans:
   name: VALU FP Operations - FP16 Trans
   formula: SUM(SP_VALU_FLOPS_FP16_TRANS_sum) / SUM($denom)
   unit: (Count + $normUnit)
-  description: Total FP16 transcendental operations executed by VALU.
+  description: >-
+    Total FP16 transcendental operations executed by VALU, per normalization unit.
 compute.valu_fp_operations_fp32:
   name: VALU FP Operations - FP32
   formula: SUM(SP_VALU_FLOPS_FP32_sum) / SUM($denom)
   unit: (Count + $normUnit)
-  description: Total FP32 operations executed by VALU.
+  description: Total FP32 operations executed by VALU, per normalization unit.
 compute.valu_fp_operations_fp32_trans:
   name: VALU FP Operations - FP32 Trans
   formula: SUM(SP_VALU_FLOPS_FP32_TRANS_sum) / SUM($denom)
   unit: (Count + $normUnit)
-  description: Total FP32 transcendental operations executed by VALU.
+  description: >-
+    Total FP32 transcendental operations executed by VALU, per normalization unit.
 compute.valu_fp_operations_fp64:
   name: VALU FP Operations - FP64
   formula: SUM(SP_VALU_FLOPS_FP64_sum) / SUM($denom)
   unit: (Count + $normUnit)
-  description: Total FP64 operations executed by VALU.
+  description: Total FP64 operations executed by VALU, per normalization unit.
 compute.valu_fp_operations_fp64_trans:
   name: VALU FP Operations - FP64 Trans
   formula: SUM(SP_VALU_FLOPS_FP64_TRANS_sum) / SUM($denom)
   unit: (Count + $normUnit)
-  description: Total FP64 transcendental operations executed by VALU.
+  description: >-
+    Total FP64 transcendental operations executed by VALU, per normalization unit.
 compute.valu_insts_cmacc:
   name: VALU Instructions - CMACC
   formula: SUM(SQ_INSTS_VALU_CMACC_sum) / SUM($denom)
   unit: (Count + $normUnit)
   description: >-
     Number of instructions issued that execute on the CMACC (core multiply-accumulate)
-    pipeline.
+    pipeline, per normalization unit.
 compute.valu_insts_smacc:
   name: VALU Instructions - SMACC
   formula: SUM(SQ_INSTS_VALU_SMACC_sum) / SUM($denom)
   unit: (Count + $normUnit)
   description: >-
-    Number of instructions issued that execute on the SMACC (side multiply-accumulate
-    / transcendental) pipeline.
+    Number of instructions issued that execute on the SMACC (side multiply-accumulate /
+    transcendental) pipeline, per normalization unit.
 compute.valu_insts_wmma:
   name: VALU Instructions - WMMA
   formula: SUM(SQ_INSTS_VEC32_VALU_WMMA_sum) / SUM($denom)
   unit: (Count + $normUnit)
-  description: Number of WMMA instructions issued.
+  description: Number of WMMA instructions issued, per normalization unit.
 compute.valu_insts_xdl:
   name: VALU Instructions - XDL
   formula: SUM(SQ_INSTS_VALU_XDLMACC_sum) / SUM($denom)
   unit: (Count + $normUnit)
   description: >-
-    Number of instructions issued that execute on the XDL (eXtreme Deep Learning /
-    WMMA) pipeline.
+    Number of instructions issued that execute on the XDL (eXtreme Deep Learning / WMMA)
+    pipeline, per normalization unit.
 compute.valu_integer_operations:
   name: VALU Integer Operations
   formula: SUM(SP_VALU_IOPS_sum) / SUM($denom)
   unit: (Count + $normUnit)
-  description: Total integer operations executed by VALU.
+  description: Total integer operations executed by VALU, per normalization unit.
 compute.valu_iops:
   name: VALU IOPs
   formula: SUM(SP_VALU_IOPS_sum) / SUM(End_Timestamp - Start_Timestamp)
@@ -368,52 +387,52 @@ compute.wmma_fp_operations_bf16:
   name: WMMA FP Operations - BF16
   formula: SUM(SQ_VALU_WMMA_FLOP_BF16_sum) / SUM($denom)
   unit: (Count + $normUnit)
-  description: Total BF16 WMMA instruction dispatches.
+  description: Total BF16 WMMA instruction dispatches, per normalization unit.
 compute.wmma_fp_operations_fp16:
   name: WMMA FP Operations - FP16
   formula: SUM(SQ_VALU_WMMA_FLOP_FP16_sum) / SUM($denom)
   unit: (Count + $normUnit)
-  description: Total FP16 WMMA instruction dispatches.
+  description: Total FP16 WMMA instruction dispatches, per normalization unit.
 compute.wmma_fp_operations_fp32:
   name: WMMA FP Operations - FP32
   formula: SUM(SQ_VALU_WMMA_FLOP_FP32_sum) / SUM($denom)
   unit: (Count + $normUnit)
-  description: Total FP32 WMMA instruction dispatches.
+  description: Total FP32 WMMA instruction dispatches, per normalization unit.
 compute.wmma_fp_operations_fp4:
   name: WMMA FP Operations - FP4
   formula: SUM(SQ_VALU_WMMA_FLOP_FP4_sum) / SUM($denom)
   unit: (Count + $normUnit)
-  description: Total FP4 WMMA instruction dispatches.
+  description: Total FP4 WMMA instruction dispatches, per normalization unit.
 compute.wmma_fp_operations_fp6:
   name: WMMA FP Operations - FP6
   formula: SUM(SQ_VALU_WMMA_FLOP_FP6_sum) / SUM($denom)
   unit: (Count + $normUnit)
-  description: Total FP6 WMMA instruction dispatches.
+  description: Total FP6 WMMA instruction dispatches, per normalization unit.
 compute.wmma_fp_operations_fp64:
   name: WMMA FP Operations - FP64
   formula: SUM(SQ_VALU_WMMA_FLOP_FP64_sum) / SUM($denom)
   unit: (Count + $normUnit)
-  description: Total FP64 WMMA instruction dispatches.
+  description: Total FP64 WMMA instruction dispatches, per normalization unit.
 compute.wmma_fp_operations_fp6fp4:
   name: WMMA FP Operations - FP6FP4
   formula: SUM(SQ_VALU_WMMA_FLOP_F6F4_sum) / SUM($denom)
   unit: (Count + $normUnit)
-  description: Total mixed FP6/FP4 WMMA instruction dispatches.
+  description: Total mixed FP6/FP4 WMMA instruction dispatches, per normalization unit.
 compute.wmma_fp_operations_fp8:
   name: WMMA FP Operations - FP8
   formula: SUM(SQ_VALU_WMMA_FLOP_FP8_sum) / SUM($denom)
   unit: (Count + $normUnit)
-  description: Total FP8 WMMA instruction dispatches.
+  description: Total FP8 WMMA instruction dispatches, per normalization unit.
 compute.wmma_int_operations_int4:
   name: WMMA Int Operations - Int4
   formula: SUM(SQ_VALU_WMMA_FLOP_I4_sum) / SUM($denom)
   unit: (Count + $normUnit)
-  description: Total Int4 WMMA instruction dispatches.
+  description: Total Int4 WMMA instruction dispatches, per normalization unit.
 compute.wmma_int_operations_int8:
   name: WMMA Int Operations - Int8
   formula: SUM(SQ_VALU_WMMA_FLOP_I8_sum) / SUM($denom)
   unit: (Count + $normUnit)
-  description: Total Int8 WMMA instruction dispatches.
+  description: Total Int8 WMMA instruction dispatches, per normalization unit.
 compute.wmma_iops_int4:
   name: WMMA IOPs (Int4)
   formula: 8192 * SUM(SQ_VALU_WMMA_FLOP_I4_sum) / SUM(End_Timestamp - Start_Timestamp)

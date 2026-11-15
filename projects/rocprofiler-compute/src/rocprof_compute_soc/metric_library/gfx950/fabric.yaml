@@ -14,26 +14,26 @@ fabric.ea_hbm_atomic_pressure:
   unit: Percent
   description: >-
     Percentage of HBM-destined write requests that are atomics. High values indicate
-    atomic contention at HBM. Atomics require read-modify-write cycles and typically
-    achieve lower effective bandwidth than pure reads or writes. Consider reducing
-    atomic granularity or using alternative synchronization patterns.
+    atomic contention at HBM, since atomics need read-modify-write cycles and typically
+    achieve lower effective bandwidth than pure reads or writes.
 fabric.ea_io_bw_bound_combined:
   name: EA IO Bandwidth Bound - Combined
   formula: 100 * SUM(TCC_EA0_RDREQ_IO_CREDIT_STALL_sum + TCC_EA0_WRREQ_IO_CREDIT_STALL_sum) / SUM(TCC_BUSY_sum)
   unit: Percent
   description: >-
-    Combined IO (PCIe) read and write credit stall percentage. High values indicate
-    the PCIe path is the bottleneck. Relevant for workloads with significant host-device
-    data transfer during kernel execution.
+    Percentage of L2 busy cycles the L2-Fabric interface was stalled on IO (PCIe) read
+    and write credits. High values indicate the PCIe path is the bottleneck, which
+    matters for workloads with significant host-device data transfer during kernel
+    execution.
 fabric.ea_wr_backpressure:
   name: EA Write Backpressure
   formula: 100 * SUM(TCC_EA0_WRREQ_STALL_sum + TCC_TOO_MANY_EA_WRREQS_STALL_sum) / SUM(TCC_BUSY_sum)
   unit: Percent
   description: >-
-    Combined EA write stall and too-many-writes stall as a percentage of L2 busy time.
-    High values indicate the EA write path is congested, causing L2 to stall on write
-    requests. This can be caused by HBM write bandwidth saturation, write-heavy workloads,
-    or atomic contention.
+    Percentage of L2 busy cycles L2 was stalled on EA writes, counting both EA write
+    stalls and too-many-writes stalls. High values indicate a congested EA write path,
+    caused for example by HBM write bandwidth saturation, write-heavy workloads, or
+    atomic contention.
 fabric.hbm_atomic_bw:
   name: HBM Atomic Bandwidth
   formula: 32 * SUM(TCC_EA0_WRREQ_ATOMIC_DRAM_32B_sum) / SUM(End_Timestamp - Start_Timestamp)
@@ -69,9 +69,9 @@ fabric.memory_bw_bound_combined_credit_pressure:
   formula: 100 * SUM(TCC_EA0_RDREQ_DRAM_CREDIT_STALL_sum + TCC_EA0_WRREQ_DRAM_CREDIT_STALL_sum) / SUM(TCC_BUSY_sum)
   unit: Percent
   description: >-
-    Combined HBM read and write credit stall percentage. This is the primary memory
-    bandwidth bound indicator. High values (>10%) with high memory utilization (>80%)
-    strongly indicate memory bandwidth is the bottleneck.
+    Percentage of L2 busy cycles the L2-Fabric interface was stalled on HBM read and
+    write credits, the primary memory bandwidth bound indicator. High values (>10%) with
+    high memory utilization (>80%) strongly indicate memory bandwidth is the bottleneck.
 fabric.pcie_atomic_bw:
   name: PCIe Atomic Bandwidth
   formula: 32 * SUM(TCC_EA0_WRREQ_ATOMIC_IO_32B_sum) / SUM(End_Timestamp - Start_Timestamp)
@@ -109,75 +109,72 @@ fabric.rd_hbm_stall:
   formula: 100 * SUM(TCC_EA0_RDREQ_DRAM_CREDIT_STALL_sum) / SUM(TCC_BUSY_sum)
   unit: Percent
   description: >-
-    The number of cycles the L2-Fabric interface was stalled on read requests to the
-    accelerator's local HBM due to HBM credit exhaustion, as a percent of the total active
-    L2 cycles. High values (>10%) combined with high memory utilization indicate that the
-    kernel is bound by memory read bandwidth.
+    Percentage of active L2 cycles the L2-Fabric interface was stalled on read requests
+    to the accelerator's local HBM due to HBM credit exhaustion. High values (>10%)
+    combined with high memory utilization indicate that the kernel is bound by memory
+    read bandwidth.
 fabric.rd_infinity_fabric_stall:
   name: L2-Fabric Read Stall (Infinity Fabric)
   formula: 100 * SUM(TCC_EA0_RDREQ_GMI_CREDIT_STALL_sum) / SUM(TCC_BUSY_sum)
   unit: Percent
   description: >-
-    The number of cycles the L2-Fabric interface was stalled on read requests to remote
-    Infinity Fabric connected accelerators or CPUs as a percent of the total active
-    L2 cycles.
+    Percentage of active L2 cycles the L2-Fabric interface was stalled on read requests
+    to remote Infinity Fabric connected accelerators or CPUs.
 fabric.rd_pcie_stall:
   name: L2-Fabric Read Stall (PCIe)
   formula: 100 * SUM(TCC_EA0_RDREQ_IO_CREDIT_STALL_sum) / SUM(TCC_BUSY_sum)
   unit: Percent
   description: >-
-    The number of cycles the L2-Fabric interface was stalled on read requests to remote
-    PCIe connected accelerators or CPUs as a percent of the total active L2 cycles.
+    Percentage of active L2 cycles the L2-Fabric interface was stalled on read requests
+    to remote PCIe connected accelerators or CPUs.
 fabric.rd_stall:
   name: L2-Fabric Read Stall
   formula: 100 * SUM(TCC_EA0_RDREQ_IO_CREDIT_STALL_sum + TCC_EA0_RDREQ_GMI_CREDIT_STALL_sum + TCC_EA0_RDREQ_DRAM_CREDIT_STALL_sum) / SUM(TCC_BUSY_sum)
   unit: Percent
   description: >-
-    The ratio of the total number of cycles the L2-Fabric interface was stalled on
-    a read request to any destination (local HBM, remote PCIe\xAE connected accelerator
-    or CPU, or remote Infinity Fabric connected accelerator or CPU) over the total
-    active L2 cycles.
+    Percentage of active L2 cycles the L2-Fabric interface was stalled on a read request
+    to any destination (local HBM, remote PCIe connected accelerator or CPU, or remote
+    Infinity Fabric connected accelerator or CPU).
 fabric.remote_access_pressure_gmi:
   name: L2 Remote Access Pressure (GMI)
   formula: 100 * SUM(TCC_EA0_RDREQ_GMI_CREDIT_STALL_sum + TCC_EA0_WRREQ_GMI_CREDIT_STALL_sum) / SUM(TCC_BUSY_sum)
   unit: Percent
   description: >-
-    Combined GMI read and write credit stall percentage. High values indicate remote
-    memory access bottleneck (multi-GPU or multi-socket).
+    Percentage of L2 busy cycles the L2-Fabric interface was stalled on GMI read and
+    write credits. High values indicate a remote memory access bottleneck (multi-GPU or
+    multi-socket).
 fabric.wr_hbm_stall:
   name: L2-Fabric Write Stall (HBM)
   formula: 100 * SUM(TCC_EA0_WRREQ_DRAM_CREDIT_STALL_sum) / SUM(TCC_BUSY_sum)
   unit: Percent
   description: >-
-    The number of cycles the L2-Fabric interface was stalled on write or atomic requests to
-    the accelerator's local HBM due to HBM credit exhaustion, as a percent of the total
-    active L2 cycles. High values (>10%) combined with high memory utilization indicate that
-    the kernel is bound by memory write bandwidth.
+    Percentage of active L2 cycles the L2-Fabric interface was stalled on write or
+    atomic requests to the accelerator's local HBM due to HBM credit exhaustion. High
+    values (>10%) combined with high memory utilization indicate that the kernel is
+    bound by memory write bandwidth.
 fabric.wr_infinity_fabric_stall:
   name: L2-Fabric Write Stall (Infinity Fabric)
   formula: 100 * SUM(TCC_EA0_WRREQ_GMI_CREDIT_STALL_sum) / SUM(TCC_BUSY_sum)
   unit: Percent
   description: >-
-    The number of cycles the L2-Fabric interface was stalled on write or atomic requests
-    to remote Infinity Fabric connected accelerators or CPUs as a percent of the total
-    active L2 cycles.
+    Percentage of active L2 cycles the L2-Fabric interface was stalled on write or
+    atomic requests to remote Infinity Fabric connected accelerators or CPUs.
 fabric.wr_pcie_stall:
   name: L2-Fabric Write Stall (PCIe)
   formula: 100 * SUM(TCC_EA0_WRREQ_IO_CREDIT_STALL_sum) / SUM(TCC_BUSY_sum)
   unit: Percent
   description: >-
-    The number of cycles the L2-Fabric interface was stalled on write or atomic requests
-    to remote PCIe connected accelerators or CPUs as a percent of the total active
-    L2 cycles.
+    Percentage of active L2 cycles the L2-Fabric interface was stalled on write or
+    atomic requests to remote PCIe connected accelerators or CPUs.
 fabric.wr_stall:
   name: L2-Fabric Write Stall
   formula: 100 * SUM(TCC_EA0_WRREQ_STALL_sum) / SUM(TCC_BUSY_sum)
   unit: Percent
   description: >-
-    The ratio of the total number of cycles the L2-Fabric interface was stalled on
-    a write or atomic request to any destination (local HBM, remote accelerator or
-    CPU, PCIe connected accelerator or CPU, or remote Infinity Fabric connected accelerator
-    or CPU) over the total active L2 cycles.
+    Percentage of active L2 cycles the L2-Fabric interface was stalled on a write or
+    atomic request to any destination (local HBM, remote accelerator or CPU, PCIe
+    connected accelerator or CPU, or remote Infinity Fabric connected accelerator or
+    CPU).
 fabric.xgmi_atomic_bw:
   name: Infinity Fabric Atomic Bandwidth
   formula: 32 * SUM(TCC_EA0_WRREQ_ATOMIC_GMI_32B_sum) / SUM(End_Timestamp - Start_Timestamp)

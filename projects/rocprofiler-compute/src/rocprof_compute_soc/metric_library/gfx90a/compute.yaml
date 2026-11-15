@@ -10,9 +10,9 @@ compute.branch_util:
   formula: 100 * SUM(SQ_ACTIVE_INST_MISC) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
   unit: Percent
   description: >-
-    Indicates what percent of the kernel's duration the branch unit was busy executing
-    instructions. Computed as the ratio of the total number of cycles spent by the
-    scheduler issuing branch instructions over the total CU cycles
+    Percentage of the kernel's duration the branch unit was busy executing instructions.
+    Computed as the ratio of the total number of cycles spent by the scheduler issuing
+    branch instructions over the total CU cycles.
   peak: 100
 compute.f16_ops:
   name: F16 OPs
@@ -75,8 +75,8 @@ compute.inst_mix_f16_trans:
   formula: SUM(SQ_INSTS_VALU_TRANS_F16) / SUM($denom)
   unit: (Instructions + $normUnit)
   description: >-
-    The total number of transcendental instructions (e.g., sqrt) operating on 16-bit
-    floating-point operands issued to the VALU per normalization unit.
+    The total number of transcendental instructions (for example, sqrt) operating on
+    16-bit floating-point operands issued to the VALU per normalization unit.
 compute.inst_mix_f32_add:
   name: VALU F32-ADD Instructions
   formula: SUM(SQ_INSTS_VALU_ADD_F32) / SUM($denom)
@@ -152,7 +152,8 @@ compute.inst_mix_mfma:
   formula: SUM(SQ_INSTS_MFMA) / SUM($denom)
   unit: (Instructions + $normUnit)
   description: >-
-    The total number of matrix fused multiply-add instructions issued.
+    The total number of matrix fused multiply-add instructions issued, per normalization
+    unit.
 compute.inst_mix_mfma_bf16:
   name: MFMA-BF16 Instructions
   formula: SUM(SQ_INSTS_VALU_MFMA_BF16) / SUM($denom)
@@ -192,19 +193,19 @@ compute.inst_mix_valu:
   formula: SUM(SQ_INSTS_VALU - SQ_INSTS_MFMA) / SUM($denom)
   unit: (Instructions + $normUnit)
   description: >-
-    The total number of vector arithmetic logic unit (VALU) operations issued. These
-    are the workhorses of the compute unit, and are used to execute a wide range of
-    instruction types including floating point operations, non-uniform address calculations,
-    transcendental operations, integer operations, shifts, conditional evaluation,
-    etc.
+    The total number of vector arithmetic logic unit (VALU) operations issued, per
+    normalization unit. These are the workhorses of the compute unit, and are used to
+    execute a wide range of instruction types including floating point operations,
+    non-uniform address calculations, transcendental operations, integer operations,
+    shifts, conditional evaluation, etc.
 compute.inst_mix_vmem:
   name: VMEM Instructions
   formula: SUM(SQ_INSTS_VMEM - SQ_INSTS_FLAT_LDS_ONLY) / SUM($denom)
   unit: (Instructions + $normUnit)
   description: >-
-    The total number of vector memory operations issued. These include most loads,
-    stores and atomic operations and all accesses to generic, global, private and
-    texture memory.
+    The total number of vector memory operations issued, per normalization unit. These
+    include most loads, stores and atomic operations and all accesses to generic,
+    global, private and texture memory.
 compute.int8_ops:
   name: INT8 OPs
   formula: 512 * SUM(SQ_INSTS_VALU_MFMA_MOPS_I8) / SUM($denom)
@@ -278,9 +279,9 @@ compute.mfma_util:
   formula: 100 * SUM(SQ_VALU_MFMA_BUSY_CYCLES) / (4 * SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
   unit: Percent
   description: >-
-    Indicates what percent of the kernel's duration the MFMA unit was busy executing
-    instructions. Computed as the ratio of the total number of cycles the MFMA was
-    busy over the total CU cycles.
+    Percentage of the kernel's duration the MFMA unit was busy executing instructions.
+    Computed as the ratio of the total number of cycles the MFMA was busy over the total
+    CU cycles.
   peak: 100
 compute.smem_lat:
   name: SMEM Latency
@@ -294,10 +295,8 @@ compute.total_flops:
   formula: $valu_f16_flop_rate + $valu_f32_flop_rate + $valu_f64_flop_rate + $mfma_f16_flop_rate + $mfma_bf16_flop_rate + $mfma_f32_flop_rate + $mfma_f64_flop_rate
   unit: GFLOP/s
   description: >-
-    The overall achieved performance, measured in GigaFLOPs per second (GFLOP/s).
-    This is calculated as the sum of all VALU and MFMA floating-point operations divided
-    by the total execution time. This value is used as the y-coordinate for the kernel's
-    point on the Roofline plot.
+    The sum of all VALU and MFMA floating-point operations, per second. This value is
+    the y-coordinate of the kernel's point on the Roofline plot.
 compute.valu_active_threads:
   peak: 64
 compute.valu_flops:
@@ -359,9 +358,8 @@ compute.vmem_util:
   formula: 100 * SUM(SQ_ACTIVE_INST_FLAT + SQ_ACTIVE_INST_VMEM) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
   unit: Percent
   description: >-
-    Indicates what percent of the kernel's duration the VMEM unit was busy executing
-    instructions, including both global/generic and spill/scratch operations (see
-    the VMEM instruction count metrics) for more detail). Does not include VALU operations.
+    Percentage of the kernel's duration the VMEM unit was busy executing instructions,
+    including both global/generic and spill/scratch operations but not VALU operations.
     Computed as the ratio of the total number of cycles spent by the scheduler issuing
     VMEM instructions over the total CU cycles.
   peak: 100

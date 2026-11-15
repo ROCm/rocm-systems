@@ -3,111 +3,102 @@ gcea.dram_rd_banks_active:
   formula: SUM(GCEA_RDRAM_NUM_BANKS_VLD_sum) / SUM($denom)
   unit: (Count + $normUnit)
   description: >-
-    Number of system memory banks with pending read requests. More active banks enable
-    better memory-level parallelism. Low bank utilization may indicate suboptimal
-    access patterns limiting bandwidth.
+    Number of system memory banks with pending read requests, per normalization unit.
+    More active banks enable better memory-level parallelism.
 gcea.dram_rd_bw:
   name: DRAM Read Bandwidth
   formula: 32 * SUM(GCEA_RDRAM_SIZE_REQ_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
-    Achieved read bandwidth to system memory. RDNA 3.5 APUs use DDR5/LPDDR5 system
-    memory. High read bandwidth indicates memory-intensive read patterns. This is
-    a key metric for identifying memory-bound workloads.
+    The number of bytes read from system memory (DDR5/LPDDR5 on RDNA 3.5 APUs), divided
+    by total duration. High read bandwidth indicates memory-intensive read patterns, a
+    key sign of memory-bound workloads.
 gcea.dram_rd_chained_req:
   name: DRAM Read Chained Requests
   formula: SUM(GCEA_RDRAM_CHAINED_REQ_PER_CLIGRP_sum) / SUM($denom)
   unit: (Count + $normUnit)
   description: >-
-    Number of sequential read request chains to system memory. Chained requests combine
-    multiple sequential accesses for better memory efficiency. High chain counts indicate
-    good memory access patterns.
+    Number of sequential read request chains to system memory, per normalization unit.
+    Chained requests combine multiple sequential accesses for better memory efficiency.
 gcea.dram_rd_req:
   name: DRAM Read Requests
   formula: SUM(GCEA_RDRAM_REQ_PER_CLIGRP_sum) / SUM($denom)
   unit: (Count + $normUnit)
   description: >-
-    Number of read requests sent to system memory. RDNA 3.5 APUs use DDR5/LPDDR5 system
-    memory. High read request counts indicate memory-intensive workloads that may
-    be bandwidth limited.
+    Number of read requests sent to system memory (DDR5/LPDDR5 on RDNA 3.5 APUs), per
+    normalization unit. High read request counts indicate memory-intensive workloads
+    that may be bandwidth limited.
 gcea.dram_rd_size_32b_increments:
   name: DRAM Read Size (32B Increments)
   formula: SUM(GCEA_RDRAM_SIZE_REQ_sum) / SUM($denom)
   unit: (Count + $normUnit)
   description: >-
-    Total volume of read data transferred from system memory. This metric helps quantify
-    memory read bandwidth consumption. Compare with theoretical bandwidth to assess
-    memory utilization.
+    Total volume of read data transferred from system memory, in 32-byte increments, per
+    normalization unit. This quantifies memory read bandwidth consumption.
 gcea.dram_wr_banks_active:
   name: DRAM Write Banks Active
   formula: SUM(GCEA_WDRAM_NUM_BANKS_VLD_sum) / SUM($denom)
   unit: (Count + $normUnit)
   description: >-
-    Number of system memory banks with pending write requests. Higher bank utilization
-    enables better write bandwidth. Low values may indicate access pattern issues.
+    Number of system memory banks with pending write requests, per normalization unit.
+    More active banks enable better write bandwidth.
 gcea.dram_wr_bw:
   name: DRAM Write Bandwidth
   formula: 32 * SUM(GCEA_WDRAM_SIZE_REQ_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
-    Achieved write bandwidth to system memory. High write bandwidth indicates write-intensive
-    workloads. Combined with read bandwidth, this shows total memory traffic between
-    the GPU and system memory.
+    The number of bytes written to system memory, divided by total duration. High write
+    bandwidth indicates write-intensive workloads.
 gcea.dram_wr_chained_req:
   name: DRAM Write Chained Requests
   formula: SUM(GCEA_WDRAM_CHAINED_REQ_PER_CLIGRP_sum) / SUM($denom)
   unit: (Count + $normUnit)
   description: >-
-    Number of sequential write request chains to system memory. Chained writes combine
-    sequential stores for better efficiency. High chain counts indicate good write
-    access patterns.
+    Number of sequential write request chains to system memory, per normalization unit.
+    Chained writes combine sequential stores for better efficiency.
 gcea.dram_wr_req:
   name: DRAM Write Requests
   formula: SUM(GCEA_WDRAM_REQ_PER_CLIGRP_sum) / SUM($denom)
   unit: (Count + $normUnit)
   description: >-
-    Number of write requests sent to system memory. High write request counts indicate
-    write-intensive workloads. Combined with read requests, this shows total memory
-    traffic.
+    Number of write requests sent to system memory, per normalization unit. High write
+    request counts indicate write-intensive workloads.
 gcea.dram_wr_size_32b_increments:
   name: DRAM Write Size (32B Increments)
   formula: SUM(GCEA_WDRAM_SIZE_REQ_sum) / SUM($denom)
   unit: (Count + $normUnit)
   description: >-
-    Total volume of write data transferred to system memory. This quantifies memory
-    write bandwidth consumption. High values indicate write-intensive workloads.
+    Total volume of write data transferred to system memory, in 32-byte increments, per
+    normalization unit. This quantifies memory write bandwidth consumption.
 gcea.probe_req:
   name: GCEA Probe Requests
   formula: SUM(GCEA_PRB_REQ_sum) / SUM($denom)
   unit: (Count + $normUnit)
   description: >-
-    Number of cache coherency probe operations. These occur when external agents or
-    system components require cache synchronization. High counts may indicate coherency
-    traffic impacting performance.
+    Number of cache coherency probe operations, per normalization unit. These occur when
+    external agents or system components require cache synchronization.
 gcea.rd_returns:
   name: GCEA Read Returns
   formula: SUM(GCEA_RRET_VLD_sum) / SUM($denom)
   unit: (Count + $normUnit)
   description: >-
-    Number of completed read operations returning data from system memory. Each return
-    delivers requested data to the GPU caches. High counts indicate successful memory
-    read traffic.
+    Number of completed read operations returning data from system memory to the GPU
+    caches, per normalization unit.
 gcea.sarb_busy:
   name: SARB Busy
   formula: 100 * SUM(GCEA_SARB_BUSY) / SUM(GCEA_ALWAYS_COUNT)
   unit: Percent
   description: >-
-    Percentage of cycles the System Arbiter is actively processing memory requests.
-    High busy percentage indicates significant off-chip memory traffic. This is a
-    key indicator of memory-bound behavior.
+    Percentage of cycles the System Arbiter is actively processing memory requests. High
+    values indicate significant off-chip memory traffic, a key indicator of memory-bound
+    behavior.
 gcea.sarb_dram_req:
   name: SARB DRAM Requests
   formula: SUM(GCEA_SARB_DRAM_REQ_PER_VC_sum) / SUM($denom)
   unit: (Count + $normUnit)
   description: >-
-    Memory requests specifically destined for system memory (DRAM). This excludes
-    requests serviced by other system components. High counts indicate memory-intensive
-    workloads.
+    Number of memory requests destined for system memory (DRAM), excluding requests
+    serviced by other system components, per normalization unit.
 gcea.sarb_stalled:
   name: SARB Stalled
   formula: 100 * SUM(GCEA_SARB_STALLED) / SUM(GCEA_ALWAYS_COUNT)
@@ -128,9 +119,9 @@ gcea.sarb_total_req:
   formula: SUM(GCEA_SARB_REQ_PER_VC_sum) / SUM($denom)
   unit: (Count + $normUnit)
   description: >-
-    Total memory requests processed by the System Arbiter. This represents all traffic
-    between the GPU caches and system memory interface, including reads, writes, and
-    atomics.
+    Total memory requests processed by the System Arbiter, per normalization unit. This
+    represents all traffic between the GPU caches and system memory interface, including
+    reads, writes, and atomics.
 gcea.sysarb_stall_rate:
   name: SysArb Stall Rate
   formula: 100 * SUM(GCEA_SARB_STALLED_sum) / SUM(GCEA_ALWAYS_COUNT_sum)
@@ -141,14 +132,13 @@ gcea.sysarb_util:
   formula: 100 * SUM(GCEA_SARB_BUSY_sum) / SUM(GCEA_ALWAYS_COUNT_sum)
   unit: Percent
   description: >-
-    Percentage of cycles the System Arbiter is actively processing memory requests.
-    The arbiter handles traffic between the GPU caches and system memory interface.
-    High utilization indicates significant off-chip memory activity.
+    Percentage of cycles the System Arbiter, which handles traffic between the GPU
+    caches and the system memory interface, is actively processing memory requests. High
+    utilization indicates significant off-chip memory activity.
 gcea.wr_returns:
   name: GCEA Write Returns
   formula: SUM(GCEA_WRET_VLD_sum) / SUM($denom)
   unit: (Count + $normUnit)
   description: >-
-    Number of completed write acknowledgements from system memory. Each return confirms
-    successful data write. High counts indicate write-intensive workloads completing
-    successfully.
+    Number of completed write acknowledgements from system memory, per normalization
+    unit.

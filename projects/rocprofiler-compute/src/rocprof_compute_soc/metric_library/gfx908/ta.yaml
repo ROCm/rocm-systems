@@ -3,7 +3,7 @@ ta.address_stall:
   formula: 100 * SUM(TA_ADDR_STALLED_BY_TC_CYCLES_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
   unit: Percent
   description: >-
-    Percent of the total CU cycles the address processor was stalled from sending
+    Percentage of the total CU cycles the address processor was stalled from sending
     address requests further into the vL1D pipeline.
 ta.buffer_atomic_insts:
   name: TA Buffer Atomic Instructions
@@ -58,21 +58,20 @@ ta.busy:
   name: Address Processing Unit Busy
   formula: 100 * SUM(TA_TA_BUSY_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
   unit: Percent
-  description: >-
-    Percent of the total CU cycles the address processor was busy
+  description: Percentage of the total CU cycles the address processor was busy.
 ta.data_processor_address_stall:
   name: Data-Processor -> Address Stall
   formula: 100 * SUM(TA_ADDR_STALLED_BY_TD_CYCLES_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
   unit: Percent
   description: >-
-    Percent of total CU cycles the address processor was stalled waiting to send command
-    data to the data processor.
+    Percentage of total CU cycles the address processor was stalled waiting to send
+    command data to the data processor.
 ta.data_stall:
   name: TA Data Stall
   formula: 100 * SUM(TA_DATA_STALLED_BY_TC_CYCLES_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
   unit: Percent
   description: >-
-    Percent of the total CU cycles the address processor was stalled from sending
+    Percentage of the total CU cycles the address processor was stalled from sending
     write/atomic data further into the vL1D pipeline.
 ta.global_atomic_insts:
   name: TA Global/Generic Atomic Instructions
