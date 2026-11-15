@@ -1280,9 +1280,10 @@ WriteInterceptor(const void* packets,
 }
 }  // namespace
 
-Queue::Queue(const AgentCache& agent, CoreApiTable table)
+Queue::Queue(const AgentCache& agent, CoreApiTable table, hsa_queue_t* intercept_queue)
 : _core_api(table)
 , _agent(agent)
+, _intercept_queue(intercept_queue)
 {
     _core_api.hsa_signal_create_fn(0, 0, nullptr, &_active_kernels);
 }
