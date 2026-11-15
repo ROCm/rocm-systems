@@ -70,7 +70,7 @@ Profile preserves each pass's raw marker and counter CSVs with the
 ### Collect only what the question needs
 
 Never run a full profile. It replays the application once per counter pass and
-also runs the roofline benchmarks.
+also runs roofline benchmarks on architectures that support them.
 
 - List what this GPU can collect with `rocprof-compute --list-metrics`, and a
   block's metrics with `rocprof-compute --list-metrics <alias>`. On ROCm 10.2
