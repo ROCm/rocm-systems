@@ -59,6 +59,8 @@ fabric.wr_atomic_64b:
   formula: SUM(TCC_EA_WRREQ_64B_sum) / SUM($denom)
 fabric.wr_atomic_bw:
   formula: SUM(TCC_EA_WRREQ_64B_sum * 64 + (TCC_EA_WRREQ_sum - TCC_EA_WRREQ_64B_sum) * 32) / SUM(End_Timestamp - Start_Timestamp)
+fabric.wr_atomic_bw_norm:
+  formula: SUM(TCC_EA_WRREQ_64B_sum * 64 + (TCC_EA_WRREQ_sum - TCC_EA_WRREQ_64B_sum) * 32) / SUM($denom)
 fabric.wr_atomic_uncached:
   formula: SUM(TCC_EA_WR_UNCACHED_32B_sum) / SUM($denom)
 fabric.wr_lat:
