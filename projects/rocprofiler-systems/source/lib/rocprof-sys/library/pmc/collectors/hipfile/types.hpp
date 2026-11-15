@@ -53,12 +53,6 @@ union enabled_metrics
         std::uint32_t write_bandwidth  : 1;
     } bits;
     std::uint32_t value = 0;
-
-    template <typename Archive>
-    void serialize(Archive& archive)
-    {
-        archive(value);
-    }
 };
 
 /**
@@ -96,21 +90,7 @@ struct metrics
     double write_bandwidth = 0.0;  ///< bytes/sec over the sampling interval
 
     /// Set when hipFile could not be queried, so the sample carries no measurement.
-    /// Default false, which is what a value-initialized `metrics{}` needs: the paused
-    /// collector emits exactly that to drop the counter tracks to zero.
     bool query_failed = false;
-
-    template <typename Archive>
-    void serialize(Archive& archive)
-    {
-        // query_failed is deliberately not carried: cache_policy::store_sample drops
-        // a failed query before it reaches the buffer, so every stored sample has it
-        // false and the default-constructed value round-trips correctly.
-        archive(read_bytes, write_bytes, read_ops, write_ops, fastpath_reads,
-                fastpath_writes, fallback_reads, fallback_writes, unaligned_reads,
-                unaligned_writes, read_errors, write_errors, read_bandwidth,
-                write_bandwidth);
-    }
 };
 
 /**

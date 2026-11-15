@@ -73,35 +73,6 @@ union enabled_metrics
         std::uint32_t mem_clock            : 1;  // current_uclk (MHz)
     } bits;
     std::uint32_t value = 0;
-
-    template <typename Archive>
-    void serialize(Archive& archive)
-    {
-        archive(value);
-    }
 };
-
-// Socket power: prefer the instantaneous "current" reading, falling back to the
-// time-averaged reading only when current is unavailable.
-[[nodiscard]] inline bool
-has_current_socket_power(const enabled_metrics& enabled)
-{
-    return enabled.bits.current_socket_power != 0;
-}
-
-[[nodiscard]] inline double
-select_socket_power(const enabled_metrics& enabled, const metrics& values)
-{
-    return has_current_socket_power(enabled)
-               ? static_cast<double>(values.current_socket_power)
-               : static_cast<double>(values.average_socket_power);
-}
-
-// Display label for the socket-power track, matching select_socket_power().
-[[nodiscard]] inline const char*
-socket_power_track_label(const enabled_metrics& enabled)
-{
-    return has_current_socket_power(enabled) ? "Current Power" : "Avg. Power";
-}
 
 }  // namespace rocprofsys::pmc::collectors::gpu

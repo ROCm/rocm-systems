@@ -7,7 +7,6 @@
 #include "library/pmc/common/types.hpp"
 #include "logger/debug.hpp"
 
-#include <cstdint>
 #include <memory>
 #include <utility>
 #include <vector>
@@ -19,14 +18,14 @@ using ::rocprofsys::pmc::device_filter;
 using ::rocprofsys::pmc::device_selection_mode;
 
 /**
- * @brief Traits type for hipFile collector configuration.
+ * @brief Traits type for hipFile device enumeration and settings.
  *
- * Bridges hipFile's AMD Infinity Storage I/O stats to base::collector.
+ * Enumerates the HIP-visible GPUs for the hipFile poller.
  *
- * @note Unlike the AMD SMI collectors, enumeration does not probe the data source.
+ * @note Unlike the AMD SMI pollers, enumeration does not probe the data source.
  * hipFile stats only become readable once the target performs hipFile I/O, which
- * generally happens after the sampler has started, so probing at setup() would find
- * nothing and permanently disable the collector. Devices are instead enumerated from
+ * generally happens after sampling has started, so probing at setup would find
+ * nothing and permanently disable the poller. Devices are instead enumerated from
  * the ROCm-visible GPU set, and each sample decides for itself whether hipFile had
  * anything to report.
  *
@@ -37,12 +36,9 @@ using ::rocprofsys::pmc::device_selection_mode;
 template <typename BackendProvider, typename DeviceType>
 struct hipfile_traits
 {
-    using metrics_t         = pmc::collectors::hipfile::metrics;
     using enabled_metrics_t = pmc::collectors::hipfile::enabled_metrics;
-    using backend_t         = DeviceType::backend_type;
     using device_t          = DeviceType;
     using device_ptr_t      = std::shared_ptr<device_t>;
-    using container_t       = std::vector<device_ptr_t>;
 
     static constexpr const char* device_name = "hipFile";
 
@@ -64,19 +60,6 @@ struct hipfile_traits
     [[nodiscard]] static enabled_metrics_t get_enabled_metrics()
     {
         return Settings::get_hipfile_enabled_metrics();
-    }
-
-    template <typename Cache>
-    static void init_pmc_metadata(const device_ptr_t& device)
-    {
-        Cache::initialize_pmc_metadata(device->get_index());
-    }
-
-    [[nodiscard]] static metrics_t get_metrics(const device_ptr_t&      device,
-                                               const enabled_metrics_t& enabled,
-                                               std::uint64_t            timestamp)
-    {
-        return device->get_metrics(enabled, timestamp);
     }
 
     /**

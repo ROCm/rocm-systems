@@ -7,7 +7,6 @@
 #include "core/trace_cache/counter_samples.hpp"
 #include "core/trace_cache/sample_processor_interface.hpp"
 #include "core/trace_cache/sample_type.hpp"
-#include "library/pmc/collectors/hipfile/sample.hpp"
 
 #include <algorithm>
 #include <sys/types.h>
@@ -151,11 +150,6 @@ public:
     void handle(const memory_copy_sample&) override {}
     void handle(const memory_allocate_sample&) override {}
     void handle(const scratch_memory_sample&) override {}
-    void handle(const gpu_pmc_sample&) override {}
-    void handle(const ainic_pmc_sample&) override {}
-    void handle(const cpu_pmc_sample&) override {}
-    void handle(const gpu_perf_counter_sample&) override {}
-    void handle(const hipfile_pmc_sample&) override {}
     void handle(const backtrace_region_sample&) override {}
     void handle(const counter_batch&) override {}
     void handle(const gap_marker&) override {}

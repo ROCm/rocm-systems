@@ -32,7 +32,6 @@ constexpr std::uint64_t k_read_bytes_slot0     = 111;
 constexpr std::uint64_t k_read_bytes_slot1     = 222;
 constexpr std::uint64_t k_read_bytes_filtered  = 333;
 constexpr std::uint64_t k_read_bytes_excluded  = 444;
-constexpr std::uint64_t k_read_bytes_single    = 2048;
 constexpr std::size_t   k_filter_index         = 5;
 }  // namespace test_values
 
@@ -188,21 +187,6 @@ TEST_F(HipFileTraitsTest, enabled_metrics_come_from_settings)
     EXPECT_EQ(enabled.value & k_write_bytes, 0U);
 }
 
-TEST_F(HipFileTraitsTest, get_metrics_delegates_to_device)
-{
-    stub_settings::set_visible_identity(1);
-    m_provider->backend->gpu(0).read_bytes = test_values::k_read_bytes_single;
-
-    const auto entries = enumerate();
-    ASSERT_EQ(entries.size(), 1U);
-
-    enabled_metrics enabled;
-    enabled.value = ALL_HIPFILE_METRICS;
-
-    EXPECT_EQ(traits_t::get_metrics(entries[0].device, enabled, 1'000'000'000).read_bytes,
-              test_values::k_read_bytes_single);
-}
-
 TEST_F(HipFileTraitsTest, identity_mapping_is_unchanged_without_a_visibility_mask)
 {
     stub_settings::set_visible_identity(2);
@@ -238,12 +222,10 @@ TEST_F(HipFileTraitsTest, subset_mask_maps_hipfile_slots_onto_profiler_indices)
     ASSERT_EQ(entries.size(), 2U);
     EXPECT_EQ(entries[0].device->get_index(), test_values::k_gpu_index_four);
     EXPECT_EQ(entries[0].device->get_hipfile_slot(), 0U);
-    EXPECT_EQ(entries[0].device->get_name(), "GPU 4");
     EXPECT_EQ(track_name(entries[0].device->get_index(), "Read Bytes"),
               "GPU [4] Storage Read Bytes (S)");
     EXPECT_EQ(entries[1].device->get_index(), test_values::k_filter_index);
     EXPECT_EQ(entries[1].device->get_hipfile_slot(), 1U);
-    EXPECT_EQ(entries[1].device->get_name(), "GPU 5");
     EXPECT_EQ(track_name(entries[1].device->get_index(), "Read Bytes"),
               "GPU [5] Storage Read Bytes (S)");
 

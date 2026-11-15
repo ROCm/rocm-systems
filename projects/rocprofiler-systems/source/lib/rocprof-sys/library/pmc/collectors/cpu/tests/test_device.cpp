@@ -141,8 +141,6 @@ TEST_F(cpu_device_test, device_interface_methods)
     const device<MockBackend> dev(mock_backend, 0, monitored_cpus);
 
     EXPECT_EQ(dev.get_index(), 0u);
-    EXPECT_EQ(dev.get_name(), "CPU 0");
-    EXPECT_FALSE(dev.get_product_name().empty());
     EXPECT_FALSE(dev.get_vendor_name().empty());
     EXPECT_EQ(dev.get_monitored_cpus().size(), 4u);
 }

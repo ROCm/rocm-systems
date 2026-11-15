@@ -11,7 +11,6 @@
 #include "core/trace_cache/counter_schema_table.hpp"
 #include "core/trace_cache/metadata_registry.hpp"
 #include "core/trace_cache/sample_processor_interface.hpp"
-#include "library/pmc/collectors/hipfile/sample.hpp"
 #include <cstdint>
 
 #include "core/perfetto/category_registry.hpp"
@@ -57,11 +56,6 @@ public:
     void handle(const region_sample& sample) override;
     void handle(const in_time_sample& sample) override;
     void handle(const pmc_event_with_sample& sample) override;
-    void handle(const gpu_pmc_sample& sample) override;
-    void handle(const ainic_pmc_sample& sample) override;
-    void handle(const cpu_pmc_sample& sample) override;
-    void handle(const gpu_perf_counter_sample& sample) override;
-    void handle(const hipfile_pmc_sample& sample) override;
     void handle(const backtrace_region_sample& sample) override;
     void handle(const kfd_sample& sample) override;
     void handle(const counter_batch& batch) override;
@@ -118,8 +112,6 @@ private:
     // KFD node_id -> per-type GPU index matching kfd_sample.device_id.
     std::unordered_map<std::uint32_t, std::uint32_t> m_kfd_node_to_gpu_index_cache;
     std::map<std::uint32_t, std::uint64_t>           m_unified_memory_fault_counts;
-    bool                                             m_cpu_pmc_initialized{ false };
-    std::optional<std::uint32_t>                     m_cpu_pmc_owner_device_id;
     counter_schema_table<counter_slot>               m_counters;
 };
 }  // namespace trace_cache

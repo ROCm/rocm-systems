@@ -15,7 +15,6 @@ set(trace_cache_tests_sources
     test_metadata_registry_json.cpp
     test_metadata_registry.cpp
     test_record_format.cpp
-    test_rocpd_pmc_name_contract.cpp
     test_rocpd_processor.cpp
     test_rocpd_xcp_output.cpp
     test_sample_type.cpp

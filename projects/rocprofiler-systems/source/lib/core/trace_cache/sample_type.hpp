@@ -15,6 +15,9 @@
 namespace rocprofsys::trace_cache
 {
 
+// Retired ids, never to be reused: 0x0006 gpu_pmc_sample, 0x0007 cpu_pmc_sample,
+// 0x000A ainic_pmc_sample, 0x000C gpu_perf_counter_sample, 0x000D hipfile_pmc_sample.
+// The parser rejects them; cache files are written and read within one run.
 enum class type_identifier_t : std::uint32_t
 {
     in_time_sample          = 0x0000,
@@ -23,14 +26,9 @@ enum class type_identifier_t : std::uint32_t
     kernel_dispatch         = 0x0003,
     memory_copy             = 0x0004,
     memory_alloc            = 0x0005,
-    gpu_pmc_sample          = 0x0006,
-    cpu_pmc_sample          = 0x0007,
     backtrace_region_sample = 0x0008,
     scratch_memory          = 0x0009,
-    ainic_pmc_sample        = 0x000A,
     kfd_sample              = 0x000B,
-    gpu_perf_counter_sample = 0x000C,
-    hipfile_pmc_sample      = 0x000D,
     counter_batch           = 0x000E,
     gap_marker              = 0x000F,
     fragmented_space        = 0xFFFF

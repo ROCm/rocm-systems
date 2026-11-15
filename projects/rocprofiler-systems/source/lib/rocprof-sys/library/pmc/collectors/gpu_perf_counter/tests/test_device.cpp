@@ -74,7 +74,6 @@ TEST_F(SdkPmcDeviceTest, DeviceProperties)
                                   test_profile_config, std::move(meta));
 
     EXPECT_EQ(dev.get_index(), 0U);
-    EXPECT_EQ(dev.get_name(), "GPU 0");
     EXPECT_EQ(dev.get_vendor_name(), "AMD");
     EXPECT_TRUE(dev.is_supported());
 }
@@ -99,8 +98,6 @@ TEST_F(SdkPmcDeviceTest, DeviceWithIndex3)
                                   {});
 
     EXPECT_EQ(dev.get_index(), 3U);
-    EXPECT_EQ(dev.get_name(), "GPU 3");
-    EXPECT_EQ(dev.get_product_name(), "GPU 3");
 }
 
 TEST_F(SdkPmcDeviceTest, SampleWithScalarCounters)

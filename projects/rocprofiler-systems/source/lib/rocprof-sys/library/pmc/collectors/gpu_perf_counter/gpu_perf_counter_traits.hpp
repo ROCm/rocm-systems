@@ -8,7 +8,6 @@
 #include "library/pmc/common/types.hpp"
 #include "logger/debug.hpp"
 
-#include <cstdint>
 #include <memory>
 #include <vector>
 
@@ -21,33 +20,9 @@ using ::rocprofsys::pmc::device_type;
 template <typename BackendProvider>
 struct gpu_perf_counter_traits
 {
-    using metrics_t         = pmc::collectors::gpu_perf_counter::metrics;
     using enabled_metrics_t = pmc::collectors::gpu_perf_counter::enabled_metrics;
     using device_t          = device<typename BackendProvider::backend_t>;
     using device_ptr_t      = std::shared_ptr<device_t>;
-    using container_t       = std::vector<device_ptr_t>;
-    using backend_t         = BackendProvider::backend_t;
-
-    static constexpr const char* device_name = "GPU";
-
-    template <typename Settings>
-    [[nodiscard]] static enabled_metrics_t get_enabled_metrics()
-    {
-        return to_enabled_metrics(Settings::get_gpu_perf_counter_enabled_metrics());
-    }
-
-    template <typename Cache>
-    static void init_pmc_metadata(const device_ptr_t& dev)
-    {
-        Cache::initialize_pmc_metadata(dev->get_index(), dev->get_counter_metadata());
-    }
-
-    [[nodiscard]] static const metrics_t& get_metrics(const device_ptr_t&      dev,
-                                                      const enabled_metrics_t& enabled,
-                                                      std::uint64_t            timestamp)
-    {
-        return dev->sample_metrics(enabled, timestamp);
-    }
 
     struct device_entry
     {
@@ -55,10 +30,9 @@ struct gpu_perf_counter_traits
         enabled_metrics_t supported_metrics;
     };
 
-    // Device filtering is the caller's responsibility: the agent list passed into
-    // register_gpu_perf_counter_source is already filtered upstream, so the
-    // Settings parameter is unused here. It is retained because the base
-    // collector's traits_check probe instantiates the two-parameter signature.
+    // Device filtering is the caller's responsibility: the agent list is already
+    // filtered upstream, so the Settings parameter is unused here; it keeps the
+    // signature of the other traits.
     template <typename Settings, typename Provider>
     [[nodiscard]] static std::vector<device_entry> enumerate_devices(
         std::shared_ptr<Provider> provider)

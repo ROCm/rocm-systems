@@ -1,15 +1,14 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-# Drives the collector through a mock backend and stub settings/cache policies, so no
-# hipFile package, no AMD Infinity Storage hardware, and no trace cache are required. This
-# is what makes the fastpath and fallback attribution verifiable in CI.
+# Mock backend and stub settings, so no hipFile package or AMD Infinity Storage hardware
+# is required.
 add_library(
     pmc-hipfile-collector-tests
     OBJECT
     test_device.cpp
     test_hipfile_traits.cpp
-    test_collector_workflow.cpp
+    test_metric_groups.cpp
     test_types.cpp
 )
 

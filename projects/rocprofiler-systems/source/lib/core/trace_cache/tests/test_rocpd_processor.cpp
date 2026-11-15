@@ -10,13 +10,8 @@
 #include "core/trace_cache/metadata_registry.hpp"
 #include "core/trace_cache/rocpd_processor.hpp"
 #include "core/trace_cache/sample_type.hpp"
-#include "library/pmc/collectors/cpu/sample.hpp"
 #include "library/pmc/collectors/cpu/types.hpp"
-#include "library/pmc/collectors/gpu/sample.hpp"
 #include "library/pmc/collectors/gpu/types.hpp"
-#include "library/pmc/collectors/gpu_perf_counter/sample.hpp"
-#include "library/pmc/collectors/gpu_perf_counter/types.hpp"
-#include "library/pmc/collectors/nic/sample.hpp"
 #include "library/pmc/collectors/nic/types.hpp"
 #include "library/thread_info.hpp"
 
@@ -59,9 +54,7 @@ using rocprofsys::agent_manager;
 using rocprofsys::agent_type;
 using rocprofsys::function_args_t;
 using rocprofsys::get_args_string;
-using rocprofsys::trace_cache::ainic_pmc_sample;
 using rocprofsys::trace_cache::backtrace_region_sample;
-using rocprofsys::trace_cache::gpu_perf_counter_sample;
 using rocprofsys::trace_cache::in_time_sample;
 using rocprofsys::trace_cache::kernel_dispatch_sample;
 using rocprofsys::trace_cache::kfd_sample;
@@ -71,13 +64,8 @@ using rocprofsys::trace_cache::pmc_event_with_sample;
 using rocprofsys::trace_cache::region_sample;
 using rocprofsys::trace_cache::rocpd_processor_t;
 using rocprofsys::trace_cache::scratch_memory_sample;
-using rocprofsys::trace_cache::info::gpu_perf_counter_name_entry;
 using rocprofsys::trace_cache::info::pmc;
 using rocprofsys::trace_cache::info::track;
-using cpu_pmc_sample = rocprofsys::pmc::collectors::cpu::sample;
-using gpu_pmc_sample = rocprofsys::pmc::collectors::gpu::sample;
-using gpu_perf_counter_value =
-    rocprofsys::pmc::collectors::gpu_perf_counter::counter_value;
 #if(ROCPROFILER_VERSION >= 600)
 using rocprofsys::trace_cache::memory_allocate_sample;
 #endif
@@ -391,17 +379,6 @@ protected:
         const std::shared_ptr<metadata_registry>& metadata, const std::string& track_name)
     {
         metadata->ensure_track(track_name, std::nullopt, std::string{});
-    }
-
-    static void seed_gpu_smi_pmc_row(const std::shared_ptr<metadata_registry>& metadata,
-                                     const char*                               pmc_name,
-                                     const char* description = nullptr)
-    {
-        metadata->add_pmc_info(make_agent_pmc_row({ .type        = agent_type::gpu,
-                                                    .name        = pmc_name,
-                                                    .target_arch = "GPU",
-                                                    .description = description }));
-        add_process_scoped_track(metadata, pmc_name);
     }
 
     [[nodiscard]] size_t count_timeline_events(
@@ -1196,64 +1173,8 @@ TEST_F(rocpd_write_read_test_interface, agents_round_trip_all_types)
                                    .product_name = "AI NIC" });
 }
 
-TEST_F(rocpd_write_read_test_interface, handle_ainic_pmc_sample_pathway)
-{
-    // Prepare: seed metadata/agents/samples and run rocpd_processor_t (opens reader).
-    static constexpr double k_rx_ucast_bytes   = 1048576.0;
-    static constexpr double k_tx_ucast_bytes   = 524288.0;
-    static constexpr size_t k_sample_timestamp = 12000;
-
-    run_processor_and_open_reader(
-        { nic_agent() },
-        [](const std::shared_ptr<metadata_registry>& metadata) {
-            metadata->add_pmc_info(
-                make_nic_metadata_pmc(k_nic_pmcs[k_nic_pmc_rx_ucast_bytes_idx]));
-            metadata->add_pmc_info(
-                make_nic_metadata_pmc(k_nic_pmcs[k_nic_pmc_tx_ucast_bytes_idx]));
-            add_process_scoped_track(metadata, "ainic_rx_rdma_ucast_bytes");
-            add_process_scoped_track(metadata, "ainic_tx_rdma_ucast_bytes");
-        },
-        [](rocpd_processor_t& processor) {
-            rocprofsys::pmc::collectors::nic::enabled_metrics enabled{};
-            enabled.bits.rx_rdma_ucast_bytes = 1;
-            enabled.bits.tx_rdma_ucast_bytes = 1;
-            rocprofsys::pmc::collectors::nic::metrics metrics{};
-            metrics.rx_rdma_ucast_bytes = static_cast<std::uint64_t>(k_rx_ucast_bytes);
-            metrics.tx_rdma_ucast_bytes = static_cast<std::uint64_t>(k_tx_ucast_bytes);
-            const ainic_pmc_sample sample{ enabled, 0, "NIC0", k_sample_timestamp,
-                                           metrics };
-            processor.handle(sample);
-        });
-
-    // Validate: profiler_hub::reader_t read-back matches inserted values.
-    ASSERT_EQ(m_reader->get_all_agents().size(), 1U);
-    expect_readback_agent_fields({ .agent_type   = "NIC",
-                                   .name         = "NIC0",
-                                   .model_name   = "CX7",
-                                   .vendor_name  = "AI NIC",
-                                   .product_name = "AI NIC" });
-
-    const auto pmc_infos = m_reader->get_all_pmc_info();
-    ASSERT_EQ(pmc_infos.size(), 2U);
-    expect_named_pmc_arch(
-        pmc_infos, { .name                = "nic_rx_ucast_bytes",
-                     .expected_arch       = "NIC",
-                     .expected_agent_type = "NIC",
-                     .expected_symbol     = "nic_rx_ucast_bytes",
-                     .expected_units = k_nic_pmcs[k_nic_pmc_rx_ucast_bytes_idx].units });
-    expect_named_pmc_arch(
-        pmc_infos, { .name                = "nic_tx_ucast_bytes",
-                     .expected_arch       = "NIC",
-                     .expected_agent_type = "NIC",
-                     .expected_symbol     = "nic_tx_ucast_bytes",
-                     .expected_units = k_nic_pmcs[k_nic_pmc_tx_ucast_bytes_idx].units });
-
-    expect_reader_has_tracks(
-        { "ainic_rx_rdma_ucast_bytes", "ainic_tx_rdma_ucast_bytes" });
-}
-
 // Mirrors tests/rocpd-validation-rules/ainic/ainic-rdma-rules.json: every
-// cache_policy.hpp NIC PMC name is registered with target_arch NIC.
+// NIC PMC name is registered with target_arch NIC.
 TEST_F(rocpd_write_read_test_interface, nic_rdma_pmc_catalog_target_arch)
 {
     // Prepare: seed metadata/agents/samples and run rocpd_processor_t (opens reader).
@@ -1636,11 +1557,6 @@ TEST_F(rocpd_write_read_test_interface, flush_creates_nonempty_file)
 //  backtrace_region_sample  → handle_backtrace_region_pathway
 //  in_time_sample           → handle_in_time_sample_pathway
 //  pmc_event_with_sample    → handle_pmc_event_with_sample_pathway
-//  gpu_pmc_sample           → handle_gpu_pmc_sample_pathway
-//  gpu_perf_counter_sample  → handle_gpu_perf_counter_sample_pathway,
-//                             handle_gpu_perf_counter_sample_empty_entries_noop
-//  ainic_pmc_sample         → handle_ainic_pmc_sample_pathway
-//  cpu_pmc_sample           → handle_cpu_pmc_sample_pathway
 //  kfd_sample               → handle_kfd_sample_pathway
 //
 //  multiple_event_types_in_single_db — several handle() paths in one DB flush.
@@ -1862,210 +1778,6 @@ TEST_F(rocpd_write_read_test_interface, handle_pmc_event_with_sample_pathway)
                                        .expected_description = "Shader wavefronts" });
 
     expect_reader_has_tracks({ "SQ_WAVES [GPU 0]" });
-}
-
-// ---------------------------------------------------------------------------
-// handle(gpu_pmc_sample): multiple scalar PMC inserts for GPU metrics
-// ---------------------------------------------------------------------------
-
-TEST_F(rocpd_write_read_test_interface, handle_gpu_pmc_sample_pathway)
-{
-    // Prepare: seed metadata/agents/samples and run rocpd_processor_t (opens reader).
-    run_processor_and_open_reader(
-        { managed_gpu_agent() },
-        [](const std::shared_ptr<metadata_registry>& metadata) {
-            seed_gpu_smi_pmc_row(metadata, "device_busy_gfx");
-            seed_gpu_smi_pmc_row(metadata, "device_busy_umc");
-            seed_gpu_smi_pmc_row(metadata, "device_temp");
-        },
-        [](rocpd_processor_t& processor) {
-            constexpr double        k_gfx_activity        = 85.0;
-            constexpr double        k_umc_activity        = 42.0;
-            constexpr double        k_hotspot_temperature = 72.0;
-            constexpr std::uint64_t k_timestamp           = 11000;
-            rocprofsys::pmc::collectors::gpu::enabled_metrics enabled{};
-            enabled.bits.gfx_activity        = 1;
-            enabled.bits.umc_activity        = 1;
-            enabled.bits.hotspot_temperature = 1;
-            rocprofsys::pmc::collectors::gpu::metrics metrics{};
-            metrics.gfx_activity        = k_gfx_activity;
-            metrics.umc_activity        = k_umc_activity;
-            metrics.hotspot_temperature = k_hotspot_temperature;
-            const gpu_pmc_sample sample{ enabled, 0, k_timestamp, metrics };
-            processor.handle(sample);
-        });
-
-    // Validate: profiler_hub::reader_t read-back matches inserted values.
-    const auto pmc_infos = m_reader->get_all_pmc_info();
-    ASSERT_EQ(pmc_infos.size(), 3U);
-    expect_named_pmc_arch(pmc_infos, { .name                = "device_busy_gfx",
-                                       .expected_arch       = "GPU",
-                                       .expected_agent_type = "GPU",
-                                       .expected_symbol     = "device_busy_gfx" });
-    expect_named_pmc_arch(pmc_infos, { .name                = "device_busy_umc",
-                                       .expected_arch       = "GPU",
-                                       .expected_agent_type = "GPU",
-                                       .expected_symbol     = "device_busy_umc" });
-    expect_named_pmc_arch(pmc_infos, { .name                = "device_temp",
-                                       .expected_arch       = "GPU",
-                                       .expected_agent_type = "GPU",
-                                       .expected_symbol     = "device_temp" });
-
-    expect_reader_has_tracks({ "device_busy_gfx", "device_busy_umc", "device_temp" });
-}
-
-// ---------------------------------------------------------------------------
-// handle(gpu_perf_counter_sample): SDK hardware counter batch → PMC events
-// ---------------------------------------------------------------------------
-
-TEST_F(rocpd_write_read_test_interface, handle_gpu_perf_counter_sample_pathway)
-{
-    // Prepare: seed metadata/agents/samples and run rocpd_processor_t (opens reader).
-    static constexpr std::uint64_t k_counter_id = 42;
-    static const std::string       k_pmc_name{ "SQ_WAVES[WGP=0,SA=0]" };
-    static const std::string       k_track_name{ "GPU [0] SQ_WAVES (S)" };
-    static constexpr std::uint64_t k_timestamp = 11500;
-    static constexpr double        k_value     = 2048.0;
-
-    run_processor_and_open_reader(
-        { managed_gpu_agent() },
-        [](const std::shared_ptr<metadata_registry>& metadata) {
-            metadata->add_pmc_info(
-                make_agent_pmc_row({ .type        = agent_type::gpu,
-                                     .name        = k_pmc_name.c_str(),
-                                     .target_arch = "GPU",
-                                     .description = "Shader wavefronts" }));
-            // gpu_perf_counter handle() emits process-scoped tracks (no thread_id).
-            metadata->ensure_track(k_track_name, std::nullopt, std::string{});
-            gpu_perf_counter_name_entry name_entry{};
-            name_entry.counter_id    = k_counter_id;
-            name_entry.pmc_info_name = k_pmc_name;
-            name_entry.track_name    = k_track_name;
-            metadata->set_gpu_perf_counter_counter_names(0, { name_entry });
-        },
-        [](rocpd_processor_t& processor) {
-            const gpu_perf_counter_sample sample{ 0, k_timestamp,
-                                                  std::vector<gpu_perf_counter_value>{
-                                                      { .counter_id = k_counter_id,
-                                                        .value      = k_value } } };
-            processor.handle(sample);
-        });
-
-    // Validate: profiler_hub::reader_t read-back matches inserted values.
-    const auto pmc_infos = m_reader->get_all_pmc_info();
-    ASSERT_EQ(pmc_infos.size(), 1U);
-    expect_named_pmc_arch(pmc_infos, { .name                 = k_pmc_name.c_str(),
-                                       .expected_arch        = "GPU",
-                                       .expected_agent_type  = "GPU",
-                                       .expected_symbol      = k_pmc_name.c_str(),
-                                       .expected_units       = "",
-                                       .expected_description = "Shader wavefronts" });
-
-    expect_reader_has_tracks({ k_track_name });
-}
-
-TEST_F(rocpd_write_read_test_interface, handle_gpu_perf_counter_sample_empty_entries_noop)
-{
-    // Prepare: seed metadata/agents/samples and run rocpd_processor_t (opens reader).
-    run_processor_and_open_reader(
-        { managed_gpu_agent() }, {}, [](rocpd_processor_t& processor) {
-            constexpr std::uint64_t       k_timestamp = 12000;
-            const gpu_perf_counter_sample sample{ 0, k_timestamp, {} };
-            processor.handle(sample);
-        });
-
-    // Validate: profiler_hub::reader_t read-back matches inserted values.
-    auto pmc_infos = m_reader->get_all_pmc_info();
-    EXPECT_TRUE(pmc_infos.empty());
-}
-
-// ---------------------------------------------------------------------------
-// handle(cpu_pmc_sample): process-level + per-core PMC inserts
-// ---------------------------------------------------------------------------
-
-// Regression test for per-core values dropped as
-//   "CPU PMC sample skipped: PMC info not registered for name=cpu_frequency"
-// (same for cpu_load)
-TEST_F(rocpd_write_read_test_interface, handle_cpu_pmc_sample_pathway)
-{
-    // Prepare: seed metadata/agents/samples and run rocpd_processor_t (opens reader).
-    const auto                     cpu        = managed_cpu_agent();
-    const std::vector<std::string> core_names = { "cpu_frequency [0] Core [0]",
-                                                  "cpu_frequency [0] Core [1]",
-                                                  "cpu_load [0] Core [0]",
-                                                  "cpu_load [0] Core [1]" };
-    std::string                    handle_output;
-    run_processor_and_open_reader(
-        { cpu },
-        [&](const std::shared_ptr<metadata_registry>& metadata) {
-            metadata->add_pmc_info(make_agent_pmc_row({ .type = agent_type::cpu,
-                                                        .name = "process_physical_memory",
-                                                        .target_arch = "CPU" }));
-            add_process_scoped_track(metadata, "process_physical_memory");
-            for(const auto& core_name : core_names)
-            {
-                metadata->add_pmc_info(make_agent_pmc_row({ .type = agent_type::cpu,
-                                                            .name = core_name.c_str(),
-                                                            .target_arch = "CPU" }));
-                add_process_scoped_track(metadata, core_name);
-            }
-        },
-        [&](rocpd_processor_t& processor) {
-            constexpr double        k_page_rss_mib   = 256.5;
-            constexpr double        k_bytes_per_mib  = 1024.0 * 1024.0;
-            constexpr float         k_core0_freq_mhz = 3200.0f;
-            constexpr float         k_core1_freq_mhz = 3100.0f;
-            constexpr double        k_core0_load_pct = 12.5;
-            constexpr double        k_core1_load_pct = 87.5;
-            constexpr std::uint64_t k_timestamp      = 13000;
-            rocprofsys::pmc::collectors::cpu::enabled_metrics enabled{};
-            enabled.bits.page_rss  = 1;
-            enabled.bits.frequency = 1;
-            enabled.bits.load      = 1;
-            rocprofsys::pmc::collectors::cpu::process_metrics proc{};
-            proc.page_rss = static_cast<std::int64_t>(k_page_rss_mib * k_bytes_per_mib);
-            const std::vector<rocprofsys::pmc::collectors::cpu::per_cpu_metrics> cores{
-                { .cpu_id = 0, .frequency = k_core0_freq_mhz, .load = k_core0_load_pct },
-                { .cpu_id = 1, .frequency = k_core1_freq_mhz, .load = k_core1_load_pct },
-            };
-            auto freqs = rocprofsys::pmc::collectors::cpu::serialize_frequencies(cores);
-            auto loads = rocprofsys::pmc::collectors::cpu::serialize_loads(cores);
-            const cpu_pmc_sample sample{ enabled,          0,
-                                         k_timestamp,      proc,
-                                         std::move(freqs), std::move(loads) };
-            ::testing::internal::CaptureStdout();
-            ::testing::internal::CaptureStderr();
-            processor.handle(sample);
-            handle_output = ::testing::internal::GetCapturedStdout() +
-                            ::testing::internal::GetCapturedStderr();
-        });
-
-    EXPECT_EQ(handle_output.find("PMC info not registered"), std::string::npos)
-        << handle_output;
-
-    const auto pmc_infos = m_reader->get_all_pmc_info();
-    ASSERT_EQ(pmc_infos.size(), 5U);
-    expect_named_pmc_arch(pmc_infos, { .name                = "process_physical_memory",
-                                       .expected_arch       = "CPU",
-                                       .expected_agent_type = "CPU",
-                                       .expected_symbol = "process_physical_memory" });
-    for(const auto& core_name : core_names)
-    {
-        expect_named_pmc_arch(pmc_infos, { .name                = core_name.c_str(),
-                                           .expected_arch       = "CPU",
-                                           .expected_agent_type = "CPU",
-                                           .expected_symbol     = core_name.c_str() });
-    }
-
-    expect_readback_agent_fields({ .agent_type   = "CPU",
-                                   .name         = "CPU0",
-                                   .model_name   = "EPYC",
-                                   .vendor_name  = "AMD",
-                                   .product_name = "EPYC 7763" });
-
-    auto expected_tracks = core_names;
-    expected_tracks.emplace_back("process_physical_memory");
-    expect_reader_has_tracks(expected_tracks);
 }
 
 // ---------------------------------------------------------------------------

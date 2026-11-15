@@ -5,7 +5,6 @@
 
 # Add subdirectories
 add_subdirectory(common)
-add_subdirectory(base)
 add_subdirectory(gpu)
 add_subdirectory(cpu)
 
@@ -51,7 +50,6 @@ endif()
 # Collect all sources
 set(pmc_collectors_sources
     ${pmc_common_sources}
-    ${pmc_base_sources}
     ${pmc_gpu_sources}
     ${pmc_cpu_sources}
     ${pmc_gpu_perf_counter_sources}
