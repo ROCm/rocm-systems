@@ -801,7 +801,7 @@ add_test(
         ${COV_OPTION} tests/unit/utils/test_analysis_views.py ${WORKING_DIR_OPTION}
 )
 
-# The metric library sync test imports tools/, which an install tree lacks.
+# These tests import tools/, which an install tree lacks.
 if(NOT TEST_FROM_INSTALL)
     add_test(
         NAME test_metric_library_sync
@@ -811,10 +811,14 @@ if(NOT TEST_FROM_INSTALL)
             tests/unit/rocprof_compute_soc/metric_library/test_metric_library_sync.py
             ${WORKING_DIR_OPTION}
     )
-endif()
-
-# The real-equation round-trip test imports tools/, which an install tree lacks.
-if(NOT TEST_FROM_INSTALL)
+    add_test(
+        NAME test_metric_lock
+        COMMAND
+            ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_metric_lock.xml
+            ${COV_OPTION}
+            tests/unit/rocprof_compute_soc/metric_library/test_metric_lock.py
+            ${WORKING_DIR_OPTION}
+    )
     add_test(
         NAME test_equation_format_real
         COMMAND
