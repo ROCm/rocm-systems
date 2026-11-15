@@ -56,15 +56,20 @@ using dda::common::ddaLL128Slices;
 using dda::common::kDdaLL128Warp;
 using dda::common::kDdaLL128WireWordsPerSlice;
 
-// Block width of each tier when uncapped. The spread two-shot keeps its own kDdaLLSpreadThreads.
-constexpr unsigned kDdaArLLOneShotThreads = 256;
-constexpr unsigned kDdaArLLTwoShotThreads = 256;
+// Block width of each tier when uncapped and the arch table sets no ddaNarrowThreads. The spread two-shot keeps its
+// own kDdaLLSpreadThreads.
+constexpr unsigned kDdaArLLOneShotThreads = 512;
+constexpr unsigned kDdaArLLTwoShotThreads = 1024;
 constexpr unsigned kDdaArLL128Threads = 512;
 
-// Two-shot messages above this keep wide blocks: on 16 ranks, 1024 beats 256 by 7% at 16M, while 256 beats 1024 by
-// 5-44% from 2M to 8M on 4, 8 and 16 ranks.
+// Two-shot messages above this keep kDdaArLLTwoShotThreads under ddaNarrowThreads: on 16 ranks, 1024 beats 256 by 7%
+// at 16M, while 256 beats 1024 by 5-44% from 2M to 8M on 4, 8 and 16 ranks.
 constexpr size_t kDdaArLLTwoShotNarrowMaxBytes = 8 * 1024 * 1024;
-constexpr unsigned kDdaArLLTwoShotWideThreads = 1024;
+
+static inline unsigned ddaArLLOneShotThreads(const ncclComm* comm) {
+  const int narrow = rcclDdaFabricNarrowThreads(comm);
+  return narrow > 0 ? (unsigned)narrow : kDdaArLLOneShotThreads;
+}
 
 // Single source of the LL and LL128 launch geometry: a 1-D grid over `units` of work, `unitThreads` threads each,
 // in blocks of `threads`, capped low (LL serves small messages where latency, not occupancy, dominates). `cap` lowers
@@ -81,12 +86,14 @@ static inline std::pair<dim3, dim3> ddaArFabricLLGrid(const ncclComm* comm, size
 // Per-tier geometry for `bytes` of message, shared by each launcher and the *Blocks reporters.
 // LL one-shot: 8-byte packets of the whole message, one thread each.
 static inline std::pair<dim3, dim3> ddaArLLOneShotGeom(const ncclComm* comm, size_t bytes, rcclDdaLaunchCap cap) {
-  return ddaArFabricLLGrid(comm, bytes >> 3, kDdaArLLOneShotThreads, 1, cap);
+  return ddaArFabricLLGrid(comm, bytes >> 3, ddaArLLOneShotThreads(comm), 1, cap);
 }
 
 // LL two-shot: 8-byte packets of one shard, one thread each.
 static inline std::pair<dim3, dim3> ddaArLLTwoShotGeom(const ncclComm* comm, size_t bytes, rcclDdaLaunchCap cap) {
-  const unsigned threads = bytes > kDdaArLLTwoShotNarrowMaxBytes ? kDdaArLLTwoShotWideThreads : kDdaArLLTwoShotThreads;
+  const int narrow = rcclDdaFabricNarrowThreads(comm);
+  const unsigned threads =
+    narrow > 0 && bytes <= kDdaArLLTwoShotNarrowMaxBytes ? (unsigned)narrow : kDdaArLLTwoShotThreads;
   return ddaArFabricLLGrid(comm, (bytes >> 3) / (size_t)std::max(comm->nRanks, 1), threads, 1, cap);
 }
 
@@ -100,7 +107,9 @@ static inline std::pair<dim3, dim3> ddaArLL128TwoShotGeom(const ncclComm* comm, 
   const size_t shardBytes = bytes / (size_t)std::max(comm->nRanks, 1);
   const size_t slices = ddaLL128Slices(shardBytes);
   const size_t maxBlocks = dda::common::ddaCapBlocks((size_t)std::max(comm->ddaFabricMaxBlocks, 1), cap.blocks);
-  return ddaArFabricLLGrid(comm, slices, dda::common::ddaLL128SliceThreads(slices, maxBlocks), kDdaLL128Warp, cap);
+  const unsigned threads =
+    dda::common::ddaLL128SliceThreads(slices, maxBlocks, (unsigned)rcclDdaFabricNarrowThreads(comm));
+  return ddaArFabricLLGrid(comm, slices, threads, kDdaLL128Warp, cap);
 }
 
 static_assert(dda::common::kDdaLLSpreadMaxRanks >= dda::common::kDdaMaxNranks, "spread peer table too small");
@@ -117,11 +126,11 @@ constexpr size_t kDdaLLSpreadMinBlockWireBytes = 96 * 1024;
 constexpr size_t kDdaLLSpreadMinSavedWireBytes = 4 * 1024 * 1024;
 
 // Whether the spread two-shot beats the LL one-shot for a message of `bytes` on nRanks ranks. The block wire is that
-// of the one-shot block the spread replaces.
-static bool ddaLLArSpreadWins(size_t bytes, int nRanks) {
+// of the oneShotThreads-wide one-shot block the spread replaces.
+static bool ddaLLArSpreadWins(size_t bytes, int nRanks, unsigned oneShotThreads) {
   const size_t n = (size_t)nRanks;
   const size_t nPk = bytes >> 3;
-  const size_t blockPkts = std::min<size_t>(nPk, kDdaArLLOneShotThreads);
+  const size_t blockPkts = std::min<size_t>(nPk, oneShotThreads);
   const size_t blockWire = blockPkts * sizeof(dda::common::LLPacket16) * (n - 1);
   const size_t savedWire = 2 * (n - 1) * (n - 2) * bytes / n;
   return blockWire >= kDdaLLSpreadMinBlockWireBytes || savedWire >= kDdaLLSpreadMinSavedWireBytes;
@@ -142,7 +151,15 @@ static bool ddaLLArSpreadSelected(ncclComm* comm, size_t bytes, unsigned threads
       ddaLLArTwoShotSlotPkts(ddaBankSize(comm->ddaScratchBytes), nRanks)) {
     return false;
   }
-  return ddaLLArSpreadWins(bytes, nRanks);
+  return ddaLLArSpreadWins(bytes, nRanks, ddaArLLOneShotThreads(comm));
+}
+
+// Geometry of the LL one-shot tier, shared by its launcher and ncclAllReduceDdaFabricLLBlocks: the spread two-shot's
+// when ddaLLArSpreadSelected picks it (*spread = true), else the one-shot's.
+static std::pair<dim3, dim3> ddaArLLOneShotTierGeom(ncclComm* comm, size_t bytes, rcclDdaLaunchCap cap, bool* spread) {
+  const auto spreadGeom = ddaArLLSpreadGeom(comm, bytes, cap);
+  *spread = ddaLLArSpreadSelected(comm, bytes, spreadGeom.second.x);
+  return *spread ? spreadGeom : ddaArLLOneShotGeom(comm, bytes, cap);
 }
 
 // The LDS-staged writers need gfx1250's async LDS stores (ASYNC_COPY_SUPPORTED) and one LL128 warp per wave.
@@ -178,10 +195,11 @@ static ncclResult_t ncclAllReduceDdaFabricLLTyped(const void* sendbuff, void* re
   const size_t bankSize = ddaBankSize(comm->ddaScratchBytes);
 
   const dda::common::DdaKernelParams params{comm->abortFlagDev};
-  const auto spreadGeom = ddaArLLSpreadGeom(comm, bytes, cap);
-  if (ddaLLArSpreadSelected(comm, bytes, spreadGeom.second.x)) {
-    const dim3 grid = spreadGeom.first;
-    const dim3 block = spreadGeom.second;
+  bool spread = false;
+  const auto geom = ddaArLLOneShotTierGeom(comm, bytes, cap, &spread);
+  const dim3 grid = geom.first;
+  const dim3 block = geom.second;
+  if (spread) {
     INFO(NCCL_COLL, "DDA fabric AllReduce LL spread two-shot: nRanks=%d bytes=%zu nPk=%zu grid=%u block=%u", nRanks,
          bytes, nPk, grid.x, block.x);
     const hipEvent_t stopEvent = rcclTakeAddonStopEvent(comm);
@@ -209,9 +227,6 @@ static ncclResult_t ncclAllReduceDdaFabricLLTyped(const void* sendbuff, void* re
     return ncclSuccess;
   }
 
-  const auto geom = ddaArLLOneShotGeom(comm, bytes, cap);
-  const dim3 grid = geom.first;
-  const dim3 block = geom.second;
   INFO(NCCL_COLL, "DDA fabric AllReduce LL: nRanks=%d bytes=%zu nPk=%zu grid=%u block=%u", nRanks, bytes, nPk, grid.x,
        block.x);
 
@@ -751,10 +766,8 @@ uint32_t ncclAllReduceDdaFabricLLBlocks(ncclComm* comm, size_t count, ncclDataTy
     const dim3 grid = ddaArLLTwoShotGeom(comm, bytes, cap).first;
     return grid.x * grid.y;
   }
-  const auto spreadGeom = ddaArLLSpreadGeom(comm, bytes, cap);
-  const dim3 grid = (ddaLLArSpreadSelected(comm, bytes, spreadGeom.second.x) ? spreadGeom
-                                                                               : ddaArLLOneShotGeom(comm, bytes, cap))
-                      .first;
+  bool spread = false;
+  const dim3 grid = ddaArLLOneShotTierGeom(comm, bytes, cap, &spread).first;
   return grid.x * grid.y;
 }
 

@@ -96,6 +96,8 @@ class DdaAllReduceFabricLLMicrotest : public ::testing::Test {
       auto it = params_.find(env);
       return it == params_.end() ? deftVal : it->second;
     };
+    // The narrow widths the gfx1250 SPX table sets for 16 ranks or fewer.
+    g_rcclDdaFabricNarrowThreads = [](const ncclComm*) { return 256; };
     comm().rank = 5;
     comm().addonStopEvent = kStopEvent;
   }
@@ -553,6 +555,25 @@ TEST_F(DdaAllReduceFabricLLMicrotest, RunLL_TwoShotWideBlocksAbove8MiB) {
   EXPECT_EQ(RunOneLL(above, ncclFloat32, {0, 256}).block.x, 256u) << "a thread cap still narrows it";
 }
 
+// With no ddaNarrowThreads (DPX, larger SPX comms, no table) every tier keeps its wide blocks: 512 one-shot, 1024
+// two-shot at any size, 512 LL128 two-shot, and the spread rule measures a 512-thread one-shot block.
+TEST_F(DdaAllReduceFabricLLMicrotest, Run_WithoutNarrowThreadsKeepsTheWideBlocks) {
+  g_rcclDdaFabricNarrowThreads = [](const ncclComm*) { return 0; };
+  comm().ddaFabricMaxBlocks = 256;
+  comm().ddaScratchBytes = 1u << 30;
+  EXPECT_EQ(RunOneLL(1u << 16).block.x, 512u);
+  EXPECT_EQ(Only().grid.x, 64u);
+  EXPECT_EQ(ncclAllReduceDdaFabricLLBlocks(mock_.get(), 1u << 16, ncclFloat32), 64u);
+  comm().nRanks = 16;
+  EXPECT_EQ(RunOneLL(Floats(4096)).kernel, (LLSpread<float, 0>())) << "512 packets x 16 B x 15 = 120 KiB a block";
+  comm().nRanks = 8;
+  OnlyTwoShot();
+  EXPECT_EQ(RunOneLL(8 * 1536).block.x, 1024u);
+  EXPECT_EQ(Only().grid.x, 1u);
+  EXPECT_EQ(RunOneLL128(8 * 8 * kSliceData / 4).block.x, 512u);
+  EXPECT_EQ(Only().grid.x, 1u);
+}
+
 // One-shot LL128: a warp per slice, 16 warps a block.
 TEST_F(DdaAllReduceFabricLLMicrotest, RunLL128_OneShotGridFollowsMessageSlices) {
   EXPECT_EQ(RunOneLL128(16 * kSliceData / 4).grid.x, 1u);
@@ -766,11 +787,13 @@ TEST_F(DdaAllReduceFabricLLMicrotest, RunLL_SpreadWhereOneShotBlockWireOrSavedWi
 
 // Both rules at their exact edges and just below: 96 KiB of block wire at 25 ranks, 4 MiB of saved wire.
 TEST_F(DdaAllReduceFabricLLMicrotest, RunLL_SpreadRuleEdges) {
-  EXPECT_TRUE(ddaLLArSpreadWins(2048, 25));       // 256 packets x 16 B x 24 = 96 KiB
-  EXPECT_FALSE(ddaLLArSpreadWins(2032, 25));      // 254 packets: 95.25 KiB
-  EXPECT_FALSE(ddaLLArSpreadWins(64 << 10, 24));  // a full block: 92 KiB, and 2.8 MiB saved
-  EXPECT_TRUE(ddaLLArSpreadWins(3 << 20, 3));     // 2 x 2 x 1 / 3 x 3 MiB = 4 MiB
-  EXPECT_FALSE(ddaLLArSpreadWins(1398101, 4));    // 2 x 3 x 2 / 4 x bytes = 4 MiB - 1
+  EXPECT_TRUE(ddaLLArSpreadWins(2048, 25, 256));       // 256 packets x 16 B x 24 = 96 KiB
+  EXPECT_FALSE(ddaLLArSpreadWins(2032, 25, 256));      // 254 packets: 95.25 KiB
+  EXPECT_FALSE(ddaLLArSpreadWins(64 << 10, 24, 256));  // a full block: 92 KiB, and 2.8 MiB saved
+  EXPECT_TRUE(ddaLLArSpreadWins(3 << 20, 3, 256));     // 2 x 2 x 1 / 3 x 3 MiB = 4 MiB
+  EXPECT_FALSE(ddaLLArSpreadWins(1398101, 4, 256));    // 2 x 3 x 2 / 4 x bytes = 4 MiB - 1
+  EXPECT_TRUE(ddaLLArSpreadWins(4096, 16, 512));       // 512 packets x 16 B x 15 = 120 KiB
+  EXPECT_FALSE(ddaLLArSpreadWins(4096, 16, 256));      // 256 packets: 60 KiB
   comm().nRanks = 25;
   comm().ddaScratchBytes = 1u << 30;
   EXPECT_EQ(RunOneLL(Floats(2048)).kernel, (LLSpread<float, 0>()));

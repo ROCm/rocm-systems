@@ -44,7 +44,8 @@ static inline std::pair<dim3, dim3> ddaReduceScatterFabricLL128Geom(ncclComm* co
   if (nBlocksMax < 1) {
     nBlocksMax = 1;
   }
-  const unsigned threads = dda::common::ddaLL128SliceThreads(slices, (size_t)nBlocksMax);
+  const unsigned threads =
+    dda::common::ddaLL128SliceThreads(slices, (size_t)nBlocksMax, (unsigned)rcclDdaFabricNarrowThreads(comm));
   const size_t warps = threads / (unsigned)kDdaLL128Warp;
   unsigned blocks = (unsigned)std::min<size_t>((slices + warps - 1) / warps, (size_t)nBlocksMax);
   if (blocks == 0) {

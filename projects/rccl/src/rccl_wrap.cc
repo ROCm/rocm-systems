@@ -1413,6 +1413,14 @@ int rcclDdaFabricAgLL128Threads(const ncclComm* comm, size_t totalBytes) {
   return table->ddaAgLL128Threads;
 }
 
+int rcclDdaFabricNarrowThreads(const ncclComm* comm) {
+  const rcclArchThresholds* table = extAlgoArchTable(comm);
+  if (table == nullptr || table->ddaNarrowThreads <= 0 || comm->nRanks > table->ddaNarrowMaxRanks) {
+    return 0;
+  }
+  return table->ddaNarrowThreads;
+}
+
 int rcclDdaFabricAgLL128Blocks(const ncclComm* comm, size_t totalBytes) {
   if (comm == nullptr) return 0;
   const int cap = comm->ddaFabricMaxBlocks;

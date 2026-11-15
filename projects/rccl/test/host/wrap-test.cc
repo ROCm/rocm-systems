@@ -8058,6 +8058,8 @@ TEST(WrapMicrotestIsolated, DdaLLTwoShotThreshold_SmallCommPerRankCap) {
         EXPECT_EQ(2 * kMiB, rcclDdaLLTwoShotThreshold(comm));
         comm->nRanks = 16;
         EXPECT_EQ(16 * kMiB, rcclDdaLLTwoShotThreshold(comm)) << "the LL tier cap";
+        table.ddaLLMaxPerRank[ncclFuncAllReduce] = 0;
+        EXPECT_EQ(2 * kMiB, rcclDdaLLTwoShotThreshold(comm)) << "rank-scaled comms ignore the per-rank cap";
         DeleteCommWithArch(comm);
       });
 }
@@ -8068,8 +8070,10 @@ TEST(WrapMicrotestIsolated, DdaLLTwoShotThreshold_EnvOverridesRankScaling) {
       []() {
         SetMicroEnv("RCCL_DDA_LL_TWOSHOT_THRESHOLD", "4194304");
         g_loadParam = ForceParam("RCCL_DDA_LL_TWOSHOT_THRESHOLD", int64_t(4) << 20);
+        rcclArchThresholds table = MakeRankScaledTable();
+        table.ddaArLLTwoShotMaxPerRank = 1 * kMiB;
         ncclComm* comm = MakeCommWithArch("gfx1250");
-        comm->archThresholds = Gfx1250Table();
+        comm->archThresholds = &table;
         comm->nRanks = 16;
         EXPECT_EQ(4 * kMiB, rcclDdaLLTwoShotThreshold(comm));
         comm->nRanks = 2;
@@ -8930,6 +8934,51 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_RegisteredRerouteFollowsTheArchTable
         ignoreTable = 1;
         ar.ExpectUnchanged(8 * kMiB, false, ceReg, "RCCL_IGNORE_ARCH_TABLE=1, eager");
         ar.ExpectUnchanged(16 * kMiB, true, NCCL_ALGO_RING, "RCCL_IGNORE_ARCH_TABLE=1, capture");
+      });
+}
+
+// Only the SPX table sets the narrow DDA LL / LL128 width, and only up to 16 ranks.
+TEST(WrapMicrotestIsolated, DdaFabricNarrowThreads_FromSpxTableUpTo16Ranks) {
+  RUN_ISOLATED_TEST(
+      "Wrap_DdaFabricNarrowThreads_FromSpxTableUpTo16Ranks",
+      []() {
+        ncclComm* comm = MakeCommWithArch("gfx1250");
+        comm->archThresholds = real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_SPX);
+        ASSERT_NE(nullptr, comm->archThresholds);
+        for (const std::pair<int, int> c : {std::make_pair(2, 256), {4, 256}, {16, 256}, {17, 0}, {32, 0}}) {
+          comm->nRanks = c.first;
+          EXPECT_EQ(c.second, rcclDdaFabricNarrowThreads(comm)) << c.first << " ranks";
+        }
+        comm->nRanks = 16;
+        comm->archThresholds = real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_DPX);
+        EXPECT_EQ(0, rcclDdaFabricNarrowThreads(comm)) << "DPX";
+        comm->archThresholds = nullptr;
+        EXPECT_EQ(0, rcclDdaFabricNarrowThreads(comm)) << "no table";
+        DeleteCommWithArch(comm);
+      });
+}
+
+// The SPX table's small-comm ReduceScatter entries: DDA LL128 to 16M per rank on 8 ranks only, and Ring LL128 to
+// 32M per rank on 8 and 16 ranks; 32 ranks keep 7.5M and 8M.
+TEST(WrapMicrotestIsolated, ReduceScatterSmallComm_FromSpxTable) {
+  RUN_ISOLATED_TEST(
+      "Wrap_ReduceScatterSmallComm_FromSpxTable",
+      []() {
+        SetMicroEnvAbsent("NCCL_PROTO");
+        ncclComm* comm = MakeGfx1250ProtocolComm(8);
+        comm->archThresholds = real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_SPX);
+        ASSERT_NE(nullptr, comm->archThresholds);
+        const std::pair<int, size_t> dda[] = {{8, 128 * kMiB}, {16, 120 * kMiB}, {32, 240 * kMiB}};
+        for (const auto& c : dda) {
+          comm->nRanks = c.first;
+          EXPECT_EQ(c.second, rcclDdaLL128Threshold(comm, ncclFuncReduceScatter)) << c.first << " ranks";
+        }
+        for (const std::pair<int, size_t> c : {std::make_pair(8, 32 * kMiB), {16, 32 * kMiB}, {32, 8 * kMiB}}) {
+          comm->nRanks = c.first;
+          EXPECT_EQ(NCCL_PROTO_LL128, RingProtocol(comm, ncclFuncReduceScatter, c.second)) << c.first << " ranks";
+          EXPECT_EQ(NCCL_PROTO_SIMPLE, RingProtocol(comm, ncclFuncReduceScatter, c.second + 16)) << c.first << " ranks";
+        }
+        DeleteCommWithArch(comm);
       });
 }
 

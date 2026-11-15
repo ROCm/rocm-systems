@@ -129,6 +129,12 @@ struct rcclArchThresholds {
   // to the LL tier's cap). 0 = the RCCL_DDA_LL_TWOSHOT_THRESHOLD default; that env var, when set, wins.
   size_t ddaArLLTwoShotMaxPerRank;
 
+  // On comms of at most ddaNarrowMaxRanks ranks: the DDA LL AllReduce one-shot and two-shot (to 8 MiB) launch
+  // ddaNarrowThreads-wide blocks instead of 512 and 1024, and the warp-per-slice DDA LL128 AllReduce two-shot and
+  // ReduceScatter grids do instead of 512 while one pass of them covers the shard. 0 threads = off.
+  int ddaNarrowThreads;
+  int ddaNarrowMaxRanks;
+
   // DDA VMM (AllReduce / ReduceScatter) launches min(init block cap,
   // clamp(ddaVmmBlockBudget / nRanks, ddaVmmMinBlocks, ddaVmmMaxBlocks)) blocks
   // on comms of at least rankScaledMinRanks ranks. Budget 0 = the init block cap.

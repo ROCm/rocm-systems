@@ -211,7 +211,8 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
     0,                   // [0] Broadcast      -- not used
     0,                   // [1] Reduce          -- not used
     16ULL*1024*1024,     // [2] AllGather       -- 128M at 8 ranks, 256M (clipped) from 16
-    15ULL*512*1024,      // [3] ReduceScatter   -- nRanks x 7.5M from 8 ranks: one 1920B slice per warp at 256 blocks
+    15ULL*512*1024,      // [3] ReduceScatter   -- nRanks x 7.5M from 16 ranks (8 take rsSmallCommDdaLL128MaxPerRank):
+                         //                        one 1920B slice per warp at 256 blocks
     0,                   // [4] AllReduce       -- ddaLL128Max total
     0,                   // [5] SendRecv        -- not used
     0,                   // [6] Send            -- not used
@@ -244,6 +245,10 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
   // Below 8 ranks: LL two-shot beats DDA LL128 1.2x at 4M on 4 ranks and loses 1.2x from 8M; on 2 ranks it
   // loses 1.2x at 4M, so 2M stays.
   .ddaArLLTwoShotMaxPerRank = 1ULL*1024*1024,
+  // 4-16 ranks (1-4 SPX nodes): 256-thread DDA LL blocks beat 512/1024 by up to 1.9x at 4K-8M, and 256-thread
+  // LL128 blocks beat 512 by 1.24-1.44x where one pass covers the shard (8M/16M/32M). Not measured above 16 ranks.
+  .ddaNarrowThreads = 256,
+  .ddaNarrowMaxRanks = 16,
   // VMM peaks at 128 / 128 / 64 / 32 blocks on 8 / 16 / 32 / 64 ranks.
   .ddaVmmBlockBudget = 2048,
   .ddaVmmMinBlocks = 32,

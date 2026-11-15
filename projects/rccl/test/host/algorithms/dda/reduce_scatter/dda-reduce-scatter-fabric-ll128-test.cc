@@ -53,6 +53,8 @@ class DdaReduceScatterFabricLL128Microtest : public ::testing::Test {
     };
     // The LL128 tier is off without an arch table; give it a cap well above anything tested.
     g_rcclDdaLL128Threshold = [](const ncclComm*, ncclFunc_t) { return size_t{1} << 30; };
+    // The narrow width the gfx1250 SPX table sets for 16 ranks or fewer.
+    g_rcclDdaFabricNarrowThreads = [](const ncclComm*) { return 256; };
     comm().rank = 7;
     comm().addonStopEvent = kStopEvent;
   }
@@ -279,6 +281,15 @@ TEST_F(DdaReduceScatterFabricLL128Microtest, Launch_GridFollowsShardSlicesWithin
   EXPECT_EQ(RunOne(16 * 100 * kSliceFloats).grid.x, 9u);
   comm().ddaLLEpochLen = 0;
   EXPECT_EQ(RunOne(16 * 100 * kSliceFloats).grid.x, 1u);
+}
+
+// With no ddaNarrowThreads (DPX, larger SPX comms, no table) the grid keeps 512-thread blocks, a block per 16 slices.
+TEST_F(DdaReduceScatterFabricLL128Microtest, Launch_WithoutNarrowThreadsKeeps512) {
+  g_rcclDdaFabricNarrowThreads = [](const ncclComm*) { return 0; };
+  comm().ddaFabricMaxBlocks = 256;
+  EXPECT_EQ(RunOne(8 * kSliceFloats).block.x, 512u);
+  EXPECT_EQ(RunOne(16 * kSliceFloats).grid.x, 1u);
+  EXPECT_EQ(RunOne(16 * kSliceFloats + 4).grid.x, 2u);
 }
 
 TEST_F(DdaReduceScatterFabricLL128Microtest, Launch_LaunchErrorIsReported) {
