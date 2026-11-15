@@ -44,6 +44,7 @@
 
 import collections
 import json
+import math
 import sys
 
 # Python 3.6 compatibility: dataclasses added in 3.7
@@ -503,9 +504,10 @@ def test_common_counters_constant_across_passes(json_data, common_counter):
             f"some passes: present in {len(values)}/{len(passes)}"
         )
         # A counter stuck at zero is constant, so the spread check below cannot see it.
-        assert min(values) > 0, (
-            f"dispatch {dispatch_id} ({entry['kernel']}) common counter {counter} is not > 0 "
-            f"in every replay pass: {values}"
+        # min() and max() skip a NaN that is not the first value, so check every value.
+        assert all(math.isfinite(v) and v > 0 for v in values), (
+            f"dispatch {dispatch_id} ({entry['kernel']}) common counter {counter} is not a "
+            f"finite value > 0 in every replay pass: {values}"
         )
         # Apply tolerance check with both relative and absolute components.
         # For SQ_WAVES, this allows up to 8-wave spread regardless of magnitude.

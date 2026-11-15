@@ -282,6 +282,97 @@ def test_baseline_passes_every_validator_check():
             assert constant(data, counter) == "pass", f"{archs}: {counter}"
 
 
+def test_zero_everywhere_fails_on_gfx11_and_other_gfx12_names():
+    # Only gfx1200 and gfx1201 may skip an all-zero counter. gfx11 (where the old AUTO
+    # perf-level skip applied) and any other gfx12 name must still fail, alone or mixed.
+    for archs in (
+        ("gfx1100",),
+        ("gfx1102",),
+        ("gfx1151",),
+        ("gfx1202",),
+        ("gfx1201", "gfx1100"),
+        ("gfx1200", "gfx1151"),
+    ):
+        assert constant(make_json(archs, grid(ZERO))) == "fail", archs
+
+
+def test_instruction_counter_is_exact_across_passes():
+    # SQ_INSTS_VALU replays bit-for-bit. One pass off by a single instruction, or one pass
+    # missing 1 of 32 instance records (~3% low), is a failure on every agent.
+    for archs in (("gfx942",), ("gfx1201",), ("gfx1250",)):
+        for bad in (NONZERO + 1, NONZERO * 31 / 32):
+            values = grid(NONZERO)
+            values[1][2] = bad
+            assert constant(make_json(archs, values)) == "fail", (archs, bad)
+
+
+def test_wave_spread_boundary_is_eight_waves():
+    # SQ_WAVES jitters by a few waves on gfx94x replay: a spread of exactly 8 waves passes,
+    # 9 fails. This pins the tolerance from both sides.
+    for spread, want in ((8.0, "pass"), (9.0, "fail")):
+        waves = [[16384.0] * 5, [4096.0] * 5, [1024.0] * 5]
+        waves[2][4] = 1024.0 + spread
+        data = make_json(("gfx942",), grid(NONZERO), waves=waves)
+        assert constant(data, "SQ_WAVES") == want, spread
+
+
+def test_identical_kernel_signatures_fail():
+    # Metric 4 must be able to fail: kernels with the same usable counters are not
+    # distinguishable. On gfx1201 the skipped SQ_INSTS_VALU is left out of the signature,
+    # so identical SQ_WAVES alone must fail there too.
+    waves = [[4096.0] * 5 for _ in range(3)]
+    v = validate()
+    for archs, values in ((("gfx942",), grid(NONZERO)), (("gfx1201",), grid(ZERO))):
+        data = make_json(archs, values, waves=waves)
+        assert (
+            outcome(v.test_counters_differ_between_kernels, data, COMMON) == "fail"
+        ), archs
+
+
+def test_negative_reading_is_not_an_unimplemented_zero():
+    # Only explicit zeros mark a counter as unimplemented on gfx1200/gfx1201. A negative
+    # reading (for example a wrapped accumulator) is a failure, not a skip.
+    values = grid(ZERO)
+    values[1][1] = -1.0
+    assert constant(make_json(("gfx1201",), values)) == "fail"
+    assert constant(make_json(("gfx1200",), grid(-1.0))) == "fail"
+
+
+def test_duplicate_pass_record_fails_dispatch_id_check():
+    # _records_by_dispatch keeps the last record of a (dispatch, pass), so a duplicated pass
+    # carrying a nonzero SQ_INSTS_VALU in front of a zero one is invisible to the zero check.
+    # The dispatch-id check is what rejects the duplicate.
+    data = make_json(("gfx1201",), grid(ZERO))
+    records = data["rocprofiler-sdk-tool"][0]["callback_records"]["counter_collection"]
+    first = records[0]
+    records.insert(
+        0, dict(first, records=[dict(s, value=NONZERO) for s in first["records"]])
+    )
+    v = validate()
+    assert outcome(v.test_dispatch_id_constant_across_replay_passes, data, 5) == "fail"
+
+
+def test_n_pass_key_is_accepted():
+    # The per-pass index may be named "n" instead of "replay_pass".
+    data = make_json(("gfx942",), grid(NONZERO))
+    for rec in data["rocprofiler-sdk-tool"][0]["callback_records"]["counter_collection"]:
+        rec["n"] = rec.pop("replay_pass")
+    assert constant(data) == "pass"
+
+
+def test_nan_in_a_later_pass_fails():
+    # rocprofv3 JSON can carry NaN (cereal writes NaN tokens and json.load accepts them).
+    # min() and max() skip a NaN that is not the first value, so every value must be checked.
+    for archs in (("gfx942",), ("gfx1201",)):
+        values = grid(NONZERO)
+        values[0][3] = float("nan")
+        assert constant(make_json(archs, values)) == "fail", archs
+        waves = [[16384.0] * 5, [4096.0] * 5, [1024.0] * 5]
+        waves[1][2] = float("nan")
+        data = make_json(archs, grid(NONZERO), waves=waves)
+        assert constant(data, "SQ_WAVES") == "fail", archs
+
+
 def main():
     tests = [(n, f) for n, f in sorted(globals().items()) if n.startswith("test_")]
     failures = []
