@@ -5,6 +5,7 @@
 #include "common/units/data_size.hpp"
 #include "core/agent_manager.hpp"
 #include "core/categories.hpp"
+#include "core/collection/schema.hpp"
 #include "core/common.hpp"
 #include "core/common_types.hpp"
 #include "core/config.hpp"
@@ -21,6 +22,7 @@
 #include "library/pmc/collectors/hipfile/types.hpp"
 #include "library/thread_info.hpp"
 #include "rocprofiler-systems/categories.h"
+#include "trace_cache/counter_samples.hpp"
 #include "trace_cache/metadata_registry.hpp"
 #include "trace_cache/sample_type.hpp"
 
@@ -550,6 +552,11 @@ perfetto_processor_t::prepare_for_processing()
     core::perfetto::ensure_synthetic_process_track_emitted(
         static_cast<int>(m_process_id));
     core::perfetto::emit_system_info_packet(node_info::get_instance());
+    m_counters.build(
+        m_metadata.get_counter_schemas(),
+        [](const collection::schema&, const collection::column_spec& column) {
+            return resolve_counter_slot(column);
+        });
 }
 
 template <typename CategoryT, typename FuncT, typename... Args>
@@ -1183,6 +1190,87 @@ perfetto_processor_t::handle(const gpu_perf_counter_sample& _gpu_perf_counter)
         TRACE_COUNTER(trait::name<category::rocm_counter_collection>::value,
                       counter_collection_track::at(_track_key, 0), _ts, entry.value);
     }
+}
+
+namespace
+{
+// A lambda: readability-function-size counts the lambdas inside TRACE_COUNTER as
+// nesting of an enclosing function, and a namespace-scope lambda has none
+template <typename CategoryT>
+constexpr auto k_emit_counter =
+    [](const ::perfetto::CounterTrack& track, std::uint64_t timestamp, double value) {
+        TRACE_COUNTER(trait::name<CategoryT>::value, track, timestamp, value);
+    };
+}  // namespace
+
+template <typename CategoryT>
+perfetto_processor_t::counter_slot
+perfetto_processor_t::make_counter_slot(const collection::column_spec& column)
+{
+    using counter_track_t = core::perfetto::counter_track<CategoryT>;
+
+    const auto track_key = std::hash<std::string>{}(column.perfetto_track_name);
+    if(!counter_track_t::exists(track_key))
+    {
+        counter_track_t::emplace(track_key, column.perfetto_track_name,
+                                 column.unit.c_str());
+    }
+    return counter_slot{ .track     = counter_track_t::at(track_key, 0),
+                         .emit      = k_emit_counter<CategoryT>,
+                         .had_value = false };
+}
+
+perfetto_processor_t::counter_slot
+perfetto_processor_t::resolve_counter_slot(const collection::column_spec& column)
+{
+    using slot_factory_t = counter_slot (*)(const collection::column_spec&);
+
+    const auto find_factory = []<size_t... Idx>(std::uint32_t category_id,
+                                                std::index_sequence<Idx...>) {
+        slot_factory_t factory = nullptr;
+        static_cast<void>(
+            ((category_id == Idx
+                  ? (factory = &make_counter_slot<category_type_id_t<Idx>>, true)
+                  : false) ||
+             ...));
+        return factory;
+    };
+
+    const auto factory = find_factory(
+        column.category_id,
+        rocprofsys::utility::make_index_sequence_range<1, ROCPROFSYS_CATEGORY_LAST>{});
+    if(factory == nullptr)
+    {
+        LOG_WARNING("Counter column '{}' has unknown category id {}",
+                    column.perfetto_track_name, column.category_id);
+        return counter_slot{};
+    }
+    return factory(column);
+}
+
+void
+perfetto_processor_t::handle(const counter_batch& batch)
+{
+    m_counters.for_each_value(batch, [&batch](counter_slot& slot, double value) {
+        if(!slot.track.has_value())
+        {
+            return;
+        }
+        slot.emit(*slot.track, batch.timestamp, value);
+        slot.had_value = true;
+    });
+}
+
+void
+perfetto_processor_t::handle(const gap_marker& gap)
+{
+    // columns that never had a value get no zero
+    m_counters.for_each_slot([&gap](const counter_slot& slot) {
+        if(slot.track.has_value() && slot.had_value)
+        {
+            slot.emit(*slot.track, gap.begin_ns, 0.0);
+        }
+    });
 }
 
 void

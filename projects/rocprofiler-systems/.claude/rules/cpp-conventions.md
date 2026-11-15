@@ -45,8 +45,10 @@ description: C++ hard rules for rocprofiler-systems — standard, formatting, li
     `CALLBACK_PHASE_ENTER`, or a struct field that must match the library
     struct) keeps the library's spelling. Mark it with
     `// NOLINTNEXTLINE(readability-identifier-naming)`, or wrap a block in
-    `NOLINTBEGIN`/`NOLINTEND` with a reason. This is the only allowed NOLINT
-    for naming.
+    `NOLINTBEGIN`/`NOLINTEND` with a reason. A name that an internal concept
+    requires (`type_identifier` for `has_type_identifier`) also gets
+    `// NOLINTNEXTLINE(readability-identifier-naming): <reason>`. These are the
+    only allowed NOLINTs for naming.
 - Mark a function `[[nodiscard]]` when the caller must use the return value.
 - A bare numeric literal other than `0`, `1`, `2`, `3`, or `4` is a named
   constant. The literal belongs in that constant's initializer.

@@ -90,12 +90,13 @@ To add a sample type, copy an existing one:
 
 1. Add a new value to `type_identifier_t`. Never renumber or reuse a value.
    `fragmented_space` is reserved.
-2. Write a struct that derives from `cacheable_t` and declares
+2. Write a default-constructible struct that declares
    `static constexpr type_identifier_t type_identifier`. Allowed field types:
    trivially copyable values, `std::string_view`, `std::vector` or `std::span`
    of trivially copyable values, and `std::optional` (not nested).
-3. Specialize `serialize`, `deserialize` and `get_size`. All three list the same
-   fields in the same order.
+3. Give it a member `template <typename Archive> void serialize(Archive&
+   archive)` that passes every field to `archive(...)`, in wire order. The one
+   function writes, reads and sizes the record (`archive.hpp`).
 4. Add the type to `storage_parser_t` in `storage_parser_alias.hpp`. Add a
    `handle()` overload to `sample_processor_interface`, and implement it in
    every processor.

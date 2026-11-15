@@ -36,4 +36,13 @@ concept buffer_storage_policy = buffered_value<Value, TypeIdentifierEnum> &&
                                     } -> std::convertible_to<bool>;
                                 };
 
+/** What a writer of records needs: store each record type, and know whether storing
+ * works. */
+template <typename Storage, typename... Records>
+concept record_storage =
+    requires(Storage& storage, const Storage& const_storage, const Records&... records) {
+        (storage.store(records), ...);
+        { const_storage.is_running() } -> std::convertible_to<bool>;
+    };
+
 }  // namespace rocprofsys::policies::trace_cache

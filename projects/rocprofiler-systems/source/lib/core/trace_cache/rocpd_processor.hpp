@@ -3,7 +3,11 @@
 
 #pragma once
 #include "agent_manager.hpp"
+#include "core/agent.hpp"
+#include "core/collection/schema.hpp"
 #include "core/node_info.hpp"
+#include "core/trace_cache/counter_samples.hpp"
+#include "core/trace_cache/counter_schema_table.hpp"
 #include "core/trace_cache/metadata_registry.hpp"
 #include "core/trace_cache/sample_processor_interface.hpp"
 
@@ -15,10 +19,12 @@
 #include <profiler-hub/writer_types.hpp>
 
 #include <cstddef>
+#include <cstdint>
 #include <string>
 #include <string_view>
 #include <sys/types.h>
 #include <unordered_set>
+#include <vector>
 
 namespace rocprofsys::trace_cache
 {
@@ -47,9 +53,40 @@ public:
     void handle(const gpu_perf_counter_sample& sample) override;
     void handle(const hipfile_pmc_sample& sample) override;
     void handle(const kfd_sample& sample) override;
+    void handle(const counter_batch& batch) override;
+    void handle(const gap_marker& gap) override;
 
 private:
+    /** One rocpd counter of a schema column, resolved once before processing. The views
+     * point into the schemas held by m_counters. */
+    struct counter_slot
+    {
+        profiler_hub::writer_types::pmc_info_unique_id_t uid;
+        profiler_hub::writer_types::track_info_t         track;
+        const char*                                      category = nullptr;
+        /** Agent not found; warned at build. */
+        bool skip      = false;
+        bool had_value = false;
+    };
+
     void post_process_metadata();
+    /** Registers the registry tracks and those of the counter schemas. */
+    void register_tracks(const std::vector<collection::schema>&   counter_schemas,
+                         profiler_hub::writer_types::process_id_t process_id);
+    /** Registers the registry PMC info and that of the counter schemas; a PMC whose
+     * agent is unknown is skipped with a warning. */
+    void register_pmc_infos(const std::vector<collection::schema>&   counter_schemas,
+                            profiler_hub::writer_types::process_id_t process_id);
+    void build_counter_slots();
+    [[nodiscard]] counter_slot make_counter_slot(
+        const collection::schema& description, const collection::column_spec& column,
+        profiler_hub::writer_types::process_id_t process_id) const;
+    void insert_counter_value(const counter_slot& slot, std::uint64_t timestamp,
+                              double value);
+
+    /** The agent of a PMC: by type index, then by id.
+     * @throws std::out_of_range when neither exists */
+    [[nodiscard]] const agent& find_pmc_agent(agent_type type, std::size_t index) const;
 
     /**
      * Try to insert a PMC event into the writer.
@@ -77,6 +114,8 @@ private:
     // PMC keys that have already been warned about
     std::unordered_set<std::string> m_unregistered_pmcs_already_warned;
     std::size_t                     m_dropped_pmc_events_count = 0;
+
+    counter_schema_table<counter_slot> m_counters;
 };
 
 }  // namespace rocprofsys::trace_cache

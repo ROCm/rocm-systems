@@ -5,7 +5,10 @@
 
 #include "agent_manager.hpp"
 #include "config.hpp"
+#include "core/collection/schema.hpp"
 #include "core/perfetto/fwd.hpp"
+#include "core/trace_cache/counter_samples.hpp"
+#include "core/trace_cache/counter_schema_table.hpp"
 #include "core/trace_cache/metadata_registry.hpp"
 #include "core/trace_cache/sample_processor_interface.hpp"
 #include "library/pmc/collectors/hipfile/sample.hpp"
@@ -61,8 +64,26 @@ public:
     void handle(const hipfile_pmc_sample& sample) override;
     void handle(const backtrace_region_sample& sample) override;
     void handle(const kfd_sample& sample) override;
+    void handle(const counter_batch& batch) override;
+    void handle(const gap_marker& gap) override;
 
 private:
+    using counter_emitter_t = void (*)(const ::perfetto::CounterTrack&, std::uint64_t,
+                                       double);
+
+    /** One counter track of a schema column, resolved once before processing. */
+    struct counter_slot
+    {
+        /** Empty (and emit null): unknown category, warned at build. */
+        std::optional<::perfetto::CounterTrack> track;
+        counter_emitter_t                       emit      = nullptr;
+        bool                                    had_value = false;
+    };
+
+    template <typename CategoryT>
+    static counter_slot make_counter_slot(const collection::column_spec& column);
+    static counter_slot resolve_counter_slot(const collection::column_spec& column);
+
     // Returns a cached ::perfetto::Track for the given (category, args...) key,
     // calling get_perfetto_track only on the first encounter to avoid the global
     // mutex on every event in high-frequency handle() paths.
@@ -99,6 +120,7 @@ private:
     std::map<std::uint32_t, std::uint64_t>           m_unified_memory_fault_counts;
     bool                                             m_cpu_pmc_initialized{ false };
     std::optional<std::uint32_t>                     m_cpu_pmc_owner_device_id;
+    counter_schema_table<counter_slot>               m_counters;
 };
 }  // namespace trace_cache
 }  // namespace rocprofsys

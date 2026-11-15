@@ -60,6 +60,7 @@ add_library(
 
 target_sources(rocprofiler-systems-core-library PRIVATE ${core_sources} ${core_headers})
 add_subdirectory(binary)
+add_subdirectory(collection)
 add_subdirectory(components)
 add_subdirectory(config)
 add_subdirectory(containers)
