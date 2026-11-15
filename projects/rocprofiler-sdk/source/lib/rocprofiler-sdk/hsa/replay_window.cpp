@@ -108,27 +108,27 @@ replay_drain_or_fatal(const Queue& queue)
 }
 
 bool
-replay_drain_agent(hsa_agent_t agent, replay_wait_budget_t budget)
+replay_drain_agent(hsa_agent_t agent, const replay_deadline_t& deadline)
 {
     auto* queue_controller = get_queue_controller();
     if(queue_controller == nullptr) return true;
 
+    using clock                  = replay_deadline_t::clock;
     constexpr auto poll_interval = std::chrono::milliseconds{2};
-    const auto     poll_slice    = [&]() {
-        const auto slice_end = std::chrono::steady_clock::now() + budget.slice;
+    const auto     poll          = [&](clock::duration timeout) {
+        const auto poll_end = clock::now() + timeout;
         for(;;)
         {
             // Includes queues destroy has already removed from the live map. Their completion
             // handlers are still running until Queue::sync returns, and a snapshot taken in that
             // window would race those handlers.
             if(queue_controller->in_flight_async_packets(agent) == 0) return true;
-            const auto now = std::chrono::steady_clock::now();
-            if(now >= slice_end) return false;
-            std::this_thread::sleep_for(
-                std::min<std::chrono::steady_clock::duration>(poll_interval, slice_end - now));
+            const auto now = clock::now();
+            if(now >= poll_end) return false;
+            std::this_thread::sleep_for(std::min<clock::duration>(poll_interval, poll_end - now));
         }
     };
-    return replay_wait(poll_slice, "this agent's async completion handler(s)", budget);
+    return replay_wait_until(poll, "this agent's async completion handler(s)", deadline);
 }
 
 void
@@ -183,7 +183,9 @@ replay_ring_submit(const Queue& queue, const rocprofiler_packet* packets, size_t
 }
 
 barrier_wait_result_t
-replay_barrier_and_wait(const Queue& queue, hsa_signal_t completion, replay_wait_budget_t budget)
+replay_barrier_and_wait(const Queue&             queue,
+                        hsa_signal_t             completion,
+                        const replay_deadline_t& deadline)
 {
     auto barrier   = hsa_barrier_and_packet_t{};
     barrier.header = HSA_PACKET_TYPE_BARRIER_AND << HSA_PACKET_HEADER_TYPE;
@@ -197,16 +199,16 @@ replay_barrier_and_wait(const Queue& queue, hsa_signal_t completion, replay_wait
 
     if(!replay_ring_submit(queue, &packet, 1)) return barrier_wait_result_t::not_submitted;
 
-    const auto completed = replay_wait(
-        [&]() {
+    const auto completed = replay_wait_until(
+        [&](replay_deadline_t::clock::duration timeout) {
             return core.hsa_signal_wait_scacquire_fn(completion,
                                                      HSA_SIGNAL_CONDITION_EQ,
                                                      0,
-                                                     std::chrono::nanoseconds{budget.slice}.count(),
+                                                     std::chrono::nanoseconds{timeout}.count(),
                                                      HSA_WAIT_STATE_BLOCKED) == 0;
         },
         "this queue's prior GPU work",
-        budget);
+        deadline);
 
     return completed ? barrier_wait_result_t::completed : barrier_wait_result_t::timed_out;
 }
