@@ -3,112 +3,121 @@
 
 """Unit tests for src/utils/equation_format.py."""
 
+from typing import List, Set
+
 import pytest
+import yaml
+from format_yaml import extract_metric_equations
 
-from utils.equation_format import normalize_equation
+import config
+from rocprof_compute_soc.metric_library.loader import default_metric_library_dir
+from utils.equation_format import (
+    CHANNEL_PLACEHOLDER,
+    LITERAL_VALUES,
+    ASTNode,
+    BinaryOpNode,
+    FunctionCallNode,
+    NumberNode,
+    UnaryOpNode,
+    normalize_equation,
+    parse_equation,
+)
+from utils.metrics.expression import build_eval_string
+from utils.utils_counter_defs import COLLECTABLES_DIR
 
-
-class TestCriticalCorrectness:
-    """Tests for bugs that would corrupt equation semantics."""
-
-    def test_peak_empirical_preserved(self):
-        """Peak (Empirical) is a column header - space must be preserved."""
-        assert normalize_equation("Peak (Empirical)") == "Peak (Empirical)"
-
-    def test_unary_negation_preserves_semantics(self):
-        """-(a + b) must stay -(a + b), not become -a + b which changes the result."""
-        assert normalize_equation("-(a + b)") == "-(a + b)"
-        assert normalize_equation("-(a * b)") == "-(a * b)"
-        assert normalize_equation("-(a - b)") == "-(a - b)"
-
-
-class TestConstantFactoring:
-    """Main normalization: factor constants out of aggregations."""
-
-    @pytest.mark.parametrize("func", ["SUM", "AVG", "MIN", "MAX"])
-    def test_constant_factored_out(self, func):
-        """SUM(x * 128) becomes 128 * SUM(x)."""
-        assert normalize_equation(f"{func}(x * 128)") == f"128 * {func}(x)"
-        assert normalize_equation(f"{func}(64 * x)") == f"64 * {func}(x)"
-
-    def test_real_world_cache_bw_equation(self):
-        """Actual equation from gfx115x configs."""
-        input_eq = (
-            "SUM(TCP_TOTAL_CACHE_ACCESSES_sum * 128) / "
-            "SUM(End_Timestamp - Start_Timestamp)"
-        )
-        expected = (
-            "128 * SUM(TCP_TOTAL_CACHE_ACCESSES_sum) / "
-            "SUM(End_Timestamp - Start_Timestamp)"
-        )
-        assert normalize_equation(input_eq) == expected
-
-    def test_nested_aggregations(self):
-        """Each nested aggregation factors independently."""
-        result = normalize_equation("SUM(x * 2) / SUM(y * 3)")
-        assert result == "2 * SUM(x) / (3 * SUM(y))"
-
-    def test_no_factoring_for_non_aggregation(self):
-        """Only SUM/AVG/MIN/MAX factor, not other functions."""
-        assert normalize_equation("SQRT(x * 2)") == "SQRT(x * 2)"
-
-    def test_no_factoring_for_addition(self):
-        """Only multiplication factors, not addition."""
-        assert normalize_equation("SUM(x + 128)") == "SUM(x + 128)"
+# (input, normalized) pairs; each normalized form is also its own normalized form
+FACTORING_CASES = [
+    # a constant on the right of the product
+    (
+        "SUM(TCP_REQ_sum * 64) / SUM(End_Timestamp - Start_Timestamp)",
+        "64 * SUM(TCP_REQ_sum) / SUM(End_Timestamp - Start_Timestamp)",
+    ),
+    # every aggregation; a factored product on the right keeps its parentheses
+    (
+        "AVG(64 * x) / MIN(2 * y) + MAX(z * 4)",
+        "64 * AVG(x) / (2 * MIN(y)) + 4 * MAX(z)",
+    ),
+    # left as written: a second argument, a function that is not an aggregation,
+    # a sum, and a negative constant, which would swap MIN and MAX
+    ("MAX(2 * x, 1)", "MAX(2 * x, 1)"),
+    ("TO_INT(x * 2)", "TO_INT(x * 2)"),
+    ("SUM(x + 128)", "SUM(x + 128)"),
+    ("MIN(-2 * x)", "MIN(-2 * x)"),
+]
 
 
-class TestParenthesesMinimization:
-    """Remove unnecessary parens while preserving semantics."""
-
-    def test_unnecessary_parens_removed(self):
-        """Same precedence ops don't need parens."""
-        assert normalize_equation("(a + b) + c") == "a + b + c"
-        assert normalize_equation("(a * b) * c") == "a * b * c"
-
-    def test_right_operand_parens_preserved(self):
-        """A right operand keeps its parens, so the evaluation order stays the same."""
-        assert normalize_equation("a - (b - c)") == "a - (b - c)"
-        assert normalize_equation("a / (b / c)") == "a / (b / c)"
-        assert normalize_equation("a + (b + c)") == "a + (b + c)"
-        assert normalize_equation("a * (b / c)") == "a * (b / c)"
-
-    def test_precedence_parens_preserved(self):
-        """Precedence parens must stay."""
-        assert normalize_equation("(a + b) * c") == "(a + b) * c"
-        assert normalize_equation("a * (b + c)") == "a * (b + c)"
+def real_equations() -> Set[str]:
+    """Return every equation of the panel configs, metric library and collectables."""
+    files = list(config.analysis_configs_dir.glob("gfx*/*.yaml"))
+    files += default_metric_library_dir().glob("gfx*/*.yaml")
+    equations = set()
+    for path in files:
+        document = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        equations.update(equation for _, equation in extract_metric_equations(document))
+    for path in COLLECTABLES_DIR.glob("*.yaml"):
+        equations.update(yaml.safe_load(path.read_text(encoding="utf-8")).values())
+    return equations
 
 
-class TestRealWorldEquations:
-    """Actual equations from YAML configs."""
-
-    def test_variable_substitution(self):
-        """$variables like $wave_size work correctly."""
-        eq = (
-            "SUM($wave_size * SQ_INSTS_VALU_sum) / SUM(End_Timestamp - Start_Timestamp)"
-        )
-        result = normalize_equation(eq)
-        assert "$wave_size" in result
-        assert "SUM" in result
-
-    def test_peak_value_equation(self):
-        """Peak values like $L2Bw_empirical_peak * 1e9."""
-        eq = "$L2Bw_empirical_peak * 1e9"
-        assert normalize_equation(eq) == eq
-
-    def test_scientific_notation(self):
-        """Scientific notation works."""
-        assert normalize_equation("x / 1e9") == "x / 1e9"
+def fully_parenthesized(node: ASTNode) -> str:
+    """Write a syntax tree with parentheses around every operation and no spaces."""
+    if isinstance(node, UnaryOpNode):
+        return f"{node.op}({fully_parenthesized(node.operand)})"
+    if isinstance(node, BinaryOpNode):
+        left = fully_parenthesized(node.left)
+        right = fully_parenthesized(node.right)
+        return f"({left}{node.op}{right})"
+    if isinstance(node, FunctionCallNode):
+        return f"{node.name}({','.join(fully_parenthesized(arg) for arg in node.args)})"
+    if isinstance(node, NumberNode):
+        return node.value
+    return node.name
 
 
-class TestSimpleEquations:
-    """Whitespace and trivial equations."""
+def test_real_equations_round_trip():
+    """Each real equation parses as Python reads it, and normalizing it with every
+    parenthesis written out and no spaces gives back the equation."""
+    failures: List[str] = []
+    for equation in sorted(real_equations()):
+        if equation in LITERAL_VALUES or CHANNEL_PLACEHOLDER in equation:
+            continue
+        written_out = fully_parenthesized(parse_equation(equation))
+        normalized = normalize_equation(written_out)
+        if build_eval_string(written_out) != build_eval_string(equation):
+            failures.append(f"parsed as {written_out}: {equation}")
+        elif normalized != equation:
+            failures.append(f"normalized to {normalized}: {equation}")
+    assert failures == []
 
-    def test_whitespace_normalization(self):
-        """Whitespace gets normalized."""
-        assert normalize_equation("a+b") == "a + b"
-        assert normalize_equation("a  +  b") == "a + b"
 
-    def test_empty_and_simple_cases(self):
-        """Simple cases work."""
-        assert normalize_equation("42") == "42"
-        assert normalize_equation("x") == "x"
+@pytest.mark.parametrize(
+    "equation", ["Peak (Empirical)", "SUM(TO_INT(TCC_ATOMIC[::_1])) / SUM($denom)"]
+)
+def test_text_and_channel_templates_left_as_written(equation):
+    assert normalize_equation(equation) == equation
+
+
+@pytest.mark.parametrize(("equation", "normalized"), FACTORING_CASES)
+def test_constants_factored_out_of_aggregations(equation, normalized):
+    assert normalize_equation(equation) == normalized
+    assert normalize_equation(normalized) == normalized
+
+
+def test_unary_minus_keeps_its_operand():
+    """-(a - b) keeps its parentheses: -a - b is a different equation."""
+    for equation in ["-(a - b)", "a - -b", "100 * -SUM(x) / y"]:
+        assert normalize_equation(equation) == equation
+
+
+@pytest.mark.parametrize(
+    "equation",
+    [
+        "SUM(a",  # an unclosed call
+        "a b",  # two operands without an operator
+        "a +",  # an operator without its right operand
+        "TCC_HIT[0]",  # a single channel, which no equation names
+    ],
+)
+def test_unparseable_equation_raises(equation):
+    with pytest.raises(ValueError):
+        parse_equation(equation)
