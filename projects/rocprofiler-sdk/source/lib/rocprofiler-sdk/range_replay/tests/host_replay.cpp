@@ -650,7 +650,7 @@ namespace hsa = ::rocprofiler::hsa;
 namespace rrt = ::rocprofiler::range_replay::test;
 
 // Production fences wait about a minute before they give up.
-constexpr auto fence_timeout_budget = hsa::replay_wait_budget_t{std::chrono::milliseconds{1}, 2};
+constexpr auto fence_timeout_budget = std::chrono::milliseconds{2};
 
 range_replay::host_agent_state_t
 host_agent(uint64_t handle)
