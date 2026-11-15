@@ -4,7 +4,7 @@
     "tool": "rj_isa_diff",
     "tool_version": "0.1.0-p0",
     "schema_version": "rj_isa_diff.v1",
-    "rocjitsu_revision": "90ddc8aae52bd58adaff8bab6498a140bcb77747",
+    "rocjitsu_revision": "5588fbf7ec0c5b3f0d92a4c83116ef5997915ac3",
     "rocjitsu_version": "0.3.0",
     "semantics": "RocJITsu ComputeUnitCore::execute_instruction, gfx950 (CDNA4) wave64, default arithmetic semantics",
     "compiler": "13.4.0"
@@ -48,6 +48,8 @@
   "options": {
     "seed": 1,
     "cases": 5000,
+    "boundary_sweep": "mandatory",
+    "max_boundary_cases": 250000,
     "policy": "baseline-v1"
   },
   "unresolved": [],
@@ -64,28 +66,59 @@
       "policy": "baseline-v1",
       "seed": 1,
       "counts": {
-        "attempted": 5000,
-        "accepted": 5000,
-        "executed_pairs": 5000,
-        "valid_pairs": 5000,
+        "attempted": 5559,
+        "accepted": 5559,
+        "executed_pairs": 5559,
+        "valid_pairs": 5559,
         "mismatches": 0,
         "harness_errors": 0,
         "rejections": {},
         "mismatch_kinds": {}
       },
+      "boundary_sweep": {
+        "cases": 559,
+        "accepted": 559,
+        "valid": 559,
+        "mismatches": 0,
+        "mandatory": true,
+        "generated": 637,
+        "duplicates_dropped": 78,
+        "truncated": false,
+        "valid_by_family": {
+          "bf16": 18,
+          "bf16x2": 12,
+          "bit": 66,
+          "bits": 48,
+          "edge": 78,
+          "f16": 48,
+          "f16x2": 30,
+          "f32": 84,
+          "f64": 11,
+          "int": 54,
+          "int64": 1,
+          "small": 30,
+          "uniform": 79
+        }
+      },
+      "random_phase": {
+        "cases": 5000,
+        "accepted": 5000,
+        "valid": 5000,
+        "mismatches": 0
+      },
       "execution": {
         "old_region_insts": 1,
         "new_region_insts": 2,
-        "old_insts_executed": 5000,
-        "new_insts_executed": 10000
+        "old_insts_executed": 5559,
+        "new_insts_executed": 11118
       },
       "timing": {
-        "setup_ns": 506782,
-        "propose_ns": 775985,
-        "state_load_ns": 3720262,
-        "old_execute_ns": 325846,
-        "new_execute_ns": 438998,
-        "compare_ns": 2002392,
+        "setup_ns": 519482,
+        "propose_ns": 4284338,
+        "state_load_ns": 5291329,
+        "old_execute_ns": 389735,
+        "new_execute_ns": 496246,
+        "compare_ns": 8272625,
         "triage_ns": 0
       },
       "counterexamples": []

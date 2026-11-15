@@ -339,6 +339,23 @@ bool has_mnemonic_prefix(std::string_view mnemonic, std::string_view prefix) {
 
 } // namespace
 
+std::vector<SourceOperand> source_operands(const Instruction &inst) {
+  std::vector<SourceOperand> out;
+  for (int i = 0; i < inst.num_src_operands(); ++i) {
+    const Operand &op = *inst.src_operand(i);
+    SourceOperand s;
+    s.fieldless = op.is_fieldless();
+    const OperandClass cls = classify_operand(op);
+    if (cls.space == Space::Tracked)
+      s.locs = cls.locs;
+    else if (cls.space == Space::Constant)
+      if (auto v = op.const_value())
+        s.constant = static_cast<uint32_t>(*v);
+    out.push_back(s);
+  }
+  return out;
+}
+
 bool is_p0_mnemonic(std::string_view mnemonic) {
   return std::ranges::find(kP0Mnemonics, mnemonic) != kP0Mnemonics.end();
 }

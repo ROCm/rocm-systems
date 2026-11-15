@@ -7,6 +7,7 @@
 /// Fixtures are LLVM-assembled gfx950 words (fixtures/fixtures.asm -> fixtures.inc);
 /// the tests themselves never run LLVM.
 
+#include "boundary.h"
 #include "case_io.h"
 #include "effects.h"
 #include "input_policy.h"
@@ -239,10 +240,13 @@ TEST(IsaDiffValidator, EquivalentRewriteHasNoMismatch) {
   TestRun r = run(d, 2000);
   ASSERT_EQ(r.results.size(), 1u);
   EXPECT_EQ(r.results[0].test_status, TestStatus::NoMismatchFound);
-  EXPECT_EQ(r.results[0].valid_pairs, 2000u);
+  // The mandatory boundary sweep runs first, then exactly 2000 random cases.
+  EXPECT_GT(r.results[0].boundary.valid, 0u);
+  EXPECT_EQ(r.results[0].random.valid, 2000u);
+  EXPECT_EQ(r.results[0].valid_pairs, r.results[0].boundary.valid + 2000u);
   // Only the region executed: 1 old and 2 new instructions per case.
-  EXPECT_EQ(r.results[0].old_insts_executed, 2000u);
-  EXPECT_EQ(r.results[0].new_insts_executed, 4000u);
+  EXPECT_EQ(r.results[0].old_insts_executed, r.results[0].executed_pairs);
+  EXPECT_EQ(r.results[0].new_insts_executed, 2 * r.results[0].executed_pairs);
   EXPECT_EQ(r.overall(), "NO_MISMATCH_FOUND");
   EXPECT_EQ(r.coverage(), "COMPLETE_FOR_DECLARED_SCOPE");
 }
@@ -261,7 +265,8 @@ TEST(IsaDiffValidator, IdenticalRegionIsStableAndLeakFree) {
   RegionResult a = test_region(same, opt, p1);
   RegionResult b = test_region(same, opt, p2);
   EXPECT_EQ(a.test_status, TestStatus::NoMismatchFound);
-  EXPECT_EQ(a.valid_pairs, 1500u);
+  EXPECT_EQ(a.random.valid, 1500u);
+  EXPECT_EQ(a.valid_pairs, a.boundary.valid + 1500u);
   EXPECT_EQ(a.valid_pairs, b.valid_pairs);
   EXPECT_EQ(a.mismatches, 0u);
 }
@@ -659,6 +664,189 @@ TEST(IsaDiffFormat, CaseJsonRoundTripsAndKeepsKeys) {
   EXPECT_EQ((*j)["s"].as_string(), "xA\n");
   EXPECT_EQ((*j)["n"].as_int(), -3);
   EXPECT_EQ((*j)["u"].as_uint(), UINT64_MAX);
+}
+
+// ---------------------------------------------------------------------------
+// Mandatory boundary / NaN / corner-case sweep
+
+std::vector<RegionInst> region_from_words(const std::vector<uint32_t> &words) {
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  std::vector<uint32_t> padded = words;
+  padded.resize(words.size() + 4, 0);
+  std::vector<RegionInst> out;
+  size_t off = 0;
+  while (off < words.size()) {
+    auto d = decoder->decode_window(std::span<const uint32_t>(padded).subspan(off), off * 4);
+    if (d.failed()) {
+      ADD_FAILURE() << "decode failed at word " << off;
+      break;
+    }
+    const size_t n = static_cast<size_t>(d.value()->size()) / 4;
+    RegionInst ri;
+    ri.pc = off * 4;
+    ri.words.assign(words.begin() + static_cast<std::ptrdiff_t>(off),
+                    words.begin() + static_cast<std::ptrdiff_t>(off + n));
+    ri.text = d.value()->disassemble();
+    if (std::string(d.value()->mnemonic()) != "s_endpgm")
+      out.push_back(std::move(ri));
+    off += n;
+  }
+  return out;
+}
+
+bool sweep_has(const BoundarySweep &sweep,
+               std::initializer_list<std::pair<unsigned, uint32_t>> want) {
+  for (const auto &c : sweep.cases) {
+    const Sample s = sweep.materialize(c);
+    bool all = true;
+    for (const auto &[l, v] : want)
+      all = all && s.value[l] == v;
+    if (all)
+      return true;
+  }
+  return false;
+}
+
+TEST(IsaDiffBoundary, EveryEntryRegisterSeesEveryCatalogValue) {
+  CaseData d = analyze(k_exec_old, k_exec_new);
+  ASSERT_EQ(d.regions.size(), 1u);
+  const RegionPair &r = d.regions[0];
+  const RegionFeatures f = make_region_features(r.old_side.insts, r.new_side.insts);
+  const BoundarySweep sweep = build_boundary_sweep(f.roles, r.contract, {});
+  EXPECT_FALSE(sweep.truncated);
+  for (unsigned l = 0; l < kNumLocs; ++l) {
+    if (!r.contract.entry_equal.test(l) || l == kLocScc)
+      continue;
+    for (const NamedValue &v : catalog32())
+      EXPECT_TRUE(sweep_has(sweep, {{l, v.value}})) << loc_name(l) << "=" << v.name;
+  }
+  // 64-bit operands (EXEC and s[2:3]) see f64 specials and EXEC lane patterns.
+  for (uint64_t v : {0x7ff8000000000000ull, 0xfff0000000000000ull, 0x8000000000000000ull,
+                     0x00000000ffffffffull, 0xffffffff00000000ull, 0x0000000000000001ull}) {
+    const auto lo = static_cast<uint32_t>(v), hi = static_cast<uint32_t>(v >> 32);
+    EXPECT_TRUE(sweep_has(sweep, {{kLocExecLo, lo}, {kLocExecHi, hi}})) << hex64(v);
+    EXPECT_TRUE(sweep_has(sweep, {{2, lo}, {3, hi}})) << hex64(v);
+  }
+  // When SCC is an input, corner values run with both SCC values.
+  RegionContract with_scc = r.contract;
+  with_scc.entry_equal.set(kLocScc);
+  with_scc.canary.reset(kLocScc);
+  const BoundarySweep s2 = build_boundary_sweep(f.roles, with_scc, {});
+  EXPECT_TRUE(sweep_has(s2, {{2, 0x7fc00000u}, {kLocScc, 0}}));
+  EXPECT_TRUE(sweep_has(s2, {{2, 0x7fc00000u}, {kLocScc, 1}}));
+  // Deterministic: the same inputs build the same sweep.
+  const BoundarySweep again = build_boundary_sweep(f.roles, r.contract, {});
+  ASSERT_EQ(again.cases.size(), sweep.cases.size());
+  for (size_t i = 0; i < sweep.cases.size(); ++i)
+    EXPECT_EQ(again.cases[i].label, sweep.cases[i].label);
+}
+
+TEST(IsaDiffBoundary, RoleValuesAreAimedAtTheSensitiveOperands) {
+  const auto insts = region_from_words(k_roles);
+  ASSERT_EQ(insts.size(), 7u);
+  const RegionRoles roles = infer_roles(insts, insts);
+  EXPECT_TRUE(roles.decoded);
+  EXPECT_TRUE(roles.roles[3] & kRoleShiftAmount);  // s_lshl_b32 s4, s2, s3
+  EXPECT_TRUE(roles.roles[7] & kRoleBfeControl);   // s_bfe_u32 s5, s6, s7
+  EXPECT_TRUE(roles.roles[9] & kRoleSextInput);    // s_sext_i32_i8 s8, s9
+  EXPECT_TRUE(roles.roles[18] & kRoleShiftAmount); // s_lshl_b64 ..., s18
+  ASSERT_EQ(roles.const_relations.size(), 1u);
+  EXPECT_EQ(roles.const_relations[0].loc, 10u);
+  EXPECT_EQ(roles.const_relations[0].constant, 0x12345u);
+  EXPECT_NE(std::ranges::find(roles.pairs, OperandPair{12, 13, false, ""}), roles.pairs.end());
+  EXPECT_NE(std::ranges::find(roles.pairs, OperandPair{20, 22, true, ""}), roles.pairs.end());
+
+  RegionContract k;
+  k.entry_equal = locs("s2,s3,s6,s7,s9,s10,s12,s13,s16,s17,s18,s20,s21,s22,s23");
+  k.canary = ~k.entry_equal;
+  k.wide_reads = locs("s16,s20,s22");
+  const BoundarySweep sweep = build_boundary_sweep(roles, k, {});
+  EXPECT_FALSE(sweep.truncated);
+  // Shift amounts: at and past the width, and high garbage over a zero low field.
+  for (uint32_t v : {32u, 33u, 63u, 64u, 65u, 0xffffffe0u, 0xffffffc0u})
+    EXPECT_TRUE(sweep_has(sweep, {{3, v}})) << hex32(v);
+  EXPECT_TRUE(sweep_has(sweep, {{18, 64u}}));
+  // S_BFE control: offset 31 width 32, width 0, offset beyond the field.
+  for (uint32_t v : {(32u << 16) | 31u, (0u << 16) | 16u, (1u << 16) | 64u})
+    EXPECT_TRUE(sweep_has(sweep, {{7, v}})) << hex32(v);
+  // Sign-extension edges.
+  for (uint32_t v : {0x7fu, 0x80u, 0x17fu, 0x12345680u})
+    EXPECT_TRUE(sweep_has(sweep, {{9, v}})) << hex32(v);
+  // Values around the literal it is compared with.
+  for (uint32_t v : {0x12345u, 0x12344u, 0x12346u, 0u - 0x12345u, ~0x12345u})
+    EXPECT_TRUE(sweep_has(sweep, {{10, v}})) << hex32(v);
+  // Carry / overflow / borrow pairs on the two add sources.
+  EXPECT_TRUE(sweep_has(sweep, {{12, 0xffffffffu}, {13, 1u}}));
+  EXPECT_TRUE(sweep_has(sweep, {{12, 0x7fffffffu}, {13, 1u}}));
+  EXPECT_TRUE(sweep_has(sweep, {{12, 0u}, {13, 1u}}));
+  EXPECT_TRUE(sweep_has(sweep, {{12, 0x7fc00000u}, {13, 0x7fc00000u}}));
+  // 64-bit compare pair: equal high halves, low halves differing by one.
+  EXPECT_TRUE(sweep_has(sweep, {{20, 0u}, {21, 1u}, {22, 1u}, {23, 1u}}));
+}
+
+TEST(IsaDiffBoundary, OffByOneAgainstALiteralIsAlwaysCaught) {
+  // x > 0x12345 rewritten as x >= 0x12345: wrong only at x == 0x12345, which random
+  // 32-bit sampling essentially never hits. The sweep hits it on every run.
+  CaseData bug = analyze(k_offbyone_old, k_offbyone_bug);
+  ASSERT_EQ(bug.regions.size(), 1u);
+  for (uint64_t seed : {1u, 2u, 3u, 99u}) {
+    SCOPED_TRACE(seed);
+    TestRun r = run(bug, /*cases=*/0, seed);
+    ASSERT_EQ(r.results.size(), 1u);
+    EXPECT_EQ(r.results[0].random.cases, 0u);
+    EXPECT_EQ(r.results[0].test_status, TestStatus::LocalMismatch);
+    EXPECT_GT(r.results[0].boundary.mismatches, 0u);
+    ASSERT_FALSE(r.results[0].examples.empty());
+    EXPECT_EQ(r.results[0].examples[0].phase, "boundary");
+    EXPECT_EQ(r.results[0].examples[0].init_old.get(2), 0x12345u);
+    EXPECT_TRUE(r.results[0].examples[0].locs.test(kLocScc));
+  }
+  // The correct rewrite (x >= 0x12346) passes the same sweep.
+  TestRun fixed = run(analyze(k_offbyone_old, k_offbyone_fixed), /*cases=*/0);
+  EXPECT_EQ(fixed.results[0].test_status, TestStatus::NoMismatchFound);
+  EXPECT_GT(fixed.results[0].boundary.valid, 0u);
+}
+
+TEST(IsaDiffBoundary, ConstraintEdgesRunAndOutOfContractValuesAreRejectedNotChanged) {
+  CaseData d = analyze(k_constraint_old, k_constraint_new);
+  ASSERT_EQ(d.regions.size(), 1u);
+  Constraint c;
+  c.loc = 4;
+  c.umax = 0xffu;
+  d.regions[0].contract.constraints.push_back(c);
+  TestRun r = run(d, /*cases=*/0);
+  const RegionResult &res = r.results[0];
+  EXPECT_EQ(res.test_status, TestStatus::NoMismatchFound);
+  EXPECT_GT(res.boundary.valid, 0u);
+  EXPECT_GT(res.boundary.cases, res.boundary.accepted);
+  bool rejected_above_umax = false;
+  for (const auto &[reason, count] : res.rejections)
+    rejected_above_umax |= reason.rfind("boundary constraint: above umax", 0) == 0 && count > 0;
+  EXPECT_TRUE(rejected_above_umax);
+  EXPECT_GT(res.boundary_families.count("constraint_edge"), 0u);
+  const RegionFeatures f =
+      make_region_features(d.regions[0].old_side.insts, d.regions[0].new_side.insts);
+  const BoundarySweep sweep = build_boundary_sweep(f.roles, d.regions[0].contract, {});
+  EXPECT_TRUE(sweep_has(sweep, {{4, 0xffu}}));
+  EXPECT_TRUE(sweep_has(sweep, {{4, 0xfeu}}));
+  EXPECT_TRUE(sweep_has(sweep, {{4, 0x100u}})); // generated, then rejected by the contract
+}
+
+TEST(IsaDiffBoundary, TruncatedSweepIsReportedAsPartialCoverage) {
+  CaseData d = analyze(k_shift_old, k_shift_new);
+  TestOptions opt;
+  opt.cases = 100;
+  opt.max_boundary_cases = 10;
+  std::vector<RegionResult> results;
+  Json report = test_case(d, opt, "", &results);
+  ASSERT_EQ(results.size(), 1u);
+  EXPECT_TRUE(results[0].boundary_truncated);
+  EXPECT_EQ(results[0].boundary.cases, 10u);
+  EXPECT_GT(results[0].boundary_generated, 10u);
+  EXPECT_EQ(results[0].coverage_scope, CoverageScope::Partial);
+  EXPECT_NE(results[0].reason.find("truncated"), std::string::npos);
+  EXPECT_EQ(report["overall"]["coverage_scope"].as_string(), "PARTIAL");
+  EXPECT_TRUE(report["regions"].items()[0]["boundary_sweep"]["truncated"].as_bool());
 }
 
 } // namespace

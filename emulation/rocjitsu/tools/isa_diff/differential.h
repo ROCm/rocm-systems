@@ -50,15 +50,27 @@ enum class CoverageScope { CompleteForDeclaredScope, Partial, NotEstablished };
 
 struct TestOptions {
   uint64_t seed = 1;
-  uint64_t cases = 1000;          ///< Accepted samples to execute.
-  uint64_t max_attempts = 0;      ///< 0 = 4 * cases.
+  /// Random cases (accepted samples) run after the mandatory boundary sweep.
+  uint64_t cases = 1000;
+  uint64_t max_attempts = 0; ///< Random-phase attempts; 0 = 4 * cases.
+  /// Safety cap on the boundary sweep. The sweep cannot be disabled; reaching the cap
+  /// is reported as truncation and partial coverage.
+  size_t max_boundary_cases = 250000;
   size_t max_counterexamples = 3; ///< Bundles saved per region.
   std::string counterexample_dir; ///< Empty: keep in memory only.
 };
 
+struct PhaseCounts {
+  uint64_t cases = 0;    ///< Samples tried in this phase.
+  uint64_t accepted = 0; ///< Samples satisfying the constraints.
+  uint64_t valid = 0;    ///< Pairs that exited normally on both sides.
+  uint64_t mismatches = 0;
+};
+
 struct Mismatch {
   uint64_t case_index = 0;
-  std::string kind; ///< observable | effect_model | frame_preservation | exit_status_divergence
+  std::string phase; ///< "boundary" or "random".
+  std::string kind;  ///< observable | effect_model | frame_preservation | exit_status_divergence
   LocSet locs;
   std::vector<std::string> frame_fields;
   std::string detail;
@@ -93,6 +105,13 @@ struct RegionResult {
   uint64_t valid_pairs = 0;    ///< Pairs where both sides exited normally and were compared.
   uint64_t mismatches = 0;
   uint64_t harness_errors = 0;
+  PhaseCounts boundary; ///< Mandatory boundary sweep.
+  PhaseCounts random;   ///< Policy-driven random phase.
+  uint64_t boundary_generated = 0;
+  uint64_t boundary_duplicates = 0;
+  bool boundary_truncated = false;
+  /// Valid boundary cases per catalog family ("int", "f32", "shift", "pair.carry", ...).
+  std::map<std::string, uint64_t> boundary_families;
   std::map<std::string, uint64_t> rejections; ///< Constraint rejections and run exclusions.
   std::map<std::string, uint64_t> mismatch_kinds;
   uint64_t old_insts_executed = 0;

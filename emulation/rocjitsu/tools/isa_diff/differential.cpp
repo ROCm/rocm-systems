@@ -3,6 +3,8 @@
 
 #include "differential.h"
 
+#include "boundary.h"
+
 #include <chrono>
 #include <filesystem>
 
@@ -216,6 +218,25 @@ Json RegionResult::to_json() const {
     mk.set(k, v);
   counts.set("mismatch_kinds", std::move(mk));
   j.set("counts", std::move(counts));
+  auto phase_json = [](const PhaseCounts &p) {
+    Json o = Json::object();
+    o.set("cases", p.cases);
+    o.set("accepted", p.accepted);
+    o.set("valid", p.valid);
+    o.set("mismatches", p.mismatches);
+    return o;
+  };
+  Json bj = phase_json(boundary);
+  bj.set("mandatory", true);
+  bj.set("generated", boundary_generated);
+  bj.set("duplicates_dropped", boundary_duplicates);
+  bj.set("truncated", boundary_truncated);
+  Json fam = Json::object();
+  for (const auto &[k, v] : boundary_families)
+    fam.set(k, v);
+  bj.set("valid_by_family", std::move(fam));
+  j.set("boundary_sweep", std::move(bj));
+  j.set("random_phase", phase_json(random));
   Json exec = Json::object();
   exec.set("old_region_insts", static_cast<uint64_t>(old_len));
   exec.set("new_region_insts", static_cast<uint64_t>(new_len));
@@ -235,6 +256,7 @@ Json RegionResult::to_json() const {
     const Mismatch &m = examples.front();
     Json first = Json::object();
     first.set("case_index", m.case_index);
+    first.set("phase", m.phase);
     first.set("kind", m.kind);
     first.set("locations", format_locs(m.locs));
     first.set("detail", m.detail);
@@ -263,6 +285,7 @@ Json counterexample_json(const RegionPair &region, const Mismatch &m, uint64_t s
   j.set("seed", seed);
   j.set("policy", policy);
   j.set("case_index", m.case_index);
+  j.set("phase", m.phase);
   j.set("kind", m.kind);
   j.set("locations", format_locs(m.locs));
   j.set("detail", m.detail);
@@ -338,31 +361,25 @@ RegionResult test_region(const RegionPair &region, const TestOptions &options,
   }
   const Frame frame = old_runner->baseline_frame();
 
-  RegionFeatures features;
-  for (const auto &i : region.old_side.insts)
-    features.old_mnemonics.push_back(i.text);
-  for (const auto &i : region.new_side.insts)
-    features.new_mnemonics.push_back(i.text);
+  const RegionFeatures features =
+      make_region_features(region.old_side.insts, region.new_side.insts);
+  auto sweep_start = Clock::now();
+  const BoundarySweep sweep = build_boundary_sweep(features.roles, region.contract,
+                                                   {options.seed, options.max_boundary_cases});
+  r.t.propose_ns += ns_since(sweep_start);
+  r.boundary_generated = sweep.generated;
+  r.boundary_duplicates = sweep.duplicates;
+  r.boundary_truncated = sweep.truncated;
 
-  const uint64_t max_attempts = options.max_attempts ? options.max_attempts : 4 * options.cases;
   std::map<std::string, uint64_t> unsupported_exclusions;
   uint64_t undefined = 0;
   MachineState init_old, init_new;
-  for (uint64_t case_index = 0; r.accepted < options.cases && r.attempted < max_attempts;
-       ++case_index) {
-    auto t0 = Clock::now();
-    Sample sample = policy.propose(features, region.contract, case_index);
-    project_onto_constraints(sample, region.contract, options.seed ^ (case_index << 1));
-    ++r.attempted;
-    auto rejection = validate_sample(sample, region.contract);
-    r.t.propose_ns += ns_since(t0);
-    if (rejection) {
-      ++r.rejections["constraint: " + *rejection];
-      policy.observe({case_index, false, false, "rejected"});
-      continue;
-    }
-    ++r.accepted;
 
+  // Execute one validated sample on both sides and classify the outcome.
+  auto run_case = [&](const Sample &sample, uint64_t case_index, PhaseCounts &phase,
+                      const char *phase_name, const std::string &family) {
+    ++r.accepted;
+    ++phase.accepted;
     auto t1 = Clock::now();
     build_initial_states(region.contract, sample, frame, options.seed, case_index, init_old,
                          init_new);
@@ -383,6 +400,7 @@ RegionResult test_region(const RegionPair &region, const TestOptions &options,
     auto t4 = Clock::now();
     Mismatch m;
     m.case_index = case_index;
+    m.phase = phase_name;
     m.out_old = out_old;
     m.out_new = out_new;
     std::string kind;
@@ -402,25 +420,30 @@ RegionResult test_region(const RegionPair &region, const TestOptions &options,
       r.t.compare_ns += ns_since(t4);
       policy.observe({case_index, true, false, "excluded"});
       if (kind.empty())
-        continue;
+        return;
       m.kind = kind;
       m.detail = key + ": " + out_old.detail + " " + out_new.detail;
     } else {
       ++r.valid_pairs;
+      ++phase.valid;
+      if (!family.empty())
+        ++r.boundary_families[family];
       const MachineState final_old = old_runner->capture();
       const MachineState final_new = new_runner->capture();
       kind = compare_pair(region, init_old, init_new, final_old, final_new, m);
       r.t.compare_ns += ns_since(t4);
       policy.observe({case_index, true, !kind.empty(), kind});
       if (kind.empty())
-        continue;
+        return;
       m.kind = kind;
       m.final_old = final_old;
       m.final_new = final_new;
-      if (kind == "effect_model" || kind == "frame_preservation")
+      if (kind == "effect_model" || kind == "frame_preservation") {
         ++r.harness_errors;
-      else
+      } else {
         ++r.mismatches;
+        ++phase.mismatches;
+      }
     }
     ++r.mismatch_kinds[kind];
     m.init_old = init_old;
@@ -446,6 +469,43 @@ RegionResult test_region(const RegionPair &region, const TestOptions &options,
       r.examples.push_back(std::move(m));
       r.t.triage_ns += ns_since(t5);
     }
+  };
+
+  // Phase 1: the boundary sweep always runs in full (exact values; never projected).
+  uint64_t case_index = 0;
+  for (const SweepCase &c : sweep.cases) {
+    auto t0 = Clock::now();
+    const Sample sample = sweep.materialize(c);
+    ++r.attempted;
+    ++r.boundary.cases;
+    auto rejection = validate_sample(sample, region.contract);
+    r.t.propose_ns += ns_since(t0);
+    if (rejection) {
+      ++r.rejections["boundary constraint: " + *rejection];
+      policy.observe({case_index, false, false, "rejected"});
+    } else {
+      run_case(sample, case_index, r.boundary, "boundary", c.family);
+    }
+    ++case_index;
+  }
+
+  // Phase 2: random cases from the policy.
+  const uint64_t max_attempts = options.max_attempts ? options.max_attempts : 4 * options.cases;
+  while (r.random.accepted < options.cases && r.random.cases < max_attempts) {
+    auto t0 = Clock::now();
+    Sample sample = policy.propose(features, region.contract, case_index);
+    project_onto_constraints(sample, region.contract, options.seed ^ (case_index << 1));
+    ++r.attempted;
+    ++r.random.cases;
+    auto rejection = validate_sample(sample, region.contract);
+    r.t.propose_ns += ns_since(t0);
+    if (rejection) {
+      ++r.rejections["constraint: " + *rejection];
+      policy.observe({case_index, false, false, "rejected"});
+    } else {
+      run_case(sample, case_index, r.random, "random", "");
+    }
+    ++case_index;
   }
 
   // Status.
@@ -471,7 +531,14 @@ RegionResult test_region(const RegionPair &region, const TestOptions &options,
     r.test_status = TestStatus::NoMismatchFound;
   }
   if (r.valid_pairs > 0 && r.test_status != TestStatus::HarnessError)
-    r.coverage_scope = CoverageScope::CompleteForDeclaredScope;
+    r.coverage_scope =
+        r.boundary_truncated ? CoverageScope::Partial : CoverageScope::CompleteForDeclaredScope;
+  if (r.boundary_truncated) {
+    if (!r.reason.empty())
+      r.reason += "; ";
+    r.reason += "boundary sweep truncated at " + std::to_string(sweep.cases.size()) + " of " +
+                std::to_string(sweep.generated) + " generated cases (--max-boundary-cases)";
+  }
   return r;
 }
 

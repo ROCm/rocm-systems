@@ -3,21 +3,10 @@
 
 #include "input_policy.h"
 
+#include "boundary.h"
+
 namespace rocjitsu::isa_diff {
 namespace {
-
-constexpr uint32_t kBoundary32[] = {
-    0x00000000u, 0x00000001u, 0x00000002u, 0xffffffffu, 0xfffffffeu, 0x7fffffffu,
-    0x80000000u, 0x80000001u, 0xaaaaaaaau, 0x55555555u, 0x0000001fu, 0x00000020u,
-    0x00000021u, 0x0000003fu, 0x00000040u, 0x0000ffffu, 0x00010000u, 0x00008000u,
-    0x000000ffu, 0x00000100u, 0xffff0000u, 0x0000007fu, 0x00000080u, 0xffffff80u,
-};
-
-constexpr uint64_t kBoundary64[] = {
-    0x0000000000000000ull, 0x0000000000000001ull, 0xffffffffffffffffull, 0x7fffffffffffffffull,
-    0x8000000000000000ull, 0x00000000ffffffffull, 0x0000000100000000ull, 0xffffffff00000000ull,
-    0x8000000000000001ull, 0x000000000000003full, 0x0000000000000040ull, 0xaaaaaaaaaaaaaaaaull,
-};
 
 /// SplitMix64 stream: deterministic, portable, and free to seed once per case
 /// (std::mt19937_64 seeding dominated the per-case cost of small regions).
@@ -57,10 +46,31 @@ uint32_t canary_value(uint64_t seed, uint64_t case_index, unsigned loc, bool new
   return v;
 }
 
-Sample BaselinePolicy::propose(const RegionFeatures &, const RegionContract &contract,
+RegionFeatures make_region_features(const std::vector<RegionInst> &old_insts,
+                                    const std::vector<RegionInst> &new_insts) {
+  RegionFeatures f;
+  for (const auto &i : old_insts)
+    f.old_text.push_back(i.text);
+  for (const auto &i : new_insts)
+    f.new_text.push_back(i.text);
+  f.roles = infer_roles(old_insts, new_insts);
+  for (unsigned l = 0; l < kNumLocs; ++l) {
+    for (const auto &v : role_catalog(f.roles.roles[l]))
+      f.role_values[l].push_back(v.value);
+    for (const auto &rel : f.roles.const_relations)
+      if (rel.loc == l)
+        for (const auto &v : const_relative_values(rel.constant))
+          f.role_values[l].push_back(v.value);
+  }
+  return f;
+}
+
+Sample BaselinePolicy::propose(const RegionFeatures &features, const RegionContract &contract,
                                uint64_t case_index) {
   CaseRng rng(splitmix64(seed_ ^ splitmix64(case_index)));
   auto pick = [&](uint64_t n) { return static_cast<size_t>(rng() % n); };
+  const auto &c32 = catalog32();
+  const auto &c64 = catalog64();
   Sample s;
   std::vector<unsigned> assigned;
   for (unsigned l = 0; l < kNumLocs; ++l) {
@@ -71,29 +81,33 @@ Sample BaselinePolicy::propose(const RegionFeatures &, const RegionContract &con
       s.value[l] = static_cast<uint32_t>((case_index & 1u) ^ (flip ? 1u : 0u));
       continue;
     }
-    // A pair operand whose low half is here draws a 64-bit boundary sometimes.
+    // A pair operand whose low half is here draws a 64-bit catalog value sometimes.
     const unsigned hi = l + 1;
     if (contract.wide_reads.test(l) && hi < kNumLocs && contract.entry_equal.test(hi) &&
         pick(3) == 0) {
-      const uint64_t v = pick(2) ? kBoundary64[pick(std::size(kBoundary64))]
-                                 : (uint64_t{1} << pick(64)) ^ (pick(2) ? ~uint64_t{0} : 0);
-      s.value[l] = static_cast<uint32_t>(v);
-      s.value[hi] = static_cast<uint32_t>(v >> 32);
-      s.events.push_back(loc_name(l) + ":pair64");
+      const NamedValue64 &v = c64[pick(c64.size())];
+      s.value[l] = static_cast<uint32_t>(v.value);
+      s.value[hi] = static_cast<uint32_t>(v.value >> 32);
+      s.events.push_back(loc_name(l) + "=" + v.name);
       assigned.push_back(l);
       assigned.push_back(hi);
       ++l; // high half done
       continue;
     }
+    const auto &roles = features.role_values[l];
     const size_t choice = pick(20);
-    if (choice < 7) {
-      s.value[l] = kBoundary32[pick(std::size(kBoundary32))];
-      s.events.push_back(loc_name(l) + ":boundary");
+    if (choice < 4 && !roles.empty()) {
+      s.value[l] = roles[pick(roles.size())];
+      s.events.push_back(loc_name(l) + ":role");
     } else if (choice < 9) {
+      const NamedValue &v = c32[pick(c32.size())];
+      s.value[l] = v.value;
+      s.events.push_back(loc_name(l) + "=" + v.name);
+    } else if (choice < 11) {
       const uint32_t bit = 1u << pick(32);
       s.value[l] = pick(2) ? bit : ~bit;
       s.events.push_back(loc_name(l) + ":single_bit");
-    } else if (choice < 12 && !assigned.empty()) {
+    } else if (choice < 14 && !assigned.empty()) {
       const unsigned other = assigned[pick(assigned.size())];
       const bool complement = pick(2) != 0;
       s.value[l] = complement ? ~s.value[other] : s.value[other];

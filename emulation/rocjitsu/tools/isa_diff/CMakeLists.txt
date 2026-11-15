@@ -8,6 +8,7 @@ add_library(
     rj_isa_diff_core
     STATIC
     artifact.cpp
+    boundary.cpp
     case_io.cpp
     contract.cpp
     diff.cpp
@@ -22,6 +23,7 @@ add_library(
     region.cpp
     region_planner.cpp
     region_runner.cpp
+    roles.cpp
 )
 target_include_directories(rj_isa_diff_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 # The execution-capable ISA registry (via RJ_TOOL_OBJECT_LIBS) is required: the

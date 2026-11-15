@@ -7,11 +7,11 @@
 /// @details This is the seam for later learned input policies. A policy proposes values
 /// for the contract's entry_equal locations and may observe feedback. It can never edit
 /// the programs, the mapping, the observable set or the constraints; those belong to the
-/// contract. P0 ships only BaselinePolicy, which is deterministic in (seed, case index)
-/// and draws:
-///   - boundary values: 0, 1, all-ones, signed and unsigned limits, single bits and
-///     their inverses, alternating patterns, shift amounts around 31/32/63;
-///   - 64-bit boundaries across the two locations of pair operands;
+/// contract. The mandatory boundary sweep (boundary.h) always runs first. The random phase
+/// then uses BaselinePolicy, which is deterministic in (seed, case index) and draws:
+///   - catalog values (integer limits, f32/f16/bf16 specials, bit patterns, ...);
+///   - role values for the register's role (shift amounts, S_BFE fields, ...);
+///   - 64-bit catalog values across the two locations of pair operands;
 ///   - correlated operands: equal or complementary copies of another input;
 ///   - uniform random values;
 ///   - SCC alternating with the case parity, plus random flips.
@@ -19,6 +19,7 @@
 
 #include "contract.h"
 #include "location.h"
+#include "roles.h"
 
 #include <array>
 #include <cstdint>
@@ -35,9 +36,17 @@ struct Sample {
 };
 
 struct RegionFeatures {
-  std::vector<std::string> old_mnemonics;
-  std::vector<std::string> new_mnemonics;
+  std::vector<std::string> old_text; ///< Disassembly of the old side.
+  std::vector<std::string> new_text;
+  RegionRoles roles;
+  /// Role-specific values per location (shift amounts, S_BFE fields, sign-extension
+  /// edges, values around combined constants), precomputed once per region.
+  std::array<std::vector<uint32_t>, kNumLocs> role_values;
 };
+
+/// @brief Decode the region once and derive its features (roles, role values).
+[[nodiscard]] RegionFeatures make_region_features(const std::vector<RegionInst> &old_insts,
+                                                  const std::vector<RegionInst> &new_insts);
 
 struct Feedback {
   uint64_t case_index = 0;

@@ -4,7 +4,7 @@
     "tool": "rj_isa_diff",
     "tool_version": "0.1.0-p0",
     "schema_version": "rj_isa_diff.v1",
-    "rocjitsu_revision": "90ddc8aae52bd58adaff8bab6498a140bcb77747",
+    "rocjitsu_revision": "5588fbf7ec0c5b3f0d92a4c83116ef5997915ac3",
     "rocjitsu_version": "0.3.0",
     "semantics": "RocJITsu ComputeUnitCore::execute_instruction, gfx950 (CDNA4) wave64, default arithmetic semantics",
     "compiler": "13.4.0"
@@ -48,6 +48,8 @@
   "options": {
     "seed": 1,
     "cases": 5000,
+    "boundary_sweep": "mandatory",
+    "max_boundary_cases": 250000,
     "policy": "baseline-v1"
   },
   "unresolved": [],
@@ -64,39 +66,71 @@
       "policy": "baseline-v1",
       "seed": 1,
       "counts": {
-        "attempted": 5000,
-        "accepted": 5000,
-        "executed_pairs": 5000,
-        "valid_pairs": 5000,
-        "mismatches": 4852,
+        "attempted": 5559,
+        "accepted": 5559,
+        "executed_pairs": 5559,
+        "valid_pairs": 5559,
+        "mismatches": 5440,
         "harness_errors": 0,
         "rejections": {},
         "mismatch_kinds": {
-          "observable": 4852
+          "observable": 5440
         }
+      },
+      "boundary_sweep": {
+        "cases": 559,
+        "accepted": 559,
+        "valid": 559,
+        "mismatches": 557,
+        "mandatory": true,
+        "generated": 637,
+        "duplicates_dropped": 78,
+        "truncated": false,
+        "valid_by_family": {
+          "bf16": 18,
+          "bf16x2": 12,
+          "bit": 66,
+          "bits": 48,
+          "edge": 78,
+          "f16": 48,
+          "f16x2": 30,
+          "f32": 84,
+          "f64": 11,
+          "int": 54,
+          "int64": 1,
+          "small": 30,
+          "uniform": 79
+        }
+      },
+      "random_phase": {
+        "cases": 5000,
+        "accepted": 5000,
+        "valid": 5000,
+        "mismatches": 4883
       },
       "execution": {
         "old_region_insts": 1,
         "new_region_insts": 2,
-        "old_insts_executed": 5000,
-        "new_insts_executed": 10000
+        "old_insts_executed": 5559,
+        "new_insts_executed": 11118
       },
       "timing": {
-        "setup_ns": 548095,
-        "propose_ns": 845115,
-        "state_load_ns": 3758221,
-        "old_execute_ns": 433811,
-        "new_execute_ns": 513899,
-        "compare_ns": 3208204,
-        "triage_ns": 348264
+        "setup_ns": 572502,
+        "propose_ns": 1343730,
+        "state_load_ns": 7183006,
+        "old_execute_ns": 3505284,
+        "new_execute_ns": 600526,
+        "compare_ns": 3433300,
+        "triage_ns": 337767
       },
       "first_mismatch": {
-        "case_index": 0,
+        "case_index": 1,
+        "phase": "boundary",
         "kind": "observable",
         "locations": "s8,s9",
-        "detail": "first observable difference s8: old 0x00000084 new 0x00000021"
+        "detail": "first observable difference s8: old 0x00000004 new 0x00000001"
       },
-      "counterexamples": ["case_syn/counterexamples/r0-syn-wrong-opcode-case0.json"]
+      "counterexamples": ["case_syn/counterexamples/r0-syn-wrong-opcode-case1.json"]
     }
   ]
 }

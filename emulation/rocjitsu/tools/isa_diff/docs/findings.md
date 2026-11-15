@@ -8,8 +8,8 @@ Base: `ROCm/rocm-systems` `origin/develop` @ `90ddc8aae5`, branch
 
 | label | what |
 |---|---|
-| **implemented** | Code-object and raw-word ingestion. Decode and CFG via `BasicBlock::build_reachable`. Precise SALU effect model. LocSet liveness (including SCC and VCC/EXEC halves). PC taint. LCS alignment with branch-target validation. Change classification. Conservative single-block region planner (merge, context, stop rules). Contracts with sources. Isolated old/new runners on `ComputeUnitCore::execute_instruction`. Deterministic input policy with a constraint checker. Observable/frame/effect-model comparison. Separate evidence-level results. Counterexample bundles, replay, synthetic injection. CLI `analyze/test/replay/inject`. Prepared-region key. Per-phase cost counters. |
-| **tested** | 25 gtest validator cases (`rj_isa_diff_tests`, ctest prefix `isa_diff.`) covering every row of handoff section 13, plus effect, liveness, alignment, JSON and replay-tamper tests. They pass in Release and under ASan+UBSan+LSan with zero reports. The CLI end-to-end flow was run on clang/lld-built gfx950 code objects and on raw word streams. |
+| **implemented** | Code-object and raw-word ingestion. Decode and CFG via `BasicBlock::build_reachable`. Precise SALU effect model. LocSet liveness (including SCC and VCC/EXEC halves). PC taint. LCS alignment with branch-target validation. Change classification. Conservative single-block region planner (merge, context, stop rules). Contracts with sources. Isolated old/new runners on `ComputeUnitCore::execute_instruction`. Mandatory boundary/NaN/corner-case sweep, run on every test (integer limits, f32/f16/bf16/f64 special encodings, EXEC lane patterns, operand-role values for shift amounts, S_BFE fields, sign-extension inputs and literal neighbours, carry/overflow/borrow pairs, constraint edges). Deterministic random policy drawing from the same catalogs, with a constraint checker. Observable/frame/effect-model comparison. Separate evidence-level results. Counterexample bundles, replay, synthetic injection. CLI `analyze/test/replay/inject`. Prepared-region key. Per-phase cost counters. |
+| **tested** | 30 gtest validator cases (`rj_isa_diff_tests`, ctest prefix `isa_diff.`) covering every row of handoff section 13, plus effect, liveness, alignment, JSON and replay-tamper tests. They pass in Release and under ASan+UBSan+LSan with zero reports. The CLI end-to-end flow was run on clang/lld-built gfx950 code objects and on raw word streams. |
 | **not run** | No real LLVM old/new pair produced by an optimisation switch: this is deferred to the separate LLVM plugin task, by user decision. No result-cache store: keys are computed and recorded, but nothing reuses results across runs. No kernel/context reproducer: reachability is not established in P0. No SMT. |
 | **unsupported** | Regions containing VALU, memory, MFMA, waits, barriers, branches, hwreg access, indirect SGPR access, TTMP/FLAT_SCRATCH/XNACK operands, or PC-derived inputs. Multi-block regions. Code objects with several `.text` sections or with zero-size kernel symbols. |
 | **inconclusive** | Regions whose two continuations read different locations (`INCONCLUSIVE_MAPPING`, e.g. register renaming across blocks). Mismatches under an `UNRESOLVED` contract. Zero-valid-case runs. |
@@ -43,6 +43,22 @@ Additional checks:
 - `ReplayRejectsAnEditedBundle`: editing one region word breaks the prepared key and replay refuses.
 - Every case also checks that execution wrote nothing outside the declared write set; that would be a `HARNESS_ERROR`. It never fired.
 
+## Mandatory boundary sweep
+
+Every `test` runs the sweep in full before any random case (`--cases` counts random
+cases only). It was added after review, because random sampling alone hits a specific
+32-bit corner only by chance.
+
+| test | observed |
+|---|---|
+| `EveryEntryRegisterSeesEveryCatalogValue` | every entry register takes every 32-bit catalog value, including f32/f16/bf16 NaN, Inf, -0 and denormals; 64-bit operands take f64 NaN/Inf and EXEC lane patterns; when SCC is an input, corner values run with SCC=0 and SCC=1; the sweep is deterministic |
+| `RoleValuesAreAimedAtTheSensitiveOperands` | the shift amount gets 32/33/63/64/65 and high garbage; the S_BFE control gets offset/width edges; the sign-extension input gets 0x7f/0x80/garbage-above values; the register compared with literal 0x12345 gets c, c+-1, -c, ~c; the add sources get carry, overflow, borrow and NaN pairs; the 64-bit compare gets equal-high/differ-low |
+| `OffByOneAgainstALiteralIsAlwaysCaught` | `s_cmp_gt_u32 x, 0x12345` -> `s_cmp_ge_u32 x, 0x12345` (wrong only at x == 0x12345) is caught in the boundary phase with `--cases 0` under seeds 1, 2, 3 and 99; the correct rewrite (`>= 0x12346`) passes |
+| `ConstraintEdgesRunAndOutOfContractValuesAreRejectedNotChanged` | with `s4 <= 0xff`, the edges 0xff and 0xfe run, and 0x100 and larger catalog values are rejected and counted (`boundary constraint: above umax`), never clamped |
+| `TruncatedSweepIsReportedAsPartialCoverage` | `--max-boundary-cases 10`: `truncated`, coverage PARTIAL, reason recorded |
+
+No rocjitsu undefined-behaviour diagnostic fired for any sweep value in the suite.
+
 ## End-to-end runs
 
 The code-object pair is `samples/codeobject/co_{old,new}.s`, built with clang/ld.lld for
@@ -67,7 +83,23 @@ replay: REPRODUCED: kind=observable locations=s8,s9
 ## Cost
 
 `bench/bench.py --cases 20000` on 2048-instruction straight-line SALU kernels; `bench.json`
-holds the raw numbers. Columns:
+holds the raw numbers. The sweep does not change the per-case cost; it adds cases.
+Measured with the sweep (boundary cases run in addition to the 20000 random ones):
+
+| variant | boundary cases | per case (µs) | cases/s (wall) |
+|---|---|---|---|
+| r1 | 842 | 2.44 | 338,948 |
+| r4 | 3,131 | 2.59 | 325,673 |
+| r16 | 9,879 | 3.09 | 287,350 |
+| r64 | 16,270 | 5.88 | 159,563 |
+| r256 | 38,599 | 15.77 | 62,079 |
+| whole-kernel control | 94,875 | 128.23 | 7,772 |
+
+The sweep grows with the number of registers the region reads (about 150-400 cases per
+register, plus pair cases), not with kernel size.
+
+The detailed per-phase breakdown below was measured before the sweep existed; the
+per-case figures still apply. Columns:
 - **analyze**: one-time decode, CFG, liveness, alignment and planning, measured by wall
   clock around the process.
 - **per case**: propose, state load, old execute, new execute and compare, measured by

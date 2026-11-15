@@ -4,7 +4,7 @@
     "tool": "rj_isa_diff",
     "tool_version": "0.1.0-p0",
     "schema_version": "rj_isa_diff.v1",
-    "rocjitsu_revision": "90ddc8aae52bd58adaff8bab6498a140bcb77747",
+    "rocjitsu_revision": "5588fbf7ec0c5b3f0d92a4c83116ef5997915ac3",
     "rocjitsu_version": "0.3.0",
     "semantics": "RocJITsu ComputeUnitCore::execute_instruction, gfx950 (CDNA4) wave64, default arithmetic semantics",
     "compiler": "13.4.0"
@@ -149,9 +149,9 @@
     "alignment_complete": true,
     "layout_shift": true,
     "timing": {
-      "decode_cfg_liveness_ns": 136835,
-      "align_classify_ns": 3786,
-      "plan_ns": 68794
+      "decode_cfg_liveness_ns": 122714,
+      "align_classify_ns": 4026,
+      "plan_ns": 76666
     }
   }
 }

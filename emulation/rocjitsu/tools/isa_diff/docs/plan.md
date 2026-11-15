@@ -147,6 +147,20 @@ Builds and tests run on a remote build host, not on the authoring workstation.
 - Tests: the same seed gives the same samples; contradictory constraints give 0 accepted;
   a range constraint only yields in-range values.
 
+### Task B2b: mandatory boundary sweep (added after review)
+- `boundary.{h,cpp}`: named catalogs (integer limits, byte/half edges, bit patterns,
+  f32/f16/bf16/f64 special encodings, EXEC lane patterns) and the role-specific value sets.
+- `roles.{h,cpp}`: operand roles from the decoded region (shift amount, bit index, S_BFE
+  control, sign-extension input, signed edge, two-source pairs, register/constant
+  relations) and the set of registers the region reads.
+- `build_boundary_sweep()`: uniform, single, pair64, pairs and constraint-edge phases over
+  zeros/ones/random bases (projected onto constraints), with both SCC values when SCC is
+  an input. De-duplicated and deterministic. The cap is reported, never silent.
+- `test_region()`: run the whole sweep before the random phase, counting each phase
+  separately; `--cases` counts random cases only.
+- Tests: catalog coverage per register, role targeting, an off-by-one against a literal
+  caught with `--cases 0`, constraint edges and rejections, truncation reporting.
+
 ### Task B3: differential loop, results, counterexamples, replay
 - `TestOptions { seed; cases; budget; max_counterexamples; }` and
   `RegionResult test_region(const RegionPlan&, const TestOptions&, InputPolicy&)`.

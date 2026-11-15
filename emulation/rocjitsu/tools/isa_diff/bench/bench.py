@@ -154,6 +154,9 @@ def main():
                 "status": reg["test_status"],
                 "contract": reg["contract_status"],
                 "valid_pairs": reg["counts"]["valid_pairs"],
+                "boundary_cases": reg["boundary_sweep"]["cases"],
+                "boundary_valid": reg["boundary_sweep"]["valid"],
+                "boundary_truncated": reg["boundary_sweep"]["truncated"],
                 "insts_per_case": (
                     reg["execution"]["old_insts_executed"]
                     + reg["execution"]["new_insts_executed"]
@@ -180,6 +183,7 @@ def main():
     (out / "bench.json").write_text(json.dumps(rows, indent=2) + "\n")
     cols = [
         "variant",
+        "boundary_cases",
         "kernel_insts",
         "region_old",
         "region_new",

@@ -306,3 +306,31 @@ s_mov_b32 s0, ttmp0
 s_getreg_b32 s4, hwreg(HW_REG_MODE)
 s_movrels_b32 s0, s1
 s_endpgm
+
+=== roles
+s_lshl_b32 s4, s2, s3
+s_bfe_u32 s5, s6, s7
+s_sext_i32_i8 s8, s9
+s_cmp_gt_u32 s10, 0x12345
+s_add_u32 s11, s12, s13
+s_lshl_b64 s[14:15], s[16:17], s18
+s_cmp_eq_u64 s[20:21], s[22:23]
+s_endpgm
+
+=== offbyone_old
+s_cmp_gt_u32 s2, 0x12345
+s_cselect_b32 s4, 1, 0
+s_cmp_eq_u32 s4, 0
+s_endpgm
+
+=== offbyone_bug
+s_cmp_ge_u32 s2, 0x12345
+s_cselect_b32 s4, 1, 0
+s_cmp_eq_u32 s4, 0
+s_endpgm
+
+=== offbyone_fixed
+s_cmp_ge_u32 s2, 0x12346
+s_cselect_b32 s4, 1, 0
+s_cmp_eq_u32 s4, 0
+s_endpgm

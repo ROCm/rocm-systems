@@ -14,8 +14,11 @@
 
 #include "location.h"
 
+#include <cstdint>
+#include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace rocjitsu {
 class Instruction;
@@ -51,6 +54,16 @@ struct Effects {
 
 /// @brief Classify one decoded instruction.
 [[nodiscard]] Effects classify(const Instruction &inst);
+
+/// One explicit source operand: the tracked locations it reads, or its constant value.
+struct SourceOperand {
+  LocSet locs;                      ///< Empty for constants and untracked state.
+  std::optional<uint32_t> constant; ///< Inline constant or literal (low 32 bits).
+  bool fieldless = false;           ///< Implicit operand such as SCC carry-in.
+};
+
+/// @brief Source operands in encoding order (src0, src1, ...).
+[[nodiscard]] std::vector<SourceOperand> source_operands(const Instruction &inst);
 
 /// @brief True if the mnemonic is in the P0 allowlist (operands are checked separately).
 [[nodiscard]] bool is_p0_mnemonic(std::string_view mnemonic);

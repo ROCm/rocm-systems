@@ -261,6 +261,8 @@ Json test_case(const CaseData &data, const TestOptions &options, const std::stri
   Json opts = Json::object();
   opts.set("seed", options.seed);
   opts.set("cases", options.cases);
+  opts.set("boundary_sweep", "mandatory");
+  opts.set("max_boundary_cases", static_cast<uint64_t>(options.max_boundary_cases));
   opts.set("policy", "baseline-v1");
   j.set("options", std::move(opts));
   Json un = Json::array();

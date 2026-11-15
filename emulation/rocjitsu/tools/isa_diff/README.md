@@ -26,6 +26,8 @@ rj_isa_diff analyze --old old.hsaco --new new.hsaco --kernel my_kernel --out cas
 
 # 2. Paired-input differential test of every READY region.
 rj_isa_diff test --case case/ --seed 1 --cases 10000 [--region r0]
+#   the boundary/NaN/corner sweep always runs first; --cases adds random cases
+#   [--max-boundary-cases N]  safety cap (default 250000); hitting it => PARTIAL
 
 # 3. Re-execute a counterexample from its recorded words (no artifact, no LLVM).
 rj_isa_diff replay --counterexample case/counterexamples/r0-case17.json [--case case/]
@@ -132,17 +134,57 @@ bytes are identical.
 
 ## Input generation
 
-`InputPolicy` is the pluggable interface (`propose`/`observe`). `ConstraintChecker`
-(`validate_sample`) keeps constraints out of the policy's hands. P0 ships
-`BaselinePolicy`, which is deterministic in (seed, case) and draws:
+Every `test` run has two phases.
 
-- boundary values;
-- 64-bit pair boundaries;
-- equal or complementary operands;
-- random values;
-- SCC alternating with the case parity.
+**1. Mandatory boundary sweep** (`boundary.{h,cpp}`). It always runs, in full, before
+any random case, and there is no flag to skip it. `--cases` counts only the random
+phase, so `--cases 0` still runs the whole sweep. The sweep is deterministic: the same
+region, contract and seed always give the same cases. It draws from named catalogs:
 
-Learned policies are future work, and may only propose inputs.
+| catalog | values |
+|---|---|
+| `int` | 0, 1, 2, 3, -1, -2, INT_MIN, INT_MAX and their neighbours |
+| `edge` | byte/half edges: 0x7f, 0x80, 0xff, 0x100, 0x7fff, 0x8000, 0xffff, 0x10000, sign-extended forms |
+| `small` / `bits` / `bit` | 31, 32, 33, 63, 64; alternating, nibble and byte patterns; each single bit and its inverse |
+| `f32` | +-0, +-Inf, quiet/signalling NaN, NaN payload extremes, min/max denormal, min/max normal, +-1, 2^31, 2^32 |
+| `f16`, `f16x2`, `bf16`, `bf16x2` | the same specials in the low half and packed |
+| `int64`, `f64`, `bits64`, `exec` | for 64-bit operands: int64 limits, half-crossing values (2^32-1, 2^32), f64 specials, EXEC lane patterns (lane 0/31/32/63, low/high 32 lanes) |
+
+Operand roles, found by decoding the region, add error-prone values where they matter:
+
+| role | added values |
+|---|---|
+| shift amount or bit index (`s_lshl/lshr/ashr`, `s_bfm`, `s_bitset/bitcmp`) | 32, 33, 63, 64, 65, 127, 128, ...; high garbage over a zero low field |
+| `s_bfe` control | offset x width edges, including width 0/32/33/64/127, offset 31/32/63/64, and garbage high bits |
+| sign-extension input | 0x7f/0x80/0x7fff/0x8000, with and without garbage above |
+| register combined with a literal `c` (add, sub, compare, min/max, mul, select, bitwise) | c, c+-1, c+-2, -c, -c+-1, ~c, c^sign, INT_MAX-c, INT_MIN-c and neighbours |
+| two register sources of one such instruction | carry (UINT_MAX+1), signed overflow (INT_MAX+1, INT_MIN-1), borrow (0-1), equal, complementary, negated, adjacent, mul wrap, NaN/Inf pairs, and a 12x12 core cross product; 64-bit pairs get equal-high/differ-low, half-crossing and an 8x8 cross |
+| contract constraints | umin/umax, both neighbours of each, and known-bit extremes |
+
+Phases: uniform (every entry register set to each catalog value), single (each register
+the region reads, over zeros/ones/seeded-random bases, with both SCC values when SCC is
+an input), pair64, pairs, and constraint edges. Bases are projected onto the
+constraints. A sweep value that violates a constraint is rejected and counted, never
+changed. Identical input states are run once. `--max-boundary-cases` (default 250000)
+is only a safety cap: reaching it is reported as `truncated` with coverage `PARTIAL`.
+`results.json` reports `boundary_sweep` (cases, valid, mismatches, truncated, valid
+cases per catalog family) separately from `random_phase`. Every boundary counterexample
+records `phase: boundary` and the exact catalog label (for example
+`single s2=constrel.0x00012345.c base=zeros`).
+
+**2. Random phase.** `InputPolicy` is the pluggable interface (`propose`/`observe`), and
+`validate_sample` keeps constraints out of the policy's hands. P0 ships `BaselinePolicy`,
+which is deterministic in (seed, case) and draws, per register:
+
+- 20%: a role value, then 25%: a catalog value (see the table above, including the
+  NaN/Inf/denormal encodings), for a register with a role; 45% catalog values for a
+  register without one;
+- 10%: a single bit or its inverse;
+- 15%: an equal or complementary copy of another input;
+- the rest: uniformly random values.
+
+64-bit operands draw from the 64-bit catalog one time in three. SCC alternates with the
+case parity. Learned policies are future work, and may only propose inputs.
 
 ## Tests and measurements
 

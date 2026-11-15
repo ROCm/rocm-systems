@@ -31,7 +31,8 @@ const char *kUsage =
     "                      [--old-kernel NAME] [--new-kernel NAME] [--context N]\n"
     "                      [--max-region N] [--max-expansions N] [--no-merge]\n"
     "  rj_isa_diff test    --case DIR [--seed N] [--cases N] [--region ID]\n"
-    "                      [--max-counterexamples N]\n"
+    "                      [--max-counterexamples N] [--max-boundary-cases N]\n"
+    "      --cases counts random cases; the boundary/NaN/corner sweep always runs first.\n"
     "  rj_isa_diff replay  --counterexample FILE [--case DIR]\n"
     "  rj_isa_diff inject  --case DIR --region ID --xor MASK --out DIR [--side old|new]\n"
     "                      [--inst N] [--word N] [--label NAME]   (synthetic self-test)\n"
@@ -191,8 +192,10 @@ int cmd_analyze(int argc, char **argv) {
 }
 
 int cmd_test(int argc, char **argv) {
-  Args a = parse(argc, argv, 2,
-                 {"--case", "--seed", "--cases", "--region", "--max-counterexamples"}, {});
+  Args a = parse(
+      argc, argv, 2,
+      {"--case", "--seed", "--cases", "--region", "--max-counterexamples", "--max-boundary-cases"},
+      {});
   if (!a.error.empty() || !a.has("--case")) {
     std::cerr << (a.error.empty() ? "test needs --case" : a.error) << "\n" << kUsage;
     return kExitError;
@@ -201,13 +204,15 @@ int cmd_test(int argc, char **argv) {
   auto seed = a.number("--seed", 1);
   auto cases = a.number("--cases", 1000);
   auto maxcex = a.number("--max-counterexamples", 3);
-  if (!seed || !cases || !maxcex) {
+  auto maxbound = a.number("--max-boundary-cases", opt.max_boundary_cases);
+  if (!seed || !cases || !maxcex || !maxbound || *maxbound == 0) {
     std::cerr << "bad numeric option\n";
     return kExitError;
   }
   opt.seed = *seed;
   opt.cases = *cases;
   opt.max_counterexamples = *maxcex;
+  opt.max_boundary_cases = *maxbound;
   const std::string dir = a.get("--case");
   opt.counterexample_dir = dir + "/counterexamples";
   std::string error;
@@ -230,9 +235,20 @@ int cmd_test(int argc, char **argv) {
     if (!r.reason.empty())
       std::cout << " : " << r.reason;
     std::cout << "\n";
+    if (r.boundary.cases || r.random.cases) {
+      std::cout << "  boundary sweep: " << r.boundary.valid << "/" << r.boundary.cases << " valid, "
+                << r.boundary.mismatches << " mismatching"
+                << (r.boundary_truncated ? ", TRUNCATED" : "") << "; random: " << r.random.valid
+                << "/" << r.random.cases << " valid, " << r.random.mismatches << " mismatching\n";
+      std::cout << "  boundary families:";
+      for (const auto &[family, count] : r.boundary_families)
+        std::cout << " " << family << "=" << count;
+      std::cout << "\n";
+    }
     if (!r.examples.empty())
-      std::cout << "  first mismatch case " << r.examples.front().case_index << " ["
-                << r.examples.front().kind << "] " << r.examples.front().detail << "\n";
+      std::cout << "  first mismatch case " << r.examples.front().case_index << " ("
+                << r.examples.front().phase << ") [" << r.examples.front().kind << "] "
+                << r.examples.front().detail << "\n";
     for (const auto &f : r.counterexample_files)
       std::cout << "  counterexample " << f << "\n";
   }

@@ -307,3 +307,31 @@ inline const std::vector<uint32_t> k_cachelive_new = {0xbe8a0082, 0x800b810a, 0x
 // s_movrels_b32 s0, s1
 // s_endpgm
 inline const std::vector<uint32_t> k_effects = {0x80040302, 0x82050100, 0x858e6a02, 0xbeeb0001, 0x86fe027e, 0xbe822004, 0xbe860207, 0xbefc0002, 0xbe8900fd, 0x8e868304, 0xbf840001, 0xbf880001, 0xbf870001, 0xbe921c00, 0xbf8c0000, 0xc0020500, 0x00000000, 0x7e000201, 0xbe80006c, 0xb884f801, 0xbe802a01, 0xbf810000};
+
+// s_lshl_b32 s4, s2, s3
+// s_bfe_u32 s5, s6, s7
+// s_sext_i32_i8 s8, s9
+// s_cmp_gt_u32 s10, 0x12345
+// s_add_u32 s11, s12, s13
+// s_lshl_b64 s[14:15], s[16:17], s18
+// s_cmp_eq_u64 s[20:21], s[22:23]
+// s_endpgm
+inline const std::vector<uint32_t> k_roles = {0x8e040302, 0x92850706, 0xbe881609, 0xbf08ff0a, 0x00012345, 0x800b0d0c, 0x8e8e1210, 0xbf121614, 0xbf810000};
+
+// s_cmp_gt_u32 s2, 0x12345
+// s_cselect_b32 s4, 1, 0
+// s_cmp_eq_u32 s4, 0
+// s_endpgm
+inline const std::vector<uint32_t> k_offbyone_old = {0xbf08ff02, 0x00012345, 0x85048081, 0xbf068004, 0xbf810000};
+
+// s_cmp_ge_u32 s2, 0x12345
+// s_cselect_b32 s4, 1, 0
+// s_cmp_eq_u32 s4, 0
+// s_endpgm
+inline const std::vector<uint32_t> k_offbyone_bug = {0xbf09ff02, 0x00012345, 0x85048081, 0xbf068004, 0xbf810000};
+
+// s_cmp_ge_u32 s2, 0x12346
+// s_cselect_b32 s4, 1, 0
+// s_cmp_eq_u32 s4, 0
+// s_endpgm
+inline const std::vector<uint32_t> k_offbyone_fixed = {0xbf09ff02, 0x00012346, 0x85048081, 0xbf068004, 0xbf810000};
