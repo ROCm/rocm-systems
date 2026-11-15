@@ -193,8 +193,9 @@ replay_drain_or_fatal(const Queue& queue);
 bool
 replay_drain_agent(hsa_agent_t agent, const replay_deadline_t& deadline = replay_deadline_t{});
 
-// replay_drain_agent over the full drain budget, fatal on a genuinely stuck queue (beta feature),
-// matching replay_drain_or_fatal.
+// replay_drain_agent's poll over the full drain budget, fatal on a genuinely stuck queue (beta
+// feature). Like replay_drain_or_fatal it waits in drain slices and warns after every slice that
+// ends undrained, the last one included.
 void
 replay_drain_agent_or_fatal(hsa_agent_t agent);
 

@@ -189,7 +189,13 @@ replay_drain_agent(hsa_agent_t agent, const replay_deadline_t& deadline)
 void
 replay_drain_agent_or_fatal(hsa_agent_t agent)
 {
-    if(replay_drain_agent(agent)) return;
+    auto* queue_controller = get_queue_controller();
+    if(queue_controller == nullptr) return;
+
+    const auto drained = [&]() { return queue_controller->in_flight_async_packets(agent) == 0; };
+    if(replay_wait([&]() { return poll_for(drained, drain_slice); },
+                   "this agent's async completion handler(s)"))
+        return;
     ROCP_FATAL << fmt::format(
         "replay: agent-wide drain stuck (async handler(s) still active after ~{}s)",
         drain_budget_secs);
