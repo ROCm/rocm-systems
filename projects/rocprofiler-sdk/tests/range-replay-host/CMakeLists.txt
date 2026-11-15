@@ -122,3 +122,57 @@ add_rr_host_test(
     ENVIRONMENT
     "RR_HOST_TOOL_MODE=host-unarmed;RR_HOST_APP_ARM=0;RR_HOST_PASSES=4;RR_HOST_EXPECT_PASSES=1"
     )
+
+#
+# Fence timeout: fence_timeout.cpp opens a host range while a kernel on another stream
+# spins, so the fence at begin gives up after
+# ROCPROFILER_RANGE_REPLAY_HOST_FENCE_TIMEOUT_MS and the range declines with
+# CONCURRENT_DISPATCH and runs once. Its body releases the kernel, and a second range
+# opened after that replays. The tool checks both CLOSE statuses and pass counts; the
+# application checks how long begin waited and every pass's result.
+#
+add_library(range-replay-host-fence-timeout-client SHARED)
+target_sources(range-replay-host-fence-timeout-client PRIVATE fence_timeout_client.cpp
+                                                              fence_timeout.hpp)
+target_include_directories(range-replay-host-fence-timeout-client
+                           PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(
+    range-replay-host-fence-timeout-client PRIVATE rocprofiler-sdk::rocprofiler-sdk
+                                                   rocprofiler-sdk::tests-build-flags)
+
+set_source_files_properties(fence_timeout.cpp PROPERTIES LANGUAGE HIP)
+add_executable(range-replay-host-fence-timeout-testapp)
+target_sources(range-replay-host-fence-timeout-testapp PRIVATE fence_timeout.cpp
+                                                               fence_timeout.hpp)
+target_include_directories(range-replay-host-fence-timeout-testapp
+                           PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(
+    range-replay-host-fence-timeout-testapp
+    PRIVATE rocprofiler-sdk::rocprofiler-sdk-headers rocprofiler-sdk::tests-build-flags
+            Threads::Threads ${CMAKE_DL_LIBS})
+add_dependencies(range-replay-host-fence-timeout-testapp
+                 range-replay-host-fence-timeout-client)
+
+if(ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE)
+    set(FENCE_TIMEOUT_PRELOAD_ENV
+        "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}:$<TARGET_FILE:range-replay-host-fence-timeout-client>"
+        )
+else()
+    set(FENCE_TIMEOUT_PRELOAD_ENV "$<TARGET_FILE:range-replay-host-fence-timeout-client>")
+endif()
+
+# A 1 s fence timeout: the blocked range declines after about a second. The spinner gives
+# up by itself after 20 s, so a fence that does not time out fails well within TIMEOUT.
+rocprofiler_add_integration_execute_test(
+    test-range-replay-host-fence-timeout
+    COMMAND $<TARGET_FILE:range-replay-host-fence-timeout-testapp>
+    DEPENDS range-replay-host-fence-timeout-client
+    TIMEOUT 60
+    LABELS "integration-tests;range-replay"
+    PRELOAD "${FENCE_TIMEOUT_PRELOAD_ENV}"
+    ENVIRONMENT "ROCPROF_RANGE_REPLAY_VERIFY=1"
+                "ROCPROFILER_RANGE_REPLAY_HOST_FENCE_TIMEOUT_MS=1000"
+    PASS_REGULAR_EXPRESSION "\\[rr-fence\\] PASS"
+    FAIL_REGULAR_EXPRESSION
+        "\\[rr-fence\\] FAIL|\\[rr-fence\\] error|\\[app\\] FAIL|${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+    )

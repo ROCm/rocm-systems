@@ -43,8 +43,10 @@
 #include <cstdint>
 #include <future>
 #include <mutex>
+#include <optional>
 #include <random>
 #include <shared_mutex>
+#include <string>
 #include <thread>
 #include <vector>
 
@@ -650,7 +652,7 @@ namespace hsa = ::rocprofiler::hsa;
 namespace rrt = ::rocprofiler::range_replay::test;
 
 // Production fences wait about a minute before they give up.
-constexpr auto fence_timeout_budget = hsa::replay_wait_budget_t{std::chrono::milliseconds{1}, 2};
+constexpr auto fence_timeout_budget = std::chrono::milliseconds{2};
 
 range_replay::host_agent_state_t
 host_agent(uint64_t handle)
@@ -824,4 +826,132 @@ TEST(range_replay_host, a_fence_timeout_declines_through_the_pass_end_exchange)
         queue.async_complete();
         controller.destroy_queue(&hsa_queue);
     }
+}
+
+namespace
+{
+// The end of a range's first pass: it dispatched, captured `value` at entry, and changed it since.
+void
+end_first_pass(range_replay::range_context_t& ctx,
+               int&                           value,
+               std::chrono::milliseconds      fence_budget)
+{
+    ctx.plan.replay_requested = true;
+    ctx.record.count_dispatches(1);
+    ctx.host.snapshot_taken = true;
+    ctx.host.fence_budget   = fence_budget;
+    ctx.host.agents.emplace_back(host_agent(agent_a));
+    ctx.host.regions.emplace_back(range_replay::host::capture_region(&value, sizeof(value)));
+    ++value;
+}
+}  // namespace
+
+TEST(range_replay_host, a_ring_that_stays_full_declines_the_fence_and_returns_its_signal)
+{
+    rrt::install_process_signal_table();
+    auto  agent      = rrt::test_agent_t{agent_a};
+    auto& controller = *hsa::get_queue_controller();
+    auto  ring       = rrt::fake_ring_t{21};
+    ring.fill();
+    rrt::add_ring_queue(controller, ring, agent);
+    const auto free_signals = rrt::free_pooled_signals();
+
+    auto value = 7;
+    auto ctx   = range_replay::range_context_t{};
+    end_first_pass(ctx, value, std::chrono::milliseconds{20});
+
+    const auto result = range_replay::host::finish_pass(ctx);
+    EXPECT_EQ(result.next_pass, 0U);
+    EXPECT_EQ(result.status, ROCPROFILER_RANGE_REPLAY_STATUS_CONCURRENT_DISPATCH);
+    EXPECT_EQ(value, 8) << "a range whose fence timed out must not restore its entry state";
+    EXPECT_EQ(ring.write_index.load(), ring.read_index.load() + rrt::fake_ring_t::size)
+        << "a fence that found no free slot must not claim one";
+    EXPECT_EQ(rrt::free_pooled_signals(), free_signals)
+        << "the signal of a barrier that was never written goes back to the pool";
+
+    controller.destroy_queue(&ring.queue);
+}
+
+TEST(range_replay_host, a_barrier_that_outlasts_the_fence_keeps_its_signal_out_of_the_pool)
+{
+    rrt::install_process_signal_table();
+    auto  agent      = rrt::test_agent_t{agent_a};
+    auto& controller = *hsa::get_queue_controller();
+    auto  ring       = rrt::fake_ring_t{22};
+    rrt::add_ring_queue(controller, ring, agent);
+    const auto free_signals = rrt::free_pooled_signals();
+
+    auto value = 7;
+    auto ctx   = range_replay::range_context_t{};
+    end_first_pass(ctx, value, std::chrono::milliseconds{20});
+
+    const auto result = range_replay::host::finish_pass(ctx);
+    EXPECT_EQ(result.status, ROCPROFILER_RANGE_REPLAY_STATUS_CONCURRENT_DISPATCH);
+    EXPECT_EQ(value, 8);
+    ASSERT_EQ(ring.write_index.load(), 1U) << "the fence writes one barrier";
+    const auto completion = ring.packets.front().completion_signal;
+    ASSERT_NE(completion.handle, 0U);
+    EXPECT_EQ(rrt::counter(completion).load(), 1) << "the barrier has not retired";
+    EXPECT_EQ(rrt::free_pooled_signals(), free_signals - 1)
+        << "the packet processor still owns the signal of a barrier in the ring";
+
+    // As the packet processor does once the work ahead of the barrier finishes.
+    rrt::counter(completion) -= 1;
+    controller.destroy_queue(&ring.queue);
+}
+
+// The work on each of two queues takes 60% of the budget: either alone fits in it, both in a row
+// do not.
+TEST(range_replay_host, one_fence_waits_one_budget_however_many_queues_it_covers)
+{
+    rrt::install_process_signal_table();
+    constexpr auto budget     = std::chrono::milliseconds{500};
+    auto           agent      = rrt::test_agent_t{agent_a};
+    auto&          controller = *hsa::get_queue_controller();
+    auto           ring_a     = rrt::fake_ring_t{23};
+    auto           ring_b     = rrt::fake_ring_t{24};
+    rrt::add_ring_queue(controller, ring_a, agent);
+    rrt::add_ring_queue(controller, ring_b, agent);
+
+    auto value = 7;
+    auto ctx   = range_replay::range_context_t{};
+    end_first_pass(ctx, value, budget);
+
+    auto elapsed = std::chrono::steady_clock::duration{};
+    {
+        auto       gpu_a  = rrt::fake_packet_processor_t{ring_a, budget * 6 / 10};
+        auto       gpu_b  = rrt::fake_packet_processor_t{ring_b, budget * 6 / 10};
+        const auto start  = std::chrono::steady_clock::now();
+        const auto result = range_replay::host::finish_pass(ctx);
+        elapsed           = std::chrono::steady_clock::now() - start;
+        EXPECT_EQ(result.status, ROCPROFILER_RANGE_REPLAY_STATUS_CONCURRENT_DISPATCH);
+        EXPECT_EQ(value, 8);
+    }
+    EXPECT_LT(elapsed, budget * 3 / 2)
+        << "the second queue's barrier may only wait for what is left of the fence's budget";
+
+    controller.destroy_queue(&ring_a.queue);
+    controller.destroy_queue(&ring_b.queue);
+}
+
+TEST(range_replay_host, fence_timeout_takes_whole_milliseconds_and_ignores_anything_else)
+{
+    using std::chrono::milliseconds;
+    const auto parse = [](const char* value) {
+        return range_replay::host::parse_fence_timeout(std::string{value});
+    };
+    const auto drain_budget = milliseconds{std::chrono::seconds{hsa::drain_budget_secs}};
+
+    EXPECT_EQ(range_replay::host::parse_fence_timeout(std::nullopt), drain_budget);
+    EXPECT_EQ(parse("1000"), milliseconds{1000});
+    EXPECT_EQ(parse("1"), milliseconds{1});
+    EXPECT_EQ(parse("3600000"), range_replay::host::max_fence_timeout);
+    for(const auto* invalid :
+        {"", "0", "-5", "3600001", "1.5", "250ms", " 250 ", "abc", "99999999999999999999"})
+        EXPECT_EQ(parse(invalid), drain_budget) << "'" << invalid << "'";
+}
+
+TEST(range_replay_host, a_host_range_fences_with_the_configured_timeout)
+{
+    EXPECT_EQ(range_replay::host_range_state_t{}.fence_budget, range_replay::host::fence_timeout());
 }

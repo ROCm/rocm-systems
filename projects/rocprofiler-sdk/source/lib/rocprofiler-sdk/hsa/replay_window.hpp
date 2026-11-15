@@ -38,6 +38,7 @@
 #include <fmt/format.h>
 #include <hsa/hsa.h>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cstddef>
@@ -121,6 +122,55 @@ replay_wait_or_fatal(TryDrainFn&& try_drain_once, std::string_view what)
     ROCP_FATAL << fmt::format("replay: {} did not drain after ~{}s", what, drain_budget_secs);
 }
 
+// When a wait that can decline instead of aborting gives up. A host replay fence makes one per
+// fence and passes it to each of its queue barriers and agent drains, so the fence as a whole gives
+// up within one budget however many queues and agents it covers.
+class replay_deadline_t
+{
+public:
+    using clock = std::chrono::steady_clock;
+
+    explicit replay_deadline_t(clock::duration budget = std::chrono::seconds{drain_budget_secs})
+    : m_start{clock::now()}
+    , m_budget{budget}
+    {}
+
+    clock::duration budget() const { return m_budget; }
+    clock::duration elapsed() const { return clock::now() - m_start; }
+    bool            expired() const { return elapsed() >= m_budget; }
+
+    // How long the next blocking wait may take: one drain slice, cut short at the deadline.
+    clock::duration next_wait() const
+    {
+        return std::clamp<clock::duration>(
+            m_budget - elapsed(), clock::duration::zero(), drain_slice);
+    }
+
+private:
+    clock::time_point m_start  = {};
+    clock::duration   m_budget = {};
+};
+
+// Retry `try_wait(timeout)`, which must block for at most `timeout`, until it succeeds or
+// `deadline` passes, warning after each drain slice spent waiting. It tries at least once, so work
+// that has already finished succeeds even past the deadline. Returns whether it succeeded.
+template <typename TryWaitFn>
+bool
+replay_wait_until(TryWaitFn&& try_wait, std::string_view what, const replay_deadline_t& deadline)
+{
+    auto warned_at = std::chrono::seconds{0};
+    while(!try_wait(deadline.next_wait()))
+    {
+        if(deadline.expired()) return false;
+        const auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(deadline.elapsed());
+        if(elapsed - warned_at < drain_slice) continue;
+        warned_at = elapsed;
+        ROCP_WARNING << fmt::format(
+            "replay: still waiting for {} (~{}s elapsed)", what, elapsed.count());
+    }
+    return true;
+}
+
 // Drain a queue's in-flight async completion handler(s) during replay. Unlike Queue::sync()'s
 // teardown use (warn once and proceed), a replay pass must NOT proceed while a handler is still
 // running: PASS-EXIT, the tool's continue-decision, restore(), and the next submit would race the
@@ -139,20 +189,22 @@ replay_drain_or_fatal(const Queue& queue);
 // read lock of the map or of the retiring set, both are re-read every poll, and destroy_queue
 // frees a queue only after it has left both. The per-agent writer lock held by the replay window
 // blocks new dispatches on the agent, so in-flight work only decreases and the poll converges.
-// Returns false if handlers are still in flight when `budget` runs out.
+// Returns false if handlers are still in flight at `deadline`.
 bool
-replay_drain_agent(hsa_agent_t agent, replay_wait_budget_t budget = {});
+replay_drain_agent(hsa_agent_t agent, const replay_deadline_t& deadline = replay_deadline_t{});
 
-// replay_drain_agent over the full drain budget, fatal on a genuinely stuck queue (beta feature),
-// matching replay_drain_or_fatal.
+// replay_drain_agent's poll over the full drain budget, fatal on a genuinely stuck queue (beta
+// feature). Like replay_drain_or_fatal it waits in drain slices and warns after every slice that
+// ends undrained, the last one included.
 void
 replay_drain_agent_or_fatal(hsa_agent_t agent);
 
 // Write `count` packets into `queue`'s ring buffer and ring its doorbell -- the same submission the
 // application itself performs, so whichever interception mechanism is installed sees them. Used to
 // re-submit recorded packets from outside a WriteInterceptor call (range replay), where no
-// interceptor-provided writer is in scope. Blocks while the ring is full. Returns false if the
-// queue's packet buffer is unavailable or its engine does not accept AQL packets.
+// interceptor-provided writer is in scope. Blocks, without a deadline, while the ring is full.
+// Returns false if the queue's packet buffer is unavailable or its engine does not accept AQL
+// packets.
 //
 // Callers submitting *recorded* packets must clear their completion signals first: re-firing a
 // signal the application has already consumed corrupts its synchronization.
@@ -163,16 +215,19 @@ enum class barrier_wait_result_t
 {
     completed,      // the barrier retired: all prior work on the queue finished
     not_submitted,  // the barrier could not be written, so nothing was waited on
+    ring_full,      // no ring slot freed up before the deadline, so nothing was written
     timed_out,      // the barrier is still in the ring and will decrement `completion` later
 };
 
-// Submit a barrier packet carrying `completion` and wait up to `budget` for it, fencing the CPU
-// against all GPU work previously submitted to `queue`. After timed_out the packet processor still
-// owns `completion`: the caller must neither reuse nor destroy it.
+// Submit a barrier packet carrying `completion` and wait until `deadline` for it, fencing the CPU
+// against all GPU work previously submitted to `queue`. Waiting for a free ring slot counts against
+// the same deadline; unlike replay_ring_submit, a slot is only claimed once it is free, so giving
+// up leaves the ring untouched. After timed_out the packet processor still owns `completion`: the
+// caller must neither reuse nor destroy it.
 barrier_wait_result_t
-replay_barrier_and_wait(const Queue&         queue,
-                        hsa_signal_t         completion,
-                        replay_wait_budget_t budget = {});
+replay_barrier_and_wait(const Queue&             queue,
+                        hsa_signal_t             completion,
+                        const replay_deadline_t& deadline = replay_deadline_t{});
 
 // While set on this thread, WriteInterceptor forwards packets untouched. Range replay's re-submit
 // path transforms the recorded packets once (via Queue::invoke_write_interceptor) and then writes

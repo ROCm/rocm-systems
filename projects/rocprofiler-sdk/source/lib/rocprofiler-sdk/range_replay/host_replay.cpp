@@ -21,6 +21,7 @@
 // THE SOFTWARE.
 
 #include "lib/rocprofiler-sdk/range_replay/host_replay.hpp"
+#include "lib/common/environment.hpp"
 #include "lib/common/logging.hpp"
 #include "lib/common/scope_destructor.hpp"
 #include "lib/rocprofiler-sdk/agent.hpp"
@@ -43,14 +44,19 @@
 #include <hsa/hsa.h>
 
 #include <algorithm>
+#include <cerrno>
 #include <chrono>
 #include <climits>
+#include <cstdlib>
 #include <cstring>
 #include <memory>
 #include <mutex>
 #include <new>
+#include <optional>
 #include <shared_mutex>
 #include <stdexcept>
+#include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -63,6 +69,9 @@ namespace host
 namespace
 {
 using phase_clock = std::chrono::steady_clock;
+
+constexpr auto fence_timeout_env =
+    std::string_view{"ROCPROFILER_RANGE_REPLAY_HOST_FENCE_TIMEOUT_MS"};
 
 double
 elapsed_ms(phase_clock::duration elapsed)
@@ -92,12 +101,16 @@ gpu_agents()
     return out;
 }
 
-// Whether the work submitted to `queue` before the fence finished within `budget`. A queue the
+// Whether the work submitted to `queue` before the fence finished by `deadline`. A queue the
 // barrier cannot be written to is not waited on.
 bool
-fence_queue(const hsa::Queue& queue, hsa::replay_wait_budget_t budget)
+fence_queue(const hsa::Queue& queue, const hsa::replay_deadline_t& deadline)
 {
     if(queue.get_engine_type() != hsa::Queue::engine_type::compute) return true;
+    // Earlier queues used up the fence's budget. A barrier written now could only time out, and
+    // its signal would then have to be leaked.
+    if(deadline.expired()) return false;
+
     auto       signal        = hsa_signal_t{.handle = 0};
     auto*      pooled_signal = hsa::Queue::create_signal(0, &signal, /*use_pool=*/true);
     auto       leak_signal   = false;
@@ -111,9 +124,11 @@ fence_queue(const hsa::Queue& queue, hsa::replay_wait_budget_t budget)
 
     if(signal.handle != 0)
     {
-        switch(hsa::replay_barrier_and_wait(queue, signal, budget))
+        switch(hsa::replay_barrier_and_wait(queue, signal, deadline))
         {
             case hsa::barrier_wait_result_t::completed: return true;
+            // Nothing reached the ring, so the signal goes back to the pool.
+            case hsa::barrier_wait_result_t::ring_full: return false;
             case hsa::barrier_wait_result_t::timed_out:
                 // The barrier is still in the ring and the packet processor decrements this signal
                 // when it retires. Released, the signal could be handed to another dispatch or
@@ -130,9 +145,9 @@ fence_queue(const hsa::Queue& queue, hsa::replay_wait_budget_t budget)
 
 // Fence compute queues while excluding destruction, but without holding the queue-map lock.
 // Copies and non-compute work must already have been synchronized by the application. Returns
-// false at the first queue or handler drain that does not finish within `budget`.
+// false at the first queue or handler drain that does not finish by `deadline`.
 bool
-fence_agent(hsa_agent_t agent, hsa::replay_wait_budget_t budget)
+fence_agent(hsa_agent_t agent, const hsa::replay_deadline_t& deadline)
 {
     auto fenced = true;
     if(auto* controller = hsa::get_queue_controller(); controller != nullptr)
@@ -140,28 +155,28 @@ fence_agent(hsa_agent_t agent, hsa::replay_wait_budget_t budget)
         controller->iterate_queues_with_lifetime([&](const hsa::Queue* queue) {
             if(fenced && queue != nullptr &&
                queue->get_agent().get_hsa_agent().handle == agent.handle)
-                fenced = fence_queue(*queue, budget);
+                fenced = fence_queue(*queue, deadline);
         });
     }
-    return fenced && hsa::replay_drain_agent(agent, budget);
+    return fenced && hsa::replay_drain_agent(agent, deadline);
 }
 
-// Fences every agent the range snapshots. GPU work that does not finish within the fence budget
+// Fences every agent the range snapshots, all against one deadline, so the range waits at most one
+// fence budget however many queues and agents there are. GPU work that does not finish by then
 // declines the range rather than aborting the application: a snapshot or restore taken while that
 // work runs would race it.
 bool
 fence_all(range_context_t& ctx)
 {
+    const auto deadline = hsa::replay_deadline_t{ctx.host.fence_budget};
     for(const auto& agent : ctx.host.agents)
     {
-        if(fence_agent(agent.hsa_agent, ctx.host.fence_budget)) continue;
+        if(fence_agent(agent.hsa_agent, deadline)) continue;
         ROCP_WARNING << fmt::format(
-            "range replay: GPU work on agent {} did not finish within ~{}s of host range {}'s "
+            "range replay: GPU work on agent {} did not finish within {:g}s of host range {}'s "
             "fence; the range will not be replayed",
             agent.agent_id.handle,
-            std::chrono::duration_cast<std::chrono::seconds>(ctx.host.fence_budget.slice *
-                                                             ctx.host.fence_budget.slices)
-                .count(),
+            std::chrono::duration<double>{ctx.host.fence_budget}.count(),
             ctx.record.range_id());
         ctx.record.decline(ROCPROFILER_RANGE_REPLAY_STATUS_CONCURRENT_DISPATCH);
         return false;
@@ -324,6 +339,41 @@ restore_regions(const std::vector<host_region_t>& regions)
 {
     for(auto itr = regions.rbegin(); itr != regions.rend(); ++itr)
         if(!itr->saved.empty()) std::memcpy(itr->ptr, itr->saved.data(), itr->saved.size());
+}
+
+std::chrono::milliseconds
+parse_fence_timeout(const std::optional<std::string>& value)
+{
+    const auto fallback = std::chrono::milliseconds{std::chrono::seconds{hsa::drain_budget_secs}};
+    if(!value) return fallback;
+
+    errno            = 0;
+    char*      end   = nullptr;
+    const auto count = std::strtoll(value->c_str(), &end, 10);
+    if(end == value->c_str() || *end != '\0' || errno == ERANGE || count < 1 ||
+       count > max_fence_timeout.count())
+    {
+        ROCP_WARNING << fmt::format("range replay: ignoring invalid {}='{}' (expected a whole "
+                                    "number of milliseconds from 1 to {}); using {} ms",
+                                    fence_timeout_env,
+                                    *value,
+                                    max_fence_timeout.count(),
+                                    fallback.count());
+        return fallback;
+    }
+    return std::chrono::milliseconds{count};
+}
+
+std::chrono::milliseconds
+fence_timeout()
+{
+    static const auto timeout = [] {
+        const auto value = common::get_env_optional(fence_timeout_env);
+        const auto ms    = parse_fence_timeout(value);
+        if(value) ROCP_INFO << fmt::format("range replay: host fence timeout is {} ms", ms.count());
+        return ms;
+    }();
+    return timeout;
 }
 
 void
