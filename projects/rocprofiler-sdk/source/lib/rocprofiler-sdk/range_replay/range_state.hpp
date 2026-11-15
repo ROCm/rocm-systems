@@ -42,6 +42,7 @@
 // packet-recording declines (queue/agent binding, graphs, copies from the owner thread, budget,
 // kernarg layout) do not apply. See host_replay.hpp.
 
+#include "lib/rocprofiler-sdk/hsa/replay_window.hpp"
 #include "lib/rocprofiler-sdk/hsa/rocprofiler_packet.hpp"
 #include "lib/rocprofiler-sdk/kernel_replay/local_context.hpp"
 #include "lib/rocprofiler-sdk/kernel_replay/memory_snapshot.hpp"
@@ -56,6 +57,7 @@
 #include <hsa/hsa.h>
 
 #include <atomic>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -159,6 +161,11 @@ private:
 struct external_decline_t
 {
     std::atomic<uint32_t> reason = {ROCPROFILER_RANGE_REPLAY_STATUS_REPLAYED};
+    // Device writes from the range's own thread. They are part of the program a host range
+    // re-executes, so they are not a decline on their own. finish_pass snapshots this around the
+    // tool callbacks: a copy those callbacks submit runs after the pass fence, and the compute
+    // queue barrier does not wait for it.
+    std::atomic<uint64_t> owning_device_writes = {0};
 };
 
 // Device state of one GPU agent captured when a host-replay range opens.
@@ -180,6 +187,14 @@ struct host_region_t
     uint64_t             exit_digest = 0;
 };
 
+namespace host
+{
+// How long a host replay fence waits, over all its queues and agents, before the range declines:
+// ROCPROFILER_RANGE_REPLAY_HOST_FENCE_TIMEOUT_MS, read once, or the drain budget.
+std::chrono::milliseconds
+fence_timeout();
+}  // namespace host
+
 struct host_range_state_t
 {
     bool     enabled = false;
@@ -190,6 +205,11 @@ struct host_range_state_t
     std::vector<host_region_t>      regions               = {};
     uint64_t                        code_object_watermark = 0;
     bool                            exit_digests_taken    = false;
+
+    // How long one fence, over all its queues and agents, waits for GPU work before the range
+    // declines. Always host::fence_timeout() in production; a field so that a test can reach the
+    // timeout in milliseconds.
+    std::chrono::milliseconds fence_budget = host::fence_timeout();
 
     // Carries the PASS callback context from the PHASE_ENTER raised just before a siglongjmp to the
     // PHASE_EXIT raised when that pass reaches end() again.

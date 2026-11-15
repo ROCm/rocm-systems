@@ -128,7 +128,8 @@ public:
     // with the intended Queue WriteInterceptor function (hsa_amd_queue_intercept_handler).
     using set_write_interceptor_t = std::function<void(hsa_amd_queue_intercept_handler, void*)>;
 
-    Queue(const AgentCache& agent, CoreApiTable table);
+    // For tests: creates no runtime queue. `intercept_queue`, if any, is the ring writes go to.
+    Queue(const AgentCache& agent, CoreApiTable table, hsa_queue_t* intercept_queue = nullptr);
     Queue(const AgentCache&  agent,
           uint32_t           size,
           hsa_queue_type32_t type,
