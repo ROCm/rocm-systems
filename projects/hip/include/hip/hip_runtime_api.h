@@ -6147,12 +6147,16 @@ hipError_t hipArray3DGetDescriptor(HIP_ARRAY3D_DESCRIPTOR* pArrayDescriptor, hip
 /**
  * @brief Gets a HIP array plane from a multiplanar HIP array.
  *
+ * @warning AMD devices do not support multiplanar arrays. On AMD this validates its arguments
+ * and returns #hipErrorNotSupported; it never returns a plane.
+ *
  * @param[out] pPlaneArray - pointer to the returned HIP array that represents a single format
  * plane of the input HIP array hArray
  * @param[in] hArray - multiplanar HIP array
  * @param[in] planeIdx - index of the array plane
  *
- * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorInvalidHandle, #hipErrorNotSupported
+ * @returns #hipErrorInvalidValue if @p pPlaneArray is nullptr, #hipErrorInvalidHandle if
+ * @p hArray is not a valid array, otherwise #hipErrorNotSupported on AMD devices.
  *
  * @see hipArrayCreate, hipArray3DCreate, hipArrayDestroy
  */
