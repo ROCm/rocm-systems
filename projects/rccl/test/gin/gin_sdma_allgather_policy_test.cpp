@@ -188,8 +188,8 @@ TEST(AllGatherPolicyArchThreshold, UnknownOrMissingNameFallsBack) {
 TEST(GatherPolicyArchTable, ThresholdPerArch) {
   EXPECT_EQ(gatherArchSdmaThreshold("gfx942:sramecc+:xnack-"), 128u << 20);  // MI300X
   EXPECT_EQ(gatherArchSdmaThreshold("gfx950:sramecc+:xnack-"), 32u << 20);   // MI350X
-  EXPECT_EQ(gatherArchSdmaThreshold("gfx1250"), 512u << 10);                 // MI455X
-  EXPECT_EQ(gatherArchSdmaThreshold("gfx1250-strict"), 512u << 10);
+  EXPECT_EQ(gatherArchSdmaThreshold("gfx1250"), 2u << 20);                   // MI455X
+  EXPECT_EQ(gatherArchSdmaThreshold("gfx1250-strict"), 2u << 20);
 }
 
 TEST(GatherPolicyArchTable, ThresholdFallsBackOffTable) {
@@ -235,9 +235,11 @@ TEST(GatherPolicyArchTable, LadderGfx1250) {
     EXPECT_EQ(gatherCtasFor(a, 0), 1) << a;
     EXPECT_EQ(gatherCtasFor(a, 8u << 10), 1) << a;
     EXPECT_EQ(gatherCtasFor(a, (8u << 10) + 1), 2) << a;
-    EXPECT_EQ(gatherCtasFor(a, 32u << 10), 2) << a;
-    EXPECT_EQ(gatherCtasFor(a, (32u << 10) + 1), 8) << a;
-    EXPECT_EQ(gatherCtasFor(a, 512u << 10), 8) << a;
+    EXPECT_EQ(gatherCtasFor(a, 64u << 10), 2) << a;
+    EXPECT_EQ(gatherCtasFor(a, (64u << 10) + 1), 4) << a;
+    EXPECT_EQ(gatherCtasFor(a, 128u << 10), 4) << a;
+    EXPECT_EQ(gatherCtasFor(a, (128u << 10) + 1), 8) << a;
+    EXPECT_EQ(gatherCtasFor(a, 2u << 20), 8) << a;
   }
 }
 
@@ -589,6 +591,7 @@ TEST(GatherPolicyEnv, ResolveLLMaxBytes) {
 TEST(GatherPolicyEnv, ResolveLLMaxBytesUsesTheArchDefault) {
   unsetenv(kGatherLLMaxBytesEnv);
   EXPECT_EQ(resolveGatherLLMaxBytesFromEnv(gatherArchLLMaxBytes("gfx942:sramecc+:xnack-")), 2048u);
+  EXPECT_EQ(resolveGatherLLMaxBytesFromEnv(gatherArchLLMaxBytes("gfx1250-strict")), 4096u);
   EXPECT_EQ(resolveGatherLLMaxBytesFromEnv(gatherArchLLMaxBytes("gfx9999")), kGatherLLDefaultMaxBytes);
   EXPECT_EQ(resolveGatherLLMaxBytesFromEnv(gatherArchLLMaxBytes(nullptr)), kGatherLLDefaultMaxBytes);
   // The env value wins over the arch default.

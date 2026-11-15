@@ -205,7 +205,7 @@ static constexpr size_t kGatherSdmaThresholdDefault = 1u << 20;
 static constexpr ArchSdmaThreshold kGatherSdmaThresholdByArch[] = {
   {"gfx942", 128u << 20},
   {"gfx950", 32u << 20},
-  {"gfx1250", 512u << 10},
+  {"gfx1250", 2u << 20},
 };
 
 inline size_t gatherArchSdmaThreshold(const char* gcnArchName) {
@@ -218,7 +218,7 @@ inline size_t gatherArchSdmaThreshold(const char* gcnArchName) {
 // chunks are barrier-bound and fewer CTAs win. Measured per rank on 8x MI300X
 // (gfx942): 1 CTA up to 2 KiB, 2 up to 8 KiB, 4 up to 32 KiB, 8 up to 512 KiB, 16
 // above. On 8x MI350X (gfx950): 2 up to 16 KiB, 16 above. On 4x MI455X (gfx1250):
-// 1 up to 8 KiB, 2 up to 32 KiB, 8 above.
+// 1 up to 8 KiB, 2 up to 64 KiB, 4 up to 128 KiB, 8 above.
 static constexpr LsaCtaStep kGatherLsaCtasGfx942[] = {
   {2u << 10, 1},
   {8u << 10, 2},
@@ -230,7 +230,8 @@ static constexpr LsaCtaStep kGatherLsaCtasGfx950[] = {
 };
 static constexpr LsaCtaStep kGatherLsaCtasGfx1250[] = {
   {8u << 10, 1},
-  {32u << 10, 2},
+  {64u << 10, 2},
+  {128u << 10, 4},
 };
 static constexpr ArchLsaCtaLadder kGatherLsaCtasByArch[] = {
   {"gfx942", kGatherLsaCtasGfx942, sizeof(kGatherLsaCtasGfx942) / sizeof(kGatherLsaCtasGfx942[0]), 16},
@@ -296,10 +297,11 @@ GIN_SDMA_AG_HD inline bool gatherUsesLLTier(size_t chunkBytes_, size_t llMaxByte
 // Gather -D 3 LL-tier cap in bytes per rank, per architecture: the largest chunk for
 // which one LL CTA beats the LSA tier. Architectures not in the table use
 // kGatherLLDefaultMaxBytes. On 8x MI300X (gfx942) and 8x MI350X (gfx950) LL wins up
-// to 2 KiB per rank.
+// to 2 KiB per rank, on 4x MI455X (gfx1250) up to 4 KiB.
 static constexpr ArchSdmaThreshold kGatherLLMaxBytesByArch[] = {
   {"gfx942", 2u << 10},
   {"gfx950", 2u << 10},
+  {"gfx1250", 4u << 10},
 };
 
 inline size_t gatherArchLLMaxBytes(const char* gcnArchName) {
