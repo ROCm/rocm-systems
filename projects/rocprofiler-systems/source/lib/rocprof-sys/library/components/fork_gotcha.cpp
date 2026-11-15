@@ -7,6 +7,7 @@
 #include "core/config.hpp"
 #include "core/state.hpp"
 #include "library/components/fork_gotcha.hpp"
+#include "library/process_sampler.hpp"
 #include "library/runtime.hpp"
 #include "library/sampling.hpp"
 
@@ -69,7 +70,10 @@ prefork_setup()
     if(config::get_use_sampling())
     {
         sampling::block_samples();
-        sampling::prefork_lock_pmc_sampler();
+    }
+    if(config::get_use_process_sampling())
+    {
+        process_sampler::block();
     }
 
     rocprofsys::categories::disable_categories(config::get_enabled_categories());
@@ -88,20 +92,15 @@ postfork_parent()
         return;
     }
 
-    // Reinitialize AMD SMI in parent process to get fresh device handles before
-    // unblocking the shutdown/setup transition. AMD SMI device handles may be corrupted
-    // after fork.
-    if(config::get_use_sampling())
-    {
-        sampling::postfork_parent_reinit();
-        sampling::postfork_parent_unlock_pmc_sampler();
-    }
-
     rocprofsys::categories::enable_categories(config::get_enabled_categories());
 
     if(config::get_use_sampling())
     {
         sampling::unblock_samples();
+    }
+    if(config::get_use_process_sampling())
+    {
+        process_sampler::unblock();
     }
 
     // prevent re-entry until prefork has been called
@@ -120,7 +119,7 @@ postfork_child()
     // Reset the fork-safe logger lock FIRST, before any logging path in the
     // child.  The console/sink spinlock may have been inherited held by a
     // thread that did not survive fork(); any LOG_* call below (or in the
-    // postfork_child_cleanup chain) would otherwise spin forever trying to
+    // process sampler reset) would otherwise spin forever trying to
     // acquire it.  Doing this here, rather than relying on the logger's own
     // atfork child handler, is order-robust: glibc runs atfork child
     // handlers LIFO, and this gotcha registers its handler after the logger
@@ -137,11 +136,9 @@ postfork_child()
 
     state::process::set(state::process::Finalized);
 
-    // Clean up AMD SMI in child process before other shutdowns
-    if(config::get_use_sampling())
+    if(config::get_use_process_sampling())
     {
-        sampling::postfork_child_reset_pmc_sampler_lock();
-        sampling::postfork_child_cleanup();
+        process_sampler::postfork_child();
     }
 
     settings::enabled() = false;

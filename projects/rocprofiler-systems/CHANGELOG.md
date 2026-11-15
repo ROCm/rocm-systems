@@ -13,9 +13,37 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
   bundled `install-skills.sh --agent <claude|codex|cursor>` to copy them into your AI coding
   agent's personal skills folder.
 
+### Changed
+
+- Process sampling runs each source (CPU, GPU AMD SMI, AI NIC, hipFile, GPU perf counters)
+  on its own thread (`omni.<source>`), so a slow source no longer delays the others.
+  Per-source frequency settings will follow; all sources use
+  `ROCPROFSYS_PROCESS_SAMPLING_FREQ` today.
+- Perfetto counter units are now `count` for GPU perf counters (was `Unit Count`), `MB` for
+  GPU memory usage (was `megabytes`), `W` for GPU power (was `watts`) and the degree Celsius
+  symbol for GPU temperature (was `deg C`). The rocpd `pmc_info.symbol` of a per-link XGMI
+  metric is the per-link PMC name (`device_xgmi_read_data_linkN`).
+- On pause, Perfetto and rocpd record a zero for every sampled counter that already had a
+  value; counters that never had a value get none. GPU perf counters are zeroed too. rocpd
+  event categories are unchanged (`amd_smi`, `amd_smi_nic`, `hipfile`,
+  `rocm_counter_collection`, `cpu_frequency`).
+- AI NIC `pmc_info` rows are written only for enabled and supported metrics.
+- The per-device "No samples were collected" warnings at finalization were removed.
+- A device whose read fails is not sampled for the rest of the run (it was retried every
+  tick).
+- The tick that reaches `ROCPROFSYS_PROCESS_SAMPLING_DURATION` ends sampling without taking a
+  sample.
+- As before, the GPU perf-counter source is created once, in the profiling SDK `tool_init`,
+  and is not recreated when the profiler re-attaches.
+
 ### Resolved issues
 
 - Sampled PAPI hardware-counter tracks use the short description instead of the raw event symbol.
+- `fork()` now waits for running process-sampler polls whenever process sampling is on (it
+  required `ROCPROFSYS_USE_SAMPLING`). Concurrent forks no longer release the block early, a
+  fork no longer causes an extra poll of every source, the forked child no longer shuts down
+  AMD SMI and the parent no longer re-initializes it.
+- A failed CPU core read is reported as no value instead of 0.
 - Fixed missing OpenMP (OMPT) events on non-main threads when a region was still open at
   finalization. Regions that never received their end callback are now emitted with the
   finalization timestamp and an `[incomplete]` name suffix instead of being dropped.

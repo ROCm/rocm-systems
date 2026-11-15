@@ -21,7 +21,6 @@
 #include "library/components/backtrace_timestamp.hpp"
 #include "library/components/callchain.hpp"
 #include "library/perf.hpp"
-#include "library/pmc/sampler.hpp"
 #include "library/runtime.hpp"
 #include "library/thread_data.hpp"
 #include "library/thread_info.hpp"
@@ -1754,51 +1753,6 @@ struct sampling_initialization
     }
 };
 }  // namespace
-void
-postfork_parent_reinit()
-{
-    if(config::get_use_process_sampling())
-    {
-        pmc::postfork_parent_reinit();
-    }
-}
-
-void
-postfork_child_cleanup()
-{
-    if(config::get_use_process_sampling())
-    {
-        pmc::postfork_child_cleanup();
-    }
-}
-
-void
-prefork_lock_pmc_sampler()
-{
-    if(config::get_use_process_sampling() && config::get_use_amd_smi())
-    {
-        pmc::prefork_lock_sampler();
-    }
-}
-
-void
-postfork_parent_unlock_pmc_sampler()
-{
-    if(config::get_use_process_sampling() && config::get_use_amd_smi())
-    {
-        pmc::postfork_parent_unlock_sampler();
-    }
-}
-
-void
-postfork_child_reset_pmc_sampler_lock()
-{
-    if(config::get_use_process_sampling() && config::get_use_amd_smi())
-    {
-        pmc::postfork_child_reset_sampler_lock();
-    }
-}
-
 void
 pause()
 {

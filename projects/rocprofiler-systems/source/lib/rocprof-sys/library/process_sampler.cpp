@@ -2,151 +2,272 @@
 // SPDX-License-Identifier: MIT
 
 #include "library/process_sampler.hpp"
-#include "core/config.hpp"
-#include "library/pmc/sampler.hpp"
-#include "library/runtime.hpp"
-#include <cstdint>
 
+#include "common/clocks.hpp"
+#include "core/collection/detail/source_runner.hpp"
+#include "core/collection/fork_gate.hpp"
+#include "core/collection/sample_collector.hpp"
+#include "core/collection/source_interface.hpp"
+#include "core/config.hpp"
+#include "core/state.hpp"
+#include "core/trace_cache/cache_manager.hpp"
+#include "core/trace_cache/collection_sink.hpp"
+#include "core/trace_cache/metadata_registry.hpp"
+#include "library/pmc/sources.hpp"
+#include "library/runtime.hpp"
 #include "logger/debug.hpp"
+
+#include <fmt/format.h>
+#include <timemory/process/threading.hpp>
 
 #include <atomic>
 #include <chrono>
+#include <cstdint>
+#include <functional>
+#include <limits>
 #include <memory>
-#include <thread>
+#include <mutex>
+#include <string_view>
+#include <utility>
 #include <vector>
 
 namespace rocprofsys::process_sampler
 {
 namespace
 {
-using promise_t                                         = std::promise<void>;
-std::unique_ptr<promise_t>             polling_finished = {};
-std::vector<std::unique_ptr<instance>> instances        = {};
-std::atomic<bool>                      sampler_paused{ false };
+using sink_t = trace_cache::collection_sink<trace_cache::buffer_storage_t,
+                                            trace_cache::metadata_registry>;
 
-bool&
-is_initialized()
-{
-    static bool _v = false;
-    return _v;
-}
-
-std::unique_ptr<std::thread>&
-get_thread()
-{
-    static std::unique_ptr<std::thread> _v;
-    return _v;
-}
-
-std::atomic<state::process::State>&
-get_sampler_state()
-{
-    static std::atomic<state::process::State> _v{ state::process::PreInit };
-    return _v;
-}
-
-std::atomic<bool>&
-get_sampler_is_sampling()
-{
-    static std::atomic<bool> _v{ false };
-    return _v;
-}
-}  // namespace
+/** Set by init_poll_thread(): shutdown() and post_process() must not stop or destroy the
+ * collector from one of its own poll threads (a source library that calls exit()). */
+thread_local bool g_on_poll_thread = false;
 
 void
-sampler::poll(std::atomic<state::process::State>* _state, nsec_t _interval,
-              promise_t* _ready)
+init_poll_thread(std::string_view source)
 {
+    g_on_poll_thread = true;
+    // thread_info reads timemory's id offset; no project-owned naming facility exists
     threading::offset_this_id(true);
-    threading::set_thread_name("omni.sampler");
+    threading::set_thread_name(fmt::format("omni.{}", source).c_str());
+    state::thread::push(state::thread::Internal);
+}
 
-    auto const _thread_state_guard = state::thread::scoped(state::thread::Internal);
+/** The one place that picks a source's polling interval. Today: the global one. */
+[[nodiscard]] std::chrono::nanoseconds
+interval_for(std::string_view /*source*/, std::chrono::nanoseconds global)
+{
+    return global;
+}
 
-    // notify thread started
-    if(_ready)
+/** Members are destroyed in reverse: the collector (joins its threads, releases the
+ * providers) before the sink. */
+class sampler
+{
+public:
+    sampler(std::chrono::nanoseconds interval, std::uint64_t deadline_ns,
+            collection::fork_gate& gate, std::function<bool()> allowed)
+    : m_interval(interval)
+    , m_sink(trace_cache::get_buffer_storage(), trace_cache::get_metadata_registry())
+    , m_collector(m_sink, gate,
+                  collection::detail::run_options{ .allowed     = std::move(allowed),
+                                                   .thread_init = &init_poll_thread,
+                                                   .deadline_ns = deadline_ns })
+    {}
+
+    void add(std::unique_ptr<collection::source_interface> source)
     {
-        _ready->set_value();
+        const auto interval = interval_for(source->name(), m_interval);
+        m_collector.add_source(std::move(source), interval);
     }
 
-    for(auto& itr : instances)
+    [[nodiscard]] collection::sample_collector& collector() noexcept
     {
-        itr->config();
+        return m_collector;
     }
 
-    LOG_DEBUG(
-        "Background process sampling polling at an interval of {:.2f} seconds...",
-        std::chrono::duration_cast<std::chrono::duration<double>>(_interval).count());
+private:
+    std::chrono::nanoseconds     m_interval;
+    sink_t                       m_sink;
+    collection::sample_collector m_collector;
+};
 
+/** The process-wide sampler, its lifecycle and the sources queued before setup(). */
+class process_sampler_state
+{
+public:
+    void add_source(std::unique_ptr<collection::source_interface> source)
+    {
+        const std::lock_guard lock(m_mutex);
+        if(!m_sampler)
+        {
+            m_pending.push_back(std::move(source));
+            return;
+        }
+        if(m_state.load() == state::process::Finalized)
+        {
+            LOG_DEBUG("Source not added: the background sampler is shut down.");
+            return;
+        }
+        m_sampler->add(std::move(source));
+        ROCPROFSYS_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
+        m_sampler->collector().start();
+    }
+
+    void setup(std::chrono::nanoseconds interval, std::uint64_t deadline_ns)
+    {
+        const std::lock_guard lock(m_mutex);
+        take_sampler().reset();
+        m_state.store(state::process::PreInit);
+
+        auto next = std::make_unique<sampler>(interval, deadline_ns, m_gate,
+                                              [this] { return is_sampling_allowed(); });
+        for(auto& source : pmc::make_default_sources())
+        {
+            next->add(std::move(source));
+        }
+        for(auto& source : std::exchange(m_pending, {}))
+        {
+            next->add(std::move(source));
+        }
+        install(std::move(next));
+
+        ROCPROFSYS_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
+        m_sampler->collector().start();
+        m_state.store(state::process::Active);
+    }
+
+    void shutdown()
+    {
+        if(g_on_poll_thread)
+        {
+            // No thread can be joined from here. The other sources' threads keep running
+            // but skip their ticks (allowed() is false); their polls in flight are
+            // drained so finalize does not run under them. Our own pass is discounted.
+            m_state.store(state::process::Finalized);
+            m_gate.block();
+            m_gate.unblock();
+            return;
+        }
+        const std::lock_guard lock(m_mutex);
+        m_state.store(state::process::Finalized);
+        if(m_sampler)
+        {
+            m_sampler->collector().stop();
+        }
+    }
+
+    void post_process()
+    {
+        if(g_on_poll_thread)
+        {
+            return;
+        }
+        const std::lock_guard lock(m_mutex);
+        take_sampler().reset();
+    }
+
+    void pause()
+    {
+        const std::lock_guard lock(m_swap_mutex);
+        m_paused = true;
+        if(m_sampler)
+        {
+            m_sampler->collector().pause();
+        }
+    }
+
+    void resume()
+    {
+        const std::lock_guard lock(m_swap_mutex);
+        m_paused = false;
+        if(m_sampler)
+        {
+            m_sampler->collector().resume();
+        }
+    }
+
+    [[nodiscard]] collection::fork_gate& gate() noexcept { return m_gate; }
+
+private:
+    [[nodiscard]] bool is_sampling_allowed() const
+    {
+        return m_state.load() == state::process::Active &&
+               state::process::get() == state::process::Active;
+    }
+
+    /** Caller holds m_mutex. The returned sampler is stopped and destroyed by the caller
+     * outside m_swap_mutex, so pause() and resume() never wait for it. */
+    [[nodiscard]] std::unique_ptr<sampler> take_sampler()
+    {
+        const std::lock_guard lock(m_swap_mutex);
+        return std::exchange(m_sampler, nullptr);
+    }
+
+    /** Caller holds m_mutex. A sampler installed while paused starts paused. */
+    void install(std::unique_ptr<sampler> next)
+    {
+        const std::lock_guard lock(m_swap_mutex);
+        m_sampler = std::move(next);
+        if(m_paused)
+        {
+            m_sampler->collector().pause();
+        }
+    }
+
+    /** Lifecycle: setup, shutdown, add_source, post_process. */
+    std::mutex m_mutex;
+    /** Short: m_sampler (written with m_mutex held too) and m_paused. */
+    std::mutex                         m_swap_mutex;
+    std::atomic<state::process::State> m_state{ state::process::PreInit };
+    bool                               m_paused = false;
+    std::vector<std::unique_ptr<collection::source_interface>> m_pending;
+    /** Outlives every sampler. */
+    collection::fork_gate    m_gate;
+    std::unique_ptr<sampler> m_sampler;
+};
+
+/** Never destroyed: finalize can run from atexit() after the static destructors. */
+process_sampler_state*&
+state_slot()
+{
+    static process_sampler_state* s_state =
+        std::make_unique<process_sampler_state>().release();
+    return s_state;
+}
+
+process_sampler_state&
+instance()
+{
+    return *state_slot();
+}
+
+/** Timeline ns at which sampling ends; max when no duration is configured. */
+std::uint64_t
+sampling_deadline_ns()
+{
     auto duration = config::get_process_sampling_duration();
     if(duration < 0.0)
     {
         duration = config::get_sampling_duration();
     }
-    const bool has_duration = (duration > 0.0);
-
-    auto       now = std::chrono::steady_clock::now();
-    const auto end = now + std::chrono::duration_cast<std::chrono::nanoseconds>(
-                               std::chrono::duration<double>{ duration });
-    while(_state && _state->load() < state::process::Finalized &&
-          state::process::get() < state::process::Finalized)
+    if(duration <= 0.0)
     {
-        std::this_thread::sleep_until(now);
-        if(_state->load() != state::process::Active)
-        {
-            continue;
-        }
-        if(state::process::get() >= state::process::Finalized)
-        {
-            break;
-        }
-        if(state::process::get() != state::process::Active)
-        {
-            continue;
-        }
-
-        for(auto& itr : instances)
-        {
-            itr->flush_pending_pause();
-        }
-
-        if(sampler_paused.load(std::memory_order_relaxed))
-        {
-            now = std::chrono::steady_clock::now() + _interval;
-            continue;
-        }
-        get_sampler_is_sampling().store(true);
-        for(auto& itr : instances)
-        {
-            itr->sample();
-        }
-        get_sampler_is_sampling().store(false);
-        if(has_duration && now >= end)
-        {
-            break;
-        }
-        now = std::chrono::steady_clock::now() + _interval;
+        return std::numeric_limits<std::uint64_t>::max();
     }
+    const auto duration_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::duration<double>{ duration });
+    return clocks::timeline::now_ns() + static_cast<std::uint64_t>(duration_ns.count());
+}
+}  // namespace
 
-    // ensure this is always false
-    get_sampler_is_sampling().store(false);
-
-    if(has_duration && now >= end && state::process::get() < state::process::Finalized)
-    {
-        LOG_DEBUG("Background process sampling duration of {:.2f} seconds has elapsed. "
-                  "Shutting down process sampling...",
-                  duration);
-    }
-
-    LOG_DEBUG("Thread sampler polling completed...");
-
-    if(polling_finished)
-    {
-        polling_finished->set_value();
-    }
+void
+add_source(std::unique_ptr<collection::source_interface> source)
+{
+    instance().add_source(std::move(source));
 }
 
 void
-sampler::setup()
+setup()
 {
     if(!get_use_process_sampling())
     {
@@ -154,133 +275,56 @@ sampler::setup()
         return;
     }
 
-    LOG_DEBUG("Setting up background sampler...");
-
-    // shutdown if already running
-    shutdown();
-
-    LOG_DEBUG("Setting up PMC sampling.");
-    auto& pmc                = instances.emplace_back(std::make_unique<instance>());
-    pmc->setup               = []() { pmc::setup(); };
-    pmc->shutdown            = []() { pmc::shutdown(); };
-    pmc->post_process        = []() { pmc::post_process(); };
-    pmc->config              = []() { pmc::config(); };
-    pmc->sample              = []() { pmc::sample(); };
-    pmc->pause               = []() { pmc::pause(); };
-    pmc->flush_pending_pause = []() { pmc::flush_pending_pause(); };
-
-    for(auto& itr : instances)
-    {
-        itr->setup();
-    }
-
-    polling_finished = std::make_unique<promise_t>();
-
-    const auto freq     = get_process_sampling_freq();
     const auto interval = std::chrono::duration_cast<std::chrono::nanoseconds>(
-        std::chrono::duration<double>{ 1.0 / freq });
+        std::chrono::duration<double>{ 1.0 / get_process_sampling_freq() });
+    LOG_DEBUG(
+        "Background process sampling polling at an interval of {:.2f} seconds...",
+        std::chrono::duration_cast<std::chrono::duration<double>>(interval).count());
 
-    ROCPROFSYS_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
-
-    set_state(state::process::PreInit);
-    using poll_fn = void (*)(std::atomic<state::process::State>*, nsec_t, promise_t*);
-    get_thread()  = std::make_unique<std::thread>(static_cast<poll_fn>(&poll),
-                                                  &get_sampler_state(), interval, nullptr);
-
-    set_state(state::process::Active);
+    instance().setup(interval, sampling_deadline_ns());
 }
 
 void
-sampler::shutdown()
+shutdown()
 {
-    // set the local sampler state to finalized
-    set_state(state::process::Finalized);
-
-    for(auto& itr : instances)
-    {
-        itr->flush_pending_pause();
-    }
-
-    // shutdown all components
-    for(auto& itr : instances)
-    {
-        itr->shutdown();
-    }
-
-    auto& _thread = get_thread();
-    if(_thread)
-    {
-        size_t              _nitr     = 0;
-        constexpr size_t    _nitr_max = 100;
-        const std::uint64_t _freq     = (1.0 / get_process_sampling_freq()) * 1.0e3;
-
-        // wait until the sampler is no longer sampling
-        std::this_thread::sleep_for(msec_t{ _freq });
-        while(get_sampler_is_sampling().load())
-        {
-            if(_nitr++ > _nitr_max)
-            {
-                break;
-            }
-        }
-
-        // during CI, throw an error if polling_finished is not valid
-        if(!polling_finished)
-        {
-            throw std::runtime_error("polling_finished is not valid");
-        }
-        if(polling_finished)
-        {
-            // wait for the thread to finish
-            auto const _fut = polling_finished->get_future();
-            _fut.wait_for(msec_t{ 10 * _freq });
-            _thread->join();
-        }
-        else
-        {
-            // cancel the thread and detach
-            std::this_thread::sleep_for(msec_t{ 10 * _freq });
-            pthread_cancel(_thread->native_handle());
-            _thread->detach();
-        }
-        _thread          = std::unique_ptr<std::thread>{ nullptr };
-        polling_finished = std::unique_ptr<promise_t>{};
-    }
-
-    is_initialized() = false;
+    instance().shutdown();
 }
 
 void
-sampler::pause()
+post_process()
 {
-    sampler_paused.store(true, std::memory_order_relaxed);
-
-    for(auto& itr : instances)
-    {
-        itr->pause();
-    }
+    instance().post_process();
 }
 
 void
-sampler::resume()
+pause()
 {
-    sampler_paused.store(false, std::memory_order_relaxed);
+    instance().pause();
 }
 
 void
-sampler::post_process()
+resume()
 {
-    for(auto& itr : instances)
-    {
-        itr->post_process();
-    }
-
-    instances.clear();
+    instance().resume();
 }
 
 void
-sampler::set_state(state_t _state)
+block()
 {
-    get_sampler_state().store(_state);
+    instance().gate().block();
+}
+
+void
+unblock()
+{
+    instance().gate().unblock();
+}
+
+void
+postfork_child()
+{
+    // The old state is leaked on purpose: its threads, mutexes and providers belong to
+    // threads that do not exist in the child.
+    state_slot() = std::make_unique<process_sampler_state>().release();
 }
 }  // namespace rocprofsys::process_sampler

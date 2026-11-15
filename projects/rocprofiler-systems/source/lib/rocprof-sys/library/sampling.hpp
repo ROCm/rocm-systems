@@ -47,12 +47,6 @@ void unblock_signals(std::set<int> = {});
 void
 post_process();
 
-void
-postfork_parent_reinit();
-
-void
-postfork_child_cleanup();
-
 /// Releases ownership of every inherited sampler slot without running destructors.
 /// Fork-child only: the pre-fork threads no longer exist in the child. Calling this from
 /// a live multi-threaded process clears sampler slots belonging to threads still inside
@@ -61,15 +55,6 @@ postfork_child_cleanup();
 /// terminate.
 void
 postfork_child_release_samplers() noexcept;
-
-void
-prefork_lock_pmc_sampler();
-
-void
-postfork_parent_unlock_pmc_sampler();
-
-void
-postfork_child_reset_pmc_sampler_lock();
 
 void
 pause();
