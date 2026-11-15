@@ -112,6 +112,46 @@ TEST(replay_window, a_deadline_wait_still_tries_once_past_its_deadline)
     EXPECT_EQ(timeouts.front(), wait_duration::zero());
 }
 
+TEST(replay_window, a_barrier_on_a_full_ring_gives_up_without_writing)
+{
+    auto agent = rrt::test_agent_t{agent_handle};
+    auto ring  = rrt::fake_ring_t{31};
+    ring.fill();
+    auto queue      = rrt::test_queue_t{agent, ring};
+    auto completion = hsa_signal_t{};
+    rrt::create_counter(0, &completion);
+
+    EXPECT_EQ(hsa::replay_barrier_and_wait(queue, completion, hsa::replay_deadline_t{short_wait}),
+              hsa::barrier_wait_result_t::ring_full);
+    EXPECT_EQ(ring.write_index.load(), rrt::fake_ring_t::size) << "no slot may be claimed";
+    EXPECT_EQ(ring.doorbell.load(), -1) << "nothing may be rung";
+    EXPECT_EQ(rrt::counter(completion).load(), 0) << "an unwritten barrier leaves its signal alone";
+
+    delete &rrt::counter(completion);
+}
+
+TEST(replay_window, a_barrier_takes_a_ring_slot_that_frees_up_before_its_deadline)
+{
+    auto agent = rrt::test_agent_t{agent_handle};
+    auto ring  = rrt::fake_ring_t{32};
+    ring.fill();
+    // The packets filling the ring were rung, so the packet processor works through them.
+    ring.doorbell.store(rrt::fake_ring_t::size - 1);
+    auto queue      = rrt::test_queue_t{agent, ring};
+    auto completion = hsa_signal_t{};
+    rrt::create_counter(0, &completion);
+
+    {
+        auto gpu = rrt::fake_packet_processor_t{ring, 5ms};
+        EXPECT_EQ(hsa::replay_barrier_and_wait(queue, completion, hsa::replay_deadline_t{5s}),
+                  hsa::barrier_wait_result_t::completed);
+    }
+    EXPECT_EQ(ring.write_index.load(), rrt::fake_ring_t::size + 1);
+    EXPECT_EQ(rrt::counter(completion).load(), 0);
+
+    delete &rrt::counter(completion);
+}
+
 TEST(replay_window, agent_drain_gives_up_while_a_handler_is_in_flight)
 {
     auto  agent      = rrt::test_agent_t{agent_handle};

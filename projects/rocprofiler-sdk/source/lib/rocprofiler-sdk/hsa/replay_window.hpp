@@ -201,8 +201,9 @@ replay_drain_agent_or_fatal(hsa_agent_t agent);
 // Write `count` packets into `queue`'s ring buffer and ring its doorbell -- the same submission the
 // application itself performs, so whichever interception mechanism is installed sees them. Used to
 // re-submit recorded packets from outside a WriteInterceptor call (range replay), where no
-// interceptor-provided writer is in scope. Blocks while the ring is full. Returns false if the
-// queue's packet buffer is unavailable or its engine does not accept AQL packets.
+// interceptor-provided writer is in scope. Blocks, without a deadline, while the ring is full.
+// Returns false if the queue's packet buffer is unavailable or its engine does not accept AQL
+// packets.
 //
 // Callers submitting *recorded* packets must clear their completion signals first: re-firing a
 // signal the application has already consumed corrupts its synchronization.
@@ -213,12 +214,15 @@ enum class barrier_wait_result_t
 {
     completed,      // the barrier retired: all prior work on the queue finished
     not_submitted,  // the barrier could not be written, so nothing was waited on
+    ring_full,      // no ring slot freed up before the deadline, so nothing was written
     timed_out,      // the barrier is still in the ring and will decrement `completion` later
 };
 
 // Submit a barrier packet carrying `completion` and wait until `deadline` for it, fencing the CPU
-// against all GPU work previously submitted to `queue`. After timed_out the packet processor still
-// owns `completion`: the caller must neither reuse nor destroy it.
+// against all GPU work previously submitted to `queue`. Waiting for a free ring slot counts against
+// the same deadline; unlike replay_ring_submit, a slot is only claimed once it is free, so giving
+// up leaves the ring untouched. After timed_out the packet processor still owns `completion`: the
+// caller must neither reuse nor destroy it.
 barrier_wait_result_t
 replay_barrier_and_wait(const Queue&             queue,
                         hsa_signal_t             completion,

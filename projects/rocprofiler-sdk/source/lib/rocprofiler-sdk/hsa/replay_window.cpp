@@ -86,6 +86,70 @@ agent_replay_state(rocprofiler_agent_id_t agent_id)
     tl_state    = state;
     return *state;
 }
+
+// Calls `ready` every couple of milliseconds until it returns true or `timeout` passes. Returns
+// whether it did.
+template <typename ReadyFn>
+bool
+poll_for(ReadyFn&& ready, replay_deadline_t::clock::duration timeout)
+{
+    using clock                  = replay_deadline_t::clock;
+    constexpr auto poll_interval = std::chrono::milliseconds{2};
+    const auto     poll_end      = clock::now() + timeout;
+    for(;;)
+    {
+        if(ready()) return true;
+        const auto now = clock::now();
+        if(now >= poll_end) return false;
+        std::this_thread::sleep_for(std::min<clock::duration>(poll_interval, poll_end - now));
+    }
+}
+
+// `queue`'s ring when it takes AQL packets, else nullptr.
+const hsa_queue_t*
+writable_ring(const Queue& queue)
+{
+    if(queue.get_engine_type() != Queue::engine_type::compute) return nullptr;
+    const auto* ring = queue.intercept_queue();
+    return (ring == nullptr || ring->base_address == nullptr) ? nullptr : ring;
+}
+
+// Claims the next slot of `ring` only while one is free, so a caller that gives up has written
+// nothing: a slot claimed with hsa_queue_add_write_index and never filled stalls the packet
+// processor at its invalid header for good.
+bool
+try_reserve_slot(const CoreApiTable& core, const hsa_queue_t* ring, uint64_t& write_idx)
+{
+    write_idx = core.hsa_queue_load_write_index_relaxed_fn(ring);
+    while(write_idx - core.hsa_queue_load_read_index_scacquire_fn(ring) < ring->size)
+    {
+        const auto seen = core.hsa_queue_cas_write_index_relaxed_fn(ring, write_idx, write_idx + 1);
+        if(seen == write_idx) return true;
+        write_idx = seen;
+    }
+    return false;
+}
+
+void
+write_slot(const CoreApiTable&       core,
+           const hsa_queue_t*        ring,
+           uint64_t                  write_idx,
+           const rocprofiler_packet& packet)
+{
+    const size_t offset = (write_idx % ring->size) * sizeof(rocprofiler_packet);
+    // The ring buffer is a flat array of 64-byte packet slots addressed by index. Stepping a
+    // byte pointer rather than casting the base address through an integer keeps this a
+    // pointer-to-pointer cast, which is what it is.
+    auto* slot = reinterpret_cast<uint32_t*>(static_cast<uint8_t*>(ring->base_address) + offset);
+    const auto* src = reinterpret_cast<const uint32_t*>(&packet);
+
+    // Header last (release store): the packet processor must not see a slot whose header is
+    // valid before its payload is.
+    std::memcpy(&slot[1], &src[1], sizeof(rocprofiler_packet) - sizeof(uint32_t));
+    reinterpret_cast<std::atomic<uint32_t>*>(slot)->store(src[0], std::memory_order_release);
+
+    core.hsa_signal_store_screlease_fn(ring->doorbell_signal, write_idx);
+}
 }  // namespace
 
 std::shared_mutex&
@@ -113,22 +177,13 @@ replay_drain_agent(hsa_agent_t agent, const replay_deadline_t& deadline)
     auto* queue_controller = get_queue_controller();
     if(queue_controller == nullptr) return true;
 
-    using clock                  = replay_deadline_t::clock;
-    constexpr auto poll_interval = std::chrono::milliseconds{2};
-    const auto     poll          = [&](clock::duration timeout) {
-        const auto poll_end = clock::now() + timeout;
-        for(;;)
-        {
-            // Includes queues destroy has already removed from the live map. Their completion
-            // handlers are still running until Queue::sync returns, and a snapshot taken in that
-            // window would race those handlers.
-            if(queue_controller->in_flight_async_packets(agent) == 0) return true;
-            const auto now = clock::now();
-            if(now >= poll_end) return false;
-            std::this_thread::sleep_for(std::min<clock::duration>(poll_interval, poll_end - now));
-        }
-    };
-    return replay_wait_until(poll, "this agent's async completion handler(s)", deadline);
+    // Includes queues destroy has already removed from the live map. Their completion handlers are
+    // still running until Queue::sync returns, and a snapshot taken in that window would race
+    // those handlers.
+    const auto drained = [&]() { return queue_controller->in_flight_async_packets(agent) == 0; };
+    return replay_wait_until([&](auto timeout) { return poll_for(drained, timeout); },
+                             "this agent's async completion handler(s)",
+                             deadline);
 }
 
 void
@@ -144,39 +199,20 @@ bool
 replay_ring_submit(const Queue& queue, const rocprofiler_packet* packets, size_t count)
 {
     if(count == 0) return true;
-    if(queue.get_engine_type() != Queue::engine_type::compute) return false;
-
-    const auto* hsa_queue = queue.intercept_queue();
-    if(hsa_queue == nullptr || hsa_queue->base_address == nullptr) return false;
+    const auto* ring = writable_ring(queue);
+    if(ring == nullptr) return false;
 
     const auto& core = queue.core_api();
-    // The ring holds hsa_queue->size packets; a slot may only be written once the GPU has consumed
-    // the packet `size` slots earlier.
-    auto* mutable_queue =
-        const_cast<hsa_queue_t*>(hsa_queue);  // NOLINT(cppcoreguidelines-pro-type-const-cast)
-
     for(size_t i = 0; i < count; ++i)
     {
-        const uint64_t write_idx = core.hsa_queue_add_write_index_relaxed_fn(mutable_queue, 1);
+        const uint64_t write_idx = core.hsa_queue_add_write_index_relaxed_fn(ring, 1);
 
-        while((write_idx - core.hsa_queue_load_read_index_scacquire_fn(mutable_queue)) >=
-              hsa_queue->size)
+        // The ring holds ring->size packets; a slot may only be written once the GPU has consumed
+        // the packet `size` slots earlier.
+        while((write_idx - core.hsa_queue_load_read_index_scacquire_fn(ring)) >= ring->size)
             std::this_thread::yield();
 
-        const size_t offset = (write_idx % hsa_queue->size) * sizeof(rocprofiler_packet);
-        // The ring buffer is a flat array of 64-byte packet slots addressed by index. Stepping a
-        // byte pointer rather than casting the base address through an integer keeps this a
-        // pointer-to-pointer cast, which is what it is.
-        auto* slot =
-            reinterpret_cast<uint32_t*>(static_cast<uint8_t*>(hsa_queue->base_address) + offset);
-        const auto* src = reinterpret_cast<const uint32_t*>(&packets[i]);
-
-        // Header last (release store): the packet processor must not see a slot whose header is
-        // valid before its payload is.
-        std::memcpy(&slot[1], &src[1], sizeof(rocprofiler_packet) - sizeof(uint32_t));
-        reinterpret_cast<std::atomic<uint32_t>*>(slot)->store(src[0], std::memory_order_release);
-
-        core.hsa_signal_store_screlease_fn(hsa_queue->doorbell_signal, write_idx);
+        write_slot(core, ring, write_idx, packets[i]);
     }
 
     return true;
@@ -187,17 +223,24 @@ replay_barrier_and_wait(const Queue&             queue,
                         hsa_signal_t             completion,
                         const replay_deadline_t& deadline)
 {
+    const auto* ring = writable_ring(queue);
+    if(ring == nullptr) return barrier_wait_result_t::not_submitted;
+
+    const auto& core      = queue.core_api();
+    auto        write_idx = uint64_t{0};
+    const auto  reserved  = [&]() { return try_reserve_slot(core, ring, write_idx); };
+    if(!replay_wait_until([&](auto timeout) { return poll_for(reserved, timeout); },
+                          "a free slot in this queue's ring",
+                          deadline))
+        return barrier_wait_result_t::ring_full;
+
     auto barrier   = hsa_barrier_and_packet_t{};
     barrier.header = HSA_PACKET_TYPE_BARRIER_AND << HSA_PACKET_HEADER_TYPE;
     barrier.header |= 1 << HSA_PACKET_HEADER_BARRIER;
     barrier.completion_signal = completion;
 
-    auto packet = rocprofiler_packet{barrier};
-
-    const auto& core = queue.core_api();
     core.hsa_signal_store_screlease_fn(completion, 1);
-
-    if(!replay_ring_submit(queue, &packet, 1)) return barrier_wait_result_t::not_submitted;
+    write_slot(core, ring, write_idx, rocprofiler_packet{barrier});
 
     const auto completed = replay_wait_until(
         [&](replay_deadline_t::clock::duration timeout) {
