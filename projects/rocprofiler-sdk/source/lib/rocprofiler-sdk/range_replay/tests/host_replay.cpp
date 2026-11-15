@@ -28,6 +28,7 @@
 #include "lib/rocprofiler-sdk/code_object/code_object.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
 #include "lib/rocprofiler-sdk/hsa/replay_window.hpp"
+#include "lib/rocprofiler-sdk/range_replay/peer_sync.hpp"
 #include "lib/rocprofiler-sdk/range_replay/range_state.hpp"
 
 #include "fake_queue.hpp"
@@ -733,6 +734,92 @@ TEST(range_replay_host, gpu_work_a_continuation_callback_leaves_running_declines
         EXPECT_EQ(result.status, ROCPROFILER_RANGE_REPLAY_STATUS_CONCURRENT_DISPATCH)
             << "continue_replay=" << continue_replay;
         EXPECT_EQ(value, 8) << "continue_replay=" << continue_replay;
+
+        queue.async_complete();
+        controller.destroy_queue(&hsa_queue);
+    }
+}
+
+namespace
+{
+struct peer_exchange_t
+{
+    rocprofiler_range_replay_peer_sync_phase_t phase = ROCPROFILER_RANGE_REPLAY_PEER_SYNC_PASS_END;
+    uint64_t                                   pass  = 0;
+    uint32_t                                   local = 0;
+};
+
+// The exchanges the tool's collective saw, and the queue a continuation callback leaves busy.
+struct peer_job_t
+{
+    std::vector<peer_exchange_t> exchanges = {};
+    rrt::test_queue_t*           queue     = nullptr;
+};
+
+uint32_t
+record_peer_sync(uint64_t,
+                 uint64_t                                   pass,
+                 rocprofiler_range_replay_peer_sync_phase_t phase,
+                 uint32_t                                   local,
+                 rocprofiler_user_data_t                    data)
+{
+    static_cast<peer_job_t*>(data.ptr)->exchanges.push_back({phase, pass, local});
+    // Every peer offers what this process offers.
+    return local;
+}
+}  // namespace
+
+// The peers of a multi-process job wait in the PASS_END collective, so a fence timeout must
+// decline through it exactly once rather than leave the boundary without it.
+TEST(range_replay_host, a_fence_timeout_declines_through_the_pass_end_exchange)
+{
+    // Pass 0 times out in the pass fence. Pass 1 times out re-fencing the work its continuation
+    // callback left running, before the job agrees on the next pass.
+    for(const auto pass : {uint64_t{0}, uint64_t{1}})
+    {
+        auto  agent      = rrt::test_agent_t{agent_a};
+        auto& controller = *hsa::get_queue_controller();
+        auto  hsa_queue  = hsa_queue_t{};
+        hsa_queue.id     = 3;
+        auto& queue      = rrt::add_test_queue(controller, hsa_queue, agent);
+        auto  job        = peer_job_t{};
+        job.queue        = &queue;
+
+        auto value                = 7;
+        auto ctx                  = range_replay::range_context_t{};
+        ctx.plan.replay_requested = true;
+        ctx.plan.host_replay      = true;
+        ctx.plan.indefinite       = true;
+        ctx.plan.user_data.ptr    = &job;
+        ctx.plan.peer_sync_cb     = record_peer_sync;
+        ctx.plan.replay_continue_cb =
+            [](uint64_t, uint64_t, uint64_t, rocprofiler_user_data_t data) {
+                hsa::agent_submit_epoch(rocprofiler_agent_id_t{.handle = agent_a}).fetch_add(1);
+                static_cast<peer_job_t*>(data.ptr)->queue->async_started();
+                return 1;
+            };
+        ctx.record.count_dispatches(1);
+        ctx.host.pass           = pass;
+        ctx.host.snapshot_taken = true;
+        ctx.host.fence_budget   = fence_timeout_budget;
+        ctx.host.agents.emplace_back(host_agent(agent_a));
+        ctx.host.regions.emplace_back(range_replay::host::capture_region(&value, sizeof(value)));
+        ++value;
+        if(pass == 0) queue.async_started();
+
+        const auto result = range_replay::host::finish_pass(ctx);
+        EXPECT_EQ(result.next_pass, 0U) << "pass=" << pass;
+        EXPECT_EQ(result.status, ROCPROFILER_RANGE_REPLAY_STATUS_CONCURRENT_DISPATCH)
+            << "pass=" << pass;
+        EXPECT_EQ(value, 8) << "pass=" << pass;
+        EXPECT_EQ(job.exchanges.size(), 1U) << "pass=" << pass;
+        if(!job.exchanges.empty())
+        {
+            EXPECT_EQ(job.exchanges.front().phase, ROCPROFILER_RANGE_REPLAY_PEER_SYNC_PASS_END);
+            EXPECT_EQ(job.exchanges.front().pass, pass);
+            EXPECT_EQ(job.exchanges.front().local, range_replay::peer::local_flags(false, false))
+                << "a declined process must not offer to continue";
+        }
 
         queue.async_complete();
         controller.destroy_queue(&hsa_queue);
