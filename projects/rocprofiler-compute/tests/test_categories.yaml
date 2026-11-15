@@ -12,7 +12,6 @@ test_categories:
       - test_utils_counter_defs
       - test_metric_library_loader
       - test_metric_description_manager
-      - test_metric_library_sync
       - test_counter_grouping_inspector
       - test_format_yaml
       - test_generate_metric_health_report
@@ -105,7 +104,6 @@ test_categories:
       - test_memory_chart_layout_format
       - test_memory_chart_preview
       - test_metric_description_manager
-      - test_metric_library_sync
       - test_metric_lock
       - test_schema_visualizer
       - test_validate_metric_library
@@ -119,7 +117,6 @@ test_categories:
       - test_memory_chart_layout_format
       - test_memory_chart_preview
       - test_metric_description_manager
-      - test_metric_library_sync
       - test_metric_lock
       - test_schema_visualizer
       - test_validate_metric_library
@@ -148,7 +145,6 @@ test_categories:
       - test_utils_counter_defs
       - test_metric_library_loader
       - test_metric_description_manager
-      - test_metric_library_sync
       - test_counter_grouping_inspector
       - test_format_yaml
       - test_generate_metric_health_report
@@ -257,7 +253,6 @@ test_categories:
       - test_memory_chart_layout_format
       - test_memory_chart_preview
       - test_metric_description_manager
-      - test_metric_library_sync
       - test_metric_lock
       - test_schema_visualizer
       - test_validate_metric_library
@@ -271,7 +266,6 @@ test_categories:
       - test_memory_chart_layout_format
       - test_memory_chart_preview
       - test_metric_description_manager
-      - test_metric_library_sync
       - test_metric_lock
       - test_schema_visualizer
       - test_validate_metric_library
@@ -308,7 +302,6 @@ test_categories:
       - test_utils_counter_defs
       - test_metric_library_loader
       - test_metric_description_manager
-      - test_metric_library_sync
       - test_counter_grouping_inspector
       - test_format_yaml
       - test_generate_metric_health_report
@@ -417,7 +410,6 @@ test_categories:
       - test_memory_chart_layout_format
       - test_memory_chart_preview
       - test_metric_description_manager
-      - test_metric_library_sync
       - test_metric_lock
       - test_schema_visualizer
       - test_validate_metric_library
@@ -431,7 +423,6 @@ test_categories:
       - test_memory_chart_layout_format
       - test_memory_chart_preview
       - test_metric_description_manager
-      - test_metric_library_sync
       - test_metric_lock
       - test_schema_visualizer
       - test_validate_metric_library
@@ -468,7 +459,6 @@ test_categories:
       - test_utils_counter_defs
       - test_metric_library_loader
       - test_metric_description_manager
-      - test_metric_library_sync
       - test_counter_grouping_inspector
       - test_format_yaml
       - test_generate_metric_health_report
@@ -577,7 +567,6 @@ test_categories:
       - test_memory_chart_layout_format
       - test_memory_chart_preview
       - test_metric_description_manager
-      - test_metric_library_sync
       - test_metric_lock
       - test_schema_visualizer
       - test_validate_metric_library
@@ -591,7 +580,6 @@ test_categories:
       - test_memory_chart_layout_format
       - test_memory_chart_preview
       - test_metric_description_manager
-      - test_metric_library_sync
       - test_metric_lock
       - test_schema_visualizer
       - test_validate_metric_library
