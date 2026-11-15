@@ -28,6 +28,8 @@
 #include "lib/rocprofiler-sdk/hsa/replay_window.hpp"
 #include "lib/rocprofiler-sdk/range_replay/range_state.hpp"
 
+#include "fake_queue.hpp"
+
 #include <gtest/gtest.h>
 
 #include <cstring>
@@ -138,14 +140,12 @@ TEST(range_replay_queue_hooks, own_range_submission_also_notifies_foreign_ranges
 // not declined as SNAPSHOT_FAILED.
 TEST(range_replay_queue_hooks, non_host_submission_does_not_snapshot)
 {
-    auto agent      = rocprofiler_agent_t{};
-    agent.id.handle = 0x2002;
-    agent.name      = "test";
-    auto ext        = noop_ext_table();
-    auto core       = noop_core_table();
-    auto cache =
-        rocprofiler::hsa::AgentCache{&agent, {.handle = 0x2002}, 0, {.handle = 0}, ext, core};
-    auto queue = rocprofiler::hsa::Queue{cache, core};
+    constexpr auto queue_id = uint64_t{0x3002};
+
+    // A non-host submission binds its range to queue.get_id(), which the plain test Queue cannot
+    // answer, so this test needs a queue that reports an id.
+    const auto agent = range_replay::test::test_agent_t{0x2002};
+    auto       queue = range_replay::test::test_queue_t{agent, queue_id};
 
     ASSERT_TRUE(range_replay::open_range(9));
     auto* open                  = range_replay::current_range();
@@ -157,6 +157,11 @@ TEST(range_replay_queue_hooks, non_host_submission_does_not_snapshot)
 
     range_replay::submission_hook(&queue, nullptr, 0, false, nullptr);
 
+    // Bound to the queue: the submission went through the non-host recording path, so the
+    // snapshot checks below are not satisfied by a hook that returned early.
+    EXPECT_EQ(open->queue, &queue);
+    EXPECT_EQ(open->record.queue_key(), queue_id);
+    EXPECT_EQ(open->record.agent_key(), agent.agent.id.handle);
     EXPECT_FALSE(open->host.enabled);
     EXPECT_FALSE(open->snapshot_taken);
     EXPECT_NE(open->record.status(), ROCPROFILER_RANGE_REPLAY_STATUS_SNAPSHOT_FAILED);
