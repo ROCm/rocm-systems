@@ -200,7 +200,9 @@ runtime, just as for packet replay. See [Performance](range_replay_performance.m
 
 - `range-replay-host-replay-test` is a GPU-free unit test. It covers the arming consumption, the
   begin macro's two returns, the registry rules that differ from packet replay, and host-region
-  capture and restore, including a full jump-and-rewind loop.
+  capture and restore, including a full jump-and-rewind loop. On fake queues it covers fences that
+  time out: a barrier that outlasts the fence, a queue whose ring stays full, one timeout shared by
+  several queues, and the parsing of `ROCPROFILER_RANGE_REPLAY_HOST_FENCE_TIMEOUT_MS`.
 - `tests/range-replay-host` is the integration test. A time-stepping solver runs inside one range.
   Each step does an FFT, a spectral filter, an inverse FFT, a 5-point stencil, Jacobi sweeps, a
   device-to-device copy, a memset, a device-to-host residual reduced on the host, and a
@@ -211,3 +213,8 @@ runtime, just as for packet replay. See [Performance](range_replay_performance.m
   was rewound. They also check the PASS order, a divergence count of 0, and the exact counter record
   count. Two negative variants check that packet replay declines the same range and that an unarmed
   application declines `HOST_JMP_NOT_SET`.
+- `test-range-replay-host-fence-timeout`, in the same directory, sets
+  `ROCPROFILER_RANGE_REPLAY_HOST_FENCE_TIMEOUT_MS=1000` and opens a range while a kernel on another
+  stream spins on a flag in host memory. The range must decline with `CONCURRENT_DISPATCH` after
+  about a second and run once. Its body releases the kernel, and a second range opened after that
+  must replay every pass from the restored state.
