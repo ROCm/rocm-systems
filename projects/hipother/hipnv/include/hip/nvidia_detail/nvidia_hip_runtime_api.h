@@ -4818,6 +4818,11 @@ inline static hipError_t hipArray3DGetDescriptor(HIP_ARRAY3D_DESCRIPTOR* pArrayD
   return hipCUResultTohipError(cuArray3DGetDescriptor(pArrayDescriptor, (CUarray)array));
 }
 
+inline static hipError_t hipArrayGetPlane(hipArray_t* pPlaneArray, hipArray_t hArray,
+                                          unsigned int planeIdx) {
+  return hipCUResultTohipError(cuArrayGetPlane((CUarray*)pPlaneArray, (CUarray)hArray, planeIdx));
+}
+
 inline static hipError_t hipStreamBeginCapture(hipStream_t stream, hipStreamCaptureMode mode) {
   return hipCUDAErrorTohipError(cudaStreamBeginCapture(stream, mode));
 }
