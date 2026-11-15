@@ -14,8 +14,7 @@ inline cl_channel_type getCLChannelType(const hipArray_Format hipFormat,
                                         const hipTextureReadMode hipReadMode) {
   if (hipReadMode == hipReadModeElementType) {
     switch (hipFormat) {
-      // NV12 has no single channel type. Parents never reach here, and the planes are created
-      // directly as UNSIGNED_INT8; fall through to the error return below.
+      // NV12 has no single channel type; its planes are created as UNSIGNED_INT8.
       case HIP_AD_FORMAT_NV12:
         break;
       case HIP_AD_FORMAT_UNSIGNED_INT8:
@@ -111,6 +110,11 @@ inline bool isLayered1D(const hipArray* arr) {
   return CL_MEM_OBJECT_IMAGE1D_ARRAY == getCLMemObjectType(arr);
 }
 
+// False for a multiplanar parent, whose data is a Buffer rather than an Image.
+inline bool isImageBacked(const hipArray* arr) {
+  return (arr != nullptr) && (getCLMemObjectType(arr) != CL_MEM_OBJECT_ALLOCATION_FAILURE);
+}
+
 inline cl_addressing_mode getCLAddressingMode(const hipTextureAddressMode hipAddressMode) {
   switch (hipAddressMode) {
     case hipAddressModeWrap:
@@ -195,9 +199,7 @@ inline size_t getElementSize(const hipArray_const_t array) {
     case HIP_AD_FORMAT_FLOAT:
       return 4 * array->NumChannels;
     case HIP_AD_FORMAT_NV12:
-      // A multiplanar parent has no single element size. Callers reject it before using this, but
-      // several of them divide by the result, so return 1 rather than the 0 below.
-      return 1;
+      return 1;  // No single element size; callers divide by this, so never return 0.
   }
 
   // error scenario
@@ -279,8 +281,6 @@ inline hipChannelFormatDesc getChannelFormatDesc(int numChannels, hipArray_Forma
           return {32, 32, 32, 32, hipChannelFormatKindFloat};
       }
     case HIP_AD_FORMAT_NV12:
-      // 8-bit luma plus two interleaved 8-bit chroma components; reported on the parent so
-      // hipArrayGetInfo does not return a zeroed descriptor.
       return {8, 8, 8, 0, hipChannelFormatKindUnsigned};
   }
 

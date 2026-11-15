@@ -76,6 +76,31 @@ __global__ void ReadTextureKernel(hipTextureObject_t tex, unsigned char* out, in
   }
 }
 
+__global__ void ReadTextureKernelUV(hipTextureObject_t tex, uchar2* out, int width, int height) {
+  const int x = blockIdx.x * blockDim.x + threadIdx.x;
+  const int y = blockIdx.y * blockDim.y + threadIdx.y;
+  if ((x < width) && (y < height)) {
+    out[(y * width) + x] = tex2D<uchar2>(tex, x, y);
+  }
+}
+
+hipTextureObject_t MakePlaneTexture(hipArray_t plane) {
+  hipResourceDesc resDesc{};
+  resDesc.resType = hipResourceTypeArray;
+  resDesc.res.array.array = plane;
+
+  hipTextureDesc texDesc{};
+  texDesc.addressMode[0] = hipAddressModeClamp;
+  texDesc.addressMode[1] = hipAddressModeClamp;
+  texDesc.filterMode = hipFilterModePoint;
+  texDesc.readMode = hipReadModeElementType;
+  texDesc.normalizedCoords = 0;
+
+  hipTextureObject_t tex = 0;
+  HIP_CHECK(hipCreateTextureObject(&tex, &resDesc, &texDesc, nullptr));
+  return tex;
+}
+
 }  // namespace
 
 /**
@@ -200,19 +225,7 @@ TEST_CASE("Unit_hipArrayGetPlane_Positive_TextureSampling") {
   HIP_CHECK(hipMemcpy2DToArray(yPlane, 0, 0, pattern.data(), kRowBytes, kRowBytes, kHeight,
                                hipMemcpyHostToDevice));
 
-  hipResourceDesc resDesc{};
-  resDesc.resType = hipResourceTypeArray;
-  resDesc.res.array.array = yPlane;
-
-  hipTextureDesc texDesc{};
-  texDesc.addressMode[0] = hipAddressModeClamp;
-  texDesc.addressMode[1] = hipAddressModeClamp;
-  texDesc.filterMode = hipFilterModePoint;
-  texDesc.readMode = hipReadModeElementType;
-  texDesc.normalizedCoords = 0;
-
-  hipTextureObject_t tex = 0;
-  HIP_CHECK(hipCreateTextureObject(&tex, &resDesc, &texDesc, nullptr));
+  const hipTextureObject_t tex = MakePlaneTexture(yPlane);
 
   unsigned char* out = nullptr;
   HIP_CHECK(hipMalloc(&out, kRowBytes * kHeight));
@@ -440,6 +453,128 @@ TEST_CASE("Unit_hipArrayGetPlane_Negative_Nv12CreationValidation") {
     desc.Depth = 4;
     REQUIRE(hipArray3DCreate(&array, &desc) == hipErrorInvalidValue);
   }
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *  - Exercises dimensions whose row bytes are not a multiple of the image pitch alignment, so the
+ *    planes sit on padded pitches rather than the naturally aligned 256x256 case. Each row carries
+ *    a distinct value, so a wrong pitch or plane offset shows up as shifted data.
+ * Test source
+ * ------------------------
+ *  - unit/memory/hipArrayGetPlane.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.1
+ */
+TEST_CASE("Unit_hipArrayGetPlane_Positive_PaddedPitchDimensions") {
+  struct Dim {
+    size_t width;
+    size_t height;
+  };
+  const Dim dims[] = {{258, 6}, {66, 10}, {130, 258}, {2, 2}};
+
+  for (const Dim& d : dims) {
+    CAPTURE(d.width, d.height);
+    hipArray_t parent = nullptr;
+    if (!CreateNv12OrSkip(&parent, Nv12Desc(d.width, d.height))) return;
+
+    hipArray_t yPlane = nullptr;
+    hipArray_t uvPlane = nullptr;
+    HIP_CHECK(hipArrayGetPlane(&yPlane, parent, 0));
+    HIP_CHECK(hipArrayGetPlane(&uvPlane, parent, 1));
+
+    HIP_ARRAY3D_DESCRIPTOR got{};
+    HIP_CHECK(hipArray3DGetDescriptor(&got, yPlane));
+    REQUIRE(got.Width == d.width);
+    REQUIRE(got.Height == d.height);
+    HIP_CHECK(hipArray3DGetDescriptor(&got, uvPlane));
+    REQUIRE(got.Width == d.width / 2);
+    REQUIRE(got.Height == d.height / 2);
+
+    // Both planes carry `width` bytes per row.
+    const size_t rowBytes = d.width;
+    std::vector<unsigned char> yPattern(rowBytes * d.height);
+    for (size_t row = 0; row < d.height; ++row) {
+      for (size_t col = 0; col < rowBytes; ++col) {
+        yPattern[(row * rowBytes) + col] = static_cast<unsigned char>(((row * 7) + col) & 0xFF);
+      }
+    }
+    std::vector<unsigned char> uvPattern(rowBytes * (d.height / 2));
+    for (size_t row = 0; row < d.height / 2; ++row) {
+      for (size_t col = 0; col < rowBytes; ++col) {
+        uvPattern[(row * rowBytes) + col] =
+            static_cast<unsigned char>(((row * 13) + col + 128) & 0xFF);
+      }
+    }
+
+    HIP_CHECK(hipMemcpy2DToArray(yPlane, 0, 0, yPattern.data(), rowBytes, rowBytes, d.height,
+                                 hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy2DToArray(uvPlane, 0, 0, uvPattern.data(), rowBytes, rowBytes, d.height / 2,
+                                 hipMemcpyHostToDevice));
+
+    REQUIRE(ReadPlane(yPlane, rowBytes, d.height) == yPattern);
+    REQUIRE(ReadPlane(uvPlane, rowBytes, d.height / 2) == uvPattern);
+
+    HIP_CHECK(hipArrayDestroy(parent));
+  }
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *  - Samples the chroma plane as a two-channel texture. The luma test only proves a one-channel
+ *    descriptor at offset 0; this exercises a two-channel descriptor at a non-zero plane offset.
+ * Test source
+ * ------------------------
+ *  - unit/memory/hipArrayGetPlane.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.1
+ */
+TEST_CASE("Unit_hipArrayGetPlane_Positive_ChromaTextureSampling") {
+  hipArray_t parent = nullptr;
+  if (!CreateNv12OrSkip(&parent, Nv12Desc())) return;
+
+  hipArray_t uvPlane = nullptr;
+  HIP_CHECK(hipArrayGetPlane(&uvPlane, parent, 1));
+
+  const size_t uvWidth = kWidth / 2;
+  const size_t uvHeight = kHeight / 2;
+  std::vector<uchar2> pattern(uvWidth * uvHeight);
+  for (size_t row = 0; row < uvHeight; ++row) {
+    for (size_t col = 0; col < uvWidth; ++col) {
+      pattern[(row * uvWidth) + col] = make_uchar2(static_cast<unsigned char>((row + col) & 0xFF),
+                                                   static_cast<unsigned char>(((row * 3) + (col * 5)) & 0xFF));
+    }
+  }
+  const size_t uvRowBytes = uvWidth * sizeof(uchar2);
+  HIP_CHECK(hipMemcpy2DToArray(uvPlane, 0, 0, pattern.data(), uvRowBytes, uvRowBytes, uvHeight,
+                               hipMemcpyHostToDevice));
+
+  const hipTextureObject_t tex = MakePlaneTexture(uvPlane);
+  uchar2* out = nullptr;
+  HIP_CHECK(hipMalloc(&out, pattern.size() * sizeof(uchar2)));
+  const dim3 block(16, 16);
+  const dim3 grid((uvWidth + block.x - 1) / block.x, (uvHeight + block.y - 1) / block.y);
+  hipLaunchKernelGGL(ReadTextureKernelUV, grid, block, 0, 0, tex, out,
+                     static_cast<int>(uvWidth), static_cast<int>(uvHeight));
+  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipDeviceSynchronize());
+
+  std::vector<uchar2> sampled(pattern.size());
+  HIP_CHECK(hipMemcpy(sampled.data(), out, sampled.size() * sizeof(uchar2), hipMemcpyDeviceToHost));
+
+  size_t mismatches = 0;
+  for (size_t i = 0; i < pattern.size(); ++i) {
+    if ((sampled[i].x != pattern[i].x) || (sampled[i].y != pattern[i].y)) ++mismatches;
+  }
+  REQUIRE(mismatches == 0);
+
+  HIP_CHECK(hipFree(out));
+  HIP_CHECK(hipDestroyTextureObject(tex));
+  HIP_CHECK(hipArrayDestroy(parent));
 }
 
 /**

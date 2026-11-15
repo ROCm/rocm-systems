@@ -1694,11 +1694,10 @@ bool Image::createView(const Memory& parent, amd::Memory::ErrorCode* errorCode) 
   }
   deviceMemory_ = parent.getDeviceMemory();
 
-  // An image view over a buffer can start partway into it: the NV12 chroma plane sits directly
-  // after the luma plane. Memory::origin() carries that offset and was otherwise dropped here,
-  // which would make the view alias offset 0. Scoped to a direct buffer parent, since the interop
-  // and mipmap view paths below already fold their offsets in via the parent resource.
-  if ((parent.owner()->asBuffer() != nullptr) && (owner()->getOrigin() != 0)) {
+  // A non-interop image view over a buffer can start partway into it, as an NV12 chroma plane
+  // does. Interop parents are excluded so imported external memory keeps its existing addressing.
+  if ((parent.owner()->asBuffer() != nullptr) && (owner()->getOrigin() != 0) &&
+      (parent.getKind() != MEMORY_KIND_INTEROP)) {
     deviceMemory_ = static_cast<char*>(deviceMemory_) + owner()->getOrigin();
   }
 

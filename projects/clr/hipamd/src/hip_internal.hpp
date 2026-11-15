@@ -44,11 +44,6 @@ class Signal;
 
 template <typename T> T ReturnPtrValue(T* ptr) { return (ptr != nullptr) ? *ptr : nullptr; }
 
-//! Upper bound on planes in a multiplanar array: two covers NV12/NV21/P010, three covers I420,
-//! and the fourth leaves room for a YUVA-style alpha plane. Nothing indexes planes by a literal,
-//! so raising this is a one-line change.
-static constexpr unsigned int kMaxArrayPlanes = 4;
-
 typedef struct hipArray {
     void* data;                        //!< Raw device pointer to array storage
     struct hipChannelFormatDesc desc;  //!< Channel format descriptor (bit depths and format)
@@ -57,22 +52,11 @@ typedef struct hipArray {
     unsigned int height;               //!< Height of the array in elements (1 for 1D)
     unsigned int depth;                //!< Depth of the array in elements (1 for 1D/2D)
     enum hipArray_Format Format;       //!< Element format (e.g. float, half, int)
-    unsigned int NumChannels;          //!< Number of channels per element (1-4, or 3 for NV12)
+    unsigned int NumChannels;          //!< Number of channels per element (1–4)
     bool isDrv;                        //!< True if allocated via the driver API
     unsigned int textureType;          //!< Texture type (1D, 2D, 3D, cubemap, etc.)
     unsigned int flags;                //!< Creation flags (e.g. hipArraySurfaceLoadStore)
-    //! Multiplanar support; zero for ordinary arrays via aggregate initialization.
-    //! A parent holds the shared backing amd::Buffer in `data`, NOT an amd::Image.
-    hipArray* planes[kMaxArrayPlanes]; //!< Plane children; null for ordinary arrays
-    unsigned int numPlanes;            //!< 0 for ordinary arrays, plane count for multiplanar
-    bool isPlane;                      //!< True if this array is owned by a parent array
 } hipArray;
-
-//! True for a multiplanar parent, whose data is a Buffer: as_amd(data)->asImage() returns nullptr,
-//! so any caller needing an Image must reject it. Plane children are ordinary arrays.
-inline bool isMultiplanarParent(const hipArray* a) {
-  return (a != nullptr) && (a->numPlanes != 0);
-}
 
 namespace hip{
 extern std::once_flag g_ihipInitialized;
