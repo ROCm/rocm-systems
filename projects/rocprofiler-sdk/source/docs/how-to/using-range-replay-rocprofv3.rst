@@ -302,9 +302,12 @@ status list.
 
 Host replay accepts several queues, several GPUs, copies and memsets by the phase's own thread,
 HIP graph launches, and balanced ``hipMalloc`` / ``hipFree`` pairs. It still declines another
-thread's launches or copies, a device allocation that leaks or frees a buffer that existed before
-the phase, a module unload, a missing jump buffer (``HOST_JMP_NOT_SET``), and a snapshot that could
-not be allocated.
+thread's launches or copies, GPU work still running when a fence at ``begin`` or at the end of a
+pass times out (``CONCURRENT_DISPATCH``), a device allocation that leaks or frees a buffer that
+existed before the phase, a module unload, a missing jump buffer (``HOST_JMP_NOT_SET``), and a
+snapshot that could not be allocated. A fence times out after 60 seconds by default, and
+``ROCPROFILER_RANGE_REPLAY_HOST_FENCE_TIMEOUT_MS`` changes that; see
+:ref:`range-replay-host-contract`.
 
 Launch every kernel once before the measured phase. HIP loads a module on the first launch of one
 of its kernels, and a library may allocate on first use. Do that work in a warmup step.
@@ -348,8 +351,13 @@ these rules. :ref:`range-replay-host` is the same contract with the SDK calls na
    random-number state are left as they are.
 #. Before ``begin``, and before ``end`` on every pass, wait for all GPU work on every GPU the
    phase uses. That includes async copies and non-compute queues. ``hipDeviceSynchronize`` on each
-   of those devices is the usual call. The SDK fences compute queues; it does not wait for a copy
-   it does not track.
+   of those devices is the usual call. The SDK fences the compute queues of every GPU, not only the
+   ones the phase uses; it does not wait for a copy it does not track. A fence waits at most
+   ``ROCPROFILER_RANGE_REPLAY_HOST_FENCE_TIMEOUT_MS`` milliseconds in total, 60 seconds by default,
+   and the phase is then declined with ``CONCURRENT_DISPATCH`` while the application keeps
+   running. A lower value, for example ``ROCPROFILER_RANGE_REPLAY_HOST_FENCE_TIMEOUT_MS=1000``,
+   turns a long kernel on another stream or GPU into a quick decline. Only ``range-host`` reads
+   this variable; ``range`` keeps its 60-second wait and stops the application when it runs out.
 #. No other thread submits GPU work or copies into device memory while the phase is open.
 #. ``hipMalloc`` / ``hipFree`` pairs inside the phase are balanced. ``hipMallocAsync`` caches
    across frees and is not a balanced pair.
