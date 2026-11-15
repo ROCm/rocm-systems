@@ -7513,24 +7513,22 @@ class CodeGenerator:
             )
 
         from amdisa.codegen.execute.scalar_fp import gen_scalar_fp
+        from amdisa.codegen.execute.rj_arith_scalar import (
+            FLOAT_ARITHMETIC,
+            FLOAT_COMPARISONS,
+            FLOAT_ROUNDING,
+            gen_scalar,
+        )
+        from amdisa.codegen.execute.rj_arith_float import RjArithBody
 
+        if ctx.arch_name == 'rdna4' and inst.name in (
+            FLOAT_ARITHMETIC.keys() | FLOAT_COMPARISONS.keys() | FLOAT_ROUNDING.keys()
+        ):
+            scalar_body = gen_scalar(ctx)
+            if scalar_body is not None:
+                return RjArithBody(scalar_body)
         scalar_fp_body = gen_scalar_fp(ctx)
         if scalar_fp_body is not None:
-            if ctx.arch_name == 'rdna3_5':
-                return scalar_fp_body
-            # GFX12 Compatibility reproduces the measured result and sticky FP
-            # causes. Explicit precision/reporting modes use the rj-arith API
-            # and preserve its unsupported-operation and observer contracts.
-            from amdisa.codegen.execute.rj_arith_float import RjArithBody
-            from amdisa.codegen.execute.rj_arith_scalar import gen_scalar
-
-            policy_body = gen_scalar(ctx)
-            if policy_body is not None:
-                return RjArithBody(
-                    '  if ((wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK) == '
-                    'RJ_ARITH_SEMANTICS_COMPATIBILITY) {\n'
-                    f'  {scalar_fp_body}\n    return;\n  }}\n{policy_body}'
-                )
             return scalar_fp_body
 
         if ctx.arch_name == 'cdna1':

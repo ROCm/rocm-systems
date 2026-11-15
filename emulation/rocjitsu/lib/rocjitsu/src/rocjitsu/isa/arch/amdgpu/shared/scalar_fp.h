@@ -3,6 +3,8 @@
 
 #pragma once
 
+// Legacy gfx1150 scalar numerical model and VM commit logic. gfx12 uses rj-arith.
+
 #include "rocjitsu/isa/arch/amdgpu/shared/comparison.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/conversion.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/fp_status.h"
@@ -24,9 +26,7 @@ namespace status = amdgpu::fp_status;
 
 enum class Op { Add, Sub, Mul, Fma, Ceil, Floor, Trunc, Rndne };
 
-inline bool use_ieee_nan(const Wavefront &wf) {
-  return wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA4 || wf.ieee_mode();
-}
+inline bool use_ieee_nan(const Wavefront &wf) { return wf.ieee_mode(); }
 
 template <typename Fmt> uint32_t denorm(const Wavefront &wf) {
   if constexpr (std::is_same_v<Fmt, F16>)
@@ -51,8 +51,7 @@ template <typename Fmt> uint32_t prepare(const Wavefront &wf, uint32_t bits) {
 }
 
 inline void commit_causes(Wavefront &wf, uint32_t causes) {
-  if (!wf.instruction_execution_failed() &&
-      (wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA4 || !wf.dx10_clamp())) {
+  if (!wf.instruction_execution_failed() && !wf.dx10_clamp()) {
     wf.set_trapsts(wf.trapsts() | causes);
     wf.raise_alu_causes(causes);
   }
@@ -196,7 +195,7 @@ void convert(Wavefront &wf, const Operand &dst, const Operand &src, bool high = 
       if (!std::isfinite(x) || x < std::numeric_limits<Int>::min() ||
           truncated > std::numeric_limits<Int>::max())
         causes = status::kInvalid;
-      else if (wf.cu().arch() != ROCJITSU_CODE_ARCH_RDNA4 && truncated != x)
+      else if (truncated != x)
         causes |= status::kInexact;
     } else {
       result = to_float<From, To>(wf, a, rounding<To>(wf), causes);
@@ -211,19 +210,8 @@ inline void pack_rtz(Wavefront &wf, const Operand &dst, const Operand &lo, const
   uint32_t low, high, causes = 0;
   {
     fp::ScopedEnvironment environment(0);
-    if (wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA4) {
-      // gfx1201 packs both conversions without changing floating-point status.
-      cvt::ToFloat<F32, F16> policy;
-      policy.input = amdgpu::input_denormal::Policy::make(denorm<F32>(wf));
-      policy.rounding.direction = cvt::Rounding::TOWARD_ZERO;
-      policy.rounding.flush_tiny = !(denorm<F16>(wf) & 2);
-      policy.quiet_nan = true;
-      low = policy(low_input);
-      high = policy(high_input);
-    } else {
-      low = to_float<F32, F16>(wf, low_input, 3, causes);
-      high = to_float<F32, F16>(wf, high_input, 3, causes);
-    }
+    low = to_float<F32, F16>(wf, low_input, 3, causes);
+    high = to_float<F32, F16>(wf, high_input, 3, causes);
   }
   commit(wf, dst, low | (high << 16), causes);
 }

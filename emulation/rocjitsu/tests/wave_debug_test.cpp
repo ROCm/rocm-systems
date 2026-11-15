@@ -11,6 +11,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna4/isa.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
@@ -86,6 +87,39 @@ struct WaveDebugFixture {
     return wf;
   }
 };
+
+// Scalar FP ignores EXEC and delivers a fresh trap even for an already sticky cause.
+TEST(WaveDebugTest, Gfx12ScalarCompatibilityDeliversInvalidAfterCommit) {
+  WaveDebugFixture f(ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
+  const auto words = rdna4::build_sop2(rdna4::kSMulF32Sop2, {.ssrc0 = 0, .ssrc1 = 1, .sdst = 2});
+  f.gpu_mem.write32(kKernelAddr, words[0]);
+  f.gpu_mem.write32(kKernelAddr + 4, words[0]);
+  auto *wave = f.dispatch(kKernelAddr);
+  ASSERT_NE(wave, nullptr);
+  wave->set_exec(0);
+  wave->set_mode_raw(0xf0);
+  const auto base = wave->sgpr_alloc().base;
+  f.cu->write_sgpr(base, 0x7f800000U);
+  f.cu->write_sgpr(base + 1, 0);
+  int traps = 0;
+  f.cu->set_alu_exception_handler([&](amdgpu::Wavefront &) {
+    ++traps;
+    const auto result = f.cu->read_sgpr(base + 2);
+    EXPECT_EQ(result & 0x7f800000U, 0x7f800000U);
+    EXPECT_NE(result & 0x7fffffU, 0U);
+    return false;
+  });
+  wave->set_gfx12_trap_ctrl_raw(0);
+  f.cu->step();
+  EXPECT_EQ(wave->trapsts(), 1U);
+  EXPECT_EQ(traps, 0);
+  f.cu->write_sgpr(base + 2, 0); // Require the trapping multiply to publish a fresh NaN.
+  wave->set_gfx12_trap_ctrl_raw(1);
+  f.cu->step();
+  EXPECT_EQ(wave->trapsts(), 1U);
+  EXPECT_EQ(traps, 1);
+}
 
 TEST(WaveDebugTest, Gfx10TrapDrainsBeforeEnteringPrivilegedHandler) {
   for (auto arch : {ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2}) {

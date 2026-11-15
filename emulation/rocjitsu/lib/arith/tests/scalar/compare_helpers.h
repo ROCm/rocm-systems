@@ -48,7 +48,8 @@ void check_scalar_compare(Call call, Predicate predicate) {
             auto am = a & magnitude, bm = b & magnitude;
             bool snan = (am > inf && !(am & quiet)) || (bm > inf && !(bm & quiet));
             bool denorm = (am && !(am & inf)) || (bm && !(bm & inf));
-            if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
+            if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL ||
+                semantics == RJ_ARITH_SEMANTICS_COMPATIBILITY) {
               if (snan) {
                 expected_status |= RJ_ARITH_EXCEPTION_INVALID;
               }

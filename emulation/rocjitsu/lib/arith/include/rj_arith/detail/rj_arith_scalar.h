@@ -346,6 +346,10 @@ int rj_arith_s_cmp_eq_u64(uint64_t flags, uint64_t instruction_flags, uint32_t *
 int rj_arith_s_cmp_lg_u64(uint64_t flags, uint64_t instruction_flags, uint32_t *scc, uint64_t a,
                           uint64_t b);
 
+// Scalar FP comparisons ignore EXEC. Mode 3 and Compatibility require valid
+// excp_flag_user storage and accumulate inherited gfx12 input classification.
+// Other semantics leave that storage unused. SCC is a required result in every mode.
+
 // SCC is a < b.
 int rj_arith_s_cmp_lt_f32(uint64_t flags, uint64_t instruction_flags, uint32_t *scc, uint32_t a,
                           uint32_t b, uint32_t *excp_flag_user);
@@ -461,7 +465,10 @@ int rj_arith_s_cmp_nlt_f16(uint64_t flags, uint64_t instruction_flags, uint32_t 
 // Scalar conversions execute once per wave and ignore EXEC, including zero;
 // d is required and SCC is unchanged. Operands are raw register bits. Sources
 // may originate from d storage. instruction_flags must be zero. Loose and exact
-// semantics are supported; mode 3 FP status reporting is unsupported. Integer-to-FP32
+// semantics are supported; explicit mode 3 reporting is unsupported. Compatibility
+// requires valid excp_flag_user storage and accumulates inherited gfx12 conversion
+// causes; RTZ packing leaves the status pointer unused.
+// Integer-to-FP32
 // and FP32-to-FP16 accept RJ_ARITH_FP_ROUND_MASK (the destination format's MODE
 // field). Errors leave d unchanged. Requires host nearest-even rounding and enabled
 // denormals; preserves host rounding but may change exception flags.
@@ -511,9 +518,9 @@ int rj_arith_s_cvt_pk_rtz_f16_f32(uint64_t flags, uint64_t instruction_flags, ui
 // be zero. Guest input flushing applies; output flushing and FP16_OVFL have no
 // effect. Preserves all host FP state and SCC, independently of host rounding.
 // Inputs may originate from d storage. Errors leave d unchanged.
-// Exact mode with non-NULL excp_flag_user accumulates INVALID for signaling NaNs
-// and INPUT_DENORM for preserved subnormals. Discarding a fractional part does
-// not raise INEXACT. Loose mode leaves excp_flag_user unchanged.
+// Mode 3 and Compatibility require valid excp_flag_user storage and accumulate INVALID for
+// signaling NaNs and INPUT_DENORM for preserved subnormals. Discarding a fractional part does not
+// raise INEXACT. Loose mode leaves excp_flag_user unchanged.
 
 // Round to an integral value toward positive infinity.
 int rj_arith_s_ceil_f32(uint64_t flags, uint64_t instruction_flags, uint32_t *d, uint32_t a,
@@ -551,7 +558,8 @@ int rj_arith_s_rndne_f16(uint64_t flags, uint64_t instruction_flags, uint32_t *d
 // Operands and literals are raw IEEE bits. FP16 reads low halves and writes a
 // zero upper half. Rounds once to the destination format. SCC is unchanged.
 // instruction_flags must be zero. FP32 and FP16 support loose and exact semantics;
-// mode 3 FP status reporting is unsupported. Loose NaN signs/payloads are
+// explicit mode 3 reporting is unsupported. Compatibility accumulates the inherited
+// gfx12 scalar FMA causes into required excp_flag_user storage. Loose NaN signs/payloads are
 // unspecified. Exact results follow the borrowed FMA NaN ordering. Guest
 // input/output flushing, FP16_OVFL and RJ_ARITH_FP_ROUND_MASK (the destination
 // format's MODE field) are supported, with tininess detected before destination
@@ -584,7 +592,9 @@ int rj_arith_s_fmamk_f32(uint64_t flags, uint64_t instruction_flags, uint32_t *d
 // to add/subtract/multiply; min/max ignore it. FP16_OVFL saturates finite FP16
 // overflow. Multiplication flushes tiny results before destination subnormal
 // rounding, so a value that would round up to the smallest normal may flush.
-// Loose and exact semantics are supported; mode 3 FP status reporting is unsupported.
+// Loose and exact semantics are supported; explicit mode 3 reporting is unsupported.
+// Compatibility requires valid excp_flag_user storage and accumulates inherited
+// gfx12 scalar arithmetic/selection causes. Modes 0–2 leave status unused.
 // Add/subtract/multiply accept RJ_ARITH_FP_ROUND_MASK (the destination format's MODE
 // field). Exact results equal FMA(a, 1, b), FMA(a, 1, -b) and FMA(a, b, signed zero),
 // so subtraction negates a NaN b. A NaN selection result is the first NaN operand,

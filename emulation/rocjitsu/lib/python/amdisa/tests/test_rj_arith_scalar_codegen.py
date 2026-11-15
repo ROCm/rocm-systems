@@ -101,6 +101,7 @@ def test_generated_rdna4_scalar_float_comparisons_and_rounding_route_to_rj_arith
         (generated / f'{encoding}_exec.cpp').read_text()
         for encoding in ('sop1', 'sopc')
     )
+    assert 'amdgpu::scalar_fp::' not in text
     for name in FLOAT_COMPARISONS | FLOAT_ROUNDING:
         assert text.count(f'rj_arith_{name.lower()}(') == 1, name
         assert f'amdgpu::execute_{name.lower()}_' not in text, name
@@ -115,6 +116,7 @@ def test_generated_rdna4_scalar_float_arithmetic_routes_to_rj_arith():
         (generated / f'{encoding}_exec.cpp').read_text()
         for encoding in ('sop1', 'sop2')
     )
+    assert 'amdgpu::scalar_fp::' not in text
     for name in FLOAT_ARITHMETIC:
         assert text.count(f'rj_arith_{name.lower()}(') == 1, name
         assert f'amdgpu::execute_{name.lower()}_' not in text, name

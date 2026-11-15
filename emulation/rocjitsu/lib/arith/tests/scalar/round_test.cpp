@@ -29,7 +29,8 @@ void check_scalar_round(Call call, Reference reference) {
         uint32_t result = 0, status = 0x80000040U;
         ASSERT_EQ(call(cpu | semantics, 0, &result, input, 0, 0, &status), RJ_ARITH_SUCCESS);
         EXPECT_EQ(result, input | quiet);
-        EXPECT_EQ(status, 0x80000040U | (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL &&
+        EXPECT_EQ(status, 0x80000040U | ((semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL ||
+                                          semantics == RJ_ARITH_SEMANTICS_COMPATIBILITY) &&
                                                  !(input & quiet)
                                              ? RJ_ARITH_EXCEPTION_INVALID
                                              : 0));
