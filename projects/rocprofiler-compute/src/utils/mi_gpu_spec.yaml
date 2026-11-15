@@ -29,6 +29,7 @@
 #               | -- valu # Data types with a VALU ceiling
 #               | -- mfma or wmma # Data types with a matrix ceiling, by matrix type
 #               | -- mfma_mixed or wmma_mixed # Mixed-precision matrix types, not plotted
+#           |-- experimental: needs --experimental to profile or analyze
 #
 # --------------------------------------------------------------------------------
 
@@ -476,7 +477,7 @@ mi_gpu_spec:
   - gpu_series: rdna4
     gpu_archs:
       - gpu_arch: gfx1201
-        experimental: true  # needs --experimental to profile or analyze
+        experimental: true
         perfmon_config:
           SQ: 8
           SQG: 8

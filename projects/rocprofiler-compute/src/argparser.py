@@ -106,23 +106,19 @@ def add_general_group(
         "-s", "--specs", action="store_true", help="Print system specs and exit."
     )
 
-    experimental_archs = sorted(mi_gpu_specs.get_experimental_archs())
+    experimental_gpus = ", ".join(sorted(mi_gpu_specs.get_experimental_archs()))
+    gpus_help = f"   GPUs ({experimental_gpus})\n" if experimental_gpus else ""
     general_group.add_argument(
         "--experimental",
         action="store_true",
-        # A mode's parser leaves a --experimental given before the mode in place
+        # Lets --experimental come before or after the mode
         default=argparse.SUPPRESS,
         help=(
             "Enable experimental feature(s):\n"
             "   ML API trace (--trace-ml-api, --list-operators, --operator)\n"
             "   Memory Bandwidth Analysis (--membw-analysis)\n"
             "   PC Sampling (--pc-sampling, --pc-sampling-method, "
-            "--pc-sampling-interval)\n"
-            + (
-                f"   GPUs ({', '.join(experimental_archs)})\n"
-                if experimental_archs
-                else ""
-            )
+            "--pc-sampling-interval)\n" + gpus_help
         ),
     )
     general_group.add_argument(

@@ -299,6 +299,11 @@ class RocProfCompute:
 
     @demarcate
     def handle_list_args(self) -> None:
+        # Archs given on the command line; generate_machine_specs checks detected ones
+        check_experimental_arch(
+            self.__args.debug_list_metrics_gfx_id or self.__args.list_blocks,
+            self.__args,
+        )
         if self.__args.specs:
             print(generate_machine_specs(self.__args))
             sys.exit(0)
@@ -307,11 +312,8 @@ class RocProfCompute:
             if arch is None:
                 self.generate_machine_specs()
                 arch = self.__mspec.gpu_arch
-            else:
-                check_experimental_arch(arch, self.__args)
             self.list_metrics(arch)
         elif self.__args.list_blocks is not None:
-            check_experimental_arch(self.__args.list_blocks, self.__args)
             self.list_blocks()
 
         if self.__mode == "profile":

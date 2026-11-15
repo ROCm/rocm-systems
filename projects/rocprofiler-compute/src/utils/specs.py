@@ -85,7 +85,9 @@ def check_experimental_arch(
             f"{gpu_arch} is an experimental GPU. Use --experimental to enable it."
         )
         return
-    console_warning(f"{gpu_arch} is experimental and may change in future releases.")
+    console_warning(
+        f"{gpu_arch} support is experimental and may change in future releases."
+    )
 
 
 def get_rocm_ver() -> str:
