@@ -30,11 +30,7 @@ std::atomic<int>      g_status{ROCPROFILER_RANGE_REPLAY_STATUS_LAST};
 std::atomic<uint64_t> g_divergence{0};
 std::atomic<bool>     g_agent_bound{false};
 
-uint64_t
-pass_count(uint64_t, rocprofiler_user_data_t)
-{
-    return kPasses;
-}
+uint64_t pass_count(uint64_t, rocprofiler_user_data_t) { return kPasses; }
 
 void
 range_replay_cb(rocprofiler_callback_tracing_record_t record, rocprofiler_user_data_t*, void*)

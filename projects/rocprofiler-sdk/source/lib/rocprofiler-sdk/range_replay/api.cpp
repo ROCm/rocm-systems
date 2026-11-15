@@ -105,8 +105,7 @@ end_range()
 }  // namespace range_replay
 }  // namespace rocprofiler
 
-extern "C"
-{
+extern "C" {
 rocprofiler_status_t
 rocprofiler_range_replay_begin(uint64_t range_id)
 {
