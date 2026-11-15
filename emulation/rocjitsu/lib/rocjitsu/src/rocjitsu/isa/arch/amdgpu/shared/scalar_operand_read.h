@@ -20,59 +20,17 @@ namespace amdgpu {
 
 [[nodiscard]] inline std::optional<ScalarRegisterRange>
 scalar_register_for_selector(const Wavefront &wf, uint32_t selector) {
-  const rj_code_arch_t arch = wf.cu().arch();
-  if (arch_uses_legacy_flat_scratch_sgprs(arch) && selector >= kFlatScratchSelectorFirst &&
-      selector <= kFlatScratchSelectorLast)
-    return ScalarRegisterRange{ScalarRegisterStorage::FLAT_SCRATCH,
-                               static_cast<uint16_t>(selector - kFlatScratchSelectorFirst), 1};
-  if (selector <= kScalarSgprSelectorLast)
-    return ScalarRegisterRange{ScalarRegisterStorage::SGPR, static_cast<uint16_t>(selector), 1};
-  if (selector <= kVccSelectorLast)
-    return ScalarRegisterRange{ScalarRegisterStorage::VCC,
-                               static_cast<uint16_t>(selector - kVccSelectorFirst), 1};
-  if (selector <= kTtmpSelectorLast)
-    return ScalarRegisterRange{ScalarRegisterStorage::TTMP,
-                               static_cast<uint16_t>(selector - kTtmpSelectorFirst), 1};
-  if (scalar_selector_is_null(arch, selector))
-    return ScalarRegisterRange{ScalarRegisterStorage::DISCARD, 0, 1};
-  if (selector == scalar_m0_selector(arch))
-    return ScalarRegisterRange{ScalarRegisterStorage::M0, 0, 1};
-  if (selector >= kExecSelectorFirst && selector <= kExecSelectorLast)
-    return ScalarRegisterRange{ScalarRegisterStorage::EXEC,
-                               static_cast<uint16_t>(selector - kExecSelectorFirst), 1};
-  return std::nullopt;
+  return scalar_register_for_selector(wf.cu().arch(), selector);
 }
 
-/// @brief Resolve and validate one complete scalar-register range.
-/// @details Every dword must name consecutive storage in one architectural
-/// register file. NULL is a single selector that discards or supplies the
-/// complete operand independently of its width.
 [[nodiscard]] inline std::optional<ScalarRegisterRange>
 resolve_scalar_storage_range(const Wavefront &wf, uint32_t selector, uint32_t count) {
-  if (count == 0 || count > std::numeric_limits<uint8_t>::max() ||
-      selector > UINT32_MAX - (count - 1))
+  auto range = resolve_scalar_storage_range(wf.cu().arch(), selector, count);
+  if (range && range->storage == ScalarRegisterStorage::SGPR &&
+      (wf.exceeds_rounded_sgpr_allocation(range->index, count) ||
+       !RegisterAccess(wf).owns_sgpr_range(wf.sgpr_alloc().base + range->index, count)))
     return std::nullopt;
-
-  auto first = scalar_register_for_selector(wf, selector);
-  if (!first)
-    return std::nullopt;
-  first->width = static_cast<uint8_t>(count);
-  if (first->storage == ScalarRegisterStorage::SGPR &&
-      wf.exceeds_rounded_sgpr_allocation(first->index, count))
-    return std::nullopt;
-  if (first->storage == ScalarRegisterStorage::DISCARD)
-    return first;
-
-  for (uint32_t offset = 1; offset < count; ++offset) {
-    auto current = scalar_register_for_selector(wf, selector + offset);
-    if (!current || current->storage != first->storage || current->index != first->index + offset)
-      return std::nullopt;
-  }
-
-  if (first->storage == ScalarRegisterStorage::SGPR &&
-      !RegisterAccess(wf).owns_sgpr_range(wf.sgpr_alloc().base + first->index, count))
-    return std::nullopt;
-  return first;
+  return range;
 }
 
 /// Capture TTMP permission at issue for accesses that can complete after a trap transition.
@@ -85,32 +43,11 @@ resolve_scalar_register_range(const Wavefront &wf, uint32_t selector, uint32_t c
   return range;
 }
 
-/// Resolve MOVREL within its original SGPR/VCC or TTMP region and allocation.
-/// Missing sources use SGPR0; missing destinations suppress the instruction.
-/// B64 alignment follows RDNA3/3.5 and measured RDNA4 behavior. CDNA requires
-/// even indices; its odd-index handling is extrapolated from RDNA. The shared
-/// SGPR/VCC region and CDNA FLAT_SCRATCH exclusion are also extrapolations;
-/// CDNA manuals do not explicitly specify the RDNA SGPR-to-VCC exception.
 [[nodiscard]] inline std::optional<uint32_t>
 relative_scalar_selector(const Wavefront &wf, uint32_t selector, uint32_t m0, uint32_t width,
                          bool destination, bool split) {
-  uint32_t offset = split ? (m0 >> (destination ? 16 : 0)) & 0x3ffu : m0;
-  if (width == 2)
-    offset &= ~1u;
-  const uint64_t indexed = uint64_t{selector} + offset;
-  const uint32_t last = selector <= kVccSelectorLast ? kVccSelectorLast : kTtmpSelectorLast;
-  if (selector > kTtmpSelectorLast || indexed + width > uint64_t{last} + 1)
-    return std::nullopt;
-  const auto base = scalar_register_for_selector(wf, selector);
-  const auto range = resolve_scalar_storage_range(wf, static_cast<uint32_t>(indexed), width);
-  if (!base || !range)
-    return std::nullopt;
-  const auto general = [](ScalarRegisterStorage storage) {
-    return storage == ScalarRegisterStorage::SGPR || storage == ScalarRegisterStorage::VCC;
-  };
-  if (base->storage != range->storage && !(general(base->storage) && general(range->storage)))
-    return std::nullopt;
-  return static_cast<uint32_t>(indexed);
+  auto indexed = relative_scalar_selector(wf.cu().arch(), selector, m0, width, destination, split);
+  return indexed && resolve_scalar_storage_range(wf, *indexed, width) ? indexed : std::nullopt;
 }
 
 /// Capture write permission without changing an atomic's separately resolved source.

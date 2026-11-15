@@ -1376,6 +1376,21 @@ target_link_libraries(
 rj_configure_target(waitcheck_target_test WARNINGS)
 rj_add_gtest_tests(waitcheck_target_test)
 
+add_executable(waitcheck_object_test analysis/waitcheck_test.cpp)
+target_include_directories(
+    waitcheck_object_test
+    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
+)
+target_link_libraries(
+    waitcheck_object_test
+    PRIVATE
+        rocjitsu_waitcheck_internal
+        rocjitsu_amdgpu_isa_model_registry
+        GTest::gtest_main
+)
+rj_configure_target(waitcheck_object_test PRIVATE_INCLUDES WARNINGS)
+rj_add_gtest_tests(waitcheck_object_test)
+
 add_executable(waitcheck_stream_test analysis/waitcheck_stream_test.cpp)
 target_link_libraries(
     waitcheck_stream_test

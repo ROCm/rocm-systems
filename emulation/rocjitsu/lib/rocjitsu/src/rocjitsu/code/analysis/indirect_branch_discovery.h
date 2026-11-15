@@ -190,6 +190,7 @@ struct PcAddressBuilder {
 ///        section with no dynamic transfer has no stale-PC branch hazard to
 ///        prove anything about.
 /// @returns Recovered indirect branch/call metadata.
+/// @param wave_size Use 32 or 64 for wave-dependent scalar writes, or zero for decoded widths.
 /// @param extra_split_points Offsets that must start a block without being treated as external
 ///        entries. Function-entry symbols and stored-pointer targets belong here: they are real
 ///        boundaries, but most of them are ordinary helpers their callers reach by a decoded edge.
@@ -208,6 +209,6 @@ struct PcAddressBuilder {
     std::vector<PcAddressBuilder> *pc_builders = nullptr,
     std::span<const uint64_t> extra_split_points = {},
     std::span<const uint64_t> analysis_root_offsets = {},
-    rj_code_target_id_t target = ROCJITSU_CODE_TARGET_INVALID);
+    rj_code_target_id_t target = ROCJITSU_CODE_TARGET_INVALID, uint8_t wave_size = 0);
 
 } // namespace rocjitsu

@@ -88,6 +88,7 @@ set_target_properties(
 add_library(
     rocjitsu_waitcheck_internal
     STATIC
+    src/rocjitsu/code/analysis/waitcheck.cpp
     $<TARGET_OBJECTS:rocjitsu_wait_counter_policy>
     $<TARGET_OBJECTS:rocjitsu_waitcheck_target>
     $<TARGET_OBJECTS:rocjitsu_waitcheck_state>
@@ -101,6 +102,8 @@ set_target_properties(
     rocjitsu_waitcheck_internal
     PROPERTIES POSITION_INDEPENDENT_CODE ON
 )
+
+rj_configure_target(rocjitsu_waitcheck_internal PRIVATE_INCLUDES WARNINGS HIDDEN)
 
 # Private base archive for code-object translation frontends. Architecture
 # models and decoder factories are supplied by each frontend, so this target
@@ -125,6 +128,7 @@ target_link_libraries(
         rocjitsu_kernel_descriptor_scan
         rocjitsu_kernarg_extension
         rocjitsu_amdhsa_metadata
+
 )
 set_target_properties(
     rocjitsu_dbt_internal
@@ -182,6 +186,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         rocjitsu_gfx1250_b0_to_a0
         PRIVATE
             rocjitsu_cdna5_model_registry
+
             rocjitsu_kernel_descriptor_scan
             rocjitsu_kernarg_extension
             rocjitsu_amdhsa_metadata

@@ -21,7 +21,6 @@ PendingEvent load(uint16_t reg, uint32_t younger, uint64_t offset = 0) {
   event.counter = WaitCounterKind::Load;
   event.kind = WaitEventKind::VmemNoSamplerLoad;
   event.regs.expand({RegClass::VGPR, reg, 1});
-  event.produces_regs = true;
   event.min_younger = younger;
   event.section_offset = offset;
   return event;
@@ -33,11 +32,8 @@ TEST(WaitcheckState, PartialWaitRetiresOnlySufficientlyOldEvents) {
   Ops::apply_wait(state, WaitCounterKind::Load, 1);
   ASSERT_EQ(state.pending[kLoad].size(), 1u);
   EXPECT_TRUE(state.pending[kLoad][0].regs.contains({RegClass::VGPR, 1, 1}));
-  EXPECT_TRUE(state.ready_regs.contains({RegClass::VGPR, 0, 1}));
-  EXPECT_FALSE(state.ready_regs.contains({RegClass::VGPR, 1, 1}));
   Ops::apply_wait(state, WaitCounterKind::Load, 0);
   EXPECT_TRUE(state.pending[kLoad].empty());
-  EXPECT_TRUE(state.ready_regs.contains({RegClass::VGPR, 1, 1}));
 }
 
 TEST(WaitcheckState, Gfx1150ExportFifoProgressAtJoinRequiresBothPaths) {
@@ -47,11 +43,10 @@ TEST(WaitcheckState, Gfx1150ExportFifoProgressAtJoinRequiresBothPaths) {
   position.counter = WaitCounterKind::Exp;
   position.kind = WaitEventKind::ExportPosition;
   position.regs.expand({RegClass::VGPR, 4, 1});
-  position.min_younger = 3;
-  position.min_younger_in_fifo = 2;
+  position.min_younger = 2;
   PendingState left, right;
   left.pending[exp] = {position};
-  position.min_younger_in_fifo = 1;
+  position.min_younger = 1;
   right.pending[exp] = {position};
   Ops::merge_into(left, right);
   const auto required = Ops::dependency_required_count(left, left.pending[exp].front(), arch);
@@ -82,19 +77,19 @@ TEST(WaitcheckState, StoreCounterOrderingControlsPartialRetirement) {
        WaitEventKind::GlobalWb, false},
       {ROCJITSU_CODE_ARCH_RDNA4, WaitCounterKind::Store, WaitEventKind::VmemStore,
        WaitEventKind::GlobalWb, false},
-      // Static FLAT may use only LDS, so it cannot prove partial Store progress.
+      // GFX11 and GFX12 FLAT always issue a Store position even on a pure LDS request.
       {ROCJITSU_CODE_ARCH_RDNA3, WaitCounterKind::Store, WaitEventKind::FlatStore,
-       WaitEventKind::VmemStore, true},
+       WaitEventKind::VmemStore, false},
       {ROCJITSU_CODE_ARCH_RDNA4, WaitCounterKind::Store, WaitEventKind::FlatStore,
-       WaitEventKind::VmemStore, true},
+       WaitEventKind::VmemStore, false},
       {ROCJITSU_CODE_ARCH_CDNA5, WaitCounterKind::Store, WaitEventKind::FlatStore,
-       WaitEventKind::VmemStore, true},
+       WaitEventKind::VmemStore, false},
       {ROCJITSU_CODE_ARCH_RDNA3, WaitCounterKind::Store, WaitEventKind::VmemStore,
-       WaitEventKind::FlatStore, true},
+       WaitEventKind::FlatStore, false},
       {ROCJITSU_CODE_ARCH_RDNA4, WaitCounterKind::Store, WaitEventKind::VmemStore,
-       WaitEventKind::FlatStore, true},
+       WaitEventKind::FlatStore, false},
       {ROCJITSU_CODE_ARCH_CDNA5, WaitCounterKind::Store, WaitEventKind::VmemStore,
-       WaitEventKind::FlatStore, true},
+       WaitEventKind::FlatStore, false},
       // Generic FLAT stores prevent partial DS retirement on CDNA3/4, but
       // normalize to the same event as native DS accesses on RDNA.
       {ROCJITSU_CODE_ARCH_CDNA3, WaitCounterKind::Ds, WaitEventKind::FlatStore, WaitEventKind::Ds,
@@ -115,12 +110,16 @@ TEST(WaitcheckState, StoreCounterOrderingControlsPartialRetirement) {
     store.counter = test.counter;
     store.kind = test.older;
     store.check_memory_order = true;
-    store.min_younger = 1;
+    // Build the per-FIFO age using the same issue transfer as both frontends.
+    store.min_younger = 0;
     PendingEvent younger = store;
     younger.kind = test.younger;
     younger.section_offset = 4;
     younger.min_younger = 0;
-    state.pending[idx] = {store, younger};
+    state.pending[idx] = {store};
+    Ops::age_events(state, younger, test.arch, 62);
+    store = state.pending[idx].front();
+    state.pending[idx].push_back(younger);
     auto &ages = state.pending_event_ages[idx].values;
     ages[static_cast<size_t>(test.older)] = 1;
     ages[static_cast<size_t>(test.younger)] = 0;
@@ -129,63 +128,63 @@ TEST(WaitcheckState, StoreCounterOrderingControlsPartialRetirement) {
     EXPECT_EQ(out_of_order.value(), test.out_of_order);
     auto required = Ops::dependency_required_count(state, store, test.arch);
     ASSERT_TRUE(required.succeeded());
-    EXPECT_EQ(required.value(), test.out_of_order ? 0u : 1u);
+    EXPECT_EQ(required.value(), store.min_younger);
     ASSERT_TRUE(Ops::apply_counter_wait(state, test.counter, 1, test.arch).succeeded());
-    EXPECT_EQ(state.pending[idx], test.out_of_order ? (std::vector<PendingEvent>{store, younger})
-                                                    : (std::vector<PendingEvent>{younger}));
-    EXPECT_TRUE(state.ready_regs.none());
+    EXPECT_EQ(state.pending[idx], store.min_younger == 0
+                                      ? (std::vector<PendingEvent>{store, younger})
+                                      : (std::vector<PendingEvent>{younger}));
     ASSERT_TRUE(Ops::apply_counter_wait(state, test.counter, 0, test.arch).succeeded());
     EXPECT_TRUE(state.pending[idx].empty());
     EXPECT_EQ(state.pending_event_ages[idx], PendingEventAges{});
   }
 }
 
-TEST(WaitcheckState, LoadWaitDoesNotReleaseXcntSourcesWhileAStoreIsPending) {
+TEST(WaitcheckState, LoadWaitReleasesLoadTranslationAndPreservesUnrelatedStore) {
   for (WaitEventKind kind : {WaitEventKind::VmemStore, WaitEventKind::FlatStore}) {
     SCOPED_TRACE(static_cast<int>(kind));
     PendingState state;
     const size_t x = Ops::counter_index(WaitCounterKind::X);
     auto source = load(0, 1);
     source.counter = WaitCounterKind::X;
-    source.produces_regs = false;
     state.pending[x] = {source};
-    // A store may be represented by the per-kind summary alone.
-    state.pending_event_ages[x].values[static_cast<size_t>(kind)] = 0;
-    const auto before = state;
-    Ops::apply_xcnt_wait_implied_by_loadcnt(state, 0);
-    EXPECT_EQ(state, before);
-    Ops::apply_xcnt_wait(state, 0);
+    // A younger store may be represented by the per-kind summary alone.
+    auto &store_age = state.pending_event_ages[x].values[static_cast<size_t>(kind)];
+    store_age = 0;
+    Ops::apply_xcnt_wait_implied_by_memory(state, WaitCounterKind::Load, 0);
     EXPECT_TRUE(state.pending[x].empty());
+    EXPECT_EQ(store_age, 0u);
+    Ops::apply_xcnt_wait(state, 0);
     EXPECT_EQ(state.pending_event_ages[x], PendingEventAges{});
   }
 }
 
-TEST(WaitcheckState, SharedGenerationBecomesReadyAfterAllCountersRetire) {
+TEST(WaitcheckState, SharedDestinationRemainsPendingUntilAllCountersRetire) {
   PendingState state;
   auto event = load(0, 0);
   event.kind = WaitEventKind::FlatLoad;
   state.pending[kLoad].push_back(event);
   event.counter = WaitCounterKind::Ds;
-  state.pending[Ops::counter_index(WaitCounterKind::Ds)].push_back(event);
+  const size_t ds = Ops::counter_index(WaitCounterKind::Ds);
+  state.pending[ds].push_back(event);
   Ops::apply_wait(state, WaitCounterKind::Load, 0);
-  EXPECT_FALSE(state.ready_regs.contains({RegClass::VGPR, 0, 1}));
+  EXPECT_TRUE(state.pending[kLoad].empty());
+  EXPECT_EQ(state.pending[ds], (std::vector<PendingEvent>{event}));
   Ops::apply_wait(state, WaitCounterKind::Ds, 0);
-  EXPECT_TRUE(state.ready_regs.contains({RegClass::VGPR, 0, 1}));
+  EXPECT_TRUE(state.pending[ds].empty());
 }
 
-TEST(WaitcheckState, OlderCommittedGenerationRemainsAvailableWithANewerProducer) {
-  PendingState state;
-  const RegisterRef reg{RegClass::VGPR, 0, 1};
-  state.pending[kLoad] = {load(0, 1), load(0, 0, 4)};
-  ASSERT_TRUE(Ops::apply_memory_wait(state, WaitCounterKind::Load, 1, ROCJITSU_CODE_ARCH_RDNA4)
-                  .succeeded());
-  ASSERT_EQ(state.pending[kLoad].size(), 1u);
-  EXPECT_TRUE(state.ready_regs.contains(reg));
-  EXPECT_TRUE(state.pending[kLoad][0].old_value_regs.contains(reg));
+TEST(WaitcheckState, PartialWaitKeepsNewerProducerOfTheSameRegisterUnchanged) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA4}) {
+    SCOPED_TRACE(arch);
+    PendingState state;
+    const auto newer = load(0, 0, 4);
+    state.pending[kLoad] = {load(0, 1), newer};
+    ASSERT_TRUE(Ops::apply_memory_wait(state, WaitCounterKind::Load, 1, arch).succeeded());
+    EXPECT_EQ(state.pending[kLoad], (std::vector<PendingEvent>{newer}));
+  }
 }
 
-TEST(WaitcheckState, JoinedDifferentCountersCannotInventACommittedGeneration) {
-  const RegisterRef reg{RegClass::VGPR, 0, 1};
+TEST(WaitcheckState, JoinedWaitDoesNotRetireAnotherCounter) {
   const size_t ds = Ops::counter_index(WaitCounterKind::Ds);
   PendingState left, right;
   left.pending[kLoad] = {load(0, 0)};
@@ -193,96 +192,61 @@ TEST(WaitcheckState, JoinedDifferentCountersCannotInventACommittedGeneration) {
   ds_event.counter = WaitCounterKind::Ds;
   ds_event.kind = WaitEventKind::Ds;
   right.pending[ds] = {ds_event};
-
-  auto joined = left;
-  Ops::merge_into(joined, right);
-  ASSERT_TRUE(Ops::apply_memory_wait(joined, WaitCounterKind::Load, 0, ROCJITSU_CODE_ARCH_RDNA4)
-                  .succeeded());
-  EXPECT_TRUE(joined.pending[kLoad].empty());
-  ASSERT_EQ(joined.pending[ds].size(), 1u);
-  EXPECT_FALSE(joined.ready_regs.contains(reg));
-  EXPECT_FALSE(joined.pending[ds][0].old_value_regs.contains(reg));
-
-  // Waiting before joining must not establish readiness on the DS-only path.
+  Ops::merge_into(left, right);
+  const auto before = left.pending[ds];
   ASSERT_TRUE(
       Ops::apply_memory_wait(left, WaitCounterKind::Load, 0, ROCJITSU_CODE_ARCH_RDNA4).succeeded());
-  ASSERT_TRUE(Ops::apply_memory_wait(right, WaitCounterKind::Load, 0, ROCJITSU_CODE_ARCH_RDNA4)
-                  .succeeded());
-  Ops::merge_into(left, right);
-  EXPECT_EQ(joined.ready_regs, left.ready_regs);
-  EXPECT_EQ(joined.pending[ds][0].old_value_regs, left.pending[ds][0].old_value_regs);
+  EXPECT_TRUE(left.pending[kLoad].empty());
+  EXPECT_EQ(left.pending[ds], before);
 }
 
-TEST(WaitcheckState, JoinedPartialLoadWaitCannotInventACommittedGeneration) {
-  const RegisterRef reg{RegClass::VGPR, 0, 1};
+TEST(WaitcheckState, JoinedPartialWaitRetainsEveryNewerPhysicalDestination) {
   PendingState left, right;
   left.pending[kLoad] = {load(0, 1), load(0, 0, 4)};
   right.pending[kLoad] = {load(0, 0, 8)};
-
-  auto joined = left;
-  Ops::merge_into(joined, right);
-  ASSERT_TRUE(Ops::apply_memory_wait(joined, WaitCounterKind::Load, 1, ROCJITSU_CODE_ARCH_RDNA4)
-                  .succeeded());
-  ASSERT_EQ(joined.pending[kLoad].size(), 2u);
-  EXPECT_FALSE(joined.ready_regs.contains(reg));
-  for (const auto &event : joined.pending[kLoad])
-    EXPECT_FALSE(event.old_value_regs.contains(reg));
-
+  Ops::merge_into(left, right);
+  const std::vector<PendingEvent> newer{left.pending[kLoad][1], left.pending[kLoad][2]};
   ASSERT_TRUE(
       Ops::apply_memory_wait(left, WaitCounterKind::Load, 1, ROCJITSU_CODE_ARCH_RDNA4).succeeded());
-  ASSERT_TRUE(Ops::apply_memory_wait(right, WaitCounterKind::Load, 1, ROCJITSU_CODE_ARCH_RDNA4)
-                  .succeeded());
-  Ops::merge_into(left, right);
-  EXPECT_EQ(joined.ready_regs, left.ready_regs);
-  // The right-hand producer has no committed predecessor value on its path.
-  EXPECT_EQ(joined.pending[kLoad][1].old_value_regs, left.pending[kLoad][1].old_value_regs);
+  EXPECT_EQ(left.pending[kLoad], newer);
 }
 
-TEST(WaitcheckState, JoinedCommonProducerEstablishesACommittedGeneration) {
+TEST(WaitcheckState, JoinedCommonProducerDoesNotRetireLaterReplacements) {
   PendingState left, right;
-  const RegisterRef reg{RegClass::VGPR, 0, 1};
   left.pending[kLoad] = {load(0, 1), load(0, 0, 4)};
   right.pending[kLoad] = {load(0, 1), load(0, 0, 8)};
   Ops::merge_into(left, right);
+  const std::vector<PendingEvent> newer{left.pending[kLoad][1], left.pending[kLoad][2]};
   ASSERT_TRUE(
       Ops::apply_memory_wait(left, WaitCounterKind::Load, 1, ROCJITSU_CODE_ARCH_RDNA4).succeeded());
-  ASSERT_EQ(left.pending[kLoad].size(), 2u);
-  EXPECT_TRUE(left.ready_regs.contains(reg));
-  for (const auto &event : left.pending[kLoad])
-    EXPECT_TRUE(event.old_value_regs.contains(reg));
+  EXPECT_EQ(left.pending[kLoad], newer);
 }
 
-TEST(WaitcheckState, PendingAndCompletedProducerBecomesReadyAfterJoinedWait) {
-  const RegisterRef reg{RegClass::VGPR, 0, 1};
+TEST(WaitcheckState, PendingAndCompletedPathsPreserveNewerProducerAfterWait) {
   PendingState pending;
   pending.pending[kLoad] = {load(0, 0)};
   auto completed = pending;
   Ops::apply_wait(completed, WaitCounterKind::Load, 0);
-  ASSERT_TRUE(completed.ready_regs.contains(reg));
   for (bool reverse : {false, true}) {
     SCOPED_TRACE(reverse);
     auto joined = reverse ? completed : pending;
     Ops::merge_into(joined, reverse ? pending : completed);
-    EXPECT_FALSE(joined.ready_regs.contains(reg));
-    // A later producer is still pending when the common older one retires.
+    // A later producer remains pending when the common older one retires.
     joined.pending[kLoad][0].min_younger = 1;
-    joined.pending[kLoad].push_back(load(0, 0, 4));
+    const auto newer = load(0, 0, 4);
+    joined.pending[kLoad].push_back(newer);
     Ops::apply_wait(joined, WaitCounterKind::Load, 1);
-    ASSERT_EQ(joined.pending[kLoad].size(), 1u);
-    EXPECT_TRUE(joined.ready_regs.contains(reg));
-    EXPECT_TRUE(joined.pending[kLoad][0].old_value_regs.contains(reg));
+    EXPECT_EQ(joined.pending[kLoad], (std::vector<PendingEvent>{newer}));
   }
 }
 
-TEST(WaitcheckState, CompletedPathCoverageIsPerRegisterAndIndependentOfJoinOrder) {
+TEST(WaitcheckState, PendingRegisterPayloadIsIndependentOfJoinOrder) {
   auto producer = load(0, 0);
   producer.regs.expand({RegClass::VGPR, 1, 1});
   std::vector<PendingState> paths(3);
   paths[0].pending[kLoad] = {producer};
   paths[1] = paths[0];
   Ops::apply_wait(paths[1], WaitCounterKind::Load, 0);
-  // This path has a committed v0 but has never produced v1.
-  paths[2].ready_regs.expand({RegClass::VGPR, 0, 1});
   std::array<size_t, 3> order{0, 1, 2};
   const std::array<uint8_t, 3> initialized{1, 1, 1};
   const auto expected = Ops::merge_predecessors(order, paths, initialized).value();
@@ -298,13 +262,15 @@ TEST(WaitcheckState, CompletedPathCoverageIsPerRegisterAndIndependentOfJoinOrder
     EXPECT_EQ(associated, joined);
     Ops::merge_into(joined, joined);
     EXPECT_EQ(joined, expected);
+    ASSERT_EQ(joined.pending[kLoad].size(), 1u);
+    EXPECT_EQ(joined.pending[kLoad][0].regs, producer.regs);
+    EXPECT_FALSE(joined.pending[kLoad][0].present_on_all_paths);
     Ops::apply_wait(joined, WaitCounterKind::Load, 0);
-    EXPECT_TRUE(joined.ready_regs.contains({RegClass::VGPR, 0, 1}));
-    EXPECT_FALSE(joined.ready_regs.contains({RegClass::VGPR, 1, 1}));
+    EXPECT_TRUE(joined.pending[kLoad].empty());
   } while (std::ranges::next_permutation(order).found);
 }
 
-TEST(WaitcheckState, ProducerAbsentOnOnePathStaysUnprovenAcrossFurtherJoins) {
+TEST(WaitcheckState, ProducerAbsentOnOnePathStaysConditionalAcrossFurtherJoins) {
   std::vector<PendingState> outputs(3);
   outputs[0].pending[kLoad] = {load(0, 0)};
   outputs[2].pending[kLoad] = {load(0, 0)};
@@ -317,22 +283,22 @@ TEST(WaitcheckState, ProducerAbsentOnOnePathStaysUnprovenAcrossFurtherJoins) {
     auto repeated = joined;
     Ops::merge_into(repeated, joined);
     EXPECT_EQ(repeated, joined);
+    EXPECT_FALSE(joined.pending[kLoad][0].present_on_all_paths);
     Ops::apply_wait(joined, WaitCounterKind::Load, 0);
     EXPECT_TRUE(joined.pending[kLoad].empty());
-    EXPECT_FALSE(joined.ready_regs.contains({RegClass::VGPR, 0, 1}));
   } while (std::ranges::next_permutation(predecessors).found);
 
   // An unvisited predecessor is not an initialized path lacking the event.
   const std::array<uint8_t, 3> middle_unvisited{1, 0, 1};
   auto joined = Ops::merge_predecessors(predecessors, outputs, middle_unvisited).value();
-  Ops::apply_wait(joined, WaitCounterKind::Load, 0);
-  EXPECT_TRUE(joined.ready_regs.contains({RegClass::VGPR, 0, 1}));
+  EXPECT_TRUE(joined.pending[kLoad][0].present_on_all_paths);
 
   // A producer issued after the join is present on every incoming path.
   joined = expected;
   joined.pending[kLoad].push_back(load(0, 0, 4));
+  EXPECT_TRUE(joined.pending[kLoad][1].present_on_all_paths);
   Ops::apply_wait(joined, WaitCounterKind::Load, 0);
-  EXPECT_TRUE(joined.ready_regs.contains({RegClass::VGPR, 0, 1}));
+  EXPECT_TRUE(joined.pending[kLoad].empty());
 }
 
 TEST(WaitcheckState, MixedHardwareEventKindsPreventPartialCounterRetirement) {
@@ -373,9 +339,9 @@ TEST(WaitcheckState, ZeroWaitClearsCounterOrderingFacts) {
 TEST(WaitcheckState, PartialWaitCannotRetireAnOutOfOrderScalarCounter) {
   PendingState state;
   const size_t ds = Ops::counter_index(WaitCounterKind::Ds);
-  auto event = load(0, 2);
+  auto event = load(0, 0);
   event.counter = WaitCounterKind::Ds;
-  event.kind = WaitEventKind::Ds;
+  event.kind = WaitEventKind::Smem;
   state.pending[ds].push_back(event);
   state.pending_smem[ds] = true;
   ASSERT_TRUE(
@@ -387,20 +353,16 @@ TEST(WaitcheckState, PartialWaitCannotRetireAnOutOfOrderScalarCounter) {
   EXPECT_TRUE(state.pending[ds].empty());
 }
 
-TEST(WaitcheckState, MergeUsesTheLeastProgressAndIntersectsReadyRegisters) {
+TEST(WaitcheckState, MergeUsesTheLeastGuaranteedProgress) {
   std::vector<PendingState> outputs(2);
   outputs[0].pending[kLoad].push_back(load(0, 2));
   outputs[1].pending[kLoad].push_back(load(0, 1));
-  outputs[0].ready_regs.expand({RegClass::VGPR, 8, 2});
-  outputs[1].ready_regs.expand({RegClass::VGPR, 9, 2});
   const std::array<size_t, 2> predecessors{0, 1};
   const std::array<uint8_t, 2> initialized{1, 1};
   auto merged = Ops::merge_predecessors(predecessors, outputs, initialized).value();
   ASSERT_EQ(merged.pending[kLoad].size(), 1u);
   EXPECT_EQ(merged.pending[kLoad][0].min_younger, 1u);
   EXPECT_TRUE(merged.uncertain_order[kLoad]);
-  EXPECT_EQ(merged.ready_regs.size(), 1u);
-  EXPECT_TRUE(merged.ready_regs.contains({RegClass::VGPR, 9, 1}));
   auto repeated = merged;
   Ops::merge_into(repeated, merged);
   EXPECT_EQ(repeated, merged);
@@ -409,7 +371,6 @@ TEST(WaitcheckState, MergeUsesTheLeastProgressAndIntersectsReadyRegisters) {
 TEST(WaitcheckState, UnvisitedPredecessorDoesNotContributeAnEmptyState) {
   std::vector<PendingState> outputs(2);
   outputs[0].pending[kLoad].push_back(load(0, 1));
-  outputs[0].ready_regs.expand({RegClass::VGPR, 8, 1});
   const std::array<size_t, 2> predecessors{0, 1};
   const std::array<uint8_t, 2> initialized{1, 0};
   EXPECT_EQ(Ops::merge_predecessors(predecessors, outputs, initialized).value(), outputs[0]);
@@ -418,7 +379,6 @@ TEST(WaitcheckState, UnvisitedPredecessorDoesNotContributeAnEmptyState) {
 TEST(WaitcheckState, InvalidPredecessorFailsInsteadOfSkippingIncomingState) {
   const std::array<size_t, 2> predecessors{0, 1};
   std::vector<PendingState> outputs(2);
-  outputs[0].ready_regs.expand({RegClass::VGPR, 0, 1});
   const std::array<uint8_t, 1> short_initialized{1};
   EXPECT_TRUE(Ops::merge_predecessors(predecessors, outputs, short_initialized).failed());
 
@@ -486,7 +446,6 @@ TEST(WaitcheckState, DependencyWaitsRetireOnlySelectedScalarHazards) {
       hazards.consecutive_ds_nops = 2;
       auto source = load(0, 0);
       source.counter = WaitCounterKind::VmVsrc;
-      source.produces_regs = false;
       state.pending[Ops::counter_index(WaitCounterKind::VmVsrc)].push_back(source);
       state.va_vdst_hazards.hazards[0] = {};
 
@@ -580,10 +539,8 @@ TEST(WaitcheckState, LegacyPackedWaitRetiresOnlyActiveFields) {
   EXPECT_EQ(state.pending[exp].size(), 1u);
 }
 
-TEST(WaitcheckState, DirectJoinIncludesModesReadinessAndSgprProgress) {
+TEST(WaitcheckState, DirectJoinIncludesModesAndSgprProgress) {
   PendingState left, right;
-  left.ready_regs.expand({RegClass::VGPR, 0, 2});
-  right.ready_regs.expand({RegClass::VGPR, 1, 2});
   left.previous_vm_vsrc_zero_wait = true;
   left.vgpr_msb.mode = 1;
   right.expert_scheduling.enabled = true;
@@ -594,7 +551,6 @@ TEST(WaitcheckState, DirectJoinIncludesModesReadinessAndSgprProgress) {
   const std::array<uint8_t, 2> initialized{1, 1};
   Ops::merge_into(left, right);
   EXPECT_EQ(left, Ops::merge_predecessors(predecessors, outputs, initialized).value());
-  EXPECT_EQ(left.ready_regs.size(), 1u);
   EXPECT_FALSE(left.previous_vm_vsrc_zero_wait);
   EXPECT_FALSE(left.vgpr_msb.known);
   EXPECT_FALSE(left.expert_scheduling.known);
@@ -654,7 +610,7 @@ TEST(WaitcheckState, CounterOnlySmemPreventsPartialXcntRetirement) {
   state.pending_smem[x] = true;
   Ops::apply_xcnt_wait(state, 1);
   EXPECT_EQ(state.pending[x].size(), 1u);
-  Ops::apply_xcnt_wait_implied_by_loadcnt(state, 1);
+  Ops::apply_xcnt_wait_implied_by_memory(state, WaitCounterKind::Load, 1);
   EXPECT_EQ(state.pending[x].size(), 1u);
   Ops::apply_xcnt_wait_implied_by_kmcnt(state, 0);
   EXPECT_FALSE(state.pending_smem[x]);
@@ -676,13 +632,14 @@ TEST(WaitcheckState, ImpliedWaitClearsMatchingCounterOnlyEventKinds) {
   EXPECT_EQ(ages[static_cast<size_t>(WaitEventKind::Ds)], 0u);
 }
 
-PendingState load_before_global_inv() {
+PendingState load_with_younger_fifo_credit() {
   PendingState state;
   const size_t vm = Ops::counter_index(WaitCounterKind::VmVsrc);
+  // One guaranteed same-class issue follows the load. A pending invalidation
+  // is unrelated to that credit.
   state.pending[kLoad] = {load(0, 1)};
   auto source = load(8, 0);
   source.counter = WaitCounterKind::VmVsrc;
-  source.produces_regs = false;
   state.pending[vm] = {source};
   state.pending_event_ages[kLoad].values[static_cast<size_t>(WaitEventKind::VmemNoSamplerLoad)] = 1;
   state.pending_event_ages[kLoad].values[static_cast<size_t>(WaitEventKind::GlobalInv)] = 0;
@@ -691,7 +648,7 @@ PendingState load_before_global_inv() {
 }
 
 TEST(WaitcheckState, LoadCompletionRetiresSourceFacetDespiteYoungerCounterOnlyRequest) {
-  auto state = load_before_global_inv();
+  auto state = load_with_younger_fifo_credit();
   const size_t vm = Ops::counter_index(WaitCounterKind::VmVsrc);
   ASSERT_TRUE(Ops::apply_memory_wait(state, WaitCounterKind::Load, 1, ROCJITSU_CODE_ARCH_RDNA4)
                   .succeeded());
@@ -703,7 +660,7 @@ TEST(WaitcheckState, LoadCompletionRetiresSourceFacetDespiteYoungerCounterOnlyRe
 }
 
 TEST(WaitcheckState, PrimaryKindCompletionDoesNotRequireMaterializedEvents) {
-  auto state = load_before_global_inv();
+  auto state = load_with_younger_fifo_credit();
   state.pending[kLoad].clear();
   const size_t vm = Ops::counter_index(WaitCounterKind::VmVsrc);
   state.pending[vm].clear();
@@ -731,16 +688,13 @@ TEST(WaitcheckState, FlatSourceRetirementRequiresBothCounterOnlyFacets) {
         auto source = load(8, 1);
         source.counter = WaitCounterKind::VmVsrc;
         source.kind = kind;
-        source.produces_regs = false;
         state.pending[vm] = {source};
         state.pending_event_ages[vm].values[static_cast<size_t>(kind)] = 1;
         // A younger counter-only request allows a partial wait to prove the
         // first route complete, but the second route can still use the source.
         state.pending_event_ages[Ops::counter_index(first)].values[static_cast<size_t>(kind)] = 1;
         state.pending_event_ages[Ops::counter_index(second)].values[static_cast<size_t>(kind)] = 0;
-        // Unknown FLAT store routing makes nonzero Store waits conservative.
-        const uint32_t count = first == WaitCounterKind::Store ? 0 : 1;
-        ASSERT_TRUE(Ops::apply_memory_wait(state, first, count, arch).succeeded());
+        ASSERT_TRUE(Ops::apply_memory_wait(state, first, 1, arch).succeeded());
         EXPECT_EQ(state.pending[vm], (std::vector<PendingEvent>{source}));
         EXPECT_EQ(state.pending_event_ages[vm].values[static_cast<size_t>(kind)], 1u);
         ASSERT_TRUE(Ops::apply_memory_wait(state, second, 0, arch).succeeded());
@@ -759,7 +713,6 @@ TEST(WaitcheckState, JoinedFlatSourceNeedsCompletionOnEveryPath) {
     auto source = load(8, 0);
     source.counter = WaitCounterKind::VmVsrc;
     source.kind = kind;
-    source.produces_regs = false;
     left.pending[vm] = {source};
     for (auto counter : {vmem, WaitCounterKind::Ds, WaitCounterKind::VmVsrc})
       left.pending_event_ages[Ops::counter_index(counter)].values[static_cast<size_t>(kind)] = 0;
@@ -778,7 +731,7 @@ TEST(WaitcheckState, JoinedFlatSourceNeedsCompletionOnEveryPath) {
 }
 
 TEST(WaitcheckState, IndividualOperationCompletionDoesNotClearTheKindsSummary) {
-  auto state = load_before_global_inv();
+  auto state = load_with_younger_fifo_credit();
   const size_t vm = Ops::counter_index(WaitCounterKind::VmVsrc);
   // A younger counter-only request of the same kind leaves its own source
   // summary pending even after the older materialized operation completes.
@@ -796,7 +749,7 @@ TEST(WaitcheckState, PrimaryWaitDoesNotRetireAnUnrelatedSourceFacet) {
   const size_t vm = Ops::counter_index(WaitCounterKind::VmVsrc);
   for (unsigned difference = 0; difference < 5; ++difference) {
     SCOPED_TRACE(difference);
-    auto state = load_before_global_inv();
+    auto state = load_with_younger_fifo_credit();
     auto &source = state.pending[vm][0];
     // A separate younger request prevents proving the whole kind complete.
     state.pending_event_ages[kLoad].values[static_cast<size_t>(WaitEventKind::VmemNoSamplerLoad)] =
@@ -827,7 +780,7 @@ TEST(WaitcheckState, PrimaryWaitDoesNotRetireAnUnrelatedSourceFacet) {
 }
 
 TEST(WaitcheckState, PrimaryWaitNeedsCompletionOfEveryMatchingOperationVariant) {
-  auto state = load_before_global_inv();
+  auto state = load_with_younger_fifo_credit();
   // A younger instance of the same static operation uses a different lane.
   // Completing only its older variant cannot release all of its source facets.
   state.pending[kLoad].push_back(load(1, 0));
@@ -844,12 +797,13 @@ TEST(WaitcheckState, PrimaryWaitRequiresCoverageAndOrderedCompletion) {
   const size_t vm = Ops::counter_index(WaitCounterKind::VmVsrc);
   for (bool out_of_order : {false, true}) {
     SCOPED_TRACE(out_of_order);
-    auto state = load_before_global_inv();
+    auto state = load_with_younger_fifo_credit();
     if (out_of_order) {
       // CDNA4 FLAT completion is not ordered at a nonzero LOAD threshold.
       state.pending[kLoad][0].kind = WaitEventKind::FlatLoad;
+      state.pending[kLoad][0].min_younger = 0;
       state.pending[vm][0].kind = WaitEventKind::FlatLoad;
-      state.pending_event_ages[kLoad].values[static_cast<size_t>(WaitEventKind::FlatLoad)] = 1;
+      state.pending_event_ages[kLoad].values[static_cast<size_t>(WaitEventKind::FlatLoad)] = 0;
     } else {
       // Matching location alone does not prove completion on an absent path.
       state.pending[kLoad][0].present_on_all_paths = false;
@@ -874,7 +828,6 @@ TEST(WaitcheckState, PartialImpliedWaitUsesAgeInsteadOfCanonicalEventOrder) {
   ds.kind = WaitEventKind::Ds;
   for (PendingEvent *event : {&oldest, &middle, &youngest, &ds}) {
     event->counter = WaitCounterKind::VmVsrc;
-    event->produces_regs = false;
   }
   state.pending[vm] = {youngest, middle, ds, oldest};
   ASSERT_TRUE(std::ranges::is_sorted(state.pending[vm], Ops::event_identity_less));
@@ -900,7 +853,6 @@ TEST(WaitcheckState, PartialImpliedWaitRetainsTiedCutoffEvents) {
   auto first = load(0, 1, 0);
   auto second = load(1, 1, 4);
   first.counter = second.counter = WaitCounterKind::VmVsrc;
-  first.produces_regs = second.produces_regs = false;
   state.pending[vm] = {first, second};
   state.pending_event_ages[vm].values[static_cast<size_t>(WaitEventKind::VmemNoSamplerLoad)] = 1;
   auto expected = state;
@@ -920,7 +872,6 @@ TEST(WaitcheckState, PartialImpliedWaitRetainsEventsWithUncertainOrder) {
   auto oldest = load(0, 1);
   auto youngest = load(1, 0, 4);
   oldest.counter = youngest.counter = WaitCounterKind::VmVsrc;
-  oldest.produces_regs = youngest.produces_regs = false;
   state.pending[vm] = {oldest, youngest};
   state.pending_event_ages[vm].values[static_cast<size_t>(WaitEventKind::VmemNoSamplerLoad)] = 0;
   state.uncertain_order[vm] = true;
@@ -949,6 +900,17 @@ TEST(WaitcheckState, CounterOnlySmemRequiresZeroXcntEvenWithoutAnAge) {
   Ops::apply_xcnt_wait(state, 0);
   EXPECT_TRUE(state.pending[x].empty());
   EXPECT_FALSE(state.pending_smem[x]);
+}
+
+TEST(WaitcheckState, DependencyRequiredCountClampsTrackedAgeToWaitEncoding) {
+  PendingState state;
+  PendingEvent event = load(0, 7);
+  event.counter = WaitCounterKind::VmVsrc;
+
+  const auto required = Ops::dependency_required_count(state, event, ROCJITSU_CODE_ARCH_CDNA5);
+
+  ASSERT_TRUE(required.succeeded());
+  EXPECT_EQ(required.value(), 6u);
 }
 
 TEST(WaitcheckState, ExplicitAndEmbeddedWaitsRetireVectorHazards) {

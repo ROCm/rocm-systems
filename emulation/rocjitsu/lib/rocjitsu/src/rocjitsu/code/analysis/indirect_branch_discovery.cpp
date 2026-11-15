@@ -358,6 +358,7 @@ struct AnalysisContext {
   std::span<const Instruction *const> insts;
   std::span<const uint8_t> text;
   rj_code_arch_t arch;
+  uint8_t wave_size = 0;
   bool setreg_vgpr_msb_fixup = false;
   std::vector<InstructionFacts> facts;
 
@@ -820,7 +821,7 @@ void record_written_sgpr_ref(InstructionFacts &facts, RegisterRef ref) {
   facts.written_sgprs.expand(ref);
 }
 
-void record_written_sgprs(const Instruction &inst, InstructionFacts &facts) {
+void record_written_sgprs(const Instruction &inst, InstructionFacts &facts, uint8_t wave_size) {
   // This analysis only needs SGPR defs. Avoid the heavier def-use helper here:
   // computing use sets and vector metadata for every instruction was a major
   // cost on large generated kernels, and none of that information participates
@@ -830,7 +831,7 @@ void record_written_sgprs(const Instruction &inst, InstructionFacts &facts) {
     if (op == nullptr)
       continue;
     if (auto ref = op->to_register_ref())
-      record_written_sgpr_ref(facts, *ref);
+      record_written_sgpr_ref(facts, inst.wave_sized_destination(*op, *ref, wave_size));
   }
 
   RegisterSet implicit_defs;
@@ -844,7 +845,7 @@ void record_written_sgprs(const Instruction &inst, InstructionFacts &facts) {
 void ensure_written_sgprs(AnalysisContext &ctx, size_t index) {
   InstructionFacts &facts = ctx.facts[index];
   if (!facts.written_sgprs_computed)
-    record_written_sgprs(*ctx.insts[index], facts);
+    record_written_sgprs(*ctx.insts[index], facts, ctx.wave_size);
 }
 
 void invalidate_written_sgprs(AnalysisContext &ctx, size_t index, BlockState &state,
@@ -1754,9 +1755,15 @@ bool try_apply_pair_update(AnalysisContext &ctx, size_t index, BlockState &state
     // patch_recovered_builder_fixups. Mark the value non-contiguous so the
     // whole-scope proof declines to rewrite the range.
     const bool adjacent = inst.src_loc() == updated.source_recovery_end_offset;
-    if (!apply_gfx1250_add_nc_u64_update(inst, word, ctx.text, ctx.arch, pair_lo, updated) &&
-        !apply_low_literal_update(inst, word, ctx.text, ctx.arch, pair_lo, updated) &&
-        !apply_high_carry_update(inst, word, ctx.text, ctx.arch, pair_lo, updated))
+    // Sign-extending the high half of a canonical 48-bit text PC preserves the
+    // local branch target. Leave the instruction intact during DBT relocation.
+    if (ctx.arch == ROCJITSU_CODE_ARCH_RDNA4 && !updated.pending_high_carry &&
+        sop1_same_sreg(inst, word, "s_sext_i32_i16", pair_lo + 1)) {
+      updated.source_recovery_end_offset = inst.src_loc() + inst.size();
+      updated.contiguous = false;
+    } else if (!apply_gfx1250_add_nc_u64_update(inst, word, ctx.text, ctx.arch, pair_lo, updated) &&
+               !apply_low_literal_update(inst, word, ctx.text, ctx.arch, pair_lo, updated) &&
+               !apply_high_carry_update(inst, word, ctx.text, ctx.arch, pair_lo, updated))
       continue;
     updated.contiguous = updated.contiguous && adjacent;
 
@@ -3562,10 +3569,12 @@ std::optional<uint16_t> s_call_sdst(const Instruction &inst, uint32_t word) {
     std::span<const Instruction *const> insts, std::span<const uint8_t> text, rj_code_arch_t arch,
     std::span<const uint64_t> extra_leaders, ExternalEntryPolicy entry_policy,
     std::vector<PcAddressBuilder> *pc_builders, std::span<const uint64_t> extra_split_points,
-    std::span<const uint64_t> analysis_root_offsets, rj_code_target_id_t target) {
+    std::span<const uint64_t> analysis_root_offsets, rj_code_target_id_t target,
+    uint8_t wave_size) {
   std::vector<IndirectCallFixup> recovered;
   FixupIndex recovered_index;
   AnalysisContext ctx = build_context(insts, text, arch, target);
+  ctx.wave_size = wave_size;
   std::vector<uint64_t> sorted_extra_leaders(extra_leaders.begin(), extra_leaders.end());
   std::ranges::sort(sorted_extra_leaders);
   sorted_extra_leaders.erase(std::ranges::unique(sorted_extra_leaders).begin(),
@@ -3674,7 +3683,8 @@ std::vector<IndirectCallFixup> discover_indirect_branch_edges(
     std::span<const Instruction *const> insts, std::span<const uint8_t> text, rj_code_arch_t arch,
     std::span<const uint64_t> extra_leaders, ExternalEntryPolicy entry_policy,
     std::vector<PcAddressBuilder> *pc_builders, std::span<const uint64_t> extra_split_points,
-    std::span<const uint64_t> analysis_root_offsets, rj_code_target_id_t target) {
+    std::span<const uint64_t> analysis_root_offsets, rj_code_target_id_t target,
+    uint8_t wave_size) {
   if (pc_builders != nullptr)
     pc_builders->clear();
   if (insts.empty())
@@ -3694,7 +3704,7 @@ std::vector<IndirectCallFixup> discover_indirect_branch_edges(
     // recovery path for another consumer kind must extend the predicate above.
     const auto unfiltered = discover_indirect_branch_edges_unfiltered(
         insts, text, arch, extra_leaders, entry_policy, nullptr, extra_split_points,
-        analysis_root_offsets, target);
+        analysis_root_offsets, target, wave_size);
     assert(unfiltered.empty() && "indirect-recovery prefilter skipped a fixup-producing consumer");
 #endif
     return {};
@@ -3702,7 +3712,7 @@ std::vector<IndirectCallFixup> discover_indirect_branch_edges(
 
   return discover_indirect_branch_edges_unfiltered(insts, text, arch, extra_leaders, entry_policy,
                                                    pc_builders, extra_split_points,
-                                                   analysis_root_offsets, target);
+                                                   analysis_root_offsets, target, wave_size);
 }
 
 } // namespace rocjitsu

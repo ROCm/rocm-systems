@@ -165,6 +165,7 @@ scan_kernel_descriptors(std::span<const uint8_t> image, uint64_t text_offset, ui
           .kernel_name = std::move(*kernel_name),
           .entry_text_offset = *entry_vaddr - *text_vaddr,
           .descriptor = desc,
+          .descriptor_vaddr = symbol.st_value,
       });
     }
   }

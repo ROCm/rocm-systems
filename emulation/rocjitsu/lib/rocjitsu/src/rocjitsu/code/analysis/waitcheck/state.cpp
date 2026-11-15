@@ -10,6 +10,145 @@
 
 namespace rocjitsu::waitcheck_detail {
 
+bool WaitcheckStateOps::is_completion_counter(WaitCounterKind counter) {
+  return counter != WaitCounterKind::X && counter != WaitCounterKind::VmVsrc &&
+         counter != WaitCounterKind::VaVdst && counter != WaitCounterKind::Depctr;
+}
+
+namespace {
+bool has_conditional_route(WaitEventKind kind) {
+  return kind == WaitEventKind::FlatLoad || kind == WaitEventKind::FlatStore;
+}
+
+bool gfx11_flat_ds(WaitCounterKind counter, WaitEventKind kind, rj_code_arch_t arch) {
+  return counter == WaitCounterKind::Ds && has_conditional_route(kind) &&
+         (arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5);
+}
+
+bool has_conditional_issue(WaitCounterKind counter, WaitEventKind kind, rj_code_arch_t arch,
+                           bool exec_nonzero) {
+  // A live VMcnt/VScnt position forces issue on GFX11. A live LGKM position
+  // alone does not. Queue summaries are upper bounds, so a different VMEM
+  // instruction may already have completed.
+  if (gfx11_flat_ds(counter, kind, arch) && !exec_nonzero)
+    return true;
+  // CDNA5 3.2.2.1: ASYNC may remain outstanding while the LDS arrive skips
+  // with EXEC=0 and DSCNT=0. A possible issue cannot age an older ASYNC load.
+  if (kind == WaitEventKind::AsyncBarrier && !exec_nonzero)
+    return true;
+  return has_conditional_route(kind) && !WaitcheckTarget::flat_issues_both_counters(arch);
+}
+} // namespace
+
+std::optional<uint32_t> WaitcheckStateOps::guaranteed_issue_order(WaitCounterKind counter,
+                                                                  WaitEventKind kind,
+                                                                  rj_code_arch_t arch,
+                                                                  bool exec_nonzero) {
+  // GFX11 and GFX12 issue both queue positions regardless of the lanes in each route.
+  if (has_conditional_issue(counter, kind, arch, exec_nonzero))
+    return std::nullopt;
+  return completion_order_kind(counter, kind, arch);
+}
+
+bool WaitcheckStateOps::ordered_waw(const PendingEvent &event,
+                                    std::span<const ClassifiedEvent> incoming,
+                                    rj_code_arch_t arch) {
+  WaitEventKind ordered = event.kind;
+  if (event.counter == WaitCounterKind::Load && amdgpu::has_ordered_vmem_writeback(arch)) {
+    // Only the VMEM facet of an older FLAT result can be superseded by a
+    // native VMEM write. The incoming generic FLAT route remains unknown.
+    if (ordered == WaitEventKind::FlatLoad)
+      ordered = WaitEventKind::VmemNoSamplerLoad;
+    if (ordered != WaitEventKind::VmemNoSamplerLoad && ordered != WaitEventKind::Sample &&
+        ordered != WaitEventKind::Bvh)
+      return false;
+  } else if (!(event.counter == WaitCounterKind::Ds && ordered == WaitEventKind::Ds) &&
+             !(event.counter == WaitCounterKind::Exp && ordered == WaitEventKind::LdsDirect &&
+               amdgpu::has_ordered_lds_direct_writeback(arch))) {
+    return false;
+  }
+  return std::ranges::any_of(incoming, [&](const ClassifiedEvent &other) {
+    return other.counter == event.counter && other.kind == ordered &&
+           other.registers == TrackedRegisterSource::Defs;
+  });
+}
+
+void WaitcheckStateOps::apply_admission(PendingState &state, const Instruction &inst,
+                                        std::span<const ClassifiedEvent> events,
+                                        rj_code_arch_t arch) {
+  for (const auto &event : events) {
+    if (!is_completion_counter(event.counter) ||
+        has_conditional_issue(event.counter, event.kind, arch, state.exec_nonzero))
+      continue;
+    // The incoming instruction must reserve all its credits before accessing
+    // its registers. Only guaranteed younger members of an ordered FIFO count.
+    const auto capacity = maximum_dependency_wait(arch, event.counter).value() + 1;
+    const uint32_t remaining = capacity - issue_units(inst, event, arch);
+    const auto idx = counter_index(event.counter);
+    const bool reaches_capacity =
+        std::ranges::any_of(
+            state.pending[idx],
+            [&](const auto &pending) { return pending.min_younger >= remaining; }) ||
+        std::ranges::any_of(state.pending_event_ages[idx].values, [&](uint8_t age) {
+          return age != kNoPendingEventAge && age >= remaining;
+        });
+    const auto &translations = state.pending[counter_index(WaitCounterKind::X)];
+    const bool releases_translation = std::ranges::any_of(translations, [&](const auto &pending) {
+      return vm_vsrc_event_implied_by_wait(pending.kind, event.counter) &&
+             pending.min_younger_primary >= remaining;
+    });
+    if (reaches_capacity || releases_translation)
+      (void)apply_memory_wait(state, event.counter, remaining, arch);
+  }
+}
+
+void WaitcheckStateOps::age_events(PendingState &state, const PendingEvent &event,
+                                   rj_code_arch_t arch, uint32_t maximum_wait, uint32_t units) {
+  const size_t idx = counter_index(event.counter);
+  const uint32_t max_age = event.counter == WaitCounterKind::VmVsrc ? 62 : maximum_wait;
+  const bool completion = is_completion_counter(event.counter);
+  const auto incoming =
+      completion ? guaranteed_issue_order(event.counter, event.kind, arch, state.exec_nonzero)
+                 : std::nullopt;
+  auto age = [&](WaitEventKind older, auto &value) {
+    // Direct async VMEM may need to retain its sources for replay. Its X
+    // position is unqualified, so neither side can use it to prove X ordering.
+    if (event.counter == WaitCounterKind::X &&
+        (is_async_transfer_kind(event.kind) || is_async_transfer_kind(older)))
+      return;
+    if (!completion || (incoming && completion_order_kind(event.counter, older, arch) == incoming))
+      value = std::min<uint32_t>(value + units, max_age);
+  };
+  if (arch == ROCJITSU_CODE_ARCH_CDNA5 && incoming) {
+    // X and primary sequence numbers diverge as soon as different VMEM families
+    // interleave. Count only definitely-issued younger credits in the same FIFO.
+    for (auto &translation : state.pending[counter_index(WaitCounterKind::X)]) {
+      const bool same_completion =
+          (is_async_transfer_kind(translation.kind) && event.counter == WaitCounterKind::Async) ||
+          (is_xcnt_vmem_event(translation) &&
+           vm_vsrc_event_implied_by_wait(translation.kind, event.counter));
+      if (same_completion && !has_conditional_route(translation.kind) &&
+          completion_order_kind(event.counter, translation.kind, arch) == incoming)
+        translation.min_younger_primary =
+            std::min<uint32_t>(maximum_wait, translation.min_younger_primary + units);
+    }
+  }
+  auto &ages = state.pending_event_ages[idx].values;
+  for (size_t kind = 0; kind < ages.size(); ++kind)
+    if (ages[kind] != kNoPendingEventAge)
+      age(static_cast<WaitEventKind>(kind), ages[kind]);
+  ages[static_cast<size_t>(event.kind)] = 0;
+  for (auto &pending : state.pending[idx]) {
+    if (!incoming && pending.implies_active_exec &&
+        gfx11_flat_ds(event.counter, event.kind, arch) &&
+        completion_order_kind(event.counter, pending.kind, arch) ==
+            completion_order_kind(event.counter, event.kind, arch))
+      pending.min_younger = std::min<uint32_t>(pending.min_younger + units, max_age);
+    else
+      age(pending.kind, pending.min_younger);
+  }
+}
+
 namespace {
 bool flat_has_other_pending_counters(const PendingState &state, WaitEventKind kind,
                                      WaitCounterKind waited_counter) {
@@ -45,9 +184,9 @@ uint32_t VgprMsbState::for_role(amdgpu::VgprMsbRole role) const {
 
 bool WaitcheckStateOps::same_event_identity(const PendingEvent &lhs, const PendingEvent &rhs) {
   return lhs.counter == rhs.counter && lhs.kind == rhs.kind && lhs.regs == rhs.regs &&
-         lhs.partial_reg == rhs.partial_reg && lhs.partial_reg_mask == rhs.partial_reg_mask &&
-         lhs.special_reg == rhs.special_reg && lhs.barrier_id == rhs.barrier_id &&
-         lhs.produces_regs == rhs.produces_regs && lhs.check_uses == rhs.check_uses &&
+         lhs.vcc_halves == rhs.vcc_halves && lhs.partial_reg == rhs.partial_reg &&
+         lhs.partial_reg_mask == rhs.partial_reg_mask && lhs.special_reg == rhs.special_reg &&
+         lhs.barrier_id == rhs.barrier_id && lhs.check_uses == rhs.check_uses &&
          lhs.check_defs == rhs.check_defs && lhs.check_exec_defs == rhs.check_exec_defs &&
          lhs.section_name == rhs.section_name && lhs.section_offset == rhs.section_offset &&
          lhs.file_offset == rhs.file_offset && lhs.instruction == rhs.instruction &&
@@ -80,14 +219,14 @@ bool WaitcheckStateOps::register_set_less(const RegisterSet &lhs, const Register
 }
 
 bool WaitcheckStateOps::event_identity_less(const PendingEvent &lhs, const PendingEvent &rhs) {
-  const auto lhs_key = std::tie(
-      lhs.section_name, lhs.section_offset, lhs.file_offset, lhs.instruction, lhs.counter, lhs.kind,
-      lhs.barrier_id, lhs.produces_regs, lhs.check_uses, lhs.check_defs, lhs.check_exec_defs,
-      lhs.check_memory_order, lhs.check_program_end, lhs.check_counter_parity_order);
-  const auto rhs_key = std::tie(
-      rhs.section_name, rhs.section_offset, rhs.file_offset, rhs.instruction, rhs.counter, rhs.kind,
-      rhs.barrier_id, rhs.produces_regs, rhs.check_uses, rhs.check_defs, rhs.check_exec_defs,
-      rhs.check_memory_order, rhs.check_program_end, rhs.check_counter_parity_order);
+  const auto lhs_key =
+      std::tie(lhs.section_name, lhs.section_offset, lhs.file_offset, lhs.instruction, lhs.counter,
+               lhs.kind, lhs.barrier_id, lhs.check_uses, lhs.check_defs, lhs.check_exec_defs,
+               lhs.check_memory_order, lhs.check_program_end, lhs.check_counter_parity_order);
+  const auto rhs_key =
+      std::tie(rhs.section_name, rhs.section_offset, rhs.file_offset, rhs.instruction, rhs.counter,
+               rhs.kind, rhs.barrier_id, rhs.check_uses, rhs.check_defs, rhs.check_exec_defs,
+               rhs.check_memory_order, rhs.check_program_end, rhs.check_counter_parity_order);
   if (lhs_key != rhs_key)
     return lhs_key < rhs_key;
   if (register_ref_key(lhs.special_reg) != register_ref_key(rhs.special_reg))
@@ -96,6 +235,8 @@ bool WaitcheckStateOps::event_identity_less(const PendingEvent &lhs, const Pendi
     return register_ref_key(lhs.partial_reg) < register_ref_key(rhs.partial_reg);
   if (lhs.partial_reg_mask != rhs.partial_reg_mask)
     return lhs.partial_reg_mask < rhs.partial_reg_mask;
+  if (lhs.vcc_halves != rhs.vcc_halves)
+    return lhs.vcc_halves < rhs.vcc_halves;
   return register_set_less(lhs.regs, rhs.regs);
 }
 
@@ -135,29 +276,57 @@ void WaitcheckStateOps::merge_delay_alu(std::vector<PendingDelayAlu> &dst,
   dst = std::move(common);
 }
 
+void ScalarOffsetValues::merge(const ScalarOffsetValues &other) {
+  if (count == 0 || *this == other)
+    return;
+  if (other.count == 0) {
+    *this = {};
+    return;
+  }
+  for (uint32_t value : other.values()) {
+    if (std::ranges::find(values(), value) != values().end())
+      continue;
+    if (count == literals.size()) {
+      *this = {};
+      return;
+    }
+    literals[count++] = value;
+  }
+  std::ranges::sort(literals.begin(), literals.begin() + count);
+}
+
 void WaitcheckStateOps::merge_into(PendingState &dst, const PendingState &src) {
+  dst.exec_nonzero &= src.exec_nonzero;
   dst.previous_vm_vsrc_zero_wait &= src.previous_vm_vsrc_zero_wait;
+  if (dst.prefetch_enabled != src.prefetch_enabled)
+    dst.prefetch_enabled.reset();
+  dst.m0.merge(src.m0);
+  for (auto it = dst.sgpr_offsets.begin(); it != dst.sgpr_offsets.end();) {
+    const auto other = src.sgpr_offsets.find(it->first);
+    if (other != src.sgpr_offsets.end()) {
+      it->second.merge(other->second);
+      if (it->second.count != 0) {
+        ++it;
+        continue;
+      }
+    }
+    it = dst.sgpr_offsets.erase(it);
+  }
   if (dst.vgpr_msb != src.vgpr_msb)
     dst.vgpr_msb = {.mode = 0, .known = false};
   if (dst.expert_scheduling != src.expert_scheduling)
     dst.expert_scheduling = {.enabled = true, .known = false};
   for (size_t i = 0; i < kCounterCount; ++i) {
-    // Presence and old-value proofs do not change hardware issue order.
+    // Path coverage does not change hardware issue order.
     const bool same_order = std::ranges::equal(
         dst.pending[i], src.pending[i], [](const PendingEvent &lhs, const PendingEvent &rhs) {
-          return same_event_identity(lhs, rhs) && lhs.min_younger == rhs.min_younger &&
-                 lhs.min_younger_in_fifo == rhs.min_younger_in_fifo;
+          return same_event_identity(lhs, rhs) && lhs.min_younger == rhs.min_younger;
         });
     if (!dst.pending[i].empty() && !src.pending[i].empty() && !same_order)
       dst.uncertain_order[i] = true;
     for (PendingEvent &event : dst.pending[i]) {
       const auto position = std::ranges::lower_bound(src.pending[i], event, event_identity_less);
       const bool found = position != src.pending[i].end() && same_event_identity(*position, event);
-      if (!found || !position->present_on_all_paths) {
-        if (event.present_on_all_paths)
-          event.ready_on_absent_paths = event.regs;
-        event.ready_on_absent_paths &= found ? position->ready_on_absent_paths : src.ready_regs;
-      }
       event.present_on_all_paths &= found && position->present_on_all_paths;
     }
     for (size_t kind = 0; kind < kWaitEventKindCount; ++kind) {
@@ -173,20 +342,15 @@ void WaitcheckStateOps::merge_into(PendingState &dst, const PendingState &src) {
       auto position = std::ranges::lower_bound(dst.pending[i], event, event_identity_less);
       if (position == dst.pending[i].end() || !same_event_identity(*position, event)) {
         position = dst.pending[i].insert(position, event);
-        if (position->present_on_all_paths)
-          position->ready_on_absent_paths = position->regs;
-        position->ready_on_absent_paths &= dst.ready_regs;
         position->present_on_all_paths = false;
       } else {
+        position->implies_active_exec &= event.implies_active_exec;
         position->min_younger = std::min(position->min_younger, event.min_younger);
-        position->min_younger_in_fifo =
-            std::min(position->min_younger_in_fifo, event.min_younger_in_fifo);
-        position->old_value_regs &= event.old_value_regs;
+        position->min_younger_primary =
+            std::min(position->min_younger_primary, event.min_younger_primary);
       }
     }
   }
-  // Missing-event coverage above needs each predecessor's original readiness.
-  dst.ready_regs &= src.ready_regs;
   merge_sgpr_hazards(dst.sgpr_hazards, src.sgpr_hazards);
   merge_va_vdst_hazards(dst.va_vdst_hazards, src.va_vdst_hazards);
   dst.vgpr_msb_setreg_hazard = dst.vgpr_msb_setreg_hazard || src.vgpr_msb_setreg_hazard;
@@ -216,55 +380,6 @@ WaitcheckStateOps::merge_predecessors(std::span<const size_t> predecessors,
   return merged;
 }
 
-bool WaitcheckStateOps::same_register_generation(const PendingEvent &lhs, const PendingEvent &rhs) {
-  return lhs.produces_regs && rhs.produces_regs && lhs.regs == rhs.regs &&
-         lhs.section_name == rhs.section_name && lhs.section_offset == rhs.section_offset &&
-         lhs.file_offset == rhs.file_offset && lhs.instruction == rhs.instruction;
-}
-
-void WaitcheckStateOps::make_retired_generations_ready(
-    PendingState &state, std::span<const PendingEvent> retired_events) {
-  for (const PendingEvent &retired : retired_events) {
-    if (!retired.produces_regs)
-      continue;
-    retired.regs.for_each([&](RegisterRef reg) {
-      if (!retired.present_on_all_paths && !retired.ready_on_absent_paths.contains(reg))
-        return;
-      if (reg.cls != RegClass::VGPR && reg.cls != RegClass::ACC_VGPR)
-        return;
-      const bool generation_still_pending =
-          std::ranges::any_of(state.pending, [&](const std::vector<PendingEvent> &events) {
-            return std::ranges::any_of(events, [&](const PendingEvent &pending) {
-              return pending.regs.contains(reg) && same_register_generation(retired, pending);
-            });
-          });
-      if (generation_still_pending)
-        return;
-
-      state.ready_regs.expand(reg);
-      for (auto &events : state.pending) {
-        for (PendingEvent &pending : events) {
-          if (pending.produces_regs && pending.regs.contains(reg))
-            pending.old_value_regs.expand(reg);
-        }
-      }
-    });
-  }
-}
-
-template <typename Predicate>
-void WaitcheckStateOps::retire_events(PendingState &state, std::vector<PendingEvent> &events,
-                                      Predicate should_retire) {
-  std::vector<PendingEvent> retired_events;
-  std::erase_if(events, [&](const PendingEvent &event) {
-    if (!should_retire(event))
-      return false;
-    retired_events.push_back(event);
-    return true;
-  });
-  make_retired_generations_ready(state, retired_events);
-}
-
 void WaitcheckStateOps::apply_wait_to_event_ages(PendingState &state, WaitCounterKind counter,
                                                  uint32_t count) {
   auto &ages = state.pending_event_ages[counter_index(counter)].values;
@@ -279,26 +394,20 @@ void WaitcheckStateOps::apply_wait(PendingState &state, WaitCounterKind counter,
   auto &pending = state.pending[idx];
   apply_wait_to_event_ages(state, counter, count);
   if (count == 0) {
-    retire_events(state, pending, [](const PendingEvent &) { return true; });
+    pending.clear();
     state.pending_smem[idx] = false;
     state.uncertain_order[idx] = false;
     return;
   }
-  retire_events(state, pending,
-                [count](const PendingEvent &event) { return event.min_younger >= count; });
+  std::erase_if(pending, [count](const PendingEvent &event) { return event.min_younger >= count; });
   if (pending.empty())
     state.uncertain_order[idx] = false;
 }
 
 util::Result WaitcheckStateOps::apply_kmcnt_wait(PendingState &state, uint32_t count,
                                                  rj_code_arch_t arch) {
-  const auto out_of_order = counter_out_of_order(state, WaitCounterKind::Km, arch);
-  if (out_of_order.failed())
+  if (amdgpu::waitcnt_model(arch).failed())
     return util::Result::failure();
-  // LLVM cannot use a partial wait to advance any part of a counter whose
-  // pending event kinds may complete out of order.
-  if (count != 0 && out_of_order.value())
-    return util::Result::success();
   apply_wait(state, WaitCounterKind::Km, count);
   apply_xcnt_wait_implied_by_kmcnt(state, count);
   return util::Result::success();
@@ -329,7 +438,7 @@ void WaitcheckStateOps::apply_filtered_vm_vsrc_wait(PendingState &state, Predica
   const size_t idx = counter_index(WaitCounterKind::VmVsrc);
   auto &pending = state.pending[idx];
   if (count == 0) {
-    retire_events(state, pending, is_implied);
+    std::erase_if(pending, is_implied);
     retire_event_kind_ages(state, WaitCounterKind::VmVsrc, is_implied);
     if (pending.empty())
       state.uncertain_order[idx] = false;
@@ -358,7 +467,7 @@ void WaitcheckStateOps::apply_filtered_vm_vsrc_wait(PendingState &state, Predica
     return;
   }
   const uint32_t youngest_retired_age = matching_ages[count];
-  retire_events(state, pending, [&](const PendingEvent &event) {
+  std::erase_if(pending, [&](const PendingEvent &event) {
     return is_implied(event) && event.min_younger >= youngest_retired_age;
   });
   retire_event_kind_ages(state, WaitCounterKind::VmVsrc, is_implied, youngest_retired_age);
@@ -381,11 +490,6 @@ bool WaitcheckStateOps::is_xcnt_smem_event(const PendingEvent &event) {
 
 bool WaitcheckStateOps::is_xcnt_vmem_event(const PendingEvent &event) {
   return event.counter == WaitCounterKind::X && is_xcnt_vmem_kind(event.kind);
-}
-
-bool WaitcheckStateOps::is_xcnt_store_event(const PendingEvent &event) {
-  return event.counter == WaitCounterKind::X &&
-         (event.kind == WaitEventKind::VmemStore || event.kind == WaitEventKind::FlatStore);
 }
 
 template <typename Predicate>
@@ -422,13 +526,26 @@ void WaitcheckStateOps::apply_xcnt_wait(PendingState &state, uint32_t count) {
 }
 
 template <typename Predicate>
-void WaitcheckStateOps::retire_xcnt_group(PendingState &state, Predicate belongs_to_group) {
+void WaitcheckStateOps::retire_xcnt_group(PendingState &state, Predicate belongs_to_group,
+                                          uint32_t count) {
   const size_t idx = counter_index(WaitCounterKind::X);
   auto &pending = state.pending[idx];
-  retire_events(state, pending, belongs_to_group);
-  retire_event_kind_ages(state, WaitCounterKind::X, belongs_to_group);
+  std::erase_if(pending, [&](const PendingEvent &event) {
+    return belongs_to_group(event) && event.min_younger >= count;
+  });
+  retire_event_kind_ages(state, WaitCounterKind::X, belongs_to_group, count);
   if (pending.empty())
     state.uncertain_order[idx] = false;
+}
+
+void WaitcheckStateOps::apply_xcnt_group_wait(PendingState &state, uint32_t count) {
+  // Switching translations or ordering a VMEM write only retires definite
+  // group members. A possible async replay source needs its own completion
+  // or a full architectural X drain.
+  if (count && has_xcnt_smem(state))
+    return;
+  retire_xcnt_group(
+      state, [](const PendingEvent &event) { return !is_async_transfer_kind(event.kind); }, count);
 }
 
 void WaitcheckStateOps::apply_xcnt_wait_implied_by_kmcnt(PendingState &state, uint32_t count) {
@@ -436,22 +553,46 @@ void WaitcheckStateOps::apply_xcnt_wait_implied_by_kmcnt(PendingState &state, ui
     return;
   if (!has_xcnt_event(state, is_xcnt_smem_event))
     return;
-  if (has_xcnt_event(state, is_xcnt_vmem_event)) {
-    retire_xcnt_group(state, is_xcnt_smem_event);
-    return;
-  }
-  apply_xcnt_wait(state, 0);
+  retire_xcnt_group(state, is_xcnt_smem_event);
 }
 
-void WaitcheckStateOps::apply_xcnt_wait_implied_by_loadcnt(PendingState &state, uint32_t count) {
-  if (!has_xcnt_event(state, is_xcnt_vmem_event) || has_xcnt_event(state, is_xcnt_store_event))
-    return;
-  if (has_xcnt_event(state, is_xcnt_smem_event)) {
-    if (count == 0)
-      retire_xcnt_group(state, is_xcnt_vmem_event);
-    return;
+void WaitcheckStateOps::apply_xcnt_wait_implied_by_memory(PendingState &state,
+                                                          WaitCounterKind counter, uint32_t count) {
+  const size_t index = counter_index(WaitCounterKind::X);
+  auto &translations = state.pending[index];
+  auto linked = [&](const PendingEvent &event) {
+    if (is_async_transfer_kind(event.kind))
+      return counter == WaitCounterKind::Async;
+    return is_xcnt_vmem_event(event) && vm_vsrc_event_implied_by_wait(event.kind, counter) &&
+           !flat_has_other_pending_counters(state, event.kind, counter);
+  };
+  // A completed translation also proves that older VMEM translations have
+  // finished. Compare X ages only on an ordered path, using an event present
+  // on every path, and never let a scalar-group alternative establish a prefix.
+  std::optional<uint32_t> prefix_age;
+  // Equal saturated ages do not establish relative order between two sources.
+  const auto maximum_x_age =
+      maximum_dependency_wait(ROCJITSU_CODE_ARCH_CDNA5, WaitCounterKind::X).value();
+  if (!state.uncertain_order[index] && !has_xcnt_smem(state)) {
+    for (const auto &event : translations) {
+      if (is_xcnt_vmem_event(event) && event.present_on_all_paths && linked(event) &&
+          event.min_younger_primary >= count && event.min_younger < maximum_x_age)
+        prefix_age = std::min(prefix_age.value_or(event.min_younger), event.min_younger);
+    }
   }
-  apply_xcnt_wait(state, count);
+  auto in_prefix = [&](uint32_t age) { return prefix_age && age >= *prefix_age; };
+  std::erase_if(translations, [&](const PendingEvent &event) {
+    return (linked(event) && event.min_younger_primary >= count) ||
+           (is_xcnt_vmem_event(event) && in_prefix(event.min_younger));
+  });
+  // A primary zero proves every request of its class complete, including
+  // summary-only entries. A partial wait only proves the ordered prefix.
+  if (count == 0)
+    retire_event_kind_ages(state, WaitCounterKind::X, linked);
+  if (prefix_age)
+    retire_event_kind_ages(state, WaitCounterKind::X, is_xcnt_vmem_event, *prefix_age);
+  if (translations.empty())
+    state.uncertain_order[index] = false;
 }
 
 bool WaitcheckStateOps::scalar_memory_makes_counter_out_of_order(const PendingState &state,
@@ -469,10 +610,9 @@ bool WaitcheckStateOps::counter_has_event_kind(const PendingState &state, WaitCo
 bool WaitcheckStateOps::flat_memory_makes_counter_out_of_order(const PendingState &state,
                                                                WaitCounterKind counter,
                                                                rj_code_arch_t arch) {
-  // Unlike runtime requests, a static FLAT store has no proven VMEM route.
-  // Its possible Store position cannot establish partial retirement, including
-  // for an older ordinary store when the FLAT request might use only LDS.
-  if (counter == WaitCounterKind::Store &&
+  // Legacy FLAT stores can use an unknown memory path. GFX11 and GFX12 FLAT
+  // instructions issue both queue positions even when all lanes use one route.
+  if (counter == WaitCounterKind::Store && !flat_issues_both_counters(arch) &&
       counter_has_event_kind(state, counter, WaitEventKind::FlatStore))
     return true;
   if ((arch != ROCJITSU_CODE_ARCH_CDNA1 && arch != ROCJITSU_CODE_ARCH_CDNA2 &&
@@ -520,18 +660,10 @@ util::FailureOr<bool> WaitcheckStateOps::counter_out_of_order(const PendingState
 
 util::Result WaitcheckStateOps::apply_counter_wait(PendingState &state, WaitCounterKind counter,
                                                    uint32_t count, rj_code_arch_t arch) {
-  if (counter == WaitCounterKind::Exp && amdgpu::has_typed_export_waits(arch) && count) {
-    // EXPCNT <= n bounds each ordered type separately, even in a mixed queue.
-    // The newest request of any one type may still be pending at a nonzero wait.
-    retire_events(state, state.pending[counter_index(counter)], [count](const PendingEvent &event) {
-      return event.min_younger_in_fifo >= count;
-    });
-    return util::Result::success();
-  }
   const auto out_of_order = counter_out_of_order(state, counter, arch);
   if (out_of_order.failed())
     return util::Result::failure();
-  if (count != 0 && out_of_order.value())
+  if (count != 0 && !is_completion_counter(counter) && out_of_order.value())
     return util::Result::success();
   apply_wait(state, counter, count);
   return util::Result::success();
@@ -540,14 +672,20 @@ util::Result WaitcheckStateOps::apply_counter_wait(PendingState &state, WaitCoun
 util::FailureOr<uint32_t> WaitcheckStateOps::dependency_required_count(const PendingState &state,
                                                                        const PendingEvent &event,
                                                                        rj_code_arch_t arch) {
-  if (event.counter == WaitCounterKind::Exp && amdgpu::has_typed_export_waits(arch))
-    return event.min_younger_in_fifo;
+  if (is_completion_counter(event.counter)) {
+    if (amdgpu::waitcnt_model(arch).failed())
+      return util::Result::failure();
+    return event.min_younger;
+  }
   const auto out_of_order = counter_out_of_order(state, event.counter, arch);
   if (out_of_order.failed())
     return util::Result::failure();
   if (state.uncertain_order[counter_index(event.counter)] || out_of_order.value())
     return 0;
-  return event.min_younger;
+  const auto max_wait = maximum_dependency_wait(arch, event.counter);
+  if (max_wait.failed())
+    return util::Result::failure();
+  return std::min(event.min_younger, max_wait.value());
 }
 
 bool WaitcheckStateOps::same_operation(const PendingEvent &lhs, const PendingEvent &rhs) {
@@ -558,14 +696,8 @@ bool WaitcheckStateOps::same_operation(const PendingEvent &lhs, const PendingEve
 
 util::Result WaitcheckStateOps::apply_memory_wait(PendingState &state, WaitCounterKind counter,
                                                   uint32_t count, rj_code_arch_t arch) {
-  const auto out_of_order = counter_out_of_order(state, counter, arch);
-  if (out_of_order.failed())
+  if (amdgpu::waitcnt_model(arch).failed())
     return util::Result::failure();
-  // SIInsertWaitcnts cannot use a nonzero wait to retire a particular event
-  // while scalar memory is pending on this counter. This notably covers
-  // legacy LGKMCNT shared by SMEM and DS operations.
-  if (count != 0 && out_of_order.value())
-    return util::Result::success();
   if (count != 0) {
     // A primary-counter wait can complete an operation even when a younger
     // counter-only request has no VM_VSRC facet. Correlate existing facets by
@@ -578,7 +710,7 @@ util::Result WaitcheckStateOps::apply_memory_wait(PendingState &state, WaitCount
       return vm_vsrc_event_implied_by_wait(source.kind, counter) && age != kNoPendingEventAge &&
              age >= count && !flat_has_other_pending_counters(state, source.kind, counter);
     };
-    retire_events(state, sources, [&](const PendingEvent &source) {
+    std::erase_if(sources, [&](const PendingEvent &source) {
       if (!vm_vsrc_event_implied_by_wait(source.kind, counter) ||
           flat_has_other_pending_counters(state, source.kind, counter))
         return false;
@@ -605,9 +737,12 @@ util::Result WaitcheckStateOps::apply_memory_wait(PendingState &state, WaitCount
       state.uncertain_order[counter_index(WaitCounterKind::VmVsrc)] = false;
   }
   apply_wait(state, counter, count);
-  apply_implied_vm_vsrc_wait(state, counter, count);
-  if (counter == WaitCounterKind::Load)
-    apply_xcnt_wait_implied_by_loadcnt(state, count);
+  // Partial waits above use the operation's actual completion FIFO. A count
+  // over VM_VSRC alone cannot distinguish ordered results from invalidates.
+  if (count == 0)
+    apply_implied_vm_vsrc_wait(state, counter, count);
+  if (arch == ROCJITSU_CODE_ARCH_CDNA5)
+    apply_xcnt_wait_implied_by_memory(state, counter, count);
   return util::Result::success();
 }
 
@@ -681,6 +816,7 @@ util::Result WaitcheckStateOps::apply_wait_fields(PendingState &state, const Wai
     case WaitCounterKind::Ds:
     case WaitCounterKind::Sample:
     case WaitCounterKind::Bvh:
+    case WaitCounterKind::Async:
       if (apply_memory_wait(state, counter, count, arch).failed())
         return util::Result::failure();
       break;

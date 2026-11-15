@@ -85,8 +85,9 @@ The simulator checks VMEM replay sources when `MODE.REPLAY_MODE=1` (bit 25).
 LLVM's gfx1250 wait-insertion pass emits a mode write at kernel entry specifically
 to select this multi-group behavior. The ISA describes bit 25 as selecting single
 or multiple VMEM groups. It gives no exemption for overwriting an outstanding
-source in single-group mode. The simulator checks scalar replay sources in both
-modes. Its VMEM diagnostics cover multi-group execution.
+source in single-group mode. The static checker consequently retains potential
+source hazards there. The simulator checks scalar replay sources in both modes.
+A runtime-clean single-group path cannot clear a static replay warning.
 [LLVM mode setup](https://github.com/llvm/llvm-project/blob/254f05a4807997ae410e157f1673c8c26020a88c/llvm/lib/Target/AMDGPU/SIInsertWaitcnts.cpp#L3742-L3752)
 
 CDNA5 ISA §8.5 requires a full XCNT drain before an enabled scalar instruction

@@ -404,25 +404,27 @@ TEST(WaitcheckStream, PartialWaitRetiresOnlyOlderLoads) {
   EXPECT_EQ(report.diagnostics[0].reg.index, 2u);
 }
 
-TEST(WaitcheckStream, CounterOnlyLoadsStillAgePendingResults) {
+TEST(WaitcheckStream, GlobalInvalidateDoesNotAgeAnOrdinaryLoad) {
   Program program;
   load(program, 0);
   // global_inv contributes to LOAD_CNT without a register result.
   program.insert(program.end(), {0xee0ac07cu, 0, 0, 0xbfc00001u, v_mov(1, 0)});
   const auto report = analyze(program);
   EXPECT_FALSE(report.incomplete);
-  EXPECT_TRUE(report.diagnostics.empty());
+  ASSERT_EQ(report.diagnostics.size(), 1u);
+  EXPECT_EQ(report.diagnostics.front().required_count, 0u);
 }
 
-TEST(WaitcheckStream, CounterBoundsSaturateWithoutWrapping) {
+TEST(WaitcheckStream, LongUnorderedSequenceDoesNotAgeAnOrdinaryLoad) {
   Program program;
   load(program, 0);
   for (unsigned i = 0; i < 300; ++i)
-    program.insert(program.end(), {0xee0ac07cu, 0, 0}); // global_inv ages LOAD_CNT.
+    program.insert(program.end(), {0xee0ac07cu, 0, 0}); // global_inv issues on LOAD_CNT.
   program.insert(program.end(), {0xbfc0003eu, v_mov(4, 0)});
   const auto report = analyze(program);
   EXPECT_FALSE(report.incomplete);
-  EXPECT_TRUE(report.diagnostics.empty());
+  ASSERT_EQ(report.diagnostics.size(), 1u);
+  EXPECT_EQ(report.diagnostics.front().required_count, 0u);
 }
 
 TEST(WaitcheckStream, WrongCounterWaitDoesNotRetireLoad) {
@@ -717,11 +719,13 @@ TEST(WaitcheckStream, MixedFlatAndGlobalStoreSourcesRequireTheirCompletionRoutes
         bool global_pending;
       };
       const WaitCase cases[] = {
-          {{store_one}, true, true},
+          {{store_one}, true, flat_first},
           {{store_zero}, true, false},
           {{ds_zero}, true, true},
-          {{ds_zero, store_one}, true, true},
-          {{store_one, ds_zero}, true, true},
+          // Either store occupies a VMEM position. Only the FLAT store
+          // also needs its independent LDS route to complete.
+          {{ds_zero, store_one}, !flat_first, flat_first},
+          {{store_one, ds_zero}, !flat_first, flat_first},
           {{ds_one, store_zero}, true, false},
           {{store_zero, ds_one}, true, false},
           {{ds_zero, store_zero}, false, false},
@@ -880,19 +884,116 @@ TEST(WaitcheckStream, CdnaGdsSourceReuseNeedsExpcntOnlyBeforeCdna4) {
   EXPECT_EQ(missing_wait.diagnostics[0].required_wait, "s_waitcnt lgkmcnt(0)");
 }
 
-TEST(WaitcheckStream, CdnaPreservesCommittedAndLiveInGenerations) {
+TEST(WaitcheckStream, CdnaReadsWaitForPendingPhysicalDestinations) {
   for (auto arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
+    SCOPED_TRACE(arch);
     for (uint32_t establish : {v_mov(4, 2), v_mov(5, 4)}) {
-      Program program{establish,   0xd86c0000u, 0x04000000u, v_mov(5, 4),
-                      0xbf8cc07fu, v_mov(4, 2), v_mov(5, 4)};
-      auto report = analyze(program, arch);
-      EXPECT_FALSE(report.incomplete);
-      EXPECT_TRUE(report.diagnostics.empty());
+      SCOPED_TRACE(establish);
+      for (bool waited : {false, true}) {
+        SCOPED_TRACE(waited);
+        Program program{establish, 0xd86c0000u, 0x04000000u}; // ds_read_b32 v4, v0
+        if (waited)
+          program.push_back(0xbf8cc07fu); // s_waitcnt lgkmcnt(0)
+        program.insert(program.end(), {v_mov(5, 4), 0xbf8cc07fu, v_mov(4, 2), v_mov(5, 4)});
+        const auto report = analyze(program, arch);
+        ASSERT_FALSE(report.incomplete);
+        ASSERT_EQ(report.diagnostics.size(), waited ? 0u : 1u);
+        if (!waited) {
+          EXPECT_EQ(report.diagnostics[0].access, WaitcheckAccess::Read);
+          EXPECT_EQ(report.diagnostics[0].reg, (RegisterRef{RegClass::VGPR, 4, 1}));
+          EXPECT_EQ(report.diagnostics[0].producer_offset, 4u);
+          EXPECT_EQ(report.diagnostics[0].consumer_offset, 12u);
+          EXPECT_EQ(report.diagnostics[0].required_wait, "s_waitcnt lgkmcnt(0)");
+        }
+      }
     }
-    const auto report = analyze({0xd86c0000u, 0x04000000u, v_mov(5, 4)}, arch);
+  }
+}
+
+TEST(WaitcheckStream, CdnaSynchronousOverwriteDoesNotRetireLoadResult) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
+    SCOPED_TRACE(arch);
+    for (bool masked : {false, true}) {
+      SCOPED_TRACE(masked);
+      for (bool waited : {false, true}) {
+        SCOPED_TRACE(waited);
+        Program program{0xd86c0000u, 0x04000000u}; // ds_read_b32 v4, v0
+        if (waited)
+          program.push_back(0xbf8cc07fu); // s_waitcnt lgkmcnt(0)
+        if (masked)
+          program.push_back(0xbe842000u); // s_and_saveexec_b64 s[4:5], s[0:1]
+        program.push_back(v_mov(4, 2));
+        if (masked)
+          program.push_back(0xbefe0104u); // s_mov_b64 exec, s[4:5]
+        program.insert(program.end(), {v_mov(5, 4), 0xbf8cc07fu, v_mov(5, 4)});
+        const auto report = analyze(program, arch);
+        ASSERT_FALSE(report.incomplete);
+        ASSERT_EQ(report.diagnostics.size(), waited ? 0u : 2u);
+        if (!waited) {
+          EXPECT_EQ(report.diagnostics[0].access, WaitcheckAccess::Write);
+          EXPECT_EQ(report.diagnostics[0].consumer_offset, masked ? 12u : 8u);
+          EXPECT_EQ(report.diagnostics[1].access, WaitcheckAccess::Read);
+          EXPECT_EQ(report.diagnostics[1].consumer_offset, masked ? 20u : 12u);
+          for (const auto &diagnostic : report.diagnostics) {
+            EXPECT_EQ(diagnostic.reg, (RegisterRef{RegClass::VGPR, 4, 1}));
+            EXPECT_EQ(diagnostic.producer_offset, 0u);
+            EXPECT_EQ(diagnostic.required_wait, "s_waitcnt lgkmcnt(0)");
+          }
+        }
+      }
+    }
+  }
+}
+
+TEST(WaitcheckStream, CdnaPartialWaitKeepsNewerDestinationPending) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
+    SCOPED_TRACE(arch);
+    for (bool waited : {false, true}) {
+      SCOPED_TRACE(waited);
+      Program program{0xe0501000u, 0x80000008u, 0xe0501000u, 0x80000008u, 0xbf8c0f71u};
+      // Two ordered buffer_load_dword v0 writes followed by vmcnt(1).
+      if (waited)
+        program.push_back(0xbf8c0f70u); // s_waitcnt vmcnt(0)
+      program.push_back(v_mov(1, 0));
+      const auto report = analyze(program, arch);
+      ASSERT_FALSE(report.incomplete);
+      ASSERT_EQ(report.diagnostics.size(), waited ? 0u : 1u);
+      if (!waited) {
+        EXPECT_EQ(report.diagnostics[0].access, WaitcheckAccess::Read);
+        EXPECT_EQ(report.diagnostics[0].reg, (RegisterRef{RegClass::VGPR, 0, 1}));
+        EXPECT_EQ(report.diagnostics[0].producer_offset, 8u);
+        EXPECT_EQ(report.diagnostics[0].consumer_offset, 20u);
+        EXPECT_EQ(report.diagnostics[0].required_wait, "s_waitcnt vmcnt(0)");
+      }
+    }
+  }
+}
+
+TEST(WaitcheckStream, Gfx950FmoeDsOverwritesRequireOrderedWaits) {
+  for (bool waited : {false, true}) {
+    SCOPED_TRACE(waited);
+    Program program{0xd9fe1140u, 0x60000006u, 0xd9fe1180u, 0x64000006u};
+    // ds_read_b128 v[96:99], v6 offset:4416; ds_read_b128 v[100:103], v6 offset:4480
+    if (waited)
+      program.push_back(0xbf8cc17fu);                          // s_waitcnt lgkmcnt(1)
+    program.insert(program.end(), {0xd1340060u, 0x00007902u}); // v_add_u32 v96, v2, s60
+    if (waited)
+      program.push_back(0xbf8cc07fu);                          // s_waitcnt lgkmcnt(0)
+    program.insert(program.end(), {0xd1340064u, 0x00007902u}); // v_add_u32 v100, v2, s60
+    const auto report = analyze(program, ROCJITSU_CODE_ARCH_CDNA4);
     ASSERT_FALSE(report.incomplete);
-    ASSERT_EQ(report.diagnostics.size(), 1u);
-    EXPECT_EQ(report.diagnostics[0].reg.index, 4u);
+    ASSERT_EQ(report.diagnostics.size(), waited ? 0u : 2u);
+    if (!waited) {
+      EXPECT_EQ(report.diagnostics[0].required_wait, "s_waitcnt lgkmcnt(1)");
+      EXPECT_EQ(report.diagnostics[1].required_wait, "s_waitcnt lgkmcnt(0)");
+      for (size_t i = 0; i < report.diagnostics.size(); ++i) {
+        EXPECT_EQ(report.diagnostics[i].access, WaitcheckAccess::Write);
+        EXPECT_EQ(report.diagnostics[i].reg,
+                  (RegisterRef{RegClass::VGPR, static_cast<uint16_t>(96 + 4 * i), 1}));
+        EXPECT_EQ(report.diagnostics[i].producer_offset, 8 * i);
+        EXPECT_EQ(report.diagnostics[i].consumer_offset, 16 + 8 * i);
+      }
+    }
   }
 }
 

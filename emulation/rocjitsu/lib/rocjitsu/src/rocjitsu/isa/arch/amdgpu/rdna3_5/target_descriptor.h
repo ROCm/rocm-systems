@@ -3,16 +3,33 @@
 
 #pragma once
 
+#include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/isa/target_registry.h"
 
+#include <array>
+
 namespace rocjitsu::rdna3_5 {
+
+inline constexpr std::array<std::string_view, 2> kTargetAliases = {"gfx1150", "gfx1151"};
+inline constexpr std::array<IsaGpuTargetDescription, 2> kGpuTargets = {{
+    {.public_id = ROCJITSU_CODE_TARGET_GFX1150,
+     .code_object_id = "gfx1150",
+     .elf_machine = EF_AMDGPU_MACH_AMDGCN_GFX1150,
+     .gfx_target_version = 110500},
+    {.public_id = ROCJITSU_CODE_TARGET_GFX1151,
+     .code_object_id = "gfx1151",
+     .elf_machine = EF_AMDGPU_MACH_AMDGCN_GFX1151,
+     .gfx_target_version = 110501},
+}};
 
 constexpr IsaTargetDescriptor
 make_target_descriptor(bool supports_execution,
                        IsaTargetDescriptor::DecoderFactory decoder_factory) {
   return {
       .id = "rdna3_5",
+      .aliases = kTargetAliases,
       .architecture_id = ROCJITSU_CODE_ARCH_RDNA3_5,
+      .gpu_targets = kGpuTargets,
       .decoder_factory = decoder_factory,
       .supports_execution = supports_execution,
   };

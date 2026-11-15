@@ -7,9 +7,9 @@
 /// Abstract state and transfer operations for forward waitcheck dataflow.
 ///
 /// A PendingState combines possible pending events/hazards (may facts) with
-/// guaranteed counter progress and available register generations (must facts).
+/// guaranteed counter progress and operation coverage (must facts).
 /// States are ordered by loss of information: a less precise state may contain
-/// more hazards, smaller lower bounds on progress, and fewer readiness facts.
+/// more hazards, smaller lower bounds on progress, and fewer coverage facts.
 /// For a CFG block B, the intended dataflow equations are
 ///   IN[B] = join(OUT[P] for each reachable predecessor P),
 ///   OUT[B] = transfer_B(IN[B]),
@@ -27,27 +27,21 @@
 ///   Matching events join by minimum age; absence on a path imposes no bound.
 ///   Per-kind ages similarly summarize the newest possibly pending request;
 ///   they include counter-only requests and are not additional event counts.
-/// - ready_regs and each matching event's old_value_regs are intersected.
-///   Readiness describes an available committed generation, not completion of
-///   every outstanding producer of that register.
 /// - Event presence on every incoming path is a must fact: matching events
-///   intersect it, and an absent event clears it. For paths missing the event,
-///   ready_on_absent_paths intersects their already-committed register facts.
-///   Retirement may establish readiness only with pending-or-ready coverage of
-///   every path. Different uncompleted producers on different paths still cannot
-///   establish readiness after the join.
+///   intersect it, and an absent event clears it. Implied cross-counter waits
+///   use this coverage when proving completion of another facet of an operation.
 /// - Conflicting mode values become unknown; possible scalar-memory presence
 ///   and uncertain ordering are ORed. Delayed clears survive only if guaranteed
 ///   on both paths, with the later of their earliest guaranteed clear times.
 ///
 /// Wait transfers refine these facts using guaranteed completion: they remove
-/// possibly pending events once the wait proves retirement, and establish must
-/// readiness only when every path has an available committed value.
-/// For an ordered counter, threshold n proves retirement at min_younger >= n;
-/// zero proves completion of the whole counter. Architecture-aware transfers
-/// withhold partial retirement when completion may be out of order and propagate
-/// guarantees to related counters. See PendingState and PendingEvent for the
-/// representation and make_retired_generations_ready for generation handling.
+/// possibly pending events once the wait proves retirement. A register remains
+/// unavailable while any conflicting physical access is still pending.
+/// For a completion FIFO, threshold n proves retirement at min_younger >= n;
+/// zero proves completion of the whole counter. Unordered events have no younger
+/// FIFO credits. Admission and waits use those lower bounds even across mixed
+/// queues and CFG joins. See PendingState and PendingEvent for the
+/// representation.
 
 #include "rocjitsu/code/analysis/waitcheck/target.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/vgpr_msb.h"
@@ -66,8 +60,9 @@ namespace rocjitsu::waitcheck_detail {
 /// Lower bounds on the age of the newest possibly pending request of each kind.
 /// kNoPendingEventAge denotes absence. These summaries include counter-only
 /// requests and may overlap materialized PendingEvents; they are not token counts.
-/// Byte storage keeps the dense per-counter summaries compact. Ages saturate at
-/// the target dependency-wait limit, below the reserved absence value.
+/// Byte storage keeps the dense per-counter summaries compact. Ages stay below
+/// the reserved absence value and may exceed a dependency wait's encodable range
+/// when another counter can apply a wider implied wait.
 struct PendingEventAges {
   std::array<uint8_t, kWaitEventKindCount> values = [] {
     std::array<uint8_t, kWaitEventKindCount> result;
@@ -91,11 +86,10 @@ struct PartialRegisterAccess {
 
 /// A possibly outstanding operation on one wait counter, identified by its static
 /// instruction location, event kind, register payload and hazard-check flags.
-/// One instruction can have multiple counter facets with the same generation.
-/// regs describes affected lanes; produces_regs distinguishes pending destinations
-/// from source-use hazards. Age, path coverage and available older values are
-/// dataflow facts, excluded from the static identity. PendingState stores events
-/// sorted by that identity, with at most one event for each identity per counter.
+/// One instruction can have multiple counter facets. regs describes the affected
+/// physical registers. Age and path coverage are dataflow facts, excluded from
+/// static identity. PendingState stores events sorted by that identity, with at
+/// most one event for each identity per counter.
 struct PendingEvent {
   RegisterSet regs;
   // Subset of regs with a committed value available while this producer remains
@@ -108,11 +102,30 @@ struct PendingEvent {
   // The available value need not be from this producer: readiness promises an
   // available committed generation, not the identity of the latest write.
   RegisterSet ready_on_absent_paths;
+  // RegisterSet treats VCC as a singleton. Keep the actual physical dwords
+  // alongside it for memory-result and replay operand overlap checks.
+  uint8_t vcc_halves = 0;
+  // LLVM tracks the low/high 16-bit physical subregisters used by D16 memory
+  // operations independently. Keep the exceptional partial destination
+  // sparse: almost every event still covers whole 32-bit register lanes.
+  std::optional<RegisterRef> partial_reg;
+  uint8_t partial_reg_mask = kVgprFull32Mask;
+  std::optional<RegisterRef> special_reg;
+  std::optional<int64_t> barrier_id;
+  // A newly issued event is pending on every path reaching that instruction.
+  // Joins clear this must fact when any incoming path lacks the event. It is
+  // state information, not part of the static event identity.
+  bool present_on_all_paths = true;
+  // If this GFX11 LDS result is pending, its issuing EXEC was nonempty.
+  // This proves a later FLAT must issue while that mask is unchanged.
+  bool implies_active_exec = false;
+  bool check_uses = true;
+  bool check_defs = true;
+  bool check_exec_defs = false;
   std::string section_name;
-  std::string instruction;
   uint64_t section_offset = 0;
   uint64_t file_offset = 0;
-  std::optional<int64_t> barrier_id;
+  std::string instruction;
   WaitEventKind kind = WaitEventKind::Unknown;
   // Lower bound on younger requests issued on this counter, independent of the
   // event's canonical vector position. Matching events join by minimum. Use the
@@ -121,24 +134,20 @@ struct PendingEvent {
   // LLVM tracks the low/high 16-bit physical subregisters used by D16 memory
   // operations independently. Keep the exceptional partial destination
   // sparse: almost every event still covers whole 32-bit register lanes.
-  std::optional<RegisterRef> partial_reg;
-  std::optional<RegisterRef> special_reg;
   WaitCounterKind counter = WaitCounterKind::Load;
-  uint8_t partial_reg_mask = kVgprFull32Mask;
   bool produces_regs = false;
   // A newly issued event is pending on every path reaching that instruction.
   // Joins clear this must fact when any incoming path lacks the event. It is
   // state information, not part of the static event identity.
-  bool present_on_all_paths = true;
-  bool check_uses = true;
-  bool check_defs = true;
-  bool check_exec_defs = false;
   bool check_memory_order = false;
   bool check_program_end = false;
   bool check_counter_parity_order = false;
   // Guaranteed younger requests in this event's own typed EXPCNT FIFO.
   // Other export types can overtake it and contribute no progress proof.
   uint8_t min_younger_in_fifo = 0;
+  // For an XCNT source, guaranteed younger credits on its primary completion FIFO.
+  // Unlike the translation age, this excludes other primary counters and FLAT routes.
+  uint8_t min_younger_primary = 0;
 
   bool operator==(const PendingEvent &) const = default;
 };
@@ -236,6 +245,17 @@ struct ExpertSchedulingState {
   bool operator==(const ExpertSchedulingState &) const = default;
 };
 
+/// Possible values of a scalar source for MOVREL. An empty set means unknown.
+/// Once a join exceeds the bound, retain every possible register alias.
+struct ScalarOffsetValues {
+  std::array<uint32_t, 4> literals{};
+  unsigned count = 0;
+
+  [[nodiscard]] std::span<const uint32_t> values() const { return {literals.data(), count}; }
+  void merge(const ScalarOffsetValues &other);
+  bool operator==(const ScalarOffsetValues &) const = default;
+};
+
 /// Dataflow facts at an instruction or block boundary on an initialized path.
 /// Counter-indexed events/ages and auxiliary hazards describe possible pending
 /// work; readiness, progress and known modes describe guarantees. The default
@@ -254,13 +274,13 @@ struct PendingState {
   // need a full PendingEvent. Scalar memory makes its counter out of order.
   std::array<bool, kCounterCount> pending_smem{};
   std::array<bool, kCounterCount> uncertain_order{};
-  // Lanes with a committed generation available on every incoming path. A later
-  // producer may still be pending; when it is issued, this fact seeds that
-  // event's old_value_regs. This is not a promise that the latest write is done.
-  RegisterSet ready_regs;
   SgprHazardState sgpr_hazards;
   VaVdstHazardState va_vdst_hazards;
   VgprMsbState vgpr_msb;
+  ScalarOffsetValues m0;
+  std::unordered_map<uint16_t, ScalarOffsetValues> sgpr_offsets;
+  std::optional<bool> prefetch_enabled;
+  bool exec_nonzero = false; ///< All incoming paths have at least one active lane.
   bool vgpr_msb_setreg_hazard = false;
   bool previous_vm_vsrc_zero_wait = false;
   std::optional<SgprHazardProducer> async_barrier_post_wait;
@@ -279,6 +299,20 @@ static_assert(sizeof(PendingState) < 4096,
 /// states without emitting diagnostics. Architecture-aware transfers report
 /// unsupported targets through Result/FailureOr.
 struct WaitcheckStateOps : WaitcheckTarget {
+  static void age_events(PendingState &state, const PendingEvent &event, rj_code_arch_t arch,
+                         uint32_t maximum_wait, uint32_t units = 1);
+
+  [[nodiscard]] static bool is_completion_counter(WaitCounterKind counter);
+  [[nodiscard]] static std::optional<uint32_t> guaranteed_issue_order(WaitCounterKind counter,
+                                                                      WaitEventKind kind,
+                                                                      rj_code_arch_t arch,
+                                                                      bool exec_nonzero);
+  static void apply_admission(PendingState &state, const Instruction &inst,
+                              std::span<const ClassifiedEvent> events, rj_code_arch_t arch);
+  [[nodiscard]] static bool ordered_waw(const PendingEvent &event,
+                                        std::span<const ClassifiedEvent> incoming,
+                                        rj_code_arch_t arch);
+
   [[nodiscard]] static bool same_event_identity(const PendingEvent &lhs, const PendingEvent &rhs);
 
   [[nodiscard]] static bool register_set_less(const RegisterSet &lhs, const RegisterSet &rhs);
@@ -299,16 +333,6 @@ struct WaitcheckStateOps : WaitcheckTarget {
   merge_predecessors(std::span<const size_t> predecessors, const std::vector<PendingState> &outputs,
                      std::span<const uint8_t> output_initialized);
 
-  [[nodiscard]] static bool same_register_generation(const PendingEvent &lhs,
-                                                     const PendingEvent &rhs);
-
-  // Retirement proves readiness when every path either has this producer or
-  // already has a committed value, and all facets of this generation retire. A
-  // different, still-pending producer does not erase this older value: record it in both
-  // ready_regs and that producer's old_value_regs for consumers permitting it.
-  static void make_retired_generations_ready(PendingState &state,
-                                             std::span<const PendingEvent> retired_events);
-
   static void apply_wait_to_event_ages(PendingState &state, WaitCounterKind counter,
                                        uint32_t count);
 
@@ -323,9 +347,8 @@ struct WaitcheckStateOps : WaitcheckTarget {
 
   [[nodiscard]] static bool is_xcnt_vmem_event(const PendingEvent &event);
 
-  [[nodiscard]] static bool is_xcnt_store_event(const PendingEvent &event);
-
   static void apply_xcnt_wait(PendingState &state, uint32_t count);
+  static void apply_xcnt_group_wait(PendingState &state, uint32_t count);
 
   // Includes counter-only requests as well as materialized register hazards.
   [[nodiscard]] static bool has_xcnt_smem(const PendingState &state);
@@ -333,7 +356,8 @@ struct WaitcheckStateOps : WaitcheckTarget {
 
   static void apply_xcnt_wait_implied_by_kmcnt(PendingState &state, uint32_t count);
 
-  static void apply_xcnt_wait_implied_by_loadcnt(PendingState &state, uint32_t count);
+  static void apply_xcnt_wait_implied_by_memory(PendingState &state, WaitCounterKind counter,
+                                                uint32_t count);
 
   [[nodiscard]] static bool scalar_memory_makes_counter_out_of_order(const PendingState &state,
                                                                      WaitCounterKind counter,
@@ -389,10 +413,6 @@ private:
   [[nodiscard]] static auto register_ref_key(const std::optional<RegisterRef> &ref);
 
   template <typename Predicate>
-  static void retire_events(PendingState &state, std::vector<PendingEvent> &events,
-                            Predicate should_retire);
-
-  template <typename Predicate>
   static void retire_event_kind_ages(PendingState &state, WaitCounterKind counter,
                                      Predicate belongs_to_group, uint32_t minimum_age = 0);
 
@@ -404,7 +424,8 @@ private:
   [[nodiscard]] static bool has_xcnt_event(const PendingState &state, Predicate predicate);
 
   template <typename Predicate>
-  static void retire_xcnt_group(PendingState &state, Predicate belongs_to_group);
+  static void retire_xcnt_group(PendingState &state, Predicate belongs_to_group,
+                                uint32_t count = 0);
 };
 
 } // namespace rocjitsu::waitcheck_detail

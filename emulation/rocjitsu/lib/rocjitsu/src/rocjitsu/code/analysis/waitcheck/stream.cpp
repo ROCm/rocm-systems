@@ -17,10 +17,6 @@ namespace {
 using namespace waitcheck_detail;
 using Ops = WaitcheckStateOps;
 
-bool has_committed_generations(rj_code_arch_t arch) {
-  return arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4;
-}
-
 std::optional<RegisterRef> first_intersection(const RegisterSet &a, const RegisterSet &b) {
   std::optional<RegisterRef> first;
   // Keep the optional assignment together with RegisterRef construction.
@@ -116,6 +112,8 @@ RegisterEffects register_effects(const Instruction &inst, rj_code_arch_t arch, u
 std::optional<std::string_view> deferred_reason(const Instruction &inst,
                                                 std::span<const ClassifiedEvent> events) {
   const auto name = inst.mnemonic();
+  if (Ops::is_scalar_prefetch(name))
+    return "scalar prefetch requires mode and memory-order analysis";
   // RegisterSet deliberately omits trap temporaries. Stop before silently
   // dropping either a pending result or one of its consumers.
   for (int i = 0; i < inst.num_src_operands() + inst.num_dst_operands(); ++i) {
@@ -129,10 +127,11 @@ std::optional<std::string_view> deferred_reason(const Instruction &inst,
     const auto ref = op->to_register_ref();
     if (ref && ref->cls == RegClass::TTMP)
       return "trap-temporary registers are not tracked";
-    // Selector-encoded VCC, FLAT_SCRATCH and XNACK_MASK destinations are
-    // not all represented by the ordinary-register operand projection.
+    // Scalar-memory event classification currently tracks ordinary SGPR
+    // destinations. Decoders can also expose VCC and FLAT_SCRATCH as explicit
+    // special-register refs; recognizing them must not silently drop the load.
     if (destination && inst.is_memory_op() && name.starts_with("s_") && !op->is_fieldless() &&
-        op->size_bits() > 0 && !ref)
+        op->size_bits() > 0 && (!ref || ref->cls != RegClass::SGPR))
       return "scalar-memory destination is not represented by register tracking";
   }
   if (is_control_flow_transfer(inst) && !is_program_path_terminator(inst))
@@ -195,37 +194,6 @@ RegisterSet registers_for_event(const ClassifiedEvent &event, const RegisterEffe
   return {};
 }
 
-bool ordered_waw(const PendingEvent &event, std::span<const ClassifiedEvent> current,
-                 rj_code_arch_t arch) {
-  if (amdgpu::has_ordered_lds_direct_writeback(arch) && event.counter == WaitCounterKind::Exp &&
-      event.kind == WaitEventKind::LdsDirect) {
-    return std::ranges::any_of(current, [](const auto &other) {
-      return other.counter == WaitCounterKind::Exp && other.kind == WaitEventKind::LdsDirect;
-    });
-  }
-  // LDS instructions stay in order with other LDS instructions from the same
-  // wave. GDS and SMEM are separate event kinds that are not ordered with LDS.
-  // Only DS-counter results qualify: expert scheduling also tracks DS sources
-  // on VmVsrc, and result ordering does not end those source lifetimes.
-  if (event.counter == WaitCounterKind::Ds && event.kind == WaitEventKind::Ds)
-    return std::ranges::any_of(current, [](const auto &other) {
-      return other.counter == WaitCounterKind::Ds && other.kind == WaitEventKind::Ds;
-    });
-  if (!amdgpu::has_ordered_vmem_writeback(arch))
-    return false;
-  if (event.kind == WaitEventKind::FlatLoad) {
-    if (event.counter != WaitCounterKind::Load)
-      return false;
-    return std::ranges::any_of(current, [](const auto &other) {
-      return other.counter == WaitCounterKind::Load &&
-             other.kind == WaitEventKind::VmemNoSamplerLoad;
-    });
-  }
-  if (event.kind != WaitEventKind::VmemNoSamplerLoad)
-    return false;
-  return std::ranges::any_of(current, [&](const auto &other) { return other.kind == event.kind; });
-}
-
 class StreamAnalyzer {
 public:
   StreamAnalyzer(rj_code_arch_t arch, WaitcheckStreamOptions options, WaitcheckStreamReport &report)
@@ -246,17 +214,14 @@ public:
     if (Ops::apply_embedded_waitcnt(state_, inst, arch_).failed())
       return util::Result::failure();
     const auto effects = register_effects(inst, arch_, options_.wave_size);
+    Ops::apply_admission(state_, inst, events, arch_);
     apply_translation_ordering(effects, events);
     if (check_dependencies(inst, effects, events, offset).failed())
       return util::Result::failure();
-    RegisterSet async_defs;
     for (const auto &event : events) {
-      if (event.registers == TrackedRegisterSource::Defs)
-        async_defs |= registers_for_event(event, effects, inst);
       if (add_event(event, effects, inst, offset).failed())
         return util::Result::failure();
     }
-    update_committed_registers(effects, async_defs);
     return util::Result::success();
   }
 
@@ -264,7 +229,6 @@ private:
   rj_code_arch_t arch_;
   WaitcheckStreamOptions options_;
   PendingState state_;
-  RegisterSet local_ready_;
   WaitcheckStreamReport &report_;
 
   util::Result check_dependencies(const Instruction &inst, const RegisterEffects &effects,
@@ -274,11 +238,11 @@ private:
         std::optional<RegisterRef> reg;
         auto access = WaitcheckAccess::Read;
         if (event.check_uses)
-          reg = first_intersection(event.regs - event.old_value_regs, effects.uses);
+          reg = first_intersection(event.regs, effects.uses);
         if (!reg && event.check_defs) {
-          // A visible old value can satisfy a read, but an outstanding memory
-          // response can still overwrite a newer synchronous definition.
-          if (!ordered_waw(event, current, arch_))
+          // Outstanding results also protect their physical destinations
+          // from unordered writes, regardless of earlier register contents.
+          if (!Ops::ordered_waw(event, current, arch_))
             reg = first_intersection(event.regs, effects.defs);
           access = WaitcheckAccess::Write;
         }
@@ -308,11 +272,6 @@ private:
     event.counter = classification.counter;
     event.kind = classification.kind;
     event.regs = registers_for_event(classification, effects, inst);
-    event.produces_regs = has_committed_generations(arch_) &&
-                          classification.registers == TrackedRegisterSource::Defs &&
-                          event.regs == vector_registers(event.regs);
-    if (event.produces_regs)
-      event.old_value_regs = event.regs & (state_.ready_regs | local_ready_);
     event.check_uses = classification.check_uses;
     event.check_defs = classification.check_defs;
     event.check_exec_defs = classification.check_exec_defs;
@@ -325,52 +284,13 @@ private:
     const auto max_wait = Ops::maximum_dependency_wait(arch_, event.counter);
     if (max_wait.failed())
       return util::Result::failure();
-    auto &ages = state_.pending_event_ages[idx].values;
-    for (auto &age : ages) {
-      if (age != kNoPendingEventAge && age < max_wait.value())
-        ++age;
-    }
-    ages[static_cast<size_t>(event.kind)] = 0;
-    const bool ordered_exp =
-        event.counter == WaitCounterKind::Exp && amdgpu::has_typed_export_waits(arch_) &&
-        (event.kind == WaitEventKind::ExportMrt || event.kind == WaitEventKind::ExportZ ||
-         event.kind == WaitEventKind::ExportPosition ||
-         event.kind == WaitEventKind::ExportPrimitive ||
-         event.kind == WaitEventKind::ExportDualSourceBlend ||
-         event.kind == WaitEventKind::LdsDirect);
-    for (auto &pending : state_.pending[idx]) {
-      if (pending.min_younger < max_wait.value())
-        ++pending.min_younger;
-      if (ordered_exp && pending.kind == event.kind &&
-          pending.min_younger_in_fifo < max_wait.value())
-        ++pending.min_younger_in_fifo;
-    }
+    Ops::age_events(state_, event, arch_, max_wait.value(),
+                    Ops::issue_units(inst, classification, arch_));
     // Counter-only operations must age older requests without accumulating a
     // dependency record of their own (notably long sequences of stores).
     if (!event.regs.none() || event.check_exec_defs || event.special_reg)
       state_.pending[idx].push_back(std::move(event));
     return util::Result::success();
-  }
-
-  void update_committed_registers(const RegisterEffects &effects, const RegisterSet &async_defs) {
-    if (!has_committed_generations(arch_))
-      return;
-    RegisterSet unavailable;
-    for (const auto &pending : state_.pending) {
-      for (const auto &event : pending) {
-        if (event.produces_regs)
-          unavailable |= event.regs - event.old_value_regs;
-      }
-    }
-    local_ready_ |= vector_registers(effects.uses - unavailable);
-    const auto synchronous = vector_registers(effects.defs - async_defs);
-    state_.ready_regs |= synchronous;
-    for (auto &pending : state_.pending) {
-      for (auto &event : pending) {
-        if (event.produces_regs)
-          event.old_value_regs |= event.regs & synchronous;
-      }
-    }
   }
 
   void apply_translation_ordering(const RegisterEffects &effects,
@@ -383,7 +303,7 @@ private:
     });
     if ((vmem && Ops::has_xcnt_smem(state_)) || (smem && Ops::has_xcnt_vmem(state_))) {
       // Switching translation groups implicitly drains the old group.
-      Ops::apply_xcnt_wait(state_, 0);
+      Ops::apply_xcnt_group_wait(state_, 0);
       return;
     }
     if (!vmem)
@@ -396,7 +316,7 @@ private:
     // A newer VMEM result cannot overwrite an older VMEM translation input
     // before that translation completes. Other outstanding inputs remain live.
     if (count)
-      Ops::apply_xcnt_wait(state_, *count);
+      Ops::apply_xcnt_group_wait(state_, *count);
   }
 };
 
@@ -418,7 +338,8 @@ util::FailureOr<WaitcheckStreamReport> analyze_stream(std::span<const uint32_t> 
     return emit_error.emit() << "unsupported waitcheck architecture";
   }
   if ((options.wave_size != 32 && options.wave_size != 64) ||
-      (has_committed_generations(arch) && options.wave_size != 64))
+      ((arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) &&
+       options.wave_size != 64))
     return emit_error.emit() << "invalid waitcheck wave size";
   if (options.expert_scheduling && !amdgpu::supports_expert_scheduling(arch))
     return emit_error.emit() << "expert scheduling is unavailable on this architecture";

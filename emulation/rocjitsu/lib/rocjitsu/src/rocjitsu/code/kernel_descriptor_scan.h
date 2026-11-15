@@ -24,6 +24,7 @@ struct KernelDescriptorInfo {
   std::string kernel_name;             ///< Symbol name minus the ".kd" suffix.
   uint64_t entry_text_offset = 0;      ///< .text-relative kernel entry.
   rocjitsu::amdhsa::kernel_descriptor_t descriptor{}; ///< Raw descriptor bytes.
+  uint64_t descriptor_vaddr = 0; ///< ELF virtual address of the descriptor symbol.
 };
 
 /// @brief Locate every ".kd" descriptor whose entry lands in .text.

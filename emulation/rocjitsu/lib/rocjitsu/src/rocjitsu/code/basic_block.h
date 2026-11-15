@@ -92,6 +92,9 @@ public:
     /// @details FullSection additionally preserves its historical implicit first external entry.
     /// Unlike these options, the legacy build() wrapper defaults to InferPredecessorless.
     ExternalEntryPolicy entry_policy = ExternalEntryPolicy::ExplicitOnly;
+
+    /// Width for wave-size-dependent destinations. Zero preserves the decoder's width.
+    uint8_t wave_size = 0;
   };
 
   /// @brief First missing successor, or control flow requiring indirect analysis.
@@ -319,7 +322,7 @@ private:
              DecodeErrorEmitter emit_error, std::span<const uint64_t> extra_leaders,
              ExternalEntryPolicy entry_policy, std::span<const uint64_t> extra_split_points,
              DecodedSection *prepared, std::span<const CodeRange> permitted_ranges,
-             rj_code_target_id_t target);
+             rj_code_target_id_t target, uint8_t wave_size);
 
   void note_successor_issue(SuccessorIssue issue) {
     if (successor_issue_ == SuccessorIssue::None)

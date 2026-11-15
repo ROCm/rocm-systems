@@ -176,12 +176,11 @@ BasicBlock::build(const CodeObject &co, Decoder &decoder, rj_code_arch_t arch,
                    std::move(emit_error));
 }
 
-FailureOr<std::vector<std::unique_ptr<BasicBlock>>>
-BasicBlock::build_impl(const CodeObject &co, Decoder &decoder, rj_code_arch_t arch,
-                       DecodeErrorEmitter emit_error, std::span<const uint64_t> extra_leaders,
-                       ExternalEntryPolicy entry_policy,
-                       std::span<const uint64_t> extra_split_points, DecodedSection *prepared,
-                       std::span<const CodeRange> permitted_ranges, rj_code_target_id_t target_id) {
+FailureOr<std::vector<std::unique_ptr<BasicBlock>>> BasicBlock::build_impl(
+    const CodeObject &co, Decoder &decoder, rj_code_arch_t arch, DecodeErrorEmitter emit_error,
+    std::span<const uint64_t> extra_leaders, ExternalEntryPolicy entry_policy,
+    std::span<const uint64_t> extra_split_points, DecodedSection *prepared,
+    std::span<const CodeRange> permitted_ranges, rj_code_target_id_t target_id, uint8_t wave_size) {
   std::vector<std::unique_ptr<BasicBlock>> blocks;
 
   for (const auto *sec : co.text_sections()) {
@@ -268,9 +267,9 @@ BasicBlock::build_impl(const CodeObject &co, Decoder &decoder, rj_code_arch_t ar
       // supplies the exact external entries; a lower-address callee is not a new root.
       std::vector<uint64_t> discovery_entries(extra_leaders.begin(), extra_leaders.end());
       discovery_entries.push_back(decoded.front()->src_loc());
-      recovered_indirect_targets =
-          discover_indirect_branch_edges(decoded_span, text, arch, discovery_entries, entry_policy,
-                                         &pc_address_builders, extra_split_points, {}, target_id);
+      recovered_indirect_targets = discover_indirect_branch_edges(
+          decoded_span, text, arch, discovery_entries, entry_policy, &pc_address_builders,
+          extra_split_points, {}, target_id, wave_size);
     }
 
     std::set<uint64_t> leaders;
@@ -754,7 +753,8 @@ BasicBlock::build_cfg(const CodeObject &co, Decoder &decoder, rj_code_arch_t arc
     if (!options.permitted_ranges.empty() || !options.decode_seeds.empty())
       return emit_error.emit() << "full-section CFG does not accept ranges or decode seeds";
     return build_impl(co, decoder, arch, std::move(emit_error), options.entries,
-                      options.entry_policy, options.split_points, nullptr, {}, target_id);
+                      options.entry_policy, options.split_points, nullptr, {}, target_id,
+                      options.wave_size);
   }
   if (options.entry_policy != ExternalEntryPolicy::ExplicitOnly)
     return emit_error.emit() << "reachable CFG requires explicit external entries";
@@ -929,7 +929,7 @@ BasicBlock::build_cfg(const CodeObject &co, Decoder &decoder, rj_code_arch_t arc
       prepared.pc_address_builders.clear();
       prepared.indirect_targets = discover_indirect_branch_edges(
           decoded_insts, text, arch, entry_offsets, ExternalEntryPolicy::ExplicitOnly,
-          &prepared.pc_address_builders, split_points, decode_seeds, target_id);
+          &prepared.pc_address_builders, split_points, decode_seeds, target_id, options.wave_size);
       analyzed_size = decoded.size();
       for (const IndirectCallFixup &fixup : prepared.indirect_targets) {
         if (!is_decoded_start(fixup.source_target_offset))
@@ -964,7 +964,7 @@ BasicBlock::build_cfg(const CodeObject &co, Decoder &decoder, rj_code_arch_t arc
   // This shares block/call construction without decoding or analyzing twice.
   return build_impl(co, decoder, arch, std::move(emit_error), entry_offsets,
                     ExternalEntryPolicy::ExplicitOnly, split_points, &prepared, merged_ranges,
-                    target_id);
+                    target_id, options.wave_size);
 }
 
 } // namespace rocjitsu
