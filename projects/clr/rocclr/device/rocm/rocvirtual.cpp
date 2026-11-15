@@ -83,11 +83,6 @@ static constexpr uint16_t kBarrierPacketAcquireHeader =
     (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_ACQUIRE_FENCE_SCOPE) |
     (HSA_FENCE_SCOPE_NONE << HSA_PACKET_HEADER_RELEASE_FENCE_SCOPE);
 
-static constexpr uint16_t kBarrierPacketReleaseHeader =
-    (HSA_PACKET_TYPE_BARRIER_AND << HSA_PACKET_HEADER_TYPE) | (1 << HSA_PACKET_HEADER_BARRIER) |
-    (HSA_FENCE_SCOPE_NONE << HSA_PACKET_HEADER_ACQUIRE_FENCE_SCOPE) |
-    (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_RELEASE_FENCE_SCOPE);
-
 static constexpr uint16_t kBarrierVendorPacketHeader =
     (HSA_PACKET_TYPE_VENDOR_SPECIFIC << HSA_PACKET_HEADER_TYPE) | (1 << HSA_PACKET_HEADER_BARRIER) |
     (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_ACQUIRE_FENCE_SCOPE) |
@@ -97,12 +92,6 @@ static constexpr uint16_t kBarrierVendorPacketNopScopeHeader =
     (HSA_PACKET_TYPE_VENDOR_SPECIFIC << HSA_PACKET_HEADER_TYPE) | (1 << HSA_PACKET_HEADER_BARRIER) |
     (HSA_FENCE_SCOPE_NONE << HSA_PACKET_HEADER_ACQUIRE_FENCE_SCOPE) |
     (HSA_FENCE_SCOPE_NONE << HSA_PACKET_HEADER_RELEASE_FENCE_SCOPE);
-
-static constexpr hsa_barrier_and_packet_t kBarrierAcquirePacket = {
-    kBarrierPacketAcquireHeader, 0, 0, {{0}}, 0, {0}};
-
-static constexpr hsa_barrier_and_packet_t kBarrierReleasePacket = {
-    kBarrierPacketReleaseHeader, 0, 0, {{0}}, 0, {0}};
 
 static constexpr uint16_t kBarrierBit = 1 << HSA_PACKET_HEADER_BARRIER;
 
@@ -1198,7 +1187,14 @@ void VirtualGPU::RetiringSignalTracker::ReleasePins(bool release_all) {
 // ================================================================================================
 hsa_signal_value_t VirtualGPU::RetiringSignalTracker::LoadValue(
     const ProfilingSignal* signal) const {
-  return reinterpret_cast<const amd_signal_t*>(signal->signal_.handle)->value;
+  const volatile hsa_signal_value_t* value =
+      &reinterpret_cast<const amd_signal_t*>(signal->signal_.handle)->value;
+  const hsa_signal_value_t loaded = *value;
+  // Over coherent XGMI the host caches device memory
+  if (signal->in_device_memory_ && gpu_.dev().isXgmi()) {
+    amd::cachelineEvict(value);
+  }
+  return loaded;
 }
 
 // ================================================================================================
@@ -1216,8 +1212,9 @@ void VirtualGPU::RetiringSignalTracker::FlushStores() {
   if (unflushed_store_ == nullptr) {
     return;
   }
-  // The BAR is write-combined, so a store can stay in this core until a fence, unseen by any GPU,
-  // including a peer that waits on the signal over XGMI
+  // A PCIe host maps the BAR write-combined, so a store can stay in this core until a fence,
+  // unseen by any GPU, including a peer that waits on the signal over XGMI. A host that maps
+  // device memory write-back (A+A) keeps the store in its cache, where the GPU's access probes it
   amd::nontemporalStoreFence();
   // A device-memory ring receives the packets that use these signals through the same BAR after
   // the stores, in order, so only a system-memory ring needs the HDP flush
@@ -1350,7 +1347,6 @@ std::vector<hsa_signal_t>& VirtualGPU::HwQueueTracker::WaitingSignal(HwQueueEngi
     } else {
       // Check if skip wait optimization is enabled. It will try to predict the same engine in ROCr
       // and ignore the signal wait, relying on in-order engine execution
-      const Settings& settings = gpu_.dev().settings();
       if (engine != HwQueueEngine::Compute) {
         explicit_wait = true;
       }
@@ -1377,9 +1373,10 @@ std::vector<hsa_signal_t>& VirtualGPU::HwQueueTracker::WaitingSignal(HwQueueEngi
   for (uint32_t i = 0; i < external_signals_.size(); ++i) {
     const Settings& settings = gpu_.dev().settings();
     // DEBUG_CLR_GRAPH_FAST_LAUNCH: a signal in device memory (graph signals, end-marker gates,
-    // device-memory queue signals) is not read: the read crosses PCIe and waits for the
-    // write-combined packet stores ahead of it, and the CP checks the wait anyway. Only a wait the
-    // host bookkeeping proves retired, with no read, is left out
+    // device-memory queue signals) is not read: the read crosses the host link, on PCIe it waits
+    // for the write-combined packet stores ahead of it, on A+A (device memory mapped write-back)
+    // it leaves the line in the CPU cache for the CP to probe, and the CP checks the wait anyway.
+    // Only a wait the host bookkeeping proves retired, with no read, is left out
     const bool unread = DEBUG_CLR_GRAPH_FAST_LAUNCH && external_signals_[i]->in_device_memory_ &&
                         !settings.cpu_wait_for_signal_;
     // Early signal status check
@@ -1799,9 +1796,8 @@ bool VirtualGPU::processMemObjects(const amd::Kernel& kernel, const_address para
               amd::Image* img = mem->asImage();
 
               // Copy memory from the original image buffer into the backing store image
-              bool result =
-                  blitMgr().copyBufferToImage(*devBuf, *devCpImg, offs, offs, img->getRegion(),
-                                              true, img->getRowPitch(), img->getSlicePitch());
+              (void)blitMgr().copyBufferToImage(*devBuf, *devCpImg, offs, offs, img->getRegion(),
+                                                true, img->getRowPitch(), img->getSlicePitch());
               // Make sure the copy operation is done
               setAqlHeader(dispatchPacketHeader_);
               // Use backing store SRD as the replacment
@@ -2623,8 +2619,9 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>&
                             amdFormat == HSA_AMD_PACKET_TYPE_BARRIER_VALUE);
     if (timestamp_ != nullptr) {
       // Read the pre-patched completion signal from the host-side flat buffer, not
-      // from |pkt|: on the NT path |pkt| is the write-combining ring slot, which
-      // cannot be read back reliably.
+      // from |pkt|: on the NT path |pkt| is the ring slot, which a PCIe host maps
+      // write-combining and cannot read back reliably, and which an A+A host maps
+      // write-back, where the read leaves the line in the CPU cache for the CP to probe.
       const auto* hostPkt = reinterpret_cast<const hsa_kernel_dispatch_packet_t*>(
           flatPacketData.data() + i * kPacketSize);
       const uint64_t prePatchedHandle =
@@ -2676,8 +2673,9 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>&
                          IsLogEnabled(amd::LOG_DETAIL_DEBUG, amd::LOG_AQL);
 
   // All packet fields are read from the host-side flat buffer (|flatPacketData|), never
-  // from the ring slot: the device-resident ring is write-combining, so reading
-  // kernel_object back from it is unreliable.  Kernel names are resolved from the device
+  // from the ring slot: a PCIe host maps the device-resident ring write-combining, so reading
+  // kernel_object back from it is unreliable, and on an A+A host (write-back) the read leaves
+  // the line in the CPU cache for the CP to probe.  Kernel names are resolved from the device
   // KernelMap by kernel_object and, when activity tracing is on, recorded into the command
   // via addKernelDispatch(). The returned dispatch slot is stored on |packetSignal| so
   // timing extraction can fill the same record regardless of signal drain order. The
@@ -2768,8 +2766,9 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>&
   // ring or more, which the CP cannot tell apart from an empty queue.
   uint64_t lastIndex = 0;
   // DEBUG_CLR_GRAPH_FAST_LAUNCH: the last packet's completion signal as written, kept on the
-  // host; reading it back from a device-memory ring is a PCIe read, which on some hosts also
-  // waits for the write-combined stores ahead of it. A profiled batch's NT path writes the signal
+  // host; reading it back from a device-memory ring crosses the host link, which on some PCIe
+  // hosts also waits for the write-combined stores ahead of it, and on A+A (write-back) leaves
+  // the line in the CPU cache for the CP to probe. A profiled batch's NT path writes the signal
   // in place, so it is read back as before.
   hsa_signal_t last_completion = reinterpret_cast<const hsa_kernel_dispatch_packet_t*>(
       flatPacketData.data() + (numPackets - 1) * kPacketSize)->completion_signal;
@@ -3211,18 +3210,19 @@ VirtualGPU::VirtualGPU(Device& device, bool profiling, bool cooperative,
       maskGroups_(0),
       schedulerThreads_(0),
       schedulerQueue_(nullptr),
+      schedulerQueueThreadRunning_(false),
       barriers_(device.QueueDeviceSignals()
                     ? std::unique_ptr<HwQueueTracker>(new RetiringSignalTracker(*this))
                     : std::unique_ptr<HwQueueTracker>(new LegacySignalTracker(*this))),
-      managed_buffer_(*this, kStagingPoolNumSignals * device.settings().stagedXferSize_, kStagingPoolNumSignals),
+      managed_buffer_(*this, kStagingPoolNumSignals * device.settings().stagedXferSize_,
+                      kStagingPoolNumSignals),
       managed_kernarg_buffer_(*this, device.settings().kernargPoolSize_, kKernArgPoolNumSignals),
       cuMask_(cuMask),
       priority_(priority),
+      dedicated_queue_(dedicated_queue),
       copy_command_type_(0),
       fence_state_(Device::CacheState::kCacheStateInvalid),
       fence_dirty_(false),
-      dedicated_queue_(dedicated_queue),
-      schedulerQueueThreadRunning_(false),
       hostcallBuffer_(nullptr) {
   index_ = device.numOfVgpus_++;
   gpu_device_ = device.getBackendDevice();
@@ -3506,10 +3506,11 @@ address VirtualGPU::ManagedBuffer::Acquire(uint32_t size, uint32_t alignment) {
     // Dispatch a barrier packet into the queue
     gpu_.dispatchBarrierPacket(kBarrierPacketHeader, kSkipSignal, chunk_signal);
     // Get the next chunk
-    active_chunk_ = ++active_chunk_ % num_chunk_signals_;
+    active_chunk_ = (active_chunk_ + 1) % num_chunk_signals_;
     // Make sure the new active chunk is free
-    bool test = WaitForSignal(pool_signal_[active_chunk_], gpu_.ActiveWait(), /*yield=*/false,
-                              gpu_.dev().QueueDeviceSignals());
+    [[maybe_unused]] bool test =
+        WaitForSignal(pool_signal_[active_chunk_], gpu_.ActiveWait(), /*yield=*/false,
+                      gpu_.dev().QueueDeviceSignals());
     assert(test && "Runtime can't fail a wait for chunk!");
     // Make sure the current offset matches the new chunk to avoid possible overlaps
     // between chunks and issues during recycle
@@ -3830,7 +3831,7 @@ void VirtualGPU::updateCommandsState(amd::Command* list) const {
   while (current != nullptr) {
     if (current->profilingInfo().enabled_) {
       if (!current->data().empty()) {
-        for (auto i = 0; i < current->data().size(); i++) {
+        for (size_t i = 0; i < current->data().size(); i++) {
           // Since this is a valid command to get a timestamp, we use the
           // timestamp provided by the runtime (saved in the data())
           ts = reinterpret_cast<Timestamp*>(current->data()[i]);
@@ -5233,7 +5234,7 @@ void VirtualGPU::submitStreamOperation(amd::StreamOperationCommand& cmd) {
     // the AQLPacket because atomics on kernels can bypass L2 cache on some hardware.
     addSystemScope();
 
-    bool result;
+    bool result = false;
     switch (flags) {
       case ROCCLR_STREAM_WRITE_VALUE_DEFAULT: {
         result = blitMgr().streamOpsWrite(*memory, value, offset, sizeBytes);
@@ -5379,8 +5380,6 @@ void VirtualGPU::submitSvmFillMemory(amd::SvmFillMemoryCommand& cmd) {
 
     size_t offset = reinterpret_cast<uintptr_t>(cmd.dst()) -
                     reinterpret_cast<uintptr_t>(dstMemory->getSvmPtr());
-
-    Memory* memory = dev().getRocMemory(dstMemory);
 
     amd::Coord3D origin(offset, 0, 0);
     amd::Coord3D size(fillSize, 1, 1);
@@ -5644,7 +5643,6 @@ bool VirtualGPU::createVirtualQueue(uint deviceQueueSize) {
   return true;
 }
 
-
 void VirtualGPU::HiddenHeapInit() {
   // We don't really need its id, just want to ensure the queue is created.
   (void)getQueueID();
@@ -5689,7 +5687,6 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
   }
 
   const amd::KernelSignature& signature = kernel.signature();
-  const amd::KernelParameters& kernelParams = kernel.parameters();
 
   bool isGraphCapture = command_ != nullptr && command_->getPktCapturingState();
 
@@ -5920,7 +5917,8 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
 #else
         __atomic_thread_fence(__ATOMIC_SEQ_CST);
 #endif
-        auto kSentinel = *reinterpret_cast<volatile unsigned char*>(argBuffer + argSize - 1);
+        [[maybe_unused]] auto kSentinel =
+            *reinterpret_cast<volatile unsigned char*>(argBuffer + argSize - 1);
       }
     }
   }
@@ -6124,8 +6122,8 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
       Memory* cpyImage = dev().getGpuMemory(devImage->CopyImageBuffer());
       amd::Coord3D offs(0);
       // Copy memory from the the backing store image into original buffer
-      bool result = blitMgr().copyImageToBuffer(*cpyImage, *buffer, offs, offs, image->getRegion(),
-                                                true, image->getRowPitch(), image->getSlicePitch());
+      (void)blitMgr().copyImageToBuffer(*cpyImage, *buffer, offs, offs, image->getRegion(), true,
+                                        image->getRowPitch(), image->getSlicePitch());
     }
   }
   return true;
@@ -6786,10 +6784,12 @@ uint32_t VirtualGPU::MetaDataPreloader::FillKernelDispatchMetadata(
 // via FillKernelDispatchMetadata; only the final transfer to the ring buffer
 // differs:
 //
-// (A) Device memory (WC over PCIe BAR): stage locally, then copy 4 x 64B
+// (A) Device memory: stage locally, then copy 4 x 64B
 //     segments via MOVDIR64B (if available) or NT stores.  Each segment's
 //     body + header are in the same atomic/NT copy — no sfence between them.
-//     Avoids dozens of scattered WC stores over the bus.
+//     Avoids dozens of scattered stores over the bus: a PCIe host maps the ring
+//     WC, and an A+A host maps it WB, where plain stores would leave the lines in
+//     the CPU cache for the CP to probe.
 //
 // (B) System memory (WB): write fields directly into the ring buffer (all
 //     stores hit L1 cache).  SFENCE between body and headers because the
@@ -6803,9 +6803,9 @@ void VirtualGPU::MetaDataPreloader::SetPacket(
     bool use_movdir64b, bool device_mem_ring_buf) {
   assert(pending_descriptor_ != nullptr);
 
-  // Staging is only needed for device-memory (WC) ring buffers to avoid
-  // scattered WC stores over PCIe.  For system-memory (WB) queues, direct
-  // writes hit L1 cache and are fast — no staging overhead needed.
+  // Staging is only needed for device-memory ring buffers, see (A).  For
+  // system-memory (WB) queues, direct writes hit L1 cache and are fast — no
+  // staging overhead needed.
   const bool use_staging = device_mem_ring_buf;
 
   if (use_staging) {
@@ -6837,11 +6837,11 @@ void VirtualGPU::MetaDataPreloader::SetPacket(
     uint32_t metadata_header = FillKernelDispatchMetadata(aql, header, metadata, false);
 
     // Write headers last — arms the metadata packet for the CP.
-    // SFENCE between body and headers: the metadata ring buffer may be WC-mapped
-    // (device memory) and the CP's prefetcher reads it independently. Without a
-    // fence, WC reordering could make valid headers visible before the body is
-    // flushed, causing the prefetcher to read garbage. This fence ensures all
-    // body writes are ordered before the header writes (ordering point #7).
+    // SFENCE between body and headers: this branch only writes system-memory
+    // rings (see (B)), and the CP's prefetcher reads them independently, so valid
+    // headers must not become visible before the body, or the prefetcher reads
+    // garbage. This fence ensures all body writes are ordered before the header
+    // writes (ordering point #7).
     amd::nontemporalStoreFence();
     metadata->header3 = metadata_header;
     metadata->header2 = metadata_header;

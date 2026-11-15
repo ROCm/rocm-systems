@@ -24,7 +24,8 @@ void half_binary_x86_64_v3(uint64_t flags, uint32_t exec_mask, uint32_t instruct
                            uint32_t *d, const uint32_t *a, const uint32_t *b, bool compatibility,
                            bool preserve_input_snan) {
   constexpr bool arithmetic = rocjitsu::arith::is_arithmetic(Op);
-  constexpr bool legacy = Op == Binary::MinLegacy || Op == Binary::MaxLegacy;
+  constexpr bool legacy = Op == Binary::MinLegacy || Op == Binary::MaxLegacy ||
+                          Op == Binary::MinLegacyCdna || Op == Binary::MaxLegacyCdna;
   constexpr bool preserve_nan_inputs = legacy || Op == Binary::Minimum || Op == Binary::Maximum;
   uint32_t instruction_flag_cases[] = {
       Packed ? packed_half_instruction_flags(instruction_flags, false) : instruction_flags,
@@ -68,8 +69,10 @@ void half_binary_x86_64_v3(uint64_t flags, uint32_t exec_mask, uint32_t instruct
       if constexpr (Op == Binary::Mul) {
         value = _mm256_mul_ps(x, y);
       }
-      if constexpr (Op == Binary::MinLegacy || Op == Binary::MaxLegacy) {
-        value = minmax_rdna3<Op == Binary::MaxLegacy>(x, y, flags & RJ_ARITH_FP_IEEE_MODE);
+      if constexpr (legacy) {
+        constexpr bool maximum = Op == Binary::MaxLegacy || Op == Binary::MaxLegacyCdna;
+        constexpr bool first_nan = Op != Binary::MinLegacyCdna && Op != Binary::MaxLegacyCdna;
+        value = minmax_legacy<maximum, first_nan>(x, y, flags & RJ_ARITH_FP_IEEE_MODE);
       }
       if constexpr (Op == Binary::MinNum) {
         value = minmax<false, false>(x, y);
@@ -129,16 +132,21 @@ void half_binary_x86_64_v3(uint64_t flags, uint32_t exec_mask, uint32_t instruct
         value = clamped;
       }
       auto encoded = half_narrow<legacy>(value, flags & RJ_ARITH_FP16_OVFL);
-      if constexpr (Packed && arithmetic) {
-        if (preserve_input_snan && !(m & RJ_ARITH_ALU_CLAMP)) {
-          // Restore selected raw sNaNs after F16C has quieted them.
-          auto raw_half = [](__m256i words, int shift, bool negate) {
+      if constexpr (arithmetic) {
+        // DX10_CLAMP off lets a NaN through CLAMP, so the selected sNaN is restored as well.
+        if (preserve_input_snan &&
+            (!(m & RJ_ARITH_ALU_CLAMP) || (flags & RJ_ARITH_FP_DX10_CLAMP_OFF))) {
+          // Restore selected raw sNaNs, with ABS, NEG and the SUB sign flip, after F16C has
+          // quieted them.
+          auto raw_half = [](__m256i words, int shift, bool abs, bool negate) {
             auto bits = _mm256_and_si256(_mm256_srl_epi32(words, _mm_cvtsi32_si128(shift)),
-                                         _mm256_set1_epi32(0xffff));
+                                         _mm256_set1_epi32(abs ? 0x7fff : 0xffff));
             return _mm256_xor_si256(bits, _mm256_set1_epi32(negate ? 0x8000 : 0));
           };
-          auto raw_x = raw_half(a_words, m & RJ_ARITH_ALU_HIGH_A ? 16 : 0, m & RJ_ARITH_ALU_NEG_A);
-          auto raw_y = raw_half(b_words, m & RJ_ARITH_ALU_HIGH_B ? 16 : 0, m & RJ_ARITH_ALU_NEG_B);
+          auto raw_x = raw_half(a_words, m & RJ_ARITH_ALU_HIGH_A ? 16 : 0, m & RJ_ARITH_ALU_ABS_A,
+                                bool(m & RJ_ARITH_ALU_NEG_A) != (Op == Binary::Subrev));
+          auto raw_y = raw_half(b_words, m & RJ_ARITH_ALU_HIGH_B ? 16 : 0, m & RJ_ARITH_ALU_ABS_B,
+                                bool(m & RJ_ARITH_ALU_NEG_B) != (Op == Binary::Sub));
           auto nan_x = _mm256_cmpgt_epi32(_mm256_and_si256(raw_x, _mm256_set1_epi32(0x7fff)),
                                           _mm256_set1_epi32(0x7c00));
           auto nan_y = _mm256_cmpgt_epi32(_mm256_and_si256(raw_y, _mm256_set1_epi32(0x7fff)),
@@ -218,5 +226,18 @@ template void half_binary_x86_64_v3<Binary::MinLegacy, true>(uint64_t, uint32_t,
 template void half_binary_x86_64_v3<Binary::MaxLegacy, true>(uint64_t, uint32_t, uint32_t,
                                                              uint32_t *, const uint32_t *,
                                                              const uint32_t *, bool, bool);
+
+template void half_binary_x86_64_v3<Binary::MinLegacyCdna, false>(uint64_t, uint32_t, uint32_t,
+                                                                  uint32_t *, const uint32_t *,
+                                                                  const uint32_t *, bool, bool);
+template void half_binary_x86_64_v3<Binary::MaxLegacyCdna, false>(uint64_t, uint32_t, uint32_t,
+                                                                  uint32_t *, const uint32_t *,
+                                                                  const uint32_t *, bool, bool);
+template void half_binary_x86_64_v3<Binary::MinLegacyCdna, true>(uint64_t, uint32_t, uint32_t,
+                                                                 uint32_t *, const uint32_t *,
+                                                                 const uint32_t *, bool, bool);
+template void half_binary_x86_64_v3<Binary::MaxLegacyCdna, true>(uint64_t, uint32_t, uint32_t,
+                                                                 uint32_t *, const uint32_t *,
+                                                                 const uint32_t *, bool, bool);
 
 } // namespace rocjitsu::arith

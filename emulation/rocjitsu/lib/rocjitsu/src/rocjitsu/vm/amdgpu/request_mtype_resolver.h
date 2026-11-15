@@ -28,6 +28,17 @@ public:
   RequestMtypeResolver(RequestMtypeResolver &&) = delete;
   RequestMtypeResolver &operator=(RequestMtypeResolver &&) = delete;
 
+  const GpuVmAccess *access() const { return access_; }
+
+  const VmLocalGrantView *local_grant(uint64_t address, size_t size) {
+    if (grant_.covers(address, size))
+      return &grant_;
+    if (!access_)
+      return nullptr;
+    grant_ = access_->local_grant_view(address, size);
+    return grant_ ? &grant_ : nullptr;
+  }
+
   Mtype fallback() const { return fallback_; }
 
   bool cached_private_uc_hint(uint64_t addr) const {
@@ -64,6 +75,7 @@ private:
 
   std::optional<GpuVmAccess> owned_access_;
   const GpuVmAccess *access_ = nullptr;
+  VmLocalGrantView grant_;
   VmMtypeCache &mtype_cache_;
   Mtype fallback_;
   bool combine_;

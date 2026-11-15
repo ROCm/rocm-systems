@@ -5,7 +5,7 @@ on:
   pull_request:
     paths:
       - 'projects/rocprofiler-sdk/source/include/rocprofiler-sdk-roctx/**.h'
-      - 'bindings/fortran/metadata/roctx.toml'
+      - 'bindings/fortran/roctx/metadata/**'
       - '.github/workflows/fortran-bindings-roctx.yml'
       - '.github/workflows/fortran-bindings.yml'
   schedule:

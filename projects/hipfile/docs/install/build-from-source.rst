@@ -18,7 +18,7 @@ Prerequisites
 hipFile targets Linux with ROCm HIP. For supported GPUs and stack components,
 see :ref:`ROCm Core SDK components <rocm:release-components>`.
 
-- CMake 3.21 or later
+- CMake 3.25.2 or later
 - A C++ compiler that matches the ``HIPFILE_CXX_STANDARD`` value you select. The
   default is C++20.
 - HIP and HSA packages from ROCm so CMake can locate ``hip`` and ``hsa-runtime64``

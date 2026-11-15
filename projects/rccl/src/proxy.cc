@@ -2275,6 +2275,9 @@ ncclResult_t ncclProxyCreate(struct ncclComm* comm) {
     // [RCCL] Host side mirrors of device side NCCL_LL128_LINEELEMS & NCCL_LL128_DATAELEMS
     proxyState->ll128LineElems = comm->ll128LineElems;
     proxyState->ll128DataElems = comm->ll128DataElems;
+    proxyState->cudaArch = comm->cudaArch;
+    proxyState->p2pCeStream = nullptr;
+    proxyState->p2pCeStreamRefs = 0;
 
     comm->proxyState->thread = std::thread(ncclProxyService, comm->proxyState);
     ncclSetThreadName(comm->proxyState->thread, "NCCL Service %2d", comm->cudaDev);

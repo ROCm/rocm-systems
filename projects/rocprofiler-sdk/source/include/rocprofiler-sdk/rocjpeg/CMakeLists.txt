@@ -23,7 +23,7 @@
 #
 # Installation of public rocJPEG headers
 #
-set(ROCPROFILER_ROCJPEG_HEADER_FILES api_args.h api_id.h table_id.h)
+set(ROCPROFILER_ROCJPEG_HEADER_FILES api_args.h api_id.h api_trace.h table_id.h)
 
 install(
     FILES ${ROCPROFILER_ROCJPEG_HEADER_FILES}

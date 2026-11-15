@@ -3388,6 +3388,7 @@ TEST(GpuVmPipeline, TranslatedTensorLoadRetriesBeforeCommittingLdsOrBarrier) {
   auto state = std::make_unique<amdgpu::tensor_dma_detail::TensorDmaState>(descriptor, false);
   state->access = context.wf->snapshot_vm_access();
   ASSERT_TRUE(state->access);
+  state->payload.resize(kExternal.size() * sizeof(uint32_t));
   for (uint32_t index = 0; index < kExternal.size(); ++index) {
     state->elements.push_back(
         {.global_address = kGlobalAddress + index * sizeof(uint32_t),
@@ -3450,6 +3451,7 @@ TEST(GpuVmPipeline, DeferredTensorLoadCommitsLdsAfterPeerReadEffects) {
   auto state = std::make_unique<amdgpu::tensor_dma_detail::TensorDmaState>(descriptor, false);
   state->access = wf->snapshot_vm_access();
   ASSERT_TRUE(state->access);
+  state->payload.resize(kValues.size() * sizeof(uint32_t));
   for (uint32_t index = 0; index < kValues.size(); ++index) {
     state->elements.push_back(
         {.global_address = kGlobalAddress + index * sizeof(uint32_t),
@@ -3516,6 +3518,7 @@ TEST(GpuVmPipeline, DeferredTensorLoadReportsInstructionPcAtCompletion) {
   state->pc = kIssuePc;
   state->access = context.wf->snapshot_vm_access();
   ASSERT_TRUE(state->access);
+  state->payload.resize(2 * sizeof(uint32_t));
   for (uint32_t index = 0; index < 2; ++index) {
     state->elements.push_back(
         {.global_address = kGlobalAddress + index * sizeof(uint32_t),
@@ -3690,57 +3693,57 @@ TEST(GpuVmPipeline, TensorLoadCompletionFailureStopsResidentAndDeferredExecution
   }
 }
 
-TEST(GpuVmPipeline, TranslatedTensorStoreRetriesWithoutReplayingOrResnapshottingLds) {
+TEST(GpuVmPipeline, TranslatedTensorStoreResumesWithinAnElementWithoutResamplingLds) {
   TranslatedPipelineContext context;
   ASSERT_NO_FATAL_FAILURE(context.initialize());
-  ASSERT_TRUE(context.address_space);
   ASSERT_NE(context.wf, nullptr);
   context.wf->set_lds_base(context.cu->allocate_lds(256));
+  context.wf->set_lds_size(256);
+  context.external->translation_granule = 4096;
 
-  constexpr uint64_t kGlobalAddress = 0x600;
+  constexpr uint64_t kCodeAddress = 0x1000;
+  constexpr uint64_t kDataAddress = 0x2ffc;
   constexpr uint32_t kBarrierAddress = 64;
-  constexpr std::array<uint32_t, 2> kStored = {0x10203040u, 0x50607080u};
-  context.wf->lds().write64(context.wf->lds_base() + kBarrierAddress, 0);
+  constexpr std::array<uint64_t, 2> kSource{0x5566778811223344ull, 0xddeeff0099aabbccull};
+  // The first i64 crosses a translation boundary halfway through.
+  context.external->store(
+      kCodeAddress, std::array<uint32_t, 4>{0xd0714001u, 0x7c000000u, 0x7c7c0c00u, S_ENDPGM_GFX12});
+  const uint32_t sgprs = context.wf->sgpr_alloc().base;
+  const std::array<uint32_t, 4> group0{1, 0, kDataAddress, 0x80000000u};
+  const std::array<uint32_t, 8> group1{
+      (3u << 16) | (1u << 18), (2u << 16) | (kBarrierAddress >> 3), 0, 2u << 16, 0, 0, 0, 0};
+  for (uint32_t reg = 0; reg < group0.size(); ++reg)
+    context.cu->write_sgpr(sgprs + reg, group0[reg]);
+  for (uint32_t reg = 0; reg < group1.size(); ++reg)
+    context.cu->write_sgpr(sgprs + 12 + reg, group1[reg]);
+  const uint32_t lds_address = context.wf->lds_base();
+  context.wf->lds().write64(lds_address, kSource[0]);
+  context.wf->lds().write64(lds_address + 8, kSource[1]);
+  context.wf->lds().write64(lds_address + kBarrierAddress, 0);
+  context.wf->pc = kCodeAddress;
+  context.wf->set_exec(1);
   context.external->unavailable_write_call = 2;
 
-  amdgpu::tensor_dma_detail::TensorDmaDescriptor descriptor;
-  descriptor.elem_size = sizeof(uint32_t);
-  descriptor.atomic_barrier = true;
-  descriptor.atomic_barrier_addr = kBarrierAddress;
-  auto state = std::make_unique<amdgpu::tensor_dma_detail::TensorDmaState>(descriptor, true);
-  state->access = context.wf->snapshot_vm_access();
-  ASSERT_TRUE(state->access);
-  for (uint32_t index = 0; index < kStored.size(); ++index) {
-    amdgpu::tensor_dma_detail::TensorDmaTransferElement element{
-        .global_address = kGlobalAddress + index * sizeof(uint32_t),
-        .lds_address = context.wf->lds_base() + index * static_cast<uint32_t>(sizeof(uint32_t)),
-        .in_bounds = true};
-    std::memcpy(element.bytes.data(), &kStored[index], sizeof(uint32_t));
-    state->elements.push_back(element);
-  }
+  EXPECT_TRUE(context.cu->step());
+  ASSERT_EQ(context.wf->state(), amdgpu::WfState::VM_RETRY);
+  EXPECT_EQ(context.external->load<uint64_t>(kDataAddress), 0x11223344ull);
+  EXPECT_EQ(context.external->load<uint64_t>(kDataAddress + 8), 0ull);
+  EXPECT_EQ(context.wf->lds().read64(lds_address + kBarrierAddress), 0ull);
+  context.wf->lds().write64(lds_address, UINT64_MAX);
+  context.wf->lds().write64(lds_address + 8, UINT64_MAX);
 
-  amdgpu::TensorDmaPipeline pipeline;
-  EXPECT_EQ(pipeline.issue_deferred(new TestMemoryInstruction(std::move(state)), *context.wf),
-            amdgpu::VmAccessOutcome::Complete);
-  EXPECT_EQ(context.wf->state(), amdgpu::WfState::VM_RETRY);
-  EXPECT_EQ(context.external->load<uint32_t>(kGlobalAddress), kStored[0]);
-  EXPECT_EQ(context.external->load<uint32_t>(kGlobalAddress + sizeof(uint32_t)), 0u);
-  context.wf->lds().write32(context.wf->lds_base(), 0xffffffffu);
-  context.wf->lds().write32(context.wf->lds_base() + sizeof(uint32_t), 0xffffffffu);
-
-  pipeline.tick();
-
-  EXPECT_EQ(context.wf->state(), amdgpu::WfState::RUNNING);
+  context.cu->step();
   EXPECT_TRUE(context.wf->wait_counters().empty());
-  EXPECT_EQ(context.external->load<uint32_t>(kGlobalAddress), kStored[0]);
-  EXPECT_EQ(context.external->load<uint32_t>(kGlobalAddress + sizeof(uint32_t)), kStored[1]);
-  const uint64_t barrier = context.wf->lds().read64(context.wf->lds_base() + kBarrierAddress);
-  EXPECT_EQ(barrier, amdgpu::kLdsBarrierCellPhaseMask << amdgpu::kLdsBarrierCellPhaseShift);
-  EXPECT_TRUE(amdgpu::lds_barrier_cell_phase_parity(barrier));
-  ASSERT_EQ(context.external->write_history.size(), 3u);
-  EXPECT_EQ(context.external->write_history[0].address, kGlobalAddress);
-  EXPECT_EQ(context.external->write_history[1].address, kGlobalAddress + sizeof(uint32_t));
-  EXPECT_EQ(context.external->write_history[2].address, kGlobalAddress + sizeof(uint32_t));
+  EXPECT_EQ(context.external->load<uint64_t>(kDataAddress), kSource[0]);
+  EXPECT_EQ(context.external->load<uint64_t>(kDataAddress + 8), kSource[1]);
+  EXPECT_EQ(context.wf->lds().read64(lds_address + kBarrierAddress),
+            amdgpu::kLdsBarrierCellPhaseMask << amdgpu::kLdsBarrierCellPhaseShift);
+  // Only the unavailable second half may be retried.
+  ASSERT_EQ(context.external->write_history.size(), 4u);
+  EXPECT_EQ(context.external->write_history[0].address, 0x2ffc);
+  EXPECT_EQ(context.external->write_history[1].address, 0x3000);
+  EXPECT_EQ(context.external->write_history[2].address, 0x3000);
+  EXPECT_EQ(context.external->write_history[3].address, 0x3004);
 }
 
 TEST(GpuVmPipeline, TranslatedAtomicRetriesCompareExchangeContention) {
