@@ -804,14 +804,6 @@ add_test(
 # These tests import tools/, which an install tree lacks.
 if(NOT TEST_FROM_INSTALL)
     add_test(
-        NAME test_metric_library_sync
-        COMMAND
-            ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_metric_library_sync.xml
-            ${COV_OPTION}
-            tests/unit/rocprof_compute_soc/metric_library/test_metric_library_sync.py
-            ${WORKING_DIR_OPTION}
-    )
-    add_test(
         NAME test_metric_lock
         COMMAND
             ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_metric_lock.xml

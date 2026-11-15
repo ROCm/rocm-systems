@@ -36,7 +36,7 @@ def sample_values(arch: str) -> dict[str, float]:
 
 
 def render(arch, values=None, membw=None):
-    """Plain-text chart for an analysis-config arch (gfx115x stands for its family)."""
+    """Plain-text chart for a config arch (gfx115x stands for its family)."""
     if values is None:
         values = sample_values(arch)
     units = panel_units(PanelConfigs.for_arch(arch))
