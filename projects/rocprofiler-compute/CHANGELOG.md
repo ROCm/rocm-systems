@@ -13,6 +13,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Optimized
 
+* Profiling on MI200 collects two fewer counters, which saves one profiling pass.
+
 ### Resolved issues
 
 ### Upcoming changes
