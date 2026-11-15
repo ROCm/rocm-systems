@@ -244,6 +244,18 @@ def convert_filter_blocks_to_panel_ids(
     return resolved
 
 
+def metric_tables_by_id(
+    panel_configs: Dict[int, Dict[str, Any]],
+) -> Dict[int, Dict[str, Any]]:
+    """Return each metric table of an arch's panel configs, by table id."""
+    return {
+        source[METRIC_TABLE]["id"]: source[METRIC_TABLE]
+        for panel_config in panel_configs.values()
+        for source in panel_config["data source"]
+        if METRIC_TABLE in source
+    }
+
+
 def iter_view_rows(
     views: Dict[int, Dict[str, Any]],
 ) -> Iterator[Tuple[str, Dict[str, Any]]]:
