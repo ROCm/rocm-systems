@@ -2686,6 +2686,7 @@ set(_rj_interposer_drm_tests
     KfdExportKeepsItsMetadataAfterTheAllocationIsFreed
     KfdImportsRetainMetadataAfterTheOriginalOwnerCloses
     MappingFlagsMatchBackingCapabilities
+    MissingMemfdRoutesRenderNodeIoctls
     OpensWithinCurrentDescriptorLimit
     PrimeHandleToFdReturnsTheBuffer
     PrimeImportKeepsTheBoStateAfterTheHandleCloses

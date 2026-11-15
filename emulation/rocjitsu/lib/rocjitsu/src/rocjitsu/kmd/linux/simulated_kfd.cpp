@@ -1115,35 +1115,12 @@ int pidfd_is_exited(int pidfd) {
   return rc == 1 && (pfd.revents & (POLLIN | POLLHUP)) ? 1 : 0;
 }
 
-/// @brief Report whether the process behind @p procfd has exited but not been
-/// reaped.
-///
-/// @details A pidfd stays readable for a zombie, so pidfd_is_exited() cannot
-/// tell a live debuggee from one that has already run to completion. The state
-/// character in /proc/<pid>/stat can. It sits after the last ')' because the
-/// comm field is parenthesised and may itself contain spaces and parentheses.
-///
-/// @retval 1 The target is a zombie (Z) or dead (X).
-/// @retval 0 The target is still running.
-/// @retval <0 Negative errno; the state could not be determined.
 int procfd_is_zombie(int procfd) {
-  // Passthrough, not ::openat/::read/::close: these run inside driver ioctls that
-  // the interposer dispatched, so a bare ::close() here would re-enter the
-  // interposer's own close() hook mid-dispatch. See PassthroughFdTraits.
+  // Pin stat through the existing proc directory, never by a recycled PID.
   UniqueDriverFd stat_fd(libc_passthrough().openat(procfd, "stat", O_RDONLY | O_CLOEXEC, 0));
-  if (stat_fd.get() < 0)
-    return errno == ENOENT ? 1 : -errno;
-  char buffer[4096];
-  const ssize_t bytes = libc_passthrough().read(stat_fd.get(), buffer, sizeof(buffer) - 1);
-  const int read_error = errno;
-  stat_fd.reset();
-  if (bytes < 0)
-    return -read_error;
-  buffer[bytes] = '\0';
-  const char *name_end = std::strrchr(buffer, ')');
-  if (name_end == nullptr || name_end[1] != ' ' || name_end[2] == '\0')
-    return -EIO;
-  return name_end[2] == 'Z' || name_end[2] == 'X';
+  if (!stat_fd)
+    return errno == ENOENT || errno == ESRCH ? 1 : -errno;
+  return proc_stat_is_exited(stat_fd.get());
 }
 
 int pin_process_identity(pid_t pid, UniqueDriverFd &pidfd, UniqueDriverFd &procfd) {

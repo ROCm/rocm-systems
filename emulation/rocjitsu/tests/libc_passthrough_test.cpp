@@ -6,16 +6,22 @@
 #include <gtest/gtest.h>
 
 #include <cerrno>
+#include <climits>
 #include <cstdlib>
 #include <cstring>
+#include <dlfcn.h>
 #include <fcntl.h>
 
 extern "C" void *__real_dlsym(void *, const char *);
 
-// Exercise the real legacy libc entry points on modern hosts too. Only hide
-// the six symbols absent from glibc 2.28; do not mock filesystem operations.
+// Exercise the real legacy libc entry points on modern hosts too.
 extern "C" void *__wrap_dlsym(void *handle, const char *name) {
   if (std::getenv("RJ_TEST_LEGACY_STAT")) {
+#if defined(__GLIBC__) && defined(__x86_64__)
+    if (std::strcmp(name, "realpath") == 0)
+      if (auto *legacy = dlvsym(handle, name, "GLIBC_2.2.5"))
+        return legacy;
+#endif
     for (const char *symbol : {"stat", "lstat", "fstat", "stat64", "lstat64", "fstat64"})
       if (std::strcmp(name, symbol) == 0)
         return nullptr;
@@ -76,4 +82,18 @@ TEST(LibcPassthroughTest, StatEntryPointsPreserveMetadataAndErrors) {
   errno = 0;
   EXPECT_EQ(real.fstat64_fn(-1, &large_descriptor), -1);
   EXPECT_EQ(errno, EBADF);
+}
+
+TEST(LibcPassthroughTest, RealpathAllocatesAndAcceptsCallerBuffer) {
+  auto &real = rocjitsu::libc_passthrough();
+  real.resolve();
+  ASSERT_TRUE(real.ready());
+  char buffer[PATH_MAX];
+  ASSERT_EQ(real.realpath_fn("/proc/self", buffer), buffer);
+  char *allocated = real.realpath_fn("/proc/self", nullptr);
+  ASSERT_NE(allocated, nullptr);
+  EXPECT_STREQ(allocated, buffer);
+  std::free(allocated);
+  EXPECT_EQ(real.realpath_fn("/proc/self/rocjitsu-nonexistent", nullptr), nullptr);
+  EXPECT_EQ(errno, ENOENT);
 }
