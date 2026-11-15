@@ -5,9 +5,9 @@
 # These feed synthetic rocprofv3 JSON to the validator's test functions and check which
 # ones pass, skip or fail. They need no GPU, so they guard the rule for skipping a common
 # sanity counter on every CI target: a counter is skipped only when a replayed agent does
-# not report it, or when every replayed agent is gfx1201 and the counter is explicitly zero
-# in every pass of every dispatch. The same all-zero shape on gfx1250, gfx942 or a mixed
-# set of agents must still fail.
+# not report it, or when every replayed agent is gfx1200 or gfx1201 and the counter is
+# explicitly zero in every pass of every dispatch. The same all-zero shape on gfx1250,
+# gfx942, gfx11, or a mix with those agents must still fail.
 
 import importlib.util
 import itertools
@@ -42,6 +42,8 @@ AGENT_SETS = [
     ("gfx1250",),
     ("gfx942",),
     ("gfx1200",),
+    ("gfx1200", "gfx1201"),
+    ("gfx1200", "gfx1250"),
     ("gfx1201", "gfx1250"),
     ("gfx1201", "gfx942"),
     (None,),
@@ -147,8 +149,8 @@ def grid(fill, dispatches=3, passes=5):
     return [[fill] * passes for _ in range(dispatches)]
 
 
-def all_gfx1201(archs):
-    return all(arch == "gfx1201" for arch in archs)
+def all_navi4(archs):
+    return bool(archs) and all(arch in ("gfx1200", "gfx1201") for arch in archs)
 
 
 def expected_target_outcome(archs, values, unreported=()):
@@ -156,7 +158,7 @@ def expected_target_outcome(archs, values, unreported=()):
     batches = [v for row in values for v in row]
     if TARGET in unreported:
         return "skip"
-    if all_gfx1201(archs) and all(v is not ABSENT and v == 0 for v in batches):
+    if all_navi4(archs) and all(v is not ABSENT and v == 0 for v in batches):
         return "skip"
     if all(v is not ABSENT and v > 0 for v in batches):
         return "pass"
@@ -165,7 +167,7 @@ def expected_target_outcome(archs, values, unreported=()):
 
 def test_exhaustive_two_by_two_batches():
     # Every assignment of {absent, zero, nonzero} to 2 dispatches x 2 passes, on every
-    # agent set: the validator must agree with the stated rule in all 81 x 8 cases.
+    # agent set: the validator must agree with the stated rule in all 81 x 10 cases.
     states = (ABSENT, ZERO, NONZERO)
     mismatches = []
     for archs in AGENT_SETS:
@@ -178,9 +180,9 @@ def test_exhaustive_two_by_two_batches():
     assert not mismatches, f"{len(mismatches)} mismatches, first: {mismatches[:3]}"
 
 
-def test_zero_everywhere_skips_only_on_gfx1201():
+def test_zero_everywhere_skips_only_on_navi4():
     for archs in AGENT_SETS:
-        want = "skip" if all_gfx1201(archs) else "fail"
+        want = "skip" if all_navi4(archs) else "fail"
         got = constant(make_json(archs, grid(ZERO)))
         assert got == want, f"{archs}: all-zero {TARGET} gave {got}, want {want}"
 

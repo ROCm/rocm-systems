@@ -72,8 +72,8 @@ rocprofiler_add_integration_execute_test(
 # counters (SQ_WAVES, SQ_INSTS_VALU) are constant across a dispatch's passes, the kernels
 # are present, and rocpd's counters_collection averages the shared counters over the
 # passes rather than summing them. A sanity counter the agent does not report is skipped.
-# A counter that reads zero for every dispatch is skipped only on gfx1201 (SQ_INSTS_VALU);
-# on other targets, including gfx1250, that is a failure. No -x, so one skipped or failing
+# A counter that reads zero for every dispatch is skipped only on gfx1200 and gfx1201; on
+# other targets, including gfx1250, that is a failure. No -x, so one skipped or failing
 # counter does not hide the remaining checks.
 rocprofiler_add_integration_validate_test(
     rocprofv3-test-kernel-replay-validate BUNDLE_TESTS

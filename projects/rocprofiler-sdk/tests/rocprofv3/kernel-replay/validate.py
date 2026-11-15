@@ -400,10 +400,15 @@ def _agent_names(sdk):
     return names
 
 
-def _agents_are_gfx1201(sdk, agent_handles):
-    """True only when every replayed agent is named gfx1201.
+# Navi4. gfx1250 is also gfx12 and is deliberately not in this set: an all-zero
+# SQ_INSTS_VALU there is still a failure.
+_NAVI4_AGENTS = frozenset({"gfx1200", "gfx1201"})
 
-    An agent missing from the agents section is not treated as gfx1201, so the
+
+def _agents_are_navi4(sdk, agent_handles):
+    """True only when every replayed agent is gfx1200 or gfx1201.
+
+    An agent missing from the agents section is not treated as Navi4, so the
     zero-everywhere skip below cannot hide a regression when the architecture is unknown.
     """
     if not agent_handles:
@@ -412,7 +417,7 @@ def _agents_are_gfx1201(sdk, agent_handles):
     archs = [names.get(handle) for handle in agent_handles]
     if any(name is None for name in archs):
         return False
-    return all(name == "gfx1201" for name in archs)
+    return all(name in _NAVI4_AGENTS for name in archs)
 
 
 def _counter_is_zero_everywhere(table, counter):
@@ -442,22 +447,22 @@ def _unusable_common_counter_reason(sdk, table, counter):
     """Why a requested common counter cannot serve as a replay sanity check, or None.
 
     A counter qualifies only if every replayed agent reports it and it reads nonzero for at
-    least one dispatch. gfx1201 lists counters that never increment (SQ_INSTS_VALU in
-    every performance level), so on that target a counter that is explicitly zero for
-    every pass of every dispatch is treated as unimplemented rather than as a replay
-    defect. On every other target, including gfx942 and gfx1250, that same shape is a
-    regression and still fails. A counter zero or absent in only some passes or
-    dispatches always fails.
+    least one dispatch. gfx1200 and gfx1201 list counters that never increment
+    (SQ_INSTS_VALU in every performance level), so on those targets a counter that is
+    explicitly zero for every pass of every dispatch is treated as unimplemented rather
+    than as a replay defect. On every other target, including gfx942 and gfx1250, that
+    same shape is a regression and still fails. A counter zero or absent in only some
+    passes or dispatches always fails.
     """
     missing = _agents_not_reporting(sdk, counter)
     if missing:
         return f"{counter} is not reported by replayed agent(s) {missing}"
-    if _agents_are_gfx1201(sdk, _replayed_agents(sdk)) and _counter_is_zero_everywhere(
+    if _agents_are_navi4(sdk, _replayed_agents(sdk)) and _counter_is_zero_everywhere(
         table, counter
     ):
         return (
             f"{counter} reads zero for every dispatch; not implemented on this "
-            "gfx1201 agent"
+            "gfx1200/gfx1201 agent"
         )
     return None
 
