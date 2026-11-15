@@ -229,6 +229,8 @@ public:
   uint32_t elem_size = 0;
   uint32_t num_elems = 0;
   bool is_load = true;
+  bool monitor_memviol = false; ///< A LOAD_MONITOR lane failed before GL2 notification.
+  bool monitors_memory = false; ///< CDNA5 FLAT/GLOBAL_LOAD_MONITOR.
   Mtype mtype = Mtype::RW;
   WaitCounterType wait_counter_type = WaitCounterType::VMCNT;
   /// Counter obligations for the memory domains selected by requesting FLAT lanes.
@@ -425,7 +427,7 @@ public:
   }
 
   [[nodiscard]] bool rejects_routed_access() const {
-    return ds_memviol || rejects_private_atomic(lane_mask);
+    return ds_memviol || monitor_memviol || rejects_private_atomic(lane_mask);
   }
 
   // The RDNA3, RDNA3.5, RDNA4 and CDNA5 ISA manuals specify MEMVIOL for an

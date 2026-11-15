@@ -24,6 +24,38 @@ Wavefront::Wavefront(ComputeUnitCore &cu, uint32_t wf_id, uint32_t default_wf_si
       max_vgprs_(max_vgprs), mode_has_gpr_idx_en_(mode_has_gpr_idx_en),
       memory_wait_checks_enabled_(cu.config().memory_wait_checks_enabled()) {}
 
+void Wavefront::issue_memory_monitor(const VectorMemState &request) {
+  if (!request.lane_mask)
+    return;
+  // The WGP returns monitor-done for FLAT accesses to LDS. It clears this
+  // wave's MWAIT even when another lane in the instruction requests GL2.
+  const auto *l2 = cu().l2();
+  const uint64_t global =
+      request.lane_mask & ~(request.flat_local_lane_mask | request.flat_dds_lane_mask);
+  monitor_generation_ =
+      global && l2
+          ? l2->coherence_domain()->monitor_lines(process_id(), request.per_lane_addr, global)
+          : 0;
+  if (request.flat_local_lane_mask || request.flat_dds_lane_mask)
+    monitor_generation_ = 0;
+}
+
+bool Wavefront::memory_monitor_wait() const {
+  const auto *l2 = cu().l2();
+  return monitor_generation_ && l2 &&
+         monitor_generation_ == l2->coherence_domain()->monitor_generation();
+}
+
+void Wavefront::issue_monitor_sleep(uint16_t immediate) {
+  if (!memory_monitor_wait())
+    return;
+  const uint32_t delay = (immediate & 0x8000) ? kSleepForever : 64u * (immediate & 0x7f);
+  issue_sleep_with_credit(delay);
+  monitor_sleeping_ = sleep_cycles_ != 0;
+  if (monitor_sleeping_)
+    cu().request_functional_yield();
+}
+
 bool Wavefront::valu_destinations_allocated(const Instruction &inst) const {
   for (int i = 0; i < inst.num_dst_operands(); ++i) {
     const auto *op = inst.dst_operand(i);
@@ -57,11 +89,14 @@ bool Wavefront::memory_destination_out_of_range(const Instruction &inst) const {
 
 void Wavefront::set_process_id(uint32_t id, ProcessIdentityKind kind) {
   process_id_ = id;
-  if (const auto apertures = cu_.resolve_shader_apertures(id, kind))
+  if (const auto apertures = cu_.resolve_shader_apertures(id, kind)) {
+    set_dword_alignment(apertures->dword_alignment);
     set_apertures(apertures->shared_base, apertures->shared_limit, apertures->private_base,
                   apertures->private_limit, /*override_launch=*/true);
-  else
+  } else {
+    set_dword_alignment(false);
     cu_.report_unresolved_apertures(id, kind);
+  }
 }
 
 void Wavefront::update_activity_counts(bool was_active, bool was_runnable) {

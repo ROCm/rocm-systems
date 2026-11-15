@@ -29,9 +29,6 @@ CDNA_INTEGER_ALIASES = {
     'V_SUBBREV_CO_U32': 'V_SUBREV_CO_CI_U32',
 }
 INTEGER_ARCHITECTURES = ('rdna3', 'rdna4', 'cdna3', 'cdna4', 'cdna5')
-# Routing and conversions migrate independently of integer arithmetic.
-ROUTING_ARCHITECTURES = INTEGER_ARCHITECTURES
-
 
 # These integer APIs use one 32-bit VGPR for each result and source.
 # Routed operands already include DPP/SDWA transformations from the decoder.
@@ -140,6 +137,15 @@ UNMODIFIED_MULTIPLIES = {
 }
 
 
+def supports_modified_move(arch: str, mnemonic: str, is_vop3: bool) -> bool:
+    """Targets with VOP3 bit moves that modify the selected floating-point sign bit."""
+    return (
+        is_vop3
+        and mnemonic in ('V_MOV_B16', 'V_MOV_B32')
+        and arch in ('rdna3', 'rdna3_5', 'rdna4', 'cdna5')
+    )
+
+
 def gen_vector32(ctx: ExecuteContext) -> str | None:
     arch = ctx.arch_name
     mnemonic = (
@@ -154,11 +160,9 @@ def gen_vector32(ctx: ExecuteContext) -> str | None:
         return None
     if mnemonic == 'V_PRNG_B32' and arch not in ('cdna4', 'cdna5'):
         return None
-    if arch not in INTEGER_ARCHITECTURES or mnemonic not in VECTOR32_NAMES:
-        return None
-    if (
-        mnemonic in CONDITIONAL_NAMES | {'V_MOV_B32'}
-        and arch not in ROUTING_ARCHITECTURES
+    modified_move = supports_modified_move(arch, mnemonic, is_vop3)
+    if mnemonic not in VECTOR32_NAMES or (
+        arch not in INTEGER_ARCHITECTURES and not modified_move
     ):
         return None
     if mnemonic in WIDEN16_NAMES and arch not in ('rdna3', 'rdna4', 'cdna5'):
@@ -253,7 +257,7 @@ def gen_vector32(ctx: ExecuteContext) -> str | None:
         if is_vop3 and mnemonic not in UNMODIFIED_MULTIPLIES and mnemonic != 'V_MOV_B32'
         else '0u'
     )
-    if mnemonic == 'V_MOV_B32' and is_vop3 and arch in ('rdna3', 'rdna4', 'cdna5'):
+    if modified_move:
         modifiers = '((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u)'
     extra = ''
     if mnemonic in ('V_ALIGNBIT_B32', 'V_ALIGNBYTE_B32') and arch in ('cdna3', 'cdna4'):
@@ -503,9 +507,14 @@ def gen_integer16(ctx: ExecuteContext) -> str | None:
     if reverse:
         src = list(reversed(src))
     is_vop3 = ctx.is_vop3
-    if arch not in INTEGER_ARCHITECTURES or mnemonic not in INTEGER16_NAMES:
+    if mnemonic not in INTEGER16_NAMES:
         return None
-    if mnemonic == 'V_MOV_B16' and arch not in ('rdna3', 'rdna4', 'cdna5'):
+    if mnemonic == 'V_MOV_B16' and is_vop3:
+        if not supports_modified_move(arch, mnemonic, is_vop3):
+            return None
+    elif arch not in INTEGER_ARCHITECTURES or (
+        mnemonic == 'V_MOV_B16' and arch not in ('rdna3', 'rdna4', 'cdna5')
+    ):
         return None
     count = 1 if mnemonic in UNARY16 else 2 if mnemonic in BINARY16 else 3
     if len(dst) != 1 or len(src) != count:

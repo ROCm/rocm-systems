@@ -158,6 +158,7 @@ table WavefrontState {
   ib_sts2_gfx11: uint32;
   // Distinguish direct memory from the standalone VM's identity mapping.
   uses_internal_address_space: bool = null;
+  dword_alignment: bool; // Sampled SH_MEM_CONFIG.ALIGNMENT_MODE is DWORD.
 }
 
 /// Serialized state of a compute unit.

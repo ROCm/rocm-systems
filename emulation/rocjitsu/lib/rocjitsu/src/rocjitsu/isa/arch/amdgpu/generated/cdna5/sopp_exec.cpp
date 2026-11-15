@@ -33,7 +33,9 @@ void SSleepSopp::execute_impl(amdgpu::Wavefront &wf) {
   wf.cu().request_functional_yield();
 }
 
-void SMonitorSleepSopp::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SMonitorSleepSopp::execute_impl(amdgpu::Wavefront &wf) {
+  wf.issue_monitor_sleep(simm16.encoding_value_);
+}
 
 void SClauseSopp::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_clause_sopp(*this, wf); }
 

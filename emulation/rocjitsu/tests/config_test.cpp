@@ -30,6 +30,7 @@
 #include "rocjitsu/kmd/linux/simulated_kfd.h"
 #include "rocjitsu/vm/amdgpu/hwreg.h"
 #include "rocjitsu/vm/amdgpu/matrix_coexecution.h"
+#include "rocjitsu/vm/amdgpu/mem_state.h"
 #include "rocjitsu/vm/amdgpu/partitioning.h"
 #include "rocjitsu/vm/amdgpu/pci/gpu_pci_device_spec.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
@@ -6312,6 +6313,41 @@ TEST(CheckpointTest, RestoresGfx10WaveAndLaunchAperturesIndependently) {
     EXPECT_EQ(next->flat_pointer32(), !ptr32);
     EXPECT_EQ(next->use_wave_apertures(), !ptr32);
   }
+}
+
+TEST(CheckpointTest, RestoredCdna5WaveContinuesAfterMonitorSleep) {
+  auto json = functional_quantum_checkpoint_config(1, 1);
+  ASSERT_TRUE(replace_exactly_once(json, "cdna3", "cdna5"));
+  config::LoadedConfig source;
+  ASSERT_TRUE(test::load_valid_config_from_string(json, source));
+  auto *soc = source.soc();
+  auto *cu = soc->xcd(0)->shader_engine(0)->compute_unit(0);
+  constexpr uint64_t pc = 0x4000;
+  soc->memory()->write32(pc, 0xbf848000); // s_monitor_sleep 0x8000
+  auto *wave = cu->dispatch_wf(0, pc, 32, 16);
+  ASSERT_NE(wave, nullptr);
+  amdgpu::VectorMemState monitor(amdgpu::GLOBAL_MEM);
+  monitor.lane_mask = 1;
+  monitor.per_lane_addr[0] = 0x8000;
+  wave->set_dword_alignment(true);
+  wave->issue_memory_monitor(monitor);
+  cu->step();
+  ASSERT_EQ(wave->pc, pc + 4);
+  ASSERT_EQ(wave->sleep_cycles(), amdgpu::Wavefront::kSleepForever);
+
+  test::ScopedTempFile file;
+  ASSERT_TRUE(file.initialize("rocjitsu-monitor-checkpoint-"));
+  ASSERT_TRUE(
+      config::save_checkpoint(file.path(), *soc, 1, source.engine_config, 1, {}).succeeded());
+  config::LoadedConfig restored;
+  ASSERT_TRUE(test::restore_valid_checkpoint(file.path(), restored));
+  const auto *reloaded =
+      restored.soc()->xcd(0)->shader_engine(0)->compute_unit(0)->wf(wave->wf_id());
+  ASSERT_NE(reloaded, nullptr);
+  EXPECT_EQ(reloaded->pc, pc + 4);
+  EXPECT_EQ(reloaded->sleep_cycles(), 0u);
+  EXPECT_FALSE(reloaded->memory_monitor_wait());
+  EXPECT_TRUE(reloaded->dword_alignment());
 }
 
 TEST(CheckpointTest, RestoresGfx10IssueDelays) {

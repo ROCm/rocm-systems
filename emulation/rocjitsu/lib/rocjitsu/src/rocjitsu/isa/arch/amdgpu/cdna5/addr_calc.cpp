@@ -153,10 +153,21 @@ void flat_global_calculate_addresses(const Inst &inst, amdgpu::Wavefront &wf,
       vaddr = vaddr_region.lane64(0, lane);
     }
     uint64_t addr = saddr_val + vaddr + offset;
+    if (d.monitors_memory) {
+      // CDNA5 10.10 applies atomic alignment to the entire payload before
+      // routing the request or marking the GL2 line.
+      const uint64_t low_bits = d.elem_size * d.num_elems - 1;
+      if (wf.dword_alignment())
+        addr &= ~low_bits;
+      else if (addr & low_bits)
+        d.monitor_memviol = true;
+    }
     if (decode_flat_private) {
       const auto translated = amdgpu::translate_flat_address(
           wf, addr, lane, amdgpu::flat_private_layout(wf.cu().arch()));
       if (translated.private_address) {
+        if (d.monitors_memory && d.num_elems > 1)
+          d.monitor_memviol = true;
         addr = translated.value;
         d.scratch_swizzle = true;
         d.requires_scratch_backing = true;

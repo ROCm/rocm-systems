@@ -2106,6 +2106,8 @@ void VCvtScalePk8F32Fp4Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t flags = cu.arithmetic_flags();
   if (wf.fp16_ovfl())
     flags |= RJ_ARITH_FP16_OVFL;
+  if (!(wf.fp_denorm_mode_f32() & 2))
+    flags |= RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS;
   amdgpu::arith::execute_wide_scaled_widen<true>(
       wf, rj_arith_v_cvt_scale_pk8_f32_fp4_w32_gfx1250, nullptr, flags, destination_base,
       source_base, src1, 8, 0, 1, amdgpu::CvtScaleSelection::f4_f6(inst_.opsel));
@@ -2184,6 +2186,8 @@ void VCvtScalePk8F32Fp8Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t flags = cu.arithmetic_flags();
   if (wf.fp16_ovfl())
     flags |= RJ_ARITH_FP16_OVFL;
+  if (!(wf.fp_denorm_mode_f32() & 2))
+    flags |= RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS;
   amdgpu::arith::execute_wide_scaled_widen<true>(
       wf, rj_arith_v_cvt_scale_pk8_f32_fp8_w32_gfx1250, nullptr, flags, destination_base,
       source_base, src1, 8, 0, 2, amdgpu::CvtScaleSelection::f8(inst_.opsel));
@@ -2262,6 +2266,8 @@ void VCvtScalePk8F32Bf8Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t flags = cu.arithmetic_flags();
   if (wf.fp16_ovfl())
     flags |= RJ_ARITH_FP16_OVFL;
+  if (!(wf.fp_denorm_mode_f32() & 2))
+    flags |= RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS;
   amdgpu::arith::execute_wide_scaled_widen<true>(
       wf, rj_arith_v_cvt_scale_pk8_f32_bf8_w32_gfx1250, nullptr, flags, destination_base,
       source_base, src1, 8, 0, 2, amdgpu::CvtScaleSelection::f8(inst_.opsel));
@@ -2680,6 +2686,8 @@ void VCvtScalePk16F32Fp6Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t flags = cu.arithmetic_flags();
   if (wf.fp16_ovfl())
     flags |= RJ_ARITH_FP16_OVFL;
+  if (!(wf.fp_denorm_mode_f32() & 2))
+    flags |= RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS;
   amdgpu::arith::execute_wide_scaled_widen<true>(
       wf, rj_arith_v_cvt_scale_pk16_f32_fp6_w32_gfx1250, nullptr, flags, destination_base,
       source_base, src1, 16, 0, 3, amdgpu::CvtScaleSelection::f4_f6(inst_.opsel));
@@ -2758,6 +2766,8 @@ void VCvtScalePk16F32Bf6Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t flags = cu.arithmetic_flags();
   if (wf.fp16_ovfl())
     flags |= RJ_ARITH_FP16_OVFL;
+  if (!(wf.fp_denorm_mode_f32() & 2))
+    flags |= RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS;
   amdgpu::arith::execute_wide_scaled_widen<true>(
       wf, rj_arith_v_cvt_scale_pk16_f32_bf6_w32_gfx1250, nullptr, flags, destination_base,
       source_base, src1, 16, 0, 3, amdgpu::CvtScaleSelection::f4_f6(inst_.opsel));

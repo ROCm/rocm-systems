@@ -300,6 +300,15 @@ util::FailureOr<uint64_t> InstructionComputeUnitView::return_message(uint32_t me
     [[fallthrough]]; // An ordinary shader's SAVE_WAVE becomes MSG_ILLEGAL_RTN.
   case 0xff:         // MSG_ILLEGAL_RTN
     return 0;
+  case 0x87: // RTN_GET_SE_HW_ID
+    if (cu.arch() == ROCJITSU_CODE_ARCH_RDNA4) {
+      const uint32_t aid = cu.cp_ ? cu.cp_->aid_id() : 0;
+      return (cu.shader_engine_id() & 0xfu) | ((aid & 0xfu) << 8);
+    }
+    // In the modeled single partition the virtual XCC is its device-local ordinal.
+    if (cu.arch() == ROCJITSU_CODE_ARCH_CDNA5)
+      return (cu.shader_engine_id() & 0xfu) | ((cu.xcc_id().value_or(0) & 0xfu) << 16);
+    return 0;
   default:
     return 0;
   }
@@ -1447,14 +1456,14 @@ void ComputeUnitCore::qualify_cdna4_memory_destination(Instruction &inst, const 
 }
 
 VmAccessOutcome ComputeUnitCore::route_memory_inst(std::unique_ptr<Instruction> &&inst,
-                                                   Wavefront &wf) {
+                                                   Wavefront &wf, bool track_monitor_wait) {
   if (arch() == ROCJITSU_CODE_ARCH_CDNA4)
     qualify_cdna4_memory_destination(*inst, wf);
   if (arch() == ROCJITSU_CODE_ARCH_RDNA3 || arch() == ROCJITSU_CODE_ARCH_RDNA3_5)
     qualify_gfx11_memory(*inst, wf);
   if (arch() == ROCJITSU_CODE_ARCH_RDNA4)
     nullify_unallocated_memory_result(*inst, wf);
-  return route_prepared_memory_inst(std::move(inst), wf);
+  return route_prepared_memory_inst(std::move(inst), wf, track_monitor_wait);
 }
 
 // Only gfx1250 partitions the shared aperture into local and distributed LDS.
@@ -1475,7 +1484,8 @@ static bool flat_shared_atomic_misaligned(rj_code_arch_t arch, const VectorMemSt
 }
 
 VmAccessOutcome ComputeUnitCore::route_prepared_memory_inst(std::unique_ptr<Instruction> &&inst,
-                                                            Wavefront &wf) {
+                                                            Wavefront &wf,
+                                                            bool track_monitor_wait) {
   if (observes_memory_instruction_routing_)
     plugin_group_->onAmdgpuRouteMemoryInstruction(*inst, wf);
   if (wf.instruction_execution_failed())
@@ -1586,6 +1596,17 @@ VmAccessOutcome ComputeUnitCore::route_prepared_memory_inst(std::unique_ptr<Inst
 
   if (decoded_route_tag == GLOBAL_MEM && inst->mnemonic().starts_with("flat_")) {
     auto &d = *inst->data_as<VectorMemState>();
+    if (d.monitors_memory) {
+      uint64_t global =
+          d.lane_mask & ~(d.flat_local_lane_mask | d.flat_dds_lane_mask | d.scratch_lane_mask);
+      while (global) {
+        const auto lane = std::countr_zero(global);
+        global &= global - 1;
+        const uint64_t high = d.per_lane_addr[lane] >> 56;
+        if (high != 0 && high != 0xff)
+          d.monitor_memviol = true;
+      }
+    }
     if (const auto *issue = inst->amdgpu_memory_issue_info()) {
       const uint64_t requests = transpose_request_lane_mask(d, wf.wf_size());
       const uint64_t shared = (flat_local_lane_mask | flat_dds_lane_mask) & requests;
@@ -1611,6 +1632,23 @@ VmAccessOutcome ComputeUnitCore::route_prepared_memory_inst(std::unique_ptr<Inst
   if (wf.instruction_execution_failed())
     return VmAccessOutcome::Malformed;
 
+  if (decoded_route_tag == GLOBAL_MEM) {
+    const auto &request = *inst->data_as<VectorMemState>();
+    if (request.monitor_memviol) {
+      // Common TRAPSTS bit 8 backs EXCP_FLAG_PRIV.MEMVIOL. Record VMEM as the
+      // first source only if the handler has cleared the previous violation.
+      if (!(wf.trapsts() & (1u << 8)))
+        wf.set_trapsts(wf.trapsts() | (3u << 30));
+      wf.latch_memory_violation();
+      wf.request_unmaskable_memory_trap();
+      return VmAccessOutcome::Complete;
+    }
+    if (request.monitors_memory) {
+      if (track_monitor_wait)
+        track_memory_wait(*inst, wf);
+      wf.issue_memory_monitor(request);
+    }
+  }
   switch (route_tag) {
   case SCALAR_MEM:
     return scalar_mem_pipeline_.issue_deferred(inst.release(), wf);
@@ -2463,8 +2501,7 @@ ComputeUnitCore::issue_instruction_impl(Wavefront *active, MaybeAsyncWindow<Enab
         const bool claimed = defer_queue_exception(
             nullptr, active->queue_id(), active->process_id(), kAqlQueueApertureViolation, false,
             false, QueueExceptionDeliveryPolicy::PublishAndCancel);
-        handle_instruction_failure(*active, "unhandled FLAT private atomic memory violation",
-                                   claimed);
+        handle_instruction_failure(*active, "unhandled memory aperture violation", claimed);
       }
       return IssueOutcome::NotIssued;
     }
@@ -2760,7 +2797,8 @@ ComputeUnitCore::issue_instruction_impl(Wavefront *active, MaybeAsyncWindow<Enab
     if (debugger_active)
       probe_wait_issue = ProbeWaitIssue{active->ensure_memory_wait_scoreboard().issue_snapshot(),
                                         active->pc, active->dispatch_generation()};
-    if (!wait_for_buffer_lanes)
+    // A monitor blocked by its address or aperture check produces no dependency.
+    if (!wait_for_buffer_lanes && !(inst->flags() & MEMORY_MONITOR))
       track_memory_wait(*inst, *active);
   }
 
@@ -3026,7 +3064,7 @@ ComputeUnitCore::issue_instruction_impl(Wavefront *active, MaybeAsyncWindow<Enab
       const bool flat = inst->mnemonic().starts_with("flat_");
       auto record = [&](uint64_t lanes, std::span<const uint64_t> addresses,
                         TranslatedMemoryProgress &progress) {
-        if (d.rejects_private_atomic(lanes))
+        if (d.monitor_memviol || d.rejects_private_atomic(lanes))
           return;
         if (check_residency) {
           progress.nonresident_lanes = nonresident_texel_lanes(d, addresses, lanes, ranges.get());
@@ -3160,7 +3198,8 @@ ComputeUnitCore::issue_instruction_impl(Wavefront *active, MaybeAsyncWindow<Enab
         auto *d = inst->data_as<VectorMemState>();
         d->issue_pc = active->pc;
       }
-      const VmAccessOutcome memory_outcome = route_memory_inst(std::move(decoded.value()), *active);
+      const VmAccessOutcome memory_outcome = route_memory_inst(
+          std::move(decoded.value()), *active, config_.memory_wait_checks_enabled());
       if (active->instruction_execution_failed()) [[unlikely]] {
         fail_current_instruction();
         return IssueOutcome::Issued;
@@ -3255,10 +3294,8 @@ ComputeUnitCore::step_impl(MmaAdmissionCache *admission, uint32_t async_wave_siz
       if (wf->nop_ready_cycle_ > cycle_counter_ && !wf->debug_single_step())
         continue;
       if (wf->sleep_cycles() != 0) {
-        if (!wf->debug_single_step()) {
-          wf->tick_sleep();
+        if (!wf->debug_single_step() && wf->tick_sleep())
           continue;
-        }
         wf->set_sleep_cycles(0);
       }
       const uint64_t slot_bit = uint64_t{1} << wf->wf_id();

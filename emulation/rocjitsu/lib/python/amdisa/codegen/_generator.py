@@ -7505,7 +7505,7 @@ class CodeGenerator:
         if scalar_fp_body is not None:
             if ctx.arch_name == 'rdna3_5':
                 return scalar_fp_body
-            # GFX12 Compatibility reproduces the measured result and sticky FP
+            # Compatibility reproduces the measured gfx12 result and sticky FP
             # causes. Explicit precision/reporting modes use the rj-arith API
             # and preserve its unsupported-operation and observer contracts.
             from amdisa.codegen.execute.rj_arith_float import RjArithBody
@@ -8185,6 +8185,8 @@ class CodeGenerator:
             # Sleep has no architectural register effect, but FUNCTIONAL
             # execution must return to the event loop so peer CUs can make
             # progress.
+            if sem.name == 'S_MONITOR_SLEEP':
+                return '  wf.issue_monitor_sleep(simm16.encoding_value_);'
             if sem.name in ('S_SLEEP', 'S_SLEEP_VAR'):
                 return self._sleep_body(sem)
             if self.isa_spec.profile.models_nop_issue_delay:
@@ -9895,6 +9897,8 @@ class CodeGenerator:
             )
         L.append(f'  {self._memory_cache_policy()}')
         L.append(f'  d->non_temporal = {nt};')
+        if sem.operation == 'monitor':
+            L.append('  d->monitors_memory = true;')
         if sem.name.startswith('CLUSTER_LOAD_'):
             L.append('  d->request_force_l1_bypass = true;')
         L.append('  flat_calculate_addresses(inst_, wf, *d);')
@@ -14858,6 +14862,8 @@ class CodeGenerator:
                             ctor_body_parts.append(
                                 f'if ({feedback}) flags_ |= CONDITIONAL_LAST_VGPR_DEF;'
                             )
+                    if _mem_sem and _mem_sem.operation == 'monitor':
+                        ctor_body_parts.append('flags_ |= MEMORY_MONITOR;')
                     if (
                         _mem_sem
                         and inst.name.startswith('GLOBAL_LOAD_TR')
@@ -17056,6 +17062,7 @@ class CodeGenerator:
                 from amdisa.codegen.execute.rj_arith_vector import (
                     CDNA5_COMBINED32,
                     CDNA5_PACKED_TERNARY,
+                    supports_modified_move,
                     VECTOR32_NAMES,
                     CDNA_INTEGER_ALIASES,
                     INTEGER_ARCHITECTURES,
@@ -17166,6 +17173,12 @@ class CodeGenerator:
                         or i.name in INTEGER_DOT_NAMES
                         for i in all_insts
                     )
+                )
+                uses_vector_arith |= any(
+                    supports_modified_move(
+                        self.isa_spec.arch_name, i.name, enc.enc_name == 'ENC_VOP3'
+                    )
+                    for i in all_insts
                 )
                 uses_vector_arith |= self.isa_spec.arch_name in (
                     'cdna4',

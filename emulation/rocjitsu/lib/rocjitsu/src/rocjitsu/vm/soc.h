@@ -103,9 +103,11 @@ public:
       xcd->set_apertures(shared_base, shared_limit, private_base, private_limit, ptr32);
   }
   void set_vmid_apertures(uint32_t vmid, uint64_t shared_base, uint64_t shared_limit,
-                          uint64_t private_base, uint64_t private_limit) {
+                          uint64_t private_base, uint64_t private_limit,
+                          bool dword_alignment = false) {
     for (auto *xcd : xcds_)
-      xcd->set_vmid_apertures(vmid, shared_base, shared_limit, private_base, private_limit);
+      xcd->set_vmid_apertures(vmid, shared_base, shared_limit, private_base, private_limit,
+                              dword_alignment);
   }
   void clear_vmid_apertures() {
     for (auto *xcd : xcds_)

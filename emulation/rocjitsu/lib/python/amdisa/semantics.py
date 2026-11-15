@@ -2276,7 +2276,12 @@ def _derive_flat(name: str) -> InstructionSemantics | None:
             if info:
                 esz, ne, se = info
                 return InstructionSemantics(
-                    name, 'flat_load', elem_size=esz, num_elems=ne, sign_extend=se
+                    name,
+                    'flat_load',
+                    operation='monitor',
+                    elem_size=esz,
+                    num_elems=ne,
+                    sign_extend=se,
                 )
 
     is_store = '_STORE_' in upper

@@ -1170,7 +1170,7 @@ int rj_arith_s_fmaak_f32_gfx1250(uint64_t flags, uint64_t instruction_flags, uin
 int rj_arith_s_fmamk_f32_gfx1250(uint64_t flags, uint64_t instruction_flags, uint32_t *d,
                                  uint32_t a, uint32_t b, uint32_t c, uint32_t *excp_flag_user);
 
-// gfx1250 scalar conversions retain NaN payloads, including signaling NaNs.
+// gfx1250 scalar conversions quiet signaling NaNs and preserve the leading payload bits.
 // Compatibility ignores denormal flushing; CVT_F16_F32 honors FP16 overflow
 // saturation. HI selects the upper input half; PK_RTZ packs a low and b high.
 // FP status is unused; strict empirical modes are unsupported.

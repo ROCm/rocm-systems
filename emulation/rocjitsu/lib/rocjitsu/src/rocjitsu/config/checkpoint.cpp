@@ -630,7 +630,8 @@ util::Result save_checkpoint(const std::string &path, const SoC &soc, uint64_t t
             record.add_num_vgprs(w->num_vgprs());
           if (cdna4 || cdna3_wave || cu->arch() == ROCJITSU_CODE_ARCH_CDNA2)
             record.add_accum_vgpr_base(w->accum_vgpr_base());
-          record.add_sleep_cycles(w->sleep_cycles());
+          record.add_dword_alignment(w->dword_alignment());
+          record.add_sleep_cycles(w->saved_sleep_cycles());
           if (gfx12) {
             record.add_sleep_wakeup(w->sleep_wakeup());
             record.add_barrier_complete_mask(unsigned(w->workgroup_barrier_complete()) |
@@ -1095,6 +1096,7 @@ util::FailureOr<LoadedConfig> restore_checkpoint(const std::string &path,
               wait && *wait != fb::GraphicsWait_None && *wait != fb::GraphicsWait_LaunchDefaults)
             return emit_error.emit() << "Unsupported checkpoint graphics wait";
           wf->set_status_raw(wf_state->status());
+          wf->set_dword_alignment(wf_state->dword_alignment());
           wf->set_sleep_cycles(wf_state->sleep_cycles());
           if (wf->supports_sleep_wakeup_credit())
             wf->set_sleep_wakeup(wf_state->sleep_wakeup());

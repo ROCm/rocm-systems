@@ -25,10 +25,10 @@ void scaled_widen_x86_64_v4(int lanes, uint64_t exec_mask, ScaledSource source,
 // inactive lanes; only gfx950 preserves D for scale 255. scale_shift selects B bits.
 template <ScaledSource Source, bool ByteScale>
 void wide_scaled_widen_x86_64_v3(int lanes, uint64_t exec_mask, ScaledDestination destination,
-                                 bool saturate, int scale_shift, uint32_t *const *d,
+                                 uint64_t flags, int scale_shift, uint32_t *const *d,
                                  const uint32_t *const *a, const uint32_t *b);
 template <ScaledSource Source, bool ByteScale>
 void wide_scaled_widen_x86_64_v4(int lanes, uint64_t exec_mask, ScaledDestination destination,
-                                 bool saturate, int scale_shift, uint32_t *const *d,
+                                 uint64_t flags, int scale_shift, uint32_t *const *d,
                                  const uint32_t *const *a, const uint32_t *b);
 } // namespace rocjitsu::arith

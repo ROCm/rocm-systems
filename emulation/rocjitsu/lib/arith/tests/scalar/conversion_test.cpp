@@ -185,10 +185,10 @@ TEST(ScalarConversionGfx1250, ArithmeticAndPolicy) {
                         {rj_arith_s_cvt_u32_f32_gfx1250, 0x4f800000, 0xffffffff},
                         {rj_arith_s_cvt_u32_f32_gfx1250, 0xbf800000, 0},
                         {rj_arith_s_cvt_f16_f32_gfx1250, 0x33800000, 1},
-                        {rj_arith_s_cvt_f16_f32_gfx1250, 0x7f800001, 0x7c01},
+                        {rj_arith_s_cvt_f16_f32_gfx1250, 0x7f800001, 0x7e00},
                         {rj_arith_s_cvt_f16_f32_gfx1250, 0x47800000, 0x7bff},
-                        {rj_arith_s_cvt_f32_f16_gfx1250, 0x7c01, 0x7f802000},
-                        {rj_arith_s_cvt_hi_f32_f16_gfx1250, 0x7c010000, 0x7f802000},
+                        {rj_arith_s_cvt_f32_f16_gfx1250, 0x7c01, 0x7fc02000},
+                        {rj_arith_s_cvt_hi_f32_f16_gfx1250, 0x7c010000, 0x7fc02000},
                         {rj_arith_s_cvt_hi_f32_f16_gfx1250, 0x00010000, 0x33800000}};
   using namespace rocjitsu::arith::test;
   for (const auto &test : cases) {
@@ -218,7 +218,7 @@ TEST(ScalarConversionGfx1250, ArithmeticAndPolicy) {
   struct Packed {
     uint32_t a, b, expected;
   };
-  const Packed packed[] = {{0x7f800001, 0xffc12345, 0xfe097c01},
+  const Packed packed[] = {{0x7f800001, 0xffc12345, 0xfe097e00},
                            {0x47800000, 0xc7800000, 0xfbff7bff},
                            {0x33800000, 0xb3800000, 0x80010001}};
   for (const auto &test : packed) {

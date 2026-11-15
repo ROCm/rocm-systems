@@ -1737,6 +1737,26 @@ public:
     return vgpr_owner_for_range(physical_base, physical_count) != nullptr;
   }
 
+  // CDNA5 VALU uses the whole source tuple starting at V0 when either end is out of range.
+  [[nodiscard]] uint32_t cdna5_valu_source_base(uint32_t base, uint32_t words) const {
+    const auto &allocation = wavefront().vgpr_alloc();
+    return allocation.contains(base, words) ? base : allocation.base;
+  }
+
+  [[nodiscard]] bool cdna5_valu_source_uses_v0(const Operand &op) const {
+    auto base = op.simd_vgpr_base(wavefront());
+    return base && !wavefront().vgpr_alloc().contains(*base, op.vgpr_count());
+  }
+
+  [[nodiscard]] OperandReadView read_cdna5_valu_control(const Operand &op, uint64_t lanes,
+                                                        uint8_t bytes) const {
+    if (cdna5_valu_source_uses_v0(op))
+      return OperandReadView(op, wavefront(),
+                             fallback_storage(wavefront().vgpr_alloc().base, lanes, bytes), bytes,
+                             false);
+    return read_operand(op, lanes, bytes);
+  }
+
   [[nodiscard]] SgprReadRegion read_sgpr_region(uint32_t physical_base, uint32_t reg_count) const {
     const Wavefront *owner = sgpr_owner_for_range(physical_base, reg_count);
     if (!owner)

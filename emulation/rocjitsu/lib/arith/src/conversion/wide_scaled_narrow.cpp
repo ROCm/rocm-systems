@@ -99,11 +99,18 @@ int convert(uint64_t flags, uint64_t exec_mask, uint64_t mode, uint32_t *const *
       } else {
         raw = a[element / 2][lane] >> ((element % 2) * 16);
       }
+      float decoded = decode<Src>(raw, flush_input);
       float scaled;
       if constexpr (FullScale) {
-        scaled = decode<Src>(raw, flush_input) / as_float(scale[lane]);
+        scaled = decoded / as_float(scale[lane]);
+        if constexpr (Dst == Destination::Fp8 || Dst == Destination::Bf8) {
+          // CDNA5 7.6.2 distinguishes an infinite source from a finite quotient overflow.
+          if ((flags & RJ_ARITH_FP16_OVFL) && (as_bits(decoded) & 0x7fffffffU) == 0x7f800000U) {
+            scaled = as_float(as_bits(scaled) | 0x00400000U);
+          }
+        }
       } else {
-        scaled = decode<Src>(raw, flush_input) * inverse_scale;
+        scaled = decoded * inverse_scale;
       }
       uint32_t value =
           scaled_narrow_encode<Dst, Stochastic>(as_bits(scaled), seed, flags & RJ_ARITH_FP16_OVFL);

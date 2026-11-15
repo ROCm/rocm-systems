@@ -4435,6 +4435,16 @@ TEST(MemoryWaitFootprintTest, PackedConversionTracksSelectedScaleLanesAndBytes) 
       cases.emplace_back(words.begin(), words.end());
     }
   }
+  // v[23:25] crosses the allocation; the whole tuple reads v[0:2].
+  // Out-of-range scale and seed operands independently read V0.
+  const auto unpack =
+      cdna5::build_vop3(cdna5::kVCvtScalePk16F32Fp6Vop3, {.vdst = 8, .src0 = 279, .src1 = 280});
+  const auto pack = cdna5::build_vop3(cdna5::kVCvtScalef32SrPk8Fp8F32Vop3,
+                                      {.vdst = 16, .src0 = 279, .src1 = 280, .src2 = 281});
+  const auto discarded =
+      cdna5::build_vop3(cdna5::kVCvtScalePk16F32Fp6Vop3, {.vdst = 9, .src0 = 279, .src1 = 260});
+  for (auto words : {unpack, pack, discarded})
+    cases.emplace_back(words.begin(), words.end());
   check_vector_footprints(ROCJITSU_CODE_ARCH_CDNA5, 32, 24, cases);
 }
 

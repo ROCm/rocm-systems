@@ -93,9 +93,14 @@ inline void execute_wide_scaled_widen(Wavefront &wave, Binary32Function wave32,
   uint64_t exec_mask =
       wave.exec() & wave.vgpr_write_mask() & (wave.wf_size() == 32 ? 0xffffffffULL : ~0ULL);
   RegisterAccess registers(wave);
-  if (!exec_mask || wave.instruction_execution_failed() ||
-      !registers.owns_vgpr_range(source, input_words) ||
-      !registers.owns_vgpr_range(destination, output_words)) {
+  if (!exec_mask || wave.instruction_execution_failed())
+    return;
+  if constexpr (ByteScale) {
+    if (!wave.vgpr_alloc().contains(destination, output_words))
+      return;
+    source = registers.cdna5_valu_source_base(source, input_words);
+  } else if (!registers.owns_vgpr_range(source, input_words) ||
+             !registers.owns_vgpr_range(destination, output_words)) {
     return;
   }
   std::array<uint32_t, 64> selected_scales{};
@@ -110,7 +115,7 @@ inline void execute_wide_scaled_widen(Wavefront &wave, Binary32Function wave32,
       }
       const unsigned byte = selection.byte(16 * half);
       const uint64_t read_mask = ((data_mask >> (16 * half)) << selection.lane_base);
-      auto scales = registers.read_operand(scale, read_mask, 1u << byte);
+      auto scales = registers.read_cdna5_valu_control(scale, read_mask, 1u << byte);
       for (uint32_t lane = 16 * half; lane < 16 * (half + 1); ++lane) {
         if ((data_mask >> lane) & 1) {
           selected_scales[lane] = (scales.lane(selection.lane(lane)) >> (8 * byte)) & 0xff;
@@ -193,15 +198,30 @@ void execute_wide_scaled_narrow(Wavefront &wave, Wave32 wave32, Wave64 wave64, u
   uint64_t exec_mask =
       wave.exec() & wave.vgpr_write_mask() & (wave.wf_size() == 32 ? 0xffffffffULL : ~0ULL);
   RegisterAccess registers(wave);
-  if (!exec_mask || wave.instruction_execution_failed() ||
-      !registers.owns_vgpr_range(source_a, input_words) ||
-      (interleaved && !registers.owns_vgpr_range(source_b, 16)) ||
-      !registers.owns_vgpr_range(destination, output_words)) {
+  if (!exec_mask || wave.instruction_execution_failed())
+    return;
+  if constexpr (FullScale) {
+    if (!wave.vgpr_alloc().contains(destination, output_words))
+      return;
+    source_a = registers.cdna5_valu_source_base(source_a, input_words);
+  } else if (!registers.owns_vgpr_range(source_a, input_words) ||
+             (interleaved && !registers.owns_vgpr_range(source_b, 16)) ||
+             !registers.owns_vgpr_range(destination, output_words)) {
     return;
   }
-  VectorInput32 scale(registers, wave, scale_operand, exec_mask);
+  auto read_control = [&](const Operand &op, std::optional<VectorInput32> &input) {
+    if constexpr (FullScale)
+      if (registers.cdna5_valu_source_uses_v0(op))
+        return registers.read_vgpr_region(wave.vgpr_alloc().base, 1, exec_mask)
+            .lanes()
+            .value()
+            .data();
+    return input.emplace(registers, wave, op, exec_mask).data;
+  };
+  std::optional<VectorInput32> scale_input;
+  const uint32_t *scale = read_control(scale_operand, scale_input);
   for (uint32_t lane = 0; lane < wave.wf_size(); ++lane) {
-    if (!FullScale && ((scale.data[lane] >> 23) & 255) == 255) {
+    if (!FullScale && ((scale[lane] >> 23) & 255) == 255) {
       exec_mask &= ~(1ULL << lane);
     }
   }
@@ -247,8 +267,7 @@ void execute_wide_scaled_narrow(Wavefront &wave, Wave32 wave32, Wave64 wave64, u
       b[reg] = lanes.value().data();
     }
   } else if (seed_operand) {
-    seed.emplace(registers, wave, *seed_operand, exec_mask);
-    b[0] = seed->data;
+    b[0] = read_control(*seed_operand, seed);
   }
   if (wave.instruction_execution_failed()) {
     return;
@@ -256,17 +275,17 @@ void execute_wide_scaled_narrow(Wavefront &wave, Wave32 wave32, Wave64 wave64, u
   auto invoke = [&](uint32_t *const *d) {
     if constexpr (FullScale) {
       if constexpr (Ternary) {
-        return wave32(flags, uint32_t(exec_mask), 0, d, a.data(), b.data(), &scale.data);
+        return wave32(flags, uint32_t(exec_mask), 0, d, a.data(), b.data(), &scale);
       } else {
-        return wave32(flags, uint32_t(exec_mask), 0, d, a.data(), &scale.data);
+        return wave32(flags, uint32_t(exec_mask), 0, d, a.data(), &scale);
       }
     } else if constexpr (Ternary) {
       return wave.wf_size() == 32
-                 ? wave32(flags, uint32_t(exec_mask), 0, d, a.data(), b.data(), &scale.data)
-                 : wave64(flags, exec_mask, 0, d, a.data(), b.data(), &scale.data);
+                 ? wave32(flags, uint32_t(exec_mask), 0, d, a.data(), b.data(), &scale)
+                 : wave64(flags, exec_mask, 0, d, a.data(), b.data(), &scale);
     } else {
-      return wave.wf_size() == 32 ? wave32(flags, uint32_t(exec_mask), 0, d, a.data(), &scale.data)
-                                  : wave64(flags, exec_mask, 0, d, a.data(), &scale.data);
+      return wave.wf_size() == 32 ? wave32(flags, uint32_t(exec_mask), 0, d, a.data(), &scale)
+                                  : wave64(flags, exec_mask, 0, d, a.data(), &scale);
     }
   };
   if (auto status =

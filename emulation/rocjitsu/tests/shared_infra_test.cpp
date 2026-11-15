@@ -548,54 +548,37 @@ TEST(MfmaExecTest, Gfx1250SwmmacK128Iu8LocationsMatchHardwareReferenceKernels) {
   }
 }
 
-TEST(TransposeLoadTest, WmmaTrB8Wave32MatchesMatrixLayout) {
-  amdgpu::VectorMemState state(amdgpu::GLOBAL_MEM);
-  state.wf_size = 32;
-  state.num_elems = 2;
-  state.transpose = static_cast<uint8_t>(amdgpu::TransposeKind::WMMA_TR_B8);
-  state.response_data.resize(32 * 8);
-  for (uint32_t source_lane = 0; source_lane < 32; ++source_lane)
-    for (uint32_t byte = 0; byte < 8; ++byte)
-      state.response_data[source_lane * 8 + byte] = static_cast<uint8_t>(source_lane * 8 + byte);
+TEST(TransposeLoadTest, WmmaTrB8MatchesGfx1201InBothWaveSizes) {
+  // Captured on gfx1201 with source bytes 0..255. Each row of eight lanes
+  // increases all four result bytes by its lane index within that row.
+  constexpr uint32_t first_words[] = {0x18100800, 0x38302820, 0x98908880, 0xb8b0a8a0};
+  constexpr uint32_t second_words[] = {0x58504840, 0x78706860, 0xd8d0c8c0, 0xf8f0e8e0};
+  for (uint32_t width : {32u, 64u}) {
+    SCOPED_TRACE(width);
+    amdgpu::VectorMemState state(amdgpu::GLOBAL_MEM);
+    state.wf_size = width;
+    state.num_elems = 2;
+    state.lane_mask = ~uint64_t{0};
+    state.transpose = static_cast<uint8_t>(amdgpu::TransposeKind::WMMA_TR_B8);
+    state.response_data.assign(width * 8, 0xee);
+    for (uint32_t byte = 0; byte < 256; ++byte)
+      state.response_data[byte] = static_cast<uint8_t>(byte);
 
-  amdgpu::transpose_response(state);
-
-  ASSERT_EQ(state.num_elems, 2u);
-  ASSERT_EQ(state.response_data.size(), 32u * 8u);
-  for (uint32_t source_lane = 0; source_lane < 32; ++source_lane) {
-    const uint32_t k = (source_lane & 7u) + 8u * (source_lane >> 4);
-    for (uint32_t byte = 0; byte < 8; ++byte) {
-      const uint32_t row = byte + 8u * ((source_lane >> 3) & 1u);
-      const uint32_t lane = row + 16u * ((k >> 3) & 1u);
-      const uint32_t slot = (k & 3u) + 4u * ((k >> 2) & 1u);
-      EXPECT_EQ(state.response_data[lane * 8 + slot], static_cast<uint8_t>(source_lane * 8 + byte));
+    if (width == 64) {
+      EXPECT_EQ(amdgpu::transpose_request_lane_mask(state, width), UINT32_MAX);
     }
-  }
-}
-
-TEST(TransposeLoadTest, WmmaTrB8Wave64UsesFirst32AddressesAndOneVgpr) {
-  amdgpu::VectorMemState state(amdgpu::GLOBAL_MEM);
-  state.wf_size = 64;
-  state.num_elems = 2;
-  state.lane_mask = ~0ULL;
-  state.transpose = static_cast<uint8_t>(amdgpu::TransposeKind::WMMA_TR_B8);
-  state.response_data.assign(64 * 8, 0xEE);
-  for (uint32_t source_lane = 0; source_lane < 32; ++source_lane)
-    for (uint32_t byte = 0; byte < 8; ++byte)
-      state.response_data[source_lane * 8 + byte] = static_cast<uint8_t>(source_lane * 8 + byte);
-
-  EXPECT_EQ(amdgpu::transpose_request_lane_mask(state, state.wf_size), 0xFFFF'FFFFULL);
-  amdgpu::transpose_response(state);
-
-  ASSERT_EQ(state.num_elems, 1u);
-  ASSERT_EQ(state.response_data.size(), 64u * 4u);
-  for (uint32_t source_lane = 0; source_lane < 32; ++source_lane) {
-    const uint32_t k = (source_lane & 7u) + 8u * (source_lane >> 4);
-    for (uint32_t byte = 0; byte < 8; ++byte) {
-      const uint32_t row = byte + 8u * ((source_lane >> 3) & 1u);
-      const uint32_t lane = row + 16u * ((k >> 3) & 1u) + 32u * ((k >> 2) & 1u);
-      EXPECT_EQ(state.response_data[lane * 4 + (k & 3u)],
-                static_cast<uint8_t>(source_lane * 8 + byte));
+    amdgpu::transpose_response(state);
+    ASSERT_EQ(state.num_elems, width == 32 ? 2u : 1u);
+    ASSERT_EQ(state.response_data.size(), 256u);
+    for (uint32_t lane = 0; lane < 32; ++lane) {
+      for (uint32_t word : {0u, 1u}) {
+        const uint32_t expected =
+            (word ? second_words : first_words)[lane / 8] + 0x01010101u * (lane % 8);
+        const uint32_t index = width == 32 ? lane * 2 + word : lane + 32 * word;
+        uint32_t actual;
+        std::memcpy(&actual, state.response_data.data() + index * 4, sizeof(actual));
+        EXPECT_EQ(actual, expected) << lane << ", word " << word;
+      }
     }
   }
 }

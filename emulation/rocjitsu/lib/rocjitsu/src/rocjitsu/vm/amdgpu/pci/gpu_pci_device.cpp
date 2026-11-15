@@ -1557,10 +1557,11 @@ bool GpuPciDevice::write_register(uint64_t byte_offset, uint32_t value) {
 
 bool GpuPciDevice::program_shader_apertures(uint32_t vmid, uint64_t shared_base,
                                             uint64_t shared_limit, uint64_t private_base,
-                                            uint64_t private_limit) {
+                                            uint64_t private_limit, bool dword_alignment) {
   if (soc_ == nullptr)
     return false;
-  soc_->set_vmid_apertures(vmid, shared_base, shared_limit, private_base, private_limit);
+  soc_->set_vmid_apertures(vmid, shared_base, shared_limit, private_base, private_limit,
+                           dword_alignment);
   return true;
 }
 

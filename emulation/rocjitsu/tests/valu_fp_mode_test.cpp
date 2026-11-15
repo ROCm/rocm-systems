@@ -1466,6 +1466,31 @@ std::vector<ArithmeticCase> fma_mix_f32_cases() {
                            ? (0x1f80u & (0x9fc0u))
                            : (0x9f60u)});
     }
+    // A selected FP16 subnormal becomes a normal FP32 value on widening.
+    // gfx1100 and gfx1201 flush it according to the FP16 input bit alone.
+    for (unsigned source = 0; source < 3; ++source) {
+      for (bool high : {false, true}) {
+        std::array<uint32_t, 3> words{0xcc200006u, 0x040a0300u};
+        if (high)
+          words[0] |= 1u << (11 + source);
+        if (source == 2)
+          words[0] |= 1u << 14;
+        else
+          words[1] |= 1u << (27 + source);
+        uint32_t inputs[] = {source == 2 ? 0u : 0x3f800000u, 0x3f800000u, 0};
+        inputs[source] = high ? 0x00010000u : 1u;
+        for (unsigned mode : {0x30u, 0x40u, 0xb0u, 0xc0u}) {
+          cases.push_back({std::format("Arch{}HalfSource{}High{}Mode{}", unsigned(arch), source,
+                                       unsigned(high), mode),
+                           arch,
+                           words,
+                           {{0, inputs[0]}, {1, inputs[1]}, {2, inputs[2]}},
+                           {{6, (mode & 0x40) ? 0x33800000u : 0u}},
+                           mode,
+                           FE_TONEAREST});
+        }
+      }
+    }
   }
   return cases;
 }
@@ -5505,6 +5530,33 @@ struct ForceScalarGuard {
   bool original = util::force_scalar();
   ~ForceScalarGuard() { util::set_force_scalar_for_testing(original); }
 };
+
+TEST(ValuFpModeHelpers, Gfx1150MovesModifyTheSelectedSignBit) {
+  ForceScalarGuard guard;
+  for (bool scalar : {false, true}) {
+    util::set_force_scalar_for_testing(scalar);
+    for (bool dpp : {false, true}) {
+      // gfx1150 E64 and identity DPP encodings. ABS and NEG are raw sign-bit
+      // operations, including on signaling NaNs. OMOD does not scale a MOV.
+      const uint32_t source = dpp ? 0xfau : 0x02010100u;
+      const uint32_t permutation = dpp ? 0xff00e400u : 0;
+      expect_arithmetic_case({"MoveB32Abs",
+                              ROCJITSU_CODE_ARCH_RDNA3_5,
+                              {0xd5810106u, source | (3u << 27), permutation},
+                              {{0, 0xff800123u}},
+                              {{6, 0x7f800123u}},
+                              0,
+                              FE_TONEAREST});
+      expect_arithmetic_case({"MoveB16NegHigh",
+                              ROCJITSU_CODE_ARCH_RDNA3_5,
+                              {0xd59c4806u, source | (1u << 29), permutation},
+                              {{0, 0x7c011234u}},
+                              {{6, 0xfc01beefu}},
+                              0,
+                              FE_TONEAREST});
+    }
+  }
+}
 
 TEST(ValuFpModeHelpers, Gfx1150VectorExceptionsAreStickyAndMaskAware) {
   struct Witness {

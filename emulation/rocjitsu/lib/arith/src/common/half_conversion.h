@@ -11,9 +11,8 @@
 
 namespace rocjitsu::arith::RJ_ARITH_IMPL_NAMESPACE {
 
-// Round toward zero to FP16, saturating finite overflow. Preserve a nonzero NaN
-// payload, optionally setting its quiet bit.
-template <bool QuietNaN = true> inline uint16_t half_rtz(uint32_t raw) {
+// Round toward zero to FP16, saturating finite overflow and quieting NaNs.
+inline uint16_t half_rtz(uint32_t raw) {
   // Adapted from rocjitsu's util::f32_to_f16_rtz; RDNA4 quiets source NaNs.
   uint32_t sign = (raw >> 16) & 0x8000;
   int exponent = (raw >> 23) & 255;
@@ -21,7 +20,7 @@ template <bool QuietNaN = true> inline uint16_t half_rtz(uint32_t raw) {
   if (exponent == 255) {
     uint32_t payload = fraction >> 13;
     if (fraction) {
-      payload = QuietNaN ? payload | 0x200 : (payload ? payload : 1);
+      payload |= 0x200;
     }
     return uint16_t(sign | 0x7c00 | payload);
   }

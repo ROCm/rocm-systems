@@ -95,6 +95,9 @@ void check(Call call) {
         SCOPED_TRACE(::testing::Message() << cpu << '/' << semantics << '/' << scenario);
         Mask exec_mask = exec_mask_for_case<Lanes>(scenario);
         uint64_t flags = cpu | semantics | (scenario % 2 ? RJ_ARITH_FP16_OVFL : 0);
+        if (ByteScale && Dst == 0 && scenario == 2) {
+          flags |= RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS;
+        }
         int destination = scenario == 0 ? 8 : scenario == 2 ? 0 : scenario == 3 ? 3 : 6;
         int shift = ByteScale ? (scenario % 4) * 8 : 23;
         uint64_t mode = ByteScale ? uint64_t(scenario % 4) << 16 : 0;
@@ -118,6 +121,9 @@ void check(Call call) {
                 code |= ((input.v[offset / 32][lane] >> (offset % 32)) & 1) << bit;
               }
               uint32_t value = reference(Source, Dst, code, scale, flags & RJ_ARITH_FP16_OVFL);
+              if ((flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS) && (value & 0x7f800000U) == 0) {
+                value &= 0x80000000U;
+              }
               int reg = destination + (Dst == 0 ? element : element / 2);
               if (Dst == 0 || element % 2 == 0) {
                 expected.v[reg][lane] = value;

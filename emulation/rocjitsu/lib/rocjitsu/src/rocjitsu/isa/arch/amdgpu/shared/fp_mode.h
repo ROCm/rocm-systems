@@ -265,6 +265,13 @@ inline minmax::LegacyPolicy legacy_minmax_policy(rj_code_arch_t arch, bool ieee_
   std::abort();
 }
 
+/// @brief Narrow the FP32 approximation produced by CDNA5 BF16 transcendentals.
+/// The default mode rounds to nearest even. Keep the existing truncation for
+/// nondefault modes until their behavior is qualified on gfx1250.
+inline uint16_t narrow_trans_bf16(float result, uint32_t round_mode) {
+  return round_mode == 0 ? util::f32_to_bf16_rne(result) : util::f32_to_bf16(result);
+}
+
 /// @brief Whether floating operations with exception support quiet signaling NaNs.
 inline bool quiets_nan(rj_code_arch_t arch, bool ieee_mode) {
   return arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5 || ieee_mode;

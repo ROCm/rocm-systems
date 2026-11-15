@@ -83,6 +83,21 @@ void check(Call call) {
   input.v[1][0] = Format == 2 ? fp4_cutoff : cutoff;
   input.v[2][0] = Src == 0 ? 0x7fc12345U : Src == 1 ? 0x7e017c00U : 0x7fc17f80U;
   input.v[3][0] = Src == 0 ? 0xff800000U : Src == 1 ? 0xfc007c00U : 0xff807f80U;
+  if constexpr (Format >= 3) {
+    // Positive/negative source infinity versus finite overflow after division by 0.5.
+    for (int lane : {0, 1}) {
+      input.v[48][lane] = 0x3f000000U;
+      if constexpr (Src == 0) {
+        input.v[0][lane] = 0x7f800000U;
+        input.v[1][lane] = 0xff800000U;
+        input.v[2][lane] = 0x7f7fffffU;
+        input.v[3][lane] = 0xff7fffffU;
+      } else {
+        input.v[0][lane] = Src == 1 ? 0xfc007c00U : 0xff807f80U;
+        input.v[1][lane] = Src == 1 ? 0xfbff7bffU : 0xff7f7f7fU;
+      }
+    }
+  }
   if constexpr (Src == 0 && !FullScale) {
     // Scaling by 2^-127 makes input-denormal handling observable after narrowing.
     input.v[0][1] = 0x00400000U;
@@ -132,13 +147,19 @@ void check(Call call) {
                   (raw & 0x7f800000U) == 0) {
                 raw &= 0x80000000U;
               }
+              const float input_value = decode(Src, raw);
               float value = FullScale
-                                ? decode(Src, raw) / std::bit_cast<float>(input.v[48][lane])
-                                : float(double(decode(Src, raw)) / std::ldexp(1.0, exponent - 127));
+                                ? input_value / std::bit_cast<float>(input.v[48][lane])
+                                : float(double(input_value) / std::ldexp(1.0, exponent - 127));
               uint32_t code;
               if constexpr (Format >= 3) {
-                code = fp8_narrow_reference(Format == 4, Stochastic, std::bit_cast<uint32_t>(value),
-                                            seed, flags & RJ_ARITH_FP16_OVFL, 950);
+                if (std::isinf(input_value) && (flags & RJ_ARITH_FP16_OVFL)) {
+                  code = std::signbit(value) ? 0xffU : 0x7fU;
+                } else {
+                  code =
+                      fp8_narrow_reference(Format == 4, Stochastic, std::bit_cast<uint32_t>(value),
+                                           seed, flags & RJ_ARITH_FP16_OVFL, 950);
+                }
               } else {
                 code = quantize_finite<(Bf6 ? 3 : 2), (Format == 2 ? 1
                                                        : Bf6       ? 2

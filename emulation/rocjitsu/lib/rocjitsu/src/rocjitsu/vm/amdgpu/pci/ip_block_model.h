@@ -74,12 +74,14 @@ public:
   /// @brief Apply the graphics block's selected VMID register bank to shader CUs.
   [[nodiscard]] virtual bool program_shader_apertures(uint32_t vmid, uint64_t shared_base,
                                                       uint64_t shared_limit, uint64_t private_base,
-                                                      uint64_t private_limit) {
+                                                      uint64_t private_limit,
+                                                      bool dword_alignment) {
     (void)vmid;
     (void)shared_base;
     (void)shared_limit;
     (void)private_base;
     (void)private_limit;
+    (void)dword_alignment;
     return false;
   }
   [[nodiscard]] virtual bool deliver_interrupt(const InterruptEntry &entry) = 0;

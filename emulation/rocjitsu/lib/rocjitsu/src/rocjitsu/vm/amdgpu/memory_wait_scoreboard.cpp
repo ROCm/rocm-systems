@@ -335,6 +335,9 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
   // VOPD only executes its two operations in a wave32.
   if (wf.wf_size() != 32 && name.starts_with("v_dual_"))
     return;
+  const bool cdna5_wide_conversion =
+      wf.cu().arch() == ROCJITSU_CODE_ARCH_CDNA5 &&
+      (name.starts_with("v_cvt_scale_pk") || name.starts_with("v_cvt_scalef32_"));
   const bool gfx10_valu = (inst.flags() & VALU) && (wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA1 ||
                                                     wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA2);
   const bool vector = name.starts_with("v_") || name.starts_with("ds_") ||
@@ -354,6 +357,12 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
   RegisterModifiers modifiers;
   inst.amdgpu_register_modifiers(modifiers);
   const RegisterAccess registers(wf);
+  if (cdna5_wide_conversion) {
+    auto destination = registers.destination_register(*inst.dst_operand(0));
+    if (!destination ||
+        !wf.vgpr_alloc().contains(wf.vgpr_alloc().base + destination->index, destination->width))
+      return;
+  }
   if (modifiers.image_address) {
     uint32_t components = modifiers.image_coordinate_count;
     uint32_t prefix = modifiers.image_prefix_words;
@@ -538,6 +547,8 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
     return range ? range->register_ref() : std::nullopt;
   };
   auto resolve = [&](const Operand &op, bool write) -> std::optional<RegisterRef> {
+    if (cdna5_wide_conversion && !write && registers.cdna5_valu_source_uses_v0(op))
+      return RegisterRef{RegClass::VGPR, 0, static_cast<uint8_t>(op.vgpr_count())};
     // MMA execution applies GPR_IDX only to ordinary VGPRs, never its
     // separate accumulator bank. Keep that bank's decoded identity intact.
     if (matrix && wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA3_5)

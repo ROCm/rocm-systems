@@ -92,9 +92,11 @@ public:
   }
 
   void set_vmid_apertures(uint32_t vmid, uint64_t shared_base, uint64_t shared_limit,
-                          uint64_t private_base, uint64_t private_limit) {
+                          uint64_t private_base, uint64_t private_limit,
+                          bool dword_alignment = false) {
     for (auto *se : shader_engines_)
-      se->spi().set_vmid_apertures(vmid, shared_base, shared_limit, private_base, private_limit);
+      se->spi().set_vmid_apertures(vmid, shared_base, shared_limit, private_base, private_limit,
+                                   dword_alignment);
   }
 
   void clear_vmid_apertures() {

@@ -1,13 +1,13 @@
 # Copyright (c) 2026 Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-"""GFX11.5 and GFX12 scalar floating-point operations on SGPRs, independent of EXEC."""
+"""GFX11.5, GFX12 and CDNA5 scalar floating-point operations on SGPRs, independent of EXEC."""
 
 from . import ExecuteContext
 
 
 def gen_scalar_fp(ctx: ExecuteContext) -> str | None:
-    if ctx.arch_name not in ('rdna3_5', 'rdna4'):
+    if ctx.arch_name not in ('rdna3_5', 'rdna4', 'cdna5'):
         return None
     parts = ctx.inst.name.split('_')
     if parts[0] != 'S' or parts[-1] not in ('F16', 'F32', 'I32', 'U32'):
@@ -18,10 +18,9 @@ def gen_scalar_fp(ctx: ExecuteContext) -> str | None:
         rel = parts[2].capitalize()
         body = f'compare<amdgpu::scalar_fp::{fmt}, amdgpu::comparison::{rel}>(wf, ssrc0, ssrc1)'
     elif op in ('ADD', 'SUB', 'MUL', 'FMAC', 'FMAAK', 'FMAMK') and fmt.startswith('F'):
-        if op == 'FMAAK':
-            operands = 'ssrc0, ssrc1, &simm32'
-        elif op == 'FMAMK':
-            operands = 'ssrc0, simm32, &ssrc1'
+        if op in ('FMAAK', 'FMAMK'):
+            a, b, c = ctx.src_ops
+            operands = f'{a}, {b}, &{c}'
         elif op == 'FMAC':
             operands = 'ssrc0, ssrc1, &sdst'
         else:

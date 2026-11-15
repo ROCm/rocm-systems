@@ -17,6 +17,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <set>
 #include <shared_mutex>
 #include <span>
 #include <string_view>
@@ -326,6 +327,15 @@ public:
     translated_local_cache_used_.store(true, std::memory_order_release);
   }
 
+  /// Arm CDNA5 MWAIT for the requesting lanes. A changed watched line broadcasts
+  /// one notification to all waves, even waves monitoring different addresses.
+  uint64_t monitor_lines(uint32_t vmid, std::span<const uint64_t> addresses, uint64_t lanes);
+  uint64_t monitor_generation() const {
+    return monitor_generation_.load(std::memory_order_acquire);
+  }
+  void notify_monitor_line(uint32_t vmid, uint64_t address);
+  void invalidate_monitors();
+
   /// @brief Register an L2 cache in this device-local coherence domain.
   void register_l2_cache(L2Cache *cache);
   /// @brief Remove an L2 cache before its storage is destroyed.
@@ -401,6 +411,12 @@ private:
   std::mutex atomic_mutex_;
   mutable util::DistributedSharedMutex l1_access_gate_;
   mutable std::shared_mutex mutex_;
+  void broadcast_monitor_done(); // Caller holds monitor_mutex_.
+  std::mutex monitor_mutex_;
+  std::set<std::pair<uint32_t, uint64_t>> monitored_lines_;
+  bool has_virtual_monitors_ = false;
+  std::atomic<bool> has_monitors_{false};
+  std::atomic<uint64_t> monitor_generation_{1};
   std::atomic<uint64_t> data_epoch_{1};
   std::atomic<uint64_t> instruction_epoch_{1};
   std::atomic<uint64_t> local_backing_epoch_{1};

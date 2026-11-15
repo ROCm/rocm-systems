@@ -1250,6 +1250,7 @@ int rj_arith_v_cvt_scalef32_pk32_bf16_bf6_w64_gfx950(uint64_t flags, uint64_t ex
 // gfx1250: A holds three VGPRs with sixteen six-bit elements; B holds packed
 // E8M0 scale bytes selected by CVT_BYTE. D has sixteen F32 or eight packed
 // F16/BF16 VGPRs. Scale255 produces NaNs; inactive lanes preserve D.
+// F32 results honor RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS.
 int rj_arith_v_cvt_scale_pk16_f32_fp6_w32_gfx1250(uint64_t flags, uint32_t exec_mask,
                                                   uint64_t instruction_flags, uint32_t *const *d,
                                                   const uint32_t *const *a,
@@ -1278,6 +1279,7 @@ int rj_arith_v_cvt_scale_pk16_bf16_bf6_w32_gfx1250(uint64_t flags, uint32_t exec
 // gfx1250 PK8: A holds one FP4 or two FP8/BF8 VGPRs; D holds eight F32
 // or four packed F16/BF16 VGPRs. B and CVT_BYTE select an E8M0 scale;
 // scale 255 produces a canonical positive NaN, including for NaN inputs.
+// F32 results honor RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS.
 int rj_arith_v_cvt_scale_pk8_f32_fp4_w32_gfx1250(uint64_t flags, uint32_t exec_mask,
                                                  uint64_t instruction_flags, uint32_t *const *d,
                                                  const uint32_t *const *a,
@@ -1676,7 +1678,8 @@ int rj_arith_v_cvt_scalef32_sr_pk16_bf6_bf16_w32_gfx1250(
 // gfx1250 PK8 narrowing divides eight values by the full FP32 scale. A has
 // eight FP32 or four packed FP16/BF16 VGPRs; D has one FP4 or two FP8/BF8 VGPRs.
 // RNE uses B[0] as scale; SR uses B[0] seed/C[0] scale, advancing per element.
-// FP8/BF8 use OCP encodings and honor FP16_OVFL saturation; FP4 ignores it.
+// FP8/BF8 use OCP encodings. FP16_OVFL saturates finite overflow and maps
+// infinite inputs to NaN. With FP16_OVFL clear, infinity maps to FP8 NaN or BF8 infinity.
 // EXEC, overlap and semantics support follow the PK16 forms above.
 int rj_arith_v_cvt_scalef32_pk8_fp4_f32_w32_gfx1250(uint64_t flags, uint32_t exec_mask,
                                                     uint64_t instruction_flags, uint32_t *const *d,

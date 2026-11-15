@@ -41,6 +41,7 @@ class Gfx10CheckpointScheduler;
 namespace amdgpu {
 
 struct Pm4FailureState;
+class VectorMemState;
 
 // Forward declaration - wavefront accesses registers through its CU.
 class ComputeUnitCore;
@@ -704,6 +705,8 @@ public:
   uint64_t private_aperture_base() const { return private_aperture_base_; }
   bool flat_pointer32() const { return flat_pointer32_; }
   uint64_t private_aperture_limit() const { return private_aperture_limit_; }
+  bool dword_alignment() const { return dword_alignment_; }
+  void set_dword_alignment(bool value) { dword_alignment_ = value; }
   bool use_wave_apertures() const { return flat_pointer32_ || aperture_override_; }
   void set_apertures(uint64_t sb, uint64_t sl, uint64_t pb, uint64_t pl, bool override_launch) {
     aperture_override_ = override_launch;
@@ -1000,7 +1003,16 @@ public:
   /// over its own instructions rather than parked at the sleep, which changes
   /// where an asynchronous debugger suspend lands inside it.
   uint32_t sleep_cycles() const { return sleep_cycles_; }
-  void set_sleep_cycles(uint32_t cycles) { sleep_cycles_ = cycles; }
+  void set_sleep_cycles(uint32_t cycles) {
+    monitor_sleeping_ = false;
+    sleep_cycles_ = cycles;
+  }
+  void issue_memory_monitor(const VectorMemState &request);
+  bool memory_monitor_wait() const;
+  void clear_memory_monitor() { monitor_generation_ = 0; }
+  void issue_monitor_sleep(uint16_t immediate);
+  // A context restore resumes after S_MONITOR_SLEEP. Ordinary sleep retains its delay.
+  uint32_t saved_sleep_cycles() const { return monitor_sleeping_ ? 0 : sleep_cycles_; }
   static constexpr bool supports_sleep_wakeup_credit(rj_code_arch_t arch) {
     return arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5;
   }
@@ -1011,13 +1023,20 @@ public:
     // A failed S_SLEEP_VAR operand read must leave its one-shot credit intact.
     if (instruction_execution_failed())
       return;
-    sleep_cycles_ = sleep_wakeup_ ? 0 : delay;
+    set_sleep_cycles(sleep_wakeup_ ? 0 : delay);
     sleep_wakeup_ = false;
   }
   static constexpr uint32_t kSleepForever = UINT32_MAX;
-  void tick_sleep() {
-    if (sleep_cycles_ != kSleepForever)
-      --sleep_cycles_;
+  // True when this cycle was spent sleeping. A monitor notification makes
+  // the next instruction eligible in this cycle.
+  bool tick_sleep() {
+    if (monitor_sleeping_ && !memory_monitor_wait()) {
+      set_sleep_cycles(0);
+      return false;
+    }
+    if (sleep_cycles_ != kSleepForever && --sleep_cycles_ == 0)
+      monitor_sleeping_ = false;
+    return true;
   }
   bool shader_can_write_ttmp() const {
     return in_trap_handler() || (status_raw() & kStatusPrivMask);
@@ -1135,6 +1154,11 @@ public:
   bool debug_suspended() const { return debug_suspended_; }
   void set_debug_suspended(bool v) {
     const bool was_runnable = !is_halted() && !debug_paused();
+    if (!v && debug_suspended_) {
+      monitor_generation_ = 0;
+      if (monitor_sleeping_)
+        set_sleep_cycles(0);
+    }
     debug_suspended_ = v;
     if (was_runnable != (!is_halted() && !debug_paused()))
       update_activity_counts(!is_halted(), was_runnable);
@@ -1237,6 +1261,7 @@ public:
     uint32_t gfx12_trap_ctrl_raw = 0;
     uint32_t trap_id = 0;
     uint32_t sleep_cycles = 0;
+    bool monitor_sleeping = false;
     bool debug_halted = false;
     bool single_step = false;
     bool fatal_exception_pending = false;
@@ -1250,6 +1275,7 @@ public:
                           gfx12_trap_ctrl_raw_,
                           trap_id_,
                           sleep_cycles_,
+                          monitor_sleeping_,
                           debug_halted_,
                           single_step_,
                           fatal_exception_pending_,
@@ -1263,6 +1289,7 @@ public:
     gfx12_trap_ctrl_raw_ = saved.gfx12_trap_ctrl_raw;
     trap_id_ = saved.trap_id;
     sleep_cycles_ = saved.sleep_cycles;
+    monitor_sleeping_ = saved.monitor_sleeping;
     set_debug_halted(saved.debug_halted);
     single_step_ = saved.single_step;
     fatal_exception_pending_ = saved.fatal_exception_pending;
@@ -1359,6 +1386,7 @@ public:
     shader_engine_id_ = 0;
     shared_aperture_base_ = 0;
     shared_aperture_limit_ = 0;
+    dword_alignment_ = false;
     private_aperture_base_ = 0;
     private_aperture_limit_ = 0;
     flat_pointer32_ = false;
@@ -1388,7 +1416,8 @@ public:
     instruction_execution_error_ = InstructionExecutionError::None;
     instruction_execution_error_detail_ = nullptr;
     instruction_execution_error_mnemonic_.clear();
-    sleep_cycles_ = 0;
+    set_sleep_cycles(0);
+    monitor_generation_ = 0;
     sleep_wakeup_ = false;
     in_trap_handler_ = false;
 
@@ -1521,6 +1550,7 @@ private:
   uint32_t shader_engine_id_ = 0; ///< Physical shader engine used by the scratch mapping.
   uint64_t shared_aperture_base_ = 0;
   uint64_t shared_aperture_limit_ = 0;
+  bool dword_alignment_ = false; // KFD uses UNALIGNED when no PCI bank is programmed.
   uint64_t private_aperture_base_ = 0;
   uint64_t private_aperture_limit_ = 0;
   bool flat_pointer32_ = false;
@@ -1550,7 +1580,9 @@ private:
   uint32_t ttmp_[16] = {};          ///< Trap temporary registers (TTMP0-15).
   uint32_t trapsts_ = 0;            ///< Trap status register (EXCP flags).
   uint32_t pending_alu_causes_ = 0; ///< EXCP causes from the current instruction.
-  uint32_t sleep_cycles_ = 0;       ///< Cycles left on an in-flight S_SLEEP.
+  uint64_t monitor_generation_ = 0; ///< Zero until a CDNA5 monitor load arms this wave.
+  bool monitor_sleeping_ = false;
+  uint32_t sleep_cycles_ = 0; ///< Cycles left on an in-flight S_SLEEP.
   enum class MemoryTrapDelivery : uint8_t { None, TrapShaderOnly, Unmaskable };
   MemoryTrapDelivery pending_memory_trap_ = MemoryTrapDelivery::None;
   bool sleep_wakeup_ = false;

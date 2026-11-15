@@ -9533,23 +9533,11 @@ def test_gfx1250_cluster_load_generators_force_request_l1_bypass():
         profile=Cdna5Profile(),
     )
 
-    cluster = SimpleNamespace(
-        name='CLUSTER_LOAD_B32',
-        semantic_class='flat_load',
-        elem_size=4,
-        num_elems=1,
-        sign_extend=False,
-        d16_hi=False,
-        d16_lo=False,
+    cluster = InstructionSemantics(
+        'CLUSTER_LOAD_B32', 'flat_load', elem_size=4, num_elems=1
     )
-    ordinary = SimpleNamespace(
-        name='GLOBAL_LOAD_B32',
-        semantic_class='flat_load',
-        elem_size=4,
-        num_elems=1,
-        sign_extend=False,
-        d16_hi=False,
-        d16_lo=False,
+    ordinary = InstructionSemantics(
+        'GLOBAL_LOAD_B32', 'flat_load', elem_size=4, num_elems=1
     )
     cluster_body = codegen._gen_flat_load([], [], cluster)
     ordinary_body = codegen._gen_flat_load([], [], ordinary)

@@ -888,6 +888,7 @@ def gen_mad_mix_f32(
     opsel_exprs: tuple[str, str] = ('', ''),
     use_cdna5_helpers: bool = False,
     fused_result: bool = False,
+    flush_f16_sources: bool = False,
 ) -> str:
     """Generate V_MAD_MIX_F32: mixed-precision FMA with op_sel selecting f16/f32 per src."""
     d, s0, s1, s2 = dst[0], src[0], src[1], src[2]
@@ -916,8 +917,9 @@ def gen_mad_mix_f32(
         L.append(
             f'    uint32_t raw2 = amdgpu::RegisterAccess(wf).read_operand({s2}, uint64_t{{1}} << lane, {s2}.register_byte_mask()).lane(lane);'
         )
+        capture = '&wf' if flush_f16_sources else ''
         L.append(
-            '    auto read_mix_src = [](uint32_t raw, uint32_t src_selector, bool src_is_f16,'
+            f'    auto read_mix_src = [{capture}](uint32_t raw, uint32_t src_selector, bool src_is_f16,'
         )
         L.append('                           bool high_half) -> float {')
         L.append('      if (!src_is_f16) return std::bit_cast<float>(raw);')
@@ -928,6 +930,11 @@ def gen_mad_mix_f32(
         L.append(
             '                          : static_cast<uint16_t>(high_half ? (raw >> 16) : raw);'
         )
+        if flush_f16_sources:
+            L.append(
+                '      bits = amdgpu::input_denormal::flush_input<amdgpu::fp_format::F16>('
+                'uint32_t(bits), amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64()));'
+            )
         L.append('      return util::f16_to_f32(bits);')
         L.append('    };')
         L.append(

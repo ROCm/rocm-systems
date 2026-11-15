@@ -1632,6 +1632,25 @@ TEST(L2CacheTest, FailedLinkedDirtyEvictionRestoresVictimForRetry) {
   EXPECT_EQ(hierarchy.physical->load<uint32_t>(kBase), kDirty);
 }
 
+TEST(DeviceCacheCoherenceTest, MonitorTableEvictionRetainsEveryLaneOfTheNewLoad) {
+  using namespace rocjitsu::amdgpu;
+  DeviceCacheCoherence domain;
+  constexpr uint64_t capacity = L2Cache::NUM_SETS * L2Cache::ASSOCIATIVITY;
+  std::array<uint64_t, 32> addresses{};
+  for (uint64_t first = 0; first < capacity; first += addresses.size()) {
+    for (size_t lane = 0; lane < addresses.size(); ++lane)
+      addresses[lane] = (first + lane) * L2Cache::LINE_SIZE;
+    // Leave one free tag so the first lane of the next load fills the table.
+    const auto lanes = first + addresses.size() == capacity ? UINT32_MAX >> 1 : UINT32_MAX;
+    domain.monitor_lines(0, addresses, lanes);
+  }
+  addresses[0] = (capacity - 1) * L2Cache::LINE_SIZE;
+  addresses[1] = capacity * L2Cache::LINE_SIZE;
+  const uint64_t generation = domain.monitor_lines(0, addresses, 3);
+  domain.notify_monitor_line(0, addresses[0]);
+  EXPECT_NE(domain.monitor_generation(), generation);
+}
+
 TEST(DeviceCacheCoherenceTest, MaintenancePreservesWritebackVersusInvalidateSemantics) {
   GpuMemory memory("memory");
   rocjitsu::amdgpu::GpuVm gpu_vm;

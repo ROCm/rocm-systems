@@ -1238,7 +1238,12 @@ def _lower_dst_write(
         # Explicit data-conversion generators use the mode-aware BF16 helpers.
         # Generic BF16 semantic writes cover arithmetic forms where current ISA
         # prose does not define FP16_OVFL clamping.
-        rhs = f'util::f32_to_bf16({rhs})'
+        if ctx.arch_name == 'cdna5':
+            rhs = (
+                f'amdgpu::fp_mode::narrow_trans_bf16({rhs}, wf.fp_round_mode_f16_f64())'
+            )
+        else:
+            rhs = f'util::f32_to_bf16({rhs})'
         if _contains_call(rhs_node, 'apply_omod'):
             rhs = (
                 f'amdgpu::fp_mode::finalize_omod_bf16({rhs}, '

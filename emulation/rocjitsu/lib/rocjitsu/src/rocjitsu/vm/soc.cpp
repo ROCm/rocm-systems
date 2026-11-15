@@ -374,21 +374,27 @@ void SoC::initialize() {
   }
 
   auto &topo = engine()->topology();
-  uint32_t xcds_per_iod = static_cast<uint32_t>(xcds_.size()) / static_cast<uint32_t>(iods_.size());
+  const uint32_t xcds_per_iod = std::max(1u, num_xcds() / num_iods());
 
-  // Wire each XCD's L2 req port → its parent IOD's cpl port.
-  // Skip if the port already has a link (set by the declarative topology config).
+  // An explicit topology can connect an XCD directly to its IOD's cache.
+  // Use the wired endpoint for the shader-visible die ID in either layout.
   for (uint32_t i = 0; i < xcds_.size(); ++i) {
     auto *xcd_out = xcds_[i]->l2_cache()->req_port();
-    if (xcd_out->link() != nullptr)
-      continue;
-    uint32_t iod_idx = i / xcds_per_iod;
-    if (iod_idx >= iods_.size())
-      iod_idx = static_cast<uint32_t>(iods_.size()) - 1;
-    auto *iod_in = iods_[iod_idx]->create_cpl_port(xcds_[i]->name());
-    auto *link = topo.add_link(xcd_out, iod_in, /*latency=*/1,
-                               /*weight=*/3);
-    link->set_exec_mode(exec_mode_);
+    if (!xcd_out->link()) {
+      const uint32_t index = std::min(i / xcds_per_iod, num_iods() - 1);
+      auto *iod_in = iods_[index]->create_cpl_port(xcds_[i]->name());
+      auto *link = topo.add_link(xcd_out, iod_in, /*latency=*/1, /*weight=*/3);
+      link->set_exec_mode(exec_mode_);
+    }
+    if (auto *cp = xcds_[i]->command_processor()) {
+      const auto *owner = xcd_out->peer()->owner();
+      for (uint32_t id = 0; id < iods_.size(); ++id) {
+        if (owner == iods_[id] || owner == iods_[id]->msc()) {
+          cp->set_aid_id(id);
+          break;
+        }
+      }
+    }
   }
 
   // Wire IOD peer interconnect links (bidirectional between all IOD pairs).

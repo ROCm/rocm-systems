@@ -623,10 +623,10 @@ inline void execute_mixed_fma(Wavefront &wave, FloatTernaryWave32Function wave32
     return;
   const unsigned half_sources = unsigned((modifiers >> 13) & 7);
   const bool half_output = destination_bytes != 0xF;
-  // The inherited gfx1250 mixed model preserves half inputs and half results.
-  // Its FP32-result form still applies MODE to FP32 inputs and outputs.
+  // For gfx1250, only the half-result forms preserve all denormals.
+  // A MIX_F32 input follows MODE for its selected precision before widening.
   const unsigned denorm32 = cdna5 && half_output ? 3u : wave.fp_denorm_mode_f32();
-  const unsigned denorm16 = cdna5 ? 3u : wave.fp_denorm_mode_f16_f64();
+  const unsigned denorm16 = cdna5 && half_output ? 3u : wave.fp_denorm_mode_f16_f64();
   const unsigned rounding = half_output ? wave.fp_round_mode_f16_f64() : wave.fp_round_mode_f32();
   flags |= uint64_t(rounding) << 24;
   if (rdna3 && !wave.dx10_clamp())

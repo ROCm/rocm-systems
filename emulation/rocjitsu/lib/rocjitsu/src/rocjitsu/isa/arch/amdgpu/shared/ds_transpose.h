@@ -13,7 +13,7 @@
 ///
 /// B64_TR_B8 is the CDNA4 MFMA byte transpose within 16-lane groups.
 /// WMMA_TR_B8 is used by RDNA4 and CDNA5 global loads. CDNA5_DS_TR_B8
-/// handles the four-row, two-column-half request grouping of gfx1250 DS loads.
+/// uses the same byte order for wave32 indexed DS loads.
 /// TR16_B128 (gfx1250 ds/global_load_tr16_b128, RDNA4 global_load_tr_b128)
 /// transposes 16-bit elements within groups of 8 consecutive lanes.
 /// B64_TR_B16 (CDNA4 ds_read_b64_tr_b16) is a 4x16-lane halfword transpose
@@ -58,72 +58,27 @@ inline void transpose_b64_tr_b8(std::vector<uint8_t> &response_data, uint32_t nu
   response_data = std::move(output);
 }
 
-/// @brief RDNA4 and CDNA5 global-load 16x16 8-bit WMMA transpose layout.
-///
-/// Each of source lanes 0..31 reads eight adjacent matrix rows for one K
-/// coordinate. Wave32 writes two VGPRs per lane. RDNA4 Wave64 consumes the
-/// same 32 source addresses but writes one VGPR across 64 destination lanes.
+/// @brief Gather the same 256-byte tile for wave32 DS/global and RDNA4 wave64 global loads.
+/// Four consecutive source lanes supply one DWORD. The other DWORD comes from
+/// eight source lanes later. Wave64 places that DWORD in the upper 32 lanes.
 inline void transpose_wmma_tr_b8(std::vector<uint8_t> &response_data, uint32_t &num_elems,
                                  uint32_t wf_size) {
-  constexpr uint32_t source_lanes = 32;
-  constexpr uint32_t source_bytes_per_lane = 8;
-
-  const uint32_t source_stride = num_elems * 4;
-  const uint32_t dest_stride = (wf_size == 64) ? 4u : 8u;
-  std::vector<uint8_t> output(wf_size * dest_stride, 0);
-
-  for (uint32_t source_lane = 0; source_lane < source_lanes; ++source_lane) {
-    const uint32_t k_lo = source_lane & 7u;
-    const uint32_t k_hi = source_lane >> 4;
-    const uint32_t matrix_row_base = 8u * ((source_lane >> 3) & 1u);
-    for (uint32_t byte = 0; byte < source_bytes_per_lane; ++byte) {
-      const uint32_t matrix_row = matrix_row_base + byte;
-      uint32_t dest_lane;
-      uint32_t dest_byte;
-      if (wf_size == 64) {
-        dest_lane = matrix_row + 16u * k_hi + 32u * ((k_lo >> 2) & 1u);
-        dest_byte = k_lo & 3u;
-      } else {
-        dest_lane = matrix_row + 16u * k_hi;
-        dest_byte = k_lo;
-      }
-
-      const uint32_t source_offset = source_lane * source_stride + byte;
-      const uint32_t dest_offset = dest_lane * dest_stride + dest_byte;
-      if (source_offset < response_data.size() && dest_offset < output.size())
-        output[dest_offset] = response_data[source_offset];
+  assert(num_elems == 2 && (wf_size == 32 || wf_size == 64));
+  constexpr uint32_t source_stride = 8;
+  const uint32_t dest_stride = wf_size == 64 ? 4 : 8;
+  std::vector<uint8_t> output(wf_size * dest_stride);
+  for (uint32_t lane = 0; lane < wf_size; ++lane) {
+    const uint32_t group = (lane & 16u) + ((lane & 8u) >> 1);
+    for (uint32_t byte = 0; byte < dest_stride; ++byte) {
+      const uint32_t dword = wf_size == 64 ? lane / 32 : byte / 4;
+      const uint32_t source_lane = group + 8 * dword + byte % 4;
+      const uint32_t offset = source_lane * source_stride + lane % 8;
+      if (offset < response_data.size())
+        output[lane * dest_stride + byte] = response_data[offset];
     }
   }
-
   response_data = std::move(output);
   num_elems = dest_stride / 4;
-}
-
-/// @brief gfx1250 DS B64 byte-level transpose.
-/// @details Destination lane `l` byte `n` comes from source lane
-/// `((l & ~0xf) | (((l >> 3) & 1) * 4)) + (n & 3) + 8 * (n >> 2)`, byte
-/// `l & 7`. The instruction has an eight-byte lane payload and requires wave32.
-inline void transpose_cdna5_ds_tr_b8(std::vector<uint8_t> &response_data, uint32_t num_elems,
-                                     uint32_t wf_size) {
-  assert(num_elems == 2 && "CDNA5 DS TR_B8 requires an eight-byte lane payload");
-  assert(wf_size == 32 && "CDNA5 DS transpose loads require wave32");
-  const uint32_t bytes_per_lane = num_elems * 4;
-  std::vector<uint8_t> output(response_data.size(), 0);
-
-  // Each 16-lane half loads an 8x16 matrix. Four adjacent lanes address
-  // consecutive rows of one eight-column half; lanes 8..15 address rows 4..7.
-  // Destination lane half*16+column receives rows 0..7 of that column.
-  for (uint32_t dest_lane = 0; dest_lane < wf_size; ++dest_lane) {
-    const uint32_t source_byte = dest_lane & 7u;
-    const uint32_t source_base = (dest_lane & ~0xfu) | (((dest_lane >> 3) & 1u) * 4u);
-    for (uint32_t dest_byte = 0; dest_byte < bytes_per_lane; ++dest_byte) {
-      const uint32_t source_lane = source_base + (dest_byte & 3u) + 8u * (dest_byte >> 2);
-      output[dest_lane * bytes_per_lane + dest_byte] =
-          response_data[source_lane * bytes_per_lane + source_byte];
-    }
-  }
-
-  response_data = std::move(output);
 }
 
 /// @brief Return the lanes that issue a transpose-load memory request.
@@ -364,11 +319,11 @@ inline void transpose_response(VectorMemState &d) {
   case TransposeKind::B64_TR_B8:
     transpose_b64_tr_b8(d.response_data, d.num_elems, d.wf_size);
     break;
+  case TransposeKind::CDNA5_DS_TR_B8:
+    assert(d.wf_size == 32 && "CDNA5 DS transpose loads require wave32");
+    [[fallthrough]];
   case TransposeKind::WMMA_TR_B8:
     transpose_wmma_tr_b8(d.response_data, d.num_elems, d.wf_size);
-    break;
-  case TransposeKind::CDNA5_DS_TR_B8:
-    transpose_cdna5_ds_tr_b8(d.response_data, d.num_elems, d.wf_size);
     break;
   case TransposeKind::TR16_B128:
     transpose_tr16_b128(d.response_data, d.num_elems, d.wf_size, compact_wave64);

@@ -2568,6 +2568,7 @@ class TestDeriveFlatLoad:
         sem = derive_semantics(name, enc_name)
         assert sem is not None
         assert sem.semantic_class == 'flat_load'
+        assert sem.operation == 'monitor'
         assert sem.elem_size == 4
         assert sem.num_elems == num_elems
         assert sem.sign_extend is False

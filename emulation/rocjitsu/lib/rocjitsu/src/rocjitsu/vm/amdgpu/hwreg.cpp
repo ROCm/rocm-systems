@@ -143,7 +143,8 @@ uint32_t gfx1250_ib_sts2_raw(const Wavefront &wf) {
   return field_value(counters.kmcnt, 0, 5) | field_value(wf.cluster_size() > 1 ? 1u : 0u, 6, 4) |
          field_value(counters.asynccnt, 12, 6) |
          field_value(std::min<uint32_t>(counters.tensorcnt, 3u), 18, 2) |
-         field_value(wf.cluster_rank(), 21, 4) | field_value(3u, 28, 2);
+         field_value(wf.cluster_rank(), 21, 4) | field_value(wf.memory_monitor_wait(), 25, 1) |
+         field_value(3u, 28, 2);
 }
 
 uint32_t gfx1250_ib_sts_raw(const Wavefront &wf) {

@@ -287,7 +287,8 @@ private:
   [[nodiscard]] bool write_register(uint64_t byte_offset, uint32_t value) override;
   [[nodiscard]] bool program_shader_apertures(uint32_t vmid, uint64_t shared_base,
                                               uint64_t shared_limit, uint64_t private_base,
-                                              uint64_t private_limit) override;
+                                              uint64_t private_limit,
+                                              bool dword_alignment) override;
 
   [[nodiscard]] int64_t access_registers(std::span<std::byte> buf, uint64_t offset, bool write);
   [[nodiscard]] int64_t access_memory(std::span<std::byte> buf, uint64_t offset, bool write,

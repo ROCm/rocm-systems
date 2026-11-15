@@ -1959,6 +1959,13 @@ TEST(XcdDistributionTest, Cdna5FanoutUsesDistinctScratchSlicesAcrossXcds) {
   Cdna5ScratchTopologyFixture fx;
   ASSERT_NO_FATAL_FAILURE(fx.initialize());
   ASSERT_EQ(fx.soc->num_xcds(), kTotalXcds);
+  // This topology wires four XCDs to each I/O die.
+  ASSERT_EQ(fx.soc->num_iods(), 2u);
+  for (uint32_t i = 0; i < kTotalXcds; ++i) {
+    const auto *cp = fx.soc->xcd(i)->command_processor();
+    EXPECT_EQ(cp->xcc_id(), i);
+    EXPECT_EQ(cp->aid_id(), i / 4);
+  }
 
   auto plugin = std::make_unique<ScratchAddressPlugin>();
   auto *addresses = plugin.get();

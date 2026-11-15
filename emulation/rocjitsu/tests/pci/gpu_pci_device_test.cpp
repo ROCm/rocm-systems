@@ -4345,7 +4345,7 @@ TEST(GpuDeviceShaderApertures, ProgramsGfx1250GuestRegistersByVmid) {
   write_register(0x09e4, 0);       // SH_MEM_CONFIG: 64-bit address mode
   write_register(0x09e3, kVmid3Bases);
   write_register(0x0900, 4u << 4);
-  write_register(0x09e4, 0);
+  write_register(0x09e4, 1u << 2); // ALIGNMENT_MODE = UNALIGNED on VMID 4.
   write_register(0x09e3, kVmid4Bases);
   EXPECT_EQ(read_register(0x09e3), kVmid4Bases);
   write_register(0x0900, 3u << 4);
@@ -4355,6 +4355,10 @@ TEST(GpuDeviceShaderApertures, ProgramsGfx1250GuestRegistersByVmid) {
                                   /*num_sgprs=*/104, /*num_vgprs=*/32);
   ASSERT_NE(wave, nullptr);
   wave->set_process_id(3, rocjitsu::amdgpu::ProcessIdentityKind::Vmid);
+  EXPECT_TRUE(wave->dword_alignment());
+  ASSERT_TRUE(cu->resolve_shader_apertures(4, rocjitsu::amdgpu::ProcessIdentityKind::Vmid));
+  EXPECT_FALSE(cu->resolve_shader_apertures(4, rocjitsu::amdgpu::ProcessIdentityKind::Vmid)
+                   ->dword_alignment);
   constexpr uint64_t kSharedBase = 0x2000'0000'0000'0000ULL;
   constexpr uint64_t kSharedLimit = 0x2000'0000'ffff'ffffULL;
   constexpr uint64_t kPrivateBase = 0x1000'0000'0000'0000ULL;
@@ -4397,10 +4401,17 @@ TEST(GpuDeviceShaderApertures, ProgramsGfx1250GuestRegistersByVmid) {
   // programmed KFD banks agree, the chosen VMID does not change this value.
   write_register(0x0900, 4u << 4);
   write_register(0x09e3, kVmid3Bases);
+  const auto same_bases =
+      cu->resolve_shader_apertures(3, rocjitsu::amdgpu::ProcessIdentityKind::Pasid);
+  ASSERT_TRUE(same_bases);
+  EXPECT_EQ(same_bases->shared_base, kSharedBase);
+  EXPECT_FALSE(same_bases->dword_alignment);
+  write_register(0x09e4, 0);
   auto *mes_wave = cu->dispatch_wf_at(/*wf_id=*/0, /*wg_id=*/0, /*pc=*/0,
                                       /*num_sgprs=*/104, /*num_vgprs=*/32);
   ASSERT_NE(mes_wave, nullptr);
   mes_wave->set_process_id(3, rocjitsu::amdgpu::ProcessIdentityKind::Pasid);
+  EXPECT_TRUE(mes_wave->dword_alignment());
   EXPECT_EQ(mes_wave->shared_aperture_base(), kSharedBase);
   EXPECT_EQ(mes_wave->private_aperture_base(), kPrivateBase);
   mes_wave->halt();

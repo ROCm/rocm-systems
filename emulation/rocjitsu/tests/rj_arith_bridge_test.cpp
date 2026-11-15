@@ -11783,7 +11783,7 @@ TEST(ArithBridgeTest, CdnaMixedFma) {
           ASSERT_TRUE(fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave)
                           .succeeded());
           const uint32_t expected =
-              operation == 0   ? (!sample.half_a && mode == 0 ? 0 : sample.result32)
+              operation == 0   ? (!sample.inline_a && mode == 0 ? 0 : sample.result32)
               : operation == 1 ? (sample.a & 0xffff0000) | sample.result16
                                : (sample.a & 0xffff) | (uint32_t(sample.result16) << 16);
           for (unsigned lane = 0; lane < lanes; ++lane) {
@@ -12770,6 +12770,65 @@ TEST(ArithBridgeTest, Gfx1250NibblePackDestinationHalf) {
   }
 }
 
+// gfx1201 quiets these signaling NaNs and sets INVALID with EXEC empty.
+TEST(ArithBridgeTest, Gfx1250ScalarSignalingNaNs) {
+  struct Case {
+    std::array<uint32_t, 1> words;
+    uint32_t input;
+    uint32_t result;
+  };
+  const Case cases[] = {
+      {cdna5::build_sop2(cdna5::kSAddF16Sop2, {.ssrc0 = 0, .ssrc1 = 128, .sdst = 2}), 0x7c01u,
+       0x7e01u},
+      {cdna5::build_sop1(cdna5::kSCeilF32Sop1, {.ssrc0 = 0, .sdst = 2}), 0x7f800001u, 0x7fc00001u},
+      {cdna5::build_sop1(cdna5::kSCvtF32F16Sop1, {.ssrc0 = 0, .sdst = 2}), 0x7c01u, 0x7fc02000u},
+  };
+  for (auto semantics :
+       {ArithmeticSemantics::Compatibility, ArithmeticSemantics::Loose,
+        ArithmeticSemantics::BitExactEmpiricalAllowLoose, ArithmeticSemantics::BitExactEmpirical}) {
+    BridgeFixture fixture(ROCJITSU_CODE_ARCH_CDNA5, 32, ArithmeticPolicy{semantics});
+    ASSERT_NE(fixture.wave, nullptr);
+    fixture.wave->set_exec(0);
+    const auto base = fixture.wave->sgpr_alloc().base;
+    for (uint32_t reserved : {0u, 0x100u, 0x200u, 0x300u}) {
+      fixture.wave->set_mode_raw(reserved);
+      for (const auto &sample : cases) {
+        SCOPED_TRACE(::testing::Message()
+                     << unsigned(semantics) << '/' << reserved << '/' << sample.words[0]);
+        fixture.wave->set_trapsts(0x20);
+        fixture.cu->write_sgpr(base, sample.input);
+        fixture.cu->write_sgpr(base + 2, 0xdeadbeefu);
+        auto inst = fixture.decoder->decode_window(sample.words);
+        ASSERT_TRUE(inst.succeeded());
+        const bool supported = semantics != ArithmeticSemantics::BitExactEmpirical;
+        EXPECT_EQ(fixture.cu->execute_instruction(inst.value().get(), *fixture.wave).succeeded(),
+                  supported);
+        EXPECT_EQ(fixture.cu->read_sgpr(base + 2), supported ? sample.result : 0xdeadbeefu);
+        EXPECT_EQ(fixture.wave->trapsts(),
+                  semantics == ArithmeticSemantics::Compatibility ? 0x21u : 0x20u);
+      }
+    }
+  }
+}
+
+TEST(ArithBridgeTest, Gfx1250ExpBf16RoundsToNearest) {
+  BridgeFixture fixture(ROCJITSU_CODE_ARCH_CDNA5);
+  ASSERT_NE(fixture.wave, nullptr);
+  fixture.wave->set_mode_raw(0);
+  fixture.wave->set_exec(1);
+  fixture.cu->write_vgpr(fixture.base(), 0, 0x3ec0u); // 0.375
+  auto check = [&](const auto &words) {
+    fixture.cu->write_vgpr(fixture.base() + 2, 0, 0xdeadbeefu);
+    auto inst = fixture.decoder->decode_window(words);
+    ASSERT_TRUE(inst.succeeded());
+    ASSERT_TRUE(fixture.cu->execute_instruction(inst.value().get(), *fixture.wave).succeeded());
+    // 2^0.375 is ~1.29684, closer to BF16 0x3fa6 than 0x3fa5.
+    EXPECT_EQ(fixture.cu->read_vgpr(fixture.base() + 2, 0), 0xdead3fa6u);
+  };
+  check(cdna5::build_vop1(cdna5::kVExpBf16Vop1, {.src0 = 256, .vdst = 2}));
+  check(cdna5::build_vop3(cdna5::kVExpBf16Vop3, {.vdst = 2, .src0 = 256}));
+}
+
 TEST(ArithBridgeTest, Gfx1250ScalarConversionCompatibility) {
   for (bool packed : {false, true}) {
     BridgeFixture fixture(ROCJITSU_CODE_ARCH_CDNA5, 32, {});
@@ -12787,14 +12846,14 @@ TEST(ArithBridgeTest, Gfx1250ScalarConversionCompatibility) {
     ASSERT_TRUE(instruction.succeeded());
     ASSERT_TRUE(
         fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave).succeeded());
-    EXPECT_EQ(fixture.cu->read_sgpr(base), packed ? 0x80017c01U : 0x33800000U);
+    EXPECT_EQ(fixture.cu->read_sgpr(base), packed ? 0x80007e00U : 0U);
     EXPECT_TRUE(fixture.wave->read_scc());
     EXPECT_EQ(fixture.wave->exec(), 0U);
     EXPECT_EQ(fixture.wave->trapsts(), 0x80000000U);
   }
 }
 
-// Loose honors overflow control; Compatibility retains gfx1250's legacy fixed narrowing.
+// FP16_OVFL controls finite FP16 overflow in both supported execution policies.
 TEST(ArithBridgeTest, Gfx1250ScalarHalfFmacOverflow) {
   for (auto semantics : {ArithmeticSemantics::Compatibility, ArithmeticSemantics::Loose}) {
     BridgeFixture fixture(ROCJITSU_CODE_ARCH_CDNA5, 32, ArithmeticPolicy{semantics});
@@ -12812,8 +12871,7 @@ TEST(ArithBridgeTest, Gfx1250ScalarHalfFmacOverflow) {
       fixture.wave->set_mode_raw(saturate ? Wavefront::FP16_OVFL_BIT : 0);
       ASSERT_TRUE(
           fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave).succeeded());
-      const bool clamp = saturate && semantics == ArithmeticSemantics::Loose;
-      EXPECT_EQ(fixture.cu->read_sgpr(base + 2) & 0xffffu, clamp ? 0x7bffu : 0x7c00u);
+      EXPECT_EQ(fixture.cu->read_sgpr(base + 2) & 0xffffu, saturate ? 0x7bffu : 0x7c00u);
     }
   }
 }
@@ -12836,7 +12894,7 @@ TEST(ArithBridgeTest, Gfx1250ScalarFmaCompatibility) {
     EXPECT_EQ(fixture.cu->read_sgpr(base), rounding == 1 ? 0x3f800001U : 0x3f800000U);
     EXPECT_TRUE(fixture.wave->read_scc());
     EXPECT_EQ(fixture.wave->exec(), 0U);
-    EXPECT_EQ(fixture.wave->trapsts(), 0x80000000U);
+    EXPECT_EQ(fixture.wave->trapsts(), 0x80000020U);
   }
 }
 
@@ -12858,7 +12916,7 @@ TEST(ArithBridgeTest, Gfx1250ScalarBinaryCompatibility) {
       ASSERT_TRUE(instruction.succeeded());
       ASSERT_TRUE(
           fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave).succeeded());
-      EXPECT_EQ(fixture.cu->read_sgpr(base), select ? 0U : 2U);
+      EXPECT_EQ(fixture.cu->read_sgpr(base), 0U);
       EXPECT_TRUE(fixture.wave->read_scc());
       EXPECT_EQ(fixture.wave->trapsts(), 0x80000000U);
       EXPECT_EQ(fixture.wave->exec(), 0U);
@@ -12882,10 +12940,9 @@ TEST(ArithBridgeTest, Gfx1250ScalarRoundingCompatibility) {
       ASSERT_TRUE(instruction.succeeded());
       ASSERT_TRUE(
           fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave).succeeded());
-      EXPECT_EQ(fixture.cu->read_sgpr(base),
-                input == 1 ? (half ? 0x3c00U : 0x3f800000U) : input | (half ? 0x200U : 0x400000U));
+      EXPECT_EQ(fixture.cu->read_sgpr(base), input == 1 ? 0U : input | (half ? 0x200U : 0x400000U));
       EXPECT_TRUE(fixture.wave->read_scc());
-      EXPECT_EQ(fixture.wave->trapsts(), 0x80000000U);
+      EXPECT_EQ(fixture.wave->trapsts(), 0x80000000U | uint32_t(input != 1));
       EXPECT_EQ(fixture.wave->exec(), 0U);
     }
   }
@@ -13007,8 +13064,8 @@ TEST(ArithBridgeTest, Gfx1250ScalarCompareCompatibility) {
       ASSERT_TRUE(instruction.succeeded());
       ASSERT_TRUE(
           fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave).succeeded());
-      EXPECT_FALSE(fixture.wave->read_scc());
-      EXPECT_EQ(fixture.wave->trapsts(), 0x80000000U);
+      EXPECT_EQ(fixture.wave->read_scc(), input == 1);
+      EXPECT_EQ(fixture.wave->trapsts(), 0x80000000U | uint32_t(input != 1));
       EXPECT_EQ(fixture.wave->exec(), 0U);
     }
   }
@@ -13352,6 +13409,27 @@ TEST(ArithBridgeTest, PackedSelectionIgnoresUnselectedNanHalf) {
       ASSERT_TRUE(f.cu->execute_instruction(instruction.value().get(), *f.wave).succeeded());
       EXPECT_EQ(f.cu->read_vgpr(f.base() + 2, 0), 0x38003800U);
     }
+  }
+}
+
+TEST(ArithBridgeTest, WideScaledF32OutputHonorsDenormalMode) {
+  BridgeFixture fixture(ROCJITSU_CODE_ARCH_CDNA5);
+  const auto words =
+      cdna5::build_vop3(cdna5::kVCvtScalePk8F32Fp4Vop3, {.vdst = 16, .src0 = 256, .src1 = 266});
+  auto instruction = fixture.decoder->decode_window(words);
+  ASSERT_TRUE(instruction.succeeded());
+  fixture.wave->set_exec(1u);
+  // FP4 +1 and -1, scaled by the smallest E8M0 value (2^-127).
+  fixture.cu->write_vgpr(fixture.base(), 0, 0xa2u);
+  fixture.cu->write_vgpr(fixture.base() + 10, 0, 0u);
+  for (unsigned denorm = 0; denorm < 4; ++denorm) {
+    SCOPED_TRACE(denorm);
+    fixture.wave->set_mode_raw(denorm << 4);
+    ASSERT_TRUE(
+        fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave).succeeded());
+    const uint32_t magnitude = (denorm & 2) ? 0x00400000u : 0u;
+    EXPECT_EQ(fixture.cu->read_vgpr(fixture.base() + 16, 0), magnitude);
+    EXPECT_EQ(fixture.cu->read_vgpr(fixture.base() + 17, 0), magnitude | 0x80000000u);
   }
 }
 
@@ -13776,6 +13854,7 @@ TEST(ArithBridgeTest, WideScaledNarrowLayoutsAndAliases) {
                   float value = form.source == 0   ? std::bit_cast<float>(raw)
                                 : form.source == 1 ? util::f16_to_f32(uint16_t(raw))
                                                    : util::bf16_to_f32(uint16_t(raw));
+                  const bool infinite_input = std::isinf(value);
                   value = full_scale ? value / std::bit_cast<float>(input[48][lane])
                                      : float(double(value) / std::ldexp(1.0, exponent - 127));
                   switch (form.format) {
@@ -13802,6 +13881,8 @@ TEST(ArithBridgeTest, WideScaledNarrowLayoutsAndAliases) {
                                          : util::f32_to_bf8_e5m2_rne_mode(value, saturate);
                     break;
                   }
+                  if (form.format >= 3 && saturate && infinite_input)
+                    codes[element] = std::signbit(value) ? 0xff : 0x7f;
                   seed = util::prng_advance(seed);
                 }
                 for (int word = 0; word < output_words; ++word)
@@ -13844,17 +13925,25 @@ TEST(ArithBridgeTest, WideFp6NarrowPreflightsAllRegisterTuples) {
   for (bool invalid_destination : {false, true}) {
     BridgeFixture fixture(ROCJITSU_CODE_ARCH_CDNA5, 32);
     fixture.wave->set_exec(~0U);
-    uint32_t valid = fixture.base();
-    uint32_t invalid = valid + fixture.cu->vgpr_allocation_block_size() - 2;
+    const uint32_t base = fixture.base();
+    const uint32_t invalid = base + fixture.wave->vgpr_alloc().count - 2;
     cdna5::Operand scale(32, cdna5::OperandType::OPR_SRC, 304);
     fixture.recorder->reads.clear();
     fixture.recorder->writes.clear();
     arith::execute_wide_scaled_narrow<false, true>(
         *fixture.wave, rj_arith_v_cvt_scalef32_pk16_fp6_f32_w32_gfx1250, nullptr,
-        fixture.cu->arithmetic_flags(), invalid_destination ? invalid : valid,
-        invalid_destination ? valid : invalid, 0, 16, false, nullptr, scale);
-    EXPECT_TRUE(fixture.recorder->reads.empty());
-    EXPECT_TRUE(fixture.recorder->writes.empty());
+        fixture.cu->arithmetic_flags(), invalid_destination ? invalid : base + 16,
+        invalid_destination ? base : invalid, 0, 16, false, nullptr, scale);
+    if (invalid_destination) {
+      EXPECT_TRUE(fixture.recorder->reads.empty());
+      EXPECT_TRUE(fixture.recorder->writes.empty());
+    } else {
+      ASSERT_EQ(fixture.recorder->reads.size(), 17u);
+      EXPECT_EQ(fixture.recorder->reads[0].reg, base + 48);
+      for (unsigned i = 0; i < 16; ++i)
+        EXPECT_EQ(fixture.recorder->reads[i + 1].reg, base + i);
+      EXPECT_EQ(fixture.recorder->writes.size(), 3u);
+    }
   }
 }
 

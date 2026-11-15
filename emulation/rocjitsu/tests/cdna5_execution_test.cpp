@@ -12,6 +12,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/mma_exec.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_path_test_hooks.h"
 #include "rocjitsu/isa/target_provider.h"
+#include "rocjitsu/vm/amdgpu/hwreg.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
 #include "rocjitsu/vm/plugins/execution_plugin_group.h"
 #include "util/host_target.h"
@@ -124,6 +125,202 @@ private:
   uint64_t saved_;
 };
 #endif
+
+TEST(Gfx1250ExecutionTest, MonitorLoadBroadcastAndSleep) {
+  amdgpu::GpuMemory memory("monitor_memory");
+  amdgpu::L2Cache l2("monitor_l2");
+  amdgpu::ComputeUnitCore::Config config{};
+  config.arch = ROCJITSU_CODE_ARCH_CDNA5;
+  config.num_wf_slots = 2;
+  config.sgprs_per_wf = kGfx1250ScalarSlots;
+  config.vgprs_per_wf = 32;
+  config.lds_size_kb = 4;
+  Gfx1250MemoryTestCu cu("monitor_cu", config, &memory, &l2);
+  auto *first = cu.dispatch_wf(0, 0, 32, 16);
+  auto *second = cu.dispatch_wf(1, 0, 32, 16);
+  ASSERT_NE(first, nullptr);
+  ASSERT_NE(second, nullptr);
+  first->set_exec(1);
+  second->set_exec(1);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  ASSERT_NE(decoder, nullptr);
+  const auto issue = [&](auto words, amdgpu::Wavefront &wave) {
+    auto instruction = decoder->decode_window(words);
+    ASSERT_TRUE(instruction.succeeded());
+    cu.execute_and_route(std::move(instruction.value()), wave);
+  };
+  const auto monitor = [&](amdgpu::Wavefront &wave, uint64_t address, bool flat, unsigned width) {
+    cu.write_vgpr(wave.vgpr_alloc().base, 0, static_cast<uint32_t>(address));
+    cu.write_vgpr(wave.vgpr_alloc().base + 1, 0, static_cast<uint32_t>(address >> 32));
+    if (flat) {
+      issue(cdna5::build_vflat(cdna5::kFlatLoadMonitorB32Vflat + width,
+                               {.saddr = 124, .vdst = 8, .scope = 2}),
+            wave);
+    } else {
+      issue(cdna5::build_vglobal(cdna5::kGlobalLoadMonitorB32Vglobal + width,
+                                 {.saddr = 124, .vdst = 8, .scope = 2}),
+            wave);
+    }
+  };
+  const auto read_mwait = [](amdgpu::Wavefront &wave) {
+    uint32_t bit = 0;
+    EXPECT_EQ(amdgpu::read_hwreg_field(wave, 28 | (25 << 6), bit),
+              amdgpu::HwregAccessResult::Success);
+    return bit;
+  };
+  const auto sleep = [&](amdgpu::Wavefront &wave, uint16_t immediate) {
+    issue(cdna5::build_sopp(cdna5::kSMonitorSleepSopp, {.simm16 = immediate}), wave);
+  };
+  constexpr uint64_t first_addr = 0x4000, second_addr = 0x5000;
+  for (uint32_t word = 0; word < 4; ++word)
+    memory.write32(first_addr + 4 * word, 0xe100u + word);
+
+  sleep(*first, 0x8000);
+  EXPECT_EQ(first->sleep_cycles(), 0u);
+  issue(cdna5::build_vglobal(cdna5::kGlobalLoadB32Vglobal, {.saddr = 124, .vdst = 8}), *first);
+  EXPECT_EQ(read_mwait(*first), 0u);
+  for (bool flat : {false, true}) {
+    for (unsigned width = 0; width < 3; ++width) {
+      SCOPED_TRACE(::testing::Message() << "flat=" << flat << " width=" << width);
+      monitor(*first, first_addr, flat, width);
+      ASSERT_EQ(read_mwait(*first), 1u);
+      for (unsigned word = 0; word < (1u << width); ++word)
+        EXPECT_EQ(cu.read_vgpr(first->vgpr_alloc().base + 8 + word, 0), 0xe100u + word);
+      sleep(*first, 1);
+      ASSERT_EQ(first->sleep_cycles(), 64u);
+      for (unsigned i = 0; i < 64; ++i)
+        first->tick_sleep();
+      EXPECT_EQ(first->sleep_cycles(), 0u);
+      EXPECT_EQ(read_mwait(*first), 1u);
+      monitor(*second, second_addr, false, 0);
+      sleep(*first, 0x8000);
+      sleep(*second, 0x8000);
+      ASSERT_EQ(first->sleep_cycles(), amdgpu::Wavefront::kSleepForever);
+      const uint8_t value = 0x11;
+      ASSERT_EQ(l2.write(second_addr + amdgpu::L2Cache::LINE_SIZE, &value, 1),
+                amdgpu::VmAccessOutcome::Complete);
+      EXPECT_EQ(read_mwait(*first), 1u);
+      EXPECT_EQ(read_mwait(*second), 1u);
+      ASSERT_EQ(l2.write(second_addr + 7, &value, 1), amdgpu::VmAccessOutcome::Complete);
+      EXPECT_EQ(read_mwait(*first), 0u);
+      EXPECT_EQ(read_mwait(*second), 0u);
+      first->tick_sleep();
+      second->tick_sleep();
+      EXPECT_EQ(first->sleep_cycles(), 0u);
+      EXPECT_EQ(second->sleep_cycles(), 0u);
+    }
+  }
+
+  monitor(*first, first_addr, false, 0);
+  ASSERT_EQ(l2.invalidate_range(first_addr + 4, 1, 0), amdgpu::VmAccessOutcome::Complete);
+  EXPECT_EQ(read_mwait(*first), 0u);
+  monitor(*first, first_addr, false, 0);
+  uint8_t data = 0;
+  ASSERT_EQ(l2.read(first_addr, &data, 1), amdgpu::VmAccessOutcome::Complete);
+  for (uint64_t i = 1; i <= amdgpu::L2Cache::ASSOCIATIVITY; ++i) {
+    ASSERT_EQ(
+        l2.read(first_addr + i * amdgpu::L2Cache::NUM_SETS * amdgpu::L2Cache::LINE_SIZE, &data, 1),
+        amdgpu::VmAccessOutcome::Complete);
+  }
+  EXPECT_EQ(read_mwait(*first), 0u);
+  monitor(*first, first_addr, true, 0);
+  ASSERT_EQ(l2.atomic_rmw(first_addr, 4, [](uint8_t *value, uint32_t) { ++value[0]; }),
+            amdgpu::VmAccessOutcome::Complete);
+  EXPECT_EQ(read_mwait(*first), 0u);
+
+  first->set_exec(0);
+  monitor(*first, first_addr, false, 0);
+  EXPECT_EQ(read_mwait(*first), 0u);
+  first->set_exec(1);
+  monitor(*first, first_addr, false, 0);
+  constexpr uint64_t shared_base = uint64_t{1} << 48;
+  cu.set_apertures(shared_base, shared_base + UINT32_MAX, 0, 0);
+  first->set_lds_base(cu.allocate_lds(256));
+  first->set_lds_size(256);
+  first->lds().write32(first->lds_base(), 0xaabbccdd);
+  monitor(*first, shared_base, true, 0);
+  EXPECT_EQ(read_mwait(*first), 0u);
+  EXPECT_EQ(cu.read_vgpr(first->vgpr_alloc().base + 8, 0), 0xaabbccddu);
+
+  monitor(*first, first_addr, true, 0);
+  sleep(*first, 0x8000);
+  EXPECT_EQ(first->saved_sleep_cycles(), 0u);
+  first->set_debug_suspended(true);
+  first->set_debug_suspended(false);
+  EXPECT_EQ(first->sleep_cycles(), 0u);
+  EXPECT_EQ(read_mwait(*first), 0u);
+  first->set_sleep_cycles(17);
+  EXPECT_EQ(first->saved_sleep_cycles(), 17u);
+}
+
+TEST(Gfx1250ExecutionTest, MonitorChecksPayloadAlignmentAndFlatApertureBeforeIssue) {
+  enum class Address { Global, Scratch, Hole };
+  amdgpu::GpuMemory memory("monitor_alignment_memory");
+  amdgpu::L2Cache l2("monitor_alignment_l2");
+  amdgpu::ComputeUnitCore::Config config{};
+  config.arch = ROCJITSU_CODE_ARCH_CDNA5;
+  config.num_wf_slots = 1;
+  config.sgprs_per_wf = kGfx1250ScalarSlots;
+  config.vgprs_per_wf = 32;
+  config.lds_size_kb = 4;
+  Gfx1250MemoryTestCu cu("monitor_alignment_cu", config, &memory, &l2);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  ASSERT_NE(decoder, nullptr);
+  constexpr uint64_t global_base = 0x4000, scratch_base = 0x8000;
+  constexpr uint32_t sentinel = 0xdeadbeef;
+  for (bool dword : {false, true}) {
+    for (bool flat : {false, true}) {
+      for (unsigned width = 0; width < 3; ++width) {
+        for (auto kind : {Address::Global, Address::Scratch, Address::Hole}) {
+          if (!flat && kind != Address::Global)
+            continue;
+          // Add one through IOFFSET on global data. The low bits distinguish
+          // payload alignment from the ordinary four-byte load alignment.
+          const unsigned words = 1u << width;
+          const uint64_t address = kind == Address::Scratch ? scratch_base
+                                   : kind == Address::Hole
+                                       ? uint64_t{1} << 57
+                                       : global_base + words * sizeof(uint32_t) - 1;
+          SCOPED_TRACE(testing::Message() << "dword=" << dword << " flat=" << flat
+                                          << " width=" << width << " address=" << address);
+          auto *wave = cu.dispatch_wf(0, 0, 32, 16);
+          ASSERT_NE(wave, nullptr);
+          wave->set_dword_alignment(dword);
+          wave->set_exec(1);
+          wave->set_scratch_base(scratch_base);
+          wave->set_scratch_lane_size(128);
+          const uint32_t vgpr = wave->vgpr_alloc().base;
+          const uint64_t src = address - 1;
+          cu.write_vgpr(vgpr, 0, src);
+          cu.write_vgpr(vgpr + 1, 0, src >> 32);
+          for (unsigned word = 0; word < words; ++word) {
+            memory.write32(global_base + 4 * word, 0x100 + word);
+            memory.write32(scratch_base + 4 * word, 0x100 + word);
+            cu.write_vgpr(vgpr + 8 + word, 0, sentinel);
+          }
+          const auto encoded =
+              flat ? cdna5::build_vflat(cdna5::kFlatLoadMonitorB32Vflat + width,
+                                        {.saddr = 124, .vdst = 8, .scope = 2, .ioffset = 1})
+                   : cdna5::build_vglobal(cdna5::kGlobalLoadMonitorB32Vglobal + width,
+                                          {.saddr = 124, .vdst = 8, .scope = 2, .ioffset = 1});
+          auto inst = decoder->decode_window(encoded);
+          ASSERT_TRUE(inst.succeeded());
+          cu.execute_and_route(std::move(inst.value()), *wave);
+          const bool fault = kind == Address::Global ? !dword : kind == Address::Hole || width != 0;
+          EXPECT_EQ(wave->memory_trap_pending(), fault);
+          uint32_t mwait = 0;
+          ASSERT_EQ(amdgpu::read_hwreg_field(*wave, 28 | (25 << 6), mwait),
+                    amdgpu::HwregAccessResult::Success);
+          EXPECT_EQ(mwait, fault ? 0u : 1u);
+          for (unsigned word = 0; word < words; ++word)
+            EXPECT_EQ(cu.read_vgpr(vgpr + 8 + word, 0), fault ? sentinel : 0x100u + word);
+          EXPECT_TRUE(wave->wait_counters().empty());
+          wave->halt();
+        }
+      }
+    }
+  }
+}
 
 TEST(Gfx1250ExecutionTest, GlobalTransposePromotesNonzeroExecToAllWave32Lanes) {
   amdgpu::GpuMemory memory("gfx1250_transpose_memory");

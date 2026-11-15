@@ -2148,6 +2148,7 @@ void GlobalLoadMonitorB32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
+  d->monitors_memory = true;
   flat_calculate_addresses(inst_, wf, *d);
   set_data(std::move(d));
 }
@@ -2163,6 +2164,7 @@ void GlobalLoadMonitorB64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
+  d->monitors_memory = true;
   flat_calculate_addresses(inst_, wf, *d);
   set_data(std::move(d));
 }
@@ -2178,6 +2180,7 @@ void GlobalLoadMonitorB128Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
+  d->monitors_memory = true;
   flat_calculate_addresses(inst_, wf, *d);
   set_data(std::move(d));
 }

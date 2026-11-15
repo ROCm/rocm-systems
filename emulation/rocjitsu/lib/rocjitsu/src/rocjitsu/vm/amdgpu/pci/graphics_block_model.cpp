@@ -133,8 +133,9 @@ void GraphicsBlockModel::observe_register_write(uint64_t byte_offset, PciMemoryA
 void GraphicsBlockModel::publish_selected_apertures(PciMemoryAccess &memory) {
   if (selected_vmid_ == 0)
     return;
+  const bool dword_alignment = (sh_mem_config_[selected_vmid_] & (1u << 2)) == 0;
   if ((sh_mem_config_[selected_vmid_] & 1u) != 0) {
-    (void)memory.program_shader_apertures(selected_vmid_, 0, 0, 0, 0);
+    (void)memory.program_shader_apertures(selected_vmid_, 0, 0, 0, 0, dword_alignment);
     return;
   }
   // GC 12.1 encodes the private base in units of 2^58 and the shared base
@@ -144,7 +145,7 @@ void GraphicsBlockModel::publish_selected_apertures(PciMemoryAccess &memory) {
   const uint64_t shared_base = uint64_t{bases >> kSharedBaseShift} << 48;
   if (!memory.program_shader_apertures(selected_vmid_, shared_base,
                                        shared_base + kSharedApertureBytes - 1, private_base,
-                                       private_base + kPrivateApertureBytes - 1))
+                                       private_base + kPrivateApertureBytes - 1, dword_alignment))
     util::Logger::warn("graphics core: shader aperture register write could not reach its SoC");
 }
 

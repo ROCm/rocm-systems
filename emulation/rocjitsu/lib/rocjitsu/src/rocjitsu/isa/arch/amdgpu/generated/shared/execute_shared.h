@@ -10384,13 +10384,15 @@ inline void execute_v_fma_mix_f32_vop3p([[maybe_unused]] Inst &inst,
         amdgpu::RegisterAccess(wf)
             .read_operand(inst.src2, uint64_t{1} << lane, inst.src2.register_byte_mask())
             .lane(lane);
-    auto read_mix_src = [](uint32_t raw, uint32_t src_selector, bool src_is_f16,
-                           bool high_half) -> float {
+    auto read_mix_src = [&wf](uint32_t raw, uint32_t src_selector, bool src_is_f16,
+                              bool high_half) -> float {
       if (!src_is_f16)
         return std::bit_cast<float>(raw);
       uint16_t bits = amdgpu::is_inline_float_src(src_selector)
                           ? util::f32_to_f16(std::bit_cast<float>(raw))
                           : static_cast<uint16_t>(high_half ? (raw >> 16) : raw);
+      bits = amdgpu::input_denormal::flush_input<amdgpu::fp_format::F16>(
+          uint32_t(bits), amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64()));
       return util::f16_to_f32(bits);
     };
     float a = read_mix_src(raw0, inst.inst_.src0, inst.inst_.op_sel_hi & 1, inst.inst_.op_sel & 1);

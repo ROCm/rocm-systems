@@ -391,6 +391,7 @@ public:
   /// @brief Invalidate all L2 lines.
   void invalidate_all() {
     auto maintenance_lock = acquire_cache_maintenance();
+    coherence_->invalidate_monitors();
     cache_.invalidate_all();
     clear_all_dirty_bytes();
   }
@@ -583,6 +584,7 @@ private:
   std::shared_lock<MaintenanceMutex> try_acquire_peer_cache_access();
   std::unique_lock<MaintenanceMutex> acquire_cache_maintenance();
   void synchronize_epoch_locked();
+  void notify_evicted_monitor(uint64_t replacement, const simdojo::CacheTag &evicted);
   VmAccessOutcome cache_partial_bytes(uint64_t addr, const uint8_t *src, uint32_t size,
                                       uint32_t vmid, uint64_t admission_generation);
   // Store allocation leaves untouched bytes absent instead of reading backing.

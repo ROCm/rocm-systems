@@ -35,6 +35,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/output_modifier.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_static_resolve.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/source_modifier.h"
+#include "rocjitsu/isa/isa_traits.h"
 #include "rocjitsu/isa/operand.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
@@ -4301,6 +4302,11 @@ template <FmaMixDst DstMode, bool Fused = false, bool NarrowF32 = false, typenam
       U raw = op.template load_native<uint32_t>(base);
       U halves = is_inline_float_src(src_selector) ? util::f32_to_f16_simd(std::bit_cast<F>(raw))
                                                    : (sel_bit ? (raw >> 16) : (raw & 0xFFFFu));
+      if constexpr (DstMode == FmaMixDst::F32) {
+        if (arch_is_rdna(wf.cu().arch()))
+          halves = input_denormal::flush_input<fp_format::F16>(
+              halves, input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64()));
+      }
       v = util::f16_to_f32_simd(halves);
     } else {
       v = op.template load_native<float>(base);

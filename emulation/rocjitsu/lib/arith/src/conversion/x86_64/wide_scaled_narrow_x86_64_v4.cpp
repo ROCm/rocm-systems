@@ -70,6 +70,17 @@ void wide_scaled_narrow_x86_64_v4(int lanes, uint64_t exec_mask, ScaledNarrowSou
       __m512 scaled;
       if constexpr (FullScale) {
         scaled = _mm512_div_ps(decoded, scaling);
+        if constexpr (Dst == ScaledNarrowDestination::Fp8 || Dst == ScaledNarrowDestination::Bf8) {
+          if (saturate) {
+            // An infinite input produces a NaN even when finite overflow saturates.
+            const auto magnitude =
+                _mm512_and_si512(_mm512_castps_si512(decoded), _mm512_set1_epi32(INT32_MAX));
+            const auto inf = _mm512_cmpeq_epi32_mask(magnitude, _mm512_set1_epi32(0x7f800000));
+            const auto bits = _mm512_castps_si512(scaled);
+            scaled = _mm512_castsi512_ps(
+                _mm512_mask_or_epi32(bits, inf, bits, _mm512_set1_epi32(0x00400000)));
+          }
+        }
       } else {
         scaled = _mm512_mul_ps(decoded, scaling);
       }

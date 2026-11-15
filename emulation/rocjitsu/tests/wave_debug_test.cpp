@@ -9,12 +9,15 @@
 #include "rocjitsu/isa/arch/amdgpu/cdna4/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna4/isa.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/isa_traits.h"
+#include "rocjitsu/vm/amdgpu/command_processor.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
@@ -86,6 +89,80 @@ struct WaveDebugFixture {
     return wf;
   }
 };
+
+TEST(WaveDebugTest, Cdna5MonitorFaultPublishesFirstVmemSourceAtHandlerEntry) {
+  constexpr uint32_t memviol = 1u << 4, address_watch = 1u, vmem = 3u << 30, lds = 2u << 30;
+  constexpr uint16_t excp_flag_priv = 17u | (31u << 11);
+  for (bool flat : {false, true}) {
+    for (bool already_faulted : {false, true}) {
+      SCOPED_TRACE(testing::Message() << "flat=" << flat << " already_faulted=" << already_faulted);
+      WaveDebugFixture f(ROCJITSU_CODE_ARCH_CDNA5, 1, 1);
+      f.l2.set_backing_memory(&f.gpu_mem);
+      f.gpu_mem.write32(0x4000, 0xa5a5a5a5);
+      f.cu->restore_wait_diagnostics(amdgpu::MemoryWaitDiagnostics::Warn,
+                                     amdgpu::MemoryWaitDiagnostics::Warn);
+      const auto load = flat ? cdna5::build_vflat(cdna5::kFlatLoadMonitorB32Vflat,
+                                                  {.saddr = 124, .vdst = 8, .scope = 2})
+                             : cdna5::build_vglobal(cdna5::kGlobalLoadMonitorB32Vglobal,
+                                                    {.saddr = 124, .vdst = 8, .scope = 2});
+      uint64_t issue_pc = kKernelAddr;
+      if (already_faulted) {
+        const auto prior = cdna5::build_vglobal(cdna5::kGlobalLoadMonitorB32Vglobal,
+                                                {.saddr = 124, .vdst = 12, .scope = 2});
+        for (const auto word : prior) {
+          f.gpu_mem.write32(issue_pc, word);
+          issue_pc += sizeof(uint32_t);
+        }
+      }
+      for (size_t word = 0; word < load.size(); ++word)
+        f.gpu_mem.write32(issue_pc + word * sizeof(uint32_t), load[word]);
+      const auto getreg =
+          cdna5::build_sopk(cdna5::kSGetregB32Sopk, {.simm16 = excp_flag_priv, .sdst = 4});
+      f.gpu_mem.write32(kTrapHandlerAddr, getreg[0]);
+      f.cu->set_trap_handler_resolver([](const amdgpu::Wavefront &) {
+        return amdgpu::ComputeUnitCore::TrapHandlerConfig{kTrapHandlerAddr, 0, false};
+      });
+      auto *wave = f.dispatch(kKernelAddr);
+      ASSERT_NE(wave, nullptr);
+      wave->set_exec(1);
+      wave->set_dword_alignment(false);
+      wave->set_mode_raw(wave->mode_raw() | (1u << 25));
+      // Seed a watch flag and the source from an earlier LDS violation. The
+      // next fault may replace the source only after MEMVIOL has been cleared.
+      wave->set_trapsts(lds | (1u << 7) | (already_faulted ? 1u << 8 : 0u));
+      const uint32_t base = wave->vgpr_alloc().base;
+      f.cu->write_vgpr(base + 1, 0, 0);
+      auto &scoreboard = wave->ensure_memory_wait_scoreboard();
+      if (already_faulted) {
+        f.cu->write_vgpr(base, 0, 0x4000);
+        f.cu->step();
+        ASSERT_EQ(wave->pc, issue_pc);
+        ASSERT_EQ(scoreboard.outstanding(amdgpu::WaitCounterKind::Load), 1u);
+        ASSERT_EQ(scoreboard.outstanding(amdgpu::WaitCounterKind::X), 1u);
+      }
+      const auto before_fault = scoreboard.issue_snapshot();
+      f.cu->write_vgpr(base, 0, 0x4001);
+      f.cu->step();
+      ASSERT_TRUE(wave->memory_trap_pending());
+      EXPECT_TRUE(wave->wait_counters().empty());
+      EXPECT_EQ(scoreboard.issue_snapshot(), before_fault);
+      unsigned hazards = 0;
+      scoreboard.bind(wave->pc, &hazards,
+                      [](void *count, const auto &) { ++*static_cast<unsigned *>(count); });
+      scoreboard.access({RegClass::VGPR, 8, 1}, 1, 0xf, false);
+      EXPECT_EQ(hazards, 0u);
+      scoreboard.access({RegClass::VGPR, 12, 1}, 1, 0xf, false);
+      EXPECT_EQ(hazards, already_faulted ? 1u : 0u);
+      f.cu->step();
+      ASSERT_TRUE(wave->in_trap_handler());
+      ASSERT_EQ(wave->pc, kTrapHandlerAddr);
+      EXPECT_EQ(wave->ttmp(0), issue_pc + load.size() * sizeof(uint32_t));
+      f.cu->step();
+      EXPECT_EQ(f.cu->read_sgpr(wave->sgpr_alloc().base + 4),
+                address_watch | memviol | (already_faulted ? lds : vmem));
+    }
+  }
+}
 
 TEST(WaveDebugTest, Gfx10TrapDrainsBeforeEnteringPrivilegedHandler) {
   for (auto arch : {ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2}) {
@@ -565,6 +642,35 @@ TEST(WaveDebugTest, ReturnMessagesUseTheIssuingQueueAndDispatch) {
     fixture.cu->set_doorbell_resolver({});
     fixture.cu->step();
     EXPECT_EQ(wave->debug_read_sgpr(12), 0xbadu);
+  }
+}
+
+TEST(WaveDebugTest, ShaderEngineReturnMessageUsesTheIssuingTopology) {
+  for (auto arch :
+       {ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
+    SCOPED_TRACE(arch);
+    amdgpu::CommandProcessor peer0("peer0"), peer1("peer1"), cp("peer2");
+    cp.set_xcd_topology(2, {&peer0, &peer1, &cp});
+    cp.set_aid_id(1);
+    WaveDebugFixture fixture(arch, 1, 1);
+    fixture.cu->set_command_processor(&cp);
+    fixture.cu->set_shader_engine_location(3, 0);
+    auto *wave = fixture.dispatch(kKernelAddr);
+    ASSERT_NE(wave, nullptr);
+    wave->set_exec(0);
+    fixture.gpu_mem.write32(kKernelAddr, 0xbe844d87u);     // s_sendmsg_rtn_b64 s[4:5], 0x87
+    fixture.gpu_mem.write32(kKernelAddr + 4, 0xbe864c87u); // s_sendmsg_rtn_b32 s6, 0x87
+    fixture.cu->write_sgpr(wave->sgpr_alloc().base + 5, 0xdeadbeef);
+    fixture.cu->write_sgpr(wave->sgpr_alloc().base + 7, 0xfeedbeef);
+    fixture.cu->step();
+    fixture.cu->step();
+    const uint32_t expected = arch == ROCJITSU_CODE_ARCH_CDNA5   ? 0x20003u
+                              : arch == ROCJITSU_CODE_ARCH_RDNA4 ? 0x103u
+                                                                 : 0u;
+    EXPECT_EQ(wave->debug_read_sgpr(4), expected);
+    EXPECT_EQ(wave->debug_read_sgpr(5), 0u);
+    EXPECT_EQ(wave->debug_read_sgpr(6), expected);
+    EXPECT_EQ(wave->debug_read_sgpr(7), 0xfeedbeefu);
   }
 }
 

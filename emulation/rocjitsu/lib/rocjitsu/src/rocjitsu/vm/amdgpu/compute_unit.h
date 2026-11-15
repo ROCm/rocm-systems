@@ -74,6 +74,7 @@ struct ShaderApertures {
   uint64_t shared_limit = 0;
   uint64_t private_base = 0;
   uint64_t private_limit = 0;
+  bool dword_alignment = false;
 };
 
 /// @brief Reporting policy for pending memory-result register accesses.
@@ -1003,11 +1004,13 @@ public:
 
   /// @brief Program the shader aperture register bank selected by a guest VMID.
   void set_vmid_apertures(uint32_t vmid, uint64_t shared_base, uint64_t shared_limit,
-                          uint64_t private_base, uint64_t private_limit) {
+                          uint64_t private_base, uint64_t private_limit,
+                          bool dword_alignment = false) {
     if (vmid >= vmid_apertures_.size())
       return;
     std::lock_guard lock(vmid_aperture_mutex_);
-    vmid_apertures_[vmid] = {shared_base, shared_limit, private_base, private_limit};
+    vmid_apertures_[vmid] = {shared_base, shared_limit, private_base, private_limit,
+                             dword_alignment};
   }
 
   /// @brief Resolve a shader bank for a dispatch identity.
@@ -1027,12 +1030,17 @@ public:
       if (!vmid_apertures_[vmid])
         continue;
       const ShaderApertures &candidate = *vmid_apertures_[vmid];
-      if (uniform && (uniform->shared_base != candidate.shared_base ||
-                      uniform->shared_limit != candidate.shared_limit ||
-                      uniform->private_base != candidate.private_base ||
-                      uniform->private_limit != candidate.private_limit))
+      if (!uniform) {
+        uniform = candidate;
+        continue;
+      }
+      if (uniform->shared_base != candidate.shared_base ||
+          uniform->shared_limit != candidate.shared_limit ||
+          uniform->private_base != candidate.private_base ||
+          uniform->private_limit != candidate.private_limit)
         return std::nullopt;
-      uniform = candidate;
+      // Without a hardware VMID, use DWORD alignment only if every bank selects it.
+      uniform->dword_alignment &= candidate.dword_alignment;
     }
     return uniform;
   }
@@ -1191,7 +1199,8 @@ public:
 
 private:
   static bool nullify_unallocated_memory_result(Instruction &inst, const Wavefront &wf);
-  VmAccessOutcome route_prepared_memory_inst(std::unique_ptr<Instruction> &&inst, Wavefront &wf);
+  VmAccessOutcome route_prepared_memory_inst(std::unique_ptr<Instruction> &&inst, Wavefront &wf,
+                                             bool track_monitor_wait);
 
   // RegisterAccess is the instruction-facing register boundary. These
   // ownership and SGPR access helpers validate the complete operation, fire
@@ -1687,7 +1696,8 @@ protected:
   /// @param inst Ownership transfers when the pipeline accepts the instruction.
   /// Rejected instructions stay with the issuer until it reports the failure.
   /// @param wf The issuing wavefront.
-  VmAccessOutcome route_memory_inst(std::unique_ptr<Instruction> &&inst, Wavefront &wf);
+  VmAccessOutcome route_memory_inst(std::unique_ptr<Instruction> &&inst, Wavefront &wf,
+                                    bool track_monitor_wait = false);
 
   [[nodiscard]] bool owns_memory_result_vgprs(const Wavefront &wf, uint32_t base,
                                               uint32_t count) const {

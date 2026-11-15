@@ -147,7 +147,9 @@ enum InstFlags : uint64_t {
   /// CDNA5 packed widening disallows overlap after applying each operand's VGPR bank.
   CHECK_CVT_SCALE_OVERLAP = (1ULL << 45),
   /// CDNA5 Table 37 reserves FP8/BF8 scale selectors 12..15.
-  RESERVED_CVT_SCALE_SELECTOR = (1ULL << 46)
+  RESERVED_CVT_SCALE_SELECTOR = (1ULL << 46),
+  /// A FLAT/GLOBAL monitor load only issues after its address and aperture checks.
+  MEMORY_MONITOR = (1ULL << 47)
 };
 
 class BasicBlock;

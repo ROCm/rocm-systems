@@ -32,7 +32,7 @@ enum class Convert {
 };
 
 // Convert a scalar FP value. Reject invalid controls before changing outputs.
-template <Convert Op, bool LegacyNaN = false>
+template <Convert Op>
 int run(uint64_t flags, uint32_t mode, uint32_t *d, uint32_t a, uint32_t b = 0) {
   // These conversions round once into the destination; directed rounding uses the VALU
   // integer models and nearest-even the native or software conversion.
@@ -63,7 +63,7 @@ int run(uint64_t flags, uint32_t mode, uint32_t *d, uint32_t a, uint32_t b = 0) 
     } else {
       uint32_t x =
           (flags & RJ_ARITH_FP_FLUSH_INPUT_DENORMALS) && !(a & 0x7f800000) ? a & 0x80000000 : a;
-      if (!LegacyNaN && (x & 0x7fffffff) > 0x7f800000) {
+      if ((x & 0x7fffffff) > 0x7f800000) {
         x |= 0x400000;
       }
       uint32_t result =
@@ -92,7 +92,7 @@ int run(uint64_t flags, uint32_t mode, uint32_t *d, uint32_t a, uint32_t b = 0) 
         b &= 0x80000000;
       }
     }
-    if (!LegacyNaN && (a & (sign - 1)) > inf) {
+    if ((a & (sign - 1)) > inf) {
       a |= half ? 0x200 : 0x400000;
     }
     float x = half ? rocjitsu::arith::f16_to_float(uint16_t(a)) : rocjitsu::arith::as_float(a);
@@ -105,8 +105,8 @@ int run(uint64_t flags, uint32_t mode, uint32_t *d, uint32_t a, uint32_t b = 0) 
     } else if constexpr (half) {
       *d = rocjitsu::arith::as_bits(x);
     } else {
-      uint32_t result = rocjitsu::arith::half_rtz<!LegacyNaN>(a) |
-                        (uint32_t(rocjitsu::arith::half_rtz<!LegacyNaN>(b)) << 16);
+      uint32_t result =
+          rocjitsu::arith::half_rtz(a) | (uint32_t(rocjitsu::arith::half_rtz(b)) << 16);
       if (flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS) {
         if (!(result & 0x7c00)) {
           result &= 0xffff8000u;
@@ -121,7 +121,7 @@ int run(uint64_t flags, uint32_t mode, uint32_t *d, uint32_t a, uint32_t b = 0) 
   return RJ_ARITH_SUCCESS;
 }
 
-// gfx1250 scalar conversions retain legacy NaN payloads and do not report FP status.
+// gfx1250 scalar conversions quiet signaling NaNs and do not report FP status.
 // Compatibility ignores guest denormal flushing; FP16 overflow saturation remains effective.
 template <Convert Op>
 int run_gfx1250(uint64_t flags, uint64_t mode, uint32_t *d, uint32_t a, uint32_t b = 0) {
@@ -137,7 +137,7 @@ int run_gfx1250(uint64_t flags, uint64_t mode, uint32_t *d, uint32_t a, uint32_t
   if (compatibility) {
     flags &= ~(RJ_ARITH_FP_FLUSH_INPUT_DENORMALS | RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS);
   }
-  return run<Op, true>(flags, 0, d, a, b);
+  return run<Op>(flags, 0, d, a, b);
 }
 
 } // namespace

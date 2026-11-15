@@ -5,6 +5,7 @@
 // for special scales; gfx1250 PK8/PK16 selects an E8M0 byte, including its NaN.
 // Both share finite decoding, output rounding, and alias-safe SIMD backends.
 
+#include "common/alu.h"
 #include "common/float_encoding.h"
 #include "common/validation.h"
 #include "conversion/scaled_widen_impl.h"
@@ -40,7 +41,9 @@ int convert(uint64_t flags, uint64_t exec_mask, uint64_t mode, uint32_t *const *
             const uint32_t *const *a, const uint32_t *const *b) {
   flags = resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
   constexpr uint64_t allowed_mode = ByteScale ? RJ_ARITH_CVT_BYTE_3 : 0;
-  if (int error = validate(flags, mode & ~allowed_mode)) {
+  constexpr uint64_t allowed_fp_flags =
+      ByteScale && Dst == ScaledDestination::F32 ? RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS : 0;
+  if (int error = validate(flags, mode & ~allowed_mode, allowed_fp_flags)) {
     return error;
   }
   if ((flags & RJ_ARITH_SEMANTICS_MASK) >= RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS) {
@@ -56,15 +59,15 @@ int convert(uint64_t flags, uint64_t exec_mask, uint64_t mode, uint32_t *const *
   }
 #if defined(RJ_ARITH_HAVE_X86_64_V4)
   if (cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
-    wide_scaled_widen_x86_64_v4<Src, ByteScale>(Lanes, exec_mask, Dst, flags & RJ_ARITH_FP16_OVFL,
-                                                scale_shift, d, a, b[0]);
+    wide_scaled_widen_x86_64_v4<Src, ByteScale>(Lanes, exec_mask, Dst, flags, scale_shift, d, a,
+                                                b[0]);
     return RJ_ARITH_SUCCESS;
   }
 #endif
 #if defined(RJ_ARITH_HAVE_X86_64_V3)
   if (cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
-    wide_scaled_widen_x86_64_v3<Src, ByteScale>(Lanes, exec_mask, Dst, flags & RJ_ARITH_FP16_OVFL,
-                                                scale_shift, d, a, b[0]);
+    wide_scaled_widen_x86_64_v3<Src, ByteScale>(Lanes, exec_mask, Dst, flags, scale_shift, d, a,
+                                                b[0]);
     return RJ_ARITH_SUCCESS;
   }
 #endif
@@ -92,6 +95,11 @@ int convert(uint64_t flags, uint64_t exec_mask, uint64_t mode, uint32_t *const *
       // Avoid relying on host operand ordering to choose between two NaN signs.
       float value_f32 =
           exponent == 255 ? as_float(0x7fc00000U) : decode<Src>(code & ((1U << bits) - 1)) * scale;
+      if constexpr (ByteScale && f32) {
+        if (flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS) {
+          value_f32 = flush_denorm_f32(value_f32);
+        }
+      }
       uint32_t value = encode_scaled_widen<Dst>(value_f32, flags & RJ_ARITH_FP16_OVFL);
       if constexpr (f32) {
         result[element][lane] = value;

@@ -192,6 +192,10 @@ public:
     return xcd_peers_.empty() ? std::nullopt : std::optional<uint32_t>(xcd_rank_);
   }
 
+  /// Index of the I/O die connected to this XCD, or zero on a single-die device.
+  uint32_t aid_id() const { return aid_id_; }
+  void set_aid_id(uint32_t id) { aid_id_ = id; }
+
   [[nodiscard]] uint64_t register_pm4_queue(Pm4QueueConfig config);
   [[nodiscard]] QueuePrepareCloseStatus
   prepare_unregister_pm4_queue_registration(uint64_t registration_id) noexcept;
@@ -958,6 +962,7 @@ private:
   std::shared_ptr<GwsDevice> gws_device_;
 
   uint32_t xcd_rank_ = 0;
+  uint32_t aid_id_ = 0;
   // Every XCD's CP in XCD index order, including this one. Empty until the SoC
   // wires the topology, which leaves fan-out disabled. Raw pointers: the SoC owns
   // every XCD and destroys them together, so a peer outlives any use of it here,

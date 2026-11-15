@@ -4,6 +4,7 @@
 // AVX2 wide low-precision widening: vector field extraction, finite decoding and
 // shared output rounding. Stage each lane group's results before masked stores.
 
+#include "common/x86_64/alu_x86_64_v3.h"
 #include "common/x86_64/fp8.h"
 #include "conversion/scaled_widen.h"
 #include "conversion/x86_64/scaled_widen_x86_64_v3.h"
@@ -42,7 +43,7 @@ namespace rocjitsu::arith {
 // every source in a lane group is consumed before any destination is written.
 template <ScaledSource Src, bool ByteScale>
 void wide_scaled_widen_x86_64_v3(int lanes, uint64_t exec_mask, ScaledDestination destination,
-                                 bool saturate, int scale_shift, uint32_t *const *d,
+                                 uint64_t flags, int scale_shift, uint32_t *const *d,
                                  const uint32_t *const *a, const uint32_t *b) {
   constexpr int bits = Src == ScaledSource::Fp4                                 ? 4
                        : (Src == ScaledSource::Fp6 || Src == ScaledSource::Bf6) ? 6
@@ -79,8 +80,12 @@ void wide_scaled_widen_x86_64_v3(int lanes, uint64_t exec_mask, ScaledDestinatio
         // Canonicalize the E8M0 NaN scale, including when both operands are NaNs.
         scaled_bits = _mm256_blendv_epi8(scaled_bits, _mm256_set1_epi32(0x7fc00000), special);
       }
+      if (ByteScale && (flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS)) {
+        scaled_bits =
+            _mm256_castps_si256(x86_64_v3::flush_denorm_f32(_mm256_castsi256_ps(scaled_bits)));
+      }
       auto value = x86_64_v3::scaled_widen_detail::encode(_mm256_castsi256_ps(scaled_bits),
-                                                          destination, saturate);
+                                                          destination, flags & RJ_ARITH_FP16_OVFL);
       if (destination == ScaledDestination::F32) {
         result[element] = value;
       } else if (element % 2) {
@@ -101,33 +106,33 @@ void wide_scaled_widen_x86_64_v3(int lanes, uint64_t exec_mask, ScaledDestinatio
   }
 }
 template void wide_scaled_widen_x86_64_v3<ScaledSource::Fp4, true>(int, uint64_t, ScaledDestination,
-                                                                   bool, int, uint32_t *const *,
+                                                                   uint64_t, int, uint32_t *const *,
                                                                    const uint32_t *const *,
                                                                    const uint32_t *);
 template void wide_scaled_widen_x86_64_v3<ScaledSource::Fp8, true>(int, uint64_t, ScaledDestination,
-                                                                   bool, int, uint32_t *const *,
+                                                                   uint64_t, int, uint32_t *const *,
                                                                    const uint32_t *const *,
                                                                    const uint32_t *);
 template void wide_scaled_widen_x86_64_v3<ScaledSource::Bf8, true>(int, uint64_t, ScaledDestination,
-                                                                   bool, int, uint32_t *const *,
+                                                                   uint64_t, int, uint32_t *const *,
                                                                    const uint32_t *const *,
                                                                    const uint32_t *);
 template void wide_scaled_widen_x86_64_v3<ScaledSource::Fp6, false>(int, uint64_t,
-                                                                    ScaledDestination, bool, int,
-                                                                    uint32_t *const *,
+                                                                    ScaledDestination, uint64_t,
+                                                                    int, uint32_t *const *,
                                                                     const uint32_t *const *,
                                                                     const uint32_t *);
 template void wide_scaled_widen_x86_64_v3<ScaledSource::Fp6, true>(int, uint64_t, ScaledDestination,
-                                                                   bool, int, uint32_t *const *,
+                                                                   uint64_t, int, uint32_t *const *,
                                                                    const uint32_t *const *,
                                                                    const uint32_t *);
 template void wide_scaled_widen_x86_64_v3<ScaledSource::Bf6, false>(int, uint64_t,
-                                                                    ScaledDestination, bool, int,
-                                                                    uint32_t *const *,
+                                                                    ScaledDestination, uint64_t,
+                                                                    int, uint32_t *const *,
                                                                     const uint32_t *const *,
                                                                     const uint32_t *);
 template void wide_scaled_widen_x86_64_v3<ScaledSource::Bf6, true>(int, uint64_t, ScaledDestination,
-                                                                   bool, int, uint32_t *const *,
+                                                                   uint64_t, int, uint32_t *const *,
                                                                    const uint32_t *const *,
                                                                    const uint32_t *);
 } // namespace rocjitsu::arith

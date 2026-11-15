@@ -379,6 +379,7 @@ def _register_handlers() -> None:
         use_cdna5_helpers=c.arch_name == 'cdna5',
         fused_result=c.arch_name.startswith('rdna')
         or c.arch_name in ('cdna1', 'cdna5'),
+        flush_f16_sources=c.arch_name.startswith('rdna'),
     )
     DISPATCH['mad_mixlo_f16'] = lambda c: gen_mad_mix_lo_hi(
         c.dst_ops,

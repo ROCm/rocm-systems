@@ -1572,6 +1572,7 @@ void FlatLoadMonitorB32Vflat::execute_impl(amdgpu::Wavefront &wf) {
   d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
+  d->monitors_memory = true;
   flat_calculate_addresses(inst_, wf, *d);
   set_data(std::move(d));
 }
@@ -1587,6 +1588,7 @@ void FlatLoadMonitorB64Vflat::execute_impl(amdgpu::Wavefront &wf) {
   d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
+  d->monitors_memory = true;
   flat_calculate_addresses(inst_, wf, *d);
   set_data(std::move(d));
 }
@@ -1602,6 +1604,7 @@ void FlatLoadMonitorB128Vflat::execute_impl(amdgpu::Wavefront &wf) {
   d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
+  d->monitors_memory = true;
   flat_calculate_addresses(inst_, wf, *d);
   set_data(std::move(d));
 }

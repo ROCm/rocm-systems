@@ -70,6 +70,16 @@ void wide_scaled_narrow_x86_64_v3(int lanes, uint64_t exec_mask, ScaledNarrowSou
       __m256 scaled;
       if constexpr (FullScale) {
         scaled = _mm256_div_ps(decoded, scaling);
+        if constexpr (Dst == ScaledNarrowDestination::Fp8 || Dst == ScaledNarrowDestination::Bf8) {
+          if (saturate) {
+            // An infinite input produces a NaN even when finite overflow saturates.
+            const auto magnitude =
+                _mm256_and_si256(_mm256_castps_si256(decoded), _mm256_set1_epi32(INT32_MAX));
+            const auto inf = _mm256_cmpeq_epi32(magnitude, _mm256_set1_epi32(0x7f800000));
+            scaled = _mm256_or_ps(
+                scaled, _mm256_castsi256_ps(_mm256_and_si256(inf, _mm256_set1_epi32(0x00400000))));
+          }
+        }
       } else {
         scaled = _mm256_mul_ps(decoded, scaling);
       }

@@ -12,6 +12,7 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cassert>
 #include <chrono>
 #include <cstring>
@@ -132,10 +133,61 @@ DeviceCacheCoherence::AtomicBoundary DeviceCacheCoherence::acquire_atomic_bounda
       data_epoch_.fetch_add(1, std::memory_order_release) + 1;
   assert(next_epoch != 0 && "device cache coherence epoch wrapped");
 
+  invalidate_monitors();
   return AtomicBoundary(this, locked_l2_count, std::move(atomic_lock), std::move(coherence_lock));
 }
 
+uint64_t DeviceCacheCoherence::monitor_lines(uint32_t vmid, std::span<const uint64_t> addresses,
+                                             uint64_t lanes) {
+  std::lock_guard lock(monitor_mutex_);
+  const auto arm_lines = [&] {
+    for (uint64_t pending = lanes; pending; pending &= pending - 1) {
+      const auto lane = std::countr_zero(pending);
+      monitored_lines_.emplace(vmid, L2Cache::CacheStore::line_address(addresses[lane]));
+    }
+  };
+  arm_lines();
+  if (monitored_lines_.size() > L2Cache::NUM_SETS * L2Cache::ASSOCIATIVITY) {
+    // Eviction wakes older waiters. Every line requested by this issue must
+    // still be watched in the generation returned to the new waiter.
+    broadcast_monitor_done();
+    arm_lines();
+  }
+  has_virtual_monitors_ |= vmid != 0;
+  has_monitors_.store(true, std::memory_order_release);
+  return monitor_generation_.load(std::memory_order_relaxed);
+}
+
+void DeviceCacheCoherence::broadcast_monitor_done() {
+  monitored_lines_.clear();
+  has_virtual_monitors_ = false;
+  has_monitors_.store(false, std::memory_order_release);
+  monitor_generation_.fetch_add(1, std::memory_order_release);
+}
+
+void DeviceCacheCoherence::notify_monitor_line(uint32_t vmid, uint64_t address) {
+  if (!has_monitors_.load(std::memory_order_acquire))
+    return;
+  std::lock_guard lock(monitor_mutex_);
+  // Legacy L2 tags are virtually indexed by VMID. Different VAs and VMIDs may
+  // alias one backing line. Evict watched tags on such accesses when either
+  // side lacks a physical address (the ISA permits broadcasts on eviction).
+  if (!monitored_lines_.empty() &&
+      (vmid || has_virtual_monitors_ ||
+       monitored_lines_.contains({vmid, L2Cache::CacheStore::line_address(address)})))
+    broadcast_monitor_done();
+}
+
+void DeviceCacheCoherence::invalidate_monitors() {
+  if (!has_monitors_.load(std::memory_order_acquire))
+    return;
+  std::lock_guard lock(monitor_mutex_);
+  if (!monitored_lines_.empty())
+    broadcast_monitor_done();
+}
+
 void DeviceCacheCoherence::publish_local_backing_change() {
+  invalidate_monitors();
   // An HDP flush or fabric effect may hold an exclusive maintenance lease.
   // Publication cannot reacquire that lease. Readers compare the epoch before
   // and after a fill, and every later hit compares it again.
@@ -165,6 +217,7 @@ void DeviceCacheCoherence::publish_local_backing_write(uint64_t backing_address,
   const uint64_t first_line = backing_address / L2Cache::LINE_SIZE;
   const uint64_t last_line = (backing_address + size - 1) / L2Cache::LINE_SIZE;
   for (uint64_t line = first_line; line <= last_line; ++line) {
+    notify_monitor_line(0, line * L2Cache::LINE_SIZE);
     [[maybe_unused]] const uint64_t next_epoch =
         local_line_epochs_[line & (kLocalLineEpochSlots - 1)].fetch_add(1,
                                                                         std::memory_order_release) +
@@ -443,6 +496,7 @@ std::vector<DeviceCacheMaintenanceLease> DeviceCacheCoherence::acquire_prepared_
     [[maybe_unused]] const uint64_t next_epoch =
         lease.owner_->data_epoch_.fetch_add(1, std::memory_order_release) + 1;
     assert(next_epoch != 0 && "device cache coherence epoch wrapped");
+    lease.owner_->invalidate_monitors();
     lease.atomic_data_epoch_published_ = true;
   }
   return leases;
@@ -1244,6 +1298,7 @@ void DeviceCacheCoherence::complete_cache_maintenance(size_t locked_l2_count,
   // caches remain excluded until the epochs are visible. Private instruction
   // caches are not touched cross-thread and reconcile this epoch on their next
   // owner-thread fetch.
+  invalidate_monitors();
   if (publish_data_epoch) {
     [[maybe_unused]] const uint64_t next_data_epoch =
         data_epoch_.fetch_add(1, std::memory_order_release) + 1;

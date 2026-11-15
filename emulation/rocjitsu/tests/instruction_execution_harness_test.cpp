@@ -8495,6 +8495,7 @@ TEST(Gfx1250CvtScaleTest, UnpackSelectsE8M0ScaleLaneAndByte) {
 
   auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
   ASSERT_NE(wf, nullptr);
+  wf->set_mode_raw(3u << 4); // Preserve F32 output subnormals for the E8M0 byte-zero case.
   const uint32_t vb = wf->vgpr_alloc().base;
   wf->set_vgpr_msb_mode(1u << 2); // SRC1 in VGPR bank 1.
   constexpr uint32_t kSentinel = 0xdeadbeef;
@@ -8724,7 +8725,7 @@ TEST(Gfx1250CvtScaleTest, WideUnpackRejectsDestinationRangeBeforeWriting) {
     wf->halt();
 }
 
-TEST(Gfx1250CvtScaleTest, WideRegionsRejectBoundariesBeforeCallbacksOrWrites) {
+TEST(Gfx1250CvtScaleTest, WideConversionsRemapSourcesAndDiscardOutOfRangeDestinations) {
   amdgpu::GpuMemory gpu_mem("gfx1250_cvt_scale_region_boundary_mem");
   amdgpu::L2Cache l2("gfx1250_cvt_scale_region_boundary_l2");
 
@@ -8751,15 +8752,17 @@ TEST(Gfx1250CvtScaleTest, WideRegionsRejectBoundariesBeforeCallbacksOrWrites) {
 
   const uint32_t vb = wf->vgpr_alloc().base;
   constexpr uint32_t kSentinel = 0xA5A5A5A5u;
-  cu->write_vgpr(vb + 10, 0, std::bit_cast<uint32_t>(1.0f));
+  constexpr std::array<uint32_t, 3> ones{0x08208208u, 0x82082082u, 0x20820820u};
+  cu->write_vgpr(vb + 60, 0, 127u); // E8M0 scale 1.0 for unpack.
+  for (uint32_t reg = 0; reg < ones.size(); ++reg)
+    cu->write_vgpr(vb + reg, 0, ones[reg]);
 
-  // Unpack source v[1022:1024] does not fit. The valid destination must remain
-  // untouched instead of consuming zero/foreign source words.
+  // Unpack source v[1022:1024] selects v[0:2].
   wf->set_vgpr_msb_mode(0x03u); // Source 0 bank 3.
   for (uint32_t reg = 20; reg < 36; ++reg)
     cu->write_vgpr(vb + reg, 0, kSentinel);
   const auto unpack_words = cdna5::build_vop3(
-      cdna5::kVCvtScalePk16F32Fp6Vop3, {.vdst = 20, .src0 = vgpr_src(254), .src1 = vgpr_src(10)});
+      cdna5::kVCvtScalePk16F32Fp6Vop3, {.vdst = 20, .src0 = vgpr_src(254), .src1 = vgpr_src(60)});
   auto decoded_unpack = decoder->decode(unpack_words.data());
   ASSERT_TRUE(decoded_unpack.succeeded());
   std::unique_ptr<Instruction> unpack = std::move(decoded_unpack).value();
@@ -8769,18 +8772,19 @@ TEST(Gfx1250CvtScaleTest, WideRegionsRejectBoundariesBeforeCallbacksOrWrites) {
   recorder_ptr->write_registers.clear();
   EXPECT_TRUE(cu->execute_instruction(unpack.get(), *wf).succeeded());
   for (uint32_t reg = 20; reg < 36; ++reg)
-    EXPECT_EQ(cu->read_vgpr_storage(vb + reg, 0), kSentinel) << "unpack dst vgpr=" << reg;
-  EXPECT_TRUE(recorder_ptr->read_registers.empty());
-  EXPECT_TRUE(recorder_ptr->write_registers.empty());
+    EXPECT_EQ(cu->read_vgpr_storage(vb + reg, 0), std::bit_cast<uint32_t>(1.0f)) << reg;
+  EXPECT_EQ(recorder_ptr->read_registers, (std::vector<uint32_t>{vb + 60, vb, vb + 1, vb + 2}));
+  ASSERT_EQ(recorder_ptr->write_registers.size(), 16u);
 
-  // Pack source v[1018:1033] does not fit. Its valid three-register
-  // destination must remain untouched.
-  wf->set_vgpr_msb_mode(0x03u); // Source 0 bank 3.
+  // Pack source v[1018:1033] selects v[0:15].
+  for (uint32_t reg = 0; reg < 16; ++reg)
+    cu->write_vgpr(vb + reg, 0, std::bit_cast<uint32_t>(1.0f));
+  cu->write_vgpr(vb + 60, 0, std::bit_cast<uint32_t>(1.0f));
   for (uint32_t reg = 40; reg < 43; ++reg)
     cu->write_vgpr(vb + reg, 0, kSentinel);
   const auto pack_source_words =
       cdna5::build_vop3(cdna5::kVCvtScalef32Pk16Fp6F32Vop3,
-                        {.vdst = 40, .src0 = vgpr_src(250), .src1 = vgpr_src(10)});
+                        {.vdst = 40, .src0 = vgpr_src(250), .src1 = vgpr_src(60)});
   auto decoded_pack_source = decoder->decode(pack_source_words.data());
   ASSERT_TRUE(decoded_pack_source.succeeded());
   std::unique_ptr<Instruction> pack_source = std::move(decoded_pack_source).value();
@@ -8790,9 +8794,12 @@ TEST(Gfx1250CvtScaleTest, WideRegionsRejectBoundariesBeforeCallbacksOrWrites) {
   recorder_ptr->write_registers.clear();
   EXPECT_TRUE(cu->execute_instruction(pack_source.get(), *wf).succeeded());
   for (uint32_t reg = 40; reg < 43; ++reg)
-    EXPECT_EQ(cu->read_vgpr_storage(vb + reg, 0), kSentinel) << "pack source dst vgpr=" << reg;
-  EXPECT_TRUE(recorder_ptr->read_registers.empty());
-  EXPECT_TRUE(recorder_ptr->write_registers.empty());
+    EXPECT_EQ(cu->read_vgpr_storage(vb + reg, 0), ones[reg - 40]) << reg;
+  ASSERT_EQ(recorder_ptr->read_registers.size(), 17u);
+  EXPECT_EQ(recorder_ptr->read_registers.front(), vb + 60);
+  for (unsigned reg = 0; reg < 16; ++reg)
+    EXPECT_EQ(recorder_ptr->read_registers[reg + 1], vb + reg);
+  EXPECT_EQ(recorder_ptr->write_registers, (std::vector<uint32_t>{vb + 40, vb + 41, vb + 42}));
 
   // Pack destination v[1022:1024] does not fit. The in-range portion must not
   // be modified.

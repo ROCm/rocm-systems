@@ -1071,6 +1071,12 @@ def gen_wide_scaled_widen(ctx: ExecuteContext) -> str | None:
     lines += [
         '  uint64_t flags = cu.arithmetic_flags();',
         '  if (wf.fp16_ovfl()) flags |= RJ_ARITH_FP16_OVFL;',
+    ]
+    if gfx1250 and '_F32_' in ctx.inst.name:
+        lines.append(
+            '  if (!(wf.fp_denorm_mode_f32() & 2)) flags |= RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS;'
+        )
+    lines += [
         f'  amdgpu::arith::execute_wide_scaled_widen<{str(gfx1250).lower()}>(wf, {wave_api(api, 32)}, {wave64},',
         f'      flags, destination_base, source_base, {scale}, {words}, {mode}, {input_words}{selection});',
     ]
