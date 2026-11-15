@@ -379,9 +379,7 @@ def main():
     for name, func in tests:
         try:
             func()
-        except (
-            Exception
-        ) as exc:  # noqa: BLE001 - report every failure, not just the first
+        except Exception as exc:  # noqa: BLE001 - report every failure
             failures.append((name, exc))
             print(f"FAIL {name}: {exc}")
         else:
