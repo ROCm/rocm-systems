@@ -57,7 +57,9 @@ typedef enum rocprofiler_range_replay_status_t  // NOLINT(performance-enum-size)
     ROCPROFILER_RANGE_REPLAY_STATUS_MEMORY_COPY_IN_RANGE,  ///< An async copy touched device memory
                                                            ///< inside the range
     ROCPROFILER_RANGE_REPLAY_STATUS_CONCURRENT_DISPATCH,  ///< Another thread dispatched to the same
-                                                          ///< agent inside the range
+                                                          ///< agent inside the range, or (host
+                                                          ///< replay) GPU work on an agent did not
+                                                          ///< finish within the fence's wait
     ROCPROFILER_RANGE_REPLAY_STATUS_PROGRAM_TOO_LARGE,    ///< Range exceeded the record budget
     ROCPROFILER_RANGE_REPLAY_STATUS_SNAPSHOT_FAILED,      ///< Device-memory snapshot was incomplete
     ROCPROFILER_RANGE_REPLAY_STATUS_STAGING_FAILED,  ///< Kernarg staging or signal setup failed
