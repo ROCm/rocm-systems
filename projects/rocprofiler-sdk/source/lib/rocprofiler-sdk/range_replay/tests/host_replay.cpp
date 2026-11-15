@@ -817,6 +817,31 @@ TEST(range_replay_host, gpu_work_a_continuation_callback_leaves_running_declines
     }
 }
 
+TEST(range_replay_host, gpu_work_that_outlasts_an_abandoned_pass_keeps_body_exception)
+{
+    auto  agent      = rrt::test_agent_t{agent_a};
+    auto& controller = *hsa::get_queue_controller();
+    auto  hsa_queue  = hsa_queue_t{};
+    hsa_queue.id     = 3;
+    auto& queue      = rrt::add_test_queue(controller, hsa_queue, agent);
+    // GPU work from the pass whose body threw, still running when host_run abandons the pass.
+    queue.async_started();
+
+    auto ctx = range_replay::range_context_t{};
+    ctx.record.decline(ROCPROFILER_RANGE_REPLAY_STATUS_BODY_EXCEPTION);
+    ctx.host.pass           = 1;
+    ctx.host.snapshot_taken = true;
+    ctx.host.fence_budget   = fence_timeout_budget;
+    ctx.host.agents.emplace_back(host_agent(agent_a));
+
+    range_replay::host::abandon_pass(ctx);
+    EXPECT_EQ(ctx.record.status(), ROCPROFILER_RANGE_REPLAY_STATUS_BODY_EXCEPTION)
+        << "the fence's timeout must not replace the reason the range was abandoned for";
+
+    queue.async_complete();
+    controller.destroy_queue(&hsa_queue);
+}
+
 namespace
 {
 // The end of a range's first pass: it dispatched, captured `value` at entry, and changed it since.
