@@ -83,7 +83,8 @@ static inline bool ginSdmaAllGatherDevCommRequirements(int deviceImpl, ncclDevCo
 //   kThresholdEnv, kDefaultThreshold, hostThresholdDefault(): the per-collective
 //     threshold env and its compiled default (kDefaultThreshold in the device pass);
 //   kCtasEnv, kCtasAlias (nullptr for none): the grid pin;
-//   kSdmaCtas, lsaCtas(chunkBytes): the size-adaptive grid of each tier.
+//   kSdmaCtas, lsaCtas(chunkBytes): the size-adaptive grid of each tier;
+//   poolCtas(): the barrier/signal pool its requirements request, which caps the grid.
 // Env values are read once per process.
 
 // gcnArchName of the current device, read once per process; nullptr if unavailable.
@@ -124,8 +125,7 @@ static inline size_t ginSdmaResolveCtasEnv() {
 template <typename Coll>
 static inline int ginSdmaResolveLaunchCtas(size_t chunkBytes, size_t sdmaThreshold) {
   return gin_sdma_allgather::allGatherCtas(chunkBytes, sdmaThreshold, ginSdmaResolveCtasEnv<Coll>(),
-                                           gin_sdma_allgather::allGatherPoolCtas(deviceCtaCount),
-                                           Coll::kSdmaCtas, Coll::lsaCtas(chunkBytes));
+                                           Coll::poolCtas(), Coll::kSdmaCtas, Coll::lsaCtas(chunkBytes));
 }
 
 // Mirrors testLaunchDeviceKernel() plus the host-resolved sdmaThreshold. `count` is what

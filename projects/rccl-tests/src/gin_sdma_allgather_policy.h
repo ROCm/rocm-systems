@@ -200,12 +200,16 @@ inline const ArchLsaCtaLadder* archLsaCtaLadder(const char* gcnArchName,
 }
 
 // Gather -D 3 LSA<->SDMA crossover in bytes per rank, per architecture.
-// Architectures not in the table use kGatherSdmaThresholdDefault.
+// Architectures not in the table use kGatherSdmaThresholdDefault. On 4x MI455X
+// (gfx1250) 96 LSA-tier CTAs match the SDMA put's bandwidth, so the LSA tier is used
+// at every size (kGatherSdmaNever).
 static constexpr size_t kGatherSdmaThresholdDefault = 1u << 20;
+// Larger than any chunk, and distinct from gin_sdma::kThresholdUnset.
+static constexpr size_t kGatherSdmaNever = ~(size_t)0 >> 1;
 static constexpr ArchSdmaThreshold kGatherSdmaThresholdByArch[] = {
   {"gfx942", 128u << 20},
   {"gfx950", 32u << 20},
-  {"gfx1250", 2u << 20},
+  {"gfx1250", kGatherSdmaNever},
 };
 
 inline size_t gatherArchSdmaThreshold(const char* gcnArchName) {
@@ -217,8 +221,9 @@ inline size_t gatherArchSdmaThreshold(const char* gcnArchName) {
 // Gather -D 3 LSA-tier CTA ladders. Every CTA runs its own LSA barrier, so small
 // chunks are barrier-bound and fewer CTAs win. Measured per rank on 8x MI300X
 // (gfx942): 1 CTA up to 2 KiB, 2 up to 8 KiB, 4 up to 32 KiB, 8 up to 512 KiB, 16
-// above. On 8x MI350X (gfx950): 2 up to 16 KiB, 16 above. On 4x MI455X (gfx1250):
-// 1 up to 8 KiB, 2 up to 64 KiB, 4 up to 128 KiB, 8 above.
+// above. On 8x MI350X (gfx950): 2 up to 16 KiB, 16 above. On 4x MI455X (gfx1250),
+// with the light done-flag fence: 2 up to 64 KiB, 4 up to 128 KiB, 8 up to 256 KiB,
+// 16 up to 512 KiB, 96 above; 96 CTAs reach the xGMI bandwidth host ncclGather gets.
 static constexpr LsaCtaStep kGatherLsaCtasGfx942[] = {
   {2u << 10, 1},
   {8u << 10, 2},
@@ -229,14 +234,15 @@ static constexpr LsaCtaStep kGatherLsaCtasGfx950[] = {
   {16u << 10, 2},
 };
 static constexpr LsaCtaStep kGatherLsaCtasGfx1250[] = {
-  {8u << 10, 1},
   {64u << 10, 2},
   {128u << 10, 4},
+  {256u << 10, 8},
+  {512u << 10, 16},
 };
 static constexpr ArchLsaCtaLadder kGatherLsaCtasByArch[] = {
   {"gfx942", kGatherLsaCtasGfx942, sizeof(kGatherLsaCtasGfx942) / sizeof(kGatherLsaCtasGfx942[0]), 16},
   {"gfx950", kGatherLsaCtasGfx950, sizeof(kGatherLsaCtasGfx950) / sizeof(kGatherLsaCtasGfx950[0]), 16},
-  {"gfx1250", kGatherLsaCtasGfx1250, sizeof(kGatherLsaCtasGfx1250) / sizeof(kGatherLsaCtasGfx1250[0]), 8},
+  {"gfx1250", kGatherLsaCtasGfx1250, sizeof(kGatherLsaCtasGfx1250) / sizeof(kGatherLsaCtasGfx1250[0]), 96},
 };
 
 // The Gather ladder for an architecture, or nullptr when it has none.
@@ -250,6 +256,19 @@ inline const ArchLsaCtaLadder* gatherLsaCtaLadder(const char* gcnArchName) {
 inline int gatherLsaCtas(const ArchLsaCtaLadder* ladder, size_t chunkBytes_) {
   if (!ladder) return kAllGatherCtasLsa;
   return lsaCtasFromLadder(chunkBytes_, ladder->steps, ladder->nSteps, ladder->above);
+}
+
+// Gather -D 3 barrier, signal and done-flag pool: the AllGather pool, raised to the
+// largest grid the Gather ladder launches. Like allGatherPoolCtas(), it is both what
+// the requirements request and the ceiling every launched grid is clamped to.
+inline int gatherPoolCtas(int deviceCtaCount, const ArchLsaCtaLadder* ladder) {
+  int pool = allGatherPoolCtas(deviceCtaCount);
+  if (!ladder) return pool;
+  if (ladder->above > pool) pool = ladder->above;
+  for (size_t i = 0; ladder->steps && i < ladder->nSteps; i++) {
+    if (ladder->steps[i].ctas > pool) pool = ladder->steps[i].ctas;
+  }
+  return pool;
 }
 
 // Element offset of rank r's contribution within EVERY peer's AllGather recv

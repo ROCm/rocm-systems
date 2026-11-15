@@ -188,8 +188,9 @@ TEST(AllGatherPolicyArchThreshold, UnknownOrMissingNameFallsBack) {
 TEST(GatherPolicyArchTable, ThresholdPerArch) {
   EXPECT_EQ(gatherArchSdmaThreshold("gfx942:sramecc+:xnack-"), 128u << 20);  // MI300X
   EXPECT_EQ(gatherArchSdmaThreshold("gfx950:sramecc+:xnack-"), 32u << 20);   // MI350X
-  EXPECT_EQ(gatherArchSdmaThreshold("gfx1250"), 2u << 20);                   // MI455X
-  EXPECT_EQ(gatherArchSdmaThreshold("gfx1250-strict"), 2u << 20);
+  EXPECT_EQ(gatherArchSdmaThreshold("gfx1250"), kGatherSdmaNever);           // MI455X
+  EXPECT_EQ(gatherArchSdmaThreshold("gfx1250-strict"), kGatherSdmaNever);
+  EXPECT_TRUE(chunkUsesLsaTier(size_t(1) << 40, gatherArchSdmaThreshold("gfx1250")));
 }
 
 TEST(GatherPolicyArchTable, ThresholdFallsBackOffTable) {
@@ -232,14 +233,17 @@ TEST(GatherPolicyArchTable, LadderGfx950) {
 
 TEST(GatherPolicyArchTable, LadderGfx1250) {
   for (const char* a : {"gfx1250", "gfx1250-strict"}) {
-    EXPECT_EQ(gatherCtasFor(a, 0), 1) << a;
-    EXPECT_EQ(gatherCtasFor(a, 8u << 10), 1) << a;
-    EXPECT_EQ(gatherCtasFor(a, (8u << 10) + 1), 2) << a;
+    EXPECT_EQ(gatherCtasFor(a, 0), 2) << a;
     EXPECT_EQ(gatherCtasFor(a, 64u << 10), 2) << a;
     EXPECT_EQ(gatherCtasFor(a, (64u << 10) + 1), 4) << a;
     EXPECT_EQ(gatherCtasFor(a, 128u << 10), 4) << a;
     EXPECT_EQ(gatherCtasFor(a, (128u << 10) + 1), 8) << a;
-    EXPECT_EQ(gatherCtasFor(a, 2u << 20), 8) << a;
+    EXPECT_EQ(gatherCtasFor(a, 256u << 10), 8) << a;
+    EXPECT_EQ(gatherCtasFor(a, (256u << 10) + 1), 16) << a;
+    EXPECT_EQ(gatherCtasFor(a, 512u << 10), 16) << a;
+    EXPECT_EQ(gatherCtasFor(a, (512u << 10) + 1), 96) << a;
+    EXPECT_EQ(gatherCtasFor(a, size_t(1) << 30), 96) << a;
+    EXPECT_EQ(gatherPoolCtas(/*deviceCtaCount=*/1, gatherLsaCtaLadder(a)), 96) << a;
   }
 }
 
@@ -251,19 +255,32 @@ TEST(GatherPolicyArchTable, NoLadderUsesAllGatherGrid) {
 }
 
 TEST(GatherPolicyArchTable, EveryLadderIsReachableAndFitsThePool) {
-  // The pool is sized from allGatherMaxCtas(), so a larger step would be clamped.
+  // With the default -V, every step must launch unclamped from the Gather pool.
   for (const ArchLsaCtaLadder& row : kGatherLsaCtasByArch) {
+    const int pool = gatherPoolCtas(/*deviceCtaCount=*/1, &row);
     EXPECT_EQ(gatherLsaCtaLadder(row.arch), &row) << row.arch;
     EXPECT_GE(row.above, 1) << row.arch;
-    EXPECT_LE(row.above, allGatherMaxCtas()) << row.arch;
+    EXPECT_EQ(allGatherCtas(0, 1, kAllGatherCtasUnset, pool, 1, row.above), row.above) << row.arch;
     for (size_t i = 0; i < row.nSteps; i++) {
       EXPECT_GE(row.steps[i].ctas, 1) << row.arch;
-      EXPECT_LE(row.steps[i].ctas, allGatherMaxCtas()) << row.arch;
+      EXPECT_EQ(allGatherCtas(0, 1, kAllGatherCtasUnset, pool, 1, row.steps[i].ctas), row.steps[i].ctas)
+          << row.arch;
       if (i > 0) {
         EXPECT_GT(row.steps[i].maxChunkBytes, row.steps[i - 1].maxChunkBytes) << row.arch;
       }
     }
   }
+}
+
+TEST(GatherPolicyPool, CoversTheLadderPeakAndTheAllGatherPool) {
+  static constexpr LsaCtaStep kSteps[] = {{1u << 10, 2}, {1u << 20, 96}};
+  const ArchLsaCtaLadder peakInSteps {"x", kSteps, 2, 64};
+  EXPECT_EQ(gatherPoolCtas(16, &peakInSteps), 96);
+  EXPECT_EQ(gatherPoolCtas(128, &peakInSteps), 128);
+  const ArchLsaCtaLadder peakAbove {"x", nullptr, 0, 80};
+  EXPECT_EQ(gatherPoolCtas(16, &peakAbove), 80);
+  EXPECT_EQ(gatherPoolCtas(16, nullptr), allGatherPoolCtas(16));
+  EXPECT_EQ(gatherPoolCtas(0, nullptr), allGatherPoolCtas(0));
 }
 
 // ---- allGatherCtas: size-adaptive ladder, clamped to the launched pool --------
