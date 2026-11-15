@@ -118,6 +118,8 @@ fence_queue(const hsa::Queue& queue, const hsa::replay_deadline_t& deadline)
         switch(hsa::replay_barrier_and_wait(queue, signal, deadline))
         {
             case hsa::barrier_wait_result_t::completed: return true;
+            // Nothing reached the ring, so the signal goes back to the pool.
+            case hsa::barrier_wait_result_t::ring_full: return false;
             case hsa::barrier_wait_result_t::timed_out:
                 // The barrier is still in the ring and the packet processor decrements this signal
                 // when it retires. Released, the signal could be handed to another dispatch or
