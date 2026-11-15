@@ -21,6 +21,7 @@
 // THE SOFTWARE.
 
 #include "lib/rocprofiler-sdk/range_replay/host_replay.hpp"
+#include "lib/common/environment.hpp"
 #include "lib/common/logging.hpp"
 #include "lib/common/scope_destructor.hpp"
 #include "lib/rocprofiler-sdk/agent.hpp"
@@ -42,14 +43,19 @@
 #include <hsa/hsa.h>
 
 #include <algorithm>
+#include <cerrno>
 #include <chrono>
 #include <climits>
+#include <cstdlib>
 #include <cstring>
 #include <memory>
 #include <mutex>
 #include <new>
+#include <optional>
 #include <shared_mutex>
 #include <stdexcept>
+#include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -62,6 +68,9 @@ namespace host
 namespace
 {
 using phase_clock = std::chrono::steady_clock;
+
+constexpr auto fence_timeout_env =
+    std::string_view{"ROCPROFILER_RANGE_REPLAY_HOST_FENCE_TIMEOUT_MS"};
 
 double
 elapsed_ms(phase_clock::duration elapsed)
@@ -91,46 +100,89 @@ gpu_agents()
     return out;
 }
 
-void
-fence_queue(const hsa::Queue& queue)
+// Whether the work submitted to `queue` before the fence finished by `deadline`. A queue the
+// barrier cannot be written to is not waited on.
+bool
+fence_queue(const hsa::Queue& queue, const hsa::replay_deadline_t& deadline)
 {
     // Copy engines and other non-compute queues are the application's job. The barrier below only
     // waits for compute.
-    if(queue.get_engine_type() != hsa::Queue::engine_type::compute) return;
+    if(queue.get_engine_type() != hsa::Queue::engine_type::compute) return true;
+    // Earlier queues used up the fence's budget. A barrier written now could only time out, and
+    // its signal would then have to be leaked.
+    if(deadline.expired()) return false;
+
     auto       signal        = hsa_signal_t{.handle = 0};
     auto*      pooled_signal = hsa::Queue::create_signal(0, &signal, /*use_pool=*/true);
+    auto       leak_signal   = false;
     const auto _release      = common::scope_destructor{[&]() {
+        if(leak_signal) return;
         if(pooled_signal != nullptr)
             hsa::Queue::release_signal(pooled_signal);
         else if(signal.handle != 0)
             queue.core_api().hsa_signal_destroy_fn(signal);
     }};
 
-    if(signal.handle == 0 || !hsa::replay_barrier_and_wait(queue, signal))
-        ROCP_WARNING << "range replay: host replay could not fence a queue with a barrier; "
-                        "relying on the application having synchronized the device";
+    if(signal.handle != 0)
+    {
+        switch(hsa::replay_barrier_and_wait(queue, signal, deadline))
+        {
+            case hsa::barrier_wait_result_t::completed: return true;
+            // Nothing reached the ring, so the signal goes back to the pool.
+            case hsa::barrier_wait_result_t::ring_full: return false;
+            case hsa::barrier_wait_result_t::timed_out:
+                // The barrier is still in the ring and the packet processor decrements this signal
+                // when it retires. Released, the signal could be handed to another dispatch or
+                // destroyed before that write, so it is leaked.
+                leak_signal = true;
+                return false;
+            case hsa::barrier_wait_result_t::not_submitted: break;
+        }
+    }
+    ROCP_WARNING << "range replay: host replay could not fence a queue with a barrier; "
+                    "relying on the application having synchronized the device";
+    return true;
 }
 
 // Fence compute queues while excluding destruction, but without holding the queue-map lock.
-// Copies and non-compute work must already have been synchronized by the application.
-void
-fence_agent(hsa_agent_t agent)
+// Copies and non-compute work must already have been synchronized by the application. Returns
+// false at the first queue or handler drain that does not finish by `deadline`.
+bool
+fence_agent(hsa_agent_t agent, const hsa::replay_deadline_t& deadline)
 {
+    auto fenced = true;
     if(auto* controller = hsa::get_queue_controller(); controller != nullptr)
     {
         controller->iterate_queues_with_lifetime([&](const hsa::Queue* queue) {
-            if(queue != nullptr && queue->get_agent().get_hsa_agent().handle == agent.handle)
-                fence_queue(*queue);
+            if(fenced && queue != nullptr &&
+               queue->get_agent().get_hsa_agent().handle == agent.handle)
+                fenced = fence_queue(*queue, deadline);
         });
     }
-    hsa::replay_drain_agent_or_fatal(agent);
+    return fenced && hsa::replay_drain_agent(agent, deadline);
 }
 
-void
-fence_all(const std::vector<host_agent_state_t>& agents)
+// Fences every agent the range snapshots, all against one deadline, so the range waits at most one
+// fence budget however many queues and agents there are. GPU work that does not finish by then
+// declines the range rather than aborting the application: a snapshot or restore taken while that
+// work runs would race it.
+bool
+fence_all(range_context_t& ctx)
 {
-    for(const auto& agent : agents)
-        fence_agent(agent.hsa_agent);
+    const auto deadline = hsa::replay_deadline_t{ctx.host.fence_budget};
+    for(const auto& agent : ctx.host.agents)
+    {
+        if(fence_agent(agent.hsa_agent, deadline)) continue;
+        ROCP_WARNING << fmt::format(
+            "range replay: GPU work on agent {} did not finish within {:g}s of host range {}'s "
+            "fence; the range will not be replayed",
+            agent.agent_id.handle,
+            std::chrono::duration<double>{ctx.host.fence_budget}.count(),
+            ctx.record.range_id());
+        ctx.record.decline(ROCPROFILER_RANGE_REPLAY_STATUS_CONCURRENT_DISPATCH);
+        return false;
+    }
+    return true;
 }
 
 // Device digests of every agent followed by the host regions', so two points in time compare
@@ -219,6 +271,7 @@ constexpr int max_refences = 8;
 // fence. A dispatch whose epoch advance is visible under the writer locks wrote its packets after
 // the read, so the fence may not cover it: release, fence again, and re-check. Every submit
 // advances the epoch under the reader lock, so with the writer locks held nothing is mid-submit.
+// A range that declines here still gets the locks; the caller sees the decline in its record.
 std::vector<std::unique_lock<std::shared_mutex>>
 lock_after_fence(range_context_t& ctx, std::vector<uint64_t> fenced_epochs)
 {
@@ -237,7 +290,7 @@ lock_after_fence(range_context_t& ctx, std::vector<uint64_t> fenced_epochs)
         }
         guards.clear();
         fenced_epochs = submit_epochs(ctx.host);
-        fence_all(ctx.host.agents);
+        if(!fence_all(ctx)) return lock_agents(ctx.host);
     }
 }
 
@@ -293,6 +346,41 @@ restore_regions(const std::vector<host_region_t>& regions)
         if(!itr->saved.empty()) std::memcpy(itr->ptr, itr->saved.data(), itr->saved.size());
 }
 
+std::chrono::milliseconds
+parse_fence_timeout(const std::optional<std::string>& value)
+{
+    const auto fallback = std::chrono::milliseconds{std::chrono::seconds{hsa::drain_budget_secs}};
+    if(!value) return fallback;
+
+    errno            = 0;
+    char*      end   = nullptr;
+    const auto count = std::strtoll(value->c_str(), &end, 10);
+    if(end == value->c_str() || *end != '\0' || errno == ERANGE || count < 1 ||
+       count > max_fence_timeout.count())
+    {
+        ROCP_WARNING << fmt::format("range replay: ignoring invalid {}='{}' (expected a whole "
+                                    "number of milliseconds from 1 to {}); using {} ms",
+                                    fence_timeout_env,
+                                    *value,
+                                    max_fence_timeout.count(),
+                                    fallback.count());
+        return fallback;
+    }
+    return std::chrono::milliseconds{count};
+}
+
+std::chrono::milliseconds
+fence_timeout()
+{
+    static const auto timeout = [] {
+        const auto value = common::get_env_optional(fence_timeout_env);
+        const auto ms    = parse_fence_timeout(value);
+        if(value) ROCP_INFO << fmt::format("range replay: host fence timeout is {} ms", ms.count());
+        return ms;
+    }();
+    return timeout;
+}
+
 void
 enter_range(range_context_t& ctx, std::vector<pending_host_region_t>&& pending_regions)
 try
@@ -312,7 +400,11 @@ try
     // needs that queue's ROCr intercept lock. Another thread can hold that lock while it waits in
     // WriteInterceptor for this agent's reader lock.
     const auto epochs = submit_epochs(host);
-    fence_all(host.agents);
+    if(!fence_all(ctx))
+    {
+        host.agents.clear();
+        return;
+    }
     const auto fenced_at = phase_clock::now();
 
     // A foreign dispatch publishes its decline before it takes the reader lock, so after the
@@ -410,9 +502,15 @@ finish_pass(range_context_t& ctx)
     const auto dispatch_count = static_cast<uint64_t>(ctx.record.observed_dispatch_count());
 
     // The pass's GPU tail belongs to the pass: its records are emitted before PASS exit, and the
-    // checks below see settled memory. The writer locks are taken just before the restore.
+    // checks below see settled memory. The writer locks are taken just before the restore. A tail
+    // that outlasts the fence budget declines the range, and the eligibility check below finishes
+    // it after PASS exit.
     const auto epochs = submit_epochs(host);
-    if(host.snapshot_taken) fence_all(host.agents);
+    if(host.snapshot_taken) fence_all(ctx);
+    // Writes the application made during the pass are already in this count. A tool callback that
+    // copies afterwards moves it, and that copy is not waited on by the compute-queue fence.
+    const auto writes_at_fence =
+        ctx.external ? ctx.external->owning_device_writes.load(std::memory_order_relaxed) : 0;
 
     if(pass > 0)
         execute_pass_phase_exit(ctx.plan, pass, ctx.agent_id, dispatch_count, host.pass_state);
@@ -424,6 +522,24 @@ finish_pass(range_context_t& ctx)
     auto finish = [&](rocprofiler_range_replay_status_t status, uint64_t divergence = 0) {
         host.local_context.reset();
         return step_result_t{0, status, divergence};
+    };
+
+    auto decline_if_callback_copied = [&]() {
+        if(ctx.external != nullptr &&
+           ctx.external->owning_device_writes.load(std::memory_order_relaxed) != writes_at_fence)
+            ctx.record.decline(ROCPROFILER_RANGE_REPLAY_STATUS_MEMORY_COPY_IN_RANGE);
+    };
+
+    // PASS exit and the continuation callback run after the pass fence. Dispatches they submit
+    // advance the epoch and are fenced again here, before divergence or the restore observes
+    // memory.
+    auto settle_callback_gpu_work = [&]() {
+        if(executable_guard.owns_lock()) executable_guard.unlock();
+        auto guards = lock_after_fence(ctx, epochs);
+        guards.clear();
+        executable_guard.lock();
+        fold_external_decline(ctx);
+        decline_if_callback_copied();
     };
 
     fold_external_decline(ctx);
@@ -468,7 +584,11 @@ finish_pass(range_context_t& ctx)
         if(!allocations_unchanged(host))
             return finish(ROCPROFILER_RANGE_REPLAY_STATUS_ALLOCATION_CHANGED_IN_RANGE);
         if(!continue_replay)
+        {
+            settle_callback_gpu_work();
+            if(!ctx.record.eligible()) return finish(ctx.record.status());
             return finish(ROCPROFILER_RANGE_REPLAY_STATUS_REPLAYED, count_divergence(host));
+        }
     }
 
     const auto next = pass + 1;
@@ -476,6 +596,8 @@ finish_pass(range_context_t& ctx)
     {
         ROCP_WARNING << "range replay: host replay pass count exceeds the siglongjmp value range; "
                         "stopping";
+        settle_callback_gpu_work();
+        if(!ctx.record.eligible()) return finish(ctx.record.status());
         return finish(ROCPROFILER_RANGE_REPLAY_STATUS_REPLAYED, count_divergence(host));
     }
 
@@ -489,6 +611,13 @@ finish_pass(range_context_t& ctx)
     if(executable_guard.owns_lock()) executable_guard.unlock();
     auto guards = lock_after_fence(ctx, epochs);
     executable_guard.lock();
+    fold_external_decline(ctx);
+    decline_if_callback_copied();
+    if(!ctx.record.eligible())
+    {
+        guards.clear();
+        return finish(ctx.record.status());
+    }
 
     const auto restore_start  = phase_clock::now();
     const auto restore_status = restore_entry_state(ctx);
@@ -508,6 +637,9 @@ finish_pass(range_context_t& ctx)
         host.local_context = std::make_shared<kernel_replay::scoped_local_context_control>(
             context::get_active_contexts());
 
+    // Visible to the PASS enter callback. Leaving it at the previous pass made that callback's
+    // dispatches count as pass 0 and made host_track_memory capture regions on a re-executed pass.
+    host.pass       = next;
     host.pass_state = pass_context_state_t{};
     execute_pass_phase_enter(ctx.plan,
                              next,
@@ -517,7 +649,6 @@ finish_pass(range_context_t& ctx)
                              ctx.internal_corr_id,
                              ctx.ancestor_corr_id,
                              host.pass_state);
-    host.pass = next;
 
     return step_result_t{next, ROCPROFILER_RANGE_REPLAY_STATUS_REPLAYED, 0};
 }

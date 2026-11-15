@@ -537,10 +537,18 @@ note_device_write(uint64_t agent_key)
     registry().rlock([&](const registry_t& entries) {
         for(const auto& entry : entries)
         {
-            // A host range re-runs its own copies, so only another thread's copy declines it, and
-            // that copy can land on any agent. A packet range did not record the copy, so a device
-            // write on its agent declines it even when the range's own thread made the copy.
-            if(entry.host ? entry.thread_id == tid : entry.agent_key != agent_key) continue;
+            // A host range re-runs its own copies, so here only another thread's copy declines it,
+            // and that copy can land on any agent. The owning thread's copies are counted instead,
+            // so that finish_pass can decline a copy a tool callback makes after the pass fence.
+            if(entry.host && entry.thread_id == tid)
+            {
+                if(entry.external)
+                    entry.external->owning_device_writes.fetch_add(1, std::memory_order_relaxed);
+                continue;
+            }
+            // A packet range did not record the copy, so a device write on its agent declines it
+            // even when the range's own thread made the copy.
+            if(!entry.host && entry.agent_key != agent_key) continue;
             if(entry.external)
                 publish_external_decline(*entry.external,
                                          ROCPROFILER_RANGE_REPLAY_STATUS_MEMORY_COPY_IN_RANGE);
