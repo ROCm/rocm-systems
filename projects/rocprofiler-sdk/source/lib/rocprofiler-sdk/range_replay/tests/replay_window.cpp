@@ -43,6 +43,9 @@ namespace
 {
 constexpr uint64_t agent_handle = 0x2001;
 constexpr auto     short_budget = hsa::replay_wait_budget_t{1ms, 3};
+constexpr auto     short_wait   = 3ms;
+
+using wait_duration = hsa::replay_deadline_t::clock::duration;
 }  // namespace
 
 TEST(replay_window, replay_wait_gives_up_after_its_budget)
@@ -66,6 +69,50 @@ TEST(replay_window, replay_wait_returns_at_the_first_try_that_drains)
     EXPECT_EQ(tries, 2);
 }
 
+TEST(replay_window, a_deadline_hands_out_one_slice_at_most_and_never_past_its_end)
+{
+    EXPECT_EQ(hsa::replay_deadline_t{std::chrono::hours{1}}.next_wait(), hsa::drain_slice);
+
+    const auto deadline = hsa::replay_deadline_t{200ms};
+    std::this_thread::sleep_for(50ms);
+    EXPECT_LE(deadline.next_wait(), 150ms);
+    EXPECT_FALSE(deadline.expired());
+    std::this_thread::sleep_for(200ms);
+    EXPECT_EQ(deadline.next_wait(), wait_duration::zero());
+    EXPECT_TRUE(deadline.expired());
+}
+
+TEST(replay_window, a_deadline_wait_gives_up_at_its_deadline)
+{
+    const auto deadline = hsa::replay_deadline_t{20ms};
+    auto       tries    = 0;
+    EXPECT_FALSE(hsa::replay_wait_until(
+        [&tries](wait_duration timeout) {
+            ++tries;
+            std::this_thread::sleep_for(timeout);
+            return false;
+        },
+        "a wait that never finishes",
+        deadline));
+    EXPECT_TRUE(deadline.expired());
+    EXPECT_GE(tries, 1);
+}
+
+TEST(replay_window, a_deadline_wait_still_tries_once_past_its_deadline)
+{
+    const auto deadline = hsa::replay_deadline_t{0ms};
+    auto       timeouts = std::vector<wait_duration>{};
+    EXPECT_TRUE(hsa::replay_wait_until(
+        [&timeouts](wait_duration timeout) {
+            timeouts.emplace_back(timeout);
+            return true;
+        },
+        "work that has already finished",
+        deadline));
+    ASSERT_EQ(timeouts.size(), 1U);
+    EXPECT_EQ(timeouts.front(), wait_duration::zero());
+}
+
 TEST(replay_window, agent_drain_gives_up_while_a_handler_is_in_flight)
 {
     auto  agent      = rrt::test_agent_t{agent_handle};
@@ -75,11 +122,11 @@ TEST(replay_window, agent_drain_gives_up_while_a_handler_is_in_flight)
     auto& queue      = rrt::add_test_queue(controller, hsa_queue, agent);
 
     const auto hsa_agent = hsa_agent_t{.handle = agent_handle};
-    EXPECT_TRUE(hsa::replay_drain_agent(hsa_agent, short_budget));
+    EXPECT_TRUE(hsa::replay_drain_agent(hsa_agent, hsa::replay_deadline_t{short_wait}));
     queue.async_started();
-    EXPECT_FALSE(hsa::replay_drain_agent(hsa_agent, short_budget));
+    EXPECT_FALSE(hsa::replay_drain_agent(hsa_agent, hsa::replay_deadline_t{short_wait}));
     queue.async_complete();
-    EXPECT_TRUE(hsa::replay_drain_agent(hsa_agent, short_budget));
+    EXPECT_TRUE(hsa::replay_drain_agent(hsa_agent, hsa::replay_deadline_t{short_wait}));
 
     controller.destroy_queue(&hsa_queue);
 }
@@ -96,10 +143,10 @@ TEST(replay_window, agent_drain_counts_a_retiring_queue_against_its_budget)
     ASSERT_TRUE(rrt::wait_until_unmapped(controller));
 
     const auto hsa_agent = hsa_agent_t{.handle = agent_handle};
-    EXPECT_FALSE(hsa::replay_drain_agent(hsa_agent, short_budget));
+    EXPECT_FALSE(hsa::replay_drain_agent(hsa_agent, hsa::replay_deadline_t{short_wait}));
 
     destroy.finish();
-    EXPECT_TRUE(hsa::replay_drain_agent(hsa_agent, short_budget));
+    EXPECT_TRUE(hsa::replay_drain_agent(hsa_agent, hsa::replay_deadline_t{short_wait}));
 }
 
 // destroy_queue erases a queue from the map before it waits for the queue's completion handlers,

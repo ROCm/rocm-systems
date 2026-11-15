@@ -56,6 +56,7 @@
 #include <hsa/hsa.h>
 
 #include <atomic>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -196,10 +197,10 @@ struct host_range_state_t
     uint64_t                        code_object_watermark = 0;
     bool                            exit_digests_taken    = false;
 
-    // How long each fence waits for an agent's GPU work before the range declines. Always the
-    // default drain budget in production; a field so that a test can reach the timeout in
-    // milliseconds.
-    hsa::replay_wait_budget_t fence_budget = {};
+    // How long one fence, over all its queues and agents, waits for GPU work before the range
+    // declines. Always the default drain budget in production; a field so that a test can reach the
+    // timeout in milliseconds.
+    std::chrono::milliseconds fence_budget = std::chrono::seconds{hsa::drain_budget_secs};
 
     // Carries the PASS callback context from the PHASE_ENTER raised just before a siglongjmp to the
     // PHASE_EXIT raised when that pass reaches end() again.
