@@ -963,11 +963,27 @@ hipError_t hipHostFree(void* ptr) {
   HIP_RETURN(ihipFree(ptr));
 }
 
+// Releases a multiplanar parent and the plane views it owns. Format-independent: it works off
+// numPlanes, so a three- or four-plane format needs no change here. The caller must already have
+// synchronized the device and removed the parent and its planes from hipArraySet.
+static void ihipReleaseMultiplanarArray(hipArray_t parent) {
+  // Plane views must go before the buffer they view.
+  for (unsigned int i = 0; i < parent->numPlanes; ++i) {
+    hipArray* plane = parent->planes[i];
+    if (plane != nullptr) {
+      as_amd(reinterpret_cast<cl_mem>(plane->data))->release();
+      delete plane;
+    }
+  }
+  as_amd(reinterpret_cast<cl_mem>(parent->data))->release();
+  delete parent;
+}
+
 hipError_t ihipArrayDestroy(hipArray_t array) {
   if (array == nullptr) {
     return hipErrorInvalidValue;
   }
-  hipArray* planes[2] = {nullptr, nullptr};
+  bool isMultiplanar = false;
   {
     amd::ScopedLock lock(hipArraySetLock);
     if (hip::hipArraySet.find(array) == hip::hipArraySet.end()) {
@@ -978,15 +994,15 @@ hipError_t ihipArrayDestroy(hipArray_t array) {
     // ports that clean up planes before the parent.
     if (array->isPlane) {
       ClPrint(amd::LOG_INFO, amd::LOG_RESOURCE,
-              "hipArrayDestroy on NV12 plane %p is a no-op; the parent owns it", array);
+              "hipArrayDestroy on plane %p is a no-op; the parent owns it", array);
       return hipSuccess;
     }
     hip::hipArraySet.erase(array);
+    isMultiplanar = (array->numPlanes != 0);
     // Children are erased under the same lock as the parent, so a concurrent hipArrayGetPlane
     // cannot hand out a plane that is about to be freed.
     for (unsigned int i = 0; i < array->numPlanes; ++i) {
-      planes[i] = array->planes[i];
-      hip::hipArraySet.erase(planes[i]);
+      hip::hipArraySet.erase(array->planes[i]);
     }
   }
   cl_mem memObj = reinterpret_cast<cl_mem>(array->data);
@@ -994,19 +1010,16 @@ hipError_t ihipArrayDestroy(hipArray_t array) {
     return hipErrorInvalidValue;
   }
 
-  auto image = as_amd(memObj);
+  auto memory = as_amd(memObj);
   // Wait on the device, associated with the current memory object during allocation
-  g_devices[image->getUserData().deviceId]->SyncAllStreams();
+  g_devices[memory->getUserData().deviceId]->SyncAllStreams();
 
-  // Release the plane images before the shared buffer they view.
-  for (hipArray* plane : planes) {
-    if (plane != nullptr) {
-      as_amd(reinterpret_cast<cl_mem>(plane->data))->release();
-      delete plane;
-    }
+  if (isMultiplanar) {
+    ihipReleaseMultiplanarArray(array);
+    return hipSuccess;
   }
-  image->release();
 
+  memory->release();
   delete array;
   return hipSuccess;
 }
@@ -1269,45 +1282,128 @@ amd::Image* ihipImageCreate(const cl_channel_order channelOrder, const cl_channe
   return image;
 }
 
-// NV12 is one pitched allocation: a full-size Y plane followed by a half-size interleaved UV
-// plane. Both planes share the same byte pitch, because a Y row is W bytes (W px x 1 channel) and
-// a UV row is also W bytes (W/2 px x 2 channels).
-static hipError_t ihipArrayCreateNV12(hipArray_t* array,
-                                      const HIP_ARRAY3D_DESCRIPTOR* pAllocateArray,
-                                      unsigned int numMipmapLevels) {
+// One plane of a multiplanar format: its channel layout, and how its dimensions derive from the
+// parent's. Element size is taken from amd::Image::Format so it cannot disagree with channelType.
+struct MultiplanarPlaneSpec {
+  cl_channel_order channelOrder;
+  cl_channel_type channelType;
+  hipArray_Format arrayFormat;
+  unsigned int numChannels;
+  unsigned int widthDivisor;   //!< Chroma subsampling in x; 1 for a full-width plane
+  unsigned int heightDivisor;  //!< Chroma subsampling in y; 1 for a full-height plane
+};
+
+struct MultiplanarSpec {
+  unsigned int planeCount;
+  MultiplanarPlaneSpec planes[kMaxArrayPlanes];
+};
+
+// True for formats the multiplanar path owns. Keep in sync with getMultiplanarSpec below.
+static bool isMultiplanarFormat(hipArray_Format format) { return format == HIP_AD_FORMAT_NV12; }
+
+// Validates a multiplanar descriptor and describes its planes. Every format-specific rule lives
+// here, so adding P010 or I420 later means adding a case rather than touching the allocator.
+static hipError_t getMultiplanarSpec(const HIP_ARRAY3D_DESCRIPTOR& desc, unsigned int mipLevels,
+                                     MultiplanarSpec& spec) {
+  switch (desc.Format) {
+    case HIP_AD_FORMAT_NV12: {
+      // Mirrors CUDA's measured creation contract: NumChannels is exactly 3, the video flag is
+      // mandatory, dimensions are even and 2D only.
+      constexpr unsigned int kNV12Flags = hipArrayVideoEncodeDecode | hipArraySurfaceLoadStore;
+      if ((desc.NumChannels != 3) || (mipLevels > 1) ||
+          ((desc.Flags & ~kNV12Flags) != 0) ||
+          ((desc.Flags & hipArrayVideoEncodeDecode) == 0) || (desc.Width == 0) ||
+          (desc.Height == 0) || ((desc.Width & 1) != 0) || ((desc.Height & 1) != 0) ||
+          (desc.Depth != 0)) {
+        return hipErrorInvalidValue;
+      }
+      // Full-size luma, then half-size interleaved chroma.
+      spec.planeCount = 2;
+      spec.planes[0] = {CL_R, CL_UNSIGNED_INT8, HIP_AD_FORMAT_UNSIGNED_INT8, 1, 1, 1};
+      spec.planes[1] = {CL_RG, CL_UNSIGNED_INT8, HIP_AD_FORMAT_UNSIGNED_INT8, 2, 2, 2};
+      return hipSuccess;
+    }
+    default:
+      return hipErrorInvalidValue;
+  }
+}
+
+// A multiplanar array is one pitched allocation holding every plane back to back, with an ordinary
+// single-plane image view over each. Plane geometry comes from the format spec; nothing below
+// knows which format it is building.
+static hipError_t ihipArrayCreateMultiplanar(hipArray_t* array,
+                                             const HIP_ARRAY3D_DESCRIPTOR* pAllocateArray,
+                                             unsigned int numMipmapLevels) {
   // PAL's image-buffer path overwrites the child's origin instead of adding it, which would alias
-  // the UV plane onto Y. Gate NV12 off until that is fixed and testable on Windows.
+  // every plane onto the first. Gate off until that is fixed and testable on Windows.
   if (GPU_ENABLE_PAL != 0) {
     return hipErrorNotSupported;
   }
 
-  // Mirrors CUDA's measured creation contract: NumChannels is exactly 3, the video flag is
-  // mandatory, dimensions are even and 2D only.
-  if ((pAllocateArray->NumChannels != 3) || (numMipmapLevels > 1)) {
-    return hipErrorInvalidValue;
+  MultiplanarSpec spec = {};
+  hipError_t status = getMultiplanarSpec(*pAllocateArray, numMipmapLevels, spec);
+  if (status != hipSuccess) {
+    return status;
   }
-  constexpr unsigned int kNV12Flags = hipArrayVideoEncodeDecode | hipArraySurfaceLoadStore;
-  if (((pAllocateArray->Flags & ~kNV12Flags) != 0) ||
-      ((pAllocateArray->Flags & hipArrayVideoEncodeDecode) == 0)) {
-    return hipErrorInvalidValue;
-  }
-  const size_t width = pAllocateArray->Width;
-  const size_t height = pAllocateArray->Height;
-  if ((width == 0) || (height == 0) || ((width & 1) != 0) || ((height & 1) != 0) ||
-      (pAllocateArray->Depth != 0)) {
+  if ((spec.planeCount == 0) || (spec.planeCount > kMaxArrayPlanes)) {
     return hipErrorInvalidValue;
   }
 
   amd::Device* device = hip::getCurrentDevice()->devices()[0];
-  if (width > (std::numeric_limits<size_t>::max() - device->info().imagePitchAlignment_)) {
-    return hipErrorInvalidValue;
+  const size_t pitchAlign = device->info().imagePitchAlignment_;
+  const size_t baseAlign = device->info().imageBaseAddressAlignment_;
+  if ((pitchAlign == 0) || (baseAlign == 0)) {
+    return hipErrorNotSupported;
   }
-  const size_t pitch = amd::alignUp(width, device->info().imagePitchAlignment_);
-  if (height > ((std::numeric_limits<size_t>::max() / pitch) / 2)) {
-    return hipErrorInvalidValue;
+
+  constexpr size_t kSizeMax = std::numeric_limits<size_t>::max();
+  struct PlaneLayout {
+    size_t width;
+    size_t height;
+    size_t pitch;
+    size_t offset;
+  };
+  PlaneLayout layout[kMaxArrayPlanes] = {};
+  size_t totalSize = 0;
+
+  for (unsigned int i = 0; i < spec.planeCount; ++i) {
+    const MultiplanarPlaneSpec& plane = spec.planes[i];
+    PlaneLayout& out = layout[i];
+
+    // The allocator's own invariant: subsampling must divide the parent's dimensions exactly.
+    // Per-format validation should already guarantee this; this catches a bad new spec.
+    if ((plane.widthDivisor == 0) || (plane.heightDivisor == 0) ||
+        ((pAllocateArray->Width % plane.widthDivisor) != 0) ||
+        ((pAllocateArray->Height % plane.heightDivisor) != 0)) {
+      return hipErrorInvalidValue;
+    }
+    out.width = pAllocateArray->Width / plane.widthDivisor;
+    out.height = pAllocateArray->Height / plane.heightDivisor;
+    if ((out.width > std::numeric_limits<unsigned int>::max()) ||
+        (out.height > std::numeric_limits<unsigned int>::max())) {
+      return hipErrorInvalidValue;
+    }
+
+    const size_t elementSize =
+        amd::Image::Format({plane.channelOrder, plane.channelType}).getElementSize();
+    if ((elementSize == 0) || (out.width > (kSizeMax / elementSize))) {
+      return hipErrorInvalidValue;
+    }
+    const size_t rowBytes = out.width * elementSize;
+    if ((rowBytes > (kSizeMax - (pitchAlign - 1))) ||
+        (totalSize > (kSizeMax - (baseAlign - 1)))) {
+      return hipErrorInvalidValue;
+    }
+    out.pitch = amd::alignUp(rowBytes, pitchAlign);
+    // Each plane starts on an image-base boundary. For NV12 this is a no-op, since the pitch is
+    // already base-aligned, but it keeps the layout valid for formats whose planes are not.
+    out.offset = amd::alignUp(totalSize, baseAlign);
+    if ((out.pitch != 0) && (out.height > ((kSizeMax - out.offset) / out.pitch))) {
+      return hipErrorInvalidValue;
+    }
+    totalSize = out.offset + (out.pitch * out.height);
   }
-  const size_t ySize = pitch * height;
-  const size_t totalSize = ySize + (pitch * (height / 2));
+
   if (device->info().maxMemAllocSize_ < totalSize) {
     return hipErrorOutOfMemory;
   }
@@ -1319,66 +1415,62 @@ static hipError_t ihipArrayCreateNV12(hipArray_t* array,
   }
   if (!buffer->create(nullptr, false, false, false)) {
     buffer->release();
-    LogPrintfError("Cannot allocate NV12 backing buffer of size: %zu", totalSize);
+    LogPrintfError("Cannot allocate multiplanar backing buffer of size: %zu", totalSize);
     return hipErrorOutOfMemory;
   }
   // ihipArrayDestroy syncs the device recorded here before releasing.
   buffer->getUserData().deviceId = hip::getCurrentDevice()->deviceId();
 
-  hipError_t status = hipSuccess;
-  amd::Image* yImage =
-      ihipImageCreate(CL_R, CL_UNSIGNED_INT8, CL_MEM_OBJECT_IMAGE2D, width, height, 0,
-                      0 /* array size */, pitch, 0 /* slice pitch */, 1, 0 /* offset */, buffer,
-                      status);
-  if (yImage == nullptr) {
-    buffer->release();
-    return status;
-  }
-  amd::Image* uvImage =
-      ihipImageCreate(CL_RG, CL_UNSIGNED_INT8, CL_MEM_OBJECT_IMAGE2D, width / 2, height / 2, 0,
-                      0 /* array size */, pitch, 0 /* slice pitch */, 1, ySize /* offset */, buffer,
-                      status);
-  if (uvImage == nullptr) {
-    yImage->release();
-    buffer->release();
-    return status;
+  amd::Image* images[kMaxArrayPlanes] = {};
+  for (unsigned int i = 0; i < spec.planeCount; ++i) {
+    const MultiplanarPlaneSpec& plane = spec.planes[i];
+    const PlaneLayout& out = layout[i];
+    images[i] = ihipImageCreate(plane.channelOrder, plane.channelType, CL_MEM_OBJECT_IMAGE2D,
+                                out.width, out.height, 0, 0 /* array size */, out.pitch,
+                                0 /* slice pitch */, 1, out.offset, buffer, status);
+    if (images[i] == nullptr) {
+      for (unsigned int j = 0; j < i; ++j) {
+        images[j]->release();
+      }
+      buffer->release();
+      return status;
+    }
   }
 
   // The parent holds the Buffer; only the children hold Images.
   hipArray* parent = new hipArray{reinterpret_cast<void*>(as_cl<amd::Memory>(buffer))};
-  hipArray* yPlane = new hipArray{reinterpret_cast<void*>(as_cl<amd::Memory>(yImage))};
-  hipArray* uvPlane = new hipArray{reinterpret_cast<void*>(as_cl<amd::Memory>(uvImage))};
+  for (unsigned int i = 0; i < spec.planeCount; ++i) {
+    const MultiplanarPlaneSpec& plane = spec.planes[i];
+    const PlaneLayout& out = layout[i];
+    hipArray* child = new hipArray{reinterpret_cast<void*>(as_cl<amd::Memory>(images[i]))};
+    child->desc = hip::getChannelFormatDesc(plane.numChannels, plane.arrayFormat);
+    child->width = static_cast<unsigned int>(out.width);
+    child->height = static_cast<unsigned int>(out.height);
+    child->depth = 0;
+    child->Format = plane.arrayFormat;
+    child->NumChannels = plane.numChannels;
+    // CUDA reports the parent's flags on every plane, not 0.
+    child->flags = pAllocateArray->Flags;
+    child->isPlane = true;
+    parent->planes[i] = child;
+  }
 
-  // CUDA reports the parent's flags on both planes, not 0.
-  auto initPlane = [&](hipArray* plane, size_t w, size_t h, unsigned int channels) {
-    plane->desc = hip::getChannelFormatDesc(channels, HIP_AD_FORMAT_UNSIGNED_INT8);
-    plane->width = w;
-    plane->height = h;
-    plane->depth = 0;
-    plane->Format = HIP_AD_FORMAT_UNSIGNED_INT8;
-    plane->NumChannels = channels;
-    plane->flags = pAllocateArray->Flags;
-    plane->isPlane = true;
-  };
-  initPlane(yPlane, width, height, 1);
-  initPlane(uvPlane, width / 2, height / 2, 2);
-
-  parent->desc = hip::getChannelFormatDesc(pAllocateArray->NumChannels, HIP_AD_FORMAT_NV12);
-  parent->width = width;
-  parent->height = height;
+  parent->desc =
+      hip::getChannelFormatDesc(pAllocateArray->NumChannels, pAllocateArray->Format);
+  parent->width = static_cast<unsigned int>(pAllocateArray->Width);
+  parent->height = static_cast<unsigned int>(pAllocateArray->Height);
   parent->depth = 0;
-  parent->Format = HIP_AD_FORMAT_NV12;
+  parent->Format = pAllocateArray->Format;
   parent->NumChannels = pAllocateArray->NumChannels;
   parent->flags = pAllocateArray->Flags;
-  parent->planes[0] = yPlane;
-  parent->planes[1] = uvPlane;
-  parent->numPlanes = 2;
+  parent->numPlanes = spec.planeCount;
 
   {
     amd::ScopedLock lock(hipArraySetLock);
     hip::hipArraySet.insert(parent);
-    hip::hipArraySet.insert(yPlane);
-    hip::hipArraySet.insert(uvPlane);
+    for (unsigned int i = 0; i < spec.planeCount; ++i) {
+      hip::hipArraySet.insert(parent->planes[i]);
+    }
   }
   *array = parent;
   return hipSuccess;
@@ -1389,8 +1481,8 @@ hipError_t ihipArrayCreate(hipArray_t* array, const HIP_ARRAY3D_DESCRIPTOR* pAll
   if (!array || !pAllocateArray) {
     return hipErrorInvalidValue;
   }
-  if (pAllocateArray->Format == HIP_AD_FORMAT_NV12) {
-    return ihipArrayCreateNV12(array, pAllocateArray, numMipmapLevels);
+  if (isMultiplanarFormat(pAllocateArray->Format)) {
+    return ihipArrayCreateMultiplanar(array, pAllocateArray, numMipmapLevels);
   }
   // NumChannels specifies the number of packed components per HIP array element; it may be 1, 2, or
   // 4;
@@ -4878,25 +4970,22 @@ hipError_t hipArrayGetPlane(hipArray_t* pPlaneArray, hipArray_t hArray, unsigned
     HIP_RETURN(hipErrorInvalidValue);
   }
 
+  hipError_t status = hipSuccess;
   {
+    // The lock spans the plane read as well: releasing it after the membership check would let a
+    // concurrent hipArrayDestroy free the parent before the dereference below.
     amd::ScopedLock lock(hipArraySetLock);
     if (hip::hipArraySet.find(hArray) == hip::hipArraySet.end()) {
-      HIP_RETURN(hipErrorInvalidHandle);
+      status = hipErrorInvalidHandle;
+    } else if ((hArray->numPlanes == 0) || (planeIdx >= hArray->numPlanes)) {
+      // A plane is itself an ordinary single-plane array, so it lands here too.
+      status = hipErrorInvalidValue;
+    } else {
+      *pPlaneArray = hArray->planes[planeIdx];
     }
   }
 
-  // A plane is itself an ordinary single-plane array, so it lands here too.
-  if (hArray->numPlanes == 0) {
-    HIP_RETURN(hipErrorInvalidValue);
-  }
-
-  if (planeIdx >= hArray->numPlanes) {
-    HIP_RETURN(hipErrorInvalidValue);
-  }
-
-  *pPlaneArray = hArray->planes[planeIdx];
-
-  HIP_RETURN(hipSuccess);
+  HIP_RETURN(status);
 }
 
 hipError_t hipMemcpyParam2DAsync(const hip_Memcpy2D* pCopy, hipStream_t stream) {
