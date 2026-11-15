@@ -33,7 +33,10 @@ set(CMAKE_HIP_STANDARD 17)
 set(CMAKE_HIP_EXTENSIONS OFF)
 set(CMAKE_HIP_STANDARD_REQUIRED ON)
 
-find_package(MPI COMPONENTS CXX REQUIRED)
+find_package(
+    MPI
+    COMPONENTS CXX
+    REQUIRED)
 
 set_source_files_properties(kernel_replay_mpi.cpp PROPERTIES LANGUAGE HIP)
 add_executable(kernel-replay-mpi)

@@ -140,7 +140,9 @@ def test_profiled_ranks_report_each_replayed_dispatch_once(
             ), f"rank {rank} dispatch {key}: replay passes {got}, expected 0..{groups - 1}"
 
         excluded = [k for k in passes if EXCLUDED_KERNEL in k[0]]
-        assert not excluded, f"rank {rank}: excluded kernel has counter records {excluded}"
+        assert (
+            not excluded
+        ), f"rank {rank}: excluded kernel has counter records {excluded}"
 
 
 def test_unprofiled_ranks_produce_no_profiler_output(

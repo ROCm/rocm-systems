@@ -35,22 +35,22 @@ set(RANGE_LAST 3)
 
 set(kr-mpi-env
     "PYTHONPATH=${rocprofiler-sdk_LIB_DIR}/python${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}/site-packages"
-    OMPI_ALLOW_RUN_AS_ROOT=1 OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1)
+    OMPI_ALLOW_RUN_AS_ROOT=1
+    OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1)
 
 set(kr-mpi-pmc --pmc SQ_WAVES SQ_INSTS_VALU GRBM_COUNT --pmc SQ_WAVES SQ_INSTS_VALU
                GRBM_GUI_ACTIVE)
 
-# All ranks profiled. --kernel-exclude-regex keeps the collective stand-in out of replay and
-# --kernel-iteration-range 2-3 limits replay to two launches of the compute kernel; every
-# other launch must run once. %rank% gives each rank its own output directory.
+# All ranks profiled. --kernel-exclude-regex keeps the collective stand-in out of replay
+# and --kernel-iteration-range 2-3 limits replay to two launches of the compute kernel;
+# every other launch must run once. %rank% gives each rank its own output directory.
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-kernel-replay-mpi-generate
     COMMAND
         ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} ${MPI_RANKS} ${MPIEXEC_PREFLAGS}
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> ${kr-mpi-pmc} --replay-mode kernel
         --kernel-replay-beta-enabled --kernel-exclude-regex peer_visible_kernel
-        --kernel-iteration-range
-        "${RANGE_FIRST}-${RANGE_LAST}" --output-format json -d
+        --kernel-iteration-range "${RANGE_FIRST}-${RANGE_LAST}" --output-format json -d
         ${CMAKE_CURRENT_BINARY_DIR}/all-ranks/rank.%rank% -o out ${PRELOAD_ARGS} --
         $<TARGET_FILE:kernel-replay-mpi> 65536 ${ITERS}
         ${CMAKE_CURRENT_BINARY_DIR}/all-ranks/counts ${MPIEXEC_POSTFLAGS}
@@ -62,7 +62,7 @@ rocprofiler_add_integration_execute_test(
     FIXTURES_SETUP rocprofv3-test-kernel-replay-mpi-data)
 
 rocprofiler_add_integration_validate_test(
-    rocprofv3-test-kernel-replay-mpi-validate
+    rocprofv3-test-kernel-replay-mpi-validate BUNDLE_TESTS
     TEST_PATHS validate.py
     COPY conftest.py
     CONFIG pytest.ini
@@ -87,18 +87,17 @@ rocprofiler_add_integration_validate_test(
         "${rocprofiler-sdk_LIB_DIR}/python${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}/site-packages"
     FIXTURES_REQUIRED rocprofv3-test-kernel-replay-mpi-data)
 
-# Only rank 0 is profiled. Rank 1 runs the application unprofiled and must still complete the
-# MPI collectives with rank 0 while rank 0 replays; rank 1 must not replay anything.
+# Only rank 0 is profiled. Rank 1 runs the application unprofiled and must still complete
+# the MPI collectives with rank 0 while rank 0 replays; rank 1 must not replay anything.
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-kernel-replay-mpi-one-rank-generate
     COMMAND
         ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} ${MPI_RANKS} ${MPIEXEC_PREFLAGS}
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> ${kr-mpi-pmc} --replay-mode kernel
         --kernel-replay-beta-enabled --kernel-exclude-regex peer_visible_kernel
-        --kernel-iteration-range
-        "${RANGE_FIRST}-${RANGE_LAST}" --profile-mpi-ranks 0 --output-format json -d
-        ${CMAKE_CURRENT_BINARY_DIR}/one-rank/rank.%rank% -o out ${PRELOAD_ARGS} --
-        $<TARGET_FILE:kernel-replay-mpi> 65536 ${ITERS}
+        --kernel-iteration-range "${RANGE_FIRST}-${RANGE_LAST}" --profile-mpi-ranks 0
+        --output-format json -d ${CMAKE_CURRENT_BINARY_DIR}/one-rank/rank.%rank% -o out
+        ${PRELOAD_ARGS} -- $<TARGET_FILE:kernel-replay-mpi> 65536 ${ITERS}
         ${CMAKE_CURRENT_BINARY_DIR}/one-rank/counts ${MPIEXEC_POSTFLAGS}
     DEPENDS kernel-replay-mpi
     TIMEOUT 180
@@ -108,7 +107,7 @@ rocprofiler_add_integration_execute_test(
     FIXTURES_SETUP rocprofv3-test-kernel-replay-mpi-one-rank-data)
 
 rocprofiler_add_integration_validate_test(
-    rocprofv3-test-kernel-replay-mpi-one-rank-validate
+    rocprofv3-test-kernel-replay-mpi-one-rank-validate BUNDLE_TESTS
     TEST_PATHS validate.py
     COPY conftest.py
     CONFIG pytest.ini
