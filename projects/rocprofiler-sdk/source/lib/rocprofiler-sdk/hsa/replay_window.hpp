@@ -44,6 +44,7 @@
 #include <cstdint>
 #include <shared_mutex>
 #include <string_view>
+#include <utility>
 
 namespace rocprofiler
 {
@@ -84,22 +85,39 @@ inline constexpr int  max_slices        = 12;
 inline constexpr auto drain_slice       = std::chrono::seconds{seconds_per_slice};
 inline constexpr int  drain_budget_secs = seconds_per_slice * max_slices;
 
-// Retry `try_drain_once` in drain_slice-sized waits, warning per slice and aborting after
-// drain_budget_secs. A replay that cannot fence itself against concurrent GPU work has no safe
-// way to continue: proceeding would snapshot or restore memory that another kernel is still
-// writing.
+// How long a non-fatal replay wait may block: `slices` waits of at most `slice` each. The default
+// is the drain budget above. Tests pass a shorter one so that a timeout takes milliseconds.
+struct replay_wait_budget_t
+{
+    std::chrono::milliseconds slice  = drain_slice;
+    int                       slices = max_slices;
+};
+
+// Retry `try_drain_once`, which must block for at most one budget.slice, up to budget.slices
+// times, warning after each slice that ends undrained. Returns whether it drained.
+template <typename TryDrainFn>
+bool
+replay_wait(TryDrainFn&& try_drain_once, std::string_view what, replay_wait_budget_t budget = {})
+{
+    for(int i = 0; i < budget.slices; ++i)
+    {
+        if(try_drain_once()) return true;
+        ROCP_WARNING << fmt::format(
+            "replay: still waiting for {} (~{}s elapsed)",
+            what,
+            std::chrono::duration_cast<std::chrono::seconds>(budget.slice * (i + 1)).count());
+    }
+    return false;
+}
+
+// replay_wait over the full drain budget, aborting if it never drains. A replay that cannot fence
+// itself against concurrent GPU work has no safe way to continue: proceeding would snapshot or
+// restore memory that another kernel is still writing.
 template <typename TryDrainFn>
 void
 replay_wait_or_fatal(TryDrainFn&& try_drain_once, std::string_view what)
 {
-    // One try_drain_once() call blocks for at most one slice, so the two together bound the wait
-    // at drain_budget_secs.
-    for(int i = 0; i < max_slices; ++i)
-    {
-        if(try_drain_once()) return;
-        ROCP_WARNING << fmt::format(
-            "replay: still waiting for {} (~{}s elapsed)", what, (i + 1) * seconds_per_slice);
-    }
+    if(replay_wait(std::forward<TryDrainFn>(try_drain_once), what)) return;
     ROCP_FATAL << fmt::format("replay: {} did not drain after ~{}s", what, drain_budget_secs);
 }
 
@@ -120,8 +138,13 @@ replay_drain_or_fatal(const Queue& queue);
 // syncing: their completion handlers can still be running. A Queue is only dereferenced under the
 // read lock of the map or of the retiring set, both are re-read every poll, and destroy_queue
 // frees a queue only after it has left both. The per-agent writer lock held by the replay window
-// blocks new dispatches on the agent, so in-flight work only decreases and the poll converges;
-// fatal on a genuinely stuck queue (beta feature), matching replay_drain_or_fatal.
+// blocks new dispatches on the agent, so in-flight work only decreases and the poll converges.
+// Returns false if handlers are still in flight when `budget` runs out.
+bool
+replay_drain_agent(hsa_agent_t agent, replay_wait_budget_t budget = {});
+
+// replay_drain_agent over the full drain budget, fatal on a genuinely stuck queue (beta feature),
+// matching replay_drain_or_fatal.
 void
 replay_drain_agent_or_fatal(hsa_agent_t agent);
 
@@ -136,10 +159,20 @@ replay_drain_agent_or_fatal(hsa_agent_t agent);
 bool
 replay_ring_submit(const Queue& queue, const rocprofiler_packet* packets, size_t count);
 
-// Submit a barrier packet carrying `completion` and wait for it, fencing the CPU against all GPU
-// work previously submitted to `queue`. Returns false if the submission itself failed.
-bool
-replay_barrier_and_wait(const Queue& queue, hsa_signal_t completion);
+enum class barrier_wait_result_t
+{
+    completed,      // the barrier retired: all prior work on the queue finished
+    not_submitted,  // the barrier could not be written, so nothing was waited on
+    timed_out,      // the barrier is still in the ring and will decrement `completion` later
+};
+
+// Submit a barrier packet carrying `completion` and wait up to `budget` for it, fencing the CPU
+// against all GPU work previously submitted to `queue`. After timed_out the packet processor still
+// owns `completion`: the caller must neither reuse nor destroy it.
+barrier_wait_result_t
+replay_barrier_and_wait(const Queue&         queue,
+                        hsa_signal_t         completion,
+                        replay_wait_budget_t budget = {});
 
 // While set on this thread, WriteInterceptor forwards packets untouched. Range replay's re-submit
 // path transforms the recorded packets once (via Queue::invoke_write_interceptor) and then writes

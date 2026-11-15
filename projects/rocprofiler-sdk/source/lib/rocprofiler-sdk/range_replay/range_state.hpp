@@ -41,6 +41,7 @@
 // packet-recording declines (queue/agent binding, graphs, copies from the owner thread, budget,
 // kernarg layout) do not apply. See host_replay.hpp.
 
+#include "lib/rocprofiler-sdk/hsa/replay_window.hpp"
 #include "lib/rocprofiler-sdk/hsa/rocprofiler_packet.hpp"
 #include "lib/rocprofiler-sdk/kernel_replay/local_context.hpp"
 #include "lib/rocprofiler-sdk/kernel_replay/memory_snapshot.hpp"
@@ -194,6 +195,11 @@ struct host_range_state_t
     std::vector<host_region_t>      regions               = {};
     uint64_t                        code_object_watermark = 0;
     bool                            exit_digests_taken    = false;
+
+    // How long each fence waits for an agent's GPU work before the range declines. Always the
+    // default drain budget in production; a field so that a test can reach the timeout in
+    // milliseconds.
+    hsa::replay_wait_budget_t fence_budget = {};
 
     // Carries the PASS callback context from the PHASE_ENTER raised just before a siglongjmp to the
     // PHASE_EXIT raised when that pass reaches end() again.
