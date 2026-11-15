@@ -7,7 +7,7 @@ from typing import List, Set
 
 import pytest
 import yaml
-from format_yaml import extract_metric_equations
+from format_yaml import file_equations
 
 import config
 from rocprof_compute_soc.metric_library.loader import default_metric_library_dir
@@ -23,7 +23,6 @@ from utils.equation_format import (
     parse_equation,
 )
 from utils.metrics.expression import build_eval_string
-from utils.utils_counter_defs import COLLECTABLES_DIR
 
 # (input, normalized) pairs; each normalized form is also its own normalized form
 FACTORING_CASES = [
@@ -51,13 +50,12 @@ FACTORING_CASES = [
 def real_equations() -> Set[str]:
     """Return every equation of the panel configs, metric library and collectables."""
     files = list(config.analysis_configs_dir.glob("gfx*/*.yaml"))
+    files += config.analysis_configs_dir.glob("collectables/*.yaml")
     files += default_metric_library_dir().glob("gfx*/*.yaml")
     equations = set()
     for path in files:
         document = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-        equations.update(equation for _, equation in extract_metric_equations(document))
-    for path in COLLECTABLES_DIR.glob("*.yaml"):
-        equations.update(yaml.safe_load(path.read_text(encoding="utf-8")).values())
+        equations.update(equation for _, equation in file_equations(path, document))
     return equations
 
 

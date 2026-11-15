@@ -24,6 +24,13 @@ PANEL_WITH_BROKEN_EQUATION = textwrap.dedent("""\
               value: SUM(SQ_INSTS_VALU_MFMA_MOPS_F64 * 512 + ) / SUM(SQ_LDS_IDX_ACTIVE)
 """)
 
+# Panel collectables: top-level name: formula pairs, with one formula to format
+COLLECTABLES = textwrap.dedent("""\
+    # Named formulas that metric formulas use as $name.
+    GRBM_GUI_ACTIVE_PER_XCD: GRBM_GUI_ACTIVE / $num_xcd
+    hbm_write_bytes: ((TCC_EA0_WRREQ_sum-TCC_EA0_WRREQ_64B_sum)*32)
+""")
+
 
 def write_config(tmp_path, relative_path, text):
     path = tmp_path / relative_path
@@ -62,6 +69,18 @@ def test_unformatted_library_formula_reported(tmp_path):
     is_valid, issues = check_file(path)
     assert not is_valid
     assert "l2.ai.formula: equation needs normalization" in issues[0]
+
+
+def test_panel_collectables_fixed_in_place(tmp_path):
+    """Each top-level value of a panel collectables file is an equation."""
+    path = write_config(
+        tmp_path, "analysis_configs/collectables/gfx942_collectables.yaml", COLLECTABLES
+    )
+    check_file(path, fix=True)
+    assert path.read_text(encoding="utf-8") == COLLECTABLES.replace(
+        "((TCC_EA0_WRREQ_sum-TCC_EA0_WRREQ_64B_sum)*32)",
+        "(TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum) * 32",
+    )
 
 
 if __name__ == "__main__":
