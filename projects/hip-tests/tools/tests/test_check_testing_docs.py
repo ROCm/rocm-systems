@@ -2763,6 +2763,22 @@ class CheckTestingDocsTest(unittest.TestCase):
         host_dir.mkdir(parents=True, exist_ok=True)
         (host_dir / "CMakeLists.txt").write_text(body, encoding="utf-8")
 
+    def test_hosttest_function_declaration_is_not_registered(self):
+        # The function declaration takes a formal TARGET parameter; it is not a
+        # host-test registration. Calls retain direct, multiline, quoted, and
+        # case-insensitive matching.
+        self._write_host_cmake(
+            "function(hip_add_host_test TARGET)\n"
+            "endfunction()\n"
+            "hip_add_host_test(DirectHostTest)\n"
+            "HIP_ADD_HOST_TEST(\n"
+            "  \"QuotedMultilineHostTest\"\n"
+            ")\n")
+        cmake_path = self.root / "catch" / "hipTestMain" / "tests" / "CMakeLists.txt"
+        self.assertEqual(
+            checker._active_host_test_targets(cmake_path),
+            ["DirectHostTest", "QuotedMultilineHostTest"])
+
     def test_hosttest_unrepresented_is_reported(self):
         # A host-test executable registered via hip_add_host_test with no covering
         # inventory suite is a silent coverage hole and is reported, naming it.

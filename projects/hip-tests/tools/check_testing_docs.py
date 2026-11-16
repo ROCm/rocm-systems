@@ -414,9 +414,12 @@ HOSTTEST_GROUP_DIR = "catch/hipTestMain/tests"
 
 # A ``hip_add_host_test(<TARGET> ...)`` registration naming the host-test
 # executable as its first argument. Matched case-insensitively with an optional
-# leading double quote, mirroring ``_ADD_SUBDIRECTORY_RE``.
+# leading double quote, mirroring ``_ADD_SUBDIRECTORY_RE``. The negative
+# lookbehind excludes ``function(hip_add_host_test TARGET)`` declarations,
+# whose ``TARGET`` token is a formal parameter rather than a registration.
 _HIP_ADD_HOST_TEST_RE = re.compile(
-    r"\bhip_add_host_test\s*\(\s*\"?([A-Za-z0-9_.+\-]+)", re.IGNORECASE)
+    r"(?<!function\()\bhip_add_host_test\s*\(\s*\"?([A-Za-z0-9_.+\-]+)",
+    re.IGNORECASE)
 
 # An ``add_subdirectory(<group>)`` call naming the group as its first token.
 # CMake commands are case-insensitive (``ADD_SUBDIRECTORY`` is the same command),
