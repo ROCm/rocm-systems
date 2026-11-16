@@ -36,8 +36,10 @@ import hashlib
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
+import tempfile
 import sys
 from pathlib import Path
 
@@ -149,6 +151,13 @@ def run_lines(text):
     if cur is not None:
         runs.append(cur)
     return [" ".join(r.split()) for r in runs]
+
+
+# llc flags that change floating-point semantics: a RUN line changing one of them is not
+# compared against its old form.
+FP_FLAG = re.compile(
+    r"denormal|fp-math|unsafe|no-nans|no-infs|fast|nnan|ninf|fp-contract|fma"
+)
 
 
 def generation(target):
@@ -405,6 +414,96 @@ def type_dwords(t):
     return None
 
 
+# Graphics shader calling conventions (CC_SI_SHADER / RetCC_SI_Shader): inreg arguments in
+# s0.., the others in v0..; integer return values in s0..s43, floating-point ones in v0..
+# The listing returns to the shader epilog by falling off its end.
+GRAPHICS_CC = (
+    "amdgpu_ps",
+    "amdgpu_vs",
+    "amdgpu_gs",
+    "amdgpu_hs",
+    "amdgpu_es",
+    "amdgpu_ls",
+    "amdgpu_cs",
+)
+
+
+def shader_returns(ret, extended=False):
+    """(return SGPRs, return VGPRs, VGPR masks, SGPR masks) of a shader's return type, or
+    None. Narrow integers (i1/i8/i16) define only their bits unless @p extended
+    (zeroext/signext)."""
+    t = ret.strip()
+    if t == "void":
+        return 0, 0, [], []
+    elems = split_top(t[1:-1]) if t.startswith("{") and t.endswith("}") else [t]
+    sg, vg, masks, smasks = 0, 0, [], []
+
+    def add(el):
+        nonlocal sg, vg
+        el = el.strip()
+        m = re.fullmatch(r"<(\d+) x (.+)>", el)
+        if m:
+            n, e = int(m.group(1)), m.group(2).strip()
+            if e in ("half", "bfloat"):  # packed pairs in VGPRs
+                vg += (n + 1) // 2
+                masks.extend([0xFFFFFFFF] * (n // 2) + ([0xFFFF] if n % 2 else []))
+                return True
+            if e == "i16":  # v2i16 in SGPRs
+                sg += (n + 1) // 2
+                smasks.extend([0xFFFFFFFF] * (n // 2) + ([0xFFFF] if n % 2 else []))
+                return True
+            return all(add(e) for _ in range(n))
+        if el in ("i32", "i16", "i8", "i1"):
+            sg += 1
+            bits = {"i32": 32, "i16": 16, "i8": 8, "i1": 1}[el]
+            smasks.append(0xFFFFFFFF if extended or bits == 32 else (1 << bits) - 1)
+            return True
+        if el == "i64":
+            sg += 2
+            smasks.extend([0xFFFFFFFF] * 2)
+            return True
+        if el == "float":
+            vg += 1
+            masks.append(0xFFFFFFFF)
+            return True
+        if el in ("half", "bfloat"):
+            vg += 1
+            masks.append(0xFFFF)
+            return True
+        if el == "double":
+            vg += 2
+            masks.extend([0xFFFFFFFF] * 2)
+            return True
+        return False
+
+    if not all(add(e) for e in elems) or sg > 44 or vg > 136:
+        return None
+    return (
+        sg,
+        vg,
+        masks if any(m != 0xFFFFFFFF for m in masks) else [],
+        smasks if any(m != 0xFFFFFFFF for m in smasks) else [],
+    )
+
+
+def inreg_dwords(define):
+    """Dwords of the inreg arguments, or None if a type is not sized."""
+    m = re.search(r"@[^(]+\((.*)\)[^)]*$", define)
+    if not m:
+        return None
+    total = 0
+    for arg in split_top(m.group(1)):
+        if not arg or not re.search(r"\binreg\b", arg):
+            continue
+        t = ARG_ATTR.sub("", arg.replace("inreg", ""))
+        t = re.sub(r"\s+%[\w.$-]+$", "", t).strip()
+        n = type_dwords(t)
+        if n is None:
+            return None
+        total += n
+    return total
+
+
 def signature(define):
     """(calling convention, return type) from a define line."""
     m = re.match(r"define\s+(.*?)@", define)
@@ -466,7 +565,7 @@ ARG_ATTR = re.compile(
 )
 
 
-def argument_vgprs(define):
+def argument_vgprs(define, limit=32):
     """VGPRs the non-inreg arguments occupy (v0..), or None if a type is not sized."""
     m = re.search(r"@[^(]+\((.*)\)[^)]*$", define)
     if not m:
@@ -485,7 +584,7 @@ def argument_vgprs(define):
         if n is None:
             return None
         total += n
-    return min(total, 32)
+    return min(total, limit)
 
 
 SPECIAL_INPUT = re.compile(
@@ -582,9 +681,10 @@ def denorm_bits(mode):
     return (0 if inp in flush else 1) | (0 if out in flush else 2)
 
 
-def function_mode(define, groups, target=None):
-    """MODE at entry: denormal modes from the function's attributes, DX10_CLAMP and IEEE on
-    (unless "amdgpu-ieee"="false"; GFX12 has neither bit)."""
+def function_mode(define, groups, target=None, shader=False):
+    """MODE at entry: denormal modes from the function's attributes, DX10_CLAMP on and IEEE
+    on for compute ("amdgpu-ieee" overrides; graphics shaders default to IEEE off; GFX12
+    has neither bit)."""
     attrs = (
         " ".join(groups.get(g, "") for g in re.findall(r"#(\d+)", define))
         + " "
@@ -609,7 +709,11 @@ def function_mode(define, groups, target=None):
     m = re.search(r'"denormal-fp-math-f32"="([^"]*)"', attrs)
     if m:
         f32 = denorm_bits(m.group(1))
-    ieee = 0 if re.search(r'"amdgpu-ieee"="false"', attrs) else 1
+    ieee = 0 if shader else 1
+    if re.search(r'"amdgpu-ieee"="false"', attrs):
+        ieee = 0
+    elif re.search(r'"amdgpu-ieee"="true"', attrs):
+        ieee = 1
     if generation(target) >= 12:
         return (f32 << 4) | (f64 << 6)
     return (f32 << 4) | (f64 << 6) | (1 << 8) | (ieee << 9)
@@ -668,7 +772,92 @@ def synthesize(name, body):
 # Collection
 
 
-def collect(repo, base, head, tests_glob, targets):
+def llc_function_bodies(asm, names):
+    """{function: [lines]} from llc output: the lines from a function's label to its end
+    (`.Lfunc_end` or `; -- End function`), without directives other than labels."""
+    bodies, cur = {}, None
+    for line in asm.splitlines():
+        s = line.strip()
+        lab = s.split(";")[0].strip()  # labels may carry a comment ("f: ; @f")
+        if cur is None:
+            if lab.endswith(":") and lab[:-1] in names:
+                cur = lab[:-1]
+                bodies[cur] = []
+            continue
+        if lab.startswith(".Lfunc_end") or s.startswith("; -- End function"):
+            cur = None
+            continue
+        if not s or (lab.startswith(".") and not lab.endswith(":")):
+            continue
+        bodies[cur].append(s)
+    return bodies
+
+
+def escape_check(line):
+    """update_llc_test_checks' escaping of '[[' and '{{' runs."""
+    return re.sub(
+        r"\[\[+|\{\{+",
+        lambda m: "{{" + "".join("\\" + c for c in m.group(0)) + "}}",
+        line,
+    )
+
+
+def llc_texts(text, path, llc_before, llc_after, targets):
+    """Two synthetic autogenerated tests holding @p text's IR and, under one prefix per RUN
+    line, the bodies llc_before and llc_after emit for it. (None, None) without a RUN line
+    this tool runs."""
+    names = set(functions_ir(text))
+    stripped = re.sub(r"^(\s*;\s*)RUN:", r"\1ORIG-RUN:", text, flags=re.M)
+    heads, checks = [[], []], [[], []]
+    with tempfile.TemporaryDirectory(prefix="rj_isa_diff_llc_") as tmp:
+        src = Path(tmp) / Path(path).name
+        src.write_text(text)
+        for i, run in enumerate(run_lines(text)):
+            p = parse_run(run)
+            if not p or p[0] not in targets:
+                continue
+            llc = p[2]
+            if not re.match(r"^\s*(\S*/)?llc(\s|$)", llc):
+                continue  # the input comes from another tool (opt | llc)
+            prefix = f"RJLLC{i}"
+            for side, binary in enumerate((llc_before, llc_after)):
+                cmd = re.sub(
+                    r"^\s*(\S*/)?llc", lambda m: shlex.quote(str(binary)), llc, count=1
+                )
+                cmd = cmd.replace("%s", shlex.quote(str(src)))
+                if " -o " not in f" {cmd} ":
+                    cmd += " -o -"
+                res = subprocess.run(
+                    cmd, shell=True, capture_output=True, text=True, timeout=300
+                )
+                if res.returncode:
+                    raise RuntimeError(
+                        f"{binary} failed on {path} RUN {i}: {res.stderr[-300:]}"
+                    )
+                heads[side].append(
+                    f"; RUN: {llc} < %s | FileCheck -check-prefixes={prefix} %s"
+                )
+                for fn, body in llc_function_bodies(res.stdout, names).items():
+                    checks[side].append(f"; {prefix}-LABEL: {fn}:")
+                    checks[side] += [
+                        f"; {prefix}-NEXT: {escape_check(l)}" for l in body
+                    ]
+    if not heads[0]:
+        return None, None
+    return tuple(
+        "; "
+        + NOTE
+        + "\n"
+        + "\n".join(heads[s])
+        + "\n"
+        + "\n".join(checks[s])
+        + "\n"
+        + stripped
+        for s in (0, 1)
+    )
+
+
+def collect(repo, base, head, tests_glob, targets, llc_pair=None):
     """Changed functions (with their before/after bodies) and skipped ones (with reasons).
     @p targets maps an llc target to how it is run ("native" or "proxy")."""
     revs = [base] if head == WORKTREE else [base, head]
@@ -687,6 +876,14 @@ def collect(repo, base, head, tests_glob, targets):
     )
     for path in files:
         old, new = show(repo, base, path), show(repo, head, path)
+        if llc_pair and new is not None:
+            # Both sides compile head's IR, one with each llc.
+            old, new = llc_texts(new, path, llc_pair[0], llc_pair[1], targets)
+            if old is None:
+                skipped.append(
+                    {"file": path, "reason": "no llc RUN line for a tested target"}
+                )
+                continue
         if old is None or new is None:
             skipped.append({"file": path, "reason": "test added or removed"})
             continue
@@ -706,16 +903,47 @@ def collect(repo, base, head, tests_glob, targets):
         runs = [r for r in new_runs if r in old_runs]
         parsed = [(i, r, parse_run(r)) for i, r in enumerate(runs)]
         parsed = [(i, r, p) for i, r, p in parsed if p]
-        targeted = [(i, r, p) for i, r, p in parsed if p[0] in targets]
-        if any(
-            (parse_run(r) or [None])[0] in targets
-            for r in new_runs + old_runs
-            if r not in runs
-        ):
+        # (index, label, (target, prefixes, llc), old prefixes, old llc)
+        targeted = [(i, r, p, p[1], p[2]) for i, r, p in parsed if p[0] in targets]
+        # A RUN line whose llc flags changed: compare it with its old form when the target,
+        # check prefixes and wave size are the same and no FP-semantics flag changed.
+        old_only = [r for r in old_runs if r not in runs]
+        new_only = [r for r in new_runs if r not in runs]
+        unpaired = 0
+        for k, nr in enumerate(new_only):
+            np_ = parse_run(nr)
+            if not np_ or np_[0] not in targets:
+                continue
+            match = None
+            for orun in old_only:
+                op_ = parse_run(orun)
+                if (
+                    op_
+                    and op_[0] == np_[0]
+                    and sorted(op_[1]) == sorted(np_[1])
+                    and run_wave_size(op_[0], run_features(op_[2]))
+                    == run_wave_size(np_[0], run_features(np_[2]))
+                    and not FP_FLAG.search(
+                        " ".join(set(op_[2].split()) ^ set(np_[2].split()))
+                    )
+                ):
+                    match = (orun, op_)
+                    break
+            if match is None:
+                unpaired += 1
+                continue
+            old_only.remove(match[0])
+            targeted.append((len(runs) + k, nr, np_, match[1][1], match[1][2]))
+            stats["flag_changes"] = stats.get("flag_changes", 0) + 1
+        unpaired += sum(1 for r in old_only if (parse_run(r) or [None])[0] in targets)
+        if unpaired:
             skipped.append(
                 {"file": path, "reason": "a RUN line for a tested target changed"}
             )
-        all_prefixes = sorted({p for _, _, (_, ps, _) in parsed for p in ps})
+        all_prefixes = sorted(
+            {p for _, _, (_, ps, _) in parsed for p in ps}
+            | {p for t in targeted for p in t[2][1] + t[3]}
+        )
         ob, nb = check_bodies(old, all_prefixes), check_bodies(new, all_prefixes)
         new_fns = functions_ir(new)
         # Changed functions on targets this tool does not execute (reported as counts).
@@ -733,17 +961,17 @@ def collect(repo, base, head, tests_glob, targets):
         if not targeted:
             continue
         stats["with_target_run"] += 1
-        for ri, run, (target, prefixes, llc) in targeted:
+        for ri, run, (target, prefixes, llc), old_prefixes, old_llc in targeted:
             for fn in new_fns:
 
-                def body_of(bodies):
-                    for p in prefixes:
+                def body_of(bodies, prefs):
+                    for p in prefs:
                         if fn in bodies.get(p, {}):
                             return p, bodies[p][fn]
                     return None, None
 
-                op, obody = body_of(ob)
-                np_, nbody = body_of(nb)
+                op, obody = body_of(ob, old_prefixes)
+                np_, nbody = body_of(nb, prefixes)
                 if obody is None or nbody is None:
                     if obody != nbody:
                         skipped.append(
@@ -770,6 +998,8 @@ def collect(repo, base, head, tests_glob, targets):
                     "target": target,
                     "proxy": targets[target] == "proxy",
                 }
+                if old_llc != llc:
+                    entry["old_llc"] = old_llc
                 if ir_identity(old, fn) != ir_identity(new, fn):
                     skipped.append({**entry, "reason": "IR of the function changed"})
                     continue
@@ -782,47 +1012,77 @@ def collect(repo, base, head, tests_glob, targets):
                     continue
                 define = new_fns[fn][0]
                 cc, ret = signature(define)
-                if cc and cc != "amdgpu_kernel":
+                if cc and cc not in ("amdgpu_kernel", "amdgpu_gfx") + GRAPHICS_CC:
                     skipped.append(
                         {**entry, "reason": f"calling convention {cc} not modelled"}
                     )
                     continue
                 kernel = cc == "amdgpu_kernel"
+                shader = cc in GRAPHICS_CC
+                ext = re.search(r"define\s+[^@]*\b(zeroext|signext)\b[^@]*@", define)
+                shader_ret = shader_returns(ret, bool(ext)) if shader else None
+                if shader and shader_ret is None:
+                    skipped.append(
+                        {**entry, "reason": f"shader return type '{ret}' not modelled"}
+                    )
+                    continue
                 feats = run_features(llc)
                 wave = run_wave_size(target, feats)
                 run_as = target if targets[target] == "native" else PROXY_CPU
                 if run_as in WAVE32_ONLY and wave != 32:
                     skipped.append({**entry, "reason": f"wave{wave} on {run_as}"})
                     continue
-                rv = 0 if kernel else type_dwords(ret)
+                rv = 0 if kernel else shader_ret[1] if shader else type_dwords(ret)
                 notes = []
                 if rv is None:
                     rv = 32
                     notes.append(
                         f"return type '{ret}' not sized: all 32 return VGPRs observed"
                     )
-                masks = [] if kernel else return_masks(define, ret)
+                masks = (
+                    []
+                    if kernel
+                    else shader_ret[2] if shader else return_masks(define, ret)
+                )
                 # Defined VGPRs at the entry: kernels v0-v2 (workitem IDs), functions
                 # their VGPR arguments; the rest is undefined until written.
-                ev = 3 if kernel else argument_vgprs(define)
+                ev = 3 if kernel else argument_vgprs(define, 136 if shader else 32)
+                if shader and ev is not None and cc == "amdgpu_cs":
+                    ev = max(ev, 3)  # workitem IDs
                 # Kernels: user (at most 16) and system (at most 5) SGPRs.
                 es = 24 if kernel else argument_sgprs(define, new_fns[fn][1], target)
+                if shader:
+                    # User SGPRs, then the system SGPRs the hardware adds after them.
+                    n = inreg_dwords(define)
+                    es = None if n is None else min(n + 8, 106)
                 if ev is None:
                     notes.append("argument types not sized: v0-v31 treated as defined")
                 jobs.append(
                     {
                         **entry,
-                        "kind": "kernel" if cc == "amdgpu_kernel" else "function",
+                        "kind": (
+                            "kernel" if kernel else "shader" if shader else "function"
+                        ),
+                        "cc": (
+                            "shader" if shader else "gfx" if cc == "amdgpu_gfx" else "c"
+                        ),
+                        "return_sgprs": shader_ret[0] if shader else 0,
+                        "return_sgpr_masks": shader_ret[3] if shader else [],
                         "return_type": ret,
                         "return_vgprs": rv,
                         "return_masks": masks,
                         "entry_vgprs": ev,
                         "entry_sgprs": es,
                         "poison_kinds": poison_kinds(new, fn),
-                        "mode": function_mode(define, attribute_groups(new), run_as),
+                        "mode": function_mode(
+                            define, attribute_groups(new), run_as, shader
+                        ),
                         "run_as": run_as,
                         "wave_size": wave,
                         "mattr": ",".join(f for f in feats if "wavefrontsize" not in f),
+                        "old_mattr": ",".join(
+                            f for f in run_features(old_llc) if "wavefrontsize" not in f
+                        ),
                         "notes": notes,
                         "old_body": ou,
                         "new_body": nu,
@@ -857,6 +1117,17 @@ def run_one(job, out, tool, llvm_bin, cases, seed, strict_nan=False, triage=True
     if job["target"] in GFX9_OLD_CACHE_SYNTAX and run_as in CDNA3_SYNTAX:
         old_body = [translate_cache_policy(l) for l in old_body]
         new_body = [translate_cache_policy(l) for l in new_body]
+    if job.get("cc") == "shader":
+        # The shader part returns to its epilog by falling off the end: s_endpgm marks it.
+        def ended(body):
+            code = [l for l in code_lines(body)]
+            return (
+                body
+                if code and code[-1].startswith("s_endpgm")
+                else body + ["s_endpgm"]
+            )
+
+        old_body, new_body = ended(old_body), ended(new_body)
     (d / "before.s").write_text(synthesize(job["function"], old_body))
     (d / "after.s").write_text(synthesize(job["function"], new_body))
     row = {k: v for k, v in job.items() if k not in ("old_body", "new_body")}
@@ -880,8 +1151,19 @@ def run_one(job, out, tool, llvm_bin, cases, seed, strict_nan=False, triage=True
         run_as,
         "--wave-size",
         str(job.get("wave_size", 64)),
+        "--calling-convention",
+        job.get("cc", "c"),
+        "--return-sgprs",
+        str(job.get("return_sgprs", 0)),
     ]
-    if job.get("mattr"):
+    if job.get("return_sgpr_masks"):
+        argv += [
+            "--return-sgpr-masks",
+            ",".join(hex(m) for m in job["return_sgpr_masks"]),
+        ]
+    if job.get("old_mattr", job.get("mattr")) != job.get("mattr"):
+        argv += ["--old-mattr", job["old_mattr"], "--new-mattr", job["mattr"]]
+    elif job.get("mattr"):
         argv += ["--mattr", job["mattr"]]
     if job.get("entry_sgprs") is not None:
         argv += ["--entry-sgprs", str(job["entry_sgprs"])]
@@ -1177,6 +1459,13 @@ def main(argv=None):
         help="do not re-test mismatches with the poison filters their IR calls for",
     )
     ap.add_argument(
+        "--llc-before",
+        help="llc built before the change: with --llc-after, compile every changed test's "
+        "head IR at its RUN lines with both and compare the functions whose code differs "
+        "(any test, not only autogenerated ones)",
+    )
+    ap.add_argument("--llc-after", help="llc built after the change (see --llc-before)")
+    ap.add_argument(
         "--list", action="store_true", help="only list what would be compared"
     )
     a = ap.parse_args(argv)
@@ -1198,7 +1487,10 @@ def main(argv=None):
         targets.update(
             {t: "proxy" for t in a.proxy_targets.split(",") if t and t not in targets}
         )
-        jobs, skipped, stats = collect(a.repo, base, head, a.tests, targets)
+        if bool(a.llc_before) != bool(a.llc_after):
+            ap.error("give both --llc-before and --llc-after")
+        llc_pair = (a.llc_before, a.llc_after) if a.llc_before else None
+        jobs, skipped, stats = collect(a.repo, base, head, a.tests, targets, llc_pair)
     except RuntimeError as e:
         print(f"error: {e}", file=sys.stderr)
         return 3

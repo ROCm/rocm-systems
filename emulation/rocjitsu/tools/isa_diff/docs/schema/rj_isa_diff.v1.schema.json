@@ -266,7 +266,13 @@
             "return_vgprs": {
               "type": "integer",
               "minimum": 0,
-              "maximum": 32
+              "maximum": 136
+            },
+            "return_sgprs": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 44,
+              "description": "Graphics shader parts: s0..s{n-1} carry integer return values."
             },
             "entry_mode": {
               "$ref": "#/$defs/hex32"
@@ -824,6 +830,13 @@
               }
             },
             "additionalProperties": false
+          }
+        },
+        "exit_masks": {
+          "type": "object",
+          "description": "Scalar locations observable only through a narrow return value (a shader's i8/i16 return in an SGPR): the bits compared.",
+          "additionalProperties": {
+            "$ref": "#/$defs/hex32"
           }
         },
         "exec_nonzero": {

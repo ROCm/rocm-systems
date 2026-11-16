@@ -40,8 +40,13 @@ Json artifact_json(const Artifact &a, size_t num_insts) {
   }
   if (a.callable) {
     Json f = Json::object();
-    f.set("calling_convention", "AMDGPU C (CC_AMDGPU_Func)");
-    f.set("return", "s_setpc_b64 s[30:31]");
+    f.set("calling_convention", a.calling_convention == "shader" ? "graphics shader part"
+                                : a.calling_convention == "gfx"  ? "amdgpu_gfx (CC_SI_Gfx)"
+                                                                 : "AMDGPU C (CC_AMDGPU_Func)");
+    f.set("return", a.calling_convention == "shader" ? "s_endpgm (to the shader epilog)"
+                                                     : "s_setpc_b64 s[30:31]");
+    if (a.return_sgprs)
+      f.set("return_sgprs", static_cast<uint64_t>(a.return_sgprs));
     f.set("return_vgprs", static_cast<uint64_t>(a.return_vgprs));
     f.set("entry_mode", hex32(a.function_mode));
     if (!a.return_masks.empty()) {

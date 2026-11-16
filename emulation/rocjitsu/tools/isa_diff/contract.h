@@ -93,6 +93,8 @@ struct RegionContract {
   /// VGPRs observable only through a return value narrower than the register: just these
   /// bits are compared (e.g. 0x0000ffff for a half returned in v0).
   std::vector<std::pair<unsigned, uint32_t>> vexit_masks;
+  /// The same for scalar locations (a shader's i8/i16 return in an SGPR).
+  std::vector<std::pair<unsigned, uint32_t>> exit_masks;
   /// Regions with branches: one entry per exit pair (empty: one fallthrough exit, whose
   /// R_out is observable/vobservable/vactive_only). observable/vobservable then hold the
   /// union over the exits.

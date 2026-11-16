@@ -669,6 +669,41 @@ Regions may contain direct branches and loops (README "Control flow").
   One function (a WWM test) briefly reported a mismatch: composition skipped an edge
   inside an untested region; only READY regions with control flow run their own edges.
 
+## Driver gains (Phase L)
+
+- **Graphics shaders.** The sweep had skipped 661 `amdgpu_ps` and 4 `amdgpu_gfx`
+  functions. With shader parts (return at `s_endpgm` to the epilog, integer returns in
+  SGPRs, float returns in VGPRs) they are compared. The first run reported 27 mismatches,
+  all `i8`/`i16` returns in s0 whose upper bits old zero-extended and new left alone:
+  undefined bits without `zeroext`/`signext`. SGPR return masks (`exit_masks`) fixed them;
+  13 `i128` returns stay skipped.
+- **RUN lines whose flags changed.** 61 changed RUN lines were paired with their old
+  form; in these 120 commits they were option renames with unchanged bodies, so nothing
+  more was run, and file skips for changed RUN lines fell from 28 to 6.
+- **Two llc builds.** PR 242731 with its before/after builds: the 2 functions whose code
+  the two builds compile differently pass (2 s).
+- **Prefix conflicts.** "CHECK body missing on one side" (49) means update_llc_test_checks
+  emitted no body for that RUN line; there is nothing to recover without llc, which
+  `--llc-before/--llc-after` provides.
+
+Final measurements (all of Phases J-L, default budget 5000):
+
+| run | result | valid cases | wall time |
+|---|---|---|---|
+| PR 237629 | 84 of 84 pass | 445,512 | 4.2 s |
+| PR 242731 | 10 of 10 pass | 37,952 | 24.4 s |
+| last 120 AMDGPU commits | 1507 functions: 1434 pass, 48 inconclusive, 25 mismatch | 8,723,501 | 164 s |
+| PR 237629 mutants | 4 of 4 caught | | |
+
+By target: gfx1100 wave32 527, gfx1250 474, gfx1200 wave32 125, gfx908 (Vega proxy) 121,
+gfx1100 wave64 57, gfx1200 wave64 54, gfx1030 wave32 47, gfx1010 wave32 45, gfx942 24,
+gfx950 16, gfx1030 wave64 14, gfx90a 2, gfx1010 wave64 1. The 25 mismatches are the ones
+of Phase J (20 stack-restore fix, 4 poison-only, 1 bf16 inline constant). The 48
+inconclusive: register renaming across blocks (13), composition through unsupported code
+(10: AGPR, LDS, buffer instructions upstream), listings ROCm's older llvm-mc rejects (7:
+VOPD bank rules and operand syntax of upstream LLVM; `--llvm-bin` with a matching
+assembler runs them), and single unsupported instructions.
+
 ## Cost
 
 **Analysis** (from `case.json` `analysis.timing`, both sides together):

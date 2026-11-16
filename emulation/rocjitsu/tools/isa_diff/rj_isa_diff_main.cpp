@@ -42,6 +42,9 @@ const char *kUsage =
     "                      [--return-vgprs N] [--return-masks M,...] [--function-mode HEX]\n"
     "                      [--entry-vgprs N] [--entry-sgprs N]  (entry and return ABI)\n"
     "                      [--target NAME[:w32|w64]] [--wave-size 32|64] [--mattr FEATURES]\n"
+    "                      [--calling-convention c|gfx|shader] [--return-sgprs N]\n"
+    "                      [--return-sgpr-masks M,...]  (shader parts)\n"
+    "                      [--old-mattr F] [--new-mattr F]  (per-side target features)\n"
     "      --target: the GPU of raw words and .s/.ll inputs (code objects name their own;\n"
     "      default gfx950). --wave-size: wave32/wave64 on GFX10+ (functions; a kernel's\n"
     "      descriptor decides its own). --mattr: target features for llc/llvm-mc.\n"
@@ -159,10 +162,12 @@ int exit_code_for(const Json &overall) {
 }
 
 const std::vector<std::string> kPlanFlags = {
-    "--context",       "--max-region",  "--max-expansions",  "--manual-region", "--map",
-    "--entry-map",     "--exit-map",    "--max-analysis-ms", "--cache-dir",     "--return-vgprs",
-    "--function-mode", "--entry-vgprs", "--return-masks",    "--entry-sgprs",   "--target",
-    "--wave-size",     "--mattr"};
+    "--context",      "--max-region",         "--max-expansions", "--manual-region",
+    "--map",          "--entry-map",          "--exit-map",       "--max-analysis-ms",
+    "--cache-dir",    "--return-vgprs",       "--function-mode",  "--entry-vgprs",
+    "--return-masks", "--entry-sgprs",        "--target",         "--wave-size",
+    "--mattr",        "--calling-convention", "--return-sgprs",   "--return-sgpr-masks",
+    "--old-mattr",    "--new-mattr"};
 const std::vector<std::string> kPlanSwitches = {"--no-merge", "--no-derive-constraints",
                                                 "--diagnostic-entry-prefix"};
 
@@ -293,15 +298,21 @@ int run_analyze(const std::string &old_path, const std::string &new_path, const 
     }
   }
   req.mattr = a.get("--mattr");
+  // A RUN line whose features changed: each side assembles with its own.
+  TargetRequest old_req = req, new_req = req;
+  if (a.has("--old-mattr"))
+    old_req.mattr = a.get("--old-mattr");
+  if (a.has("--new-mattr"))
+    new_req.mattr = a.get("--new-mattr");
   Artifact old_a, new_a;
   Json old_prov, new_prov;
   if (!load_side(old_path, a.get("--old-kernel", kernel), "old", out_dir, a.get("--llvm-bin"),
-                 common_args, old_args, req, old_a, old_prov, error)) {
+                 common_args, old_args, old_req, old_a, old_prov, error)) {
     std::cerr << "old: " << error << "\n";
     return kExitError;
   }
   if (!load_side(new_path, a.get("--new-kernel", kernel), "new", out_dir, a.get("--llvm-bin"),
-                 common_args, new_args, req, new_a, new_prov, error)) {
+                 common_args, new_args, new_req, new_a, new_prov, error)) {
     std::cerr << "new: " << error << "\n";
     return kExitError;
   }
@@ -321,11 +332,30 @@ int run_analyze(const std::string &old_path, const std::string &new_path, const 
                 ? std::optional<uint32_t>(static_cast<uint32_t>(v))
                 : std::nullopt;
   }
-  if (!ret_vgprs || *ret_vgprs > 32 || !fmode) {
-    std::cerr << "--return-vgprs takes 0..32; --function-mode takes a MODE register value\n";
+  const std::string cc = a.get("--calling-convention", "c");
+  const auto ret_sgprs = a.number("--return-sgprs", 0);
+  const unsigned max_ret_vgprs = cc == "shader" ? 136 : 32;
+  if (!ret_vgprs || *ret_vgprs > max_ret_vgprs || !fmode || !ret_sgprs || *ret_sgprs > 44 ||
+      (cc != "c" && cc != "gfx" && cc != "shader")) {
+    std::cerr << "--return-vgprs takes 0..32 (0..136 for shaders), --return-sgprs 0..44, "
+                 "--calling-convention c|gfx|shader; --function-mode takes a MODE register "
+                 "value\n";
     return kExitError;
   }
-  std::vector<uint32_t> ret_masks;
+  std::vector<uint32_t> ret_masks, ret_sgpr_masks;
+  for (const std::string &tok : llvm::split_args([&] {
+         std::string t = a.get("--return-sgpr-masks");
+         std::replace(t.begin(), t.end(), ',', ' ');
+         return t;
+       }())) {
+    char *end = nullptr;
+    const unsigned long v = std::strtoul(tok.c_str(), &end, 0);
+    if (!end || *end != '\0' || v > 0xffffffffu) {
+      std::cerr << "--return-sgpr-masks takes comma-separated 32-bit masks\n";
+      return kExitError;
+    }
+    ret_sgpr_masks.push_back(static_cast<uint32_t>(v));
+  }
   for (const std::string &tok : llvm::split_args([&] {
          std::string t = a.get("--return-masks");
          std::replace(t.begin(), t.end(), ',', ' ');
@@ -347,6 +377,9 @@ int run_analyze(const std::string &old_path, const std::string &new_path, const 
   }
   for (Artifact *art : {&old_a, &new_a}) {
     art->return_vgprs = static_cast<unsigned>(*ret_vgprs);
+    art->calling_convention = cc;
+    art->return_sgprs = static_cast<unsigned>(*ret_sgprs);
+    art->return_sgpr_masks = ret_sgpr_masks;
     art->function_mode = *fmode;
     art->return_masks = ret_masks;
     if (a.has("--entry-vgprs") && art->entry_vgprs >= 0)

@@ -112,6 +112,14 @@ std::string analysis_cache_key(const Artifact &old_artifact, const Artifact &new
     aj.set("callable", a->callable);
     aj.set("return_vgprs", static_cast<uint64_t>(a->return_vgprs));
     aj.set("function_mode", static_cast<uint64_t>(a->function_mode));
+    aj.set("calling_convention", a->calling_convention);
+    aj.set("return_sgprs", static_cast<uint64_t>(a->return_sgprs));
+    {
+      Json sm = Json::array();
+      for (uint32_t m : a->return_sgpr_masks)
+        sm.push(static_cast<uint64_t>(m));
+      aj.set("return_sgpr_masks", std::move(sm));
+    }
     aj.set("entry_vgprs", static_cast<int64_t>(a->entry_vgprs));
     aj.set("entry_sgprs", static_cast<int64_t>(a->entry_sgprs));
     Json masks = Json::array();

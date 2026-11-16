@@ -283,10 +283,15 @@ std::string compare_pair(const RegionPair &region, const MachineState &init_old,
   }
   // R_out: equality on the observable set (old naming; the new side is read at map(l)).
   LocSet diff;
+  std::array<uint32_t, kNumLocs> smask;
+  smask.fill(0xffffffffu);
+  if (!exit) // narrow return values (the fallthrough exit of a straight region)
+    for (const auto &[l, mask] : k.exit_masks)
+      smask[l] = mask;
   for (unsigned l = 0; l < kNumLocs; ++l) {
     if (!observable.test(l))
       continue;
-    const uint32_t d = final_old.get(l) ^ final_new.get(fwd[l]);
+    const uint32_t d = (final_old.get(l) ^ final_new.get(fwd[l])) & smask[l];
     if (!d)
       continue;
     if (undef && !(d & ~undef->loc[l])) {

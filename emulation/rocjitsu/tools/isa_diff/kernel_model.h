@@ -141,12 +141,22 @@ public:
   KernelModel &operator=(const KernelModel &) = delete;
 
   [[nodiscard]] const Artifact &artifact() const { return artifact_; }
+  /// Scalar locations live at a return under the artifact's calling convention.
+  [[nodiscard]] LocSet return_live_locs() const;
+  /// VGPRs live at a return (return values and callee-saved VGPRs).
+  [[nodiscard]] VSet return_live_vgprs() const;
+  /// VGPRs the callee must keep on every lane (callee-saved; none for a shader part).
+  [[nodiscard]] VSet callee_saved_vgprs() const;
   [[nodiscard]] const std::vector<InstRef> &insts() const { return insts_; }
   [[nodiscard]] const std::vector<BlockInfo> &blocks() const { return blocks_; }
 
   /// Locations live immediately before / after instruction @p i.
   [[nodiscard]] LocSet live_before(size_t i) const;
   [[nodiscard]] const LocSet &live_after(size_t i) const { return live_after_[i]; }
+  /// Scalar liveness without the return SGPRs a partial mask covers
+  /// (Artifact::return_sgpr_masks): what is observable at full width.
+  [[nodiscard]] const LocSet &live_after_strict(size_t i) const { return live_after_strict_[i]; }
+  [[nodiscard]] LocSet live_before_strict(size_t i) const;
   /// VGPRs live immediately before / after instruction @p i. A VGPR write kills only when
   /// it writes every bit and EXEC never changes afterwards (lanes outside EXEC keep their
   /// value, and are never read again then; see exec_stable_before).
@@ -220,6 +230,8 @@ private:
   std::vector<InstRef> insts_;
   std::vector<BlockInfo> blocks_;
   std::vector<LocSet> live_after_;
+  std::vector<LocSet> live_after_strict_;
+  [[nodiscard]] std::vector<LocSet> scalar_liveness(const LocSet &return_live) const;
   std::vector<VSet> vlive_after_;
   std::vector<VSet> vlive_after_strict_;
   std::vector<VSet> vwritten_before_;

@@ -162,6 +162,12 @@ Json RegionContract::to_json() const {
   }
   if (exec_nonzero)
     j.set("exec_nonzero", true);
+  if (!exit_masks.empty()) {
+    Json em = Json::object();
+    for (const auto &[l, mask] : exit_masks)
+      em.set(loc_name(l), hex32(mask));
+    j.set("exit_masks", std::move(em));
+  }
   if (!exits.empty()) {
     Json ex = Json::array();
     for (const RegionExit &e : exits) {
@@ -309,6 +315,15 @@ std::optional<RegionContract> RegionContract::from_json(const Json &j, std::stri
     }
   }
   c.exec_nonzero = j["exec_nonzero"].as_bool();
+  for (const auto &[name, mask] : j["exit_masks"].members()) {
+    const auto l = parse_loc(name);
+    const auto v = json_u64(mask);
+    if (!l || !v) {
+      error = "bad exit_masks entry '" + name + "'";
+      return std::nullopt;
+    }
+    c.exit_masks.emplace_back(*l, static_cast<uint32_t>(*v));
+  }
   for (const Json &ej : j["exits"].items()) {
     RegionExit e;
     const auto op = json_u64(ej["old_pc"]), np = json_u64(ej["new_pc"]);

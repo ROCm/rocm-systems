@@ -97,6 +97,39 @@ VSet return_observable_vgprs(unsigned return_vgprs) {
   return v;
 }
 
+LocSet KernelModel::return_live_locs() const {
+  const Target &t = artifact_.target;
+  LocSet l;
+  if (artifact_.calling_convention == "shader") {
+    for (unsigned s = 0; s < artifact_.return_sgprs && s < t.sgprs(); ++s)
+      l.set(s);
+  } else if (artifact_.calling_convention == "gfx") {
+    // CSR_AMDGPU_SI_Gfx_SGPRs: s4-s31, s64-s105.
+    for (auto [lo, hi] : {std::pair{4u, 31u}, {64u, 105u}})
+      for (unsigned s = lo; s <= hi && s < t.sgprs(); ++s)
+        l.set(s);
+  } else {
+    return return_observable_locs(t);
+  }
+  l.set(kLocExecLo);
+  l.set(kLocExecHi);
+  return l;
+}
+
+VSet KernelModel::callee_saved_vgprs() const {
+  return artifact_.callable && artifact_.calling_convention != "shader" ? return_observable_vgprs(0)
+                                                                        : VSet{};
+}
+
+VSet KernelModel::return_live_vgprs() const {
+  if (artifact_.calling_convention != "shader")
+    return return_observable_vgprs(artifact_.return_vgprs);
+  VSet v;
+  for (unsigned r = 0; r < artifact_.return_vgprs && r < kNumVgprs; ++r)
+    v.set(r);
+  return v;
+}
+
 KernelModel::~KernelModel() = default;
 
 LocSet KernelModel::live_transfer(const Effects &fx, const LocSet &live_after) {
@@ -263,6 +296,13 @@ std::unique_ptr<KernelModel> KernelModel::build(const Artifact &artifact, std::s
       b.unknown_successor = true;
     // A callable function returns through the address it was called with (s_set_pc_i64 is
     // the GFX12.5 name).
+    // A shader part returns to its epilog at s_endpgm (the listing ends there).
+    if (artifact.callable && artifact.calling_convention == "shader" && last.inst &&
+        (last.inst->flags() & PROGRAM_TERMINATOR)) {
+      b.returns = true;
+      b.unknown_successor = false;
+      b.successors.clear();
+    }
     if (artifact.callable && last.inst &&
         (last.mnemonic == "s_setpc_b64" || last.mnemonic == "s_set_pc_i64") &&
         !last.fx.unknown_effect) {
@@ -367,14 +407,41 @@ VSet KernelModel::vlive_step(size_t i, const VSet &live_after) const {
 
 VSet KernelModel::vlive_before(size_t i) const { return vlive_step(i, vlive_after_[i]); }
 
+LocSet KernelModel::live_before_strict(size_t i) const {
+  return live_transfer(insts_[i].fx, live_after_strict_[i]);
+}
+
 void KernelModel::compute_liveness() {
+  // Scalars: a backward dataflow; a second pass leaves out the return SGPRs a partial
+  // return mask covers.
+  const LocSet sret = return_live_locs();
+  LocSet spartial;
+  for (size_t s = 0; s < artifact_.return_sgpr_masks.size() && s < artifact_.return_sgprs; ++s)
+    if (artifact_.return_sgpr_masks[s] != 0xffffffffu)
+      spartial.set(s);
+  live_after_ = scalar_liveness(sret);
+  live_after_strict_ = spartial.any() ? scalar_liveness(sret & ~spartial) : live_after_;
+
+  // VGPRs: the same backward dataflow; writes never kill (partial under EXEC). A second
+  // pass leaves out the return VGPRs a partial return mask covers, so the planner can tell
+  // which VGPRs are observable only through such a narrow return value.
+  const VSet ret = return_live_vgprs();
+  VSet partial;
+  for (size_t r = 0; r < artifact_.return_masks.size() && r < artifact_.return_vgprs; ++r)
+    if (artifact_.return_masks[r] != 0xffffffffu)
+      partial.set(r);
+  vlive_after_ = vgpr_liveness(ret);
+  vlive_after_strict_ = partial.any() ? vgpr_liveness(ret & ~partial) : vlive_after_;
+}
+
+std::vector<LocSet> KernelModel::scalar_liveness(const LocSet &return_live) const {
   const size_t nb = blocks_.size();
   std::vector<LocSet> live_in(nb), live_out(nb);
   auto block_out = [&](uint32_t b) {
     if (blocks_[b].unknown_successor)
       return all_locs();
     if (blocks_[b].returns)
-      return return_observable_locs(artifact_.target);
+      return return_live;
     LocSet out;
     for (uint32_t s : blocks_[b].successors)
       out |= live_in[s];
@@ -404,25 +471,15 @@ void KernelModel::compute_liveness() {
         work.push_back(p);
       }
   }
-  live_after_.assign(insts_.size(), LocSet{});
+  std::vector<LocSet> after(insts_.size());
   for (uint32_t b = 0; b < nb; ++b) {
     LocSet live = block_out(b);
     for (size_t i = blocks_[b].end; i-- > blocks_[b].first;) {
-      live_after_[i] = live;
+      after[i] = live;
       live = live_transfer(insts_[i].fx, live);
     }
   }
-
-  // VGPRs: the same backward dataflow; writes never kill (partial under EXEC). A second
-  // pass leaves out the return VGPRs a partial return mask covers, so the planner can tell
-  // which VGPRs are observable only through such a narrow return value.
-  const VSet ret = return_observable_vgprs(artifact_.return_vgprs);
-  VSet partial;
-  for (size_t r = 0; r < artifact_.return_masks.size() && r < artifact_.return_vgprs; ++r)
-    if (artifact_.return_masks[r] != 0xffffffffu)
-      partial.set(r);
-  vlive_after_ = vgpr_liveness(ret);
-  vlive_after_strict_ = partial.any() ? vgpr_liveness(ret & ~partial) : vlive_after_;
+  return after;
 }
 
 std::vector<VSet> KernelModel::vgpr_liveness(const VSet &return_live) const {
@@ -496,8 +553,8 @@ void KernelModel::compute_undefined() {
     for (int l = 0; l < artifact_.entry_sgprs && l < static_cast<int>(artifact_.target.sgprs());
          ++l)
       sdef.set(static_cast<size_t>(l));
-    if (artifact_.callable)
-      sdef |= return_observable_locs(artifact_.target); // callee-saved SGPRs and EXEC
+    if (artifact_.callable && artifact_.calling_convention != "shader")
+      sdef |= return_live_locs(); // callee-saved SGPRs and EXEC
     sdef.set(kLocExecLo);
     sdef.set(kLocExecHi);
     entry_undef_ = ~sdef;
@@ -505,9 +562,9 @@ void KernelModel::compute_undefined() {
   VSet defined;
   for (int r = 0; r < artifact_.entry_vgprs && r < static_cast<int>(kNumVgprs); ++r)
     defined.set(static_cast<size_t>(r));
-  if (artifact_.callable) {
+  if (artifact_.callable && artifact_.calling_convention != "shader") {
     defined.set(31);
-    defined |= return_observable_vgprs(0); // callee-saved stripes
+    defined |= callee_saved_vgprs(); // callee-saved stripes
   }
   entry_vundef_ = ~defined;
   // Forward may-analysis: VGPRs written on some path from the entry.
@@ -889,7 +946,7 @@ void KernelModel::compute_exec_stability() {
   }
   // Kills: full-width writes under an EXEC that stays (callable functions keep every lane
   // of their callee-saved VGPRs for the caller).
-  const VSet keep = artifact_.callable ? return_observable_vgprs(0) : VSet{};
+  const VSet keep = callee_saved_vgprs();
   vkill_.assign(n, VSet{});
   for (size_t i = 0; i < n; ++i)
     if (exec_stable_before_[i] && full_vgpr_write(insts_[i]))

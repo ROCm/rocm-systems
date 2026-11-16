@@ -390,6 +390,16 @@ RegionPair build_region(const KernelModel &om, const KernelModel &nm, const Cand
   const LocSet out_old = exit_live(om, c.o);
   const LocSet out_new = to_old(exit_live(nm, c.n), inv_out);
   k.observable = out_old | out_new;
+  // SGPRs observable only through a return value narrower than the register.
+  {
+    const LocSet full =
+        (c.o.begin < c.o.end ? om.live_after_strict(c.o.end - 1) : om.live_before_strict(c.o.cut)) |
+        (c.n.begin < c.n.end ? nm.live_after_strict(c.n.end - 1) : nm.live_before_strict(c.n.cut));
+    const auto &masks = om.artifact().return_sgpr_masks;
+    for (unsigned s = 0; s < masks.size() && s < om.artifact().return_sgprs; ++s)
+      if (masks[s] != 0xffffffffu && k.observable.test(s) && !full.test(s))
+        k.exit_masks.emplace_back(s, masks[s]);
+  }
   // The two continuations read different locations: they differ downstream (typically
   // a register renaming that crosses blocks), so equality on the same physical
   // locations at this exit is not a justified relation. Do not guess a mapping.
@@ -433,8 +443,7 @@ RegionPair build_region(const KernelModel &om, const KernelModel &nm, const Cand
       return s.begin < s.end ? m.exec_stable_after(s.end - 1) : m.exec_stable_before(s.cut);
     };
     if (stable(om, c.o) && stable(nm, c.n)) {
-      const VSet csr =
-          om.artifact().callable || nm.artifact().callable ? return_observable_vgprs(0) : VSet{};
+      const VSet csr = om.callee_saved_vgprs() | nm.callee_saved_vgprs();
       k.vactive_only = k.vobservable & ~csr;
     }
     k.vwrites_old = union_vwrites(om, c.o);
@@ -526,8 +535,7 @@ RegionPair build_region(const KernelModel &om, const KernelModel &nm, const Cand
   // Regions with control flow: R_out per exit pair, from the liveness at each exit's
   // target; observable/vobservable become their union.
   if (!reject && (obranch || nbranch || multi_block)) {
-    const VSet csr =
-        om.artifact().callable || nm.artifact().callable ? return_observable_vgprs(0) : VSet{};
+    const VSet csr = om.callee_saved_vgprs() | nm.callee_saved_vgprs();
     const VSet vrange = k.vrange;
     LocSet obs_union;
     VSet vobs_union;

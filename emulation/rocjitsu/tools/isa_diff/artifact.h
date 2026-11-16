@@ -89,8 +89,18 @@ struct Artifact {
   /// A callable function (an STT_FUNC symbol without a kernel descriptor): entered by a
   /// call and left by `s_setpc_b64 s[30:31]`, under the AMDGPU C calling convention.
   bool callable = false;
-  /// Callable functions: VGPRs v0..v{n-1} that carry the return value (at most 32).
+  /// Callable functions: VGPRs v0..v{n-1} that carry the return value (at most 32; 136
+  /// for a shader part).
   unsigned return_vgprs = 32;
+  /// Calling convention of a callable function: "c" (AMDGPU C: returns through
+  /// s_setpc_b64 s[30:31]), "gfx" (amdgpu_gfx: the same return, callee-saved SGPRs
+  /// s4-s31 and s64-s105), or "shader" (a graphics shader part: s_endpgm returns to the
+  /// epilog with return_sgprs SGPRs and return_vgprs VGPRs; nothing is callee-saved).
+  std::string calling_convention = "c";
+  /// Shader parts: SGPRs s0..s{n-1} that carry integer return values.
+  unsigned return_sgprs = 0;
+  /// Bits of each return SGPR the epilog observes (index = SGPR); missing entries are full.
+  std::vector<uint32_t> return_sgpr_masks;
   /// Callable functions: MODE at entry, which the caller provides.
   uint32_t function_mode = kDefaultFunctionMode;
   /// VGPRs v0..v{n-1} that hold defined values at the entry (arguments; for a kernel the
