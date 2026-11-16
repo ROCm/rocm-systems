@@ -40,7 +40,7 @@ constexpr size_t kOneSliceScratch8 = 2 * 8 * 2048;
 
 template <typename T, int N>
 const void* Kernel() {
-  return KernelPtr(&dda::common::ddaReduceScatterFabricLL128<T, N>);
+  return KernelPtr(&dda::common::ddaReduceScatterFabricLL128PeerPar<T, N>);
 }
 
 class DdaReduceScatterFabricLL128Microtest : public ::testing::Test {
@@ -231,7 +231,8 @@ TEST_F(DdaReduceScatterFabricLL128Microtest, Launch_EachDatatypeLaunchesItsOwnKe
 
 TEST_F(DdaReduceScatterFabricLL128Microtest, Launch_TakesTheStopEventOnTheStream) {
   const DdaLaunch& launch = RunOne(4);
-  EXPECT_EQ(launch.block.x, 512u);
+  // One warp group at 8 ranks: a warp per rank.
+  EXPECT_EQ(launch.block.x, 256u);
   EXPECT_EQ(launch.stream, kStream);
   EXPECT_EQ(launch.startEvent, nullptr);
   EXPECT_EQ(launch.stopEvent, kStopEvent);
@@ -254,22 +255,49 @@ TEST_F(DdaReduceScatterFabricLL128Microtest, Launch_FourAndEightRanksUnrolledOth
   }
 }
 
-// 512 threads are 16 warps, one slice each: a block per 16 slices of the shard.
+// A block per slice of the shard within the block cap, capped at ddaFabricMaxBlocks and at the epoch cells.
 TEST_F(DdaReduceScatterFabricLL128Microtest, Launch_GridFollowsShardSlicesWithinCaps) {
   EXPECT_EQ(RunOne(8, ncclFloat16).grid.x, 1u);
-  EXPECT_EQ(RunOne(16 * kSliceFloats).grid.x, 1u);
-  EXPECT_EQ(RunOne(16 * kSliceFloats + 4).grid.x, 2u);
-  EXPECT_EQ(RunOne(32 * kSliceFloats, ncclBfloat16).grid.x, 1u);
-  EXPECT_EQ(RunOne(16 * 100 * kSliceFloats).grid.x, 100u);
+  EXPECT_EQ(RunOne(kSliceFloats).grid.x, 1u);
+  EXPECT_EQ(RunOne(kSliceFloats + 4).grid.x, 2u);
+  const DdaLaunch& uncapped = RunOne(100 * kSliceFloats);
+  EXPECT_EQ(uncapped.grid.x, 100u);
+  EXPECT_EQ(uncapped.block.x, 256u);
   comm().ddaFabricMaxBlocks = 6;
-  EXPECT_EQ(RunOne(16 * 100 * kSliceFloats).grid.x, 6u);
+  const DdaLaunch& capped = RunOne(100 * kSliceFloats);
+  EXPECT_EQ(capped.grid.x, 6u);
+  EXPECT_EQ(capped.block.x, 512u);
   comm().ddaFabricMaxBlocks = 0;
-  EXPECT_EQ(RunOne(16 * 100 * kSliceFloats).grid.x, 1u);
+  EXPECT_EQ(RunOne(100 * kSliceFloats).grid.x, 1u);
   comm().ddaFabricMaxBlocks = 256;
   comm().ddaLLEpochLen = 9;
-  EXPECT_EQ(RunOne(16 * 100 * kSliceFloats).grid.x, 9u);
+  EXPECT_EQ(RunOne(100 * kSliceFloats).grid.x, 9u);
   comm().ddaLLEpochLen = 0;
-  EXPECT_EQ(RunOne(16 * 100 * kSliceFloats).grid.x, 1u);
+  EXPECT_EQ(RunOne(100 * kSliceFloats).grid.x, 1u);
+}
+
+// A warp group is a warp per rank, up to the 16 warps of 512 threads.
+TEST_F(DdaReduceScatterFabricLL128Microtest, Launch_BlockIsOneWarpPerRank) {
+  const std::pair<int, unsigned> cases[] = {{2, 64u},   {3, 96u},   {4, 128u},  {8, 256u},
+                                            {12, 384u}, {16, 512u}, {32, 512u}, {144, 512u}};
+  for (const auto& [nRanks, threads] : cases) {
+    comm().nRanks = nRanks;
+    const DdaLaunch& launch = RunOne(kSliceFloats);
+    EXPECT_EQ(launch.block.x, threads) << "nRanks " << nRanks;
+    EXPECT_EQ(launch.grid.x, 1u) << "nRanks " << nRanks;
+  }
+}
+
+// Past the block cap a block doubles its groups, up to 512 threads: 40 slices at 4 ranks.
+TEST_F(DdaReduceScatterFabricLL128Microtest, Launch_BlockTakesMoreGroupsOnlyPastTheCap) {
+  comm().nRanks = 4;
+  const std::pair<int, std::pair<unsigned, unsigned>> cases[] = {{40, {40u, 128u}}, {20, {20u, 256u}}, {6, {6u, 512u}}};
+  for (const auto& [maxBlocks, want] : cases) {
+    comm().ddaFabricMaxBlocks = maxBlocks;
+    const DdaLaunch& launch = RunOne(40 * kSliceFloats);
+    EXPECT_EQ(launch.grid.x, want.first) << "maxBlocks " << maxBlocks;
+    EXPECT_EQ(launch.block.x, want.second) << "maxBlocks " << maxBlocks;
+  }
 }
 
 TEST_F(DdaReduceScatterFabricLL128Microtest, Launch_LaunchErrorIsReported) {

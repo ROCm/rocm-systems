@@ -3,14 +3,16 @@
  *
  * Host launcher + eligibility for the LL128-protocol DDA fabric reduce-scatter.
  * Reduce-scatter analogue of the LL128 one-shot launcher in
- * dda_all_reduce_fabric_ll.cu; reuses the codepath-agnostic
- * ddaReduceScatterFabricLL128 kernel from reduce_scatter_dda_fabric_ll128.h.
+ * dda_all_reduce_fabric_ll.cu. Launches the peer-parallel
+ * ddaReduceScatterFabricLL128PeerPar kernel from
+ * reduce_scatter_dda_fabric_ll128_peerpar.h.
  * See LICENSE.txt for license information.
  ************************************************************************/
 
 #include "algorithms/dda/reduce_scatter/dda_reduce_scatter.h"
 
 #include "algorithms/dda/reduce_scatter/reduce_scatter_dda_fabric_ll128.h"
+#include "algorithms/dda/reduce_scatter/reduce_scatter_dda_fabric_ll128_peerpar.h"
 #include "checks.h"
 #include "comm.h"
 #include "debug.h"
@@ -31,22 +33,31 @@ namespace {
 using dda::common::ddaBankSize;
 using dda::common::ddaLL128RsSlotWords;
 using dda::common::ddaLL128Slices;
+using dda::common::kDdaLL128RsPeerMaxThreads;
+using dda::common::kDdaLL128RsPeerMaxWarps;
 using dda::common::kDdaLL128Warp;
 using dda::common::kDdaLL128WireWordsPerSlice;
 
-// One warp carries one slice, so the grid is sized in slices rather than in
-// lines: blocks = ceil(slices / warpsPerBlock), capped by the grid budget. A
-// shard with more slices than the capped grid has warps just means each warp
-// takes several passes through the slice loop.
+// A block starts as one warp group, a warp per rank up to kDdaLL128RsPeerMaxWarps, so slices spread over the most CUs.
+// It doubles its groups up to kDdaLL128RsPeerMaxThreads only while one group per block would pass the block cap.
 static inline std::pair<dim3, dim3> ddaReduceScatterFabricLL128Geom(ncclComm* comm, size_t shardBytes) {
   const size_t slices = ddaLL128Slices(shardBytes);
-  const unsigned threads = 512;
-  const size_t warps = threads / (unsigned)kDdaLL128Warp;
+  const unsigned groupThreads =
+    (unsigned)dda::common::ddaLL128RsPeerWarps(comm->nRanks, kDdaLL128RsPeerMaxWarps) * (unsigned)kDdaLL128Warp;
   int nBlocksMax = comm->ddaFabricMaxBlocks;
   if (nBlocksMax < 1) {
     nBlocksMax = 1;
   }
-  unsigned blocks = (unsigned)std::min<size_t>((slices + warps - 1) / warps, (size_t)nBlocksMax);
+  unsigned threads = groupThreads;
+  while (threads * 2 <= (unsigned)kDdaLL128RsPeerMaxThreads) {
+    const size_t groups = threads / groupThreads;
+    if ((slices + groups - 1) / groups <= (size_t)nBlocksMax) {
+      break;
+    }
+    threads *= 2;
+  }
+  const size_t groups = threads / groupThreads;
+  unsigned blocks = (unsigned)std::min<size_t>((slices + groups - 1) / groups, (size_t)nBlocksMax);
   if (blocks == 0) {
     blocks = 1;
   }
@@ -81,27 +92,27 @@ static ncclResult_t ncclReduceScatterDdaFabricLL128Typed(const void* sendbuff, v
 
   INFO(NCCL_COLL,
        "DDA fabric ReduceScatter LL128: nRanks=%d shardBytes=%zu slices=%zu grid=%u block=%u "
-       "(warp-per-slice, bankSize=%zu)",
+       "(peer-parallel, bankSize=%zu)",
        nRanks, shardBytes, slices, grid.x, block.x, bankSize);
 
   const dda::common::DdaKernelParams params{comm->abortFlagDev};
   const hipEvent_t stopEvent = rcclTakeAddonStopEvent(comm);
-  // NRANKS_CT 4/8: unrolled peer loops; 0: runtime fallback.
+  // NRANKS_CT 4/8 unroll the fold rounds. 0 is the runtime fallback.
   switch (nRanks) {
   case 4:
-    hipExtLaunchKernelGGL((dda::common::ddaReduceScatterFabricLL128<T, 4>), grid, block, 0, stream,
+    hipExtLaunchKernelGGL((dda::common::ddaReduceScatterFabricLL128PeerPar<T, 4>), grid, block, 0, stream,
                           /*startEvent=*/nullptr, stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff),
                           static_cast<const T*>(sendbuff), shardBytes, comm->rank, nRanks, epochDev, epochLen, slices,
                           bankSize, params);
     break;
   case 8:
-    hipExtLaunchKernelGGL((dda::common::ddaReduceScatterFabricLL128<T, 8>), grid, block, 0, stream,
+    hipExtLaunchKernelGGL((dda::common::ddaReduceScatterFabricLL128PeerPar<T, 8>), grid, block, 0, stream,
                           /*startEvent=*/nullptr, stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff),
                           static_cast<const T*>(sendbuff), shardBytes, comm->rank, nRanks, epochDev, epochLen, slices,
                           bankSize, params);
     break;
   default:
-    hipExtLaunchKernelGGL((dda::common::ddaReduceScatterFabricLL128<T, 0>), grid, block, 0, stream,
+    hipExtLaunchKernelGGL((dda::common::ddaReduceScatterFabricLL128PeerPar<T, 0>), grid, block, 0, stream,
                           /*startEvent=*/nullptr, stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff),
                           static_cast<const T*>(sendbuff), shardBytes, comm->rank, nRanks, epochDev, epochLen, slices,
                           bankSize, params);
