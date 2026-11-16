@@ -52,6 +52,7 @@ suites:
   # ---------------------------------------------------------------------------
 
   - id: contract-memory
+    owner: HIP Runtime - Memory
     name: HIP contract memory-allocation tests
     kind: contract
     domain: memory
@@ -106,6 +107,7 @@ suites:
     disposition_rationale: Contract tests are the portable allocation-API baseline; exhaustive sizing and behavior belong to the functional unit-memory group.
 
   - id: contract-transfer
+    owner: HIP Runtime - Memory
     name: HIP contract memory-transfer tests
     kind: contract
     domain: transfer
@@ -156,6 +158,7 @@ suites:
     disposition_rationale: Transfer contracts pin direction and round-trip semantics; sweep-sized transfer coverage stays in functional unit groups.
 
   - id: contract-memory-pool-vmm
+    owner: HIP Runtime - Memory
     name: HIP contract memory pool and virtual memory tests
     kind: contract
     domain: memory_pool
@@ -195,6 +198,7 @@ suites:
     disposition_rationale: Pool/VMM contracts assert portable invariants with capability gating; deeper VMM behavior lives in the functional unit-vmm group.
 
   - id: contract-device
+    owner: HIP Runtime - Device/Context
     name: HIP contract device management tests
     kind: contract
     domain: device
@@ -233,6 +237,7 @@ suites:
     disposition_rationale: Device contracts hold the portable management invariants; functional device coverage remains in unit-device-context.
 
   - id: contract-context
+    owner: HIP Runtime - Device/Context
     name: HIP contract context tests
     kind: contract
     domain: context
@@ -267,6 +272,7 @@ suites:
     disposition_rationale: Driver context contracts stay portable; functional context behavior remains under unit-device-context.
 
   - id: contract-stream-event
+    owner: HIP Runtime - Stream/Event
     name: HIP contract stream and event tests
     kind: contract
     domain: stream_event
@@ -305,6 +311,7 @@ suites:
     disposition_rationale: Stream/event contracts pin portable ordering and property invariants; functional stream coverage remains in unit-stream-event.
 
   - id: contract-peer
+    owner: HIP Runtime - Multi-GPU
     name: HIP contract peer access and copy tests
     kind: contract
     domain: peer
@@ -339,6 +346,7 @@ suites:
     disposition_rationale: Peer contracts assert portable invariants and skip cleanly on single-GPU hosts; multi-GPU execution-context classification is tracked as a restructuring review item.
 
   - id: contract-kernel-launch
+    owner: HIP Runtime - Kernel Launch
     name: HIP contract kernel and launch tests
     kind: contract
     domain: kernel_launch
@@ -377,6 +385,7 @@ suites:
     disposition_rationale: Launch contracts pin portable configuration and attribute invariants; exhaustive launch behavior lives in unit-kernel-launch.
 
   - id: contract-multi-device-launch
+    owner: HIP Runtime - Multi-GPU
     name: HIP contract multi-device launch tests
     kind: contract
     domain: multi_gpu
@@ -410,6 +419,7 @@ suites:
     related_restructuring: TEST_RESTRUCTURING.md
 
   - id: contract-occupancy
+    owner: HIP Runtime - Kernel Launch
     name: HIP contract occupancy tests
     kind: contract
     domain: occupancy
@@ -444,6 +454,7 @@ suites:
     disposition_rationale: Occupancy contracts pin portable query invariants; functional occupancy coverage remains in unit-occupancy.
 
   - id: contract-graph
+    owner: HIP Runtime - Graph
     name: HIP contract graph tests
     kind: contract
     domain: graph
@@ -503,6 +514,7 @@ suites:
     disposition_rationale: Graph contracts pin portable lifecycle and node invariants; functional graph behavior remains in unit-graph.
 
   - id: contract-texture
+    owner: HIP Runtime - Texture/Surface
     name: HIP contract texture tests
     kind: contract
     domain: texture
@@ -538,6 +550,7 @@ suites:
     disposition_rationale: Texture contracts pin portable query/bind invariants; functional texture/surface coverage remains in unit-texture-surface.
 
   - id: contract-module-loader
+    owner: HIP Runtime - Module/Loader
     name: HIP contract module, library, and JIT loader tests
     kind: contract
     domain: module
@@ -576,6 +589,7 @@ suites:
     disposition_rationale: Loader contracts pin portable load/link invariants; functional module/loader behavior remains in unit-module-loader and unit-rtc.
 
   - id: contract-error
+    owner: HIP Runtime - Error Handling
     name: HIP contract error-handling tests
     kind: contract
     domain: error
@@ -610,6 +624,7 @@ suites:
     disposition_rationale: Error contracts pin portable sticky/cleared semantics; functional error coverage remains in unit-error-handling.
 
   - id: contract-interop
+    owner: HIP Runtime - Interop
     name: HIP contract interop and IPC tests
     kind: contract
     domain: interop
@@ -645,6 +660,7 @@ suites:
     disposition_rationale: Interop/IPC contracts pin portable rejection and import invariants; richer interop behavior remains in unit-interop-graphics and integration-multiprocess.
 
   - id: contract-runtime-services
+    owner: HIP Runtime - Core Services
     name: HIP contract runtime services tests
     kind: contract
     domain: runtime
@@ -690,6 +706,7 @@ suites:
   # ---------------------------------------------------------------------------
 
   - id: unit-memory
+    owner: HIP Runtime - Memory
     name: HIP unit memory tests
     kind: functional
     domain: memory
@@ -723,6 +740,7 @@ suites:
     related_restructuring: TEST_RESTRUCTURING.md
 
   - id: unit-stream-event
+    owner: HIP Runtime - Stream/Event
     name: HIP unit stream and event tests
     kind: functional
     domain: stream_event
@@ -755,6 +773,7 @@ suites:
     related_restructuring: TEST_RESTRUCTURING.md
 
   - id: unit-graph
+    owner: HIP Runtime - Graph
     name: HIP unit graph tests
     kind: functional
     domain: graph
@@ -785,6 +804,7 @@ suites:
     related_restructuring: TEST_RESTRUCTURING.md
 
   - id: unit-kernel-launch
+    owner: HIP Runtime - Kernel Launch
     name: HIP unit kernel and execution-control tests
     kind: functional
     domain: kernel_launch
@@ -818,6 +838,7 @@ suites:
     related_restructuring: TEST_RESTRUCTURING.md
 
   - id: unit-device-context
+    owner: HIP Runtime - Device/Context
     name: HIP unit device and context tests
     kind: functional
     domain: device
@@ -849,6 +870,7 @@ suites:
     related_restructuring: TEST_RESTRUCTURING.md
 
   - id: unit-occupancy
+    owner: HIP Runtime - Kernel Launch
     name: HIP unit occupancy tests
     kind: functional
     domain: occupancy
@@ -879,6 +901,7 @@ suites:
     related_restructuring: TEST_RESTRUCTURING.md
 
   - id: unit-texture-surface
+    owner: HIP Runtime - Texture/Surface
     name: HIP unit texture and surface tests
     kind: functional
     domain: texture
@@ -911,6 +934,7 @@ suites:
     related_restructuring: TEST_RESTRUCTURING.md
 
   - id: unit-rtc
+    owner: HIP Runtime - Module/Loader
     name: HIP unit HIPRTC tests
     kind: functional
     domain: rtc
@@ -940,6 +964,7 @@ suites:
     disposition_rationale: HIPRTC is a distinct runtime-compilation surface with no separate contract domain today; retained as the primary RTC coverage.
 
   - id: unit-module-loader
+    owner: HIP Runtime - Module/Loader
     name: HIP unit module, loader, and library tests
     kind: functional
     domain: module
@@ -972,6 +997,7 @@ suites:
     related_restructuring: TEST_RESTRUCTURING.md
 
   - id: unit-vmm
+    owner: HIP Runtime - Memory
     name: HIP unit virtual memory management tests
     kind: functional
     domain: memory_pool
@@ -1002,6 +1028,7 @@ suites:
     related_restructuring: TEST_RESTRUCTURING.md
 
   - id: unit-error-handling
+    owner: HIP Runtime - Error Handling
     name: HIP unit error-handling tests
     kind: functional
     domain: error
@@ -1032,6 +1059,7 @@ suites:
     related_restructuring: TEST_RESTRUCTURING.md
 
   - id: unit-device-libraries
+    owner: HIP Runtime - Device Libraries
     name: HIP unit device-library and math tests
     kind: functional
     domain: device_libraries
@@ -1068,6 +1096,7 @@ suites:
     disposition_rationale: Device-library and math correctness has no contract-tier counterpart; retained as primary device-side coverage.
 
   - id: unit-printf
+    owner: HIP Runtime - Device Libraries
     name: HIP unit printf tests
     kind: functional
     domain: printf
@@ -1097,6 +1126,7 @@ suites:
     disposition_rationale: Device printf has no contract-tier counterpart; retained as primary coverage.
 
   - id: unit-cooperative-multigpu
+    owner: HIP Runtime - Multi-GPU
     name: HIP unit cooperative-groups and peer/multi-GPU tests
     kind: functional
     domain: multi_gpu
@@ -1129,6 +1159,7 @@ suites:
     related_restructuring: TEST_RESTRUCTURING.md
 
   - id: unit-interop-graphics
+    owner: HIP Runtime - Interop
     name: HIP unit graphics interop tests
     kind: functional
     domain: interop
@@ -1161,6 +1192,7 @@ suites:
     related_restructuring: TEST_RESTRUCTURING.md
 
   - id: unit-compiler
+    owner: HIP Runtime - Compiler Integration
     name: HIP unit compiler and language-integration tests
     kind: functional
     domain: compiler
@@ -1193,6 +1225,7 @@ suites:
     disposition_rationale: Compiler-facing coverage used by runtime tests has no contract-tier counterpart; retained as primary coverage.
 
   - id: unit-multithread-sync
+    owner: HIP Runtime - Stream/Event
     name: HIP unit multithreading and synchronization tests
     kind: functional
     domain: synchronization
@@ -1223,6 +1256,7 @@ suites:
     disposition_rationale: Concurrency/synchronization behavior has no contract-tier counterpart; retained as primary coverage.
 
   - id: unit-amd-specific
+    owner: HIP Runtime - AMD Platform
     name: HIP unit AMD-specific tests
     kind: functional
     domain: amd_specific
@@ -1255,6 +1289,7 @@ suites:
     disposition_rationale: AMD-specific feature coverage is backend-gated and has no portable contract counterpart; retained as primary coverage.
 
   - id: unit-sanity
+    owner: HIP Runtime - Test Harness
     name: HIP unit sanity and harness tests
     kind: functional
     domain: harness
@@ -1291,6 +1326,7 @@ suites:
     disposition_rationale: Harness and macro-boundary coverage underpins all other suites; retained.
 
   - id: unit-oob
+    owner: HIP Runtime - Memory
     name: HIP unit out-of-bounds tests
     kind: functional
     domain: oob
@@ -1326,6 +1362,7 @@ suites:
   # ---------------------------------------------------------------------------
 
   - id: integration-multiprocess
+    owner: HIP Runtime - Integration
     name: HIP multiprocess integration tests
     kind: integration
     domain: multi_process
@@ -1360,6 +1397,7 @@ suites:
     related_restructuring: TEST_RESTRUCTURING.md
 
   - id: performance-api
+    owner: HIP Runtime - Performance
     name: HIP performance API microbenchmarks
     kind: performance
     domain: performance
@@ -1393,6 +1431,7 @@ suites:
     disposition_rationale: Performance microbenchmarks are a separate opt-in build mode and informational gate; retained as-is.
 
   - id: performance-scenarios
+    owner: HIP Runtime - Performance
     name: HIP performance scenario benchmarks
     kind: performance
     domain: performance
@@ -1422,6 +1461,7 @@ suites:
     disposition_rationale: Scenario benchmarks share the opt-in performance build mode; retained as-is.
 
   - id: stress-suite
+    owner: HIP Runtime - Stress
     name: HIP stress tests
     kind: stress
     domain: stress
@@ -1459,6 +1499,7 @@ suites:
     disposition_rationale: Stress is a separate opt-in build mode and informational gate; retained as-is.
 
   - id: static-contract-coverage
+    owner: HIP Runtime - Test Governance
     name: Contract API coverage drift gate
     kind: contract
     domain: static_validation
@@ -1485,7 +1526,7 @@ suites:
         in_repo: ../../.github/workflows/hip-contract-coverage.yml (job contract-coverage, step "Check contract-test coverage").
     evidence:
       - path: ../../.github/workflows/hip-contract-coverage.yml
-        claim: The workflow runs check_contract_coverage.py --check as a trusted, always-on static gate on pull requests touching HIP headers or the contract tier.
+        claim: The workflow runs check_contract_coverage.py --check as a trusted, path-filtered required static gate; its paths filter restricts it to pull requests touching the HIP headers, the contract tier, or the contract tooling, so docs-only changes do not trigger it.
       - path: catch/contract/tools/check_contract_coverage.py
         claim: The coverage checker is the enforced static gate.
       - path: catch/contract/uncovered_apis.txt
@@ -1495,6 +1536,7 @@ suites:
     disposition_rationale: The static coverage gate governs the contract tier and is enforced in-repo; retained.
 
   - id: static-test-plan
+    owner: HIP Runtime - Test Governance
     name: Generated test-plan staleness gate
     kind: contract
     domain: static_validation
@@ -1521,7 +1563,7 @@ suites:
         in_repo: ../../.github/workflows/hip-contract-coverage.yml (job contract-coverage, step "Check test plan is up to date").
     evidence:
       - path: ../../.github/workflows/hip-contract-coverage.yml
-        claim: The workflow runs gen_test_plan.py --check as a trusted, always-on static gate.
+        claim: The workflow runs gen_test_plan.py --check as a trusted, path-filtered required static gate under the same paths filter; docs-only changes do not trigger it.
       - path: catch/tools/gen_test_plan.py
         claim: gen_test_plan.py generates TEST_PLAN.md from @asserts annotations and provides the --check staleness gate.
       - path: catch/TEST_PLAN.md

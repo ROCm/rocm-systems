@@ -38,10 +38,12 @@ those records cite; none asserts work that has already happened.
 
 The contract tier (16 `contract-*` records such as
 [`contract-memory`, `contract-graph`, `contract-interop`](test_inventory.yaml)) is
-governed by its own always-on static gates rather than by device execution alone.
-A coverage drift checker and a generated test-plan staleness check run on every PR
-and require each public HIP API to have either a contract test or an allowlisted
-rationale.
+governed by its own path-filtered required static gates rather than by device
+execution alone. A coverage drift checker and a generated test-plan staleness check
+run on every PR that touches the HIP headers, the contract tier, or the contract
+tooling — the workflow's `paths:` filter scopes them, so they are not always-on and
+a docs-only PR does not trigger them — and require each public HIP API to have
+either a contract test or an allowlisted rationale.
 
 - Records: `static-contract-coverage`, `static-test-plan` (both `kind: contract`,
   `gating: trusted`, no GPU required).
@@ -192,7 +194,10 @@ the bar a future change must clear, not a status report.
 - **Acceptance criteria:**
   - Every record's claimed `cadence` and `gating` is backed by an in-repo workflow
     reference or marked `external:` with a pointer to where that lane is defined.
-  - The contract drift and test-plan lanes remain `trusted` and always-on.
+  - The contract drift and test-plan lanes remain `trusted` and path-filtered
+    required gates (the workflow `paths:` filter restricts them to PRs touching the
+    HIP headers, the contract tier, or the contract tooling; docs-only changes do
+    not trigger them).
   - The `HIP_TEST_LEVEL` parameterize-vs-select distinction (`TI-005`) is preserved
     in any cadence wiring; a label filter alone must not silently change workload
     parameters.

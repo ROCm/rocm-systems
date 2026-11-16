@@ -43,12 +43,22 @@ coverage_model:
       classes: [amd_linux, amd_windows, amd_wsl, nvidia_backend, graphics_capable, sanitizer]
     - id: cadence
       classes: [pr, nightly, release, on_demand]
+    - id: architecture
+      source: catch/unit/CMakeLists.txt platform guards and TESTING.md "Supported configurations"
+      classes: [cdna, rdna, any_gpu, nvidia_backend]
+    - id: capability
+      source: catch/contract/AUTHORING.md capability-skip conventions and per-record prerequisites in test_inventory.yaml
+      classes: [baseline, image_support, vmm_capable, peer_capable, graphics_capable, multi_device]
+    - id: integration_boundary
+      source: TEST_RESTRUCTURING.md integration classification (Section 1.3 and the open multi-GPU item)
+      classes: [in_process, cross_stream, cross_device, cross_process, external_producer]
 
   classes:
 
     # -- memory surface -------------------------------------------------------
 
     - id: memory.allocation_and_integrity
+      owner: HIP Runtime - Memory
       axes: [api_surface.memory, behavior.success, behavior.invalid_input, behavior.data_integrity, execution_context.single_gpu]
       risk: high
       intent: Allocation, free, memset, host/pitched/managed memory, and advise invariants plus invalid-input and out-of-bounds behavior remain observable, with allocation round-trips and byte-level integrity preserved.
@@ -62,6 +72,7 @@ coverage_model:
       gap_status: covered_dual_tier
 
     - id: memory.transfer_integrity
+      owner: HIP Runtime - Memory
       axes: [api_surface.memory, behavior.data_integrity, behavior.invalid_input, execution_context.single_gpu]
       risk: high
       intent: hipMemcpy family, async transfers, 2D/3D copies, and array copies preserve byte-for-byte round-trip and reject invalid direction or zero-byte misuse.
@@ -75,7 +86,8 @@ coverage_model:
       gap_status: contract_pins_invariant_functional_sweeps_in_unit_memory
 
     - id: memory.pools_and_virtual_memory
-      axes: [api_surface.memory, behavior.lifecycle, behavior.invalid_input, execution_context.single_gpu]
+      owner: HIP Runtime - Memory
+      axes: [api_surface.memory, behavior.lifecycle, behavior.invalid_input, execution_context.single_gpu, capability.vmm_capable]
       risk: high
       intent: Memory-pool lifecycle and access plus virtual-memory reserve/map/unmap invariants remain observable with explicit capability gating; unsupported outcomes are accepted rather than failed.
       expected_test_kinds: [contract, functional]
@@ -88,7 +100,8 @@ coverage_model:
       gap_status: capability_gated
 
     - id: memory.texture_sampling
-      axes: [api_surface.memory, behavior.data_integrity, behavior.invalid_input]
+      owner: HIP Runtime - Texture/Surface
+      axes: [api_surface.memory, behavior.data_integrity, behavior.invalid_input, capability.image_support]
       risk: medium
       intent: Texture object and reference query/bind invariants and sampled-value integrity, with texture resources modeled under the memory surface.
       expected_test_kinds: [contract, functional]
@@ -103,7 +116,8 @@ coverage_model:
     # -- stream/event surface -------------------------------------------------
 
     - id: stream_event.ordering_and_synchronization
-      axes: [api_surface.stream_event, behavior.synchronization, behavior.lifecycle, behavior.invalid_input, execution_context.single_gpu]
+      owner: HIP Runtime - Stream/Event
+      axes: [api_surface.stream_event, behavior.synchronization, behavior.lifecycle, behavior.invalid_input, execution_context.single_gpu, integration_boundary.cross_stream]
       risk: high
       intent: Stream and event creation, properties, callbacks, CU masks, stream-ordered memory ops, and cross-stream or host synchronization remain observable and correctly ordered.
       expected_test_kinds: [contract, functional]
@@ -118,6 +132,7 @@ coverage_model:
     # -- kernel/launch surface ------------------------------------------------
 
     - id: kernel_launch.configuration_and_execution
+      owner: HIP Runtime - Kernel Launch
       axes: [api_surface.kernel_launch, behavior.success, behavior.invalid_input, execution_context.single_gpu]
       risk: high
       intent: Kernel object and function attributes, call-config, kernel launch, and driver launch-ex produce correct results and reject invalid launch configuration.
@@ -131,6 +146,7 @@ coverage_model:
       gap_status: covered_dual_tier
 
     - id: kernel_launch.occupancy_bounds
+      owner: HIP Runtime - Kernel Launch
       axes: [api_surface.kernel_launch, behavior.success, behavior.invalid_input]
       risk: medium
       intent: Occupancy calculator, extended, and variable-shared-memory queries return values within documented bounds and reject invalid input.
@@ -144,7 +160,8 @@ coverage_model:
       gap_status: covered_dual_tier
 
     - id: kernel_launch.device_side_correctness
-      axes: [api_surface.kernel_launch, behavior.data_integrity, execution_context.single_gpu]
+      owner: HIP Runtime - Device Libraries
+      axes: [api_surface.kernel_launch, behavior.data_integrity, execution_context.single_gpu, architecture.any_gpu]
       risk: medium
       intent: Device-side math, atomics, warp and sync primitives, complex and vector types, and device printf produce numerically correct results when launched; these run through kernels and have no host contract surface.
       expected_test_kinds: [functional]
@@ -157,6 +174,7 @@ coverage_model:
     # -- graph surface --------------------------------------------------------
 
     - id: graph.lifecycle_and_error_paths
+      owner: HIP Runtime - Graph
       axes: [api_surface.graph, behavior.lifecycle, behavior.invalid_input, behavior.synchronization, execution_context.single_gpu]
       risk: high
       intent: Graph creation, capture, node types, update, clone, child graphs, host nodes, exec lifecycle, and invalid-state behavior remain observable and isolated.
@@ -172,6 +190,7 @@ coverage_model:
     # -- module/RTC surface ---------------------------------------------------
 
     - id: module.loader_and_jit
+      owner: HIP Runtime - Module/Loader
       axes: [api_surface.module, behavior.success, behavior.invalid_input, behavior.lifecycle]
       risk: medium
       intent: Module load file/ex/exec, JIT link, and library load produce loadable symbols and launches and reject malformed code objects.
@@ -185,6 +204,7 @@ coverage_model:
       gap_status: covered_dual_tier
 
     - id: rtc.runtime_compilation
+      owner: HIP Runtime - Module/Loader
       axes: [api_surface.rtc, behavior.success, behavior.invalid_input, execution_context.single_gpu]
       risk: medium
       intent: HIPRTC program creation, compilation, name expression, and link paths compile and execute correctly; there is no contract-tier counterpart today.
@@ -198,6 +218,7 @@ coverage_model:
     # -- runtime/driver management and errors ---------------------------------
 
     - id: runtime.device_management
+      owner: HIP Runtime - Device/Context
       axes: [api_surface.runtime, behavior.lifecycle, behavior.invalid_input, execution_context.single_gpu]
       risk: high
       intent: Device enumeration and identity, configuration, reset, and lifecycle invariants remain observable; device reset leaves the device usable.
@@ -211,6 +232,7 @@ coverage_model:
       gap_status: covered_dual_tier
 
     - id: runtime.services_and_entry_points
+      owner: HIP Runtime - Core Services
       axes: [api_surface.runtime, behavior.success, behavior.invalid_input]
       risk: medium
       intent: Runtime init and version, extension, logging, profiler-control, and driver entry-point lookup invariants remain observable.
@@ -222,6 +244,7 @@ coverage_model:
       gap_status: contract_only
 
     - id: runtime.error_reporting
+      owner: HIP Runtime - Error Handling
       axes: [api_surface.runtime, behavior.sticky_error, behavior.invalid_input]
       risk: high
       intent: Runtime and driver error reporting preserves sticky versus cleared semantics and error-string and name lookups.
@@ -235,6 +258,7 @@ coverage_model:
       gap_status: covered_dual_tier
 
     - id: driver.context_management
+      owner: HIP Runtime - Device/Context
       axes: [api_surface.driver, behavior.lifecycle, behavior.invalid_input]
       risk: medium
       intent: Driver context creation, mutation, and configuration invariants and invalid-state behavior, modeled under the driver API surface.
@@ -250,7 +274,8 @@ coverage_model:
     # -- interop and multi-GPU ------------------------------------------------
 
     - id: interop.import_and_ipc
-      axes: [api_surface.interop, behavior.invalid_input, behavior.lifecycle, execution_context.multiprocess]
+      owner: HIP Runtime - Interop
+      axes: [api_surface.interop, behavior.invalid_input, behavior.lifecycle, execution_context.multiprocess, capability.graphics_capable, integration_boundary.external_producer]
       risk: medium
       intent: Graphics interop, external-resource import, and IPC handle exchange import correctly or reject cleanly when producers or a graphics environment are absent.
       expected_test_kinds: [contract, functional, integration]
@@ -263,7 +288,8 @@ coverage_model:
       gap_status: environment_gated
 
     - id: multi_gpu.peer_and_cooperative_launch
-      axes: [api_surface.kernel_launch, execution_context.multi_gpu, behavior.success, behavior.data_integrity]
+      owner: HIP Runtime - Multi-GPU
+      axes: [api_surface.kernel_launch, execution_context.multi_gpu, behavior.success, behavior.data_integrity, capability.multi_device, integration_boundary.cross_device]
       risk: high
       intent: Peer query, access, and copy, cooperative-groups launch and sync, and cross-device launch remain observable with clean single-GPU degradation; the execution-context classification of these cases is an open restructuring item.
       expected_test_kinds: [contract, functional, integration]

@@ -30,7 +30,7 @@ This document does not define testing strategy for ROCm math libraries, communic
 A few boundaries keep these documents honest and prevent over-claiming:
 
 - `catch/TEST_PLAN.md` is **generated** from the `@asserts:` annotations by `catch/tools/gen_test_plan.py`. It is not a hand-maintained duplicate inventory: cite it as evidence, never edit it by hand, and do not re-list its cases in this guide or in `test_inventory.yaml`.
-- CI lanes that run outside this repository — notably the TheRock build and HIP runtime test jobs — are **external** to hip-tests. The inventory marks them `external:` and links them to the evidence that does live here; only the static contract-coverage and test-plan gates in `.github/workflows/hip-contract-coverage.yml` run in-repo.
+- CI lanes that run outside this repository — notably the TheRock build and HIP runtime test jobs — are **external** to hip-tests. The inventory marks them `external:` and links them to the evidence that does live here; only the static contract-coverage and test-plan gates in `.github/workflows/hip-contract-coverage.yml` run in-repo, and that workflow is **path-filtered**: its `paths:` filter restricts it to pull requests touching the HIP headers, the contract tier, or the contract tooling, so a docs-only change does not trigger it.
 - An unsupported-capability skip (`HIP_SKIP_TEST`, YAML `unsupported:`) is **signal-preserving behavior, not passing coverage**. A cleanly skipped case records that a path was not exercised here; it does not count as a validated contract.
 
 ## Development workflow
@@ -60,7 +60,7 @@ The suite lives under `projects/hip-tests/catch/`. Each layer is gated by a CMak
 
 ### Contract testing
 
-Contract tests live in `catch/contract/` and are built ON by default through `BUILD_CONTRACT_TESTS`. Each case pins the small, portable, device-only semantic guarantee of a public HIP API: successful round-trips, accepted-or-unsupported capability probes, invalid-input rejection, and sticky-error behavior. Cases carry an `@asserts: API - invariant` annotation directly above the case. `catch/tools/gen_test_plan.py` compiles these annotations into `catch/TEST_PLAN.md`, an inventory of what each case asserts. Every declared public API is either covered by a contract test or listed with a rationale in `catch/contract/uncovered_apis.txt`. The repository-root coverage drift gate in `.github/workflows/hip-contract-coverage.yml` runs the static coverage checker and the generated test-plan staleness check so new public HIP APIs do not land without a contract test or an explicit allowlist entry.
+Contract tests live in `catch/contract/` and are built ON by default through `BUILD_CONTRACT_TESTS`. Each case pins the small, portable, device-only semantic guarantee of a public HIP API: successful round-trips, accepted-or-unsupported capability probes, invalid-input rejection, and sticky-error behavior. Cases carry an `@asserts: API - invariant` annotation directly above the case. `catch/tools/gen_test_plan.py` compiles these annotations into `catch/TEST_PLAN.md`, an inventory of what each case asserts. Every declared public API is either covered by a contract test or listed with a rationale in `catch/contract/uncovered_apis.txt`. The repository-root coverage drift gate in `.github/workflows/hip-contract-coverage.yml` is a path-filtered required gate: on pull requests that touch the HIP headers, the contract tier, or the contract tooling it runs the static coverage checker and the generated test-plan staleness check so new public HIP APIs do not land without a contract test or an explicit allowlist entry. It is not always-on — a docs-only change does not trigger it.
 
 ### Unit and functional testing
 
@@ -85,8 +85,8 @@ Stress tests live in `catch/stress/` and are OFF by default through `BUILD_STRES
 | Signal | Classification | Blocks merge? | Notes |
 |---|---|---|---|
 | TheRock build and HIP runtime test jobs | Trusted gate | Yes, when required by the PR policy | Builds ROCm packages and runs the configured HIP test set. |
-| Contract API coverage drift check | Trusted gate | Yes | Requires new public APIs to have a contract test or an explicit allowlist rationale. |
-| Generated test-plan staleness check | Trusted gate | Yes | Keeps `catch/TEST_PLAN.md` synchronized with `@asserts:` annotations. |
+| Contract API coverage drift check | Trusted, path-filtered required gate | Yes, on PRs touching HIP headers, the contract tier, or the contract tooling | Path-filtered (workflow `paths:` filter), not always-on; a docs-only PR does not trigger it. Requires new public APIs to have a contract test or an explicit allowlist rationale. |
+| Generated test-plan staleness check | Trusted, path-filtered required gate | Yes, on the same contract/header/tooling paths | Path-filtered, not always-on. Keeps `catch/TEST_PLAN.md` synchronized with `@asserts:` annotations. |
 | Formatting and PR-description checks | Trusted gate | Yes, where configured | Maintains source and review hygiene. |
 | Performance and stress sweeps | Informational or scheduled gate, depending on workflow | Not universally on every PR | Used for longer-running validation and regression investigation. |
 | Flaky or quarantined cases | Unstable-flaky | No until fixed | Must have an owner, issue, and removal plan before becoming trusted signal. |
@@ -103,7 +103,7 @@ Disabling a test case should be rare and explicit. It is appropriate when a test
 
 ## Coverage
 
-Contract coverage is tracked statically: every declared public HIP API is either covered by a contract test or listed with a rationale in `catch/contract/uncovered_apis.txt`. The inventory of what each case asserts is generated into `catch/TEST_PLAN.md` by `catch/tools/gen_test_plan.py` from the `@asserts:` annotations, and the repository-root `.github/workflows/hip-contract-coverage.yml` enforces both the coverage drift check and the test-plan staleness check. Functional coverage is organized per feature area under `catch/unit/`, with the expectation that every public HIP API a change touches has at least one functional test exercising the changed behavior. Device-side code coverage is not fully captured by host coverage tools.
+Contract coverage is tracked statically: every declared public HIP API is either covered by a contract test or listed with a rationale in `catch/contract/uncovered_apis.txt`. The inventory of what each case asserts is generated into `catch/TEST_PLAN.md` by `catch/tools/gen_test_plan.py` from the `@asserts:` annotations, and the repository-root `.github/workflows/hip-contract-coverage.yml` enforces both the coverage drift check and the test-plan staleness check as a path-filtered required gate (scoped by its `paths:` filter to HIP-header, contract-tier, and contract-tooling changes rather than running on every PR). Functional coverage is organized per feature area under `catch/unit/`, with the expectation that every public HIP API a change touches has at least one functional test exercising the changed behavior. Device-side code coverage is not fully captured by host coverage tools.
 
 Code coverage and test coverage are different signals. Code coverage measures which host-side lines or branches executed. Test coverage measures which public API contracts, configurations, capabilities, and regression scenarios were intentionally validated. HIP runtime confidence depends heavily on test coverage across real hardware and runtime configurations, not only on line coverage.
 
@@ -120,7 +120,7 @@ The tables below summarize the inventory and coverage model at a glance. Each ro
 | Integration (distributed) | `integration-multiprocess`, `unit-cooperative-multigpu`, `unit-interop-graphics` | Built via `BUILD_UNIT_TESTS`; no separate top-level tier today | PR or on-demand, platform/capability-gated |
 | Performance | `performance-api`, `performance-scenarios` | `BUILD_PERF_TESTS` (OFF) | On-demand / informational |
 | Stress | `stress-suite` | `BUILD_STRESS_TESTS` (OFF) | On-demand / informational |
-| Static governance | `static-contract-coverage`, `static-test-plan` | n/a (Python gate, no GPU/build) | PR / trusted, in-repo |
+| Static governance | `static-contract-coverage`, `static-test-plan` | n/a (Python gate, no GPU/build) | PR (path-filtered) / trusted, in-repo |
 
 **Major behavioral domains**
 
@@ -138,7 +138,7 @@ The tables below summarize the inventory and coverage model at a glance. Each ro
 
 | Cadence / gating | Inventory records | Notes |
 |---|---|---|
-| PR, trusted | Contract tier, legacy unit/functional tier, `integration-multiprocess`, `static-contract-coverage`, `static-test-plan` | Device suites run through external TheRock jobs; the two static gates run in-repo |
+| PR, trusted | Contract tier, legacy unit/functional tier, `integration-multiprocess`, `static-contract-coverage`, `static-test-plan` | Device suites run through external TheRock jobs; the two static gates run in-repo as a path-filtered required gate (scoped to HIP-header, contract-tier, and contract-tooling changes, not docs-only PRs) |
 | On-demand, informational | `performance-api`, `performance-scenarios`, `stress-suite`, `unit-interop-graphics` | Opt-in build modes or environment-gated lanes, not per-PR gates |
 | Capability- or environment-gated | `contract-memory-pool-vmm`, `unit-vmm`, `contract-peer`, `unit-cooperative-multigpu`, `unit-interop-graphics` | Skip cleanly when the driver capability, device topology, or graphics environment is absent |
 

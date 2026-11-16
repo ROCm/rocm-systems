@@ -4,11 +4,12 @@
 # SPDX-License-Identifier: MIT
 """Deterministic consistency checker for the HIP testing documentation set.
 
-Validates the four hand-maintained testing documents under
-``projects/hip-tests`` as a connected set:
+Validates the hand-maintained testing documents under ``projects/hip-tests``
+as a connected set:
 
   * ``test_inventory.yaml``        - the suite inventory
   * ``test_coverage_model.yaml``   - the intended-coverage model
+  * ``TESTING.md``                 - the current-state testing strategy
   * ``TESTING_INCIDENTS.md``       - the test-control rationale / incident log
   * ``TEST_RESTRUCTURING.md``      - the restructuring roadmap (proposal)
 
@@ -17,7 +18,7 @@ for itself (workstreams WS-1 and WS-2):
 
   schema keys / vocabularies
     - every inventory suite, coverage class, and pairwise check carries its
-      required keys;
+      required keys (including an explicit ``owner``);
     - every inventory ``id`` is unique;
     - every ``kind`` / ``disposition`` / ``gating`` value is within the
       vocabulary the inventory declares for itself (the ``vocabularies:`` block).
@@ -30,27 +31,33 @@ for itself (workstreams WS-1 and WS-2):
   coverage refs
     - every ``current_inventory`` id in the coverage model resolves to an
       inventory suite id;
-    - every class / pairwise axis reference is a declared ``axis.class``.
+    - every class / pairwise axis reference is a declared ``axis.class``;
+    - the model declares the required coverage dimensions (architecture,
+      capability, integration_boundary) as explicit axes.
 
   evidence paths
     - every ``source.paths`` entry and every ``evidence.path`` resolves to a
       file on disk (relative to the component directory) unless explicitly
       marked ``external:``.
 
-  incident IDs
+  incident IDs and fields
     - every ``TI-NNN`` referenced in the YAML resolves to an incident defined by
-      a ``## TI-NNN:`` heading in TESTING_INCIDENTS.md.
+      a ``## TI-NNN:`` heading in TESTING_INCIDENTS.md;
+    - every defined incident carries the required labelled fields (Finding,
+      Control, Protects, Origin, Current status, Retirement condition).
 
-  local Markdown refs
-    - every relative Markdown link ``[text](path)`` in TESTING_INCIDENTS.md and
-      TEST_RESTRUCTURING.md resolves to a file on disk (http(s) and in-page
-      ``#anchor`` links are ignored);
+  local Markdown refs and anchors
+    - every relative Markdown link ``[text](path)`` in TESTING.md,
+      TESTING_INCIDENTS.md, and TEST_RESTRUCTURING.md resolves to a file on disk
+      (http(s)/mailto URLs are preserved as external and not existence-checked);
+    - every in-page ``#anchor`` and ``file.md#anchor`` fragment resolves to a
+      heading in the target Markdown document;
     - every ``related_restructuring`` pointer in the inventory resolves.
 
 This is a pure static consistency check: it needs only Python 3 and PyYAML, no
-ROCm, GPU, or build, so it is safe as a fast PR gate. Paths are taken as
-arguments (or resolved repo-relative from this script's location); nothing in
-the documents is executed.
+ROCm, GPU, or build, so it is safe as a fast gate. Paths are taken as arguments
+(``--root`` or the per-document overrides) or resolved repo-relative from this
+script's location; nothing in the documents is executed.
 
 Exit status: non-zero if any check fails, zero otherwise.
 """
@@ -69,29 +76,42 @@ import yaml
 _THIS_DIR = Path(__file__).resolve().parent               # tools
 HIP_TESTS_DIR = _THIS_DIR.parent                          # projects/hip-tests
 
-INVENTORY_PATH = HIP_TESTS_DIR / "test_inventory.yaml"
-COVERAGE_PATH = HIP_TESTS_DIR / "test_coverage_model.yaml"
-INCIDENTS_PATH = HIP_TESTS_DIR / "TESTING_INCIDENTS.md"
-RESTRUCTURING_PATH = HIP_TESTS_DIR / "TEST_RESTRUCTURING.md"
+# File names of the documents under the component/repository root.
+INVENTORY_NAME = "test_inventory.yaml"
+COVERAGE_NAME = "test_coverage_model.yaml"
+TESTING_NAME = "TESTING.md"
+INCIDENTS_NAME = "TESTING_INCIDENTS.md"
+RESTRUCTURING_NAME = "TEST_RESTRUCTURING.md"
 
 # Required keys per record type. Derived from the documents as authored; a
 # missing key is a schema error.
 REQUIRED_SUITE_KEYS = frozenset({
-    "id", "name", "kind", "domain", "purpose", "oracle", "source", "metadata",
-    "execution", "evidence", "disposition", "disposition_rationale",
+    "id", "name", "kind", "domain", "purpose", "oracle", "owner", "source",
+    "metadata", "execution", "evidence", "disposition", "disposition_rationale",
 })
 REQUIRED_EXECUTION_KEYS = frozenset({
     "cadence", "gating", "ctest_labels", "platforms", "backends",
     "prerequisites", "ci_lane",
 })
 REQUIRED_CLASS_KEYS = frozenset({
-    "id", "axes", "risk", "intent", "expected_test_kinds",
+    "id", "owner", "axes", "risk", "intent", "expected_test_kinds",
     "current_inventory", "evidence", "gap_status",
 })
 REQUIRED_PAIRWISE_KEYS = frozenset({
     "id", "category", "pair", "status", "priority", "rationale",
     "current_inventory", "gap_status",
 })
+
+# Coverage dimensions the model must declare explicitly as axes so that
+# architecture/capability and integration-boundary coverage can be audited.
+REQUIRED_AXES = frozenset({"architecture", "capability", "integration_boundary"})
+
+# The labelled fields every incident account must carry so that a reviewer can
+# see what a control protects and when it may be retired.
+REQUIRED_INCIDENT_LABELS = (
+    "Finding", "Control", "Protects", "Origin",
+    "Current status", "Retirement condition",
+)
 
 # Dispositions that propose relocating a record; each must name a target.
 MOVE_DISPOSITIONS = frozenset({"merge_into", "migrate", "demote", "retire"})
@@ -103,7 +123,9 @@ EXTERNAL_MARKER = "external:"
 _INCIDENT_HEADING_RE = re.compile(r"^##\s+(TI-\d+):", re.MULTILINE)
 _INCIDENT_REF_RE = re.compile(r"\bTI-\d+\b")
 _MD_LINK_RE = re.compile(r"\[[^\]]*\]\(([^)]+)\)")
-_SKIP_LINK_PREFIXES = ("http://", "https://", "mailto:", "#")
+_HEADING_RE = re.compile(r"^#{1,6}\s+(.*?)\s*$", re.MULTILINE)
+# URLs preserved as external references; existence is not checked for these.
+_EXTERNAL_LINK_PREFIXES = ("http://", "https://", "mailto:")
 
 
 def _load_yaml(path, errors):
@@ -121,14 +143,24 @@ def _path_exists(component_dir, rel_path):
     return (Path(component_dir) / rel_path).resolve().exists()
 
 
+def _nonempty_str(value):
+    return isinstance(value, str) and bool(value.strip())
+
+
 def check_inventory(inventory, component_dir):
-    """Validate the suite inventory. Returns (errors, suite_ids, incident_refs)."""
+    """Validate the suite inventory.
+
+    Returns (errors, suite_ids, incident_refs, counts) where counts is a dict
+    with 'records' and 'refs' (references successfully resolved).
+    """
     errors = []
     suite_ids = set()
     incident_refs = set()
+    refs_ok = 0
 
     if not isinstance(inventory, dict):
-        return ["inventory did not parse into a mapping"], suite_ids, incident_refs
+        return (["inventory did not parse into a mapping"], suite_ids,
+                incident_refs, {"records": 0, "refs": 0})
 
     vocab = inventory.get("vocabularies") or {}
     for name in ("kind", "disposition", "gating"):
@@ -141,7 +173,7 @@ def check_inventory(inventory, component_dir):
     suites = inventory.get("suites")
     if not isinstance(suites, list) or not suites:
         errors.append("inventory has no suites")
-        return errors, suite_ids, incident_refs
+        return errors, suite_ids, incident_refs, {"records": 0, "refs": 0}
 
     # First pass: collect ids so move-target checks can resolve forward refs.
     for suite in suites:
@@ -160,6 +192,9 @@ def check_inventory(inventory, component_dir):
         missing = REQUIRED_SUITE_KEYS - set(suite.keys())
         if missing:
             errors.append("suite {!r} missing keys: {}".format(sid, sorted(missing)))
+
+        if "owner" in suite and not _nonempty_str(suite.get("owner")):
+            errors.append("suite {!r} owner must be a non-empty string".format(sid))
 
         kind = suite.get("kind")
         if kind is not None and kind_vocab and kind not in kind_vocab:
@@ -201,8 +236,11 @@ def check_inventory(inventory, component_dir):
             for rel in source.get("paths", []) or []:
                 if isinstance(rel, str) and rel.startswith(EXTERNAL_MARKER):
                     continue
-                if isinstance(rel, str) and not _path_exists(component_dir, rel):
-                    errors.append("suite {!r} source path missing: {}".format(sid, rel))
+                if isinstance(rel, str):
+                    if _path_exists(component_dir, rel):
+                        refs_ok += 1
+                    else:
+                        errors.append("suite {!r} source path missing: {}".format(sid, rel))
 
         # Evidence paths.
         for ev in suite.get("evidence", []) or []:
@@ -211,38 +249,55 @@ def check_inventory(inventory, component_dir):
             rel = ev.get("path")
             if not isinstance(rel, str) or rel.startswith(EXTERNAL_MARKER):
                 continue
-            if not _path_exists(component_dir, rel):
+            if _path_exists(component_dir, rel):
+                refs_ok += 1
+            else:
                 errors.append("suite {!r} evidence path missing: {}".format(sid, rel))
 
         # related_restructuring is a structured local Markdown pointer.
         rr = suite.get("related_restructuring")
-        if isinstance(rr, str) and not _path_exists(component_dir, rr):
-            errors.append("suite {!r} related_restructuring missing: {}".format(sid, rr))
+        if isinstance(rr, str):
+            if _path_exists(component_dir, rr):
+                refs_ok += 1
+            else:
+                errors.append("suite {!r} related_restructuring missing: {}".format(sid, rr))
 
         # Incident references anywhere in the suite record.
         incident_refs.update(_collect_incident_refs(suite))
 
-    return errors, suite_ids, incident_refs
+    return errors, suite_ids, incident_refs, {"records": len(suites), "refs": refs_ok}
 
 
 def check_coverage_model(model, suite_ids, component_dir):
-    """Validate the coverage model against the inventory. Returns (errors, refs)."""
+    """Validate the coverage model against the inventory.
+
+    Returns (errors, incident_refs, counts) where counts has 'classes' and
+    'refs'.
+    """
     errors = []
     incident_refs = set()
+    refs_ok = 0
 
     if not isinstance(model, dict):
-        return ["coverage model did not parse into a mapping"], incident_refs
+        return (["coverage model did not parse into a mapping"], incident_refs,
+                {"classes": 0, "refs": 0})
 
     cm = model.get("coverage_model")
     if not isinstance(cm, dict):
         errors.append("coverage model is missing the coverage_model block")
-        return errors, incident_refs
+        return errors, incident_refs, {"classes": 0, "refs": 0}
 
     declared_axes = set()
+    declared_axis_ids = set()
     for axis in cm.get("axes", []) or []:
         axis_id = axis.get("id")
+        declared_axis_ids.add(axis_id)
         for cls in axis.get("classes", []) or []:
             declared_axes.add("{}.{}".format(axis_id, cls))
+
+    for req in sorted(REQUIRED_AXES):
+        if req not in declared_axis_ids:
+            errors.append("coverage model is missing required axis {!r}".format(req))
 
     def check_axis_refs(owner, refs):
         for ref in refs or []:
@@ -250,12 +305,16 @@ def check_coverage_model(model, suite_ids, component_dir):
                 errors.append("{} axis ref {!r} is not a declared axis.class".format(owner, ref))
 
     def check_inventory_refs(owner, refs):
+        nonlocal refs_ok
         for ref in refs or []:
             if ref not in suite_ids:
                 errors.append("{} references unknown inventory id {!r}".format(owner, ref))
+            else:
+                refs_ok += 1
 
     seen_class_ids = set()
-    for cls in cm.get("classes", []) or []:
+    classes = cm.get("classes", []) or []
+    for cls in classes:
         cid = cls.get("id", "<no-id>")
         if cid in seen_class_ids:
             errors.append("duplicate coverage class id: {!r}".format(cid))
@@ -263,6 +322,8 @@ def check_coverage_model(model, suite_ids, component_dir):
         missing = REQUIRED_CLASS_KEYS - set(cls.keys())
         if missing:
             errors.append("class {!r} missing keys: {}".format(cid, sorted(missing)))
+        if "owner" in cls and not _nonempty_str(cls.get("owner")):
+            errors.append("class {!r} owner must be a non-empty string".format(cid))
         check_axis_refs("class {!r}".format(cid), cls.get("axes"))
         check_inventory_refs("class {!r}".format(cid), cls.get("current_inventory"))
         for ev in cls.get("evidence", []) or []:
@@ -271,7 +332,9 @@ def check_coverage_model(model, suite_ids, component_dir):
             rel = ev.get("path")
             if not isinstance(rel, str) or rel.startswith(EXTERNAL_MARKER):
                 continue
-            if not _path_exists(component_dir, rel):
+            if _path_exists(component_dir, rel):
+                refs_ok += 1
+            else:
                 errors.append("class {!r} evidence path missing: {}".format(cid, rel))
         incident_refs.update(_collect_incident_refs(cls))
 
@@ -288,7 +351,7 @@ def check_coverage_model(model, suite_ids, component_dir):
         check_inventory_refs("pairwise {!r}".format(pid), pc.get("current_inventory"))
         incident_refs.update(_collect_incident_refs(pc))
 
-    return errors, incident_refs
+    return errors, incident_refs, {"classes": len(classes), "refs": refs_ok}
 
 
 def _collect_incident_refs(obj):
@@ -303,6 +366,15 @@ def _collect_incident_refs(obj):
         for item in obj:
             refs.update(_collect_incident_refs(item))
     return refs
+
+
+def _incident_sections(text):
+    """Yield (incident_id, section_text) for each ## TI-NNN: heading."""
+    matches = list(_INCIDENT_HEADING_RE.finditer(text))
+    for index, match in enumerate(matches):
+        start = match.start()
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
+        yield match.group(1), text[start:end]
 
 
 def defined_incident_ids(incidents_path, errors):
@@ -324,30 +396,114 @@ def check_incident_refs(refs, defined):
     return errors
 
 
-def check_markdown_links(md_path):
-    """Every relative Markdown link in md_path must resolve on disk."""
+def check_incident_fields(incidents_path):
+    """Every defined incident must carry the required labelled fields."""
     errors = []
-    path = Path(md_path)
+    path = Path(incidents_path)
     if not path.exists():
-        return ["markdown doc not found: {}".format(path)]
-    base = path.resolve().parent
+        # Missing-file diagnosis is already reported by defined_incident_ids.
+        return errors
     text = path.read_text(encoding="utf-8")
-    for target in _MD_LINK_RE.findall(text):
-        target = target.strip()
-        if not target or target.startswith(_SKIP_LINK_PREFIXES):
-            continue
-        local = target.split("#", 1)[0]
-        if not local:
-            continue
-        if not (base / local).resolve().exists():
-            errors.append("{}: broken local link: {}".format(path.name, target))
+    for incident_id, section in _incident_sections(text):
+        for label in REQUIRED_INCIDENT_LABELS:
+            # Labels are authored in bold, e.g. ``**Finding.**`` / ``**Control.**``.
+            if not re.search(r"\*\*\s*" + re.escape(label) + r"\b", section):
+                errors.append(
+                    "incident {} is missing the {!r} field".format(incident_id, label))
     return errors
 
 
-def validate(inventory_path, coverage_path, incidents_path, restructuring_path):
-    """Run every check. Returns a dict of category -> sorted error list."""
+def _heading_anchors(md_path, cache):
+    """Return the set of GitHub-style heading slugs for a Markdown file."""
+    resolved = Path(md_path).resolve()
+    if resolved in cache:
+        return cache[resolved]
+    anchors = set()
+    if resolved.exists():
+        text = resolved.read_text(encoding="utf-8")
+        for heading in _HEADING_RE.findall(text):
+            anchors.add(_slugify(heading))
+    cache[resolved] = anchors
+    return anchors
+
+
+def _slugify(heading_text):
+    """Approximate GitHub's heading-to-anchor slug.
+
+    Lowercase, drop any character that is not a word character, whitespace, or
+    hyphen (this strips Markdown punctuation such as backticks and colons), then
+    collapse whitespace runs to single hyphens.
+    """
+    text = heading_text.strip().lower()
+    text = re.sub(r"[^\w\s-]", "", text)
+    text = re.sub(r"\s+", "-", text)
+    return text
+
+
+def check_markdown_links(md_path, anchors_cache):
+    """Validate relative links and in-page anchors in md_path.
+
+    Returns (errors, refs_ok). External http(s)/mailto URLs are preserved and
+    not existence-checked. Fragment anchors are resolved against the headings of
+    the target Markdown document (the file itself for fragment-only links).
+    """
+    errors = []
+    refs_ok = 0
+    path = Path(md_path)
+    if not path.exists():
+        return ["markdown doc not found: {}".format(path)], 0
+    base = path.resolve().parent
+    text = path.read_text(encoding="utf-8")
+    for raw in _MD_LINK_RE.findall(text):
+        target = raw.strip()
+        if not target or target.startswith(_EXTERNAL_LINK_PREFIXES):
+            # Preserve external URLs: not existence-checked.
+            continue
+        local, _, fragment = target.partition("#")
+
+        if local:
+            resolved = (base / local).resolve()
+            if not resolved.exists():
+                errors.append("{}: broken local link: {}".format(path.name, target))
+                continue
+            refs_ok += 1
+            anchor_source = resolved
+        else:
+            # Fragment-only link refers to a heading in this same document.
+            anchor_source = path.resolve()
+
+        if fragment:
+            # Only Markdown documents expose heading anchors we can validate.
+            if str(anchor_source).endswith(".md"):
+                if fragment in _heading_anchors(anchor_source, anchors_cache):
+                    refs_ok += 1
+                else:
+                    errors.append(
+                        "{}: broken anchor: {}".format(path.name, target))
+    return errors, refs_ok
+
+
+def validate(root=None, inventory_path=None, coverage_path=None,
+             testing_path=None, incidents_path=None, restructuring_path=None):
+    """Run every check.
+
+    Document locations default to ``root`` (or the component directory alongside
+    this script when root is None); any per-document override takes precedence.
+
+    Returns (results, counts) where results maps category -> sorted error list
+    and counts carries the summary totals.
+    """
+    base_root = Path(root) if root is not None else HIP_TESTS_DIR
+    inventory_path = inventory_path or (base_root / INVENTORY_NAME)
+    coverage_path = coverage_path or (base_root / COVERAGE_NAME)
+    testing_path = testing_path or (base_root / TESTING_NAME)
+    incidents_path = incidents_path or (base_root / INCIDENTS_NAME)
+    restructuring_path = restructuring_path or (base_root / RESTRUCTURING_NAME)
+
     component_dir = Path(inventory_path).resolve().parent
     results = {}
+    counts = {"inventory_records": 0, "coverage_classes": 0,
+              "validated_references": 0}
 
     load_errors = []
     inventory = _load_yaml(inventory_path, load_errors)
@@ -356,45 +512,63 @@ def validate(inventory_path, coverage_path, incidents_path, restructuring_path):
 
     suite_ids = set()
     incident_refs = set()
+    refs_total = 0
 
     if inventory is not None:
-        inv_errors, suite_ids, inv_refs = check_inventory(inventory, component_dir)
+        inv_errors, suite_ids, inv_refs, inv_counts = check_inventory(
+            inventory, component_dir)
         results["inventory"] = sorted(inv_errors)
         incident_refs |= inv_refs
+        counts["inventory_records"] = inv_counts["records"]
+        refs_total += inv_counts["refs"]
     else:
         results["inventory"] = ["inventory not loaded"]
 
     if coverage is not None:
-        cov_errors, cov_refs = check_coverage_model(coverage, suite_ids, component_dir)
+        cov_errors, cov_refs, cov_counts = check_coverage_model(
+            coverage, suite_ids, component_dir)
         results["coverage_model"] = sorted(cov_errors)
         incident_refs |= cov_refs
+        counts["coverage_classes"] = cov_counts["classes"]
+        refs_total += cov_counts["refs"]
     else:
         results["coverage_model"] = ["coverage model not loaded"]
 
     incident_errors = []
     defined = defined_incident_ids(incidents_path, incident_errors)
-    incident_errors.extend(check_incident_refs(incident_refs, defined))
+    ref_errors = check_incident_refs(incident_refs, defined)
+    incident_errors.extend(ref_errors)
+    incident_errors.extend(check_incident_fields(incidents_path))
     results["incidents"] = sorted(incident_errors)
+    # Count incident references that resolved to a defined incident.
+    refs_total += len([ref for ref in incident_refs if ref in defined])
 
+    anchors_cache = {}
     md_errors = []
-    md_errors.extend(check_markdown_links(incidents_path))
-    md_errors.extend(check_markdown_links(restructuring_path))
+    for md_path in (testing_path, incidents_path, restructuring_path):
+        errs, refs_ok = check_markdown_links(md_path, anchors_cache)
+        md_errors.extend(errs)
+        refs_total += refs_ok
     results["markdown_links"] = sorted(md_errors)
 
-    return results
+    counts["validated_references"] = refs_total
+    return results, counts
 
 
-def _print_summary(results):
+_SUMMARY_KEYS = ("load", "inventory", "coverage_model", "incidents", "markdown_links")
+
+
+def _print_summary(results, counts):
     labels = {
         "load": "Document parse",
         "inventory": "Inventory schema / vocab / targets / paths",
-        "coverage_model": "Coverage model refs / paths",
-        "incidents": "Incident ID references",
-        "markdown_links": "Local Markdown links",
+        "coverage_model": "Coverage model refs / axes / paths",
+        "incidents": "Incident ID references and fields",
+        "markdown_links": "Local Markdown links and anchors",
     }
     print("HIP testing-docs consistency check")
     total = 0
-    for key in ("load", "inventory", "coverage_model", "incidents", "markdown_links"):
+    for key in _SUMMARY_KEYS:
         errs = results.get(key, [])
         total += len(errs)
         status = "OK" if not errs else "FAIL ({})".format(len(errs))
@@ -402,36 +576,51 @@ def _print_summary(results):
     print("")
     if total:
         print("Problems:")
-        for key in ("load", "inventory", "coverage_model", "incidents", "markdown_links"):
+        for key in _SUMMARY_KEYS:
             for err in results.get(key, []):
                 print("  - [{}] {}".format(key, err))
         print("")
         print("RESULT: FAIL - {} reference/consistency problem(s).".format(total))
     else:
         print("RESULT: OK - testing documents are internally consistent.")
+        print("  Inventory records:    {}".format(counts["inventory_records"]))
+        print("  Coverage classes:     {}".format(counts["coverage_classes"]))
+        print("  References validated:  {}".format(counts["validated_references"]))
 
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.strip().splitlines()[0])
-    parser.add_argument("--inventory", default=INVENTORY_PATH,
-                        help="path to test_inventory.yaml (default: component-relative)")
-    parser.add_argument("--coverage-model", default=COVERAGE_PATH,
-                        help="path to test_coverage_model.yaml (default: component-relative)")
-    parser.add_argument("--incidents", default=INCIDENTS_PATH,
-                        help="path to TESTING_INCIDENTS.md (default: component-relative)")
-    parser.add_argument("--restructuring", default=RESTRUCTURING_PATH,
-                        help="path to TEST_RESTRUCTURING.md (default: component-relative)")
+    parser.add_argument("--root", default=None,
+                        help="component/repository root holding the testing docs "
+                             "(default: the component directory alongside this script)")
+    parser.add_argument("--inventory", default=None,
+                        help="override path to test_inventory.yaml")
+    parser.add_argument("--coverage-model", default=None,
+                        help="override path to test_coverage_model.yaml")
+    parser.add_argument("--testing", default=None,
+                        help="override path to TESTING.md")
+    parser.add_argument("--incidents", default=None,
+                        help="override path to TESTING_INCIDENTS.md")
+    parser.add_argument("--restructuring", default=None,
+                        help="override path to TEST_RESTRUCTURING.md")
     parser.add_argument("--json", action="store_true",
                         help="emit the full result as JSON")
     args = parser.parse_args(argv)
 
-    results = validate(args.inventory, args.coverage_model,
-                       args.incidents, args.restructuring)
+    results, counts = validate(
+        root=args.root,
+        inventory_path=args.inventory,
+        coverage_path=args.coverage_model,
+        testing_path=args.testing,
+        incidents_path=args.incidents,
+        restructuring_path=args.restructuring,
+    )
 
     if args.json:
-        print(json.dumps(results, indent=2, sort_keys=True))
+        print(json.dumps({"results": results, "counts": counts},
+                         indent=2, sort_keys=True))
     else:
-        _print_summary(results)
+        _print_summary(results, counts)
 
     failed = any(results[key] for key in results)
     return 1 if failed else 0
