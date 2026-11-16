@@ -193,12 +193,9 @@ namespace RcclUnitTesting
     runLogLevelCase("LogLevelNumeric", "2", true);
   }
 
-  /**
-   * \brief Verify a numeric prefix of RCCL_LOG_LEVEL is kept, like other RCCL parameters
-   * ******************************************************************************************/
-  TEST(Recorder, LogLevelNumericPrefix)
+  TEST(Recorder, LogLevelNumericSuffixRejected)
   {
-    runLogLevelCase("LogLevelNumericPrefix", "2abc", true);
+    runLogLevelCase("LogLevelNumericSuffixRejected", "2abc", false);
   }
 
   /**

@@ -1550,9 +1550,9 @@
           "timeout": 60
         },
         {
-          "name": "Recorder.LogLevelNumericPrefix",
-          "description": "Recorder preserves a numeric log-level prefix",
-          "test_filter": "Recorder.LogLevelNumericPrefix",
+          "name": "Recorder.LogLevelNumericSuffixRejected",
+          "description": "Recorder rejects numeric log levels with trailing characters and keeps the default",
+          "test_filter": "Recorder.LogLevelNumericSuffixRejected",
           "timeout": 60
         },
         {

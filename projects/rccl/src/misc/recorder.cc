@@ -89,7 +89,7 @@ Recorder::Recorder() {
     errno = 0;
     char* end = nullptr;
     long long level = strtoll(levelStr, &end, 0);
-    if (errno || end == levelStr || level < INT_MIN || level > INT_MAX) {
+    if (errno || end == levelStr || *end != '\0' || level < INT_MIN || level > INT_MAX) {
       ATTN("Invalid value %s for RCCL_LOG_LEVEL, using default 1.", levelStr);
     } else {
       logLevel = static_cast<int>(level);

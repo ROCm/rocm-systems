@@ -14,6 +14,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <climits>
 #include <cstdarg>
 #include <cstdint>
 #include <cstdio>
@@ -306,14 +307,16 @@ TEST_F(RecorderMicrotest, FileName_WithoutExtensionIsBinary) {
   EXPECT_EQ(ReadFile(path_), "");
 }
 
-// RCCL_LOG_LEVEL parses like other params: a numeric prefix is kept, and a non-numeric, empty or out-of-range
-// value falls back to 1 instead of throwing.
-TEST_F(RecorderMicrotest, LogLevel_ParsesLikeOtherParams) {
+TEST_F(RecorderMicrotest, LogLevel_RequiresCompleteInRangeInteger) {
   const std::string file = Dir() + "/trace.json";
   const std::pair<const char*, int> cases[] = {
-      {"2", 2}, {"2abc", 2}, {"abc", 1}, {"", 1}, {"99999999999", 1}, {"-99999999999", 1}};
+      {nullptr, 1}, {"0", 0}, {"2", 2}, {"+2", 2}, {"-2", -2}, {"0x2", 2}, {"02", 2},
+      {"2147483647", INT_MAX}, {"-2147483648", INT_MIN},
+      {"2abc", 1}, {"2.5", 1}, {"2e3", 1}, {"2 3", 1}, {"2 ", 1}, {"abc", 1}, {"", 1},
+      {"2147483648", 1}, {"-2147483649", 1}, {"99999999999999999999999", 1},
+      {"-99999999999999999999999", 1}};
   for (const auto& [value, expected] : cases) {
-    SCOPED_TRACE(value);
+    SCOPED_TRACE(value ? value : "<unset>");
     EXPECT_EQ(Restart(file.c_str(), value).logLevel, expected);
   }
 }
