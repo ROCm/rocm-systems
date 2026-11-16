@@ -73,6 +73,7 @@ Settings::Settings() {
   // Use coarse grain system memory for kernel arguments by default (to keep GPU cache)
   fgs_kernel_arg_ = false;
   barrier_value_packet_ = false;
+  split_end_marker_ = false;
   ext_dispatch_packet_ = false;
   kernel_arg_impl_ = KernelArgImpl::HostKernelArgs;
   aql_device_ring_buf_ = false;
@@ -163,6 +164,10 @@ bool Settings::create(bool fullProfile, const amd::Isa& isa, bool enableXNACK, b
     barrier_value_packet_ = true;
     queue_pipe_dist_ = dynamic_queues_ >= 1;
   }
+  // The split end marker resolves up to one wait on a barrier-value packet. On gfx12+ its second
+  // signal-completing barrier on the launch queue costs more GPU time than the split saves the
+  // other queues
+  split_end_marker_ = barrier_value_packet_ && (gfxipMajor < 12);
 
   if ((gfxipMajor == 9 && gfxipMinor >= 4) ||
       (gfxipMajor == 12 && gfxipMinor >= 5)) {

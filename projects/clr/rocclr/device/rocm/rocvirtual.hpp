@@ -1014,6 +1014,16 @@ class VirtualGPU : public device::VirtualDevice {
                                   hsa_signal_condition32_t cond = HSA_SIGNAL_CONDITION_EQ,
                                   bool skipTs = false,
                                   hsa_signal_t completionSignal = hsa_signal_t{0});
+  //! Places the pending waits on the packet that resolves them: two to five in a barrier-AND's
+  //! dep_signal (DEBUG_CLR_GRAPH_FAST_LAUNCH), any other number in a barrier-value packet, with nop
+  //! barriers ahead of it for the waits past the first. Returns true for the barrier-AND.
+  bool PlaceBarrierWaits(hsa_amd_barrier_value_packet_t& value_packet,
+                         hsa_barrier_and_packet_t& and_packet);
+  //! Submits a split graph end marker, the packet resolving the waits and the nop barrier with
+  //! the interrupt signal, in one slot reservation with one doorbell: a second reservation's
+  //! locked compare-and-swap would wait for the first packet's ring and doorbell stores to land.
+  //! Returns the first packet's signal.
+  ProfilingSignal* dispatchSplitEndMarker();
   //! True if a barrier of the current command needs timestamps: a timed event record, or a
   //! command created under queue or activity profiling
   bool BarrierTimestamps() const;
