@@ -1690,3 +1690,50 @@ suites:
     history: Historical origin not located in available change history; this suite is a standalone Python workflow static check (catch/tools/gen_test_plan.py --check), not CMake-wired, invoked by the .github/workflows/hip-contract-coverage.yml contract-coverage job as recorded in this inventory's evidence.
     disposition: keep
     disposition_rationale: The test-plan staleness check keeps the generated inventory honest and is defined in-repo; retained.
+
+  # ---------------------------------------------------------------------------
+  # Host/harness tier: the HipTestLevel* executables validate the test harness
+  # itself (HIP_TEST_LEVEL selection and the abort-on-invalid-level guard) rather
+  # than any HIP device API. They are registered through hip_add_host_test in
+  # catch/hipTestMain/tests/CMakeLists.txt (LABELS hosttest) and built under the
+  # build_tests aggregate when the hipTestMain subdirectory is added - which
+  # catch/CMakeLists.txt does whenever any of the unit/contract/perf/stress test
+  # groups is enabled. They need no GPU to run.
+  # ---------------------------------------------------------------------------
+  - id: harness-test-level
+    owner: HIP Runtime - Test Harness
+    name: HIP test-harness level-selection host tests
+    kind: unit
+    domain: test_harness
+    purpose: Host-side validation of the catch harness HIP_TEST_LEVEL selection logic and the abort-on-invalid-level guard, so an unparseable or unsupported level fails fast instead of silently running the wrong cases.
+    oracle: Return code and Catch2 assertions for the level-resolution cases; for the abort case, the process aborts with the "is not a supported level" diagnostic and never runs the guarded body (PASS/FAIL regular expressions on the registered ctest).
+    source:
+      paths:
+        - catch/hipTestMain/tests
+      build_option: BUILD_UNIT_TESTS OR BUILD_CONTRACT_TESTS OR BUILD_PERF_TESTS OR BUILD_STRESS_TESTS (hipTestMain is added by catch/CMakeLists.txt when any test group is enabled)
+      build_target: build_tests
+      executable_pattern: HipTestLevelUnitTest and HipTestLevelAbortTest, each registered via hip_add_host_test in catch/hipTestMain/tests/CMakeLists.txt.
+    metadata:
+      framework: Catch2
+      config: catch/hipTestMain/tests/CMakeLists.txt
+    execution:
+      cadence: pr
+      gating: trusted
+      ctest_labels: [hosttest]
+      platforms: [linux, windows, wsl]
+      backends: [amd, nvidia]
+      prerequisites: [HIP test-harness build; no GPU or device required]
+      ci_lane:
+        external: Built under the build_tests aggregate and discovered as 'hosttest'-labelled ctest cases where the HIP test harness is exercised; see TESTING.md "Pre-submit and CI gates".
+    evidence:
+      - path: catch/hipTestMain/tests/CMakeLists.txt
+        claim: HipTestLevelUnitTest and HipTestLevelAbortTest are registered via hip_add_host_test with LABELS hosttest; the abort test asserts the "is not a supported level" diagnostic and that the guarded body never runs.
+      - path: catch/CMakeLists.txt
+        claim: hipTestMain (which add_subdirectory(tests) wires in) is built when any of BUILD_UNIT_TESTS, BUILD_CONTRACT_TESTS, BUILD_PERF_TESTS, or BUILD_STRESS_TESTS is enabled.
+      - path: catch/hipTestMain/CMakeLists.txt
+        claim: add_subdirectory(tests) registers the host-test executables under hipTestMain.
+      - path: catch/hipTestMain/hip_test_level.cc
+        claim: The level-resolution logic the HipTestLevelUnitTest exercises lives here and is compiled into both host-test executables.
+    history: Repository evidence records these as host-side harness tests of the HIP_TEST_LEVEL selection and abort paths, registered through hip_add_host_test in catch/hipTestMain/tests/CMakeLists.txt and built under build_tests via the hipTestMain subdirectory (catch/CMakeLists.txt); they guard the harness's own level contract rather than any device API.
+    disposition: keep
+    disposition_rationale: These host tests are the only coverage of the harness HIP_TEST_LEVEL selection and abort-on-invalid-level behavior; retained as the harness's self-contract.

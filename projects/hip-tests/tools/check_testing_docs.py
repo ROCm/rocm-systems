@@ -404,6 +404,20 @@ EXTERNAL_MARKER = "external:"
 # but carries no inventory suite is surfaced rather than silently uncovered.
 CMAKE_RECONCILIATION_AREAS = ("unit", "contract", "performance", "stress")
 
+# The CMakeLists that registers the host-side harness tests (built through
+# ``hip_add_host_test`` and labelled ``hosttest``). These executables are not
+# under a per-area ``add_subdirectory`` group, so they are reconciled separately:
+# when this file actively registers host tests, the inventory must carry a
+# host/harness suite whose ``source.paths`` covers the registering directory.
+HOSTTEST_CMAKE_REL = ("catch", "hipTestMain", "tests", "CMakeLists.txt")
+HOSTTEST_GROUP_DIR = "catch/hipTestMain/tests"
+
+# A ``hip_add_host_test(<TARGET> ...)`` registration naming the host-test
+# executable as its first argument. Matched case-insensitively with an optional
+# leading double quote, mirroring ``_ADD_SUBDIRECTORY_RE``.
+_HIP_ADD_HOST_TEST_RE = re.compile(
+    r"\bhip_add_host_test\s*\(\s*\"?([A-Za-z0-9_.+\-]+)", re.IGNORECASE)
+
 # An ``add_subdirectory(<group>)`` call naming the group as its first token.
 # CMake commands are case-insensitive (``ADD_SUBDIRECTORY`` is the same command),
 # so the match is case-insensitive; whitespace - including a newline - is allowed
@@ -414,8 +428,22 @@ CMAKE_RECONCILIATION_AREAS = ("unit", "contract", "performance", "stress")
 # ``_active_cmake_groups`` scanner strips line comments first so a
 # ``#add_subdirectory(gcc)`` is treated as an inactive (not-built) group rather
 # than an active one that must be represented.
+#
+# A quoted directory argument (``add_subdirectory("unit")``) is also accepted:
+# CMake treats a quoted argument the same as an unquoted one, so an optional
+# leading double quote is skipped before the group token is captured (the closing
+# quote is simply not part of the token).
 _ADD_SUBDIRECTORY_RE = re.compile(
-    r"\badd_subdirectory\s*\(\s*([A-Za-z0-9_.+\-]+)", re.IGNORECASE)
+    r"\badd_subdirectory\s*\(\s*\"?([A-Za-z0-9_.+\-]+)", re.IGNORECASE)
+
+# A CMake bracket comment ``#[[ ... ]]`` (optionally with equals signs in the
+# delimiter, ``#[=[ ... ]=]``) is a block comment that may span several physical
+# lines. Line-comment stripping alone would miss it - an ``add_subdirectory``
+# sitting inside a bracket comment is NOT an active group - so bracket comments
+# are masked out (content replaced by spaces, newlines preserved) before line
+# comments are stripped. The ``(?s)`` flag lets ``.`` cross newlines; the ``\1``
+# back-reference pairs the closing ``]=*]`` to the opening ``[=*[``.
+_CMAKE_BRACKET_COMMENT_RE = re.compile(r"#\[(=*)\[.*?\]\1\]", re.DOTALL)
 
 # The reasons a built CMake suite group may legitimately carry no inventory
 # suite. A documented exclusion must name one of these so the allowance is an
@@ -1132,6 +1160,20 @@ def check_inventory(inventory, component_dir, repo_root=None):
                         refs_ok += 1
                     else:
                         errors.append("suite {!r} source path missing: {}".format(sid, rel))
+            # The source block must also name how the suite is wired into the
+            # build: ``build_option`` is the CMake switch that enables it and
+            # ``build_target`` is the aggregate target it builds under. These are
+            # the facts CMake reconciliation and a reader tracing a suite back to
+            # its CMakeLists both rely on, so a present-but-empty or non-string
+            # value (or outright absence) is a schema error.
+            for field in ("build_option", "build_target"):
+                if field not in source:
+                    errors.append(
+                        "suite {!r} source is missing required {!r}".format(sid, field))
+                elif not _nonempty_str(source.get(field)):
+                    errors.append(
+                        "suite {!r} source.{} must be a non-empty string".format(
+                            sid, field))
         elif "source" in suite:
             errors.append("suite {!r} source is not a mapping".format(sid))
 
@@ -1262,32 +1304,54 @@ def check_inventory(inventory, component_dir, repo_root=None):
     return errors, suite_ids, incident_refs, {"records": len(suites), "refs": refs_ok}
 
 
-def _active_cmake_groups(cmake_path):
-    """Return the list of group names a CMakeLists.txt actively builds.
+def _strip_cmake_comments(cmake_path):
+    """Return a CMakeLists' text with all comments removed, offsets by line kept.
 
-    Each ``add_subdirectory(<group>)`` names an active group. CMake commands are
-    case-insensitive and may span several physical lines (the group name can sit
-    on the line after the opening paren), so the file's line comments are
-    stripped first and the comment-free text is then scanned as a whole with a
-    case-insensitive regex whose inter-token ``\\s*`` spans newlines. A line
-    comment is everything from the first ``#`` to end of line, so a fully
-    commented-out call (``#add_subdirectory(gcc)``) and an inline trailing
-    ``# ...`` comment both contribute nothing - a deliberately disabled group is
-    treated as not-built rather than as an active group that must be represented
-    by an inventory suite.
+    CMake commands are case-insensitive and may span several physical lines, so a
+    caller scans the comment-free text as a whole. A bracket comment
+    (``#[[ ... ]]`` / ``#[=[ ... ]=]``) is masked out first - it may itself span
+    lines - then a line comment (everything from the first ``#`` to end of line)
+    is dropped from each line. A fully commented-out call, an inline trailing
+    ``# ...`` comment, and a bracketed block comment therefore all contribute
+    nothing to the scanned text.
     """
+    masked = _CMAKE_BRACKET_COMMENT_RE.sub(
+        lambda m: _blank_like(m.group(0)), cmake_path.read_text(encoding="utf-8"))
     cleaned = []
-    for line in cmake_path.read_text(encoding="utf-8").splitlines():
-        # Drop a line comment (first ``#`` to end of line) before joining, so a
-        # commented call or an inline comment never registers a group - the same
-        # comment handling the previous line-by-line scan gave, now preserved
-        # across a multiline command.
+    for line in masked.splitlines():
         hash_index = line.find("#")
         if hash_index != -1:
             line = line[:hash_index]
         cleaned.append(line)
-    text = "\n".join(cleaned)
+    return "\n".join(cleaned)
+
+
+def _active_cmake_groups(cmake_path):
+    """Return the list of group names a CMakeLists.txt actively builds.
+
+    Each ``add_subdirectory(<group>)`` names an active group. The comment-free
+    text (see ``_strip_cmake_comments``) is scanned with a case-insensitive regex
+    whose inter-token ``\\s*`` spans newlines, so a call split across physical
+    lines is still recognized and a deliberately disabled (commented) group is
+    treated as not-built rather than an active group that must be represented by
+    an inventory suite.
+    """
+    text = _strip_cmake_comments(cmake_path)
     return [match.group(1) for match in _ADD_SUBDIRECTORY_RE.finditer(text)]
+
+
+def _active_host_test_targets(cmake_path):
+    """Return the host-test executables a CMakeLists registers via hip_add_host_test.
+
+    Each ``hip_add_host_test(<TARGET> ...)`` registers a host-side harness test
+    (labelled ``hosttest``) built under the ``build_tests`` aggregate target.
+    These executables live outside the per-area add_subdirectory groups, so they
+    are enumerated separately and reconciled against a host/harness inventory
+    record. Comments are stripped the same way as for group scanning, so a
+    commented-out registration contributes nothing.
+    """
+    text = _strip_cmake_comments(cmake_path)
+    return [match.group(1) for match in _HIP_ADD_HOST_TEST_RE.finditer(text)]
 
 
 def _represented_group_dirs(inventory):
@@ -1407,6 +1471,28 @@ def check_cmake_reconciliation(inventory, component_dir):
                 "active CMake suite group {!r} is not represented by any "
                 "inventory suite (add a suite whose source.paths covers it, or "
                 "document it under cmake_suite_group_exclusions)".format(group_dir))
+
+    # Host-side harness tests are registered through ``hip_add_host_test`` in a
+    # dedicated CMakeLists rather than a per-area add_subdirectory group, so they
+    # are reconciled on their own: when that file actively registers host-test
+    # executables, the inventory must carry a host/harness suite whose
+    # source.paths covers the registering directory. An unrepresented host test
+    # is the same silent coverage hole the group reconciliation guards against,
+    # and is reported (naming the executables) unless the registering directory
+    # is documented under cmake_suite_group_exclusions.
+    host_cmake = component_dir.joinpath(*HOSTTEST_CMAKE_REL)
+    if host_cmake.is_file():
+        host_targets = _active_host_test_targets(host_cmake)
+        if (host_targets
+                and not _group_is_represented(HOSTTEST_GROUP_DIR, represented)
+                and HOSTTEST_GROUP_DIR not in excluded):
+            errors.append(
+                "active host-test executable(s) {} registered via hip_add_host_test "
+                "under {} are not represented by any inventory suite (add a "
+                "host/harness suite whose source.paths covers {!r}, or document it "
+                "under cmake_suite_group_exclusions)".format(
+                    ", ".join(sorted(host_targets)),
+                    "/".join(HOSTTEST_CMAKE_REL), HOSTTEST_GROUP_DIR))
     return errors
 
 
@@ -2046,15 +2132,35 @@ def _strip_citation_marker(token):
     return token, False
 
 
+def _scan_commit_hashes(text):
+    """Yield (hash, marked) for every commit-like hash occurrence in text.
+
+    A mandatory hex run (group 2) means a lone ``external:`` with no following
+    hash matches nothing, so marker prose is not mistaken for a citation. An
+    ``external:``/``unverified:`` marker that immediately precedes the hash
+    (group 1) flags that occurrence as preserved.
+    """
+    for match in re.finditer(
+            r"(external:|unverified:)?\s*\b([0-9a-f]{7,40})\b",
+            text, re.IGNORECASE):
+        yield match.group(2), bool(match.group(1))
+
+
 def _iter_origin_commit_citations(origin):
     """Yield (token, marked) for every commit-like citation in an Origin value.
 
     Both backtick-quoted citations (``Landed in `0d90b30fb6c```) and bare,
     unquoted hashes (``Landed in 0d90b30fb6c``) are yielded, so dropping the
-    backticks cannot let a fabricated hash evade validation. For a bare hash an
-    ``external:``/``unverified:`` marker that immediately precedes it marks it as
-    preserved. The quoted spans are blanked (offsets preserved) before the bare
-    scan so a hash is never yielded twice.
+    backticks cannot let a fabricated hash evade validation. A backticked span is
+    not treated as an opaque token: a *descriptive* span such as
+    ``commit deadbee1`` is scanned for hash occurrences too, so a fabricated hash
+    wrapped in prose-bearing backticks is still validated. An
+    ``external:``/``unverified:`` marker is honored two ways - when it opens the
+    span (``external: 0d90b30fb6c`` / ``external: commit deadbee1``) it preserves
+    every hash the span carries, and when it immediately precedes a hash (in a
+    span or in the bare text) it preserves that single occurrence. The quoted
+    spans are blanked (offsets preserved) before the bare scan so a hash is never
+    yielded twice.
     """
     quoted = []
 
@@ -2064,15 +2170,12 @@ def _iter_origin_commit_citations(origin):
 
     remainder = re.sub(r"`([^`]+)`", _blank, origin)
     for span in quoted:
-        token, marked = _strip_citation_marker(span.strip())
+        body, span_marked = _strip_citation_marker(span.strip())
+        for token, marked in _scan_commit_hashes(body):
+            yield token, marked or span_marked
+    # Bare citations: a marker may immediately precede the hash.
+    for token, marked in _scan_commit_hashes(remainder):
         yield token, marked
-    # Bare citations: a marker may immediately precede the hash. A mandatory hex
-    # run (group 2) means a lone ``external:`` with no following hash matches
-    # nothing, so marker prose is not mistaken for a citation.
-    for match in re.finditer(
-            r"(external:|unverified:)?\s*\b([0-9a-f]{7,40})\b",
-            remainder, re.IGNORECASE):
-        yield match.group(2), bool(match.group(1))
 
 
 def check_incident_origin_citations(incidents_path):
@@ -2203,6 +2306,32 @@ def _strip_link_title(target):
     return stripped
 
 
+def _normalize_ref_label(label):
+    """Return a CommonMark-normalized reference label for matching.
+
+    CommonMark matches reference labels after stripping leading/trailing
+    whitespace, collapsing every internal whitespace run (including newlines) to a
+    single space, and case-folding. So ``[Known Gaps]`` and ``[known   gaps]``
+    (and a label whose whitespace is split across a line break) name the same
+    definition; without the internal collapse a cosmetic whitespace difference
+    would wrongly read as two distinct labels.
+    """
+    return re.sub(r"\s+", " ", label.strip()).lower()
+
+
+def _unescape_md(text):
+    """Resolve CommonMark backslash escapes in a link destination or label.
+
+    CommonMark lets any ASCII-punctuation character be backslash-escaped; the
+    backslash is then not literal and the punctuation stands for itself. A
+    destination that escapes a parenthesis (``file\\(1\\).md``) must therefore
+    resolve to the real on-disk path, not to a path with the backslashes
+    embedded. A backslash before any non-punctuation character (a space, a
+    letter) is itself literal and is kept, matching CommonMark exactly.
+    """
+    return re.sub(r"\\([!-/:-@\[-`{-~])", r"\1", text)
+
+
 def _opener_is_escaped(text, index):
     """True when the Markdown opener ``[`` at ``index`` is backslash-escaped.
 
@@ -2298,6 +2427,11 @@ def _check_link_target(doc_name, base, doc_resolved, target, anchors_cache,
         # Preserve external URLs: not existence-checked.
         return errors, refs_ok
     local, _, fragment = target.partition("#")
+    # Resolve CommonMark backslash escapes so a destination that escapes ASCII
+    # punctuation (``file\(1\).md``) resolves to the real on-disk path rather
+    # than failing with the backslashes embedded.
+    local = _unescape_md(local)
+    fragment = _unescape_md(fragment)
     if local:
         if Path(local).is_absolute():
             errors.append(
@@ -2497,7 +2631,7 @@ def check_markdown_links(md_path, anchors_cache, boundary_root=None):
     # is reported rather than silently overwriting it.
     definitions = {}
     for match in _MD_REF_DEF_RE.finditer(text):
-        label = match.group(1).strip().lower()
+        label = _normalize_ref_label(match.group(1))
         if label in definitions:
             errors.append(
                 "{}: duplicate reference-style link definition [{}] "
@@ -2527,7 +2661,7 @@ def check_markdown_links(md_path, anchors_cache, boundary_root=None):
         if _opener_is_escaped(text, match.start()):
             continue
         text_part, label_part = match.group(1), match.group(2)
-        label = (label_part.strip() or text_part.strip()).lower()
+        label = _normalize_ref_label(label_part if label_part.strip() else text_part)
         used_labels.add(label)
         if label not in definitions:
             errors.append(

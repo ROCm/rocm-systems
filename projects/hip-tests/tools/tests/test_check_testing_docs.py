@@ -55,6 +55,8 @@ suites:
     source:
       paths:
         - "external: outside-this-repo"
+      build_option: BUILD_CONTRACT_TESTS
+      build_target: contract_tests
     metadata:
       framework: Catch2
     execution:
@@ -208,6 +210,8 @@ RETIRE_SUITE = """\
     source:
       paths:
         - "external: outside-this-repo"
+      build_option: BUILD_CONTRACT_TESTS
+      build_target: contract_tests
     metadata:
       framework: Catch2
     execution:
@@ -451,6 +455,43 @@ class CheckTestingDocsTest(unittest.TestCase):
         results, _ = checker.validate(root=str(self.root))
         self.assertTrue(
             any("evidence entry missing a claim" in err
+                for err in results["inventory"]),
+            msg=results["inventory"],
+        )
+
+    def test_source_missing_build_option_is_reported(self):
+        # The source block must name the CMake switch that enables the suite; a
+        # missing build_option is a schema error.
+        broken = VALID_INVENTORY.replace(
+            "      build_option: BUILD_CONTRACT_TESTS\n", "", 1)
+        _write_docs(self.root, {"test_inventory.yaml": broken})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("source is missing required 'build_option'" in err
+                for err in results["inventory"]),
+            msg=results["inventory"],
+        )
+
+    def test_source_missing_build_target_is_reported(self):
+        broken = VALID_INVENTORY.replace(
+            "      build_target: contract_tests\n", "", 1)
+        _write_docs(self.root, {"test_inventory.yaml": broken})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("source is missing required 'build_target'" in err
+                for err in results["inventory"]),
+            msg=results["inventory"],
+        )
+
+    def test_source_blank_build_option_is_reported(self):
+        # A present-but-empty build_option names no switch and is a schema error.
+        broken = VALID_INVENTORY.replace(
+            "      build_option: BUILD_CONTRACT_TESTS\n",
+            '      build_option: ""\n', 1)
+        _write_docs(self.root, {"test_inventory.yaml": broken})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("source.build_option must be a non-empty string" in err
                 for err in results["inventory"]),
             msg=results["inventory"],
         )
@@ -1352,6 +1393,20 @@ class CheckTestingDocsTest(unittest.TestCase):
             msg=results["markdown_links"],
         )
 
+    # -- inline link with CommonMark backslash-escaped destination ------------
+
+    def test_markdown_link_escaped_parenthesis_destination_resolves(self):
+        # CommonMark lets a destination escape ASCII punctuation such as
+        # parentheses (``file\(1\).yaml``); the escapes are resolved before the
+        # path is looked up so the link points at the real on-disk file instead
+        # of failing with the backslashes embedded.
+        (self.root / "file(1).yaml").write_text("# placeholder\n", encoding="utf-8")
+        linked = VALID_TESTING.replace(
+            "(test_inventory.yaml)", "(file\\(1\\).yaml)")
+        _write_docs(self.root, {"TESTING.md": linked})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertEqual(results["markdown_links"], [], msg=results["markdown_links"])
+
     # -- inline link with balanced parentheses in destination / title --------
 
     def test_markdown_link_with_parenthesized_destination_resolves(self):
@@ -1665,6 +1720,22 @@ class CheckTestingDocsTest(unittest.TestCase):
             "See [test_inventory.yaml][].\n\n"
             "## Known gaps\n\nBody.\n\n"
             "[test_inventory.yaml]: test_inventory.yaml\n"
+        )
+        _write_docs(self.root, {"TESTING.md": testing})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertEqual(
+            results["markdown_links"], [], msg=results["markdown_links"])
+
+    def test_reference_style_label_internal_whitespace_normalized(self):
+        # CommonMark collapses internal whitespace in a reference label, so a
+        # usage and a definition that differ only in internal spacing name the
+        # same label and resolve - neither "no matching definition" nor the
+        # definition reported as "never used".
+        testing = (
+            "# Testing Strategy\n\n"
+            "See the [the inventory][big   label].\n\n"
+            "## Known gaps\n\nBody.\n\n"
+            "[big label]: test_inventory.yaml\n"
         )
         _write_docs(self.root, {"TESTING.md": testing})
         results, _ = checker.validate(root=str(self.root))
@@ -2658,6 +2729,110 @@ class CheckTestingDocsTest(unittest.TestCase):
             msg=results.get("cmake_reconciliation"),
         )
 
+    def test_cmake_quoted_add_subdirectory_is_recognized(self):
+        # A quoted directory argument (add_subdirectory("memory")) names the same
+        # active group as the unquoted form and must be reconciled identically.
+        self._write_cmake_area("unit", 'add_subdirectory("memory")\n')
+        errors = checker.check_cmake_reconciliation(
+            self._recon_inventory(paths=[]), str(self.root))
+        self.assertTrue(
+            any("catch/unit/memory" in err and "not represented" in err
+                for err in errors),
+            msg=errors)
+
+    def test_cmake_bracket_comment_group_is_not_required(self):
+        # An add_subdirectory inside a CMake bracket comment (#[[ ... ]]), even
+        # one spanning several lines, is commented out and must not register as an
+        # active group that needs a suite.
+        self._write_cmake_area(
+            "unit",
+            "#[[\n"
+            "add_subdirectory(gcc)\n"
+            "disabled block\n"
+            "]]\n"
+            "add_subdirectory(memory)\n")
+        errors = checker.check_cmake_reconciliation(
+            self._recon_inventory(paths=["catch/unit/memory"]), str(self.root))
+        self.assertEqual(errors, [], msg=errors)
+
+    # -- final fix: host-test (hip_add_host_test) reconciliation --------------
+
+    def _write_host_cmake(self, body):
+        """Write catch/hipTestMain/tests/CMakeLists.txt under the temp root."""
+        host_dir = self.root / "catch" / "hipTestMain" / "tests"
+        host_dir.mkdir(parents=True, exist_ok=True)
+        (host_dir / "CMakeLists.txt").write_text(body, encoding="utf-8")
+
+    def test_hosttest_unrepresented_is_reported(self):
+        # A host-test executable registered via hip_add_host_test with no covering
+        # inventory suite is a silent coverage hole and is reported, naming it.
+        self._write_host_cmake(
+            "hip_add_host_test(HipTestLevelUnitTest)\n"
+            "hip_add_host_test(HipTestLevelAbortTest ENVIRONMENT HIP_TEST_LEVEL=x)\n")
+        errors = checker.check_cmake_reconciliation(
+            self._recon_inventory(paths=[]), str(self.root))
+        self.assertTrue(
+            any("HipTestLevelUnitTest" in err and "HipTestLevelAbortTest" in err
+                and "hip_add_host_test" in err and "not represented" in err
+                for err in errors),
+            msg=errors)
+
+    def test_hosttest_represented_passes(self):
+        # A host/harness suite whose source.paths covers catch/hipTestMain/tests
+        # represents the registered host tests; no report.
+        self._write_host_cmake("hip_add_host_test(HipTestLevelUnitTest)\n")
+        errors = checker.check_cmake_reconciliation(
+            self._recon_inventory(paths=["catch/hipTestMain/tests"]),
+            str(self.root))
+        self.assertEqual(errors, [], msg=errors)
+
+    def test_hosttest_represented_by_path_beneath_passes(self):
+        # A source path naming a file beneath the host-test directory represents it.
+        self._write_host_cmake("hip_add_host_test(HipTestLevelUnitTest)\n")
+        errors = checker.check_cmake_reconciliation(
+            self._recon_inventory(
+                paths=["catch/hipTestMain/tests/hip_test_level_test.cc"]),
+            str(self.root))
+        self.assertEqual(errors, [], msg=errors)
+
+    def test_hosttest_commented_registration_is_not_required(self):
+        # A commented-out hip_add_host_test registers no active host test.
+        self._write_host_cmake(
+            "# hip_add_host_test(HipTestLevelUnitTest)\n")
+        errors = checker.check_cmake_reconciliation(
+            self._recon_inventory(paths=[]), str(self.root))
+        self.assertEqual(errors, [], msg=errors)
+
+    def test_hosttest_missing_file_is_feasibility_skipped(self):
+        # No host-test CMakeLists on disk -> the host reconciliation is a no-op.
+        errors = checker.check_cmake_reconciliation(
+            self._recon_inventory(paths=[]), str(self.root))
+        self.assertEqual(errors, [], msg=errors)
+
+    def test_hosttest_exclusion_allows_unrepresented(self):
+        # A documented exclusion for the host-test directory suppresses the report.
+        self._write_host_cmake("hip_add_host_test(HipTestLevelUnitTest)\n")
+        exclusions = [{
+            "group": "catch/hipTestMain/tests", "reason": "no_cases",
+            "note": "host harness tests tracked elsewhere",
+        }]
+        errors = checker.check_cmake_reconciliation(
+            self._recon_inventory(paths=[], exclusions=exclusions), str(self.root))
+        self.assertEqual(errors, [], msg=errors)
+
+    def test_hosttest_missing_inventory_runs_through_validate(self):
+        # End-to-end: with a host-test CMakeLists present but no covering suite,
+        # validate() surfaces the host-test coverage hole under reconciliation.
+        _write_docs(self.root)
+        self._write_host_cmake("hip_add_host_test(HipTestLevelUnitTest)\n")
+        results, _ = checker.validate(root=str(self.root))
+        self.assertIn("cmake_reconciliation", results)
+        self.assertTrue(
+            any("HipTestLevelUnitTest" in err and "hip_add_host_test" in err
+                for err in results["cmake_reconciliation"]),
+            msg=results.get("cmake_reconciliation"),
+        )
+
     # -- review fix 4: incident Origin commit citations ----------------------
 
     def test_is_commit_hash_classifies_hashes_and_words(self):
@@ -3098,6 +3273,58 @@ class CheckTestingDocsTest(unittest.TestCase):
         incidents = VALID_INCIDENTS.replace(
             "**Origin.** Landed in `0d90b30fb6c`.\n",
             "**Origin.** The guard was defaced then restored by maintainers.\n")
+        path.write_text(incidents, encoding="utf-8")
+        run("add", "TESTING_INCIDENTS.md")
+        run("commit", "-q", "-m", "add incidents")
+        errors = checker.check_incident_origin_citations(str(path))
+        self.assertEqual(errors, [], msg=errors)
+
+    @unittest.skipUnless(_GIT, "git not available")
+    def test_origin_citation_descriptive_backtick_bogus_hash_is_reported(self):
+        # A fabricated hash hidden inside a *descriptive* backticked span such as
+        # ``commit deadbee1`` must not evade validation: the span is scanned for
+        # hash occurrences rather than treated as an opaque non-hash token.
+        run = self._init_git_repo()
+        path = self.root / "TESTING_INCIDENTS.md"
+        incidents = VALID_INCIDENTS.replace(
+            "**Origin.** Landed in `0d90b30fb6c`.\n",
+            "**Origin.** Landed in `commit deadbee1` upstream.\n")
+        path.write_text(incidents, encoding="utf-8")
+        run("add", "TESTING_INCIDENTS.md")
+        run("commit", "-q", "-m", "add incidents")
+        errors = checker.check_incident_origin_citations(str(path))
+        self.assertTrue(
+            any("does not exist" in err and "deadbee1" in err
+                for err in errors),
+            msg=errors)
+
+    @unittest.skipUnless(_GIT, "git not available")
+    def test_origin_citation_descriptive_backtick_real_hash_passes(self):
+        # A real hash inside a descriptive backticked span resolves and is
+        # accepted - scanning the span must not false-alarm on a landed commit.
+        run = self._init_git_repo()
+        path = self.root / "TESTING_INCIDENTS.md"
+        path.write_text("placeholder\n", encoding="utf-8")
+        run("add", "TESTING_INCIDENTS.md")
+        run("commit", "-q", "-m", "seed")
+        head = run("rev-parse", "HEAD").stdout.strip()[:12]
+        incidents = VALID_INCIDENTS.replace(
+            "**Origin.** Landed in `0d90b30fb6c`.\n",
+            "**Origin.** Landed in `commit {}` upstream.\n".format(head))
+        path.write_text(incidents, encoding="utf-8")
+        errors = checker.check_incident_origin_citations(str(path))
+        self.assertEqual(errors, [], msg=errors)
+
+    @unittest.skipUnless(_GIT, "git not available")
+    def test_origin_citation_descriptive_backtick_marker_is_skipped(self):
+        # An ``external:``/``unverified:`` marker that opens a descriptive span
+        # preserves every hash the span carries, so an honest out-of-repository
+        # reference wrapped in prose is not existence-checked.
+        run = self._init_git_repo()
+        path = self.root / "TESTING_INCIDENTS.md"
+        incidents = VALID_INCIDENTS.replace(
+            "**Origin.** Landed in `0d90b30fb6c`.\n",
+            "**Origin.** Landed in `external: commit deadbee1` elsewhere.\n")
         path.write_text(incidents, encoding="utf-8")
         run("add", "TESTING_INCIDENTS.md")
         run("commit", "-q", "-m", "add incidents")
