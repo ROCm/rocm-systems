@@ -314,6 +314,12 @@ bool ParseCpuID(cpuid_t* cpuinfo) {
   *reinterpret_cast<int*>(cpuinfo->ManufacturerID) = regs[1];
   *reinterpret_cast<int*>(cpuinfo->ManufacturerID + 4) = regs[3];
   *reinterpret_cast<int*>(cpuinfo->ManufacturerID + 8) = regs[2];
+  const int max_leaf = regs[0];
+  cpuinfo->clflushopt = false;
+  if (max_leaf >= 7) {
+    __cpuidex(regs, 7, 0);
+    cpuinfo->clflushopt = ((regs[1] >> 23) & 0x1) != 0;
+  }
   // @todo fill the rest of CPU info
   return true;
 }

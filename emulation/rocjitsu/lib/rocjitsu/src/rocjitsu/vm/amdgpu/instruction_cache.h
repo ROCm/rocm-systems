@@ -101,6 +101,31 @@ public:
   fetch(const GpuVmAccess &access, uint64_t pc, uint8_t *dst, uint32_t byte_count = kFetchBytes) {
     synchronize_coherence_epoch();
     const uint32_t line_offset = static_cast<uint32_t>(pc) & (kLineSize - 1);
+    if (access.info().legacy_cache_compatible && byte_count && byte_count <= kLineSize) {
+      const uint64_t base = pc & ~uint64_t{kLineSize - 1};
+      const Line &first = lines_[(base / kLineSize) & (kNumLines - 1)];
+      const uint32_t head = std::min(byte_count, kLineSize - line_offset);
+      const auto resident = [&](const Line &line, uint64_t address) {
+        return line.valid && line.translated && line.addr == address &&
+               line.cache_namespace == access.cache_namespace();
+      };
+      if (resident(first, base)) {
+        // Only the matching live snapshot owns the counters referenced by the
+        // copied grant. Check its unique identity before touching those counters.
+        const uint32_t bytes = head == byte_count ? kLineSize : 2 * kLineSize;
+        if (code_grant_.identity() != access.cache_identity() || !code_grant_.covers(base, bytes))
+          code_grant_ = access.local_grant_view(base, bytes);
+        const auto &second = lines_[((base / kLineSize) + 1) & (kNumLines - 1)];
+        if (code_grant_ && first.admission_generation == code_grant_.generation() &&
+            (head == byte_count || (resident(second, base + kLineSize) &&
+                                    second.admission_generation == code_grant_.generation()))) {
+          std::memcpy(dst, first.data + line_offset, head);
+          if (head != byte_count)
+            std::memcpy(dst + head, second.data, byte_count - head);
+          return VmAccessOutcome::Complete;
+        }
+      }
+    }
     if (access.execute_admission_is_fixed() && byte_count <= kLineSize - line_offset) {
       // PCI/VFIO bindings have no live execute grant to recheck. A resident
       // line still belongs to its original VM generation and may not survive
@@ -300,6 +325,7 @@ private:
     return VmAccessOutcome::Complete;
   }
 
+  VmLocalGrantView code_grant_;
   Line lines_[kNumLines];
   uint64_t epoch_ = 0;
   std::shared_ptr<DeviceCacheCoherence> coherence_;

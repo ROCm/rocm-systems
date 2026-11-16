@@ -115,8 +115,10 @@ foreach(
         v_fmamk
         v_exponent
         v_min_max_med3
+        v_min_max_med3_cdna
         v_min_max_med3_num
         v_min_max
+        v_min_max_cdna
         v_min_max_num
         v_minimum_maximum3
         v_minimum_maximum
@@ -157,6 +159,11 @@ foreach(
         packed
         fp8_widen
         fp8_narrow
+        scaled_widen
+        wide_scaled_widen
+        scaled_fp8_narrow
+        scaled_fp4_narrow
+        wide_scaled_narrow
 )
     set(target "rj_arith_conversion_${family}_test")
     rj_arith_add_test(${target} conversion/${family}_test.cpp)
@@ -271,6 +278,8 @@ foreach(
     IN
     ITEMS
         half_binary
+        integer64
+        byte_shift
         half_ternary
         add
         multiply
@@ -281,7 +290,7 @@ foreach(
         boolean
         mad
         packed_binary
-        packed_mad
+        packed_ternary
         shift
         sad
         carry

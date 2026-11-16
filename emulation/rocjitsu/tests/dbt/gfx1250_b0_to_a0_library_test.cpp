@@ -4,6 +4,7 @@
 /// @file gfx1250_b0_to_a0_library_test.cpp
 /// @brief Tests the fixed-profile gfx1250 B0-to-A0 shared-library API.
 
+#include "../test_paths.h"
 #include "rocjitsu/code/dbt/gfx1250_b0_to_a0_diagnostics.h"
 #include "rocjitsu/code/rj_gfx1250_b0_to_a0.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"
@@ -43,7 +44,7 @@ void capture_diagnostic(const rj_gfx1250_b0_to_a0_diagnostic_t *diagnostic, void
        diagnostic->message != nullptr ? diagnostic->message : "", diagnostic->required_work != 0});
 }
 
-#ifdef GFX1250_B0_TO_A0_FIXTURE
+#ifdef KERNEL_DIR
 uint64_t source_identity(const std::vector<uint8_t> &bytes) {
   constexpr uint64_t kOffsetBasis = 14695981039346656037ULL;
   constexpr uint64_t kPrime = 1099511628211ULL;
@@ -301,10 +302,11 @@ TEST(Gfx1250B0ToA0Library, ReportsDeferredFamilyDiagnosticOnSuccessfulTranslatio
   EXPECT_EQ(count, 1);
 }
 
-#ifdef GFX1250_B0_TO_A0_FIXTURE
+#ifdef KERNEL_DIR
 TEST(Gfx1250B0ToA0Library, TranslatesRealGfx1250CodeObject) {
-  std::ifstream input(GFX1250_B0_TO_A0_FIXTURE, std::ios::binary);
-  ASSERT_TRUE(input) << GFX1250_B0_TO_A0_FIXTURE;
+  const auto path = rocjitsu::test::kernel_hsaco_path("relocation_function_table_dispatch_gfx1250");
+  std::ifstream input(path, std::ios::binary);
+  ASSERT_TRUE(input) << path;
   const std::vector<uint8_t> source((std::istreambuf_iterator<char>(input)),
                                     std::istreambuf_iterator<char>());
   ASSERT_GE(source.size(), 4u);
