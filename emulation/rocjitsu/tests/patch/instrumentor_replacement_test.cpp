@@ -1071,6 +1071,8 @@ TEST(InstrumentorReplacement, ProbeAdmissionRejectsUnmodeledIndirectAndCallEdges
         ASSERT_TRUE(result.edit_error);
         EXPECT_EQ(result.edit_error->code, TextEditErrorCode::UnsupportedReferences);
         EXPECT_NE(result.edit_error->message.find("CFG"), std::string::npos);
+        EXPECT_NE(result.edit_error->message.find(resolved_call ? "call/return" : "successor"),
+                  std::string::npos);
         EXPECT_EQ(result.edit_error->offset, 8u);
       } else {
         ASSERT_TRUE(validation.errors.empty()) << validation.errors.front();
@@ -1081,6 +1083,118 @@ TEST(InstrumentorReplacement, ProbeAdmissionRejectsUnmodeledIndirectAndCallEdges
       }
       EXPECT_EQ(std::memcmp(source.image_data(), pristine.data(), pristine.size()), 0);
     }
+  }
+}
+
+TEST(InstrumentorReplacement, RegisterGrowthProtectsObservedVgprsBeyondTheUsedCount) {
+  constexpr uint32_t define = test::make_mov_vgpr_inline(1, 7);
+  constexpr uint32_t read = cdna4::build_vop1(cdna4::kVMovB32Vop1, {.src0 = 257, .vdst = 2})[0];
+  constexpr uint32_t capture = cdna4::build_vop1(cdna4::kVMovB32Vop1, {.src0 = 256, .vdst = 3})[0];
+  const std::vector<uint8_t> bare = test::make_gfx950_kernel_elf(
+      {define, kNop0Word, read, kNop0Word, kNop0Word, kEndpgmWord}, 64, 4, 0, 1);
+  const AmdGpuCodeObject original(bare.data(), bare.size());
+  ASSERT_TRUE(original.is_valid());
+  const Section &original_text = *original.text_sections().front();
+  const std::vector<KernelDescriptorInfo> kernels =
+      scan_kernel_descriptors(bare, original_text.sectionOffset(), original_text.size(),
+                              original_text.sectionHeaderIndex());
+  ASSERT_EQ(kernels.size(), 1u);
+  const KernelDescriptorInfo &kernel = kernels.front();
+  ASSERT_EQ(((kernel.descriptor.compute_pgm_rsrc1 & 63) + 1) *
+                descriptor_vgpr_granularity_for_wavefront(kArch, 64),
+            8u);
+  ASSERT_EQ((RJ_AMDHSA_BITS_GET(kernel.descriptor.compute_pgm_rsrc3,
+                                amdhsa::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET) +
+             1) *
+                4,
+            8u);
+  // The used count is four, but the descriptor physically owns v0..v7.
+  const std::vector<uint8_t> image =
+      test::with_resource_metadata(bare, {{.name = kernel.kernel_name,
+                                           .kernarg_bytes = kernel.descriptor.kernarg_size,
+                                           .sgprs = 32,
+                                           .vgprs = 4,
+                                           .private_bytes = 64}});
+  const std::vector<uint8_t> pristine = image;
+  const AmdGpuCodeObject guest(image.data(), image.size());
+  ASSERT_TRUE(guest.is_valid());
+  const std::vector<uint8_t> early_image =
+      test::make_gfx950_probe_elf("clobber", {test::make_mov_vgpr_inline(1, 0), kSetpc30Word});
+  const std::vector<uint8_t> later_image =
+      test::make_gfx950_probe_elf("capture", {capture, kSetpc30Word});
+  const AmdGpuCodeObject early(early_image.data(), early_image.size());
+  const AmdGpuCodeObject later(later_image.data(), later_image.size());
+  ASSERT_TRUE(early.is_valid());
+  ASSERT_TRUE(later.is_valid());
+  for (const uint16_t observed : {uint16_t{4}, uint16_t{8}}) {
+    SCOPED_TRACE(observed);
+    const InstrumentationOptions options = {.register_growth =
+                                                OriginalRegisterCounts{.sgprs = 32, .vgprs = 4}};
+    Instrumentor instrumentor(guest, kArch, options);
+    instrumentor.add_point(
+        {.anchor_offset = 4, .probe_obj = &early, .probe_symbol = "clobber", .probe_args = {}});
+    instrumentor.add_point({.anchor_offset = 12,
+                            .probe_obj = &later,
+                            .probe_symbol = "capture",
+                            .probe_args = {probe_arg_vgpr(observed)}});
+    instrumentor.add_point(replacement_point(16, {kNop0Word}, {}));
+    const InstrumentedCodeObjectDebug result = instrumentor.patch_with_debug_summaries();
+    if (observed == 8) {
+      // Growth must not turn an unallocated original argument into a valid one.
+      expect_no_output(result);
+      EXPECT_TRUE(result.patches.empty());
+    } else {
+      ASSERT_TRUE(result.errors.empty()) << result.errors.front();
+      ASSERT_EQ(result.sites.size(), 3u);
+      EXPECT_GE(result.resources.vgprs, 6u);
+      const std::vector<InstrumentedSite>::const_iterator first = std::ranges::find_if(
+          result.sites, [](const InstrumentedSite &site) { return site.original_offset == 4; });
+      ASSERT_NE(first, result.sites.end());
+      const AmdGpuCodeObject output(result.elf_bytes.data(), result.elf_bytes.size());
+      ASSERT_TRUE(output.is_valid());
+      const Section &text = *output.text_sections().front();
+      ASSERT_LE(first->instrumentation_offset, text.size());
+      ASSERT_LE(first->instrumentation_size, text.size() - first->instrumentation_offset);
+      ASSERT_EQ(first->instrumentation_size % 4, 0u);
+      const std::span<const uint32_t> envelope(
+          reinterpret_cast<const uint32_t *>(text.data() + first->instrumentation_offset),
+          first->instrumentation_size / 4);
+      const std::unique_ptr<Decoder> decoder = Decoder::create(kArch);
+      ASSERT_NE(decoder, nullptr);
+      std::vector<uint32_t> moves;
+      for (size_t cursor = 0; cursor < envelope.size();) {
+        const DecodeResult decoded = decoder->decode_window(
+            envelope.subspan(cursor), first->instrumentation_offset + cursor * 4);
+        ASSERT_TRUE(decoded.succeeded());
+        ASSERT_GT(decoded.value()->size(), 0);
+        ASSERT_EQ(decoded.value()->size() % 4, 0);
+        ASSERT_LE(static_cast<size_t>(decoded.value()->size()) / 4, envelope.size() - cursor);
+        if (decoded.value()->mnemonic() == "v_mov_b32_e32") {
+          ASSERT_EQ(decoded.value()->size(), 4);
+          moves.push_back(decoded.value()->raw_encoding()[0]);
+        }
+        cursor += static_cast<size_t>(decoded.value()->size()) / 4;
+      }
+      std::optional<uint16_t> backup;
+      for (uint16_t candidate = 5; candidate < 256; ++candidate) {
+        const uint32_t saved = cdna4::build_vop1(
+            cdna4::kVMovB32Vop1, {.src0 = 257, .vdst = static_cast<uint8_t>(candidate)})[0];
+        const uint32_t restored = cdna4::build_vop1(
+            cdna4::kVMovB32Vop1, {.src0 = static_cast<uint16_t>(256 + candidate), .vdst = 1})[0];
+        if (std::ranges::find(moves, saved) != moves.end() &&
+            std::ranges::find(moves, restored) != moves.end()) {
+          backup = candidate;
+          break;
+        }
+      }
+      ASSERT_TRUE(backup) << "early v1 backup must not overwrite later-observed v4";
+      EXPECT_LT(*backup, result.resources.vgprs);
+      constexpr uint32_t conflicting =
+          cdna4::build_vop1(cdna4::kVMovB32Vop1, {.src0 = 257, .vdst = 4})[0];
+      EXPECT_EQ(std::ranges::find(moves, conflicting), moves.end());
+    }
+    EXPECT_EQ(image, pristine);
+    EXPECT_EQ(std::memcmp(guest.image_data(), pristine.data(), pristine.size()), 0);
   }
 }
 

@@ -183,6 +183,10 @@ adding their offsets to the public `.text` index; incomplete or undecodable stre
 and supported dynamic loader writes into executable bytes reject admission.
 Foreign branch destinations also participate in interior-reference checks, and
 foreign getpc instructions retain the conservative restriction above.
+Descriptor entries in other allocated executable sections are also retained
+references. Growth that moves such a kernel entry rejects even when the descriptor
+moves too: the writer's descriptor adjustment preserves the old absolute entry.
+Fixed entries retain the existing descriptor-only movement handling.
 ET_REL sections retain their separate section-relative coordinate spaces and the
 existing text-local reference proof.
 These checks reuse the boundary index's checked destination arithmetic and shared
@@ -865,7 +869,13 @@ persistent and are excluded from every call envelope, just like the pointer.
 `AnchorVgpr` sources are parallel copies made before constants or scalar-sourced
 argument writes. The builder orders overlapping copies and breaks cycles with a
 dead VGPR. Observed sources participate in resource exclusion even if the guest
-itself no longer uses them. Register-backup destinations must avoid live values,
+itself no longer uses them. The batch's observed VGPRs are conservatively preserved
+at every callable probe, including when a replacement deletes their last guest
+read. Guest definitions between probes still take effect. This policy can require
+extra spill or backup resources, or reject when those resources are unavailable.
+Sources must fit the original ordinary VGPR allocation before register growth;
+growth also reserves observed inputs beyond the original metadata's used count.
+Register-backup destinations must avoid live values,
 probe clobbers, fixed argument/link registers, and persistent entry storage.
 
 `kernarg_segment_ptr_slot` and `CommandProcessor::init_wavefront_regs` walk the user-SGPR enable-bit order independently, and the CP interleaves register writes with its walk so it cannot call the helper. `tests/dbi/kernarg_sgpr_slot_test.cpp` dispatches every combination to pin the agreement; a drift would have the prologue load from an unrelated pair with no fault and every unit test still green.
