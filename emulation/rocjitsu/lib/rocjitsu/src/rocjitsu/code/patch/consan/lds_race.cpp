@@ -48,7 +48,7 @@ bool admitted_instruction(std::string_view name) {
       "v_lshrrev_b32_e32",  "v_lshlrev_b32_e32",
       "v_add_nc_u32_e32",   "v_and_b32_e32",
       "v_cmp_eq_u32_e32",   "v_cmp_gt_u32_e32",
-      "global_store_b32",
+      "global_store_b32",   "s_wait_storecnt_dscnt",
   };
   return std::find(names.begin(), names.end(), name) != names.end();
 }
@@ -196,13 +196,19 @@ Result qualify_lds_race_barrier(InputProgram &program, std::span<BasicBlock *con
                                                         {.ssrc0 = cdna5::OPR_SSRC_NEG_INT_MIN})[0];
         const uint32_t wait_opcode =
             arch == ROCJITSU_CODE_ARCH_RDNA4 ? rdna4::kSBarrierWaitSopp : cdna5::kSBarrierWaitSopp;
-        const uint32_t drain_opcode =
-            arch == ROCJITSU_CODE_ARCH_RDNA4 ? rdna4::kSWaitDscntSopp : cdna5::kSWaitDscntSopp;
-        valid_group =
-            drain.raw_encoding()[0] == build_sopp_encoding(arch, drain_opcode, 0).value() &&
-            instructions[index]->raw_encoding()[0] == signal &&
-            instructions[wait_index]->raw_encoding()[0] ==
-                build_sopp_encoding(arch, wait_opcode, 0xffff).value();
+        const std::string_view drain_name = drain.mnemonic();
+        const bool ds_wait = drain_name == "s_wait_dscnt" || drain_name == "s_wait_loadcnt_dscnt" ||
+                             drain_name == "s_wait_storecnt_dscnt";
+        const FailureOr<std::optional<amdgpu::WaitFields>> fields =
+            amdgpu::WaitCounterPolicy::explicit_wait_fields(drain, arch);
+        // A combined wait may leave unrelated memory pending, but its original
+        // DS threshold must drain every LDS access before the guest barrier.
+        valid_group = ds_wait && fields.succeeded() && fields.value() &&
+                      (*fields.value())[amdgpu::WaitCounterPolicy::counter_index(
+                          amdgpu::WaitCounterKind::Ds)] == 0 &&
+                      instructions[index]->raw_encoding()[0] == signal &&
+                      instructions[wait_index]->raw_encoding()[0] ==
+                          build_sopp_encoding(arch, wait_opcode, 0xffff).value();
       } else {
         const uint32_t opcode =
             arch == ROCJITSU_CODE_ARCH_RDNA3

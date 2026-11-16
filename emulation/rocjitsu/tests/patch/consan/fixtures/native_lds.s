@@ -153,13 +153,15 @@ CONSAN_KERNEL:
   // Delay the only cross-wave pair until cycle 10.
   // Nine decrements select W0 lane 0 / W1 lane 0 only after the sixteen retained
   // barrier completions, isolating missing sync evidence from access-bank loss.
-  s_mov_b32 s11, (2*CONSAN_WAVE_SIZE*9)
+  v_mov_b32 v6, (2*CONSAN_WAVE_SIZE*9)
 #elif CONSAN_CASE == 42
   // Rotate through three high lanes while selecting independent banks 0..2.
-  s_mov_b32 s11, (CONSAN_WAVE_SIZE-4)
+  v_mov_b32 v6, (CONSAN_WAVE_SIZE-4)
 #else
-  s_mov_b32 s11, 0
+  v_mov_b32 v6, 0
 #endif
+  // RDNA4 requires a wait when SALU rewrites selectors previously read by VALU.
+  // Keep both rotating selectors in VGPRs within the existing allocation.
   v_cmp_eq_u32 MASK_VCC, 0, v0
   MASK_AND_SAVE MASK_SAVE, MASK_VCC
   GLOBAL_STORE v5, v2, s[6:7]
@@ -174,7 +176,7 @@ CONSAN_KERNEL:
 #if CONSAN_CASE == 33
   v_cmp_gt_u32 MASK_VCC, 5, v0
 #else
-  v_cmp_eq_u32 MASK_VCC, s11, v0
+  v_cmp_eq_u32 MASK_VCC, v6, v0
 #endif
   MASK_AND_SAVE MASK_SAVE, MASK_VCC
   DS_STORE v1, v2
@@ -182,12 +184,12 @@ CONSAN_KERNEL:
 #if CONSAN_CASE != 30 && CONSAN_CASE != 34 && CONSAN_CASE != 35
   consan_barrier
 #endif
-  s_add_u32 s12, s11, CONSAN_WAVE_SIZE
+  VECTOR_ADD v7, CONSAN_WAVE_SIZE, v6
 #if CONSAN_CASE == 33
   // All waves read their own first five lanes after the full-workgroup barrier.
   v_cmp_gt_u32 MASK_VCC, 5, v4
 #else
-  v_cmp_eq_u32 MASK_VCC, s12, v0
+  v_cmp_eq_u32 MASK_VCC, v7, v0
 #endif
   MASK_AND_SAVE MASK_SAVE, MASK_VCC
   DS_LOAD v3, v1
@@ -202,9 +204,9 @@ CONSAN_KERNEL:
   consan_barrier
 #endif
 #if CONSAN_CASE == 32
-  s_sub_u32 s11, s11, (2*CONSAN_WAVE_SIZE)
+  VECTOR_ADD v6, -(2*CONSAN_WAVE_SIZE), v6
 #else
-  s_add_u32 s11, s11, 1
+  VECTOR_ADD v6, 1, v6
 #endif
   s_sub_u32 s10, s10, 1
   s_cmp_eq_u32 s10, 0

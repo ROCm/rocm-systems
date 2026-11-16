@@ -120,6 +120,11 @@ class AnalysisDriver(Driver):
         assert result['ordered_pairs'] == sum(
             execution['ordered_pairs'] for execution in result['executions']
         )
+        if case == 'loop_three':
+            assert result['ordered_pairs'] == 9 * len(result['executions']), (
+                'loop_three total ordered pairs',
+                result['ordered_pairs'],
+            )
         assert result['collision_groups'] == collisions
         assert result['coverage_complete'] == (
             case
@@ -255,6 +260,12 @@ class AnalysisDriver(Driver):
                     )
             if case.startswith('loop_'):
                 assert analyzed['integrity_events'] == 0
+                if case == 'loop_three':
+                    assert analyzed['ordered_pairs'] == 9, (
+                        'loop_three dispatch ordered pairs',
+                        analyzed['serial'],
+                        analyzed['ordered_pairs'],
+                    )
                 if case.startswith('loop_no_b0_'):
                     # The same first four endpoints remain confirmed on either
                     # side of the journal limit, despite later access/sync loss.
