@@ -44,6 +44,13 @@ struct ncclLsaBarrierSession_internal {
     return state + 3 * handle.nBarriers + index * team.nRanks + peer;
   }
 
+  // [RCCL] ucInbox(team.rank, peer) without the peer lookup: the caller's own inbox is local. The lookup's
+  // fallback for peers outside the LSA team keeps comm fields live across the wait loop, which costs SGPRs.
+  NCCL_DEVICE_INLINE uint32_t* ucInboxSelf(int peer) {
+    uint32_t* state = (uint32_t*)ncclGetResourceBufferLocalPointer(comm, handle.bufHandle);
+    return state + 3 * handle.nBarriers + index * team.nRanks + peer;
+  }
+
   template <bool EnableTimeout>
   NCCL_DEVICE_INLINE ncclResult_t waitInternal(Coop, cuda::memory_order order, uint64_t timeoutCycles);
 };

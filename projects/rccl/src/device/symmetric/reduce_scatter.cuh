@@ -40,7 +40,7 @@ static __device__ void reduceDeep(ncclSymkArgsHandler const& handler, int tn, in
                                 EnableTma ? 0 :
 #endif
                                             lane);
-  ncclSymkWorldPointerGetter<Pack, EnableTma> inpPeer(inpPacks, handler.comm);
+  ncclSymkWorldPointerGetter<Pack> inpPeer(inpPacks, handler.comm);
 
   Pack acc0[UnrollPacks];
 
