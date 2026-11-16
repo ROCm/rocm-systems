@@ -100,10 +100,13 @@ for (const status of ['failed', 'timeout']) {
   test(`all-${status} results have no timing verdict`, async () => {
     const runs = publication();
     for (const result of runs[1].benchmark_results) result.status = status;
+    runs[1].provenance.machine.kernel = 'another-kernel';
     const { markdown } = await summarize(runs);
     assert.match(markdown, /0\/3 benchmarks completed/);
     assert.match(markdown, /Timing comparison unavailable: no comparable benchmark timings/);
     assert.doesNotMatch(markdown, /faster|slower|outside the duration band|Duration change/);
+    assert.match(markdown, /Changed inputs:.*environment/);
+    assert.doesNotMatch(markdown, /Timing differences/);
   });
 }
 
@@ -120,7 +123,8 @@ test('does not compare against an earlier develop run when the recorded base is 
   const summary = await summarize(runs);
   assert.equal(summary.baselineRunId, null);
   assert.match(summary.markdown, /Timing comparison unavailable/);
-  assert.doesNotMatch(summary.markdown, /faster|slower|Duration change|Compared with|earlier develop/);
+  assert.doesNotMatch(summary.markdown, /faster|slower|Duration change|Compared with/);
+  assert.match(summary.markdown, /Dashboard link chooses its own reference.*earlier develop run/);
 });
 
 test('does not invent a comparison when no baseline exists', async () => {

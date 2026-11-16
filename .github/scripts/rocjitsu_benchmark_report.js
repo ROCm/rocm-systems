@@ -290,9 +290,6 @@ function renderTimingChanges(comparisons) {
 }
 
 function renderComparison(comparisons, band) {
-  if (!comparisons.some((comparison) => comparison.comparable.length)) {
-    return ['Timing comparison unavailable: no comparable benchmark timings.'];
-  }
   const faster = comparisons.reduce((total, comparison) => total + comparison.counts.faster, 0);
   const slower = comparisons.reduce((total, comparison) => total + comparison.counts.slower, 0);
   const lines = [
@@ -326,22 +323,26 @@ function buildBenchmarkSummary(runs, runId, headSha) {
   const lines = [renderCoverage(coverage), ''];
   const summary = { runId, headSha, baselineRunId: baseline?.publication.id ?? null };
   if (!baseline) {
-    lines.push('Timing comparison unavailable: no published result for the recorded base.');
+    lines.push('Timing comparison unavailable: no published result for the recorded base.', '',
+      'The Dashboard link chooses its own reference and may compare against an earlier develop run.');
     return { ...summary, markdown: lines.join('\n') };
   }
 
   const baselineResults = indexResults(baseline);
   const comparisons = compareBenchmarkResults(candidateResults, baselineResults);
+  const hasComparableTimings = comparisons.some((comparison) => comparison.comparable.length);
   const sampling = (run) => {
     const { samples = 'unknown', warmups = 'unknown' } = run.execution_summary;
     return `${escapeMarkdown(samples)} sample${samples === 1 ? '' : 's'} and ` +
       `${escapeMarkdown(warmups)} warmup${warmups === 1 ? '' : 's'}`;
   };
   lines.push(`Sampling per benchmark: current ${sampling(candidate)}; baseline ${sampling(baseline)}.`, '');
-  lines.push(...renderComparison(comparisons, DURATION_CHANGE_BAND_PERCENT));
+  if (hasComparableTimings) lines.push(...renderComparison(comparisons, DURATION_CHANGE_BAND_PERCENT));
+  else lines.push('Timing comparison unavailable: no comparable benchmark timings.');
   const inputChanges = describeInputChanges(candidate, baseline);
   if (inputChanges.length) {
-    lines.push('', `**Changed inputs:** ${inputChanges.join(', ')}. Timing differences may reflect these changes.`);
+    const caveat = hasComparableTimings ? ' Timing differences may reflect these changes.' : '';
+    lines.push('', `**Changed inputs:** ${inputChanges.join(', ')}.${caveat}`);
   }
 
   const comparisonUrl = new URL(DASHBOARD_URL);
