@@ -42,6 +42,10 @@ struct RecordingBindingState {
   std::vector<uint64_t> submissions;
   uint32_t destructions = 0;
   bool reject_next = false;
+  bool busy_on_graceful_close = false;
+  rocjitsu::amdgpu::QueuePrepareCloseStatus preempt_close_status =
+      rocjitsu::amdgpu::QueuePrepareCloseStatus::Ready;
+  uint32_t preempt_close_calls = 0;
 };
 
 class RecordingQueueBinding final : public rocjitsu::amdgpu::QueueBinding {
@@ -58,6 +62,16 @@ public:
   rocjitsu::amdgpu::QueueSubmissionStatus submit_producer(uint64_t producer_value) override {
     state_->submissions.push_back(producer_value);
     return rocjitsu::amdgpu::QueueSubmissionStatus::Accepted;
+  }
+
+  rocjitsu::amdgpu::QueuePrepareCloseStatus prepare_close() noexcept override {
+    return state_->busy_on_graceful_close ? rocjitsu::amdgpu::QueuePrepareCloseStatus::Busy
+                                          : rocjitsu::amdgpu::QueuePrepareCloseStatus::Ready;
+  }
+
+  rocjitsu::amdgpu::QueuePrepareCloseStatus prepare_preempt_close() noexcept override {
+    ++state_->preempt_close_calls;
+    return state_->preempt_close_status;
   }
 
 private:
@@ -204,6 +218,13 @@ protected:
               rocjitsu::amdgpu::QueueDoorbellBinding binding = frontend_doorbell_;
               binding.offset = offset;
               return binding;
+            },
+            [this] {
+              return rocjitsu::amdgpu::InterruptSubscription(
+                  {}, [this](uint32_t process_id, uint64_t address,
+                             rocjitsu::amdgpu::VmAccessKind access) {
+                    faults_.push_back({process_id, address, access});
+                  });
             })));
   }
 
@@ -317,6 +338,12 @@ protected:
   rocjitsu::amdgpu::GpuQueueRegistry queue_registry_;
   RecordingComputeBindings bindings_;
   std::shared_ptr<rocjitsu::amdgpu::SdmaQueueBindingFactory> sdma_factory_;
+  struct FaultRecord {
+    uint32_t process_id;
+    uint64_t address;
+    rocjitsu::amdgpu::VmAccessKind access;
+  };
+  std::vector<FaultRecord> faults_;
   rocjitsu::amdgpu::MesEngine engine_;
   rocjitsu::amdgpu::QueueDoorbellBinding frontend_doorbell_;
   std::vector<std::pair<uint32_t, rocjitsu::amdgpu::QueuePacketFormat>> resolved_doorbells_;
@@ -372,6 +399,50 @@ TEST_F(MesEngineStateTest, RemovePublicationRetryDoesNotReplayTheSemantic) {
   EXPECT_TRUE(engine_.detach_frontend());
 }
 
+TEST_F(MesEngineStateTest, RemovePreemptsBusyComputeQueue) {
+  write_compute_add_frame(kRing, true, 1);
+  ASSERT_EQ(notify(kFrameDwords), rocjitsu::amdgpu::MesDoorbellDisposition::Complete);
+  ASSERT_EQ(engine_.active_queues(), 1u);
+  bindings_.aql->busy_on_graceful_close = true;
+
+  write_remove_frame(kRing + kFrameDwords * sizeof(uint32_t), 2);
+  store<uint32_t>(kRing + kFrameDwords * sizeof(uint32_t) + sizeof(uint32_t),
+                  kComputeDoorbell / sizeof(uint32_t));
+  EXPECT_EQ(notify(2 * kFrameDwords), rocjitsu::amdgpu::MesDoorbellDisposition::Complete);
+  EXPECT_EQ(engine_.active_queues(), 0u);
+  EXPECT_EQ(queue_registry_.active_queues(), 0u);
+  EXPECT_EQ(bindings_.aql->preempt_close_calls, 1u);
+  EXPECT_EQ(bindings_.aql->destructions, 1u);
+  EXPECT_EQ(load<uint64_t>(kCompletion), 2u);
+  EXPECT_EQ(load<uint64_t>(kReadPointer), 2 * kFrameDwords);
+}
+
+TEST_F(MesEngineStateTest, RemoveWaitsForCommittedComputePublication) {
+  write_compute_add_frame(kRing, true, 1);
+  ASSERT_EQ(notify(kFrameDwords), rocjitsu::amdgpu::MesDoorbellDisposition::Complete);
+  ASSERT_EQ(engine_.active_queues(), 1u);
+  bindings_.aql->preempt_close_status = rocjitsu::amdgpu::QueuePrepareCloseStatus::Busy;
+
+  write_remove_frame(kRing + kFrameDwords * sizeof(uint32_t), 2);
+  store<uint32_t>(kRing + kFrameDwords * sizeof(uint32_t) + sizeof(uint32_t),
+                  kComputeDoorbell / sizeof(uint32_t));
+  EXPECT_EQ(notify(2 * kFrameDwords), rocjitsu::amdgpu::MesDoorbellDisposition::Retry);
+  EXPECT_EQ(engine_.active_queues(), 1u);
+  EXPECT_EQ(queue_registry_.active_queues(), 1u);
+  EXPECT_EQ(bindings_.aql->destructions, 0u);
+  EXPECT_EQ(load<uint64_t>(kCompletion), 1u);
+  EXPECT_EQ(load<uint64_t>(kReadPointer), kFrameDwords);
+
+  bindings_.aql->preempt_close_status = rocjitsu::amdgpu::QueuePrepareCloseStatus::Ready;
+  EXPECT_EQ(notify(2 * kFrameDwords), rocjitsu::amdgpu::MesDoorbellDisposition::Complete);
+  EXPECT_EQ(engine_.active_queues(), 0u);
+  EXPECT_EQ(queue_registry_.active_queues(), 0u);
+  EXPECT_EQ(bindings_.aql->preempt_close_calls, 2u);
+  EXPECT_EQ(bindings_.aql->destructions, 1u);
+  EXPECT_EQ(load<uint64_t>(kCompletion), 2u);
+  EXPECT_EQ(load<uint64_t>(kReadPointer), 2 * kFrameDwords);
+}
+
 TEST_F(MesEngineStateTest, ResetClearsLiveQueuesBeforeFrontendDetach) {
   write_add_frame(kRing, 1);
   ASSERT_EQ(notify(kFrameDwords), rocjitsu::amdgpu::MesDoorbellDisposition::Complete);
@@ -380,6 +451,27 @@ TEST_F(MesEngineStateTest, ResetClearsLiveQueuesBeforeFrontendDetach) {
   EXPECT_TRUE(engine_.reset());
   EXPECT_EQ(engine_.active_queues(), 0u);
   EXPECT_TRUE(engine_.detach_frontend());
+}
+
+TEST_F(MesEngineStateTest, ProcessVmFaultReportsAndRevokesWithItsAddressSpace) {
+  write_compute_add_frame(kRing, true, 1);
+  ASSERT_EQ(notify(kFrameDwords), rocjitsu::amdgpu::MesDoorbellDisposition::Complete);
+  const auto handle = engine_.process_address_space_for_test(7);
+  ASSERT_TRUE(handle.has_value());
+  auto access = gpu_vm_.snapshot(*handle);
+  ASSERT_TRUE(access.has_value());
+
+  const std::array<std::byte, 16> bytes{};
+  EXPECT_EQ(access->write(0x4000, bytes), rocjitsu::amdgpu::VmAccessOutcome::Faulted);
+  ASSERT_EQ(faults_.size(), 1u);
+  EXPECT_EQ(faults_[0].process_id, 7u);
+  EXPECT_EQ(faults_[0].address, 0x4000u);
+  EXPECT_EQ(faults_[0].access, rocjitsu::amdgpu::VmAccessKind::Write);
+
+  ASSERT_TRUE(engine_.reset());
+  ASSERT_TRUE(engine_.detach_frontend());
+  EXPECT_EQ(access->write(0x4000, bytes), rocjitsu::amdgpu::VmAccessOutcome::Revoked);
+  EXPECT_EQ(faults_.size(), 1u);
 }
 
 TEST_F(MesEngineStateTest, ComputeQueuesUseFrontendPlacementDoorbellsAndLifecycle) {

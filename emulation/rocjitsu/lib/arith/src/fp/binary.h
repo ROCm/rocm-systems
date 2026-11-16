@@ -21,6 +21,8 @@ enum class Binary {
   Minimum,
   Maximum,
   MinLegacy,
+  MinLegacyCdna,
+  MaxLegacyCdna,
   MaxLegacy
 };
 
@@ -37,6 +39,11 @@ bool binary_exact_x86_64_v3(Binary op, uint64_t flags, uint32_t exec_mask,
 #endif
 
 #if defined(RJ_ARITH_HAVE_X86_64_V4)
+// Evaluate a binary selection with validated controls, preserving inactive lanes and aliases.
+void selection_f32_x86_64_v4(Binary op, uint64_t flags, uint32_t exec_mask, uint32_t mode,
+                             uint32_t *const *d, const uint32_t *const *a,
+                             const uint32_t *const *b);
+
 // Attempt finite MUL or MUL_DX9_ZERO domains without writes on decline; uses default host FP
 // state. FP status reporting follows the resolved semantics.
 bool mul_exact_x86_64_v4(uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags,

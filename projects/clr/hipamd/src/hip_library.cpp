@@ -219,7 +219,14 @@ hipError_t hipLibraryLoadFromFile(hipLibrary_t* library, const char* fname,
                                   void** libraryOptionValues, unsigned int numLibraryOptions) {
   HIP_INIT_API(hipLibraryLoadFromFile, library, fname, jitOptions, jitOptionsValues, numJitOptions,
                libraryOptions, libraryOptionValues, numLibraryOptions);
-  if (library == nullptr || !std::filesystem::exists(fname) || numJitOptions > 0) {
+  if (library == nullptr || fname == nullptr || numJitOptions > 0) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+  // Check if file exists, also use the nothrow version
+  std::error_code ferr{};
+  if (!std::filesystem::exists(fname, ferr)) {
+    LogPrintfError("Cannot access %s: %s", fname,
+                   ferr ? ferr.message().c_str() : "file does not exist");
     HIP_RETURN(hipErrorInvalidValue);
   }
   auto* l = new hip::LibraryContainer(std::string(fname));
@@ -532,7 +539,8 @@ hipError_t hipKernelSetAttribute(hipFunction_attribute attrib, int value, hipKer
       HIP_RETURN(hipErrorInvalidValue);
       break;
     case HIP_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES:
-      if ((value < 0) || (value > (wrkGrpInfo->availableLDSSize_ - wrkGrpInfo->localMemSize_))) {
+      if ((value < 0) || (static_cast<size_t>(value) >
+                          (wrkGrpInfo->availableLDSSize_ - wrkGrpInfo->localMemSize_))) {
         HIP_RETURN(hipErrorInvalidValue);
       }
       wrkGrpInfo->kernelMaxDynamicSharedSizeBytes_ = value;

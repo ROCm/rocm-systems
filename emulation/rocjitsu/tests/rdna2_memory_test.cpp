@@ -442,7 +442,7 @@ TEST_F(Rdna2MemoryTest, AddressedPrivateAndFlatLdsElementsReportAtCompletion) {
                                                  .vdst = static_cast<uint8_t>(dst)}));
       ASSERT_TRUE(inst && inst->data());
       EXPECT_EQ(wave_->trapsts(), sticky);
-      ASSERT_EQ(test::ComputeUnitTestAccess::route_memory_inst(*cu_, inst.release(), *wave_),
+      ASSERT_EQ(test::ComputeUnitTestAccess::route_memory_inst(*cu_, std::move(inst), *wave_),
                 amdgpu::VmAccessOutcome::Complete);
       EXPECT_EQ(wave_->trapsts(), sticky | (expected ? mem_viol : 0));
       EXPECT_TRUE(wave_->wait_counters().empty());
@@ -466,7 +466,7 @@ TEST_F(Rdna2MemoryTest, AddressedPrivateAndFlatLdsElementsReportAtCompletion) {
         write_vector(0, bad_lane == 1 ? 8 : 0, 1);
         auto inst = execute(load);
         ASSERT_TRUE(inst && inst->data());
-        ASSERT_EQ(test::ComputeUnitTestAccess::route_memory_inst(*cu_, inst.release(), *wave_),
+        ASSERT_EQ(test::ComputeUnitTestAccess::route_memory_inst(*cu_, std::move(inst), *wave_),
                   amdgpu::VmAccessOutcome::Complete);
         EXPECT_EQ(wave_->trapsts(), sticky | (bad_lane == 0 ? mem_viol : 0));
       }

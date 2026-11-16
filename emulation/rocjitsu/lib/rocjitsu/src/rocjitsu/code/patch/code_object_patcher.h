@@ -95,6 +95,12 @@ public:
   /// the executable LOAD segment that contains .text, preserves LOAD alignment,
   /// updates moved symbols and relocation places, and keeps descriptor-relative
   /// entries coherent with explicit descriptor patches applied by DBT.
+  /// Rejects growth that would extend a divergent LOAD mapping and supported
+  /// dynamic relocation writes that overlap final .text after place remapping.
+  /// Appended text must also have equivalent file backing in every overlapping
+  /// final LOAD mapping, including segments that remain at their original address.
+  /// Loaded section backing must remain coherent after movement, and final LOAD
+  /// memory extents, including padding, must fit ROCr's combined allocation.
   [[nodiscard]] bool replace_text(
       std::span<const uint8_t> new_text,
       std::span<const TextOffsetRelocation> text_relocations = {},
@@ -103,17 +109,18 @@ public:
       bool require_every_text_symbol_mapped = false,
       const std::unordered_map<uint64_t, uint64_t> *canonical_code_pointer_placement = nullptr);
 
-  /// @brief True if any non-inert relocation's place (r_offset) falls inside .text.
+  /// @brief Whether a relocation place or supported dynamic write affects .text.
   ///
   /// @details DBT compacts/expands/moves instructions within .text but does not
   /// remap relocation places that land in .text — replace_text() only shifts
   /// relocation offsets for whole sections moved *after* .text. An in-.text
   /// relocation would therefore be applied to the wrong translated bytes.
+  /// Supported ROCr dynamic writes also reject when their complete write
+  /// interval enters .text from before it, or its end address overflows.
+  /// Other forms retain the existing place-based check.
   /// R_AMDGPU_NONE performs no write at its relocation place. Runtime acceptance
   /// of that record is checked separately by has_rocr_rejected_none_relocation().
-  /// BinaryTranslator uses this to fail closed instead of miscompiling. Real
-  /// AMDHSA kernel code objects carry no such relocations, so this rejects only
-  /// genuinely unsupported inputs.
+  /// BinaryTranslator and shared BI admission fail closed on these inputs.
   [[nodiscard]] bool has_relocations_within_text() const;
 
   /// @brief True if ROCr cannot resolve an ET_DYN SHT_RELA section target.
