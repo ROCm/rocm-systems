@@ -43,6 +43,17 @@ test('a completed run is ordered by its start, not its finish, even when it fini
   expect(first.timestamp).toBe(late.execution_summary.timestamp);
 });
 
+test('the adapter carries the producer finish time as finishedAt, and null when the harness never wrote it', () => {
+  const publication = createFeedbackPublication();
+  const [finished, killed] = [publication.runs.find((run) => run.execution_summary.finished_at), publication.runs.find((run) => run.execution_summary.finished_at === null)];
+  finished.execution_summary.timestamp = '2026-10-22T10:00:00Z';
+  finished.execution_summary.finished_at = '2026-10-22T10:25:00Z';   // differs from the start: the test cannot pass by carrying the start
+  const { data } = adaptPublishedDashboardData(publication);
+  const byId = (run) => data.allRuns.find(({ runId }) => runId === run.publication.id);
+  expect(byId(finished)).toMatchObject({ timestamp: '2026-10-22T10:00:00Z', finishedAt: '2026-10-22T10:25:00Z' });
+  expect(byId(killed).finishedAt).toBeNull();
+});
+
 function renderStatus(finishedAt, status) {  // finishedAt: the run's finish record (null = killed harness); the start timestamp stays valid
   const run = structuredClone(raw);
   run.publication.id = 'fictional-status';

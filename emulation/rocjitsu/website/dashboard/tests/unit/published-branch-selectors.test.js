@@ -69,7 +69,7 @@ test('with several develop attempts on the recorded base commit the latest finis
   expect(pick([finished, startsLaterFinishesFirst])).toMatchObject({ reason: 'exact-base', run: { runId: 'finished-attempt' } });
 });
 
-test('automatic reference prefers the latest exact develop-base attempt and otherwise uses strictly earlier execution', () => {
+test('automatic reference prefers the latest exact develop-base attempt and otherwise the latest finish at or before the candidate start', () => {
   const candidate = data.allRuns.find(({ runId }) => runId === 'fictional-branch-01');
   const base = data.runs.find(({ runId }) => runId === 'fictional-develop-20');
   const retry = { ...base, runId: 'retry-z', timestamp: candidate.timestamp };
