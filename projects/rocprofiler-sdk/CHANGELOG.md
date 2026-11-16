@@ -9,7 +9,15 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 - rocJPEG API tracing for `rocJpegDecodeAsync`, `rocJpegDecodeSync`, `rocJpegDecodeBatchedAsync`, `rocJpegDecodeBatchedSync`, and `rocJpegGetDecoderCaps`. The rocJPEG dispatch table the SDK expects is now step version 3.
   - New `ROCPROFILER_ROCJPEG_API_ID_rocJpegDecodeAsync`, `ROCPROFILER_ROCJPEG_API_ID_rocJpegDecodeSync`, `ROCPROFILER_ROCJPEG_API_ID_rocJpegDecodeBatchedAsync`, `ROCPROFILER_ROCJPEG_API_ID_rocJpegDecodeBatchedSync`, and `ROCPROFILER_ROCJPEG_API_ID_rocJpegGetDecoderCaps` operation IDs, and matching entries in `rocprofiler_rocjpeg_api_args_t`.
 
+**rocprofv3 (CLI):**
+
+  - `--att` can be combined with `--replay-mode kernel` (beta). Each profiled dispatch gets one extra replay pass, ahead of its counter passes, that runs the dispatch thread trace with counter collection switched off; the counter groups then run with the trace switched off. Device-mode thread trace options (`--att-consecutive-kernels`, `--att-no-intercept`, `--selected-regions`, `--collection-period`) and `--att-serialize-all` are rejected with `--replay-mode kernel`. `--att-serialize-all` would still serialize the counter passes after the thread-trace context is stopped.
+
 ### Changed
+
+**rocprofv3 (CLI):**
+
+  - With `--replay-mode kernel`, a dispatch that the kernel filters do not select is no longer replayed. It runs once on the ordinary path instead of being snapshotted and re-executed once per counter group.
 
 ### Resolved issues
 
