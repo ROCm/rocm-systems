@@ -12,13 +12,7 @@
 Panel Config:
   id: 1400
   title: Efficiency Arbiter (EA)
-  description: |-
-    Efficiency Arbiter (EA) metrics for gfx1250. The EA is the gasket block
-    between GL2 and SDF, handling memory request routing to DRAM (HBM), IO,
-    HDM (host memory), and GMI (multi-GPU interconnect).
-
   data source:
-
   - metric_table:
       id: 1401
       title: EA Utilization

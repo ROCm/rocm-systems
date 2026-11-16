@@ -3,6 +3,7 @@
 
 #pragma once
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/wait_counter_policy.h"
 #include "rocjitsu/isa/register_set.h"
 #include "rocjitsu/vm/plugins/race_detector/core/common_register.h"
 #include "rocjitsu/vm/plugins/race_detector/core/instruction_snapshot.h"
@@ -19,20 +20,74 @@ namespace rocjitsu::plugins::race_detector {
 class IntervalSet;
 class RaceDetector;
 
+/// The number of tokens each wait counter holds before issuing another
+/// instruction on it stalls. Zero means the counter is absent or its capacity
+/// is not modeled.
 struct CounterCapacities {
-  int vmcnt;
-  int lgkmcnt;
+  /// Combined counters of the pre-GFX12 targets.
+  int vmcnt = 0;
+  int lgkmcnt = 0;
+  /// Split counters of gfx1250. On the pre-GFX12 capacity targets, the split
+  /// counter names in decoded metadata alias the combined counters instead.
+  /// RDNA4 has split counters, but its capacity is not modeled.
+  int loadcnt = 0;
+  int storecnt = 0;
+  int dscnt = 0;
+  int kmcnt = 0;
+  int asynccnt = 0;
+  int tensorcnt = 0;
+
+  /// Capacity of a split counter, or zero for a combined or unmodeled one.
+  [[nodiscard]] constexpr int split(amdgpu::WaitCounterType type) const {
+    switch (type) {
+    case amdgpu::WaitCounterType::LOADCNT:
+      return loadcnt;
+    case amdgpu::WaitCounterType::STORECNT:
+      return storecnt;
+    case amdgpu::WaitCounterType::DSCNT:
+      return dscnt;
+    case amdgpu::WaitCounterType::KMCNT:
+      return kmcnt;
+    case amdgpu::WaitCounterType::ASYNCCNT:
+      return asynccnt;
+    case amdgpu::WaitCounterType::TENSORCNT:
+      return tensorcnt;
+    default:
+      return 0;
+    }
+  }
 };
 
 /// Adapt the generated architecture properties to the race core's compact
 /// counter model. A zero capacity means that the architecture has no combined
 /// counter of that type.
+///
+/// gfx1250 (CDNA5) also gets split-counter capacities. The counter table in
+/// CDNA5 ISA 5.7.1 sizes LOADcnt, STOREcnt, DScnt, ASYNCcnt and TENSORcnt at 6
+/// bits and KMcnt at 5 bits, and hardware stalls issue rather than overflow a
+/// counter, so each holds 2^n - 1 tokens: 63, or 31 for KMcnt.
+/// The wait policy shared with the core memory-wait checker caps a wait at one
+/// below that all-ones value, so its maximum plus one is the same capacity.
 [[nodiscard]] inline constexpr CounterCapacities counterCapacitiesForArch(rj_code_arch_t arch) {
   const auto properties = isa_properties(arch);
-  return {
+  CounterCapacities capacities{
       .vmcnt = properties.vmcnt_capacity,
       .lgkmcnt = properties.lgkmcnt_capacity,
   };
+  if (arch == ROCJITSU_CODE_ARCH_CDNA5) {
+    const auto capacity = [](amdgpu::WaitCounterKind kind) {
+      return static_cast<int>(amdgpu::WaitCounterPolicy::maximum_dependency_wait(
+                 amdgpu::WaitcntModel::SplitGfx12, kind)) +
+             1;
+    };
+    capacities.loadcnt = capacity(amdgpu::WaitCounterKind::Load);
+    capacities.storecnt = capacity(amdgpu::WaitCounterKind::Store);
+    capacities.dscnt = capacity(amdgpu::WaitCounterKind::Ds);
+    capacities.kmcnt = capacity(amdgpu::WaitCounterKind::Km);
+    capacities.asynccnt = capacity(amdgpu::WaitCounterKind::Async);
+    capacities.tensorcnt = capacity(amdgpu::WaitCounterKind::Tensor);
+  }
+  return capacities;
 }
 
 /// Per-wave race detection state. Owns VGPR event lists, wave-level event
@@ -194,6 +249,10 @@ public:
 private:
   void retireEventRegisters(EventId);
   void checkScalarAccess(RegisterRef reg, bool isWrite) const;
+
+  /// The counter whose capacity a token of `type` counts against: the split counter
+  /// itself when it has a capacity, else the combined counter it aliases.
+  amdgpu::WaitCounterType capacityCounterFor(amdgpu::WaitCounterType type) const;
 
   template <typename Pred>
   void satisfyOldestCounterObligations(int count, amdgpu::WaitCounterType, Pred matches);
