@@ -285,6 +285,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Resolved Issues
 
+- **Fixed `amdsmi_asic_info_t.oam_id` reporting an incorrect value for multi-digit XGMI node IDs**.  
+  - The field was parsed as hex instead of decimal, so any node ID of 10 or greater reported the wrong value; its doxygen comment also incorrectly described it as a socket number rather than the XGMI physical node ID within the hive.
+
 - **Fixed wrong values from PM metrics and register table queries in the Python library**.  
   - The record names were correct, but every value was wrong.
 
