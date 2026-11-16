@@ -25,6 +25,7 @@
 #include <gtest/gtest.h>
 
 #include <cstdint>
+#include <optional>
 #include <string>
 
 namespace
@@ -121,4 +122,139 @@ TEST(kernel_iteration_filter, range_with_gaps_and_multiple_kernels)
     kernel_target_map_t targets = {{100, {1, 3}}, {200, {1, 3}}};
     EXPECT_EQ(profile_sequence(100, targets, PMC, 4), "1010");
     EXPECT_EQ(profile_sequence(200, targets, PMC, 4), "1010");
+}
+
+namespace
+{
+using rocprofiler::tool::dispatch_decision_cache_t;
+using rocprofiler::tool::replay_pass_count_for_dispatch;
+using rocprofiler::tool::targeted_once_per_dispatch;
+
+// Drives the same sequence of questions the tool sees for each launch under kernel replay: the
+// CONFIG pass-count callback first, then one counter-dispatch question per executed pass. A
+// dispatch that is not replayed gets exactly one counter-dispatch question, on the ordinary path.
+// Returns "<passes executed><T|F>" per launch, e.g. "2T" or "1F".
+struct replay_driver_t
+{
+    kernel_target_map_t          targets;
+    kernel_iteration_count_map_t counter;
+    dispatch_decision_cache_t    cache;
+    size_t                       groups   = 0;
+    uint64_t                     next_id  = 0;
+    size_t                       consults = 0;
+
+    bool targeted(uint64_t kernel_id, uint64_t dispatch_id)
+    {
+        return targeted_once_per_dispatch(cache, dispatch_id, [&] {
+            ++consults;
+            return is_targeted_kernel_iteration(kernel_id, targets, counter, PMC);
+        });
+    }
+
+    std::string launch(uint64_t kernel_id)
+    {
+        const auto id     = ++next_id;
+        const auto passes = replay_pass_count_for_dispatch(targeted(kernel_id, id), groups);
+
+        bool seen = false;
+        for(uint64_t pass = 0; pass < passes; ++pass)
+            seen = targeted(kernel_id, id);  // counter_dispatch_callback, once per pass
+        return std::to_string(passes) + (seen ? "T" : "F");
+    }
+};
+}  // namespace
+
+TEST(kernel_iteration_filter, dispatch_decision_cache_is_keyed_by_dispatch_id)
+{
+    auto cache = dispatch_decision_cache_t{};
+    EXPECT_FALSE(cache.find(5).has_value());
+
+    cache.store(5, true);
+    EXPECT_EQ(cache.find(5), std::optional<bool>{true});
+    EXPECT_FALSE(cache.find(6).has_value());
+
+    // the next dispatch replaces the slot; the stale id no longer answers
+    cache.store(6, false);
+    EXPECT_EQ(cache.find(6), std::optional<bool>{false});
+    EXPECT_FALSE(cache.find(5).has_value());
+}
+
+TEST(kernel_iteration_filter, dispatch_id_zero_is_never_cached)
+{
+    auto cache = dispatch_decision_cache_t{};
+    auto calls = 0;
+    for(int i = 0; i < 3; ++i)
+        EXPECT_TRUE(targeted_once_per_dispatch(cache, 0, [&] {
+            ++calls;
+            return true;
+        }));
+    EXPECT_EQ(calls, 3);
+}
+
+TEST(kernel_iteration_filter, replay_pass_count_is_one_unless_targeted_with_groups)
+{
+    EXPECT_EQ(replay_pass_count_for_dispatch(true, 5), 5u);
+    EXPECT_EQ(replay_pass_count_for_dispatch(true, 1), 1u);
+    EXPECT_EQ(replay_pass_count_for_dispatch(true, 0), 1u);
+    EXPECT_EQ(replay_pass_count_for_dispatch(false, 5), 1u);
+    EXPECT_EQ(replay_pass_count_for_dispatch(false, 0), 1u);
+}
+
+TEST(kernel_iteration_filter, replay_skips_kernels_outside_the_target_set)
+{
+    // kernel 1 is a compute kernel the user targets; kernel 2 stands in for a collective kernel
+    // that --kernel-exclude-regex / --kernel-include-regex left out.
+    auto d    = replay_driver_t{};
+    d.targets = {{1, {}}};
+    d.groups  = 3;
+
+    EXPECT_EQ(d.launch(1), "3T");
+    EXPECT_EQ(d.launch(2), "1F");  // not replayed, no counters
+    EXPECT_EQ(d.launch(1), "3T");
+    EXPECT_EQ(d.launch(2), "1F");
+    EXPECT_EQ(d.counter.find(2), d.counter.end());
+}
+
+TEST(kernel_iteration_filter, replay_skips_launches_outside_the_iteration_range)
+{
+    auto d    = replay_driver_t{};
+    d.targets = {{1, {2, 3}}};
+    d.groups  = 2;
+
+    // launches 1 and 4 are outside [2, 3]: they run once; 2 and 3 are replayed once per group
+    EXPECT_EQ(d.launch(1), "1F");
+    EXPECT_EQ(d.launch(1), "2T");
+    EXPECT_EQ(d.launch(1), "2T");
+    EXPECT_EQ(d.launch(1), "1F");
+}
+
+TEST(kernel_iteration_filter, filter_is_consulted_once_per_logical_dispatch)
+{
+    auto d    = replay_driver_t{};
+    d.targets = {{1, {}}};
+    d.groups  = 5;
+
+    // one launch, five passes: CONFIG plus five counter-dispatch questions, one consultation
+    EXPECT_EQ(d.launch(1), "5T");
+    EXPECT_EQ(d.consults, 1u);
+    EXPECT_EQ(d.counter[1], 1u);
+
+    // a single-group dispatch is not replayed and still advances the count by exactly one
+    d.groups = 1;
+    EXPECT_EQ(d.launch(1), "1T");
+    EXPECT_EQ(d.counter[1], 2u);
+}
+
+TEST(kernel_iteration_filter, interleaved_kernels_keep_independent_iteration_counts)
+{
+    auto d    = replay_driver_t{};
+    d.targets = {{1, {2}}, {2, {1}}};
+    d.groups  = 2;
+
+    // MPI-style loop: compute, collective, compute, collective. Only compute launch #2 and
+    // collective launch #1 are targeted; every other launch runs once.
+    EXPECT_EQ(d.launch(1), "1F");
+    EXPECT_EQ(d.launch(2), "2T");
+    EXPECT_EQ(d.launch(1), "2T");
+    EXPECT_EQ(d.launch(2), "1F");
 }

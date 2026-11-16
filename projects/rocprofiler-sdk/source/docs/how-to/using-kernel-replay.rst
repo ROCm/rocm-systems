@@ -219,8 +219,10 @@ Limitations
 * **Only single-packet, single-dispatch submissions** are replayed. Multi-packet batches warn once
   and run once.
 * **Writer lock serializes the agent** for the whole replay window. Different GPUs use different
-  locks (multi-GPU concurrent at the SDK), but there is no in-tree multi-GPU test and no MPI
-  coordination.
+  locks (multi-GPU concurrent at the SDK). Replay is per process and does not coordinate MPI
+  ranks, so a tool must not replay a kernel with effects outside its process, such as a collective
+  communication kernel. ``rocprofv3`` honors its kernel filters for this: see
+  :ref:`kernel-replay-with-mpi`.
 * **Async copies are not fenced.** ``hsa_amd_memory_async_copy`` (or HIP async memcpy) on another
   thread can mutate device memory during the replay window.
 * **Stuck drains abort the process** rather than hanging (roughly 60 s bounds inside the window).
