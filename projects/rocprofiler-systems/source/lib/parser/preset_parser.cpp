@@ -5,6 +5,8 @@
 #include "parser/parse_result.hpp"
 #include "parser/schema.hpp"
 
+#include "common/string_utility.hpp"
+
 #include <fmt/format.h>
 
 namespace rocprofsys::parser
@@ -22,7 +24,12 @@ preset_parser::parse(const schema& config_schema, const settings_t& settings) co
                 fmt::format("unknown environment variable '{}'", variable));
             continue;
         }
-        result.store_if_valid(*param, value);
+        const auto text = utility::string::trim(value);
+        if(text.empty())
+        {
+            continue;
+        }
+        result.store_if_valid(*param, text);
     }
     return result;
 }

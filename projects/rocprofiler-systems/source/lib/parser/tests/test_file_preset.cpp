@@ -3,6 +3,7 @@
 
 #include "parser/cli_parser.hpp"
 #include "parser/config_store.hpp"
+#include "parser/env_parser.hpp"
 #include "parser/file_parser.hpp"
 #include "parser/parse_result.hpp"
 #include "parser/precedence.hpp"
@@ -164,6 +165,27 @@ read_items(const std::vector<std::string>& items)
         cli_parser{ std::move(args), unknown_option::report }.parse(config_schema);
     return { .file         = stored_text(from_file, "components"),
              .command_line = stored_text(from_cli, "components") };
+}
+
+/// What a preset and the environment give for the same setting.
+struct preset_and_environment
+{
+    parse_result preset;
+    parse_result environment;
+};
+
+/// @p text as the value of @p variable in a preset and in the environment.
+preset_and_environment
+read_setting(const std::string& variable, const std::string& text)
+{
+    const auto       config_schema = make_schema();
+    const env_parser environment{
+        [&variable, &text](std::string_view name) -> std::optional<std::string> {
+            return name == variable ? std::optional{ text } : std::nullopt;
+        }
+    };
+    return { .preset      = preset_parser{}.parse(config_schema, { { variable, text } }),
+             .environment = environment.parse(config_schema) };
 }
 }  // namespace
 
@@ -362,6 +384,37 @@ TEST(parser_preset, maps_environment_settings_to_parameters)
     ASSERT_EQ(parsed.errors.size(), 2U);
     EXPECT_NE(parsed.errors.front().find("invalid value '9' for parameter 'freq'"),
               std::string::npos);
+}
+
+TEST(parser_preset, leaves_a_blank_value_unset)
+{
+    const auto parsed =
+        preset_parser{}.parse(make_schema(), { { "ROCPROFSYS_TRACE", "" },
+                                               { "ROCPROFSYS_FREQ", " " },
+                                               { "ROCPROFSYS_COMPONENTS", "" } });
+    EXPECT_TRUE(parsed.values.empty());
+    EXPECT_TRUE(parsed.errors.empty());
+}
+
+TEST(parser_preset, reads_a_value_as_the_environment_does)
+{
+    const auto settings = std::vector<std::pair<std::string, std::string>>{
+        { "ROCPROFSYS_TRACE", "" },
+        { "ROCPROFSYS_FREQ", " " },
+        { "ROCPROFSYS_FREQ", " 2 " },
+        { "ROCPROFSYS_FREQ", " 9 " },
+        { "ROCPROFSYS_COMPONENTS", "" },
+        { "ROCPROFSYS_COMPONENTS", "wall_clock," },
+        { "ROCPROFSYS_COMPONENTS", " , " },
+        { "ROCPROFSYS_COMPONENTS", "wall_clock,bogus" },
+    };
+    for(const auto& [variable, text] : settings)
+    {
+        SCOPED_TRACE(::testing::Message() << variable << "=" << text);
+        const auto found = read_setting(variable, text);
+        EXPECT_EQ(found.preset.values, found.environment.values);
+        EXPECT_EQ(found.preset.errors, found.environment.errors);
+    }
 }
 
 TEST(parser_precedence, higher_source_replaces_lower_source)
