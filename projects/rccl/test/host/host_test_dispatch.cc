@@ -1385,6 +1385,11 @@ WakePipe g_wake;
 // Set from the SIGTERM/SIGINT handler; read by the scheduler between reaps.
 volatile std::sig_atomic_t g_stopRequested = 0;
 
+// Whether a wait has already come back to say the run was asked to stop. The flag above never
+// clears, so without this the same news would be delivered again by every later wait. See
+// reapAnyChild.
+bool g_stopReported = false;
+
 extern "C" void requestStop(int)
 {
     g_stopRequested = 1;
@@ -1514,7 +1519,15 @@ pid_t reapAnyChild(ChildExit &exit, std::optional<std::chrono::milliseconds> wit
         // Tested after the reap, not before it: a child that exited is reported as having
         // exited even on the pass that notices the stop, so its result is never thrown away
         // for the sake of the news that the run is ending.
-        if (g_stopRequested != 0) {
+        //
+        // Reported on the EDGE, once. A level test would make every wait after a stop return at
+        // once, and the caller's loop -- which by then has children to wind down and nothing to
+        // do until they go -- spins on it for the whole of the teardown grace: measured at
+        // 3.64 s of CPU in 4 s of wall, during exactly the window the runner allows before its
+        // own SIGKILL. Once the news has been delivered, a wait goes back to being a wait, and
+        // the caller reads the stop from terminated() as it did before.
+        if (g_stopRequested != 0 && !g_stopReported) {
+            g_stopReported = true;
             exit = ChildExit{};
             return 0;
         }
@@ -1636,18 +1649,31 @@ std::optional<std::string> listTestsOutput(const std::string &path, std::chrono:
         break;
     }
 
-    // Collect this child specifically, rather than through reapAnyChild: a stop leaves the flag
-    // set, so a general reap would keep returning at once and the child would be left behind.
-    for (int attempt = 0; attempt < 200; ++attempt) {
-        int status = 0;
-        const pid_t done = waitpid(pid, &status, WNOHANG);
-        if (done == pid || (done < 0 && errno != EINTR)) {
-            break;
+    // Collected through the same wait as everything else, and on the same terms a test child
+    // gets: the grace period to act on the SIGTERM, then SIGKILL. This used to be a bespoke
+    // 200 x 10 ms waitpid loop, because a stop made a general reap return at once and the child
+    // would have been left behind -- which reapAnyChild no longer does.
+    std::chrono::steady_clock::time_point grace =
+        std::chrono::steady_clock::now() + kTerminateGrace;
+    bool killedOutright = false;
+    for (;;) {
+        ChildExit exit;
+        const pid_t collected = reapAnyChild(
+            exit, std::max(std::chrono::milliseconds{0},
+                           std::chrono::duration_cast<std::chrono::milliseconds>(
+                               grace - std::chrono::steady_clock::now())));
+        if (collected == pid || collected < 0) {
+            break;   // collected, or there is nothing left to wait for
         }
-        if (attempt == 50) {
-            signalChildGroup(pid, SIGKILL);   // half a second to act on the SIGTERM
+        if (collected > 0) {
+            continue;   // some other child of ours; not possible today, and harmless if it were
         }
-        std::this_thread::sleep_for(std::chrono::milliseconds{10});
+        if (killedOutright) {
+            break;   // it has had a SIGKILL and a grace period; it is the kernel's problem now
+        }
+        signalChildGroup(pid, SIGKILL);
+        killedOutright = true;
+        grace = std::chrono::steady_clock::now() + kTerminateGrace;
     }
     return std::nullopt;
 }

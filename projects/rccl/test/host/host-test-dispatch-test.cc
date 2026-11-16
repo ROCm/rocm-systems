@@ -58,6 +58,7 @@ public:
         sigaction(SIGCHLD, nullptr, &child_);
         installStopHandler();
         g_stopRequested = 0;
+        g_stopReported = false;
     }
 
     ~ScopedStopHandling()
@@ -66,6 +67,7 @@ public:
         sigaction(SIGINT, &int_, nullptr);
         sigaction(SIGCHLD, &child_, nullptr);
         g_stopRequested = 0;
+        g_stopReported = false;
         g_wake.drain();
     }
 
@@ -2929,6 +2931,33 @@ TEST(HostDispatchReapMicrotest, AStopEndsATimedWaitLongBeforeItsDeadline)
     // means the stop was not noticed until the wait ran out.
     EXPECT_LT(elapsed, std::chrono::seconds{2})
         << "the stop took " << elapsed.count() << " ms to reach a timed wait";
+}
+
+TEST(HostDispatchReapMicrotest, AWaitAfterTheStopHasBeenReportedStillWaits)
+{
+    // The stop flag never clears, so the news has to be delivered on the edge. Delivered on the
+    // level instead, every wait from the stop onwards returns at once, and the scheduler -- which
+    // has children to wind down and nothing to do until they go -- spins through the whole
+    // teardown grace at 100% of a core. The second wait below is the one that shows it: it must
+    // sit out its bound rather than come straight back.
+    const ScopedStopHandling handling;
+    const pid_t pid = spawnChild("/bin/sh", {"-c", "sleep 30"});
+    ASSERT_GT(pid, 0);
+
+    ::kill(::getpid(), SIGTERM);
+    ChildExit first{-1, true};
+    ASSERT_EQ(reapAnyChild(first, std::chrono::seconds{20}), 0) << "the stop was not reported";
+
+    const std::chrono::steady_clock::time_point start = std::chrono::steady_clock::now();
+    ChildExit second{-1, true};
+    const pid_t reaped = reapAnyChild(second, std::chrono::milliseconds{300});
+    const std::chrono::milliseconds elapsed = since(start);
+
+    discardChild(pid);
+
+    EXPECT_EQ(reaped, 0);
+    EXPECT_GE(elapsed, std::chrono::milliseconds{250})
+        << "a wait after the stop came back in " << elapsed.count() << " ms, which is a spin";
 }
 
 TEST(HostDispatchReapMicrotest, AStopThatArrivesBeforeTheWaitBeginsIsNotLost)
