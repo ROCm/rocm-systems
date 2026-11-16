@@ -94,6 +94,10 @@ void ExtensionEntryPoints::InitImageExtTable() {
   image_api.hsa_ext_image_clear_fn = hsa_ext_null;
   image_api.hsa_ext_image_destroy_fn = hsa_ext_null;
   image_api.hsa_ext_sampler_create_fn = hsa_ext_null;
+  // Without these, HSA_DISABLE_IMAGE=1 leaves the v2/v3 wrappers calling
+  // through an uninitialized pointer instead of returning an error.
+  image_api.hsa_ext_sampler_create_v2_fn = hsa_ext_null;
+  image_api.hsa_ext_sampler_create_v3_fn = hsa_ext_null;
   image_api.hsa_ext_sampler_destroy_fn = hsa_ext_null;
   image_api.hsa_amd_image_get_info_max_dim_fn = hsa_ext_null;
   image_api.hsa_ext_image_get_capability_with_layout_fn = hsa_ext_null;
@@ -442,6 +446,13 @@ hsa_status_t hsa_ext_sampler_create_v2(
     hsa_ext_sampler_t* sampler) {
   return rocr::core::Runtime::runtime_singleton_->extensions_.image_api
       .hsa_ext_sampler_create_v2_fn(agent, sampler_descriptor, sampler);
+}
+
+hsa_status_t hsa_ext_sampler_create_v3(
+    hsa_agent_t agent, const hsa_ext_sampler_descriptor_v3_t* sampler_descriptor,
+    hsa_ext_sampler_t* sampler) {
+  return rocr::core::Runtime::runtime_singleton_->extensions_.image_api
+      .hsa_ext_sampler_create_v3_fn(agent, sampler_descriptor, sampler);
 }
 
 hsa_status_t hsa_ext_sampler_destroy(hsa_agent_t agent,

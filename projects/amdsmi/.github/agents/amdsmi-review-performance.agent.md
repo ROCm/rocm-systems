@@ -4,6 +4,8 @@ description: "Performance review subagent. Checks efficiency, scaling, resource 
 tools: read/readFile, search/textSearch, search/fileSearch, search/listDirectory
 model: "Claude Sonnet 5.5"
 user-invocable: false
+applyTo: "projects/amdsmi/**"
+excludeAgent: "cloud-agent"
 ---
 
 # Performance Review — amd-smi

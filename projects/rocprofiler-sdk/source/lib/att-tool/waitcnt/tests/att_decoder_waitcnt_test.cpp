@@ -302,6 +302,12 @@ TEST(att_decoder_waitcnt_test, gfx12)
     append_isa(49, "s_wait_tensorcnt 0");
     append_isa(50, "s_wait_asynccnt 0");
 
+    // prefetches are not tracked by loadcnt
+    append_isa(51, "global_load");
+    append_isa(52, "global_prefetch_b8");
+    append_isa(53, "flat_prefetch_b8");
+    append_isa(54, "s_wait_loadcnt 0");
+
     std::vector<wave_instruction_t> insts{};
     for(size_t i = 0; i < isa_map.size(); i++)
     {
@@ -331,7 +337,7 @@ TEST(att_decoder_waitcnt_test, gfx12)
         ASSERT_EQ(dependencies.at(dep).size(), set.size());
     };
 
-    ASSERT_EQ(dependencies.size(), 14);
+    ASSERT_EQ(dependencies.size(), 15);
     set_equal(6, {2, 3});
     set_equal(7, {4});
     set_equal(8, {5});
@@ -346,6 +352,7 @@ TEST(att_decoder_waitcnt_test, gfx12)
     set_equal(42, {40, 41});
     set_equal(49, {46, 47, 48});
     set_equal(50, {44, 45});
+    set_equal(54, {51});
 }
 
 TEST(att_decoder_waitcnt_test, fail_conditions)

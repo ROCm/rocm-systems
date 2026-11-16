@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "compute_unit_test_util.h"
 #include "decode_test_util.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
@@ -29,7 +30,8 @@ protected:
     cfg.sgprs_per_wf = gfx9() ? 102 : 106;
     cfg.vgprs_per_wf = 16;
     cfg.lds_size_kb = 64;
-    cu = amdgpu::ComputeUnitCore::create("readlane", cfg, &mem, &l2);
+    ASSERT_NO_FATAL_FAILURE(
+        rocjitsu::test::initialize_compute_unit(cu, "readlane", cfg, &mem, &l2));
     decoder = Decoder::create(GetParam());
     wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, 16);
     ASSERT_NE(wf, nullptr);
@@ -80,6 +82,28 @@ TEST_P(ReadlaneSelectorTest, ReadlaneMasksInline64AndLiteralIndices) {
     EXPECT_EQ(cu->read_sgpr(wf->sgpr_alloc().base + 4),
               0xa5000000u + ((selector == 255 ? 95u : 64u) & (wf->wf_size() - 1)));
   }
+  if (GetParam() == ROCJITSU_CODE_ARCH_RDNA2) {
+    // An ordinary source VGPR beyond the 16-register allocation reads v0.
+    // v_readlane_b32 s4,v40,5
+    constexpr std::array<uint32_t, 2> words{0xd7600004, 0x02010b28};
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+    ASSERT_NE(inst, nullptr);
+    ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
+    EXPECT_EQ(cu->read_sgpr(wf->sgpr_alloc().base + 4), 0xa5000005u);
+  }
+}
+
+class Mi200ReadlaneTest : public ReadlaneSelectorTest {};
+INSTANTIATE_TEST_SUITE_P(Gfx90a, Mi200ReadlaneTest, ::testing::Values(ROCJITSU_CODE_ARCH_CDNA2));
+
+TEST_P(Mi200ReadlaneTest, OutOfRangeSourceUsesV0) {
+  wf->set_exec(0);
+  // v_readlane_b32 s4,v40,5. The wave has 16 architectural VGPRs.
+  std::array<uint32_t, 2> words{0xd2890004u, (256u + 40) | (133u << 9)};
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+  ASSERT_TRUE(inst);
+  ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
+  EXPECT_EQ(cu->read_sgpr(wf->sgpr_alloc().base + 4), 0xa5000005u);
 }
 
 TEST_P(ReadlaneSelectorTest, ReadlaneWritesBothVccWordsWithEmptyExec) {
@@ -191,7 +215,9 @@ TEST(CdnaReadlaneTest, RestoresBothVccHalvesFromInactiveSpillLanes) {
     cfg.sgprs_per_wf = 102;
     cfg.vgprs_per_wf = 128;
     cfg.lds_size_kb = 64;
-    auto cu = amdgpu::ComputeUnitCore::create("readlane", cfg, &mem, &l2);
+    std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+    ASSERT_NO_FATAL_FAILURE(
+        rocjitsu::test::initialize_compute_unit(cu, "readlane", cfg, &mem, &l2));
     auto decoder = Decoder::create(arch);
     auto *wf = cu->dispatch_wf(0, 0, 102, 128);
     ASSERT_NE(wf, nullptr);

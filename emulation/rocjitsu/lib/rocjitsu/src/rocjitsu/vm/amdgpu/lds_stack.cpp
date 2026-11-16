@@ -18,12 +18,14 @@ bool node_valid(uint32_t node) { return (node >> 3) != 0x1fffffffu; }
 // RDNA4 control state follows GPURT rtip3_ds_stack_emulation.hlsl, qualified against ISA probes.
 // https://github.com/GPUOpen-Drivers/gpurt/blob/7b226d48b46b7e92fec3b9ecc5712e5bf2bf3dd9/src/shaders/rtip3_ds_stack_emulation.hlsl
 struct Stack {
-  Lds &lds;
+  Wavefront &wave;
   uint32_t allocation, size, base, ring, valid, to_parent;
   bool parent, overflow, transition;
   void push(uint32_t node) {
     overflow |= valid == size;
-    lds.write32(allocation + base + ring * stack_slot_bytes, node);
+    const uint64_t address = uint64_t{allocation} + base + ring * stack_slot_bytes;
+    if (wave.contains_lds_range(address, 4))
+      wave.lds().write32(address, node);
     ring = ring == size - 1 ? 0 : (ring + 1) & 31;
     if (to_parent == size)
       parent = false;
@@ -43,7 +45,8 @@ struct Stack {
       }
     }
     const uint32_t next = ring ? ring - 1 : size - 1;
-    const uint32_t node = lds.read32(allocation + base + next * stack_slot_bytes);
+    const uint64_t address = uint64_t{allocation} + base + next * stack_slot_bytes;
+    const uint32_t node = wave.contains_lds_range(address, 4) ? wave.lds().read32(address) : 0;
     if (second && (node & 7) == 6)
       return invalid;
     ring = next;
@@ -144,9 +147,10 @@ void execute_lds_stack(Wavefront &wf, VectorMemState &d) {
       if (first != count) {
         for (uint32_t i = count; i-- > first + 1;)
           if (data[i + 2] != invalid) {
-            wf.lds().write32(static_cast<uint32_t>(d.per_lane_addr[lane]) +
-                                 (index % size) * stack_slot_bytes,
-                             data[i + 2]);
+            const uint32_t address =
+                static_cast<uint32_t>(d.per_lane_addr[lane]) + (index % size) * stack_slot_bytes;
+            if (wf.contains_lds_range(address, 4))
+              wf.lds().write32(address, data[i + 2]);
             index = (index + 1) & 0xffff;
           }
         result[0] = data[first + 2];
@@ -154,13 +158,17 @@ void execute_lds_stack(Wavefront &wf, VectorMemState &d) {
         --index;
         const uint32_t address =
             static_cast<uint32_t>(d.per_lane_addr[lane]) + (index % size) * stack_slot_bytes;
-        result[0] = wf.lds().read32(address);
-        wf.lds().write32(address, invalid);
+        if (!wf.contains_lds_range(address, 4)) {
+          result[0] = 0;
+        } else {
+          result[0] = wf.lds().read32(address);
+          wf.lds().write32(address, invalid);
+        }
       } else
         result[0] = terminal;
       ptr = (ptr & 0xffff0000u) | index;
     } else {
-      Stack s{wf.lds(),
+      Stack s{wf,
               wf.lds_base(),
               size,
               static_cast<uint32_t>(d.per_lane_addr[lane]) - wf.lds_base(),

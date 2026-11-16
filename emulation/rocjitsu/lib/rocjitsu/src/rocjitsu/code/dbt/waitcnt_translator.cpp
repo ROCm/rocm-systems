@@ -56,8 +56,11 @@ std::vector<uint32_t> encode_waitcnt_gfx12(const WaitcntValues &vals) {
   if (need_expcnt)
     words.push_back(make_gfx12_sopp(rdna4::kSWaitExpcnt, vals.expcnt));
 
-  if (words.empty())
-    words.push_back(build_s_nop());
+  if (words.empty()) {
+    constexpr util::FailureOr<uint32_t> nop = build_s_nop();
+    static_assert(nop.succeeded());
+    words.push_back(nop.value());
+  }
 
   return words;
 }

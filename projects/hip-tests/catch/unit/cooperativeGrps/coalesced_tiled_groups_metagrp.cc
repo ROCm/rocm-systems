@@ -6,6 +6,7 @@
 
 #include <hip_test_common.hh>
 #include <hip/hip_cooperative_groups.h>
+#include <resource_guards.hh>
 
 
 /**
@@ -40,6 +41,79 @@ static __global__ void kernel_tiledgrp_threadblk(int* mgrpSize, int* mgrpRank) {
   thread_block_tile<test_size> tiledGr = tiled_partition<test_size>(this_thread_block());
   mgrpSize[id] = tiledGr.meta_group_size();
   mgrpRank[id] = tiledGr.meta_group_rank();
+}
+
+template <unsigned int tileSize>
+static __global__ void kernel_tiledgrp_meta_rank(unsigned int* ranks, bool divergent) {
+  const auto block = this_thread_block();
+  const auto tile = tiled_partition<tileSize>(block);
+  const thread_block_tile<tileSize> erasedTile = tile;
+  const auto nestedTile = tiled_partition<tileSize / 2>(tile);
+  const auto rank = block.thread_rank();
+  if (!divergent || rank % 2 != 0) {
+    ranks[3 * rank] = tile.meta_group_rank();
+    ranks[3 * rank + 1] = erasedTile.meta_group_rank();
+    ranks[3 * rank + 2] = nestedTile.meta_group_rank();
+  }
+}
+
+template <unsigned int tileSize> static void TiledGroupMetaRankTest(dim3 threads, bool divergent) {
+  DYNAMIC_SECTION("Tile size: " << tileSize) {
+    constexpr auto rankCount = 3 * block_size;
+    constexpr auto allocSize = rankCount * sizeof(unsigned int);
+    LinearAllocGuard<unsigned int> ranksDev(LinearAllocs::hipMalloc, allocSize);
+    LinearAllocGuard<unsigned int> ranksHost(LinearAllocs::hipHostMalloc, allocSize);
+    HIP_CHECK(hipMemset(ranksDev.ptr(), 0xff, allocSize));
+    kernel_tiledgrp_meta_rank<tileSize><<<1, threads>>>(ranksDev.ptr(), divergent);
+    HIP_CHECK(hipGetLastError());
+    HIP_CHECK(hipMemcpy(ranksHost.ptr(), ranksDev.ptr(), allocSize, hipMemcpyDeviceToHost));
+    constexpr const char* streamNames[]{"typed", "erased", "nested"};
+    for (unsigned int index = 0; index < rankCount; ++index) {
+      const auto rank = index / 3;
+      // meta_group_rank() is the parent thread rank divided by the child tile size.
+      // The nested tile's parent thread rank is rank % tileSize.
+      const bool nested = index % 3 == 2;
+      const auto parentRank = nested ? rank % tileSize : rank;
+      const auto childSize = nested ? tileSize / 2 : tileSize;
+      const auto expected = divergent && rank % 2 == 0 ? ~0u : parentRank / childSize;
+      if (ranksHost.ptr()[index] != expected) {
+        INFO("Rank stream: " << streamNames[index % 3]);
+        INFO("Block thread rank: " << rank);
+        REQUIRE(ranksHost.ptr()[index] == expected);
+      }
+    }
+  }
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *    - Verify exact meta-group ranks for typed, type-erased, and nested tiles in 1D, 2D, and
+ * 3D blocks, with all lanes active and with only odd lanes active. Cover full-wave and sub-wave
+ * tiles on wave32 and wave64 devices.
+ * Test source
+ * ------------------------
+ *    - unit/cooperativeGrps/coalesced_tiled_groups_metagrp.cc
+ * Test requirements
+ * ------------------------
+ *    - HIP_VERSION >= 6.0
+ */
+HIP_TEST_CASE(Unit_tiled_groups_metagrp_rank) {
+  const auto threads = GENERATE(dim3(256), dim3(8, 32), dim3(4, 8, 8));
+  const auto divergent = GENERATE(false, true);
+  INFO("Block dimensions: x " << threads.x << ", y " << threads.y << ", z " << threads.z);
+  INFO("Odd lanes only: " << divergent);
+  TiledGroupMetaRankTest<16>(threads, divergent);
+  TiledGroupMetaRankTest<32>(threads, divergent);
+#if HT_AMD
+  int device = 0;
+  hipDeviceProp_t properties{};
+  HIP_CHECK(hipGetDevice(&device));
+  HIP_CHECK(hipGetDeviceProperties(&properties, device));
+  if (properties.warpSize == 64) {
+    TiledGroupMetaRankTest<64>(threads, divergent);
+  }
+#endif
 }
 
 /**

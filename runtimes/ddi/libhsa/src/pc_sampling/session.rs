@@ -376,7 +376,12 @@ impl Resources {
     /// Registers the trap handler and sampling trace with the GPU.
     fn activate(&mut self) -> Status {
         let trace = self.device.gpu().and_then(|gpu| match self.trace_id {
-            Some(id) => gpu.adopt_pc_sampling(self.request, id),
+            Some(id) => {
+                // SAFETY: The admitted HSA create-from-ID call transfers sole
+                // control of the stopped matching trace. Resources retains
+                // trap/sample backing through use and uncertain teardown.
+                unsafe { crate::platform::profiling::adopt(&gpu, self.request, id) }
+            }
             None => gpu.create_pc_sampling(self.request),
         });
         let trace = match trace {
@@ -757,7 +762,7 @@ impl SessionHandle {
     pub(super) fn create(
         resources: Resources,
         agent: HsaAgent,
-        quarantine: &AtomicBool,
+        quarantine: &crate::runtime::GenerationHealth,
     ) -> Result<Arc<Self>, Status> {
         let session = Arc::new(Self {
             agent,
@@ -801,7 +806,7 @@ impl SessionHandle {
         };
         if status != SUCCESS {
             if trap_may_be_installed {
-                quarantine.store(true, Ordering::Release);
+                quarantine.quarantine();
             }
             session.quarantine();
             return Err(status);

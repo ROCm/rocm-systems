@@ -12,6 +12,8 @@
 #include "MPITestBase.hpp"
 #include "NetIbCastInspect.hpp"
 #include "NetIbFaultInject.hpp"
+#include "NetIbQpSharingInspect.hpp"
+#include "QpShareRefModel.hpp"
 #include "ResourceGuards.hpp"
 #include "TestChecks.hpp"
 #include "DeviceBufferHelpers.hpp"
@@ -135,25 +137,79 @@ inline bool IsRealRequest(void* request) {
         }                                                                                \
     } while (0)
 
+// Skip a QP-sharing test unless the net plugin actually enabled sharing, or when
+// resiliency is enabled alongside it. Reads the plugin's effective configuration
+// (ncclIbCastGetQpSharingConfig), so it must run after the plugin's init(). The
+// CAST scheduler needs no check: init() turns it off whenever sharing is on.
+// Must be called from the test body (not a helper), because GTEST_SKIP() only
+// interrupts execution when expanded inline in the test scope. The qpshare_*
+// categories in test_categories_mpi.yaml (CI) and the qpshare_base env block in
+// tools/scripts/test_runner/configs/mi355x_ainic_tw_roce.json (manual runs)
+// enable sharing.
+#define QPSHARE_ENABLED_OR_SKIP()                                                         \
+    do {                                                                                   \
+        const struct ncclIbQpSharingConfig _cfg = QpShareConfig();                         \
+        if (!_cfg.enabled) {                                                               \
+            GTEST_SKIP() << "Requires QP sharing enabled in the net plugin "               \
+                            "(RCCL_IB_QP_SHARING_ENABLE=1, RCCL_IB_COMM_NGROUPS >= 1). "   \
+                            "Use the qpshare_* categories in test_categories_mpi.yaml "     \
+                            "or the qpshare_base config in mi355x_ainic_tw_roce.json.";     \
+        }                                                                                   \
+        if (_cfg.resiliencyEnabled) {                                                      \
+            GTEST_SKIP() << "QP sharing tests do not support resiliency combos yet.";      \
+        }                                                                                   \
+    } while (0)
+
+// Fatal setup checks must expand in the test body, not a helper.
+#define ASSERT_SETUP_CAST_CONNECTION(dev, listenComm, sendComm, recvComm)                \
+    do {                                                                                 \
+        std::string _setupWhy;                                                           \
+        ASSERT_EQ(SetupCastConnection((dev), (listenComm), (sendComm), (recvComm),       \
+                                      &_setupWhy),                                       \
+                  ncclSuccess)                                                           \
+            << "IB-CAST connection setup failed on at least one rank (this rank: "       \
+            << _setupWhy << ")";                                                         \
+    } while (0)
+
+#define ASSERT_SETUP_CONNECTION(dev, pair, guard)                                        \
+    do {                                                                                 \
+        std::string _setupWhy;                                                           \
+        ASSERT_EQ(SetupConnectionWithGuard((dev), (pair), (guard), &_setupWhy),          \
+                  ncclSuccess)                                                           \
+            << "NET/IB connection setup failed on at least one rank (this rank: "        \
+            << _setupWhy << ")";                                                         \
+    } while (0)
+
 // External NET IB plugin
 extern ncclNet_t ncclNetIb;
 // External NET IB-CAST plugin (WRR scheduler, multi-QP, AINIC features)
 extern ncclNet_t netIbCast;
 
-// Select plugin by NCCL_NET env var name; falls back to ncclNetIb.
-inline ncclNet_t* GetPlugin() {
-    static ncclNet_t* plugins[] = {&ncclNetIb, &netIbCast};
-    const char* env = getenv("NCCL_NET");
-    if (env) {
-        for (auto* p : plugins) {
-            if (strcmp(env, p->name) == 0) {
-                TEST_INFO("Rank %d: Using plugin %s", MPIEnvironment::world_rank, p->name);
-                return p;
-            }
-        }
+// Keep the next three in sync with src/plugin/net.cc: if the library and the
+// tests disagree about which plugin an NCCL_NET value selects, a suite can
+// silently exercise a plugin it was not meant to cover.
+inline const char* CanonicalNetName(const char* env) {
+    return rcclCanonicalNetName(env);
+}
+
+// nullptr means "names no internal IB plugin", so the caller can tell "wrong
+// suite for this config" from "typo" instead of silently falling back to IB.
+inline ncclNet_t* ResolveNetPlugin(const char* env) {
+    static ncclNet_t* const plugins[] = {&ncclNetIb, &netIbCast};
+    const char* name = CanonicalNetName(env);
+    // Unset: the library picks IB-CAST on AINIC and IB elsewhere, unless
+    // NCCL_NET_PLUGIN names an external plugin (src/plugin/net.cc:310).
+    if (name == nullptr) return rcclUseAinic() ? &netIbCast : &ncclNetIb;
+    for (auto* p : plugins) {
+        if (strcasecmp(name, p->name) == 0) return p;
     }
-    TEST_INFO("Rank %d: Using default plugin %s", MPIEnvironment::world_rank, ncclNetIb.name);
-    return &ncclNetIb;
+    return nullptr;
+}
+
+// A real plugin outside this suite's scope: a deliberate config, so skip.
+inline bool IsSocketNetName(const char* env) {
+    const char* name = CanonicalNetName(env);
+    return name != nullptr && strcasecmp(name, ncclNetSocket.name) == 0;
 }
 
 // NET IB-specific resource deleters
@@ -314,11 +370,25 @@ protected:
 
     void SetUp() override {
         MPITestBase::SetUp();
-        net_ = GetPlugin();
         numDevices_ = 0;
         initCtx_ = nullptr;
         threadCtxInit_ = nullptr;
         listenCommInit_ = nullptr;
+
+        const char* env = getenv("NCCL_NET");
+        net_ = ResolveNetPlugin(env);
+        if (net_ == nullptr) {
+            // Never fall back silently -- that is what hid the original defect.
+            if (IsSocketNetName(env)) {
+                GTEST_SKIP() << "NCCL_NET=" << env << " selects a non-IB plugin";
+            }
+            net_ = &ncclNetIb;
+            FAIL() << "NCCL_NET=" << env << " names no internal IB plugin; expected one of "
+                   << ncclNetIb.name << ", " << netIbCast.name << " or ROCM-IB (alias for "
+                   << netIbCast.name << ")";
+        }
+        TEST_INFO("Rank %d: Using plugin %s (NCCL_NET=%s)", MPIEnvironment::world_rank,
+                  net_->name, env ? env : "<unset>");
     }
 
     void TearDown() override {
@@ -470,16 +540,10 @@ protected:
         ncclNetHandle_t handle{};
     };
 
-    // Both ranks leave this together, or neither does.
-    //
-    // Every failure here used to return early, and each early return stranded the
-    // peer: a listen failure never sent the handle, so the connector sat in
-    // MPI_Recv until the suite timeout, and a failure after that skipped the
-    // closing barrier, so the other side sat there instead. A caller cannot fix
-    // that from outside, however carefully it checks the return value, because by
-    // then its peer is already blocked. So the handle message carries a status
-    // word, and the closing barrier became a reduction of it.
-    ncclResult_t SetupConnection(int dev, ConnectionPair& pair, int rank, int peerRank) {
+    // Exchange setup status so both ranks return the same verdict.
+    // `why` distinguishes a local setup failure from a peer failure.
+    [[nodiscard]] ncclResult_t SetupConnection(int dev, ConnectionPair& pair, int rank, int peerRank,
+                                               std::string* why = nullptr) {
         // Cap the accept/connect handshake so a dead fabric fails fast instead
         // of spinning forever (AICOMRCCL-1577).
         const int maxAttempts = kConnectTimeoutMs / kPollIntervalMs;
@@ -488,6 +552,7 @@ protected:
             ncclNetHandle_t handle;
         } handshake = {};
         ncclResult_t local = ncclSuccess;
+        const char* localReason = "ok";
 
         if (rank == 0) {
             local = CreateListenComm(dev, &pair.handle, &pair.listenComm);
@@ -495,6 +560,7 @@ protected:
             // and ListenCloseListen handshakes. Nothing reaches it today: ncclIbListen
             // assigns *listenComm only on its success path.
             handshake.status = (local == ncclSuccess && pair.listenComm != nullptr) ? 1 : 0;
+            if (!handshake.status) localReason = "listen failed";
             if (handshake.status) memcpy(handshake.handle, pair.handle, sizeof(pair.handle));
             // Sent even on failure: the peer is waiting for this message.
             MPI_Send(&handshake, sizeof(handshake), MPI_BYTE, peerRank, 0, MPI_COMM_WORLD);
@@ -503,13 +569,17 @@ protected:
             int attempts = 0;
             while (handshake.status && local == ncclSuccess && !done) {
                 local = AcceptConnection(pair.listenComm, &pair.recvComm);
-                if (local != ncclSuccess) break;
+                if (local != ncclSuccess) {
+                    localReason = "accept failed";
+                    break;
+                }
                 if (pair.recvComm != nullptr) {
                     done = 1;
                     break;
                 }
                 if (++attempts >= maxAttempts) {
                     local = ncclInternalError;
+                    localReason = "accept timed out";
                     break;
                 }
                 usleep(kPollIntervalUs);
@@ -519,19 +589,24 @@ protected:
                      MPI_STATUS_IGNORE);
             if (!handshake.status) {
                 local = ncclRemoteError;  // the peer could not listen
+                localReason = "peer's listen failed";
             } else {
                 memcpy(pair.handle, handshake.handle, sizeof(pair.handle));
                 int done = 0;
                 int attempts = 0;
                 while (!done) {
                     local = ConnectToRemote(dev, &pair.handle, &pair.sendComm);
-                    if (local != ncclSuccess) break;
+                    if (local != ncclSuccess) {
+                        localReason = "connect failed";
+                        break;
+                    }
                     if (pair.sendComm != nullptr) {
                         done = 1;
                         break;
                     }
                     if (++attempts >= maxAttempts) {
                         local = ncclInternalError;
+                        localReason = "connect timed out";
                         break;
                     }
                     usleep(kPollIntervalUs);
@@ -544,6 +619,9 @@ protected:
         int ok = (local == ncclSuccess) ? 1 : 0;
         MPI_Allreduce(MPI_IN_PLACE, &ok, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD);
         if (local == ncclSuccess && ok) return ncclSuccess;
+        // This rank is fine but the peer is not: say so rather than repeating "ok".
+        if (local == ncclSuccess) localReason = "peer failed setup";
+        if (why) *why = localReason;
 
         // Now that the failure is recoverable rather than fatal, whatever this rank did
         // create has to be closed here, because nothing else will.
@@ -602,6 +680,16 @@ protected:
         return done ? ncclSuccess : ncclInternalError;
     }
 
+    // Test seam for deterministic peer-failure propagation coverage.
+    bool forceSetupFailureAfterConnect_ = false;
+
+    // One local skip request skips every rank before the next collective.
+    bool SkipAgreedAcrossRanks(bool localWantsSkip) {
+        int skip = localWantsSkip ? 1 : 0;
+        MPI_Allreduce(MPI_IN_PLACE, &skip, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
+        return skip != 0;
+    }
+
     // Composite block: Init plugin + assert device count > 0.
     // Pass a non-null pointer to receive the count; pass nullptr to discard it.
     void AssertInitAndGetDevices(int* ndev) {
@@ -635,17 +723,21 @@ protected:
 
     // Composite block: SetupConnection + wire up NetConnectionGuard for RAII cleanup.
     // dev: device index. Uses world_rank to determine listener vs connector.
-    void SetupConnectionWithGuard(int dev, ConnectionPair& pair,
-                                  NetConnectionGuard& guard) {
+    // Callers assert this rank-agreed result from the test body.
+    [[nodiscard]] ncclResult_t SetupConnectionWithGuard(int dev, ConnectionPair& pair,
+                                                        NetConnectionGuard& guard,
+                                                        std::string* why = nullptr) {
         const int rank     = MPIEnvironment::world_rank;
         const int peerRank = (rank + 1) % 2;
-        ASSERT_EQ(SetupConnection(dev, pair, rank, peerRank), ncclSuccess);
+        ncclResult_t res = SetupConnection(dev, pair, rank, peerRank, why);
+        if (res != ncclSuccess) return res;
         if (rank == 0) {
             guard.setRecvComm(pair.recvComm);
             guard.setListenComm(pair.listenComm);
         } else {
             guard.setSendComm(pair.sendComm);
         }
+        return ncclSuccess;
     }
 
     // Composite block: Post a single irecv. Wraps the 4-array boilerplate.
@@ -658,7 +750,7 @@ protected:
         ASSERT_EQ(PostRecv(recvComm, 1, bufs, sizes, tags, handles, request, optRecvHint), ncclSuccess);
     }
 
-    void OptRecvCompletionRunMultiRecv(bool optRecvHint);
+    void OptRecvCompletionRunMultiRecv(bool optRecvHint, ConnectionPair& pair);
 
     static bool PortIsEthernet(const char* portsPath, const char* port) {
         char path[PATH_MAX];
@@ -934,12 +1026,12 @@ protected:
 
     // On return: rank 0 owns listenComm+recvComm, rank 1 owns sendComm.
     // Caller is responsible for closing all comms.
-    // Same contract as SetupConnection: the ranks agree before anyone asserts, so
-    // a one-sided failure cannot leave the peer waiting for a handle or a barrier.
-    // The assertion at the end is reached by both ranks with the same verdict,
-    // which is what makes a fatal failure safe here.
-    void SetupCastConnection(int dev,
-                             void** listenComm, void** sendComm, void** recvComm) {
+    // Callers assert this rank-agreed result from the test body.
+    [[nodiscard]] ncclResult_t SetupCastConnection(int dev,
+                                                   void** listenComm, void** sendComm, void** recvComm,
+                                                   std::string* why = nullptr,
+                                                   int timeoutMs = kConnectTimeoutMs) {
+        const int maxAttempts = std::max(1, timeoutMs / kPollIntervalMs);
         const int rank = MPIEnvironment::world_rank;
         const int peer = 1 - rank;
         struct SetupHandshake {
@@ -957,59 +1049,485 @@ protected:
         // accept/connect failed" apart from "the peer's listen failed", instead
         // of both ranks reporting the same generic verdict.
         bool localOk = true;
+        ncclResult_t localResult = ncclSuccess;
         const char* localReason = "ok";
 
         if (rank == 0) {
-            localOk = (CreateListenComm(dev, &handle, listenComm) == ncclSuccess)
-                      && *listenComm != nullptr;
+            localResult = CreateListenComm(dev, &handle, listenComm);
+            localOk = (localResult == ncclSuccess) && *listenComm != nullptr;
             handshake.status = localOk ? 1 : 0;
-            if (!localOk) localReason = "listen failed";
+            if (!localOk) {
+                localReason = "listen failed";
+                if (localResult == ncclSuccess) localResult = ncclInternalError;
+            }
             if (localOk) memcpy(handshake.handle, handle, sizeof(handle));
             // Sent even on failure: the peer is waiting for this message.
             MPI_Send(&handshake, sizeof(handshake), MPI_BYTE, peer, 0, MPI_COMM_WORLD);
 
-            for (int i = 0; localOk && i < kConnectTimeoutMs / kPollIntervalMs
+            for (int i = 0; localOk && i < maxAttempts
                             && *recvComm == nullptr; i++) {
-                if (AcceptConnection(*listenComm, recvComm) != ncclSuccess) {
+                localResult = AcceptConnection(*listenComm, recvComm);
+                if (localResult != ncclSuccess) {
                     localOk = false;
                     localReason = "accept failed";
                 }
                 if (localOk && *recvComm == nullptr) usleep(kPollIntervalUs);
             }
-            if (localOk && *recvComm == nullptr) { localOk = false; localReason = "accept timed out"; }
+            if (localOk && *recvComm == nullptr) {
+                localOk = false;
+                localResult = ncclInternalError;
+                localReason = "accept timed out";
+            }
         } else {
             MPI_Recv(&handshake, sizeof(handshake), MPI_BYTE, peer, 0, MPI_COMM_WORLD,
                      MPI_STATUS_IGNORE);
             if (handshake.status != 1) {
                 localOk = false;
+                localResult = ncclRemoteError;
                 localReason = "peer's listen failed";
             } else {
                 memcpy(handle, handshake.handle, sizeof(handle));
-                for (int i = 0; localOk && i < kConnectTimeoutMs / kPollIntervalMs
+                for (int i = 0; localOk && i < maxAttempts
                                 && *sendComm == nullptr; i++) {
-                    if (ConnectToRemote(dev, &handle, sendComm) != ncclSuccess) {
+                    localResult = ConnectToRemote(dev, &handle, sendComm);
+                    if (localResult != ncclSuccess) {
                         localOk = false;
                         localReason = "connect failed";
                     }
                     if (localOk && *sendComm == nullptr) usleep(kPollIntervalUs);
                 }
-                if (localOk && *sendComm == nullptr) { localOk = false; localReason = "connect timed out"; }
+                if (localOk && *sendComm == nullptr) {
+                    localOk = false;
+                    localResult = ncclInternalError;
+                    localReason = "connect timed out";
+                }
             }
+        }
+
+        // Test seam: deterministically exercises a post-connect failure propagated by the reduction.
+        if (forceSetupFailureAfterConnect_ && localOk) {
+            localOk = false;
+            localResult = ncclInternalError;
+            localReason = "failure injected after this rank's setup succeeded";
         }
 
         int ok = localOk ? 1 : 0;
         MPI_Allreduce(MPI_IN_PLACE, &ok, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD);
-        if (!ok) {
-            // The assertion below is fatal and unwinds through the caller's
-            // ASSERT_NO_FATAL_FAILURE before its teardown runs, so anything this
-            // rank created must be released here or it stays open for the rest
-            // of the process. Data comms first, then the listener.
-            if (*sendComm) { CloseSendComm(*sendComm); *sendComm = nullptr; }
-            if (*recvComm) { CloseRecvComm(*recvComm); *recvComm = nullptr; }
-            if (*listenComm) { CloseListenComm(*listenComm); *listenComm = nullptr; }
+        if (ok) return ncclSuccess;
+
+        // Close local resources before the caller's fatal assertion unwinds.
+        if (*sendComm) { CloseSendComm(*sendComm); *sendComm = nullptr; }
+        if (*recvComm) { CloseRecvComm(*recvComm); *recvComm = nullptr; }
+        if (*listenComm) { CloseListenComm(*listenComm); *listenComm = nullptr; }
+        // This rank is fine but the peer is not: say so rather than repeating "ok".
+        if (localOk) localReason = "peer failed setup";
+        if (why) *why = localReason;
+        return localOk ? ncclRemoteError : localResult;
+    }
+
+    // Non-fatal, rank-agreed variant of SetupCastConnection.
+    //
+    // Returns true only when BOTH ranks established their side (agreed via
+    // MPI_LAND, so the two ranks never disagree about whether the connection
+    // exists). On false, each rank has closed whatever it managed to open and
+    // all three out-params are left null, so the caller can stop cleanly.
+    // It prevents a timeout in the case of a failed connection.
+    bool TryCastConnection(int dev,
+                           void** listenComm, void** sendComm, void** recvComm) {
+        const int rank = MPIEnvironment::world_rank;
+        const int peer = 1 - rank;
+        ncclNetHandle_t handle;
+        memset(&handle, 0, sizeof(handle));
+        int ok = 1;
+
+        if (rank == 0) {
+            if (CreateListenComm(dev, &handle, listenComm) != ncclSuccess || *listenComm == nullptr)
+                ok = 0;
+            // Sent unconditionally: rank 1 is already blocked in MPI_Recv, and
+            // a zeroed handle makes its connect fail rather than hang.
+            MPI_Send(&handle, sizeof(handle), MPI_BYTE, peer, 0, MPI_COMM_WORLD);
+            for (int i = 0; ok && i < kMaxRetryAttempts && *recvComm == nullptr; i++) {
+                if (AcceptConnection(*listenComm, recvComm) != ncclSuccess) ok = 0;
+                else if (*recvComm == nullptr) usleep(kPollIntervalUs);
+            }
+            if (*recvComm == nullptr) ok = 0;
+        } else {
+            MPI_Recv(&handle, sizeof(handle), MPI_BYTE, peer, 0, MPI_COMM_WORLD,
+                     MPI_STATUS_IGNORE);
+            for (int i = 0; ok && i < kMaxRetryAttempts && *sendComm == nullptr; i++) {
+                if (ConnectToRemote(dev, &handle, sendComm) != ncclSuccess) ok = 0;
+                else if (*sendComm == nullptr) usleep(kPollIntervalUs);
+            }
+            if (*sendComm == nullptr) ok = 0;
         }
-        ASSERT_EQ(ok, 1) << "IB-CAST connection setup failed on at least one rank (this rank: "
-                         << localReason << ")";
+
+        int bothOk = 0;
+        MPI_Allreduce(&ok, &bothOk, 1, MPI_INT, MPI_LAND, MPI_COMM_WORLD);
+        if (!bothOk) {
+            if (*recvComm)   { CloseRecvComm(*recvComm);     *recvComm   = nullptr; }
+            if (*listenComm) { CloseListenComm(*listenComm); *listenComm = nullptr; }
+            if (*sendComm)   { CloseSendComm(*sendComm);     *sendComm   = nullptr; }
+        }
+        return bothOk != 0;
+    }
+
+    // Close one cast connection with no memory handle and no barrier. Each rank
+    // holds only its own comms (rank 0: listen+recv, rank 1: send), so the null
+    // checks make this rank-conditional without a rank test. Non-fatal: a close
+    // failure must not strand the peer at the next barrier.
+    void CloseCastConnection(void* listenComm, void* sendComm, void* recvComm) {
+        if (recvComm)   EXPECT_EQ(CloseRecvComm(recvComm), ncclSuccess);
+        if (listenComm) EXPECT_EQ(CloseListenComm(listenComm), ncclSuccess);
+        if (sendComm)   EXPECT_EQ(CloseSendComm(sendComm), ncclSuccess);
+    }
+
+    // One cast connection, from one rank's point of view. Both ranks build the
+    // same sequence; each holds only its own side (rank 0: listen+recv, rank 1:
+    // send), so the unused pointers stay null.
+    struct QpShareConn {
+        void* listen = nullptr;
+        void* send   = nullptr;
+        void* recv   = nullptr;
+        QpShareRefModel::Placement place;
+
+        // This rank's comm: the one the introspection hook can be called on.
+        void* Mine() const { return MPIEnvironment::world_rank == 0 ? recv : send; }
+    };
+
+    // Open `n` connections, appending to `cs` and advancing `model` in step.
+    // Stops at the first failure and reports which connection it was and where
+    // the model expected it to land -- diagnosing *why* a connect failed is the
+    // log's job, not the assertion's. Returns the number established.
+    int OpenConns(int n, QpShareRefModel& model,
+                  std::vector<QpShareConn>& cs, const char* what) {
+        int opened = 0;
+        for (int c = 0; c < n; c++) {
+            QpShareConn conn;
+            conn.place = model.Next();
+            if (!TryCastConnection(/*dev=*/0, &conn.listen, &conn.send, &conn.recv)) {
+                ADD_FAILURE()
+                    << what << ": connection " << c << " of " << n << " failed to establish"
+                    << " (RCCL_IB_COMM_NGROUPS=" << QpShareNGroups()
+                    << " RCCL_IB_QP_DEPTH_MULTIPLIER=" << QpShareDepthMultiplier()
+                    << "); it would have been comm #" << (model.Load(conn.place.group) + 1)
+                    << " in group " << conn.place.group;
+                break;
+            }
+            model.Commit(conn.place);
+            cs.push_back(conn);
+            opened++;
+        }
+        return opened;
+    }
+
+    // This rank's comms, in order -- the vector ExpectQpShareLayout takes.
+    std::vector<void*> MineOf(const std::vector<QpShareConn>& cs) {
+        std::vector<void*> mine;
+        mine.reserve(cs.size());
+        for (const QpShareConn& c : cs) mine.push_back(c.Mine());
+        return mine;
+    }
+
+    std::vector<QpShareRefModel::Placement> PlacesOf(const std::vector<QpShareConn>& cs) {
+        std::vector<QpShareRefModel::Placement> p;
+        p.reserve(cs.size());
+        for (const QpShareConn& c : cs) p.push_back(c.place);
+        return p;
+    }
+
+    // Close every connection and empty `cs`. Barriers between closes so the two
+    // ranks tear the same connection down together.
+    void CloseAll(std::vector<QpShareConn>& cs) {
+        for (const QpShareConn& c : cs) {
+            CloseCastConnection(c.listen, c.send, c.recv);
+            MPI_Barrier(MPI_COMM_WORLD);
+        }
+        cs.clear();
+    }
+
+    // Same MPI_LAND agreement TryCastConnection uses, for any other loop of
+    // per-connection setup calls (RegisterMemory, PostRecv, ...) that can fail
+    // on one rank but not the other.
+    bool RankAgree(bool localOk) {
+        int ok = localOk ? 1 : 0;
+        int allOk = 0;
+        MPI_Allreduce(&ok, &allOk, 1, MPI_INT, MPI_LAND, MPI_COMM_WORLD);
+        return allOk != 0;
+    }
+
+    // Register bufs[c] on comms[c] for every connection, stopping at the first
+    // failure. Returns the cross-rank agreed result, so callers can
+    // ASSERT_TRUE on it and both ranks take the same branch. Declare a
+    // SCOPE_EXIT(DeregisterAll(...)) after the buffers and before this call,
+    // so an early return cannot leave live MRs over freed memory.
+    bool RegisterAll(const std::vector<void*>& comms, std::vector<std::vector<char>>& bufs,
+                     std::vector<void*>& mhandles) {
+        bool ok = true;
+        for (size_t c = 0; c < comms.size() && ok; c++) {
+            if (RegisterMemory(comms[c], bufs[c].data(), bufs[c].size(), NCCL_PTR_HOST,
+                               &mhandles[c]) != ncclSuccess) {
+                ADD_FAILURE() << "RegisterMemory failed for conn " << c;
+                ok = false;
+            }
+        }
+        return RankAgree(ok);
+    }
+
+    // Deregister every handle that is set, and clear it, so a second call is a
+    // no-op.
+    void DeregisterAll(const std::vector<void*>& comms, std::vector<void*>& mhandles) {
+        for (size_t c = 0; c < comms.size(); c++) {
+            if (mhandles[c]) {
+                EXPECT_EQ(DeregisterMemory(comms[c], mhandles[c]), ncclSuccess);
+                mhandles[c] = nullptr;
+            }
+        }
+    }
+
+    // One connect -> transfer -> close cycle, so driver-internal CQs settle
+    // before a test baselines RDMA object counts. Returns false, with the
+    // failure recorded and the connection closed, if the cycle could not run;
+    // the caller should return.
+    bool WarmupCycle(std::vector<char>& buf, int tag) {
+        const int rank = MPIEnvironment::world_rank;
+        void* l = nullptr; void* s = nullptr; void* r = nullptr;
+        if (!TryCastConnection(/*dev=*/0, &l, &s, &r)) {
+            ADD_FAILURE() << "warmup connection failed";
+            return false;
+        }
+        void* comm = (rank == 0) ? r : s;
+        void* mh   = nullptr;
+        const bool regOk = (RegisterMemory(comm, buf.data(), buf.size(), NCCL_PTR_HOST, &mh) == ncclSuccess);
+        if (!regOk) ADD_FAILURE() << "RegisterMemory failed during warmup";
+        if (!RankAgree(regOk)) {
+            if (regOk) ADD_FAILURE() << "RegisterMemory failed on the peer during warmup";
+            if (mh) DeregisterMemory(comm, mh);
+            CloseCastConnection(l, s, r);
+            return false;
+        }
+        DoSendRecv(s, r, buf.data(), buf.data(), buf.size(), tag, mh, mh, /*seed=*/0);
+        MPI_Barrier(MPI_COMM_WORLD);
+        TeardownConnection(r, l, s, mh);
+        return true;
+    }
+
+    // Highest refcount across the given comms: the sharing depth this run
+    // actually achieved. 1 means no QP ended up shared.
+    int MaxObservedSharingDepth(const std::vector<void*>& comms) {
+        int m = 0;
+        for (void* c : comms) {
+            if (c == nullptr) continue;
+            struct ncclIbQpSharingState st = GetActualQpSharingState(c);
+            m = std::max(m, st.refcount);
+        }
+        return m;
+    }
+
+    // MaxObservedSharingDepth, plus the one thing about it that is
+    // policy-independent: with more comms than groups, some group must hold
+    // two. Without this, a regression that leaves every comm alone in its own
+    // group turns every data and stress test into a pass on the unshared path.
+    int ExpectSharingDepth(const std::vector<void*>& comms, int ngroups, const char* what) {
+        const int depth = MaxObservedSharingDepth(comms);
+        if (static_cast<int>(comms.size()) > ngroups) {
+            EXPECT_GT(depth, 1) << what << ": " << comms.size() << " comms over " << ngroups
+                                << " groups, yet no QP is shared";
+        }
+        return depth;
+    }
+
+    // Report what a QP-sharing run actually exercised.
+    //
+    // Goes to stdout on rank 0 (visible in mpirun logs) and into the gtest XML.
+    void ReportQpShareCoverage(const char* what, int nconns, int maxCommsPerGroup,
+                               int spread = -1) {
+        const int ng = QpShareNGroups();
+        const int dm = QpShareDepthMultiplier();
+        RecordProperty("qpshare_ngroups", ng);
+        RecordProperty("qpshare_depth_multiplier", dm);
+        RecordProperty("qpshare_nconns", nconns);
+        RecordProperty("qpshare_max_comms_per_group", maxCommsPerGroup);
+        if (spread >= 0) RecordProperty("qpshare_group_spread", spread);
+        if (MPIEnvironment::world_rank != 0) return;
+        printf("[QPSHARE-COV] %s ngroups=%d depth=%d nconns=%d max_comms_per_group=%d",
+               what, ng, dm, nconns, maxCommsPerGroup);
+        if (spread >= 0) printf(" group_spread=%d", spread);
+        if (maxCommsPerGroup <= 1)
+            printf("  (NO QP WAS SHARED -- unshared data path only)");
+        printf("\n");
+        fflush(stdout);
+    }
+
+    // Check that the sharing layout the transport reports is self-consistent.
+    //
+    // Derived entirely from the observed states -- no reference model -- so it
+    // holds whatever assignment policy the transport implements, and keeps
+    // holding after that policy changes. What it pins down is the bookkeeping:
+    //
+    //   * every comm is on the sharing path (commId set, group assigned);
+    //   * no two live comms hold the same commId. Completions are routed by
+    //     commId through g_IbCastCommTable, and IbCastFreeCommIdLocked does not
+    //     guard against a double free, so one that slipped through would hand
+    //     a single id to two comms that then take each other's completions;
+    //   * a group's refcount equals the number of live comms reporting it, so a
+    //     slot freed on close but still counted, or counted but not freed,
+    //     shows up here;
+    //   * refcount and cqRefcount agree. connect.cc maintains them in lockstep
+    //     over the same set of comms, but cqRefcount alone gates
+    //     IbCastCleanupGroupCqs, i.e. it decides when the group's CQ and PD are
+    //     released. The stress tests see that release only through RDMA object
+    //     counts; a drift caught here says which of the two counters is wrong,
+    //     which an object-count delta cannot;
+    //   * at most one PRIMARY per group -- at most rather than exactly, because
+    //     roles are fixed at connect() time and releasing a group's PRIMARY does
+    //     not promote a SECONDARY, so a live group legitimately has none;
+    //   * comms in one group sit on one physical QP, and no two groups share one.
+    //
+    // `comms[i]` is this rank's comm for connection i (recvComm on rank 0,
+    // sendComm on rank 1). Non-fatal, so both ranks always reach the next
+    // barrier. Returns false once anything diverges: callers that re-check after
+    // every create and destroy should stop, since a layout that is already wrong
+    // repeats the same failure O(n) more times without adding information.
+    bool ExpectQpShareLayout(const std::vector<void*>& comms, const char* stage) {
+        struct GroupTally {
+            int      live      = 0;
+            int      primaries = 0;
+            int      nqps      = 0;
+            uint32_t qpn[NCCL_IB_MAX_QPS] = {};
+        };
+        std::map<int, GroupTally> groups;
+        std::map<uint16_t, size_t> commIdOwner;
+        std::vector<struct ncclIbQpSharingState> states(comms.size());
+        std::vector<bool> live(comms.size(), false);
+        bool ok = true;
+
+        for (size_t i = 0; i < comms.size(); i++) {
+            if (comms[i] == nullptr) continue;
+            states[i] = GetActualQpSharingState(comms[i]);
+            live[i]   = true;
+
+            if (states[i].commId == 0) {
+                ADD_FAILURE() << stage << ": conn " << i << " has no commId -- it"
+                              << " silently fell back off the sharing path";
+                ok = false;
+            } else if (!commIdOwner.emplace(states[i].commId, i).second) {
+                ADD_FAILURE() << stage << ": conns " << commIdOwner[states[i].commId]
+                              << " and " << i << " both hold commId " << states[i].commId
+                              << ", so completions routed by commId reach only one of them";
+                ok = false;
+            }
+            if (states[i].sharedGroupIdx < 0) {
+                ADD_FAILURE() << stage << ": conn " << i << " has no shared group"
+                              << " while sharing is enabled";
+                ok = false;
+                live[i] = false;   // nothing below is meaningful for it
+                continue;
+            }
+            GroupTally& t = groups[states[i].sharedGroupIdx];
+            t.live++;
+            if (states[i].isSharedQpPrimary) t.primaries++;
+        }
+
+        for (size_t i = 0; i < comms.size(); i++) {
+            if (!live[i]) continue;
+            const struct ncclIbQpSharingState& st = states[i];
+            const int g = st.sharedGroupIdx;
+
+            if (st.refcount != groups[g].live) {
+                ADD_FAILURE() << stage << ": conn " << i << " in group " << g
+                              << " reports refcount=" << st.refcount << " but "
+                              << groups[g].live << " live comms report that group";
+                ok = false;
+            }
+            if (st.cqRefcount != st.refcount) {
+                ADD_FAILURE() << stage << ": conn " << i << " in group " << g
+                              << " has cqRefcount=" << st.cqRefcount << " but refcount="
+                              << st.refcount << ". cqRefcount alone decides when the"
+                              << " group's CQ and PD are released, so a drift here"
+                              << " either frees a CQ that is still in use or never"
+                              << " frees it";
+                ok = false;
+            }
+            const int nqps = std::max(0, std::min(st.nqps, NCCL_IB_MAX_QPS));
+            if (groups[g].nqps == 0) {
+                groups[g].nqps = nqps;
+                for (int q = 0; q < nqps; q++) groups[g].qpn[q] = st.qpn[q];
+            } else if (nqps != groups[g].nqps) {
+                ADD_FAILURE() << stage << ": conn " << i << " is in group " << g
+                              << " but reports nqps=" << nqps << " while the group's"
+                              << " other comms report nqps=" << groups[g].nqps;
+                ok = false;
+            } else {
+                for (int q = 0; q < nqps; q++) {
+                    if (st.qpn[q] != groups[g].qpn[q]) {
+                        ADD_FAILURE() << stage << ": conn " << i << " is in group " << g
+                                      << " but qp[" << q << "] is not on that group's"
+                                      << " physical QP";
+                        ok = false;
+                    }
+                }
+            }
+        }
+
+        for (const auto& g : groups) {
+            if (g.second.primaries > 1) {
+                ADD_FAILURE() << stage << ": group " << g.first << " has "
+                              << g.second.primaries << " PRIMARYs; a group has one"
+                              << " physical QP and so at most one owner";
+                ok = false;
+            }
+        }
+        for (auto a = groups.begin(); a != groups.end(); ++a) {
+            auto b = a;
+            for (++b; b != groups.end(); ++b) {
+                for (int q = 0; q < a->second.nqps && q < b->second.nqps; q++) {
+                    if (a->second.qpn[q] != 0 && a->second.qpn[q] == b->second.qpn[q]) {
+                        ADD_FAILURE() << stage << ": groups " << a->first << " and "
+                                      << b->first << " unexpectedly share physical qp["
+                                      << q << "]";
+                        ok = false;
+                    }
+                }
+            }
+        }
+        return ok;
+    }
+
+    // Additionally require the observed placement to match what QpShareRefModel
+    // predicted. This asserts the assignment *policy* -- occupancy-modulo, which
+    // the model transcribes from connect.cc -- rather than the bookkeeping, so a
+    // deliberate policy change fails it and the model has to be updated to match.
+    // Only QpShareAlgoLayoutSweep and QpShareAlgoChurnLayout exist to pin the
+    // policy down; everything else should use ExpectQpShareLayout alone.
+    //
+    // Note that the model counts only the comms the calling test opened, while
+    // the transport counts every live comm to that peer in the process
+    // (IbCastCountPeerTotalRefcount scans the global pool). A comm leaked by an
+    // earlier test in the same binary therefore shifts every prediction here.
+    bool ExpectQpSharePlacement(const std::vector<void*>& comms,
+                                const std::vector<QpShareRefModel::Placement>& places,
+                                const char* stage) {
+        EXPECT_EQ(comms.size(), places.size()) << stage;
+        if (comms.size() != places.size()) return false;
+        bool ok = true;
+        for (size_t i = 0; i < comms.size(); i++) {
+            if (comms[i] == nullptr) continue;
+            struct ncclIbQpSharingState st = GetActualQpSharingState(comms[i]);
+            if (st.sharedGroupIdx != places[i].group) {
+                ADD_FAILURE() << stage << ": conn " << i << " landed in group "
+                              << st.sharedGroupIdx << ", model predicted "
+                              << places[i].group;
+                ok = false;
+            }
+            if (st.isSharedQpPrimary != places[i].primary) {
+                ADD_FAILURE() << stage << ": conn " << i << " is "
+                              << (st.isSharedQpPrimary ? "PRIMARY" : "SECONDARY")
+                              << ", model predicted "
+                              << (places[i].primary ? "PRIMARY" : "SECONDARY");
+                ok = false;
+            }
+        }
+        return ok;
     }
 
     // Composite block: Warmup send + read real nqps from sendComm on rank 1.
@@ -1028,6 +1546,16 @@ protected:
         MPI_Bcast(&nqps, 1, MPI_INT, 1, MPI_COMM_WORLD);
         EXPECT_GT(nqps, 0);
         return nqps;
+    }
+
+    // Read QP-sharing pool state directly from a connected sendComm/recvComm.
+    // Unlike GetActualNqps(), no warmup send/recv is required: PRIMARY/SECONDARY
+    // role, groupIdx, refcount, and QP handles are all fixed at connect()/accept()
+    // time (see connect.cc groupIdx assignment), not populated lazily by traffic.
+    struct ncclIbQpSharingState GetActualQpSharingState(void* comm) {
+        struct ncclIbQpSharingState state = {};
+        EXPECT_EQ(ncclIbCastGetQpSharingState(comm, &state), ncclSuccess);
+        return state;
     }
 
     // Read RCCL_IB_QP_SCHED_SPLIT_DATA_MIN from the environment.
@@ -3158,6 +3686,8 @@ protected:
         if (!before.valid() || !after.valid()) {
             GTEST_LOG_(WARNING) << "RDMA resource counting unavailable on this node; "
                                 << "leak check skipped for: " << label;
+            // A skipped check otherwise looks exactly like a clean one.
+            RecordProperty("rdma_leak_check", "skipped");
             return;
         }
         EXPECT_EQ(after.qp, before.qp)

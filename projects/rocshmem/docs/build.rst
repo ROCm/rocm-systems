@@ -189,6 +189,8 @@ following host-stream APIs are made visible to rocprofiler-sdk tools:
 * ``rocshmem_getmem_on_stream``
 * ``rocshmem_putmem_on_stream``
 * ``rocshmem_putmem_signal_on_stream``
+* ``rocshmem_signal_add_on_stream``
+* ``rocshmem_signal_set_on_stream``
 * ``rocshmem_signal_wait_until_on_stream``
 
 If ``rocprofiler-register`` is not found, the build continues with tracing

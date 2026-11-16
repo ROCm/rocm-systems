@@ -1532,13 +1532,10 @@ def test_nonempty_additions_document_generates_decoder_dispatch(tmp_path):
         text=True,
     )
 
-    decoder = (output / 'isa' / 'cdna5' / 'decoder.cpp').read_text()
-    match = re.search(
-        r'DecoderImpl::sub_decode_sop1 = \{\s*(.*?)\s*\};', decoder, re.DOTALL
-    )
-    assert match is not None
-    entries = [entry.strip() for entry in match.group(1).split(',')]
-    assert entries[7] == '&detail::decodeSAdditionTestB32Sop1'
+    rows = (output / 'isa' / 'cdna5' / 'decode_tables.inc').read_text()
+    table = rows.split('#define RJ_SUB_DECODE_SOP1_ROWS', 1)[1]
+    table = table.replace('\\\n', '').splitlines()[0]
+    assert 'RJ_DECODE_CASE(7, detail, decodeSAdditionTestB32Sop1)' in table
 
 
 @pytest.mark.parametrize(

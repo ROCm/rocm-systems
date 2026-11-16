@@ -24,6 +24,7 @@
 
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/agent.hpp"
+#include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/context/correlation_id.hpp"
 #include "lib/rocprofiler-sdk/hip/hip.hpp"
 #include "lib/rocprofiler-sdk/tracing/tracing.hpp"
@@ -424,12 +425,27 @@ get_ids()
     return _data;
 }
 
-// Wrap the four graph lifecycle entry points on the HIP runtime dispatch table.
+// Wrap the four graph lifecycle entry points on the HIP runtime dispatch table. The launch state
+// they maintain is only consumed by HIP_GRAPH tracing and by kernel replay (which must not replay
+// graph dispatches), and the wrappers add work to every hipGraphLaunch, so skip them otherwise.
 template <>
 void
 update_table(::HipDispatchTable* table)
 {
     if(table == nullptr) return;
+
+    auto needs_graph_launch_state = []() {
+        for(const auto& itr : context::get_registered_contexts())
+        {
+            if(itr->is_tracing_one_of(ROCPROFILER_CALLBACK_TRACING_HIP_GRAPH,
+                                      ROCPROFILER_BUFFER_TRACING_HIP_GRAPH,
+                                      ROCPROFILER_CALLBACK_TRACING_KERNEL_REPLAY))
+                return true;
+        }
+        return false;
+    };
+    if(!needs_graph_launch_state()) return;
+
     if(table->hipGraphInstantiate_fn)
         table->hipGraphInstantiate_fn =
             graph_instantiate<api::hipGraphInstantiate>(table->hipGraphInstantiate_fn);

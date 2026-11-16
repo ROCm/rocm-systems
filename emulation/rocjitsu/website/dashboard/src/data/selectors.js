@@ -1,5 +1,4 @@
 import { configurationKey, THREAD_POLICIES } from './runSchema.js';
-import { targetColor } from '../utils/chartColors.js';
 import { classifyDurationChange, DURATION_CHANGE_BAND_PERCENT } from '../utils/performance.js';
 import { commitShaFor, commitTimestampFor, compareRunExecution, hasCommitTimestamp, sortRunsByCommit } from './runOrdering.js';
 
@@ -84,12 +83,12 @@ export function selectRunComparison(candidate, baseline, filters, tolerance = DU
 
 export function selectBenchmarkSeries(data, filters, logicalTestId) {
   const { runs, labels } = labeledRuns(data);
-  return { runs, labels, series: pairsFor(filters).map((pair, index) => {
+  return { runs, labels, series: pairsFor(filters).map((pair) => {
     const records = runs.map((run) => {
       const test = (run?.tests ?? []).find((t) => testMatches(t, filters) && t.target === pair.target && t.mode === pair.mode && t.logicalTestId === logicalTestId);
       return test ? { run, test } : null;
     });
-    return { ...pair, name: `${pair.target} ${pair.mode}`, color: targetColor(pair.target, index), records,
+    return { ...pair, name: `${pair.target} ${pair.mode}`, records,
       points: records.map((record) => completed(record?.test) ? { value: record.test.durationSeconds, record } : null) };
   }) };
 }

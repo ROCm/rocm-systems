@@ -1,7 +1,12 @@
 # Copyright (c) 2026 Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-add_library(rj_execution_fuzz_core STATIC execution_fuzz_core.cpp)
+add_library(
+    rj_execution_fuzz_core
+    STATIC
+    execution_fuzz_core.cpp
+    generated_kernel.cpp
+)
 target_include_directories(
     rj_execution_fuzz_core
     PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}

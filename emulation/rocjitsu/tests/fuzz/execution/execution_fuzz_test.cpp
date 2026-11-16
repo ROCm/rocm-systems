@@ -2,25 +2,45 @@
 // SPDX-License-Identifier: MIT
 
 #include "execution_fuzz_core.h"
+#include "generated_kernel.h"
 
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna3/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna3/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/wait_counter_policy.h"
+#include "rocjitsu/isa/decoder.h"
+#include "rocjitsu/isa/instruction.h"
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
 #include <bit>
+#include <bitset>
 #include <cstdint>
 #include <limits>
+#include <memory>
+#include <optional>
 #include <stdexcept>
+#include <string>
 #include <string_view>
 #include <thread>
 #include <vector>
 
 namespace rocjitsu::execution_fuzz {
 namespace {
+
+constexpr size_t kMinKernelInputSize = kHeaderSize + kMinGeneratedKernelBytes;
+
+std::optional<uint64_t> find_generated_kernel_seed(FuzzTarget target, uint64_t start_seed = 0) {
+  // The random mix sets the wait-checking bit only for generated kernels.
+  constexpr uint64_t kSeedSearchLimit = 256;
+  for (uint64_t seed = start_seed; seed < start_seed + kSeedSearchLimit; ++seed)
+    if (random_input(seed, kMaxInputSize, target)[1] & kWaitCheckingBit)
+      return seed;
+  return std::nullopt;
+}
 
 TEST(ExecutionFuzzTargetTest, NamesCoverEveryExecutionTarget) {
   constexpr std::array<std::string_view, static_cast<size_t>(FuzzTarget::Count)> expected = {
@@ -70,21 +90,158 @@ TEST(ExecutionFuzzTargetTest, GeneratedEncodingsReachExecutionAcrossTargets) {
   }
 }
 
+TEST(ExecutionFuzzTargetTest, RandomMixRunsGeneratedKernelsAcrossTargets) {
+  for (uint8_t index = 0; index < static_cast<uint8_t>(FuzzTarget::Count); ++index) {
+    const FuzzTarget target = *indexed_target(index);
+    SCOPED_TRACE(target_name(target));
+    for (uint64_t start_seed : {0u, 64u, 128u, 192u}) {
+      const std::optional<uint64_t> seed = find_generated_kernel_seed(target, start_seed);
+      ASSERT_TRUE(seed);
+      SCOPED_TRACE(*seed);
+      for (size_t size : {kMinKernelInputSize, kMinKernelInputSize + 1, kMinKernelInputSize + 2,
+                          kMinKernelInputSize + 3, kMaxInputSize}) {
+        SCOPED_TRACE(size);
+        std::vector<uint8_t> input = random_input(*seed, size, target);
+        ASSERT_EQ(input, generated_kernel_input(*seed, size, target));
+        for (uint8_t memory_mode : {uint8_t{0}, kCacheMemoryBit}) {
+          SCOPED_TRACE(memory_mode != 0);
+          input[1] = (input[1] & ~kCacheMemoryBit) | memory_mode;
+          testing::internal::CaptureStderr();
+          const RunStats stats = run_input(input, std::nullopt, nullptr, AsyncMode::Disabled, 1);
+          const std::string diagnostics = testing::internal::GetCapturedStderr();
+          EXPECT_EQ(diagnostics.find("memory-wait:"), std::string::npos) << diagnostics;
+          EXPECT_EQ(diagnostics.find("xcnt-wait:"), std::string::npos) << diagnostics;
+          EXPECT_GT(stats.executed, size == kMaxInputSize ? 10u : 2u);
+          EXPECT_EQ(stats.inputs_halted, 1u);
+          EXPECT_EQ(stats.inputs_stopped, 0u);
+          EXPECT_EQ(stats.budget_exhausted, 0u);
+        }
+      }
+    }
+  }
+}
+
+TEST(ExecutionFuzzInputTest, TrailingLiteralLeavesEnoughBytesToFetchLastTerminator) {
+  for (const FuzzTarget target : {FuzzTarget::Gfx908, FuzzTarget::Gfx90a, FuzzTarget::Gfx942}) {
+    SCOPED_TRACE(target_name(target));
+    for (const uint8_t memory_mode : {uint8_t{0}, kCacheMemoryBit}) {
+      SCOPED_TRACE(memory_mode);
+      // s_mov_b32 s0, literal. It consumes the first appended terminator as its literal.
+      const std::array<uint8_t, 6> input = {
+          static_cast<uint8_t>(target), memory_mode, 0xff, 0x00, 0x80, 0xbe};
+      const RunStats stats = run_input(input, std::nullopt, nullptr, AsyncMode::Disabled, 1);
+      EXPECT_EQ(stats.waves_halted, 1u);
+    }
+  }
+}
+
+TEST(ExecutionFuzzInputTest, GeneratedKernelBranchTargetsAndMemoryWaits) {
+  for (uint8_t index = 0; index < static_cast<uint8_t>(FuzzTarget::Count); ++index) {
+    const FuzzTarget target = *indexed_target(index);
+    SCOPED_TRACE(target_name(target));
+    const rj_code_arch_t arch = target_arch(target);
+    const amdgpu::WaitcntModel wait_model = amdgpu::waitcnt_model(arch).value();
+    std::unique_ptr<Decoder> decoder = Decoder::create(arch);
+    ASSERT_TRUE(decoder);
+    bool forward = false;
+    bool backward = false;
+    bool scalar_memory = false;
+    bool vector_load = false;
+    bool vector_store = false;
+    for (uint64_t seed = 0; seed != 12; ++seed) {
+      SCOPED_TRACE(seed);
+      const std::vector<uint8_t> input = generated_kernel_input(seed, kMaxInputSize, target);
+      std::vector<uint32_t> words((input.size() - kHeaderSize) / sizeof(uint32_t));
+      for (size_t word_index = 0; word_index < words.size(); ++word_index)
+        for (unsigned byte = 0; byte < sizeof(uint32_t); ++byte)
+          words[word_index] |= uint32_t{input[kHeaderSize + word_index * sizeof(uint32_t) + byte]}
+                               << (8 * byte);
+      std::vector<int64_t> branchable_word_offsets;
+      std::vector<int64_t> branch_target_words;
+      std::bitset<amdgpu::kWaitCounterCount> pending_counters;
+      bool terminated = false;
+      for (size_t word_index = 0; word_index < words.size();) {
+        const DecodeResult result = decoder->decode_window(std::span(words).subspan(word_index));
+        ASSERT_TRUE(result.succeeded()) << word_index;
+        const Instruction &instruction = *result.value();
+        if (pending_counters.any()) {
+          ASSERT_TRUE(instruction.is_waitcnt()) << word_index;
+          const auto wait = amdgpu::WaitCounterPolicy::explicit_wait_fields(instruction, arch);
+          ASSERT_TRUE(wait.succeeded() && wait.value().has_value()) << word_index;
+          const amdgpu::WaitFields &fields = *wait.value();
+          for (size_t counter_index = 0; counter_index < fields.size(); ++counter_index)
+            if (fields[counter_index] == 0)
+              pending_counters.reset(counter_index);
+        }
+        if (!instruction.is_waitcnt())
+          branchable_word_offsets.push_back(word_index);
+        if (instruction.flags() & PROGRAM_TERMINATOR) {
+          terminated = true;
+          break;
+        }
+        if (instruction.is_branch()) {
+          const int16_t displacement =
+              std::bit_cast<int16_t>(static_cast<uint16_t>(words[word_index]));
+          const int64_t target_word = static_cast<int64_t>(word_index) + 1 + displacement;
+          forward |= target_word > static_cast<int64_t>(word_index);
+          backward |= target_word < static_cast<int64_t>(word_index);
+          branch_target_words.push_back(target_word);
+        }
+        if (instruction.is_memory_op()) {
+          const amdgpu::MemoryIssueInfo *memory = instruction.amdgpu_memory_issue_info();
+          ASSERT_NE(memory, nullptr) << instruction.mnemonic();
+          scalar_memory |= !memory->exec_masked;
+          const Operand *destination = instruction.dst_operand(0);
+          ASSERT_NE(destination, nullptr) << instruction.mnemonic();
+          const bool writes_register = destination->to_register_ref().has_value();
+          vector_load |= memory->exec_masked && writes_register;
+          vector_store |= memory->exec_masked && !writes_register;
+          // Check every possible domain before runtime routing filters the FLAT domains.
+          for (amdgpu::MemoryCounterObligation obligation : memory->counter_obligations()) {
+            const amdgpu::WaitCounterKind counter =
+                amdgpu::canonical_wait_counter(obligation.wait_counter_type(), wait_model);
+            ASSERT_NE(counter, amdgpu::WaitCounterKind::Count);
+            pending_counters.set(static_cast<size_t>(counter));
+          }
+        }
+        word_index += instruction.size() / sizeof(uint32_t);
+      }
+      EXPECT_TRUE(terminated);
+      EXPECT_TRUE(pending_counters.none());
+      for (int64_t target_word : branch_target_words)
+        EXPECT_NE(std::ranges::find(branchable_word_offsets, target_word),
+                  branchable_word_offsets.end());
+    }
+    EXPECT_TRUE(forward);
+    EXPECT_TRUE(backward);
+    EXPECT_TRUE(scalar_memory);
+    EXPECT_TRUE(vector_load);
+    EXPECT_TRUE(vector_store);
+  }
+}
+
 TEST(ExecutionFuzzInputTest, GeneratedInputsRespectEverySizeAndTarget) {
   for (uint8_t index = 0; index < static_cast<uint8_t>(FuzzTarget::Count); ++index) {
     const FuzzTarget target = *indexed_target(index);
     SCOPED_TRACE(target_name(target));
+    const std::optional<uint64_t> kernel_seed = find_generated_kernel_seed(target);
+    ASSERT_TRUE(kernel_seed);
     for (size_t size = 1; size <= kMaxInputSize; ++size) {
       SCOPED_TRACE(size);
-      for (uint64_t seed :
-           {uint64_t{0}, uint64_t{1}, uint64_t{17}, std::numeric_limits<uint64_t>::max()}) {
+      for (uint64_t seed : {uint64_t{0}, uint64_t{1}, uint64_t{17}, *kernel_seed,
+                            std::numeric_limits<uint64_t>::max()}) {
         SCOPED_TRACE(seed);
         const std::vector<uint8_t> input = random_input(seed, size, target);
         ASSERT_EQ(input.size(), size);
         EXPECT_EQ(input.front(), static_cast<uint8_t>(target));
         EXPECT_EQ(input, random_input(seed, size, target));
         if (size >= kHeaderSize) {
-          EXPECT_EQ(input[1] & ~(kAsyncSelectBit | kConcurrentIssuerMask | kFullExecMaskBit), 0);
+          EXPECT_EQ(input[1] & ~(kAsyncSelectBit | kConcurrentIssuerMask | kFullExecMaskBit |
+                                 kWaitCheckingBit | kCacheMemoryBit),
+                    0);
+          if (seed == *kernel_seed) {
+            EXPECT_EQ((input[1] & kWaitCheckingBit) != 0, size >= kMinKernelInputSize);
+          }
         }
       }
     }
@@ -94,11 +251,16 @@ TEST(ExecutionFuzzInputTest, GeneratedInputsRespectEverySizeAndTarget) {
 TEST(ExecutionFuzzInputTest, GeneratedInputsRejectInvalidSizes) {
   for (size_t size : {size_t{0}, kMaxInputSize + 1, std::numeric_limits<size_t>::max()})
     EXPECT_THROW(random_input(0, size), std::invalid_argument);
+  for (size_t size : {size_t{0}, kHeaderSize, kMinKernelInputSize - 1, kMaxInputSize + 1,
+                      std::numeric_limits<size_t>::max()})
+    EXPECT_THROW(generated_kernel_input(0, size, FuzzTarget::Gfx1250), std::invalid_argument);
 }
 
 TEST(ExecutionFuzzInputTest, ArbitraryInputsPreserveByteStreamAcrossSizes) {
-  const std::vector<uint8_t> expected = {0x02, 0x00, 0xaf, 0xf4, 0x4f, 0xec, 0x9b, 0xea};
-  EXPECT_EQ(random_input(0, expected.size(), FuzzTarget::Gfx942), expected);
+  const std::vector<uint8_t> expected = {0x02, 0, 0xaf, 0xf4, 0x4f, 0xec, 0x9b, 0xea};
+  std::vector<uint8_t> input = random_input(0, expected.size(), FuzzTarget::Gfx942);
+  input[1] &= ~kCacheMemoryBit;
+  EXPECT_EQ(input, expected);
 
   const std::vector<uint8_t> full_input = random_input(0, kMaxInputSize, FuzzTarget::Gfx942);
   ASSERT_EQ(full_input.size(), kMaxInputSize);
@@ -107,6 +269,18 @@ TEST(ExecutionFuzzInputTest, ArbitraryInputsPreserveByteStreamAcrossSizes) {
     const std::vector<uint8_t> input = random_input(0, size, FuzzTarget::Gfx942);
     EXPECT_EQ(input, (std::vector<uint8_t>{full_input.begin(), full_input.begin() + size}));
   }
+}
+
+TEST(ExecutionFuzzInputTest, ArbitraryInputsSampleBothCacheModesForEitherFirstByteBit) {
+  constexpr uint64_t kRawSeedStride = 8;
+  std::bitset<4> observed;
+  for (uint64_t seed = 0; seed < 64 * kRawSeedStride; seed += kRawSeedStride) {
+    const std::vector<uint8_t> input = random_input(seed, 64, FuzzTarget::Gfx942);
+    const bool cache_enabled = (input[1] & kCacheMemoryBit) != 0;
+    const bool first_byte_bit = (input[kHeaderSize] & 8) != 0;
+    observed.set(2 * cache_enabled + first_byte_bit);
+  }
+  EXPECT_TRUE(observed.all()) << observed;
 }
 
 TEST(ExecutionFuzzInputTest, GeneratedInstructionsPreservePrefixesAcrossSizes) {
@@ -126,6 +300,45 @@ TEST(ExecutionFuzzInputTest, GeneratedInstructionsPreservePrefixesAcrossSizes) {
         differing_bits += std::popcount(static_cast<unsigned>(input[byte] ^ full_input[byte]));
       EXPECT_LE(differing_bits, 2u);
     }
+  }
+}
+
+TEST(ExecutionFuzzInputTest, EntryMutationsStayWithinThePrefix) {
+  constexpr size_t short_size = 64;
+  constexpr size_t mutation_end = kHeaderSize + 32;
+  bool saw_mutation = false;
+  for (uint64_t seed : {258u, 259u, 261u, 262u, 263u}) {
+    SCOPED_TRACE(seed);
+    const std::vector<uint8_t> small = random_input(seed, short_size, FuzzTarget::Gfx942);
+    const std::vector<uint8_t> large = random_input(seed, kMaxInputSize, FuzzTarget::Gfx942);
+    saw_mutation |= !std::equal(small.begin() + kHeaderSize, small.begin() + mutation_end,
+                                large.begin() + kHeaderSize);
+    EXPECT_TRUE(
+        std::equal(small.begin() + mutation_end, small.end(), large.begin() + mutation_end));
+  }
+  EXPECT_TRUE(saw_mutation);
+}
+
+TEST(ExecutionFuzzInputTest, WaitCheckingBitEnablesDiagnosticsOnReplay) {
+  std::vector<uint8_t> input{static_cast<uint8_t>(FuzzTarget::Gfx1250), 0};
+  const auto append = [&](auto words) {
+    for (const uint32_t word : words)
+      for (unsigned byte = 0; byte < sizeof(word); ++byte)
+        input.push_back(static_cast<uint8_t>(word >> (8 * byte)));
+  };
+  append(cdna5::build_smem(cdna5::kSLoadB32Smem, {.sbase = 0, .sdata = 20, .soffset = 124}));
+  append(cdna5::build_sop1(cdna5::kSMovB32Sop1, {.ssrc0 = 20, .sdst = 21}));
+  append(cdna5::build_sop1(cdna5::kSMovB32Sop1, {.ssrc0 = 128, .sdst = 0}));
+
+  for (bool check_waits : {false, true}) {
+    input[1] = check_waits ? kWaitCheckingBit : 0;
+    testing::internal::CaptureStderr();
+    const RunStats stats = run_input(input, std::nullopt, nullptr, AsyncMode::Disabled, 1);
+    const std::string diagnostics = testing::internal::GetCapturedStderr();
+    EXPECT_EQ(diagnostics.find("memory-wait:") != std::string::npos, check_waits) << diagnostics;
+    EXPECT_EQ(diagnostics.find("xcnt-wait:") != std::string::npos, check_waits) << diagnostics;
+    EXPECT_EQ(stats.executed, 4u);
+    EXPECT_EQ(stats.inputs_halted, 1u);
   }
 }
 
@@ -153,16 +366,23 @@ TEST(ExecutionFuzzInputTest, WmmaPrefixStartsAtExactCapacity) {
       SCOPED_TRACE(test_case.seed);
       const std::vector<uint8_t> short_input = random_input(test_case.seed, input_size - 1, target);
       ASSERT_EQ(short_input.size(), input_size - 1);
-      EXPECT_EQ(short_input[1], test_case.short_mode);
+      EXPECT_EQ(short_input[1] & ~kCacheMemoryBit, test_case.short_mode);
 
-      std::vector<uint8_t> expected{static_cast<uint8_t>(target), test_case.prefix_mode};
+      const uint8_t cache_mode = short_input[1] & kCacheMemoryBit;
+      std::vector<uint8_t> expected{static_cast<uint8_t>(target),
+                                    static_cast<uint8_t>(test_case.prefix_mode | cache_mode)};
       const auto append = [&](const auto &words) {
         for (const uint32_t word : words)
           for (unsigned byte = 0; byte < sizeof(word); ++byte)
             expected.push_back(static_cast<uint8_t>(word >> (8 * byte)));
       };
-      append(first_wmma);
-      append(second_wmma);
+      auto first = first_wmma, second = second_wmma;
+      if (test_case.seed & 16) {
+        first[0] = (first[0] & 0xff00ffffU) | (cdna5::kVWmmaF3232x16x128F4Vop3p << 16);
+        second[0] = (second[0] & 0xff00ffffU) | (cdna5::kVWmmaF3232x16x128F4Vop3p << 16);
+      }
+      append(first);
+      append(second);
       ASSERT_EQ(expected.size(), input_size);
       EXPECT_EQ(random_input(test_case.seed, input_size, target), expected);
     }
@@ -192,11 +412,16 @@ TEST(ExecutionFuzzInputTest, InitialAddressPairsReachMappedMemory) {
         append(cdna3::build_sopp(cdna3::kSWaitcntSopp));
         append(cdna3::build_sopp(cdna3::kSNopSopp));
       }
-      const RunStats stats = run_input(input, target, nullptr, AsyncMode::Disabled, 1);
-      EXPECT_EQ(stats.executed, 4u);
-      EXPECT_EQ(stats.inputs_halted, 1u);
-      EXPECT_EQ(stats.inputs_stopped, 0u);
-      EXPECT_EQ(stats.budget_exhausted, 0u);
+      for (uint8_t mode : {uint8_t{0}, kCacheMemoryBit}) {
+        SCOPED_TRACE(mode);
+        input[1] = mode;
+        const RunStats stats = run_input(input, target, nullptr, AsyncMode::Disabled, 1);
+        EXPECT_EQ(stats.executed, 4u);
+        EXPECT_EQ(stats.inputs_halted, 1u);
+        EXPECT_EQ(stats.inputs_stopped, 0u);
+        EXPECT_EQ(stats.budget_exhausted, 0u);
+        EXPECT_EQ(stats.l2_backing_reads != 0, mode == kCacheMemoryBit);
+      }
     }
   }
 }
@@ -234,16 +459,15 @@ TEST(ExecutionFuzzInputTest, GeneratedInputsSelectSyncAsyncAndConcurrentExecutio
   };
   for (const auto &[seed, async, concurrent] : cases) {
     SCOPED_TRACE(seed);
+    EXPECT_EQ(bool(random_input(seed, 24, FuzzTarget::Gfx1250)[1] & kAsyncSelectBit), async);
     const RunStats stats =
         run_input(random_input(seed, 24, FuzzTarget::Gfx1250), FuzzTarget::Gfx1250, resources);
-    EXPECT_EQ(stats.async_capable_inputs, 1u);
-    EXPECT_EQ(stats.async_enabled_inputs, async);
+    EXPECT_EQ(stats.async_capable_inputs, 0u);
+    EXPECT_EQ(stats.async_enabled_inputs, 0u);
     EXPECT_EQ(stats.concurrent_inputs, concurrent);
     EXPECT_EQ(stats.issuer_executions, concurrent ? 2u : 1u);
-    if (async)
-      EXPECT_GT(stats.async_executed, 0u);
-    else
-      EXPECT_EQ(stats.async_executed, 0u);
+    // The requested mode remains recorded, but migrated WMMA stays on the issuer.
+    EXPECT_EQ(stats.async_executed, 0u);
   }
 }
 
@@ -253,6 +477,10 @@ TEST(ExecutionFuzzInputTest, ModeByteDoesNotRewriteAsyncWmmaPrefix) {
     ASSERT_GE(input.size(), 18u);
     EXPECT_EQ(input[17], 0x1du);
   }
+  constexpr size_t wmma_prefix_end = kHeaderSize + 16;
+  const std::vector<uint8_t> wmma_prefix = random_input(257, wmma_prefix_end, FuzzTarget::Gfx1250);
+  const std::vector<uint8_t> entry_mutated = random_input(257, 32, FuzzTarget::Gfx1250);
+  EXPECT_TRUE(std::ranges::equal(wmma_prefix, std::span(entry_mutated).first(wmma_prefix_end)));
 }
 
 TEST(ExecutionFuzzInputTest, TargetOverrideKeepsInputLayout) {
@@ -283,34 +511,54 @@ TEST(ExecutionFuzzInputTest, ExplicitModesOverrideInputSelection) {
   const auto synchronous_input = random_input(1, 24, FuzzTarget::Gfx1250);
   const RunStats asynchronous =
       run_input(synchronous_input, FuzzTarget::Gfx1250, resources, AsyncMode::Enabled, 1);
-  EXPECT_EQ(asynchronous.async_enabled_inputs, 1u);
-  EXPECT_GT(asynchronous.async_executed, 0u);
+  EXPECT_EQ(asynchronous.async_enabled_inputs, 0u);
+  EXPECT_EQ(asynchronous.async_executed, 0u);
   EXPECT_EQ(asynchronous.concurrent_inputs, 0u);
   EXPECT_EQ(asynchronous.issuer_executions, 1u);
 }
 
-TEST(ExecutionFuzzInputTest, AsyncOverridePreservesInitialScalarCondition) {
+TEST(ExecutionFuzzInputTest, HarnessModesPreserveInitialScalarCondition) {
+  constexpr std::array<uint8_t, 3> kReplayModes = {
+      kWaitCheckingBit,
+      kCacheMemoryBit,
+      kWaitCheckingBit | kCacheMemoryBit,
+  };
   const auto resources = make_async_execution_resources(1);
+  bool saw_taken_branch = false;
+  bool saw_fallthrough = false;
   for (uint8_t marker = 0; marker < 64; ++marker) {
+    SCOPED_TRACE(static_cast<unsigned>(marker));
     std::vector<uint8_t> input{static_cast<uint8_t>(FuzzTarget::Gfx1250), 0};
     const auto append = [&](auto words) {
       for (const uint32_t word : words)
         for (unsigned byte = 0; byte < sizeof(word); ++byte)
           input.push_back(static_cast<uint8_t>(word >> (8 * byte)));
     };
+    // The trailing marker changes the seeded SCC, which controls whether the NOP runs.
     append(cdna5::build_sopp(cdna5::kSCbranchScc1Sopp, {.simm16 = 1}));
     append(cdna5::build_sopp(cdna5::kSNopSopp));
     append(cdna5::build_sopp(cdna5::kSEndpgmSopp));
     input.push_back(marker);
     const RunStats synchronous = run_input(input, std::nullopt, resources, AsyncMode::Disabled, 1);
     const RunStats asynchronous = run_input(input, std::nullopt, resources, AsyncMode::Enabled, 1);
-    EXPECT_EQ(synchronous.executed, asynchronous.executed) << unsigned(marker);
+    EXPECT_EQ(synchronous.executed, asynchronous.executed);
     EXPECT_EQ(synchronous.inputs_halted, 1u);
     EXPECT_EQ(asynchronous.inputs_halted, 1u);
+    saw_taken_branch |= synchronous.executed == 2;
+    saw_fallthrough |= synchronous.executed == 3;
+    for (uint8_t mode : kReplayModes) {
+      SCOPED_TRACE(static_cast<unsigned>(mode));
+      input[1] = mode;
+      const RunStats replay = run_input(input, std::nullopt, resources, AsyncMode::Disabled, 1);
+      EXPECT_EQ(replay.executed, synchronous.executed);
+      EXPECT_EQ(replay.inputs_halted, 1u);
+    }
   }
+  EXPECT_TRUE(saw_taken_branch);
+  EXPECT_TRUE(saw_fallthrough);
 }
 
-TEST(ExecutionFuzzInputTest, ThreadedInputsShareAsyncWmmaHelpers) {
+TEST(ExecutionFuzzInputTest, ThreadedInputsKeepMigratedWmmaOnIssuers) {
   constexpr uint64_t kThreads = 8;
   constexpr uint64_t kInputsPerThread = 2;
   auto resources = make_async_execution_resources(4);
@@ -321,8 +569,10 @@ TEST(ExecutionFuzzInputTest, ThreadedInputsShareAsyncWmmaHelpers) {
     workers.emplace_back([&, worker] {
       for (uint64_t input = 0; input != kInputsPerThread; ++input) {
         const uint64_t seed = 1 + 16 * (worker + input * kThreads);
-        const RunStats stats =
-            run_input(random_input(seed, 24, FuzzTarget::Gfx1250), FuzzTarget::Gfx1250, resources);
+        const RunStats stats = run_input(random_input(seed, 24, FuzzTarget::Gfx1250),
+                                         FuzzTarget::Gfx1250, resources, AsyncMode::Enabled);
+        EXPECT_EQ(stats.async_enabled_inputs, 0u);
+        EXPECT_EQ(stats.async_executed, 0u);
         results[worker].executed += stats.executed;
         results[worker].async_executed += stats.async_executed;
         results[worker].inputs += stats.inputs;
@@ -338,7 +588,7 @@ TEST(ExecutionFuzzInputTest, ThreadedInputsShareAsyncWmmaHelpers) {
     EXPECT_EQ(stats.inputs_executed, kInputsPerThread);
     async_executed += stats.async_executed;
   }
-  EXPECT_GT(async_executed, 0u);
+  EXPECT_EQ(async_executed, 0u);
 }
 
 } // namespace

@@ -12,11 +12,9 @@
 /// with run_and_read_memory().
 ///
 /// @warning The descriptor this dispatches is **not** the patched code object's.
-/// write_kernel() synthesizes a fresh one with 256 VGPRs and 104 SGPRs, taking
-/// only private_segment_fixed_size from the caller. So a test that patches an
-/// ELF whose descriptor advertises a small allocation still executes with the
-/// full register file: the orchestrator's register-ownership gates are exercised
-/// statically, at patch time, and never by execution here.
+/// write_kernel() creates a descriptor with 256 vector registers. CDNA spill
+/// probes use 128 ordinary VGPRs and 128 AccVGPRs. The caller supplies the
+/// private segment size and initialize() selects the fixture's SGPR allocation.
 ///
 /// The kernarg segment pointer is one place the two descriptors do have to
 /// agree, since the DBI entry prologue reads it at a slot fixed at patch time
@@ -38,6 +36,7 @@
 
 #include "../aql_queue.h"
 #include "../config_test_util.h"
+#include "../dbi_test_util.h"
 #include "../halt_snapshot_plugin.h"
 
 #include "rocjitsu/code/kernel_descriptor_abi.h"
@@ -69,8 +68,12 @@ class DbiSim {
 public:
   /// @param arch Config/VM arch string: "cdna3", "cdna4", or "rdna4".
   /// @param wave_size 64 for CDNA, 32 for RDNA4.
-  void initialize(std::string_view arch, uint32_t wave_size) {
+  /// @param granulated_sgpr_count SGPR allocation field from the synthetic target descriptor.
+  void initialize(std::string_view arch, uint32_t wave_size,
+                  uint32_t granulated_sgpr_count = kCallableProbeGranulatedSgprCount) {
+    util::StringDiagnostic admission_diagnostic;
     wave_size_ = wave_size;
+    granulated_sgpr_count_ = granulated_sgpr_count;
     const std::string json =
         std::string(R"({"max_ticks":100000,"num_threads":1,"vm":{"arch":")") + std::string(arch) +
         R"("},)"
@@ -94,8 +97,10 @@ public:
     mem_ = loaded_.memory();
     engine_ = std::make_unique<simdojo::SimulationEngine>(loaded_.engine_config);
     engine_->topology().set_root(loaded_.take_root());
-    loaded_.wire_links(engine_->topology());
-    engine_->create();
+    ASSERT_TRUE(loaded_.wire_links(engine_->topology(), admission_diagnostic.emitter()).succeeded())
+        << admission_diagnostic.message();
+    ASSERT_TRUE(engine_->create(admission_diagnostic.emitter()).succeeded())
+        << admission_diagnostic.message();
     plugin_group_ = make_halt_snapshot_group(&snapshot_plugin_);
     soc_->set_plugin_group(plugin_group_);
   }
@@ -163,9 +168,10 @@ public:
         static_cast<int64_t>(sizeof(kernel_descriptor_t) + entry_offset_);
     RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
                        ((256 / 8) - 1));
-    // 104 SGPRs is ample for the probe link pair s[30:31] and envelope temps.
+    if (soc_->arch() == ROCJITSU_CODE_ARCH_CDNA3 || soc_->arch() == ROCJITSU_CODE_ARCH_CDNA4)
+      RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc3, COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET, 128 / 4 - 1);
     RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
-                       ((104 / 8) - 1));
+                       granulated_sgpr_count_);
     RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, user_sgpr_count_);
     kd.kernel_code_properties = kernarg_properties_;
     if (wave32_dispatch_)
@@ -278,6 +284,7 @@ private:
   }
 
   uint32_t wave_size_ = 64;
+  uint32_t granulated_sgpr_count_ = kCallableProbeGranulatedSgprCount;
   bool wave32_dispatch_ = false;
   uint32_t queue_seq_ = 0;
   uint64_t entry_offset_ = 0;

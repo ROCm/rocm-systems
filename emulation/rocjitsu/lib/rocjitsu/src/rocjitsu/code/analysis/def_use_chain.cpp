@@ -96,9 +96,12 @@ InstDefUse::InstDefUse(const Instruction &inst, uint8_t wave_size,
     if (auto ref = ordinary_register_ref(*op)) {
       // A def of a Wave32 wave mask's decoded pair would kill an SGPR the
       // instruction does not write.
-      ref = wave_sized_register(*op, *ref, wave_size);
+      ref = inst.wave_sized_destination(*op, *ref, wave_size);
       expand_operand_register(defs, inst, *op, *ref, vgpr_msb, OperandExpansionKind::Def,
                               unknown_vgpr_defs);
+      if ((inst.flags() & CONDITIONAL_LAST_VGPR_DEF) && ref->cls == RegClass::VGPR && ref->width)
+        conditional_vgpr_def =
+            RegisterRef{RegClass::VGPR, static_cast<uint16_t>(ref->index + ref->width - 1), 1};
       has_vector_def |= is_vector_def(*ref);
     } else if (auto sc = op->to_special_reg_class()) {
       defs.expand(RegisterRef{*sc, 0, 1}); // singleton special def
@@ -117,6 +120,8 @@ InstDefUse::InstDefUse(const Instruction &inst, uint8_t wave_size,
   defs |= implicit_defs_set.ordinary_only();
 
   for (int i = 0; i < inst.num_src_operands(); ++i) {
+    if (!inst.tracks_explicit_source(i))
+      continue;
     const auto *op = inst.src_operand(i);
     if (op == nullptr)
       continue;

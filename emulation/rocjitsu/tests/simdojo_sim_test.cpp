@@ -22,6 +22,7 @@
 #include <string>
 #include <thread>
 #include <time.h>
+#include <utility>
 #include <vector>
 
 using namespace simdojo;
@@ -71,6 +72,98 @@ class AsyncPrimaryComponent : public Component {
 public:
   explicit AsyncPrimaryComponent(std::string name) : Component(std::move(name)) {}
   void startup() override { engine()->register_as_primary(); }
+};
+
+/// Active primary that performs one real event but deliberately remains registered.
+class ScheduledPrimaryComponent : public Component {
+public:
+  ScheduledPrimaryComponent(std::string name, Tick event_tick)
+      : Component(std::move(name)), event_tick_(event_tick) {
+    timer_event_.set_handler([this](Tick tick, Message *) {
+      handled = true;
+      handled_tick = tick;
+    });
+  }
+
+  void startup() override {
+    engine()->register_as_primary();
+    schedule_event(&timer_event_, event_tick_);
+  }
+
+  bool handled = false;
+  Tick handled_tick = 0;
+
+private:
+  Tick event_tick_;
+  Event timer_event_{this, EventType::TIMER_CALLBACK};
+};
+
+/// Primary that releases itself after processing one scheduled event.
+class ReleasingPrimaryComponent : public Component {
+public:
+  ReleasingPrimaryComponent(std::string name, Tick event_tick)
+      : Component(std::move(name)), event_tick_(event_tick) {
+    timer_event_.set_handler([this](Tick tick, Message *) {
+      handled_tick = tick;
+      engine()->primary_release();
+    });
+  }
+
+  void startup() override {
+    engine()->register_as_primary();
+    schedule_event(&timer_event_, event_tick_);
+  }
+
+  Tick handled_tick = 0;
+
+private:
+  Tick event_tick_;
+  Event timer_event_{this, EventType::TIMER_CALLBACK};
+};
+
+/// Primary that posts async work and optionally releases after that work runs.
+class AsyncPostingPrimaryComponent : public Component {
+public:
+  AsyncPostingPrimaryComponent(std::string name, Tick callback_tick, Tick late_tick,
+                               bool release_after_async = false)
+      : Component(std::move(name)), late_tick_(late_tick) {
+    post_.set_handler([this, callback_tick, release_after_async](Tick tick, Message *) {
+      engine()->schedule_event_async(&async_, callback_tick);
+      if (!release_after_async)
+        release(tick);
+    });
+    async_.set_handler([this, release_after_async](Tick tick, Message *) {
+      async_tick = tick;
+      if (release_after_async)
+        schedule_event(&release_, tick + kReleaseDelayTicks);
+    });
+    release_.set_handler([this](Tick tick, Message *) { release(tick); });
+    late_.set_handler([this](Tick, Message *) { late_ran = true; });
+  }
+
+  void startup() override {
+    engine()->register_as_primary();
+    schedule_event(&post_, 10);
+    schedule_event(&late_, late_tick_);
+  }
+
+  Tick async_tick = 0;
+  Tick release_tick = 0;
+  bool late_ran = false;
+
+private:
+  static constexpr Tick kReleaseDelayTicks = 5;
+
+  void release(Tick tick) {
+    release_tick = tick;
+    engine()->primary_release();
+  }
+
+  Tick late_tick_;
+  Event post_{this, EventType::TIMER_CALLBACK};
+  Event async_{this, EventType::TIMER_CALLBACK};
+  Event release_{this, EventType::TIMER_CALLBACK};
+  Event late_{this, EventType::TIMER_CALLBACK};
 };
 
 /// Component with IN/OUT ports that replies to each received message.
@@ -390,8 +483,14 @@ public:
 /// assigner maps component name → partition ID.
 void build_with_manual_partitions(SimulationEngine &engine, uint32_t num_partitions,
                                   std::function<PartitionID(Component *)> assigner) {
-  engine.topology().partition_manual(num_partitions, std::move(assigner));
-  engine.create();
+  util::StringDiagnostic admission_diagnostic;
+  ASSERT_TRUE(
+      engine.topology()
+          .partition_manual(num_partitions, std::move(assigner), admission_diagnostic.emitter())
+          .succeeded())
+      << admission_diagnostic.message();
+  ASSERT_TRUE(engine.create(admission_diagnostic.emitter()).succeeded())
+      << admission_diagnostic.message();
 }
 
 /// Helper: partition by component name suffix digit (e.g., "a0" → 0, "b1" → 1).
@@ -405,7 +504,119 @@ PartitionID partition_by_name_suffix(Component *comp) {
   return 0;
 }
 
+ExitStatus run_with_watchdog(SimulationEngine &engine) {
+  ExitStatus exit;
+  std::atomic<bool> finished{false};
+  std::thread runner([&]() {
+    exit = engine.run();
+    finished.store(true, std::memory_order_release);
+  });
+  const bool started = engine.wait_until_started();
+  const std::chrono::steady_clock::time_point deadline =
+      std::chrono::steady_clock::now() + std::chrono::seconds(2);
+  while (!finished.load(std::memory_order_acquire) && std::chrono::steady_clock::now() < deadline)
+    std::this_thread::yield();
+  const bool finished_on_its_own = finished.load(std::memory_order_acquire);
+  if (!finished_on_its_own)
+    engine.request_exit("termination regression timeout", 1);
+  runner.join();
+  EXPECT_TRUE(started);
+  EXPECT_TRUE(finished_on_its_own);
+  return exit;
+}
+
 } // namespace
+
+TEST(TopologyAdmissionTest, MissingRootAndInvalidPathsAreDiagnosed) {
+  Topology topology;
+  util::StringDiagnostic diagnostic;
+  EXPECT_TRUE(topology.resolve_component("missing", diagnostic.emitter()).failed());
+  EXPECT_NE(diagnostic.message().find("no root"), std::string::npos);
+  diagnostic("");
+  EXPECT_TRUE(topology.resolve_port("missing.port", diagnostic.emitter()).failed());
+  EXPECT_NE(diagnostic.message().find("no root"), std::string::npos);
+  diagnostic("");
+  EXPECT_TRUE(topology.wire_links({}, ExecMode::FUNCTIONAL, diagnostic.emitter()).failed());
+  EXPECT_NE(diagnostic.message().find("no root"), std::string::npos);
+
+  auto root = std::make_unique<CompositeComponent>("root");
+  root->add_child(std::make_unique<CounterComponent>("leaf", 0));
+  topology.set_root(std::move(root));
+  for (const auto &path : {"missing", "leaf.child"}) {
+    diagnostic("");
+    EXPECT_TRUE(topology.resolve_component(path, diagnostic.emitter()).failed());
+    EXPECT_NE(diagnostic.message().find(path), std::string::npos);
+  }
+  diagnostic("");
+  EXPECT_TRUE(topology.resolve_port("leaf", diagnostic.emitter()).failed());
+  EXPECT_NE(diagnostic.message().find("needs '.'"), std::string::npos);
+}
+
+TEST(TopologyAdmissionTest, InvalidLaterLinkDoesNotCreatePortsOrLinks) {
+  Topology topology;
+  auto root = std::make_unique<CompositeComponent>("root");
+  auto *leaf = root->add_child(std::make_unique<CounterComponent>("leaf", 0));
+  topology.set_root(std::move(root));
+  const auto ports_before = leaf->ports().size();
+  util::StringDiagnostic diagnostic;
+  EXPECT_TRUE(topology
+                  .wire_links({{"leaf.new_out", "leaf.new_in"}, {"leaf.new_out", "missing.new_in"}},
+                              ExecMode::FUNCTIONAL, diagnostic.emitter())
+                  .failed());
+  EXPECT_FALSE(diagnostic.message().empty());
+  EXPECT_TRUE(topology.links().empty());
+  EXPECT_EQ(leaf->ports().size(), ports_before);
+}
+
+TEST(TopologyAdmissionTest, EmptyAssignerPreservesPartitions) {
+  util::StringDiagnostic admission_diagnostic;
+  Topology topology;
+  auto root = std::make_unique<CompositeComponent>("root");
+  auto *leaf = root->add_child(std::make_unique<CounterComponent>("leaf", 0));
+  topology.set_root(std::move(root));
+  ASSERT_TRUE(topology.partition_balanced(1, admission_diagnostic.emitter()).succeeded())
+      << admission_diagnostic.message();
+  util::StringDiagnostic diagnostic;
+  EXPECT_TRUE(topology.partition_manual(2, {}, diagnostic.emitter()).failed());
+  EXPECT_NE(diagnostic.message().find("assigner must be set"), std::string::npos);
+  diagnostic("");
+  EXPECT_TRUE(
+      topology.partition_manual(
+                  0, [](Component *) { return PartitionID{0}; }, diagnostic.emitter())
+          .failed());
+  EXPECT_NE(diagnostic.message().find("num_partitions must be nonzero"), std::string::npos);
+  ASSERT_EQ(topology.partitions().size(), 1u);
+  EXPECT_EQ(leaf->partition_id(), 0u);
+}
+
+TEST(TopologyAdmissionTest, ClockFailuresDoNotRegisterDomains) {
+  Topology topology;
+  util::StringDiagnostic diagnostic;
+  EXPECT_TRUE(topology.add_clock_domain("bad", 0, 0, diagnostic.emitter()).failed());
+  EXPECT_NE(diagnostic.message().find("positive"), std::string::npos);
+  EXPECT_TRUE(topology.clock_domains().empty());
+  diagnostic("");
+  EXPECT_TRUE(
+      topology.add_clock_domain("fast", TICKS_PER_SECOND + 1, 0, diagnostic.emitter()).failed());
+  EXPECT_NE(diagnostic.message().find("must not exceed"), std::string::npos);
+  EXPECT_TRUE(topology.clock_domains().empty());
+  diagnostic("");
+  auto limit = topology.add_clock_domain("limit", TICKS_PER_SECOND, 0, diagnostic.emitter());
+  ASSERT_TRUE(limit.succeeded()) << diagnostic.message();
+  ClockDomain *limit_domain = limit.value();
+  EXPECT_EQ(limit_domain->period(), 1u);
+  ASSERT_EQ(topology.clock_domains().size(), 1u);
+  EXPECT_EQ(topology.clock_domains().front().get(), limit_domain);
+  auto domain = ClockDomain::create("clock", 1, 0, diagnostic.emitter());
+  ASSERT_TRUE(domain.succeeded()) << diagnostic.message();
+  const ClockDomain &clock = domain.value();
+  diagnostic("");
+  EXPECT_TRUE(clock.derive("bad", 0, 0, diagnostic.emitter()).failed());
+  EXPECT_NE(diagnostic.message().find("divisor"), std::string::npos);
+  diagnostic("");
+  EXPECT_TRUE(clock.derive("bad", 2, 0, diagnostic.emitter()).failed());
+  EXPECT_NE(diagnostic.message().find("frequency"), std::string::npos);
+}
 
 TEST(TopologyPartitionTest, RepartitionRetainsExternalLinkOwnerOnce) {
   // Topology borrows external endpoint owners, so external must outlive topology.
@@ -420,14 +631,21 @@ TEST(TopologyPartitionTest, RepartitionRetainsExternalLinkOwnerOnce) {
   topology.add_link(external.out_port(), consumer_ptr->in_port(), 1);
 
   for (int pass = 0; pass < 2; ++pass) {
+    util::StringDiagnostic admission_diagnostic;
     SCOPED_TRACE(::testing::Message() << "pass=" << pass);
-    topology.partition_manual(2, [](Component *) { return PartitionID{0}; });
+    ASSERT_TRUE(
+        topology
+            .partition_manual(
+                2, [](Component *) { return PartitionID{0}; }, admission_diagnostic.emitter())
+            .succeeded())
+        << admission_diagnostic.message();
     EXPECT_EQ(external.partition_id(), 0u);
     EXPECT_EQ(std::ranges::count(topology.partitions()[0].components, &external), 1);
   }
 }
 
 TEST(TopologyPartitionTest, ManualPartitionRunsExternalProducerOnAssignedPartition) {
+  util::StringDiagnostic admission_diagnostic;
   // SimulationEngine borrows external endpoint owners, so external must outlive engine.
   ProducerComponent external("external", 3);
   SimulationEngine engine({.num_threads = 2});
@@ -438,11 +656,16 @@ TEST(TopologyPartitionTest, ManualPartitionRunsExternalProducerOnAssignedPartiti
   engine.topology().set_root(std::move(root));
   engine.topology().add_link(external.out_port(), consumer->in_port(), 0);
 
-  engine.topology().partition_manual(2, [](Component *) { return PartitionID{1}; });
+  ASSERT_TRUE(engine.topology()
+                  .partition_manual(
+                      2, [](Component *) { return PartitionID{1}; }, admission_diagnostic.emitter())
+                  .succeeded())
+      << admission_diagnostic.message();
 
   ASSERT_EQ(external.partition_id(), 1u);
   ASSERT_EQ(consumer->partition_id(), 1u);
-  engine.create();
+  ASSERT_TRUE(engine.create(admission_diagnostic.emitter()).succeeded())
+      << admission_diagnostic.message();
   auto exit = engine.run();
 
   EXPECT_EQ(exit.reason, ExitReason::COMPLETED);
@@ -453,6 +676,7 @@ TEST(TopologyPartitionTest, ManualPartitionRunsExternalProducerOnAssignedPartiti
 }
 
 TEST(TopologyPartitionTest, BalancedSinglePartitionIncludesExternalLinkOwner) {
+  util::StringDiagnostic admission_diagnostic;
   // Topology borrows external endpoint owners, so external must outlive topology.
   ProducerComponent external("external", 0, 1, false);
   Topology topology;
@@ -464,7 +688,8 @@ TEST(TopologyPartitionTest, BalancedSinglePartitionIncludesExternalLinkOwner) {
 
   topology.add_link(external.out_port(), consumer_ptr->in_port(), 1);
 
-  topology.partition_balanced(1);
+  ASSERT_TRUE(topology.partition_balanced(1, admission_diagnostic.emitter()).succeeded())
+      << admission_diagnostic.message();
 
   ASSERT_EQ(topology.partitions().size(), 1u);
   EXPECT_EQ(external.partition_id(), 0u);
@@ -484,8 +709,10 @@ TEST(TopologyPartitionTest, BalancedRepartitionRetainsExternalLinkOwnerOnce) {
   topology.add_link(external.out_port(), consumer_ptr->in_port(), 1);
 
   for (int pass = 0; pass < 2; ++pass) {
+    util::StringDiagnostic admission_diagnostic;
     SCOPED_TRACE(::testing::Message() << "pass=" << pass);
-    topology.partition_balanced(2);
+    ASSERT_TRUE(topology.partition_balanced(2, admission_diagnostic.emitter()).succeeded())
+        << admission_diagnostic.message();
     ASSERT_EQ(topology.partitions().size(), 2u);
     EXPECT_LT(external.partition_id(), 2u);
 
@@ -503,34 +730,46 @@ TEST(TopologyPartitionTest, MultiThreadedEngineRequiresExplicitPolicy) {
   root->add_child(std::make_unique<CounterComponent>("counter1", 0));
   engine.topology().set_root(std::move(root));
 
-  EXPECT_THROW(engine.create(), std::invalid_argument);
+  EXPECT_TRUE(engine.create().failed());
 }
 
 TEST(TopologyPartitionTest, RejectsZeroPartitionCount) {
   Topology topology;
 
-  EXPECT_THROW(topology.partition_balanced(0), std::invalid_argument);
+  EXPECT_TRUE(topology.partition_balanced(0).failed());
   EXPECT_TRUE(topology.partitions().empty());
 
-  EXPECT_THROW(topology.partition_manual(0, [](Component *) { return PartitionID{0}; }),
-               std::invalid_argument);
+  EXPECT_TRUE(topology.partition_manual(0, [](Component *) { return PartitionID{0}; }).failed());
   EXPECT_TRUE(topology.partitions().empty());
 }
 
 TEST(TopologyPartitionTest, OutOfRangeManualAssignmentLeavesExistingStateIntact) {
+  util::StringDiagnostic admission_diagnostic;
   Topology topology;
   auto root = std::make_unique<CompositeComponent>("root");
   auto *counter0 = root->add_child(std::make_unique<CounterComponent>("counter0", 0));
   auto *counter1 = root->add_child(std::make_unique<CounterComponent>("counter1", 0));
   topology.set_root(std::move(root));
-  topology.partition_manual(1, [](Component *) { return PartitionID{0}; });
+  ASSERT_TRUE(topology
+                  .partition_manual(
+                      1, [](Component *) { return PartitionID{0}; }, admission_diagnostic.emitter())
+                  .succeeded())
+      << admission_diagnostic.message();
 
   ASSERT_EQ(topology.partitions().size(), 1u);
   ASSERT_EQ(counter0->partition_id(), 0u);
   ASSERT_EQ(counter1->partition_id(), 0u);
 
-  EXPECT_THROW(topology.partition_manual(2, [](Component *) { return PartitionID{2}; }),
-               std::invalid_argument);
+  util::StringDiagnostic diagnostic;
+  EXPECT_TRUE(topology
+                  .partition_manual(
+                      2,
+                      [](Component *component) {
+                        return component->name() == "counter1" ? PartitionID{2} : PartitionID{1};
+                      },
+                      diagnostic.emitter())
+                  .failed());
+  EXPECT_NE(diagnostic.message().find("out-of-range"), std::string::npos);
   EXPECT_EQ(topology.partitions().size(), 1u);
   EXPECT_EQ(counter0->partition_id(), 0u);
   EXPECT_EQ(counter1->partition_id(), 0u);
@@ -539,23 +778,40 @@ TEST(TopologyPartitionTest, OutOfRangeManualAssignmentLeavesExistingStateIntact)
 TEST(TopologyPartitionTest, EngineRejectsZeroWorkerThreads) {
   SimulationEngine engine({.num_threads = 0});
 
-  EXPECT_THROW(engine.create(), std::invalid_argument);
+  EXPECT_TRUE(engine.create().failed());
   EXPECT_FALSE(engine.is_created());
   EXPECT_TRUE(engine.topology().partitions().empty());
 }
 
 TEST(TopologyPartitionTest, EngineRejectsPartitionCountMismatch) {
+  util::StringDiagnostic admission_diagnostic;
   SimulationEngine engine({.num_threads = 2});
   auto root = std::make_unique<CompositeComponent>("root");
-  root->add_child(std::make_unique<CounterComponent>("counter0", 0));
+  auto *counter = root->add_child(std::make_unique<CounterComponent>("counter0", 0));
   engine.topology().set_root(std::move(root));
-  engine.topology().partition_manual(1, [](Component *) { return PartitionID{0}; });
+  ASSERT_TRUE(engine.topology()
+                  .partition_manual(
+                      1, [](Component *) { return PartitionID{0}; }, admission_diagnostic.emitter())
+                  .succeeded())
+      << admission_diagnostic.message();
 
-  EXPECT_THROW(engine.create(), std::invalid_argument);
+  util::StringDiagnostic diagnostic;
+  EXPECT_TRUE(engine.create(diagnostic.emitter()).failed());
+  EXPECT_NE(diagnostic.message().find("partition count"), std::string::npos);
   EXPECT_FALSE(engine.is_created());
+  EXPECT_EQ(counter->engine(), nullptr);
+  ASSERT_TRUE(engine.topology()
+                  .partition_manual(
+                      2, [](Component *) { return PartitionID{0}; }, admission_diagnostic.emitter())
+                  .succeeded())
+      << admission_diagnostic.message();
+  ASSERT_TRUE(engine.create(admission_diagnostic.emitter()).succeeded())
+      << admission_diagnostic.message();
+  EXPECT_EQ(counter->engine(), &engine);
 }
 
 TEST(TopologyPartitionTest, EngineRejectsZeroLatencyCrossPartitionLink) {
+  util::StringDiagnostic admission_diagnostic;
   SimulationEngine engine({.num_threads = 2});
   auto root = std::make_unique<CompositeComponent>("root");
   auto producer = std::make_unique<ProducerComponent>("producer0", 0, 1, false);
@@ -566,21 +822,24 @@ TEST(TopologyPartitionTest, EngineRejectsZeroLatencyCrossPartitionLink) {
   root->add_child(std::move(consumer));
   engine.topology().set_root(std::move(root));
   engine.topology().add_link(producer_ptr->out_port(), consumer_ptr->in_port(), 0);
-  engine.topology().partition_manual(2, partition_by_name_suffix);
+  ASSERT_TRUE(engine.topology()
+                  .partition_manual(2, partition_by_name_suffix, admission_diagnostic.emitter())
+                  .succeeded())
+      << admission_diagnostic.message();
 
-  try {
-    engine.create();
-    FAIL() << "expected invalid cross-partition latency";
-  } catch (const std::invalid_argument &e) {
-    const std::string message = e.what();
-    EXPECT_NE(message.find("root.producer0.out"), std::string::npos);
-    EXPECT_NE(message.find("root.consumer1.in"), std::string::npos);
-    EXPECT_NE(message.find("positive latency"), std::string::npos);
-  }
+  util::StringDiagnostic diagnostic;
+  EXPECT_TRUE(engine.create(diagnostic.emitter()).failed());
+  const std::string &message = diagnostic.message();
+  EXPECT_NE(message.find("root.producer0.out"), std::string::npos);
+  EXPECT_NE(message.find("root.consumer1.in"), std::string::npos);
+  EXPECT_NE(message.find("positive latency"), std::string::npos);
+  EXPECT_EQ(producer_ptr->engine(), nullptr);
+  EXPECT_EQ(consumer_ptr->engine(), nullptr);
   EXPECT_FALSE(engine.is_created());
 }
 
 TEST(TopologyPartitionTest, EngineRejectsCrossPartitionQueuedLink) {
+  util::StringDiagnostic admission_diagnostic;
   SimulationEngine engine({.num_threads = 2});
   auto root = std::make_unique<CompositeComponent>("root");
   auto producer = std::make_unique<ProducerComponent>("producer0", 0, 1, false);
@@ -591,17 +850,19 @@ TEST(TopologyPartitionTest, EngineRejectsCrossPartitionQueuedLink) {
   root->add_child(std::move(consumer));
   engine.topology().set_root(std::move(root));
   engine.topology().add_queued_link(producer_ptr->out_port(), consumer_ptr->in_port(), 1, 4);
-  engine.topology().partition_manual(2, partition_by_name_suffix);
+  ASSERT_TRUE(engine.topology()
+                  .partition_manual(2, partition_by_name_suffix, admission_diagnostic.emitter())
+                  .succeeded())
+      << admission_diagnostic.message();
 
-  try {
-    engine.create();
-    FAIL() << "expected cross-partition QueuedLink rejection";
-  } catch (const std::invalid_argument &e) {
-    const std::string message = e.what();
-    EXPECT_NE(message.find("root.producer0.out"), std::string::npos);
-    EXPECT_NE(message.find("root.consumer1.in"), std::string::npos);
-    EXPECT_NE(message.find("QueuedLink"), std::string::npos);
-  }
+  util::StringDiagnostic diagnostic;
+  EXPECT_TRUE(engine.create(diagnostic.emitter()).failed());
+  const std::string &message = diagnostic.message();
+  EXPECT_NE(message.find("root.producer0.out"), std::string::npos);
+  EXPECT_NE(message.find("root.consumer1.in"), std::string::npos);
+  EXPECT_NE(message.find("QueuedLink"), std::string::npos);
+  EXPECT_EQ(producer_ptr->engine(), nullptr);
+  EXPECT_EQ(consumer_ptr->engine(), nullptr);
   EXPECT_FALSE(engine.is_created());
 }
 
@@ -832,18 +1093,21 @@ TEST(SpinlockTest, CrossPartitionQueueEmptyDrain) {
 // ============================================================================
 
 TEST(TerminationTest, QuiescenceDetection) {
+  util::StringDiagnostic admission_diagnostic;
   SimulationEngine engine({.num_threads = 1});
   auto root = std::make_unique<CompositeComponent>("root");
   root->add_child(std::make_unique<CounterComponent>("c0", 10));
   engine.topology().set_root(std::move(root));
-  engine.create();
-  auto exit = engine.run();
+  ASSERT_TRUE(engine.create(admission_diagnostic.emitter()).succeeded())
+      << admission_diagnostic.message();
+  const ExitStatus exit = engine.run();
 
   EXPECT_EQ(exit.reason, ExitReason::COMPLETED);
-  EXPECT_NE(exit.message.find("quiescent"), std::string::npos);
+  EXPECT_EQ(exit.cause, ExitCause::QUIESCENCE);
 }
 
 TEST(TerminationTest, AllPrimaryDoneTrigger) {
+  util::StringDiagnostic admission_diagnostic;
   SimulationEngine engine({.num_threads = 1});
   auto root = std::make_unique<CompositeComponent>("root");
   auto *p = root->add_child(std::make_unique<ProducerComponent>("p0", 5));
@@ -851,39 +1115,346 @@ TEST(TerminationTest, AllPrimaryDoneTrigger) {
   engine.topology().set_root(std::move(root));
   engine.topology().add_link(static_cast<ProducerComponent *>(p)->out_port(),
                              static_cast<ConsumerComponent *>(c)->in_port(), 1);
-  engine.create();
-  auto exit = engine.run();
+  ASSERT_TRUE(engine.create(admission_diagnostic.emitter()).succeeded())
+      << admission_diagnostic.message();
+  const ExitStatus exit = engine.run();
 
   EXPECT_EQ(exit.reason, ExitReason::COMPLETED);
-  EXPECT_NE(exit.message.find("primaries"), std::string::npos);
+  EXPECT_EQ(exit.cause, ExitCause::ALL_PRIMARIES_COMPLETED);
   EXPECT_EQ(static_cast<ConsumerComponent *>(c)->received.size(), 5u);
 }
 
 TEST(TerminationTest, MaxTicksSentinel) {
+  util::StringDiagnostic admission_diagnostic;
   SimulationEngine engine({.max_ticks = 100, .num_threads = 1});
   auto root = std::make_unique<CompositeComponent>("root");
   root->add_child(std::make_unique<InfiniteComponent>("inf0"));
   engine.topology().set_root(std::move(root));
-  engine.create();
-  auto exit = engine.run();
+  ASSERT_TRUE(engine.create(admission_diagnostic.emitter()).succeeded())
+      << admission_diagnostic.message();
+  const ExitStatus exit = engine.run();
 
   EXPECT_EQ(exit.reason, ExitReason::COMPLETED);
-  EXPECT_NE(exit.message.find("max ticks"), std::string::npos);
+  EXPECT_EQ(exit.cause, ExitCause::MAX_TICKS);
+}
+
+TEST(TerminationTest, MultiThreadedMaxTicksStopsAQuiescentPrimary) {
+  SimulationEngine engine({.max_ticks = 100, .num_threads = 2});
+  auto root = std::make_unique<CompositeComponent>("root");
+  root->add_child(std::make_unique<AsyncPrimaryComponent>("primary0"));
+  root->add_child(std::make_unique<AsyncPrimaryComponent>("primary1"));
+  engine.topology().set_root(std::move(root));
+  build_with_manual_partitions(engine, 2, partition_by_name_suffix);
+
+  const ExitStatus exit = run_with_watchdog(engine);
+  EXPECT_EQ(exit.reason, ExitReason::COMPLETED);
+  EXPECT_EQ(exit.cause, ExitCause::ACTIVE_PRIMARY_STALL);
+  EXPECT_EQ(exit.tick, 0u);
+}
+
+TEST(TerminationTest, SingleThreadedMaxTicksStopsAQuiescentPrimary) {
+  SimulationEngine engine({.max_ticks = 100, .num_threads = 1});
+  auto root = std::make_unique<CompositeComponent>("root");
+  root->add_child(std::make_unique<AsyncPrimaryComponent>("primary0"));
+  engine.topology().set_root(std::move(root));
+  ASSERT_TRUE(engine.create().succeeded());
+
+  const ExitStatus exit = engine.run();
+
+  EXPECT_EQ(exit.reason, ExitReason::COMPLETED);
+  EXPECT_EQ(exit.cause, ExitCause::ACTIVE_PRIMARY_STALL);
+  EXPECT_EQ(exit.tick, 0u);
+}
+
+TEST(TerminationTest, StepModeMaxTicksStopsAQuiescentPrimary) {
+  SimulationEngine engine({.max_ticks = 100, .num_threads = 1});
+  auto root = std::make_unique<CompositeComponent>("root");
+  root->add_child(std::make_unique<AsyncPrimaryComponent>("primary0"));
+  engine.topology().set_root(std::move(root));
+  ASSERT_TRUE(engine.create().succeeded());
+
+  EXPECT_FALSE(engine.step());
+  EXPECT_EQ(engine.last_exit().reason, ExitReason::COMPLETED);
+  EXPECT_EQ(engine.last_exit().cause, ExitCause::ACTIVE_PRIMARY_STALL);
+  EXPECT_EQ(engine.last_exit().tick, 0u);
+}
+
+TEST(TerminationTest, FinitePrimaryStallAppliesOnlyBeforeMaxTicks) {
+  for (const Tick event_tick : {Tick{99}, Tick{100}}) {
+    SCOPED_TRACE(::testing::Message() << "run event_tick=" << event_tick);
+    SimulationEngine engine({.max_ticks = 100, .num_threads = 1});
+    auto root = std::make_unique<CompositeComponent>("root");
+    auto *component = static_cast<ScheduledPrimaryComponent *>(
+        root->add_child(std::make_unique<ScheduledPrimaryComponent>("primary0", event_tick)));
+    engine.topology().set_root(std::move(root));
+    ASSERT_TRUE(engine.create().succeeded());
+
+    const ExitStatus exit = engine.run();
+    EXPECT_TRUE(component->handled);
+    EXPECT_EQ(component->handled_tick, event_tick);
+    EXPECT_EQ(exit.tick, event_tick);
+    EXPECT_EQ(exit.cause,
+              event_tick < 100 ? ExitCause::ACTIVE_PRIMARY_STALL : ExitCause::MAX_TICKS);
+  }
+
+  for (const Tick event_tick : {Tick{99}, Tick{100}}) {
+    SCOPED_TRACE(::testing::Message() << "step event_tick=" << event_tick);
+    SimulationEngine engine({.max_ticks = 100, .num_threads = 1});
+    auto root = std::make_unique<CompositeComponent>("root");
+    auto *component = static_cast<ScheduledPrimaryComponent *>(
+        root->add_child(std::make_unique<ScheduledPrimaryComponent>("primary0", event_tick)));
+    engine.topology().set_root(std::move(root));
+    ASSERT_TRUE(engine.create().succeeded());
+
+    while (engine.step()) {
+    }
+    EXPECT_TRUE(component->handled);
+    EXPECT_EQ(component->handled_tick, event_tick);
+    EXPECT_EQ(engine.last_exit().tick, event_tick);
+    EXPECT_EQ(engine.last_exit().cause,
+              event_tick < 100 ? ExitCause::ACTIVE_PRIMARY_STALL : ExitCause::MAX_TICKS);
+  }
+}
+
+TEST(TerminationTest, FiniteRunsReportEarlyPrimaryCompletionAtTheLastProcessedTick) {
+  for (const uint32_t partitions : {1u, 2u}) {
+    SCOPED_TRACE(::testing::Message() << "run partitions=" << partitions);
+    SimulationEngine engine({.max_ticks = 100, .num_threads = partitions});
+    auto root = std::make_unique<CompositeComponent>("root");
+    auto *component = static_cast<ReleasingPrimaryComponent *>(
+        root->add_child(std::make_unique<ReleasingPrimaryComponent>("primary0", 10)));
+    engine.topology().set_root(std::move(root));
+    if (partitions == 1) {
+      ASSERT_TRUE(engine.create().succeeded());
+    } else {
+      build_with_manual_partitions(engine, partitions, partition_by_name_suffix);
+    }
+
+    const ExitStatus exit = engine.run();
+    EXPECT_EQ(component->handled_tick, 10u);
+    EXPECT_EQ(exit.cause, ExitCause::ALL_PRIMARIES_COMPLETED);
+    EXPECT_EQ(exit.tick, 10u);
+  }
+
+  SimulationEngine engine({.max_ticks = 100, .num_threads = 1});
+  auto root = std::make_unique<CompositeComponent>("root");
+  auto *component = static_cast<ReleasingPrimaryComponent *>(
+      root->add_child(std::make_unique<ReleasingPrimaryComponent>("primary0", 10)));
+  engine.topology().set_root(std::move(root));
+  ASSERT_TRUE(engine.create().succeeded());
+  while (engine.step()) {
+  }
+  EXPECT_EQ(component->handled_tick, 10u);
+  EXPECT_EQ(engine.last_exit().cause, ExitCause::ALL_PRIMARIES_COMPLETED);
+  EXPECT_EQ(engine.last_exit().tick, 10u);
+}
+
+TEST(TerminationTest, FiniteHorizonBoundsDrainAfterPrimaryRelease) {
+  for (const uint32_t partitions : {1u, 2u}) {
+    SCOPED_TRACE(partitions);
+    SimulationEngine engine({.max_ticks = 100, .num_threads = partitions});
+    auto root = std::make_unique<CompositeComponent>("root");
+    auto producer = std::make_unique<ProducerComponent>("producer0", 1, 10);
+    auto consumer = std::make_unique<ConsumerComponent>("consumer1");
+    ProducerComponent *producer_ptr = producer.get();
+    ConsumerComponent *consumer_ptr = consumer.get();
+    root->add_child(std::move(producer));
+    root->add_child(std::move(consumer));
+    engine.topology().set_root(std::move(root));
+    engine.topology().add_link(producer_ptr->out_port(), consumer_ptr->in_port(), 190);
+    if (partitions == 1) {
+      ASSERT_TRUE(engine.create().succeeded());
+    } else {
+      build_with_manual_partitions(engine, partitions, partition_by_name_suffix);
+    }
+
+    const ExitStatus exit = engine.run();
+    EXPECT_EQ(producer_ptr->sent_, 1u);
+    EXPECT_TRUE(consumer_ptr->received.empty());
+    EXPECT_EQ(exit.cause, ExitCause::MAX_TICKS);
+    EXPECT_EQ(exit.tick, 100u);
+  }
+}
+
+TEST(TerminationTest, FiniteHorizonDrainsAsyncWorkBeforeStopping) {
+  for (const uint32_t partitions : {1u, 2u}) {
+    SCOPED_TRACE(partitions);
+    constexpr Tick kHorizon = 100;
+    for (const Tick callback_tick : {Tick{20}, kHorizon - 1, kHorizon, kHorizon + 1}) {
+      SCOPED_TRACE(callback_tick);
+      SimulationEngine engine({.max_ticks = kHorizon, .num_threads = partitions});
+      auto root = std::make_unique<CompositeComponent>("root");
+      auto primary = std::make_unique<AsyncPostingPrimaryComponent>("primary0", callback_tick, 200);
+      AsyncPostingPrimaryComponent *primary_ptr = primary.get();
+      root->add_child(std::move(primary));
+      engine.topology().set_root(std::move(root));
+      if (partitions == 1) {
+        ASSERT_TRUE(engine.create().succeeded());
+      } else {
+        build_with_manual_partitions(engine, partitions, partition_by_name_suffix);
+      }
+
+      const ExitStatus exit = engine.run();
+      // The single-threaded sentinel follows this same-tick callback.
+      // The partitioned loop stops before processing the horizon epoch.
+      const bool ran = callback_tick < kHorizon || (callback_tick == kHorizon && partitions == 1);
+      EXPECT_EQ(primary_ptr->async_tick, ran ? callback_tick : 0u);
+      EXPECT_FALSE(primary_ptr->late_ran);
+      EXPECT_EQ(exit.cause, ExitCause::MAX_TICKS);
+      EXPECT_EQ(exit.tick, kHorizon);
+    }
+  }
+}
+
+TEST(TerminationTest, TickLimitDoesNotDelayBufferedAsyncWork) {
+  constexpr Tick kUnrelatedTick = 99;
+  for (const uint32_t partitions : {1u, 2u}) {
+    for (const Tick horizon : {Tick{0}, kUnrelatedTick, kUnrelatedTick + 1}) {
+      SCOPED_TRACE(::testing::Message() << "partitions=" << partitions << " horizon=" << horizon);
+      SimulationEngine engine({.max_ticks = horizon, .num_threads = partitions});
+      auto root = std::make_unique<CompositeComponent>("root");
+      auto primary = std::make_unique<AsyncPostingPrimaryComponent>("primary0", 20, kUnrelatedTick,
+                                                                    /*release_after_async=*/true);
+      AsyncPostingPrimaryComponent *primary_ptr = primary.get();
+      root->add_child(std::move(primary));
+      engine.topology().set_root(std::move(root));
+      if (partitions == 1) {
+        ASSERT_TRUE(engine.create().succeeded());
+      } else {
+        build_with_manual_partitions(engine, partitions, partition_by_name_suffix);
+      }
+
+      const ExitStatus exit = engine.run();
+      EXPECT_EQ(primary_ptr->async_tick, 20u);
+      EXPECT_EQ(primary_ptr->release_tick, 25u);
+      EXPECT_EQ(exit.cause, horizon == kUnrelatedTick ? ExitCause::MAX_TICKS
+                                                      : ExitCause::ALL_PRIMARIES_COMPLETED);
+      EXPECT_EQ(exit.tick, kUnrelatedTick);
+    }
+  }
+}
+
+TEST(TerminationTest, FiniteHorizonStopsBeforeSaturatedEvent) {
+  for (const uint32_t partitions : {1u, 2u}) {
+    for (const bool release_primary : {false, true}) {
+      SCOPED_TRACE(::testing::Message()
+                   << "partitions=" << partitions << " release_primary=" << release_primary);
+      SimulationEngine engine({.max_ticks = 100, .num_threads = partitions});
+      auto root = std::make_unique<CompositeComponent>("root");
+      if (release_primary) {
+        root->add_child(std::make_unique<ReleasingPrimaryComponent>("primary0", 10));
+      } else {
+        root->add_child(std::make_unique<ScheduledPrimaryComponent>("primary0", 10));
+      }
+      auto late = std::make_unique<ProducerComponent>("late1", 1, TICK_MAX,
+                                                      /*register_primary=*/false);
+      ProducerComponent *late_ptr = late.get();
+      root->add_child(std::move(late));
+      engine.topology().set_root(std::move(root));
+      if (partitions == 1) {
+        ASSERT_TRUE(engine.create().succeeded());
+      } else {
+        build_with_manual_partitions(engine, partitions, partition_by_name_suffix);
+      }
+
+      const ExitStatus exit = run_with_watchdog(engine);
+      EXPECT_EQ(late_ptr->sent_, 0u);
+      EXPECT_EQ(exit.cause, ExitCause::MAX_TICKS);
+      EXPECT_EQ(exit.tick, 100u);
+    }
+  }
+}
+
+TEST(TerminationTest, FiniteRunsReportEarlyQuiescenceWithoutPrimaries) {
+  for (const uint32_t partitions : {1u, 2u}) {
+    SCOPED_TRACE(::testing::Message() << "run partitions=" << partitions);
+    SimulationEngine engine({.max_ticks = 100, .num_threads = partitions});
+    auto root = std::make_unique<CompositeComponent>("root");
+    root->add_child(std::make_unique<LifecycleCountingComponent>("component0"));
+    engine.topology().set_root(std::move(root));
+    if (partitions == 1) {
+      ASSERT_TRUE(engine.create().succeeded());
+    } else {
+      ASSERT_TRUE(engine.topology().partition_balanced(partitions).succeeded());
+      ASSERT_TRUE(engine.create().succeeded());
+    }
+
+    const ExitStatus exit = engine.run();
+    EXPECT_EQ(exit.cause, ExitCause::QUIESCENCE);
+    EXPECT_EQ(exit.tick, 0u);
+  }
+
+  SimulationEngine engine({.max_ticks = 100, .num_threads = 1});
+  auto root = std::make_unique<CompositeComponent>("root");
+  root->add_child(std::make_unique<LifecycleCountingComponent>("component0"));
+  engine.topology().set_root(std::move(root));
+  ASSERT_TRUE(engine.create().succeeded());
+  while (engine.step()) {
+  }
+  EXPECT_EQ(engine.last_exit().cause, ExitCause::QUIESCENCE);
+  EXPECT_EQ(engine.last_exit().tick, 0u);
+}
+
+TEST(TerminationTest, FiniteMaxTicksStillAwaitsTheFirstPrimary) {
+  for (const uint32_t partitions : {1u, 2u}) {
+    SCOPED_TRACE(partitions);
+    SimulationEngine engine({.max_ticks = 100, .num_threads = partitions, .await_primaries = true});
+    auto root = std::make_unique<CompositeComponent>("root");
+    auto *component0 = static_cast<LifecycleCountingComponent *>(
+        root->add_child(std::make_unique<LifecycleCountingComponent>("component0")));
+    root->add_child(std::make_unique<LifecycleCountingComponent>("component1"));
+    engine.topology().set_root(std::move(root));
+    if (partitions > 1) {
+      ASSERT_TRUE(engine.topology().partition_balanced(partitions).succeeded());
+    }
+    ASSERT_TRUE(engine.create().succeeded());
+
+    ExitStatus exit;
+    std::atomic<bool> finished{false};
+    std::thread runner([&]() {
+      exit = engine.run();
+      finished.store(true, std::memory_order_release);
+    });
+    const bool started = engine.wait_until_started();
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    const bool stayed_alive_while_idle = !finished.load(std::memory_order_acquire);
+    engine.request_exit("external stop", 7);
+
+    const std::chrono::steady_clock::time_point deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (!finished.load(std::memory_order_acquire) && std::chrono::steady_clock::now() < deadline)
+      std::this_thread::yield();
+    const bool stopped_on_request = finished.load(std::memory_order_acquire);
+    Event rescue_event(component0, EventType::TIMER_CALLBACK, [](Tick, Message *) {});
+    if (!stopped_on_request)
+      engine.schedule_event_now(&rescue_event);
+    runner.join();
+
+    EXPECT_TRUE(started);
+    EXPECT_TRUE(stayed_alive_while_idle);
+    EXPECT_TRUE(stopped_on_request);
+    EXPECT_EQ(exit.reason, ExitReason::EXIT_REQUEST);
+    EXPECT_EQ(exit.code, 7);
+    EXPECT_EQ(exit.message, "external stop");
+  }
 }
 
 TEST(StartupReadinessTest, CleanStartupReportsReady) {
+  util::StringDiagnostic admission_diagnostic;
   // A clean startup must make wait_until_started() return true without hanging.
   SimulationEngine engine({.max_ticks = 5, .num_threads = 1});
   auto root = std::make_unique<CompositeComponent>("root");
   root->add_child(std::make_unique<LifecycleCountingComponent>("c0"));
   engine.topology().set_root(std::move(root));
-  engine.create();
+  ASSERT_TRUE(engine.create(admission_diagnostic.emitter()).succeeded())
+      << admission_diagnostic.message();
 
   engine.step();
   EXPECT_TRUE(engine.wait_until_started());
 }
 
 TEST(StartupReadinessTest, StartupFailureOutranksAnEarlierExitRequest) {
+  util::StringDiagnostic admission_diagnostic;
   // The failure is recorded SECOND here, after an ordinary code-0 exit request that
   // the same startup() issued. Whoever wrote first must not win: a generation whose
   // components never started has to report failure, or the C API maps code 0 to
@@ -892,7 +1463,8 @@ TEST(StartupReadinessTest, StartupFailureOutranksAnEarlierExitRequest) {
   auto root = std::make_unique<CompositeComponent>("root");
   root->add_child(std::make_unique<ExitThenThrowStartupComponent>("exit_then_throw0"));
   engine.topology().set_root(std::move(root));
-  engine.create();
+  ASSERT_TRUE(engine.create(admission_diagnostic.emitter()).succeeded())
+      << admission_diagnostic.message();
 
   auto exit = engine.run();
 
@@ -903,6 +1475,7 @@ TEST(StartupReadinessTest, StartupFailureOutranksAnEarlierExitRequest) {
 }
 
 TEST(StartupReadinessTest, StartupFailureIsTerminalForTheGeneration) {
+  util::StringDiagnostic admission_diagnostic;
   // A startup() throw leaves the partial attempt's event/primary/component state
   // intact, so the create() generation is terminal: step() rethrows once, latches
   // failure, and a same-generation retry must NOT re-run startup (it returns done).
@@ -911,7 +1484,8 @@ TEST(StartupReadinessTest, StartupFailureIsTerminalForTheGeneration) {
   auto root = std::make_unique<CompositeComponent>("root");
   auto *flaky = root->add_child(std::make_unique<FlakyStartupComponent>("flaky0", 1));
   engine.topology().set_root(std::move(root));
-  engine.create();
+  ASSERT_TRUE(engine.create(admission_diagnostic.emitter()).succeeded())
+      << admission_diagnostic.message();
 
   // First step(): startup throws, wait_until_started() observes failure.
   EXPECT_THROW(engine.step(), std::runtime_error);
@@ -937,13 +1511,15 @@ TEST(StartupReadinessTest, StartupFailureIsTerminalForTheGeneration) {
 
   // A fresh generation (shutdown + create) starts cleanly and succeeds.
   engine.shutdown();
-  engine.create();
+  ASSERT_TRUE(engine.create(admission_diagnostic.emitter()).succeeded())
+      << admission_diagnostic.message();
   engine.step();
   EXPECT_TRUE(engine.wait_until_started());
   EXPECT_EQ(static_cast<FlakyStartupComponent *>(flaky)->successful_startups, 1u);
 }
 
 TEST(StartupReadinessTest, ThrowingShutdownDuringStartupUnwindStillPublishesFailure) {
+  util::StringDiagnostic admission_diagnostic;
   // Component::shutdown() is not noexcept. If the startup-failure unwind ran
   // BEFORE the readiness latch, a throwing shutdown hook would escape the catch
   // path — terminating the interposer's background run() thread — while
@@ -953,7 +1529,8 @@ TEST(StartupReadinessTest, ThrowingShutdownDuringStartupUnwindStillPublishesFail
   auto root = std::make_unique<CompositeComponent>("root");
   auto *doubly = root->add_child(std::make_unique<DoublyThrowingComponent>("doubly0"));
   engine.topology().set_root(std::move(root));
-  engine.create();
+  ASSERT_TRUE(engine.create(admission_diagnostic.emitter()).succeeded())
+      << admission_diagnostic.message();
 
   // run() must return the terminal status rather than letting the shutdown throw
   // propagate out of the engine.
@@ -972,6 +1549,7 @@ TEST(StartupReadinessTest, ThrowingShutdownDuringStartupUnwindStillPublishesFail
 }
 
 TEST(StartupReadinessTest, ThrowingShutdownDuringStepUnwindRethrowsOnlyTheStartupError) {
+  util::StringDiagnostic admission_diagnostic;
   // step() rethrows to its foreground caller. The exception it propagates must be
   // the STARTUP failure, not whatever the best-effort unwind's shutdown hook threw
   // on top of it, and readiness must still be published as failed.
@@ -979,7 +1557,8 @@ TEST(StartupReadinessTest, ThrowingShutdownDuringStepUnwindRethrowsOnlyTheStartu
   auto root = std::make_unique<CompositeComponent>("root");
   auto *doubly = root->add_child(std::make_unique<DoublyThrowingComponent>("doubly0"));
   engine.topology().set_root(std::move(root));
-  engine.create();
+  ASSERT_TRUE(engine.create(admission_diagnostic.emitter()).succeeded())
+      << admission_diagnostic.message();
 
   try {
     engine.step();
@@ -999,6 +1578,7 @@ TEST(StartupReadinessTest, ThrowingShutdownDuringStepUnwindRethrowsOnlyTheStartu
 }
 
 TEST(StartupReadinessTest, RunAfterFailedStartupFailsClosedWithoutRerun) {
+  util::StringDiagnostic admission_diagnostic;
   // run()'s terminal-generation guard must be a RUNTIME check, not just an
   // assert: under -DNDEBUG a second run() after a startup throw must fail closed
   // (return the terminal INTERRUPTED status) instead of re-entering
@@ -1008,7 +1588,8 @@ TEST(StartupReadinessTest, RunAfterFailedStartupFailsClosedWithoutRerun) {
   auto root = std::make_unique<CompositeComponent>("root");
   auto *flaky = root->add_child(std::make_unique<FlakyStartupComponent>("flaky0", 1));
   engine.topology().set_root(std::move(root));
-  engine.create();
+  ASSERT_TRUE(engine.create(admission_diagnostic.emitter()).succeeded())
+      << admission_diagnostic.message();
 
   // First run(): startup throws; run() catches, latches failure, returns INTERRUPTED.
   auto first = engine.run();
@@ -1027,6 +1608,7 @@ TEST(StartupReadinessTest, RunAfterFailedStartupFailsClosedWithoutRerun) {
 }
 
 TEST(StartupReadinessTest, StartupFailureUnwindsEveryInitializedComponentOnce) {
+  util::StringDiagnostic admission_diagnostic;
   // A throwing component partway through startup must not leave earlier components'
   // resources dangling: shutdown() pairs with initialize(), so the unwind shuts
   // down EVERY initialized component (not only the started prefix) exactly once —
@@ -1040,7 +1622,8 @@ TEST(StartupReadinessTest, StartupFailureUnwindsEveryInitializedComponentOnce) {
   auto *after =
       root->add_child(std::make_unique<LifecycleCountingComponent>("after", &shutdown_order));
   engine.topology().set_root(std::move(root));
-  engine.create();
+  ASSERT_TRUE(engine.create(admission_diagnostic.emitter()).succeeded())
+      << admission_diagnostic.message();
 
   EXPECT_THROW(engine.step(), std::runtime_error);
 
@@ -1069,6 +1652,7 @@ TEST(StartupReadinessTest, StartupFailureUnwindsEveryInitializedComponentOnce) {
 }
 
 TEST(StartupReadinessTest, ThrowingShutdownStillCleansUpRemainingComponents) {
+  util::StringDiagnostic admission_diagnostic;
   // shutdown_components() marks the generation shut down before invoking any
   // callback, so a callback that throws must not be allowed to skip the components
   // after it — there is no second chance to clean them up. Each callback is
@@ -1082,7 +1666,8 @@ TEST(StartupReadinessTest, ThrowingShutdownStillCleansUpRemainingComponents) {
   auto *last =
       root->add_child(std::make_unique<LifecycleCountingComponent>("last", &shutdown_order));
   engine.topology().set_root(std::move(root));
-  engine.create();
+  ASSERT_TRUE(engine.create(admission_diagnostic.emitter()).succeeded())
+      << admission_diagnostic.message();
 
   // Reverse order is last -> thrower -> first, so the throw lands between them.
   // shutdown() must NOT propagate it: it is reached from ~SimulationEngine(), from
@@ -1101,6 +1686,7 @@ TEST(StartupReadinessTest, ThrowingShutdownStillCleansUpRemainingComponents) {
 }
 
 TEST(StartupReadinessTest, CreateThenShutdownRunsComponentCleanup) {
+  util::StringDiagnostic admission_diagnostic;
   // create() initializes every component; shutting the engine down before any
   // run()/step() must still invoke shutdown() on each initialized component
   // exactly once (shutdown() pairs with initialize(), not startup()).
@@ -1108,7 +1694,8 @@ TEST(StartupReadinessTest, CreateThenShutdownRunsComponentCleanup) {
   auto root = std::make_unique<CompositeComponent>("root");
   auto *comp = root->add_child(std::make_unique<LifecycleCountingComponent>("comp"));
   engine.topology().set_root(std::move(root));
-  engine.create();
+  ASSERT_TRUE(engine.create(admission_diagnostic.emitter()).succeeded())
+      << admission_diagnostic.message();
 
   auto *counting = static_cast<LifecycleCountingComponent *>(comp);
   EXPECT_EQ(counting->initializes, 1u);
@@ -1119,14 +1706,17 @@ TEST(StartupReadinessTest, CreateThenShutdownRunsComponentCleanup) {
 }
 
 TEST(TerminationTest, RequestExitWakesAllPartitions) {
+  util::StringDiagnostic admission_diagnostic;
   // Infinite work makes request_exit() the only termination path.
   SimulationEngine engine({.num_threads = 4});
   auto root = std::make_unique<CompositeComponent>("root");
   for (int i = 0; i < 4; ++i)
     root->add_child(std::make_unique<InfiniteComponent>("inf" + std::to_string(i)));
   engine.topology().set_root(std::move(root));
-  engine.topology().partition_balanced(4);
-  engine.create();
+  ASSERT_TRUE(engine.topology().partition_balanced(4, admission_diagnostic.emitter()).succeeded())
+      << admission_diagnostic.message();
+  ASSERT_TRUE(engine.create(admission_diagnostic.emitter()).succeeded())
+      << admission_diagnostic.message();
 
   ExitStatus exit_status;
   std::thread runner([&]() { exit_status = engine.run(); });
@@ -1150,13 +1740,20 @@ TEST(TerminationTest, RequestExitRacingShutdownIsSafe) {
   for (const uint32_t partitions : {1u, 2u, 4u}) {
     SCOPED_TRACE(partitions);
     for (int iter = 0; iter < 100; ++iter) {
+      util::StringDiagnostic admission_diagnostic;
       SimulationEngine engine({.num_threads = partitions});
       auto root = std::make_unique<CompositeComponent>("root");
       root->add_child(std::make_unique<CounterComponent>("c0", 4));
       engine.topology().set_root(std::move(root));
-      if (partitions > 1)
-        engine.topology().partition_balanced(partitions);
-      engine.create();
+      if (partitions > 1) {
+
+        ASSERT_TRUE(engine.topology()
+                        .partition_balanced(partitions, admission_diagnostic.emitter())
+                        .succeeded())
+            << admission_diagnostic.message();
+      }
+      ASSERT_TRUE(engine.create(admission_diagnostic.emitter()).succeeded())
+          << admission_diagnostic.message();
 
       // Mirrors rj_vm_run(): run to self-termination, then tear the contexts down.
       std::thread runner([&engine]() {
@@ -1178,6 +1775,7 @@ TEST(TerminationTest, IdleExitAndLastPrimaryReleaseWakeEveryWorkerMode) {
   for (const uint32_t partitions : {1u, 2u, 4u}) {
     for (const bool release_primary : {false, true}) {
       for (int iteration = 0; iteration < 16; ++iteration) {
+        util::StringDiagnostic admission_diagnostic;
         SCOPED_TRACE(::testing::Message() << "partitions=" << partitions << " primary="
                                           << release_primary << " iteration=" << iteration);
         SimulationEngine engine({.num_threads = partitions, .await_primaries = true});
@@ -1185,9 +1783,15 @@ TEST(TerminationTest, IdleExitAndLastPrimaryReleaseWakeEveryWorkerMode) {
         if (release_primary)
           root->add_child(std::make_unique<AsyncPrimaryComponent>("primary"));
         engine.topology().set_root(std::move(root));
-        if (partitions > 1)
-          engine.topology().partition_balanced(partitions);
-        engine.create();
+        if (partitions > 1) {
+
+          ASSERT_TRUE(engine.topology()
+                          .partition_balanced(partitions, admission_diagnostic.emitter())
+                          .succeeded())
+              << admission_diagnostic.message();
+        }
+        ASSERT_TRUE(engine.create(admission_diagnostic.emitter()).succeeded())
+            << admission_diagnostic.message();
 
         ExitStatus exit_status;
         std::atomic<bool> finished{false};
@@ -1281,6 +1885,7 @@ private:
 // the run hung. Reproduces at any partition count; rocjitsu hit it on every
 // multi-XCD config whose partition count was not exactly the XCD count.
 TEST(TerminationTest, QuiescentEpochDoesNotStrandPeersAtTheBarrier) {
+  util::StringDiagnostic admission_diagnostic;
   SimulationEngine engine({.num_threads = 2});
   auto root = std::make_unique<CompositeComponent>("root");
   auto *waiter = static_cast<PeerWaitComponent *>(
@@ -1292,10 +1897,14 @@ TEST(TerminationTest, QuiescentEpochDoesNotStrandPeersAtTheBarrier) {
   engine.topology().set_root(std::move(root));
   engine.topology().add_link(waiter->out_port(), responder->in_port(), 1);
   engine.topology().add_link(responder->out_port(), waiter->in_port(), 1);
-  engine.topology().partition_manual(2, partition_by_name_suffix);
+  ASSERT_TRUE(engine.topology()
+                  .partition_manual(2, partition_by_name_suffix, admission_diagnostic.emitter())
+                  .succeeded())
+      << admission_diagnostic.message();
   ASSERT_EQ(waiter->partition_id(), 0u);
   ASSERT_EQ(responder->partition_id(), 1u);
-  engine.create();
+  ASSERT_TRUE(engine.create(admission_diagnostic.emitter()).succeeded())
+      << admission_diagnostic.message();
 
   ExitStatus exit_status;
   std::atomic<bool> finished{false};
@@ -1366,6 +1975,7 @@ TEST(TerminationTest, QuiescentEngineDoesNotSpinTheHost) {
   GTEST_SKIP() << "per-thread CPU clocks are unavailable";
 #else
   for (const uint32_t partitions : {1u, 2u, 4u}) {
+    util::StringDiagnostic admission_diagnostic;
     SCOPED_TRACE(partitions);
     std::vector<std::atomic<uint64_t>> samples(partitions);
     SimulationEngine engine({.num_threads = partitions});
@@ -1377,8 +1987,12 @@ TEST(TerminationTest, QuiescentEngineDoesNotSpinTheHost) {
       root->add_child(std::move(probe));
     }
     engine.topology().set_root(std::move(root));
-    engine.topology().partition_balanced(partitions);
-    engine.create();
+    ASSERT_TRUE(engine.topology()
+                    .partition_balanced(partitions, admission_diagnostic.emitter())
+                    .succeeded())
+        << admission_diagnostic.message();
+    ASSERT_TRUE(engine.create(admission_diagnostic.emitter()).succeeded())
+        << admission_diagnostic.message();
     for (uint32_t i = 0; i < partitions; ++i)
       ASSERT_EQ(std::ranges::count_if(
                     probes, [i](const IdleCpuProbe *probe) { return probe->partition_id() == i; }),
@@ -1432,11 +2046,13 @@ TEST(TerminationTest, QuiescentEngineDoesNotSpinTheHost) {
 }
 
 TEST(TerminationTest, StepModeConsistency) {
+  util::StringDiagnostic admission_diagnostic;
   SimulationEngine engine({.num_threads = 1});
   auto root = std::make_unique<CompositeComponent>("root");
   auto *c = root->add_child(std::make_unique<CounterComponent>("c0", 10));
   engine.topology().set_root(std::move(root));
-  engine.create();
+  ASSERT_TRUE(engine.create(admission_diagnostic.emitter()).succeeded())
+      << admission_diagnostic.message();
 
   while (engine.step())
     ;
@@ -1459,7 +2075,7 @@ TEST(LBTSTest, TwoPartitionPingPong) {
 
   engine.topology().set_root(std::move(root));
   engine.topology().add_link(prod->out_port(), cons->in_port(), 5);
-  build_with_manual_partitions(engine, 2, partition_by_name_suffix);
+  ASSERT_NO_FATAL_FAILURE(build_with_manual_partitions(engine, 2, partition_by_name_suffix));
 
   auto exit = engine.run();
   EXPECT_EQ(exit.reason, ExitReason::COMPLETED);
@@ -1479,7 +2095,7 @@ TEST(LBTSTest, IdlePartitionDoesNotBlock) {
 
   engine.topology().set_root(std::move(root));
   engine.topology().add_link(pa->out_port(), cb->in_port(), 10);
-  build_with_manual_partitions(engine, 3, partition_by_name_suffix);
+  ASSERT_NO_FATAL_FAILURE(build_with_manual_partitions(engine, 3, partition_by_name_suffix));
 
   auto exit = engine.run();
   EXPECT_EQ(exit.reason, ExitReason::COMPLETED);
@@ -1498,7 +2114,7 @@ TEST(LBTSTest, TimestampAdvancesEnableProgress) {
 
   engine.topology().set_root(std::move(root));
   engine.topology().add_link(pa->out_port(), cb->in_port(), 20);
-  build_with_manual_partitions(engine, 2, partition_by_name_suffix);
+  ASSERT_NO_FATAL_FAILURE(build_with_manual_partitions(engine, 2, partition_by_name_suffix));
 
   auto exit = engine.run();
   EXPECT_EQ(exit.reason, ExitReason::COMPLETED);
@@ -1523,7 +2139,7 @@ TEST(CrossPartitionTest, MessageDelivery) {
 
   engine.topology().set_root(std::move(root));
   engine.topology().add_link(prod->out_port(), cons->in_port(), 100);
-  build_with_manual_partitions(engine, 2, partition_by_name_suffix);
+  ASSERT_NO_FATAL_FAILURE(build_with_manual_partitions(engine, 2, partition_by_name_suffix));
 
   auto exit = engine.run();
   EXPECT_EQ(exit.reason, ExitReason::COMPLETED);
@@ -1545,7 +2161,7 @@ TEST(CrossPartitionTest, LinkLatencyAdded) {
 
   engine.topology().set_root(std::move(root));
   engine.topology().add_link(prod->out_port(), cons->in_port(), 42);
-  build_with_manual_partitions(engine, 2, partition_by_name_suffix);
+  ASSERT_NO_FATAL_FAILURE(build_with_manual_partitions(engine, 2, partition_by_name_suffix));
 
   engine.run();
   ASSERT_EQ(cons->received.size(), 1u);
@@ -1556,13 +2172,44 @@ TEST(CrossPartitionTest, LinkLatencyAdded) {
 // Area 3: Async Event Causality Tests
 // ============================================================================
 
+TEST(AsyncCausalityTest, IdlePeerUsesLastCommittedTickAsAsyncFloor) {
+  for (const Tick horizon : {Tick{0}, Tick{100}}) {
+    SCOPED_TRACE(horizon);
+    // Repeat because the peer may drain before or after the posting handler.
+    for (unsigned repetition = 0; repetition < 16; ++repetition) {
+      SimulationEngine engine({.max_ticks = horizon, .num_threads = 2});
+      auto root = std::make_unique<CompositeComponent>("root");
+      Component *primary = root->add_child(std::make_unique<AsyncPrimaryComponent>("primary0"));
+      Component *peer = root->add_child(std::make_unique<CompositeComponent>("peer1"));
+      engine.topology().set_root(std::move(root));
+      ASSERT_NO_FATAL_FAILURE(build_with_manual_partitions(engine, 2, partition_by_name_suffix));
+
+      Tick callback_tick = TICK_MAX;
+      Event callback(peer, EventType::TIMER_CALLBACK,
+                     [&](Tick tick, Message *) { callback_tick = tick; });
+      Event post(primary, EventType::TIMER_CALLBACK, [&](Tick, Message *) {
+        engine.schedule_event_async(&callback, 5);
+        engine.primary_release();
+      });
+      engine.schedule_event_async(&post, 10);
+
+      const ExitStatus exit = engine.run();
+      EXPECT_EQ(callback_tick, 10u);
+      EXPECT_EQ(exit.cause, ExitCause::ALL_PRIMARIES_COMPLETED);
+      EXPECT_EQ(exit.tick, 10u);
+    }
+  }
+}
+
 TEST(AsyncCausalityTest, ScheduleEventNowProducesReasonableTimestamp) {
+  util::StringDiagnostic admission_diagnostic;
   // Single-threaded, no pacing: schedule_event_now should use GVT (current_time_).
   SimulationEngine engine({.num_threads = 1});
   auto root = std::make_unique<CompositeComponent>("root");
   auto *c = root->add_child(std::make_unique<CounterComponent>("c0", 5));
   engine.topology().set_root(std::move(root));
-  engine.create();
+  ASSERT_TRUE(engine.create(admission_diagnostic.emitter()).succeeded())
+      << admission_diagnostic.message();
 
   // Run a few steps to advance time.
   for (int i = 0; i < 3; ++i)
@@ -1586,12 +2233,14 @@ TEST(AsyncCausalityTest, ScheduleEventNowProducesReasonableTimestamp) {
 // Clearing that stale notification must acquire any concurrent producer's
 // publication, or the worker can sleep with an event stranded in the async queue.
 TEST(AsyncCausalityTest, StaleWakeDoesNotHideConcurrentPublication) {
+  util::StringDiagnostic admission_diagnostic;
   constexpr uint32_t kEvents = 2000;
   SimulationEngine engine({.num_threads = 1});
   auto root = std::make_unique<CompositeComponent>("root");
   auto *target = root->add_child(std::make_unique<AsyncPrimaryComponent>("target"));
   engine.topology().set_root(std::move(root));
-  engine.create();
+  ASSERT_TRUE(engine.create(admission_diagnostic.emitter()).succeeded())
+      << admission_diagnostic.message();
 
   std::atomic<uint32_t> processed{0};
   Event noop{target, EventType::TIMER_CALLBACK, [](Tick, Message *) {}};
@@ -1634,6 +2283,7 @@ TEST(AsyncCausalityTest, StaleWakeDoesNotHideConcurrentPublication) {
 TEST(AsyncCausalityTest, QuiescentPublicationsToEveryPartitionMakeProgress) {
   constexpr uint32_t kEvents = 2000;
   for (const uint32_t partitions : {2u, 4u}) {
+    util::StringDiagnostic admission_diagnostic;
     SCOPED_TRACE(partitions);
     SimulationEngine engine({.num_threads = partitions});
     auto root = std::make_unique<CompositeComponent>("root");
@@ -1642,8 +2292,13 @@ TEST(AsyncCausalityTest, QuiescentPublicationsToEveryPartitionMakeProgress) {
       targets.push_back(
           root->add_child(std::make_unique<AsyncPrimaryComponent>("target" + std::to_string(i))));
     engine.topology().set_root(std::move(root));
-    engine.topology().partition_manual(partitions, partition_by_name_suffix);
-    engine.create();
+    ASSERT_TRUE(
+        engine.topology()
+            .partition_manual(partitions, partition_by_name_suffix, admission_diagnostic.emitter())
+            .succeeded())
+        << admission_diagnostic.message();
+    ASSERT_TRUE(engine.create(admission_diagnostic.emitter()).succeeded())
+        << admission_diagnostic.message();
 
     std::atomic<uint32_t> processed{0};
     std::vector<std::unique_ptr<Event>> noops;
@@ -1686,6 +2341,7 @@ TEST(AsyncCausalityTest, QuiescentPublicationsToEveryPartitionMakeProgress) {
 }
 
 TEST(AsyncCausalityTest, SustainedSameTickAsyncAndExistingBatchMakeBoundedProgress) {
+  util::StringDiagnostic admission_diagnostic;
   constexpr uint32_t kBatchSize = 1024;
   constexpr uint32_t kAsyncCount = 32;
   SimulationEngine engine({.num_threads = 1});
@@ -1694,7 +2350,8 @@ TEST(AsyncCausalityTest, SustainedSameTickAsyncAndExistingBatchMakeBoundedProgre
       root->add_child(std::make_unique<SameTickAsyncFairnessComponent>("same-tick-fairness",
                                                                        kBatchSize, kAsyncCount)));
   engine.topology().set_root(std::move(root));
-  engine.create();
+  ASSERT_TRUE(engine.create(admission_diagnostic.emitter()).succeeded())
+      << admission_diagnostic.message();
 
   ExitStatus exit = engine.run();
 
@@ -1711,6 +2368,7 @@ TEST(AsyncCausalityTest, SustainedSameTickAsyncAndExistingBatchMakeBoundedProgre
 }
 
 TEST(AsyncCausalityTest, StepUsesSameBoundedAsyncArbitration) {
+  util::StringDiagnostic admission_diagnostic;
   constexpr uint32_t kBatchSize = 32;
   constexpr uint32_t kAsyncCount = EventQueue::kMaxConsecutiveAsyncEvents + 1;
   SimulationEngine engine({.num_threads = 1});
@@ -1718,7 +2376,8 @@ TEST(AsyncCausalityTest, StepUsesSameBoundedAsyncArbitration) {
   auto *component = static_cast<SameTickAsyncFairnessComponent *>(root->add_child(
       std::make_unique<SameTickAsyncFairnessComponent>("step-fairness", kBatchSize, kAsyncCount)));
   engine.topology().set_root(std::move(root));
-  engine.create();
+  ASSERT_TRUE(engine.create(admission_diagnostic.emitter()).succeeded())
+      << admission_diagnostic.message();
 
   ASSERT_TRUE(engine.step());
 
@@ -1732,15 +2391,24 @@ TEST(AsyncCausalityTest, StepUsesSameBoundedAsyncArbitration) {
 TEST(AsyncCausalityTest, NextTickRetryDoesNotStarveScheduledDeviceWork) {
   constexpr uint32_t kRetryCount = 32;
   for (uint32_t num_threads : {1u, 2u}) {
+    util::StringDiagnostic admission_diagnostic;
     SCOPED_TRACE(::testing::Message() << "num_threads=" << num_threads);
     SimulationEngine engine({.num_threads = num_threads});
     auto root = std::make_unique<CompositeComponent>("root");
     auto *component = static_cast<NextTickRetryFairnessComponent *>(root->add_child(
         std::make_unique<NextTickRetryFairnessComponent>("next-tick-retry", kRetryCount)));
     engine.topology().set_root(std::move(root));
-    if (num_threads > 1)
-      engine.topology().partition_manual(num_threads, [](Component *) { return PartitionID{0}; });
-    engine.create();
+    if (num_threads > 1) {
+
+      ASSERT_TRUE(engine.topology()
+                      .partition_manual(
+                          num_threads, [](Component *) { return PartitionID{0}; },
+                          admission_diagnostic.emitter())
+                      .succeeded())
+          << admission_diagnostic.message();
+    }
+    ASSERT_TRUE(engine.create(admission_diagnostic.emitter()).succeeded())
+        << admission_diagnostic.message();
 
     ExitStatus exit = engine.run();
 
@@ -1753,12 +2421,14 @@ TEST(AsyncCausalityTest, NextTickRetryDoesNotStarveScheduledDeviceWork) {
 }
 
 TEST(AsyncCausalityTest, NextTickTimestampSaturatesAtTickMax) {
+  util::StringDiagnostic admission_diagnostic;
   SimulationEngine engine({.num_threads = 1});
   auto root = std::make_unique<CompositeComponent>("root");
   auto *component = static_cast<NextTickSaturationComponent *>(
       root->add_child(std::make_unique<NextTickSaturationComponent>("next-tick-saturation")));
   engine.topology().set_root(std::move(root));
-  engine.create();
+  ASSERT_TRUE(engine.create(admission_diagnostic.emitter()).succeeded())
+      << admission_diagnostic.message();
 
   ExitStatus exit = engine.run();
 
@@ -1790,7 +2460,7 @@ TEST(StressTest, FourPartitionRingStress) {
   engine.topology().add_link(pb->out_port(), pc->in_port(), 5);
   engine.topology().add_link(pc->out_port(), pd->in_port(), 5);
   engine.topology().add_link(pd->out_port(), pa->in_port(), 5);
-  build_with_manual_partitions(engine, 4, partition_by_name_suffix);
+  ASSERT_NO_FATAL_FAILURE(build_with_manual_partitions(engine, 4, partition_by_name_suffix));
 
   auto exit = engine.run();
   EXPECT_EQ(exit.reason, ExitReason::COMPLETED);
@@ -1815,7 +2485,7 @@ TEST(StressTest, LongRunningThousandsOfEvents) {
   engine.topology().set_root(std::move(root));
   engine.topology().add_link(pa->out_port(), pb->in_port(), 1);
   engine.topology().add_link(pb->out_port(), pa->in_port(), 1);
-  build_with_manual_partitions(engine, 2, partition_by_name_suffix);
+  ASSERT_NO_FATAL_FAILURE(build_with_manual_partitions(engine, 2, partition_by_name_suffix));
 
   auto exit = engine.run();
   EXPECT_EQ(exit.reason, ExitReason::COMPLETED);
@@ -1831,6 +2501,7 @@ TEST(StressTest, LongRunningThousandsOfEvents) {
 }
 
 TEST(StressTest, AsyncInjectionDuringActiveSimulation) {
+  util::StringDiagnostic admission_diagnostic;
   // Use InfiniteComponent to keep the simulation running while we inject.
   // max_ticks as safety net. Keep low since each tick = one barrier round.
   SimulationEngine engine({.max_ticks = 500, .num_threads = 2});
@@ -1838,8 +2509,10 @@ TEST(StressTest, AsyncInjectionDuringActiveSimulation) {
   root->add_child(std::make_unique<InfiniteComponent>("inf0"));
   root->add_child(std::make_unique<InfiniteComponent>("inf1"));
   engine.topology().set_root(std::move(root));
-  engine.topology().partition_balanced(2);
-  engine.create();
+  ASSERT_TRUE(engine.topology().partition_balanced(2, admission_diagnostic.emitter()).succeeded())
+      << admission_diagnostic.message();
+  ASSERT_TRUE(engine.create(admission_diagnostic.emitter()).succeeded())
+      << admission_diagnostic.message();
 
   std::atomic<uint32_t> async_processed{0};
   auto *target = engine.topology().partitions()[0].components[0];

@@ -26,4 +26,5 @@ make -j
                          -crop  <[crop rectangle] - crop rectangle for output in a comma-separated format: left,top,right,bottom - [optional]>
                          -t     <[threads] - number of threads for parallel JPEG decoding [optional - default: 1]>
                          -b     <[batch_size] - decode images from input by batches of a specified size - [optional - default: 1]>
+                         -n     <[iterations] - number of decode iterations per image - [optional - default: 1]>
 ```

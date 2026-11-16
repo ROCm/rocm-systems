@@ -44,6 +44,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <vector>
 #include "util/utils.h"
 #include "impl/wddm/types.h"
 #include "impl/wddm/thunks.h"
@@ -259,6 +260,14 @@ public:
 
   ErrorCode MapGpuVirtualAddress(const gpusize map_addr, const gpusize size, gpusize offset = 0);
   ErrorCode UnmapGpuVirtualAddress(const gpusize map_addr, const gpusize size, gpusize offset = 0);
+
+  // This allocation's view on dev. System and user memory can create a peer view
+  // at the owner's VA; the owner keeps that reservation. *created is set when a
+  // new peer view was added.
+  GpuMemory* ViewOn(WDDMDevice* dev, bool create, bool* created);
+  void DropPeer(GpuMemory* peer);
+  void ReleasePeers();
+  GpuMemory* Owner() const { return owner_; }
   ErrorCode MapMemoryToVirtualAddress(bool create_phys_mem = true);
   ErrorCode MakeResident();
   ErrorCode Evict();
@@ -287,9 +296,10 @@ public:
  protected:
   explicit GpuMemory(WDDMDevice *device);
 private:
-  uint64_t AdjustSize(gpusize size) const;
-private:
   friend class WDDMDevice;
+
+  uint64_t AdjustSize(gpusize size) const;
+  ErrorCode MapFromPeer(GpuMemory* owner);
 
   WDDMDevice *const device_;
 
@@ -302,6 +312,9 @@ private:
   WinResourceHandle resource_;     // Handle to a resource object that wraps the allocation. Used for shared resources
 
   int mem_fd_; // IPC sigal's sys mem fd
+
+  GpuMemory* owner_ = nullptr;          // set when this object is a peer view
+  std::vector<GpuMemory*> peers_;       // peer views; only the owner has entries
 
   bool is_phymem_created = false; // status of physical memory allocation
   bool is_sysmem_locked_ = false; // kSystem allocation pinned via D3DKMTLock2

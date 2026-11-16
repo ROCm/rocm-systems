@@ -50,6 +50,7 @@
 #include "core/inc/amd_aie_agent.h"
 #include "core/inc/driver.h"
 #include "core/inc/memory_region.h"
+#include "inc/hsa_ext_amd_aie.h"
 
 namespace rocr {
 
@@ -68,8 +69,25 @@ public:
   /// @param[out] driver object
   static hsa_status_t DiscoverDriver(std::unique_ptr<core::Driver>& driver);
 
-  /// @brief Returns the size of the dev heap in bytes.
+  /// @brief Returns the size of the dev heap in bytes. This is the size reserved when a dev heap
+  /// exists on this device; check @ref HasDevHeap first, since UMQ (AIE4) devices have none.
   static uint64_t GetDevHeapByteSize();
+
+  /// @brief Returns whether this device has a dev heap. KMQ (aie2/aie2p) devices do; UMQ (AIE4)
+  /// devices do not, since the kernel driver rejects AMDXDNA_BO_DEV_HEAP creation for them.
+  bool HasDevHeap() const { return has_dev_heap_; }
+
+  /// @brief Matches aie4_host_queue.h's CTX_MAX_CMDS: the fixed slot count CERT validates
+  /// write_index/read_index against (get_read_index()/valid_queue_index() in the kernel driver),
+  /// regardless of the header's declared capacity. A UMQ queue's ring must be sized for exactly
+  /// this many packets, and no HSA queue on a UMQ agent can hold more packets in flight at once
+  /// (see AieAgent's min_aql_size_/max_aql_size_, which this bounds).
+  static constexpr uint32_t UmqMaxCmds() { return 32; }
+
+  /// @brief Size of the header that opens a UMQ queue's buffer, ahead of its packet ring: sizeof
+  /// the host_queue_header the driver defines (checked where it is defined, in
+  /// amd_xdna_driver.cpp).
+  static constexpr size_t UmqHeaderBytes() { return 128; }
 
   hsa_status_t Init() override;
   hsa_status_t ShutDown() override;
@@ -121,6 +139,65 @@ public:
   ///
   /// @param[in] queue_metadata KMQ metadata to be destroyed
   hsa_status_t DestroyKernelModeQueue(void* queue_metadata) const;
+
+  /// @brief Returns whether this device submits through a user-mode queue (UMQ) rather than a
+  /// kernel-mode queue (KMQ), per the kernel driver's own device_type. Defaults to false (KMQ) if
+  /// the device_type cannot be read.
+  bool UsesUserModeQueue() const;
+
+  /// @brief Create User Mode Queue (UMQ) metadata: the hardware context created against the
+  /// queue's own ring, and the mapped doorbell, for an AIE4 agent dispatch queue.
+  ///
+  /// Unlike KMQ, UMQ has no separate ring: @p ring_buf (a header followed by the queue's own
+  /// HSA-visible AQL packet ring) is handed to the device directly, and dispatch is a single
+  /// doorbell write with no per-batch driver call -- the same model a GPU hardware queue uses.
+  /// This fills in the header; the caller allocates the buffer zeroed.
+  ///
+  /// @param[in] ring_buf the queue's buffer: @ref UmqHeaderBytes of header, then
+  /// @ref UmqMaxCmds packets, which are hsa_queue_t::base_address
+  /// @param[in] agent agent the queue dispatches to, to resolve @p ring_buf's BO handle
+  /// @param[in] num_cols number of columns to create the queue's hardware context with
+  /// @param[in] num_core_rows number of core tiles in each column
+  /// @param[out] queue_metadata UMQ metadata created for the dispatch queue
+  /// @param[out] doorbell the mapped hardware doorbell to ring on dispatch
+  hsa_status_t CreateUserModeQueue(void* ring_buf, const core::Agent& agent, uint32_t num_cols,
+                                   uint32_t num_core_rows, void** queue_metadata,
+                                   volatile uint32_t** doorbell) const;
+
+  /// @brief Destroy the User Mode Queue (UMQ) metadata: its hardware context and doorbell mapping.
+  ///
+  /// @param[in] queue_metadata UMQ metadata to be destroyed
+  hsa_status_t DestroyUserModeQueue(void* queue_metadata) const;
+
+  /// @brief Submits a contiguous range of UMQ packets to CERT and blocks until they are retired.
+  /// Mirrors @ref SubmitCmdChain's caller contract (a batch of packets in, @p num_completed
+  /// packets' completion signals already released out) even though UMQ has no equivalent of
+  /// KMQ's single ioctl that chains a whole batch in the kernel: every packet is translated and
+  /// readied here, then rung with one doorbell write for the whole batch.
+  ///
+  /// A translate failure is the one case this does not mirror: since nothing is rung until every
+  /// packet has translated, a bad packet partway through aborts the whole batch (@p num_completed
+  /// is 0), not just itself and what follows.
+  ///
+  /// @param[in,out] ring the queue's packet ring; each packet translated in place before it is
+  /// submitted
+  /// @param[in] ring_capacity number of packet slots in @p ring
+  /// @param[in] queue_metadata this queue's UMQ metadata, as created by CreateUserModeQueue; its
+  /// queue header's write_index is advanced as each packet is readied
+  /// @param[in] doorbell the mapped hardware doorbell to ring once for the whole batch
+  /// @param[in] first_pkt_idx index of the first packet in the queue
+  /// @param[in] num_pkts number of packets to submit, starting at @p first_pkt_idx. Must be
+  /// greater than 0.
+  /// @param[in] agent agent that owns the queue
+  /// @param[out] num_completed how many packets, counting from @p first_pkt_idx, executed and had
+  /// their completion signals released. @p num_pkts on success. On a translate failure this is 0.
+  /// On a wait failure this is the prefix that completed before it, so the caller can consume
+  /// exactly those and leave the rest; that failing packet may still run until the hardware
+  /// context is destroyed.
+  hsa_status_t SubmitUmqPackets(hsa_amd_aie_kernel_dispatch_packet_t* ring, uint32_t ring_capacity,
+                                void* queue_metadata, volatile uint32_t* doorbell,
+                                uint64_t first_pkt_idx, uint64_t num_pkts,
+                                const core::Agent& agent, uint64_t* num_completed) const;
 
   hsa_status_t SetQueueCUMask(HSA_QUEUEID queue_id, uint32_t cu_mask_count,
                               uint32_t* queue_cu_mask) const override;
@@ -205,6 +282,9 @@ public:
   /// @brief The aligned device heap mapping, of size @ref dev_heap_size and alignment
   /// @ref dev_heap_alignment.
   void* dev_heap_vaddr = nullptr;
+
+  /// @brief Whether this device has a dev heap. Set by InitDeviceHeap(); see @ref HasDevHeap.
+  bool has_dev_heap_ = false;
 
   /// @brief Device heap size in bytes.
   static constexpr size_t dev_heap_size = 64 * 1024 * 1024;

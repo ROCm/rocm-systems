@@ -10,6 +10,10 @@ import subprocess
 import tempfile
 import unittest
 
+WAIT_CHECKING_BIT = 0x10
+CACHE_MEMORY_BIT = 0x20
+TARGET_COUNT = 12
+
 
 class ExecutionFuzzCliTest(unittest.TestCase):
     @classmethod
@@ -103,9 +107,36 @@ class ExecutionFuzzCliTest(unittest.TestCase):
                 {path.stat().st_size for path in seeds}, {8, 32, 256, 1024}
             )
             self.assertTrue(all(path.read_bytes()[0] == 10 for path in seeds))
+            modes = {path.read_bytes()[1] for path in seeds}
+            harness_modes = WAIT_CHECKING_BIT | CACHE_MEMORY_BIT
             self.assertEqual(
-                {path.read_bytes()[1] for path in seeds}, {0, 1, 6, 7, 8, 9, 14, 15}
+                {mode & ~harness_modes for mode in modes}, {0, 1, 6, 7, 8, 9, 14, 15}
             )
+            self.assertTrue(any(mode & WAIT_CHECKING_BIT for mode in modes))
+            self.assertEqual(
+                {mode & CACHE_MEMORY_BIT for mode in modes}, {0, CACHE_MEMORY_BIT}
+            )
+
+    def test_emit_auto_seeds_includes_generated_kernel_for_every_target(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            seed_directory = Path(temporary) / "seeds"
+            result = self.run_execution_fuzz(
+                "--emit-seeds", seed_directory, "--seed", "253"
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            seeds = sorted(seed_directory.glob("*.bin"))
+            self.assertEqual(len(seeds), 128)
+            kernel_targets = set()
+            for path in seeds:
+                target, modes = path.read_bytes()[:2]
+                if target in kernel_targets or not modes & WAIT_CHECKING_BIT:
+                    continue
+                replay = self.run_execution_fuzz("--input", path, "--async", "off")
+                self.assertEqual(replay.returncode, 0, replay.stderr)
+                stats = json.loads(replay.stdout)
+                if stats["inputs_halted"] == 1 and stats["executed"] > 2:
+                    kernel_targets.add(target)
+            self.assertEqual(kernel_targets, set(range(TARGET_COUNT)))
 
     def test_interrupted_input_replacement_invalidates_previous_seed(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -164,7 +195,7 @@ class ExecutionFuzzCliTest(unittest.TestCase):
             self.assertEqual(result.returncode, 2)
             self.assertIn("seed range exceeds uint64", result.stderr)
 
-    def test_unsupported_guest_input_is_a_normal_halt(self) -> None:
+    def test_unsupported_guest_input_stops_without_a_normal_halt(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             input_path = Path(temporary) / "input.bin"
             input_path.write_bytes(bytes([6, 0, 0, 0, 0x68, 0xD8]))
@@ -172,7 +203,9 @@ class ExecutionFuzzCliTest(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn("could not execute ds_gws_sema_v", result.stderr)
             stats = json.loads(result.stdout)
-            self.assertEqual(stats["inputs_halted"], 1)
+            self.assertEqual(stats["waves_halted"], 0)
+            self.assertEqual(stats["inputs_halted"], 0)
+            self.assertEqual(stats["inputs_stopped"], 1)
             self.assertEqual(stats["budget_exhausted"], 0)
 
     def test_invalid_async_mode_is_rejected(self) -> None:

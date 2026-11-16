@@ -50,6 +50,7 @@ constexpr int kRank = 1;
 constexpr int kNRanks = 4;
 constexpr int kCudaDev = 3;
 constexpr size_t kCount = 32;
+constexpr int kRoot = 2;
 
 struct Enqueued {
   ncclInfo info;
@@ -76,6 +77,7 @@ struct Select {
   hipStream_t stream;
   bool query;
   bool hint;
+  int root = -1;
 };
 
 struct Addon {
@@ -87,6 +89,7 @@ struct Addon {
   ncclRedOp_t op;
   ncclComm* comm;
   hipStream_t stream;
+  int root = -1;
 };
 
 struct DdaEnabledCall {
@@ -214,6 +217,7 @@ struct Fakes {
   std::vector<uint8_t> gatheredOwnFlag;
   ncclResult_t bootstrapResult = ncclSuccess;
   std::vector<KernelLaunch> launches;
+  std::vector<rcclDdaLaunchCap> ddaCaps;  // per capped fabric AllReduce launch
 };
 Fakes fake;
 
@@ -221,6 +225,13 @@ ncclResult_t RecordAddon(const char* fn, const void* s, void* r, size_t n, ncclD
                          ncclComm* c, hipStream_t st) {
   fake.trace.push_back(fn);
   fake.addons.push_back({fn, s, r, n, t, o, c, st});
+  return fake.addonResult;
+}
+
+ncclResult_t RecordRootAddon(const char* fn, const void* s, void* r, size_t n, ncclDataType_t t, int root, ncclComm* c,
+                             hipStream_t st) {
+  fake.trace.push_back(fn);
+  fake.addons.push_back({fn, s, r, n, t, ncclNumOps, c, st, root});
   return fake.addonResult;
 }
 
@@ -278,14 +289,28 @@ namespace {
 
 using DdaSig = ncclResult_t(const void*, void*, size_t, ncclDataType_t, ncclComm*, hipStream_t);
 using DdaOpSig = ncclResult_t(const void*, void*, size_t, ncclDataType_t, ncclRedOp_t, ncclComm*, hipStream_t);
+using DdaCappedOpSig =
+    ncclResult_t(const void*, void*, size_t, ncclDataType_t, ncclRedOp_t, ncclComm*, hipStream_t, rcclDdaLaunchCap);
+using DdaRootSig = ncclResult_t(const void*, void*, size_t, ncclDataType_t, int, ncclComm*, hipStream_t);
 #define ADDON_HOOK(hook, fn)                                                                           \
   ScopedHook<DdaSig> hook##_{g_##hook,                                                                 \
                              [](const void* s, void* r, size_t n, ncclDataType_t t, ncclComm* c,      \
                                 hipStream_t st) { return RecordAddon(fn, s, r, n, t, ncclNumOps, c, st); }};
+#define ADDON_ROOT_HOOK(hook, fn)                                                                      \
+  ScopedHook<DdaRootSig> hook##_{g_##hook, [](const void* s, void* r, size_t n, ncclDataType_t t, int root, \
+                                              ncclComm* c, hipStream_t st) {                           \
+    return RecordRootAddon(fn, s, r, n, t, root, c, st);                                                \
+  }};
 #define ADDON_OP_HOOK(hook, fn)                                                                        \
   ScopedHook<DdaOpSig> hook##_{g_##hook,                                                               \
                                [](const void* s, void* r, size_t n, ncclDataType_t t, ncclRedOp_t o,   \
                                   ncclComm* c, hipStream_t st) { return RecordAddon(fn, s, r, n, t, o, c, st); }};
+#define ADDON_CAPPED_HOOK(hook, fn)                                                                    \
+  ScopedHook<DdaCappedOpSig> hook##_{g_##hook, [](const void* s, void* r, size_t n, ncclDataType_t t, ncclRedOp_t o, \
+                                                  ncclComm* c, hipStream_t st, rcclDdaLaunchCap cap) {             \
+    fake.ddaCaps.push_back(cap);                                                                       \
+    return RecordAddon(fn, s, r, n, t, o, c, st);                                                      \
+  }};
 
 // The shared fakes' hooks, routed into `fake` for the life of a test.
 struct SharedHooks {
@@ -448,6 +473,12 @@ struct SharedHooks {
                                               hipStream_t st, bool q, bool h, rcclCollDecision* d) {
         return RecordSelect("AlltoAll", s, r, n, ncclNumOps, st, q, h, d);
       }};
+  ScopedHook<ncclResult_t(ncclComm*, size_t, ncclDataType_t, int, bool, rcclCollDecision*)> selectBroadcast{
+      g_rcclSelectBroadcast, [](ncclComm*, size_t n, ncclDataType_t, int root, bool q, rcclCollDecision* d) {
+        ncclResult_t res = RecordSelect("Broadcast", nullptr, nullptr, n, ncclNumOps, nullptr, q, false, d);
+        fake.selects.back().root = root;
+        return res;
+      }};
   ScopedHook<bool(const ncclComm*, size_t, size_t, bool, const char*)> ddaEnabled{
       g_rcclDdaEnabled, [](const ncclComm*, size_t totalBytes, size_t threshold, bool query, const char*) {
         fake.ddaEnabledCalls.push_back({totalBytes, threshold, query});
@@ -539,17 +570,21 @@ struct SharedHooks {
   ADDON_HOOK(allToAllDdaFabricLL128, "ncclAllToAllDdaFabricLL128")
   ADDON_HOOK(allToAllDdaFabric, "ncclAllToAllDdaFabric")
   ADDON_HOOK(allToAllDdaIpc, "ncclAllToAllDdaIpc")
-  ADDON_OP_HOOK(allReduceDdaFabricLL, "ncclAllReduceDdaFabricLL")
-  ADDON_OP_HOOK(allReduceDdaFabricLL128, "ncclAllReduceDdaFabricLL128")
-  ADDON_OP_HOOK(allReduceDdaFabric, "ncclAllReduceDdaFabric")
+  ADDON_CAPPED_HOOK(allReduceDdaFabricLL, "ncclAllReduceDdaFabricLL")
+  ADDON_CAPPED_HOOK(allReduceDdaFabricLL128, "ncclAllReduceDdaFabricLL128")
+  ADDON_CAPPED_HOOK(allReduceDdaFabric, "ncclAllReduceDdaFabric")
   ADDON_OP_HOOK(allReduceDdaIpc, "ncclAllReduceDdaIpc")
   ADDON_OP_HOOK(reduceScatterDdaFabricLL, "ncclReduceScatterDdaFabricLL")
   ADDON_OP_HOOK(reduceScatterDdaFabricLL128, "ncclReduceScatterDdaFabricLL128")
   ADDON_OP_HOOK(reduceScatterDdaFabric, "ncclReduceScatterDdaFabric")
   ADDON_OP_HOOK(reduceScatterDdaIpc, "ncclReduceScatterDdaIpc")
+  ADDON_ROOT_HOOK(broadcastDdaFabricLL, "ncclBroadcastDdaFabricLL")
+  ADDON_ROOT_HOOK(broadcastDdaFabricLL128, "ncclBroadcastDdaFabricLL128")
 };
 #undef ADDON_HOOK
+#undef ADDON_ROOT_HOOK
 #undef ADDON_OP_HOOK
+#undef ADDON_CAPPED_HOOK
 
 class CollectivesMicrotest : public ::testing::Test {
  protected:
@@ -590,6 +625,9 @@ class CollectivesMicrotest : public ::testing::Test {
   }
   ncclResult_t AllReduce(size_t count = kCount) {
     return ncclAllReduce_impl(send_.data(), recv_.data(), count, ncclFloat32, ncclProd, comm_.get(), stream_);
+  }
+  ncclResult_t Broadcast(int root = kRoot) {
+    return ncclBroadcast_impl(send_.data(), recv_.data(), kCount, ncclFloat32, root, comm_.get(), stream_);
   }
   ncclResult_t ReduceScatter(size_t count = kCount) {
     return ncclReduceScatter_impl(send_.data(), recv_.data(), count, ncclFloat32, ncclMin, comm_.get(), stream_);
@@ -706,14 +744,7 @@ TEST_F(CollectivesMicrotest, AlltoAllPivotEnable_ReadsItsEnvWithDefaultOff) {
 
 TEST_F(CollectivesMicrotest, AllReduceDda_SymmetricEligibleNeverTakesDda) {
   fake.ddaEnabled = true;
-  EXPECT_FALSE(rcclAllReduceShouldTakeDdaPath(comm_.get(), kCount, ncclFloat32, true, false, false));
-  EXPECT_TRUE(fake.ddaEnabledCalls.empty());
-  EXPECT_TRUE(fake.thresholdFuncs.empty());
-}
-
-TEST_F(CollectivesMicrotest, AllReduceDda_CeAllowedYieldsOffGfx1250) {
-  fake.ddaEnabled = true;
-  EXPECT_FALSE(rcclAllReduceShouldTakeDdaPath(comm_.get(), kCount, ncclFloat32, false, true, false));
+  EXPECT_FALSE(rcclAllReduceShouldTakeDdaPath(comm_.get(), kCount, ncclFloat32, true, false));
   EXPECT_TRUE(fake.ddaEnabledCalls.empty());
   EXPECT_TRUE(fake.thresholdFuncs.empty());
 }
@@ -722,7 +753,7 @@ TEST_F(CollectivesMicrotest, AllReduceDda_Gfx1250FabricRunsEvenWhenCeIsAllowed) 
   SetArch("gfx1250");
   fake.ddaEnabled = true;
   fake.ddaThreshold = 4096;
-  EXPECT_TRUE(rcclAllReduceShouldTakeDdaPath(comm_.get(), kCount, ncclFloat16, false, true, false));
+  EXPECT_TRUE(rcclAllReduceShouldTakeDdaPath(comm_.get(), kCount, ncclFloat16, false, false));
   ASSERT_EQ(1u, fake.ddaEnabledCalls.size());
   EXPECT_EQ(kCount * 2, fake.ddaEnabledCalls[0].totalBytes);
   EXPECT_EQ(4096u, fake.ddaEnabledCalls[0].threshold);
@@ -732,22 +763,22 @@ TEST_F(CollectivesMicrotest, AllReduceDda_Gfx1250FabricRunsEvenWhenCeIsAllowed) 
 
 TEST_F(CollectivesMicrotest, AllReduceDda_MessageOverTheThresholdIsRejected) {
   fake.ddaThreshold = 64;
-  EXPECT_FALSE(rcclAllReduceShouldTakeDdaPath(comm_.get(), kCount, ncclFloat64, false, false, false));
+  EXPECT_FALSE(rcclAllReduceShouldTakeDdaPath(comm_.get(), kCount, ncclFloat64, false, false));
   ASSERT_EQ(1u, fake.ddaEnabledCalls.size());
   EXPECT_EQ(kCount * 8, fake.ddaEnabledCalls[0].totalBytes);
   EXPECT_EQ(64u, fake.ddaEnabledCalls[0].threshold);
   EXPECT_EQ(std::vector<ncclFunc_t>{ncclFuncAllReduce}, fake.thresholdFuncs);
 }
 
-TEST_F(CollectivesMicrotest, AllReduceDda_Gfx1250WithCeAllowedStillAsksDda) {
+TEST_F(CollectivesMicrotest, AllReduceDda_Gfx1250WithoutDdaEnabledReturnsFalse) {
   SetArch("gfx1250");
-  EXPECT_FALSE(rcclAllReduceShouldTakeDdaPath(comm_.get(), kCount, ncclFloat32, false, true, false));
+  EXPECT_FALSE(rcclAllReduceShouldTakeDdaPath(comm_.get(), kCount, ncclFloat32, false, false));
   EXPECT_EQ(1u, fake.ddaEnabledCalls.size());
 }
 
 TEST_F(CollectivesMicrotest, AllReduceDda_TakesDdaWhenNothingElseServesTheCall) {
   fake.ddaEnabled = true;
-  EXPECT_TRUE(rcclAllReduceShouldTakeDdaPath(comm_.get(), kCount, ncclFloat32, false, false, false));
+  EXPECT_TRUE(rcclAllReduceShouldTakeDdaPath(comm_.get(), kCount, ncclFloat32, false, false));
   EXPECT_EQ(1u, fake.thresholdFuncs.size());
 }
 
@@ -1017,8 +1048,6 @@ TEST_F(CollectivesMicrotest, PlainEntryPoints_RecordThenEnqueue) {
   void* r = recv_.data();
   ncclComm* c = comm_.get();
   const std::vector<Case> cases = {
-      {[&] { return ncclBroadcast_impl(s, r, kCount, ncclFloat32, 2, c, stream_); }, rccl::rrBroadcast,
-       ncclFuncBroadcast, "Broadcast", s, r, ncclSum, 2, BROADCAST_CHUNKSTEPS, BROADCAST_SLICESTEPS},
       {[&] { return ncclGather_impl(s, r, kCount, ncclFloat32, 3, c, stream_); }, rccl::rrGather, ncclFuncGather,
        "Gather", s, r, ncclSum, 3, GATHER_CHUNKSTEPS, GATHER_SLICESTEPS},
       {[&] { return ncclReduce_impl(s, r, kCount, ncclFloat32, ncclMax, 1, c, stream_); }, rccl::rrReduce,
@@ -1310,6 +1339,94 @@ TEST_F(CollectivesMicrotest, AllGather_CheckModeDivertsAddonsButKeepsDirect) {
   EXPECT_EQ(ncclSuccess, AllGather());
   ASSERT_EQ(2u, fake.enqueued.size());
   EXPECT_TRUE(Info(1).useDirect);
+}
+
+// Broadcast
+
+TEST_F(CollectivesMicrotest, Broadcast_DdaArmsLaunchAsAddons) {
+  ExpectAddonArms({{RCCL_DDA_FABRIC_LL, "ncclBroadcastDdaFabricLL"},
+                   {RCCL_DDA_FABRIC_LL128, "ncclBroadcastDdaFabricLL128"}},
+                  [&] { return Broadcast(); }, ncclNumOps, "Broadcast");
+}
+
+TEST_F(CollectivesMicrotest, Broadcast_DdaLaunchReceivesRoot) {
+  for (int algo : {RCCL_DDA_FABRIC_LL, RCCL_DDA_FABRIC_LL128}) {
+    SCOPED_TRACE(algo);
+    Decide(algo);
+    fake.addons.clear();
+    EXPECT_EQ(ncclSuccess, Broadcast(/*root=*/3));
+    ASSERT_EQ(1u, fake.addons.size());
+    EXPECT_EQ(3, fake.addons[0].root);
+  }
+}
+
+TEST_F(CollectivesMicrotest, Broadcast_SelectsLiveWithCountAndRoot) {
+  Decide(NCCL_ALGO_RING);
+  EXPECT_EQ(ncclSuccess, Broadcast());
+  ASSERT_EQ(1u, fake.selects.size());
+  EXPECT_EQ("Broadcast", fake.selects[0].coll);
+  EXPECT_EQ(kCount, fake.selects[0].count);
+  EXPECT_EQ(kRoot, fake.selects[0].root);
+  EXPECT_FALSE(fake.selects[0].query);
+}
+
+TEST_F(CollectivesMicrotest, Broadcast_NonDdaDecisionEnqueuesWithoutDecision) {
+  for (int algo : {NCCL_ALGO_RING, NCCL_ALGO_TREE}) {
+    SCOPED_TRACE(algo);
+    Decide(algo);
+    fake.trace.clear();
+    fake.enqueued.clear();
+    fake.recorded.clear();
+    fake.enqueueResults = {ncclInvalidUsage};
+    EXPECT_EQ(ncclInvalidUsage, Broadcast());
+    EXPECT_EQ((std::vector<std::string>{"record", "select", "enqueue Broadcast"}), fake.trace);
+    ASSERT_EQ(1u, fake.recorded.size());
+    EXPECT_EQ(rccl::rrBroadcast, fake.recorded[0].type);
+    EXPECT_EQ(kCount, fake.recorded[0].count);
+    EXPECT_EQ(kRoot, fake.recorded[0].root);
+    ASSERT_EQ(1u, fake.enqueued.size());
+    const ncclInfo& info = Info();
+    EXPECT_FALSE(info.decisionValid);
+    EXPECT_EQ(ncclFuncBroadcast, info.coll);
+    EXPECT_STREQ("Broadcast", info.opName);
+    EXPECT_EQ(send_.data(), info.sendbuff);
+    EXPECT_EQ(recv_.data(), info.recvbuff);
+    EXPECT_EQ(kCount, info.count);
+    EXPECT_EQ(ncclFloat32, info.datatype);
+    EXPECT_EQ(ncclSum, info.op);
+    EXPECT_EQ(kRoot, info.root);
+    EXPECT_EQ(comm_.get(), info.comm);
+    EXPECT_EQ(stream_, info.stream);
+    EXPECT_EQ(BROADCAST_CHUNKSTEPS, info.chunkSteps);
+    EXPECT_EQ(BROADCAST_SLICESTEPS, info.sliceSteps);
+    EXPECT_EQ(nullptr, info.acc);
+    EXPECT_FALSE(info.useDirect);
+    EXPECT_TRUE(fake.addons.empty());
+  }
+}
+
+TEST_F(CollectivesMicrotest, Broadcast_CheckModeEnqueuesWithoutSelecting) {
+  comm_->checkMode = ncclCheckModeDebugGlobal;
+  Decide(RCCL_DDA_FABRIC_LL);
+  EXPECT_EQ(ncclSuccess, Broadcast());
+  EXPECT_TRUE(fake.selects.empty());
+  ASSERT_EQ(1u, fake.enqueued.size());
+  EXPECT_TRUE(fake.addons.empty());
+}
+
+TEST_F(CollectivesMicrotest, Broadcast_SelectFailureReturnsWithoutEnqueueOrLaunch) {
+  Decide(RCCL_DDA_FABRIC_LL);
+  fake.selectResult = ncclInternalError;
+  EXPECT_EQ(ncclInternalError, Broadcast());
+  EXPECT_TRUE(fake.enqueued.empty());
+  EXPECT_TRUE(fake.addons.empty());
+}
+
+TEST_F(CollectivesMicrotest, Broadcast_RecordFailureReturnsBeforeSelecting) {
+  fake.recordResult = ncclSystemError;
+  EXPECT_EQ(ncclSystemError, Broadcast());
+  EXPECT_TRUE(fake.selects.empty());
+  EXPECT_TRUE(fake.enqueued.empty());
 }
 
 // Hierarchical AllGather / ReduceScatter: 2 nodes x 4 local ranks, this rank is node 1, local rank 1.
@@ -1732,6 +1849,22 @@ TEST_F(CollectivesMicrotest, AllReduce_DdaArmsLaunchAsAddons) {
                    {RCCL_DDA_FABRIC_VMM, "ncclAllReduceDdaFabric"},
                    {RCCL_DDA_IPC, "ncclAllReduceDdaIpc"}},
                   [&] { return AllReduce(); }, ncclProd, "AllReduce");
+}
+
+// The decision's DDA cap (a re-routed call's, else none) reaches the fabric AllReduce launcher of each arm.
+TEST_F(CollectivesMicrotest, AllReduce_FabricArmsPassTheDecisionsCap) {
+  for (int algo : {RCCL_DDA_FABRIC_LL, RCCL_DDA_FABRIC_LL128, RCCL_DDA_FABRIC_VMM}) {
+    SCOPED_TRACE(algo);
+    Decide(algo);
+    for (rcclDdaLaunchCap cap : {rcclDdaLaunchCap{46, 256}, rcclDdaLaunchCap{}}) {
+      fake.ddaCaps.clear();
+      fake.decision.ddaCap = cap;
+      EXPECT_EQ(ncclSuccess, AllReduce());
+      ASSERT_EQ(1u, fake.ddaCaps.size());
+      EXPECT_EQ(cap.blocks, fake.ddaCaps[0].blocks);
+      EXPECT_EQ(cap.threads, fake.ddaCaps[0].threads);
+    }
+  }
 }
 
 TEST_F(CollectivesMicrotest, AllReduce_CheckModeDivertsAddons) {

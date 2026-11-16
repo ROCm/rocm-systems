@@ -38,3 +38,7 @@ int hsakmt_page_shift;
 /* zfb is mainly used during emulation */
 int hsakmt_zfb_support;
 int hsakmt_pm4_target_xcc;
+/* HSA_FORCE_MBIND=1 forces the legacy per-agent mbind even when the process
+ * has set an explicit NUMA memory policy (e.g. numactl -m).
+ */
+int hsakmt_force_mbind;

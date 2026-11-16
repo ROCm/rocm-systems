@@ -82,6 +82,10 @@ struct ncclGinState {
 // ncclDevrCommCreateInternal sizes per-context resource regions with it (via
 // devrGinContextsTotal), so the two must not diverge.
 static inline int ncclGinContextCount(int nGinContextsRequested, int ginCommCount) {
+  // ginContextCount is a hint; 0 is the documented "use a default" value. A 0
+  // request would size the context table and the per-context resource regions to
+  // 0 (heap corruption), so promote it to one context per GIN connection.
+  if (nGinContextsRequested < 1) nGinContextsRequested = 1;
   return ROUNDUP(nGinContextsRequested, ginCommCount);
 }
 
@@ -91,6 +95,9 @@ extern int64_t ncclParamGinType();
 // by the comm to communicate with other nodes.
 ncclResult_t ncclGetGinType(struct ncclComm* comm, ncclGinType_t* ginType);
 ncclResult_t ncclGetRailedGinType(struct ncclComm* comm, ncclGinType_t* ginType);
+// True if ginType is among the comm's active backends, whether or not it is the
+// default that ncclGetGinType reports. Same connectivity and finalize gates.
+bool ncclGinTypeActive(struct ncclComm* comm, ncclGinType_t ginType);
 
 // FIXME change to ncclGinState instead of ncclComm, no need to pass comm
 ncclResult_t ncclGinConnectOnce(struct ncclComm* comm);

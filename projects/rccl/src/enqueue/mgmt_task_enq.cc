@@ -21,23 +21,19 @@ ncclResult_t ncclMgmtTaskEnqueue(struct ncclAsyncJob* task, ncclResult_t (*func)
   task->childAbortFlagDev = comm->childAbortFlagDev;
   task->state = ncclGroupJobRunning;
   task->comm = comm;
-  ncclGroupCommJoin(comm, ncclGroupTaskTypeMgmtTask);
-  /* check if there are blocking and nonblocking comms at the same time in group. */
-  if (comm->destroyFlag) {
-    ncclGroupBlocking = 1;
-  } else if (ncclGroupBlocking == -1) {
-    /* first met communicator */
-    ncclGroupBlocking = comm->config.blocking;
-  } else if (ncclGroupBlocking != comm->config.blocking) {
+  /* check if there are blocking and nonblocking comms at the same time in group. Checked before
+   * joining: ncclGroupCommJoin records this comm's mode, and a rejected comm must not stay linked
+   * into the group list, because the caller frees it on failure. */
+  if (!comm->destroyFlag && ncclGroupBlocking != -1 && ncclGroupBlocking != comm->config.blocking) {
     WARN("Blocking and nonblocking communicators are not allowed in the same group.");
     ret = ncclInvalidArgument;
-  }
-  if (ret == ncclSuccess) {
-    ncclIntruQueueEnqueue(&comm->mgmtTaskQueue, task);
-  } else {
     // the task hasn't run
     if (destructor) destructor(task);
+    return ret;
   }
+  ncclGroupCommJoin(comm, ncclGroupTaskTypeMgmtTask);
+  if (comm->destroyFlag) ncclGroupBlocking = 1;
+  ncclIntruQueueEnqueue(&comm->mgmtTaskQueue, task);
 
   return ret;
 }

@@ -37,8 +37,9 @@ public:
   // Bounded host-speed choice; direct indexing requires a power of two.
   static constexpr size_t kNumEntries = 256;
   static_assert(kNumEntries != 0 && (kNumEntries & (kNumEntries - 1)) == 0);
-  // Match the four-word CU instruction-fetch window, including literals.
-  static constexpr size_t kNumWords = 4;
+  // The CU fetches four words plus a fifth for GFX10 MIMG with NSA=3.
+  // The fifth word in the key is zero for ordinary four-word fetches.
+  static constexpr size_t kNumWords = 5;
   using Words = std::span<const uint32_t, kNumWords>;
 
   ~DecodedInstructionCache() { clear(); }
@@ -55,13 +56,17 @@ public:
     if (enabled && entries_) {
       auto &entry = entries_->slots[pc_index(pc)];
       if (entry.instruction && entry.vmid == vmid &&
-          std::equal(words.begin(), words.end(), entry.words.begin()))
+          std::equal(words.begin(), words.end(), entry.words.begin())) {
+        from_pc_slot_ = true;
         return std::move(entry.instruction);
+      }
+      from_pc_slot_ = false;
       auto &shared = entries_->slots[entries_->content_slots[content_index(words)]];
       if (shared.instruction && shared.vmid == vmid &&
           std::equal(words.begin(), words.end(), shared.words.begin()))
         return std::move(shared.instruction);
     }
+    from_pc_slot_ = false;
     return decode_miss(decoder, words, emit_error, enabled);
   }
 
@@ -76,12 +81,13 @@ public:
     ScopedReturn(DecodedInstructionCache &cache, std::unique_ptr<Instruction> &instruction,
                  uint64_t pc, uint32_t vmid, Words words, bool enabled = true)
         : cache_(cache), instruction_(instruction), pc_(pc), vmid_(vmid), words_(words),
-          enabled_(enabled), exceptions_(std::uncaught_exceptions()) {}
+          enabled_(enabled), exceptions_(std::uncaught_exceptions()),
+          from_pc_slot_(cache.from_pc_slot_) {}
 
     [[gnu::always_inline]] ~ScopedReturn() {
       if (enabled_ && instruction_ && !instruction_->is_memory_op() && !instruction_->data() &&
           !borrows_fetch_buffer(*instruction_, words_) && std::uncaught_exceptions() == exceptions_)
-        cache_.put(pc_, vmid_, words_, instruction_);
+        cache_.put(pc_, vmid_, words_, instruction_, from_pc_slot_);
     }
 
     ScopedReturn(const ScopedReturn &) = delete;
@@ -98,6 +104,7 @@ public:
     Words words_;
     bool enabled_;
     int exceptions_;
+    bool from_pc_slot_;
   };
 
   /// @brief Drop entries before replacing the decoder/target, or destroying this CU.
@@ -125,7 +132,7 @@ private:
   static size_t content_index(Words words) {
     const uint64_t low = uint64_t{words[0]} | (uint64_t{words[1]} << 32);
     const uint64_t high = uint64_t{words[2]} | (uint64_t{words[3]} << 32);
-    uint64_t hash = low ^ std::rotl(high, 21);
+    uint64_t hash = low ^ std::rotl(high, 21) ^ std::rotl(uint64_t{words[4]}, 43);
     hash ^= hash >> 32;
     hash *= 0xd6e8feb86659fd93ULL;
     hash ^= hash >> 32;
@@ -148,13 +155,24 @@ private:
   }
 
   [[gnu::always_inline]] void put(uint64_t pc, uint32_t vmid, Words words,
-                                  std::unique_ptr<Instruction> &instruction) {
+                                  std::unique_ptr<Instruction> &instruction,
+                                  bool from_pc_slot = false) {
     // A decode miss allocates the table before execution; returning an
     // instruction during stack unwinding must not allocate.
     if (!entries_)
       return;
     const auto slot = pc_index(pc);
     auto &entry = entries_->slots[slot];
+    // An instruction taken from this PC's slot goes back where its key still
+    // is, so the common return is one pointer store. The key check covers a
+    // nested issue that reused the slot meanwhile. The content hint is not
+    // refreshed: only a colliding encoding can have moved it, which loses a
+    // sharing opportunity, not correctness. Relocated hits still take it below.
+    if (from_pc_slot && !entry.instruction && entry.vmid == vmid &&
+        std::equal(words.begin(), words.end(), entry.words.begin())) {
+      entry.instruction = std::move(instruction);
+      return;
+    }
     if (entry.instruction)
       evict(entry);
     entry.vmid = vmid;
@@ -169,6 +187,8 @@ private:
   }
 
   std::unique_ptr<Table> entries_;
+  /// Set by decode() for the ScopedReturn constructed right after it.
+  bool from_pc_slot_ = false;
 };
 
 } // namespace rocjitsu::amdgpu

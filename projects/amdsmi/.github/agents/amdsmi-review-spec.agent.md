@@ -4,6 +4,8 @@ description: "Spec-conformance review subagent. Checks the diff against its orig
 tools: read/readFile, search/textSearch, search/fileSearch, search/listDirectory, search/usages, execute/runInTerminal, atlassian/*
 model: "Claude Opus 5.5"
 user-invocable: false
+applyTo: "projects/amdsmi/**"
+excludeAgent: "cloud-agent"
 ---
 
 # Spec Conformance Review — amd-smi

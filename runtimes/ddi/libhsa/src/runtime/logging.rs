@@ -12,7 +12,7 @@ thread_local! {
 
 /// Prevents C stream callbacks from recursively entering the log writer or
 /// replacing its stream while the borrowed pointer is in use.
-pub(crate) struct LogWriteScope;
+pub(crate) struct LogWriteScope(std::marker::PhantomData<std::rc::Rc<()>>);
 
 impl LogWriteScope {
     /// Marks entry into a process logging callback scope.
@@ -20,7 +20,7 @@ impl LogWriteScope {
         if IN_LOG_WRITE.with(|active| active.replace(true)) {
             return None;
         }
-        Some(Self)
+        Some(Self(std::marker::PhantomData))
     }
 
     /// Checks whether the current thread is writing through the log callback.
@@ -46,21 +46,7 @@ struct LogConfig {
     stopping: bool,
 }
 
-/// Borrowed C `FILE` pointer governed by the HSA logging contract.
-#[derive(Clone, Copy)]
-struct BorrowedCStream(NonNull<c_void>);
-
-// SAFETY: The C stdio stream is used only while LogOutput holds its config
-// mutex. The HSA caller keeps the stream open while it is configured, and C
-// stdio serializes access from other threads using the same FILE pointer.
-unsafe impl Send for BorrowedCStream {}
-
-unsafe extern "C" {
-    /// Writes byte records to a borrowed C stdio stream.
-    fn fwrite(buffer: *const c_void, size: usize, count: usize, stream: *mut c_void) -> usize;
-    /// Flushes pending output from a borrowed C stdio stream.
-    fn fflush(stream: *mut c_void) -> i32;
-}
+use crate::platform::cstream::BorrowedCStream;
 
 /// Shared logging sink with an atomic category fast path.
 pub(crate) struct LogOutput {
@@ -91,8 +77,12 @@ impl LogOutput {
         if config.stopping {
             return INVALID_RUNTIME_STATE;
         }
+        let stream = match BorrowedCStream::acquire(stream) {
+            Ok(stream) => stream,
+            Err(status) => return status,
+        };
         config.flags = flags;
-        config.stream = NonNull::new(stream).map(BorrowedCStream);
+        config.stream = stream;
         self.enabled
             .store(u64::from_le_bytes(flags), Ordering::Release);
         SUCCESS
@@ -126,8 +116,7 @@ impl LogOutput {
             // while enabled. This mutex prevents replacement or shutdown from
             // finishing until the C stdio calls finish.
             unsafe {
-                let _ = fwrite(line.as_ptr().cast(), 1, line.len(), stream.0.as_ptr());
-                let _ = fflush(stream.0.as_ptr());
+                stream.write(line);
             }
         } else {
             let mut stream = std::io::stderr().lock();
@@ -152,7 +141,7 @@ impl LogOutput {
         line.push('\n');
         Some(LogWork {
             output: self.clone(),
-            _inflight: inflight,
+            inflight,
             flag,
             line,
         })
@@ -164,7 +153,7 @@ pub(crate) struct LogWork {
     /// Sink retained while writing outside the registry lock.
     output: Arc<LogOutput>,
     /// Blocks shutdown from freeing state while this work is outstanding.
-    _inflight: InFlightToken,
+    inflight: InFlightToken,
     /// Category to check before emitting the line.
     flag: u32,
     /// Complete formatted line owned by this work item.
@@ -174,6 +163,7 @@ pub(crate) struct LogWork {
 impl LogWork {
     /// Writes a prepared log record after releasing the runtime lock.
     pub(crate) fn write(self) {
+        let _lease_scope = ApiLeaseScope::enter(self.inflight);
         self.output.write(self.flag, self.line.as_bytes());
     }
 }
@@ -206,4 +196,17 @@ mod tests {
             Some(INVALID_RUNTIME_STATE)
         );
     }
+}
+
+#[cfg(all(windows, test))]
+#[test]
+/// Rejecting a foreign CRT stream must leave logging configuration intact.
+fn windows_custom_stream_rejection_preserves_logging_configuration() {
+    let output = LogOutput::new();
+    assert_eq!(output.set([1; 8], std::ptr::null_mut()), SUCCESS);
+    assert_eq!(output.set([2; 8], std::ptr::dangling_mut()), NOT_SUPPORTED);
+    assert_eq!(
+        output.enabled.load(Ordering::Acquire),
+        u64::from_le_bytes([1; 8])
+    );
 }
