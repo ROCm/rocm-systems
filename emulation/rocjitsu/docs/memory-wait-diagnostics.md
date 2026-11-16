@@ -45,10 +45,11 @@ Use `--wait-checking=on` for ordinary checks only, or `--wait-checking=all` to i
 gfx1250 XCNT. These modes override both per-CU settings on every GPU. Omitting the
 flag preserves JSON settings and defaults. See [configuration](configuration.md#memory-wait-diagnostics)
 for persistent global overrides and launch-mode restrictions.
-The race plugin requires ordinary wait checking: loading it with `off` is an error.
-This also applies to other plugins that observe register findings. Plugin loading
-checks each CU's effective settings, so a per-CU `memory_wait_diagnostics=off`
-also rejects these plugins unless overridden by top-level `on` or `all`.
+The race plugin requires all wait checks supported by the target: `all` on gfx1250,
+and `on` or `all` elsewhere. This also applies to other plugins that observe
+register findings. Plugin loading checks each CU's effective settings, including
+per-CU overrides. Ordinary checking must be enabled everywhere, and XCNT must
+also be enabled on gfx1250.
 
 Without a global override, memory-result diagnostics default to
 `memory_wait_diagnostics=warn`. To disable them per CU, add this entry to each
@@ -85,7 +86,7 @@ hardware XNACK support. A global `wait_checking` override takes precedence over
 both per-CU keys. Without one, setting `memory_wait_diagnostics=off` leaves an
 explicitly enabled XCNT check active. Use `--wait-checking=off` to disable both
 when no register-finding plugin is enabled. Use `--wait-checking=on` to disable
-XCNT while retaining ordinary checking and the race plugin.
+XCNT while retaining ordinary checking when no register-finding plugin is enabled.
 
 VMEM coverage is qualified for `MODE.REPLAY_MODE=1` (bit 25), the multi-group mode
 selected by LLVM at kernel entry. VMEM replay sources in single-group mode are
@@ -94,9 +95,9 @@ coverage boundary, not a claim that single-group kernels are replay-safe.
 
 Within the qualified model, X waits retire an ordered VMEM queue prefix. SMEM
 translation is unordered and requires a zero wait. A zero KM wait also releases
-SMEM sources. VMEM completion waits map completed instructions back to their X
-queue positions and release the proven translation prefix, including mixed loads
-and stores. Completion counters retain their independent positions.
+SMEM sources. VMEM and async completion waits map completed instructions back to
+their X queue positions and release the proven translation prefix, including mixed
+loads and stores. Completion counters retain their independent positions.
 The checker accounts for implicit drains at branches, register-control operations,
 messages and barriers, SMEM/VMEM transitions, and ordered VMEM destination reuse.
 It protects source dwords and executed vector lanes, without retaining payloads or

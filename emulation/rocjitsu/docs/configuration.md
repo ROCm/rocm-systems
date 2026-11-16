@@ -457,10 +457,11 @@ rocjitsu --config /path/to/config.json --wait-checking=off -- <command>
 | `off` | Disabled | Disabled |
 | `all` | Enabled | Enabled |
 
-The race plugin requires ordinary wait checking. Loading it with `off` is an error;
-use `on` (the default) or `all`. This requirement applies to any plugin that observes
-register hazards. Plugin loading checks the VM's effective settings, including
-per-CU configuration, before replacing any installed plugins. XCNT remains optional.
+The race plugin requires all wait checks supported by the target. Use `all` on
+gfx1250; other architectures accept `on` or `all`. Loading it with `off` is an
+error. Setting `all` works on every target. This requirement applies to any plugin
+that observes register hazards. Plugin loading checks the VM's effective settings,
+including per-CU configuration, before replacing any installed plugins.
 
 The flag overrides both settings on every CU and GPU for this launch. It uses the
 same config-copy mechanism as `--cpu-thread-budget`, leaving the source file unchanged.

@@ -79,7 +79,7 @@ Enable the race detector by adding it to the `plugins` section of your
 rocjitsu config file (`my_config.json`):
 
 ```json
-{ "plugins": { "race": {} } }
+{ "wait_checking": "all", "plugins": { "race": {} } }
 ```
 
 Run it under the emulator:
@@ -150,6 +150,7 @@ scripted workflows), add a `sinks` section to your config:
 
 ```json
 {
+  "wait_checking": "all",
   "plugins": { "race": {} },
   "sinks": { "types": ["file"], "dir": "/tmp/output" }
 }
@@ -162,12 +163,15 @@ $BUILD_DIR/tools/rocjitsu/rocjitsu --config my_config.json -- ./my_app
 
 ### Core-backed register reports
 
-Enabling `"race": {}` requests the core's issue-time register findings and requires
-ordinary wait checking. Loading the plugin with `--wait-checking=off`, or an
-effective per-CU `memory_wait_diagnostics=off`, is an error. The core checks each
-instruction once for both warnings and plugin reports; the plugin does not subscribe to register-access
-hooks or maintain another set of register dependencies. XCNT replay-source
-findings require XCNT checking to be explicitly enabled. See
+Enabling `"race": {}` requires all wait checks supported by the target. Use
+`"wait_checking": "all"` or `--wait-checking=all`; this works on every architecture.
+Other architectures also accept `on`, while gfx1250 requires the additional input
+register reuse checks controlled by XCNT. Incompatible effective settings, including
+per-CU overrides, reject plugin loading.
+
+The core checks each instruction once for both warnings and plugin reports; the
+plugin does not subscribe to register-access hooks or maintain another set of
+register dependencies. See
 [memory wait diagnostics](memory-wait-diagnostics.md) for target coverage,
 recovery policy, and replay-mode limits.
 

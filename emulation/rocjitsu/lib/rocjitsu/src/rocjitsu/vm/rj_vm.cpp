@@ -296,14 +296,15 @@ rj_status_t rj_vm_load_plugins(rj_vm_t *vm, const char *config_json, const char 
   if (group->observes_register_hazards()) {
     bool checking_disabled = false;
     vm->soc->for_each_cu([&](const amdgpu::ComputeUnitCore *cu) {
+      const auto &config = cu->config();
       checking_disabled |=
-          cu->config().memory_wait_diagnostics == amdgpu::MemoryWaitDiagnostics::Off;
+          config.memory_wait_diagnostics == amdgpu::MemoryWaitDiagnostics::Off ||
+          (config.arch == ROCJITSU_CODE_ARCH_CDNA5 && !config.xcnt_checks_enabled());
     });
     if (checking_disabled) {
       util::Logger::warn(
           "rj_vm_load_plugins failed: register-hazard plugins (including race) require "
-          "memory_wait_diagnostics=warn on every CU; use --wait-checking=on or "
-          "--wait-checking=all");
+          "all supported wait checks on every CU; use --wait-checking=all");
       return ROCJITSU_STATUS_INVALID_ARGUMENT;
     }
   }
