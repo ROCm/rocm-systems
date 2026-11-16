@@ -1330,6 +1330,51 @@ class CheckTestingDocsTest(unittest.TestCase):
             msg=results["markdown_links"],
         )
 
+    # -- inline link with balanced parentheses in destination / title --------
+
+    def test_markdown_link_with_parenthesized_destination_resolves(self):
+        # Regression: a link destination may itself contain a balanced pair of
+        # parentheses, e.g. ``[inventory](test_(v2)_inventory.yaml)``. The
+        # pre-fix capture stopped at the first ``)`` and truncated the
+        # destination, so a valid link to an existing file failed existence
+        # resolution. The balanced-parenthesis scan now resolves the whole
+        # destination.
+        (self.root / "test_(v2)_inventory.yaml").write_text(
+            "# placeholder\n", encoding="utf-8")
+        linked = VALID_TESTING.replace(
+            "(test_inventory.yaml)", "(test_(v2)_inventory.yaml)")
+        _write_docs(self.root, {"TESTING.md": linked})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertEqual(results["markdown_links"], [], msg=results["markdown_links"])
+
+    def test_markdown_link_with_parenthesized_title_resolves(self):
+        # Regression: an inline link title may be given in parentheses rather
+        # than quotes, ``[inventory](test_inventory.yaml (The suite inventory))``.
+        # The pre-fix capture stopped at the first ``)`` inside the title,
+        # truncating the span so the title stripper never saw a balanced
+        # ``(title)`` and the destination failed to resolve. The scan now yields
+        # the whole body and the parenthesized title is stripped before the
+        # destination is resolved.
+        titled = VALID_TESTING.replace(
+            "(test_inventory.yaml)",
+            "(test_inventory.yaml (The suite inventory))")
+        _write_docs(self.root, {"TESTING.md": titled})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertEqual(results["markdown_links"], [], msg=results["markdown_links"])
+
+    def test_markdown_link_with_parenthesized_destination_broken_is_reported(self):
+        # The balanced-parenthesis scan must not mask a genuinely broken
+        # destination: a link whose parenthesized destination names no file on
+        # disk is still reported as broken.
+        linked = VALID_TESTING.replace(
+            "(test_inventory.yaml)", "(no_(v2)_file.yaml)")
+        _write_docs(self.root, {"TESTING.md": linked})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("broken local link" in err for err in results["markdown_links"]),
+            msg=results["markdown_links"],
+        )
+
     # -- Markdown link boundary: absolute / traversal targets ----------------
 
     def test_markdown_link_absolute_target_is_rejected(self):

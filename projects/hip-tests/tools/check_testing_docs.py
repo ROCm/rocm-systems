@@ -346,7 +346,13 @@ _INCIDENT_REF_RE = re.compile(r"\bTI-\d+\b")
 # suite may carry in place of a free-text ``history`` narrative. The whole
 # token must be a ``TI-NNN`` id, not merely contain one.
 _INCIDENT_ID_FULL_RE = re.compile(r"^TI-\d+$")
-_MD_LINK_RE = re.compile(r"\[[^\]]*\]\(([^)]+)\)")
+# Inline Markdown link opener ``[text](``. The destination/title body that
+# follows is not captured here: a naive ``([^)]+)`` capture stops at the first
+# ``)`` and so truncates a valid link whose destination carries a balanced pair
+# of parentheses (``[t](a/(v2)/b.md)``) or whose title is parenthesized
+# (``[t](dest (title))``). The body is extracted by _iter_inline_link_targets,
+# which scans for the matching close paren instead.
+_MD_LINK_OPEN_RE = re.compile(r"\[[^\]]*\]\(")
 # Reference-style Markdown links: a usage ``[text][label]`` (or the collapsed
 # form ``[label][]``) paired with a ``[label]: target`` definition. The checker
 # resolves these through their definitions and validates them exactly like inline
@@ -1608,6 +1614,45 @@ def _strip_link_title(target):
     return stripped
 
 
+def _iter_inline_link_targets(text):
+    """Yield the raw ``(...)`` body of every inline Markdown link in ``text``.
+
+    The inline link opener ``[text](`` is matched with a regular expression, but
+    the destination/title body is extracted by a balanced-parenthesis scan rather
+    than a naive ``[^)]+`` capture. CommonMark permits unescaped parentheses in a
+    link destination as long as they are balanced (``[t](a/(v2)/b.md)``) and in a
+    parenthesized title (``[t](dest (title))``), so stopping at the first ``)``
+    would truncate a perfectly valid link and make it fail existence resolution.
+
+    For each opener the scan tracks parenthesis depth from the opening ``(`` and
+    yields the substring up to the matching close. A backslash escapes the next
+    character, so an escaped parenthesis does not change the depth. If the
+    parentheses never balance before end of line or end of text the link is
+    malformed; the body gathered so far is still yielded so a malformed/broken
+    link keeps being reported rather than silently dropped.
+    """
+    n = len(text)
+    for opener in _MD_LINK_OPEN_RE.finditer(text):
+        start = opener.end()      # first character inside the destination parens
+        i = start
+        depth = 1
+        while i < n:
+            ch = text[i]
+            if ch == "\\":
+                i += 2            # escaped character: consume it literally
+                continue
+            if ch == "\n":
+                break             # unbalanced: a link body stays on one line
+            if ch == "(":
+                depth += 1
+            elif ch == ")":
+                depth -= 1
+                if depth == 0:
+                    break
+            i += 1
+        yield text[start:i]
+
+
 def _check_link_target(doc_name, base, doc_resolved, target, anchors_cache,
                        boundary_root=None):
     """Validate one link target ``local#fragment`` and count resolved references.
@@ -1697,8 +1742,10 @@ def check_markdown_links(md_path, anchors_cache, boundary_root=None):
     for match in _MD_REF_DEF_RE.finditer(text):
         definitions[match.group(1).strip().lower()] = match.group(2).strip()
 
-    # Inline links.
-    for raw in _MD_LINK_RE.findall(text):
+    # Inline links. The destination/title body is extracted with a balanced-
+    # parenthesis scan so a destination or title that legitimately contains
+    # parentheses is resolved whole instead of truncated at the first ``)``.
+    for raw in _iter_inline_link_targets(text):
         errs, got = _check_link_target(
             path.name, base, doc_resolved, raw.strip(), anchors_cache,
             boundary_root)
