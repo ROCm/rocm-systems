@@ -361,6 +361,9 @@ collectables files, every top-level value is an equation.
 - Left as written: the formatter does not parse per-channel templates such as
   `TCC_HIT[::_1]`. A cell without a value is written `None`.
 
+In metric library files the formatter also fills each metric `description` to 88
+columns ([description rules](./src/rocprof_compute_soc/metric_library/README.md#descriptions)).
+
 The formatter reports each equation that it cannot parse, such as one with an
 unknown character, an unmatched parenthesis or a missing operand. The report gives
 the key of the equation and the parser message. The formatter leaves the equation
@@ -464,7 +467,7 @@ A metric whose counters do not fit one profiling pass is split into collectables
 
 ### Metric Library
 
-The metric library in `src/rocprof_compute_soc/metric_library/` defines each metric once per architecture. Until production reads the library, a metric change goes into both the panel YAMLs and the metric library. See the [metric library README](./src/rocprof_compute_soc/metric_library/README.md) for its layout, inheritance and checks.
+The metric library in `src/rocprof_compute_soc/metric_library/` defines each metric once per architecture. Until production reads the library, a metric change goes into both the panel YAMLs and the metric library. See the [metric library README](./src/rocprof_compute_soc/metric_library/README.md) for its layout, inheritance and checks, and its [description rules](./src/rocprof_compute_soc/metric_library/README.md#descriptions) before writing a metric description.
 
 `tools/test_metric_library_sync.py` checks that the metric library matches the panel YAMLs.
 
