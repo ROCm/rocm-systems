@@ -416,12 +416,14 @@ def parse_junit_xml(xml_path: Path) -> dict:
         else:
             outcome = "passed"
             passed_tests.append((name, duration))
+        detail = next((e for e in (failure, error, skipped) if e is not None), None)
         cases.append({
             "name": name,
             "classname": tc.get("classname", ""),
             "file": tc.get("file", ""),
             "outcome": outcome,
             "duration": duration,
+            "message": detail.get("message", "") if detail is not None else "",
         })
 
     return {

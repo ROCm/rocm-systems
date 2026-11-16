@@ -97,6 +97,8 @@ class Suite:
     k_expr: str | None = None
     # Curated smoke subset, or None when the suite has no smoke tier.
     smoke_tests: tuple[str, ...] | None = None
+    # Extra environment for pytest, as (name, value) pairs.
+    env: tuple[tuple[str, str], ...] = ()
     # Known failures are keyed "Class.test" instead of bare "test" names.
     # The multi-file suites need it: the same method name occurs in several
     # files. c10d_nccl keeps bare names so known_failures.json is unchanged.
@@ -122,7 +124,8 @@ SUITES: dict[str, Suite] = {
         Suite(
             name="c10d_nccl2",
             files=("test_c10d_nccl2.py",),
-            min_tests=1,
+            # 107 collected on torch 2.16 nightlies 20261113 and 20261115.
+            min_tests=100,
             known_failures_file="known_failures_c10d_nccl2.json",
             artifact_stem="pytorch_c10d_nccl2",
         ),
@@ -131,7 +134,8 @@ SUITES: dict[str, Suite] = {
         Suite(
             name="symmetric_memory",
             files=("test_symmetric_memory.py",),
-            min_tests=1,
+            # 107 collected on gfx942 (102 on gfx950), torch 20261113/20261115.
+            min_tests=100,
             known_failures_file="known_failures_symmetric_memory.json",
             artifact_stem="pytorch_symmetric_memory",
         ),
@@ -156,9 +160,20 @@ SUITES: dict[str, Suite] = {
                 "tensor/test_view_ops.py",
                 "test_composability.py",
             ),
-            min_tests=1,
+            # 552 collected on torch 20261113, 556 on 20261115.
+            min_tests=520,
             known_failures_file="known_failures_fsdp_dtensor.json",
             artifact_stem="pytorch_fsdp_dtensor",
+            # TestFullyShard1DTrainingCore.test_train_parity_multi_group needs
+            # 308-316 s (measured on MI350X with a longer limit), just over
+            # PyTorch's default 300 s per-test limit, so it timed out in every
+            # run. It is the suite's most communicator-heavy test; listing it
+            # as a known failure would hide a regression in it. Raise the
+            # limit instead (read by common_distributed at import; it also
+            # sets the teardown "ranks did not exit" limit), and keep
+            # pytest-timeout above it so PyTorch's own timeout fires first.
+            env=(("DISTRIBUTED_TESTS_DEFAULT_TIMEOUT", "600"),),
+            timeout_s=900,
         ),
     )
 }
@@ -209,7 +224,20 @@ def judge(suite: Suite, test_scope: str, cases: list[dict], tests_run: int,
     """
     errors: list[str] = []
     qualified = suite.qualified_ids
-    failed = [case_id(c, qualified) for c in cases if c["outcome"] == "failed"]
+    # A test whose call fails and whose teardown then errors appears as two
+    # testcases with the same id; count it once.
+    failed = list(dict.fromkeys(
+        case_id(c, qualified) for c in cases if c["outcome"] == "failed"))
+    failed_set = set(failed)
+    # PyTorch's persistent multi-process test classes skip every remaining
+    # test in the class after one fails ("Previous test failed, skipping").
+    # Those tests did not run. Report them apart from capability skips, so a
+    # known failure cannot silently hide the rest of its class.
+    not_run = list(dict.fromkeys(
+        case_id(c, qualified) for c in cases
+        if c["outcome"] == "skipped"
+        and c.get("message", "").startswith("Previous test failed")
+        and case_id(c, qualified) not in failed_set))
     passed_ids = {case_id(c, qualified) for c in cases if c["outcome"] == "passed"}
 
     smoke = test_scope == "smoke" and suite.smoke_tests is not None
@@ -247,6 +275,7 @@ def judge(suite: Suite, test_scope: str, cases: list[dict], tests_run: int,
         "known_failed": known_failed,
         "unexpected_failed": unexpected_failed,
         "now_passing": sorted(known_set & passed_ids),
+        "not_run_after_failure": not_run,
     }
 
 
@@ -379,6 +408,9 @@ def run_tests(pytorch_src: Path, results_log: Path, suite: Suite,
 
     env = os.environ.copy()
     env["PYTHONPATH"] = str(pytorch_src / "test") + ":" + env.get("PYTHONPATH", "")
+    for name, value in suite.env:
+        env[name] = value
+        log.info("Suite %s: %s=%s", suite.name, name, value)
 
     junit_xml = results_log.parent / f"{suite.artifact_stem}_results.xml"
 
@@ -452,7 +484,11 @@ def run_tests(pytorch_src: Path, results_log: Path, suite: Suite,
     else:
         log.info("No known-failure list for suite %s (%s)", suite.name, known_failures_file.name)
 
-    verdict = judge(suite, test_scope, junit["cases"], junit["tests_run"],
+    # Distinct testcases, not the <testsuite tests=> attribute: pytest counts
+    # subtest reports there too (1276 for 556 fsdp_dtensor testcases), and a
+    # test with a teardown error appears twice.
+    tests_run = len(dict.fromkeys((c["classname"], c["name"]) for c in junit["cases"]))
+    verdict = judge(suite, test_scope, junit["cases"], tests_run,
                     known_set, proc.returncode)
     for err in verdict["errors"]:
         log.error("%s", err)
@@ -465,7 +501,8 @@ def run_tests(pytorch_src: Path, results_log: Path, suite: Suite,
         )
 
     passed_tests = junit["passed"]
-    skipped = sum(1 for c in junit["cases"] if c["outcome"] == "skipped")
+    not_run = verdict["not_run_after_failure"]
+    skipped = sum(1 for c in junit["cases"] if c["outcome"] == "skipped") - len(not_run)
     parts = []
     if passed_tests:
         parts.append(f"{len(passed_tests)} passed")
@@ -473,6 +510,8 @@ def run_tests(pytorch_src: Path, results_log: Path, suite: Suite,
         parts.append(f"{len(verdict['unexpected_failed'])} unexpected failures")
     if verdict["known_failed"]:
         parts.append(f"{len(verdict['known_failed'])} known failures")
+    if not_run:
+        parts.append(f"{len(not_run)} not run after an earlier failure in their class")
     if skipped:
         parts.append(f"{skipped} skipped")
 
@@ -486,8 +525,9 @@ def run_tests(pytorch_src: Path, results_log: Path, suite: Suite,
         "known_failed": verdict["known_failed"],
         "unexpected_failed": verdict["unexpected_failed"],
         "errors": verdict["errors"],
+        "not_run_after_failure": not_run,
         "summary_line": ", ".join(parts) or "no tests ran",
-        "tests_run": junit["tests_run"],
+        "tests_run": tests_run,
         "expected_tests": len(suite.smoke_tests) if smoke else None,
     }
     return verdict["exit_code"], summary
@@ -539,7 +579,17 @@ def generate_summary_report(summary: dict, rccl_lib: Path,
         lines.append("")
 
     if known:
-        lines.append(f"Known failures ({len(known)}) — excluded from verdict")
+        lines.append(f"Known failures ({len(known)}) — excluded from verdict:")
+        for name in known:
+            lines.append(f"  KNOWN {name}")
+        lines.append("")
+
+    not_run = summary.get("not_run_after_failure", [])
+    if not_run:
+        lines.append(f"NOT RUN ({len(not_run)}): skipped by PyTorch after an earlier "
+                     "failure in the same test class, so these give no coverage:")
+        for name in not_run:
+            lines.append(f"  NOTRUN {name}")
         lines.append("")
 
     if summary["passed"]:

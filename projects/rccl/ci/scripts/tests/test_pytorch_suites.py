@@ -42,6 +42,19 @@ class Registry(unittest.TestCase):
             with open(SCRIPTS / s.known_failures_file) as f:
                 self.assertIsInstance(json.load(f)["tests"], dict, s.name)
 
+    def test_known_failure_entries_are_categorised(self):
+        for s in tp.SUITES.values():
+            with open(SCRIPTS / s.known_failures_file) as f:
+                d = json.load(f)
+            for test, cat in d["tests"].items():
+                self.assertIn(cat, d.get("categories", {}), f"{s.name}: {test}")
+                if s.qualified_ids:
+                    self.assertRegex(test, r"^\w+\.test_\w+$", s.name)
+
+    def test_fsdp_dtensor_timeout_override_fires_before_pytest_timeout(self):
+        env = dict(FSDP.env)
+        self.assertLess(int(env["DISTRIBUTED_TESTS_DEFAULT_TIMEOUT"]), FSDP.timeout_s)
+
     def test_artifact_stems_are_unique(self):
         stems = [s.artifact_stem for s in tp.SUITES.values()]
         self.assertEqual(len(stems), len(set(stems)))
@@ -96,7 +109,7 @@ class FileOf(unittest.TestCase):
 class Judge(unittest.TestCase):
     def test_full_suite_passes(self):
         cases = all_files_pass(FSDP)
-        v = tp.judge(FSDP, "all", cases, len(cases), set(), 0)
+        v = tp.judge(FSDP, "all", cases, FSDP.min_tests, set(), 0)
         self.assertEqual(v["exit_code"], 0, v["errors"])
 
     def test_a_file_with_only_skips_fails(self):
@@ -122,7 +135,7 @@ class Judge(unittest.TestCase):
     def test_only_known_failures_pass(self):
         cases = all_files_pass(FSDP)
         cases.append(case("test.distributed.tensor.test_utils.UtilTest", "test_x", "failed"))
-        v = tp.judge(FSDP, "all", cases, len(cases), {"UtilTest.test_x"}, 1)
+        v = tp.judge(FSDP, "all", cases, FSDP.min_tests, {"UtilTest.test_x"}, 1)
         self.assertEqual(v["exit_code"], 0, v["errors"])
 
     def test_pytest_internal_error_fails_even_if_failures_known(self):
@@ -160,6 +173,32 @@ class Judge(unittest.TestCase):
         self.assertEqual(v["now_passing"], [cid])
 
 
+class NotRunAndDuplicates(unittest.TestCase):
+    CLS = "test.distributed.test_c10d_nccl2.ProcessGroupNCCL2Test"
+
+    def test_call_failure_plus_teardown_error_counts_once(self):
+        suite = tp.SUITES["c10d_nccl2"]
+        cases = [case(self.CLS, "test_ok"),
+                 case(self.CLS, "test_x", "failed"), case(self.CLS, "test_x", "failed")]
+        v = tp.judge(suite, "all", cases, 2, set(), 1)
+        self.assertEqual(v["unexpected_failed"], ["ProcessGroupNCCL2Test.test_x"])
+
+    def test_previous_test_failed_skips_are_reported_as_not_run(self):
+        suite = tp.SUITES["c10d_nccl2"]
+        skip = dict(case(self.CLS, "test_after", "skipped"),
+                    message="Previous test failed, skipping test_c10d_nccl2.ProcessGroupNCCL2Test.test_after")
+        cap = dict(case(self.CLS, "test_cap", "skipped"), message="requires NVSHMEM")
+        # Body skipped, teardown errored: a failure, not a not-run.
+        both = dict(case(self.CLS, "test_both", "failed"), message="failed on teardown")
+        both_skip = dict(case(self.CLS, "test_both", "skipped"), message="Previous test failed, skipping")
+        cases = [case(self.CLS, "test_ok"), case(self.CLS, "test_x", "failed"),
+                 skip, cap, both, both_skip]
+        v = tp.judge(suite, "all", cases, suite.min_tests,
+                     {"ProcessGroupNCCL2Test.test_x", "ProcessGroupNCCL2Test.test_both"}, 1)
+        self.assertEqual(v["exit_code"], 0, v["errors"])
+        self.assertEqual(v["not_run_after_failure"], ["ProcessGroupNCCL2Test.test_after"])
+
+
 class JunitCases(unittest.TestCase):
     def test_cases_carry_classname_file_and_outcome(self):
         xml = """<?xml version="1.0"?>
@@ -178,6 +217,7 @@ class JunitCases(unittest.TestCase):
         self.assertEqual([c["outcome"] for c in r["cases"]], ["passed", "failed", "skipped"])
         self.assertEqual(r["cases"][0]["file"], "test/distributed/tensor/test_utils.py")
         self.assertEqual(r["failed"], ["test_b"])
+        self.assertEqual(r["cases"][1]["message"], "boom")
 
 
 if __name__ == "__main__":
