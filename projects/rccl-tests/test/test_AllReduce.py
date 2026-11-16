@@ -71,6 +71,24 @@ def test_AllReduceSingleProcess(nthreads, ngpus_single, byte_range, op, step_fac
 
     assert rccl_test.returncode == 0
 
+# With cuMem enabled, freeing a buffer with a call other than the one that allocated it
+# crashes at teardown. Not parametrized over memory types: precheckin runs
+# pytest -k "not host and not fine", which would deselect those parameter ids.
+def test_AllReduceMemoryTypeTeardown():
+    failures = []
+    for memory_type in ["coarse", "fine", "host", "managed"]:
+        env = dict(os.environ, NCCL_CUMEM_ENABLE="1")
+        if memory_type == "fine":
+            env["HSA_FORCE_FINE_GRAIN_PCIE"] = "1"
+        args = [executable, "-g", "1", "-b", "8", "-e", "64K", "-f", "8", "-Y", memory_type]
+        rccl_test = subprocess.run(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                   universal_newlines=True, env=env)
+        if rccl_test.returncode != 0:
+            print(rccl_test.stdout)
+            failures.append("-Y %s: exit code %d" % (memory_type, rccl_test.returncode))
+
+    assert not failures, "; ".join(failures)
+
 @pytest.mark.parametrize("nthreads, nprocs, ngpus_mpi, byte_range, op, step_factor, datatype",
     itertools.product(nthreads, nprocs, ngpus_mpi, byte_range, op, step_factor, datatype))
 def test_AllReduceMPI(request, nthreads, nprocs, ngpus_mpi, byte_range, op, step_factor, datatype):

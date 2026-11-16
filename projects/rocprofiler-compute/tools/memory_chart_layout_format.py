@@ -5,9 +5,10 @@
 """Check memory chart layouts and rewrite them in the canonical style.
 
 The loader checks each file first. The file is then written with keys in the
-loader's order, blocks in drawing order (each block followed by its nested and
-attached blocks), one block, metric, or arrow per line, and a blank line between
-columns and between arrows of different block pairs.
+loader's order, blocks column by column (each block followed by its nested
+blocks, then the column's blocks above and below the grid), one block, metric, or
+arrow per line, and a blank line between columns and between arrows of different
+block pairs.
 
 Usage:
     tools/memory_chart_layout_format.py           # rewrite every layout

@@ -53,8 +53,9 @@ TEST_P(FileLoadingBundleCountTest, RejectsImpossibleCountWithoutThrowing) {
   image.append(names, sizeof(names));
   image.append(magic, sizeof(magic) - 1);
   image.append(reinterpret_cast<const char *>(&count), sizeof(count));
-  const test::ScopedTempFile file("rocjitsu_malformed_fatbin_");
-  file.write(image);
+  test::ScopedTempFile file;
+  ASSERT_TRUE(file.initialize("rocjitsu_malformed_fatbin_"));
+  ASSERT_TRUE(file.write(image));
 
   EXPECT_FALSE(Executable(file.path()).is_valid());
   char sentinel;
@@ -70,7 +71,8 @@ INSTANTIATE_TEST_SUITE_P(HugeCounts, FileLoadingBundleCountTest,
                                            uint64_t{1} << 30));
 
 TEST(FileLoadingTest, RejectsDirectoryWithoutThrowing) {
-  const test::ScopedTempDirectory directory("rocjitsu_file_loading_");
+  test::ScopedTempDirectory directory;
+  ASSERT_TRUE(directory.initialize("rocjitsu_file_loading_"));
   EXPECT_TRUE(detail::read_file_bytes(directory.path()).failed());
   EXPECT_FALSE(Executable(directory.path()).is_valid());
   EXPECT_FALSE(AmdGpuCodeObject(directory.path()).is_valid());
@@ -83,7 +85,8 @@ TEST(FileLoadingTest, RejectsDirectoryWithoutThrowing) {
 }
 
 TEST(FileLoadingTest, RejectsMissingFileWithoutThrowing) {
-  const test::ScopedTempDirectory directory("rocjitsu_file_loading_");
+  test::ScopedTempDirectory directory;
+  ASSERT_TRUE(directory.initialize("rocjitsu_file_loading_"));
   const std::string path = directory.path() + "/missing";
   EXPECT_TRUE(detail::read_file_bytes(path).failed());
   EXPECT_FALSE(Executable(path).is_valid());
@@ -97,7 +100,8 @@ TEST(FileLoadingTest, RejectsMissingFileWithoutThrowing) {
 }
 
 TEST(FileLoadingTest, ReadsEmptyFileButRejectsItAsCode) {
-  const test::ScopedTempFile file("rocjitsu_file_loading_");
+  test::ScopedTempFile file;
+  ASSERT_TRUE(file.initialize("rocjitsu_file_loading_"));
   util::FailureOr<std::vector<char>> image = detail::read_file_bytes(file.path());
   ASSERT_TRUE(image.succeeded());
   EXPECT_TRUE(image.value().empty());
@@ -112,8 +116,9 @@ TEST(FileLoadingTest, ReadsEmptyFileButRejectsItAsCode) {
 }
 
 TEST(FileLoadingTest, RejectsUnreadableRegularFileWithoutThrowing) {
-  const test::ScopedTempFile file("rocjitsu_file_loading_");
-  file.write("not empty");
+  test::ScopedTempFile file;
+  ASSERT_TRUE(file.initialize("rocjitsu_file_loading_"));
+  ASSERT_TRUE(file.write("not empty"));
   std::error_code error;
   std::filesystem::permissions(file.path(), std::filesystem::perms::none, error);
   ASSERT_FALSE(error) << error.message();

@@ -40,6 +40,29 @@ TEST(WaitcheckState, PartialWaitRetiresOnlySufficientlyOldEvents) {
   EXPECT_TRUE(state.ready_regs.contains({RegClass::VGPR, 1, 1}));
 }
 
+TEST(WaitcheckState, Gfx1150ExportFifoProgressAtJoinRequiresBothPaths) {
+  constexpr auto arch = ROCJITSU_CODE_ARCH_RDNA3_5;
+  const auto exp = Ops::counter_index(WaitCounterKind::Exp);
+  PendingEvent position;
+  position.counter = WaitCounterKind::Exp;
+  position.kind = WaitEventKind::ExportPosition;
+  position.regs.expand({RegClass::VGPR, 4, 1});
+  position.min_younger = 3;
+  position.min_younger_in_fifo = 2;
+  PendingState left, right;
+  left.pending[exp] = {position};
+  position.min_younger_in_fifo = 1;
+  right.pending[exp] = {position};
+  Ops::merge_into(left, right);
+  const auto required = Ops::dependency_required_count(left, left.pending[exp].front(), arch);
+  ASSERT_TRUE(required.succeeded());
+  EXPECT_EQ(required.value(), 1u);
+  ASSERT_TRUE(Ops::apply_counter_wait(left, WaitCounterKind::Exp, 2, arch).succeeded());
+  ASSERT_EQ(left.pending[exp].size(), 1u);
+  ASSERT_TRUE(Ops::apply_counter_wait(left, WaitCounterKind::Exp, 1, arch).succeeded());
+  EXPECT_TRUE(left.pending[exp].empty());
+}
+
 TEST(WaitcheckState, StoreCounterOrderingControlsPartialRetirement) {
   struct Case {
     rj_code_arch_t arch;

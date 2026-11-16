@@ -1,3 +1,4 @@
+import { fontSizes, fontWeights, textStyles } from '../../theme/typography';
 import { useCallback, useLayoutEffect, useRef } from 'react';
 import { bindChartNativeInput } from './chartNativeInput';
 import { positionChartTooltip } from './chartTooltip';
@@ -10,7 +11,7 @@ import {
   TooltipComponent,
 } from 'echarts/components';
 import { CanvasRenderer } from 'echarts/renderers';
-import { useTheme } from '@mui/material/styles';
+import { alpha, useTheme } from '@mui/material/styles';
 
 echarts.use([
   BarChart,
@@ -33,20 +34,21 @@ export default function Chart({ option, height = 280, ariaLabel, ariaDescribedBy
   const theme = useTheme();
   const tooltip = option.tooltip ? {
     backgroundColor: theme.palette.background.paper,
-    borderColor: theme.palette.divider,
+    borderColor: theme.palette.dashboard?.border ?? theme.palette.divider,
     borderWidth: 1,
-    borderRadius: 10,
-    padding: [10, 12],
+    borderRadius: 6,
+    padding: [6, 9],
     confine: true,
     transitionDuration: 0,
-    extraCssText: `box-shadow: ${theme.shadows[5]};`,
     position: positionChartTooltip,
     ...option.tooltip,
+    extraCssText: `box-shadow: 0 4px 16px ${alpha(theme.palette.dashboard?.shadowColor ?? theme.palette.text.primary, 0.18)};max-width:var(--chart-tooltip-max-width, 340px);white-space:normal;overflow-wrap:anywhere;pointer-events:none;line-height:1.5;`,
     className: ['dashboard-chart-tooltip', option.tooltip.className].filter(Boolean).join(' '),
     textStyle: {
       color: theme.palette.text.primary,
       fontFamily: theme.typography.fontFamily,
       ...option.tooltip.textStyle,
+      fontSize: fontSizes.body, fontWeight: fontWeights.regular, lineHeight: parseFloat(textStyles.tooltip.lineHeight),
     },
   } : undefined;
   const themedOption = {
@@ -54,7 +56,7 @@ export default function Chart({ option, height = 280, ariaLabel, ariaDescribedBy
     animationDurationUpdate: 350,
     animationEasing: 'cubicOut',
     animationEasingUpdate: 'cubicInOut',
-    textStyle: { color: theme.palette.text.secondary, fontFamily: theme.typography.fontFamily },
+    textStyle: { color: theme.palette.text.secondary, fontFamily: theme.typography.fontFamily, fontSize: fontSizes.body, fontWeight: fontWeights.regular },
     ...option,
     ...(tooltip && { tooltip }),
   };
@@ -68,7 +70,7 @@ export default function Chart({ option, height = 280, ariaLabel, ariaDescribedBy
       onEvents={onEvents}
       onChartReady={handleReady}
       opts={{ renderer: 'canvas' }}
-      style={{ width: '100%', height }}
+      style={{ width: '100%', height, borderRadius: 6, cursor: option.series?.some((series) => series.type === 'bar') ? 'default' : 'crosshair' }}
       aria-label={ariaLabel}
       aria-describedby={ariaDescribedBy}
       role="img"

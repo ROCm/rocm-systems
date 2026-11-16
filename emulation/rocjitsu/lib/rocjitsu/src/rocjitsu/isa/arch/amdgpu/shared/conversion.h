@@ -25,7 +25,7 @@
 /// Evidence: gfx1201 captures cover every operation here; gfx1100 captures cover
 /// all but the FP8/BF8 ones; gfx1030 captures cover ToFloat's F16/F32/F64 OMOD
 /// and MODE boundaries. Other targets share the code without measurement;
-/// only RDNA4 uses the FP8/BF8 operations (see fp8_formats.py).
+/// CDNA5 shares RDNA4's non-scaled F32-to-OCP FP8/BF8 narrowing operations.
 /// Measured differences from the ISA manual's pseudocode or tables are marked
 /// "ISA manual discrepancy" below.
 
@@ -132,8 +132,8 @@ constexpr V f32_to_integer(V bits, Rounding rounding, NanResult nan_result) {
   const V half = (V(L{1}) << shift) >> 1;
   const V rounded =
       kept + choose(detail::rounds_up<F32>(rounding, negative, kept, rest, half), V(L{1}), V(L{0}));
-  // At or above 2^31 every Int saturates; below it the left shift is at most 7 bits.
-  const auto huge = field >= V(kUnitField + 8);
+  // Unsigned DWORD results retain one more magnitude bit than signed results.
+  const auto huge = field >= V(kUnitField + (std::is_same_v<Int, uint32_t> ? 9 : 8));
   const V left = choose(integral && !huge, field - V(kUnitField), V(L{0}));
   const V units = choose(integral, significand << left, rounded);
 
@@ -578,10 +578,10 @@ template <typename Fmt, typename V> constexpr V finish_fp8(V bits, V magnitude, 
   const V overflow(L{Encoding::kOverflow});
   V result = choose(magnitude > V(L{Encoding::kLargest}),
                     saturate ? V(L{Encoding::kLargest}) : overflow, magnitude);
-  // ISA manual discrepancy: the manual's FP16_OVFL table also saturates an
-  // infinity to the largest finite value, but gfx1201 gives the overflow
-  // encoding whatever FP16_OVFL says. Only gfx1201 is measured; CDNA4 and CDNA5
-  // keep the table's rule.
+  // ISA manual discrepancy: gfx1201 produces the overflow encoding for a true
+  // infinity in both modes. CDNA5 uses that measurement as a proxy pending a
+  // gfx1250 capture. Its Table 7 (p. 22) preserves infinity outside WMMA, while
+  // section 7.6.2 (p. 81) saturates it when FP16_OVFL is set.
   result = choose(f32_magnitude == V(F32::kInfinity), overflow, result);
   result = result | ((bits & V(F32::kSign)) >> 24);
   const L nan = std::is_same_v<Fmt, Fp8> ? kFp8Nan : kBf8Nan;

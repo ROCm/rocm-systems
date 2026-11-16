@@ -8,8 +8,8 @@
 #pragma once
 
 #include "common/bits.h"
-#include "common/internal.h"
-#include "rj_arith/rj_arith.h"
+#include "common/validation.h"
+#include "rj_arith/detail/rj_arith_common.h"
 
 #include <stdint.h>
 
@@ -83,13 +83,19 @@ inline float alu_output(float value, uint32_t modifiers) {
 // Scales an FP16 arithmetic result and applies CLAMP. OMOD flushes an
 // unscaled tiny result to positive zero; halving a normal into the subnormal
 // range produces signed zero instead. The input is represented in FP32.
-inline float alu_output_f16(float value, uint32_t modifiers) {
+// AfterRounding compares an exact wider value as if first rounded to nearest
+// even at FP16 precision, matching OMOD's scaling of the rounded result: values
+// within half a unit below 2^-14 or 2^-13 round up to it. For values already on
+// the FP16 grid both forms agree.
+template <bool AfterRounding = false> inline float alu_output_f16(float value, uint32_t modifiers) {
   if (modifiers & RJ_ARITH_ALU_OMOD_HALF) {
+    constexpr uint32_t smallest_normal = AfterRounding ? 0x387ff000u : 0x38800000u;
+    constexpr uint32_t twice_smallest_normal = AfterRounding ? 0x38fff000u : 0x39000000u;
     uint32_t bits = as_bits(value), magnitude = bits & 0x7fffffffu;
-    if (magnitude < 0x38800000u) {
+    if (magnitude < smallest_normal) {
       value = 0;
     } else if ((modifiers & RJ_ARITH_ALU_OMOD_HALF) == RJ_ARITH_ALU_OMOD_HALF &&
-               magnitude < 0x39000000u) {
+               magnitude < twice_smallest_normal) {
       value = as_float(bits & 0x80000000u);
     }
   }

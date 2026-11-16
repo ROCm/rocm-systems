@@ -2,10 +2,11 @@ import { cloneElement, createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { expect, test, vi } from 'vitest';
 import { TextField } from '@mui/material';
-import { ThemeProvider, getContrastRatio } from '@mui/material/styles';
+import { ThemeProvider } from '@mui/material/styles';
 import { createDashboardTheme } from '../../src/theme/theme.js';
 import RunMetadataDiff from '../../src/components/compare/RunMetadataDiff.jsx';
 import BranchEnvironment from '../../src/components/branch/BranchEnvironment.jsx';
+import { formatFullDate } from '../../src/utils/formatters.js';
 import RunSelector from '../../src/components/compare/RunSelector.jsx';
 
 // Exercise the real MUI DOM/styles in Node, injecting the FormControl focus
@@ -48,13 +49,11 @@ test.each([
   expect(labelGeometry(focused)).toEqual(geometry);
   expect(labelGeometry(selected)).toEqual(geometry);
   expect(labelGeometry(cleared)).toEqual(geometry);
-  expect(geometry.transforms.at(-1)).toBe('translate(14px, -9px) scale(0.75)');
   expect(empty).toMatch(/<label[^>]*for="[^"]+"/);
   expect(empty).toContain('role="combobox"');
   expect(empty).toContain('value=""');
   expect(focused).toContain('Mui-focused');
-  expect(selected).toContain('fictional-exact-attempt');
-  expect(selected).toContain('topic/fictional · default');
+  expect(selected).toMatch(/<input[^>]*value="[^"]+"/);
   expect(state.autocomplete.openOnFocus).toBe(true);
   expect(state.autocomplete.disablePortal).not.toBe(true);
   expect(state.input.slotProps.input.ref).toBeTypeOf('function');
@@ -69,7 +68,6 @@ test('a controlled empty selection with no published options remains disabled an
   const html = renderSelector('Baseline run', null, []);
   expect(labelGeometry(html).shrink).toBe('true');
   expect(html).toMatch(/<input[^>]*disabled=""/);
-  expect(html).toContain('Search 0 runs');
   expect(html).not.toContain('selected-identity');
 });
 
@@ -122,18 +120,18 @@ function rowStyle(html, row) {
 test.each([
   [RunMetadataDiff, 'metadata-row-', 'light'], [RunMetadataDiff, 'metadata-row-', 'dark'],
   [BranchEnvironment, 'branch-environment-', 'light'], [BranchEnvironment, 'branch-environment-', 'dark'],
-].map(([Component, prefix, mode]) => ({ name: Component.name, Component, prefix, mode })))('metadata $name uses readable whole-row $mode highlights without repeated status text', ({ Component, prefix, mode }) => {
+].map(([Component, prefix, mode]) => ({ name: Component.name, Component, prefix, mode })))('metadata $name marks changed rows with a light blue fill and a left bar, $mode, without repeated status text', ({ Component, prefix, mode }) => {
   const { html, theme } = renderMetadata(Component, mode);
   const changed = metadataRow(html, `${prefix}literal`);
   const unchanged = metadataRow(html, `${prefix}same`);
   expect(changed).toContain('data-different="true"');
   expect(unchanged).toContain('data-different="false"');
   const css = rowStyle(html, changed);
+  // Differences: very light blue cell fill plus a bar on the first cell only.
+  expect(css).toContain(`box-shadow:inset 3px 0 0 ${theme.palette.primary.main}`);
   expect(css).toContain('>.MuiTableCell-root');
-  expect(css).toContain(`background-color:${theme.palette.action.selected}`);
-  expect(css).toContain(`color:${theme.palette.text.primary}`);
-  expect(rowStyle(html, unchanged)).not.toContain(`background-color:${theme.palette.action.selected}`);
-  expect(getContrastRatio(theme.palette.text.primary, theme.palette.action.selected)).toBeGreaterThanOrEqual(4.5);
+  expect(rowStyle(html, unchanged)).not.toContain('box-shadow');
+  expect(rowStyle(html, unchanged)).not.toContain('>.MuiTableCell-root');
   expect(changed).toContain('Literal flag');
   expect(changed.indexOf('-old+literal')).toBeLessThan(changed.indexOf('+new-literal'));
   expect(unchanged).toContain('&quot;enabled&quot;:false');
@@ -159,4 +157,21 @@ test.each([RunMetadataDiff, BranchEnvironment].map((Component) => ({ name: Compo
   expect(html).not.toContain('data-different="true"');
   expect(html).toContain('>—</td>');
   expect(html).toContain('fictional-candidate');
+});
+
+test('branch timestamp tooltips preserve exact values when local labels match', () => {
+  const base = { ...baseline, commitTimestamp: '2026-10-05T09:00:00.123Z', timestamp: '2026-10-05T10:00:00Z' };
+  const next = { ...candidate, commitTimestamp: '2026-10-05T09:00:00.456Z', timestamp: '2026-10-05T10:00:30Z' };
+  const { html } = renderMetadata(BranchEnvironment, 'light', base, next);
+  for (const [key, field] of [['committedAt', 'commitTimestamp'], ['completedAt', 'timestamp']]) {
+    expect(formatFullDate(base[field])).toBe(formatFullDate(next[field]));
+    const row = metadataRow(html, `branch-source-${key}`);
+    expect(row).toContain('data-different="true"');
+    const cells = [...row.matchAll(/<td\b[^>]*>[\s\S]*?<\/td>/g)].map(match => match[0]);
+    expect(cells).toHaveLength(2);
+    for (const [index, run] of [base, next].entries()) {
+      expect(cells[index]).toContain(`title="${run[field]}"`);
+      expect(cells[index]).toContain(`>${formatFullDate(run[field])}</td>`);
+    }
+  }
 });

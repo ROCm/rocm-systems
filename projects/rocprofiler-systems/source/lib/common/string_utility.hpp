@@ -3,6 +3,9 @@
 
 #pragma once
 
+#include "common/result.hpp"
+
+#include <fmt/base.h>
 #include <fmt/format.h>
 
 #include <algorithm>
@@ -13,6 +16,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -154,47 +158,57 @@ has_env_key(std::string_view entry, std::string_view key) noexcept
            entry[key.size()] == '=';
 }
 
-/// @brief Strictly parse a whole string as an arithmetic Tp; nullopt on empty, partial or
-///        overflow.
+/// @brief Why a string could not be parsed as a number.
+enum class parse_error
+{
+    empty,
+    not_a_number,
+    out_of_range
+};
+
+/// @brief Strictly parse a whole string as an arithmetic Tp.
+/// @return The value, or a parse_error: empty input, a partial or non-numeric string,
+///         or a value that does not fit in Tp.
 template <typename Tp>
     requires std::integral<Tp> || std::floating_point<Tp>
-[[nodiscard]] inline std::optional<Tp>
+[[nodiscard]] inline result<Tp, parse_error>
 safe_from_chars(std::string_view number_str)
 {
+    using parse_result = result<Tp, parse_error>;
+
     if(number_str.empty())
     {
-        return std::nullopt;
+        return parse_result{ failure{ parse_error::empty } };
     }
     const char* const end    = number_str.data() + number_str.size();
     Tp                value  = 0;
-    const auto        result = std::from_chars(number_str.data(), end, value);
-    // Reject partial parses (e.g. "12.5" -> 12) by checking entire string was consumed
-    if(result.ec != std::errc{} || result.ptr != end)
+    const auto        parsed = std::from_chars(number_str.data(), end, value);
+    // Reject partial parses (e.g. "12.5" -> 12) by checking entire string was consumed.
+    // Checked before out-of-range so "99999999999x" is reported as not a number.
+    if(parsed.ptr != end ||
+       (parsed.ec != std::errc{} && parsed.ec != std::errc::result_out_of_range))
     {
-        return std::nullopt;
+        return parse_result{ failure{ parse_error::not_a_number } };
     }
-    return value;
+    if(parsed.ec == std::errc::result_out_of_range)
+    {
+        return parse_result{ failure{ parse_error::out_of_range } };
+    }
+    return parse_result{ value };
 }
 
-/// @brief Strictly parse a whole string as an int; nullopt on empty, partial or overflow.
-[[nodiscard]] inline std::optional<int>
+/// @brief Strictly parse a whole string as an int. See safe_from_chars.
+[[nodiscard]] inline result<int, parse_error>
 safe_stoi(std::string_view number_str)
 {
     return safe_from_chars<int>(number_str);
 }
 
-/// @brief Strictly parse a whole string as a long; nullopt on empty, partial or overflow.
-[[nodiscard]] inline std::optional<long>
+/// @brief Strictly parse a whole string as a long. See safe_from_chars.
+[[nodiscard]] inline result<long, parse_error>
 safe_stol(std::string_view number_str)
 {
     return safe_from_chars<long>(number_str);
-}
-
-/// @brief Strictly parse a whole string as a double; nullopt on empty or partial parse.
-[[nodiscard]] inline std::optional<double>
-safe_stod(std::string_view number_str)
-{
-    return safe_from_chars<double>(number_str);
 }
 
 /// @brief Parse a string into a boolean.
@@ -319,3 +333,27 @@ hex_padded(Tp value, size_t width = k_default_hex_width)
 }
 
 }  // namespace rocprofsys::utility::string
+
+/// Formats a parse_error as a short, user-facing description.
+template <>
+struct fmt::formatter<rocprofsys::utility::string::parse_error>
+: fmt::formatter<std::string_view>
+{
+    template <typename FormatContext>
+    auto format(rocprofsys::utility::string::parse_error err, FormatContext& ctx) const
+    {
+        using rocprofsys::utility::string::parse_error;
+        switch(err)
+        {
+            case parse_error::empty:
+                return fmt::formatter<std::string_view>::format("empty value", ctx);
+            case parse_error::not_a_number:
+                return fmt::formatter<std::string_view>::format("not a number", ctx);
+            case parse_error::out_of_range:
+                return fmt::formatter<std::string_view>::format("out of range", ctx);
+            default:
+                throw std::logic_error(
+                    fmt::format("parse_error {} not handled", static_cast<int>(err)));
+        }
+    }
+};

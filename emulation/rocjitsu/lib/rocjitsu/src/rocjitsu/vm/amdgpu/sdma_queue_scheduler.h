@@ -110,6 +110,12 @@ public:
   /// @brief Force-cancel and detach during reset or frontend teardown.
   [[nodiscard]] bool detach(Handle handle) noexcept;
 
+  /// @brief Fail the next worker startup with a thread-creation error.
+  void fail_next_worker_start_for_testing() {
+    std::lock_guard lock(mutex_);
+    fail_next_worker_start_for_testing_ = true;
+  }
+
   /// @brief Update host doorbell mappings and exclude concurrent scans.
   void set_process_doorbell_base(uint32_t process_id, void *base);
   /// @brief Service one host-polled queue through a captured doorbell for tests.
@@ -148,6 +154,7 @@ public:
   const std::shared_ptr<DeviceCacheCoherence> &cache_coherence() const { return coherence_; }
 
 private:
+  friend class SdmaQueueSchedulerTestAccess;
   class QueueRecord;
 
   class Slot {
@@ -180,6 +187,7 @@ private:
   SdmaPacketDialect dialect_;
   std::size_t next_slot_ = 0;
   bool shutting_down_ = false;
+  bool fail_next_worker_start_for_testing_ = false;
 };
 
 } // namespace rocjitsu::amdgpu

@@ -1,3 +1,4 @@
+import { fontWeights } from '../../theme/typography';
 import { Chip } from '@mui/material';
 import CheckCircleRoundedIcon from '@mui/icons-material/CheckCircleRounded';
 import ErrorRoundedIcon from '@mui/icons-material/ErrorRounded';
@@ -18,7 +19,7 @@ export default function StatusChip({ status, size = 'small' }) {
       label={config.label}
       color={config.color}
       icon={config.icon}
-      sx={{ fontWeight: 650, '& .MuiChip-icon': { fontSize: 15 } }}
+      sx={{ fontWeight: fontWeights.emphasized, '& .MuiChip-icon': { fontSize: 15 } }}
     />
   );
 }
