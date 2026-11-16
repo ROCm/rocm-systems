@@ -486,17 +486,17 @@ __device__ __forceinline__ void copy_remainder(uint8_t* dst, uint8_t* src, int s
     // Dynamically check alignment at the current pointer position
     uintptr_t align = reinterpret_cast<uintptr_t>(dst) | reinterpret_cast<uintptr_t>(src);
 
-    if (size >= 8 && (align & 7) == 0) {
+    if (__builtin_expect(size >= 8 && __builtin_is_aligned(align, 8), 1)) {
       auto val = AsmAccess<8, LP, SP>::load(src);
       AsmAccess<8, LP, SP>::store(dst, val);
       dst += 8; src += 8; size -= 8;
     }
-    else if (size >= 4 && (align & 3) == 0) {
+    else if (size >= 4 && __builtin_is_aligned(align, 4)) {
       auto val = AsmAccess<4, LP, SP>::load(src);
       AsmAccess<4, LP, SP>::store(dst, val);
       dst += 4; src += 4; size -= 4;
     }
-    else if (size >= 2 && (align & 1) == 0) {
+    else if (size >= 2 && __builtin_is_aligned(align, 2)) {
       auto val = AsmAccess<2, LP, SP>::load(src);
       AsmAccess<2, LP, SP>::store(dst, val);
       dst += 2; src += 2; size -= 2;
@@ -525,7 +525,7 @@ __device__ __forceinline__ void copy_aligned_body(uint8_t* dst, uint8_t* src,
     return;
   }
 
-  size_t prefix = (-dst_addr) & (ChunkSize - 1);  
+  size_t prefix = __builtin_align_up(dst_addr, ChunkSize) - dst_addr;
   if (tid == 0 && prefix > 0) {
     copy_prefix<LP, SP>(dst, src, prefix);
   }
