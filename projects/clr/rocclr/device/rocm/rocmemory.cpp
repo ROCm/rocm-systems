@@ -1610,6 +1610,8 @@ bool Image::create(bool alloc_local, amd::Memory::ErrorCode* errorCode) {
     roc::Image* orgImage = static_cast<roc::Image*>(orgDevMem);
     // fill all required values
     deviceImageInfo_ = orgImage->deviceImageInfo_;
+    memReqSize_ = orgImage->memReqSize_;
+    memReqAlignment_ = orgImage->memReqAlignment_;
     permission_ = orgImage->permission_;
     deviceMemory_ = orgImage->deviceMemory_;
     hsaImageObject_ = orgImage->hsaImageObject_;
@@ -1627,6 +1629,8 @@ bool Image::create(bool alloc_local, amd::Memory::ErrorCode* errorCode) {
     LogPrintfError("Fail to allocate image memory, failed with hsa_status: %d", hsaStatus);
     return false;
   }
+  memReqSize_ = deviceImageInfo_.size;
+  memReqAlignment_ = deviceImageInfo_.alignment;
 
   // roc::Device::hostAlloc and deviceLocalAlloc implementation does not
   // support alignment larger than HSA memory region allocation granularity.
@@ -1676,20 +1680,6 @@ bool Image::create(bool alloc_local, amd::Memory::ErrorCode* errorCode) {
     setOwningAgent(dev().getBackendDevice());
   }
 
-  return true;
-}
-
-bool Image::getImageMemoryRequirements(size_t* size, size_t* alignment) const {
-  // Query HSA again rather than reading deviceImageInfo_, because create() overwrites its size
-  // with the padded allocation size, and views never fill it in.
-  hsa_ext_image_data_info_t info = {};
-  hsa_status_t status =
-      Hsa::image_data_get_info(dev().getBackendDevice(), &imageDescriptor_, permission_, &info);
-  if (status != HSA_STATUS_SUCCESS) {
-    return false;
-  }
-  *size = info.size;
-  *alignment = info.alignment;
   return true;
 }
 

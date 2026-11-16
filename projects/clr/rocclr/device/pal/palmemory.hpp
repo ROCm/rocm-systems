@@ -250,13 +250,11 @@ class Image : public pal::Memory {
 
   //! Gets the size and alignment PAL requires for the memory backing this image.
   bool getImageMemoryRequirements(size_t* size, size_t* alignment) const final {
-    if (image() == nullptr) {
+    if (memReqSize() == 0) {
       return false;
     }
-    Pal::GpuMemoryRequirements req = {};
-    image()->GetGpuMemoryRequirements(&req);
-    *size = static_cast<size_t>(req.size);
-    *alignment = static_cast<size_t>(req.alignment);
+    *size = static_cast<size_t>(memReqSize());
+    *alignment = static_cast<size_t>(memReqAlignment());
     return true;
   }
 

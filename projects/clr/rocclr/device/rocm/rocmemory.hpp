@@ -268,7 +268,14 @@ class Image : public roc::Memory {
   size_t getDeviceDataAlignment() { return deviceImageInfo_.alignment; }
 
   //! Gets the size and alignment HSA requires for the memory backing this image.
-  bool getImageMemoryRequirements(size_t* size, size_t* alignment) const final;
+  bool getImageMemoryRequirements(size_t* size, size_t* alignment) const final {
+    if (memReqSize_ == 0) {
+      return false;
+    }
+    *size = memReqSize_;
+    *alignment = memReqAlignment_;
+    return true;
+  }
 
   hsa_ext_image_t getHsaImageObject() const { return hsaImageObject_; }
   const hsa_ext_image_descriptor_v2_t& getHsaImageDescriptor() const { return imageDescriptor_; }
@@ -310,6 +317,11 @@ class Image : public roc::Memory {
   hsa_ext_image_descriptor_v2_t imageDescriptor_;
   hsa_access_permission_t permission_;
   hsa_ext_image_data_info_t deviceImageInfo_;
+  //! Size and alignment HSA requires for this image's memory. Kept separately because create()
+  //! overwrites deviceImageInfo_.size with the padded allocation size. 0 for views and interop
+  //! images, which don't own their memory.
+  size_t memReqSize_ = 0;
+  size_t memReqAlignment_ = 0;
   hsa_ext_image_t hsaImageObject_;
   bool ownsHsaImageObject_ = true;
 
