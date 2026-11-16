@@ -121,6 +121,13 @@ parse_numeric_range(std::string _input_string, const std::string& _label, Up _in
                             _label, _v, _v);
                 continue;
             }
+            // A non-positive increment never reaches _vN and would loop forever.
+            if(_incr_v <= 0)
+            {
+                throw std::invalid_argument(fmt::format(
+                    "Invalid {} range specification: {}. Increment must be positive",
+                    _label, _v));
+            }
             do
             {
                 emplace(result, _vn);
