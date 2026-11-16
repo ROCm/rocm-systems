@@ -443,7 +443,9 @@ add_executable(
     cdna5_architecture_test.cpp
     cdna5_cluster_test.cpp
     cdna5_dispatch_memory_test.cpp
+    cdna5_encoded_fields_test.cpp
     cdna5_execution_test.cpp
+    cdna_ds_encoded_fields_test.cpp
     numeric_encoding_regression_test.cpp
     cdna5_gfx1251_simulation_test.cpp
     cdna5_instruction_test.cpp
@@ -458,6 +460,7 @@ add_executable(
     sdma_packet_processor_test.cpp
     sdma_ring_consumer_test.cpp
     cdna5_tensor_dma_test.cpp
+    ds_address_encoded_fields_test.cpp
     ds_memory_snapshot_test.cpp
     ds_gws_test.cpp
     buffer_lds_transfer_test.cpp
@@ -484,6 +487,7 @@ add_executable(
     kfd_events_test.cpp
     decode_smoke_test.cpp
     rdna4_dot_dpp_test.cpp
+    rdna4_encoded_fields_test.cpp
     readlane_selector_test.cpp
     pc_extension_test.cpp
     pc_fetch_test.cpp
