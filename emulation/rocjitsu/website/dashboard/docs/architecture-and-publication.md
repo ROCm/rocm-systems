@@ -156,11 +156,14 @@ ordering, labels and Recent runs all use it. The corpus runner writes
 `finished_at` on normal completion and on an ordinary exception or interrupt, but
 a harness killed outright (for example by the step timeout) leaves it `null`; the
 corpus schema calls that a checkpoint. Such a run must still sort and display by
-its start time. The dashboard carries `finished_at` as `finishedAt` for one use:
-the automatic develop reference, which is a baseline for comparison, skips any
-run with no finish record, because a checkpoint is a partial result. (When a branch
-records an exact develop base, that run is used even if it is a checkpoint.) The
-dashboard does not otherwise display the checkpoint state: a run whose cases did
+its start time. The dashboard carries `finished_at` as `finishedAt` for one use,
+the automatic develop reference. That baseline is the latest develop run that had
+finished when the candidate started: `finishedAt` at or before the candidate's
+start, latest finish first. A run with no finish record is a partial result and
+never qualifies, and neither does a run that finished after the candidate began.
+When a branch records an exact develop base and several runs share that commit,
+the latest finished one is used, and a checkpoint only when it is the only match.
+The dashboard does not otherwise display the checkpoint state: a run whose cases did
 not execute shows its unexecuted rows as `failed` ("run interrupted before
 completion") and an `× Fail` status, which is the only interrupted-run signal
 consumers get.
