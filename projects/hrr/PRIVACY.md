@@ -2,11 +2,9 @@
 
 This page states what a capture archive can and cannot contain, and what a person who
 replays one is trusting. It is the customer-facing text of
-[AIRUNTIME-2733](https://amd-hub.atlassian.net/browse/AIRUNTIME-2733) (capture privacy and
-content control). The engineering threat model is
-[AIRUNTIME-2853](https://amd-hub.atlassian.net/browse/AIRUNTIME-2853), and the hardening of
-replay against a crafted archive is
-[AIRUNTIME-2865](https://amd-hub.atlassian.net/browse/AIRUNTIME-2865).
+[AIRUNTIME-2733](https://amd-hub.atlassian.net/browse/AIRUNTIME-2733), the hardening of
+capture, and [AIRUNTIME-2865](https://amd-hub.atlassian.net/browse/AIRUNTIME-2865), the
+hardening of replay against a crafted archive.
 
 Every task under AIRUNTIME-2733 that changes what an archive holds updates this page in the
 same change. `tools/tests/test_privacy_doc.py`, run by the ctest `hrr-generator-rules`,
