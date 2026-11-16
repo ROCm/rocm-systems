@@ -1947,7 +1947,6 @@ void Device::ResolveCpFirmwareCaps() {
     // doorbells on every GPU it never uses, which runs out of doorbells with many processes on
     // a partitioned system.
     uint8_t aql_extensions[8] = {};
-    bool signal_hints = false;
     if (Hsa::agent_get_info(bkendDevice_,
                             static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_AQL_EXTENSIONS),
                             aql_extensions) == HSA_STATUS_SUCCESS) {
@@ -1958,12 +1957,11 @@ void Device::ResolveCpFirmwareCaps() {
       // CP firmware without hint support takes a hinted handle as the signal address. Left false
       // by a runtime that does not report the AQL extension. A profiler tool hands packet
       // completion signals to ROCr, which rejects a hinted handle.
-      signal_hints = hsa_flag_isset64(aql_extensions, HSA_AMD_AQL_PROPERTY_SIGNAL_HINTS) &&
-                     !amd::activity_prof::tool_attached.load(std::memory_order_relaxed);
+      signal_hints_ = hsa_flag_isset64(aql_extensions, HSA_AMD_AQL_PROPERTY_SIGNAL_HINTS) &&
+                      !amd::activity_prof::tool_attached.load(std::memory_order_relaxed);
     }
-    signal_hints_.store(signal_hints, std::memory_order_relaxed);
     ClPrint(amd::LOG_INFO, amd::LOG_INIT, "Ext kernel dispatch packet: %d, signal hints: %d",
-            settings().ext_dispatch_packet_, signal_hints);
+            settings().ext_dispatch_packet_, signal_hints_);
   });
 }
 

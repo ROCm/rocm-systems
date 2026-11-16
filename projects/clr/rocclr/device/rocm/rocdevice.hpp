@@ -638,7 +638,7 @@ class Device : public NullDevice {
   //! a VirtualGPU (ResolveCpFirmwareCaps); a signal created before that carries no hints. The pooled
   //! signals rely on one existing first: graph instantiate captures its packets on a VirtualGPU
   //! before it prepopulates the HW event pool, and gate signals are taken by a VirtualGPU.
-  bool SignalHints() const { return signal_hints_.load(std::memory_order_relaxed); }
+  bool SignalHints() const { return signal_hints_; }
   //! AQL queue ring buffers are placed in device memory. A profiler tool scans and rewrites the
   //! packets from the host, so its queues keep system-memory rings.
   bool AqlRingsInDeviceMemory() const {
@@ -884,9 +884,7 @@ class Device : public NullDevice {
   mutable std::vector<void*> graph_hw_events_;
   mutable std::mutex graph_hw_events_lock_;
   bool pcie_stores_need_flush_ = true;  //!< Stores to device memory come over PCIe through HDP
-  //! AQL completion signal handles carry hints; set by ResolveCpFirmwareCaps while other threads
-  //! may create signals
-  std::atomic<bool> signal_hints_{false};
+  bool signal_hints_ = false;           //!< AQL completion signal handles carry hints
   std::once_flag cpCapsOnce_;  //!< Guards ResolveCpFirmwareCaps
 
   //! Asks ROCr for the CP firmware capabilities (ext dispatch packet, signal hints) once, before
