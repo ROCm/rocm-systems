@@ -389,12 +389,10 @@ validate_config_file_values(const std::string& config_file, const std::string& t
         auto key       = std::string{};
         auto raw_value = std::string{};
 
-        if(auto const equal_pos = trimmed_line.find('='); equal_pos != std::string::npos)
+        if(auto const parsed = utility::string::split_key_value(trimmed_line))
         {
-            key = utility::string::trim(
-                std::string_view{ trimmed_line }.substr(0, equal_pos));
-            raw_value = utility::string::trim(
-                std::string_view{ trimmed_line }.substr(equal_pos + 1));
+            key       = utility::string::trim(parsed->key);
+            raw_value = utility::string::trim(parsed->value);
         }
         else
         {
@@ -947,14 +945,14 @@ configure_settings(bool _init)
     ROCPROFSYS_CONFIG_SETTING(
         std::string, env_vars::TRACE_PERIOD_CLOCK_ID,
         "Clock used to measure delay and duration for ROCPROFSYS_TRACE_DELAY, "
-        "ROCPROFSYS_TRACE_DURATION, and ROCPROFSYS_TRACE_PERIODS.\n"
-        "  realtime (default) : wall-clock time. A 10-second delay waits for\n"
-        "    10 real seconds regardless of how many CPU cores are active.\n"
-        "  cputime : process CPU time (CLOCK_PROCESS_CPUTIME_ID). A 10-second\n"
-        "    delay waits until the process has consumed 10 CPU-seconds in total\n"
-        "    across all threads. Useful when you want to skip a fixed amount of\n"
-        "    computation rather than a fixed elapsed time. Note: rocprof-sys\n"
-        "    instrumentation itself contributes to the CPU-time counter.",
+        "ROCPROFSYS_TRACE_DURATION, and ROCPROFSYS_TRACE_PERIODS."
+        "  realtime (default) : wall-clock time. A 10-second delay waits for"
+        " 10 real seconds regardless of how many CPU cores are active."
+        "  cputime : process CPU time (CLOCK_PROCESS_CPUTIME_ID). A 10-second"
+        " delay waits until the process has consumed 10 CPU-seconds in total"
+        " across all threads. Useful when you want to skip a fixed amount of"
+        " computation rather than a fixed elapsed time. Note: rocprof-sys"
+        " instrumentation itself contributes to the CPU-time counter.",
         "realtime", "trace", "profile", "perfetto", "timemory")
         ->set_choices({ "realtime", "cputime" });
 
@@ -2339,12 +2337,13 @@ print_banner(std::ostream& _os)
             return _property_info;
         };
 
-    auto _properties =
-        _generate_properties({ { "rev", ROCPROFSYS_GIT_REVISION },
-                               { "tag", ROCPROFSYS_GIT_DESCRIBE },
-                               { "", ROCPROFSYS_LIBRARY_ARCH },
-                               { "compiler", ROCPROFSYS_COMPILER_STRING },
-                               { "rocm", "v" ROCPROFSYS_ROCM_VERSION_STRING } });
+    auto _properties = _generate_properties(
+        { { "rev", ROCPROFSYS_GIT_REVISION },
+          { "tag", ROCPROFSYS_GIT_DESCRIBE },
+          { "", ROCPROFSYS_LIBRARY_ARCH },
+          { "compiler", ROCPROFSYS_COMPILER_STRING },
+          { "rocm", "v" ROCPROFSYS_ROCM_VERSION_STRING },
+          { "profiler-hub", "v" ROCPROFSYS_PROFILER_HUB_VERSION_STRING } });
 
     // <NAME> <VERSION> (<PROPERTIES>)
     if(!_properties.empty())
@@ -3723,10 +3722,10 @@ get_first_mpi_env_uint(const std::vector<std::string>& env_var_options,
 get_mpi_rank_from_env()
 {
     // global rank env-vars: user-provided, then runtime-specific
-    return get_first_mpi_env_uint({ get_rank_filter_id(), "MPI_RANKID", "PMI_RANK",
-                                    "MV2_COMM_WORLD_RANK", "OMPI_COMM_WORLD_RANK",
-                                    "SLURM_PROCID" },
-                                  "MPI rank");
+    auto env_var_options = std::vector<std::string>{ get_rank_filter_id() };
+    env_var_options.insert(env_var_options.end(), k_mpi_rank_env_names.begin(),
+                           k_mpi_rank_env_names.end());
+    return get_first_mpi_env_uint(env_var_options, "MPI rank");
 }
 
 [[nodiscard]] std::optional<std::uint64_t>

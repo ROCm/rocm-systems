@@ -3059,11 +3059,38 @@ HIP_PUBLIC_API hipError_t hipMemcpyBatchAsync(void** dsts, void** srcs, size_t* 
                                                             attrsIdxs, numAttrs, failIdx, stream);
   CATCH;
 }
+HIP_PUBLIC_API hipError_t hipExtMemcpyBatchAsync(void** dsts, void** srcs,
+                                  size_t* sizes, size_t* sizesDst,
+                                  hipExtMemcpyWait* waits,
+                                  hipExtMemcpySignal* signals,
+                                  size_t count,
+                                  hipExtMemcpyAttributes* attrs, size_t* attrsIdxs, size_t numAttrs,
+                                  hipStream_t stream) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipExtMemcpyBatchAsync_fn(
+      dsts, srcs, sizes, sizesDst, waits, signals,
+      count, attrs, attrsIdxs, numAttrs, stream);
+  CATCH;
+}
 HIP_PUBLIC_API hipError_t hipMemcpy3DBatchAsync(size_t numOps, struct hipMemcpy3DBatchOp* opList, size_t* failIdx,
                                  unsigned long long flags, hipStream_t stream) {
   TRY;
   return hip::GetHipDispatchTable()->hipMemcpy3DBatchAsync_fn(numOps, opList, failIdx, flags,
                                                               stream);
+  CATCH;
+}
+HIP_PUBLIC_API hipError_t hipMemcpyWithAttributesAsync(void* dst, const void* src, size_t size,
+                                                       hipMemcpyAttributes* attr,
+                                                       hipStream_t stream) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipMemcpyWithAttributesAsync_fn(dst, src, size, attr, stream);
+  CATCH;
+}
+HIP_PUBLIC_API hipError_t hipMemcpy3DWithAttributesAsync(struct hipMemcpy3DBatchOp* op,
+                                                         unsigned long long flags,
+                                                         hipStream_t stream) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipMemcpy3DWithAttributesAsync_fn(op, flags, stream);
   CATCH;
 }
 HIP_PUBLIC_API hipError_t hipMemcpy3DPeer(hipMemcpy3DPeerParms* p) {

@@ -18,6 +18,8 @@
 // - ValidateResults: each rank checks its output on the GPU against the expected values
 //   regenerated from the same seed (VerifiableFp8Verify). The result is exact in any
 //   accumulation order, so one reference covers every algorithm and protocol.
+// - Both steps run on the host instead when the test binary's kernels cannot run on the
+//   rank's GPU or UT_DEVICE_DATA=0 (see VerifiableFp8.cpp).
 // - ReduceScatter checks its slice at offset globalRank * numOutputElements.
 // - UT_DEVICE_DATA_FAULT=1 flips one output byte, as a negative control.
 namespace RcclUnitTesting

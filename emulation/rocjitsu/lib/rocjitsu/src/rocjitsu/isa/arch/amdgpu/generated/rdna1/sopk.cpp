@@ -5,6 +5,7 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna1/sopk.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna1/decode_factories.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna1/execution_backend.h"
 #include <memory>
 
@@ -652,7 +653,9 @@ SSubvectorLoopEndSopk::SSubvectorLoopEndSopk(const MachineInst *inst)
   src_operands_[0] = &simm16;
   dst_operands_[1] = &sdst_exec;
   src_operands_[1] = &sdst_exec_in;
-  num_src_ = 2;
+  omit_repeated_destination_sources_ = true;
+  src_operands_[2] = &sdst;
+  num_src_ = 3;
   num_dst_ = 2;
   sdst_exec.apply_fieldless_caps(false, false, false);
   sdst_exec_in.apply_fieldless_caps(false, false, false);

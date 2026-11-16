@@ -1,183 +1,60 @@
-import { useLayoutEffect, useRef, useState } from 'react';
-import {
-  Autocomplete,
-  Box,
-  Checkbox,
-  Chip,
-  ListItemText,
-  Paper,
-  Stack,
-  TextField,
-  Typography,
-} from '@mui/material';
-import TuneRoundedIcon from '@mui/icons-material/TuneRounded';
+import { fontSizes, fontWeights, textStyles } from '../../theme/typography';
+import { Box, ButtonBase, Checkbox, FormControlLabel, Typography } from '@mui/material';
+import { CategoryMarker } from '../shared/CategoryTag';
 
-const CHECK_ALL = '__check_all__';
-const TAG_EDGE_GAP = 12;
-
-function ResponsiveTags({ values, getItemProps }) {
-  const containerRef = useRef(null);
-  const [visibleCount, setVisibleCount] = useState(values.length);
-
-  useLayoutEffect(() => {
-    const root = containerRef.current?.closest('.MuiAutocomplete-root');
-    if (!root || typeof ResizeObserver === 'undefined') return undefined;
-
-    const calculateVisibleCount = () => {
-      const inputRoot = root.querySelector('.MuiAutocomplete-inputRoot');
-      const endAdornment = root.querySelector('.MuiAutocomplete-endAdornment');
-      const sampleChip = root.querySelector('[data-tag-measurement]');
-      if (!inputRoot || !endAdornment || !sampleChip) return;
-
-      const canvas = document.createElement('canvas');
-      const context = canvas.getContext('2d');
-      const sampleLabel = sampleChip.querySelector('.MuiChip-label');
-      const labelStyle = window.getComputedStyle(sampleLabel);
-      context.font = `${labelStyle.fontWeight} ${labelStyle.fontSize} ${labelStyle.fontFamily}`;
-      const letterSpacing = Number.parseFloat(labelStyle.letterSpacing) || 0;
-      const measureText = (text) => context.measureText(text).width + Math.max(0, text.length - 1) * letterSpacing;
-      const chipStyle = window.getComputedStyle(sampleChip);
-      const chipMargins = (Number.parseFloat(chipStyle.marginLeft) || 0) + (Number.parseFloat(chipStyle.marginRight) || 0);
-      const chipExtra = sampleChip.getBoundingClientRect().width + chipMargins - measureText(sampleLabel.textContent ?? '');
-      const overflowTag = root.querySelector('[data-overflow-tag]');
-      const overflowExtra = overflowTag
-        ? overflowTag.getBoundingClientRect().width - measureText(overflowTag.textContent ?? '')
-        : 8;
-      const inputBounds = inputRoot.getBoundingClientRect();
-      const endBounds = endAdornment.getBoundingClientRect();
-      const availableWidth = Math.max(0, endBounds.left - inputBounds.left - TAG_EDGE_GAP);
-      const tagWidths = values.map((value) => measureText(value) + chipExtra);
-      const allWidth = tagWidths.reduce((total, width) => total + width, 0);
-
-      let nextCount = values.length;
-      if (allWidth > availableWidth) {
-        nextCount = 0;
-        let visibleWidth = 0;
-        for (let count = 1; count < values.length; count += 1) {
-          visibleWidth += tagWidths[count - 1];
-          const hiddenCount = values.length - count;
-          const totalWidth = visibleWidth + measureText(`+${hiddenCount}`) + overflowExtra;
-          if (totalWidth <= availableWidth) nextCount = count;
-        }
-      }
-      setVisibleCount((current) => current === nextCount ? current : nextCount);
-    };
-
-    calculateVisibleCount();
-    const observer = new ResizeObserver(calculateVisibleCount);
-    observer.observe(root);
-    return () => observer.disconnect();
-  }, [values]);
-
-  const hiddenCount = values.length - visibleCount;
+function FilterGroup({ label, options, value, onChange, disabled, kind }) {
   return (
-    <Box component="span" ref={containerRef} sx={{ display: 'contents' }}>
-      {values.length > 0 && (
-        <Chip
-          label={values[0]}
-          size="small"
-          className="MuiAutocomplete-tag"
-          onDelete={() => {}}
-          data-tag-measurement="true"
-          aria-hidden="true"
-          sx={{ position: 'absolute', visibility: 'hidden', pointerEvents: 'none', height: 23 }}
-        />
-      )}
-      {values.slice(0, visibleCount).map((option, index) => (
-        <Chip
-          label={option}
-          size="small"
-          {...getItemProps({ index })}
-          data-responsive-tag="true"
-          key={option}
-          sx={{ height: 23, flexShrink: 0 }}
-        />
-      ))}
-      {hiddenCount > 0 && (
-        <Box
-          component="span"
-          data-overflow-tag="true"
-          title={values.slice(visibleCount).join(', ')}
-          aria-label={`${hiddenCount} more selected`}
-          sx={{ px: 0.5, flexShrink: 0, color: 'text.secondary', fontSize: 12, fontWeight: 750 }}
-        >
-          +{hiddenCount}
-        </Box>
-      )}
-    </Box>
-  );
-}
-
-function MultiSelect({ label, options, value, onChange, disabled = false }) {
-  const allSelected = options.length > 0 && value.length === options.length;
-  const someSelected = value.length > 0 && !allSelected;
-  const groupName = label.toLowerCase();
-
-  return (
-    <Box data-testid={`${groupName}-filter`} sx={{ minWidth: 0 }}>
-      <Autocomplete
-        multiple
-        disabled={disabled}
-        disableCloseOnSelect
-        options={[CHECK_ALL, ...options]}
-        value={value}
-        getOptionLabel={(option) => option === CHECK_ALL ? `Check all ${groupName}` : option}
-        filterOptions={(availableOptions, { inputValue }) => availableOptions.filter((option) => (
-          option === CHECK_ALL || option.toLowerCase().includes(inputValue.trim().toLowerCase())
+    <Box role="group" aria-label={label} data-testid={`${label.toLowerCase().replaceAll(' ', '-')}-filter`} sx={{ borderTop: 1, borderColor: 'dashboard.border', m: 0, pt: 'var(--sidebar-group-top, 12px)', pb: 'var(--sidebar-group-bottom, 8px)', minWidth: 0 }}>
+      <Typography variant="overline" sx={{ display: 'block', mb: '6px', height: '16px', ...textStyles.captionCompactEmphasized, color: 'text.secondary' }}>{label}</Typography>
+      <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: '7px', rowGap: 'var(--sidebar-chip-row-gap, 7px)', pt: '2px' }}>
+        {options.map((option) => (
+          <FormControlLabel key={option} disabled={disabled} sx={{
+            m: 0, position: 'relative', display: 'inline-flex', boxSizing: 'border-box', height: '30px', padding: '5px 12px 5px 10px', borderRadius: '999px', border: '1px solid',
+            borderColor: value.includes(option) ? 'dashboard.selectionBorder' : 'dashboard.controlBorder',
+            borderStyle: value.includes(option) ? 'solid' : 'dashed',
+            bgcolor: value.includes(option) ? 'action.selected' : 'transparent', color: disabled ? 'text.disabled' : value.includes(option) ? 'dashboard.sidebarAccentText' : 'text.muted',
+            boxShadow: value.includes(option) ? (theme) => `inset 0 0 0 1px ${theme.palette.dashboard.selectionBorder}` : 'none',
+            '&:has(input:focus-visible)': { outline: '2px solid', outlineColor: 'primary.main', outlineOffset: 2 },
+            '& .MuiFormControlLabel-label.Mui-disabled': { color: 'text.disabled' },
+          }}
+            control={<Checkbox size="small" disabled={disabled} checked={value.includes(option)}
+              onChange={() => onChange(value.includes(option) ? value.filter((item) => item !== option) : [...value, option])}
+              sx={{ position: 'absolute', inset: 0, width: '100%', height: '100%', p: 0, opacity: 0 }} />}
+            label={<Box component="span" sx={{ display: 'flex', alignItems: 'center', gap: '7px', fontSize: fontSizes.body, lineHeight: '18px', fontWeight: fontWeights.emphasized, whiteSpace: 'nowrap' }}><CategoryMarker label={option} kind={kind} size={9} muted={!value.includes(option)} />{option}</Box>} />
         ))}
-        onChange={(_, nextValue, reason, details) => {
-          if (details?.option === CHECK_ALL) {
-            onChange(allSelected ? [] : options);
-            return;
-          }
-          onChange(reason === 'clear' ? [] : nextValue.filter((option) => option !== CHECK_ALL));
-        }}
-        renderOption={(props, option, { selected }) => {
-          const { key, ...optionProps } = props;
-          const isCheckAll = option === CHECK_ALL;
-          return (
-            <Box component="li" key={key} {...optionProps} sx={{ py: 0.65, borderBottom: isCheckAll ? 1 : 0, borderColor: 'divider' }}>
-              <Checkbox
-                size="small"
-                checked={isCheckAll ? allSelected : selected}
-                indeterminate={isCheckAll && someSelected}
-                tabIndex={-1}
-                disableRipple
-                sx={{ mr: 1, p: 0.35 }}
-              />
-              <ListItemText
-                primary={isCheckAll ? `Check all ${groupName}` : option}
-                secondary={isCheckAll ? `${value.length} of ${options.length} selected` : null}
-                slotProps={{ primary: { variant: 'body2', fontWeight: isCheckAll ? 700 : 500 }, secondary: { variant: 'caption' } }}
-              />
-            </Box>
-          );
-        }}
-        renderValue={(tagValue, getItemProps) => (
-          <ResponsiveTags values={tagValue} getItemProps={getItemProps} />
-        )}
-        renderInput={(params) => <TextField {...params} label={label} size="small" />}
-        sx={{
-          minWidth: 0,
-          '& .MuiAutocomplete-inputRoot': { flexWrap: 'nowrap', overflow: 'hidden' },
-          '& .MuiAutocomplete-input': { minWidth: '4px !important' },
-        }}
-      />
+      </Box>
+      {!options.length && <Typography variant="caption" color="text.secondary">No available {label.toLowerCase()}</Typography>}
+      {kind === 'mode' && options.length > 0 && <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: '4px', pt: '8px', px: '2px', ...textStyles.caption }}>single · single-threaded<br />default · automatic policy</Typography>}
     </Box>
   );
 }
 
 export default function FiltersBar({ data, state, disabled = false }) {
+  const groups = [
+    { options: data.targets ?? [], value: state.targets ?? [], onChange: state.setTargets },
+    { options: data.suites ?? [], value: state.suites ?? [], onChange: state.setSuites },
+    { options: data.modes ?? [], value: state.modes ?? [], onChange: state.setModes },
+  ];
+  const totalCount = groups.reduce((total, { options }) => total + options.length, 0);
+  const selectedCount = groups.reduce((total, { options, value }) => total + options.filter((option) => value.includes(option)).length, 0);
+  const allSelected = totalCount > 0 && selectedCount === totalCount;
   return (
-    <Paper variant="outlined" sx={{ p: { xs: 1.5, md: 2 }, borderRadius: 3, boxShadow: 1 }}>
-      <Stack direction="row" sx={{ alignItems: 'center', gap: 1, mb: 1.5 }}>
-        <TuneRoundedIcon color="primary" sx={{ fontSize: 18 }} />
-        <Typography variant="overline" sx={{ color: 'text.secondary' }}>Global filters</Typography>
-      </Stack>
-      <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, minmax(0, 1fr))' }, gap: 1.25 }}>
-        <MultiSelect label="Targets" options={data.targets} value={state.targets} onChange={state.setTargets} disabled={disabled} />
-        <MultiSelect label="Suites" options={data.suites} value={state.suites} onChange={state.setSuites} disabled={disabled} />
+    <Box sx={{ borderTop: 1, borderColor: 'dashboard.border', pt: '14px', ml: '6px' }}>
+      <Typography variant="overline" sx={{ display: 'block', ...textStyles.captionCompactEmphasized, color: 'text.secondary', pb: '10px', mb: '2px' }}>Filters</Typography>
+      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '6px', height: '28px', padding: '2px 0 10px', ...textStyles.captionCompact, color: 'text.secondary' }}>
+        <span>{selectedCount} of {totalCount} selected</span>
+        <ButtonBase disabled={disabled || !totalCount}
+          onClick={() => groups.forEach(({ options, onChange }) => onChange(allSelected ? [] : [...options]))}
+          sx={{ ml: 'auto', ...textStyles.captionCompactEmphasized, whiteSpace: 'nowrap', color: 'dashboard.sidebarAccentText', '&.Mui-disabled': { color: 'text.muted' } }}>
+          {allSelected ? 'Deselect all' : 'Select all'}
+        </ButtonBase>
       </Box>
-    </Paper>
+
+      <Box sx={{ display: { xs: 'block', sm: 'grid', md: 'block' }, gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', columnGap: '14px' }}>
+        <FilterGroup label="Targets" kind="target" options={data.targets ?? []} value={state.targets ?? []} onChange={state.setTargets} disabled={disabled} />
+        <FilterGroup label="Suites" kind="suite" options={data.suites ?? []} value={state.suites ?? []} onChange={state.setSuites} disabled={disabled} />
+        <FilterGroup label="Thread policy" kind="mode" options={data.modes ?? []} value={state.modes ?? []} onChange={state.setModes} disabled={disabled} />
+      </Box>
+    </Box>
   );
 }

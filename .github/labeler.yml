@@ -127,11 +127,6 @@ documentation:
     - '**/docs/**/*'
     - '*.md'
 
-External CI:
-- changed-files:
-  - any-glob-to-any-file:
-    - .azuredevops/**/*
-
 github actions:
 - changed-files:
   - any-glob-to-any-file:

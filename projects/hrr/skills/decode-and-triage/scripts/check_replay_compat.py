@@ -18,6 +18,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from archive_text import sanitize
+
 _IS_WIN = sys.platform == "win32"
 
 # ---------------------------------------------------------------------------
@@ -413,10 +415,9 @@ def probe_host_replay_env_linux() -> ReplayEnvironment:
         env.gpu_archs = archs
         env.gpu_names = names
 
-    hip_config = shutil.which("hipconfig")
-    if hip_config:
-        proc = _run([hip_config, "--version"], timeout=15)
-        env.hip_runtime_version = _parse_hip_version(proc.stdout + proc.stderr)
+    rocm_path = os.environ.get("HIP_PATH") or os.environ.get("ROCM_PATH", "/opt/rocm")
+    clr_lib_dir = Path(rocm_path) / "lib"
+    env.hip_runtime_version = hip_version_from_clr_lib(clr_lib_dir)
 
     env.comgr_version = probe_comgr_version()
     return env
@@ -438,7 +439,7 @@ def probe_host_replay_env_windows() -> ReplayEnvironment:
         env.gpu_archs = archs
         env.gpu_names = names
 
-    # HIP version via amd-smi > hipconfig.bat > amdhip64.dll
+    # HIP version via amd-smi > .info/version > amdhip64.dll
     amd_smi = _find_hip_exe("amd-smi")
     if amd_smi:
         proc2 = _run([amd_smi, "--version"], timeout=15)
@@ -447,10 +448,14 @@ def probe_host_replay_env_windows() -> ReplayEnvironment:
             env.hip_runtime_version = v
 
     if not env.hip_runtime_version:
-        hip_config = _find_hip_exe("hipconfig")
-        if hip_config:
-            proc3 = _run([hip_config, "--version"], timeout=15)
-            env.hip_runtime_version = _parse_hip_version(proc3.stdout + proc3.stderr)
+        hip_root = os.environ.get("HIP_PATH") or os.environ.get("ROCM_PATH", "")
+        if hip_root:
+            version_file = os.path.join(hip_root, ".info", "version")
+            try:
+                with open(version_file, encoding="utf-8") as _vf:
+                    env.hip_runtime_version = _parse_hip_version(_vf.read())
+            except OSError:
+                pass
 
     if not env.hip_runtime_version:
         proc4 = _run([py, "-c", _PROBE_HIP_VERSION_WIN_PY], timeout=15)
@@ -632,7 +637,7 @@ def probe_docker_replay_env(
     probe_shell = (
         f"export LD_LIBRARY_PATH={ld_inside}${{LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}}; "
         "rocm-smi --showid --showproductname 2>/dev/null || true; "
-        "hipconfig --version 2>/dev/null || true"
+        "awk -F= '/^HIP_VERSION_MAJOR/{M=$2}/^HIP_VERSION_MINOR/{m=$2}/^HIP_VERSION_PATCH/{p=$2}END{if(M)print M\".\"m\".\"p}' ${ROCM_PATH:-/opt/rocm}/share/hip/version 2>/dev/null || true"
     )
     docker_args = [
         "run", "--rm",
@@ -713,8 +718,8 @@ def evaluate_compat(
         expected = capture_archs[min(gpu, len(capture_archs) - 1)]
         if expected and replay_arch and expected != replay_arch:
             msg = (
-                f"GPU architecture mismatch: capture GPU {gpu} is {expected}, "
-                f"replay GPU {gpu} looks like {replay_arch}"
+                f"GPU architecture mismatch: capture GPU {gpu} is {sanitize(expected)}, "
+                f"replay GPU {gpu} looks like {sanitize(replay_arch)}"
             )
             (report.blocks if strict_arch else report.warnings).append(msg)
 
@@ -722,7 +727,8 @@ def evaluate_compat(
         if capture.hip_runtime_version != replay.hip_runtime_version:
             msg = (
                 "HIP runtime version mismatch: capture "
-                f"{capture.hip_runtime_version} vs replay {replay.hip_runtime_version}"
+                f"{sanitize(capture.hip_runtime_version)} vs replay "
+                f"{sanitize(replay.hip_runtime_version)}"
             )
             (report.blocks if strict_version else report.prompts).append(msg)
 
@@ -730,7 +736,8 @@ def evaluate_compat(
         if capture.comgr_version != replay.comgr_version:
             msg = (
                 "comgr version mismatch: capture "
-                f"{capture.comgr_version} vs replay {replay.comgr_version}"
+                f"{sanitize(capture.comgr_version)} vs replay "
+                f"{sanitize(replay.comgr_version)}"
             )
             (report.blocks if strict_version else report.prompts).append(msg)
 
@@ -743,6 +750,9 @@ def evaluate_compat(
 # ---------------------------------------------------------------------------
 
 def render_report(report: CompatReport) -> str:
+    # The capture side is whatever the archive's author wrote, so every value
+    # printed passes the one sanitizer; the replay side is probed from the host
+    # or an image and gets the same treatment rather than a judgement call.
     lines = ["# HRR replay compatibility"]
     if report.capture:
         c = report.capture
@@ -751,27 +761,27 @@ def render_report(report: CompatReport) -> str:
             "",
             "## Capture metadata",
             f"- schema_version: {c.schema_version or 'n/a'}",
-            f"- hip_runtime_version: {c.hip_runtime_version or 'n/a'}",
-            f"- comgr_version: {c.comgr_version or 'n/a'}",
+            f"- hip_runtime_version: {sanitize(c.hip_runtime_version or 'n/a')}",
+            f"- comgr_version: {sanitize(c.comgr_version or 'n/a')}",
             f"- device_count: {c.device_count if c.device_count is not None else 'n/a'}",
             f"- captured_device_count: "
             f"{c.captured_device_count if c.captured_device_count is not None else 'n/a'}",
-            f"- gcn_arch_name: {arch_names[0] if arch_names else 'n/a'}",
+            f"- gcn_arch_name: {sanitize(arch_names[0]) if arch_names else 'n/a'}",
         ]
         if len(arch_names) > 1:
-            lines.append(f"- gcn_arch_names: {', '.join(arch_names)}")
+            lines.append(f"- gcn_arch_names: {', '.join(sanitize(a) for a in arch_names)}")
     if report.replay:
         r = report.replay
         lines += [
             "",
             "## Replay environment",
-            f"- source: {r.source}",
+            f"- source: {sanitize(r.source)}",
             f"- visible_gpus: {r.visible_gpus if r.visible_gpus is not None else 'unknown'}",
-            f"- hip_runtime_version: {r.hip_runtime_version or 'n/a'}",
-            f"- comgr_version: {r.comgr_version or 'n/a'}",
+            f"- hip_runtime_version: {sanitize(r.hip_runtime_version or 'n/a')}",
+            f"- comgr_version: {sanitize(r.comgr_version or 'n/a')}",
         ]
         if r.gpu_archs:
-            lines.append(f"- gpu_archs: {', '.join(a or 'n/a' for a in r.gpu_archs)}")
+            lines.append(f"- gpu_archs: {', '.join(sanitize(a or 'n/a') for a in r.gpu_archs)}")
     if report.blocks:
         lines += ["", "## Blocking issues"]
         lines += [f"- {b}" for b in report.blocks]

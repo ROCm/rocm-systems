@@ -686,13 +686,18 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitLinearCopyBodyWaitSignal(
   uint64_t* end_ts_addr = nullptr;
   uint32_t total_timestamp_command_size = 0;
 
+  // Profiling: complete out_signal after the end timestamp, not via inline SIGNAL.
+  uint32_t deferred_completion_size = 0;
+
   if (profiling_enabled) {
     out_signal.GetSdmaTsAddresses(start_ts_addr, end_ts_addr);
     total_timestamp_command_size = 2 * timestamp_command_size_;
+    deferred_completion_size = atomic_command_size_;
   }
 
   const uint32_t wait_dws = dep_signals.empty() ? 0 : 7;
-  const uint32_t per_pkt_dws = 1 + wait_dws + 6 + 5;
+  const uint32_t signal_dws = profiling_enabled ? 0 : 5;
+  const uint32_t per_pkt_dws = 1 + wait_dws + 6 + signal_dws;
   const uint32_t total_copy_dws = num_copy_command * per_pkt_dws;
 
   const uint32_t extra_polls = (dep_signals.size() > 1)
@@ -714,7 +719,7 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitLinearCopyBodyWaitSignal(
 
   const uint32_t total_command_size =
       prologue_bytes + extra_poll_bytes + total_timestamp_command_size +
-      copy_bytes + epilogue_bytes;
+      copy_bytes + deferred_completion_size + epilogue_bytes;
 
   const uint32_t pad_size = total_command_size < min_submission_size_
       ? min_submission_size_ - total_command_size
@@ -734,7 +739,7 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitLinearCopyBodyWaitSignal(
   }
   uint32_t wrapped_index = WrapIntoRing(curr_index);
 
-  if (num_copy_command > 1)
+  if (!profiling_enabled && num_copy_command > 1)
     out_signal.AddRelaxed(num_copy_command - 1);
 
   if (emit_prologue) {
@@ -761,7 +766,7 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitLinearCopyBodyWaitSignal(
   const core::Signal* wait_sig = dep_signals.empty() ? nullptr : dep_signals[0];
   BuildWaitSignalCopyCommand(command_addr, num_copy_command,
                              dst, src, size,
-                             wait_sig, &out_signal, false);
+                             wait_sig, profiling_enabled ? nullptr : &out_signal, false);
   bytes_written_.fill(wrapped_index, wrapped_index + copy_bytes, prior_bytes);
   bytes_written_[wrapped_index + copy_bytes - sizeof(uint32_t)] = post_bytes;
   command_addr += copy_bytes;
@@ -772,6 +777,11 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitLinearCopyBodyWaitSignal(
     command_addr += timestamp_command_size_;
     bytes_written_[wrapped_index] = post_bytes;
     wrapped_index += timestamp_command_size_;
+
+    BuildAtomicDecrementCommand(command_addr, out_signal.ValueLocation());
+    command_addr += atomic_command_size_;
+    bytes_written_[wrapped_index] = post_bytes;
+    wrapped_index += atomic_command_size_;
   }
 
   if (emit_epilogue) {
@@ -1271,7 +1281,7 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitFusedCoordinator(
     } else if (is_swap) {
       BuildWaitSignalSwapCommand(command_addr, chunks[i],
           dsts[i], const_cast<void*>(srcs[i]),
-          sizes_a[i], sizes_b[i],
+          sizes_b[i], sizes_a[i],  // addr_a is dst: pair it with the dst size
           wait_signal, signal_signal);
     } else {
       BuildWaitSignalCopyCommand(command_addr, chunks[i],
@@ -1357,13 +1367,19 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitBodies(
     bool indirect_src, bool indirect_dst,
     const std::vector<core::Signal*>& dep_signals,
     core::Signal& out_signal,
-    core::Signal* body_signal) {
+    core::Signal* body_signal,
+    const size_t* dst_size_list) {
 
   const size_t num_entries = indices.size();
   if (num_entries == 0) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 
   const bool is_swap = (op == HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP);
   const bool is_indirect = (indirect_src || indirect_dst);
+
+  // Dst-side swap size; defaults to the src side.
+  auto b_size = [&](uint32_t d) -> size_t {
+    return (is_swap && dst_size_list != nullptr) ? dst_size_list[d] : size_list[d];
+  };
 
   if (is_indirect && !indirect_copy_supported_)
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
@@ -1385,7 +1401,9 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitBodies(
     uint32_t total_chunks = 0;
     uint64_t total_bytes = 0;
     for (size_t i = 0; i < num_entries; ++i) {
-      const size_t entry_size = size_list[indices[i]];
+      const uint32_t d = indices[i];
+      // Asymmetric swap: chunk by the larger side.
+      const size_t entry_size = is_swap ? std::max(size_list[d], b_size(d)) : size_list[d];
       if (is_indirect && entry_size > max_copy_size)
         return HSA_STATUS_ERROR_INVALID_ARGUMENT;
       chunks[i] = is_indirect ? 1
@@ -1446,7 +1464,7 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitBodies(
       } else if (is_swap) {
         BuildWaitSignalSwapCommand(command_addr, chunks[i],
             dst_list[d], const_cast<void*>(src_list[d]),
-            size_list[d], size_list[d],
+            b_size(d), size_list[d],  // addr_a is dst: pair it with the dst size
             wait_signal, signal_signal);
       } else {
         BuildWaitSignalCopyCommand(command_addr, chunks[i],
@@ -1539,6 +1557,8 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitBodies(
       const uint32_t entry_copy_bytes = chunks[i] * per_pkt_dws * sizeof(uint32_t);
 
       if (is_swap) {
+        // Single-count packet; DmaCopyFanOutOp rejects asymmetric swaps.
+        assert(b_size(d) == size_list[d] && "asymmetric swap reached classic swap builder");
         BuildSwapCopyCommand(command_addr, chunks[i],
                              dst_list[d], const_cast<void*>(src_list[d]), size_list[d]);
       } else {
@@ -2932,6 +2952,9 @@ void BlitSdma<useGCR, scopeFields>::BuildWaitSignalSwapCommand(
     void* addr_a, void* addr_b, size_t size_a, size_t size_b,
     const core::Signal* wait_signal,
     core::Signal* signal_signal) {
+
+  // Single-count packet; DmaCopyFanOutOp rejects asymmetric swaps.
+  assert(size_a == size_b && "asymmetric swap reached single-count swap builder");
 
   size_t cur_a = 0, cur_b = 0;
   const size_t max_copy_size = SDMA_PKT_COPY_LINEAR_SWAP_WAITSIGNAL_GFX1250::kMaxSize_;

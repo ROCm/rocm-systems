@@ -7,6 +7,7 @@
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/operand.h"
 
+#include <cassert>
 #include <cstdint>
 #include <optional>
 #include <vector>
@@ -80,8 +81,10 @@ void expand_operand_register(RegisterSet &set, const Instruction &inst, const Op
 
 } // namespace
 
-InstDefUse::InstDefUse(const Instruction &inst, const Gfx1250VgprMsbAnalysis *vgpr_msb,
+InstDefUse::InstDefUse(const Instruction &inst, uint8_t wave_size,
+                       const Gfx1250VgprMsbAnalysis *vgpr_msb,
                        UnknownVgprDefPolicy unknown_vgpr_defs) {
+  assert(wave_size == 32 || wave_size == 64);
   has_predicated_def = inst.flags() & PREDICATED_DEF;
   const bool ignores_exec = inst.flags() & IGNORES_EXEC;
   bool has_vector_def = false;
@@ -91,8 +94,14 @@ InstDefUse::InstDefUse(const Instruction &inst, const Gfx1250VgprMsbAnalysis *vg
     if (op == nullptr)
       continue;
     if (auto ref = ordinary_register_ref(*op)) {
+      // A def of a Wave32 wave mask's decoded pair would kill an SGPR the
+      // instruction does not write.
+      ref = inst.wave_sized_destination(*op, *ref, wave_size);
       expand_operand_register(defs, inst, *op, *ref, vgpr_msb, OperandExpansionKind::Def,
                               unknown_vgpr_defs);
+      if ((inst.flags() & CONDITIONAL_LAST_VGPR_DEF) && ref->cls == RegClass::VGPR && ref->width)
+        conditional_vgpr_def =
+            RegisterRef{RegClass::VGPR, static_cast<uint16_t>(ref->index + ref->width - 1), 1};
       has_vector_def |= is_vector_def(*ref);
     } else if (auto sc = op->to_special_reg_class()) {
       defs.expand(RegisterRef{*sc, 0, 1}); // singleton special def
@@ -111,14 +120,18 @@ InstDefUse::InstDefUse(const Instruction &inst, const Gfx1250VgprMsbAnalysis *vg
   defs |= implicit_defs_set.ordinary_only();
 
   for (int i = 0; i < inst.num_src_operands(); ++i) {
+    if (!inst.tracks_explicit_source(i))
+      continue;
     const auto *op = inst.src_operand(i);
     if (op == nullptr)
       continue;
-    if (auto ref = ordinary_register_ref(*op))
+    if (auto ref = ordinary_register_ref(*op)) {
+      ref = wave_sized_register(*op, *ref, wave_size);
       expand_operand_register(uses, inst, *op, *ref, vgpr_msb, OperandExpansionKind::Use,
                               unknown_vgpr_defs);
-    else if (auto sc = op->to_special_reg_class())
+    } else if (auto sc = op->to_special_reg_class()) {
       uses.expand(RegisterRef{*sc, 0, 1}); // singleton special use
+    }
   }
 
   if (vgpr_msb == nullptr) {

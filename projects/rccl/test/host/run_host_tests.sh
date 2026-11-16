@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 #
 # Build and run the RCCL CPU-only host unit tests: rccl-HostUnitTests plus the
-# host-only microtests. The authoritative list is the `binaries` array in the
-# run phase below -- it is not duplicated here, so the two cannot drift.
+# host-only microtests. The authoritative list is host_test_binaries.txt in the
+# build directory, which test/host/CMakeLists.txt writes from its
+# rccl_add_micro_binary() calls -- it is not duplicated here, so the two cannot drift.
 #
 # Single source of truth for every command the host-test pipeline needs, so the
 # same steps run locally and in CI and nothing is scattered in the workflow YAML.
@@ -23,13 +24,16 @@
 #   configure       configure test/host
 #   build           build all host binaries (default target)
 #   guards          device-table unittest, the kernel-count and accl-reporter
-#                   pytest suites, plus src/include/test_poison_hip_atomics.py,
+#                   pytest suites, the tools/scripts/test_runner unittests
+#                   (which include the rccl-device-compile driver cases),
+#                   src/include/test_poison_hip_atomics.py,
 #                   test/test_makefile_depflags.py, and the
 #                   tools/RcclReplayer host checks (make test)
 #   run             run the suite (timestamped log + JUnit XML). Always emits
 #                   llvm source-based coverage profiles (*.profraw) into
 #                   <BUILD_DIR>/coverage (requires the host tests to be built
-#                   with -DHOST_TEST_COVERAGE=ON, the default). Also runs the
+#                   with -DENABLE_CODE_COVERAGE=ON, which the `configure` phase
+#                   passes explicitly; it is OFF by default). Also runs the
 #                   checks in the `guards` phase above.
 #   coverage        turn the per-binary *.profraw profiles from `run` into
 #                   reports: a per-binary text/HTML report + lcov tracefile
@@ -109,7 +113,8 @@ do_hipify() {
 do_configure() {
   echo "==> Configure host tests  (BUILD_TYPE=$BUILD_TYPE  ROCM_PATH=$ROCM_PATH)"
   cmake -S "$SCRIPT_DIR" -B "$BUILD_DIR" \
-    -DCMAKE_BUILD_TYPE="$BUILD_TYPE" -DROCM_PATH="$ROCM_PATH"
+    -DCMAKE_BUILD_TYPE="$BUILD_TYPE" -DROCM_PATH="$ROCM_PATH" \
+    -DENABLE_CODE_COVERAGE=ON
 }
 
 do_build() {
@@ -145,71 +150,31 @@ do_host_tests() {
     stamp=(cat)
   fi
 
-  # Every host binary the build produces. Each writes its own JUnit XML
-  # (host_tests*.xml, all uploaded) and appends to the single console LOG_FILE.
-  # rccl-HostUnitTests keeps host_tests.xml for backward compatibility.
-  local -a binaries=(
-    "rccl-HostUnitTests:$XML_FILE"
-    "rccl-UnitTestsMicroBootstrap:$SCRIPT_DIR/host_tests_micro_bootstrap.xml"
-    "rccl-UnitTestsMicro:$SCRIPT_DIR/host_tests_micro.xml"
-    "rccl-UnitTestsMicroCollectives:$SCRIPT_DIR/host_tests_micro_collectives.xml"
-    "rccl-UnitTestsMicroOnerank:$SCRIPT_DIR/host_tests_micro_onerank.xml"
-    "rccl-UnitTestsMicroMgmtTaskEnq:$SCRIPT_DIR/host_tests_micro_mgmt_task_enq.xml"
-    "rccl-UnitTestsMicroWarpSpeed:$SCRIPT_DIR/host_tests_micro_warpspeed.xml"
-    "rccl-UnitTestsMicroCrypt:$SCRIPT_DIR/host_tests_micro_crypt.xml"
-    "rccl-UnitTestsMicroStrongstream:$SCRIPT_DIR/host_tests_micro_strongstream.xml"
-    "rccl-UnitTestsMicroUtils:$SCRIPT_DIR/host_tests_micro_utils.xml"
-    "rccl-UnitTestsMicroArgcheck:$SCRIPT_DIR/host_tests_micro_argcheck.xml"
-    "rccl-UnitTestsMicroCpuset:$SCRIPT_DIR/host_tests_micro_cpuset.xml"
-    "rccl-UnitTestsMicroInit:$SCRIPT_DIR/host_tests_micro_init.xml"
-    "rccl-UnitTestsMicroInit-uncached:$SCRIPT_DIR/host_tests_micro_init_uncached.xml"
-    "rccl-UnitTestsMicroDdaColl:$SCRIPT_DIR/host_tests_micro_dda_coll.xml"
-    # FAULT_INJECTION defaults ON, so this variant is the arm that ships; init.cc
-    # gates its fault-mask blocks on ENABLE_FAULT_INJECTION at the preprocessor,
-    # so one compile cannot cover both. See test/host/CMakeLists.txt.
-    "rccl-UnitTestsMicroInit-faultinj:$SCRIPT_DIR/host_tests_micro_init_faultinj.xml"
-    "rccl-UnitTestsMicroCollTrace:$SCRIPT_DIR/host_tests_micro_coll_trace.xml"
-    "rccl-UnitTestsMicroRecorder:$SCRIPT_DIR/host_tests_micro_recorder.xml"
-    "rccl-UnitTestsMicroApiTrace:$SCRIPT_DIR/host_tests_micro_api_trace.xml"
-    "rccl-UnitTestsMicroDebug:$SCRIPT_DIR/host_tests_micro_debug.xml"
-    "rccl-UnitTestsMicroEnqueue:$SCRIPT_DIR/host_tests_micro_enqueue.xml"
-    "rccl-UnitTestsMicroGinHostProxy:$SCRIPT_DIR/host_tests_micro_gin_host_proxy.xml"
-    # ENABLE_DEVICE_LINKER defaults ON, so this variant is the arm that ships;
-    # enqueue.cc gates rcclShmemDynamicSize on RCCL_DEVICE_LINKER at the
-    # preprocessor, so one compile cannot cover both. See test/host/CMakeLists.txt.
-    "rccl-UnitTestsMicroEnqueue-devlinker:$SCRIPT_DIR/host_tests_micro_enqueue_devlinker.xml"
-    "rccl-UnitTestsMicroSymKernels:$SCRIPT_DIR/host_tests_micro_symkernels.xml"
-    "rccl-UnitTestsMicroTaskPrep:$SCRIPT_DIR/host_tests_micro_taskprep.xml"
-    "rccl-UnitTestsMicroNcclDevice:$SCRIPT_DIR/host_tests_micro_nccl_device.xml"
-    "rccl-UnitTestsMicroCore:$SCRIPT_DIR/host_tests_micro_core.xml"
-    "rccl-UnitTestsMicroCftDevRuntime:$SCRIPT_DIR/host_tests_micro_cft_dev_runtime.xml"
-    "rccl-UnitTestsMicroConnect:$SCRIPT_DIR/host_tests_micro_connect.xml"
-    "rccl-UnitTestsMicroParam:$SCRIPT_DIR/host_tests_micro_param.xml"
-    "rccl-UnitTestsMicroCe:$SCRIPT_DIR/host_tests_micro_ce.xml"
-    "rccl-UnitTestsMicroPlugin:$SCRIPT_DIR/host_tests_micro_plugin.xml"
-    "rccl-UnitTestsMicroClientSupport:$SCRIPT_DIR/host_tests_micro_client_support.xml"
-    "rccl-UnitTestsMicroProfiler:$SCRIPT_DIR/host_tests_micro_profiler.xml"
-    "rccl-UnitTestsMicroGinHost:$SCRIPT_DIR/host_tests_micro_gin_host.xml"
-    "rccl-UnitTestsMicroGinHostFinalize:$SCRIPT_DIR/host_tests_micro_gin_host_finalize.xml"
-    "rccl-UnitTestsMicroProxy:$SCRIPT_DIR/host_tests_micro_proxy.xml"
-    "rccl-UnitTestsMicroDdaIpc:$SCRIPT_DIR/host_tests_micro_dda_ipc.xml"
-    "rccl-UnitTestsMicroRoctxNvml:$SCRIPT_DIR/host_tests_micro_roctx_nvml.xml"
-    # Standalone-only: roctx.cc's ROCTX_ENABLE arm.
-    "rccl-UnitTestsMicroRoctxNvml-roctx:$SCRIPT_DIR/host_tests_micro_roctx_nvml_roctx.xml"
-    "rccl-UnitTestsMicroRocmwrap:$SCRIPT_DIR/host_tests_micro_rocmwrap.xml"
-    "rccl-UnitTestsMicroAmdsmiWrap:$SCRIPT_DIR/host_tests_micro_amdsmi_wrap.xml"
-    "rccl-UnitTestsMicroRomeModels:$SCRIPT_DIR/host_tests_micro_rome_models.xml"
-    "rccl-UnitTestsMicroTopo:$SCRIPT_DIR/host_tests_micro_topo.xml"
-    "rccl-UnitTestsMicroDiagnostics:$SCRIPT_DIR/host_tests_micro_diagnostics.xml"
-    "rccl-UnitTestsMicroGraph:$SCRIPT_DIR/host_tests_micro_graph.xml"
-    "rccl-UnitTestsMicroRmaProxy:$SCRIPT_DIR/host_tests_micro_rma_proxy.xml"
-    "rccl-UnitTestsMicroDda:$SCRIPT_DIR/host_tests_micro_dda.xml"
-    "rccl-UnitTestsMicroNetIbCastInit:$SCRIPT_DIR/host_tests_micro_net_ib_cast_init.xml"
-    "rccl-UnitTestsMicroNetIbCastDataPath:$SCRIPT_DIR/host_tests_micro_net_ib_cast_data_path.xml"
-  )
-  # Binaries that only exist for some CMake option settings (rccl-UnitTestsMicroSymKernels needs
-  # GENERATE_SYM_KERNELS, off via install.sh --disable-sym-kernels); missing is a skip, not an error.
-  local -a optional_binaries=("rccl-UnitTestsMicroSymKernels")
+  # Every host binary the build configured, as test/host/CMakeLists.txt writes them to
+  # host_test_binaries.txt. Each writes its own JUnit XML (host_tests*.xml) and appends to the
+  # single console LOG_FILE. rccl-HostUnitTests keeps host_tests.xml for backward compatibility.
+  local manifest="$BUILD_DIR/host_test_binaries.txt"
+  if [ ! -f "$manifest" ]; then
+    echo "ERROR: $manifest not found -- run the configure phase first" >&2
+    return 1
+  fi
+  local -a binaries=()
+  local bin xml_stem
+  while IFS= read -r bin; do
+    [ -n "$bin" ] || continue
+    if [ "$bin" = rccl-HostUnitTests ]; then
+      binaries+=("$bin:$XML_FILE")
+      continue
+    fi
+    # rccl-UnitTestsMicroDdaColl -> host_tests_micro_dda_coll.xml
+    xml_stem="$(printf '%s' "${bin#rccl-UnitTests}" | sed 's/\([a-z0-9]\)\([A-Z]\)/\1_\2/g; s/-/_/g' \
+      | tr '[:upper:]' '[:lower:]')"
+    binaries+=("$bin:$SCRIPT_DIR/host_tests_${xml_stem}.xml")
+  done < "$manifest"
+  if [ "${#binaries[@]}" -eq 0 ]; then
+    echo "ERROR: $manifest lists no binaries" >&2
+    return 1
+  fi
 
   : > "$LOG_FILE"   # truncate; each binary appends below
   local rc=0 entry exe name xml profdir
@@ -218,10 +183,6 @@ do_host_tests() {
     xml="${entry#*:}"
     exe="$BUILD_DIR/$name"
     if [ ! -x "$exe" ]; then
-      if printf '%s\n' "${optional_binaries[@]}" | grep -qx "$name"; then
-        echo "SKIP: $name not built (optional)" | tee -a "$LOG_FILE"
-        continue
-      fi
       echo "ERROR: expected binary not built: $exe" | tee -a "$LOG_FILE"
       rc=1
       continue
@@ -303,6 +264,14 @@ do_kernel_count_guards() {
   "$venv/bin/python" -m pytest "$RCCL_ROOT/test/kernel-count/tests" -v
 }
 
+# Run the tuner embed-script guard (test/test_embed_tuner_configs.py).
+do_tuner_embed_guards() {
+  echo "==> Tuner-embed guards (pytest: test/test_embed_tuner_configs.py)"
+  local venv
+  venv=$(guard_venv) || return 1
+  "$venv/bin/python" -m pytest "$RCCL_ROOT/test/test_embed_tuner_configs.py" -v
+}
+
 # Run the accl-profiler reporter suite. It covers accl_report.py's loss banner
 # and its refusal to read pre-rename summaries -- pure host Python, no GPU.
 do_accl_report_guards() {
@@ -317,18 +286,33 @@ do_replayer_guards() {
   echo "==> RcclReplayer host checks (make -C tools/RcclReplayer test)"
   make -C "$RCCL_ROOT/tools/RcclReplayer" test
 }
+
+# Test-runner unit tests: `unittest discover` collects every module under
+# tools/scripts/test_runner/tests, not just the rccl-device-compile driver
+# cases, so this also runs test_device_coverage_cmake.py, which shells out to
+# cmake and self-skips when cmake is absent. Nothing here needs a GPU or a
+# build directory. Run via unittest discover, as its README specifies.
+do_test_runner_guards() {
+  echo "==> Test-runner guards (unittest: tools/scripts/test_runner/tests)"
+  ( cd "$RCCL_ROOT/tools/scripts/test_runner" \
+    && python3 -m unittest discover -s tests -t . -v )
+}
+
 # All CPU-only guards: makefile -MM scan, the device-table unittest, the
-# kernel-count and accl-reporter pytest suites, the __hip_atomic_* poison
-# compile probe, then the RcclReplayer host checks. Collected with `|| rc=1`
-# rather than run back to back so that under `set -e` an early failure still
-# leaves the later guards running and reported, instead of aborting the phase
-# at the first one. Same idiom as do_host_tests above.
+# kernel-count and accl-reporter pytest suites, the tools/scripts/test_runner
+# unittests, the __hip_atomic_* poison compile probe, then the RcclReplayer host
+# checks. Collected with `|| rc=1` rather than run back to back so that under
+# `set -e` an early failure still leaves the later guards running and reported,
+# instead of aborting the phase at the first one. Same idiom as do_host_tests
+# above.
 do_guards() {
   local rc=0
   do_makefile_depflags || rc=1
   do_device_table_guards || rc=1
   do_kernel_count_guards || rc=1
+  do_tuner_embed_guards || rc=1
   do_accl_report_guards || rc=1
+  do_test_runner_guards || rc=1
   do_poison_hip_atomics || rc=1
   do_replayer_guards || rc=1
   return "$rc"
@@ -420,8 +404,9 @@ do_coverage() {
   if [ "${#tracefiles[@]}" -eq 0 ]; then
     echo "error: no .profraw files found under $COVERAGE_DIR --" >&2
     echo "       run the 'run' phase first. If you did, the tests were built" >&2
-    echo "       with -DHOST_TEST_COVERAGE=OFF, which produces no profiles" >&2
-    echo "       (coverage is on by default; drop that flag to re-enable it)" >&2
+    echo "       with -DENABLE_CODE_COVERAGE=OFF, which produces no profiles" >&2
+    echo "       (the default; re-run the 'configure' phase of this script," >&2
+    echo "        which passes -DENABLE_CODE_COVERAGE=ON)" >&2
     exit 1
   fi
 

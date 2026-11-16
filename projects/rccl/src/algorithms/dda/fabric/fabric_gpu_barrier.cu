@@ -26,7 +26,9 @@ FabricGpuBarrier::mallocAndInit(int nRanks, int nBlocks, int selfRank, void* boo
     return {nullptr, FabricGpuBarrier{}};
   }
 
-  const size_t flagBytes = static_cast<size_t>(nRanks) * nBlocks * sizeof(FlagType);
+  // Three regions (see FabricGpuBarrier): the toggle flags, the epoch flags, and one epoch cell per block.
+  const size_t flagBytes =
+    (2 * static_cast<size_t>(nRanks) * nBlocks + static_cast<size_t>(nBlocks)) * sizeof(FlagType);
 
   // This rank's flag buffer, shared with peers (VMM-backed when available).
   auto selfFlagBuf = std::make_unique<DeviceBuffer>(flagBytes, /*useVmm=*/true, manager);

@@ -1,0 +1,313 @@
+{
+  "schema_version": 1,
+  "publication": {
+    "id": "fictional-branch-13",
+    "workflow_commit_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "tensile_commit_sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "source": {
+      "branch": "fictional/optimization-13",
+      "message": "FICTIONAL branch 13",
+      "base": {
+        "branch": "develop",
+        "commit": "0015f1c70015f1c70015f1c70015f1c70015f1c7"
+      },
+      "pull_request": {
+        "number": 1012
+      }
+    },
+    "trigger": "manual",
+    "machine_label": "fictional-branch-node"
+  },
+  "execution_summary": {
+    "benchmark_suite": "fictional-current",
+    "timestamp": "2026-10-05T10:00:00.000Z",
+    "finished_at": "2026-10-05T11:12:00.000Z",
+    "wall_time_s": 1,
+    "samples": 1,
+    "warmups": 0,
+    "timeout_seconds": 1200
+  },
+  "provenance": {
+    "auxiliary": {
+      "sdk": "test-branch",
+      "enabled": true,
+      "cores": 32
+    },
+    "corpus": {
+      "corpus_commit_sha": "0000000000000000000000000000000000000384",
+      "corpus_commit_timestamp": "2025-01-01T00:00:00.000Z"
+    },
+    "machine": {
+      "hostname": "fictional-host",
+      "cpu": "fictional-cpu",
+      "platform": "fictional-platform",
+      "kernel": "fictional-kernel"
+    },
+    "rocjitsu": {
+      "rocjitsu_commit_sha": "0070f1c70070f1c70070f1c70070f1c70070f1c7",
+      "rocjitsu_commit_timestamp": "2026-10-05T09:00:00.000Z",
+      "rocm_sdk_version": "fictional-sdk"
+    }
+  },
+  "benchmark_results": [
+    {
+      "suite": "Triton",
+      "name": "Fictional GEMM",
+      "operation": "GEMM",
+      "problem": {
+        "operation": "GEMM",
+        "m": 1024
+      },
+      "id": "a",
+      "target": "gfx1250",
+      "thread_policy": "single",
+      "exit_code": 0,
+      "status": "completed",
+      "timing_results_s": [
+        15.71
+      ],
+      "error": null
+    },
+    {
+      "suite": "Llama",
+      "name": "Fictional decode",
+      "operation": "Fictional computation",
+      "problem": {
+        "tokens": 128
+      },
+      "id": "b",
+      "target": "gfx1250",
+      "thread_policy": "single",
+      "exit_code": 0,
+      "status": "completed",
+      "timing_results_s": [
+        25.91
+      ],
+      "error": null
+    },
+    {
+      "suite": "Triton",
+      "name": "Fictional added workload D",
+      "operation": "Fictional computation",
+      "problem": {
+        "size": 256
+      },
+      "id": "d",
+      "target": "gfx1250",
+      "thread_policy": "single",
+      "exit_code": 0,
+      "status": "completed",
+      "timing_results_s": [
+        36.11
+      ],
+      "error": null
+    },
+    {
+      "suite": "Llama",
+      "name": "Fictional added workload E",
+      "operation": "Fictional computation",
+      "problem": {
+        "size": 512
+      },
+      "id": "e",
+      "target": "gfx1250",
+      "thread_policy": "single",
+      "exit_code": 0,
+      "status": "completed",
+      "timing_results_s": [
+        46.31
+      ],
+      "error": null
+    },
+    {
+      "suite": "Triton",
+      "name": "Fictional GEMM",
+      "operation": "GEMM",
+      "problem": {
+        "operation": "GEMM",
+        "m": 1024
+      },
+      "id": "a",
+      "target": "gfx1250",
+      "thread_policy": "default",
+      "exit_code": 0,
+      "status": "completed",
+      "timing_results_s": [
+        20.81
+      ],
+      "error": null
+    },
+    {
+      "suite": "Llama",
+      "name": "Fictional decode",
+      "operation": "Fictional computation",
+      "problem": {
+        "tokens": 128
+      },
+      "id": "b",
+      "target": "gfx1250",
+      "thread_policy": "default",
+      "exit_code": 0,
+      "status": "completed",
+      "timing_results_s": [
+        31.01
+      ],
+      "error": null
+    },
+    {
+      "suite": "Triton",
+      "name": "Fictional added workload D",
+      "operation": "Fictional computation",
+      "problem": {
+        "size": 256
+      },
+      "id": "d",
+      "target": "gfx1250",
+      "thread_policy": "default",
+      "exit_code": 0,
+      "status": "completed",
+      "timing_results_s": [
+        41.21
+      ],
+      "error": null
+    },
+    {
+      "suite": "Llama",
+      "name": "Fictional added workload E",
+      "operation": "Fictional computation",
+      "problem": {
+        "size": 512
+      },
+      "id": "e",
+      "target": "gfx1250",
+      "thread_policy": "default",
+      "exit_code": 0,
+      "status": "completed",
+      "timing_results_s": [
+        51.41
+      ],
+      "error": null
+    },
+    {
+      "suite": "Triton",
+      "name": "Fictional GEMM",
+      "operation": "GEMM",
+      "problem": {
+        "operation": "GEMM",
+        "m": 1024
+      },
+      "id": "a",
+      "target": "gfx950",
+      "thread_policy": "single",
+      "exit_code": 0,
+      "status": "completed",
+      "timing_results_s": [
+        25.91
+      ],
+      "error": null
+    },
+    {
+      "suite": "Llama",
+      "name": "Fictional decode",
+      "operation": "Fictional computation",
+      "problem": {
+        "tokens": 128
+      },
+      "id": "b",
+      "target": "gfx950",
+      "thread_policy": "single",
+      "exit_code": 0,
+      "status": "completed",
+      "timing_results_s": [
+        36.11
+      ],
+      "error": null
+    },
+    {
+      "suite": "Triton",
+      "name": "Fictional added workload D",
+      "operation": "Fictional computation",
+      "problem": {
+        "size": 256
+      },
+      "id": "d",
+      "target": "gfx950",
+      "thread_policy": "single",
+      "exit_code": 0,
+      "status": "completed",
+      "timing_results_s": [
+        46.31
+      ],
+      "error": null
+    },
+    {
+      "suite": "Llama",
+      "name": "Fictional added workload E",
+      "operation": "Fictional computation",
+      "problem": {
+        "size": 512
+      },
+      "id": "e",
+      "target": "gfx950",
+      "thread_policy": "single",
+      "exit_code": 0,
+      "status": "completed",
+      "timing_results_s": [
+        56.51
+      ],
+      "error": null
+    },
+    {
+      "suite": "Triton",
+      "name": "Fictional GEMM",
+      "operation": "GEMM",
+      "problem": {
+        "operation": "GEMM",
+        "m": 1024
+      },
+      "id": "a",
+      "target": "gfx950",
+      "thread_policy": "default",
+      "exit_code": 0,
+      "status": "completed",
+      "timing_results_s": [
+        31.01
+      ],
+      "error": null
+    },
+    {
+      "suite": "Llama",
+      "name": "Fictional decode",
+      "operation": "Fictional computation",
+      "problem": {
+        "tokens": 128
+      },
+      "id": "b",
+      "target": "gfx950",
+      "thread_policy": "default",
+      "exit_code": 0,
+      "status": "completed",
+      "timing_results_s": [
+        41.21
+      ],
+      "error": null
+    },
+    {
+      "suite": "Triton",
+      "name": "Fictional added workload D",
+      "operation": "Fictional computation",
+      "problem": {
+        "size": 256
+      },
+      "id": "d",
+      "target": "gfx950",
+      "thread_policy": "default",
+      "exit_code": 0,
+      "status": "completed",
+      "timing_results_s": [
+        51.41
+      ],
+      "error": null
+    }
+  ]
+}

@@ -49,6 +49,13 @@
 # argument bytes for HIP_HRR_DEBUG_ARGS only in a Debug runtime. Contains its
 # own hidden [.][hrr-direct] workload.
 #
+# hrr_kernel_signature_test.cc covers the check replay makes of a kernel launch
+# record's arguments against the signature of the kernel in the code object
+# (AIRUNTIME-3070): an unmodified archive replays, a copy whose launch record has
+# too few arguments is refused with nothing launched, and copies with an extra or
+# a wider argument replay like the original. Contains its own hidden
+# [.][hrr-direct] workload.
+#
 # hrr_pinned_host_test.cc covers pinned host memory a kernel reads directly,
 # which capture snapshots before each launch and replay writes back. Contains
 # its own hidden [.][hrr-direct] workloads.
@@ -93,9 +100,11 @@ set(HRR_GPU_WORKLOAD_SOURCES
   hrr_regions_test.cc
   hrr_api_matrix_workload_test.cc
   hrr_kernel_args_test.cc
+  hrr_kernel_signature_test.cc
   hrr_pinned_host_test.cc
   hrr_va_placement_test.cc
   hrr_disk_space_test.cc
+  hrr_host_alloc_budget_test.cc
 )
 
 if(NOT DEFINED HIP_PLATFORM)
@@ -147,8 +156,14 @@ target_include_directories(hrr-integration-tests PRIVATE
 # hiprtc::hiprtc (hipRTC) is a separate ROCm CMake package from hip::host.
 find_package(hiprtc CONFIG REQUIRED)
 
+# Disable deprecated warnings as it is not relevant
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+  target_compile_options(hrr-integration-tests PRIVATE -Wno-deprecated-declarations)
+endif()
+
 target_link_libraries(hrr-integration-tests PRIVATE
   hrr::reader
+  hrr::warnings
   hip::host
   hiprtc::hiprtc
   Catch2::Catch2WithMain)
@@ -222,7 +237,7 @@ if(NOT WIN32)
     CXX_STANDARD 17
     CXX_STANDARD_REQUIRED ON
     CXX_VISIBILITY_PRESET hidden)
-  target_link_libraries(hrr-test-dispatch-tool PRIVATE ${CMAKE_DL_LIBS})
+  target_link_libraries(hrr-test-dispatch-tool PRIVATE hrr::warnings ${CMAKE_DL_LIBS})
   find_package(Threads REQUIRED)
   target_link_libraries(hrr-integration-tests PRIVATE Threads::Threads ${CMAKE_DL_LIBS})
   target_compile_definitions(hrr-integration-tests PRIVATE

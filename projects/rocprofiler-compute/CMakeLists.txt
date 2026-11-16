@@ -222,19 +222,12 @@ else()
     set(WORKING_DIR_OPTION WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
 endif()
 
+set(COVERAGE_DATA_PATH ".coverage")
 if(TEST_FROM_INSTALL)
-    # When testing from install, write coverage to install directory
-    set(COVERAGE_XML_PATH
-        "${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBEXECDIR}/${PACKAGE_NAME}/coverage.xml"
-    )
-    set(COVERAGE_DATA_PATH
-        "${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBEXECDIR}/${PACKAGE_NAME}/.coverage"
-    )
+    set(COVERAGE_XML_PATH "coverage.xml")
 else()
-    # When testing from build, write coverage XML to build directory
-    # and coverage data to source directory
+    # ctest_coverage reads coverage.xml from the build directory.
     set(COVERAGE_XML_PATH "${CMAKE_BINARY_DIR}/coverage.xml")
-    set(COVERAGE_DATA_PATH "${PROJECT_SOURCE_DIR}/.coverage")
 endif()
 
 # -------------------
@@ -270,13 +263,6 @@ add_test(
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_profile_dispatch.xml
         ${COV_OPTION} tests/integration/test_profile_dispatch.py ${WORKING_DIR_OPTION}
-)
-
-add_test(
-    NAME test_profile_sort
-    COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_profile_sort.xml
-        ${COV_OPTION} tests/integration/test_profile_sort.py ${WORKING_DIR_OPTION}
 )
 
 add_test(
@@ -414,9 +400,8 @@ add_test(
 add_test(
     NAME test_profile_torch_trace
     COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest -m torch_trace
-        --junitxml=tests/test_profile_torch_trace.xml ${COV_OPTION}
-        tests/integration/test_profile_torch_trace.py ${WORKING_DIR_OPTION}
+        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_profile_torch_trace.xml
+        ${COV_OPTION} tests/integration/test_profile_torch_trace.py ${WORKING_DIR_OPTION}
 )
 
 add_test(
@@ -424,6 +409,20 @@ add_test(
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_profile_triton_trace.xml
         ${COV_OPTION} tests/integration/test_profile_triton_trace.py ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_profile_ml_api_trace
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_profile_ml_api_trace.xml
+        ${COV_OPTION} tests/integration/test_profile_ml_api_trace.py ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_torch_trace_coverage
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_torch_trace_coverage.xml
+        ${COV_OPTION} tests/integration/test_torch_trace_coverage.py ${WORKING_DIR_OPTION}
 )
 
 add_test(
@@ -436,7 +435,6 @@ add_test(
 set_tests_properties(
     test_profile_kernel_execution
     test_profile_dispatch
-    test_profile_sort
     test_profile_misc
     test_profile_path
     test_profile_roofline_dir
@@ -451,6 +449,8 @@ set_tests_properties(
     test_profile_iteration_multiplexing_stochastic
     test_profile_torch_trace
     test_profile_triton_trace
+    test_profile_ml_api_trace
+    test_torch_trace_coverage
     test_profile_membw
     PROPERTIES LABELS "profile" RESOURCE_GROUPS gpus:1 TIMEOUT 1800
 )
@@ -565,13 +565,6 @@ add_test(
 )
 
 add_test(
-    NAME test_noise_clamper
-    COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_noise_clamper.xml
-        ${COV_OPTION} tests/unit/utils/metrics/test_noise_clamper.py ${WORKING_DIR_OPTION}
-)
-
-add_test(
     NAME test_benchmark_base
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_benchmark_base.xml
@@ -612,24 +605,24 @@ add_test(
 
 # Memory chart tests — no GPU required
 add_test(
-    NAME test_mem_chart_gfx11
+    NAME test_memory_chart_loader
     COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_mem_chart_gfx11.xml
-        ${COV_OPTION} tests/unit/utils/test_mem_chart_gfx11.py ${WORKING_DIR_OPTION}
+        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_memory_chart_loader.xml
+        ${COV_OPTION} tests/unit/memory_chart/test_loader.py ${WORKING_DIR_OPTION}
 )
 
 add_test(
-    NAME test_mem_chart_gfx9
+    NAME test_memory_chart_units
     COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_mem_chart_gfx9.xml
-        ${COV_OPTION} tests/unit/utils/test_mem_chart_gfx9.py ${WORKING_DIR_OPTION}
+        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_memory_chart_units.xml
+        ${COV_OPTION} tests/unit/memory_chart/test_units.py ${WORKING_DIR_OPTION}
 )
 
 add_test(
-    NAME test_mem_chart_gfx1250
+    NAME test_memory_chart_render
     COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_mem_chart_gfx1250.xml
-        ${COV_OPTION} tests/unit/utils/test_mem_chart_gfx1250.py ${WORKING_DIR_OPTION}
+        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_memory_chart_render.xml
+        ${COV_OPTION} tests/unit/memory_chart/test_render.py ${WORKING_DIR_OPTION}
 )
 
 add_test(
@@ -651,6 +644,13 @@ add_test(
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_roofline_main.xml
         ${COV_OPTION} tests/unit/roofline/test_roofline_main.py ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_report_shell
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_report_shell.xml
+        ${COV_OPTION} tests/unit/utils/test_report_shell.py ${WORKING_DIR_OPTION}
 )
 
 # -----------------------------------
@@ -708,6 +708,22 @@ add_test(
         ${WORKING_DIR_OPTION}
 )
 
+add_test(
+    NAME test_per_source_line_export
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_per_source_line_export.xml
+        ${COV_OPTION} tests/unit/pc_sampling/test_per_source_line_export.py
+        ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_pc_sampling_csv_export
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_pc_sampling_csv_export.xml
+        ${COV_OPTION} tests/unit/pc_sampling/test_pc_sampling_csv_export.py
+        ${WORKING_DIR_OPTION}
+)
+
 # -----------------------------------
 # Metrics unit tests
 # -----------------------------------
@@ -743,11 +759,45 @@ add_test(
 )
 
 add_test(
+    NAME test_allocator
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_allocator.xml ${COV_OPTION}
+        tests/unit/utils/counters/test_allocator.py ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_counter_file
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_counter_file.xml
+        ${COV_OPTION} tests/unit/utils/counters/test_counter_file.py ${WORKING_DIR_OPTION}
+)
+
+add_test(
     NAME test_utils_counter_defs
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_utils_counter_defs.xml
         ${COV_OPTION} tests/unit/utils/test_utils_counter_defs.py ${WORKING_DIR_OPTION}
 )
+
+add_test(
+    NAME test_metric_library_loader
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_metric_library_loader.xml
+        ${COV_OPTION} tests/unit/rocprof_compute_soc/metric_library/test_loader.py
+        ${WORKING_DIR_OPTION}
+)
+
+# The metric library sync test imports tools/, which an install tree lacks.
+if(NOT TEST_FROM_INSTALL)
+    add_test(
+        NAME test_metric_library_sync
+        COMMAND
+            ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_metric_library_sync.xml
+            ${COV_OPTION}
+            tests/unit/rocprof_compute_soc/metric_library/test_metric_library_sync.py
+            ${WORKING_DIR_OPTION}
+    )
+endif()
 
 add_test(
     NAME test_parser
@@ -789,6 +839,14 @@ add_test(
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_membw_engine.xml
         ${COV_OPTION} tests/unit/membw_analysis/test_membw_engine.py ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_membw_summary
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_membw_summary.xml
+        ${COV_OPTION} tests/unit/membw_analysis/test_membw_summary.py
+        ${WORKING_DIR_OPTION}
 )
 
 add_test(
@@ -846,65 +904,42 @@ add_test(
 )
 
 # -----------------------------------
-# TUI component tests
+# Torch trace tests
 # -----------------------------------
-
-add_test(
-    NAME test_instant_button
-    COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest -m tui --junitxml=tests/test_instant_button.xml
-        ${COV_OPTION} tests/unit/rocprof_compute_tui/widgets/test_instant_button.py
-        ${WORKING_DIR_OPTION}
-)
-
-add_test(
-    NAME test_menu_bar
-    COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest -m tui --junitxml=tests/test_menu_bar.xml
-        ${COV_OPTION} tests/unit/rocprof_compute_tui/widgets/menu_bar/test_menu_bar.py
-        ${WORKING_DIR_OPTION}
-)
-
-add_test(
-    NAME test_tui_utils
-    COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest -m tui --junitxml=tests/test_tui_utils.xml
-        ${COV_OPTION} tests/unit/rocprof_compute_tui/utils/test_tui_utils.py
-        ${WORKING_DIR_OPTION}
-)
-
-add_test(
-    NAME test_collapsibles
-    COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest -m tui --junitxml=tests/test_collapsibles.xml
-        ${COV_OPTION} tests/unit/rocprof_compute_tui/widgets/test_collapsibles.py
-        ${WORKING_DIR_OPTION}
-)
 
 if(TARGET test-torch-trace-collector)
     if(TEST_FROM_INSTALL)
-        set(_ttc_test_cmd tests/test-torch-trace-collector)
+        set(_ttc_test_bin tests/test-torch-trace-collector)
     else()
-        set(_ttc_test_cmd $<TARGET_FILE:test-torch-trace-collector>)
+        set(_ttc_test_bin $<TARGET_FILE:test-torch-trace-collector>)
     endif()
-    add_test(NAME test-torch-trace-collector COMMAND ${_ttc_test_cmd})
     get_target_property(
         _ttc_ld_path
         test-torch-trace-collector
         ROCPROF_TEST_LD_LIBRARY_PATH
     )
-    set(_ttc_test_env "LD_LIBRARY_PATH=${_ttc_ld_path}:$ENV{LD_LIBRARY_PATH}")
-    sanitizer_runtime_env(_san_env)
-    list(APPEND _ttc_test_env ${_san_env})
+    # The library path holds $ROCM_PATH, so the shell expands it at run time.
+    set(_ttc_test_cmd
+        sh
+        -c
+        "LD_LIBRARY_PATH=\"${_ttc_ld_path}:$LD_LIBRARY_PATH\" exec \"$0\" \"$@\""
+        ${_ttc_test_bin}
+    )
+    add_test(
+        NAME test-torch-trace-collector
+        COMMAND ${_ttc_test_cmd} --gtest_filter=-TorchTraceCollectorBeforeInstall.*
+    )
+    add_test(
+        NAME test-torch-trace-collector-before-install
+        COMMAND ${_ttc_test_cmd} --gtest_filter=TorchTraceCollectorBeforeInstall.*
+    )
+    sanitizer_runtime_env(_ttc_test_env)
     set_tests_properties(
         test-torch-trace-collector
+        test-torch-trace-collector-before-install
         PROPERTIES LABELS "profile" ENVIRONMENT "${_ttc_test_env}"
     )
 endif()
-
-# -----------------------------------
-# Torch trace tests
-# -----------------------------------
 
 add_test(
     NAME test_rocpd_data
@@ -914,32 +949,37 @@ add_test(
 )
 
 add_test(
-    NAME test_torch_trace_coverage
-    COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_torch_trace_coverage.xml
-        ${COV_OPTION} tests/integration/test_torch_trace_coverage.py ${WORKING_DIR_OPTION}
-)
-
-set_tests_properties(
-    test_torch_trace_coverage
-    PROPERTIES TIMEOUT 1800 LABELS "profile" RESOURCE_GROUPS gpus:1
-)
-
-add_test(
-    NAME test_torch_cpp_loader
-    COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_torch_cpp_loader.xml
-        ${COV_OPTION} tests/unit/utils/inject_roctx/_backends/test_torch_cpp_loader.py
-        ${WORKING_DIR_OPTION}
-)
-
-add_test(
     NAME test_inject_roctx_package
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_inject_roctx_package.xml
         ${COV_OPTION} tests/unit/utils/inject_roctx/test_inject_roctx_package.py
         ${WORKING_DIR_OPTION}
 )
+
+add_test(
+    NAME test_inject_roctx_torch_trace_collector
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest
+        --junitxml=tests/test_inject_roctx_torch_trace_collector.xml ${COV_OPTION}
+        tests/unit/utils/inject_roctx/_backends/test_torch_trace_collector.py
+        ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_inject_roctx_torch
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_inject_roctx_torch.xml
+        ${COV_OPTION} tests/unit/utils/inject_roctx/test_torch.py ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_inject_roctx_torch_gpu
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_inject_roctx_torch_gpu.xml
+        ${COV_OPTION} tests/integration/test_inject_roctx_torch_gpu.py
+        ${WORKING_DIR_OPTION}
+)
+set_tests_properties(test_inject_roctx_torch_gpu PROPERTIES RESOURCE_GROUPS gpus:1)
 
 # ---------------------------------------
 # Pure csv compatibility layer for pandas
@@ -980,6 +1020,17 @@ add_test(
         ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_profiler_base.xml
         ${COV_OPTION} tests/unit/rocprof_compute_profile/test_profiler_base.py
         ${WORKING_DIR_OPTION}
+)
+
+# -----------------------------------
+# rocprof_compute_base unit tests
+# -----------------------------------
+
+add_test(
+    NAME test_rocprof_compute_base
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_rocprof_compute_base.xml
+        ${COV_OPTION} tests/unit/test_rocprof_compute_base.py ${WORKING_DIR_OPTION}
 )
 
 # -----------------------------------
@@ -1066,6 +1117,23 @@ if(TARGET test-compression)
 endif()
 
 # -----------------------------------
+# CSV formatter Tests
+# -----------------------------------
+
+if(TARGET test-csv)
+    if(TEST_FROM_INSTALL)
+        set(_csv_test_cmd tests/test-csv)
+    else()
+        set(_csv_test_cmd $<TARGET_FILE:test-csv>)
+    endif()
+    add_test(NAME test-csv COMMAND ${_csv_test_cmd})
+    sanitizer_runtime_env(_san_env)
+    if(_san_env)
+        set_tests_properties(test-csv PROPERTIES ENVIRONMENT "${_san_env}")
+    endif()
+endif()
+
+# -----------------------------------
 # Generate coverage tests
 # -----------------------------------
 
@@ -1073,7 +1141,6 @@ if(${ENABLE_COVERAGE})
     set(ALL_TEST_NAMES
         test_profile_kernel_execution
         test_profile_dispatch
-        test_profile_sort
         test_profile_misc
         test_profile_path
         test_profile_roofline_dir
@@ -1091,7 +1158,10 @@ if(${ENABLE_COVERAGE})
         test_expression
         test_evaluation_pipeline
         test_metric_evaluator
+        test_allocator
+        test_counter_file
         test_utils_counter_defs
+        test_metric_library_loader
         test_parser
         test_argparser
         test_L1_cache_counters
@@ -1104,15 +1174,15 @@ if(${ENABLE_COVERAGE})
         test_utils_profile
         test_common
         test_amdsmi_interface
-        test_noise_clamper
         test_benchmark_base
         test_analysis_cli
         test_pattern_matching
         test_list_metrics_cli
-        test_mem_chart_gfx9
-        test_mem_chart_gfx11
-        test_mem_chart_gfx1250
+        test_memory_chart_loader
+        test_memory_chart_units
+        test_memory_chart_render
         test_membw_engine
+        test_membw_summary
         test_membw_guidance
         test_membw_metric_extract
         test_membw_pipeline
@@ -1120,16 +1190,16 @@ if(${ENABLE_COVERAGE})
         test_roofline_calc
         test_roofline_analyze
         test_roofline_main
-        test_instant_button
-        test_menu_bar
-        test_tui_utils
-        test_collapsibles
+        test_report_shell
         test_rocpd_data
-        test_torch_trace_coverage
         test_profile_torch_trace
         test_profile_triton_trace
-        test_torch_cpp_loader
+        test_profile_ml_api_trace
+        test_torch_trace_coverage
         test_inject_roctx_package
+        test_inject_roctx_torch
+        test_inject_roctx_torch_trace_collector
+        test_inject_roctx_torch_gpu
         test_analysis_db
         test_analysis_base
         test_analysis_orm
@@ -1138,10 +1208,14 @@ if(${ENABLE_COVERAGE})
         test_pc_sampling_analysis
         test_pc_sampling_analyze_cli
         test_pc_sampling_profile
+        test_per_kernel_isa_export
+        test_per_source_line_export
+        test_pc_sampling_csv_export
         test_metrics_common
         test_metric_validation
         test_native_tool_finder
         test_profiler_base
+        test_rocprof_compute_base
         test_rocprofv3_avail_interface
         test_soc_base
         test_tty
@@ -1251,6 +1325,13 @@ install(
     COMPONENT main
     PATTERN "__pycache__" EXCLUDE
 )
+# src/memory_chart (renderer and its JSON layouts)
+install(
+    DIRECTORY src/memory_chart
+    DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
+    COMPONENT main
+    PATTERN "__pycache__" EXCLUDE
+)
 # src/membw_analysis
 install(
     DIRECTORY src/membw_analysis
@@ -1265,14 +1346,6 @@ install(
     COMPONENT main
     PATTERN "__pycache__" EXCLUDE
 )
-# src/rocprof_compute_tui
-install(
-    DIRECTORY src/rocprof_compute_tui
-    DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
-    COMPONENT main
-    PATTERN "__pycache__" EXCLUDE
-)
-
 # ==============================================================================
 # Vendored Dependencies Installation
 # ==============================================================================

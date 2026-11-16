@@ -16,8 +16,6 @@ config["app_1"] = ["./tests/vcopy", "-n", "1048576", "-b", "256", "-i", "3"]
 config["app_mat_mul_max"] = ["./tests/mat_mul_max"]
 config["app_conjugate_gradient"] = ["./tests/conjugate_gradient/conjugate_gradient"]
 config["cleanup"] = True
-config["COUNTER_LOGGING"] = False
-config["METRIC_COMPARE"] = False
 
 num_devices = 1
 
@@ -73,28 +71,6 @@ def _assert_pc_sampling_files(
     assert remaining == {"sysinfo.csv"}
 
 
-def is_pc_sampling_not_supported(output):
-    """
-    To be called with the stdout + stderr after profiling.
-    Check whether profiling output said PC sampling is not supported on the machine
-    """
-    return any(
-        marker in output
-        for marker in (
-            # rocprof-compute's own pre-flight check against the agent configs
-            "is not supported on any of the agents on this system",
-            # rocprofiler-sdk, when it accepts the run and then rejects the config
-            "Given PC sampling configuration is not supported",
-        )
-    )
-
-
-def _skip_if_pc_sampling_unsupported(stdout, stderr, workload_dir):
-    if is_pc_sampling_not_supported(f"{stdout}\n{stderr}"):
-        common.clean_output_dir(config["cleanup"], workload_dir)
-        pytest.skip("PC sampling is not supported")
-
-
 def test_pc_sampling_host_trap(binary_handler_profile_rocprof_compute, monkeypatch):
     """
     Test that PC sampling works with --block 21 and --pc-sampling-method host_trap.
@@ -124,7 +100,7 @@ def test_pc_sampling_host_trap(binary_handler_profile_rocprof_compute, monkeypat
         app_name="app_mat_mul_max",
     )
 
-    _skip_if_pc_sampling_unsupported(stdout, stderr, workload_dir)
+    integration_common.skip_if_pc_sampling_unsupported(stdout, stderr, workload_dir)
 
     assert code == 0
     file_dict = integration_common.check_non_pmc_files(workload_dir, num_devices, 1)
@@ -162,7 +138,7 @@ def test_pc_sampling_stochastic(binary_handler_profile_rocprof_compute, monkeypa
         app_name="app_mat_mul_max",
     )
 
-    _skip_if_pc_sampling_unsupported(stdout, stderr, workload_dir)
+    integration_common.skip_if_pc_sampling_unsupported(stdout, stderr, workload_dir)
 
     assert code == 0
     file_dict = integration_common.check_non_pmc_files(workload_dir, num_devices, 1)
@@ -210,7 +186,7 @@ def test_multiprocess_pc_sampling_distinct_code_objects(
         app_name="app_conjugate_gradient",
     )
 
-    _skip_if_pc_sampling_unsupported(stdout, stderr, workload_dir)
+    integration_common.skip_if_pc_sampling_unsupported(stdout, stderr, workload_dir)
 
     assert code == 0
     file_dict = integration_common.check_non_pmc_files(workload_dir, num_devices, 1)
@@ -236,16 +212,24 @@ def test_multiprocess_pc_sampling_distinct_code_objects(
     assert database_path.is_file()
     connection = sqlite3.connect(str(database_path))
     try:
-        samples = pd.read_sql_query(
-            "SELECT DISTINCT pid, code_object_id, kernel_name "
-            "FROM compute_pc_sampling_summary_view",
-            connection,
+        summary_kernel_names = pd.read_sql_query(
+            "SELECT kernel_name FROM compute_pc_sampling_summary_view", connection
+        )["kernel_name"]
+        isa_rows = integration_common.read_per_kernel_isa_rows(connection)
+        kernels = pd.read_sql_query(
+            "SELECT kernel_uuid, kernel_name FROM compute_kernel_view", connection
         )
     finally:
         connection.close()
 
+    # The summary merges both processes into one row per kernel.
+    assert sorted(
+        name for name in summary_kernel_names if name in CG_KERNEL_NAMES
+    ) == sorted(CG_KERNEL_NAMES)
+
     # The HIP runtime's own code object is sampled too; only the CG kernels are
     # the subject here.
+    samples = isa_rows[isa_rows["count"].notna()].merge(kernels, on="kernel_uuid")
     cg_samples = samples[samples["kernel_name"].isin(CG_KERNEL_NAMES)]
     assert set(cg_samples["kernel_name"]) == CG_KERNEL_NAMES
 
@@ -295,7 +279,7 @@ def test_multi_rank_pc_sampling_only(
         check_success=False,
     )
 
-    _skip_if_pc_sampling_unsupported(stdout, stderr, workload_dir)
+    integration_common.skip_if_pc_sampling_unsupported(stdout, stderr, workload_dir)
 
     output = stdout + stderr
     assert "Multi-rank application detected" not in output
@@ -339,7 +323,7 @@ def test_multi_rank_warning_pc_sampling_with_counters(
         check_success=False,
     )
 
-    _skip_if_pc_sampling_unsupported(stdout, stderr, workload_dir)
+    integration_common.skip_if_pc_sampling_unsupported(stdout, stderr, workload_dir)
 
     output = stdout + stderr
     assert "Multi-rank application detected" in output
@@ -386,7 +370,7 @@ def test_pc_sampling_profile_then_analyze(
         app_name="app_mat_mul_max",
     )
 
-    _skip_if_pc_sampling_unsupported(stdout, stderr, workload_dir)
+    integration_common.skip_if_pc_sampling_unsupported(stdout, stderr, workload_dir)
 
     assert code == 0
     file_dict = integration_common.check_non_pmc_files(workload_dir, num_devices, 1)
@@ -480,7 +464,7 @@ def test_pc_sampling_with_sol_block(
         app_name="app_mat_mul_max",
     )
 
-    _skip_if_pc_sampling_unsupported(stdout, stderr, workload_dir)
+    integration_common.skip_if_pc_sampling_unsupported(stdout, stderr, workload_dir)
 
     assert code == 0
     file_dict = integration_common.check_csv_files(workload_dir, num_devices, 1)
@@ -504,8 +488,7 @@ def test_pc_sampling_with_sol_block(
     captured = capsys.readouterr()
     assert "2.1 System Speed-of-Light" in captured.out
     assert "21. PC Sampling" in captured.out
-    # The "instruction" column header only renders when the table has rows.
-    assert "instruction" in captured.out
-    assert "instruction_type" in captured.out
+    # A PC sampling column header only renders when the table has rows.
+    assert "active_thread_percent" in captured.out
 
     common.clean_output_dir(config["cleanup"], workload_dir)

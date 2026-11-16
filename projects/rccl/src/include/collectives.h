@@ -16,6 +16,18 @@
 
 #define NCCL_MAX_NET_SIZE (1024 * 1024 * 1024L) // Rather than send INT_MAX which is 2G-1, send a power of two.
 
+// Keep host proxy scheduling and device kernel dispatch on the same compile-time capability.
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+#define NCCL_ALLGATHER_NET_OFFLOAD_SUPPORTED 0
+#else
+#define NCCL_ALLGATHER_NET_OFFLOAD_SUPPORTED 1
+#endif
+
+static inline bool ncclUseOneRpnNetRegChannelCap(ncclFunc_t func) {
+  return func == ncclFuncBroadcast ||
+         (func == ncclFuncAllGather && NCCL_ALLGATHER_NET_OFFLOAD_SUPPORTED);
+}
+
 // CHUNKSIZE must be a multiple of SLICESIZE
 // RCCL: Benchmarking on single node for MI300X showed improved throughput for single node always using
 // a single slice, so we have separate configurations for single node and multi-node.  Single node configs
@@ -435,6 +447,11 @@ static_assert(NCCL_PAT_MULTI_RPN_NWORKERS + WARP_SIZE < NCCL_MAX_NTHREADS,
 #define NCCL_PAT_MULTI_RPN_NWORKERS 256
 #endif
 
+// Threads per PAT worker group: whole warps, with nworkers split across parallelFactor groups.
+static __host__ __device__ constexpr int patWorkerGroupSize(int nworkers, int warpSize, int parallelFactor) {
+  return nworkers / (warpSize * parallelFactor) * warpSize;
+}
+
 static constexpr int PatUsed = 0x1, PatSkipped = 0x2;
 
 struct ncclPatStep {
@@ -738,7 +755,15 @@ public:
   }
 };
 
-// When sharedConns is set, AllGather reuses PatRSAlgorithm's peer directions, so its data blocks are indexed rank-s.
+// PAT peers at dimension dim: ReduceScatter recvs from rank - 2^dim and sends to rank + 2^dim; mirrored swaps the two.
+static __host__ __device__ constexpr int patRecvPeer(int rank, int nranks, int dim, bool mirrored) {
+  return mirrored ? (rank + (1 << dim)) % nranks : (rank - (1 << dim) + nranks) % nranks;
+}
+static __host__ __device__ constexpr int patSendPeer(int rank, int nranks, int dim, bool mirrored) {
+  return patRecvPeer(rank, nranks, dim, !mirrored);
+}
+
+// When sharedConns is set, AllGather reuses PatRSAlgorithm's peer directions, so its data blocks are indexed rank-s; else it is mirrored.
 template <typename T>
 class PatAGAlgorithm {
   size_t offset;

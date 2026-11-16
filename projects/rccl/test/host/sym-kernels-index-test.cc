@@ -62,6 +62,8 @@ const std::vector<ExpectedKernelCase>& TmaValidCases() {
   static const std::vector<ExpectedKernelCase> kCases = {
       {"AllGather_TmaST", ncclSymkKernelId_AllGather_TmaST, ncclDevSum, ncclFloat32,
        (void*)ncclSymkDevKernel_AllGather_TmaST, (void*)ncclSymkDevKernel_AllGather_TmaST_profile},
+      {"AllGather_HierLsaTmaST", ncclSymkKernelId_AllGather_HierLsaTmaST, ncclDevSum, ncclFloat32,
+       (void*)ncclSymkDevKernel_AllGather_HierLsaTmaST, (void*)ncclSymkDevKernel_AllGather_HierLsaTmaST_profile},
 
       {"AllReduce_RSxTmaLD_AGxTmaST_sum_f32", ncclSymkKernelId_AllReduce_RSxTmaLD_AGxTmaST, ncclDevSum, ncclFloat32,
        (void*)ncclSymkDevKernel_AllReduce_RSxTmaLD_AGxTmaST_sum_f32,
@@ -124,6 +126,8 @@ const std::vector<ExpectedKernelCase>& ValidCases() {
       {"AllGather_RailRing_LsaST", ncclSymkKernelId_AllGather_RailRing_LsaST, ncclDevSum, ncclFloat32,
        (void*)ncclSymkDevKernel_AllGather_RailRing_LsaST,
        (void*)ncclSymkDevKernel_AllGather_RailRing_LsaST_profile},
+      {"AllGather_HierLsaST", ncclSymkKernelId_AllGather_HierLsaST, ncclDevSum, ncclFloat32,
+       (void*)ncclSymkDevKernel_AllGather_HierLsaST, (void*)ncclSymkDevKernel_AllGather_HierLsaST_profile},
 
       {"AllReduce_AGxLL_R_sum_f32", ncclSymkKernelId_AllReduce_AGxLL_R, ncclDevSum, ncclFloat32,
        (void*)ncclSymkDevKernel_AllReduce_AGxLL_R_sum_f32, (void*)ncclSymkDevKernel_AllReduce_AGxLL_R_sum_f32_profile},
@@ -247,7 +251,7 @@ const std::vector<ExpectedKernelCase>& ValidCases() {
 INSTANTIATE_TEST_SUITE_P(SymAllEmittedCombinations, SymKernelIndexValidTest, ::testing::ValuesIn(ValidCases()),
                          [](const ::testing::TestParamInfo<ExpectedKernelCase>& info) { return info.param.name; });
 
-// A 43rd generated kernel would otherwise fail elsewhere (link error or the Python EXPECTED_TOTAL) unnoticed here.
+// A 44th generated kernel would otherwise fail elsewhere (link error or the Python EXPECTED_TOTAL) unnoticed here.
 TEST(SymKernelIndexValidCasesTest, CoversEveryGeneratedKernel) {
   EXPECT_EQ(static_cast<int>(ValidCases().size()), ncclSymkKernelCount);
 }
@@ -322,7 +326,7 @@ const std::vector<InvalidKernelCase>& InvalidCases() {
       {"ReduceScatter_RailA2A_LsaLD_UnknownType_Float64", ncclSymkKernelId_ReduceScatter_RailA2A_LsaLD,
        ncclDevSumPostDiv, ncclFloat64},
   };
-  // The three DMA-staged ids swap sides with the build: unimplemented where generate.py emitted no
+  // The four DMA-staged ids swap sides with the build: unimplemented where generate.py emitted no
   // case, and otherwise carrying their own switch arms whose defaults are worth pinning.
   static const std::vector<InvalidKernelCase> kAll = [] {
     std::vector<InvalidKernelCase> all = kCases;
@@ -336,6 +340,8 @@ const std::vector<InvalidKernelCase>& InvalidCases() {
                      ncclInt64});
     } else {
       all.push_back({"UnimplementedId_AllGather_TmaST", ncclSymkKernelId_AllGather_TmaST, ncclDevSum, ncclFloat32});
+      all.push_back({"UnimplementedId_AllGather_HierLsaTmaST", ncclSymkKernelId_AllGather_HierLsaTmaST, ncclDevSum,
+                     ncclFloat32});
       all.push_back({"UnimplementedId_AllReduce_RSxTmaLD_AGxTmaST", ncclSymkKernelId_AllReduce_RSxTmaLD_AGxTmaST,
                      ncclDevSum, ncclFloat32});
       all.push_back({"UnimplementedId_ReduceScatter_TmaLD", ncclSymkKernelId_ReduceScatter_TmaLD, ncclDevSum,

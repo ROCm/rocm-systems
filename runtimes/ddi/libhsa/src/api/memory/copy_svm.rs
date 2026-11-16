@@ -15,10 +15,6 @@ use crate::ffi::*;
 use crate::memory::copy_svm::*;
 use crate::memory::pointer::*;
 use crate::memory::*;
-use crate::platform::memory as linux_interop;
-use crate::platform::memory::{
-    KfdSvmAccess as SvmAccess, KfdSvmAttribute as SvmAttribute, KfdSvmLocation as SvmLocation,
-};
 use crate::runtime::{boundary, initialized_mut, lock, map_error};
 
 #[cfg_attr(
@@ -84,7 +80,7 @@ pub unsafe extern "C" fn hsa_memory_copy(
             }
         }
         let stop = runtime.stop_workers.clone();
-        let quarantine = runtime.memory_state.async_copy_quarantine.clone();
+        let health = runtime.health.clone();
         drop(guard);
 
         let (status, may_be_live) = match execute_sync_gpu_copy(resolved.route, &stop) {
@@ -95,7 +91,7 @@ pub unsafe extern "C" fn hsa_memory_copy(
             Err(failure) => (failure.status, failure.operands_may_be_live),
         };
         if may_be_live {
-            quarantine.store(true, Ordering::Release);
+            health.quarantine();
         }
         release_async_resources(&[], &retained, may_be_live);
         status
@@ -190,7 +186,7 @@ pub unsafe extern "C" fn hsa_amd_memory_fill(
         }
         let device = runtime.gpus[index].device.clone();
         let stop = runtime.stop_workers.clone();
-        let quarantine = runtime.memory_state.async_copy_quarantine.clone();
+        let health = runtime.health.clone();
         drop(guard);
 
         let (status, may_be_live) = match device.gpu() {
@@ -206,7 +202,7 @@ pub unsafe extern "C" fn hsa_amd_memory_fill(
             Err(error) => (map_error(error), false),
         };
         if may_be_live {
-            quarantine.store(true, Ordering::Release);
+            health.quarantine();
         }
         release_async_resources(&[], &[Some(base)], may_be_live);
         status
@@ -251,140 +247,8 @@ pub unsafe extern "C" fn hsa_amd_svm_attributes_set(
             // SAFETY: The HSA ABI requires attribute_count readable pairs.
             unsafe { std::slice::from_raw_parts(attribute_list, attribute_count) }
         };
-        let (mut attributes, _) = match reserve_svm_attributes(attribute_count) {
-            Ok(storage) => storage,
-            Err(status) => return status,
-        };
-        let mut scalar_attributes = 0_u16;
-        let mut agents = Vec::new();
-        if agents.try_reserve_exact(attribute_count).is_err() {
-            return OUT_OF_RESOURCES;
-        }
-        let mut set_flags = 0_u32;
-        let mut clear_flags = 0_u32;
-        for pair in pairs {
-            let scalar_bit = match pair.attribute {
-                AMD_SVM_ATTRIB_GLOBAL_FLAG
-                | AMD_SVM_ATTRIB_READ_ONLY
-                | AMD_SVM_ATTRIB_HIVE_LOCAL
-                | AMD_SVM_ATTRIB_MIGRATION_GRANULARITY
-                | AMD_SVM_ATTRIB_PREFERRED_LOCATION
-                | AMD_SVM_ATTRIB_READ_MOSTLY
-                | AMD_SVM_ATTRIB_GPU_EXEC => Some(1_u16 << pair.attribute),
-                _ => None,
-            };
-            if let Some(bit) = scalar_bit {
-                if scalar_attributes & bit != 0 {
-                    return INCOMPATIBLE_ARGUMENTS;
-                }
-                scalar_attributes |= bit;
-            }
-            match pair.attribute {
-                AMD_SVM_ATTRIB_GLOBAL_FLAG => match pair.value {
-                    AMD_SVM_GLOBAL_FLAG_FINE_GRAINED => set_flags |= SVM_FLAG_COHERENT,
-                    AMD_SVM_GLOBAL_FLAG_COARSE_GRAINED => clear_flags |= SVM_FLAG_COHERENT,
-                    _ => return INVALID_ARGUMENT,
-                },
-                AMD_SVM_ATTRIB_READ_ONLY => {
-                    if pair.value != 0 {
-                        set_flags |= SVM_FLAG_GPU_READ_ONLY;
-                    } else {
-                        clear_flags |= SVM_FLAG_GPU_READ_ONLY;
-                    }
-                }
-                AMD_SVM_ATTRIB_HIVE_LOCAL => {
-                    if pair.value != 0 {
-                        set_flags |= SVM_FLAG_HIVE_LOCAL;
-                    } else {
-                        clear_flags |= SVM_FLAG_HIVE_LOCAL;
-                    }
-                }
-                AMD_SVM_ATTRIB_MIGRATION_GRANULARITY => {
-                    attributes.push(SvmAttribute::MigrationGranularity(
-                        pair.value.min(SVM_MAX_MIGRATION_GRANULARITY) as u32,
-                    ))
-                }
-                AMD_SVM_ATTRIB_PREFERRED_LOCATION => {
-                    let location = match svm_location_from_agent(
-                        runtime,
-                        HsaAgent { handle: pair.value },
-                        true,
-                    ) {
-                        Ok(location) => location,
-                        Err(status) => return status,
-                    };
-                    attributes.push(SvmAttribute::PreferredLocation(location));
-                }
-                AMD_SVM_ATTRIB_READ_MOSTLY => {
-                    if pair.value != 0 {
-                        set_flags |= SVM_FLAG_GPU_READ_MOSTLY;
-                    } else {
-                        clear_flags |= SVM_FLAG_GPU_READ_MOSTLY;
-                    }
-                }
-                AMD_SVM_ATTRIB_GPU_EXEC => {
-                    if pair.value != 0 {
-                        set_flags |= SVM_FLAG_GPU_EXECUTE;
-                    } else {
-                        clear_flags |= SVM_FLAG_GPU_EXECUTE;
-                    }
-                }
-                AMD_SVM_ATTRIB_AGENT_ACCESSIBLE
-                | AMD_SVM_ATTRIB_AGENT_ACCESSIBLE_IN_PLACE
-                | AMD_SVM_ATTRIB_AGENT_NO_ACCESS => {
-                    let agent = HsaAgent { handle: pair.value };
-                    if !runtime.is_agent(agent) {
-                        return INVALID_AGENT;
-                    }
-                    if agents.contains(&agent.handle) {
-                        return INCOMPATIBLE_ARGUMENTS;
-                    }
-                    agents.push(agent.handle);
-                    if runtime.is_cpu_agent(agent) {
-                        if pair.attribute == AMD_SVM_ATTRIB_AGENT_NO_ACCESS {
-                            clear_flags |= SVM_FLAG_HOST_ACCESS;
-                        } else {
-                            set_flags |= SVM_FLAG_HOST_ACCESS;
-                        }
-                    } else {
-                        let index = runtime.gpu_index(agent).ok_or(INVALID_AGENT);
-                        let index = match index {
-                            Ok(index) => index,
-                            Err(status) => return status,
-                        };
-                        let access = match pair.attribute {
-                            AMD_SVM_ATTRIB_AGENT_ACCESSIBLE => SvmAccess::Accessible,
-                            AMD_SVM_ATTRIB_AGENT_ACCESSIBLE_IN_PLACE => {
-                                SvmAccess::AccessibleInPlace
-                            }
-                            _ => SvmAccess::NoAccess,
-                        };
-                        attributes.push(SvmAttribute::Access {
-                            device: runtime.gpus[index].endpoint.id,
-                            access,
-                        });
-                    }
-                }
-                _ => return INVALID_ARGUMENT,
-            }
-        }
-        if set_flags & SVM_FLAG_HOST_ACCESS != 0 {
-            clear_flags &= !SVM_FLAG_HOST_ACCESS;
-        }
-        if clear_flags != 0 {
-            attributes.push(SvmAttribute::ClearFlags(clear_flags));
-        }
-        if set_flags != 0 {
-            attributes.push(SvmAttribute::SetFlags(set_flags));
-        }
-        if attributes.len() > SVM_MAX_ATTRIBUTES {
-            return INVALID_ARGUMENT;
-        }
-        let Some(session) = runtime.session() else {
-            return ERROR;
-        };
-        linux_interop::set_kfd_svm_attributes(session, address, size, &attributes)
-            .map_or_else(map_error, |()| SUCCESS)
+        crate::memory::advice::set(runtime, address, size, pairs)
+            .map_or_else(|status| status, |()| SUCCESS)
     })
 }
 
@@ -420,192 +284,12 @@ pub unsafe extern "C" fn hsa_amd_svm_attributes_get(
             Ok(range) => range,
             Err(status) => return status,
         };
-        let (mut attributes, mut indices) = match reserve_svm_attributes(attribute_count) {
-            Ok(storage) => storage,
-            Err(status) => return status,
-        };
-        let mut get_flags = false;
-        for index in 0..attribute_count {
-            // SAFETY: The caller supplies this complete pair array. Only each
-            // attribute tag is initialized for a query; its value is input
-            // only for ACCESS_QUERY.
-            let pair = unsafe { attribute_list.add(index) };
-            let attribute = unsafe { (&raw const (*pair).attribute).read() };
-            match attribute {
-                AMD_SVM_ATTRIB_GLOBAL_FLAG
-                | AMD_SVM_ATTRIB_READ_ONLY
-                | AMD_SVM_ATTRIB_HIVE_LOCAL
-                | AMD_SVM_ATTRIB_READ_MOSTLY
-                | AMD_SVM_ATTRIB_GPU_EXEC => {
-                    get_flags = true;
-                    indices.push(None);
-                }
-                AMD_SVM_ATTRIB_MIGRATION_GRANULARITY => {
-                    indices.push(Some(attributes.len()));
-                    attributes.push(SvmAttribute::MigrationGranularity(0));
-                }
-                AMD_SVM_ATTRIB_PREFERRED_LOCATION => {
-                    indices.push(Some(attributes.len()));
-                    attributes.push(SvmAttribute::PreferredLocation(SvmLocation::Undefined));
-                }
-                AMD_SVM_ATTRIB_PREFETCH_LOCATION => {
-                    indices.push(Some(attributes.len()));
-                    attributes.push(SvmAttribute::PrefetchLocation(SvmLocation::Undefined));
-                }
-                AMD_SVM_ATTRIB_ACCESS_QUERY => {
-                    // SAFETY: ACCESS_QUERY requires the agent value as input.
-                    let agent = HsaAgent {
-                        handle: unsafe { (&raw const (*pair).value).read() },
-                    };
-                    if !runtime.is_agent(agent) {
-                        return INVALID_AGENT;
-                    }
-                    if runtime.is_cpu_agent(agent) {
-                        get_flags = true;
-                        indices.push(None);
-                    } else {
-                        let index = runtime.gpu_index(agent).ok_or(INVALID_AGENT);
-                        let index = match index {
-                            Ok(index) => index,
-                            Err(status) => return status,
-                        };
-                        indices.push(Some(attributes.len()));
-                        attributes.push(SvmAttribute::Access {
-                            device: runtime.gpus[index].endpoint.id,
-                            access: SvmAccess::Accessible,
-                        });
-                    }
-                }
-                _ => return INVALID_ARGUMENT,
-            }
+        // SAFETY: The HSA ABI supplies this writable array; the helper reads
+        // only initialized input fields and stages all output before publication.
+        unsafe {
+            crate::memory::advice::get(runtime, address, size, attribute_list, attribute_count)
         }
-        let flag_indices = if get_flags {
-            let clear = attributes.len();
-            attributes.push(SvmAttribute::ClearFlags(0));
-            let set = attributes.len();
-            attributes.push(SvmAttribute::SetFlags(0));
-            Some((clear, set))
-        } else {
-            None
-        };
-        if attributes.len() > SVM_MAX_ATTRIBUTES {
-            return INVALID_ARGUMENT;
-        }
-        let Some(session) = runtime.session() else {
-            return ERROR;
-        };
-        if let Err(error) =
-            linux_interop::get_kfd_svm_attributes(session, address, size, &mut attributes)
-        {
-            return map_error(error);
-        }
-        let (clear_flags, set_flags) = flag_indices.map_or((0, 0), |(clear, set)| {
-            let clear = match attributes.get(clear).copied() {
-                Some(SvmAttribute::ClearFlags(value)) => value,
-                _ => 0,
-            };
-            let set = match attributes.get(set).copied() {
-                Some(SvmAttribute::SetFlags(value)) => value,
-                _ => 0,
-            };
-            (clear, set)
-        });
-        for (index, native_index) in indices.iter().copied().enumerate() {
-            // SAFETY: The caller retains the complete writable pair array.
-            // Read only the initialized tag until an output value is written.
-            let pair = unsafe { attribute_list.add(index) };
-            let attribute = unsafe { (&raw const (*pair).attribute).read() };
-            let value = match attribute {
-                AMD_SVM_ATTRIB_GLOBAL_FLAG => {
-                    if set_flags & SVM_FLAG_COHERENT != 0 {
-                        AMD_SVM_GLOBAL_FLAG_FINE_GRAINED
-                    } else if clear_flags & SVM_FLAG_COHERENT != 0 {
-                        AMD_SVM_GLOBAL_FLAG_COARSE_GRAINED
-                    } else {
-                        AMD_SVM_GLOBAL_FLAG_INDETERMINATE
-                    }
-                }
-                AMD_SVM_ATTRIB_READ_ONLY => u64::from(set_flags & SVM_FLAG_GPU_READ_ONLY),
-                AMD_SVM_ATTRIB_HIVE_LOCAL => u64::from(set_flags & SVM_FLAG_HIVE_LOCAL),
-                AMD_SVM_ATTRIB_READ_MOSTLY => u64::from(set_flags & SVM_FLAG_GPU_READ_MOSTLY),
-                AMD_SVM_ATTRIB_GPU_EXEC => u64::from(set_flags & SVM_FLAG_GPU_EXECUTE),
-                AMD_SVM_ATTRIB_MIGRATION_GRANULARITY => {
-                    let Some(native) = native_index else {
-                        return ERROR;
-                    };
-                    let Some(SvmAttribute::MigrationGranularity(value)) =
-                        attributes.get(native).copied()
-                    else {
-                        return ERROR;
-                    };
-                    u64::from(value)
-                }
-                AMD_SVM_ATTRIB_PREFERRED_LOCATION | AMD_SVM_ATTRIB_PREFETCH_LOCATION => {
-                    let Some(native) = native_index else {
-                        return ERROR;
-                    };
-                    let location = match attributes.get(native).copied() {
-                        Some(SvmAttribute::PreferredLocation(location))
-                            if attribute == AMD_SVM_ATTRIB_PREFERRED_LOCATION =>
-                        {
-                            location
-                        }
-                        Some(SvmAttribute::PrefetchLocation(location))
-                            if attribute == AMD_SVM_ATTRIB_PREFETCH_LOCATION =>
-                        {
-                            location
-                        }
-                        _ => return ERROR,
-                    };
-                    let agent = match svm_agent_from_location(runtime, location) {
-                        Ok(agent) => agent,
-                        Err(status) => return status,
-                    };
-                    agent.handle
-                }
-                AMD_SVM_ATTRIB_ACCESS_QUERY => {
-                    // SAFETY: ACCESS_QUERY retains its initialized agent input.
-                    let agent = HsaAgent {
-                        handle: unsafe { (&raw const (*pair).value).read() },
-                    };
-                    let result = if runtime.is_cpu_agent(agent) {
-                        if set_flags & SVM_FLAG_HOST_ACCESS != 0 {
-                            AMD_SVM_ATTRIB_AGENT_ACCESSIBLE
-                        } else {
-                            AMD_SVM_ATTRIB_AGENT_NO_ACCESS
-                        }
-                    } else {
-                        let Some(native) = native_index else {
-                            return ERROR;
-                        };
-                        match attributes.get(native).copied() {
-                            Some(SvmAttribute::Access {
-                                access: SvmAccess::Accessible,
-                                ..
-                            }) => AMD_SVM_ATTRIB_AGENT_ACCESSIBLE,
-                            Some(SvmAttribute::Access {
-                                access: SvmAccess::AccessibleInPlace,
-                                ..
-                            }) => AMD_SVM_ATTRIB_AGENT_ACCESSIBLE_IN_PLACE,
-                            Some(SvmAttribute::Access {
-                                access: SvmAccess::NoAccess,
-                                ..
-                            }) => AMD_SVM_ATTRIB_AGENT_NO_ACCESS,
-                            _ => return ERROR,
-                        }
-                    };
-                    // SAFETY: The pair's initialized tag is the output field
-                    // for ACCESS_QUERY; its input agent value is preserved.
-                    unsafe { (&raw mut (*pair).attribute).write(result) };
-                    continue;
-                }
-                _ => return INVALID_ARGUMENT,
-            };
-            // SAFETY: The caller supplied writable value storage. Its prior
-            // bytes need not have been initialized for output-only queries.
-            unsafe { (&raw mut (*pair).value).write(value) };
-        }
-        SUCCESS
+        .map_or_else(|status| status, |()| SUCCESS)
     })
 }
 
@@ -645,10 +329,22 @@ pub unsafe extern "C" fn hsa_amd_svm_prefetch_async(
             // SAFETY: The HSA ABI requires dependency_count readable handles.
             unsafe { std::slice::from_raw_parts(dependencies, dependency_count as usize) }
         };
-        let location = match svm_location_from_agent(runtime, agent, false) {
+        let service = match svm_service(runtime, Some(agent)) {
+            Ok(service) => service,
+            Err(status) => return status,
+        };
+        let location = match svm_location_from_agent(runtime, &service, agent, false) {
             Ok(location) => location,
             Err(status) => return status,
         };
+        if let Err(error) = service.validate_prefetch(
+            address,
+            size,
+            location,
+            rocddi::memory::advice::PrefetchCompletion::Migration,
+        ) {
+            return map_error(error);
+        }
         if dependency_slice
             .iter()
             .any(|dependency| !runtime.signal_state.owns_signal(*dependency))
@@ -683,9 +379,6 @@ pub unsafe extern "C" fn hsa_amd_svm_prefetch_async(
             Ok(pending) => pending,
             Err(status) => return status,
         };
-        let Some(session) = runtime.session.clone() else {
-            return ERROR;
-        };
         let stop = runtime.stop_workers.clone();
         let worker_handles = pending.handles.clone();
         let dependency_len = dependency_slice.len();
@@ -694,7 +387,7 @@ pub unsafe extern "C" fn hsa_amd_svm_prefetch_async(
             .spawn(move || {
                 let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     svm_prefetch_worker(
-                        session,
+                        service,
                         stop,
                         &worker_handles[..dependency_len],
                         completion,

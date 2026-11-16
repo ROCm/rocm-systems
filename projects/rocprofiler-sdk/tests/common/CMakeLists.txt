@@ -28,6 +28,51 @@ find_package(rocprofiler-sdk REQUIRED)
 # rocprofiler-sdk provides a Findlibdw.cmake
 find_package(libdw REQUIRED)
 
+# Schema directory this build writes. In-tree, including under the ROCm superbuild, that
+# is the rocprofiler-sdk binary dir. Test Install Build configures this tree on its own
+# against the SDK it just installed, and then CMAKE_BINARY_DIR is the test build tree,
+# which has no versions.yml. The package prefix does. A library directory from
+# find_package is not used: that resolves to an older SDK already on the machine, and its
+# schema does not list the versions this build writes.
+set(_rocpd_schema_candidates)
+foreach(_prefix IN ITEMS "${rocprofiler-sdk_BINARY_DIR}" "${rocprofiler-sdk_ROOT_DIR}"
+                         "${CMAKE_BINARY_DIR}" "${PROJECT_BINARY_DIR}")
+    if(_prefix)
+        list(APPEND _rocpd_schema_candidates "${_prefix}/share/rocprofiler-sdk-rocpd")
+    endif()
+endforeach()
+if(rocprofiler-sdk_LIB_DIR)
+    get_filename_component(_rocpd_schema_from_lib "${rocprofiler-sdk_LIB_DIR}" DIRECTORY)
+    list(APPEND _rocpd_schema_candidates
+         "${_rocpd_schema_from_lib}/share/rocprofiler-sdk-rocpd")
+endif()
+list(REMOVE_DUPLICATES _rocpd_schema_candidates)
+
+set(_rocpd_schema_found "")
+foreach(_dir IN LISTS _rocpd_schema_candidates)
+    if(EXISTS "${_dir}/versions.yml")
+        set(_rocpd_schema_found "${_dir}")
+        break()
+    endif()
+endforeach()
+# CACHE so rocprofiler_add_integration_execute_test sees it from every test directory. A
+# normal variable set here is not visible to that function when a sibling directory calls
+# it.
+set(ROCPROFILER_SDK_TESTS_ROCPD_SCHEMA_PATH
+    "${_rocpd_schema_found}"
+    CACHE INTERNAL "rocpd schema directory for integration tests" FORCE)
+if(ROCPROFILER_SDK_TESTS_ROCPD_SCHEMA_PATH)
+    message(
+        STATUS
+            "rocpd schema for integration tests: ${ROCPROFILER_SDK_TESTS_ROCPD_SCHEMA_PATH}"
+        )
+else()
+    message(
+        WARNING
+            "No rocpd versions.yml under any of: ${_rocpd_schema_candidates}. Integration tests will use the schema beside the librocprofiler-sdk-rocpd they load."
+        )
+endif()
+
 # build flags
 add_library(rocprofiler-sdk-tests-build-flags INTERFACE)
 add_library(rocprofiler-sdk::tests-build-flags ALIAS rocprofiler-sdk-tests-build-flags)
@@ -291,6 +336,15 @@ function(rocprofiler_add_integration_execute_test NAME)
             )
     endif()
 
+    # An older librocprofiler-sdk-rocpd earlier on LD_LIBRARY_PATH reads versions.yml from
+    # this variable before the schema beside itself. A test that sets ROCPD_SCHEMA_PATH
+    # keeps it, so rocpd-back-compat can point at a fixture schema.
+    if(ROCPROFILER_SDK_TESTS_ROCPD_SCHEMA_PATH AND NOT "${arg_ENVIRONMENT}" MATCHES
+                                                   "ROCPD_SCHEMA_PATH=")
+        list(APPEND arg_ENVIRONMENT
+             "ROCPD_SCHEMA_PATH=${ROCPROFILER_SDK_TESTS_ROCPD_SCHEMA_PATH}")
+    endif()
+
     if(NOT "integration-tests" IN_LIST arg_LABELS)
         list(APPEND arg_LABELS "integration-tests")
     endif()
@@ -401,6 +455,7 @@ function(rocprofiler_add_integration_validate_test NAME)
         "ATTACHED_FILES"
         "ATTACHED_FILES_ON_FAIL"
         "PYTHON_PATH"
+        "LIBRARY_PATH"
         "ENVIRONMENT"
         "PRELOAD"
         "FIXTURES_SETUP"

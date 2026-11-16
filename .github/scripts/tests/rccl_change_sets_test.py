@@ -6,6 +6,7 @@
 import os
 import sys
 import tempfile
+import tomllib
 import unittest
 from pathlib import Path
 
@@ -24,6 +25,8 @@ EXAMPLES = {
             "projects/rccl/test/host/CMakeLists.txt",
             "projects/rccl/test/host/run_host_tests.sh",
             "projects/rccl/test/host/fakes/os_fakes.cc",
+            "projects/rccl/test/test_categories_micro.yaml",
+            "projects/rccl/test/test_categories_micro_net.yaml",
         ],
         [
             "projects/rccl/test/host",
@@ -32,6 +35,24 @@ EXAMPLES = {
             "projects/rccl/test/CMakeLists.txt",
             "projects/rccl/src/test/host/x.cc",
             "projects/rccl-tests/test/host/x.cc",
+            "projects/rccl/test/test_categories.yaml",
+            "projects/rccl/test/test_categories_fixtures.yaml",
+            "projects/rccl/test/test_categories_mpi.yaml",
+            "projects/rccl/test/test_categories_micro.yml",
+            "projects/rccl/test/test_categories_microbench.yaml",
+        ],
+    ),
+    "test runner": (
+        [
+            "projects/rccl/tools/scripts/test_runner/configs/ci-precheckin.json",
+            "projects/rccl/tools/scripts/test_runner/lib/test_executor.py",
+            "projects/rccl/tools/scripts/test_runner/test_runner.py",
+        ],
+        [
+            "projects/rccl/tools/scripts/test_runner",
+            "projects/rccl/tools/scripts/test_runner_x/a.py",
+            "projects/rccl/tools/scripts/topo_expl/x.py",
+            "projects/rccl/tools/test_runner/a.py",
         ],
     ),
 }
@@ -98,6 +119,30 @@ class CoverageWorkflowTest(unittest.TestCase):
                         any(pattern.startswith(prefix) for prefix in prefixes),
                         f"{rule.workflow} paths {paths} do not include {pattern}",
                     )
+
+
+class TheRockSkipTest(unittest.TestCase):
+    """skip-ci-config.toml may skip TheRock CI for RCCL tests only where a
+    COVERAGE_RULES workflow runs them instead."""
+
+    SKIPPED_RULE = "host-only unit tests"
+
+    def setUp(self):
+        with open(REPO_ROOT / ".github/skip-ci-config.toml", "rb") as f:
+            self.skip_patterns = set(tomllib.load(f)["skip_ci"]["common"])
+
+    def test_host_only_rule_skips_therock(self):
+        (rule,) = [r for r in sets.COVERAGE_RULES if r.name == self.SKIPPED_RULE]
+        for pattern in rule.patterns:
+            with self.subTest(pattern=pattern):
+                self.assertIn(pattern, self.skip_patterns)
+
+    def test_rccl_test_skips_are_covered(self):
+        covered = {p for r in sets.COVERAGE_RULES for p in r.patterns}
+        for pattern in self.skip_patterns:
+            if pattern.startswith("projects/rccl/test/"):
+                with self.subTest(pattern=pattern):
+                    self.assertIn(pattern, covered)
 
 
 class WorkflowFiltersTest(unittest.TestCase):

@@ -1,89 +1,40 @@
-import { Box, Card, CardContent, Stack, Typography } from '@mui/material';
+import { fontSizes } from '../../theme/typography';
+import { Box, Paper, Typography } from '@mui/material';
 import TimerRoundedIcon from '@mui/icons-material/TimerRounded';
 import SpeedRoundedIcon from '@mui/icons-material/SpeedRounded';
 import FactCheckRoundedIcon from '@mui/icons-material/FactCheckRounded';
-import HealthAndSafetyRoundedIcon from '@mui/icons-material/HealthAndSafetyRounded';
-import ArrowDownwardRoundedIcon from '@mui/icons-material/ArrowDownwardRounded';
-import ArrowUpwardRoundedIcon from '@mui/icons-material/ArrowUpwardRounded';
-import RemoveRoundedIcon from '@mui/icons-material/RemoveRounded';
-import { formatDuration, formatPercent } from '../../utils/formatters';
-import { changeTone, classifyDurationChange } from '../../utils/performance';
+import ChecklistRoundedIcon from '@mui/icons-material/ChecklistRounded';
+import { shapeTokens } from '../../theme/tokens';
+import { formatDuration } from '../../utils/formatters';
+import { targetColor } from '../../theme/targetColors';
+import ThreadPolicySwatch from '../shared/ThreadPolicySwatch';
 
-function MetricCard({ label, value, caption, icon, tone = 'primary', badge }) {
-  const toneColor = tone === 'neutral' ? 'text.secondary' : `${tone}.main`;
-  const testId = `metric-card-${label.toLowerCase().replaceAll(' ', '-')}`;
-  return (
-    <Card data-testid={testId} sx={{ position: 'relative', overflow: 'hidden' }}>
-      <Box sx={{ position: 'absolute', inset: '0 auto 0 0', width: 3, bgcolor: toneColor }} />
-      <CardContent sx={{ p: 2.25, '&:last-child': { pb: 2.25 } }}>
-        <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'flex-start', gap: 1 }}>
-          <Box sx={{ minWidth: 0, flex: 1 }}>
-            <Typography variant="overline" sx={{ color: 'text.secondary' }}>{label}</Typography>
-            <Stack direction="row" sx={{ alignItems: 'baseline', gap: 1, mt: 0.65 }}>
-              <Typography sx={{ fontSize: { xs: 25, xl: 29 }, lineHeight: 1.1, fontWeight: 770, letterSpacing: '-.035em' }}>{value}</Typography>
-              {badge}
-            </Stack>
-          </Box>
-          <Box data-testid="metric-icon" sx={{ width: 38, height: 38, flexShrink: 0, borderRadius: 2.3, display: 'grid', placeItems: 'center', color: toneColor, bgcolor: 'action.hover' }}>
-            {icon}
-          </Box>
-        </Stack>
-        <Typography data-testid="metric-caption" variant="caption" sx={{ color: 'text.secondary', display: 'block', mt: 0.9 }}>{caption}</Typography>
-      </CardContent>
-    </Card>
-  );
+function Metric({ label, rows, valueFor, caption, icon: Icon, iconColor }) {
+  return <Paper variant="outlined" data-testid={`metric-card-${label.toLowerCase().replaceAll(' ', '-')}`} data-tone="neutral" sx={{ p: shapeTokens.cardPadding, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
+    <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1, mb: 1 }}>
+      <Typography component="h3" variant="h2">{label}</Typography>
+      <Icon role="img" aria-label={caption} sx={{ color: rows.some((row) => row.cohortIds.length && valueFor(row) != null) ? iconColor : 'text.muted', fontSize: 19, width: 19, height: 19, flexShrink: 0 }} />
+    </Box>
+    <Box sx={{ flex: 1 }}>
+      {!rows.length ? <Typography color="text.secondary" sx={{ fontSize: fontSizes.body, py: '10px' }}>No configurations selected</Typography> : rows.map((row) => {
+        const value = row.cohortIds.length ? valueFor(row) : null;
+        const unavailable = value == null;
+        const displayValue = row.cohortIds.length ? value ?? 'Unavailable' : 'No shared workloads';
+        return <Box key={row.key} data-configuration={row.key} sx={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) auto', alignItems: 'center', gap: 1, py: shapeTokens.rowPadding, '& + &': { borderTop: 1, borderColor: 'divider' } }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: '7px', minWidth: 0 }}><ThreadPolicySwatch policy={row.mode} color={(theme) => targetColor(theme, row.target)} /><Typography variant="caption" sx={{ overflowWrap: 'anywhere', color: 'text.secondary', fontSize: fontSizes.body, lineHeight: '18px' }}>{row.target} {row.mode}</Typography></Box>
+          <Typography variant="numericEmphasized" sx={{ fontSize: unavailable ? fontSizes.caption : undefined, textAlign: 'right', color: unavailable ? 'text.muted' : 'text.secondary', fontStyle: unavailable ? 'italic' : 'normal' }}>{displayValue}</Typography>
+        </Box>;
+      })}
+    </Box>
+  </Paper>;
 }
 
-export default function MetricsGrid({ metrics }) {
-  const hasResults = metrics.total > 0;
-  const baselineState = classifyDurationChange(metrics.durationDelta);
-  const baselineTone = changeTone(baselineState);
-  const healthy = hasResults && metrics.failed === 0;
-  return (
-    <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, 1fr)', lg: 'repeat(4, 1fr)' }, gap: 1.5 }}>
-      <MetricCard
-        label="Total duration"
-        value={formatDuration(metrics.duration)}
-        caption="Selected-test duration from the latest commit's newest attempt"
-        icon={<TimerRoundedIcon />}
-        tone={hasResults ? 'primary' : 'neutral'}
-      />
-      <MetricCard
-        label="Perf change"
-        value={formatPercent(metrics.durationDelta)}
-        caption={(
-          <>
-            <Box component="span" sx={{ display: 'block' }}>Selected-test duration change: latest vs oldest commit</Box>
-          </>
-        )}
-        icon={<SpeedRoundedIcon />}
-        tone={baselineTone}
-        badge={Number.isFinite(metrics.durationDelta) && (
-          <Stack component="span" direction="row" sx={{ alignItems: 'center', color: baselineTone === 'neutral' ? 'text.secondary' : `${baselineTone}.main` }}>
-            {baselineState === 'faster' && <ArrowDownwardRoundedIcon sx={{ fontSize: 16 }} />}
-            {baselineState === 'slower' && <ArrowUpwardRoundedIcon sx={{ fontSize: 16 }} />}
-            {baselineState === 'neutral' && <RemoveRoundedIcon sx={{ fontSize: 16 }} />}
-          </Stack>
-        )}
-      />
-      <MetricCard
-        label="Run coverage"
-        value={hasResults ? `${metrics.completed} / ${metrics.total}` : '—'}
-        caption="Completed selected tests in the latest run"
-        icon={<FactCheckRoundedIcon />}
-        tone={!hasResults ? 'neutral' : metrics.completeness === 100 ? 'success' : 'warning'}
-      />
-      <MetricCard
-        label="Run health"
-        value={!hasResults ? '—' : healthy ? 'Healthy' : `${metrics.failed} issue${metrics.failed === 1 ? '' : 's'}`}
-        caption={!hasResults
-          ? 'No latest-run health data available'
-          : healthy
-            ? 'All selected tests completed without failures'
-            : 'Review failed or incomplete selected tests'}
-        icon={<HealthAndSafetyRoundedIcon />}
-        tone={!hasResults ? 'neutral' : healthy ? 'success' : 'error'}
-      />
-    </Box>
-  );
+export default function MetricsGrid({ projection }) {
+  const rows = projection.rows;
+  return <Box data-testid="metric-strip" sx={{ display: 'grid', gap: 2, gridTemplateColumns: { xs: '1fr', sm: 'repeat(2,minmax(0,1fr))', md: 'repeat(4,minmax(0,1fr))' } }}>
+    <Metric label="Latest duration" icon={TimerRoundedIcon} iconColor="dashboard.secondaryAccent" rows={rows} valueFor={(r) => r.latest.durationSeconds == null ? null : formatDuration(r.latest.durationSeconds)} caption={projection.endpointLabel} />
+    <Metric label="Relative speedup" icon={SpeedRoundedIcon} iconColor="dashboard.goldAccent" rows={rows} valueFor={(r) => r.latest.speedup == null ? null : `${r.latest.speedup.toFixed(2)}×`} caption="First valid reference / latest · higher is faster" />
+    <Metric label="Latest results" icon={ChecklistRoundedIcon} iconColor="dashboard.roseAccent" rows={rows} valueFor={(r) => `${r.latest.completed}/${r.latest.required}`} caption="Succeeded / required workloads" />
+    <Metric label="Valid data points" icon={FactCheckRoundedIcon} iconColor="dashboard.oliveAccent" rows={rows} valueFor={(r) => r.points.filter((point) => Number.isFinite(point.speedup)).length} caption="Plotted points in selected range" />
+  </Box>;
 }

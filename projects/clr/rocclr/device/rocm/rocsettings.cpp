@@ -91,7 +91,7 @@ Settings::Settings() {
 
 // ================================================================================================
 bool Settings::create(bool fullProfile, const amd::Isa& isa, bool enableXNACK, bool coop_groups,
-                      bool isXgmi, bool isAPU) {
+                      bool isXgmi, bool isAPU, int aqlExtDispatch) {
   uint32_t gfxipMajor = isa.versionMajor();
   uint32_t gfxipMinor = isa.versionMinor();
   uint32_t gfxStepping = isa.versionStepping();
@@ -201,8 +201,12 @@ bool Settings::create(bool fullProfile, const amd::Isa& isa, bool enableXNACK, b
     enableExtension(ClKhrMipMapImageWrites);
   }
 
-  if (gfxipMajor == 12 && gfxipMinor >= 5) {
-    ext_dispatch_packet_ = true;
+  // The ext kernel dispatch packet carries one dependency in its dep_signal. ROCr reports it for
+  // gfx12.5, which supports it natively, and for a device whose CP firmware does; the ISA decides
+  // only when ROCr can't be asked. The carveout stays gfx12.5's.
+  const bool gfx125 = (gfxipMajor == 12 && gfxipMinor >= 5);
+  ext_dispatch_packet_ = (aqlExtDispatch >= 0) ? (aqlExtDispatch != 0) : gfx125;
+  if (gfx125) {
     groupMemCarveout_ = true;
   }
 
@@ -212,13 +216,15 @@ bool Settings::create(bool fullProfile, const amd::Isa& isa, bool enableXNACK, b
     sdma_indirect_max_size_ = 0x3fffffff;  // ROCr MaxSingleLinearCopySize
   }
 
+  sdma_asymmetric_swap_supported_ = false;
+
 #if defined(_WIN32)
   if (gfxipMajor >= 11) {
-    // Due to driver limitation,
-    // D3D10/11 sharing extensions are only supported on GFX11 or later,
-    // and D3D9 sharing extension is not supported on any hardware as it is deprecated.
+    // Due to driver limitation, the D3D sharing extensions are only supported on
+    // GFX11 or later.
     enableExtension(ClKhrD3d10Sharing);
     enableExtension(ClKhrD3d11Sharing);
+    enableExtension(ClKhrD3d9Sharing);
     enableExtension(ClAmdPlanarYuv);
   }
 #endif

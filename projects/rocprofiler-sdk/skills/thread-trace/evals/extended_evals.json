@@ -8,7 +8,7 @@
       "expected_behavior": [
         "Captures the kernel with rocprofv3 --att and reads the stats CSV or the skill's att_mine.py output",
         "Identifies that the loop's s_waitcnt instructions hold the time, and from the disassembly that each data load needs the index loaded just before it, so the waits happen one after another",
-        "Names the responsible source lines: the dependent index-then-data load chain at gather_chain.hip:34-35 (either line, or both)"
+        "Names the responsible source lines: the dependent index-then-data load chain at gather_chain.hip:56-57 (either line, or both)"
       ],
       "unexpected_behavior": [
         "Blames a cause without evidence from the trace",
@@ -27,7 +27,7 @@
         "Captures the kernel with rocprofv3 --att and reads the stats CSV or the skill's att_mine.py output",
         "Identifies that the precise exponential and division sequence holds most of the loop's cycles",
         "Reads resources/compute.md, which the att_mine.py next: line points to, or runs att_mine.py pipes and reports that VALU instructions (mostly the exponential and reciprocal ones) hold most of the stall",
-        "Names the responsible source line (the planted defect is at soft_clip.hip:29)"
+        "Names the responsible source line (the planted defect is at soft_clip.hip:51)"
       ],
       "unexpected_behavior": [
         "Blames a cause without evidence from the trace",
@@ -45,7 +45,7 @@
       "expected_behavior": [
         "Captures the kernel with rocprofv3 --att and reads the stats CSV or the skill's att_mine.py output",
         "Identifies that most waves of each workgroup spend most of their time at s_barrier, waiting for the one wave that runs the per-round series (the code under threadIdx.x == 0) before reaching it",
-        "Names the responsible source line (the planted defect is at leader_scale.hip:42)"
+        "Names the responsible source line (the planted defect is at leader_scale.hip:64)"
       ],
       "unexpected_behavior": [
         "Blames a cause without evidence from the trace",
@@ -59,7 +59,7 @@
       "id": "thread-trace-query-wait-cycles-per-wave",
       "skill_should_trigger": true,
       "workspace": "evals/files/gather-chain-latency",
-      "prompt": "gather_chain.hip in this directory runs on an AMD MI300X. Build it as its header comment says and capture it with thread trace. How many cycles does each traced wave spend in wait instructions (s_waitcnt) on the gather loop's lines (gather_chain.hip:34-35)? Trace more than one shader engine (for example --att-shader-engine-mask 0xf) so that there are several waves, and report the median and the 90th percentile across the traced waves, and how you computed them. Do not change the code.",
+      "prompt": "gather_chain.hip in this directory runs on an AMD MI300X. Build it as its header comment says and capture it with thread trace. How many cycles does each traced wave spend in wait instructions (s_waitcnt) on the gather loop's lines (gather_chain.hip:56-57)? Trace more than one shader engine (for example --att-shader-engine-mask 0xf) so that there are several waves, and report the median and the 90th percentile across the traced waves, and how you computed them. Do not change the code.",
       "expected_behavior": [
         "Captures the kernel with rocprofv3 --att",
         "Decodes the trace's per-wave instruction records with the rocprof-trace-decoder Python API and sums, per wave, the cycles of the wait instructions on those lines",

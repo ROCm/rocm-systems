@@ -47,9 +47,7 @@ constexpr size_t ddaLL128ArSlotWords(size_t bankSize, int nRanks) {
 // Self does not round-trip through scratch; its contribution is packed straight
 // from sendbuff. Scratch is double buffered: bank = flag & 1.
 template <typename T, int NRANKS_CT>
-#if defined(USE_ROCM)
 __launch_bounds__(512)
-#endif
   __global__ void ddaAllReduceFlatLL128(T* const* __restrict__ peerScratch, // ddaPeerPtrsDev: nRanks scratch bases
                                         T* __restrict__ recvbuff, // local user output
                                         const T* __restrict__ sendbuff, // local user input
@@ -72,7 +70,7 @@ __launch_bounds__(512)
 
   const uint32_t flag32 = ddaGetLLEpochInc(epochDev, blockIdx.x, 1);
   const uint64_t flag = ((uint64_t)flag32 << 32) | (uint64_t)flag32;
-  // ddaBankSize() floors the bank to a multiple of 16B, so it is always a whole
+  // ddaBankSize() floors the bank to a multiple of 128B, so it is always a whole
   // number of 8B words and the slot stride below is a whole number of slices.
   const size_t slotWords = ddaLL128ArSlotWords(bankSize, nRanks);
   const uint64_t bankWords = (uint64_t)(flag32 & 1u) * (uint64_t)(bankSize / sizeof(uint64_t));

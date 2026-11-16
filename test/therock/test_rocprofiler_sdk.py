@@ -35,7 +35,6 @@ def setup_env():
     environ_vars["ROCM_PATH"] = str(THEROCK_PATH)
     environ_vars["HIP_PATH"] = str(THEROCK_PATH)
     environ_vars["ROCPROFILER_METRICS_PATH"] = str(ROCPROFILER_SDK_PATH)
-    environ_vars["HIP_PLATFORM"] = "amd"
 
     old_ld_lib_path = os.getenv("LD_LIBRARY_PATH", "").split(":")
     environ_vars["LD_LIBRARY_PATH"] = ":".join(
@@ -55,6 +54,7 @@ def cmake_config():
         f"-DCMAKE_C_COMPILER={THEROCK_CLANG_PATH}",
         f"-DCMAKE_CXX_COMPILER={THEROCK_CLANG_PLUS_PATH}",
         f"-DPython3_EXECUTABLE={sys.executable}",
+        "-DHIP_PLATFORM=amd",
     ]
 
     logging.info(

@@ -95,3 +95,7 @@ RUN if [ -n "${ROCM_VERSION}" ]; then \
 
 WORKDIR /home
 SHELL [ "/bin/bash", "--login", "-c" ]
+
+# Build/development image that runs as root by design.
+# trivy:ignore:DS-0002
+USER root

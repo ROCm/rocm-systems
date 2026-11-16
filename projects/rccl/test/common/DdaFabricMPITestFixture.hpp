@@ -171,11 +171,13 @@ protected:
         return mpiCoordinatedSkipReason(!DdaFabricMPI::isGfx1250Device(), reason);
     }
 
-    // After createTestCommunicator(): without MNNVL, or on a multi-clique comm, fabric DDA never initializes.
-    std::string fabricInitSkipReason()
+    // After comm init (default: createTestCommunicator()'s): without MNNVL, or on a multi-clique comm, fabric DDA
+    // never initializes.
+    std::string fabricInitSkipReason(ncclComm_t comm = nullptr)
     {
-        return mpiCoordinatedSkipReason(getActiveCommunicator()->ddaFabricBarrierState == nullptr,
-                                        "DDA fabric path did not initialize");
+        if(comm == nullptr)
+            comm = getActiveCommunicator();
+        return mpiCoordinatedSkipReason(comm->ddaFabricBarrierState == nullptr, "DDA fabric path did not initialize");
     }
 
     size_t countLogNeedle(const char* needle) const

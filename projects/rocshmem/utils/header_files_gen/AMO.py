@@ -65,7 +65,7 @@ def generate_atomic_fetch_api():
     expanded_code = """
 /**
  * @name SHMEM_ATOMIC_FETCH
- * @brief Atomically return the value of \p dest to the calling PE.
+ * @brief Atomically return the value of \\p dest to the calling PE.
  *
  * The operation is blocking.
  *
@@ -78,7 +78,7 @@ def generate_atomic_fetch_api():
  * @param[in] val     The value to be atomically added.
  * @param[in] pe      PE of the remote process.
  *
- * @return            The value of \p dest.
+ * @return            The value of \\p dest.
  */\n"""
 
     for type_, tname_ in float_types:
@@ -107,7 +107,7 @@ def generate_atomic_set_api():
     expanded_code = """
 /**
  * @name SHMEM_ATOMIC_SET
- * @brief Atomically set the value \p val to \p dest on \p pe.
+ * @brief Atomically set the value \\p val to \\p dest on \\p pe.
  *
  * The operation is blocking.
  *
@@ -149,8 +149,8 @@ def generate_atomic_compare_swap_api():
     expanded_code = """
 /**
  * @name SHMEM_ATOMIC_COMPARE_SWAP
- * @brief Atomically compares if the value in \p dest with \p cond is equal
- * then put \p val in \p dest. The operation returns the older value of \p dest
+ * @brief Atomically compares if the value in \\p dest with \\p cond is equal
+ * then put \\p val in \\p dest. The operation returns the older value of \\p dest
  * to the calling PE.
  *
  * The operation is blocking.
@@ -165,7 +165,7 @@ def generate_atomic_compare_swap_api():
  * @param[in] val     The value to be atomically swapped.
  * @param[in] pe      PE of the remote process.
  *
- * @return            The old value of \p dest.
+ * @return            The old value of \\p dest.
  */\n"""
     for type_, tname_ in types:
         expanded_code += atomic_compare_swap_api(type_, tname_)
@@ -190,7 +190,7 @@ def generate_atomic_swap_api():
     expanded_code = """
 /**
  * @name SHMEM_ATOMIC_SWAP
- * @brief Atomically swap the value \p val to \p dest on \p pe.
+ * @brief Atomically swap the value \\p val to \\p dest on \\p pe.
  *
  * The operation is blocking.
  *
@@ -232,8 +232,8 @@ def generate_atomic_fetch_inc_api():
     expanded_code = """
 /**
  * @name SHMEM_ATOMIC_FETCH_INC
- * @brief Atomically add 1 to \p dest on \p pe. The operation
- * returns the older value of \p dest to the calling PE.
+ * @brief Atomically add 1 to \\p dest on \\p pe. The operation
+ * returns the older value of \\p dest to the calling PE.
  *
  * The operation is blocking.
  *
@@ -245,7 +245,7 @@ def generate_atomic_fetch_inc_api():
                       heap.
  * @param[in] pe      PE of the remote process.
  *
- * @return            The old value of \p dest before it was incremented by 1.
+ * @return            The old value of \\p dest before it was incremented by 1.
  */\n"""
     for type_, tname_ in types:
         expanded_code += atomic_fetch_inc_api(type_, tname_)
@@ -270,7 +270,7 @@ def generate_atomic_inc_api():
     expanded_code = """
 /**
  * @name SHMEM_ATOMIC_INC
- * @brief Atomically add 1 to \p dest on \p pe.
+ * @brief Atomically add 1 to \\p dest on \\p pe.
  *
  * The operation is blocking.
  *
@@ -307,8 +307,8 @@ def generate_atomic_fetch_add_api():
     expanded_code = """
 /**
  * @name SHMEM_ATOMIC_FETCH_ADD
- * @brief Atomically add the value \p val to \p dest on \p pe. The operation
- * returns the older value of \p dest to the calling PE.
+ * @brief Atomically add the value \\p val to \\p dest on \\p pe. The operation
+ * returns the older value of \\p dest to the calling PE.
  *
  * The operation is blocking.
  *
@@ -321,7 +321,7 @@ def generate_atomic_fetch_add_api():
  * @param[in] val     The value to be atomically added.
  * @param[in] pe      PE of the remote process.
  *
- * @return            The old value of \p dest before the \p val was added.
+ * @return            The old value of \\p dest before the \\p val was added.
  */\n"""
     for type_, tname_ in types:
         expanded_code += atomic_fetch_add_api(type_, tname_)
@@ -346,7 +346,7 @@ def generate_atomic_add_api():
     expanded_code = """
 /**
  * @name SHMEM_ATOMIC_ADD
- * @brief Atomically add the value \p val to \p dest on \p pe.
+ * @brief Atomically add the value \\p val to \\p dest on \\p pe.
  *
  * The operation is blocking.
  *
@@ -384,7 +384,7 @@ def generate_atomic_fetch_and_api():
     expanded_code = """
 /**
  * @name SHMEM_ATOMIC_FETCH_AND
- * @brief Atomically bitwise-and the value \p val to \p dest on \p pe.
+ * @brief Atomically bitwise-and the value \\p val to \\p dest on \\p pe.
  *
  * The operation is blocking.
  *
@@ -422,7 +422,7 @@ def generate_atomic_and_api():
     expanded_code = """
 /**
  * @name SHMEM_ATOMIC_AND
- * @brief Atomically bitwise-and the value \p val to \p dest on \p pe.
+ * @brief Atomically bitwise-and the value \\p val to \\p dest on \\p pe.
  *
  * The operation is blocking.
  *
@@ -460,7 +460,7 @@ def generate_atomic_fetch_or_api():
     expanded_code = """
 /**
  * @name SHMEM_ATOMIC_FETCH_OR
- * @brief Atomically bitwise-or the value \p val to \p dest on \p pe.
+ * @brief Atomically bitwise-or the value \\p val to \\p dest on \\p pe.
  *
  * The operation is blocking.
  *
@@ -498,7 +498,7 @@ def generate_atomic_or_api():
     expanded_code = """
 /**
  * @name SHMEM_ATOMIC_OR
- * @brief Atomically bitwise-or the value \p val to \p dest on \p pe.
+ * @brief Atomically bitwise-or the value \\p val to \\p dest on \\p pe.
  *
  * The operation is blocking.
  *
@@ -536,7 +536,7 @@ def generate_atomic_fetch_xor_api():
     expanded_code = """
 /**
  * @name SHMEM_ATOMIC_FETCH_XOR
- * @brief Atomically bitwise-xor the value \p val to \p dest on \p pe.
+ * @brief Atomically bitwise-xor the value \\p val to \\p dest on \\p pe.
  *
  * The operation is blocking.
  *
@@ -574,7 +574,7 @@ def generate_atomic_xor_api():
     expanded_code = """
 /**
  * @name SHMEM_ATOMIC_XOR
- * @brief Atomically bitwise-xor the value \p val to \p dest on \p pe.
+ * @brief Atomically bitwise-xor the value \\p val to \\p dest on \\p pe.
  *
  * The operation is blocking.
  *

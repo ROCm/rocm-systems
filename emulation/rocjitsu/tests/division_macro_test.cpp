@@ -2,7 +2,9 @@
 // SPDX-License-Identifier: MIT
 
 #include "cdna5_sim_test_common.h"
+#include "compute_unit_test_util.h"
 #include "decode_test_util.h"
+#include "rocjitsu/vm/amdgpu/arithmetic_policy.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 
 #include <array>
@@ -141,8 +143,20 @@ TEST(DivisionTest, GuestModeAndFixupCausesMatchGfx1201) {
       config.sgprs_per_wf = 128;
       config.vgprs_per_wf = 32;
       config.lds_size_kb = 64;
-      std::unique_ptr<amdgpu::ComputeUnitCore> cu =
-          amdgpu::ComputeUnitCore::create("division", config, &memory, &cache);
+      // Policies are immutable while waves are active. FMAS needs numeric exactness;
+      // FIXUP additionally reports FP status, so give each its own CU.
+      config.arithmetic = {amdgpu::ArithmeticSemantics::BitExactEmpiricalNoFpStatus};
+      std::unique_ptr<amdgpu::ComputeUnitCore> fmas_cu;
+      ASSERT_NO_FATAL_FAILURE(rocjitsu::test::initialize_compute_unit(fmas_cu, "division_fmas",
+                                                                      config, &memory, &cache));
+      auto *fmas_wf = fmas_cu->dispatch_wf(0, 0, 128, 32);
+      ASSERT_NE(fmas_wf, nullptr);
+      fmas_wf->set_exec(1);
+      const uint32_t fmas_base = fmas_wf->vgpr_alloc().base;
+      config.arithmetic = {amdgpu::ArithmeticSemantics::BitExactEmpirical};
+      std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+      ASSERT_NO_FATAL_FAILURE(
+          rocjitsu::test::initialize_compute_unit(cu, "division", config, &memory, &cache));
       amdgpu::Wavefront *wf = cu->dispatch_wf(0, 0, 128, 32);
       ASSERT_NE(wf, nullptr);
       wf->set_exec(1);
@@ -180,14 +194,23 @@ TEST(DivisionTest, GuestModeAndFixupCausesMatchGfx1201) {
             wf->set_mode_raw(
                 wide ? (rounding << 2) | (denorm << 6) | (rounding ^ 3u) | ((denorm ^ 3u) << 4)
                      : rounding | (denorm << 4) | ((rounding ^ 3u) << 2) | ((denorm ^ 3u) << 6));
-            write(stride, 0);
-            write(2 * stride, 0);
-            write(3 * stride, midpoint);
-            wf->set_vcc_mask(1);
+            fmas_wf->set_mode_raw(wf->mode_raw());
+            for (uint32_t operand = 1; operand <= 3; ++operand) {
+              const uint64_t bits = operand == 3 ? midpoint : 0;
+              fmas_cu->write_vgpr(fmas_base + operand * stride, 0, static_cast<uint32_t>(bits));
+              if (wide)
+                fmas_cu->write_vgpr(fmas_base + operand * stride + 1, 0,
+                                    static_cast<uint32_t>(bits >> 32));
+            }
+            fmas_wf->set_vcc_mask(1);
+            fmas_cu->write_vgpr(fmas_base, 1, 0x12345678u);
+            fmas->execute(*fmas, fmas_wf);
+            const uint64_t fmas_result =
+                fmas_cu->read_vgpr(fmas_base, 0) |
+                (wide ? uint64_t{fmas_cu->read_vgpr(fmas_base + 1, 0)} << 32 : 0);
+            EXPECT_EQ(fmas_result, rounding == 1 && (denorm & 2u) ? 1u : 0u);
+            EXPECT_EQ(fmas_cu->read_vgpr(fmas_base, 1), 0x12345678u);
             cu->write_vgpr(base, 1, 0x12345678u);
-            fmas->execute(*fmas, wf);
-            EXPECT_EQ(result(), rounding == 1 && (denorm & 2u) ? 1u : 0u);
-            EXPECT_EQ(cu->read_vgpr(base, 1), 0x12345678u);
 
             // A flushed subnormal denominator is zero for the quotient and its
             // divide-by-zero cause. Only preserved inputs raise input-denormal.
@@ -205,6 +228,10 @@ TEST(DivisionTest, GuestModeAndFixupCausesMatchGfx1201) {
           }
         }
         for (bool clamp : {false, true}) {
+          // RDNA4 ISA 7.2.3.1 says exceptions precede CLAMP, but gfx1201
+          // suppresses new FIXUP flags under CLAMP; old sticky flags survive.
+          // Preserve the existing CDNA5 expectation (not measured here).
+          const uint32_t omod_causes = arch == ROCJITSU_CODE_ARCH_RDNA4 && clamp ? 0u : 1u << 3;
           wf->set_mode_raw(0);
           write(stride, inf - 1); // Finite quotient before OMOD.
           write(2 * stride, one);
@@ -218,8 +245,8 @@ TEST(DivisionTest, GuestModeAndFixupCausesMatchGfx1201) {
           wf->clear_pending_alu_causes();
           modified->execute(*modified, wf);
           EXPECT_EQ(result(), clamp ? one : inf);
-          EXPECT_EQ(wf->pending_alu_causes(), 1u << 3);
-          EXPECT_EQ(wf->trapsts(), (1u << 3) | (1u << 5));
+          EXPECT_EQ(wf->pending_alu_causes(), omod_causes);
+          EXPECT_EQ(wf->trapsts(), omod_causes | (1u << 5));
 
           // Directed FIXUP recovery can produce max-finite, which OMOD then
           // overflows. ABS/NEG on either original input determines that recovery.
@@ -247,8 +274,8 @@ TEST(DivisionTest, GuestModeAndFixupCausesMatchGfx1201) {
               const uint64_t expected =
                   absolute ? (clamp ? one : inf - 1) : (clamp ? 0 : (inf - 1) | sign);
               EXPECT_EQ(result(), expected);
-              EXPECT_EQ(wf->pending_alu_causes(), 1u << 3);
-              EXPECT_EQ(wf->trapsts(), (1u << 3) | (1u << 5));
+              EXPECT_EQ(wf->pending_alu_causes(), omod_causes);
+              EXPECT_EQ(wf->trapsts(), omod_causes | (1u << 5));
               EXPECT_EQ(cu->read_vgpr(base, 1), 0x12345678u);
             }
           }
@@ -347,6 +374,7 @@ TEST(DivisionTest, GuestModeAndFixupCausesMatchGfx1201) {
           }
         }
       }
+      fmas_wf->halt();
       wf->halt();
     }
   }

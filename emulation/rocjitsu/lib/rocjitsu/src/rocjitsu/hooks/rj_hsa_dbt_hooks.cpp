@@ -587,6 +587,8 @@ void trace_virtual_lds_kernarg(uint64_t packet_id, const void *kernarg, size_t s
     return "kernel-skipped";
   case DiagnosticKind::ResidualRewrite:
     return "residual-rewrite";
+  case DiagnosticKind::InternalError:
+    return "internal-error";
   }
   return "unknown";
 }

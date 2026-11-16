@@ -64,7 +64,7 @@ shader_data_callback(rocprofiler_thread_trace_shader_data_t shader_data,
                      rocprofiler_user_data_t                userdata);
 
 void
-init();
+init(bool check_exec_mask = false);
 
 void
 finalize(void* /* tool_data */);

@@ -14,6 +14,7 @@
 #include "nccl_device.h"
 #include "rccl_vector_types.h"
 #include "gin_sdma_devtime.h" // shared device-side (wall_clock64) timing scaffold
+#include "gin_resource_sharing.h"  // --gin_resource_sharing mode selection
 #endif
 
 void AllGatherGetCollByteCount(size_t *sendcount, size_t *recvcount, size_t *paramcount, size_t *sendInplaceOffset, size_t *recvInplaceOffset, size_t count, size_t eltSize, int nranks) {
@@ -202,7 +203,11 @@ __device__ void ginAllGatherBody(ncclWindow_t sendwin, size_t sendoffset, ncclWi
 
   const int ginContext = 0;
   const unsigned int signalIndex = blockIdx.x;
-  ncclGin gin { devComm, ginContext };
+  // GPU-locked, NOT --gin_resource_sharing: unlike alltoall/broadcast, the puts
+  // here are spread across CTAs (peer r on CTA r%gridDim.x) and every CTA posts
+  // the world barrier, so qps[peer] is multi-poster -- THREAD's lock elision would
+  // race. Keep the SQ lock regardless of the CLI selection.
+  ncclGin gin { devComm, ginContext, NCCL_GIN_RESOURCE_SHARING_GPU };
   const uint64_t signalValue = gin.readSignal(signalIndex);
 
   ncclBarrierSession<ncclCoopCta> bar { ncclCoopCta(), ncclTeamTagWorld(), gin, blockIdx.x };
@@ -343,7 +348,7 @@ testResult_t AllGatherDeviceTime(struct threadArgs* args, ncclDataType_t type, n
   double devUs = 0.0;
   TESTCHECK(gin_devtime::measure(args, gridCtas, loop,
       [&](int i, long long* d_start, long long* d_end) {
-        ncclDevComm* devComm = args->devComms + i;
+        ncclDevComm* devComm = testDevComms(args, i);
         ncclWindow_t sendwin = (ncclWindow_t)(in_place ? args->recvRegHandles[i] : args->sendRegHandles[i]);
         ncclWindow_t recvwin = (ncclWindow_t)args->recvRegHandles[i];
         size_t sendoff = in_place ? args->sendInplaceOffset * (size_t)devComm->rank : 0;
@@ -377,6 +382,28 @@ testResult_t AllGatherDeviceTime(struct threadArgs* args, ncclDataType_t type, n
 }
 #endif
 
+#if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,7)
+// Tier report for -D 3. An all-peers DIRECT allgather whose transport the hybrid
+// kernel picks per-rank, keyed on the same chunkBytes-vs-threshold crossover the
+// device evaluates (chunkUsesLsaTier): <= threshold -> direct-LSA all-peers store;
+// > threshold -> GIN-put (Anvil-SDMA). `count` here is the per-rank input-chunk
+// element count (args->nbytes/eltSize), matching gin_sdma_allgather::chunkBytes.
+testResult_t AllGatherGetDeviceImplInfo(int /*deviceImpl*/, size_t count, ncclDataType_t type,
+    int /*nRanks*/, int /*lsaSize*/, char* algoOut, char* protoOut) {
+  snprintf(algoOut, 16, "%s", "T-DIRECT");
+  const size_t sdmaThreshold = AllGatherResolveSdmaThreshold();
+  const size_t chunkBytes = gin_sdma_allgather::chunkBytes(count, (size_t)wordSize(type));
+  snprintf(protoOut, 16, "%s", gin_sdma_allgather::chunkUsesLsaTier(chunkBytes, sdmaThreshold) ? "LSA" : "GIN");
+  return testSuccess;
+}
+#else
+testResult_t AllGatherGetDeviceImplInfo(int, size_t, ncclDataType_t, int, int, char* algoOut, char* protoOut) {
+  snprintf(algoOut, 16, "%s", "T-DIRECT");
+  snprintf(protoOut, 16, "%s", "GIN");
+  return testSuccess;
+}
+#endif
+
 struct testColl allGatherTest = {
   "AllGather",
   AllGatherGetCollByteCount,
@@ -386,7 +413,8 @@ struct testColl allGatherTest = {
   AllGatherGetAlgoProtoChannels,
   AllGatherGetSymkInfo,
   AllGatherGetCollImplInfo,
-  AllGatherDeviceTime
+  AllGatherDeviceTime,
+  AllGatherGetDeviceImplInfo
 };
 
 void AllGatherGetBuffSize(size_t *sendcount, size_t *recvcount, size_t count, int nranks) {
@@ -396,6 +424,12 @@ void AllGatherGetBuffSize(size_t *sendcount, size_t *recvcount, size_t count, in
 
 testResult_t AllGatherRunTest(struct threadArgs* args, int root, ncclDataType_t type, const char* typeName, ncclRedOp_t op, const char* opName) {
   args->collTest = &allGatherTest;
+#if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
+  for (int i = 0; i < args->nGpus; i++) {
+    CUDACHECK(cudaSetDevice(args->gpus[i]));
+    TESTCHECK(uploadGinResourceSharingMode());
+  }
+#endif
   ncclDataType_t *run_types;
   const char **run_typenames;
   int type_count;

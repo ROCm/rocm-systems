@@ -52,7 +52,7 @@ class DockerPlanTest(unittest.TestCase):
 class ScriptTest(unittest.TestCase):
     def test_emulator_uses_both_default_configs(self):
         script = hrr_dev.container_script(Path("/repo"), "emulator")
-        self.assertIn("gfx950_mi355x_kmd_2gpu.json", script)
+        self.assertIn("gfx950_mi350x_kmd_2gpu.json", script)
         self.assertIn("gfx1250_mi455x_kmd_4gpu.json", script)
         self.assertIn("--arch gfx950", script)
         self.assertIn("--arch gfx1250", script)
@@ -65,7 +65,7 @@ class ScriptTest(unittest.TestCase):
         script = hrr_dev.container_script(Path("/repo"), "gpu")
         self.assertIn("--arch auto", script)
         self.assertNotIn("rocjitsu", script)
-        self.assertNotIn("gfx950_mi355x_kmd_2gpu.json", script)
+        self.assertNotIn("gfx950_mi350x_kmd_2gpu.json", script)
         self.assertIn("detect_archs", script)
         self.assertNotIn("gfx950;gfx1250", script)
 

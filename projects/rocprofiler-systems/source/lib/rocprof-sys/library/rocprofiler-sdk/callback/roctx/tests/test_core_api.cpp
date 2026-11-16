@@ -137,9 +137,9 @@ expect_end_sinks(std::size_t operation, std::string_view name, std::uint64_t beg
 {
     EXPECT_CALL(*g_externals_mock, get_ppid()).WillOnce(Return(k_ppid));
     EXPECT_CALL(*g_externals_mock, get_pid()).WillOnce(Return(k_pid));
-    EXPECT_CALL(*g_metadata_registry_mock,
-                add_thread_info(
-                    Eq(thread_info_data_t{ k_ppid, k_pid, k_thread_id, 0, 0, "{}" })));
+    EXPECT_CALL(
+        *g_metadata_registry_mock,
+        ensure_thread(Eq(thread_info_data_t{ k_ppid, k_pid, k_thread_id, 0, 0, "{}" })));
 
     auto& iterate_expectation = EXPECT_CALL(
         *g_tracing_backend_mock,

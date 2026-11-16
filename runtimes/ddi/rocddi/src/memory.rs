@@ -1,6 +1,15 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#![cfg_attr(
+    windows,
+    allow(
+        unused_imports,
+        unused_variables,
+        reason = "native provider routes are absent on this host target"
+    )
+)]
+
 //! Runtime storage, host backing, and device-accessible memory.
 //!
 //! [`storage`] provides fallible storage for runtime ownership records.
@@ -16,6 +25,8 @@
 //! owner supplies its cache policy and full-range lifetime.
 //! Platform-specific sharing transports live under [`interop`].
 
+pub mod advice;
+pub mod constraints;
 pub mod device;
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
@@ -28,7 +39,8 @@ pub(crate) use device::{
     Allocation, AllocationDesc, AllocationInfo, AllocationLimits, DeviceAccess, DriverAllocation,
     DriverVirtualAddress, DriverVirtualDeviceMapping, DriverVirtualHostMapping,
     DriverVirtualMemory, HostCacheability, HostMappingPolicy, HostRegistration, MemoryKind,
-    VirtualAddressInfo, VirtualMapRequest, VirtualMemory, VirtualMemoryInfo, set_device_access_for,
+    VirtualAddressInfo, VirtualMapRequest, VirtualMemory, VirtualMemoryInfo, VirtualMemoryOptions,
+    set_device_access_for,
 };
 #[cfg(test)]
 pub(crate) use device::{DeviceIntervals, HostIntervals};

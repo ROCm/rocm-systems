@@ -1,12 +1,15 @@
 # Copyright (c) 2026 Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-if(NOT NM OR NOT MODEL_BINARY)
-    message(FATAL_ERROR "NM and MODEL_BINARY are required")
+if(NOT NM OR NOT MODEL_BINARY OR NOT REQUIRED_MODEL_ARCHES)
+    message(
+        FATAL_ERROR
+        "NM, MODEL_BINARY and REQUIRED_MODEL_ARCHES are required"
+    )
 endif()
 
 execute_process(
-    COMMAND "${NM}" -C "${MODEL_BINARY}"
+    COMMAND "${NM}" -C --format=bsd "${MODEL_BINARY}"
     RESULT_VARIABLE _nm_result
     OUTPUT_VARIABLE _symbols
     ERROR_VARIABLE _nm_error
@@ -23,6 +26,7 @@ set(_forbidden_symbols
     "ds_calculate_addresses("
     "flat_calculate_addresses("
     "mubuf_calculate_addresses("
+    ${EXTRA_FORBIDDEN_SYMBOLS}
 )
 foreach(_forbidden IN LISTS _forbidden_symbols)
     string(FIND "${_symbols}" "${_forbidden}" _match)
@@ -34,32 +38,35 @@ foreach(_forbidden IN LISTS _forbidden_symbols)
     endif()
 endforeach()
 
-# Keep the denylist from passing vacuously if the model objects disappear from
-# the final link. Aggregate consumers provide a comma-separated architecture
-# list; existing cdna5-only checks retain their decoder-symbol assertion.
-if(REQUIRED_MODEL_ARCHES)
-    string(REPLACE "," ";" _required_arches "${REQUIRED_MODEL_ARCHES}")
-    foreach(_arch IN LISTS _required_arches)
-        set(_required_symbol
-            "rocjitsu::${_arch}::create_model_target_decoder()"
-        )
-        string(FIND "${_symbols}" "${_required_symbol}" _match)
-        if(_match EQUAL -1)
-            message(
-                FATAL_ERROR
-                "model-only binary is missing model symbol: ${_required_symbol}"
-            )
-        endif()
-    endforeach()
-else()
-    set(_required_symbol
-        "rocjitsu::cdna5::Decoder::decode(unsigned int const*, util::DiagnosticEmitter const&)"
+# The registry takes each model factory's address, even when LTO inlines
+# Decoder::decode. Require a definition in this binary to keep the denylist
+# from passing on an empty image or one that only imports the model.
+execute_process(
+    COMMAND "${NM}" -C --defined-only --format=posix "${MODEL_BINARY}"
+    RESULT_VARIABLE _nm_result
+    OUTPUT_VARIABLE _definitions
+    ERROR_VARIABLE _nm_error
+)
+if(NOT _nm_result EQUAL 0)
+    message(FATAL_ERROR "nm failed: ${_nm_error}")
+endif()
+
+# Give the first POSIX record the same name boundary as every later record.
+set(_definitions "\n${_definitions}")
+string(REPLACE "," ";" _required_arches "${REQUIRED_MODEL_ARCHES}")
+set(_required_symbols ${EXTRA_REQUIRED_SYMBOLS})
+foreach(_arch IN LISTS _required_arches)
+    list(
+        APPEND _required_symbols
+        "rocjitsu::${_arch}::create_model_target_decoder()"
     )
-    string(FIND "${_symbols}" "${_required_symbol}" _match)
+endforeach()
+foreach(_required_symbol IN LISTS _required_symbols)
+    string(FIND "${_definitions}" "\n${_required_symbol} " _match)
     if(_match EQUAL -1)
         message(
             FATAL_ERROR
-            "model-only binary is missing model symbol: ${_required_symbol}"
+            "model-only binary is missing symbol: ${_required_symbol}"
         )
     endif()
-endif()
+endforeach()
