@@ -139,6 +139,7 @@ struct VmmLog {
   std::string failAt;  // the call that returns an error; empty means all succeed
   size_t granularity = 4096;
   bool exportInvalidFd = false;  // DMA-BUF export succeeds but hands back fd -1
+  StickyHipLastError* lastError = nullptr;  // when set, the failing call also leaves its error pending
 };
 
 class RocmwrapMicrotest : public ::testing::Test {
@@ -232,7 +233,8 @@ protected:
   static void InstallVmm(VmmLog& log) {
     auto step = [&log](const char* name) {
       log.calls.push_back(name);
-      return log.failAt == name ? hipErrorInvalidValue : hipSuccess;
+      if (log.failAt != name) return hipSuccess;
+      return log.lastError ? log.lastError->Fail(hipErrorInvalidValue) : hipErrorInvalidValue;
     };
     g_hipMemGetAllocationGranularity = [&log, step](size_t* g, const hipMemAllocationProp* prop,
                                                     hipMemAllocationGranularity_flags) {
@@ -370,7 +372,8 @@ TEST_F(RocmwrapMicrotest, FunctionalProbe_ZeroGranularityFailsBeforeCreating) {
   EXPECT_TRUE(Logged(NCCL_LOG_INFO, "cuMem functional probe failed on device 0"));
 }
 
-// Each failing step undoes exactly the steps that succeeded before it, in reverse order.
+// Each failing step undoes exactly the steps that succeeded before it, in reverse order, and leaves no HIP
+// last error behind -- including the early exits before anything was created.
 TEST_F(RocmwrapMicrotest, FunctionalProbe_EachFailureUndoesOnlyTheCompletedSteps) {
   struct Case {
     const char* failAt;
@@ -391,11 +394,14 @@ TEST_F(RocmwrapMicrotest, FunctionalProbe_EachFailureUndoesOnlyTheCompletedSteps
   for (const auto& c : cases) {
     SCOPED_TRACE(c.failAt);
     g_logged.clear();
+    StickyHipLastError lastError;
     VmmLog log;
     log.failAt = c.failAt;
+    log.lastError = &lastError;
     InstallVmm(log);
     EXPECT_EQ(ncclCuMemFunctionalProbe(0, 1), 0);
     EXPECT_EQ(log.calls, c.calls);
+    EXPECT_EQ(lastError.pending, hipSuccess) << "the failed probe left a HIP last error behind";
     EXPECT_TRUE(Logged(NCCL_LOG_INFO, "cuMem functional probe failed on device 1"));
   }
 }
