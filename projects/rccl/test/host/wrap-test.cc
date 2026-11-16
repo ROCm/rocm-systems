@@ -8221,6 +8221,72 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_Gfx1250VmmFirstYieldsToThePeerSplit)
       });
 }
 
+// A split only uneven shards admit, where no DDA tier would run, replaces Ring: the selector asks the split within
+// Ring's launch (its channels and block width); any other split is asked with the call's own cap. Where the planner
+// picks another algorithm, the LL128 tier stays out.
+TEST(WrapMicrotestIsolated, SelectAllReduce_UnevenSplitWithinRingsLaunch) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllReduce_UnevenSplitWithinRingsLaunch",
+      []() {
+        g_loadParam = [](const char* env, int64_t def) -> int64_t {
+          return std::strcmp(env, "RCCL_DDA_LL128_THRESHOLD") == 0 ? INT64_MAX : def;
+        };
+        ArDdaHooks hooks;
+        ScopedHook llOff(g_allReduceDdaFabricLLEligible,
+                         [](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) { return false; });
+        ScopedHook ll128On(g_allReduceDdaFabricLL128Eligible,
+                           [](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) { return true; });
+        int plannedAlgo = NCCL_ALGO_RING;
+        ScopedHook ring(g_getAlgoInfo, [&plannedAlgo](struct ncclComm*, struct ncclTaskColl* task, int, int, int,
+                                                      ncclSimInfo_t*) {
+          task->algorithm = plannedAlgo;
+          task->protocol = NCCL_PROTO_SIMPLE;
+          task->nMaxChannels = 96;
+          task->nWarps = 8;
+          return ncclSuccess;
+        });
+        bool replaces = true;
+        ScopedHook nonDda(g_allReduceDdaFabricLL128SplitReplacesNonDda,
+                          [&replaces](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) {
+                            return replaces;
+                          });
+        std::vector<rcclDdaLaunchCap> caps;
+        ScopedHook split(g_allReduceDdaFabricLL128SplitEligible,
+                         [&caps](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t,
+                                 rcclDdaLaunchCap cap, bool, rcclDdaLaunchCap* bound) {
+                           caps.push_back(cap);
+                           *bound = cap;
+                           return true;
+                         });
+        ncclComm* comm = MakeArDdaComm(12);
+        comm->WarpSize = 32;
+        rcclCollDecision d{};
+        EXPECT_EQ(ncclSuccess, rcclSelectAllReduce(comm, nullptr, nullptr, 8 * kMiB / sizeof(float), ncclFloat32,
+                                                    ncclSum, /*stream=*/nullptr, /*query=*/true,
+                                                    /*graphCapturingHint=*/false, &d));
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL128, d.algo);
+        EXPECT_TRUE(d.ddaLL128Split);
+        ASSERT_EQ(1u, caps.size());
+        EXPECT_EQ(96u, caps[0].blocks) << "Ring's channels";
+        EXPECT_EQ(256u, caps[0].threads) << "Ring's block width";
+        EXPECT_EQ(96u, d.ddaCap.blocks);
+        replaces = false;
+        caps.clear();
+        EXPECT_EQ(ncclSuccess, rcclSelectAllReduce(comm, nullptr, nullptr, 8 * kMiB / sizeof(float), ncclFloat32,
+                                                    ncclSum, nullptr, true, false, &d));
+        ASSERT_EQ(1u, caps.size());
+        EXPECT_EQ(0u, caps[0].blocks) << "a DDA tier would run it: the call's own cap";
+        replaces = true;
+        plannedAlgo = NCCL_ALGO_TREE;
+        caps.clear();
+        EXPECT_EQ(ncclSuccess, rcclSelectAllReduce(comm, nullptr, nullptr, 8 * kMiB / sizeof(float), ncclFloat32,
+                                                    ncclSum, nullptr, true, false, &d));
+        EXPECT_NE((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL128, d.algo) << "Tree planned: no LL128 tier";
+        EXPECT_TRUE(caps.empty()) << "Tree planned: the split is not asked";
+        DeleteCommWithArch(comm);
+      });
+}
+
 // Registered receive windows keep the normal tier order (the window was measured on
 // unregistered buffers).
 TEST(WrapMicrotestIsolated, SelectAllReduce_Gfx1250VmmFirstUnregisteredOnly) {

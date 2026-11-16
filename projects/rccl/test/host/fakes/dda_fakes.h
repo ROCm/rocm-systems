@@ -24,6 +24,8 @@ extern std::function<bool(ncclComm*, const void*, void*, size_t, ncclDataType_t,
     g_allReduceDdaFabricLLEligible;
 extern std::function<bool(ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t)>
     g_allReduceDdaFabricLL128Eligible;
+extern std::function<bool(ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t)>
+    g_allReduceDdaFabricLL128SplitReplacesNonDda;
 extern std::function<bool(ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t, rcclDdaLaunchCap, bool,
                           rcclDdaLaunchCap*)>
     g_allReduceDdaFabricLL128SplitEligible;

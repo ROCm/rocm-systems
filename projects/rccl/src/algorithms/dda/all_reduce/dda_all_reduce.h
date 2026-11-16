@@ -72,6 +72,11 @@ bool ncclAllReduceDdaFabricLL128SplitEligible(ncclComm* comm, const void* sendbu
                                               ncclDataType_t datatype, ncclRedOp_t op, rcclDdaLaunchCap cap,
                                               bool vmmFirst, rcclDdaLaunchCap* bound);
 
+// Whether the peer-split takes the message only through uneven shards where no DDA tier would run it (the native
+// launch would): the caller then bounds the split by that launch's grid where it is Ring.
+bool ncclAllReduceDdaFabricLL128SplitReplacesNonDda(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
+                                                    ncclDataType_t datatype, ncclRedOp_t op);
+
 // `split` runs the peer-split two-shot within `cap`, the bound ncclAllReduceDdaFabricLL128SplitEligible gave.
 ncclResult_t ncclAllReduceDdaFabricLL128(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
                                          ncclRedOp_t op, ncclComm* comm, cudaStream_t stream, rcclDdaLaunchCap cap = {},
