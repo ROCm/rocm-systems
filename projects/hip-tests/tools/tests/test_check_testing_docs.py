@@ -2974,6 +2974,71 @@ class CheckTestingDocsTest(unittest.TestCase):
             msg=results.get("cmake_reconciliation"),
         )
 
+    # -- Step 5: command-aware CMake discovery (message false positives,
+    #    quoted args, normalized inventory group paths / exclusions) ----------
+
+    def test_cmake_message_string_add_subdirectory_is_not_detected(self):
+        # Command-aware parsing only treats a real top-level ``add_subdirectory``
+        # command as an active group. An ``add_subdirectory(...)`` token that
+        # appears only inside another command's quoted string argument (here a
+        # ``message(...)`` reminder) is an argument of that command, not a group
+        # registration, so it must not demand an inventory suite.
+        self._write_cmake_area(
+            "unit",
+            'message(STATUS "remember to add_subdirectory(gcc) once it links")\n'
+            "add_subdirectory(memory)\n")
+        errors = checker.check_cmake_reconciliation(
+            self._recon_inventory(paths=["catch/unit/memory"]), str(self.root))
+        self.assertEqual(errors, [], msg=errors)
+
+    def test_cmake_message_string_with_paren_in_quotes_is_not_detected(self):
+        # A quoted command argument may itself contain parentheses. Command-aware
+        # parsing skips the quoted string when finding a command's argument span,
+        # so neither the stray ``)`` nor the ``add_subdirectory(gcc)`` token inside
+        # the quote ends the ``message`` command or registers a group; only the
+        # genuine call that follows is active.
+        self._write_cmake_area(
+            "unit",
+            'message(STATUS "note: do not add_subdirectory(gcc) here )")\n'
+            "add_subdirectory(memory)\n")
+        errors = checker.check_cmake_reconciliation(
+            self._recon_inventory(paths=["catch/unit/memory"]), str(self.root))
+        self.assertEqual(errors, [], msg=errors)
+
+    def test_hosttest_message_string_registration_is_not_detected(self):
+        # The same command-awareness protects host-test discovery: a
+        # ``hip_add_host_test(...)`` token inside a ``message(...)`` string is an
+        # argument, not a registration, so only the real call is enumerated.
+        self._write_host_cmake(
+            'message(STATUS "call hip_add_host_test(GhostTest) when ready")\n'
+            "hip_add_host_test(RealHostTest)\n")
+        cmake_path = self.root / "catch" / "hipTestMain" / "tests" / "CMakeLists.txt"
+        self.assertEqual(
+            checker._active_host_test_targets(cmake_path),
+            ["RealHostTest"])
+
+    def test_cmake_group_represented_by_normalized_source_path_passes(self):
+        # Inventory group paths are normalized for reconciliation only: a source
+        # path that names the same directory with a cosmetic ``./`` prefix still
+        # represents the discovered ``catch/<area>/<group>`` group.
+        self._write_cmake_area("unit", "add_subdirectory(memory)\n")
+        errors = checker.check_cmake_reconciliation(
+            self._recon_inventory(paths=["./catch/unit/memory"]), str(self.root))
+        self.assertEqual(errors, [], msg=errors)
+
+    def test_cmake_normalized_exclusion_allows_unrepresented_group(self):
+        # A documented exclusion is matched after the same normalization, so an
+        # exclusion that names the group with a ``./`` prefix and a trailing slash
+        # still suppresses the unrepresented report for ``catch/unit/gcc``.
+        self._write_cmake_area("unit", "add_subdirectory(gcc)\n")
+        exclusions = [{
+            "group": "./catch/unit/gcc/", "reason": "not_built",
+            "note": "link error under TheRock build; kept for reference",
+        }]
+        errors = checker.check_cmake_reconciliation(
+            self._recon_inventory(paths=[], exclusions=exclusions), str(self.root))
+        self.assertEqual(errors, [], msg=errors)
+
     # -- review fix 4: incident Origin commit citations ----------------------
 
     def test_is_commit_hash_classifies_hashes_and_words(self):

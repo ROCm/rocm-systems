@@ -412,47 +412,32 @@ CMAKE_RECONCILIATION_AREAS = ("unit", "contract", "performance", "stress")
 HOSTTEST_CMAKE_REL = ("catch", "hipTestMain", "tests", "CMakeLists.txt")
 HOSTTEST_GROUP_DIR = "catch/hipTestMain/tests"
 
-# A CMake ``function``/``macro`` declaration whose declared command name is
-# ``hip_add_host_test`` (``function(hip_add_host_test TARGET)`` and the ``macro``
-# equivalent). The declared name is a formal command definition - its following
-# tokens are formal parameters - not a registration call, so such an occurrence
-# of the ``hip_add_host_test`` token is masked out before registration scanning
-# (see ``_active_host_test_targets``). ``function``/``macro`` is matched
-# case-insensitively, and the ``\s*`` runs between the command keyword, its
-# ``(``, and the declared name each span newlines, so a declaration written with
-# extra spacing (``function (hip_add_host_test TARGET)``) or split across
-# physical lines is recognized in every valid form. Masking replaces a
-# fixed-width negative lookbehind, which could only exclude the single zero-space
-# ``function(`` form and silently let a spaced or multiline declaration through.
-_HIP_ADD_HOST_TEST_DECL_RE = re.compile(
-    r"\b(?:function|macro)\s*\(\s*hip_add_host_test\b", re.IGNORECASE)
+# The CMake commands this checker discovers, keyed by lower-cased name. CMake
+# commands are case-insensitive, so a scanned command name is compared in lower
+# case (``ADD_SUBDIRECTORY`` is the same command as ``add_subdirectory``).
+_CMAKE_ADD_SUBDIRECTORY = "add_subdirectory"
+_CMAKE_HIP_ADD_HOST_TEST = "hip_add_host_test"
 
-# A ``hip_add_host_test(<TARGET> ...)`` registration naming the host-test
-# executable as its first argument. Matched case-insensitively with an optional
-# leading double quote, mirroring ``_ADD_SUBDIRECTORY_RE``. Declaration headers
-# (``function``/``macro`` definitions of ``hip_add_host_test`` itself) are masked
-# out of the scanned text before this pattern runs, so only real registration
-# calls remain and no fixed-width lookbehind is needed to tell them apart.
-_HIP_ADD_HOST_TEST_RE = re.compile(
-    r"\bhip_add_host_test\s*\(\s*\"?([A-Za-z0-9_.+\-]+)", re.IGNORECASE)
+# The start of a CMake command invocation: an identifier (the command name)
+# followed by its opening parenthesis, with optional whitespace - including
+# newlines - between them. Capturing the whole identifier is what makes the scan
+# command-aware: ``foo_add_subdirectory(`` yields the command name
+# ``foo_add_subdirectory`` (not ``add_subdirectory``), and a bare token such as
+# ``add_subdirectory`` that appears only inside another command's quoted argument
+# is never a command start because the scanner skips over each command's argument
+# span (see ``_iter_cmake_commands``) rather than re-scanning it. A declaration
+# header ``function(hip_add_host_test TARGET)`` is likewise the ``function``
+# command whose first *argument* is ``hip_add_host_test``, so it is not mistaken
+# for a host-test registration.
+_CMAKE_COMMAND_START_RE = re.compile(r"([A-Za-z_][A-Za-z0-9_]*)\s*\(")
 
-# An ``add_subdirectory(<group>)`` call naming the group as its first token.
-# CMake commands are case-insensitive (``ADD_SUBDIRECTORY`` is the same command),
-# so the match is case-insensitive; whitespace - including a newline - is allowed
-# between the command, its ``(``, and the group token, so a call split across
-# physical lines (the group name on the line after the opening paren) is still
-# recognized. A leading ``\b`` keeps ``add_subdirectory`` from matching as the
-# tail of a longer identifier (``foo_add_subdirectory``). The surrounding
-# ``_active_cmake_groups`` scanner strips line comments first so a
-# ``#add_subdirectory(gcc)`` is treated as an inactive (not-built) group rather
-# than an active one that must be represented.
-#
-# A quoted directory argument (``add_subdirectory("unit")``) is also accepted:
-# CMake treats a quoted argument the same as an unquoted one, so an optional
-# leading double quote is skipped before the group token is captured (the closing
-# quote is simply not part of the token).
-_ADD_SUBDIRECTORY_RE = re.compile(
-    r"\badd_subdirectory\s*\(\s*\"?([A-Za-z0-9_.+\-]+)", re.IGNORECASE)
+# The first argument token of a CMake command's argument list: optional leading
+# whitespace (which may span newlines so a call split across physical lines is
+# handled), an optional opening double quote (CMake treats a quoted argument the
+# same as an unquoted one, and the closing quote is simply not part of the
+# token), then the token itself. Used to pull the group directory out of an
+# ``add_subdirectory`` call and the target out of a ``hip_add_host_test`` call.
+_CMAKE_FIRST_ARG_RE = re.compile(r'\s*"?([A-Za-z0-9_.+\-]+)')
 
 # A CMake bracket comment ``#[[ ... ]]`` (optionally with equals signs in the
 # delimiter, ``#[=[ ... ]=]``) is a block comment that may span several physical
@@ -1414,50 +1399,151 @@ def _strip_cmake_comments(cmake_path):
     return "\n".join(cleaned)
 
 
+def _iter_cmake_commands(text):
+    """Yield ``(name, args)`` for each top-level CMake command in comment-free text.
+
+    A CMake command is an identifier followed by a parenthesized argument list;
+    this yields the command name and its argument text (the span inside the outer
+    parentheses, without them) for every invocation in source order. The scan is
+    command-aware: after a command is found its whole argument span is consumed
+    before scanning resumes, so a token that only appears *inside* another
+    command's arguments (for example an ``add_subdirectory(...)`` reminder inside
+    a ``message(...)`` string, or ``hip_add_host_test`` as the declared name of a
+    ``function(hip_add_host_test TARGET)`` header) is never mistaken for a command
+    of its own.
+
+    While locating the matching close parenthesis the scan skips over double-quoted
+    strings (honoring backslash escapes) and counts nested parentheses, so a ``(``
+    or ``)`` inside a quoted argument - or a balanced nested group such as
+    ``if(NOT (A AND B))`` - does not end the command prematurely. ``text`` must
+    already have comments stripped (see ``_strip_cmake_comments``).
+    """
+    pos = 0
+    length = len(text)
+    while True:
+        match = _CMAKE_COMMAND_START_RE.search(text, pos)
+        if match is None:
+            return
+        name = match.group(1)
+        arg_start = match.end()
+        i = arg_start
+        depth = 1
+        while i < length and depth > 0:
+            ch = text[i]
+            if ch == '"':
+                # Skip the quoted string wholesale: parentheses inside it are part
+                # of the argument value, not command structure.
+                i += 1
+                while i < length:
+                    if text[i] == "\\":
+                        i += 2
+                        continue
+                    if text[i] == '"':
+                        i += 1
+                        break
+                    i += 1
+                continue
+            if ch == "(":
+                depth += 1
+            elif ch == ")":
+                depth -= 1
+                if depth == 0:
+                    break
+            i += 1
+        yield name, text[arg_start:i]
+        # Resume after this command's closing parenthesis so its argument span is
+        # not re-scanned for nested command-like tokens.
+        pos = i + 1
+
+
+def _first_cmake_argument(args):
+    """Return the first argument token of a CMake command's argument text, or None.
+
+    Leading whitespace (which may span newlines) and an optional opening double
+    quote are skipped before the token is captured; the token stops at the next
+    quote, whitespace, or closing parenthesis.
+    """
+    match = _CMAKE_FIRST_ARG_RE.match(args)
+    return match.group(1) if match else None
+
+
 def _active_cmake_groups(cmake_path):
     """Return the list of group names a CMakeLists.txt actively builds.
 
-    Each ``add_subdirectory(<group>)`` names an active group. The comment-free
-    text (see ``_strip_cmake_comments``) is scanned with a case-insensitive regex
-    whose inter-token ``\\s*`` spans newlines, so a call split across physical
-    lines is still recognized and a deliberately disabled (commented) group is
-    treated as not-built rather than an active group that must be represented by
-    an inventory suite.
+    Each real top-level ``add_subdirectory(<group>)`` command names an active
+    group. The comment-free text (see ``_strip_cmake_comments``) is parsed
+    command-by-command (see ``_iter_cmake_commands``) and matched
+    case-insensitively, so a call split across physical lines or written in any
+    case is recognized, a deliberately disabled (commented) group is treated as
+    not-built, and an ``add_subdirectory(...)`` token that appears only inside
+    another command's quoted string (for example a ``message(...)`` reminder) is
+    not mistaken for an active group that must be represented by an inventory
+    suite.
     """
-    text = _strip_cmake_comments(cmake_path)
-    return [match.group(1) for match in _ADD_SUBDIRECTORY_RE.finditer(text)]
+    groups = []
+    for name, args in _iter_cmake_commands(_strip_cmake_comments(cmake_path)):
+        if name.lower() == _CMAKE_ADD_SUBDIRECTORY:
+            group = _first_cmake_argument(args)
+            if group:
+                groups.append(group)
+    return groups
 
 
 def _active_host_test_targets(cmake_path):
     """Return the host-test executables a CMakeLists registers via hip_add_host_test.
 
-    Each ``hip_add_host_test(<TARGET> ...)`` registers a host-side harness test
-    (labelled ``hosttest``) built under the ``build_tests`` aggregate target.
-    These executables live outside the per-area add_subdirectory groups, so they
-    are enumerated separately and reconciled against a host/harness inventory
-    record. Comments are stripped the same way as for group scanning, so a
-    commented-out registration contributes nothing.
+    Each real top-level ``hip_add_host_test(<TARGET> ...)`` command registers a
+    host-side harness test (labelled ``hosttest``) built under the ``build_tests``
+    aggregate target. These executables live outside the per-area
+    add_subdirectory groups, so they are enumerated separately and reconciled
+    against a host/harness inventory record. The comment-free text is parsed
+    command-by-command (see ``_iter_cmake_commands``), so a commented-out
+    registration contributes nothing and a ``hip_add_host_test(...)`` token inside
+    another command's quoted string is not registered.
 
-    A ``function``/``macro`` declaration that *defines* ``hip_add_host_test``
-    itself (``function(hip_add_host_test TARGET)``) is a formal command
-    definition, not a registration, so its declared-name token is masked out
-    first. Masking handles every valid spacing/case/multiline form of the
-    declaration, so a spaced (``function (hip_add_host_test ...)``) or multiline
-    declaration is never mistaken for a registration of a target named after the
-    formal parameter.
+    Command-aware parsing also excludes a ``function``/``macro`` declaration that
+    *defines* ``hip_add_host_test`` itself: ``function(hip_add_host_test TARGET)``
+    is the ``function`` command whose first argument is ``hip_add_host_test``, not
+    a ``hip_add_host_test`` command, so no fixed-width lookbehind or masking is
+    needed to tell a declaration (in any spacing/case/multiline form) apart from a
+    genuine registration.
     """
-    text = _strip_cmake_comments(cmake_path)
-    text = _HIP_ADD_HOST_TEST_DECL_RE.sub(lambda m: _blank_like(m.group(0)), text)
-    return [match.group(1) for match in _HIP_ADD_HOST_TEST_RE.finditer(text)]
+    targets = []
+    for name, args in _iter_cmake_commands(_strip_cmake_comments(cmake_path)):
+        if name.lower() == _CMAKE_HIP_ADD_HOST_TEST:
+            target = _first_cmake_argument(args)
+            if target:
+                targets.append(target)
+    return targets
+
+
+def _normalize_group_path(path):
+    """Normalize a repository-relative directory token for CMake reconciliation.
+
+    Reconciliation compares inventory ``source.paths`` entries (and documented
+    exclusion group names) against the discovered ``catch/<area>/<group>`` token.
+    Cosmetic variations in how the same directory is written must not defeat the
+    match, so a leading ``./`` is dropped, back-slashes are folded to forward
+    slashes, duplicate slashes are collapsed, and a trailing slash is removed.
+    This normalization is applied ONLY for reconciliation matching; the stored
+    inventory value is never rewritten.
+    """
+    norm = path.strip().replace("\\", "/")
+    while norm.startswith("./"):
+        norm = norm[2:]
+    norm = re.sub(r"/{2,}", "/", norm)
+    if len(norm) > 1:
+        norm = norm.rstrip("/")
+    return norm
 
 
 def _represented_group_dirs(inventory):
-    """Return the set of repository-relative directory tokens the inventory names.
+    """Return the set of normalized directory tokens the inventory names.
 
-    Every non-external ``source.paths`` entry of every suite is normalized to its
-    stripped string; a CMake group directory ``catch/<area>/<group>`` is
-    considered represented when some suite names that directory or a path beneath
-    it.
+    Every non-external ``source.paths`` entry of every suite is normalized for
+    reconciliation (see ``_normalize_group_path``); a CMake group directory
+    ``catch/<area>/<group>`` is considered represented when some suite names that
+    directory or a path beneath it.
     """
     paths = set()
     if not isinstance(inventory, dict):
@@ -1471,12 +1557,18 @@ def _represented_group_dirs(inventory):
         for rel in source.get("paths") or []:
             if isinstance(rel, str) and rel.strip() and not rel.startswith(
                     EXTERNAL_MARKER):
-                paths.add(rel.strip())
+                paths.add(_normalize_group_path(rel))
     return paths
 
 
 def _group_is_represented(group_dir, represented):
-    """True when some inventory source path names group_dir or a path beneath it."""
+    """True when some inventory source path names group_dir or a path beneath it.
+
+    ``group_dir`` is normalized the same way the ``represented`` set is (see
+    ``_normalize_group_path``) so the comparison is insensitive to cosmetic path
+    variations on either side.
+    """
+    group_dir = _normalize_group_path(group_dir)
     prefix = group_dir + "/"
     return any(path == group_dir or path.startswith(prefix)
               for path in represented)
@@ -1552,7 +1644,11 @@ def check_cmake_reconciliation(inventory, component_dir):
                     "represented by an inventory suite; remove the "
                     "exclusion".format(group))
                 continue
-            excluded.add(group)
+            # Store the normalized group so reconciliation matches it against the
+            # discovered ``catch/<area>/<group>`` token regardless of cosmetic
+            # path variations (a ``./`` prefix, a trailing slash); the displayed
+            # ``group`` in any diagnostic above stays as authored.
+            excluded.add(_normalize_group_path(group))
 
     for area in CMAKE_RECONCILIATION_AREAS:
         cmake_path = component_dir / "catch" / area / "CMakeLists.txt"
@@ -1562,7 +1658,7 @@ def check_cmake_reconciliation(inventory, component_dir):
             group_dir = "catch/{}/{}".format(area, group)
             if _group_is_represented(group_dir, represented):
                 continue
-            if group_dir in excluded:
+            if _normalize_group_path(group_dir) in excluded:
                 continue
             errors.append(
                 "active CMake suite group {!r} is not represented by any "
@@ -1582,7 +1678,7 @@ def check_cmake_reconciliation(inventory, component_dir):
         host_targets = _active_host_test_targets(host_cmake)
         if (host_targets
                 and not _group_is_represented(HOSTTEST_GROUP_DIR, represented)
-                and HOSTTEST_GROUP_DIR not in excluded):
+                and _normalize_group_path(HOSTTEST_GROUP_DIR) not in excluded):
             errors.append(
                 "active host-test executable(s) {} registered via hip_add_host_test "
                 "under {} are not represented by any inventory suite (add a "
