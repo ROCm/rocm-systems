@@ -8,16 +8,52 @@
 
 #include <cstdint>
 #include <functional>
+#include <mutex>
+#include <vector>
 
 namespace rocprofsys
 {
 using grow_functor_t = std::int64_t (*)(std::int64_t);
 
+namespace detail
+{
 inline auto&
 grow_functors()
 {
-    static auto _v = container::stable_vector<grow_functor_t>{};
-    return _v;
+    static auto s_functors = container::stable_vector<grow_functor_t>{};
+    return s_functors;
+}
+
+inline std::mutex&
+grow_functors_mutex()
+{
+    static std::mutex s_mutex;
+    return s_mutex;
+}
+}  // namespace detail
+
+/// Registers a callback that grows one thread_data container. Thread-safe: distinct
+/// thread_data specializations register from their own function-local static
+/// initializers, which can run concurrently on different threads.
+inline void
+register_grow_functor(grow_functor_t func)
+{
+    auto lock = std::lock_guard<std::mutex>{ detail::grow_functors_mutex() };
+    detail::grow_functors().emplace_back(func);
+}
+
+/// Returns a copy of the registered callbacks. Callers invoke them without the registry
+/// lock held, since a callback may initialize a thread_data and register another one.
+inline std::vector<grow_functor_t>
+get_grow_functors()
+{
+    auto lock     = std::lock_guard<std::mutex>{ detail::grow_functors_mutex() };
+    auto functors = std::vector<grow_functor_t>{};
+    for(auto itr : detail::grow_functors())
+    {
+        functors.push_back(itr);
+    }
+    return functors;
 }
 
 }  // namespace rocprofsys
