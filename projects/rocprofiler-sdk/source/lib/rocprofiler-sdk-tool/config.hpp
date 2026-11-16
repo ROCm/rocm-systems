@@ -80,6 +80,23 @@ struct att_perfcounter
     }
 };
 
+/// The part of the GPU one kernel replay pass traces
+struct att_replay_target
+{
+    uint64_t target_cu          = 0;
+    uint64_t simd_select        = 0;
+    uint64_t shader_engine_mask = 0;
+
+    template <typename ArchiveT>
+    void save(ArchiveT&) const;
+
+    friend bool operator==(const att_replay_target& lhs, const att_replay_target& rhs)
+    {
+        return std::tie(lhs.target_cu, lhs.simd_select, lhs.shader_engine_mask) ==
+               std::tie(rhs.target_cu, rhs.simd_select, rhs.shader_engine_mask);
+    }
+};
+
 struct config : output_config
 {
     using base_type = output_config;
@@ -157,10 +174,20 @@ struct config : output_config
     rocprofiler_pc_sampling_method_t pc_sampling_method_value = ROCPROFILER_PC_SAMPLING_METHOD_NONE;
     rocprofiler_pc_sampling_unit_t   pc_sampling_unit_value   = ROCPROFILER_PC_SAMPLING_UNIT_NONE;
 
-    // Route counter collection through in-process kernel replay: collect every --pmc counter group
-    // in a single application run by replaying each dispatch once per group (device-memory
-    // snapshot/restore between passes). The pass count is the number of counter groups.
+    // Route counter collection or --att-remap through in-process kernel replay: collect every
+    // --pmc counter group in a single application run by replaying each dispatch once per group
+    // (device-memory snapshot/restore between passes), or let the remapper run each traced
+    // dispatch's passes.
     bool kernel_replay = get_env("ROCPROF_KERNEL_REPLAY", false);
+
+    // --att-remap: the remapper library (projects/remapper) runs each traced dispatch's kernel
+    // replay loop and picks every pass's dispatch and thread trace target.
+    bool        att_remap         = get_env("ROCPROF_ATT_REMAP", false);
+    std::string att_remap_library = get_env("ROCPROF_ATT_REMAP_LIBRARY", "libremapper.so");
+    std::string att_remap_options = get_env("ROCPROF_ATT_REMAP_OPTIONS", "");
+    std::string att_remap_output  = get_env("ROCPROF_ATT_REMAP_OUTPUT", "");
+    // Each remapped dispatch appends a JSON line naming its directory and trace output here.
+    std::string att_remap_index = get_env("ROCPROF_ATT_REMAP_INDEX", "");
 
     int         mpi_size              = get_mpi_size();
     int         mpi_rank              = get_mpi_rank();
@@ -252,6 +279,8 @@ config::get_attach_invariants() const
                            att_library_path,
                            att_param_perfcounters,
                            att_param_perf_ctrl,
+                           att_remap,
+                           att_remap_options,
                            pc_sampling_method,
                            pc_sampling_unit,
                            kernel_filter_include,
@@ -279,6 +308,15 @@ att_perfcounter::save(ArchiveT& ar) const
 {
     CFG_SERIALIZE_MEMBER(counter_name);
     CFG_SERIALIZE_MEMBER(simd_mask);
+}
+
+template <typename ArchiveT>
+void
+att_replay_target::save(ArchiveT& ar) const
+{
+    CFG_SERIALIZE_MEMBER(target_cu);
+    CFG_SERIALIZE_MEMBER(simd_select);
+    CFG_SERIALIZE_MEMBER(shader_engine_mask);
 }
 
 template <typename ArchiveT>
@@ -372,6 +410,11 @@ config::save(ArchiveT& ar) const
     CFG_SERIALIZE_MEMBER(att_param_perfcounters);
     CFG_SERIALIZE_MEMBER(att_param_perf_ctrl);
     CFG_SERIALIZE_MEMBER(att_consecutive_kernels);
+    CFG_SERIALIZE_MEMBER(att_remap);
+    CFG_SERIALIZE_MEMBER(att_remap_library);
+    CFG_SERIALIZE_MEMBER(att_remap_options);
+    CFG_SERIALIZE_MEMBER(att_remap_output);
+    CFG_SERIALIZE_MEMBER(att_remap_index);
 
     // serialize the base class
     static_cast<const base_type*>(this)->save(ar);

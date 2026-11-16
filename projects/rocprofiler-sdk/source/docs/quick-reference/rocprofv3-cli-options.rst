@@ -190,7 +190,7 @@ The following table lists the commonly used ``rocprofv3`` command-line options c
                 </tr>
                 <tr>
                     <td>--replay-mode {kernel,application}</td>
-                    <td>(beta) Select the counter-collection replay strategy. 'kernel' collects all --pmc groups in a single application run by replaying each dispatch once per group with device-memory snapshot/restore between passes, instead of re-running the whole application per group. Requires --pmc and --kernel-replay-beta-enabled. 'application' (default) re-runs the whole application once per counter group. <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-kernel-replay-rocprofv3.html">Read more...</a></td>
+                    <td>(beta) Select the counter-collection replay strategy. 'kernel' collects all --pmc groups in a single application run by replaying each dispatch once per group with device-memory snapshot/restore between passes, instead of re-running the whole application per group. With --att --att-remap, the remapper runs each traced dispatch's passes instead. Requires --pmc (or --att with --att-remap) and --kernel-replay-beta-enabled. 'application' (default) re-runs the whole application once per counter group. <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-kernel-replay-rocprofv3.html">Read more...</a></td>
                 </tr>
                 <tr>
                     <td>--kernel-replay-beta-enabled [BOOL]</td>

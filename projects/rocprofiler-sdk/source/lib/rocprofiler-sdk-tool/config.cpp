@@ -219,6 +219,7 @@ parse_counter_envs()
     }
     return {};
 }
+
 }  // namespace
 
 config::config()
@@ -241,6 +242,24 @@ config::config()
         ROCP_WARNING << "[ROCPROF_ATT_LIBRARY_PATH] ignoring environment variable because the "
                         "process is running in a secure-execution context (AT_SECURE)";
         att_library_path.clear();
+    }
+
+    // SECURITY: the same applies to the remapper library, and to the index file the remapper
+    // appends to.
+    if(common::is_at_secure())
+    {
+        if(att_remap_library != "libremapper.so")
+        {
+            ROCP_WARNING << "[ROCPROF_ATT_REMAP_LIBRARY] ignoring environment variable because the "
+                            "process is running in a secure-execution context (AT_SECURE)";
+            att_remap_library = "libremapper.so";
+        }
+        if(!att_remap_index.empty())
+        {
+            ROCP_WARNING << "[ROCPROF_ATT_REMAP_INDEX] ignoring environment variable because the "
+                            "process is running in a secure-execution context (AT_SECURE)";
+            att_remap_index.clear();
+        }
     }
 
     if(kernel_filter_include.empty()) kernel_filter_include = std::string{".*"};

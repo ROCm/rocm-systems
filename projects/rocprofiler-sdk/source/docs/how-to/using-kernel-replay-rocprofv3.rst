@@ -1,6 +1,6 @@
 .. meta::
-  :description: Using kernel replay with rocprofv3 to collect multiple counter groups in a single application run
-  :keywords: rocprofv3, kernel replay, replay-mode, kernel-replay-beta-enabled, multi-pass counters, application replay, snapshot restore
+  :description: Using kernel replay with rocprofv3 to collect multiple counter groups or thread trace targets in a single application run
+  :keywords: rocprofv3, kernel replay, replay-mode, kernel-replay-beta-enabled, multi-pass counters, application replay, snapshot restore, thread trace, ATT
 
 .. _using-kernel-replay-rocprofv3:
 
@@ -94,13 +94,52 @@ individual ``--pmc`` group must still fit in one hardware pass; kernel replay do
 group that the hardware cannot collect together. Use ``rocprofv3-avail pmc-check`` to verify a
 group before profiling.
 
+Multi-SIMD thread trace with ``--att-remap``
+============================================
+
+On gfx1250 each pass traces one SIMD, and the hardware places workgroups differently in every
+pass, so the SIMDs of one WGP run different work from pass to pass. ``--att-remap`` hands the
+traced dispatch to the remapper (``projects/remapper``), which makes the traced WGP run the same
+work in every pass:
+
+.. code-block:: bash
+
+   rocprofv3 --att --att-remap --att-target-cu 0 --kernel-include-regex <kernel> \
+       --replay-mode kernel --kernel-replay-beta-enabled -- <application_path>
+
+The remapper rewrites the kernel so each workgroup takes its tile from a placement table keyed by
+where it landed, loads the rewritten code object through HSA, and runs the replay loop. It records
+placement until several passes agree, builds the table and checks it, then traces SIMD 0 to 3 of
+the target WGP on every shader engine: with the table, at the natural placement, and the
+application's own kernel. The last pass always runs the application's dispatch, untraced, so the
+application keeps its own results. If any stage fails, the loop goes straight to that pass and
+the dispatch's ``report.json`` says why.
+
+``--att-target-cu`` picks the WGP; the remapper picks each pass's SIMD and shader engines, so
+``--att-simd-select`` and ``--att-shader-engine-mask`` are rejected, as is ``--pmc``.
+``--att-remap-options`` passes remapper settings as ``key=value`` pairs (for example
+``records=3,checks=4,repetitions=2,launch-model=auto``; ``include/remapper.h`` in the remapper
+lists them). ``--att-remap-library`` points at ``libremapper.so`` when it is not installed next to
+``rocprofv3``.
+
+Each remapped dispatch writes ``att_remap/<pid>/dispatch-<id>/`` under the output directory: the
+rewritten code object, ``manifest.json``, ``report.json`` and ``passes.json``, which says what
+each pass ran and traced. After the application exits, ``rocprofv3`` runs the remapper's merge,
+which arranges the per-pass traces and writes merged views and audits to
+``dispatch-<id>/analysis/``. ``--att-remap-merge False`` skips it.
+
+The remapper supports gfx1250 wave32 kernels. It does not rewrite kernels compiled for cluster
+launches when they are launched without clusters (their workgroup id reads the cluster rank);
+declare such kernels ``__attribute__((no_cluster))``.
+
 Pass count
 ==========
 
 The pass count is **not** a user-supplied integer. ``rocprofv3`` derives it per dispatch from the
 number of counter groups collectable on **that dispatch's GPU agent**. Pass ``i`` maps to group
 ``i``. An agent with fewer collectable groups than the global ``--pmc`` list is replayed only as
-many times as it has groups, so pass and group stay aligned.
+many times as it has groups, so pass and group stay aligned. With ``--att-remap``, the remapper
+decides how many passes a dispatch takes and what each one runs and traces.
 
 There is no ``--kernel-replay-passes`` flag and no pass-count environment variable. The CLI does
 not wire ``replay_continue`` or the localized start/stop context callbacks; those remain SDK
@@ -133,6 +172,15 @@ kernel-replay integration test does deliberately), the rows for one dispatch sha
 To attribute those rows, use ``--output-format json`` (or ``json`` together with ``csv``), where
 ``replay_pass`` is explicit.
 
+Thread trace
+------------
+
+With ``--att-remap``, each traced pass is written and decoded separately. The raw files are named
+``<agent>_pass_<pass>_shader_engine_<se>_<dispatch>.att``, and the decoded output of each pass goes
+to ``ui_output_agent_<agent>_dispatch_<dispatch>_pass_<pass>/``. That directory also holds
+``replay_target.json``, which records the pass and the ``target_cu``, ``simd_select`` and
+``shader_engine_mask`` it traced.
+
 Default ``rocpd``
 -----------------
 
@@ -155,16 +203,16 @@ Limitations (CLI)
 =================
 
 * **Beta.** The flag, the SDK API, and the output schema may change.
-* **Requires** ``--pmc``. The flag is an alternative to application replay for counter groups, not
-  a general "replay my kernel N times" switch.
+* **Requires** ``--pmc`` **or** ``--att``. The flag is an alternative to application replay for
+  counter groups and thread trace targets, not a general "replay my kernel N times" switch.
 * **Each** ``--pmc`` **group must fit one hardware pass.**
-* **Fixed pass count** equal to the number of collectable groups on that agent. No
-  ``replay_continue`` and no per-pass local-context toggles from the CLI.
-* **Counters only.** ``--att``, PC sampling, and ``--spm`` are rejected alongside
-  ``--replay-mode kernel``. Because the CLI has no per-pass toggles, any other service
-  would remain enabled for every pass and report each kernel once per pass, all under the single
-  dispatch ID that replay reuses. The SDK itself is not restricted this way -- a custom tool can
-  enable and disable services per pass through the local-context API (see
+* **Fixed pass count** equal to the number of collectable groups on that agent, or to the number of
+  thread trace targets. No ``replay_continue`` and no per-pass local-context toggles from the CLI.
+* **Counters or thread trace, not both.** ``--att`` together with ``--pmc``, PC sampling, and
+  ``--spm`` are rejected alongside ``--replay-mode kernel``. Because the CLI has no per-pass
+  toggles, any other service would remain enabled for every pass and report each kernel once per
+  pass, all under the single dispatch ID that replay reuses. The SDK itself is not restricted this
+  way -- a custom tool can enable and disable services per pass through the local-context API (see
   :ref:`using-kernel-replay`) -- so this is a CLI limitation, not a hardware or SDK one.
 * **HIP graph launches are not replayed.** A graph seen while replay is active warns once and
   runs un-replayed (not a hard error).
@@ -184,6 +232,8 @@ When to use kernel replay
 Use it when:
 
 * You need several counter groups on the **same** dispatches.
+* You need thread traces of several SIMDs or WGPs of the **same** dispatch, for example every SIMD
+  of a WGP on an architecture that traces one SIMD per run.
 * Re-running the whole application per group is too slow, or the run is non-deterministic so
   application replay would not compare the same work.
 * The kernels of interest write coarse-grained ``hipMalloc`` buffers (and optionally module-scope

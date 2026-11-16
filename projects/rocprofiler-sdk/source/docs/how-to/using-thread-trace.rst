@@ -125,6 +125,10 @@ The following table lists the parameters relevant to thread tracing:
 | att-perfcounters            | String  | SQ-only |           | Available only in gfx9. Specifies the list of SQ counters.   |
 |                             |         |         |           | To list all counters, use "rocprofv3 --list-avail``.         |
 +-----------------------------+---------+---------+-----------+--------------------------------------------------------------+
+
+On gfx1250, ``--att-remap`` with ``--replay-mode kernel --kernel-replay-beta-enabled`` traces every
+SIMD of the target WGP running the same work, in a single application run. See
+:ref:`using-kernel-replay-rocprofv3`.
 | att-activity                | Integer | 1 - 16  | 5~10      | Available only in gfx9.                                      |
 |                             |         |         |           | Shorthand for att-perfcounter-ctrl and the att-perfcounters  |
 |                             |         |         |           | related to compute unit activity such as VALU, SALU, etc.    |

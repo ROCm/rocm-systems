@@ -7,6 +7,7 @@ rocprofiler_activate_clang_tidy()
 set(TOOL_HEADERS
     att_no_intercept.hpp
     att_no_intercept_impl.hpp
+    att_remap.hpp
     config.hpp
     execution_profile.hpp
     graph_stack.hpp
@@ -15,8 +16,16 @@ set(TOOL_HEADERS
     kernel_iteration_filter.hpp
     stream_stack.hpp)
 
-set(TOOL_SOURCES att_no_intercept.cpp config.cpp graph_stack.cpp kernel_filter_range.cpp
-                 kernel_iteration_filter.cpp main.c stream_stack.cpp tool.cpp)
+set(TOOL_SOURCES
+    att_no_intercept.cpp
+    att_remap.cpp
+    config.cpp
+    graph_stack.cpp
+    kernel_filter_range.cpp
+    kernel_iteration_filter.cpp
+    main.c
+    stream_stack.cpp
+    tool.cpp)
 
 if(rocprof-trace-decoder_FOUND)
     list(APPEND TOOL_SOURCES att_no_intercept_quick_scan.cpp)
@@ -39,7 +48,8 @@ target_link_libraries(
             rocprofiler-sdk::rocprofiler-sdk-dw
             rocprofiler-sdk::rocprofiler-sdk-amd-comgr
             rocprofiler-sdk::rocprofiler-sdk-att-parser
-            rocprofiler-sdk::rocprofiler-sdk-sqlite3)
+            rocprofiler-sdk::rocprofiler-sdk-sqlite3
+            ${CMAKE_DL_LIBS})
 
 if(rocprof-trace-decoder_FOUND)
     target_link_libraries(rocprofiler-sdk-tool

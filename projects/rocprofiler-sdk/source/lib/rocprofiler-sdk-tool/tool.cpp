@@ -24,6 +24,7 @@
 #define _DEFAULT_SOURCE 1
 
 #include "att_no_intercept.hpp"
+#include "att_remap.hpp"
 #include "config.hpp"
 #include "execution_profile.hpp"
 #include "graph_stack.hpp"
@@ -94,11 +95,13 @@
 #include <time.h>
 #include <unistd.h>
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cassert>
 #include <cerrno>
 #include <chrono>
 #include <csignal>
+#include <cstddef>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -382,6 +385,15 @@ thread_local auto tl_current_replay_pass = std::optional<uint64_t>{};
 // Memoizes is_targeted_kernel() for the duration of one replay loop; see the comment there.
 thread_local auto tl_replay_dispatch_targeted = std::optional<bool>{};
 
+// dispatch id -> replay pass whose thread trace is in flight and the target it traces, for
+// dispatches --att-remap traces pass by pass. The shader data callback may run on another thread,
+// but all of a pass's data is delivered before the SDK dispatches the next pass.
+auto att_replay_pass_by_dispatch = common::Synchronized<
+    std::unordered_map<rocprofiler_dispatch_id_t, std::pair<uint64_t, tool::att_replay_target>>>{};
+
+// agents a dispatch thread trace service is configured on
+auto att_dispatch_agents = common::Synchronized<std::unordered_set<uint64_t>>{};
+
 // Stores stream ids, graph attribution, and kernel region ids for the
 // kernel-rename, hip-stream-display, and hip-graph-display services.
 struct kernel_rename_and_stream_data
@@ -445,6 +457,39 @@ is_targeted_kernel(uint64_t                                        _kern_id,
 
     if(tl_current_replay_pass.has_value()) tl_replay_dispatch_targeted = _is_target;
     return _is_target;
+}
+
+// Whether is_targeted_kernel() will select the next launch of `_kern_id`, without counting that
+// launch. Lets the replay pass-count callback skip replaying dispatches nothing will trace.
+bool
+next_launch_is_targeted(uint64_t                                        _kern_id,
+                        common::Synchronized<kernel_iteration_t, true>& _kernel_iteration)
+{
+    const auto next_iteration = _kernel_iteration.rlock(
+        [](const kernel_iteration_t& _kernel_iter, uint64_t _kernel_id) {
+            auto itr = _kernel_iter.find(_kernel_id);
+            return ((itr != _kernel_iter.end()) ? itr->second : size_t{0}) + 1;
+        },
+        _kern_id);
+
+    return target_kernels.rlock(
+        [next_iteration](const targeted_kernels_map_t& _targets_v, uint64_t _kern_id_v) {
+            auto target_itr = _targets_v.find(_kern_id_v);
+            if(target_itr == _targets_v.end()) return false;
+            const auto& range = target_itr->second;
+            if(range.empty())
+                return !tool::get_config().advanced_thread_trace || next_iteration == 1;
+            return range.count(next_iteration) > 0;
+        },
+        _kern_id);
+}
+
+// The launch counts thread trace keeps for --kernel-iteration-range
+auto&
+att_kernel_iteration()
+{
+    static auto kernel_iteration = common::Synchronized<kernel_iteration_t, true>{};
+    return kernel_iteration;
 }
 
 auto&
@@ -1111,8 +1156,7 @@ code_object_tracing_callback(rocprofiler_callback_tracing_record_t record,
                 CHECK_NOTNULL(tool_metadata)->add_decoder(obj_data);
             }
 
-            if(obj_data->storage_type == ROCPROFILER_CODE_OBJECT_STORAGE_TYPE_MEMORY &&
-               tool::get_config().advanced_thread_trace)
+            if(tool::get_config().advanced_thread_trace)
             {
                 const char* gpu_name      = tool_metadata->agents_map.at(obj_data->rocp_agent).name;
                 auto        filename      = fmt::format("{}_code_object_id_{}",
@@ -1122,51 +1166,19 @@ code_object_tracing_callback(rocprofiler_callback_tracing_record_t record,
                 std::string output_filename =
                     get_output_filename(tool::get_config(), filename, ".out");
 
-                // NOLINTNEXTLINE(performance-no-int-to-ptr)
-                output_stream.stream->write(reinterpret_cast<char*>(obj_data->memory_base),
-                                            obj_data->memory_size);
-                tool_metadata->code_object_load.wlock(
-                    [](auto&                                 data_vec,
-                       std::string                           file_name,
-                       tool::rocprofiler_code_object_info_t* obj_data_v) {
-                        data_vec.push_back({std::move(file_name),
-                                            obj_data_v->code_object_id,
-                                            obj_data_v->load_base,
-                                            obj_data_v->load_size});
-                    },
-                    output_filename,
-                    obj_data);
-            }
-            else if(obj_data->storage_type == ROCPROFILER_CODE_OBJECT_STORAGE_TYPE_FILE &&
-                    tool::get_config().advanced_thread_trace)
-            {
-                const char* gpu_name      = tool_metadata->agents_map.at(obj_data->rocp_agent).name;
-                auto        filename      = fmt::format("{}_code_object_id_{}",
-                                            std::string(gpu_name),
-                                            std::to_string(obj_data->code_object_id));
-                auto        output_stream = get_output_stream(tool::get_config(), filename, ".out");
-                std::string output_filename =
-                    get_output_filename(tool::get_config(), filename, ".out");
-
-                uint8_t*      binary      = nullptr;
-                size_t        buffer_size = 0;
-                std::ifstream code_object_file(obj_data->uri, std::ios::binary | std::ios::ate);
-                if(code_object_file.good())
+                auto bytes = tool::att_remap::code_object_bytes(*obj_data);
+                ROCP_WARNING_IF(!bytes)
+                    << "thread trace: cannot read code object " << obj_data->code_object_id << " ("
+                    << (obj_data->uri ? obj_data->uri : "") << ")";
+                if(bytes)
                 {
-                    buffer_size = code_object_file.tellg();
-                    code_object_file.seekg(0, std::ios::beg);
-                    binary = new(std::nothrow) uint8_t[buffer_size];
-                    if(binary &&
-                       !code_object_file.read(reinterpret_cast<char*>(binary), buffer_size))
-                    {
-                        delete[] binary;
-                        binary = nullptr;
-                    }
+                    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
+                    output_stream.stream->write(reinterpret_cast<const char*>(bytes->data()),
+                                                static_cast<std::streamsize>(bytes->size()));
+                    if(tool::att_remap::enabled())
+                        tool::att_remap::add_code_object(obj_data->code_object_id,
+                                                         std::move(*bytes));
                 }
-                // NOLINTBEGIN(performance-no-int-to-ptr)
-                output_stream.stream->write(reinterpret_cast<char*>(obj_data->memory_base),
-                                            obj_data->memory_size);
-                // NOLINTEND(performance-no-int-to-ptr)
                 tool_metadata->code_object_load.wlock(
                     [](auto&                                 data_vec,
                        std::string                           file_name,
@@ -1945,14 +1957,32 @@ att_shader_data_callback(rocprofiler_thread_trace_shader_data_t shader_data,
     // If dispatch_id/userdata.value == 0, then we are in device mode and get the trace id
     // from the global atomic (set by consecutive-kernels or marker-trace logic)
     if(dispatch_id == 0) dispatch_id = att_device_trace_id.load();
-    filename << fmt::format("{}_shader_engine_{}_{}", agent.handle, se_id, dispatch_id);
+
+    const auto replay = att_replay_pass_by_dispatch.rlock(
+        [](const auto& _passes, rocprofiler_dispatch_id_t _dispatch_id) {
+            auto itr = _passes.find(_dispatch_id);
+            return (itr != _passes.end()) ? std::make_optional(itr->second) : std::nullopt;
+        },
+        dispatch_id);
+    const auto replay_pass = replay ? std::optional<uint64_t>{replay->first} : std::nullopt;
+    // The decoder reads the shader engine from the last two '_'-separated fields, so the replay
+    // pass goes before them.
+    filename << agent.handle;
+    if(replay_pass) filename << fmt::format("_pass_{}", *replay_pass);
+    filename << fmt::format("_shader_engine_{}_{}", se_id, dispatch_id);
 
     auto        output_stream   = get_output_stream(tool::get_config(), filename.str(), ".att");
     std::string output_filename = get_output_filename(tool::get_config(), filename.str(), ".att");
 
     output_stream.stream->write(reinterpret_cast<char*>(shader_data.data), shader_data.data_size);
-    auto key = tool::att_dispatch_agent_key_t{dispatch_id, agent.handle};
+    auto key = tool::att_dispatch_agent_key_t{dispatch_id, agent.handle, replay_pass.value_or(0)};
     tool_metadata->att_filenames[key].emplace_back(output_filename);
+    if(replay)
+    {
+        const auto& target                     = replay->second;
+        tool_metadata->att_replay_targets[key] = {
+            target.target_cu, target.simd_select, target.shader_engine_mask};
+    }
 }
 
 rocprofiler_thread_trace_control_flags_t
@@ -1964,12 +1994,40 @@ att_dispatch_callback(rocprofiler_agent_id_t /* agent_id  */,
                       void* /*userdata_config*/,
                       rocprofiler_user_data_t* userdata_shader)
 {
-    static auto kernel_iteration = common::Synchronized<kernel_iteration_t, true>{};
-    userdata_shader->value       = dispatch_id;
+    userdata_shader->value = dispatch_id;
 
-    if(is_targeted_kernel(kernel_id, kernel_iteration))
+    const auto record_pass = [dispatch_id](const tool::att_replay_target& _target) {
+        att_replay_pass_by_dispatch.wlock(
+            [](auto&                          _passes,
+               rocprofiler_dispatch_id_t      _dispatch_id,
+               uint64_t                       _pass,
+               const tool::att_replay_target& _target_v) {
+                _passes[_dispatch_id] = {_pass, _target_v};
+            },
+            dispatch_id,
+            *tl_current_replay_pass,
+            _target);
+    };
+
+    // Under --att-remap only the passes the remapper traces are traced. A remapped launch was
+    // counted against the kernel filters when its replay loop began; its passes may run another
+    // kernel, so they are not counted again.
+    if(tool::att_remap::enabled())
+    {
+        if(!tool::att_remap::active() || !tl_current_replay_pass.has_value())
+        {
+            is_targeted_kernel(kernel_id, att_kernel_iteration());
+            return ROCPROFILER_THREAD_TRACE_CONTROL_NONE;
+        }
+        const auto target = tool::att_remap::current_trace_target();
+        if(!target) return ROCPROFILER_THREAD_TRACE_CONTROL_NONE;
+        record_pass(*target);
         return ROCPROFILER_THREAD_TRACE_CONTROL_START_AND_STOP;
-    return ROCPROFILER_THREAD_TRACE_CONTROL_NONE;
+    }
+
+    if(!is_targeted_kernel(kernel_id, att_kernel_iteration()))
+        return ROCPROFILER_THREAD_TRACE_CONTROL_NONE;
+    return ROCPROFILER_THREAD_TRACE_CONTROL_START_AND_STOP;
 }
 
 void
@@ -2590,11 +2648,39 @@ kernel_replay_pass_count_callback(rocprofiler_kernel_dispatch_info_t dispatch_in
     return (n == 0) ? 1 : n;
 }
 
+// --att-remap: hand a launch the thread trace filters select to the remapper, which then runs its
+// replay loop.
+void
+begin_att_remap(rocprofiler_callback_tracing_kernel_replay_data_t* payload,
+                rocprofiler_user_data_t*                           user_data)
+{
+    const auto& info         = payload->dispatch_info;
+    const bool  traced_agent = att_dispatch_agents.rlock(
+        [](const auto& _agents, uint64_t _handle) { return _agents.count(_handle) > 0; },
+        info.agent_id.handle);
+    if(!traced_agent || !next_launch_is_targeted(info.kernel_id, att_kernel_iteration())) return;
+
+    auto        source = tool::att_remap::dispatch_source{};
+    const auto* symbol = CHECK_NOTNULL(tool_metadata)->get_kernel_symbol(info.kernel_id);
+    if(symbol != nullptr)
+    {
+        source.kernel_name    = symbol->kernel_name;
+        source.code_object_id = symbol->code_object_id;
+    }
+    if(auto agent = tool_metadata->agents_map.find(info.agent_id);
+       agent != tool_metadata->agents_map.end())
+        source.agent_node_id = agent->second.node_id;
+
+    // The launch counts against --kernel-iteration-range once, here; its passes do not.
+    if(tool::att_remap::begin(payload, user_data, source, get_client_ctx()))
+        is_targeted_kernel(info.kernel_id, att_kernel_iteration());
+}
+
 // Kernel replay CONFIG callback: install the pass-count callback during PHASE_ENTER so the SDK can
 // query the number of replay passes for each dispatch.
 void
 kernel_replay_callback(rocprofiler_callback_tracing_record_t record,
-                       rocprofiler_user_data_t* /*user_data*/,
+                       rocprofiler_user_data_t*              user_data,
                        void* /*data*/)
 {
     if(record.kind != ROCPROFILER_CALLBACK_TRACING_KERNEL_REPLAY) return;
@@ -2609,6 +2695,18 @@ kernel_replay_callback(rocprofiler_callback_tracing_record_t record,
         // A new replay loop begins here, so the previous dispatch's iteration-filter decision must
         // not carry into it; pass 0 below will record a fresh one.
         tl_replay_dispatch_targeted.reset();
+        if(tool::att_remap::enabled()) begin_att_remap(payload, user_data);
+    }
+    else if(record.operation == ROCPROFILER_KERNEL_REPLAY_CONFIG &&
+            record.phase == ROCPROFILER_CALLBACK_PHASE_EXIT)
+    {
+        // Every pass's shader data has been delivered by the time the replay loop ends.
+        att_replay_pass_by_dispatch.wlock(
+            [](auto& _passes, rocprofiler_dispatch_id_t _dispatch_id) {
+                _passes.erase(_dispatch_id);
+            },
+            payload->dispatch_info.dispatch_id);
+        if(tool::att_remap::enabled()) tool::att_remap::end(*user_data);
     }
     else if(record.operation == ROCPROFILER_KERNEL_REPLAY_PASS)
     {
@@ -2625,6 +2723,7 @@ kernel_replay_callback(rocprofiler_callback_tracing_record_t record,
                 << "kernel replay: SDK published current_pass=" << payload->current_pass
                 << " out of range for total_passes=" << payload->total_passes;
             tl_current_replay_pass = payload->current_pass;
+            if(tool::att_remap::active()) tool::att_remap::pass_enter(payload, *user_data);
         }
         else if(record.phase == ROCPROFILER_CALLBACK_PHASE_EXIT)
         {
@@ -2632,6 +2731,7 @@ kernel_replay_callback(rocprofiler_callback_tracing_record_t record,
             // means the SDK emitted PASS phases out of order.
             ROCP_CI_LOG_IF(ERROR, !tl_current_replay_pass)
                 << "kernel replay: PASS exit without a matching enter on this thread";
+            if(tool::att_remap::active()) tool::att_remap::pass_exit(payload, *user_data);
             tl_current_replay_pass.reset();
         }
     }
@@ -3099,18 +3199,23 @@ apply_core_capability_gates(tool::config& cfg)
         cfg.att_no_intercept = false;
     }
 
-    // Replay without counter collection degrades to a plain run rather than terminating. tool_init
-    // runs inside the profiled application's process during rocprofiler configuration, so exiting
-    // here would tear the application down mid-initialization and run static destructors and atexit
-    // handlers against a partially-initialized SDK. rocprofv3 rejects this combination before the
-    // application launches, so reaching this point means ROCPROF_KERNEL_REPLAY was set by hand --
-    // skipping replay still produces a usable run, which beats killing the application.
-    if(cfg.kernel_replay && !cfg.counter_collection)
+    // Replay without counter collection or --att-remap degrades to a plain run rather than
+    // terminating. tool_init runs inside the profiled application's process during rocprofiler
+    // configuration, so exiting here would tear the application down mid-initialization and run
+    // static destructors and atexit handlers against a partially-initialized SDK. rocprofv3 rejects
+    // this combination before the application launches, so reaching this point means
+    // ROCPROF_KERNEL_REPLAY was set by hand -- skipping replay still produces a usable run, which
+    // beats killing the application.
+    const bool remapped_thread_trace = cfg.att_remap && cfg.advanced_thread_trace &&
+                                       !cfg.att_no_intercept && cfg.att_consecutive_kernels == 0 &&
+                                       !cfg.selected_regions;
+    if(cfg.kernel_replay && !cfg.counter_collection && !remapped_thread_trace)
     {
         if(!replay_counters_reported.test_and_set())
         {
             ROCP_ERROR << "ROCPROF_KERNEL_REPLAY requires counter collection "
-                          "(ROCPROF_COUNTER_COLLECTION); continuing without kernel replay";
+                          "(ROCPROF_COUNTER_COLLECTION) or --att-remap (ROCPROF_ATT_REMAP); "
+                          "continuing without kernel replay";
         }
         cfg.kernel_replay = false;
     }
@@ -3677,6 +3782,8 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                                                                         callbacks.att_shader_data,
                                                                         tool_data),
                     "thread trace service configure");
+                att_dispatch_agents.wlock(
+                    [](auto& _agents, uint64_t _handle) { _agents.emplace(_handle); }, id.handle);
             }
             else
             {
@@ -3822,13 +3929,25 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
         start_context(runtime_initialization_ctx, "runtime initialization");
     }
 
-    // Kernel replay: collect every --pmc counter group within a single application run by replaying
-    // each dispatch once per group (device memory is snapshot/restored between passes). The tool
-    // supplies the pass count (= number of groups) via kernel_replay_callback during CONFIG
-    // PHASE_ENTER, and counter_dispatch_callback selects the per-pass group.
+    // Kernel replay: collect every --pmc counter group, or every thread trace target, within a
+    // single application run by replaying each dispatch once per group or target (device memory is
+    // snapshot/restored between passes). The tool supplies the pass count via
+    // kernel_replay_callback during CONFIG PHASE_ENTER; counter_dispatch_callback selects the
+    // per-pass group, and kernel_replay_callback selects the per-pass thread trace target at PASS
+    // PHASE_ENTER.
     //
-    // apply_core_capability_gates turned replay off when counter collection is off or the
-    // rocprofiler-sdk library cannot replay
+    // apply_core_capability_gates turned replay off when neither counter collection nor dispatch
+    // thread trace is on, or the rocprofiler-sdk library cannot replay
+    if(tool::att_remap::enabled())
+    {
+        ROCP_FATAL_IF(!tool::get_config().kernel_replay ||
+                      !tool::get_config().advanced_thread_trace)
+            << "--att-remap requires thread trace under kernel replay, which this "
+               "rocprofiler-sdk library cannot provide";
+        tool::att_remap::init(
+            fs::absolute(tool::format_path(tool::get_config().output_path)).string());
+    }
+
     if(tool::get_config().kernel_replay)
     {
         auto kernel_replay_ctx = rocprofiler_context_id_t{0};
@@ -4284,7 +4403,10 @@ generate_output(cleanup_mode _cleanup_mode, bool skip_output = false)
        !tool_metadata->att_filenames.empty())
     {
         outdata.num_output += 1;
-        cleanups.emplace_back([](cleanup_mode /*_mode*/) { tool_metadata->att_filenames.clear(); });
+        cleanups.emplace_back([](cleanup_mode /*_mode*/) {
+            tool_metadata->att_filenames.clear();
+            tool_metadata->att_replay_targets.clear();
+        });
     }
 
     ROCP_INFO << fmt::format("Number of services generating output: {} ({} kB)",
@@ -4455,18 +4577,41 @@ generate_output(cleanup_mode _cleanup_mode, bool skip_output = false)
 
         for(auto& [key, att_files] : tool_metadata->att_filenames)
         {
-            auto [dispatch_id, agent_handle] = key;
-            std::string formats              = "json,csv";
+            auto [dispatch_id, agent_handle, replay_pass] = key;
+            std::string formats                           = "json,csv";
+            const auto  replay_target = tool_metadata->att_replay_targets.find(key);
+            const bool  per_pass      = replay_target != tool_metadata->att_replay_targets.end();
 
             auto ui_name = std::stringstream{};
             ui_name << fmt::format(
                 "ui_output_agent_{}_dispatch_{}", std::to_string(agent_handle), dispatch_id);
+            if(per_pass) ui_name << fmt::format("_pass_{}", replay_pass);
             auto out_path = fmt::format("{}/{}", output_path, ui_name.str());
             auto in_path  = std::string(".");
 
             decoder.parse(in_path, out_path, att_files, codeobj, perf, formats);
+
+            if(per_pass)
+            {
+                const auto& [target_cu, simd_select, shader_engine_mask] = replay_target->second;
+                fs::create_directories(out_path);
+                auto ofs = std::ofstream{fmt::format("{}/replay_target.json", out_path)};
+                ofs << fmt::format("{{\"dispatch_id\": {}, \"agent\": {}, \"replay_pass\": {}, "
+                                   "\"target_cu\": {}, \"simd_select\": {}, "
+                                   "\"shader_engine_mask\": {}}}\n",
+                                   dispatch_id,
+                                   agent_handle,
+                                   replay_pass,
+                                   target_cu,
+                                   simd_select,
+                                   shader_engine_mask);
+            }
         }
     }
+
+    if(tool::att_remap::enabled())
+        tool::att_remap::fini(
+            fs::absolute(tool::format_path(tool::get_config().output_path)).string());
 
     run_cleanup();
 }

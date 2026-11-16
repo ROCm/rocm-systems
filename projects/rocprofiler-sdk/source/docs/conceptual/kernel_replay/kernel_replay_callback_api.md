@@ -15,8 +15,9 @@ narrower slice of it through its own command-line option.
 Decoupling replay from counter collection is the point of the design: a tool can use replay for
 hardware counters, kernel timing statistics, PC sampling, thread trace, SPM, or anything else, and
 it decides per pass which of its services are active, and for dispatch thread trace which part of
-the GPU each pass traces. ``rocprofv3`` wires replay to dispatch counter collection only; SPM, PC
-sampling, and thread trace require a custom tool (see :ref:`kernel-replay-sdk-api` and the
+the GPU each pass traces. ``rocprofv3`` wires replay to dispatch counter collection, and, with
+``--att-remap``, to the remapper's per-pass dispatch and thread trace target; SPM, PC sampling, and
+mixing services across passes require a custom tool (see :ref:`kernel-replay-sdk-api` and the
 ``samples/kernel_replay/`` examples).
 
 Replay is **not** a dedicated counting service mutually exclusive with ordinary dispatch counting.
@@ -377,18 +378,27 @@ separate kernel replay Doxygen group. A walkthrough for tool authors is
 
 ```bash
 rocprofv3 --pmc <counters...> --replay-mode kernel --kernel-replay-beta-enabled -- <app>
+rocprofv3 --att --att-remap --replay-mode kernel --kernel-replay-beta-enabled -- <app>
 ```
 
-- `--replay-mode kernel` requires `--pmc` and `--kernel-replay-beta-enabled`, and the CLI fails with a diagnostic if either is missing.
+- `--replay-mode kernel` requires `--pmc`, or `--att` with `--att-remap`, and
+  `--kernel-replay-beta-enabled`, and the CLI fails with a diagnostic if either is missing. `--pmc`
+  and `--att` cannot be combined under replay.
 - The tool library creates the kernel replay context when the flag is given, and not otherwise.
-- There is no pass-count knob. The tool derives the pass count from the number of counter groups
-  collectable on the dispatch's agent and returns it from `replay_pass_count`.
-- The flag does not wire `replay_continue` or the localized start/stop context callbacks.
+- There is no pass-count knob. With `--pmc` the tool derives the pass count from the number of
+  counter groups collectable on the dispatch's agent. With `--att-remap` the remapper runs an
+  indefinite loop: at every `PASS` `PHASE_ENTER` the tool applies its plan through
+  `replay_set_dispatch` and `replay_set_thread_trace_parameters`, and `replay_continue` follows it.
+  Only dispatches thread trace will capture are remapped.
+- With `--pmc` the flag does not wire `replay_continue` or the localized start/stop context
+  callbacks.
 - Without the flag, multiple `--pmc` groups continue to use application replay, where the whole
   application is re-run once per group.
 
 JSON counter records include a `replay_pass` field. CSV `counter_collection.csv` does **not** add a
-`Replay_Pass` column. See {ref}`using-kernel-replay-rocprofv3`.
+`Replay_Pass` column. With `--att-remap`, thread trace output is written and decoded once per pass, into
+`ui_output_agent_<agent>_dispatch_<dispatch>_pass_<pass>/`, which also holds a
+`replay_target.json` naming the pass's target. See {ref}`using-kernel-replay-rocprofv3`.
 
 ## Source reference
 

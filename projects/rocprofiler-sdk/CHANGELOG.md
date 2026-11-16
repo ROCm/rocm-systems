@@ -16,9 +16,15 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
     - New `app_dispatch` and `replay_set_dispatch` members of `rocprofiler_callback_tracing_kernel_replay_data_t`, with the new `rocprofiler_kernel_replay_dispatch_t` struct and `rocprofiler_kernel_replay_dispatch_cb_t` typedef. `app_dispatch` describes the dispatch the application submitted, including its kernel argument address. During PASS `PHASE_ENTER`, `replay_set_dispatch` makes the current pass submit a different kernel object, kernel argument buffer, grid, workgroup, cluster and segment sizes.
     - The pass's packet keeps the application's packet type, header and fences, including gfx1250 cluster dispatches. Snapshot and restore, injected profiling packets, the dispatch id and the deferred completion are unchanged.
 
+**rocprofv3 (CLI):**
+
+  - Multi-SIMD thread trace on gfx1250 (beta): `--att-remap`, with `--replay-mode kernel`, hands each traced dispatch to the remapper (`projects/remapper`), which rewrites the kernel so the traced WGP runs the same work on every replay pass, traces SIMD 0 to 3 of it, and ends the loop with the application's own dispatch. `--att-remap-options`, `--att-remap-library` and `--att-remap-merge` configure it; the per-pass traces are merged after the run.
+
 ### Changed
 
 ### Resolved issues
+
+- Thread trace decoding of file-backed code objects: `rocprofv3` now writes the code object range named by the `file://` URI instead of reading the file descriptor as a memory address.
 
 ### Known issues
 

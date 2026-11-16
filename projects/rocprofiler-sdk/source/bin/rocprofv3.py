@@ -810,7 +810,8 @@ For attachment profiling of running processes:
             "'kernel' collects all counter groups within a single application run via in-process "
             "kernel replay: each dispatch is replayed once per counter group, with device-memory "
             "snapshot/restore between passes, instead of re-running the whole application per "
-            "group. Requires --pmc and --kernel-replay-beta-enabled. "
+            "group. With --att --att-remap, the remapper runs each traced dispatch's passes instead. "
+            "Requires --pmc (or --att with --att-remap) and --kernel-replay-beta-enabled. "
             "'application' (default) re-runs the whole application once per counter group."
         ),
         choices=("kernel", "application"),
@@ -1309,6 +1310,40 @@ For attachment profiling of running processes:
         type=str,
     )
 
+    add_parser_bool_argument(
+        att_options,
+        "--att-remap",
+        help="(gfx1250, beta) Trace every SIMD of one WGP running the same work. The remapper "
+        "rewrites the traced kernel so its workgroups follow a recorded placement, then replays "
+        "the dispatch: record and check passes, then one traced pass per SIMD, and finally the "
+        "application's own dispatch. The traces are merged after the run. Requires "
+        "--replay-mode kernel. --att-target-cu picks the WGP; the remapper picks each pass's "
+        "SIMD and shader engines.",
+    )
+
+    att_options.add_argument(
+        "--att-remap-options",
+        help="Remapper settings as comma-separated key=value pairs, e.g. "
+        "'records=3,checks=4,repetitions=2,launch-model=auto' (see remapper.h for the keys)",
+        default=None,
+        type=str,
+    )
+
+    att_options.add_argument(
+        "--att-remap-library",
+        help="Path to libremapper.so. Default: the one installed with rocprofv3, else the "
+        "library search path",
+        default=None,
+        type=str,
+    )
+
+    add_parser_bool_argument(
+        att_options,
+        "--att-remap-merge",
+        default=True,
+        help="Merge each remapped dispatch's per-SIMD traces after the run (default: on)",
+    )
+
     att_options.add_argument(
         "--att-perfcounters",
         help="(gfx9) List of performance counters, and optionally their SIMD mask.",
@@ -1480,9 +1515,10 @@ def has_set_attr(obj, key):
 def services_conflicting_with_kernel_replay(args, environ=None):
     """Services that kernel replay cannot collect correctly in the same run.
 
-    Kernel replay re-runs each dispatch once per counter group. Counter collection is the only
-    pass-aware service: the tool hands the SDK a pass count derived from the counter groups and
-    picks a different group on each pass. Every other service is simply left enabled for the whole
+    Kernel replay re-runs each dispatch once per pass. Counter collection is pass-aware: the tool
+    hands the SDK a pass count derived from the counter groups and picks a different group on each
+    pass. Dispatch thread trace is pass-aware only with --att-remap, where the remapper chooses each
+    pass's dispatch and trace target. Every other service is simply left enabled for the whole
     replay loop, so it instruments all of the passes and reports them under the one dispatch id the
     replay reuses -- N thread traces, or N sets of PC samples, where the run asked for one.
 
@@ -1492,7 +1528,15 @@ def services_conflicting_with_kernel_replay(args, environ=None):
     conflicts = []
 
     if getattr(args, "advanced_thread_trace", None):
-        conflicts.append("--att")
+        if not getattr(args, "att_remap", None):
+            conflicts.append("--att without --att-remap")
+        elif getattr(args, "pmc", None) or getattr(args, "pmc_groups", None):
+            conflicts.append("--att together with counter collection")
+        # Both run thread trace across the whole device rather than per dispatch.
+        if getattr(args, "att_no_intercept", None):
+            conflicts.append("--att-no-intercept")
+        if getattr(args, "att_consecutive_kernels", None):
+            conflicts.append("--att-consecutive-kernels")
 
     if (
         getattr(args, "pc_sampling_beta_enabled", None)
@@ -1647,6 +1691,111 @@ def int_auto(num_str):
         raise ValueError(
             f"{type(num_str)} is not supported. {num_str} should be of type integer or string."
         )
+
+
+def rocprofv3_prefix():
+    return os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+
+
+def find_remapper_library(path=None):
+    """libremapper.so: --att-remap-library, the one installed next to rocprofv3, or the soname."""
+    if path:
+        if not os.path.isfile(path):
+            fatal_error(f"--att-remap-library: {path} does not exist")
+        return os.path.realpath(path)
+    for prefix in (rocprofv3_prefix(), os.environ.get("ROCM_PATH")):
+        if prefix:
+            candidate = os.path.join(prefix, "lib", "libremapper.so")
+            if os.path.isfile(candidate):
+                return candidate
+    return "libremapper.so"
+
+
+def find_remapper_scripts():
+    """The remapper's att_merge scripts directory, or None."""
+    for prefix in (rocprofv3_prefix(), os.environ.get("ROCM_PATH")):
+        if prefix:
+            candidate = os.path.join(prefix, "libexec", "remapper", "att_merge")
+            if os.path.isfile(os.path.join(candidate, "layout.py")):
+                return candidate
+    return None
+
+
+def configure_att_remap(args, kernel_replay_mode, update_env):
+    """Validate --att-remap and set the tool's ROCPROF_ATT_REMAP_* environment."""
+    if not kernel_replay_mode:
+        fatal_error(
+            "--att-remap replays each traced dispatch and requires --replay-mode kernel "
+            "and --kernel-replay-beta-enabled"
+        )
+    if args.pmc or args.pmc_groups:
+        fatal_error("--att-remap cannot be combined with counter collection (--pmc)")
+    if args.att_simd_select or args.att_shader_engine_mask:
+        fatal_error(
+            "--att-remap picks the SIMD and shader engines of every pass; "
+            "drop --att-simd-select and --att-shader-engine-mask"
+        )
+    options = args.att_remap_options or ""
+    if args.att_target_cu is not None and not re.search(
+        r"(^|,)\s*target[-_]cu\s*=", options
+    ):
+        target_cu = int_auto(args.att_target_cu)
+        options = ",".join(itr for itr in (f"target-cu={target_cu}", options) if itr)
+    update_env("ROCPROF_ATT_REMAP", True, overwrite=True)
+    update_env("ROCPROF_ATT_REMAP_OPTIONS", options, overwrite=True)
+    update_env(
+        "ROCPROF_ATT_REMAP_LIBRARY",
+        find_remapper_library(args.att_remap_library),
+        overwrite=True,
+    )
+    index = getattr(args, "att_remap_index", None)
+    if index:
+        update_env("ROCPROF_ATT_REMAP_INDEX", index, overwrite=True)
+
+
+def att_remap_merges(args):
+    return bool(getattr(args, "att_remap", None)) and getattr(
+        args, "att_remap_merge", True
+    )
+
+
+def merge_att_remap(index_path):
+    """Merge the traces of every dispatch the tool remapped (one JSON line each in the index)."""
+    import json
+
+    entries = []
+    if os.path.exists(index_path):
+        with open(index_path, "r") as ifs:
+            entries = [json.loads(line) for line in ifs if line.strip()]
+        os.unlink(index_path)
+    if not entries:
+        warning(
+            "--att-remap: no dispatch was remapped; see the [remapper] and --att-remap "
+            "messages above, and check the kernel filters"
+        )
+        return 1
+    scripts = find_remapper_scripts()
+    if scripts is None:
+        warning(
+            "--att-remap: the remapper's merge scripts are not installed; merge with "
+            "'python3 <remapper>/scripts/att_merge/layout.py DISPATCH_DIR TRACE_DIR --merge'"
+        )
+        for itr in entries:
+            print(f"--att-remap: {itr['dispatch_dir']} (traces in {itr['trace_dir']})")
+        return 1
+    ec = 0
+    for itr in entries:
+        layout = os.path.join(scripts, "layout.py")
+        cmd = [sys.executable, layout, itr["dispatch_dir"], itr["trace_dir"], "--merge"]
+        print(f"--att-remap: merging {itr['dispatch_dir']}")
+        sys.stdout.flush()
+        if subprocess.call(cmd) != 0:
+            warning(f"--att-remap: merging {itr['dispatch_dir']} failed")
+            ec = 1
+        else:
+            summary = os.path.join(itr["dispatch_dir"], "analysis", "summary.json")
+            print(f"--att-remap: merged view and audits in {summary}")
+    return ec
 
 
 def run(app_args, args, **kwargs):
@@ -2286,24 +2435,25 @@ def run(app_args, args, **kwargs):
                 "--replay-mode kernel requires acknowledgement that kernel replay is a beta "
                 "feature via --kernel-replay-beta-enabled"
             )
-        if not args.pmc and not args.pmc_groups:
+        if not args.pmc and not args.pmc_groups and not args.advanced_thread_trace:
             fatal_error(
                 "--replay-mode kernel requires counter collection "
-                "(--pmc or pmc_groups)"
+                "(--pmc or pmc_groups), or thread trace with --att-remap"
             )
         replay_conflicts = services_conflicting_with_kernel_replay(args)
         if replay_conflicts:
             fatal_error(
                 "--replay-mode kernel cannot be combined with "
                 + " or ".join(replay_conflicts)
-                + ". Kernel replay only varies counter groups from one pass to the next; "
-                "every other service stays on for all of the passes and would report each "
-                "kernel once per pass. Collect them in a separate run."
+                + ". Kernel replay varies counter groups, or with --att-remap the remapper's "
+                "dispatch and thread trace target, from one pass to the next; every other "
+                "service stays on for all of the passes and would report each kernel once per "
+                "pass. Collect them in a separate run."
             )
 
-        # Route counter collection through the in-process kernel-replay service. The SDK derives
-        # the pass count from the number of counter groups via the tool's pass-count callback, so
-        # there is nothing else to communicate.
+        # Route counter collection or --att-remap through the in-process kernel-replay service. The
+        # SDK gets the pass count from the tool's pass-count callback: the number of counter
+        # groups, or the remapper's schedule.
         update_env("ROCPROF_KERNEL_REPLAY", True, overwrite_if_true=True)
 
     if args.pmc:
@@ -2455,6 +2605,10 @@ def run(app_args, args, **kwargs):
                 args.att_resource_mode,
                 overwrite=True,
             )
+
+        att_remap = bool(getattr(args, "att_remap", None))
+        if att_remap:
+            configure_att_remap(args, kernel_replay_mode, update_env)
 
         if args.att_target_cu is not None:
             update_env(
@@ -2725,10 +2879,13 @@ def main(argv=None):
             "--replay-mode kernel requires acknowledgement that kernel replay is a beta "
             "feature via --kernel-replay-beta-enabled"
         )
-    if replay_enabled and not (cli_has_pmc or input_has_counters):
+    has_att = bool(getattr(cmd_args, "advanced_thread_trace", None)) or any(
+        has_set_attr(inp, "advanced_thread_trace") for inp in inp_args
+    )
+    if replay_enabled and not (cli_has_pmc or input_has_counters or has_att):
         fatal_error(
             "--replay-mode kernel requires counter collection "
-            "(--pmc, input-file pmc, or pmc_groups)"
+            "(--pmc, input-file pmc, or pmc_groups), or thread trace with --att-remap"
         )
 
     # Kernel replay replays each dispatch once per counter group within one application run, so
@@ -2871,7 +3028,15 @@ def main(argv=None):
         pass_idx = None
         if has_set_attr(args, "pmc") and len(args.pmc) > 0:
             pass_idx = 1
-        ec = run(app_args, args, pass_id=pass_idx)
+        if att_remap_merges(args) and not args.echo:
+            import tempfile
+
+            fd, args.att_remap_index = tempfile.mkstemp(prefix="rocprofv3-att-remap-")
+            os.close(fd)
+            ec = run(app_args, args, pass_id=pass_idx, use_execv=False)
+            ec = merge_att_remap(args.att_remap_index) or ec
+        else:
+            ec = run(app_args, args, pass_id=pass_idx)
     elif use_multipass:
         # Multi-pass mode: from CLI --pmc flags and/or input file
         ec = 0

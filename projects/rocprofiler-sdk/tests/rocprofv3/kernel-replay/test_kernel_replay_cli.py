@@ -256,7 +256,22 @@ def test_counters_only_replay_has_no_service_conflict():
 
 def test_att_conflicts_with_replay():
     # ATT instruments every pass and reports them all under the dispatch id replay reuses.
-    assert service_conflicts(advanced_thread_trace=True) == ["--att"]
+    assert service_conflicts(advanced_thread_trace=True) == ["--att without --att-remap"]
+
+
+def test_att_remap_is_the_one_att_mode_replay_accepts():
+    # The remapper chooses each pass's dispatch and thread trace target.
+    assert service_conflicts(advanced_thread_trace=True, att_remap=True) == []
+    assert service_conflicts(
+        advanced_thread_trace=True, att_remap=True, pmc=["SQ_WAVES"]
+    ) == ["--att together with counter collection"]
+    # Both trace the whole device rather than one dispatch, so there is no pass to retarget.
+    assert service_conflicts(
+        advanced_thread_trace=True,
+        att_remap=True,
+        att_no_intercept=True,
+        att_consecutive_kernels="4",
+    ) == ["--att-no-intercept", "--att-consecutive-kernels"]
 
 
 def test_pc_sampling_flag_conflicts_with_replay():
@@ -280,7 +295,7 @@ def test_every_conflicting_service_is_reported_together():
     # A user who asked for all of them should be told about all of them, not one per run.
     assert service_conflicts(
         advanced_thread_trace=True, pc_sampling_beta_enabled=True, spm=["SQ_WAVES"]
-    ) == ["--att", "PC sampling", "--spm"]
+    ) == ["--att without --att-remap", "PC sampling", "--spm"]
 
 
 def test_unset_service_options_do_not_conflict():
@@ -343,7 +358,7 @@ def test_conflicts_are_reported_in_a_stable_order():
     for _ in range(5):
         assert service_conflicts(
             spm=["SQ_WAVES"], advanced_thread_trace=True, pc_sampling_beta_enabled=True
-        ) == ["--att", "PC sampling", "--spm"]
+        ) == ["--att without --att-remap", "PC sampling", "--spm"]
 
 
 def test_missing_attributes_are_treated_as_unset():
@@ -356,7 +371,9 @@ def test_missing_attributes_are_treated_as_unset():
 
 
 def test_att_alone_does_not_drag_in_other_services():
-    assert service_conflicts(advanced_thread_trace=True, spm=None) == ["--att"]
+    assert service_conflicts(advanced_thread_trace=True, spm=None) == [
+        "--att without --att-remap"
+    ]
 
 
 def test_counter_collection_is_never_itself_a_conflict():
@@ -364,6 +381,126 @@ def test_counter_collection_is_never_itself_a_conflict():
     including the list-of-lists form that replay itself builds."""
     assert service_conflicts(pmc=[["SQ_WAVES"], ["GRBM_COUNT"]]) == []
     assert service_conflicts(pmc_groups=[["SQ_WAVES"], ["GRBM_COUNT"]]) == []
+
+
+def att_remap_env(**overrides):
+    """The environment configure_att_remap sets for a --att-remap command line."""
+    settings = dict(
+        pmc=None,
+        pmc_groups=None,
+        att_target_cu=None,
+        att_simd_select=None,
+        att_shader_engine_mask=None,
+        att_remap_options=None,
+        att_remap_library=None,
+        att_remap_index=None,
+    )
+    kernel_replay = overrides.pop("kernel_replay", True)
+    settings.update(overrides)
+    env = {}
+
+    def update_env(name, value, **kwargs):
+        env[name] = value
+
+    rocprofv3().configure_att_remap(
+        argparse.Namespace(**settings), kernel_replay, update_env
+    )
+    return env
+
+
+def rejected(func):
+    try:
+        func()
+    except SystemExit as exc:
+        return exc.code != 0
+    return False
+
+
+def test_att_remap_passes_the_target_cu_and_options_to_the_tool():
+    env = att_remap_env(
+        att_target_cu="3", att_remap_options="records=2", att_remap_index="/x"
+    )
+    assert env["ROCPROF_ATT_REMAP"] is True
+    assert env["ROCPROF_ATT_REMAP_OPTIONS"] == "target-cu=3,records=2"
+    assert env["ROCPROF_ATT_REMAP_INDEX"] == "/x"
+    assert env["ROCPROF_ATT_REMAP_LIBRARY"].endswith("libremapper.so")
+    # An explicit target-cu option wins, and no --att-target-cu adds nothing.
+    env = att_remap_env(att_target_cu="3", att_remap_options="target_cu=5")
+    assert env["ROCPROF_ATT_REMAP_OPTIONS"] == "target_cu=5"
+    assert att_remap_env()["ROCPROF_ATT_REMAP_OPTIONS"] == ""
+    assert "ROCPROF_ATT_REMAP_INDEX" not in att_remap_env()
+
+
+def test_att_remap_rejects_what_the_remapper_decides_or_cannot_do():
+    assert rejected(lambda: att_remap_env(kernel_replay=False))
+    assert rejected(lambda: att_remap_env(att_simd_select="0"))
+    assert rejected(lambda: att_remap_env(att_shader_engine_mask="0x1"))
+    assert rejected(lambda: att_remap_env(pmc=[["SQ_WAVES"]]))
+    assert rejected(
+        lambda: att_remap_env(att_remap_library="/nonexistent/libremapper.so")
+    )
+
+
+def test_att_remap_runs_the_application_then_merges():
+    module = rocprofv3()
+    calls = []
+
+    def record(app_args, args, **kwargs):
+        calls.append(("run", kwargs.get("use_execv", True), args.att_remap_index))
+        return 0
+
+    def merge(index):
+        calls.append(("merge", index))
+        return 0
+
+    saved = (module.run, module.merge_att_remap)
+    module.run, module.merge_att_remap = record, merge
+    common = [
+        "--att",
+        "--att-remap",
+        "--replay-mode",
+        "kernel",
+        "--kernel-replay-beta-enabled",
+    ]
+    try:
+        module.main(common + ["--", "/bin/true"])
+        assert calls[0][:2] == ("run", False) and calls[1] == ("merge", calls[0][2])
+        os.remove(calls[0][2])
+        calls.clear()
+        module.main(common + ["--att-remap-merge", "False", "--", "/bin/true"])
+        assert calls == [("run", True, None)]
+    finally:
+        module.run, module.merge_att_remap = saved
+
+
+def test_att_remap_merge_runs_layout_for_each_remapped_dispatch():
+    module = rocprofv3()
+    with tempfile.TemporaryDirectory() as tmp:
+        scripts = os.path.join(tmp, "att_merge")
+        os.makedirs(scripts)
+        with open(os.path.join(scripts, "layout.py"), "w") as ofs:
+            ofs.write(
+                "import sys, pathlib\n"
+                "pathlib.Path(sys.argv[1], 'merged').write_text(' '.join(sys.argv[2:]))\n"
+            )
+        index = os.path.join(tmp, "index")
+        dirs = [os.path.join(tmp, f"dispatch-{i}") for i in (1, 2)]
+        with open(index, "w") as ofs:
+            for d in dirs:
+                os.makedirs(d)
+                ofs.write(json.dumps({"dispatch_dir": d, "trace_dir": tmp}) + "\n")
+        saved = module.find_remapper_scripts
+        module.find_remapper_scripts = lambda: scripts
+        try:
+            assert module.merge_att_remap(index) == 0
+            for d in dirs:
+                with open(os.path.join(d, "merged")) as ifs:
+                    assert ifs.read() == f"{tmp} --merge"
+            assert not os.path.exists(index)
+            # Nothing remapped is reported as a failure of the run.
+            assert module.merge_att_remap(index) == 1
+        finally:
+            module.find_remapper_scripts = saved
 
 
 def main():

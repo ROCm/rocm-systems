@@ -47,11 +47,13 @@
 
 #include <fmt/format.h>
 
+#include <array>
 #include <cstdint>
 #include <map>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -101,9 +103,12 @@ using counter_dimension_vec_t      = std::vector<rocprofiler_counter_record_dime
 using external_corr_id_set_t       = std::unordered_set<uint64_t>;
 using code_obj_decoder_t = rocprofiler::sdk::codeobj::disassembly::CodeobjAddressTranslate;
 using instruction_t      = rocprofiler::sdk::codeobj::disassembly::Instruction;
-using att_dispatch_agent_key_t =
-    std::pair<rocprofiler_dispatch_id_t, uint64_t>;  // (dispatch_id, agent_handle)
-using att_filenames_map_t         = std::map<att_dispatch_agent_key_t, std::vector<std::string>>;
+// (dispatch_id, agent_handle, replay_pass); replay_pass is 0 unless the dispatch was traced once
+// per kernel replay pass
+using att_dispatch_agent_key_t = std::tuple<rocprofiler_dispatch_id_t, uint64_t, uint64_t>;
+using att_filenames_map_t      = std::map<att_dispatch_agent_key_t, std::vector<std::string>>;
+// thread trace target of each kernel replay pass, for dispatches traced once per pass
+using att_replay_targets_map_t    = std::map<att_dispatch_agent_key_t, std::array<uint64_t, 3>>;
 using code_object_load_info_vec_t = std::vector<rocprofiler::att_wrapper::CodeobjLoadInfo>;
 template <typename Tp>
 using synced_map = common::Synchronized<Tp, true>;
@@ -168,6 +173,7 @@ struct metadata
     synced_map<code_object_load_info_vec_t>  code_object_load           = {};
     synced_map<kernel_rename_map_t>          kernel_rename_map          = {};
     att_filenames_map_t                      att_filenames              = {};
+    att_replay_targets_map_t                 att_replay_targets         = {};
     synced_obj<pc_sampling_stats_t>          pc_sampling_stats          = {};
     synced_obj<runtime_initialization_set_t> runtime_initialization_set = {};
     node_info                                node_data                  = {};
