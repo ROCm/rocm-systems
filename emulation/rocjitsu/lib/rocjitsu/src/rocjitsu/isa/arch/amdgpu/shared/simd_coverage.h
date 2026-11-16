@@ -299,12 +299,8 @@ template <bool Extended, bool TrackStatus = false, typename Slot,
   };
   if (!matches_mode(x) || !matches_mode(y))
     return false;
-  // Matching controls still permit host computation to raise exception flags, so
-  // each slot that computes on host floats takes one environment for the whole
-  // wavefront, after its own operand reads and around its chunk loop, and uses
-  // the unscoped arithmetic cores inside it. Raw-bit routes, including the F32
-  // MIN/MAX selections, need none, and register access, which can run callbacks,
-  // stays outside every scope.
+  // With matching controls the host's default FP environment computes each slot,
+  // through the unscoped arithmetic cores.
   struct Results {
     alignas(util::native<uint32_t>) uint32_t words[64]{};
     alignas(util::native<uint64_t>) uint64_t pairs[64]{};
@@ -323,9 +319,6 @@ template <bool Extended, bool TrackStatus = false, typename Slot,
         std::optional<RegisterAccess::OperandRead64View> c;
         if (slot.op == 32)
           c.emplace(regs.read_operand64(*slot.src2, exec));
-        // Every F64 slot computes on the host: 32-34 arithmetically, and MIN/MAX
-        // through fmax/fmin, which signal on a NaN input under no MODE gate.
-        fp_mode::ScopedEnvironment environment(0);
         for (uint32_t base = 0; base < wf.wf_size(); base += W) {
           if (!((exec >> base) & util::mask<uint64_t>(W)))
             continue;
@@ -376,11 +369,6 @@ template <bool Extended, bool TrackStatus = false, typename Slot,
       acc.emplace(regs.read_operand(*slot.dst, exec));
     const uint64_t condition =
         slot.op == 9 ? (slot.uses_vcc ? wf.vcc_mask() : read_wave_mask_scalar(*slot.src2, wf)) : 0;
-    // One environment per arithmetic slot, after that slot's reads. The gate
-    // above leaves MODE.FP_ROUND nearest-even, the rounding the cores below expect.
-    std::optional<fp_mode::ScopedEnvironment> environment;
-    if (is_arithmetic(slot))
-      environment.emplace(wf.fp_round_mode_f32());
     for (uint32_t base = 0; base < wf.wf_size(); base += W) {
       if (!((exec >> base) & util::mask<uint64_t>(W)))
         continue;

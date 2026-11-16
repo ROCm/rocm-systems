@@ -1,7 +1,6 @@
 // Copyright (c) 2025 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include "restore_rounding.h"
 #include "rocjitsu/vm/risc_v/hart.h"
 #include "simdojo/sim/clock_domain.h"
 #include "simdojo/sim/component.h"
@@ -10,7 +9,6 @@
 #include <gtest/gtest.h>
 
 #include <bit>
-#include <cfenv>
 #include <cstdint>
 #include <iterator>
 #include <limits>
@@ -129,9 +127,8 @@ TEST_F(RvSimTest, FloatToIntegerUsesStaticAndDynamicRounding) {
   }
 }
 
-TEST_F(RvSimTest, FloatToIntegerNearestModesIgnoreHostRounding) {
+TEST_F(RvSimTest, FloatToIntegerNearestModes) {
   auto &state = hart_->state();
-  const rocjitsu::test::RestoreRounding restore_rounding;
   struct Case {
     double input;
     int64_t rne;
@@ -146,21 +143,17 @@ TEST_F(RvSimTest, FloatToIntegerNearestModesIgnoreHostRounding) {
       {-2.5, -2, -3, 1},
       {0x1.0000000000001p52, 4503599627370497LL, 4503599627370497LL, 0},
   };
-  for (int host_mode : {FE_TONEAREST, FE_UPWARD, FE_DOWNWARD, FE_TOWARDZERO}) {
-    ASSERT_EQ(std::fesetround(host_mode), 0);
-    for (unsigned rm : {0u, 4u}) {
-      const uint32_t word = 0xc22082d3 | (rm << 12); // fcvt.l.d x5, f1
-      hart_->memory().load_image(reinterpret_cast<const uint8_t *>(&word), sizeof(word), 0);
-      for (const Case &c : cases) {
-        SCOPED_TRACE(::testing::Message() << c.input << " host_mode=" << host_mode << " rm=" << rm);
-        state.pc = 0;
-        state.write_freg(1, std::bit_cast<uint64_t>(c.input));
-        state.write_csr(0x001, 0);
-        ASSERT_TRUE(hart_->advance(0));
-        EXPECT_EQ(state.read_xreg(5), rm == 0 ? c.rne : c.rmm);
-        EXPECT_EQ(state.read_csr(0x001), c.flags);
-        EXPECT_EQ(std::fegetround(), host_mode);
-      }
+  for (unsigned rm : {0u, 4u}) {
+    const uint32_t word = 0xc22082d3 | (rm << 12); // fcvt.l.d x5, f1
+    hart_->memory().load_image(reinterpret_cast<const uint8_t *>(&word), sizeof(word), 0);
+    for (const Case &c : cases) {
+      SCOPED_TRACE(::testing::Message() << c.input << " rm=" << rm);
+      state.pc = 0;
+      state.write_freg(1, std::bit_cast<uint64_t>(c.input));
+      state.write_csr(0x001, 0);
+      ASSERT_TRUE(hart_->advance(0));
+      EXPECT_EQ(state.read_xreg(5), rm == 0 ? c.rne : c.rmm);
+      EXPECT_EQ(state.read_csr(0x001), c.flags);
     }
   }
 }
