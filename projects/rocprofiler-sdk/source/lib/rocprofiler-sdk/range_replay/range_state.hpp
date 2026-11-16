@@ -159,8 +159,8 @@ struct range_context_t
     hsa_agent_t            hsa_agent = {.handle = 0};
     rocprofiler_agent_id_t agent_id  = {.handle = 0};
 
-    kernel_replay::memory_snapshot::device_snapshot_t snapshot       = {};
-    bool                                              snapshot_taken = false;
+    kernel_replay::memory_snapshot::snapshot_t snapshot       = {};
+    bool                                       snapshot_taken = false;
     // Base pointers of the tracked allocations the snapshot covers, sorted. Re-checked at close: a
     // range that allocated or freed device memory while open has regions the snapshot cannot
     // restore, so it is declined rather than replayed against partially-restored inputs.
