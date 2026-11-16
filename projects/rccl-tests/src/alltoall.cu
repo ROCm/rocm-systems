@@ -13,9 +13,10 @@
 #include "rccl_vector_types.h"
 #include "gin_resource_sharing.h"  // --gin_resource_sharing mode selection
 #include <atomic>
-// The fabric LSA AllToAll lane needs the Anvil SDMA backend and librccl's lane
-// headers; an install without either keeps -D 3 on gin.put.
-#if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,7) && defined(NCCL_OS_LINUX) && \
+// The fabric LSA AllToAll lane needs the Anvil SDMA backend, librccl's lane
+// headers and device resource requirements (2.29) for its LL flags; an install
+// without any of them keeps -D 3 on gin.put.
+#if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,29,0) && defined(NCCL_OS_LINUX) && \
     NCCL_GIN_ANVIL_SDMA_ENABLE && __has_include("nccl_device/gin/anvil_sdma/gin_fabric_lsa_policy.h")
 #define ALLTOALL_GIN_FABRIC_LSA 1
 #include <map>
@@ -101,6 +102,13 @@ void AlltoAllGetBw(size_t count, size_t typesize, double sec, double* algBw, dou
   *busBw = baseBw * factor;
 }
 
+#if ALLTOALL_GIN_FABRIC_LSA
+// The fabric LSA lane's ready/done flags. thread_local for -t N, like Broadcast's
+// LL requirement: each host thread links its own node into its requirements list.
+thread_local ncclLLA2AHandle g_alltoallLaneFlags = {};
+thread_local ncclDevResourceRequirements g_alltoallLaneFlagReq = {};
+#endif
+
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,29,0)
 // set devComm reqs for alltoall device kernels
 testResult_t AlltoAllGetDevCommRequirements(int deviceImpl, ncclDevCommRequirements* reqs, ncclComm_t comm) {
@@ -134,7 +142,15 @@ testResult_t AlltoAllGetDevCommRequirements(int deviceImpl, ncclDevCommRequireme
       reqs->barrierCount = 1;
       reqs->ginSignalCount = 1;
 #if ALLTOALL_GIN_FABRIC_LSA
-      reqs->lsaBarrierCount = ::gin::fabric::ginFabricLsaA2ALsaBarrierPool(commProperties.nRanks);
+      // The lane state is only known once the devComm exists, so every -D 3
+      // communicator the lane could run on gets its flags.
+      g_alltoallLaneFlags = {};
+      if (commProperties.nRanks >= 2 && commProperties.nRanks <= ::gin::fabric::kGinFabricLsaA2AMaxCtas) {
+        NCCLCHECK(ncclLLA2ACreateRequirement(::gin::fabric::ginFabricLsaA2AFlagBlocks(commProperties.nRanks),
+                                             commProperties.nRanks, &g_alltoallLaneFlags, &g_alltoallLaneFlagReq));
+        g_alltoallLaneFlagReq.next = reqs->resourceRequirementsList;
+        reqs->resourceRequirementsList = &g_alltoallLaneFlagReq;
+      }
 #endif
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2, 29, 7)
       reqs->ginConnectionType = NCCL_GIN_CONNECTION_FULL;
@@ -187,9 +203,6 @@ bool AlltoAllGetDevCommRequirements(int deviceImpl, ncclDevCommRequirements* req
     case 3: // GinAlltoAllKernel: all GIN confined to CTA 0 (barrier/signal index 0)
       reqs->barrierCount = 1;
       reqs->ginSignalCount = 1;
-#if ALLTOALL_GIN_FABRIC_LSA
-      reqs->lsaBarrierCount = ::gin::fabric::kGinFabricLsaA2AMaxCtas;
-#endif
       return true;
     case 4: // HybridAlltoAllKernel: CTA 0 = GIN, CTAs 1..N = LSA
       if (deviceCtaCount < 2) return false;
@@ -472,13 +485,14 @@ static AlltoAllGinLaneState AlltoAllGinLaneStateFor(const ncclDevComm* devComm) 
 // Every rank reads the same agreed state, so every rank picks the same lane.
 static GinFabricA2AAlgo AlltoAllGinFabricAlgoHost(const ncclDevComm* devComm, size_t bytesPerPeer) {
   const AlltoAllGinLaneState state = AlltoAllGinLaneStateFor(devComm);
-  return ginFabricA2ASelectAlgo(state.ctxOk, state.lsaEnabled, devComm->nRanks, bytesPerPeer, state.lsaThreshold);
+  const bool ctxOk = state.ctxOk && g_alltoallLaneFlags.nSlots != 0;
+  return ginFabricA2ASelectAlgo(ctxOk, state.lsaEnabled, devComm->nRanks, bytesPerPeer, state.lsaThreshold);
 }
 
 // blockIdx.x is the peer and blockIdx.y the chunk.
 __global__ void GinAlltoAllLsaKernel(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset,
-                                     size_t bytesPerPeer, struct ncclDevComm devComm) {
-  ::gin::fabric::ginFabricLsaAlltoAllBody(sendwin, sendoffset, recvwin, recvoffset, bytesPerPeer, devComm);
+                                     size_t bytesPerPeer, struct ncclDevComm devComm, ncclLLA2AHandle flags) {
+  ::gin::fabric::ginFabricLsaAlltoAllBody(sendwin, sendoffset, recvwin, recvoffset, bytesPerPeer, devComm, flags);
 }
 
 static testResult_t AlltoAllLaunchGinLsa(void* sendbuff, size_t sendoffset, void* recvbuff, size_t recvoffset,
@@ -490,7 +504,7 @@ static testResult_t AlltoAllLaunchGinLsa(void* sendbuff, size_t sendoffset, void
   dim3 grid((unsigned)devComm->nRanks, (unsigned)chunks);
   GinAlltoAllLsaKernel<<<grid, dim3((unsigned)threads), 0, stream>>>((ncclWindow_t)sendbuff, sendoffset,
                                                                      (ncclWindow_t)recvbuff, recvoffset,
-                                                                     bytesPerPeer, *devComm);
+                                                                     bytesPerPeer, *devComm, g_alltoallLaneFlags);
   CUDACHECK(cudaGetLastError());
   return testSuccess;
 }

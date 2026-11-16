@@ -164,7 +164,7 @@ def test_AllToAllGinSdma2GiBTotalHangGuard(request):
 # The fabric LSA lane arms only where every rank has fabric-registered windows
 # (MI450 MNNVL; pass NCCL_MNNVL_ENABLE=1 through RCCL_TESTS_A2A_XENV there).
 # Elsewhere the opt-ins leave -D 3 on gin.put. 64 KiB per peer keeps the total
-# under the 2 MiB default threshold at up to 32 ranks.
+# under the nRanks^2 MiB default threshold at any rank count.
 _FABRIC_LSA_ENV = ("RCCL_GIN_ANVIL_FABRIC_MEM=1", "RCCL_GIN_ANVIL_FABRIC_LSA_A2A=1")
 
 
