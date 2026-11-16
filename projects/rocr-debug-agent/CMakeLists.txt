@@ -42,6 +42,14 @@
 # with a suitable HIP compiler. This is mostly for development, so it isn't
 # required to be built if users are only looking for the tool.
 #
+# ENABLE_UNIT_TESTS
+#
+# Enable building the rocr-debug-agent unit tests. Default is OFF.
+#
+# The unit tests are CPU-only GoogleTest tests that need no GPU or HIP
+# compiler. They are independent of ENABLE_TESTS, so
+# -DENABLE_TESTS=OFF -DENABLE_UNIT_TESTS=ON builds only the unit tests.
+#
 #
 # rocm-debug-agent has the following dependencies:
 #
@@ -60,6 +68,9 @@ include(GNUInstallDirs)
 
 # By default build the Debug Agent tests.
 option(ENABLE_TESTS "Enable building Debug Agent tests" ON)
+
+# By default do not include unit tests.
+option(ENABLE_UNIT_TESTS "Enable building Debug Agent unit tests" OFF)
 
 # Modules that are linked into both the rocm-debug-agent library and the unit
 # tests.  They are compiled once here so the tests exercise the same objects as
@@ -197,7 +208,8 @@ target_include_directories(
 # runtime: it works with any runtime that registers its r_debug with the driver (ROCr, CLR/CRUX).
 target_include_directories(
     rocm-debug-agent
-    PRIVATE $<TARGET_PROPERTY:hsa-runtime64::hsa-runtime64,INTERFACE_INCLUDE_DIRECTORIES>
+    PRIVATE
+        $<TARGET_PROPERTY:hsa-runtime64::hsa-runtime64,INTERFACE_INCLUDE_DIRECTORIES>
 )
 
 target_link_libraries(
@@ -294,4 +306,11 @@ install(
 if(ENABLE_TESTS)
     enable_testing()
     add_subdirectory(test)
+endif()
+
+# The unit tests link the rocm-debug-agent-core objects, so they are added
+# from here rather than from test/, which is also configured on its own.
+if(ENABLE_UNIT_TESTS)
+    enable_testing()
+    add_subdirectory(test/unit)
 endif()
