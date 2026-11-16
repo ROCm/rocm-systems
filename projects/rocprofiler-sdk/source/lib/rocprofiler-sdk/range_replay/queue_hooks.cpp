@@ -36,10 +36,15 @@ submission_hook(const hsa::Queue*                     queue,
                 bool                                  graph_launch_active,
                 hsa_amd_queue_intercept_packet_writer writer)
 {
+    // Re-submitted packets are the recording, not new work. No open range means this submit cannot
+    // affect one.
     if(!any_range_open() || this_thread_replaying()) return;
 
     const auto& _queue = *CHECK_NOTNULL(queue);
 
+    // Tell every other thread's open range about this submit before this thread records its own.
+    // A host range on another thread treats a dispatch to any agent as overlap; a packet range
+    // only cares about its own agent.
     if(const auto* rocp_agent = _queue.get_agent().get_rocp_agent(); rocp_agent != nullptr)
     {
         note_foreign_dispatch(rocp_agent->id.handle);
@@ -47,6 +52,9 @@ submission_hook(const hsa::Queue*                     queue,
 
     if(auto* open_range = current_range(); open_range != nullptr)
     {
+        // Record first, then snapshot. The packets have to be kept, and the snapshot has to be the
+        // memory those packets are about to read, so it is taken before this submit reaches the
+        // GPU.
         note_submission(_queue, packets, pkt_count, graph_launch_active);
         ensure_entry_snapshot(*open_range, _queue, writer);
     }

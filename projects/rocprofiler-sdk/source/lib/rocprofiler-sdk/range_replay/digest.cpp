@@ -30,6 +30,9 @@ namespace range_replay
 {
 namespace digest
 {
+// FNV-1a. Equal bytes hash equal, so a mismatch means the region changed. A match is not a proof
+// the bytes are identical; the check reports how many regions differ, which is enough to say the
+// passes did not end in the same state.
 uint64_t
 hash_bytes(const void* data, size_t size)
 {

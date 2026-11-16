@@ -1,14 +1,18 @@
 (range-replay-callback-api)=
 # Range Replay — Callback API and Tool Configuration
 
-Range replay is exposed as a **callback tracing service** plus two API calls that mark the range.
+Range replay is exposed as a **callback tracing service** plus the calls that mark the range.
 A tool subscribes to the `ROCPROFILER_CALLBACK_TRACING_RANGE_REPLAY` domain through the ordinary
 `rocprofiler_configure_callback_tracing_service()` call, then brackets the phase it wants replayed
-with `rocprofiler_range_replay_begin()` and `rocprofiler_range_replay_end()`.
+with `rocprofiler_range_replay_begin()` and `rocprofiler_range_replay_end()`. Host replay adds
+`ROCPROFILER_RANGE_REPLAY_HOST_BEGIN`, `rocprofiler_range_replay_host_jmpbuf()`,
+`rocprofiler_range_replay_host_track_memory()`, and `rocprofiler_range_replay_get_host_pass()`.
 
 The API is experimental. Its public header is
-`source/include/rocprofiler-sdk/experimental/range_replay.h`. The domain, the payload, and the two
-entry points are expected to change before a stable release.
+`source/include/rocprofiler-sdk/experimental/range_replay.h`. The domain, the payload, and the
+entry points are expected to change before a stable release. The behavior below is already in that
+header: no further public symbol is required for overlapping host regions, for rejecting a region
+that wraps the address space, or for the submit-epoch re-fence.
 
 ## API surface
 
@@ -82,6 +86,7 @@ typedef struct rocprofiler_callback_tracing_range_replay_data_t
     uint64_t                          dispatch_count;
     rocprofiler_range_replay_status_t status;
     uint64_t                          divergence_count;
+    int                               host_replay;
 } rocprofiler_callback_tracing_range_replay_data_t;
 ```
 
@@ -97,6 +102,7 @@ typedef struct rocprofiler_callback_tracing_range_replay_data_t
 | `dispatch_count` | `PASS`, `CLOSE` | dispatches observed in the range |
 | `status` | `CLOSE` | `REPLAYED`, or why the range was declined |
 | `divergence_count` | `CLOSE` | snapshot regions that differed between pass 0 and the final pass |
+| `host_replay` | `CONFIG` | **tool writes.** Non-zero selects host replay. Requires `ROCPROFILER_RANGE_REPLAY_HOST_BEGIN`; otherwise `CLOSE` is `HOST_JMP_NOT_SET`. Zero keeps packet replay |
 
 `dispatch_count` at `CLOSE` reports the dispatches *observed*, not the dispatches retained. A
 declined range drops its recorded packets immediately (they hold a kernarg copy each), but "how many
@@ -104,6 +110,25 @@ dispatches were in the phase" is still the number the tool wants to see.
 
 `user_data` written by the tool during `CONFIG` is captured once and passed to every later callback
 for that range, so a tool can carry per-range state without its own side table.
+
+## Host replay entry points
+
+Packet replay needs only `begin` and `end`. Host replay re-runs the application's own code, so the
+application opens the range with the macro and registers the host bytes the range reads and writes.
+
+| Symbol | Role |
+|---|---|
+| `ROCPROFILER_RANGE_REPLAY_HOST_BEGIN(range_id, status_out)` | Statement macro. `sigsetjmp` in the caller's frame, then `begin` on the first entry. Re-entry sets `status_out` to success and does not call `begin` again |
+| `rocprofiler_range_replay_host_jmpbuf()` | Thread-local `sigjmp_buf`, returned as `void*`. Calling it arms the next `begin` on this thread. A `dlsym` client writes the same `if (sigsetjmp(...) == 0)` the macro expands to |
+| `rocprofiler_range_replay_host_track_memory(ptr, size)` | Capture `[ptr, ptr+size)` and copy it back before each extra pass. A registration with no range open applies to the next range on this thread. A registration during pass 0 captures at the call. Later passes ignore it. It lasts until the range closes. Overlapping regions restore each byte from the earliest capture. `NULL`, a zero size, or a region that wraps past the end of the address space returns `ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT` |
+| `rocprofiler_range_replay_get_host_pass(pass)` | Writes 0 on the application's own run and 1..N-1 on re-executed passes |
+
+`end` does not return after passes 0..N-2 of a host range. It fences, restores, raises `PASS`, and
+`siglongjmp`s back to the macro. It returns once, after the last pass, having raised `CLOSE`.
+
+The full application contract (no non-trivial C++ destructor live across the jump, `volatile`
+locals, balanced allocations, synchronize before `end`) is on
+[Host range replay](range_replay_host.md).
 
 ## Pass-count semantics
 
@@ -172,6 +197,8 @@ All paths are relative to `projects/rocprofiler-sdk/`.
 |---|---|---|
 | Public header | `source/include/rocprofiler-sdk/experimental/range_replay.h` | — |
 | `begin` / `end` | `source/lib/rocprofiler-sdk/range_replay/api.cpp` | `rocprofiler_range_replay_begin`, `..._end` |
+| Host begin, track, pass query | `source/lib/rocprofiler-sdk/range_replay/api.cpp` | `rocprofiler_range_replay_host_jmpbuf`, `rocprofiler_range_replay_host_track_memory`, `rocprofiler_range_replay_get_host_pass` |
+| Host fence, snapshot, restore | `source/lib/rocprofiler-sdk/range_replay/host_replay.cpp` | `enter_range`, `finish_pass`, `restore_regions` |
 | Subscription and single-subscriber check | `source/lib/rocprofiler-sdk/callback_tracing.cpp` | `rocprofiler_configure_callback_tracing_service` |
 | Pass plan and callback delivery | `source/lib/rocprofiler-sdk/range_replay/replay_callbacks.cpp` | `execute_config_callback`, `execute_pass_phase_enter`, `execute_close_callback` |
 | Pass-count / continue decisions | `source/lib/rocprofiler-sdk/range_replay/replay_callbacks.cpp` | `should_continue_replay()` |

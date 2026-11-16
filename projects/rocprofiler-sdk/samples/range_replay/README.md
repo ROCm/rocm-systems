@@ -21,7 +21,7 @@ afterwards:
 
 That is also why the application is a participant here and not just a subject: only it knows where
 its range boundaries are. `main.cpp` calls `rocprofiler_range_replay_begin` / `_end` around the
-dispatches it wants replayed. It resolves those two entry points with `dlsym` out of the preloaded
+dispatches it wants replayed. Host replay also uses `rocprofiler_range_replay_host_jmpbuf`, `rocprofiler_range_replay_host_track_memory`, and `rocprofiler_range_replay_get_host_pass`. The begin macro names the SDK functions directly, so a `dlsym` client writes the `sigsetjmp` itself. It resolves `begin` and `end` with `dlsym` out of the preloaded
 client rather than linking the SDK, because linking the SDK into the HIP executable makes HIP
 report `hipErrorInvalidDeviceFunction` on the first kernel launch on gfx942.
 

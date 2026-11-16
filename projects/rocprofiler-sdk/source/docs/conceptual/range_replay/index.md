@@ -181,6 +181,6 @@ interesting counters are.
 - **[Host range replay](range_replay_host.md)** — the `sigsetjmp` / `siglongjmp` path that re-runs
   the application's own code per pass: the begin macro, registered host memory, the application's
   contract, and the time-stepping integration test.
-- **[Performance](range_replay_performance.md)** — the two-term cost model, why the fixed window
-  cost is paid once per range rather than once per dispatch, what the two nightly perf tests
+- **[Performance](range_replay_performance.md)** — closed-form cost of packet replay, kernel replay,
+  and host replay, why the fixed window is paid once per range, what the two nightly perf tests
   measure, and why a declined range must never be timed.
