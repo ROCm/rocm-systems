@@ -1,4 +1,5 @@
-#pragma once
+#ifndef NCCL_DEVICE_SYMMETRIC_DATA_OPS_H_
+#define NCCL_DEVICE_SYMMETRIC_DATA_OPS_H_
 #if defined(__HIP_PLATFORM_AMD__)
 #include "symmetric/primitives.h"
 #else
@@ -779,3 +780,5 @@ static __device__ void copy(Coop coop, int nElts, GMemTag dstMem, DstT* dst, SMe
     storeMem(GMemTag(), dst + e, (DstT)(transformFn((src[e]))));
   }
 }
+
+#endif // NCCL_DEVICE_SYMMETRIC_DATA_OPS_H_

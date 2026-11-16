@@ -119,7 +119,9 @@ def enumerate_kernels():
           continue
         yield Rec(coll="AllReduce", algo=algo, red=red, ty=ty)
       for algo in rs_algos:
-        # ReduceScatter emits sum and avg for every float type.
+        # Sum only for HierLsaLDST: its cross-package partials are stored as T, so avg could overflow.
+        if algo == "HierLsaLDST" and red == "avg":
+          continue
         yield Rec(coll="ReduceScatter", algo=algo, red=red, ty=ty)
 
 def required_cuda(k):

@@ -422,7 +422,7 @@ namespace RcclUnitTesting
           // before the model set maxChannels, which is the regression this guards.
           const int maxSymkBlocks = sel.symKernel == "AllGather_HierLsaST" ? ncclSymkAgHierMaxBlocks :
                                     sel.symKernel == "AllGather_HierLsaTmaST" ? ncclSymkAgHierTmaMaxBlocks :
-                                    sel.symKernel == "ReduceScatter_HierLsaLDST" ? ncclSymkRsHierMaxBlocks :
+                                    sel.symKernel == "ReduceScatter_HierLsaLDST" ? ncclSymkRsHierMaxBlocks : ncclSymkMaxBlocks;
           EXPECT_GE(symk.channels, 1)
             << "symk reported SYM without a channel count\nLOG:\n" << log;
           EXPECT_LE(symk.channels, maxSymkBlocks)

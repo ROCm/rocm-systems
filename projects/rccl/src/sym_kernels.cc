@@ -288,9 +288,9 @@ static int ncclSymkHierGroups(struct ncclComm* comm) {
 
 uint32_t ncclSymkRsHierLaunchChunkSize(struct ncclComm* comm, size_t blockBytes) {
   // The communicator's chunk size is what the slots hold, so a launch may only go below it.
-  uint32_t round = comm->symkState.kcomm.rsHierChunkSize;
-  if (blockBytes >= ncclSymkRsHierChunkSwitchBlockBytes) return round;
-  return uint32_t(std::min<size_t>(ncclSymkRsHierMinChunkBytes, round));
+  uint32_t chunk = comm->symkState.kcomm.rsHierChunkSize;
+  if (blockBytes >= ncclSymkRsHierChunkSwitchBlockBytes) return chunk;
+  return uint32_t(std::min<size_t>(ncclSymkRsHierMinChunkBytes, chunk));
 }
 
 int ncclSymkRsHierLaunchBlocks(int nRanks, size_t nBytes) {
@@ -545,6 +545,7 @@ uint32_t ncclSymkMask(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRedOp
   kmask &= needGin ? kernelMask_Gin : ~kernelMask_Gin;
 
   if (ncclSymkHierGroups(comm) == 0) kmask &= ~kernelMask_Hier;
+  if (red != ncclDevSum) kmask &= ~(1u << ncclSymkKernelId_ReduceScatter_HierLsaLDST);
   return kmask;
 }
 
