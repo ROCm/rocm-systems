@@ -12,9 +12,9 @@ l2.bw:
   description: >-
     The number of bytes looked up in the L2 cache per unit time. The number of bytes is
     calculated as the number of cache lines requested multiplied by the cache line size.
-    This value does not consider partial requests, so e.g., if only a single value is
-    requested in a cache line, the data movement will still be counted as a full cache
-    line.
+    This value does not consider partial requests, so, for example, if only a single
+    value is requested in a cache line, the data movement will still be counted as a
+    full cache line.
   peak: $max_sclk / 1000 * 64 * TO_INT($total_l2_chan)
 l2.cc_req:
   name: L2 CC Requests
@@ -139,8 +139,9 @@ l2.peak_bw:
     The number of bytes looked up in the L2 cache, as a percent of the peak theoretical
     bandwidth achievable on the specific accelerator. The number of bytes is calculated
     as the number of cache lines requested multiplied by the cache line size. This value
-    does not consider partial requests, so e.g., if only a single value is requested in
-    a cache line, the data movement will still be counted as a full cache line.
+    does not consider partial requests, so, for example, if only a single value is
+    requested in a cache line, the data movement will still be counted as a full cache
+    line.
 l2.probe_req:
   name: L2 Probe Requests
   formula: SUM(TCC_PROBE_sum) / SUM($denom)

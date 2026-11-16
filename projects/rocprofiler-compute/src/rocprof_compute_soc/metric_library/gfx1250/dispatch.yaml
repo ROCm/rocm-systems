@@ -2,7 +2,7 @@ dispatch.agprs:
   name: AGPRs
   formula: AVG(Accum_VGPR)
   unit: Registers
-  description: Number of accumulation VGPRs allocated per wave.
+  description: Number of accumulation VGPRs allocated per wavefront.
 dispatch.grid_size:
   name: Grid Size
   formula: AVG(Grid_Size)

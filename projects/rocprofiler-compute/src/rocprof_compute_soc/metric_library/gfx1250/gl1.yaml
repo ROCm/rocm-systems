@@ -36,7 +36,7 @@ gl1.gl1c_glarb_rd_bw:
   name: GL1C-GLARB Read Bandwidth
   formula: SUM(GL1C_GL2_REQ_READ_32B_sum * 32 + GL1C_GL2_REQ_READ_64B_sum * 64 + GL1C_GL2_REQ_READ_128B_sum * 128 + GL1C_GL2_REQ_READ_256B_sum * 256) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
-  description: Total GL1 to Graphic Level Arbiter read bandwidth.
+  description: Total GL1 to Graphics Level Arbiter read bandwidth.
 gl1.gl1c_glarb_rd_lat:
   name: GL1C-GLARB Read Latency
   formula: SUM(GL1C_GL2_REQ_READ_LEVEL_sum) / SUM(GL1C_GL2_REQ_READ_sum)
@@ -67,7 +67,7 @@ gl1.gl1c_glarb_wr_bw:
   name: GL1C-GLARB Write Bandwidth
   formula: 32 * SUM(GL1C_GL2_REQ_WRITE_32B_DATA_BEATS_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
-  description: Total GL1 to Graphic Level Arbiter write bandwidth.
+  description: Total GL1 to Graphics Level Arbiter write bandwidth.
 gl1.gl1c_glarb_wr_lat:
   name: GL1C-GLARB Write Latency
   formula: SUM(GL1C_GL2_REQ_WRITE_LEVEL_sum) / SUM(GL1C_GL2_REQ_WRITE_sum)
