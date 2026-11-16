@@ -991,6 +991,11 @@ typedef enum hsa_amd_agent_info_s {
    * Use HSA_AMD_SYSTEM_INFO_HOST_ALLOC_DMA_BUF_SUPPORTED instead.
    */
   HSA_AMD_AGENT_INFO_HOST_ALLOC_DMABUF_SUPPORTED = 0xA124,
+  /*
+   * Queries for number of CP Queues within the agent.
+   * The type of this attribute is uint32_t.
+   */
+  HSA_AMD_AGENT_INFO_NUM_CP_QUEUES = 0xA125,
 } hsa_amd_agent_info_t;
 
 /**

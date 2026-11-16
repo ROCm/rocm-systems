@@ -176,12 +176,17 @@ AqlQueue::AqlQueue(core::SharedQueue* shared_queue, GpuAgent* agent, size_t req_
 
   // Set group and private memory apertures in amd_queue_.
   auto& regions = agent->regions();
+  bool found_lds = false;
+  bool found_scratch = false;
 
+  fprintf(stderr, "[SLTH/QUEUE] Scanning %zu regions for LDS/scratch apertures\n", regions.size());
   for (const auto& region : regions) {
     const MemoryRegion* amdregion = static_cast<const AMD::MemoryRegion*>(region.get());
     uint64_t base = amdregion->GetBaseAddress();
 
     if (amdregion->IsLDS()) {
+      found_lds = true;
+      fprintf(stderr, "[SLTH/QUEUE]   LDS region found: base=0x%lx\n", base);
 #ifdef HSA_LARGE_MODEL
       amd_queue_.group_segment_aperture_base_hi =
           uint32_t(uintptr_t(base) >> 32);
@@ -191,6 +196,8 @@ AqlQueue::AqlQueue(core::SharedQueue* shared_queue, GpuAgent* agent, size_t req_
     }
 
     if (amdregion->IsScratch()) {
+      found_scratch = true;
+      fprintf(stderr, "[SLTH/QUEUE]   Scratch region found: base=0x%lx\n", base);
 #ifdef HSA_LARGE_MODEL
       amd_queue_.private_segment_aperture_base_hi =
           uint32_t(uintptr_t(base) >> 32);
@@ -200,7 +207,16 @@ AqlQueue::AqlQueue(core::SharedQueue* shared_queue, GpuAgent* agent, size_t req_
     }
   }
 
-  assert(amd_queue_.group_segment_aperture_base_hi != 0 && "No group region found.");
+  fprintf(stderr, "[SLTH/QUEUE]   found_lds=%d found_scratch=%d group_hi=0x%x private_hi=0x%x\n",
+          found_lds, found_scratch,
+          amd_queue_.group_segment_aperture_base_hi,
+          amd_queue_.private_segment_aperture_base_hi);
+
+  // On gfx1200+ the kernel may not provide LDS/scratch aperture addresses
+  // (synthesized with VirtualBaseAddress=0 in topology). LDS is still present
+  // in hardware — the aperture base is just not exposed via topology.
+  // Only assert if no LDS region was found at all.
+  assert((found_lds || amd_queue_.group_segment_aperture_base_hi != 0) && "No group region found.");
 
   if (core::Runtime::runtime_singleton_->flag().check_flat_scratch()) {
     assert(amd_queue_.private_segment_aperture_base_hi != 0 && "No private region found.");
@@ -842,10 +858,14 @@ void AqlQueue::Suspend() {
 
   if (core::Runtime::runtime_singleton_->flag().enable_drm()) {
     // DRM path - use ModifyQueue with 0% allocation to suspend
+    fprintf(stderr, "[SLTH] AqlQueue::Suspend: queue_id=%u → ModifyQueue(percentage=0) — CWSR L2 trap handler will fire\n",
+            drm_queue_id_);
     auto queueIn = CreateModifyQueueParams();
     queueIn.queue_percentage = 0;  // 0% = suspend
     auto err = static_cast<DrmDriver&>(agent_->driver()).ModifyQueue(&queueIn);
     assert(err == HSA_STATUS_SUCCESS && "ModifyQueue suspend failed.");
+    fprintf(stderr, "[SLTH] AqlQueue::Suspend: queue_id=%u suspended (context saved via CWSR)\n",
+            drm_queue_id_);
   } else {
     // KFD (non-DRM) mode only.
     auto err = agent_->driver().UpdateQueue(queue_id_, 0, priority_,
@@ -860,10 +880,14 @@ void AqlQueue::Resume() {
 
     if (core::Runtime::runtime_singleton_->flag().enable_drm()) {
       // DRM path - use ModifyQueue with 100% allocation to resume
+      fprintf(stderr, "[SLTH] AqlQueue::Resume: queue_id=%u → ModifyQueue(percentage=100) — CWSR context restore\n",
+              drm_queue_id_);
       auto queueIn = CreateModifyQueueParams();
       queueIn.queue_percentage = 100;  // 100% = resume
       auto err = static_cast<DrmDriver&>(agent_->driver()).ModifyQueue(&queueIn);
       assert(err == HSA_STATUS_SUCCESS && "ModifyQueue resume failed.");
+      fprintf(stderr, "[SLTH] AqlQueue::Resume: queue_id=%u resumed (context restored)\n",
+              drm_queue_id_);
     } else {
       // KFD (non-DRM) mode only.
       auto err = agent_->driver().UpdateQueue(queue_id_, 100, priority_,

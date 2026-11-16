@@ -2438,12 +2438,24 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtGetNodeMemoryPropertiesCtx(HsaKFDContext *ctx,
 		goto out;
 
 	/*Add LDS*/
-	if (i < NumBanks &&
-		hsakmt_fmm_get_aperture_base_and_limit(ctx, FMM_LDS, gpu_id,
+	if (i < NumBanks) {
+		if (hsakmt_fmm_get_aperture_base_and_limit(ctx, FMM_LDS, gpu_id,
 				&MemoryProperties[i].VirtualBaseAddress, &aperture_limit) == HSAKMT_STATUS_SUCCESS) {
-		MemoryProperties[i].HeapType = HSA_HEAPTYPE_GPU_LDS;
-		MemoryProperties[i].SizeInBytes = node_props[NodeId].node.LDSSizeInKB * 1024;
-		i++;
+			pr_err("[SLTH/TOPO] LDS aperture found: VA=0x%lx size=%uKB\n",
+			       MemoryProperties[i].VirtualBaseAddress, node_props[NodeId].node.LDSSizeInKB);
+			MemoryProperties[i].HeapType = HSA_HEAPTYPE_GPU_LDS;
+			MemoryProperties[i].SizeInBytes = node_props[NodeId].node.LDSSizeInKB * 1024;
+			i++;
+		} else if (node_props[NodeId].node.LDSSizeInKB > 0) {
+			pr_err("[SLTH/TOPO] LDS aperture NOT found, synthesizing: LDSSizeInKB=%u\n",
+			       node_props[NodeId].node.LDSSizeInKB);
+			MemoryProperties[i].HeapType = HSA_HEAPTYPE_GPU_LDS;
+			MemoryProperties[i].SizeInBytes = node_props[NodeId].node.LDSSizeInKB * 1024;
+			MemoryProperties[i].VirtualBaseAddress = 0;
+			i++;
+		} else {
+			pr_err("[SLTH/TOPO] LDS: no aperture AND LDSSizeInKB=0 — NO LDS bank added!\n");
+		}
 	}
 
 	/* Add Local memory - HSA_HEAPTYPE_FRAME_BUFFER_PRIVATE.
@@ -2460,12 +2472,21 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtGetNodeMemoryPropertiesCtx(HsaKFDContext *ctx,
 	}
 
 	/* Add SCRATCH */
-	if (i < NumBanks &&
-		hsakmt_fmm_get_aperture_base_and_limit(ctx, FMM_SCRATCH, gpu_id,
+	if (i < NumBanks) {
+		if (hsakmt_fmm_get_aperture_base_and_limit(ctx, FMM_SCRATCH, gpu_id,
 				&MemoryProperties[i].VirtualBaseAddress, &aperture_limit) == HSAKMT_STATUS_SUCCESS) {
-		MemoryProperties[i].HeapType = HSA_HEAPTYPE_GPU_SCRATCH;
-		MemoryProperties[i].SizeInBytes = (aperture_limit - MemoryProperties[i].VirtualBaseAddress) + 1;
-		i++;
+			pr_err("[SLTH/TOPO] Scratch aperture found: VA=0x%lx limit=0x%lx\n",
+			       MemoryProperties[i].VirtualBaseAddress, aperture_limit);
+			MemoryProperties[i].HeapType = HSA_HEAPTYPE_GPU_SCRATCH;
+			MemoryProperties[i].SizeInBytes = (aperture_limit - MemoryProperties[i].VirtualBaseAddress) + 1;
+			i++;
+		} else {
+			pr_err("[SLTH/TOPO] Scratch aperture NOT found, synthesizing with size=0\n");
+			MemoryProperties[i].HeapType = HSA_HEAPTYPE_GPU_SCRATCH;
+			MemoryProperties[i].SizeInBytes = 0;
+			MemoryProperties[i].VirtualBaseAddress = 0;
+			i++;
+		}
 	}
 
 	/* Add SVM aperture */

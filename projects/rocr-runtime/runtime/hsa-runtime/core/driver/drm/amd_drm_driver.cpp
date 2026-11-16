@@ -327,6 +327,11 @@ hsa_status_t DrmDriver::ModifyQueue(const ModifyQueueInParams *queueIn) {
   compute_mqd.hqd_queue_priority = drmQueueIn->hqd_queue_priority;
   compute_mqd.pm4_target_xcc = drmQueueIn->pm4_target_xcc;
 
+  fprintf(stderr, "[SLTH] DrmDriver::ModifyQueue: queue_id=%u percentage=%u%% %s\n",
+          drmQueueIn->queue_id, drmQueueIn->queue_percentage,
+          drmQueueIn->queue_percentage == 0 ? "(SUSPEND → CWSR save, L2 trap fires)" :
+          drmQueueIn->queue_percentage == 100 ? "(RESUME → CWSR restore)" : "");
+
   mqd_in = &compute_mqd;
   ip_type = AMDGPU_HW_IP_COMPUTE;
 
@@ -612,13 +617,21 @@ hsa_status_t DrmDriver::SetTrapHandler(uint32_t node_id, const void* base, uint6
     tma_size = kDrmTrapTmaSize;
   }
 
+  fprintf(stderr, "[SLTH] DrmDriver::SetTrapHandler: Installing L2 trap handler via DRM_IOCTL_AMDGPU_CWSR\n");
+  fprintf(stderr, "[SLTH]   TBA (trap code): VA=0x%lx size=%u\n",
+          reinterpret_cast<uint64_t>(base), static_cast<uint32_t>(base_size));
+  fprintf(stderr, "[SLTH]   TMA (trap memory): VA=0x%lx size=%u\n",
+          tma_va, static_cast<uint32_t>(tma_size));
+
   int result = DrmCwsrSetL2Trap(
                                             dev,
                                             reinterpret_cast<uint64_t>(base),
                                             static_cast<uint32_t>(base_size),
                                             tma_va, static_cast<uint32_t>(tma_size));
-  if (result == 0)
+  if (result == 0) {
+    fprintf(stderr, "[SLTH] DrmDriver::SetTrapHandler: L2 trap handler installed SUCCESSFULLY\n");
     return HSA_STATUS_SUCCESS;
+  }
 
   const int err = errno;
   // The level-2 trap handler is genuinely optional only when the kernel has no
