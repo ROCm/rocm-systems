@@ -18,13 +18,24 @@ recording once per extra pass.
 | Unit of repetition | one dispatch | a recorded sequence of dispatches |
 | Who drives pass 0 | the SDK | the application (the SDK only observes) |
 | When passes run | inside the dispatch, before the application sees it complete | after the range closes |
-| Application observability | none: the extra passes are invisible | none for correctness, but the range takes longer to close |
-| Ordering within a pass | n/a (one dispatch) | serialized dispatch-by-dispatch |
+| Application observability | the extra passes finish before the dispatch returns | packet replay finishes the extra passes inside `end`; host replay runs the application's code again |
+| Ordering within a pass | n/a (one dispatch) | packet replay serializes dispatches; host replay keeps the application's streams |
 
 Range replay is **experimental**. The public header is
 `rocprofiler-sdk/experimental/range_replay.h`. It shares kernel replay's device-memory snapshot,
 its per-agent replay window, and its pass-count and localized-context-toggle semantics, so a tool
 that already drives kernel replay reuses most of its pass logic unchanged.
+
+## Where to start
+
+**rocprofv3:** {ref}`using-range-replay-rocprofv3`. That page starts from application replay, then
+kernel replay, then range replay, with the memory and GPU-execution diagrams and the command lines.
+
+**Custom tools:** {ref}`using-range-replay`.
+
+This page and the ones linked from the bottom are the mechanism: when the recording happens, which
+phases are declined, and how host replay jumps. Usability and the application's contract are in the
+how-to pages.
 
 ## Record live, then replay
 
@@ -87,7 +98,7 @@ means the extra passes are skipped. The reason reaches the tool as the `CLOSE` c
 See [Soundness and declining](range_replay_soundness.md) for the full decision table, the
 cross-thread decline channel, and the optional divergence check.
 
-## How it fits together
+## Implementation
 
 ```text
 experimental/range_replay.h           public payload struct, status enum, begin/end
@@ -172,6 +183,9 @@ interesting counters are.
 
 ## Documentation in this section
 
+- **{ref}`using-range-replay-rocprofv3`** — application replay, then range replay: commands,
+  diagrams, output, and the host-replay contract.
+- **{ref}`using-range-replay`** — subscribing from a custom tool.
 - **[Callback API and tool configuration](range_replay_callback_api.md)** — the
   `ROCPROFILER_CALLBACK_TRACING_RANGE_REPLAY` domain, its three operations, the payload struct,
   pass-count semantics, the localized context toggles, and how a tool configures range replay.

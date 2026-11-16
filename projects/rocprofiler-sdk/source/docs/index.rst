@@ -58,6 +58,8 @@ The documentation is structured as follows:
       * :ref:`using-spm`
       * :ref:`using-kernel-replay`
       * :ref:`using-kernel-replay-rocprofv3`
+      * :ref:`using-range-replay`
+      * :ref:`using-range-replay-rocprofv3`
       * :doc:`Samples <how-to/samples>`
 
    .. grid-item-card:: API reference
@@ -72,6 +74,7 @@ The documentation is structured as follows:
       * :doc:`ROCprof Trace Decoder <api-reference/thread_trace>`
       * :doc:`Streaming Performance Monitor (SPM) <api-reference/spm>`
       * :doc:`Kernel replay (experimental) <api-reference/kernel_replay>`
+      * :doc:`Range replay (experimental) <api-reference/range_replay>`
       * :doc:`ROCprofiler-SDK API <api-reference/rocprofiler-sdk_api_reference>`
       * :doc:`ROCTx API <api-reference/rocprofiler-sdk-roctx_api_reference>`
 
@@ -79,6 +82,7 @@ The documentation is structured as follows:
 
       * :ref:`comparing-with-legacy-tools`
       * :ref:`kernel-replay-conceptual`
+      * :ref:`range-replay-conceptual`
 
 To contribute to the documentation, refer to
 `Contributing to ROCm <https://rocm.docs.amd.com/en/latest/contribute/contributing.html>`_.

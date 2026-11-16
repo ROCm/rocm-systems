@@ -1,6 +1,10 @@
 (range-replay-host)=
 # Host range replay (`sigsetjmp` / `siglongjmp`)
 
+The command-line form, the memory diagram, and the application's contract are in
+{ref}`using-range-replay-rocprofv3` (the contract is under the Advanced heading). This page is the
+mechanism and the tests.
+
 Packet replay records the dispatch packets a range submits and re-submits them. That is cheap, but
 it only reproduces a range whose whole effect is those packets on one queue. A real time-stepping
 loop is not like that. Each step mixes kernels on several streams, device-to-device and host-device
