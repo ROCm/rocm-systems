@@ -10,9 +10,23 @@
 #include "util/dynamic_loader.h"
 
 #include <cassert>
+#include <cerrno>
+#include <cstring>
 #include <dlfcn.h>
+#include <sys/mman.h>
 
 namespace rocjitsu {
+
+auto resolve_host_realpath() -> decltype(LibcPassthrough::realpath_fn) {
+#if defined(__GLIBC__)
+  // On older glibc, unversioned RTLD_NEXT can return the compatibility ABI
+  // that rejects a null output buffer. Newer architectures have a later base
+  // version and only one realpath implementation.
+  if (auto *symbol = dlvsym(RTLD_NEXT, "realpath", "GLIBC_2.3"))
+    return reinterpret_cast<decltype(LibcPassthrough::realpath_fn)>(symbol);
+#endif
+  return util::lookup_symbol<decltype(LibcPassthrough::realpath_fn)>(RTLD_NEXT, "realpath");
+}
 
 void LibcPassthrough::resolve() {
   if (initialized_)
@@ -94,7 +108,7 @@ void LibcPassthrough::resolve() {
     };
 #endif
   readlink_fn = util::lookup_symbol<decltype(readlink_fn)>(handle, "readlink");
-  realpath_fn = util::lookup_symbol<decltype(realpath_fn)>(handle, "realpath");
+  realpath_fn = resolve_host_realpath();
   realpath_chk_fn = util::lookup_symbol<decltype(realpath_chk_fn)>(handle, "__realpath_chk");
   fork = util::lookup_symbol<decltype(fork)>(handle, "fork");
   getsockname = util::lookup_symbol<decltype(getsockname)>(handle, "getsockname");
@@ -149,6 +163,53 @@ void LibcPassthrough::resolve() {
 LibcPassthrough &libc_passthrough() {
   static LibcPassthrough real;
   return real;
+}
+
+int create_scratch_fd(const char *name) {
+  const auto &host = libc_passthrough();
+  const int fd = host_call(host.memfd_create, ::memfd_create, name, MFD_CLOEXEC);
+  if (fd >= 0 || errno != ENOSYS)
+    return fd;
+  // Lease files, DRM handles and proc snapshots only need a private regular
+  // file. O_EXCL prevents even a holder from linking the unnamed inode.
+  const int scratch = host_call(host.openat, ::openat, AT_FDCWD, "/dev/shm",
+                                O_TMPFILE | O_EXCL | O_RDWR | O_CLOEXEC, 0600);
+  // The owner reopens the lease through /proc/self/fd. Restore owner access
+  // even if the application masks it during creation.
+  if (scratch >= 0 && fchmod(scratch, 0600) < 0) {
+    const int error = errno;
+    host_close_fd(scratch);
+    errno = error;
+    return -1;
+  }
+  return scratch;
+}
+
+int proc_stat_is_exited(int stat_fd) {
+  char buffer[4096];
+  ssize_t bytes;
+  do {
+    bytes = pread(stat_fd, buffer, sizeof(buffer) - 1, 0);
+  } while (bytes < 0 && errno == EINTR);
+  if (bytes < 0)
+    return errno == ESRCH ? 1 : -errno;
+  buffer[bytes] = '\0';
+  // comm may itself contain spaces and parentheses. The state follows the final ')'.
+  const char *name_end = std::strrchr(buffer, ')');
+  if (name_end == nullptr || name_end[1] != ' ' || name_end[2] == '\0')
+    return -EIO;
+  if (name_end[2] != 'Z' && name_end[2] != 'X')
+    return 0;
+  // A thread-group leader can exit before its workers. Field 20 counts all
+  // threads, including the leader until it can be reaped.
+  const char *field = name_end + 2;
+  for (int number = 3; number < 20; ++number) {
+    field = std::strchr(field, ' ');
+    if (!field)
+      return -EIO;
+    ++field;
+  }
+  return field[0] == '1' && field[1] == ' ';
 }
 
 int host_pidfd_open(pid_t pid, unsigned int flags) {
