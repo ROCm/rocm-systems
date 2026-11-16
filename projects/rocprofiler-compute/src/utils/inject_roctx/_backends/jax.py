@@ -24,8 +24,16 @@ _jax_thread_local = threading.local()
 def patch_jax_entry_points() -> None:
     """Wrap JAX compiled-call and primitive-dispatch entry points."""
     _wrap_jit_compiled_call()
-    _wrap_pmap_factory()
-    _wrap_shard_map_factory()
+    _wrap_named_factory(
+        "pmap",
+        _roctx_pmap_factory,
+        "Wrapped jax.pmap compiled calls with ROCTX markers",
+    )
+    _wrap_named_factory(
+        "shard_map",
+        _roctx_shard_map_factory,
+        "Wrapped jax.shard_map compiled calls with ROCTX markers",
+    )
     _wrap_primitive_bind_with_trace()
 
 
@@ -127,35 +135,33 @@ def _roctx_compiled_call(compiled: object, *args: Any, **kwargs: Any) -> object:
 _roctx_compiled_call._roctx_wrapped = True
 
 
-def _roctx_pmap_call(compiled: object, *args: Any, **kwargs: Any) -> object:
-    """Run the pmap result under jax.pmap.<fn>, skipping a nested JAX range."""
-    marker = f"jax.pmap.{_compiled_function_name(compiled)}"
-    return _run_with_jax_range(marker, compiled, *args, **kwargs)
+def _roctx_mapped_factory(
+    state_attr: str,
+    marker_prefix: str,
+    fun: object,
+    *args: Any,
+    **kwargs: Any,
+) -> object:
+    """Call the original factory and return a marked callable that forwards attrs."""
+    compiled = getattr(_STATE, state_attr)(fun, *args, **kwargs)
+    if getattr(compiled, "_roctx_wrapped", False):
+        return compiled
+    return _RoctxMappedCallable(compiled, marker_prefix)
 
 
 def _roctx_pmap_factory(fun: object, *args: Any, **kwargs: Any) -> object:
     """Call original jax.pmap and return a marked callable that forwards attributes."""
-    compiled = _STATE.pmap_factory(fun, *args, **kwargs)
-    if getattr(compiled, "_roctx_wrapped", False):
-        return compiled
-    return _RoctxPmapCallable(compiled)
+    return _roctx_mapped_factory("pmap_factory", "jax.pmap", fun, *args, **kwargs)
 
 
 _roctx_pmap_factory._roctx_wrapped = True
 
 
-def _roctx_shard_map_call(compiled: object, *args: Any, **kwargs: Any) -> object:
-    """Run the shard_map result under jax.shard_map.<fn>, skipping a nested range."""
-    marker = f"jax.shard_map.{_compiled_function_name(compiled)}"
-    return _run_with_jax_range(marker, compiled, *args, **kwargs)
-
-
 def _roctx_shard_map_factory(fun: object, *args: Any, **kwargs: Any) -> object:
     """Call original jax.shard_map and return a marked callable that forwards attrs."""
-    compiled = _STATE.shard_map_factory(fun, *args, **kwargs)
-    if getattr(compiled, "_roctx_wrapped", False):
-        return compiled
-    return _RoctxShardMapCallable(compiled)
+    return _roctx_mapped_factory(
+        "shard_map_factory", "jax.shard_map", fun, *args, **kwargs
+    )
 
 
 _roctx_shard_map_factory._roctx_wrapped = True
@@ -199,60 +205,31 @@ def _wrap_jit_compiled_call() -> None:
     )
 
 
-def _wrap_pmap_factory() -> None:
-    """Replace jax.pmap with _roctx_pmap_factory."""
-    pmap = _STATE.pmap
-    if pmap is None:
+def _wrap_named_factory(
+    attr: str, wrapper: Callable[..., Any], log_message: str
+) -> None:
+    """Replace jax.<attr> with wrapper, saving the original on _STATE."""
+    original = getattr(_STATE, attr, None)
+    if original is None:
         console_warning(
             "ml api trace",
-            "jax.pmap is not available; skipping pmap instrumentation.",
+            f"jax.{attr} is not available; skipping {attr} instrumentation.",
         )
         return
-    if getattr(pmap, "_roctx_wrapped", False):
+    if getattr(original, "_roctx_wrapped", False):
         return
     try:
         import jax
 
-        _STATE.pmap_factory = pmap
-        jax.pmap = _roctx_pmap_factory
+        setattr(_STATE, attr + "_factory", original)
+        setattr(jax, attr, wrapper)
     except Exception as exc:
         console_warning(
             "ml api trace",
-            f"Could not patch jax.pmap: {exc}",
+            f"Could not patch jax.{attr}: {exc}",
         )
         return
-    console_log(
-        "ml api trace",
-        "Wrapped jax.pmap compiled calls with ROCTX markers",
-    )
-
-
-def _wrap_shard_map_factory() -> None:
-    """Replace jax.shard_map with _roctx_shard_map_factory."""
-    shard_map = _STATE.shard_map
-    if shard_map is None:
-        console_warning(
-            "ml api trace",
-            "jax.shard_map is not available; skipping shard_map instrumentation.",
-        )
-        return
-    if getattr(shard_map, "_roctx_wrapped", False):
-        return
-    try:
-        import jax
-
-        _STATE.shard_map_factory = shard_map
-        jax.shard_map = _roctx_shard_map_factory
-    except Exception as exc:
-        console_warning(
-            "ml api trace",
-            f"Could not patch jax.shard_map: {exc}",
-        )
-        return
-    console_log(
-        "ml api trace",
-        "Wrapped jax.shard_map compiled calls with ROCTX markers",
-    )
+    console_log("ml api trace", log_message)
 
 
 def _wrap_primitive_bind_with_trace() -> None:
@@ -299,23 +276,27 @@ class _JaxState:
 _STATE = _JaxState()
 
 
-class _RoctxPmapCallable:
-    """pmap result that opens a ROCTX range, then forwards to the compiled function."""
+class _RoctxMappedCallable:
+    """pmap or shard_map result that opens a ROCTX range, then forwards attrs."""
 
-    __slots__ = ("_compiled", "_roctx_wrapped", "__weakref__")
+    __slots__ = ("_compiled", "_marker_prefix", "_roctx_wrapped", "__weakref__")
 
-    def __init__(self, compiled: object) -> None:
+    def __init__(self, compiled: object, marker_prefix: str) -> None:
         object.__setattr__(self, "_compiled", compiled)
+        object.__setattr__(self, "_marker_prefix", marker_prefix)
         object.__setattr__(self, "_roctx_wrapped", True)
 
     def __call__(self, *args: Any, **kwargs: Any) -> object:
-        return _roctx_pmap_call(self._compiled, *args, **kwargs)
+        compiled = object.__getattribute__(self, "_compiled")
+        marker_prefix = object.__getattribute__(self, "_marker_prefix")
+        marker = f"{marker_prefix}.{_compiled_function_name(compiled)}"
+        return _run_with_jax_range(marker, compiled, *args, **kwargs)
 
     def __getattr__(self, name: str) -> object:
         return getattr(self._compiled, name)
 
     def __setattr__(self, name: str, value: object) -> None:
-        if name in ("_compiled", "_roctx_wrapped"):
+        if name in ("_compiled", "_marker_prefix", "_roctx_wrapped"):
             object.__setattr__(self, name, value)
             return
         setattr(self._compiled, name, value)
@@ -325,15 +306,6 @@ class _RoctxPmapCallable:
         compiled = object.__getattribute__(self, "_compiled")
         names.update(dir(compiled))
         return sorted(names)
-
-
-class _RoctxShardMapCallable(_RoctxPmapCallable):
-    """shard_map result that opens a ROCTX range, then forwards attributes."""
-
-    __slots__ = ()
-
-    def __call__(self, *args: Any, **kwargs: Any) -> object:
-        return _roctx_shard_map_call(self._compiled, *args, **kwargs)
 
 
 class JaxBackend:
