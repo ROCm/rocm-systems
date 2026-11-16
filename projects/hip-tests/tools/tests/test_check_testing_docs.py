@@ -2867,6 +2867,85 @@ class CheckTestingDocsTest(unittest.TestCase):
         self.assertEqual(len(broken), 1, msg=results["markdown_links"])
         self.assertIn("no_such_file.md", broken[0])
 
+    # -- escape parity: even/odd backslash runs before a link opener ----------
+
+    def test_even_backslash_run_before_inline_opener_is_live(self):
+        # Two backslashes before ``[`` are an escaped-backslash literal, NOT an
+        # escaped opener: the inline link stays live and its broken destination
+        # must be reported. A simple immediate-backslash rejection would wrongly
+        # drop this real (if broken) link.
+        testing = (
+            "# Testing Strategy\n\n"
+            "A literal backslash then a real \\\\[name](no_such_file.md) link.\n\n"
+            "## Known gaps\n\nBody.\n"
+        )
+        _write_docs(self.root, {"TESTING.md": testing})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("broken local link" in err and "no_such_file.md" in err
+                for err in results["markdown_links"]),
+            msg=results["markdown_links"],
+        )
+
+    def test_odd_backslash_run_before_inline_opener_is_escaped(self):
+        # Three backslashes before ``[`` are an escaped backslash followed by an
+        # escaped opener (odd run): the bracket is literal text, so the broken
+        # destination must be neither validated nor reported.
+        testing = (
+            "# Testing Strategy\n\n"
+            "An escaped \\\\\\[name](no_such_file.md) shown as text.\n\n"
+            "## Known gaps\n\nBody.\n"
+        )
+        _write_docs(self.root, {"TESTING.md": testing})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertEqual(
+            results["markdown_links"], [], msg=results["markdown_links"])
+
+    def test_even_backslash_run_before_reference_opener_is_live(self):
+        # Two backslashes before a reference-style usage ``[text][label]`` leave
+        # the opener live, so the usage is resolved through its definition: its
+        # broken target is reported and the definition counts as used (no
+        # "never used"). An even run must not be mistaken for an escape.
+        testing = (
+            "# Testing Strategy\n\n"
+            "A literal backslash then a \\\\[inventory][inv] link.\n\n"
+            "## Known gaps\n\nBody.\n\n"
+            "[inv]: no_such_file.yaml\n"
+        )
+        _write_docs(self.root, {"TESTING.md": testing})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("broken local link" in err for err in results["markdown_links"]),
+            msg=results["markdown_links"],
+        )
+        self.assertFalse(
+            any("is never used" in err for err in results["markdown_links"]),
+            msg=results["markdown_links"],
+        )
+
+    def test_odd_backslash_run_before_reference_opener_is_escaped(self):
+        # One backslash before a reference-style usage escapes the opener (odd
+        # run): the usage is literal text and is not resolved, so its definition
+        # is left unused (reported as such) and no "no matching definition" is
+        # raised for the escaped label.
+        testing = (
+            "# Testing Strategy\n\n"
+            "An escaped \\[inventory][inv] shown as text.\n\n"
+            "## Known gaps\n\nBody.\n\n"
+            "[inv]: test_inventory.yaml\n"
+        )
+        _write_docs(self.root, {"TESTING.md": testing})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("is never used" in err for err in results["markdown_links"]),
+            msg=results["markdown_links"],
+        )
+        self.assertFalse(
+            any("has no matching definition" in err
+                for err in results["markdown_links"]),
+            msg=results["markdown_links"],
+        )
+
     def test_fenced_heading_does_not_satisfy_anchor(self):
         # A ``# Heading`` inside a fenced code block is example text, not a real
         # heading, so an anchor pointing at its slug is broken.

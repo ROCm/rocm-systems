@@ -461,13 +461,22 @@ _INCIDENT_ID_FULL_RE = re.compile(r"^TI-\d+$")
 # (``[t](dest (title))``). The body is extracted by _iter_inline_link_targets,
 # which scans for the matching close paren instead. A backslash-escaped opener
 # ``\[`` is a literal bracket, not a link (CommonMark shows ``\[text](path)`` as
-# text), so the ``(?<!\\)`` lookbehind refuses to match an escaped opener.
-_MD_LINK_OPEN_RE = re.compile(r"(?<!\\)\[[^\]]*\]\(")
+# text). Escape detection is deliberately NOT a lookbehind here: a fixed-width
+# ``(?<!\\)`` only rejects an opener preceded by a single backslash and so
+# misclassifies an even-length backslash run (``\\[`` - two backslashes that are
+# themselves an escaped-backslash literal) as escaped when the opener is in fact
+# live. _iter_inline_link_targets instead measures the preceding backslash run
+# and treats the opener as escaped only when that run is odd (see
+# ``_opener_is_escaped``).
+_MD_LINK_OPEN_RE = re.compile(r"\[[^\]]*\]\(")
 # Reference-style Markdown links: a usage ``[text][label]`` (or the collapsed
 # form ``[label][]``) paired with a ``[label]: target`` definition. The checker
 # resolves these through their definitions and validates them exactly like inline
 # links, so a reference-style link is a supported, checked form rather than one
-# that is silently ignored.
+# that is silently ignored. Escape parity is applied by the scanner the same way
+# it is for inline openers: a usage whose opening ``[`` carries an odd-length
+# preceding backslash run is an escaped (literal) bracket and is ignored, while
+# an even run (including none) leaves the opener live (see ``_opener_is_escaped``).
 _MD_REF_USE_RE = re.compile(r"\[([^\]]*)\]\[([^\]]*)\]")
 _MD_REF_DEF_RE = re.compile(r"^[ ]{0,3}\[([^\]]+)\]:[ \t]*(\S+)", re.MULTILINE)
 _HEADING_RE = re.compile(r"^#{1,6}\s+(.*?)\s*$", re.MULTILINE)
@@ -2194,6 +2203,27 @@ def _strip_link_title(target):
     return stripped
 
 
+def _opener_is_escaped(text, index):
+    """True when the Markdown opener ``[`` at ``index`` is backslash-escaped.
+
+    Counts the run of consecutive backslashes immediately preceding ``index``. A
+    backslash escapes the character that follows it, and a backslash can itself
+    be escaped, so only an ODD-length run leaves a trailing unpaired backslash
+    that escapes the opener; an EVEN-length run (including a run of zero) is a
+    sequence of escaped-backslash literals that leaves the opener live. This is
+    CommonMark's rule: ``\\[t](p)`` is an escaped bracket shown as text, while
+    ``\\\\[t](p)`` is an escaped backslash followed by a LIVE link opener. A
+    simple "immediately preceded by a backslash" rejection would wrongly treat
+    the even-run ``\\\\[`` case as escaped and so silently drop a real link.
+    """
+    run = 0
+    j = index - 1
+    while j >= 0 and text[j] == "\\":
+        run += 1
+        j -= 1
+    return run % 2 == 1
+
+
 def _iter_inline_link_targets(text):
     """Yield the raw ``(...)`` body of every inline Markdown link in ``text``.
 
@@ -2204,15 +2234,23 @@ def _iter_inline_link_targets(text):
     parenthesized title (``[t](dest (title))``), so stopping at the first ``)``
     would truncate a perfectly valid link and make it fail existence resolution.
 
-    For each opener the scan tracks parenthesis depth from the opening ``(`` and
-    yields the substring up to the matching close. A backslash escapes the next
-    character, so an escaped parenthesis does not change the depth. If the
+    An opener whose ``[`` is backslash-escaped is literal text, not a link, and is
+    skipped. Escaping is decided by the parity of the preceding backslash run (see
+    ``_opener_is_escaped``): an odd run escapes the opener (``\\[t](p)``), while an
+    even run leaves it live (``\\\\[t](p)`` is an escaped backslash before a real
+    link), so an even-length run is not mistaken for an escape.
+
+    For each live opener the scan tracks parenthesis depth from the opening ``(``
+    and yields the substring up to the matching close. A backslash escapes the
+    next character, so an escaped parenthesis does not change the depth. If the
     parentheses never balance before end of line or end of text the link is
     malformed; the body gathered so far is still yielded so a malformed/broken
     link keeps being reported rather than silently dropped.
     """
     n = len(text)
     for opener in _MD_LINK_OPEN_RE.finditer(text):
+        if _opener_is_escaped(text, opener.start()):
+            continue
         start = opener.end()      # first character inside the destination parens
         i = start
         depth = 1
@@ -2480,9 +2518,15 @@ def check_markdown_links(md_path, anchors_cache, boundary_root=None):
 
     # Reference-style usages, resolved through their definitions. A collapsed
     # ``[label][]`` names its label in the text part; a full ``[text][label]``
-    # names it in the label part.
+    # names it in the label part. A usage whose opening ``[`` is backslash-escaped
+    # is literal text, not a link, and is skipped; escaping is decided by the same
+    # preceding-backslash-run parity as inline openers (an odd run escapes it, an
+    # even run - including none - leaves it live).
     used_labels = set()
-    for text_part, label_part in _MD_REF_USE_RE.findall(text):
+    for match in _MD_REF_USE_RE.finditer(text):
+        if _opener_is_escaped(text, match.start()):
+            continue
+        text_part, label_part = match.group(1), match.group(2)
         label = (label_part.strip() or text_part.strip()).lower()
         used_labels.add(label)
         if label not in definitions:
