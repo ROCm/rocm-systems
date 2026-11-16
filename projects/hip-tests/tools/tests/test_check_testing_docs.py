@@ -2779,6 +2779,56 @@ class CheckTestingDocsTest(unittest.TestCase):
             checker._active_host_test_targets(cmake_path),
             ["DirectHostTest", "QuotedMultilineHostTest"])
 
+    def test_hosttest_spaced_function_declaration_is_not_registered(self):
+        # A declaration with whitespace between the ``function`` keyword and its
+        # ``(`` (``function (hip_add_host_test TARGET)``) is still a declaration,
+        # not a registration of a target named ``TARGET``. The fixed-width
+        # lookbehind this masking replaces could only exclude the zero-space
+        # ``function(`` form; robust declaration detection excludes the spaced
+        # form too while keeping the real registration that follows.
+        self._write_host_cmake(
+            "function (hip_add_host_test TARGET)\n"
+            "  add_dependencies(build_tests ${TARGET})\n"
+            "endfunction()\n"
+            "hip_add_host_test(SpacedDeclHostTest)\n")
+        cmake_path = self.root / "catch" / "hipTestMain" / "tests" / "CMakeLists.txt"
+        self.assertEqual(
+            checker._active_host_test_targets(cmake_path),
+            ["SpacedDeclHostTest"])
+
+    def test_hosttest_multiline_mixedcase_declaration_is_not_registered(self):
+        # A declaration split across physical lines (the declared name on the line
+        # after the opening paren) and written in mixed case is still a
+        # declaration. Only the genuine registration call is enumerated.
+        self._write_host_cmake(
+            "FUNCTION(\n"
+            "  hip_add_host_test TARGET\n"
+            ")\n"
+            "endfunction()\n"
+            "hip_add_host_test(MultilineDeclHostTest)\n")
+        cmake_path = self.root / "catch" / "hipTestMain" / "tests" / "CMakeLists.txt"
+        self.assertEqual(
+            checker._active_host_test_targets(cmake_path),
+            ["MultilineDeclHostTest"])
+
+    def test_hosttest_real_registrations_are_all_enumerated(self):
+        # Real registrations in direct, quoted, multiline, and mixed-case forms
+        # are all enumerated in source order; replacing the lookbehind with
+        # declaration masking preserves every genuine registration.
+        self._write_host_cmake(
+            "function(hip_add_host_test TARGET)\n"
+            "endfunction()\n"
+            "hip_add_host_test(FirstHostTest)\n"
+            'HIP_ADD_HOST_TEST("SecondHostTest")\n'
+            "hip_add_host_test(\n"
+            "  ThirdHostTest\n"
+            "  ENVIRONMENT HIP_TEST_LEVEL=x\n"
+            ")\n")
+        cmake_path = self.root / "catch" / "hipTestMain" / "tests" / "CMakeLists.txt"
+        self.assertEqual(
+            checker._active_host_test_targets(cmake_path),
+            ["FirstHostTest", "SecondHostTest", "ThirdHostTest"])
+
     def test_hosttest_unrepresented_is_reported(self):
         # A host-test executable registered via hip_add_host_test with no covering
         # inventory suite is a silent coverage hole and is reported, naming it.

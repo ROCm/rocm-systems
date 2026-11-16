@@ -412,14 +412,29 @@ CMAKE_RECONCILIATION_AREAS = ("unit", "contract", "performance", "stress")
 HOSTTEST_CMAKE_REL = ("catch", "hipTestMain", "tests", "CMakeLists.txt")
 HOSTTEST_GROUP_DIR = "catch/hipTestMain/tests"
 
+# A CMake ``function``/``macro`` declaration whose declared command name is
+# ``hip_add_host_test`` (``function(hip_add_host_test TARGET)`` and the ``macro``
+# equivalent). The declared name is a formal command definition - its following
+# tokens are formal parameters - not a registration call, so such an occurrence
+# of the ``hip_add_host_test`` token is masked out before registration scanning
+# (see ``_active_host_test_targets``). ``function``/``macro`` is matched
+# case-insensitively, and the ``\s*`` runs between the command keyword, its
+# ``(``, and the declared name each span newlines, so a declaration written with
+# extra spacing (``function (hip_add_host_test TARGET)``) or split across
+# physical lines is recognized in every valid form. Masking replaces a
+# fixed-width negative lookbehind, which could only exclude the single zero-space
+# ``function(`` form and silently let a spaced or multiline declaration through.
+_HIP_ADD_HOST_TEST_DECL_RE = re.compile(
+    r"\b(?:function|macro)\s*\(\s*hip_add_host_test\b", re.IGNORECASE)
+
 # A ``hip_add_host_test(<TARGET> ...)`` registration naming the host-test
 # executable as its first argument. Matched case-insensitively with an optional
-# leading double quote, mirroring ``_ADD_SUBDIRECTORY_RE``. The negative
-# lookbehind excludes ``function(hip_add_host_test TARGET)`` declarations,
-# whose ``TARGET`` token is a formal parameter rather than a registration.
+# leading double quote, mirroring ``_ADD_SUBDIRECTORY_RE``. Declaration headers
+# (``function``/``macro`` definitions of ``hip_add_host_test`` itself) are masked
+# out of the scanned text before this pattern runs, so only real registration
+# calls remain and no fixed-width lookbehind is needed to tell them apart.
 _HIP_ADD_HOST_TEST_RE = re.compile(
-    r"(?<!function\()\bhip_add_host_test\s*\(\s*\"?([A-Za-z0-9_.+\-]+)",
-    re.IGNORECASE)
+    r"\bhip_add_host_test\s*\(\s*\"?([A-Za-z0-9_.+\-]+)", re.IGNORECASE)
 
 # An ``add_subdirectory(<group>)`` call naming the group as its first token.
 # CMake commands are case-insensitive (``ADD_SUBDIRECTORY`` is the same command),
@@ -1352,8 +1367,17 @@ def _active_host_test_targets(cmake_path):
     are enumerated separately and reconciled against a host/harness inventory
     record. Comments are stripped the same way as for group scanning, so a
     commented-out registration contributes nothing.
+
+    A ``function``/``macro`` declaration that *defines* ``hip_add_host_test``
+    itself (``function(hip_add_host_test TARGET)``) is a formal command
+    definition, not a registration, so its declared-name token is masked out
+    first. Masking handles every valid spacing/case/multiline form of the
+    declaration, so a spaced (``function (hip_add_host_test ...)``) or multiline
+    declaration is never mistaken for a registration of a target named after the
+    formal parameter.
     """
     text = _strip_cmake_comments(cmake_path)
+    text = _HIP_ADD_HOST_TEST_DECL_RE.sub(lambda m: _blank_like(m.group(0)), text)
     return [match.group(1) for match in _HIP_ADD_HOST_TEST_RE.finditer(text)]
 
 
