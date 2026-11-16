@@ -32,8 +32,8 @@ VALID_INVENTORY = """\
 schema_version: 1
 component: hip-tests
 source_of_truth:
-  suite_placement: catch/*/CMakeLists.txt
-  case_metadata: catch/config/configs/*.yaml
+  suite_placement: "external: catch/*/CMakeLists.txt"
+  case_metadata: "external: catch/config/configs/*.yaml"
 vocabularies:
   kind: [contract]
   disposition: [keep, merge_into]
@@ -204,8 +204,8 @@ class CheckTestingDocsTest(unittest.TestCase):
     def test_missing_top_level_source_of_truth(self):
         broken = VALID_INVENTORY.replace(
             "source_of_truth:\n"
-            "  suite_placement: catch/*/CMakeLists.txt\n"
-            "  case_metadata: catch/config/configs/*.yaml\n",
+            '  suite_placement: "external: catch/*/CMakeLists.txt"\n'
+            '  case_metadata: "external: catch/config/configs/*.yaml"\n',
             "", 1)
         _write_docs(self.root, {"test_inventory.yaml": broken})
         results, _ = checker.validate(root=str(self.root))
@@ -256,8 +256,8 @@ class CheckTestingDocsTest(unittest.TestCase):
     def test_source_of_truth_not_a_mapping(self):
         broken = VALID_INVENTORY.replace(
             "source_of_truth:\n"
-            "  suite_placement: catch/*/CMakeLists.txt\n"
-            "  case_metadata: catch/config/configs/*.yaml\n",
+            '  suite_placement: "external: catch/*/CMakeLists.txt"\n'
+            '  case_metadata: "external: catch/config/configs/*.yaml"\n',
             "source_of_truth: just-a-string\n", 1)
         _write_docs(self.root, {"test_inventory.yaml": broken})
         results, _ = checker.validate(root=str(self.root))
@@ -351,6 +351,132 @@ class CheckTestingDocsTest(unittest.TestCase):
         _write_docs(self.root, {"test_inventory.yaml": broken})
         results, _ = checker.validate(root=str(self.root))
         self.assertEqual(results["inventory"], [], msg=results["inventory"])
+
+    # -- repository-path-bearing fields: stale values ------------------------
+
+    def test_source_of_truth_stale_value_is_reported(self):
+        # A non-external source_of_truth value that does not resolve on disk is a
+        # stale pointer and must be reported.
+        broken = VALID_INVENTORY.replace(
+            '  suite_placement: "external: catch/*/CMakeLists.txt"\n',
+            "  suite_placement: catch/does/not/exist.txt\n", 1)
+        _write_docs(self.root, {"test_inventory.yaml": broken})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("source_of_truth 'suite_placement' path missing" in err
+                for err in results["inventory"]),
+            msg=results["inventory"],
+        )
+
+    def test_source_of_truth_glob_resolves(self):
+        # A glob value that matches at least one file on disk resolves cleanly.
+        (self.root / "probe_lane.yml").write_text("x\n", encoding="utf-8")
+        broken = VALID_INVENTORY.replace(
+            '  suite_placement: "external: catch/*/CMakeLists.txt"\n',
+            "  suite_placement: probe_*.yml\n", 1)
+        _write_docs(self.root, {"test_inventory.yaml": broken})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertEqual(results["inventory"], [], msg=results["inventory"])
+
+    def test_metadata_config_stale_value_is_reported(self):
+        broken = VALID_INVENTORY.replace(
+            "    metadata:\n      framework: Catch2\n",
+            "    metadata:\n      framework: Catch2\n"
+            "      config: catch/does/not/exist.yaml\n", 1)
+        _write_docs(self.root, {"test_inventory.yaml": broken})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("metadata.config path missing" in err
+                for err in results["inventory"]),
+            msg=results["inventory"],
+        )
+
+    def test_metadata_generated_plan_stale_value_is_reported(self):
+        broken = VALID_INVENTORY.replace(
+            "    metadata:\n      framework: Catch2\n",
+            "    metadata:\n      framework: Catch2\n"
+            "      generated_plan: catch/NO_SUCH_PLAN.md\n", 1)
+        _write_docs(self.root, {"test_inventory.yaml": broken})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("metadata.generated_plan path missing" in err
+                for err in results["inventory"]),
+            msg=results["inventory"],
+        )
+
+    def test_ci_lane_in_repo_stale_value_is_reported(self):
+        broken = VALID_INVENTORY.replace(
+            "      ci_lane:\n        external: documented elsewhere\n",
+            "      ci_lane:\n"
+            "        in_repo: ../../.github/workflows/does-not-exist.yml\n", 1)
+        _write_docs(self.root, {"test_inventory.yaml": broken})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("execution.ci_lane.in_repo path missing" in err
+                for err in results["inventory"]),
+            msg=results["inventory"],
+        )
+
+    def test_ci_lane_in_repo_qualifier_is_stripped(self):
+        # The leading path token is the file; a trailing job/step qualifier is
+        # descriptive and must not be treated as part of the path.
+        (self.root / "made_up_lane.yml").write_text("name: x\n", encoding="utf-8")
+        broken = VALID_INVENTORY.replace(
+            "      ci_lane:\n        external: documented elsewhere\n",
+            "      ci_lane:\n"
+            '        in_repo: made_up_lane.yml (job build, step "run tests")\n', 1)
+        _write_docs(self.root, {"test_inventory.yaml": broken})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertEqual(results["inventory"], [], msg=results["inventory"])
+
+    # -- robustness: scalar / unhashable nested collections ------------------
+
+    def test_axis_classes_not_a_list_is_reported(self):
+        # A non-list axis.classes must produce a deterministic error, not crash.
+        broken = VALID_COVERAGE.replace(
+            "    - id: api_surface\n      classes: [memory]\n",
+            "    - id: api_surface\n      classes: 5\n", 1)
+        _write_docs(self.root, {"test_coverage_model.yaml": broken})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("classes must be a list" in err
+                for err in results["coverage_model"]),
+            msg=results["coverage_model"],
+        )
+
+    def test_pairwise_id_unhashable_is_reported(self):
+        # An unhashable pairwise id must be reported, not raise on set membership.
+        broken = VALID_COVERAGE.replace(
+            "  pairwise_checks: []\n",
+            "  pairwise_checks:\n"
+            "    - id: [not, hashable]\n"
+            "      category: cross\n"
+            "      pair: [api_surface.memory, capability.baseline]\n"
+            "      status: proposed\n"
+            "      priority: high\n"
+            "      rationale: Exercise the id guard.\n"
+            "      current_inventory: []\n"
+            "      gap_status: open\n", 1)
+        _write_docs(self.root, {"test_coverage_model.yaml": broken})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("pairwise check id must be a non-empty string" in err
+                for err in results["coverage_model"]),
+            msg=results["coverage_model"],
+        )
+
+    def test_vocabulary_entry_not_scalar_is_reported(self):
+        # A nested (unhashable) vocabulary entry must be reported, not raise on
+        # set construction.
+        broken = VALID_INVENTORY.replace(
+            "  kind: [contract]\n", "  kind: [contract, [nested]]\n", 1)
+        _write_docs(self.root, {"test_inventory.yaml": broken})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("vocabularies 'kind' entry must be a non-empty scalar" in err
+                for err in results["inventory"]),
+            msg=results["inventory"],
+        )
 
     # -- malformed ids (non-empty-string guard) ------------------------------
 

@@ -146,8 +146,11 @@ test boundary. Until then the reset must stay.
 **Finding.** Contract tests use raw HIP handles (allocations, streams, events,
 graphs, modules, arrays, VMM mappings, pools) and a failing `REQUIRE`/`HIP_CHECK`
 throws and unwinds the stack. Teardown written as plain statements after the
-assertions was skipped on that path, leaking the resource into Catch2's shared,
-randomized-order process and destabilizing later tests.
+assertions was skipped on that path, leaking the resource. A Catch2 test
+executable run directly executes multiple cases in one shared, randomized-order
+process, so a leaked resource persists into and destabilizes later cases. In
+contrast, CTest `catch_discover_tests` starts one process per registered case;
+the suite must remain correct under both run modes.
 
 **Control.** Contract tests release every acquired resource through a
 scope-exit guard, `hip::contract::ContractCleanup`, declared *before* the
@@ -156,13 +159,16 @@ allocation. Handles are captured **by value**, not by reference.
 
 **Protects.** Resource safety under exception unwinding: every acquired handle is
 released even when an assertion throws, so a failing case cannot leak state into
-the shared Catch2 process and destabilize later cases.
+the cases that share a directly-run Catch2 test executable's process (where cases
+are not CTest-isolated) and destabilize later cases.
 
 **Rationale.** Contract tests use raw HIP handles (allocations, streams, events,
 graphs, modules, arrays, VMM mappings, pools) and a failing `REQUIRE`/`HIP_CHECK`
 throws and unwinds the stack. Teardown written as plain statements after the
-assertions is skipped on that path, leaking the resource into Catch2's shared,
-randomized-order process and destabilizing later tests. The guard runs the
+assertions is skipped on that path, leaking the resource; when a Catch2 test
+executable is run directly its cases share one randomized-order process, so the
+leak persists into and destabilizes later cases, whereas under CTest
+`catch_discover_tests` runs each case in its own process. The guard runs the
 registered actions in reverse order during unwinding, giving correct RAII without
 a bespoke wrapper per handle type. The by-value capture requirement is not
 stylistic: because the guard is declared before the resources, a `[&]` capture
@@ -314,38 +320,53 @@ suite record owns it.
 
 **Finding.** Backend-divergent or CUDA-removed APIs failed to build on the backend
 where the path does not exist; `gl_interop` pulled in `GL/gl.h`, which headless
-CUDA nodes lack (defect reference `EXSWHTEC-246`); and some graph memory-free node
-paths exhibited local segfaults that would take down the shared Catch2 process.
+CUDA nodes lack (defect reference `EXSWHTEC-246`); and *launching* an instantiated
+graph that contains a memory-free node (`hipGraphAddMemFreeNode`) segfaulted
+locally. That crash is an uncatchable SIGSEGV that `HIP_CHECK` cannot trap, so it
+would take down every sibling case that shares the Catch2 test executable's
+process — the shared-process hazard that case-level isolation guards against
+(TI-002), and which under CTest `catch_discover_tests` otherwise isolates per
+case.
 
 **Control.** Backend-divergent or CUDA-removed APIs are guarded at compile time
 with `#if HT_AMD` (1 on AMD, 0 on NVIDIA), compiling to an empty binary on the
 backend where the path does not exist rather than failing to build. Build-level
 gates exclude paths an environment cannot support — `gl_interop` is built only
-under `HIP_PLATFORM STREQUAL "amd"`. Runtime paths with a known local crash are
-reduced to structural assertions guarded by an unsupported-capability check
-instead of being removed.
+under `HIP_PLATFORM STREQUAL "amd"`. A runtime path with a known uncatchable crash
+is kept as a structural-only assertion — the graph memory-free node is constructed
+and its parameters are round-tripped through `hipGraphMemFreeNodeGetParams`, but
+the graph is never instantiated or launched — rather than being removed. An
+uncatchable SIGSEGV cannot be converted into a clean capability skip the way a
+documented `hipErrorNotSupported` can (TI-001), so the coverage stays structural
+instead of probe-then-skip.
 
 **Protects.** Portability of the contract build and run across backends and
 headless hosts: it keeps CUDA nodes green without weakening AMD coverage and keeps
-a known local crash from taking down the shared process.
+an uncatchable local crash from taking down the sibling cases that share a Catch2
+test executable's process.
 
 **Rationale.** A contract test must be *portable*, which sometimes means "compile
 to nothing" on a backend that removed the API, and sometimes means "do not even
 build" a path whose dependencies are absent on the target host. `gl_interop` is
 AMD-gated because the NVIDIA header path pulls in `GL/gl.h`, which headless CUDA
 nodes lack (defect reference `EXSWHTEC-246`); gating at build time keeps those
-nodes green without weakening AMD coverage. For graph memory-free node paths that
-have exhibited local segfaults, keeping a structural, capability-skipped
-assertion preserves the portable invariant check while avoiding a crash that would
-take down the shared Catch2 process. `#if HT_AMD` is used across 44 contract
-source files.
+nodes green without weakening AMD coverage. For a graph memory-free node, whose
+launch has segfaulted locally, keeping a structural-only assertion — construct the
+node and round-trip its parameters without ever instantiating or launching the
+graph — preserves the portable invariant check while avoiding an uncatchable crash
+that would take down every sibling case sharing the Catch2 test executable's
+process. The crash is on launch, not on node construction, so the structural path
+is safe; and because a SIGSEGV cannot be trapped, it cannot be downgraded to a
+capability skip the way `hipErrorNotSupported` is in TI-001. `#if HT_AMD` is used
+across 44 contract source files.
 
 **Evidence.**
 - `#if HT_AMD` and `BACKEND-DIFF:` conventions documented in
   [`catch/contract/AUTHORING.md`](catch/contract/AUTHORING.md).
 - `gl_interop` AMD build gate and the `EXSWHTEC-246` defect note in
   [`catch/unit/CMakeLists.txt`](catch/unit/CMakeLists.txt).
-- Graph memory-free node structural/skip guard in
+- Graph memory-free node structural-only guard (node constructed and parameters
+  round-tripped via `hipGraphMemFreeNodeGetParams`, graph never launched) in
   [`catch/contract/graph_mem_nodes/test_hip_graph_mem_nodes_contract.cc`](catch/contract/graph_mem_nodes/test_hip_graph_mem_nodes_contract.cc).
 - Classified in [`test_inventory.yaml`](test_inventory.yaml) under
   `contract-graph` (graph node paths guarded against known local segfaults) and

@@ -53,6 +53,14 @@ for itself (workstreams WS-1 and WS-2):
       file on disk (relative to the component directory) unless explicitly
       marked ``external:``.
 
+  repository path pointers
+    - every repository-path-bearing field resolves relative to the component
+      directory unless marked ``external:`` (or preserved as a URL): the
+      top-level ``source_of_truth`` values (literal paths or globs), each
+      suite's ``metadata.config`` and ``metadata.generated_plan``, and
+      ``execution.ci_lane.in_repo`` (whose trailing job/step qualifier is
+      descriptive prose and is not path-checked).
+
   incident IDs and fields
     - every ``TI-NNN`` referenced in the YAML resolves to an incident defined by
       a ``## TI-NNN:`` heading in TESTING_INCIDENTS.md;
@@ -76,6 +84,7 @@ Exit status: non-zero if any check fails, zero otherwise.
 """
 
 import argparse
+import glob
 import json
 import re
 import sys
@@ -163,6 +172,12 @@ REQUIRE_TARGET_DISPOSITIONS = frozenset({"merge_into"})
 # and is not existence-checked (TEST_RESTRUCTURING.md WS-1).
 EXTERNAL_MARKER = "external:"
 
+# A repository-path-bearing field value may be a glob pattern (for example the
+# source_of_truth suite_placement/case_metadata/contract_assertions patterns)
+# rather than a single literal path; these metacharacters mark such a value so it
+# is resolved by glob match instead of literal existence.
+_GLOB_CHARS = ("*", "?", "[")
+
 _INCIDENT_HEADING_RE = re.compile(r"^##\s+(TI-\d+):", re.MULTILINE)
 _INCIDENT_REF_RE = re.compile(r"\bTI-\d+\b")
 _MD_LINK_RE = re.compile(r"\[[^\]]*\]\(([^)]+)\)")
@@ -186,6 +201,74 @@ def _path_exists(component_dir, rel_path):
     return (Path(component_dir) / rel_path).resolve().exists()
 
 
+def _looks_external(value):
+    """True when value is an explicit external: marker or a preserved URL."""
+    return value.startswith(EXTERNAL_MARKER) or value.startswith(_EXTERNAL_LINK_PREFIXES)
+
+
+def _path_token(value):
+    """Return the leading whitespace-delimited path token of value.
+
+    Repository-path-bearing fields may carry a human-readable qualifier after the
+    path itself: a CI lane names the workflow file and then, in parentheses, the
+    job and step, and a source_of_truth value may append prose such as
+    ``and external CI references in TESTING.md``. Only the leading token is the
+    path; the remainder is descriptive and is not existence-checked.
+    """
+    stripped = value.strip()
+    return stripped.split()[0] if stripped else ""
+
+
+def _glob_matches(component_dir, pattern):
+    """True when pattern (component-relative, may use ** and ..) matches a path."""
+    try:
+        return any(glob.iglob(pattern, root_dir=str(component_dir), recursive=True))
+    except (ValueError, OSError):
+        return False
+
+
+def _resolve_repo_path(component_dir, value):
+    """Classify a repository-path-bearing field value.
+
+    Returns one of ``external`` (an external: marker or URL, preserved and not
+    checked), ``empty`` (no path token), ``ok`` (the leading path token resolves
+    on disk, by literal existence or glob match), or ``missing``. A token carrying
+    a glob metacharacter is resolved by recursive glob; otherwise it is
+    existence-checked relative to the component directory.
+    """
+    stripped = value.strip()
+    if _looks_external(stripped):
+        return "external"
+    token = _path_token(stripped)
+    if not token:
+        return "empty"
+    if any(ch in token for ch in _GLOB_CHARS):
+        return "ok" if _glob_matches(component_dir, token) else "missing"
+    return "ok" if _path_exists(component_dir, token) else "missing"
+
+
+def _check_repo_path_field(component_dir, value, label, errors):
+    """Validate one repository-path-bearing field value.
+
+    Appends a deterministic error when the value is not a string, is empty, or
+    names a path (or glob) that does not resolve; external: markers and URLs are
+    preserved. Returns 1 when the value resolved to a real path (for the
+    validated-reference count), 0 otherwise.
+    """
+    if not isinstance(value, str):
+        errors.append("{} must be a string path: {!r}".format(label, value))
+        return 0
+    status = _resolve_repo_path(component_dir, value)
+    if status == "empty":
+        errors.append("{} is empty".format(label))
+        return 0
+    if status == "missing":
+        errors.append("{} path missing: {}".format(label, value.strip()))
+        return 0
+    # 'external' is preserved and not counted; 'ok' counts as a resolved ref.
+    return 1 if status == "ok" else 0
+
+
 def _nonempty_str(value):
     return isinstance(value, str) and bool(value.strip())
 
@@ -205,9 +288,16 @@ def _is_scalar(value):
 
 
 def _vocab_values(vocab, name):
-    """Return the declared vocabulary list for name as a set (empty if absent)."""
+    """Return the declared vocabulary for name as a set of its scalar entries.
+
+    Only hashable scalar entries participate; a malformed (non-scalar) entry is
+    reported separately by the vocabulary-shape check and is skipped here so that
+    set construction cannot raise on an unhashable value.
+    """
     value = vocab.get(name)
-    return set(value) if isinstance(value, list) else set()
+    if not isinstance(value, list):
+        return set()
+    return {item for item in value if isinstance(item, (str, int, float, bool))}
 
 
 def check_inventory(inventory, component_dir):
@@ -242,6 +332,13 @@ def check_inventory(inventory, component_dir):
         sot = inventory.get("source_of_truth")
         if not isinstance(sot, dict) or not sot:
             errors.append("inventory source_of_truth must be a non-empty mapping")
+        else:
+            # Every source_of_truth value is a repository-path-bearing pointer (a
+            # literal path or a glob) and must resolve unless marked external:.
+            for key in sorted(sot):
+                refs_ok += _check_repo_path_field(
+                    component_dir, sot.get(key),
+                    "source_of_truth {!r}".format(key), errors)
 
     vocab = inventory.get("vocabularies")
     if "vocabularies" in inventory and not isinstance(vocab, dict):
@@ -253,6 +350,14 @@ def check_inventory(inventory, component_dir):
             errors.append("vocabularies block is missing {!r}".format(name))
         elif not isinstance(vocab.get(name), list):
             errors.append("vocabularies {!r} must be a list".format(name))
+        else:
+            # Each declared value must be a plain scalar; a nested list/mapping is
+            # a schema error and would otherwise be an unhashable vocabulary entry.
+            for entry in vocab.get(name):
+                if not _is_scalar(entry):
+                    errors.append(
+                        "vocabularies {!r} entry must be a non-empty scalar: {!r}".format(
+                            name, entry))
     kind_vocab = _vocab_values(vocab, "kind")
     disp_vocab = _vocab_values(vocab, "disposition")
     gating_vocab = _vocab_values(vocab, "gating")
@@ -307,8 +412,32 @@ def check_inventory(inventory, component_dir):
             gating = execution.get("gating")
             if gating is not None and gating_vocab and gating not in gating_vocab:
                 errors.append("suite {!r} gating {!r} not in declared vocabulary".format(sid, gating))
+            # The in-repo CI lane names a workflow file (optionally followed by a
+            # job/step qualifier); the path must resolve. An external: lane is a
+            # separate key and is not existence-checked.
+            ci_lane = execution.get("ci_lane")
+            if isinstance(ci_lane, dict):
+                if "in_repo" in ci_lane:
+                    refs_ok += _check_repo_path_field(
+                        component_dir, ci_lane.get("in_repo"),
+                        "suite {!r} execution.ci_lane.in_repo".format(sid), errors)
+            elif "ci_lane" in execution:
+                errors.append("suite {!r} execution.ci_lane is not a mapping".format(sid))
         elif "execution" in suite:
             errors.append("suite {!r} execution is not a mapping".format(sid))
+
+        # Metadata path pointers: config (case-metadata or authoring file) and
+        # generated_plan (the derived plan) are repository paths that must resolve
+        # unless marked external:.
+        metadata = suite.get("metadata")
+        if isinstance(metadata, dict):
+            for key in ("config", "generated_plan"):
+                if key in metadata:
+                    refs_ok += _check_repo_path_field(
+                        component_dir, metadata.get(key),
+                        "suite {!r} metadata.{}".format(sid, key), errors)
+        elif "metadata" in suite:
+            errors.append("suite {!r} metadata is not a mapping".format(sid))
 
         # Merge / move targets. Only merge_into must name a disposition_target;
         # the other move dispositions may omit it, but any target they do name is
@@ -428,7 +557,17 @@ def check_coverage_model(model, suite_ids, component_dir):
                 "coverage axis id must be a non-empty string: {!r}".format(axis_id))
             continue
         declared_axis_ids.add(axis_id)
-        for cls in axis.get("classes", []) or []:
+        classes = axis.get("classes")
+        if classes is not None and not isinstance(classes, list):
+            errors.append(
+                "coverage axis {!r} classes must be a list".format(axis_id))
+            classes = []
+        for cls in classes or []:
+            if not _nonempty_str(cls):
+                errors.append(
+                    "coverage axis {!r} class must be a non-empty string: {!r}".format(
+                        axis_id, cls))
+                continue
             declared_axes.add("{}.{}".format(axis_id, cls))
 
     for req in sorted(REQUIRED_AXES):
@@ -436,13 +575,29 @@ def check_coverage_model(model, suite_ids, component_dir):
             errors.append("coverage model is missing required axis {!r}".format(req))
 
     def check_axis_refs(owner, refs):
-        for ref in refs or []:
+        if refs is None:
+            return
+        if not isinstance(refs, list):
+            errors.append("{} axis refs must be a list: {!r}".format(owner, refs))
+            return
+        for ref in refs:
+            if not isinstance(ref, str):
+                errors.append("{} axis ref must be a string: {!r}".format(owner, ref))
+                continue
             if ref not in declared_axes:
                 errors.append("{} axis ref {!r} is not a declared axis.class".format(owner, ref))
 
     def check_inventory_refs(owner, refs):
         nonlocal refs_ok
-        for ref in refs or []:
+        if refs is None:
+            return
+        if not isinstance(refs, list):
+            errors.append("{} inventory refs must be a list: {!r}".format(owner, refs))
+            return
+        for ref in refs:
+            if not isinstance(ref, str):
+                errors.append("{} inventory ref must be a string: {!r}".format(owner, ref))
+                continue
             if ref not in suite_ids:
                 errors.append("{} references unknown inventory id {!r}".format(owner, ref))
             else:
@@ -503,9 +658,15 @@ def check_coverage_model(model, suite_ids, component_dir):
             errors.append("pairwise check record is not a mapping: {!r}".format(pc))
             continue
         pid = pc.get("id", "<no-id>")
-        if pid in seen_pair_ids:
+        # An id must be a non-empty string before duplicate detection; a malformed
+        # (for example unhashable) id is a schema error and is not added to the set.
+        if not _nonempty_str(pc.get("id")):
+            errors.append(
+                "pairwise check id must be a non-empty string: {!r}".format(pc.get("id")))
+        elif pid in seen_pair_ids:
             errors.append("duplicate pairwise check id: {!r}".format(pid))
-        seen_pair_ids.add(pid)
+        else:
+            seen_pair_ids.add(pid)
         missing = REQUIRED_PAIRWISE_KEYS - set(pc.keys())
         if missing:
             errors.append("pairwise {!r} missing keys: {}".format(pid, sorted(missing)))
