@@ -25,6 +25,7 @@
 #include "rocjitsu/code/patch/probe_live_in.h"
 #include "rocjitsu/code/patch/probe_symbol.h"
 #include "rocjitsu/code/patch/trampoline_builder.h"
+#include "rocjitsu/code/scoped_cfg_edges.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna3/sgpr_layout.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
 #include "rocjitsu/isa/decoder.h"
@@ -1567,8 +1568,11 @@ bool Instrumentor::ensure_liveness_built(uint8_t wave_size,
     if (kernels.size() == 1 && block->start_offset() == kernels.front().entry_text_offset)
       options.entry_block = block.get();
   }
-  liveness_ =
-      std::make_unique<LivenessAnalysis>(KernelBlockScope(scope), wave_size, nullptr, options);
+  // Ordinary successors omit callees; their live-ins must reach the caller.
+  const std::vector<ScopedCfgEdge> edges =
+      scoped_call_liveness_edges(KernelBlockScope(scope), options.text);
+  liveness_ = std::make_unique<LivenessAnalysis>(KernelBlockScope(scope), wave_size, nullptr,
+                                                 options, edges);
   return true;
 }
 

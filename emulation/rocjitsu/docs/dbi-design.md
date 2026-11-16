@@ -117,7 +117,7 @@ the instruction; addressing and storage must be valid at the observation point.
 | Requirement | Current admission boundary |
 |---|---|
 | Register addressing | The anchor must preserve VGPR bank selection. GPR indexing and VSKIP must be proven disabled where the ISA supports them; unproven state is rejected. |
-| Register usage | Before preservation planning, `AfterInst` requires complete decoded physical VGPR usage. Indexing being off at the callback does not prove which VGPRs later guest instructions may read. |
+| Register usage | Before preservation planning, `AfterInst` requires enumerable physical VGPR accesses and liveness propagated across resolved guest calls and returns. Relative or GPR-indexed usage is rejected. |
 | Allocated storage | Required VGPRs and scratch must remain available. Unproven `s_alloc_vgpr` or VGPR/scratch-deallocation effects, including those inherited from incoming paths, are rejected. No allocation-recovery proof is implemented yet. |
 | Register hazards | Callable `AfterInst` is conservatively rejected throughout code objects containing MFMA/SMFMAC, or CDNA5 matrix or transcendental producers, until the required register dependency spacing can be proven. |
 | Instruction order | Callable `AfterInst` rejects CDNA5 code objects containing packed permutes that require an immediate safe VALU follower. Moving either the permute or its follower can break that adjacency. |
