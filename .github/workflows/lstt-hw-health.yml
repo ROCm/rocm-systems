@@ -17,7 +17,7 @@
 # develop (nightly, or by hand from develop), so the code that runs there has
 # been reviewed.
 # To try a change, run the script by hand on the host:
-#   python3 .github/scripts/lstt_hw_health.py --host <host> --gfx <gfx>
+#   EXPECT_HOSTNAME=<host> python3 .github/scripts/lstt_hw_health.py --id <id> --gfx <gfx>
 #
 # BMC check (reachability only, the firmware version is never printed): set
 # bmc: true on one row per host that has a BMC. It needs ipmitool and /dev/ipmi0
@@ -41,27 +41,33 @@ concurrency:
 
 jobs:
   health:
-    name: ${{ matrix.host }} (${{ matrix.gfx }})
+    name: ${{ matrix.id }} (${{ matrix.gfx }})
     # A manual run can pick any branch; only develop's reviewed code may run here.
     if: ${{ github.ref == 'refs/heads/develop' }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          - host: lsttstrix
+          - id: strix-halo-apu
             label: lstt-gfx1151
             gfx: gfx1151
-          # One row per runner entry, so the two arches check in parallel.
-          - host: lsttserver2
+            host_secret: LSTT_HOST_STRIX_HALO_APU
+          # One row per runner entry, so the two arches check in parallel. The
+          # MI210 label is shared by several hosts, so that row also needs the
+          # generic host label lstt-mixed-a on its runner.
+          - id: mixed-a-mi210
             label: lstt-gfx90a
+            host_label: lstt-mixed-a
             gfx: gfx90a
             bmc: true
-          - host: lsttserver2
+            host_secret: LSTT_HOST_MIXED_A
+          - id: mixed-a-navi31
             label: lstt-gfx1100
             gfx: gfx1100
+            host_secret: LSTT_HOST_MIXED_A
     runs-on:
       - ${{ matrix.label }}
-      - ${{ matrix.host }}
+      - ${{ matrix.host_label || matrix.label }}
     timeout-minutes: 20
 
     steps:
@@ -72,14 +78,16 @@ jobs:
           sparse-checkout-cone-mode: false
 
       # Host-level, so no container: /sys/class/dmi is what the firmware
-      # exposes to the booted kernel. The script checks the host identity first
-      # (a GPU label can be on several hosts, so runs-on also selects by host
-      # name), then BIOS, the amdgpu module and the GPU, and reports every
-      # layer even when one fails.
+      # exposes to the booted kernel. The script checks the host identity first,
+      # then BIOS, the amdgpu module and the GPU, and reports every layer even
+      # when one fails. Real host names are not written in this file or printed:
+      # the expected name is the repo secret named by host_secret (masked in
+      # logs), and the identity check is skipped while that secret is not set.
       - name: Hardware health
         shell: bash
         env:
-          HOST: ${{ matrix.host }}
+          ID: ${{ matrix.id }}
           GFX: ${{ matrix.gfx }}
+          EXPECT_HOSTNAME: ${{ secrets[matrix.host_secret] }}
           BMC_FLAG: ${{ matrix.bmc && '--bmc' || '' }}
-        run: python3 .github/scripts/lstt_hw_health.py --host "$HOST" --gfx "$GFX" $BMC_FLAG
+        run: python3 .github/scripts/lstt_hw_health.py --id "$ID" --gfx "$GFX" $BMC_FLAG

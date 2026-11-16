@@ -7,9 +7,12 @@
 Run it by hand on the host and in CI (.github/workflows/lstt-hw-health.yml)
 with the same arguments, and the two results are the same.
 
-This repository is public, so the output is kept minimal: the host name, the
-BIOS version, and pass or fail for the module and GPU checks. The amdgpu
-version and the output of rocminfo and docker are never read into the output.
+This repository is public, so the output is kept minimal: a generic id for the
+host, the BIOS version, and pass or fail for the module and GPU checks. The real
+host name is never printed: the expected name comes from the EXPECT_HOSTNAME
+environment variable (a repo secret in CI, so it is masked in logs), and the
+identity check is skipped when it is not set. The amdgpu version and the output
+of rocminfo and docker are never read into the output.
 
 With --bmc it also checks that the host's BMC answers over IPMI. Only
 reachability is reported: the BMC firmware version is never read into the output.
@@ -45,16 +48,19 @@ class Report:
         print(f"::error::{error}" if self._annotate else f"ERROR: {error}", flush=True)
 
 
-def check_host(report, host):
-    got = socket.gethostname().split(".")[0]
-    if got != host:
+def check_host(report):
+    expected = os.environ.get("EXPECT_HOSTNAME", "").strip()
+    if not expected:
+        report.line("- host identity: not checked (EXPECT_HOSTNAME is not set)")
+        return True
+    if socket.gethostname().split(".")[0] != expected:
         report.fail(
-            f"- host: ran on {got}, not {host}",
-            f"This row is for {host} but the job ran on {got}. Check that the "
-            f"runner labelled {host} is the one on that machine.",
+            "- host identity: not the expected machine",
+            "The job ran on a different machine than this row expects. Check the "
+            "runner labels.",
         )
         return False
-    report.line(f"- host: {host}")
+    report.line("- host identity: matches")
     return True
 
 
@@ -135,15 +141,15 @@ def check_gpu(report, gfx, image):
 
 def main():
     p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    p.add_argument("--host", required=True, help="expected short hostname")
+    p.add_argument("--id", required=True, help="generic id of the host, used in the output")
     p.add_argument("--gfx", required=True, help="expected GPU target, e.g. gfx1151")
     p.add_argument("--image", default=DEFAULT_IMAGE, help="container image used to run rocminfo")
     p.add_argument("--bmc", action="store_true", help="also check that the BMC answers over IPMI")
     args = p.parse_args()
 
     report = Report()
-    report.line(f"### {args.host}")
-    host_ok = check_host(report, args.host)
+    report.line(f"### {args.id}")
+    host_ok = check_host(report)
     # A run reports every layer, but not on the wrong host: its values would
     # be attributed to another machine.
     if host_ok:
