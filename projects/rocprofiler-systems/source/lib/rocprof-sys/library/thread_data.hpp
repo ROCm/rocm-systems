@@ -60,17 +60,17 @@ template <typename Tp, typename Tag = void, size_t MaxThreads = max_supported_th
 struct thread_data;
 
 template <typename Tp, typename Tag, size_t MaxThreads>
-struct use_placement_new_when_generating_unique_ptr<thread_data<Tp, Tag, MaxThreads>>
+struct never_delete_unique_ptr<thread_data<Tp, Tag, MaxThreads>>
 : std::true_type
 {};
 
 template <typename Tp, typename Tag, size_t MaxThreads>
-struct use_placement_new_when_generating_unique_ptr<
+struct never_delete_unique_ptr<
     thread_data<std::optional<Tp>, Tag, MaxThreads>> : std::true_type
 {};
 
 template <typename Tp, typename Tag, size_t MaxThreads>
-struct use_placement_new_when_generating_unique_ptr<
+struct never_delete_unique_ptr<
     thread_data<identity<Tp>, Tag, MaxThreads>> : std::true_type
 {};
 
