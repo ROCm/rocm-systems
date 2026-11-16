@@ -9,7 +9,8 @@
 
 include_guard(GLOBAL)
 
-option(CLR_ENABLE_WERROR "Build first-party CLR targets with -Wall -Werror" OFF)
+option(CLR_ENABLE_WERROR
+  "Build first-party CLR targets with -Wall -Werror (/W4 /WX on Windows)" OFF)
 
 add_library(clr_warnings INTERFACE)
 add_library(clr::warnings ALIAS clr_warnings)
@@ -18,12 +19,30 @@ if(NOT CLR_ENABLE_WERROR)
   return()
 endif()
 
-# Only supporting Linux for now
+if(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC"
+    OR CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
+  target_compile_options(clr_warnings INTERFACE /W4 /WX)
+
+  # C4714: "function marked as __forceinline not inlined". Whether the compiler
+  # honours __forceinline is its own decision, so this can be ignored.
+  target_compile_options(clr_warnings INTERFACE /wd4714)
+
+  if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    target_compile_options(clr_warnings INTERFACE
+      -Wno-error=deprecated-declarations)
+  endif()
+
+  message(STATUS "CLR warnings: /W4 /WX enabled")
+  return()
+endif()
+
+# Everything else: GCC/Clang on Linux.
 if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux"
     OR NOT CMAKE_CXX_COMPILER_ID MATCHES "^(GNU|Clang)$")
   message(WARNING
-    "CLR_ENABLE_WERROR is supported for GCC/Clang on Linux only; ignoring it "
-    "for ${CMAKE_CXX_COMPILER_ID} on ${CMAKE_SYSTEM_NAME}.")
+    "CLR_ENABLE_WERROR is supported for GCC/Clang on Linux and MSVC/clang-cl "
+    "on Windows only; ignoring it for ${CMAKE_CXX_COMPILER_ID} on "
+    "${CMAKE_SYSTEM_NAME}.")
   return()
 endif()
 
