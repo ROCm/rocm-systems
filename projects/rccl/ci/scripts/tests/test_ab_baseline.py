@@ -342,6 +342,12 @@ class Workflow(unittest.TestCase):
         self.assertEqual(run["env"]["BASELINE_ARTIFACT_RUN_ID"], resolved)
         self.assertIn('--baseline-artifact-dir "${BASELINE_ARTIFACTS_DIR}"', run["run"])
 
+    def test_no_run_block_expands_an_expression(self):
+        # An expression is pasted into the script before bash parses it; an
+        # env var reaches bash as data.
+        for step in self.workflow["jobs"]["test_madengine"]["steps"]:
+            self.assertNotIn("${{", step.get("run", ""), step["name"])
+
 
 if __name__ == "__main__":
     unittest.main()

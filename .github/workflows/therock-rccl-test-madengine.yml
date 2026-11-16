@@ -156,9 +156,11 @@ jobs:
           path: rocm-systems
 
       - name: Validate arch
+        env:
+          AMDGPU_FAMILIES: ${{ inputs.amdgpu_families }}
         run: |
-          if [ "${{ inputs.amdgpu_families }}" != "gfx950-dcgpu" ]; then
-            echo "Unsupported arch for MADEngine: ${{ inputs.amdgpu_families }}"
+          if [ "${AMDGPU_FAMILIES}" != "gfx950-dcgpu" ]; then
+            echo "Unsupported arch for MADEngine: ${AMDGPU_FAMILIES}"
             exit 1
           fi
 
@@ -216,6 +218,7 @@ jobs:
       - name: Fetch RCCL artifacts
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          ARTIFACT_GROUP: ${{ inputs.artifact_group }}
         run: |
           # `required` does not stop an API dispatch from passing an empty string.
           if [ -z "${ARTIFACT_RUN_ID}" ]; then
@@ -224,7 +227,7 @@ jobs:
           fi
           python3 build_tools/install_rocm_from_artifacts.py \
             --run-id="${ARTIFACT_RUN_ID}" \
-            --artifact-group="${{ inputs.artifact_group }}" \
+            --artifact-group="${ARTIFACT_GROUP}" \
             --output-dir="${OUTPUT_ARTIFACTS_DIR}" \
             --rccl
 
