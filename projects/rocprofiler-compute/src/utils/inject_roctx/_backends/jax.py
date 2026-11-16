@@ -18,23 +18,6 @@ from utils.inject_roctx.registry import register
 from utils.logger import console_log, console_warning
 
 _BACKEND_NAME = "jax"
-
-
-class _JaxState:
-    """Resolved JAX entry-point handles, populated by _resolve_jax()."""
-
-    def __init__(self) -> None:
-        self.jit: Any = None
-        self.pmap: Any = None
-        self.pmap_factory: Any = None
-        self.shard_map: Any = None
-        self.shard_map_factory: Any = None
-        self.primitive: Any = None
-        self.compiled_call: Any = None
-        self.bind_with_trace: Any = None
-
-
-_STATE = _JaxState()
 _jax_thread_local = threading.local()
 
 
@@ -289,6 +272,23 @@ def _wrap_primitive_bind_with_trace() -> None:
         "ml api trace",
         "Wrapped Primitive.bind_with_trace with ROCTX markers",
     )
+
+
+class _JaxState:
+    """Resolved JAX entry-point handles, populated by _resolve_jax()."""
+
+    def __init__(self) -> None:
+        self.jit: Any = None
+        self.pmap: Any = None
+        self.pmap_factory: Any = None
+        self.shard_map: Any = None
+        self.shard_map_factory: Any = None
+        self.primitive: Any = None
+        self.compiled_call: Any = None
+        self.bind_with_trace: Any = None
+
+
+_STATE = _JaxState()
 
 
 class _RoctxPmapCallable:
