@@ -41,6 +41,7 @@
 #include "fakes/hip_fakes.h"
 #include "fakes/os_fakes.h"
 #include "fakes/proxy_micro_fakes.h"
+#include "accl_boundary.h"
 #include "alloc.h"
 #include "comm.h"
 #include "info.h"
@@ -724,6 +725,31 @@ TEST_F(ProxySaveOpMicrotest, SaveProxy_SkipsAbsentPeersAndConnectionsWithoutProg
   peers_[4].recv[0].transportComm = nullptr;
   EXPECT_EQ(SaveProxy(comm_.get(), &comm_->channels[0], proxyRecv, 4, &op, 0, nullptr), ncclInternalError);
   EXPECT_TRUE(ProxyLogged(NCCL_LOG_WARN, "no transport for recv peer 4"));
+}
+
+// Each collective proxy op is registered with the ACCL plugin before it is
+// posted, so the record cannot close before a late-starting op. P2P is not.
+TEST_F(ProxySaveOpMicrotest, SaveProxy_RegistersCollectiveOpsWithAccl) {
+  g_acclNotifies.clear();
+  void* const coll = reinterpret_cast<void*>(0x77);
+  ncclProxyOp op = Op(ncclPatternRingTwice);
+  op.coll = ncclFuncAllReduce;
+  op.taskEventHandle = coll;
+  ASSERT_EQ(ncclProxySaveOp(comm_.get(), &op, nullptr), ncclSuccess);
+  ASSERT_EQ(Queued().size(), 2u);
+  ASSERT_EQ(g_acclNotifies.size(), 2u);
+  for (const auto& n : g_acclNotifies) {
+    EXPECT_EQ(n.first, RCCL_ACCL_PROXY_ADD);
+    EXPECT_EQ(n.second, coll);
+  }
+
+  g_acclNotifies.clear();
+  op.coll = ncclFuncSend;
+  ASSERT_EQ(ncclProxySaveOp(comm_.get(), &op, nullptr), ncclSuccess);
+  op.coll = ncclFuncAllReduce;
+  op.taskEventHandle = nullptr;
+  ASSERT_EQ(ncclProxySaveOp(comm_.get(), &op, nullptr), ncclSuccess);
+  EXPECT_TRUE(g_acclNotifies.empty()) << "P2P ops and unprofiled ops are not registered";
 }
 
 TEST_F(ProxySaveOpMicrotest, Ring_SavesRecvFromPrevThenSendToNext) {

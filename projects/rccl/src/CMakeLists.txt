@@ -415,6 +415,7 @@ set(SRC_FILES
   include/plugin/tuner/tuner_v5.h
   include/plugin/tuner/tuner_v6.h
   include/profiler.h
+  include/accl_boundary.h
   include/progress_monitor.h
   include/proxy.h
   include/proxy_diag_counters.h

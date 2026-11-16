@@ -9,12 +9,12 @@ ifeq ($(DEBUG), 1)
 CXXFLAGS += -g2 -ggdb3 -rdynamic -funwind-tables -fno-omit-frame-pointer
 endif
 
-SOURCES := accl_profiler.cc
-LDFLAGS := -lpthread
+SOURCES := accl_profiler.cc accl_net_counters.cc
+LDFLAGS := -lpthread -ldl
 
 all: $(PLUGIN_SO)
 
-$(PLUGIN_SO): $(SOURCES) accl_profiler.h accl_shim.h
+$(PLUGIN_SO): $(SOURCES) accl_profiler.h accl_net_counters.h accl_shim.h
 	@echo "Compiling to create $@ from $^"
 	$(CXX) $(INC) $(CXXFLAGS) -o $@ -Wl,-soname,$(PLUGIN_SO) $(SOURCES) $(LDFLAGS)
 

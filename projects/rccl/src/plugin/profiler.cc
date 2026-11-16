@@ -17,6 +17,8 @@
 #include "compiler.h"
 #include "device.h"
 #include "sym_kernels.h"
+#include "bootstrap.h"
+#include "accl_boundary.h"
 #include <cstring>
 #include <mutex>
 #include <thread>
@@ -540,6 +542,59 @@ ncclResult_t ncclProfilerStopCollApiEvent() {
   return ncclSuccess;
 }
 
+// Read once (-1: not yet): these run per proxy op.
+static int acclCountersEnv = -1;
+static int acclStrictEnv = -1;
+
+static bool acclEnvIsOne(int* cache, const char* name) {
+  int v = COMPILER_ATOMIC_LOAD(cache, std::memory_order_relaxed);
+  if (v < 0) {
+    const char* e = ncclGetEnv(name);
+    v = e && strcmp(e, "1") == 0;
+    COMPILER_ATOMIC_STORE(cache, v, std::memory_order_relaxed);
+  }
+  return v;
+}
+
+static bool acclCountersRequested() { return acclEnvIsOne(&acclCountersEnv, "ACCL_NET_COUNTERS"); }
+static bool acclStrictRequested() { return acclEnvIsOne(&acclStrictEnv, "ACCL_NET_STRICT"); }
+
+// The protocol ids ride on NetPlugin events: only the ACCL plugin knows them.
+static bool acclPluginLoaded() {
+  return ncclProfiler && ncclProfiler->name && strcmp(ncclProfiler->name, "ACCL-Profiler") == 0;
+}
+
+ncclResult_t ncclProfilerAcclNotify(struct ncclComm* comm, int64_t id, void* parent, void* data) {
+  if (!acclPluginLoaded() || !comm->profilerContext || !acclCountersRequested()) return ncclSuccess;
+  ncclProfilerEventDescr_t e = {};
+  e.type = ncclProfileNetPlugin;
+  e.rank = comm->rank;
+  e.parentObj = parent;
+  e.netPlugin.id = id;
+  e.netPlugin.data = data;
+  void* handle = nullptr;
+  return ncclProfiler->startEvent(comm->profilerContext, &handle, &e);
+}
+
+static int acclSynchronizeBoundary(void* context, int locallyValid) {
+  auto* comm = static_cast<struct ncclComm*>(context);
+  int* ready = nullptr;
+  if (ncclCalloc(&ready, comm->nRanks) != ncclSuccess) return 1;
+  ready[comm->rank] = locallyValid;
+  ncclResult_t r = bootstrapAllGather(comm->bootstrap, ready, sizeof(int));
+  int invalid = r != ncclSuccess;
+  for (int i = 0; i < comm->nRanks; i++) invalid |= ready[i] != 1;
+  free(ready);
+  return invalid;
+}
+
+ncclResult_t ncclProfilerAcclFinalizeBoundary(struct ncclComm* comm) {
+  if (!acclCountersRequested()) return ncclSuccess;
+  // Every rank destroys the comm, so every rank takes part.
+  rcclAcclBoundaryInfo info = {RCCL_ACCL_BOUNDARY_VERSION, 1, comm, acclSynchronizeBoundary};
+  return ncclProfilerAcclNotify(comm, RCCL_ACCL_BOUNDARY_FINAL, nullptr, &info);
+}
+
 ncclResult_t ncclProfilerStartKernelLaunchEvent(struct ncclKernelPlan* plan, cudaStream_t stream) {
   ncclProfilerEventDescr_t eDescr = {0};
   if (COMPILER_EXPECT(ncclProfiler != NULL, 0)) {
@@ -567,6 +622,24 @@ ncclResult_t ncclProfilerStartKernelLaunchEvent(struct ncclKernelPlan* plan, cud
     }
 
   startKernelLaunchEvent:
+    if ((eActivationMask_ & ncclProfileKernelLaunch) && acclCountersRequested() && acclPluginLoaded()) {
+      auto* first = ncclIntruQueueHead(&plan->collTaskQueue);
+      const char* oob = ncclGetEnv("NCCL_OOB_NET_ENABLE");
+      // supported is rank-local (e.g. isHostCbEnq), so it is a vote, never a
+      // reason to skip the exchange. Every rank of the comm launches each
+      // collective plan; P2P-only plans are not launched on every rank, so
+      // they carry no synchronize and never take part.
+      rcclAcclBoundaryInfo info = {RCCL_ACCL_BOUNDARY_VERSION,
+        !plan->persistent && !plan->isHostCbEnq && !plan->isSymColl &&
+        !plan->isCeColl && !plan->isRma && first && !first->next &&
+        ncclIntruQueueEmpty(&plan->p2pTaskQueue) && plan->comm->intraRanks == 1 &&
+        (!oob || strcmp(oob, "0") == 0), plan->comm, first ? acclSynchronizeBoundary : nullptr};
+      // In strict diagnostic mode previous GPU work must retire before the
+      // plugin drains proxy work and performs the distributed boundary.
+      if (info.supported && acclStrictRequested())
+        CUDACHECK(cudaStreamSynchronize(stream));
+      NCCLCHECK(ncclProfilerAcclNotify(plan->comm, RCCL_ACCL_BOUNDARY_INFO, nullptr, &info));
+    }
     if (eActivationMask_ & ncclProfileKernelLaunch) {
       eDescr.type = ncclProfileKernelLaunch;
       eDescr.rank = plan->comm->rank;
@@ -674,6 +747,9 @@ ncclResult_t ncclProfilerStartTaskEvents(struct ncclKernelPlan* plan) {
         }
         eDescr.coll.userTag = ct->profilerTag;
         ncclProfiler->startEvent(plan->comm->profilerContext, &ct->eventHandle, &eDescr);
+        // All registration increments happen before Coll stop, so a fast GPU
+        // cannot finalize the record before a late-waking proxy starts.
+        NCCLCHECK(ncclProfilerAcclNotify(plan->comm, RCCL_ACCL_PROXY_BEGIN, ct->eventHandle, nullptr));
       }
     }
     // comm->seqNumber values are updated even if the plugin is not active, since they are used by RAS as well.

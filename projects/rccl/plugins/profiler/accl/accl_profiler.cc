@@ -1,7 +1,8 @@
 /*
  * ACCL Profiler Plugin — Combined GPU kernel + proxy/network decomposition.
  *
- * Subscribes to: Coll, KernelCh, ProxyOp, ProxyStep
+ * Subscribes to: Coll, KernelCh, ProxyOp, ProxyStep (+ KernelLaunch with
+ * ACCL_NET_COUNTERS=1)
  * Output: JSONL with per-collective timing decomposition.
  *
  * Build: see README.md or CMakeLists.txt
@@ -17,10 +18,11 @@
 #include <unistd.h>
 
 #include "accl_shim.h"
+#include "accl_boundary.h"
 
 #define __hidden __attribute__((visibility("hidden")))
 
-static ncclDebugLogger_t gLogFn;
+__hidden ncclDebugLogger_t gLogFn;
 
 // INFO stays on NCCL_PROFILE (0x4000): routine chatter, opt-in. WARN uses
 // NCCL_ALL, as RCCL's own WARN does -- the default subsys mask is
@@ -143,10 +145,21 @@ static void acclCtxUnref(struct acclCommContext* ctx) {
   free(ctx);
 }
 
+__hidden void acclCtxRetain(struct acclCommContext* ctx) {
+  __atomic_add_fetch(&ctx->refCount, 1, __ATOMIC_SEQ_CST);
+}
+
+__hidden void acclCtxRelease(struct acclCommContext* ctx) { acclCtxUnref(ctx); }
+
 static struct acclCollInfo* acclAllocColl(struct acclCommContext* ctx) {
   pthread_mutex_lock(&ctx->collPoolMutex);
-  for (int i = 0; i < ACCL_COLL_POOL_SIZE; i++) {
+  // Net counters: next-fit, so a freed slot keeps finalized=1 for a while and a
+  // proxy op that starts late is recognised instead of joining the next tenant.
+  int base = ctx->net.enabled ? ctx->collNextFit : 0;
+  for (int n = 0; n < ACCL_COLL_POOL_SIZE; n++) {
+    int i = (base + n) % ACCL_COLL_POOL_SIZE;
     if (!ctx->collPoolUsed[i]) {
+      ctx->collNextFit = (i + 1) % ACCL_COLL_POOL_SIZE;
       ctx->collPoolUsed[i] = 1;
       // Clear around the mutex, never through it, and hold it while clearing: a
       // stale KernelCh stop writes nKernelChCompleted under this lock, and that
@@ -353,8 +366,8 @@ static double acclBusBwFactor(const char* func, int nRanks) {
 // ============================================================================
 // JSON output for a completed collective
 // ============================================================================
-static void acclWriteRecord(struct acclCommContext* ctx,
-                            struct acclCompletedRecord* rec) {
+__hidden void acclWriteRecord(struct acclCommContext* ctx,
+                              struct acclCompletedRecord* rec, const char* netJson) {
   pthread_mutex_lock(&ctx->outputMutex);
   if (!ctx->outputFile) {
     pthread_mutex_unlock(&ctx->outputMutex);
@@ -398,7 +411,7 @@ static void acclWriteRecord(struct acclCommContext* ctx,
       (unsigned long)rec->kernelEvents[i].stopGpuClk,
       (unsigned long)rec->kernelEvents[i].durationUs);
   }
-  fprintf(ctx->outputFile, "]}}}\n");
+  fprintf(ctx->outputFile, "]}}%s%s}\n", netJson ? "," : "", netJson ? netJson : "");
   fflush(ctx->outputFile);
   pthread_mutex_unlock(&ctx->outputMutex);
 }
@@ -532,7 +545,15 @@ static void acclFinalizeCollective(struct acclCollInfo* coll) {
   rec.nSendOps = nSend;
   rec.nRecvOps = nRecv;
 
-  acclWriteRecord(ctx, &rec);
+  // With net counters on, the worker writes the record once the "after"
+  // snapshot is read.
+  pthread_mutex_lock(&coll->mutex);
+  int nStarted = coll->nProxyOpsStarted;
+  pthread_mutex_unlock(&coll->mutex);
+  if (!ctx->net.enabled ||
+      acclNetCollComplete(ctx, &ctx->net, &coll->net, &rec, nStarted) != 0) {
+    acclWriteRecord(ctx, &rec, NULL);
+  }
 }
 
 // Returns 1 (under coll->mutex) if this coll should be finalized now.
@@ -542,6 +563,7 @@ static inline int acclShouldFinalize(struct acclCollInfo* coll) {
   if (!coll->collStopped) return 0;
   if (coll->nKernelChCompleted < coll->nChannels) return 0;
   if (coll->nProxyOpsCompleted < coll->nProxyOpsStarted) return 0;
+  if (coll->proxyRegistrationKnown && coll->nProxyOpsCompleted < coll->nProxyOpsExpected) return 0;
   coll->finalized = 1;
   return 1;
 }
@@ -644,6 +666,11 @@ __hidden ncclResult_t acclPluginInit(void** context, uint64_t commHash,
   *context = ctx;
   *eActivationMask = ncclProfileColl | ncclProfileKernelCh
                    | ncclProfileProxyOp | ncclProfileProxyStep;
+  // KernelLaunch is where the next window opens. P2p starts arrive without
+  // their bit (src/plugin/profiler.cc), so they need no subscription.
+  if (acclNetInit(&ctx->net, rank, nRanks, nNodes)) {
+    *eActivationMask |= ncclProfileKernelLaunch | ncclProfileNetPlugin;
+  }
 
   ACCL_INFO("ACCL Profiler: init rank=%d nRanks=%d nNodes=%d "
             "output=%s minSize=%zu",
@@ -683,6 +710,7 @@ __hidden ncclResult_t acclPluginFinalize(void* context) {
       // its kernel-channel events. Count it so the loss is visible; no record is
       // emitted for it.
       ctx->leakedCollectives++;
+      acclNetCollDrop(&coll->net);
       acclFreeCollProxyOps(ctx, coll);
       ctx->collPoolUsed[i] = 0;
       __atomic_sub_fetch(&ctx->refCount, 1, __ATOMIC_SEQ_CST);
@@ -722,6 +750,10 @@ __hidden ncclResult_t acclPluginFinalize(void* context) {
   }
   pthread_mutex_unlock(&ctx->proxyStepPoolMutex);
 
+  // Flushes queued net-counter records; must run before the summary.
+  int netLost = 0;
+  char* netSummary = acclNetFinalize(&ctx->net, &netLost);
+
   // Write the drop summary while the output file is still open, under the lock
   // acclWriteRecord uses, so the summary cannot land inside a record. The file
   // is closed by acclCtxUnref once the last reference goes away.
@@ -744,7 +776,7 @@ __hidden ncclResult_t acclPluginFinalize(void* context) {
                     dOps == 0 && dSteps == 0 && oOps == 0 && sSteps == 0 &&
                     ctx->outstandingProxyOps == 0 &&
                     ctx->outstandingProxySteps == 0 &&
-                    !writeError);
+                    netLost == 0 && !writeError);
     fprintf(ctx->outputFile,
       "{\"summary\":{\"dropped_collectives\":%lu,\"leaked_collectives\":%lu,"
       "\"inflight_collectives\":%lu,"
@@ -753,7 +785,7 @@ __hidden ncclResult_t acclPluginFinalize(void* context) {
       "\"outstanding_proxy_ops\":%lu,\"outstanding_proxy_steps\":%lu,"
       "\"write_error\":%s,"
       "\"coll_pool_size\":%d,\"proxy_op_pool_size\":%d,\"proxy_step_pool_size\":%d,"
-      "\"max_proxy_ops_per_coll\":%d,\"complete\":%s}}\n",
+      "\"max_proxy_ops_per_coll\":%d%s,\"complete\":%s}}\n",
       (unsigned long)ctx->droppedCollectives,
       (unsigned long)ctx->leakedCollectives,
       (unsigned long)ctx->inflightCollectives,
@@ -763,7 +795,7 @@ __hidden ncclResult_t acclPluginFinalize(void* context) {
       (unsigned long)ctx->outstandingProxySteps,
       writeError ? "true" : "false",
       ACCL_COLL_POOL_SIZE, ACCL_PROXY_OP_POOL_SIZE, ACCL_PROXY_STEP_POOL_SIZE,
-      ACCL_MAX_PROXY_OPS, complete ? "true" : "false");
+      ACCL_MAX_PROXY_OPS, netSummary ? netSummary : "", complete ? "true" : "false");
     fflush(ctx->outputFile);
     if (!complete) {
       ACCL_WARN("ACCL Profiler: rank=%d output INCOMPLETE: %lu collectives dropped "
@@ -798,6 +830,7 @@ __hidden ncclResult_t acclPluginFinalize(void* context) {
     ctx->outputFile = NULL;
   }
   pthread_mutex_unlock(&ctx->outputMutex);
+  free(netSummary);
 
   // Drop the init reference. Outstanding proxy ops and steps hold their own, so
   // the context survives here exactly when one of them may still be delivered.
@@ -814,16 +847,51 @@ __hidden ncclResult_t acclPluginStartEvent(void* context, void** eHandle,
 
   struct acclCommContext* ctx = (struct acclCommContext*)context;
 
+  if (eDescr->type == ncclProfileNetPlugin) {
+    const int64_t id = eDescr->netPlugin.id;
+    if (ctx->net.enabled && id == RCCL_ACCL_BOUNDARY_INFO) {
+      acclNetBoundaryInfo(&ctx->net, (const rcclAcclBoundaryInfo*)eDescr->netPlugin.data);
+    } else if (ctx->net.enabled && id == RCCL_ACCL_BOUNDARY_FINAL) {
+      acclNetFinalBoundary(&ctx->net, (const rcclAcclBoundaryInfo*)eDescr->netPlugin.data);
+    } else if ((id == RCCL_ACCL_PROXY_BEGIN || id == RCCL_ACCL_PROXY_ADD) && eDescr->parentObj &&
+               *(uint64_t*)eDescr->parentObj == ncclProfileColl) {
+      auto* coll = (struct acclCollInfo*)eDescr->parentObj;
+      pthread_mutex_lock(&coll->mutex);
+      if (id == RCCL_ACCL_PROXY_BEGIN) coll->proxyRegistrationKnown = 1;
+      else coll->nProxyOpsExpected++;
+      pthread_mutex_unlock(&coll->mutex);
+      if (id == RCCL_ACCL_PROXY_BEGIN && ctx->net.enabled) acclNetRegistered(&coll->net);
+    }
+    *eHandle = NULL;
+    return ncclSuccess;
+  }
+
+  if (eDescr->type == ncclProfileKernelLaunch) {
+    // User thread, before the kernel is launched: wait here for the read that
+    // opens the next window, so the wait is not charged to the kernel.
+    if (ctx->net.enabled) acclNetKernelLaunch(&ctx->net);
+    *eHandle = NULL;
+    return ncclSuccess;
+  }
+
+  if (eDescr->type == ncclProfileP2p) {
+    if (ctx->net.enabled) acclNetUntrackedStart(&ctx->net);
+    *eHandle = NULL;
+    return ncclSuccess;
+  }
+
   if (eDescr->type == ncclProfileColl) {
     // Check message size filter
     size_t msgSize = (size_t)acclDatatypeSize(eDescr->coll.datatype) * eDescr->coll.count;
     if (msgSize < ctx->minMsgSize) {
+      if (ctx->net.enabled) acclNetUntrackedStart(&ctx->net);
       *eHandle = NULL;
       return ncclSuccess;
     }
 
     struct acclCollInfo* coll = acclAllocColl(ctx);
     if (!coll) {
+      if (ctx->net.enabled) acclNetUntrackedStart(&ctx->net);
       *eHandle = NULL;
       return ncclSuccess;
     }
@@ -849,6 +917,12 @@ __hidden ncclResult_t acclPluginStartEvent(void* context, void** eHandle,
     coll->msgSizeBytes = msgSize;
     coll->tsCollStartUs = acclGetTimeUs();
     coll->commCtx = ctx;
+    // Proxy ops are posted after this returns, so no NIC traffic of this
+    // collective precedes its "before" snapshot. Symmetric plans (proto "")
+    // have no proxy ops and their non-head tasks get no KernelCh events.
+    if (ctx->net.enabled && coll->proto && coll->proto[0]) {
+      acclNetCollStart(&ctx->net, &coll->net);
+    }
 
     *eHandle = coll;
     return ncclSuccess;
@@ -898,16 +972,29 @@ __hidden ncclResult_t acclPluginStartEvent(void* context, void** eHandle,
 
     struct acclProxyOpInfo* op = acclAllocProxyOp(ctx);
     if (!op) {
+      // Unprofiled traffic: no window it reaches can be called clean.
+      if (ctx->net.enabled) {
+        if (parentColl) acclNetCollFlag(&parentColl->net);
+        else acclNetUntrackedStart(NULL);
+      }
       *eHandle = NULL;
       return ncclSuccess;
     }
     op->type = ncclProfileProxyOp;
     op->parentObj = parentColl;
     op->commCtx = ctx;
+    int late = 0, tracked = 0;
     if (parentColl) {
       pthread_mutex_lock(&parentColl->mutex);
       parentColl->nProxyOpsStarted++;
+      late = parentColl->finalized;
+      tracked = parentColl->net.tracked;
       pthread_mutex_unlock(&parentColl->mutex);
+    }
+    // Late: the collective already completed, so this traffic is in a later window.
+    if (ctx->net.enabled && (late || !tracked)) {
+      op->netUntracked = 1;
+      acclNetUntrackedOpStart(&ctx->net, late);
     }
     op->channelId = eDescr->proxyOp.channelId;
     op->peer = eDescr->proxyOp.peer;
@@ -960,6 +1047,8 @@ __hidden ncclResult_t acclPluginStopEvent(void* eHandle) {
     struct acclCollInfo* coll = (struct acclCollInfo*)eHandle;
     struct acclCommContext* ctx = (struct acclCommContext*)coll->commCtx;
     coll->tsCollStopUs = acclGetTimeUs();
+    // Fired right after ncclProxyStart: this plan's proxy ops are posted.
+    if (ctx->net.enabled && coll->net.tracked) acclNetCollPosted(&coll->net);
 
     pthread_mutex_lock(&coll->mutex);
     if (coll->finalized) {
@@ -998,6 +1087,7 @@ __hidden ncclResult_t acclPluginStopEvent(void* eHandle) {
   if (type == ncclProfileProxyOp) {
     struct acclProxyOpInfo* op = (struct acclProxyOpInfo*)eHandle;
     op->tsStopUs = acclGetTimeUs();
+    if (op->netUntracked) acclNetUntrackedOpStop();
 
     struct acclCollInfo* coll = (struct acclCollInfo*)op->parentObj;
     struct acclCommContext* ctx = (struct acclCommContext*)op->commCtx;

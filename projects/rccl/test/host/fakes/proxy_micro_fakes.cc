@@ -240,6 +240,12 @@ int ncclCuMemEnable() { return g_cuMemEnabled; }
 int ncclCuMemHostEnable() { return g_cuMemHostEnabled; }
 void ncclSetThreadName(std::thread&, const char*, ...) { g_threadNames++; }
 
+std::vector<std::pair<int64_t, void*>> g_acclNotifies;
+ncclResult_t ncclProfilerAcclNotify(struct ncclComm*, int64_t id, void* parent, void*) {
+  g_acclNotifies.emplace_back(id, parent);
+  return ncclSuccess;
+}
+
 bool ncclProfilerProxyDiagEnabled(void) { return g_proxyDiagEnabled; }
 ncclResult_t ncclProfilerStartProxyOpEvent(int, struct ncclProxyArgs*) {
   g_profOpStarts++;

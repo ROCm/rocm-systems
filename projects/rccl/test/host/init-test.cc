@@ -6523,6 +6523,26 @@ TEST_F(InitMicrotest, CommDestroySync_InitStateSuccess_SetsDeviceStopsProxyAndDe
   EXPECT_EQ(1, proxyStop.calls);
 }
 
+// The ACCL final counter boundary needs every rank and the bootstrap still up,
+// so it runs on a normal destroy and is skipped on abort.
+TEST_F(InitMicrotest, CommDestroySync_RunsAcclFinalBoundaryUnlessAborting) {
+  Teardown_LifecycleComm c(/*cudaDev=*/0);
+  Teardown_AllowStreamCaptureExchange();
+  ncclComm* boundaryComm = nullptr;
+  ScopedHook boundary(g_ncclProfilerAcclFinalizeBoundary, [&](ncclComm* comm) {
+    boundaryComm = comm;
+    return ncclSuccess;
+  });
+  EXPECT_EQ(ncclSuccess, Teardown_RunDestroySync(c.get()));
+  EXPECT_EQ(1, boundary.calls);
+  EXPECT_EQ(c.get(), boundaryComm);
+
+  Teardown_LifecycleComm aborting(/*cudaDev=*/0);
+  *aborting.get()->abortFlag = 1;
+  Teardown_RunDestroySync(aborting.get());
+  EXPECT_EQ(1, boundary.calls) << "no final boundary while aborting";
+}
+
 TEST_F(InitMicrotest, CommDestroySync_ClosesDdaIpcPeerMappingsBeforeProxyStop) {
   Teardown_LifecycleComm c;
   Teardown_AllowStreamCaptureExchange();

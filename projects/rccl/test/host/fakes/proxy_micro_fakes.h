@@ -16,6 +16,7 @@
 #include <deque>
 #include <functional>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "comm.h"
@@ -83,6 +84,7 @@ extern ProxyShmFakes g_shm;
 extern int g_cuMemEnabled, g_cuMemHostEnabled;
 extern int g_threadNames;
 extern bool g_proxyDiagEnabled;
+extern std::vector<std::pair<int64_t, void*>> g_acclNotifies;  // ncclProfilerAcclNotify(id, parent)
 extern int g_profOpStarts, g_profCtrlStarts, g_profCtrlStops;
 extern std::vector<int> g_profCtrlStates;
 extern std::atomic<int> g_profSleeps;  // set before the idle proxy waits, under the pool mutex

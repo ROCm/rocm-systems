@@ -31,6 +31,7 @@
 #include "info.h"
 #include "plugin.h"
 #include "profiler.h"
+#include "accl_boundary.h"
 #include "proxy.h"
 #include "sym_kernels.h"
 #include "transport.h"
@@ -131,6 +132,17 @@ hipError_t hipSetDevice(int device) {
 const char* hipGetErrorString(hipError_t) { return "fake hip error"; }
 hipError_t hipGetLastError() { return hipSuccess; }
 
+// ACCL boundary seams: the strict-mode stream sync and the per-rank vote exchange.
+std::vector<hipStream_t> g_streamSyncs;
+hipError_t hipStreamSynchronize(hipStream_t stream) {
+  g_streamSyncs.push_back(stream);
+  return hipSuccess;
+}
+std::function<ncclResult_t(void*, void*, int)> g_bootstrapAllGather;
+ncclResult_t bootstrapAllGather(void* commState, void* allData, int size) {
+  return g_bootstrapAllGather ? g_bootstrapAllGather(commState, allData, size) : ncclSuccess;
+}
+
 static const char* const kFuncNames[] = {"F0", "F1", "F2", "F3", "F4", "F5", "F6", "F7",
                                          "F8", "F9", "F10", "F11", "F12", "F13", "F14", "F15"};
 const char* ncclFuncToString(ncclFunc_t fn) { return kFuncNames[fn & 15]; }
@@ -195,6 +207,7 @@ struct FakePlugin {
   uintptr_t nextHandle = 0x1000;
   uint64_t nullHandleType = 0;  // starts of this type hand back a null handle
   std::function<void()> onStart;
+  std::vector<rcclAcclBoundaryInfo> boundaries;  // copies: the payload lives on RCCL's stack
   ncclProfiler_t vtable{"FakeProfiler", &Init, &Start, &Stop, &Record, &Finalize};
 
   static FakePlugin*& cur() {
@@ -222,6 +235,9 @@ struct FakePlugin {
     std::lock_guard<std::mutex> lock(f.mu);
     *eHandle = d->type == f.nullHandleType ? nullptr : H(f.nextHandle++);
     f.starts.push_back({ctx, *d, *eHandle});
+    if (d->type == ncclProfileNetPlugin && d->netPlugin.data &&
+        (d->netPlugin.id == RCCL_ACCL_BOUNDARY_INFO || d->netPlugin.id == RCCL_ACCL_BOUNDARY_FINAL))
+      f.boundaries.push_back(*static_cast<rcclAcclBoundaryInfo*>(d->netPlugin.data));
     return ncclSuccess;
   }
   static ncclResult_t Stop(void* eHandle) {
@@ -285,6 +301,8 @@ void ResetProfilerStatics() {
   ncclProfilerRasOverrideMask = 0;
   ncclProfilerApiState = {};
   ncclGroupDepth = 0;
+  acclCountersEnv = -1;
+  acclStrictEnv = -1;
 }
 
 class ProfilerMicrotest : public ::testing::Test {
@@ -304,6 +322,8 @@ class ProfilerMicrotest : public ::testing::Test {
     g_dladdrFname = "/opt/rocm/lib/librccl.so";
     g_setDeviceResult = hipSuccess;
     g_setDeviceArg.store(-1);
+    g_streamSyncs.clear();
+    g_bootstrapAllGather = nullptr;
     for (auto& p : ncclPluginLibPaths) p = nullptr;
     FakePlugin::cur() = &fake_;
     lib_ = {{"ncclProfiler_v7", &fake_.vtable}};
@@ -2237,3 +2257,137 @@ TEST_F(ProfilerThreadMicrotest, PostPlanWork_ManyOpsInFlight_CompleteInOrderOfTh
 }
 
 }  // namespace
+
+// --- ACCL net-counter protocol (NetPlugin events, ACCL_NET_COUNTERS=1) ---
+
+class ProfilerAcclMicrotest : public ProfilerPlanMicrotest {
+ protected:
+  void LoadAccl(bool strict = false) {
+    g_env["ACCL_NET_COUNTERS"] = "1";
+    if (strict) g_env["ACCL_NET_STRICT"] = "1";
+    fake_.vtable.name = "ACCL-Profiler";
+    comm_->intraRanks = 1;
+    Load(ncclProfileColl | ncclProfileKernelLaunch | ncclProfileNetPlugin);
+  }
+  std::vector<StartCall> Protocol(int64_t id) {
+    std::vector<StartCall> out;
+    for (auto& c : fake_.StartsOf(ncclProfileNetPlugin))
+      if (c.d.netPlugin.id == id) out.push_back(c);
+    return out;
+  }
+};
+
+TEST_F(ProfilerAcclMicrotest, Notify_OnlyTheAcclPluginWithCountersOnGetsEvents) {
+  fake_.vtable.name = "FakeProfiler";
+  g_env["ACCL_NET_COUNTERS"] = "1";
+  Load(ncclProfileKernelLaunch);
+  EXPECT_EQ(ncclSuccess, ncclProfilerAcclNotify(comm_.get(), RCCL_ACCL_PROXY_ADD, H(0x1), nullptr));
+  EXPECT_TRUE(fake_.StartsOf(ncclProfileNetPlugin).empty()) << "another plugin must not see the ids";
+
+  ResetProfilerStatics();
+  g_env.erase("ACCL_NET_COUNTERS");
+  fake_.vtable.name = "ACCL-Profiler";
+  Load(ncclProfileKernelLaunch);
+  EXPECT_EQ(ncclSuccess, ncclProfilerAcclNotify(comm_.get(), RCCL_ACCL_PROXY_ADD, H(0x1), nullptr));
+  EXPECT_TRUE(fake_.StartsOf(ncclProfileNetPlugin).empty()) << "counters off";
+}
+
+TEST_F(ProfilerAcclMicrotest, Notify_CarriesIdParentAndData) {
+  LoadAccl();
+  EXPECT_EQ(ncclSuccess, ncclProfilerAcclNotify(comm_.get(), RCCL_ACCL_PROXY_ADD, H(0x77), H(0x78)));
+  auto ev = Protocol(RCCL_ACCL_PROXY_ADD);
+  ASSERT_EQ(ev.size(), 1u);
+  EXPECT_EQ(ev[0].d.parentObj, H(0x77));
+  EXPECT_EQ(ev[0].d.netPlugin.data, H(0x78));
+  EXPECT_EQ(ev[0].d.rank, 3);
+}
+
+TEST_F(ProfilerAcclMicrotest, KernelLaunch_CollPlanVotesSupportedAndJoinsTheExchange) {
+  LoadAccl();
+  AddColl(ncclProfileKernelLaunch | ncclProfileColl);
+  ASSERT_EQ(ncclSuccess, ncclProfilerStartKernelLaunchEvent(plan_.get(), nullptr));
+  ASSERT_EQ(fake_.boundaries.size(), 1u);
+  EXPECT_EQ(fake_.boundaries[0].version, RCCL_ACCL_BOUNDARY_VERSION);
+  EXPECT_EQ(fake_.boundaries[0].supported, 1);
+  EXPECT_EQ(fake_.boundaries[0].context, comm_.get());
+  EXPECT_NE(fake_.boundaries[0].synchronize, nullptr);
+  EXPECT_TRUE(g_streamSyncs.empty()) << "passive mode does not sync the stream";
+  EXPECT_EQ(fake_.StartsOf(ncclProfileKernelLaunch).size(), 1u);
+}
+
+// supported is rank-local: an unsupported collective plan still carries
+// synchronize, so the rank votes instead of skipping the exchange.
+TEST_F(ProfilerAcclMicrotest, KernelLaunch_UnsupportedCollPlanStillJoins) {
+  LoadAccl();
+  AddColl(ncclProfileKernelLaunch | ncclProfileColl);
+  plan_->isHostCbEnq = true;
+  ASSERT_EQ(ncclSuccess, ncclProfilerStartKernelLaunchEvent(plan_.get(), nullptr));
+  ASSERT_EQ(fake_.boundaries.size(), 1u);
+  EXPECT_EQ(fake_.boundaries[0].supported, 0);
+  EXPECT_NE(fake_.boundaries[0].synchronize, nullptr);
+}
+
+TEST_F(ProfilerAcclMicrotest, KernelLaunch_P2pOnlyPlanTakesNoPart) {
+  LoadAccl();
+  AddP2p(ncclProfileKernelLaunch);
+  ASSERT_EQ(ncclSuccess, ncclProfilerStartKernelLaunchEvent(plan_.get(), nullptr));
+  ASSERT_EQ(fake_.boundaries.size(), 1u);
+  EXPECT_EQ(fake_.boundaries[0].synchronize, nullptr);
+  EXPECT_EQ(fake_.boundaries[0].supported, 0);
+}
+
+TEST_F(ProfilerAcclMicrotest, KernelLaunch_StrictSyncsTheStreamOnlyWhenSupported) {
+  LoadAccl(/*strict=*/true);
+  AddColl(ncclProfileKernelLaunch | ncclProfileColl);
+  ASSERT_EQ(ncclSuccess, ncclProfilerStartKernelLaunchEvent(plan_.get(), reinterpret_cast<hipStream_t>(0x56)));
+  ASSERT_EQ(g_streamSyncs.size(), 1u);
+  EXPECT_EQ(g_streamSyncs[0], reinterpret_cast<hipStream_t>(0x56));
+
+  plan_->isHostCbEnq = true;
+  ASSERT_EQ(ncclSuccess, ncclProfilerStartKernelLaunchEvent(plan_.get(), reinterpret_cast<hipStream_t>(0x57)));
+  EXPECT_EQ(g_streamSyncs.size(), 1u);
+}
+
+TEST_F(ProfilerAcclMicrotest, Synchronize_IsValidOnlyIfEveryRankVotesValid) {
+  LoadAccl();
+  AddColl(ncclProfileKernelLaunch | ncclProfileColl);
+  ASSERT_EQ(ncclSuccess, ncclProfilerStartKernelLaunchEvent(plan_.get(), nullptr));
+  ASSERT_EQ(fake_.boundaries.size(), 1u);
+  auto sync = fake_.boundaries[0].synchronize;
+  int peerVote = 1;
+  g_bootstrapAllGather = [&](void*, void* all, int size) {
+    EXPECT_EQ(size, (int)sizeof(int));
+    int* votes = static_cast<int*>(all);
+    for (int r = 0; r < comm_->nRanks; r++)
+      if (r != comm_->rank) votes[r] = peerVote;
+    return ncclSuccess;
+  };
+  EXPECT_EQ(0, sync(comm_.get(), 1));
+  EXPECT_NE(0, sync(comm_.get(), 0)) << "own invalid vote";
+  peerVote = 0;
+  EXPECT_NE(0, sync(comm_.get(), 1)) << "a peer voted invalid";
+  peerVote = 1;
+  g_bootstrapAllGather = [](void*, void*, int) { return ncclSystemError; };
+  EXPECT_NE(0, sync(comm_.get(), 1)) << "exchange failed";
+}
+
+TEST_F(ProfilerAcclMicrotest, FinalizeBoundary_AlwaysCarriesSynchronize) {
+  LoadAccl();
+  ASSERT_EQ(ncclSuccess, ncclProfilerAcclFinalizeBoundary(comm_.get()));
+  auto ev = Protocol(RCCL_ACCL_BOUNDARY_FINAL);
+  ASSERT_EQ(ev.size(), 1u);
+  ASSERT_EQ(fake_.boundaries.size(), 1u);
+  EXPECT_EQ(fake_.boundaries[0].supported, 1);
+  EXPECT_NE(fake_.boundaries[0].synchronize, nullptr);
+}
+
+TEST_F(ProfilerAcclMicrotest, StartTaskEvents_BeginsProxyRegistrationOnTheCollHandle) {
+  LoadAccl();
+  ncclTaskColl* ct = AddColl(ncclProfileColl);
+  ct->func = ncclFuncAllReduce;
+  ct->datatype = ncclFloat32;
+  ASSERT_EQ(ncclSuccess, ncclProfilerStartTaskEvents(plan_.get()));
+  auto ev = Protocol(RCCL_ACCL_PROXY_BEGIN);
+  ASSERT_EQ(ev.size(), 1u);
+  EXPECT_EQ(ev[0].d.parentObj, ct->eventHandle);
+}

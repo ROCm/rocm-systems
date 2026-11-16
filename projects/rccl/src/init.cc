@@ -4448,6 +4448,9 @@ static ncclResult_t commDestroySync(struct ncclAsyncJob* job_) {
     }
 
     int aborting = COMPILER_ATOMIC_LOAD(comm->abortFlag, std::memory_order_acquire) != 0;
+    // Final snapshot while every rank is still alive, proxy/profiler progress
+    // threads are running, and the bootstrap communicator remains usable.
+    if (!aborting) NCCLCHECKGOTO(ncclProfilerAcclFinalizeBoundary(comm), ret, fail);
     if (aborting) {
       NCCLCHECKGOTO(ncclCommOrphanPersistentPlans(comm), ret, fail);
     }

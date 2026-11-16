@@ -278,7 +278,8 @@ do_accl_report_guards() {
   echo "==> ACCL reporter guards (pytest: test/test_accl_report.py)"
   local venv
   venv=$(guard_venv) || return 1
-  "$venv/bin/python" -m pytest "$RCCL_ROOT/test/test_accl_report.py" -v
+  "$venv/bin/python" -m pytest "$RCCL_ROOT/test/test_accl_report.py" \
+    "$RCCL_ROOT/test/test_net_tel_report.py" -v
 }
 
 # Run the RcclReplayer host checks (g++ only, no MPI or HIP); nothing else builds tools/.

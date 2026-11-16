@@ -9,6 +9,8 @@
 #include <sys/time.h>
 #include <time.h>
 
+#include "accl_net_counters.h"
+
 // Limits
 #define ACCL_MAX_CHANNELS 256
 #define ACCL_MAX_PROXY_OPS 256
@@ -76,6 +78,7 @@ struct acclProxyOpInfo {
   uint64_t totalFlushUs;
   uint64_t totalGpuRecvWaitUs;
   int      stepsCompleted;
+  int      netUntracked;   // counted by acclNetUntrackedOpStart
 };
 
 // Per collective record
@@ -83,6 +86,8 @@ struct acclCollInfo {
   uint64_t    type;         // ncclProfileColl
   int         collStopped;
   int         finalized;
+  int         proxyRegistrationKnown;
+  int         nProxyOpsExpected;
   pthread_mutex_t mutex;
 
   // Collective metadata
@@ -114,6 +119,8 @@ struct acclCollInfo {
 
   // Comm info backpointer
   void*       commCtx;
+
+  struct acclNetCollState net;
 };
 
 // Schema for the "decomposition" JSON object. Drives the acclCompletedRecord
@@ -215,6 +222,8 @@ struct acclCommContext {
   int         nNodes;
   char        commName[256];
 
+  struct acclNetCommStats net;
+
   // Output
   FILE*       outputFile;
   char        outputPath[1024];
@@ -224,6 +233,7 @@ struct acclCommContext {
   struct acclCollInfo      collPool[ACCL_COLL_POOL_SIZE];
   int                      collPoolUsed[ACCL_COLL_POOL_SIZE];
   pthread_mutex_t          collPoolMutex;
+  int                      collNextFit;
 
   struct acclProxyOpInfo   proxyOpPool[ACCL_PROXY_OP_POOL_SIZE];
   int                      proxyOpPoolUsed[ACCL_PROXY_OP_POOL_SIZE];

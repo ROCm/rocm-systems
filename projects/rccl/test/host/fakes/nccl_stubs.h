@@ -38,6 +38,7 @@ extern std::function<ncclResult_t(struct ncclComm*)> g_ncclDdaIpcCommClosePeerMa
 
 extern std::function<ncclResult_t(struct ncclComm*)> g_ncclProfilerThreadDestroy;
 extern std::function<ncclResult_t(struct ncclComm*)> g_ncclProfilerPluginFinalize;
+extern std::function<ncclResult_t(struct ncclComm*)> g_ncclProfilerAcclFinalizeBoundary;
 
 // src/plugin/tuner.cc: commCleanup unloads the tuner plugin through this.
 extern std::function<ncclResult_t(struct ncclComm*)> g_ncclTunerPluginUnload;
