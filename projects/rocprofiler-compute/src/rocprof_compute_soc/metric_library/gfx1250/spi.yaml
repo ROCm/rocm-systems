@@ -73,11 +73,10 @@ spi.dispatched_group_groups:
   description: Total group-of-groups dispatch operations issued by SPI.
 spi.dispatched_wavefronts:
   name: Dispatched Wavefronts
+  # SPI_ALL_WAVE_sum, not SPI_CSN_WAVE_sum: the CS-pipe counter reads zero for gfx1250 compute dispatches.
   formula: AVG(SPI_ALL_WAVE_sum)
   unit: Wavefronts
-  description: >-
-    Total wavefronts dispatched (SPI_ALL_WAVE_sum; SPI_CSN_WAVE_sum is CS-pipe scoped
-    and reads zero for gfx1250 compute dispatches).
+  description: Total wavefronts dispatched.
 spi.dispatched_workgroups:
   name: Dispatched Workgroups
   formula: AVG(SPI_RA_REQ_ALLOC_sum)
