@@ -1505,7 +1505,18 @@ def check_incident_refs(refs, defined):
 
 
 def check_incident_fields(incidents_path):
-    """Every defined incident must carry the required labelled fields."""
+    """Every defined incident must carry the required labelled fields with a value.
+
+    A required field is authored as a bold label followed by its content, for
+    example ``**Finding.** <text>``. A missing label is a schema error; so is a
+    label that is present but carries no value (a bare ``**Origin.**`` with nothing
+    after it), because a reviewer then cannot see what the control protects or when
+    it may be retired. The field value is the text between the label's closing
+    ``**`` and the next field label, the next paragraph break, a heading, or the
+    end of the incident section; when that text is empty (or whitespace only) the
+    field is reported as empty rather than silently accepted on the strength of the
+    label alone.
+    """
     errors = []
     path = Path(incidents_path)
     if not path.exists():
@@ -1515,9 +1526,20 @@ def check_incident_fields(incidents_path):
     for incident_id, section in _incident_sections(text):
         for label in REQUIRED_INCIDENT_LABELS:
             # Labels are authored in bold, e.g. ``**Finding.**`` / ``**Control.**``.
-            if not re.search(r"\*\*\s*" + re.escape(label) + r"\b", section):
+            # Capture the value after the label's closing ``**`` up to the next
+            # field label (a line beginning with ``**``), a paragraph break, a
+            # heading, or the end of the section, so a present-but-empty field is
+            # distinguishable from a populated one.
+            match = re.search(
+                r"\*\*\s*" + re.escape(label) + r"\b[^*]*\*\*(.*?)"
+                r"(?=\n[ \t]*\n|\n[ \t]*\*\*|\n#{1,6}\s|\Z)",
+                section, re.DOTALL)
+            if match is None:
                 errors.append(
                     "incident {} is missing the {!r} field".format(incident_id, label))
+            elif not match.group(1).strip():
+                errors.append(
+                    "incident {} has an empty {!r} field".format(incident_id, label))
     return errors
 
 
@@ -1555,6 +1577,37 @@ def _slugify(heading_text):
     return text
 
 
+def _strip_link_title(target):
+    """Return a link destination with any optional CommonMark title removed.
+
+    An inline Markdown link destination may be followed by a title:
+    ``[text](dest "title")`` / ``[text](dest 'title')`` / ``[text](dest (title))``.
+    The title is descriptive and is not part of the path, so a naive capture of
+    everything between the parentheses would make a perfectly valid link fail
+    existence resolution. The destination is the leading token; a whitespace-
+    separated remainder that is quoted or parenthesized is a title and is dropped.
+    An angle-bracketed destination (``<dest>``) is unwrapped. A target with no
+    title (including a fragment-only ``#anchor`` or a reference-definition token
+    that never carries spaces) is returned stripped but otherwise unchanged.
+    """
+    stripped = target.strip()
+    if not stripped:
+        return stripped
+    if stripped.startswith("<"):
+        end = stripped.find(">")
+        if end != -1:
+            return stripped[1:end].strip()
+    parts = stripped.split(None, 1)
+    if len(parts) == 2:
+        dest, remainder = parts[0], parts[1].strip()
+        if len(remainder) >= 2 and (
+                (remainder[0] == '"' and remainder[-1] == '"')
+                or (remainder[0] == "'" and remainder[-1] == "'")
+                or (remainder[0] == "(" and remainder[-1] == ")")):
+            return dest
+    return stripped
+
+
 def _check_link_target(doc_name, base, doc_resolved, target, anchors_cache,
                        boundary_root=None):
     """Validate one link target ``local#fragment`` and count resolved references.
@@ -1562,7 +1615,9 @@ def _check_link_target(doc_name, base, doc_resolved, target, anchors_cache,
     Returns (errors, refs_ok). An empty or external (http(s)/mailto) target is
     preserved and not existence-checked. A local path must resolve on disk; a
     ``#fragment`` must resolve to a heading anchor in the target Markdown file
-    (``doc_resolved`` itself for a fragment-only target).
+    (``doc_resolved`` itself for a fragment-only target). An optional CommonMark
+    link title (``dest "title"``) is stripped first so a titled link resolves on
+    its destination alone.
 
     A local target is held to the same boundary as every other repository path
     pointer: an absolute target is rejected outright, and a relative target that
@@ -1572,6 +1627,7 @@ def _check_link_target(doc_name, base, doc_resolved, target, anchors_cache,
     """
     errors = []
     refs_ok = 0
+    target = _strip_link_title(target)
     if not target or target.startswith(_EXTERNAL_LINK_PREFIXES):
         # Preserve external URLs: not existence-checked.
         return errors, refs_ok

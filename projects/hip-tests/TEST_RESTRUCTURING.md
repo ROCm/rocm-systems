@@ -157,8 +157,10 @@ the bar a future change must clear, not a status report.
 - **Acceptance criteria:**
   - Every inventory `id` is unique and every `disposition` is within the declared
     vocabulary.
-  - Every `evidence.path` and every `source.paths` entry resolves to a file in the
-    repository (or is explicitly marked `external:`).
+  - Every `evidence.path` resolves to a file in the repository, and every
+    `source.paths` entry resolves to an existing file or directory (as appropriate,
+    since a suite's source is often a directory), each unless explicitly marked
+    `external:`.
   - Every `history` / `incidents` reference resolves to a defined incident ID.
   - The deterministic documentation checker passes with zero reference errors.
 

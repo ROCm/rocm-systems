@@ -782,6 +782,12 @@ suites:
     evidence:
       - path: catch/unit/CMakeLists.txt
         claim: stream, event, and streamperthread are built under BUILD_UNIT_TESTS.
+      - path: catch/config/configs/unit/stream.yaml
+        claim: Unit stream cases carry level/skip metadata driving ctest labels.
+      - path: catch/config/configs/unit/event.yaml
+        claim: Unit event cases carry level/skip metadata driving ctest labels.
+      - path: catch/config/configs/unit/streamperthread.yaml
+        claim: Unit streamperthread cases carry level/skip metadata driving ctest labels.
     history: Historical origin not located in available change history; repository evidence (the suite's catalogued source paths and CMake build wiring recorded in this inventory) documents the behavior it currently pins.
     disposition: review
     disposition_rationale: Legacy functional stream/event coverage stays active alongside contract-stream-event; classification pending restructuring review.
@@ -849,6 +855,14 @@ suites:
     evidence:
       - path: catch/unit/CMakeLists.txt
         claim: kernel, executionControl, launchBounds, and executionContext are built under BUILD_UNIT_TESTS.
+      - path: catch/config/configs/unit/kernel.yaml
+        claim: Unit kernel cases carry level/skip metadata driving ctest labels.
+      - path: catch/config/configs/unit/executionControl.yaml
+        claim: Unit executionControl cases carry level/skip metadata driving ctest labels.
+      - path: catch/config/configs/unit/launchBounds.yaml
+        claim: Unit launchBounds cases carry level/skip metadata driving ctest labels.
+      - path: catch/config/configs/unit/executionctx.yaml
+        claim: Unit executionctx (executionContext source) cases carry level/skip metadata driving ctest labels.
     history: Historical origin not located in available change history; repository evidence (the suite's catalogued source paths and CMake build wiring recorded in this inventory) documents the behavior it currently pins.
     disposition: review
     disposition_rationale: Legacy functional launch coverage stays active alongside contract-kernel-launch; classification pending restructuring review.
@@ -882,6 +896,10 @@ suites:
     evidence:
       - path: catch/unit/CMakeLists.txt
         claim: device and context are built under BUILD_UNIT_TESTS.
+      - path: catch/config/configs/unit/device.yaml
+        claim: Unit device cases carry level/skip metadata driving ctest labels.
+      - path: catch/config/configs/unit/context.yaml
+        claim: Unit context cases carry level/skip metadata driving ctest labels.
     history: Historical origin not located in available change history; repository evidence (the suite's catalogued source paths and CMake build wiring recorded in this inventory) documents the behavior it currently pins.
     disposition: review
     disposition_rationale: Legacy functional device/context coverage stays active alongside contract-device and contract-context; classification pending restructuring review.
@@ -948,6 +966,12 @@ suites:
     evidence:
       - path: catch/unit/CMakeLists.txt
         claim: texture, surface, and channelDescriptor are built under BUILD_UNIT_TESTS.
+      - path: catch/config/configs/unit/texture.yaml
+        claim: Unit texture cases carry level/skip metadata driving ctest labels.
+      - path: catch/config/configs/unit/surface.yaml
+        claim: Unit surface cases carry level/skip metadata driving ctest labels.
+      - path: catch/config/configs/unit/channelDescriptor.yaml
+        claim: Unit channelDescriptor cases carry level/skip metadata driving ctest labels.
     history: Historical origin not located in available change history; repository evidence (the suite's catalogued source paths and CMake build wiring recorded in this inventory) documents the behavior it currently pins.
     disposition: review
     disposition_rationale: Legacy functional texture/surface coverage stays active alongside contract-texture; classification pending restructuring review.
@@ -1013,6 +1037,12 @@ suites:
     evidence:
       - path: catch/unit/CMakeLists.txt
         claim: module, dynamicLoading, and library are built under BUILD_UNIT_TESTS.
+      - path: catch/config/configs/unit/module.yaml
+        claim: Unit module cases carry level/skip metadata driving ctest labels.
+      - path: catch/config/configs/unit/dynamicLoading.yaml
+        claim: Unit dynamicLoading cases carry level/skip metadata driving ctest labels.
+      - path: catch/config/configs/unit/library.yaml
+        claim: Unit library cases carry level/skip metadata driving ctest labels.
     history: Historical origin not located in available change history; repository evidence (the suite's catalogued source paths and CMake build wiring recorded in this inventory) documents the behavior it currently pins.
     disposition: review
     disposition_rationale: Legacy functional loader coverage stays active alongside contract-module-loader; classification pending restructuring review.
@@ -1116,6 +1146,22 @@ suites:
     evidence:
       - path: catch/unit/CMakeLists.txt
         claim: math, atomics, and syncthreads are built under BUILD_UNIT_TESTS within a UNIX guard; warp, threadfence, complex, vector_types, and deviceLib are built unconditionally under BUILD_UNIT_TESTS.
+      - path: catch/config/configs/unit/math.yaml
+        claim: Unit math cases carry level/skip metadata driving ctest labels.
+      - path: catch/config/configs/unit/atomics.yaml
+        claim: Unit atomics cases carry level/skip metadata driving ctest labels.
+      - path: catch/config/configs/unit/warp.yaml
+        claim: Unit warp cases carry level/skip metadata driving ctest labels.
+      - path: catch/config/configs/unit/syncthreads.yaml
+        claim: Unit syncthreads cases carry level/skip metadata driving ctest labels.
+      - path: catch/config/configs/unit/threadfence.yaml
+        claim: Unit threadfence cases carry level/skip metadata driving ctest labels.
+      - path: catch/config/configs/unit/complex.yaml
+        claim: Unit complex cases carry level/skip metadata driving ctest labels.
+      - path: catch/config/configs/unit/vector_types.yaml
+        claim: Unit vector_types cases carry level/skip metadata driving ctest labels.
+      - path: catch/config/configs/unit/deviceLib.yaml
+        claim: Unit deviceLib cases carry level/skip metadata driving ctest labels.
     history: Historical origin not located in available change history; repository evidence (the suite's catalogued source paths and CMake build wiring recorded in this inventory) documents the behavior it currently pins.
     disposition: keep
     disposition_rationale: Device-library and math correctness has no contract-tier counterpart; retained as primary device-side coverage.
@@ -1180,6 +1226,12 @@ suites:
     evidence:
       - path: catch/unit/CMakeLists.txt
         claim: cooperativeGrps and p2p are built under BUILD_UNIT_TESTS; cluster is built under BUILD_UNIT_TESTS within an HIP_PLATFORM amd guard.
+      - path: catch/config/configs/unit/cooperativeGrps.yaml
+        claim: Unit cooperativeGrps cases carry level/skip metadata driving ctest labels.
+      - path: catch/config/configs/unit/p2p.yaml
+        claim: Unit p2p cases carry level/skip metadata driving ctest labels.
+      - path: catch/config/configs/unit/cluster.yaml
+        claim: Unit cluster cases carry level/skip metadata driving ctest labels.
     history: Historical origin not located in available change history; repository evidence (the suite's catalogued source paths and CMake build wiring recorded in this inventory) documents the behavior it currently pins.
     disposition: review
     disposition_rationale: Cooperative and peer launch cases live in unit directories but are integration/multi-GPU by execution context; explicit multi-GPU classification is an open restructuring item. Source is not moved by this documentation change.
@@ -1213,6 +1265,10 @@ suites:
     evidence:
       - path: catch/unit/CMakeLists.txt
         claim: vulkan_interop and gl_interop are built under BUILD_UNIT_TESTS only within an HIP_PLATFORM amd guard (gl_interop noted disabled on NVIDIA per EXSWHTEC-246).
+      - path: catch/config/configs/unit/vulkan_interop.yaml
+        claim: Unit vulkan_interop cases carry level/skip metadata driving ctest labels.
+      - path: catch/config/configs/unit/gl_interop.yaml
+        claim: Unit gl_interop cases carry level/skip metadata driving ctest labels.
     history: gl_interop is AMD-gated because the NVIDIA header path pulls in GL/gl.h, which headless CUDA nodes lack; see TESTING_INCIDENTS.md (TI-006).
     disposition: review
     disposition_rationale: Graphics interop stays active and AMD-gated alongside contract-interop; environment-gated classification pending restructuring review.
@@ -1247,7 +1303,15 @@ suites:
         external: TheRock build and HIP runtime test jobs run the device suite; c_compilation and hip_specific are AMD-only per unit CMake; see TESTING.md.
     evidence:
       - path: catch/unit/CMakeLists.txt
-        claim: compiler and g++ are built under BUILD_UNIT_TESTS; c_compilation and hip_specific are built within an HIP_PLATFORM amd guard.
+        claim: compiler and g++ are built under BUILD_UNIT_TESTS; c_compilation and hip_specific are built within an HIP_PLATFORM amd guard (the sibling gcc directory is present but its add_subdirectory is commented out, so it is not built and carries no record).
+      - path: catch/config/configs/unit/compiler.yaml
+        claim: Unit compiler cases carry level/skip metadata driving ctest labels.
+      - path: catch/config/configs/unit/g++.yaml
+        claim: Unit g++ cases carry level/skip metadata driving ctest labels.
+      - path: catch/config/configs/unit/c_compilation.yaml
+        claim: Unit c_compilation cases carry level/skip metadata driving ctest labels.
+      - path: catch/config/configs/unit/hip_specific.yaml
+        claim: Unit hip_specific cases carry level/skip metadata driving ctest labels.
     history: Historical origin not located in available change history; repository evidence (the suite's catalogued source paths and CMake build wiring recorded in this inventory) documents the behavior it currently pins.
     disposition: keep
     disposition_rationale: Compiler-facing coverage used by runtime tests has no contract-tier counterpart; retained as primary coverage.
@@ -1280,6 +1344,10 @@ suites:
     evidence:
       - path: catch/unit/CMakeLists.txt
         claim: multiThread and synchronization are built under BUILD_UNIT_TESTS.
+      - path: catch/config/configs/unit/multiThread.yaml
+        claim: Unit multiThread cases carry level/skip metadata driving ctest labels.
+      - path: catch/config/configs/unit/synchronization.yaml
+        claim: Unit synchronization cases carry level/skip metadata driving ctest labels.
     history: Historical origin not located in available change history; repository evidence (the suite's catalogued source paths and CMake build wiring recorded in this inventory) documents the behavior it currently pins.
     disposition: keep
     disposition_rationale: Concurrency/synchronization behavior has no contract-tier counterpart; retained as primary coverage.
@@ -1305,7 +1373,7 @@ suites:
     execution:
       cadence: pr
       gating: trusted
-      ctest_labels: [hrr, callback, clock, TDM]
+      ctest_labels: [hrr, callback, clock]
       platforms: [linux, windows, wsl]
       backends: [amd]
       prerequisites: [HIP runtime and AMD device]
@@ -1313,7 +1381,13 @@ suites:
         external: TheRock build and HIP runtime test jobs run the device suite on AMD; see TESTING.md.
     evidence:
       - path: catch/unit/CMakeLists.txt
-        claim: hrr, callback, clock, and TDM are built under BUILD_UNIT_TESTS within an HIP_PLATFORM amd guard.
+        claim: hrr, callback, and clock are built under BUILD_UNIT_TESTS within an HIP_PLATFORM amd guard; TDM is built within the same guard but only on gfx1250-family offload arches and, lacking a unit config file, carries no config-driven ctest group label.
+      - path: catch/config/configs/unit/hrr.yaml
+        claim: Unit hrr cases carry level/skip metadata driving ctest labels.
+      - path: catch/config/configs/unit/callback.yaml
+        claim: Unit callback cases carry level/skip metadata driving ctest labels.
+      - path: catch/config/configs/unit/clock.yaml
+        claim: Unit clock cases carry level/skip metadata driving ctest labels.
     history: Historical origin not located in available change history; repository evidence (the suite's catalogued source paths and CMake build wiring recorded in this inventory) documents the behavior it currently pins.
     disposition: keep
     disposition_rationale: AMD-specific feature coverage is backend-gated and has no portable contract counterpart; retained as primary coverage.
@@ -1351,6 +1425,16 @@ suites:
         claim: sanityTests, assertion, and env are built under BUILD_UNIT_TESTS.
       - path: catch/CMakeLists.txt
         claim: ABM and TypeQualifiers are built under BUILD_UNIT_TESTS at the catch/ level.
+      - path: catch/config/configs/unit/sanityTests.yaml
+        claim: Unit sanityTests cases carry level/skip metadata driving ctest labels.
+      - path: catch/config/configs/unit/assertion.yaml
+        claim: Unit assertion cases carry level/skip metadata driving ctest labels.
+      - path: catch/config/configs/unit/env.yaml
+        claim: Unit env cases carry level/skip metadata driving ctest labels.
+      - path: catch/config/configs/ABM.yaml
+        claim: ABM cases carry level/skip metadata driving the ctest ABM label as a non-unit group.
+      - path: catch/config/configs/TypeQualifiers.yaml
+        claim: TypeQualifiers cases carry level/skip metadata driving the ctest TypeQualifiers label as a non-unit group.
     history: Historical origin not located in available change history; repository evidence (the suite's catalogued source paths and CMake build wiring recorded in this inventory) documents the behavior it currently pins.
     disposition: keep
     disposition_rationale: Harness and macro-boundary coverage underpins all other suites; retained.

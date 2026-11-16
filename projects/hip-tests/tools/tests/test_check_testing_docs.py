@@ -1205,6 +1205,60 @@ class CheckTestingDocsTest(unittest.TestCase):
             msg=results["incidents"],
         )
 
+    # -- incident required field present but empty ---------------------------
+
+    def test_incident_empty_finding_field_is_rejected(self):
+        # Regression: a required field whose label is present but whose value is
+        # empty (``**Finding.**`` with nothing after it) was accepted because the
+        # check only tested for the bold label. An empty field tells a reviewer
+        # nothing, so a present-but-empty label is now a schema error distinct
+        # from an absent one.
+        broken = VALID_INCIDENTS.replace(
+            "**Finding.** A control looked removable but was not.\n",
+            "**Finding.**\n")
+        _write_docs(self.root, {"TESTING_INCIDENTS.md": broken})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("has an empty 'Finding' field" in err
+                for err in results["incidents"]),
+            msg=results["incidents"],
+        )
+        # An empty field is reported as empty, not as missing: the label is there.
+        self.assertFalse(
+            any("missing the 'Finding' field" in err
+                for err in results["incidents"]),
+            msg=results["incidents"],
+        )
+
+    def test_incident_empty_origin_field_is_rejected(self):
+        # The same empty-value rule holds for every required label; Origin is the
+        # one a reader most needs when tracing a control back to its source.
+        broken = VALID_INCIDENTS.replace(
+            "**Origin.** Landed in `0d90b30fb6c`.\n",
+            "**Origin.** \n")
+        _write_docs(self.root, {"TESTING_INCIDENTS.md": broken})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("has an empty 'Origin' field" in err
+                for err in results["incidents"]),
+            msg=results["incidents"],
+        )
+
+    def test_incident_empty_trailing_field_is_rejected(self):
+        # The last field in a section has no following label or blank line, so its
+        # value runs to the end of the section; an empty trailing field must still
+        # be caught rather than swallowed by the end-of-section boundary.
+        broken = VALID_INCIDENTS.replace(
+            "**Retirement condition.** Only when the hazard cannot recur.\n",
+            "**Retirement condition.**\n")
+        _write_docs(self.root, {"TESTING_INCIDENTS.md": broken})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("has an empty 'Retirement condition' field" in err
+                for err in results["incidents"]),
+            msg=results["incidents"],
+        )
+
     # -- broken local link ---------------------------------------------------
 
     def test_broken_local_link(self):
@@ -1232,6 +1286,49 @@ class CheckTestingDocsTest(unittest.TestCase):
         _write_docs(self.root, {"TESTING.md": extended})
         results, _ = checker.validate(root=str(self.root))
         self.assertEqual(results["markdown_links"], [], msg=results["markdown_links"])
+
+    # -- inline link with an optional CommonMark title -----------------------
+
+    def test_markdown_link_with_double_quoted_title_resolves(self):
+        # Regression: an inline link may carry a title after the destination,
+        # ``[text](dest "title")``. The pre-fix capture treated the whole
+        # parenthesized span (destination plus title) as the path, so a valid
+        # titled link to an existing file failed existence resolution. The title
+        # is descriptive and is now stripped before the destination is resolved.
+        titled = VALID_TESTING.replace(
+            "(test_inventory.yaml)", '(test_inventory.yaml "The suite inventory")')
+        _write_docs(self.root, {"TESTING.md": titled})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertEqual(results["markdown_links"], [], msg=results["markdown_links"])
+
+    def test_markdown_link_with_single_quoted_title_resolves(self):
+        titled = VALID_TESTING.replace(
+            "(test_inventory.yaml)", "(test_inventory.yaml 'The suite inventory')")
+        _write_docs(self.root, {"TESTING.md": titled})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertEqual(results["markdown_links"], [], msg=results["markdown_links"])
+
+    def test_markdown_link_with_title_still_resolves_fragment_anchor(self):
+        # A titled link to a fragment anchor must still validate the anchor after
+        # the title is stripped: the destination (and its ``#fragment``) is what
+        # resolves, not the title text.
+        titled = VALID_TESTING.replace(
+            "(#known-gaps)", '(#known-gaps "Jump to gaps")')
+        _write_docs(self.root, {"TESTING.md": titled})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertEqual(results["markdown_links"], [], msg=results["markdown_links"])
+
+    def test_markdown_link_with_title_still_reports_broken_destination(self):
+        # Stripping the title must not mask a genuinely broken destination: a
+        # titled link to a missing file is still reported.
+        titled = VALID_TESTING.replace(
+            "(test_inventory.yaml)", '(no_such_file.yaml "Missing target")')
+        _write_docs(self.root, {"TESTING.md": titled})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("broken local link" in err for err in results["markdown_links"]),
+            msg=results["markdown_links"],
+        )
 
     # -- Markdown link boundary: absolute / traversal targets ----------------
 
