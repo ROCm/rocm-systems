@@ -11,7 +11,7 @@ ta.buffer_atomic_insts:
   unit: (Instructions + $normUnit)
   description: >-
     The total number of buffer atomic instructions processed by the address processing
-    unit, per normalization unit.
+    unit, counted once per wavefront, per normalization unit.
 ta.buffer_coalesced_rd:
   name: TA Buffer Coalesced Read
   formula: SUM(TA_BUFFER_COALESCED_READ_CYCLES_sum) / SUM($denom)
@@ -39,7 +39,7 @@ ta.buffer_rd_insts:
   unit: (Instructions + $normUnit)
   description: >-
     The total number of buffer read instructions processed by the address processing
-    unit, per normalization unit.
+    unit, counted once per wavefront, per normalization unit.
 ta.buffer_total_cycles:
   name: TA Buffer Total Cycles
   formula: SUM(TA_BUFFER_TOTAL_CYCLES_sum) / SUM($denom)
@@ -53,7 +53,7 @@ ta.buffer_wr_insts:
   unit: (Instructions + $normUnit)
   description: >-
     The total number of buffer write instructions processed by the address processing
-    unit, per normalization unit.
+    unit, counted once per wavefront, per normalization unit.
 ta.busy:
   name: Address Processing Unit Busy
   formula: 100 * SUM(TA_TA_BUSY_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
@@ -79,8 +79,8 @@ ta.global_atomic_insts:
   unit: (Instructions + $normUnit)
   description: >-
     The total number of global & generic memory atomic (with and without return)
-    instructions executed on all compute units on the accelerator, per normalization
-    unit.
+    instructions executed on all compute units on the accelerator, counted once per
+    wavefront, per normalization unit.
 ta.global_insts:
   name: TA Global/Generic Instructions
   formula: SUM(TA_FLAT_WAVEFRONTS_sum) / SUM($denom)
@@ -94,14 +94,16 @@ ta.global_rd_insts:
   unit: (Instructions + $normUnit)
   description: >-
     The total number of global & generic memory read instructions executed on all
-    compute units on the accelerator, per normalization unit.
+    compute units on the accelerator, counted once per wavefront, per normalization
+    unit.
 ta.global_wr_insts:
   name: TA Global/Generic Write Instructions
   formula: SUM(TA_FLAT_WRITE_WAVEFRONTS_sum) / SUM($denom)
   unit: (Instructions + $normUnit)
   description: >-
     The total number of global & generic memory write instructions executed on all
-    compute units on the accelerator, per normalization unit.
+    compute units on the accelerator, counted once per wavefront, per normalization
+    unit.
 ta.total_insts:
   name: TA Total Instructions
   formula: SUM(TA_TOTAL_WAVEFRONTS_sum) / SUM($denom)

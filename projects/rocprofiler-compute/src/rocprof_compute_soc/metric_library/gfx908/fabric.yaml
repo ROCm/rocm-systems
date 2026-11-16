@@ -191,7 +191,9 @@ fabric.wr_atomic_bw:
   unit: GB/s
   description: >-
     The number of bytes sent by the L2 over the Infinity Fabric interface by write and
-    atomic operations, divided by total duration.
+    atomic operations, divided by total duration. Infinity Fabric considers a request
+    atomic only if it targets non-write-cacheable memory, for example, fine-grained or
+    uncached memory allocations.
   peak: $hbmBandwidth
 fabric.wr_atomic_bw_norm:
   name: L2-Fabric Write and Atomic Bytes

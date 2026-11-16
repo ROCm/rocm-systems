@@ -48,7 +48,8 @@ compute.mfma_flops_f6f4:
   unit: GFLOP/s
   description: >-
     The total number of 4-bit and 6-bit floating-point operations executed on MFMA
-    units, per second. F6/F4 formats are supported in AMD Instinct MI350 series (gfx950)
+    units, per second. Note: this does not include any floating-point operations from
+    VALU instructions. F6/F4 formats are supported in AMD Instinct MI350 series (gfx950)
     and later only.
   peak: $max_sclk * $cu_per_gpu * 16834 / 1000
   peak_empirical: $MFMAF6F4Flops_empirical_peak
