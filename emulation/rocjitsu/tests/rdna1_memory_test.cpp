@@ -380,6 +380,30 @@ TEST_F(Rdna1Memory, Ptr32IsCapturedAtLaunchAndReadsOneAddressRegister) {
   EXPECT_EQ(vector(8, 2), 31u);
 }
 
+TEST_P(Gfx10MemoryAllocation, StatusVcczFollowsVccAcrossBufferLoads) {
+  constexpr uint32_t address = 0x4000, value = 0x12345678;
+  scalar(0, address);
+  scalar(1, 0);
+  scalar(2, sizeof(value));
+  scalar(3, (3u << 28) | (20u << 12));
+  memory_.write32(address, value);
+  const auto load = rdna1::build_mubuf(rdna1::kBufferLoadDword, {.vdata = 8, .soffset = 128});
+  const auto status =
+      rdna1::build_sopk(rdna1::kSGetregB32, {.simm16 = 2u | (10u << 6), .sdst = 12});
+  const auto expect_vccz = [&](bool zero) {
+    ASSERT_NO_FATAL_FAILURE(execute({status[0], 0}));
+    EXPECT_EQ(cu_->read_sgpr(wf_->sgpr_alloc().base + 12), unsigned(zero));
+  };
+  for (const uint64_t vcc : {1u, 0u}) {
+    wf_->set_vcc_raw(vcc);
+    ASSERT_NO_FATAL_FAILURE(expect_vccz(vcc == 0));
+    vector(8, 0, 0);
+    ASSERT_NO_FATAL_FAILURE(issue(load));
+    EXPECT_EQ(vector(8, 0), value);
+    ASSERT_NO_FATAL_FAILURE(expect_vccz(vcc == 0));
+  }
+}
+
 TEST_F(Rdna1Memory, Wave64PermutesWithinEachPhysicalHalf) {
   wf_->set_exec(~uint64_t{0});
   for (unsigned lane = 0; lane < 64; ++lane) {

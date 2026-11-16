@@ -565,13 +565,6 @@ add_test(
 )
 
 add_test(
-    NAME test_noise_clamper
-    COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_noise_clamper.xml
-        ${COV_OPTION} tests/unit/utils/metrics/test_noise_clamper.py ${WORKING_DIR_OPTION}
-)
-
-add_test(
     NAME test_benchmark_base
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_benchmark_base.xml
@@ -715,6 +708,22 @@ add_test(
         ${WORKING_DIR_OPTION}
 )
 
+add_test(
+    NAME test_per_source_line_export
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_per_source_line_export.xml
+        ${COV_OPTION} tests/unit/pc_sampling/test_per_source_line_export.py
+        ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_pc_sampling_csv_export
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_pc_sampling_csv_export.xml
+        ${COV_OPTION} tests/unit/pc_sampling/test_pc_sampling_csv_export.py
+        ${WORKING_DIR_OPTION}
+)
+
 # -----------------------------------
 # Metrics unit tests
 # -----------------------------------
@@ -750,11 +759,45 @@ add_test(
 )
 
 add_test(
+    NAME test_allocator
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_allocator.xml ${COV_OPTION}
+        tests/unit/utils/counters/test_allocator.py ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_counter_file
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_counter_file.xml
+        ${COV_OPTION} tests/unit/utils/counters/test_counter_file.py ${WORKING_DIR_OPTION}
+)
+
+add_test(
     NAME test_utils_counter_defs
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_utils_counter_defs.xml
         ${COV_OPTION} tests/unit/utils/test_utils_counter_defs.py ${WORKING_DIR_OPTION}
 )
+
+add_test(
+    NAME test_metric_library_loader
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_metric_library_loader.xml
+        ${COV_OPTION} tests/unit/rocprof_compute_soc/metric_library/test_loader.py
+        ${WORKING_DIR_OPTION}
+)
+
+# The metric library sync test imports tools/, which an install tree lacks.
+if(NOT TEST_FROM_INSTALL)
+    add_test(
+        NAME test_metric_library_sync
+        COMMAND
+            ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_metric_library_sync.xml
+            ${COV_OPTION}
+            tests/unit/rocprof_compute_soc/metric_library/test_metric_library_sync.py
+            ${WORKING_DIR_OPTION}
+    )
+endif()
 
 add_test(
     NAME test_parser
@@ -980,6 +1023,17 @@ add_test(
 )
 
 # -----------------------------------
+# rocprof_compute_base unit tests
+# -----------------------------------
+
+add_test(
+    NAME test_rocprof_compute_base
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_rocprof_compute_base.xml
+        ${COV_OPTION} tests/unit/test_rocprof_compute_base.py ${WORKING_DIR_OPTION}
+)
+
+# -----------------------------------
 # PC sampling profiler unit tests
 # -----------------------------------
 
@@ -1104,7 +1158,10 @@ if(${ENABLE_COVERAGE})
         test_expression
         test_evaluation_pipeline
         test_metric_evaluator
+        test_allocator
+        test_counter_file
         test_utils_counter_defs
+        test_metric_library_loader
         test_parser
         test_argparser
         test_L1_cache_counters
@@ -1117,7 +1174,6 @@ if(${ENABLE_COVERAGE})
         test_utils_profile
         test_common
         test_amdsmi_interface
-        test_noise_clamper
         test_benchmark_base
         test_analysis_cli
         test_pattern_matching
@@ -1153,10 +1209,13 @@ if(${ENABLE_COVERAGE})
         test_pc_sampling_analyze_cli
         test_pc_sampling_profile
         test_per_kernel_isa_export
+        test_per_source_line_export
+        test_pc_sampling_csv_export
         test_metrics_common
         test_metric_validation
         test_native_tool_finder
         test_profiler_base
+        test_rocprof_compute_base
         test_rocprofv3_avail_interface
         test_soc_base
         test_tty

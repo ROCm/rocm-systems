@@ -98,7 +98,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: "TheRock"
-          ref: 7c309dbaf02d53ff108e401e5f723f00353e17e4 # 2026-11-10
+          ref: c0d2f4d21e7daffe3896b9be9ce9d1b2e0793827 # 2026-11-11
 
       - name: Install python deps
         run: |
@@ -311,6 +311,11 @@ jobs:
           - workload: llama-3.1-405b-maxtext
             nodes: '4'
             job_timeout_minutes: '450'
+          # 4 nodes: two prefill, two decode. 330 = 60 + 180 (3 h time_limit)
+          # + 90.
+          - workload: deepseek-r1-sglang-disagg
+            nodes: '4'
+            job_timeout_minutes: '330'
     uses: ./.github/workflows/therock-rccl-test-madengine.yml
     secrets: inherit
     with:

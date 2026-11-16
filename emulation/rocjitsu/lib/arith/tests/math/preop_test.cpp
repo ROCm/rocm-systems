@@ -50,7 +50,7 @@ uint64_t reference(int exponent, unsigned selector, unsigned mode, unsigned gues
     omod = 0;
   }
   if (omod) {
-    if (gfx12 && std::fpclassify(value) == FP_SUBNORMAL) {
+    if (std::fpclassify(value) == FP_SUBNORMAL) {
       value = 0;
     }
     value = static_cast<double>(
@@ -174,6 +174,49 @@ TEST(TrigPreop, TableTailAndOutputFlushing) {
       for (auto mode : {RJ_ARITH_ALU_OMOD_2, RJ_ARITH_ALU_OMOD_4, RJ_ARITH_ALU_OMOD_HALF}) {
         ASSERT_EQ(call(flags | RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS, 1, mode, d, a, b, &status), 0);
         EXPECT_EQ((uint64_t(dhi[0]) << 32) | dlo[0], 0ULL);
+      }
+    }
+  }
+}
+
+// gfx1100 IEEE=0 capture (hw1100-noieee, MODE 0x00/0x50/0x800000): mul:2/mul:4 flush the
+// subnormal table tail before scaling, as gfx1201 does; scaling it first gives 0x19e839cfbc5294.
+TEST(TrigPreop, OmodFlushesSubnormalTableValueBeforeScaling) {
+  const struct {
+    uint64_t a;
+    uint32_t selector;
+    uint64_t omod;
+  } cases[] = {{0x68b6bd57cfd4edafULL, 0x2c808, RJ_ARITH_ALU_OMOD_2},
+               {0xdb611d249dc9626bULL, 0x864c654c, RJ_ARITH_ALU_OMOD_2},
+               {0x4790569f07e532c1ULL, 0xdc49732, RJ_ARITH_ALU_OMOD_4},
+               {0x5ec2448f9d586cc9ULL, 0x1e648b, RJ_ARITH_ALU_OMOD_4}};
+  for (auto cpu : supported_cpu_levels()) {
+    for (uint64_t input_flush : {uint64_t(0), RJ_ARITH_FP_FLUSH_INPUT_DENORMALS}) {
+      for (const auto &sample : cases) {
+        Registers<3, 64> r;
+        for (int lane = 0; lane < 64; ++lane) {
+          r.v[0][lane] = uint32_t(sample.a);
+          r.v[1][lane] = uint32_t(sample.a >> 32);
+          r.v[2][lane] = sample.selector;
+        }
+        const uint64_t flags = cpu | RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS |
+                               RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS | input_flush;
+        for (int call = 0; call < 3; ++call) {
+          SCOPED_TRACE(::testing::Message()
+                       << cpu << '/' << input_flush << '/' << call << '/' << std::hex << sample.a);
+          uint32_t lo[64], hi[64];
+          uint32_t *d[] = {lo, hi};
+          const uint32_t *a[] = {r.v[0], r.v[1]}, *b[] = {r.v[2]};
+          ASSERT_EQ(
+              call == 0 ? rj_arith_v_trig_preop_f64_w32(flags, ~0U, sample.omod, d, a, b, nullptr)
+              : call == 1
+                  ? rj_arith_v_trig_preop_f64_w64(flags, ~0ULL, sample.omod, d, a, b, nullptr)
+                  : rj_arith_v_trig_preop_f64_w32_gfx12(flags, ~0U, sample.omod, d, a, b, nullptr),
+              RJ_ARITH_SUCCESS);
+          for (int lane = 0; lane < (call == 1 ? 64 : 32); ++lane) {
+            EXPECT_EQ((uint64_t(hi[lane]) << 32) | lo[lane], 0ULL) << lane;
+          }
+        }
       }
     }
   }

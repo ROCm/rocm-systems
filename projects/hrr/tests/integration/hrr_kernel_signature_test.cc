@@ -9,7 +9,7 @@
  * @{
  * @ingroup HRRTest
  * Replay checks a kernel launch record's arguments against the signature of the
- * kernel in the code object before it launches (AIRUNTIME-3070).
+ * kernel in the code object before it launches.
  *
  * The handler tests stand in for the code object. This one captures a real
  * launch on a GPU, so the signature replay compares against comes from

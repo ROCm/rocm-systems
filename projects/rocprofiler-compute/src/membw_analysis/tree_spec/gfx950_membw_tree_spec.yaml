@@ -77,7 +77,7 @@ nodes:
     guidance_id: gl1_vmem_stall
 
   # --- GL2: L2 Cache Bottleneck Detection ---
-  # Source metrics: Table 3012 (L2 Bottleneck Detection Indicators)
+  # Source metrics: Table 3002 (L2 Bottleneck Detection Indicators)
   # in 3000_mem_bw.yaml
 
   gl2_back_pressure:
@@ -151,7 +151,7 @@ nodes:
     guidance_id: gl2_gmi_pressure
 
   # --- EA: Efficiency Arbiter Bottleneck Detection ---
-  # Source metrics: Table 3018 (EA Bottleneck Detection Indicators)
+  # Source metrics: Table 3003 (EA Bottleneck Detection Indicators)
   # in 3000_mem_bw.yaml
 
   ea_io_bw_bound:

@@ -4,7 +4,9 @@
 // Dense integer MFMA/WMMA: signedness, lane controls, wrap/saturation and overlap.
 #include "common/cpu.h"
 #include "common/semantics.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_common.h"
+#include "rj_arith/detail/rj_arith_mfma.h"
+#include "rj_arith/detail/rj_arith_wmma.h"
 #include <array>
 #include <bit>
 #include <gtest/gtest.h>

@@ -312,7 +312,7 @@ pub(crate) unsafe extern "C" fn scope_pair_info(
                     endpoint: &*device.endpoint,
                     request: access.requirements,
                     address_range: device.native.address_range(),
-                    import_supported: linux_interop::supports_system_dma_buf_import(&device.native),
+                    import_supported: external_transport::supports_system_import(&device.native),
                 })
                 .map_err(|_| EXHAUSTED)?;
         }
