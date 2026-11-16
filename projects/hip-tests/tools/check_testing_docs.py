@@ -142,7 +142,11 @@ for itself (workstreams WS-1 and WS-2):
   local Markdown refs and anchors
     - every relative Markdown link ``[text](path)`` in TESTING.md,
       TESTING_INCIDENTS.md, and TEST_RESTRUCTURING.md resolves to a file on disk
-      (http(s)/mailto URLs are preserved as external and not existence-checked);
+      within the boundary root (http(s)/mailto URLs are preserved as external and
+      not existence-checked); a local link target that is absolute, or that
+      resolves outside the supplied ``--root`` / default repository boundary, is
+      rejected exactly like any other repository path pointer, while valid
+      relative links and fragment anchors continue to resolve;
     - reference-style links ``[text][label]`` / ``[label][]`` are resolved through
       their ``[label]: target`` definitions and validated like inline links; a
       usage with no matching definition, or a definition that is never used, is
@@ -1551,13 +1555,20 @@ def _slugify(heading_text):
     return text
 
 
-def _check_link_target(doc_name, base, doc_resolved, target, anchors_cache):
+def _check_link_target(doc_name, base, doc_resolved, target, anchors_cache,
+                       boundary_root=None):
     """Validate one link target ``local#fragment`` and count resolved references.
 
     Returns (errors, refs_ok). An empty or external (http(s)/mailto) target is
     preserved and not existence-checked. A local path must resolve on disk; a
     ``#fragment`` must resolve to a heading anchor in the target Markdown file
     (``doc_resolved`` itself for a fragment-only target).
+
+    A local target is held to the same boundary as every other repository path
+    pointer: an absolute target is rejected outright, and a relative target that
+    resolves outside ``boundary_root`` (the supplied ``--root`` or, by default,
+    the repository root two levels above the component directory) is rejected as
+    an escape. Valid relative links and fragment anchors are unaffected.
     """
     errors = []
     refs_ok = 0
@@ -1566,7 +1577,20 @@ def _check_link_target(doc_name, base, doc_resolved, target, anchors_cache):
         return errors, refs_ok
     local, _, fragment = target.partition("#")
     if local:
+        if Path(local).is_absolute():
+            errors.append(
+                "{}: link target must be repository-relative: {}".format(
+                    doc_name, target))
+            return errors, refs_ok
         resolved = (base / local).resolve()
+        if boundary_root is not None:
+            try:
+                resolved.relative_to(boundary_root)
+            except ValueError:
+                errors.append(
+                    "{}: link target escapes repository root: {}".format(
+                        doc_name, target))
+                return errors, refs_ok
         if not resolved.exists():
             errors.append("{}: broken local link: {}".format(doc_name, target))
             return errors, refs_ok
@@ -1584,7 +1608,7 @@ def _check_link_target(doc_name, base, doc_resolved, target, anchors_cache):
     return errors, refs_ok
 
 
-def check_markdown_links(md_path, anchors_cache):
+def check_markdown_links(md_path, anchors_cache, boundary_root=None):
     """Validate inline and reference-style links and in-page anchors in md_path.
 
     Returns (errors, refs_ok). Inline ``[text](target)`` links and reference-style
@@ -1595,6 +1619,12 @@ def check_markdown_links(md_path, anchors_cache):
     itself for fragment-only links). A reference-style usage with no matching
     definition, and a definition that nothing references, are both reported so the
     two link forms stay consistent.
+
+    Every local link target is held to ``boundary_root`` (the supplied ``--root``
+    or, by default, the repository root two levels above the component directory):
+    an absolute target or a relative target that resolves outside the boundary is
+    rejected exactly like any other repository path pointer, while valid relative
+    links and fragment anchors continue to resolve.
     """
     errors = []
     refs_ok = 0
@@ -1614,7 +1644,8 @@ def check_markdown_links(md_path, anchors_cache):
     # Inline links.
     for raw in _MD_LINK_RE.findall(text):
         errs, got = _check_link_target(
-            path.name, base, doc_resolved, raw.strip(), anchors_cache)
+            path.name, base, doc_resolved, raw.strip(), anchors_cache,
+            boundary_root)
         errors.extend(errs)
         refs_ok += got
 
@@ -1631,7 +1662,8 @@ def check_markdown_links(md_path, anchors_cache):
                     path.name, label))
             continue
         errs, got = _check_link_target(
-            path.name, base, doc_resolved, definitions[label], anchors_cache)
+            path.name, base, doc_resolved, definitions[label], anchors_cache,
+            boundary_root)
         errors.extend(errs)
         refs_ok += got
 
@@ -1725,7 +1757,7 @@ def validate(root=None, inventory_path=None, coverage_path=None,
     anchors_cache = {}
     md_errors = []
     for md_path in (testing_path, incidents_path, restructuring_path):
-        errs, refs_ok = check_markdown_links(md_path, anchors_cache)
+        errs, refs_ok = check_markdown_links(md_path, anchors_cache, repo_root)
         md_errors.extend(errs)
         refs_total += refs_ok
     results["markdown_links"] = sorted(md_errors)

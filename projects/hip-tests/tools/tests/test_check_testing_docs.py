@@ -1233,6 +1233,44 @@ class CheckTestingDocsTest(unittest.TestCase):
         results, _ = checker.validate(root=str(self.root))
         self.assertEqual(results["markdown_links"], [], msg=results["markdown_links"])
 
+    # -- Markdown link boundary: absolute / traversal targets ----------------
+
+    def test_markdown_link_absolute_target_is_rejected(self):
+        # Regression: an absolute Markdown link target is rejected even when it
+        # names a real file. The pre-fix link check resolved the target and only
+        # tested existence, so an absolute path to an existing file resolved and
+        # was silently accepted; the boundary now holds Markdown links to the
+        # same repository-relative rule as every other path pointer.
+        target = self.root / "abs_target.md"
+        target.write_text("# Heading\n", encoding="utf-8")
+        broken = VALID_TESTING.replace(
+            "(test_inventory.yaml)", "({})".format(target))
+        _write_docs(self.root, {"TESTING.md": broken})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("link target must be repository-relative" in err
+                for err in results["markdown_links"]),
+            msg=results["markdown_links"],
+        )
+
+    def test_markdown_link_parent_traversal_target_is_rejected(self):
+        # Regression: with an explicit --root the supplied root is the escape
+        # boundary. A link that traverses above it to a real file genuinely
+        # exists, so the pre-fix check resolved and accepted it; a correct
+        # boundary rejects the escape even though the target is present.
+        component = self.root / "component"
+        component.mkdir()
+        (self.root / "escape_target.md").write_text("# Heading\n", encoding="utf-8")
+        broken = VALID_TESTING.replace(
+            "(test_inventory.yaml)", "(../escape_target.md)")
+        _write_docs(component, {"TESTING.md": broken})
+        results, _ = checker.validate(root=str(component))
+        self.assertTrue(
+            any("link target escapes repository root" in err
+                for err in results["markdown_links"]),
+            msg=results["markdown_links"],
+        )
+
     # -- negative --root paths -----------------------------------------------
 
     def test_empty_root_diagnoses_missing_docs(self):

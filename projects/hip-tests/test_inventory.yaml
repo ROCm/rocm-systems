@@ -735,7 +735,7 @@ suites:
     execution:
       cadence: pr
       gating: trusted
-      ctest_labels: [memory]
+      ctest_labels: [memory, device_memory]
       platforms: [linux, windows, wsl]
       backends: [amd, nvidia]
       prerequisites: [HIP runtime and device]
@@ -746,6 +746,8 @@ suites:
         claim: memory and device_memory are built under BUILD_UNIT_TESTS.
       - path: catch/config/configs/unit/memory.yaml
         claim: Unit memory cases carry level/skip metadata driving ctest labels.
+      - path: catch/config/configs/unit/device_memory.yaml
+        claim: Unit device-memory cases carry level/skip metadata driving ctest labels.
     history: Historical origin not located in available change history; repository evidence (the suite's catalogued source paths and CMake build wiring recorded in this inventory) documents the behavior it currently pins.
     disposition: review
     disposition_rationale: Legacy functional memory coverage stays active; contract-memory pins the portable invariants but does not replace sweep-sized functional behavior. Classification pending restructuring review.
@@ -838,7 +840,7 @@ suites:
     execution:
       cadence: pr
       gating: trusted
-      ctest_labels: [kernel, executionControl, launchBounds]
+      ctest_labels: [kernel, executionControl, launchBounds, executionctx]
       platforms: [linux, windows, wsl]
       backends: [amd, nvidia]
       prerequisites: [HIP runtime and device]
