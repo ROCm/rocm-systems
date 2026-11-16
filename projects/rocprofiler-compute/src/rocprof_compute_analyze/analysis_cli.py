@@ -9,6 +9,7 @@ from typing import Dict, List, Tuple
 import pandas as pd
 
 from membw_analysis.engine import run_membw_analysis
+from ml_api_tracing.analyze.call_tree import iter_call_tree_paths, rollup_node_stats
 from ml_api_tracing.analyze.definitions import CallTreeForest, CallTreeNode
 from ml_api_tracing.analyze.operator_patterns import (
     bind_operator_patterns,
@@ -16,6 +17,7 @@ from ml_api_tracing.analyze.operator_patterns import (
     operator_backend_labels,
     traced_frameworks_from_config,
 )
+from ml_api_tracing.analyze.orchestrator import process_ml_api_trace_output
 from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base
 from roofline.roofline_main import ROOFLINE_SUPPORTED, Roofline
 from utils import file_io, parser, schema, tty
@@ -27,9 +29,6 @@ from utils.utils_analysis import (
     copy_matched_operator_subtree,
     filter_forest_by_backends,
     impute_counters_iteration_multiplex,
-    iter_call_tree_paths,
-    process_ml_api_trace_output,
-    rollup_node_stats,
 )
 from utils.utils_common import selects_roofline, validate_roofline_csv
 

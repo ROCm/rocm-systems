@@ -12,6 +12,11 @@ GPU kernels they launch, and for the analyze options that read the result.
 - `analyze/` is used when analyzing. It can use pandas.
   - `definitions.py` holds the call-tree and trace-pair records.
   - `errors.py` holds the trace analysis errors.
+  - `orchestrator.py` runs the analysis steps in order for one workload.
+  - `trace_csv.py` finds and reads the marker and counter files.
+  - `pass_matching.py` joins markers and dispatches and matches operator calls
+    across profiling passes.
+  - `call_tree.py` nests the markers into call trees and adds up kernel stats.
   - `operator_patterns.py` matches `--list-operators` and `--operator` to the
     frameworks a workload traced.
 
