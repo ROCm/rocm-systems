@@ -928,7 +928,7 @@
     "tool": "rj_isa_diff",
     "tool_version": "0.1.0-p0",
     "schema_version": "rj_isa_diff.v1",
-    "rocjitsu_revision": "cea98b6ae6b072b015141dc8c70fc0f129cfec11",
+    "rocjitsu_revision": "56d31220bd5c79b777ce9aa85e25053b41b790c0",
     "rocjitsu_version": "0.3.0",
     "semantics": "RocJITsu ComputeUnitCore::execute_instruction, gfx950 (CDNA4) wave64, default arithmetic semantics",
     "compiler": "13.4.0"
@@ -982,15 +982,15 @@
         {
           "argv": ["/opt/rocm/llvm/bin/llvm-mc", "-triple=amdgcn-amd-amdhsa", "-mcpu=gfx950", "-filetype=obj", "-o", "co/artifacts/old.o", "co_old.s"],
           "exit_code": 0,
-          "elapsed_ns": 2643081
+          "elapsed_ns": 2546830
         },
         {
           "argv": ["/opt/rocm/llvm/bin/ld.lld", "-shared", "--emit-relocs", "-o", "co/artifacts/old.hsaco", "co/artifacts/old.o"],
           "exit_code": 0,
-          "elapsed_ns": 7257231
+          "elapsed_ns": 6800799
         }
       ],
-      "compile_ns": 9900312,
+      "compile_ns": 9347629,
       "executed_object": "linked_code_object",
       "note": "executed bytes are the code object linked from the re-assembled source, decoded by RocJITsu; they are not necessarily an original binary emission",
       "toolchain": {
@@ -1011,15 +1011,15 @@
         {
           "argv": ["/opt/rocm/llvm/bin/llvm-mc", "-triple=amdgcn-amd-amdhsa", "-mcpu=gfx950", "-filetype=obj", "-o", "co/artifacts/new.o", "co_new.s"],
           "exit_code": 0,
-          "elapsed_ns": 2712495
+          "elapsed_ns": 2586951
         },
         {
           "argv": ["/opt/rocm/llvm/bin/ld.lld", "-shared", "--emit-relocs", "-o", "co/artifacts/new.hsaco", "co/artifacts/new.o"],
           "exit_code": 0,
-          "elapsed_ns": 6333530
+          "elapsed_ns": 7477503
         }
       ],
-      "compile_ns": 9046025,
+      "compile_ns": 10064454,
       "executed_object": "linked_code_object",
       "note": "executed bytes are the code object linked from the re-assembled source, decoded by RocJITsu; they are not necessarily an original binary emission",
       "toolchain": {

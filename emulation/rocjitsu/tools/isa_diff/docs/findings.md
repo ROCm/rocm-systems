@@ -583,6 +583,30 @@ Re-run on the same changes, nothing changed:
   counts as an undefined input of every global store, because the decoder reports it
   as an implicit use.
 
+## Budget and changed code only
+
+`rj_isa_diff test` now runs 5000 random cases per region by default, after the mandatory
+boundary sweep. `rj_isa_diff_pr` already used 5000.
+
+Only changed code is tested:
+- **Comment-only changes are skipped.** The driver compares CHECK bodies without
+  comments before running anything. A function whose code did not change (renumbered
+  block names such as `; %Flow7` → `; %Flow8`, spill notes) is counted as comment-only,
+  not run. Inline-asm blocks count as code.
+- **Only regions execute.** Within a changed function, only the regions around the
+  hunks run. In PR 237629, old executes 2-8 instructions per case, the region length,
+  of functions of 8-12. In PR 242731 the regions are 8-66 instructions of 15-72,
+  because the change rewrites most of the conversion code.
+
+| run (default budget) | result | valid cases | wall time |
+|---|---|---|---|
+| PR 237629 | 84 of 84 pass | 464,716 | 4.1 s |
+| PR 242731 | 6 of 6 pass | 26,560 | 32.5 s |
+| last 120 AMDGPU commits | 119 pass, 30 inconclusive, 0 mismatches; 13 comment-only changes not run | 891,501 | 80 s |
+
+The 13 comment-only functions are the 13 that earlier sweeps ran and reported as
+`NO_SEMANTIC_DIFF`.
+
 ## Cost
 
 **Analysis** (from `case.json` `analysis.timing`, both sides together):

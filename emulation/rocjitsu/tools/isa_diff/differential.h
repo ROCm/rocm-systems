@@ -51,7 +51,7 @@ enum class CoverageScope { CompleteForDeclaredScope, Partial, NotEstablished };
 struct TestOptions {
   uint64_t seed = 1;
   /// Random cases (accepted samples) run after the mandatory boundary sweep.
-  uint64_t cases = 1000;
+  uint64_t cases = 5000;
   uint64_t max_attempts = 0; ///< Random-phase attempts; 0 = 4 * cases.
   /// Safety cap on the boundary sweep. The sweep cannot be disabled; reaching the cap
   /// is reported as truncation and partial coverage.

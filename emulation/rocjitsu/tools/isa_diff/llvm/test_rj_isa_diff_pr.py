@@ -128,6 +128,15 @@ def test_file(head):
             store("v_mov_b32_e32 v0, s41" if head else "v_mov_b32_e32 v0, s40"),
             ["store i32 undef, ptr addrspace(1) %p", "ret void"],
         ),
+        # Only a comment changed (a block name): nothing to test.
+        function(
+            "void @comment_only(i32 %a, ptr addrspace(1) inreg %p)",
+            "comment_only",
+            store(
+                "v_add_u32_e32 v0, 1, v0 ; head" if head else "v_add_u32_e32 v0, 1, v0"
+            ),
+            ["%s = add i32 %a, 1", "store i32 %s, ptr addrspace(1) %p", "ret void"],
+        ),
         # A real difference: add became sub.
         function(
             "void @real_bug(i32 %a, i32 %b, ptr addrspace(1) inreg %p)",
@@ -223,6 +232,13 @@ def main():
                 failures.append(
                     f"{fn}: verdict {got}, expected {v}: {json.dumps(rows.get(fn))[:600]}"
                 )
+        if "comment_only" in rows:
+            failures.append("comment_only was tested; its code did not change")
+        stats = json.loads((Path(tmp) / "out" / "summary.json").read_text())["stats"]
+        if stats.get("comment_only") != 1:
+            failures.append(
+                f"comment-only count {stats.get('comment_only')}, expected 1"
+            )
         if rows.get("half_ret", {}).get("return_masks") != [0xFFFF]:
             failures.append(
                 f"half_ret return masks {rows.get('half_ret', {}).get('return_masks')}"

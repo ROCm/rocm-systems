@@ -47,7 +47,8 @@ const char *kUsage =
     "                      [--max-counterexamples N] [--max-boundary-cases N]\n"
     "                      [--reduction-budget N] [--no-reduce] [--no-case-log]\n"
     "                      [--cache-dir DIR] [--strict-nan] [--poison-filter KINDS]\n"
-    "      --cases counts random cases; the boundary/NaN/corner sweep always runs first.\n"
+    "      --cases counts random cases (default 5000); the boundary/NaN/corner sweep always\n"
+    "      runs first.\n"
     "      --strict-nan: NaNs compare bit for bit (default: any NaN equals any NaN of the\n"
     "      same format, as LLVM allows). --poison-filter shift,fptoint,ctz,nsw,nuw,\n"
     "      disjoint,exact,nnan,ninf|all: exclude inputs that are poison in the IR.\n"
@@ -388,7 +389,7 @@ int cmd_test(int argc, char **argv) {
   }
   TestOptions opt;
   auto seed = a.number("--seed", 1);
-  auto cases = a.number("--cases", 1000);
+  auto cases = a.number("--cases", 5000);
   auto maxcex = a.number("--max-counterexamples", 3);
   auto maxbound = a.number("--max-boundary-cases", opt.max_boundary_cases);
   auto redbudget = a.number("--reduction-budget", opt.reduction_budget);
