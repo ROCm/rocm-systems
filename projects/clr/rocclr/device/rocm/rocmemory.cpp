@@ -81,7 +81,7 @@ Memory::~Memory() {
   }
 }
 
-bool Memory::allocateMapMemory(size_t allocationSize) {
+bool Memory::allocateMapMemory(size_t /*allocationSize*/) {
   assert(mapMemory_ == nullptr);
 
   amd::Memory* mapMemory = dev().findMapTarget(owner()->getSize());
@@ -110,8 +110,8 @@ bool Memory::allocateMapMemory(size_t allocationSize) {
   return true;
 }
 
-void* Memory::allocMapTarget(const amd::Coord3D& origin, const amd::Coord3D& region, uint mapFlags,
-                             size_t* rowPitch, size_t* slicePitch) {
+void* Memory::allocMapTarget(const amd::Coord3D& origin, const amd::Coord3D& /*region*/,
+                             uint /*mapFlags*/, size_t* /*rowPitch*/, size_t* /*slicePitch*/) {
   // Map/Unmap must be serialized.
   std::scoped_lock lock(owner()->lockMemoryOps());
 
@@ -178,8 +178,8 @@ void Memory::decIndMapCount() {
   }
 }
 
-void* Memory::cpuMap(device::VirtualDevice& vDev, uint flags, uint startLayer, uint numLayers,
-                     size_t* rowPitch, size_t* slicePitch) {
+void* Memory::cpuMap(device::VirtualDevice& vDev, uint /*flags*/, uint /*startLayer*/,
+                     uint /*numLayers*/, size_t* rowPitch, size_t* slicePitch) {
   // Create the map target.
   void* mapTarget = allocMapTarget(amd::Coord3D(0), amd::Coord3D(0), 0, rowPitch, slicePitch);
 
@@ -1592,7 +1592,7 @@ bool Image::createInteropImage() {
   return true;
 }
 
-bool Image::create(bool alloc_local, amd::Memory::ErrorCode* errorCode) {
+bool Image::create(bool /*alloc_local*/, amd::Memory::ErrorCode* errorCode) {
   if (owner()->parent() != nullptr) {
     // Image view creation
     roc::Memory* parent = static_cast<roc::Memory*>(owner()->parent()->getDeviceMemory(dev_));
@@ -1877,8 +1877,8 @@ bool Image::createView(const Memory& parent, amd::Memory::ErrorCode* errorCode) 
   return true;
 }
 
-void* Image::allocMapTarget(const amd::Coord3D& origin, const amd::Coord3D& region, uint mapFlags,
-                            size_t* rowPitch, size_t* slicePitch) {
+void* Image::allocMapTarget(const amd::Coord3D& origin, const amd::Coord3D& region,
+                            uint /*mapFlags*/, size_t* rowPitch, size_t* slicePitch) {
   std::scoped_lock lock(owner()->lockMemoryOps());
 
   incIndMapCount();

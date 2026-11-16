@@ -103,7 +103,7 @@ bool initGLInteropPrivateExt(void* GLdeviceContext) {
 }
 
 // ================================================================================================
-bool glCanInterop(Device* device, void* GLplatformContext, void* GLdeviceContext) {
+bool glCanInterop(Device* device, void* GLplatformContext, void* /*GLdeviceContext*/) {
   bool canInteroperate = false;
 
   LUID glAdapterLuid = {0, 0};
@@ -151,7 +151,7 @@ bool glDissociate(Device* device, void* GLplatformContext, void* GLdeviceContext
 }
 
 // ================================================================================================
-bool Export(amd::Memory* mem, GLenum targetType, int miplevel, hsa_handle_t* handle,
+bool Export(amd::Memory* mem, GLenum /*targetType*/, int /*miplevel*/, hsa_handle_t* handle,
            hsa_handle_t* resHandle, int* offset, void* image_srd, const unsigned image_srd_size) {
   assert(mem->getInteropObj() != nullptr);
   assert(mem->getInteropObj()->asGLObject() != nullptr);
