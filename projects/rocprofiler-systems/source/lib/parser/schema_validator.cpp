@@ -141,10 +141,18 @@ check_references(const schema& config_schema, const schema_param& param,
 {
     require_known_ids(config_schema, param.id, param.conflicts, errors);
     require_known_ids(config_schema, param.id, param.required, errors);
-    for(const auto& [target, ignored] : param.assigns)
+    for(const auto& [target_id, text] : param.assigns)
     {
-        static_cast<void>(ignored);
-        require_known(config_schema, param.id, target, errors);
+        require_known(config_schema, param.id, target_id, errors);
+        const auto* target = config_schema.find_param(target_id);
+        if(target != nullptr && !is_valid_value(*target, text))
+        {
+            report_catalog(
+                errors,
+                fmt::format("parameter '{}' assigns invalid value '{}' to '{}'", param.id,
+                            text, target_id),
+                { param.id, target_id });
+        }
     }
 }
 

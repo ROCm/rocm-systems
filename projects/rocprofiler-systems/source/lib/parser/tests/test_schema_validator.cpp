@@ -245,6 +245,28 @@ TEST(parser_schema_validator,
     EXPECT_TRUE(validate_schema(value).empty());
 }
 
+TEST(parser_schema_validator, catalog_check_reports_an_assigns_value_its_target_refuses)
+{
+    const auto errors_for = [](const char* text) {
+        auto gpu     = make_param(param_type::boolean);
+        gpu.id       = "gpu";
+        gpu.assigns  = { { "use_amd_smi", text } };
+        auto amd_smi = make_param(param_type::boolean);
+        amd_smi.id   = "use_amd_smi";
+        schema value{};
+        add_checked(value, std::move(gpu));
+        add_checked(value, std::move(amd_smi));
+        return validate_schema(value);
+    };
+
+    const auto typo = errors_for("ture");
+    ASSERT_EQ(typo.size(), 1U);
+    EXPECT_EQ(typo.front().message,
+              "parameter 'gpu' assigns invalid value 'ture' to 'use_amd_smi'");
+    EXPECT_TRUE(errors_for("true").empty());
+    EXPECT_TRUE(errors_for(" true ").empty());
+}
+
 TEST(parser_schema_validator, ignores_whitespace_around_a_value_and_a_default)
 {
     EXPECT_TRUE(is_valid_value(make_param(param_type::boolean), " true "));

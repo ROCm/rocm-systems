@@ -54,8 +54,9 @@ validate_values(const schema& config_schema, const typed_values_t& values);
 /**
  * Check the catalog itself, before any user input.
  *
- * Reports invalid defaults, unknown parameter ids in rules and effect fields, and
- * inverted or non-integer bounds.
+ * Reports invalid defaults and assigns values, unknown parameter ids in rules and
+ * effect fields, and inverted or non-integer bounds. A value the catalog assigns is
+ * checked as is_valid_value() checks any text for its target.
  */
 [[nodiscard]] std::vector<violation>
 validate_schema(const schema& config_schema);
