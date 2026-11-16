@@ -101,6 +101,7 @@
 #include <system_error>
 #include <thread>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 extern "C" {
@@ -735,6 +736,27 @@ get_registration_mutex()
     return _v;
 }
 
+// True while this thread runs SDK finalization or a client's finalize/detach callback. A
+// finalize() reached from inside one of these on the same thread (e.g. the tool calls exit()
+// and the atexit handler runs) must return: starting a full finalization there would re-lock
+// get_registration_mutex() held by invoke_client_finalizer or tear down state the caller is
+// still using.
+bool&
+in_teardown_scope()
+{
+    static thread_local bool _v = false;
+    return _v;
+}
+
+// Marks the current thread as inside teardown and restores the previous state on exit, so
+// nested scopes (finalize -> invoke_client_finalizer) do not clear the outer marker.
+common::scope_destructor
+make_teardown_scope()
+{
+    const bool _prev = std::exchange(in_teardown_scope(), true);
+    return common::scope_destructor{[_prev]() { in_teardown_scope() = _prev; }};
+}
+
 bool
 invoke_client_configure(std::optional<client_library>& itr)
 {
@@ -984,6 +1006,7 @@ invoke_client_detaches()
             kfd::signal_less_fence_completions();
             pc_sampling::service_sync(itr->internal_client_id);
 
+            auto _teardown    = make_teardown_scope();
             auto _fini_status = get_fini_status();
             if(_fini_status == 0) set_fini_status(-1);
             itr->configure_attach_result->tool_detach(itr->configure_attach_result->tool_data);
@@ -1044,6 +1067,7 @@ invoke_client_finalizer(rocprofiler_client_id_t client_id)
                 kfd::signal_less_fence_completions();
                 pc_sampling::service_sync(itr->internal_client_id);
 
+                auto _teardown    = make_teardown_scope();
                 auto _fini_status = get_fini_status();
                 if(_fini_status == 0) set_fini_status(-1);
                 _finalize_func(itr->configure_result->tool_data);
@@ -1214,8 +1238,7 @@ finalize()
         return;
     }
 
-    static thread_local bool _finalizing = false;
-    if(_finalizing)
+    if(in_teardown_scope())
     {
         ROCP_INFO << "ignoring re-entrant finalization request (value=" << get_fini_status() << ")";
         return;
@@ -1225,9 +1248,8 @@ finalize()
 
     static auto _once = std::once_flag{};
     std::call_once(_once, []() {
-        auto finalizing_scope =
-            common::scope_destructor{[]() { _finalizing = false; }, []() { _finalizing = true; }};
-        auto num_clients = get_num_clients();
+        auto finalizing_scope = make_teardown_scope();
+        auto num_clients      = get_num_clients();
         set_fini_status(-1);
 
         // Signal-less teardown steps 1-6, in the one order that strands no EOP-proven

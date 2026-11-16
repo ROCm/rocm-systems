@@ -24,7 +24,6 @@
 
 """PC-sampling blob views, ISA decoding, and SQL query rewriting."""
 
-import atexit
 import os
 import sqlite3
 import stat
@@ -47,15 +46,23 @@ __all__ = [
 def add_decode_args(parser, *, query_profile=False):
     """Register the ISA decode options for a command that opens databases."""
     decode = parser.add_argument_group("PC Sampling - ISA decode options")
-    decode.add_argument(
+    cache = decode.add_mutually_exclusive_group()
+    cache.add_argument(
+        "--cache-disassembly",
+        dest="cache_disassembly",
+        action="store_true",
+        default=False,
+        help=(
+            "Write lazily decoded, hash-verified instructions back into the input "
+            "databases at exit so later opens skip decoding (default: inputs are "
+            "left unmodified)."
+        ),
+    )
+    cache.add_argument(
         "--no-cache-disassembly",
         dest="cache_disassembly",
         action="store_false",
-        default=True,
-        help=(
-            "Disable disassembly write-back to keep input databases read-only "
-            "(default: cache verified instructions at exit)."
-        ),
+        help="Keep input databases read-only (default).",
     )
     decode.add_argument(
         "--codeobj-path-prefix-map",
@@ -80,11 +87,12 @@ def get_decode_args(args):
     """Return the RocpdImportData keyword arguments parsed by add_decode_args."""
     return {
         "codeobj_path_prefix_map": getattr(args, "codeobj_path_prefix_map", None),
-        "cache_disassembly": getattr(args, "cache_disassembly", True),
+        "cache_disassembly": getattr(args, "cache_disassembly", False),
     }
 
 
-def _quote_identifier(value: str) -> str:
+def quote_identifier(value: str) -> str:
+    """Quote a SQLite identifier, rejecting empty or NUL-containing names."""
     if not isinstance(value, str) or not value or "\x00" in value:
         raise ValueError(f"Invalid SQL identifier: {value!r}")
     return '"' + value.replace('"', '""') + '"'
@@ -106,7 +114,7 @@ def _table_columns(conn, table_name: str):
         return [
             row[1]
             for row in conn.execute(
-                f"PRAGMA table_info({_quote_identifier(table_name)})"
+                f"PRAGMA table_info({quote_identifier(table_name)})"
             ).fetchall()
         ]
     except sqlite3.OperationalError as error:
@@ -219,7 +227,7 @@ _MAX_DECODER_CACHE_BYTES = 256 * 1024 * 1024
 _MAX_DECODED_INSTRUCTIONS = 1 << 16
 
 
-def setup_isa_decode_views(conn, codeobj_path_prefix_map=None, cache_disassembly=True):
+def setup_isa_decode_views(conn, codeobj_path_prefix_map=None, cache_disassembly=False):
     """Register lazy ISA decode functions and enrich PC-sample decoded TEMP VIEWs.
 
     ``setup_blob_views`` remains the generic self-describing blob decoder. This
@@ -228,20 +236,24 @@ def setup_isa_decode_views(conn, codeobj_path_prefix_map=None, cache_disassembly
 
     ``codeobj_path_prefix_map`` relocates recorded code-object paths when
     decoding in a different filesystem layout than profiling ran in (see
-    _normalize_codeobj_path_prefix_map).  ``cache_disassembly`` (default True)
-    writes lazily disassembled instructions back into the input database(s) at
-    exit so later opens reuse them; only instructions decoded from bytes that
-    match the code object's recorded content hash are written.  Pass False
-    (rocpd ``--no-cache-disassembly``) to keep the input read-only.  Both are
+    _normalize_codeobj_path_prefix_map).  ``cache_disassembly`` (default False)
+    opts in to writing lazily disassembled instructions back into the input
+    database(s) at exit so later opens reuse them (rocpd ``--cache-disassembly``);
+    only instructions decoded from bytes that match the code object's recorded
+    content hash are written.  By default the inputs stay read-only.  Both are
     supplied through the API / ``rocpd`` command line, never an environment
     variable.
+
+    Returns the write-back flush callable when write-back is enabled, otherwise
+    None. The caller owns it: ``RocpdImportData`` runs it once, when the import
+    object is garbage collected or at interpreter exit, whichever comes first.
 
     If setup fails, ``rocpd_gpu_pc_sample_decoded`` is dropped rather than left
     without its ISA columns; ``rocpd_gpu_pc_sample_blob_decoded`` still exposes
     the generic blob fields.
     """
     try:
-        _setup_isa_decode_views(conn, codeobj_path_prefix_map, cache_disassembly)
+        return _setup_isa_decode_views(conn, codeobj_path_prefix_map, cache_disassembly)
     except BaseException:
         conn.execute("DROP VIEW IF EXISTS temp.rocpd_gpu_pc_sample_decoded")
         raise
@@ -405,14 +417,14 @@ def _setup_isa_decode_views(conn, codeobj_path_prefix_map, cache_disassembly):
     decoder_unavailable = (None, False, 0)
 
     # ------------------------------------------------------------------
-    # Cross-session disassembly cache.  On by default; disable per call with the
-    # API's ``cache_disassembly=False`` argument or the rocpd
-    # ``--no-cache-disassembly`` flag to keep the input database read-only.  When
-    # enabled, program counters disassembled lazily during this session from a
-    # code object whose bytes match its recorded content hash are written back
-    # into rocpd_disassembly_data at interpreter exit, so a later open serves the
-    # stored text through the decoded view's COALESCE instead of decoding it
-    # again.  Strictly best-effort: any problem (read-only or deleted database,
+    # Cross-session disassembly cache.  Off by default so opening a database never
+    # modifies it; enable per call with the API's ``cache_disassembly=True``
+    # argument or the rocpd ``--cache-disassembly`` flag.  When enabled, program
+    # counters disassembled lazily during this session from a code object whose
+    # bytes match its recorded content hash are written back into
+    # rocpd_disassembly_data when the import object is released (or at
+    # interpreter exit), so a later open serves the stored text through the
+    # decoded view's COALESCE instead of decoding it again.  Strictly best-effort: any problem (read-only or deleted database,
     # lock contention, a pre-3.1.0 input without the table, ...) skips the
     # write-back and leaves the database untouched.
     # ------------------------------------------------------------------
@@ -431,7 +443,7 @@ def _setup_isa_decode_views(conn, codeobj_path_prefix_map, cache_disassembly):
         for _seq, alias, path in attached:
             if not path or alias == "temp":
                 continue
-            schema = _quote_identifier(alias)
+            schema = quote_identifier(alias)
             try:
                 tables = {
                     row[0]
@@ -448,7 +460,7 @@ def _setup_isa_decode_views(conn, codeobj_path_prefix_map, cache_disassembly):
                     tags = dict(
                         conn.execute(
                             f"SELECT tag, value FROM {schema}."
-                            f"{_quote_identifier(metadata_table)} "
+                            f"{quote_identifier(metadata_table)} "
                             "WHERE tag IN ('uuid', 'guid')"
                         ).fetchall()
                     )
@@ -622,11 +634,11 @@ def _setup_isa_decode_views(conn, codeobj_path_prefix_map, cache_disassembly):
             writer.execute("PRAGMA busy_timeout = 5000")
             writer.execute("BEGIN IMMEDIATE")
             for (uuid, guid_val), rows in recordings.items():
-                table = _quote_identifier(f"rocpd_disassembly_data{uuid}")
+                table = quote_identifier(f"rocpd_disassembly_data{uuid}")
                 try:
                     # The file may have been replaced since it was opened.
                     stored = writer.execute(
-                        f"SELECT value FROM {_quote_identifier(f'rocpd_metadata{uuid}')} "
+                        f"SELECT value FROM {quote_identifier(f'rocpd_metadata{uuid}')} "
                         "WHERE tag = 'guid'"
                     ).fetchone()
                     if not stored or str(stored[0]) != guid_val:
@@ -665,9 +677,10 @@ def _setup_isa_decode_views(conn, codeobj_path_prefix_map, cache_disassembly):
     def _flush_writeback():
         # Persist lazily decoded, hash-verified instructions into
         # rocpd_disassembly_data so a future open reads the stored text instead of
-        # decoding again.  Runs at interpreter exit through a private writer
-        # connection (the import connection may already be closed) and routes each
-        # row to its recording's table.  Entirely best-effort; a failure just
+        # decoding again.  Runs once, when the import object is released or at
+        # interpreter exit, through a private writer connection (the import
+        # connection may already be closed) and routes each row to its
+        # recording's table.  Entirely best-effort; a failure just
         # leaves the cache unwritten.
         if not writeback_pending:
             return
@@ -696,13 +709,10 @@ def _setup_isa_decode_views(conn, codeobj_path_prefix_map, cache_disassembly):
                 )
             for path, recordings in by_path.items():
                 _write_disassembly(path, recordings)
-        except Exception:  # noqa: BLE001 - never raise from an atexit handler
+        except Exception:  # noqa: BLE001 - never raise from a finalizer
             pass
         finally:
             writeback_pending.clear()
-
-    if writeback_enabled:
-        atexit.register(_flush_writeback)
 
     computed_columns = {
         "instruction",
@@ -711,7 +721,7 @@ def _setup_isa_decode_views(conn, codeobj_path_prefix_map, cache_disassembly):
         "stall_reason_name",
     }
     source_select = ",\n                ".join(
-        f"s.{_quote_identifier(column)}"
+        f"s.{quote_identifier(column)}"
         for column in source_columns
         if column not in computed_columns
     )
@@ -760,13 +770,15 @@ def _setup_isa_decode_views(conn, codeobj_path_prefix_map, cache_disassembly):
                 rocpd_pc_sample_inst_type_name(s."inst_type") AS inst_type_name,
                 rocpd_pc_sample_stall_reason_name(s."stall_reason")
                     AS stall_reason_name
-            FROM {_quote_identifier(blob_source)} s
+            FROM {quote_identifier(blob_source)} s
             {disasm_join}
             """
 
     conn.execute(f"SELECT * FROM ({view_body}) LIMIT 0").fetchall()
     conn.execute("DROP VIEW IF EXISTS temp.rocpd_gpu_pc_sample_decoded")
     conn.execute(f"CREATE TEMP VIEW rocpd_gpu_pc_sample_decoded AS {view_body}")
+
+    return _flush_writeback if writeback_enabled else None
 
 
 def setup_blob_views(conn):
@@ -800,7 +812,7 @@ def setup_blob_views(conn):
     for guid, schema_id, source_table, byte_order, alignment, struct_size in schemas:
         if not isinstance(source_table, str):
             raise ValueError("Blob schema source_table must be text")
-        _quote_identifier(source_table)
+        quote_identifier(source_table)
         if byte_order not in ("little", "big"):
             raise ValueError(f"Invalid byte order for blob schema {(guid, schema_id)!r}")
         if not isinstance(alignment, int) or alignment <= 0:
@@ -832,7 +844,7 @@ def setup_blob_views(conn):
         for field_guid, name, offset, size, data_type, is_signed in fields:
             if str(field_guid) != schema_key[0]:
                 raise ValueError(f"Blob field GUID does not match schema {schema_key!r}")
-            _quote_identifier(name)
+            quote_identifier(name)
             normalized_name = name.casefold()
             if normalized_name in schema_field_names:
                 raise ValueError(
@@ -947,24 +959,24 @@ def setup_blob_views(conn):
         )
 
         domain_select = ",\n    ".join(
-            f"s.{_quote_identifier(column)}" for column in domain_cols
+            f"s.{quote_identifier(column)}" for column in domain_cols
         )
         blob_select = ",\n    ".join(
             'rocpd_blob_field(e."blob", e."guid", e."schema_id", '
-            f"{_quote_sql_literal(name)}) AS {_quote_identifier(name)}"
+            f"{_quote_sql_literal(name)}) AS {quote_identifier(name)}"
             for name in fields_by_name.values()
         )
 
         separator = ",\n    " if domain_select and blob_select else ""
         for view_name in (f"{source_table}_blob_decoded", f"{source_table}_decoded"):
-            quoted_view = _quote_identifier(view_name)
+            quoted_view = quote_identifier(view_name)
             conn.execute(f"DROP VIEW IF EXISTS temp.{quoted_view}")
             view_sql = (
                 f"CREATE TEMP VIEW {quoted_view} AS\n"
                 f"SELECT\n"
                 f"    {domain_select}{separator}\n"
                 f"    {blob_select}\n"
-                f"FROM {_quote_identifier(source_table)} s\n"
+                f"FROM {quote_identifier(source_table)} s\n"
                 f'LEFT JOIN "rocpd_blob_event" e ON {join_on}'
             )
             conn.execute(view_sql)

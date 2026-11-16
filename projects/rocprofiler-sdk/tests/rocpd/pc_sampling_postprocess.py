@@ -26,8 +26,9 @@
 
 Each test writes schema-3.1.0 databases holding synthetic PC samples and replaces
 the COMGR-backed ``libpyrocpd.isa_decoder`` with :class:`FakeDecoder`, whose
-instruction text is derived from the code-object bytes.  Write-back happens at
-interpreter exit, so tests that inspect it run the importer in a subprocess.
+instruction text is derived from the code-object bytes.  Write-back happens when
+the import object is released or at interpreter exit, so tests that inspect it
+usually run the importer in a subprocess.
 """
 
 import contextlib
@@ -440,13 +441,20 @@ def test_pc_sampling_cli_group_is_last(monkeypatch, capsys, command):
     options = {
         option for action in group._group_actions for option in action.option_strings
     }
-    assert {"--no-cache-disassembly", "--codeobj-path-prefix-map"} <= options
+    assert {
+        "--cache-disassembly",
+        "--no-cache-disassembly",
+        "--codeobj-path-prefix-map",
+    } <= options
     assert ("--blob-view-profile" in options) == (command == "query")
     assert group.title in capsys.readouterr().out
 
 
-@pytest.mark.parametrize("disable_cache", [False, True])
-def test_pc_sampling_cli_defaults(disable_cache):
+@pytest.mark.parametrize(
+    "cache_flag, expected_cache",
+    [(None, False), ("--cache-disassembly", True), ("--no-cache-disassembly", False)],
+)
+def test_pc_sampling_cli_defaults(cache_flag, expected_cache):
     import argparse
     from rocpd.pc_sampling_support import add_decode_args, get_decode_args
 
@@ -454,22 +462,24 @@ def test_pc_sampling_cli_defaults(disable_cache):
     add_decode_args(parser, query_profile=True)
     arguments = (
         [
-            "--no-cache-disassembly",
+            cache_flag,
             "--blob-view-profile",
             "--codeobj-path-prefix-map",
             "/container/app=/host/app",
         ]
-        if disable_cache
+        if cache_flag
         else []
     )
     args = parser.parse_args(arguments)
+    # Write-back is opt-in: without a flag the inputs stay read-only.
     assert get_decode_args(args) == {
-        "cache_disassembly": not disable_cache,
-        "codeobj_path_prefix_map": (
-            ["/container/app=/host/app"] if disable_cache else None
-        ),
+        "cache_disassembly": expected_cache,
+        "codeobj_path_prefix_map": (["/container/app=/host/app"] if cache_flag else None),
     }
-    assert args.blob_view_profile is disable_cache
+    assert args.blob_view_profile is bool(cache_flag)
+
+    with pytest.raises(SystemExit):
+        parser.parse_args(["--cache-disassembly", "--no-cache-disassembly"])
 
 
 @pytest.mark.parametrize("error_type", [TypeError, sqlite3.NotSupportedError])
@@ -723,10 +733,6 @@ def test_verified_decode_is_written_back(tmp_path, code_object, storage_type):
 def test_cached_comment_matches_lazy_decode(
     tmp_path, monkeypatch, counting_decoder, code_object, comment
 ):
-    from rocpd import pc_sampling_support
-
-    callbacks = []
-    monkeypatch.setattr(pc_sampling_support.atexit, "register", callbacks.append)
     decode = counting_decoder.decode
 
     def decode_with_comment(self, *args):
@@ -748,10 +754,10 @@ def test_cached_comment_matches_lazy_decode(
     )
     with open_db([db], cache_disassembly=True) as connection:
         cold_rows = connection.execute(query).fetchall()
+        flush = connection._writeback_finalizer
     assert cold_rows == [(insn(data, 4), comment or None, int(not comment))]
-    assert callbacks
-    for callback in callbacks:
-        callback()
+    assert flush.alive
+    flush()
     assert stored_disassembly(db) == [(guid, 1, 4, insn(data, 4))]
     with open_db([db]) as connection:
         assert connection.execute(query).fetchall() == cold_rows
@@ -860,7 +866,10 @@ def test_writeback_skips_stored_rows_without_an_index(tmp_path):
         concurrent_rows=[[table, offset, "concurrent"] for offset in range(100)],
     )
 
-    assert query_db(db, f'PRAGMA index_list("{table}")') == []
+    # The lookup index is not UNIQUE, so de-duplication cannot rely on a constraint.
+    assert all(
+        not unique for _, _, unique, *_ in query_db(db, f'PRAGMA index_list("{table}")')
+    )
     stored = query_db(db, f'SELECT code_object_offset, instruction FROM "{table}"')
     assert len(stored) == len(offsets)
     by_offset = dict(stored)
@@ -1363,10 +1372,13 @@ def test_failed_isa_setup_publishes_no_partial_view(
         rocpd_csv.execute(connection, output_path=str(out_dir), output_file="out")
     assert not list(out_dir.glob("out_pc_sampling_*"))
     assert (out_dir / "out_agent_info.csv").exists()
-    assert "skipping decoded blob/ISA views" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    # The skip is reported because raw samples exist.
+    assert "skipping pc_sampling_" in err
+    assert "skipping decoded blob/ISA views" in err
 
 
-def test_pc_csv_skips_decoded_view_without_isa_columns(tmp_path):
+def test_pc_csv_skips_decoded_view_without_isa_columns(tmp_path, capsys):
     from rocpd import csv as rocpd_csv
 
     db = tmp_path / "pc.db"
@@ -1381,6 +1393,8 @@ def test_pc_csv_skips_decoded_view_without_isa_columns(tmp_path):
         rocpd_csv.execute(connection, output_path=str(out_dir), output_file="out")
     assert not list(out_dir.glob("out_pc_sampling_*"))
     assert (out_dir / "out_agent_info.csv").exists()
+    # The skip is reported because raw samples exist.
+    assert "skipping pc_sampling_" in capsys.readouterr().err
 
 
 def test_csv_and_query_launchers_accept_decode_options(tmp_path, code_object):
@@ -1422,8 +1436,24 @@ def test_csv_and_query_launchers_accept_decode_options(tmp_path, code_object):
     )
     assert db.read_bytes() == original
 
+    # Without a flag the input stays read-only as well.
+    default_dir = tmp_path / "default"
+    run_driver(tmp_path, csv_main=["-i", str(db), "-d", str(default_dir), "-o", "out"])
+    assert db.read_bytes() == original
+
     read_write_dir = tmp_path / "rw"
-    run_driver(tmp_path, csv_main=["-i", str(db), "-d", str(read_write_dir), "-o", "out"])
+    run_driver(
+        tmp_path,
+        csv_main=[
+            "-i",
+            str(db),
+            "-d",
+            str(read_write_dir),
+            "-o",
+            "out",
+            "--cache-disassembly",
+        ],
+    )
     assert stored_disassembly(db) == [(guid, 1, 6, insn(data, 6))]
 
 
@@ -1490,6 +1520,110 @@ def test_each_pc_is_decoded_once(
                 == expected
             )
     assert counting_decoder.decodes == len(offsets)
+
+
+def test_writeback_runs_when_import_object_is_released(
+    tmp_path, fake_decoder, code_object
+):
+    import gc
+    import weakref
+
+    path, data = code_object
+    db = tmp_path / "pc.db"
+    guid = build_db(
+        db,
+        code_objects=[file_code_object(path, data)],
+        samples=[{"timestamp": 100, "offset": 6}],
+    )
+    connection = open_db([db], cache_disassembly=True)
+    finalizer = connection._writeback_finalizer
+    assert finalizer.alive
+    connection.execute("SELECT instruction FROM rocpd_gpu_pc_sample_decoded").fetchall()
+    connection.connection.close()
+    released = weakref.ref(connection)
+    del connection
+    gc.collect()
+
+    # The pending rows are persisted on release and the finalizer no longer pins them.
+    assert released() is None
+    assert not finalizer.alive
+    assert stored_disassembly(db) == [(guid, 1, 6, insn(data, 6))]
+
+
+def test_no_writeback_finalizer_without_cache(tmp_path, fake_decoder, code_object):
+    path, data = code_object
+    db = tmp_path / "pc.db"
+    build_db(db, code_objects=[file_code_object(path, data)], samples=[{"timestamp": 1}])
+    with open_db([db]) as connection:
+        assert not hasattr(connection, "_writeback_finalizer")
+
+
+def test_mixed_schema_inputs_union_by_column_name(tmp_path):
+    from rocpd.importer import _create_temp_views
+    from rocpd.schema import RocpdSchema
+
+    new_db = tmp_path / "new.db"
+    new_guid = build_db(new_db, samples=[{"timestamp": 100}])
+
+    # A 3.0.6 recording: rocpd_event has no parent_id column.
+    old_db = tmp_path / "old.db"
+    old_guid = str(uuidlib.uuid4())
+    old_uuid = "_" + old_guid.replace("-", "_")
+    with contextlib.closing(sqlite3.connect(str(old_db))) as conn:
+        RocpdSchema(uuid=old_uuid, guid=old_guid, version="3.0.6").write_schema(conn)
+        conn.execute(
+            f'INSERT INTO "rocpd_event{old_uuid}" (id, guid, correlation_id, call_stack) '
+            "VALUES (7, ?, 0, '{\"frame\": 1}')",
+            (old_guid,),
+        )
+        conn.commit()
+
+    with contextlib.closing(sqlite3.connect(":memory:")) as conn:
+        _create_temp_views(conn, [str(new_db), str(old_db)])
+        columns = [row[1] for row in conn.execute("PRAGMA table_info(rocpd_event)")]
+        assert "parent_id" in columns
+        old_row = conn.execute(
+            "SELECT parent_id, call_stack FROM rocpd_event WHERE guid = ?", (old_guid,)
+        ).fetchone()
+        # Columns line up by name: the old row has no parent and keeps its call stack.
+        assert old_row == (None, '{"frame": 1}')
+        assert (
+            conn.execute(
+                "SELECT COUNT(*) FROM rocpd_event WHERE guid = ?", (new_guid,)
+            ).fetchone()[0]
+            > 0
+        )
+
+    # Mixing versions is still rejected, but with the version error, not a SQL error.
+    with pytest.raises(ValueError, match="schema version"):
+        RocpdImportData([str(new_db), str(old_db)], skip_auto_merge=True)
+
+
+def test_query_keeps_raw_table_queries_and_rewrites_decoded_columns(tmp_path):
+    from rocpd.query import _needs_blob_view_rewrite
+
+    db = tmp_path / "pc.db"
+    build_db(db, samples=[{"timestamp": 100}])
+    with open_db([db]) as connection:
+        raw_columns = len(
+            connection.execute("SELECT * FROM rocpd_gpu_pc_sample LIMIT 0").description
+        )
+        # Valid against the raw table: keep its column set.
+        assert not _needs_blob_view_rewrite(
+            connection, "SELECT * FROM rocpd_gpu_pc_sample"
+        )
+        assert not _needs_blob_view_rewrite(
+            connection,
+            "SELECT * FROM rocpd_gpu_pc_sample UNION ALL SELECT * FROM rocpd_gpu_pc_sample",
+        )
+        assert raw_columns > 0
+        # Names a decoded column: needs the decoded view.
+        assert _needs_blob_view_rewrite(
+            connection, "SELECT instruction FROM rocpd_gpu_pc_sample"
+        )
+        assert _needs_blob_view_rewrite(
+            connection, "SELECT hw_id_wave_id FROM rocpd_gpu_pc_sample"
+        )
 
 
 def test_decoder_cache_is_bounded_by_bytes(tmp_path, monkeypatch, counting_decoder):

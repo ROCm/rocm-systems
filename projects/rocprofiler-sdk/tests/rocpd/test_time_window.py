@@ -55,8 +55,12 @@ def load_time_window_module():
             return database.executescript(statement)
         return database.execute(statement)
 
+    def quote_identifier(identifier):
+        return '"' + identifier.replace('"', '""') + '"'
+
     importer.RocpdImportData = RocpdImportData
     importer.execute_statement = execute_statement
+    importer.quote_identifier = quote_identifier
     sys.modules[package_name] = package
     sys.modules[importer.__name__] = importer
 

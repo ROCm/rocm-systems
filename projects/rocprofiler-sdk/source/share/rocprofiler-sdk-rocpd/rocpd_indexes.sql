@@ -43,3 +43,9 @@
 -- CREATE INDEX `rocpd_region{{uuid}}_pid_idx` ON `rocpd_region{{uuid}}` ("pid");
 -- CREATE INDEX `rocpd_region{{uuid}}_start_idx` ON `rocpd_region{{uuid}}` ("start");
 -- CREATE INDEX `rocpd_region{{uuid}}_end_idx` ON `rocpd_region{{uuid}}` ("end");
+
+-- PC sampling: the decoded views join every sample to its blob row on (event_id, guid) and to
+-- stored disassembly on (code_object_id, code_object_offset, guid). Without these indexes each
+-- sample row can scan the joined table.
+CREATE INDEX IF NOT EXISTS `rocpd_blob_event{{uuid}}_event_idx` ON `rocpd_blob_event{{uuid}}` ("event_id", "guid");
+CREATE INDEX IF NOT EXISTS `rocpd_disassembly_data{{uuid}}_pc_idx` ON `rocpd_disassembly_data{{uuid}}` ("code_object_id", "code_object_offset", "guid");

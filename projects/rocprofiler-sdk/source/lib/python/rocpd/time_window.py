@@ -30,7 +30,7 @@ import sys
 from argparse import ArgumentParser
 from typing import Optional, List, Tuple, Union, Any
 
-from .importer import RocpdImportData, execute_statement
+from .importer import RocpdImportData, execute_statement, quote_identifier
 
 __all__ = ["TimeWindowError", "apply_time_window", "execute", "add_args", "main"]
 
@@ -72,12 +72,6 @@ def get_marker_timestamp(
         )
 
     return int(result[0][0])
-
-
-def quote_identifier(identifier: str) -> str:
-    """Quote a SQLite identifier."""
-    escaped = identifier.replace('"', '""')
-    return f'"{escaped}"'
 
 
 def get_column_names(connection: RocpdImportData, table_name: str):

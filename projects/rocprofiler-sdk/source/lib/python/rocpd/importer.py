@@ -30,6 +30,7 @@
 import sys
 import os
 import sqlite3
+import weakref
 
 from .schema import RocpdSchema
 from . import libpyrocpd
@@ -37,6 +38,7 @@ from .features import get_supported_features_from_version
 from .pc_sampling_support import (
     add_decode_args,
     get_decode_args,
+    quote_identifier,
     setup_blob_views,
     setup_isa_decode_views,
 )
@@ -46,6 +48,7 @@ __all__ = [
     "add_decode_args",
     "get_decode_args",
     "execute_statement",
+    "quote_identifier",
     "setup_blob_views",
     "setup_isa_decode_views",
 ]
@@ -57,7 +60,7 @@ def internal_init(
     skip_auto_merge,
     automerge_limit,
     codeobj_path_prefix_map=None,
-    cache_disassembly=True,
+    cache_disassembly=False,
 ):
     from . import package
 
@@ -72,6 +75,7 @@ def internal_init(
     _connection.execute("PRAGMA foreign_keys = ON")
     _table_info = _create_temp_views(_connection, _input)
     _schema_version = libpyrocpd.schema_version(0, 0, 0)
+    _flush_writeback = None
     # When _input is empty (e.g. a missing file caused package.py to return []),
     # _create_temp_views creates no TEMP VIEWs.  Calling _create_meta_views
     # with uuid="" would then produce circularly-defined TEMP VIEWs because
@@ -79,13 +83,13 @@ def internal_init(
     # entirely; there is no data to set up views for anyway.
     if _input:
         _schema_version = _fetch_version_info(_connection)
-        _create_meta_views(
+        _flush_writeback = _create_meta_views(
             _connection,
             _schema_version,
             codeobj_path_prefix_map=codeobj_path_prefix_map,
             cache_disassembly=cache_disassembly,
         )
-    return (_connection, _input, _table_info, _schema_version)
+    return (_connection, _input, _table_info, _schema_version, _flush_writeback)
 
 
 class RocpdImportData(libpyrocpd.RocpdImportData):
@@ -97,7 +101,7 @@ class RocpdImportData(libpyrocpd.RocpdImportData):
         automerge_limit=None,
         dbname=":memory:",
         codeobj_path_prefix_map=None,
-        cache_disassembly=True,
+        cache_disassembly=False,
     ):
         from . import package
 
@@ -107,6 +111,9 @@ class RocpdImportData(libpyrocpd.RocpdImportData):
         if isinstance(input, RocpdImportData):
             super(RocpdImportData, self).__init__(input)
             self.table_info = input.table_info
+            # Shares input's connection, so keep input (and its pending disassembly
+            # write-back) alive for as long as this view of it.
+            self._source = input
         else:
 
             if isinstance(input, sqlite3.Connection):
@@ -116,7 +123,13 @@ class RocpdImportData(libpyrocpd.RocpdImportData):
             elif isinstance(input, str) or (
                 isinstance(input, list) and len(input) > 0 and isinstance(input[0], str)
             ):
-                _connection, _filenames, _table_info, _schema_version = internal_init(
+                (
+                    _connection,
+                    _filenames,
+                    _table_info,
+                    _schema_version,
+                    _flush_writeback,
+                ) = internal_init(
                     input,
                     dbname,
                     skip_auto_merge,
@@ -135,6 +148,11 @@ class RocpdImportData(libpyrocpd.RocpdImportData):
             super(RocpdImportData, self).__init__(
                 _connection, _filenames, _schema_version, _supported_features
             )
+            # Persist lazily decoded disassembly once, when this object is collected or
+            # at interpreter exit. weakref.finalize drops its reference afterwards, so
+            # the decode state does not outlive the import object.
+            if _flush_writeback is not None:
+                self._writeback_finalizer = weakref.finalize(self, _flush_writeback)
 
     def __getattr__(self, name):
         # any attribute or method not found in RocpdImportData will be looked up on self.connection
@@ -181,6 +199,16 @@ def execute_statement(conn, statement, is_script=False):
         raise err
 
 
+def _table_columns(connection, schema, table):
+    """Column names of a table or view in an attached database, in declaration order."""
+    return [
+        itr[1]
+        for itr in execute_statement(
+            connection, f"PRAGMA {schema}.table_info({quote_identifier(table)})"
+        ).fetchall()
+    ]
+
+
 def _create_temp_views(connection, input):
     """Create temporary unified views from multiple database files."""
 
@@ -205,7 +233,13 @@ def _create_temp_views(connection, input):
     # unique set of universal process identifiers
     uuids = list(set(uuids))
 
-    all_tables = {}
+    # base table name -> list of attached databases providing it, and the union of their
+    # columns in first-seen order. Inputs from different schema versions can have different
+    # column sets (e.g. rocpd_event gained parent_id in 3.1.0), so each SELECT names its
+    # columns explicitly and fills the ones a database lacks with NULL instead of relying on
+    # positional "SELECT *" unions.
+    sources = {}
+    columns = {}
     for ditr in dbinfo:
         # get the tables for the given attached database
         tables = [
@@ -227,19 +261,30 @@ def _create_temp_views(connection, input):
                 # strip the UUID suffix to create a base table name, e.g. 'rocpd_string_03daf93' -> 'rocpd_string'
                 base = itr.replace(f"{uitr}", "")
 
-                # create a list of attached databases which have the base table name
-                if base not in all_tables.keys():
-                    all_tables[base] = []
-
-                # create the SELECT statement from this database
-                select = f"SELECT * FROM {ditr}.{base}"
-
-                # make sure that we don't duplicate SELECT statements of same table from same attached database
-                if select in all_tables[base]:
+                # make sure that we don't duplicate the same table from same attached database
+                if ditr in sources.setdefault(base, []):
                     continue
 
-                # add this to list
-                all_tables[base] += [select]
+                sources[base] += [ditr]
+                base_columns = columns.setdefault(base, [])
+                for col in _table_columns(connection, ditr, base):
+                    if col not in base_columns:
+                        base_columns += [col]
+
+    all_tables = {}
+    for base, dbs in sources.items():
+        all_tables[base] = []
+        for ditr in dbs:
+            present = set(_table_columns(connection, ditr, base))
+            select_cols = ", ".join(
+                (
+                    quote_identifier(col)
+                    if col in present
+                    else f"NULL AS {quote_identifier(col)}"
+                )
+                for col in columns[base]
+            )
+            all_tables[base] += [f"SELECT {select_cols} FROM {ditr}.{base}"]
 
     # create the temporary view that is a union of all the attached databases
     for key, itr in all_tables.items():
@@ -250,7 +295,7 @@ def _create_temp_views(connection, input):
 
 
 def _create_meta_views(
-    connection, schema_version, codeobj_path_prefix_map=None, cache_disassembly=True
+    connection, schema_version, codeobj_path_prefix_map=None, cache_disassembly=False
 ):
     schema = RocpdSchema(version=str(schema_version))
     sql_script = schema.views.replace("CREATE VIEW", "CREATE TEMPORARY VIEW")
@@ -260,9 +305,10 @@ def _create_meta_views(
     # third-party input) must not make the whole database unusable, so degrade
     # gracefully: skip the decoded views while leaving the base tables and standard
     # rocpd_ views fully queryable.
+    # Returns the disassembly write-back flush callable, or None.
     try:
         setup_blob_views(connection)
-        setup_isa_decode_views(
+        return setup_isa_decode_views(
             connection,
             codeobj_path_prefix_map=codeobj_path_prefix_map,
             cache_disassembly=cache_disassembly,
@@ -271,6 +317,7 @@ def _create_meta_views(
         Exception
     ) as error:  # noqa: BLE001 - keep base views usable on decode-setup failure
         print(f"rocpd: skipping decoded blob/ISA views: {error}", file=sys.stderr)
+        return None
 
 
 def _fetch_version_info(connection):

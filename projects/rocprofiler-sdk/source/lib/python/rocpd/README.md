@@ -644,7 +644,7 @@ Purpose: One GPU PC (program counter) sample (schema 3.1.0+). Stores the sampled
 
 **rocpd_disassembly_data**
 
-Purpose: Disassembled instruction text for sampled program counters (schema 3.1.0+). Populated at collection time with --complete-isa-decode, and by default during post-processing where instructions lazily decoded from a code object whose bytes match its recorded content_hash (rocpd_info_code_object.extdata) are written back at exit (disable with --no-cache-disassembly). Rows are deduplicated per (guid, code_object_id, code_object_offset).
+Purpose: Disassembled instruction text for sampled program counters (schema 3.1.0+). Populated at collection time with --complete-isa-decode, and, with --cache-disassembly, during post-processing where instructions lazily decoded from a code object whose bytes match its recorded content_hash (rocpd_info_code_object.extdata) are written back at exit (inputs are read-only by default). Rows are deduplicated per (guid, code_object_id, code_object_offset).
 
 | Field | Meaning |
 | ----- | ------- |

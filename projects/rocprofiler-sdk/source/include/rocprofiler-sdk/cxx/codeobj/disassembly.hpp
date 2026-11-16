@@ -117,8 +117,16 @@ public:
     {
         const std::string protocol_delim{"://"};
 
-        size_t      protocol_end = m_uri.find(protocol_delim);
-        std::string protocol     = m_uri.substr(0, protocol_end);
+        size_t protocol_end = m_uri.find(protocol_delim);
+        if(protocol_end == std::string::npos)
+        {
+            // A plain filesystem path (no URI scheme): read the whole file as-is. Parsing it as
+            // a URI would drop its leading characters and treat '#'/'?' as a fragment.
+            read_file(m_uri, 0, 0);
+            return;
+        }
+
+        std::string protocol = m_uri.substr(0, protocol_end);
         protocol_end += protocol_delim.length();
 
         std::transform(protocol.begin(), protocol.end(), protocol.begin(), [](unsigned char c) {
@@ -191,8 +199,18 @@ public:
 
         if(protocol == "memory") throw std::runtime_error(protocol + " protocol not supported!");
 
-        std::ifstream file(decoded_path, std::ios::in | std::ios::binary);
-        if(!file || !file.is_open()) throw std::runtime_error("could not open " + decoded_path);
+        read_file(decoded_path, offset, size);
+    }
+
+    std::string       m_uri;
+    std::vector<char> buffer;
+
+private:
+    // Read `size` bytes at `offset` from `path` into buffer; size 0 reads to end of file.
+    void read_file(const std::string& path, size_t offset, size_t size)
+    {
+        std::ifstream file(path, std::ios::in | std::ios::binary);
+        if(!file || !file.is_open()) throw std::runtime_error("could not open " + path);
 
         if(size == 0)
         {
@@ -200,7 +218,7 @@ public:
             size_t bytes = file.gcount();
             file.clear();
 
-            if(bytes < offset) throw std::runtime_error("invalid uri " + decoded_path);
+            if(bytes < offset) throw std::runtime_error("invalid uri " + path);
 
             size = bytes - offset;
         }
@@ -209,9 +227,6 @@ public:
         buffer.resize(size);
         file.read(buffer.data(), size);
     }
-
-    std::string       m_uri;
-    std::vector<char> buffer;
 };
 
 struct SymbolInfo
