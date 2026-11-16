@@ -29,16 +29,24 @@ for itself (workstreams WS-1 and WS-2):
       vocabulary the inventory declares for itself (the ``vocabularies:`` block).
 
   merge targets
-    - a suite whose ``disposition`` proposes a move (merge_into / migrate /
-      demote / retire) must name a ``disposition_target`` of existing inventory
+    - a suite whose ``disposition`` is ``merge_into`` must name a
+      ``disposition_target``; ``migrate`` / ``demote`` / ``retire`` may omit it.
+      Any target named by a move disposition must resolve to existing inventory
       id(s); no move may name a missing or self target.
 
   coverage refs
+    - the coverage model carries its top-level identity block (``schema_version``,
+      ``component``) with the same shape the inventory requires, and every
+      inventory / axis / class id is a non-empty string before it participates
+      in duplicate or set-membership checks;
     - every ``current_inventory`` id in the coverage model resolves to an
       inventory suite id;
     - every class / pairwise axis reference is a declared ``axis.class``;
     - the model declares the required coverage dimensions (architecture,
-      capability, integration_boundary) as explicit axes.
+      capability, integration_boundary) as explicit axes;
+    - every coverage class carries a non-empty ``evidence`` list whose entries
+      are mappings with a non-empty path and claim (paths resolve on disk unless
+      marked ``external:``).
 
   evidence paths
     - every ``source.paths`` entry and every ``evidence.path`` resolves to a
@@ -97,6 +105,15 @@ REQUIRED_INVENTORY_TOP_KEYS = frozenset({
     "schema_version", "component", "source_of_truth", "vocabularies", "suites",
 })
 
+# Required top-level coverage-model keys. The coverage model carries the same
+# identity block as the inventory (schema_version, component) plus its own
+# coverage_model body; a missing or malformed identity block is a schema error
+# in its own right before any per-class check is meaningful (TEST_RESTRUCTURING.md
+# WS-2).
+REQUIRED_COVERAGE_TOP_KEYS = frozenset({
+    "schema_version", "component", "coverage_model",
+})
+
 # Vocabulary categories the inventory must declare for itself, each as a list of
 # allowed values.
 REQUIRED_VOCABULARIES = ("kind", "disposition", "gating")
@@ -131,8 +148,16 @@ REQUIRED_INCIDENT_LABELS = (
     "Current status", "Retirement condition",
 )
 
-# Dispositions that propose relocating a record; each must name a target.
+# Dispositions that may name a relocation target; when a target is present it
+# must resolve to an existing inventory id and never to the record itself.
 MOVE_DISPOSITIONS = frozenset({"merge_into", "migrate", "demote", "retire"})
+
+# Dispositions that MUST name a disposition_target. Only ``merge_into`` asserts a
+# concrete destination record that has to exist today; ``migrate`` / ``demote`` /
+# ``retire`` describe a lifecycle change whose destination may be external or not
+# yet an inventory id, so a target is optional for them (but still validated when
+# one is given).
+REQUIRE_TARGET_DISPOSITIONS = frozenset({"merge_into"})
 
 # A path value starting with this marker is a CI lane defined outside the repo
 # and is not existence-checked (TEST_RESTRUCTURING.md WS-1).
@@ -237,13 +262,21 @@ def check_inventory(inventory, component_dir):
         errors.append("inventory has no suites")
         return errors, suite_ids, incident_refs, {"records": 0, "refs": 0}
 
-    # First pass: collect ids so move-target checks can resolve forward refs.
+    # First pass: collect ids so move-target checks can resolve forward refs. An
+    # id must be a non-empty string before it can meaningfully participate in
+    # duplicate detection or forward-reference resolution; a malformed id is a
+    # schema error in its own right, so it is reported and not added to the id
+    # set.
     for suite in suites:
         sid = suite.get("id") if isinstance(suite, dict) else None
-        if sid is not None:
-            if sid in suite_ids:
-                errors.append("duplicate suite id: {!r}".format(sid))
-            suite_ids.add(sid)
+        if sid is None:
+            continue
+        if not _nonempty_str(sid):
+            errors.append("suite id must be a non-empty string: {!r}".format(sid))
+            continue
+        if sid in suite_ids:
+            errors.append("duplicate suite id: {!r}".format(sid))
+        suite_ids.add(sid)
 
     for suite in suites:
         if not isinstance(suite, dict):
@@ -277,12 +310,15 @@ def check_inventory(inventory, component_dir):
         elif "execution" in suite:
             errors.append("suite {!r} execution is not a mapping".format(sid))
 
-        # Merge / move targets.
+        # Merge / move targets. Only merge_into must name a disposition_target;
+        # the other move dispositions may omit it, but any target they do name is
+        # still resolved against the inventory.
         if disp in MOVE_DISPOSITIONS:
             target = suite.get("disposition_target")
             if target is None:
-                errors.append(
-                    "suite {!r} disposition {!r} must name disposition_target".format(sid, disp))
+                if disp in REQUIRE_TARGET_DISPOSITIONS:
+                    errors.append(
+                        "suite {!r} disposition {!r} must name disposition_target".format(sid, disp))
             else:
                 targets = target if isinstance(target, list) else [target]
                 for tid in targets:
@@ -362,6 +398,19 @@ def check_coverage_model(model, suite_ids, component_dir):
         return (["coverage model did not parse into a mapping"], incident_refs,
                 {"classes": 0, "refs": 0})
 
+    # Top-level schema: the coverage model carries the same identity block as the
+    # inventory and is validated equivalently before any per-class check runs.
+    missing_top = REQUIRED_COVERAGE_TOP_KEYS - set(model.keys())
+    if missing_top:
+        errors.append(
+            "coverage model missing top-level keys: {}".format(sorted(missing_top)))
+
+    if "schema_version" in model and not _is_scalar(model.get("schema_version")):
+        errors.append("coverage model schema_version must be a non-empty scalar")
+
+    if "component" in model and not _nonempty_str(model.get("component")):
+        errors.append("coverage model component must be a non-empty string")
+
     cm = model.get("coverage_model")
     if not isinstance(cm, dict):
         errors.append("coverage model is missing the coverage_model block")
@@ -374,6 +423,10 @@ def check_coverage_model(model, suite_ids, component_dir):
             errors.append("coverage model axis is not a mapping: {!r}".format(axis))
             continue
         axis_id = axis.get("id")
+        if not _nonempty_str(axis_id):
+            errors.append(
+                "coverage axis id must be a non-empty string: {!r}".format(axis_id))
+            continue
         declared_axis_ids.add(axis_id)
         for cls in axis.get("classes", []) or []:
             declared_axes.add("{}.{}".format(axis_id, cls))
@@ -402,9 +455,16 @@ def check_coverage_model(model, suite_ids, component_dir):
             errors.append("coverage class record is not a mapping: {!r}".format(cls))
             continue
         cid = cls.get("id", "<no-id>")
-        if cid in seen_class_ids:
+        # An id must be a non-empty string before duplicate detection or any
+        # cross-reference is meaningful; a malformed id is a schema error and is
+        # not added to the seen-id set.
+        if not _nonempty_str(cls.get("id")):
+            errors.append(
+                "coverage class id must be a non-empty string: {!r}".format(cls.get("id")))
+        elif cid in seen_class_ids:
             errors.append("duplicate coverage class id: {!r}".format(cid))
-        seen_class_ids.add(cid)
+        else:
+            seen_class_ids.add(cid)
         missing = REQUIRED_CLASS_KEYS - set(cls.keys())
         if missing:
             errors.append("class {!r} missing keys: {}".format(cid, sorted(missing)))
@@ -412,10 +472,23 @@ def check_coverage_model(model, suite_ids, component_dir):
             errors.append("class {!r} owner must be a non-empty string".format(cid))
         check_axis_refs("class {!r}".format(cid), cls.get("axes"))
         check_inventory_refs("class {!r}".format(cid), cls.get("current_inventory"))
-        for ev in cls.get("evidence", []) or []:
+        # Evidence: the list must be non-empty, and each entry must be a mapping
+        # carrying both a non-empty path and a non-empty claim; the path must
+        # resolve on disk unless marked external. Validated equivalently to the
+        # inventory suite evidence.
+        evidence = cls.get("evidence")
+        if "evidence" in cls and (not isinstance(evidence, list) or not evidence):
+            errors.append("class {!r} evidence must be a non-empty list".format(cid))
+        for ev in evidence or []:
             if not isinstance(ev, dict):
+                errors.append(
+                    "class {!r} evidence entry is not a mapping: {!r}".format(cid, ev))
                 continue
             rel = ev.get("path")
+            if not _nonempty_str(rel):
+                errors.append("class {!r} evidence entry missing a path".format(cid))
+            if not _nonempty_str(ev.get("claim")):
+                errors.append("class {!r} evidence entry missing a claim".format(cid))
             if not isinstance(rel, str) or rel.startswith(EXTERNAL_MARKER):
                 continue
             if _path_exists(component_dir, rel):

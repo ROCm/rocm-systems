@@ -317,6 +317,170 @@ class CheckTestingDocsTest(unittest.TestCase):
             msg=results["inventory"],
         )
 
+    # -- disposition targets -------------------------------------------------
+
+    def test_merge_into_requires_disposition_target(self):
+        broken = VALID_INVENTORY.replace(
+            "    disposition: keep\n", "    disposition: merge_into\n", 1)
+        _write_docs(self.root, {"test_inventory.yaml": broken})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("must name disposition_target" in err
+                for err in results["inventory"]),
+            msg=results["inventory"],
+        )
+
+    def test_merge_into_target_must_resolve(self):
+        broken = VALID_INVENTORY.replace(
+            "    disposition: keep\n",
+            "    disposition: merge_into\n    disposition_target: suite-missing\n", 1)
+        _write_docs(self.root, {"test_inventory.yaml": broken})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("is not an inventory id" in err for err in results["inventory"]),
+            msg=results["inventory"],
+        )
+
+    def test_migrate_does_not_require_disposition_target(self):
+        # migrate/demote/retire describe a lifecycle change whose destination may
+        # be external, so omitting disposition_target is not an error.
+        broken = VALID_INVENTORY.replace(
+            "  disposition: [keep, merge_into]\n",
+            "  disposition: [keep, merge_into, migrate]\n", 1).replace(
+            "    disposition: keep\n", "    disposition: migrate\n", 1)
+        _write_docs(self.root, {"test_inventory.yaml": broken})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertEqual(results["inventory"], [], msg=results["inventory"])
+
+    # -- malformed ids (non-empty-string guard) ------------------------------
+
+    def test_malformed_suite_id_is_reported(self):
+        broken = VALID_INVENTORY.replace("  - id: suite-one\n", "  - id: ''\n", 1)
+        _write_docs(self.root, {"test_inventory.yaml": broken})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("suite id must be a non-empty string" in err
+                for err in results["inventory"]),
+            msg=results["inventory"],
+        )
+
+    def test_malformed_coverage_axis_id_is_reported(self):
+        broken = VALID_COVERAGE.replace("    - id: api_surface\n", "    - id: ''\n", 1)
+        _write_docs(self.root, {"test_coverage_model.yaml": broken})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("coverage axis id must be a non-empty string" in err
+                for err in results["coverage_model"]),
+            msg=results["coverage_model"],
+        )
+
+    def test_malformed_coverage_class_id_is_reported(self):
+        broken = VALID_COVERAGE.replace("    - id: memory.basic\n", "    - id: ''\n", 1)
+        _write_docs(self.root, {"test_coverage_model.yaml": broken})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("coverage class id must be a non-empty string" in err
+                for err in results["coverage_model"]),
+            msg=results["coverage_model"],
+        )
+
+    # -- top-level coverage-model schema -------------------------------------
+
+    def test_coverage_missing_top_level_schema_version(self):
+        broken = VALID_COVERAGE.replace("schema_version: 1\n", "", 1)
+        _write_docs(self.root, {"test_coverage_model.yaml": broken})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("missing top-level keys" in err and "schema_version" in err
+                for err in results["coverage_model"]),
+            msg=results["coverage_model"],
+        )
+
+    def test_coverage_missing_top_level_component(self):
+        broken = VALID_COVERAGE.replace("component: hip-tests\n", "", 1)
+        _write_docs(self.root, {"test_coverage_model.yaml": broken})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("missing top-level keys" in err and "component" in err
+                for err in results["coverage_model"]),
+            msg=results["coverage_model"],
+        )
+
+    def test_coverage_schema_version_must_be_scalar(self):
+        broken = VALID_COVERAGE.replace(
+            "schema_version: 1\n", "schema_version: [1]\n", 1)
+        _write_docs(self.root, {"test_coverage_model.yaml": broken})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("coverage model schema_version must be a non-empty scalar" in err
+                for err in results["coverage_model"]),
+            msg=results["coverage_model"],
+        )
+
+    def test_coverage_component_not_a_string(self):
+        broken = VALID_COVERAGE.replace("component: hip-tests\n", "component: 5\n", 1)
+        _write_docs(self.root, {"test_coverage_model.yaml": broken})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("coverage model component must be a non-empty string" in err
+                for err in results["coverage_model"]),
+            msg=results["coverage_model"],
+        )
+
+    # -- coverage class evidence shapes --------------------------------------
+
+    def test_coverage_class_evidence_empty_list(self):
+        broken = VALID_COVERAGE.replace(
+            '      evidence:\n'
+            '        - path: "external: evidence-outside-repo"\n'
+            '          claim: Memory domain is built under BUILD_CONTRACT_TESTS.\n',
+            "      evidence: []\n", 1)
+        _write_docs(self.root, {"test_coverage_model.yaml": broken})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("evidence must be a non-empty list" in err
+                for err in results["coverage_model"]),
+            msg=results["coverage_model"],
+        )
+
+    def test_coverage_class_evidence_entry_not_a_mapping(self):
+        broken = VALID_COVERAGE.replace(
+            '        - path: "external: evidence-outside-repo"\n'
+            '          claim: Memory domain is built under BUILD_CONTRACT_TESTS.\n',
+            "        - not-a-mapping\n", 1)
+        _write_docs(self.root, {"test_coverage_model.yaml": broken})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("evidence entry is not a mapping" in err
+                for err in results["coverage_model"]),
+            msg=results["coverage_model"],
+        )
+
+    def test_coverage_class_evidence_entry_missing_claim(self):
+        broken = VALID_COVERAGE.replace(
+            "          claim: Memory domain is built under BUILD_CONTRACT_TESTS.\n",
+            "", 1)
+        _write_docs(self.root, {"test_coverage_model.yaml": broken})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("evidence entry missing a claim" in err
+                for err in results["coverage_model"]),
+            msg=results["coverage_model"],
+        )
+
+    def test_coverage_class_evidence_entry_missing_path(self):
+        broken = VALID_COVERAGE.replace(
+            '        - path: "external: evidence-outside-repo"\n'
+            '          claim: Memory domain is built under BUILD_CONTRACT_TESTS.\n',
+            "        - claim: A claim with no path.\n", 1)
+        _write_docs(self.root, {"test_coverage_model.yaml": broken})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("evidence entry missing a path" in err
+                for err in results["coverage_model"]),
+            msg=results["coverage_model"],
+        )
+
     # -- unknown inventory id in coverage ------------------------------------
 
     def test_unknown_inventory_id_in_coverage(self):
