@@ -17,14 +17,15 @@ namespace rocprofsys::parser
  * Reads a JSON object of parameter values grouped by category id.
  *
  * Each category value is an object whose keys are parameter ids. Environment
- * variable names are not keys. Keys that start with "_" and JSON null are
- * ignored. An unknown category, a category that is not an object, and a
- * parameter in the wrong category are errors. A JSON boolean or number that
- * matches the parameter type is stored as typed without a text round trip.
- * Other scalars are checked as text. A JSON array is accepted only for an
- * enumeration_list; join_list() joins its items as it joins the tokens of that
- * option on the command line, so the same items get the same verdict from both.
- * Values the schema rejects are reported and not stored.
+ * variable names are not keys. JSON null is ignored, and so is a key that starts
+ * with "_", such as "_comment", when it does not name a category or parameter.
+ * An unknown category, a category that is not an object, and a parameter in the
+ * wrong category are errors. A JSON boolean or number that matches the parameter
+ * type is stored as typed without a text round trip. Other scalars are checked as
+ * text. A JSON array is accepted only for an enumeration_list; join_list() joins
+ * its items as it joins the tokens of that option on the command line, so the
+ * same items get the same verdict from both. Values the schema rejects are
+ * reported and not stored.
  * catalog_document() writes this shape. It omits default_value sources and
  * parameters whose category is empty.
  */

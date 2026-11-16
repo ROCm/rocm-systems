@@ -326,6 +326,31 @@ TEST(parser_file, catalog_document_omits_defaults_and_round_trips)
     EXPECT_EQ(parsed.values.find("freq"), parsed.values.end());
 }
 
+TEST(parser_file, reads_ids_that_start_with_an_underscore)
+{
+    auto value      = make_schema();
+    auto hidden     = make_param("_hidden", param_type::integer);
+    hidden.category = "sampling";
+    auto shown      = make_param("shown", param_type::integer);
+    shown.category  = "_internal";
+    add_param(value, std::move(hidden));
+    add_param(value, std::move(shown));
+    const auto resolved = resolved_config{
+        { "_hidden",
+          resolved_value{ .value = int_value(1), .source = config_source::file } },
+        { "shown",
+          resolved_value{ .value = int_value(2), .source = config_source::file } },
+    };
+
+    auto document                 = catalog_document(value, resolved);
+    document["_comment"]          = "ignored";
+    document["sampling"]["_note"] = "ignored";
+    const auto parsed             = file_parser{}.parse(value, document);
+    EXPECT_TRUE(parsed.errors.empty());
+    EXPECT_EQ(parsed.values,
+              (typed_values_t{ { "_hidden", int_value(1) }, { "shown", int_value(2) } }));
+}
+
 TEST(parser_preset, maps_environment_settings_to_parameters)
 {
     const preset_parser::settings_t settings{ { "ROCPROFSYS_TRACE", "on" },

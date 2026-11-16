@@ -122,10 +122,12 @@ decode_value(const schema_param& param, const nlohmann::json& value)
     return { .text = scalar_text(value) };
 }
 
+/// JSON null is ignored, and so is a key that starts with "_", such as "_comment", when
+/// it does not name a category or parameter.
 [[nodiscard]] bool
-ignored_entry(std::string_view key, const nlohmann::json& value)
+ignored_entry(std::string_view key, const nlohmann::json& value, bool names_something)
 {
-    return (!key.empty() && key.front() == '_') || value.is_null();
+    return value.is_null() || (!names_something && key.starts_with('_'));
 }
 
 /// The JSON form of a stored value. A list becomes a JSON array. Parentheses are
@@ -214,8 +216,14 @@ public:
     {
         for(const auto& [key, value] : document.items())
         {
-            if(ignored_entry(key, value))
+            const bool known = known_category(m_schema, key);
+            if(ignored_entry(key, value, known))
             {
+                continue;
+            }
+            if(!known)
+            {
+                m_result.errors.push_back(fmt::format("unknown category '{}'", key));
                 continue;
             }
             read_category(key, value);
@@ -225,11 +233,6 @@ public:
 private:
     void read_category(const std::string& category_id, const nlohmann::json& value)
     {
-        if(!known_category(m_schema, category_id))
-        {
-            m_result.errors.push_back(fmt::format("unknown category '{}'", category_id));
-            return;
-        }
         if(!value.is_object())
         {
             m_result.errors.push_back(
@@ -238,30 +241,30 @@ private:
         }
         for(const auto& [key, entry] : value.items())
         {
-            if(ignored_entry(key, entry))
+            const auto* param = m_schema.find_param(key);
+            if(ignored_entry(key, entry, param != nullptr))
             {
                 continue;
             }
-            read_parameter(category_id, key, entry);
+            if(param == nullptr)
+            {
+                m_result.errors.push_back(fmt::format("unknown parameter '{}'", key));
+                continue;
+            }
+            read_parameter(category_id, *param, entry);
         }
     }
 
-    void read_parameter(std::string_view category_id, const std::string& key,
+    void read_parameter(std::string_view category_id, const schema_param& param,
                         const nlohmann::json& value)
     {
-        const auto* param = m_schema.find_param(key);
-        if(param == nullptr)
-        {
-            m_result.errors.push_back(fmt::format("unknown parameter '{}'", key));
-            return;
-        }
-        if(param->category != category_id)
+        if(param.category != category_id)
         {
             m_result.errors.push_back(fmt::format(
-                "parameter '{}' is not in category '{}'", param->id, category_id));
+                "parameter '{}' is not in category '{}'", param.id, category_id));
             return;
         }
-        store_decoded(*param, value);
+        store_decoded(param, value);
     }
 
     void store_decoded(const schema_param& param, const nlohmann::json& value)
