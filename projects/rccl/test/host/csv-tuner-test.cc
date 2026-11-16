@@ -35,6 +35,14 @@ constexpr const char* kTwoConfigCsv =
     "\n"
     "allgather,1024,4095,ring,simple,8,-1,-1\n";
 
+constexpr const char* kBoundaryAndFallbackCsv =
+    "allreduce,100,449,tree,ll128,6,2,16,-1,-1\n"
+    "allreduce,200,299,ring,ll128,5,2,16,-1,-1\n"
+    "allreduce,300,399,tree,simple,4,2,16,-1,-1\n"
+    "allreduce,400,499,ring,simple,3,2,16,-1,-1\n"
+    "allgather,500,599,ring,simple,2,2,16,-1,-1\n"
+    "reducescatter,600,699,ring,simple,1,2,16,-1,-1\n";
+
 class CsvTunerMicrotest : public ::testing::Test {
  protected:
   void SetUp() override {
@@ -272,10 +280,13 @@ TEST_F(CsvTunerMicrotest, EveryEmbeddedDataRowIsParsed) {
   }
 }
 
-TEST_F(CsvTunerMicrotest, Gfx950TwoNodeTuningBoundariesAndTopology) {
+TEST_F(CsvTunerMicrotest, FileConfigTuningBoundariesAndTopology) {
+  const std::string path = WriteTempCsv(kBoundaryAndFallbackCsv);
+  ASSERT_FALSE(path.empty());
+  SetMicroEnv("NCCL_TUNER_CONFIG_FILE", path.c_str());
   const char* source = rcclCsvTunerFindConfig("gfx950");
   ASSERT_NE(nullptr, source);
-  ASSERT_STREQ("<embedded>/rccl_tuner_gfx950.csv", source);
+  ASSERT_STREQ(path.c_str(), source);
   struct Probe {
     ncclFunc_t collective;
     size_t bytes;
@@ -284,28 +295,28 @@ TEST_F(CsvTunerMicrotest, Gfx950TwoNodeTuningBoundariesAndTopology) {
     int channels;
   };
   const Probe probes[] = {
-      {ncclFuncAllReduce, 16777215, -1, -1, 0},
-      {ncclFuncAllReduce, 16777216, NCCL_ALGO_TREE, NCCL_PROTO_LL128, 64},
-      {ncclFuncAllReduce, 33554431, NCCL_ALGO_TREE, NCCL_PROTO_LL128, 64},
-      {ncclFuncAllReduce, 33554432, NCCL_ALGO_TREE, NCCL_PROTO_LL128, 64},
-      {ncclFuncAllReduce, 54525951, NCCL_ALGO_TREE, NCCL_PROTO_LL128, 64},
-      {ncclFuncAllReduce, 54525952, NCCL_ALGO_TREE, NCCL_PROTO_LL128, 64},
-      {ncclFuncAllReduce, 117440511, NCCL_ALGO_TREE, NCCL_PROTO_LL128, 64},
-      {ncclFuncAllReduce, 117440512, NCCL_ALGO_TREE, NCCL_PROTO_LL128, 64},
-      {ncclFuncAllReduce, 150994943, NCCL_ALGO_TREE, NCCL_PROTO_LL128, 64},
-      {ncclFuncAllReduce, 150994944, NCCL_ALGO_RING, NCCL_PROTO_SIMPLE, 48},
-      {ncclFuncAllReduce, 234881024, NCCL_ALGO_RING, NCCL_PROTO_SIMPLE, 48},
-      {ncclFuncAllReduce, 234881025, -1, -1, 0},
-      {ncclFuncAllGather, 150994943, -1, -1, 0},
-      {ncclFuncAllGather, 150994944, NCCL_ALGO_RING, NCCL_PROTO_SIMPLE, 48},
-      {ncclFuncAllGather, 234881023, NCCL_ALGO_RING, NCCL_PROTO_SIMPLE, 48},
-      {ncclFuncAllGather, 234881024, -1, -1, 0},
-      {ncclFuncReduceScatter, 142606335, -1, -1, 0},
-      {ncclFuncReduceScatter, 142606336, NCCL_ALGO_RING, NCCL_PROTO_SIMPLE, 32},
-      {ncclFuncReduceScatter, 176160767, NCCL_ALGO_RING, NCCL_PROTO_SIMPLE, 32},
-      {ncclFuncReduceScatter, 176160768, -1, -1, 0},
-      {ncclFuncBroadcast, 16777216, -1, -1, 0},
-      {ncclFuncReduce, 16777216, -1, -1, 0},
+      {ncclFuncAllReduce, 99, -1, -1, 0},
+      {ncclFuncAllReduce, 100, NCCL_ALGO_TREE, NCCL_PROTO_LL128, 6},
+      {ncclFuncAllReduce, 199, NCCL_ALGO_TREE, NCCL_PROTO_LL128, 6},
+      {ncclFuncAllReduce, 200, NCCL_ALGO_TREE, NCCL_PROTO_LL128, 6},
+      {ncclFuncAllReduce, 299, NCCL_ALGO_TREE, NCCL_PROTO_LL128, 6},
+      {ncclFuncAllReduce, 300, NCCL_ALGO_TREE, NCCL_PROTO_LL128, 6},
+      {ncclFuncAllReduce, 399, NCCL_ALGO_TREE, NCCL_PROTO_LL128, 6},
+      {ncclFuncAllReduce, 400, NCCL_ALGO_TREE, NCCL_PROTO_LL128, 6},
+      {ncclFuncAllReduce, 449, NCCL_ALGO_TREE, NCCL_PROTO_LL128, 6},
+      {ncclFuncAllReduce, 450, NCCL_ALGO_RING, NCCL_PROTO_SIMPLE, 3},
+      {ncclFuncAllReduce, 499, NCCL_ALGO_RING, NCCL_PROTO_SIMPLE, 3},
+      {ncclFuncAllReduce, 500, -1, -1, 0},
+      {ncclFuncAllGather, 499, -1, -1, 0},
+      {ncclFuncAllGather, 500, NCCL_ALGO_RING, NCCL_PROTO_SIMPLE, 2},
+      {ncclFuncAllGather, 599, NCCL_ALGO_RING, NCCL_PROTO_SIMPLE, 2},
+      {ncclFuncAllGather, 600, -1, -1, 0},
+      {ncclFuncReduceScatter, 599, -1, -1, 0},
+      {ncclFuncReduceScatter, 600, NCCL_ALGO_RING, NCCL_PROTO_SIMPLE, 1},
+      {ncclFuncReduceScatter, 699, NCCL_ALGO_RING, NCCL_PROTO_SIMPLE, 1},
+      {ncclFuncReduceScatter, 700, -1, -1, 0},
+      {ncclFuncBroadcast, 100, -1, -1, 0},
+      {ncclFuncReduce, 100, -1, -1, 0},
   };
   struct Topology {
     size_t ranks;
@@ -331,22 +342,27 @@ TEST_F(CsvTunerMicrotest, Gfx950TwoNodeTuningBoundariesAndTopology) {
   }
 }
 
-TEST_F(CsvTunerMicrotest, Gfx950TwoNodeTuningPreservesUnavailableProtocolFallbacks) {
-  ASSERT_NE(nullptr, rcclCsvTunerFindConfig("gfx950"));
+TEST_F(CsvTunerMicrotest, FileConfigPreservesUnavailableProtocolFallbacks) {
+  const std::string path = WriteTempCsv(kBoundaryAndFallbackCsv);
+  ASSERT_FALSE(path.empty());
+  SetMicroEnv("NCCL_TUNER_CONFIG_FILE", path.c_str());
+  const char* source = rcclCsvTunerFindConfig("gfx950");
+  ASSERT_NE(nullptr, source);
+  ASSERT_STREQ(path.c_str(), source);
   void* context = nullptr;
   ASSERT_EQ(ncclSuccess, csvTunerInit(&context, 0, 16, 2, nullptr, nullptr, nullptr));
   ASSERT_NE(nullptr, context);
-  ExpectTuning(context, ncclFuncAllReduce, 16777216, 1, 0, -1, -1, 0,
+  ExpectTuning(context, ncclFuncAllReduce, 100, 1, 0, -1, -1, 0,
                NCCL_ALGO_TREE, NCCL_PROTO_LL128);
-  ExpectTuning(context, ncclFuncAllReduce, 33554432, 1, 0, NCCL_ALGO_RING, NCCL_PROTO_LL128, 64,
+  ExpectTuning(context, ncclFuncAllReduce, 200, 1, 0, NCCL_ALGO_RING, NCCL_PROTO_LL128, 5,
                NCCL_ALGO_TREE, NCCL_PROTO_LL128);
-  ExpectTuning(context, ncclFuncAllReduce, 54525952, 1, 0, NCCL_ALGO_TREE, NCCL_PROTO_SIMPLE, 64,
+  ExpectTuning(context, ncclFuncAllReduce, 300, 1, 0, NCCL_ALGO_TREE, NCCL_PROTO_SIMPLE, 4,
                NCCL_ALGO_TREE, NCCL_PROTO_LL128);
-  ExpectTuning(context, ncclFuncAllReduce, 117440512, 1, 0, NCCL_ALGO_RING, NCCL_PROTO_SIMPLE, 48,
+  ExpectTuning(context, ncclFuncAllReduce, 400, 1, 0, NCCL_ALGO_RING, NCCL_PROTO_SIMPLE, 3,
                NCCL_ALGO_TREE, NCCL_PROTO_LL128);
-  ExpectTuning(context, ncclFuncAllGather, 150994944, 1, 0, -1, -1, 0,
+  ExpectTuning(context, ncclFuncAllGather, 500, 1, 0, -1, -1, 0,
                NCCL_ALGO_RING, NCCL_PROTO_SIMPLE);
-  ExpectTuning(context, ncclFuncReduceScatter, 142606336, 1, 0, -1, -1, 0,
+  ExpectTuning(context, ncclFuncReduceScatter, 600, 1, 0, -1, -1, 0,
                NCCL_ALGO_RING, NCCL_PROTO_SIMPLE);
   EXPECT_EQ(ncclSuccess, csvTunerFinalize(context));
 }
