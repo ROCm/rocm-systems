@@ -146,7 +146,7 @@ class XferBuffer : public amd::EmbeddedObject {
   );
 
   //! Releases memory object used in the staging transfer
-  void Release(Memory& mem  //!< Memory object for release
+  void Release(Memory& /*mem*/  //!< Memory object for release
   ) {
     buffer_view_.updateView(nullptr, 0, 0);
   }

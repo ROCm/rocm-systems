@@ -168,7 +168,7 @@ class Memory : public device::Memory, public Resource {
   void decIndMapCount();
 
   //! Validates allocated memory for possible workarounds
-  virtual bool ValidateMemory(Resource::MemoryType memType) { return true; }
+  virtual bool ValidateMemory(Resource::MemoryType /*memType*/) { return true; }
 
  private:
   //! Disable copy constructor
