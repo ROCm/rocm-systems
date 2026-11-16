@@ -30,13 +30,16 @@ static ncclResult_t ncclReduceScatterDdaFabricLLTyped(const void* sendbuff, void
   const int nRanks = comm->nRanks;
   const size_t bytes = recvcount * sizeof(T); // per-rank shard bytes
   const size_t nPk = bytes >> 3;              // 8 payload bytes per packet
+  const int peerLanes = dda::common::ddaLLRsPeerLanes(nRanks);
 
   const unsigned threads = 256;
   int nBlocksMax = comm->ddaFabricMaxBlocks;
   if (nBlocksMax < 1) {
     nBlocksMax = 1;
   }
-  unsigned blocks = (unsigned)std::min<size_t>((nPk + threads - 1) / threads, (size_t)nBlocksMax);
+  // One thread per packet and peer lane.
+  const size_t laneThreads = nPk * (size_t)peerLanes;
+  unsigned blocks = (unsigned)std::min<size_t>((laneThreads + threads - 1) / threads, (size_t)nBlocksMax);
   if (blocks == 0) {
     blocks = 1;
   }
@@ -54,27 +57,33 @@ static ncclResult_t ncclReduceScatterDdaFabricLLTyped(const void* sendbuff, void
   // Bank 1 starts at ddaBankSize, matching the other LL tiers on this scratch.
   const size_t bankSize = dda::common::ddaBankSize(comm->ddaScratchBytes);
 
-  INFO(NCCL_COLL, "DDA fabric ReduceScatter LL: nRanks=%d shardBytes=%zu nPk=%zu grid=%u block=%u bankSize=%zu", nRanks,
-       bytes, nPk, grid.x, block.x, bankSize);
+  INFO(NCCL_COLL,
+       "DDA fabric ReduceScatter LL: nRanks=%d shardBytes=%zu nPk=%zu peerLanes=%d grid=%u block=%u bankSize=%zu",
+       nRanks, bytes, nPk, peerLanes, grid.x, block.x, bankSize);
 
   const dda::common::DdaKernelParams params{comm->abortFlagDev};
   const hipEvent_t stopEvent = rcclTakeAddonStopEvent(comm);
-  // NRANKS_CT 4/8: unrolled reduce loop; 0: runtime fallback.
+  auto launch = [&](auto kernel) {
+    hipExtLaunchKernelGGL(kernel, grid, block, 0, stream, /*startEvent=*/nullptr, stopEvent, /*flags=*/0, peers,
+                          static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff), recvcount, comm->rank, nRanks,
+                          epochDev, epochLen, bankSize, params);
+  };
+  // NRANKS_CT 4/8 unroll the reduce loop. 0 is the runtime fallback, which splits each packet's peers across peerLanes.
   switch (nRanks) {
   case 4:
-    hipExtLaunchKernelGGL((dda::common::ddaReduceScatterFabricLL<T, 4>), grid, block, 0, stream, /*startEvent=*/nullptr,
-                          stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff),
-                          recvcount, comm->rank, nRanks, epochDev, epochLen, bankSize, params);
+    launch(dda::common::ddaReduceScatterFabricLL<T, 4>);
     break;
   case 8:
-    hipExtLaunchKernelGGL((dda::common::ddaReduceScatterFabricLL<T, 8>), grid, block, 0, stream, /*startEvent=*/nullptr,
-                          stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff),
-                          recvcount, comm->rank, nRanks, epochDev, epochLen, bankSize, params);
+    launch(dda::common::ddaReduceScatterFabricLL<T, 8>);
     break;
   default:
-    hipExtLaunchKernelGGL((dda::common::ddaReduceScatterFabricLL<T, 0>), grid, block, 0, stream, /*startEvent=*/nullptr,
-                          stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff),
-                          recvcount, comm->rank, nRanks, epochDev, epochLen, bankSize, params);
+    if (peerLanes == 1) {
+      launch(dda::common::ddaReduceScatterFabricLL<T, 0, 1>);
+    } else if (peerLanes == 2) {
+      launch(dda::common::ddaReduceScatterFabricLL<T, 0, 2>);
+    } else {
+      launch(dda::common::ddaReduceScatterFabricLL<T, 0, dda::common::kDdaLLRsMaxPeerLanes>);
+    }
     break;
   }
 

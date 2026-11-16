@@ -31,9 +31,9 @@ constexpr size_t kMaxShardBytes = 1u << 20;
 // Two banks of one 1 MiB-payload slot (2 MiB of 16 B packets) per rank.
 constexpr size_t kScratchPerRank = 4u << 20;
 
-template <typename T, int N>
+template <typename T, int N, int Lanes = 1>
 const void* Kernel() {
-  return KernelPtr(&dda::common::ddaReduceScatterFabricLL<T, N>);
+  return KernelPtr(&dda::common::ddaReduceScatterFabricLL<T, N, Lanes>);
 }
 
 class DdaReduceScatterFabricLLMicrotest : public ::testing::Test {
@@ -185,12 +185,18 @@ TEST_F(DdaReduceScatterFabricLLMicrotest, Launch_TakesTheStopEventOnTheStream) {
   EXPECT_EQ(launch.flags, 0u);
 }
 
+// The runtime kernel splits each packet's peers across the fewest lanes, at most 4, that fit each lane's in one batch.
 TEST_F(DdaReduceScatterFabricLLMicrotest, Launch_FourAndEightRanksUnrolledOthersRuntime) {
   const std::pair<int, const void*> cases[] = {{4, Kernel<float, 4>()},
                                                {8, Kernel<float, 8>()},
-                                               {2, Kernel<float, 0>()},
-                                               {5, Kernel<float, 0>()},
-                                               {144, Kernel<float, 0>()}};
+                                               {2, Kernel<float, 0, 1>()},
+                                               {5, Kernel<float, 0, 1>()},
+                                               {9, Kernel<float, 0, 1>()},
+                                               {10, Kernel<float, 0, 2>()},
+                                               {17, Kernel<float, 0, 2>()},
+                                               {18, Kernel<float, 0, 4>()},
+                                               {32, Kernel<float, 0, 4>()},
+                                               {144, Kernel<float, 0, 4>()}};
   for (const auto& [nRanks, kernel] : cases) {
     comm().nRanks = nRanks;
     const DdaLaunch& launch = RunOne(4);
@@ -215,6 +221,22 @@ TEST_F(DdaReduceScatterFabricLLMicrotest, Launch_GridFollowsShardPacketsWithinCa
   EXPECT_EQ(RunOne(1u << 18).grid.x, 9u);
   comm().ddaLLEpochLen = 0;
   EXPECT_EQ(RunOne(1u << 18).grid.x, 1u);
+}
+
+// With peer lanes a block covers 256 / lanes packets: 128 at 16 ranks, 64 at 32, within the same caps.
+TEST_F(DdaReduceScatterFabricLLMicrotest, Launch_GridCountsEveryPeerLaneWithinCaps) {
+  comm().nRanks = 16;
+  EXPECT_EQ(RunOne(256).grid.x, 1u);
+  EXPECT_EQ(RunOne(260).grid.x, 2u);
+  comm().nRanks = 32;
+  EXPECT_EQ(RunOne(128).grid.x, 1u);
+  EXPECT_EQ(RunOne(132).grid.x, 2u);
+  EXPECT_EQ(RunOne(1u << 14).grid.x, 128u);
+  comm().ddaFabricMaxBlocks = 6;
+  EXPECT_EQ(RunOne(1u << 18).grid.x, 6u);
+  comm().ddaFabricMaxBlocks = 256;
+  comm().ddaLLEpochLen = 9;
+  EXPECT_EQ(RunOne(1u << 18).grid.x, 9u);
 }
 
 TEST_F(DdaReduceScatterFabricLLMicrotest, Launch_LaunchErrorIsReported) {

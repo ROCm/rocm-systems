@@ -28,12 +28,14 @@ namespace {
 using dda::common::DdaKernelParams;
 using dda::common::LLPacket16;
 
-constexpr int kRanks = 6;  // five peers: one full receive batch, then a batch with one lane in range
-constexpr int kSelf = 1;  // peers 2 to 5 fill the first batch and peer 0 wraps into the second
+constexpr int kRanks = 6;  // five peers: one runtime-kernel sweep, with slots past the end
+constexpr int kSelf = 1;  // peers 2 to 5, then peer 0, which wraps
 constexpr size_t kRecvCount = 2050;  // floats per shard; 1025 packets, so the last block is partial
 constexpr size_t kPackets = kRecvCount * sizeof(float) / 8;
 constexpr unsigned kThreads = 256;  // the production launcher's block size
 constexpr unsigned kBlocks = (kPackets + kThreads - 1) / kThreads;
+// Epoch cells for the widest grid launched here, one thread per packet and peer lane.
+constexpr unsigned kEpochCells = (kPackets * dda::common::kDdaLLRsMaxPeerLanes + kThreads - 1) / kThreads;
 constexpr uint32_t kFlag = 2;  // epoch cells start at 1, so the kernel uses flag 2 and bank 0
 constexpr float kUntouched = -1.0f;
 constexpr auto kWatchdog = std::chrono::seconds(30);
@@ -88,9 +90,9 @@ protected:
     const std::vector<float> recv(kRecvCount, kUntouched);
     HIP_CHECK(hipMalloc(&dRecv_, kRecvCount * sizeof(float)));
     HIP_CHECK(hipMemcpy(dRecv_, recv.data(), kRecvCount * sizeof(float), hipMemcpyHostToDevice));
-    const std::vector<uint32_t> epoch(kBlocks, kFlag - 1);
-    HIP_CHECK(hipMalloc(&dEpoch_, kBlocks * sizeof(uint32_t)));
-    HIP_CHECK(hipMemcpy(dEpoch_, epoch.data(), kBlocks * sizeof(uint32_t), hipMemcpyHostToDevice));
+    const std::vector<uint32_t> epoch(kEpochCells, kFlag - 1);
+    HIP_CHECK(hipMalloc(&dEpoch_, kEpochCells * sizeof(uint32_t)));
+    HIP_CHECK(hipMemcpy(dEpoch_, epoch.data(), kEpochCells * sizeof(uint32_t), hipMemcpyHostToDevice));
     HIP_CHECK(hipStreamCreateWithFlags(&stream_, hipStreamNonBlocking));
   }
 
@@ -163,6 +165,32 @@ protected:
     ASSERT_EQ(hipGetLastError(), hipSuccess);
   }
 
+  // Launches the runtime kernel with 2 or 4 peer lanes on the launcher's grid and returns its block count.
+  unsigned launchLanes(int lanes) {
+    const unsigned blocks = static_cast<unsigned>((kPackets * lanes + kThreads - 1) / kThreads);
+    if (lanes == 2) {
+      hipLaunchKernelGGL((dda::common::ddaReduceScatterFabricLL<float, 0, 2>), dim3(blocks), dim3(kThreads), 0,
+                         stream_, peers_.DevPeers<float>(), dRecv_, dSend_, kRecvCount, kSelf, kRanks, dEpoch_,
+                         static_cast<int>(blocks), dda::common::ddaLLRsBankBytes(kRanks),
+                         DdaKernelParams{peers_.AbortFlag()});
+    } else {
+      hipLaunchKernelGGL((dda::common::ddaReduceScatterFabricLL<float, 0, 4>), dim3(blocks), dim3(kThreads), 0,
+                         stream_, peers_.DevPeers<float>(), dRecv_, dSend_, kRecvCount, kSelf, kRanks, dEpoch_,
+                         static_cast<int>(blocks), dda::common::ddaLLRsBankBytes(kRanks),
+                         DdaKernelParams{peers_.AbortFlag()});
+    }
+    EXPECT_EQ(hipGetLastError(), hipSuccess);
+    return blocks;
+  }
+
+  // Clears recvbuff and rewinds every epoch cell, so the next launch uses flag 2 and bank 0 again.
+  void rewind() {
+    const std::vector<float> recv(kRecvCount, kUntouched);
+    ASSERT_EQ(hipMemcpy(dRecv_, recv.data(), kRecvCount * sizeof(float), hipMemcpyHostToDevice), hipSuccess);
+    const std::vector<uint32_t> epoch(kEpochCells, kFlag - 1);
+    ASSERT_EQ(hipMemcpy(dEpoch_, epoch.data(), kEpochCells * sizeof(uint32_t), hipMemcpyHostToDevice), hipSuccess);
+  }
+
   // Past the watchdog, raises abort and publishes every peer, so a lost wake-up or an ignored abort fails, not hangs.
   bool finishes() {
     return peers_.Finishes(
@@ -181,15 +209,15 @@ protected:
     return out;
   }
 
-  void expectEpochAdvanced() {
-    std::vector<uint32_t> epoch(kBlocks);
-    ASSERT_EQ(hipMemcpy(epoch.data(), dEpoch_, kBlocks * sizeof(uint32_t), hipMemcpyDeviceToHost), hipSuccess);
-    for (unsigned b = 0; b < kBlocks; ++b) {
+  void expectEpochAdvanced(unsigned blocks = kBlocks) {
+    std::vector<uint32_t> epoch(blocks);
+    ASSERT_EQ(hipMemcpy(epoch.data(), dEpoch_, blocks * sizeof(uint32_t), hipMemcpyDeviceToHost), hipSuccess);
+    for (unsigned b = 0; b < blocks; ++b) {
       EXPECT_EQ(epoch[b], kFlag) << "block " << b;
     }
   }
 
-  void expectReduced() {
+  void expectReduced(unsigned blocks = kBlocks) {
     const std::vector<float> out = recv();
     for (size_t i = 0; i < kRecvCount; ++i) {
       float want = sendValue(kSelf, i);
@@ -206,7 +234,7 @@ protected:
         ASSERT_EQ(w[2], bitsOf(sendValue(peer, 2 * pk + 1))) << "peer " << peer << " packet " << pk;
       }
     }
-    expectEpochAdvanced();
+    expectEpochAdvanced(blocks);
   }
 
   DdaLLHostPeers peers_;
@@ -241,16 +269,16 @@ TEST_F(DdaReduceScatterFabricLL, LateLinesAreReReadUntilFresh) {
   // Every first read has returned stale lines by now, so only a real re-read can see what is published next.
   std::this_thread::sleep_for(kSettle);
   ASSERT_EQ(hipStreamQuery(stream_), hipErrorNotReady) << "kernel finished on stale lines";
-  // The first batch gets three of its four peers, so each pass sees fresh lines next to a stale one.
+  // Three of the five peers land, so each sweep sees fresh lines next to stale ones.
   for (int r = 1; r < 4; ++r) {
     publishPeer((kSelf + r) % kRanks);
   }
   std::this_thread::sleep_for(kSettle);
-  ASSERT_EQ(hipStreamQuery(stream_), hipErrorNotReady) << "kernel finished with the first batch still stale";
-  // Completing the first batch moves every thread on to re-read the second batch, whose only peer is still stale.
+  ASSERT_EQ(hipStreamQuery(stream_), hipErrorNotReady) << "kernel finished with two peers still stale";
+  // The stale line each thread spun on lands, so the next sweep finds the last peer still stale.
   publishPeer((kSelf + 4) % kRanks);
   std::this_thread::sleep_for(kSettle);
-  ASSERT_EQ(hipStreamQuery(stream_), hipErrorNotReady) << "kernel finished with the second batch still stale";
+  ASSERT_EQ(hipStreamQuery(stream_), hipErrorNotReady) << "kernel finished with the last peer still stale";
   publishPeer((kSelf + 5) % kRanks);
   ASSERT_TRUE(finishes()) << "kernel never saw the late lines";
   expectReduced();
@@ -273,6 +301,37 @@ TEST_F(DdaReduceScatterFabricLL, TornLineWithOnlyFirstHalfFreshIsReRead) {
 
 TEST_F(DdaReduceScatterFabricLL, TornLineWithOnlySecondHalfFreshIsReRead) {
   checkTornLineWaits(1);
+}
+
+// Two or four lanes per packet each fold a subset of the five peers, and the subsets are added across lanes.
+TEST_F(DdaReduceScatterFabricLL, PeerLanesAddTheirSubsetsAcrossLanes) {
+  for (int r = 1; r < kRanks; ++r) {
+    publishPeer((kSelf + r) % kRanks);
+  }
+  for (const int lanes : {2, 4}) {
+    rewind();
+    const unsigned blocks = launchLanes(lanes);
+    ASSERT_TRUE(finishes()) << "kernel did not finish with " << lanes << " peer lanes";
+    expectReduced(blocks);
+  }
+}
+
+// With four lanes subset 0 holds offsets 1 and 5, so when offset 5 lands last the other subsets wait at the add.
+TEST_F(DdaReduceScatterFabricLL, PeerLanesWaitForTheLastSubset) {
+  const int last = (kSelf + 5) % kRanks;
+  for (int r = 1; r < 5; ++r) {
+    publishPeer((kSelf + r) % kRanks);
+  }
+  const unsigned blocks = launchLanes(4);
+  const auto deadline = std::chrono::steady_clock::now() + kWatchdog;
+  while (!phase1Done() && std::chrono::steady_clock::now() < deadline) {
+    std::this_thread::yield();
+  }
+  std::this_thread::sleep_for(kSettle);
+  ASSERT_EQ(hipStreamQuery(stream_), hipErrorNotReady) << "kernel finished before subset 0's last peer landed";
+  publishPeer(last);
+  ASSERT_TRUE(finishes()) << "kernel never saw subset 0's last peer";
+  expectReduced(blocks);
 }
 
 // The gfx1250 send prefetch is non-speculative, so a line past sendbuff in an unmapped page would raise a VM fault.

@@ -53,8 +53,21 @@ constexpr size_t ddaLLRsBankOffsetPkts(uint32_t flag, size_t bankSize) {
 // the temporary values.
 constexpr int kDdaLLRsRecvBatch = 4;
 
+// Consecutive threads that share packets between peer lanes. A span lies inside one wave for wave32 and wave64.
+constexpr int kDdaLLRsSpanLanes = 32;
+
+// Most lanes one packet's peers are split across. A lane then covers 32 / 4 consecutive packets of a peer's slot, one
+// whole 128B line per store or read.
+constexpr int kDdaLLRsMaxPeerLanes = 4;
+
+// Lanes a packet's peers are split across on nRanks ranks: the fewest that fit every lane's peers in one batch, at most
+// kDdaLLRsMaxPeerLanes.
+constexpr int ddaLLRsPeerLanes(int nRanks) {
+  return nRanks - 1 <= kDdaLLPeerBatch ? 1 : nRanks - 1 <= 2 * kDdaLLPeerBatch ? 2 : kDdaLLRsMaxPeerLanes;
+}
+
 // LL reduce-scatter kernel. 1D grid over packets (8B payload each) of the
-// per-rank shard (recvcount elements).
+// per-rank shard (recvcount elements), kPeerLanes threads per packet.
 //
 // Phase 1 (scatter): rank selfRank writes its chunk-for-peer (sendbuff[peer])
 // into peer's scratch at slot selfRank, as LL lines carrying the epoch flag.
@@ -62,7 +75,10 @@ constexpr int kDdaLLRsRecvBatch = 4;
 // (sendbuff[selfRank]), polls its own scratch slot for each other rank (waiting
 // on the flag), and sums those into recvbuff. Flag polling provides cross-rank
 // ordering, so no GPU barrier is used. Scratch is double-buffered: bank = flag & 1.
-template <typename T, int NRANKS_CT>
+//
+// With kPeerLanes > 1 a packet's peers are split across lanes, subset s taking those s + 1, s + 1 + kPeerLanes, ...
+// past selfRank, and the subsets' sums are added across lanes, so a lane walks (nRanks - 1) / kPeerLanes of them.
+template <typename T, int NRANKS_CT, int kPeerLanes = 1>
 #if defined(USE_ROCM)
 __launch_bounds__(512)
 #endif
@@ -75,6 +91,10 @@ __launch_bounds__(512)
                                            int epochLen, // number of cells in epochDev
                                            size_t bankSize, // scratch bank size (from host)
                                            DdaKernelParams params) {
+  static_assert(kPeerLanes == 1 || kPeerLanes == 2 || kPeerLanes == kDdaLLRsMaxPeerLanes, "1, 2 or 4 peer lanes");
+  static_assert(NRANKS_CT == 0 || kPeerLanes == ddaLLRsPeerLanes(NRANKS_CT), "lanes follow the rank count");
+  constexpr bool kStaticRanks = NRANKS_CT != 0;
+  constexpr int kSpanPkts = kDdaLLRsSpanLanes / kPeerLanes;
 
   const int nRanks = NRANKS_CT ? NRANKS_CT : nRanksRt;
   const size_t bytes = recvcount * sizeof(T);
@@ -82,11 +102,24 @@ __launch_bounds__(512)
   const size_t slot = kDdaLLRsSlotStridePkts;
   const size_t chunkWords = nPk * 2; // uint32 words per shard chunk
 
+  const size_t gtid = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+  const int lane = (int)(threadIdx.x % kDdaLLRsSpanLanes);
+  const int sub = kPeerLanes == 1 ? 0 : lane / kSpanPkts;
+  const size_t pk0 = (gtid - lane) / kPeerLanes + lane % kSpanPkts;
+  const size_t stride = (size_t)gridDim.x * blockDim.x / kPeerLanes;
+  // Peers of this lane's subset. The j-th sits sub + 1 + j * kPeerLanes past selfRank.
+  const int nSub = (nRanks - 1 - sub + kPeerLanes - 1) / kPeerLanes;
+  auto peerAt = [&](int j) {
+    const int p = selfRank + sub + 1 + j * kPeerLanes;
+    return p < nRanks ? p : p - nRanks;
+  };
+
 #if (defined(__gfx1250__) || defined(__gfx1250_strict__)) && __has_builtin(__builtin_amdgcn_global_prefetch)
-  // Prefetch the send chunks into L2 before the epoch barrier, one 128B line per 16 lanes; th 1 walks page tables.
-  if ((threadIdx.x & 15) == 0 && (size_t)blockIdx.x * blockDim.x + threadIdx.x < nPk) {
-    const char* base = reinterpret_cast<const char*>(sendbuff) + ((size_t)blockIdx.x * blockDim.x + threadIdx.x) * 8;
-    for (int r = 0; r < nRanks; ++r) {
+  // Prefetch the send chunks into L2 before the epoch barrier, one 128B line per 16 packets split across the subsets.
+  // th 1 walks page tables.
+  if ((pk0 & 15) == 0 && pk0 < nPk) {
+    const char* base = reinterpret_cast<const char*>(sendbuff) + pk0 * 8;
+    for (int r = sub; r < nRanks; r += kPeerLanes) {
       __builtin_amdgcn_global_prefetch((const __attribute__((address_space(1))) void*)(base + (size_t)r * bytes), 0x11);
     }
   }
@@ -94,112 +127,147 @@ __launch_bounds__(512)
   const uint32_t flag = ddaGetLLEpochInc(epochDev, blockIdx.x, 1);
   const size_t bankOffsetPkts = ddaLLRsBankOffsetPkts(flag, bankSize);
 
-  const size_t gtid = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
-  const size_t stride = (size_t)gridDim.x * blockDim.x;
-
   const uint32_t* in = reinterpret_cast<const uint32_t*>(sendbuff);
   uint32_t* out = reinterpret_cast<uint32_t*>(recvbuff);
 
-  // Phase 1: scatter sendbuff[peer] into peer's slot[self]. Gather loads before stores.
-  for (size_t pk = gtid; pk < nPk; pk += stride) {
-    for (int base = 1; base < nRanks; base += kDdaLLPeerBatch) {
+  // Phase 1: scatter sendbuff[peer] into peer's slot[self]. A batch reads its payloads and destinations before its
+  // first store: every store ends with a compiler memory barrier, so a destination read after one waits by itself.
+  for (size_t pk = pk0; pk < nPk; pk += stride) {
+    for (int base = 0; base < nSub; base += kDdaLLPeerBatch) {
       uint32_t d0[kDdaLLPeerBatch], d1[kDdaLLPeerBatch];
+      LLPacket16* dst[kDdaLLPeerBatch];
 #pragma unroll
       for (int i = 0; i < kDdaLLPeerBatch; ++i) {
-        const int r = base + i;
-        if (r < nRanks) {
-          const int peer = (selfRank + r) % nRanks;
-          const uint32_t* inPeer = in + (size_t)peer * chunkWords;
-          d0[i] = inPeer[2 * pk];
-          d1[i] = inPeer[2 * pk + 1];
+        if (kStaticRanks && base + i >= nSub) {
+          continue;
         }
+        // A runtime count reads slots past the end from the batch's first peer, so no read sits under a branch.
+        const int peer = peerAt(base + i < nSub ? base + i : base);
+        const uint32_t* inPeer = in + (size_t)peer * chunkWords;
+        d0[i] = inPeer[2 * pk];
+        d1[i] = inPeer[2 * pk + 1];
+        dst[i] = reinterpret_cast<LLPacket16*>(peerScratch[peer]) + bankOffsetPkts + (size_t)selfRank * slot;
       }
 #pragma unroll
       for (int i = 0; i < kDdaLLPeerBatch; ++i) {
-        const int r = base + i;
-        if (r < nRanks) {
-          const int peer = (selfRank + r) % nRanks;
-          LLPacket16* dst = reinterpret_cast<LLPacket16*>(peerScratch[peer]) + bankOffsetPkts + (size_t)selfRank * slot;
-          ddaLLStoreLineB128(reinterpret_cast<uint32_t*>(&dst[pk]), d0[i], flag, d1[i], flag);
+        if (base + i < nSub) {
+          ddaLLStoreLineB128(reinterpret_cast<uint32_t*>(&dst[i][pk]), d0[i], flag, d1[i], flag);
         }
       }
     }
   }
 
   // Phase 2: seed with my self-chunk, poll my slots for the others, reduce.
-  // Each pass issues every read of a peer group before any flag is tested, so
-  // those remote reads stay in flight together. The group is read again until
-  // every line is fresh.
   const uint32_t* inSelf = in + (size_t)selfRank * chunkWords;
   LLPacket16* myBase = reinterpret_cast<LLPacket16*>(peerScratch[selfRank]) + bankOffsetPkts;
-  for (size_t pk = gtid; pk < nPk; pk += stride) {
-    uint32_t acc0 = inSelf[2 * pk];
-    uint32_t acc1 = inSelf[2 * pk + 1];
-    for (int base = 1; base < nRanks; base += kDdaLLRsRecvBatch) {
-      uint32_t d0[kDdaLLRsRecvBatch], f0[kDdaLLRsRecvBatch];
-      uint32_t d1[kDdaLLRsRecvBatch], f1[kDdaLLRsRecvBatch];
-      // Read the batch until every line is fresh; the first pass is the first read, each pass one abort spin tick.
-      int spins = 0;
-      while (true) {
-        // Each pass reads every line, sharing one wait; a fresh line cannot change before this call ends.
+  for (size_t pk = pk0; pk < nPk; pk += stride) {
+    // Only subset 0 seeds with the self-chunk, so the sum across subsets counts it once.
+    const uint32_t self0 = inSelf[2 * pk];
+    const uint32_t self1 = inSelf[2 * pk + 1];
+    uint32_t acc0 = sub == 0 ? self0 : 0u;
+    uint32_t acc1 = sub == 0 ? self1 : 0u;
+    if constexpr (kStaticRanks) {
+      // Each pass issues every read of a peer group before any flag is tested, so
+      // those remote reads stay in flight together. The group is read again until
+      // every line is fresh.
+      for (int base = 0; base < nSub; base += kDdaLLRsRecvBatch) {
+        uint32_t d0[kDdaLLRsRecvBatch], f0[kDdaLLRsRecvBatch];
+        uint32_t d1[kDdaLLRsRecvBatch], f1[kDdaLLRsRecvBatch];
+        // Read the batch until every line is fresh; the first pass is the first read, each pass one abort spin tick.
+        int spins = 0;
+        while (true) {
+          // Each pass reads every line, sharing one wait; a fresh line cannot change before this call ends.
 #if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
-        asm volatile("" ::: "memory");
-        v4u got[kDdaLLRsRecvBatch];
+          asm volatile("" ::: "memory");
+          v4u got[kDdaLLRsRecvBatch];
 #pragma unroll
-        for (int i = 0; i < kDdaLLRsRecvBatch; ++i) {
-          if (base + i < nRanks) {
-            const int peer = (selfRank + base + i) % nRanks;
-            const uint32_t* src = reinterpret_cast<const uint32_t*>(myBase + (size_t)peer * slot + pk);
-            got[i] = __builtin_amdgcn_global_load_b128((v4u_gptr)src, RCCL_SYSTEM_SYNCSCOPE);
+          for (int i = 0; i < kDdaLLRsRecvBatch; ++i) {
+            if (base + i < nSub) {
+              const uint32_t* src = reinterpret_cast<const uint32_t*>(myBase + (size_t)peerAt(base + i) * slot + pk);
+              got[i] = __builtin_amdgcn_global_load_b128((v4u_gptr)src, RCCL_SYSTEM_SYNCSCOPE);
+            }
           }
-        }
-        // Keep every load above this point so the flag tests cannot sink one between them.
-        asm volatile("" ::: "memory");
+          // Keep every load above this point so the flag tests cannot sink one between them.
+          asm volatile("" ::: "memory");
 #pragma unroll
-        for (int i = 0; i < kDdaLLRsRecvBatch; ++i) {
-          if (base + i < nRanks) {
-            d0[i] = got[i][0];
-            f0[i] = got[i][1];
-            d1[i] = got[i][2];
-            f1[i] = got[i][3];
+          for (int i = 0; i < kDdaLLRsRecvBatch; ++i) {
+            if (base + i < nSub) {
+              d0[i] = got[i][0];
+              f0[i] = got[i][1];
+              d1[i] = got[i][2];
+              f1[i] = got[i][3];
+            }
           }
-        }
 #else
 #pragma unroll
-        for (int i = 0; i < kDdaLLRsRecvBatch; ++i) {
-          if (base + i < nRanks) {
-            const int peer = (selfRank + base + i) % nRanks;
-            const uint32_t* src = reinterpret_cast<const uint32_t*>(myBase + (size_t)peer * slot + pk);
-            ddaLLLoadLineB128(src, d0[i], f0[i], d1[i], f1[i]);
+          for (int i = 0; i < kDdaLLRsRecvBatch; ++i) {
+            if (base + i < nSub) {
+              const uint32_t* src = reinterpret_cast<const uint32_t*>(myBase + (size_t)peerAt(base + i) * slot + pk);
+              ddaLLLoadLineB128(src, d0[i], f0[i], d1[i], f1[i]);
+            }
+          }
+          // Keep every load above this point so none sinks past the flag tests or out of the loop.
+          asm volatile("" ::: "memory");
+#endif
+          bool fresh = true;
+#pragma unroll
+          for (int i = 0; i < kDdaLLRsRecvBatch; ++i) {
+            if (base + i < nSub && (f0[i] != flag || f1[i] != flag)) {
+              fresh = false;
+            }
+          }
+          if (fresh) {
+            break;
+          }
+          if (params.abortSpinTick(spins)) {
+            ddaSetLLEpoch(epochDev, epochLen, blockIdx.x, gridDim.x, flag);
+            return;
           }
         }
-        // Keep every load above this point so none sinks past the flag tests or out of the loop.
-        asm volatile("" ::: "memory");
-#endif
-        bool fresh = true;
 #pragma unroll
         for (int i = 0; i < kDdaLLRsRecvBatch; ++i) {
-          if (base + i < nRanks && (f0[i] != flag || f1[i] != flag)) {
-            fresh = false;
+          if (base + i < nSub) {
+            ddaLLAddPayload<T>(acc0, acc1, d0[i], d1[i]);
           }
         }
-        if (fresh) {
-          break;
+      }
+    } else {
+      // One sweep reads up to a send batch of this lane's lines, a slot past the end rereading the first, so no read
+      // sits under a branch. Between sweeps a lane spins on one stale line.
+      for (int base = 0; base < nSub; base += kDdaLLPeerBatch) {
+        const int live = nSub - base < kDdaLLPeerBatch ? nSub - base : kDdaLLPeerBatch;
+        const uint32_t* line[kDdaLLPeerBatch];
+        uint32_t d0[kDdaLLPeerBatch], d1[kDdaLLPeerBatch];
+#pragma unroll
+        for (int i = 0; i < kDdaLLPeerBatch; ++i) {
+          line[i] = reinterpret_cast<const uint32_t*>(myBase + (size_t)peerAt(i < live ? base + i : base) * slot + pk);
         }
-        if (params.abortSpinTick(spins)) {
+        if (!ddaLLWaitLineFlagsBatched<kDdaLLPeerBatch>(line, (1u << live) - 1u, flag, params, d0, d1)) {
           ddaSetLLEpoch(epochDev, epochLen, blockIdx.x, gridDim.x, flag);
           return;
         }
-      }
 #pragma unroll
-      for (int i = 0; i < kDdaLLRsRecvBatch; ++i) {
-        if (base + i < nRanks) {
-          ddaLLAddPayload<T>(acc0, acc1, d0[i], d1[i]);
+        for (int i = 0; i < kDdaLLPeerBatch; ++i) {
+          if (i < live) {
+            ddaLLAddPayload<T>(acc0, acc1, d0[i], d1[i]);
+          }
         }
       }
     }
-    out[2 * pk] = acc0;
-    out[2 * pk + 1] = acc1;
+    if constexpr (kPeerLanes > 1) {
+      // A packet's subsets sit kSpanPkts lanes apart, so adding the partner's sum at each stride leaves subset 0 with
+      // the packet's total, in a fixed order.
+#pragma unroll
+      for (int m = kSpanPkts; m < kDdaLLRsSpanLanes; m *= 2) {
+        const uint32_t o0 = __shfl_xor(acc0, m);
+        const uint32_t o1 = __shfl_xor(acc1, m);
+        ddaLLAddPayload<T>(acc0, acc1, o0, o1);
+      }
+    }
+    if (sub == 0) {
+      out[2 * pk] = acc0;
+      out[2 * pk + 1] = acc1;
+    }
   }
 
   ddaSetLLEpoch(epochDev, epochLen, blockIdx.x, gridDim.x, flag);
