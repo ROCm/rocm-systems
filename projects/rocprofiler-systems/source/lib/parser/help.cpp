@@ -48,6 +48,10 @@ append_usage(std::ostream& out, const schema_param& param)
     if(param.arg)
     {
         out << *param.arg;
+        for(const auto& alias : param.arg_aliases)
+        {
+            out << ", " << alias;
+        }
         if(!param.flag)
         {
             out << " <value>";
@@ -60,20 +64,20 @@ append_usage(std::ostream& out, const schema_param& param)
     out << '\n';
 }
 
+/// The row's own choices, then the names its registered backend lists, the names
+/// backend_interface::accepts() checks a value against.
 std::vector<std::string>
 choice_names(const schema_param& param, const backend_registry* backends)
 {
-    if(!param.choices.empty() || backends == nullptr || !param.backend ||
-       param.backend->empty())
+    auto        names = param.choices;
+    const auto* found =
+        backends == nullptr || !param.backend ? nullptr : backends->find(*param.backend);
+    if(found != nullptr)
     {
-        return param.choices;
+        const auto listed = found->choices(param);
+        names.insert(names.end(), listed.begin(), listed.end());
     }
-    const auto* found = backends->find(*param.backend);
-    if(found == nullptr)
-    {
-        return param.choices;
-    }
-    return found->choices(param);
+    return names;
 }
 
 void
@@ -131,8 +135,7 @@ format_help(const schema& config_schema, param_level max_level, std::string_view
             const backend_registry* backends)
 {
     std::ostringstream out;
-    out << "ROCm Systems Profiler options\n\n";
-    auto matched = topic.empty();
+    auto               matched = topic.empty();
     for(const auto& category : category_order(config_schema))
     {
         if(!topic.empty() && topic != category)

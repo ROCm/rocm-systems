@@ -549,6 +549,48 @@ TEST(parser_configuration, help_shows_backend_choices_and_a_category_word)
     EXPECT_EQ(help.find("--orphan <value>"), std::string::npos);
 }
 
+TEST(parser_configuration, help_starts_with_the_first_category)
+{
+    const auto help = make_parser().render_help();
+    EXPECT_EQ(help.rfind("configuration\n", 0), 0U) << help;
+}
+
+TEST(parser_configuration, help_lists_arg_aliases)
+{
+    schema catalog{};
+    auto   format      = named("output_format", param_type::enumeration);
+    format.category    = "output";
+    format.arg         = "--output-format";
+    format.arg_aliases = { "-f" };
+    format.choices     = { "pftrace", "proto" };
+    ASSERT_TRUE(catalog.add_param(std::move(format)));
+    configuration_parser parser;
+    ASSERT_TRUE(parser.initialize(std::move(catalog))) << parser.failure();
+
+    const auto help = parser.render_help();
+    EXPECT_NE(help.find("  --output-format, -f <value>\n"), std::string::npos) << help;
+    EXPECT_NE(help.find("choices: pftrace proto\n"), std::string::npos) << help;
+}
+
+TEST(parser_configuration, help_lists_a_rows_choices_then_its_backends)
+{
+    auto catalog = letter_schema();
+    auto all     = named("letters_or_all", param_type::enumeration);
+    all.category = "demo";
+    all.arg      = "--letters-or-all";
+    all.backend  = "letters";
+    all.choices  = { "all" };
+    add_param(catalog, std::move(all));
+    configuration_parser parser;
+    ASSERT_TRUE(parser.initialize(std::move(catalog))) << parser.failure();
+    ASSERT_TRUE(parser.add_backend(std::make_unique<letter_backend>()));
+
+    const auto help = parser.render_help();
+    EXPECT_NE(help.find("choices: all alpha beta\n"), std::string::npos) << help;
+    EXPECT_TRUE(parser.parse({ "--letters-or-all", "all" }).contains("letters_or_all"));
+    EXPECT_TRUE(parser.errors().empty());
+}
+
 TEST(parser_configuration, reads_argc_and_reports_an_uninitialized_parser)
 {
     configuration_parser bare;
