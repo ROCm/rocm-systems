@@ -10,11 +10,14 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/encodings.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/operand.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna4/isa.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/image_address.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/image_address_instruction.h"
 
 namespace rocjitsu {
 namespace rdna4 {
 
-class ImageMsaaLoadVsample : public Vsample {
+class ImageMsaaLoadVsample
+    : public amdgpu::ImageAddressInstruction<Vsample, false, amdgpu::ImageAddressForm{}> {
 public:
   ImageMsaaLoadVsample(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
@@ -27,6 +30,20 @@ class ImageSampleVsample : public Vsample {
 public:
   ImageSampleVsample(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.image_address = &vaddr;
+    modifiers.image_coordinates = amdgpu::gfx12_image_address_registers(inst_);
+    modifiers.image_a16 = inst_.a16;
+    modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 0;
+    if (inst_.d16)
+      modifiers.set_packed_image_result(std::popcount(uint32_t{inst_.dmask}),
+                                        vdata.size_bits() / 32);
+  }
+  bool should_print_src_operand(uint8_t operand_index) const override;
+  void append_src_operand(std::string &out, uint8_t operand_index) const override;
+  void implicit_uses(RegisterSet &uses) const override;
+  bool implicit_preservation_uses(RegisterSet &uses) const override;
+  bool tracks_explicit_source(uint8_t operand_index) const override;
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -37,6 +54,21 @@ class ImageSampleDVsample : public Vsample {
 public:
   ImageSampleDVsample(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.image_address = &vaddr;
+    modifiers.image_coordinates = amdgpu::gfx12_image_address_registers(inst_);
+    modifiers.image_a16 = inst_.a16;
+    modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 0;
+    modifiers.image_prefix_words = 2 * amdgpu::image_derivative_component_count(inst_.dim);
+    if (inst_.d16)
+      modifiers.set_packed_image_result(std::popcount(uint32_t{inst_.dmask}),
+                                        vdata.size_bits() / 32);
+  }
+  bool should_print_src_operand(uint8_t operand_index) const override;
+  void append_src_operand(std::string &out, uint8_t operand_index) const override;
+  void implicit_uses(RegisterSet &uses) const override;
+  bool implicit_preservation_uses(RegisterSet &uses) const override;
+  bool tracks_explicit_source(uint8_t operand_index) const override;
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -47,13 +79,29 @@ class ImageSampleLVsample : public Vsample {
 public:
   ImageSampleLVsample(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.image_address = &vaddr;
+    modifiers.image_coordinates = amdgpu::gfx12_image_address_registers(inst_);
+    modifiers.image_a16 = inst_.a16;
+    modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 1;
+    if (inst_.d16)
+      modifiers.set_packed_image_result(std::popcount(uint32_t{inst_.dmask}),
+                                        vdata.size_bits() / 32);
+  }
+  bool should_print_src_operand(uint8_t operand_index) const override;
+  void append_src_operand(std::string &out, uint8_t operand_index) const override;
+  void implicit_uses(RegisterSet &uses) const override;
+  bool implicit_preservation_uses(RegisterSet &uses) const override;
+  bool tracks_explicit_source(uint8_t operand_index) const override;
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
   Operand samp;
 };
 
-class ImageSampleBVsample : public Vsample {
+class ImageSampleBVsample
+    : public amdgpu::ImageAddressInstruction<
+          Vsample, false, amdgpu::ImageAddressForm{.extra_words = 1, .sample_result = true}> {
 public:
   ImageSampleBVsample(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
@@ -67,13 +115,29 @@ class ImageSampleLzVsample : public Vsample {
 public:
   ImageSampleLzVsample(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.image_address = &vaddr;
+    modifiers.image_coordinates = amdgpu::gfx12_image_address_registers(inst_);
+    modifiers.image_a16 = inst_.a16;
+    modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 0;
+    if (inst_.d16)
+      modifiers.set_packed_image_result(std::popcount(uint32_t{inst_.dmask}),
+                                        vdata.size_bits() / 32);
+  }
+  bool should_print_src_operand(uint8_t operand_index) const override;
+  void append_src_operand(std::string &out, uint8_t operand_index) const override;
+  void implicit_uses(RegisterSet &uses) const override;
+  bool implicit_preservation_uses(RegisterSet &uses) const override;
+  bool tracks_explicit_source(uint8_t operand_index) const override;
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
   Operand samp;
 };
 
-class ImageSampleCVsample : public Vsample {
+class ImageSampleCVsample
+    : public amdgpu::ImageAddressInstruction<
+          Vsample, false, amdgpu::ImageAddressForm{.extra_words = 1, .sample_result = true}> {
 public:
   ImageSampleCVsample(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
@@ -83,7 +147,10 @@ public:
   Operand samp;
 };
 
-class ImageSampleCDVsample : public Vsample {
+class ImageSampleCDVsample
+    : public amdgpu::ImageAddressInstruction<
+          Vsample, false,
+          amdgpu::ImageAddressForm{.extra_words = 1, .gradients = true, .sample_result = true}> {
 public:
   ImageSampleCDVsample(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
@@ -93,7 +160,10 @@ public:
   Operand samp;
 };
 
-class ImageSampleCLVsample : public Vsample {
+class ImageSampleCLVsample
+    : public amdgpu::ImageAddressInstruction<
+          Vsample, false,
+          amdgpu::ImageAddressForm{.extra_words = 1, .lod = true, .sample_result = true}> {
 public:
   ImageSampleCLVsample(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
@@ -103,7 +173,9 @@ public:
   Operand samp;
 };
 
-class ImageSampleCBVsample : public Vsample {
+class ImageSampleCBVsample
+    : public amdgpu::ImageAddressInstruction<
+          Vsample, false, amdgpu::ImageAddressForm{.extra_words = 2, .sample_result = true}> {
 public:
   ImageSampleCBVsample(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
@@ -113,7 +185,9 @@ public:
   Operand samp;
 };
 
-class ImageSampleCLzVsample : public Vsample {
+class ImageSampleCLzVsample
+    : public amdgpu::ImageAddressInstruction<
+          Vsample, false, amdgpu::ImageAddressForm{.extra_words = 1, .sample_result = true}> {
 public:
   ImageSampleCLzVsample(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
@@ -123,7 +197,9 @@ public:
   Operand samp;
 };
 
-class ImageSampleOVsample : public Vsample {
+class ImageSampleOVsample
+    : public amdgpu::ImageAddressInstruction<
+          Vsample, false, amdgpu::ImageAddressForm{.extra_words = 1, .sample_result = true}> {
 public:
   ImageSampleOVsample(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
@@ -133,7 +209,10 @@ public:
   Operand samp;
 };
 
-class ImageSampleDOVsample : public Vsample {
+class ImageSampleDOVsample
+    : public amdgpu::ImageAddressInstruction<
+          Vsample, false,
+          amdgpu::ImageAddressForm{.extra_words = 1, .gradients = true, .sample_result = true}> {
 public:
   ImageSampleDOVsample(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
@@ -143,7 +222,10 @@ public:
   Operand samp;
 };
 
-class ImageSampleLOVsample : public Vsample {
+class ImageSampleLOVsample
+    : public amdgpu::ImageAddressInstruction<
+          Vsample, false,
+          amdgpu::ImageAddressForm{.extra_words = 1, .lod = true, .sample_result = true}> {
 public:
   ImageSampleLOVsample(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
@@ -153,7 +235,9 @@ public:
   Operand samp;
 };
 
-class ImageSampleBOVsample : public Vsample {
+class ImageSampleBOVsample
+    : public amdgpu::ImageAddressInstruction<
+          Vsample, false, amdgpu::ImageAddressForm{.extra_words = 2, .sample_result = true}> {
 public:
   ImageSampleBOVsample(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
@@ -163,7 +247,9 @@ public:
   Operand samp;
 };
 
-class ImageSampleLzOVsample : public Vsample {
+class ImageSampleLzOVsample
+    : public amdgpu::ImageAddressInstruction<
+          Vsample, false, amdgpu::ImageAddressForm{.extra_words = 1, .sample_result = true}> {
 public:
   ImageSampleLzOVsample(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
@@ -173,7 +259,9 @@ public:
   Operand samp;
 };
 
-class ImageSampleCOVsample : public Vsample {
+class ImageSampleCOVsample
+    : public amdgpu::ImageAddressInstruction<
+          Vsample, false, amdgpu::ImageAddressForm{.extra_words = 2, .sample_result = true}> {
 public:
   ImageSampleCOVsample(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
@@ -183,7 +271,10 @@ public:
   Operand samp;
 };
 
-class ImageSampleCDOVsample : public Vsample {
+class ImageSampleCDOVsample
+    : public amdgpu::ImageAddressInstruction<
+          Vsample, false,
+          amdgpu::ImageAddressForm{.extra_words = 2, .gradients = true, .sample_result = true}> {
 public:
   ImageSampleCDOVsample(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
@@ -193,7 +284,10 @@ public:
   Operand samp;
 };
 
-class ImageSampleCLOVsample : public Vsample {
+class ImageSampleCLOVsample
+    : public amdgpu::ImageAddressInstruction<
+          Vsample, false,
+          amdgpu::ImageAddressForm{.extra_words = 2, .lod = true, .sample_result = true}> {
 public:
   ImageSampleCLOVsample(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
@@ -203,7 +297,9 @@ public:
   Operand samp;
 };
 
-class ImageSampleCBOVsample : public Vsample {
+class ImageSampleCBOVsample
+    : public amdgpu::ImageAddressInstruction<
+          Vsample, false, amdgpu::ImageAddressForm{.extra_words = 3, .sample_result = true}> {
 public:
   ImageSampleCBOVsample(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
@@ -213,7 +309,9 @@ public:
   Operand samp;
 };
 
-class ImageSampleCLzOVsample : public Vsample {
+class ImageSampleCLzOVsample
+    : public amdgpu::ImageAddressInstruction<
+          Vsample, false, amdgpu::ImageAddressForm{.extra_words = 2, .sample_result = true}> {
 public:
   ImageSampleCLzOVsample(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
@@ -223,7 +321,8 @@ public:
   Operand samp;
 };
 
-class ImageGather4Vsample : public Vsample {
+class ImageGather4Vsample
+    : public amdgpu::ImageAddressInstruction<Vsample, false, amdgpu::ImageAddressForm{}> {
 public:
   ImageGather4Vsample(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
@@ -233,7 +332,9 @@ public:
   Operand samp;
 };
 
-class ImageGather4LVsample : public Vsample {
+class ImageGather4LVsample
+    : public amdgpu::ImageAddressInstruction<Vsample, false,
+                                             amdgpu::ImageAddressForm{.lod = true}> {
 public:
   ImageGather4LVsample(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
@@ -243,7 +344,9 @@ public:
   Operand samp;
 };
 
-class ImageGather4BVsample : public Vsample {
+class ImageGather4BVsample
+    : public amdgpu::ImageAddressInstruction<Vsample, false,
+                                             amdgpu::ImageAddressForm{.extra_words = 1}> {
 public:
   ImageGather4BVsample(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
@@ -257,13 +360,25 @@ class ImageGather4LzVsample : public Vsample {
 public:
   ImageGather4LzVsample(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.image_address = &vaddr;
+    modifiers.image_coordinates = amdgpu::gfx12_image_address_registers(inst_);
+    modifiers.image_a16 = inst_.a16;
+    modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 0;
+  }
+  bool should_print_src_operand(uint8_t operand_index) const override;
+  void append_src_operand(std::string &out, uint8_t operand_index) const override;
+  void implicit_uses(RegisterSet &uses) const override;
+  bool tracks_explicit_source(uint8_t operand_index) const override;
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
   Operand samp;
 };
 
-class ImageGather4CVsample : public Vsample {
+class ImageGather4CVsample
+    : public amdgpu::ImageAddressInstruction<Vsample, false,
+                                             amdgpu::ImageAddressForm{.extra_words = 1}> {
 public:
   ImageGather4CVsample(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
@@ -273,7 +388,9 @@ public:
   Operand samp;
 };
 
-class ImageGather4CLzVsample : public Vsample {
+class ImageGather4CLzVsample
+    : public amdgpu::ImageAddressInstruction<Vsample, false,
+                                             amdgpu::ImageAddressForm{.extra_words = 1}> {
 public:
   ImageGather4CLzVsample(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
@@ -283,7 +400,9 @@ public:
   Operand samp;
 };
 
-class ImageGather4OVsample : public Vsample {
+class ImageGather4OVsample
+    : public amdgpu::ImageAddressInstruction<Vsample, false,
+                                             amdgpu::ImageAddressForm{.extra_words = 1}> {
 public:
   ImageGather4OVsample(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
@@ -293,7 +412,9 @@ public:
   Operand samp;
 };
 
-class ImageGather4LzOVsample : public Vsample {
+class ImageGather4LzOVsample
+    : public amdgpu::ImageAddressInstruction<Vsample, false,
+                                             amdgpu::ImageAddressForm{.extra_words = 1}> {
 public:
   ImageGather4LzOVsample(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
@@ -303,7 +424,9 @@ public:
   Operand samp;
 };
 
-class ImageGather4CLzOVsample : public Vsample {
+class ImageGather4CLzOVsample
+    : public amdgpu::ImageAddressInstruction<Vsample, false,
+                                             amdgpu::ImageAddressForm{.extra_words = 2}> {
 public:
   ImageGather4CLzOVsample(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
@@ -313,7 +436,8 @@ public:
   Operand samp;
 };
 
-class ImageGetLodVsample : public Vsample {
+class ImageGetLodVsample
+    : public amdgpu::ImageAddressInstruction<Vsample, false, amdgpu::ImageAddressForm{}> {
 public:
   ImageGetLodVsample(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
@@ -323,7 +447,10 @@ public:
   Operand samp;
 };
 
-class ImageSampleDG16Vsample : public Vsample {
+class ImageSampleDG16Vsample
+    : public amdgpu::ImageAddressInstruction<
+          Vsample, false,
+          amdgpu::ImageAddressForm{.gradients = true, .g16 = true, .sample_result = true}> {
 public:
   ImageSampleDG16Vsample(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
@@ -333,7 +460,11 @@ public:
   Operand samp;
 };
 
-class ImageSampleCDG16Vsample : public Vsample {
+class ImageSampleCDG16Vsample
+    : public amdgpu::ImageAddressInstruction<
+          Vsample, false,
+          amdgpu::ImageAddressForm{
+              .extra_words = 1, .gradients = true, .g16 = true, .sample_result = true}> {
 public:
   ImageSampleCDG16Vsample(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
@@ -343,7 +474,11 @@ public:
   Operand samp;
 };
 
-class ImageSampleDOG16Vsample : public Vsample {
+class ImageSampleDOG16Vsample
+    : public amdgpu::ImageAddressInstruction<
+          Vsample, false,
+          amdgpu::ImageAddressForm{
+              .extra_words = 1, .gradients = true, .g16 = true, .sample_result = true}> {
 public:
   ImageSampleDOG16Vsample(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
@@ -353,7 +488,11 @@ public:
   Operand samp;
 };
 
-class ImageSampleCDOG16Vsample : public Vsample {
+class ImageSampleCDOG16Vsample
+    : public amdgpu::ImageAddressInstruction<
+          Vsample, false,
+          amdgpu::ImageAddressForm{
+              .extra_words = 2, .gradients = true, .g16 = true, .sample_result = true}> {
 public:
   ImageSampleCDOG16Vsample(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
@@ -363,7 +502,9 @@ public:
   Operand samp;
 };
 
-class ImageSampleClVsample : public Vsample {
+class ImageSampleClVsample
+    : public amdgpu::ImageAddressInstruction<
+          Vsample, false, amdgpu::ImageAddressForm{.lod = true, .sample_result = true}> {
 public:
   ImageSampleClVsample(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
@@ -373,7 +514,10 @@ public:
   Operand samp;
 };
 
-class ImageSampleDClVsample : public Vsample {
+class ImageSampleDClVsample
+    : public amdgpu::ImageAddressInstruction<
+          Vsample, false,
+          amdgpu::ImageAddressForm{.lod = true, .gradients = true, .sample_result = true}> {
 public:
   ImageSampleDClVsample(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
@@ -383,7 +527,10 @@ public:
   Operand samp;
 };
 
-class ImageSampleBClVsample : public Vsample {
+class ImageSampleBClVsample
+    : public amdgpu::ImageAddressInstruction<
+          Vsample, false,
+          amdgpu::ImageAddressForm{.extra_words = 1, .lod = true, .sample_result = true}> {
 public:
   ImageSampleBClVsample(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
@@ -393,7 +540,10 @@ public:
   Operand samp;
 };
 
-class ImageSampleCClVsample : public Vsample {
+class ImageSampleCClVsample
+    : public amdgpu::ImageAddressInstruction<
+          Vsample, false,
+          amdgpu::ImageAddressForm{.extra_words = 1, .lod = true, .sample_result = true}> {
 public:
   ImageSampleCClVsample(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
@@ -403,7 +553,11 @@ public:
   Operand samp;
 };
 
-class ImageSampleCDClVsample : public Vsample {
+class ImageSampleCDClVsample
+    : public amdgpu::ImageAddressInstruction<
+          Vsample, false,
+          amdgpu::ImageAddressForm{
+              .extra_words = 1, .lod = true, .gradients = true, .sample_result = true}> {
 public:
   ImageSampleCDClVsample(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
@@ -413,7 +567,10 @@ public:
   Operand samp;
 };
 
-class ImageSampleCBClVsample : public Vsample {
+class ImageSampleCBClVsample
+    : public amdgpu::ImageAddressInstruction<
+          Vsample, false,
+          amdgpu::ImageAddressForm{.extra_words = 2, .lod = true, .sample_result = true}> {
 public:
   ImageSampleCBClVsample(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
@@ -423,7 +580,10 @@ public:
   Operand samp;
 };
 
-class ImageSampleClOVsample : public Vsample {
+class ImageSampleClOVsample
+    : public amdgpu::ImageAddressInstruction<
+          Vsample, false,
+          amdgpu::ImageAddressForm{.extra_words = 1, .lod = true, .sample_result = true}> {
 public:
   ImageSampleClOVsample(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
@@ -433,7 +593,11 @@ public:
   Operand samp;
 };
 
-class ImageSampleDClOVsample : public Vsample {
+class ImageSampleDClOVsample
+    : public amdgpu::ImageAddressInstruction<
+          Vsample, false,
+          amdgpu::ImageAddressForm{
+              .extra_words = 1, .lod = true, .gradients = true, .sample_result = true}> {
 public:
   ImageSampleDClOVsample(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
@@ -443,7 +607,10 @@ public:
   Operand samp;
 };
 
-class ImageSampleBClOVsample : public Vsample {
+class ImageSampleBClOVsample
+    : public amdgpu::ImageAddressInstruction<
+          Vsample, false,
+          amdgpu::ImageAddressForm{.extra_words = 2, .lod = true, .sample_result = true}> {
 public:
   ImageSampleBClOVsample(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
@@ -453,7 +620,10 @@ public:
   Operand samp;
 };
 
-class ImageSampleCClOVsample : public Vsample {
+class ImageSampleCClOVsample
+    : public amdgpu::ImageAddressInstruction<
+          Vsample, false,
+          amdgpu::ImageAddressForm{.extra_words = 2, .lod = true, .sample_result = true}> {
 public:
   ImageSampleCClOVsample(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
@@ -463,7 +633,11 @@ public:
   Operand samp;
 };
 
-class ImageSampleCDClOVsample : public Vsample {
+class ImageSampleCDClOVsample
+    : public amdgpu::ImageAddressInstruction<
+          Vsample, false,
+          amdgpu::ImageAddressForm{
+              .extra_words = 2, .lod = true, .gradients = true, .sample_result = true}> {
 public:
   ImageSampleCDClOVsample(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
@@ -473,7 +647,10 @@ public:
   Operand samp;
 };
 
-class ImageSampleCBClOVsample : public Vsample {
+class ImageSampleCBClOVsample
+    : public amdgpu::ImageAddressInstruction<
+          Vsample, false,
+          amdgpu::ImageAddressForm{.extra_words = 3, .lod = true, .sample_result = true}> {
 public:
   ImageSampleCBClOVsample(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
@@ -483,7 +660,13 @@ public:
   Operand samp;
 };
 
-class ImageSampleCDClG16Vsample : public Vsample {
+class ImageSampleCDClG16Vsample
+    : public amdgpu::ImageAddressInstruction<Vsample, false,
+                                             amdgpu::ImageAddressForm{.extra_words = 1,
+                                                                      .lod = true,
+                                                                      .gradients = true,
+                                                                      .g16 = true,
+                                                                      .sample_result = true}> {
 public:
   ImageSampleCDClG16Vsample(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
@@ -493,7 +676,13 @@ public:
   Operand samp;
 };
 
-class ImageSampleDClOG16Vsample : public Vsample {
+class ImageSampleDClOG16Vsample
+    : public amdgpu::ImageAddressInstruction<Vsample, false,
+                                             amdgpu::ImageAddressForm{.extra_words = 1,
+                                                                      .lod = true,
+                                                                      .gradients = true,
+                                                                      .g16 = true,
+                                                                      .sample_result = true}> {
 public:
   ImageSampleDClOG16Vsample(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
@@ -503,7 +692,13 @@ public:
   Operand samp;
 };
 
-class ImageSampleCDClOG16Vsample : public Vsample {
+class ImageSampleCDClOG16Vsample
+    : public amdgpu::ImageAddressInstruction<Vsample, false,
+                                             amdgpu::ImageAddressForm{.extra_words = 2,
+                                                                      .lod = true,
+                                                                      .gradients = true,
+                                                                      .g16 = true,
+                                                                      .sample_result = true}> {
 public:
   ImageSampleCDClOG16Vsample(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
@@ -513,7 +708,11 @@ public:
   Operand samp;
 };
 
-class ImageSampleDClG16Vsample : public Vsample {
+class ImageSampleDClG16Vsample
+    : public amdgpu::ImageAddressInstruction<
+          Vsample, false,
+          amdgpu::ImageAddressForm{
+              .lod = true, .gradients = true, .g16 = true, .sample_result = true}> {
 public:
   ImageSampleDClG16Vsample(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
@@ -523,7 +722,9 @@ public:
   Operand samp;
 };
 
-class ImageGather4ClVsample : public Vsample {
+class ImageGather4ClVsample
+    : public amdgpu::ImageAddressInstruction<Vsample, false,
+                                             amdgpu::ImageAddressForm{.lod = true}> {
 public:
   ImageGather4ClVsample(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
@@ -533,7 +734,9 @@ public:
   Operand samp;
 };
 
-class ImageGather4BClVsample : public Vsample {
+class ImageGather4BClVsample
+    : public amdgpu::ImageAddressInstruction<
+          Vsample, false, amdgpu::ImageAddressForm{.extra_words = 1, .lod = true}> {
 public:
   ImageGather4BClVsample(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
@@ -543,7 +746,9 @@ public:
   Operand samp;
 };
 
-class ImageGather4CClVsample : public Vsample {
+class ImageGather4CClVsample
+    : public amdgpu::ImageAddressInstruction<
+          Vsample, false, amdgpu::ImageAddressForm{.extra_words = 1, .lod = true}> {
 public:
   ImageGather4CClVsample(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
@@ -553,7 +758,9 @@ public:
   Operand samp;
 };
 
-class ImageGather4CLVsample : public Vsample {
+class ImageGather4CLVsample
+    : public amdgpu::ImageAddressInstruction<
+          Vsample, false, amdgpu::ImageAddressForm{.extra_words = 1, .lod = true}> {
 public:
   ImageGather4CLVsample(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
@@ -563,7 +770,9 @@ public:
   Operand samp;
 };
 
-class ImageGather4CBVsample : public Vsample {
+class ImageGather4CBVsample
+    : public amdgpu::ImageAddressInstruction<Vsample, false,
+                                             amdgpu::ImageAddressForm{.extra_words = 2}> {
 public:
   ImageGather4CBVsample(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
@@ -573,7 +782,9 @@ public:
   Operand samp;
 };
 
-class ImageGather4CBClVsample : public Vsample {
+class ImageGather4CBClVsample
+    : public amdgpu::ImageAddressInstruction<
+          Vsample, false, amdgpu::ImageAddressForm{.extra_words = 2, .lod = true}> {
 public:
   ImageGather4CBClVsample(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
@@ -583,7 +794,8 @@ public:
   Operand samp;
 };
 
-class ImageGather4hVsample : public Vsample {
+class ImageGather4hVsample
+    : public amdgpu::ImageAddressInstruction<Vsample, false, amdgpu::ImageAddressForm{}> {
 public:
   ImageGather4hVsample(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);

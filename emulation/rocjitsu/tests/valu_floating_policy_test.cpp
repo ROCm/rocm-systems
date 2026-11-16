@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "compute_unit_test_util.h"
 #include "instruction_failure_test_util.h"
 #include "restore_rounding.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna1/builders.h"
@@ -59,14 +60,19 @@ public:
     config.vgprs_per_wf = vgprs;
     config.lds_size_kb = 64;
     cache_.set_backing_memory(&memory_);
-    compute_unit_ =
-        amdgpu::ComputeUnitCore::create("instruction_policy", config, &memory_, &cache_);
+    rocjitsu::test::initialize_compute_unit(compute_unit_, "instruction_policy", config, &memory_,
+                                            &cache_);
+    if (!compute_unit_)
+      return;
     decoder_ = Decoder::create(arch);
     wave_ = compute_unit_->dispatch_wf(0, 0, 106, vgprs, wave_size);
     wave_->set_exec(1);
     base_ = wave_->vgpr_alloc().base;
   }
-  ~InstructionPolicyMachine() { wave_->halt(); }
+  ~InstructionPolicyMachine() {
+    if (wave_)
+      wave_->halt();
+  }
   template <size_t N>
   util::FailureOr<uint32_t> run(const std::array<uint32_t, N> &words, uint32_t a, uint32_t b = 0,
                                 uint32_t c = 0, uint32_t mode = 0xf0) {
@@ -446,6 +452,7 @@ TEST(ValuFloatingPolicy, FmaF32OutputScalingFlushesSubnormalIntermediate) {
   // Earlier targets disable OMOD when output denormals or IEEE mode are set.
   for (auto arch : kAllArchitectures) {
     InstructionPolicyMachine machine(arch);
+    ASSERT_FALSE(::testing::Test::HasFatalFailure());
     util::FailureOr<std::array<uint32_t, 2>> maybe_words = fma_f32_words(arch, 0, 0, 1, 0);
     ASSERT_TRUE(maybe_words.succeeded());
     const auto words = maybe_words.value();
@@ -490,6 +497,7 @@ TEST(ValuFloatingPolicy, FmaF32FlushesTinySignificandBeforePacking) {
   };
   for (auto arch : kAllArchitectures) {
     InstructionPolicyMachine machine(arch);
+    ASSERT_FALSE(::testing::Test::HasFatalFailure());
     for (uint32_t ieee : {0u, 1u})
       for (uint32_t denorm : {1u, 3u})
         for (uint32_t round = 0; round < 4; ++round)
@@ -523,6 +531,7 @@ TEST(ValuFloatingPolicy, FmaF32FlushesTinySignificandBeforePacking) {
 TEST(ValuFloatingPolicy, ScalarFmaF32UsesModeAndNanPolicy) {
   // CDNA5 section 6.8 gives SALU floating point the same MODE controls as VALU.
   InstructionPolicyMachine machine(ROCJITSU_CODE_ARCH_CDNA5);
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   struct Case {
     uint32_t a, b, c, mode, expected;
   };
@@ -570,6 +579,7 @@ TEST(ValuFloatingPolicy, FmaF32MatchesPhysicalNanBits) {
   };
   for (auto arch : kAllArchitectures) {
     InstructionPolicyMachine machine(arch);
+    ASSERT_FALSE(::testing::Test::HasFatalFailure());
     for (uint32_t ieee : {0u, 1u})
       for (uint32_t denorm : {0u, 1u, 2u, 3u})
         for (uint32_t round : {0u, 1u, 2u, 3u})
@@ -605,6 +615,7 @@ TEST(ValuFloatingPolicy, FmaF32MatchesPhysicalNanBits) {
 TEST(ValuFloatingPolicy, PackedMinimumPropagatesNaN) {
   for (rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_RDNA4}) {
     InstructionPolicyMachine machine(arch);
+    ASSERT_FALSE(::testing::Test::HasFatalFailure());
     for (uint16_t opcode : {cdna5::kVPkMinNumF16Vop3p, cdna5::kVPkMaxNumF16Vop3p,
                             cdna5::kVPkMinimumF16Vop3p, cdna5::kVPkMaximumF16Vop3p}) {
       const std::array<uint32_t, 2> words = packed_words(arch, opcode);
@@ -622,6 +633,7 @@ TEST(ValuFloatingPolicy, PackedF32Mode) {
   for (rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_CDNA2, ROCJITSU_CODE_ARCH_CDNA3,
                               ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
     InstructionPolicyMachine machine(arch);
+    ASSERT_FALSE(::testing::Test::HasFatalFailure());
     // src1 is v1:v2; testing the low result makes the high component immaterial.
     const std::array<uint32_t, 2> words =
         packed_words(arch, arch == ROCJITSU_CODE_ARCH_CDNA5 ? 41 : 50);
@@ -631,18 +643,23 @@ TEST(ValuFloatingPolicy, PackedF32Mode) {
     util::FailureOr<uint32_t> round_up = machine.run(words, 0x3f800000, 0x33800000, 0, 0xf1);
     ASSERT_TRUE(round_up.succeeded());
     witness("packed_f32_round_up", arch, round_up.value(), 0x3f800001);
-    const rocjitsu::test::RestoreRounding restore_rounding;
-    std::fesetround(FE_UPWARD);
-    util::FailureOr<uint32_t> maybe_got = machine.run(words, 0x3f800000, 0x33800000, 0, 0xf0);
-    ASSERT_TRUE(maybe_got.succeeded());
-    const uint32_t got = maybe_got.value();
-    std::fesetround(restore_rounding.saved());
-    witness("packed_f32_host_round", arch, got, 0x3f800000);
+    // Only the unmigrated legacy implementation promises immunity to host rounding.
+    // rj-arith assumes the default host FP environment and never changes it.
+    if (arch == ROCJITSU_CODE_ARCH_CDNA2) {
+      const rocjitsu::test::RestoreRounding restore_rounding;
+      std::fesetround(FE_UPWARD);
+      util::FailureOr<uint32_t> maybe_got = machine.run(words, 0x3f800000, 0x33800000, 0, 0xf0);
+      ASSERT_TRUE(maybe_got.succeeded());
+      const uint32_t got = maybe_got.value();
+      std::fesetround(restore_rounding.saved());
+      witness("packed_f32_host_round", arch, got, 0x3f800000);
+    }
   }
 }
 TEST(ValuFloatingPolicy, PackedF16Clamp) {
   for (rj_code_arch_t arch : kAllArchitectures) {
     InstructionPolicyMachine machine(arch);
+    ASSERT_FALSE(::testing::Test::HasFatalFailure());
     for (uint16_t opcode :
          {cdna5::kVPkFmaF16Vop3p, cdna5::kVPkAddF16Vop3p, cdna5::kVPkMulF16Vop3p}) {
       const std::array<uint32_t, 2> words = packed_words(arch, opcode, 1);
@@ -667,6 +684,7 @@ TEST(ValuFloatingPolicy, PackedF16Clamp) {
 TEST(ValuFloatingPolicy, PackedF16Mode) {
   for (rj_code_arch_t arch : kAllArchitectures) {
     InstructionPolicyMachine machine(arch);
+    ASSERT_FALSE(::testing::Test::HasFatalFailure());
     const std::array<uint32_t, 2> words = packed_words(arch, cdna5::kVPkAddF16Vop3p);
     util::FailureOr<uint32_t> denorm = machine.run(words, 0x00010001, 0x00010001, 0, 0);
     ASSERT_TRUE(denorm.succeeded());
@@ -690,6 +708,7 @@ TEST(ValuFloatingPolicy, PackedF16Mode) {
 TEST(ValuFloatingPolicy, PackedF16FmaZeroSignUsesGuestRounding) {
   for (rj_code_arch_t arch : kAllArchitectures) {
     InstructionPolicyMachine machine(arch);
+    ASSERT_FALSE(::testing::Test::HasFatalFailure());
     const std::array<uint32_t, 2> words = packed_words(arch, cdna5::kVPkFmaF16Vop3p);
     for (uint32_t guest_round = 0; guest_round < 4; ++guest_round) {
       for (int host_round : {FE_TONEAREST, FE_UPWARD, FE_DOWNWARD, FE_TOWARDZERO}) {
@@ -726,6 +745,7 @@ TEST(ValuFloatingPolicy, F16Dot2HostContract) {
   for (rj_code_arch_t arch :
        {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4}) {
     InstructionPolicyMachine machine(arch);
+    ASSERT_FALSE(::testing::Test::HasFatalFailure());
     const std::array<uint32_t, 2> words = rdna4::build_vop3(
         rdna4::kVDot2F16F16Vop3, {.vdst = 6, .src0 = 256, .src1 = 257, .src2 = 258});
     const rocjitsu::test::RestoreRounding restore_rounding;
@@ -750,6 +770,7 @@ TEST(ValuFloatingPolicy, F16Dot2HostContract) {
 TEST(ValuFloatingPolicy, F32UnaryDenormControls) {
   for (rj_code_arch_t arch : kAllArchitectures) {
     InstructionPolicyMachine machine(arch);
+    ASSERT_FALSE(::testing::Test::HasFatalFailure());
     struct Case {
       size_t op;
       uint32_t input;
@@ -771,6 +792,7 @@ TEST(ValuFloatingPolicy, ReciprocalSquareRootUsesSharedMappingAcrossProfiles) {
   // qualification for these finite approximation witnesses covers RDNA3/4.
   for (rj_code_arch_t arch : kAllArchitectures) {
     InstructionPolicyMachine machine(arch);
+    ASSERT_FALSE(::testing::Test::HasFatalFailure());
     const auto words = unary_words(arch, 4);
     const bool quiet = arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5;
     for (const auto &test :
@@ -794,6 +816,7 @@ TEST(ValuFloatingPolicy, LogarithmUsesSharedMappingAcrossProfiles) {
   };
   for (rj_code_arch_t arch : kAllArchitectures) {
     InstructionPolicyMachine machine(arch);
+    ASSERT_FALSE(::testing::Test::HasFatalFailure());
     const auto words = unary_words(arch, 2);
     for (uint32_t ieee : {0u, 1u})
       for (uint32_t mode = 0; mode < 16; ++mode) {
@@ -813,6 +836,7 @@ TEST(ValuFloatingPolicy, HalfReciprocalSquareRootModesAndNaNPayloads) {
   // Finite witness bits are physically qualified on RDNA3/4.
   for (rj_code_arch_t arch : kAllArchitectures) {
     InstructionPolicyMachine machine(arch);
+    ASSERT_FALSE(::testing::Test::HasFatalFailure());
     const bool quiet = arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5;
     for (uint32_t mode = 0; mode < 16; ++mode) {
       const uint32_t raw_mode = 0x30u | ((mode & 3u) << 2) | ((mode >> 2) << 6);
@@ -841,6 +865,7 @@ TEST(ValuFloatingPolicy, HalfReciprocalSquareRootModesAndNaNPayloads) {
 TEST(ValuFloatingPolicy, F32UnaryQuietsSignalingNaNs) {
   for (rj_code_arch_t arch : kAllArchitectures) {
     InstructionPolicyMachine machine(arch);
+    ASSERT_FALSE(::testing::Test::HasFatalFailure());
     for (size_t op = 0; op < 5; ++op) {
       const std::array<uint32_t, 1> words = unary_words(arch, op);
       util::FailureOr<uint32_t> maybe_result = machine.run(words, 0x7f800001, 0, 0, 0x2f0);
@@ -854,6 +879,7 @@ TEST(ValuFloatingPolicy, Dot2InlineReplication) {
   for (rj_code_arch_t arch :
        {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4}) {
     InstructionPolicyMachine machine(arch);
+    ASSERT_FALSE(::testing::Test::HasFatalFailure());
     for (uint16_t opcode : {rdna4::kVDot2F16F16Vop3, rdna4::kVDot2Bf16Bf16Vop3}) {
       const std::array<uint32_t, 2> words =
           rdna4::build_vop3(opcode, {.vdst = 6, .src0 = 242, .src1 = 242, .src2 = 128});
@@ -868,6 +894,7 @@ TEST(ValuFloatingPolicy, Dot2InlineReplication) {
 }
 TEST(ValuFloatingPolicy, PackedBf16Clamp) {
   InstructionPolicyMachine machine(ROCJITSU_CODE_ARCH_CDNA5);
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   for (uint16_t opcode : {cdna5::kVPkFmaBf16Vop3p, cdna5::kVPkAddBf16Vop3p, cdna5::kVPkMulBf16Vop3p,
                           cdna5::kVPkMinNumBf16Vop3p, cdna5::kVPkMaxNumBf16Vop3p}) {
     const std::array<uint32_t, 2> words = packed_words(ROCJITSU_CODE_ARCH_CDNA5, opcode, 1);
@@ -885,6 +912,7 @@ TEST(ValuFloatingPolicy, SquareRootModesAndNaNPayloads) {
   // also meets the one-ULP F32 and 0.51-ULP F16 bounds of older profiles.
   for (rj_code_arch_t arch : kAllArchitectures) {
     InstructionPolicyMachine machine(arch);
+    ASSERT_FALSE(::testing::Test::HasFatalFailure());
     for (uint32_t ieee : {0u, 1u}) {
       const bool quiet =
           ieee || arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5;
@@ -926,6 +954,7 @@ TEST(ValuFloatingPolicy, SquareRootModesAndNaNPayloads) {
 
 TEST(ValuFloatingPolicy, Bf16UnaryQuietsSignalingNaNs) {
   InstructionPolicyMachine machine(ROCJITSU_CODE_ARCH_CDNA5);
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   for (uint16_t opcode : {cdna5::kVRcpBf16Vop1, cdna5::kVSqrtBf16Vop1, cdna5::kVRsqBf16Vop1,
                           cdna5::kVLogBf16Vop1, cdna5::kVExpBf16Vop1}) {
     const std::array<uint32_t, 1> words = cdna5::build_vop1(opcode, {.src0 = 256, .vdst = 6});
@@ -940,6 +969,7 @@ TEST(ValuFloatingPolicy, PackedF32MultiplyAndFmaUseMode) {
   for (rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_CDNA2, ROCJITSU_CODE_ARCH_CDNA3,
                               ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
     InstructionPolicyMachine machine(arch);
+    ASSERT_FALSE(::testing::Test::HasFatalFailure());
     const uint16_t multiply =
         arch == ROCJITSU_CODE_ARCH_CDNA5 ? cdna5::kVPkMulF32Vop3p : cdna2::kVPkMulF32Vop3p;
     const uint16_t fused =
@@ -974,6 +1004,7 @@ TEST(ValuFloatingPolicy, PackedF32MultiplyAndFmaUseMode) {
 TEST(ValuFloatingPolicy, PackedF16OutputFlushAndSignedZero) {
   for (rj_code_arch_t arch : kAllArchitectures) {
     InstructionPolicyMachine machine(arch);
+    ASSERT_FALSE(::testing::Test::HasFatalFailure());
     const std::array<uint32_t, 2> multiply = packed_words(arch, cdna5::kVPkMulF16Vop3p);
     {
       util::FailureOr<uint32_t> result = machine.run(multiply, 0x04000400, 0x38003800, 0, 0x70);
@@ -1008,6 +1039,7 @@ TEST(ValuFloatingPolicy, Dot2ReplicatesEachInlineSourceButPreservesLiteralHalves
   for (rj_code_arch_t arch :
        {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4}) {
     InstructionPolicyMachine machine(arch);
+    ASSERT_FALSE(::testing::Test::HasFatalFailure());
     for (uint16_t opcode : {rdna4::kVDot2F16F16Vop3, rdna4::kVDot2Bf16Bf16Vop3}) {
       const bool bf16 = opcode == rdna4::kVDot2Bf16Bf16Vop3;
       const uint32_t one = bf16 ? 0x3f803f80u : 0x3c003c00u;
@@ -1046,6 +1078,7 @@ TEST(ValuFloatingPolicy, Dot2ReplicatesEachInlineSourceButPreservesLiteralHalves
 TEST(ValuFloatingPolicy, SqrtFlushesNegativeDenormalsToNegativeZero) {
   for (rj_code_arch_t arch : kAllArchitectures) {
     InstructionPolicyMachine machine(arch);
+    ASSERT_FALSE(::testing::Test::HasFatalFailure());
     {
       util::FailureOr<uint32_t> result = machine.run(unary_words(arch, 1), 0x80000001u);
       ASSERT_TRUE(result.succeeded());
@@ -1056,6 +1089,7 @@ TEST(ValuFloatingPolicy, SqrtFlushesNegativeDenormalsToNegativeZero) {
 
 TEST(ValuFloatingPolicy, Bf16MixInlineConstantsRespectSelectedHalf) {
   InstructionPolicyMachine machine(ROCJITSU_CODE_ARCH_CDNA5);
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   for (uint16_t opcode :
        {cdna5::kVFmaMixF32Bf16Vop3p, cdna5::kVFmaMixloBf16Vop3p, cdna5::kVFmaMixhiBf16Vop3p}) {
     for (uint32_t source = 0; source < 3; ++source) {
@@ -1085,6 +1119,7 @@ TEST(ValuFloatingPolicy, Bf16MixInlineConstantsRespectSelectedHalf) {
 
 TEST(ValuFloatingPolicy, TanhQuietsSignalingNaNsAcrossFormats) {
   InstructionPolicyMachine machine(ROCJITSU_CODE_ARCH_CDNA5);
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   struct Case {
     uint16_t opcode;
     uint32_t source;
@@ -1107,6 +1142,7 @@ TEST(ValuFloatingPolicy, PackedF32ClampAcrossTargets) {
   for (rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_CDNA2, ROCJITSU_CODE_ARCH_CDNA3,
                               ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
     InstructionPolicyMachine machine(arch);
+    ASSERT_FALSE(::testing::Test::HasFatalFailure());
     const std::array<uint16_t, 3> opcodes =
         arch == ROCJITSU_CODE_ARCH_CDNA5
             ? std::array<uint16_t, 3>{cdna5::kVPkAddF32Vop3p, cdna5::kVPkMulF32Vop3p,
@@ -1137,6 +1173,7 @@ TEST(ValuFloatingPolicy, PackedF32ClampAcrossTargets) {
 TEST(ValuFloatingPolicy, PackedF16ThreeInputSelectionsUseClampAndDenormMode) {
   for (rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
     InstructionPolicyMachine machine(arch);
+    ASSERT_FALSE(::testing::Test::HasFatalFailure());
     const std::vector<uint16_t> opcodes =
         arch == ROCJITSU_CODE_ARCH_CDNA5
             ? std::vector<uint16_t>{cdna5::kVPkMinimum3F16Vop3p, cdna5::kVPkMaximum3F16Vop3p,
@@ -1167,6 +1204,7 @@ TEST(ValuFloatingPolicy, PackedF16ThreeInputSelectionsUseClampAndDenormMode) {
 
 TEST(ValuFloatingPolicy, PackedBf16MinimumAndMaximumOrderSignedZeros) {
   InstructionPolicyMachine machine(ROCJITSU_CODE_ARCH_CDNA5);
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   for (bool minimum : {false, true}) {
     const uint16_t opcode = minimum ? cdna5::kVPkMinNumBf16Vop3p : cdna5::kVPkMaxNumBf16Vop3p;
     {
@@ -1180,6 +1218,7 @@ TEST(ValuFloatingPolicy, PackedBf16MinimumAndMaximumOrderSignedZeros) {
 
 TEST(ValuFloatingPolicy, Rdna4F32DotInlineSourcesMatchHardware) {
   InstructionPolicyMachine machine(ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   for (uint16_t opcode : {rdna4::kVDot2F32F16Vop3p, rdna4::kVDot2F32Bf16Vop3p}) {
     const std::array<uint32_t, 2> words = rdna4::build_vop3p(
         opcode, {.vdst = 6, .src0 = 242, .src1 = 242, .src2 = 128, .opsel_hi = 3});
@@ -1194,6 +1233,7 @@ TEST(ValuFloatingPolicy, Rdna4F32DotInlineSourcesMatchHardware) {
 TEST(ValuFloatingPolicy, DppFloatingSourceAbsoluteAndNegate) {
   for (const auto arch : kAllArchitectures) {
     InstructionPolicyMachine machine(arch);
+    ASSERT_FALSE(::testing::Test::HasFatalFailure());
     std::array<uint32_t, 2> words{};
 #define ADD_DPP(ARCH, ENUM)                                                                        \
   case ENUM:                                                                                       \
@@ -1250,6 +1290,7 @@ TEST(ValuFloatingPolicy, DppTrue16SelectsHalvesBeforeSourceModifiers) {
         continue;
       for (uint32_t vgprs : {8u, 256u}) {
         InstructionPolicyMachine machine(arch, vgprs, wave_size);
+        ASSERT_FALSE(::testing::Test::HasFatalFailure());
         for (uint64_t active : {~uint64_t{0}, uint64_t{0x5555555555555555}}) {
           for (uint32_t swap : {0u, 1u}) {
             for (uint32_t halves = 0; halves < 8; ++halves) {

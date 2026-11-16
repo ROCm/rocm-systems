@@ -45,11 +45,25 @@ they implement the HSA C ABI. rocddi owns the independent native session and
 its retry mechanism; AMDF instances use that mechanism without joining the
 HSA process gate.
 
-The single HSA CPU agent is frontend policy built from rocddi's passive host
-topology snapshot. It does not activate a CPU device. HSA prefers CPU cache
-records from OS NUMA node zero and uses the system scan when that node is
-absent. Cache handles, names, callback order, and agent attributes belong to
-libhsa.
+On Linux, the first `hsa_init` binds the runtime image to its creating process.
+After `fork`, the child must `exec` before using HSA. The inherited child's
+`hsa_init` reports `HSA_STATUS_ERROR`, and runtime-dependent status APIs report
+`HSA_STATUS_ERROR_NOT_INITIALIZED`; raw signal and queue-index APIs return
+their existing fallback values. Public dispatch and profiler bridges bypass
+inherited tool wrappers before reaching those guards. The parent retains its
+HSA state. The dispatch guard requires Linux `MADV_WIPEONFORK` support; if
+that advice cannot be installed, `hsa_init` fails instead of publishing an
+unguarded runtime. Applications should `exec` or `_exit` promptly in the
+child, especially when other threads existed at `fork`.
+If a callback itself calls `fork`, its child must `exec` or `_exit` before
+returning from the callback into the inherited runtime call.
+
+HSA CPU agents are frontend projections of rocddi's passive host topology.
+Linux CPU nodes retain their memory-bank and NUMA associations; a generic
+host CPU projection is used when native CPU nodes are absent. Cache selection
+follows explicit locality and CPU sharing records. Missing CPU model names
+receive the HSA display fallback. These projections do not activate CPU devices;
+cache handles, names, callback order and public attributes remain frontend policy.
 
 The CMake build stages `libhsa-runtime64.so.1` with `ROCR_1` symbol versions.
 Its `libamdf.so` alias exports AMDF from the same image. The two ABIs have
@@ -97,8 +111,13 @@ The finalizer extension and external semaphore operations are not supported.
 ## Build and verification
 
 See the [workspace build instructions](../../README.md) for the CMake build,
-library aliases, and Cargo commands. The current platform adapter is Linux;
-the runtime builds on x86-64 and AArch64. GPU execution was previously
+library aliases, and Cargo commands. Native adapters now distinguish Linux
+handles from pointer-sized Windows handles and qualify native sharing and trace
+protocols. HSA Rust sources and tests type-check for Windows x86-64 MSVC;
+Windows DLL export generation is deferred. Complete SDK/C++ linkage and native
+Windows execution remain unqualified. Windows GPU
+initialization, tool dispatch and borrowed CRT logging remain unavailable.
+The Linux runtime builds on x86-64 and AArch64. GPU execution was previously
 observed on one x86-64 GFX1201 host. CTest runs Rust tests and the native C
 smoke test without a GPU. The [GPU probes](tests/gpu/README.md) cover
 HSA callbacks, logging, sampling, and kernel dispatch on a qualified host.

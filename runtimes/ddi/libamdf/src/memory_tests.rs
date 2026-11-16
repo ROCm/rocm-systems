@@ -258,7 +258,7 @@ fn export_range_errors_are_invalid_and_preserve_output() {
     }
 }
 
-unsafe fn host_resource() -> (*mut amdf_instance_t, *mut amdf_memory_t) {
+unsafe fn test_instance() -> *mut amdf_instance_t {
     let parameters = amdf_instance_create_info_t {
         r#type: AMDF_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
         structure_size: size_of::<amdf_instance_create_info_t>() as u32,
@@ -271,6 +271,11 @@ unsafe fn host_resource() -> (*mut amdf_instance_t, *mut amdf_memory_t) {
             0
         );
     };
+    instance
+}
+
+unsafe fn host_resource() -> (*mut amdf_instance_t, *mut amdf_memory_t) {
+    let instance = unsafe { test_instance() };
     let mut scope = std::ptr::null_mut();
     let mut count = 0;
     unsafe {
@@ -569,6 +574,8 @@ fn registration_requires_the_declared_host_cacheability() {
 #[test]
 fn queue_scratch_resolves_one_device_range_and_blocks_early_free() {
     unsafe {
+        let instance = test_instance();
+        let scope = &raw mut (*instance.cast::<Instance>()).scope;
         let device = std::ptr::NonNull::<Device>::dangling().as_ptr();
         let other_device = device.wrapping_add(1);
         let mut accesses = OwnerVec::try_with_allocator(Allocator::system(), 1).unwrap();
@@ -586,7 +593,7 @@ fn queue_scratch_resolves_one_device_range_and_blocks_early_free() {
             })
             .unwrap();
         let owner = Owned::new(Memory {
-            scope: std::ptr::null_mut(),
+            scope,
             backing: Backing::Registered,
             host_allocator: Allocator::system(),
             allocated_backing: false,
@@ -628,12 +635,15 @@ fn queue_scratch_resolves_one_device_range_and_blocks_early_free() {
         assert_eq!(destroy(pointer.cast(), std::ptr::null_mut()), BUSY);
         drop(borrow);
         assert_eq!(destroy(pointer.cast(), std::ptr::null_mut()), 0);
+        assert_eq!(instance::destroy(instance), 0);
     }
 }
 
 #[test]
 fn kernel_commands_require_exact_executable_device_access_and_logical_range() {
     unsafe {
+        let instance = test_instance();
+        let scope = &raw mut (*instance.cast::<Instance>()).scope;
         let device = std::ptr::NonNull::<Device>::dangling().as_ptr();
         let mut accesses = OwnerVec::try_with_allocator(Allocator::system(), 1).unwrap();
         accesses
@@ -650,7 +660,7 @@ fn kernel_commands_require_exact_executable_device_access_and_logical_range() {
             })
             .unwrap();
         let owner = Owned::new(Memory {
-            scope: std::ptr::null_mut(),
+            scope,
             backing: Backing::Registered,
             host_allocator: Allocator::system(),
             allocated_backing: false,
@@ -698,12 +708,15 @@ fn kernel_commands_require_exact_executable_device_access_and_logical_range() {
             Err(UNSUPPORTED)
         );
         assert_eq!(destroy(pointer.cast(), std::ptr::null_mut()), 0);
+        assert_eq!(instance::destroy(instance), 0);
     }
 }
 
 #[test]
 fn multi_device_access_queries_and_scratch_preserve_request_order() {
     unsafe {
+        let instance = test_instance();
+        let scope = &raw mut (*instance.cast::<Instance>()).scope;
         let first = std::ptr::NonNull::<Device>::dangling().as_ptr();
         let second = first.wrapping_add(1);
         let mut accesses = OwnerVec::try_with_allocator(Allocator::system(), 2).unwrap();
@@ -730,7 +743,7 @@ fn multi_device_access_queries_and_scratch_preserve_request_order() {
                 .unwrap();
         }
         let owner = Owned::new(Memory {
-            scope: std::ptr::null_mut(),
+            scope,
             backing: Backing::Registered,
             host_allocator: Allocator::system(),
             allocated_backing: false,
@@ -792,6 +805,7 @@ fn multi_device_access_queries_and_scratch_preserve_request_order() {
             Err(INVALID)
         );
         assert_eq!(destroy(pointer.cast(), std::ptr::null_mut()), 0);
+        assert_eq!(instance::destroy(instance), 0);
     }
 }
 

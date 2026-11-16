@@ -21,7 +21,13 @@ NCCL_PARAM(SymCTAs, "SYM_CTAS", 0)
 static constexpr float disableTime = 1.e30f;
 
 int ncclSymkModelCtasEnvOverride(enum ncclSymkKernelId kernelId) {
-  int maxBlocks = kernelId == ncclSymkKernelId_AllGather_HierLsaST ? ncclSymkAgHierMaxBlocks : ncclSymkMaxBlocks;
+  int maxBlocks = ncclSymkMaxBlocks;
+  if (kernelId == ncclSymkKernelId_AllGather_HierLsaST) {
+    maxBlocks = ncclSymkAgHierMaxBlocks;
+  }
+  if (kernelId == ncclSymkKernelId_AllGather_HierLsaTmaST) {
+    maxBlocks = ncclSymkAgHierTmaMaxBlocks;
+  }
   int64_t nUserCTAs = ncclParamSymCTAs();
   if (nUserCTAs < 1) return 0;
   if (nUserCTAs > maxBlocks) return maxBlocks;
@@ -58,16 +64,25 @@ static bool rcclSymkAllGatherLLYieldsToST(struct ncclTuningInput_t* const inputs
 // the next kernel stays in for the launches LL cannot take, such as grouped ones.
 static bool rcclSymkAllGatherYieldsInPartitionMode(struct ncclTuningInput_t* const inputs,
                                                    enum ncclSymkKernelId kernelId, uint32_t valid_kmask) {
-  constexpr int st = ncclSymkKernelId_AllGather_ST;
-  constexpr int hier = ncclSymkKernelId_AllGather_HierLsaST;
+  constexpr int vecSt = ncclSymkKernelId_AllGather_ST;
+  constexpr int tmaSt = ncclSymkKernelId_AllGather_TmaST;
+  constexpr int vecHier = ncclSymkKernelId_AllGather_HierLsaST;
+  constexpr int tmaHier = ncclSymkKernelId_AllGather_HierLsaTmaST;
   struct ncclComm* comm = inputs->comm;
   if (inputs->func != ncclFuncAllGather || !ncclSymkIsGfx1250(comm) || !comm->hasMloPart ||
       comm->tuningContext.forced[inputs->func] ||
       (inputs->winRegType != ncclSymSendRegRecvReg && inputs->winRegType != ncclSymSendNonregRecvReg)) {
     return false;
   }
-  bool hasSt = (valid_kmask >> st & 1) && (inputs->tuningMask >> (NCCL_TUNING_SYM_KERNEL_ID_OFFSET + st) & 1);
-  bool hasHier = (valid_kmask >> hier & 1) && (inputs->tuningMask >> (NCCL_TUNING_SYM_KERNEL_ID_OFFSET + hier) & 1);
+  struct AllowMask {
+    uint32_t bits;
+    bool has(int id) const { return bits >> id & 1; }
+  };
+  const AllowMask allowed{valid_kmask & uint32_t(inputs->tuningMask >> NCCL_TUNING_SYM_KERNEL_ID_OFFSET)};
+  int st = allowed.has(vecSt) ? vecSt : tmaSt;
+  int hier = allowed.has(vecHier) ? vecHier : tmaHier;
+  bool hasSt = allowed.has(st);
+  bool hasHier = allowed.has(hier);
   if (!hasSt && !hasHier) return false;
   int afterLL = hasSt ? st : hier;
   if (hasHier && ncclSymkGfx1250AllGatherPrefersHier(comm->nRanks, inputs->nBytes)) return kernelId != hier;

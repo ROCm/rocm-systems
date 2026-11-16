@@ -21,8 +21,6 @@
 
 namespace hip {
 hipError_t ihipFree(void* ptr);
-// forward declaration of methods required for managed variables
-hipError_t ihipMallocManaged(void** ptr, size_t size, size_t align = 0, bool use_host_ptr = 0);
 
 hipError_t DynCO::loadCodeObject(const char* fname, const void* image, bool init_global_vars,
                                  std::vector<char>* image_storage) {
@@ -55,8 +53,8 @@ DynCO::~DynCO() {
 
   for (auto& elem : vars_) {
     if (elem.second->GetVarKind() == Var::DVK_Managed) {
-      hipError_t err = ihipFree(elem.second->GetManagedVarPtr());
-      assert(err == hipSuccess);
+      [[maybe_unused]] hipError_t err = ihipFree(elem.second->GetManagedVarPtr());
+      assert(err == hipSuccess && "Failed to free managed variable pointer");
     }
 
     delete elem.second;
@@ -191,7 +189,8 @@ hipError_t DynCO::initDynManagedVars(const std::string& managedVar) {
     return status;
   }
   // Allocate managed memory for these symbols
-  status = ihipMallocManaged(&pointer, mem->getSize(), 0, 0);
+  status = ihipMallocManaged(&pointer, mem->getSize(), 0, /*use_host_ptr=*/false,
+                             ManagedMemOwner::kModuleVariable);
   guarantee(status == hipSuccess, "Status %d, failed to allocate managed memory", status);
 
   // update as manager variable and set managed memory pointer and size
@@ -247,7 +246,7 @@ hipError_t DynCO::populateDynGlobalVars() {
 
   for (auto& elem : var_names) {
     vars_.insert(
-        std::make_pair(elem, new Var(elem, Var::DeviceVarKind::DVK_Variable, 0, 0, 0, nullptr)));
+        std::make_pair(elem, new Var(elem, Var::DeviceVarKind::DVK_Variable, 0, nullptr)));
   }
 
   for (auto& elem : var_names) {
@@ -414,7 +413,7 @@ hipError_t StatCO::RemoveFatBinary(FatBinaryInfo** module) {
   auto managedVarsIter = managedVars_.find(module);
   if (managedVarsIter != managedVars_.end()) {
     for (auto& managedVar : managedVarsIter->second) {
-      hipError_t err = hipSuccess;
+      [[maybe_unused]] hipError_t err = hipSuccess;
       if (managedVar->IsManagedVarMapped()) {
         err = ihipFree(*(static_cast<void**>(managedVar->GetManagedVarPtr())));
       } else {

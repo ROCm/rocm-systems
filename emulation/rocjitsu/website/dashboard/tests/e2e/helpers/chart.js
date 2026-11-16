@@ -38,11 +38,11 @@ export async function clickLastCompletedChartPoint(chart) {
     const point = await readChart(chart, (instance) => {
       const option = instance.getOption();
       const seriesIndex = option.series.findIndex((series) => series.type === 'line'
-        && series.data.some((point) => point?.record && Number.isFinite(point.value)));
+        && series.data.some((point) => point?.record && Number.isFinite(point.value[1])));
       const series = option.series[seriesIndex];
-      const index = series.data.findLastIndex((point) => point?.record && Number.isFinite(point.value));
+      const index = series.data.findLastIndex((point) => point?.record && Number.isFinite(point.value[1]));
       return {
-        position: instance.convertToPixel({ seriesIndex }, [option.xAxis[0].data[index], series.data[index].value]),
+        position: instance.convertToPixel({ seriesIndex }, series.data[index].value),
         mode: series.data[index].record.test.mode,
         width: instance.getWidth(), height: instance.getHeight(),
       };

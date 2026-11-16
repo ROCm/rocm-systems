@@ -292,6 +292,24 @@ struct DeviceIdentityConfig {
   PciDeviceConfig pci;    ///< Bus shape for PCI-attached front ends.
 };
 
+/// @brief Owned metadata for one selected system node, without its components.
+struct NodeDeviceIdentityConfig {
+  std::string local_node_id; ///< Resolved node selection retained independently of the parser.
+  std::vector<KfdDeviceConfig> devices; ///< Device identities in stable node-local ordinal order.
+  PciDeviceConfig pci;                  ///< Bus shape of the node's GPU profile.
+  uint32_t num_xcc = 0;                 ///< XCD count per GPU from the declarative topology.
+  bool publish_peer_links = true; ///< Whether active KFD metadata advertises legacy peer links.
+};
+
+/// @brief Read selected-node GPU metadata without constructing the simulator.
+/// @details Uses the same identity expansion and node selection as VM creation.
+/// Parsing, selection, and topology-count failures emit a diagnostic and return
+/// failure. Allocation exceptions propagate to the caller. A missing device
+/// identity remains marked absent; this does not validate execution resources.
+util::FailureOr<NodeDeviceIdentityConfig>
+load_node_device_identity_from_string(const std::string &json, const std::string &schema_text,
+                                      std::string_view node_id, util::DiagnosticEmitter emit_error);
+
 /// @brief Read only a config's device identity and bus shape.
 /// @details Building the topology allocates the whole simulated machine, which
 /// for a large part is gigabytes of register files. A front end that only needs
@@ -325,15 +343,15 @@ simdojo::ExecMode parse_exec_mode(const std::string &mode_str);
 /// @param schema_text FlatBuffers schema text.
 /// @param emit_error Destination for failure diagnostics.
 /// @returns Success, or failure with a diagnostic for file-reading, parsing,
-/// KFD/DBT device conversion, architecture/target validation, system-graph validation,
-/// node selection, component-range, link-expression, or execution-thread allocation
+/// KFD/DBT device conversion, architecture/target validation, CU resource limits, system-graph
+/// validation, node selection, component-range, link-expression, or execution-thread allocation
 /// errors. Other validation and allocation exceptions propagate.
 util::Result validate_config(const std::string &json_path, const std::string &schema_text,
                              util::DiagnosticEmitter emit_error);
 
 /// @brief Load simulation config from a JSON file.
 /// @details File-reading, parsing, KFD/DBT device conversion, architecture/target
-/// validation, system-graph validation, node selection, component-range,
+/// validation, CU resource limits, system-graph validation, node selection, component-range,
 /// link-expression, and execution-thread allocation failures emit a diagnostic and
 /// return failure. Other validation and allocation exceptions propagate.
 /// @param json_path Path to the JSON config file.
@@ -362,9 +380,9 @@ util::FailureOr<LoadedConfig> load_config(const std::string &json_path,
 
 /// @brief Load simulation config from a JSON string.
 /// @details Parsing, KFD/DBT device conversion, architecture/target validation,
-/// system-graph validation, node selection, component-range, link-expression, and
-/// execution-thread allocation failures emit a diagnostic and return failure.
-/// Other validation and allocation exceptions propagate.
+/// CU resource limits, system-graph validation, node selection, component-range, link-expression,
+/// and execution-thread allocation failures emit a diagnostic and return failure. Other validation
+/// and allocation exceptions propagate.
 /// @param json JSON configuration string.
 /// @param schema_text FlatBuffers schema text (the .fbs content).
 /// @param emit_error Destination for failure diagnostics.
