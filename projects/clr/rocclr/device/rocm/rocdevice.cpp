@@ -201,6 +201,12 @@ void Device::setupCpuAgent() {
   link_attrs.push_back(std::make_pair(LinkAttribute::kLinkLinkType, 0));
   if (findLinkInfo(cpu_agents_[0].fine_grain_pool, &link_attrs)) {
     isXgmi_ = (link_attrs[0].second == HSA_AMD_LINK_INFO_TYPE_XGMI);
+    // findLinkInfo stores -1 when there are zero hops. kLinkHopCount is a
+    // NUMA-distance estimate and is 0 when that distance is below one hop.
+    const bool cpu_link = link_attrs[0].second >= 0;
+    info_.largeBar_ = ROC_ENABLE_LARGE_BAR && cpu_link && !isAPU_;
+  } else {
+    info_.largeBar_ = false;
   }
 
   preferred_numa_node_ = index;
@@ -654,6 +660,10 @@ bool Device::create() {
     return false;
   }
 
+  // Query before Settings::create() since the threshold selection depends on it,
+  // and before setupCpuAgent() so large BAR can exclude APUs.
+  isAPU_ = agentIsAPU(bkendDevice_);
+
   setupCpuAgent();
 
   // Get Agent HDP Flush Register Memory
@@ -667,9 +677,6 @@ bool Device::create() {
 
   info_.hdpMemFlushCntl = hdpInfo.HDP_MEM_FLUSH_CNTL;
   info_.hdpRegFlushCntl = hdpInfo.HDP_REG_FLUSH_CNTL;
-
-  // Query before Settings::create() since the threshold selection depends on it.
-  isAPU_ = agentIsAPU(bkendDevice_);
 
   // Create HSA settings
   assert(!settings_);
@@ -858,14 +865,15 @@ hsa_status_t Device::iterateGpuMemoryPoolCallback(hsa_amd_memory_pool_t pool, vo
         } else if ((global_flag & HSA_REGION_GLOBAL_FLAG_COARSE_GRAINED) != 0) {
           dev->gpuvm_segment_ = pool;
 
-          // If cpu agent cannot access this pool, the device does not support large bar.
+          // WSL/Windows does not report CPU link hops the way KFD does. CPU
+          // access to this pool is the large-BAR signal there. An APU can
+          // access the pool because the memory is shared, so that stays false.
           hsa_amd_memory_pool_access_t tmp{};
           Hsa::agent_memory_pool_get_info(dev->cpu_agent_info_->agent, pool,
                                           HSA_AMD_AGENT_MEMORY_POOL_INFO_ACCESS, &tmp);
-
           if (tmp == HSA_AMD_MEMORY_POOL_ACCESS_NEVER_ALLOWED) {
             dev->info_.largeBar_ = false;
-          } else {
+          } else if (!dev->isAPU_) {
             dev->info_.largeBar_ = ROC_ENABLE_LARGE_BAR;
           }
 

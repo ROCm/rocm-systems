@@ -1176,7 +1176,7 @@ information, GPU status, and running processes.
 ~$ amd-smi
 +------------------------------------------------------------------------------+
 | AMD-SMI            27.2.0                                                    |
-| amdgpu Version:    6.19.14.31400000-2370381                                  |
+| amdgpu Version:    6.19.4                                                    |
 | ROCm Version:      10.2.0                                                    |
 | Platform:          Linux Baremetal                                           |
 |-------------------------------------+----------------------------------------|
@@ -1351,7 +1351,7 @@ GPU: 0
         PTL_FORMAT: N/A
     DRIVER:
         NAME: amdgpu
-        VERSION: 6.19.14.31400000-2370381
+        VERSION: 6.19.4
         OS_KERNEL_VERSION: 5.15.0-generic
     BOARD:
         MODEL_NUMBER: N/A

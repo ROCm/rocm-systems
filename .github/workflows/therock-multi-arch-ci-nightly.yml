@@ -46,8 +46,7 @@ jobs:
       # Limit GPU families for nightly CI: gfx94X, gfx950, gfx125X (Linux) and gfx1151 (Windows)
       linux_amdgpu_families: 'gfx94X,gfx950,gfx125X'
       windows_amdgpu_families: 'gfx1151'
-      linux_test_labels: ''
-      windows_test_labels: ''
+      pr_labels: ''
       prebuilt_stages: ''
       baseline_run_id: ''
       repository: ROCm/TheRock

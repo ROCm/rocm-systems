@@ -18,6 +18,8 @@ virtualMemoryManagement:
   Unit_hipMemRetainAllocationHandle_Capture: *level_default
   Unit_hipMemImportFromShareableHandle_Positive_Basic: *level_default
   Unit_hipMemImportFromShareableHandle_HostBackedAlloc: *level_default
+  Unit_hipMemImportFromShareableHandle_SelfImportReleaseKeepsAllocation: *level_default
+  Unit_hipMemImportFromShareableHandle_SelfImportReleaseAcrossRecycledVa: *level_default
   Unit_hipMemImportFromShareableHandle_Negative_Parameters: *level_default
   Unit_hipMemImportFromShareableHandle_MulProc_ChldUseHdl: *level_default
   Unit_hipMemImportFromShareableHandle_MulProc_ParntChldUseHdl: *level_default

@@ -33,24 +33,12 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - Identifies HBM Generation 4 VRAM, reported by `amdsmi_get_gpu_vram_info()`.
   - Also added the pre-existing `HBM3E` value to the Python `AmdSmiVramType` enum, which had been missing it.
 
-- **Added amdgpu version details to `amdsmi_get_gpu_driver_info()`**.  
-  - `driver_kernel_version` and `amdgpu_driver_version` split `/sys/module/amdgpu/version`, such as `6.19.14` and `31400000`. A 3-part version such as `6.19.4` fills only `driver_kernel_version`.
-  - `driver_build_version` reports the build number of the active DKMS package when its version matches the loaded module.
-  - `driver_full_version` is `driver_version` plus `-build` when the build is known, otherwise `driver_version`. `driver_version` is unchanged.
-  - On the WSL backend, `driver_full_version` is a copy of the WDDM `driver_version`.
-
 - **Added NPM (Node Power Management) power limit setting**.  
   - New `amd-smi set --node-power-limit`/`-n` to set the node-level power limit in watts (node-wide, not per-GPU).
   - New API: `amdsmi_set_npm_limit()`.
   - New `current_node_power` field in `amdsmi_npm_info_t` (returned by `amdsmi_get_npm_info()`), the current (instantaneous) node power in watts, queried once per node rather than once per GPU; `amd-smi node -p` now displays it when available.
   - New `max_node_power_limit` field in `amdsmi_npm_info_t` (returned by `amdsmi_get_npm_info()`), the platform max bound for `amdsmi_set_npm_limit()` requests.
   - `amdsmi_set_npm_limit()` rejects the request with `AMDSMI_STATUS_INVAL` when NPM is disabled on the node (`amdsmi_npm_info_t::status == AMDSMI_NPM_STATUS_DISABLED`), instead of writing a limit that would have no defined effect. `amd-smi set --node-power-limit` performs the same check up front to fail fast with a friendlier message.
-
-- **Added amdgpu version details to `amdsmi_get_gpu_driver_info()`**.  
-  - `driver_kernel_version` and `amdgpu_driver_version` split `/sys/module/amdgpu/version`, such as `6.19.14` and `31400000`. A 3-part version such as `6.19.4` fills only `driver_kernel_version`.
-  - `driver_build_version` reports the build number of the active DKMS package when its version matches the loaded module.
-  - `driver_full_version` is `driver_version` plus `-build` when the build is known, otherwise `driver_version`. `driver_version` is unchanged.
-  - On the WSL backend, `driver_full_version` is a copy of the WDDM `driver_version`.
 
 - **Added NPM (Node Power Management) balancing mode get/set**.  
   - New `amdsmi_npm_balancing_mode_t` enum: `AMDSMI_NPM_BALANCING_MODE_POWER_BALANCING` (PB, the default) or `AMDSMI_NPM_BALANCING_MODE_FREQUENCY_BALANCING` (FB).
@@ -62,27 +50,6 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Added a receipt timestamp to `amd-smi event` records**.
   - `AmdSmiEventReader.read()` now attaches a `timestamp` (Unix epoch seconds) to every event record, and the `event` subcommand surfaces it as a `TIMESTAMP` field so events can be correlated across streams.
   - Human-readable output renders one indented block per event (including `TIMESTAMP`); `--csv` writes the header once followed by a row per event, and `--json` emits newline-delimited JSON (one object per line).
-
-- **Added the fabric PPoD/vPoD/DF-station configuration write APIs**.  
-  - New APIs: `amdsmi_set_gpu_fabric_ppod_config()`, `amdsmi_set_gpu_fabric_vpod_config()`, `amdsmi_set_gpu_fabric_station_config()`.
-  - New structures: `amdsmi_fabric_ppod_config_t`, `amdsmi_fabric_vpod_config_t`, `amdsmi_fabric_station_config_t`, and the `amdsmi_fabric_ppod_data_t`, `amdsmi_fabric_vpod_data_t`, `amdsmi_fabric_station_data_t` payloads they share with `amdsmi_get_gpu_fabric_info()`.
-  - New enums: `amdsmi_fabric_config_version_t`, `amdsmi_fabric_ppod_field_t`, `amdsmi_fabric_vpod_field_t`, `amdsmi_fabric_df_field_t`. Each config carries a `mask` selecting the fields to write and a `commit` flag.
-  - `commit == false` validates the request and writes nothing. The driver ignores the staging files unless a commit follows, so values left there would only be picked up by the next commit.
-  - `mask` must select at least one field. A request with `mask == 0` returns `AMDSMI_STATUS_INVAL` even when `commit` is set, so a bare commit cannot flush whatever a prior partial write left staged.
-  - A committing request compares the write subtree against the flat surface before it writes anything and logs any field already pending, since the driver applies everything staged rather than only the fields the request named. The check is observational and never changes the result; enable debug logging to see the report.
-
-- **Added `amdsmi_fabric_info_v2_t`, a second layout for `amdsmi_get_gpu_fabric_info()`**.  
-  - Groups the version 1 fields into the `ppod`/`vpod`/`station` payloads shared with the write APIs above, and exposes the DF/station data (`station_flags`, `num_stations`, `lane_en_bitmap`) and `local_accelerator_count`, none of which have a version 1 equivalent.
-  - New enum `amdsmi_fabric_info_version_t` selects the layout. Set `fabric_version` to `AMDSMI_FABRIC_INFO_VERSION_2` before the call to receive the new layout:
-
-    ```c
-    amdsmi_fabric_info_t info = {0};   /* C++: amdsmi_fabric_info_t info = {}; */
-    info.fabric_version = AMDSMI_FABRIC_INFO_VERSION_2;
-    amdsmi_get_gpu_fabric_info(handle, &info);
-    ```
-
-  - Adds `ppod_mask`, `vpod_mask`, and `station_mask`, reporting which fields the call actually read. A clear bit means the corresponding field holds its sentinel, which distinguishes "not published by the driver" from a real value that happens to equal the sentinel. The three words are carved from the existing `reserved` array, so `sizeof(amdsmi_fabric_info_v2_t)` is unchanged.
-  - The Python `amdsmi_get_gpu_fabric_info()` requests the new layout automatically; its dictionary gains the three mask keys and is otherwise unchanged.
 
 ### Changed
 
@@ -159,9 +126,6 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **NPM sysfs numeric reads (e.g. `cur_node_power_limit`, `max_node_power_limit`) now reject negative or malformed content**.  
   - Previously a leading `-` (e.g. `"-1"`) parsed successfully as `UINT64_MAX`; such content now fails with `RSMI_STATUS_UNEXPECTED_DATA`.
 
-- **`amd-smi`, `amd-smi version`, and `amd-smi static --driver` include the DKMS build in the amdgpu version**.  
-  - For example `6.19.14.31400000-2370381`. Labels and JSON/CSV keys are unchanged.
-
 - **`amd-smi metric` no longer prints fields the GPU's `gpu_metrics` table version cannot carry** (human-readable output only).  
   - These fields previously printed as `N/A` and are now omitted from human-readable output. On a metrics v1.3 GPU this removes 88 of the 110 `N/A` values in `amd-smi metric -g 0` (80%), taking the command from 140 lines to 95.
   - **Fields that stop appearing on current accelerators.** On the metrics v1.6 and later tables, which cover MI300X, MI325X and MI355X, the `POWER` section loses `THROTTLE_STATUS` and the `USAGE` section loses `MM_ACTIVITY`, `VCN_ACTIVITY` and `JPEG_ACTIVITY`. Naming the section does not bring them back, so `amd-smi metric --power` no longer prints `THROTTLE_STATUS` and `amd-smi metric --usage` no longer prints the three activity rows. On a metrics v1.3 GPU plain `amd-smi metric` instead drops the whole `THROTTLE` section, and `THROTTLE_STATUS` is still printed. **`--show-unsupported` restores all of them**, and `--json` and `--csv` never stopped emitting them.
@@ -174,14 +138,6 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **`amd-smi static` shows NUMA information on Linux guests**.  
   - `--numa` was previously limited to Linux baremetal and passthrough guests.
   - Default `amd-smi static` output on guests now includes NUMA, in human-readable, JSON, and CSV output.
-
-- **`amdsmi_fabric_info_t::fabric_version` is now an in/out layout selector**.  
-  - On input it names the union member `amdsmi_get_gpu_fabric_info()` fills; on output it reports the member that was filled. Any value other than `AMDSMI_FABRIC_INFO_VERSION_2` selects `amdsmi_fabric_info_v1_t`, so a zero-initialized structure and one left uninitialized both yield the version 1 layout. An unrecognized value is not an error.
-  - `amdsmi_fabric_info_v1_t` and its field offsets are unchanged and now frozen; on the version 1 path no byte past that union member is written, including the trailing `reserved` words. Existing binaries need no recompile.
-  - `sizeof(amdsmi_fabric_info_t)` grows from 320 to 552 bytes to accommodate `amdsmi_fabric_info_v2_t`. Code that allocates the structure by name is unaffected after a recompile; code that hardcodes the size or serializes the structure whole must be updated.
-
-- **`amdsmi_get_gpu_fabric_info()` reports an over-length accelerator list as absent instead of truncating it**.  
-  - `vpod_active_accelerators` and `local_accelerators` previously kept as many IDs as the array holds and dropped the rest. Neither field carries a count that covers the drop, so a truncated list was indistinguishable from a complete one. A list longer than the array now leaves the field at its sentinel with the corresponding `vpod_mask` / `ppod_mask` bit clear.
 
 ### Removed
 
@@ -252,6 +208,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 - **Fixed a segmentation fault in the DRM example when run without root**.  
   - `amdsmi_get_gpu_accelerator_partition_profile_config()` returns `AMDSMI_STATUS_NO_PERM` without filling its output, and the example read `num_profiles` from that uninitialized structure, so the profile loop ran past the end of the `profiles` array on every GPU. The loop now runs only when the query succeeds.
+
+- **Fixed `amd-smi` using the `amdsmi` Python library of another ROCm install**.  
+  - When `ROCM_PATH` or `ROCM_HOME` named a different ROCm install, `amd-smi` loaded that install's library, so it either failed with an `AttributeError` or reported the other install's library and ROCm versions. `ROCM_PATH` and `ROCM_HOME` no longer redirect which `amdsmi` Python package `amd-smi` loads.
 
 ## amd_smi_lib for ROCm 10.1.0
 
