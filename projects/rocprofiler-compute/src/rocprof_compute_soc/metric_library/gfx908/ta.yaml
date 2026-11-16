@@ -58,7 +58,7 @@ ta.busy:
   name: Address Processing Unit Busy
   formula: 100 * SUM(TA_TA_BUSY_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
   unit: Percent
-  description: Percent of the total CU cycles the address processor was busy
+  description: Percent of the total CU cycles the address processor was busy.
 ta.data_processor_address_stall:
   name: Data-Processor -> Address Stall
   formula: 100 * SUM(TA_ADDR_STALLED_BY_TD_CYCLES_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)

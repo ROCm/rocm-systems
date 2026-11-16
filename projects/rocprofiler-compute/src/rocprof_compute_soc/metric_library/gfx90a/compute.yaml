@@ -12,7 +12,7 @@ compute.branch_util:
   description: >-
     Indicates what percent of the kernel's duration the branch unit was busy executing
     instructions. Computed as the ratio of the total number of cycles spent by the
-    scheduler issuing branch instructions over the total CU cycles
+    scheduler issuing branch instructions over the total CU cycles.
   peak: 100
 compute.f16_ops:
   name: F16 OPs
