@@ -172,12 +172,12 @@ whose actual target stays fixed while unrelated metadata moves. Removing every
 source getpc in the batch remains permitted. The check uses immutable source
 facts across queries and forks; it does not add CFG/liveness to pure replacement.
 
-Retained direct branches in every allocated executable section of a linked object
-are checked against storage moved by growth, including allocated sections and
-unsectioned loaded tails.
-A batch that changes the distance between a retained branch and its destination is
-rejected before publishing ELF bytes or sites. Branches whose source and target
-both stay fixed or move together remain supported. Only branches removed from
+Retained direct branches and section-tail fallthrough edges in every allocated
+executable section of a linked object are checked against storage moved by growth,
+including allocated sections and unsectioned loaded tails.
+A batch that changes the distance between a retained edge's source and destination
+is rejected before publishing ELF bytes or sites. Edges whose source and target
+both stay fixed or move together remain supported. Only edges removed from
 `.text` by the batch are excluded. Foreign sections are decoded separately without
 adding their offsets to the public `.text` index; incomplete or undecodable streams
 and supported dynamic loader writes into executable bytes reject admission.
@@ -195,8 +195,13 @@ multiple probes for one replacement, and other conflicting duplicates reject.
 Distinct observation and replacement sites share one atomic batch. The normal
 probe ABI, resource, scratch and wrapper gates apply when a probe is requested;
 a pure replacement needs no probe or liveness.
-The callable-probe MOVREL check runs on the effective guest blocks, including
-relative SGPR accesses introduced only by replacement bodies.
+Replacement batches with callable probes reject effective CFGs with missing
+successors or indirect/call-return flows that the current liveness scope does not
+model. This check follows the private replacement layout, so removing an unsafe
+edge can make a batch admissible. Probe-free replacements retain their existing
+structural and growth checks. The callable-probe MOVREL check also runs on the
+effective guest blocks, including relative SGPR accesses introduced only by
+replacement bodies.
 
 Before probe planning, all replacements are laid out privately using the same
 TrampolineBuilder and CodeObjectPatcher used for final output. Fresh CFG/liveness
