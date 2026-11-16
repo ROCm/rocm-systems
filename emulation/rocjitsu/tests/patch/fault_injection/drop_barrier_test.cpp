@@ -148,6 +148,82 @@ TEST_P(FaultDropBarrierFamily, SelectorUsesLogicalOrderExactPrecedenceAndImmutab
       matches_drop_output(context, exact.value(), repeated.value().image, error).succeeded());
 }
 
+TEST(FaultDropBarrier, SourceFactsDoNotRequireBarrierQualification) {
+  for (const std::vector<uint32_t> &words :
+       {std::vector<uint32_t>{kMov, kEnd}, std::vector<uint32_t>{kSignal, kEnd}}) {
+    const FaultMutationContext context(make_gfx1250_barrier_elf(words));
+    FaultMutationError error;
+    const FailureOr<const FaultSourceFacts *> facts = context.source_facts("test_kernel", error);
+    ASSERT_TRUE(facts.succeeded()) << error.message;
+    EXPECT_EQ(facts.value()->owner.entry, "test_kernel");
+    EXPECT_EQ(facts.value()->descriptor.entry_text_offset, facts.value()->owner.entry_offset);
+    ASSERT_NE(facts.value()->boundaries, nullptr);
+    ASSERT_FALSE(facts.value()->blocks.empty());
+    const FailureOr<FaultBarrierInventory> inventory =
+        discover_drop_barriers(context, "test_kernel", error);
+    if (words.front() == kSignal) {
+      EXPECT_TRUE(inventory.failed());
+      EXPECT_EQ(error.code, FaultMutationErrorCode::IncompleteSelection);
+    } else {
+      ASSERT_TRUE(inventory.succeeded()) << error.message;
+      EXPECT_TRUE(inventory.value().barriers().empty());
+    }
+    const FailureOr<const FaultSourceFacts *> again = context.source_facts("test_kernel", error);
+    ASSERT_TRUE(again.succeeded()) << error.message;
+    EXPECT_EQ(facts.value(), again.value());
+  }
+}
+
+TEST(FaultDropBarrier, SourceFactsDoNotRequireDropTargetPolicy) {
+  const DropTargetRow row = {.name = "gfx90a",
+                             .target = ROCJITSU_CODE_TARGET_GFX90A,
+                             .arch = IsaFamily::Cdna2,
+                             .wave_size = 64,
+                             .split = false};
+  ASSERT_FALSE(static_barrier_policy(row.target));
+  const std::vector<uint8_t> image =
+      make_barrier_elf_for_target(row, {checked_encoding(build_s_endpgm(row.arch))});
+  for (const bool drop_first : {false, true}) {
+    SCOPED_TRACE(drop_first);
+    const FaultMutationContext context(image);
+    ASSERT_EQ(context.source().target_id(), row.target);
+    FaultMutationError error;
+    if (drop_first) {
+      EXPECT_TRUE(discover_drop_barriers(context, "test_kernel", error).failed());
+      EXPECT_EQ(error.code, FaultMutationErrorCode::UnsupportedTarget);
+    }
+    const FailureOr<const FaultSourceFacts *> facts = context.source_facts("test_kernel", error);
+    ASSERT_TRUE(facts.succeeded()) << error.message;
+    EXPECT_EQ(facts.value()->owner.entry, "test_kernel");
+    ASSERT_NE(facts.value()->boundaries, nullptr);
+    EXPECT_FALSE(facts.value()->blocks.empty());
+    FailureOr<std::unique_ptr<Instrumentor>> fork = context.fork_instrumentor(error);
+    ASSERT_TRUE(fork.succeeded()) << error.message;
+    const Instrumentor::ValidationResult validation = fork.value()->validate_points();
+    EXPECT_TRUE(validation.errors.empty());
+    EXPECT_TRUE(validation.sites.empty());
+    EXPECT_TRUE(discover_drop_barriers(context, "test_kernel", error).failed());
+    EXPECT_EQ(error.code, FaultMutationErrorCode::UnsupportedTarget);
+    const FailureOr<const FaultSourceFacts *> again = context.source_facts("test_kernel", error);
+    ASSERT_TRUE(again.succeeded()) << error.message;
+    EXPECT_EQ(facts.value(), again.value());
+  }
+}
+
+TEST(FaultDropBarrier, SourceForksHaveIndependentQueues) {
+  const FaultMutationContext context(make_gfx1250_barrier_elf({kMov, kEnd}));
+  FaultMutationError error;
+  FailureOr<std::unique_ptr<Instrumentor>> first = context.fork_instrumentor(error);
+  ASSERT_TRUE(first.succeeded()) << error.message;
+  first.value()->add_point_by_offset(0xffffffffu);
+  EXPECT_FALSE(first.value()->validate_points().errors.empty());
+  FailureOr<std::unique_ptr<Instrumentor>> second = context.fork_instrumentor(error);
+  ASSERT_TRUE(second.succeeded()) << error.message;
+  const Instrumentor::ValidationResult validation = second.value()->validate_points();
+  EXPECT_TRUE(validation.errors.empty());
+  EXPECT_TRUE(validation.sites.empty());
+}
+
 TEST(FaultDropBarrier, SelectorRejectsEmptyOutOfRangeAndUnboundExact) {
   FaultMutationError error;
   const FaultMutationContext empty(make_gfx1250_barrier_elf({kMov, kEnd}));

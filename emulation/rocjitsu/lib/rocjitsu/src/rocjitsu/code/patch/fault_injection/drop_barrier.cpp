@@ -37,6 +37,20 @@ Result reject(FaultMutationError &error, FaultMutationErrorCode code, std::strin
   return Result::failure();
 }
 
+Result validate_source_header(std::span<const uint8_t> image, Elf64_Ehdr &header,
+                              FaultMutationError &error) {
+  if (image.size() < sizeof(header))
+    return reject(error, FaultMutationErrorCode::UnsupportedForm, "truncated ELF header");
+  std::memcpy(&header, image.data(), sizeof(header));
+  if (std::memcmp(header.e_ident, EI_MAGIC, EI_MAGIC_SIZE) != 0 ||
+      header.e_ident[EI_CLASS] != ELFCLASS64 || header.e_ident[EI_DATA] != ELFDATA2LSB ||
+      header.e_ident[EI_OSABI] != ELFOSABI_AMDGPU_HSA || header.e_type != ET_DYN ||
+      header.e_machine != EM_AMDGPU)
+    return reject(error, FaultMutationErrorCode::UnsupportedForm,
+                  "expected little-endian AMDHSA ET_DYN ELF64");
+  return Result::success();
+}
+
 FaultMutationError translate_edit_error(const TextEditError &edit) {
   if (edit.code == TextEditErrorCode::UnsupportedTarget)
     return {.code = FaultMutationErrorCode::UnsupportedTarget,
@@ -149,6 +163,9 @@ public:
   std::once_flag analysis_once;
   FaultMutationError error; // Whole-image admission/ownership failure, shared by every discovery.
   bool analysis_ok = false;
+  std::vector<std::unique_ptr<BasicBlock>> blocks;
+  std::vector<FaultSourceFacts> sources;
+  std::once_flag drop_once;
   std::vector<std::shared_ptr<const FaultBarrierRecord>> kernels;
   // Borrow the context's source; forks share these pristine facts, not attempt state.
   std::unique_ptr<Instrumentor> instrumentor;
@@ -231,24 +248,15 @@ Result FaultMutationContext::analyze() const {
   const AmdGpuCodeObject &object = source();
   const rj_code_target_id_t target = object.target_id();
   Elf64_Ehdr header = {};
-  if (image.size() < sizeof(header))
-    return reject(error, FaultMutationErrorCode::UnsupportedForm, "truncated ELF header");
-  std::memcpy(&header, image.data(), sizeof(header));
-  if (std::memcmp(header.e_ident, EI_MAGIC, EI_MAGIC_SIZE) != 0 ||
-      header.e_ident[EI_CLASS] != ELFCLASS64 || header.e_ident[EI_DATA] != ELFDATA2LSB ||
-      header.e_ident[EI_OSABI] != ELFOSABI_AMDGPU_HSA || header.e_type != ET_DYN ||
-      header.e_machine != EM_AMDGPU)
-    return reject(error, FaultMutationErrorCode::UnsupportedForm,
-                  "expected little-endian AMDHSA ET_DYN ELF64");
+  if (validate_source_header(image, header, error).failed())
+    return Result::failure();
   const IsaTargetRegistry &registry = default_isa_target_registry();
   const IsaTargetDescriptor *target_facts = registry.find(target);
   const IsaTargetBinding *binding = registry.find_target(target);
-  const std::optional<StaticBarrierPolicy> policy = static_barrier_policy(target, registry);
-  if (!target_facts || !binding || !policy ||
-      (header.e_flags & EF_AMDGPU_MACH) != binding->elf_machine ||
+  if (!target_facts || !binding || (header.e_flags & EF_AMDGPU_MACH) != binding->elf_machine ||
       (header.e_flags & ~uint32_t{0xfff}) != 0)
     return reject(error, FaultMutationErrorCode::UnsupportedTarget,
-                  "requires a registered complete-barrier target with matching ELF flags");
+                  "requires a registered target with matching ELF flags");
   if (!object.is_valid())
     return reject(error, FaultMutationErrorCode::UnsupportedForm, "invalid code object");
   if (object.text_sections().size() != 1)
@@ -432,24 +440,79 @@ Result FaultMutationContext::analyze() const {
                         "indirect owner is unsupported", instruction.src_loc());
       }
     }
-    // Ownership failures reject the whole profile. Once this scope is exclusive,
-    // cache its wave/form error or qualified barriers in an immutable record so
-    // an unsupported sibling barrier does not disqualify an independent kernel.
+    state_->sources.push_back({.section = {.index = *text.sectionHeaderIndex(),
+                                           .file_offset = text.sectionOffset(),
+                                           .vaddr = text.vaddr(),
+                                           .size = text.size()},
+                               .owner = {.entry = owner.kernel_name,
+                                         .entry_offset = owner.entry_text_offset,
+                                         .descriptor_file_offset = owner.descriptor_file_offset},
+                               .descriptor = owner,
+                               .blocks = std::move(scope),
+                               .boundaries = boundaries});
+  }
+  if (block_owners.size() != blocks.value().size())
+    return reject(error, FaultMutationErrorCode::UnsupportedForm, "unresolved code ownership");
+  state_->blocks = std::move(blocks).value();
+  return Result::success();
+}
+
+FailureOr<const FaultSourceFacts *>
+FaultMutationContext::source_facts(std::string_view entry, FaultMutationError &error) const {
+  error = {};
+  std::call_once(state_->analysis_once, [&] { state_->analysis_ok = analyze().succeeded(); });
+  if (!state_->analysis_ok) {
+    error = state_->error;
+    return Result::failure();
+  }
+  const std::ptrdiff_t matches = std::ranges::count_if(
+      state_->sources, [&](const FaultSourceFacts &facts) { return facts.owner.entry == entry; });
+  if (matches > 1)
+    return reject(error, FaultMutationErrorCode::AmbiguousSelection,
+                  "exact entry name identifies multiple descriptors");
+  if (entry.empty() || matches == 0) {
+    std::string message = "entry must match one exact kernel name; descriptor entries:";
+    for (const FaultSourceFacts &facts : state_->sources)
+      message += " " + facts.owner.entry;
+    return reject(error, FaultMutationErrorCode::BadIdentity, std::move(message));
+  }
+  return &*std::ranges::find_if(
+      state_->sources, [&](const FaultSourceFacts &facts) { return facts.owner.entry == entry; });
+}
+
+FailureOr<std::unique_ptr<Instrumentor>>
+FaultMutationContext::fork_instrumentor(FaultMutationError &error) const {
+  error = {};
+  std::call_once(state_->analysis_once, [&] { state_->analysis_ok = analyze().succeeded(); });
+  if (!state_->analysis_ok) {
+    error = state_->error;
+    return Result::failure();
+  }
+  TextEditError edit_error;
+  FailureOr<std::unique_ptr<Instrumentor>> fork = state_->instrumentor->fork(edit_error);
+  if (fork.failed()) {
+    error = translate_edit_error(edit_error);
+    return Result::failure();
+  }
+  return std::move(fork).value();
+}
+
+void FaultMutationContext::qualify_drop() const {
+  const rj_code_target_id_t target = source().target_id();
+  const IsaTargetRegistry &registry = default_isa_target_registry();
+  const IsaTargetDescriptor *target_facts = registry.find(target);
+  const std::optional<StaticBarrierPolicy> policy = static_barrier_policy(target, registry);
+  assert(target_facts && policy);
+  for (const FaultSourceFacts &facts : state_->sources) {
     auto record = std::make_shared<FaultBarrierRecord>();
-    record->section = {.index = *text.sectionHeaderIndex(),
-                       .file_offset = text.sectionOffset(),
-                       .vaddr = text.vaddr(),
-                       .size = text.size()};
-    record->owner = {.entry = owner.kernel_name,
-                     .entry_offset = owner.entry_text_offset,
-                     .descriptor_file_offset = owner.descriptor_file_offset};
+    record->section = facts.section;
+    record->owner = facts.owner;
     record->source = source_;
-    const uint32_t wave = kernel_wavefront_size(target_facts->family, owner.descriptor);
-    // The shared helper normalizes CDNA3/4 to Wave64 even if the raw Wave32 bit
-    // is set. Check that bit against family policy, independently of barrier form:
-    // RDNA3 full singletons admit both waves; CDNA3/4 full singletons do not.
+    const uint32_t wave = kernel_wavefront_size(target_facts->family, facts.descriptor.descriptor);
+    // CDNA3/4 normalize to Wave64 even when the raw Wave32 bit is set.
+    // Check that bit against the recipe's allowed wave sizes independently.
     const bool descriptor_requests_wave32 =
-        (owner.descriptor.kernel_code_properties &
+        (facts.descriptor.descriptor.kernel_code_properties &
          amdhsa::KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32) != 0;
     if (std::ranges::find(policy->wave_sizes, wave) == policy->wave_sizes.end() ||
         (descriptor_requests_wave32 &&
@@ -460,7 +523,7 @@ Result FaultMutationContext::analyze() const {
     } else {
       StaticBarrierError barrier_error;
       FailureOr<std::vector<StaticBarrier>> barriers =
-          qualify_static_barriers(scope, target, *boundaries, barrier_error);
+          qualify_static_barriers(facts.blocks, target, *facts.boundaries, barrier_error);
       if (barriers.failed()) {
         record->error = {.code = barrier_error.code == StaticBarrierErrorCode::IncompleteBarrier
                                      ? FaultMutationErrorCode::IncompleteSelection
@@ -476,21 +539,30 @@ Result FaultMutationContext::analyze() const {
     }
     state_->kernels.push_back(std::move(record));
   }
-  if (block_owners.size() != blocks.value().size())
-    return reject(error, FaultMutationErrorCode::UnsupportedForm, "unresolved code ownership");
-  return Result::success();
 }
 
 FailureOr<FaultBarrierInventory> discover_drop_barriers(const FaultMutationContext &context,
                                                         std::string_view entry,
                                                         FaultMutationError &error) {
   error = {};
-  std::call_once(context.state_->analysis_once,
-                 [&] { context.state_->analysis_ok = context.analyze().succeeded(); });
-  if (!context.state_->analysis_ok) {
-    error = context.state_->error;
+  // Preserve header and recipe-policy error precedence before structural analysis.
+  const std::span<const uint8_t> image = context.image();
+  Elf64_Ehdr header = {};
+  if (validate_source_header(image, header, error).failed())
     return Result::failure();
-  }
+  const rj_code_target_id_t target = context.source().target_id();
+  const IsaTargetRegistry &registry = default_isa_target_registry();
+  const IsaTargetDescriptor *target_facts = registry.find(target);
+  const IsaTargetBinding *binding = registry.find_target(target);
+  if (!target_facts || !binding || !static_barrier_policy(target, registry) ||
+      (header.e_flags & EF_AMDGPU_MACH) != binding->elf_machine ||
+      (header.e_flags & ~uint32_t{0xfff}) != 0)
+    return reject(error, FaultMutationErrorCode::UnsupportedTarget,
+                  "requires a registered complete-barrier target with matching ELF flags");
+  const FailureOr<const FaultSourceFacts *> facts = context.source_facts(entry, error);
+  if (facts.failed())
+    return Result::failure();
+  std::call_once(context.state_->drop_once, [&] { context.qualify_drop(); });
   // First choose one exact kernel record; ambiguous names never select the first.
   // Logical-barrier ordering and exact-handle precedence apply within that record.
   const std::vector<std::shared_ptr<const FaultBarrierRecord>> &kernels = context.state_->kernels;
@@ -537,12 +609,9 @@ FailureOr<DropBarrierResult> apply_drop_barrier(const FaultMutationContext &cont
   // Only successful analyze/discover can produce a bound selection. That path
   // admits the immutable source target and initializes the shared source facts.
   assert(target && context.state_->instrumentor);
-  TextEditError edit_error;
-  FailureOr<std::unique_ptr<Instrumentor>> fork = context.state_->instrumentor->fork(edit_error);
-  if (fork.failed()) {
-    error = translate_edit_error(edit_error);
+  FailureOr<std::unique_ptr<Instrumentor>> fork = context.fork_instrumentor(error);
+  if (fork.failed())
     return Result::failure();
-  }
   std::unique_ptr<Instrumentor> instrumentor = std::move(fork).value();
   const FailureOr<uint32_t> encoded_nop = build_s_nop(0, target->family);
   if (encoded_nop.failed())

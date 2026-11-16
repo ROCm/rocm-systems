@@ -4,6 +4,7 @@
 #pragma once
 
 #include "rocjitsu/code/analysis/static_barriers.h"
+#include "rocjitsu/code/kernel_descriptor_scan.h"
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/result.h"
@@ -20,6 +21,9 @@
 namespace rocjitsu {
 
 class AmdGpuCodeObject;
+class BasicBlock;
+class InstructionBoundaries;
+class Instrumentor;
 
 enum class FaultMutationKind { DropBarrier };
 enum class FaultMutationErrorCode {
@@ -55,6 +59,17 @@ public:
   bool operator==(const FaultMutationOwner &) const = default;
 };
 
+/// @brief Facts for one independently owned, closed direct-CFG kernel.
+/// @details Views and block pointers borrow the context; they must not outlive it.
+/// The blocks are analysis inputs and must not be mutated by consumers.
+struct FaultSourceFacts {
+  FaultMutationSection section;
+  FaultMutationOwner owner;
+  KernelDescriptorInfo descriptor;
+  std::vector<BasicBlock *> blocks;
+  const InstructionBoundaries *boundaries = nullptr;
+};
+
 class FaultBarrierInventory;
 class DropBarrierSelection;
 struct FaultBarrierRecord;
@@ -80,9 +95,21 @@ public:
   const AmdGpuCodeObject &source() const { return *source_; }
   std::span<const uint8_t> image() const;
 
+  /// @brief Create a fresh request queue bound to the admitted pristine source.
+  /// @details The context must outlive the returned Instrumentor. Forks share only
+  /// immutable source facts; queues and patch attempts are independent.
+  [[nodiscard]] FailureOr<std::unique_ptr<Instrumentor>>
+  fork_instrumentor(FaultMutationError &error) const;
+
+  /// @brief Find source facts independently of any fault recipe.
+  /// @details The returned pointer and its views remain valid only while this context lives.
+  [[nodiscard]] FailureOr<const FaultSourceFacts *> source_facts(std::string_view entry,
+                                                                 FaultMutationError &error) const;
+
 private:
   class State;
   Result analyze() const;
+  void qualify_drop() const;
   // This context is the sole persistent strong source owner. The shared control block
   // lets records/selections observe expiry via weak_ptr, including after address reuse.
   const std::shared_ptr<const AmdGpuCodeObject> source_;
