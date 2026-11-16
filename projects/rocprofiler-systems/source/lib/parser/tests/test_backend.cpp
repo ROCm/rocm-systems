@@ -3,6 +3,7 @@
 
 #include "parser/backend.hpp"
 #include "parser/schema.hpp"
+#include "parser/value_text.hpp"
 
 #include <gtest/gtest.h>
 
@@ -128,7 +129,7 @@ TEST(parser_backend, choices_and_the_default_follow_the_parameter)
     EXPECT_FALSE(domains->accepts(domain_row, ""));
 }
 
-TEST(parser_backend, a_list_accepts_each_delimiter)
+TEST(parser_backend, a_list_follows_the_list_rules_of_every_source)
 {
     backend_registry registry;
     add_domains(registry);
@@ -136,29 +137,29 @@ TEST(parser_backend, a_list_accepts_each_delimiter)
     ASSERT_NE(domains, nullptr);
     const auto param = make_param("domains", param_type::enumeration_list);
 
-    EXPECT_TRUE(domains->accepts(param, "kernel_dispatch hip_api"));
     EXPECT_TRUE(domains->accepts(param, "kernel_dispatch,hip_api"));
-    EXPECT_TRUE(domains->accepts(param, "kernel_dispatch;hip_api"));
-    EXPECT_TRUE(domains->accepts(param, "kernel_dispatch:hip_api"));
-    EXPECT_TRUE(domains->accepts(param, "kernel_dispatch\thip_api"));
-    EXPECT_TRUE(domains->accepts(param, "kernel_dispatch\nhip_api"));
-    EXPECT_TRUE(domains->accepts(param, "kernel_dispatch,,hip_api"));
-    EXPECT_FALSE(domains->accepts(param, "kernel_dispatch, not_a_domain"));
+    EXPECT_TRUE(domains->accepts(param, " kernel_dispatch , hip_api "));
+    EXPECT_TRUE(domains->accepts(param, "kernel_dispatch,"));
     EXPECT_TRUE(domains->accepts(param, ""));
+    EXPECT_FALSE(domains->accepts(param, "kernel_dispatch hip_api"));
+    EXPECT_FALSE(domains->accepts(param, "kernel_dispatch;hip_api"));
+    EXPECT_FALSE(domains->accepts(param, "kernel_dispatch,,hip_api"));
+    EXPECT_FALSE(domains->accepts(param, ","));
+    EXPECT_FALSE(domains->accepts(param, "kernel_dispatch, not_a_domain"));
 }
 
-TEST(parser_backend, a_string_with_a_delimiter_is_a_list)
+TEST(parser_backend, adds_its_names_to_the_rows_own_choices)
 {
     backend_registry registry;
     add_domains(registry);
     const auto* domains = registry.find("domains");
     ASSERT_NE(domains, nullptr);
-    const auto param = make_param("domains", param_type::string);
+    auto param    = make_param("domains", param_type::enumeration_list);
+    param.choices = { "all" };
 
-    EXPECT_TRUE(domains->accepts(param, "kernel_dispatch"));
-    EXPECT_TRUE(domains->accepts(param, "kernel_dispatch,hip_api"));
-    EXPECT_FALSE(domains->accepts(param, "kernel_dispatch,not_a_domain"));
-    EXPECT_TRUE(domains->accepts(param, ""));
+    EXPECT_TRUE(domains->accepts(param, "all"));
+    EXPECT_TRUE(domains->accepts(param, "all,hip_api"));
+    EXPECT_FALSE(domains->accepts(param, "all,bogus"));
 }
 
 TEST(parser_backend, allow_custom_accepts_unlisted_text)
@@ -175,7 +176,28 @@ TEST(parser_backend, allow_custom_accepts_unlisted_text)
 
     auto listed         = make_param("domains", param_type::enumeration_list);
     listed.allow_custom = true;
-    EXPECT_TRUE(domains->accepts(listed, "one;two"));
+    EXPECT_TRUE(domains->accepts(listed, "one,two"));
     EXPECT_TRUE(domains->accepts(listed, ""));
-    EXPECT_FALSE(domains->accepts(listed, " ,;"));
+    EXPECT_FALSE(domains->accepts(listed, "one,,two"));
+}
+
+TEST(parser_backend, a_backend_row_gets_the_verdict_of_a_row_that_lists_the_names)
+{
+    backend_registry registry;
+    add_domains(registry);
+    const auto* domains = registry.find("domains");
+    ASSERT_NE(domains, nullptr);
+    const auto from_backend = make_param("domains", param_type::enumeration_list);
+    auto       listed       = from_backend;
+    listed.backend.reset();
+    listed.choices = { "kernel_dispatch", "hip_api" };
+
+    for(const auto* text : { "hip_api", " hip_api , kernel_dispatch ", "hip_api,", ",",
+                             "hip_api,,kernel_dispatch", "hip_api bogus", "bogus", "" })
+    {
+        SCOPED_TRACE(text);
+        const bool stored_and_accepted = parse_value(from_backend, text).has_value() &&
+                                         domains->accepts(from_backend, text);
+        EXPECT_EQ(stored_and_accepted, accepts_text(listed, text));
+    }
 }

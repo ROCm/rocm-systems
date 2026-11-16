@@ -19,8 +19,9 @@ namespace rocprofsys::parser
  * Supplies the allowed values for a parameter whose schema names a backend.
  *
  * choices() and default_value() see the parameter, so one registered backend can
- * serve more than one catalog row. accepts() is the shared check: it compares a
- * value with choices() unless allow_custom is set.
+ * serve more than one catalog row. A row names one backend, and a backend can
+ * combine several sources, such as rocprofiler-sdk domains and the runtimes for
+ * --traces. accepts() is the shared check.
  */
 class backend
 {
@@ -41,12 +42,11 @@ public:
         const schema_param& param) const = 0;
 
     /**
-     * @return true when @p value is allowed for @p param.
-     * An enumeration must name one choice. An empty enumeration is refused.
-     * An enumeration_list, and a string that contains a delimiter, is split on
-     * space, comma, semicolon, colon, tab, and newline. Each element must be a
-     * choice. An empty list is allowed. With allow_custom, an enumeration may be
-     * any non-empty text and a list only needs one element.
+     * @return true when @p value is allowed for @p param: the text is read as
+     * parse_value() reads it, against the row's own choices and this backend's. A
+     * name neither lists is refused unless allow_custom is set, and a list follows the
+     * rules of any other enumeration_list, so "temp,,power" and "temp;power" are
+     * refused, and an empty list is allowed.
      */
     [[nodiscard]] bool accepts(const schema_param& param, std::string_view value) const;
 
