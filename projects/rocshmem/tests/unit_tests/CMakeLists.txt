@@ -78,7 +78,8 @@ if (USE_IPC)
   )
 endif()
 
-if (USE_IPC AND USE_TDM)
+if (USE_IPC AND (USE_TDM OR USE_LDS_STAGE))
+  # these also cover the async (non-TDM) backend
   target_sources(
     ${PROJECT_NAME}
     PRIVATE
