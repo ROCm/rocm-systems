@@ -551,6 +551,37 @@ class _UniqueKeyLoader(yaml.SafeLoader):
     so ``_load_yaml`` reports it as a parse failure) on the first repeat.
     """
 
+    def compose_node(self, parent, index):
+        # Reject a cyclic anchor/alias while still allowing an ordinary
+        # (non-cyclic) shared alias. ``yaml.safe_load`` composes a recursive node
+        # graph for a self-referential anchor (``a: &A {b: *A}``) and constructs a
+        # Python object that references itself; a later recursive walk of the
+        # document (for example ``_collect_incident_refs``) then cannot terminate.
+        # For a consistency checker that is a schema error: a testing document is
+        # a finite tree, never a cycle. An anchor is tracked from the moment its
+        # node begins composing until that node is fully composed, so an alias
+        # that resolves to an anchor still in progress (an ancestor of the current
+        # node) is a cyclic reference and is reported as a parse failure, whereas
+        # a non-cyclic alias - one that names an anchor already fully composed -
+        # is left untouched and resolves normally.
+        if not hasattr(self, "_composing_anchors"):
+            self._composing_anchors = set()
+        if self.check_event(yaml.events.AliasEvent):
+            anchor = self.peek_event().anchor
+            if anchor in self._composing_anchors:
+                raise yaml.composer.ComposerError(
+                    None, None,
+                    "found cyclic anchor {!r}".format(anchor),
+                    self.peek_event().start_mark)
+            return super().compose_node(parent, index)
+        anchor = self.peek_event().anchor
+        if anchor is not None:
+            self._composing_anchors.add(anchor)
+        node = super().compose_node(parent, index)
+        if anchor is not None:
+            self._composing_anchors.discard(anchor)
+        return node
+
     def construct_mapping(self, node, deep=False):
         seen = set()
         for key_node, _value_node in node.value:
@@ -576,11 +607,22 @@ class _UniqueKeyLoader(yaml.SafeLoader):
 
 
 def _load_yaml(path, errors):
+    # Read and decode first so a file that is not valid UTF-8 produces a
+    # deterministic load error rather than an uncaught UnicodeDecodeError: the
+    # testing documents are authored as UTF-8, and a stray non-UTF-8 byte (a
+    # bad copy/paste or a mis-encoded save) is a load failure, not a crash. The
+    # UnicodeDecodeError message is itself deterministic (it names the offending
+    # byte and position), so the reported error is stable across runs.
     try:
-        return yaml.load(Path(path).read_text(encoding="utf-8"),
-                         Loader=_UniqueKeyLoader)
+        text = Path(path).read_text(encoding="utf-8")
     except FileNotFoundError:
         errors.append("file not found: {}".format(path))
+        return None
+    except UnicodeDecodeError as exc:
+        errors.append("{} is not valid UTF-8: {}".format(path, exc))
+        return None
+    try:
+        return yaml.load(text, Loader=_UniqueKeyLoader)
     except yaml.YAMLError as exc:
         errors.append("{} does not parse as YAML: {}".format(path, exc))
     return None
@@ -688,12 +730,37 @@ def _path_token(value):
     return stripped.split()[0] if stripped else ""
 
 
-def _glob_matches(component_dir, pattern):
-    """True when pattern (component-relative, may use ** and ..) matches a path."""
+def _glob_location_status(component_dir, pattern, repo_root=None):
+    """Classify a glob pattern by whether its matches stay within the boundary.
+
+    Returns ``ok`` when the pattern (component-relative, may use ** and ..)
+    matches at least one path and every match resolves - following symlinks -
+    within the boundary root; ``outside`` when any match escapes the boundary (for
+    example a matched symlink whose target points out of the repository), so a
+    pattern that mixes in-boundary and escaping matches is rejected rather than
+    passing on the strength of a single safe match; and ``missing`` when the
+    pattern matches nothing. The boundary is the supplied ``repo_root`` when given
+    and otherwise the repository root two levels above the component directory
+    (see ``_boundary_root``). Resolving each match (not just the literal pattern
+    token) is what makes the check symlink-safe: the literal-location guard in
+    ``_path_location_status`` only rejects a ``..`` escape written into the
+    pattern, never a symlink that escapes the boundary at match time.
+    """
+    boundary = _boundary_root(component_dir, repo_root)
     try:
-        return any(glob.iglob(pattern, root_dir=str(component_dir), recursive=True))
+        matches = list(
+            glob.iglob(pattern, root_dir=str(component_dir), recursive=True))
     except (ValueError, OSError):
-        return False
+        return "missing"
+    if not matches:
+        return "missing"
+    for rel in matches:
+        resolved = (Path(component_dir) / rel).resolve()
+        try:
+            resolved.relative_to(boundary)
+        except ValueError:
+            return "outside"
+    return "ok"
 
 
 def _resolve_repo_path(component_dir, value, repo_root=None):
@@ -724,7 +791,10 @@ def _resolve_repo_path(component_dir, value, repo_root=None):
     if location != "ok":
         return location
     if any(ch in token for ch in _GLOB_CHARS):
-        return "ok" if _glob_matches(component_dir, token) else "missing"
+        # A glob is resolved by match, and each match must itself stay within the
+        # boundary (a matched symlink may escape it even when the literal pattern
+        # does not); an escaping match makes the whole pattern ``outside``.
+        return _glob_location_status(component_dir, token, repo_root)
     return "ok" if _path_exists(component_dir, token, repo_root) else "missing"
 
 

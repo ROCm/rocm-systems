@@ -282,6 +282,23 @@ class CheckTestingDocsTest(unittest.TestCase):
             msg=results["load"],
         )
 
+    def test_invalid_utf8_is_reported_deterministically(self):
+        # A document that is not valid UTF-8 must produce a deterministic load
+        # error rather than crashing the checker with an uncaught
+        # UnicodeDecodeError. The error is the same across repeated runs.
+        _write_docs(self.root)
+        (self.root / "test_inventory.yaml").write_bytes(
+            b"schema_version: 1\ncomponent: \xff\xfe not utf-8\n")
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("not valid UTF-8" in err for err in results["load"]),
+            msg=results["load"],
+        )
+        # The same invalid input yields an identical load result every run.
+        results_again, _ = checker.validate(root=str(self.root))
+        self.assertEqual(results["load"], results_again["load"],
+                         msg=results["load"])
+
     # -- top-level inventory schema: missing keys ----------------------------
 
     def test_missing_top_level_schema_version(self):
@@ -649,6 +666,38 @@ class CheckTestingDocsTest(unittest.TestCase):
         _write_docs(self.root, {"test_inventory.yaml": broken})
         results, _ = checker.validate(root=str(self.root))
         self.assertEqual(results["inventory"], [], msg=results["inventory"])
+
+    def test_glob_symlink_within_boundary_resolves(self):
+        # A glob that matches a symlink which resolves (following the link) to a
+        # file INSIDE the boundary is safe and resolves cleanly.
+        (self.root / "real_target.yml").write_text("x\n", encoding="utf-8")
+        os.symlink(self.root / "real_target.yml", self.root / "probe_link.yml")
+        broken = VALID_INVENTORY.replace(
+            '  suite_placement: "external: catch/*/CMakeLists.txt"\n',
+            "  suite_placement: probe_*.yml\n", 1)
+        _write_docs(self.root, {"test_inventory.yaml": broken})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertEqual(results["inventory"], [], msg=results["inventory"])
+
+    def test_glob_symlink_escaping_boundary_is_rejected(self):
+        # A glob that matches a mix of an in-boundary file and a symlink whose
+        # target resolves OUTSIDE the boundary must be rejected: a single safe
+        # match may not mask the escaping one.
+        outside = tempfile.TemporaryDirectory()
+        self.addCleanup(outside.cleanup)
+        outside_file = Path(outside.name) / "escape_target.yml"
+        outside_file.write_text("x\n", encoding="utf-8")
+        (self.root / "probe_safe.yml").write_text("x\n", encoding="utf-8")
+        os.symlink(outside_file, self.root / "probe_escape.yml")
+        broken = VALID_INVENTORY.replace(
+            '  suite_placement: "external: catch/*/CMakeLists.txt"\n',
+            "  suite_placement: probe_*.yml\n", 1)
+        _write_docs(self.root, {"test_inventory.yaml": broken})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("escapes repository root" in err for err in results["inventory"]),
+            msg=results["inventory"],
+        )
 
     def test_repository_path_absolute_value_is_rejected(self):
         broken = VALID_INVENTORY.replace(
@@ -1584,6 +1633,32 @@ class CheckTestingDocsTest(unittest.TestCase):
                 for err in results["load"]),
             msg=results["load"],
         )
+
+    # -- strict YAML loader rejects cyclic aliases ---------------------------
+
+    def test_cyclic_yaml_alias_is_rejected(self):
+        # A self-referential anchor/alias builds a recursive object graph that a
+        # later walk of the document cannot terminate on; the strict loader must
+        # reject it as a parse failure rather than returning a cyclic structure.
+        cyclic = "root: &anchor\n  child: *anchor\n" + VALID_INVENTORY
+        _write_docs(self.root, {"test_inventory.yaml": cyclic})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("does not parse as YAML" in err and "cyclic anchor" in err
+                for err in results["load"]),
+            msg=results["load"],
+        )
+
+    def test_noncyclic_yaml_alias_is_allowed(self):
+        # A non-cyclic alias refers to an already fully-composed anchor and is a
+        # legitimate YAML convenience; the cyclic rejection must not over-reach to
+        # an ordinary shared anchor, so the whole valid set still passes.
+        shared = VALID_INVENTORY.replace(
+            "  kind: [contract]\n", "  kind: [&c contract]\n", 1).replace(
+            "    kind: contract\n", "    kind: *c\n", 1)
+        _write_docs(self.root, {"test_inventory.yaml": shared})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertEqual(_all_errors(results), [], msg=results)
 
     # -- required inventory field type / nonempty constraints ----------------
 
