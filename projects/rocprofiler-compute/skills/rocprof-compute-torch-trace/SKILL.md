@@ -58,6 +58,7 @@ rocprof-compute profile --experimental --trace-ml-api jax --name <name> -- pytho
 ```
 
 A nested `jit` is one marker. Compiled calls are `jax.jit.<fn>`, `jax.pmap.<fn>`, and `jax.shard_map.<fn>`.
+Deprecated `pjit` compiled calls show as `jax.jit.<fn>`.
 
 All three combine as `--trace-ml-api torch triton jax`. User-defined ROCTx regions
 are included with every `--trace-ml-api` run. A bare `--trace-ml-api` traces
