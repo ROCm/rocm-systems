@@ -30,10 +30,8 @@ FACTORING_CASES = [
 ]
 
 
-@pytest.mark.parametrize(
-    "equation", ["Peak (Empirical)", "SUM(TO_INT(TCC_ATOMIC[::_1])) / SUM($denom)"]
-)
-def test_text_and_channel_templates_left_as_written(equation):
+def test_channel_templates_left_as_written():
+    equation = "SUM(TO_INT(TCC_ATOMIC[::_1])) / SUM($denom)"
     assert normalize_equation(equation) == equation
 
 

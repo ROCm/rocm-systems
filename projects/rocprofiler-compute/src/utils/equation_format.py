@@ -14,9 +14,6 @@ from dataclasses import dataclass
 from enum import Enum, auto
 from typing import List, Optional
 
-# Values that are text, not equations, such as the roofline column header
-LITERAL_VALUES = {"Peak (Empirical)"}
-
 # Aggregation functions where constants should be factored out
 AGGREGATION_FUNCTIONS = {"SUM", "MIN", "MAX", "AVG"}
 
@@ -33,7 +30,7 @@ def normalize_equation(equation: str) -> str:
 
     Raises ValueError when the equation cannot be parsed.
     """
-    if equation in LITERAL_VALUES or CHANNEL_PLACEHOLDER in equation:
+    if CHANNEL_PLACEHOLDER in equation:
         return equation
 
     return format_equation(parse_equation(equation))

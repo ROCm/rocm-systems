@@ -13,7 +13,6 @@ import config
 from rocprof_compute_soc.metric_library.loader import default_metric_library_dir
 from utils.equation_format import (
     CHANNEL_PLACEHOLDER,
-    LITERAL_VALUES,
     ASTNode,
     BinaryOpNode,
     FunctionCallNode,
@@ -57,7 +56,7 @@ def test_real_equations_round_trip():
     parenthesis written out and no spaces gives back the equation."""
     failures: List[str] = []
     for equation in sorted(real_equations()):
-        if equation in LITERAL_VALUES or CHANNEL_PLACEHOLDER in equation:
+        if CHANNEL_PLACEHOLDER in equation:
             continue
         written_out = fully_parenthesized(parse_equation(equation))
         normalized = normalize_equation(written_out)
