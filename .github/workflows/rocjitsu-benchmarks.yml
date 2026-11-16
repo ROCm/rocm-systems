@@ -197,13 +197,23 @@ jobs:
             PR_HEAD_BRANCH="$(jq -r '.head.ref' <<< "${PR_JSON}")"
             PR_HEAD_SHA="$(jq -r '.head.sha' <<< "${PR_JSON}")"
             PR_URL="$(jq -r '.html_url' <<< "${PR_JSON}")"
-            if [[ "${PR_STATE}" != open \
-                  || "${PR_BASE}" != "${BASE_BRANCH}" \
-                  || "${PR_HEAD_REPOSITORY}" != "${GITHUB_REPOSITORY}" \
-                  || "${PR_HEAD_BRANCH}" != "${BENCHMARK_BRANCH}" \
-                  || ! "${PR_HEAD_SHA}" =~ ^[0-9a-f]{40}$ \
-                  || "${PR_URL}" != "https://github.com/${GITHUB_REPOSITORY}/pull/${REQUESTED_PULL_REQUEST}" ]]; then
-              fail "PR #${REQUESTED_PULL_REQUEST} must be an open same-repository ${BENCHMARK_BRANCH} PR to develop."
+            if [[ "${PR_STATE}" != open ]]; then
+              fail "PR #${REQUESTED_PULL_REQUEST} is '${PR_STATE}'; benchmarking requires an open PR."
+            fi
+            if [[ "${PR_BASE}" != "${BASE_BRANCH}" ]]; then
+              fail "PR #${REQUESTED_PULL_REQUEST} targets '${PR_BASE}'; benchmarking requires base branch '${BASE_BRANCH}'. Stacked PR bases are not supported."
+            fi
+            if [[ "${PR_HEAD_REPOSITORY}" != "${GITHUB_REPOSITORY}" ]]; then
+              fail "PR #${REQUESTED_PULL_REQUEST} head repository is '${PR_HEAD_REPOSITORY}'; benchmarking requires '${GITHUB_REPOSITORY}'."
+            fi
+            if [[ "${PR_HEAD_BRANCH}" != "${BENCHMARK_BRANCH}" ]]; then
+              fail "PR #${REQUESTED_PULL_REQUEST} head branch is '${PR_HEAD_BRANCH}'; selected benchmark branch is '${BENCHMARK_BRANCH}'."
+            fi
+            if [[ ! "${PR_HEAD_SHA}" =~ ^[0-9a-f]{40}$ ]]; then
+              fail "PR #${REQUESTED_PULL_REQUEST} has invalid head SHA '${PR_HEAD_SHA}'; expected a full 40-character lowercase hex commit SHA."
+            fi
+            if [[ "${PR_URL}" != "https://github.com/${GITHUB_REPOSITORY}/pull/${REQUESTED_PULL_REQUEST}" ]]; then
+              fail "PR #${REQUESTED_PULL_REQUEST} URL is '${PR_URL}'; expected 'https://github.com/${GITHUB_REPOSITORY}/pull/${REQUESTED_PULL_REQUEST}'."
             fi
             PR_MERGE_BASE="$(gh api \
               "repos/${GITHUB_REPOSITORY}/compare/${BENCHMARK_SHA}...${PR_HEAD_SHA}" \
