@@ -100,18 +100,20 @@ struct generate
 
             if constexpr(use_placement_new_when_generating_unique_ptr<value_type>::value)
             {
-                // create a thread-local buffer for placement-new with proper alignment
-                alignas(value_type) static thread_local auto _buffer =
-                    std::array<char, sizeof(value_type)>{};
+                // These instances are process-wide singletons (see thread_data) that are
+                // intentionally never destroyed (thread_deleter does not delete them when
+                // this trait is set). They must NOT live in a thread_local buffer: the
+                // buffer belongs to whichever thread happens to create the instance first
+                // and is freed when that thread exits, leaving the singleton dangling.
+                // This happens when the tool is initialized on a short-lived thread, e.g.
+                // when attaching to a running process. Allocate on the heap instead.
                 if constexpr(std::is_constructible<value_type, Args...>::value)
                 {
-                    return type{ new(_buffer.data())
-                                     value_type{ std::forward<Args>(_args)... } };
+                    return type{ new value_type{ std::forward<Args>(_args)... } };
                 }
                 else
                 {
-                    return type{ new(_buffer.data())
-                                     value_type{ invoke(std::forward<Args>(_args))... } };
+                    return type{ new value_type{ invoke(std::forward<Args>(_args))... } };
                 }
             }
             else
