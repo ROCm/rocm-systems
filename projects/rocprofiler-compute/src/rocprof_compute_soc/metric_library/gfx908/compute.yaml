@@ -70,8 +70,8 @@ compute.se_util:
   description: >-
     The percent of total shader engine cycles in the kernel where any CU in a
     shader-engine was actively doing any work, normalized over all shader-engines. Low
-    values (e.g., << 100%) indicate that the accelerator was not fully saturated by the
-    kernel, or a potential load-imbalance issue.
+    values (for example, << 100%) indicate that the accelerator was not fully saturated
+    by the kernel, or a potential load-imbalance issue.
 compute.valu_active_threads:
   name: VALU Active Threads
   formula: SUM(SQ_THREAD_CYCLES_VALU) / SUM(SQ_ACTIVE_INST_VALU)

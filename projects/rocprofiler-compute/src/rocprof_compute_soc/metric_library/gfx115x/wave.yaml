@@ -22,9 +22,9 @@ wave.life:
   formula: SUM(SQ_WAVE_CYCLES_sum) / SUM(SQ_WAVES_sum)
   unit: Cycles
   description: >-
-    Average number of cycles from wavefront creation to completion. Longer wave life
-    indicates more execution time per wavefront, which may be due to complex kernels,
-    memory latency, or synchronization waits.
+    Average number of cycles from wavefront creation to completion. Longer wavefront
+    life indicates more execution time per wavefront, which may be due to complex
+    kernels, memory latency, or synchronization waits.
 wave.occupancy:
   name: Wavefront Occupancy
   formula: SUM(SQ_WAVE_CYCLES_sum) / SUM(SQ_BUSY_CYCLES_avr)

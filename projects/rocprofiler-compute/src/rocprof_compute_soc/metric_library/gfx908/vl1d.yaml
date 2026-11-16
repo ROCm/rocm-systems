@@ -20,9 +20,9 @@ vl1d.bw_util:
     The number of bytes looked up in the vL1D cache as a result of VMEM instructions, as
     a percent of the peak theoretical bandwidth achievable on the specific accelerator.
     The number of bytes is calculated as the number of cache lines requested multiplied
-    by the cache line size. This value does not consider partial requests, so for
-    instance, if only a single value is requested in a cache line, the data movement
-    will still be counted as a full cache line.
+    by the cache line size. This value does not consider partial requests, so, for
+    example, if only a single value is requested in a cache line, the data movement will
+    still be counted as a full cache line.
 vl1d.cache_accesses:
   name: vL1D Cache Accesses
   formula: SUM(TCP_TOTAL_CACHE_ACCESSES_sum) / SUM($denom)
@@ -35,9 +35,9 @@ vl1d.cache_bw:
   description: >-
     The number of bytes looked up in the vL1D cache as a result of VMEM instructions per
     unit time. The number of bytes is calculated as the number of cache lines requested
-    multiplied by the cache line size. This value does not consider partial requests, so
-    e.g., if only a single value is requested in a cache line, the data movement will
-    still be counted as a full cache line.
+    multiplied by the cache line size. This value does not consider partial requests,
+    so, for example, if only a single value is requested in a cache line, the data
+    movement will still be counted as a full cache line.
   peak: $max_sclk / 1000 * 64 * $cu_per_gpu
 vl1d.cache_hits:
   name: vL1D Cache Hits
@@ -105,7 +105,7 @@ vl1d.invalidations:
   unit: (Requests + $normUnit)
   description: >-
     The number of times the vL1D was issued a write-back invalidate command during the
-    kernel's execution per normalization unit. This may be triggered by, for instance,
+    kernel's execution per normalization unit. This may be triggered by, for example,
     the buffer_wbinvl1 instruction.
 vl1d.l2_atomic_bw:
   name: vL1D-L2 Atomic Bandwidth
@@ -128,7 +128,7 @@ vl1d.l2_bw:
     The number of bytes transferred across the vL1D-L2 interface as a result of VMEM
     instructions, divided by total duration. The number of bytes is calculated as the
     number of cache lines requested multiplied by the cache line size. This value does
-    not consider partial requests, so for instance, if only a single value is requested
+    not consider partial requests, so, for example, if only a single value is requested
     in a cache line, the data movement will still be counted as a full cache line.
 vl1d.l2_rd_bw:
   name: vL1D-L2 Read Bandwidth

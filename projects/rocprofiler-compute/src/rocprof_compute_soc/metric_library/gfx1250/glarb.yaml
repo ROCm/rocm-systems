@@ -2,7 +2,7 @@ glarb.gl2_atomic_bw:
   name: GLARB-GL2 Atomic Bandwidth
   formula: 64 * SUM(GLARBC_REQ_ATOMIC_WITH_RET_sum + GLARBC_REQ_ATOMIC_WITHOUT_RET_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
-  description: Total Graphic Level Arbiter to GL2 atomic bandwidth.
+  description: Total Graphics Level Arbiter to GL2 atomic bandwidth.
 glarb.glarba_req:
   name: GLARBA Requests
   formula: SUM(GLARBA_ARB_REQUESTS_sum) / SUM($denom)
@@ -28,7 +28,7 @@ glarb.glarba_util:
   name: GLARBA Utilization
   formula: 100 * SUM(GLARBA_BUSY_sum) / SUM(GLARBA_CYCLE_sum)
   unit: Percent
-  description: Percentage of cycles the Graphic Level Arbiter is processing requests.
+  description: Percentage of cycles the Graphics Level Arbiter is processing requests.
 glarb.glarbc_buffer_full_stall:
   name: GLARBC Buffer Full Stall
   formula: 100 * SUM(GLARBC_STALL_BUFFER_FULL_sum) / SUM(GLARBC_BUSY_sum)
@@ -77,12 +77,12 @@ glarb.glarbc_req_bw_rd:
   name: GLARBC Request Bandwidth - Read
   formula: SUM(GLARBC_REQ_READ_32B_sum * 32 + GLARBC_REQ_READ_64B_sum * 64 + GLARBC_REQ_READ_128B_sum * 128 + GLARBC_REQ_READ_256B_sum * 256) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
-  description: Total Graphic Level Arbiter to GL2 read bandwidth.
+  description: Total Graphics Level Arbiter to GL2 read bandwidth.
 glarb.glarbc_req_bw_wr:
   name: GLARBC Request Bandwidth - Write
   formula: SUM(GLARBC_REQ_WRITE_32B_sum * 32 + GLARBC_REQ_WRITE_64B_sum * 64 + GLARBC_REQ_WRITE_128B_sum * 128 + GLARBC_REQ_WRITE_256B_sum * 256) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
-  description: Total Graphic Level Arbiter to GL2 write bandwidth.
+  description: Total Graphics Level Arbiter to GL2 write bandwidth.
 glarb.glarbc_req_rd:
   name: GLARBC Requests - Read
   formula: SUM(GLARBC_REQ_READ_sum) / SUM($denom)
@@ -103,5 +103,5 @@ glarb.glarbc_util:
   formula: 100 * SUM(GLARBC_BUSY_sum) / SUM(GLARBC_CYCLE_sum)
   unit: Percent
   description: >-
-    Percentage of cycles the Graphic Level Arbiter staging buffer is forwarding
+    Percentage of cycles the Graphics Level Arbiter staging buffer is forwarding
     requests.

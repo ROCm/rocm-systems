@@ -75,8 +75,8 @@ compute.inst_mix_f16_trans:
   formula: SUM(SQ_INSTS_VALU_TRANS_F16) / SUM($denom)
   unit: (Instructions + $normUnit)
   description: >-
-    The total number of transcendental instructions (e.g., sqrt) operating on 16-bit
-    floating-point operands issued to the VALU per normalization unit.
+    The total number of transcendental instructions (for example, sqrt) operating on
+    16-bit floating-point operands issued to the VALU per normalization unit.
 compute.inst_mix_f32_add:
   name: VALU F32-ADD Instructions
   formula: SUM(SQ_INSTS_VALU_ADD_F32) / SUM($denom)
