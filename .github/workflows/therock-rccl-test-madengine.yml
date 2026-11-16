@@ -264,9 +264,13 @@ jobs:
         env:
           NCCL_DEBUG: WARN
           MAD_SECRETS_HFTOKEN: ${{ secrets.HF_TOKEN || '' }}
-          # Read-only: looks up the event and commit of each RCCL build's run.
-          GITHUB_TOKEN: ${{ github.token }}
+          # No GITHUB_TOKEN: this step pip-installs and runs third-party code.
+          # The baseline step looked up each build's event and commit instead.
           BASELINE_ARTIFACT_RUN_ID: ${{ steps.baseline.outputs.artifact_run_id }}
+          ARTIFACT_EVENT: ${{ steps.baseline.outputs.artifact_event }}
+          ARTIFACT_SHA: ${{ steps.baseline.outputs.artifact_sha }}
+          BASELINE_ARTIFACT_EVENT: ${{ steps.baseline.outputs.baseline_artifact_event }}
+          BASELINE_ARTIFACT_SHA: ${{ steps.baseline.outputs.baseline_artifact_sha }}
           JOB_TIMEOUT_MINUTES: ${{ inputs.job_timeout_minutes }}
           # Nodes to keep out of the allocation, as a SLURM hostlist.
           MADENGINE_SLURM_EXCLUDE: ${{ vars.RCCL_MADENGINE_SLURM_EXCLUDE || '' }}

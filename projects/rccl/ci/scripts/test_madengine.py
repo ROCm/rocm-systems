@@ -2301,8 +2301,6 @@ def run_ab_in_one_allocation(
         pass
 
     env = os.environ.copy()
-    # Only the build lookups here need it; the nodes do not.
-    env.pop("GITHUB_TOKEN", None)
     docker_builds_dir = work_dir / "docker_builds"
     docker_builds_dir.mkdir(exist_ok=True)
     env["MAD_DOCKER_BUILDS"] = str(docker_builds_dir)
@@ -3058,6 +3056,15 @@ def main() -> None:
             log.error("No A/B baseline: %s", exc)
             sys.exit(1)
         print(f"artifact_run_id={build}")
+        # Looked up here: the run step installs and runs third-party code, so
+        # it gets no GITHUB_TOKEN and reads these from the env instead.
+        for prefix, looked_up in (
+            ("artifact", os.environ.get("ARTIFACT_RUN_ID", "")),
+            ("baseline_artifact", build),
+        ):
+            source = artifact_build(looked_up)
+            print(f"{prefix}_event={source['event']}")
+            print(f"{prefix}_sha={source['sha']}")
         sys.exit(0)
     if not (args.artifact_dir and args.baseline_artifact_dir):
         parser.error("--artifact-dir and --baseline-artifact-dir are required")
@@ -3075,11 +3082,14 @@ def main() -> None:
         CANDIDATE: os.environ.get("ARTIFACT_RUN_ID", ""),
         BASELINE: os.environ.get("BASELINE_ARTIFACT_RUN_ID", ""),
     }
+    sources = {
+        phase: {"event": os.environ.get(f"{prefix}_EVENT", ""),
+                "sha": os.environ.get(f"{prefix}_SHA", "")}
+        for phase, prefix in ((CANDIDATE, "ARTIFACT"), (BASELINE, "BASELINE_ARTIFACT"))
+    }
     fingerprints = {}
-    sources = {}
     for phase, lib in libs.items():
         fingerprints[phase] = get_rccl_fingerprint(lib)
-        sources[phase] = artifact_build(builds[phase])
         log.info("%s: %s from build %s (%s at %s), md5=%s version=%s",
                  phase, lib, builds[phase] or "?", sources[phase]["event"] or "?",
                  sources[phase]["sha"][:12] or "?", fingerprints[phase]["md5"],

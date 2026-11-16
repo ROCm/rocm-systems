@@ -273,12 +273,16 @@ class MainPhaseLibraries(unittest.TestCase):
         def fingerprint(lib):
             return {"md5": "", "version": versions[dirs[str(lib.parent)]], "size": 0}
 
+        # Builds the API could be asked about, were main() to ask.
+        env = {"GITHUB_REPOSITORY": "ROCm/rocm-systems",
+               "ARTIFACT_RUN_ID": "500", "BASELINE_ARTIFACT_RUN_ID": "300"}
         with mock.patch.object(sys, "argv", argv), \
+             mock.patch.dict(os.environ, env), \
              mock.patch.object(tm, "find_rccl_library",
                                side_effect=lambda d: Path(d) / "librccl.so"), \
              mock.patch.object(tm, "get_rccl_fingerprint", side_effect=fingerprint), \
-             mock.patch.object(tm, "artifact_build",
-                               return_value={"event": "", "sha": "", "created_at": ""}), \
+             mock.patch.object(tm, "_github_json",
+                               side_effect=AssertionError("the run step has no token")), \
              mock.patch.object(tm, "install_madengine") as self.install, \
              mock.patch.object(tm, "check_mad_knobs"), \
              mock.patch.object(tm, "resolve_base_digest", return_value="b@sha256:1"), \
@@ -311,7 +315,28 @@ class ResolveBaselineCli(unittest.TestCase):
              "--workload", "llama-3.1-70b-training", "--cluster", "ruby"],
             env=env, capture_output=True, text=True, check=True,
         )
-        self.assertEqual(out.stdout, "artifact_run_id=7\n")
+        self.assertEqual(out.stdout, "artifact_run_id=7\n"
+                                     "artifact_event=\nartifact_sha=\n"
+                                     "baseline_artifact_event=\nbaseline_artifact_sha=\n")
+
+    def test_both_builds_are_looked_up_for_the_run_step(self):
+        sources = {"500": {"event": "schedule", "sha": "c" * 40, "created_at": ""},
+                   "300": {"event": "schedule", "sha": "b" * 40, "created_at": ""}}
+        argv = ["test_madengine.py", "--resolve-baseline",
+                "--workload", "llama-3.1-70b-training", "--cluster", "ruby"]
+        env = {"ARTIFACT_RUN_ID": "500", "BASELINE_ARTIFACT_RUN_ID": "300"}
+        out = io.StringIO()
+        with mock.patch.object(sys, "argv", argv), \
+             mock.patch.dict(os.environ, env), \
+             mock.patch.object(tm, "artifact_build", side_effect=sources.get), \
+             mock.patch("sys.stdout", out), \
+             self.assertRaises(SystemExit):
+            tm.main()
+        self.assertEqual(out.getvalue().splitlines(), [
+            "artifact_run_id=300",
+            "artifact_event=schedule", f"artifact_sha={'c' * 40}",
+            "baseline_artifact_event=schedule", f"baseline_artifact_sha={'b' * 40}",
+        ])
 
 
 @unittest.skipIf(yaml is None, "PyYAML not installed")
@@ -341,6 +366,15 @@ class Workflow(unittest.TestCase):
         run = steps["Run MADEngine workload"]
         self.assertEqual(run["env"]["BASELINE_ARTIFACT_RUN_ID"], resolved)
         self.assertIn('--baseline-artifact-dir "${BASELINE_ARTIFACTS_DIR}"', run["run"])
+
+    def test_only_the_baseline_step_gets_the_token_for_the_lookups(self):
+        steps = {s["name"]: s for s in self.workflow["jobs"]["test_madengine"]["steps"]}
+        self.assertIn("GITHUB_TOKEN", steps["Resolve the A/B baseline build"]["env"])
+        run = steps["Run MADEngine workload"]["env"]
+        self.assertNotIn("GITHUB_TOKEN", run)
+        for name in ("ARTIFACT_EVENT", "ARTIFACT_SHA",
+                     "BASELINE_ARTIFACT_EVENT", "BASELINE_ARTIFACT_SHA"):
+            self.assertEqual(run[name], f"${{{{ steps.baseline.outputs.{name.lower()} }}}}")
 
     def test_no_run_block_expands_an_expression(self):
         # An expression is pasted into the script before bash parses it; an
