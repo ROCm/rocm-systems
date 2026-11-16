@@ -218,31 +218,6 @@ resolve_collected(const collected_input& collected)
     });
 }
 
-void
-add_backend_defaults(resolved_config& resolved, const schema& config_schema,
-                     const backend_registry& backends)
-{
-    for(const auto& param : config_schema.params())
-    {
-        const auto* found =
-            param.backend && !param.default_value && !resolved.contains(param.id)
-                ? backends.find(*param.backend)
-                : nullptr;
-        const auto fallback =
-            found == nullptr ? std::nullopt : found->default_value(param);
-        if(!fallback || fallback->empty() || !found->accepts(param, *fallback))
-        {
-            continue;
-        }
-        if(const auto parsed = parse_value(param, *fallback))
-        {
-            resolved.emplace(param.id,
-                             resolved_value{ .value  = *parsed,
-                                             .source = config_source::default_value });
-        }
-    }
-}
-
 /// Write what @p param assigns, under @p source, to each target that does not have a
 /// higher source. initialize() refused a catalog that assigns an unknown parameter or
 /// a value its target refuses.
@@ -422,7 +397,6 @@ configuration_parser::parse(const std::vector<std::string>& arguments)
     m_unparsed            = std::move(collected.command_line.unparsed);
 
     auto resolved = resolve_collected(collected);
-    add_backend_defaults(resolved, request.config_schema, *m_backends);
     apply_assigns(resolved, request.config_schema);
     append_violations(m_errors, request.config_schema, resolved);
     try

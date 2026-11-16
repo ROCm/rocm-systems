@@ -119,12 +119,6 @@ public:
     {
         return { "alpha", "beta" };
     }
-
-    [[nodiscard]] std::optional<std::string> default_value(
-        const schema_param&) const override
-    {
-        return "alpha";
-    }
 };
 
 schema_param
@@ -497,7 +491,7 @@ TEST(parser_configuration, rejects_values_outside_a_backend_catalog)
     auto       parser  = make_letter_parser(true);
     const auto refused = parser.parse({ "--letter", "nope" });
     EXPECT_TRUE(contains_text(parser.errors(), "command line"));
-    EXPECT_EQ(refused.at("letter"), "alpha");
+    EXPECT_FALSE(refused.contains("letter"));
     EXPECT_EQ(refused.at("trace"), "false");
 
     const auto accepted = parser.parse({ "--letter", "beta" });
@@ -529,14 +523,6 @@ TEST(parser_configuration, unknown_backend_does_not_reject_every_value)
     auto       parser = make_letter_parser(false);
     const auto values = parser.parse({ "--letter", "alpha" });
     EXPECT_TRUE(parser.errors().empty());
-    EXPECT_EQ(values.at("letter"), "alpha");
-    EXPECT_EQ(values.at("trace"), "false");
-}
-
-TEST(parser_configuration, backend_default_keeps_the_other_values)
-{
-    auto       parser = make_letter_parser(true);
-    const auto values = parser.parse({});
     EXPECT_EQ(values.at("letter"), "alpha");
     EXPECT_EQ(values.at("trace"), "false");
 }
