@@ -27,7 +27,8 @@
 //
 // Usage:
 //   timeout --signal=INT 3s signal-handler-test [--app-signal-handler|--no-app-signal-handler]
-//                                               [--single-process|--fork|--fork-exec|--spawn]
+//                                               [--single-process|--fork-exec|--spawn|
+//                                                --coordinated-shutdown]
 //
 // Good case (--app-signal-handler): app installs handler, coordinates shutdown.
 //   Used with rocprofv3 --disable-signal-handlers. Profiler flushes via atexit.
@@ -35,9 +36,6 @@
 // Bad case (--no-app-signal-handler): app has SIG_DFL everywhere.
 //   Profiler's signal handler is the only thing that can flush data before death.
 //
-// TODO: --raw-fork (_Fork without exec) is not supported. _Fork skips
-// pthread_atfork handlers, leaving stale profiler state. Extremely rare in practice.
-
 #include <hip/hip_runtime.h>
 #include <rocprofiler-sdk-roctx/roctx.h>
 
@@ -144,43 +142,6 @@ run_kernels(const char* label)
     fprintf(stderr, "  %s PID=%d: completed %d iterations\n", label, getpid(), iter);
 }
 
-// Fork child worker for the good case (app handles signals).
-// Child ignores SIGINT and waits for 'q' on pipe from parent.
-void
-fork_child_worker(int id, int pipe_rd)
-{
-    signal(SIGINT, SIG_IGN);
-    fcntl(pipe_rd, F_SETFL, O_NONBLOCK);
-
-    float* d_buf = nullptr;
-    HIP_CHECK(hipMalloc(&d_buf, 1024 * sizeof(float)));
-
-    roctxRangePush(str_join("child_", id, "_pid_", getpid()).c_str());
-
-    int iter = 0;
-    while(true)
-    {
-        roctxRangePush(str_join("child_", id, "_iter_", iter).c_str());
-
-        test_kernel<<<4, 256>>>(d_buf, 1024);
-
-        roctxRangePop();
-        iter++;
-
-        char cmd = 0;
-        if(read(pipe_rd, &cmd, 1) == 1 && cmd == 'q') break;
-        usleep(10000);
-    }
-
-    HIP_CHECK(hipDeviceSynchronize());
-    HIP_CHECK(hipFree(d_buf));
-    roctxRangePop();
-
-    emit_roctx_marker("exit_marker child fork ppid:%d pid:%d", getppid(), getpid());
-    fprintf(stderr, "  child_%d PID=%d: exiting after %d iters\n", id, getpid(), iter);
-    close(pipe_rd);
-}
-
 // ============================================================================
 // GOOD CASE modes: app handles signals, coordinates shutdown
 // ============================================================================
@@ -198,61 +159,6 @@ mode_good_single_process()
     run_kernels("parent");
 
     emit_roctx_marker("exit_marker parent single-process ppid:%d pid:%d", getppid(), getpid());
-    fprintf(stderr, "Parent PID=%d: clean exit\n", getpid());
-    return 0;
-}
-
-int
-mode_good_fork()
-{
-    fprintf(stderr, "Mode: good/fork, PID=%d\n", getpid());
-
-    constexpr int NUM_CHILDREN = 2;
-    int           pipes[NUM_CHILDREN][2];
-    pid_t         children[NUM_CHILDREN];
-
-    for(int i = 0; i < NUM_CHILDREN; i++)
-    {
-        if(pipe(pipes[i]) != 0)
-        {
-            for(int j = 0; j < i; j++)
-            {
-                close(pipes[j][0]);
-                close(pipes[j][1]);
-            }
-
-            throw std::runtime_error(
-                std::string("signal-handler-test pipe() failed with error code ") +
-                std::to_string(errno));
-        }
-        pid_t pid = fork();
-        if(pid == 0)
-        {
-            close(pipes[i][1]);
-            fork_child_worker(i, pipes[i][0]);
-            exit(0);
-        }
-        children[i] = pid;
-        close(pipes[i][0]);
-    }
-
-    struct sigaction sa = {};
-    sa.sa_handler       = sigint_handler;
-    sigemptyset(&sa.sa_mask);
-    sigaction(SIGINT, &sa, nullptr);
-
-    run_kernels("parent");
-
-    fprintf(stderr, "Parent: sending shutdown to children\n");
-    for(int i = 0; i < NUM_CHILDREN; i++)
-    {
-        write(pipes[i][1], "q", 1);
-        close(pipes[i][1]);
-    }
-    for(int i = 0; i < NUM_CHILDREN; i++)
-        waitpid(children[i], nullptr, 0);
-
-    emit_roctx_marker("exit_marker parent fork ppid:%d pid:%d", getppid(), getpid());
     fprintf(stderr, "Parent PID=%d: clean exit\n", getpid());
     return 0;
 }
@@ -325,6 +231,116 @@ mode_good_spawn(const char* self_path)
     return 0;
 }
 
+[[noreturn]] void
+mode_coordinated_child()
+{
+    // This helper runs after exec and only synchronizes with the parent. It does not need any
+    // child-side HIP or ROCTX work to exercise the parent's chained signal handler.
+    char    command = 0;
+    ssize_t nread   = 0;
+    do
+    {
+        nread = read(STDIN_FILENO, &command, 1);
+    } while(nread < 0 && errno == EINTR);
+
+    _exit((nread == 1 && command == 'q') ? 0 : 1);
+}
+
+int
+mode_coordinated_shutdown(const char* self_path)
+{
+    fprintf(stderr, "Mode: coordinated-shutdown, PID=%d\n", getpid());
+
+    constexpr int NUM_CHILDREN = 2;
+    int           pipes[NUM_CHILDREN][2]{{-1, -1}, {-1, -1}};
+    pid_t         children[NUM_CHILDREN]{};
+
+    for(int i = 0; i < NUM_CHILDREN; ++i)
+    {
+        if(pipe(pipes[i]) != 0)
+        {
+            for(int j = 0; j < i; ++j)
+            {
+                close(pipes[j][0]);
+                close(pipes[j][1]);
+            }
+            throw std::runtime_error("coordinated-shutdown pipe() failed");
+        }
+    }
+
+    struct sigaction sa = {};
+    sa.sa_handler       = sigint_handler;
+    sigemptyset(&sa.sa_mask);
+    sigaction(SIGINT, &sa, nullptr);
+
+    for(int i = 0; i < NUM_CHILDREN; ++i)
+    {
+        pid_t pid = fork();
+        if(pid < 0) throw std::runtime_error("coordinated-shutdown fork() failed");
+        if(pid == 0)
+        {
+            // Do only async-signal-safe setup before exec. In particular, do not call HIP, ROCTX,
+            // or profiler APIs in the fork child.
+            sigset_t blocked = {};
+            sigemptyset(&blocked);
+            sigaddset(&blocked, SIGINT);
+            if(sigprocmask(SIG_BLOCK, &blocked, nullptr) != 0) _exit(124);
+
+            for(int j = 0; j < NUM_CHILDREN; ++j)
+            {
+                close(pipes[j][1]);
+                if(j != i) close(pipes[j][0]);
+            }
+
+            if(pipes[i][0] != STDIN_FILENO)
+            {
+                if(dup2(pipes[i][0], STDIN_FILENO) < 0) _exit(125);
+                close(pipes[i][0]);
+            }
+
+            execl(self_path, self_path, "--coordinated-child", nullptr);
+            _exit(127);
+        }
+        children[i] = pid;
+    }
+
+    for(auto& pipe_fds : pipes)
+        close(pipe_fds[0]);
+
+    run_kernels("parent");
+
+    fprintf(stderr, "Parent: sending shutdown to children\n");
+    for(auto& pipe_fds : pipes)
+    {
+        ssize_t nwritten = 0;
+        do
+        {
+            nwritten = write(pipe_fds[1], "q", 1);
+        } while(nwritten < 0 && errno == EINTR);
+        close(pipe_fds[1]);
+        if(nwritten != 1) return 1;
+    }
+
+    for(auto child : children)
+    {
+        int   status = 0;
+        pid_t waited = 0;
+        do
+        {
+            waited = waitpid(child, &status, 0);
+        } while(waited < 0 && errno == EINTR);
+
+        // The profiler's finalization worker may have already reaped this child.
+        if(waited < 0 && errno == ECHILD) continue;
+        if(waited != child || !WIFEXITED(status) || WEXITSTATUS(status) != 0) return 1;
+    }
+
+    emit_roctx_marker(
+        "exit_marker parent coordinated-shutdown ppid:%d pid:%d", getppid(), getpid());
+    fprintf(stderr, "Parent PID=%d: clean exit\n", getpid());
+    return 0;
+}
+
 // ============================================================================
 // BAD CASE modes: app does NOT handle signals (SIG_DFL everywhere)
 // Profiler's signal handler is the only thing that can flush data.
@@ -336,36 +352,6 @@ mode_bad_single_process()
     fprintf(stderr, "Mode: bad/single-process, PID=%d (no signal handler)\n", getpid());
     run_kernels("parent");
     emit_roctx_marker("exit_marker parent single-process ppid:%d pid:%d", getppid(), getpid());
-    fprintf(stderr, "Parent PID=%d: exit\n", getpid());
-    return 0;
-}
-
-int
-mode_bad_fork()
-{
-    fprintf(stderr, "Mode: bad/fork, PID=%d (no signal handler)\n", getpid());
-
-    constexpr int NUM_CHILDREN = 2;
-    pid_t         children[NUM_CHILDREN];
-
-    for(int i = 0; i < NUM_CHILDREN; i++)
-    {
-        pid_t pid = fork();
-        if(pid == 0)
-        {
-            run_kernels(str_join("child_", i).c_str());
-            emit_roctx_marker("exit_marker child fork ppid:%d pid:%d", getppid(), getpid());
-            exit(0);
-        }
-        children[i] = pid;
-    }
-
-    run_kernels("parent");
-
-    for(int i = 0; i < NUM_CHILDREN; i++)
-        waitpid(children[i], nullptr, 0);
-
-    emit_roctx_marker("exit_marker parent fork ppid:%d pid:%d", getppid(), getpid());
     fprintf(stderr, "Parent PID=%d: exit\n", getpid());
     return 0;
 }
@@ -505,8 +491,10 @@ main(int argc, char** argv)
 
     for(int i = 1; i < argc; i++)
     {
-        if(std::strcmp(argv[i], "--single-process") == 0 || std::strcmp(argv[i], "--fork") == 0 ||
+        if(std::strcmp(argv[i], "--single-process") == 0 ||
            std::strcmp(argv[i], "--fork-exec") == 0 || std::strcmp(argv[i], "--spawn") == 0 ||
+           std::strcmp(argv[i], "--coordinated-shutdown") == 0 ||
+           std::strcmp(argv[i], "--coordinated-child") == 0 ||
            std::strcmp(argv[i], "--lingering-child") == 0)
         {
             mode = argv[i];
@@ -529,18 +517,19 @@ main(int argc, char** argv)
 
     // Normal-exit regression mode (no signal); independent of app_handles_signals.
     if(std::strcmp(mode, "--lingering-child") == 0) return mode_lingering_child();
+    if(std::strcmp(mode, "--coordinated-child") == 0) mode_coordinated_child();
 
     if(app_handles_signals)
     {
         if(std::strcmp(mode, "--single-process") == 0) return mode_good_single_process();
-        if(std::strcmp(mode, "--fork") == 0) return mode_good_fork();
         if(std::strcmp(mode, "--fork-exec") == 0) return mode_good_fork_exec(argv[0]);
         if(std::strcmp(mode, "--spawn") == 0) return mode_good_spawn(argv[0]);
+        if(std::strcmp(mode, "--coordinated-shutdown") == 0)
+            return mode_coordinated_shutdown(argv[0]);
     }
     else
     {
         if(std::strcmp(mode, "--single-process") == 0) return mode_bad_single_process();
-        if(std::strcmp(mode, "--fork") == 0) return mode_bad_fork();
         if(std::strcmp(mode, "--fork-exec") == 0) return mode_bad_fork_exec(argv[0]);
         if(std::strcmp(mode, "--spawn") == 0) return mode_bad_spawn(argv[0]);
     }
