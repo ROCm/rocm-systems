@@ -334,14 +334,30 @@ __device__ void IPCContext::internal_get_broadcastmem_wave(
     getmem_wave(dst, src, nelems, pe_root);
 }
 
-__device__ void IPCContext::internal_broadcastmem_wave(void *dst, const void *src, int nelems,
-                                      int pe_root, int pe_start,
-                                      int stride, int pe_size,
-                                      long *p_sync) {  // NOLINT(runtime/int)
+__device__ void IPCContext::internal_broadcastmem_wave(rocshmem_team_t team, void *dst,
+    const void *src, int nelems, int pe_root) {
+#if defined(USE_SDMA)
+  if (nelems < 512 || constmem.ipc_sdma_threshold != SDMA_THRESHOLD_DISABLED)
+#else
+  if (nelems < 512)
+#endif
+  {
+    broadcastmem_linear_thread_puts_wave(team, dst, src, nelems, pe_root);
+    return;
+  }
+
+  IPCTeam *team_obj = reinterpret_cast<IPCTeam *>(team);
+  int stride = team_obj->tinfo_wrt_world->stride;
+  int pe_start = team_obj->tinfo_wrt_world->pe_start;
+  int pe_size = team_obj->tinfo_wrt_world->size;
+  long *p_sync = team_obj->bcast_pSync;
+  // Passed pe_root is relative to team, convert to world root
+  int pe_root_world = team_obj->get_pe_in_world(pe_root);
+
   if (num_pes < 4) {
-    internal_put_broadcastmem_wave(dst, src, nelems, pe_root, pe_start, stride, pe_size);
+    internal_put_broadcastmem_wave(dst, src, nelems, pe_root_world, pe_start, stride, pe_size);
   } else {
-    internal_get_broadcastmem_wave(dst, src, nelems, pe_root);
+    internal_get_broadcastmem_wave(dst, src, nelems, pe_root_world);
   }
 
   // Synchronize on completion of broadcast
@@ -394,29 +410,10 @@ __device__ void IPCContext::broadcastmem_linear_thread_puts_wave(
 
 __device__ int IPCContext::broadcastmem_wave(rocshmem_team_t team,
                               void *dest, const void *source, int nelems, int PE_root) {
-
   if (dest == nullptr || source == nullptr || team == ROCSHMEM_TEAM_INVALID)
     return ROCSHMEM_ERROR;
 
-  IPCTeam *team_obj = reinterpret_cast<IPCTeam *>(team);
-
-  int stride = team_obj->tinfo_wrt_world->stride;
-  int pe_start = team_obj->tinfo_wrt_world->pe_start;
-  int pe_size = team_obj->tinfo_wrt_world->size;
-  long *p_sync = team_obj->bcast_pSync;
-
-  // Passed pe_root is relative to team, convert to world root
-  int pe_root_world = team_obj->get_pe_in_world(PE_root);
-
-#if defined(USE_SDMA)
-  if (nelems < 512 || constmem.ipc_sdma_threshold != SDMA_THRESHOLD_DISABLED)
-#else
-  if (nelems < 512)
-#endif
-    broadcastmem_linear_thread_puts_wave(team, dest, source, nelems, PE_root);
-  else
-    internal_broadcastmem_wave(dest, source, nelems, pe_root_world,
-                                pe_start, stride, pe_size, p_sync);
+  internal_broadcastmem_wave(team, dest, source, nelems, PE_root);
   return ROCSHMEM_SUCCESS;
 }
 
@@ -436,14 +433,30 @@ __device__ void IPCContext::internal_get_broadcastmem_wg(
     getmem_wg(dst, src, nelems, pe_root);
 }
 
-__device__ void IPCContext::internal_broadcastmem_wg(void *dst, const void *src, int nelems,
-                                      int pe_root, int pe_start,
-                                      int stride, int pe_size,
-                                      long *p_sync) {  // NOLINT(runtime/int)
+__device__ void IPCContext::internal_broadcastmem_wg(rocshmem_team_t team, void *dst,
+    const void *src, int nelems, int pe_root) {
+#if defined(USE_SDMA)
+  if (nelems < 512 || constmem.ipc_sdma_threshold != SDMA_THRESHOLD_DISABLED)
+#else
+  if (nelems < 512)
+#endif
+  {
+    broadcastmem_linear_thread_puts_wg(team, dst, src, nelems, pe_root);
+    return;
+  }
+
+  IPCTeam *team_obj = reinterpret_cast<IPCTeam *>(team);
+  int stride = team_obj->tinfo_wrt_world->stride;
+  int pe_start = team_obj->tinfo_wrt_world->pe_start;
+  int pe_size = team_obj->tinfo_wrt_world->size;
+  long *p_sync = team_obj->bcast_pSync;
+  // Passed pe_root is relative to team, convert to world root
+  int pe_root_world = team_obj->get_pe_in_world(pe_root);
+
   if (num_pes < 4) {
-    internal_put_broadcastmem_wg(dst, src, nelems, pe_root, pe_start, stride, pe_size);
+    internal_put_broadcastmem_wg(dst, src, nelems, pe_root_world, pe_start, stride, pe_size);
   } else {
-    internal_get_broadcastmem_wg(dst, src, nelems, pe_root);
+    internal_get_broadcastmem_wg(dst, src, nelems, pe_root_world);
   }
 
   // Synchronize on completion of broadcast
@@ -500,25 +513,7 @@ __device__ void IPCContext::broadcastmem_linear_thread_puts_wg(
 
 __device__ void IPCContext::broadcastmem_wg(rocshmem_team_t team,
                               void *dest, const void *source, int nelems, int PE_root) {
-  IPCTeam *team_obj = reinterpret_cast<IPCTeam *>(team);
-
-  int stride = team_obj->tinfo_wrt_world->stride;
-  int pe_start = team_obj->tinfo_wrt_world->pe_start;
-  int pe_size = team_obj->tinfo_wrt_world->size;
-  long *p_sync = team_obj->bcast_pSync;
-
-  // Passed pe_root is relative to team, convert to world root
-  int pe_root_world = team_obj->get_pe_in_world(PE_root);
-
-#if defined(USE_SDMA)
-  if (nelems < 512 || constmem.ipc_sdma_threshold != SDMA_THRESHOLD_DISABLED)
-#else
-  if (nelems < 512)
-#endif
-    broadcastmem_linear_thread_puts_wg(team, dest, source, nelems, PE_root);
-  else
-    internal_broadcastmem_wg(dest, source, nelems, pe_root_world,
-                                pe_start, stride, pe_size, p_sync);
+  internal_broadcastmem_wg(team, dest, source, nelems, PE_root);
 }
 __device__ int IPCContext::alltoallmem_wave(rocshmem_team_t team, void* dest,
                                   const void* source, int nelems){

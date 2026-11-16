@@ -432,9 +432,8 @@ class IPCContext : public Context {
   IpcImpl *ipcImpl{nullptr};
 
   //internal functions used by collective operations
-  __device__ void internal_broadcastmem_wg(void *dest, const void *source, int nelems, int pe_root,
-                                     int pe_start, int stride, int pe_size,
-                                     long *p_sync);  // NOLINT(runtime/int)
+  __device__ void internal_broadcastmem_wg(rocshmem_team_t team, void *dest,
+                                     const void *source, int nelems, int pe_root);
 
   __device__ void internal_put_broadcastmem_wg(void *dst, const void *src, int nelems,
                                          int pe_root, int PE_start,
@@ -443,10 +442,8 @@ class IPCContext : public Context {
   __device__ void internal_get_broadcastmem_wg(void *dst, const void *src, int nelems,
                                          int pe_root);  // NOLINT(runtime/int)
 
-  __device__ void internal_broadcastmem_wave(void *dst, const void *src, int nelems,
-                                      int pe_root, int pe_start,
-                                      int stride, int pe_size,
-                                      long *p_sync);
+  __device__ void internal_broadcastmem_wave(rocshmem_team_t team, void *dst,
+                                      const void *src, int nelems, int pe_root);
 
   __device__ void internal_put_broadcastmem_wave(void *dst, const void *src, int nelems,
                                                  int pe_root, int pe_start, int stride, int pe_size);
@@ -458,19 +455,6 @@ class IPCContext : public Context {
 
   __device__ void broadcastmem_linear_thread_puts_wg(rocshmem_team_t team, void *dst,
                                                       const void *src, int nelems, int PE_root);
-
-  template <typename T>
-  __device__ void internal_broadcast_wave(T *dst, const T *src, int nelems,
-                                      int pe_root, int pe_start,
-                                      int stride, int pe_size,
-                                      long *p_sync);
-
-  template <typename T>
-  __device__ void internal_put_broadcast_wave(T *dst, const T *src, int nelems,
-                                                 int pe_root, int pe_start, int stride, int pe_size);
-
-  template <typename T>
-  __device__ void internal_get_broadcast_wave(T *dst, const T *src, int nelems, int pe_root);
 
   template <typename T>
   __device__ void fcollect_linear_wg(rocshmem_team_t team, T *dest,

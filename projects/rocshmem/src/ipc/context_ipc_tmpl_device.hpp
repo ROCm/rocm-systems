@@ -794,23 +794,6 @@ __device__ int IPCContext::reduce_scatter_wave(rocshmem_team_t team, T *dest,
 }
 
 template <typename T>
-__device__ void IPCContext::internal_put_broadcast_wave(T *dst, const T *src, int nelems, int pe_root, int pe_start,
-    int stride, int pe_size) {  // NOLINT(runtime/int)
-  if (my_pe == pe_root) {
-    int finish = pe_start + stride * pe_size;
-    for (int i = pe_start; i < finish; i += stride) {
-        put_nbi_wave(dst, src, nelems, i);
-    }
-  }
-}
-
-template <typename T>
-__device__ void IPCContext::internal_get_broadcast_wave(
-  T *dst, const T *src, int nelems, int pe_root) {
-    get_wave(dst, src, nelems, pe_root);
-}
-
-template <typename T>
 __device__ int IPCContext::broadcast_wave(rocshmem_team_t team,
                               T *dest, const T *source, int nelems, int PE_root) {
   if (dest == nullptr ||
@@ -818,34 +801,14 @@ __device__ int IPCContext::broadcast_wave(rocshmem_team_t team,
     team == ROCSHMEM_TEAM_INVALID)
     return ROCSHMEM_ERROR;
 
-  // Route through the generic dispatcher so this path exercises the new
-  // thread-puts fast path (and its size/SDMA gating) instead of
-  // reimplementing it here.
-  return broadcastmem_wave(team, dest, source, nelems * sizeof(T), PE_root);
-}
-
-template <typename T>
-__device__ void IPCContext::internal_broadcast_wave(T *dst, const T *src, int nelems,
-                                      int pe_root, int pe_start,
-                                      int stride, int pe_size,
-                                      long *p_sync) {  // NOLINT(runtime/int)
-  if (constmem.num_pes < 4) {
-    internal_put_broadcast_wave<T>(dst, src, nelems, pe_root, pe_start, stride, pe_size);
-  } else {
-    internal_get_broadcast_wave<T>(dst, src, nelems, pe_root);
-  }
-
-  // Synchronize on completion of broadcast
-  internal_sync_wave(my_pe, pe_start, stride, pe_size, p_sync);
+  internal_broadcastmem_wave(team, dest, source, nelems * sizeof(T), PE_root);
+  return ROCSHMEM_SUCCESS;
 }
 
 template <typename T>
 __device__ void IPCContext::broadcast_wg(rocshmem_team_t team, T *dst,
                                       const T *src, int nelems, int pe_root) {
-  // Route through the generic dispatcher so this path exercises the new
-  // thread-puts fast path (and its size/SDMA gating) instead of
-  // reimplementing it here.
-  broadcastmem_wg(team, dst, src, nelems * sizeof(T), pe_root);
+  internal_broadcastmem_wg(team, dst, src, nelems * sizeof(T), pe_root);
 }
 
 template <typename T>
