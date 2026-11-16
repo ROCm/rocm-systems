@@ -96,8 +96,9 @@ hosts.
 
 **Finding.** HIP keeps a per-thread sticky error. A rejection left uncleared
 poisoned the next test's `HIP_CHECK(hipGetLastError())`, which surfaced as a
-failure in a *different* test — one that only appeared in full-suite, randomized
-order (Catch2 shares one process) and frequently only on the NVIDIA backend.
+failure in a *different* test when a Catch2 executable ran multiple cases in one
+shared process, frequently only on the NVIDIA backend. Direct execution uses
+declaration order by default; callers may request a different order explicitly.
 
 **Control.** After any call a test *expects* to fail, the test clears the
 thread-global sticky error with `(void)hipGetLastError();`.
@@ -108,12 +109,13 @@ order-dependent, hard-to-localize failure.
 
 **Rationale.** HIP keeps a per-thread sticky error. A rejection left uncleared
 poisons the next test's `HIP_CHECK(hipGetLastError())`, which surfaces as a
-failure in a *different* test — one that only appears in full-suite, randomized
-order (Catch2 shares one process) and frequently only on the NVIDIA backend. The
-reset is deliberately placed at each intentional-rejection site so the hazard
-never crosses a test boundary. A maintainer who sees a lone `(void)hipGetLastError()`
-and removes it as a no-op reintroduces an order-dependent, hard-to-localize
-cross-test failure.
+failure in a *different* test when direct Catch2 execution runs multiple cases in
+one shared process. Direct execution uses declaration order by default, unless
+the caller passes an explicit order option, and the failure is frequently seen
+only on the NVIDIA backend. The reset is deliberately placed at each
+intentional-rejection site so the hazard never crosses a test boundary. A
+maintainer who sees a lone `(void)hipGetLastError()` and removes it as a no-op
+reintroduces an order-dependent, hard-to-localize cross-test failure.
 
 **Evidence.**
 - Convention documented in [`catch/contract/AUTHORING.md`](catch/contract/AUTHORING.md)
@@ -147,10 +149,11 @@ test boundary. Until then the reset must stay.
 graphs, modules, arrays, VMM mappings, pools) and a failing `REQUIRE`/`HIP_CHECK`
 throws and unwinds the stack. Teardown written as plain statements after the
 assertions was skipped on that path, leaking the resource. A Catch2 test
-executable run directly executes multiple cases in one shared, randomized-order
-process, so a leaked resource persists into and destabilizes later cases. In
-contrast, CTest `catch_discover_tests` starts one process per registered case;
-the suite must remain correct under both run modes.
+executable run directly executes multiple cases in one shared process, in
+declaration order by default unless the caller passes an explicit order option,
+so a leaked resource persists into and destabilizes later cases. In contrast,
+CTest `catch_discover_tests` starts one process per registered case; the suite
+must remain correct under both run modes.
 
 **Control.** Contract tests release every acquired resource through a
 scope-exit guard, `hip::contract::ContractCleanup`, declared *before* the
@@ -166,8 +169,9 @@ are not CTest-isolated) and destabilize later cases.
 graphs, modules, arrays, VMM mappings, pools) and a failing `REQUIRE`/`HIP_CHECK`
 throws and unwinds the stack. Teardown written as plain statements after the
 assertions is skipped on that path, leaking the resource; when a Catch2 test
-executable is run directly its cases share one randomized-order process, so the
-leak persists into and destabilizes later cases, whereas under CTest
+executable is run directly its cases share one process and run in declaration
+order by default unless the caller passes an explicit order option, so the leak
+persists into and destabilizes later cases. In contrast, CTest
 `catch_discover_tests` runs each case in its own process. The guard runs the
 registered actions in reverse order during unwinding, giving correct RAII without
 a bespoke wrapper per handle type. The by-value capture requirement is not

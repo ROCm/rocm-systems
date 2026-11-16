@@ -676,6 +676,35 @@ class CheckTestingDocsTest(unittest.TestCase):
         results, _ = checker.validate(root=str(self.root))
         self.assertEqual(results["inventory"], [], msg=results["inventory"])
 
+    def test_ci_lane_empty_mapping_is_reported(self):
+        # A ci_lane mapping that carries neither a non-empty in_repo nor a
+        # non-empty external lane names no CI lane at all and is a schema error:
+        # the suite would claim CI coverage it does not actually point at.
+        broken = VALID_INVENTORY.replace(
+            "      ci_lane:\n        external: documented elsewhere\n",
+            "      ci_lane: {}\n", 1)
+        _write_docs(self.root, {"test_inventory.yaml": broken})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("execution.ci_lane must carry a non-empty in_repo or external"
+                in err for err in results["inventory"]),
+            msg=results["inventory"],
+        )
+
+    def test_ci_lane_empty_in_repo_and_external_is_reported(self):
+        # Present-but-empty in_repo / external values are no lane either; the
+        # mapping must carry at least one usable lane string.
+        broken = VALID_INVENTORY.replace(
+            "      ci_lane:\n        external: documented elsewhere\n",
+            '      ci_lane:\n        in_repo: ""\n        external: ""\n', 1)
+        _write_docs(self.root, {"test_inventory.yaml": broken})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("execution.ci_lane must carry a non-empty in_repo or external"
+                in err for err in results["inventory"]),
+            msg=results["inventory"],
+        )
+
     # -- robustness: scalar / unhashable nested collections ------------------
 
     def test_axis_classes_not_a_list_is_reported(self):
@@ -849,6 +878,37 @@ class CheckTestingDocsTest(unittest.TestCase):
         results, _ = checker.validate(root=str(self.root))
         self.assertTrue(
             any("coverage axis id must be a non-empty string" in err
+                for err in results["coverage_model"]),
+            msg=results["coverage_model"],
+        )
+
+    def test_duplicate_coverage_axis_id_is_reported(self):
+        # Two axis records sharing an id make the axis ambiguous: a later
+        # declaration silently shadows the earlier one. Duplicating an existing
+        # axis (same id and classes) isolates the duplicate-id error.
+        broken = VALID_COVERAGE.replace(
+            "    - id: api_surface\n      classes: [memory]\n",
+            "    - id: api_surface\n      classes: [memory]\n"
+            "    - id: api_surface\n      classes: [memory]\n", 1)
+        _write_docs(self.root, {"test_coverage_model.yaml": broken})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("duplicate coverage axis id: 'api_surface'" in err
+                for err in results["coverage_model"]),
+            msg=results["coverage_model"],
+        )
+
+    def test_duplicate_class_within_axis_is_reported(self):
+        # A class listed twice in one axis is a dead duplicate: it silently
+        # collapses to a single declared axis.class, so the repeat must be
+        # reported rather than deduplicated away.
+        broken = VALID_COVERAGE.replace(
+            "    - id: api_surface\n      classes: [memory]\n",
+            "    - id: api_surface\n      classes: [memory, memory]\n", 1)
+        _write_docs(self.root, {"test_coverage_model.yaml": broken})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("coverage axis 'api_surface' has duplicate class 'memory'" in err
                 for err in results["coverage_model"]),
             msg=results["coverage_model"],
         )

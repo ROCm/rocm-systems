@@ -55,7 +55,10 @@ for itself (workstreams WS-1 and WS-2):
       ``disposition_rationale``) are non-empty strings, ``execution.cadence`` is a
       non-empty string, and ``execution.platforms`` / ``backends`` /
       ``prerequisites`` are non-empty lists (``ctest_labels`` may be an empty list
-      for a build-free static check, so it is only required to be a list).
+      for a build-free static check, so it is only required to be a list);
+      ``execution.ci_lane`` is a mapping that must name a lane - it carries a
+      non-empty ``in_repo`` path or a non-empty ``external`` string (a ci_lane
+      with neither points at no CI coverage and is a schema error).
     - the YAML is parsed with a strict loader that rejects any mapping carrying a
       duplicate key, so a repeated key (for example a copy/pasted suite ``id`` or
       ``evidence`` key) is a parse error rather than a silently dropped value.
@@ -91,6 +94,10 @@ for itself (workstreams WS-1 and WS-2):
       ``status`` / ``rationale`` / ``gap_status`` strings and a ``priority`` within
       the same high/medium/low vocabulary;
     - every class / pairwise axis reference is a declared ``axis.class``;
+    - every declared axis ``id`` is unique, and every class within a single axis
+      is declared once (a duplicate axis id shadows the earlier declaration, and
+      a class repeated within an axis collapses to one ``axis.class``); every
+      coverage ``class`` id is likewise unique;
     - the model declares the required coverage dimensions (architecture,
       capability, integration_boundary) as explicit axes;
     - the ``pairwise_checks`` block is a non-empty cross-axis audit that exercises
@@ -730,9 +737,18 @@ def check_inventory(inventory, component_dir):
                 errors.append("suite {!r} gating {!r} not in declared vocabulary".format(sid, gating))
             # The in-repo CI lane names a workflow file (optionally followed by a
             # job/step qualifier); the path must resolve. An external: lane is a
-            # separate key and is not existence-checked.
+            # separate key and is not existence-checked. Either way the mapping
+            # must name a lane: a ci_lane carrying neither a non-empty ``in_repo``
+            # nor a non-empty ``external`` string points at no CI coverage at all
+            # and is a schema error in its own right (a suite may not claim a CI
+            # lane it does not actually reference).
             ci_lane = execution.get("ci_lane")
             if isinstance(ci_lane, dict):
+                if not _nonempty_str(ci_lane.get("in_repo")) and not _nonempty_str(
+                        ci_lane.get("external")):
+                    errors.append(
+                        "suite {!r} execution.ci_lane must carry a non-empty "
+                        "in_repo or external lane".format(sid))
                 if "in_repo" in ci_lane:
                     refs_ok += _check_repo_path_field(
                         component_dir, ci_lane.get("in_repo"),
@@ -1007,6 +1023,11 @@ def check_coverage_model(model, suite_ids, component_dir, inventory_kind_vocab=N
             errors.append(
                 "coverage axis id must be a non-empty string: {!r}".format(axis_id))
             continue
+        # An axis id must be unique: a second axis record sharing an id makes the
+        # dimension ambiguous (a later declaration silently shadows the earlier
+        # one), so the repeat is a schema error.
+        if axis_id in declared_axis_ids:
+            errors.append("duplicate coverage axis id: {!r}".format(axis_id))
         declared_axis_ids.add(axis_id)
         classes = axis.get("classes")
         if classes is not None and not isinstance(classes, list):
@@ -1018,6 +1039,14 @@ def check_coverage_model(model, suite_ids, component_dir, inventory_kind_vocab=N
             if not _nonempty_str(cls):
                 errors.append(
                     "coverage axis {!r} class must be a non-empty string: {!r}".format(
+                        axis_id, cls))
+                continue
+            # A class listed twice within one axis is a dead duplicate: it
+            # collapses to a single declared axis.class, so the repeat says
+            # nothing new and is reported rather than silently deduplicated.
+            if cls in axis_classes:
+                errors.append(
+                    "coverage axis {!r} has duplicate class {!r}".format(
                         axis_id, cls))
                 continue
             axis_classes.add(cls)
