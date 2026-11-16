@@ -22,6 +22,7 @@
 
 #include <stdlib.h>  // POSIX ::setenv
 
+#include <algorithm>
 #include <cstdint>
 #include <exception>
 #include <memory>
@@ -30,6 +31,7 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <variant>
 #include <vector>
 
 namespace rocprofsys::parser
@@ -63,6 +65,26 @@ source_label(config_source source)
     return "value";
 }
 
+/// The part of a refused @p value to name: the first element of a list that @p backend
+/// refuses, as the command line names the element at fault, or else the whole value.
+std::string
+refused_text(const backend_interface& backend, const schema_param& param,
+             const config_value_t& value)
+{
+    if(const auto* items = std::get_if<std::vector<std::string>>(&value))
+    {
+        const auto found =
+            std::ranges::find_if(*items, [&backend, &param](const std::string& item) {
+                return !backend.accepts(param, item);
+            });
+        if(found != items->end())
+        {
+            return *found;
+        }
+    }
+    return format_value(value);
+}
+
 void
 reject_backend_values(const schema& config_schema, const backend_registry& backends,
                       config_source source, parse_result& parsed)
@@ -82,7 +104,9 @@ reject_backend_values(const schema& config_schema, const backend_registry& backe
             continue;
         }
         parsed.errors.push_back(fmt::format(
-            "{} from {}", invalid_value_message(text, itr->first), source_label(source)));
+            "{} from {}",
+            invalid_value_message(refused_text(*found, *param, itr->second), itr->first),
+            source_label(source)));
         itr = parsed.values.erase(itr);
     }
 }

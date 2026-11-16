@@ -404,6 +404,25 @@ TEST(parser_configuration, rejects_values_outside_a_backend_catalog)
     EXPECT_EQ(accepted.at("letter"), "beta");
 }
 
+TEST(parser_configuration, names_the_list_element_a_backend_refuses)
+{
+    auto catalog     = letter_schema();
+    auto letters     = named("letters", param_type::enumeration_list);
+    letters.category = "demo";
+    letters.arg      = "--letters";
+    letters.backend  = "letters";
+    add_param(catalog, std::move(letters));
+    configuration_parser parser;
+    parser.set_environment([](std::string_view) { return std::optional<std::string>{}; });
+    ASSERT_TRUE(parser.initialize(std::move(catalog))) << parser.failure();
+    ASSERT_TRUE(parser.add_backend(std::make_unique<letter_backend>()));
+
+    static_cast<void>(parser.parse({ "--letters", "alpha,nope" }));
+    EXPECT_EQ(parser.errors(),
+              (std::vector<std::string>{
+                  "invalid value 'nope' for parameter 'letters' from command line" }));
+}
+
 TEST(parser_configuration, unknown_backend_does_not_reject_every_value)
 {
     auto       parser = make_letter_parser(false);
