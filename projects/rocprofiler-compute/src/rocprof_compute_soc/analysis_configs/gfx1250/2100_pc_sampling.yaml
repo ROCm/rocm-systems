@@ -7,5 +7,4 @@ Panel Config:
       id: 2101
       title: PC Sampling
       source: ps_file
-      comparable: false
   metrics_description: {}

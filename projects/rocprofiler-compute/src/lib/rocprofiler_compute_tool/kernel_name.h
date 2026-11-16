@@ -7,6 +7,9 @@
 namespace rocprofiler_compute_tool
 {
 
+/** Returns the name without a trailing ".kd" descriptor suffix, preserving bare ".kd". */
+std::string_view strip_kernel_descriptor_suffix(std::string_view name) noexcept;
+
 /// Drops a trailing ".kd" and demangles.
 std::string format_kernel_name(const char* mangled_name);
 

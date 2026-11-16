@@ -55,10 +55,20 @@ Event::~Event() {
   if (auto* notifyEvent = notify_event_.load(std::memory_order_acquire)) {
     notifyEvent->release();
   }
+  // A command that never completed, such as one recorded by a stream capture
+  releasePinnedHwEvents();
   // Destroy global HW event if available
   if ((hw_event_ != nullptr) && (device_ != nullptr)) {
     device_->ReleaseGlobalSignal(hw_event_);
   }
+}
+
+// ================================================================================================
+void Event::releasePinnedHwEvents() {
+  for (void* hw_event : pinned_hw_events_) {
+    device_->ReleaseGlobalSignal(hw_event);
+  }
+  pinned_hw_events_.clear();
 }
 
 // ================================================================================================
@@ -156,6 +166,8 @@ bool Event::setStatus(int32_t status, uint64_t timeStamp) {
     if (!IS_HIP) {
       releaseResources();
     }
+    // The GPU passed the command's waits before it completed
+    releasePinnedHwEvents();
 
     if (profilingInfo().enabled_) {
       amd::activity_prof::ReportActivity(command());

@@ -125,24 +125,7 @@ inline void execute_float_compare(Wavefront &wave, FloatCompare32Function wave32
       }
     }
     uint32_t *state = &causes;
-    // Preserve the numeric SIMD route for ordinary comparisons. A non-finite
-    // operand in a signaling RDNA4 compare uses the qualified status path.
-    if (wave.cu().arch() == ROCJITSU_CODE_ARCH_RDNA4 &&
-        (flags & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_COMPATIBILITY &&
-        (modifiers & RJ_ARITH_ALU_CLAMP) && !constant) {
-      constexpr unsigned word = Bits == 64 ? 1 : 0;
-      constexpr uint32_t exponent = Bits == 64 ? 0x7ff00000u : Bits == 32 ? 0x7f800000u : 0x7c00u;
-      const unsigned shift_a = Bits == 16 && (modifiers & RJ_ARITH_ALU_HIGH_A) ? 16 : 0;
-      const unsigned shift_b = Bits == 16 && (modifiers & RJ_ARITH_ALU_HIGH_B) ? 16 : 0;
-      for (uint64_t active = exec_mask; active; active &= active - 1) {
-        unsigned lane = std::countr_zero(active);
-        if (((a[word][lane] >> shift_a) & exponent) == exponent ||
-            ((b[word][lane] >> shift_b) & exponent) == exponent) {
-          flags = (flags & ~RJ_ARITH_SEMANTICS_MASK) | RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL;
-          break;
-        }
-      }
-    }
+    // Arithmetic/status policy stays in the selected library entry point.
     if (wave.wf_size() == 64)
       return wave64(flags, exec_mask, modifiers, &result, a, b, state);
     uint32_t result32 = 0;

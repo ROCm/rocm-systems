@@ -108,6 +108,7 @@ foreach(
         v_div_scale
         v_fma_dx9_zero
         v_fma
+        v_mad_f16
         v_fma_mix
         v_fma_mix_bf16
         v_fmaak
@@ -115,8 +116,10 @@ foreach(
         v_fmamk
         v_exponent
         v_min_max_med3
+        v_min_max_med3_cdna
         v_min_max_med3_num
         v_min_max
+        v_min_max_cdna
         v_min_max_num
         v_minimum_maximum3
         v_minimum_maximum
@@ -157,6 +160,11 @@ foreach(
         packed
         fp8_widen
         fp8_narrow
+        scaled_widen
+        wide_scaled_widen
+        scaled_fp8_narrow
+        scaled_fp4_narrow
+        wide_scaled_narrow
 )
     set(target "rj_arith_conversion_${family}_test")
     rj_arith_add_test(${target} conversion/${family}_test.cpp)
@@ -182,7 +190,16 @@ endforeach()
 foreach(
     family
     IN
-    ITEMS move_cndmask swap ds permlane relative lane
+    ITEMS
+        move_cndmask
+        pair_move
+        swap
+        ds
+        permlane
+        relative
+        lane
+        packed_permute
+        screen_partition
 )
     set(target "rj_arith_register_${family}_test")
     rj_arith_add_test(${target} register/${family}_test.cpp)
@@ -262,6 +279,8 @@ foreach(
     IN
     ITEMS
         half_binary
+        integer64
+        byte_shift
         half_ternary
         add
         multiply
@@ -272,7 +291,7 @@ foreach(
         boolean
         mad
         packed_binary
-        packed_mad
+        packed_ternary
         shift
         sad
         carry

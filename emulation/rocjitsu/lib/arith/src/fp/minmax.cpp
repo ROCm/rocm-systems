@@ -17,36 +17,45 @@ namespace {
 
 // Select FP32 minima, maxima, or medians for the selected lanes. Reject invalid controls
 // before changing outputs.
-template <rocjitsu::arith::Minmax3 Op>
+template <rocjitsu::arith::Minmax3 Op,
+          bool LegacyOutput = rocjitsu::arith::MinmaxPolicy<Op>::legacy>
 int minmax3(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *const *d,
             const uint32_t *const *a, const uint32_t *const *b, const uint32_t *const *c) {
   using Policy = rocjitsu::arith::MinmaxPolicy<Op>;
   constexpr bool FirstMaximum = Policy::first_maximum;
   constexpr bool SecondMaximum = Policy::second_maximum;
   constexpr bool PropagateNaN = Policy::propagate_nan;
-  constexpr bool Rdna3 = Policy::rdna3;
+  constexpr bool Legacy = Policy::legacy;
   if (mode >> 32) {
     return rocjitsu::arith::execute_dpp(
         flags, exec_mask, mode, a, [&](uint32_t exec_mask, const uint32_t *const *source) {
-          return minmax3<Op>(flags, exec_mask, uint32_t(mode), d, source, b, c);
+          return minmax3<Op, LegacyOutput>(flags, exec_mask, uint32_t(mode), d, source, b, c);
         });
   }
 
   constexpr uint64_t fp_flags = RJ_ARITH_FP_FLUSH_INPUT_DENORMALS |
                                 RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS | RJ_ARITH_FP_IEEE_MODE |
-                                RJ_ARITH_FP_ROUND_MASK | (Rdna3 ? RJ_ARITH_FP_DX10_CLAMP_OFF : 0);
+                                RJ_ARITH_FP_ROUND_MASK |
+                                (LegacyOutput ? RJ_ARITH_FP_DX10_CLAMP_OFF : 0);
   if (int error = rocjitsu::arith::validate(flags, mode & ~0x1ffU, fp_flags)) {
     return error;
   }
   if ((flags & RJ_ARITH_SEMANTICS_MASK) > RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS) {
     return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
   }
-  if constexpr (Rdna3) {
+  if constexpr (LegacyOutput) {
     mode = rocjitsu::arith::rdna3_output_modifiers(flags, mode);
   }
   if (exec_mask == 0) {
     return RJ_ARITH_SUCCESS;
   }
+#if defined(RJ_ARITH_HAVE_X86_64_V4)
+  if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
+    rocjitsu::arith::minmax3_x86_64_v4(Op, false, flags, exec_mask, uint32_t(mode), d[0], a[0],
+                                       b[0], c[0]);
+    return RJ_ARITH_SUCCESS;
+  }
+#endif
 #if defined(RJ_ARITH_HAVE_X86_64_V3)
   if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
     rocjitsu::arith::minmax3_x86_64_v3(Op, flags, exec_mask, mode, d[0], a[0], b[0], c[0]);
@@ -66,9 +75,10 @@ int minmax3(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *const *
     // Keep the architecture-specific NaN selection rules separate from source and destination
     // modifiers.
     float value;
-    if constexpr (Rdna3) {
-      value = rocjitsu::arith::minmax3_rdna3<FirstMaximum, SecondMaximum, Policy::median>(
-          x, y, z, flags & RJ_ARITH_FP_IEEE_MODE);
+    if constexpr (Legacy) {
+      value =
+          rocjitsu::arith::minmax3_legacy<FirstMaximum, SecondMaximum, Policy::median,
+                                          !Policy::cdna>(x, y, z, flags & RJ_ARITH_FP_IEEE_MODE);
     } else {
       value =
           rocjitsu::arith::minmax3_value<FirstMaximum, SecondMaximum, PropagateNaN, Policy::median>(
@@ -87,10 +97,11 @@ int minmax3(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *const *
 
 // Select FP32 minima, maxima, or medians for Wave64. Reject invalid controls before changing
 // outputs.
-template <rocjitsu::arith::Minmax3 Op>
+template <rocjitsu::arith::Minmax3 Op,
+          bool LegacyOutput = rocjitsu::arith::MinmaxPolicy<Op>::legacy>
 int minmax3_wave64(uint64_t flags, uint64_t exec_mask, uint64_t mode, uint32_t *const *d,
                    const uint32_t *const *a, const uint32_t *const *b, const uint32_t *const *c) {
-  if (int error = minmax3<Op>(flags, 0, mode, nullptr, nullptr, nullptr, nullptr)) {
+  if (int error = minmax3<Op, LegacyOutput>(flags, 0, mode, nullptr, nullptr, nullptr, nullptr)) {
     return error;
   }
   if (!exec_mask) {
@@ -106,8 +117,8 @@ int minmax3_wave64(uint64_t flags, uint64_t exec_mask, uint64_t mode, uint32_t *
     }
     uint32_t *dest = d[0] + half * 32;
     const uint32_t *x = a[0] + half * 32, *y = b[0] + half * 32, *z = c[0] + half * 32;
-    if (int error = minmax3<Op>(flags, uint32_t(exec_mask >> (half * 32)), half_instruction_flags,
-                                &dest, &x, &y, &z)) {
+    if (int error = minmax3<Op, LegacyOutput>(flags, uint32_t(exec_mask >> (half * 32)),
+                                              half_instruction_flags, &dest, &x, &y, &z)) {
       return error;
     }
   }
@@ -614,4 +625,190 @@ int rj_arith_v_med3_f32_w64(uint64_t flags, uint64_t exec_mask, uint64_t mode, u
     return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
   }
   return minmax3_wave64<rocjitsu::arith::Minmax3::MedianLegacy>(flags, exec_mask, mode, d, a, b, c);
+}
+
+// Select three operands with the inherited CDNA NaN and median policies.
+int rj_arith_v_min3_f32_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t mode,
+                                   uint32_t *const *d, const uint32_t *const *a,
+                                   const uint32_t *const *b, const uint32_t *const *c,
+                                   [[maybe_unused]] uint32_t *trapsts) {
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (rocjitsu::arith::reports_fp_status(flags)) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
+  }
+  return minmax3<rocjitsu::arith::Minmax3::Min3Cdna>(flags, exec_mask, mode, d, a, b, c);
+}
+
+// Select three operands with the inherited CDNA NaN and median policies.
+int rj_arith_v_min3_f32_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t mode,
+                                   uint32_t *const *d, const uint32_t *const *a,
+                                   const uint32_t *const *b, const uint32_t *const *c,
+                                   [[maybe_unused]] uint32_t *trapsts) {
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (rocjitsu::arith::reports_fp_status(flags)) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
+  }
+  return minmax3_wave64<rocjitsu::arith::Minmax3::Min3Cdna>(flags, exec_mask, mode, d, a, b, c);
+}
+
+// Select three operands with the inherited CDNA NaN and median policies.
+int rj_arith_v_max3_f32_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t mode,
+                                   uint32_t *const *d, const uint32_t *const *a,
+                                   const uint32_t *const *b, const uint32_t *const *c,
+                                   [[maybe_unused]] uint32_t *trapsts) {
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (rocjitsu::arith::reports_fp_status(flags)) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
+  }
+  return minmax3<rocjitsu::arith::Minmax3::Max3Cdna>(flags, exec_mask, mode, d, a, b, c);
+}
+
+// Select three operands with the inherited CDNA NaN and median policies.
+int rj_arith_v_max3_f32_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t mode,
+                                   uint32_t *const *d, const uint32_t *const *a,
+                                   const uint32_t *const *b, const uint32_t *const *c,
+                                   [[maybe_unused]] uint32_t *trapsts) {
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (rocjitsu::arith::reports_fp_status(flags)) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
+  }
+  return minmax3_wave64<rocjitsu::arith::Minmax3::Max3Cdna>(flags, exec_mask, mode, d, a, b, c);
+}
+
+// Select three operands with the inherited CDNA NaN and median policies.
+int rj_arith_v_med3_f32_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t mode,
+                                   uint32_t *const *d, const uint32_t *const *a,
+                                   const uint32_t *const *b, const uint32_t *const *c,
+                                   [[maybe_unused]] uint32_t *trapsts) {
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (rocjitsu::arith::reports_fp_status(flags)) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
+  }
+  return minmax3<rocjitsu::arith::Minmax3::MedianCdna>(flags, exec_mask, mode, d, a, b, c);
+}
+
+// Select three operands with the inherited CDNA NaN and median policies.
+int rj_arith_v_med3_f32_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t mode,
+                                   uint32_t *const *d, const uint32_t *const *a,
+                                   const uint32_t *const *b, const uint32_t *const *c,
+                                   [[maybe_unused]] uint32_t *trapsts) {
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (rocjitsu::arith::reports_fp_status(flags)) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
+  }
+  return minmax3_wave64<rocjitsu::arith::Minmax3::MedianCdna>(flags, exec_mask, mode, d, a, b, c);
+}
+
+// Apply CDNA4's inherited OMOD/CLAMP policy to NaN-propagating selection.
+int rj_arith_v_minimum3_f32_w32_gfx950(uint64_t flags, uint32_t exec_mask, uint64_t mode,
+                                       uint32_t *const *d, const uint32_t *const *a,
+                                       const uint32_t *const *b, const uint32_t *const *c,
+                                       [[maybe_unused]] uint32_t *trapsts) {
+  // The inherited OMOD policy is not hardware-qualified for this forced-IEEE instruction.
+  // Keep Compatibility usable without advertising this case as empirical bit-exact.
+  if ((flags & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS &&
+      (rocjitsu::arith::rdna3_output_modifiers(flags, mode) & RJ_ARITH_ALU_OMOD_MASK)) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
+  }
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (rocjitsu::arith::reports_fp_status(flags)) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
+  }
+  return minmax3<rocjitsu::arith::Minmax3::Minimum3, true>(flags, exec_mask, mode, d, a, b, c);
+}
+
+// Apply CDNA4's inherited OMOD/CLAMP policy to NaN-propagating selection.
+int rj_arith_v_minimum3_f32_w64_gfx950(uint64_t flags, uint64_t exec_mask, uint64_t mode,
+                                       uint32_t *const *d, const uint32_t *const *a,
+                                       const uint32_t *const *b, const uint32_t *const *c,
+                                       [[maybe_unused]] uint32_t *trapsts) {
+  // The inherited OMOD policy is not hardware-qualified for this forced-IEEE instruction.
+  // Keep Compatibility usable without advertising this case as empirical bit-exact.
+  if ((flags & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS &&
+      (rocjitsu::arith::rdna3_output_modifiers(flags, mode) & RJ_ARITH_ALU_OMOD_MASK)) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
+  }
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (rocjitsu::arith::reports_fp_status(flags)) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
+  }
+  return minmax3_wave64<rocjitsu::arith::Minmax3::Minimum3, true>(flags, exec_mask, mode, d, a, b,
+                                                                  c);
+}
+
+// Apply CDNA4's inherited OMOD/CLAMP policy to NaN-propagating selection.
+int rj_arith_v_maximum3_f32_w32_gfx950(uint64_t flags, uint32_t exec_mask, uint64_t mode,
+                                       uint32_t *const *d, const uint32_t *const *a,
+                                       const uint32_t *const *b, const uint32_t *const *c,
+                                       [[maybe_unused]] uint32_t *trapsts) {
+  // The inherited OMOD policy is not hardware-qualified for this forced-IEEE instruction.
+  // Keep Compatibility usable without advertising this case as empirical bit-exact.
+  if ((flags & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS &&
+      (rocjitsu::arith::rdna3_output_modifiers(flags, mode) & RJ_ARITH_ALU_OMOD_MASK)) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
+  }
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (rocjitsu::arith::reports_fp_status(flags)) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
+  }
+  return minmax3<rocjitsu::arith::Minmax3::Maximum3, true>(flags, exec_mask, mode, d, a, b, c);
+}
+
+// Apply CDNA4's inherited OMOD/CLAMP policy to NaN-propagating selection.
+int rj_arith_v_maximum3_f32_w64_gfx950(uint64_t flags, uint64_t exec_mask, uint64_t mode,
+                                       uint32_t *const *d, const uint32_t *const *a,
+                                       const uint32_t *const *b, const uint32_t *const *c,
+                                       [[maybe_unused]] uint32_t *trapsts) {
+  // The inherited OMOD policy is not hardware-qualified for this forced-IEEE instruction.
+  // Keep Compatibility usable without advertising this case as empirical bit-exact.
+  if ((flags & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS &&
+      (rocjitsu::arith::rdna3_output_modifiers(flags, mode) & RJ_ARITH_ALU_OMOD_MASK)) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
+  }
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (rocjitsu::arith::reports_fp_status(flags)) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
+  }
+  return minmax3_wave64<rocjitsu::arith::Minmax3::Maximum3, true>(flags, exec_mask, mode, d, a, b,
+                                                                  c);
 }
