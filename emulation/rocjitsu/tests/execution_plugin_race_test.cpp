@@ -2437,19 +2437,50 @@ TEST_F(Gfx950CounterCapacityRaceTest, MessageAdvancesLgkmcnt) {
   EXPECT_FALSE(vgpr_read(0));
 }
 
-// Before GFX12, an EXEC-zero vector memory instruction applies no backpressure.
-TEST_F(Gfx950CounterCapacityRaceTest, ExecZeroLoadAppliesNoBackpressure) {
+// Measured on MI355X (#15938): an EXEC-zero buffer or global instruction counts
+// on VMCNT, so it applies backpressure.
+TEST_F(Gfx950CounterCapacityRaceTest, ExecZeroLoadAppliesBackpressure) {
   load(/*lds=*/false, /*vgpr=*/0);
   for (int index = 0; index < kVmcntCapacity - 1; ++index)
     load(/*lds=*/false, /*vgpr=*/1);
   load(/*lds=*/false, /*vgpr=*/2, /*exec=*/0);
-  EXPECT_TRUE(vgpr_read(0));
+  EXPECT_FALSE(vgpr_read(0));
 }
 
-// Nor does an EXEC-zero load hold a slot for later waits there.
-TEST_F(Gfx950CounterCapacityRaceTest, PartialVmcntWaitDoesNotCountExecZeroLoad) {
+// An EXEC-zero instruction holds a VMCNT slot: after a load and an EXEC-zero
+// load, store or load to LDS, s_waitcnt vmcnt(1) completes the first load.
+TEST_F(Gfx950CounterCapacityRaceTest, PartialVmcntWaitCountsExecZeroInstruction) {
+  auto exec_zero = [&](bool is_load, bool lds_dst) {
+    wave->pc += 16;
+    auto state = std::make_unique<VectorMemState>(GLOBAL_MEM);
+    state->elem_size = sizeof(uint32_t);
+    state->num_elems = 1;
+    state->is_load = is_load;
+    state->lds_dst = lds_dst;
+    state->wf_size = wave->wf_size();
+    state->dst_reg_base = wave->vgpr_alloc().base + 2;
+    TestMemoryInstruction inst(std::move(state));
+    wave->set_exec(0);
+    fixture.plugin_group_->onAmdgpuBeforeExecuteInstruction(wave->pc, inst, *wave);
+    fixture.plugin_group_->onAmdgpuMemoryAccessRouted({}, inst, *wave);
+    wave->set_exec(1);
+  };
+  const uint32_t wait_one = legacy_wait_word(ROCJITSU_CODE_ARCH_CDNA4, /*vmcnt=*/1, /*lgkmcnt=*/15);
+  const uint32_t wait_all = legacy_wait_word(ROCJITSU_CODE_ARCH_CDNA4, /*vmcnt=*/0, /*lgkmcnt=*/15);
+  for (const auto &[is_load, lds_dst] : {std::pair{true, false}, {false, false}, {false, true}}) {
+    SCOPED_TRACE(testing::Message() << "is_load=" << is_load << " lds_dst=" << lds_dst);
+    load(/*lds=*/false, /*vgpr=*/0);
+    exec_zero(is_load, lds_dst);
+    execute_wait(*fixture.plugin_group_, *wave, wait_one);
+    EXPECT_FALSE(vgpr_read(0));
+    execute_wait(*fixture.plugin_group_, *wave, wait_all);
+  }
+}
+
+// With no EXEC-zero instruction after the load, s_waitcnt vmcnt(1) leaves it
+// pending.
+TEST_F(Gfx950CounterCapacityRaceTest, PartialVmcntWaitLeavesOnlyLoadPending) {
   load(/*lds=*/false, /*vgpr=*/0);
-  load(/*lds=*/false, /*vgpr=*/2, /*exec=*/0);
   execute_wait(*fixture.plugin_group_, *wave,
                legacy_wait_word(ROCJITSU_CODE_ARCH_CDNA4, /*vmcnt=*/1, /*lgkmcnt=*/15));
   EXPECT_TRUE(vgpr_read(0));
