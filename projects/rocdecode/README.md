@@ -205,11 +205,11 @@ After installation, the following files are available:
 
   > [!NOTE]
   > The `utils/` and `samples/` sources and the CMake helper modules in
-  > `share/rocdecode/cmake/` ship with the development package. Only the bundled
-  > test media (`video/`, `frames/`) under `/opt/rocm/share/rocdecode/` is
-  > provided by the `amdrocm-decode-test` package. Install `amdrocm-decode-test`
-  > (see [Install](#install)) only if you run the samples against the bundled
-  > media or run the CTests.
+  > `share/rocdecode/cmake/` ship with the development package. The CTest
+  > project, test scripts, and bundled test media (`video/`, `frames/`) under
+  > `/opt/rocm/share/rocdecode/` are provided by the `amdrocm-decode-test`
+  > package. Install `amdrocm-decode-test` (see [Install](#install)) to run the
+  > CTests or to run the samples against the bundled media.
 
 If you obtain rocDecode from [TheRock](https://github.com/ROCm/TheRock)'s generic
 (`.tar.zst`) artifacts instead of distribution packages, the `utils/` and
