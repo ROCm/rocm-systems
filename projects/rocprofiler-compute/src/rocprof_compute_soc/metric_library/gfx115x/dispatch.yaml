@@ -29,9 +29,8 @@ dispatch.sgprs:
   formula: AVG(SGPR)
   unit: Registers
   description: >-
-    The number of scalar general-purpose registers allocated for the kernel. Note:
-    this may not exactly match the number of SGPRs requested by the compiler due to
-    allocation granularity.
+    The number of scalar general-purpose registers allocated for the kernel. On this
+    architecture every wavefront gets 128.
 dispatch.vgprs:
   name: VGPRs
   formula: AVG(Arch_VGPR)
