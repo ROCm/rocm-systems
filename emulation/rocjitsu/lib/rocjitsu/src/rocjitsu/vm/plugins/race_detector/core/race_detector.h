@@ -79,11 +79,9 @@ public:
                     MemoryOrderClass currentMemoryOrder = MemoryOrderClass::LDS,
                     uint8_t atomicBytes = 0) const;
 
-  /// Check for WAR hazards: no outstanding LDS reads overlap the range.
-  /// Same-wave operations are ordered only when both belong to the same
-  /// non-UNORDERED completion class.
-  /// TODO(newling): WAW detection (write vs outstanding writes) is not
-  /// implemented.
+  /// Check for WAR and WAW hazards: no outstanding LDS reads or writes overlap
+  /// the range. Same-wave operations are ordered only when both belong to the
+  /// same non-UNORDERED completion class.
   void validateWrite(int addr, WaveId, int lane, int nBytes,
                      MemoryOrderClass currentMemoryOrder = MemoryOrderClass::LDS,
                      uint8_t atomicBytes = 0) const;
@@ -146,8 +144,13 @@ private:
   static bool hasPotentialLdsConflict(int addr, int nBytes,
                                       const std::vector<LdsChunkCounts> &counts, WaveId wave,
                                       MemoryOrderClass currentMemoryOrder);
+  /// Report each event of `pending` that overlaps the access and is not
+  /// ordered before it.
+  void reportUnorderedOverlaps(const std::vector<EventId> &pending, int addr, WaveId wave, int lane,
+                               int nBytes, bool isWrite, MemoryOrderClass currentMemoryOrder,
+                               uint8_t atomicBytes) const;
 
-  /// Active LDS write events (for scanning during read validation).
+  /// Active LDS write events (for scanning during read and write validation).
   std::vector<EventId> ldsWriteEvents;
 
   /// Active LDS read events (for scanning during write validation).

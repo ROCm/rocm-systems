@@ -95,7 +95,7 @@ public:
     ASSERT_TRUE(
         waves_[wave]->prepareForCounterIncrement(amdgpu::WaitCounterType::VMCNT).succeeded());
     ldsAddrs.resize(waveSize_, 0);
-    // Validate each active lane's write against outstanding reads, as the plugin does.
+    // Validate each active lane's write against outstanding LDS accesses, as the plugin does.
     for (int lane = 0; lane < waveSize_; ++lane)
       if (exec & (1ULL << lane))
         detector_->validateWrite(static_cast<int>(ldsAddrs[lane]), WaveId{wave}, lane, bytesPerLane,
@@ -108,7 +108,7 @@ public:
   }
 
   /// Register a tensor DMA load into LDS (tracked by tensorcnt). The load
-  /// writes every range; it is validated against outstanding LDS reads.
+  /// writes every range; it is validated against outstanding LDS reads and writes.
   void tensorLoadToLds(int wave, std::vector<LdsByteRange> ranges) {
     tensorTransfer(wave, MemoryEventType::GLOBAL_TO_LDS, ranges);
   }
@@ -227,7 +227,7 @@ public:
     waves_[wave]->dispatch(wait);
   }
 
-  /// Register an LDS write and validate against outstanding reads.
+  /// Register an LDS write and validate against outstanding reads and writes.
   void ldsWrite(int wave, int lane, int addr, int bytes,
                 MemoryOrderClass memoryOrder = MemoryOrderClass::LDS,
                 amdgpu::WaitCounterType waitCounterType = amdgpu::WaitCounterType::LGKMCNT,

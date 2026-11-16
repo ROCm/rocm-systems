@@ -795,6 +795,17 @@ TEST_F(TensorDmaRaceTest, TransferIsCheckedAgainstPendingLdsAccesses) {
   EXPECT_NE(report.find("wave=0 lane=-1"), std::string::npos) << report;
 }
 
+// A DS write over bytes another wave has written is checked even though no read
+// is pending, and is ordered only by that wave's wait and a barrier.
+TEST_F(TensorDmaRaceTest, DsWriteOverAnotherWavesWriteRacesUntilWaitAndBarrier) {
+  EXPECT_FALSE(ds_write(0, 4));
+  EXPECT_TRUE(ds_write(1, 4));
+  wait_dscnt(0);
+  wait_dscnt(1);
+  barrier();
+  EXPECT_FALSE(ds_write(0, 4));
+}
+
 TEST_F(TensorDmaRaceTest, StoreIsCheckedAgainstAPendingDsWrite) {
   // DS writes and tensor transfers complete independently, so the store may
   // read the bytes before the earlier write lands.

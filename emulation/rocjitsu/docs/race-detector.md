@@ -217,8 +217,8 @@ races. Some examples:
   the same wave that touch the same LDS byte, in either order, until
   `s_wait_tensorcnt` or a full `tensorcnt` retires the earlier one. Two stores
   of the same tile only read it, which is safe; two loads over the same bytes
-  are an LDS write/write conflict, which the detector does not check (see
-  Limitations). Each instruction is registered when it issues, as other memory
+  are an LDS write/write conflict, reported under the same rule. Each
+  instruction is registered when it issues, as other memory
   instructions are, so an instruction that moves no data still occupies its
   `tensorcnt` slot, and a transfer that waits for memory is pending from the
   moment it issues.
@@ -458,8 +458,8 @@ The plugin keeps track, for all registers and LDS memory bytes, of which memory
 operations are in flight. When an instruction in the emulator accesses an LDS
 byte, there is a check to see what memory events are still in flight that
 read/write that byte, from the perspective of the accessing thread. In this way,
-RAW (read-after-write) and WAR (write-after-read) hazards can be detected.
-For VGPRs and scalar registers, the detector also flags WAW when an instruction
+RAW (read-after-write), WAR (write-after-read) and, for LDS bytes, WAW
+(write-after-write) hazards can be detected. For VGPRs and scalar registers, the detector also flags WAW when an instruction
 write can be clobbered by a pending asynchronous load. The detector also reports
 WAW between scalar loads targeting the same SGPR or TTMP.
 
@@ -610,7 +610,10 @@ this source tree. The original
 - **Limited WAW detection**: VGPR WAW covers instruction writes and
   asynchronous memory writes that overlap a pending load. Scalar-register WAW
   covers instruction writes and scalar loads that overlap pending scalar-memory
-  destinations. LDS WAW is not currently reported.
+  destinations. LDS WAW is reported under the rules for LDS reads: an earlier
+  write of another wave must be waited for and followed by a barrier, and an
+  earlier write of the same wave must be waited for or share an in-order
+  completion class with the later write.
 
 - **Embedded waits**: the plugin handles explicit wait instructions, including
   `s_wait_idle` and RDNA4's compatibility `s_waitcnt`, but does not apply waits
