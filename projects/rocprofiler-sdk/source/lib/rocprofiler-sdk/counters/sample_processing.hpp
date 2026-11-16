@@ -47,6 +47,15 @@ callback_thread_start();
 void
 callback_thread_stop();
 
+// Blocks until counter records for samples handed off before this call have been written, or
+// the timeout expires. The consumer keeps running and collecting contexts keep collecting.
+uint64_t
+callback_thread_drain(const uint64_t timeout_ns = 0);
+
+// Samples handed off but not yet consumed, without waiting.
+uint64_t
+callback_thread_peek();
+
 void
 process_callback_data(completed_cb_params_t&& params);
 }  // namespace counters

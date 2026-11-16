@@ -386,7 +386,16 @@ setup_session(int kfd, uint32_t gpu_id, dlog_session* s, bool* permanent = nullp
     sinfo.op   = KFD_DLOG_STREAM_OP_INFO;
     if(ioctl(s->stream_fd, KFD_DLOG_STREAM_IOC, &sinfo) != 0)
     {
-        ROCP_WARNING << "KFD dispatch-log: STREAM_OP_INFO failed";
+        // The argument size is encoded into the request number, so a kernel built for a
+        // different stream ABI rejects this with ENOTTY instead of reporting its version.
+        ROCP_WARNING << fmt::format(
+            "KFD dispatch-log: STREAM_OP_INFO failed (errno={}){}",
+            errno,
+            errno == ENOTTY ? fmt::format(" -- this kernel does not implement stream ABI v{}, so "
+                                          "dispatch-log is unavailable and this GPU falls back to "
+                                          "HSA timestamps",
+                                          KFD_DLOG_STREAM_ABI_VERSION)
+                            : std::string{});
         return false;
     }
     s->info = sinfo.info;

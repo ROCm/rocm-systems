@@ -106,6 +106,8 @@ typedef enum rocprofiler_status_t  // NOLINT(performance-enum-size)
     ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_REGISTER_VERSION,  ///< rocprofiler-register version is
                                                              ///< incompatible. Late-start profiling
                                                              ///< requires ROCm 7.0+.
+    ROCPROFILER_STATUS_ERROR_TIMEOUT,  ///< A timeout was hit and requested operation failed to
+                                       ///< complete
     ROCPROFILER_STATUS_LAST,
     ROCPROFILER_STATUS_ERROR_PROFILE_NOT_FOUND =
         ROCPROFILER_STATUS_ERROR_CONFIG_NOT_FOUND,  ///< ROCPROFILER_STATUS_ERROR_PROFILE_NOT_FOUND

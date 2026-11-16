@@ -205,11 +205,16 @@ queue_controller_init(HsaApiTable* table);
 void
 queue_controller_fini();
 
-// Best-effort drain of every intercepted queue. Returns false if any queue's drain timed out with
-// kernels still active, so callers that tear state down behind the drain can say so; callers that
-// only want a fence may ignore it.
-bool
-queue_controller_sync();
+// Best-effort drain of the queue interceptor and every intercepted queue. Returns the records
+// still outstanding across them, so ZERO means everything drained -- never use the result as a
+// truth value, since a non-zero count converts to `true` and reads as the opposite. @p timeout_ns
+// bounds each wait individually, not the call as a whole.
+uint64_t
+queue_controller_sync(const uint64_t timeout_ns = 0);
+
+// Total async packets still in flight across every intercepted queue, without waiting.
+uint64_t
+queue_controller_peek_active_async_packets();
 
 // Register a queue that already existed when interception began, so that records can be
 // emitted for it. Safe to call repeatedly; only the first call registers. Returns false
