@@ -3,9 +3,12 @@
 
 #include "barrier_fixture.h"
 #include "barrier_oracle.h"
+#include "cdna_lds_fixture.h"
+#include "lds_fixture.h"
 #include "rocjitsu/code/file_io.h"
 #include "rocjitsu/code/patch/code_object_patcher.h"
 #include "rocjitsu/code/patch/fault_injection/drop_barrier.h"
+#include "rocjitsu/code/patch/fault_injection/lds_wrong_address.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "scoped_temp.h"
@@ -261,13 +264,112 @@ INSTANTIATE_TEST_SUITE_P(TargetWaves, FaultMutationCliFamily, ::testing::ValuesI
                            return info.param.name;
                          });
 
+TEST_F(FaultMutationCli, ListsLoadAndStoreForms) {
+  write(input_, test::make_lds_load_elf(EF_AMDGPU_MACH_AMDGCN_GFX1200));
+  ASSERT_EQ(invoke({"--input", input_.string(), "--kernel", "test_kernel", "--kind",
+                    "LdsWrongAddress", "--list"}),
+            0);
+  EXPECT_NE(stdout_.find(
+                "ordinal=0 exact=0 address_vgpr=2 address_bank=0 target=gfx1200 form=ds_load_b32"),
+            std::string::npos);
+  EXPECT_NE(stdout_.find(
+                "ordinal=1 exact=8 address_vgpr=1 address_bank=0 target=gfx1200 form=ds_store_b32"),
+            std::string::npos);
+}
+
+TEST_F(FaultMutationCli, LdsMutationSummaryMatchesSelectedLibraryResultAndEmittedImage) {
+  const std::vector<uint8_t> image =
+      test::make_lds_load_elf(EF_AMDGPU_MACH_AMDGCN_GFX1200, true, 0);
+  write(input_, image);
+  const FaultMutationContext source(image);
+  FaultMutationError error;
+  const FailureOr<LdsInventory> inventory =
+      discover_lds_wrong_address(source, "test_kernel", error);
+  ASSERT_TRUE(inventory.succeeded()) << error.message;
+  const FailureOr<LdsSelection> selection =
+      select_lds_wrong_address(inventory.value(), {.exact = std::nullopt, .ordinal = 1}, error);
+  ASSERT_TRUE(selection.succeeded()) << error.message;
+  const FailureOr<LdsResult> result = apply_lds_wrong_address(source, selection.value(), 7, error);
+  ASSERT_TRUE(result.succeeded()) << error.message;
+  ASSERT_EQ(result.value().logical_mutation_count, 1u);
+  ASSERT_EQ(invoke({"--input", input_.string(), "--output", output_.string(), "--kernel",
+                    "test_kernel", "--kind", "LdsWrongAddress", "--exact",
+                    std::to_string(selection.value().site().offset), "--ordinal", "999",
+                    "--address-vgpr", "7"}),
+            0);
+  const std::vector<uint8_t> emitted = read(output_);
+  ASSERT_EQ(emitted, result.value().image);
+  const AmdGpuCodeObject mutant(emitted.data(), emitted.size());
+  ASSERT_TRUE(mutant.is_valid());
+  EXPECT_EQ(mutant.target_id(), source.source().target_id());
+  EXPECT_TRUE(test::lds_output_matches(source, selection.value().site().offset, 7, emitted));
+  EXPECT_EQ(stdout_, "kind=LdsWrongAddress target=gfx1200 exact=" +
+                         std::to_string(selection.value().site().offset) +
+                         " address_vgpr=7 logical_mutations=" +
+                         std::to_string(result.value().logical_mutation_count) +
+                         " output_bytes=" + std::to_string(emitted.size()) + "\n");
+  EXPECT_TRUE(stderr_.empty());
+}
+
+TEST_F(FaultMutationCli, ListsCdnaAndBankedForms) {
+  for (const test::CdnaLdsTarget &target : test::kCdnaLdsTargets) {
+    write(input_, test::make_cdna_lds_elf(target));
+    ASSERT_EQ(invoke({"--input", input_.string(), "--kernel", "test_kernel", "--kind",
+                      "LdsWrongAddress", "--list"}),
+              0);
+    EXPECT_NE(stdout_.find("form=ds_write_b32"), std::string::npos);
+    EXPECT_NE(stdout_.find("form=ds_write_b128"), std::string::npos);
+  }
+  constexpr std::array<uint32_t, 1> set_bank =
+      cdna5::build_sopp(cdna5::kSSetVgprMsbSopp, {.simm16 = 1});
+  constexpr std::array<uint32_t, 2> load =
+      cdna5::build_vds(cdna5::kDsLoadB32Vds, {.addr = 2, .vdst = 5});
+  write(input_, test::make_cdna5_lds_elf({set_bank[0], load[0], load[1]}, 16));
+  ASSERT_EQ(invoke({"--input", input_.string(), "--kernel", "test_kernel", "--kind",
+                    "LdsWrongAddress", "--list"}),
+            0);
+  EXPECT_NE(stdout_.find("address_bank=1 target=gfx1250 form=ds_load_b32"), std::string::npos);
+}
+
 TEST_F(FaultMutationCli, HelpCapabilitiesAndArguments) {
   EXPECT_EQ(invoke({"--help"}), 0);
   EXPECT_NE(stdout_.find("Exact takes precedence"), std::string::npos);
+  EXPECT_NE(stdout_.find("LdsWrongAddress admits gfx1200/gfx1201 wave32/wave64 ds_store_b32"),
+            std::string::npos);
+  EXPECT_NE(stdout_.find("allocated --address-vgpr"), std::string::npos);
+  EXPECT_NE(stdout_.find("the first member of a barrier, or the LDS instruction"),
+            std::string::npos);
   EXPECT_EQ(invoke({"--capabilities"}), 0);
   const std::string capabilities = stdout_;
-  EXPECT_EQ(std::count(capabilities.begin(), capabilities.end(), '\n'), 10);
-  EXPECT_EQ(capabilities.find("LdsWrongAddress"), std::string::npos);
+  EXPECT_EQ(std::count(capabilities.begin(), capabilities.end(), '\n'), 24);
+  EXPECT_NE(capabilities.find("kind=LdsWrongAddress target=gfx1250 wave=32 "
+                              "form=ds_store_b32 admission=direct-single-owner\n"),
+            std::string::npos);
+  EXPECT_NE(capabilities.find("kind=LdsWrongAddress target=gfx1250 wave=32 "
+                              "form=ds_load_b32 admission=direct-single-owner\n"),
+            std::string::npos);
+  constexpr std::string_view lds1200 = "kind=LdsWrongAddress target=gfx1200 wave=64 "
+                                       "form=ds_store_b32 admission=direct-single-owner\n";
+  constexpr std::string_view lds1201 = "kind=LdsWrongAddress target=gfx1201 wave=64 "
+                                       "form=ds_store_b32 admission=direct-single-owner\n";
+  ASSERT_NE(capabilities.find(lds1200), std::string::npos);
+  ASSERT_NE(capabilities.find(lds1201), std::string::npos);
+  for (const std::string target : {"gfx1200", "gfx1201"})
+    EXPECT_NE(capabilities.find("kind=LdsWrongAddress target=" + target +
+                                " wave=64 form=ds_load_b32 admission=direct-single-owner\n"),
+              std::string::npos);
+  for (const std::string target : {"gfx1200", "gfx1201"}) {
+    for (const std::string form : {"ds_store_b32", "ds_load_b32"})
+      EXPECT_NE(capabilities.find("kind=LdsWrongAddress target=" + target +
+                                  " wave=32 form=" + form + " admission=direct-single-owner\n"),
+                std::string::npos);
+  }
+  for (const std::string target : {"gfx942", "gfx950"}) {
+    for (const std::string form : {"ds_write_b32", "ds_write_b128"})
+      EXPECT_NE(capabilities.find("kind=LdsWrongAddress target=" + target +
+                                  " wave=64 form=" + form + " admission=direct-single-owner\n"),
+                std::string::npos);
+  }
   for (const FaultMutationCapability &capability : fault_mutation_capabilities()) {
     const std::string target(default_isa_target_registry().find_target(capability.target)->id);
     EXPECT_NE(capabilities.find("kind=DropBarrier target=" + target +
