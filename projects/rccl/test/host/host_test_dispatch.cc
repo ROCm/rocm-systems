@@ -873,6 +873,12 @@ std::vector<std::string> manifestBinaries(const std::string &directory)
     if (!manifest) {
         return {};
     }
+    // Resolved once, and compared against every entry: a match is this executable under another
+    // name, and running it would fork the run into itself. The error main() prints invites a
+    // hand-written manifest, so the name it may be given is not the build's to control.
+    std::error_code selfEc;
+    const fs::path self = fs::weakly_canonical(selfPath(), selfEc);
+
     std::vector<std::string> names;
     std::string line;
     while (std::getline(manifest, line)) {
@@ -886,6 +892,20 @@ std::vector<std::string> manifestBinaries(const std::string &directory)
         if (fs::path(line).filename() != fs::path(line)) {
             fmt::print(stderr, "host-test-dispatch: ignoring \"{}\" in {}: a binary name, not a"
                                " path, is expected on each line\n",
+                       line, kBinaryManifest);
+            continue;
+        }
+        std::error_code ec;
+        const fs::path resolved = fs::weakly_canonical(fs::path(directory) / line, ec);
+        if (!selfEc && !ec && resolved == self) {
+            fmt::print(stderr, "host-test-dispatch: ignoring \"{}\" in {}: it resolves to this"
+                               " executable, which would run the front door inside itself\n",
+                       line, kBinaryManifest);
+            continue;
+        }
+        if (std::find(names.begin(), names.end(), line) != names.end()) {
+            fmt::print(stderr, "host-test-dispatch: ignoring \"{}\" in {}: already named, and a"
+                               " second child of that name would overwrite the first's report\n",
                        line, kBinaryManifest);
             continue;
         }

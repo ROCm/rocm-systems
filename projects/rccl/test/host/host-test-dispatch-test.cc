@@ -1054,6 +1054,36 @@ TEST(HostDispatchManifestMicrotest, AManifestEntryThatIsAPathIsRefused)
               std::vector<std::string>{"rccl-UnitTestsMicroCrypt"});
 }
 
+TEST(HostDispatchManifestMicrotest, AnEntryThatIsThisExecutableIsRefused)
+{
+    // A manifest naming the front door, beside a copy of the front door in micro/, is a fork
+    // bomb: every child reads the same manifest and forks itself again. The check is by resolved
+    // path and not by name, because renaming the binary must not be what lets it recurse.
+    const ScopedDir tree("rccl-dispatch-test");
+    const std::filesystem::path micro = std::filesystem::path(binaryDirectory(tree.path()));
+    std::error_code ec;
+    std::filesystem::create_directories(micro, ec);
+    std::filesystem::create_symlink(selfPath(), micro / "rccl-UnitTestsHostAllRenamed", ec);
+    ASSERT_FALSE(ec) << ec.message();
+    addManifest(tree, {"rccl-UnitTestsHostAllRenamed", "rccl-UnitTestsMicroCrypt"});
+
+    EXPECT_EQ(manifestBinaries(binaryDirectory(tree.path())),
+              std::vector<std::string>{"rccl-UnitTestsMicroCrypt"});
+}
+
+TEST(HostDispatchManifestMicrotest, ANameTheManifestRepeatsIsFrontedOnce)
+{
+    // Each child's log and report path is derived from its name, so a name listed twice has the
+    // second child overwrite the first's report -- half the run's results gone, with the run
+    // still green. One name, one child.
+    const ScopedDir tree("rccl-dispatch-test");
+    addManifest(tree, {"rccl-UnitTestsMicroCrypt", "rccl-UnitTestsMicroInit",
+                       "rccl-UnitTestsMicroCrypt"});
+
+    EXPECT_EQ(manifestBinaries(binaryDirectory(tree.path())),
+              (std::vector<std::string>{"rccl-UnitTestsMicroCrypt", "rccl-UnitTestsMicroInit"}));
+}
+
 // ── the listing each binary is asked for ───────────────────────────
 //
 // What is worth proving is the part that used to be impossible: a listing is a child like any
