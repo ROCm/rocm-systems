@@ -6,6 +6,7 @@
 
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
+#include "rocjitsu/code/analysis/control_flow.h"
 #include "rocjitsu/code/analysis/def_use_chain.h"
 #include "rocjitsu/code/analysis/exec_state.h"
 #include "rocjitsu/code/analysis/gfx1250_vgpr_msb.h"
@@ -65,14 +66,15 @@ struct SourceTextFacts {
     uint64_t address;
     std::optional<uint64_t> text_offset;
   };
-  struct DirectBranch {
+  struct ControlFlowEdge {
     SourceLocation source;
     uint64_t destination;
+    bool fallthrough = false;
   };
   InstructionBoundaries boundaries;
   TextEditReferences references;
   std::vector<SourceLocation> pc_reads;
-  std::vector<DirectBranch> direct_branches;
+  std::vector<ControlFlowEdge> flow_edges;
 };
 
 struct Instrumentor::ResolvedPoints {
@@ -1634,7 +1636,18 @@ bool Instrumentor::ensure_source_facts(TextEditError &error) {
     // rejects its overflow flag before these facts can be used.
     const std::span<const uint64_t> references = boundaries.reference_addresses();
     if (references.size() != reference_count)
-      facts->direct_branches.push_back({.source = source, .destination = references.back()});
+      facts->flow_edges.push_back({.source = source, .destination = references.back()});
+    const bool unconditional_branch =
+        (instruction.flags() & BRANCH) != 0 && (instruction.flags() & COND_BRANCH) == 0;
+    const bool can_fall_through = !is_program_path_terminator(instruction) &&
+                                  !unconditional_branch &&
+                                  ((instruction.flags() & INDIRECT_BRANCH) == 0 ||
+                                   indirect_branch_falls_through(instruction));
+    const uint64_t size = instruction.size();
+    if (can_fall_through && size <= section.size() &&
+        instruction.src_loc() == section.size() - size)
+      facts->flow_edges.push_back(
+          {.source = source, .destination = section.vaddr() + section.size(), .fallthrough = true});
     if (instruction.mnemonic() == "s_getpc_b64" || instruction.mnemonic() == "s_get_pc_i64")
       facts->pc_reads.push_back(source);
   };
@@ -1711,9 +1724,9 @@ bool Instrumentor::ensure_source_facts(TextEditError &error) {
     if (!decode_section(*section, boundaries, false))
       return false;
   }
-  for (const SourceTextFacts::DirectBranch &branch : facts->direct_branches) {
-    if (!branch.source.text_offset)
-      facts->references.branch_addresses.push_back(branch.destination);
+  for (const SourceTextFacts::ControlFlowEdge &edge : facts->flow_edges) {
+    if (!edge.fallthrough && !edge.source.text_offset)
+      facts->references.branch_addresses.push_back(edge.destination);
   }
   source_facts_ = std::move(facts);
   return true;
@@ -2094,10 +2107,10 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
         std::ranges::find_if(
             source_facts_->pc_reads,
             [&](const SourceTextFacts::SourceLocation &source) { return !is_removed(source); });
-    const bool has_retained_branch = std::ranges::any_of(
-        source_facts_->direct_branches,
-        [&](const SourceTextFacts::DirectBranch &branch) { return !is_removed(branch.source); });
-    if (retained_pc != source_facts_->pc_reads.end() || has_retained_branch) {
+    const bool has_retained_edge = std::ranges::any_of(
+        source_facts_->flow_edges,
+        [&](const SourceTextFacts::ControlFlowEdge &edge) { return !is_removed(edge.source); });
+    if (retained_pc != source_facts_->pc_reads.end() || has_retained_edge) {
       const Section &text = *obj_.text_sections().front();
       const uint64_t text_end = text.vaddr() + text.size();
       const uint64_t file_end = text.sectionOffset() + text.size();
@@ -2150,16 +2163,18 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
                                        .message = out.errors.back()};
         return out;
       }
-      for (const SourceTextFacts::DirectBranch &branch : source_facts_->direct_branches) {
-        if (is_removed(branch.source) ||
-            storage_moves(branch.source.address) == storage_moves(branch.destination))
+      for (const SourceTextFacts::ControlFlowEdge &edge : source_facts_->flow_edges) {
+        if (is_removed(edge.source) ||
+            storage_moves(edge.source.address) == storage_moves(edge.destination))
           continue;
         out.errors.emplace_back(
-            "replacement growth cannot preserve a retained direct branch displacement");
-        if (!branch.source.text_offset)
-          out.errors.back() += " (source VA " + std::to_string(branch.source.address) + ")";
+            edge.fallthrough
+                ? "replacement growth cannot preserve a retained fallthrough edge"
+                : "replacement growth cannot preserve a retained direct branch displacement");
+        if (!edge.source.text_offset)
+          out.errors.back() += " (source VA " + std::to_string(edge.source.address) + ")";
         out.edit_error = TextEditError{.code = TextEditErrorCode::UnsupportedReferences,
-                                       .offset = branch.source.text_offset.value_or(0),
+                                       .offset = edge.source.text_offset.value_or(0),
                                        .message = out.errors.back()};
         return out;
       }
@@ -2208,10 +2223,28 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
       }
     }
   }
-  // M0 can displace SGPR reads and writes, which ordinary liveness does not
-  // model. Callable probes allocate envelope registers from those facts.
   if (std::ranges::any_of(
           points_, [](const InstrumentationPoint &point) { return point.probe_obj != nullptr; })) {
+    if (has_replacements) {
+      for (const std::unique_ptr<BasicBlock> &block : blocks_) {
+        // The local liveness scope has no external or call/return edge overlay.
+        if (block->successor_issue() == BasicBlock::SuccessorIssue::None &&
+            block->call_edges().empty())
+          continue;
+        const Instruction *terminator = block->terminator();
+        const uint64_t offset =
+            terminator && terminator->src_loc() < obj_.text_sections().front()->size()
+                ? terminator->src_loc()
+                : 0;
+        out.errors.emplace_back(
+            "replacement probe requires an effective CFG with all guest successors analyzed");
+        out.edit_error = TextEditError{.code = TextEditErrorCode::UnsupportedReferences,
+                                       .offset = offset,
+                                       .message = out.errors.back()};
+        return out;
+      }
+    }
+    // M0-displaced SGPR accesses are absent from ordinary def/use facts.
     std::vector<BasicBlock *> probe_scope;
     probe_scope.reserve(blocks_.size());
     for (const std::unique_ptr<BasicBlock> &block : blocks_)

@@ -13,6 +13,7 @@
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/kernel_descriptor_scan.h"
 #include "rocjitsu/code/patch/code_object_patcher.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna1/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna1/operand_types.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna2/opcodes.h"
@@ -1997,6 +1998,165 @@ std::vector<uint8_t> make_external_branch_elf(uint64_t origin, uint64_t destinat
   std::memcpy(image.data() + loaded_end, names.data(), names.size());
   std::memcpy(image.data() + header.e_shoff, sections.data(), sections.size() * sizeof(Elf64_Shdr));
   return image;
+}
+
+TEST(CheckedTextEdits, ReplacementGrowthChecksCrossSectionFallthrough) {
+  constexpr rj_code_arch_t arch = ROCJITSU_CODE_ARCH_CDNA4;
+  const util::FailureOr<uint32_t> nop = build_s_nop(0, arch);
+  const util::FailureOr<uint32_t> move = build_s_mov_b32(0, 0, arch);
+  const util::FailureOr<uint32_t> end = build_s_endpgm(arch);
+  const std::optional<uint32_t> branch = test::expected_replacement_branch(0x304, 0x200, arch);
+  const util::FailureOr<uint32_t> conditional =
+      build_sopp_encoding(arch, cdna4::kSCbranchScc0Sopp, static_cast<uint16_t>(-66));
+  ASSERT_TRUE(nop.succeeded());
+  ASSERT_TRUE(move.succeeded());
+  ASSERT_TRUE(end.succeeded());
+  ASSERT_TRUE(branch);
+  ASSERT_TRUE(conditional.succeeded());
+  struct FallthroughCase {
+    const char *name;
+    uint32_t text_tail;
+    bool rejects;
+    bool replace_tail = false;
+    bool moving_foreign = false;
+  };
+  const std::array<FallthroughCase, 6> cases = {{
+      {.name = "ordinary text tail falls into moved section",
+       .text_tail = move.value(),
+       .rejects = true},
+      {.name = "conditional branch retains a moved fallthrough",
+       .text_tail = conditional.value(),
+       .rejects = true},
+      {.name = "program terminator has no fallthrough", .text_tail = end.value(), .rejects = false},
+      {.name = "unconditional branch to fixed section has no fallthrough",
+       .text_tail = *branch,
+       .rejects = false},
+      {.name = "terminal replacement removes the original fallthrough",
+       .text_tail = move.value(),
+       .rejects = false,
+       .replace_tail = true},
+      {.name = "foreign fallthrough source and destination move together",
+       .text_tail = end.value(),
+       .rejects = false,
+       .moving_foreign = true},
+  }};
+  for (const FallthroughCase &test_case : cases) {
+    SCOPED_TRACE(test_case.name);
+    const uint64_t foreign_origin = test_case.moving_foreign ? 0x400 : 0x200;
+    const uint64_t foreign_target = test_case.moving_foreign ? 0x404 : 0x308;
+    std::vector<uint8_t> image = make_external_branch_elf(foreign_origin, foreign_target, true);
+    const AmdGpuCodeObject initial(image.data(), image.size());
+    ASSERT_TRUE(initial.is_valid());
+    std::vector<Elf64_Shdr> sections = CodeObjectPatcher(initial).section_headers();
+    const Section &initial_text = *initial.text_sections().front();
+    ASSERT_TRUE(initial_text.sectionHeaderIndex());
+    sections[*initial_text.sectionHeaderIndex()].sh_size = 8;
+    test_support::write_elf_struct_for_test(image, 0x304, test_case.text_tail);
+    test_support::write_elf_struct_for_test(image, foreign_origin,
+                                            test_case.moving_foreign ? move.value() : end.value());
+    const Elf64_Ehdr header = test_support::read_elf_struct_for_test<Elf64_Ehdr>(image, 0);
+    std::memcpy(image.data() + header.e_shoff, sections.data(),
+                sections.size() * sizeof(Elf64_Shdr));
+    const std::vector<uint8_t> pristine = image;
+    const AmdGpuCodeObject source(image.data(), image.size());
+    ASSERT_TRUE(source.is_valid());
+    ASSERT_EQ(source.text_sections().size(), 1u);
+    ASSERT_EQ(source.allocated_executable_sections().size(), 3u);
+    const Section &text = *source.text_sections().front();
+    ASSERT_EQ(text.vaddr(), 0x300u);
+    ASSERT_EQ(text.size(), 8u);
+    ASSERT_EQ(header.e_phnum, 1u);
+    const Elf64_Phdr load =
+        test_support::read_elf_struct_for_test<Elf64_Phdr>(image, header.e_phoff);
+    ASSERT_EQ(load.p_type, PT_LOAD);
+    ASSERT_NE(load.p_flags & PF_X, 0u);
+    for (const Section *section : source.allocated_executable_sections()) {
+      ASSERT_GE(section->vaddr(), load.p_vaddr);
+      ASSERT_LE(section->vaddr() + section->size(), load.p_vaddr + load.p_filesz);
+      ASSERT_EQ(section->sectionOffset() - load.p_offset, section->vaddr() - load.p_vaddr);
+    }
+    const std::unique_ptr<Decoder> decoder = Decoder::create(arch);
+    ASSERT_NE(decoder, nullptr);
+    const std::span<const uint32_t> tail_words(reinterpret_cast<const uint32_t *>(text.data() + 4),
+                                               1);
+    const DecodeResult decoded = decoder->decode_window(tail_words, 4);
+    ASSERT_TRUE(decoded.succeeded());
+    if (test_case.text_tail == move.value()) {
+      // This reproducer has no explicit branch or getpc to enter the old guard.
+      EXPECT_EQ(decoded.value()->mnemonic(), "s_mov_b32");
+      EXPECT_FALSE(decoded.value()->branch_offset_bytes());
+    }
+    const int route_count = test_case.rejects || test_case.replace_tail ? 4 : 1;
+    for (int route = 0; route < route_count; ++route) {
+      SCOPED_TRACE(route);
+      Instrumentor seed(source, arch);
+      Instrumentor *batch = &seed;
+      std::unique_ptr<Instrumentor> child;
+      TextEditError error;
+      if (route == 1) {
+        ASSERT_NE(seed.instruction_boundaries(error), nullptr) << error.message;
+      } else if (route >= 2) {
+        if (route == 3) {
+          seed.add_point_by_offset(0);
+          const Instrumentor::ValidationResult warmed = seed.validate_points();
+          ASSERT_TRUE(warmed.errors.empty()) << warmed.errors.front();
+          ASSERT_EQ(warmed.sites.size(), 1u);
+        }
+        FailureOr<std::unique_ptr<Instrumentor>> fork = seed.fork(error);
+        ASSERT_TRUE(fork.succeeded()) << error.message;
+        child = std::move(fork).value();
+        batch = child.get();
+      }
+      batch->add_point(
+          {.anchor_offset = test_case.replace_tail ? 4u : 0u,
+           .kind = InstrumentationKind::ReplaceWithInst,
+           .probe_symbol = {},
+           .probe_args = {},
+           .replacement = InstructionReplacement{
+               .expected_bytes =
+                   make_instruction_bytes({test_case.replace_tail ? move.value() : nop.value()}),
+               .replacement_bytes = test_case.replace_tail ? make_instruction_bytes({end.value()})
+                                                           : std::vector<uint8_t>{}}});
+      const Instrumentor::ValidationResult validated = batch->validate_points();
+      const InstrumentedCodeObjectDebug result = batch->patch_with_debug_summaries();
+      if (test_case.rejects) {
+        EXPECT_FALSE(validated.errors.empty());
+        EXPECT_TRUE(validated.sites.empty());
+        EXPECT_FALSE(result.errors.empty());
+        EXPECT_TRUE(result.elf_bytes.empty());
+        EXPECT_TRUE(result.sites.empty());
+        EXPECT_TRUE(result.patches.empty());
+        EXPECT_TRUE(result.edit_error);
+        if (result.edit_error) {
+          EXPECT_EQ(result.edit_error->code, TextEditErrorCode::UnsupportedReferences);
+          EXPECT_NE(result.edit_error->message.find("fallthrough"), std::string::npos);
+          EXPECT_EQ(result.edit_error->offset, 4u);
+        }
+      } else {
+        ASSERT_TRUE(validated.errors.empty()) << validated.errors.front();
+        ASSERT_TRUE(result.errors.empty()) << result.errors.front();
+        ASSERT_EQ(result.sites.size(), 1u);
+        const AmdGpuCodeObject candidate(result.elf_bytes.data(), result.elf_bytes.size());
+        ASSERT_TRUE(candidate.is_valid());
+        const Section *target = test_support::find_section(candidate, ".other.target");
+        ASSERT_NE(target, nullptr);
+        EXPECT_GT(target->vaddr(), foreign_target);
+        EXPECT_EQ(test_support::read_elf_struct_for_test<uint32_t>(result.elf_bytes,
+                                                                   target->sectionOffset()),
+                  end.value());
+        if (test_case.moving_foreign) {
+          const Section *origin = test_support::find_section(candidate, ".other.branch");
+          ASSERT_NE(origin, nullptr);
+          EXPECT_EQ(origin->vaddr() + origin->size(), target->vaddr());
+          EXPECT_EQ(test_support::read_elf_struct_for_test<uint32_t>(result.elf_bytes,
+                                                                     origin->sectionOffset()),
+                    move.value());
+        }
+      }
+      EXPECT_EQ(image, pristine);
+      EXPECT_EQ(std::memcmp(source.image_data(), pristine.data(), pristine.size()), 0);
+    }
+  }
 }
 
 TEST(CheckedTextEdits, ReplacementGrowthChecksBranchesOriginatingOutsideText) {

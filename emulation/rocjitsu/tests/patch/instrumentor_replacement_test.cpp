@@ -3,12 +3,15 @@
 
 #include "rocjitsu/code/patch/instrumentor.h"
 
+#include "../amdhsa_metadata_test_util.h"
 #include "../dbi_test_util.h"
 #include "replacement_test_util.h"
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/analysis/instruction_boundaries.h"
+#include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
+#include "rocjitsu/code/builders/spill_builders.h"
 #include "rocjitsu/code/kernel_descriptor_scan.h"
 #include "rocjitsu/code/patch/code_object_patcher.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/builders.h"
@@ -776,6 +779,307 @@ TEST(InstrumentorReplacement, ComposesProbeAndReplacementAtTheSameSite) {
         EXPECT_EQ(result.elf_bytes, direct_image);
       EXPECT_FALSE(result.edit_error);
       EXPECT_EQ(image, pristine);
+    }
+  }
+}
+
+// Reuse the kernel fixture and its executable LOAD, including actual loaded
+// prefix bytes. Descriptor data keeps its original section and ABI ownership.
+std::vector<uint8_t> make_probe_cfg_extent_elf(bool external_target) {
+  constexpr uint32_t define = cdna4::build_sop1(
+      cdna4::kSMovB32Sop1, {.ssrc0 = scalar_positive_inline_u32(7), .sdst = 8})[0];
+  constexpr uint32_t read = cdna4::build_sop1(cdna4::kSMovB32Sop1, {.ssrc0 = 8, .sdst = 9})[0];
+  std::vector<uint32_t> words = {define, kNop0Word, kEndpgmWord};
+  if (!external_target)
+    words.insert(words.end(), {read, kEndpgmWord});
+  std::vector<uint8_t> image =
+      test::with_descriptor_metadata(test::make_gfx950_kernel_elf(words, 64), kArch);
+  Elf64_Ehdr header = {};
+  std::memcpy(&header, image.data(), sizeof(header));
+  header.e_ident[EI_DATA] = ELFDATA2LSB;
+  header.e_ident[EI_VERSION] = 1;
+  header.e_ident[EI_ABIVERSION] = ELFABIVERSION_AMDGPU_HSA_V5;
+  std::memcpy(image.data(), &header, sizeof(header));
+  const AmdGpuCodeObject original(image.data(), image.size());
+  if (!original.is_valid())
+    return {};
+  const Section &text = *original.text_sections().front();
+  const std::array<uint32_t, 2> foreign = {read, kEndpgmWord};
+  const uint64_t target = external_target ? text.vaddr() - sizeof(foreign) : text.vaddr() + 12;
+  const std::optional<uint32_t> branch =
+      test::expected_replacement_branch(text.vaddr() + 8, target, kArch);
+  if (!branch)
+    return {};
+  std::memcpy(image.data() + text.sectionOffset() + 8, &*branch, sizeof(*branch));
+  if (!external_target)
+    return image;
+  std::optional<std::vector<Elf64_Phdr>> segments =
+      read_elf_table<Elf64_Phdr>(image, header.e_phoff, header.e_phnum, header.e_phentsize);
+  if (!segments)
+    return {};
+  const std::vector<Elf64_Phdr>::iterator load =
+      std::ranges::find_if(*segments, [&](const Elf64_Phdr &segment) {
+        return segment.p_type == PT_LOAD && segment.p_offset == text.sectionOffset();
+      });
+  if (load == segments->end() || load->p_offset < sizeof(foreign))
+    return {};
+  load->p_offset -= sizeof(foreign);
+  load->p_vaddr -= sizeof(foreign);
+  load->p_paddr -= sizeof(foreign);
+  load->p_filesz += sizeof(foreign);
+  load->p_memsz += sizeof(foreign);
+  std::memcpy(image.data() + load->p_offset, foreign.data(), sizeof(foreign));
+  std::vector<Elf64_Shdr> sections = CodeObjectPatcher(original).section_headers();
+  sections.push_back({.sh_name = 0,
+                      .sh_type = SHT_PROGBITS,
+                      .sh_flags = SHF_ALLOC | SHF_EXECINSTR,
+                      .sh_addr = target,
+                      .sh_offset = load->p_offset,
+                      .sh_size = sizeof(foreign),
+                      .sh_link = 0,
+                      .sh_info = 0,
+                      .sh_addralign = sizeof(uint32_t),
+                      .sh_entsize = 0});
+  header.e_shnum = static_cast<uint16_t>(sections.size());
+  image.resize(header.e_shoff + sections.size() * sizeof(Elf64_Shdr));
+  std::memcpy(image.data(), &header, sizeof(header));
+  std::memcpy(image.data() + header.e_phoff, segments->data(),
+              segments->size() * sizeof(Elf64_Phdr));
+  std::memcpy(image.data() + header.e_shoff, sections.data(), sections.size() * sizeof(Elf64_Shdr));
+  return image;
+}
+
+TEST(InstrumentorReplacement, ProbeAdmissionRequiresTheEffectiveGuestToStayInItsCfg) {
+  enum class Seed { Cold, Query, Fork, WarmFork };
+  struct Case {
+    const char *name;
+    bool external;
+    bool with_probe;
+    bool remove_branch;
+    int composition;
+    Seed seed;
+  };
+  const std::array<Case, 8> cases = {{
+      {.name = "external, direct probe",
+       .external = true,
+       .with_probe = true,
+       .remove_branch = false,
+       .composition = 0,
+       .seed = Seed::Cold},
+      {.name = "external, replacement then probe",
+       .external = true,
+       .with_probe = true,
+       .remove_branch = false,
+       .composition = 1,
+       .seed = Seed::Query},
+      {.name = "external, probe then replacement",
+       .external = true,
+       .with_probe = true,
+       .remove_branch = false,
+       .composition = 2,
+       .seed = Seed::Fork},
+      {.name = "external, warm fork",
+       .external = true,
+       .with_probe = true,
+       .remove_branch = false,
+       .composition = 0,
+       .seed = Seed::WarmFork},
+      {.name = "external, probe-free deletion",
+       .external = true,
+       .with_probe = false,
+       .remove_branch = false,
+       .composition = 0,
+       .seed = Seed::WarmFork},
+      {.name = "contained live register",
+       .external = false,
+       .with_probe = true,
+       .remove_branch = false,
+       .composition = 0,
+       .seed = Seed::Cold},
+      {.name = "contained, merged probe",
+       .external = false,
+       .with_probe = true,
+       .remove_branch = false,
+       .composition = 2,
+       .seed = Seed::Query},
+      {.name = "offending branch removed",
+       .external = true,
+       .with_probe = true,
+       .remove_branch = true,
+       .composition = 0,
+       .seed = Seed::WarmFork},
+  }};
+  constexpr uint32_t clobber = cdna4::build_sop1(
+      cdna4::kSMovB32Sop1, {.ssrc0 = scalar_positive_inline_u32(0), .sdst = 8})[0];
+  const std::vector<uint8_t> probe_image =
+      test::make_gfx950_probe_elf("probe", {clobber, kSetpc30Word});
+  const AmdGpuCodeObject probe(probe_image.data(), probe_image.size());
+  ASSERT_TRUE(probe.is_valid());
+  for (const Case &test_case : cases) {
+    SCOPED_TRACE(test_case.name);
+    const std::vector<uint8_t> image = make_probe_cfg_extent_elf(test_case.external);
+    const std::vector<uint8_t> pristine = image;
+    const AmdGpuCodeObject source(image.data(), image.size());
+    ASSERT_TRUE(source.is_valid());
+    ASSERT_EQ(source.allocated_executable_sections().size(), test_case.external ? 2u : 1u);
+    const Section &text = *source.text_sections().front();
+    uint32_t branch = 0;
+    std::memcpy(&branch, text.data() + 8, sizeof(branch));
+    Instrumentor seed(source, kArch);
+    Instrumentor *batch = &seed;
+    std::unique_ptr<Instrumentor> child;
+    TextEditError error;
+    if (test_case.seed == Seed::Query) {
+      ASSERT_NE(seed.instruction_boundaries(error), nullptr) << error.message;
+    } else if (test_case.seed != Seed::Cold) {
+      if (test_case.seed == Seed::WarmFork) {
+        seed.add_point_by_offset(4);
+        const Instrumentor::ValidationResult warmed = seed.validate_points();
+        ASSERT_TRUE(warmed.errors.empty()) << warmed.errors.front();
+      }
+      FailureOr<std::unique_ptr<Instrumentor>> fork = seed.fork(error);
+      ASSERT_TRUE(fork.succeeded()) << error.message;
+      child = std::move(fork).value();
+      batch = child.get();
+    }
+    InstrumentationPoint replace = replacement_point(4, {kNop0Word}, {});
+    if (test_case.with_probe && test_case.composition == 0) {
+      replace.probe_obj = &probe;
+      replace.probe_symbol = "probe";
+    }
+    const InstrumentationPoint before = {
+        .anchor_offset = 4, .probe_obj = &probe, .probe_symbol = "probe", .probe_args = {}};
+    if (test_case.with_probe && test_case.composition == 2)
+      batch->add_point(before);
+    batch->add_point(replace);
+    if (test_case.with_probe && test_case.composition == 1)
+      batch->add_point(before);
+    if (test_case.remove_branch)
+      batch->add_point(replacement_point(8, {branch}, {kEndpgmWord}));
+    const Instrumentor::ValidationResult validation = batch->validate_points();
+    const InstrumentedCodeObjectDebug result = batch->patch_with_debug_summaries();
+    if (test_case.external && test_case.with_probe && !test_case.remove_branch) {
+      EXPECT_FALSE(validation.errors.empty());
+      EXPECT_TRUE(validation.sites.empty());
+      expect_no_output(result);
+      EXPECT_TRUE(result.patches.empty());
+      EXPECT_TRUE(result.edit_error);
+      if (result.edit_error) {
+        EXPECT_EQ(result.edit_error->code, TextEditErrorCode::UnsupportedReferences);
+        EXPECT_NE(result.edit_error->message.find("CFG"), std::string::npos);
+        EXPECT_EQ(result.edit_error->offset, 8u);
+      }
+    } else {
+      ASSERT_TRUE(validation.errors.empty()) << validation.errors.front();
+      ASSERT_TRUE(result.errors.empty()) << result.errors.front();
+      ASSERT_EQ(result.sites.size(), test_case.remove_branch ? 2u : 1u);
+      ASSERT_EQ(result.patches.size(), result.sites.size());
+      EXPECT_EQ(result.patches.front().is_probe_call, test_case.with_probe);
+      EXPECT_EQ(result.sites.front().guest_size, 0u);
+      if (!test_case.with_probe)
+        expect_pure_replacements(
+            source, result,
+            {{.offset = 4, .expected = instruction_bytes({kNop0Word}), .replacement = {}}});
+      if (!test_case.external) {
+        // This control has the same S8 use inside the analyzed CFG. It must
+        // reach preservation planning rather than reject at an unrelated gate.
+        const AmdGpuCodeObject candidate(result.elf_bytes.data(), result.elf_bytes.size());
+        ASSERT_TRUE(candidate.is_valid());
+        const Section &candidate_text = *candidate.text_sections().front();
+        const std::span<const uint32_t> words(
+            reinterpret_cast<const uint32_t *>(candidate_text.data()), candidate_text.size() / 4);
+        const util::FailureOr<std::array<uint32_t, 2>> saved =
+            build_v_writelane_b32(0, 8, 0, kArch);
+        const util::FailureOr<std::array<uint32_t, 2>> restored =
+            build_v_readlane_b32(8, 0, 0, kArch);
+        ASSERT_TRUE(saved.succeeded());
+        ASSERT_TRUE(restored.succeeded());
+        EXPECT_NE(std::ranges::search(words, saved.value()).begin(), words.end());
+        EXPECT_NE(std::ranges::search(words, restored.value()).begin(), words.end());
+        const std::vector<KernelDescriptorInfo> kernels =
+            scan_kernel_descriptors(result.elf_bytes, candidate_text.sectionOffset(),
+                                    candidate_text.size(), candidate_text.sectionHeaderIndex());
+        ASSERT_EQ(kernels.size(), 1u);
+        EXPECT_GT(kernels.front().descriptor.private_segment_fixed_size, 64u);
+      }
+    }
+    EXPECT_EQ(image, pristine);
+    EXPECT_EQ(std::memcmp(source.image_data(), pristine.data(), pristine.size()), 0);
+  }
+}
+
+TEST(InstrumentorReplacement, ProbeAdmissionRejectsUnmodeledIndirectAndCallEdges) {
+  constexpr uint32_t define = cdna4::build_sop1(
+      cdna4::kSMovB32Sop1, {.ssrc0 = scalar_positive_inline_u32(7), .sdst = 8})[0];
+  constexpr uint32_t read = cdna4::build_sop1(cdna4::kSMovB32Sop1, {.ssrc0 = 8, .sdst = 9})[0];
+  constexpr uint32_t clobber = cdna4::build_sop1(
+      cdna4::kSMovB32Sop1, {.ssrc0 = scalar_positive_inline_u32(0), .sdst = 8})[0];
+  const util::FailureOr<uint32_t> indirect = build_s_setpc_b64(0, kArch);
+  const util::FailureOr<uint32_t> call = build_s_call_b64(4, 1, kArch);
+  const util::FailureOr<uint32_t> returned = build_s_setpc_b64(4, kArch);
+  ASSERT_TRUE(indirect.succeeded());
+  ASSERT_TRUE(call.succeeded());
+  ASSERT_TRUE(returned.succeeded());
+  const std::vector<uint8_t> probe_image =
+      test::make_gfx950_probe_elf("probe", {clobber, kSetpc30Word});
+  const AmdGpuCodeObject probe(probe_image.data(), probe_image.size());
+  ASSERT_TRUE(probe.is_valid());
+  for (const bool resolved_call : {false, true}) {
+    SCOPED_TRACE(resolved_call);
+    const std::vector<uint32_t> words =
+        resolved_call ? std::vector<uint32_t>{define,      kNop0Word, call.value(),
+                                              kEndpgmWord, read,      returned.value()}
+                      : std::vector<uint32_t>{define, kNop0Word, indirect.value()};
+    const std::vector<uint8_t> image =
+        test::with_descriptor_metadata(test::make_gfx950_kernel_elf(words, 64), kArch);
+    const std::vector<uint8_t> pristine = image;
+    const AmdGpuCodeObject source(image.data(), image.size());
+    ASSERT_TRUE(source.is_valid());
+    const std::unique_ptr<Decoder> decoder = Decoder::create(kArch);
+    ASSERT_NE(decoder, nullptr);
+    const FailureOr<std::vector<std::unique_ptr<BasicBlock>>> blocks =
+        BasicBlock::build(source, *decoder, kArch);
+    ASSERT_TRUE(blocks.succeeded());
+    if (resolved_call) {
+      // The direct call has no missing successor issue, but its call/return
+      // edges are separate from ordinary successors consumed by this liveness.
+      EXPECT_TRUE(std::ranges::any_of(blocks.value(), [](const std::unique_ptr<BasicBlock> &block) {
+        return !block->call_edges().empty() &&
+               block->successor_issue() == BasicBlock::SuccessorIssue::None;
+      }));
+    } else {
+      EXPECT_TRUE(std::ranges::any_of(blocks.value(), [](const std::unique_ptr<BasicBlock> &block) {
+        return block->successor_issue() == BasicBlock::SuccessorIssue::IndirectControlFlow;
+      }));
+    }
+    for (const bool with_probe : {false, true}) {
+      SCOPED_TRACE(with_probe);
+      Instrumentor instrumentor(source, kArch);
+      InstrumentationPoint point = replacement_point(4, {kNop0Word}, {});
+      if (with_probe) {
+        point.probe_obj = &probe;
+        point.probe_symbol = "probe";
+      }
+      instrumentor.add_point(point);
+      const Instrumentor::ValidationResult validation = instrumentor.validate_points();
+      const InstrumentedCodeObjectDebug result = instrumentor.patch_with_debug_summaries();
+      if (with_probe) {
+        EXPECT_FALSE(validation.errors.empty());
+        EXPECT_TRUE(validation.sites.empty());
+        expect_no_output(result);
+        EXPECT_TRUE(result.patches.empty());
+        ASSERT_TRUE(result.edit_error);
+        EXPECT_EQ(result.edit_error->code, TextEditErrorCode::UnsupportedReferences);
+        EXPECT_NE(result.edit_error->message.find("CFG"), std::string::npos);
+        EXPECT_EQ(result.edit_error->offset, 8u);
+      } else {
+        ASSERT_TRUE(validation.errors.empty()) << validation.errors.front();
+        ASSERT_TRUE(result.errors.empty()) << result.errors.front();
+        expect_pure_replacements(
+            source, result,
+            {{.offset = 4, .expected = instruction_bytes({kNop0Word}), .replacement = {}}});
+      }
+      EXPECT_EQ(std::memcmp(source.image_data(), pristine.data(), pristine.size()), 0);
     }
   }
 }
