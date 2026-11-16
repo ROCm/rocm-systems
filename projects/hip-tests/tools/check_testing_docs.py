@@ -511,6 +511,17 @@ _MD_LINK_OPEN_RE = re.compile(r"\[[^\]]*\]\(")
 _MD_REF_USE_RE = re.compile(r"\[([^\]]*)\]\[([^\]]*)\]")
 _MD_REF_DEF_RE = re.compile(r"^[ ]{0,3}\[([^\]]+)\]:[ \t]*(\S+)", re.MULTILINE)
 _HEADING_RE = re.compile(r"^#{1,6}\s+(.*?)\s*$", re.MULTILINE)
+# A Markdown link/image opener inside a heading: an optional image bang ``!``,
+# the ``[visible]`` label (or image alt text), and the ``(`` that begins the
+# destination. GitHub derives a heading's anchor slug from the heading's
+# *rendered* text, so only the visible label/alt text contributes - the
+# destination and any optional title do not. ``_heading_visible_text`` uses this
+# to keep the label and drop the following balanced ``(...)`` destination before
+# the slug is formed; the label capture ``[^\]]*`` stops at the first ``]`` and
+# the destination is consumed by a balanced-parenthesis scan (not a naive
+# ``[^)]*``) so a destination carrying a balanced pair of parentheses or a
+# parenthesized title is fully excluded.
+_MD_INLINE_LABEL_RE = re.compile(r"!?\[([^\]]*)\]\(")
 # A fenced code-block delimiter line: three or more backticks or tildes, possibly
 # indented and carrying an info string. Link scanning masks everything between a
 # matching opening and closing fence so a ``[text](path)`` inside a code block is
@@ -2467,14 +2478,67 @@ def _heading_anchors(md_path, cache):
     return anchors
 
 
+def _heading_visible_text(heading_text):
+    """Reduce a heading's Markdown link/image markup to its visible text.
+
+    GitHub derives a heading's anchor slug from the heading's *rendered* text,
+    so an inline link ``[label](dest "title")`` contributes only ``label`` and an
+    inline image ``![alt](src)`` contributes only ``alt`` - the destination and
+    any optional title never appear in the slug. Plain text surrounding a link,
+    and any inline ``code`` span a heading carries, are preserved verbatim so a
+    heading that merely contains inline code still slugs the same way. A
+    destination may carry a balanced pair of parentheses or a parenthesized
+    title, so the destination is consumed by a balanced-parenthesis scan rather
+    than stopping at the first ``)``; an escaped parenthesis inside the
+    destination does not end it early. A malformed opener whose destination never
+    closes consumes to end of text, which simply drops the dangling markup from
+    the visible text rather than crashing.
+    """
+    out = []
+    pos = 0
+    n = len(heading_text)
+    for match in _MD_INLINE_LABEL_RE.finditer(heading_text):
+        # A later opener may fall inside a destination already consumed by an
+        # earlier iteration; skip it so its text is not re-emitted.
+        if match.start() < pos:
+            continue
+        out.append(heading_text[pos:match.start()])
+        out.append(match.group(1))  # the visible link label / image alt text
+        # Consume the destination: the balanced ``(...)`` that begins right after
+        # the matched opening parenthesis, honoring backslash escapes.
+        i = match.end()
+        depth = 1
+        while i < n:
+            ch = heading_text[i]
+            if ch == "\\":
+                i += 2
+                continue
+            if ch == "(":
+                depth += 1
+            elif ch == ")":
+                depth -= 1
+                if depth == 0:
+                    i += 1
+                    break
+            i += 1
+        pos = i
+    out.append(heading_text[pos:])
+    return "".join(out)
+
+
 def _slugify(heading_text):
     """Approximate GitHub's heading-to-anchor slug.
 
-    Lowercase, drop any character that is not a word character, whitespace, or
-    hyphen (this strips Markdown punctuation such as backticks and colons), then
-    collapse whitespace runs to single hyphens.
+    Reduce any Markdown link/image markup to its visible label/alt text first
+    (see ``_heading_visible_text``) so a destination or title never pollutes the
+    slug, then lowercase, drop any character that is not a word character,
+    whitespace, or hyphen (this strips Markdown punctuation such as backticks and
+    colons), then collapse whitespace runs to single hyphens. Inline-code and
+    plain heading text are preserved by the visible-text reduction, so a heading
+    carrying neither a link nor an image slugs exactly as before.
     """
-    text = heading_text.strip().lower()
+    text = _heading_visible_text(heading_text)
+    text = text.strip().lower()
     text = re.sub(r"[^\w\s-]", "", text)
     text = re.sub(r"\s+", "-", text)
     return text

@@ -3377,6 +3377,72 @@ class CheckTestingDocsTest(unittest.TestCase):
         self.assertEqual(
             results["markdown_links"], [], msg=results["markdown_links"])
 
+    def test_heading_with_markdown_link_slugs_from_label(self):
+        # GitHub derives a heading's anchor from its rendered text, so a heading
+        # that carries an inline link contributes only the visible link label -
+        # the destination (and any title) are not part of the slug. An anchor to
+        # the label-based slug must resolve, while the destination text that the
+        # naive slug used to fold in (``...-httpsexamplecomguide``) is absent.
+        testing = (
+            "# Testing Strategy\n\n"
+            "See the [guide](#the-testing-guide).\n\n"
+            "## The [testing guide](https://example.com/guide)\n\nBody.\n"
+        )
+        _write_docs(self.root, {"TESTING.md": testing})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertEqual(
+            results["markdown_links"], [], msg=results["markdown_links"])
+
+    def test_heading_link_keeps_surrounding_text_drops_destination(self):
+        # Plain text on either side of an inline link is preserved in the slug
+        # while the link destination is dropped, so an anchor built from the
+        # surrounding words plus the link label resolves. The destination only
+        # resolves to nothing in the slug: if it leaked in, the surrounding-text
+        # anchor below would not match.
+        testing = (
+            "# Testing Strategy\n\n"
+            "Jump to [it](#run-the-smoke-suite-before-merging).\n\n"
+            "## Run the [smoke suite](https://example.com/smoke) before merging\n\n"
+            "Body.\n"
+        )
+        _write_docs(self.root, {"TESTING.md": testing})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertEqual(
+            results["markdown_links"], [], msg=results["markdown_links"])
+
+    def test_duplicate_linked_heading_anchor_suffix_resolves(self):
+        # Two headings whose visible text reduces to the same label collide even
+        # when their link destinations differ, so GitHub disambiguates the second
+        # with a ``-1`` suffix. A link to both the base and the suffixed anchor
+        # must resolve, proving the duplicate suffixing runs on the label-derived
+        # slug rather than on destination-polluted text.
+        testing = (
+            "# Testing Strategy\n\n"
+            "See [first](#the-plan) and [second](#the-plan-1).\n\n"
+            "## The [plan](https://example.com/a)\n\nFirst.\n\n"
+            "## The [plan](https://example.com/b)\n\nSecond.\n"
+        )
+        _write_docs(self.root, {"TESTING.md": testing})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertEqual(
+            results["markdown_links"], [], msg=results["markdown_links"])
+
+    def test_heading_with_markdown_image_slugs_from_alt_text(self):
+        # An inline image in a heading contributes only its alt text to the slug;
+        # the image source is excluded exactly like a link destination. The
+        # surrounding word after the image is kept, so the alt-plus-text anchor
+        # resolves.
+        testing = (
+            "# Testing Strategy\n\n"
+            "See the [badge](#status-badge-overview).\n\n"
+            "## ![status badge](https://example.com/badge.png) overview\n\n"
+            "Body.\n"
+        )
+        _write_docs(self.root, {"TESTING.md": testing})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertEqual(
+            results["markdown_links"], [], msg=results["markdown_links"])
+
     # -- final fix 3: CMake add_subdirectory case / multiline parsing ---------
 
     def test_cmake_uppercase_add_subdirectory_is_detected(self):
