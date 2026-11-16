@@ -75,6 +75,14 @@ coverage_model:
   axes:
     - id: api_surface
       classes: [memory]
+    - id: behavior
+      classes: [data_integrity]
+    - id: environment
+      classes: [nvidia_backend]
+    - id: execution_context
+      classes: [single_gpu]
+    - id: cadence
+      classes: [pr]
     - id: architecture
       classes: [any_gpu]
     - id: capability
@@ -84,7 +92,7 @@ coverage_model:
   classes:
     - id: memory.basic
       owner: Team Alpha
-      axes: [api_surface.memory, capability.baseline, integration_boundary.in_process]
+      axes: [api_surface.memory, behavior.data_integrity, architecture.any_gpu, capability.baseline, integration_boundary.in_process]
       risk: high
       intent: Allocation invariants remain observable.
       expected_test_kinds: [contract]
@@ -93,7 +101,39 @@ coverage_model:
         - path: "external: evidence-outside-repo"
           claim: Memory domain is built under BUILD_CONTRACT_TESTS.
       gap_status: covered_dual_tier
-  pairwise_checks: []
+  pairwise_checks:
+    - id: memory_x_data_integrity
+      category: api_x_behavior
+      pair: [api_surface.memory, behavior.data_integrity]
+      status: review_priority
+      priority: high
+      rationale: Round-trips preserve bytes, not only return success.
+      current_inventory: [suite-one]
+      gap_status: covered_dual_tier
+    - id: memory_x_nvidia_backend
+      category: api_x_environment
+      pair: [api_surface.memory, environment.nvidia_backend]
+      status: review_priority
+      priority: medium
+      rationale: Contract memory invariants are portable to the NVIDIA backend.
+      current_inventory: [suite-one]
+      gap_status: covered_dual_tier
+    - id: memory_x_single_gpu
+      category: integration_x_execution_context
+      pair: [api_surface.memory, execution_context.single_gpu]
+      status: review_priority
+      priority: low
+      rationale: Behavior must be observable on a single device first.
+      current_inventory: [suite-one]
+      gap_status: covered_dual_tier
+    - id: baseline_x_pr
+      category: capability_x_cadence
+      pair: [capability.baseline, cadence.pr]
+      status: review_priority
+      priority: low
+      rationale: Baseline-capability paths run on PR cadence.
+      current_inventory: [suite-one]
+      gap_status: covered_dual_tier
 """
 
 VALID_TESTING = """\
@@ -176,7 +216,7 @@ RETIRE_SUITE = """\
     evidence:
       - path: "external: evidence-outside-repo"
         claim: Built under BUILD_CONTRACT_TESTS.
-    history: Legacy coverage folded into suite-one.
+    history: Superseded coverage; repository evidence records the folding into suite-one.
     disposition: retire
     disposition_target: [suite-one]
     disposition_rationale: Folded into suite-one.
@@ -632,7 +672,7 @@ class CheckTestingDocsTest(unittest.TestCase):
     def test_pairwise_id_unhashable_is_reported(self):
         # An unhashable pairwise id must be reported, not raise on set membership.
         broken = VALID_COVERAGE.replace(
-            "  pairwise_checks: []\n",
+            "  pairwise_checks:\n",
             "  pairwise_checks:\n"
             "    - id: [not, hashable]\n"
             "      category: cross\n"
@@ -990,9 +1030,9 @@ class CheckTestingDocsTest(unittest.TestCase):
 
     def test_class_record_not_a_mapping(self):
         broken = VALID_COVERAGE.replace(
-            "      gap_status: covered_dual_tier\n  pairwise_checks: []\n",
+            "      gap_status: covered_dual_tier\n  pairwise_checks:\n",
             "      gap_status: covered_dual_tier\n    - not-a-mapping\n"
-            "  pairwise_checks: []\n",
+            "  pairwise_checks:\n",
             1)
         _write_docs(self.root, {"test_coverage_model.yaml": broken})
         results, _ = checker.validate(root=str(self.root))
@@ -1004,7 +1044,7 @@ class CheckTestingDocsTest(unittest.TestCase):
 
     def test_pairwise_record_not_a_mapping(self):
         broken = VALID_COVERAGE.replace(
-            "  pairwise_checks: []\n",
+            "  pairwise_checks:\n",
             "  pairwise_checks:\n    - not-a-mapping\n", 1)
         _write_docs(self.root, {"test_coverage_model.yaml": broken})
         results, _ = checker.validate(root=str(self.root))
@@ -1352,7 +1392,8 @@ class CheckTestingDocsTest(unittest.TestCase):
         _write_docs(self.root, {"test_inventory.yaml": broken})
         results, _ = checker.validate(root=str(self.root))
         self.assertTrue(
-            any("must carry a non-empty history or a non-empty incidents list" in err
+            any("must carry governing incidents or a history that establishes "
+                "real context" in err
                 for err in results["inventory"]),
             msg=results["inventory"],
         )
@@ -1524,6 +1565,116 @@ class CheckTestingDocsTest(unittest.TestCase):
                 for err in results["incidents"]),
             msg=results["incidents"],
         )
+
+    # -- pairwise_checks: non-empty and all required categories --------------
+
+    def test_empty_pairwise_checks_is_reported(self):
+        # The pairwise block is the model's cross-axis audit; an empty block
+        # claims no audit at all and must be rejected.
+        model = self._coverage_model(axes=[], classes=[], pairwise_checks=[])
+        errors, _, _ = checker.check_coverage_model(model, set(), str(self.root))
+        self.assertTrue(
+            any("pairwise_checks must be a non-empty list" in err for err in errors),
+            msg=errors)
+
+    def test_missing_required_pairwise_category_is_reported(self):
+        # Drop the capability_x_cadence category (re-label its entry) so a whole
+        # required audit dimension is absent; the pair refs are left intact so the
+        # only new error is the missing category.
+        broken = VALID_COVERAGE.replace(
+            "      category: capability_x_cadence\n",
+            "      category: api_x_behavior\n", 1)
+        _write_docs(self.root, {"test_coverage_model.yaml": broken})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("missing required categories" in err
+                and "capability_x_cadence" in err
+                for err in results["coverage_model"]),
+            msg=results["coverage_model"],
+        )
+
+    # -- declared axis classes must be audited (or marked informational) -----
+
+    def test_unreferenced_axis_class_is_reported(self):
+        # A declared class that no coverage class or pairwise check references,
+        # and that is not marked informational, is a dead vocabulary entry.
+        broken = VALID_COVERAGE.replace(
+            "    - id: execution_context\n      classes: [single_gpu]\n",
+            "    - id: execution_context\n      classes: [single_gpu, multi_gpu]\n", 1)
+        _write_docs(self.root, {"test_coverage_model.yaml": broken})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("execution_context.multi_gpu" in err and "never referenced" in err
+                for err in results["coverage_model"]),
+            msg=results["coverage_model"],
+        )
+
+    def test_informational_axis_class_is_exempt(self):
+        # The same unreferenced class passes once the axis explicitly marks it
+        # informational.
+        broken = VALID_COVERAGE.replace(
+            "    - id: execution_context\n      classes: [single_gpu]\n",
+            "    - id: execution_context\n      classes: [single_gpu, multi_gpu]\n"
+            "      informational_classes: [multi_gpu]\n", 1)
+        _write_docs(self.root, {"test_coverage_model.yaml": broken})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertEqual(_all_errors(results), [], msg=results)
+
+    def test_informational_class_not_declared_is_reported(self):
+        # An informational marker may only name a class the axis actually declares;
+        # marking an undeclared class is a schema error, not an exemption.
+        broken = VALID_COVERAGE.replace(
+            "    - id: execution_context\n      classes: [single_gpu]\n",
+            "    - id: execution_context\n      classes: [single_gpu]\n"
+            "      informational_classes: [multi_gpu]\n", 1)
+        _write_docs(self.root, {"test_coverage_model.yaml": broken})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("informational class 'multi_gpu' is not a declared class" in err
+                for err in results["coverage_model"]),
+            msg=results["coverage_model"],
+        )
+
+    # -- history: a bare/generic placeholder is not historical context -------
+
+    def test_bare_history_placeholder_is_reported(self):
+        # The stock "origin not located; repository evidence records current
+        # purpose." line must no longer pass on its own: it is a bare placeholder.
+        broken = VALID_INVENTORY.replace(
+            "    history: Guarded per TI-001.\n",
+            "    history: Historical origin not located; repository evidence "
+            "records current purpose.\n", 1)
+        _write_docs(self.root, {"test_inventory.yaml": broken})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("bare/generic placeholder" in err for err in results["inventory"]),
+            msg=results["inventory"],
+        )
+
+    def test_history_without_evidence_marker_is_reported(self):
+        # A narrative with real-looking prose but no evidence/origin marker does
+        # not establish provenance and is rejected.
+        broken = VALID_INVENTORY.replace(
+            "    history: Guarded per TI-001.\n",
+            "    history: This suite checks allocation behavior.\n", 1)
+        _write_docs(self.root, {"test_inventory.yaml": broken})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("evidence/origin marker" in err for err in results["inventory"]),
+            msg=results["inventory"],
+        )
+
+    def test_history_with_evidence_marker_and_context_passes(self):
+        # An honest unknown-origin narrative that points at the repository
+        # evidence that does exist (no invented ticket) is accepted.
+        broken = VALID_INVENTORY.replace(
+            "    history: Guarded per TI-001.\n",
+            "    history: Historical origin not located in available change "
+            "history; repository evidence (source paths and CMake wiring) "
+            "documents the behavior it currently pins.\n", 1)
+        _write_docs(self.root, {"test_inventory.yaml": broken})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertEqual(_all_errors(results), [], msg=results)
 
 
 if __name__ == "__main__":

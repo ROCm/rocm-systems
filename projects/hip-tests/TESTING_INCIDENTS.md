@@ -119,7 +119,7 @@ cross-test failure.
 - Convention documented in [`catch/contract/AUTHORING.md`](catch/contract/AUTHORING.md)
   ("Clear the sticky error after every intentional rejection"), including the
   diagnostic hint: if a test passes alone but fails in-suite, suspect this.
-- The reset appears in 38 contract source files; e.g.
+- The reset appears in 29 contract source files; e.g.
   [`catch/contract/vmm_handle/test_hip_vmm_handle_contract.cc`](catch/contract/vmm_handle/test_hip_vmm_handle_contract.cc)
   and
   [`catch/contract/mem_map_array/test_hip_mem_map_array_contract.cc`](catch/contract/mem_map_array/test_hip_mem_map_array_contract.cc).
@@ -132,7 +132,7 @@ sticky-error-reset rule separately from the suite introduction was **not located
 in `git log` (the `(void)hipGetLastError()` string predates the contract tier in
 unrelated CLR code, so a `-S` search does not isolate the convention's origin).
 
-**Current status.** Active; the reset appears in 38 contract source files and is
+**Current status.** Active; the reset appears in 29 contract source files and is
 mandated for every intentional-rejection site by the authoring guide.
 
 **Retirement condition.** Only if HIP stops keeping a per-thread sticky error, or

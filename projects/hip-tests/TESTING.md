@@ -154,7 +154,7 @@ The tables below summarize the inventory and coverage model at a glance. Each ro
 | `kernel_launch.device_side_correctness`, `rtc.runtime_compilation` | no_contract_tier | Device-side primitive and HIPRTC paths have functional coverage only; no portable contract invariant pins them yet |
 | `runtime.services_and_entry_points` | contract_only | Covered by a contract invariant with no functional counterpart today |
 | `memory.pools_and_virtual_memory` | capability_gated | Asserted only where the driver capability exists; unsupported outcomes are accepted, not failed |
-| `interop.import_and_ipc` | environment_gated | Runs only where a graphics/producer environment is configured; AMD-gated |
+| `interop.import_and_ipc` | environment_gated | Runs only where a graphics/producer environment is configured. Contract coverage (graphics-interop, external-resource, and IPC invariants in `contract-interop`) spans the AMD and NVIDIA backends per the inventory; only the AMD-only functional graphics portion (`unit-interop-graphics` Vulkan/OpenGL) is AMD-gated |
 | `multi_gpu.peer_and_cooperative_launch` | distributed_classification_open | Cases live in unit directories but are integration/multi-GPU by execution context; classification is an open review item |
 
 These statuses mirror the `gap_status` fields in [`test_coverage_model.yaml`](test_coverage_model.yaml); a gap here is a coverage shape to review, not a failing test. The narrative [Known gaps summary](#known-gaps-summary) below covers the current-state process gaps.

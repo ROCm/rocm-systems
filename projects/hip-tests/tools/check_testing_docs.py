@@ -40,8 +40,14 @@ for itself (workstreams WS-1 and WS-2):
       directory - unless marked ``external:``), matching the coverage-class
       evidence requirement;
     - every suite documents its historical context: it carries either a non-empty
-      ``history`` narrative or a non-empty ``incidents`` list, so a reader can
-      trace a non-obvious control back to its origin or its governing incident. An
+      ``incidents`` list or a ``history`` narrative that actually establishes
+      context, so a reader can trace a non-obvious control back to its origin or
+      its governing incident. A bare/generic placeholder (for example a stock
+      "origin not located; repository evidence records current purpose." line)
+      does not count on its own: a sufficient narrative must carry an explicit
+      evidence/origin marker (such as ``repository evidence``) AND not be a
+      contentless sentinel. An honest unknown origin is still accepted when it
+      points at the repository evidence that does exist (no invented tickets). An
       ``incidents`` list, when present, is a non-empty list of ``TI-NNN`` ids, each
       of which must resolve to a defined incident (as any TI reference does).
     - every required suite field is present with a usable value: the descriptive
@@ -87,6 +93,13 @@ for itself (workstreams WS-1 and WS-2):
     - every class / pairwise axis reference is a declared ``axis.class``;
     - the model declares the required coverage dimensions (architecture,
       capability, integration_boundary) as explicit axes;
+    - the ``pairwise_checks`` block is a non-empty cross-axis audit that exercises
+      all four required categories (``api_x_behavior``, ``api_x_environment``,
+      ``integration_x_execution_context``, ``capability_x_cadence``);
+    - every declared ``axis.class`` is meaningfully audited - referenced by at
+      least one coverage class or pairwise check - unless the axis explicitly
+      marks it under ``informational_classes`` (a declared-but-unreferenced,
+      non-informational class is a dead vocabulary entry and is rejected);
     - every coverage class carries a non-empty ``evidence`` list whose entries
       are mappings with a non-empty path and claim (paths resolve to a file on
       disk - not a directory - unless marked ``external:``).
@@ -212,6 +225,22 @@ REQUIRED_PAIRWISE_KEYS = frozenset({
 # architecture/capability and integration-boundary coverage can be audited.
 REQUIRED_AXES = frozenset({"architecture", "capability", "integration_boundary"})
 
+# Pairwise-check categories the coverage model must populate. The pairwise block
+# is the model's cross-axis audit; it must be non-empty and must exercise all
+# four review dimensions so the audit is not silently missing a whole class of
+# interactions:
+#   * api_x_behavior                   - an API surface against a behavior mode
+#   * api_x_environment                - an API surface against an environment
+#   * integration_x_execution_context  - graph/module/RTC (and multi-GPU) feature
+#                                        integration against an execution context
+#   * capability_x_cadence             - a capability-gated path against a cadence
+# A missing category (or an empty pairwise block) is a schema error: the model
+# would claim an audit it does not actually perform (TEST_RESTRUCTURING.md WS-2).
+REQUIRED_PAIRWISE_CATEGORIES = frozenset({
+    "api_x_behavior", "api_x_environment",
+    "integration_x_execution_context", "capability_x_cadence",
+})
+
 # The severity/priority vocabulary the coverage model documents for itself (a
 # coverage class ``risk`` and a pairwise check ``priority`` are review-priority
 # levels). A value outside this set is a schema error so the audit priorities
@@ -247,6 +276,40 @@ RETIRE_DISPOSITION = "retire"
 REQUIRED_RETIREMENT_EVIDENCE = (
     "coverage_equivalence", "ci_evidence", "owner_approval",
 )
+
+# Historical-context enforcement. A suite documents its provenance either by
+# naming the governing incident(s) (an ``incidents`` list) or by carrying a
+# ``history`` narrative. A narrative is only accepted when it does more than
+# restate a stock placeholder: it must carry an explicit evidence/origin marker
+# AND not be a bare, contentless sentinel. This keeps the provenance chain real -
+# a generic "origin not located" line alone no longer satisfies the requirement -
+# while still permitting an honest "origin unknown" record that points at the
+# repository evidence that does exist (no invented tickets).
+#
+# Markers that signal a narrative actually cites evidence or an origin: an
+# explicit repository-evidence phrase, a governing-incident reference, or the
+# control vocabulary the incident log uses to describe why a guard exists.
+HISTORY_EVIDENCE_MARKERS = (
+    "repository evidence", "origin", "incident", "testing_incidents", "ti-",
+    "enforced", "guarded", "gated", "hazard", "drift",
+)
+# Bare / generic history sentinels that, standing alone, do NOT establish
+# historical context. These are normalized (lower-cased, whitespace-collapsed)
+# before comparison. A suite whose entire history is one of these must instead
+# name governing incidents or carry real context; the stock "origin not located;
+# repository evidence records current purpose." line is explicitly here so it can
+# no longer pass on the strength of the marker words it happens to contain.
+GENERIC_HISTORY_SENTINELS = frozenset({
+    "historical origin not located; repository evidence records current purpose.",
+    "historical origin not located.",
+    "repository evidence records current purpose.",
+    "origin not located.",
+    "unknown.",
+    "none.",
+    "n/a.",
+    "no history.",
+    "tbd.",
+})
 
 # A path value starting with this marker is a CI lane defined outside the repo
 # and is not existence-checked (TEST_RESTRUCTURING.md WS-1).
@@ -415,6 +478,30 @@ def _check_repo_path_field(component_dir, value, label, errors):
 
 def _nonempty_str(value):
     return isinstance(value, str) and bool(value.strip())
+
+
+def _normalize_history(value):
+    """Lower-case and whitespace-collapse a history string for sentinel matching."""
+    return re.sub(r"\s+", " ", value.strip().lower())
+
+
+def _history_is_sufficient(value):
+    """True when a history narrative establishes real historical context.
+
+    A sufficient narrative is a non-empty string that carries an explicit
+    evidence/origin marker (``repository evidence``, a governing-incident
+    reference, or the control vocabulary the incident log uses) AND is not a
+    bare/generic sentinel (for example a stock "origin not located" line). The
+    marker requirement rejects a context-free note that names no evidence; the
+    sentinel check rejects a stock placeholder that happens to contain a marker
+    word but no actual context.
+    """
+    if not _nonempty_str(value):
+        return False
+    if _normalize_history(value) in GENERIC_HISTORY_SENTINELS:
+        return False
+    low = value.lower()
+    return any(marker in low for marker in HISTORY_EVIDENCE_MARKERS)
 
 
 def _is_scalar(value):
@@ -759,10 +846,14 @@ def check_inventory(inventory, component_dir):
 
         # Historical context. Every suite must say where it came from or which
         # control governs it, so a reader encountering a non-obvious guard can
-        # trace the rationale: either a non-empty ``history`` narrative or a
-        # non-empty ``incidents`` list naming the controlling TI-NNN incident(s).
-        # When neither is present the record is history-blind and the provenance
-        # chain to TESTING_INCIDENTS.md is broken.
+        # trace the rationale: either a non-empty ``incidents`` list naming the
+        # controlling TI-NNN incident(s), or a ``history`` narrative that actually
+        # establishes context. A bare/generic placeholder (for example a stock
+        # "origin not located; repository evidence records current purpose." line)
+        # does NOT count on its own: a sufficient narrative must carry an explicit
+        # evidence/origin marker AND not be a contentless sentinel. An honest
+        # unknown origin is still accepted as long as it points at the repository
+        # evidence that does exist; no ticket is invented to satisfy the rule.
         history = suite.get("history")
         incidents = suite.get("incidents")
         if "history" in suite and not _nonempty_str(history):
@@ -781,10 +872,22 @@ def check_inventory(inventory, component_dir):
                         errors.append(
                             "suite {!r} incidents entry must be a TI-NNN incident id: "
                             "{!r}".format(sid, inc))
-        if not _nonempty_str(history) and not has_incidents:
-            errors.append(
-                "suite {!r} must carry a non-empty history or a non-empty "
-                "incidents list".format(sid))
+        # A suite is history-blind unless it names governing incidents or carries
+        # a sufficient narrative. Report the most specific diagnosis: a present
+        # but insufficient history (a bare/generic placeholder, or a note with no
+        # evidence/origin marker) gets a targeted message; an entirely absent one
+        # gets the general requirement.
+        if not has_incidents and not _history_is_sufficient(history):
+            if _nonempty_str(history):
+                errors.append(
+                    "suite {!r} history is a bare/generic placeholder: it must carry "
+                    "an explicit evidence/origin marker (e.g. 'repository evidence') "
+                    "with real context, or the suite must name governing "
+                    "incidents".format(sid))
+            else:
+                errors.append(
+                    "suite {!r} must carry governing incidents or a history that "
+                    "establishes real context".format(sid))
 
         # related_restructuring is a structured local Markdown pointer.
         rr = suite.get("related_restructuring")
@@ -846,6 +949,14 @@ def check_coverage_model(model, suite_ids, component_dir):
 
     declared_axes = set()
     declared_axis_ids = set()
+    # Axis.class references that are declared but intentionally not yet claimed by
+    # any coverage class or pairwise check. Such a class is kept in the vocabulary
+    # for completeness (it names a dimension value the model acknowledges) but is
+    # exempted from the "every declared class is audited" rule only when the axis
+    # explicitly lists it under ``informational_classes``.
+    informational_axes = set()
+    # Axis.class references actually used by a coverage class or pairwise check.
+    referenced_axes = set()
     axes = cm.get("axes")
     if axes is None:
         axes = []
@@ -867,13 +978,35 @@ def check_coverage_model(model, suite_ids, component_dir):
             errors.append(
                 "coverage axis {!r} classes must be a list".format(axis_id))
             classes = []
+        axis_classes = set()
         for cls in classes or []:
             if not _nonempty_str(cls):
                 errors.append(
                     "coverage axis {!r} class must be a non-empty string: {!r}".format(
                         axis_id, cls))
                 continue
+            axis_classes.add(cls)
             declared_axes.add("{}.{}".format(axis_id, cls))
+        # Optional informational-class marker: each entry must be a non-empty
+        # string that names a class the axis actually declares (an informational
+        # marker for an undeclared class is a schema error, not an exemption).
+        info = axis.get("informational_classes")
+        if info is not None and not isinstance(info, list):
+            errors.append(
+                "coverage axis {!r} informational_classes must be a list".format(axis_id))
+            info = []
+        for cls in info or []:
+            if not _nonempty_str(cls):
+                errors.append(
+                    "coverage axis {!r} informational class must be a non-empty "
+                    "string: {!r}".format(axis_id, cls))
+                continue
+            if cls not in axis_classes:
+                errors.append(
+                    "coverage axis {!r} informational class {!r} is not a declared "
+                    "class of that axis".format(axis_id, cls))
+                continue
+            informational_axes.add("{}.{}".format(axis_id, cls))
 
     for req in sorted(REQUIRED_AXES):
         if req not in declared_axis_ids:
@@ -889,6 +1022,7 @@ def check_coverage_model(model, suite_ids, component_dir):
             if not isinstance(ref, str):
                 errors.append("{} axis ref must be a string: {!r}".format(owner, ref))
                 continue
+            referenced_axes.add(ref)
             if ref not in declared_axes:
                 errors.append("{} axis ref {!r} is not a declared axis.class".format(owner, ref))
 
@@ -1002,6 +1136,7 @@ def check_coverage_model(model, suite_ids, component_dir):
         incident_refs.update(_collect_incident_refs(cls))
 
     seen_pair_ids = set()
+    present_categories = set()
     pairwise_checks = cm.get("pairwise_checks")
     if pairwise_checks is None:
         pairwise_checks = []
@@ -1034,6 +1169,8 @@ def check_coverage_model(model, suite_ids, component_dir):
             if field in pc and not _nonempty_str(pc.get(field)):
                 errors.append(
                     "pairwise {!r} {} must be a non-empty string".format(pid, field))
+        if _nonempty_str(pc.get("category")):
+            present_categories.add(pc.get("category"))
         priority = pc.get("priority")
         if "priority" in pc and not _nonempty_str(priority):
             errors.append("pairwise {!r} priority must be a non-empty string".format(pid))
@@ -1053,6 +1190,33 @@ def check_coverage_model(model, suite_ids, component_dir):
         check_axis_refs("pairwise {!r}".format(pid), pc.get("pair"))
         check_inventory_refs("pairwise {!r}".format(pid), pc.get("current_inventory"))
         incident_refs.update(_collect_incident_refs(pc))
+
+    # The pairwise block is the model's cross-axis audit; it must actually be
+    # performed. An empty block claims no audit at all, and a missing category
+    # means a whole dimension of interactions (API x behavior, API x environment,
+    # feature-integration x execution context, or capability x cadence) is never
+    # reviewed.
+    if not pairwise_checks:
+        errors.append(
+            "coverage model pairwise_checks must be a non-empty list of cross-axis checks")
+    else:
+        missing_categories = REQUIRED_PAIRWISE_CATEGORIES - present_categories
+        if missing_categories:
+            errors.append(
+                "coverage model pairwise_checks is missing required "
+                "categories: {}".format(sorted(missing_categories)))
+
+    # Every declared axis.class must be meaningfully audited: referenced by at
+    # least one coverage class ``axes`` list or pairwise ``pair``, unless the axis
+    # explicitly marks it ``informational_classes``. A declared-but-unreferenced,
+    # non-informational class is a dead vocabulary entry that claims a dimension
+    # value the model never actually audits.
+    unaudited = sorted(declared_axes - referenced_axes - informational_axes)
+    for axis_class in unaudited:
+        errors.append(
+            "coverage axis class {!r} is declared but never referenced by a "
+            "coverage class or pairwise check (reference it, or mark it under the "
+            "axis's informational_classes)".format(axis_class))
 
     return errors, incident_refs, {"classes": len(classes), "refs": refs_ok}
 

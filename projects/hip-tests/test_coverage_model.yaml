@@ -39,10 +39,21 @@ coverage_model:
       classes: [success, invalid_input, sticky_error, lifecycle, synchronization, data_integrity]
     - id: execution_context
       classes: [host_only, single_gpu, multi_gpu, multiprocess]
+      # host_only is declared for completeness; no coverage class is modeled
+      # purely host-side today (host-only cases ride along with single_gpu suites).
+      informational_classes: [host_only]
     - id: environment
       classes: [amd_linux, amd_windows, amd_wsl, nvidia_backend, graphics_capable, sanitizer]
+      # Per-OS AMD platform values are tracked per suite in test_inventory.yaml
+      # (execution.platforms); the coverage model audits environment only where it
+      # changes behavior (nvidia_backend, graphics_capable, sanitizer).
+      informational_classes: [amd_linux, amd_windows, amd_wsl]
     - id: cadence
       classes: [pr, nightly, release, on_demand]
+      # nightly/release cadence is documented in TESTING.md but no inventory suite
+      # currently declares that cadence (the actual cadence table lists only PR and
+      # on-demand); these remain declared vocabulary, not yet an audited claim.
+      informational_classes: [nightly, release]
     - id: architecture
       source: catch/unit/CMakeLists.txt platform guards and TESTING.md "Supported configurations"
       classes: [cdna, rdna, any_gpu, nvidia_backend]
@@ -52,6 +63,9 @@ coverage_model:
     - id: integration_boundary
       source: TEST_RESTRUCTURING.md integration classification (Section 1.3 and the open multi-GPU item)
       classes: [in_process, cross_stream, cross_device, cross_process, external_producer]
+      # in_process is the implicit default boundary that most suites occupy; it is
+      # declared for completeness rather than audited as a distinct claim.
+      informational_classes: [in_process]
 
   classes:
 
@@ -59,9 +73,9 @@ coverage_model:
 
     - id: memory.allocation_and_integrity
       owner: HIP Runtime - Memory
-      axes: [api_surface.memory, behavior.success, behavior.invalid_input, behavior.data_integrity, execution_context.single_gpu]
+      axes: [api_surface.memory, behavior.success, behavior.invalid_input, behavior.data_integrity, execution_context.single_gpu, architecture.nvidia_backend]
       risk: high
-      intent: Allocation, free, memset, host/pitched/managed memory, and advise invariants plus invalid-input and out-of-bounds behavior remain observable, with allocation round-trips and byte-level integrity preserved.
+      intent: Allocation, free, memset, host/pitched/managed memory, and advise invariants plus invalid-input and out-of-bounds behavior remain observable, with allocation round-trips and byte-level integrity preserved. The contract tier is intended to be portable to the HIP-over-CUDA (NVIDIA backend) architecture, where it is measured separately.
       expected_test_kinds: [contract, functional]
       current_inventory: [contract-memory, unit-memory, unit-oob]
       evidence:
@@ -161,9 +175,9 @@ coverage_model:
 
     - id: kernel_launch.device_side_correctness
       owner: HIP Runtime - Device Libraries
-      axes: [api_surface.kernel_launch, behavior.data_integrity, execution_context.single_gpu, architecture.any_gpu]
+      axes: [api_surface.kernel_launch, behavior.data_integrity, execution_context.single_gpu, architecture.any_gpu, architecture.cdna, architecture.rdna]
       risk: medium
-      intent: Device-side math, atomics, warp and sync primitives, complex and vector types, and device printf produce numerically correct results when launched; these run through kernels and have no host contract surface.
+      intent: Device-side math, atomics, warp and sync primitives, complex and vector types, and device printf produce numerically correct results when launched; these run through kernels and have no host contract surface. Wavefront-sensitive primitives (warp, sync, atomics) must stay correct across both CDNA (64-wide) and RDNA (configurable 32/64) architectures.
       expected_test_kinds: [functional]
       current_inventory: [unit-device-libraries, unit-printf]
       evidence:
@@ -275,7 +289,7 @@ coverage_model:
 
     - id: interop.import_and_ipc
       owner: HIP Runtime - Interop
-      axes: [api_surface.interop, behavior.invalid_input, behavior.lifecycle, execution_context.multiprocess, capability.graphics_capable, integration_boundary.external_producer]
+      axes: [api_surface.interop, behavior.invalid_input, behavior.lifecycle, execution_context.multiprocess, capability.graphics_capable, integration_boundary.cross_process, integration_boundary.external_producer]
       risk: medium
       intent: Graphics interop, external-resource import, and IPC handle exchange import correctly or reject cleanly when producers or a graphics environment are absent.
       expected_test_kinds: [contract, functional, integration]
@@ -289,7 +303,7 @@ coverage_model:
 
     - id: multi_gpu.peer_and_cooperative_launch
       owner: HIP Runtime - Multi-GPU
-      axes: [api_surface.kernel_launch, execution_context.multi_gpu, behavior.success, behavior.data_integrity, capability.multi_device, integration_boundary.cross_device]
+      axes: [api_surface.kernel_launch, execution_context.multi_gpu, behavior.success, behavior.data_integrity, capability.multi_device, capability.peer_capable, integration_boundary.cross_device]
       risk: high
       intent: Peer query, access, and copy, cooperative-groups launch and sync, and cross-device launch remain observable with clean single-GPU degradation; the execution-context classification of these cases is an open restructuring item.
       expected_test_kinds: [contract, functional, integration]
@@ -378,7 +392,7 @@ coverage_model:
 
     # graph / module / RTC x execution context
     - id: graph_x_single_gpu
-      category: feature_x_execution_context
+      category: integration_x_execution_context
       pair: [api_surface.graph, execution_context.single_gpu]
       status: review_priority
       priority: medium
@@ -386,7 +400,7 @@ coverage_model:
       current_inventory: [contract-graph, unit-graph]
       gap_status: covered_dual_tier
     - id: module_x_single_gpu
-      category: feature_x_execution_context
+      category: integration_x_execution_context
       pair: [api_surface.module, execution_context.single_gpu]
       status: review_priority
       priority: low
@@ -394,7 +408,7 @@ coverage_model:
       current_inventory: [contract-module-loader, unit-module-loader]
       gap_status: covered_dual_tier
     - id: rtc_x_single_gpu
-      category: feature_x_execution_context
+      category: integration_x_execution_context
       pair: [api_surface.rtc, execution_context.single_gpu]
       status: review_priority
       priority: medium
@@ -402,7 +416,7 @@ coverage_model:
       current_inventory: [unit-rtc]
       gap_status: no_contract_tier
     - id: kernel_launch_x_multi_gpu
-      category: feature_x_execution_context
+      category: integration_x_execution_context
       pair: [api_surface.kernel_launch, execution_context.multi_gpu]
       status: review_priority
       priority: high
