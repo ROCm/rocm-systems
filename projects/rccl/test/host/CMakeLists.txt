@@ -3450,6 +3450,8 @@ file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/${RCCL_MICRO_SUBDIR}/${RCCL_MICRO_MANIFE
 add_dependencies(rccl-UnitTestsHostAll ${_micro_binaries})
 
 if(BUILD_TESTS)
+  # Plain install(), as for everything else in micro/: rocm_install() hard-codes
+  # CMAKE_INSTALL_BINDIR and cannot be pointed a level deeper.
   install(FILES "${CMAKE_CURRENT_BINARY_DIR}/${RCCL_MICRO_SUBDIR}/${RCCL_MICRO_MANIFEST}"
     DESTINATION ${CMAKE_INSTALL_BINDIR}/${RCCL_MICRO_SUBDIR} COMPONENT tests)
 endif()
