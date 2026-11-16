@@ -253,3 +253,24 @@ TEST(rocprofiler_lib, hip_table_wrappers_kernel_replay)
 
     expect_wrapped("hipGraphInstantiate");
 }
+
+// Range replay declines a range that contains a graph launch, which it detects through the same
+// launch state, so it must get the graph wrappers even without HIP_GRAPH tracing.
+TEST(rocprofiler_lib, hip_table_wrappers_range_replay)
+{
+    run_with_contexts([](rocprofiler_context_id_t ctx) {
+        auto status = rocprofiler_configure_callback_tracing_service(
+            ctx,
+            ROCPROFILER_CALLBACK_TRACING_RANGE_REPLAY,
+            nullptr,
+            0,
+            [](rocprofiler_callback_tracing_record_t, rocprofiler_user_data_t*, void*) {},
+            nullptr);
+        if(status != ROCPROFILER_STATUS_SUCCESS) get_test_data().setup_supported = false;
+    });
+
+    if(!get_test_data().setup_supported)
+        GTEST_SKIP() << "range replay is not supported by this rocprofiler-sdk build";
+
+    expect_wrapped("hipGraphInstantiate");
+}
