@@ -3,27 +3,22 @@
 
 import re
 from collections.abc import Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
 
-from utils import csv_compression, schema
-from utils.inject_roctx.constants import (
-    KNOWN_ML_API_BACKENDS,
-    OPERATOR_BACKENDS,
-    USER_REGION_BACKEND,
+from ml_api_tracing.analyze.definitions import (
+    CallTreeForest,
+    CallTreeNode,
+    KernelStats,
+    MlApiTracePair,
+    NodeRollup,
 )
-from utils.logger import (
-    console_debug,
-    console_error,
-    console_log,
-    console_warning,
-    demarcate,
-)
-from utils.ml_api_trace_errors import (
+from ml_api_tracing.analyze.errors import (
+    FatalMlApiTraceError,
     KernelSequenceLengthMismatchError,
     LauncherThreadNotFoundError,
     MarkerNotNestedError,
@@ -33,6 +28,20 @@ from utils.ml_api_trace_errors import (
     PassMarkerMismatchError,
     UnaccountedKernelError,
     UncorrelatedLauncherIntervalError,
+)
+from ml_api_tracing.constants import KNOWN_ML_API_BACKENDS, USER_REGION_BACKEND
+from ml_api_tracing.marker_format import (
+    parse_marker_function,
+    split_operator_args,
+    stacked_marker_function_cell,
+)
+from utils import csv_compression, schema
+from utils.logger import (
+    console_debug,
+    console_error,
+    console_log,
+    console_warning,
+    demarcate,
 )
 from utils.utils_common import (
     NATIVE_AGENTS_PREFIX,
@@ -110,13 +119,6 @@ _MERGE_KEYS = ["Dispatch_ID", *_KERNEL_ID_KEYS]
 ARGS_DISPLAY_MAX_ITEMS = 8
 ARGS_DISPLAY_MAX_CHARS = 160
 ARGS_DISPLAY_MAX_VARIANTS = 5
-_STACKED_MARKER_WIRE = re.compile(r":#\d+@")
-_FATAL_ML_API_TRACE_ERRORS = (
-    KernelSequenceLengthMismatchError,
-    MarkerNotNestedError,
-    OverlappingMarkerRangeError,
-    PassMarkerMismatchError,
-)
 _REQUIRED_MARKER_COLUMNS = (
     "Function",
     "Thread_Id",
@@ -168,82 +170,6 @@ def get_bw_scale_and_unit(value: float) -> tuple[float, str]:
     if value >= 1e3:
         return 1e3, "KB/s"
     return 1.0, "B/s"
-
-
-@dataclass
-class KernelStats:
-    """Aggregated kernel launch stats for one kernel name.
-
-    min_duration_ns and max_duration_ns are None until a dispatch with a
-    non-zero duration is observed. pmc_group_keys holds one
-    process_rocpd_csv group key per launch of this name.
-    """
-
-    launches: int = 0
-    total_duration_ns: float = 0.0
-    min_duration_ns: Optional[float] = None
-    max_duration_ns: Optional[float] = None
-    kernel_id: Optional[int] = None
-    pmc_group_keys: list[tuple] = field(default_factory=list)
-
-
-@dataclass
-class CallTreeNode:
-    """A node in the operator call tree.
-
-    children is the list of child operator nodes. file_name, line_number,
-    backend, start_timestamp, end_timestamp, thread_id, and
-    launcher_thread_id are optional fields copied from a marker row when set.
-    invocation_ids stores marker-start strings for this node. args_invocations
-    maps each distinct operator-argument blob to the invocation ids that used
-    it.
-
-    Inclusive over this node plus all descendants:
-      kernel_launches, total_duration_ms, min/max/mean dispatch stats.
-    """
-
-    name: str
-    children: list["CallTreeNode"] = field(default_factory=list)
-    kernels: dict[str, KernelStats] = field(default_factory=dict)
-    kernel_launches: int = 0
-    total_duration_ms: float = 0.0
-    invocation_ids: set[str] = field(default_factory=set)
-    args_invocations: dict[str, set[str]] = field(default_factory=dict)
-    min_dispatch_ns: Optional[float] = None
-    max_dispatch_ns: Optional[float] = None
-    mean_dispatch_ns: Optional[float] = None
-    file_name: Optional[str] = None
-    line_number: Optional[int] = None
-    backend: Optional[str] = None
-    start_timestamp: Optional[float] = None
-    end_timestamp: Optional[float] = None
-    thread_id: Optional[str] = None
-    launcher_thread_id: Optional[str] = None
-
-    @property
-    def call_count(self) -> int:
-        return len(self.invocation_ids)
-
-    @property
-    def args_variants(self) -> list[tuple[str, int]]:
-        """Distinct operator-argument blobs with call counts, most frequent first."""
-        return sorted(
-            (
-                (args_blob, len(recorded_invocation_ids))
-                for args_blob, recorded_invocation_ids in self.args_invocations.items()
-            ),
-            key=lambda variant: (-variant[1], variant[0]),
-        )
-
-
-@dataclass
-class NodeRollup:
-    """Inclusive subtree aggregate returned by rollup_node_stats."""
-
-    launches: int
-    total_duration_ns: float
-    min_dispatch_ns: Optional[float]
-    max_dispatch_ns: Optional[float]
 
 
 @dataclass(frozen=True)
@@ -338,64 +264,6 @@ def iter_call_tree_paths(
         yield from iter_call_tree_paths(node.children, path)
 
 
-def decode_marker_name(name: str) -> str:
-    """Decode a percent-encoded marker segment ('%2F' -> '/', '%25' -> '%')."""
-    return name.replace("%2F", "/").replace("%25", "%")
-
-
-def decode_marker_args(args: str) -> str:
-    """Decode percent-encoded argument text back to '|', ';', CR, LF, and '%'."""
-    return (
-        args
-        .replace("%7C", "|")
-        .replace("%3B", ";")
-        .replace("%0D", "\r")
-        .replace("%0A", "\n")
-        .replace("%25", "%")
-    )
-
-
-def split_operator_args(args_blob: str) -> list[str]:
-    """Split a parenthesized operator-args blob into top-level argument tokens."""
-    args_text = args_blob.strip()
-    if args_text.startswith("(") and args_text.endswith(")"):
-        args_text = args_text[1:-1]
-    args_text = args_text.strip()
-    if not args_text:
-        return []
-
-    tokens: list[str] = []
-    token_chars: list[str] = []
-    depth = 0
-    quote_char: Optional[str] = None
-    escaped = False
-    for char in args_text:
-        if quote_char is not None:
-            token_chars.append(char)
-            if escaped:
-                escaped = False
-            elif char == "\\":
-                escaped = True
-            elif char == quote_char:
-                quote_char = None
-        elif char in "'\"":
-            quote_char = char
-            token_chars.append(char)
-        elif char in "([{":
-            depth += 1
-            token_chars.append(char)
-        elif char in ")]}":
-            depth = max(depth - 1, 0)
-            token_chars.append(char)
-        elif char == "," and depth == 0:
-            tokens.append("".join(token_chars).strip())
-            token_chars = []
-        else:
-            token_chars.append(char)
-    tokens.append("".join(token_chars).strip())
-    return [token for token in tokens if token]
-
-
 def format_operator_args(
     args_blob: str,
     max_items: int = ARGS_DISPLAY_MAX_ITEMS,
@@ -416,77 +284,12 @@ def format_operator_args(
     return formatted_args
 
 
-def _split_name_and_location(first_token: str) -> tuple[str, str, Optional[int]]:
-    """Split `{name}:{location}` from the right into name, file, and line."""
-    if first_token.endswith(":n/a"):
-        return first_token[: -len(":n/a")], "", None
-    parts = first_token.rsplit(":", 2)
-    if len(parts) == 3:
-        operator_name, file_part, line_part = parts
-        if file_part and line_part.isdigit():
-            return operator_name, Path(file_part).name, int(line_part)
-    return first_token, "", None
-
-
-def parse_marker_function(function_value: object) -> dict[str, Any]:
-    """Parse one Function cell into operator, location, backend, ltid, and args."""
-    if function_value is None or (
-        isinstance(function_value, float) and pd.isna(function_value)
-    ):
-        raw = ""
-    else:
-        raw = str(function_value)
-    tokens = raw.split("|") if raw else [""]
-    first_token = tokens[0]
-    operator_name, file_name, line_number = _split_name_and_location(first_token)
-    parsed_keys = {
-        "ltid": "n/a",
-        "args": "n/a",
-    }
-    backend = USER_REGION_BACKEND
-    for token in tokens[1:]:
-        if token in KNOWN_ML_API_BACKENDS:
-            backend = token
-            continue
-        if "=" not in token:
-            continue
-        key, value = token.split("=", 1)
-        if key == "args":
-            parsed_keys["args"] = decode_marker_args(value)
-        elif key in parsed_keys:
-            parsed_keys[key] = value
-    launcher_thread_id = ""
-    if parsed_keys["ltid"] not in ("", "n/a"):
-        launcher_thread_id = parsed_keys["ltid"]
-    return {
-        "Operator_Name": decode_marker_name(operator_name),
-        "File_Name": file_name,
-        "Line_Number": line_number,
-        "Backend": backend,
-        "launcher_thread_id": launcher_thread_id,
-        "args": parsed_keys["args"],
-    }
-
-
-def _stacked_marker_function_cell(function_value: object) -> Optional[str]:
-    """Return the raw cell when it uses legacy stacked wire, else None."""
-    if function_value is None or (
-        isinstance(function_value, float) and pd.isna(function_value)
-    ):
-        return None
-    raw = str(function_value)
-    first_token = raw.split("|", 1)[0] if raw else ""
-    if _STACKED_MARKER_WIRE.search(first_token):
-        return raw
-    return None
-
-
 def _apply_parsed_function_columns(trace_df: pd.DataFrame) -> pd.DataFrame:
     """Add parse_marker_function columns, keeping Function and Thread_Id."""
     if trace_df.empty:
         return trace_df
     for function_value in trace_df["Function"]:
-        stacked_cell = _stacked_marker_function_cell(function_value)
+        stacked_cell = stacked_marker_function_cell(function_value)
         if stacked_cell is not None:
             console_error(
                 "analysis",
@@ -643,7 +446,7 @@ def _record_ml_api_trace_error(
     if errors is not None:
         errors.append(err)
         return
-    if isinstance(err, _FATAL_ML_API_TRACE_ERRORS):
+    if isinstance(err, FatalMlApiTraceError):
         raise err
     console_warning("analysis", str(err))
 
@@ -679,7 +482,7 @@ def nest_marker_intervals(
     trace_df: pd.DataFrame,
     errors: Optional[list[MlApiTraceError]] = None,
     skipped_keys: Optional[set[tuple[str, str]]] = None,
-) -> dict[str, list[CallTreeNode]]:
+) -> CallTreeForest:
     """Nest marker intervals per Thread_Id using timestamp containment.
 
     Rows are sorted by thread, start time, and descending end time so
@@ -687,7 +490,7 @@ def nest_marker_intervals(
     Overlapping rows are skipped and recorded in skipped_keys so later nest
     validation does not report them again.
     """
-    forest: dict[str, list[CallTreeNode]] = {}
+    forest: CallTreeForest = {}
     if trace_df.empty:
         return forest
     ordered = trace_df.sort_values(
@@ -753,7 +556,7 @@ def _deepest_containing_node(
 
 
 def attach_unlocated_trees_by_launcher_thread(
-    forest: dict[str, list[CallTreeNode]],
+    forest: CallTreeForest,
     errors: Optional[list[MlApiTraceError]] = None,
 ) -> None:
     """Stack torch/triton trees with no source onto the autograd launcher thread.
@@ -815,7 +618,7 @@ def _prune_cpu_only_call_tree_node(node: CallTreeNode) -> bool:
     return bool(node.kernels) or bool(node.children)
 
 
-def _prune_cpu_only_call_trees(forest: dict[str, list[CallTreeNode]]) -> None:
+def _prune_cpu_only_call_trees(forest: CallTreeForest) -> None:
     """Drop subtrees with no kernel dispatches."""
     for thread_id, roots in list(forest.items()):
         kept_roots = [root for root in roots if _prune_cpu_only_call_tree_node(root)]
@@ -826,7 +629,7 @@ def _prune_cpu_only_call_trees(forest: dict[str, list[CallTreeNode]]) -> None:
 
 
 def _record_missing_source_location_errors(
-    forest: dict[str, list[CallTreeNode]],
+    forest: CallTreeForest,
     errors: Optional[list[MlApiTraceError]] = None,
 ) -> None:
     """Record unlocated roots in KNOWN_ML_API_BACKENDS with no launcher thread."""
@@ -849,7 +652,7 @@ def _record_missing_source_location_errors(
 
 
 def _nested_invocation_keys(
-    forest: dict[str, list[CallTreeNode]],
+    forest: CallTreeForest,
 ) -> set[tuple[str, str]]:
     """Return (Thread_Id, marker-start) pairs present in the forest."""
     return {
@@ -862,7 +665,7 @@ def _nested_invocation_keys(
 
 def _validate_all_markers_nested(
     trace_df: pd.DataFrame,
-    forest: dict[str, list[CallTreeNode]],
+    forest: CallTreeForest,
     errors: Optional[list[MlApiTraceError]] = None,
     skipped_keys: Optional[set[tuple[str, str]]] = None,
 ) -> None:
@@ -1068,12 +871,12 @@ def _copy_scoped_operator_node(
 
 
 def copy_matched_operator_subtree(
-    forest: dict[str, list[CallTreeNode]],
+    forest: CallTreeForest,
     matched_nodes: list[CallTreeNode],
-) -> dict[str, list[CallTreeNode]]:
+) -> CallTreeForest:
     """Copy matches, in-scope descendants, and ancestors needed to reach them."""
     matched_node_ids = {id(node) for node in matched_nodes}
-    subtree: dict[str, list[CallTreeNode]] = {}
+    subtree: CallTreeForest = {}
     for thread_id, roots in forest.items():
         kept_roots: list[CallTreeNode] = []
         for root in roots:
@@ -1103,66 +906,6 @@ def filter_forest_by_backends(
         if node.backend in backends
     ]
     return copy_matched_operator_subtree(forest, backend_nodes)
-
-
-def traced_frameworks_from_config(profiling_config: dict[str, Any]) -> list[str]:
-    """Return the frameworks that --trace-ml-api traced, from profiling_config.yaml."""
-    return list(profiling_config.get("trace_ml_api") or [])
-
-
-def check_backends_traced(backends: list[str], traced_frameworks: list[str]) -> None:
-    """Raise ValueError unless the workload traced every given backend.
-
-    User regions are recorded by every --trace-ml-api run.
-    """
-    if not traced_frameworks:
-        raise ValueError(
-            "Workload was not profiled with --trace-ml-api. Profile again with "
-            "--trace-ml-api to use --list-operators or --operator."
-        )
-    for backend in backends:
-        if backend in KNOWN_ML_API_BACKENDS and backend not in traced_frameworks:
-            raise ValueError(
-                f"Workload was not profiled with --trace-ml-api {backend}."
-            )
-
-
-def split_backend_prefix(pattern: str) -> tuple[Optional[str], str]:
-    """Split 'torch:*conv*' into ('torch', '*conv*').
-
-    A pattern without a prefix returns (None, pattern). The '::' in names such
-    as aten::addmm is not a prefix.
-    """
-    prefix, separator, rest = pattern.partition(":")
-    if not separator or rest.startswith(":"):
-        return None, pattern
-    return prefix, rest or "**"
-
-
-def bind_operator_patterns(
-    patterns: list[str], traced_frameworks: list[str]
-) -> dict[str, list[str]]:
-    """Group --operator patterns by the backend they match in one workload.
-
-    A pattern without a prefix uses the prefix before it. Before any prefix, it
-    matches every traced framework and user regions. No patterns match every
-    operator. Raises ValueError for an unknown prefix or an untraced framework.
-    """
-    patterns_by_backend: dict[str, list[str]] = {}
-    backends = [*traced_frameworks, USER_REGION_BACKEND]
-    for token in patterns or ["**"]:
-        prefix, pattern = split_backend_prefix(token)
-        if prefix is not None:
-            if prefix not in OPERATOR_BACKENDS:
-                raise ValueError(
-                    f"Unknown --operator prefix {prefix!r}. "
-                    f"Prefixes: {', '.join(OPERATOR_BACKENDS)}"
-                )
-            backends = [prefix]
-        for backend in backends:
-            patterns_by_backend.setdefault(backend, []).append(pattern)
-    check_backends_traced(list(patterns_by_backend), traced_frameworks)
-    return patterns_by_backend
 
 
 def _node_source_location(node: CallTreeNode) -> str:
@@ -1234,7 +977,7 @@ def _aggregate_operator_summary_rows(
 
 
 def build_operator_summary(
-    call_trees: dict[str, list[CallTreeNode]],
+    call_trees: CallTreeForest,
 ) -> pd.DataFrame:
     """One row per operator path that launched GPU work.
 
@@ -1419,7 +1162,7 @@ def _outer_join_dispatches_and_markers(
     )
 
 
-def _join_pass_marker_and_counter(pair: schema.MlApiTracePair) -> pd.DataFrame:
+def _join_pass_marker_and_counter(pair: MlApiTracePair) -> pd.DataFrame:
     """Load one counter CSV, collapse dispatches, and outer-join markers."""
     counter_df = _rename_column_alias(
         pd.read_csv(pair.counter_path), "Correlation_ID", "Correlation_Id"
@@ -1579,6 +1322,13 @@ def _unmatched_kernel_rows(joined_df: pd.DataFrame) -> pd.DataFrame:
     ].copy()
 
 
+def _unmatched_kernel_names(unmatched_rows: pd.DataFrame) -> list[str]:
+    """Return each unmatched kernel name once, in the order first seen."""
+    if "Kernel_Name" not in unmatched_rows.columns:
+        return []
+    return list(dict.fromkeys(str(name) for name in unmatched_rows["Kernel_Name"]))
+
+
 def _group_kernels_onto_markers(joined_df: pd.DataFrame) -> pd.DataFrame:
     """Collect Kernel_Names for each marker identity in one pass row."""
     if joined_df.empty:
@@ -1651,7 +1401,7 @@ def process_ml_api_trace_output(
         return
 
     workload.ml_api_trace_pairs = [
-        schema.MlApiTracePair(
+        MlApiTracePair(
             marker_df=_load_marker_trace_dataframe(marker_path),
             counter_path=counter_path,
         )
@@ -1672,9 +1422,12 @@ def _build_ml_api_call_trees(workload: schema.Workload) -> None:
     workload.unmatched_kernel_frames = unmatched_kernel_frames
     nonempty_unmatched = [frame for frame in unmatched_kernel_frames if not frame.empty]
     if nonempty_unmatched:
+        unmatched_rows = pd.concat(nonempty_unmatched, ignore_index=True)
         _record_ml_api_trace_error(
             None,
-            UnaccountedKernelError(pd.concat(nonempty_unmatched, ignore_index=True)),
+            UnaccountedKernelError(
+                len(unmatched_rows), _unmatched_kernel_names(unmatched_rows)
+            ),
         )
     for pair in workload.ml_api_trace_pairs:
         marker_rows = pair.joined_df[pair.joined_df["Function"].notna()].copy()

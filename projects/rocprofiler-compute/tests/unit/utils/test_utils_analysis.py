@@ -13,23 +13,22 @@ import pandas as pd
 import pytest
 
 import utils.utils_analysis as utils_analysis
-from utils import csv_compression, schema
-from utils.ml_api_trace_errors import (
+from ml_api_tracing.analyze.definitions import CallTreeNode, KernelStats, NodeRollup
+from ml_api_tracing.analyze.errors import (
     KernelSequenceLengthMismatchError,
+    MarkerNotNestedError,
     MissingSourceLocationError,
     OverlappingMarkerRangeError,
+    UnaccountedKernelError,
     UncorrelatedLauncherIntervalError,
 )
+from ml_api_tracing.marker_format import parse_marker_function
+from utils import csv_compression, schema
 from utils.utils_analysis import (
     COUNTER_RESULTS_COLUMNS,
-    CallTreeNode,
-    KernelStats,
-    NodeRollup,
     assign_native_ids,
     attach_unlocated_trees_by_launcher_thread,
-    bind_operator_patterns,
     build_operator_summary,
-    check_backends_traced,
     copy_matched_operator_subtree,
     filter_forest_by_backends,
     find_native_artifacts,
@@ -38,14 +37,10 @@ from utils.utils_analysis import (
     join_native_counters,
     nest_marker_intervals,
     number_gpus_by_node,
-    parse_marker_function,
     process_ml_api_trace_output,
     process_rocpd_csv,
     rollup_node_stats,
-    split_backend_prefix,
     split_counters_by_pass,
-    split_operator_args,
-    traced_frameworks_from_config,
 )
 
 ALL_NATIVE_KINDS = ("counters", "dispatch", "kernel_symbols", "agents")
@@ -956,27 +951,6 @@ def test_impute_counters_iteration_multiplex(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_kernel_stats_defaults_min_max_to_none():
-    stats = KernelStats()
-    assert stats.min_duration_ns is None
-    assert stats.max_duration_ns is None
-
-
-def test_call_tree_node_defaults_dispatch_stats_to_none():
-    node = CallTreeNode(name="x")
-    assert node.min_dispatch_ns is None
-    assert node.max_dispatch_ns is None
-    assert node.mean_dispatch_ns is None
-
-
-def test_call_tree_node_call_count_is_property_of_invocation_ids():
-    node = CallTreeNode(name="x")
-    assert node.call_count == 0
-    node.invocation_ids.add("ctx1")
-    node.invocation_ids.add("ctx2")
-    assert node.call_count == 2
-
-
 def test_fold_identical_sibling_subtrees_empty():
     assert fold_identical_sibling_subtrees([]) == []
 
@@ -1121,94 +1095,6 @@ def test_filter_forest_by_backends_user_keeps_the_whole_region():
     assert filter_forest_by_backends(forest, []) is forest
 
 
-@pytest.mark.parametrize(
-    "profiling_config, expected",
-    [
-        ({}, []),
-        ({"trace_ml_api": None}, []),
-        ({"trace_ml_api": ["torch", "triton"]}, ["torch", "triton"]),
-    ],
-)
-def test_traced_frameworks_from_config(profiling_config, expected):
-    assert traced_frameworks_from_config(profiling_config) == expected
-
-
-def test_check_backends_traced_accepts_user_regions():
-    check_backends_traced(["torch", "user"], ["torch"])
-
-
-@pytest.mark.parametrize(
-    "backends, traced_frameworks, message",
-    [
-        pytest.param(["triton"], ["torch"], "--trace-ml-api triton", id="untraced"),
-        pytest.param([], [], "Profile again with --trace-ml-api", id="no_trace"),
-    ],
-)
-def test_check_backends_traced_rejects(backends, traced_frameworks, message):
-    with pytest.raises(ValueError, match=message):
-        check_backends_traced(backends, traced_frameworks)
-
-
-@pytest.mark.parametrize(
-    "pattern, expected",
-    [
-        ("torch:*conv*", ("torch", "*conv*")),
-        ("torch:*/aten::addmm", ("torch", "*/aten::addmm")),
-        ("*/aten::addmm", (None, "*/aten::addmm")),
-        ("*relu*", (None, "*relu*")),
-        ("user:", ("user", "**")),
-    ],
-)
-def test_split_backend_prefix(pattern, expected):
-    assert split_backend_prefix(pattern) == expected
-
-
-@pytest.mark.parametrize(
-    "patterns, traced_frameworks, expected",
-    [
-        pytest.param(
-            ["torch:*conv*", "*relu*", "triton:*matmul*"],
-            ["torch", "triton"],
-            {"torch": ["*conv*", "*relu*"], "triton": ["*matmul*"]},
-            id="prefix_carries_forward",
-        ),
-        pytest.param(
-            ["*relu*"],
-            ["torch"],
-            {"torch": ["*relu*"], "user": ["*relu*"]},
-            id="no_prefix_matches_traced_and_user",
-        ),
-        pytest.param(
-            [],
-            ["triton"],
-            {"triton": ["**"], "user": ["**"]},
-            id="no_patterns_match_everything",
-        ),
-        pytest.param(
-            ["user:*UserDefined*"],
-            ["torch"],
-            {"user": ["*UserDefined*"]},
-            id="user_prefix",
-        ),
-    ],
-)
-def test_bind_operator_patterns(patterns, traced_frameworks, expected):
-    assert bind_operator_patterns(patterns, traced_frameworks) == expected
-
-
-@pytest.mark.parametrize(
-    "patterns, traced_frameworks, message",
-    [
-        pytest.param(["toch:*relu*"], ["torch"], "prefix 'toch'", id="unknown"),
-        pytest.param(["triton:*mm*"], ["torch"], "api triton", id="untraced"),
-        pytest.param(["*relu*"], [], "Profile again", id="no_trace"),
-    ],
-)
-def test_bind_operator_patterns_rejects(patterns, traced_frameworks, message):
-    with pytest.raises(ValueError, match=message):
-        bind_operator_patterns(patterns, traced_frameworks)
-
-
 def test_kernel_stats_length_mismatch_records_error():
     row = SimpleNamespace(
         Operator_Name="aten::addmm",
@@ -1220,17 +1106,6 @@ def test_kernel_stats_length_mismatch_records_error():
     kernels = utils_analysis._kernel_stats_from_marker_row(row, errors)
     assert kernels == {}
     assert any(isinstance(err, KernelSequenceLengthMismatchError) for err in errors)
-
-
-def test_split_operator_args_respects_nested_commas():
-    tokens = split_operator_args("(self=float32[2, 2], other=(1, 2), name='a,b')")
-    assert tokens == ["self=float32[2, 2]", "other=(1, 2)", "name='a,b'"]
-
-
-def test_split_operator_args_empty_blob():
-    assert split_operator_args("") == []
-    assert split_operator_args("()") == []
-    assert split_operator_args("  (  )  ") == []
 
 
 def test_format_operator_args_caps_item_count():
@@ -1249,16 +1124,6 @@ def test_format_operator_args_caps_length():
 def test_format_operator_args_empty_blob():
     assert format_operator_args("") == ""
     assert format_operator_args("()") == ""
-
-
-def test_args_variants_orders_by_call_count():
-    node = CallTreeNode(name="aten::mm")
-    node.args_invocations["(self=float32[2x2])"] = {"1"}
-    node.args_invocations["(self=float32[4x4])"] = {"2", "3"}
-    assert node.args_variants == [
-        ("(self=float32[4x4])", 2),
-        ("(self=float32[2x2])", 1),
-    ]
 
 
 def test_fold_identical_sibling_subtrees_merges_args_variants():
@@ -2948,68 +2813,6 @@ def test_assign_native_ids_numbers_dispatches_in_launch_order():
     assert numbered["Counter_Value"].tolist() == [101, 102, 201, 202]
 
 
-def test_parse_marker_function_aten_addmm_n_a():
-    parsed = parse_marker_function(
-        "aten::addmm:n/a|seqNr=1|tid=1|ftid=0|scope=FUNCTION|args=()|torch"
-    )
-    assert parsed["Operator_Name"] == "aten::addmm"
-    assert parsed["File_Name"] == ""
-    assert parsed["Line_Number"] is None
-    assert parsed["Backend"] == "torch"
-    assert parsed["launcher_thread_id"] == ""
-    assert parsed["args"] == "()"
-
-
-def test_parse_marker_function_autograd_keeps_inner_colon_and_space():
-    parsed = parse_marker_function(
-        "autograd::engine::evaluate_function: SumBackward0:n/a"
-        "|seqNr=n/a|tid=2|ftid=0|scope=FUNCTION|args=n/a|torch"
-    )
-    assert (
-        parsed["Operator_Name"] == "autograd::engine::evaluate_function: SumBackward0"
-    )
-    assert parsed["File_Name"] == ""
-    assert parsed["Line_Number"] is None
-
-
-def test_parse_marker_function_linear_forward_file_and_line():
-    parsed = parse_marker_function(
-        "nn.Module.Linear.forward:simple_torch_code.py:19"
-        "|seqNr=n/a|tid=n/a|ftid=n/a|scope=n/a|args=()|torch"
-    )
-    assert parsed["Operator_Name"] == "nn.Module.Linear.forward"
-    assert parsed["File_Name"] == "simple_torch_code.py"
-    assert parsed["Line_Number"] == 19
-
-
-def test_parse_marker_function_triton_backend_and_location():
-    parsed = parse_marker_function(
-        "triton.JITFunction.rmsnorm_kernel:llama_triton_layer.py:381"
-        "|seqNr=n/a|tid=n/a|ftid=n/a|scope=n/a|args=n/a|triton"
-    )
-    assert parsed["Backend"] == "triton"
-    assert parsed["File_Name"] == "llama_triton_layer.py"
-    assert parsed["Line_Number"] == 381
-
-
-def test_parse_marker_function_user_range_without_keys():
-    parsed = parse_marker_function("training_loop")
-    assert parsed["Operator_Name"] == "training_loop"
-    assert parsed["File_Name"] == ""
-    assert parsed["Line_Number"] is None
-    assert parsed["Backend"] == "user"
-
-
-def test_parse_marker_function_decodes_name_and_args():
-    parsed = parse_marker_function(
-        "aten::foo%2Fbar%25baz:n/a"
-        "|seqNr=1|tid=1|ftid=0|scope=FUNCTION"
-        "|args=a%7Cb%3Bc%0Dd%0Ae%25f|torch"
-    )
-    assert parsed["Operator_Name"] == "aten::foo/bar%baz"
-    assert parsed["args"] == "a|b;c\rd\ne%f"
-
-
 def test_stacked_marker_wire_exits(monkeypatch):
     messages = record_console_error_and_exit(monkeypatch)
     stacked = pd.DataFrame({
@@ -3332,6 +3135,20 @@ def test_process_two_dispatches_same_marker_keep_both_kernel_names(tmp_path):
     names = list(workload.ml_api_trace_df["Kernel_Names"].iloc[0])
     assert names == ["kernel_a", "kernel_b"]
     assert set(workload.ml_api_call_trees["1"][0].kernels) == {"kernel_a", "kernel_b"}
+
+
+def test_record_ml_api_trace_error_raises_fatal_and_warns_coverage(monkeypatch):
+    warnings = []
+    monkeypatch.setattr(
+        utils_analysis, "console_warning", lambda *args: warnings.append(args)
+    )
+    with pytest.raises(MarkerNotNestedError):
+        utils_analysis._record_ml_api_trace_error(
+            None, MarkerNotNestedError("aten::addmm", "1", 1.5)
+        )
+    utils_analysis._record_ml_api_trace_error(None, UnaccountedKernelError(1, ["k"]))
+    assert len(warnings) == 1
+    assert "1 unmatched dispatches; Kernel_Names: k" in warnings[0][1]
 
 
 def test_process_unmatched_kernel_warns_and_continues(tmp_path, monkeypatch):

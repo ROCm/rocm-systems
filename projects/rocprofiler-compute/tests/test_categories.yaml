@@ -24,6 +24,12 @@ test_categories:
       - test_argparser
       - test_utils_common
       - test_utils_analysis
+      - test_ml_api_tracing_marker_format
+      - test_ml_api_tracing_definitions
+      - test_ml_api_tracing_operator_patterns
+      - test_ml_api_tracing_trace_selection
+      - test_ml_api_tracing_stdlib_imports
+      - test_ml_api_tracing_errors
       - test_utils_profile
       - test_common
       - test_amdsmi_interface
@@ -140,6 +146,12 @@ test_categories:
       - test_mi_gpu_spec
       - test_utils_common
       - test_utils_analysis
+      - test_ml_api_tracing_marker_format
+      - test_ml_api_tracing_definitions
+      - test_ml_api_tracing_operator_patterns
+      - test_ml_api_tracing_trace_selection
+      - test_ml_api_tracing_stdlib_imports
+      - test_ml_api_tracing_errors
       - test_utils_profile
       - test_common
       - test_amdsmi_interface
@@ -274,6 +286,12 @@ test_categories:
       - test_mi_gpu_spec
       - test_utils_common
       - test_utils_analysis
+      - test_ml_api_tracing_marker_format
+      - test_ml_api_tracing_definitions
+      - test_ml_api_tracing_operator_patterns
+      - test_ml_api_tracing_trace_selection
+      - test_ml_api_tracing_stdlib_imports
+      - test_ml_api_tracing_errors
       - test_utils_profile
       - test_common
       - test_amdsmi_interface
@@ -408,6 +426,12 @@ test_categories:
       - test_mi_gpu_spec
       - test_utils_common
       - test_utils_analysis
+      - test_ml_api_tracing_marker_format
+      - test_ml_api_tracing_definitions
+      - test_ml_api_tracing_operator_patterns
+      - test_ml_api_tracing_trace_selection
+      - test_ml_api_tracing_stdlib_imports
+      - test_ml_api_tracing_errors
       - test_utils_profile
       - test_common
       - test_amdsmi_interface
