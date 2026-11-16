@@ -19,6 +19,7 @@
 #include <fstream>
 #include <iterator>
 #include <optional>
+#include <tuple>
 
 namespace rocjitsu::isa_diff {
 namespace {
@@ -43,9 +44,15 @@ struct ElfKernelSymbol {
   uint64_t size = 0;
 };
 
+/// Inline-asm markers (symbols in .text) and the record section the LLVM plugin wrote.
+struct ElfInlineAsm {
+  std::vector<ElfKernelSymbol> markers;
+  std::string records;
+};
+
 bool scan_elf(std::span<const uint8_t> image, ElfText &text, std::vector<ElfKernelSymbol> &funcs,
               std::vector<std::pair<uint64_t, uint64_t>> &notes,
-              std::vector<TextRelocation> &relocs, std::string &error) {
+              std::vector<TextRelocation> &relocs, ElfInlineAsm &inline_asm, std::string &error) {
   Elf64_Ehdr eh{};
   if (!read_struct(image, 0, eh) || std::memcmp(eh.e_ident, ELFMAG, SELFMAG) != 0 ||
       eh.e_ident[EI_CLASS] != ELFCLASS64) {
@@ -79,6 +86,10 @@ bool scan_elf(std::span<const uint8_t> image, ElfText &text, std::vector<ElfKern
     const Elf64_Shdr &sh = sections[i];
     if (sh.sh_type == SHT_NOTE)
       notes.emplace_back(sh.sh_offset, sh.sh_size);
+    if (section_name(sh) == kInlineAsmSection && sh.sh_type == SHT_PROGBITS &&
+        sh.sh_offset <= image.size() && image.size() - sh.sh_offset >= sh.sh_size)
+      inline_asm.records.assign(reinterpret_cast<const char *>(image.data() + sh.sh_offset),
+                                sh.sh_size);
     if (section_name(sh) == ".text") {
       if (have_text) {
         error = "multiple .text sections are not supported in P0";
@@ -106,14 +117,17 @@ bool scan_elf(std::span<const uint8_t> image, ElfText &text, std::vector<ElfKern
       Elf64_Sym sym{};
       if (!read_struct(image, sh.sh_offset + i * sizeof(Elf64_Sym), sym))
         break;
-      if (ELF64_ST_TYPE(sym.st_info) != STT_FUNC || sym.st_shndx != text.index)
+      if (sym.st_shndx != text.index)
         continue;
       const uint64_t off = strtab.sh_offset + sym.st_name;
       if (off >= image.size())
         continue;
       const char *begin = reinterpret_cast<const char *>(image.data() + off);
-      funcs.push_back(
-          {std::string(begin, strnlen(begin, image.size() - off)), sym.st_value, sym.st_size});
+      std::string name(begin, strnlen(begin, image.size() - off));
+      if (name.starts_with(kInlineAsmMarkerPrefix))
+        inline_asm.markers.push_back({std::move(name), sym.st_value, 0});
+      else if (ELF64_ST_TYPE(sym.st_info) == STT_FUNC)
+        funcs.push_back({std::move(name), sym.st_value, sym.st_size});
     }
   }
   // Relocations that patch .text: a static section aimed at .text (sh_info), or any
@@ -205,6 +219,59 @@ void flatten_metadata(const amdhsa::MetadataValue &v, const std::string &prefix,
   }
 }
 
+/// Attach the inline-asm blocks inside the kernel range. The record section holds one
+/// NUL-terminated record per block: "<marker>\t<before_label 0|1>\t<text>".
+bool read_inline_asm(const ElfInlineAsm &info, uint64_t text_vaddr, Artifact &out,
+                     std::string &error) {
+  std::map<std::string, std::pair<bool, std::string>> records;
+  size_t pos = 0;
+  while (pos < info.records.size()) {
+    size_t end = info.records.find('\0', pos);
+    if (end == std::string::npos)
+      end = info.records.size();
+    const std::string rec = info.records.substr(pos, end - pos);
+    pos = end + 1;
+    if (rec.empty())
+      continue;
+    const size_t t1 = rec.find('\t');
+    const size_t t2 = t1 == std::string::npos ? t1 : rec.find('\t', t1 + 1);
+    if (t2 == std::string::npos) {
+      error = "malformed inline-asm record '" + rec + "'";
+      return false;
+    }
+    records[rec.substr(0, t1)] = {rec.substr(t1 + 1, t2 - t1 - 1) == "1", rec.substr(t2 + 1)};
+  }
+  // Address order; blocks at one address (nothing assembled between them) keep their source
+  // order, which the marker's sequence number records.
+  std::vector<std::tuple<uint64_t, uint64_t, InlineAsmBlock>> found;
+  for (const auto &m : info.markers) {
+    if (m.value < text_vaddr)
+      continue;
+    const uint64_t off = m.value - text_vaddr;
+    if (off < out.kernel_begin || off >= out.kernel_end)
+      continue;
+    auto it = records.find(m.name);
+    if (it == records.end()) {
+      error = "inline-asm marker '" + m.name + "' has no record";
+      return false;
+    }
+    uint64_t seq = 0;
+    const std::string digits = m.name.substr(kInlineAsmMarkerPrefix.size());
+    if (digits.empty() || digits.find_first_not_of("0123456789") != std::string::npos) {
+      error = "malformed inline-asm marker '" + m.name + "'";
+      return false;
+    }
+    seq = std::stoull(digits);
+    found.emplace_back(off, seq, InlineAsmBlock{off, it->second.second, it->second.first});
+  }
+  std::sort(found.begin(), found.end(), [](const auto &a, const auto &b) {
+    return std::tie(std::get<0>(a), std::get<1>(a)) < std::tie(std::get<0>(b), std::get<1>(b));
+  });
+  for (auto &f : found)
+    out.inline_asm.push_back(std::move(std::get<2>(f)));
+  return true;
+}
+
 /// Parse the AMDHSA metadata note and keep this kernel's map plus the global fields.
 void read_metadata(std::span<const uint8_t> image, const std::string &kernel, Artifact &out) {
   std::string error;
@@ -284,7 +351,8 @@ bool artifact_from_code_object(std::span<const uint8_t> image, const std::string
   std::vector<ElfKernelSymbol> funcs;
   std::vector<std::pair<uint64_t, uint64_t>> notes;
   std::vector<TextRelocation> relocs;
-  if (!scan_elf(image, text, funcs, notes, relocs, error))
+  ElfInlineAsm asm_info;
+  if (!scan_elf(image, text, funcs, notes, relocs, asm_info, error))
     return false;
   const auto kernels = scan_kernel_descriptors(image, text.offset, text.size, text.index);
   const KernelDescriptorInfo *chosen = nullptr;
@@ -297,20 +365,35 @@ bool artifact_from_code_object(std::span<const uint8_t> image, const std::string
       chosen = &k;
     }
   }
+  // Without a descriptor, a function symbol is a callable function: the named one, or the
+  // only one when no name is given.
+  const ElfKernelSymbol *callable = nullptr;
   if (!chosen) {
+    for (const auto &f : funcs) {
+      if (f.size == 0 || !(kernel.empty() || f.name == kernel))
+        continue;
+      if (callable && kernel.empty()) {
+        error = "code object has several functions and no kernel; pass --kernel";
+        return false;
+      }
+      callable = &f;
+    }
+  }
+  if (!chosen && !callable) {
     error = kernel.empty() ? "code object has no kernel descriptor"
-                           : "kernel '" + kernel + "' not found";
+                           : "kernel or function '" + kernel + "' not found";
     return false;
   }
-  const ElfKernelSymbol *sym = nullptr;
+  const std::string name = chosen ? chosen->kernel_name : callable->name;
+  const ElfKernelSymbol *sym = callable;
   for (const auto &f : funcs)
-    if (f.name == chosen->kernel_name)
+    if (!sym && f.name == name)
       sym = &f;
   if (!sym || sym->size == 0) {
-    error = "kernel symbol '" + chosen->kernel_name + "' is missing or has st_size 0";
+    error = "kernel symbol '" + name + "' is missing or has st_size 0";
     return false;
   }
-  if (sym->value < text.vaddr || sym->value - text.vaddr != chosen->entry_text_offset) {
+  if (sym->value < text.vaddr || (chosen && sym->value - text.vaddr != chosen->entry_text_offset)) {
     error = "kernel symbol and descriptor disagree on the entry";
     return false;
   }
@@ -321,15 +404,20 @@ bool artifact_from_code_object(std::span<const uint8_t> image, const std::string
   out.text.assign(image.begin() + static_cast<std::ptrdiff_t>(text.offset),
                   image.begin() + static_cast<std::ptrdiff_t>(text.offset + text.size));
   out.text_vaddr = text.vaddr;
-  out.kernel_begin = chosen->entry_text_offset;
-  out.kernel_end = chosen->entry_text_offset + sym->size;
+  out.kernel_begin = sym->value - text.vaddr;
+  out.kernel_end = out.kernel_begin + sym->size;
   if (out.kernel_end > text.size) {
     error = "kernel symbol extends past .text";
     return false;
   }
-  out.kernel_name = chosen->kernel_name;
-  out.descriptor.resize(sizeof(chosen->descriptor));
-  std::memcpy(out.descriptor.data(), &chosen->descriptor, sizeof(chosen->descriptor));
+  out.kernel_name = name;
+  out.callable = chosen == nullptr;
+  if (chosen) {
+    out.descriptor.resize(sizeof(chosen->descriptor));
+    std::memcpy(out.descriptor.data(), &chosen->descriptor, sizeof(chosen->descriptor));
+  }
+  if (!read_inline_asm(asm_info, text.vaddr, out, error))
+    return false;
   util::Sha256 notes_sha;
   for (const auto &[off, size] : notes)
     if (off <= image.size() && image.size() - off >= size)
@@ -339,6 +427,10 @@ bool artifact_from_code_object(std::span<const uint8_t> image, const std::string
   out.text_relocations = std::move(relocs);
   read_metadata(image, out.kernel_name, out);
   return true;
+}
+
+uint32_t initial_mode(const Artifact &artifact) {
+  return artifact.callable ? artifact.function_mode : initial_mode(artifact.descriptor);
 }
 
 uint32_t initial_mode(const std::vector<uint8_t> &descriptor) {

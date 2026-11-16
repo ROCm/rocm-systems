@@ -15,6 +15,17 @@ namespace rocjitsu::isa_diff {
 namespace {
 
 std::string key_of(const InstRef &ref) {
+  if (ref.inline_asm >= 0) {
+    // An inline-asm block matches only the block with the same position in the other
+    // function's sequence and the same text: a renamed operand makes it a change, and a
+    // matched pair receives the same values. Machine-word keys have a length that is a
+    // multiple of 4; this one never does.
+    std::string key =
+        std::string(1, '\0') + "asm#" + std::to_string(ref.inline_asm) + "\n" + ref.asm_text;
+    if (key.size() % 4 == 0)
+      key.push_back('\0');
+    return key;
+  }
   std::vector<uint32_t> words = ref.words;
   if (ref.inst && (ref.inst->flags() & (BRANCH | COND_BRANCH)) &&
       !(ref.inst->flags() & (INDIRECT_BRANCH | INDIRECT_CALL)) && words.size() == 1)
@@ -435,6 +446,37 @@ DiffResult diff_kernels(const KernelModel &old_model, const KernelModel &new_mod
                        "liveness is widened to everything there, and single entry of regions "
                        "cannot be checked",
                        true});
+  // Inline-asm blocks are matched by their position in each function's sequence. That is
+  // only meaningful when both sequences have the same length and operand shapes.
+  const auto &oasm = old_model.artifact().inline_asm;
+  const auto &nasm = new_model.artifact().inline_asm;
+  if (oasm.size() != nasm.size()) {
+    r.notes.push_back({ChangeKind::Unexplained,
+                       "inline asm blocks: old has " + std::to_string(oasm.size()) + ", new has " +
+                           std::to_string(nasm.size()) + "; blocks cannot be matched",
+                       true});
+  } else {
+    for (size_t k = 0; k < oasm.size(); ++k)
+      if (inline_asm_shape(oasm[k].text) != inline_asm_shape(nasm[k].text)) {
+        r.notes.push_back({ChangeKind::Unexplained,
+                           "inline asm block " + std::to_string(k) + " differs in shape: '" +
+                               oasm[k].text + "' vs '" + nasm[k].text + "'",
+                           true});
+        break;
+      }
+  }
+  if (!oasm.empty() || !nasm.empty()) {
+    for (const auto &[m, side] : {std::pair{&old_model, "old"}, {&new_model, "new"}})
+      for (const InstRef &ref : m->insts())
+        if (ref.inline_asm >= 0 && ref.fx.unknown_effect) {
+          r.notes.push_back({ChangeKind::Unexplained,
+                             std::string(side) + " inline asm block " +
+                                 std::to_string(ref.inline_asm) + " has unknown effects (" +
+                                 ref.fx.reject_reason + ")",
+                             true});
+          break;
+        }
+  }
   return r;
 }
 

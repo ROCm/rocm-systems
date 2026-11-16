@@ -204,6 +204,57 @@
         },
         "metadata_parsed": {
           "type": "boolean"
+        },
+        "callable_function": {
+          "type": "object",
+          "description": "Present for a callable function (an STT_FUNC symbol without a kernel descriptor): entered by a call, left by s_setpc_b64 s[30:31]. At a return, the caller observes v0..v{return_vgprs-1}, the callee-saved SGPRs/VGPRs and EXEC.",
+          "required": [
+            "calling_convention",
+            "return",
+            "return_vgprs",
+            "entry_mode"
+          ],
+          "properties": {
+            "calling_convention": {
+              "type": "string"
+            },
+            "return": {
+              "type": "string"
+            },
+            "return_vgprs": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 32
+            },
+            "entry_mode": {
+              "$ref": "#/$defs/hex32"
+            }
+          },
+          "additionalProperties": false
+        },
+        "inline_asm": {
+          "type": "array",
+          "description": "Comment-only inline-asm blocks of a .s input inside the kernel/function, in address order (marked by the LLVM plugin).",
+          "items": {
+            "type": "object",
+            "required": [
+              "offset",
+              "text"
+            ],
+            "properties": {
+              "offset": {
+                "$ref": "#/$defs/hex"
+              },
+              "text": {
+                "type": "string"
+              },
+              "before_label": {
+                "type": "boolean",
+                "description": "A label follows: the block ends the preceding code."
+              }
+            },
+            "additionalProperties": false
+          }
         }
       },
       "additionalProperties": false
@@ -332,6 +383,10 @@
         },
         "compile_ns": {
           "$ref": "#/$defs/count"
+        },
+        "inline_asm_blocks_marked": {
+          "$ref": "#/$defs/count",
+          "description": "Comment-only inline-asm blocks marked in the assembled copy of the source."
         }
       },
       "additionalProperties": false
@@ -391,11 +446,28 @@
           "items": {
             "$ref": "#/$defs/hex32"
           },
-          "minItems": 1,
+          "minItems": 0,
           "maxItems": 4
         },
         "asm": {
           "type": "string"
+        },
+        "inline_asm": {
+          "type": "object",
+          "description": "A comment-only inline-asm block (no words): its index in the function's sequence of blocks, which pairs it with the other side's block, and its text.",
+          "required": [
+            "index",
+            "text"
+          ],
+          "properties": {
+            "index": {
+              "$ref": "#/$defs/count"
+            },
+            "text": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
         }
       },
       "additionalProperties": false
@@ -635,6 +707,10 @@
         "downstream_memory_reads": {
           "type": "boolean",
           "description": "Code after the region loads from memory, so a stored-byte difference can be compensated downstream. Absent when false."
+        },
+        "inline_asm": {
+          "type": "boolean",
+          "description": "The region contains comment-only inline-asm blocks: a def block writes per-case values (lanes in EXEC), equal for the old and new block with the same index; what use blocks observe is compared. Absent when false."
         }
       },
       "additionalProperties": false,
@@ -1717,6 +1793,42 @@
               },
               "additionalProperties": {
                 "$ref": "#/$defs/hex32"
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        "inline_asm": {
+          "type": "object",
+          "description": "Inline asm: the seed of def values, and what use blocks observed in execution order (per used 32-bit piece; VGPR pieces are 64 lanes with lanes outside EXEC zeroed, followed by EXEC lo/hi).",
+          "required": [
+            "seed",
+            "uses"
+          ],
+          "properties": {
+            "seed": {
+              "$ref": "#/$defs/hex"
+            },
+            "uses": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "block",
+                  "values"
+                ],
+                "properties": {
+                  "block": {
+                    "$ref": "#/$defs/count"
+                  },
+                  "values": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/$defs/hex32"
+                    }
+                  }
+                },
+                "additionalProperties": false
               }
             }
           },

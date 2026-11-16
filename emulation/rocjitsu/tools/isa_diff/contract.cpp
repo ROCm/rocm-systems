@@ -152,6 +152,8 @@ Json RegionContract::to_json() const {
     j.set("memory_reads", true);
   if (memory_writes)
     j.set("memory_writes", true);
+  if (inline_asm)
+    j.set("inline_asm", true);
   if (downstream_memory_reads)
     j.set("downstream_memory_reads", true);
   j.set("mode_old", hex32(mode_old));
@@ -260,6 +262,7 @@ std::optional<RegionContract> RegionContract::from_json(const Json &j, std::stri
   c.memory_reads = j["memory_reads"].as_bool();
   c.memory_writes = j["memory_writes"].as_bool();
   c.downstream_memory_reads = j["downstream_memory_reads"].as_bool();
+  c.inline_asm = j["inline_asm"].as_bool();
   for (const char *key : {"mode_old", "mode_new"}) {
     if (!j.has(key))
       continue;

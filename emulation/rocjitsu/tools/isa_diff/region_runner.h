@@ -16,10 +16,12 @@
 /// A failure is classified and never treated as a no-op or a success.
 #pragma once
 
+#include "effects.h"
 #include "machine_state.h"
 #include "region.h"
 
 #include <memory>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -148,6 +150,18 @@ private:
   uint64_t entry_pc_ = 0;
   uint32_t vgpr_alloc_ = 0;
   uint64_t total_executed_ = 0;
+  /// Inline-asm blocks by region index (empty for machine instructions), and per case the
+  /// seed of their def values and what their uses observed.
+  std::vector<std::optional<InlineAsmEffect>> asm_;
+  std::vector<uint32_t> asm_block_;
+  uint64_t asm_seed_ = 0;
+  std::vector<AsmUse> asm_uses_;
+  /// Run inline-asm block @p i: record its uses, then write its defs.
+  RunOutcome run_inline_asm(size_t i);
 };
+
+/// Value a matched inline-asm `def` writes: piece @p slot of block @p block, lane @p lane
+/// (0 for scalars), for the case's inline-asm seed. Half catalog values, half random.
+[[nodiscard]] uint32_t inline_asm_word(uint64_t seed, uint32_t block, uint32_t slot, uint32_t lane);
 
 } // namespace rocjitsu::isa_diff

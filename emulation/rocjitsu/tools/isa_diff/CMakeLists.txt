@@ -47,6 +47,14 @@ add_executable(rj_isa_diff rj_isa_diff_main.cpp)
 target_link_libraries(rj_isa_diff PRIVATE rj_isa_diff_core rj_isa_diff_llvm)
 rj_configure_target(rj_isa_diff TOOL)
 
+# One command for an LLVM change: the driver that tests the AMDGPU lit tests a patch
+# updates (llvm/rj_isa_diff_pr.py) sits next to rj_isa_diff, which it runs.
+configure_file(
+    llvm/rj_isa_diff_pr.py
+    ${CMAKE_CURRENT_BINARY_DIR}/rj_isa_diff_pr
+    COPYONLY
+)
+
 if(BUILD_TESTING)
     include(GoogleTest)
     add_executable(

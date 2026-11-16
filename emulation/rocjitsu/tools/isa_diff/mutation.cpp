@@ -32,6 +32,11 @@ std::optional<RegionPair> make_synthetic_mutation(const RegionPair &base, const 
   }
   LocSet writes, wide;
   for (auto &inst : side.insts) {
+    if (inst.inline_asm >= 0) {
+      const Effects fx = classify_inline_asm(inst.asm_text);
+      writes |= fx.writes;
+      continue;
+    }
     std::vector<uint32_t> window = inst.words;
     window.resize(window.size() + 3, 0);
     util::StringDiagnostic diag;

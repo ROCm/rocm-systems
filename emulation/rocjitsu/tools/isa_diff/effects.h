@@ -65,6 +65,36 @@ struct Effects {
 /// @brief Classify one decoded instruction.
 [[nodiscard]] Effects classify(const Instruction &inst);
 
+/// One 32-bit piece of an inline-asm register operand: a tracked scalar location or a VGPR.
+struct AsmSlot {
+  bool vgpr = false;
+  unsigned index = 0; ///< Loc for scalars, register number for VGPRs.
+  bool operator==(const AsmSlot &) const = default;
+};
+
+/// A comment-only inline-asm block (LLVM `;;#ASMSTART` ... `;;#ASMEND` around lines such as
+/// "; def v[0:1]" or "; use s4"). It assembles to nothing; LLVM tests use it as an opaque
+/// producer (`def`) or consumer (`use`) of register values.
+struct InlineAsmEffect {
+  std::vector<AsmSlot> uses; ///< In operand order, one per 32-bit piece.
+  std::vector<AsmSlot> defs;
+  bool opaque = false;    ///< Text not understood: its effects are unknown.
+  bool untracked = false; ///< Names state outside the tracked universe (AGPRs, ...).
+  std::string reason;     ///< Why it is opaque or untracked.
+};
+
+/// @brief Parse a comment-only inline-asm block; lines are separated by '\n'. Lines are
+/// "; def R, R, ..." or "; use R, ..."; any other line that names no register is ignored.
+[[nodiscard]] InlineAsmEffect parse_inline_asm(std::string_view text);
+
+/// @brief Effect summary of a comment-only inline-asm block. A `use` of a VGPR also reads
+/// EXEC (the lanes it observes). Opaque text has unknown effects; AGPR operands are untracked.
+[[nodiscard]] Effects classify_inline_asm(std::string_view text);
+
+/// @brief The block with each register operand reduced to its class and width
+/// ("; def v[0:1]" -> "def v2"): equal on both sides of a correctly matched block.
+[[nodiscard]] std::string inline_asm_shape(std::string_view text);
+
 /// One explicit source operand: the tracked locations it reads, or its constant value.
 struct SourceOperand {
   LocSet locs;                      ///< Empty for constants and untracked state.

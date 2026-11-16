@@ -77,6 +77,10 @@ struct RegionContract {
   bool memory_reads = false, memory_writes = false;
   /// Changed code downstream reads memory: a memory mismatch may be compensated there.
   bool downstream_memory_reads = false;
+  /// The region contains comment-only inline-asm blocks: a `def` block writes values
+  /// drawn per case, equal for the old and new block with the same index; what a `use`
+  /// block observes is compared between the two sides.
+  bool inline_asm = false;
   std::vector<Constraint> constraints;
   std::string exit_mapping = "single fall-through exit after the last region instruction";
   /// Hand-written register correspondence (handoff 3.1), old location -> new location,

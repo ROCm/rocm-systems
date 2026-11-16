@@ -1759,4 +1759,137 @@ TEST(IsaDiffMemory, VectorMemoryCompletesInOrder) {
   EXPECT_EQ(early.regions[0].contract.status, ContractStatus::Unresolved);
 }
 
+// ---------------------------------------------------------------------------
+// Callable functions and comment-only inline asm.
+
+TEST(IsaDiffInlineAsm, DefAndUseCommentsAreParsedIntoSlots) {
+  const InlineAsmEffect d = parse_inline_asm("; def v[0:1]");
+  ASSERT_EQ(d.defs.size(), 2u);
+  EXPECT_TRUE(d.defs[0].vgpr);
+  EXPECT_EQ(d.defs[1].index, 1u);
+  EXPECT_TRUE(d.uses.empty());
+  EXPECT_FALSE(d.opaque);
+
+  const InlineAsmEffect u = parse_inline_asm("; use s[4:5], vcc, scc");
+  ASSERT_EQ(u.uses.size(), 5u);
+  EXPECT_EQ(u.uses[0], (AsmSlot{false, 4}));
+  EXPECT_EQ(u.uses[2], (AsmSlot{false, kLocVccLo}));
+  EXPECT_EQ(u.uses[4], (AsmSlot{false, kLocScc}));
+
+  // Several lines: uses and defs accumulate.
+  const InlineAsmEffect both = parse_inline_asm("; use v3\n; def s7");
+  EXPECT_EQ(both.uses.size(), 1u);
+  EXPECT_EQ(both.defs.size(), 1u);
+
+  EXPECT_TRUE(parse_inline_asm("; def a0").untracked);
+  EXPECT_TRUE(parse_inline_asm("; use alloca0 v1").opaque);
+  EXPECT_TRUE(parse_inline_asm("; frobnicate v1").opaque); // names a register: not ignorable
+  const InlineAsmEffect none = parse_inline_asm("; just a comment");
+  EXPECT_FALSE(none.opaque);
+  EXPECT_TRUE(none.uses.empty() && none.defs.empty());
+  EXPECT_TRUE(parse_inline_asm("v_mov_b32 v0, 0").opaque); // not comment-only
+}
+
+TEST(IsaDiffInlineAsm, EffectsReadExecForVectorOperandsAndShapesIgnoreRenaming) {
+  const Effects use = classify_inline_asm("; use v2");
+  EXPECT_TRUE(use.p0);
+  EXPECT_TRUE(use.vreads.test(2));
+  EXPECT_EQ(use.reads, locs("exec_lo,exec_hi"));
+  EXPECT_TRUE(use.implicit_reads.none());
+
+  const Effects def = classify_inline_asm("; def v[4:5], s9");
+  EXPECT_TRUE(def.vwrites.test(4) && def.vwrites.test(5));
+  EXPECT_EQ(def.writes, locs("s9"));
+  EXPECT_EQ(def.reads, locs("exec_lo,exec_hi")); // lanes outside EXEC keep their value
+
+  const Effects agpr = classify_inline_asm("; def a[0:1]");
+  EXPECT_FALSE(agpr.p0);
+  EXPECT_FALSE(agpr.unknown_effect);
+  const Effects odd = classify_inline_asm("; use v1-2");
+  EXPECT_TRUE(odd.unknown_effect);
+
+  EXPECT_EQ(inline_asm_shape("; def v[0:1]"), inline_asm_shape("; def v[2:3]"));
+  EXPECT_NE(inline_asm_shape("; def v[0:1]"), inline_asm_shape("; def v[0:2]"));
+  EXPECT_NE(inline_asm_shape("; def v0"), inline_asm_shape("; def s0"));
+}
+
+TEST(IsaDiffInlineAsm, ReturnObservablesFollowTheCallingConvention) {
+  const LocSet l = return_observable_locs();
+  EXPECT_TRUE(l.test(30) && l.test(31) && l.test(39) && l.test(48) && l.test(101));
+  EXPECT_FALSE(l.test(0) || l.test(29) || l.test(40) || l.test(47));
+  EXPECT_TRUE(l.test(kLocExecLo) && l.test(kLocExecHi));
+  EXPECT_FALSE(l.test(kLocVccLo) || l.test(kLocM0) || l.test(kLocScc));
+  const VSet v = return_observable_vgprs(2);
+  EXPECT_TRUE(v.test(0) && v.test(1));
+  EXPECT_FALSE(v.test(2) || v.test(39));
+  EXPECT_TRUE(v.test(40) && v.test(47) && v.test(56) && v.test(255));
+  EXPECT_FALSE(v.test(48) || v.test(55));
+  EXPECT_FALSE(return_observable_vgprs(0).test(0));
+}
+
+TEST(IsaDiffInlineAsm, RunnerDefinesActiveLanesAndRecordsUses) {
+  // def s[4:5]; def v1 (lanes in EXEC); use v1, s5.
+  std::vector<RegionInst> insts = {
+      {0x1000, {}, "inline asm: ; def s[4:5]", 0, "; def s[4:5]"},
+      {0x1000, {}, "inline asm: ; def v1", 1, "; def v1"},
+      {0x1000, {}, "inline asm: ; use v1, s5", 2, "; use v1, s5"},
+  };
+  std::string error;
+  auto runner = RegionRunner::create(insts, "asm_runner", error, 8);
+  ASSERT_TRUE(runner) << error;
+  MachineState s;
+  s.frame = runner->baseline_frame();
+  s.resize_vgprs(8);
+  for (unsigned lane = 0; lane < kWaveLanes; ++lane)
+    s.vset(1, lane, 0xabc00000u + lane);
+  s.set(kLocExecLo, 0x0000ffffu); // lanes 0..15
+  s.set(kLocExecHi, 0);
+  s.asm_seed = 0x1234567u;
+  runner->load(s);
+  const RunOutcome out = runner->run(16);
+  ASSERT_EQ(out.status, RunStatus::Ok) << out.detail;
+  EXPECT_EQ(out.executed, 3u);
+  const MachineState f = runner->capture();
+  EXPECT_EQ(f.get(4), inline_asm_word(s.asm_seed, 0, 0, 0));
+  EXPECT_EQ(f.get(5), inline_asm_word(s.asm_seed, 0, 1, 0));
+  EXPECT_EQ(f.vget(1, 3), inline_asm_word(s.asm_seed, 1, 0, 3));
+  EXPECT_EQ(f.vget(1, 40), 0xabc00000u + 40); // outside EXEC: kept
+  ASSERT_EQ(f.asm_uses.size(), 1u);
+  const AsmUse &u = f.asm_uses[0];
+  EXPECT_EQ(u.block, 2u);
+  ASSERT_EQ(u.values.size(), 64u + 1u + 2u); // v1 lanes, s5, EXEC lo/hi
+  EXPECT_EQ(u.values[3], inline_asm_word(s.asm_seed, 1, 0, 3));
+  EXPECT_EQ(u.values[40], 0u); // lanes outside EXEC are not observed
+  EXPECT_EQ(u.values[64], f.get(5));
+  EXPECT_EQ(u.values[65], 0x0000ffffu);
+
+  // The record round-trips through JSON (bundles replay it).
+  auto back = MachineState::from_json(f.to_json(), error);
+  ASSERT_TRUE(back) << error;
+  EXPECT_EQ(back->asm_seed, f.asm_seed);
+  EXPECT_EQ(back->asm_uses, f.asm_uses);
+}
+
+TEST(IsaDiffInlineAsm, RegionInstructionsKeepTheirBlockThroughJson) {
+  RegionPair r;
+  r.id = "r0";
+  r.status = RegionStatus::Ready;
+  r.old_side.insts = {{0x10, {}, "inline asm: ; def v0", 3, "; def v0"},
+                      {0x10, {0xbf800000u}, "s_nop 0", -1, ""}};
+  r.new_side.insts = r.old_side.insts;
+  r.contract.canary = all_locs(); // a valid contract initialises every location
+  std::string error;
+  auto back = RegionPair::from_json(r.to_json(), error);
+  ASSERT_TRUE(back) << error;
+  ASSERT_EQ(back->old_side.insts.size(), 2u);
+  EXPECT_EQ(back->old_side.insts[0].inline_asm, 3);
+  EXPECT_EQ(back->old_side.insts[0].asm_text, "; def v0");
+  EXPECT_TRUE(back->old_side.insts[0].words.empty());
+  EXPECT_EQ(back->old_side.insts[1].inline_asm, -1);
+  // Different asm text, same words: a different prepared region.
+  RegionPair other = r;
+  other.new_side.insts[0].asm_text = "; def v1";
+  EXPECT_NE(compute_prepared_key(r), compute_prepared_key(other));
+}
+
 } // namespace

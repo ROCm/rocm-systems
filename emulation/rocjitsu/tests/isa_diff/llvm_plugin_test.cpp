@@ -5,6 +5,7 @@
 /// @brief LLVM plugin tests: run only when an LLVM toolchain is available at configure time.
 
 #include "case_io.h"
+#include "kernel_model.h"
 #include "llvm_frontend.h"
 
 #include <gtest/gtest.h>
@@ -454,6 +455,179 @@ TEST(IsaDiffLlvm, SideArgumentsThatChangeTheTargetAreRejected) {
   EXPECT_FALSE(
       llvm::compile(tc, dir + "/k.ll", {"-O3"}, {"-mcpu=gfx942"}, dir + "/x", "", a, p, error));
   EXPECT_NE(error.find("-mcpu"), std::string::npos) << error;
+  std::filesystem::remove_all(dir);
+}
+
+// ---------------------------------------------------------------------------
+// Callable functions and comment-only inline asm (LLVM test listings).
+
+TEST(IsaDiffLlvm, CommentOnlyInlineAsmIsMarkedWithItsPosition) {
+  const std::string src = "f:\n"
+                          "\t;;#ASMSTART\n\t; def v[0:1]\n\t;;#ASMEND\n"
+                          "\tv_mov_b32_e32 v4, 0\n"
+                          "\t;;#ASMSTART\n\tv_mov_b32 v1, 0\n\t;;#ASMEND\n" // real code: kept
+                          "\t;;#ASMSTART\n\t; use v2\n\t;;#ASMEND\n"
+                          ".LBB0_2:                                ; %Flow\n"
+                          "\ts_setpc_b64 s[30:31]\n";
+  size_t marked = 0;
+  const std::string out = llvm::mark_inline_asm(src, marked);
+  EXPECT_EQ(marked, 2u);
+  EXPECT_NE(out.find("__rj_isa_diff_asm.0:\n\t;;#ASMSTART\n\t; def v[0:1]"), std::string::npos)
+      << out;
+  EXPECT_NE(out.find(".section\t.rj_isa_diff_inline_asm"), std::string::npos);
+  EXPECT_NE(out.find("\"__rj_isa_diff_asm.0\\t0\\t; def v[0:1]\""), std::string::npos) << out;
+  // The use is followed by a label: it ends the preceding block.
+  EXPECT_NE(out.find("\"__rj_isa_diff_asm.1\\t1\\t; use v2\""), std::string::npos) << out;
+  EXPECT_NE(out.find("v_mov_b32 v1, 0"), std::string::npos);
+  size_t none = 0;
+  EXPECT_EQ(llvm::mark_inline_asm("s_endpgm\n", none), "s_endpgm\n");
+  EXPECT_EQ(none, 0u);
+}
+
+/// A callable function as llc prints it, with inline-asm placeholders: two defs feed a
+/// packed move whose result is stored through the inreg pointer.
+constexpr const char *kShuffleFn = R"(	.text
+	.globl	f
+	.p2align	8
+	.type	f,@function
+f:
+	s_waitcnt vmcnt(0) expcnt(0) lgkmcnt(0)
+	;;#ASMSTART
+	; def DEF0
+	;;#ASMEND
+	v_mov_b32_e32 v4, 0
+	;;#ASMSTART
+	; def DEF1
+	;;#ASMEND
+	s_nop 0
+	v_pk_mov_b32 v[0:1], PKMOV op_sel:[1,0]
+	global_store_dwordx2 v4, v[0:1], s[0:1]
+	s_waitcnt vmcnt(0)
+	s_setpc_b64 s[30:31]
+.Lfunc_end0:
+	.size	f, .Lfunc_end0-f
+)";
+
+/// A function returning a value and passing an intermediate to an inline-asm use.
+constexpr const char *kUseFn = R"(	.text
+	.globl	g
+	.p2align	8
+	.type	g,@function
+g:
+	s_waitcnt vmcnt(0) expcnt(0) lgkmcnt(0)
+	;;#ASMSTART
+	; def TMP_REG
+	;;#ASMEND
+	s_nop 0
+	v_add_u32_e32 TMP_REG, v0, TMP_REG
+	v_mul_lo_u32 v0, TMP_REG, v1
+	;;#ASMSTART
+	; use USE_REG
+	;;#ASMEND
+	EXTRA_INST
+	s_setpc_b64 s[30:31]
+.Lfunc_end0:
+	.size	g, .Lfunc_end0-g
+)";
+
+std::string fill(std::string text, const std::vector<std::pair<std::string, std::string>> &subst) {
+  for (const auto &[from, to] : subst)
+    for (size_t pos; (pos = text.find(from)) != std::string::npos;)
+      text.replace(pos, from.size(), to);
+  return text;
+}
+
+/// Assemble two listings of one function and run the whole pipeline.
+std::string verdict_of(const std::string &dir, const std::string &fn, const std::string &old_s,
+                       const std::string &new_s, unsigned return_vgprs) {
+  const auto tc = toolchain();
+  Artifact a[2];
+  for (int side = 0; side < 2; ++side) {
+    const std::string path = dir + (side ? "/new.s" : "/old.s");
+    EXPECT_TRUE(write_text_file(path, side ? new_s : old_s));
+    llvm::Provenance p;
+    std::string error;
+    EXPECT_TRUE(llvm::assemble(tc, path, dir + (side ? "/new" : "/old"), fn, a[side], p, error))
+        << error;
+    EXPECT_TRUE(a[side].callable);
+    a[side].return_vgprs = return_vgprs;
+  }
+  std::string error;
+  auto data = analyze_artifacts(a[0], a[1], {}, error);
+  EXPECT_TRUE(data) << error;
+  if (!data)
+    return "error";
+  TestOptions opt;
+  opt.cases = 1000;
+  Json report = test_case(*data, opt, "", nullptr);
+  return report["overall"]["test_status"].as_string() + "/" +
+         report["overall"]["contract_status"].as_string();
+}
+
+TEST(IsaDiffLlvm, CallableFunctionWithInlineAsmIsTestedEndToEnd) {
+  const std::string dir = temp_dir("callable");
+  const std::string base =
+      fill(kShuffleFn, {{"DEF0", "v[0:1]"}, {"DEF1", "v[2:3]"}, {"PKMOV", "v[0:1], v[2:3]"}});
+  // The function loads as a callable function; both blocks are found in order, and the
+  // return makes the CFG complete.
+  {
+    const auto tc = toolchain();
+    ASSERT_TRUE(write_text_file(dir + "/f.s", base));
+    Artifact a;
+    llvm::Provenance p;
+    std::string error;
+    ASSERT_TRUE(llvm::assemble(tc, dir + "/f.s", dir + "/f", "f", a, p, error)) << error;
+    EXPECT_TRUE(a.callable);
+    EXPECT_TRUE(a.descriptor.empty());
+    EXPECT_EQ(p.inline_asm_blocks, 2u);
+    ASSERT_EQ(a.inline_asm.size(), 2u);
+    EXPECT_EQ(a.inline_asm[0].text, "; def v[0:1]");
+    EXPECT_EQ(a.inline_asm[1].text, "; def v[2:3]");
+    EXPECT_LT(a.inline_asm[0].offset, a.inline_asm[1].offset);
+    auto model = KernelModel::build(a, error);
+    ASSERT_TRUE(model) << error;
+    EXPECT_TRUE(model->cfg_complete());
+    EXPECT_TRUE(model->blocks().back().returns);
+    size_t pseudo = 0;
+    for (const auto &ref : model->insts())
+      pseudo += ref.inline_asm >= 0;
+    EXPECT_EQ(pseudo, 2u);
+  }
+  // The defs trade registers and the packed move follows: equivalent (void: no return
+  // registers observed).
+  const std::string swapped =
+      fill(kShuffleFn, {{"DEF0", "v[2:3]"}, {"DEF1", "v[0:1]"}, {"PKMOV", "v[2:3], v[0:1]"}});
+  EXPECT_EQ(verdict_of(dir, "f", base, swapped, 0), "NO_MISMATCH_FOUND/ESTABLISHED");
+  // The defs trade registers but the move does not follow: wrong.
+  const std::string wrong =
+      fill(kShuffleFn, {{"DEF0", "v[2:3]"}, {"DEF1", "v[0:1]"}, {"PKMOV", "v[0:1], v[2:3]"}});
+  EXPECT_EQ(verdict_of(dir, "f", base, wrong, 0), "LOCAL_MISMATCH/ESTABLISHED");
+
+  const std::string g =
+      fill(kUseFn, {{"TMP_REG", "v2"}, {"USE_REG", "v2"}, {"EXTRA_INST", "s_nop 0"}});
+  // Renaming the temporary everywhere, its asm use included: equivalent.
+  EXPECT_EQ(verdict_of(
+                dir, "g", g,
+                fill(kUseFn, {{"TMP_REG", "v3"}, {"USE_REG", "v3"}, {"EXTRA_INST", "s_nop 0"}}), 1),
+            "NO_MISMATCH_FOUND/ESTABLISHED");
+  // The asm use reads another register: what it observes differs.
+  EXPECT_EQ(verdict_of(
+                dir, "g", g,
+                fill(kUseFn, {{"TMP_REG", "v2"}, {"USE_REG", "v0"}, {"EXTRA_INST", "s_nop 0"}}), 1),
+            "LOCAL_MISMATCH/ESTABLISHED");
+  // A caller-saved SGPR may be clobbered; a callee-saved one may not.
+  EXPECT_EQ(
+      verdict_of(
+          dir, "g", g,
+          fill(kUseFn, {{"TMP_REG", "v2"}, {"USE_REG", "v2"}, {"EXTRA_INST", "s_mov_b32 s20, 0"}}),
+          1),
+      "NO_MISMATCH_FOUND/ESTABLISHED");
+  EXPECT_EQ(
+      verdict_of(
+          dir, "g", g,
+          fill(kUseFn, {{"TMP_REG", "v2"}, {"USE_REG", "v2"}, {"EXTRA_INST", "s_mov_b32 s34, 0"}}),
+          1),
+      "LOCAL_MISMATCH/ESTABLISHED");
   std::filesystem::remove_all(dir);
 }
 

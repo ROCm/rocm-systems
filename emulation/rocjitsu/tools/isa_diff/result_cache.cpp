@@ -107,6 +107,9 @@ std::string analysis_cache_key(const Artifact &old_artifact, const Artifact &new
     aj.set("kind", a->kind);
     aj.set("kernel", a->kernel_name);
     aj.set("text_vaddr", a->text_vaddr);
+    aj.set("callable", a->callable);
+    aj.set("return_vgprs", static_cast<uint64_t>(a->return_vgprs));
+    aj.set("function_mode", static_cast<uint64_t>(a->function_mode));
     k.set(a == &old_artifact ? "old" : "new", std::move(aj));
   }
   Json o = Json::object();

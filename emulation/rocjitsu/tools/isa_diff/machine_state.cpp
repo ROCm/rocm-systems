@@ -55,6 +55,22 @@ Json MachineState::to_json() const {
     m.set("written", std::move(w));
     j.set("memory", std::move(m));
   }
+  if (asm_seed != 0 || !asm_uses.empty()) {
+    Json a = Json::object();
+    a.set("seed", hex64(asm_seed));
+    Json uses = Json::array();
+    for (const AsmUse &u : asm_uses) {
+      Json uj = Json::object();
+      uj.set("block", static_cast<uint64_t>(u.block));
+      Json vals = Json::array();
+      for (uint32_t v : u.values)
+        vals.push(hex32(v));
+      uj.set("values", std::move(vals));
+      uses.push(std::move(uj));
+    }
+    a.set("uses", std::move(uses));
+    j.set("inline_asm", std::move(a));
+  }
   return j;
 }
 
@@ -109,6 +125,23 @@ std::optional<MachineState> MachineState::from_json(const Json &j, std::string &
       s.mem_init.emplace_back(*a >> 2, static_cast<uint32_t>(*v));
     }
     std::sort(s.mem_init.begin(), s.mem_init.end());
+  }
+  const Json &asm_state = j["inline_asm"];
+  if (asm_state.is_object()) {
+    s.asm_seed = json_u64(asm_state["seed"]).value_or(0);
+    for (const Json &uj : asm_state["uses"].items()) {
+      AsmUse u;
+      u.block = static_cast<uint32_t>(uj["block"].as_uint());
+      for (const Json &v : uj["values"].items()) {
+        auto x = json_u64(v);
+        if (!x) {
+          error = "bad inline asm value in state";
+          return std::nullopt;
+        }
+        u.values.push_back(static_cast<uint32_t>(*x));
+      }
+      s.asm_uses.push_back(std::move(u));
+    }
   }
   const Json &v = j["vgprs"];
   if (v.is_object()) {
@@ -172,7 +205,10 @@ std::vector<std::string> differing_frame_fields(const Frame &a, const Frame &b) 
     out.push_back("status_except_scc");
   if (a.mode != b.mode)
     out.push_back("mode");
-  if (a.trapsts != b.trapsts)
+  // TRAPSTS.EXCP[6:0] are sticky floating-point (and integer divide) exception flags that VALU
+  // arithmetic accumulates. LLVM's default floating-point environment gives them no meaning
+  // (only strictfp does), so they are neither frame nor output; trap enables (MODE) stay fixed.
+  if ((a.trapsts ^ b.trapsts) & ~kTrapstsArithmeticExceptions)
     out.push_back("trapsts");
   if (a.ttmp != b.ttmp)
     out.push_back("ttmp[0:15]");

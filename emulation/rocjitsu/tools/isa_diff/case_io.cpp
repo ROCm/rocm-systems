@@ -37,6 +37,26 @@ Json artifact_json(const Artifact &a, size_t num_insts) {
     j.set("text_relocations", static_cast<uint64_t>(a.text_relocations.size()));
     j.set("metadata_parsed", a.metadata_parsed);
   }
+  if (a.callable) {
+    Json f = Json::object();
+    f.set("calling_convention", "AMDGPU C (CC_AMDGPU_Func)");
+    f.set("return", "s_setpc_b64 s[30:31]");
+    f.set("return_vgprs", static_cast<uint64_t>(a.return_vgprs));
+    f.set("entry_mode", hex32(a.function_mode));
+    j.set("callable_function", std::move(f));
+  }
+  if (!a.inline_asm.empty()) {
+    Json blocks = Json::array();
+    for (const InlineAsmBlock &b : a.inline_asm) {
+      Json bj = Json::object();
+      bj.set("offset", hex64(b.offset));
+      bj.set("text", b.text);
+      if (b.before_label)
+        bj.set("before_label", true);
+      blocks.push(std::move(bj));
+    }
+    j.set("inline_asm", std::move(blocks));
+  }
   return j;
 }
 

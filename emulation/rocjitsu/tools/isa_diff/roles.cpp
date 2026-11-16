@@ -145,6 +145,12 @@ RegionRoles infer_roles(const std::vector<RegionInst> &old_insts,
   for (const auto *side : {&old_insts, &new_insts}) {
     auto &summary = side == &old_insts ? r.old_summary : r.new_summary;
     for (const RegionInst &ri : *side) {
+      if (ri.inline_asm >= 0) {
+        const Effects fx = classify_inline_asm(ri.asm_text);
+        summary.push_back(
+            {ri.pc, "inline_asm", ri.text, fx.reads, fx.writes, fx.vreads, fx.vwrites});
+        continue;
+      }
       std::vector<uint32_t> window = ri.words;
       window.resize(window.size() + 3, 0);
       auto decoded = decoder->decode_window(window, ri.pc);

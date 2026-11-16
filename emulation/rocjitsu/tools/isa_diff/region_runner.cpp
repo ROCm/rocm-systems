@@ -135,6 +135,12 @@ public:
       if (!(a.request_lane_mask >> lane & 1u))
         continue;
       const uint64_t base = a.addresses[lane];
+      if (bytes && base + (bytes - 1) < base) {
+        // The access wraps around the 64-bit address space: hardware faults (the address
+        // is far outside any GPUVM range); there are no bytes to seed or record.
+        wraps_ = true;
+        continue;
+      }
       if (a.is_load) {
         for (uint64_t w = base >> 2; w <= (base + bytes - 1) >> 2; ++w) {
           const uint64_t k = w - (base >> 2); // dword of this lane's access
@@ -163,9 +169,11 @@ public:
     stored_.clear();
     seed_ = seed;
     unsupported_ = false;
+    wraps_ = false;
   }
   [[nodiscard]] uint64_t seed() const { return seed_; }
   [[nodiscard]] bool unsupported() const { return unsupported_; }
+  [[nodiscard]] bool wraps() const { return wraps_; }
   [[nodiscard]] std::vector<std::pair<uint64_t, uint8_t>> written() const {
     std::vector<std::pair<uint64_t, uint8_t>> out;
     for (uint64_t b : std::set<uint64_t>(stored_.begin(), stored_.end())) {
@@ -202,6 +210,7 @@ private:
   uint64_t code_lo_, code_hi_;
   uint64_t seed_ = 0;
   bool unsupported_ = false;
+  bool wraps_ = false;
   std::unordered_set<uint64_t> seeded_; ///< 4-byte words seeded this run.
   std::unordered_set<uint64_t> stored_; ///< Bytes stored this run.
 };
@@ -318,10 +327,20 @@ std::unique_ptr<RegionRunner> RegionRunner::create(const std::vector<RegionInst>
     error = "no gfx950 decoder";
     return nullptr;
   }
+  r->asm_.assign(insts.size(), std::nullopt);
+  r->asm_block_.assign(insts.size(), 0);
   for (size_t i = 0; i < insts.size(); ++i) {
     const RegionInst &ri = insts[i];
     r->pcs_.push_back(ri.pc);
     r->texts_.push_back(ri.text);
+    if (ri.inline_asm >= 0) {
+      // Comment-only inline asm: no machine code; run_inline_asm() gives it its meaning.
+      r->asm_[i] = parse_inline_asm(ri.asm_text);
+      r->asm_block_[i] = static_cast<uint32_t>(ri.inline_asm);
+      r->insts_.push_back(nullptr);
+      r->model_only_.push_back(false);
+      continue;
+    }
     util::StringDiagnostic ddiag;
     std::vector<uint32_t> window = ri.words;
     window.resize(window.size() + 3, 0); // decoder may look ahead for literals
@@ -349,6 +368,17 @@ std::unique_ptr<RegionRunner> RegionRunner::create(const std::vector<RegionInst>
     std::vector<std::pair<int, int>> origin(kNumSgprs, {-1, -1}); // (load index, dword)
     for (size_t i = 0; i < r->insts_.size(); ++i) {
       const Instruction *inst = r->insts_[i].get();
+      if (!inst && r->asm_[i]) {
+        // An inline-asm def is an opaque producer, like a scalar load: if its SGPRs later
+        // serve as a memory base, it produces pointer-shaped values there.
+        const auto &defs = r->asm_[i]->defs;
+        for (size_t j = 0; j < defs.size(); ++j)
+          if (!defs[j].vgpr && defs[j].index < kNumSgprs)
+            origin[defs[j].index] =
+                j < 32 ? std::pair<int, int>{static_cast<int>(i), static_cast<int>(j)}
+                       : std::pair<int, int>{-1, -1};
+        continue;
+      }
       if (!inst)
         break;
       const Effects fx = classify(*inst);
@@ -449,6 +479,8 @@ void RegionRunner::load(const MachineState &s) {
       cu_->write_vgpr(vbase + r, lane, s.vget(r, lane));
   wf.begin_instruction_execution();
   wf.pc = pcs_.empty() ? 0 : pcs_.front();
+  asm_seed_ = s.asm_seed;
+  asm_uses_.clear();
 }
 
 MachineState RegionRunner::capture() const {
@@ -488,7 +520,124 @@ MachineState RegionRunner::capture() const {
     s.mem_written = mem_->written();
     s.mem_init = image_->snapshot();
   }
+  s.asm_seed = asm_seed_;
+  s.asm_uses = asm_uses_;
   return s;
+}
+
+uint32_t inline_asm_word(uint64_t seed, uint32_t block, uint32_t slot, uint32_t lane) {
+  return initial_memory_word(seed ^ 0x61736d0000000000ull,
+                             (uint64_t{block} << 40) | (uint64_t{slot} << 8) | lane);
+}
+
+RunOutcome RegionRunner::run_inline_asm(size_t i) {
+  RunOutcome out;
+  const InlineAsmEffect &e = *asm_[i];
+  const uint32_t block = asm_block_[i];
+  amdgpu::Wavefront &wf = *wave_;
+  const uint32_t sbase = wf.sgpr_alloc().base;
+  const uint32_t vbase = wf.vgpr_alloc().base;
+  if (e.opaque || e.untracked) {
+    out.status = RunStatus::UnsupportedOperand;
+    out.failed_index = i;
+    out.detail = e.reason;
+    return out;
+  }
+  for (const auto *slots : {&e.uses, &e.defs})
+    for (const AsmSlot &s : *slots)
+      if (s.vgpr && s.index >= vgpr_count_) {
+        out.status = RunStatus::InvalidRegisterAccess;
+        out.failed_index = i;
+        out.detail = "inline asm names v" + std::to_string(s.index) + " beyond the tracked VGPRs";
+        return out;
+      }
+  auto read_loc = [&](unsigned l) -> uint32_t {
+    if (l < kNumSgprs)
+      return cu_->read_sgpr_storage(sbase + l);
+    switch (l) {
+    case kLocVccLo:
+      return static_cast<uint32_t>(wf.vcc());
+    case kLocVccHi:
+      return static_cast<uint32_t>(wf.vcc() >> 32);
+    case kLocExecLo:
+      return static_cast<uint32_t>(wf.exec_raw());
+    case kLocExecHi:
+      return static_cast<uint32_t>(wf.exec_raw() >> 32);
+    case kLocM0:
+      return wf.m0();
+    default:
+      return wf.read_scc() ? 1u : 0u;
+    }
+  };
+  auto write_loc = [&](unsigned l, uint32_t v) {
+    if (l < kNumSgprs) {
+      cu_->write_sgpr(sbase + l, v);
+      return;
+    }
+    switch (l) {
+    case kLocVccLo:
+      wf.set_vcc_raw((wf.vcc() & ~uint64_t{0xffffffffu}) | v);
+      break;
+    case kLocVccHi:
+      wf.set_vcc_raw((wf.vcc() & uint64_t{0xffffffffu}) | (uint64_t{v} << 32));
+      break;
+    case kLocExecLo:
+      wf.set_exec_raw((wf.exec_raw() & ~uint64_t{0xffffffffu}) | v);
+      break;
+    case kLocExecHi:
+      wf.set_exec_raw((wf.exec_raw() & uint64_t{0xffffffffu}) | (uint64_t{v} << 32));
+      break;
+    case kLocM0:
+      wf.set_m0(v);
+      break;
+    default:
+      wf.set_status_raw((wf.status_raw() & ~1u) | (v & 1u));
+      break;
+    }
+  };
+  if (!e.uses.empty()) {
+    AsmUse u;
+    u.block = block;
+    const uint64_t exec = wf.exec_raw();
+    bool vector = false;
+    for (const AsmSlot &s : e.uses) {
+      if (!s.vgpr) {
+        u.values.push_back(read_loc(s.index));
+        continue;
+      }
+      vector = true;
+      for (unsigned lane = 0; lane < kWaveLanes; ++lane)
+        u.values.push_back((exec >> lane) & 1u ? cu_->read_vgpr_storage(vbase + s.index, lane)
+                                               : 0u);
+    }
+    if (vector) {
+      u.values.push_back(static_cast<uint32_t>(exec));
+      u.values.push_back(static_cast<uint32_t>(exec >> 32));
+    }
+    asm_uses_.push_back(std::move(u));
+  }
+  for (size_t j = 0; j < e.defs.size(); ++j) {
+    const AsmSlot &s = e.defs[j];
+    const auto slot = static_cast<uint32_t>(j);
+    if (s.vgpr) {
+      // Per-thread semantics: the lanes in EXEC get the value, the others keep theirs (as
+      // for a VALU def; LLVM may keep another thread's value in an inactive lane).
+      const uint64_t exec = wf.exec_raw();
+      for (unsigned lane = 0; lane < kWaveLanes; ++lane)
+        if ((exec >> lane) & 1u)
+          cu_->write_vgpr(vbase + s.index, lane, inline_asm_word(asm_seed_, block, slot, lane));
+    } else {
+      uint32_t v = inline_asm_word(asm_seed_, block, slot, 0);
+      // Pointer-shaped where the region uses it as a memory base (see MemoryImage::word).
+      const uint64_t h = splitmix64(asm_seed_ ^ (uint64_t{block} << 32) ^ slot ^ 0x7074725f);
+      if (j < 32 && ((pointer_lo_[i] >> j) & 1u))
+        v = static_cast<uint32_t>(h) & 0xffff0000u;
+      else if (j < 32 && ((pointer_hi_[i] >> j) & 1u))
+        v = 0x10u + static_cast<uint32_t>((h >> 32) % 0x70u);
+      write_loc(s.index, v & loc_value_mask(s.index));
+    }
+  }
+  return out;
 }
 
 RunOutcome RegionRunner::run(size_t budget, std::vector<TraceStep> *trace) {
@@ -508,6 +657,29 @@ RunOutcome RegionRunner::run(size_t budget, std::vector<TraceStep> *trace) {
       out.failed_index = decode_failed_index_;
       out.detail = decode_error_;
       return out;
+    }
+    if (asm_[i]) {
+      RunOutcome a = run_inline_asm(i);
+      if (a.status != RunStatus::Ok) {
+        a.executed = out.executed;
+        return a;
+      }
+      ++out.executed;
+      ++total_executed_;
+      if (trace) {
+        MachineState now = capture();
+        TraceStep step;
+        step.index = i;
+        step.pc = pcs_[i];
+        step.text = texts_[i];
+        step.changed = differing_locs(prev, now);
+        step.vchanged = differing_vgprs(prev, now);
+        step.frame_changed = differing_frame_fields(prev.frame, now.frame);
+        step.after = now;
+        trace->push_back(std::move(step));
+        prev = std::move(now);
+      }
+      continue;
     }
     Instruction *inst = insts_[i].get();
     if (is_mem_[i] && inst && inst->execute && !model_only_[i]) {
@@ -550,6 +722,12 @@ RunOutcome RegionRunner::run(size_t budget, std::vector<TraceStep> *trace) {
         out.status = RunStatus::UndefinedBehavior;
         out.failed_index = i;
         out.detail = "RocJITsu reported ISA undefined behaviour (see isa-undefined log)";
+        return out;
+      }
+      if (mem_ && mem_->wraps()) {
+        out.status = RunStatus::MemoryFault;
+        out.failed_index = i;
+        out.detail = "memory access wraps around the 64-bit address space at '" + texts_[i] + "'";
         return out;
       }
       if (wf.state() == amdgpu::WfState::HALTED || wf.state() == amdgpu::WfState::MEMORY_TRAP) {

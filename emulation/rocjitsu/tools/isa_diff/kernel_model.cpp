@@ -62,6 +62,29 @@ int64_t direct_branch_offset(const Instruction &inst, uint64_t offset) {
 
 } // namespace
 
+LocSet return_observable_locs() {
+  // CSR_AMDGPU_SGPRs (AMDGPUCallingConv.td): s30-s39, s48-s55, s64-s71, s80-s87, s96-s105;
+  // s102-s105 are not addressable here. The caller also expects its EXEC back.
+  LocSet l;
+  for (auto [lo, hi] : {std::pair{30u, 39u}, {48u, 55u}, {64u, 71u}, {80u, 87u}, {96u, 101u}})
+    for (unsigned s = lo; s <= hi; ++s)
+      l.set(s);
+  l.set(kLocExecLo);
+  l.set(kLocExecHi);
+  return l;
+}
+
+VSet return_observable_vgprs(unsigned return_vgprs) {
+  // RetCC_AMDGPU_Func returns in v0..v31; CSR_AMDGPU_VGPRs are v40-v47, v56-v63, ...
+  VSet v;
+  for (unsigned r = 0; r < std::min(return_vgprs, 32u); ++r)
+    v.set(r);
+  for (unsigned base = 40; base + 8 <= kNumVgprs; base += 16)
+    for (unsigned r = base; r < base + 8; ++r)
+      v.set(r);
+  return v;
+}
+
 KernelModel::~KernelModel() = default;
 
 LocSet KernelModel::live_transfer(const Effects &fx, const LocSet &live_after) {
@@ -141,6 +164,59 @@ std::unique_ptr<KernelModel> KernelModel::build(const Artifact &artifact, std::s
     return nullptr;
   }
 
+  // Comment-only inline-asm blocks become zero-size pseudo-instructions. A block runs
+  // before the instruction at its offset, in that instruction's basic block, unless a label
+  // separates them: then it ends the preceding block (fall-through into the label). After
+  // a branch it would sit on the fall-through edge alone, which no block represents; its
+  // effects are then unknown. Blocks not directly before a reachable instruction are dead.
+  if (!artifact.inline_asm.empty()) {
+    std::vector<InstRef> merged;
+    merged.reserve(insts.size() + artifact.inline_asm.size());
+    std::vector<bool> ends_previous;
+    size_t k = 0;
+    const auto &blocks_asm = artifact.inline_asm;
+    for (size_t i = 0; i < insts.size(); ++i) {
+      while (k < blocks_asm.size() && blocks_asm[k].offset <= insts[i].offset) {
+        const InlineAsmBlock &b = blocks_asm[k];
+        const int index = static_cast<int>(k++);
+        if (b.offset != insts[i].offset)
+          continue; // not directly before reachable code
+        InstRef ref;
+        ref.offset = b.offset;
+        ref.pc = insts[i].pc;
+        ref.mnemonic = "inline_asm";
+        ref.inline_asm = index;
+        ref.asm_text = b.text;
+        std::string flat = b.text;
+        std::ranges::replace(flat, '\n', ' ');
+        ref.text = "inline asm: " + flat;
+        ref.fx = classify_inline_asm(b.text);
+        ref.block = insts[i].block;
+        bool previous = false;
+        if (b.before_label) {
+          const InstRef *prev = merged.empty() ? nullptr : &merged.back();
+          if (prev && !prev->fx.control_flow) {
+            ref.block = prev->block;
+            previous = true;
+          } else {
+            ref.fx = Effects{};
+            ref.fx.unknown_effect = true;
+            ref.fx.reject_reason = "inline asm on a branch's fall-through edge";
+          }
+        }
+        merged.push_back(std::move(ref));
+        ends_previous.push_back(previous);
+      }
+      merged.push_back(std::move(insts[i]));
+      ends_previous.push_back(false);
+    }
+    insts = std::move(merged);
+    index_of_offset.clear();
+    for (size_t i = 0; i < insts.size(); ++i)
+      if (!ends_previous[i])
+        index_of_offset.try_emplace(insts[i].offset, i);
+  }
+
   // Blocks in first-instruction order (block_index follows linear order of first insts).
   auto &blocks = model->blocks_;
   blocks.resize(block_index.size());
@@ -171,6 +247,18 @@ std::unique_ptr<KernelModel> KernelModel::build(const Artifact &artifact, std::s
     const InstRef &last = insts[b.end - 1];
     if (last.fx.unknown_effect)
       b.unknown_successor = true;
+    // A callable function returns through the address it was called with.
+    if (artifact.callable && last.inst && last.mnemonic == "s_setpc_b64" &&
+        !last.fx.unknown_effect) {
+      LocSet ra;
+      ra.set(30);
+      ra.set(31);
+      if (last.fx.reads == ra) {
+        b.returns = true;
+        b.unknown_successor = false;
+        b.successors.clear();
+      }
+    }
     if (b.unknown_successor)
       model->cfg_complete_ = false;
   }
@@ -180,6 +268,8 @@ std::unique_ptr<KernelModel> KernelModel::build(const Artifact &artifact, std::s
 
   // Direct branch targets.
   for (size_t i = 0; i < insts.size(); ++i) {
+    if (!insts[i].inst)
+      continue;
     const int64_t target = direct_branch_offset(*insts[i].inst, insts[i].offset);
     if (target < 0)
       continue;
@@ -243,6 +333,8 @@ void KernelModel::compute_liveness() {
   auto block_out = [&](uint32_t b) {
     if (blocks_[b].unknown_successor)
       return all_locs();
+    if (blocks_[b].returns)
+      return return_observable_locs();
     LocSet out;
     for (uint32_t s : blocks_[b].successors)
       out |= live_in[s];
@@ -288,6 +380,8 @@ void KernelModel::compute_liveness() {
   auto vblock_out = [&](uint32_t b) {
     if (blocks_[b].unknown_successor)
       return vall;
+    if (blocks_[b].returns)
+      return return_observable_vgprs(artifact_.return_vgprs);
     VSet out;
     for (uint32_t s : blocks_[b].successors)
       out |= vin[s];
@@ -403,6 +497,8 @@ std::array<bool, PendingState::kNumCounters> producer_counters(const Instruction
 }
 
 PendingState pending_transfer(const InstRef &ref, PendingState s) {
+  if (!ref.inst)
+    return s; // inline asm: no memory operation
   const Instruction &inst = *ref.inst;
   if (ref.mnemonic == "s_waitcnt" && inst.num_src_operands() >= 1) {
     if (auto v = inst.src_operand(0)->const_value()) {

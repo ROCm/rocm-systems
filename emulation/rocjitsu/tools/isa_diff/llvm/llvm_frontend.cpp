@@ -9,6 +9,7 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+#include <cctype>
 #include <chrono>
 #include <cstdlib>
 #include <cstring>
@@ -50,7 +51,103 @@ int record(Provenance &prov, const std::vector<std::string> &argv, const std::st
   return cmd.exit_code;
 }
 
+std::string trim(const std::string &s) {
+  const size_t b = s.find_first_not_of(" \t\r");
+  if (b == std::string::npos)
+    return {};
+  const size_t e = s.find_last_not_of(" \t\r");
+  return s.substr(b, e - b + 1);
+}
+
+bool is_label(std::string t) {
+  if (t.empty() || t.front() == ';')
+    return false;
+  t = trim(t.substr(0, t.find(';'))); // ".LBB0_2:   ; %Flow"
+  if (t.empty() || t.back() != ':')
+    return false;
+  for (size_t i = 0; i + 1 < t.size(); ++i) {
+    const char c = t[i];
+    if (!(std::isalnum(static_cast<unsigned char>(c)) || c == '_' || c == '.' || c == '$'))
+      return false;
+  }
+  return true;
+}
+
+/// String body for .ascii: backslash, quote, tab and newline escaped.
+std::string asm_string(const std::string &s) {
+  std::string out;
+  for (char c : s) {
+    if (c == '\\' || c == '"')
+      out += '\\', out += c;
+    else if (c == '\t')
+      out += "\\t";
+    else if (c == '\n')
+      out += "\\n";
+    else
+      out += c;
+  }
+  return out;
+}
+
 } // namespace
+
+std::string mark_inline_asm(const std::string &source, size_t &marked) {
+  marked = 0;
+  std::vector<std::string> lines;
+  {
+    std::istringstream in(source);
+    std::string line;
+    while (std::getline(in, line))
+      lines.push_back(line);
+  }
+  std::string out;
+  std::string records;
+  for (size_t i = 0; i < lines.size(); ++i) {
+    if (trim(lines[i]) != ";;#ASMSTART") {
+      out += lines[i] + "\n";
+      continue;
+    }
+    size_t end = i + 1;
+    while (end < lines.size() && trim(lines[end]) != ";;#ASMEND")
+      ++end;
+    bool comment_only = end < lines.size();
+    std::string text;
+    for (size_t k = i + 1; k < end && comment_only; ++k) {
+      const std::string t = trim(lines[k]);
+      if (t.empty())
+        continue;
+      if (t.front() != ';')
+        comment_only = false;
+      else
+        text += (text.empty() ? "" : "\n") + t;
+    }
+    if (comment_only && !text.empty()) {
+      // Does a label come before the next instruction? Skip blank and comment lines,
+      // other comment-only asm blocks, and directives.
+      bool before_label = false;
+      for (size_t k = end + 1; k < lines.size(); ++k) {
+        const std::string t = trim(lines[k]);
+        if (t.empty() || t.front() == ';')
+          continue;
+        if (is_label(t))
+          before_label = true;
+        else if (t.front() == '.')
+          continue;
+        break;
+      }
+      const std::string name = std::string(kInlineAsmMarkerPrefix) + std::to_string(marked++);
+      out += name + ":\n";
+      records += "\t.asciz\t\"" +
+                 asm_string(name + "\t" + (before_label ? "1" : "0") + "\t" + text) + "\"\n";
+    }
+    for (size_t k = i; k <= end && k < lines.size(); ++k)
+      out += lines[k] + "\n";
+    i = end;
+  }
+  if (marked)
+    out += "\t.section\t" + std::string(kInlineAsmSection) + ",\"\",@progbits\n" + records;
+  return out;
+}
 
 int run_tool(const std::vector<std::string> &argv, const std::string &stdout_path,
              const std::string &stderr_path) {
@@ -186,6 +283,8 @@ Json Provenance::to_json() const {
   j.set("compile_ns", total);
   j.set("executed_object", executed_object);
   j.set("note", note);
+  if (inline_asm_blocks)
+    j.set("inline_asm_blocks_marked", static_cast<uint64_t>(inline_asm_blocks));
   j.set("toolchain", toolchain);
   return j;
 }
@@ -206,9 +305,24 @@ bool assemble(const Toolchain &tc, const std::string &s_path, const std::string 
   const std::string obj = work_prefix + ".o";
   const std::string hsaco = work_prefix + ".hsaco";
   const std::string err = work_prefix + ".stderr";
+  // Comment-only inline-asm blocks assemble to nothing: mark where they are and record
+  // their text in the object, so the code object carries them.
+  size_t marked = 0;
+  const std::string marked_text = mark_inline_asm(*text, marked);
+  std::string mc_input = s_path;
+  if (marked) {
+    mc_input = work_prefix + ".marked.s";
+    std::ofstream f(mc_input, std::ios::binary);
+    f << marked_text;
+    if (!f) {
+      error = "cannot write " + mc_input;
+      return false;
+    }
+    prov.inline_asm_blocks = marked;
+  }
   if (record(prov,
              {tc.llvm_mc, "-triple=" + prov.triple, "-mcpu=" + prov.mcpu, "-filetype=obj", "-o",
-              obj, s_path},
+              obj, mc_input},
              "", err) != 0) {
     error = "llvm-mc failed on " + s_path + ": " + prov.commands.back().stderr_tail;
     return false;

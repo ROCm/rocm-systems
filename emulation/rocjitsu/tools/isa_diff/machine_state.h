@@ -16,6 +16,11 @@
 
 namespace rocjitsu::isa_diff {
 
+/// TRAPSTS.EXCP bits 0-6: the sticky invalid, input-denormal, divide-by-zero, overflow,
+/// underflow, inexact and integer-divide-by-zero flags. VALU arithmetic sets them; they are
+/// excluded from frame preservation (see differing_frame_fields).
+inline constexpr uint32_t kTrapstsArithmeticExceptions = 0x7fu;
+
 /// Control state that P0 instructions neither read nor write. It is fixed to the
 /// post-dispatch values, recorded, and checked for preservation after every case.
 struct Frame {
@@ -35,6 +40,15 @@ struct Frame {
   bool operator==(const Frame &) const = default;
 };
 
+/// What one inline-asm `use` block observed: one entry per used 32-bit piece. A VGPR
+/// piece is 64 lanes with lanes outside EXEC zeroed; when the block uses a VGPR, EXEC
+/// (lo, hi) follows.
+struct AsmUse {
+  uint32_t block = 0; ///< Inline-asm block index (pairs the old and new block).
+  std::vector<uint32_t> values;
+  bool operator==(const AsmUse &) const = default;
+};
+
 struct MachineState {
   std::array<uint32_t, kNumLocs> loc{}; ///< SCC is 0/1.
   Frame frame;
@@ -48,6 +62,11 @@ struct MachineState {
   /// Initial content of every 32-bit word the case read (word index, value), sorted:
   /// the memory input shared by both sides, recorded so bundles replay exactly.
   std::vector<std::pair<uint64_t, uint32_t>> mem_init;
+  /// Inline asm: the seed of the values `def` blocks produce (0: the region has none;
+  /// equal on both sides, so a matched block defines the same values), and what `use`
+  /// blocks observed during the run, in execution order.
+  uint64_t asm_seed = 0;
+  std::vector<AsmUse> asm_uses;
 
   [[nodiscard]] uint32_t get(unsigned l) const { return loc[l]; }
   void set(unsigned l, uint32_t v) { loc[l] = v & loc_value_mask(l); }

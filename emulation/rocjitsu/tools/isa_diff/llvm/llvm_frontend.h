@@ -55,6 +55,8 @@ struct Provenance {
   std::string executed_object; ///< "linked_code_object" or "raw_text".
   std::string note;
   Json toolchain;
+  /// Comment-only inline-asm blocks marked in the assembled copy of the source.
+  size_t inline_asm_blocks = 0;
 
   [[nodiscard]] Json to_json() const;
 };
@@ -70,6 +72,13 @@ struct Provenance {
                            const std::vector<std::string> &side_args,
                            const std::string &work_prefix, const std::string &kernel, Artifact &out,
                            Provenance &prov, std::string &error);
+
+/// @brief Mark comment-only inline-asm blocks (`;;#ASMSTART`, comment lines, `;;#ASMEND`)
+/// of an LLVM assembly listing. Each block gets a label `__rj_isa_diff_asm.<n>` in front of
+/// it, and a record "<label>\t<before_label 0|1>\t<text>" in the non-loaded section
+/// `.rj_isa_diff_inline_asm` appended at the end. The machine code is unchanged.
+/// @param marked Set to the number of blocks marked (0: the text is returned unchanged).
+[[nodiscard]] std::string mark_inline_asm(const std::string &source, size_t &marked);
 
 /// @brief Split a whitespace-separated argument string (no quoting).
 [[nodiscard]] std::vector<std::string> split_args(const std::string &text);

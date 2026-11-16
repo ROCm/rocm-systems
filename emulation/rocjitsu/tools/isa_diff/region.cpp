@@ -21,6 +21,12 @@ Json side_to_json(const RegionSide &side) {
       words.push(hex32(w));
     ij.set("words", std::move(words));
     ij.set("asm", inst.text);
+    if (inst.inline_asm >= 0) {
+      Json aj = Json::object();
+      aj.set("index", static_cast<uint64_t>(inst.inline_asm));
+      aj.set("text", inst.asm_text);
+      ij.set("inline_asm", std::move(aj));
+    }
     insts.push(std::move(ij));
   }
   j.set("insts", std::move(insts));
@@ -46,8 +52,13 @@ bool side_from_json(const Json &j, RegionSide &side, std::string &error) {
       }
       inst.words.push_back(static_cast<uint32_t>(*v));
     }
-    if (inst.words.empty()) {
-      error = "region instruction without words";
+    if (ij.has("inline_asm")) {
+      inst.inline_asm = static_cast<int>(ij["inline_asm"]["index"].as_uint());
+      inst.asm_text = ij["inline_asm"]["text"].as_string();
+    }
+    if (inst.words.empty() == (inst.inline_asm < 0)) {
+      error = inst.inline_asm < 0 ? "region instruction without words"
+                                  : "inline asm block with instruction words";
       return false;
     }
     inst.text = ij["asm"].as_string();

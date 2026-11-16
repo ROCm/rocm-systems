@@ -21,6 +21,10 @@ struct RegionInst {
   uint64_t pc = 0;
   std::vector<uint32_t> words;
   std::string text; ///< Disassembly at analysis time (informational).
+  /// A comment-only inline-asm block (no words): its index in the function's sequence of
+  /// blocks, which pairs it with the other side's block, and its text, which defines it.
+  int inline_asm = -1;
+  std::string asm_text;
 };
 
 enum class RegionStatus { Ready, Unsupported, Inconclusive };

@@ -9,6 +9,8 @@
 
 #include <algorithm>
 #include <array>
+#include <cctype>
+#include <charconv>
 
 namespace rocjitsu::isa_diff {
 namespace {
@@ -158,18 +160,10 @@ constexpr std::array kP0Mnemonics = std::to_array<std::string_view>({
 // SALU instructions outside P0 that read no tracked state beyond their classified
 // operands (the branch conditions SCC/VCC/EXEC are fieldless operands; see tests).
 constexpr std::array kNoImplicitReads = std::to_array<std::string_view>({
-    "s_endpgm",
-    "s_waitcnt",
-    "s_barrier",
-    "s_branch",
-    "s_cbranch_scc0",
-    "s_cbranch_scc1",
-    "s_cbranch_vccz",
-    "s_cbranch_vccnz",
-    "s_cbranch_execz",
-    "s_cbranch_execnz",
-    "s_sleep",
+    "s_endpgm", "s_waitcnt", "s_barrier", "s_branch", "s_cbranch_scc0", "s_cbranch_scc1",
+    "s_cbranch_vccz", "s_cbranch_vccnz", "s_cbranch_execz", "s_cbranch_execnz", "s_sleep",
     "s_setprio",
+    "s_setpc_b64", // reads its target only; a return's live-out is the calling convention's
 });
 
 // Generic scalar operand selector values (gfx9 encoding of SSRC/SDST fields).
@@ -178,6 +172,8 @@ constexpr int kSelXnackMaskHi = 105;
 constexpr int kSelVccLo = 106;
 constexpr int kSelVccHi = 107;
 constexpr int kSelM0 = 124;
+constexpr int kSelSharedBase = 235;        ///< src_shared_base (gfx9)
+constexpr int kSelPopsExitingWaveId = 239; ///< src_pops_exiting_wave_id
 constexpr int kSelVccz = 251;
 constexpr int kSelExecz = 252;
 constexpr int kSelScc = 253;
@@ -325,6 +321,13 @@ OperandClass classify_operand(const Operand &op) {
     if (sel >= kSelFlatScratchLo && sel <= kSelXnackMaskHi) {
       out.space = Space::Outside;
       out.what = "flat_scratch/xnack_mask selector";
+      return out;
+    }
+    if (sel >= kSelSharedBase && sel <= kSelPopsExitingWaveId) {
+      // src_shared_base/limit, src_private_base/limit, src_pops_exiting_wave_id: read-only
+      // dispatch constants, the same for both sides; named state, not an unknown effect.
+      out.space = Space::Outside;
+      out.what = "aperture register";
       return out;
     }
     if (op.const_value()) {
@@ -601,6 +604,196 @@ Effects classify(const Instruction &inst) {
   }
   fx.implicit_special_reads = fx.implicit_reads.any();
   return fx;
+}
+
+namespace {
+
+std::string_view trim(std::string_view s) {
+  while (!s.empty() && std::isspace(static_cast<unsigned char>(s.front())))
+    s.remove_prefix(1);
+  while (!s.empty() && std::isspace(static_cast<unsigned char>(s.back())))
+    s.remove_suffix(1);
+  return s;
+}
+
+std::optional<unsigned> parse_uint(std::string_view s) {
+  unsigned v = 0;
+  const auto [p, ec] = std::from_chars(s.data(), s.data() + s.size(), v);
+  if (ec != std::errc() || p != s.data() + s.size() || s.empty())
+    return std::nullopt;
+  return v;
+}
+
+/// Register range "x5" or "x[4:7]" with prefix @p x; returns [first, last].
+std::optional<std::pair<unsigned, unsigned>> parse_range(std::string_view op,
+                                                         std::string_view prefix) {
+  if (op.substr(0, prefix.size()) != prefix)
+    return std::nullopt;
+  std::string_view rest = op.substr(prefix.size());
+  if (!rest.empty() && rest.front() == '[' && rest.back() == ']') {
+    rest = rest.substr(1, rest.size() - 2);
+    const size_t colon = rest.find(':');
+    if (colon == std::string_view::npos)
+      return std::nullopt;
+    auto a = parse_uint(rest.substr(0, colon));
+    auto b = parse_uint(rest.substr(colon + 1));
+    if (!a || !b || *b < *a)
+      return std::nullopt;
+    return std::pair{*a, *b};
+  }
+  auto a = parse_uint(rest);
+  if (!a)
+    return std::nullopt;
+  return std::pair{*a, *a};
+}
+
+/// One operand into slots. Returns false if not understood; sets @p untracked for AGPRs.
+bool operand_slots(std::string_view op, std::vector<AsmSlot> &out, bool &untracked) {
+  if (op == "vcc") {
+    out.push_back({false, kLocVccLo});
+    out.push_back({false, kLocVccHi});
+    return true;
+  }
+  if (op == "exec") {
+    out.push_back({false, kLocExecLo});
+    out.push_back({false, kLocExecHi});
+    return true;
+  }
+  if (auto loc = parse_loc(op); loc && *loc >= kNumSgprs) {
+    out.push_back({false, *loc}); // vcc_lo, vcc_hi, exec_lo, exec_hi, m0, scc
+    return true;
+  }
+  if (auto r = parse_range(op, "v")) {
+    if (r->second >= kNumVgprs)
+      return false;
+    for (unsigned i = r->first; i <= r->second; ++i)
+      out.push_back({true, i});
+    return true;
+  }
+  if (auto r = parse_range(op, "s")) {
+    if (r->second >= kNumSgprs)
+      return false;
+    for (unsigned i = r->first; i <= r->second; ++i)
+      out.push_back({false, i});
+    return true;
+  }
+  if (parse_range(op, "a") || parse_range(op, "agpr")) {
+    untracked = true;
+    return true;
+  }
+  return false;
+}
+
+/// True if @p line names something that looks like a register.
+bool names_register(std::string_view line) {
+  for (size_t i = 0; i < line.size(); ++i) {
+    const bool start = i == 0 || !std::isalnum(static_cast<unsigned char>(line[i - 1]));
+    if (!start)
+      continue;
+    const std::string_view rest = line.substr(i);
+    for (std::string_view w : {"vcc", "exec", "m0", "scc"})
+      if (rest.substr(0, w.size()) == w)
+        return true;
+    if ((rest[0] == 'v' || rest[0] == 's' || rest[0] == 'a') && rest.size() > 1 &&
+        (std::isdigit(static_cast<unsigned char>(rest[1])) || rest[1] == '['))
+      return true;
+  }
+  return false;
+}
+
+} // namespace
+
+InlineAsmEffect parse_inline_asm(std::string_view text) {
+  InlineAsmEffect e;
+  size_t pos = 0;
+  while (pos <= text.size()) {
+    size_t nl = text.find('\n', pos);
+    if (nl == std::string_view::npos)
+      nl = text.size();
+    std::string_view line = trim(text.substr(pos, nl - pos));
+    pos = nl + 1;
+    if (line.empty())
+      continue;
+    if (line.front() != ';') {
+      e.opaque = true;
+      e.reason = "inline asm line is not a comment: '" + std::string(line) + "'";
+      return e;
+    }
+    while (!line.empty() && line.front() == ';')
+      line.remove_prefix(1);
+    line = trim(line);
+    const size_t sp = line.find_first_of(" \t");
+    const std::string_view verb = line.substr(0, sp);
+    if (verb != "def" && verb != "use") {
+      if (names_register(line)) {
+        e.opaque = true;
+        e.reason = "inline asm comment not understood: '" + std::string(line) + "'";
+        return e;
+      }
+      continue;
+    }
+    std::string_view ops = sp == std::string_view::npos ? std::string_view{} : line.substr(sp);
+    auto &slots = verb == "def" ? e.defs : e.uses;
+    while (!trim(ops).empty()) {
+      const size_t comma = ops.find(',');
+      const std::string_view op = trim(ops.substr(0, comma));
+      ops = comma == std::string_view::npos ? std::string_view{} : ops.substr(comma + 1);
+      if (!operand_slots(op, slots, e.untracked)) {
+        e.opaque = true;
+        e.reason = "inline asm operand not understood: '" + std::string(op) + "'";
+        return e;
+      }
+    }
+  }
+  if (e.untracked)
+    e.reason = "inline asm names AGPRs, which are not tracked";
+  return e;
+}
+
+Effects classify_inline_asm(std::string_view text) {
+  Effects fx;
+  fx.implicit_special_reads = false;
+  const InlineAsmEffect e = parse_inline_asm(text);
+  if (e.opaque) {
+    fx.unknown_effect = true;
+    fx.reject_reason = e.reason;
+    return fx;
+  }
+  for (const AsmSlot &s : e.uses) {
+    if (s.vgpr) {
+      fx.vreads.set(s.index);
+      fx.reads.set(kLocExecLo);
+      fx.reads.set(kLocExecHi);
+    } else {
+      fx.reads.set(s.index);
+    }
+  }
+  for (const AsmSlot &s : e.defs) {
+    if (s.vgpr) {
+      fx.vwrites.set(s.index); // the lanes in EXEC
+      fx.reads.set(kLocExecLo);
+      fx.reads.set(kLocExecHi);
+    } else {
+      fx.writes.set(s.index);
+    }
+  }
+  fx.p0 = !e.untracked;
+  if (e.untracked)
+    fx.reject_reason = e.reason;
+  return fx;
+}
+
+std::string inline_asm_shape(std::string_view text) {
+  const InlineAsmEffect e = parse_inline_asm(text);
+  if (e.opaque)
+    return "opaque:" + std::string(text);
+  auto shape = [](const std::vector<AsmSlot> &slots) {
+    std::string s;
+    for (const AsmSlot &a : slots)
+      s += a.vgpr ? 'v' : (a.index < kNumSgprs ? 's' : 'x');
+    return s;
+  };
+  return "use " + shape(e.uses) + ";def " + shape(e.defs) + (e.untracked ? ";agpr" : "");
 }
 
 } // namespace rocjitsu::isa_diff

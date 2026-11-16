@@ -12,7 +12,11 @@
 /// direction that matters to the contract:
 ///   - an unknown successor, call edge, or unknown-effect instruction makes everything live;
 ///   - instructions outside P0 never kill, and are assumed to read EXEC, VCC and M0;
-///   - a block with no successors (s_endpgm) has nothing live after it.
+///   - a block with no successors (s_endpgm) has nothing live after it;
+///   - a callable function's return (`s_setpc_b64 s[30:31]`) has the calling
+///     convention's observable registers live after it.
+/// Comment-only inline-asm blocks of a `.s` input are zero-size pseudo-instructions in
+/// the linear order, with the effects their text names (`; def`, `; use`).
 #pragma once
 
 #include "artifact.h"
@@ -50,6 +54,11 @@ struct InstRef {
   int64_t branch_target_index = -1;
   /// Relocations patching this instruction's bytes ("type 1 sym+4; ..."), empty if none.
   std::string relocations;
+  /// A comment-only inline-asm block (artifact.inline_asm[inline_asm]) represented as a
+  /// zero-size pseudo-instruction: inst is null, words are empty, fx comes from its text.
+  /// -1 for machine instructions.
+  int inline_asm = -1;
+  std::string asm_text; ///< The block's text (pseudo-instructions only).
 };
 
 /// Memory operations that may still be outstanding at a program point (gfx9 counters).
@@ -80,7 +89,18 @@ struct BlockInfo {
   std::vector<uint32_t> successors;
   std::vector<uint32_t> predecessors;
   bool unknown_successor = false; ///< Indirect/missing edge or call: everything live-out.
+  /// Ends with the callable function's return (`s_setpc_b64 s[30:31]`): live-out is the
+  /// calling convention's (return VGPRs, callee-saved registers, EXEC).
+  bool returns = false;
 };
+
+/// Locations a caller can observe after a callable function returns (AMDGPU C calling
+/// convention): callee-saved SGPRs s30-s39, s48-s55, s64-s71, s80-s87, s96-s101 (with the
+/// return address, stack and frame pointers) and EXEC.
+[[nodiscard]] LocSet return_observable_locs();
+/// VGPRs a caller can observe after a return: v0..v{return_vgprs-1} and the callee-saved
+/// stripes v40-v47, v56-v63, ..., v248-v255.
+[[nodiscard]] VSet return_observable_vgprs(unsigned return_vgprs);
 
 class KernelModel {
 public:

@@ -108,6 +108,26 @@ std::vector<uint64_t> differing_memory(const MachineState &a, const MachineState
   return out;
 }
 
+/// First difference between what the two sides' inline-asm `use` blocks observed, or empty.
+std::string asm_use_difference(const MachineState &a, const MachineState &b) {
+  const size_t n = std::max(a.asm_uses.size(), b.asm_uses.size());
+  for (size_t i = 0; i < n; ++i) {
+    if (i >= a.asm_uses.size() || i >= b.asm_uses.size() ||
+        a.asm_uses[i].block != b.asm_uses[i].block ||
+        a.asm_uses[i].values.size() != b.asm_uses[i].values.size())
+      return "inline asm use blocks executed differently (old " +
+             std::to_string(a.asm_uses.size()) + ", new " + std::to_string(b.asm_uses.size()) +
+             " observations)";
+    const AsmUse &ua = a.asm_uses[i];
+    const AsmUse &ub = b.asm_uses[i];
+    for (size_t k = 0; k < ua.values.size(); ++k)
+      if (ua.values[k] != ub.values[k])
+        return "inline asm block " + std::to_string(ua.block) + " use differs at value " +
+               std::to_string(k) + ": old " + hex32(ua.values[k]) + " new " + hex32(ub.values[k]);
+  }
+  return {};
+}
+
 uint8_t memory_byte(const MachineState &s, uint64_t x) {
   for (const auto &[a, v] : s.mem_written)
     if (a == x)
@@ -160,6 +180,12 @@ std::string compare_pair(const RegionPair &region, const MachineState &init_old,
   if (!mdiff.empty()) {
     m.memory = true;
     m.mem_addrs.assign(mdiff.begin(), mdiff.begin() + std::min<size_t>(mdiff.size(), 16));
+  }
+  // Inline asm: what matched `use` blocks observed.
+  const std::string adiff = asm_use_difference(final_old, final_new);
+  if (diff.none() && vdiff.none() && mdiff.empty() && !adiff.empty()) {
+    m.detail = adiff;
+    return "observable";
   }
   if (diff.none() && vdiff.none() && !mdiff.empty()) {
     const uint64_t x = mdiff.front();
@@ -646,6 +672,12 @@ void build_initial_states(const RegionContract &contract, const Sample &sample, 
     const uint64_t mseed = splitmix64(seed ^ splitmix64(case_index ^ 0x6d656d6f7279ull)) | 1u;
     old_state.mem_seed = mseed;
     new_state.mem_seed = mseed;
+  }
+  // Inline asm: matched def blocks write the same per-case values on both sides.
+  if (contract.inline_asm) {
+    const uint64_t aseed = splitmix64(seed ^ splitmix64(case_index ^ 0x696e6c696e65ull)) | 1u;
+    old_state.asm_seed = aseed;
+    new_state.asm_seed = aseed;
   }
   // Each side starts in its own kernel's MODE (FP rounding/denormals, DX10_CLAMP, IEEE).
   old_state.frame.mode = contract.mode_old;

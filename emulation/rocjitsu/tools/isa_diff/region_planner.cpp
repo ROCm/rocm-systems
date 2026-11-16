@@ -89,7 +89,7 @@ std::vector<RegionInst> region_insts(const KernelModel &m, size_t begin, size_t 
   std::vector<RegionInst> out;
   for (size_t i = begin; i < end; ++i) {
     const InstRef &ref = m.insts()[i];
-    out.push_back({ref.pc, ref.words, ref.text});
+    out.push_back({ref.pc, ref.words, ref.text, ref.inline_asm, ref.asm_text});
   }
   return out;
 }
@@ -329,11 +329,26 @@ RegionPair build_region(const KernelModel &om, const KernelModel &nm, const Cand
                              "outside EXEC keep their value)",
                          "KernelModel backward VSet liveness"});
   }
+  std::vector<int> asm_blocks[2];
   for (const auto *side : {&region.old_side, &region.new_side}) {
     const KernelModel &m = side == &region.old_side ? om : nm;
     for (size_t i = side->begin; i < side->end; ++i) {
       k.memory_reads = k.memory_reads || m.insts()[i].fx.mem_read;
       k.memory_writes = k.memory_writes || m.insts()[i].fx.mem_write;
+      if (m.insts()[i].inline_asm >= 0)
+        asm_blocks[side == &region.old_side ? 0 : 1].push_back(m.insts()[i].inline_asm);
+    }
+  }
+  if (!asm_blocks[0].empty() || !asm_blocks[1].empty()) {
+    k.inline_asm = true;
+    k.sources.push_back({"inline asm: blocks are paired by their index in each function's "
+                         "sequence; a def block writes per-case values, equal for both "
+                         "blocks of a pair; what use blocks observe (lanes in EXEC) is compared",
+                         "inline-asm markers from the .s source"});
+    if (asm_blocks[0] != asm_blocks[1] && region.status == RegionStatus::Ready) {
+      region.status = RegionStatus::Inconclusive;
+      region.reason = "INCONCLUSIVE_MAPPING: the region's sides contain different inline asm "
+                      "blocks, so their values cannot be paired";
     }
   }
   if (k.memory_reads || k.memory_writes) {
@@ -376,8 +391,8 @@ RegionPair build_region(const KernelModel &om, const KernelModel &nm, const Cand
       ++l;
     }
   }
-  k.mode_old = initial_mode(om.artifact().descriptor);
-  k.mode_new = initial_mode(nm.artifact().descriptor);
+  k.mode_old = initial_mode(om.artifact());
+  k.mode_new = initial_mode(nm.artifact());
   k.sources.push_back({"mode_old/mode_new = MODE at dispatch from each kernel descriptor's "
                        "compute_pgm_rsrc1 (assembler defaults without a descriptor)",
                        "kernel descriptor"});
@@ -571,7 +586,7 @@ AtomMap build_atoms(const KernelModel &om, const KernelModel &nm, const DiffResu
           const InstRef &ref = m.insts()[i];
           a.writes |= ref.fx.writes;
           a.unknown = a.unknown || ref.fx.unknown_effect;
-          a.mem = a.mem || (ref.inst->flags() & MEMORY_OP);
+          a.mem = a.mem || (ref.inst && (ref.inst->flags() & MEMORY_OP));
           a.vwrites |= ref.fx.vwrites;
         }
       };
@@ -617,7 +632,7 @@ CompositionResult analyse_composition(const KernelModel &om, const KernelModel &
       s = eq_bottom();
       return;
     }
-    const uint64_t flags = ref.inst->flags();
+    const uint64_t flags = ref.inst ? ref.inst->flags() : 0;
     const bool is_mem = (flags & MEMORY_OP) != 0;
     LocSet reads = ref.fx.reads;
     reads |= ref.fx.implicit_reads;
@@ -684,7 +699,7 @@ CompositionResult analyse_composition(const KernelModel &om, const KernelModel &
   };
   auto diverges = [&](uint32_t b, const EqState &s) {
     const InstRef &last = oi[blocks[b].end - 1];
-    if (!(last.inst->flags() & COND_BRANCH))
+    if (!last.inst || !(last.inst->flags() & COND_BRANCH))
       return false;
     if (owner[blocks[b].end - 1] >= 0)
       return true;
@@ -775,7 +790,7 @@ uint32_t top_mask(uint32_t n) { return n == 0 ? 0u : n >= 32 ? ~0u : ~0u << (32 
 
 std::optional<Bits> transfer_bits(const InstRef &ref, const BitsState &s) {
   const Effects &fx = ref.fx;
-  if (!fx.p0 || (ref.inst->flags() & PREDICATED_DEF))
+  if (!fx.p0 || !ref.inst || (ref.inst->flags() & PREDICATED_DEF))
     return std::nullopt;
   LocSet dst = fx.writes;
   dst.reset(kLocScc);
@@ -1098,8 +1113,20 @@ PlanResult plan_regions(const KernelModel &old_model, const KernelModel &new_mod
       shapes.erase({0, 0});
       std::vector<std::pair<size_t, size_t>> ordered(shapes.begin(), shapes.end());
       std::ranges::stable_sort(ordered, {}, [](const auto &s) { return s.first + s.second; });
-      if (ordered.size() > options.max_variants)
-        ordered.resize(options.max_variants);
+      if (ordered.size() > options.max_variants) {
+        // Keep the largest contexts as well: when the small ones fail, the compensating
+        // code is often further away (a reused VGPR overwritten a dozen instructions on).
+        std::vector<std::pair<size_t, size_t>> largest;
+        for (auto s : {std::pair{size_t{0}, max_f}, std::pair{max_b, max_f}})
+          if (s != std::pair<size_t, size_t>{0, 0} &&
+              std::ranges::find(largest, s) == largest.end())
+            largest.push_back(s);
+        ordered.resize(options.max_variants > largest.size() ? options.max_variants - largest.size()
+                                                             : 0);
+        for (const auto &s : largest)
+          if (std::ranges::find(ordered, s) == ordered.end())
+            ordered.push_back(s);
+      }
       for (const auto &[b, f] : ordered) {
         Candidate v = merged[r];
         v.before = 0;
@@ -1190,7 +1217,8 @@ PlanResult plan_regions(const KernelModel &old_model, const KernelModel &new_mod
         }
         d.reads |= fx.reads | fx.implicit_reads;
         d.vreads |= fx.vreads;
-        d.mem = d.mem || fx.mem_read || (m.insts()[i].inst->flags() & MEMORY_OP) != 0;
+        d.mem = d.mem || fx.mem_read ||
+                (m.insts()[i].inst && (m.insts()[i].inst->flags() & MEMORY_OP) != 0);
       }
     };
     for (size_t q = 0; q < result.regions.size(); ++q) {

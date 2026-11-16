@@ -218,6 +218,35 @@ class Validator:
                 self.check_file(os.path.join(dirpath, name))
 
 
+# A callable function as llc prints it, with inline-asm placeholders (LLVM plugin: the .s
+# path needs llvm-mc and ld.lld). TMP is the temporary the def produces, USE what the use
+# block reads.
+FUNCTION_LISTING = """\t.text
+\t.globl\tg
+\t.p2align\t8
+\t.type\tg,@function
+g:
+\ts_waitcnt vmcnt(0) expcnt(0) lgkmcnt(0)
+\t;;#ASMSTART
+\t; def TMP
+\t;;#ASMEND
+\ts_nop 0
+\tv_add_u32_e32 TMP, v0, TMP
+\tv_mul_lo_u32 v0, TMP, v1
+\t;;#ASMSTART
+\t; use USE
+\t;;#ASMEND
+\ts_setpc_b64 s[30:31]
+.Lfunc_end0:
+\t.size\tg, .Lfunc_end0-g
+"""
+FUNCTIONS = {
+    "fn_old": {"TMP": "v2", "USE": "v2"},
+    "fn_new": {"TMP": "v3", "USE": "v3"},  # renamed everywhere: equivalent
+    "fn_wrong": {"TMP": "v2", "USE": "v0"},  # the use reads another register
+}
+
+
 def run(tool, args, expect, failures):
     proc = subprocess.run([tool] + args, capture_output=True, text=True)
     if proc.returncode not in expect:
@@ -377,6 +406,33 @@ def drive_cli(tool, work, v):
         )
     else:
         f.append("memory store-offset case produced no counterexample bundle")
+    # Callable function with comment-only inline asm (.s through the LLVM plugin).
+    for name, subst in FUNCTIONS.items():
+        text = FUNCTION_LISTING
+        for k, val in subst.items():
+            text = text.replace(k, val)
+        with open(path(name + ".s"), "w") as out:
+            out.write(text)
+    for case, new_name, code in (("fn", "fn_new", 0), ("fn_wrong", "fn_wrong", 1)):
+        run(
+            tool,
+            [
+                "analyze",
+                "--old",
+                path("fn_old.s"),
+                "--new",
+                path(new_name + ".s"),
+                "--kernel",
+                "g",
+                "--return-vgprs",
+                "1",
+                "--out",
+                path(case),
+            ],
+            {0},
+            f,
+        )
+        test(case, {code})
     # Synthetic error injection, its counterexamples, and replay of one bundle.
     run(
         tool,
@@ -445,6 +501,8 @@ def drive_cli(tool, work, v):
         "memst",
         "memld",
         "memst_off",
+        "fn",
+        "fn_wrong",
         "shift_injected",
     ]:
         v.check_tree(path(case))

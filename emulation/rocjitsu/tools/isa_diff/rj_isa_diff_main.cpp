@@ -10,6 +10,7 @@
 
 #include <charconv>
 #include <cstdio>
+#include <cstdlib>
 #include <filesystem>
 #include <iostream>
 #include <map>
@@ -37,6 +38,7 @@ const char *kUsage =
     "                      [--manual-region old:B-E,new:B-E [--map s4=s8,...]\n"
     "                       [--entry-map s4=s8,...] [--exit-map s4=s8,...]]\n"
     "                      [--diagnostic-entry-prefix] [--cache-dir DIR]\n"
+    "                      [--return-vgprs N] [--function-mode HEX]  (callable functions)\n"
     "      --manual-region: one hand-written region (instruction indices or 0x PCs, E\n"
     "      exclusive); --map: old=new register correspondence. Both stay ASSUMED.\n"
     "  rj_isa_diff test    --case DIR [--seed N] [--cases N] [--region ID]\n"
@@ -146,8 +148,9 @@ int exit_code_for(const Json &overall) {
 }
 
 const std::vector<std::string> kPlanFlags = {
-    "--context",   "--max-region", "--max-expansions",  "--manual-region", "--map",
-    "--entry-map", "--exit-map",   "--max-analysis-ms", "--cache-dir"};
+    "--context",   "--max-region",   "--max-expansions", "--manual-region",
+    "--map",       "--entry-map",    "--exit-map",       "--max-analysis-ms",
+    "--cache-dir", "--return-vgprs", "--function-mode"};
 const std::vector<std::string> kPlanSwitches = {"--no-merge", "--no-derive-constraints",
                                                 "--diagnostic-entry-prefix"};
 
@@ -227,6 +230,25 @@ int run_analyze(const std::string &old_path, const std::string &new_path, const 
                  common_args, new_args, new_a, new_prov, error)) {
     std::cerr << "new: " << error << "\n";
     return kExitError;
+  }
+  // Callable functions: the caller-visible part of the calling convention.
+  const auto ret_vgprs = a.number("--return-vgprs", 32);
+  std::optional<uint32_t> fmode = kDefaultFunctionMode;
+  if (a.has("--function-mode")) {
+    const std::string &s = a.get("--function-mode");
+    char *end = nullptr;
+    const unsigned long v = std::strtoul(s.c_str(), &end, 0);
+    fmode = end && *end == '\0' && !s.empty() && v <= 0xffffffffu
+                ? std::optional<uint32_t>(static_cast<uint32_t>(v))
+                : std::nullopt;
+  }
+  if (!ret_vgprs || *ret_vgprs > 32 || !fmode) {
+    std::cerr << "--return-vgprs takes 0..32; --function-mode takes a MODE register value\n";
+    return kExitError;
+  }
+  for (Artifact *art : {&old_a, &new_a}) {
+    art->return_vgprs = static_cast<unsigned>(*ret_vgprs);
+    art->function_mode = *fmode;
   }
   bool cache_hit = false;
   auto data = analyze_cached(old_a, new_a, *plan, a.get("--cache-dir"), cache_hit, error);

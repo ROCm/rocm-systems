@@ -1,6 +1,7 @@
 # rj_isa_diff: incremental ISA-to-ISA differential testing
 
-`rj_isa_diff` compares an old and a new compile of the same AMDGPU kernel. It finds
+`rj_isa_diff` compares an old and a new compile of the same AMDGPU kernel or callable
+function. It finds
 where the machine code changed, cuts a contiguous region around each change, and
 writes an explicit entry/exit contract for that region. It then runs both versions of
 the region on paired inputs through RocJITsu's own instruction execution
@@ -16,15 +17,29 @@ Scope: gfx950 (CDNA4), wave64, straight-line regions inside one basic block, mad
   `global_store_*`, `s_load_dword*`, and `s_waitcnt` (see "Memory").
 
 LDS, flat, buffer, scratch and atomic accesses stay outside. The kernel around a region
-may contain anything; the region may not.
+may contain anything; the region may not. Regions may also contain the comment-only
+inline-asm blocks of LLVM tests (`; def v[0:1]`, `; use s4`; see "Inline asm").
 
 Inputs are AMDGPU code objects, raw instruction words, and, through the LLVM plugin
 (`llvm/`), `.s` and `.ll` sources. The core never runs LLVM; the plugin is a separate
-library that turns sources into code objects and records how.
+library that turns sources into code objects and records how. A kernel is found through
+its descriptor; a function symbol without a descriptor is a callable function (see
+"Callable functions").
+
+To test an LLVM change, `rj_isa_diff_pr` does everything in one command: it reads the
+old and new assembly of every function the change affects from the CHECK lines of the
+AMDGPU lit tests the change regenerated, and runs `analyze` and `test` on each (see
+"Testing an LLVM change").
 
 ## Commands
 
 ```sh
+# 0. One command for an LLVM change (base and head revisions of an llvm-project checkout).
+rj_isa_diff_pr --repo ~/llvm-project --base BASE --head HEAD --out report/
+#   --pr N             fetch GitHub PR N and test it against its merge base
+#   --head WORKTREE    test the checkout's uncommitted (regenerated) tests
+#   [--cases N] [--jobs N] [--tests GLOB] [--proxy-targets LIST] [--llvm-bin DIR] [--list]
+
 # 1. Decode, align, classify, plan regions and contracts.
 rj_isa_diff analyze --old old.hsaco --new new.hsaco --kernel my_kernel --out case/
 #   [--context N]       execute N common-prefix instructions before the change
@@ -38,6 +53,7 @@ rj_isa_diff analyze --old old.hsaco --new new.hsaco --kernel my_kernel --out cas
 #   [--diagnostic-entry-prefix]  also build entry-prefix diagnostic regions
 #   [--cache-dir DIR]   reuse an identical earlier analysis
 #   [--old-kernel/--new-kernel NAME] when the symbol name differs
+#   callable functions: [--return-vgprs N] (0..32, default 32) [--function-mode HEX]
 #   .s/.ll inputs: [--llvm-bin DIR] [--llc-args S] [--old-llc-args S] [--new-llc-args S]
 
 # 1b. LLVM plugin: compile one .ll twice, with different llc options per side.
@@ -117,7 +133,9 @@ For each region pair (`case.json` → `regions[].contract`):
   the two continuations read different locations, the region is
   `INCONCLUSIVE_MAPPING` instead of guessing a mapping.
 - **Frame**: STATUS (except SCC), MODE, TRAPSTS, TTMP, scratch base, wait counters,
-  and trap/wave state are fixed and must be preserved.
+  and trap/wave state are fixed and must be preserved. The sticky arithmetic exception
+  flags (TRAPSTS.EXCP bits 0-6) are excluded: VALU arithmetic sets them, and LLVM's
+  default floating-point environment gives them no meaning.
 - **Effect check**: each side may change only its `declared_writes_*`. Any other
   change is a `HARNESS_ERROR`, because it means the effect model is wrong.
 - **Pending effects** (`pending_effects`): memory operations that may still be in flight,
@@ -151,7 +169,9 @@ A local mismatch may be compensated by common code around the change (handoff 5.
 `analyze` precomputes up to 12 larger variants of each READY region, stored in
 `case.json` under `expansion_variants`. Each variant adds matched common P0 instructions
 from the same block, before and/or after the change (`r0.ctx-b<before>f<after>`). Each
-has its own contract.
+has its own contract. When there are more shapes than variants, the largest contexts
+(all common code forward, and both ways) are kept besides the smallest ones, because the
+code that compensates a difference is often further away than a few instructions.
 
 After a base region shows `LOCAL_MISMATCH`, `test` runs these variants smallest first. The
 base result keeps its local mismatch, and `expansion.resolution` records the outcome:
@@ -284,6 +304,123 @@ The note then says "register allocation only". Register-count metadata (`.vgpr_c
 `.sgpr_count`, `.agpr_count`) follows the same rule. Any other descriptor bit, or an
 allocation that a kernel overruns, stays semantic.
 
+## Callable functions
+
+A function symbol (`STT_FUNC`) without a kernel descriptor is a callable function under the
+AMDGPU C calling convention (`CC_AMDGPU_Func`, `AMDGPUCallingConv.td`). The case records
+it under `artifacts.*.callable_function`.
+
+- **Return.** `s_setpc_b64 s[30:31]` is the return: a block without successors, instead of
+  an unknown indirect branch. It reads only s[30:31].
+- **Live at a return.** The caller observes:
+  - the return VGPRs `v0..v{N-1}`, with N from `--return-vgprs` (default 32: every VGPR
+    the convention can return in, which is conservative for a function returning less);
+  - the callee-saved SGPRs s30-s39, s48-s55, s64-s71, s80-s87, s96-s101 (with the return
+    address, stack and frame pointers);
+  - the callee-saved VGPRs v40-v47, v56-v63, ..., v248-v255, on every lane;
+  - EXEC.
+
+  Caller-saved registers (s0-s29, v0-v39 beyond the return value, VCC, M0, SCC) are
+  dead after the return. A rewrite that clobbers a callee-saved register is a mismatch.
+- **Entry.** Both sides enter with the same caller state, so the composition check starts
+  from full equality, as for a kernel. MODE at entry is `--function-mode` (default
+  `0x3f0`: LLVM's default function mode, denormals kept, DX10_CLAMP and IEEE on).
+- **Calls** (`s_swappc_b64`) stay unknown successors: everything is live there.
+- A kernel body without its descriptor (as in LLVM test CHECK lines) also loads as a
+  function symbol; it ends at `s_endpgm`, where nothing is live.
+
+## Inline asm
+
+LLVM tests feed values in and out of the code under test with comment-only inline asm:
+
+```
+;;#ASMSTART
+; def v[0:1]
+;;#ASMEND
+```
+
+Such a block assembles to nothing, so it is invisible in the code object. Ignored, its
+inputs would look like unchanged entry values, which is wrong when old and new allocate them
+differently, and a value consumed by a `; use` block would look dead.
+
+- **Marking.** The LLVM plugin puts a label (`__rj_isa_diff_asm.<n>`) in front of every
+  comment-only block before assembling. It records the block's text, and whether a label
+  follows the block, in a non-loaded section, `.rj_isa_diff_inline_asm`. The code object
+  carries both, and its hash covers them. Blocks that contain real instructions are
+  ordinary code.
+- **Pseudo-instructions.** The kernel model turns each block into a zero-size
+  pseudo-instruction at its position. Its effects come from the text:
+  - `; def R, ...` writes R: VGPR lanes in EXEC, so it reads EXEC;
+  - `; use R, ...` reads R (and EXEC for VGPRs).
+
+  R is `sN`, `s[N:M]`, `vN`, `v[N:M]`, `vcc`, `exec`, `m0`, `scc`, or one of their halves.
+  AGPR operands are untracked: no region may contain the block. Any other text that names
+  a register is opaque: its effects are unknown, and a diff note keeps coverage partial.
+  A block followed by a label ends the preceding block. After a branch, it would sit on
+  the fall-through edge alone; that case is opaque too.
+- **Pairing.** Blocks are paired by their index in each function's sequence of blocks.
+  - The diff key includes the index and the text: a block whose operands were renamed is
+    part of a changed hunk, so the code around it forms one region.
+  - Sequences of different length or operand shape are a diff note: no pairing, coverage
+    partial.
+  - A region whose two sides contain different blocks is `INCONCLUSIVE_MAPPING`.
+- **Execution.**
+  - A `def` writes per-case values from the case's inline-asm seed. The old and new block
+    with the same index get the same values, whatever registers they name.
+  - SGPRs that the region uses as a memory base get pointer-shaped values.
+  - A `use` records what it reads: SGPRs, VGPR lanes in EXEC, and EXEC. The two sides'
+    records are compared like stored bytes, so a renamed register that ends in a `use` is
+    checked, and a wrong value in it is a mismatch (`inline asm block K use differs`).
+  - States record the seed and the uses (`inline_asm`), so bundles replay.
+- **Assumption.** Pairing by position assumes both compiles emit the blocks in the same
+  order. Non-`sideeffect` inline asm may be scheduled. A reorder pairs the wrong values,
+  which shows up as a mismatch rather than a pass.
+
+## Testing an LLVM change
+
+`rj_isa_diff_pr` (`llvm/rj_isa_diff_pr.py`, installed next to `rj_isa_diff` in the build
+tree) tests an LLVM change on the AMDGPU lit tests it updates. LLVM is neither built nor
+run.
+
+- **Source of the assembly.** Tests whose assertions were autogenerated by
+  `utils/update_llc_test_checks.py` contain each function's complete assembly in their
+  CHECK lines. The driver reads both revisions of each changed test under
+  `llvm/test/CodeGen/AMDGPU` from git, and rebuilds the old and new listing of every
+  function whose CHECK body changed. A listing is the body with `{{\[\[}}`-style
+  escapes undone, plus placeholder data for symbols it references but does not define.
+  An assembler (`llvm-mc` and `ld.lld`, by default ROCm's) turns it into a code object.
+- **What is compared.** A function under a RUN line that targets gfx950, or a proxy
+  target, and is the same on both sides:
+  - the test is autogenerated without `--filter`;
+  - the RUN line is unchanged;
+  - the function's IR is unchanged: body, attribute groups, referenced globals;
+  - its CHECK lines contain no FileCheck patterns;
+  - its calling convention is the C one or `amdgpu_kernel`.
+
+  Every other changed function is listed with the reason it was skipped.
+- **Proxy targets.** Listings of other GFX9 targets (gfx940-gfx942, and gfx900-gfx90c with
+  the vector-memory cache bits glc/slc/scc renamed sc0/nt/sc1, the same bits) are
+  assembled and executed as gfx950 and labelled `proxy`. A listing gfx950 cannot assemble
+  (a removed instruction, an odd-aligned VGPR pair) is `UNSUPPORTED`. Changed functions on
+  other targets are counted, not executed.
+- **ABI from the IR.**
+  - `--return-vgprs` is the return type's size in dwords (`void` 0, `<3 x half>` 2,
+    `iN`/`bN` ceil(N/32), structs and arrays summed). An unknown type gives the
+    conservative 32, with a note.
+  - `--function-mode` comes from the denormal attributes (`denormal_fpenv(...)`,
+    `"denormal-fp-math"`, `"denormal-fp-math-f32"`) and `"amdgpu-ieee"`.
+- **Output.** `report.md` (a verdict table, then details of every function that did not
+  pass) and `summary.json`. Each function's directory under `functions/` holds its
+  listings, case, results and logs.
+- **Exit codes.**
+
+  | code | meaning |
+  |---|---|
+  | 0 | every compared function passed and nothing changed was skipped |
+  | 1 | a local mismatch |
+  | 2 | inconclusive, unsupported or skipped functions |
+  | 3 | harness error |
+
 ## Manual regions and register maps
 
 `--manual-region old:B-E,new:B-E` replaces automatic planning with one hand-picked
@@ -335,8 +472,10 @@ liveness disagrees. It is never inferred from outputs.
 - `.s` goes through `llvm-mc`, then `ld.lld -shared --emit-relocs`. `--emit-relocs`
   keeps `.rela.text`, so instructions patched by the linker stay identifiable; the
   executed bytes are unchanged.
-- A listing without a kernel descriptor falls back to its raw `.text`
-  (`executed_object: raw_text`).
+- A listing with neither a kernel descriptor nor a function symbol falls back to its raw
+  `.text` (`executed_object: raw_text`).
+- Comment-only inline-asm blocks are marked in a copy of the source before assembly
+  (`inline_asm_blocks_marked`; see "Inline asm").
 
 `case.json` gets `provenance.{old,new}` with:
 
@@ -563,8 +702,11 @@ case parity. Learned policies are future work, and may only propose inputs.
 - Fixtures come from `tests/isa_diff/fixtures/fixtures.asm`, assembled once by
   `regen_fixtures.sh`; these tests never run LLVM.
 - `rj_isa_diff_llvm_tests` (prefix `isa_diff_llvm.`) is built only when `llc` is found
-  at configure time. It covers the plugin, the real LLVM pairs, relocations and
-  per-kernel metadata.
+  at configure time. It covers the plugin, the real LLVM pairs, relocations,
+  per-kernel metadata, inline-asm marking, and a callable function with inline asm end to
+  end.
+- `validate_outputs.py` also drives a callable function with inline asm through the LLVM
+  plugin (`fn`, `fn_wrong`), so the new fields are validated on real output.
 - `isa_diff.schema_and_cli` runs `validate_outputs.py` against the CLI and the committed
   samples. It is skipped when python3-jsonschema is missing.
 - `docs/samples/regen.sh` regenerates the samples (`codeobject`, `synthetic`,

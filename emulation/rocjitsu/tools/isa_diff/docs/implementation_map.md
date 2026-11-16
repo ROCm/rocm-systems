@@ -138,3 +138,6 @@ and `ScalarSccTest.*:*Sop*:*Scalar*` passes 1162/1162 on the base.
 | 11 caches and cost | `result_cache.{h,cpp}`, `region.cpp` `compute_prepared_key`, timing fields in `case_io.cpp` / `differential.cpp` |
 | 12 CLI and schemas | `rj_isa_diff_main.cpp`, `docs/schema/` |
 | 13 tests | `tests/isa_diff/isa_diff_test.cpp`, `tests/isa_diff/llvm_plugin_test.cpp`, `docs/schema/validate_outputs.py` |
+| callable functions (Phase G) | `artifact.cpp` (`artifact_from_code_object`: function symbol without descriptor; `initial_mode(const Artifact&)`), `kernel_model.cpp` (`BlockInfo::returns`, `return_observable_locs/vgprs`), `rj_isa_diff_main.cpp` (`--return-vgprs`, `--function-mode`) |
+| inline asm (Phase G) | `llvm/llvm_frontend.cpp` (`mark_inline_asm`), `artifact.cpp` (`read_inline_asm`), `effects.cpp` (`parse_inline_asm`, `classify_inline_asm`, `inline_asm_shape`), `kernel_model.cpp` (pseudo-instructions), `diff.cpp` (`key_of`, shape notes), `region_runner.cpp` (`run_inline_asm`, `inline_asm_word`), `differential.cpp` (`asm_use_difference`, inline-asm seed) |
+| one command for an LLVM change (Phase G) | `llvm/rj_isa_diff_pr.py` (copied to the build tree as `rj_isa_diff_pr`) |
