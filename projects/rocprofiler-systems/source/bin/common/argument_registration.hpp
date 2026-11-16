@@ -184,16 +184,23 @@ register_preset_and_domain_arguments(argument_parser& parser, std::string_view t
                 if(!input.empty())
                 {
                     const auto input_integer = utility::string::safe_stoi(input);
-                    if(input_integer.is_ok())
-                    {
-                        freq = input;
-                    }
-                    else
+                    if(input_integer.is_error())
                     {
                         std::cerr << fmt::format(
                             "[rocprof-sys] WARNING: Invalid CPU sampling frequency "
                             "'{}' ({}), using default 100 Hz\n",
                             input, input_integer.error());
+                    }
+                    else if(input_integer.value() <= 0)
+                    {
+                        std::cerr << fmt::format(
+                            "[rocprof-sys] WARNING: Invalid CPU sampling frequency "
+                            "'{}' (must be positive), using default 100 Hz\n",
+                            input);
+                    }
+                    else
+                    {
+                        freq = input;
                     }
                 }
             }
