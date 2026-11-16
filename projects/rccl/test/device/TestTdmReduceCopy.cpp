@@ -40,12 +40,12 @@ constexpr size_t kGuardElts = 64;
 template<typename RedOp, typename T, int NSrcs, int NDsts, int PreOpSrcs>
 __global__ void __launch_bounds__(kBlockThreads)
   kReduceCopyTdm(T* const* srcs, T* const* dsts, ssize_t nElts, uint64_t redArg, bool postOp,
-                 [[maybe_unused]] int tdmReduce) {
+                 [[maybe_unused]] int tdmCopy, [[maybe_unused]] int tdmReduce) {
   __shared__ void* srcPtrs[NSrcs];
   __shared__ void* dstPtrs[NDsts];
   if (threadIdx.x == 0) {
 #if ENABLE_TDM_SIMPLE
-    ncclShmem.comm.tdmSimpleEnable = 0;
+    ncclShmem.comm.tdmSimpleEnable = tdmCopy;
     ncclShmem.comm.tdmSimpleReduceEnable = tdmReduce;
 #endif
     for (int s = 0; s < NSrcs; s++) srcPtrs[s] = srcs[s];
@@ -61,13 +61,13 @@ __global__ void __launch_bounds__(kBlockThreads)
 // TDM reduce path. Equal outputs alone cannot show that the TDM tiles ran, since the vector path computes the same.
 template<typename RedOp, typename T, int NSrcs, int NDsts, int PreOpSrcs>
 __global__ void __launch_bounds__(kBlockThreads)
-  kTdmReduceGate(T* const* srcs, T* const* dsts, ssize_t nElts, bool postOp, [[maybe_unused]] int tdmReduce,
-                 int* gate) {
+  kTdmReduceGate(T* const* srcs, T* const* dsts, ssize_t nElts, bool postOp, [[maybe_unused]] int tdmCopy,
+                 [[maybe_unused]] int tdmReduce, int* gate) {
   __shared__ void* srcPtrs[NSrcs];
   __shared__ void* dstPtrs[NDsts];
   if (threadIdx.x == 0) {
 #if ENABLE_TDM_SIMPLE
-    ncclShmem.comm.tdmSimpleEnable = 0;
+    ncclShmem.comm.tdmSimpleEnable = tdmCopy;
     ncclShmem.comm.tdmSimpleReduceEnable = tdmReduce;
 #endif
     for (int s = 0; s < NSrcs; s++) srcPtrs[s] = srcs[s];
@@ -104,12 +104,14 @@ protected:
   template<typename T>
   static T value(size_t i, int s);
 
-  // Runs one reduceCopy shape with the TDM reduce switch on and off and checks both against `ref`, and checks that the
-  // TDM gate admits the shape only with the switch on, and only when `expectTdm`.
-  // `offElts` shifts every pointer off the 256-byte alignment the TDM gate requires.
+  // Runs one reduceCopy shape with a TDM switch on and off and checks both against `ref`, and checks that the TDM gate
+  // admits the shape only with the switch on, and only when `expectTdm`. The switch is RCCL_TDM_SIMPLE_REDUCE_ENABLE,
+  // or RCCL_TDM_SIMPLE_ENABLE with `copySwitch`. `offElts` shifts every pointer off the 256-byte alignment the TDM
+  // gate requires.
   template<typename RedOp, typename T, int NSrcs, int NDsts, int PreOpSrcs>
   void run(size_t nElts, size_t offElts, uint64_t redArg, bool postOp, bool expectTdm,
-           const std::function<T(const std::vector<std::vector<T>>&, size_t)>& ref, const std::string& tag) {
+           const std::function<T(const std::vector<std::vector<T>>&, size_t)>& ref, const std::string& tag,
+           bool copySwitch = false) {
 #if !ENABLE_TDM_SIMPLE
     GTEST_SKIP() << "Built without ENABLE_TDM_SIMPLE";
 #endif
@@ -132,7 +134,9 @@ protected:
     T sentinel;
     std::memset(&sentinel, 0xAB, sizeof(T));
 
-    for (int tdmReduce = 1; tdmReduce >= 0; tdmReduce--) {
+    for (int tdm = 1; tdm >= 0; tdm--) {
+      const int tdmCopy = copySwitch ? tdm : 0;
+      const int tdmReduce = copySwitch ? 0 : tdm;
       std::vector<DeviceBuffer<T>> dSrc, dDst;
       std::vector<T*> srcPtrs, dstPtrs;
       for (int s = 0; s < NSrcs; s++) {
@@ -151,27 +155,27 @@ protected:
       dDstPtrs.copyFrom(dstPtrs);
 
       kReduceCopyTdm<RedOp, T, NSrcs, NDsts, PreOpSrcs><<<1, kBlockThreads>>>(
-        dSrcPtrs.ptr, dDstPtrs.ptr, static_cast<ssize_t>(nElts), redArg, postOp, tdmReduce);
+        dSrcPtrs.ptr, dDstPtrs.ptr, static_cast<ssize_t>(nElts), redArg, postOp, tdmCopy, tdmReduce);
       syncAndCheck();
 
       DeviceBuffer<int> dGate(1);
       kTdmReduceGate<RedOp, T, NSrcs, NDsts, PreOpSrcs><<<1, kBlockThreads>>>(
-        dSrcPtrs.ptr, dDstPtrs.ptr, static_cast<ssize_t>(nElts), postOp, tdmReduce, dGate.ptr);
+        dSrcPtrs.ptr, dDstPtrs.ptr, static_cast<ssize_t>(nElts), postOp, tdmCopy, tdmReduce, dGate.ptr);
       syncAndCheck();
       const int gate = dGate.copyTo()[0];
       if (gate < 0) GTEST_SKIP() << "Device code was built without the TDM reduce path";
-      ASSERT_EQ(tdmReduce && expectTdm ? 1 : 0, gate) << tag << " tdmReduce=" << tdmReduce << ": TDM gate";
+      ASSERT_EQ(tdm && expectTdm ? 1 : 0, gate) << tag << " tdm=" << tdm << ": TDM gate";
 
       for (int d = 0; d < NDsts; d++) {
         std::vector<T> out = dDst[d].copyTo();
         for (size_t i = 0; i < nElts; i++) {
           ASSERT_EQ(0, std::memcmp(&out[dstStart + i], &expected[i], sizeof(T)))
-            << tag << " tdmReduce=" << tdmReduce << " dst=" << d << ": mismatch at element " << i << " of " << nElts;
+            << tag << " tdm=" << tdm << " dst=" << d << ": mismatch at element " << i << " of " << nElts;
         }
         for (size_t i = 0; i < dstTotal; i++) {
           if (i >= dstStart && i < dstStart + nElts) continue;
           ASSERT_EQ(0, std::memcmp(&out[i], &sentinel, sizeof(T)))
-            << tag << " tdmReduce=" << tdmReduce << " dst=" << d << ": guard overwritten at index " << i;
+            << tag << " tdm=" << tdm << " dst=" << d << ": guard overwritten at index " << i;
         }
       }
     }
@@ -277,6 +281,33 @@ TEST_F(TdmReduceCopyTest, SumF32BelowOneTileFallsBack) {
   run<FuncSum<float>, float, 2, 1, 0>(1000, 0, 0, false, false, sumRef, "sumSmall");
 }
 
+static float copyRef(const std::vector<std::vector<float>>& src, size_t i) {
+  return src[0][i];
+}
+
+// recvCopySend with unregistered buffers: one FIFO source to the output and the next peer, read once per tile. Three
+// tiles per warp run both halves of the ping-pong and end on the second.
+TEST_F(TdmReduceCopyTest, CopyF32OneSrcTwoDsts) {
+  run<FuncSum<float>, float, 1, 2, 0>(tileElts<float>(3) + 333, 0, 0, false, true, copyRef, "copy1x2",
+                                      /*copySwitch=*/true);
+}
+
+// 13 tiles over 8 warps: five warps run two tiles, three leave the loop after their first store.
+TEST_F(TdmReduceCopyTest, CopyF32UnevenTilesThreeDsts) {
+  run<FuncSum<float>, float, 1, 3, 0>(tileElts<float>(1) * 13 / 8 + 1000, 0, 0, false, true, copyRef, "copyUneven1x3",
+                                      /*copySwitch=*/true);
+}
+
+// A single-destination copy stays with tryTdmCopy.
+TEST_F(TdmReduceCopyTest, CopyF32OneDstStaysOnCopyPath) {
+  run<FuncSum<float>, float, 1, 1, 0>(tileElts<float>(2), 0, 0, false, false, copyRef, "copy1x1", /*copySwitch=*/true);
+}
+
+// The reduce switch alone does not admit a copy.
+TEST_F(TdmReduceCopyTest, CopyF32TwoDstsNeedsCopySwitch) {
+  run<FuncSum<float>, float, 1, 2, 0>(tileElts<float>(2), 0, 0, false, false, copyRef, "copy1x2reduceSwitch");
+}
+
 // Every case above skips when the TDM reduce path is not built, so a TDM test config would pass while covering nothing.
 // With RCCL_TEST_EXPECT_TDM_SIMPLE set, this case fails instead when the build flag or the device pass disagrees.
 TEST_F(TdmReduceCopyTest, BuildFlagMatchesExpectation) {
@@ -301,7 +332,8 @@ TEST_F(TdmReduceCopyTest, BuildFlagMatchesExpectation) {
   dDstPtrs.copyFrom(std::vector<float*>{dst.ptr});
   DeviceBuffer<int> dGate(1);
   kTdmReduceGate<FuncSum<float>, float, 2, 1, 0><<<1, kBlockThreads>>>(
-    dSrcPtrs.ptr, dDstPtrs.ptr, static_cast<ssize_t>(nElts), /*postOp=*/false, /*tdmReduce=*/1, dGate.ptr);
+    dSrcPtrs.ptr, dDstPtrs.ptr, static_cast<ssize_t>(nElts), /*postOp=*/false, /*tdmCopy=*/0, /*tdmReduce=*/1,
+    dGate.ptr);
   syncAndCheck();
   EXPECT_EQ(1, dGate.copyTo()[0]) << "The device pass has no TDM reduce path (TDM_SUPPORTED is 0 there), so every TDM "
                                   << "reduce suite runs the vector path.";
