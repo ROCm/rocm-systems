@@ -1991,9 +1991,28 @@ The ``NCCL_P2P_NET_CHUNKSIZE`` controls the size of messages sent through the ne
 
 Values accepted
 ^^^^^^^^^^^^^^^
-The default is 131072 (128 K).
+The default is 131072 (128 K). In RCCL, on multi-node gfx942 the default is 524288 (512 K) from 64 ranks, and on gfx950 it is 524288 (512 K) from 32 ranks and 262144 (256 K) from 16 ranks; setting the variable overrides these defaults.
 
 Values are integers, in bytes. The recommendation is to use powers of 2, hence 262144 would be the next value.
+A value of 0 or less selects the default.
+
+NCCL_P2P_PCI_CHUNKSIZE
+----------------------
+
+The ``NCCL_P2P_PCI_CHUNKSIZE`` controls the size of messages sent within a single node whose GPUs are not all connected by direct links, for ncclSend/ncclRecv operations.
+
+Values accepted
+^^^^^^^^^^^^^^^
+The default is 131072 (128 K). Values are integers, in bytes. A value of 0 or less selects the default.
+
+NCCL_P2P_NVL_CHUNKSIZE
+----------------------
+
+The ``NCCL_P2P_NVL_CHUNKSIZE`` controls the size of messages sent within a single node whose GPUs are all connected by direct links (NVLink on NVIDIA, xGMI on AMD), for ncclSend/ncclRecv operations.
+
+Values accepted
+^^^^^^^^^^^^^^^
+The default is 524288 (512 K). Values are integers, in bytes. A value of 0 or less selects the default.
 
 NCCL_P2P_LL_THRESHOLD
 ---------------------
