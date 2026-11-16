@@ -50,8 +50,8 @@
 # own hidden [.][hrr-direct] workload.
 #
 # hrr_kernel_signature_test.cc covers the check replay makes of a kernel launch
-# record's arguments against the signature of the kernel in the code object
-# (AIRUNTIME-3070): an unmodified archive replays, a copy whose launch record has
+# record's arguments against the signature of the kernel in the code object:
+# an unmodified archive replays, a copy whose launch record has
 # too few arguments is refused with nothing launched, and copies with an extra or
 # a wider argument replay like the original. Contains its own hidden
 # [.][hrr-direct] workload.
@@ -61,7 +61,7 @@
 # its own hidden [.][hrr-direct] workloads.
 #
 # hrr_va_placement_test.cc covers capture-address placement: a device pointer
-# stored in device memory by an H2D copy (ROCM-31827). Contains its own hidden
+# stored in device memory by an H2D copy. Contains its own hidden
 # [.][hrr-direct] workload.
 #
 # hrr_dispatch_swap_test.cc covers capture shutdown: a slot another component

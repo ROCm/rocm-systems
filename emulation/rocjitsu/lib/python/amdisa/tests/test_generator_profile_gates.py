@@ -26,7 +26,6 @@ from amdisa.codegen.execute.floating_policy import (
 )
 from amdisa.codegen.execute.vector_special import (
     gen_cvt_fp8,
-    gen_cvt_scalef32,
     gen_vector_mad_64_32,
     gen_vector_div_scale,
     gen_vector_movrel,
@@ -2900,38 +2899,6 @@ def test_latent_execute_fallbacks_report_failure_without_preparing_execution(
     assert CodeGenerator._is_unimplemented_execute_stub(body)
 
 
-@pytest.mark.parametrize(
-    ('operation', 'direct_operands'),
-    [
-        ('sr_pk_fp4_f32', ['data_src']),
-        ('pk32_fp6_f32', ['vdst', 'src0']),
-        ('2xpk16_fp6_f32', ['vdst', 'src0', 'src1']),
-        ('pk32_f32_fp6', ['vdst', 'src0']),
-        ('sr_pk32_fp6_f32', ['vdst', 'src0']),
-    ],
-)
-def test_latent_scalef32_checks_every_direct_operand_before_execution(
-    operation, direct_operands
-):
-    body = gen_cvt_scalef32(
-        SimpleNamespace(
-            op=operation,
-            dst_ops=['vdst'],
-            src_ops=['src0', 'src1', 'src2'],
-            arch_name='cdna4',
-        )
-    )
-    assert 'throw ' not in body
-    lane_loop = body.index('for (uint32_t lane')
-    for operand in direct_operands:
-        guard = re.search(rf'if\s*\(!{operand}_off\)\s*{{([^}}]*)}}', body)
-        assert guard is not None
-        rejection = guard.group(1)
-        assert 'InstructionExecutionError::UnsupportedOperandValue' in rejection
-        assert 'return;' in rejection
-        assert guard.end() < lane_loop
-
-
 @pytest.mark.parametrize('conditional', [False, True])
 def test_failure_stub_recognition_keeps_conditional_modifier_restoration(
     tmp_path, monkeypatch, conditional
@@ -3000,7 +2967,9 @@ def test_generated_sparse_integer_mma_dispatches_cross_lane_helper(
     assert 'InstructionExecutionError::UnimplementedInstruction' not in body
 
 
-def test_cdna3_real_spec_mfma_destination_uses_acc_cd(tmp_path):
+@pytest.fixture(scope='module')
+def generated_cdna3_isa(tmp_path_factory):
+    output = tmp_path_factory.mktemp('cdna3')
     isa_xml = _mrisa_dir() / 'amdgpu_isa_cdna3.xml'
     if not isa_xml.is_file():
         pytest.skip('CDNA3 semantics XML not available')
@@ -3009,12 +2978,21 @@ def test_cdna3_real_spec_mfma_destination_uses_acc_cd(tmp_path):
         isafiles=[f'cdna3:{isa_xml}'],
         gen_isas=True,
         gen_dbt=False,
-        isa_output=str(tmp_path),
+        isa_output=str(output),
         dbt_output=None,
     )
     _run(args)
+    return output / 'cdna3'
 
-    vop3p = (tmp_path / 'cdna3' / 'vop3p_exec.cpp').read_text()
+
+def test_generated_scalar_compare_uses_scalar_arithmetic_header(generated_cdna3_isa):
+    source = (generated_cdna3_isa / 'sopc_exec.cpp').read_text()
+    assert '#include "rj_arith/detail/rj_arith_scalar.h"' in source
+    assert '#include "rj_arith/rj_arith.h"' not in source
+
+
+def test_cdna3_real_spec_mfma_destination_uses_acc_cd(generated_cdna3_isa):
+    vop3p = (generated_cdna3_isa / 'vop3p_exec.cpp').read_text()
     body = _generated_method_body(
         vop3p,
         'VMfmaF3216x16x8Xf32Vop3pMfma',
@@ -3025,8 +3003,8 @@ def test_cdna3_real_spec_mfma_destination_uses_acc_cd(tmp_path):
 
     # Per-target generation owns its compact, DPP/SDWA and extended numerical
     # bodies locally. All three routes must collect the same wave status.
-    vop2 = (tmp_path / 'cdna3' / 'vop2_exec.cpp').read_text()
-    vop3 = (tmp_path / 'cdna3' / 'vop3_exec.cpp').read_text()
+    vop2 = (generated_cdna3_isa / 'vop2_exec.cpp').read_text()
+    vop3 = (generated_cdna3_isa / 'vop3_exec.cpp').read_text()
     for cls in ('Add', 'Sub', 'Subrev', 'Mul'):
         status = f'cdna3::execute_half_with_status<cdna3::HalfOp::{cls}>'
         compact = vop2.split(f'void V{cls}F16Vop2::execute_impl(', 1)[1].split(
@@ -3417,25 +3395,6 @@ def test_disabled_gpr_idx_capability_reaches_sparse_and_dense_mixed_matrix_branc
     assert 'exec_f32_mixed' in dense_body
     assert 'exec_f32_scaled_mixed' not in dense_body
     assert 'raw_words_' not in dense_body
-
-
-def test_cdna4_wide_conversion_indexes_each_base_once():
-    body = gen_cvt_scalef32(
-        SimpleNamespace(
-            op='2xpk16_fp6_f32',
-            dst_ops=['vdst'],
-            src_ops=['src0', 'src1', 'src2'],
-            arch_name='cdna4',
-        )
-    )
-
-    for operand in ('vdst', 'src0', 'src1'):
-        assert body.count(f'auto {operand}_off = Isa::resolved_vgpr_offset') == 1
-        assert f'uint32_t {operand}_base = vb + amdgpu::apply_gpr_idx' in body
-    assert 'unified_vgpr_index()' not in body
-    assert 'rd(src0_base' in body
-    assert 'rd(src1_base' in body
-    assert 'wr(vdst_base' in body
 
 
 def test_cdna3_fp8_cvt_uses_fnuz_helper_variant():

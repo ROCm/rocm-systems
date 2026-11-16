@@ -12,7 +12,7 @@ namespace rocjitsu::amdgpu {
 
 /// @brief How a queue owner learns that its producer cursor advanced.
 enum class QueueDoorbellMode : uint8_t {
-  /// Poll a host-mapped doorbell page and clamp work to the observed cursor.
+  /// Poll a host-mapped doorbell page for producer notifications.
   HostPolled,
   /// Poll a doorbell value through the queue's GPU virtual address space.
   VmPolled,

@@ -105,6 +105,7 @@ public:
         .queue_desc_va = request.queue_descriptor_address,
         .exception_status_va = request.exception_status_address,
         .exception_event_id = request.exception_event_id,
+        .exception_event_sink = request.exception_event_sink,
         .xcd_fanout = request.xcd_fanout,
         .packet_format = request.packet_format,
         .initial_consumer_cursor = request.initial_consumer_cursor,
