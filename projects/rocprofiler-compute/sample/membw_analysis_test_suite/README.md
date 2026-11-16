@@ -29,11 +29,11 @@ The metrics are in the "L1 Cache" table (3001) of the Memory Bandwidth Analysis 
 
 | Workload | Metric | Expression |
 |---|---|---|
-| gl2_backpressure | L1 Cache - TCP stalled by L2 | `TCP_TCR_TCP_STALL_CYCLES / TCP_GATE_EN2` |
+| gl2_backpressure | L1 Cache - TCP stalled by L2 | `100 * SUM(TCP_TCR_TCP_STALL_CYCLES_sum) / SUM(TCP_GATE_EN2_sum)` |
 | L1_stall_microbenchmark | L1 Cache - TA stalled by TCP (aggregated), L1 Cache - TCP stalled by UTCL1, L1 Cache - TCP stalled by L2 | See the other rows |
-| L1_stall_microbenchmark `sq1` | L1 Cache - VMEM stalled by L1 Cache | `SQ_VMEM_TA_CMD_FIFO_FULL / SQ_BUSY_CYCLES` |
-| utcl1_stall | L1 Cache - TCP stalled by UTCL1 | `TCP_UTCL1_STALL_INFLIGHT_MAX / TCP_GATE_EN2` |
-| ta_tcp_stall | L1 Cache - TA stalled by TCP (aggregated) | `TCP_TCP_TA_ADDR_STALL_CYCLES / TCP_GATE_EN2` |
+| L1_stall_microbenchmark `sq1` | L1 Cache - VMEM stalled by L1 Cache | `100 * SUM(SQ_VMEM_TA_CMD_FIFO_FULL) / SUM(SQ_BUSY_CYCLES)` |
+| utcl1_stall | L1 Cache - TCP stalled by UTCL1 | `100 * SUM(TCP_UTCL1_STALL_INFLIGHT_MAX_sum) / SUM(TCP_GATE_EN2_sum)` |
+| ta_tcp_stall | L1 Cache - TA stalled by TCP (aggregated) | `100 * SUM(TCP_TCP_TA_ADDR_STALL_CYCLES_sum) / SUM(TCP_GATE_EN2_sum)` |
 
 ## Build
 
