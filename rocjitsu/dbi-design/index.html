@@ -1402,6 +1402,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Code Object Patcher (code/patch/code_object_patcher.h) [shared with DBT]">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#text-growth-safety" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Text growth safety
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
         
           <li class="md-nav__item">
@@ -2581,6 +2598,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Code Object Patcher (code/patch/code_object_patcher.h) [shared with DBT]">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#text-growth-safety" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Text growth safety
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
         
           <li class="md-nav__item">
@@ -3188,6 +3222,41 @@ published.</p>
 the orchestrator. Trampolines live inside <code>.text</code> as a local code cave (the same
 layout DBT uses) rather than a separate section, so cave offsets are plain
 <code>.text</code>-relative bytes in <code>[text_size, text_size + cave_bytes)</code>.</p>
+<h4 id="text-growth-safety">Text growth safety<a class="headerlink" href="#text-growth-safety" title="Permanent link">&para;</a></h4>
+<p>The checked anchor batch validates edits against the original image. Appending
+code can create new relocation-write or mapping overlaps, so <code>replace_text()</code>
+also validates the loader-visible effects of text growth:</p>
+<ul>
+<li>Before inserting file bytes, every <code>PT_LOAD</code> whose file range would grow,
+  including a range ending at the insertion point, must map that point to the
+  end of the original <code>.text</code>. Extending a mapping at another virtual address
+  would expose the inserted bytes there as well.</li>
+<li>After remapping relocation destinations in moved sections, supported ROCr
+  dynamic writes must clear the complete final <code>.text</code> range. A write left at
+  the original text end can overwrite a trampoline; a destination that moves
+  clear with its allocated section remains eligible.</li>
+<li>After segment layout, images with <code>PT_LOAD</code> segments require matching file
+  backing for the complete appended range. Every overlap with a LOAD memory
+  range must also load the same file bytes as <code>.text</code>. Missing backing,
+  different file backing, or overlap with zero-fill storage rejects the patch.</li>
+<li>Every originally loaded part of another allocated section must retain its
+  backing after layout. A moved section or descriptor symbol must still name
+  the corresponding file bytes or zero-fill range in its LOAD; moving section
+  metadata without moving its backing rejects the patch.</li>
+<li>For linked ROCr images, every final LOAD memory extent must fit the combined
+  allocation calculated from the first LOAD's base and the last LOAD's end.
+  This includes alignment padding outside <code>.text</code>, not just appended instructions.</li>
+</ul>
+<p>The final mapping check includes segments that neither grow nor move. For
+example, a data segment stored before <code>.text</code> in the file can map at the original
+text end. The source ranges are disjoint, but the appended trampoline then
+occupies the data segment's address. A loader copy from that segment would
+overwrite the trampoline even though the original anchor passed admission.</p>
+<p>The final overlap check permits touching memory ranges, empty memory mappings,
+and overlaps with matching file backing. Segments moved clear of the appended
+text remain eligible. A failed growth check returns through the existing patcher
+error path; Instrumentor publishes neither ELF bytes nor successful site records.
+Section-only images without LOAD segments retain their offline mutation path.</p>
 <h3 id="checked-edits-codepatchchecked_text_editsh">Checked edits (<code>code/patch/checked_text_edits.h</code>)<a class="headerlink" href="#checked-edits-codepatchchecked_text_editsh" title="Permanent link">&para;</a></h3>
 <p>The checked operation is local to one original-text anchor batch. It requires
 the unchanged source, full-section decoded boundaries, selected decoder, and
@@ -3197,6 +3266,23 @@ It does not cache source facts, create a fallback decoder or patcher,
 or expose a reusable context. All edits are validated before writing the
 orchestrator's private text buffer. Probe admission, layout, and resource policy
 remain with Instrumentor, and CodeObjectPatcher remains the ELF writer.</p>
+<p>Source admission checks the complete write interval of supported ROCr dynamic
+relocations against the original <code>.text</code>. A write can start before the section
+and still overwrite its first instruction. Overflowing write ends reject; an
+interval ending exactly at the section's start does not overlap it. Existing
+static, inert and unsupported-form policies remain separate.</p>
+<p>The batch also checks aliases of edited bytes in <code>PT_LOAD</code> file ranges. Every
+mapping of those shared file bytes must expose them at the same virtual address;
+otherwise, editing an anchor would also modify bytes visible at another address.</p>
+<p>At each edited virtual address, every LOAD file copy must also read the anchor's
+own file bytes. A disjoint file range containing another copy of the original
+instruction could otherwise restore that instruction over the patched branch.
+Empty file ranges perform no copy: modern ROCr zeroes the shared allocation
+once, rather than zeroing each segment's tail after copying it.</p>
+<p>Aliases outside the edited anchors do not participate in these source checks.
+The separate <a href="#text-growth-safety">text growth checks</a> validate appended code,
+moved storage, and the final loader layout. Descriptor ownership and whole-kernel
+mapping qualification remain consumer responsibilities.</p>
 <p>The reference checks cover decoded direct-branch destinations, text-symbol
 start/end offsets, raw symbol-less RELATIVE64 destinations under the existing
 allocation policy, and the kernel entries already collected by observation
