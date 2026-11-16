@@ -12,7 +12,7 @@ sl1d.hit_rate_excl_dup:
   formula: 100 * SUM(SQC_DCACHE_HITS_sum) / SUM(SQC_DCACHE_HITS_sum + SQC_DCACHE_MISSES_sum)
   unit: Percent
   description: >-
-    Percentage of sL1D requests that hit on a previously loaded line the cache.
+    Percentage of sL1D requests that hit on a previously loaded line in the cache.
     Calculated as the number of sL1D hits over the number of hits and misses, excluding
     duplicate misses. The scalar cache stores uniform data accessed by scalar
     instructions. High hit rates indicate efficient reuse of constant and uniform data

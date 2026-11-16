@@ -75,7 +75,7 @@ spi.reached_cu_wavefront_limit:
   unit: Percent
   description: >-
     Percentage of total CU cycles in the kernel where a wavefront could not be scheduled
-    to a CU due to limits within the workgroup manager. This is expected to be always be
+    to a CU due to limits within the workgroup manager. This is expected to always be
     zero on CDNA2 or newer accelerators (and small for previous accelerators).
 spi.reached_cu_workgroup_limit:
   name: Reached CU Workgroup Limit
@@ -83,7 +83,7 @@ spi.reached_cu_workgroup_limit:
   unit: Percent
   description: >-
     Percentage of total CU cycles in the kernel where a workgroup could not be scheduled
-    to a CU due to limits within the workgroup manager. This is expected to be always be
+    to a CU due to limits within the workgroup manager. This is expected to always be
     zero on CDNA2 or newer accelerators (and small for previous accelerators).
 spi.scheduler_pipe_stall_rate:
   name: Scheduler-Pipe Stall Rate
