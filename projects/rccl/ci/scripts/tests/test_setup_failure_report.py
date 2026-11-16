@@ -8,7 +8,9 @@ import os
 import subprocess
 import sys
 import tempfile
+import types
 import unittest
+from collections.abc import Callable
 from pathlib import Path
 from unittest import mock
 
@@ -21,6 +23,8 @@ from rccl_ci_utils import SetupFailureReport
 
 log = logging.getLogger(__name__)
 
+HarnessMain = Callable[[SetupFailureReport], None]
+
 RUN_ENV = {
     "GITHUB_SERVER_URL": "https://github.com",
     "GITHUB_REPOSITORY": "ROCm/rocm-systems",
@@ -28,35 +32,36 @@ RUN_ENV = {
 }
 
 
+def script_path(module: types.ModuleType) -> str:
+    """Return the file an imported harness module was loaded from."""
+    assert module.__file__ is not None
+    return module.__file__
+
+
 class ReportCapture(unittest.TestCase):
     """Patch the report channels and record what each one is sent."""
 
-    def setUp(self):
+    def setUp(self) -> None:
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         self.tmp = Path(tmp.name)
         self.summary_file = self.tmp / "step_summary.md"
         env = dict(RUN_ENV, GITHUB_STEP_SUMMARY=str(self.summary_file))
-        for patcher in (
-            mock.patch.dict(os.environ, env),
-            mock.patch.object(rccl_ci_utils, "send_email_report"),
-            mock.patch.object(rccl_ci_utils, "send_teams_webhook"),
-        ):
-            patcher.start()
-            self.addCleanup(patcher.stop)
+        env_patcher = mock.patch.dict(os.environ, env)
+        env_patcher.start()
+        self.addCleanup(env_patcher.stop)
+        self.email = self.patch_channel("send_email_report")
+        self.webhook = self.patch_channel("send_teams_webhook")
 
-    @property
-    def email(self):
-        return rccl_ci_utils.send_email_report
+    def patch_channel(self, name: str) -> mock.Mock:
+        patcher = mock.patch.object(rccl_ci_utils, name)
+        self.addCleanup(patcher.stop)
+        return patcher.start()
 
-    @property
-    def webhook(self):
-        return rccl_ci_utils.send_teams_webhook
-
-    def summary(self):
+    def summary(self) -> str:
         return self.summary_file.read_text() if self.summary_file.exists() else ""
 
-    def assert_reported(self, subject, step):
+    def assert_reported(self, subject: str, step: str) -> None:
         summary = self.summary()
         self.assertIn(f"{subject}: FAILED before any tests ran", summary)
         self.assertIn(f"Failed step: {step}", summary)
@@ -69,21 +74,21 @@ class ReportCapture(unittest.TestCase):
             self.assertEqual(channel.call_args.kwargs, {"subject_prefix": subject})
             self.assertIn(f"Failed step: {step}", report)
 
-    def assert_not_reported(self):
+    def assert_not_reported(self) -> None:
         self.assertEqual(self.summary(), "")
         self.email.assert_not_called()
         self.webhook.assert_not_called()
 
 
 class SetupFailureReportTest(ReportCapture):
-    def run_main(self, main, **notify):
+    def run_main(self, main: HarnessMain, **notify: str) -> None:
         report = SetupFailureReport("RCCL Test")
         report.notify(notify.get("email", "dev@example.com"),
                       notify.get("webhook", "https://webhook.example"))
         report.run(lambda: main(report))
 
-    def test_sys_exit_in_a_step_reports_step_and_logged_errors(self):
-        def main(report):
+    def test_sys_exit_in_a_step_reports_step_and_logged_errors(self) -> None:
+        def main(report: SetupFailureReport) -> None:
             report.step("Discover RCCL library")
             log.error("librccl.so not found in /build")
             sys.exit(1)
@@ -95,8 +100,8 @@ class SetupFailureReportTest(ReportCapture):
         self.assertIn("Cause:       exited with status 1", self.summary())
         self.assertIn("  librccl.so not found in /build", self.summary())
 
-    def test_exception_in_a_step_reports_it_and_is_reraised(self):
-        def main(report):
+    def test_exception_in_a_step_reports_it_and_is_reraised(self) -> None:
+        def main(report: SetupFailureReport) -> None:
             report.step("Install madengine")
             subprocess.run(["false"], check=True)
 
@@ -105,8 +110,8 @@ class SetupFailureReportTest(ReportCapture):
         self.assert_reported("RCCL Test", "Install madengine")
         self.assertIn("Cause:       CalledProcessError: Command '['false']'", self.summary())
 
-    def test_names_the_last_step_started(self):
-        def main(report):
+    def test_names_the_last_step_started(self) -> None:
+        def main(report: SetupFailureReport) -> None:
             report.step("Discover RCCL library")
             report.step("Clone test sources")
             sys.exit(1)
@@ -115,8 +120,8 @@ class SetupFailureReportTest(ReportCapture):
             self.run_main(main)
         self.assert_reported("RCCL Test", "Clone test sources")
 
-    def test_failure_after_tests_started_is_left_to_the_harness(self):
-        def main(report):
+    def test_failure_after_tests_started_is_left_to_the_harness(self) -> None:
+        def main(report: SetupFailureReport) -> None:
             report.step("Clone test sources")
             report.tests_started()
             sys.exit(1)
@@ -125,12 +130,12 @@ class SetupFailureReportTest(ReportCapture):
             self.run_main(main)
         self.assert_not_reported()
 
-    def test_success_and_early_return_send_nothing(self):
-        def exit_zero(report):
+    def test_success_and_early_return_send_nothing(self) -> None:
+        def exit_zero(report: SetupFailureReport) -> None:
             report.step("Discover RCCL library")
             sys.exit(0)
 
-        def early_return(report):  # --discover-only
+        def early_return(report: SetupFailureReport) -> None:  # --discover-only
             report.step("Discover RCCL library")
 
         with self.assertRaises(SystemExit):
@@ -138,16 +143,16 @@ class SetupFailureReportTest(ReportCapture):
         self.run_main(early_return)
         self.assert_not_reported()
 
-    def test_failure_before_the_first_step_sends_nothing(self):
-        def main(report):
+    def test_failure_before_the_first_step_sends_nothing(self) -> None:
+        def main(report: SetupFailureReport) -> None:
             sys.exit(2)  # e.g. argparse, before notify targets are known
 
         with self.assertRaises(SystemExit):
             self.run_main(main)
         self.assert_not_reported()
 
-    def test_cancellation_is_not_reported_as_a_failure(self):
-        def main(report):
+    def test_cancellation_is_not_reported_as_a_failure(self) -> None:
+        def main(report: SetupFailureReport) -> None:
             report.step("Clone test sources")
             raise KeyboardInterrupt
 
@@ -155,8 +160,8 @@ class SetupFailureReportTest(ReportCapture):
             self.run_main(main)
         self.assert_not_reported()
 
-    def test_without_notify_targets_only_the_summary_is_written(self):
-        def main(report):
+    def test_without_notify_targets_only_the_summary_is_written(self) -> None:
+        def main(report: SetupFailureReport) -> None:
             report.step("Discover RCCL library")
             sys.exit(1)
 
@@ -166,10 +171,10 @@ class SetupFailureReportTest(ReportCapture):
         self.email.assert_not_called()
         self.webhook.assert_not_called()
 
-    def test_a_reporting_error_does_not_replace_the_original_failure(self):
+    def test_a_reporting_error_does_not_replace_the_original_failure(self) -> None:
         self.webhook.side_effect = RuntimeError("webhook down")
 
-        def main(report):
+        def main(report: SetupFailureReport) -> None:
             report.step("Discover RCCL library")
             sys.exit(3)
 
@@ -177,10 +182,10 @@ class SetupFailureReportTest(ReportCapture):
             self.run_main(main)
         self.assertEqual(raised.exception.code, 3)
 
-    def test_only_errors_logged_during_this_run_are_reported(self):
+    def test_only_errors_logged_during_this_run_are_reported(self) -> None:
         log.error("from an earlier run")
 
-        def main(report):
+        def main(report: SetupFailureReport) -> None:
             report.step("Discover RCCL library")
             sys.exit(1)
 
@@ -192,20 +197,20 @@ class SetupFailureReportTest(ReportCapture):
 class HarnessSetupFailureTest(ReportCapture):
     """A forced setup failure in each harness's real main() sends a report."""
 
-    def run_harness(self, module, subject, argv):
+    def run_harness(self, module: types.ModuleType, subject: str, argv: list[str]) -> None:
         report = SetupFailureReport(subject)
         with mock.patch.object(module, "setup_report", report), \
-                mock.patch.object(sys, "argv", [module.__file__] + argv):
+                mock.patch.object(sys, "argv", [script_path(module)] + argv):
             with self.assertRaises(SystemExit) as raised:
                 report.run(module.main)
         self.assertNotEqual(raised.exception.code, 0)
 
-    def empty_artifact_dir(self):
+    def empty_artifact_dir(self) -> str:
         artifact_dir = self.tmp / "build"
         artifact_dir.mkdir(exist_ok=True)
         return str(artifact_dir)
 
-    def test_jax_collective(self):
+    def test_jax_collective(self) -> None:
         self.run_harness(test_jax_collective, test_jax_collective.REPORT_SUBJECT, [
             "--artifact-dir", self.empty_artifact_dir(),
             "--jax-src", str(self.tmp / "jax-src"),
@@ -215,7 +220,7 @@ class HarnessSetupFailureTest(ReportCapture):
         self.assert_reported("RCCL JAX Collective Test", "Discover RCCL library")
         self.assertIn("librccl.so not found in", self.summary())
 
-    def test_pytorch_c10d(self):
+    def test_pytorch_c10d(self) -> None:
         self.run_harness(test_pytorch_c10d, test_pytorch_c10d.REPORT_SUBJECT, [
             "--artifact-dir", self.empty_artifact_dir(),
             "--pytorch-src", str(self.tmp / "pytorch-src"),
@@ -224,7 +229,7 @@ class HarnessSetupFailureTest(ReportCapture):
         ])
         self.assert_reported("RCCL PyTorch c10d Test", "Discover RCCL library")
 
-    def madengine_argv(self, nodes=None):
+    def madengine_argv(self, nodes: int | None = None) -> tuple[str, list[str]]:
         workload = next(iter(test_madengine.WORKLOAD_CONFIGS))
         required = test_madengine.WORKLOAD_CONFIGS[workload].get("required_nodes")
         return workload, [
@@ -237,18 +242,18 @@ class HarnessSetupFailureTest(ReportCapture):
             "--teams-webhook", "https://webhook.example",
         ]
 
-    def test_madengine(self):
+    def test_madengine(self) -> None:
         workload, argv = self.madengine_argv()
         self.run_harness(test_madengine, "RCCL MADEngine", argv)
         self.assert_reported(f"RCCL MADEngine {workload}", "Discover RCCL library")
 
-    def test_madengine_argument_error(self):
+    def test_madengine_argument_error(self) -> None:
         workload, argv = self.madengine_argv(nodes=1)
         with mock.patch("sys.stderr"):  # argparse prints usage
             self.run_harness(test_madengine, "RCCL MADEngine", argv)
         self.assert_reported(f"RCCL MADEngine {workload}", "Check arguments")
 
-    def test_scripts_report_when_run_as_scripts(self):
+    def test_scripts_report_when_run_as_scripts(self) -> None:
         # Covers the __main__ entry points; no notify targets, so only the
         # GitHub summary is written.
         artifact_dir = self.empty_artifact_dir()
@@ -261,10 +266,10 @@ class HarnessSetupFailureTest(ReportCapture):
             test_madengine: madengine_argv[:madengine_argv.index("--notify-email")],
         }
         for module, argv in cases.items():
-            with self.subTest(script=Path(module.__file__).name):
+            with self.subTest(script=Path(script_path(module)).name):
                 self.summary_file.unlink(missing_ok=True)
                 result = subprocess.run(
-                    [sys.executable, module.__file__] + argv,
+                    [sys.executable, script_path(module)] + argv,
                     capture_output=True, text=True, env=os.environ.copy(),
                 )
                 self.assertEqual(result.returncode, 1, result.stderr)
