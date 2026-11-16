@@ -197,10 +197,27 @@ ncclTaskColl SymmetricTaskScheduler_MakeTask() {
   return task;
 }
 
-// calcArgsSize() floors at sizeof(ncclSymkDevWorkArgs4K)=4096; kSymSchedBigBatchTasks alone clears it (64*64B).
-constexpr int kSymSchedBigBatchTasks = 64;
+// Largest batch whose args fit the 4 KB symmetric kernel argument; one more work trips the scheduler's guard.
+constexpr int SymSchedMaxWorksIn4K(int nChannels, bool profiler) {
+  int n = 0;
+  while (ncclSymkDevWorkArgs::calcArgsSize(nChannels, n + 1, profiler) <= sizeof(ncclSymkDevWorkArgs4K)) n++;
+  return n;
+}
 // Headroom above kSymSchedBigBatchTasks so a 1-cell-per-task batch never exhausts the channel budget mid-loop.
 constexpr int kSymSchedBigBatchChannels = 100;
+// A batch filled exactly to the 4 KB limit, so including one extra task would make the scheduler fail.
+constexpr int kSymSchedBigBatchTasks = SymSchedMaxWorksIn4K(kSymSchedBigBatchChannels, false);
+static_assert(kSymSchedBigBatchTasks > 1 && kSymSchedBigBatchTasks < kSymSchedBigBatchChannels,
+              "big batch must hold several works and leave channel headroom");
+
+// Counts ncclSymkMakeDevWork calls, i.e. the works the scheduler packed into its one batch.
+std::function<ncclResult_t(struct ncclComm*, struct ncclTaskColl*, struct ncclSymkDevWork*)>
+SymmetricTaskScheduler_CountMakeDevWork(int* calls) {
+  return [calls](struct ncclComm*, struct ncclTaskColl*, struct ncclSymkDevWork*) {
+    ++*calls;
+    return ncclSuccess;
+  };
+}
 
 // Builds n tasks (1 cell each, one channel apiece); only the last gets isSymLast. Caller must keep it alive.
 std::vector<ncclTaskColl> SymmetricTaskScheduler_EnqueueBatch(
@@ -2730,18 +2747,20 @@ TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_NonTmaKernel_UndersizedGrantAn
   EXPECT_EQ(scene.plan->threadPerBlock, kWarps * kSymTmaWaveSize);
 }
 
-// Head task's nMaxChannels(60) differs from the rest of the batch(kSymSchedBigBatchChannels=100): proves the
-// value comes from headTask specifically, not a std::max shared across the batch (both clear the 4096 floor).
+// Head task's nMaxChannels(60) differs from the rest of the batch(kSymSchedBigBatchChannels=100): the batch fits
+// 4 KB only with 60 channels, so success proves the value comes from headTask, not a std::max across the batch.
 TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_NMaxChannels_DerivedFromHeadTask_FeedsArgsSize) {
-  SymmetricTaskScheduler_Scene scene;
-  auto tasks = SymmetricTaskScheduler_EnqueueBatch(&scene.symTaskQueue, kSymSchedBigBatchTasks,
-                                                    ncclSymkKernelId_AllGather_LL, /*lastIsSymLast=*/1);
   constexpr int kHeadNMaxChannels = 60;
+  constexpr int kTasks = SymSchedMaxWorksIn4K(kHeadNMaxChannels, false);
+  static_assert(ncclSymkDevWorkArgs::calcArgsSize(kSymSchedBigBatchChannels, kTasks, false) >
+                  sizeof(ncclSymkDevWorkArgs4K),
+                "with the batch's 100 channels the same works must not fit");
+  SymmetricTaskScheduler_Scene scene;
+  auto tasks = SymmetricTaskScheduler_EnqueueBatch(&scene.symTaskQueue, kTasks, ncclSymkKernelId_AllGather_LL,
+                                                    /*lastIsSymLast=*/1);
   tasks[0].nMaxChannels = kHeadNMaxChannels;
   EXPECT_EQ(ncclSymmetricTaskScheduler(scene.comm.get(), &scene.symTaskQueue, scene.plan.get()), ncclSuccess);
-  EXPECT_EQ(scene.plan->kernelArgsSize,
-            std::max(ncclSymkDevWorkArgs::calcArgsSize(kHeadNMaxChannels, kSymSchedBigBatchTasks, false),
-                     sizeof(ncclSymkDevWorkArgs4K)));
+  EXPECT_EQ(scene.plan->kernelArgsSize, sizeof(ncclSymkDevWorkArgs4K));
 }
 
 // A hardcoded cellCount would give alignUp(1,1024)=1024 here, not the correct alignUp(1,256)=256 for float32.
@@ -2792,10 +2811,11 @@ TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_WorkCountingLoop_StopsAtDevFun
   ncclTaskColl mismatchTask = SymmetricTaskScheduler_MakeTask();
   mismatchTask.devFuncId = ncclSymkKernelId_AllGather_LLMC;  // different batch, appended after the big one
   ncclIntruQueueEnqueue(&scene.symTaskQueue, &mismatchTask);
+  int makeDevWorkCalls = 0;
+  ScopedHook makeDevWorkHook(g_symkMakeDevWork, SymmetricTaskScheduler_CountMakeDevWork(&makeDevWorkCalls));
+  // The batch is full, so counting the trailing task would also trip the 4 KB guard.
   EXPECT_EQ(ncclSymmetricTaskScheduler(scene.comm.get(), &scene.symTaskQueue, scene.plan.get()), ncclSuccess);
-  EXPECT_EQ(scene.plan->kernelArgsSize,
-            std::max(ncclSymkDevWorkArgs::calcArgsSize(kSymSchedBigBatchChannels, kSymSchedBigBatchTasks, false),
-                     sizeof(ncclSymkDevWorkArgs4K)));
+  EXPECT_EQ(makeDevWorkCalls, kSymSchedBigBatchTasks);
 }
 
 TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_WorkCountingLoop_IsSymLastBreak_ExcludesLaterSameBatchTask) {
@@ -2805,10 +2825,11 @@ TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_WorkCountingLoop_IsSymLastBrea
   ncclTaskColl trailingTask = SymmetricTaskScheduler_MakeTask();  // same devFuncId as the batch, appended after
   trailingTask.isSymLast = 0;
   ncclIntruQueueEnqueue(&scene.symTaskQueue, &trailingTask);
+  int makeDevWorkCalls = 0;
+  ScopedHook makeDevWorkHook(g_symkMakeDevWork, SymmetricTaskScheduler_CountMakeDevWork(&makeDevWorkCalls));
+  // The batch is full, so counting the trailing task would also trip the 4 KB guard.
   EXPECT_EQ(ncclSymmetricTaskScheduler(scene.comm.get(), &scene.symTaskQueue, scene.plan.get()), ncclSuccess);
-  EXPECT_EQ(scene.plan->kernelArgsSize,
-            std::max(ncclSymkDevWorkArgs::calcArgsSize(kSymSchedBigBatchChannels, kSymSchedBigBatchTasks, false),
-                     sizeof(ncclSymkDevWorkArgs4K)));
+  EXPECT_EQ(makeDevWorkCalls, kSymSchedBigBatchTasks);
 }
 
 // Exercises task != nullptr alone: the chain ends before isSymLast ever fires, so only the null check stops it.
@@ -2816,10 +2837,10 @@ TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_WorkCountingLoop_TerminatesAtC
   SymmetricTaskScheduler_Scene scene;
   auto tasks = SymmetricTaskScheduler_EnqueueBatch(&scene.symTaskQueue, kSymSchedBigBatchTasks,
                                                     ncclSymkKernelId_AllGather_LL, /*lastIsSymLast=*/0);
+  int makeDevWorkCalls = 0;
+  ScopedHook makeDevWorkHook(g_symkMakeDevWork, SymmetricTaskScheduler_CountMakeDevWork(&makeDevWorkCalls));
   EXPECT_EQ(ncclSymmetricTaskScheduler(scene.comm.get(), &scene.symTaskQueue, scene.plan.get()), ncclSuccess);
-  EXPECT_EQ(scene.plan->kernelArgsSize,
-            std::max(ncclSymkDevWorkArgs::calcArgsSize(kSymSchedBigBatchChannels, kSymSchedBigBatchTasks, false),
-                     sizeof(ncclSymkDevWorkArgs4K)));
+  EXPECT_EQ(makeDevWorkCalls, kSymSchedBigBatchTasks);
 }
 
 TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_WorkCountingLoop_TotalCount_AlignsEachTaskUpToCellCount) {
@@ -2870,28 +2891,56 @@ TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_ArgsSize_FloorWins_BelowCalcAr
   EXPECT_EQ(scene.plan->kernelArgsSize, sizeof(ncclSymkDevWorkArgs4K));
 }
 
-// The big batch's raw calcArgsSize clears the 4096 floor; a crash here would mean calloc's size didn't match.
-TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_ArgsSize_CalcWins_AboveFloor) {
+// A batch filled exactly to the 4 KB symmetric kernel argument is accepted; packing it must not overrun calloc.
+TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_ArgsSize_ExactlyFillsSymkArg_Accepted) {
   SymmetricTaskScheduler_Scene scene;
   auto tasks = SymmetricTaskScheduler_EnqueueBatch(&scene.symTaskQueue, kSymSchedBigBatchTasks,
                                                     ncclSymkKernelId_AllGather_LL, /*lastIsSymLast=*/1);
   EXPECT_EQ(ncclSymmetricTaskScheduler(scene.comm.get(), &scene.symTaskQueue, scene.plan.get()), ncclSuccess);
-  EXPECT_EQ(scene.plan->kernelArgsSize,
-            ncclSymkDevWorkArgs::calcArgsSize(kSymSchedBigBatchChannels, kSymSchedBigBatchTasks, false));
-  ASSERT_GT(scene.plan->kernelArgsSize, sizeof(ncclSymkDevWorkArgs4K));
+  EXPECT_EQ(scene.plan->kernelArgsSize, sizeof(ncclSymkDevWorkArgs4K));
 }
 
-// A big batch with profiling on: the profiler-counters region is large enough that dropping it would crash.
+// One work past the 4 KB symmetric kernel argument: the kernel would read past it, so the scheduler must refuse.
+TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_ArgsSize_AboveSymkArg_ReturnsInternalErrorWithWarn) {
+  SymmetricTaskScheduler_Scene scene;
+  auto tasks = SymmetricTaskScheduler_EnqueueBatch(&scene.symTaskQueue, kSymSchedBigBatchTasks + 1,
+                                                    ncclSymkKernelId_AllGather_LL, /*lastIsSymLast=*/1);
+  RcclUnitTesting::ScopedDebugLogging debugLogging(NCCL_LOG_WARN, NCCL_ALL);
+  ncclResult_t result = ncclSuccess;
+  const std::string log = RcclUnitTesting::CaptureLog(
+      [&]() { result = ncclSymmetricTaskScheduler(scene.comm.get(), &scene.symTaskQueue, scene.plan.get()); });
+  EXPECT_EQ(result, ncclInternalError);
+  EXPECT_TRUE(RcclUnitTesting::LogHas(log, "exceeds the 4096-byte symmetric kernel argument"));
+  EXPECT_EQ(g_symSchedLastCalloc, nullptr);
+  EXPECT_EQ(scene.plan->kernelSymArgs, nullptr);
+}
+
+// The profiler-counters region counts toward the 4 KB limit: a batch that fits without it must be refused with it.
 TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_ArgsSize_IncludesProfilerCountersRegion_WhenEnabled) {
+  static_assert(ncclSymkDevWorkArgs::calcArgsSize(kSymSchedBigBatchChannels, kSymSchedBigBatchTasks, true) >
+                  sizeof(ncclSymkDevWorkArgs4K),
+                "the profiler region must push the full batch past 4 KB");
   SymmetricTaskScheduler_Scene scene;
   ScopedHook pluginHook(g_profilerPluginLoaded, []() { return true; });
   auto tasks = SymmetricTaskScheduler_EnqueueBatch(&scene.symTaskQueue, kSymSchedBigBatchTasks,
                                                     ncclSymkKernelId_AllGather_LL, /*lastIsSymLast=*/1);
   tasks[0].eActivationMask = ncclProfileKernelCh;
   scene.plan->persistent = false;
+  EXPECT_EQ(ncclSymmetricTaskScheduler(scene.comm.get(), &scene.symTaskQueue, scene.plan.get()), ncclInternalError);
+}
+
+// With profiling on, the largest batch that still fits once the profiler region is counted is accepted.
+TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_ArgsSize_ProfilerBatchWithinSymkArg_Accepted) {
+  constexpr int kTasks = SymSchedMaxWorksIn4K(kSymSchedBigBatchChannels, true);
+  static_assert(kTasks > 0, "a profiled batch must fit at least one work");
+  SymmetricTaskScheduler_Scene scene;
+  ScopedHook pluginHook(g_profilerPluginLoaded, []() { return true; });
+  auto tasks = SymmetricTaskScheduler_EnqueueBatch(&scene.symTaskQueue, kTasks, ncclSymkKernelId_AllGather_LL,
+                                                    /*lastIsSymLast=*/1);
+  tasks[0].eActivationMask = ncclProfileKernelCh;
+  scene.plan->persistent = false;
   EXPECT_EQ(ncclSymmetricTaskScheduler(scene.comm.get(), &scene.symTaskQueue, scene.plan.get()), ncclSuccess);
-  EXPECT_EQ(scene.plan->kernelArgsSize,
-            ncclSymkDevWorkArgs::calcArgsSize(kSymSchedBigBatchChannels, kSymSchedBigBatchTasks, true));
+  EXPECT_EQ(scene.plan->kernelArgsSize, sizeof(ncclSymkDevWorkArgs4K));
 }
 
 TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_ArgsBufNMaxChannels_SetFromLocal) {

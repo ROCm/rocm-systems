@@ -431,10 +431,18 @@ static ncclResult_t ncclSymmetricTaskSchedulerImpl(
   }
 
   plan->kernelArgsSize = ncclSymkDevWorkArgsSize<Args>(nMaxChannels, workCount, profilerEnabled);
-  // [RCCL] Both kernel families take their args as a by-value 4K union; size the buffer to match.
-  plan->kernelArgsSize =
-    std::max<size_t>(plan->kernelArgsSize,
-                     sizeof(typename std::conditional<Genk, ncclGenkDevWorkArgs4K, ncclSymkDevWorkArgs4K>::type));
+  {
+    // [RCCL] Both kernel families take their args as a by-value 4K union; size the buffer to match.
+    constexpr size_t kArgs4K =
+      sizeof(typename std::conditional<Genk, ncclGenkDevWorkArgs4K, ncclSymkDevWorkArgs4K>::type);
+    if (plan->kernelArgsSize > kArgs4K) {
+      WARN("Symmetric kernel args size %zu for %d works exceeds the %zu-byte symmetric kernel argument",
+           plan->kernelArgsSize, workCount, kArgs4K);
+      ret = ncclInternalError;
+      goto fail;
+    }
+    plan->kernelArgsSize = std::max<size_t>(plan->kernelArgsSize, kArgs4K);
+  }
   argsBuf = (Args*)calloc(1, plan->kernelArgsSize);
   if (argsBuf == NULL) {
     WARN("Failed to allocate %zu bytes of symmetric kernel args", plan->kernelArgsSize);
