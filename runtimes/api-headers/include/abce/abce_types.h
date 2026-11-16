@@ -9,11 +9,12 @@
 #ifndef ABCE_TYPES_H_
 #define ABCE_TYPES_H_
 
+#include "abce_config.h"
+
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
-#include "abce_config.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -56,6 +57,7 @@ typedef struct abce_packet_caps_t {
 } abce_packet_caps_t;
 
 // Derives inherent packet/coherency capabilities from the gfx IP.
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline abce_packet_caps_t abce_detect_packet_caps(abce_isa_version_t isa) {
   abce_packet_caps_t caps;
   caps.version = ABCE_SDMA_IP_VERSION_OSS4;
@@ -90,6 +92,9 @@ static inline abce_packet_caps_t abce_detect_packet_caps(abce_isa_version_t isa)
   }
   return caps;
 }
+#else
+extern abce_packet_caps_t abce_detect_packet_caps(abce_isa_version_t isa);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 //===----------------------------------------------------------------------===//
 // abce_platform_caps_t
@@ -107,6 +112,7 @@ typedef struct abce_platform_caps_t {
 
 // ROCr-compatible IP defaults. A runtime should override these when link
 // topology says otherwise (for example an xGMI host link disables HDP flush).
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline abce_platform_caps_t abce_detect_default_platform_caps(abce_isa_version_t isa) {
   abce_platform_caps_t caps;
   caps.device_atomic_support = !(isa.major == 7 && isa.minor == 0 && isa.stepping == 1);
@@ -114,6 +120,9 @@ static inline abce_platform_caps_t abce_detect_default_platform_caps(abce_isa_ve
   caps.driver_manages_gcr = false;
   return caps;
 }
+#else
+extern abce_platform_caps_t abce_detect_default_platform_caps(abce_isa_version_t isa);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 //===----------------------------------------------------------------------===//
 // abce_builder_config_t
@@ -127,11 +136,15 @@ typedef struct abce_builder_config_t {
 
 // Zero-initializing this struct is NOT the default configuration:
 // use_copy_size_override defaults to true. Always initialize through here.
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline void abce_builder_config_initialize(abce_builder_config_t* out_config) {
   out_config->use_copy_size_override = true;
   out_config->max_linear_copy_size = 0;
   out_config->max_fill_size = 0;
 }
+#else
+extern void abce_builder_config_initialize(abce_builder_config_t* out_config);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 //===----------------------------------------------------------------------===//
 // Placement modes

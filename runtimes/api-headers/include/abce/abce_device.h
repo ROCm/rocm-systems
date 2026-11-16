@@ -126,24 +126,32 @@ typedef struct abce_device_wait_t {
   uint32_t compare;  // abce_device_wait_compare_t.
 } abce_device_wait_t;
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline bool abce_device_wait_holds(const abce_device_wait_t* wait, uint64_t word) {
   return wait->compare == ABCE_DEVICE_WAIT_LEQ ? word <= wait->value : word >= wait->value;
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline uint32_t abce_device_wait_function(const abce_device_wait_t* wait) {
   return wait->compare == ABCE_DEVICE_WAIT_LEQ ? SDMA_FUNC_LESS_EQUAL : SDMA_FUNC_GREATER_EQUAL;
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline bool abce_device_signal_op_is_atomic(uint32_t op) {
   return op == ABCE_DEVICE_SIGNAL_ADD || op == ABCE_DEVICE_SIGNAL_SUB;
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 // Whether the engine applies |op| with an SDMA atomic. Before gfx125 SET is one
 // too: the only plain store there is a 32-bit FENCE, and two of them would let
 // a waiter see a 64-bit value half written.
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline bool abce_device_signal_needs_atomics(const abce_builder_t* builder, uint32_t op) {
   return abce_device_signal_op_is_atomic(op) || !abce_builder_is_gfx125plus(builder);
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 //===----------------------------------------------------------------------===//
 // Host side: building an engine
@@ -151,6 +159,7 @@ static inline bool abce_device_signal_needs_atomics(const abce_builder_t* builde
 
 // UNIMPLEMENTED for parts whose copies need GCR packets, which the device
 // submitter does not emit.
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline abce_status_t abce_device_engine_initialize(const abce_builder_t* builder,
                                                           const abce_device_ring_t* ring,
                                                           uint32_t engine_id,
@@ -165,11 +174,22 @@ static inline abce_status_t abce_device_engine_initialize(const abce_builder_t* 
   out_engine->ring = *ring;
   return ABCE_STATUS_OK;
 }
+#else
+extern abce_status_t abce_device_engine_initialize(const abce_builder_t* builder,
+                                                          const abce_device_ring_t* ring,
+                                                          uint32_t engine_id,
+                                                          bool device_atomic_support,
+                                                          abce_device_engine_t* out_engine);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline bool abce_device_handle_valid(const abce_device_handle_t* handle) {
   return handle && handle->engine && handle->abi_version == ABCE_DEVICE_ABI_VERSION &&
          handle->engine->abi_version == ABCE_DEVICE_ABI_VERSION;
 }
+#else
+extern bool abce_device_handle_valid(const abce_device_handle_t* handle);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 // A kernel's code object runs only on its own target, so for the targets below
 // the packet format is fixed at compile time and only the host's size limits
@@ -186,6 +206,7 @@ static inline bool abce_device_handle_valid(const abce_device_handle_t* handle) 
 #endif
 #endif  // __HIP_DEVICE_COMPILE__
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline void abce_device_load_builder(const abce_builder_t* engine_builder,
                                             abce_builder_t* out_builder) {
 #if defined(ABCE_DEVICE_TARGET_ISA_)
@@ -202,6 +223,7 @@ static inline void abce_device_load_builder(const abce_builder_t* engine_builder
   *out_builder = *engine_builder;
 #endif
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 // Engine fields loaded once before the lane loop, so they are not reloaded
 // after each lane's ring stores. The ring is loaded per lane, in emit.
@@ -232,19 +254,24 @@ typedef struct abce_device_request_t {
   uint32_t flags;  // ABCE_DEVICE_SUBMIT_*.
 } abce_device_request_t;
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline uint64_t abce_device_wait_packet_bytes(const abce_builder_t* builder) {
   return abce_builder_is_gfx125plus(builder) ? sizeof(SDMA_PKT_POLL_MEM_64B_GFX125PLUS)
                                              : sizeof(SDMA_PKT_POLL_REGMEM);
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline uint64_t abce_device_completion_packet_bytes(const abce_builder_t* builder,
                                                            const abce_device_signal_t* completion) {
   return abce_device_signal_needs_atomics(builder, completion->op)
              ? sizeof(SDMA_PKT_ATOMIC)
              : sizeof(SDMA_PKT_FENCE_64B_GFX125PLUS);
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 // Packets are built in zeroed locals and stored whole; the ring is never read.
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline size_t abce_device_store_wait(const abce_builder_t* builder, char* out,
                                             const abce_device_wait_t* wait) {
   if (abce_builder_is_gfx125plus(builder)) {
@@ -262,7 +289,9 @@ static inline size_t abce_device_store_wait(const abce_builder_t* builder, char*
   *(SDMA_PKT_POLL_REGMEM*)out = poll;
   return sizeof(poll);
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline size_t abce_device_store_completion(const abce_builder_t* builder, char* out,
                                                   const abce_device_signal_t* completion) {
   if (abce_device_signal_needs_atomics(builder, completion->op)) {
@@ -283,6 +312,7 @@ static inline size_t abce_device_store_completion(const abce_builder_t* builder,
   *(SDMA_PKT_FENCE_64B_GFX125PLUS*)out = fence;
   return sizeof(fence);
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 // The packets of one submission and their sizes, decided before reserving.
 typedef struct abce_device_frame_t {
@@ -299,6 +329,7 @@ typedef struct abce_device_frame_t {
 // Frame: [wait] body [signal]. gfx125+ copies fold the wait, and an UNORDERED
 // signal, into COPY_LINEAR_WAITSIGNAL; otherwise POLL, body, then ATOMIC or
 // FENCE, which land after everything earlier on the ring.
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline abce_status_t abce_device_plan_frame(const abce_builder_t* builder,
                                                    const abce_device_request_t* request,
                                                    abce_device_frame_t* out_frame) {
@@ -343,7 +374,9 @@ static inline abce_status_t abce_device_plan_frame(const abce_builder_t* builder
   out_frame->bytes = out_frame->wait_bytes + out_frame->body_bytes + out_frame->completion_bytes;
   return ABCE_STATUS_OK;
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline void abce_device_write_frame(const abce_builder_t* builder,
                                            const abce_device_request_t* request,
                                            const abce_device_frame_t* frame, char* cursor) {
@@ -396,9 +429,11 @@ static inline void abce_device_write_frame(const abce_builder_t* builder,
   cursor += frame->body_bytes;
   if (frame->completion_bytes) abce_device_store_completion(builder, cursor, completion);
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 // Reserves |bytes|, folding in any wrap tail as NOPs, and returns where the
 // payload goes: the reservation's last |bytes|.
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline abce_status_t abce_device_reserve_payload(abce_device_ring_t* ring, uint64_t bytes,
                                                         bool block,
                                                         abce_ring_reservation_t* out_reservation,
@@ -415,7 +450,9 @@ static inline abce_status_t abce_device_reserve_payload(abce_device_ring_t* ring
   *out_payload_start = padding.end;
   return ABCE_STATUS_OK;
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline abce_status_t abce_device_emit(const abce_builder_t* builder,
                                              const abce_device_ring_t* engine_ring,
                                              const abce_device_request_t* request) {
@@ -435,11 +472,15 @@ static inline abce_status_t abce_device_emit(const abce_builder_t* builder,
                           abce_device_ring_write_address(ring, payload_start));
   return abce_device_ring_submit(ring, &reservation);
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline bool abce_device_word_well_formed(const uint64_t* address) {
   return address && ((uintptr_t)address % sizeof(uint64_t)) == 0;
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline abce_status_t abce_device_validate_request(const abce_device_submit_view_t* view,
                                                          const abce_device_request_t* request) {
   if ((request->flags & ~ABCE_DEVICE_SUBMIT_NONBLOCKING) != 0) return ABCE_STATUS_INVALID_ARGUMENT;
@@ -474,34 +515,44 @@ static inline abce_status_t abce_device_validate_request(const abce_device_submi
   }
   return ABCE_STATUS_OK;
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline abce_status_t abce_device_submit_lane(const abce_device_submit_view_t* view,
                                                     const abce_device_request_t* request) {
   const abce_status_t status = abce_device_validate_request(view, request);
   if (!abce_status_is_ok(status)) return status;
   return abce_device_emit(&view->builder, &view->engine->ring, request);
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 #if defined(__HIP_DEVICE_COMPILE__)
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline uint32_t abce_device_lane_id(void) {
   return __builtin_amdgcn_mbcnt_hi(~0u, __builtin_amdgcn_mbcnt_lo(~0u, 0u));
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline uint64_t abce_device_lane_mask(bool predicate) {
   return __builtin_amdgcn_ballot_w64(predicate);
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 // |value| in lane |lane|, which must be the same in every active lane.
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline uint64_t abce_device_read_lane(uint64_t value, uint32_t lane) {
   const uint32_t low = (uint32_t)__builtin_amdgcn_readlane((int)(uint32_t)value, (int)lane);
   const uint32_t high = (uint32_t)__builtin_amdgcn_readlane((int)(uint32_t)(value >> 32), (int)lane);
   return ((uint64_t)high << 32) | low;
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 // Every active lane, all on view's engine and all blocking, submits under one
 // reservation and one publish: frames go back to back in lane order, each lane
 // writing its own. A lane whose request fails validation drops out. Groups past
 // half the ring take turns instead.
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline abce_status_t abce_device_submit_lanes_together(const abce_device_submit_view_t* view,
                                                               const abce_device_request_t* request,
                                                               uint32_t lane) {
@@ -542,10 +593,12 @@ static inline abce_status_t abce_device_submit_lanes_together(const abce_device_
   if (lane == leader) abce_device_ring_submit(ring, &reservation);
   return ABCE_STATUS_OK;
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 #endif  // __HIP_DEVICE_COMPILE__
 
 // |one_lane| is a constant at every call site: with it set, the lane loop is not
 // compiled in.
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline abce_status_t abce_device_submit(const abce_device_handle_t* handle,
                                                const abce_device_request_t* request,
                                                bool one_lane) {
@@ -591,7 +644,9 @@ static inline abce_status_t abce_device_submit(const abce_device_handle_t* handl
   return abce_device_submit_lane(&view, request);
 #endif  // __HIP_DEVICE_COMPILE__
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline abce_device_request_t abce_device_request(abce_device_submit_kind_t kind,
                                                         const abce_device_wait_t* dependency,
                                                         const abce_device_signal_t* completion,
@@ -607,7 +662,9 @@ static inline abce_device_request_t abce_device_request(abce_device_submit_kind_
   request.flags = flags;
   return request;
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline abce_device_request_t abce_device_linear_request(
     void* dst, const void* src, uint64_t size, const abce_device_wait_t* dependency,
     const abce_device_signal_t* completion, uint32_t flags) {
@@ -618,7 +675,9 @@ static inline abce_device_request_t abce_device_linear_request(
   request.size = size;
   return request;
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline abce_device_request_t abce_device_write_request(
     void* dst, uint64_t value, uint32_t size, const abce_device_wait_t* dependency,
     const abce_device_signal_t* completion, uint32_t flags) {
@@ -629,6 +688,7 @@ static inline abce_device_request_t abce_device_write_request(
   request.value = value;
   return request;
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 // Submits one linear copy of |size| bytes from |src| to |dst| on the handle's
 // ring. Returns once the copy is queued, not complete. Submissions on one ring
@@ -669,6 +729,7 @@ static inline abce_device_request_t abce_device_write_request(
 // Returns INVALID_ARGUMENT (bad handle, pointer, size, signal, wait or flags),
 // UNIMPLEMENTED (a signal that needs atomics without them), OUT_OF_RANGE (never fits the ring),
 // or NOT_READY (non-blocking only).
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline abce_status_t abce_device_submit_linear(const abce_device_handle_t* handle,
                                                       void* dst, const void* src, uint64_t size,
                                                       const abce_device_wait_t* dependency,
@@ -678,9 +739,11 @@ static inline abce_status_t abce_device_submit_linear(const abce_device_handle_t
       abce_device_linear_request(dst, src, size, dependency, completion, flags);
   return abce_device_submit(handle, &request, false);
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 // abce_device_submit_linear() for exactly one calling lane per wave (several
 // waves may call at once). INVALID_ARGUMENT if more lanes of a wave call it.
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline abce_status_t abce_device_submit_linear_one_lane(
     const abce_device_handle_t* handle, void* dst, const void* src, uint64_t size,
     const abce_device_wait_t* dependency, const abce_device_signal_t* completion, uint32_t flags) {
@@ -688,6 +751,7 @@ static inline abce_status_t abce_device_submit_linear_one_lane(
       abce_device_linear_request(dst, src, size, dependency, completion, flags);
   return abce_device_submit(handle, &request, true);
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 // Writes the low |size| (1, 2, 4 or 8) bytes of |value|, carried in the packet,
 // to |dst| aligned to min(size, 4); no source buffer. 4 and 8 bytes are one
@@ -695,6 +759,7 @@ static inline abce_status_t abce_device_submit_linear_one_lane(
 // untouched. It is data, not a completion: on gfx125+ it may land before
 // earlier copies, so flag readiness with a signal. Otherwise as
 // abce_device_submit_linear().
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline abce_status_t abce_device_submit_write(const abce_device_handle_t* handle,
                                                      void* dst, uint64_t value, uint32_t size,
                                                      const abce_device_wait_t* dependency,
@@ -704,8 +769,10 @@ static inline abce_status_t abce_device_submit_write(const abce_device_handle_t*
       abce_device_write_request(dst, value, size, dependency, completion, flags);
   return abce_device_submit(handle, &request, false);
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 // abce_device_submit_write() for exactly one calling lane per wave.
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline abce_status_t abce_device_submit_write_one_lane(
     const abce_device_handle_t* handle, void* dst, uint64_t value, uint32_t size,
     const abce_device_wait_t* dependency, const abce_device_signal_t* completion, uint32_t flags) {
@@ -713,10 +780,12 @@ static inline abce_status_t abce_device_submit_write_one_lane(
       abce_device_write_request(dst, value, size, dependency, completion, flags);
   return abce_device_submit(handle, &request, true);
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 // Queues |completion| (required) alone: it lands once every earlier submission
 // on the ring has, which drains the ring for the waiter. Otherwise as
 // abce_device_submit_linear().
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline abce_status_t abce_device_submit_signal(const abce_device_handle_t* handle,
                                                      const abce_device_signal_t* completion,
                                                      const abce_device_wait_t* dependency,
@@ -725,8 +794,10 @@ static inline abce_status_t abce_device_submit_signal(const abce_device_handle_t
       abce_device_request(ABCE_DEVICE_SUBMIT_SIGNAL, dependency, completion, flags);
   return abce_device_submit(handle, &request, false);
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 // abce_device_submit_signal() for exactly one calling lane per wave.
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline abce_status_t abce_device_submit_signal_one_lane(
     const abce_device_handle_t* handle, const abce_device_signal_t* completion,
     const abce_device_wait_t* dependency, uint32_t flags) {
@@ -734,6 +805,7 @@ static inline abce_status_t abce_device_submit_signal_one_lane(
       abce_device_request(ABCE_DEVICE_SUBMIT_SIGNAL, dependency, completion, flags);
   return abce_device_submit(handle, &request, true);
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 #ifdef __cplusplus
 }  // extern "C"

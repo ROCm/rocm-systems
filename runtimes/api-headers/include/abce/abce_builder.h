@@ -9,13 +9,14 @@
 #ifndef ABCE_BUILDER_H_
 #define ABCE_BUILDER_H_
 
+#include "abce_config.h"
+
 #include <assert.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
 
-#include "abce_config.h"
 #include "abce_types.h"
 #include "sdma_packets.h"
 
@@ -35,13 +36,17 @@ extern "C" {
 // Address helpers
 //===----------------------------------------------------------------------===//
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline uint32_t abce_ptr_low32(const void* ptr) {
   return (uint32_t)(uintptr_t)ptr;
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline uint32_t abce_ptr_high32(const void* ptr) {
   return (uint32_t)((uint64_t)(uintptr_t)ptr >> 32);
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 //===----------------------------------------------------------------------===//
 // abce_builder_t
@@ -91,6 +96,7 @@ typedef struct abce_builder_t {
 // |config| asks for a limit the packets cannot carry: a linear-copy limit above
 // what this IP's COUNT field encodes, or a fill limit that is not a whole number
 // of dwords within SDMA_PKT_CONSTANT_FILL_MAX_SIZE.
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline abce_status_t abce_builder_initialize(abce_isa_version_t isa,
                                                     const abce_builder_config_t* config,
                                                     abce_builder_t* out_builder) {
@@ -121,33 +127,58 @@ static inline abce_status_t abce_builder_initialize(abce_isa_version_t isa,
   out_builder->max_fill_dwords = (uint32_t)(max_fill_size / sizeof(uint32_t));
   return ABCE_STATUS_OK;
 }
+#else
+extern abce_status_t abce_builder_initialize(abce_isa_version_t isa,
+                                                    const abce_builder_config_t* config,
+                                                    abce_builder_t* out_builder);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 //===----------------------------------------------------------------------===//
 // Device/config queries
 //===----------------------------------------------------------------------===//
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline bool abce_builder_is_gfx125plus(const abce_builder_t* builder) {
   return builder->is_gfx125plus;
 }
+#else
+extern bool abce_builder_is_gfx125plus(const abce_builder_t* builder);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline size_t abce_builder_max_copy_size(const abce_builder_t* builder) {
   return builder->max_copy_size;
 }
+#else
+extern size_t abce_builder_max_copy_size(const abce_builder_t* builder);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 // SWAP exists on gfx94x/95x and gfx125+; no other part has the packet.
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline bool abce_builder_swap_supported(const abce_builder_t* builder) {
   return builder->is_gfx125plus || (builder->isa.major == 9 && builder->isa.minor >= 4);
 }
+#else
+extern bool abce_builder_swap_supported(const abce_builder_t* builder);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 // Required alignment of both swap endpoints.
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline size_t abce_builder_swap_alignment(const abce_builder_t* builder) {
   return builder->is_gfx125plus ? SDMA_PKT_COPY_LINEAR_SWAP_GFX125PLUS_ALIGNMENT
                                 : SDMA_PKT_COPY_LINEAR_SWAP_ALIGNMENT;
 }
+#else
+extern size_t abce_builder_swap_alignment(const abce_builder_t* builder);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline bool abce_builder_requires_gcr(const abce_builder_t* builder) {
   return builder->packet_caps.use_gcr;
 }
+#else
+extern bool abce_builder_requires_gcr(const abce_builder_t* builder);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 //===----------------------------------------------------------------------===//
 // Packet-count queries (for buffer sizing / signal pre-arming)
@@ -161,38 +192,65 @@ static inline bool abce_builder_requires_gcr(const abce_builder_t* builder) {
 // small max_linear_copy_size override brings an addressable copy close to it.
 #define ABCE_MAX_OP_PACKETS ((uint64_t)UINT32_MAX)
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline uint64_t abce_builder_num_copy_packets(const abce_builder_t* builder, size_t size) {
   return abce_div_round_up_u64(size, builder->max_copy_size);
 }
+#else
+extern uint64_t abce_builder_num_copy_packets(const abce_builder_t* builder, size_t size);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline uint64_t abce_builder_num_broadcast_packets(const abce_builder_t* builder,
                                                           size_t size) {
   return abce_builder_num_copy_packets(builder, size);
 }
+#else
+extern uint64_t abce_builder_num_broadcast_packets(const abce_builder_t* builder,
+                                                          size_t size);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline uint64_t abce_builder_num_multicast_packets(const abce_builder_t* builder,
                                                           size_t size) {
   return abce_builder_num_copy_packets(builder, size);
 }
+#else
+extern uint64_t abce_builder_num_multicast_packets(const abce_builder_t* builder,
+                                                          size_t size);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline uint64_t abce_builder_num_swap_packets(const abce_builder_t* builder, size_t size) {
   const size_t max_size = (builder->scope_fields && builder->is_gfx125plus)
                               ? SDMA_PKT_COPY_LINEAR_SWAP_GFX125PLUS_MAX_SIZE
                               : SDMA_PKT_COPY_LINEAR_SWAP_MAX_SIZE;
   return abce_div_round_up_u64(size, max_size);
 }
+#else
+extern uint64_t abce_builder_num_swap_packets(const abce_builder_t* builder, size_t size);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline uint64_t abce_builder_num_wait_signal_swap_packets(const abce_builder_t* builder,
                                                                  size_t size_a, size_t size_b) {
   (void)builder;
   return abce_div_round_up_u64(ABCE_MAX(size_a, size_b),
                                SDMA_PKT_COPY_LINEAR_SWAP_WAITSIGNAL_GFX125PLUS_MAX_SIZE);
 }
+#else
+extern uint64_t abce_builder_num_wait_signal_swap_packets(const abce_builder_t* builder,
+                                                                 size_t size_a, size_t size_b);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 // |count| is in dwords, the unit a fill is emitted in.
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline uint64_t abce_builder_num_fill_packets(const abce_builder_t* builder, size_t count) {
   return abce_div_round_up_u64(count, builder->max_fill_dwords);
 }
+#else
+extern uint64_t abce_builder_num_fill_packets(const abce_builder_t* builder, size_t count);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 //===----------------------------------------------------------------------===//
 // Fused wait/copy/signal parameters
@@ -219,6 +277,7 @@ typedef struct abce_wait_signal_params_t {
   uint64_t signal_value;
 } abce_wait_signal_params_t;
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline abce_wait_signal_params_t abce_wait_signal_none(void) {
   abce_wait_signal_params_t params;
   params.wait_addr = NULL;
@@ -231,11 +290,15 @@ static inline abce_wait_signal_params_t abce_wait_signal_none(void) {
   params.signal_value = 1;
   return params;
 }
+#else
+extern abce_wait_signal_params_t abce_wait_signal_none(void);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 //===----------------------------------------------------------------------===//
 // Builders (see ZEROED-BUFFER CONTRACT above)
 //===----------------------------------------------------------------------===//
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline void abce_builder_build_fence(const abce_builder_t* builder, char* cmd_addr,
                                             uint32_t* fence, uint32_t fence_value) {
   ABCE_ASSERT(cmd_addr != NULL);
@@ -260,9 +323,14 @@ static inline void abce_builder_build_fence(const abce_builder_t* builder, char*
     pkt->DATA_UNION.data = fence_value;
   }
 }
+#else
+extern void abce_builder_build_fence(const abce_builder_t* builder, char* cmd_addr,
+                                            uint32_t* fence, uint32_t fence_value);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 // One COPY_LINEAR packet of |copy_size| bytes, at most the builder's
 // max_copy_size, into a zeroed |pkt|.
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline void abce_builder_form_copy_packet(const abce_builder_t* builder,
                                                  SDMA_PKT_COPY_LINEAR* pkt, void* dst,
                                                  const void* src, uint32_t copy_size) {
@@ -285,7 +353,9 @@ static inline void abce_builder_form_copy_packet(const abce_builder_t* builder,
   pkt->DST_ADDR_LO_UNION.dst_addr_31_0 = abce_ptr_low32(dst);
   pkt->DST_ADDR_HI_UNION.dst_addr_63_32 = abce_ptr_high32(dst);
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline void abce_builder_build_copy(const abce_builder_t* builder, char* cmd_addr, void* dst,
                                            const void* src, size_t size) {
   size_t cur_size = 0;
@@ -298,7 +368,12 @@ static inline void abce_builder_build_copy(const abce_builder_t* builder, char* 
     cur_size += copy_size;
   }
 }
+#else
+extern void abce_builder_build_copy(const abce_builder_t* builder, char* cmd_addr, void* dst,
+                                           const void* src, size_t size);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline void abce_builder_build_broadcast_copy(const abce_builder_t* builder, char* cmd_addr,
                                                      void* dst1, void* dst2, const void* src,
                                                      size_t size) {
@@ -334,7 +409,13 @@ static inline void abce_builder_build_broadcast_copy(const abce_builder_t* build
     cur_size += copy_size;
   }
 }
+#else
+extern void abce_builder_build_broadcast_copy(const abce_builder_t* builder, char* cmd_addr,
+                                                     void* dst1, void* dst2, const void* src,
+                                                     size_t size);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline void abce_builder_build_multicast_copy(const abce_builder_t* builder, char* cmd_addr,
                                                      void* const* dsts, uint32_t num_dsts,
                                                      const void* src, size_t size) {
@@ -368,6 +449,11 @@ static inline void abce_builder_build_multicast_copy(const abce_builder_t* build
     cur_size += copy_size;
   }
 }
+#else
+extern void abce_builder_build_multicast_copy(const abce_builder_t* builder, char* cmd_addr,
+                                                     void* const* dsts, uint32_t num_dsts,
+                                                     const void* src, size_t size);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 //===----------------------------------------------------------------------===//
 // Fused wait/copy/signal builders (gfx125plus, variable-length)
@@ -412,6 +498,7 @@ static inline void abce_builder_build_multicast_copy(const abce_builder_t* build
     memcpy((signal_dws), (const uint32_t*)&(tmpl) + 14, 5 * sizeof(uint32_t));        \
   } while (0)
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline void abce_builder_build_multicast_wait_signal_copy(
     const abce_builder_t* builder, char* cmd_addr, void* const* dsts, uint32_t num_dsts,
     const void* src, size_t size, const abce_wait_signal_params_t* params) {
@@ -483,7 +570,13 @@ static inline void abce_builder_build_multicast_wait_signal_copy(
     cur_size += copy_size;
   }
 }
+#else
+extern void abce_builder_build_multicast_wait_signal_copy(
+    const abce_builder_t* builder, char* cmd_addr, void* const* dsts, uint32_t num_dsts,
+    const void* src, size_t size, const abce_wait_signal_params_t* params);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline void abce_builder_build_swap_copy(const abce_builder_t* builder, char* cmd_addr,
                                                 void* addr_a, void* addr_b, size_t size) {
   ABCE_STATIC_ASSERT(sizeof(SDMA_PKT_COPY_LINEAR_SWAP_GFX125PLUS) ==
@@ -533,6 +626,10 @@ static inline void abce_builder_build_swap_copy(const abce_builder_t* builder, c
     cur_size += copy_size;
   }
 }
+#else
+extern void abce_builder_build_swap_copy(const abce_builder_t* builder, char* cmd_addr,
+                                                void* addr_a, void* addr_b, size_t size);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 //===----------------------------------------------------------------------===//
 // Rect (2D/3D sub-window) copy
@@ -543,14 +640,17 @@ static inline void abce_builder_build_swap_copy(const abce_builder_t* builder, c
 // builder's AppendFn template parameter.
 typedef void* (*abce_rect_append_fn_t)(void* user_data, size_t packet_bytes);
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline int abce_max_aligned_element(size_t width) {
   return abce_count_trailing_zeros_u64((uint64_t)width | 16ull);
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 // Builds linear sub-window (rect) copy packets.
 //
 // Returns ABCE_STATUS_RECT_OUT_OF_RANGE when the pitch or slice exceeds what
 // the packet can encode; the C++ builder threw std::invalid_argument here.
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline abce_status_t abce_builder_build_copy_rect(
     const abce_builder_t* builder, abce_rect_append_fn_t append, void* user_data,
     const abce_pitched_ptr_t* dst, const abce_dim3_t* dst_offset, const abce_pitched_ptr_t* src,
@@ -679,6 +779,12 @@ static inline abce_status_t abce_builder_build_copy_rect(
   }
   return ABCE_STATUS_OK;
 }
+#else
+extern abce_status_t abce_builder_build_copy_rect(
+    const abce_builder_t* builder, abce_rect_append_fn_t append, void* user_data,
+    const abce_pitched_ptr_t* dst, const abce_dim3_t* dst_offset, const abce_pitched_ptr_t* src,
+    const abce_dim3_t* src_offset, const abce_dim3_t* range);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 // Counting append used by abce_builder_num_rect_packets(): hands back one
 // throwaway packet's worth of scratch and tallies the calls.
@@ -687,18 +793,21 @@ typedef struct abce_rect_count_state_t {
   ABCE_ALIGNAS(16) char scratch[256];
 } abce_rect_count_state_t;
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline void* abce_rect_count_append(void* user_data, size_t packet_bytes) {
   abce_rect_count_state_t* state = (abce_rect_count_state_t*)user_data;
   (void)packet_bytes;
   ++state->num_packets;
   return state->scratch;
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 // Number of rect (2D/3D sub-window) copy packets.
 //
 // Rect tiling is data dependent (pitch/alignment driven), so this replays the
 // exact same loop as abce_builder_build_copy_rect() with a counting append —
 // the two can never diverge. Fails the same way the emit does.
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline abce_status_t abce_builder_num_rect_packets(
     const abce_builder_t* builder, const abce_pitched_ptr_t* dst, const abce_dim3_t* dst_offset,
     const abce_pitched_ptr_t* src, const abce_dim3_t* src_offset, const abce_dim3_t* range,
@@ -710,11 +819,18 @@ static inline abce_status_t abce_builder_num_rect_packets(
   *out_num_packets = state.num_packets;
   return status;
 }
+#else
+extern abce_status_t abce_builder_num_rect_packets(
+    const abce_builder_t* builder, const abce_pitched_ptr_t* dst, const abce_dim3_t* dst_offset,
+    const abce_pitched_ptr_t* src, const abce_dim3_t* src_offset, const abce_dim3_t* range,
+    uint32_t* out_num_packets);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 //===----------------------------------------------------------------------===//
 // Remaining fixed-layout builders
 //===----------------------------------------------------------------------===//
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline void abce_builder_build_fill(const abce_builder_t* builder, char* cmd_addr, void* ptr,
                                            uint32_t value, size_t count) {
   char* cur_ptr = (char*)ptr;
@@ -739,7 +855,12 @@ static inline void abce_builder_build_fill(const abce_builder_t* builder, char* 
     count -= fill_count;
   }
 }
+#else
+extern void abce_builder_build_fill(const abce_builder_t* builder, char* cmd_addr, void* ptr,
+                                           uint32_t value, size_t count);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline void abce_builder_build_poll_compare(const abce_builder_t* builder, char* cmd_addr,
                                                    void* addr, uint32_t reference, uint32_t mask,
                                                    uint32_t function) {
@@ -755,12 +876,23 @@ static inline void abce_builder_build_poll_compare(const abce_builder_t* builder
   pkt->DW5_UNION.retry_count = 0xfff;
   if (builder->scope_fields) pkt->DW5_UNION.scope = SDMA_MEMORY_SCOPE_SYS;
 }
+#else
+extern void abce_builder_build_poll_compare(const abce_builder_t* builder, char* cmd_addr,
+                                                   void* addr, uint32_t reference, uint32_t mask,
+                                                   uint32_t function);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline void abce_builder_build_poll(const abce_builder_t* builder, char* cmd_addr,
                                            void* addr, uint32_t reference, uint32_t mask) {
   abce_builder_build_poll_compare(builder, cmd_addr, addr, reference, mask, SDMA_FUNC_EQUAL);
 }
+#else
+extern void abce_builder_build_poll(const abce_builder_t* builder, char* cmd_addr,
+                                           void* addr, uint32_t reference, uint32_t mask);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline void abce_builder_build_poll_64b_compare(const abce_builder_t* builder,
                                                        char* cmd_addr, void* addr,
                                                        uint64_t reference, uint64_t mask,
@@ -779,12 +911,24 @@ static inline void abce_builder_build_poll_64b_compare(const abce_builder_t* bui
   pkt->DW7_UNION.retry_count = 0;
   if (builder->scope_fields) pkt->DW7_UNION.scope = SDMA_MEMORY_SCOPE_SYS;
 }
+#else
+extern void abce_builder_build_poll_64b_compare(const abce_builder_t* builder,
+                                                       char* cmd_addr, void* addr,
+                                                       uint64_t reference, uint64_t mask,
+                                                       uint32_t function);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline void abce_builder_build_poll_64b(const abce_builder_t* builder, char* cmd_addr,
                                                void* addr, uint64_t reference, uint64_t mask) {
   abce_builder_build_poll_64b_compare(builder, cmd_addr, addr, reference, mask, SDMA_FUNC_EQUAL);
 }
+#else
+extern void abce_builder_build_poll_64b(const abce_builder_t* builder, char* cmd_addr,
+                                               void* addr, uint64_t reference, uint64_t mask);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline void abce_builder_build_fence_64b(const abce_builder_t* builder, char* cmd_addr,
                                                 void* fence_addr, uint64_t fence_value) {
   SDMA_PKT_FENCE_64B_GFX125PLUS* pkt = (SDMA_PKT_FENCE_64B_GFX125PLUS*)cmd_addr;
@@ -799,7 +943,12 @@ static inline void abce_builder_build_fence_64b(const abce_builder_t* builder, c
   pkt->DATA_LO_UNION.data_31_0 = (uint32_t)fence_value;
   pkt->DATA_HI_UNION.data_63_32 = (uint32_t)(fence_value >> 32);
 }
+#else
+extern void abce_builder_build_fence_64b(const abce_builder_t* builder, char* cmd_addr,
+                                                void* fence_addr, uint64_t fence_value);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline void abce_builder_build_wait_signal_copy(const abce_builder_t* builder,
                                                        char* cmd_addr, void* dst, const void* src,
                                                        size_t size,
@@ -866,7 +1015,14 @@ static inline void abce_builder_build_wait_signal_copy(const abce_builder_t* bui
     cur_size += copy_size;
   }
 }
+#else
+extern void abce_builder_build_wait_signal_copy(const abce_builder_t* builder,
+                                                       char* cmd_addr, void* dst, const void* src,
+                                                       size_t size,
+                                                       const abce_wait_signal_params_t* params);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline void abce_builder_build_wait_signal_indirect_copy(
     const abce_builder_t* builder, char* cmd_addr, void* dst, const void* src, size_t size,
     bool indirect_src, bool indirect_dst, const abce_wait_signal_params_t* params) {
@@ -929,7 +1085,13 @@ static inline void abce_builder_build_wait_signal_indirect_copy(
     num_dwords += 5;
   }
 }
+#else
+extern void abce_builder_build_wait_signal_indirect_copy(
+    const abce_builder_t* builder, char* cmd_addr, void* dst, const void* src, size_t size,
+    bool indirect_src, bool indirect_dst, const abce_wait_signal_params_t* params);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline void abce_builder_build_wait_signal_swap(const abce_builder_t* builder,
                                                        char* cmd_addr, void* addr_a, void* addr_b,
                                                        size_t size_a, size_t size_b,
@@ -1006,8 +1168,15 @@ static inline void abce_builder_build_wait_signal_swap(const abce_builder_t* bui
     cur_b += chunk_b;
   }
 }
+#else
+extern void abce_builder_build_wait_signal_swap(const abce_builder_t* builder,
+                                                       char* cmd_addr, void* addr_a, void* addr_b,
+                                                       size_t size_a, size_t size_b,
+                                                       const abce_wait_signal_params_t* params);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 // Writes the whole packet, so it does not rely on the zeroed-buffer contract.
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline void abce_builder_build_write(const abce_builder_t* builder, char* cmd_addr,
                                             void* dst, const uint32_t* data, uint32_t num_dwords) {
   (void)builder;
@@ -1022,10 +1191,15 @@ static inline void abce_builder_build_write(const abce_builder_t* builder, char*
   memcpy(cmd_addr, &header, sizeof(header));
   memcpy(cmd_addr + sizeof(header), data, num_dwords * sizeof(uint32_t));
 }
+#else
+extern void abce_builder_build_write(const abce_builder_t* builder, char* cmd_addr,
+                                            void* dst, const uint32_t* data, uint32_t num_dwords);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 // Stores one byte at |dst| as a one-byte CONST_FILL (SIZE 0; only 0 = byte and
 // 2 = dword exist). Keeps the engine's dependency check (NPD = 0), so it cannot
 // overtake an earlier write to the same address. Writes the whole packet.
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline void abce_builder_build_fill_byte(const abce_builder_t* builder, char* cmd_addr,
                                                 void* dst, uint8_t value) {
   SDMA_PKT_CONSTANT_FILL pkt;
@@ -1039,9 +1213,14 @@ static inline void abce_builder_build_fill_byte(const abce_builder_t* builder, c
   pkt.COUNT_UNION.count = 0;  // Bytes - 1.
   memcpy(cmd_addr, &pkt, sizeof(pkt));
 }
+#else
+extern void abce_builder_build_fill_byte(const abce_builder_t* builder, char* cmd_addr,
+                                                void* dst, uint8_t value);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 // |operation| is one of the 64-bit SDMA_ATOMIC_* opcodes, with |value| as the
 // operand.
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline void abce_builder_build_atomic(const abce_builder_t* builder, char* cmd_addr,
                                              void* addr, uint32_t operation, uint64_t value) {
   SDMA_PKT_ATOMIC* pkt = (SDMA_PKT_ATOMIC*)cmd_addr;
@@ -1054,17 +1233,32 @@ static inline void abce_builder_build_atomic(const abce_builder_t* builder, char
   pkt->SRC_DATA_LO_UNION.src_data_31_0 = (uint32_t)value;
   pkt->SRC_DATA_HI_UNION.src_data_63_32 = (uint32_t)(value >> 32);
 }
+#else
+extern void abce_builder_build_atomic(const abce_builder_t* builder, char* cmd_addr,
+                                             void* addr, uint32_t operation, uint64_t value);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline void abce_builder_build_atomic_add(const abce_builder_t* builder, char* cmd_addr,
                                                  void* addr, uint64_t value) {
   abce_builder_build_atomic(builder, cmd_addr, addr, SDMA_ATOMIC_ADD64, value);
 }
+#else
+extern void abce_builder_build_atomic_add(const abce_builder_t* builder, char* cmd_addr,
+                                                 void* addr, uint64_t value);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline void abce_builder_build_atomic_decrement(const abce_builder_t* builder,
                                                        char* cmd_addr, void* addr) {
   abce_builder_build_atomic_add(builder, cmd_addr, addr, UINT64_MAX);
 }
+#else
+extern void abce_builder_build_atomic_decrement(const abce_builder_t* builder,
+                                                       char* cmd_addr, void* addr);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline void abce_builder_build_get_global_timestamp(const abce_builder_t* builder,
                                                            char* cmd_addr, void* write_address) {
   SDMA_PKT_TIMESTAMP* pkt = (SDMA_PKT_TIMESTAMP*)cmd_addr;
@@ -1075,7 +1269,12 @@ static inline void abce_builder_build_get_global_timestamp(const abce_builder_t*
   pkt->ADDR_LO_UNION.addr_31_0 = abce_ptr_low32(write_address);
   pkt->ADDR_HI_UNION.addr_63_32 = abce_ptr_high32(write_address);
 }
+#else
+extern void abce_builder_build_get_global_timestamp(const abce_builder_t* builder,
+                                                           char* cmd_addr, void* write_address);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline void abce_builder_build_trap(const abce_builder_t* builder, char* cmd_addr,
                                            uint32_t event_id) {
   (void)builder;
@@ -1083,13 +1282,22 @@ static inline void abce_builder_build_trap(const abce_builder_t* builder, char* 
   pkt->HEADER_UNION.op = SDMA_OP_TRAP;
   pkt->INT_CONTEXT_UNION.int_ctx = event_id;
 }
+#else
+extern void abce_builder_build_trap(const abce_builder_t* builder, char* cmd_addr,
+                                           uint32_t event_id);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline void abce_builder_build_hdp_flush(const abce_builder_t* builder, char* cmd_addr) {
   (void)builder;
   ABCE_ASSERT(cmd_addr != NULL);
   memcpy(cmd_addr, &abce_sdma_hdp_flush_cmd, sizeof(abce_sdma_hdp_flush_cmd));
 }
+#else
+extern void abce_builder_build_hdp_flush(const abce_builder_t* builder, char* cmd_addr);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline void abce_builder_build_gcr(const abce_builder_t* builder, char* cmd_addr,
                                           bool invalidate) {
   ABCE_ASSERT(cmd_addr != NULL);
@@ -1121,6 +1329,10 @@ static inline void abce_builder_build_gcr(const abce_builder_t* builder, char* c
     pkt->WORD2_UNION.GCR_CONTROL_GL2_RANGE = 0;
   }
 }
+#else
+extern void abce_builder_build_gcr(const abce_builder_t* builder, char* cmd_addr,
+                                          bool invalidate);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 #ifdef __cplusplus
 }  // extern "C"

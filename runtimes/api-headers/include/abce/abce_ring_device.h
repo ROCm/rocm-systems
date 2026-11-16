@@ -24,10 +24,11 @@
 #ifndef ABCE_RING_DEVICE_H_
 #define ABCE_RING_DEVICE_H_
 
+#include "abce_config.h"
+
 #include <stdbool.h>
 #include <stdint.h>
 
-#include "abce_config.h"
 #include "abce_ring_core.h"
 #include "sdma_packets.h"
 
@@ -49,15 +50,18 @@ typedef struct abce_device_ring_t {
 // Address of the bytes at monotonic |write_index|. abce_ring_reserve() never
 // hands out a region that straddles the physical end, so a reservation is
 // contiguous from here.
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline char* abce_device_ring_write_address(const abce_device_ring_t* ring,
                                                    uint64_t write_index) {
   return (char*)ring->base + abce_ring_wrap(write_index, ring->size);
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 // Fills a reservation with NOPs: one counted header over the first
 // SDMA_NOP_MAX_DWORDS, so the engine skips them as one packet, and zero dwords
 // (one-dword NOPs) after it. Only wrap padding needs it; the submitter stores
 // its packets whole.
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline void abce_device_ring_pad(const abce_device_ring_t* ring,
                                         const abce_ring_reservation_t* reservation) {
   uint32_t* words = (uint32_t*)abce_device_ring_write_address(ring, reservation->start);
@@ -66,23 +70,29 @@ static inline void abce_device_ring_pad(const abce_device_ring_t* ring,
   const uint64_t nop_words = num_words < SDMA_NOP_MAX_DWORDS ? num_words : SDMA_NOP_MAX_DWORDS;
   words[0] = (uint32_t)(nop_words - 1) << SDMA_NOP_COUNT_SHIFT;
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline uint64_t abce_device_ring_load_read_index(void* user_data) {
   const abce_device_ring_t* ring = (const abce_device_ring_t*)user_data;
   return abce_ring_atomic_load_hw(ring->read_ptr);
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 // The packets land before either store below (gfx9/gfx10 start on the doorbell,
 // gfx11+ also poll the write pointer). Nothing else the thread wrote is
 // released.
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline void abce_device_ring_publish_write_index(void* user_data, uint64_t new_write_index) {
   abce_device_ring_t* ring = (abce_device_ring_t*)user_data;
   abce_ring_wait_stores();
   abce_ring_atomic_store_hw(ring->write_ptr, new_write_index);
   abce_ring_atomic_store_hw(ring->doorbell, new_write_index);
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 // Publishes [start, end) in reservation order and rings the doorbell.
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline abce_status_t abce_device_ring_submit(abce_device_ring_t* ring,
                                                     const abce_ring_reservation_t* reservation) {
   abce_ring_publisher_t publisher;
@@ -92,12 +102,14 @@ static inline abce_status_t abce_device_ring_submit(abce_device_ring_t* ring,
   publisher.user_data = ring;
   return abce_ring_publish(&publisher, reservation);
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 // Reserves |bytes| of contiguous ring space. While the ring is full it waits if
 // |block|, else returns ABCE_STATUS_NOT_READY. Wrap padding is folded in
 // (abce_ring_reserve()): the payload is the last |bytes| of the reservation, and
 // any tail before it must be filled with NOPs before submit. |bytes| may be at
 // most half the ring; ABCE_STATUS_OUT_OF_RANGE otherwise.
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline abce_status_t abce_device_ring_reserve(abce_device_ring_t* ring, uint64_t bytes,
                                                      bool block,
                                                      abce_ring_reservation_t* out_reservation) {
@@ -110,6 +122,7 @@ static inline abce_status_t abce_device_ring_reserve(abce_device_ring_t* ring, u
   producer.user_data = ring;
   return abce_ring_reserve_(&producer, bytes, block, out_reservation);
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 #ifdef __cplusplus
 }  // extern "C"

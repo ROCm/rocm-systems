@@ -20,6 +20,8 @@ use crate::{Error, ErrorKind};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 
+pub(crate) mod kernel;
+
 /// Test-only event stream shared by activated endpoints of one driver.
 struct TestEvents {
     /// Events and waiters protected by the same lock as publication.
@@ -137,13 +139,19 @@ impl Drop for TestEventSubscription {
 }
 
 /// Test driver instance with common routing and a numeric-only GPU queue.
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "independent test-driver capability switches"
+)]
 pub(crate) struct TestDriver {
+    pub(crate) kernel_controls: Option<Arc<kernel::KernelControls>>,
     instance: super::DriverInstanceId,
     id: [u8; 16],
     kind: EndpointKind,
     lifetime: DriverContextLifetime,
     host_registration: bool,
     owned_allocation: bool,
+    sdma_memory: bool,
     pub(crate) advice_enabled: bool,
     pub(crate) advice_prefetch_gate: Option<Arc<(std::sync::Barrier, std::sync::Barrier)>>,
     pub(crate) advice_calls: AtomicUsize,
@@ -208,6 +216,14 @@ pub(crate) struct TestQueue {
     fail_destroy: Arc<AtomicBool>,
     destroys: Arc<AtomicUsize>,
     released: bool,
+    storage: Option<Box<TestQueueStorage>>,
+}
+
+/// Host backing for publication tests. Tests advance retirement explicitly;
+/// this storage does not emulate GPU packet execution.
+struct TestQueueStorage {
+    ring: Box<[u32]>,
+    words: [AtomicU64; 3],
 }
 
 impl CachedInfo for TestQueue {
@@ -235,6 +251,12 @@ impl UserQueueResource for TestQueue {
 
     fn progress(&self) -> Result<(u64, u64), Error> {
         self.check()?;
+        if let Some(storage) = &self.storage {
+            return Ok((
+                storage.words[0].load(Ordering::Acquire),
+                storage.words[1].load(Ordering::Acquire),
+            ));
+        }
         Ok((0, 0))
     }
 
@@ -312,12 +334,14 @@ impl CachedInfo for TestAllocation {
 impl TestDriver {
     pub(crate) fn new(id: [u8; 16], kind: EndpointKind, lifetime: DriverContextLifetime) -> Self {
         Self {
+            kernel_controls: None,
             instance: super::new_driver_instance(),
             id,
             kind,
             lifetime,
             host_registration: false,
             owned_allocation: false,
+            sdma_memory: false,
             advice_enabled: false,
             advice_prefetch_gate: None,
             advice_calls: AtomicUsize::new(0),
@@ -340,6 +364,12 @@ impl TestDriver {
                 wait_started: Condvar::new(),
             }),
         }
+    }
+
+    pub(crate) fn with_kernel_sdma(mut self) -> Self {
+        self = self.with_sdma_memory();
+        self.kernel_controls = Some(Arc::new(kernel::KernelControls::default()));
+        self
     }
 
     /// Emits a device event to every active test subscription.
@@ -390,6 +420,13 @@ impl TestDriver {
     }
 
     /// Creates a fake SDMA transport without publishing any accessible pages.
+    /// Enables real host storage for native ABCE queue-publication tests.
+    pub(crate) fn with_sdma_memory(mut self) -> Self {
+        self.owned_allocation = true;
+        self.sdma_memory = true;
+        self
+    }
+
     pub(crate) fn create_user_queue(
         &self,
         device: &TestDevice,
@@ -401,7 +438,8 @@ impl TestDriver {
                 detail: "test endpoint is not this driver's GPU",
             });
         }
-        if !matches!(request.parameters, QueueParameters::Sdma)
+        let targeted = matches!(request.parameters, QueueParameters::SdmaByEngine { .. });
+        if !(matches!(request.parameters, QueueParameters::Sdma) || (self.sdma_memory && targeted))
             || request.ring_size_bytes < 4096
             || !request.ring_size_bytes.is_power_of_two()
         {
@@ -410,7 +448,17 @@ impl TestDriver {
                 detail: "test GPU only supports power-of-two SDMA queues",
             });
         }
-        Ok(Owned::new(TestQueue {
+        let ring_size = usize::try_from(request.ring_size_bytes).map_err(|_| Error::Operation {
+            kind: ErrorKind::InvalidArgument,
+            detail: "test ring exceeds host address space",
+        })?;
+        let storage = self.sdma_memory.then(|| {
+            Box::new(TestQueueStorage {
+                ring: vec![0; ring_size / 4].into_boxed_slice(),
+                words: std::array::from_fn(|_| AtomicU64::new(0)),
+            })
+        });
+        let mut queue = TestQueue {
             id: self.id,
             info: QueueTransport {
                 ring_host_address: 0x1000,
@@ -434,7 +482,25 @@ impl TestDriver {
             fail_destroy: self.fail_queue_destroy.clone(),
             destroys: self.queue_destroys.clone(),
             released: false,
-        })?)
+            storage,
+        };
+        if let Some(storage) = &mut queue.storage {
+            queue.info.ring_host_address = storage.ring.as_mut_ptr() as usize;
+            queue.info.ring_device_address = queue.info.ring_host_address as u64;
+            queue.info.read_index_host_address = storage.words[0].as_ptr() as usize;
+            queue.info.read_index_device_address = queue.info.read_index_host_address as u64;
+            queue.info.write_index_host_address = storage.words[1].as_ptr() as usize;
+            queue.info.write_index_device_address = queue.info.write_index_host_address as u64;
+            queue.info.doorbell_host_address = storage.words[2].as_ptr() as usize;
+            if let QueueParameters::SdmaByEngine {
+                selection: crate::device::gpu::queue::SdmaEngineSelection::Id(id),
+                ..
+            } = request.parameters
+            {
+                queue.info.sdma_engine_id = Some(id);
+            }
+        }
+        Ok(Owned::new(queue)?)
     }
 
     fn endpoint(&self) -> Endpoint {
@@ -576,7 +642,13 @@ impl AllocationOperations for TestDriver {
             logical_alignment: if registered { 1 } else { page },
             logical_size_granularity: 1,
             required_access: DeviceAccess::READ,
-            supported_access: DeviceAccess::READ | DeviceAccess::WRITE,
+            supported_access: DeviceAccess::READ
+                | DeviceAccess::WRITE
+                | if self.kernel_controls.is_some() {
+                    DeviceAccess::EXECUTE
+                } else {
+                    DeviceAccess::NONE
+                },
             host_visible: true,
             host_cacheability: Some(crate::memory::HostCacheability::WriteBack),
             host_writable: true,
@@ -635,7 +707,7 @@ impl AllocationOperations for TestDriver {
         kind: MemoryKind,
         size: u64,
         alignment: u64,
-        _permissions: DeviceAccess,
+        permissions: DeviceAccess,
     ) -> Result<Owned<Self::Allocation>, Error> {
         if !self.owned_allocation || kind != MemoryKind::System || !peers.is_empty() {
             return Err(Error::Operation {
@@ -646,6 +718,16 @@ impl AllocationOperations for TestDriver {
         let host = crate::memory::host::HostAllocation::allocate(size, alignment)?;
         let info = host.info();
         let backing = host.registration_lease()?;
+        if let Some(controls) = &self.kernel_controls {
+            controls
+                .allocations
+                .lock()
+                .map_err(|_| Error::Operation {
+                    kind: ErrorKind::Internal,
+                    detail: "test allocation lock poisoned",
+                })?
+                .push((info.host_address as u64, size, permissions));
+        }
         Ok(Owned::new(TestAllocation {
             id: device.id,
             host_address: info.host_address,

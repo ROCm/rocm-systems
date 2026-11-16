@@ -7,16 +7,22 @@
 #ifndef ABCE_TOPOLOGY_H_
 #define ABCE_TOPOLOGY_H_
 
+#include "abce_config.h"
+
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
-#include "abce_config.h"
 
 // Whether the KFD sysfs topology reader below is available. It walks
 // /sys/class/kfd/kfd/topology/nodes with opendir/readdir, which only exists on
 // Linux; abce_topology_data_t itself is platform-neutral, so a client on
 // another OS populates it from its own source (see abce_sdma_policy_set_topology).
+// In external mode availability belongs to the provider build. A per-TU
+// override cannot change the behavior of the linked implementation.
+#if !ABCE_ENABLE_IMPLEMENTATION && defined(ABCE_HAS_KFD_TOPOLOGY)
+#error "ABCE_HAS_KFD_TOPOLOGY is a header-only override; external topology availability belongs to the provider"
+#endif
 #ifndef ABCE_HAS_KFD_TOPOLOGY
 #if defined(__linux__)
 #define ABCE_HAS_KFD_TOPOLOGY 1
@@ -25,7 +31,7 @@
 #endif
 #endif  // ABCE_HAS_KFD_TOPOLOGY
 
-#if ABCE_HAS_KFD_TOPOLOGY
+#if ABCE_ENABLE_IMPLEMENTATION && ABCE_HAS_KFD_TOPOLOGY
 #include <dirent.h>
 #include <stdio.h>
 #include <string.h>
@@ -49,6 +55,7 @@ typedef struct abce_topology_data_t {
 // Zero-initializing this struct is NOT the default state: an unknown
 // xgmi_physical_id is -1. Always initialize through here, which also serves as
 // the reset used before reloading topology.
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline void abce_topology_data_initialize(abce_topology_data_t* out_topology) {
   for (uint32_t device_id = 0; device_id < ABCE_MAX_TOPOLOGY_DEVICES; ++device_id) {
     out_topology->xgmi_physical_id[device_id] = -1;
@@ -57,7 +64,11 @@ static inline void abce_topology_data_initialize(abce_topology_data_t* out_topol
       out_topology->recommended_mask[device_id][peer_id] = 0;
   }
 }
+#else
+extern void abce_topology_data_initialize(abce_topology_data_t* out_topology);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline void abce_topology_data_set_device(abce_topology_data_t* topology,
                                                  uint32_t device_id, int xgmi_physical_id,
                                                  uint64_t hive_id) {
@@ -65,7 +76,13 @@ static inline void abce_topology_data_set_device(abce_topology_data_t* topology,
   topology->xgmi_physical_id[device_id] = xgmi_physical_id;
   topology->hive_id[device_id] = hive_id;
 }
+#else
+extern void abce_topology_data_set_device(abce_topology_data_t* topology,
+                                                 uint32_t device_id, int xgmi_physical_id,
+                                                 uint64_t hive_id);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline void abce_topology_data_set_recommended_mask(abce_topology_data_t* topology,
                                                            uint32_t source_device_id,
                                                            uint32_t destination_device_id,
@@ -75,17 +92,34 @@ static inline void abce_topology_data_set_recommended_mask(abce_topology_data_t*
     return;
   topology->recommended_mask[source_device_id][destination_device_id] = mask;
 }
+#else
+extern void abce_topology_data_set_recommended_mask(abce_topology_data_t* topology,
+                                                           uint32_t source_device_id,
+                                                           uint32_t destination_device_id,
+                                                           uint64_t mask);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline int abce_topology_data_xgmi_physical_id(const abce_topology_data_t* topology,
                                                       uint32_t device_id) {
   return device_id < ABCE_MAX_TOPOLOGY_DEVICES ? topology->xgmi_physical_id[device_id] : -1;
 }
+#else
+extern int abce_topology_data_xgmi_physical_id(const abce_topology_data_t* topology,
+                                                      uint32_t device_id);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline uint64_t abce_topology_data_hive_id(const abce_topology_data_t* topology,
                                                   uint32_t device_id) {
   return device_id < ABCE_MAX_TOPOLOGY_DEVICES ? topology->hive_id[device_id] : 0;
 }
+#else
+extern uint64_t abce_topology_data_hive_id(const abce_topology_data_t* topology,
+                                                  uint32_t device_id);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline uint64_t abce_topology_data_recommended_mask(const abce_topology_data_t* topology,
                                                            uint32_t source_device_id,
                                                            uint32_t destination_device_id) {
@@ -94,6 +128,11 @@ static inline uint64_t abce_topology_data_recommended_mask(const abce_topology_d
              ? topology->recommended_mask[source_device_id][destination_device_id]
              : 0;
 }
+#else
+extern uint64_t abce_topology_data_recommended_mask(const abce_topology_data_t* topology,
+                                                           uint32_t source_device_id,
+                                                           uint32_t destination_device_id);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 //===----------------------------------------------------------------------===//
 // abce_topology_load_result_t
@@ -128,6 +167,7 @@ typedef struct abce_topology_load_result_t {
 // fscanf width below MUST stay one less than this.
 #define ABCE_TOPOLOGY_KEY_MAX 64
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline uint32_t abce_topology_parse_node_id(const char* name) {
   if (!name || name[0] < '0' || name[0] > '9') return UINT32_MAX;
   uint32_t value = 0;
@@ -137,7 +177,9 @@ static inline uint32_t abce_topology_parse_node_id(const char* name) {
   }
   return value;
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline int abce_topology_read_xgmi_physical_id(const char* pci_bdf) {
   char path[ABCE_TOPOLOGY_PATH_MAX];
   const int written =
@@ -150,7 +192,9 @@ static inline int abce_topology_read_xgmi_physical_id(const char* pci_bdf) {
   fclose(file);
   return parsed ? physical_id : -1;
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline void abce_topology_load_links(uint32_t source_node, const char* links_directory,
                                             abce_topology_data_t* topology) {
   DIR* directory = opendir(links_directory);
@@ -180,7 +224,9 @@ static inline void abce_topology_load_links(uint32_t source_node, const char* li
   }
   closedir(directory);
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline void abce_topology_load_node(uint32_t node_id, const char* node_directory,
                                            abce_topology_data_t* topology,
                                            abce_topology_load_result_t* result) {
@@ -241,6 +287,7 @@ static inline void abce_topology_load_node(uint32_t node_id, const char* node_di
     result->num_non_xgmi_sdma = (uint8_t)num_sdma_engines;
   }
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 // Header-only Linux/KFD topology reader. A null |base_path| reads
 // ABCE_KFD_TOPOLOGY_DEFAULT_PATH. Parsing into a temporary
@@ -249,6 +296,7 @@ static inline void abce_topology_load_node(uint32_t node_id, const char* node_di
 //
 // Returns whether a GPU was found, which is also reported in
 // out_result->found_gpu alongside the engine counts.
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline bool abce_topology_load_from_kfd(const char* base_path,
                                                abce_topology_data_t* out_topology,
                                                abce_topology_load_result_t* out_result) {
@@ -276,6 +324,11 @@ static inline bool abce_topology_load_from_kfd(const char* base_path,
   if (out_result->found_gpu) *out_topology = loaded;
   return out_result->found_gpu;
 }
+#else
+extern bool abce_topology_load_from_kfd(const char* base_path,
+                                               abce_topology_data_t* out_topology,
+                                               abce_topology_load_result_t* out_result);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 #endif  // ABCE_HAS_KFD_TOPOLOGY
 

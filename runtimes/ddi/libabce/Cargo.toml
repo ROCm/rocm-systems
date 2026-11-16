@@ -1,0 +1,22 @@
+# Copyright (c) 2026 Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
+[package]
+name = "libabce"
+description = "ABCE C ABI over native rocddi mechanisms"
+publish = false
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "abce"
+crate-type = ["rlib"]
+
+[dependencies]
+rocddi.workspace = true
+
+[lints]
+workspace = true

@@ -21,7 +21,7 @@
 //! generic ownership and rollback algorithms remain shared.
 
 #[cfg(test)]
-use super::test_driver::{TestAllocation, TestDriver, TestQueue};
+use super::test_driver::{TestAllocation, TestDriver, TestQueue, kernel::TestKernelQueue};
 use super::{
     AllocationOperations, DeviceDriverState, GpuDriverRef, GpuKernelQueueOperations,
     GpuPcSamplingOperations, GpuUserQueueOperations, VirtualMemoryOperations,
@@ -850,6 +850,8 @@ impl QueueState {
 
 /// Driver-selected owner of a kernel-mediated GPU queue.
 pub(crate) enum KernelQueueState {
+    #[cfg(test)]
+    Test(DriverKernelQueue<TestDriver, TestKernelQueue>),
     #[cfg(not(target_os = "linux"))]
     Unavailable(std::convert::Infallible),
     /// Driver-mediated queue owned by the Linux KFD backend.
@@ -915,6 +917,8 @@ impl KernelQueueState {
             // SAFETY: The caller preserves the command backing.
             #[cfg(target_os = "linux")]
             Self::LinuxKfd(queue) => unsafe { queue.submit(command) },
+            #[cfg(test)]
+            Self::Test(queue) => unsafe { queue.submit(command) },
         }
     }
 
@@ -924,6 +928,8 @@ impl KernelQueueState {
             Self::Unavailable(never, ..) => match *never {},
             #[cfg(target_os = "linux")]
             Self::LinuxKfd(queue) => queue.status(),
+            #[cfg(test)]
+            Self::Test(queue) => queue.status(),
         }
     }
 
@@ -933,6 +939,8 @@ impl KernelQueueState {
             Self::Unavailable(never, ..) => match *never {},
             #[cfg(target_os = "linux")]
             Self::LinuxKfd(queue) => queue.refresh_status(),
+            #[cfg(test)]
+            Self::Test(queue) => queue.refresh_status(),
         }
     }
 
@@ -949,6 +957,10 @@ impl KernelQueueState {
             Self::LinuxKfd(queue) => {
                 queue.wait(submission, timeout_nanoseconds, poll_duration_nanoseconds)
             }
+            #[cfg(test)]
+            Self::Test(queue) => {
+                queue.wait(submission, timeout_nanoseconds, poll_duration_nanoseconds)
+            }
         }
     }
 
@@ -958,6 +970,8 @@ impl KernelQueueState {
             Self::Unavailable(never, ..) => match *never {},
             #[cfg(target_os = "linux")]
             Self::LinuxKfd(queue) => queue.destroy(),
+            #[cfg(test)]
+            Self::Test(queue) => queue.destroy(),
         }
     }
 }
@@ -1008,7 +1022,13 @@ impl GpuDriverRef<'_> {
                 )))
             }
             #[cfg(test)]
-            Self::Test { .. } => Err(super::instance::unsupported_test_gpu()),
+            Self::Test { driver, state } => {
+                let inner = driver.create_kernel_queue(state, format)?;
+                Ok(KernelQueueState::Test(DriverKernelQueue::new(
+                    (*driver).clone(),
+                    inner,
+                )))
+            }
         }
     }
 

@@ -15,6 +15,7 @@ use crate::memory::Allocation;
 use crate::topology::{CacheAssociations, CacheInfo, CacheKind, GpuInfo};
 use crate::{Error, ErrorKind};
 
+pub mod abce;
 mod copy;
 pub mod event;
 pub mod image;
@@ -31,6 +32,8 @@ pub use copy::{
 pub(crate) struct GpuResources {
     /// Bounded SDMA contexts shared across clones of the activated device.
     copy_pool: copy::CopyResourcePool,
+    /// Native ABCE queues scoped to this activated GPU/VM owner.
+    abce_pool: abce::native::CopyPool,
 }
 
 /// Returns whether a topology cache is a non-instruction GPU compute-unit

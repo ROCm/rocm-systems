@@ -13,8 +13,20 @@
 #include <stddef.h>
 #include <stdint.h>
 
+// Host callers select the external Rust provider through rocm_runtime::abce.
+// Non-CMake callers keep the historical header implementation by default.
+#ifndef ABCE_ENABLE_IMPLEMENTATION
+#define ABCE_ENABLE_IMPLEMENTATION 1
+#endif
+#if ABCE_ENABLE_IMPLEMENTATION != 0 && ABCE_ENABLE_IMPLEMENTATION != 1
+#error "ABCE_ENABLE_IMPLEMENTATION must be 0 or 1"
+#endif
+#if !ABCE_ENABLE_IMPLEMENTATION && defined(__HIP__)
+#error "ABCE external implementation supports host translation units; compile HIP kernels with the header implementation"
+#endif
+
 // MSVC proper, not clang-cl: it has none of the GCC builtins ABCE uses on host.
-#if defined(_MSC_VER) && !defined(__clang__)
+#if ABCE_ENABLE_IMPLEMENTATION && defined(_MSC_VER) && !defined(__clang__)
 #define ABCE_COMPILER_MSVC 1
 #if !defined(_M_X64)
 #error "ABCE's MSVC host atomics assume x64 ordering"
@@ -27,6 +39,15 @@
 #ifdef __cplusplus
 extern "C" {
 #endif  // __cplusplus
+
+// Version of the externally linkable host ABI. Device descriptors have their
+// own ABCE_DEVICE_ABI_VERSION in abce_device.h.
+#define ABCE_HOST_ABI_VERSION 1u
+#if ABCE_ENABLE_IMPLEMENTATION
+static inline uint32_t abce_host_abi_version(void) { return ABCE_HOST_ABI_VERSION; }
+#else
+extern uint32_t abce_host_abi_version(void);
+#endif
 
 //===----------------------------------------------------------------------===//
 // Compiler configuration
@@ -76,24 +97,33 @@ extern "C" {
 #define ABCE_ARRAYSIZE(arr) (sizeof(arr) / sizeof((arr)[0]))
 
 // Rounds |value| up to a power-of-two |alignment|.
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline uint64_t abce_align_up(uint64_t value, uint64_t alignment) {
   return (value + alignment - 1) & ~(alignment - 1);
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 // |value| / |divisor| rounded up, exact for every |value|: there is no rounding
 // addition to overflow. |divisor| MUST be non-zero.
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline uint64_t abce_div_round_up_u64(uint64_t value, uint64_t divisor) {
   return value / divisor + (value % divisor != 0);
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline bool abce_is_power_of_two(uint64_t value) {
   return value != 0 && (value & (value - 1)) == 0;
 }
+#else
+extern bool abce_is_power_of_two(uint64_t value);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 // Index of the lowest set bit. |value| MUST be non-zero. GCC/Clang get the
 // builtin; anything else gets a portable loop. The masks involved are at most
 // ABCE_MAX_ENGINES bits wide and no caller is on a hot path, so the fallback
 // costs nothing worth an ISA-specific intrinsic.
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline int abce_count_trailing_zeros_u64(uint64_t value) {
 #if defined(__GNUC__) || defined(__clang__)
   return __builtin_ctzll(value);
@@ -106,7 +136,9 @@ static inline int abce_count_trailing_zeros_u64(uint64_t value) {
   return count;
 #endif  // __GNUC__ || __clang__
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline int abce_popcount_u64(uint64_t value) {
 #if defined(__GNUC__) || defined(__clang__)
   return __builtin_popcountll(value);
@@ -116,6 +148,7 @@ static inline int abce_popcount_u64(uint64_t value) {
   return count;
 #endif  // __GNUC__ || __clang__
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 //===----------------------------------------------------------------------===//
 // Host atomics
@@ -129,6 +162,7 @@ static inline int abce_popcount_u64(uint64_t value) {
 // interlocked exchange.
 //===----------------------------------------------------------------------===//
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline uint64_t abce_host_load_relaxed_u64(const uint64_t* ptr) {
 #if ABCE_COMPILER_MSVC
   return *(const volatile uint64_t*)ptr;
@@ -136,7 +170,9 @@ static inline uint64_t abce_host_load_relaxed_u64(const uint64_t* ptr) {
   return __atomic_load_n(ptr, __ATOMIC_RELAXED);
 #endif
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline uint64_t abce_host_load_acquire_u64(const uint64_t* ptr) {
 #if ABCE_COMPILER_MSVC
   const uint64_t value = *(const volatile uint64_t*)ptr;
@@ -146,7 +182,9 @@ static inline uint64_t abce_host_load_acquire_u64(const uint64_t* ptr) {
   return __atomic_load_n(ptr, __ATOMIC_ACQUIRE);
 #endif
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline void abce_host_store_relaxed_u64(uint64_t* ptr, uint64_t value) {
 #if ABCE_COMPILER_MSVC
   *(volatile uint64_t*)ptr = value;
@@ -154,7 +192,9 @@ static inline void abce_host_store_relaxed_u64(uint64_t* ptr, uint64_t value) {
   __atomic_store_n(ptr, value, __ATOMIC_RELAXED);
 #endif
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline void abce_host_store_release_u64(uint64_t* ptr, uint64_t value) {
 #if ABCE_COMPILER_MSVC
   _ReadWriteBarrier();
@@ -163,7 +203,9 @@ static inline void abce_host_store_release_u64(uint64_t* ptr, uint64_t value) {
   __atomic_store_n(ptr, value, __ATOMIC_RELEASE);
 #endif
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline void abce_host_store_release_u32(uint32_t* ptr, uint32_t value) {
 #if ABCE_COMPILER_MSVC
   _ReadWriteBarrier();
@@ -172,8 +214,10 @@ static inline void abce_host_store_release_u32(uint32_t* ptr, uint32_t value) {
   __atomic_store_n(ptr, value, __ATOMIC_RELEASE);
 #endif
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 // Strong compare-and-swap. On failure |*expected| receives the current value.
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline bool abce_host_cas_relaxed_u64(uint64_t* ptr, uint64_t* expected,
                                              uint64_t desired) {
 #if ABCE_COMPILER_MSVC
@@ -187,7 +231,9 @@ static inline bool abce_host_cas_relaxed_u64(uint64_t* ptr, uint64_t* expected,
                                      __ATOMIC_RELAXED);
 #endif
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline void abce_host_fence_release(void) {
 #if ABCE_COMPILER_MSVC
   _ReadWriteBarrier();
@@ -195,7 +241,11 @@ static inline void abce_host_fence_release(void) {
   __atomic_thread_fence(__ATOMIC_RELEASE);
 #endif
 }
+#else
+extern void abce_host_fence_release(void);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline void abce_host_fence_seq_cst(void) {
 #if ABCE_COMPILER_MSVC
   _mm_mfence();
@@ -203,6 +253,7 @@ static inline void abce_host_fence_seq_cst(void) {
   __atomic_thread_fence(__ATOMIC_SEQ_CST);
 #endif
 }
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 //===----------------------------------------------------------------------===//
 // abce_status_t
@@ -255,11 +306,16 @@ typedef enum abce_status_t {
   ABCE_STATUS_NOT_READY,
 } abce_status_t;
 
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline bool abce_status_is_ok(abce_status_t status) {
   return status == ABCE_STATUS_OK;
 }
+#else
+extern bool abce_status_is_ok(abce_status_t status);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 // Stable short name for logs. Never null.
+#if ABCE_ENABLE_IMPLEMENTATION
 static inline const char* abce_status_name(abce_status_t status) {
   switch (status) {
     case ABCE_STATUS_OK:
@@ -291,6 +347,9 @@ static inline const char* abce_status_name(abce_status_t status) {
   }
   return "UNKNOWN";
 }
+#else
+extern const char* abce_status_name(abce_status_t status);
+#endif  // ABCE_ENABLE_IMPLEMENTATION
 
 #ifdef __cplusplus
 }  // extern "C"

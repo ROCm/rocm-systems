@@ -35,14 +35,13 @@ use packet::{SdmaCommand, TimingAddresses, encode_gfx9_timestamp};
 // GFX12.0 SDMA 7.0.1 uses the OSS5 COPY_LINEAR and GCR packet layouts. Keep the packet
 // format here so either frontend can use the same native copy mechanism.
 const COPY_PACKET_BYTES: usize = 28;
-const SWAP_PACKET_BYTES: usize = 28;
-const FILL_PACKET_BYTES: usize = 20;
+#[cfg(test)]
 const GCR_PACKET_BYTES: usize = 20;
 const TIMESTAMP_PACKET_BYTES: usize = 12;
+#[cfg(test)]
 const COMMAND_BYTES: usize = GCR_PACKET_BYTES * 2 + COPY_PACKET_BYTES;
 #[cfg(test)]
 const TIMED_COMMAND_BYTES: usize = COMMAND_BYTES + TIMESTAMP_PACKET_BYTES * 2;
-const FILL_COMMAND_BYTES: usize = GCR_PACKET_BYTES * 2 + FILL_PACKET_BYTES;
 const GFX1250_GCR_PACKET_BYTES: usize = 24;
 const GFX1250_CONTROLLED_COMMAND_BYTES: usize =
     GFX1250_GCR_PACKET_BYTES * 2 + 19 * 4 + TIMESTAMP_PACKET_BYTES * 2;
@@ -50,18 +49,17 @@ const MAX_COPY_PACKET_BYTES: u64 = 0x3f_ffe0;
 const MAX_INDIRECT_PACKET_BYTES: u64 = 0x3fff_ffe0;
 const MAX_FILL_PACKET_BYTES: u64 = 0x3f_ffe0;
 const MAX_FILL_PACKET_DWORDS: u64 = MAX_FILL_PACKET_BYTES / 4;
+#[cfg(test)]
 const SDMA_COPY_LINEAR: u32 = 1;
-const SDMA_COPY_SWAP: u32 = 1 | (9 << 8);
-// The gfx1250 SIGNAL_OPERATION field uses the GL2 64-bit atomic opcodes.
-// Atomic swap implements the public raw WRITE operation.
-const SDMA_SIGNAL_WRITE64: u32 = 0x67;
-const SDMA_SIGNAL_ADD64: u32 = 0x6f;
-const SDMA_SIGNAL_SUB64: u32 = 0x70;
+#[cfg(test)]
 const SDMA_CONST_FILL_DWORD: u32 = 0x0b | (2 << 30);
+#[cfg(test)]
 const SDMA_TIMESTAMP_GET_GLOBAL_SYS: u32 = 0x0d | (2 << 8) | (3 << 24);
-const SDMA_TIMESTAMP_GET_GLOBAL_GFX9: u32 = 0x0d | (2 << 8);
+#[cfg(test)]
 const SDMA_USER_GCR: u32 = 0x11 | (1 << 8);
+#[cfg(test)]
 const GCR_WRITEBACK: u32 = (1 << 31) | (1 << 22);
+#[cfg(test)]
 const GCR_INVALIDATE: u32 = (1 << 30) | (1 << 25) | (1 << 24) | (1 << 23);
 const NATIVE_WAIT_NS: u64 = 50_000_000;
 const USER_RING_BYTES: u64 = 4096;

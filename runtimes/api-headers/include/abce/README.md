@@ -3,6 +3,11 @@
 
 # ABCE — Accelerated Blit Copy Engine
 
+ABCE defaults to its header implementation. CMake consumers can select the
+native Rust host provider with `ABCE_HEADER_ONLY=OFF` and link
+`rocm_runtime::abce`; see the [Rust provider usage guide](../../../ddi/libabce/README.md).
+
+
 **Status: draft, circulated for comment.** Nothing in the tree consumes ABCE yet; it is a
 standalone header-only library at `runtimes/api-headers/include/abce`. The interface is C11 — strict C,
 `extern "C"` guarded, so it is includable from C++ as-is — with `abce_cxx.h` as an optional

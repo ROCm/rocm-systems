@@ -639,7 +639,7 @@ impl GpuDriverRef<'_> {
             #[cfg(target_os = "linux")]
             Self::LinuxKfd { driver, state } => driver.available_sdma_engines(state),
             #[cfg(test)]
-            Self::Test { .. } => Err(unsupported_test_gpu()),
+            Self::Test { driver, state } => driver.available_sdma_engines(state),
         }
     }
 
