@@ -189,6 +189,26 @@ static std::string TargetToGeneric(const std::string &input) {
   return generic_name;
 }
 
+// Some targets support XNACK in the compiler but are run by ROCr in xnack-off mode with XNACK
+// reported as unsupported (gfx9 client APUs: gfx902/gfx909/gfx90c). The agent ISA name then has
+// no xnack feature (e.g. amdgcn-amd-amdhsa--gfx90c), and COMGR does not match it against code
+// objects built with an explicit "xnack-" (e.g. --offload-arch=gfx90c:xnack-), although those
+// are exactly right for the device. Return that "<isa>:xnack-" alias, or an empty string.
+static std::string XnackOffAlias(const amd::Isa& isa) {
+  if (isa.isXnackSupported()) {
+    return {};
+  }
+  std::string alias = isa.isaName() + ":xnack-";
+  const amd::Isa* alias_isa = amd::Isa::findIsa(alias.c_str());
+  if (alias_isa == nullptr || alias_isa->isXnackSupported() ||
+      alias_isa->versionMajor() != isa.versionMajor() ||
+      alias_isa->versionMinor() != isa.versionMinor() ||
+      alias_isa->versionStepping() != isa.versionStepping()) {
+    return {};
+  }
+  return alias;
+}
+
 static bool IsCodeObjectUncompressed(const void* image, size_t image_size) {
   constexpr size_t magic_size = sizeof(symbols::kOffloadBundleUncompressedMagicStr) - 1;
   if (image_size < magic_size) {
@@ -586,6 +606,10 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
   for (auto device : devices) {
     std::string device_name = device->devices()[0]->isa().isaName();
     unique_isa_names.insert(device_name);
+    auto xnack_off_name = XnackOffAlias(device->devices()[0]->isa());
+    if (!xnack_off_name.empty()) {
+      unique_isa_names.insert(xnack_off_name);
+    }
     auto generic_name = TargetToGeneric(device_name);
     if (!generic_name.empty()) {
       unique_isa_names.insert(generic_name);
@@ -616,6 +640,13 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
       std::string device_name = device->devices()[0]->isa().isaName();
       auto generic_target_name = TargetToGeneric(device_name);   // Generic Code Object
       auto native_co = code_obj_map.find(device_name);           // Native Code Object
+      if (native_co == code_obj_map.end()) {
+        // Native code object built with explicit xnack- for an xnack-off device
+        auto xnack_off_name = XnackOffAlias(device->devices()[0]->isa());
+        if (!xnack_off_name.empty()) {
+          native_co = code_obj_map.find(xnack_off_name);
+        }
+      }
       auto generic_co = code_obj_map.find(generic_target_name);  // generic Code Object
 
       // If the size is not 0, that means we found the native isa code object
