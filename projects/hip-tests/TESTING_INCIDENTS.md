@@ -195,7 +195,7 @@ handle type. Until then the guard must stay.
 **Inventory records.** The guard is a suite-wide convention rather than a single
 inventory record; it underlies the resource-safety claims of the contract tier.
 
-## TI-004: Contract coverage and test-plan drift gates
+## TI-004: Contract coverage and test-plan drift checks
 
 **Finding.** Without a gate, a new or changed public HIP API could land without
 either portable contract coverage or a reviewed justification for its absence,
@@ -203,10 +203,13 @@ turning "we forgot to test this" into a silent omission; the uncovered-API
 allowlist could accumulate stale excuses; and `catch/TEST_PLAN.md` could drift out
 of sync with the `@asserts:` tags in the contract sources.
 
-**Control.** Two static, path-filtered required PR gates govern the contract
-tier. They are **not** always-on: the workflow's `paths:` filter restricts them to
-pull requests that touch the HIP headers, the contract tier, or the contract
-tooling, so a docs-only PR does not trigger them.
+**Control.** A single path-filtered workflow runs one `contract-coverage` job that
+governs the contract tier through two static checks. They are **not** always-on:
+the workflow's `paths:` filter restricts the job to pull requests that touch the
+HIP headers, the contract tier, or the contract tooling, so a docs-only PR does not
+trigger it. Both checks are workflow-defined and path-filtered; whether either
+blocks merge depends on branch-protection settings external to this repository and
+is not asserted here.
 1. A coverage drift checker,
    [`catch/contract/tools/check_contract_coverage.py`](catch/contract/tools/check_contract_coverage.py),
    fails a PR when a public HIP API declared in `hip_runtime_api.h` has neither a
@@ -215,7 +218,7 @@ tooling, so a docs-only PR does not trigger them.
    a reason. It also fails on *stale* allowlist entries so the allowlist stays
    truthful, and it verifies the numeric snapshot block in
    [`CONTRACT_COVERAGE.md`](CONTRACT_COVERAGE.md).
-2. A test-plan staleness gate (`catch/tools/gen_test_plan.py --check`) fails when
+2. A test-plan staleness check (`catch/tools/gen_test_plan.py --check`) fails when
    `catch/TEST_PLAN.md` is out of date with the `// @asserts:` tags in the
    contract sources.
 
@@ -223,10 +226,10 @@ tooling, so a docs-only PR does not trigger them.
 public APIs from landing untested and keeps the generated plan and allowlist
 honest.
 
-**Rationale.** The gate exists so a new or changed public API cannot land without
+**Rationale.** The check exists so a new or changed public API cannot land without
 either portable contract coverage or an explicit, reviewed justification for its
 absence. It converts "we forgot to test this" from a silent omission into a
-blocking, self-documenting CI failure on the relevant paths, and keeps the
+self-documenting CI failure on the relevant paths, and keeps the
 allowlist from accumulating stale excuses. The snapshot (2026-11-05) records 97.4%
 approximate declared API-name coverage with 13 intentionally uncovered,
 allowlisted APIs.
@@ -235,10 +238,10 @@ allowlisted APIs.
 - Checker, allowlist, and philosophy in
   [`CONTRACT_COVERAGE.md`](CONTRACT_COVERAGE.md) and
   [`catch/contract/AUTHORING.md`](catch/contract/AUTHORING.md).
-- Enforced in-repo by
+- Defined in-repo by
   [`../../.github/workflows/hip-contract-coverage.yml`](../../.github/workflows/hip-contract-coverage.yml),
-  whose `paths:` filter scopes the gates to HIP-header, contract-tier, and
-  contract-tooling changes.
+  whose single `contract-coverage` job runs both checks and whose `paths:` filter
+  scopes them to HIP-header, contract-tier, and contract-tooling changes.
 - Classified in [`test_inventory.yaml`](test_inventory.yaml) as
   `static-contract-coverage` (trusted, path-filtered, no GPU required) and
   `static-test-plan`.
@@ -249,13 +252,15 @@ with the contract suite in `0d90b30fb6c` (#8827); follow-up refinement in
 node APIs touched the allowlist in `666d066f964`
 (`fix(clr): set dispatch-table entries for external-semaphore graph node APIs (#15085)`).
 
-**Current status.** Active and enforced in-repo by
-[`../../.github/workflows/hip-contract-coverage.yml`](../../.github/workflows/hip-contract-coverage.yml)
-as a path-filtered required gate; classified in the inventory as
-`static-contract-coverage` and `static-test-plan`.
+**Current status.** Active in-repo as two static checks in the single
+`contract-coverage` job of
+[`../../.github/workflows/hip-contract-coverage.yml`](../../.github/workflows/hip-contract-coverage.yml),
+path-filtered; whether either blocks merge is governed by branch-protection
+settings external to this repository and is not asserted here. Classified in the
+inventory as `static-contract-coverage` and `static-test-plan`.
 
 **Retirement condition.** Only if public-API contract coverage and test-plan
-freshness are guaranteed by another enforced mechanism. Until then both gates are
+freshness are guaranteed by another mechanism. Until then both checks are
 retained.
 
 **Inventory records.** `static-contract-coverage` (`TI-004`).

@@ -38,12 +38,15 @@ those records cite; none asserts work that has already happened.
 
 The contract tier (16 `contract-*` records such as
 [`contract-memory`, `contract-graph`, `contract-interop`](test_inventory.yaml)) is
-governed by its own path-filtered required static gates rather than by device
-execution alone. A coverage drift checker and a generated test-plan staleness check
-run on every PR that touches the HIP headers, the contract tier, or the contract
-tooling — the workflow's `paths:` filter scopes them, so they are not always-on and
-a docs-only PR does not trigger them — and require each public HIP API to have
-either a contract test or an allowlisted rationale.
+governed by a single path-filtered workflow rather than by device
+execution alone. Its one `contract-coverage` job runs two static checks — a
+coverage drift checker and a generated test-plan staleness check — on every PR that
+touches the HIP headers, the contract tier, or the contract tooling; the workflow's
+`paths:` filter scopes the job, so the checks are not always-on and a docs-only PR
+does not trigger them, and they require each public HIP API to have either a
+contract test or an allowlisted rationale. The checks are workflow-defined; whether
+either blocks merge is governed by branch-protection settings external to this
+repository.
 
 - Records: `static-contract-coverage`, `static-test-plan` (both `kind: contract`,
   `gating: trusted`, no GPU required).
@@ -56,7 +59,7 @@ either a contract test or an allowlisted rationale.
 
 Implication for restructuring: contract records are the portable API baseline and
 should be treated as a governed interface, not merged into functional sweeps. Any
-move touching a `contract-*` record must keep the drift and test-plan gates green.
+move touching a `contract-*` record must keep the drift and test-plan checks green.
 
 ### 1.2 Unit/functional coverage is broad and historically distributed
 
@@ -136,7 +139,7 @@ for the kind of guard that looks removable but is not).
    recorded (see Section 4). Ambiguity is never resolved by silently relocating
    source.
 5. **Governed interfaces stay green.** Any change touching a `contract-*` record
-   must keep the coverage drift and test-plan staleness gates passing
+   must keep the coverage drift and test-plan staleness checks passing
    (`static-contract-coverage`, `static-test-plan`; `TI-004`).
 
 ## 3. Workstreams
@@ -170,7 +173,7 @@ the bar a future change must clear, not a status report.
   - Each consolidated domain has exactly one record per tier with a non-overlapping,
     stated oracle, or a documented reason both tiers must remain.
   - No `merge_into` names a missing target ID.
-  - No consolidation weakens a contract gate (Rule 5) or drops a capability guard
+  - No consolidation weakens a contract check (Rule 5) or drops a capability guard
     (Rule 1).
 
 ### WS-3: Coverage-gap closure
@@ -195,9 +198,11 @@ the bar a future change must clear, not a status report.
   - Every record's claimed `cadence` and `gating` is backed by an in-repo workflow
     reference or marked `external:` with a pointer to where that lane is defined.
   - The contract drift and test-plan lanes remain `trusted` and path-filtered
-    required gates (the workflow `paths:` filter restricts them to PRs touching the
-    HIP headers, the contract tier, or the contract tooling; docs-only changes do
-    not trigger them).
+    checks in the single `contract-coverage` workflow job (the workflow `paths:`
+    filter restricts the job to PRs touching the HIP headers, the contract tier, or
+    the contract tooling; docs-only changes do not trigger them); any
+    merge-required status is governed by branch protection external to this
+    repository.
   - The `HIP_TEST_LEVEL` parameterize-vs-select distinction (`TI-005`) is preserved
     in any cadence wiring; a label filter alone must not silently change workload
     parameters.

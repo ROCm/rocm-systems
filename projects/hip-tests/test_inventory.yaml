@@ -1499,7 +1499,7 @@ suites:
 
   - id: static-contract-coverage
     owner: HIP Runtime - Test Governance
-    name: Contract API coverage drift gate
+    name: Contract API coverage drift check
     kind: contract
     domain: static_validation
     purpose: Static-analysis governance (not a device test) - fails when a newly declared public HIP runtime API ships without a contract test and is not on the uncovered allowlist, when contract case names break the naming convention, or when the CONTRACT_COVERAGE.md snapshot drifts.
@@ -1525,18 +1525,18 @@ suites:
         in_repo: ../../.github/workflows/hip-contract-coverage.yml (job contract-coverage, step "Check contract-test coverage").
     evidence:
       - path: ../../.github/workflows/hip-contract-coverage.yml
-        claim: The workflow runs check_contract_coverage.py --check as a trusted, path-filtered required static gate; its paths filter restricts it to pull requests touching the HIP headers, the contract tier, or the contract tooling, so docs-only changes do not trigger it.
+        claim: The workflow's single contract-coverage job runs check_contract_coverage.py --check as a trusted, path-filtered static check; its paths filter restricts the job to pull requests touching the HIP headers, the contract tier, or the contract tooling, so docs-only changes do not trigger it. Whether it blocks merge is governed by branch protection external to this repository.
       - path: catch/contract/tools/check_contract_coverage.py
-        claim: The coverage checker is the enforced static gate.
+        claim: The coverage checker is the static check run by the contract-coverage job.
       - path: catch/contract/uncovered_apis.txt
         claim: Intentionally uncovered public APIs are allowlisted with rationale.
-    history: The drift gate exists so new public HIP APIs cannot land without a contract test or an explicit allowlist rationale; see CONTRACT_COVERAGE.md and TESTING_INCIDENTS.md (TI-004).
+    history: The drift check exists so new public HIP APIs cannot land without a contract test or an explicit allowlist rationale; see CONTRACT_COVERAGE.md and TESTING_INCIDENTS.md (TI-004).
     disposition: keep
-    disposition_rationale: The static coverage gate governs the contract tier and is enforced in-repo; retained.
+    disposition_rationale: The static coverage check governs the contract tier and is defined in-repo; retained.
 
   - id: static-test-plan
     owner: HIP Runtime - Test Governance
-    name: Generated test-plan staleness gate
+    name: Generated test-plan staleness check
     kind: contract
     domain: static_validation
     purpose: Static-analysis governance (not a device test) - fails when catch/TEST_PLAN.md is out of date with the contract sources (a case was added, renamed, or removed, or an @asserts tag changed, without regenerating the plan).
@@ -1562,10 +1562,10 @@ suites:
         in_repo: ../../.github/workflows/hip-contract-coverage.yml (job contract-coverage, step "Check test plan is up to date").
     evidence:
       - path: ../../.github/workflows/hip-contract-coverage.yml
-        claim: The workflow runs gen_test_plan.py --check as a trusted, path-filtered required static gate under the same paths filter; docs-only changes do not trigger it.
+        claim: The workflow's single contract-coverage job runs gen_test_plan.py --check as a trusted, path-filtered static check under the same paths filter; docs-only changes do not trigger it. Merge-required status is governed by branch protection external to this repository.
       - path: catch/tools/gen_test_plan.py
-        claim: gen_test_plan.py generates TEST_PLAN.md from @asserts annotations and provides the --check staleness gate.
+        claim: gen_test_plan.py generates TEST_PLAN.md from @asserts annotations and provides the --check staleness check.
       - path: catch/TEST_PLAN.md
         claim: The generated plan is the derived case inventory; it is cited here, never hand-edited or duplicated.
     disposition: keep
-    disposition_rationale: The test-plan staleness gate keeps the generated inventory honest and is enforced in-repo; retained.
+    disposition_rationale: The test-plan staleness check keeps the generated inventory honest and is defined in-repo; retained.

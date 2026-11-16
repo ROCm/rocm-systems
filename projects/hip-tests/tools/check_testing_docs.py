@@ -38,6 +38,15 @@ for itself (workstreams WS-1 and WS-2):
     - every suite carries a non-empty ``evidence`` list whose entries are mappings
       with a non-empty path and claim (paths resolve on disk unless marked
       ``external:``), matching the coverage-class evidence requirement.
+    - every required suite field is present with a usable value: the descriptive
+      scalars (``name`` / ``domain`` / ``purpose`` / ``oracle`` /
+      ``disposition_rationale``) are non-empty strings, ``execution.cadence`` is a
+      non-empty string, and ``execution.platforms`` / ``backends`` /
+      ``prerequisites`` are non-empty lists (``ctest_labels`` may be an empty list
+      for a build-free static check, so it is only required to be a list).
+    - the YAML is parsed with a strict loader that rejects any mapping carrying a
+      duplicate key, so a repeated key (for example a copy/pasted suite ``id`` or
+      ``evidence`` key) is a parse error rather than a silently dropped value.
 
   move / retire targets
     - a suite whose ``disposition`` is ``merge_into`` or ``retire`` must name a
@@ -60,6 +69,9 @@ for itself (workstreams WS-1 and WS-2):
       in duplicate or set-membership checks;
     - every ``current_inventory`` id in the coverage model resolves to an
       inventory suite id;
+    - every coverage class declares a non-empty ``axes`` list and a non-empty
+      ``current_inventory`` list, and every pairwise check's ``pair`` names exactly
+      two ``axis.class`` references;
     - every class / pairwise axis reference is a declared ``axis.class``;
     - the model declares the required coverage dimensions (architecture,
       capability, integration_boundary) as explicit axes;
@@ -90,6 +102,10 @@ for itself (workstreams WS-1 and WS-2):
     - every relative Markdown link ``[text](path)`` in TESTING.md,
       TESTING_INCIDENTS.md, and TEST_RESTRUCTURING.md resolves to a file on disk
       (http(s)/mailto URLs are preserved as external and not existence-checked);
+    - reference-style links ``[text][label]`` / ``[label][]`` are resolved through
+      their ``[label]: target`` definitions and validated like inline links; a
+      usage with no matching definition, or a definition that is never used, is
+      reported;
     - every in-page ``#anchor`` and ``file.md#anchor`` fragment resolves to a
       heading in the target Markdown document;
     - every ``related_restructuring`` pointer in the inventory resolves.
@@ -223,14 +239,46 @@ _GLOB_CHARS = ("*", "?", "[")
 _INCIDENT_HEADING_RE = re.compile(r"^##\s+(TI-\d+):", re.MULTILINE)
 _INCIDENT_REF_RE = re.compile(r"\bTI-\d+\b")
 _MD_LINK_RE = re.compile(r"\[[^\]]*\]\(([^)]+)\)")
+# Reference-style Markdown links: a usage ``[text][label]`` (or the collapsed
+# form ``[label][]``) paired with a ``[label]: target`` definition. The checker
+# resolves these through their definitions and validates them exactly like inline
+# links, so a reference-style link is a supported, checked form rather than one
+# that is silently ignored.
+_MD_REF_USE_RE = re.compile(r"\[([^\]]*)\]\[([^\]]*)\]")
+_MD_REF_DEF_RE = re.compile(r"^[ ]{0,3}\[([^\]]+)\]:[ \t]*(\S+)", re.MULTILINE)
 _HEADING_RE = re.compile(r"^#{1,6}\s+(.*?)\s*$", re.MULTILINE)
 # URLs preserved as external references; existence is not checked for these.
 _EXTERNAL_LINK_PREFIXES = ("http://", "https://", "mailto:")
 
 
+class _UniqueKeyLoader(yaml.SafeLoader):
+    """A SafeLoader that rejects a mapping with a duplicate key.
+
+    ``yaml.safe_load`` silently keeps the last value when a mapping repeats a
+    key, so a copy/paste that duplicates (for example) a suite's ``id`` or an
+    ``evidence`` key would load without complaint and quietly drop the earlier
+    value. For a consistency checker that is itself a schema error: the document
+    no longer says what it appears to say. This loader walks each mapping node's
+    raw key list and raises a ``ConstructorError`` (a ``yaml.YAMLError`` subclass,
+    so ``_load_yaml`` reports it as a parse failure) on the first repeat.
+    """
+
+    def construct_mapping(self, node, deep=False):
+        seen = set()
+        for key_node, _value_node in node.value:
+            key = self.construct_object(key_node, deep=deep)
+            if key in seen:
+                raise yaml.constructor.ConstructorError(
+                    "while constructing a mapping", node.start_mark,
+                    "found duplicate key {!r}".format(key), key_node.start_mark)
+            seen.add(key)
+        return super().construct_mapping(node, deep)
+
+
 def _load_yaml(path, errors):
     try:
-        return yaml.safe_load(Path(path).read_text(encoding="utf-8"))
+        return yaml.load(Path(path).read_text(encoding="utf-8"),
+                         Loader=_UniqueKeyLoader)
     except FileNotFoundError:
         errors.append("file not found: {}".format(path))
     except yaml.YAMLError as exc:
@@ -466,6 +514,14 @@ def check_inventory(inventory, component_dir):
         if "owner" in suite and not _nonempty_str(suite.get("owner")):
             errors.append("suite {!r} owner must be a non-empty string".format(sid))
 
+        # The remaining required descriptive fields are free-text scalars that
+        # carry the record's meaning; a present-but-empty or non-string value is a
+        # schema error (the missing-key check above handles outright absence).
+        for field in ("name", "domain", "purpose", "oracle", "disposition_rationale"):
+            if field in suite and not _nonempty_str(suite.get(field)):
+                errors.append(
+                    "suite {!r} {} must be a non-empty string".format(sid, field))
+
         # ``kind`` and ``disposition`` are vocabulary tokens: each must be a
         # non-empty scalar string before it can be compared against the declared
         # vocabulary set. A list/mapping value is both a schema error and an
@@ -488,6 +544,24 @@ def check_inventory(inventory, component_dir):
             exec_missing = REQUIRED_EXECUTION_KEYS - set(execution.keys())
             if exec_missing:
                 errors.append("suite {!r} execution missing keys: {}".format(sid, sorted(exec_missing)))
+            # ``cadence`` is a free-text scalar and must be a non-empty string.
+            if "cadence" in execution and not _nonempty_str(execution.get("cadence")):
+                errors.append(
+                    "suite {!r} execution.cadence must be a non-empty string".format(sid))
+            # platforms / backends / prerequisites enumerate where and how the
+            # suite runs; each must be a non-empty list. ctest_labels may legitimately
+            # be empty (a build-free static check registers no CTest labels), so it is
+            # only required to be a list.
+            for field in ("platforms", "backends", "prerequisites"):
+                if field in execution and (
+                        not isinstance(execution.get(field), list)
+                        or not execution.get(field)):
+                    errors.append(
+                        "suite {!r} execution.{} must be a non-empty list".format(sid, field))
+            if "ctest_labels" in execution and not isinstance(
+                    execution.get("ctest_labels"), list):
+                errors.append(
+                    "suite {!r} execution.ctest_labels must be a list".format(sid))
             # ``gating`` is a vocabulary token with the same scalar-string
             # requirement as kind/disposition; guard it before the membership check.
             gating = execution.get("gating")
@@ -775,6 +849,19 @@ def check_coverage_model(model, suite_ids, component_dir):
             errors.append("class {!r} missing keys: {}".format(cid, sorted(missing)))
         if "owner" in cls and not _nonempty_str(cls.get("owner")):
             errors.append("class {!r} owner must be a non-empty string".format(cid))
+        # axes and current_inventory are the class's required cross-references and
+        # must each be a non-empty list: an empty axes list leaves the class
+        # unanchored to any coverage dimension, and an empty current_inventory
+        # claims a class that nothing covers. Per-entry membership is checked by the
+        # helpers below; here the container shape must be a populated list.
+        if "axes" in cls and (
+                not isinstance(cls.get("axes"), list) or not cls.get("axes")):
+            errors.append("class {!r} axes must be a non-empty list".format(cid))
+        if "current_inventory" in cls and (
+                not isinstance(cls.get("current_inventory"), list)
+                or not cls.get("current_inventory")):
+            errors.append(
+                "class {!r} current_inventory must be a non-empty list".format(cid))
         check_axis_refs("class {!r}".format(cid), cls.get("axes"))
         check_inventory_refs("class {!r}".format(cid), cls.get("current_inventory"))
         # Evidence: the list must be non-empty, and each entry must be a mapping
@@ -827,6 +914,15 @@ def check_coverage_model(model, suite_ids, component_dir):
         missing = REQUIRED_PAIRWISE_KEYS - set(pc.keys())
         if missing:
             errors.append("pairwise {!r} missing keys: {}".format(pid, sorted(missing)))
+        # A pairwise check pairs exactly two axis.class dimensions; a pair with any
+        # other number of refs is not a pair and is a schema error. (Membership of
+        # each ref is validated by check_axis_refs; the non-list case is reported
+        # there as well.)
+        pair = pc.get("pair")
+        if isinstance(pair, list) and len(pair) != 2:
+            errors.append(
+                "pairwise {!r} pair must name exactly two axis.class refs (got {})".format(
+                    pid, len(pair)))
         check_axis_refs("pairwise {!r}".format(pid), pc.get("pair"))
         check_inventory_refs("pairwise {!r}".format(pid), pc.get("current_inventory"))
         incident_refs.update(_collect_incident_refs(pc))
@@ -951,12 +1047,50 @@ def _slugify(heading_text):
     return text
 
 
-def check_markdown_links(md_path, anchors_cache):
-    """Validate relative links and in-page anchors in md_path.
+def _check_link_target(doc_name, base, doc_resolved, target, anchors_cache):
+    """Validate one link target ``local#fragment`` and count resolved references.
 
-    Returns (errors, refs_ok). External http(s)/mailto URLs are preserved and
-    not existence-checked. Fragment anchors are resolved against the headings of
-    the target Markdown document (the file itself for fragment-only links).
+    Returns (errors, refs_ok). An empty or external (http(s)/mailto) target is
+    preserved and not existence-checked. A local path must resolve on disk; a
+    ``#fragment`` must resolve to a heading anchor in the target Markdown file
+    (``doc_resolved`` itself for a fragment-only target).
+    """
+    errors = []
+    refs_ok = 0
+    if not target or target.startswith(_EXTERNAL_LINK_PREFIXES):
+        # Preserve external URLs: not existence-checked.
+        return errors, refs_ok
+    local, _, fragment = target.partition("#")
+    if local:
+        resolved = (base / local).resolve()
+        if not resolved.exists():
+            errors.append("{}: broken local link: {}".format(doc_name, target))
+            return errors, refs_ok
+        refs_ok += 1
+        anchor_source = resolved
+    else:
+        # Fragment-only link refers to a heading in this same document.
+        anchor_source = doc_resolved
+    if fragment and str(anchor_source).endswith(".md"):
+        # Only Markdown documents expose heading anchors we can validate.
+        if fragment in _heading_anchors(anchor_source, anchors_cache):
+            refs_ok += 1
+        else:
+            errors.append("{}: broken anchor: {}".format(doc_name, target))
+    return errors, refs_ok
+
+
+def check_markdown_links(md_path, anchors_cache):
+    """Validate inline and reference-style links and in-page anchors in md_path.
+
+    Returns (errors, refs_ok). Inline ``[text](target)`` links and reference-style
+    ``[text][label]`` / collapsed ``[label][]`` links (resolved through their
+    ``[label]: target`` definitions) are both validated the same way; external
+    http(s)/mailto URLs are preserved and not existence-checked, and fragment
+    anchors resolve against the headings of the target Markdown document (the file
+    itself for fragment-only links). A reference-style usage with no matching
+    definition, and a definition that nothing references, are both reported so the
+    two link forms stay consistent.
     """
     errors = []
     refs_ok = 0
@@ -964,33 +1098,47 @@ def check_markdown_links(md_path, anchors_cache):
     if not path.exists():
         return ["markdown doc not found: {}".format(path)], 0
     base = path.resolve().parent
+    doc_resolved = path.resolve()
     text = path.read_text(encoding="utf-8")
+
+    # Reference-style link definitions; Markdown reference labels are
+    # case-insensitive, so normalize to lower case for matching.
+    definitions = {}
+    for match in _MD_REF_DEF_RE.finditer(text):
+        definitions[match.group(1).strip().lower()] = match.group(2).strip()
+
+    # Inline links.
     for raw in _MD_LINK_RE.findall(text):
-        target = raw.strip()
-        if not target or target.startswith(_EXTERNAL_LINK_PREFIXES):
-            # Preserve external URLs: not existence-checked.
+        errs, got = _check_link_target(
+            path.name, base, doc_resolved, raw.strip(), anchors_cache)
+        errors.extend(errs)
+        refs_ok += got
+
+    # Reference-style usages, resolved through their definitions. A collapsed
+    # ``[label][]`` names its label in the text part; a full ``[text][label]``
+    # names it in the label part.
+    used_labels = set()
+    for text_part, label_part in _MD_REF_USE_RE.findall(text):
+        label = (label_part.strip() or text_part.strip()).lower()
+        used_labels.add(label)
+        if label not in definitions:
+            errors.append(
+                "{}: reference-style link [{}] has no matching definition".format(
+                    path.name, label))
             continue
-        local, _, fragment = target.partition("#")
+        errs, got = _check_link_target(
+            path.name, base, doc_resolved, definitions[label], anchors_cache)
+        errors.extend(errs)
+        refs_ok += got
 
-        if local:
-            resolved = (base / local).resolve()
-            if not resolved.exists():
-                errors.append("{}: broken local link: {}".format(path.name, target))
-                continue
-            refs_ok += 1
-            anchor_source = resolved
-        else:
-            # Fragment-only link refers to a heading in this same document.
-            anchor_source = path.resolve()
+    # A reference label that is defined but never used is dead metadata and is
+    # reported so the two link forms stay consistent.
+    for label in sorted(definitions):
+        if label not in used_labels:
+            errors.append(
+                "{}: reference-style link definition [{}] is never used".format(
+                    path.name, label))
 
-        if fragment:
-            # Only Markdown documents expose heading anchors we can validate.
-            if str(anchor_source).endswith(".md"):
-                if fragment in _heading_anchors(anchor_source, anchors_cache):
-                    refs_ok += 1
-                else:
-                    errors.append(
-                        "{}: broken anchor: {}".format(path.name, target))
     return errors, refs_ok
 
 

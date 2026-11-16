@@ -1167,6 +1167,180 @@ class CheckTestingDocsTest(unittest.TestCase):
         self.assertEqual(
             results["markdown_links"], [], msg=results["markdown_links"])
 
+    # -- strict YAML loader rejects duplicate keys ---------------------------
+
+    def test_duplicate_yaml_key_is_rejected(self):
+        # A mapping that repeats a key would silently drop the earlier value under
+        # yaml.safe_load; the strict loader reports it as a parse failure instead.
+        broken = VALID_INVENTORY.replace(
+            "    disposition_rationale: Baseline contract coverage.\n",
+            "    disposition_rationale: Baseline contract coverage.\n"
+            "    disposition_rationale: A silently-dropped duplicate.\n", 1)
+        _write_docs(self.root, {"test_inventory.yaml": broken})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("does not parse as YAML" in err and "duplicate key" in err
+                for err in results["load"]),
+            msg=results["load"],
+        )
+
+    # -- required inventory field type / nonempty constraints ----------------
+
+    def test_suite_empty_descriptive_field_is_rejected(self):
+        broken = VALID_INVENTORY.replace(
+            "    purpose: Pin a portable invariant.\n", '    purpose: ""\n', 1)
+        _write_docs(self.root, {"test_inventory.yaml": broken})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("purpose must be a non-empty string" in err
+                for err in results["inventory"]),
+            msg=results["inventory"],
+        )
+
+    def test_suite_empty_cadence_is_rejected(self):
+        broken = VALID_INVENTORY.replace(
+            "      cadence: pr\n", '      cadence: ""\n', 1)
+        _write_docs(self.root, {"test_inventory.yaml": broken})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("execution.cadence must be a non-empty string" in err
+                for err in results["inventory"]),
+            msg=results["inventory"],
+        )
+
+    def test_suite_empty_platforms_list_is_rejected(self):
+        broken = VALID_INVENTORY.replace(
+            "      platforms: [linux]\n", "      platforms: []\n", 1)
+        _write_docs(self.root, {"test_inventory.yaml": broken})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("execution.platforms must be a non-empty list" in err
+                for err in results["inventory"]),
+            msg=results["inventory"],
+        )
+
+    def test_suite_ctest_labels_may_be_empty_but_must_be_a_list(self):
+        # An empty ctest_labels list is allowed (a build-free static check registers
+        # no CTest labels); a non-list value is a schema error.
+        ok = VALID_INVENTORY.replace(
+            "      ctest_labels: [contract]\n", "      ctest_labels: []\n", 1)
+        _write_docs(self.root, {"test_inventory.yaml": ok})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertEqual(results["inventory"], [], msg=results["inventory"])
+
+        broken = VALID_INVENTORY.replace(
+            "      ctest_labels: [contract]\n", "      ctest_labels: contract\n", 1)
+        _write_docs(self.root, {"test_inventory.yaml": broken})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("execution.ctest_labels must be a list" in err
+                for err in results["inventory"]),
+            msg=results["inventory"],
+        )
+
+    # -- coverage class / pairwise semantics ---------------------------------
+
+    def test_class_empty_axes_is_rejected(self):
+        cls = {"id": "c1", "owner": "o", "axes": [], "risk": "low",
+               "intent": "i", "expected_test_kinds": [], "current_inventory": ["s"],
+               "evidence": [{"path": "external: x", "claim": "c"}],
+               "gap_status": "x"}
+        model = self._coverage_model(axes=[], classes=[cls], pairwise_checks=[])
+        errors, _, _ = checker.check_coverage_model(model, {"s"}, str(self.root))
+        self.assertTrue(
+            any("axes must be a non-empty list" in err for err in errors),
+            msg=errors)
+
+    def test_class_empty_current_inventory_is_rejected(self):
+        cls = {"id": "c1", "owner": "o", "axes": ["a.b"], "risk": "low",
+               "intent": "i", "expected_test_kinds": [], "current_inventory": [],
+               "evidence": [{"path": "external: x", "claim": "c"}],
+               "gap_status": "x"}
+        model = self._coverage_model(axes=[], classes=[cls], pairwise_checks=[])
+        errors, _, _ = checker.check_coverage_model(model, set(), str(self.root))
+        self.assertTrue(
+            any("current_inventory must be a non-empty list" in err
+                for err in errors),
+            msg=errors)
+
+    def test_pairwise_pair_must_have_exactly_two_refs(self):
+        pc = {"id": "p1", "category": "x", "pair": ["a.b"], "status": "s",
+              "priority": "low", "rationale": "r", "current_inventory": [],
+              "gap_status": "x"}
+        model = self._coverage_model(axes=[], classes=[], pairwise_checks=[pc])
+        errors, _, _ = checker.check_coverage_model(model, set(), str(self.root))
+        self.assertTrue(
+            any("pair must name exactly two" in err for err in errors),
+            msg=errors)
+
+    # -- reference-style Markdown links --------------------------------------
+
+    def test_reference_style_link_resolves(self):
+        testing = (
+            "# Testing Strategy\n\n"
+            "See the [inventory][inv].\n\n"
+            "## Known gaps\n\nBody.\n\n"
+            "[inv]: test_inventory.yaml\n"
+        )
+        _write_docs(self.root, {"TESTING.md": testing})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertEqual(
+            results["markdown_links"], [], msg=results["markdown_links"])
+
+    def test_reference_style_collapsed_link_resolves(self):
+        testing = (
+            "# Testing Strategy\n\n"
+            "See [test_inventory.yaml][].\n\n"
+            "## Known gaps\n\nBody.\n\n"
+            "[test_inventory.yaml]: test_inventory.yaml\n"
+        )
+        _write_docs(self.root, {"TESTING.md": testing})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertEqual(
+            results["markdown_links"], [], msg=results["markdown_links"])
+
+    def test_reference_style_link_without_definition_is_reported(self):
+        testing = (
+            "# Testing Strategy\n\n"
+            "See the [inventory][inv].\n\n"
+            "## Known gaps\n\nBody.\n"
+        )
+        _write_docs(self.root, {"TESTING.md": testing})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("has no matching definition" in err
+                for err in results["markdown_links"]),
+            msg=results["markdown_links"],
+        )
+
+    def test_reference_style_definition_unused_is_reported(self):
+        testing = (
+            "# Testing Strategy\n\n"
+            "Body with no reference usage.\n\n"
+            "## Known gaps\n\nBody.\n\n"
+            "[inv]: test_inventory.yaml\n"
+        )
+        _write_docs(self.root, {"TESTING.md": testing})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("is never used" in err for err in results["markdown_links"]),
+            msg=results["markdown_links"],
+        )
+
+    def test_reference_style_link_broken_target_is_reported(self):
+        testing = (
+            "# Testing Strategy\n\n"
+            "See the [inventory][inv].\n\n"
+            "## Known gaps\n\nBody.\n\n"
+            "[inv]: no_such_file.yaml\n"
+        )
+        _write_docs(self.root, {"TESTING.md": testing})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("broken local link" in err for err in results["markdown_links"]),
+            msg=results["markdown_links"],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
