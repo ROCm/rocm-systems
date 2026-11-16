@@ -19,6 +19,40 @@
 
 namespace rocjitsu {
 
+bool uses_kernarg_preload_firmware_skip(rocjitsu::IsaFamily arch) {
+  return arch == rocjitsu::IsaFamily::Cdna3 || arch == rocjitsu::IsaFamily::Cdna4;
+}
+
+std::optional<std::vector<uint64_t>>
+kernel_hardware_entry_candidates(const KernelDescriptorInfo &kernel, rocjitsu::IsaFamily arch,
+                                 uint64_t text_size) {
+  switch (arch) {
+  case rocjitsu::IsaFamily::Cdna1:
+  case rocjitsu::IsaFamily::Cdna2:
+  case rocjitsu::IsaFamily::Cdna3:
+  case rocjitsu::IsaFamily::Cdna4:
+  case rocjitsu::IsaFamily::Cdna5:
+  case rocjitsu::IsaFamily::Rdna1:
+  case rocjitsu::IsaFamily::Rdna2:
+  case rocjitsu::IsaFamily::Rdna3:
+  case rocjitsu::IsaFamily::Rdna3_5:
+  case rocjitsu::IsaFamily::Rdna4:
+    break;
+  default:
+    return std::nullopt;
+  }
+  const uint64_t entry = kernel.entry_text_offset;
+  if (entry >= text_size)
+    return std::nullopt;
+  std::vector<uint64_t> roots = {entry};
+  if (kernarg_preload_length(kernel.descriptor) && uses_kernarg_preload_firmware_skip(arch)) {
+    if (text_size - entry <= kKernargPreloadSkipBytes)
+      return std::nullopt;
+    roots.push_back(entry + kKernargPreloadSkipBytes);
+  }
+  return roots;
+}
+
 namespace {
 
 using KD = rocjitsu::amdhsa::kernel_descriptor_t;

@@ -822,6 +822,14 @@ void record_written_sgpr_ref(InstructionFacts &facts, RegisterRef ref) {
 }
 
 void record_written_sgprs(const Instruction &inst, InstructionFacts &facts) {
+  // Runtime-relative scalar destinations can overwrite any SGPR, including a
+  // PC-builder register which feeds a recovered transfer.
+  const std::string_view mnemonic = inst.mnemonic();
+  if (mnemonic.starts_with("s_movreld") || mnemonic.starts_with("s_movrelsd")) {
+    facts.written_sgprs.expand({RegClass::SGPR, 0, REGISTER_SET_MAX_SGPRS});
+    facts.written_sgprs_computed = true;
+    return;
+  }
   // This analysis only needs SGPR defs. Avoid the heavier def-use helper here:
   // computing use sets and vector metadata for every instruction was a major
   // cost on large generated kernels, and none of that information participates
