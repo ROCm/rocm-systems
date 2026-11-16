@@ -40,9 +40,10 @@ template <bool Maximum, bool PropagateNaN, typename Float> Float minmax(Float x,
   return (Maximum ? x > y : x < y) ? x : y;
 }
 
-// RDNA3 MIN/MAX prefer a signaling NaN only in IEEE mode. Otherwise a lone
-// NaN loses to a number, while two NaNs return A without quieting it.
-template <bool Maximum, typename Float> Float minmax_rdna3(Float x, Float y, bool ieee) {
+// Legacy MIN/MAX prioritize signaling NaNs only in IEEE mode. A lone NaN
+// loses to a number; two NaNs select A on RDNA3 and B on CDNA3/4.
+template <bool Maximum, bool FirstNaN = true, typename Float>
+Float minmax_legacy(Float x, Float y, bool ieee) {
   using Bits = FloatBits<Float>;
   auto a = Bits::bits(x), b = Bits::bits(y);
   bool an = Bits::is_nan(a);
@@ -54,8 +55,9 @@ template <bool Maximum, typename Float> Float minmax_rdna3(Float x, Float y, boo
     if (bn && !(b & Bits::quiet)) {
       return Bits::value(b | Bits::quiet);
     }
-  } else if (an && bn) {
-    return x;
+  }
+  if (an && bn) {
+    return FirstNaN ? x : y;
   }
   return minmax<Maximum, false>(x, y);
 }
@@ -83,20 +85,28 @@ float minmax3_value(float x, float y, float z) {
   return value;
 }
 
-// RDNA3 median orders -0 below +0, as in rocjitsu shared/minmax.h.
-// Any NaN selects the chained minimum using the binary IEEE-mode rule.
-template <bool FirstMaximum, bool SecondMaximum, bool Median>
-float minmax3_rdna3(float x, float y, float z, bool ieee) {
+// Legacy ternary selection applies the binary NaN policy at each step.
+// CDNA median matches the largest operand numerically, treating signed zeros as equal.
+template <bool FirstMaximum, bool SecondMaximum, bool Median, bool FirstNaN = true>
+float minmax3_legacy(float x, float y, float z, bool ieee) {
   if constexpr (Median) {
     if (FloatBits<float>::is_nan(FloatBits<float>::bits(x)) ||
         FloatBits<float>::is_nan(FloatBits<float>::bits(y)) ||
         FloatBits<float>::is_nan(FloatBits<float>::bits(z))) {
-      return minmax_rdna3<false>(minmax_rdna3<false>(x, y, ieee), z, ieee);
+      return minmax_legacy<false, FirstNaN>(minmax_legacy<false, FirstNaN>(x, y, ieee), z, ieee);
     }
-    return minmax_rdna3<true>(minmax_rdna3<false>(x, y, ieee),
-                              minmax_rdna3<false>(minmax_rdna3<true>(x, y, ieee), z, ieee), ieee);
+    if constexpr (!FirstNaN) {
+      float largest = minmax_legacy<true, false>(minmax_legacy<true, false>(x, y, ieee), z, ieee);
+      return largest == x   ? minmax_legacy<true, false>(y, z, ieee)
+             : largest == y ? minmax_legacy<true, false>(x, z, ieee)
+                            : minmax_legacy<true, false>(x, y, ieee);
+    }
+    return minmax_legacy<true>(minmax_legacy<false>(x, y, ieee),
+                               minmax_legacy<false>(minmax_legacy<true>(x, y, ieee), z, ieee),
+                               ieee);
   }
-  return minmax_rdna3<SecondMaximum>(minmax_rdna3<FirstMaximum>(x, y, ieee), z, ieee);
+  return minmax_legacy<SecondMaximum, FirstNaN>(minmax_legacy<FirstMaximum, FirstNaN>(x, y, ieee),
+                                                z, ieee);
 }
 
 } // namespace rocjitsu::arith::RJ_ARITH_IMPL_NAMESPACE

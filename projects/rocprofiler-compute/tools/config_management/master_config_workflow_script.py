@@ -14,13 +14,11 @@ TOOLS_DIR = SCRIPT_DIR
 SOC_ROOT = REPO_ROOT / "src" / "rocprof_compute_soc"
 ANALYSIS_CONFIGS = SOC_ROOT / "analysis_configs"
 
-GFX9_TEMPLATE = ANALYSIS_CONFIGS / "gfx9_config_template.yaml"
-GFX11_TEMPLATE = ANALYSIS_CONFIGS / "gfx11_config_template.yaml"
-
 PYTHON = sys.executable
 
 VERIFY_SCRIPT = TOOLS_DIR / "verify_against_config_template.py"
 HASH_CHECKER_SCRIPT = TOOLS_DIR / "hash_checker.py"
+METRIC_LIBRARY_SCRIPT = TOOLS_DIR.parent / "validate_metric_library.py"
 
 
 def run(cmd):
@@ -48,17 +46,12 @@ def main():
     if not VERIFY_SCRIPT.exists():
         fatal("verify_against_config_template.py not found")
 
-    rc = run([
-        PYTHON,
-        VERIFY_SCRIPT,
-        ANALYSIS_CONFIGS,
-        "--gfx9-template",
-        GFX9_TEMPLATE,
-        "--gfx11-template",
-        GFX11_TEMPLATE,
-    ])
+    rc = run([PYTHON, VERIFY_SCRIPT, ANALYSIS_CONFIGS])
     if rc != 0:
         fatal("Template / architecture verification failed")
+
+    if run([PYTHON, METRIC_LIBRARY_SCRIPT]) != 0:
+        fatal("Metric library validation failed")
 
     if args.validate_only:
         print("\nValidation successful.")
