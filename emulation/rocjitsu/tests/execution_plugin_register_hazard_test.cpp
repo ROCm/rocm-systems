@@ -11,13 +11,20 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
 #include <bit>
+#include <cstddef>
+#include <cstdint>
+#include <format>
 #include <functional>
 #include <map>
+#include <memory>
+#include <span>
 #include <sstream>
-#include <stdexcept>
 #include <string>
+#include <string_view>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -96,7 +103,8 @@ public:
   std::function<void(Wavefront &)> halt;
 };
 
-struct DiagnosticHarness {
+class DiagnosticHarness {
+public:
   PluginFixture fixture;
   StringSink *sink = nullptr;
   RaceDetectorPlugin *race = nullptr;
@@ -136,7 +144,8 @@ struct DiagnosticHarness {
   }
 };
 
-struct Program {
+class Program {
+public:
   static constexpr uint64_t kEntry = 0x1000 + sizeof(amdhsa::kernel_descriptor_t);
   std::vector<uint32_t> words;
 
@@ -183,8 +192,9 @@ TEST(RegisterHazardPluginTest, RegisterCheckingUsesOnlyCoreFindings) {
 TEST(RegisterHazardPluginTest, ReportedHazardFailureStopsBeforeDependentEffects) {
   class FailingHazardPlugin final : public ExecutionPlugin {
   public:
-    explicit FailingHazardPlugin(bool reject)
-        : ExecutionPlugin(reject ? "reject-hazard" : "observe-hazard"), reject_(reject) {}
+    FailingHazardPlugin(bool reject, uint64_t consumer_pc)
+        : ExecutionPlugin(reject ? "reject-hazard" : "observe-hazard"), reject_(reject),
+          consumer_pc_(consumer_pc) {}
     bool observes_register_hazards() const override { return true; }
     bool observes_before_execute_instruction() const override { return true; }
     bool observes_after_execute_instruction() const override { return true; }
@@ -198,25 +208,30 @@ TEST(RegisterHazardPluginTest, ReportedHazardFailureStopsBeforeDependentEffects)
       else
         EXPECT_EQ(wave.instruction_execution_error(), InstructionExecutionError::PluginFailure);
     }
-    void onAmdgpuBeforeExecuteInstruction(uint64_t, const Instruction &, Wavefront &,
+    void onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Instruction &, Wavefront &,
                                           std::span<const uint32_t>) override {
-      ++before;
+      if (pc == consumer_pc_)
+        ++before;
     }
-    void onAmdgpuAfterExecuteInstruction(uint64_t, const Instruction &, Wavefront &) override {
-      ++after;
+    void onAmdgpuAfterExecuteInstruction(uint64_t pc, const Instruction &, Wavefront &) override {
+      if (pc == consumer_pc_)
+        ++after;
     }
-    void onAmdgpuAsyncInstructionIssued(uint64_t, const Instruction &, Wavefront &) override {
-      ++async;
+    void onAmdgpuAsyncInstructionIssued(uint64_t pc, const Instruction &, Wavefront &) override {
+      if (pc == consumer_pc_)
+        ++async;
     }
     void onAmdgpuMemoryAccessRouted(const MemoryAccessObservation &, const Instruction &,
-                                    Wavefront &) override {
-      ++routed;
+                                    Wavefront &wave) override {
+      if (wave.pc == consumer_pc_)
+        ++routed;
     }
     void onAmdgpuWavefrontCancelled(Wavefront &) override { ++cancelled; }
     unsigned hazards = 0, before = 0, after = 0, async = 0, routed = 0, cancelled = 0;
 
   private:
     bool reject_;
+    uint64_t consumer_pc_;
   };
 
   enum class Consumer { Move, BufferStore, Mma };
@@ -226,8 +241,8 @@ TEST(RegisterHazardPluginTest, ReportedHazardFailureStopsBeforeDependentEffects)
       PluginFixture fixture;
       ASSERT_NO_FATAL_FAILURE(fixture.initialize(1, "cdna5", 32, 128, 256, 1, helpers, "off"));
       fixture.plugin_group_ = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
-      auto rejecting = std::make_unique<FailingHazardPlugin>(true);
-      auto observing = std::make_unique<FailingHazardPlugin>(false);
+      auto rejecting = std::make_unique<FailingHazardPlugin>(true, 0x1000);
+      auto observing = std::make_unique<FailingHazardPlugin>(false, 0x1000);
       const std::array observers{rejecting.get(), observing.get()};
       ASSERT_TRUE(fixture.plugin_group_->add(std::move(rejecting)));
       ASSERT_TRUE(fixture.plugin_group_->add(std::move(observing)));
@@ -286,6 +301,54 @@ TEST(RegisterHazardPluginTest, ReportedHazardFailureStopsBeforeDependentEffects)
         EXPECT_EQ(observer->cancelled, 1u);
       }
     }
+
+  for (uint32_t helpers : {0, 4}) {
+    SCOPED_TRACE(std::format("FLAT overwrite helpers={}", helpers));
+    PluginFixture fixture;
+    ASSERT_NO_FATAL_FAILURE(fixture.initialize(1, "cdna5", 32, 128, 256, 1, helpers, "off"));
+    Program program;
+    program.emit(cdna5::build_vop1(cdna5::kVMovB32Vop1, {.src0 = 128, .vdst = 0}));
+    program.emit(cdna5::build_vop1(cdna5::kVMovB32Vop1, {.src0 = 255, .vdst = 2}));
+    program.emit(std::array{0x2000u});
+    program.emit(cdna5::build_vop1(cdna5::kVMovB32Vop1, {.src0 = 128, .vdst = 3}));
+    program.emit(cdna5::build_vds(cdna5::kDsLoadB32Vds, {.addr = 0, .vdst = 4}));
+    const uint64_t consumer_pc = program.emit(cdna5::build_vflat(
+        cdna5::kFlatLoadB32Vflat, {.saddr = kModernNullSelector, .vdst = 4, .vaddr = 2}));
+    program.emit(cdna5::build_sopp(cdna5::kSEndpgmSopp));
+    fixture.mem->write32(0x2000, 0xabcd);
+    fixture.plugin_group_ = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+    auto rejecting = std::make_unique<FailingHazardPlugin>(true, consumer_pc);
+    auto observing = std::make_unique<FailingHazardPlugin>(false, consumer_pc);
+    const std::array observers{rejecting.get(), observing.get()};
+    ASSERT_TRUE(fixture.plugin_group_->add(std::move(rejecting)));
+    ASSERT_TRUE(fixture.plugin_group_->add(std::move(observing)));
+    fixture.soc->set_plugin_group(fixture.plugin_group_);
+    unsigned failures = 0;
+    fixture.cu()->set_execution_failure_handler([&](Wavefront &failed) {
+      ++failures;
+      EXPECT_EQ(failed.pc, consumer_pc);
+      EXPECT_EQ(failed.instruction_execution_error(), InstructionExecutionError::PluginFailure);
+      EXPECT_STREQ(failed.instruction_execution_error_detail(), "register hazard reporting failed");
+      const MemoryWaitScoreboard &scoreboard = failed.ensure_memory_wait_scoreboard();
+      EXPECT_EQ(scoreboard.outstanding(WaitCounterKind::Ds), 1u);
+      EXPECT_EQ(scoreboard.outstanding(WaitCounterKind::Load), 0u);
+      return false;
+    });
+    const uint64_t kernel =
+        fixture.write_kernel(0x1000, program.words.data(), program.words.size(), 12, 4);
+    test::AqlQueue queue(fixture.mem, fixture.cp());
+    queue.dispatch(kernel, 32, 32);
+    fixture.run_until_idle();
+    EXPECT_EQ(failures, 1u);
+    for (const FailingHazardPlugin *observer : observers) {
+      EXPECT_EQ(observer->hazards, 1u);
+      EXPECT_EQ(observer->before, 0u);
+      EXPECT_EQ(observer->after, 0u);
+      EXPECT_EQ(observer->async, 0u);
+      EXPECT_EQ(observer->routed, 0u);
+      EXPECT_EQ(observer->cancelled, 1u);
+    }
+  }
 }
 
 TEST(RegisterHazardPluginTest, Cdna2TrapEntryDrainsObserverStateIndependentOfCoreWarnings) {

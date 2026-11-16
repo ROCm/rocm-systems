@@ -1976,6 +1976,8 @@ void ComputeUnitCore::track_memory_wait(Instruction &inst, Wavefront &wf) {
       scoreboard.access(d.reg, d.lanes & ~shared_lanes, d.bytes, true, vmem_write_order);
       scoreboard.access(d.reg, shared_lanes, d.bytes, true, lds_write_order);
     }
+    if (wf.instruction_execution_failed()) [[unlikely]]
+      return;
   }
   // FLAT's actual route determines which completion proves translation. Only
   // map X to a position issued below for this instruction: zero-EXEC operations
@@ -2790,8 +2792,13 @@ ComputeUnitCore::issue_instruction_impl(Wavefront *active, MaybeAsyncWindow<Enab
     if (debugger_active)
       probe_wait_issue = ProbeWaitIssue{active->ensure_memory_wait_scoreboard().issue_snapshot(),
                                         active->pc, active->dispatch_generation()};
-    if (!wait_for_buffer_lanes)
+    if (!wait_for_buffer_lanes) {
       track_memory_wait(*inst, *active);
+      if (active->instruction_execution_failed()) [[unlikely]] {
+        fail_current_instruction();
+        return IssueOutcome::Issued;
+      }
+    }
   }
 
   // The cause classifiers report into this as they run; see alu_exceptions.h.
