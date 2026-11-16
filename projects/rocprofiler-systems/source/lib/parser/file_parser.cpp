@@ -100,8 +100,8 @@ joined_array(const nlohmann::json& value, std::string_view separator)
 
 struct decoded_value
 {
-    std::optional<config_value_t> typed          = {};
-    std::optional<std::string>    text           = {};
+    std::optional<config_value_t> typed;
+    std::optional<std::string>    text;
     bool                          array_rejected = false;
 };
 
@@ -112,15 +112,18 @@ decode_value(const schema_param& param, const nlohmann::json& value)
     {
         if(param.type != param_type::enumeration_list)
         {
-            return { .array_rejected = true };
+            return { .typed          = std::nullopt,
+                     .text           = std::nullopt,
+                     .array_rejected = true };
         }
-        return { .text = joined_array(value, list_separator(param)) };
+        return { .typed = std::nullopt,
+                 .text  = joined_array(value, list_separator(param)) };
     }
     if(auto typed = typed_scalar(param, value))
     {
-        return { .typed = std::move(typed) };
+        return { .typed = std::move(typed), .text = std::nullopt };
     }
-    return { .text = scalar_text(value) };
+    return { .typed = std::nullopt, .text = scalar_text(value) };
 }
 
 /// JSON null is ignored, and so is a key that starts with "_", such as "_comment", when
