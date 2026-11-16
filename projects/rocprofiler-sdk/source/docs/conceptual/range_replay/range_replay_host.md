@@ -139,8 +139,8 @@ If other GPUs run kernels longer than the range can usefully wait, a lower value
 into a quick decline, for example `ROCPROFILER_RANGE_REPLAY_HOST_FENCE_TIMEOUT_MS=1000`. A value
 that is not a whole number of milliseconds from 1 to 3600000 is ignored with a warning. A fence that
 times out leaves at most one barrier in a queue to retire later, and with it one HSA signal that the
-SDK does not reuse. Only host replay reads this setting. Kernel replay and packet range replay keep
-their 60-second wait and stop the application when it runs out.
+SDK does not reuse. Only host replay reads this setting. Kernel replay keeps its 60-second wait and
+stops the application when it runs out.
 
 A code object loaded during the application's own run of the range does not decline. HIP loads a
 module on the first launch of one of its kernels, so declining would refuse ordinary applications.
@@ -198,11 +198,12 @@ runtime, just as for packet replay. See [Performance](range_replay_performance.m
 
 ## Tests
 
-- `range-replay-host-replay-test` is a GPU-free unit test. It covers the arming consumption, the
-  begin macro's two returns, the registry rules that differ from packet replay, and host-region
-  capture and restore, including a full jump-and-rewind loop. On fake queues it covers fences that
-  time out: a barrier that outlasts the fence, a queue whose ring stays full, one timeout shared by
-  several queues, and the parsing of `ROCPROFILER_RANGE_REPLAY_HOST_FENCE_TIMEOUT_MS`.
+- The `range_replay_host` suite in `range-replay-tests` needs no GPU. It covers the arming
+  consumption, the begin macro's two returns, the registry rules that differ from packet replay, and
+  host-region capture and restore, including a full jump-and-rewind loop. On fake queues it covers
+  fences that time out: a barrier that outlasts the fence, a queue whose ring stays full, one
+  timeout shared by several queues, and the parsing of
+  `ROCPROFILER_RANGE_REPLAY_HOST_FENCE_TIMEOUT_MS`.
 - `tests/range-replay-host` is the integration test. A time-stepping solver runs inside one range.
   Each step does an FFT, a spectral filter, an inverse FFT, a 5-point stencil, Jacobi sweeps, a
   device-to-device copy, a memset, a device-to-host residual reduced on the host, and a
