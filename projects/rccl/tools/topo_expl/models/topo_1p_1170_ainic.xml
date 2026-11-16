@@ -1,0 +1,29 @@
+<!--
+ - Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
+ - See LICENSE.txt for license information
+ -
+ - 1x gfx1170 integrated GPU (APU) with one AMD Pensando AI NIC in a
+ - Thunderbolt/USB4 PCIe enclosure. Hypothetical: the CPU and GPU nodes are
+ - from a NCCL_TOPO_DUMP_FILE dump of the measured node (topo_1p_1170.xml,
+ - with gdr="1" as dumped when the network plugin supports DMA-BUF), but the
+ - NIC and its bridges are hand-written. Replace it with a dump once the NIC
+ - is installed. The enclosure link is modeled as PCIe 3.0 x4, about what a
+ - USB4 PCIe tunnel carries. The GPU sits on the root complex, so the NIC is
+ - PHB away.
+ -->
+<system version="2">
+  <cpu numaid="0" affinity="fffff" arch="x86_64" vendor="AuthenticAMD" familyid="26" modelid="129">
+    <pci busid="0000:82:00.0" class="0x038000" vendor="0x1002" device="0x1903" subsystem_vendor="0x1002" subsystem_device="0x1903" link_speed="16.0 GT/s PCIe" link_width="16">
+      <gpu dev="0" sm="4" gcn="gfx1170" arch="38911" integrated="1" rank="0" gdr="1" mlopart="-1"/>
+    </pci>
+    <pci busid="0000:62:00.0" class="0x060400" vendor="0x8086" device="0x15ef" subsystem_vendor="0x8086" subsystem_device="0x0000" link_speed="8.0 GT/s PCIe" link_width="4">
+      <pci busid="0000:63:01.0" class="0x060400" vendor="0x8086" device="0x15ef" subsystem_vendor="0x8086" subsystem_device="0x0000" link_speed="8.0 GT/s PCIe" link_width="4">
+        <pci busid="0000:64:00.0" class="0x020000" vendor="0x1dd8" device="0x1002" subsystem_vendor="0x1dd8" subsystem_device="0x5201" link_speed="32.0 GT/s PCIe" link_width="16">
+          <nic>
+            <net name="ionic_0" dev="0" latency="0" speed="400000" port="1" guid="0x1dd8000000000001" rail="0" plane="0" maxconn="131072" gdr="1" net="1"/>
+          </nic>
+        </pci>
+      </pci>
+    </pci>
+  </cpu>
+</system>
