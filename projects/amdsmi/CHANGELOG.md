@@ -6,6 +6,11 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ## amd_smi_lib for ROCm 10.3.0
 
+### Changed
+
+- **`amdsmi_get_gpu_kfd_info()` now returns `AMDSMI_STATUS_NOT_SUPPORTED` on WSL**.
+  - WSL has no KFD, so the call previously returned success with placeholder values; it now reports the data as unsupported.
+
 ### Resolved Issues
 
 - **Fixed `amd-smi ras --cper` crashing with `TypeError` when no GPU devices are available**.
