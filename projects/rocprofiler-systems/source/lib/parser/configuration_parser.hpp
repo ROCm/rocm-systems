@@ -27,10 +27,11 @@ namespace rocprofsys::parser
  * then command_line. After that, assigns runs for a parameter that is on, as
  * is_enabled() decides, and whose winning source is not the default, so --debug=false
  * assigns nothing. A target with a higher source is left alone. The config file
- * path is the resolved "config_file" parameter. The preset name is the resolved
- * "preset" parameter. An empty preset name is unset. An empty lookup for a named
- * preset means that name is unknown. initialize() builds an empty backend registry.
- * A missing registration accepts the value. The parser is single-threaded.
+ * path and the preset name are the "config_file" and "preset" values given on the
+ * command line; a config file or a preset holds settings and cannot choose either. An
+ * empty preset name is unset. An empty lookup for a named preset means that name is
+ * unknown. initialize() builds an empty backend registry. A missing registration
+ * accepts the value. The parser is single-threaded.
  */
 class configuration_parser
 {

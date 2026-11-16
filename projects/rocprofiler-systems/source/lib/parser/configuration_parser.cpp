@@ -117,21 +117,16 @@ make_source(config_source source, const parse_result& parsed)
     return sourced_values{ .source = source, .values = parsed.values };
 }
 
+/// What the command line gave @p param_id, or nothing when it is absent.
 std::optional<std::string>
-selected_text(std::vector<sourced_values> sources, std::string_view param_id)
+command_line_text(const parse_result& command_line, std::string_view param_id)
 {
-    const auto resolved = resolve_precedence(std::move(sources));
-    const auto itr      = resolved.find(param_id);
-    if(itr == resolved.end())
+    const auto found = command_line.values.find(param_id);
+    if(found == command_line.values.end())
     {
         return std::nullopt;
     }
-    const auto text = format_value(itr->second.value);
-    if(text.empty())
-    {
-        return std::nullopt;
-    }
-    return text;
+    return format_value(found->second);
 }
 
 env_parser
@@ -217,23 +212,15 @@ read_primary(const parse_request& request)
 void
 read_indirect(const parse_request& request, collected_input& collected)
 {
-    const auto file_path = selected_text(
-        { make_source(config_source::default_value, collected.defaults),
-          make_source(config_source::environment, collected.environment),
-          make_source(config_source::command_line, collected.command_line) },
-        k_config_file_param);
-    collected.file = read_config_file(request.config_schema, file_path);
+    const auto& given = collected.command_line;
+    collected.file    = read_config_file(request.config_schema,
+                                         command_line_text(given, k_config_file_param));
     reject_backend_values(request.config_schema, request.backends, config_source::file,
                           collected.file);
 
-    const auto preset_name = selected_text(
-        { make_source(config_source::default_value, collected.defaults),
-          make_source(config_source::file, collected.file),
-          make_source(config_source::environment, collected.environment),
-          make_source(config_source::command_line, collected.command_line) },
-        k_preset_param);
     collected.preset =
-        read_preset(request.config_schema, preset_name, request.presets, request.errors);
+        read_preset(request.config_schema, command_line_text(given, k_preset_param),
+                    request.presets, request.errors);
     reject_backend_values(request.config_schema, request.backends, config_source::preset,
                           collected.preset);
 }

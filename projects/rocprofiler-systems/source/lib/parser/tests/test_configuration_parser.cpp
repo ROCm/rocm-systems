@@ -223,6 +223,57 @@ summary_schema()
     return value;
 }
 
+/// config_file and preset with environment names, as a catalog may give them.
+schema
+selector_schema()
+{
+    schema value{};
+    auto   config_file = named("config_file", param_type::path);
+    config_file.arg    = "--config";
+    config_file.env    = "ROCPROFSYS_CONFIG_FILE";
+    auto preset        = named("preset", param_type::string);
+    preset.arg         = "--preset";
+    preset.env         = "ROCPROFSYS_PRESET";
+    auto verbose       = named("verbose", param_type::integer);
+    verbose.arg        = "--verbose";
+    verbose.env        = "ROCPROFSYS_VERBOSE";
+    add_param(value, std::move(config_file));
+    add_param(value, std::move(preset));
+    add_param(value, std::move(verbose));
+    return value;
+}
+
+/// An environment whose ROCPROFSYS_CONFIG_FILE names a missing file and whose
+/// ROCPROFSYS_PRESET names "quiet".
+std::optional<std::string>
+selector_environment(std::string_view name)
+{
+    if(name == "ROCPROFSYS_CONFIG_FILE")
+    {
+        return "missing.json";
+    }
+    if(name == "ROCPROFSYS_PRESET")
+    {
+        return "quiet";
+    }
+    return std::nullopt;
+}
+
+/// "quiet" sets verbose and names the preset "loud", which would set it again.
+preset_parser::settings_t
+chained_presets(std::string_view name)
+{
+    if(name == "quiet")
+    {
+        return { { "ROCPROFSYS_PRESET", "loud" }, { "ROCPROFSYS_VERBOSE", "-1" } };
+    }
+    if(name == "loud")
+    {
+        return { { "ROCPROFSYS_VERBOSE", "4" } };
+    }
+    return {};
+}
+
 configuration_parser
 make_letter_parser(bool with_backend)
 {
@@ -359,6 +410,56 @@ TEST(parser_configuration, preset_overrides_the_file_and_environment)
     const auto values = parser.parse({ "--config", file.path(), "--preset", "balanced" });
     EXPECT_TRUE(parser.errors().empty());
     EXPECT_EQ(values.at("output_path"), "from-preset");
+}
+
+TEST(parser_configuration, a_config_file_cannot_choose_the_preset_or_another_file)
+{
+    const scoped_temp_file file{ R"({
+        "configuration": {
+            "config_file": "missing.json",
+            "output_path": "from-file",
+            "preset": "balanced"
+        }
+    })" };
+    auto                   parser = make_parser();
+    parser.set_preset_lookup(
+        preset_with("balanced", { { "ROCPROFSYS_PROFILE", "true" } }));
+    const auto values = parser.parse({ "--config", file.path() });
+    EXPECT_TRUE(parser.errors().empty());
+    EXPECT_EQ(values.at("output_path"), "from-file");
+    EXPECT_EQ(values.at("profile"), "false");
+}
+
+TEST(parser_configuration, only_the_command_line_chooses_the_file_and_the_preset)
+{
+    configuration_parser parser;
+    parser.set_environment(selector_environment);
+    ASSERT_TRUE(parser.initialize(selector_schema())) << parser.failure();
+    parser.set_preset_lookup(chained_presets);
+
+    const auto from_environment = parser.parse({});
+    EXPECT_TRUE(parser.errors().empty());
+    EXPECT_FALSE(from_environment.contains("verbose"));
+
+    const auto from_command_line = parser.parse({ "--preset", "quiet" });
+    EXPECT_TRUE(parser.errors().empty());
+    EXPECT_EQ(from_command_line.at("verbose"), "-1");
+}
+
+TEST(parser_configuration, an_export_after_a_preset_reads_back_as_plain_settings)
+{
+    auto parser = make_parser();
+    parser.set_preset_lookup(
+        preset_with("balanced", { { "ROCPROFSYS_PROFILE", "true" } }));
+    auto values = parser.parse({ "--preset", "balanced", "--verbose", "4" });
+    ASSERT_TRUE(parser.errors().empty());
+
+    const scoped_temp_file file{ parser.export_as_json() };
+    auto                   from_file = make_parser();
+    auto                   read_back = from_file.parse({ "--config", file.path() });
+    EXPECT_TRUE(from_file.errors().empty());
+    read_back.erase("config_file");
+    EXPECT_EQ(read_back, values);
 }
 
 TEST(parser_configuration, unknown_options_are_forwarded_and_parsing_continues)
