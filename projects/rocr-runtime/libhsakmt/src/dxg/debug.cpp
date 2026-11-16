@@ -76,6 +76,9 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtCheckRuntimeDebugSupport(void) {
   }
 
   for (auto&& device : dxg_topology->wdevices_) {
+    if (!device->IsAqlSupported())
+      return HSAKMT_STATUS_NOT_SUPPORTED;
+
     if (Wkmi::KmdDbgVersion version;
         !device->GetKmdDbgVersion(&version) ||
         version.major < 1 ||
