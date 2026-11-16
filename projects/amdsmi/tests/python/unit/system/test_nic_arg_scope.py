@@ -8,6 +8,7 @@ all of them.
 """
 
 import ast
+import ctypes
 import os
 import sys
 import unittest
@@ -30,7 +31,7 @@ _WINDOWS_HYPERVISOR = {
 }
 _PLATFORMS = ((_LINUX_BAREMETAL, "--help"), (_WINDOWS_HYPERVISOR, "profile"))
 
-_NIC_HANDLES = ["nic-0", "nic-1"]
+_NIC_HANDLES = [ctypes.c_void_p(0x400), ctypes.c_void_p(0x401)]
 
 
 def _select_nics(nic_selections, nic_choices=None):
@@ -152,4 +153,4 @@ class TestNicArgScope(unittest.TestCase):
                 with self.subTest(command=command, flag=flag, selector="bare"):
                     self.assertEqual(self._parse([command, flag]).nic, _NIC_HANDLES)
                 with self.subTest(command=command, flag=flag, selector="0"):
-                    self.assertEqual(self._parse([command, flag, "0"]).nic, ["nic-0"])
+                    self.assertEqual(self._parse([command, flag, "0"]).nic, _NIC_HANDLES[:1])

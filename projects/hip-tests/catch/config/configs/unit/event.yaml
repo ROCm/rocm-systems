@@ -140,6 +140,9 @@ event:
     tags: [multigpu, P1]
   Unit_hipEventQuery_DifferentDevice:
     <<: *level_default
+    disabled:
+      targets: [amd_wsl]
+      reason: "AIRUNTIME-3125 - test takes too long on WSL (~185s). Skipping for now."
     tags: [synchronization, P0]
   Unit_hipEventIpc_shm_cleanup:
     <<: *level_default

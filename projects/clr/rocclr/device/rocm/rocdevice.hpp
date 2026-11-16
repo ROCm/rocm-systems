@@ -81,6 +81,7 @@ class ProfilingSignal : public amd::ReferenceCountedObject {
   bool use_retired_ = true;      //!< The last use is known to be complete
   bool armed_ = false;           //!< The value holds kInitSignalValueOne, visible to the GPU
   bool in_device_memory_ = false;  //!< Host stores to the value need FlushSignalStores
+  uint32_t event_id_ = 0;          //!< amd_signal_t::event_id, which never changes
   bool binary_use_ = false;  //!< The current use starts at 1 and only its packet decrements it
   bool timed_use_ = true;    //!< The current use captures timestamps
   //! Bit 0: a host check on any thread loaded the current use's value as 0, unlike use_retired_,
@@ -614,12 +615,6 @@ class Device : public NullDevice {
   bool CreateSignals(uint32_t count, hsa_signal_value_t initial_value, uint64_t attributes,
                      bool batched, bool device_memory, hsa_signal_t* signals,
                      bool& in_device_memory) const;
-  //! True if pooled graph signals are batched in device memory
-  bool GraphDeviceSignals() const { return graph_device_signals_; }
-  //! A gate signal for a graph end marker (DEBUG_CLR_GRAPH_FAST_LAUNCH), armed; nullptr if none.
-  //! The gate comes with a reference of its own, the checkout, which the caller releases once
-  //! the command that uses the gate holds it (or at once if the gate goes unused)
-  ProfilingSignal* AcquireGateSignal();
   //! True if queue completion signals are batched in device memory
   bool QueueDeviceSignals() const { return queue_device_signals_; }
   //! A batched command keeps its completion signal until the batch completes, and replacing a
@@ -634,6 +629,9 @@ class Device : public NullDevice {
   //! reports that stores to device memory come over PCIe, re-store the last one and read it back.
   //! last_stored must be in device memory, or the readback does not drain HDP.
   void FlushSignalStores(hsa_signal_t last_stored, hsa_signal_value_t value) const;
+  //! Host stores to this device's memory come over PCIe through HDP and must be flushed before
+  //! the device can observe them (HSA_AMD_AGENT_INFO_PCIE_STORES_NEED_FLUSH)
+  bool PcieStoresNeedFlush() const { return pcie_stores_need_flush_; }
   //! AQL completion signal handles carry hints the CP firmware decodes
   bool SignalHints() const { return signal_hints_; }
   //! AQL queue ring buffers are placed in device memory. A profiler tool scans and rewrites the
@@ -789,7 +787,7 @@ class Device : public NullDevice {
   void HiddenHeapAlloc(const VirtualGPU& gpu);
   //! Init hidden heap for device memory allocations
   void HiddenHeapInit(const VirtualGPU& gpu);
-  bool isXgmi() const override { return isXgmi_; }
+  bool isXgmi() const override { return !PcieStoresNeedFlush(); }
 
   //! SDMA engine allocation for per-stream affinity
   uint32_t AllocateSdmaEngine(VirtualGPU* vgpu, HwQueueEngine engine_type,
@@ -872,10 +870,6 @@ class Device : public NullDevice {
   hsa_amd_memory_pool_t gpu_ext_fine_grained_segment_;
   hsa_amd_memory_pool_t device_signal_pool_{0};  //!< Pool for signals in device memory, if any
   bool graph_device_signals_ = false;  //!< Graph signals live in device_signal_pool_
-  std::mutex gate_lock_;                        //!< Guards the gate pool
-  std::vector<ProfilingSignal*> gate_signals_;  //!< AcquireGateSignal()'s pool
-  size_t gate_next_ = 0;                        //!< Where AcquireGateSignal() starts its search
-  bool gate_short_ = false;                     //!< The pool ran out: grow when it is not
   bool queue_device_signals_ = false;  //!< Queue signals live in device_signal_pool_
   //! Armed HW events that graphs take their signal sets from and give back when destroyed
   mutable std::vector<void*> graph_hw_events_;
@@ -964,7 +958,6 @@ class Device : public NullDevice {
   //! Read and Write mask for device<->host
   uint32_t maxSdmaReadMask_;
   uint32_t maxSdmaWriteMask_;
-  bool isXgmi_;  //!< Flag to indicate if there is XGMI between CPU<->GPU
   bool isAPU_ = false;  //!< Flag to indicate the agent shares physical memory with the CPU
   bool pm4_emulation_ = false;  //!< Flag to indicate if PM4 emulation is enabled
   uint32_t numHwPipes_;  //!< Number of hardware pipes

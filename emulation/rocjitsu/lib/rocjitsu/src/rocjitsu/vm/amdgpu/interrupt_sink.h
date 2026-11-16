@@ -29,6 +29,7 @@ public:
   InterruptSink() = default;
 
   void deliver(uint32_t process_id, uint32_t event_id) const;
+  void notify_idle(uint32_t process_id) const;
   void report_vm_fault(uint32_t process_id, uint64_t address, VmAccessKind access) const;
   explicit operator bool() const { return state_ != nullptr; }
 
@@ -51,8 +52,11 @@ public:
   using VmFaultCallback =
       std::function<void(uint32_t process_id, uint64_t address, VmAccessKind access)>;
 
+  using IdleCallback = std::function<void(uint32_t process_id)>;
+
   InterruptSubscription() = default;
-  explicit InterruptSubscription(Callback callback, VmFaultCallback vm_fault_callback = {});
+  explicit InterruptSubscription(Callback callback, VmFaultCallback vm_fault_callback = {},
+                                 IdleCallback idle_callback = {});
   ~InterruptSubscription();
   InterruptSubscription(InterruptSubscription &&other) noexcept;
   InterruptSubscription &operator=(InterruptSubscription &&other) noexcept;
@@ -72,8 +76,10 @@ private:
 class InterruptSink::State {
 public:
   State(InterruptSubscription::Callback callback,
-        InterruptSubscription::VmFaultCallback vm_fault_callback)
-      : callback_(std::move(callback)), vm_fault_callback_(std::move(vm_fault_callback)) {}
+        InterruptSubscription::VmFaultCallback vm_fault_callback,
+        InterruptSubscription::IdleCallback idle_callback)
+      : callback_(std::move(callback)), vm_fault_callback_(std::move(vm_fault_callback)),
+        idle_callback_(std::move(idle_callback)) {}
 
   void deliver(uint32_t process_id, uint32_t event_id) {
     InterruptSubscription::Callback callback;
@@ -101,6 +107,19 @@ public:
     callback(process_id, address, access);
   }
 
+  void notify_idle(uint32_t process_id) {
+    InterruptSubscription::IdleCallback callback;
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      if (!active_ || !idle_callback_)
+        return;
+      callback = idle_callback_;
+      ++callbacks_in_flight_;
+    }
+    CallbackLease lease(this);
+    callback(process_id);
+  }
+
   void revoke_and_drain() {
     const uint64_t callbacks_on_this_thread = CallbackLease::count(this);
     std::unique_lock<std::mutex> lock(mutex_);
@@ -110,6 +129,7 @@ public:
     });
     callback_ = {};
     vm_fault_callback_ = {};
+    idle_callback_ = {};
   }
 
 private:
@@ -144,6 +164,8 @@ private:
   std::condition_variable idle_;
   InterruptSubscription::Callback callback_;
   InterruptSubscription::VmFaultCallback vm_fault_callback_;
+  // Synthetic queue-idle notification, separate from packet event context zero.
+  InterruptSubscription::IdleCallback idle_callback_;
   uint64_t callbacks_in_flight_ = 0;
   bool active_ = true;
 };
@@ -153,6 +175,11 @@ inline void InterruptSink::deliver(uint32_t process_id, uint32_t event_id) const
     state_->deliver(process_id, event_id);
 }
 
+inline void InterruptSink::notify_idle(uint32_t process_id) const {
+  if (state_)
+    state_->notify_idle(process_id);
+}
+
 inline void InterruptSink::report_vm_fault(uint32_t process_id, uint64_t address,
                                            VmAccessKind access) const {
   if (state_)
@@ -160,11 +187,12 @@ inline void InterruptSink::report_vm_fault(uint32_t process_id, uint64_t address
 }
 
 inline InterruptSubscription::InterruptSubscription(Callback callback,
-                                                    VmFaultCallback vm_fault_callback) {
-  if (callback || vm_fault_callback)
-    state_.store(
-        std::make_shared<InterruptSink::State>(std::move(callback), std::move(vm_fault_callback)),
-        std::memory_order_release);
+                                                    VmFaultCallback vm_fault_callback,
+                                                    IdleCallback idle_callback) {
+  if (callback || vm_fault_callback || idle_callback)
+    state_.store(std::make_shared<InterruptSink::State>(
+                     std::move(callback), std::move(vm_fault_callback), std::move(idle_callback)),
+                 std::memory_order_release);
 }
 
 inline InterruptSubscription::~InterruptSubscription() { reset(); }

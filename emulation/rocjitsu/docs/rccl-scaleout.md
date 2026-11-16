@@ -4,11 +4,9 @@ This is a control only. The active exit gate is the four-node, two-GPU-per-node
 mixed P2P/IPC and NET workload in
 [Same-host pod RCCL gate](same-host-pod-rccl-gate.md), run in both VFIO and
 emulated KFD modes.
-The [2026-10-15 record](same-host-pod-rccl-result-20261015.md) reports a
-historical local pass with a zero-patch guest driver and standard VFIO-user
-peer transport. See
 [the gate's qualification status](same-host-pod-rccl-gate.md#qualification-status)
-for the current tree.
+records the historical pass with a zero-patch guest driver and standard
+VFIO-user peer transport, along with the remaining qualification work.
 
 `configs/gfx1250_mi455x_kmd_2node_net.json` is a schematic system
 manifest with one gfx1250 GPU on each of two nodes. Its network link records

@@ -105,8 +105,7 @@ VFIO backend's guest-RAM atomic operations. The peer endpoint's AtomicOp
 completer bits stayed clear, and peer BAR atomics are rejected. This checks
 ordinary peer reads and writes on one host; it does not qualify peer atomics,
 cacheable coherence, or the four-guest same-host RCCL exit gate below. The
-exact local images, commands, hashes, and log paths are in
-`docs/stock-driver-hardware-path-20261014.md`.
+[original two-GPU record][driver-control] includes the commands and hashes.
 
 ## Host prerequisites
 
@@ -240,10 +239,11 @@ The final same-host pod image uses the pinned AMDGPU/AMDKFD package with
 **zero local driver patches**. Earlier fault-injection and four-GPU controls
 used locally patched guest modules. Those patches are not included in this
 repository and their results are historical; they do not qualify the current
-stock-driver pod image. See the historical
-[October 14 record](stock-driver-hardware-path-20261014.md) and
-[zero-patch pod ablation](unpatched-amdgpu-pod-ablation-20261015.md)
-for the scope of those runs.
+stock-driver pod image. See the [two-GPU driver control][driver-control] and
+the [zero-patch driver ablation][driver-ablation] for the scope of those runs.
+
+[driver-control]: https://github.com/ROCm/rocm-systems/blob/90ddc8aae52bd58adaff8bab6498a140bcb77747/emulation/rocjitsu/docs/stock-driver-hardware-path-20261014.md
+[driver-ablation]: https://github.com/ROCm/rocm-systems/blob/90ddc8aae52bd58adaff8bab6498a140bcb77747/emulation/rocjitsu/docs/unpatched-amdgpu-pod-ablation-20261015.md
 
 ## GEMM qualification contract
 
@@ -678,15 +678,8 @@ Require per-rank numerical references for all five collectives at small and
 large sizes with repeats, both channel types, directed committed fabric
 effects, bounded completion, and clean teardown. The two-host and cacheable
 peer-coherence qualifications follow this same-host gate.
-The [2026-10-19 local result](same-host-pod-rccl-result-20261019.md)
-records both modes with `--fabric-effect-trace` selecting directed evidence,
-but its source capture does not qualify the current rebased tree.
-The [2026-10-15 result](same-host-pod-rccl-result-20261015.md) passes this
-gate in both modes with zero local AMDGPU/AMDKFD patches and standard
-VFIO-user peer DMA maps. The earlier
-[2026-10-14 result](same-host-pod-rccl-result-20261014.md) remains a
-historical control; its VFIO run used a removed nonstandard peer
-transport.
+See the [gate's qualification status](same-host-pod-rccl-gate.md#qualification-status)
+for historical results and the evidence required for a fresh run.
 
 ## Results and reruns
 
