@@ -197,15 +197,17 @@ def _register_handlers() -> None:
         c.supports_dpp8,
         c.supports_sdwa,
         c.profile.dpp_bound_ctrl_applies_to_inactive_sources,
-        use_rj_arith=c.arch_name in ('rdna3', 'rdna4'),
+        use_rj_arith=c.arch_name in ('rdna3', 'rdna4', 'cdna3', 'cdna4', 'cdna5'),
         is_vop3=c.is_vop3,
         stage_after_destination=c.arch_name == 'rdna3_5',
+        # Preserve legacy CDNA bit-move modifiers; RDNA treats signs as FP32.
+        apply_dpp_source_modifiers=c.arch_name in ('rdna3', 'rdna4'),
     )
     DISPATCH['vector_swaprel'] = lambda c: gen_vector_swaprel(
         c.dst_ops,
         c.src_ops,
         c.profile.uses_vgpr_msb_indexing,
-        use_rj_arith=c.arch_name in ('rdna3', 'rdna4'),
+        use_rj_arith=c.arch_name in ('rdna3', 'rdna4', 'cdna3', 'cdna4', 'cdna5'),
     )
     DISPATCH['vector_sat_pack'] = lambda c: gen_vector_sat_pack(
         c.dst_ops,

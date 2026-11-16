@@ -16,10 +16,10 @@ from . import benchmark_gfx9_base
 # Bench_gfx950 Class
 # =============================================================================
 class Bench_gfx950(benchmark_gfx9_base.Bench_gfx9):
-    def __init__(self, device_id: int, cache_sizes: dict) -> None:
+    def __init__(self, device_id: int, cache_sizes: dict, gpu_arch: str) -> None:
         super().__init__(device_id, cache_sizes)
 
-        self.unsupported_data_types = []
+        self.apply_roofline_spec(gpu_arch)
 
         self.matrix_ops = {
             "F4": 131072,
@@ -53,7 +53,7 @@ class Bench_gfx950(benchmark_gfx9_base.Bench_gfx9):
             + """
         extern "C" __global__ void mfma_f8(int iter, float *dummy)
         {
-            // MI300 series only - note gfx940/gfx941/gfx942 only uses fnuz f8
+            // MI300 series only - note gfx942 only uses fnuz f8
             long a =  threadIdx.x;
 
             vec16<float> result = {0};

@@ -3,12 +3,7 @@
 Panel Config:
   id: 1100
   title: GL1 Cache
-  description: |-
-    GL1 Cache metrics for gfx1250. GL1 consists of GL1A (arbiter) and GL1C
-    (cache buffers). Each SE contains 12 GL1 channels shared by all WGPs.
-
   data source:
-
   - metric_table:
       id: 1101
       title: GL1A Processing

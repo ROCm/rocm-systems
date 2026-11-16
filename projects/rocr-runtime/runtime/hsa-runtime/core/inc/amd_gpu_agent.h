@@ -325,10 +325,13 @@ class GpuAgent : public GpuAgentInt {
                             std::vector<core::Signal*>& dep_signals) override;
 
   // @brief Override from core::Agent.
+  // @p peer_agent, if not null, is the GPU every rect is copied to; a copy with a peer in the
+  // same hive runs on the SDMA engine recommended for that peer, as DmaCopy does.
   hsa_status_t DmaCopyRect(const hsa_amd_memory_copy_rect_ptr_t* srcs,
                            const hsa_amd_memory_copy_rect_ptr_t* dsts, const hsa_dim3_t* ranges,
                            uint16_t num_rects, hsa_amd_copy_direction_t dir,
-                           std::vector<core::Signal*>& dep_signals, core::Signal& out_signal);
+                           std::vector<core::Signal*>& dep_signals, core::Signal& out_signal,
+                           core::Agent* peer_agent = nullptr);
 
   // @brief Override from core::Agent.
   hsa_status_t DmaFill(void* ptr, uint32_t value, size_t count) override;

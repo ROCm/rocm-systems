@@ -48,8 +48,14 @@ void integer16_x86_64_v3(uint32_t exec_mask, uint32_t mode, uint32_t *d, const u
     if constexpr (Op == Integer16::Max) {
       result = Signed ? _mm256_max_epi16(x, y) : _mm256_max_epu16(x, y);
     }
-    if constexpr (Op == Integer16::Mul) {
+    if constexpr (Op == Integer16::Mul || Op == Integer16::MulClamp) {
       result = _mm256_mullo_epi16(x, y);
+      if constexpr (Op == Integer16::MulClamp) {
+        if (mode & RJ_ARITH_PK_CLAMP) {
+          auto fits = _mm256_cmpeq_epi16(_mm256_mulhi_epu16(x, y), _mm256_setzero_si256());
+          result = _mm256_or_si256(result, _mm256_andnot_si256(fits, _mm256_set1_epi16(-1)));
+        }
+      }
     }
     if constexpr (Op == Integer16::ShiftLeft || Op == Integer16::ShiftRight) {
       const auto halves = _mm256_set1_epi32(65535);
@@ -135,4 +141,9 @@ template void integer16_x86_64_v3<Integer16::ShiftRight, true, false>(uint32_t, 
                                                                       uint32_t *, const uint32_t *,
                                                                       const uint32_t *);
 
+template void integer16_x86_64_v3<Integer16::MulClamp, false>(uint32_t, uint32_t, uint32_t *,
+                                                              const uint32_t *, const uint32_t *);
+template void integer16_x86_64_v3<Integer16::MulClamp, false, false>(uint32_t, uint32_t, uint32_t *,
+                                                                     const uint32_t *,
+                                                                     const uint32_t *);
 } // namespace rocjitsu::arith
