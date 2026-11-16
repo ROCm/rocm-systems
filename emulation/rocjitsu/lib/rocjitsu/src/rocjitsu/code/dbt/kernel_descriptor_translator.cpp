@@ -42,7 +42,6 @@ static_assert(sizeof(KD) == 64, "AMDHSA kernel descriptor size changed");
 
 constexpr uint32_t kMaxVgprGranulatedField = 63;
 constexpr uint32_t kMaxSgprGranulatedField = 15;
-constexpr uint64_t kKernargPreloadSkipBytes = 256;
 constexpr uint16_t kScalarOperandTtmpBase = 108;
 constexpr uint16_t kTtmpRdna4GridYz = 7;
 constexpr uint16_t kTtmpRdna4GridX = 9;
@@ -195,14 +194,6 @@ constexpr uint16_t kTtmpRdna4GridX = 9;
   if (!has_dispatch_ptr(desc))
     return std::nullopt;
   return static_cast<uint16_t>(sgpr);
-}
-
-[[nodiscard]] bool uses_kernarg_preload_firmware_skip(rj_code_arch_t arch) {
-  // CDNA3/CDNA4 implement kernarg preloading through the legacy firmware
-  // compatibility window: old firmware enters at the descriptor entry and
-  // compatible firmware enters 256 bytes later. GFX1250 supports preloading in
-  // hardware but has one entry, exactly as specified by the descriptor.
-  return arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4;
 }
 
 [[nodiscard]] std::optional<uint32_t> kernarg_bytes_to_preserve(const KD &desc) {

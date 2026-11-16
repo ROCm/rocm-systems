@@ -18,6 +18,40 @@
 
 namespace rocjitsu {
 
+bool uses_kernarg_preload_firmware_skip(rj_code_arch_t arch) {
+  return arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4;
+}
+
+std::optional<std::vector<uint64_t>>
+kernel_hardware_entry_candidates(const KernelDescriptorInfo &kernel, rj_code_arch_t arch,
+                                 uint64_t text_size) {
+  switch (arch) {
+  case ROCJITSU_CODE_ARCH_CDNA1:
+  case ROCJITSU_CODE_ARCH_CDNA2:
+  case ROCJITSU_CODE_ARCH_CDNA3:
+  case ROCJITSU_CODE_ARCH_CDNA4:
+  case ROCJITSU_CODE_ARCH_CDNA5:
+  case ROCJITSU_CODE_ARCH_RDNA1:
+  case ROCJITSU_CODE_ARCH_RDNA2:
+  case ROCJITSU_CODE_ARCH_RDNA3:
+  case ROCJITSU_CODE_ARCH_RDNA3_5:
+  case ROCJITSU_CODE_ARCH_RDNA4:
+    break;
+  default:
+    return std::nullopt;
+  }
+  const uint64_t entry = kernel.entry_text_offset;
+  if (entry >= text_size)
+    return std::nullopt;
+  std::vector<uint64_t> roots = {entry};
+  if (kernarg_preload_length(kernel.descriptor) && uses_kernarg_preload_firmware_skip(arch)) {
+    if (text_size - entry <= kKernargPreloadSkipBytes)
+      return std::nullopt;
+    roots.push_back(entry + kKernargPreloadSkipBytes);
+  }
+  return roots;
+}
+
 namespace {
 
 using KD = rocjitsu::amdhsa::kernel_descriptor_t;
