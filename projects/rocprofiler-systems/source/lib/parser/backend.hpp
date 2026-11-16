@@ -8,7 +8,6 @@
 #include <functional>
 #include <map>
 #include <memory>
-#include <optional>
 #include <shared_mutex>
 #include <string>
 #include <string_view>
@@ -19,10 +18,10 @@ namespace rocprofsys::parser
 /**
  * Supplies the allowed values for a parameter whose schema names a backend.
  *
- * choices() and default_value() see the parameter, so one registered backend can
- * serve more than one catalog row. A row names one backend, and a backend can
- * combine several sources, such as rocprofiler-sdk domains and the runtimes for
- * --traces. accepts() is the shared check.
+ * choices() sees the parameter, so one registered backend can serve more than one
+ * catalog row. A row names one backend, and a backend can combine several sources,
+ * such as rocprofiler-sdk domains and the runtimes for --traces. accepts() is the
+ * shared check.
  */
 class backend_interface
 {
@@ -37,9 +36,6 @@ public:
     [[nodiscard]] virtual std::string_view name() const = 0;
 
     [[nodiscard]] virtual std::vector<std::string> choices(
-        const schema_param& param) const = 0;
-
-    [[nodiscard]] virtual std::optional<std::string> default_value(
         const schema_param& param) const = 0;
 
     /**

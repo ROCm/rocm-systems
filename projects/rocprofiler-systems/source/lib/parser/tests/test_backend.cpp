@@ -8,7 +8,6 @@
 #include <gtest/gtest.h>
 
 #include <memory>
-#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -32,12 +31,6 @@ public:
         return {};
     }
 
-    [[nodiscard]] std::optional<std::string> default_value(
-        const schema_param&) const override
-    {
-        return std::nullopt;
-    }
-
 private:
     std::string m_name;
 };
@@ -55,16 +48,6 @@ public:
             return { "SQ_WAVES" };
         }
         return { "kernel_dispatch", "hip_api" };
-    }
-
-    [[nodiscard]] std::optional<std::string> default_value(
-        const schema_param& param) const override
-    {
-        if(param.id == "counters")
-        {
-            return std::nullopt;
-        }
-        return std::string{ "kernel_dispatch" };
     }
 };
 
@@ -107,7 +90,7 @@ TEST(parser_backend, an_empty_registry_has_no_backends)
     EXPECT_EQ(registry.find("papi"), nullptr);
 }
 
-TEST(parser_backend, choices_and_the_default_follow_the_parameter)
+TEST(parser_backend, choices_follow_the_parameter)
 {
     backend_registry registry;
     add_domains(registry);
@@ -118,9 +101,7 @@ TEST(parser_backend, choices_and_the_default_follow_the_parameter)
     const auto counter_row = make_param("counters", param_type::enumeration);
     EXPECT_EQ(domains->choices(domain_row),
               (std::vector<std::string>{ "kernel_dispatch", "hip_api" }));
-    EXPECT_EQ(domains->default_value(domain_row).value_or(""), "kernel_dispatch");
     EXPECT_EQ(domains->choices(counter_row), (std::vector<std::string>{ "SQ_WAVES" }));
-    EXPECT_FALSE(domains->default_value(counter_row).has_value());
     EXPECT_TRUE(domains->accepts(domain_row, "kernel_dispatch"));
     EXPECT_FALSE(domains->accepts(domain_row, "SQ_WAVES"));
     EXPECT_TRUE(domains->accepts(counter_row, "SQ_WAVES"));
