@@ -21,8 +21,7 @@
 
 #include <hip_test_aqllog.hh>
 
-#include "hipGraphInstantiateNullStreamFence_common.hh"
-
+#include <algorithm>
 #include <optional>
 #include <string>
 #include <vector>
@@ -34,26 +33,19 @@ namespace aqllog = hip::aqllog;
 constexpr int kFenceScopeSystem = 2;
 
 size_t countBarriersBetweenDispatches(const std::string& log) {
-  const std::optional<std::string> region =
-      aqllog::ExtractRegion(log, graph_fence_test::kFenceRegion);
-  INFO("child trace must contain the fence-test region");
+  const std::optional<std::string> region = aqllog::ExtractRegion(log, "workload");
+  INFO("child trace must contain the workload region");
   REQUIRE(region.has_value());
 
   const std::vector<aqllog::Packet> packets = aqllog::ParsePackets(*region);
-  INFO("fence-test region must contain AQL packets");
+  INFO("workload region must contain AQL packets");
   REQUIRE_FALSE(packets.empty());
 
-  size_t barriers_between_dispatches = 0;
-  size_t dispatches = 0;
-  for (const aqllog::Packet& packet : packets) {
-    if (packet.kind == aqllog::PacketKind::kDispatch) {
-      ++dispatches;
-    } else if (dispatches == 1) {
-      ++barriers_between_dispatches;
-    }
-  }
+  const size_t dispatches = std::count_if(
+      packets.begin(), packets.end(),
+      [](const aqllog::Packet& packet) { return packet.kind == aqllog::PacketKind::kDispatch; });
   REQUIRE(dispatches == 2);
-  return barriers_between_dispatches;
+  return aqllog::BarriersBetweenDispatches(*region).size();
 }
 
 }  // namespace
@@ -73,9 +65,9 @@ size_t countBarriersBetweenDispatches(const std::string& log) {
  */
 HIP_TEST_CASE(Unit_hipGraphInstantiate_NullStreamFenceUnchanged) {
   const std::string with_graph =
-      aqllog::RunExecutable(graph_fence_test::kChildExecutable, graph_fence_test::kScenarioGraph);
+      aqllog::RunExecutable("hipGraphInstantiateNullStreamFence_exe", "graph");
   const std::string without_graph =
-      aqllog::RunExecutable(graph_fence_test::kChildExecutable, graph_fence_test::kScenarioNoGraph);
+      aqllog::RunExecutable("hipGraphInstantiateNullStreamFence_exe", "nograph");
 
   const size_t with_graph_barriers = countBarriersBetweenDispatches(with_graph);
   const size_t without_graph_barriers = countBarriersBetweenDispatches(without_graph);
@@ -99,12 +91,11 @@ HIP_TEST_CASE(Unit_hipGraphInstantiate_NullStreamFenceUnchanged) {
  *  - Linux, AMD backend
  */
 HIP_TEST_CASE(Unit_hipGraphInstantiate_CapturedPacketSystemScopePreserved) {
-  const std::string log = aqllog::RunExecutable(graph_fence_test::kChildExecutable,
-                                                graph_fence_test::kScenarioCapturedSystemScope);
+  const std::string log =
+      aqllog::RunExecutable("hipGraphInstantiateNullStreamFence_exe", "captured_system_scope");
 
-  const std::optional<std::string> region =
-      aqllog::ExtractRegion(log, graph_fence_test::kCapturedSystemScopeRegion);
-  INFO("child trace must contain the captured-system-scope region");
+  const std::optional<std::string> region = aqllog::ExtractRegion(log, "workload");
+  INFO("child trace must contain the workload region");
   REQUIRE(region.has_value());
 
   size_t system_dispatches = 0;

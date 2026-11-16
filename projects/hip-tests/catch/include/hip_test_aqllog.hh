@@ -168,11 +168,11 @@ inline std::vector<Packet> ParsePackets(const std::string& log) {
 }
 
 //! Packets emitted after the dispatch carrying |begin_token| and before the
-//! next dispatch carrying |end_token|. Scanning runs to the end of |log| when
-//! |end_token| never appears, and returns nothing when |begin_token| never does.
+//! next dispatch carrying |end_token|. An omitted begin selects the first
+//! dispatch; an omitted end selects the following dispatch.
 inline std::vector<Packet> PacketsBetweenDispatches(const std::string& log,
-                                                    const std::string& begin_token,
-                                                    const std::string& end_token) {
+                                                    std::optional<std::string> begin_token = {},
+                                                    std::optional<std::string> end_token = {}) {
   std::vector<Packet> packets;
   std::istringstream lines(log);
   std::string line;
@@ -180,10 +180,10 @@ inline std::vector<Packet> PacketsBetweenDispatches(const std::string& log,
   while (std::getline(lines, line)) {
     const bool is_dispatch = IsDispatchLine(line);
     if (!collecting) {
-      collecting = is_dispatch && line.find(begin_token) != std::string::npos;
+      collecting = is_dispatch && (!begin_token || line.find(*begin_token) != std::string::npos);
       continue;
     }
-    if (is_dispatch && line.find(end_token) != std::string::npos) {
+    if (is_dispatch && (!end_token || line.find(*end_token) != std::string::npos)) {
       break;
     }
     if (std::optional<Packet> packet = ParseLine(line)) {
@@ -195,8 +195,8 @@ inline std::vector<Packet> PacketsBetweenDispatches(const std::string& log,
 
 //! Barrier packets in the same dispatch-delimited window as PacketsBetweenDispatches().
 inline std::vector<Packet> BarriersBetweenDispatches(const std::string& log,
-                                                     const std::string& begin_token,
-                                                     const std::string& end_token) {
+                                                     std::optional<std::string> begin_token = {},
+                                                     std::optional<std::string> end_token = {}) {
   std::vector<Packet> barriers;
   for (const Packet& packet : PacketsBetweenDispatches(log, begin_token, end_token)) {
     if (packet.kind != PacketKind::kDispatch) {

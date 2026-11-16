@@ -8,8 +8,6 @@
 
 #include <hip_test_aqllog_trace_region.hh>
 
-#include "hipGraphInstantiateNullStreamFence_common.hh"
-
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -92,11 +90,11 @@ void runFenceScenario(bool instantiate_graph) {
   // The graph is not launched because only packet construction is under test.
   hipStream_t stream = nullptr;
   CHECK(hipStreamCreate(&stream));
-  hip::aqllog::BeginRegion(graph_fence_test::kFenceRegion);
+  hip::aqllog::BeginRegion("workload");
   launchWriteKernel(stream, buffer);
   launchWriteKernel(stream, buffer);
   CHECK(hipStreamSynchronize(stream));
-  hip::aqllog::EndRegion(graph_fence_test::kFenceRegion);
+  hip::aqllog::EndRegion("workload");
   CHECK(hipStreamDestroy(stream));
 
   if (instantiate_graph) {
@@ -124,10 +122,10 @@ void runCapturedSystemScopeScenario() {
 
   hipStream_t stream = nullptr;
   CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
-  hip::aqllog::BeginRegion(graph_fence_test::kCapturedSystemScopeRegion);
+  hip::aqllog::BeginRegion("workload");
   CHECK(hipGraphLaunch(exec, stream));
   CHECK(hipStreamSynchronize(stream));
-  hip::aqllog::EndRegion(graph_fence_test::kCapturedSystemScopeRegion);
+  hip::aqllog::EndRegion("workload");
 
   CHECK(hipStreamDestroy(stream));
   CHECK(hipGraphExecDestroy(exec));
@@ -145,11 +143,11 @@ int main(int argc, char** argv) {
   }
 
   const std::string_view scenario{argv[1]};
-  if (scenario == graph_fence_test::kScenarioGraph) {
+  if (scenario == "graph") {
     runFenceScenario(true);
-  } else if (scenario == graph_fence_test::kScenarioNoGraph) {
+  } else if (scenario == "nograph") {
     runFenceScenario(false);
-  } else if (scenario == graph_fence_test::kScenarioCapturedSystemScope) {
+  } else if (scenario == "captured_system_scope") {
     runCapturedSystemScopeScenario();
   } else {
     std::fprintf(stderr, "unknown graph-fence scenario: %.*s\n", static_cast<int>(scenario.size()),

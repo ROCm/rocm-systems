@@ -86,7 +86,6 @@ if(HIP_PLATFORM MATCHES "amd")
     hipStreamUpdateCaptureDependencies.cc
     hipGraphAddNodeBeginCapture.cc
     hipGraphExternalSemaphoresNodes.cc
-    # Parses the AMD AQL trace; the source is Linux-gated.
     hipGraphInstantiateNullStreamFence.cc
   )
   set(TEST_SRC ${TEST_SRC} ${AMD_SRC})
