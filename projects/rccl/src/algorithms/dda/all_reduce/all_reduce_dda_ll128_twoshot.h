@@ -268,8 +268,9 @@ constexpr size_t kDdaArSplitHandoffAreaBytes =
 constexpr size_t kDdaArSplitWideStageBytes = 96 * 1024;
 // Chunked wide B stages this many copies of a slice at a time.
 constexpr uint32_t kDdaArSplitWideChunkCopies = 8;
-// B's forms: pairwise (two copies a poll), wide (all copies of a round's slices staged), or wide in chunks of copies.
-enum DdaArSplitB : int { kDdaArSplitBPairwise, kDdaArSplitBWide, kDdaArSplitBWideChunked };
+// B's forms: pairwise (two copies a poll), wide (all copies of a round's slices staged), wide in chunks of copies, or
+// gathered into LDS with async loads (DMA).
+enum DdaArSplitB : int { kDdaArSplitBPairwise, kDdaArSplitBWide, kDdaArSplitBWideChunked, kDdaArSplitBDma };
 
 // Slices a wide B round stages: n - 1 copies each (0 when one slice's copies overflow the stage).
 constexpr size_t ddaArSplitWideRoundSlices(int nRanks) {
@@ -294,6 +295,51 @@ constexpr size_t ddaLL128ArSplitSharedBytes(unsigned threads, int nRanks, bool h
   return ddaLL128StageBytes(threads) + (handoff ? kDdaArSplitHandoffAreaBytes : 0) + ddaArSplitBStageBytes(b) +
          (((size_t)nRanks * sizeof(void*) + 15) & ~(size_t)15);
 }
+
+// Dynamic LDS a DMA B launch may use in all (gfx1250: 320 KiB a workgroup, a margin kept for static LDS).
+constexpr size_t kDdaArSplitDmaLdsBudget = 300 * 1024;
+
+// Where DMA B's area starts: past the windows, the hand-off area and the peer table, 128 B aligned.
+constexpr size_t ddaArSplitDmaAreaOffset(unsigned threads, int nRanks, bool handoff) {
+  return (ddaLL128ArSplitSharedBytes(threads, nRanks, handoff) + kDdaLL128LineBytes - 1) / kDdaLL128LineBytes *
+         kDdaLL128LineBytes;
+}
+
+// Slices of every peer's copy one DMA B group stages: what the budget holds, at most blockSlices (a block's most
+// slices); 0 when not one slice of every peer fits.
+constexpr size_t ddaArSplitDmaGroupSlices(unsigned threads, int nRanks, bool handoff, size_t blockSlices) {
+  const size_t used = ddaArSplitDmaAreaOffset(threads, nRanks, handoff);
+  const size_t fit = nRanks < 2 || used >= kDdaArSplitDmaLdsBudget
+                       ? 0
+                       : (kDdaArSplitDmaLdsBudget - used) / ((size_t)(nRanks - 1) * kDdaLL128WireBytesPerSlice);
+  return fit < blockSlices ? fit : blockSlices;
+}
+
+// Dynamic LDS of a DMA B launch whose groups stage `group` slices of every peer.
+constexpr size_t ddaLL128ArSplitDmaSharedBytes(unsigned threads, int nRanks, bool handoff, size_t group) {
+  return ddaArSplitDmaAreaOffset(threads, nRanks, handoff) +
+         group * (size_t)(nRanks - 1) * kDdaLL128WireBytesPerSlice;
+}
+
+#if ASYNC_COPY_SUPPORTED
+// The warp's async loads of one copy of a wire slice (128 B aligned at `wire`) into LDS `img`. Each 128 B line is one
+// b128 load of 8 lanes, as in the cooperative readers; whether a line can land torn is untested for loads to LDS.
+__device__ __forceinline__ void ddaArSplitDmaLoadCopy(const uint64_t* wire, uint8_t* img) {
+  asyncLoadToLDS<SyncPolicy::Async, kDdaLL128StagePolicy, true>(reinterpret_cast<const uint8_t*>(wire), img,
+                                                                 kDdaLL128WireBytesPerSlice);
+}
+
+// Whether every line of the LDS copy `img` carries `flag` (wave uniform).
+__device__ __forceinline__ bool ddaArSplitDmaCopyFresh(const uint8_t* img, int lane, bool flagLane, uint64_t flag) {
+  using LdsU64 = __attribute__((address_space(3))) const volatile uint64_t*;
+  bool stale = false;
+#pragma unroll
+  for (int g = 0; g < kDdaLL128Pairs; ++g) {
+    stale |= flagLane && ((LdsU64)(img + (size_t)(g * kDdaLL128Warp + lane) * 16))[1] != flag;
+  }
+  return !__any(stale);
+}
+#endif
 
 // C's push of a wire slice image in LDS to `wireSlice`: async LDS stores where built, else this lane's 16 B stores.
 __device__ __forceinline__ void ddaArSplitHandoffPush(const uint8_t* image, uint64_t* wireSlice, int lane) {
@@ -322,15 +368,19 @@ struct DdaLL128SplitUnit {
 // Peer-split LL128 two-shot: the two-shot's layout, wire and fold order over (slice, peer) units.
 // Block b owns the same slices of every shard on every rank and waits only on block b, here or on a peer (a block is
 // resident whole), so with in-order dispatch the lowest unfinished block always runs and a partly resident grid drains.
-// An aborted wait leaves only its warp (in wide B the whole block, at the stage's barrier), before anything that
-// depends on it is stored.
+// An aborted wait leaves only its warp (in wide and DMA B the whole block, at a barrier), before anything that depends
+// on it is stored.
 // In place is safe: A reads only the peers' shards and D writes (peer, slice) only after the peer folded my copy of it.
 // The rank count is runtime only: the peer loops do not unroll, and a compile-time count adds no resident block.
 // kDdaLL128FlagBytesNarrow runs the narrow flag: slicesTotal counts 1984 B slices; units and fold order hold.
 // kHandoff: B hands each reduced slice to C through LDS; a block owns at most kDdaArSplitHandoffSlices slices.
-// kB (with the hand-off): wide B polls a round's copies on every warp into LDS, then each slice's owner adds them in
+// Wide B (kB, with the hand-off) polls a round's copies on every warp into LDS, then each slice's owner adds them in
 // peer order from me + 1, as pairwise B does; chunked, kDdaArSplitWideChunkCopies copies at a time. Wide B needs
 // ddaArSplitWideRoundSlices(nRanks) >= 1, which the launcher's copies rule keeps.
+// DMA B (the 8 B flag, with or without the hand-off): per group of the block's slices every warp loads its share of the
+// copies into LDS with async loads and reloads stale ones, one block barrier, then (slice, pair 2h / 2h + 1) items fold
+// on every warp in the same order to the hand-off image or my own slot, and recvbuff. A gfx1250 build without async
+// loads traps there (the launcher cannot tell such a build apart).
 template <typename T, int kFlagBytes = kDdaLL128FlagBytesWide, bool kHandoff = false,
           DdaArSplitB kB = kDdaArSplitBPairwise>
 __launch_bounds__(kDdaLL128ArThreads) __global__
@@ -341,7 +391,9 @@ __launch_bounds__(kDdaLL128ArThreads) __global__
   constexpr int kWire = kDdaLL128WireAsync;
   constexpr size_t kSliceData = (size_t)ddaLL128DataBytesPerSliceOf<kFlagBytes>();
   static_assert(kFlagBytes == kDdaLL128FlagBytesWide || sizeof(T) <= 4, "the narrow layout moves whole dwords");
-  static_assert(kB == kDdaArSplitBPairwise || kHandoff, "wide B stages after the hand-off area");
+  constexpr bool kWideB = kB == kDdaArSplitBWide || kB == kDdaArSplitBWideChunked;
+  static_assert(!kWideB || kHandoff, "wide B stages after the hand-off area");
+  static_assert(kB != kDdaArSplitBDma || kFlagBytes == kDdaLL128FlagBytesWide, "DMA B folds 8 B flag lines");
   constexpr uint32_t kPairMask = (1u << kDdaLL128SplitPollSlices) - 1;  // both slices of a poll pair
   const int lane = threadIdx.x % kDdaLL128Warp;
   // Wave uniform where an LL128 warp is a wave (wave32), so the unit bookkeeping below stays in scalar registers.
@@ -457,7 +509,114 @@ __launch_bounds__(kDdaLL128ArThreads) __global__
 
   // B. reduce my slices in peer order from me + 1, to recvbuff and to my own second area slot[me] (no peer writes
   // it), or to the hand-off area.
-  if constexpr (kB != kDdaArSplitBPairwise) {
+  if constexpr (kB == kDdaArSplitBDma) {
+#if ASYNC_COPY_SUPPORTED
+    // Items of a slice: pairs (0, 1) and (2, 3) (a flag lane couples pairs 2h and 2h + 1).
+    constexpr uint32_t kItems = kDdaLL128Pairs / 2;
+    using LdsU64 = __attribute__((address_space(3))) const uint64_t*;
+    uint8_t* const dmaLds = ddaLL128ArStageLds + ddaArSplitDmaAreaOffset(blockDim.x, nRanks, kHandoff);
+    const uint32_t group =
+      (uint32_t)ddaArSplitDmaGroupSlices(blockDim.x, nRanks, kHandoff, perBlock + (extra != 0 ? 1u : 0u));
+    auto copyAt = [&](uint32_t si, uint32_t pi) {
+      return dmaLds + ((size_t)si * peers + pi) * kDdaLL128WireBytesPerSlice;
+    };
+#pragma unroll 1
+    for (uint32_t g0 = 0; g0 < nSlices; g0 += group) {
+      const uint32_t gs = nSlices - g0 < group ? nSlices - g0 : group;
+      const uint32_t copies = gs * peers;
+#pragma unroll 1
+      for (uint32_t u = warp; u < copies; u += nwarps) {
+        ddaArSplitDmaLoadCopy(slotAt(selfBase, bankWords, peerOf(u % peers), s0 + g0 + u / peers),
+                              copyAt(u / peers, u % peers));
+      }
+      asyncWait<0>();
+      __atomic_signal_fence(__ATOMIC_SEQ_CST);  // the flag reads below stay after the wait
+      bool aborted = false;
+#pragma unroll 1
+      for (uint32_t u = warp; u < copies && !aborted; u += nwarps) {
+        uint8_t* const img = copyAt(u / peers, u % peers);
+        int spins = 0;
+        while (!ddaArSplitDmaCopyFresh(img, lane, flagLane, flag)) {
+          if (params.abortSpinTick(spins)) {
+            aborted = true;
+            break;
+          }
+          ddaArSplitDmaLoadCopy(slotAt(selfBase, bankWords, peerOf(u % peers), s0 + g0 + u / peers), img);
+          asyncWait<0>();
+          __atomic_signal_fence(__ATOMIC_SEQ_CST);
+        }
+      }
+      // An aborted wait anywhere stops the block before anything that depends on it is stored.
+      if (__syncthreads_or(aborted)) {
+        quit();
+        return;
+      }
+#pragma unroll 1
+      for (uint32_t it = warp; it < gs * kItems; it += nwarps) {
+        const uint32_t si = it / kItems;
+        const uint32_t s = s0 + g0 + si;
+        const int gA = 2 * (int)(it % kItems);
+        const int gB = gA + 1;
+        const int elt = eltIn(s);
+        const int8_t* const own = shardAt(srcBytes, selfRank, s);
+        // Own pairs gA, gB in ddaLL128LoadRegs's layout (a flag lane's gB lo is its gA chunk's hi).
+        uint64_t r[4] = {0, 0, 0, 0};
+        const int cA = ddaLL128ChunkIx(gA, lane);
+        const int cB = ddaLL128ChunkIx(gB, lane);
+        if (cA * 16 < elt) {
+          ddaLL128Load16B(reinterpret_cast<const uint64_t*>(own + cA * 16), r[0], r[1]);
+        }
+        if (!flagLane) {
+          if (cB * 16 < elt) {
+            ddaLL128Load16B(reinterpret_cast<const uint64_t*>(own + cB * 16), r[2], r[3]);
+          }
+        } else {
+          r[2] = r[1];
+        }
+#pragma unroll 1
+        for (uint32_t pi = 0; pi < peers; ++pi) {
+          const LdsU64 pa = (LdsU64)(copyAt(si, pi) + (size_t)(gA * kDdaLL128Warp + lane) * 16);
+          const LdsU64 pb = (LdsU64)(copyAt(si, pi) + (size_t)(gB * kDdaLL128Warp + lane) * 16);
+          r[0] = ddaLL128AddWord<T>(r[0], pa[0]);
+          r[1] = ddaLL128AddWord<T>(r[1], pa[1]);
+          r[2] = ddaLL128AddWord<T>(r[2], pb[0]);
+          r[3] = ddaLL128AddWord<T>(r[3], pb[1]);
+        }
+        // To C: pairs gA, gB of the wire image, the flag in a flag lane's hi words.
+        if constexpr (kHandoff) {
+          uint64_t* const img = reinterpret_cast<uint64_t*>(handoffLds + (size_t)(s - s0) * kDdaLL128WireBytesPerSlice);
+          uint64_t* const pairA = img + (size_t)(gA * kDdaLL128Warp + lane) * 2;
+          uint64_t* const pairB = img + (size_t)(gB * kDdaLL128Warp + lane) * 2;
+          pairA[0] = r[0];
+          pairA[1] = flagLane ? flag : r[1];
+          pairB[0] = r[2];
+          pairB[1] = flagLane ? flag : r[3];
+        } else {
+          uint64_t* const w = wireAt(bankWordsNext, selfRank, s);
+          ddaLL128StoreAtomic16B(w + gA * 2 * kDdaLL128Warp, r[0], flagLane ? flag : r[1]);
+          ddaLL128StoreAtomic16B(w + gB * 2 * kDdaLL128Warp, r[2], flagLane ? flag : r[3]);
+        }
+        // To recvbuff: ddaLL128StoreRegs's chunks of pairs gA, gB.
+        int8_t* const out = shardAt(dstBytes, selfRank, s);
+        if (cA * 16 < elt) {
+          ddaLL128Store16B(reinterpret_cast<uint64_t*>(out + cA * 16), r[0], flagLane ? r[2] : r[1]);
+        }
+        if (!flagLane && cB * 16 < elt) {
+          ddaLL128Store16B(reinterpret_cast<uint64_t*>(out + cB * 16), r[2], r[3]);
+        }
+      }
+      // The next group's loads overwrite the stage; the barrier also lands every hand-off image of this group.
+      __syncthreads();
+      if constexpr (kHandoff) {
+        for (uint32_t i = threadIdx.x; i < gs; i += blockDim.x) {
+          __scoped_atomic_store_n(&handoffReady[g0 + i], 1u, __ATOMIC_RELAXED, __MEMORY_SCOPE_WRKGRP);
+        }
+      }
+    }
+#else
+    __builtin_trap();
+#endif
+  } else if constexpr (kB != kDdaArSplitBPairwise) {
     // B's last step for reduced slice s: its wire image to the hand-off area, marked ready, then to recvbuff.
     auto finish = [&](uint32_t s, uint64_t (&acc)[kDdaLL128WordsPerThread]) {
       uint8_t* const mine = handoffLds + (size_t)(s - s0) * kDdaLL128WireBytesPerSlice + (size_t)lane * 16;
