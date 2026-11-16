@@ -248,16 +248,6 @@ class Image : public pal::Memory {
 
   Image* CopyImageBuffer() const { return copyImageBuffer_; }
 
-  //! Gets the size and alignment PAL requires for the memory backing this image.
-  bool getImageMemoryRequirements(size_t* size, size_t* alignment) const final {
-    if (memReqSize() == 0) {
-      return false;
-    }
-    *size = static_cast<size_t>(memReqSize());
-    *alignment = static_cast<size_t>(memReqAlignment());
-    return true;
-  }
-
   //! Validates allocated memory for possible workarounds
   bool ValidateMemory(Resource::MemoryType memType) final;
 

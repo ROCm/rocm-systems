@@ -5194,11 +5194,9 @@ hipError_t ihipArrayGetMemoryRequirements(hipArrayMemoryRequirements* memoryRequ
     return hipErrorInvalidValue;
   }
 
-  amd::Device* amd_device = g_devices[image->getUserData().deviceId]->devices()[0];
-  device::Memory* device_memory = image->getDeviceMemory(*amd_device);
   size_t size = 0;
   size_t alignment = 0;
-  if (device_memory == nullptr || !device_memory->getImageMemoryRequirements(&size, &alignment)) {
+  if (!image->getMemoryRequirements(&size, &alignment)) {
     return hipErrorNotSupported;
   }
 

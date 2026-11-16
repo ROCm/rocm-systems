@@ -732,8 +732,6 @@ bool Resource::CreateImage(CreateParams* params, bool forceLinear) {
       }
     }
     offset_ += static_cast<size_t>(subOffset_);
-    memReqSize_ = req.size;
-    memReqAlignment_ = req.alignment;
   } else {
     memRef_ = viewOwner_->memRef_;
     memRef_->retain();

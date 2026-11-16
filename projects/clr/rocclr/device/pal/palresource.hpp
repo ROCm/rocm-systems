@@ -347,10 +347,6 @@ class Resource {
   //! Gets the resource element size
   uint elementSize() const { return elementSize_; }
 
-  //! Gets the size and alignment PAL requires for an image's own memory, or 0 if it has none
-  Pal::gpusize memReqSize() const { return memReqSize_; }
-  Pal::gpusize memReqAlignment() const { return memReqAlignment_; }
-
   //! Get the mapped address of this resource
   address data() const { return reinterpret_cast<address>(address_); }
 
@@ -540,12 +536,6 @@ class Resource {
   uint mapFlags_;    //!< Map flags for map/umapLayer
 
   Pal::IImage* image_;  //!< PAL image object
-
-  //! Size and alignment PAL requires for the image's memory, before CreateImage() rounds them up
-  //! to MaxGpuAlignment. Only set for images that allocate their own memory; 0 for views, images
-  //! on buffers and interop images.
-  Pal::gpusize memReqSize_ = 0;
-  Pal::gpusize memReqAlignment_ = 0;
 
   uint32_t* hwState_;  //!< HW state for image object
   uint64_t hwSrd_;     //!< GPU pointer to HW SRD
