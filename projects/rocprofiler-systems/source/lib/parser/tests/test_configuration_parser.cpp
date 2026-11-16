@@ -517,6 +517,24 @@ TEST(parser_configuration, assigns_run_after_precedence)
     EXPECT_EQ(defaults.find("log_level"), defaults.end());
 }
 
+TEST(parser_configuration, assigns_need_the_option_on)
+{
+    std::optional<std::string> debug_variable;
+    configuration_parser       parser;
+    parser.set_environment(
+        [&debug_variable](std::string_view name) -> std::optional<std::string> {
+            return name == "ROCPROFSYS_DEBUG" ? debug_variable : std::nullopt;
+        });
+    ASSERT_TRUE(parser.initialize(effect_schema())) << parser.failure();
+
+    EXPECT_EQ(parser.parse({ "--debug" }).at("log_level"), "debug");
+    EXPECT_FALSE(parser.parse({ "--debug=false" }).contains("log_level"));
+    debug_variable = "false";
+    EXPECT_FALSE(parser.parse({}).contains("log_level"));
+    debug_variable = "true";
+    EXPECT_EQ(parser.parse({}).at("log_level"), "debug");
+}
+
 TEST(parser_configuration, failed_initialize_keeps_the_previous_catalog)
 {
     auto   parser = make_parser();

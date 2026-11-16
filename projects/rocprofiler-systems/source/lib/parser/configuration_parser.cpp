@@ -280,54 +280,39 @@ keeps_existing(const resolved_config& resolved, std::string_view target,
            static_cast<std::uint8_t>(source);
 }
 
-/// Assigns run from values that won precedence, not from defaults. A target with a
-/// higher source is left alone. A constant that does not parse fails the whole update.
-bool
-apply_assigns(resolved_config& resolved, const schema& config_schema,
-              std::vector<std::string>& errors)
+/// Assigns run for a parameter that is on and whose value won over the default. A
+/// target with a higher source is left alone. initialize() refused a catalog that
+/// assigns an unknown parameter or a value its target refuses.
+void
+apply_assigns(resolved_config& resolved, const schema& config_schema)
 {
-    std::vector<std::pair<const schema_param*, resolved_value>> origins;
+    std::vector<std::pair<const schema_param*, config_source>> origins;
     for(const auto& param : config_schema.params())
     {
         const auto found = resolved.find(param.id);
-        if(found == resolved.end() ||
-           found->second.source == config_source::default_value)
+        if(found != resolved.end() &&
+           found->second.source != config_source::default_value &&
+           is_enabled(found->second.value))
         {
-            continue;
+            origins.emplace_back(&param, found->second.source);
         }
-        origins.emplace_back(&param, found->second);
     }
 
-    auto failed = false;
-    for(const auto& [param, origin] : origins)
+    for(const auto& [param, source] : origins)
     {
         for(const auto& [target_id, text] : param->assigns)
         {
             const auto* target = config_schema.find_param(target_id);
-            if(target == nullptr)
+            const auto  parsed =
+                target == nullptr ? std::nullopt : parse_value(*target, text);
+            if(!parsed || keeps_existing(resolved, target_id, source))
             {
-                errors.push_back(
-                    fmt::format("parameter '{}' assigns unknown parameter '{}'",
-                                param->id, target_id));
-                failed = true;
-                continue;
-            }
-            if(keeps_existing(resolved, target_id, origin.source))
-            {
-                continue;
-            }
-            const auto parsed = parse_value(*target, text);
-            if(!parsed)
-            {
-                errors.push_back(invalid_value_message(text, target_id));
-                failed = true;
                 continue;
             }
             resolved.insert_or_assign(
-                target_id, resolved_value{ .value = *parsed, .source = origin.source });
+                target_id, resolved_value{ .value = *parsed, .source = source });
         }
     }
-    return !failed;
 }
 
 void
@@ -481,10 +466,7 @@ configuration_parser::parse(const std::vector<std::string>& arguments)
 
     auto resolved = resolve_collected(collected);
     add_backend_defaults(resolved, request.config_schema, *m_backends);
-    if(!apply_assigns(resolved, request.config_schema, m_errors))
-    {
-        return {};
-    }
+    apply_assigns(resolved, request.config_schema);
     append_violations(m_errors, request.config_schema, resolved);
     try
     {

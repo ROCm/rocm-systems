@@ -25,8 +25,9 @@ namespace rocprofsys::parser
  * and the command line.
  *
  * Precedence, from lowest to highest, is default_value, file, environment, preset,
- * then command_line. After that, assigns runs for a value whose winning source is
- * not the default. A target with a higher source is left alone. The config file
+ * then command_line. After that, assigns runs for a parameter that is on, as
+ * is_enabled() decides, and whose winning source is not the default, so --debug=false
+ * assigns nothing. A target with a higher source is left alone. The config file
  * path is the resolved "config_file" parameter. The preset name is the resolved
  * "preset" parameter. An empty preset name is unset. An empty lookup for a named
  * preset means that name is unknown. initialize() builds an empty backend registry.
