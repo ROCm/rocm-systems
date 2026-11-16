@@ -9,6 +9,7 @@
 #include <cstring>
 #include <libmount/libmount.h>
 #include <stdexcept>
+#include <string_view>
 #include <system_error>
 
 struct libmnt_context;
@@ -118,6 +119,39 @@ LibMountHelper::getMountInfo(dev_t dev) const
     }
     else if (fstype && !strcmp(fstype, "xfs")) {
         mountinfo.type = FilesystemType::xfs;
+    }
+    else if (fstype && (!strcmp(fstype, "nfs") || !strcmp(fstype, "nfs4"))) {
+        mountinfo.type        = FilesystemType::nfs;
+        mountinfo.options.nfs = {NfsProto::unknown};
+
+        char  *value{};
+        size_t length{};
+        int    result = libmount->mnt_fs_get_option(mnt_fs, "proto", &value, &length);
+        if (result < 0) {
+            libmount->mnt_free_context(mnt_ctx);
+            throw std::runtime_error("libmount: Could not get mount option: proto");
+        }
+        if (result == 0 && value) {
+            std::string_view proto(value, length);
+            if (proto == "tcp") {
+                mountinfo.options.nfs.proto = NfsProto::tcp;
+            }
+            else if (proto == "tcp6") {
+                mountinfo.options.nfs.proto = NfsProto::tcp6;
+            }
+            else if (proto == "udp") {
+                mountinfo.options.nfs.proto = NfsProto::udp;
+            }
+            else if (proto == "udp6") {
+                mountinfo.options.nfs.proto = NfsProto::udp6;
+            }
+            else if (proto == "rdma") {
+                mountinfo.options.nfs.proto = NfsProto::rdma;
+            }
+            else if (proto == "rdma6") {
+                mountinfo.options.nfs.proto = NfsProto::rdma6;
+            }
+        }
     }
     else {
         mountinfo.type = FilesystemType::other;

@@ -964,11 +964,14 @@ TEST(CommandProcessorInterruptRoutingTest, QueuesWithTheSameProcessIdKeepDistinc
     second_status = 0;
   });
 
+  amdgpu::InterruptSubscription packet_owner([](uint32_t, uint32_t) {
+    ADD_FAILURE() << "Software queue exceptions must not use the packet interrupt route";
+  });
   auto register_queue = [&](uint32_t queue_id, uint64_t &exception_status, uint32_t event_id,
-                            const amdgpu::InterruptSink &interrupt_sink) {
+                            const amdgpu::InterruptSink &exception_event_sink) {
     amdgpu::ComputeQueueConfig queue{};
     queue.address_space = address_space;
-    queue.interrupt_sink = interrupt_sink;
+    queue.interrupt_sink = packet_owner.sink();
     queue.process_id = kProcessId;
     queue.queue_id = queue_id;
     queue.ring_base_va = 0x100;
@@ -977,6 +980,7 @@ TEST(CommandProcessorInterruptRoutingTest, QueuesWithTheSameProcessIdKeepDistinc
     queue.write_ptr_va = 0x88;
     queue.exception_status_va = reinterpret_cast<uint64_t>(&exception_status);
     queue.exception_event_id = event_id;
+    queue.exception_event_sink = exception_event_sink;
     (void)sim.cp()->register_queue(std::move(queue));
   };
   register_queue(17, first_status, 17, first_owner.sink());

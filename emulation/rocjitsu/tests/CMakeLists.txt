@@ -18,6 +18,34 @@ if(RJ_ENABLE_UBSAN)
 endif()
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    # A separate executable lets --wrap hide modern stat symbols without
+    # affecting any other test or the interposer's own symbol resolution.
+    add_executable(
+        libc_passthrough_test
+        libc_passthrough_test.cpp
+        ../lib/rocjitsu/src/rocjitsu/kmd/linux/libc_passthrough.cpp
+    )
+    target_include_directories(
+        libc_passthrough_test
+        PRIVATE ../lib/rocjitsu/src ../lib/util/include
+    )
+    target_link_libraries(
+        libc_passthrough_test
+        PRIVATE GTest::gtest_main ${CMAKE_DL_LIBS}
+    )
+    target_link_options(libc_passthrough_test PRIVATE "-Wl,--wrap=dlsym")
+    rj_configure_target(libc_passthrough_test WARNINGS)
+    add_test(NAME LibcPassthrough.NativeStat COMMAND libc_passthrough_test)
+    # Force the old ABI only on hosts for which the resolver knows the
+    # stat version even when the build headers omit _STAT_VER.
+    if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|amd64|AMD64|aarch64|arm64)$")
+        add_test(
+            NAME LibcPassthrough.LegacyStat
+            COMMAND
+                ${CMAKE_COMMAND} -E env RJ_TEST_LEGACY_STAT=1
+                $<TARGET_FILE:libc_passthrough_test>
+        )
+    endif()
     add_test(
         NAME MemoryKeeper.ScrubbedEnvironmentStartup
         COMMAND
@@ -464,7 +492,9 @@ add_executable(
     canonical_line_freshness_test.cpp
     legacy_page_table_cache_test.cpp
     config_test.cpp
+    rj_vm_config_test.cpp
     checkpoint_restore_errors_test.cpp
+    cdna_integer_arith_test.cpp
     rj_arith_policy_test.cpp
     rj_arith_config_test.cpp
     rj_arith_bridge_test.cpp
@@ -2395,6 +2425,36 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
             $<TARGET_FILE:register_observer_probe>
     )
 
+    # Compile as C and link only the shared library's public ABI.
+    add_executable(vm_config_c_api_test vm_config_c_api_test.c)
+    target_link_libraries(vm_config_c_api_test PRIVATE rocjitsu_shared)
+    if(RJ_ENABLE_UBSAN AND RJ_UBSAN_VPTR)
+        # Compile the consumer as C, but link the C++ runtime needed by the
+        # instrumented library's vptr checks.
+        set_target_properties(
+            vm_config_c_api_test
+            PROPERTIES LINKER_LANGUAGE CXX
+        )
+    endif()
+    target_include_directories(
+        vm_config_c_api_test
+        PRIVATE ${PROJECT_SOURCE_DIR}/lib/rocjitsu/include
+    )
+    rj_configure_target(vm_config_c_api_test WARNINGS)
+    add_test(
+        NAME VmConfigCApi
+        COMMAND
+            vm_config_c_api_test
+            ${CMAKE_CURRENT_SOURCE_DIR}/race-detector/race_test_config.json
+    )
+    # An installed ROCm SDK may provide an older library with the same SONAME.
+    set_tests_properties(
+        VmConfigCApi
+        PROPERTIES
+            ENVIRONMENT_MODIFICATION
+                "LD_LIBRARY_PATH=path_list_prepend:$<TARGET_FILE_DIR:rocjitsu_shared>"
+    )
+
     # Resolve only public C symbols through RTLD_LOCAL. Linking simulator
     # objects here would hide whether an ordinary embedder can map its handles.
     add_executable(vm_shared_memory_api_test vm_shared_memory_api_test.cpp)
@@ -2650,6 +2710,7 @@ set(_rj_interposer_drm_tests
     KfdExportKeepsItsMetadataAfterTheAllocationIsFreed
     KfdImportsRetainMetadataAfterTheOriginalOwnerCloses
     MappingFlagsMatchBackingCapabilities
+    MissingMemfdRoutesRenderNodeIoctls
     OpensWithinCurrentDescriptorLimit
     PrimeHandleToFdReturnsTheBuffer
     PrimeImportKeepsTheBoStateAfterTheHandleCloses
@@ -4239,6 +4300,7 @@ if(RJ_ENABLE_HIP_TESTS)
     rj_hip_runtime_supports_arch(RJ_HIP_RUNTIME_SUPPORTS_GFX950 "gfx950")
     rj_hip_runtime_supports_arch(RJ_HIP_RUNTIME_SUPPORTS_GFX942 "gfx942")
     rj_hip_runtime_supports_arch(RJ_HIP_RUNTIME_SUPPORTS_GFX1250 "gfx1250")
+    rj_hip_runtime_supports_arch(RJ_HIP_RUNTIME_SUPPORTS_GFX1251 "gfx1251")
 endif()
 
 if(RJ_ENABLE_HIP_TESTS)
@@ -4760,6 +4822,17 @@ if(RJ_ENABLE_HIP_TESTS)
             CONFIG ${RJ_CDNA3_KMD_CONFIG}
             ENVIRONMENT "RJ_HW_ID_XCDS=8" "RJ_HW_ID_SHADER_ENGINES=4" "RJ_HW_ID_CUS_PER_SE=10"
             TIMEOUT 120
+        )
+    endif()
+
+    if(HAS_GFX1251_DEVICE_KERNELS AND RJ_HIP_RUNTIME_SUPPORTS_GFX1251)
+        rj_add_hip_test(hip_vector_add_gfx1251_test ARCH gfx1251 SOURCE hip_vector_add_test.cpp)
+        rj_add_hip_test_case(
+            hip_vector_add_gfx1251_test
+            "HipVectorAddTest.PackedF64"
+            NAME "HipVectorAddTest.PackedF64.Gfx1251"
+            CONFIG ${PROJECT_SOURCE_DIR}/configs/gfx1251_synthetic.json
+            TIMEOUT 60
         )
     endif()
 

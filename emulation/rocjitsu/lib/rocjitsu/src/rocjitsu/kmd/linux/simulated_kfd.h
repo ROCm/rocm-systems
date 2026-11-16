@@ -745,6 +745,8 @@ public:
     amdgpu::InterruptSubscription interrupt_subscription;
     /// CP completions follow the GC version's named-event mailbox rule.
     amdgpu::InterruptSubscription cp_interrupt_subscription;
+    /// Software queue exceptions signal runtime events without GPU mailboxes.
+    amdgpu::InterruptSubscription exception_event_subscription;
     bool cps_initialized = false;
     /// Whether the "no CWSR layout for this architecture" warning has been
     /// logged for this GPU. The check now runs per faulting access rather than
@@ -813,6 +815,11 @@ private:
                         bool peer_cache_read,
                         const GpuAliasIngressGate::DrainAuthority *authority = nullptr) const;
 
+  [[nodiscard]] std::optional<amdgpu::MemoryIngressAdmission>
+  try_local_gpu_alias_ingress(uint32_t process_id, uint32_t gpu_id,
+                              const amdgpu::GpuVmAccess &expected,
+                              std::span<const amdgpu::MemoryIngressSpan> spans);
+
   /// The VM owns this endpoint child and destroys KFD before its children.
   /// A binding snapshot may outlive KFD, so callbacks only lock this weak
   /// handle. Destruction clears the pointer under the same lock before the
@@ -831,6 +838,7 @@ private:
   struct CuIngressAccess {
     std::mutex mutex;
     std::condition_variable effects_drained;
+    util::DistributedSharedMutex admission_mutex;
     SimulatedKfd *driver = nullptr;
     size_t active_effect_callbacks = 0;
     bool standalone_after_shutdown = false;

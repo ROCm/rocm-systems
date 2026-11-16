@@ -1454,7 +1454,7 @@ bool CommandProcessor::publish_queue_exception(uint32_t queue_id, uint32_t proce
   uint64_t exception_status_va = 0;
   uint32_t exception_event_id = 0;
   AddressSpaceHandle address_space;
-  InterruptSink interrupt_sink;
+  InterruptSink exception_event_sink;
   std::chrono::milliseconds ack_timeout;
   {
     std::lock_guard<std::recursive_mutex> lk(hw_queue_mutex_);
@@ -1467,7 +1467,7 @@ bool CommandProcessor::publish_queue_exception(uint32_t queue_id, uint32_t proce
     exception_event_id = queue->exception_event_id;
     ack_timeout = runtime_exception_ack_timeout_;
     address_space = queue->address_space;
-    interrupt_sink = queue->interrupt_sink;
+    exception_event_sink = queue->exception_event_sink;
   }
 
   const AtomicLoadResult previous =
@@ -1478,7 +1478,7 @@ bool CommandProcessor::publish_queue_exception(uint32_t queue_id, uint32_t proce
   if (gpu_vm_->atomic_store(address_space, exception_status_va, sizeof(combined_status),
                             combined_status) != VmAccessOutcome::Complete)
     return false;
-  interrupt_sink.deliver(process_id, exception_event_id);
+  exception_event_sink.deliver(process_id, exception_event_id);
   if (!wait_for_ack)
     return true;
   const auto deadline = std::chrono::steady_clock::now() + ack_timeout;

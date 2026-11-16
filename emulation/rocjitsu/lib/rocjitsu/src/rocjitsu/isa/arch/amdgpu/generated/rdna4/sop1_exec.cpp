@@ -1244,6 +1244,7 @@ void SCvtF32I32Sop1::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t flags = wf.cu().arithmetic_flags();
   if (!(wf.fp_denorm_mode_f32() & 2u))
     flags |= RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS;
+  flags |= uint64_t(wf.fp_round_mode_f32()) << 24;
   const uint32_t input0 = registers.read_scalar(ssrc0);
   uint32_t result = 0;
   uint32_t causes = 0;
@@ -1269,6 +1270,7 @@ void SCvtF32U32Sop1::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t flags = wf.cu().arithmetic_flags();
   if (!(wf.fp_denorm_mode_f32() & 2u))
     flags |= RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS;
+  flags |= uint64_t(wf.fp_round_mode_f32()) << 24;
   const uint32_t input0 = registers.read_scalar(ssrc0);
   uint32_t result = 0;
   uint32_t causes = 0;
@@ -1348,6 +1350,7 @@ void SCvtF16F32Sop1::execute_impl(amdgpu::Wavefront &wf) {
     flags |= RJ_ARITH_FP_FLUSH_INPUT_DENORMALS;
   if (!(wf.fp_denorm_mode_f16_f64() & 2u))
     flags |= RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS;
+  flags |= uint64_t(wf.fp_round_mode_f16_f64()) << 24;
   const uint32_t input0 = registers.read_scalar(ssrc0);
   uint32_t result = 0;
   uint32_t causes = 0;

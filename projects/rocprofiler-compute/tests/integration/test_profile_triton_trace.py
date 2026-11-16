@@ -43,7 +43,8 @@ def triton_trace_profiled_workload(
             workload_dir,
             [
                 "--experimental",
-                "--triton-trace",
+                "--trace-ml-api",
+                "triton",
                 "--iteration-multiplexing",
             ],
             check_success=True,
@@ -79,7 +80,8 @@ def test_list_triton_operators_prints_call_tree(
     code = binary_handler_analyze_rocprof_compute([
         "--experimental",
         "analyze",
-        "--list-triton-operators",
+        "--list-operators",
+        "triton",
         "--path",
         triton_trace_profiled_workload,
     ])
@@ -96,8 +98,8 @@ def test_triton_operator_matmul_selects_kernels(
     code = binary_handler_analyze_rocprof_compute([
         "--experimental",
         "analyze",
-        "--triton-operator",
-        "*matmul*",
+        "--operator",
+        "triton:*matmul*",
         "--path",
         triton_trace_profiled_workload,
     ])

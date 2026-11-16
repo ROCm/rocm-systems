@@ -3313,13 +3313,14 @@ def _local_coverage_probe(
             apply = 'amdgpu::source_modifier::apply<amdgpu::fp_format::F32>'
             src0 = f'{apply}(a, 0, inst.inst_.abs, inst.inst_.neg)'
             src1 = f'{apply}(b, 1, inst.inst_.abs, inst.inst_.neg)'
-        functor = (
-            '[&](auto a, auto b) { return '
-            + convert.format(x=src0)
-            + ' | ('
-            + convert.format(x=src1)
-            + ' << 16); }'
+        low = convert.format(x=src0)
+        high = convert.format(x=src1)
+        packed = (
+            f'amdgpu::fp_mode::pack_f16_results({low}, {high}, wf.fp_denorm_mode_f16_f64())'
+            if arch_name == 'cdna5' and template_name == 'v_cvt_pk_f16_f32_vop3'
+            else f'{low} | ({high} << 16)'
         )
+        functor = f'[&](auto a, auto b) {{ return {packed}; }}'
         return call(2, False, 0, functor)
     if template_name == 'v_cvt_f32_bf16_vop1':
         return call(
