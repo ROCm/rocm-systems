@@ -441,12 +441,6 @@ rocprofsys_preinit_cache()
 }
 
 void
-rocprofsys_preinit_cpu_agents()
-{
-    cpu::query_cpu_agents();
-}
-
-void
 rocprofsys_preinit_hidden()
 {
     // run once and discard

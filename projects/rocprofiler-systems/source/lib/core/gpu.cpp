@@ -410,16 +410,12 @@ std::vector<bool>                    processors::jpeg_busy_supported    = {};
 std::vector<bool>                    processors::xgmi_supported         = {};
 std::vector<bool>                    processors::pcie_supported         = {};
 
-std::vector<amdsmi_processor_handle> processors::ainic_list        = {};
-std::uint32_t                        processors::total_ainic_count = 0;
-
 void
 get_processor_handles()
 {
     std::uint32_t socket_count;
     std::uint32_t processor_count;
     processors::processors_list.clear();
-    processors::ainic_list.clear();
 
     // Passing nullptr will return us the number of sockets available for read in this
     // system
@@ -454,7 +450,6 @@ get_processor_handles()
 #ifdef AINIC_SUPPORTED
             if(processor_type == AMDSMI_PROCESSOR_TYPE_AMD_NIC)
             {
-                processors::ainic_list.push_back(processor);
                 continue;
             }
 #endif  // AINIC_SUPPORTED
@@ -528,7 +523,6 @@ get_processor_handles()
         }
     }
     processors::total_processor_count = processors::processors_list.size();
-    processors::total_ainic_count     = processors::ainic_list.size();
 }
 
 bool
