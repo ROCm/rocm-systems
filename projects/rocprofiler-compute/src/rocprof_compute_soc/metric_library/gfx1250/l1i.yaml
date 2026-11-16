@@ -8,7 +8,10 @@ l1i.gl1_rd_bw:
   name: L1I-GL1 Read Bandwidth
   formula: 128 * SUM(SQC_TC_INST_REQ_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
-  description: Instruction Cache miss fill bandwidth from GL1.
+  description: >-
+    The number of bytes the instruction cache (L1I) requests from the GL1 cache, divided
+    by total duration. High values may indicate instruction cache pressure from large
+    kernels or frequent instruction cache misses.
 l1i.hit_rate_excl_dup:
   name: L1I Hit Rate (Excluding Duplicate Misses)
   formula: 100 * SUM(SQC_ICACHE_HITS_sum) / SUM(SQC_ICACHE_HITS_sum + SQC_ICACHE_MISSES_sum)
