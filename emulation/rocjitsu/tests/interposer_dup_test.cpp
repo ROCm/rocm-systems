@@ -3401,6 +3401,75 @@ TEST_F(InterposerPm4Test, UnsupportedGdsResetLeavesQueueUsable) {
   EXPECT_EQ(wait_output(monotonic_deadline_after(std::chrono::seconds(2))), 0);
 }
 
+TEST_F(InterposerPm4Test, AccumulatedSyncobjChunksRespectArrayBudget) {
+  constexpr uint32_t kChunkDwords = 1u << 20;
+  constexpr size_t kArrayBytes = 16 * 1024 * 1024;
+  constexpr size_t kMaxEntries = kArrayBytes / sizeof(drm_amdgpu_cs_chunk_syncobj);
+  std::vector<uint32_t> words(kChunkDwords, 0);
+  for (uint32_t id :
+       {AMDGPU_CHUNK_ID_SYNCOBJ_IN, AMDGPU_CHUNK_ID_SYNCOBJ_OUT,
+        AMDGPU_CHUNK_ID_SYNCOBJ_TIMELINE_WAIT, AMDGPU_CHUNK_ID_SYNCOBJ_TIMELINE_SIGNAL}) {
+    SCOPED_TRACE(id);
+    const bool timeline = id == AMDGPU_CHUNK_ID_SYNCOBJ_TIMELINE_WAIT ||
+                          id == AMDGPU_CHUNK_ID_SYNCOBJ_TIMELINE_SIGNAL;
+    const uint32_t entry_dwords = timeline ? sizeof(drm_amdgpu_cs_chunk_syncobj) / 4 : 1;
+    const size_t full_chunks = kMaxEntries / (kChunkDwords / entry_dwords);
+    drm_amdgpu_cs_chunk chunk{};
+    chunk.chunk_id = id;
+    chunk.length_dw = kChunkDwords;
+    chunk.chunk_data = reinterpret_cast<uint64_t>(words.data());
+    drm_amdgpu_cs_chunk extra = chunk;
+    extra.length_dw = entry_dwords;
+    const auto submit_chunks = [&](size_t count, bool extra_entry) {
+      std::vector<uint64_t> pointers(count, reinterpret_cast<uint64_t>(&chunk));
+      if (extra_entry)
+        pointers.push_back(reinterpret_cast<uint64_t>(&extra));
+      drm_amdgpu_cs cs{};
+      cs.in.ctx_id = context_;
+      cs.in.num_chunks = pointers.size();
+      cs.in.chunks = reinterpret_cast<uint64_t>(pointers.data());
+      EXPECT_EQ(ioctl(drm_, DRM_IOCTL_AMDGPU_CS, &cs), -1);
+      return errno;
+    };
+    // Without an IB, admitted arrays reach the ordinary submission validation.
+    EXPECT_EQ(submit_chunks(1, false), EINVAL);
+    EXPECT_EQ(submit_chunks(full_chunks, false), EINVAL);
+    EXPECT_EQ(submit_chunks(full_chunks, true), ENOMEM);
+    // Repeated chunks deliberately share a valid 4 MiB caller buffer.
+    EXPECT_EQ(submit_chunks(full_chunks + 1, false), ENOMEM);
+  }
+}
+
+TEST_F(InterposerPm4Test, SyncobjDependencyStorageRespectsArrayBudget) {
+  constexpr uint32_t kChunkDwords = 1u << 20;
+  std::vector<uint32_t> words(kChunkDwords, 0);
+  drm_amdgpu_cs_chunk input{};
+  input.chunk_id = AMDGPU_CHUNK_ID_SYNCOBJ_IN;
+  input.length_dw = kChunkDwords;
+  input.chunk_data = reinterpret_cast<uint64_t>(words.data());
+  drm_amdgpu_cs_chunk_ib ib{};
+  ib.va_start = kAddress;
+  ib.ib_bytes = 4;
+  ib.ip_type = AMDGPU_HW_IP_COMPUTE;
+  drm_amdgpu_cs_chunk ib_chunk{};
+  ib_chunk.chunk_id = AMDGPU_CHUNK_ID_IB;
+  ib_chunk.length_dw = sizeof(ib) / 4;
+  ib_chunk.chunk_data = reinterpret_cast<uint64_t>(&ib);
+  uint64_t pointers[] = {reinterpret_cast<uint64_t>(&input), reinterpret_cast<uint64_t>(&ib_chunk)};
+  drm_amdgpu_cs cs{};
+  cs.in.ctx_id = context_;
+  cs.in.num_chunks = 2;
+  cs.in.chunks = reinterpret_cast<uint64_t>(pointers);
+  // The 16 MiB parsed array fits, but its larger dependency records do not.
+  EXPECT_EQ(ioctl(drm_, DRM_IOCTL_AMDGPU_CS, &cs), -1);
+  EXPECT_EQ(errno, ENOMEM);
+
+  // A small admitted dependency reaches handle lookup instead.
+  input.length_dw = 1;
+  EXPECT_EQ(ioctl(drm_, DRM_IOCTL_AMDGPU_CS, &cs), -1);
+  EXPECT_EQ(errno, ENOENT);
+}
+
 TEST_F(InterposerPm4Test, BoHandleCountLimitFailsBeforeCopying) {
   // Linux's AMDGPU_BO_LIST_MAX_ENTRIES is 128K, independently of the
   // interposer's caller-array allocation budget.

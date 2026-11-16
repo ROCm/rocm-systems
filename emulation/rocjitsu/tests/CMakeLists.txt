@@ -2826,6 +2826,8 @@ rj_add_interposer_test_suite(
 )
 
 set(_rj_interposer_pm4_tests
+    AccumulatedSyncobjChunksRespectArrayBudget
+    SyncobjDependencyStorageRespectsArrayBudget
     BoHandleCountLimitFailsBeforeCopying
     UnsupportedGdsResetLeavesQueueUsable
     SparseReplacementPreservesResidentTail

@@ -2821,6 +2821,9 @@ public:
       case AMDGPU_CHUNK_ID_SYNCOBJ_IN:
       case AMDGPU_CHUNK_ID_SYNCOBJ_OUT: {
         auto &target = chunk.chunk_id == AMDGPU_CHUNK_ID_SYNCOBJ_IN ? inputs : outputs;
+        constexpr size_t kMaxEntries = kMaxDrmArrayBytes / sizeof(target[0]);
+        if (words.size() > kMaxEntries - target.size())
+          return -ENOMEM;
         for (uint32_t handle : words)
           target.push_back({handle, 0, 0});
         break;
@@ -2830,6 +2833,9 @@ public:
         if (bytes % sizeof(drm_amdgpu_cs_chunk_syncobj))
           return -EINVAL;
         auto &target = chunk.chunk_id == AMDGPU_CHUNK_ID_SYNCOBJ_TIMELINE_WAIT ? inputs : outputs;
+        constexpr size_t kMaxEntries = kMaxDrmArrayBytes / sizeof(target[0]);
+        if (bytes / sizeof(target[0]) > kMaxEntries - target.size())
+          return -ENOMEM;
         for (size_t offset = 0; offset < bytes; offset += sizeof(drm_amdgpu_cs_chunk_syncobj)) {
           drm_amdgpu_cs_chunk_syncobj object;
           std::memcpy(&object, reinterpret_cast<uint8_t *>(words.data()) + offset, sizeof(object));
@@ -2850,7 +2856,12 @@ public:
       std::shared_ptr<SyncobjFence> fence;
       uint64_t point;
     };
+    // Dependencies retain two shared pointers per input, so their storage can
+    // exceed the parsed syncobj array even when that array fits the budget.
+    if (inputs.size() > kMaxDrmArrayBytes / sizeof(Dependency))
+      return -ENOMEM;
     std::vector<Dependency> dependencies;
+    dependencies.reserve(inputs.size());
     auto finished = std::make_shared<SyncobjFence>();
     auto retained = std::make_shared<GemSubmissionLease>();
     retained->context = this;
