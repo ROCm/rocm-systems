@@ -9,7 +9,8 @@ sl1d.bw:
   name: sL1D Cache Bandwidth
   formula: 64 * SUM(SQC_DCACHE_REQ) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
-  description: The number of bytes looked up in the sL1D cache per unit time.
+  description: >-
+    The number of bytes looked up in the sL1D cache, divided by total duration.
   peak: $max_sclk / 1000 * 64 * $sqc_per_gpu
 sl1d.bw_util:
   name: sL1D Bandwidth Utilization
@@ -80,7 +81,8 @@ sl1d.l2_rd_bw:
   formula: 64 * SUM(SQC_TC_DATA_READ_REQ) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
-    Bandwidth of read requests from the sL1D cache to the L2 cache per unit time.
+    The number of bytes the sL1D cache requests from the L2 cache by read requests,
+    divided by total duration.
 sl1d.l2_rd_req:
   name: sL1D-L2 Read Requests
   formula: SUM(SQC_TC_DATA_READ_REQ) / SUM($denom)

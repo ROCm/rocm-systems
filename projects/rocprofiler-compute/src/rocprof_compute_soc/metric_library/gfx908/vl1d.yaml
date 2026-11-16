@@ -33,11 +33,11 @@ vl1d.cache_bw:
   formula: 64 * SUM(TCP_TOTAL_CACHE_ACCESSES_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
-    The number of bytes looked up in the vL1D cache as a result of VMEM instructions per
-    unit time. The number of bytes is calculated as the number of cache lines requested
-    multiplied by the cache line size. This value does not consider partial requests,
-    so, for example, if only a single value is requested in a cache line, the data
-    movement will still be counted as a full cache line.
+    The number of bytes looked up in the vL1D cache as a result of VMEM instructions,
+    divided by total duration. The number of bytes is calculated as the number of cache
+    lines requested multiplied by the cache line size. This value does not consider
+    partial requests, so, for example, if only a single value is requested in a cache
+    line, the data movement will still be counted as a full cache line.
   peak: $max_sclk / 1000 * 64 * $cu_per_gpu
 vl1d.cache_hits:
   name: vL1D Cache Hits
@@ -109,7 +109,8 @@ vl1d.l2_atomic_bw:
   formula: 64 * SUM(TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
-    Bandwidth of atomic requests from the vL1D cache to the L2 cache per unit time.
+    The number of bytes of atomic requests from the vL1D cache to the L2 cache, divided
+    by total duration.
 vl1d.l2_atomic_req:
   name: vL1D-L2 Atomic Requests
   formula: SUM(TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum) / SUM($denom)
@@ -132,7 +133,8 @@ vl1d.l2_rd_bw:
   formula: 128 * SUM(TCP_TCC_READ_REQ_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
-    Bandwidth of read requests from the vL1D cache to the L2 cache per unit time.
+    The number of bytes of read requests from the vL1D cache to the L2 cache, divided by
+    total duration.
 vl1d.l2_rd_lat:
   name: vL1D-L2 Read Latency
   formula: SUM(TCP_TCC_READ_REQ_LATENCY_sum) / SUM(TCP_TCC_READ_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum)
@@ -153,7 +155,8 @@ vl1d.l2_wr_bw:
   formula: 64 * SUM(TCP_TCC_WRITE_REQ_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
-    Bandwidth of write requests from the vL1D cache to the L2 cache per unit time.
+    The number of bytes of write requests from the vL1D cache to the L2 cache, divided
+    by total duration.
 vl1d.l2_wr_lat:
   name: vL1D-L2 Write Latency
   formula: SUM(TCP_TCC_WRITE_REQ_LATENCY_sum) / SUM(TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum)
