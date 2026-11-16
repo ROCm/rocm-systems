@@ -11,6 +11,8 @@ Sample JAX workload for rocprof-compute --trace-ml-api jax.
         -n jax_workload -- python3 ./jax_workload.py
 """
 
+from functools import partial
+
 import jax
 import jax.numpy as jnp
 from jax.sharding import Mesh, NamedSharding, PartitionSpec
@@ -55,16 +57,51 @@ mapped.lower(xs)
 mapped(xs)
 
 
+class PmapWorker:
+    @partial(jax.pmap, static_broadcasted_argnums=(0,))
+    def step(self, v):
+        return v * v
+
+
+PmapWorker().step(xs)
+
+mesh = Mesh(jax.devices(), ("x",))
+sharded_x = jax.device_put(x, NamedSharding(mesh, PartitionSpec("x", None)))
+
+
 @jax.jit
 def shard_map_square(v):
     return jax.shard_map(
         lambda operand: operand * operand,
-        mesh=Mesh(jax.devices(), ("x",)),
+        mesh=mesh,
         in_specs=PartitionSpec("x", None),
         out_specs=PartitionSpec("x", None),
     )(v)
 
 
-mesh = Mesh(jax.devices(), ("x",))
-sharded_x = jax.device_put(x, NamedSharding(mesh, PartitionSpec("x", None)))
 shard_map_square(sharded_x)
+
+
+@jax.shard_map(
+    mesh=mesh,
+    in_specs=PartitionSpec("x", None),
+    out_specs=PartitionSpec("x", None),
+)
+def shard_map_cube(v):
+    return v * v * v
+
+
+shard_map_cube(sharded_x)
+
+
+@jax.jit
+@jax.shard_map(
+    mesh=mesh,
+    in_specs=PartitionSpec("x", None),
+    out_specs=PartitionSpec("x", None),
+)
+def shard_map_inc(v):
+    return v + 1
+
+
+shard_map_inc(sharded_x)

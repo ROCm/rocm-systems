@@ -2,7 +2,6 @@
 # SPDX-License-Identifier:  MIT
 
 # Keep in sync with its copies under projects/rocprofiler-compute/:
-#   tests/jax_workload.py
 #   skills/rocprof-compute-torch-trace/evals/samples/jax_workload.py
 
 """

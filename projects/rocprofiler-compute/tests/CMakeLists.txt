@@ -137,3 +137,12 @@ add_custom_target(
         ${CMAKE_SOURCE_DIR}/tests/torch_triton_net.py
     COMMENT "Copying torch_triton_net.py to tests directory"
 )
+
+add_custom_target(
+    jax_workload
+    ALL
+    COMMAND
+        ${CMAKE_COMMAND} -E copy ${CMAKE_SOURCE_DIR}/sample/jax_workload.py
+        ${CMAKE_SOURCE_DIR}/tests/jax_workload.py
+    COMMENT "Copying jax_workload.py to tests directory"
+)
