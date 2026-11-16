@@ -1969,11 +1969,20 @@ TEST(ExecutionPluginTest, MemoryPipelineFlatCountersFollowRoutedRequests) {
           const auto *race_state =
               static_cast<RaceWavefrontState *>(wf->plugin_state(race->slot_index()));
           const auto &events = race_state->race_state->getDetector()->events();
-          ASSERT_EQ(events.totalAllocated(), counters.empty() ? 0 : 1);
-          if (!counters.empty())
-            for (const auto counter : {vm_counter, ds_counter, WaitCounterType::EXPCNT})
-              EXPECT_EQ(events.pendingCounterIncrement(EventId{0}, counter),
-                        std::ranges::count(counters, counter));
+          const bool both_domains = arch == "cdna5";
+          const bool mixed = lds_lanes && (exec & ~lds_lanes);
+          ASSERT_EQ(events.totalAllocated(), both_domains       ? (mixed ? 1 : 2)
+                                             : counters.empty() ? 0
+                                                                : 1);
+          for (const auto counter : {vm_counter, ds_counter, WaitCounterType::EXPCNT}) {
+            unsigned pending = 0;
+            for (int event = 0; event < events.totalAllocated(); ++event)
+              pending += events.pendingCounterIncrement(EventId{event}, counter);
+            const auto expected = both_domains && counter != WaitCounterType::EXPCNT
+                                      ? 1
+                                      : std::ranges::count(counters, counter);
+            EXPECT_EQ(pending, expected);
+          }
         }
       }
     }

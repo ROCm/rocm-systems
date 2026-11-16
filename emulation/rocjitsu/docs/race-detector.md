@@ -360,15 +360,11 @@ wait can complete a prefix. That does not prove that an overlapping tensor load
 and store access LDS in order before the wait. Their LDS accesses are therefore
 checked as unordered.
 
-Functional counter acquisition and the core memory-wait checker use the selected
-memory domains. So does the race detector on the pre-GFX12 capacity targets
-(CDNA1 through CDNA4 and GFX11): it applies FLAT capacity constraints after
-addresses are resolved, because before the address operands are read, neither
-domain is guaranteed to need a counter slot. On those targets, a full LDS
-counter followed by a global-only FLAT therefore cannot prove an older LDS
-result complete. On gfx1250, every FLAT instruction increments both DScnt and
-LOADcnt or STOREcnt when it issues (CDNA5 ISA 5.7.1.3), and the race detector
-counts it on both; see the gfx1250 capacity model below.
+On gfx1250, both the core register checker and the plugin's LDS analysis count
+FLAT on DScnt and LOADcnt or STOREcnt at issue (CDNA5 ISA 5.7.1.3), including
+slots in a domain with no requests. Other targets apply FLAT capacity only after
+addresses select a domain. Register results depend only on the counter for each
+returned lane's address. Functional counter acquisition remains routing-specific.
 
 Race-analysis events have three states:
 
@@ -393,14 +389,15 @@ separate.
 
 The adapter and memory pipeline read the same `MemoryIssueInfo` selected by
 routing; the plugin does not infer FLAT's counter domains from addresses again.
+On gfx1250 it also retains the unused decoded domains as counter-only slots.
 `WaitCounterPolicy` decodes explicit waits and removes all-ones no-wait fields.
 The race core receives only the remaining numeric bounds, not ISA encodings.
 A zero wait completes every event on its selected counter. A nonzero wait retires
 only the provable prefix within each independently ordered completion class.
 Sharing a counter does not make scalar memory, GDS, and indexed LDS one FIFO.
 
-The detector's persistent counter accounting is limited to operations routed
-through rocJITsu's memory pipelines. A narrow `s_sendmsg*` fallback applies
+The detector retains memory-pipeline and tensor-DMA counter positions, plus
+gfx1250 cache-operation and LDS lane-permute slots. A narrow `s_sendmsg*` fallback applies
 issue-time pressure: one LGKMCNT token on the pre-GFX12 capacity targets (CDNA1
 through CDNA4 and GFX11), and on gfx1250 one KMcnt token, or two for
 `s_sendmsg_rtn_*`, which also counts its returned data (CDNA5 ISA 5.4). On
@@ -415,28 +412,7 @@ treated as complete message, timestamp or barrier modeling. Leaving out a
 counter's operations only makes its capacity model conservative: the detector
 can miss a completion, never retire too much.
 
-### LDS footprints
-
-Memory routing supplies actual lane masks and addresses. Global/scratch-only
-issues contribute counters without LDS intervals. Mixed global/LDS FLAT issues
-contribute one event, with both obligations and only the ordinary LDS lanes'
-intervals. The plugin conservatively keeps that whole event pending until both
-domains complete; unlike the core's register dependencies, its LDS footprint
-does not yet have independent per-domain readiness.
-
-LDS ranges are bounded by the CU backing capacity. RDNA4 FLAT additionally clips
-to the captured workgroup allocation, keeping only complete memory elements.
-Its bound is the modeled `lds_base + lds_size`, including scheduler rounding,
-not a new target-allocation model. Tensor DMA observations instead describe
-byte ranges and can include a partial element at the allocation boundary.
-Rejected LDS addresses record no intervals but retain their counter participation.
-DDS has no emulator backing and faults before execution.
-
-Conflict checks use counts per 16-byte chunk before scanning overlapping
-intervals. Read and write histories are separate: a read checks prior writes
-(RAW), and a write checks prior reads (WAR). Chunks containing only ordered DS
-accesses from the same wave can bypass the scan. Cross-wave evidence remains
-until synchronization; LDS write/write conflicts are not currently checked.
+### Counter capacity
 
 Counter-capacity backpressure is modeled for the VMCNT and LGKMCNT domains on
 CDNA1 through CDNA4 and GFX11. CDNA uses a four-bit LGKMCNT and six-bit VMCNT;
@@ -489,6 +465,29 @@ domain its addresses did not use is recorded as an event with no registers or
 LDS bytes, in order with that domain's other operations, so later capacity
 checks and partial waits count it as hardware does. The FLAT's own result still
 depends only on the domains its addresses used.
+
+### LDS footprints
+
+Memory routing supplies actual lane masks and addresses. Global/scratch-only
+issues contribute counters without LDS intervals. Mixed global/LDS FLAT issues
+contribute one event, with both obligations and only the ordinary LDS lanes'
+intervals. The plugin conservatively keeps that whole event pending until both
+domains complete; unlike the core's register dependencies, its LDS footprint
+does not yet have independent per-domain readiness.
+
+LDS ranges are bounded by the CU backing capacity. RDNA4 FLAT additionally clips
+to the captured workgroup allocation, keeping only complete memory elements.
+Its bound is the modeled `lds_base + lds_size`, including scheduler rounding,
+not a new target-allocation model. Tensor DMA observations instead describe
+byte ranges and can include a partial element at the allocation boundary.
+Rejected LDS addresses record no intervals but retain their counter participation.
+DDS has no emulator backing and faults before execution.
+
+Conflict checks use counts per 16-byte chunk before scanning overlapping
+intervals. Read and write histories are separate: a read checks prior writes
+(RAW), and a write checks prior reads (WAR). Chunks containing only ordered DS
+accesses from the same wave can bypass the scan. Cross-wave evidence remains
+until synchronization; LDS write/write conflicts are not currently checked.
 
 For a DS or FLAT instruction, the plugin first merges the active lanes' byte
 ranges into intervals and checks the chunk counts under them. When no chunk can
@@ -654,8 +653,9 @@ this source tree. The original
   go unreported.
 
 - **Incomplete LDS counter occupancy**: pipeline memory issues and tensor DMA
-  are retained. A narrow `s_sendmsg*` fallback applies issue-time LGKMCNT
-  pressure, but does not retain message occupancy. Inline timestamp and other
+  are retained. The plugin also retains gfx1250 cache-operation and LDS lane-permute slots.
+  A narrow `s_sendmsg*` fallback applies issue-time LGKMCNT or KMcnt pressure,
+  but does not retain message occupancy. Inline timestamp and other
   non-pipeline producers are not fully represented. Do not infer complete LDS
   partial-wait coverage from the core's broader register-producer coverage.
 

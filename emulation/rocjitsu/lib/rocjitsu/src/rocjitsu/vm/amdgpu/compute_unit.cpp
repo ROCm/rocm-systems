@@ -1774,6 +1774,8 @@ void ComputeUnitCore::track_memory_wait(Instruction &inst, Wavefront &wf) {
       const auto counter = scalar                                     ? smem_wait_counter(model)
                            : completion == MemoryCompletionClass::LDS ? WaitCounterKind::Ds
                                                                       : WaitCounterKind::Load;
+      if (!MemoryWaitScoreboard::counts_memory_counter(inst, wf, counter))
+        return;
       const auto kind = scalar ? WaitEventKind::Smem
                         : completion == MemoryCompletionClass::LDS
                             ? WaitEventKind::Ds
@@ -1854,6 +1856,7 @@ void ComputeUnitCore::track_memory_wait(Instruction &inst, Wavefront &wf) {
   // Source checks precede this pure FLAT domain calculation. Resolve admission,
   // overwrite ordering and result readiness before execution.
   const bool flat = inst.mnemonic().starts_with("flat_");
+  const bool flat_both_counters = flat && config_.arch == ROCJITSU_CODE_ARCH_CDNA5;
   const auto planned_flat =
       flat ? MemoryWaitScoreboard::flat_lanes(
                  inst, wf,
@@ -1871,7 +1874,8 @@ void ComputeUnitCore::track_memory_wait(Instruction &inst, Wavefront &wf) {
                     counter == WaitCounterKind::Ds);
   };
   for (const auto &event : classified) {
-    if (!is_flat_memory_counter(event.counter) || !flat_counter_lanes(event.counter))
+    if (!is_flat_memory_counter(event.counter) || flat_both_counters ||
+        !flat_counter_lanes(event.counter))
       continue;
     const auto maximum = WaitCounterPolicy::maximum_dependency_wait(config_.arch, event.counter);
     if (maximum.succeeded())
@@ -1989,7 +1993,9 @@ void ComputeUnitCore::track_memory_wait(Instruction &inst, Wavefront &wf) {
   std::optional<WaitCounterKind> xcnt_completion;
   for (const auto &event : classified) {
     const auto counter = event.counter;
-    if (is_flat_memory_counter(counter) && !flat_counter_lanes(counter))
+    if (!MemoryWaitScoreboard::counts_memory_counter(inst, wf, counter))
+      continue;
+    if (is_flat_memory_counter(counter) && !flat_both_counters && !flat_counter_lanes(counter))
       continue;
     if (counter == WaitCounterKind::X) {
       if (track_xcnt && (xscalar || vector_lanes || scoreboard.outstanding(counter))) {
@@ -2712,7 +2718,7 @@ ComputeUnitCore::issue_instruction_impl(Wavefront *active, MaybeAsyncWindow<Enab
     if (inst->is_waitcnt() || inst->has_embedded_memory_wait() || inst->is_memory_wait_producer() ||
         (config_.arch == ROCJITSU_CODE_ARCH_CDNA5 &&
          waitcheck_detail::WaitcheckTarget::is_xcnt_drain(*inst)))
-      wait_state->before(*inst, config_.arch);
+      wait_state->before(*inst, config_.arch, active);
     bind_memory_wait(*wait_state, *inst, *active);
   }
   const bool wait_for_buffer_lanes =

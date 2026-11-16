@@ -373,22 +373,19 @@ TEST(RaceDetector, CounterCapacity_DirectToLdsRemainsPendingBelowVmcntCapacity) 
 
 namespace {
 
-constexpr int kGfx1250ScalarRegisters = 64;
-
 int gfx1250Capacity(amdgpu::WaitCounterType counter) {
   return counterCapacitiesForArch(ROCJITSU_CODE_ARCH_CDNA5).split(counter);
 }
 
 RaceTestBuilder makeGfx1250Test(int numWaves = 1) {
-  return RaceTestBuilder(numWaves, /*vgprs=*/8, /*sgprs=*/kGfx1250ScalarRegisters,
-                         /*waveSize=*/32, Dim3d(0),
+  return RaceTestBuilder(numWaves, /*waveSize=*/32, Dim3d(0),
                          counterCapacitiesForArch(ROCJITSU_CODE_ARCH_CDNA5));
 }
 
 void issueCounterOps(RaceTestBuilder &builder, int count, amdgpu::WaitCounterType counter,
                      MemoryOrderClass order) {
   for (int index = 0; index < count; ++index)
-    builder.counterOp(kWave, counter, order);
+    builder.counterIssue(kWave, counter, order);
 }
 
 EventStatus statusOf(const RaceTestBuilder &builder, int event) {
@@ -430,7 +427,7 @@ TEST_P(Gfx1250SplitCounterCapacityTest, OverflowRetiresOldestPrefix) {
     issue(builder, capacity() + overflow);
 
     for (int event = 0; event < overflow; ++event)
-      EXPECT_EQ(statusOf(builder, event), EventStatus::WAVE_COMPLETE) << "event " << event;
+      EXPECT_EQ(statusOf(builder, event), EventStatus::RETIRED) << "event " << event;
     EXPECT_EQ(statusOf(builder, overflow), EventStatus::ACTIVE);
   }
 }
@@ -459,8 +456,8 @@ TEST(RaceDetector, Gfx1250CounterCapacity_CombinedCounterFailsLoudly) {
   for (const auto counter : {amdgpu::WaitCounterType::VMCNT, amdgpu::WaitCounterType::LGKMCNT}) {
     SCOPED_TRACE(static_cast<int>(counter));
     RaceDetector detector(/*nWaves=*/
-                          1, /*vgprCount=*/8, /*sgprCount=*/kGfx1250ScalarRegisters, Dim3d(0),
-                          [](RaceViolation) {}, counterCapacitiesForArch(ROCJITSU_CODE_ARCH_CDNA5),
+                          1, Dim3d(0), [](RaceViolation) {},
+                          counterCapacitiesForArch(ROCJITSU_CODE_ARCH_CDNA5),
                           /*ldsSizeBytes=*/64 * 1024);
     EXPECT_TRUE(detector.getWaveRaceState(0).prepareForCounterIncrement(counter).failed());
     EXPECT_TRUE(detector.getWaveRaceState(0).getWaveMemoryEvents().empty());
@@ -544,9 +541,9 @@ TEST(RaceDetector, Gfx1250CounterCapacity_TwoTokenEventsFillKmcnt) {
   const int events = capacity / kTokens;
   auto builder = makeGfx1250Test();
   for (int index = 0; index <= events; ++index)
-    builder.counterOp(kWave, amdgpu::WaitCounterType::KMCNT, MemoryOrderClass::VMEM, kTokens);
+    builder.counterIssue(kWave, amdgpu::WaitCounterType::KMCNT, MemoryOrderClass::VMEM, kTokens);
 
-  EXPECT_EQ(statusOf(builder, 0), EventStatus::WAVE_COMPLETE);
+  EXPECT_EQ(statusOf(builder, 0), EventStatus::RETIRED);
   EXPECT_EQ(statusOf(builder, 1), EventStatus::ACTIVE);
 }
 
@@ -556,10 +553,9 @@ TEST(RaceDetector, Gfx1250CounterCapacity_FullKmcntDoesNotCompleteScalarLoads) {
   const int capacity = gfx1250Capacity(amdgpu::WaitCounterType::KMCNT);
   auto builder = makeGfx1250Test();
   for (int sgpr = 0; sgpr <= capacity; ++sgpr)
-    builder.scalarLoad(kWave, sgpr, /*numRegs=*/1, amdgpu::WaitCounterType::KMCNT);
+    builder.counterIssue(kWave, amdgpu::WaitCounterType::KMCNT, MemoryOrderClass::UNORDERED);
 
-  builder.checkSgprRead(kWave, /*reg=*/0);
-  EXPECT_TRUE(builder.hasSgprRace(0));
+  EXPECT_EQ(statusOf(builder, 0), EventStatus::ACTIVE);
 }
 
 // Larger scalar loads add two KMcnt tokens each.
@@ -568,10 +564,9 @@ TEST(RaceDetector, Gfx1250CounterCapacity_FullKmcntDoesNotCompleteWideScalarLoad
   auto builder = makeGfx1250Test();
   const int wideLoads = capacity / 2 + 1;
   for (int load = 0; load < wideLoads; ++load)
-    builder.scalarLoad(kWave, /*sgprBase=*/2 * load, /*numRegs=*/2, amdgpu::WaitCounterType::KMCNT);
+    builder.counterIssue(kWave, amdgpu::WaitCounterType::KMCNT, MemoryOrderClass::UNORDERED, 2);
 
-  builder.checkSgprRead(kWave, /*reg=*/0, /*width=*/2);
-  EXPECT_TRUE(builder.hasSgprRace(0));
+  EXPECT_EQ(statusOf(builder, 0), EventStatus::ACTIVE);
 }
 
 TEST(RaceDetector, Gfx1250CounterCapacity_SplitCountersDoNotShareCapacity) {
@@ -599,7 +594,7 @@ TEST(RaceDetector, Gfx1250CounterCapacity_SplitCountersDoNotShareCapacity) {
     auto builder = makeGfx1250Test();
     issueCounterOps(builder, gfx1250Capacity(testCase.fullCounter), testCase.fullCounter,
                     testCase.fullOrder);
-    builder.counterOp(kWave, testCase.otherCounter, testCase.otherOrder);
+    builder.counterIssue(kWave, testCase.otherCounter, testCase.otherOrder);
 
     EXPECT_EQ(statusOf(builder, 0), EventStatus::ACTIVE);
   }
@@ -616,7 +611,7 @@ TEST(RaceDetector, Gfx1250CounterCapacity_MixedAsyncClassesRetireNothing) {
   issueCounterOps(builder, loads, amdgpu::WaitCounterType::ASYNCCNT, MemoryOrderClass::ASYNC_LOAD);
   issueCounterOps(builder, stores, amdgpu::WaitCounterType::ASYNCCNT,
                   MemoryOrderClass::ASYNC_STORE);
-  builder.counterOp(kWave, amdgpu::WaitCounterType::ASYNCCNT, MemoryOrderClass::ASYNC_LOAD);
+  builder.counterIssue(kWave, amdgpu::WaitCounterType::ASYNCCNT, MemoryOrderClass::ASYNC_LOAD);
 
   EXPECT_EQ(statusOf(builder, 0), EventStatus::ACTIVE);
   EXPECT_EQ(statusOf(builder, loads), EventStatus::ACTIVE);
@@ -627,9 +622,9 @@ TEST(RaceDetector, Gfx1250CounterCapacity_AsyncStoreIssueRetiresOldestAsyncLoad)
   auto builder = makeGfx1250Test();
   issueCounterOps(builder, capacity, amdgpu::WaitCounterType::ASYNCCNT,
                   MemoryOrderClass::ASYNC_LOAD);
-  builder.counterOp(kWave, amdgpu::WaitCounterType::ASYNCCNT, MemoryOrderClass::ASYNC_STORE);
+  builder.counterIssue(kWave, amdgpu::WaitCounterType::ASYNCCNT, MemoryOrderClass::ASYNC_STORE);
 
-  EXPECT_EQ(statusOf(builder, 0), EventStatus::WAVE_COMPLETE);
+  EXPECT_EQ(statusOf(builder, 0), EventStatus::RETIRED);
   EXPECT_EQ(statusOf(builder, 1), EventStatus::ACTIVE);
 }
 
@@ -638,9 +633,9 @@ TEST(RaceDetector, Gfx1250CounterCapacity_AsyncLoadIssueRetiresOldestAsyncStore)
   auto builder = makeGfx1250Test();
   issueCounterOps(builder, capacity, amdgpu::WaitCounterType::ASYNCCNT,
                   MemoryOrderClass::ASYNC_STORE);
-  builder.counterOp(kWave, amdgpu::WaitCounterType::ASYNCCNT, MemoryOrderClass::ASYNC_LOAD);
+  builder.counterIssue(kWave, amdgpu::WaitCounterType::ASYNCCNT, MemoryOrderClass::ASYNC_LOAD);
 
-  EXPECT_EQ(statusOf(builder, 0), EventStatus::WAVE_COMPLETE);
+  EXPECT_EQ(statusOf(builder, 0), EventStatus::RETIRED);
   EXPECT_EQ(statusOf(builder, 1), EventStatus::ACTIVE);
 }
 
@@ -651,8 +646,7 @@ TEST(RaceDetector, Gfx1250CounterCapacity_TensorLoadsAndStoresShareOneClass) {
   const int capacity = gfx1250Capacity(amdgpu::WaitCounterType::TENSORCNT);
   auto builder = makeGfx1250Test();
   for (int index = 0; index <= capacity; ++index) {
-    const auto type =
-        index % 2 == 0 ? MemoryEventType::GLOBAL_TO_LDS : MemoryEventType::LDS_TO_GLOBAL;
+    const auto type = index % 2 == 0 ? LdsAccess::Write : LdsAccess::Read;
     builder.counterLdsTransfer(
         kWave, amdgpu::WaitCounterType::TENSORCNT, MemoryOrderClass::TENSOR, type,
         {{.address = static_cast<uint32_t>(index * kDwordBytes), .bytes = kDwordBytes}});
@@ -671,9 +665,9 @@ TEST(RaceDetector, Gfx1250CounterCapacity_PartialWaitAfterCapacityRetiresNextEve
   // fewer retires events 1 and 2.
   builder.waitCounter(kWave, amdgpu::WaitCounterType::LOADCNT, capacity - 2);
 
-  EXPECT_EQ(statusOf(builder, 0), EventStatus::WAVE_COMPLETE);
-  EXPECT_EQ(statusOf(builder, 1), EventStatus::WAVE_COMPLETE);
-  EXPECT_EQ(statusOf(builder, 2), EventStatus::WAVE_COMPLETE);
+  EXPECT_EQ(statusOf(builder, 0), EventStatus::RETIRED);
+  EXPECT_EQ(statusOf(builder, 1), EventStatus::RETIRED);
+  EXPECT_EQ(statusOf(builder, 2), EventStatus::RETIRED);
   EXPECT_EQ(statusOf(builder, 3), EventStatus::ACTIVE);
 }
 
@@ -713,7 +707,7 @@ TEST(RaceDetector, CounterCapacity_LegacyTargetsDoNotModelGfx1250Counters) {
   for (const auto counter :
        {amdgpu::WaitCounterType::ASYNCCNT, amdgpu::WaitCounterType::TENSORCNT}) {
     SCOPED_TRACE(static_cast<int>(counter));
-    RaceTestBuilder builder(/*numWaves=*/1, /*vgprs=*/8, /*sgprs=*/kScalarRegisters);
+    RaceTestBuilder builder(/*numWaves=*/1);
     issueCounterOps(builder, kVmcntCapacity + 1, counter,
                     counter == amdgpu::WaitCounterType::ASYNCCNT ? MemoryOrderClass::ASYNC_LOAD
                                                                  : MemoryOrderClass::TENSOR);

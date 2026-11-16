@@ -1709,7 +1709,7 @@ TEST(MemoryWaitExecutionTest, MessageResultsCheckM0AndOnlyConsumedExecWords) {
   }
 }
 
-TEST(MemoryWaitExecutionTest, CounterOnlyCacheOperationDoesNotProveOlderLoadComplete) {
+TEST(MemoryWaitExecutionTest, CounterOnlyCacheOperationSharesLoadCompletionOrder) {
   using namespace rocjitsu::amdhsa;
   for (bool zero_exec : {false, true}) {
     for (unsigned threshold : {0u, 1u, 2u}) {
@@ -1742,9 +1742,8 @@ TEST(MemoryWaitExecutionTest, CounterOnlyCacheOperationDoesNotProveOlderLoadComp
       step_until_halted(*sim.engine, *sim.cu());
       ASSERT_EQ(sim.snapshot->snapshots().size(), 1u);
       EXPECT_EQ(sim.snapshot->snapshots().front().vgpr(3, 0), 0x12345678u);
-      // Invalidation contributes to LOADcnt even with zero EXEC, but does not
-      // share the load's completion order. Only a zero wait proves it ready.
-      EXPECT_EQ(sim.cu()->memory_wait_diagnostic_count(), threshold != 0 ? 1u : 0u);
+      // Invalidation takes an ordered LOADcnt slot even with zero EXEC.
+      EXPECT_EQ(sim.cu()->memory_wait_diagnostic_count(), threshold > 1 ? 1u : 0u);
     }
   }
 }
@@ -1944,8 +1943,10 @@ TEST(MemoryWaitExecutionTest, FlatLanesHaveSeparateDependenciesAndCounterPartici
         ASSERT_NO_FATAL_FAILURE(inst.initialize(2));
         cu->track_memory_wait(inst, *wf);
         auto &state = *wf->memory_wait_scoreboard();
-        EXPECT_EQ(state.outstanding(WaitCounterKind::Load), shared_lanes != 0b1111 ? 1u : 0u);
-        EXPECT_EQ(state.outstanding(WaitCounterKind::Ds), shared_lanes != 0 ? 1u : 0u);
+        EXPECT_EQ(state.outstanding(WaitCounterKind::Load),
+                  arch == ROCJITSU_CODE_ARCH_CDNA5 || shared_lanes != 0b1111 ? 1u : 0u);
+        EXPECT_EQ(state.outstanding(WaitCounterKind::Ds),
+                  arch == ROCJITSU_CODE_ARCH_CDNA5 || shared_lanes != 0 ? 1u : 0u);
         std::vector<MemoryWaitScoreboard::Hazard> hazards;
         state.bind(0x200, &hazards, [](void *p, const auto &hazard) {
           static_cast<decltype(hazards) *>(p)->push_back(hazard);
@@ -1959,7 +1960,8 @@ TEST(MemoryWaitExecutionTest, FlatLanesHaveSeparateDependenciesAndCounterPartici
         state.wait(waited, 0);
         state.access(result, ready_lanes, 0xf, false);
         EXPECT_TRUE(hazards.empty());
-        EXPECT_EQ(state.outstanding(pending), pending_lanes ? 1u : 0u);
+        EXPECT_EQ(state.outstanding(pending),
+                  arch == ROCJITSU_CODE_ARCH_CDNA5 || pending_lanes ? 1u : 0u);
         state.access(result, pending_lanes, 0xf, false);
         ASSERT_EQ(hazards.size(), pending_lanes ? 1u : 0u);
         if (pending_lanes) {
@@ -2102,9 +2104,10 @@ TEST(MemoryWaitExecutionTest, DecodedFlatPlansMatchExecutedAddressesBeforeAnyReg
           state.check_instruction(inst, *wf);
           cu->track_memory_wait(inst, *wf);
           EXPECT_EQ(observed->reads, 0u);
-          EXPECT_EQ(state.outstanding(WaitCounterKind::Ds), planned.shared ? 1u : 0u);
+          EXPECT_EQ(state.outstanding(WaitCounterKind::Ds),
+                    (cdna5 && exec) || planned.shared ? 1u : 0u);
           EXPECT_EQ(state.outstanding(WaitCounterKind::Load),
-                    planned.requests & ~planned.shared ? 1u : 0u);
+                    (cdna5 && exec) || (planned.requests & ~planned.shared) ? 1u : 0u);
           inst.execute(inst, wf);
           ASSERT_NE(inst.data(), nullptr);
           const auto &data = *inst.data_as<VectorMemState>();
@@ -2176,7 +2179,7 @@ TEST(MemoryWaitExecutionTest, FlatLdsWaitUsesTheWavesAperture) {
     auto &state = wf->ensure_memory_wait_scoreboard();
     cu->track_memory_wait(*decoded.value(), *wf);
     EXPECT_EQ(state.outstanding(WaitCounterKind::Ds), 1u);
-    EXPECT_EQ(state.outstanding(WaitCounterKind::Load), 0u);
+    EXPECT_EQ(state.outstanding(WaitCounterKind::Load), 1u);
     std::vector<MemoryWaitScoreboard::Hazard> hazards;
     state.bind(0x200, &hazards, [](void *p, const auto &hazard) {
       static_cast<decltype(hazards) *>(p)->push_back(hazard);
@@ -2216,7 +2219,7 @@ struct MemoryWaitOrderingTest : ::testing::Test {
   }
   void track(Instruction &inst) {
     auto &state = wf->ensure_memory_wait_scoreboard();
-    state.before(inst, cu->arch());
+    state.before(inst, cu->arch(), wf);
     state.check_instruction(inst, *wf);
     cu->track_memory_wait(inst, *wf);
     wf->pc += 8;
@@ -2651,10 +2654,10 @@ TEST_F(MemoryWaitOrderingTest, FlatAndGlobalStoresShareCompletionOrderForReplay)
         ASSERT_EQ(state.outstanding(WaitCounterKind::X), 2u);
         state.wait(WaitCounterKind::Store, threshold);
         state.access({RegClass::VGPR, 0, 2}, 1, 0xf, true);
-        // The runtime counts only routed domains: an LDS-only FLAT contributes
-        // no Store position. This pins that existing model, not the ISA's
-        // unconditional dual-counter issue rule.
-        const bool translated = threshold == 0 || (threshold == 1 && shared_lanes != 0b1111);
+        // The unused STOREcnt slot can complete an older global store, but
+        // the LDS-only FLAT's own replay sources still depend on DScnt.
+        const bool translated =
+            threshold == 0 || (threshold == 1 && (!flat_first || shared_lanes != 0b1111));
         EXPECT_EQ(cu->xcnt_diagnostic_count(), translated ? 0u : 1u);
       }
 }

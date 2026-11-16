@@ -1159,4 +1159,425 @@ TEST(RegisterHazardPluginTest, GroupHonorsHazardInterestAndWaveSubscription) {
   EXPECT_EQ(probes[2]->hazards.size(), 1u);
 }
 
+// Counter-capacity register probes run through AQL dispatch so admission,
+// dependency tracking and plugin reporting use the same path as applications.
+class Gfx1250RegisterCapacityTest : public ::testing::Test {
+protected:
+  static constexpr int kCapacity = 63;
+  static constexpr uint64_t kGlobalAddress = 0x8000;
+  static constexpr uint64_t kSharedBase = 0x100000000;
+  DiagnosticHarness harness;
+  Program program;
+  virtual bool legacy() const { return false; }
+
+  void SetUp() override {
+    ASSERT_NO_FATAL_FAILURE(harness.initialize(false, false, legacy() ? "cdna4" : "cdna5"));
+    harness.fixture.mem->write32(kGlobalAddress, 0x12345678);
+    harness.probe->dispatch = [&](std::span<Wavefront *> waves) {
+      for (auto *wave : waves) {
+        wave->set_exec(1);
+        wave->set_apertures(kSharedBase, kSharedBase + 0xffff, 0, 0, true);
+        auto *cu = harness.fixture.cu();
+        for (uint32_t lane = 0; lane < 2; ++lane) {
+          for (const auto [reg, address] :
+               {std::pair{16u, kGlobalAddress}, std::pair{18u, kSharedBase + 128},
+                std::pair{20u, lane ? kSharedBase + 128 : kGlobalAddress}}) {
+            cu->write_vgpr(wave->vgpr_alloc().base + reg, lane, uint32_t(address));
+            cu->write_vgpr(wave->vgpr_alloc().base + reg + 1, lane, uint32_t(address >> 32));
+          }
+          cu->write_vgpr(wave->vgpr_alloc().base + 22, lane, 0);
+          cu->write_vgpr(wave->vgpr_alloc().base + 24, lane, 0);
+        }
+        const uint32_t resource = wave->sgpr_alloc().base + 8;
+        cu->write_sgpr(resource, kGlobalAddress);
+        cu->write_sgpr(resource + 1, 0);
+        cu->write_sgpr(resource + 2, 64);
+        cu->write_sgpr(resource + 3, 0);
+      }
+    };
+  }
+
+  void exec(uint64_t mask) {
+    if (legacy())
+      program.emit(
+          cdna4::build_sop1(cdna4::kSMovB64Sop1, {.ssrc0 = uint8_t(128 + mask), .sdst = 126}));
+    else
+      program.emit(
+          cdna5::build_sop1(cdna5::kSMovB32Sop1, {.ssrc0 = uint8_t(128 + mask), .sdst = 126}));
+  }
+
+  void vmem_load(int, uint32_t vgpr, uint64_t mask = 1) {
+    exec(mask);
+    if (legacy())
+      program.emit(cdna4::build_flat(cdna4::kFlatLoadDwordFlat,
+                                     {.seg = 2, .addr = 16, .saddr = 0x7f, .vdst = uint8_t(vgpr)}));
+    else
+      program.emit(
+          cdna5::build_vglobal(cdna5::kGlobalLoadB32Vglobal,
+                               {.saddr = kModernNullSelector, .vdst = uint8_t(vgpr), .vaddr = 16}));
+    exec(1);
+  }
+
+  void vmem_store(int) {
+    program.emit(cdna5::build_vglobal(cdna5::kGlobalStoreB32Vglobal,
+                                      {.saddr = kModernNullSelector, .vsrc = 24, .vaddr = 16}));
+  }
+
+  enum class FlatRoute { Global, Lds, Mixed, NoActiveLanes };
+  void flat_load(int, uint32_t vgpr, FlatRoute route) {
+    exec(route == FlatRoute::NoActiveLanes ? 0 : route == FlatRoute::Mixed ? 3 : 1);
+    const uint8_t address = route == FlatRoute::Lds ? 18 : route == FlatRoute::Mixed ? 20 : 16;
+    program.emit(cdna5::build_vflat(
+        cdna5::kFlatLoadB32Vflat,
+        {.saddr = kModernNullSelector, .vdst = uint8_t(vgpr), .vaddr = address}));
+    exec(1);
+  }
+
+  void buffer_load(int, uint32_t vgpr, uint32_t type, uint64_t mask = 1) {
+    program.emit(cdna5::build_sop1(cdna5::kSMovB32Sop1, {.ssrc0 = 255, .sdst = 11}));
+    program.emit(std::array{type << 30});
+    exec(mask);
+    program.emit(
+        cdna5::build_vbuffer(cdna5::kBufferLoadB32Vbuffer,
+                             {.soffset = kModernNullSelector, .vdata = uint8_t(vgpr), .rsrc = 8}));
+    exec(1);
+  }
+
+  void wait_loadcnt(int, uint16_t count) {
+    program.emit(cdna5::build_sopp(cdna5::kSWaitLoadcntSopp, {.simm16 = count}));
+  }
+  void wait_dscnt(int, uint16_t count) {
+    program.emit(cdna5::build_sopp(cdna5::kSWaitDscntSopp, {.simm16 = count}));
+  }
+  void global_inv(int, uint64_t mask = 1) {
+    exec(mask);
+    program.emit(std::array{0xEE0AC000u, 0u, 0u});
+    exec(1);
+  }
+
+  bool vgpr_read(int, uint32_t vgpr) {
+    // Include both lanes of a mixed FLAT result: each needs its own domain.
+    exec(3);
+    const uint64_t consumer =
+        legacy() ? program.emit(cdna4::build_vop1(cdna4::kVMovB32Vop1,
+                                                  {.src0 = uint16_t(256 + vgpr), .vdst = 25}))
+                 : program.emit(cdna5::build_vop1(cdna5::kVMovB32Vop1,
+                                                  {.src0 = uint16_t(256 + vgpr), .vdst = 25}));
+    if (legacy())
+      program.emit(cdna4::build_sopp(cdna4::kSEndpgmSopp));
+    else
+      program.emit(cdna5::build_sopp(cdna5::kSEndpgmSopp));
+    const uint32_t lanes = legacy() ? 64 : 32;
+    harness.run(program.words, lanes, lanes, 256);
+    return std::ranges::any_of(harness.probe->hazards, [&](const auto &hazard) {
+      return hazard.consumer_pc == consumer && !hazard.write;
+    });
+  }
+};
+
+TEST(RegisterHazardPluginTest, ScalarResultsRemainPendingAfterKmcntCapacityAdmission) {
+  for (bool wide : {false, true})
+    for (bool waited : {false, true}) {
+      SCOPED_TRACE(std::format("wide={} waited={}", wide, waited));
+      DiagnosticHarness harness;
+      ASSERT_NO_FATAL_FAILURE(harness.initialize(false, false, "cdna5"));
+      harness.fixture.mem->write32(0x8000, 123);
+      Program program;
+      program.emit(cdna5::build_sop1(cdna5::kSMovB32Sop1, {.ssrc0 = 255, .sdst = 0}));
+      program.emit(std::array{0x8000u});
+      program.emit(cdna5::build_sop1(cdna5::kSMovB32Sop1, {.ssrc0 = 128, .sdst = 1}));
+      // KMcnt holds 31 units; wide loads need two units each.
+      for (int index = 0; index < (wide ? 16 : 32); ++index)
+        program.emit(cdna5::build_smem(
+            wide ? cdna5::kSLoadB64Smem : cdna5::kSLoadB32Smem,
+            {.sbase = 0, .sdata = uint8_t(index ? 6 : 4), .soffset = kModernNullSelector}));
+      if (waited)
+        program.emit(cdna5::build_sopp(cdna5::kSWaitKmcntSopp, {.simm16 = 0}));
+      const uint64_t consumer =
+          program.emit(cdna5::build_sop1(cdna5::kSMovB32Sop1, {.ssrc0 = 4, .sdst = 8}));
+      program.emit(cdna5::build_sopp(cdna5::kSEndpgmSopp));
+      ASSERT_NO_FATAL_FAILURE(harness.run(program.words, 32, 32));
+      const bool pending = std::ranges::any_of(harness.probe->hazards, [&](const auto &hazard) {
+        return hazard.consumer_pc == consumer && !hazard.write;
+      });
+      EXPECT_EQ(pending, !waited);
+    }
+}
+
+class Gfx950RegisterCapacityTest : public Gfx1250RegisterCapacityTest {
+protected:
+  static constexpr int kVmcntCapacity = 63;
+  static constexpr int kLgkmcntCapacity = 15;
+  bool legacy() const override { return true; }
+  void load(bool lds, uint32_t vgpr, uint64_t mask = 1) {
+    if (!lds) {
+      vmem_load(0, vgpr, mask);
+      return;
+    }
+    exec(mask);
+    program.emit(cdna4::build_ds(cdna4::kDsReadB32Ds, {.addr = 22, .vdst = uint8_t(vgpr)}));
+    exec(1);
+  }
+  bool vgpr_read(uint32_t vgpr) { return Gfx1250RegisterCapacityTest::vgpr_read(0, vgpr); }
+};
+
+TEST_F(Gfx1250RegisterCapacityTest, FullLoadcntCompletesOldestLoad) {
+  vmem_load(0, /*vgpr=*/0);
+  for (int index = 0; index < kCapacity; ++index)
+    vmem_load(0, /*vgpr=*/1);
+  EXPECT_FALSE(vgpr_read(0, 0));
+}
+
+TEST_F(Gfx1250RegisterCapacityTest, LoadcntBelowCapacityKeepsOldestLoadPending) {
+  vmem_load(0, /*vgpr=*/0);
+  for (int index = 0; index < kCapacity - 1; ++index)
+    vmem_load(0, /*vgpr=*/1);
+  EXPECT_TRUE(vgpr_read(0, 0));
+}
+
+TEST_F(Gfx1250RegisterCapacityTest, StorecntPressureDoesNotCompleteALoad) {
+  vmem_load(0, /*vgpr=*/0);
+  for (int index = 0; index < kCapacity + 1; ++index)
+    vmem_store(0);
+  EXPECT_TRUE(vgpr_read(0, 0));
+}
+
+TEST_F(Gfx1250RegisterCapacityTest, ExecZeroLoadTakesALoadcntSlot) {
+  vmem_load(0, /*vgpr=*/0);
+  for (int index = 0; index < kCapacity - 1; ++index)
+    vmem_load(0, /*vgpr=*/1);
+  vmem_load(0, /*vgpr=*/2, /*exec=*/0);
+  EXPECT_FALSE(vgpr_read(0, 0));
+}
+
+TEST_F(Gfx1250RegisterCapacityTest, ExecZeroLoadBelowCapacityKeepsOldestLoadPending) {
+  vmem_load(0, /*vgpr=*/0);
+  for (int index = 0; index < kCapacity - 2; ++index)
+    vmem_load(0, /*vgpr=*/1);
+  vmem_load(0, /*vgpr=*/2, /*exec=*/0);
+  EXPECT_TRUE(vgpr_read(0, 0));
+}
+
+TEST_F(Gfx1250RegisterCapacityTest, ExecZeroLoadHoldsALoadcntSlot) {
+  vmem_load(0, /*vgpr=*/0);
+  for (int index = 0; index < kCapacity - 2; ++index)
+    vmem_load(0, /*vgpr=*/1);
+  vmem_load(0, /*vgpr=*/2, /*exec=*/0);
+  vmem_load(0, /*vgpr=*/1);
+  EXPECT_FALSE(vgpr_read(0, 0));
+}
+
+TEST_F(Gfx1250RegisterCapacityTest, PartialLoadcntWaitCountsExecZeroLoad) {
+  vmem_load(0, /*vgpr=*/0);
+  vmem_load(0, /*vgpr=*/2, /*exec=*/0);
+  wait_loadcnt(0, 1);
+  EXPECT_FALSE(vgpr_read(0, 0));
+}
+
+TEST_F(Gfx1250RegisterCapacityTest, FlatResolvedToGlobalAdvancesLoadcnt) {
+  vmem_load(0, /*vgpr=*/0);
+  for (int index = 0; index < kCapacity - 1; ++index)
+    vmem_load(0, /*vgpr=*/1);
+  flat_load(0, /*vgpr=*/2, FlatRoute::Global);
+  EXPECT_FALSE(vgpr_read(0, 0));
+}
+
+TEST_F(Gfx1250RegisterCapacityTest, FlatResolvedToLdsAdvancesLoadcnt) {
+  vmem_load(0, /*vgpr=*/0);
+  for (int index = 0; index < kCapacity - 1; ++index)
+    vmem_load(0, /*vgpr=*/1);
+  flat_load(0, /*vgpr=*/2, FlatRoute::Lds);
+  EXPECT_FALSE(vgpr_read(0, 0));
+}
+
+TEST_F(Gfx1250RegisterCapacityTest, FlatWithNoActiveLanesAdvancesLoadcnt) {
+  vmem_load(0, /*vgpr=*/0);
+  for (int index = 0; index < kCapacity - 1; ++index)
+    vmem_load(0, /*vgpr=*/1);
+  flat_load(0, /*vgpr=*/2, FlatRoute::NoActiveLanes);
+  EXPECT_FALSE(vgpr_read(0, 0));
+}
+
+TEST_F(Gfx1250RegisterCapacityTest, FlatWithNoActiveLanesHoldsALoadcntSlot) {
+  vmem_load(0, /*vgpr=*/0);
+  for (int index = 0; index < kCapacity - 2; ++index)
+    vmem_load(0, /*vgpr=*/1);
+  flat_load(0, /*vgpr=*/2, FlatRoute::NoActiveLanes);
+  vmem_load(0, /*vgpr=*/1);
+  EXPECT_FALSE(vgpr_read(0, 0));
+}
+
+TEST_F(Gfx1250RegisterCapacityTest, CapacityCountsLdsFlatSlot) {
+  vmem_load(0, /*vgpr=*/0);
+  flat_load(0, /*vgpr=*/2, FlatRoute::Lds);
+  for (int index = 0; index < kCapacity - 2; ++index)
+    vmem_load(0, /*vgpr=*/1);
+  vmem_load(0, /*vgpr=*/1);
+  EXPECT_FALSE(vgpr_read(0, 0));
+}
+
+TEST_F(Gfx1250RegisterCapacityTest, PartialLoadcntWaitCountsLdsFlatSlot) {
+  vmem_load(0, /*vgpr=*/0);
+  flat_load(0, /*vgpr=*/2, FlatRoute::Lds);
+  wait_loadcnt(0, 1);
+  EXPECT_FALSE(vgpr_read(0, 0));
+}
+
+TEST_F(Gfx1250RegisterCapacityTest, PartialLoadcntWaitAllowingBothKeepsLoadPending) {
+  vmem_load(0, /*vgpr=*/0);
+  flat_load(0, /*vgpr=*/2, FlatRoute::Lds);
+  wait_loadcnt(0, 2);
+  EXPECT_TRUE(vgpr_read(0, 0));
+}
+
+TEST_F(Gfx1250RegisterCapacityTest, GlobalFlatResultIsReadyAfterLoadcntWait) {
+  flat_load(0, /*vgpr=*/2, FlatRoute::Global);
+  wait_loadcnt(0, 0);
+  EXPECT_FALSE(vgpr_read(0, 2));
+}
+
+TEST_F(Gfx1250RegisterCapacityTest, LdsFlatResultIsReadyAfterDscntWait) {
+  flat_load(0, /*vgpr=*/2, FlatRoute::Lds);
+  wait_dscnt(0, 0);
+  EXPECT_FALSE(vgpr_read(0, 2));
+}
+
+TEST_F(Gfx1250RegisterCapacityTest, MixedFlatAdvancesLoadcnt) {
+  vmem_load(0, /*vgpr=*/0);
+  for (int index = 0; index < kCapacity - 1; ++index)
+    vmem_load(0, /*vgpr=*/1);
+  flat_load(0, /*vgpr=*/2, FlatRoute::Mixed);
+  EXPECT_FALSE(vgpr_read(0, 0));
+}
+
+TEST_F(Gfx1250RegisterCapacityTest, MixedFlatResultNeedsBothWaits) {
+  flat_load(0, /*vgpr=*/2, FlatRoute::Mixed);
+  wait_loadcnt(0, 0);
+  EXPECT_TRUE(vgpr_read(0, 2));
+}
+
+TEST_F(Gfx1250RegisterCapacityTest, MixedFlatResultIsReadyAfterBothWaits) {
+  flat_load(0, /*vgpr=*/2, FlatRoute::Mixed);
+  wait_loadcnt(0, 0);
+  wait_dscnt(0, 0);
+  EXPECT_FALSE(vgpr_read(0, 2));
+}
+
+TEST_F(Gfx1250RegisterCapacityTest, GlobalInvAdvancesLoadcnt) {
+  vmem_load(0, /*vgpr=*/0);
+  for (int index = 0; index < kCapacity - 1; ++index)
+    vmem_load(0, /*vgpr=*/1);
+  ASSERT_NO_FATAL_FAILURE(global_inv(0));
+  EXPECT_FALSE(vgpr_read(0, 0));
+}
+
+TEST_F(Gfx1250RegisterCapacityTest, GlobalInvWithExecZeroAdvancesLoadcnt) {
+  vmem_load(0, /*vgpr=*/0);
+  for (int index = 0; index < kCapacity - 1; ++index)
+    vmem_load(0, /*vgpr=*/1);
+  ASSERT_NO_FATAL_FAILURE(global_inv(0, /*exec=*/0));
+  EXPECT_FALSE(vgpr_read(0, 0));
+}
+
+TEST_F(Gfx1250RegisterCapacityTest, GlobalInvBelowCapacityKeepsOldestLoadPending) {
+  vmem_load(0, /*vgpr=*/0);
+  for (int index = 0; index < kCapacity - 2; ++index)
+    vmem_load(0, /*vgpr=*/1);
+  ASSERT_NO_FATAL_FAILURE(global_inv(0));
+  EXPECT_TRUE(vgpr_read(0, 0));
+}
+
+TEST_F(Gfx1250RegisterCapacityTest, GlobalInvHoldsALoadcntSlot) {
+  vmem_load(0, /*vgpr=*/0);
+  for (int index = 0; index < kCapacity - 2; ++index)
+    vmem_load(0, /*vgpr=*/1);
+  ASSERT_NO_FATAL_FAILURE(global_inv(0));
+  vmem_load(0, /*vgpr=*/1);
+  EXPECT_FALSE(vgpr_read(0, 0));
+}
+
+TEST_F(Gfx1250RegisterCapacityTest, PartialLoadcntWaitCountsGlobalInv) {
+  vmem_load(0, /*vgpr=*/0);
+  ASSERT_NO_FATAL_FAILURE(global_inv(0));
+  wait_loadcnt(0, 1);
+  EXPECT_FALSE(vgpr_read(0, 0));
+}
+
+TEST_F(Gfx1250RegisterCapacityTest, BufferLoadFillsLoadcnt) {
+  vmem_load(0, /*vgpr=*/0);
+  for (int index = 0; index < kCapacity - 1; ++index)
+    vmem_load(0, /*vgpr=*/1);
+  ASSERT_NO_FATAL_FAILURE(buffer_load(0, /*vgpr=*/2, /*type=*/0));
+  EXPECT_FALSE(vgpr_read(0, 0));
+}
+
+TEST_F(Gfx1250RegisterCapacityTest, IgnoredBufferLoadDoesNotFillLoadcnt) {
+  vmem_load(0, /*vgpr=*/0);
+  for (int index = 0; index < kCapacity - 1; ++index)
+    vmem_load(0, /*vgpr=*/1);
+  ASSERT_NO_FATAL_FAILURE(buffer_load(0, /*vgpr=*/2, /*type=*/2));
+  EXPECT_TRUE(vgpr_read(0, 0));
+}
+
+TEST_F(Gfx1250RegisterCapacityTest, ExecZeroBufferLoadFillsLoadcnt) {
+  vmem_load(0, /*vgpr=*/0);
+  for (int index = 0; index < kCapacity - 1; ++index)
+    vmem_load(0, /*vgpr=*/1);
+  ASSERT_NO_FATAL_FAILURE(buffer_load(0, /*vgpr=*/2, /*type=*/0, /*exec=*/0));
+  EXPECT_FALSE(vgpr_read(0, 0));
+}
+
+TEST_F(Gfx1250RegisterCapacityTest, ExecZeroIgnoredBufferLoadDoesNotFillLoadcnt) {
+  vmem_load(0, /*vgpr=*/0);
+  for (int index = 0; index < kCapacity - 1; ++index)
+    vmem_load(0, /*vgpr=*/1);
+  ASSERT_NO_FATAL_FAILURE(buffer_load(0, /*vgpr=*/2, /*type=*/2, /*exec=*/0));
+  EXPECT_TRUE(vgpr_read(0, 0));
+}
+
+TEST_F(Gfx1250RegisterCapacityTest, PartialLoadcntWaitCountsExecZeroBufferLoad) {
+  vmem_load(0, /*vgpr=*/0);
+  ASSERT_NO_FATAL_FAILURE(buffer_load(0, /*vgpr=*/2, /*type=*/0, /*exec=*/0));
+  wait_loadcnt(0, 1);
+  EXPECT_FALSE(vgpr_read(0, 0));
+}
+
+TEST_F(Gfx1250RegisterCapacityTest, PartialLoadcntWaitDoesNotCountIgnoredExecZeroBufferLoad) {
+  vmem_load(0, /*vgpr=*/0);
+  ASSERT_NO_FATAL_FAILURE(buffer_load(0, /*vgpr=*/2, /*type=*/2, /*exec=*/0));
+  wait_loadcnt(0, 1);
+  EXPECT_TRUE(vgpr_read(0, 0));
+}
+
+TEST_F(Gfx950RegisterCapacityTest, MessageAdvancesLgkmcnt) {
+  load(/*lds=*/true, /*vgpr=*/0);
+  for (int index = 0; index < kLgkmcntCapacity - 1; ++index)
+    load(/*lds=*/true, /*vgpr=*/1);
+  program.emit(std::array{0xBF900000u}); // s_sendmsg 0.
+  EXPECT_FALSE(vgpr_read(0));
+}
+
+TEST_F(Gfx950RegisterCapacityTest, ExecZeroLoadAppliesNoBackpressure) {
+  load(/*lds=*/false, /*vgpr=*/0);
+  for (int index = 0; index < kVmcntCapacity - 1; ++index)
+    load(/*lds=*/false, /*vgpr=*/1);
+  load(/*lds=*/false, /*vgpr=*/2, /*exec=*/0);
+  EXPECT_TRUE(vgpr_read(0));
+}
+
+TEST_F(Gfx950RegisterCapacityTest, PartialVmcntWaitDoesNotCountExecZeroLoad) {
+  load(/*lds=*/false, /*vgpr=*/0);
+  load(/*lds=*/false, /*vgpr=*/2, /*exec=*/0);
+  program.emit(std::array{0xbf8c0f71u}); // s_waitcnt vmcnt(1) lgkmcnt(15).
+  EXPECT_TRUE(vgpr_read(0));
+}
+
+TEST_F(Gfx950RegisterCapacityTest, LoadAdvancesVmcnt) {
+  load(/*lds=*/false, /*vgpr=*/0);
+  for (int index = 0; index < kVmcntCapacity - 1; ++index)
+    load(/*lds=*/false, /*vgpr=*/1);
+  load(/*lds=*/false, /*vgpr=*/2);
+  EXPECT_FALSE(vgpr_read(0));
+}
+
 } // namespace
