@@ -22,8 +22,8 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
         `hipArraySparseProperties` structure. Added for source compatibility: AMD devices do not
         support sparse arrays, so it zeroes the structure and returns `hipErrorNotSupported`.
       * `hipArrayGetPlane` returns a single format plane of a multiplanar HIP array. Added for
-        source compatibility: AMD devices do not support multiplanar arrays, so no array has
-        planes and it validates its arguments and returns `hipErrorNotSupported`.
+        source compatibility: HIP does not implement multiplanar arrays, so no array has planes
+        and it validates its arguments and returns `hipErrorNotSupported`.
     - Execution affinity: support for API parity with corresponding CUDA API.
       * `hipDeviceGetExecAffinitySupport` reports whether a device supports a given execution-affinity
         type and the device's CU-masking granularity. `hipExecAffinityTypeCUCount` is always reported

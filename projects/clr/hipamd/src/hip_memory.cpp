@@ -4728,9 +4728,8 @@ hipError_t hipArrayGetPlane(hipArray_t* pPlaneArray, hipArray_t hArray, unsigned
 
   *pPlaneArray = nullptr;
 
-  amd::Device* device = hip::getCurrentDevice()->devices()[0];
   ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_MEM,
-          "Multiplanar arrays are not supported on the device %s", device->info().name_);
+          "HIP does not implement multiplanar arrays, so no array has planes to return");
   HIP_RETURN(hipErrorNotSupported);
 }
 
