@@ -29,7 +29,8 @@ namespace rocprofsys::parser
 {
 namespace
 {
-/// Text for a JSON scalar that is checked as text. A number keeps its JSON spelling.
+/// Text for a JSON scalar that is checked as text. A number is the text JSON writes for
+/// it, so 1e2 is 100.0.
 std::optional<std::string>
 scalar_text(const nlohmann::json& value)
 {
@@ -336,16 +337,20 @@ file_parser::parse_file(const schema& config_schema, const std::string& filepath
         return result;
     }
 
+    nlohmann::json document;
     try
     {
-        return parse(config_schema, nlohmann::json::parse(input));
-    } catch(const nlohmann::json::parse_error& error)
+        document = nlohmann::json::parse(input);
+    } catch(const nlohmann::json::exception& error)
     {
+        // A malformed document throws parse_error; a number too large for a double,
+        // such as 1e400, throws out_of_range.
         parse_result result{};
         result.errors.push_back(fmt::format("failed to parse configuration file '{}': {}",
                                             filepath, error.what()));
         return result;
     }
+    return parse(config_schema, document);
 }
 
 }  // namespace rocprofsys::parser

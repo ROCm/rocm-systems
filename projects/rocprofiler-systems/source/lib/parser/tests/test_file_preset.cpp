@@ -214,6 +214,16 @@ TEST(parser_file, reads_a_file_and_reports_io_errors)
     EXPECT_NE(invalid.errors.front().find("failed to parse"), std::string::npos);
 }
 
+TEST(parser_file, reports_a_number_too_large_for_a_double)
+{
+    const scoped_temp_file file{ R"({ "sampling": { "freq": 1e400 } })" };
+    const auto             parsed = file_parser{}.parse_file(make_schema(), file.path());
+    EXPECT_TRUE(parsed.values.empty());
+    ASSERT_EQ(parsed.errors.size(), 1U);
+    EXPECT_NE(parsed.errors.front().find("failed to parse configuration file"),
+              std::string::npos);
+}
+
 TEST(parser_file, rejects_an_array_for_a_scalar_parameter)
 {
     const auto document = nlohmann::json::parse(R"({
