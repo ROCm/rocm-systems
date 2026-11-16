@@ -555,16 +555,25 @@ class VirtualGPU : public device::VirtualDevice {
         pending_descriptor_ = nullptr;
         pending_preload_length_ = 0;
         pending_preload_offset_ = 0;
+        pending_kernargs_ = nullptr;
+        pending_kernarg_bytes_ = 0;
       }
 
-      //! Stage the kernel descriptor and preload info for the next dispatch.
-      //! Call before dispatchAqlPacket.
+      //! Stage the kernel descriptor, preload info and host copy of the kernel arguments for
+      //! the next dispatch. Call before dispatchAqlPacket.
       void PrepareDispatch(const hsa_amd_metadata_kernel_descriptor_t* descriptor,
-                           uint16_t preload_length, uint16_t preload_offset) {
+                           uint16_t preload_length, uint16_t preload_offset,
+                           const uint8_t* kernargs, size_t kernarg_bytes) {
         pending_descriptor_ = descriptor;
         pending_preload_length_ = preload_length;
         pending_preload_offset_ = preload_offset;
+        pending_kernargs_ = kernargs;
+        pending_kernarg_bytes_ = kernarg_bytes;
       }
+
+      //! The next packet's completion signal has this event_id, so the metadata needn't read it
+      //! from the signal and bring a device-memory signal's line into the CPU cache
+      void SetCompletionEventId(uint32_t event_id) { completion_event_id_ = event_id; }
 
       //! Write the metadata prefetch packet for the AQL slot at |index|.
       //! |use_movdir64b|: use atomic 64B writes (no sfence between body/header).
@@ -577,10 +586,12 @@ class VirtualGPU : public device::VirtualDevice {
                               bool device_mem_ring_buf, uint32_t rest = 0,
                               AqlPacket* aql_loc = nullptr) {
         if (!HasMetadataQueue()) {
+          completion_event_id_ = -1;
           return;
         }
         auto* dst = static_cast<uint8_t*>(queue_base_) + index * kMetadataPacketSize;
         FillMetadata(packet, header, dst, use_movdir64b, device_mem_ring_buf);
+        completion_event_id_ = -1;
 
         // For Format 4 (DISPATCH_LD), set the launch_descriptor pointer in the AQL packet
         // to point to the launch_descriptor structure in the metadata packet
@@ -606,9 +617,11 @@ class VirtualGPU : public device::VirtualDevice {
       template <class AqlPacket>
       inline void CaptureMetadata(AqlPacket* packet, uint16_t header, uint8_t* dst) {
         if (!HasMetadataQueue() || dst == nullptr) {
+          completion_event_id_ = -1;
           return;
         }
         FillMetadata(packet, header, dst, false, false);
+        completion_event_id_ = -1;
       }
 
       //! Set the launch descriptor version (called once from VirtualGPU::create)
@@ -717,9 +730,10 @@ class VirtualGPU : public device::VirtualDevice {
                      bool use_movdir64b, bool device_mem_ring_buf) const {
         const uint32_t metadata_header = GetType(header) | metadata_version_header_;
         uint32_t event_id = 0;
-        if (aql->completion_signal.handle) {
-          auto* signal = reinterpret_cast<amd_signal_t*>(aql->completion_signal.handle);
-          event_id = signal->event_id;
+        if (aql->completion_signal.handle != 0) {
+          event_id = completion_event_id_ >= 0
+                         ? static_cast<uint32_t>(completion_event_id_)
+                         : amd_signal_from_handle(aql->completion_signal.handle)->event_id;
         }
         if (use_movdir64b) {
           alignas(64) uint8_t seg0[64] = {};
@@ -737,7 +751,11 @@ class VirtualGPU : public device::VirtualDevice {
 
       void* queue_base_ = nullptr;        //!< The buffer base of prefetching queue
       uint32_t metadata_version_header_ = 0; //!< Pre-shifted version bits for metadata headers
+      //! event_id of the next packet's completion signal if known, else -1 to read it
+      int64_t completion_event_id_ = -1;
       const hsa_amd_metadata_kernel_descriptor_t* pending_descriptor_ = nullptr;
+      const uint8_t* pending_kernargs_ = nullptr;  //!< Host copy of the kernel arguments
+      size_t pending_kernarg_bytes_ = 0;           //!< Bytes valid at pending_kernargs_
       uint16_t pending_preload_length_ = 0;
       uint16_t pending_preload_offset_ = 0;
 

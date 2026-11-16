@@ -3813,7 +3813,14 @@ bool KernelBlitManager::batchMemOps(const void* paramArray, size_t paramSize,
   auto constBuf = isGraphPktCapturing
       ? gpu().command()->getGraphKernArg(count * paramSize, kCBAlignment, dev().index())
       : gpu().allocKernArg(count * paramSize, kCBAlignment);
-  memcpy(constBuf, paramArray, (count * paramSize));
+  if (isGraphPktCapturing) {
+    // Every launch of the graph reads these, so keep them out of the CPU cache of a host that
+    // maps device memory write-back. An immediate submit keeps plain stores: the locked
+    // operations that follow on its submit path would wait for non-temporal stores to drain.
+    amd::nontemporalMemcpy(constBuf, paramArray, count * paramSize);
+  } else {
+    memcpy(constBuf, paramArray, (count * paramSize));
+  }
 
   setArgument(kernels_[blitType], 0, sizeof(cl_mem), constBuf, 0, nullptr, kDirectVa);
   setArgument(kernels_[blitType], 1, sizeof(uint32_t), &count);
