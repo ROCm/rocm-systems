@@ -64,6 +64,14 @@ rj_code_target_id_t effective_target(const AmdGpuCodeObject &object, rj_code_arc
   return target == nullptr ? ROCJITSU_CODE_TARGET_INVALID : target->public_id;
 }
 
+bool requires_cdna5_valu_follower(const Instruction &inst) {
+  // These gfx1250/1251 permutes need an immediately issuing safe VALU.
+  // https://github.com/llvm/llvm-project/commit/0c8e5777423c2e657d7e5c61b2cc812253f9b3ec
+  const std::string_view mnemonic = inst.mnemonic();
+  return mnemonic == "v_perm_pk16_b4_u4" || mnemonic == "v_perm_pk16_b6_u4" ||
+         mnemonic == "v_perm_pk16_b8_u4";
+}
+
 // These ISA message tables assign MSG_DEALLOC_VGPRS to message 3. Older
 // architectures give that encoding different semantics.
 bool deallocates_vgprs(const Instruction &instruction, rj_code_arch_t arch) {
@@ -1302,6 +1310,8 @@ public:
         has_mfma_producer_ |= inst.is_mfma();
         has_cdna5_producer_ |=
             arch == ROCJITSU_CODE_ARCH_CDNA5 && may_require_cdna5_valu_spacing(inst);
+        has_cdna5_packed_permute_ |=
+            arch == ROCJITSU_CODE_ARCH_CDNA5 && requires_cdna5_valu_follower(inst);
       }
     }
     while (!work.empty()) {
@@ -1323,6 +1333,7 @@ public:
 
   [[nodiscard]] bool has_mfma_producer() const { return has_mfma_producer_; }
   [[nodiscard]] bool has_cdna5_producer() const { return has_cdna5_producer_; }
+  [[nodiscard]] bool has_cdna5_packed_permute() const { return has_cdna5_packed_permute_; }
 
   [[nodiscard]] bool may_be_unsafe(const Instruction &anchor, bool after,
                                    CallableState state) const {
@@ -1345,6 +1356,7 @@ private:
   std::unordered_map<const Instruction *, PointState> states_;
   bool has_mfma_producer_ = false;
   bool has_cdna5_producer_ = false;
+  bool has_cdna5_packed_permute_ = false;
 
   static uint8_t state_bit(CallableState state) { return 1u << static_cast<unsigned>(state); }
 
@@ -1547,11 +1559,9 @@ bool Instrumentor::ensure_liveness_built(uint8_t wave_size,
   const Section *text = obj_.text_sections().front();
   std::vector<BasicBlock *> scope;
   LivenessAnalysisOptions options;
-  if (arch_ == ROCJITSU_CODE_ARCH_CDNA5) {
-    options.arch = arch_;
-    options.target = effective_target(obj_, arch_);
-    options.text = {reinterpret_cast<const uint8_t *>(text->data()), text->size()};
-  }
+  options.arch = arch_;
+  options.target = effective_target(obj_, arch_);
+  options.text = {reinterpret_cast<const uint8_t *>(text->data()), text->size()};
   for (const std::unique_ptr<BasicBlock> &block : blocks_) {
     scope.push_back(block.get());
     if (kernels.size() == 1 && block->start_offset() == kernels.front().entry_text_offset)
@@ -1839,6 +1849,14 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
                                   "containing matrix or transcendental producers");
           continue;
         }
+        // Replacing the required follower with a branch is unsafe too. Until
+        // adjacency is proven, exclude the family throughout the decoded object.
+        if (pt.kind == InstrumentationKind::AfterInst &&
+            callable_state_analysis_->has_cdna5_packed_permute()) {
+          out.errors.emplace_back("AfterInst cannot preserve the required VALU adjacency in a "
+                                  "CDNA5 code object containing packed permutes");
+          continue;
+        }
         for (const CallableState state : {CallableState::GprIndexing, CallableState::Vskip,
                                           CallableState::UnavailableStorage}) {
           if (callable_state_analysis_->may_be_unsafe(
@@ -1969,6 +1987,18 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
     std::string analysis_error;
     if (!ensure_liveness_built(*resolved.wave_size, kernels, &analysis_error)) {
       result.errors.push_back(std::move(analysis_error));
+      return result;
+    }
+  }
+  // MODE safety at the callback does not enumerate later indexed guest reads.
+  // Require that independent proof before AfterInst relies on physical liveness.
+  if (std::ranges::any_of(resolved.sites, [](const ResolvedInstrumentationSite &site) {
+        return site.kind == InstrumentationKind::AfterInst;
+      })) {
+    const util::FailureOr<bool> complete = liveness_->global_vgpr_usage_is_complete();
+    if (complete.failed() || !complete.value()) {
+      result.errors.emplace_back("AfterInst requires complete physical VGPR usage; relative or "
+                                 "GPR-indexed accesses are unsupported");
       return result;
     }
   }

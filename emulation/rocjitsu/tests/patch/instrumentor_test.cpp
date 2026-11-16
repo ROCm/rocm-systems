@@ -5879,8 +5879,11 @@ TEST(InstrumentorProbePatch, CallableStateAnalysisIsSharedAcrossPointsAndResolut
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
   constexpr uint32_t kNop = cdna4::build_sopp(cdna4::kSNopSopp)[0];
   constexpr uint32_t kEnd = cdna4::build_sopp(cdna4::kSEndpgmSopp)[0];
-  constexpr uint32_t kOn = cdna4::build_sopc(cdna4::kSSetGprIdxOnSopc, {.ssrc0 = 5, .ssrc1 = 8})[0];
-  constexpr uint32_t kOff = cdna4::build_sopp(cdna4::kSSetGprIdxOffSopp)[0];
+  // VSKIP exercises observation-state caching without incomplete VGPR uses.
+  constexpr uint32_t kOn =
+      cdna4::build_sopc(cdna4::kSSetvskipSopc, {.ssrc0 = 129, .ssrc1 = 128})[0];
+  constexpr uint32_t kOff =
+      cdna4::build_sopc(cdna4::kSSetvskipSopc, {.ssrc0 = 128, .ssrc1 = 128})[0];
   const std::vector<uint8_t> image = make_gfx950_kernel_elf({kOn, kNop, kOff, kNop, kEnd}, 64);
   const std::vector<uint8_t> body = make_gfx950_probe_elf("shared_state", {kProbeSetpcS30S31});
   const AmdGpuCodeObject object(image.data(), image.size());
@@ -5925,7 +5928,7 @@ TEST(InstrumentorProbePatch, CallableStateAnalysisIsSharedAcrossPointsAndResolut
                         .probe_args = {}});
     const Instrumentor::ValidationResult invalid = rejected.validate_points();
     ASSERT_EQ(invalid.errors.size(), 1u);
-    EXPECT_NE(invalid.errors.front().find("GPR indexing"), std::string::npos);
+    EXPECT_NE(invalid.errors.front().find("VSKIP"), std::string::npos);
     EXPECT_TRUE(invalid.sites.empty());
   }
 }
@@ -6191,11 +6194,16 @@ TEST(InstrumentorProbePatch, KernelEntryUsesDispatchModeStateDespiteGuestBackedg
             .kind = kind, .probe_obj = &probe, .probe_symbol = "entry_mode", .probe_args = {}};
         instrumentor.add_point(point);
         const InstrumentedCodeObject result = instrumentor.patch();
-        const bool admitted = kind == InstrumentationKind::KernelEntry || clears;
+        const bool admitted = kind == InstrumentationKind::KernelEntry ||
+                              (clears && (vskip || kind != InstrumentationKind::AfterInst));
         ASSERT_EQ(result.errors.empty(), admitted)
             << (result.errors.empty() ? "" : result.errors.front());
         if (!admitted) {
           EXPECT_TRUE(result.elf_bytes.empty());
+          if (!vskip && clears && kind == InstrumentationKind::AfterInst) {
+            EXPECT_NE(result.errors.front().find("complete physical VGPR usage"),
+                      std::string::npos);
+          }
           continue;
         }
         ASSERT_FALSE(result.elf_bytes.empty());
@@ -6333,6 +6341,29 @@ void expect_hazard_patch(rj_code_arch_t arch, uint32_t flags, std::vector<uint32
     ASSERT_EQ(result.errors.size(), 1u);
     EXPECT_NE(result.errors.front().find(reason), std::string::npos) << result.errors.front();
   }
+}
+
+TEST(InstrumentorProbePatch, AfterInstRequiresCompleteVgprUsageForModeLiteralsAndRelativeAccesses) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  constexpr uint32_t kNop = cdna4::build_sopp(cdna4::kSNopSopp)[0];
+  constexpr uint16_t kIndexingBit = amdgpu::MODE_HWREG | (27u << 6);
+  const uint32_t write =
+      cdna4::build_sopk(cdna4::kSSetregImm32B32Sopk, {.simm16 = kIndexingBit})[0];
+  // The literal is after the observation point and at a nonzero text offset.
+  // A clear-only write is complete; enabling indexing hides physical uses.
+  for (const uint32_t literal : {0u, 1u}) {
+    SCOPED_TRACE(literal);
+    expect_hazard_patch(
+        kArch, EF_AMDGPU_MACH_AMDGCN_GFX950, {kNop, write, literal},
+        {.kind = InstrumentationKind::AfterInst, .probe_symbol = {}, .probe_args = {}},
+        literal == 0, "complete physical VGPR usage");
+  }
+  const uint32_t relative = rdna4::build_vop1(rdna4::kVMovrelsB32Vop1, {.src0 = 256, .vdst = 3})[0];
+  expect_hazard_patch(
+      ROCJITSU_CODE_ARCH_RDNA4, EF_AMDGPU_MACH_AMDGCN_GFX1200,
+      {rdna4::build_sopp(rdna4::kSNopSopp)[0], relative},
+      {.kind = InstrumentationKind::AfterInst, .probe_symbol = {}, .probe_args = {}}, false,
+      "complete physical VGPR usage");
 }
 
 TEST(InstrumentorProbePatch, AfterInstRejectsMfmaAnchorsAndPendingScalarDependencies) {
@@ -6495,6 +6526,68 @@ TEST(InstrumentorProbePatch, AfterInstRejectsCdna5AnchorsAndPendingValuDependenc
                          .probe_symbol = {},
                          .probe_args = test_case.args},
                         false, "VALU spacing");
+  }
+}
+
+TEST(InstrumentorProbePatch, AfterInstRejectsCdna5PermuteFamilies) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA5;
+  struct Family {
+    uint16_t opcode;
+    std::string_view mnemonic;
+  };
+  const std::array<Family, 3> families = {{
+      {.opcode = cdna5::kVPermPk16B4U4Vop3, .mnemonic = "v_perm_pk16_b4_u4"},
+      {.opcode = cdna5::kVPermPk16B6U4Vop3, .mnemonic = "v_perm_pk16_b6_u4"},
+      {.opcode = cdna5::kVPermPk16B8U4Vop3, .mnemonic = "v_perm_pk16_b8_u4"},
+  }};
+  const util::FailureOr<uint32_t> follower = build_v_mov_b32_src(12, 264, kArch);
+  ASSERT_TRUE(follower.succeeded());
+  for (const Family &family : families) {
+    SCOPED_TRACE(family.mnemonic);
+    const std::array<uint32_t, 2> permute =
+        cdna5::build_vop3(family.opcode, {.vdst = 8, .src0 = 256, .src1 = 258, .src2 = 260});
+    const std::unique_ptr<Decoder> decoder = Decoder::create(kArch);
+    ASSERT_NE(decoder, nullptr);
+    const std::unique_ptr<Instruction> decoded(decode_valid(*decoder, permute.data()));
+    ASSERT_NE(decoded, nullptr);
+    ASSERT_EQ(decoded->mnemonic(), family.mnemonic);
+    ASSERT_EQ(decoded->size(), 8);
+    ASSERT_FALSE(decoded->is_transcendental());
+    ASSERT_EQ(decoded->flags() & MATRIX_REGISTER_ACCESSES, 0u);
+    expect_hazard_patch(
+        kArch, EF_AMDGPU_MACH_AMDGCN_GFX1250, {permute[0], permute[1], follower.value()},
+        {.kind = InstrumentationKind::AfterInst, .probe_symbol = {}, .probe_args = {}}, false,
+        "adjacency");
+  }
+}
+
+TEST(InstrumentorProbePatch, AfterInstRejectsCdna5PermuteAdjacencyAtEitherAnchor) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA5;
+  const std::array<uint32_t, 2> permute = cdna5::build_vop3(
+      cdna5::kVPermPk16B4U4Vop3, {.vdst = 8, .src0 = 256, .src1 = 258, .src2 = 260});
+  const std::array<uint32_t, 2> ordinary_permute =
+      cdna5::build_vop3(cdna5::kVPermB32Vop3, {.vdst = 8, .src0 = 256, .src1 = 258, .src2 = 260});
+  const util::FailureOr<uint32_t> follower = build_v_mov_b32_src(12, 264, kArch);
+  ASSERT_TRUE(follower.succeeded());
+  for (const uint32_t flags : {EF_AMDGPU_MACH_AMDGCN_GFX1250, EF_AMDGPU_MACH_AMDGCN_GFX1251}) {
+    SCOPED_TRACE(flags);
+    // Relocating the permute puts the scalar drain next; patching its safe
+    // follower instead leaves the permute followed by the injected s_branch.
+    for (const uint64_t offset : {0u, 8u}) {
+      SCOPED_TRACE(offset);
+      expect_hazard_patch(kArch, flags, {permute[0], permute[1], follower.value()},
+                          {.anchor_offset = offset,
+                           .kind = InstrumentationKind::AfterInst,
+                           .probe_symbol = {},
+                           .probe_args = {}},
+                          false, "adjacency");
+    }
+    expect_hazard_patch(kArch, flags, {ordinary_permute[0], ordinary_permute[1], follower.value()},
+                        {.anchor_offset = 8,
+                         .kind = InstrumentationKind::AfterInst,
+                         .probe_symbol = {},
+                         .probe_args = {}},
+                        true, {});
   }
 }
 

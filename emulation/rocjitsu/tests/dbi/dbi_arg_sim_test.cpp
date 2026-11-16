@@ -448,6 +448,70 @@ TEST(DbiAfterInstSim, RejectsGprIndexEnableWhileBeforeInstPreservesTheDisplacedR
   }
 }
 
+TEST(DbiAfterInstSim, RejectsFutureIndexedReadsWhileDirectReadsPreserveGuestState) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  constexpr uint32_t kGuestV7Value = 9;
+  constexpr uint32_t kProbeValue = 5;
+  constexpr util::FailureOr<uint32_t> nop = build_s_nop(0, kArch);
+  constexpr util::FailureOr<uint32_t> endpgm = build_s_endpgm(kArch);
+  constexpr util::FailureOr<uint32_t> setpc = build_s_setpc_b64(30, kArch);
+  constexpr util::FailureOr<uint32_t> displacement =
+      build_s_mov_b32(5, scalar_positive_inline_u32(4), kArch);
+  static_assert(nop.succeeded() && endpgm.succeeded() && setpc.succeeded() &&
+                displacement.succeeded());
+  const uint32_t enable_src0 =
+      cdna4::build_sopc(cdna4::kSSetGprIdxOnSopc, {.ssrc0 = 5, .ssrc1 = 1})[0];
+  const uint32_t disable = cdna4::build_sopp(cdna4::kSSetGprIdxOffSopp)[0];
+  const std::vector<uint8_t> body = test::make_gfx950_probe_elf(
+      "future_index", {test::make_mov_vgpr_inline(7, kProbeValue), setpc.value()});
+  const AmdGpuCodeObject probe(body.data(), body.size());
+  for (const bool indexed : {false, true}) {
+    SCOPED_TRACE(indexed);
+    const util::FailureOr<uint32_t> readback =
+        build_v_mov_b32_src(2, 256 + (indexed ? 3 : 7), kArch);
+    ASSERT_TRUE(readback.succeeded());
+    // Indexing is off at the callback. The later SRC0 displacement makes the
+    // encoded v3 read v7, whose live value the callback must not destroy.
+    const std::vector<uint32_t> guest = {test::make_mov_vgpr_inline(7, kGuestV7Value),
+                                         displacement.value(),
+                                         nop.value(),
+                                         indexed ? enable_src0 : nop.value(),
+                                         readback.value(),
+                                         indexed ? disable : nop.value(),
+                                         endpgm.value()};
+    test::DbiSim baseline;
+    ASSERT_NO_FATAL_FAILURE(baseline.initialize("cdna4", 64));
+    EXPECT_EQ(baseline.run_and_read_vgpr(guest, 64, 2), std::vector<uint32_t>(64, kGuestV7Value));
+
+    const std::vector<uint8_t> image =
+        test::with_descriptor_metadata(test::make_gfx950_kernel_elf(guest, 64, 3, 3, 1), kArch);
+    const AmdGpuCodeObject object(image.data(), image.size());
+    Instrumentor instrumentor(object, kArch);
+    instrumentor.add_point({.anchor_offset = 8,
+                            .kind = InstrumentationKind::AfterInst,
+                            .probe_obj = &probe,
+                            .probe_symbol = "future_index",
+                            .probe_args = {}});
+    const InstrumentedCodeObject result = instrumentor.patch();
+    EXPECT_EQ(result.errors.empty(), !indexed)
+        << (result.errors.empty() ? "" : result.errors.front());
+    if (indexed && !result.errors.empty()) {
+      EXPECT_NE(result.errors.front().find("VGPR"), std::string::npos);
+      EXPECT_TRUE(result.elf_bytes.empty());
+      EXPECT_TRUE(result.sites.empty());
+      continue;
+    }
+    ASSERT_TRUE(result.errors.empty()) << result.errors.front();
+    const AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+    const uint32_t scratch = test::patched_private_segment_size(patched);
+    EXPECT_GT(scratch, 64u) << "the callback's v7 clobber must preserve the guest's later read";
+    test::DbiSim sim;
+    ASSERT_NO_FATAL_FAILURE(sim.initialize("cdna4", 64));
+    EXPECT_EQ(sim.run_and_read_vgpr(test::section_words(patched, ".text"), scratch, 2),
+              std::vector<uint32_t>(64, kGuestV7Value));
+  }
+}
+
 class BarrierMarkerObserver final : public ExecutionPlugin {
 public:
   BarrierMarkerObserver() : ExecutionPlugin("dbi_barrier_marker") {}
