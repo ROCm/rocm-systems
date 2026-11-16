@@ -20,6 +20,7 @@
 #include "nccl_device/gin/proxy/gin_proxy_device_host_common.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cstring>
 #include <iomanip>
 #include <vector>
@@ -796,6 +797,138 @@ TEST_F(GinDeviceTest, PostGfd_MultiPeer) {
       EXPECT_EQ(static_cast<uint64_t>(slotN.qword[ncclGinProxyGfdHeader].header.size), 0ULL)
           << "peer " << p << " slot " << s << " was unexpectedly written";
     }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// PostGfd_VisibleToHostWhileKernelRuns (AICOMRCCL-3634): a posted GFD must reach the CPU while the kernel is still
+//   running. The kernel posts, then spins until the host acks; the host plays the proxy and polls the per-qword flag
+//   bits (as proxyGinPollGfd does). Latency is timed on the GPU (wall clock after the post and when the ack arrives),
+//   so launch and code-object load time never count, and the only host-to-GPU signal is the ack, not the channel
+//   under test. System-scope stores show up in microseconds; non-temporal ones in ms to seconds, or at kernel exit.
+//   kHostTimeoutMs only guards a hang. postGfdImpl<false> is instantiated directly, so no FORCE_OFF build is needed.
+// ---------------------------------------------------------------------------
+
+__global__ void kernelPostGfdThenWaitForHostAck(ncclGinProxyGpuCtx_t* ctx, ncclGinProxyGfd_t* gfdIn, uint32_t peer,
+                                                uint32_t* ack, uint64_t* ticks) {
+  // Explicitly the fallback store flavour (UseDwordx4=false), independent of how this binary was built.
+  nccl::gin::proxy::postGfdImpl</*UseDwordx4=*/false>(ncclCoopCta{}, ctx, gfdIn, peer);
+  if (threadIdx.x == 0) {
+    const uint64_t t0 = wall_clock64();
+    // System-scope acquire: the ack is written by the host while this kernel runs.
+    while (__scoped_atomic_load_n(ack, __ATOMIC_ACQUIRE, __MEMORY_SCOPE_SYSTEM) == 0) {
+    }
+    *ticks = wall_clock64() - t0; // read by the host after the kernel exits
+  }
+}
+
+TEST_F(GinDeviceTest, PostGfd_VisibleToHostWhileKernelRuns) {
+  constexpr uint32_t kNranks = 2;
+  constexpr uint32_t kQueueSize = 64; // >= kRounds so postGfd never waits for credits (nothing advances cis).
+  constexpr uint32_t kRounds = 32;
+  constexpr uint32_t kPeer = 1;
+  // Only bounds how long a miss takes to report: a pass returns as soon as the GFD is seen. Generous so that launch
+  // latency or lazy code-object loading on a cold or loaded GPU is never mistaken for an invisible GFD.
+  constexpr int kHostTimeoutMs = 30000;
+  // Pass/fail bound on GPU-timed post-to-observed latency. Deliberately generous (system-scope stores take ~2.5 us,
+  // a descheduled host poll thread can add a few ms): a missed regression is preferred over a false failure.
+  constexpr double kMaxVisibleMs = 50.0;
+
+  // Cleanup guards, so a fatal HIP_CHECK mid-test neither leaks pinned memory nor leaves a kernel spinning on `ack`.
+  struct PinnedHost {
+    void* p = nullptr;
+    ~PinnedHost() { if (p) (void)hipHostFree(p); }
+  };
+  struct StreamGuard {
+    hipStream_t s = nullptr;
+    uint32_t* ack = nullptr;
+    ~StreamGuard() {
+      if (!s) return;
+      __atomic_store_n(ack, 1u, __ATOMIC_RELEASE); // release a kernel that is still waiting for the host
+      (void)hipStreamSynchronize(s);
+      (void)hipStreamDestroy(s);
+    }
+  };
+
+  // The queue lives in pinned host memory, as in production, so the host observes exactly what the GPU made visible.
+  PinnedHost queuesMem, ackMem;
+  HIP_CHECK(hipHostMalloc(&queuesMem.p, kNranks * kQueueSize * sizeof(ncclGinProxyGfd_t)));
+  HIP_CHECK(hipHostMalloc(&ackMem.p, sizeof(uint32_t)));
+  auto* hQueues = static_cast<ncclGinProxyGfd_t*>(queuesMem.p);
+  auto* hAck = static_cast<uint32_t*>(ackMem.p);
+  std::memset(hQueues, 0, kNranks * kQueueSize * sizeof(ncclGinProxyGfd_t));
+
+  DeviceBuffer<uint32_t> d_pis(kNranks);
+  DeviceBuffer<uint32_t> d_cis(kNranks);
+  DeviceBuffer<ncclGinProxyGfd_t> d_gfdIn(1);
+  DeviceBuffer<ncclGinProxyGpuCtx_t> d_ctx(1);
+  DeviceBuffer<uint64_t> d_ticks(1);
+  d_pis.zero();
+  d_cis.zero();
+
+  ncclGinProxyGpuCtx_t hostCtx{};
+  hostCtx.nranks = static_cast<int>(kNranks);
+  hostCtx.queueSize = kQueueSize;
+  hostCtx.queues = hQueues;
+  hostCtx.pis = d_pis.ptr;
+  hostCtx.cis = d_cis.ptr;
+  d_ctx.upload(hostCtx);
+
+  int wallClockKHz = 0;
+  HIP_CHECK(hipDeviceGetAttribute(&wallClockKHz, hipDeviceAttributeWallClockRate, 0));
+  ASSERT_GT(wallClockKHz, 0);
+
+  int missedRound = -1;
+  std::vector<double> latencyMs;
+  for (uint32_t round = 0; round < kRounds; round++) {
+    // Same invariant buildGfd establishes: every qword carries flag bit 1, so "visible" == "flag bit observed set".
+    // The slot starts zeroed, so a set flag can only come from this round's stores.
+    ncclGinProxyGfd_t gfd{};
+    const uint64_t expectedQword = (uint64_t{0xC0FFEE00u + round} << 8) | 1u;
+    for (int k = 0; k < ncclGinProxyGfdQwords; k++) gfd.qword[k].raw = expectedQword;
+    d_gfdIn.upload(gfd);
+    __atomic_store_n(hAck, 0u, __ATOMIC_RELEASE);
+
+    StreamGuard guard;
+    guard.ack = hAck;
+    HIP_CHECK(hipStreamCreate(&guard.s));
+    kernelPostGfdThenWaitForHostAck<<<1, 64, 0, guard.s>>>(d_ctx.ptr, d_gfdIn.ptr, kPeer, hAck, d_ticks.ptr);
+    HIP_CHECK(hipGetLastError()); // a failed launch would otherwise wait out kHostTimeoutMs and look like a miss
+
+    // Host-side "proxy": wait until every qword of this round's slot has its flag bit visible.
+    ncclGinProxyGfd_t* slot = &hQueues[kPeer * kQueueSize + round];
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(kHostTimeoutMs);
+    bool seen = false;
+    while (!seen && std::chrono::steady_clock::now() < deadline) {
+      seen = true;
+      for (int k = 0; k < ncclGinProxyGfdQwords; k++) {
+        const uint64_t raw = __atomic_load_n(&slot->qword[k].raw, __ATOMIC_RELAXED);
+        if ((raw & 1u) == 0) seen = false; // flag.v is the low bit of every qword.
+      }
+    }
+    if (!seen) missedRound = static_cast<int>(round);
+    // Once flagged, a qword must also carry the posted payload (the slot started zeroed, so nothing stale can match).
+    if (seen) {
+      for (int k = 0; k < ncclGinProxyGfdQwords; k++) {
+        EXPECT_EQ(__atomic_load_n(&slot->qword[k].raw, __ATOMIC_RELAXED), expectedQword)
+            << "round " << round << " qword " << k << " is flagged but its payload is wrong";
+      }
+    }
+
+    // Release the kernel either way (on a miss the GFD only shows up once it exits); the guard does it on early exits.
+    __atomic_store_n(hAck, 1u, __ATOMIC_RELEASE);
+    HIP_CHECK(hipStreamSynchronize(guard.s));
+    latencyMs.push_back(static_cast<double>(d_ticks.copyTo()[0]) / wallClockKHz);
+    // Stop at the first miss: it already proves the bug, and more rounds would only burn another kHostTimeoutMs.
+    if (missedRound >= 0) break;
+  }
+
+  EXPECT_EQ(missedRound, -1) << "the GFD of round " << missedRound << " (of " << kRounds
+                             << ") was not CPU-visible while the posting kernel was still running";
+  for (size_t r = 0; r < latencyMs.size(); r++) {
+    GTEST_LOG_(INFO) << "round " << r << ": GFD observed by the host " << latencyMs[r] << " ms after the post";
+    EXPECT_LE(latencyMs[r], kMaxVisibleMs) << "round " << r << ": the GFD took " << latencyMs[r]
+                                           << " ms to become CPU-visible (bound " << kMaxVisibleMs << " ms)";
   }
 }
 
