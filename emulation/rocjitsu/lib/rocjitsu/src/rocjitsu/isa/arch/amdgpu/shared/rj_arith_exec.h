@@ -32,15 +32,15 @@ using WmmaFunction = int (*)(uint64_t, uint64_t, uint32_t *const *, const uint32
 
 /// @brief Evaluate matrix output in scratch storage and notify/store only after success.
 /// The callback may initialize tied accumulators before invoking the arithmetic entry point.
-template <typename Invoke>
+template <uint32_t MaxRegisters = 8, typename Invoke>
 inline void commit_matrix_result(Wavefront &wave, RegisterAccess &registers, uint32_t destination,
                                  uint32_t result_registers, uint8_t write_bytes, Invoke &&invoke) {
   if (wave.instruction_execution_failed())
     return;
   const uint32_t lanes = wave.wf_size();
   const uint64_t all_lanes = lanes == 64 ? ~uint64_t{0} : 0xffffffffu;
-  std::array<uint32_t *, 8> d{};
-  std::array<std::array<uint32_t, 64>, 8> results{};
+  std::array<uint32_t *, MaxRegisters> d{};
+  std::array<std::array<uint32_t, 64>, MaxRegisters> results{};
   for (uint32_t reg = 0; reg < result_registers; ++reg)
     d[reg] = results[reg].data();
   if (invoke(d.data()) != RJ_ARITH_SUCCESS) {

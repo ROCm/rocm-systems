@@ -1,7 +1,8 @@
 # Copyright (c) 2026 Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-# Usage: rj_add_test_path(<target> <macro-name> <path>)
+# Usage: rj_add_test_path(<target> <macro-name> <path>) for test fixtures or
+#        rj_add_build_path(<target> <macro-name> <path>) for other runtime paths.
 #   target     - existing executable or library
 #   macro-name - runtime path macro for this target's own C++ sources
 #   path       - runtime value, including generator expressions
@@ -12,12 +13,27 @@
 # contents and sizeof are unsupported. Macros do not propagate to targets
 # that link this target.
 #
-# Keep runtime fixture paths in a small per-target object. The forced header
+# Keep runtime paths in a small per-target object. The forced header
 # preserves the original command-line macros' visibility and availability,
 # while all consumers can share cached objects between workspace prefixes.
 function(rj_add_test_path target name value)
+    _rj_add_build_path(${target} ${name} "${value}" rocjitsu::test test_build_paths)
+endfunction()
+
+function(rj_add_build_path target name value)
+    _rj_add_build_path(${target} ${name} "${value}" rocjitsu build_paths)
+endfunction()
+
+function(
+    _rj_add_build_path
+    target
+    name
+    value
+    namespace_prefix
+    file_stem
+)
     if(NOT name MATCHES "^[A-Za-z_][A-Za-z_0-9]*$")
-        message(FATAL_ERROR "Invalid test path macro: ${name}")
+        message(FATAL_ERROR "Invalid build path macro: ${name}")
     endif()
     get_property(defined TARGET ${target} PROPERTY "RJ_TEST_PATH_${name}" SET)
     if(defined)
@@ -32,18 +48,17 @@ function(rj_add_test_path target name value)
     endif()
     set_property(TARGET ${target} PROPERTY "RJ_TEST_PATH_${name}" "${value}")
 
-    get_property(
-        initialized
-        TARGET ${target}
-        PROPERTY RJ_TEST_PATHS_INITIALIZED
-    )
-    string(MAKE_C_IDENTIFIER "${target}" target_id)
-    set(namespace "rocjitsu::test::build_paths_${target_id}")
-    if(NOT initialized)
-        set_property(TARGET ${target} PROPERTY RJ_TEST_PATHS_INITIALIZED TRUE)
+    get_property(namespace TARGET ${target} PROPERTY RJ_BUILD_PATH_NAMESPACE)
+    if(NOT namespace)
+        string(MAKE_C_IDENTIFIER "${target}" target_id)
+        set(namespace "${namespace_prefix}::build_paths_${target_id}")
+        set_property(
+            TARGET ${target}
+            PROPERTY RJ_BUILD_PATH_NAMESPACE "${namespace}"
+        )
         set(output_dir "${CMAKE_CURRENT_BINARY_DIR}/${target}_build_paths")
-        set(header "${output_dir}/test_build_paths.h")
-        set(source "${output_dir}/$<CONFIG>/test_build_paths.cpp")
+        set(header "${output_dir}/${file_stem}.h")
+        set(source "${output_dir}/$<CONFIG>/${file_stem}.cpp")
         file(
             GENERATE OUTPUT "${header}"
             CONTENT
@@ -52,7 +67,7 @@ function(rj_add_test_path target name value)
         file(
             GENERATE OUTPUT "${source}"
             CONTENT
-                "#include \"test_build_paths.h\"\n\nnamespace ${namespace} {\n$<TARGET_GENEX_EVAL:${target},$<TARGET_PROPERTY:${target},RJ_TEST_PATH_VALUES>>} // namespace ${namespace}\n"
+                "#include \"${file_stem}.h\"\n\nnamespace ${namespace} {\n$<TARGET_GENEX_EVAL:${target},$<TARGET_PROPERTY:${target},RJ_TEST_PATH_VALUES>>} // namespace ${namespace}\n"
             TARGET ${target}
         )
         target_include_directories(${target} PRIVATE "${output_dir}")

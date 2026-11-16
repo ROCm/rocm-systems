@@ -307,16 +307,17 @@ runtime, just as for packet replay. See [Performance](range_replay_performance.m
 
 ## Tests
 
-- `range-replay-host-replay-test` is a GPU-free unit test. It covers the arming consumption, the
-  begin macro's two returns, the registry rules that differ from packet replay, and host-region
-  capture and restore, including a full jump-and-rewind loop. On fake queues it covers fences that
-  time out: a barrier that outlasts the fence, a queue whose ring stays full, one timeout shared by
-  several queues, and the parsing of `ROCPROFILER_RANGE_REPLAY_HOST_FENCE_TIMEOUT_MS`. It also
-  covers `host_run` with no context (the body runs once) and with a NULL body.
-- `range-replay-host-run-test` is a GPU-free unit test of `host_run` against a tool registered with
-  `rocprofiler_force_configure`. It covers the pass sequence, packet mode, nested entry points in
-  the body, host-region restore, exceptions on the first and on a replayed pass, and the C++
-  wrapper.
+- The `range_replay_host` suite in `range-replay-tests` needs no GPU. It covers the arming
+  consumption, the begin macro's two returns, the registry rules that differ from packet replay, and
+  host-region capture and restore, including a full jump-and-rewind loop. On fake queues it covers
+  fences that time out: a barrier that outlasts the fence, a queue whose ring stays full, one
+  timeout shared by several queues, and the parsing of
+  `ROCPROFILER_RANGE_REPLAY_HOST_FENCE_TIMEOUT_MS`. It also covers `host_run` with no context (the
+  body runs once) and with a NULL body.
+- The `range_replay_host_run` suite in `range-replay-tests` needs no GPU. It tests `host_run`
+  against a tool registered with `rocprofiler_force_configure`: the pass sequence, packet mode,
+  nested entry points in the body, host-region restore, exceptions on the first and on a replayed
+  pass, and the C++ wrapper.
 - `tests/range-replay-host-api` is the `host_run` integration test. Each step runs kernels on two
   streams joined by events and a host computation that feeds the next step, through the C++
   wrapper. The application checks every pass and the final state bit for bit against a host

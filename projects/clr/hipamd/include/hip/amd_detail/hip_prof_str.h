@@ -512,7 +512,9 @@ enum hip_api_id_t {
   HIP_API_ID_hipKernelSetAttributeForDevice = 490,
   HIP_API_ID_hipKernelSetCacheConfig = 491,
   HIP_API_ID_hipExtMemcpyBatchAsync = 492,
-  HIP_API_ID_LAST = 492,
+  HIP_API_ID_hipMemcpy3DWithAttributesAsync = 493,
+  HIP_API_ID_hipMemcpyWithAttributesAsync = 494,
+  HIP_API_ID_LAST = 494,
 
 
   HIP_API_ID_hipBindTexture = HIP_API_ID_NONE,
@@ -888,6 +890,7 @@ static inline const char* hip_api_name(const uint32_t id) {
     case HIP_API_ID_hipMemcpy3DBatchAsync: return "hipMemcpy3DBatchAsync";
     case HIP_API_ID_hipMemcpy3DPeer: return "hipMemcpy3DPeer";
     case HIP_API_ID_hipMemcpy3DPeerAsync: return "hipMemcpy3DPeerAsync";
+    case HIP_API_ID_hipMemcpy3DWithAttributesAsync: return "hipMemcpy3DWithAttributesAsync";
     case HIP_API_ID_hipMemcpyAsync: return "hipMemcpyAsync";
     case HIP_API_ID_hipMemcpyAtoA: return "hipMemcpyAtoA";
     case HIP_API_ID_hipMemcpyAtoD: return "hipMemcpyAtoD";
@@ -913,6 +916,7 @@ static inline const char* hip_api_name(const uint32_t id) {
     case HIP_API_ID_hipMemcpyToArray: return "hipMemcpyToArray";
     case HIP_API_ID_hipMemcpyToSymbol: return "hipMemcpyToSymbol";
     case HIP_API_ID_hipMemcpyToSymbolAsync: return "hipMemcpyToSymbolAsync";
+    case HIP_API_ID_hipMemcpyWithAttributesAsync: return "hipMemcpyWithAttributesAsync";
     case HIP_API_ID_hipMemcpyWithStream: return "hipMemcpyWithStream";
     case HIP_API_ID_hipMemset: return "hipMemset";
     case HIP_API_ID_hipMemset2D: return "hipMemset2D";
@@ -1374,6 +1378,7 @@ static inline uint32_t hipApiIdByName(const char* name) {
   if (strcmp("hipMemcpy3DBatchAsync", name) == 0) return HIP_API_ID_hipMemcpy3DBatchAsync;
   if (strcmp("hipMemcpy3DPeer", name) == 0) return HIP_API_ID_hipMemcpy3DPeer;
   if (strcmp("hipMemcpy3DPeerAsync", name) == 0) return HIP_API_ID_hipMemcpy3DPeerAsync;
+  if (strcmp("hipMemcpy3DWithAttributesAsync", name) == 0) return HIP_API_ID_hipMemcpy3DWithAttributesAsync;
   if (strcmp("hipMemcpyAsync", name) == 0) return HIP_API_ID_hipMemcpyAsync;
   if (strcmp("hipMemcpyAtoA", name) == 0) return HIP_API_ID_hipMemcpyAtoA;
   if (strcmp("hipMemcpyAtoD", name) == 0) return HIP_API_ID_hipMemcpyAtoD;
@@ -1399,6 +1404,7 @@ static inline uint32_t hipApiIdByName(const char* name) {
   if (strcmp("hipMemcpyToArray", name) == 0) return HIP_API_ID_hipMemcpyToArray;
   if (strcmp("hipMemcpyToSymbol", name) == 0) return HIP_API_ID_hipMemcpyToSymbol;
   if (strcmp("hipMemcpyToSymbolAsync", name) == 0) return HIP_API_ID_hipMemcpyToSymbolAsync;
+  if (strcmp("hipMemcpyWithAttributesAsync", name) == 0) return HIP_API_ID_hipMemcpyWithAttributesAsync;
   if (strcmp("hipMemcpyWithStream", name) == 0) return HIP_API_ID_hipMemcpyWithStream;
   if (strcmp("hipMemset", name) == 0) return HIP_API_ID_hipMemset;
   if (strcmp("hipMemset2D", name) == 0) return HIP_API_ID_hipMemset2D;
@@ -3622,6 +3628,12 @@ typedef struct hip_api_data_s {
       hipStream_t stream;
     } hipMemcpy3DPeerAsync;
     struct {
+      hipMemcpy3DBatchOp* op;
+      hipMemcpy3DBatchOp op__val;
+      unsigned long long flags;
+      hipStream_t stream;
+    } hipMemcpy3DWithAttributesAsync;
+    struct {
       void* dst;
       const void* src;
       size_t sizeBytes;
@@ -3793,6 +3805,14 @@ typedef struct hip_api_data_s {
       hipMemcpyKind kind;
       hipStream_t stream;
     } hipMemcpyToSymbolAsync;
+    struct {
+      void* dst;
+      const void* src;
+      size_t size;
+      hipMemcpyAttributes* attr;
+      hipMemcpyAttributes attr__val;
+      hipStream_t stream;
+    } hipMemcpyWithAttributesAsync;
     struct {
       void* dst;
       const void* src;
@@ -6562,6 +6582,12 @@ typedef struct hip_api_data_s {
   cb_data.args.hipMemcpy3DPeerAsync.p = (hipMemcpy3DPeerParms*)p; \
   cb_data.args.hipMemcpy3DPeerAsync.stream = (hipStream_t)stream; \
 };
+// hipMemcpy3DWithAttributesAsync[('hipMemcpy3DBatchOp*', 'op'), ('unsigned long long', 'flags'), ('hipStream_t', 'stream')]
+#define INIT_hipMemcpy3DWithAttributesAsync_CB_ARGS_DATA(cb_data) { \
+  cb_data.args.hipMemcpy3DWithAttributesAsync.op = (hipMemcpy3DBatchOp*)op; \
+  cb_data.args.hipMemcpy3DWithAttributesAsync.flags = (unsigned long long)flags; \
+  cb_data.args.hipMemcpy3DWithAttributesAsync.stream = (hipStream_t)stream; \
+};
 // hipMemcpyAsync[('void*', 'dst'), ('const void*', 'src'), ('size_t', 'sizeBytes'), ('hipMemcpyKind', 'kind'), ('hipStream_t', 'stream')]
 #define INIT_hipMemcpyAsync_CB_ARGS_DATA(cb_data) { \
   cb_data.args.hipMemcpyAsync.dst = (void*)dst; \
@@ -6750,6 +6776,14 @@ typedef struct hip_api_data_s {
   cb_data.args.hipMemcpyToSymbolAsync.offset = (size_t)offset; \
   cb_data.args.hipMemcpyToSymbolAsync.kind = (hipMemcpyKind)kind; \
   cb_data.args.hipMemcpyToSymbolAsync.stream = (hipStream_t)stream; \
+};
+// hipMemcpyWithAttributesAsync[('void*', 'dst'), ('const void*', 'src'), ('size_t', 'size'), ('hipMemcpyAttributes*', 'attr'), ('hipStream_t', 'stream')]
+#define INIT_hipMemcpyWithAttributesAsync_CB_ARGS_DATA(cb_data) { \
+  cb_data.args.hipMemcpyWithAttributesAsync.dst = (void*)dst; \
+  cb_data.args.hipMemcpyWithAttributesAsync.src = (const void*)src; \
+  cb_data.args.hipMemcpyWithAttributesAsync.size = (size_t)size; \
+  cb_data.args.hipMemcpyWithAttributesAsync.attr = (hipMemcpyAttributes*)attr; \
+  cb_data.args.hipMemcpyWithAttributesAsync.stream = (hipStream_t)stream; \
 };
 // hipMemcpyWithStream[('void*', 'dst'), ('const void*', 'src'), ('size_t', 'sizeBytes'), ('hipMemcpyKind', 'kind'), ('hipStream_t', 'stream')]
 #define INIT_hipMemcpyWithStream_CB_ARGS_DATA(cb_data) { \
@@ -8904,6 +8938,10 @@ static inline void hipApiArgsInit(hip_api_id_t id, hip_api_data_t* data) {
     case HIP_API_ID_hipMemcpy3DPeerAsync:
       if (data->args.hipMemcpy3DPeerAsync.p) data->args.hipMemcpy3DPeerAsync.p__val = *(data->args.hipMemcpy3DPeerAsync.p);
       break;
+// hipMemcpy3DWithAttributesAsync[('hipMemcpy3DBatchOp*', 'op'), ('unsigned long long', 'flags'), ('hipStream_t', 'stream')]
+    case HIP_API_ID_hipMemcpy3DWithAttributesAsync:
+      if (data->args.hipMemcpy3DWithAttributesAsync.op) data->args.hipMemcpy3DWithAttributesAsync.op__val = *(data->args.hipMemcpy3DWithAttributesAsync.op);
+      break;
 // hipMemcpyAsync[('void*', 'dst'), ('const void*', 'src'), ('size_t', 'sizeBytes'), ('hipMemcpyKind', 'kind'), ('hipStream_t', 'stream')]
     case HIP_API_ID_hipMemcpyAsync:
       break;
@@ -8986,6 +9024,10 @@ static inline void hipApiArgsInit(hip_api_id_t id, hip_api_data_t* data) {
       break;
 // hipMemcpyToSymbolAsync[('const void*', 'symbol'), ('const void*', 'src'), ('size_t', 'sizeBytes'), ('size_t', 'offset'), ('hipMemcpyKind', 'kind'), ('hipStream_t', 'stream')]
     case HIP_API_ID_hipMemcpyToSymbolAsync:
+      break;
+// hipMemcpyWithAttributesAsync[('void*', 'dst'), ('const void*', 'src'), ('size_t', 'size'), ('hipMemcpyAttributes*', 'attr'), ('hipStream_t', 'stream')]
+    case HIP_API_ID_hipMemcpyWithAttributesAsync:
+      if (data->args.hipMemcpyWithAttributesAsync.attr) data->args.hipMemcpyWithAttributesAsync.attr__val = *(data->args.hipMemcpyWithAttributesAsync.attr);
       break;
 // hipMemcpyWithStream[('void*', 'dst'), ('const void*', 'src'), ('size_t', 'sizeBytes'), ('hipMemcpyKind', 'kind'), ('hipStream_t', 'stream')]
     case HIP_API_ID_hipMemcpyWithStream:
@@ -12238,6 +12280,14 @@ static inline const char* hipApiString(hip_api_id_t id, const hip_api_data_t* da
       oss << ", stream="; roctracer::hip_support::detail::operator<<(oss, data->args.hipMemcpy3DPeerAsync.stream);
       oss << ")";
     break;
+    case HIP_API_ID_hipMemcpy3DWithAttributesAsync:
+      oss << "hipMemcpy3DWithAttributesAsync(";
+      if (data->args.hipMemcpy3DWithAttributesAsync.op == NULL) oss << "op=NULL";
+      else { oss << "op="; roctracer::hip_support::detail::operator<<(oss, data->args.hipMemcpy3DWithAttributesAsync.op__val); }
+      oss << ", flags="; roctracer::hip_support::detail::operator<<(oss, data->args.hipMemcpy3DWithAttributesAsync.flags);
+      oss << ", stream="; roctracer::hip_support::detail::operator<<(oss, data->args.hipMemcpy3DWithAttributesAsync.stream);
+      oss << ")";
+    break;
     case HIP_API_ID_hipMemcpyAsync:
       oss << "hipMemcpyAsync(";
       oss << "dst="; roctracer::hip_support::detail::operator<<(oss, data->args.hipMemcpyAsync.dst);
@@ -12458,6 +12508,16 @@ static inline const char* hipApiString(hip_api_id_t id, const hip_api_data_t* da
       oss << ", offset="; roctracer::hip_support::detail::operator<<(oss, data->args.hipMemcpyToSymbolAsync.offset);
       oss << ", kind="; roctracer::hip_support::detail::operator<<(oss, data->args.hipMemcpyToSymbolAsync.kind);
       oss << ", stream="; roctracer::hip_support::detail::operator<<(oss, data->args.hipMemcpyToSymbolAsync.stream);
+      oss << ")";
+    break;
+    case HIP_API_ID_hipMemcpyWithAttributesAsync:
+      oss << "hipMemcpyWithAttributesAsync(";
+      oss << "dst="; roctracer::hip_support::detail::operator<<(oss, data->args.hipMemcpyWithAttributesAsync.dst);
+      oss << ", src="; roctracer::hip_support::detail::operator<<(oss, data->args.hipMemcpyWithAttributesAsync.src);
+      oss << ", size="; roctracer::hip_support::detail::operator<<(oss, data->args.hipMemcpyWithAttributesAsync.size);
+      if (data->args.hipMemcpyWithAttributesAsync.attr == NULL) oss << ", attr=NULL";
+      else { oss << ", attr="; roctracer::hip_support::detail::operator<<(oss, data->args.hipMemcpyWithAttributesAsync.attr__val); }
+      oss << ", stream="; roctracer::hip_support::detail::operator<<(oss, data->args.hipMemcpyWithAttributesAsync.stream);
       oss << ")";
     break;
     case HIP_API_ID_hipMemcpyWithStream:

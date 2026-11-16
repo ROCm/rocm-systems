@@ -166,7 +166,8 @@ TEST(LaunchPreloadTest, SanitizerNamedExecutableAliasDoesNotPreloadExecutable) {
   const std::filesystem::path exe = std::filesystem::read_symlink("/proc/self/exe", ec);
   ASSERT_FALSE(ec) << ec.message();
 
-  const rocjitsu::test::ScopedTempDirectory temp_dir_owner("rocjitsu-launch-preload-");
+  rocjitsu::test::ScopedTempDirectory temp_dir_owner;
+  ASSERT_TRUE(temp_dir_owner.initialize("rocjitsu-launch-preload-"));
   const std::filesystem::path temp_dir(temp_dir_owner.path());
 
   static constexpr const char *alias_names[] = {"launch-asan-preload-test",

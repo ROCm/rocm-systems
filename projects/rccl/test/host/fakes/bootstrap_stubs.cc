@@ -14,6 +14,7 @@
 #include "bootstrap.h"
 
 #include "fakes/bootstrap_stubs.h"
+#include "fakes/fail_loud.h"
 #include "fakes/signature-drift.h"
 
 bool g_bootstrapNetInitFail = false;
@@ -27,12 +28,32 @@ ncclResult_t bootstrapAllGather(void* commState, void* allData, int size) {
   return g_bootstrapAllGather(commState, allData, size);
 }
 ASSERT_HOOK_MATCHES_PROD(g_bootstrapAllGather, bootstrapAllGather);
-std::function<ncclResult_t(void*, int, int, int)> g_bootstrapBarrier =
-    [](void*, int, int, int) { return ncclInternalError; };
-ncclResult_t bootstrapBarrier(void* commState, int rank, int nranks, int tag) {
-  return g_bootstrapBarrier(commState, rank, nranks, tag);
+
+// Fail-loud by default: only a test that scripts the exchange may reach these.
+static ncclResult_t DefaultBootstrapBarrier(void*, int, int, int) {
+  FailLoudUnfaked("bootstrap_stubs", "bootstrapBarrier");
 }
+static ncclResult_t DefaultBootstrapSend(void*, int, int, void*, int) {
+  FailLoudUnfaked("bootstrap_stubs", "bootstrapSend");
+}
+static ncclResult_t DefaultBootstrapRecv(void*, int, int, void*, int) {
+  FailLoudUnfaked("bootstrap_stubs", "bootstrapRecv");
+}
+std::function<ncclResult_t(void*, int, int, int)> g_bootstrapBarrier = DefaultBootstrapBarrier;
+std::function<ncclResult_t(void*, int, int, void*, int)> g_bootstrapSend = DefaultBootstrapSend;
+std::function<ncclResult_t(void*, int, int, void*, int)> g_bootstrapRecv = DefaultBootstrapRecv;
 ASSERT_HOOK_MATCHES_PROD(g_bootstrapBarrier, bootstrapBarrier);
+ASSERT_HOOK_MATCHES_PROD(g_bootstrapSend, bootstrapSend);
+ASSERT_HOOK_MATCHES_PROD(g_bootstrapRecv, bootstrapRecv);
+ncclResult_t bootstrapBarrier(void* commState, int rank, int nRanks, int tag) {
+  return g_bootstrapBarrier(commState, rank, nRanks, tag);
+}
+ncclResult_t bootstrapSend(void* commState, int peer, int tag, void* data, int size) {
+  return g_bootstrapSend(commState, peer, tag, data, size);
+}
+ncclResult_t bootstrapRecv(void* commState, int peer, int tag, void* data, int size) {
+  return g_bootstrapRecv(commState, peer, tag, data, size);
+}
 // Only init.cc:2958 reaches this, to hand the rocSHMEM unique id to the other
 // ranks. Succeeds without touching bcastData; no test reaches it yet.
 ncclResult_t bootstrapBroadcast(void*, int, int, int, void*, int) { return ncclSuccess; }
@@ -102,7 +123,9 @@ void ResetBootstrapStubs() {
   g_bootstrapCreateRoot = DefaultBootstrapCreateRoot;
   g_bootstrapNetInitFail = false;
   g_bootstrapAllGather = [](void*, void*, int) { return ncclInternalError; };
-  g_bootstrapBarrier = [](void*, int, int, int) { return ncclInternalError; };
+  g_bootstrapBarrier = DefaultBootstrapBarrier;
+  g_bootstrapSend = DefaultBootstrapSend;
+  g_bootstrapRecv = DefaultBootstrapRecv;
   g_bootstrapIntraNodeBarrier = DefaultBootstrapIntraNodeBarrier;
   g_bootstrapGetUniqueIdResult = ncclSuccess;
   g_bootstrapGetUniqueIdCalls = 0;

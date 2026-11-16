@@ -4,8 +4,11 @@
 #ifndef ROCJITSU_ISA_AMDGPU_SHARED_ALU_EXCEPTIONS_H_
 #define ROCJITSU_ISA_AMDGPU_SHARED_ALU_EXCEPTIONS_H_
 
+#include "rocjitsu/isa/arch/amdgpu/cdna1/alu_status.h"
+#include "rocjitsu/isa/arch/amdgpu/rdna3_5/valu.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/division.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include <bit>
@@ -109,11 +112,33 @@ inline uint32_t classify_mul_f32(float lhs, float rhs, float omod_scale = 1.0f) 
 }
 
 template <typename Inst> uint32_t classify_mul_f32_vop2(const Inst &inst, Wavefront &wf) {
+  if (wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA3_5) {
+    const uint32_t causes =
+        rdna3_5::arithmetic_flags<rdna3_5::FmaOperation::Multiply>(inst, wf, inst.vsrc1);
+    wf.raise_alu_causes(causes);
+    return causes;
+  }
+  if (wf.cu().arch() == ROCJITSU_CODE_ARCH_CDNA1) {
+    const uint32_t causes = rocjitsu::cdna1::classify_binary_f32<true>(inst, wf, inst.vsrc1);
+    wf.raise_alu_causes(causes);
+    return causes;
+  }
   return detail::classify_mul_lanes(
       inst.src0, inst.vsrc1, wf, [](float lhs, float rhs) { return classify_mul_f32(lhs, rhs); });
 }
 
 template <typename Inst> uint32_t classify_mul_f32_vop3(const Inst &inst, Wavefront &wf) {
+  if (wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA3_5) {
+    const uint32_t causes =
+        rdna3_5::arithmetic_flags<rdna3_5::FmaOperation::Multiply>(inst, wf, inst.src1);
+    wf.raise_alu_causes(causes);
+    return causes;
+  }
+  if (wf.cu().arch() == ROCJITSU_CODE_ARCH_CDNA1) {
+    const uint32_t causes = rocjitsu::cdna1::classify_binary_f32<true>(inst, wf, inst.src1);
+    wf.raise_alu_causes(causes);
+    return causes;
+  }
   // OMOD scales the exact and rounded products alike. Its policy is uniform
   // across the wave, including which causes the target suppresses.
   const uint32_t omod = fp_mode::effective_omod(wf.cu().arch(), wf.fp_denorm_mode_f32(),
@@ -134,6 +159,79 @@ template <typename Inst> uint32_t classify_mul_f32_vop3(const Inst &inst, Wavefr
       rhs = -rhs;
     return classify_mul_f32(lhs, rhs, omod_scale) & ~suppressed;
   });
+}
+
+// OMOD scales the rounded half. Report exceptions at the arithmetic and
+// output boundaries before destination saturation or CLAMP masks the result.
+inline uint32_t gfx10_f16_output_causes(double exact, uint16_t arithmetic, bool saturate,
+                                        unsigned omod) {
+  uint16_t magnitude = arithmetic & 0x7fffu;
+  if (magnitude == 0 && exact != 0)
+    return (1u << 4) | (1u << 5);
+  if (magnitude == 0x7c00u && saturate)
+    magnitude = 0x7bffu;
+  const unsigned exponent = magnitude >> 10;
+  if (exponent != 0 && exponent != 31) {
+    if ((omod == 1 || omod == 2) && exponent + omod >= 31)
+      return (1u << 3) | (1u << 5);
+    if (omod == 3 && exponent == 1)
+      return (1u << 4) | (1u << 5);
+  }
+  return 0;
+}
+
+template <typename Inst> void record_gfx10_add_f16_exceptions(const Inst &inst, Wavefront &wf) {
+  const RegisterAccess regs(wf);
+  const uint64_t active = wf.exec() & wf.vgpr_write_mask();
+  const auto denorm = wf.fp_denorm_mode_f16_f64();
+  const auto round_mode = wf.fp_round_mode_f16_f64();
+  unsigned omod = 0;
+  if constexpr (requires { inst.inst_.omod; })
+    omod =
+        fp_mode::effective_f16_omod(wf.cu().arch(), denorm, wf.ieee_mode(), false, inst.inst_.omod);
+  else if constexpr (requires { inst.sdwa_omod_; })
+    if (inst.inst_.src0 == SRC_SDWA)
+      omod = fp_mode::effective_f16_omod(wf.cu().arch(), denorm, wf.ieee_mode(), false,
+                                         inst.sdwa_omod_);
+  uint32_t causes = 0;
+  for (unsigned lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(active & (uint64_t{1} << lane)))
+      continue;
+    uint16_t a = uint16_t(regs.read_lane(inst.src0, lane));
+    uint16_t b;
+    if constexpr (requires { inst.src1; }) {
+      b = uint16_t(regs.read_lane(inst.src1, lane));
+      a = fp_mode::detail::modify_f16(a, inst.inst_.abs & 1, inst.inst_.neg & 1);
+      b = fp_mode::detail::modify_f16(b, inst.inst_.abs & 2, inst.inst_.neg & 2);
+    } else {
+      b = uint16_t(regs.read_lane(inst.vsrc1, lane));
+    }
+    const auto ma = a & 0x7fffu, mb = b & 0x7fffu;
+    if (ma >= 0x7c00 || mb >= 0x7c00) {
+      if ((ma > 0x7c00 && !(a & 0x200)) || (mb > 0x7c00 && !(b & 0x200)) ||
+          (ma == 0x7c00 && mb == 0x7c00 && a != b))
+        causes |= 1u;
+      continue;
+    }
+    if ((denorm & 1) && ((ma && ma < 0x400) || (mb && mb < 0x400)))
+      causes |= 1u << 1;
+    a = fp_mode::detail::flush_input_f16(a, denorm);
+    b = fp_mode::detail::flush_input_f16(b, denorm);
+    // The add rounds and flushes to a half before OMOD sees its result.
+    // Detect arithmetic overflow independently of final FP16_OVFL saturation.
+    const double exact = double(util::f16_to_f32(a)) + double(util::f16_to_f32(b));
+    const auto raw = fp_mode::finish_arithmetic_f16(exact, round_mode, denorm, false);
+    if ((raw & 0x7fffu) == 0x7c00 || std::abs(exact) >= 65536.0)
+      causes |= 1u << 3;
+    if (double(util::f16_to_f32(raw)) != exact) {
+      causes |= 1u << 5;
+      if (exact != 0 && std::abs(exact) < 0x1p-14)
+        causes |= 1u << 4;
+    }
+    causes |= gfx10_f16_output_causes(exact, raw, wf.fp16_ovfl(), omod);
+  }
+  wf.set_trapsts(wf.trapsts() | causes);
+  wf.raise_alu_causes(causes);
 }
 
 template <typename Inst> uint32_t classify_sqrt_f32_vop1(const Inst &inst, Wavefront &wf) {

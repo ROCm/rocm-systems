@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "compute_unit_test_util.h"
 #include "decode_test_util.h"
 #include "util/simd.h"
 #include "util/simd_test_hooks.h"
@@ -68,7 +69,8 @@ protected:
     config.vgprs_per_wf = 256;
     config.lds_size_kb = 64;
     cache_.set_backing_memory(&memory_);
-    cu_ = amdgpu::ComputeUnitCore::create("packed_f32_scalar_sources", config, &memory_, &cache_);
+    ASSERT_NO_FATAL_FAILURE(rocjitsu::test::initialize_compute_unit(
+        cu_, "packed_f32_scalar_sources", config, &memory_, &cache_));
     decoder_ = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
     wave_ = cu_->dispatch_wf(0, 0, 106, 256);
     ASSERT_NE(wave_, nullptr);

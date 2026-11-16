@@ -24,13 +24,29 @@ void trace(const char *event) {
 
 class BoundaryPlugin final : public rocjitsu::ExecutionPlugin {
 public:
-  BoundaryPlugin() : ExecutionPlugin("boundary") { trace("create"); }
-  ~BoundaryPlugin() override { trace("destroy"); }
+  BoundaryPlugin()
+      : ExecutionPlugin("boundary"),
+        long_shutdown_(std::getenv("ROCJITSU_PLUGIN_TEST_LONG_SHUTDOWN") != nullptr) {
+    trace("create");
+  }
+  ~BoundaryPlugin() override {
+    trace("destroy");
+    sink().write("boundary:destroy\n");
+  }
+
+  void onShutdown() override {
+    trace("shutdown");
+    sink().write(long_shutdown_ ? "boundary:shutdown with a longer outgoing record\n"
+                                : "boundary:shutdown\n");
+  }
 
   void onInit() override {
     trace("init");
     sink().write("boundary:init\n");
   }
+
+private:
+  bool long_shutdown_;
 };
 
 __attribute__((destructor)) void on_unload() { trace("unload"); }

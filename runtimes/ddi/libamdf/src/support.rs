@@ -218,8 +218,15 @@ pub(crate) fn unregister(counter: &AtomicU64) {
 }
 
 pub(crate) fn native(error: &rocddi::Error) -> u64 {
-    if let Some(code) = error.native_error_code() {
-        return (u64::from(AMDF_STATUS_DOMAIN_ERRNO) << 32) | u64::from(code.unsigned_abs());
+    if let Some(status) = error.native_status() {
+        let domain = match status.domain {
+            rocddi::NativeStatusDomain::Errno => AMDF_STATUS_DOMAIN_ERRNO,
+            rocddi::NativeStatusDomain::Win32 => AMDF_STATUS_DOMAIN_WIN32,
+            rocddi::NativeStatusDomain::NtStatus => AMDF_STATUS_DOMAIN_NTSTATUS,
+            rocddi::NativeStatusDomain::Hresult => AMDF_STATUS_DOMAIN_HRESULT,
+            rocddi::NativeStatusDomain::Firmware => AMDF_STATUS_DOMAIN_FIRMWARE,
+        };
+        return (u64::from(domain) << 32) | u64::from(status.code);
     }
     match error.kind() {
         rocddi::ErrorKind::InvalidArgument => INVALID,
@@ -230,5 +237,41 @@ pub(crate) fn native(error: &rocddi::Error) -> u64 {
         rocddi::ErrorKind::Busy => BUSY,
         rocddi::ErrorKind::DeviceLost => LOST,
         _ => INTERNAL,
+    }
+}
+
+#[cfg(test)]
+mod native_status_tests {
+    use super::*;
+    use rocddi::{Error, ErrorKind, NativeStatus, NativeStatusDomain};
+
+    #[test]
+    fn amdf_preserves_native_namespaces_and_high_bits() {
+        for (domain, abi_domain) in [
+            (NativeStatusDomain::Errno, AMDF_STATUS_DOMAIN_ERRNO),
+            (NativeStatusDomain::Win32, AMDF_STATUS_DOMAIN_WIN32),
+            (NativeStatusDomain::NtStatus, AMDF_STATUS_DOMAIN_NTSTATUS),
+            (NativeStatusDomain::Hresult, AMDF_STATUS_DOMAIN_HRESULT),
+            (NativeStatusDomain::Firmware, AMDF_STATUS_DOMAIN_FIRMWARE),
+        ] {
+            for code in [5, 0x8007_0005, 0xc000_0022, u32::MAX] {
+                let error = Error::DriverOperation {
+                    kind: ErrorKind::PermissionDenied,
+                    operation: "native status test",
+                    status: NativeStatus { domain, code },
+                };
+                assert_eq!(
+                    native(&error),
+                    (u64::from(abi_domain) << 32) | u64::from(code)
+                );
+            }
+        }
+        assert_eq!(
+            native(&Error::Operation {
+                kind: ErrorKind::Unsupported,
+                detail: "missing service"
+            }),
+            UNSUPPORTED
+        );
     }
 }

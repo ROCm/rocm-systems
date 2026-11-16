@@ -130,7 +130,7 @@ protected:
     text.push_back(anchor_word);
     text.push_back(endpgm_);
     const std::vector<uint8_t> image = test::make_amdgpu_kernel_elf(
-        text, /*private_bytes=*/64, /*granulated_sgpr_count=*/3, a_.e_flags,
+        text, /*private_bytes=*/64, test::kCallableProbeGranulatedSgprCount, a_.e_flags,
         /*granulated_vgpr_count=*/0,
         /*accum_offset=*/0, /*unterminated_kd_name=*/false,
         /*wrap_section_header_table=*/false,
