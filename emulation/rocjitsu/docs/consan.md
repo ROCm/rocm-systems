@@ -554,11 +554,16 @@ access PCs must increase along each path within an iteration; the qualified
 loop uses repeated epochs. Mutation admission and detector admission remain
 independent decisions.
 
-For example, reuse the paths and plugin environment from [Build and setup](#build-and-setup).
-Replace `original.hsaco` and `my_kernel` with a `gfx1250` workload's input and
-exact entry containing an admitted complete barrier:
+For this example, also configure `$consan_build` with
+`-DRJ_BUILD_FAULT_INJECTION=ON`; the mutation toolchain defaults to `OFF`
+independently of the three ConSan components. Reuse the paths and plugin
+environment from [Build and setup](#build-and-setup). Replace `original.hsaco`
+and `my_kernel` with a `gfx1250` workload's input and exact entry containing an
+admitted complete barrier:
 
 ```bash
+cmake -S "$consan_source" -B "$consan_build" -DRJ_BUILD_FAULT_INJECTION=ON
+cmake --build "$consan_build" --target rj_code_mutate
 consan_mutant="$consan_example/mutant.hsaco"
 "$consan_build/tools/rj_code_mutate" \
   --input original.hsaco --kernel my_kernel --kind DropBarrier \
