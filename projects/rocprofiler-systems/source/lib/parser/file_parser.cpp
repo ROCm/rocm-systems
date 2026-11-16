@@ -100,8 +100,8 @@ joined_array(const nlohmann::json& value, std::string_view separator)
 
 struct decoded_value
 {
-    std::optional<config_value_t> typed;
-    std::optional<std::string>    text;
+    std::optional<config_value_t> typed          = {};
+    std::optional<std::string>    text           = {};
     bool                          array_rejected = false;
 };
 
