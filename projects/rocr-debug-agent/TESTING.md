@@ -16,8 +16,8 @@ There are two tiers:
 - **Integration tests** are GPU-bound: each test builds and runs a real HIP
   kernel with the debug agent attached, then inspects its output.
 - **Unit tests** are CPU-only GTest tests under `test/unit/`, built into the
-  `rocm-debug-agent-unit-tests` binary when `ENABLE_UNIT_TESTS=ON`.  They
-  need no GPU.
+  `rocm-debug-agent-unit-tests` binary whenever the tests are built and
+  GoogleTest is available.  They need no GPU.
 
 Tests live under `test/`.  The `rocm-debug-agent-test` binary contains the
 HIP kernel scenarios; `test/run-test.py` drives it, sweeping
@@ -76,7 +76,7 @@ Which tests run, and which binaries the wrapper requires, depend on the flags:
 | `--gpu-tests --cpu-tests`  | both                | integration and unit                       |
 
 The wrapper fails before running anything if a required binary is missing.
-The unit test binary is only built with `ENABLE_UNIT_TESTS=ON`.
+The unit test binary is only built when GoogleTest is available.
 
 The wrapper prepends the ROCm tree's `bin` and `lib` directories to `PATH` and
 `LD_LIBRARY_PATH`, drops `ROCM_PATH` from the environment unless

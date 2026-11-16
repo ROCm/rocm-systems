@@ -12,7 +12,9 @@
 # They can run on any machine without GPU hardware.
 #
 # The modules under test are linked from the rocm-debug-agent-core object
-# library, so the tests exercise the same objects as the shipping library.
+# library.  In a full build that is the top-level library's core, so the tests
+# exercise the same objects as the shipping library.  When test/ is configured
+# on its own, the core is built here from the same sources and flags.
 # Only the amd-dbgapi headers are used; libamd-dbgapi is not linked.
 
 cmake_minimum_required(VERSION 3.21)
@@ -26,22 +28,29 @@ if(NOT GTest_FOUND)
     find_package(GTest MODULE QUIET)
 endif()
 
-# If GoogleTest not found, fail the build.
+# Without GoogleTest, build the other tests and skip the unit tests.
 if(NOT GTest_FOUND)
-    message(FATAL_ERROR "GoogleTest not found. Unit tests are enabled but GoogleTest is not available. "
-                        "Install GoogleTest or disable unit tests with -DENABLE_UNIT_TESTS=OFF")
+    message(
+        WARNING
+        "GoogleTest not found, skipping the Debug Agent unit tests."
+    )
+    return()
 endif()
 
 # Find Threads (required by GTest and for pthreads).
 find_package(Threads REQUIRED)
 
-# The rocm-debug-agent-core target is created by the top-level CMakeLists.txt.
+# The top-level CMakeLists.txt creates rocm-debug-agent-core.  Create it here
+# when test/ is configured on its own.
 if(NOT TARGET rocm-debug-agent-core)
-    message(
-        FATAL_ERROR
-        "The rocm-debug-agent-core target is missing. "
-        "Configure from the top-level rocr-debug-agent CMakeLists.txt."
+    find_package(
+        amd-dbgapi
+        REQUIRED
+        CONFIG
+        PATHS /opt/rocm/
+        PATH_SUFFIXES cmake/amd-dbgapi lib/cmake/amd-dbgapi
     )
+    include(${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/rocm-debug-agent-core.cmake)
 endif()
 
 # Headers under test.

@@ -37,6 +37,8 @@
 #
 # rocr-debug-agent
 # HIP compiler/tools
+# GoogleTest (optional, the unit tests are skipped without it)
+# amd-dbgapi headers (for the unit tests)
 #
 #
 # Available defines to be used when building rocr-debug-agent-test:
@@ -262,9 +264,4 @@ install(
 )
 
 # Unit tests (logic tests with no GPU/HIP runtime dependencies).
-# By default do not include unit tests.
-option(ENABLE_UNIT_TESTS "Enable building Debug Agent unit tests" OFF)
-
-if(ENABLE_UNIT_TESTS)
-    add_subdirectory(unit)
-endif()
+add_subdirectory(unit)
