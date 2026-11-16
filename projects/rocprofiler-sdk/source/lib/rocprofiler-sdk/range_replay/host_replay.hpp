@@ -23,12 +23,13 @@
 #pragma once
 
 // Host replay: range replay's alternate execution path, selected by the tool setting host_replay at
-// CONFIG and the application opening the range with ROCPROFILER_RANGE_REPLAY_HOST_BEGIN.
+// CONFIG and the application opening the range with ROCPROFILER_REPLAY_RANGE_BEGIN (or
+// ROCPROFILER_RANGE_REPLAY_HOST_BEGIN).
 //
 // Packet replay records a range's dispatch packets and re-submits them, so it can only replay a
 // range whose whole effect is those packets on one queue. Host replay records nothing: the
 // application's code between begin and end is the program. end() restores the state the range
-// started from and siglongjmps to the sigsetjmp the application took just before begin(), and the
+// started from and siglongjmps to the sigsetjmp the application took in the range's scope, and the
 // application executes the range again. Copies, memsets, several queues and agents, graph launches,
 // balanced allocate/free pairs and host computation are therefore part of every pass.
 //

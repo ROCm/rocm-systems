@@ -2,23 +2,22 @@
 //
 // Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
 
-// Application half of the range replay samples: a multi-dispatch range bracketed by
-// rocprofiler_range_replay_begin / _end.
+// Application half of the range replay samples: a multi-dispatch range.
 //
 // Range replay is the one replay service the application drives, so unlike the kernel replay
-// samples this main has to call into the SDK. It resolves the two entry points with dlsym rather
-// than linking rocprofiler-sdk, because linking the SDK into the HIP executable makes HIP report
-// hipErrorInvalidDeviceFunction on the first kernel launch on gfx942 (see
-// samples/kernel_replay/CMakeLists.txt). The tool library is LD_PRELOADed, so the SDK is already
-// in the process and RTLD_DEFAULT finds the symbols.
+// samples this main has to call into the SDK. Packet replay calls rocprofiler_range_replay_begin
+// / _end around the dispatches. Host replay uses ROCPROFILER_REPLAY_RANGE_BEGIN / _END, so the
+// jump buffer lives for the whole range and each extra pass re-runs the dispatches. The tool
+// library is LD_PRELOADed. The executable does not link librocprofiler-sdk, because that link
+// makes HIP report hipErrorInvalidDeviceFunction on the first kernel launch on gfx942 (see
+// samples/kernel_replay/CMakeLists.txt).
 //
 // RR_APP_MODE selects what the application does inside the range, so one application can serve
 // both the clients that expect a replay and the ones that expect a decline:
 //
 //   plain        (default) three dispatches on one stream -- a replayable range
 //   multi-queue  the same, plus a dispatch on a second stream, which the SDK declines
-//   host         the same as plain, but the range is armed with sigsetjmp so a tool that sets
-//                host_replay can siglongjmp back to the top of the range
+//   host         the same as plain, opened with the scoped host-replay macros
 
 #include "range.hpp"
 
@@ -26,9 +25,6 @@
 
 #include <hip/hip_runtime.h>
 
-#include <dlfcn.h>
-
-#include <csetjmp>
 #include <cstdio>
 #include <cstdlib>
 #include <string>
@@ -64,32 +60,10 @@ step(int* acc, int add)
 int
 main()
 {
-    auto* begin_fn = reinterpret_cast<decltype(&rocprofiler_range_replay_begin)>(
-        dlsym(RTLD_DEFAULT, "rocprofiler_range_replay_begin"));
-    auto* end_fn = reinterpret_cast<decltype(&rocprofiler_range_replay_end)>(
-        dlsym(RTLD_DEFAULT, "rocprofiler_range_replay_end"));
-
-    if(begin_fn == nullptr || end_fn == nullptr)
-    {
-        fprintf(stderr, "[app] FAIL: the range replay API is not in this process\n");
-        return EXIT_FAILURE;
-    }
-
     const auto* mode_env     = getenv("RR_APP_MODE");
     const auto  mode         = std::string{mode_env != nullptr ? mode_env : "plain"};
     const bool  second_queue = (mode == "multi-queue");
     const bool  host_replay  = (mode == "host");
-
-    using jmpbuf_fn_t = void* (*) ();
-    auto* jmp_fn      = host_replay ? reinterpret_cast<jmpbuf_fn_t>(
-                                     dlsym(RTLD_DEFAULT, "rocprofiler_range_replay_host_jmpbuf"))
-                                    : nullptr;
-    if(host_replay && jmp_fn == nullptr)
-    {
-        fprintf(stderr,
-                "[app] FAIL: rocprofiler_range_replay_host_jmpbuf is not in this process\n");
-        return EXIT_FAILURE;
-    }
 
     int* acc     = nullptr;
     int* scratch = nullptr;
@@ -108,56 +82,65 @@ main()
     // allocation inside a range is itself a decline reason.
     HIP_CHECK(hipDeviceSynchronize());
 
-    // Host replay's sigsetjmp has to be in this frame. end() longjmps back to it, and a setjmp
-    // inside begin() would be invalid the moment begin() returned. The first return calls begin;
-    // every later return is a replay pass and must not open the range again. sigsetjmp may only be
-    // the whole controlling expression of the if (or compared with a constant there), so the two
-    // modes open the range in separate branches rather than through one combined condition.
-    // begin_status is written after the sigsetjmp and read after the siglongjmp, so it is volatile.
-    volatile auto begin_status = ROCPROFILER_STATUS_SUCCESS;
+    // The dispatches are the range. Host replay brackets them with the scoped macros, so the jump
+    // buffer stays live until END drains, leaves the pass, and restores the entry snapshot when
+    // another pass remains. Packet replay calls begin and end around the same dispatches.
+    const auto launch = [&]() -> int {
+        // 0 -> 1 -> 5 -> 18
+        for(uint64_t add = 1; add <= kRangeDispatches; ++add)
+        {
+            step<<<1, 1>>>(acc, static_cast<int>(add));
+            HIP_CHECK(hipGetLastError());
+        }
+
+        // A dispatch on a second queue inside the range. It writes `scratch`, not `acc`, so the
+        // accumulator chain -- and therefore the check at the end -- is the same in both modes.
+        if(second_queue)
+        {
+            step<<<1, 1, 0, other>>>(scratch, 1);
+            HIP_CHECK(hipGetLastError());
+        }
+
+        // The range's own work has to be complete before it closes: end re-executes from the
+        // range-entry snapshot, and the host has to have observed the live run first.
+        HIP_CHECK(hipDeviceSynchronize());
+        return EXIT_SUCCESS;
+    };
+
     if(host_replay)
     {
-        if(sigsetjmp(*static_cast<sigjmp_buf*>(jmp_fn()), 1) == 0)
-            begin_status = begin_fn(kRangeId);
+        ROCPROFILER_REPLAY_RANGE_BEGIN(kRangeId)
+        {
+            const auto begin_status = rocp_begin_status_;
+            if(begin_status != ROCPROFILER_STATUS_SUCCESS)
+            {
+                fprintf(stderr,
+                        "[app] FAIL: rocprofiler_range_replay_begin returned status %d\n",
+                        static_cast<int>(begin_status));
+                return EXIT_FAILURE;
+            }
+            if(launch() != EXIT_SUCCESS) return EXIT_FAILURE;
+        }
+        ROCPROFILER_REPLAY_RANGE_END()
     }
     else
     {
-        begin_status = begin_fn(kRangeId);
-    }
-
-    if(begin_status != ROCPROFILER_STATUS_SUCCESS)
-    {
-        fprintf(stderr,
-                "[app] FAIL: rocprofiler_range_replay_begin returned status %d\n",
-                static_cast<int>(begin_status));
-        return EXIT_FAILURE;
-    }
-
-    // 0 -> 1 -> 5 -> 18
-    for(uint64_t add = 1; add <= kRangeDispatches; ++add)
-    {
-        step<<<1, 1>>>(acc, static_cast<int>(add));
-        HIP_CHECK(hipGetLastError());
-    }
-
-    // A dispatch on a second queue inside the range. It writes `scratch`, not `acc`, so the
-    // accumulator chain -- and therefore the check at the end -- is the same in both modes.
-    if(second_queue)
-    {
-        step<<<1, 1, 0, other>>>(scratch, 1);
-        HIP_CHECK(hipGetLastError());
-    }
-
-    // The range's own work has to be complete before it closes: _end re-executes the recording
-    // from the range-entry snapshot, and the host has to have observed the live run first.
-    HIP_CHECK(hipDeviceSynchronize());
-
-    if(const auto status = end_fn(); status != ROCPROFILER_STATUS_SUCCESS)
-    {
-        fprintf(stderr,
-                "[app] FAIL: rocprofiler_range_replay_end returned status %d\n",
-                static_cast<int>(status));
-        return EXIT_FAILURE;
+        if(const auto status = rocprofiler_range_replay_begin(kRangeId);
+           status != ROCPROFILER_STATUS_SUCCESS)
+        {
+            fprintf(stderr,
+                    "[app] FAIL: rocprofiler_range_replay_begin returned status %d\n",
+                    static_cast<int>(status));
+            return EXIT_FAILURE;
+        }
+        if(launch() != EXIT_SUCCESS) return EXIT_FAILURE;
+        if(const auto status = rocprofiler_range_replay_end(); status != ROCPROFILER_STATUS_SUCCESS)
+        {
+            fprintf(stderr,
+                    "[app] FAIL: rocprofiler_range_replay_end returned status %d\n",
+                    static_cast<int>(status));
+            return EXIT_FAILURE;
+        }
     }
 
     int acc_h = 0;

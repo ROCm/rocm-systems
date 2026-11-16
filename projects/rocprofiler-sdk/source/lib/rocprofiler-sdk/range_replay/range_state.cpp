@@ -86,11 +86,15 @@ registry()
 thread_local std::unique_ptr<range_context_t> tl_range     = {};
 thread_local bool                             tl_replaying = false;
 
-thread_local sigjmp_buf                         tl_host_jmp_buffers[2]  = {};
-thread_local sigjmp_buf*                        tl_host_jmp_staged      = &tl_host_jmp_buffers[0];
-thread_local sigjmp_buf*                        tl_host_jmp_active      = &tl_host_jmp_buffers[1];
-thread_local bool                               tl_host_jmp_armed       = false;
-thread_local std::vector<pending_host_region_t> tl_pending_host_regions = {};
+thread_local sigjmp_buf                         tl_host_jmp_buffers[2] = {};
+thread_local sigjmp_buf*                        tl_host_jmp_staged     = &tl_host_jmp_buffers[0];
+thread_local sigjmp_buf*                        tl_host_jmp_active     = &tl_host_jmp_buffers[1];
+thread_local bool                               tl_host_jmp_armed      = false;
+thread_local sigjmp_buf*                        tl_host_jmp_pending_external       = nullptr;
+thread_local sigjmp_buf*                        tl_host_jmp_active_external        = nullptr;
+thread_local bool                               tl_host_jmp_pending_external_valid = false;
+thread_local bool                               tl_host_jmp_active_external_valid  = false;
+thread_local std::vector<pending_host_region_t> tl_pending_host_regions            = {};
 
 // kernel_object -> (kernarg segment size, alignment, parent code object), memoized. Resolving it
 // means walking the loaded code objects' symbols, which is far too slow to repeat per recorded
@@ -305,26 +309,56 @@ set_this_thread_replaying(bool replaying)
     tl_replaying = replaying;
 }
 
+void
+arm_caller_jmp(void* env)
+{
+    tl_host_jmp_pending_external       = static_cast<sigjmp_buf*>(env);
+    tl_host_jmp_pending_external_valid = true;
+    tl_host_jmp_armed                  = true;
+}
+
+void
+release_caller_jmp()
+{
+    tl_host_jmp_active_external       = nullptr;
+    tl_host_jmp_active_external_valid = false;
+}
+
 void*
 host_jmpbuf()
 {
-    tl_host_jmp_armed = true;
+    tl_host_jmp_pending_external_valid = false;
+    tl_host_jmp_armed                  = true;
     return tl_host_jmp_staged;
 }
 
 bool
 take_host_jmp_armed()
 {
-    const bool armed = std::exchange(tl_host_jmp_armed, false);
-    // A nested HOST_BEGIN writes only the staged buffer; consuming its rejected begin must not
-    // replace the enclosing range's live siglongjmp target.
-    if(armed && !tl_range) std::swap(tl_host_jmp_staged, tl_host_jmp_active);
+    const bool armed    = std::exchange(tl_host_jmp_armed, false);
+    const bool external = std::exchange(tl_host_jmp_pending_external_valid, false);
+    // A nested begin arms its own pending target. Consuming a rejected begin must not replace the
+    // enclosing range's live siglongjmp target.
+    if(armed && !tl_range)
+    {
+        if(external)
+        {
+            tl_host_jmp_active_external       = tl_host_jmp_pending_external;
+            tl_host_jmp_active_external_valid = true;
+        }
+        else
+        {
+            std::swap(tl_host_jmp_staged, tl_host_jmp_active);
+            tl_host_jmp_active_external_valid = false;
+        }
+    }
     return armed;
 }
 
 void*
 host_jmp_target()
 {
+    if(tl_host_jmp_active_external_valid) return tl_host_jmp_active_external;
     return tl_host_jmp_active;
 }
 
