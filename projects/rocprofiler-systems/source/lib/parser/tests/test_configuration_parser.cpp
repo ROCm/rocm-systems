@@ -5,6 +5,7 @@
 #include "parser/cli_parser.hpp"
 #include "parser/configuration_parser.hpp"
 #include "parser/env_parser.hpp"
+#include "parser/help.hpp"
 #include "parser/preset_parser.hpp"
 #include "parser/schema.hpp"
 
@@ -177,6 +178,48 @@ level_schema()
     hidden.description = "Hidden option";
     add_param(value, std::move(mode));
     add_param(value, std::move(hidden));
+    return value;
+}
+
+schema_param
+flag_row(std::string param_id, std::string category, std::string description)
+{
+    auto param        = named(std::move(param_id), param_type::boolean);
+    param.arg         = "--" + param.id;
+    param.flag        = true;
+    param.category    = std::move(category);
+    param.description = std::move(description);
+    return param;
+}
+
+/// Rows of every shape the summary prints: an alias, no description, no arg, no
+/// category, an advanced row beside basic ones, and a category with only an advanced row.
+schema
+summary_schema()
+{
+    schema value{};
+    auto   format        = named("output_format", param_type::enumeration);
+    format.category      = "output";
+    format.arg           = "--output-format";
+    format.arg_aliases   = { "-f" };
+    format.description   = "Output format";
+    format.choices       = { "pftrace", "proto" };
+    auto hidden          = flag_row("hidden", "tracing", "Hidden");
+    hidden.level         = param_level::advanced;
+    auto dump            = flag_row("dump", "debug", "Dump state");
+    dump.level           = param_level::advanced;
+    auto verbose         = named("verbose", param_type::integer);
+    verbose.arg          = "--verbose";
+    verbose.description  = "Verbosity";
+    auto internal        = named("internal", param_type::string);
+    internal.description = "Internal setting";
+    add_param(value, std::move(format));
+    add_param(value, flag_row("trace", "tracing", "Enable tracing"));
+    add_param(value, flag_row("quiet", "tracing", ""));
+    add_param(value, std::move(hidden));
+    add_param(value, std::move(dump));
+    add_param(value, std::move(verbose));
+    add_param(value, std::move(internal));
     return value;
 }
 
@@ -598,6 +641,10 @@ TEST(parser_configuration, help_shows_backend_choices_and_a_category_word)
     EXPECT_NE(help.find("ghost"), std::string::npos);
     EXPECT_NE(help.find("--orphan"), std::string::npos);
     EXPECT_EQ(help.find("--orphan <value>"), std::string::npos);
+
+    const auto letter = parser.render_help(param_level::basic, "--letter");
+    EXPECT_NE(letter.find("choices: alpha beta\n"), std::string::npos) << letter;
+    EXPECT_EQ(letter.find("--orphan"), std::string::npos) << letter;
 }
 
 TEST(parser_configuration, help_starts_with_the_first_category)
@@ -640,6 +687,68 @@ TEST(parser_configuration, help_lists_a_rows_choices_then_its_backends)
     EXPECT_NE(help.find("choices: all alpha beta\n"), std::string::npos) << help;
     EXPECT_TRUE(parser.parse({ "--letters-or-all", "all" }).contains("letters_or_all"));
     EXPECT_TRUE(parser.errors().empty());
+}
+
+TEST(parser_configuration, summary_lists_each_row_on_one_line_under_its_category)
+{
+    EXPECT_EQ(format_summary(summary_schema()),
+              "output\n"
+              "  --output-format, -f  Output format\n"
+              "\n"
+              "tracing\n"
+              "  --trace              Enable tracing\n"
+              "  --quiet\n"
+              "\n"
+              "  --verbose            Verbosity\n"
+              "  internal             Internal setting\n"
+              "\n");
+}
+
+TEST(parser_configuration, summary_shows_advanced_rows_at_the_advanced_level)
+{
+    EXPECT_EQ(format_summary(summary_schema(), param_level::advanced),
+              "output\n"
+              "  --output-format, -f  Output format\n"
+              "\n"
+              "tracing\n"
+              "  --trace              Enable tracing\n"
+              "  --quiet\n"
+              "  --hidden             Hidden\n"
+              "\n"
+              "debug\n"
+              "  --dump               Dump state\n"
+              "\n"
+              "  --verbose            Verbosity\n"
+              "  internal             Internal setting\n"
+              "\n");
+}
+
+TEST(parser_configuration, help_topic_names_one_option_by_any_of_its_spellings)
+{
+    configuration_parser parser;
+    ASSERT_TRUE(parser.initialize(summary_schema())) << parser.failure();
+    const auto* expected = "output\n"
+                           "  --output-format, -f <value>\n"
+                           "      Output format\n"
+                           "      choices: pftrace proto\n"
+                           "\n";
+    EXPECT_EQ(parser.render_help(param_level::basic, "--output-format"), expected);
+    EXPECT_EQ(parser.render_help(param_level::basic, "-f"), expected);
+    EXPECT_EQ(parser.render_help(param_level::basic, "--hidden"), "tracing\n"
+                                                                  "  --hidden\n"
+                                                                  "      Hidden\n"
+                                                                  "\n");
+}
+
+TEST(parser_configuration, help_leaves_out_a_category_with_no_row_shown)
+{
+    configuration_parser parser;
+    ASSERT_TRUE(parser.initialize(summary_schema())) << parser.failure();
+    EXPECT_EQ(parser.render_help().find("debug\n"), std::string::npos);
+    EXPECT_NE(parser.render_help(param_level::advanced).find("debug\n  --dump\n"),
+              std::string::npos);
+    EXPECT_NE(parser.render_help(param_level::basic, "debug").find("No parameters match"),
+              std::string::npos);
 }
 
 TEST(parser_configuration, reads_argc_and_reports_an_uninitialized_parser)

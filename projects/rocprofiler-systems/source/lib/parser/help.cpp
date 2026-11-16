@@ -6,16 +6,28 @@
 #include "parser/schema.hpp"
 
 #include <algorithm>
+#include <cstddef>
 #include <ostream>
+#include <ranges>
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace rocprofsys::parser
 {
 namespace
 {
+constexpr std::size_t k_column_gap = 2;
+
+/// The rows shown under one heading. Rows with no category have an empty heading.
+struct help_group
+{
+    std::string                      heading;
+    std::vector<const schema_param*> params;
+};
+
 bool
 include_param(const schema_param& param, param_level max_level)
 {
@@ -42,25 +54,92 @@ category_order(const schema& config_schema)
     return order;
 }
 
+/// The rows shown at @p max_level, under each category in the order it first appears,
+/// then the rows with no category. A heading with no row shown is left out.
+std::vector<help_group>
+help_groups(const schema& config_schema, param_level max_level)
+{
+    auto headings = category_order(config_schema);
+    headings.emplace_back();
+    std::vector<help_group> groups;
+    for(auto& heading : headings)
+    {
+        auto shown = config_schema.params_in_category(heading);
+        std::erase_if(shown, [max_level](const schema_param* param) {
+            return !include_param(*param, max_level);
+        });
+        if(!shown.empty())
+        {
+            groups.push_back(
+                { .heading = std::move(heading), .params = std::move(shown) });
+        }
+    }
+    return groups;
+}
+
+/// The groups format_help() shows: all of them, the category @p topic names, or the
+/// row @p topic spells, whatever its level.
+std::vector<help_group>
+topic_groups(const schema& config_schema, param_level max_level, std::string_view topic)
+{
+    auto groups = help_groups(config_schema, max_level);
+    if(topic.empty())
+    {
+        return groups;
+    }
+    std::erase_if(groups,
+                  [topic](const help_group& group) { return group.heading != topic; });
+    const auto* param = config_schema.find_param_by_arg(topic);
+    if(groups.empty() && param != nullptr)
+    {
+        groups.push_back({ .heading = param->category, .params = { param } });
+    }
+    return groups;
+}
+
+/// arg and then each of arg_aliases, as in "--output-format, -f". A row with no
+/// command-line spelling is named by its id.
+std::string
+spellings(const schema_param& param)
+{
+    if(!param.arg)
+    {
+        return param.id;
+    }
+    auto text = *param.arg;
+    for(const auto& alias : param.arg_aliases)
+    {
+        text.append(", ").append(alias);
+    }
+    return text;
+}
+
+/// Where a summary line's description starts: past the widest spelling.
+std::size_t
+description_column(const std::vector<help_group>& groups)
+{
+    auto rows = groups | std::views::transform(&help_group::params) | std::views::join;
+    const auto width = [](const schema_param* param) { return spellings(*param).size(); };
+    const auto widest = std::ranges::max_element(rows, {}, width);
+    return widest == rows.end() ? 0 : width(*widest) + k_column_gap;
+}
+
+void
+append_heading(std::ostream& out, const help_group& group)
+{
+    if(!group.heading.empty())
+    {
+        out << group.heading << '\n';
+    }
+}
+
 void
 append_usage(std::ostream& out, const schema_param& param)
 {
-    out << "  ";
-    if(param.arg)
+    out << "  " << spellings(param);
+    if(param.arg && !param.flag)
     {
-        out << *param.arg;
-        for(const auto& alias : param.arg_aliases)
-        {
-            out << ", " << alias;
-        }
-        if(!param.flag)
-        {
-            out << " <value>";
-        }
-    }
-    else
-    {
-        out << param.id;
+        out << " <value>";
     }
     out << '\n';
 }
@@ -119,28 +198,15 @@ append_details(std::ostream& out, const schema_param& param,
 }
 
 void
-append_param(std::ostream& out, const schema_param& param, param_level max_level,
-             const backend_registry* backends)
+append_summary_line(std::ostream& out, const schema_param& param, std::size_t column)
 {
-    if(!include_param(param, max_level))
+    const auto text = spellings(param);
+    out << "  " << text;
+    if(!param.description.empty())
     {
-        return;
+        out << std::string(column - text.size(), ' ') << param.description;
     }
-    append_usage(out, param);
-    append_details(out, param, backends);
-}
-
-void
-append_uncategorized(std::ostream& out, const schema& config_schema,
-                     param_level max_level, const backend_registry* backends)
-{
-    for(const auto& param : config_schema.params())
-    {
-        if(param.category.empty())
-        {
-            append_param(out, param, max_level, backends);
-        }
-    }
+    out << '\n';
 }
 }  // namespace
 
@@ -149,27 +215,37 @@ format_help(const schema& config_schema, param_level max_level, std::string_view
             const backend_registry* backends)
 {
     std::ostringstream out;
-    auto               matched = topic.empty();
-    for(const auto& category : category_order(config_schema))
+    const auto         groups = topic_groups(config_schema, max_level, topic);
+    for(const auto& group : groups)
     {
-        if(!topic.empty() && topic != category)
+        append_heading(out, group);
+        for(const auto* param : group.params)
         {
-            continue;
-        }
-        matched = true;
-        out << category << '\n';
-        for(const auto* param : config_schema.params_in_category(category))
-        {
-            append_param(out, *param, max_level, backends);
+            append_usage(out, *param);
+            append_details(out, *param, backends);
         }
     }
-    if(topic.empty())
-    {
-        append_uncategorized(out, config_schema, max_level, backends);
-    }
-    if(!matched)
+    if(groups.empty() && !topic.empty())
     {
         out << "No parameters match topic '" << topic << "'.\n";
+    }
+    return out.str();
+}
+
+std::string
+format_summary(const schema& config_schema, param_level max_level)
+{
+    std::ostringstream out;
+    const auto         groups = help_groups(config_schema, max_level);
+    const auto         column = description_column(groups);
+    for(const auto& group : groups)
+    {
+        append_heading(out, group);
+        for(const auto* param : group.params)
+        {
+            append_summary_line(out, *param, column);
+        }
+        out << '\n';
     }
     return out.str();
 }

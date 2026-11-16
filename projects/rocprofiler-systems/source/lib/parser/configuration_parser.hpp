@@ -100,7 +100,8 @@ public:
     /// @throws std::runtime_error if a variable cannot be set.
     void apply_to_environment() const;
 
-    /// @p max_level basic omits advanced rows. advanced includes them.
+    /// format_help() for the catalog and the registered backends: @p max_level basic
+    /// omits advanced rows, and @p topic names a category or one parameter's spelling.
     [[nodiscard]] std::string render_help(param_level      max_level = param_level::basic,
                                           std::string_view topic     = {}) const;
 
