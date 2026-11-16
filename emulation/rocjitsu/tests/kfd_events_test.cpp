@@ -11,6 +11,7 @@ RJ_DIAGNOSTIC_POP
 
 #include <gtest/gtest.h>
 
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <thread>
@@ -36,8 +37,10 @@ protected:
       kfd_ioctl_set_event_args args{};
       args.event_id = id;
       EXPECT_EQ(events.set_event(&args), 0);
+    } else if (source == 1) {
+      events.signal_interrupt(id, false);
     } else {
-      events.signal_interrupt(source == 1 ? id : 0);
+      events.notify_idle();
     }
   }
 
@@ -121,22 +124,110 @@ class KfdEventOrderingTest : public KfdEventsTest,
 
 TEST_P(KfdEventOrderingTest, AutoResetSignalReachesWaiter) {
   const auto [source, age, signal_first] = GetParam();
+  std::array<uint64_t, 8> slots;
+  slots.fill(UINT64_MAX);
+  events.adopt_page(slots.data(), sizeof(slots));
   const auto id = create();
+  const auto deliver = [&] {
+    if (source == 3) {
+      std::atomic_ref<uint64_t>(slots[id]).store(id, std::memory_order_release);
+      events.signal_interrupt(id, true);
+    } else {
+      signal(id, source);
+    }
+  };
   if (signal_first)
-    signal(id, source);
+    deliver();
   Wait wait(events, {id}, age);
   if (!signal_first) {
     ASSERT_TRUE(registered(id));
-    signal(id, source);
+    deliver();
   }
   wait.complete();
   expect_unsignaled(id);
 }
 
-INSTANTIATE_TEST_SUITE_P(SetInterruptBroadcast, KfdEventOrderingTest,
-                         ::testing::Combine(::testing::Values(0, 1, 2),
+INSTANTIATE_TEST_SUITE_P(SetInterruptIdle, KfdEventOrderingTest,
+                         ::testing::Combine(::testing::Values(0, 1, 2, 3),
                                             ::testing::Values(uint64_t{0}, uint64_t{1}),
                                             ::testing::Bool()));
+
+TEST_F(KfdEventsTest, InterruptRequiresSignalPage) {
+  const auto id = create();
+  for (bool mailbox_updated : {false, true}) {
+    events.signal_interrupt(id, mailbox_updated);
+    expect_unsignaled(id);
+  }
+}
+
+TEST_F(KfdEventsTest, NamedInterruptUsesTheGpuMailboxRule) {
+  std::array<uint64_t, 8> slots;
+  slots.fill(UINT64_MAX);
+  events.adopt_page(slots.data(), sizeof(slots));
+  const std::array ids{create(), create()};
+  for (bool mailbox_updated : {false, true})
+    for (uint32_t context : {0u, ids[0], UINT32_MAX})
+      for (uint32_t marked : {0u, 1u, 2u, 3u}) {
+        SCOPED_TRACE(::testing::Message() << mailbox_updated << ':' << context << ':' << marked);
+        for (size_t index = 0; index < ids.size(); ++index)
+          std::atomic_ref<uint64_t>(slots[ids[index]])
+              .store(marked & (1u << index) ? ids[index] : UINT64_MAX, std::memory_order_release);
+        events.signal_interrupt(context, mailbox_updated);
+        const bool named = context == ids[0] && (!mailbox_updated || (marked & 1u));
+        for (size_t index = 0; index < ids.size(); ++index) {
+          const bool expected = named ? index == 0 : marked & (1u << index);
+          if (expected) {
+            Wait ready(events, {ids[index]}, 0, true, true);
+            ready.complete();
+          }
+          expect_unsignaled(ids[index]);
+          EXPECT_EQ(slots[ids[index]],
+                    !expected && (marked & (1u << index)) ? uint64_t{ids[index]} : UINT64_MAX);
+        }
+      }
+}
+
+TEST_F(KfdEventsTest, InvalidInterruptConsumesOnlyMarkedMailboxes) {
+  std::array<uint64_t, 8> slots;
+  slots.fill(UINT64_MAX);
+  events.adopt_page(slots.data(), sizeof(slots));
+  const auto first = create();
+  const auto second = create();
+  for (uint32_t context : {0u, UINT32_MAX}) {
+    SCOPED_TRACE(context);
+    events.signal_interrupt(context, true);
+    expect_unsignaled(first);
+    expect_unsignaled(second);
+    std::atomic_ref<uint64_t>(slots[second]).store(second, std::memory_order_release);
+    events.signal_interrupt(context, true);
+    expect_unsignaled(first);
+    Wait ready(events, {second}, 0, true, true);
+    ready.complete();
+    EXPECT_EQ(slots[second], UINT64_MAX);
+    events.signal_interrupt(context, true);
+    expect_unsignaled(second);
+  }
+  // CPU state and event ages are not GPU mailbox messages. A reset or an
+  // auto-reset wait must also leave an independently published mailbox intact.
+  signal(first);
+  Wait cpu(events, {first}, 0, true, true);
+  cpu.complete();
+  EXPECT_EQ(slots[first], UINT64_MAX);
+  std::atomic_ref<uint64_t>(slots[first]).store(first, std::memory_order_release);
+  reset(first);
+  events.signal_interrupt(0, true);
+  Wait gpu(events, {first}, 0, true, true);
+  gpu.complete();
+  EXPECT_EQ(slots[first], UINT64_MAX);
+  events.signal_interrupt(first, false);
+  std::atomic_ref<uint64_t>(slots[first]).store(first, std::memory_order_release);
+  Wait previous(events, {first}, 0, true, true);
+  previous.complete();
+  events.signal_interrupt(0, true);
+  Wait next(events, {first}, 0, true, true);
+  next.complete();
+  EXPECT_EQ(slots[first], UINT64_MAX);
+}
 
 TEST_F(KfdEventsTest, AutoResetSignalReachesEveryRegisteredWaiter) {
   const auto id = create();

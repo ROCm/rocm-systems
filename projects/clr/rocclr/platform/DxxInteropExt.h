@@ -74,9 +74,20 @@ class IAmdDxExtCLInterop : public IAmdDxExtInterface {
   virtual HRESULT CLReleaseResource11(ID3D11Resource* pResource, UINT* gpuIdBitmask) = 0;
   virtual HRESULT CLQueryResource11(ID3D11Resource* pResource, UINT planeIndex,
                                     VOID* pSrd, UINT* pSrdSize) = 0;
+};
 
-  virtual HRESULT CLAcquireResource9(IDirect3DSurface9* pResource, UINT* gpuIdBitmask) = 0;
-  virtual HRESULT CLReleaseResource9(IDirect3DSurface9* pResource, UINT* gpuIdBitmask) = 0;
+interface IDirect3DResource9;
+
+class IAmdDxExtCLInterop9 : public IAmdDxExtInterface {
+ public:
+  virtual HRESULT QueryInteropGpuMask(UINT* pGpuIdBitmask) = 0;
+
+  virtual HRESULT CLAcquireResource(IDirect3DResource9* pResource, UINT gpuIdBitmask) = 0;
+  virtual HRESULT CLReleaseResource(IDirect3DResource9* pResource, UINT gpuIdBitmask) = 0;
+  // planeIndex selects one plane of a planar YUV image; ignored for other images and buffers.
+  // *pSrdSize is the output buffer capacity on input and the required size on return.
+  virtual HRESULT CLQueryResource(IDirect3DResource9* pResource, UINT planeIndex,
+                                  VOID* pSrd, UINT* pSrdSize) = 0;
 };
 
 // Use GetProcAddress, etc. to retrieve exported functions

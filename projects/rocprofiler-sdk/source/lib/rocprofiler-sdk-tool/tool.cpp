@@ -1108,7 +1108,8 @@ code_object_tracing_callback(rocprofiler_callback_tracing_record_t record,
             if(tool::get_config().pc_sampling_host_trap ||
                tool::get_config().pc_sampling_stochastic)
             {
-                CHECK_NOTNULL(tool_metadata)->add_decoder(obj_data);
+                CHECK_NOTNULL(tool_metadata)
+                    ->add_decoder(obj_data, tool::get_config().rocpd_output);
             }
 
             if(obj_data->storage_type == ROCPROFILER_CODE_OBJECT_STORAGE_TYPE_MEMORY &&
@@ -3746,8 +3747,15 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
         start_context(rename_ctx, "kernel rename");
     }
 
-    // Track stream ID information via callback service
-    if(core_supports_kind(ROCPROFILER_CALLBACK_TRACING_HIP_STREAM))
+    // Track stream ID information via callback service. The stream stack is only read by
+    // set_kernel_rename_and_stream_correlation_id for the records below, and the tracing wraps
+    // every HIP function taking a stream, so only enable it when one of those is collected.
+    const auto& cfg              = tool::get_config();
+    const bool  needs_stream_ids = cfg.kernel_trace || cfg.memory_copy_trace ||
+                                  cfg.memory_allocation_trace || cfg.hip_runtime_api_trace ||
+                                  cfg.hip_event_trace || cfg.counter_collection ||
+                                  cfg.spm_counter_collection || cfg.kernel_replay;
+    if(needs_stream_ids && core_supports_kind(ROCPROFILER_CALLBACK_TRACING_HIP_STREAM))
     {
         auto hip_stream_display_ctx = rocprofiler_context_id_t{0};
 
@@ -4388,7 +4396,9 @@ generate_output(cleanup_mode _cleanup_mode, bool skip_output = false)
                           hip_graph_output.get_generator(),
                           rocshmem_output.get_generator(),
                           hipfile_output.get_generator(),
-                          hip_event_output.get_generator());
+                          hip_event_output.get_generator(),
+                          pc_sampling_host_trap_output.get_generator(),
+                          pc_sampling_stochastic_output.get_generator());
     }
 
     if(tool::get_config().otf2_output && outdata.num_output > 0 &&

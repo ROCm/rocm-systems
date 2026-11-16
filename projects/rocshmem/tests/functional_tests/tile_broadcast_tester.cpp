@@ -197,10 +197,10 @@ __global__ void TileBroadcastTest(rocshmem_team_t *teams, int num_teams,
   rocshmem_team_t my_team = teams[wg_id % num_teams];
   rocshmem_wg_team_create_ctx(my_team, ctx_type, &ctx_array[0]);
 
-  // In no-TDM build, rocshmem_query_tdm_lds_bytes() returns 0. The TDM LDS
-  // region sits right after the one ctx slot in the dynamic shared buffer.
+  // Without an LDS-staged build (USE_LDS_STAGE/USE_TDM) this returns 0. The
+  // staged LDS region sits right after the one ctx slot in the dynamic shared buffer.
   uint8_t *tdm_lds = reinterpret_cast<uint8_t*>(&ctx_array[1]);
-  rocshmem_set_tdm_lds(tdm_lds, rocshmem_query_tdm_lds_bytes());
+  rocshmem_set_lds_stage(tdm_lds, rocshmem_query_lds_stage_bytes());
 
   int matrix_size = tile_extent_0 * tile_extent_1;
   int offset = matrix_size * wg_id;
@@ -398,7 +398,7 @@ void TileBroadcastTester::launchKernel(dim3 gridSize, dim3 blockSize,
     }
 
     case TileBroadcastWGTestType: {
-      size_t wg_shared = sizeof(rocshmem_ctx_t) + rocshmem_query_tdm_lds_bytes();
+      size_t wg_shared = sizeof(rocshmem_ctx_t) + rocshmem_query_lds_stage_bytes();
       hipLaunchKernelGGL(TileBroadcastTest, dim3(args.num_wgs), blockSize,
                          wg_shared, stream,
                          teams, args.num_wgs, source, dest,

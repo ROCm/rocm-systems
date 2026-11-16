@@ -1,16 +1,23 @@
-import { Box, Button, IconButton, Stack, Tooltip, Typography } from '@mui/material';
+import { fontSizes, fontWeights, textStyles } from '../../theme/typography';
+import { Box, IconButton, Stack, Typography } from '@mui/material';
+import SurfaceButton from '../shared/SurfaceButton';
+import HoverTooltip from '../shared/HoverTooltip';
+import { shapeTokens } from '../../theme/tokens';
 import DarkModeRoundedIcon from '@mui/icons-material/DarkModeRounded';
 import LightModeRoundedIcon from '@mui/icons-material/LightModeRounded';
 import DownloadRoundedIcon from '@mui/icons-material/DownloadRounded';
 import CloudSyncRoundedIcon from '@mui/icons-material/CloudSyncRounded';
-import OpenInNewRoundedIcon from '@mui/icons-material/OpenInNewRounded';
-import { formatFullDate, formatPublicationTime } from '../../utils/formatters';
+import GitHubIcon from '@mui/icons-material/GitHub';
+import { formatPublicationTime } from '../../utils/formatters';
+import { repositoryLink as buildRepositoryLink } from '../../utils/repositoryLink';
 import { dashboardPageLabels } from '../../config/dashboardPages';
 
-const actionStyles = { width: { xs: 44, sm: 32 }, height: { xs: 44, sm: 32 }, border: 1, borderColor: 'divider', borderRadius: '6px', '& svg': { fontSize: 17 } };
+// Top-right actions: circular icon buttons and a pill link, one 40px height.
+const actionStyles = { width: { xs: 44, sm: 40 }, height: { xs: 44, sm: 40 }, border: 1, borderColor: 'dashboard.controlBorder', borderRadius: '50%', color: 'text.secondary', '&:hover': { bgcolor: 'action.hover' }, '& svg': { fontSize: 22 } };
 
 export default function DashboardHeader({ data, dataError = null, downloadData, loading = false, mode, onReloadData, onToggleMode, tab = 'overview' }) {
   const publicationLabel = formatPublicationTime(data?.generatedAt);
+  const repositoryLink = buildRepositoryLink(data?.repository, data?.canonicalBranch);
   const downloadJson = () => {
     if (loading || !downloadData) return;
     const blob = new Blob([JSON.stringify(downloadData, null, 2)], { type: 'application/json' });
@@ -22,23 +29,21 @@ export default function DashboardHeader({ data, dataError = null, downloadData, 
     URL.revokeObjectURL(url);
   };
   return (
-    <Box component="header" sx={{ borderBottom: 1, borderColor: 'divider', bgcolor: 'background.paper', px: { xs: 2, md: 3 }, py: { xs: 2, md: 2.5 } }}>
-      <Stack direction="row" sx={{ alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 1.5 }}>
+    <Box component="header" sx={{ borderBottom: 1, borderColor: 'dashboard.border', bgcolor: 'background.paper', px: { xs: 2, md: 3 }, py: shapeTokens.headerPadding }}>
+      <Stack direction="row" sx={{ alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px' }}>
         <Box sx={{ minWidth: 0 }}>
-          <Typography sx={{ fontSize: 11, lineHeight: '16px', color: 'text.secondary', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Rocjitsu / {dashboardPageLabels[tab]}</Typography>
-          <Typography component="h1" variant="h1" sx={{ mt: 0.25 }}>{dashboardPageLabels[tab]}</Typography>
-          <Tooltip title={publicationLabel ? formatFullDate(data.generatedAt) : ''}>
-            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
-              {loading ? 'Loading run data…' : dataError ? 'Data unavailable' : publicationLabel ? <>Data as of <Box component="strong" sx={{ fontWeight: 600, color: 'text.primary' }}><time dateTime={data.generatedAt}>{publicationLabel}</time></Box></> : 'Data unavailable'}
+          <Typography sx={{ ...textStyles.captionCompact, color: 'text.secondary', textTransform: 'uppercase', letterSpacing: '0.06em' }}>rocjitsu / {dashboardPageLabels[tab]}</Typography>
+          <Typography component="h1" variant="h1" sx={{ mt: '2px' }}>{dashboardPageLabels[tab]}</Typography>
+            <Typography variant="caption" color="text.muted" sx={{ display: 'block', mt: '4px' }}>
+              {loading ? 'Loading run data…' : dataError ? 'Data unavailable' : publicationLabel ? <>Data as of <Box component="strong" sx={{ fontWeight: fontWeights.emphasized, color: 'text.primary' }}><time dateTime={data.generatedAt}>{publicationLabel}</time></Box></> : 'Data unavailable'}
             </Typography>
-          </Tooltip>
         </Box>
-        <Stack direction="row" sx={{ gap: 0.75, alignItems: 'center', flexWrap: 'wrap' }}>
-          {data?.repository && <Button component="a" href={data.repository} target="_blank" rel="noreferrer"
-            variant="outlined" color="inherit" startIcon={<OpenInNewRoundedIcon />} sx={{ borderColor: 'divider', height: { xs: 44, sm: 32 }, fontSize: 12, color: 'text.secondary', bgcolor: 'background.default' }}>Repository</Button>}
-          <Tooltip title="Reload all data (bypass cached files)"><span><IconButton aria-label="Reload all data" color={dataError ? 'primary' : 'default'} disabled={loading} onClick={onReloadData} sx={actionStyles}><CloudSyncRoundedIcon /></IconButton></span></Tooltip>
-          <Tooltip title="Download JSON"><span><IconButton aria-label="Download JSON" disabled={loading || !downloadData} onClick={downloadJson} sx={actionStyles}><DownloadRoundedIcon /></IconButton></span></Tooltip>
-          <Tooltip title={`Use ${mode === 'dark' ? 'light' : 'dark'} theme`}><IconButton aria-label={`Use ${mode === 'dark' ? 'light' : 'dark'} theme`} onClick={onToggleMode} sx={actionStyles}>{mode === 'dark' ? <LightModeRoundedIcon /> : <DarkModeRoundedIcon />}</IconButton></Tooltip>
+        <Stack direction="row" sx={{ gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
+          {repositoryLink && <SurfaceButton component="a" href={repositoryLink.href} target="_blank" rel="noreferrer"
+            startIcon={<GitHubIcon />} sx={{ height: { xs: 44, sm: 40 }, px: '16px', borderRadius: '999px', borderColor: 'dashboard.controlBorder', fontSize: fontSizes.body }}>{repositoryLink.label}</SurfaceButton>}
+          <HoverTooltip title="Reload all data (bypass cached files)"><IconButton aria-label="Reload all data" color={dataError ? 'primary' : 'default'} disabled={loading} onClick={onReloadData} sx={actionStyles}><CloudSyncRoundedIcon /></IconButton></HoverTooltip>
+          <HoverTooltip title="Download JSON"><IconButton aria-label="Download JSON" disabled={loading || !downloadData} onClick={downloadJson} sx={actionStyles}><DownloadRoundedIcon /></IconButton></HoverTooltip>
+          <HoverTooltip title={`Use ${mode === 'dark' ? 'light' : 'dark'} theme`}><IconButton aria-label={`Use ${mode === 'dark' ? 'light' : 'dark'} theme`} onClick={onToggleMode} sx={actionStyles}>{mode === 'dark' ? <LightModeRoundedIcon /> : <DarkModeRoundedIcon />}</IconButton></HoverTooltip>
         </Stack>
       </Stack>
     </Box>

@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "compute_unit_test_util.h"
 #include "decode_test_util.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna1/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna1/opcodes.h"
@@ -38,6 +39,61 @@ template <typename Fields> Fields query_fields() {
     f.tfe = 1;
   return f;
 }
+
+TEST(ImageResourceDecodeTest, Rdna1UsesSixteenBitDepthAndBaseArray) {
+  std::array<uint32_t, 8> descriptor{};
+  util::insert_bits_into_words(descriptor.data(), 124, 4, amdgpu::kImage3d);
+  util::insert_bits_into_words(descriptor.data(), 128, 16, 0x8000u);
+  util::insert_bits_into_words(descriptor.data(), 144, 16, 0x8000u);
+  const amdgpu::ImageResource resource =
+      amdgpu::decode_image_resource(descriptor, ROCJITSU_CODE_ARCH_RDNA1);
+  EXPECT_EQ(resource.depth, 0x8001u);
+  EXPECT_EQ(resource.base_array, 0x8000u);
+  EXPECT_EQ(amdgpu::image_resource_info(descriptor, ROCJITSU_CODE_ARCH_RDNA1, 0),
+            (std::array<uint32_t, 4>{1, 1, 0x8001u, 1}));
+}
+
+TEST(ImageResourceDecodeTest, Gfx12SeparatesUav3dAndFullDepthScale) {
+  std::array<uint32_t, 8> descriptor{};
+  util::insert_bits_into_words(descriptor.data(), 124, 4, amdgpu::kImage3d);
+  // Adjacent reserved and scale fields must not become ARRAY_PITCH or leak
+  // into the independently decoded UAV3D and five-bit DEPTH_SCALE controls.
+  util::insert_bits_into_words(descriptor.data(), 160, 4, 15u);
+  util::insert_bits_into_words(descriptor.data(), 170, 10, 1023u);
+  for (bool uav3d : {false, true}) {
+    for (uint32_t depth_scale = 0; depth_scale < 32; ++depth_scale) {
+      SCOPED_TRACE(testing::Message() << uav3d << ':' << depth_scale);
+      util::insert_bits_into_words(descriptor.data(), 164, 1, static_cast<uint32_t>(uav3d));
+      util::insert_bits_into_words(descriptor.data(), 165, 5, depth_scale);
+      const amdgpu::ImageResource resource =
+          amdgpu::decode_image_resource(descriptor, ROCJITSU_CODE_ARCH_RDNA4);
+      EXPECT_EQ(resource.uav3d, uav3d);
+      EXPECT_EQ(resource.depth_scale, depth_scale);
+      EXPECT_EQ(resource.array_pitch, 0u);
+    }
+  }
+}
+
+TEST(ImageResourceDecodeTest, Gfx12ResinfoKeepsUav3dViewBoundsIndependentOfDepthScale) {
+  std::array<uint32_t, 8> descriptor{};
+  util::insert_bits_into_words(descriptor.data(), 62, 16, 127u);
+  util::insert_bits_into_words(descriptor.data(), 78, 16, 63u);
+  util::insert_bits_into_words(descriptor.data(), 57, 5, 2u);
+  util::insert_bits_into_words(descriptor.data(), 111, 5, 4u);
+  util::insert_bits_into_words(descriptor.data(), 124, 4, amdgpu::kImage3d);
+  util::insert_bits_into_words(descriptor.data(), 128, 14, 17u);
+  util::insert_bits_into_words(descriptor.data(), 144, 13, 3u);
+  for (bool uav3d : {false, true}) {
+    for (uint32_t depth_scale = 0; depth_scale < 32; ++depth_scale) {
+      SCOPED_TRACE(testing::Message() << uav3d << ':' << depth_scale);
+      util::insert_bits_into_words(descriptor.data(), 164, 1, static_cast<uint32_t>(uav3d));
+      util::insert_bits_into_words(descriptor.data(), 165, 5, depth_scale);
+      EXPECT_EQ(amdgpu::image_resource_info(descriptor, ROCJITSU_CODE_ARCH_RDNA4, 1),
+                (std::array<uint32_t, 4>{16, 8, uav3d ? 15u : 2u, 3}));
+    }
+  }
+}
+
 class ImageResourceTest : public testing::TestWithParam<rj_code_arch_t> {
 protected:
   std::array<uint32_t, 8> descriptor(uint32_t type, bool view, bool uav = false) {
@@ -56,10 +112,9 @@ protected:
     set(128, 13, 17);
     set(gfx9 ? 160 : 144, 13, view ? 3 : 0);
     if (gfx12) {
-      // RDNA4 ISA Table 60 defines BASE_ARRAY as bits 156:144, so this sets the
-      // adjacent bit to verify that spec-defined width. ROCr resource_gfx12.h
-      // instead names bit 157 BASE_ARRAY_MSB; the gfx1201 RESINFO probe cited
-      // below did not isolate this bit, so it is not evidence for either layout.
+      // RDNA4 ISA Table 60 defines BASE_ARRAY as bits 156:144. An isolated
+      // gfx1201 RESINFO probe also ignores bit 157: base values 1 and 8193
+      // both report 8191 layers from a descriptor with depth 8192.
       set(157, 1, 1);
     }
     if (uav)
@@ -111,7 +166,9 @@ TEST_P(ImageResourceTest, DecodedQueryCompactsMaskAndPreservesInactiveLanesWithA
   cfg.num_wf_slots = 1;
   cfg.sgprs_per_wf = 32;
   cfg.vgprs_per_wf = 32;
-  auto cu = amdgpu::ComputeUnitCore::create("query_cu", cfg, &memory, &l2);
+  std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+  ASSERT_NO_FATAL_FAILURE(
+      rocjitsu::test::initialize_compute_unit(cu, "query_cu", cfg, &memory, &l2));
   auto *wf = cu->dispatch_wf(0, 0, 32, 32);
   ASSERT_NE(wf, nullptr);
   const uint32_t last = wf->wf_size() - 1;
@@ -173,7 +230,9 @@ TEST(Cdna2ImageResourceTest, AccumulatorDestinationKeepsLodInVgpr) {
   cfg.num_wf_slots = 2;
   cfg.sgprs_per_wf = 32;
   cfg.vgprs_per_wf = 512;
-  auto cu = amdgpu::ComputeUnitCore::create("query_acc_cu", cfg, &memory, &l2);
+  std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+  ASSERT_NO_FATAL_FAILURE(
+      rocjitsu::test::initialize_compute_unit(cu, "query_acc_cu", cfg, &memory, &l2));
   auto *reserved = cu->dispatch_wf(0, 0, 32, 512);
   auto *wf = cu->dispatch_wf(0, 0, 32, 512);
   ASSERT_NE(reserved, nullptr);

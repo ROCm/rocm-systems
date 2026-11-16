@@ -31,3 +31,7 @@
 //   test_atomic_add_f32: global_float[0]
 //   test_atomic_add_f64: global_double[0]
 //   test_atomic_int: global_int[0..6]
+//
+// test_multicast_load writes global_float[MEGA_KERNEL_MULTICAST_FLOAT_INDEX].
+// Keep it outside input_buffer, which other blocks may still be reading.
+#define MEGA_KERNEL_MULTICAST_FLOAT_INDEX 192
