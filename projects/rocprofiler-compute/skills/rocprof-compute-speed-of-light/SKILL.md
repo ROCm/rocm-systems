@@ -38,7 +38,9 @@ memory, kernel-bottleneck, and roofline skills point here.
 
 Linux GPU metrics, the Memory Chart, and roofline start with ROCm Compute
 Profiler 3.11 (ROCm 10.3); ROCm 10.2 and 10.1 shipped without gfx1201 support.
-PC sampling is outside Navi48 support in this release. Follow the `STABLE_STD`
+gfx1201 support is experimental: add `--experimental` to every `profile` and
+`analyze` command, for example
+`rocprof-compute --experimental profile -n <name> -- <app>`. PC sampling is outside Navi48 support in this release. Follow the `STABLE_STD`
 prerequisite and counter limits in the
 [RDNA System Speed-of-Light](../../docs/conceptual/rdna/system-speed-of-light.rst),
 and compare runs only within one performance state. List the Navi48 aliases
