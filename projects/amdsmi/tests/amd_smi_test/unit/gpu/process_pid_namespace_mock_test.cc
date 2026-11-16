@@ -9,9 +9,12 @@
 
 #include <fcntl.h>
 #include <gtest/gtest.h>
+#include <sys/mman.h>
 #include <sys/stat.h>
+#include <unistd.h>
 
 #include <algorithm>
+#include <cerrno>
 #include <cinttypes>
 #include <cstdint>
 #include <cstdio>
@@ -181,6 +184,12 @@ class MockPidNamespace {
     kfd_.WriteFile(dir + "/vram_" + std::to_string(kKfdGpuId), "7\n");
   }
 
+  // Makes <proc>/<entry> a link to `target`, in place of what is there.
+  void LinkEntry(const std::string& entry, const std::string& target) {
+    std::filesystem::remove_all(proc_.root() + "/" + entry);
+    std::filesystem::create_symlink(target, proc_.root() + "/" + entry);
+  }
+
  private:
   GpuFiles files_;
   FakeSysfsTree proc_;
@@ -328,6 +337,85 @@ TEST(GpuUnit, PidNamespaceProcessListsHoldTheGpuProcesses) {
     EXPECT_EQ(merged[i].gpus[0].gpu_index, ns.index());
     EXPECT_EQ(merged[i].gpus[0].mem, listed[merged[i].pid].mem);
   }
+}
+
+// A link that open() fails with EPERM, as /proc mounted with hidepid=noaccess
+// does for another user's process: this process's /proc/self/map_files entry
+// for a page it maps from a file, which only a caller with CAP_SYS_ADMIN or
+// CAP_CHECKPOINT_RESTORE may follow.
+class EpermLink {
+ public:
+  EpermLink() : file_(tmpfile()), page_size_(static_cast<size_t>(sysconf(_SC_PAGESIZE))) {
+    if (file_ == nullptr || ftruncate(fileno(file_), static_cast<off_t>(page_size_)) != 0) return;
+    page_ = mmap(nullptr, page_size_, PROT_READ, MAP_SHARED, fileno(file_), 0);
+    if (page_ == MAP_FAILED) return;
+    const auto start = reinterpret_cast<uintptr_t>(page_);
+    char path[64];
+    snprintf(path, sizeof(path), "/proc/self/map_files/%" PRIxPTR "-%" PRIxPTR, start,
+             start + page_size_);
+    const int fd = open(path, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+    if (fd < 0 && errno == EPERM) path_ = path;
+    if (fd >= 0) close(fd);
+  }
+  ~EpermLink() {
+    if (page_ != MAP_FAILED) munmap(page_, page_size_);
+    if (file_ != nullptr) fclose(file_);
+  }
+
+  EpermLink(const EpermLink&) = delete;
+  EpermLink& operator=(const EpermLink&) = delete;
+
+  // Empty unless open() of the link fails with EPERM for this caller.
+  const std::string& path() const { return path_; }
+
+ private:
+  FILE* file_;
+  size_t page_size_;
+  void* page_ = MAP_FAILED;
+  std::string path_;
+};
+
+TEST(GpuUnit, PidNamespaceListsLeaveOutAProcessThatHidepidDenies) {
+  const auto files = FindGpuFiles();
+  if (!files) GTEST_SKIP() << "No character devices to stand for /dev/kfd and render nodes";
+  EpermLink denied;
+  if (denied.path().empty()) {
+    GTEST_SKIP() << "Opening a /proc/self/map_files link does not fail with EPERM for this caller";
+  }
+  ScopedAmdsmiInit smi_init;
+  MockPidNamespace ns(*files);
+  AddProcesses(&ns);
+  // Opening /proc/<pid> fails with EPERM for the first process, opening its fd
+  // directory for the second, and opening its maps for the third, which has
+  // /dev/kfd open and a queue on the GPU.
+  constexpr uint32_t kDenied = 4310;
+  constexpr uint32_t kFdDenied = 4311;
+  constexpr uint32_t kMapsDenied = 4312;
+  ns.LinkEntry(std::to_string(kDenied), denied.path());
+  ns.AddProcess(kFdDenied, true, Node::kThisGpu, kKfdGpuId);
+  ns.LinkEntry(std::to_string(kFdDenied) + "/fd", denied.path());
+  ns.AddProcess(kMapsDenied, true, Node::kNone, kKfdGpuId);
+  ns.LinkEntry(std::to_string(kMapsDenied) + "/maps", denied.path());
+  WaitOutProcessListCache();
+
+  // The lists leave out the first two rather than fail. The third is a KFD
+  // process, and with its queues unreadable and no render node open, no GPU
+  // lists it.
+  uint32_t num_items = 0;
+  ASSERT_EQ(amdsmi_get_gpu_compute_process_info(nullptr, &num_items), AMDSMI_STATUS_SUCCESS);
+  EXPECT_EQ(num_items, 6U);
+  uint32_t num_processes = 8;
+  amdsmi_proc_info_t list[8] = {};
+  ASSERT_EQ(amdsmi_get_gpu_process_list(ns.handle(), &num_processes, list), AMDSMI_STATUS_SUCCESS);
+  EXPECT_EQ(num_processes, 3U);
+  // A lookup of each reports that the caller may not read it.
+  for (const uint32_t pid : {kDenied, kFdDenied, kMapsDenied}) {
+    uint32_t gpu_count = 0;
+    EXPECT_EQ(amdsmi_get_gpu_compute_process_gpus(pid, nullptr, &gpu_count), AMDSMI_STATUS_NO_PERM)
+        << "pid " << pid;
+  }
+  amdsmi_process_info_t info{};
+  EXPECT_EQ(amdsmi_get_gpu_compute_process_info_by_pid(kDenied, &info), AMDSMI_STATUS_NO_PERM);
 }
 
 }  // namespace

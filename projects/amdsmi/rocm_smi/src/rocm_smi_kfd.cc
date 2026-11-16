@@ -249,17 +249,20 @@ enum class LocalGpuRead { kKfd, kHeld, kQueues };
 // process. Returns 0, or the errno of the reads: ENOENT or ESRCH once the
 // process has exited, EACCES when the caller may not read its open files.
 static int ReadLocalGpuUse(uint32_t pid, LocalGpuRead what, LocalGpuUse* use) {
+  // A /proc mounted with hidepid=noaccess denies another user's process with
+  // EPERM, where the ptrace access check gives EACCES.
+  const auto access_errno = [](int err) { return err == EPERM ? EACCES : err; };
   const GpuCharMajors majors = GetGpuCharMajors();
   const std::string proc_path = std::string(ProcPathRoot()) + "/" + std::to_string(pid);
   const int proc_fd = open(proc_path.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
-  if (proc_fd < 0) return errno;
+  if (proc_fd < 0) return access_errno(errno);
   const int fd_dir_fd = openat(proc_fd, "fd", O_RDONLY | O_DIRECTORY | O_CLOEXEC);
   DIR* fd_dir = fd_dir_fd < 0 ? nullptr : fdopendir(fd_dir_fd);
   if (fd_dir == nullptr) {
     const int err = errno;
     if (fd_dir_fd >= 0) close(fd_dir_fd);
     close(proc_fd);
-    return err;
+    return access_errno(err);
   }
   std::unordered_set<uint32_t> drm_minors;
   while (const dirent* entry = readdir(fd_dir)) {
@@ -287,7 +290,7 @@ static int ReadLocalGpuUse(uint32_t pid, LocalGpuRead what, LocalGpuUse* use) {
   }
   closedir(fd_dir);
   const int err = use->has_kfd() && what == LocalGpuRead::kQueues
-                      ? ReadLocalQueueGpus(proc_fd, use->kfd_files, &use->queues)
+                      ? access_errno(ReadLocalQueueGpus(proc_fd, use->kfd_files, &use->queues))
                       : 0;
   close(proc_fd);
   if (what != LocalGpuRead::kKfd) {
