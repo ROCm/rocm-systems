@@ -180,10 +180,10 @@ struct LivenessAnalysisOptions {
 
 /// @brief Whether any instruction in @p blocks is an `s_movrel*` form.
 ///
-/// @details M0 displaces the encoded SGPR index at runtime, so the operand names
-/// one register and the hardware accesses another. Neither
-/// @ref explicit_ordinary_sgpr_bound nor LivenessAnalysis models that, so a
-/// caller relying on either for SGPR usage must reject a scope where this holds.
+/// @details M0 displaces the encoded SGPR index at runtime. LivenessAnalysis
+/// detects these instructions and marks global SGPR usage incomplete because
+/// the physical register depends on M0. Callers using
+/// @ref explicit_ordinary_sgpr_bound must check for these instructions separately.
 ///
 /// Matches by prefix: that covers the load, the store (`s_movreld_*`) and the
 /// RDNA `s_movrelsd_2_b32` pair form. Any other scalar indirection would need
@@ -295,6 +295,22 @@ public:
   /// VGPR ranges must fail closed when this query returns false.
   FailureOr<bool> global_vgpr_usage_is_complete() const;
 
+  /// @brief Whether explicit operands cover SGPR usage in the decoded scope.
+  /// @returns Failure if analysis is unavailable, or false if an `s_movrel*`
+  /// instruction can redirect an SGPR access through M0. A whole-kernel
+  /// conclusion requires a scope that includes all reachable callees.
+  FailureOr<bool> global_sgpr_usage_is_complete() const;
+
+  /// @brief Find an even ordinary SGPR pair unused throughout the decoded scope.
+  /// @details The scope must include reachable callees. The search spans
+  /// REGISTER_SET_ALLOCATABLE_SGPRS. Callers using a pair beyond the current
+  /// kernel descriptor allocation must grow it with require_sgprs(). The query
+  /// does not reserve the pair. Repeated queries may return the same registers.
+  /// @returns Failure if analysis is unavailable. A successful empty result
+  /// means SGPR usage is incomplete, @p inst is outside the scope (or null),
+  /// or no pair is free.
+  FailureOr<std::optional<uint16_t>> find_globally_unused_sgpr_pair(const Instruction *inst) const;
+
   /// @brief Find a VGPR tuple that no instruction in the kernel reads or writes.
   ///
   /// @details This query is cheaper and stronger than point liveness: the
@@ -370,6 +386,7 @@ private:
   mutable bool analyzed_ = false;
   bool exec_masked_defs_kill_ = false;
   bool global_vgpr_usage_is_complete_ = true;
+  bool global_sgpr_usage_is_complete_ = true;
   uint16_t min_free_vgpr_ = 0;
   uint16_t max_free_vgpr_ = 0;
   uint8_t wave_size_ = 0;

@@ -15,6 +15,9 @@ repository.workspace = true
 doctest = false
 crate-type = ["rlib"]
 
+[build-dependencies]
+cc = "1.2"
+
 [lints.rust]
 missing_docs = "deny"
 unsafe_code = "allow"

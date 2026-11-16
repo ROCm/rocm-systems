@@ -23,6 +23,7 @@ RJ_DIAGNOSTIC_POP
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <span>
 #include <string>
 #include <unordered_set>
 #include <utility>
@@ -81,6 +82,14 @@ public:
   /// @brief Forward fixed-map replacement to the simulated execution driver when present.
   void *mmap_replacing_client_doorbell_views(void *addr, size_t length, int prot, int flags, int fd,
                                              off_t offset) override;
+
+  /// @brief Forward host VMA cleanup to the simulated execution KFD, if any.
+  void run_host_vma_replacement(std::span<const std::pair<uint64_t, uint64_t>> ranges,
+                                const std::function<bool()> &bare_mapping_change) override;
+  void *mmap_observing_host_vma_change(void *addr, size_t length, int prot, int flags, off_t offset,
+                                       const std::function<void()> &on_change) override;
+  int munmap_observing_host_vma_change(void *addr, size_t length,
+                                       const std::function<void()> &on_change) override;
 
   /// @brief Return true when @p minor is the configured guest render node.
   [[nodiscard]] bool handles_drm_render_minor(uint32_t minor) const override;

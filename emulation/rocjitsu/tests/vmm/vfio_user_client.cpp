@@ -25,9 +25,11 @@ extern "C" {
 }
 
 #include <sys/socket.h>
+#include <sys/time.h>
 #include <sys/un.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <array>
 #include <cerrno>
 #include <cstdio>
@@ -68,6 +70,14 @@ bool read_exactly(int socket, void *into, std::size_t length) {
 } // namespace
 
 VfioUserClient::~VfioUserClient() { close_socket(); }
+
+bool VfioUserClient::set_io_timeout(std::chrono::seconds timeout) {
+  if (socket_ < 0 || timeout <= std::chrono::seconds::zero())
+    return false;
+  const timeval limit{.tv_sec = static_cast<time_t>(timeout.count()), .tv_usec = 0};
+  return ::setsockopt(socket_, SOL_SOCKET, SO_SNDTIMEO, &limit, sizeof(limit)) == 0 &&
+         ::setsockopt(socket_, SOL_SOCKET, SO_RCVTIMEO, &limit, sizeof(limit)) == 0;
+}
 
 bool VfioUserClient::send(uint16_t command, std::span<const std::byte> payload, int fd) {
   vfio_user_header header{};
@@ -140,7 +150,8 @@ bool VfioUserClient::receive(std::vector<std::byte> &payload) {
   }
   // The server reports a refused access by flagging the reply, which is how a
   // test tells "the device said no" from "the transport broke".
-  return (header.flags & VFIO_USER_F_ERROR) == 0;
+  last_reply_was_error_ = (header.flags & VFIO_USER_F_ERROR) != 0;
+  return !last_reply_was_error_;
 }
 
 bool VfioUserClient::request(uint16_t command, std::span<const std::byte> payload, int fd,
@@ -148,7 +159,7 @@ bool VfioUserClient::request(uint16_t command, std::span<const std::byte> payloa
   return send(command, payload, fd) && receive(reply);
 }
 
-bool VfioUserClient::connect(const std::string &socket_path) {
+bool VfioUserClient::connect(const std::string &socket_path, std::size_t max_version_reply_bytes) {
   // Refused rather than truncated: snprintf would silently shorten an overlong
   // path and then connect to a DIFFERENT socket, which presents as the server
   // never answering.
@@ -158,6 +169,7 @@ bool VfioUserClient::connect(const std::string &socket_path) {
   }
 
   close_socket();
+  last_reply_was_error_ = false;
   socket_ = ::socket(AF_UNIX, SOCK_STREAM, 0);
   if (socket_ < 0) {
     return false;
@@ -174,7 +186,7 @@ bool VfioUserClient::connect(const std::string &socket_path) {
 
   // The version exchange carries each side's limits as JSON. The server replies
   // with its own, which the tests do not need beyond the handshake succeeding.
-  const std::string capabilities =
+  std::string capabilities =
       std::format(R"({{"capabilities":{{"max_msg_fds":{},"max_data_xfer_size":{}}}}})", 8,
                   VFIO_USER_DEFAULT_MAX_DATA_XFER_SIZE);
   std::vector<std::byte> payload(sizeof(vfio_user_version) + capabilities.size() + 1);
@@ -186,6 +198,11 @@ bool VfioUserClient::connect(const std::string &socket_path) {
 
   std::vector<std::byte> reply;
   if (!request(VFIO_USER_VERSION, payload, -1, reply)) {
+    close_socket();
+    return false;
+  }
+  if (max_version_reply_bytes != 0 &&
+      sizeof(vfio_user_header) + reply.size() > max_version_reply_bytes) {
     close_socket();
     return false;
   }
@@ -298,21 +315,22 @@ bool VfioUserClient::region_write(uint32_t region, uint64_t offset,
   return request(VFIO_USER_REGION_WRITE, payload, -1, reply);
 }
 
-bool VfioUserClient::dma_map(uint64_t iova, uint64_t size, int fd, uint64_t fd_offset) {
+bool VfioUserClient::dma_map(uint64_t iova, uint64_t size, int fd, uint64_t fd_offset,
+                             uint32_t padding_bytes, bool writable) {
+  std::vector<std::byte> payload(sizeof(vfio_user_dma_map) + padding_bytes);
   vfio_user_dma_map request_body{};
-  request_body.argsz = sizeof(request_body);
-  request_body.flags = VFIO_USER_F_DMA_REGION_READ | VFIO_USER_F_DMA_REGION_WRITE;
+  request_body.argsz = static_cast<uint32_t>(payload.size());
+  request_body.flags = VFIO_USER_F_DMA_REGION_READ | (writable ? VFIO_USER_F_DMA_REGION_WRITE : 0);
   if (fd >= 0) {
     request_body.flags |= VFIO_USER_F_DMA_REGION_MMAP;
   }
   request_body.offset = fd_offset;
   request_body.addr = iova;
   request_body.size = size;
+  std::memcpy(payload.data(), &request_body, sizeof(request_body));
 
   std::vector<std::byte> reply;
-  return request(VFIO_USER_DMA_MAP,
-                 {reinterpret_cast<const std::byte *>(&request_body), sizeof(request_body)}, fd,
-                 reply);
+  return request(VFIO_USER_DMA_MAP, payload, fd, reply);
 }
 
 bool VfioUserClient::dma_unmap(uint64_t iova, uint64_t size) {
@@ -325,6 +343,11 @@ bool VfioUserClient::dma_unmap(uint64_t iova, uint64_t size) {
   return request(VFIO_USER_DMA_UNMAP,
                  {reinterpret_cast<const std::byte *>(&request_body), sizeof(request_body)}, -1,
                  reply);
+}
+
+bool VfioUserClient::device_reset() {
+  std::vector<std::byte> reply;
+  return request(VFIO_USER_DEVICE_RESET, {}, -1, reply);
 }
 
 } // namespace rocjitsu::test

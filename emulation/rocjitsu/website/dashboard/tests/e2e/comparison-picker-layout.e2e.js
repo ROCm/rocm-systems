@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { expectRunPicker } from './helpers/runPicker.js';
 import { openDashboard, selectRun } from './helpers/dashboard.js';
 
 for (const width of [1439, 390]) {
@@ -10,7 +11,7 @@ for (const width of [1439, 390]) {
       const page = await context.newPage();
       const errors = [];
       page.on('pageerror', (error) => errors.push(error.message));
-      await openDashboard(page, '/?view=compare');
+      await openDashboard(page, '/?view=compare&compareCandidate=unpublished-c&compareBaseline=unpublished-b');
       const controls = [
         page.getByRole('combobox', { name: 'Candidate run', exact: true }),
         page.getByRole('button', { name: 'Swap', exact: true }),
@@ -28,14 +29,14 @@ for (const width of [1439, 390]) {
       };
       await expect(controls[1]).toBeDisabled();
       await selectRun(page, 'Candidate run', 'fictional-develop-23');
-      await expect(page.getByTestId('candidate-run-selected-identity')).toContainText('fictional-develop-23');
+      await expectRunPicker(page, 'candidate-run', 'fictional-develop-23');
       await expectStable();
       await selectRun(page, 'Baseline run', 'fictional-develop-17');
-      await expect(page.getByTestId('baseline-run-selected-identity')).toContainText('fictional-develop-17');
+      await expectRunPicker(page, 'baseline-run', 'fictional-develop-17');
       await expectStable();
       await controls[1].click();
-      await expect(page.getByTestId('candidate-run-selected-identity')).toContainText('fictional-develop-17');
-      await expect(page.getByTestId('baseline-run-selected-identity')).toContainText('fictional-develop-23');
+      await expectRunPicker(page, 'candidate-run', 'fictional-develop-17');
+      await expectRunPicker(page, 'baseline-run', 'fictional-develop-23');
       await expectStable();
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
       expect(errors).toEqual([]);

@@ -13,6 +13,7 @@
 
 #include "rocjitsu/code/dbt/translation_store.h"
 
+#include <algorithm>
 #include <chrono>
 #include <cstdlib>
 #include <cstring>
@@ -29,6 +30,7 @@
 #include <fcntl.h>
 #include <sched.h>
 #include <sys/file.h>
+#include <sys/resource.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -97,6 +99,100 @@ TEST_F(TranslationStoreTest, StoredObjectComesBack) {
   put(*store, kObject);
   EXPECT_EQ(get(*store), kObject);
   EXPECT_EQ(store->hits_for_test(), 1u);
+}
+
+TEST_F(TranslationStoreTest, MalformedEntriesAreMisses) {
+  auto store = open("pair-a");
+  put(*store, kObject);
+  ASSERT_EQ(get(*store), kObject);
+
+  const std::filesystem::path entries = std::filesystem::path(root_) / "pair-a" / "v1";
+  std::filesystem::path manifest;
+  std::filesystem::path object;
+  for (const auto &item : std::filesystem::directory_iterator(entries)) {
+    if (item.path().extension() == ".man")
+      manifest = item.path();
+    if (item.path().extension() == ".obj")
+      object = item.path();
+  }
+  ASSERT_FALSE(manifest.empty());
+  ASSERT_FALSE(object.empty());
+  std::ifstream manifest_stream(manifest);
+  const std::string original((std::istreambuf_iterator<char>(manifest_stream)), {});
+
+  for (const std::string &text : {std::string{}, std::string("bad magic\n"),
+                                  std::string("rjcache1\n"), original + std::string(4096, 'x')}) {
+    std::ofstream(manifest, std::ios::trunc) << text;
+    EXPECT_TRUE(get(*store).empty());
+  }
+  // A valid manifest must still reject a missing or corrupted object.
+  std::ofstream(manifest, std::ios::trunc) << original;
+  std::ofstream(object, std::ios::trunc) << "OUTPUT";
+  EXPECT_TRUE(get(*store).empty());
+  std::filesystem::remove(object);
+  EXPECT_TRUE(get(*store).empty());
+
+  put(*store, kObject);
+  EXPECT_EQ(get(*store), kObject);
+}
+
+TEST_F(TranslationStoreTest, OversizedObjectMismatchIsRejectedBeforeAllocation) {
+  if (dlsym(RTLD_DEFAULT, "__asan_init") || dlsym(RTLD_DEFAULT, "__tsan_init") ||
+      dlsym(RTLD_DEFAULT, "__msan_init"))
+    GTEST_SKIP() << "address-space limits conflict with sanitizer shadow mappings";
+  auto store = open("pair-a");
+  put(*store, kObject);
+  ASSERT_EQ(get(*store), kObject);
+  const std::filesystem::path entries = std::filesystem::path(root_) / "pair-a" / "v1";
+  std::filesystem::path object;
+  for (const auto &item : std::filesystem::directory_iterator(entries))
+    if (item.path().extension() == ".obj")
+      object = item.path();
+  ASSERT_FALSE(object.empty());
+  std::filesystem::resize_file(object, 512u << 20);
+
+  ASSERT_EXIT(
+      {
+        struct rlimit limit {};
+        if (getrlimit(RLIMIT_AS, &limit) != 0)
+          _exit(2);
+        limit.rlim_cur = std::min<rlim_t>(limit.rlim_max, 256u << 20);
+        if (setrlimit(RLIMIT_AS, &limit) != 0)
+          _exit(3);
+        if (!get(*store).empty())
+          _exit(4);
+        put(*store, kObject);
+        _exit(get(*store) == kObject ? 0 : 5);
+      },
+      ::testing::ExitedWithCode(0), "");
+}
+
+TEST_F(TranslationStoreTest, FailedPublicationLeavesNoTemporaryOrPartialEntry) {
+  for (const char *suffix : {".man", ".obj"}) {
+    auto store = open("pair-a");
+    put(*store, kObject);
+    ASSERT_EQ(get(*store), kObject);
+
+    const std::filesystem::path entries = std::filesystem::path(root_) / "pair-a" / "v1";
+    std::filesystem::path blocked;
+    for (const auto &item : std::filesystem::directory_iterator(entries))
+      if (item.path().extension() == suffix)
+        blocked = item.path();
+    ASSERT_FALSE(blocked.empty());
+    for (const auto &item : std::filesystem::directory_iterator(entries))
+      std::filesystem::remove(item.path());
+    // renameat() cannot publish a regular file over this directory. Blocking
+    // the object also exercises cleanup after the manifest was published.
+    ASSERT_TRUE(std::filesystem::create_directory(blocked));
+    put(*store, kObject);
+    EXPECT_TRUE(get(*store).empty());
+    for (const auto &item : std::filesystem::directory_iterator(entries))
+      EXPECT_EQ(item.path(), blocked) << "failed publication left an entry or temporary";
+
+    std::filesystem::remove(blocked);
+    put(*store, kObject);
+    EXPECT_EQ(get(*store), kObject);
+  }
 }
 
 TEST_F(TranslationStoreTest, DomainsDoNotShareEntries) {

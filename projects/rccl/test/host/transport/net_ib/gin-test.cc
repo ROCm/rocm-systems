@@ -717,7 +717,8 @@ TEST_F(NetIbGinMicrotest, CreateContext_SingleRankBuildsContextsAndClampsBatchSi
     int expected;
   };
   for (BatchCase batch :
-       {BatchCase{1, NCCL_RMA_MAX_IB_WRS_PER_OP}, BatchCase{1000, NCCL_RMA_IB_WR_BATCHSIZE}}) {
+       {BatchCase{1, NCCL_RMA_MAX_IB_WRS_PER_OP}, BatchCase{NCCL_RMA_IB_WR_BATCHSIZE + 1, NCCL_RMA_IB_WR_BATCHSIZE},
+        BatchCase{1000, NCCL_RMA_IB_WR_BATCHSIZE}}) {
     SCOPED_TRACE(batch.requested);
     GinCreateContextScene scene(/*nranks=*/1, /*rank=*/0);
     ScopedHook params(g_loadParam, [batch](const char* name, int64_t fallback) {
@@ -1465,6 +1466,175 @@ TEST_F(NetIbGinMicrotest, RmaVtable_ExportsProxyBackendContract) {
   EXPECT_EQ(ncclRmaIbProxy.test, ncclRmaIbProxyTest);
   EXPECT_EQ(ncclRmaIbProxy.rmaProgress, nullptr);
   EXPECT_EQ(ncclRmaIbProxy.queryLastError, nullptr);
+}
+
+// One doorbell: every WR but the last is unsignaled; the last is the signaled
+// tail that a single completion retires the whole batch with.
+void ExpectSignaledTail(const IbVerbsScene::Send& send) {
+  ASSERT_FALSE(send.chain.empty());
+  for (size_t i = 0; i + 1 < send.chain.size(); i++) {
+    EXPECT_EQ(send.chain[i].wr.send_flags & IBV_SEND_SIGNALED, 0) << "wr " << i;
+  }
+  EXPECT_NE(send.chain.back().wr.send_flags & IBV_SEND_SIGNALED, 0);
+}
+
+TEST_F(NetIbGinMicrotest, AggregatePuts_StayUnpostedUntilTheBatchCannotHoldAPutSignal) {
+  GinDataScene scene;
+  scene.context.wrBatchsize = 4;
+  ASSERT_NE(scene.PostPut(ncclRmaOptFlagsAggregateRequests), nullptr);
+  ASSERT_NE(scene.PostPut(ncclRmaOptFlagsAggregateRequests), nullptr);
+  EXPECT_TRUE(scene.verbs.sends.empty());
+
+  // Two held puts plus a third would leave no room for a put-signal, so the third closes the batch.
+  ASSERT_NE(scene.PostPut(ncclRmaOptFlagsAggregateRequests), nullptr);
+  ASSERT_EQ(scene.verbs.sends.size(), 1u);
+  EXPECT_EQ(scene.verbs.sends[0].qp, scene.dataQp);
+  ASSERT_EQ(scene.verbs.sends[0].chain.size(), 3u);
+  ExpectSignaledTail(scene.verbs.sends[0]);
+}
+
+TEST_F(NetIbGinMicrotest, DefaultPuts_RingTheDoorbellForEachRequest) {
+  GinDataScene scene;
+  for (size_t i = 0; i < 3; i++) {
+    ASSERT_NE(scene.PostPut(), nullptr);
+    ASSERT_EQ(scene.verbs.sends.size(), i + 1);
+    EXPECT_EQ(scene.verbs.sends.back().qp, scene.dataQp);
+    ASSERT_EQ(scene.verbs.sends.back().chain.size(), 1u);
+    ExpectSignaledTail(scene.verbs.sends.back());
+  }
+}
+
+TEST_F(NetIbGinMicrotest, PutSignal_ClosesTheBatchOnceAnotherPutSignalWouldNotFit) {
+  GinDataScene scene;
+  scene.context.wrBatchsize = 4;
+  ASSERT_NE(scene.PostPut(ncclRmaOptFlagsAggregateRequests), nullptr);
+  ASSERT_NE(scene.PostPut(ncclRmaOptFlagsAggregateRequests), nullptr);
+  EXPECT_TRUE(scene.verbs.sends.empty());
+
+  // The two held WRs plus this put-signal's two fill the batch, leaving no room for another put-signal.
+  void* request = nullptr;
+  ASSERT_EQ(ncclRmaIbProxyIPutSignal(&scene.context, 0, 0, &scene.srcHandle, 8, 0, &scene.dstHandle, 1, 8,
+                                    &scene.dstHandle, 5, NCCL_NET_SIGNAL_OP_ADD, false,
+                                    ncclRmaOptFlagsAggregateRequests, &request),
+            ncclSuccess);
+  ASSERT_NE(request, nullptr);
+  ASSERT_EQ(scene.verbs.sends.size(), 1u);
+  ASSERT_EQ(scene.verbs.posted.size(), 4u);
+  EXPECT_EQ(scene.verbs.posted[2].opcode, IBV_WR_RDMA_WRITE);
+  EXPECT_EQ(scene.verbs.posted[3].opcode, IBV_WR_ATOMIC_FETCH_AND_ADD);
+  ExpectSignaledTail(scene.verbs.sends[0]);
+}
+
+TEST_F(NetIbGinMicrotest, PutSignal_StaysHeldUntilTheNextPutRingsTheDoorbell) {
+  GinDataScene scene;
+  scene.context.wrBatchsize = 6;
+  ASSERT_NE(scene.PostPut(ncclRmaOptFlagsAggregateRequests), nullptr);
+  ASSERT_NE(scene.PostPut(ncclRmaOptFlagsAggregateRequests), nullptr);
+  void* request = nullptr;
+  ASSERT_EQ(ncclRmaIbProxyIPutSignal(&scene.context, 0, 0, &scene.srcHandle, 8, 0, &scene.dstHandle, 1, 8,
+                                    &scene.dstHandle, 5, NCCL_NET_SIGNAL_OP_ADD, false,
+                                    ncclRmaOptFlagsAggregateRequests, &request),
+            ncclSuccess);
+  EXPECT_TRUE(scene.verbs.sends.empty());
+
+  // The default put closes the batch: two aggregated puts, one put-signal, then this put.
+  ASSERT_NE(scene.PostPut(), nullptr);
+  ASSERT_EQ(scene.verbs.sends.size(), 1u);
+  ASSERT_EQ(scene.verbs.posted.size(), 5u);
+  EXPECT_EQ(scene.verbs.posted[3].opcode, IBV_WR_ATOMIC_FETCH_AND_ADD);
+  EXPECT_EQ(scene.verbs.posted[4].opcode, IBV_WR_RDMA_WRITE);
+  ExpectSignaledTail(scene.verbs.sends[0]);
+}
+
+TEST_F(NetIbGinMicrotest, IGet_AggregatesAReadTheSameWay) {
+  GinDataScene scene;
+  scene.context.wrBatchsize = 4;
+  void* request = nullptr;
+  ASSERT_EQ(ncclRmaIbProxyIGet(&scene.context, 0, 0, &scene.srcHandle, 8, 0, &scene.dstHandle, 1,
+                              ncclRmaOptFlagsAggregateRequests, &request),
+            ncclSuccess);
+  ASSERT_NE(request, nullptr);
+  EXPECT_TRUE(scene.verbs.sends.empty());
+
+  // A default read closes the batch: the held read plus this one, posted as one doorbell.
+  void* closing = nullptr;
+  ASSERT_EQ(ncclRmaIbProxyIGet(&scene.context, 0, 0, &scene.srcHandle, 8, 0, &scene.dstHandle, 1, 0, &closing),
+            ncclSuccess);
+  ASSERT_NE(closing, nullptr);
+  ASSERT_EQ(scene.verbs.sends.size(), 1u);
+  ASSERT_EQ(scene.verbs.posted.size(), 2u);
+  EXPECT_EQ(scene.verbs.posted[0].opcode, IBV_WR_RDMA_READ);
+  EXPECT_EQ(scene.verbs.posted[1].opcode, IBV_WR_RDMA_READ);
+  ExpectSignaledTail(scene.verbs.sends[0]);
+}
+
+TEST_F(NetIbGinMicrotest, Test_PostsTheHeldBatchAndOneTailCompletionRetiresEveryEarlierRequest) {
+  GinDataScene scene;
+  scene.context.wrBatchsize = 4;
+  ncclIbRequest* reqs[4];
+  for (ncclIbRequest*& req : reqs) {
+    req = scene.PostPut(ncclRmaOptFlagsAggregateRequests);
+    ASSERT_NE(req, nullptr);
+  }
+  // Three puts fill the first batch and post it; the fourth stays held.
+  ASSERT_EQ(scene.verbs.sends.size(), 1u);
+  ASSERT_EQ(scene.verbs.sends[0].chain.size(), 3u);
+  ExpectSignaledTail(scene.verbs.sends[0]);
+
+  // Only the posted batch's tail completes; a single completion covers the earlier requests.
+  scene.QueueCompletion(reqs[2]);
+  int done = 0;
+  ASSERT_EQ(ncclRmaIbProxyTest(nullptr, reqs[0], &done), ncclSuccess);
+  EXPECT_EQ(done, 1);
+  EXPECT_EQ(scene.verbs.sends.size(), 2u);  // the held fourth put was posted by the test
+  for (int i = 1; i <= 2; i++) {
+    ASSERT_EQ(ncclRmaIbProxyTest(nullptr, reqs[i], &done), ncclSuccess);
+    EXPECT_EQ(done, 1) << "request " << i;
+  }
+  done = 0;
+  ASSERT_EQ(ncclRmaIbProxyTest(nullptr, reqs[3], &done), ncclSuccess);
+  EXPECT_EQ(done, 0);
+
+  scene.QueueCompletion(reqs[3]);
+  ASSERT_EQ(ncclRmaIbProxyTest(nullptr, reqs[3], &done), ncclSuccess);
+  EXPECT_EQ(done, 1);
+}
+
+TEST_F(NetIbGinMicrotest, DestroyContext_PostsAHeldBatchBeforeReleasingTheComms) {
+  GinDataScene scene;
+  // DestroyContext frees the comm arrays with the ledgered free(), so they come from the ledger too.
+  ncclRmaIbProxyCtx* context = nullptr;
+  ASSERT_EQ(g_hostAllocs.Calloc(&context, 1), ncclSuccess);
+  context->rank = 0;
+  context->nranks = 2;
+  context->nContexts = 1;
+  context->wrBatchsize = NCCL_RMA_IB_WR_BATCHSIZE;
+  void** sendComms = nullptr;
+  void** recvComms = nullptr;
+  ASSERT_EQ(g_hostAllocs.Calloc(&sendComms, 2), ncclSuccess);
+  ASSERT_EQ(g_hostAllocs.Calloc(&recvComms, 2), ncclSuccess);
+  context->fullSendComm = sendComms;
+  context->fullRecvComm = recvComms;
+  sendComms[1] = &scene.send;
+  recvComms[1] = &scene.recv;
+  HookOf<decltype(g_ginNetCloseSend)> closeSend{g_ginNetCloseSend, [](void*) { return ncclSuccess; }};
+  HookOf<decltype(g_ginNetCloseRecv)> closeRecv{g_ginNetCloseRecv, [](void*) { return ncclSuccess; }};
+
+  void* put = nullptr;
+  ASSERT_EQ(ncclRmaIbProxyIPut(context, 0, 0, &scene.srcHandle, 8, 0, &scene.dstHandle, 1,
+                              ncclRmaOptFlagsAggregateRequests, &put),
+            ncclSuccess);
+  ASSERT_NE(put, nullptr);
+  EXPECT_TRUE(scene.verbs.sends.empty());
+
+  ASSERT_EQ(ncclRmaIbProxyDestroyContext(context), ncclSuccess);
+  ASSERT_EQ(scene.verbs.sends.size(), 1u);
+  EXPECT_EQ(scene.verbs.sends[0].qp, scene.dataQp);
+  ASSERT_EQ(scene.verbs.sends[0].chain.size(), 1u);
+  ExpectSignaledTail(scene.verbs.sends[0]);
+  EXPECT_EQ(context->fullSendComm, nullptr);
+  EXPECT_EQ(context->fullRecvComm, nullptr);
+  g_hostAllocs.Free(context);
 }
 
 }  // namespace

@@ -15,6 +15,7 @@
 #pragma once
 
 #include "../mma_test_util.h"
+#include "compute_unit_test_util.h"
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/mma_exec.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
@@ -196,7 +197,9 @@ struct ExactFixture {
     cfg.sgprs_per_wf = SGPRS;
     cfg.vgprs_per_wf = VGPRS;
     cfg.lds_size_kb = 64;
-    cu = amdgpu::ComputeUnitCore::create("cu_mma_exact", cfg, &gpu_mem, &l2);
+    rocjitsu::test::initialize_compute_unit(cu, "cu_mma_exact", cfg, &gpu_mem, &l2);
+    if (!cu)
+      return;
     wf = cu->dispatch_wf(0, 0, SGPRS, VGPRS);
     if (wf)
       vbase = wf->vgpr_alloc().base;
