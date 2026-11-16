@@ -51,13 +51,13 @@ rocprof-compute profile --experimental --trace-ml-api triton --name <name> -- py
 `torch.compile` / Inductor fused kernels use PyTorch's static launcher, so they
 do not get `|triton` ranges. Attribute them with `--trace-ml-api torch`.
 
-For JAX (`jax.jit` / `jax.pmap` / eager primitives):
+For JAX (`jax.jit` / `jax.pmap` / `jax.shard_map` / eager primitives):
 
 ```bash
 rocprof-compute profile --experimental --trace-ml-api jax --name <name> -- python <script.py>
 ```
 
-A nested `jit` is one marker. The tracer does not wrap `pjit` or `shard_map`.
+A nested `jit` is one marker. Compiled calls are `jax.jit.<fn>`, `jax.pmap.<fn>`, and `jax.shard_map.<fn>`.
 
 All three combine as `--trace-ml-api torch triton jax`. User-defined ROCTx regions
 are included with every `--trace-ml-api` run. A bare `--trace-ml-api` traces

@@ -1122,13 +1122,15 @@ JAX trace
 =========
 
 ROCm Compute Profiler can map performance counters to the ``jax.jit`` /
-``jax.pmap`` compiled call or eager primitive that launched them.
+``jax.pmap`` / ``jax.shard_map`` compiled call or eager primitive that
+launched them.
 Enable it with the ``--trace-ml-api jax`` option. It writes the same
 ``ml_api_trace`` output as Torch and Triton trace and is analyzed the same way.
 
-The tracer wraps compiled ``jax.jit`` and ``jax.pmap`` calls and
-``jax.extend.core.Primitive`` dispatch. Marker names are ``jax.jit.<fn>``,
-``jax.pmap.<fn>``, and ``jax.{primitive}`` (for example ``jax.dot_general``).
+The tracer wraps compiled ``jax.jit``, ``jax.pmap``, and ``jax.shard_map``
+calls and ``jax.extend.core.Primitive`` dispatch. Marker names are
+``jax.jit.<fn>``, ``jax.pmap.<fn>``, ``jax.shard_map.<fn>``, and
+``jax.{primitive}`` (for example ``jax.dot_general``).
 It does not wrap ``jnp.*`` helpers. A nested or inner call does not open a
 second range; its kernels stay under the outer marker.
 
@@ -1138,8 +1140,7 @@ Kernels launched from the call inherit that marker and join on
 ``Correlation_ID`` and ``GUID``.
 
 The deprecated ``pjit`` alias compiles to the same ``PjitFunction`` as
-``jax.jit``, so those calls show as ``jax.jit.<fn>``. ``shard_map`` is unmarked
-unless it sits under an outer ``jit`` / ``pmap``.
+``jax.jit``, so those calls show as ``jax.jit.<fn>``.
 
 .. warning::
 
