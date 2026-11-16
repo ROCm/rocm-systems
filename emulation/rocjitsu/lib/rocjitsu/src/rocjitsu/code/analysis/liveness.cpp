@@ -72,6 +72,8 @@ void dfs_reverse_post_order(const BasicBlock &start,
   // they can never be unconditional kills.
   if (du.has_predicated_def)
     return {};
+  if (du.conditional_vgpr_def)
+    kills.erase(*du.conditional_vgpr_def);
   // EXEC-masked vector defs preserve inactive lanes' old values, so they are
   // kills only where EXEC is provably full (every lane overwritten). Where the
   // EXEC state is unknown we stay conservative and do not kill.

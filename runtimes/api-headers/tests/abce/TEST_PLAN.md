@@ -25,6 +25,7 @@ ASLR off: `setarch "$(uname -m)" -R ./abce_unit_tests`.
 |---|---|
 | `harness/abce_test_harness.hpp` | ISA table, frame walker, fake ring (plain memory, instant or manual engine, mapped-words or queue-ops backend), `Mapper` (builder + orchestrator + rings) |
 | `unit/device_test.cpp` | Device submitter on host-memory rings |
+| `unit/hsa_test.cpp` | HSA queue-ring adapter over a stubbed queue table |
 | `unit/packet_fields_test.cpp` | Packet bit-field regressions |
 | `unit/validation_test.cpp` | Request validation and plan lifecycle |
 | `unit/profiling_test.cpp` | Timestamp ordering for profiled copies |
@@ -85,9 +86,12 @@ Currently: gfx90a large multicast with several engines returns `NO_LEGAL_ENGINE`
 - libFuzzer on `abce_decode.h` against truncated/garbage streams: must terminate, never read past
   the end.
 
-### T7. Planned: C++ and HSA wrappers (GPU-free)
-`abce_cxx.h` RAII/ownership and error mapping; `abce_hsa.h` with a stubbed HSA table (queue
-creation, signal handling, pinned-memory lock failure paths).
+### T7. C++ and HSA wrappers (GPU-free; started)
+Done: `unit/hsa_test.cpp` runs `abce_hsa.h`'s queue-ring adapter over a stubbed queue table; a
+failed direct-word query leaves the adapter uninitialized (null ring, `drain()` refused), and it
+initializes once every query succeeds.
+Planned: `abce_cxx.h` RAII/ownership and error mapping; the rest of `abce_hsa.h` (queue creation,
+signal handling, pinned-memory lock failure paths).
 
 ### T8. Device submitter (done)
 `unit/device_test.cpp` runs `abce_device.h`'s single-lane path on the host against plain-memory

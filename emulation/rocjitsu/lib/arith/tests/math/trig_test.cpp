@@ -14,7 +14,7 @@
 #include "common/semantics.h"
 #include "common/wave.h"
 #include "math/trig_golden.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_math.h"
 #include <bit>
 
 #include <cmath>

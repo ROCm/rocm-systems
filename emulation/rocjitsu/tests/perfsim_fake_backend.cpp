@@ -300,15 +300,12 @@ bool has_expected_v8_native_bitfield_layout() {
 }
 
 void trace(const std::string &line) noexcept {
-  try {
-    std::lock_guard<std::mutex> lock(trace_mutex);
-    const char *path = std::getenv("ROCJITSU_PERFSIM_FAKE_TRACE");
-    if (!path || !*path)
-      return;
-    std::ofstream output(path, std::ios::app);
-    output << line << '\n';
-  } catch (...) {
-  }
+  std::lock_guard<std::mutex> lock(trace_mutex);
+  const char *path = std::getenv("ROCJITSU_PERFSIM_FAKE_TRACE");
+  if (!path || !*path)
+    return;
+  std::ofstream output(path, std::ios::app);
+  output << line << '\n';
 }
 
 bool mode_is(const char *value) {

@@ -7,9 +7,9 @@
 // Class bits follow rocjitsu's execute_v_cmp_class_f{16,32,64} bitwise models.
 
 #include "compare/class.h"
-#include "common/internal.h"
+#include "common/validation.h"
 #include "register/dpp.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_compare.h"
 
 #include <stdint.h>
 

@@ -4,7 +4,7 @@
 // Tests for integer multiplication and high-half products.
 
 #include "integer/multiply_test.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_integer.h"
 
 #include <gtest/gtest.h>
 

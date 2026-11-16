@@ -9,8 +9,9 @@
 #pragma once
 
 #include "common/bits.h"
+#include "common/compiler.h"
 #include "fp/float_output.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_common.h"
 
 #include <stdint.h>
 
@@ -57,6 +58,7 @@ template <typename Ops> inline typename Ops::V division_vector_top(DivisionVecto
   auto high = Ops::inverse(Ops::eq(a.hi, Ops::set(0)));
   auto word = Ops::select(high, a.hi, a.lo), top = Ops::select(high, Ops::set(64), Ops::set(0));
   constexpr unsigned shifts[] = {32u, 16u, 8u, 4u, 2u, 1u};
+  RJ_ARITH_UNROLL(6)
   for (unsigned shift : shifts) {
     auto upper = Ops::shr(word, Ops::set(shift));
     auto present = Ops::inverse(Ops::eq(upper, Ops::set(0)));
@@ -294,6 +296,7 @@ inline void division_vector_run(uint32_t exec_mask, uint32_t mode, uint32_t *con
   for (int lane = 0; lane < 32; lane += Ops::lanes) {
     typename Ops::V inputs[3];
     const uint32_t *const *sources[] = {a, b, c};
+    RJ_ARITH_UNROLL(3)
     for (int i = 0; i < 3; ++i) {
       inputs[i] = Ops::load_words(sources[i][0] + lane);
       if constexpr (Width == 64) {

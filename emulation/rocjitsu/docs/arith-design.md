@@ -156,13 +156,15 @@ integration retains Rocjitsu's existing exception classifier for Compatibility;
 explicit mode 3 uses the library's qualified reporting domain instead.
 Compatibility may retain demonstrated hardware-fidelity improvements over the
 previous interpreter; instruction contracts document such exceptions.
+On RDNA4 the simulator also records invalid inputs to FP32 binary arithmetic
+and min/max, overflow of FP32 add/subtract before OMOD, and signaling
+floating-point compares on NaN. Dual FP32 arithmetic slots share the wave’s
+exception flags. Explicit numeric-only modes suppress these additional flags.
 Rocjitsu's [`arithmetic.semantics`](configuration.md#cpu-arithmetic-policy)
 setting maps directly to these modes and defaults to compatibility. Its string
 values are the lowercase constant names without `RJ_ARITH_SEMANTICS_`.
-The migrated families are RDNA3/RDNA4 dense WMMA, RDNA4 sparse WMMA, and RDNA3/RDNA4
-fused floating-point arithmetic, basic floating-point arithmetic and selection,
-division, dot products, conversions, math functions, comparisons, integer arithmetic, scalar arithmetic, dual-issue arithmetic, graphics operations and register/lane routing. Other handlers retain their existing
-implementations.
+[Instruction coverage](../lib/arith/COVERAGE.md) describes the migrated families.
+Other handlers retain their existing implementations.
 
 ### Guest FP controls
 

@@ -5,13 +5,13 @@
 // Owns public entry points and their validation/dispatch policy.
 
 #include "dot/dot.h"
-#include "common/float_formats.h"
-#include "common/internal.h"
+#include "common/float_encoding.h"
 #include "common/simd.h"
+#include "common/validation.h"
 #include "dot/gfx11_dot2.h"
 #include "dot/x86_64/dot2_exact.h"
 #include "register/dpp.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_dot.h"
 
 #include <stdint.h>
 

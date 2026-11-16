@@ -24,12 +24,37 @@
 
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 
+#include <optional>
+#include <utility>
+
 namespace rocprofiler
 {
 namespace hsa
 {
 namespace async_copy
 {
+using copy_time_t = std::pair<hsa_status_t, hsa_amd_profiling_async_copy_time_t>;
+
+void
+create_copy_signal(hsa_signal_t signal);
+
+void
+retain_copy_signal(hsa_signal_t signal);
+
+void
+release_copy_signal(hsa_signal_t signal);
+
+void
+record_copy_time(hsa_signal_t                        signal,
+                 hsa_status_t                        status,
+                 hsa_amd_profiling_async_copy_time_t time);
+
+std::optional<copy_time_t>
+find_copy_time(hsa_signal_t signal);
+
+void
+clear_copy_time_cache();
+
 const char*
 name_by_id(uint32_t id);
 
@@ -51,5 +76,8 @@ async_copy_sync();
 
 void
 async_copy_fini();
+
+void
+async_copy_reset();
 }  // namespace hsa
 }  // namespace rocprofiler
