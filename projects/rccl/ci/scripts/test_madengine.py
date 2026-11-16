@@ -49,6 +49,7 @@ import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import NoReturn
 
 from rccl_ci_utils import (
     find_rccl_library,
@@ -2938,6 +2939,36 @@ def resolve_baseline(
     return build
 
 
+def send_report(args: argparse.Namespace, report: str, exit_code: int) -> None:
+    """Send *report* to the email and Teams channel the run was given."""
+    status = "PASSED" if exit_code == 0 else "FAILED"
+    subject_prefix = f"RCCL MADEngine {args.workload}"
+    if args.notify_email:
+        send_email_report(report, args.notify_email, status,
+                          subject_prefix=subject_prefix)
+    if args.teams_webhook:
+        send_teams_webhook(report, args.teams_webhook, status,
+                           subject_prefix=subject_prefix)
+
+
+def fail_before_run(args: argparse.Namespace, scale: str, reason: str) -> NoReturn:
+    """Exit 1 for a run stopped before its phases, reporting it like one that ran.
+
+    A scheduled night that fails here still sends its report.
+    """
+    log.error("%s", reason)
+    report = generate_summary_report(
+        args.workload, scale, 1, f"not run: {reason}", "", args.cluster,
+        builds={CANDIDATE: os.environ.get("ARTIFACT_RUN_ID", ""),
+                BASELINE: os.environ.get("BASELINE_ARTIFACT_RUN_ID", "")},
+    )
+    log.info("\n%s", report)
+    write_github_summary(report)
+    set_github_output("madengine_status", "fail")
+    send_report(args, report, 1)
+    sys.exit(1)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -3053,8 +3084,7 @@ def main() -> None:
         try:
             build = resolve_baseline(args.workload, cluster_config["gpu_target"])
         except RuntimeError as exc:
-            log.error("No A/B baseline: %s", exc)
-            sys.exit(1)
+            fail_before_run(args, scale, f"No A/B baseline: {exc}")
         print(f"artifact_run_id={build}")
         # Looked up here: the run step installs and runs third-party code, so
         # it gets no GITHUB_TOKEN and reads these from the env instead.
@@ -3098,9 +3128,9 @@ def main() -> None:
     # from the image's own RCCL, and that phase would be measured unverified.
     unreadable = [phase for phase in libs if not fingerprints[phase]["version"]]
     if unreadable:
-        log.error("Could not read the RCCL version of the %s library, so its "
-                  "phase could not be verified to run it", " and ".join(unreadable))
-        sys.exit(1)
+        fail_before_run(args, scale, (
+            f"Could not read the RCCL version of the {' and '.join(unreadable)} "
+            "library, so its phase could not be verified to run it"))
     rccl_fingerprint = fingerprints[CANDIDATE]
     if rccl_fingerprint["md5"] and rccl_fingerprint["md5"] == fingerprints[BASELINE]["md5"]:
         log.info("Both builds carry the same librccl: this run is an A/A")
@@ -3119,8 +3149,7 @@ def main() -> None:
         try:
             base_ref = resolve_base_digest(workload_config["base_image"])
         except RuntimeError as exc:
-            log.error("Cannot pin the A/B base image: %s", exc)
-            sys.exit(1)
+            fail_before_run(args, scale, f"Cannot pin the A/B base image: {exc}")
 
     # Step 3: Stage both phases' images (or use pre-built). Images are built on
     # the allocation's nodes, never here: this host's disk is shared by runners.
@@ -3130,19 +3159,22 @@ def main() -> None:
             sys.exit(1)
         images = {phase: args.overlay_image for phase in libs}
     else:
-        images = {
-            phase: stage_rccl_overlay(
-                lib,
-                workload_config["base_image"],
-                cluster_config["gpu_target"],
-                work_dir,
-                family=family,
-                primus_dir=primus_dir,
-                from_ref=base_ref,
-                phase=phase,
-            )
-            for phase, lib in libs.items()
-        }
+        try:
+            images = {
+                phase: stage_rccl_overlay(
+                    lib,
+                    workload_config["base_image"],
+                    cluster_config["gpu_target"],
+                    work_dir,
+                    family=family,
+                    primus_dir=primus_dir,
+                    from_ref=base_ref,
+                    phase=phase,
+                )
+                for phase, lib in libs.items()
+            }
+        except RuntimeError as exc:
+            fail_before_run(args, scale, f"Cannot stage the A/B images: {exc}")
 
     # Step 4: Generate one manifest per A/B phase
     phases: list[tuple[str, Path]] = []
@@ -3391,13 +3423,7 @@ def main() -> None:
     summary_path = work_dir / "madengine_summary.txt"
     summary_path.write_text(report)
 
-    report_status = "PASSED" if exit_code == 0 else "FAILED"
-    if args.notify_email:
-        send_email_report(report, args.notify_email, report_status,
-                          subject_prefix=f"RCCL MADEngine {args.workload}")
-    if args.teams_webhook:
-        send_teams_webhook(report, args.teams_webhook, report_status,
-                           subject_prefix=f"RCCL MADEngine {args.workload}")
+    send_report(args, report, exit_code)
 
     sys.exit(exit_code)
 

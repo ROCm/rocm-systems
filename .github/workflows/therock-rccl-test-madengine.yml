@@ -240,12 +240,23 @@ jobs:
           BASELINE_ARTIFACT_RUN_ID: ${{ inputs.baseline_artifact_run_id }}
           WORKLOAD: ${{ inputs.workload }}
           NODES: ${{ inputs.nodes }}
+          # A night that stops here must still send its report.
+          NOTIFY_EMAIL: ${{ inputs.notify_email }}
+          TEAMS_WEBHOOK: ${{ inputs.teams_webhook }}
         run: |
+          NOTIFY_ARGS=()
+          if [ -n "${NOTIFY_EMAIL}" ]; then
+            NOTIFY_ARGS+=(--notify-email "${NOTIFY_EMAIL}")
+          fi
+          if [ -n "${TEAMS_WEBHOOK}" ]; then
+            NOTIFY_ARGS+=(--teams-webhook "${TEAMS_WEBHOOK}")
+          fi
           python3 rocm-systems/projects/rccl/ci/scripts/test_madengine.py \
             --resolve-baseline \
             --workload "${WORKLOAD}" \
             --cluster "${CLUSTER}" \
-            --nodes "${NODES}" >> "$GITHUB_OUTPUT"
+            --nodes "${NODES}" \
+            "${NOTIFY_ARGS[@]}" >> "$GITHUB_OUTPUT"
 
       - name: Fetch baseline RCCL artifacts
         env:

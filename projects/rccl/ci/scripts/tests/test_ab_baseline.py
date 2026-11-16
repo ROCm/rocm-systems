@@ -3,6 +3,7 @@
 Run from projects/rccl/ci/scripts:  python3 -m unittest discover -s tests
 """
 
+import contextlib
 import io
 import json
 import os
@@ -305,6 +306,82 @@ class MainPhaseLibraries(unittest.TestCase):
             self.assertEqual(self.staged, {})
 
 
+class FailBeforeRun(unittest.TestCase):
+    """A run that stops before its phases still sends its report."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.summary = Path(tmp.name) / "summary.md"
+        self.senders = {}
+        for name in ("send_email_report", "send_teams_webhook"):
+            patcher = mock.patch.object(tm, name)
+            self.senders[name] = patcher.start()
+            self.addCleanup(patcher.stop)
+        patcher = mock.patch.dict(os.environ, {"GITHUB_STEP_SUMMARY": str(self.summary),
+                                               "ARTIFACT_RUN_ID": "500"})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def main(self, *argv: str, **patches) -> str:
+        """main() with *patches* over test_madengine; returns its stdout."""
+        argv = ["test_madengine.py", "--workload", "llama-3.1-70b-training",
+                "--cluster", "ruby", "--notify-email", "ci@example.com",
+                "--teams-webhook", "https://hook.example.com", *argv]
+        out = io.StringIO()
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(mock.patch.object(sys, "argv", argv))
+            stack.enter_context(mock.patch("sys.stdout", out))
+            for name, new in patches.items():
+                stack.enter_context(mock.patch.object(tm, name, new))
+            with self.assertRaises(SystemExit) as cm:
+                tm.main()
+        self.assertEqual(cm.exception.code, 1)
+        return out.getvalue()
+
+    def assert_reported(self, reason: str) -> None:
+        for name, sender in self.senders.items():
+            sender.assert_called_once()
+            report, _, status = sender.call_args.args
+            self.assertEqual(status, "FAILED", name)
+            self.assertIn(reason, report, name)
+        self.assertIn(reason, self.summary.read_text())
+
+    def run_main(self, **patches) -> None:
+        good = {"md5": "", "version": "2.30.4-HEAD:aaaaaaa", "size": 0}
+        defaults = {
+            "find_rccl_library": lambda d: Path(d) / "librccl.so",
+            "get_rccl_fingerprint": mock.Mock(return_value=good),
+            "install_madengine": mock.Mock(),
+            "check_mad_knobs": mock.Mock(),
+            "resolve_base_digest": mock.Mock(return_value="b@sha256:1"),
+        }
+        self.main("--artifact-dir", "/cand", "--baseline-artifact-dir", "/base",
+                  "--work-dir", "/nonexistent", **{**defaults, **patches})
+
+    def test_no_baseline(self):
+        stdout = self.main("--resolve-baseline", resolve_baseline=mock.Mock(
+            side_effect=RuntimeError("no nightly CI build before 500")))
+        self.assertEqual(stdout, "")
+        self.assert_reported("No A/B baseline: no nightly CI build before 500")
+
+    def test_an_unreadable_version(self):
+        self.run_main(get_rccl_fingerprint=mock.Mock(
+            return_value={"md5": "", "version": "", "size": 0}))
+        self.assert_reported("Could not read the RCCL version of the baseline and "
+                             "candidate library")
+
+    def test_an_unpinned_base_image(self):
+        self.run_main(resolve_base_digest=mock.Mock(
+            side_effect=RuntimeError("the registry gave no digest for rocm/primus")))
+        self.assert_reported("Cannot pin the A/B base image: the registry gave no digest")
+
+    def test_an_image_that_cannot_be_staged(self):
+        self.run_main(stage_rccl_overlay=mock.Mock(
+            side_effect=RuntimeError("loads its GPU kernels from a .kpack")))
+        self.assert_reported("Cannot stage the A/B images: loads its GPU kernels")
+
+
 class ResolveBaselineCli(unittest.TestCase):
     def test_stdout_carries_only_the_output_line(self):
         env = {k: v for k, v in os.environ.items() if not k.startswith("GITHUB_")}
@@ -366,6 +443,13 @@ class Workflow(unittest.TestCase):
         run = steps["Run MADEngine workload"]
         self.assertEqual(run["env"]["BASELINE_ARTIFACT_RUN_ID"], resolved)
         self.assertIn('--baseline-artifact-dir "${BASELINE_ARTIFACTS_DIR}"', run["run"])
+
+    def test_the_baseline_step_can_report_its_failure(self):
+        steps = {s["name"]: s for s in self.workflow["jobs"]["test_madengine"]["steps"]}
+        resolve = steps["Resolve the A/B baseline build"]
+        self.assertEqual(resolve["env"]["NOTIFY_EMAIL"], "${{ inputs.notify_email }}")
+        self.assertEqual(resolve["env"]["TEAMS_WEBHOOK"], "${{ inputs.teams_webhook }}")
+        self.assertIn('"${NOTIFY_ARGS[@]}"', resolve["run"])
 
     def test_only_the_baseline_step_gets_the_token_for_the_lookups(self):
         steps = {s["name"]: s for s in self.workflow["jobs"]["test_madengine"]["steps"]}
