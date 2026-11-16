@@ -92,6 +92,10 @@ Signal* IPCSignal::Attach(const hsa_amd_ipc_signal_t* ipc_signal_handle) {
   // Reuse an existing attachment before importing the shared memory again. The
   // underlying DRM import is not idempotent for repeated imports of the same
   // handle, while HSA signal handles are reference-counted.
+  // Keep this lock across the import so two threads cannot import the same key
+  // concurrently. On the dmabuf path, this also serializes other attaches and
+  // destroys while IPCClientImport waits up to 10 seconds to connect and 10
+  // seconds to receive the exported handle.
   std::lock_guard<std::mutex> lock(lock_);
   auto it = attachments_.find(key);
   if (it != attachments_.end()) {
