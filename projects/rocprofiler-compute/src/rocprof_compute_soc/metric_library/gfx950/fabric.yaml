@@ -132,7 +132,7 @@ fabric.rd_stall:
   unit: Percent
   description: >-
     The ratio of the total number of cycles the L2-Fabric interface was stalled on a
-    read request to any destination (local HBM, remote PCIe\xAE connected accelerator or
+    read request to any destination (local HBM, remote PCIe connected accelerator or
     CPU, or remote Infinity Fabric connected accelerator or CPU) over the total active
     L2 cycles.
 fabric.remote_access_pressure_gmi:

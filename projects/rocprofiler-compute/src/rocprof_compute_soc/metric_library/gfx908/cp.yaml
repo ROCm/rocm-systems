@@ -20,7 +20,7 @@ cp.cpc_utcl1_stall:
   formula: 100 * SUM(CPC_UTCL1_STALL_ON_TRANSLATION) / SUM(CPC_CPC_STAT_BUSY)
   unit: Percent
   description: >-
-    Percent of CPC busy cycles where the CPC was stalled by address translation
+    Percent of CPC busy cycles where the CPC was stalled by address translation.
 cp.cpc_utcl2_util:
   name: CPC-UTCL2 Utilization
   formula: 100 * SUM(CPC_CPC_UTCL2IU_BUSY) / SUM(CPC_CPC_UTCL2IU_BUSY + CPC_CPC_UTCL2IU_IDLE)
