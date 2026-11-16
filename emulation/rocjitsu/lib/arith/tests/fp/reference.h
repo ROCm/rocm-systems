@@ -8,7 +8,7 @@
 #include "common/cpu.h"
 #include "common/floating_point.h"
 #include "common/half_reference.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_common.h"
 #include <bit>
 
 #include <algorithm>
@@ -88,6 +88,33 @@ inline void expect_fp(uint64_t actual, uint64_t expected, int width, uint64_t se
   }
 }
 
+// IEEE selection with signed-zero ordering. These test references cover quiet
+// NaNs. Directed guest-control cases live in v_min_max_test.cpp; loose results
+// do not promise a particular NaN payload or signed-zero choice.
+inline double select_fp(double x, double y, bool maximum, bool propagate = false) {
+  if (std::isnan(x) || std::isnan(y)) {
+    return propagate ? std::numeric_limits<double>::quiet_NaN() : std::isnan(x) ? y : x;
+  }
+  if (x == 0 && y == 0) {
+    return (maximum ? std::signbit(x) && std::signbit(y) : std::signbit(x) || std::signbit(y))
+               ? -0.0
+               : 0.0;
+  }
+  return maximum ? std::max(x, y) : std::min(x, y);
+}
+
+// Return the test reference's three-value median.
+inline double median_fp(double x, double y, double z) {
+  if (std::isnan(x) || std::isnan(y) || std::isnan(z)) {
+    return select_fp(select_fp(x, y, false), z, false);
+  }
+  double values[] = {x, y, z};
+  std::sort(std::begin(values), std::end(values), [](double a, double b) {
+    return a < b || (a == 0 && b == 0 && std::signbit(a) && !std::signbit(b));
+  });
+  return values[1];
+}
+
 // Apply source sign modifiers; selection of packed halves stays in each test.
 inline double modified_fp(double value, uint64_t instruction_flags, int operand) {
   if (instruction_flags & (RJ_ARITH_ALU_ABS_A << operand)) {
@@ -107,19 +134,6 @@ template <typename Call> void expect_invalid_fp_requests(Call call) {
   }
   EXPECT_EQ(call(1ULL << 63, 0), RJ_ARITH_ERROR_INVALID_FLAGS);
   EXPECT_EQ(call(0, 1ULL << 63), RJ_ARITH_ERROR_INVALID_FLAGS);
-}
-
-// FP64 FMA and unary APIs reject nondefault guest rounding in Loose/Compatibility.
-// The caller checks that rejected requests preserve operand and status storage.
-template <typename Call> void expect_invalid_fp64_rounding(Call call) {
-  for (uint64_t cpu : supported_cpu_levels()) {
-    for (uint64_t semantics : {RJ_ARITH_SEMANTICS_LOOSE, RJ_ARITH_SEMANTICS_COMPATIBILITY}) {
-      for (uint64_t rounding :
-           {RJ_ARITH_FP_ROUND_UP, RJ_ARITH_FP_ROUND_DOWN, RJ_ARITH_FP_ROUND_ZERO}) {
-        EXPECT_EQ(call(cpu | semantics | rounding, 0), RJ_ARITH_ERROR_INVALID_FLAGS);
-      }
-    }
-  }
 }
 
 // FMA validates malformed controls before rejecting an unsupported status request.

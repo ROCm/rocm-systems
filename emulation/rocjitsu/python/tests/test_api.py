@@ -610,7 +610,7 @@ assert not rocjitsu.run(lambda: importlib.util.find_spec('parent_only_framework'
         self.assertEqual(rocjitsu.cli(["--help"]).returncode, 0)
         with self.assertRaises(subprocess.CalledProcessError) as caught:
             rocjitsu.cli(["--not-a-real-option"])
-        self.assertIn("unknown option", caught.exception.stderr)
+        self.assertIn("unknown flag", caught.exception.stderr)
         self.assertEqual(CONFIG.read_bytes(), original)
 
     def test_launch_environment_directory_and_budget(self):

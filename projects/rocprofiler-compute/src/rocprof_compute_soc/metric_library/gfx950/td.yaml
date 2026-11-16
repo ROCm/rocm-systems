@@ -1,0 +1,7 @@
+td.wr_ack_insts:
+  name: TD Write Ack Instructions
+  formula: SUM(TD_WRITE_ACKT_WAVEFRONT_sum) / SUM($denom)
+  unit: (Instructions + $normUnit)
+  description: >-
+    The total number of write acknowledgements submitted by data-return unit to SQ,
+    summed over all compute units on the accelerator, per normalization unit.

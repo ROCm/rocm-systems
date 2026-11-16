@@ -109,7 +109,8 @@ class Event : public RuntimeObject {
   const Device* device_;  //!< Device, this event associated with
 
   struct ProfilingInfo {
-    ProfilingInfo(bool enabled = false) : enabled_(enabled), marker_ts_(false) {
+    ProfilingInfo(bool enabled = false)
+        : enabled_(enabled), timed_(enabled), signal_required_(false) {
       if (enabled) {
         clear();
         correlation_id_ = amd::activity_prof::correlation_id;
@@ -123,7 +124,11 @@ class Event : public RuntimeObject {
 
     uint64_t correlation_id_;
     bool enabled_;             //!< Profiling enabled for the wave limiter
-    bool marker_ts_;           //!< TS marker
+    //! The command's barriers capture timestamps: it was created under queue or activity
+    //! profiling, or is a timed event marker. enabled_ alone may only track the batch.
+    bool timed_;
+    //! The completion needs a signal of its own: an event binds to it or a command waits on it
+    bool signal_required_;
     bool batch_flush_ = true;  //!< Command can flush the batch in direct dispatch mode
 
     void clear() {
@@ -163,10 +168,16 @@ class Event : public RuntimeObject {
   }
 
  public:
-  //! Use profiling info to force a tracking signal on command
-  void SetProfiling() {
+  //! Give the command's completion a signal of its own, tracked through profiling
+  void RequireSignal() {
     EnableProfiling();
-    profilingInfo_.marker_ts_ = true;
+    profilingInfo_.signal_required_ = true;
+  }
+
+  //! Profile this command and capture the timestamps of its barriers
+  void EnableTiming() {
+    EnableProfiling();
+    profilingInfo_.timed_ = true;
   }
 
   //! Return the context for this event.
@@ -345,7 +356,6 @@ class Command : public Event {
 
   bool packetCapturing_ = false;       //!< Flag to enable/disable graph gpu packet capture
   GraphPacketCaptureContext* graphCapture_ = nullptr;  //!< Capture context, owned by the graph node
-  address kernArgOffset_ = nullptr;  //!< KernelArg buffer to used when graph capturing is enabled
  protected:
   bool cpu_wait_ = false;  //!< If true, then the command was issued for CPU/GPU sync
 
@@ -1095,8 +1105,8 @@ class BatchMemoryOperationCommand : public Command {
                               size_t paramSize)
       : Command(queue, cmdType, eventWaitList),
         count_(count),
-        paramArray_(paramArray),
         flags_(flags),
+        paramArray_(paramArray),
         paramSize_(paramSize) {
     // Sanity check
     assert(((cmdType == ROCCLR_COMMAND_BATCH_STREAM)) && "Invalid batch memory operation");
@@ -1113,7 +1123,7 @@ class BatchMemoryOperationCommand : public Command {
 
  private:
   uint32_t count_;          // !< The number of operations in the array.
-  uint32_t flags_;          // !< Reserved for future expansion. Must be 0.
+  [[maybe_unused]] uint32_t flags_;  // !< Reserved for future expansion. Must be 0.
   const void* paramArray_;  // !< Pointer to the array of individual operations
   size_t paramSize_;        // !< size in bytes of the param array passed
 };
@@ -1766,7 +1776,7 @@ class Marker : public Command {
   bool isMarkerCommand() const override { return true; }
 
   //! The actual command implementation.
-  virtual void submit(device::VirtualDevice& device) { device.submitMarker(*this); }
+  void submit(device::VirtualDevice& device) override { device.submitMarker(*this); }
 };
 
 class AccumulateCommand : public Command {
@@ -1795,6 +1805,12 @@ class AccumulateCommand : public Command {
   //! When false, the destructor does not destroy hw_events_ (an external owner,
   //! e.g. the graph signal pool, reclaims them instead).
   bool owns_hw_events_ = true;
+  //! The graph launch runs segments on queues other than this command's
+  //! (DEBUG_CLR_GRAPH_FAST_LAUNCH)
+  bool multi_stream_ = false;
+  //! Commands of other queues that packets of this command wait on without a command of their
+  //! own (DEBUG_CLR_GRAPH_FAST_LAUNCH), held until this command completes
+  std::vector<Command*> held_commands_;
 
  public:
   AccumulateCommand(HostQueue& queue, const EventWaitList& eventWaitList = nullWaitList,
@@ -1826,6 +1842,26 @@ class AccumulateCommand : public Command {
   //! Set to false when an external owner (e.g. the graph signal pool) recycles
   //! them across launches instead.
   void setOwnsHwEvents(bool owns) { owns_hw_events_ = owns; }
+
+  //! Marks a graph launch that runs segments on other queues than this command's
+  void setMultiStream(bool multi_stream) { multi_stream_ = multi_stream; }
+  bool multiStream() const { return multi_stream_; }
+
+  //! Holds a command that a packet of this command waits on, until this command completes
+  //! (releaseHeldCommands) or is destroyed
+  void holdCommand(Command* command) {
+    command->retain();
+    held_commands_.push_back(command);
+  }
+
+  //! Releases the held commands once this command completed: its packets, after the waits on
+  //! them, are done
+  void releaseHeldCommands() {
+    for (Command* command : held_commands_) {
+      command->release();
+    }
+    held_commands_.clear();
+  }
 
   //! Reserve one graph dispatch slot and return its index. |name| must not be
   //! nullptr for a kernel — use "<unknown>" when it cannot be resolved.
@@ -2319,8 +2355,8 @@ class SvmPrefetchAsyncCommand : public Command {
         dev_ptr_(dev_ptr),
         count_(count),
         cpu_access_(cpu_access),
-        dev_(dev),
-        numa_id_(numa_id) {}
+        numa_id_(numa_id),
+        dev_(dev) {}
 
   virtual void submit(device::VirtualDevice& device) { device.submitSvmPrefetchAsync(*this); }
 

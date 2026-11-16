@@ -8,12 +8,18 @@ mod amdsmi_wrapper;
 mod utils;
 mod amdsmi;
 
+#[cfg(test)]
+mod enumeration_tests;
+
 pub use utils::*;
 pub use amdsmi::*;
 
 #[cfg(test)]
 mod tests {
-    use crate::{AmdsmiLinkStatusT, AmdsmiLinkTopologyT};
+    use crate::{
+        amdsmi_get_nic_processor_handles, AmdsmiLinkStatusT, AmdsmiLinkTopologyT,
+        AmdsmiProcessorHandle, AmdsmiResult, AmdsmiSocketHandle, AmdsmiStatusT,
+    };
 
     #[test]
     fn link_status_is_reexported() {
@@ -29,5 +35,17 @@ mod tests {
             assert_eq!(status as u32, value);
         }
         let _: fn(&AmdsmiLinkTopologyT) -> AmdsmiLinkStatusT = |topology| topology.link_status;
+    }
+
+    #[test]
+    fn nic_processor_handles_are_exported() {
+        let _: fn(AmdsmiSocketHandle) -> AmdsmiResult<Vec<AmdsmiProcessorHandle>> =
+            amdsmi_get_nic_processor_handles;
+    }
+
+    #[test]
+    fn nic_processor_handles_report_an_uninitialized_library() {
+        let result = amdsmi_get_nic_processor_handles(std::ptr::null_mut());
+        assert_eq!(result, Err(AmdsmiStatusT::AmdsmiStatusNotInit));
     }
 }

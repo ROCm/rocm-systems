@@ -3,6 +3,7 @@
 
 #include <gtest/gtest.h>
 #include <pthread.h>
+#include <unistd.h>
 
 #include <cerrno>
 #include <thread>
@@ -13,7 +14,11 @@
 
 TEST(SystemFunctionalReadOnly, ShutdownPreservesDeviceMutex) {
   const auto status = rsmi_init(RSMI_INIT_FLAG_THRAD_ONLY_MUTEX);
-  if (status == RSMI_STATUS_NOT_SUPPORTED) {
+  // RSMI_STATUS_INIT_ERROR also occurs on the DXG backend (WSL), where legacy
+  // rocm_smi device discovery can't run at all. Gate on /dev/dxg so a genuine
+  // init regression on real KFD/sysfs hardware still fails instead of skipping.
+  if (status == RSMI_STATUS_NOT_SUPPORTED ||
+      (status == RSMI_STATUS_INIT_ERROR && access("/dev/dxg", F_OK) == 0)) {
     GTEST_SKIP() << "ROCm driver is unavailable";
   }
   ASSERT_EQ(RSMI_STATUS_SUCCESS, status);

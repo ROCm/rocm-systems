@@ -603,6 +603,192 @@ HIP_TEST_CASE(Unit_hipDrvLaunchKernelEx_StreamCapture_ClusterDim) {
 }
 #endif  // !defined(_WIN32) && !HT_NVIDIA
 
+#if !defined(_WIN32) && !HT_NVIDIA
+static __global__ void clusterValidationKernel(int* out) {
+  if (threadIdx.x == 0 && blockIdx.x == 0)
+    *out = 1;
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *  - Verifies that hipDrvLaunchKernelEx rejects a cluster dimension whose
+ *    product exceeds the device maximum with hipErrorInvalidClusterSize.
+ *
+ * Test Source
+ * ------------------------
+ *  - catch/unit/module/hipDrvLaunchKernelEx.cc
+ *
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.0
+ *  - Device with cluster launch support
+ */
+HIP_TEST_CASE(Unit_hipDrvLaunchKernelEx_Negative_OversizedCluster) {
+  hipDeviceProp_t prop{};
+  HIP_CHECK(hipGetDeviceProperties(&prop, 0));
+  if (!prop.clusterLaunch) {
+    HIP_SKIP_TEST("Test requires a device with cluster launch support");
+  }
+
+  hipFunction_t func;
+  HIP_CHECK(hipGetFuncBySymbol(&func, reinterpret_cast<const void*>(&clusterValidationKernel)));
+
+  int* d = nullptr;
+  HIP_CHECK(hipMalloc(&d, sizeof(int)));
+
+  hipLaunchAttribute attr{};
+  attr.id = hipLaunchAttributeClusterDimension;
+  attr.value.clusterDim = {32, 1, 1};
+
+  HIP_LAUNCH_CONFIG config{};
+  config.gridDimX = 32; config.gridDimY = 1; config.gridDimZ = 1;
+  config.blockDimX = 64; config.blockDimY = 1; config.blockDimZ = 1;
+  config.attrs = &attr;
+  config.numAttrs = 1;
+
+  void* params[] = {&d};
+  HIP_CHECK_ERROR(hipDrvLaunchKernelEx(&config, func, params, nullptr),
+                  hipErrorInvalidClusterSize);
+
+  HIP_CHECK(hipFree(d));
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *  - Verifies that hipDrvLaunchKernelEx rejects cluster dimensions whose
+ *    product overflows uint32_t (65536 * 65536 = 2^32) with
+ *    hipErrorInvalidClusterSize.
+ *
+ * Test Source
+ * ------------------------
+ *  - catch/unit/module/hipDrvLaunchKernelEx.cc
+ *
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.0
+ *  - Device with cluster launch support
+ */
+HIP_TEST_CASE(Unit_hipDrvLaunchKernelEx_Negative_OverflowClusterDim) {
+  hipDeviceProp_t prop{};
+  HIP_CHECK(hipGetDeviceProperties(&prop, 0));
+  if (!prop.clusterLaunch) {
+    HIP_SKIP_TEST("Test requires a device with cluster launch support");
+  }
+
+  hipFunction_t func;
+  HIP_CHECK(hipGetFuncBySymbol(&func, reinterpret_cast<const void*>(&clusterValidationKernel)));
+
+  int* d = nullptr;
+  HIP_CHECK(hipMalloc(&d, sizeof(int)));
+
+  hipLaunchAttribute attr{};
+  attr.id = hipLaunchAttributeClusterDimension;
+  attr.value.clusterDim = {65536, 65536, 1};
+
+  HIP_LAUNCH_CONFIG config{};
+  config.gridDimX = 32; config.gridDimY = 1; config.gridDimZ = 1;
+  config.blockDimX = 64; config.blockDimY = 1; config.blockDimZ = 1;
+  config.attrs = &attr;
+  config.numAttrs = 1;
+
+  void* params[] = {&d};
+  HIP_CHECK_ERROR(hipDrvLaunchKernelEx(&config, func, params, nullptr),
+                  hipErrorInvalidClusterSize);
+
+  HIP_CHECK(hipFree(d));
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *  - Verifies that hipDrvLaunchKernelEx rejects a cluster size > 1 on a
+ *    device that does not support cluster launches (clusterMaxSize == 0).
+ *
+ * Test Source
+ * ------------------------
+ *  - catch/unit/module/hipDrvLaunchKernelEx.cc
+ *
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.0
+ *  - Device WITHOUT cluster launch support
+ */
+HIP_TEST_CASE(Unit_hipDrvLaunchKernelEx_Negative_NonClusterDevice) {
+  hipDeviceProp_t prop{};
+  HIP_CHECK(hipGetDeviceProperties(&prop, 0));
+  if (prop.clusterLaunch) {
+    HIP_SKIP_TEST("Test requires a device WITHOUT cluster launch support");
+  }
+
+  hipFunction_t func;
+  HIP_CHECK(hipGetFuncBySymbol(&func, reinterpret_cast<const void*>(&clusterValidationKernel)));
+
+  int* d = nullptr;
+  HIP_CHECK(hipMalloc(&d, sizeof(int)));
+
+  hipLaunchAttribute attr{};
+  attr.id = hipLaunchAttributeClusterDimension;
+  attr.value.clusterDim = {2, 1, 1};
+
+  HIP_LAUNCH_CONFIG config{};
+  config.gridDimX = 16; config.gridDimY = 1; config.gridDimZ = 1;
+  config.blockDimX = 64; config.blockDimY = 1; config.blockDimZ = 1;
+  config.attrs = &attr;
+  config.numAttrs = 1;
+
+  void* params[] = {&d};
+  HIP_CHECK_ERROR(hipDrvLaunchKernelEx(&config, func, params, nullptr),
+                  hipErrorInvalidClusterSize);
+
+  HIP_CHECK(hipFree(d));
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *  - Verifies that hipLaunchKernelExC rejects a cluster size > 1 on a
+ *    device that does not support cluster launches (clusterMaxSize == 0).
+ *
+ * Test Source
+ * ------------------------
+ *  - catch/unit/module/hipDrvLaunchKernelEx.cc
+ *
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.0
+ *  - Device WITHOUT cluster launch support
+ */
+HIP_TEST_CASE(Unit_hipLaunchKernelExC_Negative_NonClusterDevice) {
+  hipDeviceProp_t prop{};
+  HIP_CHECK(hipGetDeviceProperties(&prop, 0));
+  if (prop.clusterLaunch) {
+    HIP_SKIP_TEST("Test requires a device WITHOUT cluster launch support");
+  }
+
+  int* d = nullptr;
+  HIP_CHECK(hipMalloc(&d, sizeof(int)));
+
+  hipLaunchAttribute attr{};
+  attr.id = hipLaunchAttributeClusterDimension;
+  attr.val.clusterDim = {2, 1, 1};
+
+  hipLaunchConfig_t config{};
+  config.gridDim = dim3(16);
+  config.blockDim = dim3(64);
+  config.attrs = &attr;
+  config.numAttrs = 1;
+
+  void* args[] = {&d};
+  HIP_CHECK_ERROR(hipLaunchKernelExC(&config,
+                      reinterpret_cast<const void*>(&clusterValidationKernel), args),
+                  hipErrorInvalidClusterSize);
+
+  HIP_CHECK(hipFree(d));
+}
+#endif  // !defined(_WIN32) && !HT_NVIDIA
+
 /**
  * End doxygen group ModuleTest.
  * @}

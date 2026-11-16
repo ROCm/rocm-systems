@@ -1,3 +1,5 @@
+import { isValidTimestamp } from '../utils/timestamp.js';
+
 function parsedTime(value) {
   const time = Date.parse(value);
   return Number.isFinite(time) ? time : Number.NEGATIVE_INFINITY;
@@ -13,7 +15,7 @@ export function commitTimestampFor(run) {
 }
 
 export function hasCommitTimestamp(run) {
-  return typeof run?.commitTimestamp === 'string' && Number.isFinite(Date.parse(run.commitTimestamp));
+  return isValidTimestamp(run?.commitTimestamp);
 }
 
 export function compareRunExecution(left, right) {

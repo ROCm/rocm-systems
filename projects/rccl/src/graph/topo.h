@@ -216,6 +216,7 @@ struct ncclTopoNode {
       int arch;
       int vendor;
       int model;
+      int rome; // RCCL: AMD Rome-class host (Zen 2 Rome, family 19h), independent of the Zen generation in model
       ncclAffinity affinity;
     } cpu;
     struct {

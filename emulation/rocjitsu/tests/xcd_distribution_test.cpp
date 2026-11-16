@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 /// @file xcd_distribution_test.cpp
-/// @brief How a single AQL dispatch is spread across the XCDs of a multi-XCD SoC.
+/// @brief AQL launch-register ABI and workgroup distribution across a SoC's XCDs.
 
 #include "aql_queue.h"
 #include "config_test_util.h"
@@ -12,6 +12,7 @@
 
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/kernel_descriptor_abi.h"
+#include "rocjitsu/code/kernel_descriptor_scan.h"
 #include "rocjitsu/config/config_loader.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna3/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna3/opcodes.h"
@@ -23,6 +24,7 @@
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/gws_device.h"
 #include "rocjitsu/vm/amdgpu/partitioning.h"
+#include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "rocjitsu/vm/amdgpu/xcd.h"
 #include "rocjitsu/vm/plugins/execution_plugin.h"
@@ -101,8 +103,12 @@ struct XcdDistributionFixture {
 
   void initialize(Threading threading = Threading::Single, uint32_t dispatch_threads = 1,
                   const std::string &config_path = CONFIG_PATH) {
-    util::StringDiagnostic admission_diagnostic;
     ASSERT_TRUE(test::load_valid_config(config_path, loaded));
+    initialize_loaded(threading, dispatch_threads);
+  }
+
+  void initialize_loaded(Threading threading = Threading::Single, uint32_t dispatch_threads = 1) {
+    util::StringDiagnostic admission_diagnostic;
     soc = loaded.soc();
     memory = loaded.memory();
     soc->set_dispatch_threads(dispatch_threads);
@@ -116,6 +122,8 @@ struct XcdDistributionFixture {
     engine->topology().set_root(loaded.take_root());
     ASSERT_TRUE(loaded.wire_links(engine->topology(), admission_diagnostic.emitter()).succeeded())
         << admission_diagnostic.message();
+    util::FailureOr<uint32_t> maybe_s_endpgm_4 = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
+    ASSERT_TRUE(maybe_s_endpgm_4.succeeded());
     if (loaded.engine_config.num_threads > 1 &&
         !amdgpu::partition_topology_by_xcds(engine->topology(), soc,
                                             loaded.engine_config.num_threads))
@@ -132,8 +140,7 @@ struct XcdDistributionFixture {
                        ((104 / 8) - 1));
     RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 2);
     memory->load_image(reinterpret_cast<const uint8_t *>(&kd), sizeof(kd), kKdAddr);
-    memory->write32(kKdAddr + sizeof(kernel_descriptor_t),
-                    build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4));
+    memory->write32(kKdAddr + sizeof(kernel_descriptor_t), maybe_s_endpgm_4.value());
   }
 };
 
@@ -151,6 +158,10 @@ struct Cdna5ScratchTopologyFixture {
     soc = loaded.soc();
     memory = loaded.memory();
     loaded.engine_config.num_threads = 1;
+    util::FailureOr<uint32_t> maybe_s_endpgm_2 = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5);
+    ASSERT_TRUE(maybe_s_endpgm_2.succeeded());
+    util::FailureOr<uint32_t> maybe_s_endpgm_3 = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5);
+    ASSERT_TRUE(maybe_s_endpgm_3.succeeded());
     engine = std::make_unique<simdojo::SimulationEngine>(loaded.engine_config);
     engine->topology().set_root(loaded.take_root());
     ASSERT_TRUE(loaded.wire_links(engine->topology(), admission_diagnostic.emitter()).succeeded())
@@ -163,12 +174,10 @@ struct Cdna5ScratchTopologyFixture {
     kd.kernel_code_entry_byte_offset = sizeof(kernel_descriptor_t);
     kd.private_segment_fixed_size = 64;
     memory->load_image(reinterpret_cast<const uint8_t *>(&kd), sizeof(kd), kCdna5ScratchKdAddr);
-    memory->write32(kCdna5ScratchKdAddr + sizeof(kernel_descriptor_t),
-                    build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5));
+    memory->write32(kCdna5ScratchKdAddr + sizeof(kernel_descriptor_t), maybe_s_endpgm_3.value());
     kd.private_segment_fixed_size = 0;
     memory->load_image(reinterpret_cast<const uint8_t *>(&kd), sizeof(kd), kCdna5PlainKdAddr);
-    memory->write32(kCdna5PlainKdAddr + sizeof(kernel_descriptor_t),
-                    build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5));
+    memory->write32(kCdna5PlainKdAddr + sizeof(kernel_descriptor_t), maybe_s_endpgm_2.value());
   }
 };
 
@@ -186,7 +195,9 @@ void install_scratch_kernel(amdgpu::GpuMemory &memory, uint32_t private_bytes,
   RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 2);
   kd.private_segment_fixed_size = private_bytes;
   memory.load_image(reinterpret_cast<const uint8_t *>(&kd), sizeof(kd), kScratchKdAddr);
-  memory.write32(kScratchKdAddr + sizeof(kernel_descriptor_t), build_s_endpgm(arch));
+  util::FailureOr<uint32_t> maybe_s_endpgm_1 = build_s_endpgm(arch);
+  ASSERT_TRUE(maybe_s_endpgm_1.succeeded());
+  memory.write32(kScratchKdAddr + sizeof(kernel_descriptor_t), maybe_s_endpgm_1.value());
 }
 
 // Minimal CDNA3 (GFX9) DS GWS op issue for the cross-XCD rendezvous regressions.
@@ -376,6 +387,341 @@ public:
 private:
   std::map<uint32_t, uint64_t> scratch_bases_;
 };
+
+/// Observe the ABI inputs before a kernel prologue consumes them.
+class ScratchAbiPlugin : public ExecutionPlugin {
+public:
+  explicit ScratchAbiPlugin(bool check_descriptor = false)
+      : ExecutionPlugin("xcd-scratch-abi"), check_descriptor_(check_descriptor) {}
+
+  void onAmdgpuWorkgroupDispatched(uint32_t, uint32_t wg_id, uint32_t, uint32_t,
+                                   std::span<amdgpu::Wavefront *> waves) override {
+    ASSERT_EQ(waves.size(), 2u);
+    for (uint32_t wave_index = 0; wave_index < waves.size(); ++wave_index) {
+      auto &wf = *waves[wave_index];
+      amdgpu::RegisterAccess regs(wf);
+      const uint32_t base = wf.sgpr_alloc().base;
+      const uint64_t initial =
+          uint64_t{regs.read_sgpr(base + 4)} | (uint64_t{regs.read_sgpr(base + 5)} << 32);
+      const uint32_t wave_offset = regs.read_sgpr(base + 8);
+      if (check_descriptor_) {
+        EXPECT_EQ((regs.read_sgpr(base + 3) >> 21) & 3u, wf.wf_size() == 32 ? 2u : 3u);
+        EXPECT_EQ(regs.read_sgpr(base), static_cast<uint32_t>(kDefaultScratchPool));
+        EXPECT_EQ(regs.read_sgpr(base + 1) & 0xffffu, kDefaultScratchPool >> 32);
+      }
+      EXPECT_EQ(regs.read_sgpr(base + 6), wg_id);
+      const bool has_wave_id = wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA2;
+      EXPECT_EQ(regs.read_sgpr(base + 7), 2u | (wave_index << 6) |
+                                              (has_wave_id ? wave_index << 20 : 0u) |
+                                              (wave_index == 0 ? 1u << 31 : 0u));
+      EXPECT_EQ(initial, kDefaultScratchPool);
+      EXPECT_EQ(initial + wave_offset, wf.scratch_base());
+      EXPECT_TRUE(offsets_.insert(wave_offset).second);
+    }
+  }
+
+  const std::set<uint32_t> &offsets() const { return offsets_; }
+
+private:
+  std::set<uint32_t> offsets_;
+  bool check_descriptor_;
+};
+
+TEST(ScratchDispatchAbiTest, SuppliesQueueBaseAndDistinctOffsetsAfterSystemSgprs) {
+  XcdDistributionFixture fx;
+  ASSERT_NO_FATAL_FAILURE(
+      fx.initialize(Threading::Single, 1, test::config_path("gfx90a_mi210_kmd.json")));
+  using namespace rocjitsu::amdhsa;
+  kernel_descriptor_t kd{};
+  kd.kernel_code_entry_byte_offset = sizeof(kd);
+  kd.private_segment_fixed_size = 64;
+  RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT, 7);
+  RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT, 12);
+  RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 6);
+  RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X, 1);
+  RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_INFO, 1);
+  RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_ENABLE_PRIVATE_SEGMENT, 1);
+  RJ_AMDHSA_BITS_SET(kd.kernel_code_properties,
+                     KERNEL_CODE_PROPERTY_ENABLE_SGPR_PRIVATE_SEGMENT_BUFFER, 1);
+  RJ_AMDHSA_BITS_SET(kd.kernel_code_properties, KERNEL_CODE_PROPERTY_ENABLE_SGPR_FLAT_SCRATCH_INIT,
+                     1);
+  fx.memory->load_image(reinterpret_cast<const uint8_t *>(&kd), sizeof(kd), kScratchKdAddr);
+  const util::FailureOr<uint32_t> endpgm = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA2);
+  ASSERT_TRUE(endpgm.succeeded());
+  fx.memory->write32(kScratchKdAddr + sizeof(kd), endpgm.value());
+  auto plugin = std::make_unique<ScratchAbiPlugin>();
+  auto *observed = plugin.get();
+  auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+  ASSERT_TRUE(group->add(std::move(plugin)));
+  fx.soc->set_plugin_group(group);
+  auto queue = test::make_fanout_queue(fx.memory, fx.soc->assign_queue_owner_cp(0));
+  queue->dispatch(kScratchKdAddr, 8 * 128, 128);
+  fx.engine->run();
+  EXPECT_EQ(observed->offsets().size(), 16u);
+}
+
+TEST(ScratchDispatchAbiTest, KfdQueueFillsLegacyRdnaDescriptorForBothWaveSizes) {
+  for (const auto &[config, arch] : {std::pair{"rdna1", ROCJITSU_CODE_ARCH_RDNA1},
+                                     std::pair{"rdna2", ROCJITSU_CODE_ARCH_RDNA2}}) {
+    for (uint32_t wave_size : {32u, 64u}) {
+      SCOPED_TRACE(testing::Message() << config << " wave=" << wave_size);
+      // The fixture's doorbell poller must stop before its backing leaves scope.
+      uint64_t doorbell = 1;
+      XcdDistributionFixture fx;
+      const std::string json = std::string(R"({
+        "num_threads": 1,
+        "vm": {"arch": ")") + config +
+                               R"(", "gpu": {"device": {"num_sdma_engines": 0}}},
+        "topology": {"root": {"name": "soc", "type": "soc", "children": [
+          {"name": "vram", "type": "gpu_memory"},
+          {"name": "xcd[0:1]", "type": "xcd", "children": [
+            {"name": "l2", "type": "l2_cache"},
+            {"name": "cp", "type": "command_processor"},
+            {"name": "se[0:1]", "type": "shader_engine", "children": [
+              {"name": "cu[0:8]", "type": "compute_unit"}
+            ]}
+          ]}
+        ]}, "links": [
+          {"pattern": "xcd[i].cp.req_[j] -> xcd[i].se[0].cu[j].cpl",
+           "for_ranges": [{"var_name": "i", "start": 0, "end": 1},
+                          {"var_name": "j", "start": 0, "end": 8}],
+           "latency": 1, "weight": 2},
+          {"pattern": "xcd[i].se[0].cu[j].req -> xcd[i].l2.cpl_[j]",
+           "for_ranges": [{"var_name": "i", "start": 0, "end": 1},
+                          {"var_name": "j", "start": 0, "end": 8}],
+           "latency": 1, "weight": 10}
+        ]}
+      })";
+      ASSERT_TRUE(test::load_valid_config_from_string(json, fx.loaded, 1));
+      ASSERT_NO_FATAL_FAILURE(fx.initialize_loaded());
+      using namespace rocjitsu::amdhsa;
+      kernel_descriptor_t kd{};
+      kd.kernel_code_entry_byte_offset = sizeof(kd);
+      kd.private_segment_fixed_size = 64;
+      RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT, 7);
+      RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 6);
+      RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X, 1);
+      RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_INFO, 1);
+      RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_ENABLE_PRIVATE_SEGMENT, 1);
+      RJ_AMDHSA_BITS_SET(kd.kernel_code_properties,
+                         KERNEL_CODE_PROPERTY_ENABLE_SGPR_PRIVATE_SEGMENT_BUFFER, 1);
+      RJ_AMDHSA_BITS_SET(kd.kernel_code_properties,
+                         KERNEL_CODE_PROPERTY_ENABLE_SGPR_FLAT_SCRATCH_INIT, 1);
+      RJ_AMDHSA_BITS_SET(kd.kernel_code_properties, KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32,
+                         wave_size == 32);
+      fx.memory->load_image(reinterpret_cast<const uint8_t *>(&kd), sizeof(kd), kScratchKdAddr);
+      const util::FailureOr<uint32_t> endpgm = build_s_endpgm(arch);
+      ASSERT_TRUE(endpgm.succeeded());
+      fx.memory->write32(kScratchKdAddr + sizeof(kd), endpgm.value());
+      auto plugin = std::make_unique<ScratchAbiPlugin>(true);
+      auto *observed = plugin.get();
+      auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+      ASSERT_TRUE(group->add(std::move(plugin)));
+      fx.soc->set_plugin_group(group);
+      constexpr uint64_t queue_address = 0x40000;
+      amd_queue_v2_t queue_desc{};
+      queue_desc.scratch_backing_memory_location = kDefaultScratchPool;
+      queue_desc.scratch_resource_descriptor[0] = static_cast<uint32_t>(kDefaultScratchPool);
+      queue_desc.scratch_resource_descriptor[1] = (kDefaultScratchPool >> 32) | (1u << 31);
+      queue_desc.scratch_resource_descriptor[2] = 0x100000;
+      queue_desc.scratch_resource_descriptor[3] = 0x21814facu & ~(3u << 21);
+      queue_desc.compute_tmpring_size = 256 | (4u << 12);
+      queue_desc.write_dispatch_id = 1;
+      fx.memory->load_image(reinterpret_cast<const uint8_t *>(&queue_desc), sizeof(queue_desc),
+                            queue_address);
+      hsa_kernel_dispatch_packet_t packet{};
+      packet.header = HSA_PACKET_TYPE_KERNEL_DISPATCH;
+      packet.setup = 1;
+      packet.workgroup_size_x = 2 * wave_size;
+      packet.workgroup_size_y = packet.workgroup_size_z = 1;
+      packet.grid_size_x = packet.workgroup_size_x;
+      packet.grid_size_y = packet.grid_size_z = 1;
+      packet.kernel_object = kScratchKdAddr;
+      fx.memory->load_image(reinterpret_cast<const uint8_t *>(&packet), sizeof(packet),
+                            test::AqlQueue::DEFAULT_RING_ADDR);
+      amdgpu::ComputeQueueConfig hardware{};
+      hardware.queue_id = 1;
+      hardware.ring_base_va = test::AqlQueue::DEFAULT_RING_ADDR;
+      hardware.ring_size = test::AqlQueue::DEFAULT_RING_SIZE;
+      hardware.read_ptr_va = queue_address + offsetof(amd_queue_t, read_dispatch_id);
+      hardware.write_ptr_va = queue_address + offsetof(amd_queue_t, write_dispatch_id);
+      hardware.doorbell_base = &doorbell;
+      hardware.doorbell_mode = amdgpu::QueueDoorbellMode::HostPolled;
+      hardware.uses_kfd_queue_abi = true;
+      auto *cp = fx.soc->assign_queue_owner_cp(0);
+      ASSERT_NE(cp, nullptr);
+      cp->register_queue(std::move(hardware));
+      fx.engine->schedule_event_now(cp->doorbell_event());
+      fx.engine->run();
+      EXPECT_EQ(observed->offsets().size(), 2u);
+      EXPECT_EQ(fx.memory->read64(queue_address + offsetof(amd_queue_t, read_dispatch_id)), 1u);
+    }
+  }
+}
+
+/// Observe generation-specific workgroup-info fields before kernel execution.
+class WorkgroupInfoPlugin : public ExecutionPlugin {
+public:
+  explicit WorkgroupInfoPlugin(bool ttmp_ids = false, uint32_t info_slot = 2)
+      : ExecutionPlugin("xcd-workgroup-info"), ttmp_ids_(ttmp_ids), info_slot_(info_slot) {}
+
+  void onAmdgpuWorkgroupDispatched(uint32_t, uint32_t, uint32_t, uint32_t,
+                                   std::span<amdgpu::Wavefront *> waves) override {
+    ASSERT_EQ(waves.size(), 2u);
+    for (uint32_t wave_index = 0; wave_index < waves.size(); ++wave_index) {
+      auto &wf = *waves[wave_index];
+      amdgpu::RegisterAccess regs(wf);
+      const uint32_t info = regs.read_sgpr(wf.sgpr_alloc().base + info_slot_);
+      const uint32_t expected = ttmp_ids_
+                                    ? 2u | (wave_index << 6)
+                                    : (wave_index == 0 ? 1u << 31 : 0) | (wave_index << 20) | 2u;
+      EXPECT_EQ(info, expected);
+      if (ttmp_ids_) {
+        EXPECT_EQ(regs.read_sgpr(wf.sgpr_alloc().base + info_slot_ + 1), 0u);
+        EXPECT_EQ(regs.read_sgpr(wf.sgpr_alloc().base + info_slot_ + 2), 0u);
+      }
+      ++observed_;
+    }
+  }
+
+  uint32_t observed() const { return observed_; }
+
+private:
+  bool ttmp_ids_;
+  uint32_t info_slot_;
+  uint32_t observed_ = 0;
+};
+
+TEST(WorkgroupInfoDispatchTest, Cdna3AndCdna4IncludeWaveId) {
+  for (const char *config : {"gfx942_cdna3.json", "gfx950_mi355x.json"}) {
+    SCOPED_TRACE(config);
+    XcdDistributionFixture fx;
+    ASSERT_NO_FATAL_FAILURE(fx.initialize(Threading::Single, 1, test::config_path(config)));
+    using namespace rocjitsu::amdhsa;
+    kernel_descriptor_t kd{};
+    kd.kernel_code_entry_byte_offset = sizeof(kd);
+    RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT, 7);
+    RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT, 12);
+    RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 2);
+    RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_INFO, 1);
+    RJ_AMDHSA_BITS_SET(kd.kernel_code_properties,
+                       KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1);
+    fx.memory->load_image(reinterpret_cast<const uint8_t *>(&kd), sizeof(kd), kKdAddr);
+    auto plugin = std::make_unique<WorkgroupInfoPlugin>();
+    auto *observed = plugin.get();
+    auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+    ASSERT_TRUE(group->add(std::move(plugin)));
+    fx.soc->set_plugin_group(group);
+    auto queue = test::make_fanout_queue(fx.memory, fx.soc->assign_queue_owner_cp(0));
+    queue->dispatch(kKdAddr, 128, 128);
+    fx.engine->run();
+    EXPECT_EQ(observed->observed(), 2u);
+  }
+}
+
+TEST(WorkgroupInfoDispatchTest, ZeroUserSgprsPutInfoFirstInBothAqlQueuePaths) {
+  for (const char *config : {"gfx942_cdna3.json", "gfx950_mi355x.json"}) {
+    const rj_code_arch_t arch = std::string_view(config).starts_with("gfx942")
+                                    ? ROCJITSU_CODE_ARCH_CDNA3
+                                    : ROCJITSU_CODE_ARCH_CDNA4;
+    for (bool kfd : {false, true}) {
+      SCOPED_TRACE(testing::Message() << config << " KFD=" << kfd);
+      // The queue poller retains this address until the fixture tears it down.
+      uint64_t doorbell = 1;
+      XcdDistributionFixture fx;
+      ASSERT_NO_FATAL_FAILURE(fx.initialize(Threading::Single, 1, test::config_path(config)));
+      using namespace rocjitsu::amdhsa;
+      kernel_descriptor_t kd{};
+      kd.kernel_code_entry_byte_offset = sizeof(kd);
+      RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT, 7);
+      RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
+                         12);
+      RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_INFO, 1);
+      EXPECT_EQ(kernel_descriptor_initial_sgpr_count(arch, kd), 1u);
+      fx.memory->load_image(reinterpret_cast<const uint8_t *>(&kd), sizeof(kd), kKdAddr);
+      const util::FailureOr<uint32_t> endpgm = build_s_endpgm(arch);
+      ASSERT_TRUE(endpgm.succeeded());
+      fx.memory->write32(kKdAddr + sizeof(kd), endpgm.value());
+      auto plugin = std::make_unique<WorkgroupInfoPlugin>(false, 0);
+      WorkgroupInfoPlugin *observed = plugin.get();
+      auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+      ASSERT_TRUE(group->add(std::move(plugin)));
+      fx.soc->set_plugin_group(group);
+      auto *cp = fx.soc->assign_queue_owner_cp(0);
+      ASSERT_NE(cp, nullptr);
+      if (!kfd) {
+        auto queue = test::make_fanout_queue(fx.memory, cp);
+        queue->dispatch(kKdAddr, 128, 128);
+        fx.engine->run();
+      } else {
+        constexpr uint64_t kQueueAddress = 0x40000;
+        amd_queue_v2_t queue_desc{};
+        queue_desc.write_dispatch_id = 1;
+        fx.memory->load_image(reinterpret_cast<const uint8_t *>(&queue_desc), sizeof(queue_desc),
+                              kQueueAddress);
+        hsa_kernel_dispatch_packet_t packet{};
+        packet.header = HSA_PACKET_TYPE_KERNEL_DISPATCH;
+        packet.setup = 1;
+        packet.workgroup_size_x = 128;
+        packet.workgroup_size_y = packet.workgroup_size_z = 1;
+        packet.grid_size_x = 128;
+        packet.grid_size_y = packet.grid_size_z = 1;
+        packet.kernel_object = kKdAddr;
+        fx.memory->load_image(reinterpret_cast<const uint8_t *>(&packet), sizeof(packet),
+                              test::AqlQueue::DEFAULT_RING_ADDR);
+        amdgpu::ComputeQueueConfig hardware{};
+        hardware.queue_id = 1;
+        hardware.ring_base_va = test::AqlQueue::DEFAULT_RING_ADDR;
+        hardware.ring_size = test::AqlQueue::DEFAULT_RING_SIZE;
+        hardware.read_ptr_va = kQueueAddress + offsetof(amd_queue_t, read_dispatch_id);
+        hardware.write_ptr_va = kQueueAddress + offsetof(amd_queue_t, write_dispatch_id);
+        hardware.doorbell_base = &doorbell;
+        hardware.doorbell_mode = amdgpu::QueueDoorbellMode::HostPolled;
+        hardware.uses_kfd_queue_abi = true;
+        cp->register_queue(std::move(hardware));
+        fx.engine->schedule_event_now(cp->doorbell_event());
+        fx.engine->run();
+      }
+      EXPECT_EQ(observed->observed(), 2u);
+    }
+  }
+}
+
+TEST(WorkgroupInfoDispatchTest, ArchitectedWorkgroupIdsDoNotShiftAqlInfo) {
+  for (const auto arch : {ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
+    const char *config =
+        arch == ROCJITSU_CODE_ARCH_RDNA4 ? "gfx1201_r9700.json" : "gfx1250_mi455x.json";
+    SCOPED_TRACE(config);
+    XcdDistributionFixture fx;
+    ASSERT_NO_FATAL_FAILURE(fx.initialize(Threading::Single, 1, test::config_path(config)));
+    using namespace rocjitsu::amdhsa;
+    kernel_descriptor_t kd{};
+    kd.kernel_code_entry_byte_offset = sizeof(kd);
+    RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT, 7);
+    RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT, 12);
+    RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 2);
+    RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_INFO, 1);
+    RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X, 1);
+    RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Y, 1);
+    EXPECT_EQ(kernel_descriptor_initial_sgpr_count(arch, kd), 3u);
+    RJ_AMDHSA_BITS_SET(kd.kernel_code_properties,
+                       KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1);
+    fx.memory->load_image(reinterpret_cast<const uint8_t *>(&kd), sizeof(kd), kKdAddr);
+    const util::FailureOr<uint32_t> endpgm = build_s_endpgm(arch);
+    ASSERT_TRUE(endpgm.succeeded());
+    fx.memory->write32(kKdAddr + sizeof(kd), endpgm.value());
+    auto plugin = std::make_unique<WorkgroupInfoPlugin>(true);
+    auto *observed = plugin.get();
+    auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+    ASSERT_TRUE(group->add(std::move(plugin)));
+    fx.soc->set_plugin_group(group);
+    auto queue = test::make_fanout_queue(fx.memory, fx.soc->assign_queue_owner_cp(0));
+    const uint32_t group_size = arch == ROCJITSU_CODE_ARCH_CDNA5 ? 64 : 128;
+    queue->dispatch(kKdAddr, group_size * 2, group_size);
+    fx.engine->run();
+    EXPECT_EQ(observed->observed(), 4u);
+  }
+}
 
 /// Count queue-dispatched workgroups and record the largest physical wave slot.
 class WaveSlotPlugin : public ExecutionPlugin {
@@ -1466,8 +1812,11 @@ TEST(XcdDistributionTest, RuntimeQueueScratchUsesItsOwnBackingWithoutSyntheticAl
   using namespace rocjitsu::amdhsa;
   struct alignas(64) Kernel {
     kernel_descriptor_t kd{};
-    uint32_t endpgm = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
+    uint32_t endpgm = 0;
   } kernel;
+  util::FailureOr<uint32_t> maybe_s_endpgm = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_TRUE(maybe_s_endpgm.succeeded());
+  kernel.endpgm = maybe_s_endpgm.value();
   constexpr uint64_t kKernelVa = 0x20000;
   constexpr uint64_t kRingVa = 0x30000;
   constexpr uint64_t kQueueVa = 0x40000;
@@ -1543,7 +1892,7 @@ TEST(XcdDistributionTest, FanoutSizesScratchForTheWholeGridNotOneShare) {
   constexpr uint64_t kPerWave = uint64_t{kPrivateBytes} * kWavefrontSize;
   constexpr uint64_t kWavesPerWg = 1;
   constexpr uint64_t kGridWide = kPerWave * kTotalCus * kWavesPerWg;
-  install_scratch_kernel(*fx.memory, kPrivateBytes);
+  ASSERT_NO_FATAL_FAILURE(install_scratch_kernel(*fx.memory, kPrivateBytes));
 
   auto vm_access = std::make_shared<SparseGpuVmAccess>(
       *fx.memory,
@@ -1744,8 +2093,8 @@ TEST(XcdDistributionTest, GrowingScratchPreservesAlreadyAdmittedWaves) {
         scratch_slots += cu->scratch_slots_per_cu();
     }
     const size_t pool_bytes = per_wave * scratch_slots;
-    install_scratch_kernel(*fx.memory, kPrivateBytes,
-                           cdna5 ? ROCJITSU_CODE_ARCH_CDNA5 : ROCJITSU_CODE_ARCH_CDNA4);
+    ASSERT_NO_FATAL_FAILURE(install_scratch_kernel(
+        *fx.memory, kPrivateBytes, cdna5 ? ROCJITSU_CODE_ARCH_CDNA5 : ROCJITSU_CODE_ARCH_CDNA4));
 
     // A preceding dispatch left enough backing for the first wave, but not the
     // new grid. Provision the missing tail before admitting any new waves.
@@ -1819,7 +2168,7 @@ TEST(XcdDistributionTest, ScratchAllocatorFailureStopsBeforeWaveAdmission) {
   XcdDistributionFixture fx;
   ASSERT_NO_FATAL_FAILURE(fx.initialize());
   constexpr uint32_t kPrivateBytes = 64;
-  install_scratch_kernel(*fx.memory, kPrivateBytes);
+  ASSERT_NO_FATAL_FAILURE(install_scratch_kernel(*fx.memory, kPrivateBytes));
 
   auto vm_access = std::make_shared<SparseGpuVmAccess>(
       *fx.memory, SparseGpuVmAccess::HostWindow{.base = kDefaultScratchPool, .size = 0});
@@ -1853,7 +2202,7 @@ TEST(XcdDistributionTest, ScratchRequiresTheCompleteWaveSlice) {
   XcdDistributionFixture fx;
   ASSERT_NO_FATAL_FAILURE(fx.initialize());
   constexpr uint32_t kPrivateBytes = 64;
-  install_scratch_kernel(*fx.memory, kPrivateBytes);
+  ASSERT_NO_FATAL_FAILURE(install_scratch_kernel(*fx.memory, kPrivateBytes));
 
   // The first byte resolves, which is enough for the old point probe, while the
   // rest of this wave's 4 KiB scratch slice is deliberately absent.

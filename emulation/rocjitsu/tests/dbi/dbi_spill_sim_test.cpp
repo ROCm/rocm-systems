@@ -37,7 +37,10 @@
 #include "rocjitsu/code/builders/spill_builders.h"
 #include "rocjitsu/code/patch/instrumentor.h"
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
+
+#include "util/diagnostic.h"
 
 #include <gtest/gtest.h>
 
@@ -73,8 +76,9 @@ constexpr uint32_t kSentinel2 = 9; // Distinct value for a second reg, to catch 
 // operands and writes one VGPR. src0 is the 9-bit VOP2 src field (VGPR = 256 + index, SGPR
 // = index); vsrc1 and vdst are VGPR indices. Reading a register as a source keeps it live
 // across the anchor without clobbering it -- used to pin many registers live at once.
-[[nodiscard]] uint32_t build_v_add_u32(uint16_t vdst, uint16_t src0, uint16_t vsrc1,
-                                       rj_code_arch_t arch) {
+util::FailureOr<uint32_t> build_v_add_u32(uint16_t vdst, uint16_t src0, uint16_t vsrc1,
+                                          rj_code_arch_t arch,
+                                          util::DiagnosticEmitter emit_error = {}) {
   const uint8_t d = static_cast<uint8_t>(vdst);
   const uint8_t s1 = static_cast<uint8_t>(vsrc1);
   switch (arch) {
@@ -85,8 +89,15 @@ constexpr uint32_t kSentinel2 = 9; // Distinct value for a second reg, to catch 
   case ROCJITSU_CODE_ARCH_RDNA4:
     return rdna4::build_vop2(rdna4::kVAddNcU32Vop2, {.src0 = src0, .vsrc1 = s1, .vdst = d})[0];
   default:
-    throw util::UnimplementedInst("v_add_u32 for target architecture");
+    return emit_error.emit() << "Unimplemented instruction: v_add_u32 for target architecture";
   }
+}
+
+TEST(DbiSpillBuilders, UnsupportedArchitectureReturnsFailure) {
+  util::StringDiagnostic diagnostic;
+  EXPECT_TRUE(
+      build_v_add_u32(1, 256, 1, ROCJITSU_CODE_ARCH_INVALID, diagnostic.emitter()).failed());
+  EXPECT_EQ(diagnostic.message(), "Unimplemented instruction: v_add_u32 for target architecture");
 }
 
 // VGPR / SGPR spill, executed on CDNA3 (gfx942, wave64), CDNA4 (gfx950, wave64),
@@ -117,12 +128,16 @@ protected:
   explicit DbiVgprSpillSimBase(const SpillSimArch &a) : a_(a) {}
 
   void SetUp() override {
-    const uint32_t endpgm = build_s_endpgm(a_.arch);
-    const uint32_t setpc = build_s_setpc_b64(/*s[30:31]=*/30, a_.arch);
+    util::FailureOr<uint32_t> maybe_s_endpgm_54 = build_s_endpgm(a_.arch);
+    ASSERT_TRUE(maybe_s_endpgm_54.succeeded());
+    const uint32_t endpgm = maybe_s_endpgm_54.value();
+    util::FailureOr<uint32_t> maybe_s_setpc_b64_53 = build_s_setpc_b64(/*s[30:31]=*/30, a_.arch);
+    ASSERT_TRUE(maybe_s_setpc_b64_53.succeeded());
+    const uint32_t setpc = maybe_s_setpc_b64_53.value();
     // v_mov v2, K ; v_mov v3, v2 (ANCHOR at offset 4, v2 live) ; s_endpgm.
     auto target = test::make_amdgpu_kernel_elf(
         {test::make_mov_vgpr_inline(2, kSentinel), kMovV3V2, endpgm}, /*private_bytes=*/64,
-        /*granulated_sgpr_count=*/3, a_.e_flags);
+        test::kCallableProbeGranulatedSgprCount, a_.e_flags);
     target = test::with_descriptor_metadata(target, a_.arch);
     auto probe = test::make_amdgpu_probe_elf("rj_test_probe", {kMovV2Zero, setpc}, a_.e_flags);
 
@@ -174,7 +189,9 @@ protected:
         build_scratch_load_dword(2, 64, a_.arch);
     ASSERT_TRUE(maybe_load.succeeded());
     const std::vector<uint32_t> &load = maybe_load.value();
-    const uint32_t nop = build_s_nop(0, a_.arch);
+    util::FailureOr<uint32_t> maybe_s_nop_52 = build_s_nop(0, a_.arch);
+    ASSERT_TRUE(maybe_s_nop_52.succeeded());
+    const uint32_t nop = maybe_s_nop_52.value();
 
     std::vector<uint32_t> sabotaged = patched_text_;
     auto it = std::ranges::search(sabotaged, load).begin();
@@ -250,14 +267,22 @@ protected:
   explicit DbiSgprSpillSimBase(const SpillSimArch &a) : a_(a) {}
 
   void SetUp() override {
-    const uint32_t endpgm = build_s_endpgm(a_.arch);
-    const uint32_t setpc = build_s_setpc_b64(/*s[30:31]=*/30, a_.arch);
-    const uint32_t mov_s8_k =
+    util::FailureOr<uint32_t> maybe_s_endpgm_51 = build_s_endpgm(a_.arch);
+    ASSERT_TRUE(maybe_s_endpgm_51.succeeded());
+    const uint32_t endpgm = maybe_s_endpgm_51.value();
+    util::FailureOr<uint32_t> maybe_s_setpc_b64_50 = build_s_setpc_b64(/*s[30:31]=*/30, a_.arch);
+    ASSERT_TRUE(maybe_s_setpc_b64_50.succeeded());
+    const uint32_t setpc = maybe_s_setpc_b64_50.value();
+    util::FailureOr<uint32_t> maybe_s_mov_b32_49 =
         build_s_mov_b32(kSpilledSgpr, static_cast<uint16_t>(128 + kSentinel), a_.arch);
-    const uint32_t mov_s8_0 = build_s_mov_b32(kSpilledSgpr, 128, a_.arch);
+    ASSERT_TRUE(maybe_s_mov_b32_49.succeeded());
+    const uint32_t mov_s8_k = maybe_s_mov_b32_49.value();
+    util::FailureOr<uint32_t> maybe_s_mov_b32_48 = build_s_mov_b32(kSpilledSgpr, 128, a_.arch);
+    ASSERT_TRUE(maybe_s_mov_b32_48.succeeded());
+    const uint32_t mov_s8_0 = maybe_s_mov_b32_48.value();
     // s_mov s8, K ; v_mov v3, s8 (ANCHOR at offset 4, s8 live) ; s_endpgm.
     auto target = test::make_amdgpu_kernel_elf({mov_s8_k, kMovV3S8, endpgm}, /*private_bytes=*/64,
-                                               /*granulated_sgpr_count=*/3, a_.e_flags);
+                                               test::kCallableProbeGranulatedSgprCount, a_.e_flags);
     target = test::with_descriptor_metadata(target, a_.arch);
     auto probe = test::make_amdgpu_probe_elf("rj_test_probe", {mov_s8_0, setpc}, a_.e_flags);
 
@@ -307,7 +332,9 @@ protected:
         build_v_readlane_b32(kSpilledSgpr, /*bridge=*/0, /*lane=*/0, a_.arch);
     ASSERT_TRUE(maybe_readlane.succeeded());
     const std::array<uint32_t, 2> readlane = maybe_readlane.value();
-    const uint32_t nop = build_s_nop(0, a_.arch);
+    util::FailureOr<uint32_t> maybe_s_nop_47 = build_s_nop(0, a_.arch);
+    ASSERT_TRUE(maybe_s_nop_47.succeeded());
+    const uint32_t nop = maybe_s_nop_47.value();
 
     std::vector<uint32_t> sabotaged = patched_text_;
     auto it = std::ranges::search(sabotaged, readlane).begin();
@@ -382,17 +409,25 @@ protected:
   explicit DbiTwoSgprSpillSimBase(const SpillSimArch &a) : a_(a) {}
 
   void SetUp() override {
-    const uint32_t endpgm = build_s_endpgm(a_.arch);
-    const uint32_t setpc = build_s_setpc_b64(/*s[30:31]=*/30, a_.arch);
-    const uint32_t mov_s8_k =
+    util::FailureOr<uint32_t> maybe_s_endpgm_46 = build_s_endpgm(a_.arch);
+    ASSERT_TRUE(maybe_s_endpgm_46.succeeded());
+    const uint32_t endpgm = maybe_s_endpgm_46.value();
+    util::FailureOr<uint32_t> maybe_s_setpc_b64_45 = build_s_setpc_b64(/*s[30:31]=*/30, a_.arch);
+    ASSERT_TRUE(maybe_s_setpc_b64_45.succeeded());
+    const uint32_t setpc = maybe_s_setpc_b64_45.value();
+    util::FailureOr<uint32_t> maybe_s_mov_b32_44 =
         build_s_mov_b32(kSpilledSgpr, static_cast<uint16_t>(128 + kSentinel), a_.arch);
-    const uint32_t mov_s9_k =
+    ASSERT_TRUE(maybe_s_mov_b32_44.succeeded());
+    const uint32_t mov_s8_k = maybe_s_mov_b32_44.value();
+    util::FailureOr<uint32_t> maybe_s_mov_b32_43 =
         build_s_mov_b32(kSpilledSgprHi, static_cast<uint16_t>(128 + kSentinel2), a_.arch);
+    ASSERT_TRUE(maybe_s_mov_b32_43.succeeded());
+    const uint32_t mov_s9_k = maybe_s_mov_b32_43.value();
     // s_mov s8,K1 ; s_mov s9,K2 ; v_mov v3,s8 (ANCHOR at offset 8: reads s8, s9 read
     // next -> both live) ; v_mov v4,s9 ; s_endpgm.
-    auto target =
-        test::make_amdgpu_kernel_elf({mov_s8_k, mov_s9_k, kMovV3S8, kMovV4S9, endpgm},
-                                     /*private_bytes=*/64, /*granulated_sgpr_count=*/3, a_.e_flags);
+    auto target = test::make_amdgpu_kernel_elf({mov_s8_k, mov_s9_k, kMovV3S8, kMovV4S9, endpgm},
+                                               /*private_bytes=*/64,
+                                               test::kCallableProbeGranulatedSgprCount, a_.e_flags);
     target = test::with_descriptor_metadata(target, a_.arch);
     auto probe =
         test::make_amdgpu_probe_elf("rj_test_probe", {kMovS8Zero, kMovS9Zero, setpc}, a_.e_flags);
@@ -488,14 +523,18 @@ protected:
   explicit DbiAccVgprSpillSimBase(const SpillSimArch &a) : a_(a) {}
 
   void SetUp() override {
-    const uint32_t endpgm = build_s_endpgm(a_.arch);
-    const uint32_t setpc = build_s_setpc_b64(/*s[30:31]=*/30, a_.arch);
+    util::FailureOr<uint32_t> maybe_s_endpgm_42 = build_s_endpgm(a_.arch);
+    ASSERT_TRUE(maybe_s_endpgm_42.succeeded());
+    const uint32_t endpgm = maybe_s_endpgm_42.value();
+    util::FailureOr<uint32_t> maybe_s_setpc_b64_41 = build_s_setpc_b64(/*s[30:31]=*/30, a_.arch);
+    ASSERT_TRUE(maybe_s_setpc_b64_41.succeeded());
+    const uint32_t setpc = maybe_s_setpc_b64_41.value();
     // v_accvgpr_write a0, K ; v_accvgpr_read v3, a0 (ANCHOR at offset 8, acc0
     // live) ; s_endpgm. The read copies restored acc0 into v3 for observability.
     auto target = test::make_amdgpu_kernel_elf(
         {kAccWriteA0ZeroLo, test::make_accvgpr_write_a0_inline_hi(kSentinel), kAccReadV3A0Lo,
          kAccReadV3A0Hi, endpgm},
-        /*private_bytes=*/64, /*granulated_sgpr_count=*/3, a_.e_flags);
+        /*private_bytes=*/64, test::kCallableProbeGranulatedSgprCount, a_.e_flags);
     target = test::with_descriptor_metadata(target, a_.arch);
     auto probe = test::make_amdgpu_probe_elf(
         "rj_test_probe", {kAccWriteA0ZeroLo, kAccWriteA0ZeroHi, setpc}, a_.e_flags);
@@ -548,7 +587,9 @@ protected:
         build_scratch_load_dword(/*acc0=*/0, 64, a_.arch, nullptr, /*acc=*/true);
     ASSERT_TRUE(maybe_load.succeeded());
     const std::vector<uint32_t> &load = maybe_load.value();
-    const uint32_t nop = build_s_nop(0, a_.arch);
+    util::FailureOr<uint32_t> maybe_s_nop_40 = build_s_nop(0, a_.arch);
+    ASSERT_TRUE(maybe_s_nop_40.succeeded());
+    const uint32_t nop = maybe_s_nop_40.value();
 
     std::vector<uint32_t> sabotaged = patched_text_;
     auto it = std::ranges::search(sabotaged, load).begin();
@@ -619,11 +660,19 @@ protected:
   explicit DbiCombinedSpillSimBase(const SpillSimArch &a) : a_(a) {}
 
   void SetUp() override {
-    const uint32_t endpgm = build_s_endpgm(a_.arch);
-    const uint32_t setpc = build_s_setpc_b64(/*s[30:31]=*/30, a_.arch);
-    const uint32_t mov_s8_k =
+    util::FailureOr<uint32_t> maybe_s_endpgm_39 = build_s_endpgm(a_.arch);
+    ASSERT_TRUE(maybe_s_endpgm_39.succeeded());
+    const uint32_t endpgm = maybe_s_endpgm_39.value();
+    util::FailureOr<uint32_t> maybe_s_setpc_b64_38 = build_s_setpc_b64(/*s[30:31]=*/30, a_.arch);
+    ASSERT_TRUE(maybe_s_setpc_b64_38.succeeded());
+    const uint32_t setpc = maybe_s_setpc_b64_38.value();
+    util::FailureOr<uint32_t> maybe_s_mov_b32_37 =
         build_s_mov_b32(kSpilledSgpr, static_cast<uint16_t>(128 + kSentinel), a_.arch);
-    const uint32_t mov_s8_0 = build_s_mov_b32(kSpilledSgpr, 128, a_.arch);
+    ASSERT_TRUE(maybe_s_mov_b32_37.succeeded());
+    const uint32_t mov_s8_k = maybe_s_mov_b32_37.value();
+    util::FailureOr<uint32_t> maybe_s_mov_b32_36 = build_s_mov_b32(kSpilledSgpr, 128, a_.arch);
+    ASSERT_TRUE(maybe_s_mov_b32_36.succeeded());
+    const uint32_t mov_s8_0 = maybe_s_mov_b32_36.value();
     // v_mov v2,K ; s_mov s8,K ; v_accvgpr_write a0,K ; (ANCHOR at offset 16)
     // v_mov v5,v2 ; v_mov v6,s8 ; v_accvgpr_read v7,a0 ; s_endpgm.
     // 16 VGPRs with ACCUM_OFFSET=1 puts the accumulator window at v8-v15, so v2 and
@@ -634,7 +683,7 @@ protected:
         {test::make_mov_vgpr_inline(2, kSentinel), mov_s8_k, kAccWriteA0ZeroLo,
          test::make_accvgpr_write_a0_inline_hi(kSentinel), kMovV5V2, kMovV6S8, kAccReadV7A0Lo,
          kAccReadV7A0Hi, endpgm},
-        /*private_bytes=*/64, /*granulated_sgpr_count=*/3, a_.e_flags,
+        /*private_bytes=*/64, test::kCallableProbeGranulatedSgprCount, a_.e_flags,
         /*granulated_vgpr_count=*/1, /*accum_offset=*/1);
     target = test::with_descriptor_metadata(target, a_.arch);
     auto probe = test::make_amdgpu_probe_elf(
@@ -700,7 +749,9 @@ protected:
         build_scratch_load_dword(/*acc0=*/0, 72, a_.arch, nullptr, /*acc=*/true);
     ASSERT_TRUE(maybe_aload.succeeded());
     const std::vector<uint32_t> &aload = maybe_aload.value();
-    const uint32_t nop = build_s_nop(0, a_.arch);
+    util::FailureOr<uint32_t> maybe_s_nop_35 = build_s_nop(0, a_.arch);
+    ASSERT_TRUE(maybe_s_nop_35.succeeded());
+    const uint32_t nop = maybe_s_nop_35.value();
 
     std::vector<uint32_t> sabotaged = patched_text_;
     const auto nop_seq = [&](const auto &seq, const char *what) {
@@ -775,22 +826,33 @@ protected:
   explicit DbiReusedBridgeSpillSimBase(const SpillSimArch &a) : a_(a) {}
 
   void SetUp() override {
-    const uint32_t endpgm = build_s_endpgm(a_.arch);
-    const uint32_t setpc = build_s_setpc_b64(/*s[30:31]=*/30, a_.arch);
-    const uint32_t mov_s8_k =
+    util::FailureOr<uint32_t> maybe_s_endpgm_34 = build_s_endpgm(a_.arch);
+    ASSERT_TRUE(maybe_s_endpgm_34.succeeded());
+    const uint32_t endpgm = maybe_s_endpgm_34.value();
+    util::FailureOr<uint32_t> maybe_s_setpc_b64_33 = build_s_setpc_b64(/*s[30:31]=*/30, a_.arch);
+    ASSERT_TRUE(maybe_s_setpc_b64_33.succeeded());
+    const uint32_t setpc = maybe_s_setpc_b64_33.value();
+    util::FailureOr<uint32_t> maybe_s_mov_b32_32 =
         build_s_mov_b32(kSpilledSgpr, static_cast<uint16_t>(128 + kSentinel2), a_.arch);
+    ASSERT_TRUE(maybe_s_mov_b32_32.succeeded());
+    const uint32_t mov_s8_k = maybe_s_mov_b32_32.value();
     constexpr uint16_t kVgprSrc = 256; // VOP2 src field: VGPR = 256 + index.
-    auto vadd = [&](uint16_t d, uint16_t s0, uint16_t s1) {
-      return build_v_add_u32(d, s0, s1, a_.arch);
-    };
+    util::StringDiagnostic diagnostic;
+    const std::array<util::FailureOr<uint32_t>, 5> adds = {
+        build_v_add_u32(1, kVgprSrc + 0, 1, a_.arch, diagnostic.emitter()),
+        build_v_add_u32(3, kVgprSrc + 2, 3, a_.arch, diagnostic.emitter()),
+        build_v_add_u32(5, kVgprSrc + 4, 5, a_.arch, diagnostic.emitter()),
+        build_v_add_u32(7, kVgprSrc + 6, 7, a_.arch, diagnostic.emitter()),
+        build_v_add_u32(1, kSpilledSgpr, 1, a_.arch, diagnostic.emitter())};
+    for (const util::FailureOr<uint32_t> &add : adds)
+      ASSERT_TRUE(add.succeeded()) << diagnostic.message();
     // v_mov v0,K ; s_mov s8,K2 ; then an add chain (ANCHOR at offset 8) that reads v0..v7
     // and s8 -- keeping all eight VGPRs and s8 live -- while writing only v1/v3/v5/v7, so v0
     // and s8 stay intact for readback. s_endpgm.
     auto target = test::make_amdgpu_kernel_elf(
-        {test::make_mov_vgpr_inline(0, kSentinel), mov_s8_k, vadd(1, kVgprSrc + 0, 1),
-         vadd(3, kVgprSrc + 2, 3), vadd(5, kVgprSrc + 4, 5), vadd(7, kVgprSrc + 6, 7),
-         vadd(1, kSpilledSgpr, 1), endpgm},
-        /*private_bytes=*/64, /*granulated_sgpr_count=*/3, a_.e_flags);
+        {test::make_mov_vgpr_inline(0, kSentinel), mov_s8_k, adds[0].value(), adds[1].value(),
+         adds[2].value(), adds[3].value(), adds[4].value(), endpgm},
+        /*private_bytes=*/64, test::kCallableProbeGranulatedSgprCount, a_.e_flags);
     target = test::with_descriptor_metadata(target, a_.arch);
     auto probe = test::make_amdgpu_probe_elf(
         "rj_test_probe", {test::make_mov_vgpr_inline(0, 0), kMovS8Zero, setpc}, a_.e_flags);
@@ -885,13 +947,6 @@ TEST_F(DbiRdna4ReusedBridgeSpillSimFixture, ReusedSpilledBridgeRestoredBeforeOwn
 // wave32 caveat: EXEC save/restore + full-mask toggle stay wave64-shaped
 // (s_mov_b64); on wave32 the extra EXEC_HI write is harmless (EXEC_LO round-trips).
 
-// s_mov_b32 <sdst>, <32-bit literal>: two words (src0 = 255 selects a trailing
-// literal). Used for the RDNA4 wave32 partial EXEC mask (exec_lo=0x0000FFFF).
-[[nodiscard]] std::vector<uint32_t> s_mov_b32_literal(uint16_t sdst, uint32_t literal,
-                                                      rj_code_arch_t arch) {
-  return {build_s_mov_b32(sdst, /*literal marker=*/255, arch), literal};
-}
-
 // Per-arch EXEC-sim config. set_partial_mask narrows EXEC to [0, active_lanes);
 // restore_full_mask widens it back (both variable length).
 struct ExecSimArch {
@@ -904,40 +959,82 @@ struct ExecSimArch {
 // CDNA3 wave64: clear exec_hi -> lanes 0..31; restore with exec_hi = -1.
 [[nodiscard]] inline ExecSimArch cdna3_exec_arch() {
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA3;
+  constexpr util::FailureOr<uint16_t> maybe_scalar_inline_neg_one_28 = scalar_inline_neg_one(kArch);
+  static_assert(maybe_scalar_inline_neg_one_28.succeeded());
+  constexpr util::FailureOr<uint32_t> maybe_s_mov_b32_29 =
+      build_s_mov_b32(/*exec_hi=*/127, maybe_scalar_inline_neg_one_28.value(), kArch);
+  static_assert(maybe_s_mov_b32_29.succeeded());
+  constexpr util::FailureOr<uint32_t> maybe_s_mov_b32_30 =
+      build_s_mov_b32(/*exec_hi=*/127, /*inline 0=*/128, kArch);
+  static_assert(maybe_s_mov_b32_30.succeeded());
   return {kCdna3SpillArch,
           /*active_lanes=*/32,
-          {build_s_mov_b32(/*exec_hi=*/127, /*inline 0=*/128, kArch)},
-          {build_s_mov_b32(/*exec_hi=*/127, scalar_inline_neg_one(kArch), kArch)}};
+          {maybe_s_mov_b32_30.value()},
+          {maybe_s_mov_b32_29.value()}};
 }
 
 // CDNA4 wave64: clear exec_hi -> lanes 0..31; restore with exec_hi = -1.
 [[nodiscard]] inline ExecSimArch cdna4_exec_arch() {
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  constexpr util::FailureOr<uint16_t> maybe_scalar_inline_neg_one_25 = scalar_inline_neg_one(kArch);
+  static_assert(maybe_scalar_inline_neg_one_25.succeeded());
+  constexpr util::FailureOr<uint32_t> maybe_s_mov_b32_26 =
+      build_s_mov_b32(/*exec_hi=*/127, maybe_scalar_inline_neg_one_25.value(), kArch);
+  static_assert(maybe_s_mov_b32_26.succeeded());
+  constexpr util::FailureOr<uint32_t> maybe_s_mov_b32_27 =
+      build_s_mov_b32(/*exec_hi=*/127, /*inline 0=*/128, kArch);
+  static_assert(maybe_s_mov_b32_27.succeeded());
   return {kCdna4SpillArch,
           /*active_lanes=*/32,
-          {build_s_mov_b32(/*exec_hi=*/127, /*inline 0=*/128, kArch)},
-          {build_s_mov_b32(/*exec_hi=*/127, scalar_inline_neg_one(kArch), kArch)}};
+          {maybe_s_mov_b32_27.value()},
+          {maybe_s_mov_b32_26.value()}};
 }
 
 // RDNA4 wave32: narrow exec_lo to 0x0000FFFF (lanes 0..15); restore with exec_lo = -1.
 [[nodiscard]] inline ExecSimArch rdna4_exec_arch() {
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_RDNA4;
+  constexpr util::FailureOr<uint16_t> maybe_scalar_inline_neg_one_21 = scalar_inline_neg_one(kArch);
+  static_assert(maybe_scalar_inline_neg_one_21.succeeded());
+  constexpr util::FailureOr<uint16_t> maybe_scalar_operand_exec_lo_22 =
+      scalar_operand_exec_lo(kArch);
+  static_assert(maybe_scalar_operand_exec_lo_22.succeeded());
+  constexpr util::FailureOr<uint32_t> maybe_s_mov_b32_23 = build_s_mov_b32(
+      maybe_scalar_operand_exec_lo_22.value(), maybe_scalar_inline_neg_one_21.value(), kArch);
+  static_assert(maybe_s_mov_b32_23.succeeded());
+  constexpr util::FailureOr<uint16_t> maybe_scalar_operand_exec_lo_24 =
+      scalar_operand_exec_lo(kArch);
+  static_assert(maybe_scalar_operand_exec_lo_24.succeeded());
+  constexpr util::FailureOr<uint32_t> partial =
+      build_s_mov_b32(maybe_scalar_operand_exec_lo_24.value(), 255, kArch);
+  static_assert(partial.succeeded());
   return {kRdna4SpillArch,
           /*active_lanes=*/16,
-          s_mov_b32_literal(scalar_operand_exec_lo(kArch), /*lanes 0..15=*/0x0000FFFFu, kArch),
-          {build_s_mov_b32(scalar_operand_exec_lo(kArch), scalar_inline_neg_one(kArch), kArch)}};
+          {partial.value(), /*lanes 0..15=*/0x0000FFFFu},
+          {maybe_s_mov_b32_23.value()}};
 }
 
 // Index of the trampoline's EXEC restore: an s_mov_b64 writing EXEC_LO from a
 // dead SGPR temp (< VCC_LO), not the probe's own `s_mov_b64 exec, 0` (reads
 // inline 0 = 128). text.size() if absent.
 [[nodiscard]] size_t find_exec_restore(const std::vector<uint32_t> &text, rj_code_arch_t arch) {
-  const uint32_t mov64 = sop1_op_mov_b64(arch);
+  util::FailureOr<uint32_t> maybe_sop1_op_mov_b64_20 = sop1_op_mov_b64(arch);
+  EXPECT_TRUE(maybe_sop1_op_mov_b64_20.succeeded());
+  if (maybe_sop1_op_mov_b64_20.failed())
+    return text.size();
+  const uint32_t mov64 = maybe_sop1_op_mov_b64_20.value();
+  util::FailureOr<uint16_t> maybe_scalar_operand_vcc_lo_18 = scalar_operand_vcc_lo(arch);
+  EXPECT_TRUE(maybe_scalar_operand_vcc_lo_18.succeeded());
+  if (maybe_scalar_operand_vcc_lo_18.failed())
+    return text.size();
+  util::FailureOr<uint16_t> maybe_scalar_operand_exec_lo_19 = scalar_operand_exec_lo(arch);
+  EXPECT_TRUE(maybe_scalar_operand_exec_lo_19.succeeded());
+  if (maybe_scalar_operand_exec_lo_19.failed())
+    return text.size();
   for (size_t i = 0; i < text.size(); ++i) {
     const uint32_t w = text[i];
     if ((w >> 23) == kSop1EncodingPrefix && ((w >> 8) & 0xFFu) == mov64 &&
-        ((w >> 16) & 0x7Fu) == scalar_operand_exec_lo(arch) &&
-        (w & 0xFFu) < scalar_operand_vcc_lo(arch))
+        ((w >> 16) & 0x7Fu) == maybe_scalar_operand_exec_lo_19.value() &&
+        (w & 0xFFu) < maybe_scalar_operand_vcc_lo_18.value())
       return i;
   }
   return text.size();
@@ -951,13 +1048,23 @@ protected:
   explicit DbiExecPreserveSimBase(ExecSimArch a) : a_(std::move(a)) {}
 
   void SetUp() override {
-    const uint32_t endpgm = build_s_endpgm(a_.base.arch);
-    const uint32_t setpc = build_s_setpc_b64(/*s[30:31]=*/30, a_.base.arch);
+    util::FailureOr<uint32_t> maybe_s_endpgm_17 = build_s_endpgm(a_.base.arch);
+    ASSERT_TRUE(maybe_s_endpgm_17.succeeded());
+    const uint32_t endpgm = maybe_s_endpgm_17.value();
+    util::FailureOr<uint32_t> maybe_s_setpc_b64_16 =
+        build_s_setpc_b64(/*s[30:31]=*/30, a_.base.arch);
+    ASSERT_TRUE(maybe_s_setpc_b64_16.succeeded());
+    const uint32_t setpc = maybe_s_setpc_b64_16.value();
     const uint32_t mov_v3_0 = 0x7E060280u;                      // v_mov_b32 v3, 0
     const uint32_t mov_v3_k = 0x7E060200u | (128u + kSentinel); // v_mov_b32 v3, K
     // Probe clobbers the whole EXEC pair: s_mov_b64 exec, 0.
-    const uint32_t probe_clobber_exec =
-        build_s_mov_b64(scalar_operand_exec_lo(a_.base.arch), /*inline 0=*/128, a_.base.arch);
+    util::FailureOr<uint16_t> maybe_scalar_operand_exec_lo_14 =
+        scalar_operand_exec_lo(a_.base.arch);
+    ASSERT_TRUE(maybe_scalar_operand_exec_lo_14.succeeded());
+    util::FailureOr<uint32_t> maybe_s_mov_b64_15 =
+        build_s_mov_b64(maybe_scalar_operand_exec_lo_14.value(), /*inline 0=*/128, a_.base.arch);
+    ASSERT_TRUE(maybe_s_mov_b64_15.succeeded());
+    const uint32_t probe_clobber_exec = maybe_s_mov_b64_15.value();
 
     // v_mov v3,0 (all lanes) ; <narrow EXEC> ; ANCHOR v_mov v3,K ; s_endpgm.
     std::vector<uint32_t> code = {mov_v3_0};
@@ -966,8 +1073,8 @@ protected:
     code.push_back(mov_v3_k);
     code.push_back(endpgm);
 
-    auto target = test::make_amdgpu_kernel_elf(code, /*private_bytes=*/0,
-                                               /*granulated_sgpr_count=*/3, a_.base.e_flags);
+    auto target = test::make_amdgpu_kernel_elf(
+        code, /*private_bytes=*/0, test::kCallableProbeGranulatedSgprCount, a_.base.e_flags);
 
     target = test::with_descriptor_metadata(target, a_.base.arch);
     auto probe =
@@ -1021,7 +1128,9 @@ protected:
     ASSERT_LT(restore, patched_text_.size()) << "EXEC restore (s_mov_b64 exec, tmp) not found";
 
     std::vector<uint32_t> sabotaged = patched_text_;
-    sabotaged[restore] = build_s_nop(0, a_.base.arch);
+    util::FailureOr<uint32_t> maybe_s_nop_13 = build_s_nop(0, a_.base.arch);
+    ASSERT_TRUE(maybe_s_nop_13.succeeded());
+    sabotaged[restore] = maybe_s_nop_13.value();
 
     test::DbiSim broken;
     ASSERT_NO_FATAL_FAILURE(broken.initialize(a_.base.sim_arch, a_.base.wave_size));
@@ -1090,15 +1199,27 @@ protected:
   explicit DbiExecWidenSpillSimBase(ExecSimArch a) : a_(std::move(a)) {}
 
   void SetUp() override {
-    const uint32_t endpgm = build_s_endpgm(a_.base.arch);
-    const uint32_t setpc = build_s_setpc_b64(/*s[30:31]=*/30, a_.base.arch);
+    util::FailureOr<uint32_t> maybe_s_endpgm_12 = build_s_endpgm(a_.base.arch);
+    ASSERT_TRUE(maybe_s_endpgm_12.succeeded());
+    const uint32_t endpgm = maybe_s_endpgm_12.value();
+    util::FailureOr<uint32_t> maybe_s_setpc_b64_11 =
+        build_s_setpc_b64(/*s[30:31]=*/30, a_.base.arch);
+    ASSERT_TRUE(maybe_s_setpc_b64_11.succeeded());
+    const uint32_t setpc = maybe_s_setpc_b64_11.value();
     const uint32_t mov_v2_k = test::make_mov_vgpr_inline(2, kSentinel); // v_mov v2, K (all lanes)
     const uint32_t mov_v3_0 = 0x7E060280u;                              // v_mov v3, 0
     const uint32_t mov_v4_v2 = 0x7E080302u;                             // v_mov v4, v2 (v2 live)
     const uint32_t mov_v3_v2 = kMovV3V2;                                // v_mov v3, v2
     // Probe widens EXEC to all lanes, then clobbers v2 on all of them.
-    const uint32_t probe_widen = build_s_mov_b64(scalar_operand_exec_lo(a_.base.arch),
-                                                 scalar_inline_neg_one(a_.base.arch), a_.base.arch);
+    util::FailureOr<uint16_t> maybe_scalar_inline_neg_one_8 = scalar_inline_neg_one(a_.base.arch);
+    ASSERT_TRUE(maybe_scalar_inline_neg_one_8.succeeded());
+    util::FailureOr<uint16_t> maybe_scalar_operand_exec_lo_9 = scalar_operand_exec_lo(a_.base.arch);
+    ASSERT_TRUE(maybe_scalar_operand_exec_lo_9.succeeded());
+    util::FailureOr<uint32_t> maybe_s_mov_b64_10 =
+        build_s_mov_b64(maybe_scalar_operand_exec_lo_9.value(),
+                        maybe_scalar_inline_neg_one_8.value(), a_.base.arch);
+    ASSERT_TRUE(maybe_s_mov_b64_10.succeeded());
+    const uint32_t probe_widen = maybe_s_mov_b64_10.value();
 
     // v2=K ; v3=0 ; <narrow EXEC> ; ANCHOR v_mov v4,v2 ; <widen EXEC> ; v3=v2 ; endpgm.
     std::vector<uint32_t> code = {mov_v2_k, mov_v3_0};
@@ -1109,8 +1230,8 @@ protected:
     code.push_back(mov_v3_v2);
     code.push_back(endpgm);
 
-    auto target = test::make_amdgpu_kernel_elf(code, /*private_bytes=*/64,
-                                               /*granulated_sgpr_count=*/3, a_.base.e_flags);
+    auto target = test::make_amdgpu_kernel_elf(
+        code, /*private_bytes=*/64, test::kCallableProbeGranulatedSgprCount, a_.base.e_flags);
 
     target = test::with_descriptor_metadata(target, a_.base.arch);
     auto probe = test::make_amdgpu_probe_elf("rj_test_probe", {probe_widen, kMovV2Zero, setpc},
@@ -1163,8 +1284,15 @@ protected:
         build_scratch_store_dword(2, 64, a_.base.arch);
     ASSERT_TRUE(maybe_store.succeeded());
     const std::vector<uint32_t> &store = maybe_store.value();
-    const uint32_t toggle = build_s_mov_b64(scalar_operand_exec_lo(a_.base.arch),
-                                            scalar_inline_neg_one(a_.base.arch), a_.base.arch);
+    util::FailureOr<uint16_t> maybe_scalar_inline_neg_one_5 = scalar_inline_neg_one(a_.base.arch);
+    ASSERT_TRUE(maybe_scalar_inline_neg_one_5.succeeded());
+    util::FailureOr<uint16_t> maybe_scalar_operand_exec_lo_6 = scalar_operand_exec_lo(a_.base.arch);
+    ASSERT_TRUE(maybe_scalar_operand_exec_lo_6.succeeded());
+    util::FailureOr<uint32_t> maybe_s_mov_b64_7 =
+        build_s_mov_b64(maybe_scalar_operand_exec_lo_6.value(),
+                        maybe_scalar_inline_neg_one_5.value(), a_.base.arch);
+    ASSERT_TRUE(maybe_s_mov_b64_7.succeeded());
+    const uint32_t toggle = maybe_s_mov_b64_7.value();
     // The in-flight-load drain now sits at the envelope top, not in the spill
     // prologue, so the store's immediately preceding word is the EXEC=-1 toggle.
     auto it = std::ranges::search(patched_text_, store).begin();
@@ -1176,7 +1304,9 @@ protected:
         << "word before the store should be the prologue EXEC=-1 toggle";
 
     std::vector<uint32_t> sabotaged = patched_text_;
-    sabotaged[toggle_idx] = build_s_nop(0, a_.base.arch);
+    util::FailureOr<uint32_t> maybe_s_nop_4 = build_s_nop(0, a_.base.arch);
+    ASSERT_TRUE(maybe_s_nop_4.succeeded());
+    sabotaged[toggle_idx] = maybe_s_nop_4.value();
 
     test::DbiSim broken;
     ASSERT_NO_FATAL_FAILURE(broken.initialize(a_.base.sim_arch, a_.base.wave_size));
@@ -1241,8 +1371,13 @@ protected:
   explicit DbiExecMaskAtSpillSimBase(ExecSimArch a) : a_(std::move(a)) {}
 
   void SetUp() override {
-    const uint32_t endpgm = build_s_endpgm(a_.base.arch);
-    const uint32_t setpc = build_s_setpc_b64(/*s[30:31]=*/30, a_.base.arch);
+    util::FailureOr<uint32_t> maybe_s_endpgm_3 = build_s_endpgm(a_.base.arch);
+    ASSERT_TRUE(maybe_s_endpgm_3.succeeded());
+    const uint32_t endpgm = maybe_s_endpgm_3.value();
+    util::FailureOr<uint32_t> maybe_s_setpc_b64_2 =
+        build_s_setpc_b64(/*s[30:31]=*/30, a_.base.arch);
+    ASSERT_TRUE(maybe_s_setpc_b64_2.succeeded());
+    const uint32_t setpc = maybe_s_setpc_b64_2.value();
     const uint32_t mov_v5_0 = 0x7E0A0280u;                      // v_mov v5, 0 (all lanes)
     const uint32_t mov_v5_k = 0x7E0A0200u | (128u + kSentinel); // v_mov v5, K (probe marker)
     const uint32_t mov_v2_k = test::make_mov_vgpr_inline(2, kSentinel); // v_mov v2, K (spilled reg)
@@ -1259,8 +1394,8 @@ protected:
     code.insert(code.end(), a_.restore_full_mask.begin(), a_.restore_full_mask.end());
     code.push_back(endpgm);
 
-    auto target = test::make_amdgpu_kernel_elf(code, /*private_bytes=*/64,
-                                               /*granulated_sgpr_count=*/3, a_.base.e_flags);
+    auto target = test::make_amdgpu_kernel_elf(
+        code, /*private_bytes=*/64, test::kCallableProbeGranulatedSgprCount, a_.base.e_flags);
 
     target = test::with_descriptor_metadata(target, a_.base.arch);
     AmdGpuCodeObject obj(target.data(), target.size());
@@ -1309,7 +1444,9 @@ protected:
     ASSERT_LT(restore, patched_text_.size()) << "pre-call EXEC anchor-restore not found";
 
     std::vector<uint32_t> sabotaged = patched_text_;
-    sabotaged[restore] = build_s_nop(0, a_.base.arch);
+    util::FailureOr<uint32_t> maybe_s_nop_1 = build_s_nop(0, a_.base.arch);
+    ASSERT_TRUE(maybe_s_nop_1.succeeded());
+    sabotaged[restore] = maybe_s_nop_1.value();
 
     test::DbiSim broken;
     ASSERT_NO_FATAL_FAILURE(broken.initialize(a_.base.sim_arch, a_.base.wave_size));
@@ -1357,6 +1494,82 @@ TEST_F(DbiRdna4ExecMaskAtSpillSimFixture, ProbeRunsUnderAnchorMask) {
 }
 TEST_F(DbiRdna4ExecMaskAtSpillSimFixture, MissingAnchorRestoreRunsProbeFullMask) {
   expect_missing_anchor_restore_runs_probe_full_mask();
+}
+
+void expect_scalar_relative_probe(bool relative_source, bool with_probe,
+                                  uint16_t selected_value = 7) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  ASSERT_LE(selected_value, 64);
+  const util::FailureOr<uint16_t> m0_operand = scalar_operand_m0(kArch);
+  ASSERT_TRUE(m0_operand.succeeded());
+  const std::array<util::FailureOr<uint32_t>, 6> setup = {
+      build_s_mov_b32(0, 128, kArch),
+      build_s_mov_b32(2, static_cast<uint16_t>(128 + selected_value), kArch),
+      build_s_mov_b32(4, 139, kArch),
+      build_s_mov_b32(m0_operand.value(), 130, kArch),
+      relative_source ? build_sop1_encoding(kArch, cdna4::kSMovrelsB32Sop1, 10, 0)
+                      : build_s_mov_b32(10, 4, kArch),
+      build_s_endpgm(kArch)};
+  std::vector<uint32_t> words;
+  for (const util::FailureOr<uint32_t> &word : setup) {
+    ASSERT_TRUE(word.succeeded());
+    words.push_back(word.value());
+  }
+  if (with_probe) {
+    const util::FailureOr<uint32_t> ret = build_s_setpc_b64(30, kArch);
+    ASSERT_TRUE(ret.succeeded());
+    const std::vector<uint8_t> image = test::make_gfx950_kernel_elf(words, 0);
+    const std::vector<uint8_t> probe_image =
+        test::make_gfx950_probe_elf("relative_guest_probe", {ret.value()});
+    const AmdGpuCodeObject source(image.data(), image.size());
+    const AmdGpuCodeObject probe(probe_image.data(), probe_image.size());
+    ASSERT_TRUE(source.is_valid() && probe.is_valid());
+    Instrumentor instrumentor(source, kArch);
+    instrumentor.add_point({.anchor_offset = 16,
+                            .probe_obj = &probe,
+                            .probe_symbol = "relative_guest_probe",
+                            .probe_args = {}});
+    const InstrumentedCodeObjectDebug result = instrumentor.patch_with_debug_summaries();
+    if (relative_source) {
+      EXPECT_FALSE(result.errors.empty());
+      EXPECT_TRUE(result.elf_bytes.empty());
+      EXPECT_TRUE(result.sites.empty());
+      EXPECT_TRUE(result.patches.empty());
+    } else {
+      ASSERT_TRUE(result.errors.empty()) << result.errors.front();
+      ASSERT_EQ(result.sites.size(), 1u);
+    }
+    // On rejection execute the pristine program. An erroneously admitted image
+    // is executed too, so the hidden read exposes actual register corruption.
+    if (!result.elf_bytes.empty()) {
+      const AmdGpuCodeObject candidate(result.elf_bytes.data(), result.elf_bytes.size());
+      ASSERT_TRUE(candidate.is_valid());
+      words = test::section_words(candidate, ".text");
+    }
+    EXPECT_EQ(std::memcmp(source.image_data(), image.data(), image.size()), 0);
+  }
+  test::DbiSim simulator;
+  ASSERT_NO_FATAL_FAILURE(simulator.initialize("cdna4", 64));
+  const std::optional<uint64_t> observed = simulator.run_and_read_sgpr64(words, 0, 10);
+  ASSERT_TRUE(observed) << "guest did not halt";
+  EXPECT_EQ(static_cast<uint32_t>(*observed), relative_source ? selected_value : 11u);
+}
+
+TEST(DbiScalarRelativeProbe, DirectGuestWithoutProbeIsEleven) {
+  expect_scalar_relative_probe(false, false);
+}
+
+TEST(DbiScalarRelativeProbe, DirectGuestWithProbeIsEleven) {
+  expect_scalar_relative_probe(false, true);
+}
+
+TEST(DbiScalarRelativeProbe, RelativeGuestWithoutProbeReadsTheM0SelectedRegister) {
+  expect_scalar_relative_probe(true, false);
+  expect_scalar_relative_probe(true, false, 17);
+}
+
+TEST(DbiScalarRelativeProbe, RejectsProbeWithoutChangingTheRelativeGuest) {
+  expect_scalar_relative_probe(true, true);
 }
 
 } // namespace

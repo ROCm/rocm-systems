@@ -1140,4 +1140,53 @@ const char* amd_smi_fabricTelemIdToString(uint64_t telemId);
  * @return ncclResult_t ncclSuccess on success
  */
 ncclResult_t amd_smi_getFabricBandwidth(uint32_t deviceIndex, uint32_t* bandwidthMbps);
+
+/*************************************************************************
+ * RAS Diagnostics Queries
+ *
+ * Used by src/ras/diagnostics_gpu.cc. They load amd_smi on first use,
+ * independent of RCCL_USE_AMD_SMI_LIB, take busIdToInt64() bus IDs, and
+ * return ncclSystemError when a value is unavailable.
+ ************************************************************************/
+
+struct amdsmiDiagEccCounts {
+  uint64_t correctable; //!< Accumulated correctable errors
+  uint64_t uncorrectable; //!< Accumulated uncorrectable errors
+  uint64_t deferred; //!< Accumulated deferred errors (detected, not corrected)
+};
+
+struct amdsmiDiagXgmiLinks {
+  int nLinks; //!< Links reported up or down; disabled links are not counted
+  int nDown; //!< Links reported down
+};
+
+/**
+ * @brief Load amd_smi up front; the queries otherwise load it on first use
+ */
+ncclResult_t amd_smi_diagInit();
+
+/**
+ * @brief Number of AMD GPUs on the node, independent of HIP_VISIBLE_DEVICES
+ */
+ncclResult_t amd_smi_diagGpuCount(uint32_t* count);
+
+/**
+ * @brief Market name of the GPU, e.g. "AMD Instinct MI355X"
+ */
+ncclResult_t amd_smi_diagGpuModel(int64_t busId, char* model, size_t len);
+
+/**
+ * @brief Version of the amdgpu kernel driver that serves the GPU, e.g. "6.19.14.31400000"
+ */
+ncclResult_t amd_smi_diagDriverVersion(int64_t busId, char* version, size_t len);
+
+/**
+ * @brief Accumulated ECC error counts of the GPU, summed over all memory blocks
+ */
+ncclResult_t amd_smi_diagEccCounts(int64_t busId, struct amdsmiDiagEccCounts* counts);
+
+/**
+ * @brief Number of XGMI links of the GPU and how many of them are down
+ */
+ncclResult_t amd_smi_diagXgmiLinks(int64_t busId, struct amdsmiDiagXgmiLinks* links);
 #endif // AMDSMI_WRAP_H_

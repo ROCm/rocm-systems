@@ -177,6 +177,7 @@ EXPORTS
   hsa_ext_image_destroy
   hsa_ext_sampler_create
   hsa_ext_sampler_create_v2
+  hsa_ext_sampler_create_v3
   hsa_ext_sampler_destroy
   hsa_ext_image_get_capability_with_layout
   hsa_ext_image_data_get_info_with_layout

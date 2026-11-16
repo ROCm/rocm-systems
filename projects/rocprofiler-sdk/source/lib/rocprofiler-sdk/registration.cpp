@@ -1208,25 +1208,25 @@ finalize()
     if(get_fini_status() > 0) __gcov_dump();
 #endif
 
-    if(get_fini_status() != 0)
+    if(get_fini_status() > 0)
     {
         ROCP_INFO << "ignoring finalization request (value=" << get_fini_status() << ")";
         return;
     }
 
-    static auto _sync = std::atomic_flag{};
-    if(_sync.test_and_set())
+    static thread_local bool _finalizing = false;
+    if(_finalizing)
     {
-        ROCP_INFO << "ignoring finalization request [already finalized] (value="
-                  << get_fini_status() << ")";
+        ROCP_INFO << "ignoring re-entrant finalization request (value=" << get_fini_status() << ")";
         return;
     }
-    // above returns true for all invocations after the first one
 
     ROCP_INFO << "finalizing rocprofiler (value=" << get_fini_status() << ")";
 
     static auto _once = std::once_flag{};
     std::call_once(_once, []() {
+        auto finalizing_scope =
+            common::scope_destructor{[]() { _finalizing = false; }, []() { _finalizing = true; }};
         auto num_clients = get_num_clients();
         set_fini_status(-1);
 
@@ -1503,16 +1503,15 @@ rocprofiler_set_api_table(const char* name,
         // the potential loss of some API calls.
         rocprofiler::hip::restore_table(hip_runtime_api_table, lib_instance);
 
-        // any internal modifications to the HipDispatchTable need to be done before we make the
-        // copy or else those modifications will be lost when HIP API tracing is enabled
-        // because the HIP API tracing invokes the function pointers from the copy below
+        // store a reference of the HipDispatchTable implementations for invoking these
+        // functions without going through tracing wrappers
+        rocprofiler::hip::copy_table(hip_runtime_api_table, lib_instance);
+
         rocprofiler::hip::graph::update_table(hip_runtime_api_table);
         rocprofiler::hip::event::update_table(hip_runtime_api_table);
 
-        rocprofiler::hip::copy_table(hip_runtime_api_table, lib_instance);
-
         // install rocprofiler API wrappers
-        rocprofiler::hip::update_table(hip_runtime_api_table);
+        rocprofiler::hip::update_table(hip_runtime_api_table, lib_instance);
 
         // Tracing notifications the runtime has initialized
         rocprofiler::runtime_init::initialize(
@@ -1554,15 +1553,14 @@ rocprofiler_set_api_table(const char* name,
         // the potential loss of some API calls.
         rocprofiler::hip::restore_table(hip_compiler_api_table, lib_instance);
 
-        // any internal modifications to the HipCompilerDispatchTable need to be done before we make
-        // the copy or else those modifications will be lost when HIP API tracing is enabled because
-        // the HIP API tracing invokes the function pointers from the copy below
+        // store a reference of the HipCompilerDispatchTable implementations for invoking these
+        // functions without going through tracing wrappers
         rocprofiler::hip::copy_table(hip_compiler_api_table, lib_instance);
 
         rocprofiler::code_object::initialize(hip_compiler_api_table);
 
         // install rocprofiler API wrappers
-        rocprofiler::hip::update_table(hip_compiler_api_table);
+        rocprofiler::hip::update_table(hip_compiler_api_table, lib_instance);
 
         // allow tools to install API wrappers
         rocprofiler::intercept_table::notify_intercept_table_registration(

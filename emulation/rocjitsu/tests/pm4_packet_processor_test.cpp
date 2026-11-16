@@ -25,9 +25,16 @@ namespace {
 
 class FlatMemory final : public AddressSpaceTranslator, public PhysicalMemoryAccess {
 public:
-  FlatMemory() : bytes_(0x4000) {}
+  static constexpr uint64_t kSize = 0x4000;
+  FlatMemory() : bytes_(kSize) {}
 
   VmTranslationResult translate(uint64_t address, std::size_t size, VmAccessKind) const override {
+    for (const uint64_t alias : aliases) {
+      if (address >= alias && address - alias < bytes_.size()) {
+        address -= alias;
+        break;
+      }
+    }
     if (size == 0 || address > bytes_.size() || size > bytes_.size() - address)
       return {.outcome = VmAccessOutcome::Faulted, .translation = {}};
     return {
@@ -104,6 +111,7 @@ public:
   void make_store_faulted_once(uint64_t address) {
     store_outcome_once_ = std::pair{address, VmAccessOutcome::Faulted};
   }
+  std::vector<uint64_t> aliases;
 
 private:
   std::vector<std::byte> bytes_;
@@ -193,6 +201,62 @@ TEST_F(Pm4PacketProcessorTest, ProcessesRegisterWriteAcrossNativeRingWrap) {
   EXPECT_TRUE(completed);
   EXPECT_EQ(queue.read_pointer_journal.cursor(), 7u);
   EXPECT_EQ(memory->load<uint32_t>(kReadPointer), 3u);
+}
+
+TEST_F(Pm4PacketProcessorTest, LoadsHighRegisterAddressesInTheQueueAddressSpace) {
+  constexpr uint64_t raw = 0x0000800012340000;
+  constexpr uint64_t canonical = 0xffff800012340000;
+  constexpr uint64_t wide = 0x0001800056780000;
+  constexpr uint32_t lo = static_cast<uint32_t>(raw), hi = raw >> 32;
+  constexpr uint32_t wide_lo = static_cast<uint32_t>(wide + 12), wide_hi = wide >> 32;
+  const std::array<uint32_t, 30> packets{
+      0xc0035e00, lo,      hi,      1, 1, // LOAD_UCONFIG_REG
+      0xc0035f00, lo,      hi,      2, 1, // LOAD_SH_REG
+      0xc0036100, lo,      hi,      3, 1, // LOAD_CONTEXT_REG
+      0xc0036300, lo,      hi,      4, 1, // LOAD_SH_REG_INDEX
+      0xc0039f00, lo,      hi,      5, 1, // LOAD_CONTEXT_REG_INDEX
+      0xc0036300, wide_lo, wide_hi, 6, 1, // Full-width indexed source.
+  };
+  for (bool native_ring : {false, true}) {
+    SCOPED_TRACE(native_ring);
+    memory->aliases = {native_ring ? raw : canonical, wide};
+    const uint32_t value = native_ring ? 40 : 20;
+    for (uint32_t i = 0; i < 4; ++i)
+      memory->store(i * 4, value + i);
+    submit(packets, native_ring);
+    queue.commands.submissions.front().graphics_engine = true;
+    ASSERT_EQ(service(), Pm4TestStatus::Ready);
+    EXPECT_EQ(queue.commands.uconfig_registers[1], value + 1);
+    EXPECT_EQ(queue.commands.sh_registers[2], value + 2);
+    EXPECT_EQ(queue.commands.context_registers[3], value + 3);
+    EXPECT_EQ(queue.commands.sh_registers[4], value);
+    EXPECT_EQ(queue.commands.context_registers[5], value);
+    EXPECT_EQ(queue.commands.sh_registers[6], value + 3);
+  }
+}
+
+TEST_F(Pm4PacketProcessorTest, RegisterLoadReadsAcrossTheDrmVaSplit) {
+  constexpr uint64_t split = uint64_t{1} << 47;
+  memory->aliases = {split - FlatMemory::kSize, 0xffff800000000000};
+  memory->store<uint32_t>(FlatMemory::kSize - 4, 55);
+  memory->store<uint32_t>(0, 66);
+  // The indexed load straddles bit 47. The shadow load adds a register
+  // offset that puts its first source dword in the upper half.
+  const std::array<uint32_t, 10> packets{0xc0036300, 0xfffffffc, 0x7fff, 2, 2,
+                                         0xc0035f00, 0xfffffffc, 0x7fff, 1, 1};
+  submit(packets);
+  ASSERT_EQ(service(), Pm4TestStatus::Ready);
+  EXPECT_EQ(queue.commands.sh_registers[1], 66u);
+  EXPECT_EQ(queue.commands.sh_registers[2], 55u);
+  EXPECT_EQ(queue.commands.sh_registers[3], 66u);
+}
+
+TEST_F(Pm4PacketProcessorTest, ShadowLoadRejectsOffsetPastThe48BitAperture) {
+  // A register offset of one dword would carry the encoded base into bit 48.
+  memory->aliases = {uint64_t{1} << 48};
+  const std::array<uint32_t, 5> packet{0xc0035f00, 0xfffffffc, 0xffff, 1, 1};
+  submit(packet);
+  EXPECT_EQ(service(), Pm4TestStatus::Faulted);
 }
 
 TEST_F(Pm4PacketProcessorTest, MaskedPredExecRetainsSkippedCursorAcrossPublicationRetry) {

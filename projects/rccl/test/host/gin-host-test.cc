@@ -973,6 +973,40 @@ TEST_F(GinHostTypeQueryMicrotest, GetRailedGinType_UnconnectedComm_ReportsNoGin)
   EXPECT_EQ(NCCL_GIN_TYPE_NONE, type);
 }
 
+// ncclGinTypeActive looks past the default backend, with ncclGetGinType's gates.
+TEST_F(GinHostTypeQueryMicrotest, GinTypeActive_TypeInANonDefaultSlot_ReportsActive) {
+  auto* gs = gin();
+  gs->numActiveBackends = 2;
+  gs->backends[1] = gs->backends[0];
+  gs->backends[1].ginType = NCCL_GIN_TYPE_ANVIL_SDMA;
+
+  EXPECT_TRUE(ncclGinTypeActive(comm(), NCCL_GIN_TYPE_PROXY));
+  EXPECT_TRUE(ncclGinTypeActive(comm(), NCCL_GIN_TYPE_ANVIL_SDMA));
+  EXPECT_FALSE(ncclGinTypeActive(comm(), NCCL_GIN_TYPE_ROCSHMEM_GDA));
+
+  ncclGinType_t def = NCCL_GIN_TYPE_NONE;
+  ASSERT_EQ(ncclSuccess, ncclGetGinType(comm(), &def));
+  EXPECT_EQ(NCCL_GIN_TYPE_PROXY, def);
+
+  // Slots past numActiveBackends are stale, not active.
+  gs->numActiveBackends = 1;
+  EXPECT_FALSE(ncclGinTypeActive(comm(), NCCL_GIN_TYPE_ANVIL_SDMA));
+}
+
+TEST_F(GinHostTypeQueryMicrotest, GinTypeActive_RailOnlyFinalizedOrNullComm_ReportsInactive) {
+  EXPECT_TRUE(ncclGinTypeActive(comm(), NCCL_GIN_TYPE_PROXY));
+
+  comm_->globalGinSupport = NCCL_GIN_CONNECTION_RAIL;
+  EXPECT_FALSE(ncclGinTypeActive(comm(), NCCL_GIN_TYPE_PROXY));
+  comm_->globalGinSupport = NCCL_GIN_CONNECTION_FULL;
+
+  gin()->finalized = true;
+  EXPECT_FALSE(ncclGinTypeActive(comm(), NCCL_GIN_TYPE_PROXY));
+  gin()->finalized = false;
+
+  EXPECT_FALSE(ncclGinTypeActive(nullptr, NCCL_GIN_TYPE_PROXY));
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // ncclGinValidateSignalRequest
 
@@ -1109,6 +1143,25 @@ TEST_F(GinHostConnectOnceMicrotest, ConnectOnce_SecondConnectFails_ClosesTheEarl
   EXPECT_EQ(1, fake_.closeCollCalls);
   EXPECT_EQ(nullptr, gin()->backends[0].ginComms[0]);
   EXPECT_FALSE(gin()->connected);
+}
+
+// AICOMRCCL-3418: every active backend connects in one pass, so with
+// RCCL_GIN_TYPE_LIST naming two, one backend's connect failure closes the other
+// too. src/gin/README.md ("Mixing backends") documents this.
+TEST_F(GinHostConnectOnceMicrotest, ConnectOnce_SecondBackendConnectFails_ClosesEveryBackend) {
+  auto* gs = gin();
+  gs->numActiveBackends = 2;
+  gs->backends[1] = gs->backends[0];
+  gs->backends[1].ginType = NCCL_GIN_TYPE_ANVIL_SDMA;
+  fake_.failConnect = {ncclSystemError, 2};  // one connection per backend: call 2 is backends[1]
+
+  EXPECT_EQ(ncclSystemError, connectOnce());
+  EXPECT_EQ(2, fake_.connectCalls);
+  EXPECT_EQ(1, fake_.closeCollCalls);  // backends[0]'s connection, which had succeeded
+  EXPECT_EQ(nullptr, gs->backends[0].ginComms[0]);
+  EXPECT_TRUE(gs->backends[0].closed);
+  EXPECT_TRUE(gs->backends[1].closed);
+  EXPECT_FALSE(gs->connected);
 }
 
 // Two local GIN devices, four connections: connections are spread round-robin
@@ -1297,6 +1350,31 @@ TEST_F(GinHostBackendSelectMicrotest, DevCommSetup_FirstBackendsSetupFails_Succe
   EXPECT_EQ(2, fake_.createContextCalls);
 }
 
+// ncclGinDevCommSetup honors reqs.ginType: an SDMA request binds backendIndex 1 when
+// PROXY is the default; NCCL_GIN_TYPE_NONE still takes backends[0].
+TEST_F(GinHostBackendSelectMicrotest, DevCommSetup_RequestedTypeIsNotTheDefault_BindsThatBackend) {
+  auto* gs = gin();
+  gs->numActiveBackends = 2;
+  gs->backends[1] = gs->backends[0];
+  gs->backends[1].ginType = NCCL_GIN_TYPE_ANVIL_SDMA;
+  gs->backends[1].ginComms[0] = fake_.collCommHandle(1);
+  fake_.needsProxyProgress = false;
+
+  auto reqs = proxyReqs();
+  reqs.ginType = NCCL_GIN_TYPE_ANVIL_SDMA;
+  ASSERT_EQ(ncclSuccess, setup(reqs));
+  EXPECT_EQ(1, devComm_.backendIndex);
+  ASSERT_NE(nullptr, gs->devComms);
+  EXPECT_EQ(1, gs->devComms->backendIndex);
+
+  // Without a type the DevComm takes the default, which is what the SDMA paths got before.
+  reqs.ginType = NCCL_GIN_TYPE_NONE;
+  ncclDevComm dflt{};
+  ASSERT_EQ(ncclSuccess, ncclGinDevCommSetup(comm(), &reqs, &dflt, NCCL_VERSION_CODE));
+  EXPECT_EQ(0, dflt.backendIndex);
+  ASSERT_EQ(ncclSuccess, ncclGinDevCommFree(comm(), &dflt));
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // ncclGinDevCommSetup -- config, strides, and failure cleanup
 
@@ -1368,6 +1446,7 @@ TEST_F(GinHostDevCommSetupMicrotest, DevCommSetup_DeviceCodeVersionAndBackendTyp
     {"gdaki tops out at its last revision", NCCL_GIN_TYPE_GDAKI, NCCL_VERSION(2, 32, 0), 2},
     {"gpi tops out at its last revision", NCCL_GIN_TYPE_GPI, NCCL_VERSION(2, 32, 0), 1},
     {"efa gda at its first revision", NCCL_GIN_TYPE_EFA_GDA, NCCL_VERSION(2, 31, 0), 1},
+    {"efa gda tops out at its last revision", NCCL_GIN_TYPE_EFA_GDA, NCCL_VERSION(2, 32, 0), 2},
     // AMD device-initiated backends ignore the host-provided version entirely.
     {"rocshmem gda is version-less", NCCL_GIN_TYPE_ROCSHMEM_GDA, NCCL_VERSION(2, 32, 0), 0},
     {"anvil sdma is version-less", NCCL_GIN_TYPE_ANVIL_SDMA, NCCL_VERSION(2, 32, 0), 0},
@@ -1409,6 +1488,53 @@ TEST_F(GinHostDevCommSetupMicrotest, DevCommSetup_ContextCountNotAMultipleOfTheC
   EXPECT_EQ(8u, devComm_.ginContextCount);  // 5 rounded up to a multiple of 4
   EXPECT_EQ(2, lastConfig().nContexts);     // ... which is 2 per connection
   EXPECT_EQ(4, devComm_.ginConnectionCount);
+}
+
+// Applications index contexts with devComm.ginContextCount, so it has to be the
+// allocated count -- the request rounded up to ginCommCount -- whether or not
+// the request was already a multiple (NVIDIA/nccl#2301).
+TEST_F(GinHostDevCommSetupMicrotest, DevCommSetup_AnyContextRequest_ReportsTheAllocatedCount) {
+  const struct {
+    int requested;
+    int connections;
+    int allocated;
+  } cases[] = {
+      {1, 1, 1}, {4, 1, 4}, {3, 3, 3}, {6, 3, 6},
+      {1, 4, 4}, {4, 3, 6}, {5, 2, 6}, {3, 2, 4},
+  };
+  for (const auto& spec : cases) {
+    SCOPED_TRACE("requested=" + std::to_string(spec.requested) +
+                 " connections=" + std::to_string(spec.connections));
+    gin()->backends[0].ginCommCount = spec.connections;
+    for (int i = 1; i < spec.connections; i++) gin()->backends[0].ginComms[i] = fake_.collCommHandle(i);
+    fake_.createContextCalls = 0;
+    fake_.createdConfigs.clear();
+
+    auto reqs = proxyReqs();
+    reqs.ginContextCount = spec.requested;
+    ncclDevComm devComm{};
+    ASSERT_EQ(ncclSuccess, setup(reqs, &devComm));
+    EXPECT_EQ(spec.allocated, static_cast<int>(devComm.ginContextCount));
+    EXPECT_EQ(spec.connections, fake_.createContextCalls);
+    for (const auto& config : fake_.createdConfigs) {
+      EXPECT_EQ(spec.allocated, config.nContexts * spec.connections);
+    }
+    ASSERT_EQ(ncclSuccess, ncclGinDevCommFree(comm(), &devComm));
+  }
+}
+
+// A createContext failure must not leave a reported count an application could
+// index with.
+TEST_F(GinHostDevCommSetupMicrotest, DevCommSetup_CreateContextFails_ClearsTheReportedContextCount) {
+  gin()->backends[0].ginCommCount = 3;
+  for (int i = 1; i < 3; i++) gin()->backends[0].ginComms[i] = fake_.collCommHandle(i);
+  fake_.failCreateContext = {ncclSystemError, 1};
+
+  auto reqs = proxyReqs();
+  reqs.ginContextCount = 4;
+  EXPECT_NE(ncclSuccess, setup(reqs, &devComm_));
+  EXPECT_EQ(0u, devComm_.ginContextCount);
+  EXPECT_EQ(1, fake_.createContextCalls);
 }
 
 // AICOMRCCL-3181: ncclDevCommCreate corrupted the heap when a devComm was
@@ -2133,6 +2259,181 @@ TEST_F(GinHostQueryLastErrorMicrotest, QueryLastError_QueryFails_PropagatesTheSt
   EXPECT_EQ(ncclSystemError, ncclGinQueryLastError(gin(), &hasError));
   EXPECT_FALSE(hasError);
   EXPECT_EQ(1, fake_.queryCalls);  // the devComm's second connection is never asked
+}
+
+// Records the rankStride ginDevCommSetupWithBackend hands to createContext.
+// needsProxyProgress stays off so a successful setup does not spawn workers.
+struct CapturedGinConfig {
+  int calls = 0;
+  int rankStride = -1;
+  ncclNetDeviceHandle_t devHandle{};
+};
+CapturedGinConfig* g_capturedGinConfig = nullptr;
+
+ncclResult_t CaptureStrideCreateContext(void* /*collComm*/, ncclGinConfig_t* config, void** ginCtx,
+                                         ncclNetDeviceHandle_t** devHandle) {
+  g_capturedGinConfig->calls++;
+  g_capturedGinConfig->rankStride = config->rankStride;
+  g_capturedGinConfig->devHandle.handle = reinterpret_cast<void*>(0x21);
+  g_capturedGinConfig->devHandle.needsProxyProgress = 0;
+  *ginCtx = reinterpret_cast<void*>(0x11);
+  *devHandle = &g_capturedGinConfig->devHandle;
+  return ncclSuccess;
+}
+
+ncclResult_t CaptureStrideDestroyContext(void* /*ginCtx*/) { return ncclSuccess; }
+
+// NCCL_GIN_CONNECTION_CUSTOM_STRIDE: the requested world-rank stride must be
+// positive, no larger than the rail team, and a multiple of the stride the
+// communicator actually connected. The plugin sees that stride in units of the
+// connected group.
+class GinHostCustomStrideMicrotest : public ::testing::Test {
+protected:
+  std::unique_ptr<ncclComm> comm_ = std::make_unique<ncclComm>();
+  std::unique_ptr<ncclSharedResources> sr_ = std::make_unique<ncclSharedResources>();
+  CapturedGinConfig captured_;
+  ncclGin_t vtable_{};
+  ncclDevComm devComm_{};
+
+  void SetUp() override {
+    // Installs g_ncclTeamRail so it reports g_railStride. The default rail team
+    // is the zero team, which would reject every positive custom stride. Doing
+    // this here keeps the filter GinHostCustomStrideMicrotest.* working on its own.
+    ResetGinHostGlobals();
+    g_railStride = 4;
+    g_capturedGinConfig = &captured_;
+
+    comm_->sharedRes = sr_.get();
+    comm_->contiguousRanksPerHost = 1;
+
+    struct ncclGinState& ginState = sr_->ginState;
+    ginState.ginConnectionType = NCCL_GIN_CONNECTION_FULL;  // connectedStride == 1
+    ginState.proxyNthreads = 1;
+    ginState.proxyThreadsCreated = true;  // do not spawn progress threads
+    ginState.proxyThreadStopSignal.store(true);
+
+    vtable_.name = "fake-gin-stride";
+    vtable_.createContext = &CaptureStrideCreateContext;
+    vtable_.destroyContext = &CaptureStrideDestroyContext;
+
+    struct ncclGinBackendState& backend = ginState.backends[0];
+    backend.ginType = NCCL_GIN_TYPE_PROXY;
+    backend.ncclGin = &vtable_;
+    backend.ginCommCount = 1;
+    backend.ginComms[0] = reinterpret_cast<void*>(0x10);
+  }
+
+  void TearDown() override {
+    struct ncclGinState& ginState = sr_->ginState;
+    if (ginState.devComms != nullptr) {
+      EXPECT_EQ(ncclSuccess, ncclGinDevCommFree(comm_.get(), &devComm_));
+    }
+    g_capturedGinConfig = nullptr;
+    ResetGinHostGlobals();
+  }
+
+  ncclDevCommRequirements MakeReqs(ncclGinConnectionType_t connectionType, int customStride) {
+    ncclDevCommRequirements reqs{};
+    reqs.ginContextCount = 1;
+    reqs.ginConnectionType = connectionType;
+    reqs.ginCustomStride = customStride;
+    reqs.ginTrafficClass = NCCL_CONFIG_UNDEF_INT;
+    reqs.ginSignalCount = 3;
+    return reqs;
+  }
+
+  ncclResult_t Setup(const ncclDevCommRequirements& reqs) {
+    return ginDevCommSetupWithBackend(comm_.get(), &reqs, &devComm_, /*deviceCodeVersion=*/0,
+                                      &sr_->ginState.backends[0]);
+  }
+};
+
+TEST_F(GinHostCustomStrideMicrotest, FullConnectivity_PassesCustomStrideToPlugin) {
+  ncclDevCommRequirements reqs = MakeReqs(NCCL_GIN_CONNECTION_CUSTOM_STRIDE, /*customStride=*/2);
+
+  ASSERT_EQ(ncclSuccess, Setup(reqs));
+
+  EXPECT_EQ(1, captured_.calls);
+  EXPECT_EQ(2, captured_.rankStride);  // requestedStride / connectedStride(1)
+  EXPECT_EQ(1, devComm_.ginConnectionStride);
+  EXPECT_EQ(idivRcp32(1), devComm_.ginConnectionStride_rcp32);
+  EXPECT_EQ(2, devComm_.ginContextStride);
+}
+
+TEST_F(GinHostCustomStrideMicrotest, RailConnectivity_ScalesPluginStrideByConnectedGroup) {
+  sr_->ginState.ginConnectionType = NCCL_GIN_CONNECTION_RAIL;
+  comm_->contiguousRanksPerHost = 2;  // connectedStride
+  ncclDevCommRequirements reqs = MakeReqs(NCCL_GIN_CONNECTION_CUSTOM_STRIDE, /*customStride=*/4);
+
+  ASSERT_EQ(ncclSuccess, Setup(reqs));
+
+  EXPECT_EQ(1, captured_.calls);
+  EXPECT_EQ(2, captured_.rankStride);  // 4 / 2
+  EXPECT_EQ(2, devComm_.ginConnectionStride);
+  EXPECT_EQ(idivRcp32(2), devComm_.ginConnectionStride_rcp32);
+  EXPECT_EQ(4, devComm_.ginContextStride);
+}
+
+TEST_F(GinHostCustomStrideMicrotest, RejectsStrideZero) {
+  ncclDevCommRequirements reqs = MakeReqs(NCCL_GIN_CONNECTION_CUSTOM_STRIDE, /*customStride=*/0);
+
+  EXPECT_EQ(ncclInvalidUsage, Setup(reqs));
+  EXPECT_EQ(0, captured_.calls);
+  EXPECT_EQ(0, devComm_.ginConnectionStride);
+  EXPECT_EQ(0, devComm_.ginContextStride);
+}
+
+TEST_F(GinHostCustomStrideMicrotest, RejectsStrideGreaterThanRail) {
+  ncclDevCommRequirements reqs = MakeReqs(NCCL_GIN_CONNECTION_CUSTOM_STRIDE, /*customStride=*/8);
+
+  EXPECT_EQ(ncclInvalidUsage, Setup(reqs));
+  EXPECT_EQ(0, captured_.calls);
+  EXPECT_EQ(0, devComm_.ginContextStride);
+}
+
+// ncclDevCommCreate reports this rejection as ncclInternalError. The helper
+// returns ncclInvalidUsage, and ncclGinDevCommSetup returns ncclInternalError
+// after that backend fails. numActiveBackends is 1 so the stride check runs;
+// with no backends the same code comes back without reaching it.
+TEST_F(GinHostCustomStrideMicrotest, OverRailStride_PublicSetupReturnsInternalError) {
+  sr_->ginState.numActiveBackends = 1;
+  ncclDevCommRequirements reqs = MakeReqs(NCCL_GIN_CONNECTION_CUSTOM_STRIDE, /*customStride=*/8);
+
+  EXPECT_EQ(ncclInternalError, ncclGinDevCommSetup(comm_.get(), &reqs, &devComm_, /*deviceCodeVersion=*/0));
+  EXPECT_EQ(0, captured_.calls);
+  EXPECT_EQ(0, devComm_.ginContextStride);
+}
+
+TEST_F(GinHostCustomStrideMicrotest, RejectsStrideNotMultipleOfConnectedStride) {
+  sr_->ginState.ginConnectionType = NCCL_GIN_CONNECTION_RAIL;
+  comm_->contiguousRanksPerHost = 2;
+  ncclDevCommRequirements reqs = MakeReqs(NCCL_GIN_CONNECTION_CUSTOM_STRIDE, /*customStride=*/1);
+
+  EXPECT_EQ(ncclInvalidUsage, Setup(reqs));
+  EXPECT_EQ(0, captured_.calls);
+  EXPECT_EQ(0, devComm_.ginContextStride);
+}
+
+TEST_F(GinHostCustomStrideMicrotest, RailConnectionType_UsesRailStride) {
+  ncclDevCommRequirements reqs = MakeReqs(NCCL_GIN_CONNECTION_RAIL, /*customStride=*/1);
+
+  ASSERT_EQ(ncclSuccess, Setup(reqs));
+
+  EXPECT_EQ(1, captured_.calls);
+  EXPECT_EQ(g_railStride, captured_.rankStride);
+  EXPECT_EQ(1, devComm_.ginConnectionStride);
+  EXPECT_EQ(g_railStride, devComm_.ginContextStride);
+}
+
+TEST_F(GinHostCustomStrideMicrotest, OtherConnectionType_IgnoresCustomStride) {
+  ncclDevCommRequirements reqs = MakeReqs(NCCL_GIN_CONNECTION_FULL, /*customStride=*/2);
+
+  ASSERT_EQ(ncclSuccess, Setup(reqs));
+
+  EXPECT_EQ(1, captured_.calls);
+  EXPECT_EQ(1, captured_.rankStride);
+  EXPECT_EQ(1, devComm_.ginConnectionStride);
+  EXPECT_EQ(1, devComm_.ginContextStride);
 }
 
 }  // namespace

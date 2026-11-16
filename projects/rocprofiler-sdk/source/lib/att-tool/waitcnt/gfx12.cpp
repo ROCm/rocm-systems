@@ -148,6 +148,9 @@ classify(const std::string& inst)
         }
     }
 
+    // Prefetches do not return data and are not tracked by loadcnt
+    if(inst.find("_prefetch_") != npos) return MemoryInstType::TYPE_NOT_MEM;
+
     bool bStore = inst.find("store") != npos || inst.find("global_wb") == 0;
 
     if(inst.find("global_") == 0 || inst.find("buffer_") <= 1 || inst.find("scratch_") == 0)

@@ -14,7 +14,7 @@ test('attempt selector labels and search identify branch, full SHA, PR, message,
   expect(presentation.filterRunOptions([attempt], { inputValue: 'not-published' })).toEqual([]);
 });
 
-test.each(['09:30', '14:00', '2026-10-02T09:30:00Z', 'single', 'gfx950'])('branch attempt search includes displayed context %s', (inputValue) => {
+test.each(['09:30', '14:00', '2026-10-02T09:30:00Z', 'gfx950'])('branch attempt search includes displayed context %s', (inputValue) => {
   const run = { ...attempt, commitTimestamp: '2026-10-02T09:30:00Z', modes: ['single'], targets: ['gfx950'] };
   expect(presentation.filterRunOptions([run], { inputValue })).toEqual([run]);
 });

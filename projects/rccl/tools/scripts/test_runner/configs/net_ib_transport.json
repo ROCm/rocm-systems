@@ -15,7 +15,8 @@
     "thor2": "--oversubscribe --mca plm_rsh_agent srun --mca oob_tcp_if_include eno8303 --mca btl_tcp_if_include eno8303 --mca btl ^openib --bind-to none"
   },
   "env_variables": {
-    "NCCL_DEBUG": "INFO"
+    "NCCL_DEBUG": "INFO",
+    "NCCL_SOCKET_IFNAME": "^lo,docker,br-,veth,virbr,usb"
   },
   "system_env_variables": {
     "mellanox": {
@@ -600,7 +601,7 @@
       }
     },
 
-    "cast_base": {
+    "cast_scheduler_base": {
       "extends": "net_ib_base",
       "env_variables": {
         "RCCL_IB_QP_SCHED_ENABLE":          "1",
@@ -608,12 +609,34 @@
         "RCCL_IB_QP_SCHED_WEIGHT":          "0",
         "RCCL_IB_QP_SCHED_UPDATE_INTERVAL": "50",
         "RCCL_IB_QP_SCHED_RESET_INTERVAL":  "60000",
-        "RCCL_IB_QP_SCHED_SPLIT_DATA_MIN":  "65536"
+        "RCCL_IB_QP_SCHED_SPLIT_DATA_MIN":  "65536",
+        "NCCL_IB_RECEIVER_SIDE_MATCHING_SCHEME": "0"
       }
     },
 
+    "cast_setup": {
+      "extends": "net_ib_base",
+      "timeout": 120,
+      "env_variables": {
+        "NCCL_IB_QPS_PER_CONNECTION": "2",
+        "NCCL_IB_SPLIT_DATA_ON_QPS": "1"
+      },
+      "tests": [
+        {
+          "name": "Cast_SetupUnilateralConnectFailureReported",
+          "description": "One invalid connect-side device must fail setup on both ranks without hanging",
+          "test_filter": "NetIbMPITest.CastSetupUnilateralConnectFailureReported"
+        },
+        {
+          "name": "Cast_SetupPeerFailurePropagates",
+          "description": "A post-connect failure must reach the healthy peer through setup reduction",
+          "test_filter": "NetIbMPITest.CastSetupPeerFailurePropagates"
+        }
+      ]
+    },
+
     "cast_wrr_split": {
-      "extends": "cast_base",
+      "extends": "cast_scheduler_base",
       "timeout": 120,
       "env_variables": {
         "NCCL_IB_QPS_PER_CONNECTION": "2",
@@ -660,11 +683,12 @@
           "description": "regMr, regMrDmaBuf and deregMr reject a null communicator, and regMr rejects a zero size, instead of dereferencing it",
           "test_filter": "NetIbMPITest.CastRegistrationRejectsBadArguments"
         }
+
       ]
     },
 
     "cast_wrr_no_split": {
-      "extends": "cast_base",
+      "extends": "cast_scheduler_base",
       "timeout": 120,
       "env_variables": {
         "NCCL_IB_QPS_PER_CONNECTION": "2",
@@ -695,7 +719,7 @@
     },
 
     "cast_single_qp": {
-      "extends": "cast_base",
+      "extends": "cast_scheduler_base",
       "timeout": 60,
       "env_variables": {
         "NCCL_IB_QPS_PER_CONNECTION": "1",
@@ -711,7 +735,7 @@
     },
 
     "cast_four_qp": {
-      "extends": "cast_base",
+      "extends": "cast_scheduler_base",
       "timeout": 120,
       "env_variables": {
         "NCCL_IB_QPS_PER_CONNECTION": "4",
@@ -732,7 +756,7 @@
     },
 
     "cast_max_qp": {
-      "extends": "cast_base",
+      "extends": "cast_scheduler_base",
       "timeout": 120,
       "env_variables": {
         "NCCL_IB_QPS_PER_CONNECTION": "128",
@@ -748,7 +772,7 @@
     },
 
     "cast_shim_leak_guard": {
-      "extends": "cast_base",
+      "extends": "cast_scheduler_base",
       "timeout": 120,
       "description": "Runs the shim-leak probe in a plain CAST configuration, where RCCL_IB_FAULT_INJECTION is simply absent. The damage a leak does is process-wide and has nothing to do with threading, so the guard belongs in an ordinary run and not only in the threaded fault suites.",
       "env_variables": {
@@ -764,7 +788,7 @@
       ]
     },
     "cast_stress": {
-      "extends": "cast_base",
+      "extends": "cast_scheduler_base",
       "timeout": 600,
       "env_variables": {
         "NCCL_IB_QPS_PER_CONNECTION": "2",
@@ -850,7 +874,7 @@
     },
 
     "fault_inject_cast": {
-      "extends": "cast_base",
+      "extends": "cast_scheduler_base",
       "timeout": 300,
       "env_variables": {
         "NCCL_IB_SPLIT_DATA_ON_QPS":          "1",
@@ -892,7 +916,7 @@
     },
 
     "resiliency_gid_change": {
-      "extends": "cast_base",
+      "extends": "cast_scheduler_base",
       "timeout": 300,
       "env_variables": {
         "NCCL_IB_RESILIENCY_PORT_FAILOVER": "1",
@@ -937,6 +961,7 @@
         { "name": "NetIB_Branch_MrCacheRefCount",   "description": "Double-register same buffer: refs reach 2, first dereg keeps MR, second frees it",  "test_filter": "NetIbMPITest.MrCacheRefCount" },
         { "name": "NetIB_Branch_SendSizeClamping",  "description": "isend with size > maxRecvs*maxSize is clamped to maxSize, data integrity verified",  "test_filter": "NetIbMPITest.SendSizeClamping" },
         { "name": "NetIB_Branch_NullCommClose",     "description": "closeSend/closeRecv/closeListen on NULL comm returns ncclSuccess without crash",     "test_filter": "NetIbMPITest.NullCommClose" },
+        { "name": "NetIB_Branch_NullCommCastDataPath", "description": "IB-CAST isend/irecv/iflush reject a NULL comm instead of dereferencing it",         "test_filter": "NetIbMPITest.NullCommCastDataPath" },
         { "name": "NetIB_Branch_SetNetAttrNoOp",    "description": "ncclNetPlugin_v9.setAttr returns ncclSuccess for all known attribute types",         "test_filter": "NetIbMPITest.SetNetAttrNoOp" }
       ]
     },
@@ -1087,7 +1112,24 @@
         { "name": "NetIB_GIN_PeerMem_MixedIPutIGetIPutSignal_Ctx1_1MiB", "description": "GIN peermem: mixed iput/iget/iput-signal (Ctx1, 1MiB, RegMr)", "test_filter": "CtxAndSize/RmaMPITest.MixedIPutIGetIPutSignal/Ctx1_1MiB_RegMr" },
         { "name": "NetIB_GIN_PeerMem_MixedIPutIGetIPutSignal_Ctx2_4KiB", "description": "GIN peermem: mixed iput/iget/iput-signal (Ctx2, 4KiB, RegMr)", "test_filter": "CtxAndSize/RmaMPITest.MixedIPutIGetIPutSignal/Ctx2_4KiB_RegMr" },
         { "name": "NetIB_GIN_PeerMem_MixedIPutIGetIPutSignal_Ctx2_64KiB", "description": "GIN peermem: mixed iput/iget/iput-signal (Ctx2, 64KiB, RegMr)", "test_filter": "CtxAndSize/RmaMPITest.MixedIPutIGetIPutSignal/Ctx2_64KiB_RegMr" },
-        { "name": "NetIB_GIN_PeerMem_MixedIPutIGetIPutSignal_Ctx2_1MiB", "description": "GIN peermem: mixed iput/iget/iput-signal (Ctx2, 1MiB, RegMr)", "test_filter": "CtxAndSize/RmaMPITest.MixedIPutIGetIPutSignal/Ctx2_1MiB_RegMr" }
+        { "name": "NetIB_GIN_PeerMem_MixedIPutIGetIPutSignal_Ctx2_1MiB", "description": "GIN peermem: mixed iput/iget/iput-signal (Ctx2, 1MiB, RegMr)", "test_filter": "CtxAndSize/RmaMPITest.MixedIPutIGetIPutSignal/Ctx2_1MiB_RegMr" },
+        { "name": "NetIB_GIN_PeerMem_AggregatedPutsClosedByDefault_Ctx1_4KiB", "description": "GIN peermem: aggregated puts closed by a default op (Ctx1, 4KiB, RegMr)", "test_filter": "CtxAndSize/RmaMPITest.AggregatedPutsClosedByDefault/Ctx1_4KiB_RegMr" },
+        { "name": "NetIB_GIN_PeerMem_AggregatedPutsClosedByDefault_Ctx2_4KiB", "description": "GIN peermem: aggregated puts closed by a default op (Ctx2, 4KiB, RegMr)", "test_filter": "CtxAndSize/RmaMPITest.AggregatedPutsClosedByDefault/Ctx2_4KiB_RegMr" },
+        { "name": "NetIB_GIN_PeerMem_IFlushAfterAggregatedPuts_Ctx1_4KiB", "description": "GIN peermem: flush after aggregated puts (Ctx1, 4KiB, RegMr)", "test_filter": "CtxAndSize/RmaMPITest.IFlushAfterAggregatedPuts/Ctx1_4KiB_RegMr" },
+        { "name": "NetIB_GIN_PeerMem_IFlushAfterAggregatedPuts_Ctx2_4KiB", "description": "GIN peermem: flush after aggregated puts (Ctx2, 4KiB, RegMr)", "test_filter": "CtxAndSize/RmaMPITest.IFlushAfterAggregatedPuts/Ctx2_4KiB_RegMr" },
+        { "name": "NetIB_GIN_PeerMem_AggregatedIPutsCompleteBySequence_Ctx1_4KiB", "description": "GIN peermem: aggregated iputs complete by sequence (Ctx1, 4KiB, RegMr)", "test_filter": "CtxAndSize/RmaMPITest.AggregatedIPutsCompleteBySequence/Ctx1_4KiB_RegMr" },
+        { "name": "NetIB_GIN_PeerMem_AggregatedIPutsCompleteBySequence_Ctx1_64KiB", "description": "GIN peermem: aggregated iputs complete by sequence (Ctx1, 64KiB, RegMr)", "test_filter": "CtxAndSize/RmaMPITest.AggregatedIPutsCompleteBySequence/Ctx1_64KiB_RegMr" },
+        { "name": "NetIB_GIN_PeerMem_AggregatedIPutsCompleteBySequence_Ctx1_1MiB", "description": "GIN peermem: aggregated iputs complete by sequence (Ctx1, 1MiB, RegMr)", "test_filter": "CtxAndSize/RmaMPITest.AggregatedIPutsCompleteBySequence/Ctx1_1MiB_RegMr" },
+        { "name": "NetIB_GIN_PeerMem_AggregatedIPutsCompleteBySequence_Ctx2_4KiB", "description": "GIN peermem: aggregated iputs complete by sequence (Ctx2, 4KiB, RegMr)", "test_filter": "CtxAndSize/RmaMPITest.AggregatedIPutsCompleteBySequence/Ctx2_4KiB_RegMr" },
+        { "name": "NetIB_GIN_PeerMem_AggregatedIPutsCompleteBySequence_Ctx2_64KiB", "description": "GIN peermem: aggregated iputs complete by sequence (Ctx2, 64KiB, RegMr)", "test_filter": "CtxAndSize/RmaMPITest.AggregatedIPutsCompleteBySequence/Ctx2_64KiB_RegMr" },
+        { "name": "NetIB_GIN_PeerMem_AggregatedIPutsCompleteBySequence_Ctx2_1MiB", "description": "GIN peermem: aggregated iputs complete by sequence (Ctx2, 1MiB, RegMr)", "test_filter": "CtxAndSize/RmaMPITest.AggregatedIPutsCompleteBySequence/Ctx2_1MiB_RegMr" },
+        { "name": "NetIB_GIN_PeerMem_AggregatedMixedBatchCompletesInPostingOrder_Ctx1_4KiB", "description": "GIN peermem: aggregated iget/iput/iput-signal batch completes in posting order (Ctx1, 4KiB, RegMr)", "test_filter": "CtxAndSize/RmaMPITest.AggregatedMixedBatchCompletesInPostingOrder/Ctx1_4KiB_RegMr" },
+        { "name": "NetIB_GIN_PeerMem_AggregatedMixedBatchCompletesInPostingOrder_Ctx1_64KiB", "description": "GIN peermem: aggregated iget/iput/iput-signal batch completes in posting order (Ctx1, 64KiB, RegMr)", "test_filter": "CtxAndSize/RmaMPITest.AggregatedMixedBatchCompletesInPostingOrder/Ctx1_64KiB_RegMr" },
+        { "name": "NetIB_GIN_PeerMem_AggregatedMixedBatchCompletesInPostingOrder_Ctx1_1MiB", "description": "GIN peermem: aggregated iget/iput/iput-signal batch completes in posting order (Ctx1, 1MiB, RegMr)", "test_filter": "CtxAndSize/RmaMPITest.AggregatedMixedBatchCompletesInPostingOrder/Ctx1_1MiB_RegMr" },
+        { "name": "NetIB_GIN_PeerMem_AggregatedMixedBatchCompletesInPostingOrder_Ctx2_4KiB", "description": "GIN peermem: aggregated iget/iput/iput-signal batch completes in posting order (Ctx2, 4KiB, RegMr)", "test_filter": "CtxAndSize/RmaMPITest.AggregatedMixedBatchCompletesInPostingOrder/Ctx2_4KiB_RegMr" },
+        { "name": "NetIB_GIN_PeerMem_AggregatedMixedBatchCompletesInPostingOrder_Ctx2_64KiB", "description": "GIN peermem: aggregated iget/iput/iput-signal batch completes in posting order (Ctx2, 64KiB, RegMr)", "test_filter": "CtxAndSize/RmaMPITest.AggregatedMixedBatchCompletesInPostingOrder/Ctx2_64KiB_RegMr" },
+        { "name": "NetIB_GIN_PeerMem_AggregatedMixedBatchCompletesInPostingOrder_Ctx2_1MiB", "description": "GIN peermem: aggregated iget/iput/iput-signal batch completes in posting order (Ctx2, 1MiB, RegMr)", "test_filter": "CtxAndSize/RmaMPITest.AggregatedMixedBatchCompletesInPostingOrder/Ctx2_1MiB_RegMr" },
+        { "name": "NetIB_GIN_PeerMem_AggregatedIPutSignalStress", "description": "GIN peermem: 4096 aggregated iput-signals, one doorbell per 16-op window (RegMr)", "test_filter": "RmaMPIStressTest.AggregatedIPutSignalStress" }
       ]
     },
     "net_ib_gin_dmabuf": {
@@ -1148,7 +1190,23 @@
         { "name": "NetIB_GIN_DmaBuf_MixedIPutIGetIPutSignal_Ctx1_1MiB", "description": "GIN dmabuf: mixed iput/iget/iput-signal (Ctx1, 1MiB, DmaBuf)", "test_filter": "CtxAndSize/RmaMPITest.MixedIPutIGetIPutSignal/Ctx1_1MiB_DmaBuf" },
         { "name": "NetIB_GIN_DmaBuf_MixedIPutIGetIPutSignal_Ctx2_4KiB", "description": "GIN dmabuf: mixed iput/iget/iput-signal (Ctx2, 4KiB, DmaBuf)", "test_filter": "CtxAndSize/RmaMPITest.MixedIPutIGetIPutSignal/Ctx2_4KiB_DmaBuf" },
         { "name": "NetIB_GIN_DmaBuf_MixedIPutIGetIPutSignal_Ctx2_64KiB", "description": "GIN dmabuf: mixed iput/iget/iput-signal (Ctx2, 64KiB, DmaBuf)", "test_filter": "CtxAndSize/RmaMPITest.MixedIPutIGetIPutSignal/Ctx2_64KiB_DmaBuf" },
-        { "name": "NetIB_GIN_DmaBuf_MixedIPutIGetIPutSignal_Ctx2_1MiB", "description": "GIN dmabuf: mixed iput/iget/iput-signal (Ctx2, 1MiB, DmaBuf)", "test_filter": "CtxAndSize/RmaMPITest.MixedIPutIGetIPutSignal/Ctx2_1MiB_DmaBuf" }
+        { "name": "NetIB_GIN_DmaBuf_MixedIPutIGetIPutSignal_Ctx2_1MiB", "description": "GIN dmabuf: mixed iput/iget/iput-signal (Ctx2, 1MiB, DmaBuf)", "test_filter": "CtxAndSize/RmaMPITest.MixedIPutIGetIPutSignal/Ctx2_1MiB_DmaBuf" },
+        { "name": "NetIB_GIN_DmaBuf_AggregatedPutsClosedByDefault_Ctx1_4KiB", "description": "GIN dmabuf: aggregated puts closed by a default op (Ctx1, 4KiB, DmaBuf)", "test_filter": "CtxAndSize/RmaMPITest.AggregatedPutsClosedByDefault/Ctx1_4KiB_DmaBuf" },
+        { "name": "NetIB_GIN_DmaBuf_AggregatedPutsClosedByDefault_Ctx2_4KiB", "description": "GIN dmabuf: aggregated puts closed by a default op (Ctx2, 4KiB, DmaBuf)", "test_filter": "CtxAndSize/RmaMPITest.AggregatedPutsClosedByDefault/Ctx2_4KiB_DmaBuf" },
+        { "name": "NetIB_GIN_DmaBuf_IFlushAfterAggregatedPuts_Ctx1_4KiB", "description": "GIN dmabuf: flush after aggregated puts (Ctx1, 4KiB, DmaBuf)", "test_filter": "CtxAndSize/RmaMPITest.IFlushAfterAggregatedPuts/Ctx1_4KiB_DmaBuf" },
+        { "name": "NetIB_GIN_DmaBuf_IFlushAfterAggregatedPuts_Ctx2_4KiB", "description": "GIN dmabuf: flush after aggregated puts (Ctx2, 4KiB, DmaBuf)", "test_filter": "CtxAndSize/RmaMPITest.IFlushAfterAggregatedPuts/Ctx2_4KiB_DmaBuf" },
+        { "name": "NetIB_GIN_DmaBuf_AggregatedIPutsCompleteBySequence_Ctx1_4KiB", "description": "GIN dmabuf: aggregated iputs complete by sequence (Ctx1, 4KiB, DmaBuf)", "test_filter": "CtxAndSize/RmaMPITest.AggregatedIPutsCompleteBySequence/Ctx1_4KiB_DmaBuf" },
+        { "name": "NetIB_GIN_DmaBuf_AggregatedIPutsCompleteBySequence_Ctx1_64KiB", "description": "GIN dmabuf: aggregated iputs complete by sequence (Ctx1, 64KiB, DmaBuf)", "test_filter": "CtxAndSize/RmaMPITest.AggregatedIPutsCompleteBySequence/Ctx1_64KiB_DmaBuf" },
+        { "name": "NetIB_GIN_DmaBuf_AggregatedIPutsCompleteBySequence_Ctx1_1MiB", "description": "GIN dmabuf: aggregated iputs complete by sequence (Ctx1, 1MiB, DmaBuf)", "test_filter": "CtxAndSize/RmaMPITest.AggregatedIPutsCompleteBySequence/Ctx1_1MiB_DmaBuf" },
+        { "name": "NetIB_GIN_DmaBuf_AggregatedIPutsCompleteBySequence_Ctx2_4KiB", "description": "GIN dmabuf: aggregated iputs complete by sequence (Ctx2, 4KiB, DmaBuf)", "test_filter": "CtxAndSize/RmaMPITest.AggregatedIPutsCompleteBySequence/Ctx2_4KiB_DmaBuf" },
+        { "name": "NetIB_GIN_DmaBuf_AggregatedIPutsCompleteBySequence_Ctx2_64KiB", "description": "GIN dmabuf: aggregated iputs complete by sequence (Ctx2, 64KiB, DmaBuf)", "test_filter": "CtxAndSize/RmaMPITest.AggregatedIPutsCompleteBySequence/Ctx2_64KiB_DmaBuf" },
+        { "name": "NetIB_GIN_DmaBuf_AggregatedIPutsCompleteBySequence_Ctx2_1MiB", "description": "GIN dmabuf: aggregated iputs complete by sequence (Ctx2, 1MiB, DmaBuf)", "test_filter": "CtxAndSize/RmaMPITest.AggregatedIPutsCompleteBySequence/Ctx2_1MiB_DmaBuf" },
+        { "name": "NetIB_GIN_DmaBuf_AggregatedMixedBatchCompletesInPostingOrder_Ctx1_4KiB", "description": "GIN dmabuf: aggregated iget/iput/iput-signal batch completes in posting order (Ctx1, 4KiB, DmaBuf)", "test_filter": "CtxAndSize/RmaMPITest.AggregatedMixedBatchCompletesInPostingOrder/Ctx1_4KiB_DmaBuf" },
+        { "name": "NetIB_GIN_DmaBuf_AggregatedMixedBatchCompletesInPostingOrder_Ctx1_64KiB", "description": "GIN dmabuf: aggregated iget/iput/iput-signal batch completes in posting order (Ctx1, 64KiB, DmaBuf)", "test_filter": "CtxAndSize/RmaMPITest.AggregatedMixedBatchCompletesInPostingOrder/Ctx1_64KiB_DmaBuf" },
+        { "name": "NetIB_GIN_DmaBuf_AggregatedMixedBatchCompletesInPostingOrder_Ctx1_1MiB", "description": "GIN dmabuf: aggregated iget/iput/iput-signal batch completes in posting order (Ctx1, 1MiB, DmaBuf)", "test_filter": "CtxAndSize/RmaMPITest.AggregatedMixedBatchCompletesInPostingOrder/Ctx1_1MiB_DmaBuf" },
+        { "name": "NetIB_GIN_DmaBuf_AggregatedMixedBatchCompletesInPostingOrder_Ctx2_4KiB", "description": "GIN dmabuf: aggregated iget/iput/iput-signal batch completes in posting order (Ctx2, 4KiB, DmaBuf)", "test_filter": "CtxAndSize/RmaMPITest.AggregatedMixedBatchCompletesInPostingOrder/Ctx2_4KiB_DmaBuf" },
+        { "name": "NetIB_GIN_DmaBuf_AggregatedMixedBatchCompletesInPostingOrder_Ctx2_64KiB", "description": "GIN dmabuf: aggregated iget/iput/iput-signal batch completes in posting order (Ctx2, 64KiB, DmaBuf)", "test_filter": "CtxAndSize/RmaMPITest.AggregatedMixedBatchCompletesInPostingOrder/Ctx2_64KiB_DmaBuf" },
+        { "name": "NetIB_GIN_DmaBuf_AggregatedMixedBatchCompletesInPostingOrder_Ctx2_1MiB", "description": "GIN dmabuf: aggregated iget/iput/iput-signal batch completes in posting order (Ctx2, 1MiB, DmaBuf)", "test_filter": "CtxAndSize/RmaMPITest.AggregatedMixedBatchCompletesInPostingOrder/Ctx2_1MiB_DmaBuf" }
       ]
     },
     "net_ib_host_api_fused": {
@@ -1374,7 +1432,7 @@
       "command_args": "--net_ib_nthreads=4"
     },
     "cast_multithread": {
-      "extends": "cast_base",
+      "extends": "cast_scheduler_base",
       "timeout": 300,
       "env_variables": {
         "NCCL_IB_QPS_PER_CONNECTION": "2",
@@ -1479,7 +1537,7 @@
     },
 
     "cast_opt_recv_disabled_sched": {
-      "extends": "cast_base",
+      "extends": "cast_scheduler_base",
       "timeout": 120,
       "description": "QP scheduler on (cast_base): optRecvCompletion must stay off.",
       "env_variables": {
@@ -1503,7 +1561,7 @@
     },
 
     "cast_wrr_split_long_interval": {
-      "extends": "cast_base",
+      "extends": "cast_scheduler_base",
       "timeout": 120,
       "description": "Extends cast_base rather than cast_wrr_split so it does not also inherit that suite's tests, several of which need the RTT timer to fire and would fail at this interval.",
       "env_variables": {
@@ -1520,7 +1578,7 @@
       ]
     },
     "cast_wrr_no_split_long_interval": {
-      "extends": "cast_base",
+      "extends": "cast_scheduler_base",
       "timeout": 120,
       "description": "Extends cast_base rather than cast_wrr_no_split for the same reason as its split counterpart.",
       "env_variables": {
@@ -1547,7 +1605,7 @@
       ]
     },
     "fault_multithread_base": {
-      "extends": "cast_base",
+      "extends": "cast_scheduler_base",
       "timeout": 600,
       "description": "IB-CAST fault environment for the threaded suites, carrying no tests of its own for the reason given in net_ib_multithread_base. Port failover is on and port recovery is left at its default of off: the failover tests here assert that failover absorbed the error and that the device is no longer Ok, which recovery would undo underneath them. Concurrent recovery is covered by fault_recovery_multithread_2 and the nightly drift suite, which enable it. RCCL_IB_FAULT_INJECTION stays off: these tests use the per-communicator pre-call hooks and have no use for the libibverbs ops shims, which add two acquisitions of one process-global mutex to every poll_cq and whose registry is per device, so one worker's clear disarms every other worker's faults.",
       "env_variables": {
@@ -1792,6 +1850,12 @@
       "name": "NET IB - CAST WRR+Split (QPS=2, splitData=1)",
       "description": "White-box WRR scheduler tests with split-data path enabled: token counts, threshold boundary, split/WRR token accounting, sched enable/disable",
       "config": "cast_wrr_split",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - CAST Setup Failure Propagation",
+      "description": "Rank-agreed CAST setup failures must report cleanly without hanging",
+      "config": "cast_setup",
       "enabled": true
     },
     {

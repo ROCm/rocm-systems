@@ -16,7 +16,11 @@
 #include "nccl_fakes.h"  // g_loadParam
 #include "rocmwrap.h"
 
-ncclResult_t rocmLibraryInit(void) { return ncclSuccess; }
+int g_rocmLibraryInitCalls = 0;
+ncclResult_t rocmLibraryInit(void) {
+  g_rocmLibraryInitCalls++;
+  return ncclSuccess;
+}
 
 // dmaBufSupported gate: NULL -> unsupported.
 PFN_hsa_amd_portable_export_dmabuf pfn_hsa_amd_portable_export_dmabuf = nullptr;
@@ -49,13 +53,13 @@ bool FdOpen(int fd) { return fcntl(fd, F_GETFD) != -1; }
 
 void CuMemExportRecorder::Install() {
 #if defined(RCCL_CUMEM_DMABUF_EXPORT_SUPPORTED)
-  g_hipMemGetHandleForAddressRange = [this](void* handle, hipDeviceptr_t ptr, size_t size, hipMemRangeHandleType,
+  g_hipMemGetHandleForAddressRange = [this](void* handle, hipDeviceptr_t ptr, size_t size, hipMemRangeHandleType type,
                                              unsigned long long flags) {
     if (result != hipSuccess) return result;
     int fd = FreshDevNullFd();
     if (fd == -1) return hipErrorInvalidValue;
     *static_cast<int*>(handle) = fd;
-    push_back({ptr, size, flags, fd});
+    push_back({ptr, size, flags, fd, static_cast<int>(type)});
     return hipSuccess;
   };
 #else
@@ -78,4 +82,5 @@ void ResetRocmWrapFakes() {
   }
   g_exportedFds.clear();
   g_nextExportFd = 200;
+  g_rocmLibraryInitCalls = 0;
 }

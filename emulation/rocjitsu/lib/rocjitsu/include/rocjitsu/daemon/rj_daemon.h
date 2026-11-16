@@ -34,6 +34,20 @@ enum {
   RJ_DAEMON_STATUS_ERROR = 4,
 };
 
+/// @brief Optional daemon diagnostics selected before the VM starts.
+/// @details fabric_trace_capacity must be zero unless
+/// RJ_DAEMON_OPTION_TRACE_FABRIC_EFFECTS is set. When tracing is enabled, zero
+/// selects RJ_DAEMON_FABRIC_TRACE_MAX_CAPACITY; nonzero values from 1 through
+/// that limit are accepted. Larger values are rejected before VM construction.
+typedef struct rj_daemon_options_t {
+  uint32_t struct_size;           ///< Set to sizeof(rj_daemon_options_t).
+  uint32_t flags;                 ///< Bitwise OR of RJ_DAEMON_OPTION_* values.
+  uint32_t fabric_trace_capacity; ///< Zero selects RJ_DAEMON_FABRIC_TRACE_MAX_CAPACITY.
+} rj_daemon_options_t;
+
+enum { RJ_DAEMON_OPTION_TRACE_FABRIC_EFFECTS = 1u << 0 };
+enum { RJ_DAEMON_FABRIC_TRACE_MAX_CAPACITY = 200000u };
+
 /// @brief Start a daemon-mode VM and its Unix-socket RPC server.
 ///
 /// @details Parses the supplied JSON configuration and returns only after the
@@ -54,16 +68,29 @@ enum {
 RJ_API_EXPORT rj_status_t rj_daemon_start(const char *json, const char *socket_path,
                                           rj_daemon_t **daemon);
 
+/// @brief Start a daemon with explicit optional diagnostics.
+/// @details NULL options have the same behavior as rj_daemon_start. Unknown
+/// flags and a mismatched struct_size are rejected before VM construction.
+RJ_API_EXPORT rj_status_t rj_daemon_start_with_options(const char *json, const char *socket_path,
+                                                       const rj_daemon_options_t *options,
+                                                       rj_daemon_t **daemon);
+
 /// @brief Stop a daemon and release its handle.
 ///
 /// @details Stops accepting clients, unblocks and joins every client thread,
 /// stops and joins the simulation engine, destroys the VM, and removes the
 /// socket if it is still the endpoint created by rj_daemon_start. Passing NULL
-/// is a successful no-op. The handle is invalid after this function returns;
-/// callers must synchronize concurrent status queries before stopping it.
+/// is a successful no-op. On success the handle is invalid. If final process
+/// maintenance fails, the stopped daemon retains its VM and retryable close
+/// state; the caller must retain the handle and call rj_daemon_stop again.
+/// Dropped diagnostic trace records are logged separately and do not make a
+/// completed VM teardown retryable.
+/// Callers must synchronize concurrent status queries before stopping it.
 ///
 /// @param[in] daemon Daemon handle, or NULL.
 /// @retval ROCJITSU_STATUS_SUCCESS The daemon was stopped and released.
+/// @retval ROCJITSU_STATUS_ERROR Final process maintenance failed. errno holds
+/// the first driver error and the daemon handle remains valid for retry.
 RJ_API_EXPORT rj_status_t rj_daemon_stop(rj_daemon_t *daemon);
 
 /// @brief Return the daemon's current lifecycle state.
@@ -71,8 +98,8 @@ RJ_API_EXPORT rj_status_t rj_daemon_stop(rj_daemon_t *daemon);
 /// @details Thread-safe while the handle remains valid. A NULL handle reports
 /// RJ_DAEMON_STATUS_STOPPED.
 ///
-/// @note Do NOT call on a daemon after rj_daemon_stop has been called,
-/// as the handle is invalid and may have been freed.
+/// @note Do NOT call on a daemon after rj_daemon_stop succeeds, as the handle
+/// is invalid and may have been freed. A failed stop retains the handle.
 ///
 /// @param[in] daemon Daemon handle, or NULL.
 RJ_API_EXPORT rj_daemon_status_t rj_daemon_status(const rj_daemon_t *daemon);

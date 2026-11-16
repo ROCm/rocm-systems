@@ -452,7 +452,7 @@ struct external_dependencies
 
     // Single source of truth is core/trace_cache/cacheable.hpp's ABSOLUTE constant;
     // kfd_events.hpp never includes that header, so the value is surfaced here.
-    static constexpr std::string_view k_pmc_value_type_absolute = trace_cache::ABSOLUTE;
+    static constexpr std::string_view k_pmc_value_type_absolute = trace_cache::k_absolute;
 
     // Single source of truth for these strings is core/categories.hpp's
     // trait::name<category::X>; kfd_events.hpp itself never includes
@@ -940,8 +940,6 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
 
     using sdk_backend_t    = backends::rocprofiler_sdk::backend<wrapper>;
     using tracing_config_t = tracing_config<sdk_backend_t, default_externals>;
-
-    sdk_backend_t::check_version_compatibility();
 
     auto const _callback_domains = tracing_config_t::get_callback_domains();
     auto const _buffered_domain  = tracing_config_t::get_buffered_domains();
