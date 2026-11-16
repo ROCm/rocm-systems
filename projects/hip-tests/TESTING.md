@@ -35,7 +35,7 @@ A few boundaries keep these documents honest and prevent over-claiming:
 
 ## Development workflow
 
-All tests are C++ built on Catch2 and discovered and run through CTest. Test executables are grouped by CMake `BUILD_*` options and by CTest labels generated from Catch2/YAML tags. Workload size is parameterized by level. `HIP_TEST_LEVEL=level_N` only sets the parameters (default `level_2`) and never filters; a Catch2 filter such as `[level_0]` or `ctest -L level_0` only selects tests and never changes the parameters. Set both to combine them, e.g. `HIP_TEST_LEVEL=level_0 ctest -L level_0`.
+All device and runtime tests — the contract, unit/functional, and performance tiers that exercise the HIP runtime on a GPU — are C++ built on Catch2 and discovered and run through CTest. (The in-repo documentation/governance tooling, notably `tools/check_testing_docs.py`, is a standalone Python check with its own `unittest` suite under `tools/tests/`; it is build-free and is not part of the Catch2/CTest harness.) Test executables are grouped by CMake `BUILD_*` options and by CTest labels generated from Catch2/YAML tags. Workload size is parameterized by level. `HIP_TEST_LEVEL=level_N` only sets the parameters (default `level_2`) and never filters; a Catch2 filter such as `[level_0]` or `ctest -L level_0` only selects tests and never changes the parameters. Set both to combine them, e.g. `HIP_TEST_LEVEL=level_0 ctest -L level_0`.
 
 | You changed | Run this before pushing | Needs GPU |
 |---|---|---|

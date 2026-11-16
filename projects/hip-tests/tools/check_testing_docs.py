@@ -19,7 +19,10 @@ for itself (workstreams WS-1 and WS-2):
   schema keys / vocabularies
     - the inventory carries its top-level identity/provenance/vocabulary blocks
       (``schema_version``, ``component``, ``source_of_truth``, ``vocabularies``,
-      ``suites``) with the required mapping/list shapes;
+      ``suites``) with the required mapping/list shapes; its ``schema_version``
+      is the supported version (the integer 1) and its ``component`` is
+      ``hip-tests`` - a well-formed but unsupported version or a non-matching
+      component is a schema error in its own right;
     - every inventory suite, coverage class, and pairwise check carries its
       required keys; suites and coverage classes additionally carry an explicit
       ``owner`` (pairwise checks inherit ownership from the classes they
@@ -49,7 +52,10 @@ for itself (workstreams WS-1 and WS-2):
 
   coverage refs
     - the coverage model carries its top-level identity block (``schema_version``,
-      ``component``) with the same shape the inventory requires, and every
+      ``component``) with the same shape and supported-identity requirement the
+      inventory has (version 1, component ``hip-tests``), and the two documents
+      must agree with each other on both fields (a coverage model may not be
+      paired with an inventory of a different schema version or component); every
       inventory / axis / class id is a non-empty string before it participates
       in duplicate or set-membership checks;
     - every ``current_inventory`` id in the coverage model resolves to an
@@ -135,6 +141,17 @@ REQUIRED_INVENTORY_TOP_KEYS = frozenset({
 REQUIRED_COVERAGE_TOP_KEYS = frozenset({
     "schema_version", "component", "coverage_model",
 })
+
+# Supported identity of the document set. The inventory and the coverage model
+# are two halves of one connected schema; each must declare the single schema
+# version this checker understands (the integer 1) and the component it belongs
+# to (hip-tests). A well-formed but unsupported schema_version or a non-matching
+# component is a schema error in its own right (the document set was authored
+# against, or copied from, a different contract), and the two documents must
+# additionally agree with each other on both fields (TEST_RESTRUCTURING.md
+# WS-1/WS-2).
+SUPPORTED_SCHEMA_VERSION = 1
+SUPPORTED_COMPONENT = "hip-tests"
 
 # Vocabulary categories the inventory must declare for itself, each as a list of
 # allowed values.
@@ -312,6 +329,18 @@ def _is_scalar(value):
     return True
 
 
+def _is_supported_schema_version(value):
+    """True only for the exact integer schema version this checker supports.
+
+    ``schema_version`` must equal the integer 1. ``bool`` is a subclass of
+    ``int`` in Python (so ``True == 1``) and a float ``1.0`` would compare equal
+    to 1 as well; both are rejected here so that the stored version is literally
+    the integer 1 and nothing that merely coerces to it.
+    """
+    return (isinstance(value, int) and not isinstance(value, bool)
+            and value == SUPPORTED_SCHEMA_VERSION)
+
+
 def _vocab_values(vocab, name):
     """Return the declared vocabulary for name as a set of its scalar entries.
 
@@ -347,11 +376,23 @@ def check_inventory(inventory, component_dir):
         errors.append(
             "inventory missing top-level keys: {}".format(sorted(missing_top)))
 
-    if "schema_version" in inventory and not _is_scalar(inventory.get("schema_version")):
-        errors.append("inventory schema_version must be a non-empty scalar")
+    if "schema_version" in inventory:
+        schema_version = inventory.get("schema_version")
+        if not _is_scalar(schema_version):
+            errors.append("inventory schema_version must be a non-empty scalar")
+        elif not _is_supported_schema_version(schema_version):
+            errors.append(
+                "inventory schema_version must be the supported version {} "
+                "(got {!r})".format(SUPPORTED_SCHEMA_VERSION, schema_version))
 
-    if "component" in inventory and not _nonempty_str(inventory.get("component")):
-        errors.append("inventory component must be a non-empty string")
+    if "component" in inventory:
+        component = inventory.get("component")
+        if not _nonempty_str(component):
+            errors.append("inventory component must be a non-empty string")
+        elif component != SUPPORTED_COMPONENT:
+            errors.append(
+                "inventory component must be {!r} (got {!r})".format(
+                    SUPPORTED_COMPONENT, component))
 
     if "source_of_truth" in inventory:
         sot = inventory.get("source_of_truth")
@@ -620,11 +661,23 @@ def check_coverage_model(model, suite_ids, component_dir):
         errors.append(
             "coverage model missing top-level keys: {}".format(sorted(missing_top)))
 
-    if "schema_version" in model and not _is_scalar(model.get("schema_version")):
-        errors.append("coverage model schema_version must be a non-empty scalar")
+    if "schema_version" in model:
+        schema_version = model.get("schema_version")
+        if not _is_scalar(schema_version):
+            errors.append("coverage model schema_version must be a non-empty scalar")
+        elif not _is_supported_schema_version(schema_version):
+            errors.append(
+                "coverage model schema_version must be the supported version {} "
+                "(got {!r})".format(SUPPORTED_SCHEMA_VERSION, schema_version))
 
-    if "component" in model and not _nonempty_str(model.get("component")):
-        errors.append("coverage model component must be a non-empty string")
+    if "component" in model:
+        component = model.get("component")
+        if not _nonempty_str(component):
+            errors.append("coverage model component must be a non-empty string")
+        elif component != SUPPORTED_COMPONENT:
+            errors.append(
+                "coverage model component must be {!r} (got {!r})".format(
+                    SUPPORTED_COMPONENT, component))
 
     cm = model.get("coverage_model")
     if not isinstance(cm, dict):
@@ -779,6 +832,30 @@ def check_coverage_model(model, suite_ids, component_dir):
         incident_refs.update(_collect_incident_refs(pc))
 
     return errors, incident_refs, {"classes": len(classes), "refs": refs_ok}
+
+
+def check_identity_consistency(inventory, coverage):
+    """Cross-check that the inventory and coverage model declare the same identity.
+
+    The two documents are a connected set companion to each other, so beyond each
+    declaring the supported schema_version and component on its own, they must
+    agree with each other on both fields: a coverage model must never be paired
+    with an inventory of a different schema version or component. Only runs when
+    both documents parse into mappings and both carry the field; the per-document
+    presence/shape checks report an absent or malformed field on their own.
+    """
+    errors = []
+    if not isinstance(inventory, dict) or not isinstance(coverage, dict):
+        return errors
+    for field in ("schema_version", "component"):
+        if field in inventory and field in coverage:
+            inv_value = inventory.get(field)
+            cov_value = coverage.get(field)
+            if inv_value != cov_value:
+                errors.append(
+                    "coverage model {} {!r} does not match inventory {} {!r}".format(
+                        field, cov_value, field, inv_value))
+    return errors
 
 
 def _collect_incident_refs(obj):
@@ -961,6 +1038,9 @@ def validate(root=None, inventory_path=None, coverage_path=None,
     if coverage is not None:
         cov_errors, cov_refs, cov_counts = check_coverage_model(
             coverage, suite_ids, component_dir)
+        # The coverage model and the inventory are a connected set: cross-check
+        # that they declare the same identity (schema_version, component).
+        cov_errors.extend(check_identity_consistency(inventory, coverage))
         results["coverage_model"] = sorted(cov_errors)
         incident_refs |= cov_refs
         counts["coverage_classes"] = cov_counts["classes"]

@@ -305,6 +305,32 @@ class CheckTestingDocsTest(unittest.TestCase):
             msg=results["inventory"],
         )
 
+    def test_unsupported_schema_version_is_rejected(self):
+        # A well-formed scalar that is not the supported version (1) is a schema
+        # error in its own right, distinct from the non-scalar shape error.
+        broken = VALID_INVENTORY.replace(
+            "schema_version: 1\n", "schema_version: 2\n", 1)
+        _write_docs(self.root, {"test_inventory.yaml": broken})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("schema_version must be the supported version 1" in err
+                for err in results["inventory"]),
+            msg=results["inventory"],
+        )
+
+    def test_wrong_component_is_rejected(self):
+        # A non-empty component string that is not hip-tests is rejected: the
+        # document set was authored against a different component.
+        broken = VALID_INVENTORY.replace(
+            "component: hip-tests\n", "component: rocprofiler-sdk\n", 1)
+        _write_docs(self.root, {"test_inventory.yaml": broken})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("component must be 'hip-tests'" in err
+                for err in results["inventory"]),
+            msg=results["inventory"],
+        )
+
     def test_source_of_truth_not_a_mapping(self):
         broken = VALID_INVENTORY.replace(
             "source_of_truth:\n"
@@ -813,6 +839,56 @@ class CheckTestingDocsTest(unittest.TestCase):
         results, _ = checker.validate(root=str(self.root))
         self.assertTrue(
             any("coverage model component must be a non-empty string" in err
+                for err in results["coverage_model"]),
+            msg=results["coverage_model"],
+        )
+
+    def test_coverage_unsupported_schema_version_is_rejected(self):
+        broken = VALID_COVERAGE.replace(
+            "schema_version: 1\n", "schema_version: 2\n", 1)
+        _write_docs(self.root, {"test_coverage_model.yaml": broken})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("coverage model schema_version must be the supported version 1" in err
+                for err in results["coverage_model"]),
+            msg=results["coverage_model"],
+        )
+
+    def test_coverage_wrong_component_is_rejected(self):
+        broken = VALID_COVERAGE.replace(
+            "component: hip-tests\n", "component: rocprofiler-sdk\n", 1)
+        _write_docs(self.root, {"test_coverage_model.yaml": broken})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("coverage model component must be 'hip-tests'" in err
+                for err in results["coverage_model"]),
+            msg=results["coverage_model"],
+        )
+
+    # -- cross-document identity consistency ---------------------------------
+
+    def test_identity_mismatch_schema_version_between_documents(self):
+        # The inventory stays at version 1; the coverage model is bumped to 2.
+        # Beyond the coverage model's own unsupported-version error, the cross-
+        # document check reports that the two documents disagree.
+        broken = VALID_COVERAGE.replace(
+            "schema_version: 1\n", "schema_version: 2\n", 1)
+        _write_docs(self.root, {"test_coverage_model.yaml": broken})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("schema_version 2 does not match inventory schema_version 1" in err
+                for err in results["coverage_model"]),
+            msg=results["coverage_model"],
+        )
+
+    def test_identity_mismatch_component_between_documents(self):
+        broken = VALID_COVERAGE.replace(
+            "component: hip-tests\n", "component: rocprofiler-sdk\n", 1)
+        _write_docs(self.root, {"test_coverage_model.yaml": broken})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("component 'rocprofiler-sdk' does not match inventory "
+                "component 'hip-tests'" in err
                 for err in results["coverage_model"]),
             msg=results["coverage_model"],
         )
