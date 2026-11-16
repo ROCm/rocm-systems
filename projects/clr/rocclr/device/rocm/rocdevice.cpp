@@ -1951,17 +1951,19 @@ void Device::ResolveCpFirmwareCaps() {
                             static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_AQL_EXTENSIONS),
                             aql_extensions) == HSA_STATUS_SUCCESS) {
       // The only write to settings after init. Its readers are VirtualGPUs, which call_once orders
-      // after it; the other bits of the word are written back unchanged.
+      // after it.
       static_cast<Settings*>(settings_)->ext_dispatch_packet_ =
           hsa_flag_isset64(aql_extensions, HSA_AMD_AQL_PROPERTY_EXT_DISPATCH);
       // CP firmware without hint support takes a hinted handle as the signal address. Left false
       // by a runtime that does not report the AQL extension. A profiler tool hands packet
       // completion signals to ROCr, which rejects a hinted handle.
-      signal_hints_ = hsa_flag_isset64(aql_extensions, HSA_AMD_AQL_PROPERTY_SIGNAL_HINTS) &&
-                      !amd::activity_prof::tool_attached.load(std::memory_order_relaxed);
+      signal_hints_.store(
+          hsa_flag_isset64(aql_extensions, HSA_AMD_AQL_PROPERTY_SIGNAL_HINTS) &&
+              !amd::activity_prof::tool_attached.load(std::memory_order_relaxed),
+          std::memory_order_relaxed);
     }
     ClPrint(amd::LOG_INFO, amd::LOG_INIT, "Ext kernel dispatch packet: %d, signal hints: %d",
-            settings().ext_dispatch_packet_, signal_hints_);
+            settings().ext_dispatch_packet_, SignalHints());
   });
 }
 

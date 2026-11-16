@@ -37,9 +37,8 @@ class Settings : public device::Settings {
       uint dynamic_queues_ : 2;        //!< Dynamic queues: 0=off, 1=Depth, 2=1+dedicated null
       uint blocking_blit_ : 1;         //!< Blit ops can be blocking on CPU
       uint queue_pipe_dist_ : 1;       //!< gfx94x queue pipe distribution
-      uint ext_dispatch_packet_ : 1;   //!< Uses new ext dispatch packet for all launches
       uint aql_barrier_opt_ : 1;       //!< Per-stream barrier-bit optimization
-      uint reserved_ : 17;
+      uint reserved_ : 18;
     };
     uint value_;
   };
@@ -64,6 +63,10 @@ class Settings : public device::Settings {
   uint32_t hmmFlags_;       //!< HMM functionality control flags
   uint32_t limit_blit_wg_;  //!< The number of workgroups for blit execution
   uint32_t max_hw_queues_;  //!< Effective maximum HW queues (accounts for null stream reservation)
+
+  //! Uses new ext dispatch packet for all launches. Not a bitfield: Device::ResolveCpFirmwareCaps()
+  //! writes it after init, while other threads may read the bitfields.
+  bool ext_dispatch_packet_;
 
   //! Default constructor
   Settings();
