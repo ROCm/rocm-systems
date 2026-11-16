@@ -14,6 +14,9 @@ inline cl_channel_type getCLChannelType(const hipArray_Format hipFormat,
                                         const hipTextureReadMode hipReadMode) {
   if (hipReadMode == hipReadModeElementType) {
     switch (hipFormat) {
+      // NV12 has no single channel type; its planes are created as UNSIGNED_INT8.
+      case HIP_AD_FORMAT_NV12:
+        break;
       case HIP_AD_FORMAT_UNSIGNED_INT8:
         return CL_UNSIGNED_INT8;
       case HIP_AD_FORMAT_SIGNED_INT8:
@@ -33,6 +36,8 @@ inline cl_channel_type getCLChannelType(const hipArray_Format hipFormat,
     }
   } else if (hipReadMode == hipReadModeNormalizedFloat) {
     switch (hipFormat) {
+      case HIP_AD_FORMAT_NV12:
+        break;
       case HIP_AD_FORMAT_UNSIGNED_INT8:
         return CL_UNORM_INT8;
       case HIP_AD_FORMAT_SIGNED_INT8:
@@ -103,6 +108,11 @@ inline cl_mem_object_type getCLMemObjectType(const hipArray* arr) {
 
 inline bool isLayered1D(const hipArray* arr) {
   return CL_MEM_OBJECT_IMAGE1D_ARRAY == getCLMemObjectType(arr);
+}
+
+// False for a multiplanar parent, whose data is a Buffer rather than an Image.
+inline bool isImageBacked(const hipArray* arr) {
+  return (arr != nullptr) && (getCLMemObjectType(arr) != CL_MEM_OBJECT_ALLOCATION_FAILURE);
 }
 
 inline cl_addressing_mode getCLAddressingMode(const hipTextureAddressMode hipAddressMode) {
@@ -188,6 +198,8 @@ inline size_t getElementSize(const hipArray_const_t array) {
     case HIP_AD_FORMAT_SIGNED_INT32:
     case HIP_AD_FORMAT_FLOAT:
       return 4 * array->NumChannels;
+    case HIP_AD_FORMAT_NV12:
+      return 1;  // No single element size; callers divide by this, so never return 0.
   }
 
   // error scenario
@@ -268,6 +280,8 @@ inline hipChannelFormatDesc getChannelFormatDesc(int numChannels, hipArray_Forma
         case 4:
           return {32, 32, 32, 32, hipChannelFormatKindFloat};
       }
+    case HIP_AD_FORMAT_NV12:
+      return {8, 8, 8, 0, hipChannelFormatKindUnsigned};
   }
 
   // error scenario

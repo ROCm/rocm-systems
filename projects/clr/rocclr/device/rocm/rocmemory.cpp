@@ -1691,6 +1691,13 @@ bool Image::createView(const Memory& parent, amd::Memory::ErrorCode* errorCode) 
   }
   deviceMemory_ = parent.getDeviceMemory();
 
+  // A non-interop image view over a buffer can start partway into it, as an NV12 chroma plane
+  // does. Interop parents are excluded so imported external memory keeps its existing addressing.
+  if ((parent.owner()->asBuffer() != nullptr) && (owner()->getOrigin() != 0) &&
+      (parent.getKind() != MEMORY_KIND_INTEROP)) {
+    deviceMemory_ = static_cast<char*>(deviceMemory_) + owner()->getOrigin();
+  }
+
   originalDeviceMemory_ = (parent.owner()->asBuffer() != nullptr)
                               ? deviceMemory_
                               : static_cast<const Image&>(parent).originalDeviceMemory_;

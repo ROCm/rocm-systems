@@ -660,5 +660,8 @@ typedef enum rocprofiler_hip_runtime_api_id_t  // NOLINT(performance-enum-size)
     ROCPROFILER_HIP_RUNTIME_API_ID_hipMemcpyWithAttributesAsync,
     ROCPROFILER_HIP_RUNTIME_API_ID_hipMemcpy3DWithAttributesAsync,
 #endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 41
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipArrayGetPlane,
+#endif
     ROCPROFILER_HIP_RUNTIME_API_ID_LAST,
 } rocprofiler_hip_runtime_api_id_t;

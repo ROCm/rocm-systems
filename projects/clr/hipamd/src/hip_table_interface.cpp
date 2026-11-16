@@ -148,6 +148,11 @@ HIP_PUBLIC_API hipError_t hipArrayGetDescriptor(HIP_ARRAY_DESCRIPTOR* pArrayDesc
   return hip::GetHipDispatchTable()->hipArrayGetDescriptor_fn(pArrayDescriptor, array);
   CATCH;
 }
+HIP_PUBLIC_API hipError_t hipArrayGetPlane(hipArray_t* pPlaneArray, hipArray_t hArray, unsigned int planeIdx) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipArrayGetPlane_fn(pPlaneArray, hArray, planeIdx);
+  CATCH;
+}
 HIP_PUBLIC_API hipError_t hipArrayGetInfo(hipChannelFormatDesc* desc, hipExtent* extent, unsigned int* flags,
                            hipArray_t array) {
   TRY;

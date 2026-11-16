@@ -1104,6 +1104,8 @@ enum hipLimit_t {
 #define hipArraySurfaceLoadStore 0x02
 #define hipArrayCubemap 0x04
 #define hipArrayTextureGather 0x08
+/** Array is a video encode/decode surface. Required for #HIP_AD_FORMAT_NV12, matching CUDA. */
+#define hipArrayVideoEncodeDecode 0x100
 #define hipOccupancyDefault 0x00
 #define hipOccupancyDisableCachingOverride 0x01
 #define hipCooperativeLaunchMultiDeviceNoPreSync 0x01
@@ -6091,6 +6093,39 @@ hipError_t hipArrayGetDescriptor(HIP_ARRAY_DESCRIPTOR* pArrayDescriptor, hipArra
  * hipMemHostGetDevicePointer, hipMemsetD8, hipMemsetD16, hipMemsetD32, hipArrayGetInfo
  */
 hipError_t hipArray3DGetDescriptor(HIP_ARRAY3D_DESCRIPTOR* pArrayDescriptor, hipArray_t array);
+/**
+ * @brief Gets a HIP array plane from a multiplanar HIP array.
+ *
+ * Returns in @p pPlaneArray a HIP array representing a single format plane of @p hArray.
+ *
+ * For an array created with #HIP_AD_FORMAT_NV12 of width W and height H, a @p planeIdx of 0
+ * returns the luma plane: #HIP_AD_FORMAT_UNSIGNED_INT8, one channel, W x H. A @p planeIdx of 1
+ * returns the chroma plane: #HIP_AD_FORMAT_UNSIGNED_INT8, two channels, W/2 x H/2. Both planes
+ * inherit the creation flags of @p hArray.
+ *
+ * The returned plane is **owned by** @p hArray. It must not be destroyed independently, and it
+ * becomes invalid once @p hArray is destroyed. Repeated queries for the same plane return the same
+ * handle while @p hArray is alive. For compatibility with CUDA, calling ::hipArrayDestroy on a
+ * plane handle returns #hipSuccess without independently releasing the plane or its backing
+ * storage; the parent releases both when it is destroyed.
+ *
+ * @note Multiplanar arrays are currently supported only on the ROCr backend.
+ *
+ * @param[out] pPlaneArray - pointer to the returned HIP array representing a single format plane
+ * of @p hArray
+ * @param[in] hArray - multiplanar HIP array
+ * @param[in] planeIdx - index of the array plane
+ *
+ * @returns #hipSuccess, #hipErrorDeinitialized, #hipErrorNotInitialized, #hipErrorInvalidContext,
+ * #hipErrorInvalidValue, #hipErrorInvalidHandle
+ *
+ * @returns #hipErrorInvalidHandle if @p hArray is nullptr or is not a valid array.
+ * @returns #hipErrorInvalidValue if @p pPlaneArray is nullptr, if @p hArray does not have a
+ * multiplanar format, or if @p planeIdx exceeds the number of planes in @p hArray.
+ *
+ * @see hipArrayCreate, hipArray3DCreate, hipArrayDestroy
+ */
+hipError_t hipArrayGetPlane(hipArray_t *pPlaneArray, hipArray_t hArray, unsigned int planeIdx);
 /**
  *  @brief Copies data between host and device.
  *

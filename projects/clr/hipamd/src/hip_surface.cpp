@@ -62,6 +62,10 @@ hipError_t ihipCreateSurfaceObject(hipSurfaceObject_t* pSurfObject,
     return hipErrorInvalidValue;
   }
   image = as_amd(memObj)->asImage();
+  // Null for a multiplanar parent, which cannot back a surface; bind one of its planes.
+  if (image == nullptr) {
+    return hipErrorInvalidValue;
+  }
 
   void* surfObjectBuffer = nullptr;
   hipError_t err =

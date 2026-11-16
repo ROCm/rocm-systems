@@ -114,6 +114,7 @@ hipArrayDestroy
 hipArrayGetInfo
 hipArrayGetDescriptor
 hipArray3DGetDescriptor
+hipArrayGetPlane
 hipMallocArray
 hipMemAdvise
 hipMemAllocPitch
