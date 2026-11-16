@@ -1313,6 +1313,14 @@ static size_t rcclCeArRegChunkElems(const ncclComm* comm, size_t count, ncclData
   return ncclCeAllReduceChunkBytes(shardBytes, slotChunkBytes) / eltSize;
 }
 
+// The table's LL128 tier cap. ReduceScatter on comms of at least ddaRsLL128LargeCommMinRanks ranks runs to
+// ddaRsLL128LargeCommMaxBytes when that is higher.
+inline size_t ddaLL128TierCapFromTable(const rcclArchThresholds* table, ncclFunc_t func, int nRanks) {
+  const size_t cap = ddaTierCapFromTable(table, table->ddaLL128Max, table->ddaLL128MaxPerRank, func, nRanks);
+  const bool largeComm = table->ddaRsLL128LargeCommMinRanks > 0 && nRanks >= table->ddaRsLL128LargeCommMinRanks;
+  return func == ncclFuncReduceScatter && largeComm ? std::max(cap, table->ddaRsLL128LargeCommMaxBytes) : cap;
+}
+
 // Returns the LL128 size cap for this collective, or 0 if the tier is disabled.
 // RCCL_DDA_LL128 three-way logic:
 //   kDdaThresholdUnset (-1, default): auto — enabled iff arch table has non-zero
@@ -1327,11 +1335,11 @@ inline size_t rcclDdaLL128ThresholdTab(const rcclArchThresholds* table, ncclFunc
   if (param == 0) return 0;
   if (param == kDdaThresholdUnset) {
     if (table == nullptr) return 0;
-    return ddaTierCapFromTable(table, table->ddaLL128Max, table->ddaLL128MaxPerRank, func, nRanks);
+    return ddaLL128TierCapFromTable(table, func, nRanks);
   }
   // param > 0: user forced on
   if (table == nullptr) return kDdaLL128BaseDefault;
-  return ddaTierCapFromTable(table, table->ddaLL128Max, table->ddaLL128MaxPerRank, func, nRanks);
+  return ddaLL128TierCapFromTable(table, func, nRanks);
 }
 size_t rcclDdaLL128Threshold(const ncclComm* comm, ncclFunc_t func) {
   return rcclDdaLL128ThresholdTab(extAlgoArchTable(comm), func, comm != nullptr ? comm->nRanks : 0);
@@ -1427,6 +1435,16 @@ int rcclDdaFabricA2aLL128Blocks(const ncclComm* comm, size_t totalBytes) {
 int rcclDdaFabricRsLL128Threads(const ncclComm* comm) {
   const rcclArchThresholds* table = extAlgoArchTable(comm);
   return table != nullptr ? table->ddaRsLL128Threads : 0;
+}
+
+size_t rcclDdaFabricRsLL128PeerMaxBytes(const ncclComm* comm) {
+  const rcclArchThresholds* table = extAlgoArchTable(comm);
+  if (table == nullptr) {
+    return 0;
+  }
+  const size_t nRanks = (size_t)std::max(comm->nRanks, 0);
+  const size_t shard = std::max(table->ddaRsLL128PeerMaxShard, nRanks * table->ddaRsLL128PeerMaxShardPerRank);
+  return std::min(nRanks * shard, table->ddaRsLL128PeerMaxBytes);
 }
 
 // Widest window any enabled DDA tier can serve for this collective. The entry

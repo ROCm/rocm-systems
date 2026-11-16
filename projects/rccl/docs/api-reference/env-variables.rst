@@ -1694,14 +1694,24 @@ threshold table introduced for gfx1250.
           multiple of 32 from 32 to 1024. Pre-table default: ``256``.
 
     * - | ``RCCL_DDA_LL128_RS_THREADS``
-        | Threads per block for the gfx1250 DDA fabric LL128 ``ncclReduceScatter``
-          kernel. When ``0`` (default), resolved from ``ddaRsLL128Threads`` in the
-          arch table: the gfx1250 table uses 256 threads on every partition but
-          DPX, and every other case uses 512. Values that are not a multiple of 32
-          from 32 to 512 are ignored.
+        | Threads per block for the batched gfx1250 DDA fabric LL128
+          ``ncclReduceScatter`` kernel. When ``0`` (default), resolved from
+          ``ddaRsLL128Threads`` in the arch table: the gfx1250 table uses 256
+          threads on every partition but DPX, and every other case uses 512.
+          Values that are not a multiple of 32 from 32 to 512 are ignored. The
+          peer-parallel kernel sizes its own block, a warp per rank, up to 512
+          threads.
       - | ``0``: Resolved from the per-arch table at runtime (default).
         | ``N``: Use ``N`` threads per block, overriding the table. ``N`` must be a
           multiple of 32 from 32 to 512. Pre-table default: ``512``.
+
+    * - | ``RCCL_DDA_LL128_RS_PEER_MAX_BYTES``
+        | Largest message in bytes the gfx1250 DDA fabric LL128 ``ncclReduceScatter``
+          sends through its peer-parallel kernel. Larger messages take the batched
+          kernel.
+      - | ``-1``: Resolved from the per-arch table at runtime (default).
+        | ``0``: Use the batched kernel at every size.
+        | ``N`` (bytes): Use the peer-parallel kernel up to ``N``, overriding the table.
 
     * - | ``RCCL_DDA_BC_MAX_BLOCKS``
         | Lowers the per-rank block budget of the DDA Broadcast kernels. The

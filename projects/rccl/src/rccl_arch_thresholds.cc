@@ -31,7 +31,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
     16ULL*1024,          // [0] Broadcast       -- LL beats Ring 1.5-4.5x to 16K at 4-24 ranks
     0,                   // [1] Reduce          -- not used
     64ULL*1024,          // [2] AllGather         // [2] AllGather
-    4ULL*1024*1024,      // [3] ReduceScatter   -- LL beats LL128 to 4M at 4 ranks; nRanks x 1M below 4 ranks
+    1ULL*1024*1024,      // [3] ReduceScatter   -- LL beats LL128 to 1M on 4-16 ranks
     32ULL*1024*1024,     // [4] AllReduce
     0,                   // [5] SendRecv        -- not used
     0,                   // [6] Send            -- not used
@@ -202,7 +202,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
     0,                   // [0] Broadcast      -- not used
     0,                   // [1] Reduce          -- not used
     16ULL*1024,          // [2] AllGather       -- LL beats LL128 to 128K/256K/512K/1M at 8/16/32/64
-    1ULL*1024*1024,      // [3] ReduceScatter   -- nRanks x 1M from 8 ranks; LL beats LL128 to 8M/16M at 8/16
+    0,                   // [3] ReduceScatter   -- ddaLLMax total: LL128 takes over at 2M-4M on 8 and 16 ranks
     1ULL*1024*1024,      // [4] AllReduce       -- LL two-shot beats LL128 1.4-1.9x to 8M/16M/32M/64M
     0,                   // [5] SendRecv        -- not used
     0,                   // [6] Send            -- not used
@@ -213,8 +213,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
     0,                   // [0] Broadcast      -- not used
     0,                   // [1] Reduce          -- not used
     16ULL*1024*1024,     // [2] AllGather       -- 128M at 8 ranks, 256M (clipped) from 16
-    15ULL*512*1024,      // [3] ReduceScatter   -- nRanks x 7.5M from 8 ranks: one 1920B slice per warp at
-                         //                        256 blocks of 512 threads, two at 256 threads
+    32ULL*1024*1024,     // [3] ReduceScatter   -- 256M (clipped) from 8 ranks: LL128 beats Ring to 256M at 8 and 16
     0,                   // [4] AllReduce       -- ddaLL128Max total
     0,                   // [5] SendRecv        -- not used
     0,                   // [6] Send            -- not used
@@ -250,6 +249,13 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
   .ddaVmmMaxBlocks = 128,
   // ReduceScatter LL128 block size: 256 threads beat 512 at 8M-128M on 4-32 ranks.
   .ddaRsLL128Threads = 256,
+  // ReduceScatter LL128 kernel crossover by shard and message size.
+  .ddaRsLL128PeerMaxShard = 512ULL*1024,
+  .ddaRsLL128PeerMaxShardPerRank = 64ULL*1024,
+  .ddaRsLL128PeerMaxBytes = 32ULL*1024*1024,
+  // ReduceScatter LL128 beats Ring to 512M on large comms.
+  .ddaRsLL128LargeCommMinRanks = 32,
+  .ddaRsLL128LargeCommMaxBytes = 512ULL*1024*1024,
   // Ring / Tree crossovers, same sweep (AllReduce LL128: AICOMRCCL-2874/2875).
   .arRingLL128MaxPerRank = 32ULL*1024*1024,       // Ring LL128 beats Simple to 256M/512M/1G/2G at 8-64
   .arTreeLL128Unlimited = true,                   // Tree LL128 beats Tree Simple 1.3-2.9x at 32M-16G

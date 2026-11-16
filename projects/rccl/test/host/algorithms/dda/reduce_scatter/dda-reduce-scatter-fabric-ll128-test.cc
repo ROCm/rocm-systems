@@ -5,8 +5,8 @@
  ************************************************************************/
 
 // Host-only microtests for src/algorithms/dda/reduce_scatter/dda_reduce_scatter_fabric_ll128.cu: eligibility against
-// the scratch bank's per-rank slot and the LL128 cap, the datatype dispatch, the slice grid and its caps, and the
-// launch.
+// the scratch bank's per-rank slot and the LL128 cap, the datatype dispatch, the peer-parallel and batched split, each
+// kernel's slice grid and its caps, and the launch.
 
 #include <gtest/gtest.h>
 
@@ -41,6 +41,11 @@ constexpr size_t kOneSliceScratch8 = 2 * 8 * 2048;
 template <typename T, int N>
 const void* Kernel() {
   return KernelPtr(&dda::common::ddaReduceScatterFabricLL128<T, N>);
+}
+
+template <typename T, int N>
+const void* PeerParKernel() {
+  return KernelPtr(&dda::common::ddaReduceScatterFabricLL128PeerPar<T, N>);
 }
 
 class DdaReduceScatterFabricLL128Microtest : public ::testing::Test {
@@ -80,9 +85,14 @@ class DdaReduceScatterFabricLL128Microtest : public ::testing::Test {
     return g_ddaLaunches.at(0);
   }
 
+  // Messages up to `bytes` take the peer-parallel kernel, as an arch table cap would send them.
+  void PeerParallelUpTo(size_t bytes) {
+    g_rcclDdaFabricRsLL128PeerMaxBytes = [bytes](const ncclComm*) { return bytes; };
+  }
+
   template <typename T>
-  void ExpectLaunchOf(const DdaLaunch& launch, size_t recvcount) {
-    EXPECT_EQ(launch.kernel, (Kernel<T, 8>()));
+  void ExpectLaunchOf(const DdaLaunch& launch, size_t recvcount, const void* kernel = Kernel<T, 8>()) {
+    EXPECT_EQ(launch.kernel, kernel);
     ASSERT_EQ(launch.args.size(), 11u);
     EXPECT_EQ(launch.Arg<T**>(0), comm().ddaPeerPtrsDev);
     EXPECT_EQ(launch.Arg<T*>(1), kRecvbuff);
@@ -272,7 +282,7 @@ TEST_F(DdaReduceScatterFabricLL128Microtest, Launch_GridFollowsShardSlicesWithin
   EXPECT_EQ(RunOne(16 * 100 * kSliceFloats).grid.x, 1u);
 }
 
-// The reported block count is the launch grid, caps included.
+// The reported block count is the launch grid of either kernel, caps included.
 TEST_F(DdaReduceScatterFabricLL128Microtest, Blocks_MatchTheLaunchedGrid) {
   struct Case {
     size_t count;
@@ -282,12 +292,15 @@ TEST_F(DdaReduceScatterFabricLL128Microtest, Blocks_MatchTheLaunchedGrid) {
                         {16 * kSliceFloats + 4, ncclFloat32},
                         {32 * kSliceFloats, ncclBfloat16},
                         {16 * 100 * kSliceFloats, ncclFloat32}};
-  for (int maxBlocks : {256, 6}) {
-    comm().ddaFabricMaxBlocks = maxBlocks;
-    for (const Case& c : cases) {
-      EXPECT_EQ(ncclReduceScatterDdaFabricLL128Blocks(mock_.get(), c.count, c.datatype),
-                RunOne(c.count, c.datatype).grid.x)
-        << "count " << c.count << " maxBlocks " << maxBlocks;
+  for (size_t peerMax : {size_t{0}, size_t{1} << 30}) {
+    PeerParallelUpTo(peerMax);
+    for (int maxBlocks : {256, 6}) {
+      comm().ddaFabricMaxBlocks = maxBlocks;
+      for (const Case& c : cases) {
+        EXPECT_EQ(ncclReduceScatterDdaFabricLL128Blocks(mock_.get(), c.count, c.datatype),
+                  RunOne(c.count, c.datatype).grid.x)
+          << "count " << c.count << " maxBlocks " << maxBlocks << " peerMax " << peerMax;
+      }
     }
   }
 }
@@ -321,6 +334,118 @@ TEST_F(DdaReduceScatterFabricLL128Microtest, Launch_ThreadsFromArchTableUnlessOv
     g_rcclDdaFabricRsLL128Threads = [tuned](const ncclComm*) { return tuned; };
     EXPECT_EQ(RunOne(8).block.x, 512u) << "table " << tuned;
   }
+}
+
+// The table's cap is the whole message: up to it the peer-parallel kernel runs, past it the batched one.
+TEST_F(DdaReduceScatterFabricLL128Microtest, PeerParallel_UpToTheTableCapBatchedAbove) {
+  EXPECT_EQ(RunOne(kSliceFloats).kernel, (Kernel<float, 8>()));
+  PeerParallelUpTo(8 * kSliceFloats * sizeof(float));
+  EXPECT_EQ(RunOne(kSliceFloats).kernel, (PeerParKernel<float, 8>()));
+  EXPECT_EQ(RunOne(kSliceFloats + 4).kernel, (Kernel<float, 8>()));
+  EXPECT_EQ(RunOne(2 * kSliceFloats, ncclFloat16).kernel, (PeerParKernel<half, 8>()));
+  EXPECT_EQ(RunOne(2 * kSliceFloats + 8, ncclFloat16).kernel, (Kernel<half, 8>()));
+}
+
+// DDA_LL128_RS_PEER_MAX_BYTES overrides the table's cap. -1, the default, reads the table, and 0 or another negative
+// keeps the batched kernel.
+TEST_F(DdaReduceScatterFabricLL128Microtest, PeerParallel_EnvOverridesTheTable) {
+  PeerParallelUpTo(size_t{1} << 30);
+  for (int64_t env : {int64_t{0}, int64_t{-5}}) {
+    params_["RCCL_DDA_LL128_RS_PEER_MAX_BYTES"] = env;
+    EXPECT_EQ(RunOne(4).kernel, (Kernel<float, 8>())) << "DDA_LL128_RS_PEER_MAX_BYTES " << env;
+  }
+  params_["RCCL_DDA_LL128_RS_PEER_MAX_BYTES"] = 8 * 16;
+  EXPECT_EQ(RunOne(4).kernel, (PeerParKernel<float, 8>()));
+  EXPECT_EQ(RunOne(8).kernel, (Kernel<float, 8>()));
+  params_["RCCL_DDA_LL128_RS_PEER_MAX_BYTES"] = -1;
+  EXPECT_EQ(RunOne(8).kernel, (PeerParKernel<float, 8>()));
+  PeerParallelUpTo(0);
+  EXPECT_EQ(RunOne(8).kernel, (Kernel<float, 8>()));
+  params_["RCCL_DDA_LL128_RS_PEER_MAX_BYTES"] = 8 * 32;
+  EXPECT_EQ(RunOne(8).kernel, (PeerParKernel<float, 8>()));
+}
+
+TEST_F(DdaReduceScatterFabricLL128Microtest, PeerParallel_EachDatatypeLaunchesItsOwnKernel) {
+  PeerParallelUpTo(size_t{1} << 30);
+  ExpectLaunchOf<float>(RunOne(16, ncclFloat32), 16, PeerParKernel<float, 8>());
+  ExpectLaunchOf<half>(RunOne(16, ncclFloat16), 16, PeerParKernel<half, 8>());
+  ExpectLaunchOf<bf16>(RunOne(16, ncclBfloat16), 16, PeerParKernel<bf16, 8>());
+  ExpectLaunchOf<dda::common::fp8e4m3>(RunOne(16, ncclFloat8e4m3), 16, PeerParKernel<dda::common::fp8e4m3, 8>());
+  ExpectLaunchOf<dda::common::fp8e5m2>(RunOne(16, ncclFloat8e5m2), 16, PeerParKernel<dda::common::fp8e5m2, 8>());
+}
+
+TEST_F(DdaReduceScatterFabricLL128Microtest, PeerParallel_FourAndEightRanksUnrolledOthersRuntime) {
+  PeerParallelUpTo(size_t{1} << 30);
+  const std::pair<int, const void*> cases[] = {{4, PeerParKernel<float, 4>()},
+                                               {8, PeerParKernel<float, 8>()},
+                                               {2, PeerParKernel<float, 0>()},
+                                               {5, PeerParKernel<float, 0>()},
+                                               {144, PeerParKernel<float, 0>()}};
+  for (const auto& [nRanks, kernel] : cases) {
+    comm().nRanks = nRanks;
+    const DdaLaunch& launch = RunOne(4);
+    EXPECT_EQ(launch.kernel, kernel) << "nRanks " << nRanks;
+    EXPECT_EQ(launch.Arg<int>(5), nRanks);
+  }
+}
+
+// A block per slice within the block cap, capped at ddaFabricMaxBlocks and at the epoch cells.
+TEST_F(DdaReduceScatterFabricLL128Microtest, PeerParallel_GridFollowsShardSlicesWithinCaps) {
+  PeerParallelUpTo(size_t{1} << 30);
+  EXPECT_EQ(RunOne(8, ncclFloat16).grid.x, 1u);
+  EXPECT_EQ(RunOne(kSliceFloats).grid.x, 1u);
+  EXPECT_EQ(RunOne(kSliceFloats + 4).grid.x, 2u);
+  const DdaLaunch& uncapped = RunOne(100 * kSliceFloats);
+  EXPECT_EQ(uncapped.grid.x, 100u);
+  EXPECT_EQ(uncapped.block.x, 256u);
+  comm().ddaFabricMaxBlocks = 6;
+  const DdaLaunch& capped = RunOne(100 * kSliceFloats);
+  EXPECT_EQ(capped.grid.x, 6u);
+  EXPECT_EQ(capped.block.x, 512u);
+  comm().ddaFabricMaxBlocks = 0;
+  EXPECT_EQ(RunOne(100 * kSliceFloats).grid.x, 1u);
+  comm().ddaFabricMaxBlocks = 256;
+  comm().ddaLLEpochLen = 9;
+  EXPECT_EQ(RunOne(100 * kSliceFloats).grid.x, 9u);
+  comm().ddaLLEpochLen = 0;
+  EXPECT_EQ(RunOne(100 * kSliceFloats).grid.x, 1u);
+}
+
+// A warp group is a warp per rank, up to the 16 warps of 512 threads.
+TEST_F(DdaReduceScatterFabricLL128Microtest, PeerParallel_BlockIsOneWarpPerRank) {
+  PeerParallelUpTo(size_t{1} << 30);
+  const std::pair<int, unsigned> cases[] = {{2, 64u},   {3, 96u},   {4, 128u},  {8, 256u},
+                                            {12, 384u}, {16, 512u}, {32, 512u}, {144, 512u}};
+  for (const auto& [nRanks, threads] : cases) {
+    comm().nRanks = nRanks;
+    const DdaLaunch& launch = RunOne(kSliceFloats);
+    EXPECT_EQ(launch.block.x, threads) << "nRanks " << nRanks;
+    EXPECT_EQ(launch.grid.x, 1u) << "nRanks " << nRanks;
+  }
+}
+
+// Past the block cap a block doubles its groups, up to 512 threads: 40 slices at 4 ranks.
+TEST_F(DdaReduceScatterFabricLL128Microtest, PeerParallel_BlockTakesMoreGroupsOnlyPastTheCap) {
+  PeerParallelUpTo(size_t{1} << 30);
+  comm().nRanks = 4;
+  const std::pair<int, std::pair<unsigned, unsigned>> cases[] = {{40, {40u, 128u}}, {20, {20u, 256u}}, {6, {6u, 512u}}};
+  for (const auto& [maxBlocks, want] : cases) {
+    comm().ddaFabricMaxBlocks = maxBlocks;
+    const DdaLaunch& launch = RunOne(40 * kSliceFloats);
+    EXPECT_EQ(launch.grid.x, want.first) << "maxBlocks " << maxBlocks;
+    EXPECT_EQ(launch.block.x, want.second) << "maxBlocks " << maxBlocks;
+  }
+}
+
+// DDA_LL128_RS_THREADS and the table's block size apply to the batched kernel only.
+TEST_F(DdaReduceScatterFabricLL128Microtest, PeerParallel_BlockIgnoresTheBatchedThreadSettings) {
+  params_["RCCL_DDA_LL128_RS_THREADS"] = 32;
+  g_rcclDdaFabricRsLL128Threads = [](const ncclComm*) { return 128; };
+  EXPECT_EQ(RunOne(4).block.x, 32u);
+  PeerParallelUpTo(size_t{1} << 30);
+  EXPECT_EQ(RunOne(4).block.x, 256u);
+  params_.erase("RCCL_DDA_LL128_RS_THREADS");
+  EXPECT_EQ(RunOne(4).block.x, 256u);
 }
 
 TEST_F(DdaReduceScatterFabricLL128Microtest, Launch_LaunchErrorIsReported) {
