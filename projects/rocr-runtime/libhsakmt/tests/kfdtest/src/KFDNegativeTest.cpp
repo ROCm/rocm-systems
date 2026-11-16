@@ -96,7 +96,7 @@ TEST_F(KFDNegativeTest, BasicPipeReset) {
 
             LOG() << "Child ==> Complete" << std::endl;
 
-            exit(0);
+            exit(HasFailure());
 	} else {
             int childStatus = 0;
 
@@ -108,6 +108,9 @@ TEST_F(KFDNegativeTest, BasicPipeReset) {
             write(pipefd[1], &buf, 1);
             LOG() << "Parent ==> Wait on child to launch bad packet" << std::endl;
             waitpid(childPid, &childStatus, 0);
+            // the child checks that its own queue reset raised the exception event
+            EXPECT_TRUE(WIFEXITED(childStatus) && WEXITSTATUS(childStatus) == 0)
+                << "child failed, wait status 0x" << std::hex << childStatus;
 
             // parent process should not intercept reset event on child queue reset
             EXPECT_NE(HSAKMT_STATUS_SUCCESS, HSAKMT_CALL(hsaKmtWaitOnEvent, g_baseTest->m_hsakmt_current_ctx, resetEvent, 100));
