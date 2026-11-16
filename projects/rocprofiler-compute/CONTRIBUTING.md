@@ -359,9 +359,8 @@ collectables files, every top-level value is an equation.
   (`a - (b - c)`, `a + (b + c)`, `(a + b) * c`).
 - **Unary negation** — negation of a compound expression keeps its parentheses:
   `-(a + b)`, not `-a + b`.
-- **Left as written** — the `Peak (Empirical)` header text and per-channel
-  templates such as `TCC_HIT[::_1]` are not parsed. A cell with no value is
-  written `None`.
+- **Left as written** — per-channel templates such as `TCC_HIT[::_1]` are not
+  parsed. A cell with no value is written `None`.
 
 The formatter reports an equation it cannot parse (unknown characters, unmatched
 parentheses, a missing operand) with its key and the parser message, and leaves
