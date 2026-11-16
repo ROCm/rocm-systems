@@ -44,8 +44,12 @@ Streams on devices that don't support stream wait values
    streams.
 
 The null stream and ``hipStreamPerThread``
-   The call synchronizes the stream, runs the transfer, and returns after the
-   transfer finishes.
+   The call runs synchronously: it synchronizes the stream, runs the transfer,
+   and returns only after the transfer has finished, with the result already
+   written to ``bytes_read_p`` or ``bytes_written_p``. This matches cuFile's
+   documented behavior for the default stream. Even so, synchronize the stream
+   and keep the pointer arguments valid until the call returns, so the same code
+   works on any stream.
 
 Deregister every stream you use for asynchronous I/O, including streams that
 were registered implicitly, before you destroy it. Otherwise a new stream that

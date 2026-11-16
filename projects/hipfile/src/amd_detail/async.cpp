@@ -29,7 +29,7 @@ signalOffloadComplete(AsyncOp *op)
 {
     op->file.reset();
     op->buffer.reset();
-    if (uint64_t *slot = op->stream->signalSlot()) {
+    if (uint64_t *slot = op->signal_slot) {
         std::atomic_ref<uint64_t>{*slot}.fetch_add(1, std::memory_order_release);
     }
 }
@@ -75,7 +75,7 @@ AsyncOp::AsyncOp(IoType _io_type, std::shared_ptr<IFile> _file, std::shared_ptr<
                                             : std::variant<const hoff_t, hoff_t *>{_file_offset}},
       buffer_offset{stream->fixedBufferOffset() ? std::variant<const hoff_t, hoff_t *>{*_buffer_offset}
                                                 : std::variant<const hoff_t, hoff_t *>{_buffer_offset}},
-      bytes_transferred{_bytes_transferred}, backend{std::move(_backend)}
+      bytes_transferred{_bytes_transferred}, backend{std::move(_backend)}, signal_slot{stream->signalSlot()}
 {
 }
 
@@ -151,6 +151,12 @@ enqueueAsync(std::shared_ptr<Backend> backend, IoType io_type, std::shared_ptr<I
             throw std::invalid_argument("Stream is being deregistered");
         }
 
+        // Allocate the signal slot before building the op, so the AsyncOp ctor caches a valid pointer.
+        // Held under the lock and sequenced after the retire check, so a retiring drain can't race it.
+        if (gated) {
+            stream->ensureSignalSlot();
+        }
+
         op = std::make_shared<AsyncOp>(io_type, std::move(file), std::move(buffer), stream, size, file_offset,
                                        buffer_offset, bytes_transferred, std::move(backend));
         op->block       = !gated;
@@ -171,8 +177,8 @@ enqueueAsync(std::shared_ptr<Backend> backend, IoType io_type, std::shared_ptr<I
 
         if (gated) {
             try {
-                Context<Hip>::get()->hipStreamWaitValue64(stream->getHipStream(), stream->signalSlot(),
-                                                          target, hipStreamWaitValueGte, UINT64_MAX);
+                Context<Hip>::get()->hipStreamWaitValue64(stream->getHipStream(), op->signal_slot, target,
+                                                          hipStreamWaitValueGte, UINT64_MAX);
             }
             catch (...) {
                 arm_error = std::current_exception();
