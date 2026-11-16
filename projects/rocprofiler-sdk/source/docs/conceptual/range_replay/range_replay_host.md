@@ -263,5 +263,5 @@ runtime, just as for packet replay. See [Performance](range_replay_performance.m
   leaking a device allocation (it declines `ALLOCATION_CHANGED_IN_RANGE`, its peer `PEER_DECLINED`),
   and one rank not arming the jump (`HOST_JMP_NOT_SET` and `PEER_DECLINED`). Every pass must end in
   the same device checksum and reduced value, and the MPI call count must match the pass count.
-- `range-replay-peer-sync-test` is a GPU-free unit test of the agreement rule, including an
-  exhaustive check that all ranks leave at the same pass boundary.
+- The `range_replay_peer_sync` suite in `range-replay-tests` needs no GPU. It tests the agreement
+  rule, including an exhaustive check that all ranks leave at the same pass boundary.
