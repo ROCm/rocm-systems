@@ -4,7 +4,7 @@
     "tool": "rj_isa_diff",
     "tool_version": "0.1.0-p0",
     "schema_version": "rj_isa_diff.v1",
-    "rocjitsu_revision": "9eebb9d6297c8bf63bd403be5caeb00b7a477cbc",
+    "rocjitsu_revision": "cea98b6ae6b072b015141dc8c70fc0f129cfec11",
     "rocjitsu_version": "0.3.0",
     "semantics": "RocJITsu ComputeUnitCore::execute_instruction, gfx950 (CDNA4) wave64, default arithmetic semantics",
     "compiler": "13.4.0"
@@ -27,7 +27,8 @@
       "metadata_sha256": "37da1ec4a2b4278a98b7a56d882ae3cedbb349d40ec396de852d7d138ff08817",
       "text_relocations": 0,
       "metadata_parsed": true,
-      "entry_vgprs": 3
+      "entry_vgprs": 3,
+      "entry_sgprs": 11
     },
     "new": {
       "label": "llvm/artifacts/new.hsaco",
@@ -43,7 +44,8 @@
       "metadata_sha256": "37da1ec4a2b4278a98b7a56d882ae3cedbb349d40ec396de852d7d138ff08817",
       "text_relocations": 0,
       "metadata_parsed": true,
-      "entry_vgprs": 3
+      "entry_vgprs": 3,
+      "entry_sgprs": 11
     }
   },
   "provenance": {
@@ -59,20 +61,20 @@
         {
           "argv": ["/opt/rocm/llvm/bin/llc", "-mtriple=amdgcn-amd-amdhsa", "-mcpu=gfx950", "-O3", "-filetype=asm", "-o", "llvm/artifacts/old.s", "k3.ll"],
           "exit_code": 0,
-          "elapsed_ns": 17532787
+          "elapsed_ns": 13747185
         },
         {
           "argv": ["/opt/rocm/llvm/bin/llvm-mc", "-triple=amdgcn-amd-amdhsa", "-mcpu=gfx950", "-filetype=obj", "-o", "llvm/artifacts/old.o", "llvm/artifacts/old.s"],
           "exit_code": 0,
-          "elapsed_ns": 3226166
+          "elapsed_ns": 2931705
         },
         {
           "argv": ["/opt/rocm/llvm/bin/ld.lld", "-shared", "--emit-relocs", "-o", "llvm/artifacts/old.hsaco", "llvm/artifacts/old.o"],
           "exit_code": 0,
-          "elapsed_ns": 7067281
+          "elapsed_ns": 8979624
         }
       ],
-      "compile_ns": 27826234,
+      "compile_ns": 25658514,
       "executed_object": "linked_code_object",
       "note": "executed bytes are the code object linked from the re-assembled source, decoded by RocJITsu; they are not necessarily an original binary emission",
       "toolchain": {
@@ -93,20 +95,20 @@
         {
           "argv": ["/opt/rocm/llvm/bin/llc", "-mtriple=amdgcn-amd-amdhsa", "-mcpu=gfx950", "-O3", "-combiner-disabled", "-filetype=asm", "-o", "llvm/artifacts/new.s", "k3.ll"],
           "exit_code": 0,
-          "elapsed_ns": 15836169
+          "elapsed_ns": 14586059
         },
         {
           "argv": ["/opt/rocm/llvm/bin/llvm-mc", "-triple=amdgcn-amd-amdhsa", "-mcpu=gfx950", "-filetype=obj", "-o", "llvm/artifacts/new.o", "llvm/artifacts/new.s"],
           "exit_code": 0,
-          "elapsed_ns": 3059535
+          "elapsed_ns": 3156454
         },
         {
           "argv": ["/opt/rocm/llvm/bin/ld.lld", "-shared", "--emit-relocs", "-o", "llvm/artifacts/new.hsaco", "llvm/artifacts/new.o"],
           "exit_code": 0,
-          "elapsed_ns": 7658102
+          "elapsed_ns": 7375729
         }
       ],
-      "compile_ns": 26553806,
+      "compile_ns": 25118242,
       "executed_object": "linked_code_object",
       "note": "executed bytes are the code object linked from the re-assembled source, decoded by RocJITsu; they are not necessarily an original binary emission",
       "toolchain": {
@@ -257,6 +259,8 @@
         "declared_writes_old": "s0,s1,s4,s5,scc",
         "declared_writes_new": "s0,s1,s4,s5,scc",
         "wide_reads": "",
+        "undef_old": "m0",
+        "undef_new": "m0",
         "mode_old": "0x000003f0",
         "mode_new": "0x000003f0",
         "constraints": [],
@@ -301,7 +305,7 @@
           }
         ]
       },
-      "prepared_key": "d3efa075c0f6de967caa18b700f5b22f2547db61a8e944db749a81305a930cba"
+      "prepared_key": "e56250b5c730336b931eb43097b9f28e045e66999ddc18992ac804d141ee8dd7"
     }
   ],
   "expansion_variants": [
@@ -422,6 +426,8 @@
         "declared_writes_old": "s0,s1,s4,s5,scc",
         "declared_writes_new": "s0,s1,s4,s5,scc",
         "wide_reads": "",
+        "undef_old": "m0",
+        "undef_new": "m0",
         "mode_old": "0x000003f0",
         "mode_new": "0x000003f0",
         "constraints": [],
@@ -470,7 +476,7 @@
           }
         ]
       },
-      "prepared_key": "64a65a86ce486e91828be952e33a91d6aab2467c78a7e7a0117ce7320eb432f5"
+      "prepared_key": "500b6bd9b5c3576a8fb9d92e3b99fedcefe211d8beeefdad0e2b14209e5ecbae"
     },
     {
       "id": "r0.ctx-b1f0",
@@ -589,6 +595,8 @@
         "declared_writes_old": "s0,s1,s4,s5,scc",
         "declared_writes_new": "s0,s1,s4,s5,scc",
         "wide_reads": "",
+        "undef_old": "m0",
+        "undef_new": "m0",
         "mode_old": "0x000003f0",
         "mode_new": "0x000003f0",
         "constraints": [
@@ -647,7 +655,7 @@
           }
         ]
       },
-      "prepared_key": "4eeed00361dbf7673ac81687e55246a4431f214adb2c1405c1583583d4d23f00"
+      "prepared_key": "34f5734cdc94620b158284c46ed61654a4e7b760c6b6a006cffce6f97d360569"
     },
     {
       "id": "r0.ctx-b0f2",
@@ -776,6 +784,8 @@
         "declared_writes_old": "s0,s1,s4,s5,scc",
         "declared_writes_new": "s0,s1,s4,s5,scc",
         "wide_reads": "",
+        "undef_old": "m0",
+        "undef_new": "m0",
         "mode_old": "0x000003f0",
         "mode_new": "0x000003f0",
         "constraints": [],
@@ -824,7 +834,7 @@
           }
         ]
       },
-      "prepared_key": "aa6b63011ad2a3be12fe90251af3442159ddbf1a21737116f449447a422b9afe"
+      "prepared_key": "8d27a60295741e8737fd4950a915333188ad3c4870a982da69cb897c3035df56"
     },
     {
       "id": "r0.ctx-b1f1",
@@ -953,6 +963,8 @@
         "declared_writes_old": "s0,s1,s4,s5,scc",
         "declared_writes_new": "s0,s1,s4,s5,scc",
         "wide_reads": "",
+        "undef_old": "m0",
+        "undef_new": "m0",
         "mode_old": "0x000003f0",
         "mode_new": "0x000003f0",
         "constraints": [
@@ -1015,7 +1027,7 @@
           }
         ]
       },
-      "prepared_key": "938c301f6a1dc1e4329c1d949be51610daf887e70fa9bb13af5ae6fbd6707c13"
+      "prepared_key": "67e4f2fdd8028ee96c5bcfed119f7e3592d56459cc21380075dbaa4e1643d736"
     },
     {
       "id": "r0.ctx-b2f0",
@@ -1144,6 +1156,8 @@
         "declared_writes_old": "s0,s1,s4,s5,scc",
         "declared_writes_new": "s0,s1,s4,s5,scc",
         "wide_reads": "",
+        "undef_old": "m0",
+        "undef_new": "m0",
         "mode_old": "0x000003f0",
         "mode_new": "0x000003f0",
         "constraints": [],
@@ -1192,7 +1206,7 @@
           }
         ]
       },
-      "prepared_key": "f2e0547fff2b4c1ca7e5ff486af034fc48811869b393433fa16ae16a71da7fbb"
+      "prepared_key": "fcb1e9aea966db3623647f1badcf9ac1b7b3916d297dbcf819acb581253d5e4c"
     },
     {
       "id": "r0.ctx-b0f4",
@@ -1349,6 +1363,8 @@
         "vgpr_wide_reads": "",
         "vgpr_undef_old": "v3",
         "vgpr_undef_new": "v3",
+        "undef_old": "m0",
+        "undef_new": "m0",
         "mode_old": "0x000003f0",
         "mode_new": "0x000003f0",
         "constraints": [],
@@ -1405,7 +1421,7 @@
           }
         ]
       },
-      "prepared_key": "18903497165bb29a385a01977302649065cacfa90f8fe937e6eaec82b5153dbf"
+      "prepared_key": "6d8a5b31975d4e994be8db019bfe15297294eb509ed689730cf4b3df73a37420"
     },
     {
       "id": "r0.ctx-b2f2",
@@ -1554,6 +1570,8 @@
         "declared_writes_old": "s0,s1,s4,s5,scc",
         "declared_writes_new": "s0,s1,s4,s5,scc",
         "wide_reads": "",
+        "undef_old": "m0",
+        "undef_new": "m0",
         "mode_old": "0x000003f0",
         "mode_new": "0x000003f0",
         "constraints": [],
@@ -1606,7 +1624,7 @@
           }
         ]
       },
-      "prepared_key": "982d114f3c6f877363f3d7ca522d584466cae60350f4a08ff344d8fff7a63304"
+      "prepared_key": "4b8c681936fc23c92bd03120f2fc42345677b2855230e2315299f8bb7827ea0c"
     },
     {
       "id": "r0.ctx-b4f0",
@@ -1755,6 +1773,8 @@
         "declared_writes_old": "s0,s1,s4,s5,scc",
         "declared_writes_new": "s0,s1,s4,s5,scc",
         "wide_reads": "",
+        "undef_old": "m0",
+        "undef_new": "m0",
         "mode_old": "0x000003f0",
         "mode_new": "0x000003f0",
         "constraints": [],
@@ -1803,7 +1823,7 @@
           }
         ]
       },
-      "prepared_key": "0a796a7e0f8877b03a449be38fe0676f78a3496337c4328dca128c10751d4528"
+      "prepared_key": "c458c7b4cca8ad5f331e45c865796d2abd4237083f2c267b69710addfb63ec91"
     },
     {
       "id": "r0.ctx-b0f6",
@@ -1981,6 +2001,8 @@
         "vgpr_undef_old": "v3",
         "vgpr_undef_new": "v3",
         "memory_writes": true,
+        "undef_old": "m0",
+        "undef_new": "m0",
         "mode_old": "0x000003f0",
         "mode_new": "0x000003f0",
         "constraints": [
@@ -2053,7 +2075,7 @@
           }
         ]
       },
-      "prepared_key": "d8b943fc0aa730c966e3c16e1f7d965ba02f4c946a74515dbd455707941d926c"
+      "prepared_key": "2a1bab83e82686228993fe8b170fc76afe265dcb2d48251fa38e6edd10b2b9cc"
     },
     {
       "id": "r0.ctx-b7f0",
@@ -2241,6 +2263,8 @@
         "vgpr_undef_old": "v3",
         "vgpr_undef_new": "v3",
         "memory_reads": true,
+        "undef_old": "m0",
+        "undef_new": "m0",
         "mode_old": "0x000003f0",
         "mode_new": "0x000003f0",
         "constraints": [
@@ -2313,7 +2337,7 @@
           }
         ]
       },
-      "prepared_key": "10a518242650f9d13bab86428198e8a5f9d35c9d4be6b29ae60d1f339cc3159d"
+      "prepared_key": "197127ddb01d541ca8678a3abb7be29ed74bcf9ee33f325253eee62fdce890e3"
     },
     {
       "id": "r0.ctx-b4f4",
@@ -2510,6 +2534,8 @@
         "vgpr_wide_reads": "",
         "vgpr_undef_old": "v3",
         "vgpr_undef_new": "v3",
+        "undef_old": "m0",
+        "undef_new": "m0",
         "mode_old": "0x000003f0",
         "mode_new": "0x000003f0",
         "constraints": [],
@@ -2570,7 +2596,7 @@
           }
         ]
       },
-      "prepared_key": "702095c8feb96dbda19ea8da62fe7f92b7412635224daef372e897e5984a445b"
+      "prepared_key": "7974fc211e7c087a8c9ea8763952fe80b04dd0e503d48e656dfb50c67be86b11"
     },
     {
       "id": "r0.ctx-b7f6",
@@ -2819,6 +2845,8 @@
         "vgpr_undef_new": "v3",
         "memory_reads": true,
         "memory_writes": true,
+        "undef_old": "m0",
+        "undef_new": "m0",
         "mode_old": "0x000003f0",
         "mode_new": "0x000003f0",
         "constraints": [
@@ -2895,7 +2923,7 @@
           }
         ]
       },
-      "prepared_key": "75e0f9ba770a71ad3821da4eb5824dc889295e69c44b34ca29755b338e5cf870"
+      "prepared_key": "b53910cb1bc799fb3a1a617357d472adb06e5ca7ef7760256595c5614bc896da"
     }
   ],
   "analysis": {
@@ -2911,13 +2939,13 @@
     "alignment_complete": true,
     "layout_shift": true,
     "timing": {
-      "parse_ns": 200053,
-      "decode_cfg_ns": 191640,
-      "dataflow_ns": 13830,
-      "model_total_ns": 211109,
-      "align_classify_ns": 41372,
-      "plan_ns": 741800,
-      "compile_ns": 54380040
+      "parse_ns": 208803,
+      "decode_cfg_ns": 195382,
+      "dataflow_ns": 13642,
+      "model_total_ns": 214714,
+      "align_classify_ns": 40331,
+      "plan_ns": 769990,
+      "compile_ns": 50776756
     }
   }
 }

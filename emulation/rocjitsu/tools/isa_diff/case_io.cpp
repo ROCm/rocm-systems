@@ -52,6 +52,7 @@ Json artifact_json(const Artifact &a, size_t num_insts) {
     j.set("callable_function", std::move(f));
   }
   j.set("entry_vgprs", static_cast<int64_t>(a.entry_vgprs));
+  j.set("entry_sgprs", static_cast<int64_t>(a.entry_sgprs));
   if (!a.inline_asm.empty()) {
     Json blocks = Json::array();
     for (const InlineAsmBlock &b : a.inline_asm) {

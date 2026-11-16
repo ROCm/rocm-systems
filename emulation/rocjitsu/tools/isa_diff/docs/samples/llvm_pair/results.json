@@ -4,7 +4,7 @@
     "tool": "rj_isa_diff",
     "tool_version": "0.1.0-p0",
     "schema_version": "rj_isa_diff.v1",
-    "rocjitsu_revision": "9eebb9d6297c8bf63bd403be5caeb00b7a477cbc",
+    "rocjitsu_revision": "cea98b6ae6b072b015141dc8c70fc0f129cfec11",
     "rocjitsu_version": "0.3.0",
     "semantics": "RocJITsu ComputeUnitCore::execute_instruction, gfx950 (CDNA4) wave64, default arithmetic semantics",
     "compiler": "13.4.0"
@@ -24,7 +24,8 @@
       "metadata_sha256": "37da1ec4a2b4278a98b7a56d882ae3cedbb349d40ec396de852d7d138ff08817",
       "text_relocations": 0,
       "metadata_parsed": true,
-      "entry_vgprs": 3
+      "entry_vgprs": 3,
+      "entry_sgprs": 11
     },
     "new": {
       "label": "llvm/artifacts/new.hsaco",
@@ -40,7 +41,8 @@
       "metadata_sha256": "37da1ec4a2b4278a98b7a56d882ae3cedbb349d40ec396de852d7d138ff08817",
       "text_relocations": 0,
       "metadata_parsed": true,
-      "entry_vgprs": 3
+      "entry_vgprs": 3,
+      "entry_sgprs": 11
     }
   },
   "provenance": {
@@ -56,20 +58,20 @@
         {
           "argv": ["/opt/rocm/llvm/bin/llc", "-mtriple=amdgcn-amd-amdhsa", "-mcpu=gfx950", "-O3", "-filetype=asm", "-o", "llvm/artifacts/old.s", "k3.ll"],
           "exit_code": 0,
-          "elapsed_ns": 17532787
+          "elapsed_ns": 13747185
         },
         {
           "argv": ["/opt/rocm/llvm/bin/llvm-mc", "-triple=amdgcn-amd-amdhsa", "-mcpu=gfx950", "-filetype=obj", "-o", "llvm/artifacts/old.o", "llvm/artifacts/old.s"],
           "exit_code": 0,
-          "elapsed_ns": 3226166
+          "elapsed_ns": 2931705
         },
         {
           "argv": ["/opt/rocm/llvm/bin/ld.lld", "-shared", "--emit-relocs", "-o", "llvm/artifacts/old.hsaco", "llvm/artifacts/old.o"],
           "exit_code": 0,
-          "elapsed_ns": 7067281
+          "elapsed_ns": 8979624
         }
       ],
-      "compile_ns": 27826234,
+      "compile_ns": 25658514,
       "executed_object": "linked_code_object",
       "note": "executed bytes are the code object linked from the re-assembled source, decoded by RocJITsu; they are not necessarily an original binary emission",
       "toolchain": {
@@ -90,20 +92,20 @@
         {
           "argv": ["/opt/rocm/llvm/bin/llc", "-mtriple=amdgcn-amd-amdhsa", "-mcpu=gfx950", "-O3", "-combiner-disabled", "-filetype=asm", "-o", "llvm/artifacts/new.s", "k3.ll"],
           "exit_code": 0,
-          "elapsed_ns": 15836169
+          "elapsed_ns": 14586059
         },
         {
           "argv": ["/opt/rocm/llvm/bin/llvm-mc", "-triple=amdgcn-amd-amdhsa", "-mcpu=gfx950", "-filetype=obj", "-o", "llvm/artifacts/new.o", "llvm/artifacts/new.s"],
           "exit_code": 0,
-          "elapsed_ns": 3059535
+          "elapsed_ns": 3156454
         },
         {
           "argv": ["/opt/rocm/llvm/bin/ld.lld", "-shared", "--emit-relocs", "-o", "llvm/artifacts/new.hsaco", "llvm/artifacts/new.o"],
           "exit_code": 0,
-          "elapsed_ns": 7658102
+          "elapsed_ns": 7375729
         }
       ],
-      "compile_ns": 26553806,
+      "compile_ns": 25118242,
       "executed_object": "linked_code_object",
       "note": "executed bytes are the code object linked from the re-assembled source, decoded by RocJITsu; they are not necessarily an original binary emission",
       "toolchain": {
@@ -140,7 +142,7 @@
       "witness_scope": "NONE",
       "coverage_scope": "COMPLETE_FOR_DECLARED_SCOPE",
       "proof_status": "NOT_RUN",
-      "prepared_key": "d3efa075c0f6de967caa18b700f5b22f2547db61a8e944db749a81305a930cba",
+      "prepared_key": "e56250b5c730336b931eb43097b9f28e045e66999ddc18992ac804d141ee8dd7",
       "pending_effects": "NONE",
       "composition": "HOLDS",
       "policy": "baseline-v1",
@@ -205,12 +207,12 @@
         "new_insts_executed": 26264
       },
       "timing": {
-        "setup_ns": 539224,
-        "propose_ns": 1972493,
-        "state_load_ns": 2810626,
-        "old_execute_ns": 1219742,
-        "new_execute_ns": 978675,
-        "compare_ns": 2572472,
+        "setup_ns": 414013,
+        "propose_ns": 2007114,
+        "state_load_ns": 2760270,
+        "old_execute_ns": 1293288,
+        "new_execute_ns": 1056795,
+        "compare_ns": 17186833,
         "triage_ns": 0
       },
       "counterexamples": []

@@ -104,6 +104,30 @@ def test_file(head):
                 "ret void",
             ],
         ),
+        # A NaN's bits flow through an integer operation before the store.
+        function(
+            "void @fadd_bits(float %a, float %b, ptr addrspace(1) inreg %p)",
+            "fadd_bits",
+            [
+                "v_add_f32_e32 v0, v1, v0" if head else "v_add_f32_e32 v0, v0, v1",
+                "v_and_b32_e32 v0, 0xffff, v0",
+            ]
+            + store("")[1:],
+            [
+                "%s = fadd float %a, %b",
+                "%i = bitcast float %s to i32",
+                "%m = and i32 %i, 65535",
+                "store i32 %m, ptr addrspace(1) %p",
+                "ret void",
+            ],
+        ),
+        # An undefined scalar: the IR stores undef; the garbage SGPR was reallocated.
+        function(
+            "void @sgpr_undef(ptr addrspace(1) inreg %p)",
+            "sgpr_undef",
+            store("v_mov_b32_e32 v0, s41" if head else "v_mov_b32_e32 v0, s40"),
+            ["store i32 undef, ptr addrspace(1) %p", "ret void"],
+        ),
         # A real difference: add became sub.
         function(
             "void @real_bug(i32 %a, i32 %b, ptr addrspace(1) inreg %p)",
@@ -189,6 +213,8 @@ def main():
             "undef_elt": "pass",
             "half_ret": "pass",
             "nsw_add": "poison-only",
+            "fadd_bits": "pass",
+            "sgpr_undef": "pass",
             "real_bug": "mismatch",
         }
         for fn, v in want.items():
@@ -223,6 +249,8 @@ def main():
         )
         if drv.verdict(rows["fadd_ab"]) != "mismatch":
             failures.append("fadd_ab under --strict-nan should mismatch")
+        if drv.verdict(rows["fadd_bits"]) != "mismatch":
+            failures.append("fadd_bits under --strict-nan should mismatch")
         if drv.verdict(rows["nsw_add"]) != "mismatch":
             failures.append("nsw_add without triage should mismatch")
     if failures:

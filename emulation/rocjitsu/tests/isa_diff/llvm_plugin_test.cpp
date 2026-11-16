@@ -542,6 +542,7 @@ std::string fill(std::string text, const std::vector<std::pair<std::string, std:
 struct PairOptions {
   unsigned return_vgprs = 0;
   int entry_vgprs = -2; ///< -2: the loader's default.
+  int entry_sgprs = -2;
   std::vector<uint32_t> return_masks;
   bool strict_nan = false;
   uint32_t poison_filter = 0;
@@ -573,6 +574,8 @@ std::string verdict_of(const std::string &dir, const std::string &fn, const std:
     a[side].return_masks = o.return_masks;
     if (o.entry_vgprs != -2)
       a[side].entry_vgprs = o.entry_vgprs;
+    if (o.entry_sgprs != -2)
+      a[side].entry_sgprs = o.entry_sgprs;
   }
   std::string error;
   auto data = analyze_artifacts(a[0], a[1], {}, error);
@@ -765,6 +768,49 @@ TEST(IsaDiffLlvm, PoisonFilterExcludesInputsThatArePoisonInTheIR) {
   EXPECT_EQ(verdict_of(dir, "f", wrap, sat, nsw), "NO_MISMATCH_FOUND/ESTABLISHED");
   // The filter does not excuse a difference on ordinary inputs.
   EXPECT_EQ(verdict_of(dir, "f", wrap, store_fn({"v_sub_u32_e32 v0, v0, v1"}), nsw),
+            "LOCAL_MISMATCH/ESTABLISHED");
+  std::filesystem::remove_all(dir);
+}
+
+TEST(IsaDiffLlvm, NanBitsThroughIntegerOperationsAreDontCare) {
+  const std::string dir = temp_dir("nanint");
+  PairOptions o;
+  o.entry_vgprs = 2;
+  // fadd commutes; the NaN's low half then goes through an integer AND before the store.
+  // Old re-runs with alternative NaN choices show those bits depend on the NaN.
+  const std::string ab = store_fn({"v_add_f32_e32 v0, v0, v1", "v_and_b32_e32 v0, 0xffff, v0"});
+  const std::string ba = store_fn({"v_add_f32_e32 v0, v1, v0", "v_and_b32_e32 v0, 0xffff, v0"});
+  EXPECT_EQ(verdict_of(dir, "f", ab, ba, o), "NO_MISMATCH_FOUND/ESTABLISHED");
+  PairOptions strict = o;
+  strict.strict_nan = true;
+  EXPECT_EQ(verdict_of(dir, "f", ab, ba, strict), "LOCAL_MISMATCH/ESTABLISHED");
+  // A wrong mask is wrong for ordinary values too: still a mismatch.
+  EXPECT_EQ(verdict_of(dir, "f", ab,
+                       store_fn({"v_add_f32_e32 v0, v1, v0", "v_and_b32_e32 v0, 0xfffe, v0"}), o),
+            "LOCAL_MISMATCH/ESTABLISHED");
+  std::filesystem::remove_all(dir);
+}
+
+TEST(IsaDiffLlvm, UndefinedScalarsAreDontCare) {
+  const std::string dir = temp_dir("sgprundef");
+  PairOptions o;
+  o.entry_vgprs = 0;
+  // s40 and s41 are neither arguments (s0-s29 by default) nor callee-saved: undefined.
+  const std::string s40 = store_fn({"v_mov_b32_e32 v0, s40"});
+  const std::string s41 = store_fn({"v_mov_b32_e32 v0, s41"});
+  EXPECT_EQ(verdict_of(dir, "f", s40, s41, o), "NO_MISMATCH_FOUND/ESTABLISHED");
+  // With every SGPR defined, the reallocation is a difference.
+  PairOptions all = o;
+  all.entry_sgprs = 102;
+  EXPECT_EQ(verdict_of(dir, "f", s40, s41, all), "LOCAL_MISMATCH/ESTABLISHED");
+  // New reads garbage where old reads an argument: a real bug.
+  PairOptions four = o;
+  four.entry_sgprs = 4;
+  EXPECT_EQ(verdict_of(dir, "f", store_fn({"v_mov_b32_e32 v0, s2"}), s41, four),
+            "LOCAL_MISMATCH/ESTABLISHED");
+  // A callee-saved SGPR holds the caller's value: defined.
+  EXPECT_EQ(verdict_of(dir, "f", store_fn({"v_mov_b32_e32 v0, s34"}),
+                       store_fn({"v_mov_b32_e32 v0, s35"}), o),
             "LOCAL_MISMATCH/ESTABLISHED");
   std::filesystem::remove_all(dir);
 }

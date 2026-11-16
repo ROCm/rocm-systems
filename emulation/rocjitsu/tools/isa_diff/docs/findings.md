@@ -10,7 +10,7 @@ f58b06dce1f9`). Every number here comes from that build and toolchain.
 | label | what |
 |---|---|
 | **implemented** | See the next section for the full list. |
-| **tested** | 83 isa_diff tests pass in Release. They are 67 validator cases (`rj_isa_diff_tests`) covering every row of handoff section 13, every feature below, VALU support, memory, callable functions, inline asm, NaN equivalence and poison kinds; 14 LLVM plugin cases (`rj_isa_diff_llvm_tests`) on real ROCm-LLVM output; the schema/CLI test; and the `rj_isa_diff_pr` end-to-end test. All pass under ASan+UBSan+LSan with zero reports. Three real LLVM old/new pairs were run end to end, and the 55 functions of LLVM PR 242731's changed tests were run with before/after `llc` (see "VALU support and LLVM PR 242731" and "Memory in regions: PR 242731 re-evaluated"). The full tree was built and its full ctest run. |
+| **tested** | 85 isa_diff tests pass in Release. They are 67 validator cases (`rj_isa_diff_tests`) covering every row of handoff section 13, every feature below, VALU support, memory, callable functions, inline asm, NaN equivalence and poison kinds; 16 LLVM plugin cases (`rj_isa_diff_llvm_tests`) on real ROCm-LLVM output; the schema/CLI test; and the `rj_isa_diff_pr` end-to-end test. All pass under ASan+UBSan+LSan with zero reports. Three real LLVM old/new pairs were run end to end, and the 55 functions of LLVM PR 242731's changed tests were run with before/after `llc` (see "VALU support and LLVM PR 242731" and "Memory in regions: PR 242731 re-evaluated"). The full tree was built and its full ctest run. |
 | **not run** | SMT/SemaAST proofs (`proof_status` is always `NOT_RUN`). Reachability witnesses: the entry-prefix diagnostic path runs a prefix with arbitrary entry values, but no dispatch-ABI model exists. Learned input policies. Program (instruction) reduction of counterexamples. Multi-block, branching and loop regions (P1, designed in `p1_p2_design.md`). |
 | **unsupported** | Regions containing memory other than `global_load_*`/`global_store_*`/`s_load_dword*` (LDS, flat, buffer, scratch, atomics), MFMA, interpolation, indirect VGPR access, barriers, branches, hwreg access, indirect SGPR access, TTMP/FLAT_SCRATCH/XNACK operands, PC-derived inputs, or relocated bytes. Multi-block regions. Code objects with several `.text` sections or zero-size kernel symbols. |
 | **inconclusive** | Regions whose continuations read different locations (`INCONCLUSIVE_MAPPING`). Local mismatches that changed code downstream may compensate (`compensable_downstream`). Mismatches under an `UNRESOLVED` contract. Relocation-only differences. Zero-valid-case runs. No real pair or PR 242731 kernel is inconclusive any more. |
@@ -529,14 +529,59 @@ equivalence and poison triage did not trigger there.
 
 **Limits.**
 - NaN equivalence applies where both sides' values come straight from floating-point
-  instructions, through moves and stores. A NaN payload difference that flows through
-  integer operations before being observed is a mismatch: conservative.
-- Undefined values are VGPRs only (SGPR `IMPLICIT_DEF`s stay defined), and the mask is
-  sampled: three refills per case.
+  instructions, through moves and stores. NaN bits that flow through integer operations
+  are handled in the next phase (NaN choice).
+- Undefined values are VGPRs only here (scalars follow in the next phase), and the mask
+  is sampled: three refills per case.
 - The poison filter matches machine conditions, not IR values. An `nsw` filter excludes
   every overflowing 32-bit add in the region, which can remove far more inputs than the
   IR's poison does (2,031 of 2,224 in the probe). The driver therefore reports
   `poison-only` as its own verdict, never as a pass.
+
+## NaN bits through integer code, undefined scalars
+
+Two limits from the previous phase are closed (README "NaNs, undefined values and poison").
+
+- **NaN bits used as integers.** A NaN's unspecified bits that pass through integer
+  code (`bitcast` + `and`) before being observed were compared bit-exactly.
+  - Fix: the NaN's bits are treated like an undefined value. When old produces a NaN in
+    a case, it re-runs with every NaN a floating-point instruction produces replaced by
+    the canonical quiet NaN, all ones, then a random quiet NaN.
+  - Bits that change are don't care, and new re-runs with its own alternatives.
+- **Undefined scalars.** Only VGPRs had an undefined state.
+  - SGPRs above `--entry-sgprs` are now undefined until written, except a callable
+    function's callee-saved ones. VCC, M0 and SCC are always undefined at the entry.
+  - Kernels take the count from their descriptor.
+  - The driver takes it from the IR: `inreg` arguments, plus 16 for special inputs,
+    calls, stack use, or targets without architected flat scratch; 24 for kernels.
+
+| probe (void function storing v0) | before | now |
+|---|---|---|
+| commuted `v_add_f32`, then `v_and_b32 v0, 0xffff, v0` | LOCAL_MISMATCH | NO_MISMATCH_FOUND (1,132 pairs equal only through NaN rules); `--strict-nan`: LOCAL_MISMATCH |
+| the same with a wrong mask `0xfffe` on the new side | LOCAL_MISMATCH | LOCAL_MISMATCH (ordinary values differ) |
+| `v_mov_b32 v0, s40` vs `v_mov_b32 v0, s41` (an undefined SGPR reallocated) | LOCAL_MISMATCH | NO_MISMATCH_FOUND (2,341 masked); `--entry-sgprs 102`: LOCAL_MISMATCH |
+| new reads garbage s41 where old reads the argument s2 | LOCAL_MISMATCH | LOCAL_MISMATCH |
+| callee-saved s34 vs s35 | LOCAL_MISMATCH | LOCAL_MISMATCH (callee-saved registers are defined) |
+
+Re-run on the same changes, nothing changed:
+- PR 237629: 84 of 84 pass;
+- PR 242731: 6 of 6 pass;
+- the last 120 AMDGPU commits: 132 pass, 30 inconclusive. 24 valid pairs there are equal
+  only through the NaN rules, and 27 only through undefined-bit masking.
+
+`isa_diff_llvm.pr_driver` adds two functions:
+- `fadd_bits`: a commuted `fadd` whose bits are masked as an integer. Pass; mismatch under
+  `--strict-nan`.
+- `sgpr_undef`: `store i32 undef`, with the garbage SGPR reallocated. Pass.
+
+**Limits.**
+- The mask is sampled: three alternatives per case, joint for undefined registers and NaN
+  choices. A bit that varies only under other choices is still compared (conservative).
+- A bit that varies under some choice is accepted with any value, even one no choice
+  produces (permissive on those bits only).
+- When a region has both sources, a masked difference is credited to both counters. M0
+  counts as an undefined input of every global store, because the decoder reports it
+  as an implicit use.
 
 ## Cost
 

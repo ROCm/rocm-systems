@@ -55,8 +55,8 @@ rj_isa_diff analyze --old old.hsaco --new new.hsaco --kernel my_kernel --out cas
 #   [--cache-dir DIR]   reuse an identical earlier analysis
 #   [--old-kernel/--new-kernel NAME] when the symbol name differs
 #   callable functions: [--return-vgprs N] (0..32, default 32) [--function-mode HEX]
-#     [--return-masks M0,M1,...] (bits of each return VGPR)  [--entry-vgprs N] (defined
-#     argument VGPRs; others are undefined until written)
+#     [--return-masks M0,M1,...] (bits of each return VGPR)  [--entry-vgprs N]
+#     [--entry-sgprs N] (defined argument registers; others are undefined until written)
 #   .s/.ll inputs: [--llvm-bin DIR] [--llc-args S] [--old-llc-args S] [--new-llc-args S]
 
 # 1b. LLVM plugin: compile one .ll twice, with different llc options per side.
@@ -417,6 +417,11 @@ run.
     `[0xffffffff, 0xffff]`.
   - `--entry-vgprs` is the dwords of the non-`inreg` arguments (3 for kernels). Other
     VGPRs are undefined at the entry.
+  - `--entry-sgprs` is the dwords of the `inreg` arguments.
+    - Add 16 when the function may use special inputs or the private segment buffer
+      (s0-s15): special-input intrinsics, calls, `alloca`, or a target without
+      architected flat scratch.
+    - Kernels get 24 (at most 16 user + 5 system SGPRs).
   - `--function-mode` comes from the denormal attributes (`denormal_fpenv(...)`,
     `"denormal-fp-math"`, `"denormal-fp-math-f32"`) and `"amdgpu-ieee"`.
 - **Poison triage.** A function that mismatches is re-tested with the poison filters its
@@ -462,13 +467,27 @@ switch for the stricter reading.
       still a mismatch.
   - **Sweep.** The mandatory sweep adds pairs of different NaNs (quiet/signalling,
     signs, payloads, mixed f16/bf16 halves) so this is exercised every run.
-- **Undefined values** (LLVM undef; `analyze --entry-vgprs N`).
-  - **Defined at entry:** the argument VGPRs `v0..v{N-1}`. A callable function also has
-    v31 (workitem IDs) and the callee-saved VGPRs defined. Kernels default to v0-v2;
-    callable functions default to 32; raw words treat everything as defined.
-  - **Analysis.** A forward may-written analysis finds the VGPRs a region reads that no
-    path from the entry has written. Contract fields: `vgpr_undef_old`,
-    `vgpr_undef_new`.
+  - **NaN bits used as integers.** A NaN's unspecified bits may flow into integer code
+    (a bitcast and a mask) before they are observed.
+    - When old produced a NaN in a case, it re-runs with every NaN a floating-point
+      instruction produces replaced by an alternative: the canonical quiet NaN, then all
+      ones, then a random quiet NaN.
+    - Output bits that change depend on the NaN's choice and are don't care.
+    - New re-runs with its own alternative NaNs and must still match.
+    - Moves, `v_cndmask` and `v_pk_mov` copy a NaN unchanged: only producing
+      instructions choose.
+    - This uses the same mask and re-runs as undefined values.
+- **Undefined values** (LLVM undef; `analyze --entry-vgprs N --entry-sgprs N`).
+  - **Defined at entry:** the argument VGPRs `v0..v{N-1}` and SGPRs `s0..s{N-1}`, plus
+    EXEC.
+    - A callable function also has v31 (workitem IDs) and its callee-saved VGPRs and
+      SGPRs defined.
+    - VCC, M0 and SCC are undefined at every entry.
+    - Defaults: callable functions 32 VGPRs and 30 SGPRs; kernels v0-v2 and their
+      descriptor's user + system SGPR count; raw words treat everything as defined.
+  - **Analysis.** A forward may-written analysis finds the VGPRs and scalar locations a
+    region reads that no path from the entry has written. Contract fields:
+    `vgpr_undef_old`, `vgpr_undef_new`, `undef_old`, `undef_new`.
   - **Test.** In each case, old re-runs with its undefined registers refilled three
     times: all zeros, all ones, random.
     - Output bits that change are don't care for that case.

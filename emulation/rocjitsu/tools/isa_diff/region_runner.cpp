@@ -636,6 +636,7 @@ void RegionRunner::load(const MachineState &s) {
   asm_uses_.clear();
   vfp_.assign(size_t{vgpr_count_} * kWaveLanes, 0); // inputs carry no provenance
   poison_hit_.clear();
+  nan_produced_ = false;
 }
 
 MachineState RegionRunner::capture() const {
@@ -952,6 +953,79 @@ std::string RegionRunner::poison_before(size_t i) const {
       break;
   }
   return {};
+}
+
+void RegionRunner::choose_nans(size_t i, uint64_t exec) {
+  const FpPlan &p = fp_plan_[i];
+  switch (p.kind) {
+  case FpResult::None:
+  case FpResult::Move:
+  case FpResult::CndMask:
+  case FpResult::PkMov:
+    return; // not a floating-point operation: NaN bits pass through unchanged
+  default:
+    break;
+  }
+  const uint32_t vbase = wave_->vgpr_alloc().base;
+  for (size_t k = 0; k < p.dsts.size(); ++k) {
+    const unsigned d = p.dsts[k];
+    if (d >= vgpr_count_)
+      continue;
+    for (unsigned lane = 0; lane < kWaveLanes; ++lane) {
+      if (!((exec >> lane) & 1u))
+        continue;
+      const uint8_t t = vfp_[size_t{d} * kWaveLanes + lane];
+      const uint32_t w = read_vgpr(d, lane);
+      const uint64_t r = splitmix64(nan_seed_ ^ (uint64_t{i} << 20) ^ (uint64_t{d} << 8) ^ lane);
+      auto pick = [&](uint64_t canonical, uint64_t ones, uint64_t keep, uint64_t quiet) {
+        return nan_choice_ == 1 ? canonical : nan_choice_ == 2 ? ones : ((r & keep) | quiet);
+      };
+      if (t & kFpF32) {
+        if (!is_nan_f32(w))
+          continue;
+        nan_produced_ = true;
+        if (nan_choice_)
+          cu_->write_vgpr(
+              vbase + d, lane,
+              static_cast<uint32_t>(pick(0x7fc00000u, 0xffffffffu, 0x803fffffu, 0x7fc00000u)));
+      } else if ((t & kFpF64Lo) && d + 1 < vgpr_count_) {
+        const uint64_t v = uint64_t{w} | (uint64_t{read_vgpr(d + 1, lane)} << 32);
+        if (!is_nan_f64(v))
+          continue;
+        nan_produced_ = true;
+        if (nan_choice_) {
+          const uint64_t n = pick(0x7ff8000000000000ull, ~uint64_t{0}, 0x8007ffffffffffffull,
+                                  0x7ff8000000000000ull);
+          cu_->write_vgpr(vbase + d, lane, static_cast<uint32_t>(n));
+          cu_->write_vgpr(vbase + d + 1, lane, static_cast<uint32_t>(n >> 32));
+        }
+      } else {
+        uint32_t out = w;
+        bool any = false;
+        for (unsigned h = 0; h < 2; ++h) {
+          const uint32_t half = (w >> (16 * h)) & 0xffffu;
+          const bool f16 = t & (h ? kFpF16Hi : kFpF16Lo), bf16 = t & (h ? kFpBF16Hi : kFpBF16Lo);
+          if (!((f16 && is_nan_f16(half)) || (bf16 && is_nan_bf16(half))))
+            continue;
+          any = true;
+          const uint64_t rh = r >> (16 * h);
+          const uint32_t n =
+              f16 ? static_cast<uint32_t>(nan_choice_ == 1   ? 0x7e00u
+                                          : nan_choice_ == 2 ? 0xffffu
+                                                             : ((rh & 0x81ffu) | 0x7e00u))
+                  : static_cast<uint32_t>(nan_choice_ == 1   ? 0x7fc0u
+                                          : nan_choice_ == 2 ? 0xffffu
+                                                             : ((rh & 0x803fu) | 0x7fc0u));
+          out = (out & ~(0xffffu << (16 * h))) | (n << (16 * h));
+        }
+        if (!any)
+          continue;
+        nan_produced_ = true;
+        if (nan_choice_)
+          cu_->write_vgpr(vbase + d, lane, out);
+      }
+    }
+  }
 }
 
 std::string RegionRunner::poison_after(size_t i, uint64_t exec) const {
@@ -1301,6 +1375,7 @@ RunOutcome RegionRunner::run(size_t budget, std::vector<TraceStep> *trace) {
       return out;
     }
     apply_tags(i, exec_before, scratch_tags_);
+    choose_nans(i, exec_before);
     if (poison_filter_ && poison_hit_.empty())
       poison_hit_ = poison_after(i, exec_before);
     if (trace) {

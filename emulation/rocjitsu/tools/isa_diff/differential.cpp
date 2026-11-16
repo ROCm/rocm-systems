@@ -122,6 +122,8 @@ uint8_t memory_byte(const MachineState &s, uint64_t x) {
 /// there is a valid refinement.
 struct UndefMask {
   bool any = false;
+  bool from_undef = false; ///< Built from refills of undefined registers.
+  bool from_nan = false;   ///< Built from alternative NaN choices.
   std::array<uint32_t, kNumLocs> loc{};
   std::vector<uint32_t> vgpr; ///< Register-major lanes, as MachineState::vgpr.
   std::map<uint64_t, uint8_t> mem;
@@ -137,6 +139,12 @@ struct CompareStats {
   bool nan = false;   ///< A difference vanished through NaN equivalence.
   bool undef = false; ///< A difference vanished through undefined-bit masking.
 };
+
+/// A difference vanished under the mask: credit the mask's sources.
+void note_mask(const UndefMask &m, CompareStats &st) {
+  st.undef = st.undef || m.from_undef;
+  st.nan = st.nan || m.from_nan;
+}
 
 /// The stored floating-point unit containing byte @p x, if any.
 const FpUnit *fp_unit_at(const MachineState &s, uint64_t x) {
@@ -191,7 +199,7 @@ std::string asm_use_difference(const MachineState &a, const MachineState &b,
           (d & cfg.undef->asm_uses[i][k])) {
         d &= ~cfg.undef->asm_uses[i][k];
         if (!d) {
-          st.undef = true;
+          note_mask(*cfg.undef, st);
           continue;
         }
       }
@@ -259,7 +267,7 @@ std::string compare_pair(const RegionPair &region, const MachineState &init_old,
     if (!d)
       continue;
     if (undef && !(d & ~undef->loc[l])) {
-      st.undef = true;
+      note_mask(*undef, st);
       continue;
     }
     diff.set(l);
@@ -289,7 +297,7 @@ std::string compare_pair(const RegionPair &region, const MachineState &init_old,
       if (undef && r * kWaveLanes + lane < undef->vgpr.size()) {
         const uint32_t ud = d & ~undef->vgpr[size_t{r} * kWaveLanes + lane];
         if (!ud) {
-          st.undef = true;
+          note_mask(*undef, st);
           continue;
         }
         d = ud;
@@ -337,7 +345,7 @@ std::string compare_pair(const RegionPair &region, const MachineState &init_old,
     if (undef) {
       const auto it = undef->mem.find(x);
       if (it != undef->mem.end() && !(d & ~it->second)) {
-        st.undef = true;
+        note_mask(*undef, st);
         continue;
       }
     }
@@ -397,9 +405,14 @@ std::string compare_pair(const RegionPair &region, const MachineState &init_old,
 /// random one also exposes bits of derived values (x + 1, x & m, ...).
 constexpr unsigned kUndefAlternatives = 3;
 
-/// Refill @p regs (all lanes) with values of alternative @p alt (1-based).
-void refill_undef(MachineState &s, const VSet &regs, uint64_t seed, uint64_t case_index,
-                  unsigned alt, bool new_side) {
+/// Refill @p regs (all lanes) and @p locs with values of alternative @p alt (1-based).
+void refill_undef(MachineState &s, const VSet &regs, const LocSet &locs, uint64_t seed,
+                  uint64_t case_index, unsigned alt, bool new_side) {
+  for (unsigned l = 0; l < kNumLocs; ++l)
+    if (locs.test(l))
+      s.set(l, alt == 1   ? 0u
+               : alt == 2 ? 0xffffffffu
+                          : canary_value(seed ^ (0x756e646566ull * alt), case_index, l, new_side));
   for (unsigned r = 0; r < s.vgpr_count; ++r)
     if (regs.test(r))
       for (unsigned lane = 0; lane < kWaveLanes; ++lane)
@@ -442,53 +455,67 @@ void merge_undef(UndefMask &m, const MachineState &a, const MachineState &b) {
           });
 }
 
-/// Old's undefined-dependent bits for one case: old re-runs with its undefined registers
-/// refilled (kUndefAlternatives times); output bits that change are don't care.
+/// Old's don't-care bits for one case: old re-runs kUndefAlternatives times, with its
+/// undefined registers refilled and (when it produced a NaN, @p nan) every NaN a
+/// floating-point instruction produces replaced by an alternative one. Output bits that
+/// change depend on an undefined value or on a NaN's unspecified bits.
 UndefMask compute_undef_mask(const RegionPair &region, RegionRunner &old_runner,
                              const MachineState &init_old, const MachineState &final_old,
-                             uint64_t seed, uint64_t case_index) {
+                             uint64_t seed, uint64_t case_index, bool nan) {
   UndefMask m;
-  if (region.contract.vundef_old.none())
+  const RegionContract &k = region.contract;
+  const bool undef = k.vundef_old.any() || k.undef_old.any();
+  if (!undef && !nan)
     return m;
   for (unsigned alt = 1; alt <= kUndefAlternatives; ++alt) {
     MachineState s = init_old;
-    refill_undef(s, region.contract.vundef_old, seed, case_index, alt, false);
+    refill_undef(s, k.vundef_old, k.undef_old, seed, case_index, alt, false);
+    old_runner.set_nan_choice(nan ? alt : 0, splitmix64(seed ^ (case_index << 2) ^ alt));
     old_runner.load(s);
-    const RunOutcome o = old_runner.run(region.old_side.insts.size());
-    if (o.status != RunStatus::Ok)
-      continue;
-    merge_undef(m, final_old, old_runner.capture());
+    const bool ok = old_runner.run(region.old_side.insts.size()).status == RunStatus::Ok;
+    if (ok)
+      merge_undef(m, final_old, old_runner.capture());
   }
+  old_runner.set_nan_choice(0, 0);
+  m.from_undef = undef;
+  m.from_nan = nan;
   return m;
 }
 
-/// New must not depend on an undefined value where old does not: new re-runs with its own
-/// undefined registers refilled, and each run must still match old under the mask. On a
-/// mismatch, @p alt_init / @p alt_final hold the new side's run.
+/// New must not depend on an undefined value or a NaN's bits where old does not: new
+/// re-runs with its own undefined registers refilled and alternative NaNs (@p nan), and
+/// each run must still match old under the mask. On a mismatch, @p alt_init /
+/// @p alt_final hold the new side's run.
 std::string check_new_undef(const RegionPair &region, RegionRunner &new_runner,
                             const MachineState &init_old, const MachineState &init_new,
                             const MachineState &final_old, const CompareConfig &cfg, uint64_t seed,
-                            uint64_t case_index, Mismatch &m, MachineState &alt_init,
+                            uint64_t case_index, bool nan, Mismatch &m, MachineState &alt_init,
                             MachineState &alt_final) {
-  if (region.contract.vundef_new.none())
+  const RegionContract &k = region.contract;
+  if (k.vundef_new.none() && k.undef_new.none() && !nan)
     return {};
-  for (unsigned alt = 1; alt <= kUndefAlternatives; ++alt) {
+  std::string kind;
+  for (unsigned alt = 1; alt <= kUndefAlternatives && kind.empty(); ++alt) {
     MachineState s = init_new;
-    refill_undef(s, region.contract.vundef_new, seed, case_index, alt, true);
+    refill_undef(s, k.vundef_new, k.undef_new, seed, case_index, alt, true);
+    new_runner.set_nan_choice(nan ? alt : 0, splitmix64(seed ^ (case_index << 2) ^ alt ^ 0x6e6577));
     new_runner.load(s);
     if (new_runner.run(region.new_side.insts.size()).status != RunStatus::Ok)
       continue;
     MachineState f = new_runner.capture();
-    const std::string kind = compare_pair(region, init_old, s, final_old, f, m, cfg);
+    kind = compare_pair(region, init_old, s, final_old, f, m, cfg);
     if (!kind.empty()) {
-      m.detail = "new reads an undefined value (" + format_vgprs(region.contract.vundef_new) +
-                 "): " + m.detail;
+      m.detail = std::string("new depends on ") +
+                 (nan ? "a NaN's unspecified bits or an undefined value"
+                      : "an undefined value (" + format_vgprs(k.vundef_new) +
+                            (k.undef_new.any() ? " " + format_locs(k.undef_new) : "") + ")") +
+                 ": " + m.detail;
       alt_init = std::move(s);
       alt_final = std::move(f);
-      return kind;
     }
   }
-  return {};
+  new_runner.set_nan_choice(0, 0);
+  return kind;
 }
 
 // ---------------------------------------------------------------------------
@@ -576,7 +603,8 @@ Json reduce_mismatch(const RegionPair &region, RegionRunner &old_runner, RegionR
     if (!old_runner.poison_hit().empty() || !new_runner.poison_hit().empty())
       return false; // a poison input: excluded, never a reduction step
     const MachineState fa = old_runner.capture(), fb = new_runner.capture();
-    const UndefMask umask = compute_undef_mask(region, old_runner, a, fa, seed, m.case_index);
+    const UndefMask umask = compute_undef_mask(region, old_runner, a, fa, seed, m.case_index,
+                                               !m.strict_nan && old_runner.nan_produced());
     Mismatch t;
     const std::string kind =
         compare_pair(region, a, b, fa, fb, t, CompareConfig{m.strict_nan, &umask});
@@ -1365,15 +1393,17 @@ RegionResult test_region(const RegionPair &region, const TestOptions &options,
         ++r.boundary_families[family];
       const MachineState final_old = old_runner->capture();
       MachineState final_new = new_runner->capture();
-      const UndefMask umask =
-          compute_undef_mask(region, *old_runner, init_old, final_old, options.seed, case_index);
+      const bool nan_old = !options.strict_nan && old_runner->nan_produced();
+      const bool nan_new = !options.strict_nan && new_runner->nan_produced();
+      const UndefMask umask = compute_undef_mask(region, *old_runner, init_old, final_old,
+                                                 options.seed, case_index, nan_old);
       const CompareConfig cfg{options.strict_nan, &umask};
       CompareStats cst;
       kind = compare_pair(region, init_old, init_new, final_old, final_new, m, cfg, &cst);
       if (kind.empty()) {
         MachineState alt_init, alt_final;
         kind = check_new_undef(region, *new_runner, init_old, init_new, final_old, cfg,
-                               options.seed, case_index, m, alt_init, alt_final);
+                               options.seed, case_index, nan_new, m, alt_init, alt_final);
         if (!kind.empty()) {
           init_new = std::move(alt_init);
           final_new = std::move(alt_final);
@@ -1590,12 +1620,13 @@ ReplayOutcome replay_counterexample(const Json &bundle, std::string &error) {
     kind = "harness_exit";
   }
   const MachineState final_old = old_runner->capture(), final_new = new_runner->capture();
+  const bool nan_old = !strict_nan && old_runner->nan_produced();
   if (kind.empty() && oo.status == RunStatus::Ok && on.status == RunStatus::Ok) {
     // The same comparison as the test: NaN policy and the case's undef mask (old re-run
     // with its undefined registers refilled, derived from the recorded seed and case).
     const UndefMask umask =
         compute_undef_mask(*region, *old_runner, *init_old, final_old, bundle["seed"].as_uint(),
-                           bundle["case_index"].as_uint());
+                           bundle["case_index"].as_uint(), nan_old);
     kind = compare_pair(*region, *init_old, *init_new, final_old, final_new, m,
                         CompareConfig{strict_nan, &umask});
   }

@@ -40,7 +40,7 @@ const char *kUsage =
     "                       [--entry-map s4=s8,...] [--exit-map s4=s8,...]]\n"
     "                      [--diagnostic-entry-prefix] [--cache-dir DIR]\n"
     "                      [--return-vgprs N] [--return-masks M,...] [--function-mode HEX]\n"
-    "                      [--entry-vgprs N]  (callable functions: return and argument ABI)\n"
+    "                      [--entry-vgprs N] [--entry-sgprs N]  (entry and return ABI)\n"
     "      --manual-region: one hand-written region (instruction indices or 0x PCs, E\n"
     "      exclusive); --map: old=new register correspondence. Both stay ASSUMED.\n"
     "  rj_isa_diff test    --case DIR [--seed N] [--cases N] [--region ID]\n"
@@ -155,7 +155,7 @@ int exit_code_for(const Json &overall) {
 const std::vector<std::string> kPlanFlags = {
     "--context",       "--max-region",  "--max-expansions",  "--manual-region", "--map",
     "--entry-map",     "--exit-map",    "--max-analysis-ms", "--cache-dir",     "--return-vgprs",
-    "--function-mode", "--entry-vgprs", "--return-masks"};
+    "--function-mode", "--entry-vgprs", "--return-masks",    "--entry-sgprs"};
 const std::vector<std::string> kPlanSwitches = {"--no-merge", "--no-derive-constraints",
                                                 "--diagnostic-entry-prefix"};
 
@@ -266,8 +266,9 @@ int run_analyze(const std::string &old_path, const std::string &new_path, const 
     ret_masks.push_back(static_cast<uint32_t>(v));
   }
   const auto entry_vgprs = a.number("--entry-vgprs", 0);
-  if (!entry_vgprs || *entry_vgprs > 256) {
-    std::cerr << "--entry-vgprs takes 0..256\n";
+  const auto entry_sgprs = a.number("--entry-sgprs", 0);
+  if (!entry_vgprs || *entry_vgprs > 256 || !entry_sgprs || *entry_sgprs > kNumSgprs) {
+    std::cerr << "--entry-vgprs takes 0..256, --entry-sgprs 0..102\n";
     return kExitError;
   }
   for (Artifact *art : {&old_a, &new_a}) {
@@ -276,6 +277,8 @@ int run_analyze(const std::string &old_path, const std::string &new_path, const 
     art->return_masks = ret_masks;
     if (a.has("--entry-vgprs") && art->entry_vgprs >= 0)
       art->entry_vgprs = static_cast<int>(*entry_vgprs);
+    if (a.has("--entry-sgprs") && art->entry_sgprs >= 0)
+      art->entry_sgprs = static_cast<int>(*entry_sgprs);
   }
   bool cache_hit = false;
   auto data = analyze_cached(old_a, new_a, *plan, a.get("--cache-dir"), cache_hit, error);

@@ -164,6 +164,10 @@ Json RegionContract::to_json() const {
     j.set("memory_writes", true);
   if (inline_asm)
     j.set("inline_asm", true);
+  if (undef_old.any())
+    j.set("undef_old", format_locs(undef_old));
+  if (undef_new.any())
+    j.set("undef_new", format_locs(undef_new));
   if (downstream_memory_reads)
     j.set("downstream_memory_reads", true);
   j.set("mode_old", hex32(mode_old));
@@ -283,6 +287,15 @@ std::optional<RegionContract> RegionContract::from_json(const Json &j, std::stri
   c.memory_writes = j["memory_writes"].as_bool();
   c.downstream_memory_reads = j["downstream_memory_reads"].as_bool();
   c.inline_asm = j["inline_asm"].as_bool();
+  for (const auto &[key, out] :
+       {std::pair{"undef_old", &c.undef_old}, {"undef_new", &c.undef_new}}) {
+    auto parsed = parse_locs(j[key].as_string());
+    if (!parsed) {
+      error = std::string("bad location list in '") + key + "'";
+      return std::nullopt;
+    }
+    *out = *parsed;
+  }
   for (const char *key : {"mode_old", "mode_new"}) {
     if (!j.has(key))
       continue;

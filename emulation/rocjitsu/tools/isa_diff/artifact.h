@@ -87,6 +87,12 @@ struct Artifact {
   /// workitem IDs). Other VGPRs are undefined until written (LLVM undef). -1: all defined
   /// (raw words). Loaded callable functions default to 32, kernels to 3.
   int entry_vgprs = -1;
+  /// SGPRs s0..s{n-1} that hold defined values at the entry (a function's inreg arguments
+  /// and special inputs; a kernel's user and system SGPRs). Above them, VCC, M0 and SCC
+  /// are undefined until written; a callable function's callee-saved SGPRs and EXEC are
+  /// defined. -1: all defined (raw words). Functions default to 30, kernels to their
+  /// descriptor's user + system SGPR count.
+  int entry_sgprs = -1;
   /// Callable functions: bits of each return VGPR the caller observes (index = VGPR);
   /// missing entries are full. A half returned in v0 is {0x0000ffff}.
   std::vector<uint32_t> return_masks;

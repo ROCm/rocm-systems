@@ -303,6 +303,13 @@ Equivalent compiles that LLVM's semantics allow to differ were false mismatches.
 | H3 narrow returns | `--return-masks`; return-mask-aware VGPR liveness; `vgpr_exit_masks` | `NarrowReturnValuesCompareTheirBitsOnly` |
 | H4 poison | `--poison-filter` (nine machine analogues); driver maps IR constructs to filters and re-tests mismatches (`poison-only`) | `KindsParseAndMapToInstructions`, `PoisonFilterExcludesInputsThatArePoisonInTheIR`, `isa_diff_llvm.pr_driver`; validator `poison`, `poison_filtered` |
 
+## Phase I: NaN bits through integer code, undefined scalars (2026-11-16, seventh goal)
+
+| task | content | tests |
+|---|---|---|
+| I1 NaN choice | the runner replaces every NaN a floating-point instruction produces with an alternative (canonical, all ones, random quiet); when old produced a NaN, its re-runs give the don't-care mask; new re-runs with its own alternatives | `NanBitsThroughIntegerOperationsAreDontCare`, `isa_diff_llvm.pr_driver` (`fadd_bits`) |
+| I2 undefined scalars | `--entry-sgprs` (kernels from the descriptor); SGPRs above it but callee-saved, VCC, M0, SCC undefined; scalar may-written analysis; `undef_old/new`; refills cover them; the driver derives the count from the IR | `UndefinedScalarsAreDontCare`, `isa_diff_llvm.pr_driver` (`sgpr_undef`) |
+
 ## Not in P0 (design retained)
 P1 (scalar branches, multi-exit regions, loops, reachability witnesses, SemaAST/SMT proof) and
 the rest of P2 (MFMA, LDS/flat/buffer/scratch/atomic memory, completion-order modelling,

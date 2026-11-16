@@ -402,6 +402,36 @@ def argument_vgprs(define):
     return min(total, 32)
 
 
+SPECIAL_INPUT = re.compile(
+    r"@llvm\.amdgcn\.(dispatch\.ptr|queue\.ptr|implicitarg\.ptr|kernarg\.segment\.ptr|"
+    r"dispatch\.id|workgroup\.id|lds\.kernel\.id)|\bcall\b(?![^\n]*(@llvm\.|\basm\b))|"
+    r"\balloca\b"
+)
+FLAT_SCRATCH_TARGETS = ("gfx940", "gfx941", "gfx942", "gfx950")
+
+
+def argument_sgprs(define, body, target):
+    """SGPRs defined at a function's entry: its inreg arguments, after the special inputs
+    and the private segment buffer (s0-s15) when it may use them: special-input
+    intrinsics, calls, stack objects, or a target without architected flat scratch. None
+    if an argument type is not sized."""
+    m = re.search(r"@[^(]+\((.*)\)[^)]*$", define)
+    if not m:
+        return None
+    total = 0
+    for arg in split_top(m.group(1)):
+        if not arg or not re.search(r"\binreg\b", arg):
+            continue
+        t = ARG_ATTR.sub("", arg.replace("inreg", ""))
+        t = re.sub(r"\s+%[\w.$-]+$", "", t).strip()
+        n = type_dwords(t)
+        if n is None:
+            return None
+        total += n
+    special = SPECIAL_INPUT.search(body) or target not in FLAT_SCRATCH_TARGETS
+    return min(total + (16 if special else 0), 30)
+
+
 def return_masks(define, ret):
     """Observed bits of each return VGPR when the return type is narrower than its
     registers (no zeroext/signext): [] when every bit is defined."""
@@ -668,6 +698,8 @@ def collect(repo, base, head, tests_glob, targets):
                 # Defined VGPRs at the entry: kernels v0-v2 (workitem IDs), functions
                 # their VGPR arguments; the rest is undefined until written.
                 ev = 3 if kernel else argument_vgprs(define)
+                # Kernels: user (at most 16) and system (at most 5) SGPRs.
+                es = 24 if kernel else argument_sgprs(define, new_fns[fn][1], target)
                 if ev is None:
                     notes.append("argument types not sized: v0-v31 treated as defined")
                 jobs.append(
@@ -678,6 +710,7 @@ def collect(repo, base, head, tests_glob, targets):
                         "return_vgprs": rv,
                         "return_masks": masks,
                         "entry_vgprs": ev,
+                        "entry_sgprs": es,
                         "poison_kinds": poison_kinds(new, fn),
                         "mode": function_mode(define, attribute_groups(new)),
                         "notes": notes,
@@ -733,6 +766,8 @@ def run_one(job, out, tool, llvm_bin, cases, seed, strict_nan=False, triage=True
         "--function-mode",
         hex(job["mode"]),
     ]
+    if job.get("entry_sgprs") is not None:
+        argv += ["--entry-sgprs", str(job["entry_sgprs"])]
     if job.get("entry_vgprs") is not None:
         argv += ["--entry-vgprs", str(job["entry_vgprs"])]
     if job.get("return_masks"):

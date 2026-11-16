@@ -441,12 +441,27 @@ VSet KernelModel::vundef_before(size_t i) const {
   return i < vwritten_before_.size() ? entry_vundef_ & ~vwritten_before_[i] : VSet{};
 }
 
+LocSet KernelModel::undef_before(size_t i) const {
+  return i < written_before_.size() ? entry_undef_ & ~written_before_[i] : LocSet{};
+}
+
 void KernelModel::compute_undefined() {
   // VGPRs defined at the entry: the argument VGPRs, and for a callable function the
   // workitem IDs (v31) and the callee-saved VGPRs (the caller's values). The rest hold
   // whatever the caller or the previous wave left: LLVM undef until written.
   if (artifact_.entry_vgprs < 0 || !cfg_complete_)
     return; // all defined (raw words), or edges the analysis cannot see
+  // Scalars: s{entry_sgprs}.. (but a callable function's callee-saved SGPRs), VCC, M0, SCC.
+  if (artifact_.entry_sgprs >= 0) {
+    LocSet sdef;
+    for (int l = 0; l < artifact_.entry_sgprs && l < static_cast<int>(kNumSgprs); ++l)
+      sdef.set(static_cast<size_t>(l));
+    if (artifact_.callable)
+      sdef |= return_observable_locs(); // callee-saved SGPRs and EXEC
+    sdef.set(kLocExecLo);
+    sdef.set(kLocExecHi);
+    entry_undef_ = ~sdef;
+  }
   VSet defined;
   for (int r = 0; r < artifact_.entry_vgprs && r < static_cast<int>(kNumVgprs); ++r)
     defined.set(static_cast<size_t>(r));
@@ -488,6 +503,35 @@ void KernelModel::compute_undefined() {
       if (insts_[i].fx.unknown_effect)
         w.set();
       w |= insts_[i].fx.vwrites;
+    }
+  }
+  // The same forward may-written analysis over scalar locations.
+  std::vector<LocSet> sin(nb), sout(nb);
+  auto sblock_writes = [&](uint32_t b, LocSet w) {
+    for (size_t i = blocks_[b].first; i < blocks_[b].end; ++i)
+      w |= insts_[i].fx.unknown_effect ? all_locs() : insts_[i].fx.writes;
+    return w;
+  };
+  for (bool changed = true; changed;) {
+    changed = false;
+    for (uint32_t b = 0; b < nb; ++b) {
+      LocSet i;
+      for (uint32_t p : blocks_[b].predecessors)
+        i |= sout[p];
+      const LocSet o = sblock_writes(b, i);
+      if (i != sin[b] || o != sout[b]) {
+        sin[b] = i;
+        sout[b] = o;
+        changed = true;
+      }
+    }
+  }
+  written_before_.assign(insts_.size(), LocSet{});
+  for (uint32_t b = 0; b < nb; ++b) {
+    LocSet w = sin[b];
+    for (size_t i = blocks_[b].first; i < blocks_[b].end; ++i) {
+      written_before_[i] = w;
+      w |= insts_[i].fx.unknown_effect ? all_locs() : insts_[i].fx.writes;
     }
   }
 }

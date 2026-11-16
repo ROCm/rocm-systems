@@ -287,6 +287,12 @@ RegionPair build_region(const KernelModel &om, const KernelModel &nm, const Cand
     return o;
   };
   k.entry_equal = entry_live(om, c.o) | to_old(entry_live(nm, c.n), inv_in);
+  // Undefined scalar inputs (LLVM undef): live-ins written on no path from the entry and
+  // not defined there. Not with a register map (the sides name different locations).
+  if (!mapped) {
+    k.undef_old = entry_live(om, c.o) & om.undef_before(anchor_index(c.o));
+    k.undef_new = entry_live(nm, c.n) & nm.undef_before(anchor_index(c.n));
+  }
   k.canary = ~k.entry_equal;
   const LocSet out_old = exit_live(om, c.o);
   const LocSet out_new = to_old(exit_live(nm, c.n), inv_out);

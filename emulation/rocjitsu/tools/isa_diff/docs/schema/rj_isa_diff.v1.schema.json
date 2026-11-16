@@ -268,6 +268,12 @@
           "minimum": -1,
           "maximum": 256,
           "description": "VGPRs v0..v{n-1} defined at the entry (arguments, workitem IDs); others are undefined until written. -1: all defined."
+        },
+        "entry_sgprs": {
+          "type": "integer",
+          "minimum": -1,
+          "maximum": 102,
+          "description": "SGPRs s0..s{n-1} defined at the entry; above them (except a callable function's callee-saved SGPRs), VCC, M0 and SCC are undefined until written. -1: all defined."
         }
       },
       "additionalProperties": false
@@ -739,6 +745,14 @@
           "additionalProperties": {
             "$ref": "#/$defs/hex32"
           }
+        },
+        "undef_old": {
+          "type": "string",
+          "description": "Live-in scalar locations undefined on the old side (never written since the entry, not defined there)."
+        },
+        "undef_new": {
+          "type": "string",
+          "description": "Live-in scalar locations undefined on the new side (never written since the entry, not defined there)."
         }
       },
       "additionalProperties": false,

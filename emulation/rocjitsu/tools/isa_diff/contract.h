@@ -71,6 +71,8 @@ struct RegionContract {
   /// entry, not ABI-defined): LLVM undef. Old's outputs that depend on them are don't care,
   /// and new may not depend on its own beyond that (README "Undefined values").
   VSet vundef_old, vundef_new;
+  /// The same for scalar locations (SGPRs, VCC, M0, SCC).
+  LocSet undef_old, undef_new;
   /// VGPRs observable only through a return value narrower than the register: just these
   /// bits are compared (e.g. 0x0000ffff for a half returned in v0).
   std::vector<std::pair<unsigned, uint32_t>> vexit_masks;

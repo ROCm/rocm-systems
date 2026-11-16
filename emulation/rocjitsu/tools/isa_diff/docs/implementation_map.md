@@ -143,4 +143,5 @@ and `ScalarSccTest.*:*Sop*:*Scalar*` passes 1162/1162 on the base.
 | one command for an LLVM change (Phase G) | `llvm/rj_isa_diff_pr.py` (copied to the build tree as `rj_isa_diff_pr`) |
 | NaN equivalence (Phase H) | `effects.cpp` (`fp_result_kind`, `fp_source_kind`, `nan_residual`), `region_runner.cpp` (`plan_tags`, `apply_tags`, memory-model `record_fp_units`), `differential.cpp` (`compare_pair`, `nan_unit_equal`) |
 | undefined values and narrow returns (Phase H) | `kernel_model.cpp` (`compute_undefined`, `vundef_before`, `vgpr_liveness`), `region_planner.cpp` (`vundef_old/new`, `vexit_masks`), `differential.cpp` (`compute_undef_mask`, `check_new_undef`) |
+| NaN choice and undefined scalars (Phase I) | `region_runner.cpp` (`choose_nans`, `set_nan_choice`), `kernel_model.cpp` (`undef_before`, scalar may-written analysis), `differential.cpp` (`compute_undef_mask`, `check_new_undef`, `note_mask`), `llvm/rj_isa_diff_pr.py` (`argument_sgprs`) |
 | poison filter (Phase H) | `effects.cpp` (`poison_check_kind`, `parse_poison_kinds`), `region_runner.cpp` (`poison_before`, `poison_after`), `llvm/rj_isa_diff_pr.py` (`poison_kinds`, `poison_triage`) |

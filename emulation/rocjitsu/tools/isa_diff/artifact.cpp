@@ -413,6 +413,20 @@ bool artifact_from_code_object(std::span<const uint8_t> image, const std::string
   out.kernel_name = name;
   out.callable = chosen == nullptr;
   out.entry_vgprs = out.callable ? 32 : 3; // argument VGPRs v0-v31 / workitem IDs v0-v2
+  out.entry_sgprs = 30;                    // inreg arguments and special inputs: s0-s29
+  if (chosen) {
+    // A kernel: the user SGPRs, then the enabled system SGPRs (workgroup IDs, workgroup
+    // info, private segment wave offset).
+    using namespace amdhsa;
+    const uint32_t r2 = chosen->descriptor.compute_pgm_rsrc2;
+    out.entry_sgprs =
+        static_cast<int>(RJ_AMDHSA_BITS_GET(r2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT) +
+                         RJ_AMDHSA_BITS_GET(r2, COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X) +
+                         RJ_AMDHSA_BITS_GET(r2, COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Y) +
+                         RJ_AMDHSA_BITS_GET(r2, COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Z) +
+                         RJ_AMDHSA_BITS_GET(r2, COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_INFO) +
+                         RJ_AMDHSA_BITS_GET(r2, COMPUTE_PGM_RSRC2_ENABLE_PRIVATE_SEGMENT));
+  }
   if (chosen) {
     out.descriptor.resize(sizeof(chosen->descriptor));
     std::memcpy(out.descriptor.data(), &chosen->descriptor, sizeof(chosen->descriptor));

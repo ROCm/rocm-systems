@@ -122,6 +122,16 @@ public:
   /// Poison filter (PoisonKind mask): instructions are checked for the machine analogues of
   /// IR poison conditions before (inputs) and after (floating-point results) they execute.
   void set_poison_filter(uint32_t kinds) { poison_filter_ = kinds; }
+  /// NaN choice: LLVM leaves the bits of a NaN that a floating-point operation produces
+  /// unspecified. Alternative @p alt (1 canonical quiet NaN, 2 all ones, 3 random quiet
+  /// NaN from @p seed) replaces every NaN a floating-point instruction produces; 0 keeps
+  /// the hardware's. Outputs that change with the choice depend on it (don't care).
+  void set_nan_choice(unsigned alt, uint64_t seed) {
+    nan_choice_ = alt;
+    nan_seed_ = seed;
+  }
+  /// The last run produced a NaN from a floating-point instruction (in some active lane).
+  [[nodiscard]] bool nan_produced() const { return nan_produced_; }
   /// The first poison condition the last run met, or empty.
   [[nodiscard]] const std::string &poison_hit() const { return poison_hit_; }
 
@@ -185,6 +195,11 @@ private:
   std::vector<std::string> mnemonics_;
   std::vector<uint8_t> vfp_; ///< FpTag per VGPR lane during a run.
   uint32_t poison_filter_ = 0;
+  unsigned nan_choice_ = 0;
+  uint64_t nan_seed_ = 0;
+  bool nan_produced_ = false;
+  /// Note NaN results of instruction @p i (lanes in @p exec) and apply the NaN choice.
+  void choose_nans(size_t i, uint64_t exec);
   std::string poison_hit_;
   [[nodiscard]] uint32_t read_loc(unsigned l) const;
   [[nodiscard]] uint32_t read_vgpr(unsigned r, unsigned lane) const;

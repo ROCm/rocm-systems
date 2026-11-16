@@ -129,6 +129,9 @@ public:
   /// the entry (Artifact::entry_vgprs, plus v31 and the callee-saved VGPRs of a callable
   /// function) and written on no path from the entry. Empty when everything is defined.
   [[nodiscard]] VSet vundef_before(size_t i) const;
+  /// The same for scalar locations: SGPRs from Artifact::entry_sgprs on (except a callable
+  /// function's callee-saved ones), VCC, M0 and SCC. EXEC is always defined.
+  [[nodiscard]] LocSet undef_before(size_t i) const;
   /// VGPRs that may hold a PC-derived value immediately before instruction @p i.
   [[nodiscard]] const VSet &pc_vtainted_before(size_t i) const { return vtaint_before_[i]; }
   /// Locations that may hold a PC-derived value immediately before instruction @p i.
@@ -175,6 +178,8 @@ private:
   std::vector<VSet> vlive_after_strict_;
   std::vector<VSet> vwritten_before_;
   VSet entry_vundef_;
+  std::vector<LocSet> written_before_;
+  LocSet entry_undef_;
   std::vector<VSet> vtaint_before_;
   std::vector<LocSet> taint_before_;
   std::vector<PendingState> pending_before_;

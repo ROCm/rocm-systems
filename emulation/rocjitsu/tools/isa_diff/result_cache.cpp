@@ -113,6 +113,7 @@ std::string analysis_cache_key(const Artifact &old_artifact, const Artifact &new
     aj.set("return_vgprs", static_cast<uint64_t>(a->return_vgprs));
     aj.set("function_mode", static_cast<uint64_t>(a->function_mode));
     aj.set("entry_vgprs", static_cast<int64_t>(a->entry_vgprs));
+    aj.set("entry_sgprs", static_cast<int64_t>(a->entry_sgprs));
     Json masks = Json::array();
     for (uint32_t m : a->return_masks)
       masks.push(static_cast<uint64_t>(m));
