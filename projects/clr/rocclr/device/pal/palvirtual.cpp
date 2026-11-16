@@ -2402,7 +2402,7 @@ void VirtualGPU::submitStreamOperation(amd::StreamOperationCommand& cmd) {
       LogError("submitStreamOperation: Wait failed!");
     }
   } else if (type == ROCCLR_COMMAND_STREAM_WRITE_VALUE) {
-    bool result;
+    bool result = false;
     switch (flags) {
       case ROCCLR_STREAM_WRITE_VALUE_DEFAULT: {
         result = blitMgr().streamOpsWrite(*memory, value, offset, sizeBytes);

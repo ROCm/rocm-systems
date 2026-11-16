@@ -114,8 +114,9 @@ bool glCanInterop(Device* device, void* GLplatformContext, void* GLdeviceContext
   if (wglGetContextGPUInfoAMD(hRC, &glAdapterLuid, &glChainBitMask)) {
     // match the adapter
     canInteroperate = device->info().luidLowPart_ == glAdapterLuid.LowPart &&
-                      device->info().luidHighPart_ == glAdapterLuid.HighPart &&
-                      (((1 << device->index()) & glChainBitMask) != 0);
+                      device->info().luidHighPart_ ==
+                          static_cast<uint32_t>(glAdapterLuid.HighPart) &&
+                      (((1u << device->index()) & glChainBitMask) != 0);
   }
 
   return canInteroperate;

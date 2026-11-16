@@ -379,8 +379,8 @@ bool Program::compileAndLinkExecutable(const amd_comgr_data_set_t inputs,
                                        size_t* executableSize, file_type_t continueCompileFrom) {
   // create the linked output
   amd_comgr_action_info_t action;
-  amd_comgr_data_set_t output;
-  amd_comgr_data_set_t relocatableData;
+  amd_comgr_data_set_t output{};
+  amd_comgr_data_set_t relocatableData{};
   bool hasAction = false;
   bool hasOutput = false;
   bool hasRelocatableData = false;
@@ -809,7 +809,7 @@ bool Program::linkImpl(amd::option::Options* options) {
     amd_comgr_status_t status = addCodeObjData(llvmBinary_.data(), llvmBinary_.size(),
                                                AMD_COMGR_DATA_KIND_BC, "LLVM Binary", &inputs);
 
-    amd_comgr_data_set_t linked_bc;
+    amd_comgr_data_set_t linked_bc{};
     bool hasLinkedBC = false;
 
     if (status == AMD_COMGR_STATUS_SUCCESS) {
@@ -1895,7 +1895,7 @@ bool Program::createKernelMetadataMap(void* binary, size_t binSize) {
   }
 
   for (size_t i = 0; i < size && status == AMD_COMGR_STATUS_SUCCESS; i++) {
-    amd_comgr_metadata_node_t nameMeta;
+    amd_comgr_metadata_node_t nameMeta{};
     bool hasNameMeta = false;
     bool hasKernelNode = false;
 

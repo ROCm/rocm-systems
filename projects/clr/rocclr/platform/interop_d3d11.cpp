@@ -400,7 +400,7 @@ bool D3D11Object::copySharedToOrig() {
   return true;
 }
 
-std::vector<std::pair<void*, std::pair<UINT, UINT>>> D3D11Object::resources_;
+std::vector<std::pair<void*, std::pair<UINT, INT>>> D3D11Object::resources_;
 Monitor D3D11Object::resLock_;
 
 //

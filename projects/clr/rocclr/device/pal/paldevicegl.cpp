@@ -769,7 +769,7 @@ bool Device::glCanInterop(void* GLplatformContext, void* GLdeviceContext) const 
     // match the adapter
     canInteroperate = (properties().osProperties.luidHighPart == glAdapterLuid.HighPart) &&
                       (properties().osProperties.luidLowPart == glAdapterLuid.LowPart) &&
-                      ((1 << properties().gpuIndex) == glChainBitMask);
+                      ((1u << properties().gpuIndex) == glChainBitMask);
   }
 #else
   GLuint glDeviceId = 0;

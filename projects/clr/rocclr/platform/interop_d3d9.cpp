@@ -19,7 +19,7 @@ std::vector<std::pair<TD3D9RESINFO, TD3D9RESINFO>> D3D9Object::resources_;
 Monitor D3D9Object::resLock_;
 
 size_t D3D9Object::getElementBytes(D3DFORMAT d3d9Format, cl_uint plane) {
-  size_t bytesPerPixel;
+  size_t bytesPerPixel = 0;
 
   switch (d3d9Format) {
     case D3DFMT_UNKNOWN:
