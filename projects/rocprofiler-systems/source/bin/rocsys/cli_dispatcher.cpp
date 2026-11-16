@@ -9,8 +9,10 @@
 #include <algorithm>
 #include <cstddef>
 #include <ostream>
+#include <span>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace rocprofsys::cli
@@ -64,24 +66,55 @@ payload_index(bool strip_subcommand) noexcept
 }
 
 [[nodiscard]] bool
-is_help_flag(std::string_view token) noexcept
+is_bare_help_flag(std::string_view token) noexcept
 {
-    return token == k_help_short || token == k_help_alt_short || token == k_help_long ||
-           token.starts_with(k_help_long_eq);
+    return token == k_help_short || token == k_help_alt_short || token == k_help_long;
 }
 
-[[nodiscard]] dispatch_kind
-tool_kind(const subcommand_spec& spec) noexcept
+[[nodiscard]] bool
+is_help_flag(std::string_view token) noexcept
 {
-    return spec.mode.has_value() ? dispatch_kind::in_process : dispatch_kind::exec_tool;
+    return is_bare_help_flag(token) || token.starts_with(k_help_long_eq);
+}
+
+/// The topic of "--help=<topic>", or nothing for a bare help flag.
+[[nodiscard]] std::string_view
+help_topic(std::string_view token) noexcept
+{
+    return token.starts_with(k_help_long_eq) ? token.substr(k_help_long_eq.size())
+                                             : std::string_view{};
+}
+
+/// How to see the rocsys options in full.
+[[nodiscard]] std::string
+details_hint(std::string_view program)
+{
+    return fmt::format(
+        "Use '{0} <option> --help' for one rocsys option in full, such as\n"
+        "'{0} traces --help', '{0} --help=<category>' for one category,\n"
+        "and '{0} --help=all' for every option.\n",
+        program);
+}
+
+// "--help=<topic>" is the tool's topic help, so only the bare help flags match.
+[[nodiscard]] bool
+asks_for_help(int argc, char** argv, int start)
+{
+    const auto args = std::span{ argv, static_cast<std::size_t>(argc) }.subspan(
+        static_cast<std::size_t>(std::min(start, argc)));
+    const auto as_text   = [](const char* arg) { return std::string_view{ arg }; };
+    const auto separator = std::ranges::find(args, std::string_view{ "--" }, as_text);
+    return std::ranges::any_of(args.begin(), separator, is_bare_help_flag, as_text);
 }
 
 [[nodiscard]] dispatch_result
-make_tool_result(const subcommand_spec* spec, bool strip_subcommand) noexcept
+make_tool_result(const subcommand_spec* spec, bool strip_subcommand, int argc,
+                 char** argv)
 {
-    return { .kind             = tool_kind(*spec),
-             .spec             = spec,
-             .strip_subcommand = strip_subcommand };
+    const auto kind = asks_for_help(argc, argv, payload_index(strip_subcommand))
+                          ? dispatch_kind::show_subcommand_help
+                          : dispatch_kind::run_subcommand;
+    return { .kind = kind, .spec = spec, .strip_subcommand = strip_subcommand };
 }
 
 // Scan the tool's own options (tokens after argv0 / the verb, before "--").
@@ -114,12 +147,16 @@ option_present_before_separator(int argc, char** argv, int start, std::string_vi
 dispatch_result
 parse_dispatch(int argc, char** argv, std::string_view program)
 {
-    if(argc <= 1 || is_help_flag(argv[1]))
+    if(argc <= 1)
     {
         return { .kind = dispatch_kind::show_help };
     }
 
     const auto first = std::string_view{ argv[1] };
+    if(is_help_flag(first))
+    {
+        return { .kind = dispatch_kind::show_help, .topic = help_topic(first) };
+    }
     if(first == k_version_long)
     {
         return { .kind = dispatch_kind::show_version };
@@ -135,19 +172,36 @@ parse_dispatch(int argc, char** argv, std::string_view program)
                      .error_message = fmt::format(
                          "error: missing application argument\n{}", help_hint(program)) };
         }
-        return make_tool_result(found, true);
+        // A plain word right after the verb is an application given without "--".
+        // Refuse it before routing help: rocsys would otherwise read its options, and
+        // --help, from the application's arguments.
+        if(found->requires_app && !std::string_view{ argv[2] }.starts_with('-'))
+        {
+            return { .kind          = dispatch_kind::error,
+                     .error_message = fmt::format(
+                         "error: put '--' before the application: {} {} [options] -- {} "
+                         "[app-args]\n{}",
+                         program, found->name, argv[2], help_hint(program)) };
+        }
+        return make_tool_result(found, true, argc, argv);
     }
 
     if(!first.starts_with('-'))
     {
-        return { .kind          = dispatch_kind::error,
-                 .error_message = fmt::format("error: unknown subcommand '{}'\n{}", first,
-                                              help_hint(program)) };
+        auto message =
+            fmt::format("error: unknown subcommand '{}'\n{}", first, help_hint(program));
+        if(asks_for_help(argc, argv, payload_index(true)))
+        {
+            return { .kind          = dispatch_kind::show_option_help,
+                     .topic         = first,
+                     .error_message = std::move(message) };
+        }
+        return { .kind = dispatch_kind::error, .error_message = std::move(message) };
     }
 
     // Implicit default: first token is a flag or "--". Keep it in the forwarded argv.
     const auto* chosen = &k_subcommands.front();
-    return make_tool_result(chosen, false);
+    return make_tool_result(chosen, false, argc, argv);
 }
 
 std::vector<std::string>
@@ -176,7 +230,7 @@ make_forwarded_argv(int argc, char** argv, forward_options options)
 }
 
 void
-print_help(std::ostream& out, std::string_view program)
+print_help(std::ostream& out, std::string_view program, std::string_view options_text)
 {
     constexpr auto k_name_column = subcommand_name_column();
     std::string    subcommands;
@@ -196,18 +250,43 @@ Commands and workflows are subject to change.
 
 Subcommands:
 {subcommands}
-Examples:
+rocsys options:
+{options}Examples:
   {program} -- ./app
   {program} profile -- ./app
+  {program} --traces hip mpi -- ./app
   {program} instrument -- ./app
   {program} rewrite -- ./app
 
 Use '{program} <subcommand> --help' for subcommand-specific options.
-
+{details}
 Documentation: {docs}
 )",
         fmt::arg("usage", make_usage(program)), fmt::arg("subcommands", subcommands),
+        fmt::arg("options", options_text), fmt::arg("details", details_hint(program)),
         fmt::arg("program", program), fmt::arg("docs", k_docs_url));
+}
+
+void
+print_subcommand_help(std::ostream& out, std::string_view program,
+                      const subcommand_spec& spec, std::string_view options_text)
+{
+    out << fmt::format(
+        R"(Usage:
+  {program} {name} [options]
+
+{description}. Runs {runs}.
+
+{options}{tool}
+  Every other option is passed to {tool} unchanged.
+  Run '{tool} --help' to list them.
+)",
+        fmt::arg("program", program), fmt::arg("name", spec.name),
+        fmt::arg("description", spec.description),
+        fmt::arg("runs", spec.runs.empty() ? spec.binary_name : spec.runs),
+        fmt::arg("tool", spec.binary_name),
+        fmt::arg("options",
+                 spec.lists_rocsys_options ? options_text : std::string_view{}));
 }
 
 }  // namespace rocprofsys::cli

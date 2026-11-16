@@ -11,8 +11,9 @@ Using the rocsys command (experimental)
 The ``rocsys`` command is a new unified command-line entry point for profiling.
 Running ``rocsys -- ./app`` or ``rocsys profile -- ./app`` produces a full trace
 profile, and ``rocsys rewrite`` runs ``rocprof-sys-instrument`` in binary-rewrite
-mode (``-o``). A ``rocsys`` subcommand selects the tool, and any arguments after the subcommand are
-forwarded to the selected tool.
+mode (``-o``). A ``rocsys`` subcommand selects the tool. ``rocsys`` reads its own
+options, described in :ref:`rocsys-options`, and forwards every other argument after the
+subcommand, unchanged and in order, to the selected tool.
 
 Usage
 =====
@@ -33,6 +34,9 @@ a profile records a rocpd trace of the default ROCm domains and default GPU
 telemetry. You can change the data that is collected by using ``--preset`` or
 domain flags, as described in :doc:`using-preset-profiles`.
 
+The application and its arguments always follow ``--``. ``rocsys`` reports an error
+for an application given without it, such as ``rocsys python ./script.py``.
+
 ``rocsys`` with no arguments prints the top-level help. ``rocsys --version``
 prints the version. Print the top-level help, or run a profile with a preset:
 
@@ -40,6 +44,55 @@ prints the version. Print the top-level help, or run a profile with a preset:
 
    rocsys --help
    rocsys --preset=balanced -- ./app
+
+.. _rocsys-options:
+
+rocsys options
+==============
+
+``rocsys`` has three options of its own. They apply to every subcommand and can appear
+anywhere between the subcommand and ``--``.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 24 76
+
+   * - Option
+     - Effect
+   * - ``--traces <names>``
+     - Selects what is traced: the ROCm APIs ``hip-api`` (or ``hip``), ``hsa-api``
+       (or ``hsa``), ``roctx``, ``kernel-dispatch``, ``memory-copy``,
+       ``memory-allocation``, and ``rocshmem``, and the runtimes ``mpi``, ``openmp``,
+       ``rccl``, ``ucx``, and ``openshmem``.
+   * - ``--output-path <dir>``
+     - Directory for the output files.
+   * - ``--log-level <level>``
+     - How much the tool logs: ``trace``, ``debug``, ``info``, ``warn`` (or
+       ``warning``), ``error`` (or ``err``), ``critical``, or ``off``.
+
+.. code-block:: shell
+
+   rocsys --traces hip mpi -- ./app
+   rocsys --traces hip,mpi -- ./app
+   rocsys --traces hip --traces mpi -- ./app
+   rocsys instrument --traces kernel-dispatch -- ./app
+   rocsys --output-path out --log-level debug -- ./app
+
+Names are separated by spaces or commas, and ``--traces`` can be repeated. With ``=``,
+separate names with commas only: ``--traces=hip,mpi``. An unknown name is an error.
+``--traces`` is the whole selection: a name you leave out is not traced, so
+``rocsys --traces hip -- ./app`` also turns MPI tracing off. Without ``--traces``, the
+tool's own defaults apply.
+
+A tool option for the same setting, such as ``--rocm``, ``--parallel``, ``--preset``, or
+``-o``, takes priority over the ``rocsys`` option. For ``rewrite``, pass ``--traces`` when
+the rewritten binary runs, as in ``rocsys --traces hip -- ./app.inst``.
+
+``rocsys --help`` lists these options after the subcommands. ``rocsys <subcommand> --help``,
+``-h``, or ``-?`` names the tool whose own ``--help`` lists every other option, and also
+lists these options for ``profile``, ``instrument``, ``python``, and ``attach``. A help topic
+such as ``rocsys profile --help=tracing`` is passed to the tool. A ``--help`` after ``--``
+belongs to the application.
 
 Subcommands
 ===========
