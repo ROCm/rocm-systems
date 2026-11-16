@@ -24,6 +24,7 @@ set(RANGE_REPLAY_TEST_SOURCES
     queue_hooks.cpp
     retained_kernarg.cpp
     host_replay.cpp
+    peer_sync.cpp
     replay_window.cpp
     replay_configure.cpp
     replay_phases.cpp

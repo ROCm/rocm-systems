@@ -74,8 +74,34 @@ typedef enum rocprofiler_range_replay_status_t  // NOLINT(performance-enum-size)
     ROCPROFILER_RANGE_REPLAY_STATUS_HOST_JMP_NOT_SET,  ///< Tool asked for host replay, but the
                                                        ///< application did not arm a sigsetjmp in
                                                        ///< the caller's frame
+    ROCPROFILER_RANGE_REPLAY_STATUS_PEER_DECLINED,     ///< Another process of the job, coordinated
+                                                       ///< through @c peer_sync_cb, declined or
+                                                       ///< could not take part in the next pass
     ROCPROFILER_RANGE_REPLAY_STATUS_LAST,
 } rocprofiler_range_replay_status_t;
+
+/**
+ * @brief Phase of a pass boundary at which @c peer_sync_cb is called.
+ */
+typedef enum rocprofiler_range_replay_peer_sync_phase_t  // NOLINT(performance-enum-size)
+{
+    ROCPROFILER_RANGE_REPLAY_PEER_SYNC_NONE = 0,
+    ROCPROFILER_RANGE_REPLAY_PEER_SYNC_PASS_END,  ///< A pass finished on this process; decide, as
+                                                  ///< a job, whether to restore and run another
+    ROCPROFILER_RANGE_REPLAY_PEER_SYNC_RESTORED,  ///< Every process restored; barrier before the
+                                                  ///< next pass starts
+    ROCPROFILER_RANGE_REPLAY_PEER_SYNC_LAST,
+} rocprofiler_range_replay_peer_sync_phase_t;
+
+/**
+ * @brief Bits of the flags exchanged by @c peer_sync_cb.
+ */
+typedef enum rocprofiler_range_replay_peer_flags_t  // NOLINT(performance-enum-size)
+{
+    ROCPROFILER_RANGE_REPLAY_PEER_ELIGIBLE = 1U << 0,  ///< This process can take part in the next
+                                                       ///< pass: nothing declined its range
+    ROCPROFILER_RANGE_REPLAY_PEER_CONTINUE = 1U << 1,  ///< This process wants to run another pass
+} rocprofiler_range_replay_peer_flags_t;
 
 /**
  * @brief ROCProfiler Range Replay Callback Tracer Record.
@@ -151,6 +177,12 @@ typedef struct rocprofiler_callback_tracing_range_replay_data_t
     uint64_t                          divergence_count;
     int                               host_replay;
 
+    uint32_t (*peer_sync_cb)(uint64_t                                   range_id,
+                             uint64_t                                   pass,
+                             rocprofiler_range_replay_peer_sync_phase_t phase,
+                             uint32_t                                   local_flags,
+                             rocprofiler_user_data_t                    user_data);
+
     /// @var pass_count_cb
     /// @brief [CONFIG] Tool-provided callback returning the total number of passes for this range,
     /// counting the application's own execution as pass 0. The tool sets this during CONFIG
@@ -201,6 +233,37 @@ typedef struct rocprofiler_callback_tracing_range_replay_data_t
     /// application to open the range with @ref ROCPROFILER_RANGE_REPLAY_HOST_BEGIN; otherwise the
     /// range declines with @ref ROCPROFILER_RANGE_REPLAY_STATUS_HOST_JMP_NOT_SET. Zero (the
     /// default) keeps packet replay.
+    ///
+    /// @var peer_sync_cb
+    /// @brief [CONFIG] Optional, host replay only. Set it when the range runs in several
+    /// cooperating processes (an MPI job) so that they replay together or not at all. Every
+    /// process of the job must set it, and must set @c host_replay, for the same ranges.
+    ///
+    /// The SDK calls it from @ref rocprofiler_range_replay_end on the thread that closes the range,
+    /// at the end of every pass of the range, including the application's own run, on every
+    /// process, whether or not that process is still eligible to continue. Calls are collective:
+    /// the n-th call on one process must meet the n-th call on every other process.
+    ///  - ROCPROFILER_RANGE_REPLAY_PEER_SYNC_PASS_END: @p local_flags are
+    ///    @ref ROCPROFILER_RANGE_REPLAY_PEER_ELIGIBLE (nothing declined this range here) and
+    ///    @ref ROCPROFILER_RANGE_REPLAY_PEER_CONTINUE (this process wants another pass). Return the
+    ///    bitwise AND of @p local_flags over all processes. The call must not return before every
+    ///    process has entered it, because the SDK restores memory right after it returns: a
+    ///    peer may still be using this process's device memory (for example through a peer-to-peer
+    ///    mapping) until it, too, finished the pass. Returning 0 declines the range here with
+    ///    @ref ROCPROFILER_RANGE_REPLAY_STATUS_PEER_DECLINED, which is the right answer when the
+    ///    peers cannot be reached.
+    ///  - ROCPROFILER_RANGE_REPLAY_PEER_SYNC_RESTORED: a barrier. It is called only when the
+    ///    previous call returned both bits, after this process restored its memory and before it
+    ///    re-executes the range. The return value is ignored.
+    ///
+    /// The callback runs while the range's device memory is quiescent, so it must not submit GPU
+    /// work, allocate or free device memory, or copy into device memory. Host-side MPI on host
+    /// buffers is fine. When the processes disagree (one has declined, or one wants to stop), all
+    /// of them stop at the same pass boundary. A process that was still eligible reports
+    /// @ref ROCPROFILER_RANGE_REPLAY_STATUS_PEER_DECLINED, or REPLAYED when the disagreement is
+    /// only about whether to run more passes, and continues with the state of the pass that just
+    /// ended. Once every process has agreed to restore, a process that then fails to restore aborts
+    /// the job, because its peers cannot be brought back.
 } rocprofiler_callback_tracing_range_replay_data_t;
 
 /**

@@ -64,6 +64,13 @@ struct range_plan_t
     uint64_t (*pass_count_cb)(uint64_t, rocprofiler_user_data_t)                     = nullptr;
     int (*replay_continue_cb)(uint64_t, uint64_t, uint64_t, rocprofiler_user_data_t) = nullptr;
 
+    // Cross-process collective for host replay in a multi-process job; see peer_sync.hpp.
+    uint32_t (*peer_sync_cb)(uint64_t,
+                             uint64_t,
+                             rocprofiler_range_replay_peer_sync_phase_t,
+                             uint32_t,
+                             rocprofiler_user_data_t) = nullptr;
+
     uint64_t total_passes = 0;
     bool     indefinite   = false;
     // True when the tool asked for more than the application's own execution. A range with
@@ -142,6 +149,20 @@ execute_close_callback(const range_plan_t&               plan,
                        rocprofiler_thread_id_t           thr_id,
                        uint64_t                          internal_corr_id,
                        uint64_t                          ancestor_corr_id);
+
+// True when this range's processes coordinate their passes: a host-replay range whose tool set
+// peer_sync_cb. Every process of the job takes part in every pass boundary of such a range.
+bool
+uses_peer_sync(const range_plan_t& plan);
+
+// Calls the tool's collective for `phase`. Returns the job-wide flags for PASS_END; for RESTORED
+// the tool's return value carries no meaning and 0 is returned. Must be called with no SDK lock
+// held: it blocks until every process of the job arrived.
+uint32_t
+execute_peer_sync(const range_plan_t&                        plan,
+                  uint64_t                                   pass,
+                  rocprofiler_range_replay_peer_sync_phase_t phase,
+                  uint32_t                                   local_flags);
 
 // Whether another pass should run after `current_pass`.
 bool

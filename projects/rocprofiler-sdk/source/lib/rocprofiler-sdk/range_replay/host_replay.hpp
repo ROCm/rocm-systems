@@ -93,6 +93,13 @@ track_region(range_context_t& ctx, void* ptr, size_t size);
 step_result_t
 finish_pass(range_context_t& ctx);
 
+// Called from end() for a range the tool configured for host replay but the application opened
+// without arming the jump (it ran once and declined HOST_JMP_NOT_SET). In a multi-process job its
+// peers are waiting for this process at the end of their first pass; this makes the one exchange
+// they expect, offering no eligibility, so they decline together instead of hanging.
+void
+exchange_unarmed_boundary(range_context_t& ctx);
+
 // Capture and restore of registered host regions. GPU-free.
 host_region_t
 capture_region(void* ptr, size_t size);

@@ -34,6 +34,7 @@
 #include "lib/rocprofiler-sdk/kernel_replay/memory_snapshot.hpp"
 #include "lib/rocprofiler-sdk/range_replay/digest.hpp"
 #include "lib/rocprofiler-sdk/range_replay/executor.hpp"
+#include "lib/rocprofiler-sdk/range_replay/peer_sync.hpp"
 #include "lib/rocprofiler-sdk/range_replay/replay_callbacks.hpp"
 
 #include <rocprofiler-sdk/agent.h>
@@ -510,9 +511,34 @@ finish_pass(range_context_t& ctx)
     // Hold shared ownership from the final decline check through globals capture/restore.
     auto executable_guard = std::shared_lock{code_object::executable_lifetime_mutex()};
 
-    auto finish = [&](rocprofiler_range_replay_status_t status, uint64_t divergence = 0) {
+    // Peer coordination (multi-process jobs). Every process calls the tool's collective exactly
+    // once per pass boundary, however its pass ended, so an early decline here cannot leave its
+    // peers waiting in a collective that this process never enters. `exchanged` records that this
+    // boundary's call was made, either by `finish` or by the continuing path below.
+    const bool peers     = uses_peer_sync(ctx.plan);
+    auto       exchanged = false;
+
+    auto done = [&](rocprofiler_range_replay_status_t status, uint64_t divergence = 0) {
         host.local_context.reset();
         return step_result_t{0, status, divergence};
+    };
+
+    auto finish = [&](rocprofiler_range_replay_status_t status, uint64_t divergence = 0) {
+        if(peers && !exchanged)
+        {
+            exchanged = true;
+            // The collective blocks for as long as the slowest peer needs: never under lifetime
+            // protection. A process finishing here has nothing left to decide, so the answer is
+            // not used; the call is how its peers learn what it did.
+            if(executable_guard.owns_lock()) executable_guard.unlock();
+            const auto finished_replayed =
+                status == ROCPROFILER_RANGE_REPLAY_STATUS_REPLAYED && ctx.record.eligible();
+            execute_peer_sync(ctx.plan,
+                              pass,
+                              ROCPROFILER_RANGE_REPLAY_PEER_SYNC_PASS_END,
+                              peer::local_flags(finished_replayed, false));
+        }
+        return done(status, divergence);
     };
 
     auto decline_if_callback_copied = [&]() {
@@ -610,9 +636,64 @@ finish_pass(range_context_t& ctx)
         return finish(ctx.record.status());
     }
 
+    if(peers)
+    {
+        // Agree with the job while the writer locks are held, so that nothing in this process can
+        // dispatch between the agreement and the restore. A peer may still be reading this
+        // process's device memory until it finishes its own pass, which is why the collective
+        // must not return early, and why it comes before the restore.
+        const auto local = peer::local_flags(true, true);
+        executable_guard.unlock();
+        const auto global =
+            execute_peer_sync(ctx.plan, pass, ROCPROFILER_RANGE_REPLAY_PEER_SYNC_PASS_END, local);
+        exchanged = true;
+        executable_guard.lock();
+
+        switch(peer::resolve(local, global, pass))
+        {
+            case peer::action_t::restore_and_continue: break;
+            case peer::action_t::stop_replayed:
+            {
+                // Stop where we are. settle takes the writer locks itself.
+                guards.clear();
+                settle_callback_gpu_work();
+                if(!ctx.record.eligible()) return done(ctx.record.status());
+                return done(ROCPROFILER_RANGE_REPLAY_STATUS_REPLAYED, count_divergence(host));
+            }
+            case peer::action_t::keep:
+            case peer::action_t::stop_declined:
+            {
+                ctx.record.decline(ROCPROFILER_RANGE_REPLAY_STATUS_PEER_DECLINED);
+                guards.clear();
+                return done(ctx.record.status());
+            }
+        }
+
+        // The job agreed to restore. A decline published during the collective (another thread
+        // dispatching or copying) is too late to back out of: the peers will restore and re-run.
+        fold_external_decline(ctx);
+        decline_if_callback_copied();
+        ROCP_FATAL_IF(!ctx.record.eligible())
+            << fmt::format("range replay: host range {} was declined ({}) after every process of "
+                           "the job agreed to run pass {}; the peers cannot be brought back. "
+                           "Another thread used the devices inside a multi-process range.",
+                           ctx.record.range_id(),
+                           static_cast<int>(ctx.record.status()),
+                           next);
+    }
+
     const auto restore_start  = phase_clock::now();
     const auto restore_status = restore_entry_state(ctx);
-    if(restore_status != ROCPROFILER_RANGE_REPLAY_STATUS_REPLAYED) return finish(restore_status);
+    if(restore_status != ROCPROFILER_RANGE_REPLAY_STATUS_REPLAYED)
+    {
+        ROCP_FATAL_IF(peers) << fmt::format(
+            "range replay: host range {} could not restore its entry state (status {}) after "
+            "every process of the job agreed to run pass {}; the peers cannot be brought back",
+            ctx.record.range_id(),
+            static_cast<int>(restore_status),
+            next);
+        return finish(restore_status);
+    }
     executable_guard.unlock();
     guards.clear();
     ROCP_TRACE << fmt::format("range replay: host range {} restore before pass {}: {:.3f} ms",
@@ -641,7 +722,22 @@ finish_pass(range_context_t& ctx)
                              ctx.ancestor_corr_id,
                              host.pass_state);
 
+    // No process starts the next pass until every process has restored: the first MPI call of the
+    // re-executed range would otherwise pair with a peer whose memory is still mid-restore.
+    if(peers)
+        execute_peer_sync(ctx.plan,
+                          next,
+                          ROCPROFILER_RANGE_REPLAY_PEER_SYNC_RESTORED,
+                          peer::flag_eligible | peer::flag_continue);
+
     return step_result_t{next, ROCPROFILER_RANGE_REPLAY_STATUS_REPLAYED, 0};
+}
+
+void
+exchange_unarmed_boundary(range_context_t& ctx)
+{
+    if(!uses_peer_sync(ctx.plan)) return;
+    execute_peer_sync(ctx.plan, 0, ROCPROFILER_RANGE_REPLAY_PEER_SYNC_PASS_END, 0);
 }
 }  // namespace host
 }  // namespace range_replay

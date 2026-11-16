@@ -144,24 +144,17 @@ the destination rank's own allocations — so if every rank snapshots its own ag
 restores before every pass, the union covers the peer writes too. Nothing about the snapshot needs
 to become distributed.
 
-What is missing is agreement. A collective's kernels rendezvous: they spin on flags in peer memory.
-If one rank replays a collective and another does not, the replaying rank's kernel waits for a peer
-that never arrives. So participating ranks must replay in lockstep — same pass count, entering each
-pass together — and, critically, **a range declined on one rank must be abandoned on all of them**.
+What is needed on top is agreement. A collective's kernels rendezvous: they spin on flags in peer
+memory, and host-side MPI calls pair up across ranks. If one rank replays and another does not, the
+replaying rank waits for a peer that never arrives. So participating ranks must replay in lockstep,
+and **a range declined on one rank must be abandoned on all of them**.
 
-A tool can arrange the lockstep part with the existing API, because `pass_count_cb` and
-`replay_continue_cb` are tool callbacks: it can allreduce the pass count and the continue-decision
-inside them. It cannot arrange the abandonment part. Eligibility is not known at `CONFIG` (the range
-has not run yet), and by `CLOSE` the passes have already happened. There is no point in the current
-API where a tool learns that its range is replayable and can still veto it.
-
-That argues for one addition before the API stabilizes: a **vetoable pre-replay notification**,
-delivered from `rocprofiler_range_replay_end()` after eligibility is fully determined — after the
-drain, the allocation-stability check, and kernarg staging — but before the first pass rewinds device
-memory. A tool would allreduce the status across the communicator and veto unless every rank is
-eligible. It is a small change (the executor already computes everything in that order; the callback
-slots in before the pass loop) and it is the enabler for the entire distributed case, so it is worth
-doing deliberately rather than discovering later that the API cannot express it.
+For host replay this is provided by `peer_sync_cb`, a collective the tool implements (an
+`MPI_Allreduce` with `MPI_BAND` is enough) and the SDK calls at the end of every pass on every
+process. The ranks AND their "eligible" and "continue" flags, and all of them restore and re-run, or
+all of them stop at the same boundary, before any rank has rewound its memory. See
+[Host range replay](range_replay_host.md#multi-process-jobs-mpi). Packet replay is not supported
+across processes.
 
 Host-side and network state is the harder limit. Intra-node collectives over xGMI are
 peer-to-peer device writes, which the snapshot covers. Inter-node collectives involve a host proxy
