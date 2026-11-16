@@ -52,6 +52,8 @@ static bool exceedsMaxGridDim(const amd::LaunchParams& launchParams, const amd::
     }
   }
   return false;
+}
+
 static hipError_t ihipValidateClusterSize(const dim3& clusterDim, size_t clusterMaxSize) {
   __hip_uint32_t clusterSize;
   if (multiplyOverflow(clusterDim.x, clusterDim.y, clusterSize) ||
