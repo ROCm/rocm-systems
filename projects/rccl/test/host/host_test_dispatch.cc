@@ -2278,9 +2278,7 @@ ChildVerdict classifyChild(const ChildOutcome &outcome, const ChildContext &cont
         // It finished on its own, but the run is ending, so the rest of this binary never runs.
         verdict.fragments.push_back(crashFragment(
             context.qualifier,
-            fmt::format("run was stopped{}",
-                        fmt::format("; its {} remaining part(s) were skipped",
-                                    context.remainingParts))));
+            fmt::format("run was stopped{}", skipped)));
         verdict.failed = true;
         verdict.skipRemainingParts = true;
     }
