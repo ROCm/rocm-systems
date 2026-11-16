@@ -179,6 +179,14 @@ std::mutex compute_process_list_mutex;
 static const std::chrono::milliseconds kComputeProcessCacheDuration =
     std::chrono::milliseconds(read_env_ms("AMDSMI_PROCESS_INFO_CACHE_MS", 1));
 
+// Set only by smi_amdgpu_set_kfd_process_lister_for_testing().
+std::atomic<SmiKfdProcessListerFn> g_kfd_process_lister_override{nullptr};
+
+SmiKfdProcessListerFn KfdProcessLister() {
+  const SmiKfdProcessListerFn lister = g_kfd_process_lister_override.load();
+  return lister != nullptr ? lister : GetProcessInfo;
+}
+
 }  // namespace
 
 amdsmi_status_t AMDSmiGPUDevice::get_compute_process_list_impl(
@@ -209,7 +217,7 @@ amdsmi_status_t AMDSmiGPUDevice::get_compute_process_list_impl(
   // this GPU.
   std::vector<rsmi_process_info_t> procs;
   const amdsmi_status_t list_status =
-      smi_amdgpu_list_kfd_processes(GetProcessInfo, cache_ptr->num_kfd_processes, &procs);
+      smi_amdgpu_list_kfd_processes(KfdProcessLister(), cache_ptr->num_kfd_processes, &procs);
   if (list_status != AMDSMI_STATUS_SUCCESS) {
     return list_status;
   }
@@ -1159,3 +1167,7 @@ auto AMDSmiGPUDevice::get_fabric_info_from_ualoe(amdsmi_fabric_info_t& fabric_in
 }
 
 }  // namespace amd::smi
+
+void smi_amdgpu_set_kfd_process_lister_for_testing(SmiKfdProcessListerFn lister) {
+  amd::smi::g_kfd_process_lister_override.store(lister);
+}

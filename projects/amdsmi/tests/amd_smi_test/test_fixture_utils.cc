@@ -28,6 +28,7 @@
 #include "amd_smi/impl/amd_smi_test_overrides.h"
 #include "amd_smi/impl/amd_smi_utils.h"
 #include "rocm_smi/rocm_smi_device.h"
+#include "rocm_smi/rocm_smi_kfd.h"
 #include "rocm_smi/rocm_smi_main.h"
 
 namespace fs = std::filesystem;
@@ -265,6 +266,23 @@ ScopedRocmSmiDevice::~ScopedRocmSmiDevice() {
   }
   auto& devices = amd::smi::RocmSMI::getInstance().devices();
   if (index_ < devices.size()) devices.resize(index_);
+}
+
+ScopedKfdNode::ScopedKfdNode(uint64_t gpu_id, uint32_t dev_index) : gpu_id_(gpu_id) {
+  auto& nodes = amd::smi::RocmSMI::getInstance().kfd_node_map();
+  if (const auto it = nodes.find(gpu_id_); it != nodes.end()) previous_ = it->second;
+  auto node = std::make_shared<amd::smi::KFDNode>(0);
+  node->set_amdgpu_dev_index(dev_index);
+  nodes[gpu_id_] = std::move(node);
+}
+
+ScopedKfdNode::~ScopedKfdNode() {
+  auto& nodes = amd::smi::RocmSMI::getInstance().kfd_node_map();
+  if (previous_) {
+    nodes[gpu_id_] = previous_;
+  } else {
+    nodes.erase(gpu_id_);
+  }
 }
 
 void WaitOutProcessListCache() {

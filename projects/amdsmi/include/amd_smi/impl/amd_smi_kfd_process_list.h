@@ -22,6 +22,9 @@
  */
 using SmiKfdProcessLister =
     std::function<int(rsmi_process_info_t* procs, uint32_t num_allocated, uint32_t* num_found)>;
+// A plain function pointer, so that the test override fits in a std::atomic.
+using SmiKfdProcessListerFn = int (*)(rsmi_process_info_t* procs, uint32_t num_allocated,
+                                      uint32_t* num_found);
 
 /**
  *  @brief List the KFD processes by PID, listing again with more room while
@@ -37,5 +40,9 @@ using SmiKfdProcessLister =
  */
 auto smi_amdgpu_list_kfd_processes(const SmiKfdProcessLister& list, uint32_t expected,
                                    std::vector<rsmi_process_info_t>* procs) -> amdsmi_status_t;
+
+// Test-only: GPU process lists list KFD processes with `lister` instead of
+// amd::smi::GetProcessInfo(); nullptr restores it.
+void smi_amdgpu_set_kfd_process_lister_for_testing(SmiKfdProcessListerFn lister);
 
 #endif  // AMD_SMI_INCLUDE_AMD_SMI_KFD_PROCESS_LIST_H_

@@ -6316,20 +6316,37 @@ amdsmi_status_t amdsmi_get_gpu_process_list_by_pid(amdsmi_processor_handle* proc
     return AMDSMI_STATUS_INVAL;
   }
 
-  // Collect processes from all GPUs, grouped by PID
+  // Collect processes from all GPUs, grouped by PID. Handles that are not GPUs
+  // are skipped. A GPU whose list cannot be read, such as one that processes kept
+  // starting on (AMDSMI_STATUS_RETRY), is left out rather than hiding the other
+  // GPUs' processes; its error is returned only if no GPU's list is read.
   std::map<uint32_t, amdsmi_proc_info_by_pid_t> pid_map;
-
+  auto first_error = AMDSMI_STATUS_SUCCESS;
+  bool any_read = false;
   for (uint32_t i = 0; i < num_processors; i++) {
     amd::smi::AMDSmiGPUDevice* gpu_device = nullptr;
-    amdsmi_status_t r = get_gpu_device_from_handle(processor_handles[i], &gpu_device);
-    if (r != AMDSMI_STATUS_SUCCESS) continue;
-
-    uint32_t gpu_index = gpu_device->get_gpu_id();
+    if (get_gpu_device_from_handle(processor_handles[i], &gpu_device) != AMDSMI_STATUS_SUCCESS) {
+      continue;
+    }
     amd::smi::GPUComputeProcessList_t compute_process_list;
-    r = gpu_device->amdgpu_get_compute_process_list(compute_process_list);
-    if (r != AMDSMI_STATUS_SUCCESS) return r;
-    for (auto& [pid, proc_info] : compute_process_list)
-      merge_proc_into_pid_map(pid_map, gpu_index, proc_info);
+    const amdsmi_status_t r = gpu_device->amdgpu_get_compute_process_list(compute_process_list);
+    if (r != AMDSMI_STATUS_SUCCESS) {
+      std::ostringstream ss;
+      ss << __PRETTY_FUNCTION__ << " | Leaving out GPU " << gpu_device->get_gpu_id() << ": "
+         << smi_amdgpu_get_status_string(r, false);
+      LOG_WARN(ss);
+      if (first_error == AMDSMI_STATUS_SUCCESS) {
+        first_error = r;
+      }
+      continue;
+    }
+    any_read = true;
+    for (const auto& [pid, proc_info] : compute_process_list) {
+      merge_proc_into_pid_map(pid_map, gpu_device->get_gpu_id(), proc_info);
+    }
+  }
+  if (!any_read && first_error != AMDSMI_STATUS_SUCCESS) {
+    return first_error;
   }
 
   uint32_t num_pids = static_cast<uint32_t>(pid_map.size());

@@ -9,6 +9,8 @@
 #include <gtest/gtest.h>
 #include <unistd.h>
 
+#include <atomic>
+#include <cerrno>
 #include <cstdint>
 #include <filesystem>
 #include <limits>
@@ -17,6 +19,7 @@
 #include "amd_smi/amdsmi.h"
 #include "amd_smi/impl/amd_smi_drm.h"
 #include "amd_smi/impl/amd_smi_gpu_device.h"
+#include "amd_smi/impl/amd_smi_kfd_process_list.h"
 #include "amd_smi/impl/amd_smi_test_overrides.h"
 #include "amd_smi/impl/fdinfo.h"
 #include "rocm_smi/rocm_smi_device.h"
@@ -43,6 +46,12 @@ amdsmi_bdf_t TestBdf() {
   bdf.bus_number = 0xfe;
   bdf.device_number = 0x1f;
   bdf.function_number = 7;
+  return bdf;
+}
+
+amdsmi_bdf_t OtherTestBdf() {
+  amdsmi_bdf_t bdf{};
+  bdf.bus_number = 0xc3;
   return bdf;
 }
 
@@ -92,15 +101,17 @@ void AddKfdFilesForEveryGpu(FakeSysfsTree* kfd, const std::string& pid) {
   }
 }
 
-// A GPU for the process lists: the rocm_smi device at sysfs/card9, which has
-// this test GPU's address and, as discovery sets it on a real GPU, its KFD id.
+// A GPU for the process lists: the rocm_smi device at sysfs/<card>, which has
+// the address `bdf` and, as discovery sets it on a real GPU, the KFD id
+// `kfd_gpu_id`; by default this test GPU's.
 class TestGpu {
  public:
-  TestGpu()
-      : rocm_device_(sysfs_.root() + "/card9"),
-        gpu_device_(rocm_device_.index(), "card9", TestBdf(), drm_),
+  explicit TestGpu(const std::string& card = "card9", const amdsmi_bdf_t& bdf = TestBdf(),
+                   uint64_t kfd_gpu_id = kKfdGpuId)
+      : rocm_device_(sysfs_.root() + "/" + card),
+        gpu_device_(rocm_device_.index(), card, bdf, drm_),
         registration_(&gpu_device_) {
-    amd::smi::RocmSMI::getInstance().devices()[rocm_device_.index()]->set_kfd_gpu_id(kKfdGpuId);
+    amd::smi::RocmSMI::getInstance().devices()[rocm_device_.index()]->set_kfd_gpu_id(kfd_gpu_id);
   }
   uint32_t index() const { return rocm_device_.index(); }
   amdsmi_processor_handle handle() const { return registration_.handle(); }
@@ -277,6 +288,77 @@ TEST(GpuUnit, ProcessListLeavesOutAProcessWhoseGpusTheCallerMayNotRead) {
   ASSERT_EQ(status, AMDSMI_STATUS_SUCCESS);
   ASSERT_EQ(num_processes, 1U);
   EXPECT_EQ(list[0].pid, kShown);
+}
+
+// Lists KFD processes as KFD does, except that the first listing after
+// g_listings is reset fails.
+std::atomic<int> g_listings{0};
+int FailFirstListing(rsmi_process_info_t* procs, uint32_t num_allocated, uint32_t* num_found) {
+  return g_listings++ == 0 ? EIO : amd::smi::GetProcessInfo(procs, num_allocated, num_found);
+}
+
+class ScopedKfdProcessLister {
+ public:
+  explicit ScopedKfdProcessLister(SmiKfdProcessListerFn lister) {
+    smi_amdgpu_set_kfd_process_lister_for_testing(lister);
+  }
+  ~ScopedKfdProcessLister() { smi_amdgpu_set_kfd_process_lister_for_testing(nullptr); }
+
+  ScopedKfdProcessLister(const ScopedKfdProcessLister&) = delete;
+  ScopedKfdProcessLister& operator=(const ScopedKfdProcessLister&) = delete;
+};
+
+TEST(GpuUnit, ProcessListByPidLeavesOutOnlyAGpuWhoseListFails) {
+  ScopedAmdsmiInit smi_init;
+  MockProcessRoots roots;
+  // KFD places the process on the second GPU through a queue.
+  constexpr uint32_t kPid = 4261;
+  roots.kfd().WriteFile("4261/queues/0/gpuid", std::to_string(kOtherKfdGpuId) + "\n");
+  AddKfdFilesForEveryGpu(&roots.kfd(), "4261");
+  AddProcess(&roots.proc(), kPid, kOtherBdfText);
+
+  TestGpu failing;
+  TestGpu other("card10", OtherTestBdf(), kOtherKfdGpuId);
+  ScopedKfdNode kfd_node(kOtherKfdGpuId, other.index());
+  WaitOutProcessListCache();
+  // The first GPU's list fails, as when reading KFD's process directory fails.
+  g_listings = 0;
+  ScopedKfdProcessLister lister(FailFirstListing);
+  amdsmi_processor_handle handles[] = {failing.handle(), other.handle()};
+  uint32_t num_pids = 4;
+  amdsmi_proc_info_by_pid_t by_pid[4] = {};
+  const amdsmi_status_t status = amdsmi_get_gpu_process_list_by_pid(handles, 2, by_pid, &num_pids);
+  // Both GPUs' lists were read: the first one's failed, the second one's did not.
+  EXPECT_EQ(g_listings.load(), 2);
+  ASSERT_EQ(status, AMDSMI_STATUS_SUCCESS);
+  ASSERT_EQ(num_pids, 1U);
+  EXPECT_EQ(by_pid[0].pid, kPid);
+  ASSERT_EQ(by_pid[0].num_gpus, 1U);
+  EXPECT_EQ(by_pid[0].gpus[0].gpu_index, other.index());
+}
+
+// Fails every listing: the first with EIO, the others because the caller may
+// not read KFD's process directory.
+int FailEveryListing(rsmi_process_info_t*, uint32_t, uint32_t*) {
+  return g_listings++ == 0 ? EIO : EACCES;
+}
+
+TEST(GpuUnit, ProcessListByPidReturnsTheFirstErrorWhenNoGpuListIsRead) {
+  ScopedAmdsmiInit smi_init;
+  MockProcessRoots roots;
+  TestGpu first;
+  TestGpu second("card10", OtherTestBdf(), kOtherKfdGpuId);
+  ScopedKfdNode kfd_node(kOtherKfdGpuId, second.index());
+  WaitOutProcessListCache();
+  g_listings = 0;
+  ScopedKfdProcessLister lister(FailEveryListing);
+  amdsmi_processor_handle handles[] = {first.handle(), second.handle()};
+  uint32_t num_pids = 4;
+  amdsmi_proc_info_by_pid_t by_pid[4] = {};
+  const amdsmi_status_t status = amdsmi_get_gpu_process_list_by_pid(handles, 2, by_pid, &num_pids);
+  // Both GPUs' lists were read; the first one's error (EIO) is returned.
+  EXPECT_EQ(g_listings.load(), 2);
+  EXPECT_EQ(status, AMDSMI_STATUS_UNEXPECTED_SIZE);
 }
 
 }  // namespace
