@@ -596,11 +596,16 @@ __device__ inline void warpLdsCopy(uint64_t global, uint32_t lds, size_t sizeInB
 // NO final wait. Work + LDS partition by rank within the team (warpId - start),
 // so each team indexes its own `ldsBuffer` from zero. Safe to call collectively
 // (warps outside the range return immediately) or only from the team's warps.
-template <CachePolicy cp>
-__device__ inline void issue(void* dst, const void* src, size_t sizeBytes, void* ldsBuffer, size_t ldsBufferBytes,
-                             uint32_t startWarpId, uint32_t stopWarpId) {
+//
+// Copies src to each of the NDST destinations. The partition follows dst[0];
+// every other destination must sit at the same offset mod ALIGN, so each chunk
+// is loaded (and shifted) once and stored NDST times from the same LDS slot.
+template <CachePolicy cp, int NDST>
+__device__ inline void issueTo(void* const (&dst)[NDST], const void* src, size_t sizeBytes, void* ldsBuffer,
+                               size_t ldsBufferBytes, uint32_t startWarpId, uint32_t stopWarpId) {
+  static_assert(NDST >= 1, "issueTo needs at least one destination");
   const uint8_t* s = reinterpret_cast<const uint8_t*>(src);
-  uint8_t* d = reinterpret_cast<uint8_t*>(dst);
+  uint8_t* d = reinterpret_cast<uint8_t*>(dst[0]);
   const uint32_t ldsBase = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(ldsBuffer));
   const uint32_t ldsBytes = static_cast<uint32_t>(ldsBufferBytes); // LDS is small
 
@@ -638,9 +643,16 @@ __device__ inline void issue(void* dst, const void* src, size_t sizeBytes, void*
 
   // The vector head is issued after the warp's first TDM load so the two overlap.
   const bool vecHead = rank == 0 && head;
+  // Vector-copies [off, off + n) of src to every destination.
+  auto vecCopy = [&](size_t off, size_t n) {
+#pragma unroll
+    for (int k = 0; k < NDST; ++k) {
+      warpVecCopy(s + off, reinterpret_cast<uint8_t*>(dst[k]) + off, n, warpThread, warpThreads);
+    }
+  };
   const size_t bulk = sizeBytes - head;
   if (bulk == 0) {
-    if (vecHead) warpVecCopy(s, d, head, warpThread, warpThreads);
+    if (vecHead) vecCopy(0, head);
     return;
   }
 
@@ -683,7 +695,11 @@ __device__ inline void issue(void* dst, const void* src, size_t sizeBytes, void*
       // LDS-only fence: waits for the shift's writes, not the head's global stores.
       __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup", "local");
     }
-    ldsTileBytes<LdsDir::Store, cp>(global, slot + o, n);
+#pragma unroll
+    for (int k = 0; k < NDST; ++k) {
+      const uint64_t dk = reinterpret_cast<uint64_t>(dst[k]) - dAddr; // a multiple of ALIGN
+      ldsTileBytes<LdsDir::Store, cp>(global + dk, slot + o, n);
+    }
   };
 
   if (nSlots == 1) {
@@ -693,8 +709,8 @@ __device__ inline void issue(void* dst, const void* src, size_t sizeBytes, void*
     // copies that remainder with vectors while the chunk is in flight.
     if (len > chunkBytes && len - chunkBytes <= ALIGN) {
       ldsTileBytes<LdsDir::Load, cp>(sB, win + o - sigma, chunkBytes + delta);
-      if (vecHead) warpVecCopy(s, d, head, warpThread, warpThreads);
-      warpVecCopy(s + begin + chunkBytes, d + begin + chunkBytes, len - chunkBytes, warpThread, warpThreads);
+      if (vecHead) vecCopy(0, head);
+      vecCopy(begin + chunkBytes, len - chunkBytes);
       waitTensor0();
       storeChunk(win, dB, chunkBytes);
       waitTensor0();
@@ -703,7 +719,7 @@ __device__ inline void issue(void* dst, const void* src, size_t sizeBytes, void*
     for (size_t off = 0; off < len; off += chunkBytes) {
       const uint32_t n = len - off < chunkBytes ? static_cast<uint32_t>(len - off) : chunkBytes;
       ldsTileBytes<LdsDir::Load, cp>(sB + off, win + o - sigma, n + delta);
-      if (off == 0 && vecHead) warpVecCopy(s, d, head, warpThread, warpThreads);
+      if (off == 0 && vecHead) vecCopy(0, head);
       waitTensor0();
       storeChunk(win, dB + off, n);
       waitTensor0();
@@ -718,13 +734,20 @@ __device__ inline void issue(void* dst, const void* src, size_t sizeBytes, void*
     const uint32_t n = len - off < chunkBytes ? static_cast<uint32_t>(len - off) : chunkBytes;
     if (off) waitTensor0();
     ldsTileBytes<LdsDir::Load, cp>(sB + off, win + slot + o - sigma, n + delta);
-    if (off == 0 && vecHead) warpVecCopy(s, d, head, warpThread, warpThreads);
+    if (off == 0 && vecHead) vecCopy(0, head);
     if (off) storeChunk(win + (slot ^ slotBytes), dB + off - chunkBytes, chunkBytes);
     slot ^= slotBytes;
     lastOff = off;
   }
   waitTensor0();
   storeChunk(win + (slot ^ slotBytes), dB + lastOff, static_cast<uint32_t>(len - lastOff));
+}
+
+template <CachePolicy cp>
+__device__ inline void issue(void* dst, const void* src, size_t sizeBytes, void* ldsBuffer, size_t ldsBufferBytes,
+                             uint32_t startWarpId, uint32_t stopWarpId) {
+  void* const dsts[1] = {dst};
+  issueTo<cp, 1>(dsts, src, sizeBytes, ldsBuffer, ldsBufferBytes, startWarpId, stopWarpId);
 }
 
 } // namespace detail
