@@ -2771,7 +2771,7 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
     }
     comm->maxTreePattern = std::max(comm->maxTreePattern, allGather3Data[i].graphInfo[NCCL_ALGO_TREE].pattern);
     comm->p2pnChannelsPerPeer = std::min(comm->p2pnChannelsPerPeer, allGather3Data[i].p2pnChannelsPerPeer);
-    // Base is what gather/scatter use per peer. Taking the min with the stride keeps every rank on the
+    // Base is what gather and send/recv use per peer. Taking the min with the stride keeps every rank on the
     // same halved-or-not decision, so a pair never disagrees on its part count.
     comm->p2pnChannelsPerPeerBase = std::min(comm->p2pnChannelsPerPeerBase, allGather3Data[i].p2pnChannelsPerPeerBase);
     comm->p2pMaxPeers = std::max(comm->p2pMaxPeers, allGather3Data[i].p2pMaxPeers);
@@ -2984,7 +2984,7 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
         while (comm->p2pSchedule[sendRound].sendRank != peer) sendRound++;
         while (comm->p2pSchedule[recvRound].recvRank != peer) recvRound++;
         int p2pBatchEnable = rcclEffectiveP2pBatchEnable(comm);
-        // Gather/scatter use a scaled base and the unhalved part count on a halved single-node
+        // gather and send/recv use a scaled base and the unhalved part count on a halved single-node
         // comm; connect that block and the unscaled one a mixed pair uses (see rcclP2pWorkBase).
         int gatherScale = rcclP2pBaseScale(comm, ncclFuncGather);
         int nParts = rcclP2pPartCount(comm, ncclFuncGather);

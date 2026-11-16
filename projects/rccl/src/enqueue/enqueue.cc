@@ -4219,8 +4219,8 @@ static ncclResult_t p2pTaskAppend(struct ncclComm* comm, struct ncclInfo* info, 
       while (peer != (isSendNotRecv ? comm->p2pSchedule[round].sendRank : comm->p2pSchedule[round].recvRank)) {
         round += 1;
       }
-      // Connect this collective's scaled block, and also the unscaled block a mixed pair uses.
-      // The last pass leaves base at scale 1 for the CE net extension below.
+      // Connect this collective's scaled block, and for gather and send/recv also the unscaled block
+      // a mixed pair uses. The last pass leaves base at scale 1 for the CE net extension below.
       int nScales = rcclP2pBaseScale(comm, collAPI) > 1 ? 2 : 1;
       uint8_t base = 0;
       for (int s = 0; s < nScales; s++) {

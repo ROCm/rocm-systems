@@ -68,10 +68,14 @@ inline bool rcclP2pHalvedSingleNode(struct ncclComm* comm) {
   return comm->nNodes == 1 && comm->hasMloPart && comm->p2pnChannelsPerPeerBase > comm->p2pnChannelsPerPeer;
 }
 
-// Single-node MLOPart gather/scatter keep the unhalved per-peer count (the halving
-// loop in paths.cc sizes alltoall, and was also cutting gather to 1 part per peer).
+// Single-node MLOPart gather and send/recv keep the unhalved per-peer count. The halving loop
+// in paths.cc sizes the many-peers-at-once collectives (alltoall, alltoallv, scatter); gather
+// has one receiver at a time and send/recv one peer, so cutting them only costs bandwidth
+// (gather fell to 1 part per peer at 64 partitions; 1 GiB sendrecv lost about a quarter).
 inline bool rcclP2pPartitionedGather(struct ncclComm* comm, ncclFunc_t collAPI) {
-  return rcclP2pHalvedSingleNode(comm) && (collAPI == ncclFuncGather || collAPI == ncclFuncScatter);
+  return rcclP2pHalvedSingleNode(comm) &&
+         (collAPI == ncclFuncGather || collAPI == ncclFuncSend || collAPI == ncclFuncRecv ||
+          collAPI == ncclFuncSendRecv);
 }
 
 // Parts (channels per peer) one collective places. The device recovers a part with

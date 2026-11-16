@@ -103,7 +103,7 @@ static ncclResult_t postTuneSymFreeTuningInfoRaw(struct ncclComm* comm, struct n
   return ncclSuccess;
 }
 
-// scale is rcclP2pBaseScale of the collective: 1 except single-node gather/scatter.
+// scale is rcclP2pBaseScale of the collective: 1 except single-node gather and send/recv.
 static ncclResult_t postTuneP2pChannelBase(struct ncclComm* comm, int peer, bool isSendNotRecv, int scale,
                                            uint8_t* baseOut) {
   int round = 0;
