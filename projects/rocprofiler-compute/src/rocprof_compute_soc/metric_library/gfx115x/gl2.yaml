@@ -4,16 +4,17 @@ gl2.atomic_req:
   unit: (Count + $normUnit)
   description: >-
     Number of atomic memory operations processed by the GL2 cache. Atomics provide
-    thread-safe memory access but may serialize at contended addresses. High counts
-    may impact performance.
+    thread-safe memory access but may serialize at contended addresses. High counts may
+    impact performance.
 gl2.ea_rd_req_dram:
   name: EA Read Requests (DRAM)
   formula: SUM(GL2C_EA_RDREQ_DRAM_sum) / SUM($denom)
   unit: (Count + $normUnit)
   description: >-
-    Number of read requests forwarded from GL2 cache through GCEA (Graphics Core Efficiency
-    Arbiter). These requests go toward system memory, though they may be served by
-    system-level caches before reaching DRAM. High counts indicate memory-bound workloads.
+    Number of read requests forwarded from GL2 cache through GCEA (Graphics Core
+    Efficiency Arbiter). These requests go toward system memory, though they may be
+    served by system-level caches before reaching DRAM. High counts indicate
+    memory-bound workloads.
 gl2.ea_wr_req_dram:
   name: EA Write Requests (DRAM)
   formula: SUM(GL2C_EA_WRREQ_DRAM_sum) / SUM($denom)
@@ -38,8 +39,8 @@ gl2.fabric_wr_bw:
   unit: GB/s
   description: >-
     Write bandwidth between the GL2 cache and the memory fabric/system memory. High
-    values indicate write-intensive workloads. Combined with read bandwidth, this
-    shows total memory traffic leaving the GPU caches.
+    values indicate write-intensive workloads. Combined with read bandwidth, this shows
+    total memory traffic leaving the GPU caches.
   peak: $max_mclk * 4 * $num_memory_channels * 4 / 1000
 gl2.hit_rate:
   name: GL2 Cache Hit Rate
@@ -47,9 +48,9 @@ gl2.hit_rate:
   unit: Percent
   description: >-
     Percentage of GL2 cache requests that are serviced from cache without accessing
-    system memory. Higher hit rates reduce memory bandwidth pressure and improve performance.
-    Low hit rates may indicate poor data locality or working sets that exceed cache
-    capacity.
+    system memory. Higher hit rates reduce memory bandwidth pressure and improve
+    performance. Low hit rates may indicate poor data locality or working sets that
+    exceed cache capacity.
   peak: 100
 gl2.hits:
   name: GL2 Cache Hits
@@ -64,9 +65,9 @@ gl2.misses:
   formula: SUM(GL2C_MISS_sum) / SUM($denom)
   unit: (Count + $normUnit)
   description: >-
-    Number of GL2 cache requests that missed and required fetching through GCEA (Graphics
-    Core Efficiency Arbiter). High miss counts indicate heavy memory traffic. Consider
-    improving data locality or reducing working set size.
+    Number of GL2 cache requests that missed and required fetching through GCEA
+    (Graphics Core Efficiency Arbiter). High miss counts indicate heavy memory traffic.
+    Consider improving data locality or reducing working set size.
 gl2.rd_req:
   name: GL2 Read Requests
   formula: SUM(GL2C_READ_sum) / SUM($denom)

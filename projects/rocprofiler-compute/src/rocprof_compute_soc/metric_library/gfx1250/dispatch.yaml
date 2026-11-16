@@ -13,8 +13,8 @@ dispatch.lds_allocation:
   formula: AVG(LDS_Per_Workgroup)
   unit: Bytes per Workgroup
   description: >-
-    The number of bytes of LDS memory (or, shared memory) allocated per workgroup.
-    Note: This may also be larger than what was requested at compile time due to both
+    The number of bytes of LDS memory (or, shared memory) allocated per workgroup. Note:
+    This may also be larger than what was requested at compile time due to both
     allocation granularity and dynamic per-dispatch LDS allocations.
 dispatch.scratch_allocation:
   name: Scratch Allocation
@@ -27,8 +27,8 @@ dispatch.scratch_allocation_per_wave:
   unit: KB per Wavefront
   description: >-
     The amount of scratch memory requested per wavefront, in KB: the scratch bytes
-    requested per work-item multiplied by the wavefront size. Scratch memory is used
-    for stack memory on the accelerator, as well as for register spills and restores.
+    requested per work-item multiplied by the wavefront size. Scratch memory is used for
+    stack memory on the accelerator, as well as for register spills and restores.
 dispatch.sgprs:
   name: SGPRs
   formula: AVG(SGPR)
@@ -42,8 +42,8 @@ dispatch.vgprs:
   unit: Registers
   description: >-
     The number of architected vector general-purpose registers allocated for the kernel.
-    Note: this may not exactly match the number of VGPRs requested by the compiler
-    due to allocation granularity.
+    Note: this may not exactly match the number of VGPRs requested by the compiler due
+    to allocation granularity.
 dispatch.workgroup_size:
   name: Workgroup Size
   formula: AVG(Workgroup_Size)
@@ -53,5 +53,4 @@ dispatch.workgroups_per_wgp:
   name: Workgroups per WGP
   formula: AVG(Grid_Size / Workgroup_Size) / $cu_per_gpu
   unit: Workgroups per WGP
-  description: >-
-    The number of workgroups in the launch divided by the number of WGPs.
+  description: The number of workgroups in the launch divided by the number of WGPs.

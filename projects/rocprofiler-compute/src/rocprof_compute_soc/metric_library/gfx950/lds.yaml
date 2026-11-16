@@ -4,8 +4,7 @@ lds.atomic:
   name: LDS ATOMIC
   formula: SUM(SQ_INSTS_LDS_ATOMIC) / SUM($denom)
   unit: (Instructions + $normUnit)
-  description: >-
-    The total number of LDS atomic instructions per normalization unit.
+  description: The total number of LDS atomic instructions per normalization unit.
 lds.atomic_bw:
   name: LDS ATOMIC Bandwidth
   formula: 64 * SUM(SQ_INSTS_LDS_ATOMIC_BANDWIDTH) / SUM(End_Timestamp - Start_Timestamp)
@@ -27,34 +26,32 @@ lds.data_fifo_full_rate:
   formula: SUM(SQ_LDS_DATA_FIFO_FULL) / SUM($denom)
   unit: (Cycles + $normUnit)
   description: >-
-    The number of cycles where the LDS data FIFO was full, per normalization unit.
-    High values indicate backpressure in LDS data return path, which may stall wavefronts
+    The number of cycles where the LDS data FIFO was full, per normalization unit. High
+    values indicate backpressure in LDS data return path, which may stall wavefronts
     waiting for LDS read/atomic results.
 lds.load:
   name: LDS LOAD
   formula: SUM(SQ_INSTS_LDS_LOAD) / SUM($denom)
   unit: (Instructions + $normUnit)
-  description: >-
-    The total number of LDS load instructions per normalization unit.
+  description: The total number of LDS load instructions per normalization unit.
 lds.load_bw:
   name: LDS LOAD Bandwidth
   formula: 64 * SUM(SQ_INSTS_LDS_LOAD_BANDWIDTH) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
     The effective bandwidth of LDS load operations, accounting for the work-items
-    executed (execution mask). Calculated as the total bytes loaded from LDS divided
-    by the kernel duration.
+    executed (execution mask). Calculated as the total bytes loaded from LDS divided by
+    the kernel duration.
 lds.store:
   name: LDS STORE
   formula: SUM(SQ_INSTS_LDS_STORE) / SUM($denom)
   unit: (Instructions + $normUnit)
-  description: >-
-    The total number of LDS store instructions per normalization unit.
+  description: The total number of LDS store instructions per normalization unit.
 lds.store_bw:
   name: LDS STORE Bandwidth
   formula: 64 * SUM(SQ_INSTS_LDS_STORE_BANDWIDTH) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
     The effective bandwidth of LDS store operations, accounting for the work-items
-    executed (execution mask). Calculated as the total bytes stored to LDS divided
-    by the kernel duration.
+    executed (execution mask). Calculated as the total bytes stored to LDS divided by
+    the kernel duration.

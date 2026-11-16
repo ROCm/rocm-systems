@@ -28,8 +28,7 @@ glarb.glarba_util:
   name: GLARBA Utilization
   formula: 100 * SUM(GLARBA_BUSY_sum) / SUM(GLARBA_CYCLE_sum)
   unit: Percent
-  description: >-
-    Percentage of cycles the Graphic Level Arbiter is processing requests.
+  description: Percentage of cycles the Graphic Level Arbiter is processing requests.
 glarb.glarbc_buffer_full_stall:
   name: GLARBC Buffer Full Stall
   formula: 100 * SUM(GLARBC_STALL_BUFFER_FULL_sum) / SUM(GLARBC_BUSY_sum)
@@ -73,8 +72,7 @@ glarb.glarbc_req_atomic_without_return:
   name: GLARBC Requests - Atomic Without Return
   formula: SUM(GLARBC_REQ_ATOMIC_WITHOUT_RET_sum) / SUM($denom)
   unit: (Requests + $normUnit)
-  description: >-
-    Number of non-returning Graphics Level Arbiter atomic requests.
+  description: Number of non-returning Graphics Level Arbiter atomic requests.
 glarb.glarbc_req_bw_rd:
   name: GLARBC Request Bandwidth - Read
   formula: SUM(GLARBC_REQ_READ_32B_sum * 32 + GLARBC_REQ_READ_64B_sum * 64 + GLARBC_REQ_READ_128B_sum * 128 + GLARBC_REQ_READ_256B_sum * 256) / SUM(End_Timestamp - Start_Timestamp)
@@ -105,4 +103,5 @@ glarb.glarbc_util:
   formula: 100 * SUM(GLARBC_BUSY_sum) / SUM(GLARBC_CYCLE_sum)
   unit: Percent
   description: >-
-    Percentage of cycles the Graphic Level Arbiter staging buffer is forwarding requests.
+    Percentage of cycles the Graphic Level Arbiter staging buffer is forwarding
+    requests.

@@ -35,8 +35,7 @@ ea.hdm_bw_rd:
   formula: 32 * SUM(GC_EA_SE_SARB_HDM_RD_SIZE_REQ_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
-    Total read bandwidth from Host Data Memory (unified memory pages) through the
-    EA.
+    Total read bandwidth from Host Data Memory (unified memory pages) through the EA.
 ea.hdm_bw_wr:
   name: HDM Bandwidth - Write
   formula: 32 * SUM(GC_EA_SE_SARB_HDM_WR_SIZE_REQ_sum) / SUM(End_Timestamp - Start_Timestamp)
@@ -94,20 +93,17 @@ ea.outstanding_req_io_rd:
   name: EA Outstanding Requests - IO Read
   formula: SUM(GC_EA_SE_SARB_OUTSTANDING_IO_RD_sum) / SUM(GC_EA_SE_BUSY_CYCLE_sum)
   unit: Requests
-  description: >-
-    Average in-flight PCI-E and other IO read requests from EA to SDP.
+  description: Average in-flight PCI-E and other IO read requests from EA to SDP.
 ea.outstanding_req_io_wr:
   name: EA Outstanding Requests - IO Write
   formula: SUM(GC_EA_SE_SARB_OUTSTANDING_IO_WR_sum) / SUM(GC_EA_SE_BUSY_CYCLE_sum)
   unit: Requests
-  description: >-
-    Average in-flight PCI-E and other IO write requests from EA to SDP.
+  description: Average in-flight PCI-E and other IO write requests from EA to SDP.
 ea.outstanding_req_probe_req:
   name: EA Outstanding Requests - Probe Request
   formula: SUM(GC_EA_SE_PROBE_OUTSTANDING_REQ_sum) / SUM(GC_EA_SE_BUSY_CYCLE_sum)
   unit: Requests
-  description: >-
-    Time-averaged number of in-flight cache coherence probe requests from EA.
+  description: Time-averaged number of in-flight cache coherence probe requests from EA.
 ea.outstanding_req_probe_response:
   name: EA Outstanding Requests - Probe Response
   formula: SUM(GC_EA_SE_PROBE_OUTSTANDING_RESP_sum) / SUM(GC_EA_SE_BUSY_CYCLE_sum)
@@ -160,5 +156,5 @@ ea.util:
   formula: 100 * SUM(GC_EA_SE_BUSY_CYCLE_sum) / SUM(GC_EA_SE_CYCLE_sum)
   unit: Percent
   description: >-
-    Percentage of cycles the Efficiency Arbiter is routing requests toward HBM, IO,
-    or fabric.
+    Percentage of cycles the Efficiency Arbiter is routing requests toward HBM, IO, or
+    fabric.

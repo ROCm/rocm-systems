@@ -58,6 +58,43 @@ COLLECTABLES = textwrap.dedent("""\
     hbm_write_bytes: ((TCC_EA0_WRREQ_sum-TCC_EA0_WRREQ_64B_sum)*32)
 """)
 
+# Metric library descriptions: one too long for its line, one folded although it fits
+# the key line, one folded too narrow, and an empty one
+LDS_UTIL = (
+    "Percentage of the kernel's duration the LDS was busy executing LDS instructions, "
+    "averaged over compute units."
+)
+UNFILLED_DESCRIPTIONS = textwrap.dedent(f"""\
+    lds.util:
+      description: {LDS_UTIL}
+    lds.insts:
+      description: >-
+        Number of LDS instructions issued.
+    lds.bank_conflict_rate:
+      description: >-
+        Percentage of LDS cycles spent
+        on bank conflicts. High conflict rates reduce effective LDS bandwidth.
+      unit: pct
+    lds.unused:
+      description: ''
+""")
+
+FILLED_DESCRIPTIONS = textwrap.dedent("""\
+    lds.util:
+      description: >-
+        Percentage of the kernel's duration the LDS was busy executing LDS instructions,
+        averaged over compute units.
+    lds.insts:
+      description: Number of LDS instructions issued.
+    lds.bank_conflict_rate:
+      description: >-
+        Percentage of LDS cycles spent on bank conflicts. High conflict rates reduce
+        effective LDS bandwidth.
+      unit: pct
+    lds.unused:
+      description: ''
+""")
+
 
 def write_config(tmp_path, relative_path, text):
     path = tmp_path / relative_path
@@ -253,6 +290,19 @@ def test_panel_collectables_fixed_in_place(tmp_path):
         "((TCC_EA0_WRREQ_sum-TCC_EA0_WRREQ_64B_sum)*32)",
         "(TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum) * 32",
     )
+
+
+def test_library_descriptions_filled(tmp_path):
+    """Metric library descriptions are filled to 88 columns, on the key line when they
+    fit there."""
+    path = write_config(
+        tmp_path, "metric_library/gfx950/lds.yaml", UNFILLED_DESCRIPTIONS
+    )
+    is_valid, issues = check_file(path)
+    assert not is_valid
+    assert issues == ["  descriptions need filling to 88 columns"]
+    check_file(path, fix=True)
+    assert path.read_text(encoding="utf-8") == FILLED_DESCRIPTIONS
 
 
 if __name__ == "__main__":

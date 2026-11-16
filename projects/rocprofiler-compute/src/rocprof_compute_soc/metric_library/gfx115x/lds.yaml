@@ -13,9 +13,9 @@ lds.bank_conflict_rate:
   unit: Percent
   description: >-
     Percentage of LDS accesses that experienced bank conflicts. Conflicts occur when
-    multiple work-items in a wavefront access different addresses in the same LDS
-    bank. High conflict rates reduce effective LDS bandwidth. Restructuring data layouts
-    can help.
+    multiple work-items in a wavefront access different addresses in the same LDS bank.
+    High conflict rates reduce effective LDS bandwidth. Restructuring data layouts can
+    help.
 lds.bank_conflicts:
   name: LDS Bank Conflicts
   formula: AVG(SQC_LDS_BANK_CONFLICT)

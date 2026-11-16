@@ -7,8 +7,8 @@ spi.schedule_pipe_wave_occupancy:
   formula: AVG(SPI_CSQ_P0_OCCUPANCY + SPI_CSQ_P1_OCCUPANCY + SPI_CSQ_P2_OCCUPANCY + SPI_CSQ_P3_OCCUPANCY)
   unit: Wavefronts
   description: >-
-    Total number of waves occupying all scheduler-pipe queues. The SPI has 4 scheduler-pipes,
-    each with 8 hardware queues.
+    Total number of waves occupying all scheduler-pipe queues. The SPI has 4
+    scheduler-pipes, each with 8 hardware queues.
 spi.scheduler_pipe_fifo_full_rate:
   name: Scheduler-Pipe FIFO Full Rate
   formula: 100 * SUM(SPI_CS0_CRAWLER_STALL + SPI_CS1_CRAWLER_STALL + SPI_CS2_CRAWLER_STALL + SPI_CS3_CRAWLER_STALL) / SUM($GRBM_SPI_BUSY_PER_XCD * $se_per_gpu)

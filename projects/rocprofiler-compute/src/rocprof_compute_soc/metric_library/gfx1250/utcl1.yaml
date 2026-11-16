@@ -13,8 +13,7 @@ utcl1.total_req_from_utcl0:
   name: UTCL1 Total Requests from UTCL0
   formula: SUM(UTCL1_REQS_sum) / SUM($denom)
   unit: (Requests + $normUnit)
-  description: >-
-    Total address translation requests received by UTCL1 from UTCL0.
+  description: Total address translation requests received by UTCL1 from UTCL0.
 utcl1.total_returns_to_utcl0:
   name: UTCL1 Total Returns to UTCL0
   formula: SUM(UTCL1_RTNS_sum) / SUM($denom)

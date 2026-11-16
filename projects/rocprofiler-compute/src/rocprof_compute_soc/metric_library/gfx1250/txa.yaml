@@ -63,8 +63,8 @@ txa.bus_util_buffer_req:
   formula: 100 * SUM(TX_VCA_BUFFER_TOTAL_CYCLES_sum) / (2 * SUM(TX_VMW_GATE_EN1_sum))
   unit: Percent
   description: >-
-    Percentage of cycles the TXA-to-GL0 bus is carrying buffer (descriptor-based)
-    VMEM requests.
+    Percentage of cycles the TXA-to-GL0 bus is carrying buffer (descriptor-based) VMEM
+    requests.
 txa.bus_util_flat_req:
   name: TXA Bus Utilization - Flat Requests
   formula: 100 * SUM(TX_VCA_FLAT_TOTAL_CYCLES_sum) / (2 * SUM(TX_VMW_GATE_EN1_sum))
@@ -75,8 +75,7 @@ txa.bus_util_lds_req:
   name: TXA Bus Utilization - LDS Requests
   formula: 100 * SUM(TX_VCA_LDS_TOTAL_CYCLES_sum) / (2 * SUM(TX_VMW_GATE_EN1_sum))
   unit: Percent
-  description: >-
-    Percentage of cycles the TXA-to-GL0 bus is carrying LDS requests.
+  description: Percentage of cycles the TXA-to-GL0 bus is carrying LDS requests.
 txa.cluster_load_inst:
   name: TXA Cluster Load Instruction
   formula: SUM(TX_VCA_CLUSTER_LOAD_WAVEFRONT_sum) / SUM($denom)
@@ -97,8 +96,7 @@ txa.flat_atomics_insts:
   name: TXA Flat Atomics Instructions
   formula: SUM(TX_VCA_FLAT_ATOMIC_WAVEFRONTS_sum) / SUM($denom)
   unit: (Count + $normUnit)
-  description: >-
-    Number of flat-addressed atomic instructions processed by TXA.
+  description: Number of flat-addressed atomic instructions processed by TXA.
 txa.flat_insts:
   name: TXA Flat Instructions
   formula: SUM(TX_VCA_FLAT_WAVEFRONTS_sum) / SUM($denom)
@@ -113,8 +111,7 @@ txa.flat_store_insts:
   name: TXA Flat Store Instructions
   formula: SUM(TX_VCA_FLAT_STORE_WAVEFRONTS_sum) / SUM($denom)
   unit: (Count + $normUnit)
-  description: >-
-    Number of flat-addressed store instructions processed by TXA.
+  description: Number of flat-addressed store instructions processed by TXA.
 txa.gl0_atomics_bw:
   name: GL0 Atomics Bandwidth
   formula: SUM(TX_VCA_CACHE_ATOMIC_BANDWIDTH_BYTES_sum) / SUM(End_Timestamp - Start_Timestamp)
@@ -171,14 +168,12 @@ txa.req_bus_stall_rate:
   name: TXA Request Bus Stall Rate
   formula: 100 * SUM(TX_VMW_DATA_FIFO_STALL_sum) / (2 * SUM(TX_VMW_GATE_EN1_sum))
   unit: Percent
-  description: >-
-    Percentage of cycles the TXA-to-GL0 request data bus is stalled.
+  description: Percentage of cycles the TXA-to-GL0 request data bus is stalled.
 txa.req_bus_util:
   name: Shader-TXA Request Bus Utilization
   formula: 100 * SUM(TX_VCA_IN_ADDR_CYCLES_sum + TX_VCA_IN_DATA_CYCLES_sum) / SUM(2 * GRBM_GUI_ACTIVE_sum * $cu_per_gpu)
   unit: Percent
-  description: >-
-    Percentage of cycles the Shader-to-TXA request bus is carrying a request.
+  description: Percentage of cycles the Shader-to-TXA request bus is carrying a request.
 txa.req_bus_util_atomic_data:
   name: TXA Request Bus Utilization - Atomic Data
   formula: 100 * SUM(TX_VCA_ATOMIC_WRITE_DATA_INPUT_CYCLES_sum) / SUM(2 * GRBM_GUI_ACTIVE_sum * $cu_per_gpu)
@@ -234,5 +229,4 @@ txa.vmw_req_bus_util:
   name: TXA-VMW Request Bus Utilization
   formula: 100 * SUM(TX_VCA_VMEMREQ_CYCLES_sum) / SUM(2 * GRBM_GUI_ACTIVE_sum * $cu_per_gpu)
   unit: Percent
-  description: >-
-    Percentage of cycles the TXA-to-GL0 request data bus is carrying data.
+  description: Percentage of cycles the TXA-to-GL0 request data bus is carrying data.
