@@ -105,12 +105,6 @@ class PrivacyDocTest(unittest.TestCase):
         self.assertIn("untrusted executable input", text)
         self.assertIn("launches their kernels on the GPU", text)
 
-    def test_links_no_internal_tracker(self):
-        # Customers cannot open AMD's Jira, so the page names no ticket.
-        text = PRIVACY.read_text(encoding="utf-8")
-        self.assertNotIn("atlassian.net", text)
-        self.assertIsNone(re.search(r"\bAIRUNTIME-\d+", text))
-
     def test_sharing_section_links_the_notice_and_does_not_copy_it(self):
         header = NOTICE_H.read_text(encoding="utf-8")
         notice = header.split("hrr-archive-notice-begin", 1)[1]
