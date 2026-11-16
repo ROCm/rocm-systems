@@ -29,17 +29,22 @@ pub(crate) fn svm_range(pointer: *mut c_void, size: usize) -> Result<(u64, u64),
 /// Maps an HSA agent to its SVM location identifier.
 pub(crate) fn svm_location_from_agent(
     runtime: &HsaState,
+    service: &MemoryAdvice,
     agent: HsaAgent,
     allow_null: bool,
 ) -> Result<SvmLocation, Status> {
     if agent.handle == 0 && allow_null {
-        return Ok(SvmLocation::Undefined);
+        return Ok(SvmLocation::UnspecifiedOrMixed);
     }
     if runtime.is_cpu_agent(agent) {
         return Ok(SvmLocation::System);
     }
     let index = runtime.gpu_index(agent).ok_or(INVALID_AGENT)?;
-    Ok(SvmLocation::Device(runtime.gpus[index].endpoint.id))
+    Ok(SvmLocation::Device(
+        service
+            .target(&runtime.gpus[index].device)
+            .map_err(map_error)?,
+    ))
 }
 
 /// Maps a native SVM location identifier back to an HSA agent.
@@ -49,11 +54,11 @@ pub(crate) fn svm_agent_from_location(
 ) -> Result<HsaAgent, Status> {
     match location {
         SvmLocation::System => Ok(HsaAgent { handle: CPU_AGENT }),
-        SvmLocation::Undefined => Ok(HsaAgent { handle: 0 }),
+        SvmLocation::UnspecifiedOrMixed => Ok(HsaAgent { handle: 0 }),
         SvmLocation::Device(identity) => runtime
             .gpus
             .iter()
-            .position(|gpu| gpu.endpoint.id == identity)
+            .position(|gpu| gpu.endpoint.id == identity.endpoint_id())
             .map(|index| HsaAgent {
                 handle: GPU_AGENT_BASE + index as u64,
             })
@@ -61,22 +66,20 @@ pub(crate) fn svm_agent_from_location(
     }
 }
 
-/// Reserves attribute and agent-index storage for an SVM query.
-pub(crate) fn reserve_svm_attributes(
-    count: usize,
-) -> Result<(Vec<SvmAttribute>, Vec<Option<usize>>), Status> {
-    if count > SVM_MAX_ATTRIBUTES {
-        return Err(INVALID_ARGUMENT);
+/// Selects the provider of an explicit GPU, or requires a unique service.
+pub(crate) fn svm_service(
+    runtime: &HsaState,
+    agent: Option<HsaAgent>,
+) -> Result<MemoryAdvice, Status> {
+    let session = runtime.session().ok_or(ERROR)?;
+    if let Some(agent) = agent {
+        if let Some(index) = runtime.gpu_index(agent) {
+            return session
+                .memory_advice_for(&runtime.gpus[index].device)
+                .map_err(map_error);
+        }
     }
-    let mut attributes = Vec::new();
-    attributes
-        .try_reserve_exact(count.saturating_add(2))
-        .map_err(|_| OUT_OF_RESOURCES)?;
-    let mut indices = Vec::new();
-    indices
-        .try_reserve_exact(count)
-        .map_err(|_| OUT_OF_RESOURCES)?;
-    Ok((attributes, indices))
+    session.memory_advice().map_err(map_error)
 }
 
 /// Rolls back signal and allocation retention until the worker accepts them.
@@ -250,11 +253,11 @@ fn finish_async_copy_signal(
 
 #[allow(
     clippy::needless_pass_by_value,
-    reason = "the worker owns the session and stop token for its full asynchronous lifetime"
+    reason = "the worker owns the provider service and stop token for its full asynchronous lifetime"
 )]
 /// Runs SVM prefetch work after its dependency signals are satisfied.
 pub(crate) fn svm_prefetch_worker(
-    session: Session,
+    service: MemoryAdvice,
     stop: Arc<AtomicBool>,
     dependencies: &[HsaSignal],
     completion: HsaSignal,
@@ -266,11 +269,11 @@ pub(crate) fn svm_prefetch_worker(
         finish_async_signal(completion, false);
         return;
     }
-    let result = linux_interop::set_kfd_svm_attributes(
-        &session,
+    let result = service.prefetch(
         address,
         size,
-        &[SvmAttribute::PrefetchLocation(location)],
+        location,
+        rocddi::memory::advice::PrefetchCompletion::Migration,
     );
     finish_async_signal(completion, result.is_ok());
 }
@@ -1234,15 +1237,9 @@ fn execute_gpu_entries(
     }
 }
 
-/// Reads a system clock tick from the native device or host.
-fn system_copy_tick(device: Option<&Device>) -> Result<u64, CopyRouteFailure> {
-    let device = device.ok_or_else(|| CopyRouteFailure::retired(ERROR))?;
-    let counters = crate::runtime::clock_counters(device)
-        .map_err(|error| CopyRouteFailure::retired(map_error(error)))?;
-    if counters.system == 0 {
-        return Err(CopyRouteFailure::retired(ERROR));
-    }
-    Ok(counters.system)
+/// Reads the host profiling clock without requiring a GPU or native correlation.
+fn system_copy_tick() -> Result<u64, CopyRouteFailure> {
+    rocddi::host::clock::read().map_err(|error| CopyRouteFailure::retired(map_error(error)))
 }
 
 /// Builds an asynchronous copy profile from GPU copy timestamps.
@@ -1259,7 +1256,6 @@ fn execute_copy_route(
     route: AsyncCopyRoute,
     sdma_engine: Option<u32>,
     profile_enabled: bool,
-    host_clock: Option<&Device>,
     stop: &AtomicBool,
 ) -> Result<Option<AsyncCopyProfile>, CopyRouteFailure> {
     match route {
@@ -1272,9 +1268,7 @@ fn execute_copy_route(
             if stop.load(Ordering::Acquire) {
                 return Err(CopyRouteFailure::retired(ERROR));
             }
-            let start = profile_enabled
-                .then(|| system_copy_tick(host_clock))
-                .transpose()?;
+            let start = profile_enabled.then(system_copy_tick).transpose()?;
             let needs_loaded_mapping = matches!(&source, HostCopySource::LoadedAddress(..))
                 || matches!(&destination, HostCopyDestination::LoadedAddress(..));
             let guard = if needs_loaded_mapping {
@@ -1319,9 +1313,7 @@ fn execute_copy_route(
             unsafe { std::ptr::copy(source_host as *const u8, destination_host as *mut u8, size) };
             fence(Ordering::SeqCst);
             drop(guard);
-            let end = profile_enabled
-                .then(|| system_copy_tick(host_clock))
-                .transpose()?;
+            let end = profile_enabled.then(system_copy_tick).transpose()?;
             let profile = start.zip(end).map(|(start, end)| AsyncCopyProfile {
                 clock: AsyncCopyClock::System,
                 start,

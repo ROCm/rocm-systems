@@ -1263,8 +1263,8 @@ class TaskPostTuning_P2pScene {
     : scene_(kRanks, kP2pRank),
       schedule_(kRanks + kScheduleSpare),
       planPeers_(kRanks),
-      connectSend_(kRanks),
-      connectRecv_(kRanks),
+      connectSend_(kRanks * NCCL_MAX_CONNS),
+      connectRecv_(kRanks * NCCL_MAX_CONNS),
       channelPeers_(static_cast<size_t>(nP2pChannels) * kRanks),
       peerSlots_(static_cast<size_t>(nP2pChannels) * kRanks) {
     struct ncclComm* comm = scene_.comm();
@@ -1292,8 +1292,12 @@ class TaskPostTuning_P2pScene {
   TaskPrepScene* scene() { return &scene_; }
   ncclComm::P2pSchedulePair& ScheduleAt(int round) { return schedule_[round]; }
   struct ncclChannelPeer& ChannelPeer(int channelId, int peer) { return channelPeers_[Slot(channelId, peer)]; }
-  struct ncclConnector* Send(int channelId, int peer) { return &ChannelPeer(channelId, peer).send[kP2pConnIndex]; }
-  struct ncclConnector* Recv(int channelId, int peer) { return &ChannelPeer(channelId, peer).recv[kP2pConnIndex]; }
+  struct ncclConnector* Send(int channelId, int peer, int connIndex = kP2pConnIndex) {
+    return &ChannelPeer(channelId, peer).send[connIndex];
+  }
+  struct ncclConnector* Recv(int channelId, int peer, int connIndex = kP2pConnIndex) {
+    return &ChannelPeer(channelId, peer).recv[connIndex];
+  }
 
   struct ncclConnector* Conn(bool isSendNotRecv, int channelId, int peer) {
     return isSendNotRecv ? Send(channelId, peer) : Recv(channelId, peer);
@@ -1301,6 +1305,10 @@ class TaskPostTuning_P2pScene {
 
   const struct channelMasks& connectSend(int peer) const { return connectSend_[peer]; }
   const struct channelMasks& connectRecv(int peer) const { return connectRecv_[peer]; }
+  const struct channelMasks& connectForIndex(bool isSendNotRecv, int peer, int connIndex) const {
+    const auto& masks = isSendNotRecv ? connectSend_ : connectRecv_;
+    return masks[peer + CHANNEL_MASK_OFFSET(kRanks, connIndex)];
+  }
 
   const struct channelMasks& connect(bool isSendNotRecv, int peer) const {
     return isSendNotRecv ? connectSend_[peer] : connectRecv_[peer];
@@ -1308,6 +1316,9 @@ class TaskPostTuning_P2pScene {
 
   bool& Seen(bool isSendNotRecv, int peer) {
     return isSendNotRecv ? planPeers_[peer].sendSeen : planPeers_[peer].recvSeen;
+  }
+  bool& CeSeen(bool isSendNotRecv, int peer) {
+    return isSendNotRecv ? planPeers_[peer].sendCeSeen : planPeers_[peer].recvCeSeen;
   }
 
   std::vector<int> Channels(bool isSendNotRecv) {
@@ -1448,6 +1459,52 @@ TEST_F(TaskPostTuningMicrotest, P2pRecordPreconnect_FreshSendPeer_ClaimsItsSendC
   EXPECT_TRUE(TaskPostTuning_MaskHasExactly(p2p.connectSend(kP2pRank), {}));
 }
 
+TEST_F(TaskPostTuningMicrotest, P2pRecordPreconnect_CopyEngineUsesDedicatedSeenStateMaskAndCap) {
+  TaskPostTuning_P2pScene p2p;
+  ScopedHook connIndex(g_rcclP2pTaskConnIndex,
+                       [](ncclComm*, ncclFunc_t, int) { return NCCL_CONN_IDX_P2P_CE; });
+  ScopedHook taskParts(g_rcclP2pTaskParts, [](ncclComm*, ncclFunc_t, int) { return 1; });
+  bool needPreconnect = false;
+
+  ASSERT_EQ(ncclSuccess,
+            postTuneP2pRecordPreconnect(p2p.comm(), kP2pPeer, kIsSend, ncclFuncSend, &needPreconnect));
+
+  std::vector<int> ceChannels = p2p.Channels(kIsSend);
+  ceChannels.resize(1);
+  EXPECT_TRUE(needPreconnect);
+  EXPECT_TRUE(p2p.CeSeen(kIsSend, kP2pPeer));
+  EXPECT_FALSE(p2p.Seen(kIsSend, kP2pPeer));
+  EXPECT_TRUE(TaskPostTuning_MaskHasExactly(
+    p2p.connectForIndex(kIsSend, kP2pPeer, NCCL_CONN_IDX_P2P_CE), ceChannels));
+  EXPECT_TRUE(TaskPostTuning_MaskHasExactly(p2p.connectSend(kP2pPeer), {}));
+  for (int channelId : ceChannels) {
+    EXPECT_EQ(kConnected, p2p.Send(channelId, kP2pPeer, NCCL_CONN_IDX_P2P_CE)->hasSeen);
+    EXPECT_EQ(kNotConnected, p2p.Send(channelId, kP2pPeer, kP2pConnIndex)->hasSeen);
+  }
+}
+
+TEST_F(TaskPostTuningMicrotest, P2pRecordPreconnect_CopyEngineCapDoesNotNarrowP2pNetMask) {
+  TaskPostTuning_P2pScene p2p;
+  p2p.comm()->p2pNet = 1;
+  ScopedHook connIndex(g_rcclP2pTaskConnIndex,
+                       [](ncclComm*, ncclFunc_t, int) { return NCCL_CONN_IDX_P2P_CE; });
+  ScopedHook taskParts(g_rcclP2pTaskParts, [](ncclComm*, ncclFunc_t, int) { return 1; });
+  bool needPreconnect = false;
+
+  ASSERT_EQ(ncclSuccess,
+            postTuneP2pRecordPreconnect(p2p.comm(), kP2pPeer, kIsSend, ncclFuncSend, &needPreconnect));
+
+  std::vector<int> ceChannels = p2p.Channels(kIsSend);
+  ceChannels.resize(1);
+  EXPECT_TRUE(TaskPostTuning_MaskHasExactly(
+    p2p.connectForIndex(kIsSend, kP2pPeer, NCCL_CONN_IDX_P2P_CE), ceChannels));
+  EXPECT_TRUE(TaskPostTuning_MaskHasExactly(
+    p2p.connectForIndex(kIsSend, kP2pPeer, NCCL_CONN_IDX_P2P_NET), p2p.Channels(kIsSend)));
+  for (int channelId : p2p.Channels(kIsSend)) {
+    EXPECT_EQ(kConnected, p2p.Send(channelId, kP2pPeer, NCCL_CONN_IDX_P2P_NET)->p2pOnly);
+  }
+}
+
 TEST_F(TaskPostTuningMicrotest, P2pRecordPreconnect_FreshRecvPeer_ClaimsItsRecvChannelsAndLeavesTheSendSideAlone) {
   TaskPostTuning_P2pScene p2p;
   const std::vector<int> recvChannels = p2p.Channels(kIsRecv);
@@ -1475,7 +1532,8 @@ TEST_F(TaskPostTuningMicrotest, P2pRecordPreconnect_FreshRecvPeer_ClaimsItsRecvC
 TEST_F(TaskPostTuningMicrotest, P2pRecordPreconnect_ScatterWithFewerParts_ClaimsItsPartsAndLeavesTheRestForLater) {
   for (bool isSendNotRecv : {kIsSend, kIsRecv}) {
     TaskPostTuning_P2pScene p2p;
-    ScopedHook scatterParts(g_rcclP2pTaskParts, [](struct ncclComm* comm, ncclFunc_t collAPI) {
+    p2p.comm()->p2pNet = 1;
+    ScopedHook scatterParts(g_rcclP2pTaskParts, [](struct ncclComm* comm, ncclFunc_t collAPI, int) {
       return collAPI == ncclFuncScatter ? 1 : comm->p2pnChannelsPerPeer;
     });
     const std::vector<int> channels = p2p.Channels(isSendNotRecv);
@@ -1490,6 +1548,12 @@ TEST_F(TaskPostTuningMicrotest, P2pRecordPreconnect_ScatterWithFewerParts_Claims
     EXPECT_EQ(kConnected, p2p.Conn(isSendNotRecv, channels[0], kP2pPeer)->hasSeen);
     EXPECT_EQ(kNotConnected, p2p.Conn(isSendNotRecv, channels[1], kP2pPeer)->hasSeen);
     EXPECT_TRUE(TaskPostTuning_MaskHasExactly(p2p.connect(isSendNotRecv, kP2pPeer), {channels[0]}));
+    EXPECT_TRUE(TaskPostTuning_MaskHasExactly(
+      p2p.connectForIndex(isSendNotRecv, kP2pPeer, NCCL_CONN_IDX_P2P_NET), {channels[0]}));
+    EXPECT_EQ(kConnected,
+              (isSendNotRecv ? p2p.Send(channels[0], kP2pPeer, NCCL_CONN_IDX_P2P_NET) :
+                               p2p.Recv(channels[0], kP2pPeer, NCCL_CONN_IDX_P2P_NET))
+                ->p2pOnly);
 
     // The full-part task adds only the channel the Scatter left out.
     ASSERT_EQ(ncclSuccess,

@@ -61,6 +61,8 @@ struct TranslatedMemoryRequest {
   uint32_t data_offset = 0;
   uint32_t size = 0;
   uint64_t reordered_lane_mask = 0;
+  // Set during legacy KFD preflight; retained across deferred peer retries.
+  VmDataRoute route = VmDataRoute::Local;
 };
 
 /// @brief Retry state retained by a prepared translated memory instruction.
@@ -77,10 +79,15 @@ public:
   std::vector<uint8_t> reordered_data;
   std::size_t request_index = 0;
   std::size_t completed_bytes = 0;
+  VmTransferToken transfer_token;
   uint32_t atomic_lane = 0;
   uint64_t atomic_loaded_value = 0;
   bool initialized = false;
   bool atomic_loaded = false;
+  // A legacy binding may contain deferred peer requests. Retain the choice
+  // with its VM snapshot and request cursor across retries.
+  bool peer_data_route = false;
+  bool mixed_local_peer_route = false;
 };
 
 /// @brief Texel footprint captured at issue time for one filtered image instruction.
@@ -324,8 +331,18 @@ public:
   /// allocation base; per-lane destination offsets are carried in
   /// per_lane_lds_addr.
   uint32_t lds_base = 0;
-  bool lds_per_lane_addr = false; ///< Per-lane LDS endpoints of a load or store.
+  /// Read the store payload from LDS rather than VGPRs, as gfx1250 async stores
+  /// do. per_lane_lds_addr then holds each lane's LDS source address, or
+  /// kInvalidLdsAddress for a lane that reads no LDS bytes.
+  bool lds_src = false;
+  /// Per-lane LDS endpoints of a load or store: per_lane_lds_addr holds the LDS
+  /// destination (lds_dst) or source (lds_src) addresses.
+  bool lds_per_lane_addr = false;
   std::array<uint32_t, 64> per_lane_lds_addr = {};
+  /// For lds_src, the leading LDS bytes each lane reads from per_lane_lds_addr:
+  /// the bytes of its source inside the allocation. Bytes past them read zero.
+  /// Zero for lanes that read no LDS.
+  std::array<uint8_t, 64> per_lane_lds_src_bytes = {};
   bool cluster_multicast = false;  ///< Cluster async-to-LDS load: multicast LDS writes by M0 mask.
   uint32_t cluster_mcast_mask = 0; ///< Cluster workgroup destination mask captured at issue time.
   uint64_t issue_pc = 0;           ///< PC at which the instruction was issued (debug).

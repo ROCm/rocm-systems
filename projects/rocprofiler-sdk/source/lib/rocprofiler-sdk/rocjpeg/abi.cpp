@@ -35,7 +35,21 @@ namespace rocjpeg
 static_assert(ROCJPEG_RUNTIME_API_TABLE_MAJOR_VERSION == 0,
               "Major version updated for rocJPEG dispatch table");
 
+#if ROCJPEG_RUNTIME_API_TABLE_STEP_VERSION == 0
 ROCP_SDK_ENFORCE_ABI_VERSIONING(::RocJpegDispatchTable, 9)
+#endif
+
+#if ROCJPEG_RUNTIME_API_TABLE_STEP_VERSION == 1
+ROCP_SDK_ENFORCE_ABI_VERSIONING(::RocJpegDispatchTable, 11)
+#endif
+
+#if ROCJPEG_RUNTIME_API_TABLE_STEP_VERSION == 2
+ROCP_SDK_ENFORCE_ABI_VERSIONING(::RocJpegDispatchTable, 13)
+#endif
+
+#if ROCJPEG_RUNTIME_API_TABLE_STEP_VERSION == 3
+ROCP_SDK_ENFORCE_ABI_VERSIONING(::RocJpegDispatchTable, 14)
+#endif
 
 ROCP_SDK_ENFORCE_ABI(::RocJpegDispatchTable, pfn_rocjpeg_stream_create, 0)
 ROCP_SDK_ENFORCE_ABI(::RocJpegDispatchTable, pfn_rocjpeg_stream_parse, 1)
@@ -46,6 +60,20 @@ ROCP_SDK_ENFORCE_ABI(::RocJpegDispatchTable, pfn_rocjpeg_get_image_info, 5)
 ROCP_SDK_ENFORCE_ABI(::RocJpegDispatchTable, pfn_rocjpeg_decode, 6)
 ROCP_SDK_ENFORCE_ABI(::RocJpegDispatchTable, pfn_rocjpeg_decode_batched, 7)
 ROCP_SDK_ENFORCE_ABI(::RocJpegDispatchTable, pfn_rocjpeg_get_error_name, 8)
+
+#if ROCJPEG_RUNTIME_API_TABLE_STEP_VERSION >= 1
+ROCP_SDK_ENFORCE_ABI(::RocJpegDispatchTable, pfn_rocjpeg_decode_async, 9)
+ROCP_SDK_ENFORCE_ABI(::RocJpegDispatchTable, pfn_rocjpeg_decode_sync, 10)
+#endif
+
+#if ROCJPEG_RUNTIME_API_TABLE_STEP_VERSION >= 2
+ROCP_SDK_ENFORCE_ABI(::RocJpegDispatchTable, pfn_rocjpeg_decode_batched_async, 11)
+ROCP_SDK_ENFORCE_ABI(::RocJpegDispatchTable, pfn_rocjpeg_decode_batched_sync, 12)
+#endif
+
+#if ROCJPEG_RUNTIME_API_TABLE_STEP_VERSION >= 3
+ROCP_SDK_ENFORCE_ABI(::RocJpegDispatchTable, pfn_rocjpeg_get_decoder_caps, 13)
+#endif
 
 }  // namespace rocjpeg
 }  // namespace rocprofiler

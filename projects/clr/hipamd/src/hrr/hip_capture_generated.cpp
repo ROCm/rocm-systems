@@ -2459,18 +2459,6 @@ static hipError_t capture_hipGraphKernelNodeSetAttribute(hipGraphNode_t hNode, h
 }
 
 
-// Generated shim
-static hipError_t capture_hipGraphLaunch(hipGraphExec_t graphExec, hipStream_t stream) {
-  hipError_t r = g_real_table.hipGraphLaunch_fn(graphExec, stream);
-  if (r == hipSuccess) {
-    hrr_args_hipGraphLaunch a{};
-    a.ret         = static_cast<int32_t>(r);
-    a.graphExec = reinterpret_cast<uint64_t>(graphExec);
-    a.stream = reinterpret_cast<uint64_t>(stream);
-    hrr_cap::writer::write_event_raw(HRR_API_HIPGRAPHLAUNCH, &a.hdr, sizeof(a));
-  }
-  return r;
-}
 
 // Generated shim
 static hipError_t capture_hipGraphMemAllocNodeGetParams(hipGraphNode_t node, hipMemAllocNodeParams* pNodeParams) {
@@ -5682,18 +5670,6 @@ static hipError_t capture_hipEventRecord_spt(hipEvent_t event, hipStream_t strea
 
 
 
-// Generated shim
-static hipError_t capture_hipGraphLaunch_spt(hipGraphExec_t graphExec, hipStream_t stream) {
-  hipError_t r = g_real_table.hipGraphLaunch_spt_fn(graphExec, stream);
-  if (r == hipSuccess) {
-    hrr_args_hipGraphLaunch_spt a{};
-    a.ret         = static_cast<int32_t>(r);
-    a.graphExec = reinterpret_cast<uint64_t>(graphExec);
-    a.stream = reinterpret_cast<uint64_t>(stream);
-    hrr_cap::writer::write_event_raw(HRR_API_HIPGRAPHLAUNCH_SPT, &a.hdr, sizeof(a));
-  }
-  return r;
-}
 
 // Generated shim
 static hipError_t capture_hipStreamBeginCapture_spt(hipStream_t stream, hipStreamCaptureMode mode) {
@@ -8168,6 +8144,7 @@ extern hipError_t capture_hipGraphAddMemcpyNodeToSymbol(hipGraphNode_t* pGraphNo
 extern hipError_t capture_hipGraphExecKernelNodeSetParams(hipGraphExec_t hGraphExec, hipGraphNode_t node, const hipKernelNodeParams* pNodeParams);
 extern hipError_t capture_hipGraphExecMemcpyNodeSetParamsToSymbol(hipGraphExec_t hGraphExec, hipGraphNode_t node, const void* symbol, const void* src, size_t count, size_t offset, hipMemcpyKind kind);
 extern hipError_t capture_hipGraphKernelNodeSetParams(hipGraphNode_t node, const hipKernelNodeParams* pNodeParams);
+extern hipError_t capture_hipGraphLaunch(hipGraphExec_t graphExec, hipStream_t stream);
 extern hipError_t capture_hipGraphMemcpyNodeSetParamsToSymbol(hipGraphNode_t node, const void* symbol, const void* src, size_t count, size_t offset, hipMemcpyKind kind);
 extern hipError_t capture_hipHostRegister(void* hostPtr, size_t sizeBytes, unsigned int flags);
 extern hipError_t capture_hipHostUnregister(void* hostPtr);
@@ -8203,6 +8180,7 @@ extern hipError_t capture_hipMemcpy3D_spt(const struct hipMemcpy3DParms* p);
 extern hipError_t capture_hipMemcpy3DAsync_spt(const hipMemcpy3DParms* p, hipStream_t stream);
 extern hipError_t capture_hipLaunchCooperativeKernel_spt(const void* f, dim3 gridDim, dim3 blockDim, void** kernelParams, uint32_t sharedMemBytes, hipStream_t hStream);
 extern hipError_t capture_hipLaunchKernel_spt(const void* function_address, dim3 numBlocks, dim3 dimBlocks, void** args, size_t sharedMemBytes, hipStream_t stream);
+extern hipError_t capture_hipGraphLaunch_spt(hipGraphExec_t graphExec, hipStream_t stream);
 extern hipError_t capture_hipGraphAddBatchMemOpNode(hipGraphNode_t* phGraphNode, hipGraph_t hGraph, const hipGraphNode_t* dependencies, size_t numDependencies, const hipBatchMemOpNodeParams* nodeParams);
 extern hipError_t capture_hipGraphBatchMemOpNodeSetParams(hipGraphNode_t hNode, hipBatchMemOpNodeParams* nodeParams);
 extern hipError_t capture_hipGraphExecBatchMemOpNodeSetParams(hipGraphExec_t hGraphExec, hipGraphNode_t hNode, const hipBatchMemOpNodeParams* nodeParams);

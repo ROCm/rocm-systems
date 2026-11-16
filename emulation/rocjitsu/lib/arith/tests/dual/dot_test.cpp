@@ -4,6 +4,8 @@
 // Tests for VOPD dot-product wrappers.
 
 #include "dual/helpers.h"
+#include "rj_arith/detail/rj_arith_dot.h"
+#include "rj_arith/detail/rj_arith_dual.h"
 
 // Check VOPD results and status against the corresponding ordinary instruction.
 TEST(DualDot2accF32F16W32Gfx11, Arithmetic) {

@@ -44,6 +44,7 @@
 #include "util/simd.h"
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <bit>
 #include <cassert>
@@ -52,6 +53,7 @@
 #include <cstdint>
 #include <limits>
 #include <optional>
+#include <span>
 #include <type_traits>
 
 namespace rocjitsu::cdna5 {

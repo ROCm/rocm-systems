@@ -29,7 +29,7 @@
 namespace amd::roc {
 class Device;
 class Memory;
-struct ProfilingSignal;
+class ProfilingSignal;
 class Timestamp;
 
 constexpr static uint64_t kInvalidAqlSlot = std::numeric_limits<uint64_t>::max();
@@ -443,8 +443,9 @@ class VirtualGPU : public device::VirtualDevice {
     void NoteWaitsSubmitted() override;
     void NoteGpuWait(ProfilingSignal* signal) override;
 
-    //! Signals a set of GPU waits captured in one WaitingSignal call. Holding a reference keeps
-    //! the owner from rearming them while a waiter may still read the old use.
+    //! Signals a set of GPU waits captured in one WaitingSignal call outside a command (a command
+    //! pins its waits itself). Holding a reference keeps the owner from rearming them while a
+    //! waiter may still read the old use.
     struct PinnedWaits {
       std::vector<ProfilingSignal*> signals;
       uint64_t close_seq = 0;   //!< Uses below this sequence consume the waits
@@ -567,8 +568,9 @@ class VirtualGPU : public device::VirtualDevice {
 
       //! Write the metadata prefetch packet for the AQL slot at |index|.
       //! |use_movdir64b|: use atomic 64B writes (no sfence between body/header).
-      //! |device_mem_ring_buf|: ring buffer is WC over PCIe — when MOVDIR64B is
-      //!   unavailable, stages locally then NT-copies to avoid scattered WC stores.
+      //! |device_mem_ring_buf|: ring buffer is in device memory (WC on a PCIe host, WB on
+      //!   A+A) — stages locally then copies with MOVDIR64B or NT stores, so no scattered
+      //!   stores cross the bus or stay in the CPU cache.
       template <class AqlPacket>
       inline void SetMetadata(AqlPacket* packet, uint16_t header,
                               uint64_t index, bool use_movdir64b,
@@ -760,17 +762,17 @@ class VirtualGPU : public device::VirtualDevice {
 
   void updateCommandsState(amd::Command* list) const;
 
-  void submitReadMemory(amd::ReadMemoryCommand& cmd);
-  void submitWriteMemory(amd::WriteMemoryCommand& cmd);
-  void submitCopyMemory(amd::CopyMemoryCommand& cmd);
-  void submitCopyMemoryP2P(amd::CopyMemoryP2PCommand& cmd);
-  void submitBatchCopyMemory(amd::BatchCopyMemoryCommand& cmd);
-  void SubmitBatchCopyMemoryRect(amd::BatchCopyMemoryRectCommand& cmd);
-  void SubmitBatchWriteMemory(amd::BatchWriteMemoryCommand& cmd);
-  void SubmitBatchReadMemory(amd::BatchReadMemoryCommand& cmd);
-  void submitMapMemory(amd::MapMemoryCommand& cmd);
-  void submitUnmapMemory(amd::UnmapMemoryCommand& cmd);
-  void submitKernel(amd::NDRangeKernelCommand& cmd);
+  void submitReadMemory(amd::ReadMemoryCommand& cmd) override;
+  void submitWriteMemory(amd::WriteMemoryCommand& cmd) override;
+  void submitCopyMemory(amd::CopyMemoryCommand& cmd) override;
+  void submitCopyMemoryP2P(amd::CopyMemoryP2PCommand& cmd) override;
+  void submitBatchCopyMemory(amd::BatchCopyMemoryCommand& cmd) override;
+  void SubmitBatchCopyMemoryRect(amd::BatchCopyMemoryRectCommand& cmd) override;
+  void SubmitBatchWriteMemory(amd::BatchWriteMemoryCommand& cmd) override;
+  void SubmitBatchReadMemory(amd::BatchReadMemoryCommand& cmd) override;
+  void submitMapMemory(amd::MapMemoryCommand& cmd) override;
+  void submitUnmapMemory(amd::UnmapMemoryCommand& cmd) override;
+  void submitKernel(amd::NDRangeKernelCommand& cmd) override;
   bool submitKernelInternal(
       const amd::NDRangeContainer& sizes,                  //!< Workload sizes
       const amd::Kernel& kernel,                           //!< Kernel for execution
@@ -780,34 +782,34 @@ class VirtualGPU : public device::VirtualDevice {
       amd::NDRangeKernelCommand* vcmd = nullptr,           //!< Original launch command
       hsa_kernel_dispatch_packet_t* aql_packet = nullptr,  //!< Scheduler launch
       bool attach_signal = false);
-  void submitNativeFn(amd::NativeFnCommand& cmd);
-  void submitMarker(amd::Marker& cmd);
+  void submitNativeFn(amd::NativeFnCommand& cmd) override;
+  void submitMarker(amd::Marker& cmd) override;
   void CompleteCpuWait(amd::Command& cmd) override;
-  void submitAccumulate(amd::AccumulateCommand& cmd);
-  void submitAcquireExtObjects(amd::AcquireExtObjectsCommand& cmd);
-  void submitReleaseExtObjects(amd::ReleaseExtObjectsCommand& cmd);
-  void submitPerfCounter(amd::PerfCounterCommand& cmd);
+  void submitAccumulate(amd::AccumulateCommand& cmd) override;
+  void submitAcquireExtObjects(amd::AcquireExtObjectsCommand& cmd) override;
+  void submitReleaseExtObjects(amd::ReleaseExtObjectsCommand& cmd) override;
+  void submitPerfCounter(amd::PerfCounterCommand& cmd) override;
 
-  void flush(amd::Command* list = nullptr, bool wait = false);
-  void submitFillMemory(amd::FillMemoryCommand& cmd);
-  void submitStreamOperation(amd::StreamOperationCommand& cmd);
-  void submitBatchMemoryOperation(amd::BatchMemoryOperationCommand& cmd);
-  void submitVirtualMap(amd::VirtualMapCommand& cmd);
-  void submitMigrateMemObjects(amd::MigrateMemObjectsCommand& cmd);
+  void flush(amd::Command* list = nullptr, bool wait = false) override;
+  void submitFillMemory(amd::FillMemoryCommand& cmd) override;
+  void submitStreamOperation(amd::StreamOperationCommand& cmd) override;
+  void submitBatchMemoryOperation(amd::BatchMemoryOperationCommand& cmd) override;
+  void submitVirtualMap(amd::VirtualMapCommand& cmd) override;
+  void submitMigrateMemObjects(amd::MigrateMemObjectsCommand& cmd) override;
 
-  void submitSvmFreeMemory(amd::SvmFreeMemoryCommand& cmd);
-  void submitSvmCopyMemory(amd::SvmCopyMemoryCommand& cmd);
-  void submitSvmFillMemory(amd::SvmFillMemoryCommand& cmd);
-  void submitSvmMapMemory(amd::SvmMapMemoryCommand& cmd);
-  void submitSvmUnmapMemory(amd::SvmUnmapMemoryCommand& cmd);
-  void submitSvmPrefetchAsync(amd::SvmPrefetchAsyncCommand& cmd);
-  void SubmitSvmPrefetchBatchAsync(amd::SvmPrefetchBatchAsyncCommand& cmd);
-  void SubmitSvmDiscardBatchAsync(amd::SvmDiscardBatchAsyncCommand& cmd);
-  virtual void submitSignal(amd::SignalCommand& cmd) {}
-  virtual void submitMakeBuffersResident(amd::MakeBuffersResidentCommand& cmd) {}
+  void submitSvmFreeMemory(amd::SvmFreeMemoryCommand& cmd) override;
+  void submitSvmCopyMemory(amd::SvmCopyMemoryCommand& cmd) override;
+  void submitSvmFillMemory(amd::SvmFillMemoryCommand& cmd) override;
+  void submitSvmMapMemory(amd::SvmMapMemoryCommand& cmd) override;
+  void submitSvmUnmapMemory(amd::SvmUnmapMemoryCommand& cmd) override;
+  void submitSvmPrefetchAsync(amd::SvmPrefetchAsyncCommand& cmd) override;
+  void SubmitSvmPrefetchBatchAsync(amd::SvmPrefetchBatchAsyncCommand& cmd) override;
+  void SubmitSvmDiscardBatchAsync(amd::SvmDiscardBatchAsyncCommand& cmd) override;
+  void submitSignal(amd::SignalCommand& cmd) override {}
+  void submitMakeBuffersResident(amd::MakeBuffersResidentCommand& cmd) override {}
 
-  void submitThreadTraceMemObjects(amd::ThreadTraceMemObjectsCommand& cmd) {}
-  void submitThreadTrace(amd::ThreadTraceCommand& vcmd) {}
+  void submitThreadTraceMemObjects(amd::ThreadTraceMemObjectsCommand& cmd) override {}
+  void submitThreadTrace(amd::ThreadTraceCommand& vcmd) override {}
 
   virtual void submitExternalSemaphoreCmd(amd::ExternalSemaphoreCmd& cmd) override;
 
@@ -823,9 +825,6 @@ class VirtualGPU : public device::VirtualDevice {
    * @return bool true if Wait returned successfully, false otherwise
    */
   bool releaseGpuMemoryFence(bool skip_copy_wait = false);
-  //! An armed gate signal for a graph end marker (DEBUG_CLR_GRAPH_FAST_LAUNCH) from the device's
-  //! pool, nullptr if none
-  ProfilingSignal* AcquireGateSignal();
   //! Issues the pending fork wait (DEBUG_CLR_GRAPH_FAST_LAUNCH) as a barrier without signal
   void FlushPendingForkWait();
   //! Drops the pending fork wait and its reference
@@ -899,12 +898,12 @@ class VirtualGPU : public device::VirtualDevice {
   void* allocKernArg(size_t size, size_t alignment);
   //! Returns the size of one managed kernarg pool chunk.
   size_t KernArgPoolChunkSize() const;
-  bool isFenceDirty() const { return fence_dirty_.load(std::memory_order_acquire); }
+  bool isFenceDirty() const override { return fence_dirty_.load(std::memory_order_acquire); }
   void setFenceDirty(bool state) { fence_dirty_.store(state, std::memory_order_release); }
   void WaitCompleteSignal(hsa_signal_t signal);
 
-  void HiddenHeapInit();
-  uint64_t getQueueID();
+  void HiddenHeapInit() override;
+  uint64_t getQueueID() override;
 
   //! Add completion signal to the scheduler queue thread's event list.
   //! Wakes the scheduler queue thread if it's sleeping.
@@ -989,7 +988,8 @@ class VirtualGPU : public device::VirtualDevice {
   bool dispatchCounterAqlPacket(hsa_ext_amd_aql_pm4_packet_t* packet, const uint32_t gfxVersion,
                                 bool blocking, const hsa_ven_amd_aqlprofile_1_00_pfn_t* extApi);
   void dispatchBarrierPacket(uint16_t packetHeader, bool skipSignal = false,
-                             hsa_signal_t signal = hsa_signal_t{0}, bool depSignalsSet = false);
+                             hsa_signal_t signal = hsa_signal_t{0}, bool depSignalsSet = false,
+                             bool skipTs = false);
   void dispatchBarrierValuePacket(uint16_t packetHeader, bool resolveDepSignal = false,
                                   hsa_signal_t signal = hsa_signal_t{0},
                                   hsa_signal_value_t value = 0, hsa_signal_value_t mask = 0,
@@ -1069,13 +1069,17 @@ class VirtualGPU : public device::VirtualDevice {
   //! Record the last write index and whether the last packet is idle-trackable. Only tracker-owned
   //! signals (from Barriers().ActiveSignal()) qualify; set skip_signal for externally-provided or
   //! absent completion signals. IsQueueIdle() reads the tracker-owned signal at check time.
+  inline void TrackQueueProgress(hsa_signal_t completion_signal, uint64_t index,
+                                 bool skip_signal = false) {
+    last_write_index_ = index;
+    if (!skip_signal && completion_signal.handle != 0) {
+      last_packet_with_signal_index_ = index;
+    }
+  }
   template <typename AqlPacket>
   inline void TrackQueueProgress(const AqlPacket& packet, uint64_t index,
                                  bool skip_signal = false) {
-    last_write_index_ = index;
-    if (!skip_signal && packet.completion_signal.handle != 0) {
-      last_packet_with_signal_index_ = index;
-    }
+    TrackQueueProgress(packet.completion_signal, index, skip_signal);
   }
 
   //! Returns true if the queue is considered as idle, i.e. all submitted packets are complete.
