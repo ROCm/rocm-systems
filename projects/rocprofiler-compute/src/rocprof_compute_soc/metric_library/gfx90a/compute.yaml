@@ -359,8 +359,7 @@ compute.vmem_util:
   unit: Percent
   description: >-
     Indicates what percent of the kernel's duration the VMEM unit was busy executing
-    instructions, including both global/generic and spill/scratch operations (see the
-    VMEM instruction count metrics) for more detail). Does not include VALU operations.
-    Computed as the ratio of the total number of cycles spent by the scheduler issuing
-    VMEM instructions over the total CU cycles.
+    instructions, including both global/generic and spill/scratch operations. Does not
+    include VALU operations. Computed as the ratio of the total number of cycles spent
+    by the scheduler issuing VMEM instructions over the total CU cycles.
   peak: 100

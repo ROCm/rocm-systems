@@ -115,15 +115,15 @@ l2.hits:
   formula: SUM(TCC_HIT_sum) / SUM($denom)
   unit: (Hits + $normUnit)
   description: >-
-    The total number of requests to the L2 from all clients that hit in the cache. As
-    noted in the Speed-of-Light section, this includes hit-on-miss requests.
+    The total number of requests to the L2 from all clients that hit in the cache. This
+    includes hit-on-miss requests.
 l2.misses:
   name: L2 Misses
   formula: SUM(TCC_MISS_sum) / SUM($denom)
   unit: (Misses + $normUnit)
   description: >-
-    The total number of requests to the L2 from all clients that miss in the cache. As
-    noted in the Speed-of-Light section, these do not include hit-on-miss requests.
+    The total number of requests to the L2 from all clients that miss in the cache.
+    These do not include hit-on-miss requests.
 l2.nc_req:
   name: L2 NC Requests
   formula: SUM(TCC_NC_REQ_sum) / SUM($denom)

@@ -23,7 +23,7 @@ compute.inst_mix_salu:
     The total number of scalar arithmetic logic unit (SALU) operations issued. Typically
     these are used for address calculations, literal constants, and other operations
     that are provably uniform across a wavefront. Although scalar memory (SMEM)
-    operations are issued by the SALU, they are counted separately in this section.
+    operations are issued by the SALU, they are counted separately.
 compute.inst_mix_smem:
   name: SMEM Instructions
   formula: SUM(SQ_INSTS_SMEM) / SUM($denom)
