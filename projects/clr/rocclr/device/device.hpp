@@ -371,6 +371,9 @@ struct Info : public amd::EmbeddedObject {
   //! Size of L2 Cache in bytes.
   uint32_t l2CacheSize_;
 
+  //! Size of L3 cache in bytes. 0 when no cache information is available.
+  uint32_t l3CacheSize_;
+
   //! Maximum persisting L2 cache size in bytes.
   size_t persistingL2CacheMaxSize_;
 

@@ -141,6 +141,12 @@ device:
   Unit_hipGetDeviceAttribute_hipDeviceAttributeHostAllocDmaBufSupported:
     <<: *level_default
     tags: [query]
+  Unit_hipGetDeviceAttribute_hipDeviceAttributeL3CacheSize:
+    <<: *level_default
+    tags: [query]
+  Unit_hipGetDeviceAttribute_L3CacheSize_HsaConsistency:
+    <<: *level_default
+    tags: [query]
   Unit_hipGetDeviceCount_NegTst:
     <<: *level_default
     tags: [query, P0]

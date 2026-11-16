@@ -238,6 +238,9 @@ hipError_t hipDeviceGetAttribute(int* pi, hipDeviceAttribute_t attr, int device)
     case hipDeviceAttributeL2CacheSize:
       *pi = prop.l2CacheSize;
       break;
+    case hipDeviceAttributeL3CacheSize:
+      *pi = std::min<uint32_t>(g_devices[device]->devices()[0]->info().l3CacheSize_, int32_max);
+      break;
     case hipDeviceAttributeLocalL1CacheSupported:
       *pi = prop.localL1CacheSupported;
       break;

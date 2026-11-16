@@ -5,6 +5,8 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 ## HIP 7.18.0 for ROCm 10.3.0
 
 ### Added
+
+* New AMD-specific device attribute `hipDeviceAttributeL3CacheSize`, queryable with `hipDeviceGetAttribute`. It reports the size of the device L3 (Infinity Cache / MALL) in bytes, capped at `INT_MAX`, and returns `0` when no cache information is available. The attribute is populated by the ROCm (ROCr) backend; the PAL backend reports `0`. On a partitioned AMD Instinct GPU the value is the partition's L3 share, which the kernel scales by the memory-partition (NPS) mode rather than by the compute-partition count. The existing `hipDeviceProp_t::l2CacheSize` and `hipDeviceAttributeL2CacheSize` are unchanged.
 * New HIP APIs
     - Memory Management: support for API parity with corresponding CUDA API.
       * `hipMemcpyWithAttributesAsync` performs a single asynchronous 1D copy with the attributes
