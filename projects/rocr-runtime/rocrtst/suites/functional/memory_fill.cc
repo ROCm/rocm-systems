@@ -245,7 +245,10 @@ static hsa_status_t LongDependencyBlockingCopy(hsa_signal_t signal, void* dst,
                                                size, 0, nullptr, signal);
   if (err != HSA_STATUS_SUCCESS) return err;
 
-  if (hsa_signal_wait_scacquire(signal, HSA_SIGNAL_CONDITION_LT, 1, UINT64_MAX,
+  // Same bound as LongDependencyRelease. An unbounded wait here hangs the
+  // shard if SDMA drops this staging copy's completion write.
+  if (hsa_signal_wait_scacquire(signal, HSA_SIGNAL_CONDITION_LT, 1,
+                                kLongDependencyCompletionTimeoutNs,
                                 HSA_WAIT_STATE_BLOCKED) != 0) {
     return HSA_STATUS_ERROR;
   }
@@ -290,21 +293,43 @@ void MemoryFill::LongDependencyCopyTest(void) {
     return;
   }
 
+  // A full-profile agent does not issue these copies on SDMA. The
+  // host-to-device blit is a kernel, and the rectangle copy returns
+  // HSA_STATUS_ERROR_OUT_OF_RESOURCES. A platform filter cannot tell that
+  // agent apart: it only distinguishes real hardware, an emulator, and the
+  // FFM simulator.
+  if (profile() != HSA_PROFILE_BASE) {
+    std::cout << "  Skipping: the dependency poll under test is issued only "
+                 "on HSA_PROFILE_BASE" << std::endl;
+    return;
+  }
+
+  // Set while a submitted copy may still be running. The scope guards then
+  // leave its buffers and signals mapped, so a late completion write does
+  // not fault and the failure stays a test failure.
+  bool copy_outstanding = false;
+
   hsa_signal_t xfer;
   ASSERT_SUCCESS(hsa_signal_create(1, 0, nullptr, &xfer));
-  MAKE_SCOPE_GUARD([&]() { hsa_signal_destroy(xfer); });
+  MAKE_SCOPE_GUARD([&]() {
+    if (!copy_outstanding) hsa_signal_destroy(xfer);
+  });
 
   uint32_t* host_buf = nullptr;
   ASSERT_SUCCESS(hsa_amd_memory_pool_allocate(
       cpu_pool(), kLongLinearBytes, 0, reinterpret_cast<void**>(&host_buf)));
-  MAKE_SCOPE_GUARD([&]() { hsa_amd_memory_pool_free(host_buf); });
+  MAKE_SCOPE_GUARD([&]() {
+    if (!copy_outstanding) hsa_amd_memory_pool_free(host_buf);
+  });
   ASSERT_SUCCESS(hsa_amd_agents_allow_access(1, gpu_device1(), nullptr,
                                              host_buf));
 
   void* dev_buf = nullptr;
   ASSERT_SUCCESS(hsa_amd_memory_pool_allocate(device_pool(), kLongLinearBytes,
                                               0, &dev_buf));
-  MAKE_SCOPE_GUARD([&]() { hsa_amd_memory_pool_free(dev_buf); });
+  MAKE_SCOPE_GUARD([&]() {
+    if (!copy_outstanding) hsa_amd_memory_pool_free(dev_buf);
+  });
 
   const size_t kLinearDwords = kLongLinearBytes / sizeof(uint32_t);
   std::vector<uint32_t> pattern(kLinearDwords);
@@ -314,34 +339,44 @@ void MemoryFill::LongDependencyCopyTest(void) {
 
   hsa_signal_t gate;
   ASSERT_SUCCESS(hsa_signal_create(1, 0, nullptr, &gate));
-  MAKE_SCOPE_GUARD([&]() { hsa_signal_destroy(gate); });
+  MAKE_SCOPE_GUARD([&]() {
+    if (!copy_outstanding) hsa_signal_destroy(gate);
+  });
 
   hsa_signal_t done;
   ASSERT_SUCCESS(hsa_signal_create(1, 0, nullptr, &done));
-  MAKE_SCOPE_GUARD([&]() { hsa_signal_destroy(done); });
+  MAKE_SCOPE_GUARD([&]() {
+    if (!copy_outstanding) hsa_signal_destroy(done);
+  });
 
   for (int iter = 0; iter < kLongDependencyRepeats; ++iter) {
     for (size_t i = 0; i < kLinearDwords; ++i) {
       host_buf[i] = 0xDEADBEEFu;
     }
+    copy_outstanding = true;
     ASSERT_SUCCESS(LongDependencyBlockingCopy(xfer, dev_buf, *gpu_device1(),
                                               host_buf, *cpu_device(),
                                               kLongLinearBytes));
+    copy_outstanding = false;
     memcpy(host_buf, pattern.data(), kLongLinearBytes);
 
     hsa_signal_store_screlease(gate, 1);
     hsa_signal_store_screlease(done, 1);
+    copy_outstanding = true;
     ASSERT_SUCCESS(hsa_amd_memory_async_copy(dev_buf, *gpu_device1(), host_buf,
                                              *cpu_device(), kLongLinearBytes, 1,
                                              &gate, done));
     if (!LongDependencyRelease(gate, done, "linear copy")) {
       return;
     }
+    copy_outstanding = false;
 
     memset(host_buf, 0, kLongLinearBytes);
+    copy_outstanding = true;
     ASSERT_SUCCESS(LongDependencyBlockingCopy(xfer, host_buf, *cpu_device(),
                                               dev_buf, *gpu_device1(),
                                               kLongLinearBytes));
+    copy_outstanding = false;
     EXPECT_EQ(0, memcmp(host_buf, pattern.data(), kLongLinearBytes))
         << "linear copy iteration " << iter
         << " destination does not hold the source contents";
@@ -355,12 +390,16 @@ void MemoryFill::LongDependencyCopyTest(void) {
   uint8_t* rect_src = nullptr;
   ASSERT_SUCCESS(hsa_amd_memory_pool_allocate(
       cpu_pool(), src_bytes, 0, reinterpret_cast<void**>(&rect_src)));
-  MAKE_SCOPE_GUARD([&]() { hsa_amd_memory_pool_free(rect_src); });
+  MAKE_SCOPE_GUARD([&]() {
+    if (!copy_outstanding) hsa_amd_memory_pool_free(rect_src);
+  });
 
   uint8_t* rect_host_dst = nullptr;
   ASSERT_SUCCESS(hsa_amd_memory_pool_allocate(
       cpu_pool(), dst_bytes, 0, reinterpret_cast<void**>(&rect_host_dst)));
-  MAKE_SCOPE_GUARD([&]() { hsa_amd_memory_pool_free(rect_host_dst); });
+  MAKE_SCOPE_GUARD([&]() {
+    if (!copy_outstanding) hsa_amd_memory_pool_free(rect_host_dst);
+  });
 
   ASSERT_SUCCESS(hsa_amd_agents_allow_access(1, gpu_device1(), nullptr,
                                              rect_src));
@@ -370,7 +409,9 @@ void MemoryFill::LongDependencyCopyTest(void) {
   void* rect_dst = nullptr;
   ASSERT_SUCCESS(hsa_amd_memory_pool_allocate(device_pool(), dst_bytes, 0,
                                               &rect_dst));
-  MAKE_SCOPE_GUARD([&]() { hsa_amd_memory_pool_free(rect_dst); });
+  MAKE_SCOPE_GUARD([&]() {
+    if (!copy_outstanding) hsa_amd_memory_pool_free(rect_dst);
+  });
 
   for (size_t y = 0; y < kLongRectHeight; ++y) {
     for (size_t x = 0; x < kLongRectWidth; ++x) {
@@ -388,23 +429,29 @@ void MemoryFill::LongDependencyCopyTest(void) {
 
   for (int iter = 0; iter < kLongDependencyRepeats; ++iter) {
     memset(rect_host_dst, 0xA5, dst_bytes);
+    copy_outstanding = true;
     ASSERT_SUCCESS(LongDependencyBlockingCopy(xfer, rect_dst, *gpu_device1(),
                                               rect_host_dst, *cpu_device(),
                                               dst_bytes));
+    copy_outstanding = false;
 
     hsa_signal_store_screlease(gate, 1);
     hsa_signal_store_screlease(done, 1);
+    copy_outstanding = true;
     ASSERT_SUCCESS(hsa_amd_memory_async_copy_rect(
         &dst_pitched, &offset, &src_pitched, &offset, &range, *gpu_device1(),
         hsaHostToDevice, 1, &gate, done));
     if (!LongDependencyRelease(gate, done, "pitched 2D copy")) {
       return;
     }
+    copy_outstanding = false;
 
     memset(rect_host_dst, 0, dst_bytes);
+    copy_outstanding = true;
     ASSERT_SUCCESS(LongDependencyBlockingCopy(xfer, rect_host_dst, *cpu_device(),
                                               rect_dst, *gpu_device1(),
                                               dst_bytes));
+    copy_outstanding = false;
 
     for (size_t y = 0; y < kLongRectHeight; ++y) {
       EXPECT_EQ(0, memcmp(rect_host_dst + y * kLongRectDstPitch,
