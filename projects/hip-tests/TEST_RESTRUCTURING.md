@@ -30,7 +30,7 @@ first; nothing here authorizes editing source trees.
 
 ## 1. Inventory findings
 
-These findings summarize the current catalog of 42 inventory records. Each is
+These findings summarize the current catalog of 43 inventory records. Each is
 grounded in [`test_inventory.yaml`](test_inventory.yaml) and the source evidence
 those records cite; none asserts work that has already happened.
 

@@ -39,9 +39,8 @@ coverage_model:
       classes: [success, invalid_input, sticky_error, lifecycle, synchronization, data_integrity]
     - id: execution_context
       classes: [host_only, single_gpu, multi_gpu, multiprocess]
-      # host_only is declared for completeness; no coverage class is modeled
-      # purely host-side today (host-only cases ride along with single_gpu suites).
-      informational_classes: [host_only]
+      # Host-only harness coverage is modeled explicitly below; other host-side
+      # checks can also accompany device-facing single_gpu suites.
     - id: environment
       classes: [amd_linux, amd_windows, amd_wsl, nvidia_backend, graphics_capable, sanitizer]
       # Per-OS AMD platform values are tracked per suite in test_inventory.yaml
@@ -68,6 +67,22 @@ coverage_model:
       informational_classes: [in_process]
 
   classes:
+
+    # -- test-harness surface -------------------------------------------------
+
+    - id: test_harness.level_selection
+      owner: HIP Runtime - Test Harness
+      axes: [behavior.invalid_input, execution_context.host_only, cadence.pr]
+      risk: low
+      intent: HIP_TEST_LEVEL selection and abort-on-invalid-level behavior are validated by host-only harness tests, so malformed or unsupported levels fail before device tests are selected.
+      expected_test_kinds: [unit]
+      current_inventory: [harness-test-level]
+      evidence:
+        - path: catch/hipTestMain/tests/CMakeLists.txt
+          claim: HipTestLevelUnitTest and HipTestLevelAbortTest are registered with hip_add_host_test and the hosttest label.
+        - path: catch/hipTestMain/hip_test_level.cc
+          claim: The host-test executables exercise this HIP_TEST_LEVEL resolution logic.
+      gap_status: host_only_harness_coverage
 
     # -- memory surface -------------------------------------------------------
 
