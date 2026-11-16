@@ -2796,8 +2796,7 @@ static bool rcclSelectAlltoAllFabric(struct ncclComm* comm, const rcclArchThresh
   }
 
   if (!query)
-    INFO(NCCL_TUNING, "A2A fabric paths: none eligible (perPeer=%zu total=%zu inPlace=%d)", perPeer, totalBytes,
-         (int)(sendbuff == recvbuff));
+    INFO(NCCL_TUNING, "A2A fabric paths: none eligible (perPeer=%zu total=%zu)", perPeer, totalBytes);
   return false;
 }
 
@@ -2886,8 +2885,13 @@ ncclResult_t rcclSelectAlltoAll(struct ncclComm* comm, const void* sendbuff, voi
     INFO(NCCL_TUNING, "A2A symk disqualified: totalBytes=%zu > a2aSymMaxR2=%zu", totalBytes, a2aSymMaxR2);
 
   // (3) gfx1250 fabric paths (rcclSelectAlltoAllFabric: LL, LL128).
+  // In place, gfx1250 AllToAll takes no DDA fabric tier (LL, LL128 or VMM); it falls through to
+  // Direct per-peer Send/Recv.
   const bool a2aFabricArch = IsArchMatch(comm->archName, "gfx1250");
-  if (!a2aSymEligible && a2aFabricArch && rcclDdaEnabled(comm, totalBytes, totalBytes, query, "A2A fabric")) {
+  const bool a2aFabricInPlace = a2aFabricArch && sendbuff == recvbuff;
+  if (!query && a2aFabricInPlace) INFO(NCCL_TUNING, "A2A DDA fabric disqualified: in place");
+  if (!a2aSymEligible && a2aFabricArch && !a2aFabricInPlace &&
+      rcclDdaEnabled(comm, totalBytes, totalBytes, query, "A2A fabric")) {
     if (rcclSelectAlltoAllFabric(comm, archTable, sendbuff, recvbuff, count, datatype, query, decision))
       return rcclSelectDone("A2A", query, decision);
   }
@@ -2899,7 +2903,7 @@ ncclResult_t rcclSelectAlltoAll(struct ncclComm* comm, const void* sendbuff, voi
   if (!a2aSymEligible && rcclDdaEnabled(comm, totalBytes, a2aDdaEntryMax, query, "A2A")) {
     if (a2aFabricArch) {
       // The entry gate now admits the widest tier, so VMM re-checks its own cap.
-      if (a2aDdaMax != 0 && totalBytes <= a2aDdaMax &&
+      if (!a2aFabricInPlace && a2aDdaMax != 0 && totalBytes <= a2aDdaMax &&
           ncclAllToAllDdaFabricEligible(comm, sendbuff, recvbuff, count, datatype)) {
         decision->algo = RCCL_DDA_FABRIC_VMM;
         decision->nMaxChannels = ncclAllToAllDdaFabricBlocks(comm, count, datatype);

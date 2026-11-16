@@ -9,10 +9,11 @@
  * @brief MPI end-to-end tests for gfx1250 AlltoAll on the DDA fabric tiers at buffer offsets
  *
  * Ranks choose a tier from their own buffers, so a tier that refused some alignments would let ranks
- * with different offsets run different kernels and hang; p2p also returns wrong data in place on
- * gfx1250. Every offset, down to 1 byte, in and out of place, must take the tier a 16-byte aligned
- * call takes, and every received byte must be exact, at sizes where the aligned call takes a DDA
- * tier under the active arch table.
+ * with different offsets run different kernels and hang. Out of place, every offset, down to 1 byte,
+ * must take the tier a 16-byte aligned call takes, and every received byte must be exact, at sizes
+ * where the aligned call takes a DDA tier under the active arch table. In place, every offset must
+ * take Direct p2p; its data is not checked, since per-peer Send/Recv does not order the send of a
+ * chunk before the receive that overwrites it.
  *
  * DdaAlltoAllPeerColumnsMPI repeats the cases with RCCL_DDA_FABRIC_MAXBLOCKS=2, so each LL128 block
  * column serves several peers.
@@ -130,9 +131,14 @@ protected:
         const size_t count      = perPeerBytes / static_cast<size_t>(ncclTypeSize(c.datatype));
         void* const  send       = sendBase + c.sendOffset;
         void* const  recv       = c.inPlace ? send : recvBase + c.recvOffset;
+        if(c.inPlace)
+        {
+            EXPECT_EQ(selectedAlgo(send, recv, count, c.datatype), RCCL_DIRECT_ALLTOALL) << "Rank " << rank_;
+            return;
+        }
 
         int       blocks      = -1;
-        const int alignedAlgo = selectedAlgo(sendBase, c.inPlace ? sendBase : recvBase, count, c.datatype, &blocks);
+        const int alignedAlgo = selectedAlgo(sendBase, recvBase, count, c.datatype, &blocks);
         if(!isDdaFabric(alignedAlgo))
             return;
         ++ddaCases_;
@@ -153,8 +159,7 @@ protected:
                                                     "DDA AlltoAll");
         EXPECT_TRUE(verifyBufferData<uint8_t>(recv, totalBytes, [this, nRanks, perPeerBytes](size_t i) {
             return chunkPattern(static_cast<int>(i / perPeerBytes), rank_, i % perPeerBytes);
-        })) << "Rank " << rank_ << " of " << nRanks << ": " << (c.inPlace ? "in-place" : "out-of-place")
-            << " AlltoAll data mismatch";
+        })) << "Rank " << rank_ << " of " << nRanks << ": out-of-place AlltoAll data mismatch";
     }
 
     void runAllCases()

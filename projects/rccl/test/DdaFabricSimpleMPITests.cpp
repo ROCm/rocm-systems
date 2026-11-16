@@ -88,8 +88,6 @@ constexpr char kReduceScatterNeedle[] =
     "DDA fabric ReduceScatter: launching kernel";
 constexpr char kAllToAllPullNeedle[] =
     "DDA fabric AllToAll: launching kernel";
-constexpr char kAllToAllPushNeedle[] =
-    "DDA fabric AllToAll: launching push kernel";
 constexpr char kAllToAllPeerPushNeedle[] =
     "DDA fabric AllToAll: launching peer-major push kernel";
 constexpr char kAllToAllTdmPushNeedle[] =
@@ -416,8 +414,7 @@ protected:
             });
     }
 
-    // In place runs once: a second in-place AllToAll would transpose the data back.
-    void runAllToAll(int iterations, bool inPlace, size_t desiredCount, const char* needle)
+    void runAllToAll(int iterations, size_t desiredCount, const char* needle)
     {
         const size_t countPerPeer = allToAllCount(desiredCount);
         ASSERT_GT(countPerPeer, 0u);
@@ -428,21 +425,11 @@ protected:
         void* recvBuf = nullptr;
         ASSERT_MPI_EQ(hipSuccess, hipMalloc(&sendBuf, bytes));
         DeviceBufferAutoGuard sendGuard(sendBuf);
-        if(inPlace)
-        {
-            recvBuf = sendBuf;
-        }
-        else
-        {
-            ASSERT_MPI_EQ(hipSuccess, hipMalloc(&recvBuf, bytes));
-        }
-        DeviceBufferAutoGuard recvGuard(inPlace ? nullptr : recvBuf);
+        ASSERT_MPI_EQ(hipSuccess, hipMalloc(&recvBuf, bytes));
+        DeviceBufferAutoGuard recvGuard(recvBuf);
 
         ASSERT_MPI_EQ(hipSuccess, fillAllToAllSend(sendBuf, countPerPeer));
-        if(!inPlace)
-        {
-            ASSERT_MPI_EQ(hipSuccess, hipMemset(recvBuf, 0, bytes));
-        }
+        ASSERT_MPI_EQ(hipSuccess, hipMemset(recvBuf, 0, bytes));
 
         for(int i = 0; i < iterations; ++i)
         {
@@ -466,7 +453,7 @@ protected:
         const size_t count = llAllToAllCount();
         if(count == 0)
             GTEST_SKIP() << "the AllToAll DDA LL tier is off";
-        runAllToAll(iterations, /*inPlace=*/false, count, kAllToAllLLNeedle);
+        runAllToAll(iterations, count, kAllToAllLLNeedle);
     }
 
     // Enqueues an LL AllToAll and a SIMPLE AllToAll back to back for `rounds` rounds without syncing, so an LL kernel
@@ -583,14 +570,6 @@ TEST_F(DdaFabricSimple, RepeatedAllToAll)
     runLLAllToAll(kRepeatedIterations);
 }
 
-// In place, every push setting takes the all-peer vector push.
-TEST_F(DdaFabricSimple, AllToAllInPlace)
-{
-    if(const std::string why = allToAllSkipReason(1, -1, -1); !why.empty())
-        GTEST_SKIP() << why;
-    runAllToAll(1, /*inPlace=*/true, simpleAllToAllCount(), kAllToAllPushNeedle);
-}
-
 // The push kernels sync all ranks at exit, so LL / LL128 cannot reuse the scratch while a peer still drains it.
 TEST_F(DdaFabricSimple, AllToAllPeerTdmPushAlternatingWithLL)
 {
@@ -607,7 +586,6 @@ TEST_F(DdaFabricSimple, AllToAllTdmPushUnalignedChunks)
         GTEST_SKIP() << why;
     // 16 B short of the largest count per peer, so a peer's chunk is not a multiple of 256 B.
     runAllToAll(kRepeatedIterations,
-                /*inPlace=*/false,
                 simpleAllToAllCount() - 4,
                 rcclParamDdaA2APushPeer() ? kAllToAllPeerTdmPushNeedle : kAllToAllTdmPushNeedle);
 }
@@ -616,21 +594,21 @@ TEST_F(DdaFabricSimple, AllToAllPeerVectorPush)
 {
     if(const std::string why = allToAllSkipReason(1, 1, 0); !why.empty())
         GTEST_SKIP() << why;
-    runAllToAll(kRepeatedIterations, /*inPlace=*/false, simpleAllToAllCount(), kAllToAllPeerPushNeedle);
+    runAllToAll(kRepeatedIterations, simpleAllToAllCount(), kAllToAllPeerPushNeedle);
 }
 
 TEST_F(DdaFabricSimple, AllToAllAllPeerTdmPush)
 {
     if(const std::string why = allToAllSkipReason(1, 0, 1); !why.empty())
         GTEST_SKIP() << why;
-    runAllToAll(kRepeatedIterations, /*inPlace=*/false, simpleAllToAllCount(), kAllToAllTdmPushNeedle);
+    runAllToAll(kRepeatedIterations, simpleAllToAllCount(), kAllToAllTdmPushNeedle);
 }
 
 TEST_F(DdaFabricSimple, AllToAllPull)
 {
     if(const std::string why = allToAllSkipReason(0, -1, -1); !why.empty())
         GTEST_SKIP() << why;
-    runAllToAll(kRepeatedIterations, /*inPlace=*/false, simpleAllToAllCount(), kAllToAllPullNeedle);
+    runAllToAll(kRepeatedIterations, simpleAllToAllCount(), kAllToAllPullNeedle);
 }
 
 TEST_F(DdaFabricSimple, AlternatingCollectivesOnSameCommunicator)

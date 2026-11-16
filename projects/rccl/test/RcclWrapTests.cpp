@@ -3472,8 +3472,9 @@ TEST(RcclAlltoAllDecision, Gfx1250Dpx_A2aBands)
     }
 }
 
-// gfx1250 DPX table, 8 ranks, bf16: buffer offsets of 1 and 2 bytes, in and out of place, take the band
-// a 256-byte aligned call takes, so ranks whose buffers differ in alignment pick the same kernel.
+// gfx1250 DPX table, 8 ranks, bf16: out of place, buffer offsets of 1 and 2 bytes take the band a 256-byte aligned
+// call takes, so ranks whose buffers differ in alignment pick the same kernel. In place, every band, VMM included,
+// takes Direct p2p.
 TEST(RcclAlltoAllDecision, Gfx1250Dpx_A2aBandsIgnoreBufferAlignment)
 {
     auto comm = std::make_unique<ncclComm>();
@@ -3484,7 +3485,8 @@ TEST(RcclAlltoAllDecision, Gfx1250Dpx_A2aBandsIgnoreBufferAlignment)
     const size_t align = 16u * (size_t)comm->nRanks;
     const std::pair<size_t, int> cases[] = {{128ul << 10, RCCL_DDA_FABRIC_LL},
                                             {(128ul << 10) + align, RCCL_DDA_FABRIC_LL128},
-                                            {16ul << 20, RCCL_DDA_FABRIC_LL128}};
+                                            {16ul << 20, RCCL_DDA_FABRIC_LL128},
+                                            {(16ul << 20) + align, RCCL_DDA_FABRIC_VMM}};
     const std::pair<size_t, size_t> offsets[] = {{0, 0}, {2, 0}, {0, 2}, {1, 1}};
     for (const auto& c : cases)
     {
@@ -3494,12 +3496,15 @@ TEST(RcclAlltoAllDecision, Gfx1250Dpx_A2aBandsIgnoreBufferAlignment)
             ASSERT_EQ(SelectA2A(*comm, c.first, dec, o.first, o.second, ncclBfloat16), ncclSuccess) << c.first;
             EXPECT_EQ(dec.algo, c.second) << c.first << " send+" << o.first << " recv+" << o.second;
         }
-        rcclCollDecision dec{};
         const size_t count = c.first / ncclTypeSize(ncclBfloat16) / comm->nRanks;
-        ASSERT_EQ(rcclSelectAlltoAll(comm.get(), a2aRecvStorage + 2, a2aRecvStorage + 2, count, ncclBfloat16,
-                                     /*stream=*/nullptr, /*query=*/true, /*graphCapturingHint=*/false, &dec),
-                  ncclSuccess);
-        EXPECT_EQ(dec.algo, c.second) << c.first << " in place +2";
+        for (size_t off : {size_t(0), size_t(2)})
+        {
+            rcclCollDecision dec{};
+            ASSERT_EQ(rcclSelectAlltoAll(comm.get(), a2aRecvStorage + off, a2aRecvStorage + off, count, ncclBfloat16,
+                                         /*stream=*/nullptr, /*query=*/true, /*graphCapturingHint=*/false, &dec),
+                      ncclSuccess);
+            EXPECT_EQ(dec.algo, RCCL_DIRECT_ALLTOALL) << c.first << " in place +" << off;
+        }
     }
 }
 

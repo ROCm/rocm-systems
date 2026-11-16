@@ -539,9 +539,8 @@ test_categories:
   # the RCCL_DDA_A2A_* kernel choice for the process lifetime, so they are set before launch. Outside these categories
   # only the tests that need a non-default kernel choice skip.
   standard_env_dda_a2a_push:
-    description: "DDA fabric AllToAll with the default push settings: peer-major TDM push (alternating with LL, and with chunks that are not a multiple of 256 B) and the all-peer vector push in place."
+    description: "DDA fabric AllToAll with the default push settings: peer-major TDM push, alternating with LL and with chunks that are not a multiple of 256 B."
     test_patterns:
-      - "DdaFabricSimple.AllToAllInPlace"
       - "DdaFabricSimple.AllToAllPeerTdmPushAlternatingWithLL"
       - "DdaFabricSimple.AllToAllTdmPushUnalignedChunks"
     exclude_windows: *mpi_exclude_windows
