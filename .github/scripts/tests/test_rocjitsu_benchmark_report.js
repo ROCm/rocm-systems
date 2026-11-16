@@ -48,7 +48,7 @@ test('creates one PR report with direct dashboard and workflow links', async () 
   assert.equal(writes[0][1].issue_number, 42);
   const body = comments[0].body;
   assert.match(body, /<!-- rocjitsu-benchmark-report:42 -->/);
-  assert.match(body, /## rocjitsu benchmarks: success/);
+  assert.match(body, /## rocjitsu benchmark job: success/);
   assert.match(body, /https:\/\/rocm.github.io\/rocm-systems\/rocjitsu-dashboard\//);
   const dashboardLink = body.match(/\[Dashboard\]\(([^)]+)\)/)[1];
   const dashboardUrl = new URL(dashboardLink);
@@ -90,7 +90,7 @@ test('reports benchmark failure without attempt metadata', async () => {
   const { args, comments } = fixture();
   await reportBenchmark({ ...args, benchmarkResult: 'failure',
     publishResult: 'skipped', publishedRunId: '' });
-  assert.match(comments[0].body, /benchmarks: failure/);
+  assert.match(comments[0].body, /benchmark job: failure/);
   assert.doesNotMatch(comments[0].body, /Reporting attempt|Benchmark attempt|Benchmark job|Publication job/);
 });
 
@@ -99,7 +99,7 @@ test('cancelled benchmark reports its selected commit and recovery without outpu
   await reportBenchmark({ ...args, benchmarkResult: 'cancelled', publishResult: 'skipped',
     publishedRunId: '' });
   const body = comments[0].body;
-  assert.match(body, /## rocjitsu benchmarks: cancelled/);
+  assert.match(body, /## rocjitsu benchmark job: cancelled/);
   assert.match(body, /Presubmit for commit:?[\s\S]*a{40}/);
   assert.doesNotMatch(body, /Measured head:/);
   assert.doesNotMatch(body, /Reporting attempt|Benchmark attempt|Publication job|Benchmark job/);
@@ -125,8 +125,8 @@ for (const publishResult of ['failure', 'skipped', 'cancelled']) {
     const { args, comments } = fixture();
     await reportBenchmark({ ...args, benchmarkResult: 'failure', publishResult });
     assert.match(comments[0].body, /Results were not published/);
-    assert.match(comments[0].body, /## rocjitsu benchmarks: failure/);
-    assert.doesNotMatch(comments[0].body, /benchmarks: success/);
+    assert.match(comments[0].body, /## rocjitsu benchmark job: failure/);
+    assert.doesNotMatch(comments[0].body, /benchmark job: success/);
     const url = new URL(comments[0].body.match(/\[Dashboard\]\(([^)]+)\)/)[1]);
     assert.equal(url.searchParams.get('branch'), 'feature/source');
     assert.equal(url.searchParams.has('run'), false);
@@ -150,7 +150,7 @@ test('published failure results do not claim benchmark success', async () => {
   const { args, comments } = fixture();
   await reportBenchmark({ ...args, benchmarkResult: 'failure' });
   assert.match(comments[0].body, /run=github-123-attempt-1/);
-  assert.match(comments[0].body, /## rocjitsu benchmarks: failure/);
+  assert.match(comments[0].body, /## rocjitsu benchmark job: failure/);
 });
 
 test('does not overwrite a user comment or a different report', async () => {
@@ -192,7 +192,7 @@ for (const newerResult of ['cancelled', 'success']) {
       assert.equal(writes.length, newestFirst ? 1 : 2);
       assert.match(comments[0].body, /rocjitsu-benchmark-report-run:200:20:1/);
       assert.match(comments[0].body, /b{40}/);
-      assert.match(comments[0].body, new RegExp(`benchmarks: ${newerResult}`));
+      assert.match(comments[0].body, new RegExp(`benchmark job: ${newerResult}`));
     });
   }
 }
@@ -267,7 +267,7 @@ test('post-merge report finds the exact merged PR and links its develop result',
   assert.equal(writes[0][1].issue_number, 42);
   const body = comments[0].body;
   assert.match(body, /<!-- rocjitsu-post-commit-benchmark:a{40} -->/);
-  assert.match(body, /rocjitsu benchmarks: success/);
+  assert.match(body, /rocjitsu benchmark job: success/);
   assert.match(body, /Post-merge for commit[\s\S]*a{40}/);
   const url = new URL(body.match(/\[Dashboard\]\(([^)]+)\)/)[1]);
   assert.equal(url.searchParams.get('branch'), 'develop');
@@ -335,7 +335,7 @@ test('failed post-merge publication does not link an earlier run as the result',
   await reportBenchmark({ ...args, benchmarkResult: 'failure', publishResult: 'failure', publishedRunId: '' });
   const body = comments[0].body;
   assert.match(body, /Results were not published/);
-  assert.match(body, /## rocjitsu benchmarks: failure/);
+  assert.match(body, /## rocjitsu benchmark job: failure/);
   const url = new URL(body.match(/\[Dashboard\]\(([^)]+)\)/)[1]);
   assert.equal(url.searchParams.get('branch'), 'develop');
   assert.equal(url.searchParams.has('run'), false);
@@ -344,7 +344,7 @@ test('failed post-merge publication does not link an earlier run as the result',
 test('cancelled post-merge report identifies its commit', async () => {
   const { args, comments } = postCommitFixture();
   await reportBenchmark({ ...args, benchmarkResult: 'cancelled', publishResult: 'skipped', publishedRunId: '' });
-  assert.match(comments[0].body, /benchmarks: cancelled/);
+  assert.match(comments[0].body, /benchmark job: cancelled/);
   assert.match(comments[0].body, /Post-merge for commit/);
   assert.doesNotMatch(comments[0].body, /current PR head/);
 });
@@ -436,10 +436,35 @@ for (const postMerge of [false, true]) {
     const summaryPath = await summaryArtifact(t, JSON.stringify(summary));
     await reportBenchmark({ ...args, summaryPath });
     const body = comments[0].body;
-    assert.match(body, /## rocjitsu benchmarks: success/);
+    assert.match(body, /## rocjitsu benchmark job: success/);
     assert.match(body, /15\/15 benchmarks completed/);
     assert.match(body, /4 faster, 0 slower/);
     assert.match(body, /Fictional GEMM.*35.84 s.*25.4 s.*-29.1%/);
     assert.doesNotMatch(body, /Reporting attempt|Benchmark attempt|Benchmark job|Publication job|shared dashboard dataset/);
+  });
+}
+
+for (const postMerge of [false, true]) {
+  test(`labels job success separately from an all-failed suite (${postMerge ? 'post-merge' : 'presubmit'})`, async (t) => {
+    const { args, comments } = postMerge ? postCommitFixture() : fixture();
+    const { readFile } = require('node:fs/promises');
+    const { resolve } = require('node:path');
+    const baseline = JSON.parse(await readFile(resolve(__dirname,
+      '../../../emulation/rocjitsu/website/dashboard/tests/fixtures/fictional-producer-run.json'), 'utf8'));
+    baseline.publication.id = 'baseline';
+    baseline.publication.source = { branch: 'develop' };
+    baseline.provenance.rocjitsu.rocjitsu_commit_sha = 'b'.repeat(40);
+    const candidate = structuredClone(baseline);
+    candidate.publication.id = args.publishedRunId;
+    candidate.publication.source.base = { branch: 'develop', commit: 'b'.repeat(40) };
+    candidate.provenance.rocjitsu.rocjitsu_commit_sha = args.headSha;
+    for (const result of candidate.benchmark_results) result.status = 'failed';
+    const summary = buildBenchmarkSummary([baseline, candidate], args.publishedRunId, args.headSha);
+    const summaryPath = await summaryArtifact(t, JSON.stringify(summary));
+    await reportBenchmark({ ...args, summaryPath });
+    assert.match(comments[0].body, /## rocjitsu benchmark job: success/);
+    assert.match(comments[0].body, /0\/3 benchmarks completed.*3 failed/);
+    assert.match(comments[0].body, /Timing comparison unavailable: no comparable benchmark timings/);
+    assert.doesNotMatch(comments[0].body, /faster|slower|outside the duration band/);
   });
 }

@@ -88,7 +88,7 @@ function renderReport({
   return [
     marker,
     `<!-- rocjitsu-benchmark-report-run:${context.runId}:${runNumber}:${runAttempt} -->`,
-    `## rocjitsu benchmarks: ${status}`,
+    `## rocjitsu benchmark job: ${status}`,
     '',
     `${phase} for commit [\`${headSha.slice(0, 12)}\`](${commitUrl}).`,
     '',
@@ -161,6 +161,7 @@ function describeInputChanges(candidate, baseline) {
     for (const key of ['rocjitsu_commit_sha', 'rocjitsu_commit_timestamp', 'target_config_sha256']) {
       delete provenance.rocjitsu?.[key];
     }
+    delete provenance.machine?.hostname;
     const settings = ['warmups', 'samples', 'timeout_seconds', 'benchmark_suite']
       .map((key) => [key, run.execution_summary[key]]);
     return stableJson({ provenance, settings });
@@ -289,6 +290,9 @@ function renderTimingChanges(comparisons) {
 }
 
 function renderComparison(comparisons, band) {
+  if (!comparisons.some((comparison) => comparison.comparable.length)) {
+    return ['Timing comparison unavailable: no comparable benchmark timings.'];
+  }
   const faster = comparisons.reduce((total, comparison) => total + comparison.counts.faster, 0);
   const slower = comparisons.reduce((total, comparison) => total + comparison.counts.slower, 0);
   const lines = [
@@ -326,7 +330,14 @@ function buildBenchmarkSummary(runs, runId, headSha) {
     return { ...summary, markdown: lines.join('\n') };
   }
 
-  const comparisons = compareBenchmarkResults(candidateResults, indexResults(baseline));
+  const baselineResults = indexResults(baseline);
+  const comparisons = compareBenchmarkResults(candidateResults, baselineResults);
+  const sampling = (run) => {
+    const { samples = 'unknown', warmups = 'unknown' } = run.execution_summary;
+    return `${escapeMarkdown(samples)} sample${samples === 1 ? '' : 's'} and ` +
+      `${escapeMarkdown(warmups)} warmup${warmups === 1 ? '' : 's'}`;
+  };
+  lines.push(`Sampling per benchmark: current ${sampling(candidate)}; baseline ${sampling(baseline)}.`, '');
   lines.push(...renderComparison(comparisons, DURATION_CHANGE_BAND_PERCENT));
   const inputChanges = describeInputChanges(candidate, baseline);
   if (inputChanges.length) {
@@ -337,6 +348,14 @@ function buildBenchmarkSummary(runs, runId, headSha) {
   comparisonUrl.searchParams.set('view', 'compare');
   comparisonUrl.searchParams.set('compareCandidate', candidate.publication.id);
   comparisonUrl.searchParams.set('compareBaseline', baseline.publication.id);
+  const results = [...candidateResults.values(), ...baselineResults.values()];
+  for (const [parameter, field] of [
+    ['compareTargets', 'target'], ['compareSuites', 'suite'], ['compareModes', 'mode'],
+  ]) {
+    const values = [...new Set(results.map((result) => result[field]))].sort();
+    if (!values.length) comparisonUrl.searchParams.set(parameter, '');
+    for (const value of values) comparisonUrl.searchParams.append(parameter, value);
+  }
   const baselineCommit = escapeMarkdown(baseline.provenance.rocjitsu.rocjitsu_commit_sha.slice(0, 12));
   lines.push('', `Compared with [\`${baselineCommit}\`](${comparisonUrl.href}).`);
   return { ...summary, markdown: lines.join('\n') };

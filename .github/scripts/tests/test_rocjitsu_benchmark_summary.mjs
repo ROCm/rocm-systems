@@ -58,7 +58,54 @@ test('reports run coverage, timing changes and exact run links', async () => {
   assert.equal(url.searchParams.get('compareBaseline'), 'baseline');
   assert.equal(url.searchParams.get('compareCandidate'), 'candidate');
   assert.equal(url.searchParams.get('view'), 'compare');
+  assert.deepEqual(url.searchParams.getAll('compareTargets'), ['gfx950']);
+  assert.deepEqual(url.searchParams.getAll('compareSuites'), ['GPT-OSS', 'Triton']);
+  assert.deepEqual(url.searchParams.getAll('compareModes'), ['default']);
 });
+
+test('comparison links include baseline-only and candidate-only filter options', async () => {
+  const runs = publication();
+  runs[0].benchmark_results.push({ ...structuredClone(runs[0].benchmark_results[0]),
+    target: 'gfx1250', thread_policy: 'single', suite: 'baseline-only' });
+  runs[1].benchmark_results.push({ ...structuredClone(runs[1].benchmark_results[0]),
+    target: 'gfx1201', suite: 'candidate-only & extra' });
+  const { markdown } = await summarize(runs);
+  const url = new URL(markdown.match(/Compared with \[.*?\]\(([^)]+)\)/)[1]);
+  assert.deepEqual(url.searchParams.getAll('compareTargets'), ['gfx1201', 'gfx1250', 'gfx950']);
+  assert.deepEqual(url.searchParams.getAll('compareSuites'), ['GPT-OSS', 'Triton', 'baseline-only', 'candidate-only & extra']);
+  assert.deepEqual(url.searchParams.getAll('compareModes'), ['default', 'single']);
+});
+
+test('ignores container hostname changes while retaining other machine inputs', async () => {
+  const runs = publication();
+  runs[1].provenance.machine.hostname = 'another-container';
+  const before = structuredClone(runs);
+  assert.doesNotMatch((await summarize(runs)).markdown, /Changed inputs/);
+  assert.deepEqual(runs, before);
+  runs[1].provenance.machine.kernel = 'another-kernel';
+  assert.match((await summarize(runs)).markdown, /Changed inputs:.*environment/);
+});
+
+test('discloses sampling and warmup counts for both runs', async () => {
+  const runs = publication();
+  assert.match((await summarize(runs)).markdown,
+    /Sampling per benchmark: current 1 sample and 0 warmups; baseline 1 sample and 0 warmups/);
+  runs[1].execution_summary.samples = 5;
+  runs[1].execution_summary.warmups = 2;
+  assert.match((await summarize(runs)).markdown,
+    /Sampling per benchmark: current 5 samples and 2 warmups; baseline 1 sample and 0 warmups/);
+});
+
+for (const status of ['failed', 'timeout']) {
+  test(`all-${status} results have no timing verdict`, async () => {
+    const runs = publication();
+    for (const result of runs[1].benchmark_results) result.status = status;
+    const { markdown } = await summarize(runs);
+    assert.match(markdown, /0\/3 benchmarks completed/);
+    assert.match(markdown, /Timing comparison unavailable: no comparable benchmark timings/);
+    assert.doesNotMatch(markdown, /faster|slower|outside the duration band|Duration change/);
+  });
+}
 
 test('prefers the recorded parent over a more recent unrelated develop result', async () => {
   const runs = publication();
