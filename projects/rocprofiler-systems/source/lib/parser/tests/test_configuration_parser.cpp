@@ -447,6 +447,31 @@ TEST(parser_configuration, exports_environment_and_json)
     ::unsetenv("ROCPROFSYS_TRACE");
 }
 
+TEST(parser_configuration, exported_values_read_back_the_same)
+{
+    auto       parser = make_parser();
+    const auto values =
+        parser.parse({ "--verbose", "4", "--output", "exported", "--trace" });
+    ASSERT_TRUE(parser.errors().empty());
+
+    const auto exported         = parser.export_as_environment();
+    auto       from_environment = make_parser();
+    from_environment.set_environment(
+        [&exported](std::string_view name) -> std::optional<std::string> {
+            const auto found = exported.find(name);
+            return found == exported.end() ? std::nullopt
+                                           : std::optional{ found->second };
+        });
+    EXPECT_EQ(from_environment.parse({}), values);
+
+    const scoped_temp_file file{ parser.export_as_json() };
+    auto                   from_file = make_parser();
+    auto                   read_back = from_file.parse({ "--config", file.path() });
+    EXPECT_TRUE(from_file.errors().empty());
+    read_back.erase("config_file");
+    EXPECT_EQ(read_back, values);
+}
+
 TEST(parser_configuration, flag_does_not_consume_the_command)
 {
     auto       parser    = make_parser();

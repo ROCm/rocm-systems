@@ -90,8 +90,11 @@ public:
         return m_errors;
     }
 
-    /// Environment name to canonical text. Defaults are omitted.
+    /// Environment name to canonical text. Defaults are omitted. The environment parser
+    /// reads each value back the same, except a blank one, which it reads as unset.
     [[nodiscard]] value_map_t export_as_environment() const;
+    /// The category document catalog_document() writes, which the file parser reads
+    /// back the same. Defaults are omitted.
     [[nodiscard]] std::string export_as_json() const;
 
     /// Copy export_as_environment() into the process environment.
