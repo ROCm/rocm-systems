@@ -8,6 +8,7 @@
 #include <unistd.h>
 
 #include <algorithm>
+#include <cerrno>
 #include <cinttypes>
 #include <cstdio>
 #include <cstdlib>
@@ -19,10 +20,12 @@
 #include <vector>
 
 #include "amd_smi/amdsmi.h"
+#include "amd_smi/impl/amd_smi_common.h"
 #include "amd_smi/impl/amd_smi_container_id_parser.h"
 #include "amd_smi/impl/amd_smi_test_overrides.h"
 #include "amd_smi/impl/amd_smi_utils.h"
 #include "rocm_smi/rocm_smi_kfd.h"
+#include "rocm_smi/rocm_smi_utils.h"
 
 auto smi_amdgpu_parse_drm_memory(std::string_view line, std::string_view key, uint64_t* bytes)
     -> bool {
@@ -92,6 +95,52 @@ auto smi_amdgpu_sum_drm_fdinfo(const std::string& fdinfo_dir, std::string_view b
   }
   closedir(d);
   return AMDSMI_STATUS_SUCCESS;
+}
+
+// The status for an errno that keeps a process's fdinfo from being read.
+static amdsmi_status_t FdinfoReadStatus(int err) {
+  if (err == EACCES || err == EPERM) return AMDSMI_STATUS_NO_PERM;
+  return amd::smi::rsmi_to_amdsmi_status(amd::smi::ErrnoToRsmiStatus(err));
+}
+
+auto smi_amdgpu_fdinfo_shows_gpu(long pid, std::string_view bdf) -> amdsmi_status_t {
+  const std::string fdinfo_dir =
+      amd::smi::test_hooks::ProcRoot() + "/" + std::to_string(pid) + "/fdinfo";
+  DIR* d = opendir(fdinfo_dir.c_str());
+  if (d == nullptr) {
+    const int err = errno;
+    return err == ENOENT || err == ESRCH ? AMDSMI_STATUS_NOT_FOUND : FdinfoReadStatus(err);
+  }
+  constexpr std::string_view kPdevKey = "drm-pdev:";
+  bool shown = false;
+  // A file that could not be read may have shown this GPU. Files of fds closed,
+  // or of a process that exited, since the directory was listed are gone.
+  int read_err = 0;
+  for (const dirent* dir = readdir(d); !shown && dir != nullptr; dir = readdir(d)) {
+    if (dir->d_name[0] == '.') continue;
+    // Opened through the open directory, as smi_amdgpu_sum_drm_fdinfo() does.
+    const int fd = openat(dirfd(d), dir->d_name, O_RDONLY | O_CLOEXEC);
+    FILE* fdinfo = fd < 0 ? nullptr : fdopen(fd, "r");
+    if (fdinfo == nullptr) {
+      const int err = errno;
+      if (fd >= 0) close(fd);
+      if (read_err == 0 && err != ENOENT && err != ESRCH) read_err = err;
+      continue;
+    }
+    char* l = nullptr;
+    size_t l_size = 0;
+    ssize_t len = 0;
+    while (!shown && (len = ::getline(&l, &l_size, fdinfo)) > 0) {
+      const std::string_view line(l, static_cast<size_t>(len));
+      shown =
+          line.substr(0, kPdevKey.size()) == kPdevKey && trim(line.substr(kPdevKey.size())) == bdf;
+    }
+    free(l);
+    fclose(fdinfo);
+  }
+  closedir(d);
+  if (shown) return AMDSMI_STATUS_SUCCESS;
+  return read_err == 0 ? AMDSMI_STATUS_NOT_FOUND : FdinfoReadStatus(read_err);
 }
 
 extern "C" {

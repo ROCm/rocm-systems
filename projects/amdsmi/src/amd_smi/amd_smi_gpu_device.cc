@@ -273,7 +273,42 @@ amdsmi_status_t AMDSmiGPUDevice::get_compute_process_list_impl(
       amdsmi_proc_info.mem = rsmi_proc_info.vram_usage;
     }
 
-    return static_cast<int32_t>(status_code);
+    return status_code;
+  };
+
+  // For a process whose GPUs KFD could not report: KFD makes its files for every
+  // GPU, so only its DRM fdinfo places it. If that cannot be read either, the list
+  // fails rather than drop a running process, unless the caller may not read its
+  // GPUs, as a PID namespace's listing leaves such processes out.
+  const std::string fdinfo_bdf = bdf_to_string();
+  auto place_by_fdinfo = [&](uint32_t pid, rsmi_status_t gpus_status) {
+    // Only a missing KFD directory means that it exited.
+    if (!KfdProcessExists(pid)) {
+      return AMDSMI_STATUS_SUCCESS;
+    }
+    const amdsmi_status_t shown = smi_amdgpu_fdinfo_shows_gpu(pid, fdinfo_bdf);
+    if (shown == AMDSMI_STATUS_SUCCESS) {
+      amdsmi_proc_info_t amdsmi_proc_info{};
+      if (get_process_info(MakeUnavailableProcessInfo(pid), amdsmi_proc_info) ==
+              AMDSMI_STATUS_SUCCESS ||
+          KfdProcessExists(pid)) {
+        compute_process_list.emplace(pid, amdsmi_proc_info);
+      }
+    }
+    if (shown == AMDSMI_STATUS_SUCCESS || shown == AMDSMI_STATUS_NOT_FOUND) {
+      return AMDSMI_STATUS_SUCCESS;
+    }
+    std::ostringstream ss;
+    ss << __PRETTY_FUNCTION__ << " | pid " << pid << ": its GPUs could not be read from KFD ("
+       << getRSMIStatusString(gpus_status, false) << ") nor its DRM fdinfo ("
+       << smi_amdgpu_get_status_string(shown, false) << ")";
+    if (gpus_status == rsmi_status_t::RSMI_STATUS_PERMISSION) {
+      ss << "; left out";
+      LOG_INFO(ss);
+      return AMDSMI_STATUS_SUCCESS;
+    }
+    LOG_ERROR(ss);
+    return rsmi_to_amdsmi_status(gpus_status);
   };
 
   /**
@@ -286,27 +321,7 @@ amdsmi_status_t AMDSmiGPUDevice::get_compute_process_list_impl(
     const auto gpus_status = rsmi_compute_process_gpus_get(
         rsmi_proc_info.process_id, list_device_ptr.get(), &list_device_allocation_size);
     if (gpus_status != rsmi_status_t::RSMI_STATUS_SUCCESS) {
-      // A process that exited is left out. One still running is listed, with
-      // every KFD stat unknown, if its DRM fdinfo shows this GPU. The lookup
-      // skips KFD files that are gone, so only a missing KFD directory means
-      // that the process exited.
-      const auto pid = rsmi_proc_info.process_id;
-      if (!KfdProcessExists(pid)) {
-        return;
-      }
-      amdsmi_proc_info_t amdsmi_proc_info{};
-      if (get_process_info(MakeUnavailableProcessInfo(pid), amdsmi_proc_info) ==
-          AMDSMI_STATUS_SUCCESS) {
-        compute_process_list.emplace(pid, amdsmi_proc_info);
-        return;
-      }
-      std::ostringstream ss;
-      ss << __PRETTY_FUNCTION__ << " | Leaving out pid " << pid
-         << " on this GPU: its GPUs could not be read from KFD ("
-         << getRSMIStatusString(gpus_status, false)
-         << ") and its DRM fdinfo does not show this GPU or cannot be read";
-      LOG_WARN(ss);
-      return;
+      return place_by_fdinfo(rsmi_proc_info.process_id, gpus_status);
     }
 
     for (auto device_idx = uint32_t(0); device_idx < list_device_allocation_size; ++device_idx) {
@@ -328,13 +343,17 @@ amdsmi_status_t AMDSmiGPUDevice::get_compute_process_list_impl(
         compute_process_list.emplace(rsmi_proc_info.process_id, amdsmi_proc_info);
       }
     }
+    return AMDSMI_STATUS_SUCCESS;
   };
 
   /**
    *  Transfer/Save the ones linked to this device.
    */
   for (const auto& rsmi_proc_info : procs) {
-    update_list_by_running_device(rsmi_proc_info);
+    const amdsmi_status_t status = update_list_by_running_device(rsmi_proc_info);
+    if (status != AMDSMI_STATUS_SUCCESS) {
+      return status;
+    }
   }
   cache_ptr->list = compute_process_list;
   cache_ptr->updated = std::chrono::steady_clock::now();

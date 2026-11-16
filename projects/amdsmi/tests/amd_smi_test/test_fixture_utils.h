@@ -224,6 +224,11 @@ class ScopedRocmSmiDevice {
   std::string link_dir_;  // Directory holding the renderD link; empty if none was created.
 };
 
+// Waits until a GPU's process list cached by an earlier query (for
+// AMDSMI_PROCESS_INFO_CACHE_MS, 1 ms by default) is stale, so that the next
+// query reads the processes a test set up instead of another test's.
+void WaitOutProcessListCache();
+
 // RAII: calls the real amdsmi_init()/amdsmi_shut_down() around a test case.
 // kNoHardwareDiscoveryInitFlags is not a public amdsmi_init_flags_t value --
 // amdsmi_init_flags_t has no defined "none" flag. Zero happens to make every

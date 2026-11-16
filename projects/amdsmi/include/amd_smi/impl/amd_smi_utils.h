@@ -351,4 +351,16 @@ auto smi_amdgpu_parse_drm_memory(std::string_view line, std::string_view key, ui
 auto smi_amdgpu_sum_drm_fdinfo(const std::string& fdinfo_dir, std::string_view bdf,
                                amdsmi_proc_info_t* info) -> amdsmi_status_t;
 
+/**
+ *  @brief Whether a process's DRM fdinfo shows a client of the GPU at @p bdf.
+ *
+ *  @param[in] pid The process, read under amd::smi::test_hooks::ProcRoot().
+ *  @param[in] bdf The GPU's address as fdinfo prints it, such as "0000:03:00.0".
+ *  @return ::AMDSMI_STATUS_SUCCESS if one of its fdinfo files has that drm-pdev,
+ *  ::AMDSMI_STATUS_NOT_FOUND if none has or the process has exited, otherwise
+ *  ::AMDSMI_STATUS_NO_PERM if the caller may not read one of them, or the status
+ *  for another error that keeps one from being read.
+ */
+auto smi_amdgpu_fdinfo_shows_gpu(long pid, std::string_view bdf) -> amdsmi_status_t;
+
 #endif  // AMD_SMI_INCLUDE_AMD_SMI_UTILS_H_

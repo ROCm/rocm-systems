@@ -7,6 +7,7 @@
 // read, so the functional tests skip that comparison there.
 
 #include <gtest/gtest.h>
+#include <unistd.h>
 
 #include <cstdint>
 #include <filesystem>
@@ -18,7 +19,9 @@
 #include "amd_smi/impl/amd_smi_gpu_device.h"
 #include "amd_smi/impl/amd_smi_test_overrides.h"
 #include "amd_smi/impl/fdinfo.h"
+#include "rocm_smi/rocm_smi_device.h"
 #include "rocm_smi/rocm_smi_kfd.h"
+#include "rocm_smi/rocm_smi_main.h"
 #include "test_fixture_utils.h"
 
 namespace {
@@ -75,6 +78,40 @@ void AddProcess(FakeSysfsTree* proc, uint32_t pid, const std::string& pdev) {
 constexpr uint64_t kVram = 1024 * 1024;
 constexpr uint64_t kGtt = 2 * 1024 * 1024;
 constexpr uint64_t kCpu = 3 * 1024;
+
+// Writes the per-GPU files that KFD creates in a process's directory for every
+// GPU when the process opens /dev/kfd, used or not: here for this GPU and
+// another one.
+void AddKfdFilesForEveryGpu(FakeSysfsTree* kfd, const std::string& pid) {
+  for (const uint64_t gpu_id : {kKfdGpuId, kOtherKfdGpuId}) {
+    const std::string id = std::to_string(gpu_id);
+    kfd->WriteFile(pid + "/vram_" + id, "0\n");
+    kfd->WriteFile(pid + "/sdma_" + id, "0\n");
+    kfd->WriteFile(pid + "/stats_" + id + "/cu_occupancy", "0\n");
+    kfd->WriteFile(pid + "/stats_" + id + "/evicted_ms", "0\n");
+  }
+}
+
+// A GPU for the process lists: the rocm_smi device at sysfs/card9, which has
+// this test GPU's address and, as discovery sets it on a real GPU, its KFD id.
+class TestGpu {
+ public:
+  TestGpu()
+      : rocm_device_(sysfs_.root() + "/card9"),
+        gpu_device_(rocm_device_.index(), "card9", TestBdf(), drm_),
+        registration_(&gpu_device_) {
+    amd::smi::RocmSMI::getInstance().devices()[rocm_device_.index()]->set_kfd_gpu_id(kKfdGpuId);
+  }
+  uint32_t index() const { return rocm_device_.index(); }
+  amdsmi_processor_handle handle() const { return registration_.handle(); }
+
+ private:
+  FakeSysfsTree sysfs_;
+  ScopedRocmSmiDevice rocm_device_;
+  AMDSmiDrm drm_;
+  AMDSmiGPUDevice gpu_device_;
+  ScopedProcessorRegistration registration_;
+};
 
 class MockProcessRoots {
  public:
@@ -135,25 +172,29 @@ TEST(GpuUnit, ProcessInfoOfAProcessOnAnotherGpuIsNotFound) {
 TEST(GpuUnit, ProcessListPlacesAProcessWhoseKfdGpusCannotBeRead) {
   ScopedAmdsmiInit smi_init;
   MockProcessRoots roots;
-  // Neither process's KFD queue names a readable GPU. The first one's fdinfo
-  // shows this GPU, the second one's another GPU.
+  // No process's KFD queue names a readable GPU, and each has the KFD files of
+  // both GPUs. The first one's fdinfo shows this GPU, the second one's another
+  // GPU; the third has no /proc entry (it exited), and the fourth shows another
+  // GPU and has an fdinfo entry whose fd was closed during the read.
   constexpr uint32_t kOnThisGpu = 4250;
   constexpr uint32_t kOnAnotherGpu = 4251;
-  roots.kfd().WriteFile("4250/queues/0/gpuid", "not-a-gpu-id\n");
-  roots.kfd().WriteFile("4251/queues/0/gpuid", "not-a-gpu-id\n");
+  constexpr uint32_t kWithoutProcEntry = 4256;
+  constexpr uint32_t kWithClosedFd = 4257;
+  for (const uint32_t pid : {kOnThisGpu, kOnAnotherGpu, kWithoutProcEntry, kWithClosedFd}) {
+    roots.kfd().WriteFile(std::to_string(pid) + "/queues/0/gpuid", "not-a-gpu-id\n");
+    AddKfdFilesForEveryGpu(&roots.kfd(), std::to_string(pid));
+  }
   AddProcess(&roots.proc(), kOnThisGpu, kBdfText);
   AddProcess(&roots.proc(), kOnAnotherGpu, kOtherBdfText);
+  AddProcess(&roots.proc(), kWithClosedFd, kOtherBdfText);
+  const std::string closed_fd = roots.proc().root() + "/" + std::to_string(kWithClosedFd);
+  std::filesystem::create_symlink(closed_fd + "/fdinfo/gone", closed_fd + "/fdinfo/8");
 
-  FakeSysfsTree sysfs;
-  ScopedRocmSmiDevice rocm_device(sysfs.root() + "/card9");
-  AMDSmiDrm drm;
-  AMDSmiGPUDevice gpu_device(rocm_device.index(), "card9", TestBdf(), drm);
-  ScopedProcessorRegistration registration(&gpu_device);
-
+  TestGpu gpu;
+  WaitOutProcessListCache();
   uint32_t num_processes = 4;
   amdsmi_proc_info_t list[4] = {};
-  ASSERT_EQ(amdsmi_get_gpu_process_list(registration.handle(), &num_processes, list),
-            AMDSMI_STATUS_SUCCESS);
+  ASSERT_EQ(amdsmi_get_gpu_process_list(gpu.handle(), &num_processes, list), AMDSMI_STATUS_SUCCESS);
   ASSERT_EQ(num_processes, 1U);
   EXPECT_EQ(list[0].pid, kOnThisGpu);
   EXPECT_EQ(list[0].memory_usage.vram_mem, kVram);
@@ -162,6 +203,80 @@ TEST(GpuUnit, ProcessListPlacesAProcessWhoseKfdGpusCannotBeRead) {
   EXPECT_EQ(list[0].cu_occupancy, std::numeric_limits<decltype(list[0].cu_occupancy)>::max());
   EXPECT_EQ(list[0].evicted_time, std::numeric_limits<decltype(list[0].evicted_time)>::max());
   EXPECT_EQ(list[0].sdma_usage, std::numeric_limits<decltype(list[0].sdma_usage)>::max());
+}
+
+TEST(GpuUnit, ProcessListFailsForARunningProcessThatCannotBePlaced) {
+  ScopedAmdsmiInit smi_init;
+  MockProcessRoots roots;
+  // KFD cannot say which GPU this running process uses, and its fdinfo cannot be
+  // read either: a file stands where the directory should be.
+  roots.kfd().WriteFile("4252/queues/0/gpuid", "not-a-gpu-id\n");
+  AddKfdFilesForEveryGpu(&roots.kfd(), "4252");
+  roots.proc().WriteFile("4252/fdinfo", "not a directory\n");
+
+  TestGpu gpu;
+  WaitOutProcessListCache();
+  // The error from reading its GPUs (a queue GPU id that is not a number), not
+  // a list without it.
+  uint32_t num_processes = 4;
+  amdsmi_proc_info_t list[4] = {};
+  EXPECT_EQ(amdsmi_get_gpu_process_list(gpu.handle(), &num_processes, list),
+            AMDSMI_STATUS_UNEXPECTED_DATA);
+  // With no GPU's list read, the by-PID list returns it too.
+  amdsmi_processor_handle handle = gpu.handle();
+  uint32_t num_pids = 4;
+  amdsmi_proc_info_by_pid_t by_pid[4] = {};
+  EXPECT_EQ(amdsmi_get_gpu_process_list_by_pid(&handle, 1, by_pid, &num_pids),
+            AMDSMI_STATUS_UNEXPECTED_DATA);
+}
+
+TEST(GpuUnit, ProcessListFailsWhenAnFdinfoFileCannotBeRead) {
+  ScopedAmdsmiInit smi_init;
+  MockProcessRoots roots;
+  // KFD cannot say which GPU this running process uses. Its readable fdinfo
+  // file shows another GPU, but one that cannot be read (a symlink loop) might
+  // have shown this one.
+  roots.kfd().WriteFile("4258/queues/0/gpuid", "not-a-gpu-id\n");
+  AddKfdFilesForEveryGpu(&roots.kfd(), "4258");
+  AddProcess(&roots.proc(), 4258, kOtherBdfText);
+  std::filesystem::create_symlink("9", roots.proc().root() + "/4258/fdinfo/9");
+
+  TestGpu gpu;
+  WaitOutProcessListCache();
+  uint32_t num_processes = 4;
+  amdsmi_proc_info_t list[4] = {};
+  EXPECT_EQ(amdsmi_get_gpu_process_list(gpu.handle(), &num_processes, list),
+            AMDSMI_STATUS_UNEXPECTED_DATA);
+}
+
+TEST(GpuUnit, ProcessListLeavesOutAProcessWhoseGpusTheCallerMayNotRead) {
+  if (geteuid() == 0) GTEST_SKIP() << "Root reads files whatever their mode";
+  ScopedAmdsmiInit smi_init;
+  MockProcessRoots roots;
+  // The caller may read neither process's KFD queue. The fdinfo of the first
+  // shows this GPU; that of the second cannot be read either.
+  constexpr uint32_t kShown = 4259;
+  constexpr uint32_t kHidden = 4260;
+  for (const uint32_t pid : {kShown, kHidden}) {
+    const std::string dir = std::to_string(pid);
+    roots.kfd().WriteFile(dir + "/queues/0/gpuid", std::to_string(kKfdGpuId) + "\n");
+    AddKfdFilesForEveryGpu(&roots.kfd(), dir);
+    std::filesystem::permissions(roots.kfd().root() + "/" + dir + "/queues/0/gpuid",
+                                 std::filesystem::perms::none);
+    AddProcess(&roots.proc(), pid, kBdfText);
+  }
+  std::filesystem::permissions(roots.proc().root() + "/4260/fdinfo", std::filesystem::perms::none);
+
+  TestGpu gpu;
+  WaitOutProcessListCache();
+  uint32_t num_processes = 4;
+  amdsmi_proc_info_t list[4] = {};
+  const amdsmi_status_t status = amdsmi_get_gpu_process_list(gpu.handle(), &num_processes, list);
+  std::filesystem::permissions(roots.proc().root() + "/4260/fdinfo",
+                               std::filesystem::perms::owner_all);
+  ASSERT_EQ(status, AMDSMI_STATUS_SUCCESS);
+  ASSERT_EQ(num_processes, 1U);
+  EXPECT_EQ(list[0].pid, kShown);
 }
 
 }  // namespace
