@@ -517,7 +517,7 @@ suites:
     evidence:
       - path: catch/contract/CMakeLists.txt
         claim: The graph and graph_* node domains plus capture/driver_graph_node are built under BUILD_CONTRACT_TESTS.
-    history: Some graph node paths (e.g. memory-free nodes) are guarded against known local segfaults; see TESTING_INCIDENTS.md (TI-006).
+    history: "Repository evidence shows structural-only coverage for the graph memory-free node: it is constructed and its parameters are round-tripped without graph instantiation or launch. The originating crash rationale is not located or verified in repository evidence; see TESTING_INCIDENTS.md (TI-006)."
     disposition: keep
     disposition_rationale: Graph contracts pin portable lifecycle and node invariants; functional graph behavior remains in unit-graph.
 

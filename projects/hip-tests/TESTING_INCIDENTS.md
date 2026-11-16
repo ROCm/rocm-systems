@@ -325,48 +325,41 @@ suite record owns it.
 
 **Finding.** Backend-divergent or CUDA-removed APIs failed to build on the backend
 where the path does not exist; `gl_interop` pulled in `GL/gl.h`, which headless
-CUDA nodes lack (defect reference `EXSWHTEC-246`); and *launching* an instantiated
-graph that contains a memory-free node (`hipGraphAddMemFreeNode`) is treated as
-crash-prone, so the graph memory-free contract case keeps that path structural-only
-rather than launching it. The concern is an uncatchable SIGSEGV on launch that
-`HIP_CHECK` cannot trap, which would take down every sibling case that shares the
-Catch2 test executable's process — the shared-process hazard that case-level
-isolation guards against (TI-002), and which under CTest `catch_discover_tests`
-otherwise isolates per case. The originating crash observation is not a
-repository-evidenced event; what the repository shows is the structural-only guard
-itself (see Origin).
+CUDA nodes lack (defect reference `EXSWHTEC-246`); and the graph memory-free
+contract case keeps `hipGraphAddMemFreeNode` coverage structural-only rather than
+instantiating or launching its graph. Repository evidence establishes that
+structural guard, but does not locate or verify the originating crash rationale.
+An exact account of an uncatchable local SIGSEGV on launch is therefore unverified
+rationale, not a repository-evidenced fact (see Origin).
 
 **Control.** Backend-divergent or CUDA-removed APIs are guarded at compile time
 with `#if HT_AMD` (1 on AMD, 0 on NVIDIA), compiling to an empty binary on the
 backend where the path does not exist rather than failing to build. Build-level
 gates exclude paths an environment cannot support — `gl_interop` is built only
-under `HIP_PLATFORM STREQUAL "amd"`. A runtime path whose launch is treated as
-crash-prone is kept as a structural-only assertion — the graph memory-free node is
-constructed and its parameters are round-tripped through
-`hipGraphMemFreeNodeGetParams`, but the graph is never instantiated or launched —
-rather than being removed. An uncatchable SIGSEGV cannot be converted into a clean
-capability skip the way a documented `hipErrorNotSupported` can (TI-001), so the
-coverage stays structural instead of probe-then-skip.
+under `HIP_PLATFORM STREQUAL "amd"`. The graph memory-free case is kept as a
+structural-only assertion: the node is constructed and its parameters are
+round-tripped through `hipGraphMemFreeNodeGetParams`, but the graph is never
+instantiated or launched. This preserves the repository-evidenced structural
+coverage without asserting an unverified local-SIGSEGV rationale as fact.
 
 **Protects.** Portability of the contract build and run across backends and
-headless hosts: it keeps CUDA nodes green without weakening AMD coverage and keeps
-an uncatchable crash on the guarded launch path from taking down the sibling cases
-that share a Catch2 test executable's process.
+headless hosts: it keeps CUDA nodes green without weakening AMD coverage, while
+retaining the graph memory-free node's observable construction and parameter
+round-trip coverage without treating an unverified crash account as established
+repository evidence.
 
 **Rationale.** A contract test must be *portable*, which sometimes means "compile
 to nothing" on a backend that removed the API, and sometimes means "do not even
 build" a path whose dependencies are absent on the target host. `gl_interop` is
 AMD-gated because the NVIDIA header path pulls in `GL/gl.h`, which headless CUDA
 nodes lack (defect reference `EXSWHTEC-246`); gating at build time keeps those
-nodes green without weakening AMD coverage. For a graph memory-free node, whose
-launch is treated as crash-prone, keeping a structural-only assertion — construct
-the node and round-trip its parameters without ever instantiating or launching the
-graph — preserves the portable invariant check while avoiding an uncatchable crash
-that would take down every sibling case sharing the Catch2 test executable's
-process. The guarded hazard is on launch, not on node construction, so the
-structural path is safe; and because a SIGSEGV cannot be trapped, it cannot be
-downgraded to a capability skip the way `hipErrorNotSupported` is in TI-001.
-`#if HT_AMD` is used across 44 contract source files.
+nodes green without weakening AMD coverage. For the graph memory-free node, the
+repository-evidenced structural assertion — construct the node and round-trip its
+parameters without instantiating or launching the graph — preserves an observable
+portable invariant. The exact local-SIGSEGV account that may have motivated this
+scope is not located or verified in repository evidence, so no claim is made that
+node construction is safe, that launch is the hazard, or that a SIGSEGV would
+propagate to sibling cases. `#if HT_AMD` is used across 44 contract source files.
 
 **Evidence.**
 - `#if HT_AMD` and `BACKEND-DIFF:` conventions documented in
@@ -377,18 +370,20 @@ downgraded to a capability skip the way `hipErrorNotSupported` is in TI-001.
   round-tripped via `hipGraphMemFreeNodeGetParams`, graph never launched) in
   [`catch/contract/graph_mem_nodes/test_hip_graph_mem_nodes_contract.cc`](catch/contract/graph_mem_nodes/test_hip_graph_mem_nodes_contract.cc).
 - Classified in [`test_inventory.yaml`](test_inventory.yaml) under
-  `contract-graph` (graph node paths guarded against known local segfaults) and
-  `unit-interop-graphics` (gl_interop AMD-gated).
+  `contract-graph` (repository-evidenced structural-only graph memory-free-node
+  coverage; originating crash rationale unverified) and `unit-interop-graphics`
+  (gl_interop AMD-gated).
 
 **Origin.** The `HT_AMD` guarding convention and the structural-only
 graph-mem-node guard landed with the contract suite in `0d90b30fb6c` (#8827); that
-structural-only guard is the repository evidence for this control. The originating
-launch-crash observation that motivated keeping the memory-free node structural is
-**not located** as a landed change or any other in-repo record, and is not
-asserted here as a repository-evidenced event. The `gl_interop` AMD build gate
-lives in `catch/unit/CMakeLists.txt`, whose testing-framework scaffold originates
-in `abab64b35a1`; the specific change that disabled `gl_interop` on NVIDIA under
-`EXSWHTEC-246` was **not located** as a distinct commit in `git log`.
+structural-only guard is the repository evidence for this control. The exact local
+SIGSEGV account proposed as the reason for keeping the memory-free node structural
+is **not located or verified** as a landed change or other in-repository record,
+and remains unverified rationale rather than a repository-evidenced event. The
+`gl_interop` AMD build gate lives in `catch/unit/CMakeLists.txt`, whose
+testing-framework scaffold originates in `abab64b35a1`; the specific change that
+disabled `gl_interop` on NVIDIA under `EXSWHTEC-246` was **not located** as a
+distinct commit in `git log`.
 
 **Current status.** Active; `#if HT_AMD` is used across 44 contract source files,
 the `gl_interop` build gate is in place, and the graph-mem-node structural guard
@@ -396,8 +391,8 @@ remains.
 
 **Retirement condition.** Evaluated per guard: a guard may be removed only when
 the guarded API exists on all supported backends, the absent header dependency is
-gone, or the guarded launch path is verified crash-free so the structural fallback
-is no longer needed.
+gone, or the graph memory-free case has a verified rationale and broader execution
+coverage that supersedes the current structural-only assertion.
 
 **Inventory records.** `contract-graph` (`TI-006`), `unit-interop-graphics`
 (`TI-006`).

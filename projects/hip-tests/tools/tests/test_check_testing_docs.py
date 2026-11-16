@@ -603,6 +603,28 @@ class CheckTestingDocsTest(unittest.TestCase):
         results, _ = checker.validate(root=str(self.root))
         self.assertEqual(results["inventory"], [], msg=results["inventory"])
 
+    def test_repository_path_absolute_value_is_rejected(self):
+        broken = VALID_INVENTORY.replace(
+            '  suite_placement: "external: catch/*/CMakeLists.txt"\n',
+            "  suite_placement: /tmp\n", 1)
+        _write_docs(self.root, {"test_inventory.yaml": broken})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("must be repository-relative" in err for err in results["inventory"]),
+            msg=results["inventory"],
+        )
+
+    def test_repository_path_escaping_traversal_is_rejected(self):
+        broken = VALID_INVENTORY.replace(
+            '  suite_placement: "external: catch/*/CMakeLists.txt"\n',
+            "  suite_placement: ../../../../tmp\n", 1)
+        _write_docs(self.root, {"test_inventory.yaml": broken})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("escapes repository root" in err for err in results["inventory"]),
+            msg=results["inventory"],
+        )
+
     def test_metadata_config_stale_value_is_reported(self):
         broken = VALID_INVENTORY.replace(
             "    metadata:\n      framework: Catch2\n",
@@ -1314,6 +1336,32 @@ class CheckTestingDocsTest(unittest.TestCase):
             any("pair must name exactly two" in err for err in errors),
             msg=errors)
 
+    def test_pairwise_pair_requires_distinct_axes(self):
+        broken = VALID_COVERAGE.replace(
+            "pair: [api_surface.memory, behavior.data_integrity]",
+            "pair: [api_surface.memory, api_surface.other]", 1).replace(
+            "    - id: api_surface\n      classes: [memory]\n",
+            "    - id: api_surface\n      classes: [memory, other]\n", 1)
+        _write_docs(self.root, {"test_coverage_model.yaml": broken})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("must reference distinct axes" in err
+                for err in results["coverage_model"]),
+            msg=results["coverage_model"],
+        )
+
+    def test_pairwise_pair_requires_distinct_members(self):
+        broken = VALID_COVERAGE.replace(
+            "pair: [api_surface.memory, behavior.data_integrity]",
+            "pair: [api_surface.memory, api_surface.memory]", 1)
+        _write_docs(self.root, {"test_coverage_model.yaml": broken})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("must reference distinct members" in err
+                for err in results["coverage_model"]),
+            msg=results["coverage_model"],
+        )
+
     # -- reference-style Markdown links --------------------------------------
 
     def test_reference_style_link_resolves(self):
@@ -1496,6 +1544,18 @@ class CheckTestingDocsTest(unittest.TestCase):
             msg=results["coverage_model"],
         )
 
+    def test_coverage_class_evidence_path_outside_repository_is_rejected(self):
+        broken = VALID_COVERAGE.replace(
+            '        - path: "external: evidence-outside-repo"\n',
+            "        - path: ../../../../tmp\n")
+        _write_docs(self.root, {"test_coverage_model.yaml": broken})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("evidence path escapes repository root" in err
+                for err in results["coverage_model"]),
+            msg=results["coverage_model"],
+        )
+
     # -- coverage class / pairwise required field validation -----------------
 
     def test_class_risk_not_in_vocabulary_is_reported(self):
@@ -1527,6 +1587,30 @@ class CheckTestingDocsTest(unittest.TestCase):
         results, _ = checker.validate(root=str(self.root))
         self.assertTrue(
             any("expected_test_kinds must be a non-empty list" in err
+                for err in results["coverage_model"]),
+            msg=results["coverage_model"],
+        )
+
+    def test_class_expected_test_kind_must_be_nonempty_string(self):
+        broken = VALID_COVERAGE.replace(
+            "      expected_test_kinds: [contract]\n",
+            "      expected_test_kinds: ['']\n", 1)
+        _write_docs(self.root, {"test_coverage_model.yaml": broken})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("expected_test_kinds entry must be a non-empty string" in err
+                for err in results["coverage_model"]),
+            msg=results["coverage_model"],
+        )
+
+    def test_class_expected_test_kind_must_be_inventory_kind(self):
+        broken = VALID_COVERAGE.replace(
+            "      expected_test_kinds: [contract]\n",
+            "      expected_test_kinds: [functional]\n", 1)
+        _write_docs(self.root, {"test_coverage_model.yaml": broken})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("expected_test_kinds entry 'functional' not in inventory kind vocabulary" in err
                 for err in results["coverage_model"]),
             msg=results["coverage_model"],
         )

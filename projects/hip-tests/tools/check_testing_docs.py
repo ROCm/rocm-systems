@@ -387,25 +387,34 @@ def _load_yaml(path, errors):
     return None
 
 
-def _path_exists(component_dir, rel_path):
-    """True when rel_path (component-relative) resolves to an existing path.
+def _repository_root(component_dir):
+    """Return the repository root for the projects/hip-tests component."""
+    return Path(component_dir).resolve().parents[1]
 
-    A source directory (``catch/contract/memory``) and a literal file both count
-    here; this is the existence test for path pointers that may legitimately name
-    a directory (suite ``source.paths``, ``metadata`` pointers, source_of_truth).
-    """
-    return (Path(component_dir) / rel_path).resolve().exists()
+
+def _path_location_status(component_dir, rel_path):
+    """Classify a repository path as usable, absolute, or outside its repository."""
+    path = Path(rel_path)
+    if path.is_absolute():
+        return "absolute"
+    resolved = (Path(component_dir) / path).resolve()
+    try:
+        resolved.relative_to(_repository_root(component_dir))
+    except ValueError:
+        return "outside"
+    return "ok"
+
+
+def _path_exists(component_dir, rel_path):
+    """True when rel_path resolves to an existing path within this repository."""
+    return (_path_location_status(component_dir, rel_path) == "ok"
+            and (Path(component_dir) / rel_path).resolve().exists())
 
 
 def _path_is_file(component_dir, rel_path):
-    """True when rel_path (component-relative) resolves to an existing file.
-
-    Stricter than ``_path_exists``: a directory does not count. Evidence
-    pointers must cite a concrete file (a CMakeLists.txt, a config YAML, a
-    generated plan), not a directory, so a reader can open the exact artifact
-    that backs the claim.
-    """
-    return (Path(component_dir) / rel_path).resolve().is_file()
+    """True when rel_path resolves to an existing file within this repository."""
+    return (_path_location_status(component_dir, rel_path) == "ok"
+            and (Path(component_dir) / rel_path).resolve().is_file())
 
 
 def _looks_external(value):
@@ -449,6 +458,9 @@ def _resolve_repo_path(component_dir, value):
     token = _path_token(stripped)
     if not token:
         return "empty"
+    location = _path_location_status(component_dir, token)
+    if location != "ok":
+        return location
     if any(ch in token for ch in _GLOB_CHARS):
         return "ok" if _glob_matches(component_dir, token) else "missing"
     return "ok" if _path_exists(component_dir, token) else "missing"
@@ -468,6 +480,12 @@ def _check_repo_path_field(component_dir, value, label, errors):
     status = _resolve_repo_path(component_dir, value)
     if status == "empty":
         errors.append("{} is empty".format(label))
+        return 0
+    if status == "absolute":
+        errors.append("{} must be repository-relative: {}".format(label, value.strip()))
+        return 0
+    if status == "outside":
+        errors.append("{} escapes repository root: {}".format(label, value.strip()))
         return 0
     if status == "missing":
         errors.append("{} path missing: {}".format(label, value.strip()))
@@ -809,7 +827,16 @@ def check_inventory(inventory, component_dir):
                         continue
                     if rel.startswith(EXTERNAL_MARKER):
                         continue
-                    if _path_exists(component_dir, rel):
+                    location = _path_location_status(component_dir, rel)
+                    if location == "absolute":
+                        errors.append(
+                            "suite {!r} source path must be repository-relative: {}".format(
+                                sid, rel))
+                    elif location == "outside":
+                        errors.append(
+                            "suite {!r} source path escapes repository root: {}".format(
+                                sid, rel))
+                    elif _path_exists(component_dir, rel):
                         refs_ok += 1
                     else:
                         errors.append("suite {!r} source path missing: {}".format(sid, rel))
@@ -836,7 +863,14 @@ def check_inventory(inventory, component_dir):
                 errors.append("suite {!r} evidence entry missing a claim".format(sid))
             if not isinstance(rel, str) or rel.startswith(EXTERNAL_MARKER):
                 continue
-            if _path_is_file(component_dir, rel):
+            location = _path_location_status(component_dir, rel)
+            if location == "absolute":
+                errors.append(
+                    "suite {!r} evidence path must be repository-relative: {}".format(sid, rel))
+            elif location == "outside":
+                errors.append(
+                    "suite {!r} evidence path escapes repository root: {}".format(sid, rel))
+            elif _path_is_file(component_dir, rel):
                 refs_ok += 1
             elif _path_exists(component_dir, rel):
                 errors.append(
@@ -903,7 +937,7 @@ def check_inventory(inventory, component_dir):
     return errors, suite_ids, incident_refs, {"records": len(suites), "refs": refs_ok}
 
 
-def check_coverage_model(model, suite_ids, component_dir):
+def check_coverage_model(model, suite_ids, component_dir, inventory_kind_vocab=None):
     """Validate the coverage model against the inventory.
 
     Returns (errors, incident_refs, counts) where counts has 'classes' and
@@ -912,6 +946,7 @@ def check_coverage_model(model, suite_ids, component_dir):
     errors = []
     incident_refs = set()
     refs_ok = 0
+    inventory_kind_vocab = inventory_kind_vocab or set()
 
     if not isinstance(model, dict):
         return (["coverage model did not parse into a mapping"], incident_refs,
@@ -1087,11 +1122,21 @@ def check_coverage_model(model, suite_ids, component_dir):
                     cid, risk, sorted(COVERAGE_RISK_VALUES)))
         # expected_test_kinds enumerates the tiers the class is meant to hold and
         # must be a non-empty list.
+        expected_kinds = cls.get("expected_test_kinds")
         if "expected_test_kinds" in cls and (
-                not isinstance(cls.get("expected_test_kinds"), list)
-                or not cls.get("expected_test_kinds")):
+                not isinstance(expected_kinds, list) or not expected_kinds):
             errors.append(
                 "class {!r} expected_test_kinds must be a non-empty list".format(cid))
+        elif isinstance(expected_kinds, list):
+            for kind in expected_kinds:
+                if not _nonempty_str(kind):
+                    errors.append(
+                        "class {!r} expected_test_kinds entry must be a non-empty string: {!r}".format(
+                            cid, kind))
+                elif inventory_kind_vocab and kind not in inventory_kind_vocab:
+                    errors.append(
+                        "class {!r} expected_test_kinds entry {!r} not in inventory kind vocabulary".format(
+                            cid, kind))
         # axes and current_inventory are the class's required cross-references and
         # must each be a non-empty list: an empty axes list leaves the class
         # unanchored to any coverage dimension, and an empty current_inventory
@@ -1126,7 +1171,14 @@ def check_coverage_model(model, suite_ids, component_dir):
                 errors.append("class {!r} evidence entry missing a claim".format(cid))
             if not isinstance(rel, str) or rel.startswith(EXTERNAL_MARKER):
                 continue
-            if _path_is_file(component_dir, rel):
+            location = _path_location_status(component_dir, rel)
+            if location == "absolute":
+                errors.append(
+                    "class {!r} evidence path must be repository-relative: {}".format(cid, rel))
+            elif location == "outside":
+                errors.append(
+                    "class {!r} evidence path escapes repository root: {}".format(cid, rel))
+            elif _path_is_file(component_dir, rel):
                 refs_ok += 1
             elif _path_exists(component_dir, rel):
                 errors.append(
@@ -1187,6 +1239,17 @@ def check_coverage_model(model, suite_ids, component_dir):
             errors.append(
                 "pairwise {!r} pair must name exactly two axis.class refs (got {})".format(
                     pid, len(pair)))
+        elif isinstance(pair, list):
+            first, second = pair
+            if isinstance(first, str) and isinstance(second, str):
+                first_axis, _, _ = first.partition(".")
+                second_axis, _, _ = second.partition(".")
+                if first == second:
+                    errors.append(
+                        "pairwise {!r} pair must reference distinct members".format(pid))
+                if first_axis == second_axis:
+                    errors.append(
+                        "pairwise {!r} pair must reference distinct axes".format(pid))
         check_axis_refs("pairwise {!r}".format(pid), pc.get("pair"))
         check_inventory_refs("pairwise {!r}".format(pid), pc.get("current_inventory"))
         incident_refs.update(_collect_incident_refs(pc))
@@ -1487,8 +1550,13 @@ def validate(root=None, inventory_path=None, coverage_path=None,
         results["inventory"] = ["inventory not loaded"]
 
     if coverage is not None:
+        inventory_kind_vocab = set()
+        if isinstance(inventory, dict) and isinstance(
+                inventory.get("vocabularies"), dict):
+            inventory_kind_vocab = _vocab_values(
+                inventory["vocabularies"], "kind")
         cov_errors, cov_refs, cov_counts = check_coverage_model(
-            coverage, suite_ids, component_dir)
+            coverage, suite_ids, component_dir, inventory_kind_vocab)
         # The coverage model and the inventory are a connected set: cross-check
         # that they declare the same identity (schema_version, component).
         cov_errors.extend(check_identity_consistency(inventory, coverage))
