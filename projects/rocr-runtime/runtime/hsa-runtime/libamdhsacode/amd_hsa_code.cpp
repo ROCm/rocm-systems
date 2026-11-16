@@ -122,6 +122,11 @@ inline bool IsNoteStringSizeWithinRoom(size_t room, size_t offset, uint16_t clai
 
     uint64_t Symbol::Size() const
     {
+      // Under -fsanitize=address the compiler grows an instrumented global by a
+      // trailing redzone, so the ELF symbol size can cover memory the variable
+      // does not own. HSA_EXECUTABLE_SYMBOL_INFO_VARIABLE_SIZE is the size of
+      // the variable, so report the declared size when it is recoverable.
+      if (has_declared_size) { return declared_size; }
       return elfsym->size();
     }
 
@@ -1868,6 +1873,83 @@ inline bool IsNoteStringSizeWithinRoom(size_t room, size_t offset, uint16_t clai
         return true;
       }
 
+    namespace {
+
+    // Layout of one __asan_global descriptor in the asan_globals section as the
+    // AMDGPU backend emits it for a 64-bit target: eight pointer-sized fields,
+    // of which only the first three are of interest here.
+    //
+    //   +0   beg                 address of the instrumented global
+    //   +8   size                size declared in the source
+    //   +16  size_with_redzone   size the compiler actually reserved
+    //
+    // beg is zero in the file and supplied by an R_AMDGPU_RELATIVE64 relocation
+    // whose r_offset is the descriptor's address and whose addend is the
+    // global's address, so the descriptor joins to its symbol by address.
+    constexpr uint64_t kAsanGlobalDescriptorSize = 64;
+    constexpr uint64_t kAsanGlobalBegOffset = 0;
+    constexpr uint64_t kAsanGlobalDeclaredSizeOffset = 8;
+    constexpr uint64_t kAsanGlobalPaddedSizeOffset = 16;
+
+    }  // namespace
+
+    void AmdHsaCode::PullAsanGlobalSizes()
+    {
+      // Only produced for a 64-bit target, and only by an instrumented build.
+      if (img->EClass() != ELFCLASS64) { return; }
+
+      Section* asanGlobals = nullptr;
+      for (size_t i = 0; i < img->sectionCount(); ++i) {
+        Section* sec = img->section(i);
+        if (sec && sec->type() == SHT_PROGBITS && sec->Name() == "asan_globals") {
+          asanGlobals = sec;
+          break;
+        }
+      }
+      if (!asanGlobals) { return; }
+
+      const uint64_t sectionSize = asanGlobals->size();
+      const uint64_t sectionAddr = asanGlobals->addr();
+      // A section that is not a whole number of descriptors is a layout this
+      // code does not know; leave every symbol on its ELF size. An unallocated
+      // section has no address to match a relocation offset against.
+      if (sectionSize == 0 || sectionSize % kAsanGlobalDescriptorSize != 0) { return; }
+      if (sectionAddr == 0) { return; }
+
+      for (RelocationSection* relocSection : relocationSections) {
+        if (!relocSection) { continue; }
+        // A static relocation section, kept by --emit-relocs, records offsets
+        // into its target section rather than addresses, so its entries cannot
+        // be matched against this section's address range.
+        if (relocSection->targetSection()) { continue; }
+        for (size_t i = 0; i < relocSection->relocationCount(); ++i) {
+          Relocation* reloc = relocSection->relocation(i);
+          if (!reloc || reloc->type() != ELF::R_AMDGPU_RELATIVE64) { continue; }
+
+          const uint64_t relocOffset = reloc->offset();
+          if (relocOffset < sectionAddr || relocOffset >= sectionAddr + sectionSize) { continue; }
+          const uint64_t descriptorOffset = relocOffset - sectionAddr;
+          // Only the relocation against the descriptor's beg field carries the
+          // address of the global; the others point at its name.
+          if (descriptorOffset % kAsanGlobalDescriptorSize != kAsanGlobalBegOffset) { continue; }
+
+          uint64_t declaredSize = 0;
+          uint64_t paddedSize = 0;
+          if (!asanGlobals->getData(descriptorOffset + kAsanGlobalDeclaredSizeOffset, &declaredSize,
+                                    sizeof(declaredSize)) ||
+              !asanGlobals->getData(descriptorOffset + kAsanGlobalPaddedSizeOffset, &paddedSize,
+                                    sizeof(paddedSize))) {
+            continue;
+          }
+          // A descriptor that does not describe a padded object, or that claims
+          // a declared size the padded object cannot hold, is not a layout this
+          // code understands.
+          if (declaredSize == 0 || declaredSize > paddedSize) { continue; }
+          asanDeclaredSizes[static_cast<uint64_t>(reloc->addend())] = {declaredSize, paddedSize};
+        }
+      }
+    }
+
     bool AmdHsaCode::PullElfV2()
     {
       for (size_t i = 0; i < img->segmentCount(); ++i) {
@@ -1889,6 +1971,10 @@ inline bool IsNoteStringSizeWithinRoom(size_t room, size_t offset, uint16_t clai
           hsatext = sec;
         }
       }
+      // Needs relocationSections, filled in above, and must run before the
+      // symbol pass that consumes the recovered sizes.
+      PullAsanGlobalSizes();
+
       for (size_t i = 0; i < img->getSymbolTable()->symbolCount(); ++i) {
         amd::elf::Symbol* elfsym = img->getSymbolTable()->symbol(i);
         std::shared_ptr<Symbol> sym;
@@ -1912,9 +1998,21 @@ inline bool IsNoteStringSizeWithinRoom(size_t room, size_t offset, uint16_t clai
           break;
         }
         case STT_OBJECT:
-        case STT_COMMON:
-          sym = std::make_shared<VariableSymbolV2>(elfsym);
+        case STT_COMMON: {
+          std::shared_ptr<VariableSymbolV2> varsym = std::make_shared<VariableSymbolV2>(elfsym);
+          if (!asanDeclaredSizes.empty()) {
+            auto it = asanDeclaredSizes.find(varsym->VAddr());
+            // Take the declared size only from a descriptor that agrees with
+            // the symbol on the size of the padded object. A symbol already
+            // sized as declared, and any descriptor whose fields do not line up
+            // with this symbol, keeps the ELF size.
+            if (it != asanDeclaredSizes.end() && it->second.second == elfsym->size()) {
+              varsym->SetDeclaredSize(it->second.first);
+            }
+          }
+          sym = varsym;
           break;
+        }
         default:
           break; // Skip unknown symbols.
         }

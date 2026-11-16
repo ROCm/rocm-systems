@@ -114,10 +114,15 @@ namespace code {
     class Symbol {
     protected:
       amd::elf::Symbol* elfsym;
+      // Size as declared in the source, recovered from the sanitizer's own
+      // metadata, for a global the address sanitizer padded with a redzone.
+      // Unset for every symbol in a non-instrumented code object.
+      uint64_t declared_size;
+      bool has_declared_size;
 
     public:
       explicit Symbol(amd::elf::Symbol* elfsym_)
-        : elfsym(elfsym_) { }
+        : elfsym(elfsym_), declared_size(0), has_declared_size(false) { }
       virtual ~Symbol() { }
       virtual bool IsKernelSymbol() const { return false; }
       virtual KernelSymbol* AsKernelSymbol() { assert(false); return 0; }
@@ -138,6 +143,8 @@ namespace code {
       hsa_variable_segment_t Segment() const;
       uint64_t Size() const;
       uint32_t Size32() const;
+      void SetDeclaredSize(uint64_t size) { declared_size = size; has_declared_size = true; }
+      bool HasDeclaredSize() const { return has_declared_size; }
       uint32_t Alignment() const;
       bool IsConst() const;
       virtual hsa_status_t GetInfo(hsa_code_symbol_info_t attribute, void *value);
@@ -182,6 +189,11 @@ namespace code {
       std::vector<Section*> dataSections;
       std::vector<RelocationSection*> relocationSections;
       std::vector<std::shared_ptr<Symbol>> symbols;
+      // Virtual address of an instrumented global -> its source-declared size
+      // and the padded size the compiler reserved for it, both recovered from
+      // the asan_globals section. Empty unless the code object was built with
+      // -fsanitize=address.
+      std::unordered_map<uint64_t, std::pair<uint64_t, uint64_t>> asanDeclaredSizes;
       bool combineDataSegments;
       Segment* hsaSegments[AMDGPU_HSA_SEGMENT_LAST][2];
       Section* hsaSections[AMDGPU_HSA_SECTION_LAST];
@@ -196,6 +208,7 @@ namespace code {
       bool PullElf();
       bool PullElfV1();
       bool PullElfV2();
+      void PullAsanGlobalSizes();
 
       void AddAmdNote(uint32_t type, const void* desc, uint32_t desc_size);
       template <typename S>
