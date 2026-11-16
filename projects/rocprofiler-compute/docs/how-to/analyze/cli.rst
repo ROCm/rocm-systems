@@ -973,4 +973,3 @@ Analyze mode has these debug options:
 
 * ``--debug-verify-deps``: Check that the Python dependencies of analyze mode are
   installed, then exit. It doesn't need ``--path``.
-
