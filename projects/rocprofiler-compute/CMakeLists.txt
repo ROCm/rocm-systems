@@ -806,6 +806,17 @@ if(NOT TEST_FROM_INSTALL)
     )
 endif()
 
+# The real-equation round-trip test imports tools/, which an install tree lacks.
+if(NOT TEST_FROM_INSTALL)
+    add_test(
+        NAME test_equation_format_real
+        COMMAND
+            ${PYTHON_TEST_COMMAND} -m pytest
+            --junitxml=tests/test_equation_format_real.xml ${COV_OPTION}
+            tests/unit/utils/test_equation_format_real.py ${WORKING_DIR_OPTION}
+    )
+endif()
+
 add_test(
     NAME test_parser
     COMMAND
