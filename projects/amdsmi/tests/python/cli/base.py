@@ -147,6 +147,28 @@ class TestCliBase(unittest.TestCase):
         "reset": {"--xgmierr": amdsmi.AmdSmiStatus.INVAL},
     }
 
+    # The only flags ``metric --nic`` accepts. The parser rejects any GPU or CPU
+    # metric flag given with --nic, so a command carrying one expects a failure.
+    NIC_METRIC_FLAGS = frozenset(
+        {
+            "--nic",
+            "--port",
+            "--extended",
+            "--rdma",
+            "--sensors",
+            "--show-unsupported",
+            "--json",
+            "--csv",
+            "--file",
+            "--append",
+            "--overwrite",
+            "--loglevel",
+            "--watch",
+            "--watch_time",
+            "--iterations",
+        }
+    )
+
     # Order for the amd-smi reset commands, putting --clocks last since
     # it resets clocks and overdrive to default
     SWEEP_ARG_ORDER = {"reset": {"first": "--fans", "last": "--clocks"}}
@@ -234,15 +256,17 @@ class TestCliBase(unittest.TestCase):
                 gpus.append(entry["bdf"])
                 gpus.append(entry["uuid"])
         baseline["gpus"] = gpus
+        baseline["nics"] = cls._nic_sweep_values()
 
         # When parsing, expand each arg with its value(s).
-        # CPU/Core are given default values because their sub-arguments require a value.
+        # CPU/Core/NIC are given default values because their sub-arguments require a value.
         # Otherwise, tests will populate the args incorrectly on CPU/APU-capable systems.
         baseline["sub_args"] = {
             "CLOCK": ["SYS", "DF", "DCEF", "SOC", "MEM", "VCLK0", "VCLK1", "DCLK0", "DCLK1", "ALL"],
             "PID": [123],
             "NAME": ["AMD"],
             "GPU": gpus,
+            "NIC": baseline["nics"],
             "CPU": ["all", "0"],
             "CORE": ["all", "0"],
             "FILE": [
@@ -257,6 +281,22 @@ class TestCliBase(unittest.TestCase):
         }
         baseline["clk_freq"] = cls._read_clk_freq()
         return baseline
+
+    @classmethod
+    def _nic_sweep_values(cls) -> list:
+        """Values for the --nic selector: none on a host without a NIC.
+
+        A host without a NIC answers ``--nic 0`` with DEVICE_NOT_FOUND and
+        ``--nic all`` with no output, so sweeping them could never pass.
+        """
+        (rc, data, _) = cls.util.RunCmdSync("amd-smi list --nic all --json")
+        if rc or not data:
+            return []
+        try:
+            nics = json.loads(data)
+        except json.JSONDecodeError:
+            return []
+        return ["all", "0"] if nics else []
 
     @classmethod
     def _read_clk_freq(cls):
@@ -544,14 +584,6 @@ class TestCliBase(unittest.TestCase):
                                     f"{self.tab}Untested (no sweep values for {sub_arg}): "
                                     f"amd-smi {cmd.split()[1]} {items[item_index]}"
                                 )
-                        elif "Device" in match_str and sub_arg.isupper():
-                            # A selector with no sweep IDs, bare, only reaches the missing-value
-                            # error; --nic is listed once a NIC driver loads, even with no NIC.
-                            sub_found = True
-                            self.common.print(
-                                f"{self.tab}Untested (no sweep values for {sub_arg}): "
-                                f"amd-smi {cmd.split()[1]} {items[item_index]}"
-                            )
                     if not sub_found:
                         # Put in sub_arg if it was not found
                         if "Set" in match_str:
@@ -695,32 +727,21 @@ class TestCliBase(unittest.TestCase):
                     nameStr == "{min_power}" or nameStr == "{avg_power}" or nameStr == "{max_power}"
                 ):
                     # For setting --power-cap
-                    # Stop at the match; a later iteration would overwrite it with "N/A".
-                    for power_type in self.power_types:
-                        if power_type in cmd:
-                            power_type = self.static_data["gpu_data"][gpu_index]["limit"][
-                                power_type
-                            ]
+                    # Stop at the match; a later iteration would overwrite it with None.
+                    for sensor in self.power_types:
+                        if sensor in cmd:
                             break
                     else:
-                        power_type = "N/A"
-                    if (
-                        power_type == "N/A"
-                        or not isinstance(power_type, dict)
-                        or power_type["min_power_limit"] == "N/A"
-                        or power_type["max_power_limit"] == "N/A"
-                    ):
+                        sensor = None
+                    power_range = self._power_cap_range(sensor, gpu_index, explicit_gpu)
+                    if power_range is None:
                         cmd = ""
                     else:
+                        min_power, max_power, zero_cap = power_range
                         # A current cap of 0 means the CLI refuses every write to this
                         # sensor, whatever value is asked for.
-                        current_cap = power_type["socket_power_limit"]
-                        if isinstance(current_cap, dict) and current_cap["value"] == 0:
+                        if zero_cap:
                             cond = [*ok, AmdSmiExitCode.INVALID_PARAMETER_VALUE]
-                        # The CLI clamps its lower bound to 1, so a reported min of 0
-                        # is refused rather than being the smallest settable cap.
-                        min_power = max(power_type["min_power_limit"]["value"], 1)
-                        max_power = power_type["max_power_limit"]["value"]
                         avg_power = int((min_power + max_power) / 2)
                         if nameStr == "{min_power}":
                             cmd = cmd.replace("{min_power}", str(min_power), 1)
@@ -806,6 +827,14 @@ class TestCliBase(unittest.TestCase):
                             cmd = ""
                     else:
                         cmd = ""
+            # The NIC path prints once and never loops, so the parser rejects --watch with --nic
+            words = cmd.split()
+            if "--nic" in words and ("--watch" in words):
+                cond = [AmdSmiExitCode.INVALID_PARAMETER]
+            if (words[1:2] == ["metric"]) and ("--nic" in words):
+                given_flags = {word for word in words if word.startswith("--")}
+                if given_flags - self.NIC_METRIC_FLAGS:
+                    cond = [AmdSmiExitCode.INVALID_PARAMETER]
             cmds[index] = (cmd, cond)
 
         # Pare down commands
@@ -986,23 +1015,97 @@ class TestCliBase(unittest.TestCase):
                 defaulting to it while actually running on every device.
 
         Returns:
-            int: the highest settable level plus one, or 0 when the device does
-            not expose the clock -- in which case the caller drops the command.
+            int: the highest settable level plus one, or 0 when the device -- or,
+            without an explicit --gpu, any device -- does not expose the clock, in
+            which case the caller drops the command.
         """
+        # Without an explicit --gpu the command runs on every device, so the mask has
+        # to be one the smallest table accepts, and every device must expose the
+        # clock: one that does not fails with a different code than the rest, and the
+        # CLI then exits MIXED_DEVICE_ERRORS. Explicit --gpu commands still cover each.
         if clk_type == "PCIE":
-            pcie_levels = self.static_data["gpu_data"][gpu_index]["bus"]["pcie_levels"]
-            return len(pcie_levels) if isinstance(pcie_levels, dict) else 0
+            if explicit_gpu:
+                indices = [gpu_index]
+            else:
+                indices = range(len(self.static_data["gpu_data"]))
+            per_gpu = []
+            for index in indices:
+                pcie_levels = self.static_data["gpu_data"][index]["bus"]["pcie_levels"]
+                if not isinstance(pcie_levels, dict) or not pcie_levels:
+                    return 0
+                per_gpu.append(len(pcie_levels))
+            return min(per_gpu) if per_gpu else 0
 
-        # Without an explicit --gpu the command runs on every device, so the mask
-        # has to be one the smallest table also accepts.
         tables = [self.clk_freq[gpu_index]] if explicit_gpu else self.clk_freq
         per_gpu = []
         for table in tables:
             freq = table.get(clk_type)
-            if freq and freq["num_supported"]:
-                # The deep-sleep row occupies a table slot but is not settable.
-                per_gpu.append(freq["num_supported"] - int(freq["has_deep_sleep"]))
-        return min(per_gpu) if per_gpu else 0
+            if not freq or not freq["num_supported"]:
+                return 0
+            # The deep-sleep row occupies a table slot but is not settable.
+            per_gpu.append(freq["num_supported"] - int(freq["has_deep_sleep"]))
+        if not per_gpu:
+            return 0
+        # A table's middle levels can come and go as the command runs (a fine-grained
+        # domain lists its current clock as a level only while it sits between min and
+        # max). Every device then refuses a vanished level the same way, which the
+        # caller tolerates -- unless the devices are different models: the one that
+        # lost the level fails with another code than the rest, and the CLI exits
+        # MIXED_DEVICE_ERRORS. So on a mixed host, name only levels 0 and 1, which
+        # every table with two or more levels always lists.
+        if not explicit_gpu and self._mixed_gpu_models():
+            return min(min(per_gpu), 2)
+        return min(per_gpu)
+
+    def _mixed_gpu_models(self):
+        """Whether the host has GPUs of more than one model (graphics target)."""
+        targets = {
+            gpu.get("asic", {}).get("target_graphics_version")
+            for gpu in self.static_data["gpu_data"]
+        }
+        return len(targets) > 1
+
+    def _power_cap_range(self, sensor, gpu_index, explicit_gpu):
+        """The ``--power-cap`` range every target device accepts for *sensor*.
+
+        Without an explicit --gpu the command runs on every device, so the range is
+        the overlap of each device's range: on a mixed host a value one device
+        accepts can be out of range for another (e.g. 1-290 W next to 255-272 W).
+
+        Args:
+            sensor: power sensor named in the command (``ppt0``/``ppt1``), or None.
+            gpu_index: device the command reads its values from.
+            explicit_gpu: whether the command named that device.
+
+        Returns:
+            tuple: ``(min_power, max_power, zero_cap)``, ``zero_cap`` being whether
+            any target device's current cap is 0; or None when *sensor* is None, a
+            target device does not expose it, or the ranges do not overlap -- in
+            which case the caller drops the command.
+        """
+        if sensor is None:
+            return None
+        indices = [gpu_index] if explicit_gpu else range(len(self.static_data["gpu_data"]))
+        lows, highs, zero_cap = [], [], False
+        for index in indices:
+            limits = self.static_data["gpu_data"][index]["limit"][sensor]
+            if (
+                not isinstance(limits, dict)
+                or limits["min_power_limit"] == "N/A"
+                or limits["max_power_limit"] == "N/A"
+            ):
+                return None
+            # The CLI clamps its lower bound to 1, so a reported min of 0
+            # is refused rather than being the smallest settable cap.
+            lows.append(max(limits["min_power_limit"]["value"], 1))
+            highs.append(limits["max_power_limit"]["value"])
+            current_cap = limits["socket_power_limit"]
+            if isinstance(current_cap, dict) and current_cap["value"] == 0:
+                zero_cap = True
+        min_power, max_power = max(lows), min(highs)
+        if min_power > max_power:
+            return None
+        return min_power, max_power, zero_cap
 
     @staticmethod
     def _clk_limit_value(clocks, clk_type, bound):

@@ -192,7 +192,29 @@ TEST(AqlPacketProcessorTest, BarrierDependencyMustResolveBeforeAdmission) {
   EXPECT_EQ(admitted.completion_signal, 0x2000u);
   EXPECT_TRUE(admitted.barrier_bit);
   EXPECT_TRUE(admitted.blocks_following);
+  EXPECT_TRUE(admitted.no_fence_aql_barrier);
   EXPECT_TRUE(complete.blocks_following);
+}
+
+TEST(AqlPacketProcessorTest, ScopedBarriersCannotUseTheNoFenceRootReplacementPath) {
+  AqlPreparedPacket admitted{};
+  AqlPacketProcessor processor({
+      .load_signal = {},
+      .admit =
+          [&](const AqlPacketProcessRequest &, AqlPreparedPacket prepared) {
+            admitted = prepared;
+            return AqlAdmissionResult{.status = AqlAdmissionStatus::Complete};
+          },
+  });
+
+  for (const uint16_t scope_shift : {uint16_t{HSA_PACKET_HEADER_ACQUIRE_FENCE_SCOPE},
+                                     uint16_t{HSA_PACKET_HEADER_RELEASE_FENCE_SCOPE}}) {
+    hsa_barrier_and_packet_t packet{};
+    packet.header = HSA_PACKET_TYPE_BARRIER_AND | (HSA_FENCE_SCOPE_AGENT << scope_shift);
+    const auto bytes = packet_bytes(packet);
+    EXPECT_EQ(processor.process(request_for(bytes)).packet.status, PacketProcessStatus::Complete);
+    EXPECT_FALSE(admitted.no_fence_aql_barrier);
+  }
 }
 
 TEST(AqlPacketProcessorTest, RevokedDependencySnapshotIsTerminalRatherThanBlocked) {

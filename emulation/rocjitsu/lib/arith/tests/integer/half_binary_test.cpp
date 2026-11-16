@@ -151,3 +151,13 @@ TEST(IntegerAshrrevI16W64, Arithmetic) {
   rocjitsu::arith::test::check_half_binary<64, 2>(rj_arith_v_ashrrev_i16_w64,
                                                   rocjitsu::arith::test::HalfBinary::Ashr);
 }
+
+TEST(IntegerMulLoU16W32Gfx942, Arithmetic) {
+  rocjitsu::arith::test::check_half_binary<32, 2>(rj_arith_v_mul_lo_u16_w32_gfx942,
+                                                  rocjitsu::arith::test::HalfBinary::MulLoU16Clamp);
+}
+
+TEST(IntegerMulLoU16W64Gfx942, Arithmetic) {
+  rocjitsu::arith::test::check_half_binary<64, 2>(rj_arith_v_mul_lo_u16_w64_gfx942,
+                                                  rocjitsu::arith::test::HalfBinary::MulLoU16Clamp);
+}

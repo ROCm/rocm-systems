@@ -1649,6 +1649,37 @@ write_interceptor(Queue*                                queue,
         });
 }
 
+// The CP retires a packet by resetting its slot header to INVALID, promptly, but it
+// may defer the read_dispatch_id write-back: on gfx1250 the read index can stop a
+// few packets short of a finished burst and stay there while the queue is idle. So
+// the window [read index, P) also counts as retired once every slot in it is
+// INVALID. A slot is reused only after the read index has passed it, and the doorbell
+// path invalidates only slots at or past next_scan_pos (== P at the snapshot), so an
+// INVALID header in the window is never an unconsumed packet. Walking back from the
+// newest packet stops at the first one still in flight.
+//
+// Precondition: caller holds state.drain_mu, so neither the ring nor real_rdid (both
+// owned by the runtime's queue) can be freed by a concurrent destroy under the loads.
+bool
+hw_queue_retired_locked(const QueueState& state, uint64_t submit_pos)
+{
+    const uint64_t _rdid = __atomic_load_n(state.real_rdid, __ATOMIC_ACQUIRE);
+    if(hw_queue_drained(_rdid, submit_pos)) return true;
+    // A window longer than the ring would alias slots; only the read index can decide it.
+    if(!state.ring_buf || submit_pos - _rdid > state.ring_size) return false;
+
+    for(uint64_t pos = submit_pos; pos > _rdid; --pos)
+    {
+        const auto* slot_base = static_cast<const char*>(state.ring_buf) +
+                                (((pos - 1) & state.ring_mask) * state.pkt_size);
+        const auto* hdr_ptr = reinterpret_cast<const volatile uint16_t*>(slot_base);
+
+        if((__atomic_load_n(hdr_ptr, __ATOMIC_ACQUIRE) & 0xFFu) !=
+           static_cast<unsigned>(HSA_PACKET_TYPE_INVALID))
+            return false;
+    }
+    return true;
+}
 }  // namespace
 
 // Precondition: caller holds state.drain_mu. gate_lock still orders the
@@ -1668,7 +1699,7 @@ wait_queue_hw_drained_locked(QueueState& state, uint64_t submit_pos, uint64_t de
 {
     if(!state.real_rdid) return true;
 
-    while(!hw_queue_drained(__atomic_load_n(state.real_rdid, __ATOMIC_ACQUIRE), submit_pos))
+    while(!hw_queue_retired_locked(state, submit_pos))
     {
         if(kfd::steady_now_ns() >= deadline_ns) return false;
         std::this_thread::sleep_for(std::chrono::microseconds{200});
@@ -1713,7 +1744,17 @@ drain_all_queues_hw(uint64_t deadline_ns)
         auto _lk = std::unique_lock<std::mutex>{_state->drain_mu};
         if(!_state->rdid_valid) continue;  // destroyed under the same lock; skip
         const uint64_t _P = close_admission_and_snapshot_locked(*_state);
-        wait_queue_hw_drained_locked(*_state, _P, deadline_ns);
+        if(wait_queue_hw_drained_locked(*_state, _P, deadline_ns)) continue;
+
+        // The shared budget ran out with packets still in flight on this queue. Not
+        // a loss by itself -- drain_for_teardown() reports any dispatch it strands --
+        // but it is where teardown spent the close budget.
+        ROCP_INFO << fmt::format(
+            "KFD dispatch-log: teardown HW drain of hsa_queue_t{{.id={}}} reached its deadline "
+            "before packets up to {} retired (read index {})",
+            _state->hsa_queue ? _state->hsa_queue->id : 0,
+            _P,
+            __atomic_load_n(_state->real_rdid, __ATOMIC_ACQUIRE));
     }
 }
 

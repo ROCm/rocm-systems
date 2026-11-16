@@ -18,7 +18,7 @@ VInterpP1F32Vop3::VInterpP1F32Vop3(const MachineInst *inst)
            selected_exec_fn(InstructionExecutionId::VInterpP1F32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src1(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src0(32, OperandType::OPR_ATTR, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src0(32, OperandType::OPR_ATTR, (reinterpret_cast<const OpEncoding *>(inst)->src0 & 0x3fu)),
       m0(32, OperandType::OPR_SDST_M0, 124) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src1;
@@ -48,7 +48,7 @@ VInterpP2F32Vop3::VInterpP2F32Vop3(const MachineInst *inst)
            selected_exec_fn(InstructionExecutionId::VInterpP2F32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src1(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src0(32, OperandType::OPR_ATTR, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src0(32, OperandType::OPR_ATTR, (reinterpret_cast<const OpEncoding *>(inst)->src0 & 0x3fu)),
       m0(32, OperandType::OPR_SDST_M0, 124) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src1;
@@ -78,7 +78,7 @@ VInterpMovF32Vop3::VInterpMovF32Vop3(const MachineInst *inst)
            selected_exec_fn(InstructionExecutionId::VInterpMovF32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src1(32, OperandType::OPR_PARAM, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src0(32, OperandType::OPR_ATTR, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src0(32, OperandType::OPR_ATTR, (reinterpret_cast<const OpEncoding *>(inst)->src0 & 0x3fu)),
       m0(32, OperandType::OPR_SDST_M0, 124) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src1;
@@ -147,7 +147,7 @@ VReadfirstlaneB32Vop3::VReadfirstlaneB32Vop3(const MachineInst *inst)
     : Vop3("v_readfirstlane_b32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VReadfirstlaneB32Vop3)),
       vdst(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0) {
+      src0(32, OperandType::OPR_VGPR_OR_LDS, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   num_src_ = 1;
@@ -5928,7 +5928,7 @@ VInterpP1llF16Vop3::VInterpP1llF16Vop3(const MachineInst *inst)
            selected_exec_fn(InstructionExecutionId::VInterpP1llF16Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src1(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src0(16, OperandType::OPR_ATTR, reinterpret_cast<const OpEncoding *>(inst)->src0) {
+      src0(16, OperandType::OPR_ATTR, (reinterpret_cast<const OpEncoding *>(inst)->src0 & 0x3fu)) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src1;
   src_operands_[1] = &src0;
@@ -5955,7 +5955,7 @@ VInterpP1lvF16Vop3::VInterpP1lvF16Vop3(const MachineInst *inst)
            selected_exec_fn(InstructionExecutionId::VInterpP1lvF16Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src1(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src0(16, OperandType::OPR_ATTR, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src0(16, OperandType::OPR_ATTR, (reinterpret_cast<const OpEncoding *>(inst)->src0 & 0x3fu)),
       src2(16, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src2) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src1;
@@ -5985,7 +5985,7 @@ VInterpP2LegacyF16Vop3::VInterpP2LegacyF16Vop3(const MachineInst *inst)
            selected_exec_fn(InstructionExecutionId::VInterpP2LegacyF16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src1(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src0(16, OperandType::OPR_ATTR, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src0(16, OperandType::OPR_ATTR, (reinterpret_cast<const OpEncoding *>(inst)->src0 & 0x3fu)),
       src2(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src2) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src1;
@@ -6021,7 +6021,7 @@ VInterpP2F16Vop3::VInterpP2F16Vop3(const MachineInst *inst)
            selected_exec_fn(InstructionExecutionId::VInterpP2F16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src1(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src0(16, OperandType::OPR_ATTR, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src0(16, OperandType::OPR_ATTR, (reinterpret_cast<const OpEncoding *>(inst)->src0 & 0x3fu)),
       src2(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src2) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src1;
@@ -6032,6 +6032,8 @@ VInterpP2F16Vop3::VInterpP2F16Vop3(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
+  vdst.set_register_byte_mask((amdgpu::vop3_opsel(inst_) & 8) ? 0xc : 0x3);
+  vdst.set_preserve_unwritten_bytes();
   flags_ |= EMBEDDED_MEMORY_WAIT;
 }
 
@@ -6299,7 +6301,7 @@ VReadlaneB32Vop3::VReadlaneB32Vop3(const MachineInst *inst)
     : Vop3("v_readlane_b32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VReadlaneB32Vop3)),
       vdst(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src0(32, OperandType::OPR_VGPR_OR_LDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SSRC_LANESEL, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;

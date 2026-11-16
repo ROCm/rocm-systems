@@ -4,12 +4,15 @@
 #pragma once
 
 #include "rj_arith/rj_arith.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/fp_format.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/rj_arith_vector_exec.h"
 #include "rocjitsu/isa/operand.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 
+#include <bit>
 #include <cstdint>
+#include <type_traits>
 
 namespace rocjitsu::amdgpu::arith {
 
@@ -84,7 +87,7 @@ using FloatCompare64Function = int (*)(uint64_t, uint64_t, uint64_t, uint64_t *,
 
 // Report fresh causes separately from sticky state so repeated exceptions still
 // reach trap delivery. A rejected call commits neither its mask nor its causes.
-template <unsigned Bits, typename Commit>
+template <unsigned Bits, bool Gfx10Signaling = false, typename Commit>
 inline void execute_float_compare(Wavefront &wave, FloatCompare32Function wave32,
                                   FloatCompare64Function wave64, uint64_t flags, uint64_t modifiers,
                                   const Operand &source_a, const Operand &source_b, bool constant,
@@ -98,7 +101,31 @@ inline void execute_float_compare(Wavefront &wave, FloatCompare32Function wave32
   uint64_t result = 0;
   uint32_t causes = 0;
   auto invoke = [&](const uint32_t *const *a, const uint32_t *const *b) {
+    // GFX10 uses CLAMP to request a signaling compare, including quiet NaNs.
+    if constexpr (Gfx10Signaling) {
+      if (modifiers & RJ_ARITH_ALU_CLAMP) {
+        using F =
+            std::conditional_t<Bits == 16, fp_format::F16,
+                               std::conditional_t<Bits == 32, fp_format::F32, fp_format::F64>>;
+        auto is_nan = [&](const uint32_t *const *source, uint64_t high, unsigned lane) {
+          uint64_t bits = source[0][lane];
+          if constexpr (Bits == 64)
+            bits |= uint64_t{source[1][lane]} << 32;
+          if constexpr (Bits == 16)
+            bits >>= (modifiers & high) ? 16 : 0;
+          return (bits & F::kMagnitude) > F::kInfinity;
+        };
+        for (uint64_t lanes = exec_mask; lanes; lanes &= lanes - 1) {
+          const unsigned lane = std::countr_zero(lanes);
+          if (is_nan(a, RJ_ARITH_ALU_HIGH_A, lane) || is_nan(b, RJ_ARITH_ALU_HIGH_B, lane)) {
+            causes |= RJ_ARITH_EXCEPTION_INVALID;
+            break;
+          }
+        }
+      }
+    }
     uint32_t *state = &causes;
+    // Arithmetic/status policy stays in the selected library entry point.
     if (wave.wf_size() == 64)
       return wave64(flags, exec_mask, modifiers, &result, a, b, state);
     uint32_t result32 = 0;
@@ -106,8 +133,9 @@ inline void execute_float_compare(Wavefront &wave, FloatCompare32Function wave32
     result = result32;
     return status;
   };
-  const int status =
-      with_compare_inputs<Bits>(wave, wave.exec(), source_a, source_b, constant, modifiers, invoke);
+  const bool skip_inputs = constant && !(Gfx10Signaling && (modifiers & RJ_ARITH_ALU_CLAMP));
+  const int status = with_compare_inputs<Bits>(wave, Gfx10Signaling ? exec_mask : wave.exec(),
+                                               source_a, source_b, skip_inputs, modifiers, invoke);
   if (wave.instruction_execution_failed())
     return;
   if (status != RJ_ARITH_SUCCESS) {

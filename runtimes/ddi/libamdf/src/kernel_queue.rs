@@ -325,7 +325,7 @@ pub(crate) unsafe extern "C" fn destroy(pointer: *mut amdf_kernel_queue_t) -> u6
             queue.destroying.store(true, Ordering::Release);
         }
         let result = queue.native.destroy().map_err(|error| {
-            if error.kind() == rocddi::ErrorKind::Busy && error.native_error_code().is_none() {
+            if error.kind() == rocddi::ErrorKind::Busy && error.native_status().is_none() {
                 // Native preflight rejected destruction before releasing the
                 // queue. BUSY promises that this public handle can be retried.
                 queue.destroying.store(false, Ordering::Release);

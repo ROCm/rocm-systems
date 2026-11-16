@@ -2,12 +2,13 @@
 # SPDX-License-Identifier:  MIT
 
 import argparse
-from typing import Optional
+from typing import List, Optional
 
 from rocprof_compute_soc.soc_base import OmniSoC_Base
 from utils.logger import console_error, demarcate
 from utils.mi_gpu_spec import mi_gpu_specs
 from utils.specs import MachineSpecs
+from utils.utils_common import selects_roofline
 
 
 class gfx908_soc(OmniSoC_Base):
@@ -26,14 +27,15 @@ class gfx908_soc(OmniSoC_Base):
     # Required child methods
     # -----------------------
     @demarcate
-    def profiling_setup(self) -> Optional[list[str]]:
+    def profiling_setup(self) -> Optional[List[str]]:
         """Perform any SoC-specific setup prior to profiling."""
         super().profiling_setup()
-        if self.get_args().roof_only:
-            console_error(f"{self.get_arch()} does not support roofline analysis")
 
         # Perfmon filtering
         filter_blocks = self.perfmon_filter()
+        # A full profile skips the unsupported benchmark without an error
+        if filter_blocks and selects_roofline(filter_blocks):
+            console_error(f"{self.get_arch()} does not support roofline analysis")
         return filter_blocks
 
     @demarcate

@@ -11,8 +11,9 @@ namespace rocjitsu::arith::RJ_ARITH_IMPL_NAMESPACE {
 
 // Evaluate all batches before publishing D, preserving arbitrary operand overlap.
 template <int M, int K, int Batch, bool Bf16>
-void mfma_half_kernel(uint64_t controls, uint32_t *const *d, const uint32_t *const *a,
-                      const uint32_t *const *b, const uint32_t *const *c) {
+void mfma_half_kernel(uint64_t controls, bool clamp_overflow, uint32_t *const *d,
+                      const uint32_t *const *a, const uint32_t *const *b,
+                      const uint32_t *const *c) {
   constexpr int Elements = M * K * Batch;
   alignas(64) float left[Elements], right[Elements];
   for (int reg = 0; reg < Elements / 128; ++reg) {
@@ -30,6 +31,6 @@ void mfma_half_kernel(uint64_t controls, uint32_t *const *d, const uint32_t *con
       }
     }
   }
-  mfma_reduce_simd<M, K, Batch, 2>(controls, d, left, right, c);
+  mfma_reduce_simd<M, K, Batch, 2>(controls, d, left, right, c, clamp_overflow);
 }
 } // namespace rocjitsu::arith::RJ_ARITH_IMPL_NAMESPACE
