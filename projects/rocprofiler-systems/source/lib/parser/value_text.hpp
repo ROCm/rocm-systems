@@ -6,6 +6,7 @@
 #include "parser/schema.hpp"
 
 #include <cstdint>
+#include <functional>
 #include <map>
 #include <optional>
 #include <string>
