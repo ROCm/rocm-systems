@@ -32,10 +32,18 @@ def patch_jax_entry_points() -> None:
 def _resolve_jax() -> bool:
     """Bind the jax handles on _STATE. Returns True if jax is importable."""
     if importlib.util.find_spec("jax") is None:
+        console_warning(
+            "ml api trace",
+            "JAX is not installed; skipping jax instrumentation.",
+        )
         return False
     try:
         import jax
-    except Exception:
+    except Exception as exc:
+        console_warning(
+            "ml api trace",
+            f"Could not import jax: {exc}",
+        )
         return False
 
     _STATE.jit = getattr(jax, "jit", None)
@@ -334,10 +342,6 @@ class JaxBackend:
     def install(self) -> None:
         """Resolve jax and ROCTX, then wrap compiled-call and primitive entry points."""
         if not _resolve_jax():
-            console_warning(
-                "ml api trace",
-                "JAX is not installed; skipping jax instrumentation.",
-            )
             return
         if not core.ensure_python_tier():
             console_warning(
