@@ -4918,7 +4918,7 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
       }
 
       // Size gate for CE AllReduce / ReduceScatter without symmetric memory registration:
-      // the 2-shot window is rcclCeAr2ShotMax (arch table or RCCL_CE_AR_MAX_MSG_BYTES).
+      // the 2-shot window is rcclCeAr2ShotMax (arch table or RCCL_CE_AR_2SHOT_MAX_BYTES).
       bool ceAllReduceFits = false;
       bool ceReduceScatterFits = false;
       ncclSymRegType_t winRegType;

@@ -3286,9 +3286,8 @@ ncclResult_t ncclCeEnsureAllReduceStaging(struct ncclComm* comm) {
 
   // Size from the latched slot count so RCCL_CE_REDUCE_PER_CHUNK can reserve
   // RCCL_CE_REDUCE_PER_CHUNK_SLOTS (default 2; raise via env for a deeper pool).
-  ceARTmpBufSize = alignUp(NUM_SLOTS * (size_t)comm->nRanks *
-                             ncclCeAllReduceMaxChunkBytes(comm->nRanks, comm->ceColl.ceArStagingBytes),
-                           (size_t)16);
+  ceARTmpBufSize =
+      ncclCeAllReduceStagingBufBytes(comm->nRanks, comm->ceColl.ceArStagingBytes, NUM_SLOTS);
   NCCLCHECKGOTO(ncclMemAlloc((void**)&ceARTmpBuf, ceARTmpBufSize), ret, fail);
   NCCLCHECKGOTO(ncclDevrWindowRegisterInGroup(comm, ceARTmpBuf, ceARTmpBufSize, NCCL_WIN_COLL_SYMMETRIC, &arWinDev),
                 ret, fail);
@@ -3315,10 +3314,9 @@ int ncclCeRecvRangeContainedInWindow(struct ncclDevrWindow const* win, void cons
          recvStart - winStart <= peerSafeSize - totalBytes;
 }
 
-size_t ncclCeAllReduceStagingBufBytes(int nRanks, size_t stagingBytes) {
-  if (nRanks <= 0) return 0;
-  return alignUp((size_t)NCCL_CE_NUM_SLOTS * (size_t)nRanks *
-                   ncclCeAllReduceMaxChunkBytes(nRanks, stagingBytes),
+size_t ncclCeAllReduceStagingBufBytes(int nRanks, size_t stagingBytes, size_t numSlots) {
+  if (nRanks <= 0 || numSlots == 0) return 0;
+  return alignUp(numSlots * (size_t)nRanks * ncclCeAllReduceMaxChunkBytes(nRanks, stagingBytes),
                  (size_t)16);
 }
 
@@ -3615,10 +3613,7 @@ ncclResult_t ncclCeAllReduce(struct ncclComm* comm, const void* sendbuff, void* 
     CUDACHECKGOTO(cudaEventRecord(ceColl->synceEvent, ceStream), ret, fail);
     CUDACHECKGOTO(cudaStreamWaitEvent(stream, ceColl->synceEvent, 0), ret, fail);
     if (totalSteps <= (size_t)NUM_SLOTS) {
-      // No-reuse kernels deliberately leave readiness at 1 so every block can
-      // advance independently. Reset only after both the reduction kernel and
-      // scatter stream have completed; the next collective is ordered behind
-      // this memset on the caller stream.
+      // Clear latched doorbells so the next call cannot see a stale 1.
       CUDACHECKGOTO(cudaMemsetAsync(signalBuffer, 0,
                                     NUM_SLOTS * (size_t)comm->nRanks * sizeof(uint32_t), stream),
                     ret, fail);
@@ -3877,10 +3872,7 @@ ncclResult_t ncclCeReduceScatter(struct ncclComm* comm, const void* sendbuff, vo
     CUDACHECKGOTO(cudaEventRecord(ceColl->synceEvent, ceStream), ret, fail);
     CUDACHECKGOTO(cudaStreamWaitEvent(stream, ceColl->synceEvent, 0), ret, fail);
     if (!perChunkReduce && totalSteps <= (size_t)NUM_SLOTS) {
-      // No-reuse kernels deliberately leave readiness at 1 so every block can
-      // advance independently. Reset only after both the reduction kernel and
-      // scatter stream have completed; the next collective is ordered behind
-      // this memset on the caller stream.
+      // Clear latched doorbells so the next call cannot see a stale 1.
       CUDACHECKGOTO(cudaMemsetAsync(signalBuffer, 0,
                                     NUM_SLOTS * (size_t)comm->nRanks * sizeof(uint32_t), stream),
                     ret, fail);
@@ -3890,20 +3882,9 @@ exit:
   ncclCeFreeBatchOpsParams(&batchOpsParams);
   return ret;
 fail:
-  // Per-chunk mode raises slot doorbells on ceStream and clears them only after
-  // the finite reducer on reduceStream. A goto fail between those leaves the
-  // window latched at 1; the host reset above is !perChunkReduce and the
-  // totalSteps==1 launch never runs the kernel clear. Queue the zero on
-  // ceStream so it lands after any already-enqueued write: scatterStream is
-  // NonBlocking, so a default-stream memset would not wait for that write and
-  // could be overwritten by a store of 1 that completes later. Drain ceStream
-  // before returning so the next collective's readyWaits on the user stream
-  // cannot observe the stale 1.
-  if (perChunkReduce && signalBuffer != nullptr) {
-    CUDACHECKIGNORE(cudaMemsetAsync(signalBuffer, 0,
-                                    NUM_SLOTS * (size_t)comm->nRanks * sizeof(uint32_t), ceStream));
-    CUDACHECKIGNORE(cudaStreamSynchronize(ceStream));
-  }
+  // Do not memset/host-sync doorbells here: peers may still write them, and
+  // synchronizing ceStream can hang if a peer already failed. Leave recovery to
+  // communicator abort.
   goto exit;
 }
 

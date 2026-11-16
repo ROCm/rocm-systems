@@ -283,18 +283,22 @@ TEST_F(CeAllReduceEligibilityTest, StagingBufBytesMatchesInitFormula)
 {
     for (size_t stagingBytes :
          {static_cast<size_t>(NCCL_CE_AR_STAGING_BYTES), static_cast<size_t>(33) * 1024 * 1024}) {
-        for (int nRanks : {2, 3, 4, 5, 6, 7, 8, 12, 16, 24}) {
-            SCOPED_TRACE("stagingBytes=" + std::to_string(stagingBytes) +
-                         " nRanks=" + std::to_string(nRanks));
-            const size_t expected = alignUp(
-                static_cast<size_t>(NCCL_CE_NUM_SLOTS) * static_cast<size_t>(nRanks) *
-                    ncclCeAllReduceMaxChunkBytes(nRanks, stagingBytes),
-                static_cast<size_t>(16));
-            EXPECT_EQ(ncclCeAllReduceStagingBufBytes(nRanks, stagingBytes), expected);
+        for (size_t numSlots : {static_cast<size_t>(NCCL_CE_NUM_SLOTS), static_cast<size_t>(8)}) {
+            for (int nRanks : {2, 3, 4, 5, 6, 7, 8, 12, 16, 24}) {
+                SCOPED_TRACE("stagingBytes=" + std::to_string(stagingBytes) +
+                             " nRanks=" + std::to_string(nRanks) +
+                             " numSlots=" + std::to_string(numSlots));
+                const size_t expected = alignUp(
+                    numSlots * static_cast<size_t>(nRanks) *
+                        ncclCeAllReduceMaxChunkBytes(nRanks, stagingBytes),
+                    static_cast<size_t>(16));
+                EXPECT_EQ(ncclCeAllReduceStagingBufBytes(nRanks, stagingBytes, numSlots), expected);
+            }
         }
     }
     EXPECT_EQ(ncclCeAllReduceStagingBufBytes(0, NCCL_CE_AR_STAGING_BYTES), 0u);
     EXPECT_EQ(ncclCeAllReduceStagingBufBytes(-1, NCCL_CE_AR_STAGING_BYTES), 0u);
+    EXPECT_EQ(ncclCeAllReduceStagingBufBytes(8, NCCL_CE_AR_STAGING_BYTES, 0), 0u);
 }
 
 TEST_F(CeAllReduceEligibilityTest, MaxStagingBytesPerRank)

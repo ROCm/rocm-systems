@@ -98,9 +98,11 @@ test_categories:
       - "NCCL_LOCAL_REGISTER=0"
       - "RCCL_CE_REDUCESCATTER=1"
   quick_env_ce_reducescatter_per_chunk:
-    description: "CE ReduceScatter finite per-chunk reducer correctness on a multi-chunk BF16 Avg workload."
+    description: "CE ReduceScatter finite per-chunk reducer correctness on multi-chunk BF16 Avg workloads."
     test_patterns:
       - "CeMPI_ReduceScatter.GroupedPipelinedBfloat16Average"
+      - "CeMPI_ReduceScatter.GroupedTwoChunkNoReuseBfloat16Average"
+      - "CeMPI_ReduceScatter.Bfloat16AverageScalarTail"
     exclude_windows: *mpi_exclude_windows
     labels:
       - "rccl"

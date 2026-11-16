@@ -1786,8 +1786,16 @@ bool rcclUseCeReduceScatter(struct ncclComm* comm, size_t recvcount, ncclDataTyp
     return false;
   }
 
-  // No message-size cap: CE ReduceScatter pipelines through ceARTmpBuf slots, so
+  // No upper size cap: CE ReduceScatter pipelines through ceARTmpBuf slots, so
   // large messages are chunked rather than rejected (unlike CE AllReduce 2-shot).
+  // Honour the shared non-AR CE floor (arch table / RCCL_CE_COLL_MIN_BYTES).
+  const size_t totalBytes = (size_t)comm->nRanks * recvcount * ncclTypeSize(datatype);
+  const size_t minBytes = rcclCeNonRegMinTab(extAlgoArchTable(comm), ncclFuncReduceScatter);
+  if (totalBytes < minBytes) {
+    INFO(NCCL_TUNING, "Skipping CE ReduceScatter: totalBytes %zu < ceNonRegMin %zu", totalBytes,
+         minBytes);
+    return false;
+  }
 
   if (comm->config.CTAPolicy != NCCL_CTA_POLICY_ZERO) {
     WARN("Skipping CE ReduceScatter: CTA policy is not ZERO");
@@ -1797,6 +1805,12 @@ bool rcclUseCeReduceScatter(struct ncclComm* comm, size_t recvcount, ncclDataTyp
                            (op == ncclAvg && datatype == ncclBfloat16);
   if (!opSupported) {
     WARN("Skipping CE ReduceScatter: unsupported reduction operation");
+    return false;
+  }
+  // Grouped CE ReduceScatter is validated for Primus BF16 Avg; keep other ops on
+  // ring/symk inside ncclGroupStart/End.
+  if (ncclGroupDepth > 0 && !(op == ncclAvg && datatype == ncclBfloat16)) {
+    INFO(NCCL_TUNING, "Skipping CE ReduceScatter: grouped path requires BF16 Avg");
     return false;
   }
   if (datatype == ncclFloat8e4m3 || datatype == ncclFloat8e5m2) {

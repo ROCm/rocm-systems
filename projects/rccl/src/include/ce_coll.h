@@ -324,8 +324,10 @@ ncclResult_t ncclHierCeAlltoAllv(struct ncclComm* comm, struct ncclKernelPlan* p
 // Phase 3 writes the full receive range through peer mappings.
 int ncclCeRecvRangeContainedInWindow(struct ncclDevrWindow const* win, void const* recvbuff, size_t totalBytes);
 
-// Bytes allocated for ceARTmpBuf from the resolved runtime staging capacity.
-size_t ncclCeAllReduceStagingBufBytes(int nRanks, size_t stagingBytes);
+// Bytes allocated for ceARTmpBuf from the resolved runtime staging capacity and
+// slot count (defaults to NCCL_CE_NUM_SLOTS when omitted by callers).
+size_t ncclCeAllReduceStagingBufBytes(int nRanks, size_t stagingBytes,
+                                      size_t numSlots = (size_t)NCCL_CE_NUM_SLOTS);
 
 // CE AllReduce: scatter → local-reduce → allgather (→ optional copy-to-user-recvbuff).
 // Requires comm->ceColl.ceARTmpBuf != NULL (i.e. ncclCeInit has run).

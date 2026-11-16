@@ -1594,8 +1594,13 @@ threshold table introduced for gfx1250.
         | Opt-in Copy Engine ReduceScatter. Off by default. When enabled, it shares
           the CE AllReduce staging buffer (``ceARTmpBuf``); user buffers do not need
           symmetric registration. Requires ``NCCL_CTA_POLICY=2`` (``CTA_POLICY_ZERO``).
-          Single-node symmetric communicators only. There is no message-size cap;
-          large messages are pipelined through the staging slots.
+          Single-node symmetric communicators only. There is no upper message-size
+          cap; large messages are pipelined through the staging slots. Messages
+          below ``RCCL_CE_COLL_MIN_BYTES`` / the arch-table ``ceNonRegMin`` floor
+          skip CE. Inside ``ncclGroupStart``/``End``, only BF16 ``ncclAvg`` is
+          eligible (eager calls outside a group still allow Sum/Prod/Min/Max).
+          ``RCCL_CE_REDUCE_PER_CHUNK`` and ``RCCL_CE_REDUCE_PER_CHUNK_SLOTS`` must
+          match across all ranks in the communicator.
       - | ``0``: Disabled (default).
         | ``1``: Enabled, subject to the other eligibility checks.
     * - | ``RCCL_FORCE_CE_COLL``
@@ -1622,7 +1627,8 @@ threshold table introduced for gfx1250.
           reduction stream waits on GPU doorbells before each launch, so reducer
           blocks do not occupy compute units while SDMA is still staging data.
           This mode reserves ``RCCL_CE_REDUCE_PER_CHUNK_SLOTS`` staging slots
-          (default 2, same as the persistent path unless raised).
+          (default 2, same as the persistent path unless raised). All ranks in a
+          communicator must use the same value (checked at init).
       - | ``0``: Use the persistent pipelined reducer (default).
         | ``1``: Launch one finite reducer per chunk.
 
@@ -1632,7 +1638,8 @@ threshold table introduced for gfx1250.
           chunks land on fresh slots before reuse, at the cost of more GPU memory
           (``slots × nRanks × RCCL_CE_AR_STAGING_BYTES``). Values below the
           double-buffered pool size (2) are raised to 2; non-positive values keep
-          the compile-time default.
+          the compile-time default. All ranks in a communicator must resolve to
+          the same slot count (checked at init).
       - | ``2``: Default per-chunk staging-slot count.
         | ``N``: Reserve ``N`` slots (at least 2).
 
@@ -1673,8 +1680,8 @@ threshold table introduced for gfx1250.
           usage. The default path reserves 2 slots (512 MiB at the default);
           ``RCCL_CE_REDUCE_PER_CHUNK=1`` reserves ``RCCL_CE_REDUCE_PER_CHUNK_SLOTS``
           slots (512 MiB at the defaults of 2 × 256 MiB).
-          This variable sizes the buffer only; the non-forced selector cap is
-          controlled separately by ``RCCL_CE_AR_MAX_MSG_BYTES``.
+          This variable sizes the buffer only; the non-forced 2-shot selector cap
+          is controlled separately by ``RCCL_CE_AR_2SHOT_MAX_BYTES``.
       - | ``-1``: Use the compile-time default of 256 MiB (default).
         | ``N`` (bytes): Set the per-slot payload capacity to ``N``.
     * - | ``RCCL_TDM_LL128_ENABLE``

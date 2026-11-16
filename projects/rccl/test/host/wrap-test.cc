@@ -9467,7 +9467,7 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_CeAcceptsMessagePastAllReduceCap
       "Wrap_SelectReduceScatter_CeAcceptsMessagePastAllReduceCap",
       []() {
         g_loadParam = [](const char* env, int64_t deft) {
-          if (std::strcmp(env, "RCCL_CE_AR_MAX_MSG_BYTES") == 0) return int64_t(4096);
+          if (std::strcmp(env, "RCCL_CE_AR_2SHOT_MAX_BYTES") == 0) return int64_t(4096);
           return EnabledCeReduceScatterParams(env, deft);
         };
         g_ceImplemented = true;
@@ -9889,8 +9889,36 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_LateCeRegisteredRejectsFloat8) {
       });
 }
 
-// Eager CE_2SHOT requires ncclGroupDepth == 0; inside a group the call must
-// stay queued as CE_REGISTERED rather than falling through to the ring.
+// RCCL_CE_COLL_MIN_BYTES floors CE ReduceScatter the same way as other non-AR CE paths.
+TEST(WrapMicrotestIsolated, SelectReduceScatter_CeDeclinedBelowCollMinBytes) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectReduceScatter_CeDeclinedBelowCollMinBytes",
+      []() {
+        g_loadParam = [](const char* env, int64_t deft) {
+          if (std::strcmp(env, "RCCL_CE_COLL_MIN_BYTES") == 0) return int64_t(1024);
+          return EnabledCeReduceScatterParams(env, deft);
+        };
+        g_ceImplemented = true;
+        ncclComm* comm = MakeSelectComm();
+        comm->nRanks = 4;
+        ArmSpanningLsaTeam(comm);
+        comm->symmetricSupport = 1;
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+        uint8_t stagingBuf[16];
+        comm->ceColl.ceARTmpBuf = stagingBuf;
+        // totalBytes = 4 * 8 * 4 = 128 < 1024.
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr, /*recvcount=*/8, ncclFloat32,
+                                                       ncclSum, /*query=*/false, &decision));
+        EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_2SHOT, decision.algo);
+        EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, decision.algo);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// Eager CE_2SHOT requires ncclGroupDepth == 0; inside a group only BF16 Avg is
+// CE-eligible and must stay queued as CE_REGISTERED rather than falling through
+// to the ring.
 TEST(WrapMicrotestIsolated, SelectReduceScatter_InsideGroupSelectsRegisteredNotEager) {
   RUN_ISOLATED_TEST(
       "Wrap_SelectReduceScatter_InsideGroupSelectsRegisteredNotEager",
@@ -9903,10 +9931,15 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_InsideGroupSelectsRegisteredNotE
         comm->ceColl.ceARTmpBuf = stagingBuf;
         ncclGroupDepth = 1;
         rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr, /*recvcount=*/8, ncclBfloat16,
+                                                       ncclAvg, /*query=*/false, &decision));
+        EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_2SHOT, decision.algo);
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, decision.algo);
+        // Grouped Sum is intentionally not CE-eligible.
         EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr, /*recvcount=*/8, ncclFloat32,
                                                        ncclSum, /*query=*/false, &decision));
         EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_2SHOT, decision.algo);
-        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, decision.algo);
+        EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, decision.algo);
         ncclGroupDepth = 0;
         DeleteCommWithArch(comm);
       });
@@ -10215,7 +10248,7 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_CeOptInSelectsRegisteredThenEage
       []() {
         g_loadParam = [](const char* env, int64_t defaultValue) {
           if (std::strcmp(env, "RCCL_CE_REDUCESCATTER") == 0) return (int64_t)1;
-          if (std::strcmp(env, "RCCL_CE_AR_MAX_MSG_BYTES") == 0) return (int64_t)268435456;
+          if (std::strcmp(env, "RCCL_CE_AR_2SHOT_MAX_BYTES") == 0) return (int64_t)268435456;
           return defaultValue;
         };
         g_ceImplemented = true;

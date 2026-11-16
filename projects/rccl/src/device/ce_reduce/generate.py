@@ -97,9 +97,10 @@ REDOPS = [
     ("Max", 3),
 ]
 
-# Floating-point ncclAvg lowers to PreMulSum. GPT-OSS reduces BF16 gradients,
-# so instantiate that path without adding unvalidated Avg kernels for every
-# other datatype.
+# BF16 ncclAvg sums across ranks then post-scales once by 1/nRanks
+# (CeReducePostOp), rather than pre-scaling each input. GPT-OSS reduces BF16
+# gradients, so instantiate that path without adding unvalidated Avg kernels
+# for every other datatype.
 AVG_TYPES = {"bf16"}
 
 

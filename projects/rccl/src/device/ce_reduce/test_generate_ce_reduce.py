@@ -48,8 +48,12 @@ BASE_REDOPS = [
 ]
 
 
+# Keep in sync with generate.py AVG_TYPES.
+AVG_TYPES = {"bf16"}
+
+
 def redops_for_type(tag: str) -> list[tuple[str, int]]:
-    return BASE_REDOPS + ([("Avg", 4)] if tag == "bf16" else [])
+    return BASE_REDOPS + ([("Avg", 4)] if tag in AVG_TYPES else [])
 
 VECTORIZE_OK = {
     ("i8", "Min"),
@@ -362,6 +366,19 @@ class CeReducePersistentContractTest(unittest.TestCase):
         self.assertIn("int ncclCeLocalReduceMaxBlocks()", dispatcher)
         self.assertIn("(size_t)ncclCeLocalReduceMaxBlocks()", self.impl)
 
+    def test_avg_only_emitted_for_configured_types(self) -> None:
+        # Generator behaviour: Avg is a per-type opt-in, not a global redop.
+        for tag, _ in TYPES:
+            rednames = [name for name, _ in redops_for_type(tag)]
+            if tag in AVG_TYPES:
+                self.assertIn("Avg", rednames)
+                self.assertTrue(os.path.exists(
+                    os.path.join(self._dir, "ce_reduce_%s_Avg.cpp" % tag)))
+            else:
+                self.assertNotIn("Avg", rednames)
+                self.assertFalse(os.path.exists(
+                    os.path.join(self._dir, "ce_reduce_%s_Avg.cpp" % tag)))
+
     def test_bf16_avg_scales_once_after_reduction(self) -> None:
         self.assertIn("struct CeReducePostOp<hip_bfloat16, 4>", self.impl)
         self.assertNotIn("CeReducePreOp", self.impl)
@@ -369,6 +386,12 @@ class CeReducePersistentContractTest(unittest.TestCase):
         # Scalar and packed post-ops must share one reciprocal definition.
         self.assertIn("ceReduceBfloat16AvgScale", self.impl)
         self.assertEqual(self.impl.count("(hip_bfloat16)(1.0f / (float)nRanks)"), 1)
+        # Banner lives in the .in (line comments are stripped from self.impl for
+        # signature parsing). It must describe post-scale Avg, not PreMulSum.
+        with open(os.path.join(HERE, "ce_reduce_impl.h.in")) as f:
+            impl_in = f.read()
+        self.assertRegex(impl_in, r"4=Avg \(sum; CeReducePostOp scales once\)")
+        self.assertNotIn("pre-scaled sum", impl_in)
 
     def test_bf16_avg_uses_packed_pair_arithmetic(self) -> None:
         self.assertIn("struct CeReducePackOp<hip_bfloat16, 4>", self.impl)

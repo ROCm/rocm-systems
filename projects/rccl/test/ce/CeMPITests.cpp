@@ -1164,6 +1164,11 @@ protected:
                         algo == static_cast<int>(RCCL_CE_REGISTERED))
                 << context << ": rcclGetCollImplInfo must report a CE algo when CE ran"
                 << " (algo=" << algo << ")";
+            const int maxBlocks =
+                MPIHelpers::getEnvParam<int>("RCCL_CE_REDUCE_MAX_BLOCKS", NCCL_CE_REDUCE_DEFAULT_BLOCKS);
+            EXPECT_LE(nChannels, maxBlocks)
+                << context << ": nChannels=" << nChannels << " exceeds RCCL_CE_REDUCE_MAX_BLOCKS="
+                << maxBlocks;
         }
         else
         {
@@ -1216,8 +1221,11 @@ protected:
 
     // Primus GPT-OSS BF16 Avg ReduceScatter shapes. grouped wraps the call in
     // ncclGroupStart/End; minChunksPerShard > 0 requires the multi-chunk path.
+    // iterations > 1 runs the collective back-to-back so a missing doorbell
+    // reset between calls is visible.
     void runBfloat16Average(size_t recvcount, bool grouped, size_t minChunksPerShard,
-                            const char* testId)
+                            const char* testId, int iterations = 1,
+                            bool expectMaxBlocks = false)
     {
         if(!validateTestPrerequisites(kMinRanks8))
             GTEST_SKIP() << "Need >= " << kMinRanks8 << " MPI ranks";
@@ -1240,25 +1248,42 @@ protected:
                       sendBuf, totalElem,
                       [rank](size_t) { return hip_bfloat16(static_cast<float>(rank + 1)); }));
 
-        if(grouped)
-            ASSERT_EQ(ncclSuccess, ncclGroupStart());
-        ASSERT_EQ(ncclSuccess,
-                  ncclReduceScatter(sendBuf, recvBuf, recvcount, ncclBfloat16, ncclAvg,
-                                    getActiveCommunicator(), getActiveStream()));
-        if(grouped)
-            ASSERT_EQ(ncclSuccess, ncclGroupEnd());
-        ASSERT_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
-
         const hip_bfloat16 expected(static_cast<float>(nRanks + 1) / 2.0f);
-        ASSERT_TRUE(verifyBufferData<hip_bfloat16>(
-            recvBuf, recvcount, [expected](size_t) { return expected; }))
-            << "Rank " << rank << ": CE ReduceScatter BF16 Avg verification failed";
+        for(int iter = 0; iter < iterations; ++iter)
+        {
+            if(grouped)
+                ASSERT_EQ(ncclSuccess, ncclGroupStart());
+            ASSERT_EQ(ncclSuccess,
+                      ncclReduceScatter(sendBuf, recvBuf, recvcount, ncclBfloat16, ncclAvg,
+                                        getActiveCommunicator(), getActiveStream()));
+            if(grouped)
+                ASSERT_EQ(ncclSuccess, ncclGroupEnd());
+            ASSERT_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
+
+            ASSERT_TRUE(verifyBufferData<hip_bfloat16>(
+                recvBuf, recvcount, [expected](size_t) { return expected; }))
+                << "Rank " << rank << ": CE ReduceScatter BF16 Avg verification failed"
+                << " on iteration " << iter;
+        }
 
         assertCEPathTaken(testId, recvcount, ncclBfloat16, ncclAvg, sendBuf, recvBuf);
         if(isCeReduceScatterExpected() && minChunksPerShard > 0)
         {
             EXPECT_GE(ceLogChunksPerShard(readAllLogs()), minChunksPerShard)
                 << testId << ": expected chunksPerShard >= " << minChunksPerShard;
+        }
+        if(isCeReduceScatterExpected() && expectMaxBlocks)
+        {
+            int algo = 0, proto = 0, nChannels = 0;
+            ASSERT_EQ(ncclSuccess,
+                      rcclGetCollImplInfo(getActiveCommunicator(), ncclFuncReduceScatter, recvcount,
+                                          ncclBfloat16, ncclAvg, sendBuf, recvBuf, /*graphCapturing=*/0,
+                                          &algo, &proto, &nChannels))
+                << testId << ": rcclGetCollImplInfo failed for max-blocks check";
+            const int maxBlocks =
+                MPIHelpers::getEnvParam<int>("RCCL_CE_REDUCE_MAX_BLOCKS", NCCL_CE_REDUCE_DEFAULT_BLOCKS);
+            EXPECT_EQ(nChannels, maxBlocks)
+                << testId << ": pipelined BF16 Avg should use the full RCCL_CE_REDUCE_MAX_BLOCKS cap";
         }
     }
 };
@@ -1284,6 +1309,14 @@ TEST_F(CeMPI_ReduceScatter, Bfloat16Average)
                        "CeMPI_ReduceScatter/Bfloat16Average");
 }
 
+// 4099 is not a multiple of the BF16 vector width (8), so the scalar CeReducePostOp
+// Avg tail runs in addition to the packed body.
+TEST_F(CeMPI_ReduceScatter, Bfloat16AverageScalarTail)
+{
+    runBfloat16Average(4099, /*grouped=*/false, /*minChunksPerShard=*/0,
+                       "CeMPI_ReduceScatter/Bfloat16AverageScalarTail");
+}
+
 // Primus batches gradient collectives between ncclGroupStart/End. Exercise the
 // queued CE dispatch path rather than only the eager public-API path above.
 TEST_F(CeMPI_ReduceScatter, GroupedBfloat16Average)
@@ -1303,7 +1336,20 @@ TEST_F(CeMPI_ReduceScatter, GroupedPipelinedBfloat16Average)
     constexpr size_t kShardBytes = 96ull * 1024 * 1024;
     const size_t recvcount = kShardBytes / sizeof(hip_bfloat16);
     runBfloat16Average(recvcount, /*grouped=*/true, /*minChunksPerShard=*/3,
-                       "CeMPI_ReduceScatter/GroupedPipelinedBfloat16Average");
+                       "CeMPI_ReduceScatter/GroupedPipelinedBfloat16Average",
+                       /*iterations=*/1, /*expectMaxBlocks=*/true);
+}
+
+// Shard just over one default staging slot on 8 ranks (256 MiB / 8 = 32 MiB) so
+// chunksPerShard == 2. That takes the kernel no-reuse branch (totalSteps <=
+// NCCL_CE_NUM_SLOTS). Run twice so a missing doorbell reset between calls fails.
+TEST_F(CeMPI_ReduceScatter, GroupedTwoChunkNoReuseBfloat16Average)
+{
+    constexpr size_t kShardBytes = 48ull * 1024 * 1024;
+    const size_t recvcount = kShardBytes / sizeof(hip_bfloat16);
+    runBfloat16Average(recvcount, /*grouped=*/true, /*minChunksPerShard=*/2,
+                       "CeMPI_ReduceScatter/GroupedTwoChunkNoReuseBfloat16Average",
+                       /*iterations=*/2);
 }
 
 // ===========================================================================

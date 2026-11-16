@@ -173,7 +173,7 @@ static inline int ncclCeLocalReduceBlocksT(size_t chunkElems) {
 
 // *********************************************************************************
 // ReduceOp<T, RedOp> -- compile-time reduction functor
-// 0=Sum  1=Prod  2=Min  3=Max  4=Avg (pre-scaled sum)
+// 0=Sum  1=Prod  2=Min  3=Max  4=Avg (sum; CeReducePostOp scales once)
 // *********************************************************************************
 template <typename T, int RedOp>
 struct ReduceOp;

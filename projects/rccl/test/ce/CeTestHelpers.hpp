@@ -168,9 +168,10 @@ inline bool ceLogShowsReduceScatterReducer(const std::string& log, const char* r
 // (single-chunk shards). Pass the logged chunksPerShard (or 0 if absent).
 inline const char* ceExpectedReduceScatterReducer(size_t chunksPerShard)
 {
-    const char* env = std::getenv("RCCL_CE_REDUCE_PER_CHUNK");
-    const bool perChunkEnv = env != nullptr && env[0] != '\0' && std::strcmp(env, "0") != 0;
-    if(perChunkEnv && chunksPerShard > 1)
+    // Match production: ncclCeReduceScatterPerChunkReduce requires perChunkParam > 0
+    // (so "-1" stays on the persistent reducer).
+    const int perChunkParam = MPIHelpers::getEnvParam<int>("RCCL_CE_REDUCE_PER_CHUNK", 0);
+    if(perChunkParam > 0 && chunksPerShard > 1)
         return "per-chunk";
     return "persistent";
 }
