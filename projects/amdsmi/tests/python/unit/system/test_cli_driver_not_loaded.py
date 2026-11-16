@@ -11,6 +11,7 @@ bnxt_en (Broadcom NIC) are loaded. Input that needs a missing driver reports tha
 """
 
 import contextlib
+import ctypes
 import importlib.util
 import inspect
 import io
@@ -147,7 +148,7 @@ class _FakeHelpers:
         return {"0": "nic0"}, "0"
 
     def get_device_handles_from_nic_selections(self, nic_selections, nic_choices):
-        return True, ["nic0"]
+        return True, [ctypes.c_void_p(0x400)]
 
     def get_switch_choices(self):
         return {}, ""
