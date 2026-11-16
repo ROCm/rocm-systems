@@ -15,6 +15,9 @@ TEST(DecodeBenchmarkCli, ProductionRegistrationAndCustomTypedFlags) {
   ASSERT_TRUE(register_decode_benchmark_flags(command, flags, diagnostic.emitter()).succeeded());
   ASSERT_TRUE(command.find_flag("-t")->parse_and_set("gfx950", diagnostic.emitter()).succeeded());
   EXPECT_EQ(flags.target->value(), ROCJITSU_CODE_TARGET_GFX950);
+  ASSERT_TRUE(command.find_flag("-t")->parse_and_set("gfx1100", diagnostic.emitter()).succeeded());
+  EXPECT_EQ(flags.target->value(), ROCJITSU_CODE_TARGET_GFX1100);
+  EXPECT_EQ(command.find_flag("--target")->format_value(), "gfx1100");
   ASSERT_TRUE(
       flags.target->set_value(ROCJITSU_CODE_TARGET_GFX942, diagnostic.emitter()).succeeded());
   EXPECT_EQ(command.find_flag("--target")->format_value(), "gfx942");

@@ -235,11 +235,12 @@ runtime, just as for packet replay. See [Performance](range_replay_performance.m
 
 ## Tests
 
-- `range-replay-host-replay-test` is a GPU-free unit test. It covers the arming consumption, the
-  begin macro's two returns, the registry rules that differ from packet replay, and host-region
-  capture and restore, including a full jump-and-rewind loop. On fake queues it covers fences that
-  time out: a barrier that outlasts the fence, a queue whose ring stays full, one timeout shared by
-  several queues, and the parsing of `ROCPROFILER_RANGE_REPLAY_HOST_FENCE_TIMEOUT_MS`.
+- The `range_replay_host` suite in `range-replay-tests` needs no GPU. It covers the arming
+  consumption, the begin macro's two returns, the registry rules that differ from packet replay, and
+  host-region capture and restore, including a full jump-and-rewind loop. On fake queues it covers
+  fences that time out: a barrier that outlasts the fence, a queue whose ring stays full, one
+  timeout shared by several queues, and the parsing of
+  `ROCPROFILER_RANGE_REPLAY_HOST_FENCE_TIMEOUT_MS`.
 - `tests/range-replay-host` is the integration test. A time-stepping solver runs inside one range.
   Each step does an FFT, a spectral filter, an inverse FFT, a 5-point stencil, Jacobi sweeps, a
   device-to-device copy, a memset, a device-to-host residual reduced on the host, and a
@@ -262,5 +263,5 @@ runtime, just as for packet replay. See [Performance](range_replay_performance.m
   leaking a device allocation (it declines `ALLOCATION_CHANGED_IN_RANGE`, its peer `PEER_DECLINED`),
   and one rank not arming the jump (`HOST_JMP_NOT_SET` and `PEER_DECLINED`). Every pass must end in
   the same device checksum and reduced value, and the MPI call count must match the pass count.
-- `range-replay-peer-sync-test` is a GPU-free unit test of the agreement rule, including an
-  exhaustive check that all ranks leave at the same pass boundary.
+- The `range_replay_peer_sync` suite in `range-replay-tests` needs no GPU. It tests the agreement
+  rule, including an exhaustive check that all ranks leave at the same pass boundary.

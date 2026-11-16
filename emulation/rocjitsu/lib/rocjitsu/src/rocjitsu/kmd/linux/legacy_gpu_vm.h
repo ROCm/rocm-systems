@@ -8,6 +8,7 @@
 
 #include "rocjitsu/vm/amdgpu/gpu_vm.h"
 #include "rocjitsu/vm/amdgpu/legacy_address_space.h"
+#include "util/diagnostic.h"
 
 #include <memory>
 #include <mutex>
@@ -35,9 +36,16 @@ public:
   [[nodiscard]] bool set_memory(GpuMemory *memory);
   [[nodiscard]] bool set_memory(std::shared_ptr<GpuMemory> memory);
 
+  /// @brief Register a legacy binding, returning an empty handle on failure.
+  /// @details Rejecting cached page-table policies without a shared request mutex
+  /// installs no binding and delivers one diagnostic after releasing the adapter
+  /// mutex, so the sink may query the adapter. Other failures return an empty
+  /// handle without emitting a diagnostic.
+  /// @param emit_error Destination for the cached page-table policy diagnostic.
   [[nodiscard]] AddressSpaceHandle
   register_address_space(uint32_t vmid, LegacyAddressSpaceRegistration registration,
-                         std::shared_ptr<void> frontend_lifetime = {});
+                         std::shared_ptr<void> frontend_lifetime = {},
+                         util::DiagnosticEmitter emit_error = {});
   [[nodiscard]] AddressSpaceHandle
   register_address_space(uint32_t vmid, LegacyPageTable *page_table,
                          util::DistributedSharedMutex *page_table_mutex,

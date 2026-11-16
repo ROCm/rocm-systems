@@ -33,6 +33,8 @@ ASSERT_HOOK_MATCHES_PROD(g_getCollNetSupport, ncclGetCollNetSupport);
 ASSERT_HOOK_MATCHES_PROD(g_getRegBuff, ncclGetRegBuff);
 ASSERT_HOOK_MATCHES_PROD(g_rcclEffectiveP2pBatchEnable, rcclEffectiveP2pBatchEnable);
 ASSERT_HOOK_MATCHES_PROD(g_rcclP2pTaskParts, rcclP2pTaskParts);
+ASSERT_HOOK_MATCHES_PROD(g_rcclP2pTaskUsesCe, rcclP2pTaskUsesCe);
+ASSERT_HOOK_MATCHES_PROD(g_rcclP2pTaskConnIndex, rcclP2pTaskConnIndex);
 ASSERT_HOOK_MATCHES_PROD(g_enqueueCheck, ncclEnqueueCheck);
 ASSERT_HOOK_MATCHES_PROD(g_rcclLogCollInfo, rcclLogCollInfo);
 ASSERT_HOOK_MATCHES_PROD(g_rcclAddonLaunchBegin, rcclAddonLaunchBegin);
@@ -82,8 +84,12 @@ static int DefaultEffectiveP2pBatchEnable(struct ncclComm*) { return 0; }
 std::function<int(struct ncclComm*)> g_rcclEffectiveP2pBatchEnable = DefaultEffectiveP2pBatchEnable;
 
 // enqueue.cc's answer for every task outside multi-node AINIC Scatter.
-static int DefaultP2pTaskParts(struct ncclComm* comm, ncclFunc_t) { return comm->p2pnChannelsPerPeer; }
-std::function<int(struct ncclComm*, ncclFunc_t)> g_rcclP2pTaskParts = DefaultP2pTaskParts;
+static int DefaultP2pTaskParts(struct ncclComm* comm, ncclFunc_t, int) { return comm->p2pnChannelsPerPeer; }
+std::function<int(struct ncclComm*, ncclFunc_t, int)> g_rcclP2pTaskParts = DefaultP2pTaskParts;
+static bool DefaultP2pTaskUsesCe(struct ncclComm*, ncclFunc_t, int) { return false; }
+std::function<bool(struct ncclComm*, ncclFunc_t, int)> g_rcclP2pTaskUsesCe = DefaultP2pTaskUsesCe;
+static int DefaultP2pTaskConnIndex(struct ncclComm*, ncclFunc_t, int) { return 1; }
+std::function<int(struct ncclComm*, ncclFunc_t, int)> g_rcclP2pTaskConnIndex = DefaultP2pTaskConnIndex;
 
 // enqueue.cc:437-441 splits the default on ROCm version; mirrored rather than pinned to one arm.
 #if ROCM_VERSION >= 71200
@@ -132,6 +138,8 @@ void ResetEnqueueFakes() {
   g_getRegBuff = DefaultGetRegBuff;
   g_rcclEffectiveP2pBatchEnable = DefaultEffectiveP2pBatchEnable;
   g_rcclP2pTaskParts = DefaultP2pTaskParts;
+  g_rcclP2pTaskUsesCe = DefaultP2pTaskUsesCe;
+  g_rcclP2pTaskConnIndex = DefaultP2pTaskConnIndex;
   g_enqueueCheck = DefaultEnqueueCheck;
   g_rcclLogCollInfo = DefaultLogCollInfo;
   g_rcclAddonLaunchBegin = DefaultAddonLaunchBegin;
@@ -141,8 +149,17 @@ void ResetEnqueueFakes() {
 int rcclEffectiveP2pBatchEnable(struct ncclComm* comm) {
   return g_rcclEffectiveP2pBatchEnable(comm);
 }
-int rcclP2pTaskParts(struct ncclComm* comm, ncclFunc_t collAPI) {
-  return g_rcclP2pTaskParts(comm, collAPI);
+int rcclP2pTaskParts(struct ncclComm* comm, ncclFunc_t collAPI, int peer) {
+  return g_rcclP2pTaskParts(comm, collAPI, peer);
+}
+bool rcclP2pDirectApi(ncclFunc_t collAPI) {
+  return collAPI == ncclFuncSend || collAPI == ncclFuncRecv || collAPI == ncclFuncSendRecv;
+}
+bool rcclP2pTaskUsesCe(struct ncclComm* comm, ncclFunc_t collAPI, int peer) {
+  return g_rcclP2pTaskUsesCe(comm, collAPI, peer);
+}
+int rcclP2pTaskConnIndex(struct ncclComm* comm, ncclFunc_t collAPI, int peer) {
+  return g_rcclP2pTaskConnIndex(comm, collAPI, peer);
 }
 
 // src/enqueue/enqueue.cc

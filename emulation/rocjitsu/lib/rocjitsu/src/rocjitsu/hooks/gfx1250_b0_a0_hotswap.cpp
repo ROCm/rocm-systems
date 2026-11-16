@@ -41,11 +41,9 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <exception>
 #include <list>
 #include <memory>
 #include <mutex>
-#include <new>
 #include <span>
 #include <string>
 #include <string_view>
@@ -57,7 +55,6 @@
 #include <vector>
 
 namespace {
-
 using Blob = std::shared_ptr<std::vector<uint8_t>>;
 using VendorReaderCreate = hsa_status_t (*)(hsa_file_t, size_t, size_t, hsa_code_object_reader_t *);
 
@@ -132,10 +129,7 @@ template <typename Fn> decltype(auto) with_test_dump_paths(Fn &&fn) {
 }
 
 void remember_test_dump(const char *path) noexcept {
-  try {
-    with_test_dump_paths([&](std::vector<std::string> &paths) { paths.emplace_back(path); });
-  } catch (...) {
-  }
+  with_test_dump_paths([&](std::vector<std::string> &paths) { paths.emplace_back(path); });
 }
 #else
 void remember_test_dump(const char *) noexcept {}
@@ -202,16 +196,12 @@ template <typename Fn> decltype(auto) with_capture_state(Fn &&fn) {
 /// @returns True the first time @p source_id is offered, up to the registry cap.
 bool claim_once(std::unordered_set<uint64_t> SourceCaptureState::*member,
                 uint64_t source_id) noexcept {
-  try {
-    return with_capture_state([&](SourceCaptureState &state) {
-      auto &seen = state.*member;
-      if (seen.size() >= kMaxCapturedSources)
-        return false;
-      return seen.insert(source_id).second;
-    });
-  } catch (...) {
-    return false;
-  }
+  return with_capture_state([&](SourceCaptureState &state) {
+    auto &seen = state.*member;
+    if (seen.size() >= kMaxCapturedSources)
+      return false;
+    return seen.insert(source_id).second;
+  });
 }
 
 /// @brief What became of an attempt to claim the capture slot for one source.
@@ -228,18 +218,14 @@ enum class CaptureClaim : uint8_t {
 /// can be retried once the operator fixes it rather than being refused for the
 /// life of the process.
 CaptureClaim begin_source_capture(uint64_t source_id) noexcept {
-  try {
-    return with_capture_state([&](SourceCaptureState &state) {
-      if (state.captures.contains(source_id))
-        return CaptureClaim::AlreadyHandled;
-      if (state.captures.size() >= kMaxCapturedSources)
-        return CaptureClaim::RegistryFull;
-      state.captures.emplace(source_id, false);
-      return CaptureClaim::Granted;
-    });
-  } catch (...) {
-    return CaptureClaim::AlreadyHandled;
-  }
+  return with_capture_state([&](SourceCaptureState &state) {
+    if (state.captures.contains(source_id))
+      return CaptureClaim::AlreadyHandled;
+    if (state.captures.size() >= kMaxCapturedSources)
+      return CaptureClaim::RegistryFull;
+    state.captures.emplace(source_id, false);
+    return CaptureClaim::Granted;
+  });
 }
 
 /// @brief Settle a claim taken by begin_source_capture().
@@ -429,35 +415,12 @@ void log_translation_diagnostic(uint64_t source_id,
   funlockfile(stderr);
 }
 
-template <typename Fn> hsa_status_t hsa_boundary(const char *operation, Fn &&fn) noexcept {
-  try {
-    return fn();
-  } catch (const std::bad_alloc &) {
-    log_error("operation=%s exception=std::bad_alloc status=%d", operation,
-              static_cast<int>(HSA_STATUS_ERROR_OUT_OF_RESOURCES));
-    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
-  } catch (const std::exception &error) {
-    log_error("operation=%s exception=std::exception what=%s status=%d", operation, error.what(),
-              static_cast<int>(HSA_STATUS_ERROR));
-    return HSA_STATUS_ERROR;
-  } catch (...) {
-    log_error("operation=%s exception=unknown status=%d", operation,
-              static_cast<int>(HSA_STATUS_ERROR));
-    return HSA_STATUS_ERROR;
-  }
-}
-
 template <typename Fn> class ScopeGuard {
 public:
   explicit ScopeGuard(Fn fn) : fn_(std::move(fn)) {}
   ScopeGuard(const ScopeGuard &) = delete;
   ScopeGuard &operator=(const ScopeGuard &) = delete;
-  ~ScopeGuard() noexcept {
-    try {
-      fn_();
-    } catch (...) {
-    }
-  }
+  ~ScopeGuard() noexcept { fn_(); }
 
 private:
   Fn fn_;
@@ -467,14 +430,15 @@ template <typename Fn> ScopeGuard<Fn> make_scope_guard(Fn fn) {
   return ScopeGuard<Fn>(std::move(fn));
 }
 
-hsa_status_t HSA_API reader_create_from_file(hsa_file_t file, hsa_code_object_reader_t *reader);
+hsa_status_t HSA_API reader_create_from_file(hsa_file_t file,
+                                             hsa_code_object_reader_t *reader) noexcept;
 hsa_status_t HSA_API reader_create_from_memory(const void *code_object, size_t size,
-                                               hsa_code_object_reader_t *reader);
+                                               hsa_code_object_reader_t *reader) noexcept;
 hsa_status_t HSA_API reader_destroy(hsa_code_object_reader_t reader);
 hsa_status_t HSA_API executable_destroy(hsa_executable_t executable);
 hsa_status_t HSA_API load_agent_code_object(hsa_executable_t executable, hsa_agent_t agent,
                                             hsa_code_object_reader_t reader, const char *options,
-                                            hsa_loaded_code_object_t *loaded);
+                                            hsa_loaded_code_object_t *loaded) noexcept;
 hsa_status_t HSA_API load_program_code_object(hsa_executable_t executable,
                                               hsa_code_object_reader_t reader, const char *options,
                                               hsa_loaded_code_object_t *loaded);
@@ -652,72 +616,49 @@ struct HookState {
 // process-lifetime: reclaimed only by the OS at exit, after all consumers are gone.
 HookState &g_state = *new HookState();
 
-bool store_reader(hsa_code_object_reader_t reader, Blob bytes) noexcept {
-  try {
-    std::lock_guard lock(g_state.storage_mutex);
-    g_state.readers[reader.handle] = std::move(bytes);
-    return true;
-  } catch (...) {
-    return false;
-  }
+void store_reader(hsa_code_object_reader_t reader, Blob bytes) noexcept {
+  std::lock_guard lock(g_state.storage_mutex);
+  g_state.readers[reader.handle] = std::move(bytes);
 }
 
 Blob lookup_reader(hsa_code_object_reader_t reader) noexcept {
-  try {
-    std::lock_guard lock(g_state.storage_mutex);
-    const auto it = g_state.readers.find(reader.handle);
-    return it == g_state.readers.end() ? nullptr : it->second;
-  } catch (...) {
-    return nullptr;
-  }
+  std::lock_guard lock(g_state.storage_mutex);
+  const auto it = g_state.readers.find(reader.handle);
+  return it == g_state.readers.end() ? nullptr : it->second;
 }
 
 void erase_reader(hsa_code_object_reader_t reader) noexcept {
-  try {
-    std::lock_guard lock(g_state.storage_mutex);
-    g_state.readers.erase(reader.handle);
-  } catch (...) {
-  }
+  std::lock_guard lock(g_state.storage_mutex);
+  g_state.readers.erase(reader.handle);
 }
 
-bool retain(hsa_executable_t executable, Blob bytes) noexcept {
-  try {
-    std::lock_guard lock(g_state.storage_mutex);
-    g_state.executables[executable.handle].push_back(std::move(bytes));
-    return true;
-  } catch (...) {
-    return false;
-  }
+void retain(hsa_executable_t executable, Blob bytes) noexcept {
+  std::lock_guard lock(g_state.storage_mutex);
+  g_state.executables[executable.handle].push_back(std::move(bytes));
 }
 
 // Drop a single reserved blob for @p executable (matched by identity), erasing the
 // map entry when its last blob is removed. Used to roll back a reservation when the
 // lower load fails.
 void unretain(hsa_executable_t executable, const Blob &bytes) noexcept {
-  try {
-    std::lock_guard lock(g_state.storage_mutex);
-    const auto map_it = g_state.executables.find(executable.handle);
-    if (map_it == g_state.executables.end())
-      return;
-    auto &buffers = map_it->second;
-    for (auto it = buffers.begin(); it != buffers.end(); ++it) {
-      if (it->get() == bytes.get()) {
-        buffers.erase(it);
-        break;
-      }
+  std::lock_guard lock(g_state.storage_mutex);
+  const auto map_it = g_state.executables.find(executable.handle);
+  if (map_it == g_state.executables.end())
+    return;
+  auto &buffers = map_it->second;
+  for (auto it = buffers.begin(); it != buffers.end(); ++it) {
+    if (it->get() == bytes.get()) {
+      buffers.erase(it);
+      break;
     }
-    if (buffers.empty())
-      g_state.executables.erase(map_it);
-  } catch (...) {
   }
+  if (buffers.empty())
+    g_state.executables.erase(map_it);
 }
 
 void release(hsa_executable_t executable) noexcept {
-  try {
-    std::lock_guard lock(g_state.storage_mutex);
-    g_state.executables.erase(executable.handle);
-  } catch (...) {
-  }
+  std::lock_guard lock(g_state.storage_mutex);
+  g_state.executables.erase(executable.handle);
 }
 
 #if defined(RJ_HOTSWAP_TEST_HOOKS)
@@ -730,34 +671,14 @@ bool retain_completed_claims_for_test() {
   return g_retain_completed_claims.load(std::memory_order_relaxed);
 }
 
-// Test-only: fail one of the two allocations that admitting an entry needs, the
-// way a short allocation would. Nothing else can provoke that, and what becomes
-// of the cohort when it happens is the whole question. 1 is the list node, 2 the
-// index node; they fail at different points and have to be exercised separately.
-std::atomic<int> g_fail_next_admission{0};
-void fail_admission_if_armed_for_test(int stage) {
-  int armed = g_fail_next_admission.load(std::memory_order_relaxed);
-  if (armed == stage &&
-      g_fail_next_admission.compare_exchange_strong(armed, 0, std::memory_order_relaxed))
-    throw std::bad_alloc();
-}
 #else
 constexpr bool retain_completed_claims_for_test() { return false; }
-constexpr void fail_admission_if_armed_for_test(int) {}
 #endif
 
 /// @brief What the memo did while its lock was held, to be reported once it is
 /// released.
 ///
-/// @details Fixed and scalar, so recording an event allocates nothing and cannot
-/// fail. That matters more than the detail it gives up: gathering these into a
-/// container put a throwing call in the middle of the very transitions this data
-/// describes. An allocation failure while noting a refusal would abandon the
-/// completed result its cohort was waiting for, and one while noting a
-/// displacement would abort eviction with the memo still over its ceiling and
-/// nothing left to retry it -- both at exactly the moment memory is scarce, which
-/// is when the ceiling and the single-flight guarantee are worth the most.
-/// Observing must never be able to change what is observed.
+/// @details Fixed and scalar so recording an event does not allocate.
 struct MemoLogSummary {
   bool refused = false;
   size_t refused_bytes = 0;
@@ -828,7 +749,7 @@ void memo_evict_locked(MemoLogSummary &summary) {
 enum class MemoLookup {
   kHit,        ///< @p out holds a previous outcome for these exact bytes.
   kTranslate,  ///< The caller owns the digest and must publish or release it.
-  kUnavailable ///< The memo could not be consulted; translate without it.
+  kUnavailable ///< The memo is disabled; translate without it.
 };
 
 /// @brief Look up a translation of exactly @p source, waiting out one in flight.
@@ -852,78 +773,74 @@ MemoLookup memo_acquire(uint64_t fingerprint, const Blob &source, TranslationRec
            std::memcmp(other->data(), source->data(), source->size()) == 0;
   };
   claim = 0;
-  try {
-    std::unique_lock lock(g_state.memo_mutex);
-    // A capacity of zero disables the memo: nothing is looked up, nothing is
-    // claimed, and every load translates as it did before this existed. Only a
-    // test sets that; production runs with a fixed ceiling.
-    if (g_state.memo_capacity == 0)
-      return MemoLookup::kUnavailable;
-    for (;;) {
-      const auto range = g_state.index.equal_range(fingerprint);
-      for (auto it = range.first; it != range.second; ++it) {
-        const MemoList::iterator node = it->second;
-        if (!same_bytes(node->source))
-          continue;
-        out = node->translation;
-        g_state.recent.splice(g_state.recent.begin(), g_state.recent, node);
-        return MemoLookup::kHit;
-      }
-      // A claim that finished but has not finished draining its cohort still
-      // holds exactly what this load wants. Take a copy of it: holding the memo
-      // lock makes that safe even if the last enrolled waiter erases the claim an
-      // instant later, since the copy carries its own reference to the bytes.
-      // Starting a fresh translation instead -- as skipping completed claims
-      // entirely would -- costs another 197 s and 15.9 GB for the object RCCL
-      // loads, purely because of when this load happened to arrive.
-      const auto finished = std::ranges::find_if(g_state.in_flight, [&](const InFlightClaim &e) {
-        return e.completed && e.fingerprint == fingerprint && same_bytes(e.source);
-      });
-      if (finished != g_state.in_flight.end()) {
-        out = finished->result;
-        return MemoLookup::kHit;
-      }
 
-      // Wait only for a translation of exactly these bytes. Matching on the
-      // fingerprint alone would park this load behind an unrelated object that
-      // merely samples the same, which for a large object is minutes of lost
-      // progress for work that could have run alongside it.
-      const auto running = std::ranges::find_if(g_state.in_flight, [&](const InFlightClaim &entry) {
-        return !entry.completed && entry.fingerprint == fingerprint && same_bytes(entry.source);
-      });
-      if (running == g_state.in_flight.end())
-        break;
-
-      // Enrol on that exact claim, so waking up means checking what became of it
-      // rather than re-deciding which translation this load belongs to.
-      const uint64_t enrolled = running->id;
-      ++running->cohort;
-      ++g_state.memo_waiters;
-      bool served = false;
-      for (;;) {
-        g_state.memo_ready.wait(lock);
-        const auto entry = std::ranges::find(g_state.in_flight, enrolled, &InFlightClaim::id);
-        if (entry == g_state.in_flight.end())
-          break; // Published to the memo, or abandoned. Either way, look again.
-        if (!entry->completed)
-          continue; // A different claim resolved; this one is still running.
-        out = entry->result;
-        served = true;
-        if (--entry->cohort == 0 && !retain_completed_claims_for_test())
-          g_state.in_flight.erase(entry);
-        break;
-      }
-      --g_state.memo_waiters;
-      if (served)
-        return MemoLookup::kHit;
-    }
-    claim = g_state.next_claim_id++;
-    g_state.in_flight.push_back(InFlightClaim{claim, fingerprint, source, {}, false, 0});
-    return MemoLookup::kTranslate;
-  } catch (...) {
-    claim = 0;
+  std::unique_lock lock(g_state.memo_mutex);
+  // A capacity of zero disables the memo: nothing is looked up, nothing is
+  // claimed, and every load translates as it did before this existed. Only a
+  // test sets that; production runs with a fixed ceiling.
+  if (g_state.memo_capacity == 0)
     return MemoLookup::kUnavailable;
+  for (;;) {
+    const auto range = g_state.index.equal_range(fingerprint);
+    for (auto it = range.first; it != range.second; ++it) {
+      const MemoList::iterator node = it->second;
+      if (!same_bytes(node->source))
+        continue;
+      out = node->translation;
+      g_state.recent.splice(g_state.recent.begin(), g_state.recent, node);
+      return MemoLookup::kHit;
+    }
+    // A claim that finished but has not finished draining its cohort still
+    // holds exactly what this load wants. Take a copy of it: holding the memo
+    // lock makes that safe even if the last enrolled waiter erases the claim an
+    // instant later, since the copy carries its own reference to the bytes.
+    // Starting a fresh translation instead -- as skipping completed claims
+    // entirely would -- costs another 197 s and 15.9 GB for the object RCCL
+    // loads, purely because of when this load happened to arrive.
+    const auto finished = std::ranges::find_if(g_state.in_flight, [&](const InFlightClaim &e) {
+      return e.completed && e.fingerprint == fingerprint && same_bytes(e.source);
+    });
+    if (finished != g_state.in_flight.end()) {
+      out = finished->result;
+      return MemoLookup::kHit;
+    }
+
+    // Wait only for a translation of exactly these bytes. Matching on the
+    // fingerprint alone would park this load behind an unrelated object that
+    // merely samples the same, which for a large object is minutes of lost
+    // progress for work that could have run alongside it.
+    const auto running = std::ranges::find_if(g_state.in_flight, [&](const InFlightClaim &entry) {
+      return !entry.completed && entry.fingerprint == fingerprint && same_bytes(entry.source);
+    });
+    if (running == g_state.in_flight.end())
+      break;
+
+    // Enrol on that exact claim, so waking up means checking what became of it
+    // rather than re-deciding which translation this load belongs to.
+    const uint64_t enrolled = running->id;
+    ++running->cohort;
+    ++g_state.memo_waiters;
+    bool served = false;
+    for (;;) {
+      g_state.memo_ready.wait(lock);
+      const auto entry = std::ranges::find(g_state.in_flight, enrolled, &InFlightClaim::id);
+      if (entry == g_state.in_flight.end())
+        break; // Published to the memo, or abandoned. Either way, look again.
+      if (!entry->completed)
+        continue; // A different claim resolved; this one is still running.
+      out = entry->result;
+      served = true;
+      if (--entry->cohort == 0 && !retain_completed_claims_for_test())
+        g_state.in_flight.erase(entry);
+      break;
+    }
+    --g_state.memo_waiters;
+    if (served)
+      return MemoLookup::kHit;
   }
+  claim = g_state.next_claim_id++;
+  g_state.in_flight.push_back(InFlightClaim{claim, fingerprint, source, {}, false, 0});
+  return MemoLookup::kTranslate;
 }
 
 void erase_claim_locked(uint64_t claim) {
@@ -936,90 +853,56 @@ void erase_claim_locked(uint64_t claim) {
 void memo_publish(uint64_t claim, uint64_t fingerprint, Blob source,
                   TranslationRecord record) noexcept {
   MemoLogSummary summary;
-  try {
-    {
-      std::lock_guard lock(g_state.memo_mutex);
-      const size_t bytes = source->size() + (record.output == nullptr ? 0 : record.output->size());
-      const auto held = std::ranges::find(g_state.in_flight, claim, &InFlightClaim::id);
-      const bool has_cohort = held != g_state.in_flight.end() && held->cohort != 0;
 
-      // Give the cohort something to wake onto before anything that can fail.
-      // Admitting an entry allocates twice, and if either allocation is short --
-      // most likely exactly when this translation has just peaked at 15.9 GB --
-      // the claim is all that stands between these waiters and translating the
-      // same object again one at a time. Copying the record here shares ownership
-      // of bytes that already exist and allocates nothing.
-      if (has_cohort) {
-        held->result = record;
-        held->completed = true;
-      }
+  {
+    std::lock_guard lock(g_state.memo_mutex);
+    const size_t bytes = source->size() + (record.output == nullptr ? 0 : record.output->size());
+    const auto held = std::ranges::find(g_state.in_flight, claim, &InFlightClaim::id);
+    const bool has_cohort = held != g_state.in_flight.end() && held->cohort != 0;
 
-      // The ceiling is a promise about how much memory this takes and keeps, so an
-      // entry that does not fit is declined rather than admitted and then exempted
-      // from the rule. Say so: the alternative to holding it is paying the
-      // translation on every load, and an operator watching that has no other way
-      // to tell the two apart.
-      bool admitted = false;
-      if (bytes > g_state.memo_capacity) {
-        summary.refused = true;
-        summary.refused_bytes = bytes;
-        summary.capacity = g_state.memo_capacity;
-      } else {
-        try {
-          // The list, the index and the byte count commit together or not at all.
-          // A node the index cannot reach is worse than a missing entry: eviction
-          // would later subtract bytes that were never added, wrapping memo_bytes
-          // and leaving capacity enforcement broken for the life of the process.
-          fail_admission_if_armed_for_test(1);
-          g_state.recent.push_front(MemoEntry{fingerprint, source, record});
-          try {
-            fail_admission_if_armed_for_test(2);
-            g_state.index.emplace(fingerprint, g_state.recent.begin());
-          } catch (...) {
-            g_state.recent.pop_front();
-            throw;
-          }
-          g_state.memo_bytes += bytes;
-          memo_evict_locked(summary);
-          admitted = true;
-        } catch (...) {
-          // Could not take it. The cohort above still gets its answer; a later
-          // load translates again, which is the same cost as never having cached
-          // it and nothing like the cost of a convoy.
-        }
-      }
-
-      // Let the claim go once it has no one left to serve: either the memo now
-      // answers for these bytes, or nobody was waiting on them.
-      if (admitted || !has_cohort) {
-        const auto entry = std::ranges::find(g_state.in_flight, claim, &InFlightClaim::id);
-        if (entry != g_state.in_flight.end())
-          g_state.in_flight.erase(entry);
-      }
+    // Preserve the result for the cohort when the entry exceeds the memo cap.
+    if (has_cohort) {
+      held->result = record;
+      held->completed = true;
     }
-  } catch (...) {
-    // A claim that never completed must not survive, or every later load of these
-    // bytes waits on a translation that is not coming. One that DID complete is
-    // holding a result its cohort has not collected yet, and erasing that is what
-    // creates the convoy -- so tell the two apart rather than dropping both.
-    try {
-      std::lock_guard lock(g_state.memo_mutex);
+
+    // The ceiling is a promise about how much memory this takes and keeps, so an
+    // entry that does not fit is declined rather than admitted and then exempted
+    // from the rule. Say so: the alternative to holding it is paying the
+    // translation on every load, and an operator watching that has no other way
+    // to tell the two apart.
+    bool admitted = false;
+    if (bytes > g_state.memo_capacity) {
+      summary.refused = true;
+      summary.refused_bytes = bytes;
+      summary.capacity = g_state.memo_capacity;
+    } else {
+      g_state.recent.push_front(MemoEntry{fingerprint, source, record});
+      g_state.index.emplace(fingerprint, g_state.recent.begin());
+
+      g_state.memo_bytes += bytes;
+      memo_evict_locked(summary);
+      admitted = true;
+    }
+
+    // Let the claim go once it has no one left to serve: either the memo now
+    // answers for these bytes, or nobody was waiting on them.
+    if (admitted || !has_cohort) {
       const auto entry = std::ranges::find(g_state.in_flight, claim, &InFlightClaim::id);
-      if (entry != g_state.in_flight.end() && !entry->completed)
+      if (entry != g_state.in_flight.end())
         g_state.in_flight.erase(entry);
-    } catch (...) {
     }
   }
+
   g_state.memo_ready.notify_all();
   emit_memo_summary(summary);
 }
 
 /// @brief Give up a claim without publishing, so waiters retry rather than hang.
 void memo_release(uint64_t claim) noexcept {
-  try {
+  {
     std::lock_guard lock(g_state.memo_mutex);
     erase_claim_locked(claim);
-  } catch (...) {
   }
   g_state.memo_ready.notify_all();
 }
@@ -1064,7 +947,7 @@ void hold_claimed_translation_for_test() {}
 void override_translation_status_for_test(rj_status_t &, uint8_t *&, size_t &) {}
 #endif // RJ_HOTSWAP_TEST_HOOKS
 
-bool install(HsaApiTable *table) {
+bool install(HsaApiTable *table) noexcept {
   std::lock_guard lock(g_state.lifecycle_mutex);
   if (g_state.core != nullptr) {
     log_error("OnLoad refused: hook is already installed");
@@ -1121,13 +1004,9 @@ bool install(HsaApiTable *table) {
   // generations, so retaining across reinstall is sound. This bounds growth by the
   // number of never-destroyed executables across runtime generations, which is
   // small; correctness (no dangling profiler/debugger pointer) takes precedence.
-  // Build the immutable snapshot FIRST -- this is the only fallible step. If the
-  // allocation throws, we must not have committed any install state: g_state.core
-  // stays null so a later install is not permanently rejected by the "already
-  // installed" guard above (the earlier order assigned core before this alloc, so a
-  // throw left the hook sticky-uninstallable). A callback that already loaded the
-  // previous generation's shared_ptr keeps that table alive for its whole call, so
-  // publishing a fresh snapshot never mutates a table another thread dereferences.
+  // A callback that already loaded the previous generation's shared_ptr keeps
+  // that table alive for its whole call. Publishing a fresh snapshot never
+  // mutates a table another thread dereferences.
   auto snapshot = std::make_shared<const OriginalApi>(original);
 
   g_state.vendor_reader.store(nullptr, std::memory_order_release);
@@ -1145,7 +1024,7 @@ bool install(HsaApiTable *table) {
   return true;
 }
 
-void uninstall() {
+void uninstall() noexcept {
   std::lock_guard lock(g_state.lifecycle_mutex);
   CoreApiTable *core = g_state.core;
   // Swap the published snapshot out for nullptr. Any callback still holding the
@@ -1180,22 +1059,16 @@ void uninstall() {
 Blob adopt_bytes(std::vector<uint8_t> &&bytes) {
   if (bytes.empty())
     return nullptr;
-  try {
-    return std::make_shared<std::vector<uint8_t>>(std::move(bytes));
-  } catch (...) {
-    return nullptr;
-  }
+
+  return std::make_shared<std::vector<uint8_t>>(std::move(bytes));
 }
 
 Blob copy_bytes(const void *data, size_t size) {
   if (data == nullptr || size == 0)
     return nullptr;
-  try {
-    const auto *begin = static_cast<const uint8_t *>(data);
-    return std::make_shared<std::vector<uint8_t>>(begin, begin + size);
-  } catch (...) {
-    return nullptr;
-  }
+
+  const auto *begin = static_cast<const uint8_t *>(data);
+  return std::make_shared<std::vector<uint8_t>>(begin, begin + size);
 }
 
 Blob read_file_region(hsa_file_t file, size_t offset, size_t requested_size) {
@@ -1212,12 +1085,8 @@ Blob read_file_region(hsa_file_t file, size_t offset, size_t requested_size) {
   if (size == 0 || size > remaining)
     return nullptr;
 
-  Blob bytes;
-  try {
-    bytes = std::make_shared<std::vector<uint8_t>>(size);
-  } catch (...) {
-    return nullptr;
-  }
+  auto bytes = std::make_shared<std::vector<uint8_t>>(size);
+
   size_t done = 0;
   while (done < size) {
     const ssize_t count =
@@ -1232,8 +1101,10 @@ Blob read_file_region(hsa_file_t file, size_t offset, size_t requested_size) {
 }
 
 hsa_status_t capture_reader(const OriginalApi &api, hsa_code_object_reader_t *reader, Blob bytes) {
-  if (bytes != nullptr && store_reader(*reader, std::move(bytes)))
+  if (bytes != nullptr) {
+    store_reader(*reader, std::move(bytes));
     return HSA_STATUS_SUCCESS;
+  }
   (void)api.destroy_reader(*reader);
   *reader = {};
   return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
@@ -1266,7 +1137,7 @@ AgentStepping classify_agent(const OriginalApi &api, hsa_agent_t agent) {
   } data{get_isa_info, {}, false};
   const hsa_status_t status = iterate(
       agent,
-      [](hsa_isa_t isa, void *opaque) -> hsa_status_t {
+      [](hsa_isa_t isa, void *opaque) noexcept -> hsa_status_t {
         auto *out = static_cast<IsaData *>(opaque);
         uint32_t length = 0;
         if (out->get_info(isa, HSA_ISA_INFO_NAME_LENGTH, &length) != HSA_STATUS_SUCCESS ||
@@ -1359,12 +1230,8 @@ hsa_status_t load_owned_bytes(hsa_executable_t executable, hsa_agent_t agent, co
   // not copy) the ELF pointer -- CodeObjectReaderImpl::SetMemory stores it directly
   // and the loader hands code->ElfData() to the LoadedCodeObjectImpl -- so once a
   // load succeeds, ROCr references these bytes until the executable is destroyed.
-  // The map insertion is fallible (allocation); doing it AFTER a successful load
-  // would mean a successful publish could be followed by a failed retain, leaving
-  // ROCr with an unowned raw pointer. Reserving first makes retention a no-fail fact
-  // by the time the load returns success.
-  if (!retain(executable, bytes))
-    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+  // Reserve the ownership before publishing the pointer to the lower loader.
+  retain(executable, bytes);
 
   // On FAILURE, drop the reservation. A failure may be a pre-publication rejection
   // (null/invalid executable, profile/ISA mismatch) where ROCr never referenced the
@@ -1384,313 +1251,277 @@ hsa_status_t load_owned_bytes(hsa_executable_t executable, hsa_agent_t agent, co
 }
 
 hsa_status_t HSA_API reader_create_from_memory(const void *code_object, size_t size,
-                                               hsa_code_object_reader_t *reader) {
-  return hsa_boundary("hsa_code_object_reader_create_from_memory", [&] {
-    // Reject a null output pointer before forwarding: the lower/vendor API may write
-    // through it without checking, so fail fast the way ROCr's own layer does.
-    if (reader == nullptr)
-      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-    const std::shared_ptr<const OriginalApi> api =
-        g_state.active_api.load(std::memory_order_acquire);
-    if (api == nullptr)
-      return HSA_STATUS_ERROR;
-    auto *original = api->create_memory;
-    const hsa_status_t status = original(code_object, size, reader);
-    if (status != HSA_STATUS_SUCCESS)
-      return status;
+                                               hsa_code_object_reader_t *reader) noexcept {
+  // Reject a null output pointer before forwarding: the lower/vendor API may write
+  // through it without checking, so fail fast the way ROCr's own layer does.
+  if (reader == nullptr)
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  const std::shared_ptr<const OriginalApi> api = g_state.active_api.load(std::memory_order_acquire);
+  if (api == nullptr)
+    return HSA_STATUS_ERROR;
+  auto *original = api->create_memory;
+  const hsa_status_t status = original(code_object, size, reader);
+  if (status != HSA_STATUS_SUCCESS)
+    return status;
 
-    return capture_reader(*api, reader, copy_bytes(code_object, size));
-  });
+  return capture_reader(*api, reader, copy_bytes(code_object, size));
 }
 
-hsa_status_t HSA_API reader_create_from_file(hsa_file_t file, hsa_code_object_reader_t *reader) {
-  return hsa_boundary("hsa_code_object_reader_create_from_file", [&] {
-    if (reader == nullptr)
-      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-    const std::shared_ptr<const OriginalApi> api =
-        g_state.active_api.load(std::memory_order_acquire);
-    if (api == nullptr)
-      return HSA_STATUS_ERROR;
-    auto *original = api->create_file;
-    const hsa_status_t status = original(file, reader);
-    if (status != HSA_STATUS_SUCCESS)
-      return status;
-    return capture_reader(*api, reader, read_file_region(file, 0, 0));
-  });
+hsa_status_t HSA_API reader_create_from_file(hsa_file_t file,
+                                             hsa_code_object_reader_t *reader) noexcept {
+  if (reader == nullptr)
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  const std::shared_ptr<const OriginalApi> api = g_state.active_api.load(std::memory_order_acquire);
+  if (api == nullptr)
+    return HSA_STATUS_ERROR;
+  auto *original = api->create_file;
+  const hsa_status_t status = original(file, reader);
+  if (status != HSA_STATUS_SUCCESS)
+    return status;
+  return capture_reader(*api, reader, read_file_region(file, 0, 0));
 }
 
 hsa_status_t vendor_reader_create(hsa_file_t file, size_t offset, size_t size,
-                                  hsa_code_object_reader_t *reader) {
-  return hsa_boundary("amd_loader_code_object_reader_create_from_file", [&] {
-    if (reader == nullptr)
-      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-    const std::shared_ptr<const OriginalApi> api =
-        g_state.active_api.load(std::memory_order_acquire);
-    if (api == nullptr)
-      return HSA_STATUS_ERROR;
-    auto original = g_state.vendor_reader.load(std::memory_order_acquire);
-    if (original == nullptr)
-      return HSA_STATUS_ERROR;
-    const hsa_status_t status = original(file, offset, size, reader);
-    if (status != HSA_STATUS_SUCCESS)
-      return status;
-    return capture_reader(*api, reader, read_file_region(file, offset, size));
-  });
+                                  hsa_code_object_reader_t *reader) noexcept {
+  if (reader == nullptr)
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  const std::shared_ptr<const OriginalApi> api = g_state.active_api.load(std::memory_order_acquire);
+  if (api == nullptr)
+    return HSA_STATUS_ERROR;
+  auto original = g_state.vendor_reader.load(std::memory_order_acquire);
+  if (original == nullptr)
+    return HSA_STATUS_ERROR;
+  const hsa_status_t status = original(file, offset, size, reader);
+  if (status != HSA_STATUS_SUCCESS)
+    return status;
+  return capture_reader(*api, reader, read_file_region(file, offset, size));
 }
 
 hsa_status_t HSA_API system_get_major_extension_table(uint16_t extension, uint16_t version_major,
                                                       size_t table_length, void *table) {
-  return hsa_boundary("hsa_system_get_major_extension_table", [&] {
-    const std::shared_ptr<const OriginalApi> api =
-        g_state.active_api.load(std::memory_order_acquire);
-    if (api == nullptr)
-      return HSA_STATUS_ERROR;
-    auto *original = api->get_extension_table;
-    const hsa_status_t status = original(extension, version_major, table_length, table);
-    constexpr size_t reader_field_end =
-        offsetof(VendorLoaderTable, create_reader_from_file) + sizeof(VendorReaderCreate);
-    if (status != HSA_STATUS_SUCCESS || table == nullptr || extension != HSA_EXTENSION_AMD_LOADER ||
-        version_major != 1 || table_length < reader_field_end)
-      return status;
-
-    auto *loader = static_cast<VendorLoaderTable *>(table);
-    auto reader = loader->create_reader_from_file;
-    if (reader != nullptr) {
-      auto expected = static_cast<VendorReaderCreate>(nullptr);
-      g_state.vendor_reader.compare_exchange_strong(expected, reader, std::memory_order_acq_rel);
-      loader->create_reader_from_file = vendor_reader_create;
-    }
+  const std::shared_ptr<const OriginalApi> api = g_state.active_api.load(std::memory_order_acquire);
+  if (api == nullptr)
+    return HSA_STATUS_ERROR;
+  auto *original = api->get_extension_table;
+  const hsa_status_t status = original(extension, version_major, table_length, table);
+  constexpr size_t reader_field_end =
+      offsetof(VendorLoaderTable, create_reader_from_file) + sizeof(VendorReaderCreate);
+  if (status != HSA_STATUS_SUCCESS || table == nullptr || extension != HSA_EXTENSION_AMD_LOADER ||
+      version_major != 1 || table_length < reader_field_end)
     return status;
-  });
+
+  auto *loader = static_cast<VendorLoaderTable *>(table);
+  auto reader = loader->create_reader_from_file;
+  if (reader != nullptr) {
+    auto expected = static_cast<VendorReaderCreate>(nullptr);
+    g_state.vendor_reader.compare_exchange_strong(expected, reader, std::memory_order_acq_rel);
+    loader->create_reader_from_file = vendor_reader_create;
+  }
+  return status;
 }
 
 hsa_status_t HSA_API reader_destroy(hsa_code_object_reader_t reader) {
-  return hsa_boundary("hsa_code_object_reader_destroy", [&] {
-    const std::shared_ptr<const OriginalApi> api =
-        g_state.active_api.load(std::memory_order_acquire);
-    if (api == nullptr)
-      return HSA_STATUS_ERROR;
-    auto *original = api->destroy_reader;
-    const hsa_status_t status = original(reader);
-    if (status == HSA_STATUS_SUCCESS)
-      erase_reader(reader);
-    return status;
-  });
+  const std::shared_ptr<const OriginalApi> api = g_state.active_api.load(std::memory_order_acquire);
+  if (api == nullptr)
+    return HSA_STATUS_ERROR;
+  auto *original = api->destroy_reader;
+  const hsa_status_t status = original(reader);
+  if (status == HSA_STATUS_SUCCESS)
+    erase_reader(reader);
+  return status;
 }
 
 hsa_status_t HSA_API executable_destroy(hsa_executable_t executable) {
-  return hsa_boundary("hsa_executable_destroy", [&] {
-    const std::shared_ptr<const OriginalApi> api =
-        g_state.active_api.load(std::memory_order_acquire);
-    if (api == nullptr)
-      return HSA_STATUS_ERROR;
-    auto *original = api->destroy_executable;
-    const hsa_status_t status = original(executable);
-    if (status == HSA_STATUS_SUCCESS)
-      release(executable);
-    return status;
-  });
+  const std::shared_ptr<const OriginalApi> api = g_state.active_api.load(std::memory_order_acquire);
+  if (api == nullptr)
+    return HSA_STATUS_ERROR;
+  auto *original = api->destroy_executable;
+  const hsa_status_t status = original(executable);
+  if (status == HSA_STATUS_SUCCESS)
+    release(executable);
+  return status;
 }
 
 hsa_status_t HSA_API load_agent_code_object(hsa_executable_t executable, hsa_agent_t agent,
                                             hsa_code_object_reader_t reader, const char *options,
-                                            hsa_loaded_code_object_t *loaded) {
-  return hsa_boundary("hsa_executable_load_agent_code_object", [&] {
-    const std::shared_ptr<const OriginalApi> api =
-        g_state.active_api.load(std::memory_order_acquire);
-    if (api == nullptr)
-      return HSA_STATUS_ERROR;
-    auto *original_load = api->load_agent;
+                                            hsa_loaded_code_object_t *loaded) noexcept {
+  const std::shared_ptr<const OriginalApi> api = g_state.active_api.load(std::memory_order_acquire);
+  if (api == nullptr)
+    return HSA_STATUS_ERROR;
+  auto *original_load = api->load_agent;
 
-    const AgentStepping stepping = classify_agent(*api, agent);
-    if (stepping == AgentStepping::kOther || stepping == AgentStepping::kB0OrLater)
-      return original_load(executable, agent, reader, options, loaded);
-    if (stepping == AgentStepping::kUnknown)
-      return HSA_STATUS_ERROR_INVALID_AGENT;
+  const AgentStepping stepping = classify_agent(*api, agent);
+  if (stepping == AgentStepping::kOther || stepping == AgentStepping::kB0OrLater)
+    return original_load(executable, agent, reader, options, loaded);
+  if (stepping == AgentStepping::kUnknown)
+    return HSA_STATUS_ERROR_INVALID_AGENT;
 
-    Blob source = lookup_reader(reader);
-    if (source == nullptr)
-      return HSA_STATUS_ERROR_INVALID_CODE_OBJECT_READER;
-    if (!is_gfx1250(source))
-      return load_owned_bytes(executable, agent, source, options, loaded, *api, original_load);
+  Blob source = lookup_reader(reader);
+  if (source == nullptr)
+    return HSA_STATUS_ERROR_INVALID_CODE_OBJECT_READER;
+  if (!is_gfx1250(source))
+    return load_owned_bytes(executable, agent, source, options, loaded, *api, original_load);
 
-    // gfx1250 A0 and B0 code objects carry the same machine identity. Mode 2 is
-    // a B0-input environment, so gfx1250 input targeting an A0 agent uses the
-    // fixed B0-to-A0 profile.
-    //
-    // Translation is a pure function of these bytes, so a caller that registers
-    // the same object repeatedly -- which is exactly what a kernel-attribute walk
-    // over a large device library does, once per registration and once per device
-    // -- should pay for it once. RCCL's gfx1250 device image is 212 MiB and takes
-    // 197 s to translate, so a repeat that translates again does not merely run
-    // slowly; it exhausts the caller's whole startup budget.
-    const uint64_t fingerprint = sample_fingerprint(*source);
+  // gfx1250 A0 and B0 code objects carry the same machine identity. Mode 2 is
+  // a B0-input environment, so gfx1250 input targeting an A0 agent uses the
+  // fixed B0-to-A0 profile.
+  //
+  // Translation is a pure function of these bytes, so a caller that registers
+  // the same object repeatedly -- which is exactly what a kernel-attribute walk
+  // over a large device library does, once per registration and once per device
+  // -- should pay for it once. RCCL's gfx1250 device image is 212 MiB and takes
+  // 197 s to translate, so a repeat that translates again does not merely run
+  // slowly; it exhausts the caller's whole startup budget.
+  const uint64_t fingerprint = sample_fingerprint(*source);
 
-    TranslationRecord translation;
-    uint64_t claim = 0;
-    const MemoLookup lookup = memo_acquire(fingerprint, source, translation, claim);
+  TranslationRecord translation;
+  uint64_t claim = 0;
+  const MemoLookup lookup = memo_acquire(fingerprint, source, translation, claim);
 
-    // A claim taken by memo_acquire() must be given back exactly once. Anything
-    // that leaves this scope without resolving it would leave every later load of
-    // these bytes waiting on a translation that is never coming.
-    bool claim_resolved = lookup != MemoLookup::kTranslate;
-    const auto claim_guard = make_scope_guard([&] {
-      if (!claim_resolved)
-        memo_release(claim);
-    });
-    const auto remember = [&](const TranslationRecord &outcome) {
-      if (claim_resolved)
-        return;
-      claim_resolved = true;
-      memo_publish(claim, fingerprint, source, outcome);
-    };
+  // A claim taken by memo_acquire() must be given back exactly once. Anything
+  // that leaves this scope without resolving it would leave every later load of
+  // these bytes waiting on a translation that is never coming.
+  bool claim_resolved = lookup != MemoLookup::kTranslate;
+  const auto claim_guard = make_scope_guard([&] {
+    if (!claim_resolved)
+      memo_release(claim);
+  });
+  const auto remember = [&](const TranslationRecord &outcome) {
+    if (claim_resolved)
+      return;
+    claim_resolved = true;
+    memo_publish(claim, fingerprint, source, outcome);
+  };
 
-    // Serve a remembered outcome, whichever way it went. Both reuses carry the
-    // same record as a fresh translation so every load stays attributable to its
-    // source object, but only the verbose channel sees them: the reuse itself is
-    // not news, and almost every load is a reuse.
-    if (lookup == MemoLookup::kHit) {
-      if (translation.output == nullptr) {
-        log_translation(translation.info.source_code_object_id, "reused_failure",
-                        translation.info.changed_instruction_count, source->size(), 0,
-                        translation.status, HSA_STATUS_ERROR_INVALID_CODE_OBJECT,
-                        /*replay=*/true);
-        return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
-      }
-      const hsa_status_t reused_status = load_owned_bytes(executable, agent, translation.output,
-                                                          options, loaded, *api, original_load);
-      log_translation(translation.info.source_code_object_id, "reused",
-                      translation.info.changed_instruction_count, source->size(),
-                      translation.output->size(), translation.status, reused_status);
-      return reused_status;
-    }
-
-    // Only a load this process has not already answered reaches the store, which
-    // is what keeps its cost off the repeat path: a digest over the whole source
-    // and a file read, once per distinct object rather than once per load.
-    //
-    // The key names the translator, the configuration and the source -- never
-    // where the entry lives -- so the tool that wrote it and this reader agree by
-    // construction, which is the whole reason a translation performed ahead of
-    // time can be found at all.
-    const CacheKey cache_key = pretranslation_store().key_for(*source, kTranslationIdentity);
-    std::vector<uint8_t> cached = pretranslation_store().lookup(cache_key, kTranslationIdentity);
-    // Adopting the store's buffer rather than copying it again keeps a hit to one
-    // allocation; the bytes have already been read once.
-    const size_t cached_size = cached.size();
-    if (Blob reused = adopt_bytes(std::move(cached)); reused != nullptr) {
-      // Remember what the store gave us. Without this, every later load of these
-      // bytes would read the file again -- the repetition the memo exists to
-      // remove, moved from the translator to the filesystem.
-      TranslationRecord stored;
-      stored.output = reused;
-      // Only when someone is listening. This walks the whole source -- about
-      // 237 ms for the 212 MiB device library -- and its only consumer is a field
-      // in a log line that log_translation() drops unless verbose output is on.
-      // Paying that on the path whose entire purpose is to be fast, for output
-      // almost nobody asks for, is the wrong trade.
-      if (verbose_logging())
-        stored.info.source_code_object_id =
-            rocjitsu::stable_code_object_id(source->data(), source->size());
-      remember(stored);
-
-      const hsa_status_t reused_status =
-          load_owned_bytes(executable, agent, reused, options, loaded, *api, original_load);
-      log("reused tier=aot input_bytes=%zu output_bytes=%zu status=%d", source->size(), cached_size,
-          static_cast<int>(reused_status));
-      return reused_status;
-    }
-
-    uint8_t *translated_data = nullptr;
-    size_t translated_size = 0;
-    g_state.translations.fetch_add(1, std::memory_order_relaxed);
-    hold_claimed_translation_for_test();
-    translation.status = rj_gfx1250_b0_to_a0_translate(
-        source->data(), source->size(), &translated_data, &translated_size, &translation.info,
-        [](const rj_gfx1250_b0_to_a0_diagnostic_t *diagnostic, void *user_data) noexcept {
-          const auto *info = static_cast<const rj_gfx1250_b0_to_a0_translation_info_t *>(user_data);
-          log_translation_diagnostic(info->source_code_object_id, diagnostic);
-        },
-        &translation.info);
-    override_translation_status_for_test(translation.status, translated_data, translated_size);
-    if (translation.status != ROCJITSU_STATUS_SUCCESS || translated_data == nullptr ||
-        translated_size == 0) {
-      rj_gfx1250_b0_to_a0_free(translated_data);
-      // Copying a large input to disk after an allocation failure adds pressure
-      // to a system that just ran out, and the bytes are not what failed.
-      if (translation.status != ROCJITSU_STATUS_OUT_OF_RESOURCES)
-        dump_failed_source(translation.info.source_code_object_id, *source);
-      // Remember a refusal only when it is a verdict on the bytes. The translator
-      // reports an environmental failure -- an allocation it could not make, an
-      // exception it could not attribute -- with a status that promises nothing
-      // about the input, and recording one of those would turn a single bad moment
-      // into a permanent refusal of an object that translates perfectly well.
-      if (translation.status == ROCJITSU_STATUS_INVALID_CODE_OBJECT)
-        remember(translation);
-      log_translation(translation.info.source_code_object_id, "translation_failed",
+  // Serve a remembered outcome, whichever way it went. Both reuses carry the
+  // same record as a fresh translation so every load stays attributable to its
+  // source object, but only the verbose channel sees them: the reuse itself is
+  // not news, and almost every load is a reuse.
+  if (lookup == MemoLookup::kHit) {
+    if (translation.output == nullptr) {
+      log_translation(translation.info.source_code_object_id, "reused_failure",
                       translation.info.changed_instruction_count, source->size(), 0,
-                      translation.status, HSA_STATUS_ERROR_INVALID_CODE_OBJECT);
+                      translation.status, HSA_STATUS_ERROR_INVALID_CODE_OBJECT,
+                      /*replay=*/true);
       return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
     }
+    const hsa_status_t reused_status = load_owned_bytes(executable, agent, translation.output,
+                                                        options, loaded, *api, original_load);
+    log_translation(translation.info.source_code_object_id, "reused",
+                    translation.info.changed_instruction_count, source->size(),
+                    translation.output->size(), translation.status, reused_status);
+    return reused_status;
+  }
 
-    translation.output = copy_bytes(translated_data, translated_size);
+  // Only a load this process has not already answered reaches the store, which
+  // is what keeps its cost off the repeat path: a digest over the whole source
+  // and a file read, once per distinct object rather than once per load.
+  //
+  // The key names the translator, the configuration and the source -- never
+  // where the entry lives -- so the tool that wrote it and this reader agree by
+  // construction, which is the whole reason a translation performed ahead of
+  // time can be found at all.
+  const CacheKey cache_key = pretranslation_store().key_for(*source, kTranslationIdentity);
+  std::vector<uint8_t> cached = pretranslation_store().lookup(cache_key, kTranslationIdentity);
+  // Adopting the store's buffer rather than copying it again keeps a hit to one
+  // allocation; the bytes have already been read once.
+  const size_t cached_size = cached.size();
+  if (Blob reused = adopt_bytes(std::move(cached)); reused != nullptr) {
+    // Remember what the store gave us. Without this, every later load of these
+    // bytes would read the file again -- the repetition the memo exists to
+    // remove, moved from the translator to the filesystem.
+    TranslationRecord stored;
+    stored.output = reused;
+    // Only when someone is listening. This walks the whole source -- about
+    // 237 ms for the 212 MiB device library -- and its only consumer is a field
+    // in a log line that log_translation() drops unless verbose output is on.
+    // Paying that on the path whose entire purpose is to be fast, for output
+    // almost nobody asks for, is the wrong trade.
+    if (verbose_logging())
+      stored.info.source_code_object_id =
+          rocjitsu::stable_code_object_id(source->data(), source->size());
+    remember(stored);
+
+    const hsa_status_t reused_status =
+        load_owned_bytes(executable, agent, reused, options, loaded, *api, original_load);
+    log("reused tier=aot input_bytes=%zu output_bytes=%zu status=%d", source->size(), cached_size,
+        static_cast<int>(reused_status));
+    return reused_status;
+  }
+
+  uint8_t *translated_data = nullptr;
+  size_t translated_size = 0;
+  g_state.translations.fetch_add(1, std::memory_order_relaxed);
+  hold_claimed_translation_for_test();
+  translation.status = rj_gfx1250_b0_to_a0_translate(
+      source->data(), source->size(), &translated_data, &translated_size, &translation.info,
+      [](const rj_gfx1250_b0_to_a0_diagnostic_t *diagnostic, void *user_data) noexcept {
+        const auto *info = static_cast<const rj_gfx1250_b0_to_a0_translation_info_t *>(user_data);
+        log_translation_diagnostic(info->source_code_object_id, diagnostic);
+      },
+      &translation.info);
+  override_translation_status_for_test(translation.status, translated_data, translated_size);
+  if (translation.status != ROCJITSU_STATUS_SUCCESS || translated_data == nullptr ||
+      translated_size == 0) {
     rj_gfx1250_b0_to_a0_free(translated_data);
-    if (translation.output == nullptr) {
-      // Deliberately NOT remembered: running out of memory says nothing about
-      // these bytes, and recording it would turn one bad moment into a permanent
-      // refusal of an object that translates perfectly well.
-      log_translation(translation.info.source_code_object_id, "output_copy_failed",
-                      translation.info.changed_instruction_count, source->size(), translated_size,
-                      translation.status, HSA_STATUS_ERROR_OUT_OF_RESOURCES);
-      return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
-    }
+    // Copying a large input to disk after an allocation failure adds pressure
+    // to a system that just ran out, and the bytes are not what failed.
+    if (translation.status != ROCJITSU_STATUS_OUT_OF_RESOURCES)
+      dump_failed_source(translation.info.source_code_object_id, *source);
+    // Remember a refusal only when it is a verdict on the bytes. The translator
+    // reports an environmental failure with a status that promises nothing
+    // about the input, and recording one of those would turn a single bad moment
+    // into a permanent refusal of an object that translates perfectly well.
+    if (translation.status == ROCJITSU_STATUS_INVALID_CODE_OBJECT)
+      remember(translation);
+    log_translation(translation.info.source_code_object_id, "translation_failed",
+                    translation.info.changed_instruction_count, source->size(), 0,
+                    translation.status, HSA_STATUS_ERROR_INVALID_CODE_OBJECT);
+    return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
+  }
 
-    remember(translation);
-    const hsa_status_t load_status = load_owned_bytes(executable, agent, translation.output,
-                                                      options, loaded, *api, original_load);
-    log_translation(translation.info.source_code_object_id, "translated",
-                    translation.info.changed_instruction_count, source->size(), translated_size,
-                    translation.status, load_status);
-    return load_status;
-  });
+  translation.output = copy_bytes(translated_data, translated_size);
+  rj_gfx1250_b0_to_a0_free(translated_data);
+
+  remember(translation);
+  const hsa_status_t load_status =
+      load_owned_bytes(executable, agent, translation.output, options, loaded, *api, original_load);
+  log_translation(translation.info.source_code_object_id, "translated",
+                  translation.info.changed_instruction_count, source->size(), translated_size,
+                  translation.status, load_status);
+  return load_status;
 }
 
 hsa_status_t HSA_API load_program_code_object(hsa_executable_t executable,
                                               hsa_code_object_reader_t reader, const char *options,
                                               hsa_loaded_code_object_t *loaded) {
-  return hsa_boundary("hsa_executable_load_program_code_object", [&] {
-    const std::shared_ptr<const OriginalApi> api =
-        g_state.active_api.load(std::memory_order_acquire);
-    if (api == nullptr)
-      return HSA_STATUS_ERROR;
-    auto *original = api->load_program;
-    const A0Risk risk = assess_a0_risk(*api);
-    // Same status either way -- callers must not have to distinguish these -- but the
-    // unenumerable case is logged separately so a co-loaded tool that refuses agent
-    // iteration is not misread as an A0 incompatibility.
-    if (risk == A0Risk::kUnenumerable) {
-      log("agent enumeration failed; refusing agent-less program load");
-      return HSA_STATUS_ERROR_INCOMPATIBLE_ARGUMENTS;
-    }
-    if (risk == A0Risk::kPossible)
-      return HSA_STATUS_ERROR_INCOMPATIBLE_ARGUMENTS;
-    return original(executable, reader, options, loaded);
-  });
+  const std::shared_ptr<const OriginalApi> api = g_state.active_api.load(std::memory_order_acquire);
+  if (api == nullptr)
+    return HSA_STATUS_ERROR;
+  auto *original = api->load_program;
+  const A0Risk risk = assess_a0_risk(*api);
+  // Same status either way -- callers must not have to distinguish these -- but the
+  // unenumerable case is logged separately so a co-loaded tool that refuses agent
+  // iteration is not misread as an A0 incompatibility.
+  if (risk == A0Risk::kUnenumerable) {
+    log("agent enumeration failed; refusing agent-less program load");
+    return HSA_STATUS_ERROR_INCOMPATIBLE_ARGUMENTS;
+  }
+  if (risk == A0Risk::kPossible)
+    return HSA_STATUS_ERROR_INCOMPATIBLE_ARGUMENTS;
+  return original(executable, reader, options, loaded);
 }
 
 hsa_status_t HSA_API load_code_object(hsa_executable_t executable, hsa_agent_t agent,
                                       hsa_code_object_t code_object, const char *options) {
-  return hsa_boundary("hsa_executable_load_code_object", [&] {
-    const std::shared_ptr<const OriginalApi> api =
-        g_state.active_api.load(std::memory_order_acquire);
-    if (api == nullptr)
-      return HSA_STATUS_ERROR;
-    auto *original = api->load_deprecated;
-    const AgentStepping stepping = classify_agent(*api, agent);
-    if (stepping == AgentStepping::kA0 || stepping == AgentStepping::kUnknown)
-      return HSA_STATUS_ERROR_INCOMPATIBLE_ARGUMENTS;
-    return original(executable, agent, code_object, options);
-  });
+  const std::shared_ptr<const OriginalApi> api = g_state.active_api.load(std::memory_order_acquire);
+  if (api == nullptr)
+    return HSA_STATUS_ERROR;
+  auto *original = api->load_deprecated;
+  const AgentStepping stepping = classify_agent(*api, agent);
+  if (stepping == AgentStepping::kA0 || stepping == AgentStepping::kUnknown)
+    return HSA_STATUS_ERROR_INCOMPATIBLE_ARGUMENTS;
+  return original(executable, agent, code_object, options);
 }
 
 } // namespace
@@ -1707,29 +1538,11 @@ extern "C" RJ_HOOK_EXPORT bool OnLoad(HsaApiTable *table, uint64_t runtime_versi
   (void)runtime_version;
   (void)failed_tool_count;
   (void)failed_tool_names;
-  try {
-    return install(table);
-  } catch (const std::bad_alloc &) {
-    log_error("OnLoad failed: exception=std::bad_alloc");
-    return false;
-  } catch (const std::exception &error) {
-    log_error("OnLoad failed: exception=std::exception what=%s", error.what());
-    return false;
-  } catch (...) {
-    log_error("OnLoad failed: exception=unknown");
-    return false;
-  }
+
+  return install(table);
 }
 
-extern "C" RJ_HOOK_EXPORT void OnUnload() {
-  try {
-    uninstall();
-  } catch (const std::exception &error) {
-    log_error("OnUnload failed: exception=std::exception what=%s", error.what());
-  } catch (...) {
-    log_error("OnUnload failed: exception=unknown");
-  }
-}
+extern "C" RJ_HOOK_EXPORT void OnUnload() { uninstall(); }
 
 #if defined(RJ_HOTSWAP_TEST_HOOKS)
 // Test-only: total number of translated backing buffers currently retained across
@@ -1777,7 +1590,6 @@ extern "C" RJ_HOOK_EXPORT void rj_test_clear_retained_storage() {
   }
   g_gate_open.notify_all();
   g_retain_completed_claims.store(false, std::memory_order_relaxed);
-  g_fail_next_admission.store(0, std::memory_order_relaxed);
   {
     std::lock_guard lock(g_forced_status_mutex);
     g_forced_status_armed = false;
@@ -1842,12 +1654,6 @@ extern "C" RJ_HOOK_EXPORT uint64_t rj_test_sample_fingerprint(const void *bytes,
 // load into the window where a finished result is still available to be taken.
 extern "C" RJ_HOOK_EXPORT void rj_test_retain_completed_claims(bool retain) {
   g_retain_completed_claims.store(retain, std::memory_order_relaxed);
-}
-
-// Test-only: make the next admission to the memo fail as a short allocation
-// would. Stage 1 is the LRU list node, stage 2 the index node; zero disarms.
-extern "C" RJ_HOOK_EXPORT void rj_test_fail_next_memo_admission(int stage) {
-  g_fail_next_admission.store(stage, std::memory_order_relaxed);
 }
 
 // Test-only: threads currently asleep waiting for an in-flight translation.

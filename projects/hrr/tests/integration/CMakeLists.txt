@@ -50,8 +50,8 @@
 # own hidden [.][hrr-direct] workload.
 #
 # hrr_kernel_signature_test.cc covers the check replay makes of a kernel launch
-# record's arguments against the signature of the kernel in the code object
-# (AIRUNTIME-3070): an unmodified archive replays, a copy whose launch record has
+# record's arguments against the signature of the kernel in the code object:
+# an unmodified archive replays, a copy whose launch record has
 # too few arguments is refused with nothing launched, and copies with an extra or
 # a wider argument replay like the original. Contains its own hidden
 # [.][hrr-direct] workload.
@@ -61,7 +61,7 @@
 # its own hidden [.][hrr-direct] workloads.
 #
 # hrr_va_placement_test.cc covers capture-address placement: a device pointer
-# stored in device memory by an H2D copy (ROCM-31827). Contains its own hidden
+# stored in device memory by an H2D copy. Contains its own hidden
 # [.][hrr-direct] workload.
 #
 # hrr_dispatch_swap_test.cc covers capture shutdown: a slot another component
@@ -104,6 +104,7 @@ set(HRR_GPU_WORKLOAD_SOURCES
   hrr_pinned_host_test.cc
   hrr_va_placement_test.cc
   hrr_disk_space_test.cc
+  hrr_host_alloc_budget_test.cc
 )
 
 if(NOT DEFINED HIP_PLATFORM)
@@ -155,8 +156,14 @@ target_include_directories(hrr-integration-tests PRIVATE
 # hiprtc::hiprtc (hipRTC) is a separate ROCm CMake package from hip::host.
 find_package(hiprtc CONFIG REQUIRED)
 
+# Disable deprecated warnings as it is not relevant
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+  target_compile_options(hrr-integration-tests PRIVATE -Wno-deprecated-declarations)
+endif()
+
 target_link_libraries(hrr-integration-tests PRIVATE
   hrr::reader
+  hrr::warnings
   hip::host
   hiprtc::hiprtc
   Catch2::Catch2WithMain)
@@ -230,7 +237,7 @@ if(NOT WIN32)
     CXX_STANDARD 17
     CXX_STANDARD_REQUIRED ON
     CXX_VISIBILITY_PRESET hidden)
-  target_link_libraries(hrr-test-dispatch-tool PRIVATE ${CMAKE_DL_LIBS})
+  target_link_libraries(hrr-test-dispatch-tool PRIVATE hrr::warnings ${CMAKE_DL_LIBS})
   find_package(Threads REQUIRED)
   target_link_libraries(hrr-integration-tests PRIVATE Threads::Threads ${CMAKE_DL_LIBS})
   target_compile_definitions(hrr-integration-tests PRIVATE

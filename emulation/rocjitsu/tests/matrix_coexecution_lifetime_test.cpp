@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "async_mma_test_util.h"
+#include "rocjitsu/isa/arch/amdgpu/async_mma_policy.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
 #include "rocjitsu/vm/amdgpu/matrix_coexecution.h"
@@ -26,14 +27,14 @@ using AdmissionCache = amdgpu::MmaAdmissionCache;
 AdmissionCache::Words write_window(amdgpu::GpuMemory &memory, amdgpu::InstructionCache &icache,
                                    uint64_t pc, bool dependent, uint16_t branch_immediate) {
   const auto a =
-      cdna5::build_vop3p(cdna5::kVWmmaF3216x16x64Fp8Fp8Vop3p,
+      cdna5::build_vop3p(cdna5::kVWmmaF3232x16x128F4Vop3p,
                          {.vdst = 64, .src0 = 256, .src1 = 288, .src2 = 320, .opsel_hi = 3});
-  const auto b = cdna5::build_vop3p(cdna5::kVWmmaF3216x16x64Fp8Fp8Vop3p,
-                                    {.vdst = 96,
-                                     .src0 = uint16_t(dependent ? 320 : 256),
-                                     .src1 = 288,
-                                     .src2 = 352,
-                                     .opsel_hi = 3});
+  const auto b =
+      cdna5::build_vop3p(cdna5::kVWmmaF3232x16x128F4Vop3p, {.vdst = 96,
+                                                            .src0 = uint16_t(dependent ? 320 : 256),
+                                                            .src1 = 288,
+                                                            .src2 = 352,
+                                                            .opsel_hi = 3});
   for (unsigned i = 0; i != 2; ++i) {
     memory.write32(pc + 4 * i, a[i]);
     memory.write32(pc + 8 + 4 * i, b[i]);
@@ -46,6 +47,8 @@ AdmissionCache::Words write_window(amdgpu::GpuMemory &memory, amdgpu::Instructio
 }
 
 TEST(MmaAdmissionCacheTest, BoundsRetainedPlansAndRebuildsAfterEviction) {
+  if (!rocjitsu::amdgpu::async_mma_policy::candidate("v_wmma_f32_32x16x128_f4"))
+    GTEST_SKIP() << "Migrated matrix handlers require issuer-owned error reporting.";
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   decoder->enable_pool();
   AdmissionCache cache(2, 3);
@@ -81,6 +84,8 @@ TEST(MmaAdmissionCacheTest, BoundsRetainedPlansAndRebuildsAfterEviction) {
 }
 
 TEST(MmaAdmissionCacheTest, ReplacesChangedCodeWithoutGrowingTheCache) {
+  if (!rocjitsu::amdgpu::async_mma_policy::candidate("v_wmma_f32_32x16x128_f4"))
+    GTEST_SKIP() << "Migrated matrix handlers require issuer-owned error reporting.";
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   decoder->enable_pool();
   AdmissionCache cache(2, 1);
@@ -105,6 +110,8 @@ TEST(MmaAdmissionCacheTest, ReplacesChangedCodeWithoutGrowingTheCache) {
 }
 
 TEST(MmaAdmissionCacheTest, RevalidatesAcceptedAndRejectedPlansBeyondTheInitialFetch) {
+  if (!rocjitsu::amdgpu::async_mma_policy::candidate("v_wmma_f32_32x16x128_f4"))
+    GTEST_SKIP() << "Migrated matrix handlers require issuer-owned error reporting.";
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   decoder->enable_pool();
   AdmissionCache cache;
@@ -112,7 +119,7 @@ TEST(MmaAdmissionCacheTest, RevalidatesAcceptedAndRejectedPlansBeyondTheInitialF
   amdgpu::InstructionCache icache;
   constexpr uint64_t pc = 0x4d0000;
   const auto a =
-      cdna5::build_vop3p(cdna5::kVWmmaF3216x16x64Fp8Fp8Vop3p,
+      cdna5::build_vop3p(cdna5::kVWmmaF3232x16x128F4Vop3p,
                          {.vdst = 64, .src0 = 256, .src1 = 288, .src2 = 320, .opsel_hi = 3});
   for (unsigned i = 0; i != a.size(); ++i)
     memory.write32(pc + 4 * i, a[i]);
@@ -124,7 +131,7 @@ TEST(MmaAdmissionCacheTest, RevalidatesAcceptedAndRejectedPlansBeyondTheInitialF
 
   for (unsigned version = 0; version != 12; ++version) {
     const bool dependent = version % 2;
-    const auto b = cdna5::build_vop3p(cdna5::kVWmmaF3216x16x64Fp8Fp8Vop3p,
+    const auto b = cdna5::build_vop3p(cdna5::kVWmmaF3232x16x128F4Vop3p,
                                       {.vdst = 96,
                                        .src0 = uint16_t(dependent ? 320 : 256),
                                        .src1 = 288,
@@ -190,6 +197,8 @@ private:
 };
 
 TEST(MmaAdmissionCacheTest, ReleasesTemporaryDecodesBeforeReturningAndSurvivesThreadMigration) {
+  if (!rocjitsu::amdgpu::async_mma_policy::candidate("v_wmma_f32_32x16x128_f4"))
+    GTEST_SKIP() << "Migrated matrix handlers require issuer-owned error reporting.";
   for (bool pooled : {false, true}) {
     AdmissionCache cache;
     amdgpu::GpuMemory memory("decode_lifetimes");

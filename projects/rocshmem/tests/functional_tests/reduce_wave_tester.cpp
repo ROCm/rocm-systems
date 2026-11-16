@@ -92,6 +92,9 @@ __global__ void ReduceWaveTest(int loop, int skip, long long int *start_time,
     __syncthreads();
   }
 
+  uint8_t *tdm_lds = reinterpret_cast<uint8_t*>(&ctx_array[num_waves_per_wg]);
+  rocshmem_set_lds_stage(tdm_lds, rocshmem_query_lds_stage_bytes());
+
   int num_elems = size / sizeof(T1);
 
   // Each wave uses its own buffer slice
@@ -179,7 +182,8 @@ void ReduceWaveTester<T1, T2>::preLaunchKernel() {
 template <typename T1, ROCSHMEM_OP T2>
 void ReduceWaveTester<T1, T2>::launchKernel(dim3 gridSize, dim3 blockSize,
                                             int loop, size_t size) {
-  size_t shared_bytes = num_warps * sizeof(rocshmem_ctx_t);
+  size_t shared_bytes = num_warps * sizeof(rocshmem_ctx_t) +
+                        rocshmem_query_lds_stage_bytes();
 
   hipLaunchKernelGGL(HIP_KERNEL_NAME(ReduceWaveTest<T1, T2>), gridSize,
                      blockSize, shared_bytes, stream, loop, args.skip,

@@ -1,0 +1,15 @@
+# pylint configuration for RCCL-owned Python.
+
+[MAIN]
+
+# Fail only on the rules we have explicitly opted into.
+disable=all
+
+enable=
+    unused-import,
+
+[REPORTS]
+
+# One line per finding, no trailing score table or summary sections.
+score=no
+reports=no

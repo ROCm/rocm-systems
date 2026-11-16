@@ -13,7 +13,7 @@ rj_status_t rj_code_translate(const rj_code_object_t *source, const rj_code_dbt_
   if (!source || !source->co || !options)
     return ROCJITSU_STATUS_ERROR;
 
-  try {
+  return [&]() noexcept -> rj_status_t {
     // This C entry point carries no silicon revision (see rj_code_dbt_options_t).
     // A same-architecture gfx1250 translation is direction-ambiguous without one, so
     // BinaryTranslator fails it closed internally. Revision-aware B0->A0 translation
@@ -39,7 +39,5 @@ rj_status_t rj_code_translate(const rj_code_object_t *source, const rj_code_dbt_
     obj->owned_co = std::move(owned);
     *translated = obj;
     return ROCJITSU_STATUS_SUCCESS;
-  } catch (...) {
-    return ROCJITSU_STATUS_ERROR;
-  }
+  }();
 }
