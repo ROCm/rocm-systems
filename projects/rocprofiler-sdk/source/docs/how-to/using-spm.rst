@@ -4,23 +4,21 @@
 
 .. _using-spm:
 
-==================
-Using SPM
-*****************************
-Using SPM
-*****************************
+=========================================
+Using Streaming Performance Monitor (SPM)
+=========================================
 
-SPM (Streaming Performance Monitor) sampling service for GPU profiling is a profiling technique to periodically sample performance counters with GPU timestamp.
+Streaming Performance Monitor (SPM) sampling service for GPU profiling is a profiling technique to periodically sample performance counters with GPU timestamp.
 
 Here are the benefits of using SPM to sample counters:
 
-- Identify performance bottlenecks 
+- Identify performance bottlenecks
 - Understand kernel execution behavior
-- fine-grained, time-resolved performance data.
+- Get fine-grained, time-resolved performance data
 
-To try out the SPM, you can use the command-line tool ``rocprofv3`` or the ROCprofiler-SDK library.
+To get started with SPM, use the command-line tool ``rocprofv3`` or the ROCprofiler-SDK library.
 
-SPM is one of three hardware counter collection mechanisms in ROCprofiler-SDK, alongside dispatch PMC and device counter collection. For a comparison of granularity, timing, and use cases, see :ref:`How SPM differs from other counter services <glance-spm-comparison>` in the SDK overview.
+SPM is one of the three hardware counter collection mechanisms in ROCprofiler-SDK, alongside :ref:`dispatch PMC <rocprofiler_sdk_counter_collection_services>` and :ref:`device counter collection <rocprofiler_sdk_counter_collection_services>`. For a comparison of granularity, timing, and use cases, see :ref:`How SPM differs from other counter services <glance-spm-comparison>` in the SDK overview.
 
 SPM availability and configuration
 ===========================================
@@ -43,7 +41,7 @@ The output lists if ``rocprofv3`` supports SPM
 
       Counter_Name        :   TCC_MISS
       Description         :   Number of cache misses. UC reads count as misses.
-      Block               :   TCC 
+      Block               :   TCC
       SPM                 :   Supported
       Dimensions          :   DIMENSION_INSTANCE[0:15] DIMENSION_XCC[0:7]
 

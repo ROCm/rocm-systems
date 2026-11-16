@@ -262,7 +262,7 @@ rocprofv3 — command-line profiling interface
 
 Internally, ``rocprofv3`` sets ``ROCP_TOOL_LIBRARIES`` to load ``librocprofiler-sdk-tool.so``, a tool library built on ROCprofiler-SDK. Note that ``rocprofiler-compute`` uses ROCprofiler-SDK directly through its own tool library (``librocprofiler-compute-tool.so``) and doesn't route through ``rocprofv3``. Similarly, ``rocprofiler-systems`` uses ROCprofiler-SDK directly.
 
-A companion tool, ``rocprofv3-avail``, lists all available hardware performance counters, derived metrics, and supported architectures for the installed GPUs.
+A companion tool, ``rocprofv3-avail``, lists all available hardware performance counters, derived metrics, and supported architectures for the installed GPUs. Run ``rocprofv3 --doctor`` to check whether your machine and ROCm installation are ready for profiling; it reports what would prevent ``rocprofv3`` from working and how to fix it. See :ref:`using-rocprofv3-doctor` for details.
 
 How it works
 -------------
@@ -290,7 +290,7 @@ Use these options to collect API and activity traces from the GPU runtime: ``--s
 Counter collection
 ^^^^^^^^^^^^^^^^^^^
 
-Use ``--pmc`` to collect hardware performance counters. Specify multiple ``--pmc`` flags to collect more counters across multiple passes.
+Use ``--pmc`` to collect hardware performance counters. Specify multiple ``--pmc`` flags to collect more counters across multiple passes. The beta ``--replay-mode kernel`` option collects every ``--pmc`` group in a single application run instead, by replaying each dispatch once per group. See :ref:`using-kernel-replay-rocprofv3` for details and limitations.
 
 For the full option description and usage, see `Counter collection <https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/quick-reference/rocprofv3-cli-options.html#counter-collection>`_ in the CLI options reference.
 
