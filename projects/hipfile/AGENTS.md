@@ -156,11 +156,13 @@ Notes:
     without it unless configured with
     `-DHIPFILE_ALLOW_SKIP_FASTPATH_TESTS=ON`.
   - `stress`: short concurrency tests run under `gdb`: `state_mt`,
-    `batch_mt`, and `hipfileread-cpu-visibility`, which runs once with only
-    fastpath and once with only fallback in `HIPFILE_CAPABLE_DIR`. The
+    `batch_mt`, `hipfileread-cpu-visibility`, which runs once with only
+    fastpath and once with only fallback in `HIPFILE_CAPABLE_DIR`, and
+    `hipfileread-gpu-visibility`, which does the same with a kernel launched
+    after `hipFileRead` and again with one running during it. The
     `hipfileread-cpu-visibility` tests are skipped on GPUs whose VRAM the CPU
-    can't map, and `-DHIPFILE_ALLOW_SKIP_FASTPATH_TESTS=ON` also skips its
-    fastpath run where fastpath is unavailable. The stress tests can pass for
+    can't map, and `-DHIPFILE_ALLOW_SKIP_FASTPATH_TESTS=ON` also skips the
+    fastpath runs where fastpath is unavailable. The stress tests can pass for
     a while after a bug lands, so a failure may not come from the change
     you're looking at.
 

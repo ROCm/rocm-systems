@@ -158,3 +158,39 @@ hipfile_add_test_executable(
     SRCS "hipfileread-gpu-visibility.cpp" "hipfileread-gpu-visibility-kernel.hip"
     SYSINCLS ${HIPFILE_AMD_SOURCE_PATH} ${HIPFILE_INCLUDE_PATH} ${HIPFILE_TEST_COMMON_PATH} ${HIPFILE_THIRD_PARTY_PATH}
 )
+
+# One test per backend for each time the checking kernel can run: launched
+# after hipFileRead returns, or running during hipFileRead. --prime fills the
+# GPU's caches with the previous pattern first. The top of
+# hipfileread-gpu-visibility.cpp describes a soak test.
+set(_hipfileread_gpu_visibility_args --directory ${HIPFILE_CAPABLE_DIR} --iterations 100 --prime)
+foreach(_kernel IN ITEMS after during)
+    # gdb follows hipfile-fastpath-gate's exec, so a crash in
+    # hipfileread-gpu-visibility still gets a backtrace
+    add_test(
+        NAME hipfileread_gpu_visibility_${_kernel}_fastpath_test
+        COMMAND gdb --batch --quiet -ex run -ex "thread apply all bt full" --return-child-result
+                --args $<TARGET_FILE:hipfile-fastpath-gate> ${_hipfile_fastpath_gate_args} ${HIPFILE_CAPABLE_DIR}
+                -- $<TARGET_FILE:hipfileread-gpu-visibility> ${_hipfileread_gpu_visibility_args} --kernel ${_kernel}
+    )
+    add_test(
+        NAME hipfileread_gpu_visibility_${_kernel}_fallback_test
+        COMMAND gdb --batch --quiet -ex run -ex "thread apply all bt full" --return-child-result
+                --args $<TARGET_FILE:hipfileread-gpu-visibility> ${_hipfileread_gpu_visibility_args} --kernel ${_kernel}
+    )
+    set_tests_properties(
+        hipfileread_gpu_visibility_${_kernel}_fastpath_test hipfileread_gpu_visibility_${_kernel}_fallback_test
+        PROPERTIES LABELS "stress;internal"
+    )
+    # Report the fastpath run as skipped rather than failed when, only with
+    # --allow-skip-fastpath, hipfile-fastpath-gate reports that fastpath is
+    # unavailable. Keep the marker synchronized with the message in
+    # hipfile-fastpath-gate.cpp.
+    set_tests_properties(hipfileread_gpu_visibility_${_kernel}_fastpath_test PROPERTIES
+        ENVIRONMENT "HIPFILE_ALLOW_COMPAT_MODE=false"
+        SKIP_REGULAR_EXPRESSION "Fast path is not available"
+    )
+    set_tests_properties(hipfileread_gpu_visibility_${_kernel}_fallback_test PROPERTIES
+        ENVIRONMENT "HIPFILE_FORCE_COMPAT_MODE=true"
+    )
+endforeach()
