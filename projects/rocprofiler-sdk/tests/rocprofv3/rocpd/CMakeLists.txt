@@ -427,6 +427,10 @@ rocprofiler_add_integration_validate_test(
          ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/summary/out_marker_summary_by_rank.csv
     TIMEOUT 60
     LABELS "integration-tests;rocpd"
+    PYTHON_PATH
+        "${rocprofiler-sdk_LIB_DIR}/python${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}/site-packages"
+        LIBRARY_PATH
+        "${rocprofiler-sdk_LIB_DIR}"
     FIXTURES_REQUIRED rocprofv3-test-rocpd-generation)
 
 # Validate --summary-by-rank files output for multiple processes
