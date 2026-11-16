@@ -9,8 +9,8 @@ l1i.bw_util:
   formula: 100000 * SUM(SQC_ICACHE_REQ) / SUM($max_sclk * $sqc_per_gpu * (End_Timestamp - Start_Timestamp))
   unit: Percent
   description: >-
-    The number of bytes looked up in the L1I cache, as a percent of the peak theoretical
-    bandwidth. Calculated as the ratio of L1I requests over the total L1I cycles.
+    Percentage of the peak theoretical L1I cache bandwidth used by L1I cache lookups.
+    Calculated as the ratio of L1I requests over the total L1I cycles.
 l1i.fetch_lat:
   name: L1I Fetch Latency
   formula: SUM(SQ_IFETCH_LEVEL_ACCUM) / SUM(SQ_IFETCH)
@@ -60,7 +60,7 @@ l1i.l2_bw_util:
   formula: 100000 * SUM(SQC_TC_INST_REQ) / (2 * SUM($max_sclk * $sqc_per_gpu * (End_Timestamp - Start_Timestamp)))
   unit: Percent
   description: >-
-    The percent of the peak theoretical L1I -> L2 cache request bandwidth achieved.
+    Percentage of the peak theoretical L1I -> L2 cache request bandwidth achieved.
     Calculated as the ratio of the total number of requests from the L1I to the L2 cache
     over the total L1I-L2 interface cycles.
 l1i.misses_duplicated:

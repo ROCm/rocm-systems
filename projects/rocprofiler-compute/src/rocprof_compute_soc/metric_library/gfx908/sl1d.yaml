@@ -17,9 +17,8 @@ sl1d.bw_util:
   formula: 100000 * SUM(SQC_DCACHE_REQ) / SUM($max_sclk * $sqc_per_gpu * (End_Timestamp - Start_Timestamp))
   unit: Percent
   description: >-
-    The number of bytes looked up in the sL1D cache, as a percent of the peak
-    theoretical bandwidth. Calculated as the ratio of sL1D requests over the total sL1D
-    cycles.
+    Percentage of the peak theoretical sL1D cache bandwidth used by sL1D cache lookups.
+    Calculated as the ratio of sL1D requests over the total sL1D cycles.
 sl1d.hit_rate_excl_dup:
   name: sL1D Hit Rate (Excluding Duplicate Misses)
   formula: 100 * SUM(SQC_DCACHE_HITS) / SUM(SQC_DCACHE_HITS + SQC_DCACHE_MISSES)
@@ -73,9 +72,9 @@ sl1d.l2_bw_util:
   formula: 100000 * SUM(SQC_TC_DATA_READ_REQ + SQC_TC_DATA_WRITE_REQ + SQC_TC_DATA_ATOMIC_REQ) / (2 * SUM($max_sclk * $sqc_per_gpu * (End_Timestamp - Start_Timestamp)))
   unit: Percent
   description: >-
-    The percentage of the peak theoretical sL1D - L2 interface bandwidth acheived.
-    Calculated as total number of bytes read from, written to, or atomically updated
-    across the sL1D - L2 interface.
+    Percentage of the peak theoretical sL1D<->L2 interface bandwidth achieved.
+    Calculated from the total number of read, write, and atomic requests across the
+    sL1D<->L2 interface.
 sl1d.l2_rd_bw:
   name: sL1D-L2 Read Bandwidth
   formula: 64 * SUM(SQC_TC_DATA_READ_REQ) / SUM(End_Timestamp - Start_Timestamp)
