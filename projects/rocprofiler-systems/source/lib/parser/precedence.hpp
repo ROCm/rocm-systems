@@ -4,7 +4,7 @@
 #pragma once
 
 #include "parser/config_store.hpp"
-#include "parser/schema.hpp"
+#include "parser/value_text.hpp"
 
 #include <functional>
 #include <map>
