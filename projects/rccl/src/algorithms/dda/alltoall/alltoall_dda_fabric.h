@@ -26,8 +26,9 @@ __launch_bounds__(512)
 #endif
   __global__ void ddaAllToAllFabric(T* const* __restrict__ ipcbuffs, T* __restrict__ recvbuff, size_t count,
                                     int selfRank, int nRanks, FabricGpuBarrier barrier) {
+  int ddaAbort = 0;
   // Release-acquire barrier ensures the stream-ordered scratch write is visible to peers.
-  barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, true /* hasSubsequentMemAccess */>();
+  barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, true /* hasSubsequentMemAccess */>(ddaAbort);
 
   // use uint4 to do 16-byte loads to maximize memory efficiency. We assume
   // that count % countPerThread == 0, enforced before kernel launch.
@@ -54,7 +55,7 @@ __launch_bounds__(512)
   }
 
   // barrier to ensure remote ranks won't free their buffers until I'm done
-  barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, false /* hasSubsequentMemAccess */>();
+  barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, false /* hasSubsequentMemAccess */>(ddaAbort);
 }
 
 // Push alltoall: each rank writes its send chunk for peer r into peer r's scratch at this rank's slot,
@@ -67,8 +68,9 @@ __launch_bounds__(512)
   __global__ void ddaAllToAllFabricPush(T* const* __restrict__ ipcbuffs, T* __restrict__ recvbuff, size_t count,
                                         const T* __restrict__ sendbuff, int selfRank, int nRanks,
                                         FabricGpuBarrier barrier) {
+  int ddaAbort = 0;
   // The previous collective's readers must be done with every scratch slot this block is about to overwrite.
-  barrier.syncOnSameBlockIdx<false /* hasPreviousMemAccess */, true /* hasSubsequentMemAccess */>();
+  barrier.syncOnSameBlockIdx<false /* hasPreviousMemAccess */, true /* hasSubsequentMemAccess */>(ddaAbort);
 
   const int nRanksEff = (NRANKS_CT > 0) ? NRANKS_CT : nRanks;
   constexpr int kUnroll = (NRANKS_CT > 0) ? NRANKS_CT : 8;
@@ -103,7 +105,7 @@ __launch_bounds__(512)
   }
 
   // Publish the remote writes before any rank reads its scratch.
-  barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, true /* hasSubsequentMemAccess */>();
+  barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, true /* hasSubsequentMemAccess */>(ddaAbort);
 
   T* selfScratch = ipcbuffs[selfRank];
   for (size_t idx = idxStart; idx < idxEnd; idx += idxStride) {
@@ -114,7 +116,7 @@ __launch_bounds__(512)
     }
   }
 
-  barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, false /* hasSubsequentMemAccess */>();
+  barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, false /* hasSubsequentMemAccess */>(ddaAbort);
 }
 
 // Peer-major copy loops keep this many 16 B loads in flight per thread.
@@ -173,6 +175,7 @@ __launch_bounds__(512)
                                             const T* __restrict__ sendbuff, int selfRank, int nRanks,
                                             int blocksPerPeer, unsigned pieces, unsigned drain,
                                             FabricGpuBarrier barrier) {
+  int ddaAbort = 0;
   constexpr size_t countPerThread = sizeof(uint4) / sizeof(T);
   const size_t nLines = count / countPerThread;
   const size_t stride = static_cast<size_t>(blocksPerPeer) * blockDim.x;
@@ -204,7 +207,7 @@ __launch_bounds__(512)
         ddaA2APeerCopy<true, false>(recvbuff + fromSlot, ipcbuffs[selfRank] + fromSlot, lo, hi, stride);
       }
     }
-    barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, false /* hasSubsequentMemAccess */>();
+    barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, false /* hasSubsequentMemAccess */>(ddaAbort);
     barrier.epochEnd(epoch, pieces);
     return;
   }
@@ -240,7 +243,7 @@ __launch_bounds__(512)
     }
   }
 
-  barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, false /* hasSubsequentMemAccess */>();
+  barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, false /* hasSubsequentMemAccess */>(ddaAbort);
   barrier.epochEnd(epoch, pieces);
 }
 } // namespace dda::common

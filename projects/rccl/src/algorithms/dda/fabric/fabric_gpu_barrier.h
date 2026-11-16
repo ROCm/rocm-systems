@@ -47,8 +47,9 @@ public:
   static __host__ std::pair<std::unique_ptr<FabricGpuBarrierResources>, FabricGpuBarrier> mallocAndInit(
     int nRanks, int nBlocks, int selfRank, void* bootstrap, struct ncclMemManager* manager, DdaKernelParams params);
 
+  // `aborted` is the kernel's own sticky flag, not a member. See IpcGpuBarrier::syncOnSameBlockIdx.
   template <bool hasPreviousMemAccess, bool hasSubsequentMemAccess>
-  __device__ __forceinline__ void syncOnSameBlockIdx() {
+  __device__ __forceinline__ void syncOnSameBlockIdx(int& aborted) {
     enum class MemFenceType {
       RELEASE_ACQUIRE,
       RELEASE_ONLY,
@@ -73,7 +74,7 @@ public:
     // same increasing order, so the interleaved signal/wait cannot deadlock.
     FlagType* selfBuf = peerFlags_[selfRank_];
     bool gaveUp = false;
-    for (int peerRank = threadIdx.x; !aborted_ && peerRank < nRanks_; peerRank += blockDim.x) {
+    for (int peerRank = threadIdx.x; aborted == 0 && peerRank < nRanks_; peerRank += blockDim.x) {
       FlagType* peerBuf = peerFlags_[peerRank];
       bool signaled = false;
 
@@ -104,13 +105,13 @@ public:
     // suffices; larger cliques span waves and need the block-wide vote.
     const bool singleWave = nRanks_ <= warpSize;
     if (singleWave) {
-      aborted_ = __any(aborted_ || gaveUp);
+      if (__any(aborted != 0 || gaveUp)) aborted = 1;
     }
     if constexpr (hasSubsequentMemAccess) {
       if (singleWave) {
         __syncthreads();
-      } else {
-        aborted_ = __syncthreads_or(aborted_ || gaveUp);
+      } else if (__syncthreads_or(aborted != 0 || gaveUp)) {
+        aborted = 1;
       }
     }
   }
@@ -272,8 +273,6 @@ private:
   int nRanks_{-1};
   FlagType** peerFlags_{nullptr};
   DdaKernelParams params_{};
-  // Sticky for the rest of the kernel and uniform across the signaling lanes; see IpcGpuBarrier::aborted_.
-  bool aborted_{false};
   bool useEpoch_{true};
 
   __host__ FabricGpuBarrier(int nBlocks, int selfRank, int nRanks, FlagType** peerFlags, DdaKernelParams params)
