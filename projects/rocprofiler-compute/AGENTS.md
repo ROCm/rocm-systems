@@ -40,8 +40,9 @@ requires which script.
 
 Put tests for `tools/` scripts in `tools/test_*.py`. Register each module in
 `CMakeLists.txt` with its own `add_test` inside `if(NOT TEST_FROM_INSTALL)`,
-because the install tree has no `tools/`. Add its test name to
-`tests/test_categories.yaml`.
+because the install tree has no `tools/`. Add its test name to each category
+in `tests/test_categories.yaml` and to every `*_exclude` list there, so CI skips
+it.
 
 ## Git Workflows
 
