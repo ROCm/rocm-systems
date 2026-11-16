@@ -234,7 +234,6 @@ amd::GLFunctions::~GLFunctions() {
 #ifdef _WIN32
   if (hIntGLRC_) {
     if (!wglDeleteContext_(hIntGLRC_)) {
-      DWORD dwErr = GetLastError();
       LogWarning("Cannot delete GLRC");
     }
   }
@@ -410,7 +409,6 @@ bool amd::GLFunctions::setIntEnv() {
   // Set internal DC and GLRC
   if (tempDC_ != getDC() || tempGLRC_ != getIntGLRC()) {
     if (!wglMakeCurrent_(getDC(), getIntGLRC())) {
-      DWORD err = GetLastError();
       LogWarning("cannot set internal GL environment");
       return false;
     }
@@ -439,7 +437,6 @@ bool amd::GLFunctions::restoreEnv() {
 #ifdef _WIN32
   // Restore original DC and GLRC
   if (!wglMakeCurrent_(tempDC_, tempGLRC_)) {
-    DWORD err = GetLastError();
     LogWarning("cannot restore original GL environment");
     return false;
   }

@@ -1805,7 +1805,6 @@ bool KernelBlitManager::copyBufferRect(device::Memory& srcMemory, device::Memory
                                        bool entire, amd::CopyMetadata copyMetadata) const {
   std::scoped_lock k(lockXferOps_);
   bool result = false;
-  bool rejected = false;
 
   // Fall into the PAL path for rejected transfers
   if (setup_.disableCopyBufferRect_ || gpuMem(srcMemory).isHostMemDirectAccess() ||

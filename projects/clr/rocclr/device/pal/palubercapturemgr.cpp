@@ -65,7 +65,7 @@ static void PAL_STDCALL UberTraceStateChangeCallback(const GpuUtil::TraceSession
         {
             VirtualGPU* current_gpu = mgr->GetCurrentGPU();
             if (current_gpu != nullptr) {
-                bool flush_success = current_gpu->queue(MainEngine).flush();
+                [[maybe_unused]] bool flush_success = current_gpu->queue(MainEngine).flush();
                 assert(flush_success);
             }
             break;

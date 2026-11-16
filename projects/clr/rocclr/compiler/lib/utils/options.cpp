@@ -1333,7 +1333,7 @@ static std::string getValidDumpPath(const std::string& path) {
   if (path.size() > pathname_max) {
     // On Windows the max file path is 32,767 if you prefix "\\?\" with full path
     if (isFullPath(path)) {
-      const unsigned new_win_path = _MAX_ENV;
+      [[maybe_unused]] const unsigned new_win_path = _MAX_ENV;
       // prefix "\\?\"
       validPath = "\\\\?\\" + path;
       assert(path.size() < new_win_path);
