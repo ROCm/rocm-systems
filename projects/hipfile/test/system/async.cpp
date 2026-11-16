@@ -401,6 +401,55 @@ INSTANTIATE_TEST_SUITE_P(
         return std::get<0>(param_info.param).name + "_" + std::to_string(flags);
     });
 
+// HIPFILE_FORCE_BLOCKING_ASYNC (an AIS_TESTING-only hook) makes a stream take the blocking
+// host-function async path even on hardware that supports stream wait values, so the fallback path
+// is exercised here instead of only on devices that lack wait-value support. The variable is read in
+// the stream constructor, so it must be set before hipFileStreamRegister.
+class HipAsyncForcedBlocking : public HipAsync, public ::testing::WithParamInterface<AsyncIoFunction> {
+public:
+    void SetUp() override
+    {
+        HipAsync::SetUp();
+        io_op = GetParam().function;
+        name  = GetParam().name;
+        if (name == "hipFileReadAsync") {
+            HipFileDataOps::zeroMemoryRegion(dev_ptr, 0, buffer_size);
+            HipFileDataOps::randomizeFileRegion(tf.fd, file_size);
+        }
+        else {
+            HipFileDataOps::zeroFileRegion(tf.fd, file_size);
+            HipFileDataOps::randomizeMemoryRegion(dev_ptr, 0, buffer_size);
+        }
+        ASSERT_EQ(setenv("HIPFILE_FORCE_BLOCKING_ASYNC", "1", 1), 0);
+        ASSERT_EQ(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking), hipSuccess);
+        ASSERT_EQ(hipFileStreamRegister(stream, 0), HIPFILE_SUCCESS);
+    }
+    void TearDown() override
+    {
+        ASSERT_EQ(hipFileStreamDeregister(stream), HIPFILE_SUCCESS);
+        ASSERT_EQ(hipStreamDestroy(stream), hipSuccess);
+        ASSERT_EQ(unsetenv("HIPFILE_FORCE_BLOCKING_ASYNC"), 0);
+        HipAsync::TearDown();
+    }
+    hipFileError_t (*io_op)(hipFileHandle_t, void *, size_t *, hoff_t *, hoff_t *, ssize_t *, hipStream_t);
+    std::string name;
+    hipStream_t stream;
+};
+
+TEST_P(HipAsyncForcedBlocking, transfersCorrectlyOnBlockingPath)
+{
+    ASSERT_EQ(io_op(fh, dev_ptr, &io_size, &file_offset, &buffer_offset, &bytes_transferred, stream),
+              HIPFILE_SUCCESS);
+    ASSERT_EQ(hipStreamSynchronize(stream), hipSuccess);
+    ASSERT_EQ(bytes_transferred, io_size);
+    HipFileDataOps::assertFileAndMemoryRegionsMatch(dev_ptr, buffer_offset, tf.fd, file_offset, io_size);
+}
+
+INSTANTIATE_TEST_SUITE_P(HipAsyncBlocking, HipAsyncForcedBlocking, ::testing::ValuesIn(asyncIOFns),
+                         [](const testing::TestParamInfo<HipAsyncForcedBlocking::ParamType> &param_info) {
+                             return param_info.param.name;
+                         });
+
 #ifdef __HIP_PLATFORM_AMD__
 
 enum class AsyncIoTestBackend {

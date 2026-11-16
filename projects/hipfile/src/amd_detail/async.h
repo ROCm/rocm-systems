@@ -40,6 +40,10 @@ public:
     ssize_t *const                       bytes_transferred;
     std::shared_ptr<Backend>             backend;
 
+    // The stream's signal slot, cached in the constructor (before the op is shared) so the pool thread
+    // bumps it without touching Stream::signal_slot. Null on default and non-wait-value streams.
+    uint64_t *signal_slot{nullptr};
+
     // Set before the dispatch host function is queued and never changed: true when the stream can't be gated
     // on a wait value, so the host function blocks until the IO finishes.
     bool block{false};
