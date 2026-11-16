@@ -154,19 +154,21 @@ static inline __device__ void copyFromSrcToDest(const T* __restrict__ srcbuff, T
 //   - NRANKS_CT == 0 : runtime fallback; nRanks comes from nRanksRuntime and the
 //                      peer loop is partially unrolled 8-wide, covering any clique up to
 //                      kDdaMaxNranks.
-template <typename T, int NRANKS_CT, bool hasAcc>
-static inline __device__ void reduceScatter(T* const* __restrict__ ipcbuffs, T* __restrict__ destbuff,
-                                            const T* __restrict__ acc, int selfRank, int nRanksRuntime,
-                                            const size_t idxStart, const size_t idxEnd, const size_t idxStride,
-                                            int pattern) {
+// Tree allreduce was bound by a 64-bit index multiply in this loop. DDA shard spans fit in
+// 32 bits; keep size_t only when a span does not.
+template <typename T, int NRANKS_CT, bool hasAcc, typename Idx>
+static inline __device__ void reduceScatterIndexed(T* const* __restrict__ ipcbuffs, T* __restrict__ destbuff,
+                                                   const T* __restrict__ acc, int selfRank, int nRanksRuntime,
+                                                   Idx idxStart, Idx idxEnd, Idx idxStride, int pattern) {
   static_assert(is_supported_type_v<T>, "dda: unsupported element type");
   const int nRanks = (NRANKS_CT > 0) ? NRANKS_CT : nRanksRuntime;
   constexpr int kUnroll = (NRANKS_CT > 0) ? NRANKS_CT : 8;
-  for (size_t idx = idxStart; idx < idxEnd; idx += idxStride) {
+  const Idx rankOff = static_cast<Idx>(selfRank) * idxEnd;
+  for (Idx idx = idxStart; idx < idxEnd; idx += idxStride) {
     // pattern = 2 performs reduce (one-shot)
     // pattern = 1 performs reduce-scatter (two-shot)
-    size_t srcIdx = (pattern == 2) ? idx : (idx + static_cast<size_t>(selfRank) * idxEnd);
-    size_t destIdx = (pattern == 1) ? (idx + static_cast<size_t>(selfRank) * idxEnd) : idx;
+    Idx srcIdx = (pattern == 2) ? idx : static_cast<Idx>(idx + rankOff);
+    Idx destIdx = (pattern == 1) ? static_cast<Idx>(idx + rankOff) : idx;
 
     uint4 sum{0, 0, 0, 0};
     if constexpr (hasAcc) {
@@ -186,21 +188,38 @@ static inline __device__ void reduceScatter(T* const* __restrict__ ipcbuffs, T* 
   }
 }
 
+template <typename T, int NRANKS_CT, bool hasAcc>
+static inline __device__ void reduceScatter(T* const* __restrict__ ipcbuffs, T* __restrict__ destbuff,
+                                            const T* __restrict__ acc, int selfRank, int nRanksRuntime,
+                                            const size_t idxStart, const size_t idxEnd, const size_t idxStride,
+                                            int pattern) {
+  const int nRanks = (NRANKS_CT > 0) ? NRANKS_CT : nRanksRuntime;
+  const unsigned long long span = idxEnd * static_cast<unsigned long long>(nRanks > 0 ? nRanks : 1);
+  if (idxStart <= 0xffffffffull && idxEnd <= 0xffffffffull && idxStride <= 0xffffffffull && span <= 0xffffffffull) {
+    reduceScatterIndexed<T, NRANKS_CT, hasAcc, unsigned>(ipcbuffs, destbuff, acc, selfRank, nRanksRuntime,
+                                                         static_cast<unsigned>(idxStart), static_cast<unsigned>(idxEnd),
+                                                         static_cast<unsigned>(idxStride), pattern);
+  } else {
+    reduceScatterIndexed<T, NRANKS_CT, hasAcc, size_t>(ipcbuffs, destbuff, acc, selfRank, nRanksRuntime, idxStart,
+                                                       idxEnd, idxStride, pattern);
+  }
+}
+
 // Unified all-gather helper for both the IPC and fabric paths. See reduceScatter
 // above for the NRANKS_CT / nRanksRuntime / unroll semantics.
-template <typename T, int NRANKS_CT>
-static inline __device__ void allGather(T* const* __restrict__ ipcbuffs, T* __restrict__ destbuff, int selfRank,
-                                        int nRanksRuntime, const size_t idxStart, const size_t idxEnd,
-                                        const size_t idxStride, bool enable_offset) {
+template <typename T, int NRANKS_CT, typename Idx>
+static inline __device__ void allGatherIndexed(T* const* __restrict__ ipcbuffs, T* __restrict__ destbuff, int selfRank,
+                                               int nRanksRuntime, Idx idxStart, Idx idxEnd, Idx idxStride,
+                                               bool enable_offset) {
   static_assert(is_supported_type_v<T>, "dda: unsupported element type");
   const int nRanks = (NRANKS_CT > 0) ? NRANKS_CT : nRanksRuntime;
   constexpr int kUnroll = (NRANKS_CT > 0) ? NRANKS_CT : 8;
-  for (size_t idx = idxStart; idx < idxEnd; idx += idxStride) {
+  for (Idx idx = idxStart; idx < idxEnd; idx += idxStride) {
 #pragma unroll kUnroll
     for (int r = 0; r < nRanks; ++r) {
       int srcRank = (selfRank + r) % nRanks;
-      size_t destIdx = idx + static_cast<size_t>(srcRank) * idxEnd;
-      size_t srcIdx;
+      Idx destIdx = idx + static_cast<Idx>(srcRank) * idxEnd;
+      Idx srcIdx;
       if (enable_offset) {
         srcIdx = destIdx;
       } else {
@@ -208,6 +227,22 @@ static inline __device__ void allGather(T* const* __restrict__ ipcbuffs, T* __re
       }
       *reinterpret_cast<uint4*>(&destbuff[destIdx]) = reinterpret_cast<const uint4*>(&ipcbuffs[srcRank][srcIdx])[0];
     }
+  }
+}
+
+template <typename T, int NRANKS_CT>
+static inline __device__ void allGather(T* const* __restrict__ ipcbuffs, T* __restrict__ destbuff, int selfRank,
+                                        int nRanksRuntime, const size_t idxStart, const size_t idxEnd,
+                                        const size_t idxStride, bool enable_offset) {
+  const int nRanks = (NRANKS_CT > 0) ? NRANKS_CT : nRanksRuntime;
+  const unsigned long long span = idxEnd * static_cast<unsigned long long>(nRanks > 0 ? nRanks : 1);
+  if (idxStart <= 0xffffffffull && idxEnd <= 0xffffffffull && idxStride <= 0xffffffffull && span <= 0xffffffffull) {
+    allGatherIndexed<T, NRANKS_CT, unsigned>(ipcbuffs, destbuff, selfRank, nRanksRuntime, static_cast<unsigned>(idxStart),
+                                             static_cast<unsigned>(idxEnd), static_cast<unsigned>(idxStride),
+                                             enable_offset);
+  } else {
+    allGatherIndexed<T, NRANKS_CT, size_t>(ipcbuffs, destbuff, selfRank, nRanksRuntime, idxStart, idxEnd, idxStride,
+                                           enable_offset);
   }
 }
 
