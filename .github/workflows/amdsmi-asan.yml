@@ -129,7 +129,7 @@ jobs:
       - ${{ vars.RUNNER_TYPE }}
     timeout-minutes: 45
     container:
-      image: ubuntu:24.04@sha256:008173c23f95b170204355c12626cb5a965d779a7e1283b09e9cffbb1bf33ca3 # noble, 2026-09-11
+      image: ${{ vars.ASAN_DOCKER_IMAGE || 'ubuntu:24.04@sha256:008173c23f95b170204355c12626cb5a965d779a7e1283b09e9cffbb1bf33ca3' }} # noble, 2026-09-11
       options: --rm --privileged --device=/dev/kfd --device=/dev/dri --group-add video --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -u root
     env:
       # Skip the tests that change GPU settings: an ASAN abort mid-test would

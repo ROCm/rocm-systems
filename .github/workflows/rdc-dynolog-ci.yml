@@ -72,7 +72,7 @@ jobs:
       - ${{ vars.RUNNER_TYPE }}
     timeout-minutes: 60
     container:
-      image: ${{ vars.RDC_DOCKER_IMAGE || 'rocm/dev-ubuntu-22.04:7.2' }}
+      image: ${{ vars.RDC_DOCKER_IMAGE || 'rocm/dev-ubuntu-22.04:7.2@sha256:05af5f04a06b04676d4c7438997d0deadaeb7478961ad621376e199bf3aeb644' }}
       options: >-
         --rm --privileged
         --device=/dev/kfd
