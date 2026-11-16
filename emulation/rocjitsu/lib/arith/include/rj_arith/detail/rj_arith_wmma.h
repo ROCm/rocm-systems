@@ -13,6 +13,14 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
+// gfx1250 sparse IU8 WMMA: A/B/D use 8/16/8 VGPRs; index uses two Wave32 VGPRs.
+// SIGNED_A/B select signedness; CLAMP saturates once after dot+D.
+// All semantics are exact; FP flags and EXEC are ignored. D is the tied accumulator;
+// D may overlap A, B or index. Errors leave all operands unchanged.
+int rj_arith_v_swmmac_i32_16x16x128_iu8_w32(uint64_t flags, uint64_t controls, uint32_t *const *d,
+                                            const uint32_t *const *a, const uint32_t *const *b,
+                                            const uint32_t *const *index);
+
 // gfx1250 byte WMMA: A/B/C/D each use eight Wave32 VGPRs. SIGNED_A/B select
 // signed factors; CLAMP saturates once after dot+C, otherwise addition wraps.
 // All semantics share exact integer arithmetic; guest FP flags are ignored.
@@ -526,6 +534,116 @@ int rj_arith_v_wmma_f32_16x16x128_bf8_bf8_w32(uint64_t flags, uint64_t instructi
 int rj_arith_v_wmma_f16_16x16x128_bf8_bf8_w32(uint64_t flags, uint64_t instruction_flags,
                                               uint32_t *const *d, const uint32_t *const *a,
                                               const uint32_t *const *b, const uint32_t *const *c);
+
+// gfx1250 mixed WMMA controls: formats use bits 0..2 / 3..5 (RJ_ARITH_MATRIX_FORMAT_*).
+constexpr uint64_t RJ_ARITH_WMMA_MIXED_NEG_C = 1ULL << 6;
+constexpr uint64_t RJ_ARITH_WMMA_MIXED_ABS_C = 1ULL << 7;
+
+// Compute D=A*B+C across Wave32, ignoring EXEC. Each pointer addresses 32 words.
+// 16-row A/B consume 16/12/8 VGPRs for 8/6/4-bit formats; C/D consume 8.
+// The 32-row FP4 form consumes A=16, B=8, C/D=16 VGPRs and accepts only C modifiers.
+// ABS_C precedes NEG_C. All inputs precede stores; aliases are supported.
+// Loose/allow-Loose/Compatibility retain scalar unfused and SIMD fused arithmetic;
+// strict empirical modes are unsupported. FP modes are ignored; errors leave D unchanged.
+int rj_arith_v_wmma_f32_16x16x128_f8f6f4_w32(uint64_t flags, uint64_t controls, uint32_t *const *d,
+                                             const uint32_t *const *a, const uint32_t *const *b,
+                                             const uint32_t *const *c);
+int rj_arith_v_wmma_f32_32x16x128_f4_w32(uint64_t flags, uint64_t controls, uint32_t *const *d,
+                                         const uint32_t *const *a, const uint32_t *const *b,
+                                         const uint32_t *const *c);
+
+// Scale formats are enums: E8M0=0, unsigned E5M3=1, OCP E4M3=2; 3 is reserved.
+constexpr uint64_t RJ_ARITH_WMMA_SCALE_FORMAT_A_SHIFT = 8ULL;
+constexpr uint64_t RJ_ARITH_WMMA_SCALE_FORMAT_B_SHIFT = 10ULL;
+constexpr uint64_t RJ_ARITH_WMMA_SCALE_ROW_A = 1ULL << 12;
+constexpr uint64_t RJ_ARITH_WMMA_SCALE_ROW_B = 1ULL << 13;
+
+// Scaled gfx1250 WMMA shares the preceding formats, C modifiers, policies and sizes.
+// A/B use contiguous K groups per lane (16 byte values or 32 subbyte values).
+// Scale operands contain one Wave32 VGPR (SCALE) or two (SCALE16), four bytes per word.
+// Byte b scales the contiguous 32- or 16-product block b. ROW_A/B select the upper
+// halfwave; 32-row FP4 A instead uses all32lanes, ignoring ROW_A. Each fused block
+// is multiplied by scale A then scale B before addition to C. Scale storage may alias D.
+int rj_arith_v_wmma_scale_f32_16x16x128_f8f6f4_w32(uint64_t flags, uint64_t controls,
+                                                   uint32_t *const *d, const uint32_t *const *a,
+                                                   const uint32_t *const *b,
+                                                   const uint32_t *const *c,
+                                                   const uint32_t *const *scale_a,
+                                                   const uint32_t *const *scale_b);
+int rj_arith_v_wmma_scale16_f32_16x16x128_f8f6f4_w32(uint64_t flags, uint64_t controls,
+                                                     uint32_t *const *d, const uint32_t *const *a,
+                                                     const uint32_t *const *b,
+                                                     const uint32_t *const *c,
+                                                     const uint32_t *const *scale_a,
+                                                     const uint32_t *const *scale_b);
+int rj_arith_v_wmma_scale_f32_32x16x128_f4_w32(uint64_t flags, uint64_t controls,
+                                               uint32_t *const *d, const uint32_t *const *a,
+                                               const uint32_t *const *b, const uint32_t *const *c,
+                                               const uint32_t *const *scale_a,
+                                               const uint32_t *const *scale_b);
+int rj_arith_v_wmma_scale16_f32_32x16x128_f4_w32(uint64_t flags, uint64_t controls,
+                                                 uint32_t *const *d, const uint32_t *const *a,
+                                                 const uint32_t *const *b, const uint32_t *const *c,
+                                                 const uint32_t *const *scale_a,
+                                                 const uint32_t *const *scale_b);
+// INDEX_KEY_1 follows LLVM's metadata >> 16 folding: shift each metadata word
+// logically by 16 before decoding positions. Other instruction controls are unchanged.
+// gfx1250 sparse D += A*B, Wave32, ignoring EXEC. A uses eight VGPRs, B sixteen;
+// index uses one VGPR for half inputs and two for FP8. Each VGPR has 32 lanes.
+// F32 D occupies eight VGPRs; packed D four. BF16F32 requires eight D pointers,
+// reads all eight as FP32 and writes only the first four as BF16. The only control
+// is RJ_ARITH_SWMMAC_INDEX_KEY_1, described above.
+// Compatibility preserves ordered FMA and NaN priority. Packed outputs round once
+// to nearest-even and honor FP16_OVFL, including infinite inputs. Other FP modes
+// are ignored; strict empirical semantics are unsupported. Aliases are supported.
+int rj_arith_v_swmmac_f32_16x16x64_f16_w32(uint64_t flags, uint64_t controls, uint32_t *const *d,
+                                           const uint32_t *const *a, const uint32_t *const *b,
+                                           const uint32_t *const *index);
+int rj_arith_v_swmmac_f32_16x16x64_bf16_w32(uint64_t flags, uint64_t controls, uint32_t *const *d,
+                                            const uint32_t *const *a, const uint32_t *const *b,
+                                            const uint32_t *const *index);
+int rj_arith_v_swmmac_f16_16x16x64_f16_w32(uint64_t flags, uint64_t controls, uint32_t *const *d,
+                                           const uint32_t *const *a, const uint32_t *const *b,
+                                           const uint32_t *const *index);
+int rj_arith_v_swmmac_bf16_16x16x64_bf16_w32(uint64_t flags, uint64_t controls, uint32_t *const *d,
+                                             const uint32_t *const *a, const uint32_t *const *b,
+                                             const uint32_t *const *index);
+int rj_arith_v_swmmac_bf16f32_16x16x64_bf16_w32(uint64_t flags, uint64_t controls,
+                                                uint32_t *const *d, const uint32_t *const *a,
+                                                const uint32_t *const *b,
+                                                const uint32_t *const *index);
+int rj_arith_v_swmmac_f32_16x16x128_fp8_fp8_w32(uint64_t flags, uint64_t controls,
+                                                uint32_t *const *d, const uint32_t *const *a,
+                                                const uint32_t *const *b,
+                                                const uint32_t *const *index);
+int rj_arith_v_swmmac_f16_16x16x128_fp8_fp8_w32(uint64_t flags, uint64_t controls,
+                                                uint32_t *const *d, const uint32_t *const *a,
+                                                const uint32_t *const *b,
+                                                const uint32_t *const *index);
+int rj_arith_v_swmmac_f32_16x16x128_fp8_bf8_w32(uint64_t flags, uint64_t controls,
+                                                uint32_t *const *d, const uint32_t *const *a,
+                                                const uint32_t *const *b,
+                                                const uint32_t *const *index);
+int rj_arith_v_swmmac_f16_16x16x128_fp8_bf8_w32(uint64_t flags, uint64_t controls,
+                                                uint32_t *const *d, const uint32_t *const *a,
+                                                const uint32_t *const *b,
+                                                const uint32_t *const *index);
+int rj_arith_v_swmmac_f32_16x16x128_bf8_fp8_w32(uint64_t flags, uint64_t controls,
+                                                uint32_t *const *d, const uint32_t *const *a,
+                                                const uint32_t *const *b,
+                                                const uint32_t *const *index);
+int rj_arith_v_swmmac_f16_16x16x128_bf8_fp8_w32(uint64_t flags, uint64_t controls,
+                                                uint32_t *const *d, const uint32_t *const *a,
+                                                const uint32_t *const *b,
+                                                const uint32_t *const *index);
+int rj_arith_v_swmmac_f32_16x16x128_bf8_bf8_w32(uint64_t flags, uint64_t controls,
+                                                uint32_t *const *d, const uint32_t *const *a,
+                                                const uint32_t *const *b,
+                                                const uint32_t *const *index);
+int rj_arith_v_swmmac_f16_16x16x128_bf8_bf8_w32(uint64_t flags, uint64_t controls,
+                                                uint32_t *const *d, const uint32_t *const *a,
+                                                const uint32_t *const *b,
+                                                const uint32_t *const *index);
 
 #ifdef __cplusplus
 } // extern "C"

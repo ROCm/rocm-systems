@@ -7,6 +7,7 @@
 #include "util/log.h"
 
 #include <algorithm>
+#include <array>
 #include <format>
 #include <utility>
 
@@ -15,6 +16,11 @@ namespace rocjitsu {
 IpRegisterWindow::IpRegisterWindow(RegisterAperture &registers, std::span<const uint64_t> segments,
                                    std::string owner)
     : registers_(&registers), segments_(segments), owner_(std::move(owner)) {}
+
+IpRegisterWindow IpRegisterWindow::absolute_remap() const {
+  static constexpr std::array<uint64_t, 1> kBarOrigin{0};
+  return IpRegisterWindow(*registers_, kBarOrigin, owner_);
+}
 
 std::optional<uint64_t> IpRegisterWindow::resolve(uint32_t segment_index, uint32_t dword) const {
   if (segment_index >= segments_.size()) {

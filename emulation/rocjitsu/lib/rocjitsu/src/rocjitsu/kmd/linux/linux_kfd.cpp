@@ -7,6 +7,7 @@
 #include "rocjitsu/kmd/linux/linux_kfd.h"
 
 #include "rocjitsu/kmd/linux/kfd_ioctl_utils.h"
+#include "rocjitsu/vm/amdgpu/hsa_clock.h"
 
 #include "rocjitsu/base/rj_compiler.h"
 RJ_DIAGNOSTIC_PUSH
@@ -174,20 +175,18 @@ int LinuxKfd::fill_get_version_ioctl(void *arg) {
 
 int LinuxKfd::get_clock_counters_ioctl(void *arg) { return fill_get_clock_counters_ioctl(arg); }
 
-int LinuxKfd::fill_get_clock_counters_ioctl(void *arg) {
+int LinuxKfd::fill_get_clock_counters_ioctl(void *arg, uint32_t frequency_mhz) {
   auto *args = static_cast<kfd_ioctl_get_clock_counters_args *>(arg);
   if (!args) {
     errno = EINVAL;
     return -1;
   }
 
-  auto now = std::chrono::steady_clock::now().time_since_epoch();
-  uint64_t ns =
-      static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(now).count());
+  const uint64_t ns = amdgpu::hsa_system_timestamp();
   args->system_clock_freq = 1000000000ULL;
   args->system_clock_counter = ns;
   args->cpu_clock_counter = ns;
-  args->gpu_clock_counter = ns;
+  args->gpu_clock_counter = amdgpu::gpu_clock_from_ns(ns, frequency_mhz);
   return 0;
 }
 

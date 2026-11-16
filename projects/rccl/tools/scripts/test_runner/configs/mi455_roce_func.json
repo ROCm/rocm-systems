@@ -5325,6 +5325,11 @@
           "test_filter": "DdaMPI_AllReduce.LLTwoShotMultiRank"
         },
         {
+          "name": "DDA_Fabric_AllReduce_LL_SpreadTwoShot",
+          "description": "DDA fabric AllReduce LL spread two-shot on the one-shot grid at 1 MiB from 5 ranks: analytic sum and the spread COLL log line",
+          "test_filter": "DdaMPI_AllReduce.LLSpreadTwoShotMultiRank"
+        },
+        {
           "name": "DDA_Fabric_AllReduce_LL128_OneShot",
           "description": "DDA fabric AllReduce LL128 one-shot tier with the LL thresholds zeroed; own process because RCCL_PARAM caches thresholds",
           "test_filter": "DdaMPI_AllReduce.LL128OneShotMultiRank"

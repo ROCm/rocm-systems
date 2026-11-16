@@ -91,7 +91,7 @@ Settings::Settings() {
 
 // ================================================================================================
 bool Settings::create(bool fullProfile, const amd::Isa& isa, bool enableXNACK, bool coop_groups,
-                      bool isXgmi, bool isAPU) {
+                      bool pcieStoresNeedFlush, bool isAPU, int aqlExtDispatch) {
   uint32_t gfxipMajor = isa.versionMajor();
   uint32_t gfxipMinor = isa.versionMinor();
   uint32_t gfxStepping = isa.versionStepping();
@@ -155,10 +155,11 @@ bool Settings::create(bool fullProfile, const amd::Isa& isa, bool enableXNACK, b
     enableCoopMultiDeviceGroups_ = GPU_ENABLE_COOP_GROUPS & coop_groups;
   }
 
+  // gfx12+ includes Navi4x (gfx120x) as well as gfx125x
   if ((gfxipMajor == 9 && gfxipMinor == 0 && gfxStepping == 10) ||
       ((gfxipMajor == 9 && gfxipMinor >= 4 &&
-        (gfxStepping == 0 || gfxStepping == 1 || gfxStepping == 2)))) {
-    // Enable Barrier Value packet is only for MI2XX/300
+        (gfxStepping == 0 || gfxStepping == 1 || gfxStepping == 2))) ||
+      (gfxipMajor >= 12)) {
     barrier_value_packet_ = true;
     queue_pipe_dist_ = dynamic_queues_ >= 1;
   }
@@ -169,7 +170,7 @@ bool Settings::create(bool fullProfile, const amd::Isa& isa, bool enableXNACK, b
     sdma_swap_alignment_ = (gfxipMajor == 12) ? 32 : 64;
   }
 
-  setKernelArgImpl(isa, isXgmi);
+  setKernelArgImpl(isa, pcieStoresNeedFlush);
 
   if (gfxipMajor >= 10) {
      enableWave32Mode_ = true;
@@ -201,8 +202,12 @@ bool Settings::create(bool fullProfile, const amd::Isa& isa, bool enableXNACK, b
     enableExtension(ClKhrMipMapImageWrites);
   }
 
-  if (gfxipMajor == 12 && gfxipMinor >= 5) {
-    ext_dispatch_packet_ = true;
+  // The ext kernel dispatch packet carries one dependency in its dep_signal. ROCr reports it for
+  // gfx12.5, which supports it natively, and for a device whose CP firmware does; the ISA decides
+  // only when ROCr can't be asked. The carveout stays gfx12.5's.
+  const bool gfx125 = (gfxipMajor == 12 && gfxipMinor >= 5);
+  ext_dispatch_packet_ = (aqlExtDispatch >= 0) ? (aqlExtDispatch != 0) : gfx125;
+  if (gfx125) {
     groupMemCarveout_ = true;
   }
 
@@ -269,7 +274,7 @@ void Settings::override() {
 }
 
 // ================================================================================================
-void Settings::setKernelArgImpl(const amd::Isa& isa, bool isXgmi) {
+void Settings::setKernelArgImpl(const amd::Isa& isa, bool pcieStoresNeedFlush) {
   const uint32_t gfxipMajor = isa.versionMajor();
   const uint32_t gfxipMinor = isa.versionMinor();
   const uint32_t gfxStepping = isa.versionStepping();
@@ -277,23 +282,24 @@ void Settings::setKernelArgImpl(const amd::Isa& isa, bool isXgmi) {
   const bool isGfx94x = gfxipMajor == 9 && gfxipMinor >= 4 &&
                         (gfxStepping == 0 || gfxStepping == 1 || gfxStepping == 2);
   const bool isGfx90a = (gfxipMajor == 9 && gfxipMinor == 0 && gfxStepping == 10);
-  const bool isGfx125x = (gfxipMajor == 12) && ((gfxipMinor >= 5));
+  // gfx12+ includes Navi4x (gfx120x) as well as gfx125x
+  const bool isGfx12Plus = gfxipMajor >= 12;
 
   auto kernelArgImpl = KernelArgImpl::HostKernelArgs;
 
-  if (isXgmi) {
-    // The XGMI-connected path does not require the manual memory ordering
-    // workarounds that the PCIe connected path requires
+  if (!pcieStoresNeedFlush) {
+    // Host stores reach device memory over coherent xGMI, so they need none of the manual
+    // memory ordering workarounds that PCIe does
     kernelArgImpl = KernelArgImpl::DeviceKernelArgs;
-  } else if (isGfx94x || isGfx90a || isGfx125x) {
+  } else if (isGfx94x || isGfx90a || isGfx12Plus) {
     // Implement the kernel argument readback workaround
     // (write all args -> sfence -> write last byte -> mfence -> read last byte)
     kernelArgImpl = KernelArgImpl::DeviceKernelArgsReadback;
   }
 
-  // Enable device kernel args by default on gfx94x/gfx125x. Device-memory AQL
+  // Enable device kernel args by default on gfx94x and gfx12+. Device-memory AQL
   // ring buffers are controlled separately via DEBUG_CLR_AQL_DEV_QUEUE below.
-  if (isGfx94x || isGfx125x) {
+  if (isGfx94x || isGfx12Plus) {
     kernel_arg_impl_ = kernelArgImpl;
     kernel_arg_opt_ = true;
     aql_device_ring_buf_ = DEBUG_CLR_AQL_DEV_QUEUE > 0;

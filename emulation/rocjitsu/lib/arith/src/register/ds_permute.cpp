@@ -7,9 +7,9 @@
 // Register routing follows rocjitsu's DS handlers. RDNA3 Wave64 routes within
 // each half-wave; RDNA4 Wave64 routes across the entire wave.
 
-#include "common/internal.h"
 #include "common/simd.h"
-#include "rj_arith/rj_arith.h"
+#include "common/validation.h"
+#include "rj_arith/detail/rj_arith_register.h"
 
 #include <stdint.h>
 
@@ -29,11 +29,20 @@ int permute(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags, uint
   if (!exec_mask) {
     return RJ_ARITH_SUCCESS;
   }
+#if defined(RJ_ARITH_HAVE_X86_64_V4)
+  if constexpr (Backward) {
+    if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
+      rocjitsu::arith::ds_bpermute_x86_64_v4(Lanes, Group, exec_mask, d[0], addr[0], data[0],
+                                             offset, ReadInactive);
+      return RJ_ARITH_SUCCESS;
+    }
+  }
+#endif
 #if defined(RJ_ARITH_HAVE_X86_64_V3)
-  if constexpr (Backward && !ReadInactive) {
+  if constexpr (Backward) {
     if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
       rocjitsu::arith::ds_bpermute_x86_64_v3(Lanes, Group, exec_mask, d[0], addr[0], data[0],
-                                             offset);
+                                             offset, ReadInactive);
       return RJ_ARITH_SUCCESS;
     }
   }

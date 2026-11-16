@@ -4,6 +4,8 @@
 // Tests for rounding to integral values and rounding-related FP status.
 
 #include "math/unary_test.h"
+#include "rj_arith/detail/rj_arith_fp.h"
+#include "rj_arith/detail/rj_arith_math.h"
 
 // Check unary math results and semantics/status support across CPU levels.
 TEST(MathTruncF32W32Gfx11, Arithmetic) {

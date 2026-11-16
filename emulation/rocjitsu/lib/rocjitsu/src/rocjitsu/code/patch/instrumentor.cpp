@@ -13,6 +13,7 @@
 #include "rocjitsu/code/builders/spill_builders.h"
 #include "rocjitsu/code/code_object.h"
 #include "rocjitsu/code/kernel_descriptor_scan.h"
+#include "rocjitsu/code/kernel_scope.h"
 #include "rocjitsu/code/patch/checked_text_edits.h"
 #include "rocjitsu/code/patch/code_object_patcher.h"
 #include "rocjitsu/code/patch/entry_prologue.h"
@@ -24,6 +25,7 @@
 #include "rocjitsu/code/patch/probe_live_in.h"
 #include "rocjitsu/code/patch/probe_symbol.h"
 #include "rocjitsu/code/patch/trampoline_builder.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna3/sgpr_layout.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/isa_traits.h"
@@ -33,12 +35,14 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cassert>
 #include <cstring>
 #include <optional>
 #include <span>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <unordered_set>
 #include <utility>
 #include <vector>
@@ -241,8 +245,14 @@ std::optional<uint8_t> common_wavefront_size(rj_code_arch_t arch,
 // FLAT_SCRATCH stays rejected: the spill store/load depend on it, so a probe
 // that clobbers it entangles with the spill mechanism. Fail closed there rather
 // than let it silently corrupt the host kernel's state.
-bool check_probe_special_state(const ProbeClobberSummary &summary, std::string *error_out) {
-  if (summary.touches_flat_scratch) {
+bool check_probe_special_state(const ProbeClobberSummary &summary, rj_code_arch_t arch,
+                               std::span<const uint32_t> allocations, std::string *error_out) {
+  const bool writes_backing =
+      arch == ROCJITSU_CODE_ARCH_CDNA3 && std::ranges::any_of(allocations, [&](uint32_t count) {
+        const auto base = cdna3::flat_scratch_base(cdna3::sgpr_alias_end(count));
+        return summary.ordinary_clobbers.intersects(RegisterRef{RegClass::SGPR, base, 2});
+      });
+  if (summary.touches_flat_scratch || writes_backing) {
     report(error_out, "probe body writes FLAT_SCRATCH, which the spill store/load depend on; "
                       "not preservable across a probe call");
     return false;
@@ -741,6 +751,120 @@ namespace {
   return std::any_of(probes.begin(), probes.end(), [](const ProbeCallable &probe) {
     return std::any_of(probe.arg_sources.begin(), probe.arg_sources.end(), reads_entry_storage);
   });
+}
+
+// A direct call initializes its even SGPR pair to one of this kernel's decoded
+// continuations. A SETPC is bounded only if every path still carries such a link.
+bool cdna3_kernel_has_unknown_target(BasicBlock &entry, const KernelScopeSpec &spec,
+                                     const BlockOffsetIndex &offsets,
+                                     const std::unordered_set<BasicBlock *> &reachable,
+                                     uint32_t sgpr_count) {
+  if (std::ranges::none_of(reachable, [](const BasicBlock *block) {
+        return block->successor_issue() != BasicBlock::SuccessorIssue::None;
+      }))
+    return false;
+
+  std::unordered_map<BasicBlock *, uint64_t> incoming;
+  std::vector<BasicBlock *> worklist;
+  auto merge = [&](BasicBlock *block, uint64_t links) {
+    if (!reachable.contains(block))
+      return;
+    auto [it, inserted] = incoming.emplace(block, links);
+    if (!inserted) {
+      links &= it->second;
+      if (it->second == links)
+        return;
+      it->second = links;
+    }
+    worklist.push_back(block);
+  };
+  merge(&entry, 0);
+  for (uint64_t offset : spec.own_entries)
+    merge(block_for_offset(offsets, offset), 0);
+  const auto pair_bit = [sgpr_count](unsigned reg) -> uint64_t {
+    // Firmware's aliased scalar tail can also be written by implicit operands.
+    if ((reg & 1u) || reg >= 128 ||
+        reg + 1 >= cdna3::flat_scratch_base(cdna3::sgpr_alias_end(sgpr_count)))
+      return 0;
+    return uint64_t{1} << (reg / 2);
+  };
+  while (!worklist.empty()) {
+    BasicBlock *block = worklist.back();
+    worklist.pop_back();
+    uint64_t links = incoming.at(block);
+    for (const Instruction &inst : block->instructions()) {
+      if (!links)
+        break;
+      if (inst.mnemonic().starts_with("s_movrel")) {
+        links = 0;
+        break;
+      }
+      const InstDefUse effects(inst, 64);
+      for (uint64_t pairs = links; pairs; pairs &= pairs - 1) {
+        const uint16_t first = 2 * std::countr_zero(pairs);
+        if (effects.defs.intersects(RegisterRef{RegClass::SGPR, first, 2}))
+          links &= ~pair_bit(first);
+      }
+    }
+    if (block->successor_issue() != BasicBlock::SuccessorIssue::None) {
+      const Instruction *term = block->terminator();
+      if (block->successor_issue() != BasicBlock::SuccessorIssue::IndirectControlFlow || !term ||
+          term->mnemonic() != "s_setpc_b64" || !term->num_src_operands())
+        return true;
+      const auto src = term->src_operand(0)->to_register_ref();
+      if (!src || src->cls != RegClass::SGPR || src->width != 2 || !(links & pair_bit(src->index)))
+        return true;
+    }
+
+    const auto &calls = block->call_edges();
+    for (BasicBlock *next : block->successors())
+      merge(next, calls.empty() ? links : 0);
+    for (const BasicBlock::CallEdge &call : calls) {
+      // The callee may clobber any older saved link before it returns.
+      merge(call.continuation, 0);
+      const bool local = call.kind == BasicBlock::CallEdgeKind::DirectCall &&
+                         reachable.contains(call.continuation);
+      merge(call.callee, links | (local ? pair_bit(call.return_sreg) : 0));
+    }
+  }
+  return false;
+}
+
+// Shared code must satisfy every kernel that can execute a probe. Keep an
+// unresolved caller among the possible owners of every site.
+std::unordered_map<uint64_t, std::vector<uint32_t>>
+cdna3_probe_sgpr_counts(const std::vector<std::unique_ptr<BasicBlock>> &blocks,
+                        std::span<const KernelDescriptorInfo> kernels,
+                        std::span<const ResolvedInstrumentationSite> sites) {
+  std::unordered_map<uint64_t, std::vector<uint32_t>> owners;
+  const auto offsets = build_block_offset_index(blocks);
+  const auto positions = build_block_position_index(blocks);
+  std::vector<uint32_t> all_counts;
+  for (const auto &kernel : kernels) {
+    const uint32_t count =
+        *AmdGpuCodeObject::min_kernel_sgpr_count(ROCJITSU_CODE_ARCH_CDNA3, std::span(&kernel, 1));
+    all_counts.push_back(count);
+    auto *entry = block_for_offset(offsets, kernel.entry_text_offset);
+    KernelScopeSpec spec;
+    // On gfx942 firmware can start 256 bytes beyond a kernarg-preload entry.
+    if (kernarg_preload_length(kernel.descriptor))
+      spec.own_entries.insert(kernel.entry_text_offset + 256);
+    std::vector<BasicBlock *> reached;
+    if (entry)
+      reached = reachable_kernel_blocks(blocks, offsets, positions, *entry, spec);
+    const std::unordered_set<BasicBlock *> reachable(reached.begin(), reached.end());
+    const bool incomplete =
+        !entry || cdna3_kernel_has_unknown_target(*entry, spec, offsets, reachable, count);
+    for (const auto &site : sites) {
+      if (site.is_probe_call() &&
+          (incomplete || reachable.contains(block_for_offset(offsets, site.anchor_offset))))
+        owners[site.anchor_offset].push_back(count);
+    }
+  }
+  for (const auto &site : sites)
+    if (site.is_probe_call() && !owners.contains(site.anchor_offset))
+      owners.emplace(site.anchor_offset, all_counts);
+  return owners;
 }
 
 // The probes whose arguments made a prologue necessary, named so a rejection
@@ -1407,6 +1531,7 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
         result.resources.vgprs = std::max(result.resources.vgprs, end);
     });
   };
+  RegisterSet guest_registers;
   if (options_.register_growth) {
     const util::FailureOr<bool> complete = liveness_->global_vgpr_usage_is_complete();
     if (complete.failed()) {
@@ -1419,7 +1544,6 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
     }
     result.resources = {.sgprs = options_.register_growth->sgprs,
                         .vgprs = options_.register_growth->vgprs};
-    RegisterSet guest_registers;
     for (const std::unique_ptr<BasicBlock> &block : blocks_)
       for (const Instruction &instruction : block->instructions()) {
         const InstDefUse effects(instruction, *resolved.wave_size, liveness_->gfx1250_vgpr_msb(),
@@ -1503,6 +1627,10 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
   // size is written back to the descriptor after all sites succeed.
   std::optional<SpillManager> spills;
 
+  std::unordered_map<uint64_t, std::vector<uint32_t>> cdna3_owners;
+  if (arch_ == ROCJITSU_CODE_ARCH_CDNA3 && kernels.size() > 1 && !resolved.probes.empty())
+    cdna3_owners = cdna3_probe_sgpr_counts(blocks_, kernels, sites);
+
   std::vector<AppliedSite> applied;
   applied.reserve(sites.size());
   // Allocate offsets for each site. Trampoline size is highly dependent on the
@@ -1519,16 +1647,34 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
     if (site.is_probe_call()) {
       const ProbeCallable &probe = resolved.probes[*site.probe_index];
 
-      // The kernel must own the fixed return-link pair.
-      if (const uint16_t link_base = probe.abi.link_pair_base;
-          is_valid_probe_abi(probe.abi) &&
-          !probe_link_pair_fits_in_kernel(*kernel_sgpr_count, link_base)) {
-        result.errors.push_back(
-            "probe call needs the return-link pair s[" + std::to_string(link_base) + ":" +
-            std::to_string(link_base + 1) + "] but the kernel allocates only " +
-            std::to_string(*kernel_sgpr_count) + " SGPRs; rebuild the kernel with at least " +
-            std::to_string(link_base + 2) + " SGPRs");
-        continue;
+      const uint32_t default_count = kernel_sgpr_count.value_or(0);
+      std::span<const uint32_t> allocations(&default_count, 1);
+      if (!cdna3_owners.empty())
+        allocations = cdna3_owners.at(site.anchor_offset);
+      const uint32_t site_sgpr_count = std::ranges::min(allocations);
+      // The kernel must own an ordinary pair throughout the call. On gfx942 an
+      // in-bounds pair can still be the physical backing of VCC or FLAT_SCRATCH.
+      if (is_valid_probe_abi(probe.abi)) {
+        const uint16_t link_base = probe.abi.link_pair_base;
+        if (!probe_link_pair_fits_in_kernel(site_sgpr_count, link_base)) {
+          result.errors.push_back(
+              "probe call needs the return-link pair s[" + std::to_string(link_base) + ":" +
+              std::to_string(link_base + 1) + "] but the kernel allocates only " +
+              std::to_string(site_sgpr_count) + " SGPRs; rebuild the kernel with at least " +
+              std::to_string(link_base + 2) + " SGPRs");
+          continue;
+        }
+        const auto alias = std::ranges::find_if(allocations, [&](uint32_t count) {
+          return arch_ == ROCJITSU_CODE_ARCH_CDNA3 &&
+                 cdna3::sgpr_pair_overlaps_vcc_or_flat_scratch(count, link_base);
+        });
+        if (alias != allocations.end()) {
+          result.errors.push_back("probe return-link pair s[" + std::to_string(link_base) + ":" +
+                                  std::to_string(link_base + 1) +
+                                  "] overlaps VCC or FLAT_SCRATCH in the kernel's " +
+                                  std::to_string(*alias) + "-SGPR allocation");
+          continue;
+        }
       }
 
       // The kernel must likewise own the argument VGPRs. Only asked of a call
@@ -1580,7 +1726,7 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
       const ProbeClobberSummary *summary = &probe_summaries[*site.probe_index];
 
       // Check for special machine state that has no save/restore path yet
-      if (!check_probe_special_state(*summary, &err)) {
+      if (!check_probe_special_state(*summary, arch_, allocations, &err)) {
         result.errors.push_back(std::move(err));
         continue;
       }
@@ -1630,7 +1776,7 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
       plan.preserve_m0 = summary->touches_m0;
       // Cap envelope/temp SGPR selection at the kernel's own allocation so a temp
       // never lands past its .sgpr_count
-      plan.kernel_sgpr_count = *kernel_sgpr_count;
+      plan.kernel_sgpr_count = site_sgpr_count;
       plan.kernel_vgpr_count = vgpr_bounds.ordinary_bound;
       plan.probe_args = site.probe_args;
       plan.force_full_exec = probe.force_full_exec;
@@ -1928,6 +2074,21 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
       if (result.resources.sgprs > REGISTER_SET_ALLOCATABLE_SGPRS || result.resources.vgprs > 256) {
         result.errors.emplace_back("instrumentation exceeds the bounded register allocation");
         return result;
+      }
+      if (arch_ == ROCJITSU_CODE_ARCH_CDNA3) {
+        const uint32_t old_end =
+            cdna3::sgpr_alias_end(*AmdGpuCodeObject::min_kernel_sgpr_count(arch_, kernels));
+        const uint32_t new_end =
+            cdna3::sgpr_alias_end(result.resources.sgprs + kCdnaSpecialSgprTailReserve);
+        const auto uses_numeric_alias = [&](uint32_t end) {
+          return guest_registers.intersects({RegClass::SGPR, cdna3::flat_scratch_base(end), 2}) ||
+                 guest_registers.intersects({RegClass::SGPR, cdna3::vcc_base(end), 2});
+        };
+        if (old_end != new_end && (uses_numeric_alias(old_end) || uses_numeric_alias(new_end))) {
+          result.errors.emplace_back(
+              "register growth would change a guest numeric SGPR alias for VCC or FLAT_SCRATCH");
+          return result;
+        }
       }
       RJ_AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1,
                          amdhsa::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,

@@ -11,7 +11,13 @@ project(
 find_package(rocprofiler-sdk REQUIRED)
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 
-set(rocpd-api-schema-path "${CMAKE_BINARY_DIR}/share/rocprofiler-sdk-rocpd")
+# Test Install Build configures this directory as its own project, so CMAKE_BINARY_DIR
+# does not contain the schema. The common helper records the directory that does.
+if(ROCPROFILER_SDK_TESTS_ROCPD_SCHEMA_PATH)
+    set(rocpd-api-schema-path "${ROCPROFILER_SDK_TESTS_ROCPD_SCHEMA_PATH}")
+else()
+    set(rocpd-api-schema-path "${CMAKE_BINARY_DIR}/share/rocprofiler-sdk-rocpd")
+endif()
 set(rocpd-api-site-packages
     "${rocprofiler-sdk_LIB_DIR}/python${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}/site-packages"
     )

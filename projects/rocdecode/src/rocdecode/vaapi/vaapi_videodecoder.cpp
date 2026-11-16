@@ -855,10 +855,12 @@ rocDecStatus VaContext::GetVaContext(int device_id, uint32_t *va_ctx_id) {
         }
     }
 
+    // Reuse a context only when both the HIP device and its PCI BDF match. Partitions of one card
+    // (DPX/TPX/QPX/CPX) share the BDF above, but each partition is a separate HIP device with its own
+    // render node, so matching on the BDF alone would run a later partition on the first partition's node.
     if (!va_contexts_.empty()) {
         for (va_ctx_idx = 0; va_ctx_idx < va_contexts_.size(); va_ctx_idx++) {
-            if ((!gpu_pci_bdf.empty() && gpu_pci_bdf == va_contexts_[va_ctx_idx].gpu_pci_bdf) ||
-                gpu_uuid.compare(va_contexts_[va_ctx_idx].gpu_uuid) == 0) {
+            if (va_contexts_[va_ctx_idx].device_id == device_id && va_contexts_[va_ctx_idx].gpu_pci_bdf == gpu_pci_bdf) {
                 found_existing = true;
                 break;
             }

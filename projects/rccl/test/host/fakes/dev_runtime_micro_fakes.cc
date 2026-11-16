@@ -32,6 +32,7 @@
 
 #include "fakes/dev_runtime_micro_fakes.h"
 #include "fakes/hip_fakes.h"   // shared HIP seams + InstallHipVmmEmulator()
+#include "fakes/mgmt_task_enq_fakes.h"  // ResetMgmtTaskEnqFakes()
 #include "fakes/nccl_device_core_fakes.h"  // ncclTeam* accessors + ResetNcclDeviceCoreFakes()
 #include "fakes/nccl_fakes.h"  // g_ncclProxyClientGetFdBlocking, ResetNcclFakes()
 #include "signature-drift.h"
@@ -521,21 +522,6 @@ void ncclGinDevCommClearFields(struct ncclDevComm* devComm) {
   for (auto& handle : devComm->ginHandles) handle = nullptr;
 }
 
-// The enqueue-rearch job path: collective_stubs.cc reads ncclParamEnqueueRearchEnable
-// through g_loadParam (default 0), so it is reached only when a test sets
-// ENQUEUE_REARCH_ENABLE. The default accepts the job without running or freeing it.
-static ncclResult_t DefaultMgmtTaskEnqueue(struct ncclAsyncJob*, ncclResult_t (*)(struct ncclAsyncJob*),
-                                           void (*)(void*), ncclComm_t) {
-  return ncclSuccess;
-}
-std::function<ncclResult_t(struct ncclAsyncJob*, ncclResult_t (*)(struct ncclAsyncJob*), void (*)(void*), ncclComm_t)>
-    g_devrMgmtTaskEnqueue = DefaultMgmtTaskEnqueue;
-ncclResult_t ncclMgmtTaskEnqueue(struct ncclAsyncJob* task, ncclResult_t (*func)(struct ncclAsyncJob*),
-                                 void (*destructor)(void*), ncclComm_t comm) {
-  return g_devrMgmtTaskEnqueue(task, func, destructor, comm);
-}
-ASSERT_HOOK_MATCHES_PROD(g_devrMgmtTaskEnqueue, ncclMgmtTaskEnqueue);
-
 #undef ASSERT_HOOK_MATCHES_PROD
 
 // ---------------------------------------------------------------------------
@@ -564,6 +550,7 @@ void ResetDevRuntimeMicroFakes() {
   g_devrGinConnectOnce                          = DefaultGinConnectOnce;
   g_devrGinDevCommSetup                         = DefaultGinDevCommSetup;
   g_devrGinDevCommFree                          = DefaultGinDevCommFree;
+  ResetMgmtTaskEnqFakes();
   g_devrGinRegister                             = DefaultGinRegister;
   g_devrGinDeregister                           = DefaultGinDeregister;
   g_devrRmaProxyConnectOnce                     = DefaultRmaProxyConnectOnce;
@@ -578,7 +565,6 @@ void ResetDevRuntimeMicroFakes() {
   g_devrBootstrapBarrier                        = DefaultBootstrapBarrier;
   g_devrIntruAddressMapInsert                   = DefaultIntruAddressMapInsert;
   g_devrNcclCommWindowDeregister                = DefaultCommWindowDeregister;
-  g_devrMgmtTaskEnqueue                         = DefaultMgmtTaskEnqueue;
   ResetNcclDeviceCoreFakes();
   g_devrComputeCftSize                          = DefaultComputeCftSize;
   g_devrComputeCftMcSize                        = DefaultComputeCftMcSize;
