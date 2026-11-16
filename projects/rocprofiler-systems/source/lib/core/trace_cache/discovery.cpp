@@ -163,9 +163,14 @@ merge_perfetto_files()
     }
     else if(std::holds_alternative<std::string>(suffix_variant))
     {
-        cached_mpi_rank =
-            rocprofsys::utility::string::safe_stoi(std::get<std::string>(suffix_variant))
-                .value_or(0);
+        const auto& suffix = std::get<std::string>(suffix_variant);
+        const auto  parsed = rocprofsys::utility::string::safe_stoi(suffix);
+        if(parsed.is_error())
+        {
+            LOG_WARNING("Unparsable MPI rank suffix '{}': {}. Assuming rank 0.", suffix,
+                        parsed.error());
+        }
+        cached_mpi_rank = parsed.value_or(0);
     }
 
     LOG_DEBUG("Merging perfetto files: rank={} (from settings::default_process_suffix)",
