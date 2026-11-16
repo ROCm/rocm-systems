@@ -60,7 +60,7 @@ template <> inline std::string type_name<__hip_bfloat16>()     { return "bfloat1
  *
  * Each list is an X-macro taking X(T, "name"):
  *   T     - the C++ type to instantiate the tester with
- *   name  - the string a user passes to -tc to select that type
+ *   name  - the string a user passes to -types to select that type
  *
  * Every list contains exactly the types the corresponding tester .cpp
  * actually compiles specializations for. Adding a type here without adding
@@ -235,7 +235,7 @@ template <> inline std::string type_name<__hip_bfloat16>()     { return "bfloat1
 // scalar_to_vector). The guard must match the one in src/rocshmem.cpp,
 // src/rocshmem_gpu.cpp and utils/header_files_gen/COLL.py. On those HIP
 // versions bfloat16 is dropped from the reduction lists -- even if requested
-// explicitly with -tc -- so a tester is never instantiated against the
+// explicitly with -types -- so a tester is never instantiated against the
 // generic no-op device stub. Tester::create() reports the skip.
 #if !(HIP_VERSION_MAJOR == 7 && (HIP_VERSION_MINOR == 16 || HIP_VERSION_MINOR == 17))
 #define ROCSHMEM_BF16_REDUCE_SUPPORTED 1

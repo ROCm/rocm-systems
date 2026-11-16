@@ -272,7 +272,7 @@ class Tester;
  *
  * Testers allocate their symmetric buffers in their constructors, so building
  * them all up front would hold every tester's buffers in the symmetric heap at
- * once.  With per-type coverage (-tc full) one test type expands to a dozen or
+ * once.  With per-type coverage (-types full) one test type expands to a dozen or
  * more testers, which overruns the heap.  The factory method hands back one
  * thunk per tester instead; the driver constructs, runs, and destroys them one
  * at a time so only a single tester's buffers are resident.

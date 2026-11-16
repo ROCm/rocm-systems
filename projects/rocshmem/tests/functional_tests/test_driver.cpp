@@ -307,7 +307,7 @@ int main(int argc, char *argv[]) {
    * one. Testers allocate their symmetric buffers in their constructors, so
    * building them all up front would keep every tester's buffers resident at
    * once -- which overruns the symmetric heap once a test type expands into a
-   * dozen or more per-type testers (-tc full).
+   * dozen or more per-type testers (-types full).
    */
   for (auto &make_test : tests) {
     Tester *test = make_test();

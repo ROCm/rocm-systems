@@ -124,14 +124,14 @@ public:
   TypeCoverage type_coverage = TypeCoverage::Minimal;
 
   /**
-   * Types requested via -tc, stored in normalized form. Only consulted when
+   * Types requested via -types, stored in normalized form. Only consulted when
    * type_coverage is Custom.
    */
   std::unordered_set<std::string> type_filter;
 
   /**
    * Spaces are folded to underscores so that "unsigned int" and unsigned_int
-   * compare equal. This lets -tc take multi-word types without shell quoting.
+   * compare equal. This lets -types take multi-word types without shell quoting.
    * Folding in this direction (rather than underscores to spaces) leaves
    * int32_t / int64_t intact.
    */

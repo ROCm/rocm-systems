@@ -234,7 +234,7 @@ std::vector<TesterFactory> Tester::create(TesterArguments args) {
   std::vector<TesterFactory> testers;
   std::string test_name;
 
-  // Types the user asked for (via -tc full or -tc <types>) that this build or
+  // Types the user asked for (via -types full or -types <types>) that this build or
   // backend cannot run. Reported under the test header so a skip is visible
   // rather than silent. Minimal mode never asks for these types, so it never
   // produces a note.

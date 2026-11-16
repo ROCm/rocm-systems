@@ -140,10 +140,10 @@ TesterArguments::TesterArguments(int argc, char *argv[]) {
         fprintf(stderr, "--num-wf must be a positive integer.\n");
         exit(-1);
       }
-    } else if (arg == "-tc") {
+    } else if (arg == "-types") {
       i++;
       if (i >= argc) {
-        fprintf(stderr, "-tc requires an argument (minimal|full|type1:type2:...)\n");
+        fprintf(stderr, "-types requires an argument (minimal|full|type1:type2:...)\n");
         exit(-1);
       }
       std::string val = argv[i];
@@ -158,7 +158,7 @@ TesterArguments::TesterArguments(int argc, char *argv[]) {
         while (std::getline(ss, tok, ':'))
           if (!tok.empty()) type_filter.insert(normalize_type_name(tok));
         if (type_filter.empty()) {
-          fprintf(stderr, "-tc: no types specified in '%s'\n", val.c_str());
+          fprintf(stderr, "-types: no types specified in '%s'\n", val.c_str());
           exit(-1);
         }
       }
@@ -320,11 +320,11 @@ void TesterArguments::show_usage(std::string executable_name) {
   std::cout << "\t-b|-batch Set buffer rotation batch size (default: loop count)\n";
   std::cout << "\t-noverif|-nocheck disable buffer verification\n";
   std::cout << "\t--num-wf <number of wave-fronts per workgroup> (detected at runtime via HIP, overwrites -z if used)\n";
-  std::cout << "\t-tc <minimal|full|type1:type2:...>  Type coverage mode (default: minimal)\n";
+  std::cout << "\t-types <minimal|full|type1:type2:...>  Type coverage mode (default: minimal)\n";
   std::cout << "\t    minimal  - run the default type subset for each test\n";
   std::cout << "\t    full     - run all compiled types for each test\n";
-  std::cout << "\t    t1:t2:... - run only the specified types (e.g. -tc int:float:char)\n";
-  std::cout << "\t                multi-word types may use underscores: -tc unsigned_int:long_long\n";
+  std::cout << "\t    t1:t2:... - run only the specified types (e.g. -types int:float:char)\n";
+  std::cout << "\t                multi-word types may use underscores: -types unsigned_int:long_long\n";
 }
 
 void TesterArguments::get_arguments() {
