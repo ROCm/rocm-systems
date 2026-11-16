@@ -7,8 +7,6 @@
 #include "parser/schema_validator.hpp"
 #include "parser/value_text.hpp"
 
-#include "common/string_utility.hpp"
-
 #include <fmt/format.h>
 
 #include <algorithm>
@@ -79,29 +77,6 @@ is_signed_number(const schema_param& param, std::string_view token)
 blocks_value(const schema_param& param, std::string_view token)
 {
     return starts_option(token) && !is_signed_number(param, token);
-}
-
-/// The tokens of one list option as one list value. A token boundary separates two
-/// names, and a separator already at the boundary is not doubled, so "hip," "mpi" and
-/// "hip" "," "mpi" are both hip,mpi, while "," alone stays a value that names nothing.
-std::string
-list_text(const std::vector<std::string>& tokens, std::string_view separator)
-{
-    std::string text;
-    for(const auto& token : tokens)
-    {
-        const auto part = utility::string::trim(token);
-        if(part.empty())
-        {
-            continue;
-        }
-        if(!text.empty() && !text.ends_with(separator) && !part.starts_with(separator))
-        {
-            text.append(separator);
-        }
-        text.append(part);
-    }
-    return text;
 }
 
 /// The part of a refused list @p text to name: the first element that is not a valid
@@ -275,7 +250,7 @@ private:
                                     join_tokens(tokens, 0, tokens.size(), separator));
             return;
         }
-        const auto text   = list_text(tokens, separator);
+        const auto text   = join_list(tokens, separator);
         const auto parsed = parse_value(param, text);
         if(!parsed)
         {
