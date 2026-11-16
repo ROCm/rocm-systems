@@ -112,7 +112,7 @@ uint64_t Signal::Wait(uint64_t value, device::Signal::Condition c, uint64_t time
     result = event_.Wait(Util::fseconds{timeoutInSec});
 
     if ((result != Pal::Result::Success) && (result != Pal::Result::Timeout)) {
-      return -1;
+      return ~uint64_t{0};
     }
 
     std::atomic_thread_fence(std::memory_order_acquire);
@@ -137,7 +137,7 @@ uint64_t Signal::Wait(uint64_t value, device::Signal::Condition c, uint64_t time
     }
   }
 
-  return -1;
+  return ~uint64_t{0};
 }
 
 void Signal::Reset(uint64_t value) { amdSignal_->value = value; }

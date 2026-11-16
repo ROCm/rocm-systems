@@ -234,10 +234,10 @@ size_t PrintfDbg::outputArgument(const std::string& fmt, bool printFloat, size_t
           const float fArg = size == 2
                                  ? amd::half2float(*(reinterpret_cast<const uint16_t*>(argument)))
                                  : *(reinterpret_cast<const float*>(argument));
-          static const char* fSpecifiers = "eEfgGa";
+          static const char* floatSpecifiers = "eEfgGa";
           std::string fmtF = fmt;
           size_t posS = fmtF.find_first_of("%");
-          size_t posE = fmtF.find_first_of(fSpecifiers);
+          size_t posE = fmtF.find_first_of(floatSpecifiers);
           if (posS != std::string::npos && posE != std::string::npos) {
             fmtF.replace(posS + 1, posE - posS, "s");
           }

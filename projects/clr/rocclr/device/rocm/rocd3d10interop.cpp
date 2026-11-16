@@ -96,8 +96,8 @@ bool associateD3D10Device(const Device* device, ID3D10Device* pd3d10Device,
   PFNAmdDxExtCreate AmdDxExtCreate = GetAmdDxExtCreate();
   if (AmdDxExtCreate) {
     IAmdDxExt* pExt = nullptr;
-    HRESULT hr = AmdDxExtCreate(pd3d10Device, &pExt);
-    if (SUCCEEDED(hr) && pExt) {
+    HRESULT extHr = AmdDxExtCreate(pd3d10Device, &pExt);
+    if (SUCCEEDED(extHr) && pExt) {
       IAmdDxExtCLInterop* pCLExt =
           static_cast<IAmdDxExtCLInterop*>(pExt->GetExtInterface(AmdDxExtCLInteropID));
       if (pCLExt) {

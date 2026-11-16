@@ -548,8 +548,8 @@ int D3D10Object::initD3D10Object(const Context& amdContext, ID3D10Resource* pRes
     return CL_INVALID_D3D10_DEVICE_KHR;
   }
 
-  D3D10_QUERY_DESC desc = {D3D10_QUERY_EVENT, 0};
-  pDev->CreateQuery(&desc, &obj.pQuery_);
+  D3D10_QUERY_DESC queryDesc = {D3D10_QUERY_EVENT, 0};
+  pDev->CreateQuery(&queryDesc, &obj.pQuery_);
 
 #define SET_SHARED_FLAGS()                                                                         \
   {                                                                                                \

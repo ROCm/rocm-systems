@@ -71,8 +71,8 @@ int D3D11Object::initD3D11Object(const Context& amdContext, ID3D11Resource* pRes
     return CL_INVALID_D3D11_DEVICE_KHR;
   }
 
-  D3D11_QUERY_DESC desc = {D3D11_QUERY_EVENT, 0};
-  pDev->CreateQuery(&desc, &obj.pQuery_);
+  D3D11_QUERY_DESC queryDesc = {D3D11_QUERY_EVENT, 0};
+  pDev->CreateQuery(&queryDesc, &obj.pQuery_);
 
 #define SET_SHARED_FLAGS()                                                                         \
   {                                                                                                \

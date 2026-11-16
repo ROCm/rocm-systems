@@ -642,31 +642,4 @@ hsa_status_t PALHSALoaderContext::SamplerDestroy(hsa_agent_t agent,
   return HSA_STATUS_SUCCESS;
 }
 
-static hsa_status_t GetKernelNamesCallback(hsa_executable_t hExec, hsa_executable_symbol_t hSymbol,
-                                           void* data) {
-  auto symbol = amd::hsa::loader::Symbol::Object(hSymbol);
-  auto symbolNameList = reinterpret_cast<std::vector<std::string>*>(data);
-
-  hsa_symbol_kind_t type;
-  if (!symbol->GetInfo(HSA_EXECUTABLE_SYMBOL_INFO_TYPE, &type)) {
-    return HSA_STATUS_ERROR;
-  }
-
-  if (type == HSA_SYMBOL_KIND_KERNEL) {
-    uint32_t length;
-    if (!symbol->GetInfo(HSA_EXECUTABLE_SYMBOL_INFO_NAME_LENGTH, &length)) {
-      return HSA_STATUS_ERROR;
-    }
-
-    char* name = reinterpret_cast<char*>(alloca(length + 1));
-    if (!symbol->GetInfo(HSA_EXECUTABLE_SYMBOL_INFO_NAME, name)) {
-      return HSA_STATUS_ERROR;
-    }
-    name[length] = '\0';
-
-    symbolNameList->push_back(std::string(name));
-  }
-  return HSA_STATUS_SUCCESS;
-}
-
 }  // namespace amd::pal

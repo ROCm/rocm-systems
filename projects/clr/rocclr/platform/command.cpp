@@ -833,9 +833,9 @@ bool CopyMemoryP2PCommand::validateMemory() {
     std::scoped_lock lock(devices[0]->P2PStageOps());
     // Make sure runtime allocates memory on every device
     for (uint d = 0; d < devices[0]->GlbCtx().devices().size(); ++d) {
-      device::Memory* mem =
+      device::Memory* stageMem =
           devices[0]->P2PStage()->getDeviceMemory(*devices[0]->GlbCtx().devices()[d]);
-      if (nullptr == mem) {
+      if (nullptr == stageMem) {
         ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_MEM,
                 "Cannot get P2P stage Device Memory for device: 0x%x \n",
                 devices[0]->GlbCtx().devices()[d]);

@@ -682,9 +682,9 @@ hipError_t hipKernelSetCacheConfig(hipKernel_t kernel, hipFuncCache_t config, hi
     if (container->GetKernelName(&kernelName, kernel) != hipSuccess || kernelName == nullptr) {
       HIP_RETURN(hipErrorInvalidResourceHandle);
     }
-    hipError_t status = container->ResolveKernelForDevice(&targetKernel, kernelName, device);
-    if (status != hipSuccess) {
-      HIP_RETURN(status);
+    hipError_t resolveStatus = container->ResolveKernelForDevice(&targetKernel, kernelName, device);
+    if (resolveStatus != hipSuccess) {
+      HIP_RETURN(resolveStatus);
     }
   } else {
     HIP_RETURN(hipErrorInvalidResourceHandle);

@@ -502,7 +502,7 @@ void Memory::syncCacheFromHost(VirtualGPU& gpu, device::Memory::SyncFlags syncFl
       // Make sure the parent sync is an unique operation.
       // If the app uses multiple subbuffers from multiple queues,
       // then the parent sync can be called from multiple threads
-      std::scoped_lock lock(owner()->parent()->lockMemoryOps());
+      std::scoped_lock parentLock(owner()->parent()->lockMemoryOps());
       gpuMemory->syncCacheFromHost(gpu, syncFlagsTmp);
       //! \note Don't do early exit here, since we still have to sync
       //! this view, if the parent sync operation was a NOP.

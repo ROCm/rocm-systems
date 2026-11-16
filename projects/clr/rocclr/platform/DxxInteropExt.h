@@ -28,7 +28,7 @@ interface ID3D11Resource;
 interface IDirect3DSurface9;
 
 // forward declaration of extended primitive topology enumeration
-enum AmdDxExtPrimitiveTopology;
+enum AmdDxExtPrimitiveTopology : int;
 
 // Extension version information
 struct AmdDxExtVersion {
