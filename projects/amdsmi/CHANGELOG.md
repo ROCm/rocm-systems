@@ -6,6 +6,12 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ## amd_smi_lib for ROCm 10.3.0
 
+### Changed
+
+- **`amdsmi_get_gpu_activity()` now reports an unavailable usage as `UINT32_MAX`**.  
+  - The `amdsmi_engine_usage_t` fields are `uint32_t`, but `gfx_activity`, `umc_activity` and `mm_activity` were copied from the `uint16_t` GPU metrics fields, so an unavailable usage arrived as `0x0000FFFF`. They now report `0xFFFFFFFF`, matching the other `uint32_t` fields.
+  - C, Go and Rust callers that compare against `0xFFFF` must also accept `0xFFFFFFFF`. The Python interface and the CLI already render both as `N/A`.
+
 ### Resolved Issues
 
 - **Fixed `amd-smi ras --cper` crashing with `TypeError` when no GPU devices are available**.
@@ -13,6 +19,12 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 - **Fixed `amd-smi` failures on non-x86 systems where the library is built without ESMI (EPYC CPU) support**.  
   - `amd-smi` no longer tries to initialize CPU monitoring on such builds, and the Python CPU APIs now raise `AmdSmiLibraryException` with `AMDSMI_STATUS_NOT_SUPPORTED` instead of `AttributeError`. CPU affinity is reported again instead of N/A, and the Go shim builds without ESMI.
+
+- **Fixed v2.4 APU metrics reporting an unavailable `average_socket_power` or `average_gfx_power` as `65535` mW**.  
+  - v2.4 stores both as `uint16_t` while `amdsmi_apu_metrics_t` holds them as `uint32_t`, so the 16-bit unavailable marker was copied as a real reading and `amd-smi metric` showed `65.53 W` instead of `N/A`. Both now report `UINT32_MAX`, as v3.0 already did.
+
+- **Fixed v1.0 GPU metrics reporting an unavailable `energy_accumulator`, `pcie_link_width` or `pcie_link_speed` as a real value**.  
+  - v1.0 stores these narrower than `amdsmi_gpu_metrics_t` (`uint32_t` energy, `uint8_t` link width/speed), so the unavailable marker arrived as `0xFFFFFFFF` or `0xFF`. They now report `UINT64_MAX` and `UINT16_MAX`, as v1.1 and later already did.
 
 ## amd_smi_lib for ROCm 10.2.0
 

@@ -17,7 +17,7 @@ TestGPUBusyRead::TestGPUBusyRead() : TestBase() {
   set_title("AMDSMI GPU Busy Read Test");
   set_description(
       "The GPU Busy Read tests verifies that the gpu busy "
-      "percentage can be read properly.");
+      "percentage and engine activity can be read properly.");
 }
 
 TestGPUBusyRead::~TestGPUBusyRead(void) {}
@@ -73,6 +73,22 @@ void TestGPUBusyRead::Run(void) {
           std::cout << "\t**GPU Busy Percent (Percent Idle):" << std::dec << val_ui32 << " ("
                     << 100 - val_ui32 << ")" << std::endl;
         }
+      }
+
+      amdsmi_engine_usage_t usage{};
+      DISPLAY_AMDSMI_API("amdsmi_get_gpu_activity", "gpu=" + std::to_string(i), VERB(STANDARD));
+      err = amdsmi_get_gpu_activity(processor_handles_[i], &usage);
+      DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
+      if (err == AMDSMI_STATUS_NOT_SUPPORTED) {
+        IF_VERB(STANDARD) {
+          std::cout << "\t**GPU Activity: Not supported on this machine" << std::endl;
+        }
+      } else {
+        CHK_ERR_ASRT(err)
+        // The uint16 N/A value must be widened to UINT32_MAX, never leak as 0xFFFF.
+        EXPECT_NE(usage.gfx_activity, 0xFFFFu);
+        EXPECT_NE(usage.umc_activity, 0xFFFFu);
+        EXPECT_NE(usage.mm_activity, 0xFFFFu);
       }
     }
   }
