@@ -202,7 +202,7 @@
     <div class="md-source__repository md-source__repository--active">
       ROCm/rocm-systems
       <ul class="md-source__facts">
-        <li class="md-source__fact md-source__fact--stars" data-repository-stat="stargazers_count" title="Stars: 563 · build snapshot" aria-label="Stars: 563">563</li>
+        <li class="md-source__fact md-source__fact--stars" data-repository-stat="stargazers_count" title="Stars: 564 · build snapshot" aria-label="Stars: 564">564</li>
         <li class="md-source__fact md-source__fact--forks" data-repository-stat="forks_count" title="Forks: 505 · build snapshot" aria-label="Forks: 505">505</li>
       </ul>
     </div>
@@ -255,7 +255,7 @@
     <div class="md-source__repository md-source__repository--active">
       ROCm/rocm-systems
       <ul class="md-source__facts">
-        <li class="md-source__fact md-source__fact--stars" data-repository-stat="stargazers_count" title="Stars: 563 · build snapshot" aria-label="Stars: 563">563</li>
+        <li class="md-source__fact md-source__fact--stars" data-repository-stat="stargazers_count" title="Stars: 564 · build snapshot" aria-label="Stars: 564">564</li>
         <li class="md-source__fact md-source__fact--forks" data-repository-stat="forks_count" title="Forks: 505 · build snapshot" aria-label="Forks: 505">505</li>
       </ul>
     </div>
@@ -1880,9 +1880,8 @@
 <p>GPU allocations, doorbells, event pages, and GEM objects use the backing adapters
 in <code>memory_backing.h</code>.
 The private <code>rocjitsu-memory</code> helper creates fixed-size memfds within its own
-inherited hard file limit, raising only its own soft limit. If that limit
-cannot accommodate an allocation, it uses
-System V shared RAM instead. Ordinary allocations stay on native memfds even
+inherited hard file limit, raising only its own soft limit. If the limit is too
+low or the host lacks <code>memfd_create</code>, it uses System V shared RAM. Ordinary allocations stay on native memfds even
 when shmem lacks user xattrs. On export, an unsupported policy xattr causes the
 keeper to wrap that memfd in a token carrying the policy. The token retains the
 same file bytes and device/inode identity across descriptor transfers.
@@ -1991,7 +1990,16 @@ unmapping or changing their protections.</p>
 <h2 id="keeper-lifecycle">Keeper lifecycle<a class="headerlink" href="#keeper-lifecycle" title="Permanent link">&para;</a></h2>
 <p>The helper execs with an independent address space, detaches from application
 job control, and watches its owner's pidfd and an open-file-description lock
-on an empty memfd. A private <code>PROT_NONE</code> mapping retains the owner's locked
+on an empty memfd. When <code>memfd_create</code> returns <code>ENOSYS</code>, the lease, synthetic
+DRM descriptors, and proc snapshots use unnamed files on <code>/dev/shm</code>. When
+<code>pidfd_open</code> returns <code>ENOSYS</code>, the owner opens <code>/proc/self/stat</code> and sends the
+file descriptor to the helper over their private startup socket. This pins the
+owner even when the mounted procfs belongs to an ancestor PID namespace. The
+helper polls that descriptor for exit and checks it before accepting private
+connections.
+These fallbacks cover in-process simulation. Daemon mode still requires
+<code>memfd_create</code> for its debugger-visible KFD mapping.
+A private <code>PROT_NONE</code> mapping retains the owner's locked
 file description after its descriptor closes; the empty file is never sized or
 accessed. <code>MADV_DONTFORK</code> keeps that mapping out of forked children, and exec
 removes it. The helper waits for the lock through an independently opened file
@@ -2008,7 +2016,8 @@ then-current hard limits.
 Generated topology files and proc-maps snapshots are sized there. Topology
 files with small payloads travel with the sizing request and are written by the helper
 with positional I/O. Larger topology files and proc-maps snapshots are
-populated through shared mappings.
+populated through shared mappings. The keeper reserves the snapshot pages first
+so opening proc maps on a full tmpfs returns <code>ENOSPC</code>.
 Both paths preserve the caller's file offset. Metadata files must fit the
 helper's hard file limit. Topology population
 failures emit a warning identifying the file. Application writes, including
