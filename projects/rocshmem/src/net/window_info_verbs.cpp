@@ -71,13 +71,11 @@ void WindowInfoVerbs::wait_all() {
   }
 }
 
-void WindowInfoVerbs::make_room() {
-  // Leave headroom for one more WR. Without this a non-blocking burst of more
-  // than sq_depth_ posts would make ibv_post_send return ENOMEM; that post is
-  // dropped but a naive caller would still count it outstanding and then hang in
-  // wait_all()/quiet() waiting for a completion that never arrives.
+void WindowInfoVerbs::make_room(unsigned need) {
+  // Reserve `need` SQ slots: a post into a full SQ returns ENOMEM and is
+  // dropped, yet the caller counts it outstanding and then hangs in wait_all().
   while (sq_depth_ > 0 &&
-         outstanding_ >= static_cast<uint64_t>(sq_depth_)) {
+         outstanding_ + need > static_cast<uint64_t>(sq_depth_)) {
     reap();
   }
 }
@@ -173,15 +171,14 @@ void WindowInfoVerbs::post_signal(int lane, uint64_t *sig_addr, uint64_t signal,
     case ROCSHMEM_SIGNAL_SET:
       // Ordered 8-byte inline write -- rides the same RC QP after the payload,
       // so the signal is placed after the data at the responder (no fence).
-      rma_->post_signal_set(lane, raddr, rma_->rkey(pe), signal, next_id_++);
-      outstanding_++;
+      account_post(rma_->post_signal_set(lane, raddr, rma_->rkey(pe), signal,
+                                         next_id_++));
       break;
     case ROCSHMEM_SIGNAL_ADD:
       // Atomic add; the fetched pre-image lands in the scratch and is discarded.
-      rma_->post_fadd(lane, reinterpret_cast<uintptr_t>(amo_scratch_),
-                      amo_scratch_lkey_, raddr, rma_->rkey(pe), signal,
-                      next_id_++);
-      outstanding_++;
+      account_post(rma_->post_fadd(lane, reinterpret_cast<uintptr_t>(amo_scratch_),
+                                   amo_scratch_lkey_, raddr, rma_->rkey(pe),
+                                   signal, next_id_++));
       break;
     default:
       LOG_ERROR("host-verbs: invalid sig_op %d", sig_op);
@@ -193,7 +190,7 @@ void WindowInfoVerbs::put_signal(void *dst, const void *src, size_t n,
                                  uint64_t *sig_addr, uint64_t signal,
                                  int sig_op, int pe) {
   hdp_->hdp_flush();  // NIC reads the latest (GPU) source bytes
-  make_room();
+  make_room(2);  // write + signal
   int lane = lane_for(pe);
   account_post(rma_->post_write(lane, reinterpret_cast<uintptr_t>(src),
                                 rma_->lkey_for(src), rma_->remote_va(pe, dst),
@@ -207,7 +204,7 @@ void WindowInfoVerbs::put_signal_nbi(void *dst, const void *src, size_t n,
                                      uint64_t *sig_addr, uint64_t signal,
                                      int sig_op, int pe) {
   hdp_->hdp_flush();
-  make_room();
+  make_room(2);  // write + signal
   int lane = lane_for(pe);
   account_post(rma_->post_write(lane, reinterpret_cast<uintptr_t>(src),
                                 rma_->lkey_for(src), rma_->remote_va(pe, dst),

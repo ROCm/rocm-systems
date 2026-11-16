@@ -309,11 +309,9 @@ __host__ bool HostInterface::verbs_amo_fetch_cas(WindowInfo* window_info,
 #endif  // USE_HOST_VERBS
 
 /*
- * Blocking host-initiated signal ops. Dispatched by window subtype like the
- * blocking putmem/amo: served by WindowInfoVerbs on the verbs transport. No
- * public blocking C API routes here yet (follow-up); today the net unit tests
- * drive WindowInfoVerbs directly. A non-verbs window has no blocking signal
- * path, so it aborts rather than silently no-op.
+ * Blocking host-initiated signal ops, reached from the public C API. Dispatched
+ * by window subtype like the blocking putmem/amo: served by WindowInfoVerbs on
+ * the verbs transport; a non-verbs window aborts rather than silently no-op.
  */
 __host__ void HostInterface::putmem_signal(
     [[maybe_unused]] void* dest, [[maybe_unused]] const void* source,

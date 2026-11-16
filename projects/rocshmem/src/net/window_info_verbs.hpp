@@ -116,9 +116,9 @@ class WindowInfoVerbs : public WindowInfo {
                    int pe);
   //! Spin the context CQ until all posted ops on it have completed.
   void wait_all();
-  //! Block until there is room in the SQ for at least one more post, so the
-  //! next ibv_post_send cannot fail with ENOMEM on a full queue.
-  void make_room();
+  //! Block until the SQ has room for @p need more posts, so the following
+  //! ibv_post_send calls cannot fail with ENOMEM. @p need must be <= sq_depth_.
+  void make_room(unsigned need = 1);
   //! Account for a just-attempted post: bump outstanding_ on success, or log a
   //! post failure without bumping it (so wait_all/quiet can't hang forever).
   void account_post(uint64_t wr_id);
