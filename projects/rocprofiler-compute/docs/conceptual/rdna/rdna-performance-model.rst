@@ -18,6 +18,13 @@ achieved application performance on AMD RDNA™ GPUs including:
 Navi 44 (gfx1200) is not supported in this release. For gfx1201 profiling
 prerequisites, see :ref:`profiling power-gating requirements <profile-rdna-power-gating>`.
 
+.. warning::
+
+   gfx1201 support is experimental. Add ``--experimental`` to each
+   ``rocprof-compute`` command on gfx1201, for example
+   ``rocprof-compute --experimental profile -n <name> -- <app>`` and
+   ``rocprof-compute --experimental analyze -p <workload>``.
+
 .. note::
 
   * For AMD Instinct™ GPUs (CDNA-CDNA4), see :doc:`../cdna/cdna-performance-model`.
