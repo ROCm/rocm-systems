@@ -259,7 +259,7 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
 - **`rccl-UnitTestsMicroDevcommV23000`**: `src/devcomm/devcomm_v23000.cc`
   (via `DEVCOMM_V23000_CC_PATH`, suites `DevcommV23000*`), covering requirement
   filtering and both ABI-copy directions. Its own binary avoids the compatibility
-  table stub in `dev_runtime_micro_fakes.cc`. See `test_categories_micro_devcomm_v23000.yaml`.
+  table stub in `dev_runtime_micro_fakes.cc`.
 - **`rccl-UnitTestsMicroBootstrap`**: `bootstrap.cc` (via `BOOTSTRAP_CC_PATH`, from
   `bootstrap-test.cc`); suites `Bootstrap*Microtest.*`. Ranks run as threads over the
   in-memory socket layer and net plugin in `fakes/bootstrap_micro_fakes.cc`. Its own binary
@@ -534,7 +534,7 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   `rome_models.cc`) is linked real as a collaborator, and `topo.cc` comes in through
   `topo_include.cc` rather than as a source file because `TopoSetNetDevsPolicy` can only
   be defined from inside that TU. Shares `TopoScene.h` and `fakes/graph_fakes.cc` with
-  `rccl-UnitTestsMicroTopo`. See `test_categories_micro_search.yaml`.
+  `rccl-UnitTestsMicroTopo`.
 
 - **`rccl-UnitTestsMicroTopo`** — the rest of the real `src/graph` files, each `#include`d
   from its own test TU via `<STEM>_CC_PATH`: `xml.cc` (`Xml*`), `topo.cc` (`Topo*`),

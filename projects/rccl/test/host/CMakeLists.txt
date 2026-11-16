@@ -2639,8 +2639,7 @@ rccl_add_micro_binary(rccl-UnitTestsMicroSearch
     ${_MICRO_MODE_DEFS}
     ${_MICRO_AMDSMI_DEF}
     SEARCH_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/graph/search.cc"
-    TOPO_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/graph/topo.cc"
-  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_search.yaml")
+    TOPO_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/graph/topo.cc")
 
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroDiagnostics
@@ -3488,8 +3487,7 @@ rccl_add_micro_binary(rccl-UnitTestsMicroDevcommV23000
   SOURCES ${TEST_MICRO_DEVCOMM_V23000_SOURCE_FILES}
   EXTRA_DEFS
     ${_MICRO_MODE_DEFS}
-    DEVCOMM_V23000_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/devcomm/devcomm_v23000.cc"
-  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_devcomm_v23000.yaml")
+    DEVCOMM_V23000_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/devcomm/devcomm_v23000.cc")
 
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsHostAll
