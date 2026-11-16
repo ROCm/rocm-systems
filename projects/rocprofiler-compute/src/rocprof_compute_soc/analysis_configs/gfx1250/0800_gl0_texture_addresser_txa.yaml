@@ -11,14 +11,7 @@
 Panel Config:
   id: 800
   title: GL0 Texture Addresser (TXA)
-  description: |-
-    GL0 Texture Addresser metrics for gfx1250. The TXA is the address generation
-    and request handling front-end of the GL0 cache subsystem. It processes
-    memory requests from shader cores including LDS, VMEM (buffer/flat),
-    async operations, TDM (Tensor Data Mover), and block load/store operations.
-
   data source:
-
   - metric_table:
       id: 801
       title: TXA Utilization

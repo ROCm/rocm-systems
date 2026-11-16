@@ -43,12 +43,13 @@ extern "C" __attribute__((visibility("default"))) void rj_test_host_drm(int fd, 
 
 extern "C" __attribute__((visibility("default"))) int fstat(int fd, struct stat *info) {
   static auto next = reinterpret_cast<decltype(&fstat)>(dlsym(RTLD_NEXT, "fstat"));
-  return finish_stat(fd, info, next(fd, info));
+  // glibc before 2.33 may have no public fstat below this preload.
+  return finish_stat(fd, info, next ? next(fd, info) : fstatat(fd, "", info, AT_EMPTY_PATH));
 }
 
 extern "C" __attribute__((visibility("default"))) int fstat64(int fd, struct stat64 *info) {
   static auto next = reinterpret_cast<decltype(&fstat64)>(dlsym(RTLD_NEXT, "fstat64"));
-  return finish_stat(fd, info, next(fd, info));
+  return finish_stat(fd, info, next ? next(fd, info) : fstatat64(fd, "", info, AT_EMPTY_PATH));
 }
 
 extern "C" __attribute__((visibility("default"))) int __fxstat(int version, int fd,

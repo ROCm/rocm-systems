@@ -461,8 +461,11 @@ extern const char* ROCJPEGAPI rocJpegGetErrorName(RocJpegStatus rocjpeg_status);
  * and rocJpegDecodeBatchedAsync()) must not be called from more than one thread at the same time on the
  * same handle.
  *
- * The stream handle and the data it was parsed from are no longer used once this function returns, so they
- * can be parsed again, destroyed, or freed before rocJpegDecodeSync() is called.
+ * The stream handle, the data it was parsed from, and `decode_params` are no longer used once this function
+ * returns, so they can be reused, parsed again, destroyed, or freed before rocJpegDecodeSync() is called.
+ * rocJpegDecodeSync() identifies the pending decode by the `destination` pointer and copies the decoded image to it.
+ * Pass it the same `destination` pointer, not a pointer to a copy of the RocJpegImage, and keep the RocJpegImage
+ * unchanged and its channel buffers allocated until rocJpegDecodeSync() returns.
  *
  * @param handle The rocJPEG handle.
  * @param jpeg_stream_handle The rocJPEG stream handle.
@@ -484,7 +487,7 @@ RocJpegStatus ROCJPEGAPI rocJpegDecodeAsync(RocJpegHandle handle, RocJpegStreamH
  * these calls at the same time on the same handle.
  *
  * @param handle The rocJPEG handle.
- * @param destination A pointer to RocJpegImage where the decoded image will be stored.
+ * @param destination The RocJpegImage pointer passed to rocJpegDecodeAsync(), where the decoded image will be stored.
  * @return A RocJpegStatus indicating the success or failure of the sync operation.
  */
 RocJpegStatus ROCJPEGAPI rocJpegDecodeSync(RocJpegHandle handle, RocJpegImage *destination);
@@ -504,8 +507,12 @@ RocJpegStatus ROCJPEGAPI rocJpegDecodeSync(RocJpegHandle handle, RocJpegImage *d
  * rocJpegDecodeBatched(), rocJpegDecodeAsync(), and rocJpegDecodeBatchedAsync() must not be called from
  * more than one thread at the same time on the same handle.
  *
- * The stream handles and the data they were parsed from are no longer used once this function returns. The stream handles 
- * can then be parsed again, destroyed, or freed before rocJpegDecodeBatchedSync() is called.
+ * The stream handles, the data they were parsed from, and the `jpeg_stream_handles` and `decode_params` arrays
+ * are no longer used once this function returns, so they can be reused, parsed again, destroyed, or freed before
+ * rocJpegDecodeBatchedSync() is called. rocJpegDecodeBatchedSync() identifies the pending decodes by the
+ * `destinations` array and copies the decoded images to it. Pass it the same `destinations` array, not a copy,
+ * and the same `batch_size`, and keep the RocJpegImage structs unchanged and their channel buffers allocated until
+ * rocJpegDecodeBatchedSync() returns.
  *
  * @param handle The rocJPEG handle.
  * @param jpeg_stream_handles An array of rocJPEG stream handles representing the input JPEG streams.
@@ -529,8 +536,8 @@ RocJpegStatus ROCJPEGAPI rocJpegDecodeBatchedAsync(RocJpegHandle handle, RocJpeg
  * same handle.
  *
  * @param handle The rocJPEG handle.
- * @param destinations An array of RocJpegImage pointers identifying the pending batch, as passed to rocJpegDecodeBatchedAsync.
- * @param batch_size The number of images in the batch.
+ * @param destinations The array of RocJpegImage structs passed to rocJpegDecodeBatchedAsync(), identifying the pending batch.
+ * @param batch_size The number of images in the batch, as passed to rocJpegDecodeBatchedAsync().
  * @return A RocJpegStatus indicating the success or failure of the sync operation.
  */
 RocJpegStatus ROCJPEGAPI rocJpegDecodeBatchedSync(RocJpegHandle handle, RocJpegImage *destinations, int batch_size);

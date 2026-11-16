@@ -118,6 +118,75 @@ inline void execute_swap(Wavefront &wave, uint64_t flags, const Operand &destina
   }
 }
 
+// Exchange adjacent rows without requiring the source lane to be active.
+// Read both operands before publishing either output; observation masks cover
+// the opposite row consumed by each active destination.
+template <int Stride>
+inline void execute_permlane_swap(Wavefront &wave, uint64_t flags, const Operand &destination,
+                                  const Operand &source) {
+  if (wave.wf_size() <= Stride) {
+    return;
+  }
+  uint64_t exec_mask = wave.exec() & wave.vgpr_write_mask();
+  uint64_t low_rows = Stride == 16 ? 0x0000ffff0000ffffULL : 0x00000000ffffffffULL;
+  uint64_t a_write = exec_mask & low_rows, d_write = exec_mask & ~low_rows;
+  if (!exec_mask) {
+    return;
+  }
+  RegisterAccess registers(wave);
+  VectorInput32 old_a(registers, wave, source, d_write >> Stride);
+  VectorInput32 old_d(registers, wave, destination, a_write << Stride);
+  if (wave.instruction_execution_failed()) {
+    return;
+  }
+  std::array<uint32_t, 64> a_values, d_values;
+  std::copy_n(old_a.data, wave.wf_size(), a_values.data());
+  std::copy_n(old_d.data, wave.wf_size(), d_values.data());
+  uint32_t *a = a_values.data(), *d = d_values.data();
+  int status;
+  if constexpr (Stride == 16) {
+    status = wave.wf_size() == 32
+                 ? rj_arith_v_permlane16_swap_b32_w32(flags, uint32_t(exec_mask), 0, &d, &a)
+                 : rj_arith_v_permlane16_swap_b32_w64(flags, exec_mask, 0, &d, &a);
+  } else {
+    status = rj_arith_v_permlane32_swap_b32_w64(flags, exec_mask, 0, &d, &a);
+  }
+  if (status != RJ_ARITH_SUCCESS) {
+    wave.report_instruction_execution_error(InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  for (unsigned lane = 0; lane < wave.wf_size(); ++lane) {
+    if ((a_write >> lane) & 1) {
+      registers.write_lane(source, lane, a_values[lane]);
+    }
+    if ((d_write >> lane) & 1) {
+      registers.write_lane(destination, lane, d_values[lane]);
+    }
+  }
+}
+
+// Retain scalar group_width access and active-lane source observation for index generation.
+inline void execute_permlane_index(Wavefront &wave, uint64_t flags, const Operand &destination,
+                                   const Operand &source, const Operand &width_operand) {
+  RegisterAccess registers(wave);
+  uint32_t group_width = registers.read_scalar(width_operand);
+  uint64_t exec_mask = wave.exec();
+  if (!exec_mask || wave.instruction_execution_failed()) {
+    return;
+  }
+  if (!width_operand.is_vgpr() && (!group_width || (group_width & (group_width - 1)))) {
+    wave.report_undefined_behavior("permlane group width is not a power of two");
+  }
+  VectorInput32 a(registers, wave, source, exec_mask);
+  write_vector32_result(
+      wave, registers, destination, exec_mask, [&](uint32_t *const *d, uint64_t write_mask) {
+        return wave.wf_size() == 32 ? rj_arith_v_permlane_idx_gen_b32_w32(
+                                          flags, uint32_t(write_mask), 0, d, &a.data, group_width)
+                                    : rj_arith_v_permlane_idx_gen_b32_w64(flags, write_mask, 0, d,
+                                                                          &a.data, group_width);
+      });
+}
+
 // Wave32 is a no-op without operand access. Wave64 reads the opposite half,
 // including inactive source lanes, and masks destination stores normally.
 inline void execute_permlane64(Wavefront &wave, uint64_t flags, const Operand &destination,
@@ -196,6 +265,98 @@ inline void execute_permlane16(Wavefront &wave, Wave32 wave32, Wave64 wave64, ui
       wave, registers, destination, write_mask,
       [&](uint32_t *const *d, uint64_t) { return invoke(d); },
       /*allow_direct=*/false);
+}
+
+// Observe the selected source lanes, including inactive sources, before allowing
+// direct masked output. Decoder operands retain scalar and subword interpretation.
+template <ValuPermutation Kind, typename Wave32, typename Wave64>
+inline void execute_group_permutation(Wavefront &wave, Wave32 wave32, Wave64 wave64, uint64_t flags,
+                                      const Operand &destination, const Operand &source,
+                                      uint32_t selector, uint32_t group_width) {
+  uint64_t exec_mask = wave.exec();
+  if (!exec_mask) {
+    return;
+  }
+  uint64_t read_mask = 0;
+  for (unsigned lane = 0; lane < wave.wf_size(); ++lane) {
+    if ((exec_mask >> lane) & 1) {
+      unsigned selected =
+          valu_permutation_source(Kind, lane, selector, group_width, wave.wf_size());
+      if (selected < wave.wf_size()) {
+        read_mask |= uint64_t{1} << selected;
+      }
+    }
+  }
+  RegisterAccess registers(wave);
+  VectorInput32 input(registers, wave, source, read_mask);
+  write_vector32_result(
+      wave, registers, destination, exec_mask & wave.vgpr_write_mask(),
+      [&](uint32_t *const *d, uint64_t write_mask) {
+        return wave.wf_size() == 32
+                   ? wave32(flags, uint32_t(write_mask), 0, d, &input.data, selector, group_width)
+                   : wave64(flags, write_mask, 0, d, &input.data, selector, group_width);
+      });
+}
+
+// Resolve numeric operand widths before invoking the packed permutation. Stage
+// all result words so aliases and observed multi-register writes remain ordered.
+template <int Bits, typename Wave32, typename Wave64, typename Destination>
+inline void execute_packed_permutation(Wavefront &wave, Wave32 wave32, Wave64 wave64,
+                                       uint64_t flags, const Destination &destination,
+                                       const Operand &source_a, const Operand &source_b,
+                                       const Operand &source_c) {
+  uint64_t exec_mask = wave.exec() & wave.vgpr_write_mask();
+  if (!exec_mask) {
+    return;
+  }
+  RegisterAccess registers(wave);
+  std::optional<VectorInput32> a32, b32;
+  std::optional<VectorInput64> a64, b64;
+  const uint32_t *a[2], *b[2];
+  if constexpr (Bits == 8) {
+    a64.emplace(registers, wave, source_a, exec_mask);
+    a[0] = a64->data[0];
+    a[1] = a64->data[1];
+  } else {
+    a32.emplace(registers, wave, source_a, exec_mask);
+    a[0] = a32->data;
+  }
+  if constexpr (Bits == 4) {
+    b32.emplace(registers, wave, source_b, exec_mask);
+    b[0] = b32->data;
+  } else {
+    b64.emplace(registers, wave, source_b, exec_mask);
+    b[0] = b64->data[0];
+    b[1] = b64->data[1];
+  }
+  VectorInput64 c(registers, wave, source_c, exec_mask);
+  if (wave.instruction_execution_failed()) {
+    return;
+  }
+  std::array<uint32_t, 64> result[Bits / 2]{};
+  uint32_t *d[Bits / 2];
+  for (int word = 0; word < Bits / 2; ++word) {
+    d[word] = result[word].data();
+  }
+  int status = wave.wf_size() == 32 ? wave32(flags, uint32_t(exec_mask), 0, d, a, b, c.data.data())
+                                    : wave64(flags, exec_mask, 0, d, a, b, c.data.data());
+  if (status != RJ_ARITH_SUCCESS) {
+    wave.report_instruction_execution_error(InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  // Preserve the concrete ISA operand when adjusting its register index.
+  Destination output = destination;
+  output.size_bits_ = 32;
+  for (int word = 0; word < Bits / 2; ++word) {
+    output.encoding_value_ = destination.encoding_value_ + word;
+    auto view = registers.write_operand(output, exec_mask);
+    for (unsigned lane = 0; lane < wave.wf_size(); lane += util::native_width_v<uint32_t>) {
+      if (view.store_native(lane, util::load<uint32_t>(d[word] + lane), exec_mask >> lane)
+              .failed()) {
+        return;
+      }
+    }
+  }
 }
 
 } // namespace rocjitsu::amdgpu::arith

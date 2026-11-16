@@ -1627,7 +1627,7 @@ void Wavefront::report_undefined_behavior(std::string_view reason) const {
   cu_.report_undefined_behavior(*this, reason);
 }
 
-void ComputeUnitCore::report_static_isa_diagnostics(const Instruction &inst, const Wavefront &wf) {
+void ComputeUnitCore::report_static_isa_diagnostics(const Instruction &inst, Wavefront &wf) {
   const uint64_t flags = inst.flags();
   if (flags & INVALID_MFMA_BROADCAST)
     report_undefined_behavior(wf, "invalid MFMA CBSZ/ABID broadcast controls");
@@ -1638,6 +1638,22 @@ void ComputeUnitCore::report_static_isa_diagnostics(const Instruction &inst, con
     report_undefined_behavior(wf, "undefined IU DOT/WMMA modifiers");
   if (flags & MISALIGNED_SCALAR_DATA)
     report_undefined_behavior(wf, "misaligned scalar data tuple");
+  if ((flags & RESERVED_CVT_SCALE_SELECTOR) && wf.exec())
+    report_undefined_behavior(wf, "reserved FP8/BF8 packed scale selector");
+  if ((flags & CHECK_CVT_SCALE_OVERLAP) && wf.exec()) {
+    const RegisterAccess regs(wf);
+    const auto dst = regs.destination_register(*inst.dst_operand(0));
+    if (!dst)
+      return;
+    for (int i = 0; i < inst.num_src_operands(); ++i) {
+      const auto src = regs.source_register(*inst.src_operand(i));
+      if (src && src->cls == RegClass::VGPR && src->index < dst->index + dst->width &&
+          dst->index < src->index + src->width) {
+        report_undefined_behavior(wf, "packed scale destination overlaps a source VGPR");
+        break;
+      }
+    }
+  }
 }
 
 void ComputeUnitCore::report_undefined_behavior(const Wavefront &wf, std::string_view reason) {

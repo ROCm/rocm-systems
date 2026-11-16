@@ -43,6 +43,8 @@ from rccl_ci_utils import (
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 log = logging.getLogger(__name__)
 
+PYTORCH_REPO = "https://github.com/pytorch/pytorch.git"
+
 SMOKE_TESTS = [
     "test_all_reduce_coalesced_nccl",
     "test_all_reduce_coalesced_manager_nccl",
@@ -96,99 +98,32 @@ def setup_ld_library_path(rccl_lib_dir: Path, rocm_lib_dir: Path | None) -> str:
 
 
 def clone_pytorch_test_sources(pytorch_src: Path) -> None:
-    """Sparse-clone PyTorch test sources matching the installed torch version.
+    """Sparse-check-out test/ at the commit the installed torch was built from.
 
-    For release builds (e.g. 2.5.0), clones at the matching tag.
-    For nightly builds (e.g. 2.14.0a0+rocm7.15.0a20260712), clones using
-    --shallow-since to get commits around the build date, then checks out the
-    commit closest to that date so test sources match the installed wheel.
+    The date in a nightly version string is the ROCm build date, not the
+    PyTorch source date, so use torch.version.git_version instead.
     """
     import re
-    from datetime import timedelta
 
     import torch
 
-    torch_version = torch.__version__
-    base_version = torch_version.split("+")[0]
-    log.info("PyTorch version: %s", torch_version)
+    commit = torch.version.git_version
+    log.info("PyTorch version: %s, git_version: %s", torch.__version__, commit)
+    if not re.fullmatch(r"[0-9a-f]{40}", commit or ""):
+        log.error("torch.version.git_version is not a commit SHA; "
+                  "cannot match test sources to the installed torch")
+        sys.exit(1)
 
-    git_ref = f"v{base_version}"
-    result = subprocess.run(
-        ["git", "ls-remote", "--tags", "https://github.com/pytorch/pytorch.git", git_ref],
-        capture_output=True,
-        text=True,
-    )
-
-    date_match = re.search(r"(\d{8})", torch_version)
-    use_date_pinning = False
-
-    if result.stdout.strip():
-        log.info("Found tag %s", git_ref)
-    elif date_match:
-        build_date = date_match.group(1)
-        dt = datetime.strptime(build_date, "%Y%m%d")
-        shallow_since = (dt - timedelta(days=2)).strftime("%Y-%m-%d")
-        log.info("Tag %s not found; nightly build date %s", git_ref, build_date)
-        git_ref = "nightly"
-        use_date_pinning = True
-    else:
-        log.info("Tag %s not found, using nightly branch HEAD", git_ref)
-        git_ref = "nightly"
-
-    if use_date_pinning:
-        log.info("Cloning PyTorch (ref=%s, shallow-since=%s, sparse) into %s",
-                 git_ref, shallow_since, pytorch_src)
-        subprocess.run(
-            [
-                "git", "clone",
-                f"--branch={git_ref}",
-                f"--shallow-since={shallow_since}",
-                "--filter=blob:none",
-                "--sparse",
-                "https://github.com/pytorch/pytorch.git",
-                str(pytorch_src),
-            ],
-            check=True,
-        )
-    else:
-        log.info("Cloning PyTorch (ref=%s, depth=1, sparse) into %s", git_ref, pytorch_src)
-        subprocess.run(
-            [
-                "git", "clone",
-                "--depth=1",
-                f"--branch={git_ref}",
-                "--filter=blob:none",
-                "--sparse",
-                "https://github.com/pytorch/pytorch.git",
-                str(pytorch_src),
-            ],
-            check=True,
-        )
-
-    subprocess.run(
+    log.info("Fetching PyTorch test sources at %s (sparse) into %s", commit, pytorch_src)
+    pytorch_src.mkdir(parents=True, exist_ok=True)
+    for cmd in (
+        ["git", "init", "-q"],
+        ["git", "remote", "add", "origin", PYTORCH_REPO],
         ["git", "sparse-checkout", "set", "test/"],
-        cwd=pytorch_src,
-        check=True,
-    )
-
-    if use_date_pinning:
-        before = (dt + timedelta(days=1)).strftime("%Y-%m-%dT00:00:00")
-        result = subprocess.run(
-            ["git", "log", f"--before={before}", "--format=%H", "-1"],
-            cwd=pytorch_src,
-            capture_output=True,
-            text=True,
-        )
-        if result.returncode == 0 and result.stdout.strip():
-            commit = result.stdout.strip()
-            log.info("Checking out commit %s (latest before %s)", commit[:12], before)
-            subprocess.run(
-                ["git", "checkout", commit],
-                cwd=pytorch_src,
-                check=True,
-            )
-        else:
-            log.warning("Could not find commit before %s, using HEAD of nightly", before)
+        ["git", "fetch", "--depth=1", "--filter=blob:none", "origin", commit],
+        ["git", "checkout", "-q", "FETCH_HEAD"],
+    ):
+        subprocess.run(cmd, cwd=pytorch_src, check=True)
 
     test_file = pytorch_src / "test" / "distributed" / "test_c10d_nccl.py"
     if not test_file.exists():

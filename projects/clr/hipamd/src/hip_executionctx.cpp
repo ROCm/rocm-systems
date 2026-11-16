@@ -21,8 +21,11 @@ namespace hip {
 // Constructor / Destructor
 // ---------------------------------------------------------------------------
 ExecutionCtx::ExecutionCtx(int deviceId, DevResourceDesc* desc, uint32_t flags)
-    : deviceId_(deviceId), flags_(flags), cuCount_(0), resourceDesc_(desc),
-      ctxId_(nextCtxId_.fetch_add(1)) {}
+    : deviceId_(deviceId),
+      flags_(flags),
+      cuCount_(0),
+      ctxId_(nextCtxId_.fetch_add(1)),
+      resourceDesc_(desc) {}
 
 hipError_t ExecutionCtx::Create() {
   uint32_t totalCUs = getTotalCuCount(deviceId_);

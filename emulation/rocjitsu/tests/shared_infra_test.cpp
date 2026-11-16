@@ -3272,6 +3272,29 @@ TEST(DppPermuteTest, True16SourceByteMaskFollowsOpSel) {
             ExecutionPlugin::kHighHalfByteMask);
 }
 
+TEST(DppPermuteTest, FullWavePlansTrackControlWidthAndBoundAcrossReuse) {
+  using namespace amdgpu::dpp;
+  for (uint32_t width : {32u, 64u, 32u}) {
+    const uint64_t full = util::mask<uint64_t>(width);
+    // These distinct permutations occupy the same slot in the full-wave plan cache.
+    for (uint32_t ctrl : std::array<uint32_t, 3>{ROW_SHR1, ROW_XMASK_BASE + 6, ROW_SHR1}) {
+      for (bool bound : {false, true, false}) {
+        for (uint64_t exec : {full, full & uint64_t{0x5555555555555555}, full}) {
+          for (bool fi : {false, true}) {
+            const auto expected = compute_dpp_plan(width, ctrl, 15, 15, bound, fi, exec, true);
+            const auto plan = make_dpp_plan(width, ctrl, 15, 15, bound, fi, exec, true);
+            EXPECT_EQ(plan.source_lanes, expected.source_lanes);
+            EXPECT_EQ(plan.physical_read_dest_mask, expected.physical_read_dest_mask);
+            EXPECT_EQ(plan.zero_source_mask, expected.zero_source_mask);
+            EXPECT_EQ(plan.source_write_mask, expected.source_write_mask);
+            EXPECT_EQ(plan.row_bank_mask, expected.row_bank_mask);
+          }
+        }
+      }
+    }
+  }
+}
+
 TEST(DppPermuteTest, AccessPlanTracksSelectedSources) {
   using namespace amdgpu::dpp;
   constexpr uint64_t kAllLanesActive = ~0ULL;
@@ -7294,6 +7317,36 @@ TEST(Gfx1250AddrCalcTest, VbufferRangeCheckAcceptsExactEndOnly) {
   expect_element_lane_masks(boundary_state.element_lane_masks, {0x1ULL});
   EXPECT_EQ(boundary_state.per_lane_addr[0], kBase + 4);
   EXPECT_EQ(boundary_state.per_lane_addr[1], 0ULL);
+
+  // Exercise the full-wave linear path with a nonzero bias and alternating
+  // exact-end and crossing halfwords, bounded by either STRIDE or NUM_RECORDS.
+  wf->set_exec(UINT64_MAX);
+  const uint64_t even_lanes = wf->exec() & 0x5555'5555'5555'5555ULL;
+  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane)
+    cu->write_vgpr(vbase + 4, lane, 3 + (lane & 1));
+  cu->write_sgpr(wf->sgpr_alloc().base + 4, 2);
+  inst.soffset = 4;
+  inst.ioffset = 1;
+  for (const bool structured : {false, true}) {
+    write_gfx1250_buffer_resource(
+        *cu, *wf, 40,
+        encode_gfx1250_buffer_resource(kBase, structured ? 64 : 8, 8, 0, false, structured));
+    amdgpu::VectorMemState full(amdgpu::GLOBAL_MEM);
+    full.elem_size = 2;
+    full.num_elems = 1;
+    cdna5::mubuf_calculate_addresses(inst, *wf, full);
+    EXPECT_EQ(full.lane_mask, even_lanes);
+    expect_element_lane_masks(full.element_lane_masks, {even_lanes});
+    for (uint32_t lane = 0; lane < wf->wf_size(); ++lane)
+      EXPECT_EQ(full.per_lane_addr[lane], lane & 1 ? 0 : kBase + 6);
+    cu->write_sgpr(wf->sgpr_alloc().base + 4, UINT32_MAX);
+    cdna5::mubuf_calculate_addresses(inst, *wf, full);
+    EXPECT_EQ(full.lane_mask, 0u);
+    expect_element_lane_masks(full.element_lane_masks, {0});
+    for (uint32_t lane = 0; lane < wf->wf_size(); ++lane)
+      EXPECT_EQ(full.per_lane_addr[lane], 0u);
+    cu->write_sgpr(wf->sgpr_alloc().base + 4, 2);
+  }
 }
 
 TEST(Gfx1250AddrCalcTest, VbufferZeroNumRecordsMasksAllLanes) {
