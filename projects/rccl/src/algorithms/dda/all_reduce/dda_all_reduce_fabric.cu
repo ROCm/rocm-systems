@@ -183,9 +183,14 @@ bool ncclAllReduceDdaFabricEligible(ncclComm* comm, const void* sendbuff, void* 
   return true;
 }
 
+rcclDdaLaunchCap ncclAllReduceDdaFabricGrid(ncclComm* comm, size_t count, ncclDataType_t datatype,
+                                            rcclDdaLaunchCap cap) {
+  const auto geom = ddaAllReduceFabricGeom(comm, count, ncclTypeSize(datatype), cap);
+  return {geom.first.x * geom.first.y, geom.second.x};
+}
+
 uint32_t ncclAllReduceDdaFabricBlocks(ncclComm* comm, size_t count, ncclDataType_t datatype, rcclDdaLaunchCap cap) {
-  const auto grid = ddaAllReduceFabricGeom(comm, count, ncclTypeSize(datatype), cap).first;
-  return grid.x * grid.y;
+  return ncclAllReduceDdaFabricGrid(comm, count, datatype, cap).blocks;
 }
 
 ncclResult_t ncclAllReduceDdaFabric(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,

@@ -5340,6 +5340,11 @@
           "test_filter": "DdaMPI_AllReduce.LL128TwoShotMultiRank"
         },
         {
+          "name": "DDA_Fabric_AllReduce_LL128_StagedWire_TwoShot",
+          "description": "DDA fabric AllReduce LL128 two-shot with RCCL_DDA_LL128_ASYNC_WIRE=1: the LDS-staged writer on two ranks and the peer-split two-shot from three, exact integer sums; own process",
+          "test_filter": "DdaMPI_AllReduce.LL128StagedWireTwoShotMultiRank"
+        },
+        {
           "name": "DDA_Fabric_AllReduce_BitIdentical",
           "description": "Float and bf16 AllReduce at 256 KiB to 4 MiB returns bit-identical output on every rank under the default selection",
           "test_filter": "DdaMPI_AllReduce.BitIdenticalAcrossRanksDefaultSelection"

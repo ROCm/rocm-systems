@@ -109,8 +109,8 @@ RCCL_PARAM(DdaLLOneShotThreshold, "DDA_LL_ONESHOT_THRESHOLD", (size_t)(1) * 1024
 RCCL_PARAM(DdaLLTwoShotThreshold, "DDA_LL_TWOSHOT_THRESHOLD", (size_t)(2) * 1024 * 1024); // 2 MiB
 RCCL_PARAM(DdaLL128OneShotThreshold, "DDA_LL128_ONESHOT_THRESHOLD", (size_t)(4) * 1024 * 1024); // 4 MiB
 RCCL_PARAM(DdaLL128TwoShotThreshold, "DDA_LL128_TWOSHOT_THRESHOLD", (size_t)(64) * 1024 * 1024); // 64 MiB
-// Opt in to the LDS-staged LL128 two-shot AllReduce writer on gfx1250 wave32 from 2 MiB shards.
-RCCL_PARAM(DdaLL128AsyncWire, "DDA_LL128_ASYNC_WIRE", 0);
+// LDS-staged LL128 two-shot AllReduce writer and peer-split on gfx1250 wave32 from 2 MiB; on by default, 0 turns off.
+RCCL_PARAM(DdaLL128AsyncWire, "DDA_LL128_ASYNC_WIRE", 1);
 RCCL_PARAM(DdaLL128, "DDA_LL128", kDdaThresholdUnset);
 RCCL_PARAM(DdaLL128Threshold, "DDA_LL128_THRESHOLD", kDdaThresholdUnset);
 // Broadcast DDA: unset follows the arch table (any Broadcast DDA tier), 0 off, >0 on.
@@ -1265,12 +1265,17 @@ size_t rcclDdaLLThreshold(const ncclComm* comm, ncclFunc_t func) {
   return rcclDdaLLThresholdTab(extAlgoArchTable(comm), func, comm != nullptr ? comm->nRanks : 0);
 }
 
+// Whether the user sets RCCL_DDA_LL_TWOSHOT_THRESHOLD, read once.
+static bool rcclDdaLLTwoShotThresholdSet() {
+  static const bool set = rcclEnvIsSet("RCCL_DDA_LL_TWOSHOT_THRESHOLD");
+  return set;
+}
+
 // RCCL_DDA_LL_TWOSHOT_THRESHOLD wins when the user sets it. On rank-scaled comms
 // whose table scales the AllReduce LL tier, two-shot runs to that tier's cap;
 // otherwise the env var's default applies.
 inline size_t rcclDdaLLTwoShotThresholdTab(const rcclArchThresholds* table, int nRanks) {
-  static const bool envSet = rcclEnvIsSet("RCCL_DDA_LL_TWOSHOT_THRESHOLD");
-  if (!envSet && rcclDdaRankScaled(table, nRanks) &&
+  if (!rcclDdaLLTwoShotThresholdSet() && rcclDdaRankScaled(table, nRanks) &&
       funcThresholdFromTable(table->ddaLLMaxPerRank, ncclFuncAllReduce) != 0) {
     return rcclDdaLLThresholdTab(table, ncclFuncAllReduce, nRanks);
   }
@@ -1349,6 +1354,17 @@ inline size_t rcclDdaLL128TwoShotThresholdTab(const rcclArchThresholds* table, i
 }
 size_t rcclDdaLL128TwoShotThreshold(const ncclComm* comm) {
   return rcclDdaLL128TwoShotThresholdTab(extAlgoArchTable(comm), comm != nullptr ? comm->nRanks : 0);
+}
+
+bool rcclDdaArLLTierPinnedByEnv() {
+  static const bool oneShotSet = rcclEnvIsSet("RCCL_DDA_LL_ONESHOT_THRESHOLD");
+  size_t unused;
+  return oneShotSet || rcclDdaLLTwoShotThresholdSet() || ddaThresholdFromEnv(rcclParamDdaLLThreshold(), &unused);
+}
+
+bool rcclDdaArLL128OneShotPinnedByEnv() {
+  static const bool set = rcclEnvIsSet("RCCL_DDA_LL128_ONESHOT_THRESHOLD");
+  return set;
 }
 
 inline size_t rcclDdaVmmThresholdTab(const rcclArchThresholds* table, ncclFunc_t func, int nRanks) {
@@ -2108,8 +2124,9 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
         rcclCollDecision cand = *decision;
         cand.algo = RCCL_DDA_FABRIC_LL128;
         cand.protocol = NCCL_PROTO_LL128;
-        cand.ddaCap = ddaCap;
-        cand.nMaxChannels = ncclAllReduceDdaFabricLL128Blocks(comm, count, datatype, ddaCap);
+        cand.ddaLL128Split = ncclAllReduceDdaFabricLL128SplitEligible(comm, sendbuff, recvbuff, count, datatype, op,
+                                                                      ddaCap, /*vmmFirst=*/false, &cand.ddaCap);
+        cand.nMaxChannels = ncclAllReduceDdaFabricLL128Blocks(comm, count, datatype, cand.ddaCap, cand.ddaLL128Split);
         rcclCandSearchRecord(cs, RCCL_BACKEND_DDA, cand);
         if (!query) {
           INFO(NCCL_TUNING, "AR cand DDA-LL128(registered eager): inWindow=1 preferred=%d fallback=%d",
@@ -2124,8 +2141,12 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
         // rcclCandSearch arbitration runs to completion: under CTA_POLICY_ZERO the
         // preferred mask is RCCL_BACKEND_CE, so an early return would silently
         // bypass the preferred/fallback warning when CE 2-shot is not yet ready.
-        if (rcclDdaArVmmFirstTab(archTable, comm->nRanks, msgBytes, winRegType) &&
-            ncclAllReduceDdaFabricEligible(comm, sendbuff, recvbuff, count, datatype, op)) {
+        // The VMM-first window leaves messages the LL128 peer-split two-shot takes to the LL128 tier.
+        const bool vmmFirst = rcclDdaArVmmFirstTab(archTable, comm->nRanks, msgBytes, winRegType);
+        rcclDdaLaunchCap splitBound;
+        const bool split = ncclAllReduceDdaFabricLL128SplitEligible(comm, sendbuff, recvbuff, count, datatype, op,
+                                                                    ddaCap, vmmFirst, &splitBound);
+        if (vmmFirst && !split && ncclAllReduceDdaFabricEligible(comm, sendbuff, recvbuff, count, datatype, op)) {
           rcclCollDecision cand = *decision;
           cand.algo = RCCL_DDA_FABRIC_VMM;
           cand.ddaCap = ddaCap;
@@ -2147,8 +2168,9 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
             ncclAllReduceDdaFabricLL128Eligible(comm, sendbuff, recvbuff, count, datatype, op)) {
           rcclCollDecision cand = *decision;
           cand.algo = RCCL_DDA_FABRIC_LL128; cand.protocol = NCCL_PROTO_LL128;
-          cand.ddaCap = ddaCap;
-          cand.nMaxChannels = ncclAllReduceDdaFabricLL128Blocks(comm, count, datatype, ddaCap);
+          cand.ddaCap = splitBound;
+          cand.ddaLL128Split = split;
+          cand.nMaxChannels = ncclAllReduceDdaFabricLL128Blocks(comm, count, datatype, cand.ddaCap, split);
           rcclCandSearchRecord(cs, RCCL_BACKEND_DDA, cand, msgBytes <= arDdaLL128Max);
           if (!query) INFO(NCCL_TUNING, "AR cand DDA-LL128: inWindow=%d preferred=%d fallback=%d", (int)(msgBytes <= arDdaLL128Max), (int)cs.bestPreferredFound, (int)cs.bestFallbackFound);
         }

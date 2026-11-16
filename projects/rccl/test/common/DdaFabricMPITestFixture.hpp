@@ -17,6 +17,7 @@
 #include "DdaMPITestHelpers.hpp"
 #include "MPIHelpers.hpp"
 #include "MPITestBase.hpp"
+#include "StreamWaitHelpers.hpp"
 #include "TestChecks.hpp"
 #include "comm.h" // internal: struct ncclComm::ddaFabricBarrierState
 
@@ -24,12 +25,10 @@
 #include <mpi.h>
 
 #include <algorithm>
-#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <memory>
 #include <string>
-#include <thread>
 
 namespace DdaFabricMPI
 {
@@ -75,21 +74,7 @@ inline bool logContainsNeedle(const MPIHelpers::TestLogAssertionContext& logCtx,
     return countLogNeedle(logCtx, needle) > 0;
 }
 
-// Polls so that a kernel spinning on a peer flag that never arrives is reported instead of hanging.
-// Returns hipSuccess, the stream's error, or hipErrorNotReady when the timeout expires.
-inline hipError_t waitStreamBounded(hipStream_t stream, std::chrono::milliseconds timeout)
-{
-    const auto deadline = std::chrono::steady_clock::now() + timeout;
-    while(true)
-    {
-        const hipError_t query = hipStreamQuery(stream);
-        if(query != hipErrorNotReady || std::chrono::steady_clock::now() >= deadline)
-        {
-            return query;
-        }
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
-    }
-}
+using RcclUnitTesting::waitStreamBounded;
 
 // Every rank must call this. A spinning kernel or a sticky HIP error cannot be recovered, so either aborts the job.
 inline void abortJobUnlessAllRanksDrained(hipError_t status, const char* what)

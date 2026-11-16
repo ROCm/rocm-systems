@@ -142,16 +142,21 @@ __device__ __forceinline__ void ddaLL128Store16B(uint64_t* dst, uint64_t lo, uin
 #endif
 }
 
+// One 16B load: the dwordx4 builtin where the device pass has it, else a nontemporal load.
+__device__ __forceinline__ void ddaLL128Load16BRaw(v4u& dst, const void* src) {
+#if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
+  dst = __builtin_amdgcn_global_load_b128((v4u_gptr)src, RCCL_SYSTEM_SYNCSCOPE);
+#else
+  dst = __builtin_nontemporal_load((v4u_gptr)src);
+#endif
+}
+
 __device__ __forceinline__ void ddaLL128Load16B(const uint64_t* src, uint64_t& lo, uint64_t& hi) {
   union {
     v4u v;
     uint64_t w[2];
   } u;
-#if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
-  u.v = __builtin_amdgcn_global_load_b128((v4u_gptr)src, RCCL_SYSTEM_SYNCSCOPE);
-#else
-  u.v = __builtin_nontemporal_load((v4u_gptr)src);
-#endif
+  ddaLL128Load16BRaw(u.v, src);
   lo = u.w[0];
   hi = u.w[1];
 }
@@ -210,6 +215,11 @@ __device__ __forceinline__ void ddaLL128LoadRegs(
     if (flag) regs[2 * g] = regs[2 * g - 1];
 }
 
+// Chunk pair g of lane wid loads without a branch; a flag lane's odd pair, whose data is unused, loads lane wid - 1's.
+__device__ __forceinline__ int ddaLL128LoadChunkIx(int g, int wid, bool flag) {
+  return ddaLL128ChunkIx(g, (flag && g % 2 == 1) ? wid - 1 : wid);
+}
+
 // ddaLL128LoadRegs without per-lane branches. Loads a lane does not need are in bounds and discarded.
 template <typename T>
 __device__ __forceinline__ void ddaLL128LoadRegsBatched(
@@ -217,7 +227,7 @@ __device__ __forceinline__ void ddaLL128LoadRegsBatched(
   constexpr int EltPer16B = 16 / sizeof(T);
 #pragma unroll
   for (int g = 0; g < kDdaLL128Pairs; g++) {
-    const int ix = ddaLL128ChunkIx(g, (flag && g % 2 == 1) ? wid - 1 : wid);
+    const int ix = ddaLL128LoadChunkIx(g, wid, flag);
     const int elt = ix * EltPer16B < eltN ? ix * EltPer16B : 0;
     ddaLL128Load16B(reinterpret_cast<const uint64_t*>(src + elt), regs[2 * g], regs[2 * g + 1]);
   }
@@ -238,6 +248,42 @@ __device__ __forceinline__ void ddaLL128ForEachWirePair(const uint64_t (&regs)[k
 #pragma unroll
   for (int u = 0; u < kDdaLL128WordsPerThread; u += 2) {
     f(u * kDdaLL128Warp, regs[u], flagLane ? flag : regs[u + 1]);
+  }
+}
+
+// ddaLL128LoadRegsBatched in two steps, so loads stay in flight; chunks past eltN load chunk 0, RawToRegs zeroes them.
+struct DdaLL128Raw {
+  v4u v[kDdaLL128Pairs];
+};
+
+template <typename T>
+__device__ __forceinline__ void ddaLL128LoadRaw(DdaLL128Raw& raw, const T* src, int eltN, int wid, bool flag) {
+  constexpr int EltPer16B = 16 / sizeof(T);
+  // Compiler barrier: each call's loads issue here, so a look-ahead reload is not folded into an earlier load.
+  asm volatile("" ::: "memory");
+#pragma unroll
+  for (int g = 0; g < kDdaLL128Pairs; g++) {
+    const int ix = ddaLL128LoadChunkIx(g, wid, flag);
+    ddaLL128Load16BRaw(raw.v[g], src + (ix * EltPer16B < eltN ? ix : 0) * EltPer16B);
+  }
+}
+
+// ddaLL128LoadRegs's registers from a raw load.
+template <typename T>
+__device__ __forceinline__ void ddaLL128RawToRegs(const DdaLL128Raw& raw, uint64_t (&regs)[kDdaLL128WordsPerThread],
+                                                  int eltN, int wid, bool flag) {
+  constexpr int EltPer16B = 16 / sizeof(T);
+#pragma unroll
+  for (int g = 0; g < kDdaLL128Pairs; g++) {
+    const bool valid = ddaLL128LoadChunkIx(g, wid, flag) * EltPer16B < eltN;
+    regs[2 * g] = valid ? (uint64_t)raw.v[g][0] | ((uint64_t)raw.v[g][1] << 32) : 0;
+    regs[2 * g + 1] = valid ? (uint64_t)raw.v[g][2] | ((uint64_t)raw.v[g][3] << 32) : 0;
+  }
+#pragma unroll
+  for (int g = 1; g < kDdaLL128Pairs; g += 2) {  // move flag-lane data out of odd regs
+    if (flag) {
+      regs[2 * g] = regs[2 * g - 1];
+    }
   }
 }
 
@@ -390,6 +436,47 @@ __device__ __forceinline__ bool ddaLL128PollWireBatched(const uint64_t* wire, ui
   return true;
 }
 
+// ddaLL128PollWire on wire[i] for each bit i of the wave-uniform mask, loads before any flag test; false if aborted.
+template <int kN>
+__device__ __forceinline__ bool ddaLL128PollWireN(const uint64_t* const (&wire)[kN], uint32_t mask,
+                                                  uint64_t (&vr)[kN][kDdaLL128WordsPerThread], uint64_t flag, int wid,
+                                                  DdaKernelParams params) {
+  const bool flagLane = ddaLL128IsFlagLane(wid);
+  auto loadAll = [&]() {
+#pragma unroll
+    for (int u = 0; u < kDdaLL128WordsPerThread; u += 2) {
+#pragma unroll
+      for (int i = 0; i < kN; ++i) {
+        if ((mask >> i) & 1u) {
+          ddaLL128LoadAtomic16B(wire[i] + u * kDdaLL128Warp, vr[i][u], vr[i][u + 1]);
+        }
+      }
+    }
+  };
+  int spins = 0;
+  bool needReload;
+  do {
+    if (params.abortSpinTick(spins)) {
+      return false;
+    }
+    needReload = false;
+    loadAll();
+#pragma unroll
+    for (int i = 0; i < kN; ++i) {
+      if ((mask >> i) & 1u) {
+#pragma unroll
+        for (int u = 0; u < kDdaLL128WordsPerThread; u += 2) {
+          needReload |= flagLane && vr[i][u + 1] != flag;
+        }
+      }
+    }
+  } while (__any(needReload));
+#if !RCCL_HAVE_COOPERATIVE_ATOMIC_BUILTINS
+  loadAll();
+#endif
+  return true;
+}
+
 // Flag-lane un-shuffle then store of registers into `dst`
 template <typename T>
 __device__ __forceinline__ void ddaLL128StoreRegs(
@@ -412,6 +499,12 @@ __device__ __forceinline__ void ddaLL128StoreRegs(
 // Slices needed to carry bytes of payload.
 constexpr size_t ddaLL128Slices(size_t bytes) {
   return (bytes + kDdaLL128DataBytesPerSlice - 1) / kDdaLL128DataBytesPerSlice;
+}
+
+// Payload bytes of slice s of a `bytes`-long range: a whole slice, or what is left for the last one.
+constexpr int ddaLL128SliceBytes(size_t bytes, size_t s) {
+  const size_t rem = bytes - s * (size_t)kDdaLL128DataBytesPerSlice;
+  return rem < (size_t)kDdaLL128DataBytesPerSlice ? (int)rem : kDdaLL128DataBytesPerSlice;
 }
 
 // Payload a slot of slotWords wire words carries, in whole slices.
