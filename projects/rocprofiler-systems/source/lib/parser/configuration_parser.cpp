@@ -41,13 +41,6 @@ constexpr int              k_overwrite         = 1;
 
 using json = nlohmann::json;
 
-unknown_option
-to_unknown(parse_mode mode)
-{
-    return mode == parse_mode::stop_at_unknown ? unknown_option::stop
-                                               : unknown_option::report;
-}
-
 void
 append_errors(std::vector<std::string>& dest, const std::vector<std::string>& extra)
 {
@@ -74,8 +67,8 @@ reject_backend_values(const schema& config_schema, const backend_registry& backe
 {
     for(auto itr = parsed.values.begin(); itr != parsed.values.end();)
     {
-        const auto*    param = config_schema.find_param(itr->first);
-        const backend* found = nullptr;
+        const auto*              param = config_schema.find_param(itr->first);
+        const backend_interface* found = nullptr;
         if(param != nullptr && param->backend && !param->backend->empty())
         {
             found = backends.find(*param->backend);
@@ -171,7 +164,7 @@ struct parse_request
 {
     const schema&                                config_schema;
     const std::vector<std::string>&              arguments;
-    parse_mode                                   mode = parse_mode::full;
+    unknown_option                               unknown = unknown_option::report;
     const env_parser::lookup_t&                  environment;
     const configuration_parser::preset_lookup_t& presets;
     const backend_registry&                      backends;
@@ -185,8 +178,7 @@ read_primary(const parse_request& request)
     collected.defaults    = default_parser{}.parse(request.config_schema);
     collected.environment = make_env(request.environment).parse(request.config_schema);
     collected.command_line =
-        cli_parser{ request.arguments, to_unknown(request.mode) }.parse(
-            request.config_schema);
+        cli_parser{ request.arguments, request.unknown }.parse(request.config_schema);
     reject_backend_values(request.config_schema, request.backends,
                           config_source::default_value, collected.defaults);
     reject_backend_values(request.config_schema, request.backends,
@@ -264,7 +256,7 @@ add_backend_defaults(resolved_config& resolved, const schema& config_schema,
         {
             continue;
         }
-        const auto parsed = parse_value(param, canonical_choice(param, fallback));
+        const auto parsed = parse_value(param, fallback);
         if(!parsed)
         {
             continue;
@@ -324,7 +316,7 @@ apply_assigns(resolved_config& resolved, const schema& config_schema,
             {
                 continue;
             }
-            const auto parsed = parse_value(*target, canonical_choice(*target, text));
+            const auto parsed = parse_value(*target, text);
             if(!parsed)
             {
                 errors.push_back(invalid_value_message(text, target_id));
@@ -388,9 +380,9 @@ install_resolved(config_store& live, const schema& config_schema,
 }  // namespace
 
 void
-configuration_parser::set_parse_mode(parse_mode mode)
+configuration_parser::set_unknown_option(unknown_option policy)
 {
-    m_mode = mode;
+    m_unknown = policy;
 }
 
 void
@@ -446,7 +438,7 @@ configuration_parser::initialize(schema catalog)
 }
 
 bool
-configuration_parser::add_backend(std::unique_ptr<backend> item)
+configuration_parser::add_backend(std::unique_ptr<backend_interface> item)
 {
     if(m_backends == nullptr)
     {
@@ -476,7 +468,7 @@ configuration_parser::parse(const std::vector<std::string>& arguments)
     const auto schema_ptr = m_store->config_schema();
     const auto request    = parse_request{ .config_schema = *schema_ptr,
                                            .arguments     = arguments,
-                                           .mode          = m_mode,
+                                           .unknown       = m_unknown,
                                            .environment   = m_environment,
                                            .presets       = m_presets,
                                            .backends      = *m_backends,

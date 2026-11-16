@@ -84,7 +84,7 @@ private:
     std::filesystem::path m_path;
 };
 
-class letter_backend final : public backend
+class letter_backend final : public backend_interface
 {
 public:
     [[nodiscard]] std::string_view name() const override { return "letters"; }
@@ -120,8 +120,7 @@ schema
 letter_schema()
 {
     schema value{};
-    // A string so the catalog accepts the text. The backend then accepts or rejects it.
-    auto letter         = named("letter", param_type::string);
+    auto   letter       = named("letter", param_type::enumeration);
     letter.category     = "demo";
     letter.backend      = "letters";
     letter.arg          = "--letter";
@@ -162,11 +161,6 @@ effect_schema()
     auto log_level        = named("log_level", param_type::string);
     log_level.category    = "logging";
     log_level.arg         = "--log-level";
-    auto broken           = named("broken", param_type::boolean);
-    broken.category       = "logging";
-    broken.flag           = true;
-    broken.arg            = "--broken";
-    broken.assigns        = { { "profile", "not-a-bool" } };
     auto profile          = named("profile", param_type::boolean);
     profile.category      = "tracing";
     profile.default_value = "false";
@@ -188,7 +182,6 @@ effect_schema()
     right.arg             = "--right";
     add_param(value, std::move(debug));
     add_param(value, std::move(log_level));
-    add_param(value, std::move(broken));
     add_param(value, std::move(profile));
     add_param(value, std::move(flat));
     add_param(value, std::move(left));
@@ -292,22 +285,24 @@ TEST(parser_configuration, preset_overrides_the_file_and_environment)
     EXPECT_EQ(values.at("output_path"), "from-preset");
 }
 
-TEST(parser_configuration, unknown_option_can_stop_parsing)
+TEST(parser_configuration, unknown_options_are_forwarded_and_parsing_continues)
 {
     auto parser = make_parser();
-    parser.set_parse_mode(parse_mode::stop_at_unknown);
-    const auto stopped =
-        parser.parse({ "--output", "kept", "--not-an-option", "--debug" });
-    EXPECT_EQ(stopped.at("output_path"), "kept");
-    EXPECT_EQ(stopped.at("debug"), "false");
+    parser.set_unknown_option(unknown_option::forward);
+    const auto forwarded =
+        parser.parse({ "--gpu=temp", "--output", "kept", "--not-an-option", "value",
+                       "--debug", "--", "./app" });
     EXPECT_TRUE(parser.errors().empty());
-    ASSERT_EQ(parser.unparsed().size(), 2U);
-    EXPECT_EQ(parser.unparsed().at(0), "--not-an-option");
-    EXPECT_EQ(parser.unparsed().at(1), "--debug");
+    EXPECT_EQ(forwarded.at("output_path"), "kept");
+    EXPECT_EQ(forwarded.at("debug"), "true");
+    EXPECT_EQ(parser.unparsed(),
+              (std::vector<std::string>{ "--gpu=temp", "--not-an-option", "value" }));
+    EXPECT_EQ(parser.command(), std::vector<std::string>{ "./app" });
 
-    parser.set_parse_mode(parse_mode::full);
+    parser.set_unknown_option(unknown_option::report);
     static_cast<void>(parser.parse({ "--not-an-option" }));
     EXPECT_TRUE(contains_text(parser.errors(), "unknown option"));
+    EXPECT_TRUE(parser.unparsed().empty());
 }
 
 TEST(parser_configuration, rejects_values_outside_the_schema)
@@ -396,7 +391,7 @@ TEST(parser_configuration, help_filters_by_level_and_topic)
     mode.category      = "sampling";
     mode.arg           = "--mode";
     mode.description   = "Sampling mode";
-    mode.choices       = { choice{ "realtime" }, choice{ "cputime" } };
+    mode.choices       = { "realtime", "cputime" };
     auto hidden        = named("hidden", param_type::boolean);
     hidden.category    = "sampling";
     hidden.level       = param_level::advanced;
@@ -475,17 +470,25 @@ TEST(parser_configuration, a_directory_config_path_throws)
     EXPECT_EQ(parser.get<std::int64_t>("verbose"), 0);
 }
 
-TEST(parser_configuration, invalid_assign_keeps_the_previous_store)
+TEST(parser_configuration, refuses_a_catalog_that_assigns_an_invalid_value)
 {
     configuration_parser parser;
     parser.set_environment([](std::string_view) { return std::optional<std::string>{}; });
     ASSERT_TRUE(parser.initialize(effect_schema())) << parser.failure();
-    const auto first = parser.parse({});
-    EXPECT_EQ(first.at("profile"), "false");
-    const auto rejected = parser.parse({ "--broken" });
-    EXPECT_TRUE(rejected.empty());
-    EXPECT_TRUE(contains_text(parser.errors(), "profile"));
-    EXPECT_EQ(parser.get<bool>("profile"), false);
+
+    auto broken_catalog = effect_schema();
+    auto broken         = named("broken", param_type::boolean);
+    broken.category     = "logging";
+    broken.flag         = true;
+    broken.arg          = "--broken";
+    broken.assigns      = { { "profile", "not-a-bool" } };
+    add_param(broken_catalog, std::move(broken));
+    EXPECT_FALSE(parser.initialize(std::move(broken_catalog)));
+    EXPECT_NE(
+        parser.failure().find("parameter 'broken' assigns invalid value 'not-a-bool' to "
+                              "'profile'"),
+        std::string::npos);
+    EXPECT_EQ(parser.config_schema()->find_param("broken"), nullptr);
 }
 
 TEST(parser_configuration, assigns_run_after_precedence)

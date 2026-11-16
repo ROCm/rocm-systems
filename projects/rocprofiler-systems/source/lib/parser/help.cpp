@@ -63,20 +63,15 @@ append_usage(std::ostream& out, const schema_param& param)
 std::vector<std::string>
 choice_names(const schema_param& param, const backend_registry* backends)
 {
-    std::vector<std::string> names;
-    names.reserve(param.choices.size());
-    for(const auto& item : param.choices)
+    if(!param.choices.empty() || backends == nullptr || !param.backend ||
+       param.backend->empty())
     {
-        names.push_back(item.value);
-    }
-    if(!names.empty() || backends == nullptr || !param.backend || param.backend->empty())
-    {
-        return names;
+        return param.choices;
     }
     const auto* found = backends->find(*param.backend);
     if(found == nullptr)
     {
-        return names;
+        return param.choices;
     }
     return found->choices(param);
 }

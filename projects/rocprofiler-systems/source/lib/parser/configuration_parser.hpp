@@ -4,13 +4,13 @@
 #pragma once
 
 #include "parser/backend.hpp"
+#include "parser/cli_parser.hpp"
 #include "parser/config_store.hpp"
 #include "parser/env_parser.hpp"
 #include "parser/help.hpp"
 #include "parser/preset_parser.hpp"
 #include "parser/schema.hpp"
 
-#include <cstdint>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -20,15 +20,6 @@
 
 namespace rocprofsys::parser
 {
-/// What to do with an argument that is not in the schema.
-enum class parse_mode : std::uint8_t
-{
-    /// Record an error and keep parsing.
-    full = 0,
-    /// Stop and return that argument plus everything after it as unparsed.
-    stop_at_unknown,
-};
-
 /**
  * Loads a schema and resolves defaults, a config file, the environment, a preset,
  * and the command line.
@@ -46,7 +37,11 @@ class configuration_parser
 public:
     using preset_lookup_t = std::function<preset_parser::settings_t(std::string_view)>;
 
-    void set_parse_mode(parse_mode mode);
+    /// What the command line does with an option the catalog does not know.
+    /// unknown_option::report, the default, records an error. unknown_option::forward
+    /// keeps it, and any plain argument before "--", in unparsed() for the tool a
+    /// wrapper runs.
+    void set_unknown_option(unknown_option policy);
     /// Replace process-environment lookup. An empty function reads the process.
     void set_environment(env_parser::lookup_t lookup);
     void set_preset_lookup(preset_lookup_t lookup);
@@ -68,7 +63,7 @@ public:
      * @return false, leaving the registry unchanged, when the parser is not
      * initialized or the name is empty or already taken.
      */
-    [[nodiscard]] bool add_backend(std::unique_ptr<backend> item);
+    [[nodiscard]] bool add_backend(std::unique_ptr<backend_interface> item);
 
     [[nodiscard]] const std::string& failure() const noexcept { return m_failure; }
 
@@ -83,6 +78,8 @@ public:
     {
         return m_command;
     }
+    /// With unknown_option::forward, every unknown option and plain argument before
+    /// "--", in order.
     [[nodiscard]] const std::vector<std::string>& unparsed() const noexcept
     {
         return m_unparsed;
@@ -109,7 +106,7 @@ public:
 private:
     std::unique_ptr<config_store>     m_store;
     std::unique_ptr<backend_registry> m_backends;
-    parse_mode                        m_mode = parse_mode::full;
+    unknown_option                    m_unknown = unknown_option::report;
     env_parser::lookup_t              m_environment;
     preset_lookup_t                   m_presets;
     std::string                       m_failure;
