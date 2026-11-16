@@ -13,6 +13,7 @@
 #include <time.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <atomic>
 #include <cerrno>
 #include <chrono>
@@ -48,6 +49,10 @@ constexpr int kChurnThreads = 3;
 constexpr auto kChurnTime = std::chrono::seconds(8);
 // Fewest churn processes that must bind for a run to count; AMDSMI CI runs bound 285 to 486.
 constexpr int kMinChurnProcesses = 100;
+// How long a churn process that holds VRAM waits to be listed before it exits
+// (beyond AMDSMI_PROCESS_INFO_CACHE_MS), first and at most.
+constexpr auto kHolderWait = std::chrono::milliseconds(200);
+constexpr auto kMaxHolderWait = std::chrono::seconds(2);
 
 // Makes the calling process a GPU process: opens /dev/kfd, binds the render node
 // and, given a size, allocates that much VRAM, which the GPU's process list needs
@@ -88,6 +93,44 @@ bool RunChurnProcess(uint32_t kfd_gpu_id, const char* render_node) {
   int wstatus = 0;
   return child > 0 && waitpid(child, &wstatus, 0) == child && WIFEXITED(wstatus) &&
          WEXITSTATUS(wstatus) == 0;
+}
+
+// Starts a GPU process that holds a page of VRAM, as the GPU's process list
+// needs to count it, until it is killed. Returns its PID once it holds the
+// VRAM, or -1 with the failed step and its errno in `report` (step -1 when
+// pipe() or fork() failed, or the child sent no report).
+pid_t StartHolder(uint32_t kfd_gpu_id, const char* render_node, HelperReport* report) {
+  *report = HelperReport{};
+  int fds[2];
+  if (pipe(fds) != 0) {
+    report->err = errno;
+    return -1;
+  }
+  const pid_t child = fork();
+  if (child < 0) report->err = errno;
+  if (child == 0) {
+    close(fds[0]);
+    prctl(PR_SET_PDEATHSIG, SIGKILL);
+    const HelperReport bound = BindKfd(kfd_gpu_id, render_node, kPageSize);
+    if (write(fds[1], &bound, sizeof(bound)) != sizeof(bound) ||
+        bound.step != HelperReport::kReady) {
+      _exit(1);
+    }
+    for (;;) pause();
+  }
+  close(fds[1]);
+  pollfd ready{fds[0], POLLIN, 0};
+  if (child > 0 && poll(&ready, 1, 30000) == 1 &&
+      read(fds[0], report, sizeof(*report)) != sizeof(*report)) {
+    *report = HelperReport{};
+  }
+  close(fds[0]);
+  const bool up = child > 0 && report->step == HelperReport::kReady;
+  if (child > 0 && !up) {
+    kill(child, SIGKILL);
+    waitpid(child, nullptr, 0);
+  }
+  return up ? child : -1;
 }
 
 }  // namespace
@@ -185,7 +228,8 @@ void TestProcessListChurnRead::Run(void) {
   stopper.kfd_pid = kfd_pid;
 
   std::vector<amdsmi_proc_info_t> procs(kMaxProcs);
-  auto query = [&](pid_t pid, bool* listed) {
+  uint32_t num_listed = 0;  // Entries of procs that the last successful query filled
+  auto query = [&]() {
     uint32_t count = static_cast<uint32_t>(procs.size());
     amdsmi_status_t st = amdsmi_get_gpu_process_list(gpu, &count, procs.data());
     if (st == AMDSMI_STATUS_OUT_OF_RESOURCES) {
@@ -193,25 +237,28 @@ void TestProcessListChurnRead::Run(void) {
       count = static_cast<uint32_t>(procs.size());
       st = amdsmi_get_gpu_process_list(gpu, &count, procs.data());
     }
-    *listed = false;
-    for (uint32_t i = 0; st == AMDSMI_STATUS_SUCCESS && i < count && i < procs.size(); ++i) {
-      *listed |= procs[i].pid == static_cast<uint32_t>(pid);
-    }
+    num_listed =
+        st == AMDSMI_STATUS_SUCCESS ? std::min(count, static_cast<uint32_t>(procs.size())) : 0;
     return st;
+  };
+  // Whether the last successful query listed `pid`.
+  auto listed = [&](pid_t pid) {
+    return std::any_of(
+        procs.begin(), procs.begin() + num_listed,
+        [pid](const amdsmi_proc_info_t& p) { return p.pid == static_cast<uint32_t>(pid); });
   };
   // A list cached before the helper started is served for up to
   // AMDSMI_PROCESS_INFO_CACHE_MS, so wait until it shows the helper.
   const char* cache_ms = std::getenv("AMDSMI_PROCESS_INFO_CACHE_MS");
-  bool listed = false;
-  for (const auto give_up =
-           Clock::now() + std::chrono::seconds(10) +
-           std::chrono::milliseconds(cache_ms ? std::strtoul(cache_ms, nullptr, 10) : 0);
-       !listed && Clock::now() < give_up;) {
-    if (query(helper, &listed) != AMDSMI_STATUS_SUCCESS || !listed) {
-      std::this_thread::sleep_for(std::chrono::milliseconds(10));
-    }
+  const auto cache_time =
+      std::chrono::milliseconds(cache_ms ? std::strtoul(cache_ms, nullptr, 10) : 0);
+  bool helper_listed = false;
+  for (const auto give_up = Clock::now() + std::chrono::seconds(10) + cache_time;
+       !helper_listed && Clock::now() < give_up;) {
+    helper_listed = query() == AMDSMI_STATUS_SUCCESS && listed(helper);
+    if (!helper_listed) std::this_thread::sleep_for(std::chrono::milliseconds(10));
   }
-  ASSERT_TRUE(listed) << "GPU 0 does not list the helper by its PID";
+  ASSERT_TRUE(helper_listed) << "GPU 0 does not list the helper by its PID";
 
   std::atomic<bool> stop{false};
   std::atomic<int> churned{0};
@@ -228,15 +275,54 @@ void TestProcessListChurnRead::Run(void) {
       }
     });
   }
+  // One more thread's processes hold VRAM, so that the list counts them while
+  // they run: each runs until a list shows it, or for kHolderWait, then exits.
+  // On a host whose lists are slow, each unlisted one makes the next run longer.
+  std::atomic<pid_t> holder{0};         // The running one, or 0
+  std::atomic<pid_t> holder_listed{0};  // The last one a list showed
+  std::atomic<int> holders{0};
+  std::atomic<int> holders_failed{0};
+  HelperReport holder_failure;  // The last failed start's; read after the join
+  churn.emplace_back([&] {
+    std::chrono::milliseconds wait = kHolderWait;
+    while (!stop) {
+      HelperReport report;
+      const pid_t pid = StartHolder(kfd_gpu_id, render_node.c_str(), &report);
+      if (pid < 0) {
+        ++holders_failed;
+        holder_failure = report;
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        continue;
+      }
+      ++holders;
+      holder = pid;
+      for (const auto give_up = Clock::now() + wait + cache_time;
+           holder_listed != pid && !stop && Clock::now() < give_up;) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+      }
+      if (holder_listed != pid) {
+        wait = std::min<std::chrono::milliseconds>(2 * wait, kMaxHolderWait);
+      }
+      holder = 0;
+      kill(pid, SIGKILL);
+      waitpid(pid, nullptr, 0);
+    }
+  });
   int calls = 0;
   int unlisted = 0;
+  int holders_listed = 0;
   std::map<amdsmi_status_t, int> errors;
   for (const auto end = Clock::now() + kChurnTime; Clock::now() < end; ++calls) {
-    const amdsmi_status_t st = query(helper, &listed);
+    const pid_t holding = holder;
+    const amdsmi_status_t st = query();
     if (st != AMDSMI_STATUS_SUCCESS) {
       ++errors[st];
-    } else if (!listed) {
-      ++unlisted;
+      continue;
+    }
+    if (!listed(helper)) ++unlisted;
+    if (holding != 0 && holding != holder_listed && listed(holding)) {
+      holder_listed = holding;
+      ++holders_listed;
     }
   }
   stop = true;
@@ -256,8 +342,17 @@ void TestProcessListChurnRead::Run(void) {
       << churned << " churn processes bound to the GPU, " << churn_failed << " did not";
   EXPECT_GT(churned, churn_failed)
       << churned << " churn processes bound to the GPU, " << churn_failed << " did not";
+  // The churn reached the lists: processes that came and went were listed.
+  if (holders == 0 && IsEnvironmentFailure(holder_failure)) {
+    GTEST_SKIP() << "No churn process could hold VRAM: step " << holder_failure.step << ", errno "
+                 << holder_failure.err;
+  }
+  EXPECT_GT(holders_listed, 0) << holders << " churn processes held VRAM, " << holders_failed
+                               << " could not (last: step " << holder_failure.step << ", errno "
+                               << holder_failure.err << "); none was listed";
   IF_VERB(STANDARD) {
-    std::cout << "\t**" << calls << " calls while " << churned
-              << " GPU processes started and exited" << std::endl;
+    std::cout << "\t**" << calls << " calls while " << churned + holders
+              << " GPU processes started and exited; " << holders_listed << " of the " << holders
+              << " that held VRAM were listed" << std::endl;
   }
 }
