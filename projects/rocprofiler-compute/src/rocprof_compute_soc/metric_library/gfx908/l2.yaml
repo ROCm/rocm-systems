@@ -107,8 +107,7 @@ l2.hit_rate:
   formula: 100 * SUM(TCC_HIT_sum) / SUM(TCC_HIT_sum + TCC_MISS_sum)
   unit: Percent
   description: >-
-    The ratio of the number of L2 cache line requests that hit in the L2 cache over the
-    total number of incoming cache line requests to the L2 cache.
+    Percentage of incoming cache line requests to the L2 cache that hit in the L2 cache.
   peak: 100
 l2.hits:
   name: L2 Hits
@@ -189,8 +188,8 @@ l2.util:
   formula: 100 * SUM(TCC_BUSY_sum) / SUM(TO_INT($total_l2_chan) * $GRBM_GUI_ACTIVE_PER_XCD)
   unit: Percent
   description: >-
-    The ratio of the number of cycles an L2 channel was active, summed over all L2
-    channels on the accelerator over the total L2 cycles.
+    Percentage of total L2 cycles an L2 channel was active, summed over all L2 channels
+    on the accelerator.
 l2.wr_req:
   name: L2 Write Requests
   formula: SUM(TCC_WRITE_sum) / SUM($denom)

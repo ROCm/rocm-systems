@@ -2,7 +2,7 @@ utcl1.lookup_hit_rate:
   name: UTCL1 Lookup Hit Rate
   formula: 100 * SUM(UTCL1_HITS_sum) / SUM(UTCL1_REQS_sum)
   unit: Percent
-  description: UTCL1 TLB hit rate.
+  description: Percentage of UTCL1 TLB requests that hit.
 utcl1.miss_handler_fifo_full_rate:
   name: UTCL1 Miss Handler FIFO Full Rate
   formula: 100 * SUM(UTCL1_STALL_MH_FULL_sum) / SUM(UTCL1_XLAT_REQ_BUSY_sum)

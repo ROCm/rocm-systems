@@ -21,7 +21,7 @@ l1i.hit_rate_excl_dup:
   formula: 100 * SUM(SQC_ICACHE_HITS) / SUM(SQC_ICACHE_HITS + SQC_ICACHE_MISSES)
   unit: Percent
   description: >-
-    The percent of L1I requests that hit on a previously loaded line the cache.
+    Percentage of L1I requests that hit on a previously loaded line the cache.
     Calculated as the number of L1I hits over the number of hits and misses, excluding
     duplicate misses.
   peak: 100
@@ -30,7 +30,7 @@ l1i.hit_rate_incl_dup:
   formula: 100 * SUM(SQC_ICACHE_HITS) / SUM(SQC_ICACHE_HITS + SQC_ICACHE_MISSES + SQC_ICACHE_MISSES_DUPLICATE)
   unit: Percent
   description: >-
-    The percent of L1I requests that hit on a previously loaded line the cache.
+    Percentage of L1I requests that hit on a previously loaded line the cache.
     Calculated as the number of L1I hits over the number of hits and misses, including
     duplicate misses.
 l1i.hits:
@@ -45,8 +45,8 @@ l1i.hits_per_req:
   formula: 100 * SUM(SQC_ICACHE_HITS) / SUM(SQC_ICACHE_REQ)
   unit: Percent
   description: >-
-    The percent of L1I requests that hit on a previously loaded cache line. Calculated
-    as the ratio of the number of L1I requests that hit over the number of all L1I
+    Percentage of L1I requests that hit on a previously loaded cache line. Calculated as
+    the ratio of the number of L1I requests that hit over the number of all L1I
     requests.
 l1i.l2_bw:
   name: L1I-L2 Bandwidth

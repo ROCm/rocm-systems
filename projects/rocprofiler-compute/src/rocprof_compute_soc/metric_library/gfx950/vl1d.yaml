@@ -27,36 +27,37 @@ vl1d.cache_ta_stalled_by_tcp_aggregated:
   formula: 100 * SUM(TCP_TCP_TA_ADDR_STALL_CYCLES_sum) / SUM(TCP_GATE_EN2_sum)
   unit: Percent
   description: >-
-    Measures the aggregated impact of TCP events on TA. A high stall rate (>= 10%)
-    indicates that TCP is the bottleneck.
+    Percentage of vL1D busy cycles TCP stalled TA. This measures the aggregated impact
+    of TCP events on TA. A high stall rate (>= 10%) indicates that TCP is the
+    bottleneck.
 vl1d.cache_tcp_stalled_by_l2:
   name: L1 Cache - TCP Stalled by L2
   formula: 100 * SUM(TCP_TCR_TCP_STALL_CYCLES_sum) / SUM(TCP_GATE_EN2_sum)
   unit: Percent
   description: >-
-    Measures backpressure from L2 (TCC) to L1 (TCP) via TCR. A high stall rate (>= 10%)
-    indicates L2 is the bottleneck.
+    Percentage of vL1D busy cycles TCP was stalled by backpressure from L2 (TCC) through
+    TCR. A high stall rate (>= 10%) indicates L2 is the bottleneck.
 vl1d.cache_tcp_stalled_by_td:
   name: L1 Cache - TCP Stalled by TD
   formula: 100 * SUM(TCP_TD_TCP_STALL_CYCLES_sum) / SUM(TCP_GATE_EN2_sum)
   unit: Percent
   description: >-
-    Measures backpressure from TD (texture data) to TCP. A high rate indicates TD cannot
-    consume return data fast enough.
+    Percentage of vL1D busy cycles TCP was stalled by backpressure from TD (texture
+    data). A high rate indicates TD cannot consume return data fast enough.
 vl1d.cache_tcp_stalled_by_utcl1:
   name: L1 Cache - TCP Stalled by UTCL1
   formula: 100 * SUM(TCP_UTCL1_STALL_INFLIGHT_MAX_sum) / SUM(TCP_GATE_EN2_sum)
   unit: Percent
   description: >-
-    Measures backpressure from UTCL1 (TLB) to TCP. A high stall rate (>= 10%) indicates
-    UTCL1 is saturated with inflight requests.
+    Percentage of vL1D busy cycles TCP was stalled by backpressure from UTCL1 (TLB). A
+    high stall rate (>= 10%) indicates UTCL1 is saturated with inflight requests.
 vl1d.cache_tcp_stalled_by_utcl2:
   name: L1 Cache - TCP Stalled by UTCL2
   formula: 100 * SUM(TCP_PERF_SEL_UTCL1_STALL_LFIFO_NOT_RES_sum) / SUM(TCP_GATE_EN2_sum)
   unit: Percent
   description: >-
-    Measures backpressure from UTCL2 to TCP. A high stall rate (>= 10%) indicates UTCL2
-    misses causing TLB latency.
+    Percentage of vL1D busy cycles TCP was stalled by backpressure from UTCL2. A high
+    stall rate (>= 10%) indicates UTCL2 misses causing TLB latency.
 vl1d.inflight_req:
   name: UTCL1 Inflight Requests
   formula: SUM(TCP_CLIENT_UTCL1_INFLIGHT_sum) / SUM($denom)
