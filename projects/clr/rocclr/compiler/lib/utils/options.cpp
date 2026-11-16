@@ -578,8 +578,8 @@ int getOptionDesc(std::string& options, size_t StartPos, bool IsShortForm, Optio
   return option_ndx;
 }
 
-bool processOption(int OptDescTableIx, Options& Opts, const std::string& Value, bool IsPrefixOption,
-                   bool IsOffFlag) {
+bool processOption(int OptDescTableIx, Options& Opts, const std::string& Value,
+                   bool /*IsPrefixOption*/, bool IsOffFlag) {
   OptionVariables* ovars = Opts.oVariables;
   OptionDescriptor* od = &OptDescTable[OptDescTableIx];
 
@@ -1361,7 +1361,7 @@ static std::string getValidDumpPath(const std::string& path) {
 
 #endif
 
-static std::string getValidDumpBaseName(const std::string& path, const std::string& file,
+static std::string getValidDumpBaseName(const std::string& /*path*/, const std::string& file,
                                         long basename_max, const std::string& ext) {
   if (file.size() + ext.size() < static_cast<unsigned long>(basename_max)) {
     return file;

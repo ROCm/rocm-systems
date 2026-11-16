@@ -173,7 +173,7 @@ void* Memory::operator new(size_t size, const Context& context) {
 
 void Memory::operator delete(void* p) { RuntimeObject::operator delete(p); }
 
-void Memory::operator delete(void* p, const Context& context) { Memory::operator delete(p); }
+void Memory::operator delete(void* p, const Context& /*context*/) { Memory::operator delete(p); }
 
 
 void Memory::addSubBuffer(Memory* view) {
