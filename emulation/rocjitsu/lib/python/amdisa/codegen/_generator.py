@@ -12827,16 +12827,12 @@ class CodeGenerator:
                         if inst.name.startswith(('V_MFMA_F32_', 'V_MFMA_I32_')) and (
                             'F8F6F4' not in inst.name.replace('_', '')
                         ):
-                            a_block_lanes = (
-                                int(inst.name.split('_')[3].split('X')[0])
-                                if self.isa_spec.arch_name == 'cdna2'
-                                else 0
-                            )
+                            matrix_rows = int(inst.name.split('_')[3].split('X')[0])
                             access_conditions.append(
                                 'modifiers.mfma = {static_cast<uint8_t>(inst_.cbsz), '
                                 'static_cast<uint8_t>(inst_.abid), '
                                 'static_cast<uint8_t>(inst_.blgp), '
-                                f'{a_block_lanes}'
+                                f'{matrix_rows}'
                                 '};'
                             )
                         if dpp_routes_src1:

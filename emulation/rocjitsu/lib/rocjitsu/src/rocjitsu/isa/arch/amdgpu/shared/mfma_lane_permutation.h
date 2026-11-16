@@ -3,26 +3,24 @@
 
 #pragma once
 
+#include "rj_arith/rj_arith.h"
+#include "rocjitsu/base/api.h"
+
 #include <cstdint>
 
 namespace rocjitsu::amdgpu {
 
-/// AMD's matrix calculator at 2ef91896 applies adjacent M-lane block groups
-/// to gfx908, gfx90a and gfx942. CDNA2 follows that mapping. MI100 and MI200
-/// describe the same fields. The gfx908 model retains full-wave broadcast
-/// pending a hardware comparison. The gfx942/gfx950 model follows the
-/// full-wave formula in MI300 §7.1.5.1 and CDNA4 §7.1.6.1. Both guides'
-/// §13.3.6.1 ABID tables describe adjacent groups.
+// Keep architecture selection shared by execution and decoded-access checking.
+inline uint32_t mfma_a_block_lanes(rj_code_arch_t arch, uint32_t matrix_rows) {
+  return arch == ROCJITSU_CODE_ARCH_CDNA2 ? matrix_rows : 0u;
+}
+
+// The retained CDNA1/3/4 model uses a full-wave group; CDNA2 uses adjacent
+// M-lane blocks. Hardware qualification of that choice is separate from
+// keeping arithmetic, register reads and dependency checks consistent.
 inline uint32_t permute_a_lane(uint32_t lane, uint32_t cbsz, uint32_t abid,
                                uint32_t matrix_block_lanes = 0) {
-  if (cbsz == 0 || cbsz > 4)
-    return lane;
-  const uint32_t blocks = 1u << cbsz;
-  const uint32_t width = matrix_block_lanes ? matrix_block_lanes : 64u / blocks;
-  if (width > 64u / blocks)
-    return lane;
-  const uint32_t group_size = width * blocks;
-  return (lane / group_size) * group_size + (abid % blocks) * width + (lane % width);
+  return rj_arith_mfma_a_source_lane(lane, cbsz, abid, matrix_block_lanes);
 }
 
 /// @brief Permute the B-matrix lane based on the blgp field.
@@ -37,26 +35,7 @@ inline uint32_t permute_a_lane(uint32_t lane, uint32_t cbsz, uint32_t abid,
 ///   6: broadcast third 16 lanes  (l_b % 16 + 32)
 ///   7: broadcast fourth 16 lanes (l_b % 16 + 48)
 inline uint32_t permute_b_lane(uint32_t lane, uint32_t blgp) {
-  switch (blgp) {
-  case 0:
-    return lane;
-  case 1:
-    return lane % 32;
-  case 2:
-    return lane % 32 + 32;
-  case 3:
-    return (lane + 16) % 64;
-  case 4:
-    return lane % 16;
-  case 5:
-    return lane % 16 + 16;
-  case 6:
-    return lane % 16 + 32;
-  case 7:
-    return lane % 16 + 48;
-  default:
-    return lane;
-  }
+  return rj_arith_mfma_b_source_lane(lane, blgp);
 }
 
 /// Lanes read after applying a permutation to a full wave64 operand.

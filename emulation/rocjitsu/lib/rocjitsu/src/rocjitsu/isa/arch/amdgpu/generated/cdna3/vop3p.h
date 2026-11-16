@@ -349,7 +349,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.mfma = {static_cast<uint8_t>(inst_.cbsz), static_cast<uint8_t>(inst_.abid),
-                      static_cast<uint8_t>(inst_.blgp), 0};
+                      static_cast<uint8_t>(inst_.blgp), 16};
   }
   Operand vdst;
   Operand src0;
@@ -363,7 +363,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.mfma = {static_cast<uint8_t>(inst_.cbsz), static_cast<uint8_t>(inst_.abid),
-                      static_cast<uint8_t>(inst_.blgp), 0};
+                      static_cast<uint8_t>(inst_.blgp), 32};
   }
   Operand vdst;
   Operand src0;
@@ -377,7 +377,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.mfma = {static_cast<uint8_t>(inst_.cbsz), static_cast<uint8_t>(inst_.abid),
-                      static_cast<uint8_t>(inst_.blgp), 0};
+                      static_cast<uint8_t>(inst_.blgp), 32};
   }
   Operand vdst;
   Operand src0;
@@ -391,7 +391,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.mfma = {static_cast<uint8_t>(inst_.cbsz), static_cast<uint8_t>(inst_.abid),
-                      static_cast<uint8_t>(inst_.blgp), 0};
+                      static_cast<uint8_t>(inst_.blgp), 16};
   }
   Operand vdst;
   Operand src0;
@@ -405,7 +405,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.mfma = {static_cast<uint8_t>(inst_.cbsz), static_cast<uint8_t>(inst_.abid),
-                      static_cast<uint8_t>(inst_.blgp), 0};
+                      static_cast<uint8_t>(inst_.blgp), 4};
   }
   Operand vdst;
   Operand src0;
@@ -419,7 +419,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.mfma = {static_cast<uint8_t>(inst_.cbsz), static_cast<uint8_t>(inst_.abid),
-                      static_cast<uint8_t>(inst_.blgp), 0};
+                      static_cast<uint8_t>(inst_.blgp), 32};
   }
   Operand vdst;
   Operand src0;
@@ -433,7 +433,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.mfma = {static_cast<uint8_t>(inst_.cbsz), static_cast<uint8_t>(inst_.abid),
-                      static_cast<uint8_t>(inst_.blgp), 0};
+                      static_cast<uint8_t>(inst_.blgp), 16};
   }
   Operand vdst;
   Operand src0;
@@ -447,7 +447,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.mfma = {static_cast<uint8_t>(inst_.cbsz), static_cast<uint8_t>(inst_.abid),
-                      static_cast<uint8_t>(inst_.blgp), 0};
+                      static_cast<uint8_t>(inst_.blgp), 32};
   }
   Operand vdst;
   Operand src0;
@@ -461,7 +461,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.mfma = {static_cast<uint8_t>(inst_.cbsz), static_cast<uint8_t>(inst_.abid),
-                      static_cast<uint8_t>(inst_.blgp), 0};
+                      static_cast<uint8_t>(inst_.blgp), 16};
   }
   Operand vdst;
   Operand src0;
@@ -475,7 +475,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.mfma = {static_cast<uint8_t>(inst_.cbsz), static_cast<uint8_t>(inst_.abid),
-                      static_cast<uint8_t>(inst_.blgp), 0};
+                      static_cast<uint8_t>(inst_.blgp), 4};
   }
   Operand vdst;
   Operand src0;
@@ -489,7 +489,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.mfma = {static_cast<uint8_t>(inst_.cbsz), static_cast<uint8_t>(inst_.abid),
-                      static_cast<uint8_t>(inst_.blgp), 0};
+                      static_cast<uint8_t>(inst_.blgp), 32};
   }
   Operand vdst;
   Operand src0;
@@ -503,7 +503,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.mfma = {static_cast<uint8_t>(inst_.cbsz), static_cast<uint8_t>(inst_.abid),
-                      static_cast<uint8_t>(inst_.blgp), 0};
+                      static_cast<uint8_t>(inst_.blgp), 16};
   }
   Operand vdst;
   Operand src0;
@@ -517,7 +517,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.mfma = {static_cast<uint8_t>(inst_.cbsz), static_cast<uint8_t>(inst_.abid),
-                      static_cast<uint8_t>(inst_.blgp), 0};
+                      static_cast<uint8_t>(inst_.blgp), 32};
   }
   Operand vdst;
   Operand src0;
@@ -531,7 +531,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.mfma = {static_cast<uint8_t>(inst_.cbsz), static_cast<uint8_t>(inst_.abid),
-                      static_cast<uint8_t>(inst_.blgp), 0};
+                      static_cast<uint8_t>(inst_.blgp), 16};
   }
   Operand vdst;
   Operand src0;
@@ -545,7 +545,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.mfma = {static_cast<uint8_t>(inst_.cbsz), static_cast<uint8_t>(inst_.abid),
-                      static_cast<uint8_t>(inst_.blgp), 0};
+                      static_cast<uint8_t>(inst_.blgp), 4};
   }
   Operand vdst;
   Operand src0;
@@ -559,7 +559,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.mfma = {static_cast<uint8_t>(inst_.cbsz), static_cast<uint8_t>(inst_.abid),
-                      static_cast<uint8_t>(inst_.blgp), 0};
+                      static_cast<uint8_t>(inst_.blgp), 32};
   }
   Operand vdst;
   Operand src0;
@@ -573,7 +573,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.mfma = {static_cast<uint8_t>(inst_.cbsz), static_cast<uint8_t>(inst_.abid),
-                      static_cast<uint8_t>(inst_.blgp), 0};
+                      static_cast<uint8_t>(inst_.blgp), 16};
   }
   Operand vdst;
   Operand src0;
@@ -587,7 +587,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.mfma = {static_cast<uint8_t>(inst_.cbsz), static_cast<uint8_t>(inst_.abid),
-                      static_cast<uint8_t>(inst_.blgp), 0};
+                      static_cast<uint8_t>(inst_.blgp), 32};
   }
   Operand vdst;
   Operand src0;
@@ -601,7 +601,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.mfma = {static_cast<uint8_t>(inst_.cbsz), static_cast<uint8_t>(inst_.abid),
-                      static_cast<uint8_t>(inst_.blgp), 0};
+                      static_cast<uint8_t>(inst_.blgp), 16};
   }
   Operand vdst;
   Operand src0;
@@ -615,7 +615,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.mfma = {static_cast<uint8_t>(inst_.cbsz), static_cast<uint8_t>(inst_.abid),
-                      static_cast<uint8_t>(inst_.blgp), 0};
+                      static_cast<uint8_t>(inst_.blgp), 4};
   }
   Operand vdst;
   Operand src0;
@@ -629,7 +629,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.mfma = {static_cast<uint8_t>(inst_.cbsz), static_cast<uint8_t>(inst_.abid),
-                      static_cast<uint8_t>(inst_.blgp), 0};
+                      static_cast<uint8_t>(inst_.blgp), 32};
   }
   Operand vdst;
   Operand src0;
@@ -643,7 +643,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.mfma = {static_cast<uint8_t>(inst_.cbsz), static_cast<uint8_t>(inst_.abid),
-                      static_cast<uint8_t>(inst_.blgp), 0};
+                      static_cast<uint8_t>(inst_.blgp), 16};
   }
   Operand vdst;
   Operand src0;
@@ -737,7 +737,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.mfma = {static_cast<uint8_t>(inst_.cbsz), static_cast<uint8_t>(inst_.abid),
-                      static_cast<uint8_t>(inst_.blgp), 0};
+                      static_cast<uint8_t>(inst_.blgp), 16};
   }
   Operand vdst;
   Operand src0;
@@ -751,7 +751,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.mfma = {static_cast<uint8_t>(inst_.cbsz), static_cast<uint8_t>(inst_.abid),
-                      static_cast<uint8_t>(inst_.blgp), 0};
+                      static_cast<uint8_t>(inst_.blgp), 16};
   }
   Operand vdst;
   Operand src0;
@@ -765,7 +765,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.mfma = {static_cast<uint8_t>(inst_.cbsz), static_cast<uint8_t>(inst_.abid),
-                      static_cast<uint8_t>(inst_.blgp), 0};
+                      static_cast<uint8_t>(inst_.blgp), 16};
   }
   Operand vdst;
   Operand src0;
@@ -779,7 +779,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.mfma = {static_cast<uint8_t>(inst_.cbsz), static_cast<uint8_t>(inst_.abid),
-                      static_cast<uint8_t>(inst_.blgp), 0};
+                      static_cast<uint8_t>(inst_.blgp), 16};
   }
   Operand vdst;
   Operand src0;
@@ -793,7 +793,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.mfma = {static_cast<uint8_t>(inst_.cbsz), static_cast<uint8_t>(inst_.abid),
-                      static_cast<uint8_t>(inst_.blgp), 0};
+                      static_cast<uint8_t>(inst_.blgp), 32};
   }
   Operand vdst;
   Operand src0;
@@ -807,7 +807,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.mfma = {static_cast<uint8_t>(inst_.cbsz), static_cast<uint8_t>(inst_.abid),
-                      static_cast<uint8_t>(inst_.blgp), 0};
+                      static_cast<uint8_t>(inst_.blgp), 32};
   }
   Operand vdst;
   Operand src0;
@@ -821,7 +821,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.mfma = {static_cast<uint8_t>(inst_.cbsz), static_cast<uint8_t>(inst_.abid),
-                      static_cast<uint8_t>(inst_.blgp), 0};
+                      static_cast<uint8_t>(inst_.blgp), 32};
   }
   Operand vdst;
   Operand src0;
@@ -835,7 +835,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.mfma = {static_cast<uint8_t>(inst_.cbsz), static_cast<uint8_t>(inst_.abid),
-                      static_cast<uint8_t>(inst_.blgp), 0};
+                      static_cast<uint8_t>(inst_.blgp), 32};
   }
   Operand vdst;
   Operand src0;

@@ -281,7 +281,7 @@ struct RegisterModifiers {
     uint8_t cbsz = 0;
     uint8_t abid = 0;
     uint8_t blgp = 0;
-    uint8_t a_block_lanes = 0; ///< CDNA2 uses M-lane groups; zero keeps A checks full-wave.
+    uint8_t matrix_rows = 0; ///< M dimension used by the shared A-broadcast mapping.
   } mfma;
 
   /// VADDR operand enabling coordinate tracking.

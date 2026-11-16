@@ -100,6 +100,11 @@ accesses, and private address uses of FLAT_SCRATCH are checked too. Preserved sc
 halves and inactive vector lanes are not treated as consumed inputs. EXEC is consumed
 even when its eagerly computed value disables all vector lanes.
 
+MFMA broadcast checks derive source lanes from the same permutations used by
+arithmetic and register reads. Updating a shared permutation updates the checked
+footprint too. This keeps diagnostics consistent with emulation; qualification
+of the emulated mapping against hardware is separate.
+
 The shared target model handles CDNA1 through CDNA5 and RDNA1 through RDNA4, including
 RDNA3.5. Each ordered completion class retains the suffix requested by a wait.
 Scalar memory results require a zero wait. A mixed counter can prove an ordered

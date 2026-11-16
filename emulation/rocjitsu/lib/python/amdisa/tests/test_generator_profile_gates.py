@@ -9912,15 +9912,11 @@ def test_mfma_broadcast_metadata_excludes_fields_with_other_meanings(
             assert ('modifiers.mfma =' in body) == broadcasts, (arch, name)
             if broadcasts:
                 broadcast_forms += 1
-                a_block_lanes = (
-                    int(re.search(r'VMfma[FI]32(\d+)x', name)[1])
-                    if arch == 'cdna2'
-                    else 0
-                )
+                matrix_rows = int(re.search(r'VMfma[FI]32(\d+)x', name)[1])
                 assert (
                     '{static_cast<uint8_t>(inst_.cbsz), '
                     'static_cast<uint8_t>(inst_.abid), '
-                    'static_cast<uint8_t>(inst_.blgp), ' + str(a_block_lanes) + '}'
+                    'static_cast<uint8_t>(inst_.blgp), ' + str(matrix_rows) + '}'
                 ) in ' '.join(body.split())
     assert broadcast_forms > 80
 

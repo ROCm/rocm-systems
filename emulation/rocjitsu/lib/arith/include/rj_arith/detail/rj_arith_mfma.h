@@ -53,6 +53,43 @@ constexpr uint64_t RJ_ARITH_MFMA_CBSZ_MASK = 7ULL;
 constexpr uint64_t RJ_ARITH_MFMA_ABID_SHIFT = 3ULL;
 constexpr uint64_t RJ_ARITH_MFMA_BLGP_SHIFT = 7ULL;
 
+// Shared by arithmetic, register reads and dependency checks. A nonzero block
+// width selects adjacent matrix-block groups; zero selects a full-wave group.
+static inline uint32_t rj_arith_mfma_a_source_lane(uint32_t lane, uint32_t cbsz, uint32_t abid,
+                                                   uint32_t matrix_block_lanes) {
+  if (cbsz == 0 || cbsz > 4) {
+    return lane;
+  }
+  const uint32_t blocks = 1u << cbsz;
+  const uint32_t width = matrix_block_lanes ? matrix_block_lanes : 64u / blocks;
+  if (width > 64u / blocks) {
+    return lane;
+  }
+  const uint32_t group_size = width * blocks;
+  return (lane / group_size) * group_size + (abid % blocks) * width + (lane % width);
+}
+
+static inline uint32_t rj_arith_mfma_b_source_lane(uint32_t lane, uint32_t blgp) {
+  switch (blgp) {
+  case 1:
+    return lane % 32;
+  case 2:
+    return lane % 32 + 32;
+  case 3:
+    return (lane + 16) % 64;
+  case 4:
+    return lane % 16;
+  case 5:
+    return lane % 16 + 16;
+  case 6:
+    return lane % 16 + 32;
+  case 7:
+    return lane % 16 + 48;
+  default:
+    return lane;
+  }
+}
+
 // FP32 factors use M*K*batch/64 VGPRs each; outputs use M*M*batch/64.
 // Controls, semantics and overlap follow the dense MFMA contract below.
 int rj_arith_v_mfma_f32_32x32x1_2b_f32_w64(uint64_t flags, uint64_t controls, uint32_t *const *d,

@@ -4505,21 +4505,24 @@ TEST(MemoryWaitFootprintTest, MfmaBroadcastChecksOnlySelectedSourceLanes) {
                           ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
     SCOPED_TRACE(static_cast<int>(arch));
     std::vector<std::vector<uint32_t>> cases;
-    for (const auto [cbsz, abid, blgp] :
-         {std::array<uint8_t, 3>{2, 1, 4}, {0, 0, 1}, {1, 1, 2}, {4, 15, 3}, {3, 6, 7}}) {
+    for (const auto [cbsz, abid, blgp] : {std::array<uint8_t, 3>{2, 1, 4},
+                                          {0, 0, 1},
+                                          {1, 1, 2},
+                                          {4, 15, 3},
+                                          {3, 6, 7},
+                                          {2, 1, 5},
+                                          {2, 1, 6}}) {
       for (uint16_t opcode :
            {cdna4::kVMfmaI324x4x416bI8Vop3pMfma, cdna4::kVMfmaF324x4x116bF32Vop3pMfma}) {
         // These GFX9 encodings share their opcodes and broadcast fields across
-        // CDNA1-4. Disputed A broadcasts have separate conservative-check tests.
-        // Here only CDNA2 broadcasts A; C and D still use every lane.
-        const auto words = cdna4::build_vop3p_mfma(
-            opcode, {.vdst = 64,
-                     .cbsz = arch == ROCJITSU_CODE_ARCH_CDNA2 ? cbsz : uint8_t{0},
-                     .abid = arch == ROCJITSU_CODE_ARCH_CDNA2 ? abid : uint8_t{0},
-                     .src0 = 256,
-                     .src1 = 272,
-                     .src2 = 288,
-                     .blgp = blgp});
+        // CDNA1-4. Compare checks against the reads made by each target's executor.
+        const auto words = cdna4::build_vop3p_mfma(opcode, {.vdst = 64,
+                                                            .cbsz = cbsz,
+                                                            .abid = abid,
+                                                            .src0 = 256,
+                                                            .src1 = 272,
+                                                            .src2 = 288,
+                                                            .blgp = blgp});
         cases.emplace_back(words.begin(), words.end());
       }
     }
@@ -4602,13 +4605,12 @@ void check_mfma_broadcast_loads(rj_code_arch_t arch, uint8_t cbsz, uint8_t abid,
   }
 }
 
-TEST(MemoryWaitExecutionTest, MfmaKeepsDisputedASourceMappingsConservative) {
+TEST(MemoryWaitExecutionTest, MfmaChecksTheEmulatedASourceLanes) {
   for (auto arch : {ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
     SCOPED_TRACE(static_cast<unsigned>(arch));
-    // With CBSZ=2/ABID=1, the calculator selects lanes 4-7, 20-23, 36-39,
-    // and 52-55; the full-wave formula selects 16-31. Preserve all A warnings
-    // until the discrepancy is resolved. B still uses only lanes 0-15.
-    check_mfma_broadcast_loads(arch, 2, 1, 4, {~uint64_t{0}, 0xffff});
+    // This is the retained execution model, independently of hardware mapping
+    // qualification: A reads lanes 16-31 and B reads lanes 0-15.
+    check_mfma_broadcast_loads(arch, 2, 1, 4, {0xffff0000, 0xffff});
   }
 }
 
