@@ -3472,6 +3472,196 @@ class CheckTestingDocsTest(unittest.TestCase):
         errors = checker.check_incident_origin_citations(str(path))
         self.assertEqual(errors, [], msg=errors)
 
+    # -- fence/comment masking of incident headings, fields, Origin hashes ----
+
+    def test_fenced_incident_heading_is_not_defined(self):
+        # A ``## TI-NNN:`` heading inside a fenced code block is template/example
+        # text, not a real incident definition, so it must not register an id.
+        incidents = VALID_INCIDENTS + (
+            "\n## Appendix\n\n"
+            "An example of the incident template (not a real incident):\n\n"
+            "```markdown\n"
+            "## TI-999: Example only\n"
+            "```\n"
+        )
+        path = self.root / "TESTING_INCIDENTS.md"
+        path.write_text(incidents, encoding="utf-8")
+        errors = []
+        defined = checker.defined_incident_ids(str(path), errors)
+        self.assertIn("TI-001", defined, msg=defined)
+        self.assertNotIn("TI-999", defined, msg=defined)
+        self.assertEqual(errors, [], msg=errors)
+
+    def test_tilde_fenced_incident_heading_is_not_defined(self):
+        # The tilde fence form (``~~~``) is masked identically to the backtick form.
+        incidents = VALID_INCIDENTS + (
+            "\n## Appendix\n\n"
+            "An example of the incident template (not a real incident):\n\n"
+            "~~~markdown\n"
+            "## TI-999: Example only\n"
+            "~~~\n"
+        )
+        path = self.root / "TESTING_INCIDENTS.md"
+        path.write_text(incidents, encoding="utf-8")
+        errors = []
+        defined = checker.defined_incident_ids(str(path), errors)
+        self.assertIn("TI-001", defined, msg=defined)
+        self.assertNotIn("TI-999", defined, msg=defined)
+        self.assertEqual(errors, [], msg=errors)
+
+    def test_commented_incident_heading_is_not_defined(self):
+        # A ``## TI-NNN:`` heading hidden inside an HTML comment is likewise not a
+        # real incident definition.
+        incidents = VALID_INCIDENTS + (
+            "\n## Appendix\n\n"
+            "<!--\n"
+            "## TI-999: Example only\n"
+            "-->\n"
+        )
+        path = self.root / "TESTING_INCIDENTS.md"
+        path.write_text(incidents, encoding="utf-8")
+        errors = []
+        defined = checker.defined_incident_ids(str(path), errors)
+        self.assertIn("TI-001", defined, msg=defined)
+        self.assertNotIn("TI-999", defined, msg=defined)
+        self.assertEqual(errors, [], msg=errors)
+
+    def test_fenced_required_fields_do_not_satisfy_incident(self):
+        # A real ``## TI-001:`` heading whose required labelled fields appear only
+        # inside a fenced code block carries no real fields: the fenced labels are
+        # example text and must not satisfy the requirement.
+        incidents = (
+            "# Incidents\n\n"
+            "## TI-001: Example control\n\n"
+            "```\n"
+            "**Finding.** A control looked removable but was not.\n"
+            "**Control.** Guard the path.\n"
+            "**Protects.** The trusted signal.\n"
+            "**Origin.** Landed in `0d90b30fb6c`.\n"
+            "**Current status.** Active.\n"
+            "**Retirement condition.** Only when the hazard cannot recur.\n"
+            "```\n"
+        )
+        path = self.root / "TESTING_INCIDENTS.md"
+        path.write_text(incidents, encoding="utf-8")
+        errors = checker.check_incident_fields(str(path))
+        self.assertTrue(
+            any("missing the 'Finding' field" in err for err in errors),
+            msg=errors)
+
+    def test_tilde_fenced_required_fields_do_not_satisfy_incident(self):
+        incidents = (
+            "# Incidents\n\n"
+            "## TI-001: Example control\n\n"
+            "~~~\n"
+            "**Finding.** A control looked removable but was not.\n"
+            "**Control.** Guard the path.\n"
+            "**Protects.** The trusted signal.\n"
+            "**Origin.** Landed in `0d90b30fb6c`.\n"
+            "**Current status.** Active.\n"
+            "**Retirement condition.** Only when the hazard cannot recur.\n"
+            "~~~\n"
+        )
+        path = self.root / "TESTING_INCIDENTS.md"
+        path.write_text(incidents, encoding="utf-8")
+        errors = checker.check_incident_fields(str(path))
+        self.assertTrue(
+            any("missing the 'Finding' field" in err for err in errors),
+            msg=errors)
+
+    def test_commented_required_fields_do_not_satisfy_incident(self):
+        incidents = (
+            "# Incidents\n\n"
+            "## TI-001: Example control\n\n"
+            "<!--\n"
+            "**Finding.** A control looked removable but was not.\n"
+            "**Control.** Guard the path.\n"
+            "**Protects.** The trusted signal.\n"
+            "**Origin.** Landed in `0d90b30fb6c`.\n"
+            "**Current status.** Active.\n"
+            "**Retirement condition.** Only when the hazard cannot recur.\n"
+            "-->\n"
+        )
+        path = self.root / "TESTING_INCIDENTS.md"
+        path.write_text(incidents, encoding="utf-8")
+        errors = checker.check_incident_fields(str(path))
+        self.assertTrue(
+            any("missing the 'Finding' field" in err for err in errors),
+            msg=errors)
+
+    @unittest.skipUnless(_GIT, "git not available")
+    def test_origin_citation_fenced_fabricated_hash_is_ignored(self):
+        # A fabricated hash that lives inside a fenced code block within the Origin
+        # field span is example text, not a citation, so it must not be validated.
+        run = self._init_git_repo()
+        path = self.root / "TESTING_INCIDENTS.md"
+        incidents = VALID_INCIDENTS.replace(
+            "**Origin.** Landed in `0d90b30fb6c`.\n",
+            "**Origin.** See the fenced example of a stale citation:\n"
+            "```\n"
+            "reverted in commit deadbee1\n"
+            "```\n")
+        path.write_text(incidents, encoding="utf-8")
+        run("add", "TESTING_INCIDENTS.md")
+        run("commit", "-q", "-m", "add incidents")
+        errors = checker.check_incident_origin_citations(str(path))
+        self.assertEqual(errors, [], msg=errors)
+
+    @unittest.skipUnless(_GIT, "git not available")
+    def test_origin_citation_tilde_fenced_fabricated_hash_is_ignored(self):
+        run = self._init_git_repo()
+        path = self.root / "TESTING_INCIDENTS.md"
+        incidents = VALID_INCIDENTS.replace(
+            "**Origin.** Landed in `0d90b30fb6c`.\n",
+            "**Origin.** See the fenced example of a stale citation:\n"
+            "~~~\n"
+            "reverted in commit deadbee1\n"
+            "~~~\n")
+        path.write_text(incidents, encoding="utf-8")
+        run("add", "TESTING_INCIDENTS.md")
+        run("commit", "-q", "-m", "add incidents")
+        errors = checker.check_incident_origin_citations(str(path))
+        self.assertEqual(errors, [], msg=errors)
+
+    @unittest.skipUnless(_GIT, "git not available")
+    def test_origin_citation_commented_fabricated_hash_is_ignored(self):
+        # A fabricated hash hidden inside an HTML comment within the Origin field
+        # is likewise not a live citation.
+        run = self._init_git_repo()
+        path = self.root / "TESTING_INCIDENTS.md"
+        incidents = VALID_INCIDENTS.replace(
+            "**Origin.** Landed in `0d90b30fb6c`.\n",
+            "**Origin.** Historic note <!-- reverted in commit deadbee1 --> "
+            "see upstream.\n")
+        path.write_text(incidents, encoding="utf-8")
+        run("add", "TESTING_INCIDENTS.md")
+        run("commit", "-q", "-m", "add incidents")
+        errors = checker.check_incident_origin_citations(str(path))
+        self.assertEqual(errors, [], msg=errors)
+
+    @unittest.skipUnless(_GIT, "git not available")
+    def test_origin_citation_inline_hash_preserved_despite_fence(self):
+        # Masking is fence/comment-only: a real backticked Origin hash OUTSIDE any
+        # fence must survive and still be validated even when the section also
+        # carries a fenced example hash. The inline `0d90b30fb6c` is bogus and must
+        # still be reported, while the fenced deadbee1 is ignored.
+        run = self._init_git_repo()
+        path = self.root / "TESTING_INCIDENTS.md"
+        incidents = VALID_INCIDENTS.replace(
+            "**Retirement condition.** Only when the hazard cannot recur.\n",
+            "**Retirement condition.** Only when the hazard cannot recur.\n\n"
+            "```\n"
+            "ignored in commit deadbee1\n"
+            "```\n")
+        path.write_text(incidents, encoding="utf-8")
+        run("add", "TESTING_INCIDENTS.md")
+        run("commit", "-q", "-m", "add incidents")
+        errors = checker.check_incident_origin_citations(str(path))
+        self.assertTrue(
+            any("0d90b30fb6c" in err for err in errors), msg=errors)
+        self.assertFalse(
+            any("deadbee1" in err for err in errors), msg=errors)
+
     # -- final fix 5: bare external: markers in path-bearing fields -----------
 
     def test_bare_external_source_of_truth_is_reported(self):

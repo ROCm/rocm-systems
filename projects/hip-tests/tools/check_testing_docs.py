@@ -2036,12 +2036,21 @@ def _collect_incident_refs(obj):
 
 
 def _incident_sections(text):
-    """Yield (incident_id, section_text) for each ## TI-NNN: heading."""
-    matches = list(_INCIDENT_HEADING_RE.finditer(text))
+    """Yield (incident_id, section_text) for each ## TI-NNN: heading.
+
+    Fenced code blocks and HTML comments are masked (offsets preserved) before
+    headings are located and sections are sliced, so a ``## TI-NNN:`` heading or
+    a ``**Label.**`` field that lives inside a code fence or a comment is example
+    text - it defines no incident and satisfies no required field. Inline code
+    spans are deliberately NOT masked: a backticked real Origin hash outside a
+    fence or comment must survive so the citation check can still validate it.
+    """
+    masked = _mask_comments(_mask_fences(text))
+    matches = list(_INCIDENT_HEADING_RE.finditer(masked))
     for index, match in enumerate(matches):
         start = match.start()
-        end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
-        yield match.group(1), text[start:end]
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(masked)
+        yield match.group(1), masked[start:end]
 
 
 def defined_incident_ids(incidents_path, errors):
@@ -2057,7 +2066,10 @@ def defined_incident_ids(incidents_path, errors):
     if not path.exists():
         errors.append("incidents doc not found: {}".format(path))
         return set()
-    text = path.read_text(encoding="utf-8")
+    # Mask fenced code blocks and HTML comments (offsets preserved) before
+    # locating headings, so an example ``## TI-NNN:`` heading inside a fence or a
+    # comment is not registered as a real incident definition.
+    text = _mask_comments(_mask_fences(path.read_text(encoding="utf-8")))
     defined = set()
     for tid in _INCIDENT_HEADING_RE.findall(text):
         if tid in defined:
