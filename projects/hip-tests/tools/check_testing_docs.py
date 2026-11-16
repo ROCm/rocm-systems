@@ -46,10 +46,16 @@ for itself (workstreams WS-1 and WS-2):
       "origin not located; repository evidence records current purpose." line)
       does not count on its own: a sufficient narrative must carry an explicit
       evidence/origin marker (such as ``repository evidence``) AND not be a
-      contentless sentinel. An honest unknown origin is still accepted when it
-      points at the repository evidence that does exist (no invented tickets). An
-      ``incidents`` list, when present, is a non-empty list of ``TI-NNN`` ids, each
-      of which must resolve to a defined incident (as any TI reference does).
+      contentless sentinel. A generic "unknown origin" narrative is held to a
+      higher bar: a lightly expanded placeholder (the stock "origin not located"
+      line with a few extra words) still names no evidence specific to the
+      record, so it must additionally cite record-specific context - a concrete
+      repository path or a governing incident - or the suite must name governing
+      incidents instead. This keeps an honest unknown-origin record anchored to
+      the repository evidence that does exist (no invented tickets) while
+      rejecting a reused template that passes on the strength of a marker word.
+      An ``incidents`` list, when present, is a non-empty list of ``TI-NNN`` ids,
+      each of which must resolve to a defined incident (as any TI reference does).
     - every required suite field is present with a usable value: the descriptive
       scalars (``name`` / ``domain`` / ``purpose`` / ``oracle`` /
       ``disposition_rationale``) are non-empty strings, ``execution.cadence`` is a
@@ -142,11 +148,15 @@ for itself (workstreams WS-1 and WS-2):
   local Markdown refs and anchors
     - every relative Markdown link ``[text](path)`` in TESTING.md,
       TESTING_INCIDENTS.md, and TEST_RESTRUCTURING.md resolves to a file on disk
-      within the boundary root (http(s)/mailto URLs are preserved as external and
-      not existence-checked); a local link target that is absolute, or that
-      resolves outside the supplied ``--root`` / default repository boundary, is
+      (not a directory) within the boundary root (http(s)/mailto URLs are
+      preserved as external and not existence-checked); a local link target that
+      is absolute, that resolves outside the supplied ``--root`` / default
+      repository boundary, or that resolves to a directory rather than a file is
       rejected exactly like any other repository path pointer, while valid
-      relative links and fragment anchors continue to resolve;
+      relative links and fragment anchors continue to resolve; link-like text
+      inside inline code spans and fenced code blocks is shown rather than linked
+      and is masked out before scanning, so a ``[text](path)`` in a code example
+      is neither validated nor reported;
     - reference-style links ``[text][label]`` / ``[label][]`` are resolved through
       their ``[label]: target`` definitions and validated like inline links; a
       usage with no matching definition, or a definition that is never used, is
@@ -312,6 +322,25 @@ HISTORY_EVIDENCE_MARKERS = (
     "repository evidence", "origin", "incident", "testing_incidents", "ti-",
     "enforced", "guarded", "gated", "hazard", "drift",
 )
+# A generic "unknown origin" narrative. When a history opens by declaring that
+# the origin could not be located, the marker words it carries ("origin",
+# "repository evidence") are generic and a lightly reworded placeholder would
+# otherwise pass on their strength alone. Such a narrative is therefore held to a
+# higher bar (see ``_history_is_sufficient``): it must additionally cite
+# record-specific context. The pattern deliberately requires ``origin``
+# immediately followed by the not-located phrasing so that an incidental use of
+# the word ``origin`` elsewhere in a real narrative is not treated as generic.
+_UNKNOWN_ORIGIN_RE = re.compile(
+    r"origin\s+(?:not\s+located|not\s+found|unknown|unidentified)",
+    re.IGNORECASE)
+# A concrete repository path token (a slash-joined path that either descends at
+# least two levels or ends in a file extension). Its presence in an otherwise
+# generic unknown-origin narrative is the record-specific evidence that keeps the
+# provenance pointed at something real rather than a reused template. A single
+# incidental slash with no further segment or extension (``and/or``) is
+# intentionally not enough.
+_RECORD_SPECIFIC_PATH_RE = re.compile(
+    r"[\w.\-]+/[\w.\-]+(?:/[\w./\-]+|\.[A-Za-z0-9]+)")
 # Bare / generic history sentinels that, standing alone, do NOT establish
 # historical context. These are normalized (lower-cased, whitespace-collapsed)
 # before comparison. A suite whose entire history is one of these must instead
@@ -361,6 +390,11 @@ _MD_LINK_OPEN_RE = re.compile(r"\[[^\]]*\]\(")
 _MD_REF_USE_RE = re.compile(r"\[([^\]]*)\]\[([^\]]*)\]")
 _MD_REF_DEF_RE = re.compile(r"^[ ]{0,3}\[([^\]]+)\]:[ \t]*(\S+)", re.MULTILINE)
 _HEADING_RE = re.compile(r"^#{1,6}\s+(.*?)\s*$", re.MULTILINE)
+# A fenced code-block delimiter line: three or more backticks or tildes, possibly
+# indented and carrying an info string. Link scanning masks everything between a
+# matching opening and closing fence so a ``[text](path)`` inside a code block is
+# shown, not validated.
+_CODE_FENCE_RE = re.compile(r"^(\s*)(`{3,}|~{3,})(.*)$")
 # URLs preserved as external references; existence is not checked for these.
 _EXTERNAL_LINK_PREFIXES = ("http://", "https://", "mailto:")
 
@@ -551,6 +585,20 @@ def _normalize_history(value):
     return re.sub(r"\s+", " ", value.strip().lower())
 
 
+def _history_cites_record_specific_context(value):
+    """True when a history narrative points at evidence specific to the record.
+
+    Record-specific context is either a governing-incident reference (a
+    ``TI-NNN`` id) or a concrete repository path token (see
+    ``_RECORD_SPECIFIC_PATH_RE``). This is what distinguishes an honest
+    unknown-origin record - which names the real source/wiring that documents the
+    behavior it pins - from a reused generic template that names nothing.
+    """
+    if _INCIDENT_REF_RE.search(value):
+        return True
+    return bool(_RECORD_SPECIFIC_PATH_RE.search(value))
+
+
 def _history_is_sufficient(value):
     """True when a history narrative establishes real historical context.
 
@@ -561,13 +609,25 @@ def _history_is_sufficient(value):
     marker requirement rejects a context-free note that names no evidence; the
     sentinel check rejects a stock placeholder that happens to contain a marker
     word but no actual context.
+
+    A generic "unknown origin" narrative is held to a higher bar: its marker
+    words ("origin", "repository evidence") are generic, so a lightly expanded
+    placeholder would otherwise pass on their strength alone. Such a narrative is
+    accepted only when it additionally cites record-specific context - a concrete
+    repository path or a governing incident - so the provenance points at
+    something real rather than a reused template.
     """
     if not _nonempty_str(value):
         return False
     if _normalize_history(value) in GENERIC_HISTORY_SENTINELS:
         return False
     low = value.lower()
-    return any(marker in low for marker in HISTORY_EVIDENCE_MARKERS)
+    if not any(marker in low for marker in HISTORY_EVIDENCE_MARKERS):
+        return False
+    if (_UNKNOWN_ORIGIN_RE.search(value)
+            and not _history_cites_record_specific_context(value)):
+        return False
+    return True
 
 
 def _is_scalar(value):
@@ -963,9 +1023,12 @@ def check_inventory(inventory, component_dir, repo_root=None):
         # establishes context. A bare/generic placeholder (for example a stock
         # "origin not located; repository evidence records current purpose." line)
         # does NOT count on its own: a sufficient narrative must carry an explicit
-        # evidence/origin marker AND not be a contentless sentinel. An honest
-        # unknown origin is still accepted as long as it points at the repository
-        # evidence that does exist; no ticket is invented to satisfy the rule.
+        # evidence/origin marker AND not be a contentless sentinel, and a generic
+        # unknown-origin narrative must additionally cite record-specific context
+        # (a concrete repository path or a governing incident) so a lightly
+        # reworded template cannot pass on a marker word alone. An honest unknown
+        # origin is still accepted as long as it points at the repository evidence
+        # that does exist; no ticket is invented to satisfy the rule.
         history = suite.get("history")
         incidents = suite.get("incidents")
         if "history" in suite and not _nonempty_str(history):
@@ -986,16 +1049,17 @@ def check_inventory(inventory, component_dir, repo_root=None):
                             "{!r}".format(sid, inc))
         # A suite is history-blind unless it names governing incidents or carries
         # a sufficient narrative. Report the most specific diagnosis: a present
-        # but insufficient history (a bare/generic placeholder, or a note with no
-        # evidence/origin marker) gets a targeted message; an entirely absent one
-        # gets the general requirement.
+        # but insufficient history (a bare/generic placeholder, a lightly expanded
+        # unknown-origin template, or a note with no evidence/origin marker) gets a
+        # targeted message; an entirely absent one gets the general requirement.
         if not has_incidents and not _history_is_sufficient(history):
             if _nonempty_str(history):
                 errors.append(
                     "suite {!r} history is a bare/generic placeholder: it must carry "
                     "an explicit evidence/origin marker (e.g. 'repository evidence') "
-                    "with real context, or the suite must name governing "
-                    "incidents".format(sid))
+                    "with record-specific context (a concrete repository path or a "
+                    "governing incident), not a reworded generic sentinel; or the "
+                    "suite must name governing incidents".format(sid))
             else:
                 errors.append(
                     "suite {!r} must carry governing incidents or a history that "
@@ -1514,14 +1578,18 @@ def check_incident_fields(incidents_path):
     """Every defined incident must carry the required labelled fields with a value.
 
     A required field is authored as a bold label followed by its content, for
-    example ``**Finding.** <text>``. A missing label is a schema error; so is a
-    label that is present but carries no value (a bare ``**Origin.**`` with nothing
-    after it), because a reviewer then cannot see what the control protects or when
-    it may be retired. The field value is the text between the label's closing
-    ``**`` and the next field label, the next paragraph break, a heading, or the
-    end of the incident section; when that text is empty (or whitespace only) the
-    field is reported as empty rather than silently accepted on the strength of the
-    label alone.
+    example ``**Finding.** <text>``. The label must match the exact ``**Label.**``
+    syntax, not merely be a prefix of a longer bold run: a lookalike such as
+    ``**Origin story.**`` or ``**Finding of fact.**`` is a different label and does
+    NOT satisfy the required ``Origin`` / ``Finding`` field, so a reviewer cannot
+    paper over a missing required field with a similarly named one. A missing label
+    is a schema error; so is a label that is present but carries no value (a bare
+    ``**Origin.**`` with nothing after it), because a reviewer then cannot see what
+    the control protects or when it may be retired. The field value is the text
+    between the label's closing ``**`` and the next field label, the next paragraph
+    break, a heading, or the end of the incident section; when that text is empty
+    (or whitespace only) the field is reported as empty rather than silently
+    accepted on the strength of the label alone.
     """
     errors = []
     path = Path(incidents_path)
@@ -1531,13 +1599,17 @@ def check_incident_fields(incidents_path):
     text = path.read_text(encoding="utf-8")
     for incident_id, section in _incident_sections(text):
         for label in REQUIRED_INCIDENT_LABELS:
-            # Labels are authored in bold, e.g. ``**Finding.**`` / ``**Control.**``.
-            # Capture the value after the label's closing ``**`` up to the next
-            # field label (a line beginning with ``**``), a paragraph break, a
-            # heading, or the end of the section, so a present-but-empty field is
-            # distinguishable from a populated one.
+            # Labels are authored in bold with the exact ``**Label.**`` syntax,
+            # e.g. ``**Finding.**`` / ``**Control.**``. The label, an optional
+            # surrounding space, and the terminating period must be the entire
+            # bold run: a prefix match (``**Origin story.**`` for ``Origin``) is a
+            # different label and must not satisfy the required field. Capture the
+            # value after the label's closing ``**`` up to the next field label (a
+            # line beginning with ``**``), a paragraph break, a heading, or the end
+            # of the section, so a present-but-empty field is distinguishable from
+            # a populated one.
             match = re.search(
-                r"\*\*\s*" + re.escape(label) + r"\b[^*]*\*\*(.*?)"
+                r"\*\*\s*" + re.escape(label) + r"\s*\.\s*\*\*(.*?)"
                 r"(?=\n[ \t]*\n|\n[ \t]*\*\*|\n#{1,6}\s|\Z)",
                 section, re.DOTALL)
             if match is None:
@@ -1668,7 +1740,10 @@ def _check_link_target(doc_name, base, doc_resolved, target, anchors_cache,
     pointer: an absolute target is rejected outright, and a relative target that
     resolves outside ``boundary_root`` (the supplied ``--root`` or, by default,
     the repository root two levels above the component directory) is rejected as
-    an escape. Valid relative links and fragment anchors are unaffected.
+    an escape. A local target must resolve to a file, not a directory (a bare
+    directory link exposes no document to read and is held to the same
+    file-not-directory rule as every other evidence path). Valid relative links
+    and fragment anchors are unaffected.
     """
     errors = []
     refs_ok = 0
@@ -1695,6 +1770,11 @@ def _check_link_target(doc_name, base, doc_resolved, target, anchors_cache,
         if not resolved.exists():
             errors.append("{}: broken local link: {}".format(doc_name, target))
             return errors, refs_ok
+        if resolved.is_dir():
+            errors.append(
+                "{}: link target is a directory, not a file: {}".format(
+                    doc_name, target))
+            return errors, refs_ok
         refs_ok += 1
         anchor_source = resolved
     else:
@@ -1707,6 +1787,96 @@ def _check_link_target(doc_name, base, doc_resolved, target, anchors_cache,
         else:
             errors.append("{}: broken anchor: {}".format(doc_name, target))
     return errors, refs_ok
+
+
+def _blank_like(text):
+    """Return text with every character replaced by a space, newlines preserved.
+
+    Used to blank out code content while keeping character offsets and line
+    numbers unchanged, so the surrounding document still scans with the same
+    positions and the ``^``-anchored reference-definition regex still sees real
+    line starts.
+    """
+    return "".join("\n" if ch == "\n" else " " for ch in text)
+
+
+def _mask_inline_code(text):
+    """Return text with inline code spans blanked out (offsets preserved).
+
+    A CommonMark inline code span opens with a run of one or more backticks and
+    closes with a run of the same length. The span (delimiters and content) is
+    replaced with spaces so a ``[text](path)`` or ``[label]: target`` that appears
+    inside code is not mistaken for a real link or reference definition. A backtick
+    run with no matching closing run is not a code span and is left untouched.
+    """
+    out = []
+    i = 0
+    n = len(text)
+    while i < n:
+        ch = text[i]
+        if ch != "`":
+            out.append(ch)
+            i += 1
+            continue
+        # Measure the opening backtick run.
+        j = i
+        while j < n and text[j] == "`":
+            j += 1
+        run = j - i
+        # Search for a closing run of exactly the same length.
+        k = j
+        closed = False
+        while k < n:
+            if text[k] == "`":
+                m = k
+                while m < n and text[m] == "`":
+                    m += 1
+                if m - k == run:
+                    out.append(_blank_like(text[i:m]))
+                    i = m
+                    closed = True
+                    break
+                k = m
+            else:
+                k += 1
+        if not closed:
+            # No closing run: the backticks are literal, not a code span.
+            out.append(text[i:j])
+            i = j
+    return "".join(out)
+
+
+def _mask_code(text):
+    """Return text with fenced code blocks and inline code spans blanked out.
+
+    Code content is replaced by spaces of equal length (newlines preserved) so
+    character offsets and line numbers are unchanged, but no ``[``, ``(``, or
+    backtick inside code can be mistaken for a Markdown link, link opener, or
+    reference definition. Real links and definitions outside code are untouched.
+    Fenced blocks are masked first (so backticks that open/close a fence are not
+    re-interpreted as inline code), then inline spans on the remaining text.
+    """
+    lines = text.split("\n")
+    out = []
+    fence = None  # (marker_char, length) while inside a fenced block
+    for line in lines:
+        match = _CODE_FENCE_RE.match(line)
+        if fence is None:
+            if match:
+                fence = (match.group(2)[0], len(match.group(2)))
+                out.append(_blank_like(line))
+            else:
+                out.append(line)
+        else:
+            # Inside a fence: blank every line. A fence of the same marker that is
+            # at least as long and carries no trailing info string closes it.
+            out.append(_blank_like(line))
+            if match:
+                marker_char, length = match.group(2)[0], len(match.group(2))
+                if (marker_char == fence[0] and length >= fence[1]
+                        and not match.group(3).strip()):
+                    fence = None
+    return _mask_inline_code("\n".join(out))
 
 
 def check_markdown_links(md_path, anchors_cache, boundary_root=None):
@@ -1726,6 +1896,11 @@ def check_markdown_links(md_path, anchors_cache, boundary_root=None):
     an absolute target or a relative target that resolves outside the boundary is
     rejected exactly like any other repository path pointer, while valid relative
     links and fragment anchors continue to resolve.
+
+    Link-like text inside inline code spans and fenced code blocks is shown, not
+    linked: such regions are masked out before scanning so a ``[text](path)`` in a
+    code example is neither validated nor reported, while real links and reference
+    definitions outside code are unaffected.
     """
     errors = []
     refs_ok = 0
@@ -1734,7 +1909,10 @@ def check_markdown_links(md_path, anchors_cache, boundary_root=None):
         return ["markdown doc not found: {}".format(path)], 0
     base = path.resolve().parent
     doc_resolved = path.resolve()
-    text = path.read_text(encoding="utf-8")
+    # Mask inline code spans and fenced code blocks so link-like text inside code
+    # is not scanned; offsets and line starts are preserved for the ^-anchored
+    # reference-definition regex.
+    text = _mask_code(path.read_text(encoding="utf-8"))
 
     # Reference-style link definitions; Markdown reference labels are
     # case-insensitive, so normalize to lower case for matching.

@@ -1259,6 +1259,22 @@ class CheckTestingDocsTest(unittest.TestCase):
             msg=results["incidents"],
         )
 
+    def test_incident_prefix_lookalike_label_does_not_satisfy_requirement(self):
+        # Regression: a required label must match the exact ``**Label.**`` syntax,
+        # not merely be a prefix of a longer bold run. Renaming ``**Origin.**`` to
+        # a lookalike ``**Origin story.**`` means the required ``Origin`` field is
+        # absent; the lookalike must not paper over it.
+        broken = VALID_INCIDENTS.replace(
+            "**Origin.** Landed in `0d90b30fb6c`.\n",
+            "**Origin story.** Landed in `0d90b30fb6c`.\n")
+        _write_docs(self.root, {"TESTING_INCIDENTS.md": broken})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("missing the 'Origin' field" in err
+                for err in results["incidents"]),
+            msg=results["incidents"],
+        )
+
     # -- broken local link ---------------------------------------------------
 
     def test_broken_local_link(self):
@@ -1691,6 +1707,119 @@ class CheckTestingDocsTest(unittest.TestCase):
             msg=results["markdown_links"],
         )
 
+    # -- code spans and fenced code blocks are not links ---------------------
+
+    def test_link_inside_inline_code_span_is_ignored(self):
+        # A ``[text](path)`` inside an inline code span is shown, not linked: the
+        # destination names no file on disk but must not be reported as broken.
+        testing = (
+            "# Testing Strategy\n\n"
+            "Write a link like `[name](no_such_file.md)` to point at a doc.\n\n"
+            "## Known gaps\n\nBody.\n"
+        )
+        _write_docs(self.root, {"TESTING.md": testing})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertEqual(
+            results["markdown_links"], [], msg=results["markdown_links"])
+
+    def test_link_inside_fenced_code_block_is_ignored(self):
+        # A ``[text](path)`` inside a fenced code block is example text, not a
+        # link, and must not be existence-checked.
+        testing = (
+            "# Testing Strategy\n\n"
+            "Example:\n\n"
+            "```\n"
+            "[broken](no_such_file.md)\n"
+            "[label]: also_missing.md\n"
+            "```\n\n"
+            "## Known gaps\n\nBody.\n"
+        )
+        _write_docs(self.root, {"TESTING.md": testing})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertEqual(
+            results["markdown_links"], [], msg=results["markdown_links"])
+
+    def test_reference_definition_inside_fenced_code_block_is_ignored(self):
+        # A ``[label]: target`` line inside a fenced code block is not a real
+        # reference definition, so it is neither resolved nor reported as unused.
+        testing = (
+            "# Testing Strategy\n\n"
+            "```\n"
+            "[inv]: no_such_file.yaml\n"
+            "```\n\n"
+            "## Known gaps\n\nBody.\n"
+        )
+        _write_docs(self.root, {"TESTING.md": testing})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertEqual(
+            results["markdown_links"], [], msg=results["markdown_links"])
+
+    def test_tilde_fenced_code_block_is_ignored(self):
+        # Fences may be drawn with tildes as well as backticks; a link inside a
+        # ``~~~`` block is still example text.
+        testing = (
+            "# Testing Strategy\n\n"
+            "~~~\n"
+            "[broken](no_such_file.md)\n"
+            "~~~\n\n"
+            "## Known gaps\n\nBody.\n"
+        )
+        _write_docs(self.root, {"TESTING.md": testing})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertEqual(
+            results["markdown_links"], [], msg=results["markdown_links"])
+
+    def test_real_link_outside_code_still_validated(self):
+        # Masking code must not blind the checker to real links: a genuine broken
+        # link outside any code span/fence is still reported even when a code
+        # example with its own (ignored) link is present in the same document.
+        testing = (
+            "# Testing Strategy\n\n"
+            "A real [inventory](no_such_file.yaml) link.\n\n"
+            "Example code: `[x](also_ignored.md)` and:\n\n"
+            "```\n"
+            "[y](still_ignored.md)\n"
+            "```\n\n"
+            "## Known gaps\n\nBody.\n"
+        )
+        _write_docs(self.root, {"TESTING.md": testing})
+        results, _ = checker.validate(root=str(self.root))
+        broken = [err for err in results["markdown_links"]
+                  if "broken local link" in err]
+        self.assertEqual(len(broken), 1, msg=results["markdown_links"])
+        self.assertIn("no_such_file.yaml", broken[0])
+
+    def test_real_link_with_inline_code_in_text_still_resolves(self):
+        # A real link whose visible text is an inline code span but whose
+        # destination lies outside the backticks (``[`inv`](test_inventory.yaml)``)
+        # must still resolve: only the code span in the text is masked, not the
+        # link itself.
+        testing = (
+            "# Testing Strategy\n\n"
+            "See [`inv`](test_inventory.yaml) and the [gaps](#known-gaps).\n\n"
+            "## Known gaps\n\nBody.\n"
+        )
+        _write_docs(self.root, {"TESTING.md": testing})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertEqual(
+            results["markdown_links"], [], msg=results["markdown_links"])
+
+    # -- Markdown local link target must be a file, not a directory ----------
+
+    def test_markdown_link_to_directory_is_reported(self):
+        # A local link that resolves to a directory exposes no document to read
+        # and is held to the same file-not-directory rule as any evidence path.
+        (self.root / "a_directory").mkdir()
+        broken = VALID_TESTING.replace(
+            "(test_inventory.yaml)", "(a_directory)")
+        _write_docs(self.root, {"TESTING.md": broken})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("link target is a directory, not a file" in err
+                for err in results["markdown_links"]),
+            msg=results["markdown_links"],
+        )
+
     # -- historical context: history or incidents required -------------------
 
     def test_suite_missing_history_and_incidents_is_reported(self):
@@ -2011,12 +2140,46 @@ class CheckTestingDocsTest(unittest.TestCase):
 
     def test_history_with_evidence_marker_and_context_passes(self):
         # An honest unknown-origin narrative that points at the repository
-        # evidence that does exist (no invented ticket) is accepted.
+        # evidence that does exist (a concrete source/build path, no invented
+        # ticket) is accepted: the record-specific path is what anchors it.
+        broken = VALID_INVENTORY.replace(
+            "    history: Guarded per TI-001.\n",
+            "    history: Historical origin not located in available change "
+            "history; the behavior it pins is evidenced by its catalogued "
+            "sources under catch/contract/transfer built via "
+            "catch/contract/CMakeLists.txt.\n", 1)
+        _write_docs(self.root, {"test_inventory.yaml": broken})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertEqual(_all_errors(results), [], msg=results)
+
+    def test_lightly_expanded_generic_history_is_reported(self):
+        # Regression: a generic "origin not located" placeholder that is lightly
+        # reworded with a few extra words (but still names no evidence specific to
+        # THIS record) must not pass on the strength of the "repository evidence"
+        # marker alone. A generic unknown-origin narrative now has to cite
+        # record-specific context (a concrete repository path or a governing
+        # incident), so the reworded template is reported.
         broken = VALID_INVENTORY.replace(
             "    history: Guarded per TI-001.\n",
             "    history: Historical origin not located in available change "
             "history; repository evidence (source paths and CMake wiring) "
             "documents the behavior it currently pins.\n", 1)
+        _write_docs(self.root, {"test_inventory.yaml": broken})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("bare/generic placeholder" in err
+                and "record-specific context" in err
+                for err in results["inventory"]),
+            msg=results["inventory"],
+        )
+
+    def test_generic_unknown_origin_with_incident_passes(self):
+        # A generic unknown-origin opener is still accepted when the suite points
+        # at a governing incident: the incident is the record-specific context.
+        broken = VALID_INVENTORY.replace(
+            "    history: Guarded per TI-001.\n",
+            "    history: Historical origin not located in available change "
+            "history; the control is governed by TI-001.\n", 1)
         _write_docs(self.root, {"test_inventory.yaml": broken})
         results, _ = checker.validate(root=str(self.root))
         self.assertEqual(_all_errors(results), [], msg=results)

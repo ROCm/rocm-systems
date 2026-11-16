@@ -154,7 +154,7 @@ suites:
         claim: Transfer, copy3d, and array copy domains are built under BUILD_CONTRACT_TESTS.
       - path: catch/config/configs/contract.yaml
         claim: Contract_Transfer_* and Contract_DriverMemcpy_* cases are declared with transfer/driver_memcpy tags.
-    history: Historical origin not located in available change history; repository evidence (the suite's catalogued source paths and CMake build wiring recorded in this inventory) documents the behavior it currently pins.
+    history: Historical origin not located in available change history; the behavior it pins is evidenced by its catalogued sources (e.g. catch/contract/transfer) built via catch/contract/CMakeLists.txt under BUILD_CONTRACT_TESTS.
     disposition: keep
     disposition_rationale: Transfer contracts pin direction and round-trip semantics; sweep-sized transfer coverage stays in functional unit groups.
 
@@ -234,7 +234,7 @@ suites:
     evidence:
       - path: catch/contract/CMakeLists.txt
         claim: device, device_identity, device_config, device_lifecycle, device_reset, device_texture_query, and green_context are built under BUILD_CONTRACT_TESTS.
-    history: Historical origin not located in available change history; repository evidence (the suite's catalogued source paths and CMake build wiring recorded in this inventory) documents the behavior it currently pins.
+    history: Historical origin not located in available change history; the behavior it pins is evidenced by its catalogued sources (e.g. catch/contract/device) built via catch/contract/CMakeLists.txt under BUILD_CONTRACT_TESTS.
     disposition: keep
     disposition_rationale: Device contracts hold the portable management invariants; functional device coverage remains in unit-device-context.
 
@@ -270,7 +270,7 @@ suites:
     evidence:
       - path: catch/contract/CMakeLists.txt
         claim: context, context_mutation, and context_config are built under BUILD_CONTRACT_TESTS.
-    history: Historical origin not located in available change history; repository evidence (the suite's catalogued source paths and CMake build wiring recorded in this inventory) documents the behavior it currently pins.
+    history: Historical origin not located in available change history; the behavior it pins is evidenced by its catalogued sources (e.g. catch/contract/context) built via catch/contract/CMakeLists.txt under BUILD_CONTRACT_TESTS.
     disposition: keep
     disposition_rationale: Driver context contracts stay portable; functional context behavior remains under unit-device-context.
 
@@ -310,7 +310,7 @@ suites:
     evidence:
       - path: catch/contract/CMakeLists.txt
         claim: stream_event, stream_props, stream_callbacks, stream_attributes, stream_memory_ops, stream_cu_mask, and stream_attach are built under BUILD_CONTRACT_TESTS.
-    history: Historical origin not located in available change history; repository evidence (the suite's catalogued source paths and CMake build wiring recorded in this inventory) documents the behavior it currently pins.
+    history: Historical origin not located in available change history; the behavior it pins is evidenced by its catalogued sources (e.g. catch/contract/stream_event) built via catch/contract/CMakeLists.txt under BUILD_CONTRACT_TESTS.
     disposition: keep
     disposition_rationale: Stream/event contracts pin portable ordering and property invariants; functional stream coverage remains in unit-stream-event.
 
@@ -346,7 +346,7 @@ suites:
     evidence:
       - path: catch/contract/CMakeLists.txt
         claim: peer_query, peer_access, and peer_copy are built under BUILD_CONTRACT_TESTS.
-    history: Historical origin not located in available change history; repository evidence (the suite's catalogued source paths and CMake build wiring recorded in this inventory) documents the behavior it currently pins.
+    history: Historical origin not located in available change history; the behavior it pins is evidenced by its catalogued sources (e.g. catch/contract/peer_query) built via catch/contract/CMakeLists.txt under BUILD_CONTRACT_TESTS.
     disposition: keep
     disposition_rationale: Peer contracts assert portable invariants and skip cleanly on single-GPU hosts; multi-GPU execution-context classification is tracked as a restructuring review item.
 
@@ -386,7 +386,7 @@ suites:
     evidence:
       - path: catch/contract/CMakeLists.txt
         claim: kernel, call_config, func_attributes, kernel_launch, driver_launch_ex, kernel_name_ref, and kernel_object_attributes are built under BUILD_CONTRACT_TESTS.
-    history: Historical origin not located in available change history; repository evidence (the suite's catalogued source paths and CMake build wiring recorded in this inventory) documents the behavior it currently pins.
+    history: Historical origin not located in available change history; the behavior it pins is evidenced by its catalogued sources (e.g. catch/contract/kernel) built via catch/contract/CMakeLists.txt under BUILD_CONTRACT_TESTS.
     disposition: keep
     disposition_rationale: Launch contracts pin portable configuration and attribute invariants; exhaustive launch behavior lives in unit-kernel-launch.
 
@@ -420,7 +420,7 @@ suites:
     evidence:
       - path: catch/contract/CMakeLists.txt
         claim: multi_device_launch is built under BUILD_CONTRACT_TESTS.
-    history: Historical origin not located in available change history; repository evidence (the suite's catalogued source paths and CMake build wiring recorded in this inventory) documents the behavior it currently pins.
+    history: Historical origin not located in available change history; the behavior it pins is evidenced by its catalogued sources (e.g. catch/contract/multi_device_launch) built via catch/contract/CMakeLists.txt under BUILD_CONTRACT_TESTS.
     disposition: review
     disposition_rationale: The contract case remains active and portable, but its multi-GPU execution-context classification needs explicit integration/multi-GPU metadata; tracked as an open restructuring item rather than a move.
     related_restructuring: TEST_RESTRUCTURING.md
@@ -457,7 +457,7 @@ suites:
     evidence:
       - path: catch/contract/CMakeLists.txt
         claim: occupancy, occupancy_ext, and occupancy_variable are built under BUILD_CONTRACT_TESTS.
-    history: Historical origin not located in available change history; repository evidence (the suite's catalogued source paths and CMake build wiring recorded in this inventory) documents the behavior it currently pins.
+    history: Historical origin not located in available change history; the behavior it pins is evidenced by its catalogued sources (e.g. catch/contract/occupancy) built via catch/contract/CMakeLists.txt under BUILD_CONTRACT_TESTS.
     disposition: keep
     disposition_rationale: Occupancy contracts pin portable query invariants; functional occupancy coverage remains in unit-occupancy.
 
@@ -554,7 +554,7 @@ suites:
     evidence:
       - path: catch/contract/CMakeLists.txt
         claim: texture, driver_texture_object, texture_reference, and texture_reference_symbol are built under BUILD_CONTRACT_TESTS.
-    history: Historical origin not located in available change history; repository evidence (the suite's catalogued source paths and CMake build wiring recorded in this inventory) documents the behavior it currently pins.
+    history: Historical origin not located in available change history; the behavior it pins is evidenced by its catalogued sources (e.g. catch/contract/texture) built via catch/contract/CMakeLists.txt under BUILD_CONTRACT_TESTS.
     disposition: keep
     disposition_rationale: Texture contracts pin portable query/bind invariants; functional texture/surface coverage remains in unit-texture-surface.
 
@@ -594,7 +594,7 @@ suites:
     evidence:
       - path: catch/contract/CMakeLists.txt
         claim: module, module_load_ex, module_load_file, module_exec, jit_link, library, and library_file are built under BUILD_CONTRACT_TESTS.
-    history: Historical origin not located in available change history; repository evidence (the suite's catalogued source paths and CMake build wiring recorded in this inventory) documents the behavior it currently pins.
+    history: Historical origin not located in available change history; the behavior it pins is evidenced by its catalogued sources (e.g. catch/contract/module) built via catch/contract/CMakeLists.txt under BUILD_CONTRACT_TESTS.
     disposition: keep
     disposition_rationale: Loader contracts pin portable load/link invariants; functional module/loader behavior remains in unit-module-loader and unit-rtc.
 
@@ -703,7 +703,7 @@ suites:
     evidence:
       - path: catch/contract/CMakeLists.txt
         claim: runtime, extension, logging, profiler, and driver_entry_point are built under BUILD_CONTRACT_TESTS.
-    history: Historical origin not located in available change history; repository evidence (the suite's catalogued source paths and CMake build wiring recorded in this inventory) documents the behavior it currently pins.
+    history: Historical origin not located in available change history; the behavior it pins is evidenced by its catalogued sources (e.g. catch/contract/runtime) built via catch/contract/CMakeLists.txt under BUILD_CONTRACT_TESTS.
     disposition: keep
     disposition_rationale: Runtime-service contracts pin portable init/lookup invariants and remain the API baseline for these paths.
 
@@ -748,7 +748,7 @@ suites:
         claim: Unit memory cases carry level/skip metadata driving ctest labels.
       - path: catch/config/configs/unit/device_memory.yaml
         claim: Unit device-memory cases carry level/skip metadata driving ctest labels.
-    history: Historical origin not located in available change history; repository evidence (the suite's catalogued source paths and CMake build wiring recorded in this inventory) documents the behavior it currently pins.
+    history: Historical origin not located in available change history; the behavior it pins is evidenced by its catalogued sources (e.g. catch/unit/memory) built via catch/unit/CMakeLists.txt under BUILD_UNIT_TESTS.
     disposition: review
     disposition_rationale: Legacy functional memory coverage stays active; contract-memory pins the portable invariants but does not replace sweep-sized functional behavior. Classification pending restructuring review.
     related_restructuring: TEST_RESTRUCTURING.md
@@ -788,7 +788,7 @@ suites:
         claim: Unit event cases carry level/skip metadata driving ctest labels.
       - path: catch/config/configs/unit/streamperthread.yaml
         claim: Unit streamperthread cases carry level/skip metadata driving ctest labels.
-    history: Historical origin not located in available change history; repository evidence (the suite's catalogued source paths and CMake build wiring recorded in this inventory) documents the behavior it currently pins.
+    history: Historical origin not located in available change history; the behavior it pins is evidenced by its catalogued sources (e.g. catch/unit/stream) built via catch/unit/CMakeLists.txt under BUILD_UNIT_TESTS.
     disposition: review
     disposition_rationale: Legacy functional stream/event coverage stays active alongside contract-stream-event; classification pending restructuring review.
     related_restructuring: TEST_RESTRUCTURING.md
@@ -820,7 +820,7 @@ suites:
     evidence:
       - path: catch/unit/CMakeLists.txt
         claim: graph is built under BUILD_UNIT_TESTS.
-    history: Historical origin not located in available change history; repository evidence (the suite's catalogued source paths and CMake build wiring recorded in this inventory) documents the behavior it currently pins.
+    history: Historical origin not located in available change history; the behavior it pins is evidenced by its catalogued sources (e.g. catch/unit/graph) built via catch/unit/CMakeLists.txt under BUILD_UNIT_TESTS.
     disposition: review
     disposition_rationale: Legacy functional graph coverage stays active alongside contract-graph; classification pending restructuring review.
     related_restructuring: TEST_RESTRUCTURING.md
@@ -863,7 +863,7 @@ suites:
         claim: Unit launchBounds cases carry level/skip metadata driving ctest labels.
       - path: catch/config/configs/unit/executionctx.yaml
         claim: Unit executionctx (executionContext source) cases carry level/skip metadata driving ctest labels.
-    history: Historical origin not located in available change history; repository evidence (the suite's catalogued source paths and CMake build wiring recorded in this inventory) documents the behavior it currently pins.
+    history: Historical origin not located in available change history; the behavior it pins is evidenced by its catalogued sources (e.g. catch/unit/kernel) built via catch/unit/CMakeLists.txt under BUILD_UNIT_TESTS.
     disposition: review
     disposition_rationale: Legacy functional launch coverage stays active alongside contract-kernel-launch; classification pending restructuring review.
     related_restructuring: TEST_RESTRUCTURING.md
@@ -900,7 +900,7 @@ suites:
         claim: Unit device cases carry level/skip metadata driving ctest labels.
       - path: catch/config/configs/unit/context.yaml
         claim: Unit context cases carry level/skip metadata driving ctest labels.
-    history: Historical origin not located in available change history; repository evidence (the suite's catalogued source paths and CMake build wiring recorded in this inventory) documents the behavior it currently pins.
+    history: Historical origin not located in available change history; the behavior it pins is evidenced by its catalogued sources (e.g. catch/unit/device) built via catch/unit/CMakeLists.txt under BUILD_UNIT_TESTS.
     disposition: review
     disposition_rationale: Legacy functional device/context coverage stays active alongside contract-device and contract-context; classification pending restructuring review.
     related_restructuring: TEST_RESTRUCTURING.md
@@ -932,7 +932,7 @@ suites:
     evidence:
       - path: catch/unit/CMakeLists.txt
         claim: occupancy is built under BUILD_UNIT_TESTS.
-    history: Historical origin not located in available change history; repository evidence (the suite's catalogued source paths and CMake build wiring recorded in this inventory) documents the behavior it currently pins.
+    history: Historical origin not located in available change history; the behavior it pins is evidenced by its catalogued sources (e.g. catch/unit/occupancy) built via catch/unit/CMakeLists.txt under BUILD_UNIT_TESTS.
     disposition: review
     disposition_rationale: Legacy functional occupancy coverage stays active alongside contract-occupancy; classification pending restructuring review.
     related_restructuring: TEST_RESTRUCTURING.md
@@ -972,7 +972,7 @@ suites:
         claim: Unit surface cases carry level/skip metadata driving ctest labels.
       - path: catch/config/configs/unit/channelDescriptor.yaml
         claim: Unit channelDescriptor cases carry level/skip metadata driving ctest labels.
-    history: Historical origin not located in available change history; repository evidence (the suite's catalogued source paths and CMake build wiring recorded in this inventory) documents the behavior it currently pins.
+    history: Historical origin not located in available change history; the behavior it pins is evidenced by its catalogued sources (e.g. catch/unit/texture) built via catch/unit/CMakeLists.txt under BUILD_UNIT_TESTS.
     disposition: review
     disposition_rationale: Legacy functional texture/surface coverage stays active alongside contract-texture; classification pending restructuring review.
     related_restructuring: TEST_RESTRUCTURING.md
@@ -1004,7 +1004,7 @@ suites:
     evidence:
       - path: catch/unit/CMakeLists.txt
         claim: rtc is built under BUILD_UNIT_TESTS.
-    history: Historical origin not located in available change history; repository evidence (the suite's catalogued source paths and CMake build wiring recorded in this inventory) documents the behavior it currently pins.
+    history: Historical origin not located in available change history; the behavior it pins is evidenced by its catalogued sources (e.g. catch/unit/rtc) built via catch/unit/CMakeLists.txt under BUILD_UNIT_TESTS.
     disposition: keep
     disposition_rationale: HIPRTC is a distinct runtime-compilation surface with no separate contract domain today; retained as the primary RTC coverage.
 
@@ -1043,7 +1043,7 @@ suites:
         claim: Unit dynamicLoading cases carry level/skip metadata driving ctest labels.
       - path: catch/config/configs/unit/library.yaml
         claim: Unit library cases carry level/skip metadata driving ctest labels.
-    history: Historical origin not located in available change history; repository evidence (the suite's catalogued source paths and CMake build wiring recorded in this inventory) documents the behavior it currently pins.
+    history: Historical origin not located in available change history; the behavior it pins is evidenced by its catalogued sources (e.g. catch/unit/module) built via catch/unit/CMakeLists.txt under BUILD_UNIT_TESTS.
     disposition: review
     disposition_rationale: Legacy functional loader coverage stays active alongside contract-module-loader; classification pending restructuring review.
     related_restructuring: TEST_RESTRUCTURING.md
@@ -1075,7 +1075,7 @@ suites:
     evidence:
       - path: catch/unit/CMakeLists.txt
         claim: virtualMemoryManagement is built under BUILD_UNIT_TESTS.
-    history: Historical origin not located in available change history; repository evidence (the suite's catalogued source paths and CMake build wiring recorded in this inventory) documents the behavior it currently pins.
+    history: Historical origin not located in available change history; the behavior it pins is evidenced by its catalogued sources (e.g. catch/unit/virtualMemoryManagement) built via catch/unit/CMakeLists.txt under BUILD_UNIT_TESTS.
     disposition: review
     disposition_rationale: Legacy functional VMM coverage stays active alongside contract-memory-pool-vmm; classification pending restructuring review.
     related_restructuring: TEST_RESTRUCTURING.md
@@ -1107,7 +1107,7 @@ suites:
     evidence:
       - path: catch/unit/CMakeLists.txt
         claim: errorHandling is built under BUILD_UNIT_TESTS.
-    history: Historical origin not located in available change history; repository evidence (the suite's catalogued source paths and CMake build wiring recorded in this inventory) documents the behavior it currently pins.
+    history: Historical origin not located in available change history; the behavior it pins is evidenced by its catalogued sources (e.g. catch/unit/errorHandling) built via catch/unit/CMakeLists.txt under BUILD_UNIT_TESTS.
     disposition: review
     disposition_rationale: Legacy functional error coverage stays active alongside contract-error; classification pending restructuring review.
     related_restructuring: TEST_RESTRUCTURING.md
@@ -1162,7 +1162,7 @@ suites:
         claim: Unit vector_types cases carry level/skip metadata driving ctest labels.
       - path: catch/config/configs/unit/deviceLib.yaml
         claim: Unit deviceLib cases carry level/skip metadata driving ctest labels.
-    history: Historical origin not located in available change history; repository evidence (the suite's catalogued source paths and CMake build wiring recorded in this inventory) documents the behavior it currently pins.
+    history: Historical origin not located in available change history; the behavior it pins is evidenced by its catalogued sources (e.g. catch/unit/math) built via catch/unit/CMakeLists.txt under BUILD_UNIT_TESTS.
     disposition: keep
     disposition_rationale: Device-library and math correctness has no contract-tier counterpart; retained as primary device-side coverage.
 
@@ -1193,7 +1193,7 @@ suites:
     evidence:
       - path: catch/unit/CMakeLists.txt
         claim: printf is built under BUILD_UNIT_TESTS.
-    history: Historical origin not located in available change history; repository evidence (the suite's catalogued source paths and CMake build wiring recorded in this inventory) documents the behavior it currently pins.
+    history: Historical origin not located in available change history; the behavior it pins is evidenced by its catalogued sources (e.g. catch/unit/printf) built via catch/unit/CMakeLists.txt under BUILD_UNIT_TESTS.
     disposition: keep
     disposition_rationale: Device printf has no contract-tier counterpart; retained as primary coverage.
 
@@ -1232,7 +1232,7 @@ suites:
         claim: Unit p2p cases carry level/skip metadata driving ctest labels.
       - path: catch/config/configs/unit/cluster.yaml
         claim: Unit cluster cases carry level/skip metadata driving ctest labels.
-    history: Historical origin not located in available change history; repository evidence (the suite's catalogued source paths and CMake build wiring recorded in this inventory) documents the behavior it currently pins.
+    history: Historical origin not located in available change history; the behavior it pins is evidenced by its catalogued sources (e.g. catch/unit/cooperativeGrps) built via catch/unit/CMakeLists.txt under BUILD_UNIT_TESTS.
     disposition: review
     disposition_rationale: Cooperative and peer launch cases live in unit directories but are integration/multi-GPU by execution context; explicit multi-GPU classification is an open restructuring item. Source is not moved by this documentation change.
     related_restructuring: TEST_RESTRUCTURING.md
@@ -1312,7 +1312,7 @@ suites:
         claim: Unit c_compilation cases carry level/skip metadata driving ctest labels.
       - path: catch/config/configs/unit/hip_specific.yaml
         claim: Unit hip_specific cases carry level/skip metadata driving ctest labels.
-    history: Historical origin not located in available change history; repository evidence (the suite's catalogued source paths and CMake build wiring recorded in this inventory) documents the behavior it currently pins.
+    history: Historical origin not located in available change history; the behavior it pins is evidenced by its catalogued sources (e.g. catch/unit/compiler) built via catch/unit/CMakeLists.txt under BUILD_UNIT_TESTS.
     disposition: keep
     disposition_rationale: Compiler-facing coverage used by runtime tests has no contract-tier counterpart; retained as primary coverage.
 
@@ -1348,7 +1348,7 @@ suites:
         claim: Unit multiThread cases carry level/skip metadata driving ctest labels.
       - path: catch/config/configs/unit/synchronization.yaml
         claim: Unit synchronization cases carry level/skip metadata driving ctest labels.
-    history: Historical origin not located in available change history; repository evidence (the suite's catalogued source paths and CMake build wiring recorded in this inventory) documents the behavior it currently pins.
+    history: Historical origin not located in available change history; the behavior it pins is evidenced by its catalogued sources (e.g. catch/unit/multiThread) built via catch/unit/CMakeLists.txt under BUILD_UNIT_TESTS.
     disposition: keep
     disposition_rationale: Concurrency/synchronization behavior has no contract-tier counterpart; retained as primary coverage.
 
@@ -1388,7 +1388,7 @@ suites:
         claim: Unit callback cases carry level/skip metadata driving ctest labels.
       - path: catch/config/configs/unit/clock.yaml
         claim: Unit clock cases carry level/skip metadata driving ctest labels.
-    history: Historical origin not located in available change history; repository evidence (the suite's catalogued source paths and CMake build wiring recorded in this inventory) documents the behavior it currently pins.
+    history: Historical origin not located in available change history; the behavior it pins is evidenced by its catalogued sources (e.g. catch/unit/hrr) built via catch/unit/CMakeLists.txt under BUILD_UNIT_TESTS.
     disposition: keep
     disposition_rationale: AMD-specific feature coverage is backend-gated and has no portable contract counterpart; retained as primary coverage.
 
@@ -1435,7 +1435,7 @@ suites:
         claim: ABM cases carry level/skip metadata driving the ctest ABM label as a non-unit group.
       - path: catch/config/configs/TypeQualifiers.yaml
         claim: TypeQualifiers cases carry level/skip metadata driving the ctest TypeQualifiers label as a non-unit group.
-    history: Historical origin not located in available change history; repository evidence (the suite's catalogued source paths and CMake build wiring recorded in this inventory) documents the behavior it currently pins.
+    history: Historical origin not located in available change history; the behavior it pins is evidenced by its catalogued sources (e.g. catch/unit/sanityTests) built via catch/unit/CMakeLists.txt under BUILD_UNIT_TESTS.
     disposition: keep
     disposition_rationale: Harness and macro-boundary coverage underpins all other suites; retained.
 
@@ -1468,7 +1468,7 @@ suites:
         claim: oob is built only when ENABLE_OOB_TESTS and HIP_PLATFORM amd and not ASAN and UNIX.
       - path: catch/CMakeLists.txt
         claim: ENABLE_OOB_TESTS defaults ON (option ENABLE_OOB_TESTS "Build OOB tests, deliberately wrong inputs" ON).
-    history: Historical origin not located in available change history; repository evidence (the suite's catalogued source paths and CMake build wiring recorded in this inventory) documents the behavior it currently pins.
+    history: Historical origin not located in available change history; the behavior it pins is evidenced by its catalogued sources (e.g. catch/unit/oob) built via catch/unit/CMakeLists.txt under BUILD_UNIT_TESTS.
     disposition: keep
     disposition_rationale: OOB coverage is build-gated and signal-preserving with no contract counterpart; retained.
 
@@ -1507,7 +1507,7 @@ suites:
         claim: multiproc is a non-unit group with its own case metadata.
       - path: catch/config/common.py
         claim: multiproc is listed in NON_UNIT_GROUPS.
-    history: Historical origin not located in available change history; repository evidence (the suite's catalogued source paths and CMake build wiring recorded in this inventory) documents the behavior it currently pins.
+    history: Historical origin not located in available change history; the behavior it pins is evidenced by its catalogued sources (e.g. catch/multiproc) built via catch/CMakeLists.txt under BUILD_UNIT_TESTS.
     disposition: review
     disposition_rationale: Multiprocess cases are integration by nature but live outside a dedicated integration tier; integration responsibilities are distributed and pending restructuring review.
     related_restructuring: TEST_RESTRUCTURING.md
@@ -1543,7 +1543,7 @@ suites:
         claim: performance builds api and scenarios subdirectories.
       - path: catch/performance/api/CMakeLists.txt
         claim: api covers memset, memcpy, kernelLaunch, stream, event, warpSync, splitBarrier, and example.
-    history: Historical origin not located in available change history; repository evidence (the suite's catalogued source paths and CMake build wiring recorded in this inventory) documents the behavior it currently pins.
+    history: Historical origin not located in available change history; the behavior it pins is evidenced by its catalogued sources (e.g. catch/performance/api) built via catch/CMakeLists.txt under BUILD_PERF_TESTS.
     disposition: keep
     disposition_rationale: Performance microbenchmarks are a separate opt-in build mode and informational gate; retained as-is.
 
@@ -1574,7 +1574,7 @@ suites:
     evidence:
       - path: catch/performance/CMakeLists.txt
         claim: scenarios is built as part of the performance group.
-    history: Historical origin not located in available change history; repository evidence (the suite's catalogued source paths and CMake build wiring recorded in this inventory) documents the behavior it currently pins.
+    history: Historical origin not located in available change history; the behavior it pins is evidenced by its catalogued sources (e.g. catch/performance/scenarios) built via catch/performance/CMakeLists.txt under BUILD_PERF_TESTS.
     disposition: keep
     disposition_rationale: Scenario benchmarks share the opt-in performance build mode; retained as-is.
 
@@ -1613,7 +1613,7 @@ suites:
         claim: stress builds memory, module, and deviceallocation always, and printf and stream within an HIP_PLATFORM amd guard.
       - path: catch/stress/memory/CMakeLists.txt
         claim: memory_stress is built via hip_add_exe_to_target with TEST_TARGET_NAME stress_test.
-    history: Historical origin not located in available change history; repository evidence (the suite's catalogued source paths and CMake build wiring recorded in this inventory) documents the behavior it currently pins.
+    history: Historical origin not located in available change history; the behavior it pins is evidenced by its catalogued sources (e.g. catch/stress/memory) built via catch/CMakeLists.txt under BUILD_STRESS_TESTS.
     disposition: keep
     disposition_rationale: Stress is a separate opt-in build mode and informational gate; retained as-is.
 
@@ -1687,6 +1687,6 @@ suites:
         claim: gen_test_plan.py generates TEST_PLAN.md from @asserts annotations and provides the --check staleness check.
       - path: catch/TEST_PLAN.md
         claim: The generated plan is the derived case inventory; it is cited here, never hand-edited or duplicated.
-    history: Historical origin not located in available change history; repository evidence (the suite's catalogued source paths and CMake build wiring recorded in this inventory) documents the behavior it currently pins.
+    history: Historical origin not located in available change history; this suite is a standalone Python workflow static check (catch/tools/gen_test_plan.py --check), not CMake-wired, invoked by the .github/workflows/hip-contract-coverage.yml contract-coverage job as recorded in this inventory's evidence.
     disposition: keep
     disposition_rationale: The test-plan staleness check keeps the generated inventory honest and is defined in-repo; retained.
