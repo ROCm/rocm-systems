@@ -126,7 +126,10 @@ for itself (workstreams WS-1 and WS-2):
     - every ``source.paths`` entry resolves to a path on disk (a source directory
       or a file) relative to the component directory, and every ``evidence.path``
       resolves specifically to a file (not a directory), unless explicitly marked
-      ``external:``.
+      ``external:``; an empty or whitespace-only ``source.paths`` entry is
+      rejected rather than resolved to the component directory, and a bare
+      ``external:`` with no target is rejected (the marker must name the external
+      reference it stands in for).
 
   repository path pointers
     - every repository-path-bearing field resolves relative to the component
@@ -136,6 +139,18 @@ for itself (workstreams WS-1 and WS-2):
       ``execution.ci_lane.in_repo`` (whose trailing job/step qualifier is
       descriptive prose and is not path-checked).
 
+  CMake suite-group reconciliation
+    - for each Catch2 area (unit / contract / performance / stress) whose
+      per-area ``CMakeLists.txt`` is present, every actively built group
+      (``add_subdirectory(<group>)`` on a non-commented line) must be represented
+      by an inventory suite whose ``source.paths`` names ``catch/<area>/<group>``
+      (or a path beneath it); a built group that no suite covers is reported,
+      unless it is explicitly documented under the inventory's optional
+      ``cmake_suite_group_exclusions`` block with a categorized reason
+      (not_built / commented / no_cases / bare / external) and a note. The
+      reconciliation is feasibility-gated: an area with no CMakeLists.txt on disk
+      is skipped, so the check is a no-op for a fixture that ships no CMake tree.
+
   incident IDs and fields
     - every ``TI-NNN`` referenced in the YAML resolves to an incident defined by
       a ``## TI-NNN:`` heading in TESTING_INCIDENTS.md;
@@ -143,7 +158,14 @@ for itself (workstreams WS-1 and WS-2):
       ``## TI-NNN:`` headings is a schema error (the id is meant to be stable and
       unique);
     - every defined incident carries the required labelled fields (Finding,
-      Control, Protects, Origin, Current status, Retirement condition).
+      Control, Protects, Origin, Current status, Retirement condition);
+    - every commit-like citation in an incident Origin field (an abbreviated or
+      full git SHA, typically in backticks) resolves to a commit in the
+      repository; a hash that git reports does not exist is reported unless the
+      author explicitly marks the citation ``external:`` or ``unverified:``. This
+      check is feasibility-gated: when the document is not inside a git work tree
+      (or git is unavailable) hash existence cannot be verified and the check is
+      skipped.
 
   local Markdown refs and anchors
     - every relative Markdown link ``[text](path)`` in TESTING.md,
@@ -160,7 +182,9 @@ for itself (workstreams WS-1 and WS-2):
     - reference-style links ``[text][label]`` / ``[label][]`` are resolved through
       their ``[label]: target`` definitions and validated like inline links; a
       usage with no matching definition, or a definition that is never used, is
-      reported;
+      reported; a label defined more than once (case-insensitively) is reported
+      and the first definition is preserved as authoritative rather than silently
+      overwritten;
     - every in-page ``#anchor`` and ``file.md#anchor`` fragment resolves to a
       heading in the target Markdown document;
     - every ``related_restructuring`` pointer in the inventory, when present, is a
@@ -180,6 +204,7 @@ import argparse
 import glob
 import json
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -362,6 +387,43 @@ GENERIC_HISTORY_SENTINELS = frozenset({
 # A path value starting with this marker is a CI lane defined outside the repo
 # and is not existence-checked (TEST_RESTRUCTURING.md WS-1).
 EXTERNAL_MARKER = "external:"
+
+# Catch2 test areas whose per-area CMakeLists.txt enumerates the active test
+# groups (one ``add_subdirectory(<group>)`` per built group). The checker
+# reconciles these active groups against the inventory so a group that is built
+# but carries no inventory suite is surfaced rather than silently uncovered.
+CMAKE_RECONCILIATION_AREAS = ("unit", "contract", "performance", "stress")
+
+# An ``add_subdirectory(<group>)`` call naming the group as its first token. The
+# surrounding ``_active_cmake_groups`` scanner skips commented-out lines so a
+# ``#add_subdirectory(gcc)`` is treated as an inactive (not-built) group rather
+# than an active one that must be represented.
+_ADD_SUBDIRECTORY_RE = re.compile(r"add_subdirectory\(\s*([A-Za-z0-9_.+\-]+)")
+
+# The reasons a built CMake suite group may legitimately carry no inventory
+# suite. A documented exclusion must name one of these so the allowance is an
+# explicit, categorized decision rather than a silent hole:
+#   * not_built - the group is guarded off by default / builds nothing here
+#   * commented - the add_subdirectory is commented out (kept for reference)
+#   * no_cases  - the group directory holds only config/bare scaffolding, no
+#                 runnable contract/unit/perf/stress cases to inventory
+#   * bare      - a placeholder group with no test sources yet
+#   * external  - the group's coverage is owned by an external record
+CMAKE_EXCLUSION_REASONS = frozenset({
+    "not_built", "commented", "no_cases", "bare", "external",
+})
+
+# A commit-like citation in an incident Origin field: a 7-40 character hex string
+# (an abbreviated or full git SHA). The ``_is_commit_hash`` helper additionally
+# requires at least one digit so an all-letter English word that happens to be
+# hex ("defaced") is not mistaken for a hash.
+_COMMIT_HASH_RE = re.compile(r"^[0-9a-f]{7,40}$")
+
+# Inline-code markers that exempt a cited commit from existence validation: a
+# citation the author explicitly flags as living outside this repository or as
+# unverified is preserved as-is (no invented ticket, no false alarm) rather than
+# checked against the local object database.
+ORIGIN_CITATION_MARKERS = ("external:", "unverified:")
 
 # A repository-path-bearing field value may be a glob pattern (for example the
 # source_of_truth suite_placement/case_metadata/contract_assertions patterns)
@@ -963,7 +1025,22 @@ def check_inventory(inventory, component_dir, repo_root=None):
                         errors.append(
                             "suite {!r} source path is not a string: {!r}".format(sid, rel))
                         continue
+                    # An empty or whitespace-only source path carries no target.
+                    # It must be rejected rather than resolved: Path("") (or a
+                    # blank string) resolves to the component directory itself,
+                    # which exists, so it would otherwise count as a spuriously
+                    # satisfied reference.
+                    if not rel.strip():
+                        errors.append(
+                            "suite {!r} source path must be a non-empty string".format(sid))
+                        continue
                     if rel.startswith(EXTERNAL_MARKER):
+                        # A bare ``external:`` with no target names nothing; the
+                        # marker must carry the external reference it stands in for.
+                        if not rel[len(EXTERNAL_MARKER):].strip():
+                            errors.append(
+                                "suite {!r} source path external marker must name a "
+                                "target: {!r}".format(sid, rel))
                         continue
                     location = _path_location_status(component_dir, rel, repo_root)
                     if location == "absolute":
@@ -1098,6 +1175,145 @@ def check_inventory(inventory, component_dir, repo_root=None):
         incident_refs.update(_collect_incident_refs(suite))
 
     return errors, suite_ids, incident_refs, {"records": len(suites), "refs": refs_ok}
+
+
+def _active_cmake_groups(cmake_path):
+    """Return the list of group names a CMakeLists.txt actively builds.
+
+    Each ``add_subdirectory(<group>)`` on a non-commented line names an active
+    group; a commented-out call (``#add_subdirectory(gcc)``) is skipped so a
+    deliberately-disabled group is treated as not-built rather than as an active
+    group that must be represented by an inventory suite.
+    """
+    groups = []
+    for line in cmake_path.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if stripped.startswith("#"):
+            continue
+        match = _ADD_SUBDIRECTORY_RE.match(stripped)
+        if match:
+            groups.append(match.group(1))
+    return groups
+
+
+def _represented_group_dirs(inventory):
+    """Return the set of repository-relative directory tokens the inventory names.
+
+    Every non-external ``source.paths`` entry of every suite is normalized to its
+    stripped string; a CMake group directory ``catch/<area>/<group>`` is
+    considered represented when some suite names that directory or a path beneath
+    it.
+    """
+    paths = set()
+    if not isinstance(inventory, dict):
+        return paths
+    for suite in inventory.get("suites") or []:
+        if not isinstance(suite, dict):
+            continue
+        source = suite.get("source")
+        if not isinstance(source, dict):
+            continue
+        for rel in source.get("paths") or []:
+            if isinstance(rel, str) and rel.strip() and not rel.startswith(
+                    EXTERNAL_MARKER):
+                paths.add(rel.strip())
+    return paths
+
+
+def _group_is_represented(group_dir, represented):
+    """True when some inventory source path names group_dir or a path beneath it."""
+    prefix = group_dir + "/"
+    return any(path == group_dir or path.startswith(prefix)
+              for path in represented)
+
+
+def check_cmake_reconciliation(inventory, component_dir):
+    """Reconcile active CMake suite groups against the inventory.
+
+    For each Catch2 area (unit / contract / performance / stress) whose
+    per-area ``CMakeLists.txt`` exists, every actively built group
+    (``add_subdirectory(<group>)``) must be represented by an inventory suite
+    whose ``source.paths`` names ``catch/<area>/<group>`` (or a path beneath it).
+    A built group that no suite covers is a silent coverage hole and is reported,
+    unless it is explicitly documented under the inventory's optional
+    ``cmake_suite_group_exclusions`` block with a categorized reason and a note.
+
+    The reconciliation is feasibility-gated: an area whose CMakeLists.txt is not
+    present on disk is skipped, so the check is a no-op for a self-contained
+    fixture that ships no CMake tree.
+
+    Returns a list of deterministic error strings.
+    """
+    errors = []
+    if not isinstance(inventory, dict):
+        return errors
+
+    component_dir = Path(component_dir)
+    represented = _represented_group_dirs(inventory)
+
+    # Documented exclusions: an explicit, categorized allowance for a built group
+    # that intentionally carries no inventory suite. Each entry must name the
+    # group, a reason within the documented vocabulary, and a note (the clear
+    # metadata that records why the allowance is safe).
+    excluded = set()
+    raw_exclusions = inventory.get("cmake_suite_group_exclusions")
+    if raw_exclusions is not None:
+        if not isinstance(raw_exclusions, list):
+            errors.append("cmake_suite_group_exclusions must be a list")
+            raw_exclusions = []
+        for entry in raw_exclusions:
+            if not isinstance(entry, dict):
+                errors.append(
+                    "cmake_suite_group_exclusions entry is not a mapping: "
+                    "{!r}".format(entry))
+                continue
+            group = entry.get("group")
+            reason = entry.get("reason")
+            note = entry.get("note")
+            if not _nonempty_str(group):
+                errors.append(
+                    "cmake_suite_group_exclusions entry must name a non-empty "
+                    "group: {!r}".format(group))
+                continue
+            group = group.strip()
+            if not _nonempty_str(reason) or reason not in CMAKE_EXCLUSION_REASONS:
+                errors.append(
+                    "cmake_suite_group_exclusions group {!r} reason must be one "
+                    "of {}: {!r}".format(
+                        group, sorted(CMAKE_EXCLUSION_REASONS), reason))
+                continue
+            if not _nonempty_str(note):
+                errors.append(
+                    "cmake_suite_group_exclusions group {!r} must carry a "
+                    "non-empty note".format(group))
+                continue
+            # A group that is both represented by a suite and documented as
+            # excluded is contradictory metadata: the exclusion claims no suite
+            # covers it while a suite does. Report it rather than let the two
+            # records disagree silently.
+            if _group_is_represented(group, represented):
+                errors.append(
+                    "cmake_suite_group_exclusions group {!r} is already "
+                    "represented by an inventory suite; remove the "
+                    "exclusion".format(group))
+                continue
+            excluded.add(group)
+
+    for area in CMAKE_RECONCILIATION_AREAS:
+        cmake_path = component_dir / "catch" / area / "CMakeLists.txt"
+        if not cmake_path.is_file():
+            continue
+        for group in _active_cmake_groups(cmake_path):
+            group_dir = "catch/{}/{}".format(area, group)
+            if _group_is_represented(group_dir, represented):
+                continue
+            if group_dir in excluded:
+                continue
+            errors.append(
+                "active CMake suite group {!r} is not represented by any "
+                "inventory suite (add a suite whose source.paths covers it, or "
+                "document it under cmake_suite_group_exclusions)".format(group_dir))
+    return errors
 
 
 def _has_gap_metadata(pairwise):
@@ -1621,6 +1837,138 @@ def check_incident_fields(incidents_path):
     return errors
 
 
+def _is_commit_hash(token):
+    """True when token looks like an abbreviated or full git commit SHA.
+
+    A commit-like token is a 7-40 character hex string that also carries at least
+    one digit, so an all-letter English word that happens to be hex ("defaced")
+    is not mistaken for a hash.
+    """
+    low = token.lower()
+    return bool(_COMMIT_HASH_RE.match(low)) and any(ch.isdigit() for ch in low)
+
+
+def _git_work_tree(path):
+    """Return str(path) when path is inside a git work tree, else None.
+
+    Hash validation is feasibility-gated: when git is unavailable or the document
+    does not live in a checkout (for example a self-contained test fixture under
+    a temporary directory), the Origin-citation check is skipped rather than
+    raising or reporting a spurious failure.
+    """
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(path), "rev-parse", "--is-inside-work-tree"],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    except (OSError, ValueError):
+        return None
+    if result.returncode != 0 or result.stdout.strip() != "true":
+        return None
+    return str(path)
+
+
+def _git_tracks(repo_dir, path):
+    """True when path is a tracked file in the git repo at repo_dir.
+
+    Origin citations are validated only for a document the repository actually
+    tracks: a throwaway fixture written into (or beneath) some ambient checkout is
+    untracked, and its citations refer to a different repository, so validating
+    them against the ambient repo would be meaningless. Anchoring on tracked-ness
+    keeps the check meaningful for the real, version-controlled document while
+    skipping self-contained fixtures.
+    """
+    try:
+        result = subprocess.run(
+            ["git", "-C", repo_dir, "ls-files", "--error-unmatch", "--",
+             str(path)],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    except (OSError, ValueError):
+        return False
+    return result.returncode == 0
+
+
+def _git_commit_exists(repo_dir, commit):
+    """Tri-state existence of a commit object in repo_dir.
+
+    Returns True when ``commit`` resolves to a commit object, False when git ran
+    and reported it does not, and None when existence could not be determined
+    (git unavailable). The ``commit`` argument is validated as pure hex by the
+    caller, so it is safe to pass as a revision.
+    """
+    try:
+        result = subprocess.run(
+            ["git", "-C", repo_dir, "rev-parse", "--verify", "--quiet",
+             commit + "^{commit}"],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    except (OSError, ValueError):
+        return None
+    return result.returncode == 0
+
+
+def check_incident_origin_citations(incidents_path):
+    """Validate commit-like citations in each incident's Origin field.
+
+    An incident Origin names where a control was introduced, often citing an
+    abbreviated git SHA in backticks (``Landed in `0d90b30fb6c```). A fabricated
+    or stale hash makes the provenance unfollowable, so each commit-like citation
+    is checked against the repository's object database: a hash that git reports
+    does not exist is reported. A citation the author explicitly flags with an
+    inline ``external:`` or ``unverified:`` marker is preserved as-is and not
+    existence-checked, so an honest out-of-repository or unverifiable reference is
+    kept without inventing a ticket.
+
+    The check is feasibility-gated: when the document is not inside a git work
+    tree (or git is unavailable) hash existence cannot be verified, so the check
+    is skipped rather than reporting a spurious failure.
+    """
+    errors = []
+    path = Path(incidents_path)
+    if not path.exists():
+        # Missing-file diagnosis is already reported by defined_incident_ids.
+        return errors
+    repo_dir = _git_work_tree(path.resolve().parent)
+    if repo_dir is None:
+        return errors
+    # Only validate citations for a document the repository actually tracks: an
+    # untracked fixture under some ambient checkout cites commits of a different
+    # repository, so resolving them here would be meaningless.
+    if not _git_tracks(repo_dir, path.resolve()):
+        return errors
+    text = path.read_text(encoding="utf-8")
+    for incident_id, section in _incident_sections(text):
+        # The Origin value runs from its bold label to the next field label, a
+        # paragraph break, a heading, or the end of the section - the same span
+        # the required-field check uses - so a multi-line Origin that cites more
+        # than one commit is scanned whole.
+        match = re.search(
+            r"\*\*\s*Origin\s*\.\s*\*\*(.*?)"
+            r"(?=\n[ \t]*\n|\n[ \t]*\*\*|\n#{1,6}\s|\Z)",
+            section, re.DOTALL)
+        if match is None:
+            continue
+        origin = match.group(1)
+        for span in re.findall(r"`([^`]+)`", origin):
+            token = span.strip()
+            marked = False
+            low = token.lower()
+            for marker in ORIGIN_CITATION_MARKERS:
+                if low.startswith(marker):
+                    token = token[len(marker):].strip()
+                    marked = True
+                    break
+            if not _is_commit_hash(token):
+                continue
+            if marked:
+                # Explicitly external / unverified: preserved, not checked.
+                continue
+            if _git_commit_exists(repo_dir, token.lower()) is False:
+                errors.append(
+                    "incident {} Origin cites commit {!r} which does not exist in "
+                    "the repository (cite a real landed commit, or mark it "
+                    "'external:'/'unverified:')".format(incident_id, token))
+    return errors
+
+
 def _heading_anchors(md_path, cache):
     """Return the set of GitHub-style heading slugs for a Markdown file."""
     resolved = Path(md_path).resolve()
@@ -1915,10 +2263,22 @@ def check_markdown_links(md_path, anchors_cache, boundary_root=None):
     text = _mask_code(path.read_text(encoding="utf-8"))
 
     # Reference-style link definitions; Markdown reference labels are
-    # case-insensitive, so normalize to lower case for matching.
+    # case-insensitive, so normalize to lower case for matching. A label defined
+    # more than once (case-insensitively) is ambiguous: CommonMark keeps the
+    # first definition and silently ignores the rest, so a copy/pasted or
+    # conflicting redefinition would otherwise be dropped without a word. The
+    # first definition is preserved as authoritative and each later redefinition
+    # is reported rather than silently overwriting it.
     definitions = {}
     for match in _MD_REF_DEF_RE.finditer(text):
-        definitions[match.group(1).strip().lower()] = match.group(2).strip()
+        label = match.group(1).strip().lower()
+        if label in definitions:
+            errors.append(
+                "{}: duplicate reference-style link definition [{}] "
+                "(Markdown reference labels are case-insensitive; the first "
+                "definition is authoritative)".format(path.name, label))
+            continue
+        definitions[label] = match.group(2).strip()
 
     # Inline links. The destination/title body is extracted with a balanced-
     # parenthesis scan so a destination or title that legitimately contains
@@ -2005,8 +2365,15 @@ def validate(root=None, inventory_path=None, coverage_path=None,
         incident_refs |= inv_refs
         counts["inventory_records"] = inv_counts["records"]
         refs_total += inv_counts["refs"]
+        # Reconcile active CMake suite groups against the inventory. This is a
+        # feasibility-gated cross-check against the component's catch/ tree, so it
+        # runs here (where component_dir is known) rather than inside
+        # check_inventory, and is a no-op when no CMake tree is present.
+        results["cmake_reconciliation"] = sorted(
+            check_cmake_reconciliation(inventory, component_dir))
     else:
         results["inventory"] = ["inventory not loaded"]
+        results["cmake_reconciliation"] = []
 
     if coverage is not None:
         inventory_kind_vocab = set()
@@ -2031,6 +2398,7 @@ def validate(root=None, inventory_path=None, coverage_path=None,
     ref_errors = check_incident_refs(incident_refs, defined)
     incident_errors.extend(ref_errors)
     incident_errors.extend(check_incident_fields(incidents_path))
+    incident_errors.extend(check_incident_origin_citations(incidents_path))
     results["incidents"] = sorted(incident_errors)
     # Count incident references that resolved to a defined incident.
     refs_total += len([ref for ref in incident_refs if ref in defined])
@@ -2047,13 +2415,15 @@ def validate(root=None, inventory_path=None, coverage_path=None,
     return results, counts
 
 
-_SUMMARY_KEYS = ("load", "inventory", "coverage_model", "incidents", "markdown_links")
+_SUMMARY_KEYS = ("load", "inventory", "cmake_reconciliation", "coverage_model",
+                 "incidents", "markdown_links")
 
 
 def _print_summary(results, counts):
     labels = {
         "load": "Document parse",
         "inventory": "Inventory schema / vocab / targets / paths",
+        "cmake_reconciliation": "Active CMake suite groups vs inventory",
         "coverage_model": "Coverage model refs / axes / paths",
         "incidents": "Incident ID references and fields",
         "markdown_links": "Local Markdown links and anchors",

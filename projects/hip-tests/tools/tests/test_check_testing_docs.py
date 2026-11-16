@@ -13,10 +13,16 @@ Run with:  python -m unittest projects/hip-tests/tools/tests/test_check_testing_
 """
 
 import os
+import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+
+# git-backed tests (Origin-citation existence checks) need a real git binary;
+# they are skipped rather than failed where git is unavailable.
+_GIT = shutil.which("git")
 
 # The checker lives one directory up (tools/check_testing_docs.py).
 _TOOLS_DIR = Path(__file__).resolve().parent.parent
@@ -2406,6 +2412,351 @@ class CheckTestingDocsTest(unittest.TestCase):
                 in err for err in results["coverage_model"]),
             msg=results["coverage_model"],
         )
+
+
+    # -- review fix 1: duplicate reference-style link definitions ------------
+
+    def test_reference_style_duplicate_definition_is_reported(self):
+        # Two definitions for the same label are ambiguous: CommonMark keeps the
+        # first and silently drops the rest, so a copy/pasted or conflicting
+        # redefinition must be reported rather than swallowed.
+        testing = (
+            "# Testing Strategy\n\n"
+            "See the [inventory][inv].\n\n"
+            "## Known gaps\n\nBody.\n\n"
+            "[inv]: test_inventory.yaml\n"
+            "[inv]: test_coverage_model.yaml\n"
+        )
+        _write_docs(self.root, {"TESTING.md": testing})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("duplicate reference-style link definition" in err
+                and "[inv]" in err
+                for err in results["markdown_links"]),
+            msg=results["markdown_links"],
+        )
+
+    def test_reference_style_duplicate_definition_is_case_insensitive(self):
+        # Markdown reference labels are case-insensitive, so ``[inv]`` and
+        # ``[INV]`` collide; the second (any-case) redefinition is reported and
+        # the first is preserved as authoritative (no spurious "never used").
+        testing = (
+            "# Testing Strategy\n\n"
+            "See the [inventory][inv].\n\n"
+            "## Known gaps\n\nBody.\n\n"
+            "[inv]: test_inventory.yaml\n"
+            "[INV]: test_coverage_model.yaml\n"
+        )
+        _write_docs(self.root, {"TESTING.md": testing})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("duplicate reference-style link definition" in err
+                for err in results["markdown_links"]),
+            msg=results["markdown_links"],
+        )
+        # The surviving first definition is used, so no "never used" noise fires.
+        self.assertFalse(
+            any("is never used" in err for err in results["markdown_links"]),
+            msg=results["markdown_links"],
+        )
+
+    def test_reference_style_single_definition_still_passes(self):
+        # Regression guard: a lone definition is not mistaken for a duplicate.
+        testing = (
+            "# Testing Strategy\n\n"
+            "See the [inventory][inv].\n\n"
+            "## Known gaps\n\nBody.\n\n"
+            "[inv]: test_inventory.yaml\n"
+        )
+        _write_docs(self.root, {"TESTING.md": testing})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertEqual(
+            results["markdown_links"], [], msg=results["markdown_links"])
+
+    # -- review fix 2: empty/whitespace source.paths and bare external -------
+
+    def test_empty_string_source_path_is_reported(self):
+        # An empty source path resolves to the component directory itself (which
+        # exists) and would otherwise count as a spuriously satisfied reference.
+        broken = VALID_INVENTORY.replace(
+            '        - "external: outside-this-repo"\n',
+            '        - ""\n', 1)
+        _write_docs(self.root, {"test_inventory.yaml": broken})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("source path must be a non-empty string" in err
+                for err in results["inventory"]),
+            msg=results["inventory"],
+        )
+
+    def test_whitespace_only_source_path_is_reported(self):
+        # A blank, whitespace-only path carries no target and must be rejected
+        # rather than stripped to the component directory.
+        broken = VALID_INVENTORY.replace(
+            '        - "external: outside-this-repo"\n',
+            '        - "   "\n', 1)
+        _write_docs(self.root, {"test_inventory.yaml": broken})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("source path must be a non-empty string" in err
+                for err in results["inventory"]),
+            msg=results["inventory"],
+        )
+
+    def test_bare_external_source_path_marker_is_reported(self):
+        # The ``external:`` marker must name the external reference it stands in
+        # for; a bare marker with no target names nothing.
+        broken = VALID_INVENTORY.replace(
+            '        - "external: outside-this-repo"\n',
+            '        - "external:"\n', 1)
+        _write_docs(self.root, {"test_inventory.yaml": broken})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("external marker must name a target" in err
+                for err in results["inventory"]),
+            msg=results["inventory"],
+        )
+
+    def test_bare_external_source_path_marker_with_trailing_space_is_reported(self):
+        # Trailing whitespace after the marker is still an empty target.
+        broken = VALID_INVENTORY.replace(
+            '        - "external: outside-this-repo"\n',
+            '        - "external:   "\n', 1)
+        _write_docs(self.root, {"test_inventory.yaml": broken})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("external marker must name a target" in err
+                for err in results["inventory"]),
+            msg=results["inventory"],
+        )
+
+    def test_named_external_source_path_still_passes(self):
+        # Regression guard: a named external target remains accepted.
+        _write_docs(self.root)
+        results, _ = checker.validate(root=str(self.root))
+        self.assertEqual(results["inventory"], [], msg=results["inventory"])
+
+    # -- review fix 3: active CMake suite groups vs inventory ----------------
+
+    def _write_cmake_area(self, area, body):
+        """Write a per-area catch/<area>/CMakeLists.txt under the temp root."""
+        area_dir = self.root / "catch" / area
+        area_dir.mkdir(parents=True, exist_ok=True)
+        (area_dir / "CMakeLists.txt").write_text(body, encoding="utf-8")
+
+    def _recon_inventory(self, paths=None, exclusions=None):
+        """Build a one-suite inventory dict for reconciliation tests."""
+        inv = {"suites": [{"id": "s1", "source": {"paths": list(paths or [])}}]}
+        if exclusions is not None:
+            inv["cmake_suite_group_exclusions"] = exclusions
+        return inv
+
+    def test_cmake_active_group_unrepresented_is_reported(self):
+        self._write_cmake_area("unit", "add_subdirectory(memory)\n")
+        errors = checker.check_cmake_reconciliation(
+            self._recon_inventory(paths=[]), str(self.root))
+        self.assertTrue(
+            any("catch/unit/memory" in err and "not represented" in err
+                for err in errors),
+            msg=errors)
+
+    def test_cmake_active_group_represented_passes(self):
+        self._write_cmake_area("unit", "add_subdirectory(memory)\n")
+        errors = checker.check_cmake_reconciliation(
+            self._recon_inventory(paths=["catch/unit/memory"]), str(self.root))
+        self.assertEqual(errors, [], msg=errors)
+
+    def test_cmake_group_represented_by_path_beneath_passes(self):
+        # A source path naming a file beneath the group directory represents it.
+        self._write_cmake_area("unit", "add_subdirectory(memory)\n")
+        errors = checker.check_cmake_reconciliation(
+            self._recon_inventory(paths=["catch/unit/memory/alloc.cc"]),
+            str(self.root))
+        self.assertEqual(errors, [], msg=errors)
+
+    def test_cmake_commented_group_is_not_required(self):
+        # A commented-out add_subdirectory is a deliberately-disabled group and
+        # must not be treated as an active group that needs a suite.
+        self._write_cmake_area(
+            "unit",
+            "#add_subdirectory(gcc)   # TODO link error\n"
+            "add_subdirectory(memory)\n")
+        errors = checker.check_cmake_reconciliation(
+            self._recon_inventory(paths=["catch/unit/memory"]), str(self.root))
+        self.assertEqual(errors, [], msg=errors)
+
+    def test_cmake_missing_area_is_feasibility_skipped(self):
+        # No catch tree on disk -> the reconciliation is a no-op for a fixture
+        # that ships no CMake tree.
+        errors = checker.check_cmake_reconciliation(
+            self._recon_inventory(paths=[]), str(self.root))
+        self.assertEqual(errors, [], msg=errors)
+
+    def test_cmake_exclusion_allows_unrepresented_group(self):
+        # A documented, categorized exclusion suppresses the unrepresented report.
+        self._write_cmake_area("unit", "add_subdirectory(gcc)\n")
+        exclusions = [{
+            "group": "catch/unit/gcc", "reason": "not_built",
+            "note": "link error under TheRock build; kept for reference",
+        }]
+        errors = checker.check_cmake_reconciliation(
+            self._recon_inventory(paths=[], exclusions=exclusions), str(self.root))
+        self.assertEqual(errors, [], msg=errors)
+
+    def test_cmake_exclusion_invalid_reason_is_reported(self):
+        self._write_cmake_area("unit", "add_subdirectory(gcc)\n")
+        exclusions = [{
+            "group": "catch/unit/gcc", "reason": "because", "note": "x",
+        }]
+        errors = checker.check_cmake_reconciliation(
+            self._recon_inventory(paths=[], exclusions=exclusions), str(self.root))
+        self.assertTrue(
+            any("reason must be one of" in err for err in errors), msg=errors)
+
+    def test_cmake_exclusion_missing_note_is_reported(self):
+        self._write_cmake_area("unit", "add_subdirectory(gcc)\n")
+        exclusions = [{"group": "catch/unit/gcc", "reason": "not_built"}]
+        errors = checker.check_cmake_reconciliation(
+            self._recon_inventory(paths=[], exclusions=exclusions), str(self.root))
+        self.assertTrue(
+            any("must carry a non-empty note" in err for err in errors), msg=errors)
+
+    def test_cmake_exclusion_for_represented_group_is_contradiction(self):
+        # A group both covered by a suite and documented as excluded is
+        # contradictory metadata and is reported.
+        self._write_cmake_area("unit", "add_subdirectory(memory)\n")
+        exclusions = [{
+            "group": "catch/unit/memory", "reason": "not_built", "note": "x",
+        }]
+        errors = checker.check_cmake_reconciliation(
+            self._recon_inventory(
+                paths=["catch/unit/memory"], exclusions=exclusions),
+            str(self.root))
+        self.assertTrue(
+            any("already represented" in err for err in errors), msg=errors)
+
+    def test_cmake_exclusions_not_a_list_is_reported(self):
+        self._write_cmake_area("unit", "add_subdirectory(gcc)\n")
+        inv = self._recon_inventory(paths=[])
+        inv["cmake_suite_group_exclusions"] = {"group": "catch/unit/gcc"}
+        errors = checker.check_cmake_reconciliation(inv, str(self.root))
+        self.assertTrue(
+            any("cmake_suite_group_exclusions must be a list" in err
+                for err in errors),
+            msg=errors)
+
+    def test_cmake_reconciliation_runs_through_validate(self):
+        # End-to-end: the reconciliation is wired into validate() under its own
+        # summary key and fires against a catch tree the inventory does not cover.
+        _write_docs(self.root)
+        self._write_cmake_area("unit", "add_subdirectory(memory)\n")
+        results, _ = checker.validate(root=str(self.root))
+        self.assertIn("cmake_reconciliation", results)
+        self.assertTrue(
+            any("catch/unit/memory" in err and "not represented" in err
+                for err in results["cmake_reconciliation"]),
+            msg=results.get("cmake_reconciliation"),
+        )
+
+    # -- review fix 4: incident Origin commit citations ----------------------
+
+    def test_is_commit_hash_classifies_hashes_and_words(self):
+        # A commit-like token is 7-40 hex chars with at least one digit; an
+        # all-letter hex word ("defaced") and a too-short token are not hashes.
+        self.assertTrue(checker._is_commit_hash("0d90b30fb6c"))
+        self.assertTrue(checker._is_commit_hash("a1b2c3d"))
+        self.assertFalse(checker._is_commit_hash("defaced"))
+        self.assertFalse(checker._is_commit_hash("abc12"))
+        self.assertFalse(checker._is_commit_hash("TI-001"))
+        self.assertFalse(checker._is_commit_hash("not-a-hash"))
+
+    def _init_git_repo(self):
+        """Initialize a throwaway git repo in the temp root; return a runner."""
+        def run(*args):
+            return subprocess.run(
+                ["git", "-C", str(self.root), *args],
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                check=True)
+        run("init", "-q")
+        run("config", "user.email", "tester@example.com")
+        run("config", "user.name", "Tester")
+        run("config", "commit.gpgsign", "false")
+        return run
+
+    @unittest.skipUnless(_GIT, "git not available")
+    def test_origin_citation_bogus_hash_is_reported(self):
+        # A tracked incidents doc that cites a hash absent from the object
+        # database makes provenance unfollowable and is reported.
+        run = self._init_git_repo()
+        path = self.root / "TESTING_INCIDENTS.md"
+        path.write_text(VALID_INCIDENTS, encoding="utf-8")
+        run("add", "TESTING_INCIDENTS.md")
+        run("commit", "-q", "-m", "add incidents")
+        errors = checker.check_incident_origin_citations(str(path))
+        self.assertTrue(
+            any("does not exist" in err and "0d90b30fb6c" in err
+                for err in errors),
+            msg=errors)
+
+    @unittest.skipUnless(_GIT, "git not available")
+    def test_origin_citation_real_commit_passes(self):
+        # A citation that resolves to a real commit in the repo is accepted.
+        run = self._init_git_repo()
+        path = self.root / "TESTING_INCIDENTS.md"
+        path.write_text("placeholder\n", encoding="utf-8")
+        run("add", "TESTING_INCIDENTS.md")
+        run("commit", "-q", "-m", "seed")
+        head = run("rev-parse", "HEAD").stdout.strip()[:12]
+        path.write_text(
+            VALID_INCIDENTS.replace("`0d90b30fb6c`", "`{}`".format(head)),
+            encoding="utf-8")
+        errors = checker.check_incident_origin_citations(str(path))
+        self.assertEqual(errors, [], msg=errors)
+
+    @unittest.skipUnless(_GIT, "git not available")
+    def test_origin_citation_external_marker_is_skipped(self):
+        # An explicitly external citation is preserved as-is, not existence-checked.
+        run = self._init_git_repo()
+        path = self.root / "TESTING_INCIDENTS.md"
+        path.write_text(
+            VALID_INCIDENTS.replace(
+                "Landed in `0d90b30fb6c`.", "Landed in `external: 0d90b30fb6c`."),
+            encoding="utf-8")
+        run("add", "TESTING_INCIDENTS.md")
+        run("commit", "-q", "-m", "add incidents")
+        errors = checker.check_incident_origin_citations(str(path))
+        self.assertEqual(errors, [], msg=errors)
+
+    @unittest.skipUnless(_GIT, "git not available")
+    def test_origin_citation_unverified_marker_is_skipped(self):
+        run = self._init_git_repo()
+        path = self.root / "TESTING_INCIDENTS.md"
+        path.write_text(
+            VALID_INCIDENTS.replace(
+                "Landed in `0d90b30fb6c`.", "Landed in `unverified: 0d90b30fb6c`."),
+            encoding="utf-8")
+        run("add", "TESTING_INCIDENTS.md")
+        run("commit", "-q", "-m", "add incidents")
+        errors = checker.check_incident_origin_citations(str(path))
+        self.assertEqual(errors, [], msg=errors)
+
+    @unittest.skipUnless(_GIT, "git not available")
+    def test_origin_citation_untracked_file_is_skipped(self):
+        # An untracked fixture under some ambient checkout cites commits of a
+        # different repository, so its citations are not validated here.
+        self._init_git_repo()
+        path = self.root / "TESTING_INCIDENTS.md"
+        path.write_text(VALID_INCIDENTS, encoding="utf-8")  # written, not committed
+        errors = checker.check_incident_origin_citations(str(path))
+        self.assertEqual(errors, [], msg=errors)
+
+    def test_origin_citation_non_git_dir_is_skipped(self):
+        # Outside a git work tree, hash existence cannot be verified; the check
+        # is feasibility-gated to a no-op rather than a spurious failure.
+        path = self.root / "TESTING_INCIDENTS.md"
+        path.write_text(VALID_INCIDENTS, encoding="utf-8")
+        errors = checker.check_incident_origin_citations(str(path))
+        self.assertEqual(errors, [], msg=errors)
 
 
 if __name__ == "__main__":
