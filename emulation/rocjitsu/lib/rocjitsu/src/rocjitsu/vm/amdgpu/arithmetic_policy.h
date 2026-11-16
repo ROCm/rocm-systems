@@ -6,6 +6,8 @@
 
 #pragma once
 
+#include "util/simd_control.h"
+
 #include <cstdint>
 #include <string_view>
 
@@ -39,9 +41,12 @@ public:
 
   /// @brief Return cached CPU/semantics flags with the live scalar-test override.
   /// Guest instruction controls are added separately by the execution adapters.
-  uint64_t flags() const;
+  uint64_t flags() const { return util::force_scalar() ? flags_ & ~cpu_flags_mask : flags_; }
 
 private:
+  // The low 16 bits contain CPU level and feature flags; checked against the API in the
+  // constructor.
+  static constexpr uint64_t cpu_flags_mask = 0xffff;
   uint64_t flags_;
 };
 

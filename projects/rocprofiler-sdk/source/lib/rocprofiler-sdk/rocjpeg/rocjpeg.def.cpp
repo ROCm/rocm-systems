@@ -73,9 +73,21 @@ ROCJPEG_API_INFO_DEFINITION_V(ROCPROFILER_ROCJPEG_TABLE_ID_CORE, ROCPROFILER_ROC
 ROCJPEG_API_INFO_DEFINITION_V(ROCPROFILER_ROCJPEG_TABLE_ID_CORE, ROCPROFILER_ROCJPEG_API_ID_rocJpegDecodeBatched, rocJpegDecodeBatched, pfn_rocjpeg_decode_batched, handle, jpeg_stream_handles, batch_size, decode_params, destinations)
 ROCJPEG_API_INFO_DEFINITION_V(ROCPROFILER_ROCJPEG_TABLE_ID_CORE, ROCPROFILER_ROCJPEG_API_ID_rocJpegGetErrorName, rocJpegGetErrorName, pfn_rocjpeg_get_error_name, rocjpeg_status)
 
+#if ROCJPEG_RUNTIME_API_TABLE_STEP_VERSION >= 1
+ROCJPEG_API_INFO_DEFINITION_V(ROCPROFILER_ROCJPEG_TABLE_ID_CORE, ROCPROFILER_ROCJPEG_API_ID_rocJpegDecodeAsync, rocJpegDecodeAsync, pfn_rocjpeg_decode_async, handle, jpeg_stream_handle, decode_params, destination)
+ROCJPEG_API_INFO_DEFINITION_V(ROCPROFILER_ROCJPEG_TABLE_ID_CORE, ROCPROFILER_ROCJPEG_API_ID_rocJpegDecodeSync, rocJpegDecodeSync, pfn_rocjpeg_decode_sync, handle, destination)
+#endif
+
+#if ROCJPEG_RUNTIME_API_TABLE_STEP_VERSION >= 2
+ROCJPEG_API_INFO_DEFINITION_V(ROCPROFILER_ROCJPEG_TABLE_ID_CORE, ROCPROFILER_ROCJPEG_API_ID_rocJpegDecodeBatchedAsync, rocJpegDecodeBatchedAsync, pfn_rocjpeg_decode_batched_async, handle, jpeg_stream_handles, batch_size, decode_params, destinations)
+ROCJPEG_API_INFO_DEFINITION_V(ROCPROFILER_ROCJPEG_TABLE_ID_CORE, ROCPROFILER_ROCJPEG_API_ID_rocJpegDecodeBatchedSync, rocJpegDecodeBatchedSync, pfn_rocjpeg_decode_batched_sync, handle, destinations, batch_size)
+#endif
+
+#if ROCJPEG_RUNTIME_API_TABLE_STEP_VERSION >= 3
+ROCJPEG_API_INFO_DEFINITION_V(ROCPROFILER_ROCJPEG_TABLE_ID_CORE, ROCPROFILER_ROCJPEG_API_ID_rocJpegGetDecoderCaps, rocJpegGetDecoderCaps, pfn_rocjpeg_get_decoder_caps, handle, decode_caps)
+#endif
+
 #else
 #    error                                                                                         \
         "Do not compile this file directly. It is included by lib/rocprofiler-sdk/rocjpeg/rocjpeg.cpp"
 #endif
-
-

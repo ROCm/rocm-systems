@@ -61,32 +61,62 @@ ncclResult_t ncclFabricMemHandler::exchangeMemPtrs() {
   std::vector<FabricExchEntry> entries(static_cast<size_t>(nranks_));
   memset(entries.data(), 0, entries.size() * sizeof(FabricExchEntry));
 
-  // Export this rank's allocation handle into an opaque fabric descriptor.
-  CUCHECK(cuMemExportToShareableHandle(&entries[static_cast<size_t>(rank_)].desc, selfHandle_, ncclCuMemHandleType, 0));
-  entries[static_cast<size_t>(rank_)].size = selfSize_;
+  auto exportSelf = [&]() -> ncclResult_t {
+    CUCHECK(cuMemExportToShareableHandle(&entries[static_cast<size_t>(rank_)].desc, selfHandle_, ncclCuMemHandleType,
+                                         0));
+    entries[static_cast<size_t>(rank_)].size = selfSize_;
+    return ncclSuccess;
+  };
+  // Join the allgather even if export fails, so peers do not block in it.
+  ncclResult_t exp = exportSelf();
+  if (exp != ncclSuccess) memset(&entries[static_cast<size_t>(rank_)], 0, sizeof(FabricExchEntry));
 
   NCCLCHECK(bootstrapAllGather(bootstrap_, entries.data(), static_cast<int>(sizeof(FabricExchEntry))));
-
+  // A failed export publishes size 0; every rank rejects it so all of them return here together.
   for (int i = 0; i < nranks_; ++i) {
-    if (i == rank_) {
-      continue;
+    if (entries[static_cast<size_t>(i)].size != 0) continue;
+    if (i != rank_ || exp == ncclSuccess) {
+      WARN("ncclFabricMemHandler::exchangeMemPtrs: rank %d published an empty fabric entry", i);
     }
-    CUmemGenericAllocationHandle peerHandle{};
-    CUCHECK(cuMemImportFromShareableHandle(&peerHandle, (void*)&entries[static_cast<size_t>(i)].desc,
-                                           ncclCuMemHandleType));
+    return ncclUnhandledCudaError;
+  }
 
-    // Reserve + map + set access for the imported handle
-    void* peerPtr = nullptr;
-    ncclResult_t res = ncclCuMemAllocAddr(&peerPtr, &peerHandle, entries[static_cast<size_t>(i)].size);
-    if (res != ncclSuccess) {
-      (void)cuMemRelease(peerHandle);
-      WARN("ncclFabricMemHandler::exchangeMemPtrs: ncclCuMemAllocAddr failed for peer %d", i);
-      return res;
+  auto importPeers = [&]() -> ncclResult_t {
+    for (int i = 0; i < nranks_; ++i) {
+      if (i == rank_) {
+        continue;
+      }
+      CUmemGenericAllocationHandle peerHandle{};
+      CUCHECK(cuMemImportFromShareableHandle(&peerHandle, (void*)&entries[static_cast<size_t>(i)].desc,
+                                             ncclCuMemHandleType));
+
+      // Reserve + map + set access for the imported handle
+      void* peerPtr = nullptr;
+      ncclResult_t res = ncclCuMemAllocAddr(&peerPtr, &peerHandle, entries[static_cast<size_t>(i)].size);
+      if (res != ncclSuccess) {
+        if (cuMemRelease(peerHandle) != CUDA_SUCCESS) (void)cudaGetLastError();
+        WARN("ncclFabricMemHandler::exchangeMemPtrs: ncclCuMemAllocAddr failed for peer %d", i);
+        return res;
+      }
+      // Record the mapping before releasing the handle so the destructor can
+      // free it even if cuMemRelease below fails and returns early.
+      memPtrs_[static_cast<size_t>(i)] = peerPtr;
+      CUCHECK(cuMemRelease(peerHandle));
     }
-    // Record the mapping before releasing the handle so the destructor can
-    // free it even if cuMemRelease below fails and returns early.
-    memPtrs_[static_cast<size_t>(i)] = peerPtr;
-    CUCHECK(cuMemRelease(peerHandle));
+    return ncclSuccess;
+  };
+  ncclResult_t res = importPeers();
+
+  // Every rank votes, so a rank that failed to import does not leave its peers to continue alone.
+  std::vector<int> ready(static_cast<size_t>(nranks_), 0);
+  ready[static_cast<size_t>(rank_)] = res == ncclSuccess ? 1 : 0;
+  NCCLCHECK(bootstrapAllGather(bootstrap_, ready.data(), static_cast<int>(sizeof(int))));
+  if (res != ncclSuccess) return res;
+  for (int i = 0; i < nranks_; ++i) {
+    if (ready[static_cast<size_t>(i)] == 0) {
+      WARN("ncclFabricMemHandler::exchangeMemPtrs: rank %d failed to map its fabric peers", i);
+      return ncclUnhandledCudaError;
+    }
   }
 
   exchanged_ = true;

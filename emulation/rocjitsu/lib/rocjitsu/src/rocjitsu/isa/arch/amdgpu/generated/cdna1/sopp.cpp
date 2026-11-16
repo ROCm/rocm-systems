@@ -445,6 +445,7 @@ STrapSopp::STrapSopp(const MachineInst *inst)
   src_operands_[0] = &simm16;
   num_src_ = 1;
   num_dst_ = 0;
+  flags_ |= SOFTWARE_TRAP;
   flags_ |= WRITES_PC;
 }
 

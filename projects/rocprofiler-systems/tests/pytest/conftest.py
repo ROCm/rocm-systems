@@ -17,6 +17,7 @@ import signal
 import subprocess
 import sys
 import traceback
+import warnings
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Callable, Generator, Mapping
@@ -678,6 +679,18 @@ def pytest_collection_finish(session) -> None:
                 f"CTestTestfile.cmake generation failed due to:\n{failures}",
                 returncode=1,
             )
+        if not session.items:
+            opts = session.config.option
+            active = [
+                f"-m '{opts.markexpr}'" if opts.markexpr else "",
+                f"-k '{opts.keyword}'" if opts.keyword else "",
+            ]
+            filters = " ".join(a for a in active if a) or "none"
+            pytest.exit(
+                f"CTestTestfile.cmake generation collected 0 tests (filters: {filters}); "
+                "check python_files in pytest-generate.ini and the -m/-k filters",
+                returncode=1,
+            )
         raw_path = session.config.getoption("--ctest-output-path", default=None)
         output_path = Path(raw_path) if raw_path else None
         _ctest_generate_tests(session.items, output_path)
@@ -836,6 +849,39 @@ def parse_metadata_settings(metadata_file: Path) -> dict:
         for key, entry in settings.items()
         if isinstance(entry, dict) and "value" in entry
     }
+
+
+def cpu_frequency_available(
+    sysfs_cpu_root: Path = Path("/sys/devices/system/cpu"),
+) -> bool:
+    """Return True if at least one CPU exposes a readable cpufreq ``scaling_cur_freq``.
+
+    With no readable file to sample CPU frequency, there will be no ``Frequency (S)``
+    counter reaching the trace. Containers and VMs often hide cpufreq.
+    """
+    for freq_file in sysfs_cpu_root.glob("cpu[0-9]*/cpufreq/scaling_cur_freq"):
+        try:
+            with freq_file.open("r") as handle:
+                handle.read(1)
+            return True
+        except OSError:
+            continue
+    return False
+
+
+def host_counters_expected(counters: list[str]) -> list[str]:
+    """Drop ``Frequency (S)`` from ``counters`` when cpufreq is unavailable.
+
+    Emits a warning so the dropped check stays visible in the pytest summary.
+    """
+    if "Frequency (S)" not in counters or cpu_frequency_available():
+        return counters
+    warnings.warn(
+        "cpufreq (scaling_cur_freq) is not readable on this host; skipping the "
+        "'Frequency (S)' counter check",
+        stacklevel=2,
+    )
+    return [name for name in counters if name != "Frequency (S)"]
 
 
 def assert_resolved_settings(

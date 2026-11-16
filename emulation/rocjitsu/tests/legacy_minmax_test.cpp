@@ -4,6 +4,7 @@
 /// @file legacy_minmax_test.cpp
 /// @brief Decoded legacy selection, MODE and architecture-specific NaN/zero rules.
 
+#include "compute_unit_test_util.h"
 #include "decode_test_util.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
@@ -47,7 +48,8 @@ protected:
     config.sgprs_per_wf = 106;
     config.vgprs_per_wf = 256;
     config.lds_size_kb = 64;
-    cu_ = amdgpu::ComputeUnitCore::create("minmax_cu", config, &memory_, &cache_);
+    ASSERT_NO_FATAL_FAILURE(
+        rocjitsu::test::initialize_compute_unit(cu_, "minmax_cu", config, &memory_, &cache_));
     decoder_ = Decoder::create(config.arch);
     wave_ = cu_->dispatch_wf(0, 0, 106, 256);
     ASSERT_NE(wave_, nullptr);

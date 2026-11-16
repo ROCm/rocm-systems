@@ -30,6 +30,7 @@
 #pragma once
 
 #include "rocjitsu/vm/plugins/execution_plugin_group.h"
+#include "util/diagnostic.h"
 
 #include <memory>
 #include <string>
@@ -68,15 +69,21 @@ public:
   /// @p plugin_dir has the same meaning as in load_from_config().
   ///
   /// The optional top-level `"require_all_plugins"` boolean defaults to false,
-  /// preserving best-effort loading. When true, this function throws if any
+  /// preserving best-effort loading. When true, this function returns failure if any
   /// plugin listed in `"plugins"` cannot be added. A non-boolean value is
   /// rejected. When all plugins are required, an explicitly present `"plugins"`
   /// value must be an object; omitting `"plugins"` is valid and produces an empty
   /// group.
   ///
-  /// @returns A non-null group (empty if the config declares no plugins).
-  static std::shared_ptr<ExecutionPluginGroup>
-  configure_plugin_group(const std::string &config_json, const std::string &plugin_dir = {});
+  /// @returns A non-null group (empty if the config declares no plugins), or failure
+  /// for malformed JSON, a non-object root, invalid admission options, or when a required plugin
+  /// cannot be added. An empty input string intentionally produces an empty group.
+  /// The failure reason is sent to @p emit_error; omitting the emitter discards
+  /// the message because FailureOr itself carries no diagnostic text.
+  /// Plugin accessors, factories, callbacks and destructors must not throw.
+  static util::FailureOr<std::shared_ptr<ExecutionPluginGroup>>
+  configure_plugin_group(const std::string &config_json, const std::string &plugin_dir = {},
+                         util::DiagnosticEmitter emit_error = {});
 };
 
 } // namespace rocjitsu

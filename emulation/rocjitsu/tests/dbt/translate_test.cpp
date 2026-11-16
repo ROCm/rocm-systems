@@ -25,6 +25,7 @@
 #include "rocjitsu/code/dbt/virtual_lds.h"
 #include "rocjitsu/code/dbt/waitcnt_translator.h"
 #include "rocjitsu/code/kernel_descriptor_abi.h"
+#include "rocjitsu/code/kernel_descriptor_scan.h"
 #include "rocjitsu/code/patch/code_object_patcher.h"
 #include "rocjitsu/code/patch/kernarg_extension.h"
 #include "rocjitsu/code/patch/kernel_text_layout.h"
@@ -760,6 +761,23 @@ TEST(BinaryTranslatorE2E, InvalidGuestRetainsUnsupportedArchitectureDiagnostic) 
   EXPECT_EQ(result.elf_bytes, image);
 }
 
+TEST(BinaryTranslatorE2E, RejectsUnregisteredCdna3ToCdna4Translation) {
+  // gfx950 has no XF32 MFMA. Copying its two gfx942 words into a gfx950 ELF
+  // would leave an unrecognized instruction followed by an unrelated vector add.
+  constexpr std::array<uint32_t, 3> words{0xd3be8000, 0x02020500, 0xbf810000};
+  auto image = make_minimal_amdgpu_elf_with_text_words_and_rodata(words);
+  write_value_for_test<uint32_t>(image, offsetof(Elf64_Ehdr, e_flags),
+                                 EF_AMDGPU_MACH_AMDGCN_GFX942);
+  AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+  BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4);
+  const auto result = translator.translate(source);
+  EXPECT_FALSE(result.dispatchable());
+  EXPECT_EQ(result.elf_bytes, image);
+  EXPECT_TRUE(
+      has_error_containing(result, DiagnosticKind::Legalization, "no instruction translator"));
+}
+
 TEST(BinaryTranslatorE2E, InvalidHostBuilderDiagnosticRetainsTargetContext) {
   const std::vector<uint8_t> image = make_minimal_amdgpu_elf_with_text_and_rodata();
   AmdGpuCodeObject source(image.data(), image.size());
@@ -772,6 +790,40 @@ TEST(BinaryTranslatorE2E, InvalidHostBuilderDiagnosticRetainsTargetContext) {
   EXPECT_EQ(result.diagnostics.front().message,
             "unsupported host_arch: Unimplemented instruction: s_endpgm for target architecture");
   EXPECT_EQ(result.elf_bytes, image);
+}
+
+TEST(BinaryTranslatorE2E, RejectsUnregisteredRdna2ToRdna3Translation) {
+  // On gfx1100 these gfx1030 MOVK, MOV and ENDPGM words write NULL,
+  // conditionally move a pair, and set KILL, respectively.
+  constexpr std::array<uint32_t, 3> words{0xb07c0001, 0xbe880387, 0xbf810000};
+  auto image = make_minimal_amdgpu_elf_with_text_words_and_rodata(words);
+  write_value_for_test<uint32_t>(image, offsetof(Elf64_Ehdr, e_flags),
+                                 EF_AMDGPU_MACH_AMDGCN_GFX1030);
+  AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+  BinaryTranslator translator(ROCJITSU_CODE_ARCH_RDNA2, ROCJITSU_CODE_ARCH_RDNA3);
+  const auto result = translator.translate(source);
+  EXPECT_FALSE(result.dispatchable());
+  EXPECT_EQ(result.elf_bytes, image);
+  EXPECT_TRUE(
+      has_error_containing(result, DiagnosticKind::Legalization, "no instruction translator"));
+}
+
+TEST(BinaryTranslatorE2E, RejectsUnregisteredCdna2ToCdna3Translation) {
+  // gfx942 reinterprets gfx90a MADAK as fused FMAAK and cannot decode this MFMA.
+  constexpr std::array<uint32_t, 5> words{0x30040300, 0x3f812345, 0xd3d58000, 0x04020300,
+                                          0xbf810000};
+  auto image = make_minimal_amdgpu_elf_with_text_words_and_rodata(words);
+  write_value_for_test<uint32_t>(image, offsetof(Elf64_Ehdr, e_flags),
+                                 EF_AMDGPU_MACH_AMDGCN_GFX90A);
+  AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+  BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA2, ROCJITSU_CODE_ARCH_CDNA3);
+  const auto result = translator.translate(source);
+  EXPECT_FALSE(result.dispatchable());
+  EXPECT_EQ(result.elf_bytes, image);
+  EXPECT_TRUE(
+      has_error_containing(result, DiagnosticKind::Legalization, "no instruction translator"));
 }
 
 TEST(BinaryTranslatorE2E, EmptyTextSameArchIsSuccessfulNoOp) {
@@ -3740,6 +3792,37 @@ TEST(CodeObjectPatcher, SupportsRelative64AddendIntoText) {
   CodeObjectPatcher out_patcher(out_co);
   EXPECT_FALSE(out_patcher.has_unsupported_relocation_to_text())
       << "RELATIVE64 addend outside .text must be accepted";
+}
+
+TEST(BinaryTranslator, ExpandsWaitWithoutTextPadding) {
+  // The entire source .text is one CDNA4 wait for all counters and s_endpgm.
+  const auto image = make_minimal_amdgpu_elf_with_descriptor_after_text({0xbf8c0000, 0xbf810000});
+  AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA4);
+  const auto result = translator.translate(source);
+  ASSERT_TRUE(result.dispatchable()) << result.diagnostics.front().message;
+  AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+  const Section *text = find_section(translated, ".text");
+  ASSERT_NE(text, nullptr);
+  const auto descriptors =
+      scan_kernel_descriptors(result.elf_bytes, text->sectionOffset(), text->size());
+  ASSERT_EQ(descriptors.size(), 1u);
+  const uint64_t entry = descriptors.front().entry_text_offset;
+  ASSERT_EQ(entry % sizeof(uint32_t), 0u);
+  auto expected = encode_waitcnt_gfx12(decode_waitcnt_gfx9(0));
+  ASSERT_GT(expected.size(), 1u);
+  constexpr auto endpgm = build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4);
+  static_assert(endpgm.succeeded());
+  expected.push_back(endpgm.value());
+  const std::span words(reinterpret_cast<const uint32_t *>(text->data()),
+                        text->size() / sizeof(uint32_t));
+  ASSERT_LE(entry / sizeof(uint32_t) + expected.size(), words.size());
+  EXPECT_TRUE(
+      std::ranges::equal(words.subspan(entry / sizeof(uint32_t), expected.size()), expected));
+  EXPECT_EQ(find_section(translated, ".rj_translations"), nullptr);
 }
 
 TEST(BinaryTranslator, InlineExpansionAvoidsCaveBranchOverflow) {

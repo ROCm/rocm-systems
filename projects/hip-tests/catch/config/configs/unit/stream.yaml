@@ -58,6 +58,15 @@ stream:
   Unit_hipStreamAddCallback_WithCreatedStream:
     <<: *level_default
     tags: [callback, P0]
+  Unit_hipStreamAddCallback_OrderedWithKernels:
+    <<: *level_default
+    tags: [callback, synchronization, P1]
+  Unit_hipEventSynchronize_BlockingSyncAfterKernel:
+    <<: *level_default
+    tags: [synchronization, P1]
+  Unit_hipEventElapsedTime_TimedAndUntimedRecords:
+    <<: *level_default
+    tags: [synchronization, P1]
   Unit_hipStreamAttachMemAsync_Negative:
     <<: *level_default
     disabled:
@@ -155,6 +164,9 @@ stream:
     <<: *level_default
     tags: [lifecycle, smoke, P0]
   Unit_hipStreamDestroy_Negative_NullStream:
+    <<: *level_default
+    tags: [lifecycle, P1]
+  Unit_hipStreamDestroy_Negative_StaleAfterDeviceReset:
     <<: *level_default
     tags: [lifecycle, P1]
   Unit_hipStreamDestroy_WithFinishedWork:
