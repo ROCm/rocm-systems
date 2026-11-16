@@ -284,7 +284,7 @@ static constexpr int AmdVendor = 0x1002;
 template <typename T>
 inline void WriteAqlArgAt(unsigned char* dst,  //!< The write pointer to the buffer
                           T src,               //!< The source pointer
-                          uint size,           //!< The size in bytes to copy
+                          [[maybe_unused]] uint size,  //!< The size in bytes to copy
                           size_t offset  //!< The alignment to follow while writing to the buffer
 ) {
   assert(sizeof(T) <= size && "Argument's size mismatches ABI!");

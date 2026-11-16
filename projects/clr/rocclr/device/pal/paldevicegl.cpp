@@ -666,7 +666,8 @@ static const cmFormatXlateParams cmFormatXlateTable[] = {
     {CM_SURF_FMT_STENCIL8, CL_UNSIGNED_INT8, CL_R},
 };
 
-bool Device::initGLInteropPrivateExt(void* GLplatformContext, void* GLdeviceContext) const {
+bool Device::initGLInteropPrivateExt([[maybe_unused]] void* GLplatformContext,
+                                     void* GLdeviceContext) const {
 #ifdef ATI_OS_LINUX
   GLXContext ctx = (GLXContext)GLplatformContext;
   void* pModule = dlopen("libGL.so.1", RTLD_NOW);
@@ -756,7 +757,8 @@ bool Device::initGLInteropPrivateExt(void* GLplatformContext, void* GLdeviceCont
   return true;
 }
 
-bool Device::glCanInterop(void* GLplatformContext, void* GLdeviceContext) const {
+bool Device::glCanInterop(void* GLplatformContext,
+                          [[maybe_unused]] void* GLdeviceContext) const {
   bool canInteroperate = false;
 
 #ifdef ATI_OS_WIN
@@ -895,7 +897,8 @@ bool Device::resGLAssociate(void* GLContext, uint name, uint type, Pal::OsExtern
   return status;
 }
 
-bool Device::resGLAcquire(void* GLplatformContext, void* mbResHandle, uint type) const {
+bool Device::resGLAcquire([[maybe_unused]] void* GLplatformContext, void* mbResHandle,
+                          uint type) const {
   std::scoped_lock lk(lockPAL());
 
   GLResource hRes = {};
@@ -915,7 +918,8 @@ bool Device::resGLAcquire(void* GLplatformContext, void* mbResHandle, uint type)
 #endif
 }
 
-bool Device::resGLRelease(void* GLplatformContext, void* mbResHandle, uint type) const {
+bool Device::resGLRelease([[maybe_unused]] void* GLplatformContext, void* mbResHandle,
+                          uint type) const {
   std::scoped_lock lk(lockPAL());
 
   GLResource hRes = {};
