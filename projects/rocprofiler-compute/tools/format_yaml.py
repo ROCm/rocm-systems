@@ -43,18 +43,34 @@ SKIP_FILE_PATTERNS = [
 
 # YAML keys that contain metric equations ("formula" and "peak_empirical" in metric
 # library files)
-EQUATION_KEYS = {"value", "avg", "min", "max", "peak", "formula", "peak_empirical"}
+EQUATION_KEYS = {
+    "value",
+    "avg",
+    "min",
+    "max",
+    "std dev",
+    "expr",
+    "peak",
+    "formula",
+    "peak_empirical",
+}
+
+# Key of a metric_table's column titles, which use the equation keys for display text
+HEADER_KEY = "header"
 
 
 def extract_metric_equations(
     data: Dict[str, Any], path: str = ""
 ) -> List[Tuple[str, str]]:
-    """Return (key path, equation) of each equation field in YAML data."""
+    """Return (key path, equation) of each equation field in YAML data, skipping
+    table headers."""
     equations = []
 
     if isinstance(data, dict):
         for key, value in data.items():
             current_path = f"{path}.{key}" if path else key
+            if key == HEADER_KEY:
+                continue
             if key in EQUATION_KEYS and isinstance(value, str):
                 equations.append((current_path, value))
             elif isinstance(value, dict):
