@@ -102,6 +102,12 @@ number of counter groups collectable on **that dispatch's GPU agent**. Pass ``i`
 ``i``. An agent with fewer collectable groups than the global ``--pmc`` list is replayed only as
 many times as it has groups, so pass and group stay aligned.
 
+With ``--selected-regions``, a dispatch launched while ``roctxProfilerPause`` has stopped counter
+collection gets one pass: it runs once, with no snapshot, queue drain or counters. Replay resumes
+with the next dispatch after ``roctxProfilerResume``. Kernel filters (``--kernel-include-regex``,
+``--kernel-exclude-regex`` and ``--kernel-iteration-range``) still decide per dispatch in the first
+pass, so a filtered-out dispatch is replayed without collecting counters.
+
 There is no ``--kernel-replay-passes`` flag and no pass-count environment variable. The CLI does
 not wire ``replay_continue`` or the localized start/stop context callbacks; those remain SDK
 tool APIs (:ref:`using-kernel-replay`).

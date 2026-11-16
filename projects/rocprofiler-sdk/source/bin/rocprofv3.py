@@ -61,7 +61,7 @@ DEPRECATED_DIRECT_OUTPUT_FORMATS = ("csv", "pftrace", "otf2")
 ATT_RESOURCE_MODES = ("default", "hsa", "code-object")
 REATTACH_INVARIANT_FILTER = (
     r".*_trace|^pc_sampling_.*$|^att_.*$|"
-    r"^(pmc|pmc_groups|output_config|extra_counters)$|"
+    r"^(pmc|pmc_groups|output_config|extra_counters|replay_mode)$|"
     r"^selected_regions(_ref_count)?$|"
     r"^kernel_(include_regex|exclude_regex|iteration_range)$"
 )

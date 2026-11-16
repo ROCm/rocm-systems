@@ -284,6 +284,33 @@ def test_replay_without_counter_collection_is_rejected():
         )
 
 
+def reattach(previous, current):
+    """Merge a reattach command line with the previous attachment's settings."""
+    module = rocprofv3()
+    return module.get_args(
+        argparse.Namespace(**current),
+        module.dotdict(previous),
+        filter=module.REATTACH_INVARIANT_FILTER,
+        require_in_both=True,
+    )
+
+
+def test_reattach_cannot_change_replay_mode():
+    """The replay context is configured by the first attachment, so a later one cannot switch
+    replay on or off; it would only relabel the passes in the output."""
+    try:
+        reattach({"replay_mode": None}, {"replay_mode": "kernel"})
+    except RuntimeError:
+        pass
+    else:
+        raise AssertionError("reattaching with a different --replay-mode should fail")
+
+
+def test_reattach_with_the_same_replay_mode_is_allowed():
+    merged = reattach({"replay_mode": "kernel"}, {"replay_mode": "kernel"})
+    assert merged["replay_mode"] == "kernel"
+
+
 def service_conflicts(environ=None, **attrs):
     return rocprofv3().services_conflicting_with_kernel_replay(
         rocprofv3().dotdict(attrs), environ={} if environ is None else environ

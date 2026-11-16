@@ -156,6 +156,7 @@ By default, the output file generation runs asynchronously after detachment, all
    - ``pmc_groups``
    - ``output_config``
    - ``extra_counters``
+   - ``replay_mode``
    - ``selected_regions``
    - ``selected_regions_ref_count``
    - ``kernel_include_regex``
