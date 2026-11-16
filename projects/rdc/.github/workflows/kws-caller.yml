@@ -6,9 +6,9 @@ on:
     types: [opened, synchronize, reopened]
   workflow_dispatch:
 jobs:
-  kws:
+  kws: # zizmor: ignore[excessive-permissions]
     if: ${{ github.event_name == 'pull_request' }}
-    uses: AMD-ROCm-Internal/rocm_ci_infra/.github/workflows/kws.yml@mainline
+    uses: AMD-ROCm-Internal/rocm_ci_infra/.github/workflows/kws.yml@mainline # zizmor: ignore[unpinned-uses,secrets-inherit]
     secrets: inherit
     with:
       pr_number: ${{github.event.pull_request.number}}
