@@ -411,27 +411,27 @@ coverage_model:
       gap_status: distributed_classification_open
 
     # capability-gated paths x cadence
-    - id: memory_pools_x_pr_cadence
+    - id: vmm_capable_x_pr_cadence
       category: capability_x_cadence
-      pair: [api_surface.memory, cadence.pr]
+      pair: [capability.vmm_capable, cadence.pr]
       status: review_priority
       priority: medium
-      rationale: Capability-gated pool, VMM, and shareable-handle paths run on PR cadence but only assert behavior where the driver capability exists.
+      rationale: VMM-capable pool, virtual-memory, and shareable-handle paths run on PR cadence but only assert behavior where the driver capability exists; elsewhere the unsupported outcome is accepted.
       current_inventory: [contract-memory-pool-vmm, unit-vmm]
       gap_status: capability_gated
-    - id: kernel_launch_x_on_demand_cadence
+    - id: baseline_capability_x_on_demand_cadence
       category: capability_x_cadence
-      pair: [api_surface.kernel_launch, cadence.on_demand]
+      pair: [capability.baseline, cadence.on_demand]
       status: review_priority
       priority: low
-      rationale: Kernel-launch performance microbenchmarks are an opt-in build mode and run on demand as an informational signal, not a PR gate.
+      rationale: Baseline-capability kernel-launch performance microbenchmarks need no special device capability; they are an opt-in build mode run on demand as an informational signal, not a PR gate.
       current_inventory: [performance-api]
       gap_status: informational_only
-    - id: interop_x_on_demand_cadence
+    - id: graphics_capable_x_on_demand_cadence
       category: capability_x_cadence
-      pair: [api_surface.interop, cadence.on_demand]
+      pair: [capability.graphics_capable, cadence.on_demand]
       status: review_priority
       priority: low
-      rationale: Graphics interop runs on demand where a graphics-capable environment is configured, not on every PR.
+      rationale: Graphics-capable interop runs on demand only where a graphics-capable environment is configured, not on every PR.
       current_inventory: [unit-interop-graphics]
       gap_status: environment_gated

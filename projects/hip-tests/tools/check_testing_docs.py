@@ -36,8 +36,14 @@ for itself (workstreams WS-1 and WS-2):
       for itself (the ``vocabularies:`` block); a non-scalar token is a schema
       error rather than an unhashable set-membership crash;
     - every suite carries a non-empty ``evidence`` list whose entries are mappings
-      with a non-empty path and claim (paths resolve on disk unless marked
-      ``external:``), matching the coverage-class evidence requirement.
+      with a non-empty path and claim (paths resolve to a file on disk - not a
+      directory - unless marked ``external:``), matching the coverage-class
+      evidence requirement;
+    - every suite documents its historical context: it carries either a non-empty
+      ``history`` narrative or a non-empty ``incidents`` list, so a reader can
+      trace a non-obvious control back to its origin or its governing incident. An
+      ``incidents`` list, when present, is a non-empty list of ``TI-NNN`` ids, each
+      of which must resolve to a defined incident (as any TI reference does).
     - every required suite field is present with a usable value: the descriptive
       scalars (``name`` / ``domain`` / ``purpose`` / ``oracle`` /
       ``disposition_rationale``) are non-empty strings, ``execution.cadence`` is a
@@ -72,17 +78,24 @@ for itself (workstreams WS-1 and WS-2):
     - every coverage class declares a non-empty ``axes`` list and a non-empty
       ``current_inventory`` list, and every pairwise check's ``pair`` names exactly
       two ``axis.class`` references;
+    - every coverage class carries its descriptive fields with a usable value:
+      ``intent`` / ``gap_status`` are non-empty strings, ``expected_test_kinds`` is
+      a non-empty list, and ``risk`` is within the documented high/medium/low
+      vocabulary; every pairwise check likewise carries non-empty ``category`` /
+      ``status`` / ``rationale`` / ``gap_status`` strings and a ``priority`` within
+      the same high/medium/low vocabulary;
     - every class / pairwise axis reference is a declared ``axis.class``;
     - the model declares the required coverage dimensions (architecture,
       capability, integration_boundary) as explicit axes;
     - every coverage class carries a non-empty ``evidence`` list whose entries
-      are mappings with a non-empty path and claim (paths resolve on disk unless
-      marked ``external:``).
+      are mappings with a non-empty path and claim (paths resolve to a file on
+      disk - not a directory - unless marked ``external:``).
 
   evidence paths
-    - every ``source.paths`` entry and every ``evidence.path`` resolves to a
-      file on disk (relative to the component directory) unless explicitly
-      marked ``external:``.
+    - every ``source.paths`` entry resolves to a path on disk (a source directory
+      or a file) relative to the component directory, and every ``evidence.path``
+      resolves specifically to a file (not a directory), unless explicitly marked
+      ``external:``.
 
   repository path pointers
     - every repository-path-bearing field resolves relative to the component
@@ -95,6 +108,9 @@ for itself (workstreams WS-1 and WS-2):
   incident IDs and fields
     - every ``TI-NNN`` referenced in the YAML resolves to an incident defined by
       a ``## TI-NNN:`` heading in TESTING_INCIDENTS.md;
+    - every incident id is defined exactly once: a ``TI-NNN`` carried by two
+      ``## TI-NNN:`` headings is a schema error (the id is meant to be stable and
+      unique);
     - every defined incident carries the required labelled fields (Finding,
       Control, Protects, Origin, Current status, Retirement condition).
 
@@ -196,6 +212,12 @@ REQUIRED_PAIRWISE_KEYS = frozenset({
 # architecture/capability and integration-boundary coverage can be audited.
 REQUIRED_AXES = frozenset({"architecture", "capability", "integration_boundary"})
 
+# The severity/priority vocabulary the coverage model documents for itself (a
+# coverage class ``risk`` and a pairwise check ``priority`` are review-priority
+# levels). A value outside this set is a schema error so the audit priorities
+# stay comparable across records.
+COVERAGE_RISK_VALUES = frozenset({"high", "medium", "low"})
+
 # The labelled fields every incident account must carry so that a reviewer can
 # see what a control protects and when it may be retired.
 REQUIRED_INCIDENT_LABELS = (
@@ -238,6 +260,10 @@ _GLOB_CHARS = ("*", "?", "[")
 
 _INCIDENT_HEADING_RE = re.compile(r"^##\s+(TI-\d+):", re.MULTILINE)
 _INCIDENT_REF_RE = re.compile(r"\bTI-\d+\b")
+# A single incident id, used to validate the explicit ``incidents:`` list a
+# suite may carry in place of a free-text ``history`` narrative. The whole
+# token must be a ``TI-NNN`` id, not merely contain one.
+_INCIDENT_ID_FULL_RE = re.compile(r"^TI-\d+$")
 _MD_LINK_RE = re.compile(r"\[[^\]]*\]\(([^)]+)\)")
 # Reference-style Markdown links: a usage ``[text][label]`` (or the collapsed
 # form ``[label][]``) paired with a ``[label]: target`` definition. The checker
@@ -267,7 +293,19 @@ class _UniqueKeyLoader(yaml.SafeLoader):
         seen = set()
         for key_node, _value_node in node.value:
             key = self.construct_object(key_node, deep=deep)
-            if key in seen:
+            # A non-scalar (list/mapping) key is unhashable, so the duplicate
+            # test below would raise a bare TypeError rather than a reportable
+            # parse error. YAML does allow complex keys, but the testing-doc
+            # schema never uses one, and an accidental one (for example a
+            # mis-indented list that collapses into a key) is a schema error we
+            # want surfaced as a parse failure, not a crash.
+            try:
+                duplicate = key in seen
+            except TypeError:
+                raise yaml.constructor.ConstructorError(
+                    "while constructing a mapping", node.start_mark,
+                    "found unhashable key {!r}".format(key), key_node.start_mark)
+            if duplicate:
                 raise yaml.constructor.ConstructorError(
                     "while constructing a mapping", node.start_mark,
                     "found duplicate key {!r}".format(key), key_node.start_mark)
@@ -287,8 +325,24 @@ def _load_yaml(path, errors):
 
 
 def _path_exists(component_dir, rel_path):
-    """True when rel_path (component-relative) resolves to an existing file."""
+    """True when rel_path (component-relative) resolves to an existing path.
+
+    A source directory (``catch/contract/memory``) and a literal file both count
+    here; this is the existence test for path pointers that may legitimately name
+    a directory (suite ``source.paths``, ``metadata`` pointers, source_of_truth).
+    """
     return (Path(component_dir) / rel_path).resolve().exists()
+
+
+def _path_is_file(component_dir, rel_path):
+    """True when rel_path (component-relative) resolves to an existing file.
+
+    Stricter than ``_path_exists``: a directory does not count. Evidence
+    pointers must cite a concrete file (a CMakeLists.txt, a config YAML, a
+    generated plan), not a directory, so a reader can open the exact artifact
+    that backs the claim.
+    """
+    return (Path(component_dir) / rel_path).resolve().is_file()
 
 
 def _looks_external(value):
@@ -695,10 +749,42 @@ def check_inventory(inventory, component_dir):
                 errors.append("suite {!r} evidence entry missing a claim".format(sid))
             if not isinstance(rel, str) or rel.startswith(EXTERNAL_MARKER):
                 continue
-            if _path_exists(component_dir, rel):
+            if _path_is_file(component_dir, rel):
                 refs_ok += 1
+            elif _path_exists(component_dir, rel):
+                errors.append(
+                    "suite {!r} evidence path is a directory, not a file: {}".format(sid, rel))
             else:
                 errors.append("suite {!r} evidence path missing: {}".format(sid, rel))
+
+        # Historical context. Every suite must say where it came from or which
+        # control governs it, so a reader encountering a non-obvious guard can
+        # trace the rationale: either a non-empty ``history`` narrative or a
+        # non-empty ``incidents`` list naming the controlling TI-NNN incident(s).
+        # When neither is present the record is history-blind and the provenance
+        # chain to TESTING_INCIDENTS.md is broken.
+        history = suite.get("history")
+        incidents = suite.get("incidents")
+        if "history" in suite and not _nonempty_str(history):
+            errors.append("suite {!r} history must be a non-empty string".format(sid))
+        has_incidents = isinstance(incidents, list) and bool(incidents)
+        if "incidents" in suite:
+            if not has_incidents:
+                errors.append(
+                    "suite {!r} incidents must be a non-empty list".format(sid))
+            else:
+                for inc in incidents:
+                    # Each entry must be a bare TI-NNN id; its resolution to a
+                    # defined incident is handled by the incident-reference check
+                    # (the id is collected below like any other TI reference).
+                    if not _nonempty_str(inc) or not _INCIDENT_ID_FULL_RE.match(inc.strip()):
+                        errors.append(
+                            "suite {!r} incidents entry must be a TI-NNN incident id: "
+                            "{!r}".format(sid, inc))
+        if not _nonempty_str(history) and not has_incidents:
+            errors.append(
+                "suite {!r} must carry a non-empty history or a non-empty "
+                "incidents list".format(sid))
 
         # related_restructuring is a structured local Markdown pointer.
         rr = suite.get("related_restructuring")
@@ -849,6 +935,29 @@ def check_coverage_model(model, suite_ids, component_dir):
             errors.append("class {!r} missing keys: {}".format(cid, sorted(missing)))
         if "owner" in cls and not _nonempty_str(cls.get("owner")):
             errors.append("class {!r} owner must be a non-empty string".format(cid))
+        # The descriptive scalars carry the class's meaning: ``intent`` and
+        # ``gap_status`` are free-text and must be non-empty strings, and
+        # ``risk`` is a review-priority token that must be within the documented
+        # high/medium/low vocabulary. (The missing-key check above handles
+        # outright absence.)
+        for field in ("intent", "gap_status"):
+            if field in cls and not _nonempty_str(cls.get(field)):
+                errors.append(
+                    "class {!r} {} must be a non-empty string".format(cid, field))
+        risk = cls.get("risk")
+        if "risk" in cls and not _nonempty_str(risk):
+            errors.append("class {!r} risk must be a non-empty string".format(cid))
+        elif _nonempty_str(risk) and risk not in COVERAGE_RISK_VALUES:
+            errors.append(
+                "class {!r} risk {!r} not in {}".format(
+                    cid, risk, sorted(COVERAGE_RISK_VALUES)))
+        # expected_test_kinds enumerates the tiers the class is meant to hold and
+        # must be a non-empty list.
+        if "expected_test_kinds" in cls and (
+                not isinstance(cls.get("expected_test_kinds"), list)
+                or not cls.get("expected_test_kinds")):
+            errors.append(
+                "class {!r} expected_test_kinds must be a non-empty list".format(cid))
         # axes and current_inventory are the class's required cross-references and
         # must each be a non-empty list: an empty axes list leaves the class
         # unanchored to any coverage dimension, and an empty current_inventory
@@ -883,8 +992,11 @@ def check_coverage_model(model, suite_ids, component_dir):
                 errors.append("class {!r} evidence entry missing a claim".format(cid))
             if not isinstance(rel, str) or rel.startswith(EXTERNAL_MARKER):
                 continue
-            if _path_exists(component_dir, rel):
+            if _path_is_file(component_dir, rel):
                 refs_ok += 1
+            elif _path_exists(component_dir, rel):
+                errors.append(
+                    "class {!r} evidence path is a directory, not a file: {}".format(cid, rel))
             else:
                 errors.append("class {!r} evidence path missing: {}".format(cid, rel))
         incident_refs.update(_collect_incident_refs(cls))
@@ -914,6 +1026,21 @@ def check_coverage_model(model, suite_ids, component_dir):
         missing = REQUIRED_PAIRWISE_KEYS - set(pc.keys())
         if missing:
             errors.append("pairwise {!r} missing keys: {}".format(pid, sorted(missing)))
+        # The descriptive scalars carry the check's meaning: ``category``,
+        # ``status``, ``rationale``, and ``gap_status`` are free-text and must be
+        # non-empty strings, and ``priority`` is a review-priority token that must
+        # be within the documented high/medium/low vocabulary.
+        for field in ("category", "status", "rationale", "gap_status"):
+            if field in pc and not _nonempty_str(pc.get(field)):
+                errors.append(
+                    "pairwise {!r} {} must be a non-empty string".format(pid, field))
+        priority = pc.get("priority")
+        if "priority" in pc and not _nonempty_str(priority):
+            errors.append("pairwise {!r} priority must be a non-empty string".format(pid))
+        elif _nonempty_str(priority) and priority not in COVERAGE_RISK_VALUES:
+            errors.append(
+                "pairwise {!r} priority {!r} not in {}".format(
+                    pid, priority, sorted(COVERAGE_RISK_VALUES)))
         # A pairwise check pairs exactly two axis.class dimensions; a pair with any
         # other number of refs is not a pair and is a schema error. (Membership of
         # each ref is validated by check_axis_refs; the non-list case is reported
@@ -978,13 +1105,25 @@ def _incident_sections(text):
 
 
 def defined_incident_ids(incidents_path, errors):
-    """Return the set of TI-NNN ids defined by headings in TESTING_INCIDENTS.md."""
+    """Return the set of TI-NNN ids defined by headings in TESTING_INCIDENTS.md.
+
+    A TI-NNN defined by more than one ``## TI-NNN:`` heading is a schema error:
+    the id is meant to be stable and unique, and a second definition makes the
+    account a reader (or a suite reference) resolves to ambiguous. Each repeat is
+    reported, and the id still resolves (so downstream reference checks are not
+    additionally confused by it).
+    """
     path = Path(incidents_path)
     if not path.exists():
         errors.append("incidents doc not found: {}".format(path))
         return set()
     text = path.read_text(encoding="utf-8")
-    return set(_INCIDENT_HEADING_RE.findall(text))
+    defined = set()
+    for tid in _INCIDENT_HEADING_RE.findall(text):
+        if tid in defined:
+            errors.append("duplicate incident definition: {}".format(tid))
+        defined.add(tid)
+    return defined
 
 
 def check_incident_refs(refs, defined):

@@ -176,6 +176,7 @@ RETIRE_SUITE = """\
     evidence:
       - path: "external: evidence-outside-repo"
         claim: Built under BUILD_CONTRACT_TESTS.
+    history: Legacy coverage folded into suite-one.
     disposition: retire
     disposition_target: [suite-one]
     disposition_rationale: Folded into suite-one.
@@ -1339,6 +1340,189 @@ class CheckTestingDocsTest(unittest.TestCase):
         self.assertTrue(
             any("broken local link" in err for err in results["markdown_links"]),
             msg=results["markdown_links"],
+        )
+
+    # -- historical context: history or incidents required -------------------
+
+    def test_suite_missing_history_and_incidents_is_reported(self):
+        # A suite that documents neither a history narrative nor an incidents
+        # list is history-blind and must be reported.
+        broken = VALID_INVENTORY.replace(
+            "    history: Guarded per TI-001.\n", "", 1)
+        _write_docs(self.root, {"test_inventory.yaml": broken})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("must carry a non-empty history or a non-empty incidents list" in err
+                for err in results["inventory"]),
+            msg=results["inventory"],
+        )
+
+    def test_suite_incidents_list_satisfies_history(self):
+        # A non-empty incidents list naming a defined incident satisfies the
+        # historical-context requirement in place of a history narrative, and the
+        # listed id resolves like any other TI reference.
+        broken = VALID_INVENTORY.replace(
+            "    history: Guarded per TI-001.\n", "    incidents: [TI-001]\n", 1)
+        _write_docs(self.root, {"test_inventory.yaml": broken})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertEqual(results["inventory"], [], msg=results["inventory"])
+        self.assertEqual(results["incidents"], [], msg=results["incidents"])
+
+    def test_suite_empty_history_is_reported(self):
+        broken = VALID_INVENTORY.replace(
+            "    history: Guarded per TI-001.\n", '    history: ""\n', 1)
+        _write_docs(self.root, {"test_inventory.yaml": broken})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("history must be a non-empty string" in err
+                for err in results["inventory"]),
+            msg=results["inventory"],
+        )
+
+    def test_suite_incidents_empty_list_is_reported(self):
+        broken = VALID_INVENTORY.replace(
+            "    history: Guarded per TI-001.\n", "    incidents: []\n", 1)
+        _write_docs(self.root, {"test_inventory.yaml": broken})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("incidents must be a non-empty list" in err
+                for err in results["inventory"]),
+            msg=results["inventory"],
+        )
+
+    def test_suite_incidents_non_ti_entry_is_reported(self):
+        # An incidents entry that is not a bare TI-NNN id is a schema error.
+        broken = VALID_INVENTORY.replace(
+            "    history: Guarded per TI-001.\n", "    incidents: [not-an-incident]\n", 1)
+        _write_docs(self.root, {"test_inventory.yaml": broken})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("incidents entry must be a TI-NNN incident id" in err
+                for err in results["inventory"]),
+            msg=results["inventory"],
+        )
+
+    def test_suite_incidents_unknown_ti_is_reported(self):
+        # A well-formed TI id that no heading defines must fail the incident
+        # reference check, exactly as an unknown TI in a history string would.
+        broken = VALID_INVENTORY.replace(
+            "    history: Guarded per TI-001.\n", "    incidents: [TI-404]\n", 1)
+        _write_docs(self.root, {"test_inventory.yaml": broken})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("TI-404" in err for err in results["incidents"]),
+            msg=results["incidents"],
+        )
+
+    # -- strict loader: unhashable mapping key -------------------------------
+
+    def test_unhashable_yaml_key_is_rejected(self):
+        # A complex (list) mapping key is unhashable; the strict loader must
+        # report it as a parse failure rather than crashing on set membership.
+        broken = "? [complex, key]\n: value\n" + VALID_INVENTORY
+        _write_docs(self.root, {"test_inventory.yaml": broken})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("does not parse as YAML" in err and "unhashable key" in err
+                for err in results["load"]),
+            msg=results["load"],
+        )
+
+    # -- evidence paths must be files, not directories -----------------------
+
+    def test_suite_evidence_path_directory_is_reported(self):
+        (self.root / "evidence_dir").mkdir()
+        broken = VALID_INVENTORY.replace(
+            '      - path: "external: evidence-outside-repo"\n', "      - path: evidence_dir\n")
+        _write_docs(self.root, {"test_inventory.yaml": broken})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("evidence path is a directory, not a file" in err
+                for err in results["inventory"]),
+            msg=results["inventory"],
+        )
+
+    def test_coverage_class_evidence_path_directory_is_reported(self):
+        (self.root / "evidence_dir").mkdir()
+        broken = VALID_COVERAGE.replace(
+            '        - path: "external: evidence-outside-repo"\n',
+            "        - path: evidence_dir\n")
+        _write_docs(self.root, {"test_coverage_model.yaml": broken})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("evidence path is a directory, not a file" in err
+                for err in results["coverage_model"]),
+            msg=results["coverage_model"],
+        )
+
+    # -- coverage class / pairwise required field validation -----------------
+
+    def test_class_risk_not_in_vocabulary_is_reported(self):
+        broken = VALID_COVERAGE.replace("      risk: high\n", "      risk: critical\n", 1)
+        _write_docs(self.root, {"test_coverage_model.yaml": broken})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("risk 'critical' not in" in err for err in results["coverage_model"]),
+            msg=results["coverage_model"],
+        )
+
+    def test_class_empty_intent_is_reported(self):
+        broken = VALID_COVERAGE.replace(
+            "      intent: Allocation invariants remain observable.\n",
+            '      intent: ""\n', 1)
+        _write_docs(self.root, {"test_coverage_model.yaml": broken})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("intent must be a non-empty string" in err
+                for err in results["coverage_model"]),
+            msg=results["coverage_model"],
+        )
+
+    def test_class_empty_expected_test_kinds_is_reported(self):
+        broken = VALID_COVERAGE.replace(
+            "      expected_test_kinds: [contract]\n",
+            "      expected_test_kinds: []\n", 1)
+        _write_docs(self.root, {"test_coverage_model.yaml": broken})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("expected_test_kinds must be a non-empty list" in err
+                for err in results["coverage_model"]),
+            msg=results["coverage_model"],
+        )
+
+    def test_pairwise_priority_not_in_vocabulary_is_reported(self):
+        pc = {"id": "p1", "category": "x", "pair": ["a.b", "c.d"], "status": "s",
+              "priority": "urgent", "rationale": "r", "current_inventory": [],
+              "gap_status": "x"}
+        model = self._coverage_model(axes=[], classes=[], pairwise_checks=[pc])
+        errors, _, _ = checker.check_coverage_model(model, set(), str(self.root))
+        self.assertTrue(
+            any("priority 'urgent' not in" in err for err in errors), msg=errors)
+
+    def test_pairwise_empty_category_is_reported(self):
+        pc = {"id": "p1", "category": "", "pair": ["a.b", "c.d"], "status": "s",
+              "priority": "low", "rationale": "r", "current_inventory": [],
+              "gap_status": "x"}
+        model = self._coverage_model(axes=[], classes=[], pairwise_checks=[pc])
+        errors, _, _ = checker.check_coverage_model(model, set(), str(self.root))
+        self.assertTrue(
+            any("category must be a non-empty string" in err for err in errors),
+            msg=errors)
+
+    # -- duplicate incident definition ---------------------------------------
+
+    def test_duplicate_incident_definition_is_reported(self):
+        # A second ## TI-001: heading makes the id ambiguous and must be reported.
+        broken = VALID_INCIDENTS + (
+            "\n## TI-001: A duplicate heading\n\n"
+            "**Finding.** x\n**Control.** x\n**Protects.** x\n"
+            "**Origin.** x\n**Current status.** x\n**Retirement condition.** x\n")
+        _write_docs(self.root, {"TESTING_INCIDENTS.md": broken})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("duplicate incident definition: TI-001" in err
+                for err in results["incidents"]),
+            msg=results["incidents"],
         )
 
 
