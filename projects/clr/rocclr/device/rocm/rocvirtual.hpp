@@ -398,6 +398,8 @@ class VirtualGPU : public device::VirtualDevice {
    public:
     LegacySignalTracker(const VirtualGPU& gpu) : HwQueueTracker(gpu) {}
 
+    ~LegacySignalTracker() override;
+
     void ResetCurrentSignal() override;
 
    private:
@@ -407,9 +409,27 @@ class VirtualGPU : public device::VirtualDevice {
     hsa_status_t SetAsyncHandler(ProfilingSignal* signal, Timestamp* ts,
                                  hsa_signal_value_t init_value) override;
     bool IsBusy(const ProfilingSignal* signal) const override;
+    void NoteWaitsSubmitted() override;
+    void NoteGpuWait(ProfilingSignal* signal) override;
 
     //! Wait for the next active signal
     void WaitNext();
+
+    //! Signals GPU waiters read and the uses started after the waits were captured. Holding a
+    //! reference makes AcquireSlot swap the signal out instead of rearming it before the waiters
+    //! read it, e.g. a barrier that joins several SDMA signals of a batch copy.
+    struct HeldWaits {
+      std::vector<ProfilingSignal*> signals;
+      std::vector<ProfilingSignal*> consumers;
+    };
+
+    //! Drops the holds whose consumers completed, oldest first
+    void ReleaseHolds(bool release_all = false);
+
+    HeldWaits open_holds_;                  //!< Holds from the last WaitingSignal calls
+    std::deque<HeldWaits> closed_holds_;    //!< Holds waiting for their consumers
+    ProfilingSignal* prior_wait_ = nullptr; //!< Waited prior signal, held only for a second use
+    bool open_waits_used_ = false;          //!< A use consumed the open waits
   };
 
   //! Proves reuse from host memory instead of reading every signal, and rearms signals ahead of
