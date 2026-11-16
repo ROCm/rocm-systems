@@ -862,6 +862,19 @@
         "undef_new": {
           "type": "string",
           "description": "Live-in scalar locations undefined on the new side (never written since the entry, not defined there)."
+        },
+        "memory_dead_at_exit": {
+          "enum": [
+            "frame",
+            "private"
+          ]
+        },
+        "vgpr_input_masks": {
+          "type": "object",
+          "description": "VGPR inputs whose every lane is ANDed with the mask (memory model: LDS addresses inside the window).",
+          "additionalProperties": {
+            "$ref": "#/$defs/hex32"
+          }
         }
       },
       "additionalProperties": false,
@@ -2009,6 +2022,12 @@
               },
               "additionalProperties": {
                 "$ref": "#/$defs/hex32"
+              }
+            },
+            "dead": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/hex"
               }
             }
           },

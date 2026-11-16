@@ -1063,3 +1063,61 @@ open (README "Whole functions").
     regions cannot execute yet (LDS stores, buffer spills, AGPR moves, `s_setreg`), so the
     whole function cannot run either. Memory in regions (LDS, buffer, scratch, atomics)
     is what unlocks them.
+
+## Memory in regions: LDS, scratch, buffer, atomics (2026-11-16)
+
+Regions now run LDS (`ds_*`, two-address forms, DS atomics), scratch, buffer and flat
+accesses and global/flat/buffer atomics (README "Memory").
+
+- **Probes** (gfx908 buffer spills, gfx942 scratch spills, gfx950 LDS and atomics): a
+  spill slot moved consistently passes and a reload from the wrong slot is a mismatch; an
+  LDS offset folded into the address passes (1224 of 1225 cases valid once LDS address
+  inputs are masked into the window) and a wrong offset is a memory mismatch at an LDS
+  address; `add x` as `sub -x` passes with and without the returned value, `sub x` does
+  not. They are the tests `SpillSlotsAreDeadWhereNothingElseReadsTheStack`,
+  `LdsAccessesRunInTheWindow`, `AtomicsReadAndWriteMemory`.
+- **RocJITsu set-up** the runner needed: an LDS window on the wave (`set_lds_base/size`,
+  64 KiB; dispatch leaves it empty, which drops every DS lane), a scratch base
+  (`FLAT_SCRATCH`, 0 faults), unbounded scratch lanes, and the memory plugin walking the
+  swizzle stride of private accesses and both DS address sets. A MUBUF without
+  `offen`/`idxen` decodes its unused address field as a register-less `v0`: it is not
+  an input.
+- **Sweep** (the final sweep's 120 commits again; 440 s with a 120 s budget per function):
+
+| | after item 4 | now |
+|---|---|---|
+| pass | 1436 | 1448 |
+| pass-masked | 12 | 12 |
+| inconclusive | 38 | 26 |
+| mismatch | 21 | 21 |
+
+  - The 12 new passes are `ds-sub-offset.ll` (LDS address folding) on gfx900 (as gfx908),
+    gfx1010 and gfx1100.
+  - A first run reported 4 new mismatches in `memmove-var-size.ll` (gfx1030): r0 swaps
+    two registers (a compensable witness), and r1, whose entry relation relies on r0's
+    R_out, then differed. Such a mismatch is now a witness, not a verdict (transitively);
+    the whole function decides. There `f0` passes, but on only 20 valid cases (copy loops
+    over random sizes pass the step limit): a whole-function pass now needs 100 valid
+    cases, so these stay inconclusive.
+  - `memintrinsic-unroll.ll` (`memcpy_p5_p5_sz2048`: thousands of scratch accesses per
+    case) needs minutes per function: the driver's `--job-timeout` (default 300 s) reports
+    such a function inconclusive instead of stalling a sweep.
+  - Still not executed: AGPR moves (`v_accvgpr_*`), `s_setreg`, and functions whose
+    whole body has an indirect branch before the return.
+
+## Two llc builds (2026-11-16)
+
+`--llc-before/--llc-after` already compiled changed tests with both compilers; now
+`--all-tests` adds every unchanged test, `--corpus` adds IR from outside the repository
+(`.ll`, `.llir`), `--build-llc DIR` builds the two llc (a worktree and an incremental build
+per side), and the compiles run in parallel.
+
+- PR 242731 with the builds `~/llvm-pr242731-before-build-20261115` and
+  `~/llvm-i64-half-sat-20261114-build`, `--all-tests` and 300 kernels of the Triton cache
+  (`--corpus-mcpu gfx942`): 4 changed tests, 3609 unchanged tests and 300 kernels compiled
+  twice in 69 s; code differs in 2 functions, both pass. The PR's codegen change reaches
+  no other test or kernel. 2482 unchanged tests have no RUN line for a tested target, 4
+  could not be compiled standalone; neither counts as a skip. RUN lines that need files
+  of earlier RUN lines (`%t`) are not run.
+- Self-test: wrapper llc pair whose "after" side commutes `v_add_u32` operands; an
+  unchanged hand-written test and a RUN-less corpus file are both compared and pass.

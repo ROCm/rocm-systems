@@ -93,6 +93,10 @@ struct RegionContract {
   /// VGPRs observable only through a return value narrower than the register: just these
   /// bits are compared (e.g. 0x0000ffff for a half returned in v0).
   std::vector<std::pair<unsigned, uint32_t>> vexit_masks;
+  /// VGPR inputs whose every lane is ANDed with the mask (memory model: an LDS address
+  /// that is a region input lies inside the wave's LDS window; outside it, LLVM is
+  /// undefined).
+  std::vector<std::pair<unsigned, uint32_t>> vinput_masks;
   /// The same for scalar locations (a shader's i8/i16 return in an SGPR).
   std::vector<std::pair<unsigned, uint32_t>> exit_masks;
   /// Regions with branches: one entry per exit pair (empty: one fallthrough exit, whose
@@ -141,6 +145,12 @@ struct RegionContract {
   /// "UNKNOWN" (an outstanding op has unknown effects). CONFLICT and UNKNOWN leave the
   /// context unresolved: the isolated run starts with every input ready, real hardware may not.
   std::string pending_effects = "NONE";
+  /// Stored bytes that are dead at the exit and not compared: "" (none), "frame" (what the
+  /// region stored into the stack frame through the stack or frame pointer, without a
+  /// VGPR address: at a callable function's return, or when nothing outside the region
+  /// reads private memory) or "private" (a kernel's s_endpgm: all its private memory and
+  /// LDS).
+  std::string memory_dead_at_exit;
   /// Composition check (handoff 5.2): "HOLDS" when must-equality propagated from the
   /// kernel entry through common code and upstream regions' R_out covers entry_equal,
   /// "FAILS" otherwise (then the contract is UNRESOLVED), "NOT_CHECKED" for synthetic or

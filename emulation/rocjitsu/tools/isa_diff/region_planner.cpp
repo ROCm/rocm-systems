@@ -492,6 +492,24 @@ RegionPair build_region(const KernelModel &om, const KernelModel &nm, const Cand
                       "blocks, so their values cannot be paired";
     }
   }
+  // Stack-frame bytes the region stores are dead at its exit when nothing outside it can
+  // read private memory (spill slots reloaded inside the region, or not at all).
+  if (k.memory_writes) {
+    bool private_reads = false;
+    for (const auto *side : {&region.old_side, &region.new_side}) {
+      const KernelModel &m = side == &region.old_side ? om : nm;
+      for (size_t i = 0; i < m.insts().size() && !private_reads; ++i)
+        if (i < side->begin || i >= side->end)
+          private_reads = may_read_private(m.insts()[i].mnemonic) || m.insts()[i].fx.unknown_effect;
+    }
+    if (!private_reads) {
+      k.memory_dead_at_exit = "frame";
+      k.sources.push_back({"memory: no instruction outside the region reads private memory, so "
+                           "the stack-frame bytes it stores are dead at its exit and not "
+                           "compared",
+                           "memory_model"});
+    }
+  }
   if (k.memory_reads || k.memory_writes) {
     k.sources.push_back({"memory: loads read one initial memory image shared by both sides "
                          "(an input); the bytes either side stores are compared at the exit",
@@ -513,6 +531,92 @@ RegionPair build_region(const KernelModel &om, const KernelModel &nm, const Cand
             }
         written |= ref.fx.writes;
       }
+    }
+    // Buffer resources (V#) and scratch offsets that are region inputs: the calling
+    // convention's private segment buffer (s[0:3] in a function), a base far above the
+    // code with unlimited records and ADD_TID with a dword swizzle, so lanes interleave by
+    // dword as the hardware's scratch does; stack-pointer offsets are 16-byte aligned.
+    {
+      const Target &t = om.artifact().target;
+      const uint32_t swizzle = t.major >= 11 ? 0x40000000u : 0x80000000u;
+      const uint32_t word3 = t.major <= 9 ? 0x00e00000u : t.wave32() ? 0x31c16000u : 0x31e16000u;
+      auto pin = [&](unsigned l, uint32_t one, uint32_t zero) {
+        if (!k.entry_equal.test(l))
+          return;
+        for (const Constraint &c : k.constraints)
+          if (c.loc == l && c.source == "memory_model")
+            return;
+        Constraint c;
+        c.loc = l;
+        c.known_one = one;
+        c.known_zero = zero;
+        c.source = "memory_model";
+        k.constraints.push_back(c);
+      };
+      bool resource = false;
+      for (const auto *side : {&region.old_side, &region.new_side}) {
+        const KernelModel &m = side == &region.old_side ? om : nm;
+        LocSet written;
+        for (size_t i = side->begin; i < side->end; ++i) {
+          const InstRef &ref = m.insts()[i];
+          const bool buffer = ref.mnemonic.rfind("buffer_", 0) == 0;
+          const bool scratch = ref.mnemonic.rfind("scratch_", 0) == 0;
+          if ((buffer || scratch) && (ref.fx.mem_read || ref.fx.mem_write))
+            for (const SourceOperand &so : source_operands(*ref.inst, m.artifact().target)) {
+              const auto n = so.locs.count();
+              unsigned first = 0;
+              while (first < kNumLocs && !so.locs.test(first))
+                ++first;
+              if (n == 4 && buffer && first + 3 < kNumSgprs) {
+                const unsigned words[4] = {first, first + 1, first + 2, first + 3};
+                if (!written.test(words[0]))
+                  pin(words[0], 0, 0xffu);
+                if (!written.test(words[1]))
+                  pin(words[1], swizzle | 0x10u, ~(swizzle | 0x7fu));
+                if (!written.test(words[2]))
+                  pin(words[2], 0xffffffffu, 0);
+                if (!written.test(words[3]))
+                  pin(words[3], word3, ~word3);
+                resource = true;
+              } else if (n == 1 && first < kNumSgprs && !written.test(first)) {
+                pin(first, 0, 0xfu); // soffset / saddr: an aligned stack offset
+              }
+            }
+          written |= ref.fx.writes;
+        }
+      }
+      // LDS addresses that are region inputs: inside the window, dword aligned, with room
+      // for the instruction offsets.
+      VSet lds_addr;
+      for (const auto *side : {&region.old_side, &region.new_side}) {
+        const KernelModel &m = side == &region.old_side ? om : nm;
+        VSet vwritten;
+        for (size_t i = side->begin; i < side->end; ++i) {
+          const InstRef &ref = m.insts()[i];
+          if (ref.mnemonic.rfind("ds_", 0) == 0 && (ref.fx.mem_read || ref.fx.mem_write))
+            for (const SourceOperand &so : source_operands(*ref.inst, m.artifact().target))
+              if (so.vlocs.any()) {
+                lds_addr |= so.vlocs & ~vwritten & k.ventry_equal;
+                break; // the address is the first VGPR source
+              }
+          vwritten |= ref.fx.vwrites;
+        }
+      }
+      for (unsigned r = 0; r < kNumVgprs; ++r)
+        if (lds_addr.test(r))
+          k.vinput_masks.emplace_back(r, 0x7ffcu);
+      if (lds_addr.any())
+        k.sources.push_back({"LDS addresses that are region inputs (" + format_vgprs(lds_addr) +
+                                 ") lie inside the LDS window: every lane is masked with "
+                                 "0x7ffc (outside the allocation LLVM is undefined)",
+                             "memory_model"});
+      if (resource)
+        k.sources.push_back({"buffer resources that are region inputs are the private segment "
+                             "buffer of the calling convention: a 256-byte aligned base far "
+                             "above the code, unlimited records, ADD_TID with a dword swizzle "
+                             "(word 3 " +
+                                 hex32(word3) + ")",
+                             "memory_model"});
     }
     for (unsigned l = 0; l + 1 < kNumSgprs; ++l) {
       if (!bases.test(l) || !bases.test(l + 1) || (l > 0 && bases.test(l - 1) && l % 2 == 1))
@@ -1641,6 +1745,18 @@ PlanResult plan_regions(const KernelModel &old_model, const KernelModel &new_mod
     }
     RegionContract &k = f.contract;
     k.composition = "NOT_CHECKED";
+    if (k.memory_reads || k.memory_writes) {
+      // At the return a function's own stack frame is gone; at s_endpgm so are a kernel's
+      // private memory and LDS.
+      k.memory_dead_at_exit = old_model.artifact().callable ? "frame" : "private";
+      k.sources.push_back({k.memory_dead_at_exit == "frame"
+                               ? "memory: bytes the function stores into its own stack frame "
+                                 "(through the stack or frame pointer, no VGPR address) are dead "
+                                 "at its return and not compared"
+                               : "memory: the kernel's private memory and LDS are dead at "
+                                 "s_endpgm and not compared",
+                           "whole_function"});
+    }
     if (metadata_differs) {
       k.status = ContractStatus::Unresolved;
       k.sources.push_back({"entry relation not established: kernel metadata differs", "planner"});

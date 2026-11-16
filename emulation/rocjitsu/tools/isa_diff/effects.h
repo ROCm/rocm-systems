@@ -38,8 +38,8 @@ struct Effects {
   VSet vwrites;           ///< VGPRs written (lanes under EXEC, or all for lane writes).
   VSet vwide_reads;       ///< First register of each 64-bit VGPR source.
   bool valu = false;      ///< VALU instruction (reads EXEC; region-executable when allowed).
-  bool mem_read = false;  ///< Region-executable load (global_load_*, s_load_dword*).
-  bool mem_write = false; ///< Region-executable store (global_store_*).
+  bool mem_read = false;  ///< Region-executable load or atomic (region_memory_access).
+  bool mem_write = false; ///< Region-executable store or atomic.
   /// True when the instruction is in the P0 allowlist and every operand is a
   /// tracked location or a constant, so a region may execute it.
   bool p0 = false;
@@ -204,11 +204,28 @@ struct SourceOperand {
 /// A VALU instruction the region runner executes: not MFMA, memory, interpolation,
 /// indirect or exception-state access.
 [[nodiscard]] bool is_region_valu(std::string_view mnemonic, uint64_t flags);
-/// A memory instruction the region runner executes: global loads and stores (not LDS-DMA,
-/// transpose, block, addtid or atomic forms), scalar loads, and the counter waits of every
+/// What a region-executable memory instruction does with memory.
+struct MemoryAccess {
+  bool reads = false;
+  bool writes = false;
+  bool atomic = false; ///< A read-modify-write.
+};
+
+/// A memory instruction the region runner executes: loads, stores and atomics of global,
+/// flat, scratch and buffer memory and of LDS (not LDS-DMA, transpose, block, addtid,
+/// typed-format, GWS or cross-lane DS forms), scalar loads, and the counter waits of every
 /// generation (s_waitcnt*, s_wait_*cnt). Memory is an input of the region (equal on both
 /// sides) and stored bytes are part of its output.
 [[nodiscard]] bool is_region_memory(std::string_view mnemonic);
+/// How a memory instruction accesses memory; nullopt for waits and anything outside.
+[[nodiscard]] std::optional<MemoryAccess> region_memory_access(std::string_view mnemonic);
+/// A private access in stack-frame form, from its disassembly: no VGPR address, so through
+/// the stack or frame pointer (buffer `v1, off, s[0:3], s32 offset:12`; scratch
+/// `off, v1, s32 offset:12`).
+[[nodiscard]] bool is_frame_access(std::string_view mnemonic, std::string_view text);
+/// An instruction that may read private memory (stack frames): buffer, scratch and flat
+/// loads and atomics of any form.
+[[nodiscard]] bool may_read_private(std::string_view mnemonic);
 /// A direct branch the region runner follows (taken edges inside the region continue
 /// there; others leave it).
 [[nodiscard]] bool is_region_branch(std::string_view mnemonic);

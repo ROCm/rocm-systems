@@ -16,9 +16,11 @@ branches and loops whose exits correspond on both sides (see "Control flow"), ma
   generation's names, SALU float of GFX11.5+ included);
 - plain VALU instructions, which exclude MFMA, interpolation, indirect VGPR access, and
   exception state;
-- global and scalar memory instructions: `global_load_*` (not the LDS, `_tr`, `block` or
-  `addtid` forms), `global_store_*`, `s_load_dword*`/`s_load_b*`, and every counter wait
-  (`s_waitcnt*`, `s_wait_*cnt`; see "Memory");
+- memory instructions (see "Memory"): loads, stores and atomics of global, flat,
+  scratch and buffer memory and of LDS (`ds_read*`/`ds_load*`, `ds_write*`/`ds_store*`
+  including the two-address forms, DS atomics), scalar loads, and every counter wait
+  (`s_waitcnt*`, `s_wait_*cnt`). Not the LDS-DMA, `_tr`, `block`, `addtid`, typed-format,
+  GWS, ordered-count or cross-lane DS (`ds_swizzle`, `ds_permute`) forms;
 - scheduling hints without a functional effect (`s_nop`, `s_delay_alu`, `s_clause`,
   `s_wait_alu`, `s_waitcnt_depctr`, prefetch hints). Alignment matches the other
   instructions first and hints only in the gaps between them; a hunk of hints alone
@@ -26,8 +28,7 @@ branches and loops whose exits correspond on both sides (see "Control flow"), ma
   `NO_SEMANTIC_DIFF`. Hardware hazards these hints avoid are not modelled, so not checked;
 - direct branches (`s_branch`, `s_cbranch_scc0/1`, `vccz/vccnz`, `execz/execnz`).
 
-LDS, flat, buffer, scratch and atomic accesses stay outside. The kernel around a region
-may contain anything; the region may not. Regions may also contain the comment-only
+The kernel around a region may contain anything; the region may not. Regions may also contain the comment-only
 inline-asm blocks of LLVM tests (`; def v[0:1]`, `; use s4`; see "Inline asm").
 
 Inputs are AMDGPU code objects, raw instruction words, and, through the LLVM plugin
@@ -248,7 +249,7 @@ function has neither cut:
   where liveness is the calling convention's.
 - **When it runs.** `test` runs `f0` only when the regions leave the verdict open
   (`INCONCLUSIVE`, `UNSUPPORTED`, or a pass with partial coverage). A pass of `f0`
-  with complete coverage makes the function `NO_MISMATCH_FOUND` with complete
+  with complete coverage and at least 100 valid cases makes the function `NO_MISMATCH_FOUND` with complete
   coverage, unless an unresolved item lies outside the function's code (metadata,
   layout, relocations); a mismatch of `f0` is a `LOCAL_MISMATCH` verdict. Either way
   `overall.resolved_by` is `whole_function`, `results.json` has `whole_function`
@@ -409,7 +410,38 @@ within the step.
 - **Faults.** A wave that halts or traps on an access is a `MEMORY_FAULT`.
   - On both sides, the input is excluded and counted as a rejection.
   - On one side, it is an `exit_status_divergence` mismatch.
-  - Atomic, dual-address, and code-overwriting accesses are `UNSUPPORTED_OPERAND`.
+  - LDS-DMA, image and code-overwriting accesses are `UNSUPPORTED_OPERAND`.
+- **LDS.** The wave has a 64 KiB LDS window at offset 0 (one workgroup's allocation).
+  - LDS words are seeded from the same image as global memory, as word
+    `(kLdsTag | offset) / 4`; stored LDS bytes appear in the states as
+    `0x4000000000000000 | offset`, so LDS and global memory never alias.
+  - An access outside the window is a fault of the case (LLVM: out of the allocation,
+    undefined): excluded on both sides, a mismatch on one.
+  - An LDS address that is a region input (the first VGPR source of a DS instruction,
+    not written before it) has every lane masked with `0x7ffc` (`vgpr_input_masks`,
+    source `memory_model`), so it lies in the window with room for offsets.
+  - Two-address forms (`ds_read2*`, `ds_write2*`) move both address sets.
+- **Atomics.** Global, flat, buffer and DS atomics read and write: the word is seeded
+  before the read-modify-write and the result is stored. A returning atomic's old value
+  goes to its destination like a load.
+- **Private memory (scratch and buffer spills).**
+  - `scratch_*` instructions address the wave's scratch base, fixed in the frame at
+    `0x0000008000000000`; lanes interleave by dword as the hardware's do.
+  - A buffer resource that is a region input (the four SGPRs of a `buffer_*` instruction,
+    not written before it) is the calling convention's private segment buffer
+    (`memory_model` constraints): a 256-byte aligned base far above the code, unlimited
+    records, and word 3 with ADD_TID and a dword swizzle (`0x00e00000` on GFX9,
+    `0x31c16000`/`0x31e16000` on wave32/wave64 GFX10+). Single-SGPR offsets of buffer and
+    scratch accesses (`s32`, the stack pointer) are 16-byte aligned.
+  - **Stack frames.** A private access without a VGPR address (MUBUF without
+    `offen`/`idxen`, scratch with an SGPR address only) goes through the stack or frame
+    pointer: the function's own frame. Bytes stored that way are dead where nothing can
+    read them again, and not compared (`memory_dead_at_exit: frame`, `memory.dead` in the
+    states): at the exit of a region when no instruction outside it may read private
+    memory (no buffer, scratch or flat load or atomic, no unknown effect), and at a
+    callable function's return (`f0`). A kernel's `f0` drops all its private memory and
+    LDS at `s_endpgm` (`private`). A spill slot that moved is therefore not a
+    difference, while a reload from the wrong slot is.
 - **Contract.**
   - `memory_reads` and `memory_writes` record what the region does.
   - A region that loads needs memory equality at its entry in the composition check.
@@ -557,7 +589,20 @@ run.
   (`--old-mattr`/`--new-mattr`). Other changed RUN lines are skipped.
 - **Two llc builds.** `--llc-before LLC --llc-after LLC` compiles every changed test's
   head IR at each RUN line for a tested target with both, and compares the functions
-  whose code differs; any test qualifies, not only autogenerated ones.
+  whose code differs; any test qualifies, not only autogenerated ones (hand-written
+  tests, added tests, CHECK bodies present on one side only).
+  - `--build-llc DIR` builds the two llc itself: a worktree of `--repo` per side
+    (`DIR/before`, `DIR/after`; `WORKTREE` builds the checkout) and a Release+assertions
+    AMDGPU-only build per side (`DIR/before-build`, `DIR/after-build`), configured once and
+    rebuilt incrementally, so a sweep over neighbouring commits rebuilds little.
+  - `--all-tests` also compiles every unchanged test matching `--tests`: code a change
+    moved in tests whose CHECK lines were not updated (or do not exist).
+  - `--corpus PATH...` also compiles LLVM IR from outside the repository (real kernels;
+    files, or directories searched for `.ll` and `.llir`, e.g. a Triton cache), at one `llc -mtriple=amdgcn-amd-amdhsa -mcpu=CPU` RUN
+    line per `--corpus-mcpu` CPU (default `gfx950`).
+  - The compiles run in parallel (`--jobs`). Unchanged tests and corpus files without a
+    RUN line for a tested target are not skips; the summary counts them
+    (`extra_without_tested_run`).
 - **ABI from the IR.**
   - `--return-vgprs` is the return type's size in dwords (`void` 0, `<3 x half>` 2,
     `iN`/`bN` ceil(N/32), `<N x i8>` N (one element per register), structs and arrays

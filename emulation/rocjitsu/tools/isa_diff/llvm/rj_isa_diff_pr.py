@@ -860,6 +860,8 @@ def llc_texts(text, path, llc_before, llc_after, targets):
             llc = p[2]
             if not re.match(r"^\s*(\S*/)?llc(\s|$)", llc):
                 continue  # the input comes from another tool (opt | llc)
+            if "%t" in llc or "%S" in llc or "%p" in llc:
+                continue  # needs files earlier RUN lines make (split-file, opt > %t.bc)
             prefix = f"RJLLC{i}"
             for side, binary in enumerate((llc_before, llc_after)):
                 cmd = re.sub(
@@ -898,9 +900,50 @@ def llc_texts(text, path, llc_before, llc_after, targets):
     )
 
 
-def collect(repo, base, head, tests_glob, targets, llc_pair=None):
+def corpus_files(paths):
+    """The LLVM IR files named by @p paths: files, or directories searched recursively for
+    .ll and .llir (Triton's cache) files."""
+    out = []
+    for p in map(Path, paths):
+        out += sorted([*p.rglob("*.ll"), *p.rglob("*.llir")]) if p.is_dir() else [p]
+    return out
+
+
+def corpus_text(path, mcpus):
+    """A corpus file's IR with one llc RUN line per CPU (its own RUN lines are kept)."""
+    runs = "".join(
+        f"; RUN: llc -mtriple=amdgcn-amd-amdhsa -mcpu={c} < %s | FileCheck %s\n"
+        for c in mcpus
+    )
+    return runs + Path(path).read_text()
+
+
+def all_test_names(repo, head, tests_glob):
+    """Every AMDGPU CodeGen test at @p head matching the glob."""
+    if head == WORKTREE:
+        root = Path(repo)
+        names = [str(p.relative_to(root)) for p in (root / TEST_DIR).rglob("*.ll")]
+    else:
+        names = git(repo, "ls-tree", "-r", "--name-only", head, "--", TEST_DIR).split()
+    return sorted(n for n in names if n.endswith(".ll") and Path(n).match(tests_glob))
+
+
+def collect(
+    repo,
+    base,
+    head,
+    tests_glob,
+    targets,
+    llc_pair=None,
+    all_tests=False,
+    corpus=(),
+    corpus_mcpus=(),
+    jobs_n=8,
+):
     """Changed functions (with their before/after bodies) and skipped ones (with reasons).
-    @p targets maps an llc target to how it is run ("native" or "proxy")."""
+    @p targets maps an llc target to how it is run ("native" or "proxy"). With @p llc_pair,
+    @p all_tests adds every test (not only changed ones) and @p corpus adds .ll files from
+    outside the repository, compiled for @p corpus_mcpus."""
     revs = [base] if head == WORKTREE else [base, head]
     names = git(repo, "diff", "--name-only", *revs, "--", TEST_DIR).split()
     files = [n for n in names if n.endswith(".ll") and Path(n).match(tests_glob)]
@@ -915,11 +958,57 @@ def collect(repo, base, head, tests_glob, targets, llc_pair=None):
             "comment_only": 0,
         },
     )
-    for path in files:
-        old, new = show(repo, base, path), show(repo, head, path)
+    # (path, old text, new text): changed tests first, then (with two llc builds) the
+    # unchanged tests and the corpus, whose IR is the same on both sides.
+    sources = [(path, show(repo, base, path), show(repo, head, path)) for path in files]
+    extra_paths = set()
+    if llc_pair and all_tests:
+        extra = [
+            n for n in all_test_names(repo, head, tests_glob) if n not in set(files)
+        ]
+        extra_paths.update(extra)
+        stats["unchanged_tests"] = len(extra)
+        sources += [(n, None, show(repo, head, n)) for n in extra]
+    if llc_pair and corpus:
+        cfiles = corpus_files(corpus)
+        stats["corpus_files"] = len(cfiles)
+        for f in cfiles:
+            text = corpus_text(f, corpus_mcpus)
+            sources.append((str(Path(f).resolve()), text, text))
+            extra_paths.add(str(Path(f).resolve()))
+    compiled = {}
+    if llc_pair:
+        # Both sides compile head's IR, one with each llc; the compiles run in parallel.
+        def compile_one(item):
+            path, _, new = item
+            if new is None:
+                return path, None
+            try:
+                return path, llc_texts(new, path, llc_pair[0], llc_pair[1], targets)
+            except RuntimeError as e:
+                return path, e
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, jobs_n)) as pool:
+            compiled = dict(pool.map(compile_one, sources))
+    for path, old, new in sources:
         if llc_pair and new is not None:
-            # Both sides compile head's IR, one with each llc.
-            old, new = llc_texts(new, path, llc_pair[0], llc_pair[1], targets)
+            res = compiled.get(path)
+            if isinstance(res, RuntimeError):
+                if path in extra_paths:
+                    # Not part of the change: counted, not a skip.
+                    stats["extra_llc_failed"] = stats.get("extra_llc_failed", 0) + 1
+                    continue
+                skipped.append(
+                    {"file": path, "reason": f"llc failed: {str(res)[:200]}"}
+                )
+                continue
+            old, new = res
+            if old is None and path in extra_paths:
+                # Not part of the change: nothing this tool runs, not a skip.
+                stats["extra_without_tested_run"] = (
+                    stats.get("extra_without_tested_run", 0) + 1
+                )
+                continue
             if old is None:
                 skipped.append(
                     {"file": path, "reason": "no llc RUN line for a tested target"}
@@ -1163,6 +1252,10 @@ def job_dir(out, job):
     )
 
 
+# Seconds one function's test may take (--job-timeout; None: unlimited).
+JOB_TIMEOUT = None
+
+
 def run_one(job, out, tool, llvm_bin, cases, seed, strict_nan=False, triage=True):
     """Build the job under a private name, with paths relative to it, then publish it at
     job_dir() by a rename."""
@@ -1256,23 +1349,30 @@ def run_job_in(job, d, tool, llvm_bin, cases, seed, strict_nan, triage):
             lines[0].split("error:", 1)[1].strip() if lines else text[-400:]
         )[:300]
         return row
-    te = subprocess.run(
-        [
-            str(tool),
-            "test",
-            "--case",
-            "case",
-            "--cases",
-            str(cases),
-            "--seed",
-            str(seed),
-            "--no-case-log",
-        ]
-        + (["--strict-nan"] if strict_nan else []),
-        capture_output=True,
-        text=True,
-        cwd=d,
-    )
+    try:
+        te = subprocess.run(
+            [
+                str(tool),
+                "test",
+                "--case",
+                "case",
+                "--cases",
+                str(cases),
+                "--seed",
+                str(seed),
+                "--no-case-log",
+            ]
+            + (["--strict-nan"] if strict_nan else []),
+            capture_output=True,
+            text=True,
+            cwd=d,
+            timeout=JOB_TIMEOUT,
+        )
+    except subprocess.TimeoutExpired:
+        (d / "test.log").write_text(f"killed after {JOB_TIMEOUT} s (--job-timeout)\n")
+        row["status"] = "INCONCLUSIVE"
+        row["detail"] = f"test exceeded the {JOB_TIMEOUT} s time budget (--job-timeout)"
+        return row
     (d / "test.log").write_text(te.stdout + te.stderr)
     row["test_exit"] = te.returncode
     try:
@@ -1332,7 +1432,15 @@ def poison_triage(job, d, tool, cases, seed, strict_nan):
     )
     for f in ("results.json",):
         (tri / f).unlink(missing_ok=True)
-    te = subprocess.run(
+    try:
+        te = _run_poison(tool, cases, seed, kinds, strict_nan, d)
+    except subprocess.TimeoutExpired:
+        return {"kinds": kinds, "status": "TIMEOUT"}
+    return _poison_result(te, kinds, d)
+
+
+def _run_poison(tool, cases, seed, kinds, strict_nan, d):
+    return subprocess.run(
         [
             str(tool),
             "test",
@@ -1350,8 +1458,13 @@ def poison_triage(job, d, tool, cases, seed, strict_nan):
         capture_output=True,
         text=True,
         cwd=d,
+        timeout=JOB_TIMEOUT,
     )
+
+
+def _poison_result(te, kinds, d):
     (d / "test_poison.log").write_text(te.stdout + te.stderr)
+    tri = d / "case_poison"
     out = {"kinds": kinds}
     try:
         res = json.loads((tri / "results.json").read_text())
@@ -1511,6 +1624,49 @@ def report(out, meta, rows, skipped, stats):
     return text, counts
 
 
+def build_llc(repo, rev, root, side, jobs):
+    """llc of @p rev, built in @p root/@p side (a worktree of @p repo) and
+    @p root/@p side-build (configured once, then incremental). WORKTREE builds the repo's
+    own checkout."""
+    root = Path(root).resolve()
+    root.mkdir(parents=True, exist_ok=True)
+    if rev == WORKTREE:
+        src = Path(repo).resolve()
+    else:
+        src = root / side
+        if not (src / ".git").exists():
+            git(repo, "worktree", "add", "--detach", str(src), rev)
+        else:
+            git(str(src), "checkout", "-q", "--detach", rev)
+    build = root / f"{side}-build"
+    if not (build / "build.ninja").exists():
+        cmd = [
+            "cmake",
+            "-G",
+            "Ninja",
+            "-S",
+            str(src / "llvm"),
+            "-B",
+            str(build),
+            "-DCMAKE_BUILD_TYPE=Release",
+            "-DLLVM_ENABLE_ASSERTIONS=ON",
+            "-DLLVM_TARGETS_TO_BUILD=AMDGPU",
+            "-DLLVM_ENABLE_PROJECTS=",
+        ]
+        if shutil.which("ccache"):
+            cmd.append("-DLLVM_CCACHE_BUILD=ON")
+        res = subprocess.run(cmd, capture_output=True, text=True)
+        if res.returncode:
+            raise RuntimeError(f"cmake for {side} failed: {res.stderr[-500:]}")
+    print(f"building llc ({side}, {rev[:12]}) in {build}", flush=True)
+    res = subprocess.run(
+        ["ninja", "-C", str(build), f"-j{jobs}", "llc"], capture_output=True, text=True
+    )
+    if res.returncode:
+        raise RuntimeError(f"building llc ({side}) failed: {res.stdout[-800:]}")
+    return str(build / "bin" / "llc")
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(
         description=__doc__.split("\n\n")[0],
@@ -1568,9 +1724,43 @@ def main(argv=None):
     )
     ap.add_argument("--llc-after", help="llc built after the change (see --llc-before)")
     ap.add_argument(
+        "--build-llc",
+        metavar="DIR",
+        help="build llc at --base and --head in DIR (a worktree and an incremental build "
+        "per side, reused across runs) and use them as --llc-before/--llc-after",
+    )
+    ap.add_argument(
+        "--all-tests",
+        action="store_true",
+        help="with two llc builds: also compare every unchanged test matching --tests "
+        "(code a change moved in tests whose CHECK lines were not updated)",
+    )
+    ap.add_argument(
+        "--corpus",
+        nargs="+",
+        default=[],
+        metavar="PATH",
+        help="with two llc builds: also compare these .ll files or directories (real "
+        "kernels; no RUN lines needed), compiled for --corpus-mcpu",
+    )
+    ap.add_argument(
+        "--corpus-mcpu",
+        default="gfx950",
+        help="comma-separated CPUs the corpus is compiled for (default %(default)s)",
+    )
+    ap.add_argument(
+        "--job-timeout",
+        type=float,
+        default=300,
+        help="seconds one function's test may take before it is reported INCONCLUSIVE "
+        "(default %(default)s; 0: unlimited)",
+    )
+    ap.add_argument(
         "--list", action="store_true", help="only list what would be compared"
     )
     a = ap.parse_args(argv)
+    global JOB_TIMEOUT
+    JOB_TIMEOUT = a.job_timeout if a.job_timeout > 0 else None
     try:
         if a.pr:
             base, head = resolve_pr(a.repo, a.pr, a.remote)
@@ -1595,8 +1785,29 @@ def main(argv=None):
         )
         if bool(a.llc_before) != bool(a.llc_after):
             ap.error("give both --llc-before and --llc-after")
+        if a.build_llc and a.llc_before:
+            ap.error("give --build-llc or --llc-before/--llc-after, not both")
+        if a.build_llc:
+            a.llc_before = build_llc(a.repo, base, a.build_llc, "before", a.jobs)
+            a.llc_after = build_llc(a.repo, head, a.build_llc, "after", a.jobs)
         llc_pair = (a.llc_before, a.llc_after) if a.llc_before else None
-        jobs, skipped, stats = collect(a.repo, base, head, a.tests, targets, llc_pair)
+        if (a.all_tests or a.corpus) and not llc_pair:
+            ap.error(
+                "--all-tests and --corpus need two llc builds (--llc-before/--llc-after "
+                "or --build-llc)"
+            )
+        jobs, skipped, stats = collect(
+            a.repo,
+            base,
+            head,
+            a.tests,
+            targets,
+            llc_pair,
+            all_tests=a.all_tests,
+            corpus=a.corpus,
+            corpus_mcpus=[c for c in a.corpus_mcpu.split(",") if c],
+            jobs_n=a.jobs,
+        )
     except RuntimeError as e:
         print(f"error: {e}", file=sys.stderr)
         return 3
@@ -1610,7 +1821,14 @@ def main(argv=None):
         "tool": a.tool,
     }
     print(
-        f"{base[:12]}..{head[:12]}: {stats['changed_test_files']} changed AMDGPU tests, "
+        f"{base[:12]}..{head[:12]}: {stats['changed_test_files']} changed AMDGPU tests"
+        + (
+            f" (+{stats.get('unchanged_tests', 0)} unchanged tests, "
+            f"{stats.get('corpus_files', 0)} corpus files with both llc builds)"
+            if llc_pair and (a.all_tests or a.corpus)
+            else ""
+        )
+        + ", "
         f"{stats['autogenerated']} autogenerated, {stats['with_target_run']} with a tested "
         f"RUN line; {len(jobs)} changed functions to compare "
         f"({stats['comment_only']} more changed only in comments), "

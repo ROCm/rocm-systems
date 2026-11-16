@@ -532,6 +532,59 @@ def main():
                 f"nothing to compare: exit {code}, status {none.get('status')}, rows {list(rows)}"
             )
 
+        # Two llc builds (wrappers around one llc; the "after" one commutes v_add_u32
+        # operands, an equivalent change): an unchanged hand-written test (--all-tests)
+        # and a corpus file without RUN lines (--corpus) are compiled and compared.
+        llc = Path(a.llvm_bin) / "llc" if a.llvm_bin else None
+        if llc and llc.exists():
+            before, after = Path(tmp) / "llc_before", Path(tmp) / "llc_after"
+            before.write_text(f'#!/bin/sh\nexec "{llc}" "$@"\n')
+            after.write_text(
+                f'#!/bin/sh\n"{llc}" "$@" | '
+                "sed -E 's/(v_add_u32_e32 v[0-9]+), (v[0-9]+), (v[0-9]+)/\\1, \\3, \\2/'\n"
+            )
+            before.chmod(0o755)
+            after.chmod(0o755)
+            add = "define i32 @{0}(i32 %a, i32 %b) {{\n  %c = add i32 %a, %b\n  ret i32 %c\n}}\n"
+            (test.parent / "unchanged_add.ll").write_text(
+                "; RUN: llc -mtriple=amdgcn -mcpu=gfx950 < %s | FileCheck %s\n; CHECK: u_add\n"
+                + add.format("u_add")
+            )
+            git(repo, "add", ".")
+            git(repo, "commit", "-q", "-m", "an unchanged test")
+            (repo / "llvm" / "README.txt").write_text("not a test\n")
+            git(repo, "add", ".")
+            git(repo, "commit", "-q", "-m", "a change outside the tests")
+            corpus = Path(tmp) / "corpus"
+            corpus.mkdir()
+            (corpus / "kernel.ll").write_text(add.format("c_add"))
+            code, rows, _ = run(
+                a.driver,
+                repo,
+                Path(tmp) / "out_llc",
+                a.tool,
+                a.llvm_bin,
+                "--llc-before",
+                str(before),
+                "--llc-after",
+                str(after),
+                "--all-tests",
+                "--tests",
+                "*unchanged_add.ll",
+                "--corpus",
+                str(corpus),
+                "--corpus-mcpu",
+                "gfx950",
+            )
+            for fn in ("u_add", "c_add"):
+                got = drv.verdict(rows[fn]) if fn in rows else "missing"
+                if got != "pass":
+                    failures.append(
+                        f"{fn} (two llc builds): verdict {got}, expected pass"
+                    )
+            if code != 0:
+                failures.append(f"two llc builds: exit {code}, expected 0")
+
     if failures:
         print("FAILED:\n  " + "\n  ".join(failures))
         print(log[-3000:])

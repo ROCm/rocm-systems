@@ -54,6 +54,12 @@ Json MachineState::to_json() const {
     for (const auto &[addr, byte] : mem_written)
       w.set(hex64(addr), hex32(byte));
     m.set("written", std::move(w));
+    if (!mem_dead.empty()) {
+      Json dead = Json::array();
+      for (uint64_t addr : mem_dead)
+        dead.push(hex64(addr));
+      m.set("dead", std::move(dead));
+    }
     j.set("memory", std::move(m));
   }
   if (exit_pc)
@@ -164,6 +170,15 @@ std::optional<MachineState> MachineState::from_json(const Json &j, std::string &
       s.mem_written.emplace_back(*a, static_cast<uint8_t>(*b));
     }
     std::sort(s.mem_written.begin(), s.mem_written.end());
+    for (const Json &d : mem["dead"].items()) {
+      auto a = json_u64(d);
+      if (!a) {
+        error = "bad dead memory address in state";
+        return std::nullopt;
+      }
+      s.mem_dead.push_back(*a);
+    }
+    std::sort(s.mem_dead.begin(), s.mem_dead.end());
     for (const auto &[addr, value] : mem["initial"].members()) {
       auto a = json_u64(Json(addr));
       auto v = json_u64(value);

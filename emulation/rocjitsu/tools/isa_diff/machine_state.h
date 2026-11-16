@@ -60,6 +60,10 @@ struct FpUnit {
   auto operator<=>(const FpUnit &) const = default;
 };
 
+/// LDS bytes in memory addresses (mem_written, mem_init, mem_dead): this bit plus the byte
+/// offset in the wave's LDS window, so LDS and global memory never alias.
+inline constexpr uint64_t kLdsTag = uint64_t{1} << 62;
+
 struct MachineState {
   std::array<uint32_t, kNumLocs> loc{}; ///< SCC is 0/1.
   Frame frame;
@@ -73,6 +77,10 @@ struct MachineState {
   /// Initial content of every 32-bit word the case read (word index, value), sorted:
   /// the memory input shared by both sides, recorded so bundles replay exactly.
   std::vector<std::pair<uint64_t, uint32_t>> mem_init;
+  /// Stored bytes that are dead where the run left (sorted): a callable function's own
+  /// stack frame at its return, a kernel's private memory and LDS at s_endpgm
+  /// (RegionContract::memory_dead_at_exit). They are not compared.
+  std::vector<uint64_t> mem_dead;
   /// Inline asm: the seed of the values `def` blocks produce (0: the region has none;
   /// equal on both sides, so a matched block defines the same values), and what `use`
   /// blocks observed during the run, in execution order.

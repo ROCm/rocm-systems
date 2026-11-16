@@ -527,6 +527,33 @@ Json test_case(const CaseData &data, const TestOptions &options, const std::stri
       }
     }
   }
+  // A region whose entry relation relies on an upstream region's R_out (depends_on) has
+  // no justified entry relation when that region itself shows an unresolved mismatch:
+  // its mismatch is a witness, not a verdict (transitively).
+  for (bool changed = true; changed;) {
+    changed = false;
+    for (auto &r : results) {
+      if (r.test_status != TestStatus::LocalMismatch || !r.resolved_by.empty() || r.compensable)
+        continue;
+      for (const auto &region : data.regions) {
+        if (region.id != r.region_id)
+          continue;
+        for (const auto &up : region.contract.depends_on)
+          for (const auto &u : results)
+            if (u.region_id == up && u.test_status == TestStatus::LocalMismatch &&
+                u.resolved_by.empty() && !r.compensable) {
+              r.compensable = true;
+              changed = true;
+              compensable.push_back({"context",
+                                     "local mismatch of " + r.region_id +
+                                         " relies on the R_out of " + up +
+                                         ", which itself differs: its entry relation is not "
+                                         "justified",
+                                     r.region_id});
+            }
+      }
+    }
+  }
   // Handoff 5.3: diagnostic regions were requested explicitly at analysis time. They run
   // after the verdict regions and are reported apart from them.
   Json diagnostics = Json::array();
@@ -573,9 +600,12 @@ Json test_case(const CaseData &data, const TestOptions &options, const std::stri
       BaselinePolicy fpolicy(topt.seed);
       const RegionResult fr = test_region(f, topt, fpolicy);
       const bool established = fr.contract_status == ContractStatus::Established;
+      // A pass needs enough valid cases (loops past the step limit and inputs that fault
+      // on both sides are excluded); a mismatch needs one witness.
+      constexpr uint64_t kMinValid = 100;
       const bool pass = fr.test_status == TestStatus::NoMismatchFound && established &&
                         fr.coverage_scope == CoverageScope::CompleteForDeclaredScope &&
-                        blocking.empty();
+                        blocking.empty() && fr.valid_pairs >= kMinValid;
       const bool mismatch = fr.test_status == TestStatus::LocalMismatch && established;
       whole.set("result", fr.to_json());
       whole.set("decides", pass || mismatch);
@@ -592,11 +622,14 @@ Json test_case(const CaseData &data, const TestOptions &options, const std::stri
         whole.set("reason", "the whole function differs at its return, from an entry state "
                             "both sides receive alike");
       } else {
-        whole.set("reason", !blocking.empty()
-                                ? "the whole function cannot decide: " + blocking
-                                : std::string("the whole function is ") +
-                                      test_status_name(fr.test_status) + " (contract " +
-                                      contract_status_name(fr.contract_status) + ")");
+        whole.set("reason",
+                  !blocking.empty() ? "the whole function cannot decide: " + blocking
+                  : fr.test_status == TestStatus::NoMismatchFound && fr.valid_pairs < kMinValid
+                      ? "the whole function passes on only " + std::to_string(fr.valid_pairs) +
+                            " valid cases (fewer than " + std::to_string(kMinValid) +
+                            "): not decisive"
+                      : std::string("the whole function is ") + test_status_name(fr.test_status) +
+                            " (contract " + contract_status_name(fr.contract_status) + ")");
       }
       resolved_by_function = pass || mismatch;
       if (resolved_by_function)

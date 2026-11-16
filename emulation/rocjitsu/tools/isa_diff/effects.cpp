@@ -533,6 +533,18 @@ bool has_mnemonic_prefix(std::string_view mnemonic, std::string_view prefix) {
   return mnemonic.substr(0, prefix.size()) == prefix;
 }
 
+/// @p text names @p name as an operand token.
+bool text_names(std::string_view text, std::string_view name) {
+  for (size_t p = text.find(name); p != std::string_view::npos; p = text.find(name, p + 1)) {
+    const bool start = p == 0 || text[p - 1] == ' ' || text[p - 1] == ',' || text[p - 1] == '[';
+    const size_t e = p + name.size();
+    const bool end = e == text.size() || text[e] == ',' || text[e] == ' ' || text[e] == ']';
+    if (start && end)
+      return true;
+  }
+  return false;
+}
+
 } // namespace
 
 std::vector<SourceOperand> source_operands(const Instruction &inst, const Target &target) {
@@ -568,12 +580,74 @@ bool is_region_memory(std::string_view m) {
     return true;
   if (starts("s_wait_") && (m.ends_with("cnt") || has("cnt_")))
     return true; // s_wait_loadcnt, ..., s_wait_loadcnt_dscnt, s_wait_storecnt_dscnt
-  if (has("addtid") || has("block") || has("lds") || has("_tr"))
+  return region_memory_access(m).has_value();
+}
+
+std::optional<MemoryAccess> region_memory_access(std::string_view m) {
+  auto starts = [&](std::string_view p) { return m.substr(0, p.size()) == p; };
+  auto has = [&](std::string_view p) { return m.find(p) != std::string_view::npos; };
+  const MemoryAccess load{true, false, false}, store{false, true, false}, atomic{true, true, true};
+  // LDS-DMA, transpose, block, add-tid and typed (format) forms stay outside.
+  if (has("addtid") || has("block") || has("lds") || has("_tr") || has("format"))
+    return std::nullopt;
+  if (starts("s_load_dword") || starts("s_load_b") || starts("s_load_u") || starts("s_load_i"))
+    return load;
+  for (std::string_view p : {"global_", "flat_", "scratch_", "buffer_"}) {
+    if (!starts(p))
+      continue;
+    const std::string_view rest = m.substr(p.size());
+    if (rest.substr(0, 5) == "load_")
+      return load;
+    if (rest.substr(0, 6) == "store_")
+      return store;
+    if (rest.substr(0, 7) == "atomic_" && p != "scratch_")
+      return atomic;
+    return std::nullopt;
+  }
+  if (!starts("ds_") || has("src2") || has("gws") || has("ordered") || has("swizzle") ||
+      has("permute") || has("append") || has("consume") || has("bvh") || has("nop") ||
+      has("condxchg") || has("barrier"))
+    return std::nullopt;
+  if (starts("ds_read") || starts("ds_load"))
+    return load;
+  if (starts("ds_write_") || starts("ds_write2") || starts("ds_store"))
+    return store;
+  for (std::string_view p :
+       {"ds_add_", "ds_sub_", "ds_rsub_", "ds_inc_", "ds_dec_", "ds_min_", "ds_max_", "ds_and_",
+        "ds_or_", "ds_xor_", "ds_mskor_", "ds_wrxchg", "ds_cmpst_", "ds_cmpstore_", "ds_pk_add_"})
+    if (starts(p))
+      return atomic;
+  return std::nullopt;
+}
+
+bool is_frame_access(std::string_view m, std::string_view text) {
+  const bool buffer = m.substr(0, 7) == "buffer_", scratch = m.substr(0, 8) == "scratch_";
+  if (!buffer && !scratch)
     return false;
-  if (starts("global_load_"))
-    return true;
-  return starts("global_store_") || starts("s_load_dword") || starts("s_load_b") ||
-         starts("s_load_u") || starts("s_load_i");
+  bool sgpr = false, vaddr = false;
+  unsigned vgprs = 0;
+  for (size_t p = text.find(' '); p != std::string_view::npos && p < text.size();) {
+    size_t q = text.find_first_of(" ,", p + 1);
+    if (q == std::string_view::npos)
+      q = text.size();
+    const std::string_view tok = text.substr(p + 1, q - p - 1);
+    vaddr = vaddr || tok == "offen" || tok == "idxen";
+    sgpr = sgpr || (tok.size() > 1 && tok[0] == 's' && tok[1] >= '0' && tok[1] <= '9');
+    vgprs += tok.size() > 1 && tok[0] == 'v' && (tok[1] == '[' || (tok[1] >= '0' && tok[1] <= '9'));
+    p = q;
+  }
+  // MUBUF: no offen/idxen means no VGPR address (LLVM prints `off`). Scratch: an SGPR
+  // address and a single VGPR operand, the data or destination (LLVM prints `off` for the
+  // missing VGPR address).
+  return buffer ? !vaddr : sgpr && vgprs == 1;
+}
+
+bool may_read_private(std::string_view m) {
+  for (std::string_view p :
+       {"buffer_load", "buffer_atomic", "scratch_load", "flat_load", "flat_atomic"})
+    if (m.substr(0, p.size()) == p)
+      return true;
+  return false;
 }
 
 bool is_region_branch(std::string_view m) {
@@ -611,6 +685,7 @@ Effects classify(const Instruction &inst, const Target &target) {
 
   std::string first_outside;
   const bool memory_inst = is_region_memory(mnemonic);
+  const std::string inst_text = memory_inst ? inst.disassemble() : std::string();
   bool unknown = false;
   std::string unknown_what;
   auto absorb = [&](const Operand &op, bool is_dst) {
@@ -644,6 +719,11 @@ Effects classify(const Instruction &inst, const Target &target) {
       // The memory pseudo-operand of a supported memory instruction is the memory the
       // region runner models (initial image in, stored bytes out).
       if (memory_inst && op.is_fieldless())
+        break;
+      // A disabled address field (MUBUF without offen/idxen, scratch without a VGPR
+      // address) decodes as a register-less operand the disassembly does not show.
+      if (memory_inst && cls.what.ends_with("without a register") &&
+          !text_names(inst_text, op.name()))
         break;
       if (first_outside.empty())
         first_outside = "operand outside the P0 state: " + cls.what;
@@ -753,14 +833,17 @@ Effects classify(const Instruction &inst, const Target &target) {
   const bool valu_ok = is_region_valu(mnemonic, flags);
   const bool mem_ok = is_region_memory(mnemonic);
   if (mem_ok) {
-    fx.mem_read = mnemonic.substr(0, 12) == "global_load_" || mnemonic.substr(0, 6) == "s_load";
-    fx.mem_write = mnemonic.substr(0, 13) == "global_store_";
-    if ((flags & VMEM) != 0) // vector memory moves the lanes in EXEC
+    const auto access = region_memory_access(mnemonic);
+    fx.mem_read = access && access->reads;
+    fx.mem_write = access && access->writes;
+    // Vector memory and LDS move the lanes in EXEC.
+    if ((flags & (VMEM | LDS)) != 0 || mnemonic.substr(0, 3) == "ds_")
       add_pair(fx.reads, kLocExecLo, kLocExecHi, static_cast<int>(target.wave_size));
   }
   if (!salu_ok && !valu_ok && !mem_ok) {
     fx.reject_reason =
-        "opcode not in the region allowlist (SALU allowlist, plain VALU, global/scalar memory): " +
+        "opcode not in the region allowlist (SALU allowlist, plain VALU, memory: global, "
+        "flat, scratch, buffer, LDS, scalar loads, atomics): " +
         std::string(mnemonic);
   } else if (fx.unknown_effect) {
     fx.reject_reason = "unmodelled effect: " + unknown_what;

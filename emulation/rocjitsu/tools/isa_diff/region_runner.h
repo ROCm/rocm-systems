@@ -117,6 +117,12 @@ public:
   void load(const MachineState &state);
   /// Share the initial memory image with the other side's runner (one per case).
   void set_memory_image(std::shared_ptr<MemoryImage> image) { image_ = std::move(image); }
+  /// Stored bytes captured as dead at the exit (RegionContract::memory_dead_at_exit).
+  void set_memory_dead_at_exit(std::string kind) { dead_kind_ = std::move(kind); }
+  /// LDS window of the wave (one workgroup's allocation at offset 0).
+  static constexpr uint64_t kLdsWindow = 64 * 1024;
+  /// Scratch base (FLAT_SCRATCH): canonical, far above the code and pointer inputs.
+  static constexpr uint64_t kScratchBase = 0x0000'0080'0000'0000ull;
   RunOutcome run(size_t budget, std::vector<TraceStep> *trace = nullptr);
   [[nodiscard]] MachineState capture() const;
 
@@ -178,6 +184,9 @@ private:
   bool has_memory_ = false;
   std::vector<bool> is_mem_;
   MemoryModel *mem_ = nullptr;
+  std::string dead_kind_;
+  std::vector<bool> frame_access_; ///< Per instruction: a stack-frame private access.
+  void configure_wave();
   std::shared_ptr<void> plugin_group_;
   std::shared_ptr<MemoryImage> image_ = std::make_shared<MemoryImage>();
   /// Per instruction: dwords of a scalar load that later serve as a memory base

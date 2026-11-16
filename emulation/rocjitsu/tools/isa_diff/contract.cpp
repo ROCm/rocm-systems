@@ -159,6 +159,12 @@ Json RegionContract::to_json() const {
         em.set("v" + std::to_string(r), hex32(mask));
       j.set("vgpr_exit_masks", std::move(em));
     }
+    if (!vinput_masks.empty()) {
+      Json im = Json::object();
+      for (const auto &[r, mask] : vinput_masks)
+        im.set("v" + std::to_string(r), hex32(mask));
+      j.set("vgpr_input_masks", std::move(im));
+    }
   }
   if (exec_nonzero)
     j.set("exec_nonzero", true);
@@ -219,6 +225,8 @@ Json RegionContract::to_json() const {
   if (!exit_map.empty())
     j.set("exit_map", format_register_map(exit_map));
   j.set("pending_effects", pending_effects);
+  if (!memory_dead_at_exit.empty())
+    j.set("memory_dead_at_exit", memory_dead_at_exit);
   j.set("composition", composition);
   Json frame = Json::array();
   for (const auto &f : frame_field_names())
@@ -312,6 +320,15 @@ std::optional<RegionContract> RegionContract::from_json(const Json &j, std::stri
         return std::nullopt;
       }
       c.vexit_masks.emplace_back(vgpr_extent(*r) - 1, static_cast<uint32_t>(*v));
+    }
+    for (const auto &[name, mask] : j["vgpr_input_masks"].members()) {
+      auto v = json_u64(mask);
+      const auto r = parse_vgprs(name);
+      if (!v || !r || r->count() != 1 || vgpr_extent(*r) > c.vgpr_count) {
+        error = "bad vgpr_input_masks entry '" + name + "'";
+        return std::nullopt;
+      }
+      c.vinput_masks.emplace_back(vgpr_extent(*r) - 1, static_cast<uint32_t>(*v));
     }
   }
   c.exec_nonzero = j["exec_nonzero"].as_bool();
@@ -416,6 +433,7 @@ std::optional<RegionContract> RegionContract::from_json(const Json &j, std::stri
     (std::string_view(key) == "entry_map" ? c.entry_map : c.exit_map) = std::move(*m);
   }
   c.pending_effects = j.has("pending_effects") ? j["pending_effects"].as_string() : "NONE";
+  c.memory_dead_at_exit = j["memory_dead_at_exit"].as_string();
   c.composition = j.has("composition") ? j["composition"].as_string() : "NOT_CHECKED";
   auto status = parse_contract_status(j["status"].as_string());
   if (!status) {

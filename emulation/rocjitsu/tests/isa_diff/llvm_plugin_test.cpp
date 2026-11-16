@@ -1209,6 +1209,41 @@ TEST(IsaDiffWholeFunction, RenamingAcrossBlocksIsSettledByTheWholeFunction) {
   std::filesystem::remove_all(dir);
 }
 
+TEST(IsaDiffWholeFunction, MismatchesRelyingOnADifferingUpstreamAreWitnesses) {
+  const std::string dir = temp_dir("wholefn_dep");
+  // Old copies (a, b) into (v6, v7), new into (v7, v6); one is incremented on a branch
+  // and the final subtraction is swapped too: equivalent. The last region's mismatch
+  // relies on the swapped registers of the first: a witness, not a verdict (memmove
+  // functions of LLVM's memmove-var-size.ll looked like this).
+  auto body = [](bool swapped) {
+    const std::string x = swapped ? "v7" : "v6", y = swapped ? "v6" : "v7";
+    return fn_listing({"v_mov_b32_e32 " + x + ", v0", "v_mov_b32_e32 " + y + ", v1",
+                       "s_cmp_eq_u32 s4, 0", "s_cbranch_scc1 .LBB0_2",
+                       "v_add_u32_e32 " + x + ", 1, " + x,
+                       ".LBB0_2:", "v_sub_u32_e32 v0, " + x + ", " + y, "v_mov_b32_e32 v4, 0",
+                       "global_store_dword v4, v0, s[2:3]", "s_waitcnt vmcnt(0)"});
+  };
+  TestOptions opt;
+  opt.cases = 500;
+  PlanOptions regions_only;
+  regions_only.whole_function = false;
+  auto data = analyze_pair(dir, body(false), body(true), 2, regions_only);
+  ASSERT_TRUE(data);
+  Json report = test_case(*data, opt, "", nullptr);
+  EXPECT_EQ(report["overall"]["test_status"].as_string(), "INCONCLUSIVE");
+  bool relies = false;
+  for (const Json &u : report["unresolved"].items())
+    relies = relies || u["what"].as_string().find("relies on the R_out") != std::string::npos ||
+             u["what"].as_string().find("may be compensated") != std::string::npos;
+  EXPECT_TRUE(relies);
+  data = analyze_pair(dir, body(false), body(true), 2);
+  ASSERT_TRUE(data);
+  report = test_case(*data, opt, "", nullptr);
+  EXPECT_EQ(report["overall"]["test_status"].as_string(), "NO_MISMATCH_FOUND");
+  EXPECT_EQ(report["overall"]["resolved_by"].as_string(), "whole_function");
+  std::filesystem::remove_all(dir);
+}
+
 TEST(IsaDiffWholeFunction, PassingRegionsDoNotRunTheWholeFunction) {
   const std::string dir = temp_dir("wholefn_pass");
   auto data = analyze_pair(dir, store_fn({"v_add_u32_e32 v0, v0, v1"}),
@@ -1221,6 +1256,86 @@ TEST(IsaDiffWholeFunction, PassingRegionsDoNotRunTheWholeFunction) {
   EXPECT_EQ(report["overall"]["test_status"].as_string(), "NO_MISMATCH_FOUND");
   EXPECT_FALSE(report.has("whole_function"));
   EXPECT_FALSE(report["overall"].has("resolved_by"));
+  std::filesystem::remove_all(dir);
+}
+
+/// A spill to stack slot @p store and a reload from @p load around a dead overwrite.
+std::vector<std::string> spill_body(bool scratch, int store, int load) {
+  const std::string st =
+      scratch ? "scratch_store_dword off, v1, s32 offset:" + std::to_string(store)
+              : "buffer_store_dword v1, off, s[0:3], s32 offset:" + std::to_string(store);
+  const std::string ld =
+      scratch ? "scratch_load_dword v3, off, s32 offset:" + std::to_string(load)
+              : "buffer_load_dword v3, off, s[0:3], s32 offset:" + std::to_string(load);
+  return {"v_add_u32_e32 v1, v0, v2", st, "v_mov_b32_e32 v1, 0",
+          "s_waitcnt vmcnt(0)",       ld, "s_waitcnt vmcnt(0)",
+          "v_add_u32_e32 v0, v3, v1"};
+}
+
+TEST(IsaDiffMemory, SpillSlotsAreDeadWhereNothingElseReadsTheStack) {
+  const std::string dir = temp_dir("spills");
+  for (const auto &[cpu, scratch] : {std::pair{"gfx908", false}, {"gfx942", true}}) {
+    SCOPED_TRACE(cpu);
+    PairOptions o;
+    o.mcpu = cpu;
+    o.return_vgprs = 1;
+    o.entry_vgprs = 3;
+    const std::string base = target_fn(cpu, spill_body(scratch, 12, 12));
+    // Another stack slot, stored and reloaded inside the region: the frame is dead after
+    // it, so the slots are not compared, only the reloaded value.
+    EXPECT_EQ(verdict_of(dir, "f", base, target_fn(cpu, spill_body(scratch, 16, 16)), o),
+              "NO_MISMATCH_FOUND/ESTABLISHED");
+    // Reloading another slot than the one stored: the value differs.
+    EXPECT_EQ(verdict_of(dir, "f", base, target_fn(cpu, spill_body(scratch, 16, 12)), o),
+              "LOCAL_MISMATCH/ESTABLISHED");
+  }
+  std::filesystem::remove_all(dir);
+}
+
+TEST(IsaDiffMemory, LdsAccessesRunInTheWindow) {
+  const std::string dir = temp_dir("lds");
+  PairOptions o;
+  o.return_vgprs = 1;
+  o.entry_vgprs = 2;
+  const std::string old_s =
+      target_fn("gfx950", {"ds_write_b32 v0, v1 offset:12", "s_waitcnt lgkmcnt(0)",
+                           "ds_read_b32 v0, v0 offset:12", "s_waitcnt lgkmcnt(0)"});
+  // The offset folded into the address: equivalent.
+  const std::string folded =
+      target_fn("gfx950", {"v_add_u32_e32 v2, 12, v0", "ds_write_b32 v2, v1",
+                           "s_waitcnt lgkmcnt(0)", "ds_read_b32 v0, v2", "s_waitcnt lgkmcnt(0)"});
+  auto data = analyze_pair(dir, old_s, folded, 2);
+  ASSERT_TRUE(data);
+  ASSERT_EQ(data->regions.size(), 1u);
+  ASSERT_EQ(data->regions[0].status, RegionStatus::Ready) << data->regions[0].reason;
+  // The address input lies in the LDS window.
+  ASSERT_EQ(data->regions[0].contract.vinput_masks.size(), 1u);
+  EXPECT_EQ(data->regions[0].contract.vinput_masks[0].first, 0u);
+  EXPECT_EQ(verdict_of(dir, "f", old_s, folded, o), "NO_MISMATCH_FOUND/ESTABLISHED");
+  // A wrong offset stores to another LDS word.
+  const std::string wrong = target_fn(
+      "gfx950", {"v_add_u32_e32 v2, 16, v0", "ds_write_b32 v2, v1", "s_waitcnt lgkmcnt(0)",
+                 "ds_read_b32 v0, v0 offset:12", "s_waitcnt lgkmcnt(0)"});
+  EXPECT_EQ(verdict_of(dir, "f", old_s, wrong, o), "LOCAL_MISMATCH/ESTABLISHED");
+  std::filesystem::remove_all(dir);
+}
+
+TEST(IsaDiffMemory, AtomicsReadAndWriteMemory) {
+  const std::string dir = temp_dir("atomics");
+  PairOptions o;
+  o.return_vgprs = 1;
+  o.entry_vgprs = 2;
+  auto fn = [](const std::string &op) {
+    return target_fn("gfx950", {"v_mov_b32_e32 v4, 0", op, "s_waitcnt vmcnt(0)"});
+  };
+  // add x == sub -x, with and without the returned old value.
+  const std::string add = fn("global_atomic_add v0, v4, v1, s[4:5] sc0");
+  const std::string sub =
+      target_fn("gfx950", {"v_mov_b32_e32 v4, 0", "v_sub_u32_e32 v2, 0, v1",
+                           "global_atomic_sub v0, v4, v2, s[4:5] sc0", "s_waitcnt vmcnt(0)"});
+  EXPECT_EQ(verdict_of(dir, "f", add, sub, o), "NO_MISMATCH_FOUND/ESTABLISHED");
+  EXPECT_EQ(verdict_of(dir, "f", add, fn("global_atomic_sub v0, v4, v1, s[4:5] sc0"), o),
+            "LOCAL_MISMATCH/ESTABLISHED");
   std::filesystem::remove_all(dir);
 }
 

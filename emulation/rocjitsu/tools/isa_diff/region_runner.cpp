@@ -129,10 +129,13 @@ std::vector<std::pair<uint64_t, uint32_t>> MemoryImage::snapshot() const {
 
 /// Seeds load bytes from the initial memory content before the pipeline reads them, and
 /// records the bytes stores write. Observations fire after routing, before the access.
+/// Global, buffer, scratch and flat accesses go to GpuMemory; LDS accesses (route LOCAL)
+/// to the CU's LDS, whose bytes appear as kLdsTag | offset. Atomics read and write.
 class RegionRunner::MemoryModel final : public ExecutionPlugin {
 public:
-  MemoryModel(amdgpu::GpuMemory *mem, uint64_t code_lo, uint64_t code_hi)
-      : ExecutionPlugin("rj_isa_diff_memory"), mem_(mem), code_lo_(code_lo), code_hi_(code_hi) {}
+  MemoryModel(amdgpu::GpuMemory *mem, amdgpu::Lds *lds, uint64_t code_lo, uint64_t code_hi)
+      : ExecutionPlugin("rj_isa_diff_memory"), mem_(mem), lds_(lds), code_lo_(code_lo),
+        code_hi_(code_hi) {}
   bool observes_before_execute_instruction() const override { return false; }
   bool observes_after_execute_instruction() const override { return false; }
   bool observes_async_instruction_issued() const override { return false; }
@@ -143,41 +146,90 @@ public:
   bool observes_sgpr_reads() const override { return false; }
   bool observes_memory_routing() const override { return true; }
 
-  void set_access(MemoryImage *image, uint32_t pointer_lo, uint32_t pointer_hi) {
+  void set_access(MemoryImage *image, uint32_t pointer_lo, uint32_t pointer_hi, bool frame) {
     image_ = image;
     pointer_lo_ = pointer_lo;
     pointer_hi_ = pointer_hi;
+    frame_ = frame;
   }
 
   void onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessObservation &a) override {
-    if (a.atomic_op != amdgpu::AtomicOp::NONE || !a.secondary_addresses.empty()) {
+    if (a.lds_destination || !a.image_sample_footprints.empty()) {
       unsupported_ = true;
       return;
     }
-    const uint64_t bytes = uint64_t{a.element_size_bytes} * a.elements_per_lane;
-    for (size_t lane = 0; lane < a.addresses.size() && lane < 64; ++lane) {
-      if (!(a.request_lane_mask >> lane & 1u))
-        continue;
-      const uint64_t base = a.addresses[lane];
-      if (bytes && base + (bytes - 1) < base) {
-        // The access wraps around the 64-bit address space: hardware faults (the address
-        // is far outside any GPUVM range); there are no bytes to seed or record.
-        wraps_ = true;
-        continue;
-      }
-      if (a.is_load) {
-        for (uint64_t w = base >> 2; w <= (base + bytes - 1) >> 2; ++w) {
-          const uint64_t k = w - (base >> 2); // dword of this lane's access
-          const int half = k < 32 ? (pointer_lo_ >> k & 1u   ? 0
-                                     : pointer_hi_ >> k & 1u ? 1
-                                                             : -1)
-                                  : -1;
-          seed_word(w, half);
+    const bool local = a.route == amdgpu::MemoryRoute::LOCAL;
+    const bool atomic = a.atomic_op != amdgpu::AtomicOp::NONE;
+    const bool reads = a.is_load || atomic, writes = !a.is_load || atomic;
+    const bool priv = a.decoded_space == amdgpu::DecodedMemorySpace::SCRATCH ||
+                      a.scratch_lane_mask != 0 || a.scratch_element_stride_bytes != 0;
+    const uint64_t esz = a.element_size_bytes;
+    const uint64_t n = std::max<uint32_t>(a.elements_per_lane, 1);
+    const uint64_t stride = a.scratch_element_stride_bytes;
+    std::vector<uint64_t> bytes;
+    for (const auto *set : {&a.addresses, &a.secondary_addresses}) {
+      for (size_t lane = 0; lane < set->size() && lane < 64; ++lane) {
+        if (!(a.request_lane_mask >> lane & 1u))
+          continue;
+        const uint64_t base = (*set)[lane];
+        // Swizzled scratch and private buffers interleave lanes by dword: element bytes
+        // advance by the swizzle stride every 4 bytes.
+        const bool swizzled =
+            stride != 0 && (a.scratch_lane_mask == 0 || (a.scratch_lane_mask >> lane & 1u));
+        bytes.clear();
+        for (uint64_t e = 0; e < n; ++e) {
+          if (!a.element_lane_masks.empty() &&
+              (e >= a.element_lane_masks.size() || !(a.element_lane_masks[e] >> lane & 1u)))
+            continue; // out of the buffer's range: not accessed
+          for (uint64_t j = 0; j < esz; ++j) {
+            const uint64_t logical = e * esz + j;
+            const uint64_t addr =
+                swizzled ? base + (logical / 4) * stride + logical % 4 : base + logical;
+            if (addr < base && !swizzled) {
+              wraps_ = true; // past the end of the 64-bit address space
+              break;
+            }
+            bytes.push_back(addr);
+          }
         }
-      } else {
-        for (uint64_t b = base; b < base + bytes; ++b)
-          stored_.insert(b);
-        record_fp_units(lane, base, bytes);
+        if (local) {
+          for (uint64_t b : bytes)
+            if (b >= kLdsWindow)
+              lds_oob_ = true; // outside the wave's LDS window: undefined in LLVM
+          if (lds_oob_)
+            return;
+          if (reads)
+            for (uint64_t b : bytes)
+              seed_lds_word(b >> 2);
+          if (writes)
+            for (uint64_t b : bytes)
+              lds_stored_.insert(b);
+          if (writes && !atomic && !swizzled && !bytes.empty())
+            record_fp_units(lane, kLdsTag | bytes.front(), bytes.size());
+          continue;
+        }
+        if (reads)
+          for (uint64_t b : bytes) {
+            const uint64_t k = swizzled ? 32 : (b - base) >> 2; // dword of this lane's access
+            const int half = k < 32 ? (pointer_lo_ >> k & 1u   ? 0
+                                       : pointer_hi_ >> k & 1u ? 1
+                                                               : -1)
+                                    : -1;
+            seed_word(b >> 2, half);
+          }
+        if (writes) {
+          for (uint64_t b : bytes) {
+            stored_.insert(b);
+            if (priv)
+              private_.insert(b);
+            if (priv && frame_)
+              frame_bytes_.insert(b);
+          }
+          if (atomic || swizzled)
+            erase_fp_units(bytes);
+          else if (!bytes.empty())
+            record_fp_units(lane, bytes.front(), bytes.size());
+        }
       }
     }
   }
@@ -190,17 +242,28 @@ public:
       mem_->write_block(w << 2, std::span<const uint8_t>(kZero, 4));
     for (uint64_t b : stored_)
       mem_->write_block(b, std::span<const uint8_t>(kZero, 1));
+    for (uint64_t w : lds_seeded_)
+      for (unsigned k = 0; k < 4; ++k)
+        lds_->write8(static_cast<uint32_t>((w << 2) + k), 0);
+    for (uint64_t b : lds_stored_)
+      lds_->write8(static_cast<uint32_t>(b), 0);
     seeded_.clear();
     stored_.clear();
+    lds_seeded_.clear();
+    lds_stored_.clear();
+    private_.clear();
+    frame_bytes_.clear();
     fp_units_.clear();
     store_fp_ = false;
     seed_ = seed;
     unsupported_ = false;
     wraps_ = false;
+    lds_oob_ = false;
   }
   [[nodiscard]] uint64_t seed() const { return seed_; }
   [[nodiscard]] bool unsupported() const { return unsupported_; }
   [[nodiscard]] bool wraps() const { return wraps_; }
+  [[nodiscard]] bool lds_oob() const { return lds_oob_; }
   /// Floating-point provenance of the next store's data: per lane, the FpTag of each data
   /// dword; @p hi16 for a `_d16_hi` store. Off for every other access.
   void set_store_fp(bool on, bool hi16,
@@ -222,7 +285,21 @@ public:
       mem_->read_block(b, std::span<uint8_t>(&v, 1));
       out.emplace_back(b, v);
     }
+    for (uint64_t b : std::set<uint64_t>(lds_stored_.begin(), lds_stored_.end()))
+      out.emplace_back(kLdsTag | b, lds_->read8(static_cast<uint32_t>(b)));
     return out;
+  }
+  /// Stored bytes dead at the exit (RegionContract::memory_dead_at_exit), sorted.
+  [[nodiscard]] std::vector<uint64_t> dead(const std::string &kind) const {
+    std::set<uint64_t> out;
+    if (kind == "frame")
+      out.insert(frame_bytes_.begin(), frame_bytes_.end());
+    if (kind == "private") {
+      out.insert(private_.begin(), private_.end());
+      for (uint64_t b : lds_stored_)
+        out.insert(kLdsTag | b);
+    }
+    return {out.begin(), out.end()};
   }
   [[nodiscard]] bool touches_code() const {
     for (uint64_t b : stored_)
@@ -232,6 +309,12 @@ public:
   }
 
 private:
+  void erase_fp_units(const std::vector<uint64_t> &bytes) {
+    std::erase_if(fp_units_, [&](const FpUnit &u) {
+      return std::ranges::any_of(bytes,
+                                 [&](uint64_t b) { return b >= u.addr && b < u.addr + u.size; });
+    });
+  }
   /// A store replaces the floating-point units it overlaps, and adds those its data
   /// carries: f32 dwords, f64 dword pairs, and f16/bf16 halves.
   void record_fp_units(size_t lane, uint64_t base, uint64_t bytes) {
@@ -278,17 +361,36 @@ private:
       mem_->write_block(addr, std::span<const uint8_t>(&byte, 1));
     }
   }
+  /// LDS word @p w (offset / 4): seeded from the same image, as word (kLdsTag | 4w) / 4.
+  void seed_lds_word(uint64_t w) {
+    if (!lds_seeded_.insert(w).second)
+      return;
+    const uint64_t tagged = (kLdsTag >> 2) | w;
+    const uint32_t value = image_ ? image_->word(tagged, -1) : initial_memory_word(seed_, tagged);
+    for (unsigned k = 0; k < 4; ++k) {
+      const uint64_t addr = (w << 2) + k;
+      if (!lds_stored_.count(addr))
+        lds_->write8(static_cast<uint32_t>(addr), static_cast<uint8_t>(value >> (8 * k)));
+    }
+  }
 
   amdgpu::GpuMemory *mem_;
+  amdgpu::Lds *lds_;
   MemoryImage *image_ = nullptr;
   uint32_t pointer_lo_ = 0, pointer_hi_ = 0;
+  bool frame_ = false; ///< The current instruction addresses the stack frame (no VGPR address).
   uint64_t code_lo_, code_hi_;
   uint64_t seed_ = 0;
   bool unsupported_ = false;
   bool wraps_ = false;
-  std::unordered_set<uint64_t> seeded_; ///< 4-byte words seeded this run.
-  std::unordered_set<uint64_t> stored_; ///< Bytes stored this run.
-  std::vector<FpUnit> fp_units_;        ///< Stored floating-point values this run.
+  bool lds_oob_ = false;
+  std::unordered_set<uint64_t> seeded_;      ///< 4-byte words seeded this run.
+  std::unordered_set<uint64_t> stored_;      ///< Bytes stored this run.
+  std::unordered_set<uint64_t> lds_seeded_;  ///< LDS words (offset / 4) seeded this run.
+  std::unordered_set<uint64_t> lds_stored_;  ///< LDS byte offsets stored this run.
+  std::unordered_set<uint64_t> private_;     ///< Stored bytes of private (scratch) accesses.
+  std::unordered_set<uint64_t> frame_bytes_; ///< Private bytes stored in stack-frame form.
+  std::vector<FpUnit> fp_units_;             ///< Stored floating-point values this run.
   bool store_fp_ = false, store_hi16_ = false;
   std::array<std::array<uint8_t, 4>, kWaveLanes> store_tags_{};
 };
@@ -354,6 +456,7 @@ std::unique_ptr<RegionRunner> RegionRunner::create(const std::vector<RegionInst>
     const size_t sp = ri.text.find(' ');
     const std::string mnemonic = sp == std::string::npos ? ri.text : ri.text.substr(0, sp);
     r->is_mem_.push_back(is_region_memory(mnemonic));
+    r->frame_access_.push_back(is_frame_access(mnemonic, ri.text));
     r->has_memory_ = r->has_memory_ || r->is_mem_.back();
   }
   r->memory_ = std::make_unique<amdgpu::GpuMemory>(label + "_mem");
@@ -388,7 +491,7 @@ std::unique_ptr<RegionRunner> RegionRunner::create(const std::vector<RegionInst>
       hi = std::max<uint64_t>(hi, ri.pc + ri.words.size() * 4);
     }
     auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
-    auto *model = new MemoryModel(r->memory_.get(), lo, hi);
+    auto *model = new MemoryModel(r->memory_.get(), &r->cu_->lds(), lo, hi);
     if (!group->add(OwnedPlugin(model, PluginDeleter{&delete_execution_plugin}))) {
       error = "cannot attach the memory-model plugin";
       return nullptr;
@@ -404,6 +507,10 @@ std::unique_ptr<RegionRunner> RegionRunner::create(const std::vector<RegionInst>
     error = "cannot dispatch a " + target.label() + " wave";
     return nullptr;
   }
+  r->configure_wave();
+  // Private memory: scratch instructions need a scratch base (FLAT_SCRATCH); it is fixed
+  // in the frame like the rest of the dispatch state.
+  r->wave_->set_scratch_base(kScratchBase);
   r->decoder_ = Decoder::create(target.arch);
   if (!r->decoder_) {
     error = "no " + target.name + " decoder";
@@ -614,9 +721,19 @@ void RegionRunner::simulate_model_only_for_test(size_t index) {
     model_only_[index] = true;
 }
 
+void RegionRunner::configure_wave() {
+  // One workgroup's LDS window at offset 0 (the CU's LDS): DS addresses outside it are a
+  // fault of the case (MemoryModel::lds_oob). Scratch lanes are unbounded.
+  wave_->set_lds_base(0);
+  wave_->set_lds_size(static_cast<uint32_t>(kLdsWindow));
+  wave_->set_scratch_lane_size(0x7fffffffu);
+}
+
 void RegionRunner::load(const MachineState &s) {
-  if (wave_->state() != amdgpu::WfState::RUNNING) // a memory fault halted it: re-dispatch
+  if (wave_->state() != amdgpu::WfState::RUNNING) { // a memory fault halted it: re-dispatch
     wave_ = cu_->dispatch_wf(0, entry_pc_, target_.wave_sgprs(), vgpr_alloc_, target_.wave_size);
+    configure_wave();
+  }
   if (has_memory_)
     image_->begin(s.mem_seed, s.mem_init);
   amdgpu::Wavefront &wf = *wave_;
@@ -698,6 +815,7 @@ MachineState RegionRunner::capture() const {
     cu_->flush_all(); // stores may still sit in the write-back L2
     s.mem_seed = mem_->seed();
     s.mem_written = mem_->written();
+    s.mem_dead = mem_->dead(dead_kind_);
     s.mem_init = image_->snapshot();
   }
   s.asm_seed = asm_seed_;
@@ -1406,7 +1524,7 @@ RunOutcome RegionRunner::run(size_t budget, std::vector<TraceStep> *trace) {
       // The full issue path: fetch at the PC, execute, route, complete (functional).
       wf.pc = pcs_[i];
       if (mem_) {
-        mem_->set_access(image_.get(), pointer_lo_[i], pointer_hi_[i]);
+        mem_->set_access(image_.get(), pointer_lo_[i], pointer_hi_[i], frame_access_[i]);
         // A store's data carries its floating-point provenance into memory: the data
         // operand is the second VGPR operand (after the address).
         std::array<std::array<uint8_t, 4>, kWaveLanes> lane_tags{};
@@ -1453,8 +1571,15 @@ RunOutcome RegionRunner::run(size_t budget, std::vector<TraceStep> *trace) {
       if (mem_ && (mem_->unsupported() || mem_->touches_code())) {
         out.status = RunStatus::UnsupportedOperand;
         out.failed_index = i;
-        out.detail = mem_->unsupported() ? "atomic or dual-address memory access"
+        out.detail = mem_->unsupported() ? "LDS-DMA or image memory access"
                                          : "store into the region's own code";
+        return out;
+      }
+      if (mem_ && mem_->lds_oob()) {
+        out.status = RunStatus::MemoryFault;
+        out.failed_index = i;
+        out.detail = "LDS address outside the " + std::to_string(kLdsWindow / 1024) +
+                     " KiB window at '" + texts_[i] + "'";
         return out;
       }
       if (cu_->isa_diagnostic_count() != ub_before) {

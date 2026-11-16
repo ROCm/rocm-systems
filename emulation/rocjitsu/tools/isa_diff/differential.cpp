@@ -103,6 +103,9 @@ std::vector<uint64_t> differing_memory(const MachineState &a, const MachineState
     addrs.insert(x);
   for (const auto &[x, v] : mb)
     addrs.insert(x);
+  for (const auto *s : {&a, &b})
+    for (uint64_t x : s->mem_dead)
+      addrs.erase(x); // dead where the run left (memory_dead_at_exit)
   for (uint64_t x : addrs) {
     const uint8_t va = ma.count(x) ? ma[x] : initial_byte(a, x);
     const uint8_t vb = mb.count(x) ? mb[x] : initial_byte(b, x);
@@ -1065,7 +1068,10 @@ void build_initial_states(const RegionContract &contract, const Sample &sample, 
   for (unsigned r = 0; r < contract.vgpr_count; ++r)
     for (unsigned lane = 0; lane < kWaveLanes; ++lane) {
       if (contract.ventry_equal.test(r)) {
-        const uint32_t v = have_lanes ? sample.vvalue[size_t{r} * kWaveLanes + lane] : 0u;
+        uint32_t v = have_lanes ? sample.vvalue[size_t{r} * kWaveLanes + lane] : 0u;
+        for (const auto &[mr, mask] : contract.vinput_masks)
+          if (mr == r)
+            v &= mask;
         old_state.vset(r, lane, v);
         new_state.vset(r, lane, v);
       } else {
@@ -1370,6 +1376,8 @@ RegionResult test_region(const RegionPair &region, const TestOptions &options,
     new_runner->set_memory_image(image);
     old_runner->set_poison_filter(options.poison_filter);
     new_runner->set_poison_filter(options.poison_filter);
+    old_runner->set_memory_dead_at_exit(region.contract.memory_dead_at_exit);
+    new_runner->set_memory_dead_at_exit(region.contract.memory_dead_at_exit);
   }
   r.strict_nan = options.strict_nan;
   r.poison_filter = options.poison_filter;
@@ -1757,6 +1765,8 @@ ReplayOutcome replay_counterexample(const Json &bundle, std::string &error) {
   auto image = std::make_shared<MemoryImage>();
   old_runner->set_memory_image(image);
   new_runner->set_memory_image(image);
+  old_runner->set_memory_dead_at_exit(region->contract.memory_dead_at_exit);
+  new_runner->set_memory_dead_at_exit(region->contract.memory_dead_at_exit);
   const auto poison = parse_poison_kinds(bundle["poison_filter"].as_string()).value_or(0);
   old_runner->set_poison_filter(poison);
   new_runner->set_poison_filter(poison);
