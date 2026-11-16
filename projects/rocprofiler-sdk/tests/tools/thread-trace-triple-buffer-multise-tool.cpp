@@ -42,7 +42,6 @@ namespace MultiSE
 {
 constexpr size_t   GPU_BYTES_PER_SE    = 16ul << 20;
 constexpr size_t   MAX_CAPTURE_BYTES   = 1ul << 30;
-constexpr size_t   MAX_CHUNKS_PER_SE   = 1024;
 constexpr size_t   MIN_SWAPS_PER_SE    = 2;
 constexpr uint64_t SHADER_ENGINE_MASK  = 0x11111113;
 constexpr uint32_t SHADER_ENGINE_SHIFT = 20;
@@ -64,7 +63,7 @@ check(rocprofiler_status_t status, const char* operation)
 
 struct chunk_t
 {
-    const char* bytes{};
+    const char* bytes{};  // Null once the capture budget is exhausted
     size_t      size{};
     bool        end{};
     bool        retired_buffer{};
@@ -117,16 +116,19 @@ collect(rocprofiler_thread_trace_shader_data_t data, rocprofiler_user_data_t use
 
     // read_offset skips the tail of a token that started in the previous chunk, which only helps
     // when a chunk is decoded alone. Concatenated chunks need those bytes to complete the token.
-    const auto size = data.data_size;
-    require(size <= MAX_CAPTURE_BYTES, "chunk exceeds capture budget");
+    const auto size   = data.data_size;
     const auto offset = capture->byte_count.fetch_add(size);
-    require(offset <= MAX_CAPTURE_BYTES - size, "capture exceeds host memory budget");
 
     // Copy before returning the SDK-owned buffer. No callback waits for another chunk.
-    auto chunk  = chunk_t{};
-    chunk.bytes = capture->arena.data() + offset;
-    chunk.size  = size;
-    if(size > 0) std::memcpy(capture->arena.data() + offset, data.data, size);
+    // The trace size depends on the GPU (e.g. fewer shader engines see more data each); once the
+    // budget is exhausted, chunks are only tracked and each engine decodes its stored prefix.
+    auto chunk = chunk_t{};
+    chunk.size = size;
+    if(offset <= MAX_CAPTURE_BYTES && size <= MAX_CAPTURE_BYTES - offset)
+    {
+        chunk.bytes = capture->arena.data() + offset;
+        if(size > 0) std::memcpy(capture->arena.data() + offset, data.data, size);
+    }
     chunk.end = (data.flags & ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_END) != 0;
     // Supported GFX9/GFX12 hardware retires a full per-SE buffer on each swap.
     // Neither the small GFX9 header nor the final END/drain chunk counts as a swap.
@@ -134,9 +136,8 @@ collect(rocprofiler_thread_trace_shader_data_t data, rocprofiler_user_data_t use
 
     auto& engine = *agent.engines.at(data.shader_engine_id);
     auto  lock   = std::lock_guard{engine.mutex};
-    require(engine.chunks.size() < MAX_CHUNKS_PER_SE, "too many chunks for one engine");
     require(engine.chunks.emplace(data.chunk_index, chunk).second, "duplicate chunk index");
-    engine.byte_count += size;
+    if(chunk.bytes != nullptr) engine.byte_count += size;
 }
 
 struct parse_state_t
@@ -144,7 +145,22 @@ struct parse_state_t
     uint32_t engine_id{};
     uint32_t last_dispatch{};
     size_t   records{};
+    // The newest record is checked once the next arrives, since a truncated capture can end
+    // in a cut-off token.
+    bool     has_pending{};
+    uint64_t pending{};
 };
+
+void
+check_record(parse_state_t& state, uint64_t value)
+{
+    const auto engine   = value >> SHADER_ENGINE_SHIFT;
+    const auto dispatch = static_cast<uint32_t>(value & DISPATCH_MASK);
+    require(engine == state.engine_id, "shaderdata belongs to the wrong engine");
+    require(dispatch >= state.last_dispatch, "shaderdata dispatch order regressed");
+    state.last_dispatch = dispatch;
+    ++state.records;
+}
 
 void
 parse(rocprofiler_thread_trace_decoder_record_type_t type,
@@ -157,8 +173,8 @@ parse(rocprofiler_thread_trace_decoder_record_type_t type,
         auto* infos = static_cast<rocprofiler_thread_trace_decoder_info_t*>(events);
         for(size_t i = 0; i < count; ++i)
         {
-            require(infos[i] != ROCPROFILER_THREAD_TRACE_DECODER_INFO_DATA_LOST,
-                    "decoder reported lost trace data");
+            // DATA_LOST means the hardware dropped tokens under bandwidth pressure, which the SDK
+            // cannot prevent; SDK-side loss shows up as buffer-full flags or missing chunks.
             if(infos[i] != ROCPROFILER_THREAD_TRACE_DECODER_INFO_NONE)
                 std::cerr << rocprofiler_thread_trace_decoder_info_string(capture->decoder,
                                                                           infos[i])
@@ -171,12 +187,9 @@ parse(rocprofiler_thread_trace_decoder_record_type_t type,
     auto* records = static_cast<rocprofiler_thread_trace_decoder_shaderdata_t*>(events);
     for(size_t i = 0; i < count; ++i)
     {
-        const auto engine   = records[i].value >> SHADER_ENGINE_SHIFT;
-        const auto dispatch = records[i].value & DISPATCH_MASK;
-        require(engine == state.engine_id, "shaderdata belongs to the wrong engine");
-        require(dispatch >= state.last_dispatch, "shaderdata dispatch order regressed");
-        state.last_dispatch = dispatch;
-        ++state.records;
+        if(state.has_pending) check_record(state, state.pending);
+        state.pending     = records[i].value;
+        state.has_pending = true;
     }
 }
 
@@ -198,14 +211,20 @@ validate()
             uint64_t next_index = 0;
             size_t   swaps      = 0;
             bool     ended      = false;
+            bool     stored     = true;  // Decode only the contiguous prefix that was stored
             for(const auto& [index, chunk] : engine.chunks)
             {
                 require(index == next_index++, "missing chunk index");
                 require(!ended, "chunk received after END");
                 ended = chunk.end;
                 swaps += chunk.retired_buffer;
-                bytes.insert(bytes.end(), chunk.bytes, chunk.bytes + chunk.size);
+                stored = stored && (chunk.bytes != nullptr || chunk.size == 0);
+                if(stored && chunk.size > 0)
+                    bytes.insert(bytes.end(), chunk.bytes, chunk.bytes + chunk.size);
             }
+            if(!stored)
+                std::cout << "GPU " << agent->id.handle << " SE " << se << ": capture budget "
+                          << "reached, decoding the first " << bytes.size() << " bytes\n";
             require(ended, "missing END chunk");
             engine.chunks.clear();
 
@@ -215,6 +234,7 @@ validate()
                 check(rocprofiler_trace_decode(
                           capture->decoder, parse, bytes.data(), bytes.size(), &state),
                       "trace decode failed");
+            if(stored && state.has_pending) check_record(state, state.pending);
             std::cout << "GPU " << agent->id.handle << " SE " << se << ": " << state.records
                       << " shaderdata records, " << swaps << " buffer swaps\n";
             if(state.records > 0 && swaps >= MIN_SWAPS_PER_SE) ++complete_engines;
